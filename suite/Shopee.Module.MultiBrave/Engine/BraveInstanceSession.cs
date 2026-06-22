@@ -1159,9 +1159,12 @@ internal sealed class BraveInstanceSession : IDisposable
             Dictionary<string, object> proxy;
             try
             {
-                proxy = preferFresh || attempt == 1
-                    ? await GetProxyAsync()
-                    : await GetCurrentProxyAsync();
+                // LUÔN dùng /current (IP hiện tại của key, ổn định tới khi Kiot tự xoay ~30'). KHÔNG gọi
+                // /new: ép xoay IP mỗi launch khiến login-IP ≠ scrape-IP → Shopee bắn captcha + hủy session.
+                // Proxy chết mà chưa xoay → throw (avoidFingerprint) → kết thúc run → ScrapeRunner cooldown
+                // + đổi tk khác (đúng flow: proxy lỗi thì nghỉ tk đó, không xoay IP). preferFresh chỉ còn
+                // ảnh hưởng nhịp delay retry phía dưới, không còn ép /new.
+                proxy = await GetCurrentProxyAsync();
             }
             catch (Exception ex)
             {

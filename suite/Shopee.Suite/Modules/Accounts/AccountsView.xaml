@@ -35,16 +35,20 @@
                     <Button Style="{StaticResource SuccessButton}" Content="+  Thêm" MinWidth="80"
                             Command="{Binding AddCommand}" />
                     <Button Style="{StaticResource DangerButton}" Content="−  Xóa" MinWidth="80"
-                            Margin="8,0,0,0" Command="{Binding DeleteCommand}" />
+                            Margin="8,0,0,0" Command="{Binding DeleteCommand}"
+                            CommandParameter="{Binding SelectedItems, ElementName=AccountsGrid}" />
                     <Button Content="⬇  Import…" Margin="8,0,0,0" Command="{Binding ImportCommand}" />
+                    <Button Content="🔄  Kiểm tra tk lỗi" Margin="8,0,0,0" Command="{Binding CheckErroredCommand}"
+                            Visibility="{Binding IsErrorFilter, Converter={StaticResource BoolToVis}}"
+                            ToolTip="Tự đăng nhập lần lượt TẤT CẢ tk lỗi/captcha: vào được trang chủ → bỏ cờ lỗi, về kho; KHÔNG vào được (sai mk/captcha/lỗi) → XÓA HẲN." />
                     <TextBlock Text="Hiện:" VerticalAlignment="Center" Margin="16,0,6,0" Style="{StaticResource Caption}" />
                     <ComboBox MinWidth="150" VerticalAlignment="Center"
                               SelectedItem="{Binding SelectedFilter}" ItemsSource="{Binding FilterOptions}" />
                 </StackPanel>
 
                 <Border Style="{StaticResource Card}" ClipToBounds="True">
-                    <DataGrid ItemsSource="{Binding Items}" SelectedItem="{Binding Selected}" BorderThickness="0"
-                              IsReadOnly="True">
+                    <DataGrid x:Name="AccountsGrid" ItemsSource="{Binding Items}" SelectedItem="{Binding Selected}"
+                              BorderThickness="0" IsReadOnly="True" SelectionMode="Extended">
                         <DataGrid.Columns>
                             <DataGridTextColumn Header="Tên" Binding="{Binding DisplayName}" Width="1.2*" />
                             <DataGridTextColumn Header="Tài khoản" Binding="{Binding Username}" Width="1.4*">
@@ -124,9 +128,6 @@
                             <!-- Nút thao tác trên ĐÚNG tài khoản đang chọn: Bật lại (nếu đang lỗi) + Lưu chi tiết. -->
             <!-- WrapPanel: nếu panel hẹp thì xuống dòng thay vì cắt mất nút (trước đây nút "Kiểm tra" bị che). -->
                             <WrapPanel HorizontalAlignment="Right" Margin="0,18,0,0">
-                                <Button Content="Kiểm tra" MinWidth="100" Margin="0,0,0,6"
-                                        ToolTip="Mở Brave với profile + proxy của tài khoản này tới Shopee để giải captcha / kiểm tra đăng nhập"
-                                        Command="{Binding DataContext.CheckCommand, ElementName=Root}" />
                                 <Button Content="Bật lại" MinWidth="100" Margin="10,0,0,6"
                                         ToolTip="Bỏ đánh dấu lỗi/captcha của tài khoản này → đưa về rotation Scrape/Search"
                                         Foreground="{StaticResource SuccessBrush}" BorderBrush="{StaticResource SuccessBrush}"

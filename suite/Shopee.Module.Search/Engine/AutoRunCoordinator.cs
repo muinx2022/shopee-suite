@@ -82,7 +82,7 @@ public sealed class AutoRunCoordinator
         await Task.WhenAll(workers);
     }
 
-    /// <summary>Best-effort synchronous kill of every lane's Edge window (Stop / form close).</summary>
+    /// <summary>Best-effort synchronous kill of every lane's Brave window (Stop / form close).</summary>
     public void KillAllBrowsers()
     {
         lock (_sesLock)

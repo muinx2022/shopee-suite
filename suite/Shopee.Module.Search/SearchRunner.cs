@@ -5,7 +5,7 @@ using ShopeeStatApp.Services;
 
 namespace Shopee.Modules.Search;
 
-/// <summary>Tài khoản Shopee từ kho chung, để engine stat mở Edge tìm kiếm.</summary>
+/// <summary>Tài khoản Shopee từ kho chung, để engine stat mở Brave tìm kiếm.</summary>
 public sealed record SearchAccountSpec(
     string Id, string Label, string ShopeeAccountLogin, bool OpenWithShopeeAccount,
     string KiotProxyKey, string ProxyType, string ManualProxy, string ProfileRelativePath,

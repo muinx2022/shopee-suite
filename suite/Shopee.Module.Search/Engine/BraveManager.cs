@@ -1,6 +1,6 @@
 namespace ShopeeStatApp.Services;
 
-public sealed class EdgeManager(AppSettingsService appSettings)
+public sealed class BraveManager(AppSettingsService appSettings)
 {
     // Dùng chung 1 HttpClient cho gọi kiotproxy: tạo mới mỗi lần (mỗi account/lane relaunch) cạn socket/TIME_WAIT.
     private static readonly HttpClient ProxyHttp = new() { Timeout = TimeSpan.FromSeconds(12) };
@@ -53,7 +53,7 @@ public sealed class EdgeManager(AppSettingsService appSettings)
     public void Launch(InstanceConfig config, string profileDir, string? proxyServer, int wsPort)
     {
         // Ưu tiên BravePath cấu hình (nếu trỏ đúng brave.exe), nếu không thì tự dò Brave.
-        var bravePath = appSettings.Settings.EdgePath;
+        var bravePath = appSettings.Settings.BravePath;
         if (string.IsNullOrWhiteSpace(bravePath) || !File.Exists(bravePath) ||
             !bravePath.EndsWith("brave.exe", StringComparison.OrdinalIgnoreCase))
             bravePath = DetectBravePath()
@@ -217,15 +217,15 @@ public sealed class EdgeManager(AppSettingsService appSettings)
     private static bool IsExtensionDir(string path) =>
         Directory.Exists(path) && File.Exists(Path.Combine(path, "manifest.json"));
 
-    private static void KillEdgeProcessesForProfile(string profileDir)
+    private static void KillBraveProcessesForProfile(string profileDir)
     {
         var fullProfileDir = Path.GetFullPath(profileDir).TrimEnd('\\', '/');
         var killedAny = false;
         try
         {
-            // One WMI query collects msedge.exe processes and command lines, then kills
+            // One WMI query collects brave.exe processes and command lines, then kills
             // only processes whose command line points to this managed profile.
-            foreach (var pid in FindEdgePidsByCommandLine(fullProfileDir))
+            foreach (var pid in FindBravePidsByCommandLine(fullProfileDir))
             {
                 try
                 {
@@ -245,7 +245,7 @@ public sealed class EdgeManager(AppSettingsService appSettings)
         catch { }
     }
 
-    private static List<int> FindEdgePidsByCommandLine(string profileDirNeedle)
+    private static List<int> FindBravePidsByCommandLine(string profileDirNeedle)
     {
         var pids = new List<int>();
         try
@@ -331,14 +331,10 @@ public sealed class EdgeManager(AppSettingsService appSettings)
 
     private static async Task<(string? Proxy, string? Error)> FetchKiotProxyAsync(string key, string proxyType)
     {
+        // CHỈ /current (KHÔNG /new): để IP lúc đăng nhập Shopee TRÙNG IP lúc search (cùng key) → tránh
+        // captcha. /new ép xoay IP → login-IP ≠ search-IP → Shopee bắn captcha + dễ mất phiên.
         var currentUrl = $"https://api.kiotproxy.com/api/v1/proxies/current?key={Uri.EscapeDataString(key)}";
-        var current = await TryFetchKiotProxyAsync(currentUrl, proxyType);
-        if (current.Proxy is not null)
-            return current;
-
-        var newUrl = $"https://api.kiotproxy.com/api/v1/proxies/new?key={Uri.EscapeDataString(key)}&region=random";
-        var fresh = await TryFetchKiotProxyAsync(newUrl, proxyType);
-        return fresh.Proxy is not null ? fresh : (null, fresh.Error ?? current.Error);
+        return await TryFetchKiotProxyAsync(currentUrl, proxyType);
     }
 
     private static async Task<(string? Proxy, string? Error)> TryFetchKiotProxyAsync(
@@ -402,11 +398,11 @@ public sealed class EdgeManager(AppSettingsService appSettings)
         }
     }
 
-    // Ports handed out by FindFreePort but not yet bound by their consumer (Edge's CDP
+    // Ports handed out by FindFreePort but not yet bound by their consumer (Brave's CDP
     // server or a lane's HttpListener). The OS frees an ephemeral port the instant the
     // probe listener closes, so without this two lanes starting together — and binding
     // seconds later, after proxy resolution — can be handed the SAME number and collide
-    // (one lane's Edge then talks to another lane's WS/CDP). Guarded by _portLock.
+    // (one lane's Brave then talks to another lane's WS/CDP). Guarded by _portLock.
     private static readonly object _portLock = new();
     private static readonly HashSet<int> _reservedPorts = [];
 
@@ -454,9 +450,9 @@ public sealed class EdgeManager(AppSettingsService appSettings)
         try { _process?.Dispose(); } catch { }
 
         if (!string.IsNullOrWhiteSpace(_currentProfileDir))
-            KillEdgeProcessesForProfile(_currentProfileDir);
+            KillBraveProcessesForProfile(_currentProfileDir);
 
-        // The CDP port was reserved for this browser's lifetime; free it now that Edge is gone.
+        // The CDP port was reserved for this browser's lifetime; free it now that Brave is gone.
         if (_cdpPort > 0)
         {
             ReleasePort(_cdpPort);

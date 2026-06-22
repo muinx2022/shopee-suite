@@ -99,7 +99,7 @@ public sealed class SearchOrchestrator
         await _ws.SendAsync(new { action = "stop" });
     }
 
-    /// <summary>Pauses the live crawl: the extension waits at the next safe point. Edge/WS stay alive.</summary>
+    /// <summary>Pauses the live crawl: the extension waits at the next safe point. Brave/WS stay alive.</summary>
     public async Task PauseAsync()
     {
         await _ws.SendAsync(new { action = "pause" });

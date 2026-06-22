@@ -67,22 +67,14 @@ public sealed partial class ScrapeViewModel : ObservableObject
     [RelayCommand]
     private void Reload()
     {
-        // Giữ lựa chọn cũ (tk đã tick + shop + tk đang xem detail) theo Id để reload không mất trạng thái.
-        var prevSelected = ScrapeTargets.Where(t => t.IsSelected).Select(t => t.Account.Id).ToHashSet();
-        var prevShop = ScrapeTargets.ToDictionary(t => t.Account.Id, t => t.SelectedShop?.Id);
+        // Tk đang xem ở panel chi tiết — chỉ là trạng thái UI (không lưu), giữ lại qua reload cho mượt.
         var prevDetailId = SelectedTarget?.Account.Id;
 
         ScrapeTargets.Clear();
+        // Mỗi ScrapeTargetViewModel TỰ nạp config đã lưu (tick chọn + shop + số dòng/process) theo
+        // Account.Id từ ScrapeTargetConfigStore → giữ nguyên lựa chọn người dùng qua reload + khởi động lại.
         foreach (var a in BigSellerStore.Shared.Accounts)
-        {
-            var vm = new ScrapeTargetViewModel(a) { IsSelected = prevSelected.Contains(a.Id) };
-            vm.SelectedShop =
-                (prevShop.TryGetValue(a.Id, out var sid) && sid is not null
-                    ? vm.Shops.FirstOrDefault(s => s.Id == sid)
-                    : null)
-                ?? vm.Shops.FirstOrDefault();
-            ScrapeTargets.Add(vm);
-        }
+            ScrapeTargets.Add(new ScrapeTargetViewModel(a));
         SelectedTarget = ScrapeTargets.FirstOrDefault(t => t.Account.Id == prevDetailId) ?? ScrapeTargets.FirstOrDefault();
         PoolCount = AccountStore.Shared.Accounts.Count(a => !a.Disabled);
         Status = $"{ScrapeTargets.Count} BigSeller · {PoolCount} acc Shopee (tự xoay vòng).";

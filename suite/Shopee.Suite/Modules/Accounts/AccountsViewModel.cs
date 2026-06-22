@@ -8,6 +8,7 @@ using Shopee.Core.Accounts;
 using Shopee.Core.Browser;
 using Shopee.Core.Infrastructure;
 using Shopee.Core.Proxy;
+using Shopee.Modules.CheckAccount;
 
 namespace Shopee.Suite.Modules.Accounts;
 
@@ -26,8 +27,17 @@ public sealed partial class AccountsViewModel : ObservableObject
     // đánh dấu (Disabled) khi dính captcha lúc Scrape/Search — để xử lý sau.
     public string[] FilterOptions { get; } = ["Còn dùng được", "Bị lỗi / captcha", "Tất cả"];
 
+    public const string ErrorFilter = "Bị lỗi / captcha";
+
     [ObservableProperty] private string _selectedFilter = "Còn dùng được";
-    partial void OnSelectedFilterChanged(string value) => Reload();
+    partial void OnSelectedFilterChanged(string value)
+    {
+        Reload();
+        OnPropertyChanged(nameof(IsErrorFilter));
+    }
+
+    /// <summary>Chỉ true khi đang xem bộ lọc "Bị lỗi / captcha" — nút "Kiểm tra tk lỗi" chỉ hiện lúc đó.</summary>
+    public bool IsErrorFilter => SelectedFilter == ErrorFilter;
 
     public int ErroredCount => AccountStore.Shared.Accounts.Count(a => a.Disabled);
 
@@ -89,48 +99,126 @@ public sealed partial class AccountsViewModel : ObservableObject
 
     private bool CanReenable() => Selected?.Model.Disabled == true;
 
-    /// <summary>Mở Brave với ĐÚNG profile + proxy của tk này tới Shopee để KIỂM TRA tay (giải captcha,
-    /// xem còn login không). Cùng profile mà Scrape import session → giải captcha xong, lần scrape sau OK.</summary>
-    [RelayCommand(CanExecute = nameof(HasSelection))]
-    private async Task Check()
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsCheckIdle))]
+    [NotifyCanExecuteChangedFor(nameof(CheckErroredCommand))]
+    private bool _isChecking;
+
+    // Delay ngẫu nhiên giữa các lần check (giả lập người dùng, tránh login dồn dập → bớt bị chặn).
+    private readonly Random _rng = new();
+
+    public bool IsCheckIdle => !IsChecking;
+
+    private bool CanCheckErrored() => IsCheckIdle;
+
+    /// <summary>
+    /// FLOW TỰ ĐỘNG DỌN TK LỖI: duyệt LẦN LƯỢT mọi tài khoản đang bị lỗi/captcha (Disabled), chạy
+    /// auto-login Shopee (mở Brave + set cookie SPC_F + điền form human). Vào được trang chủ (có cookie
+    /// phiên) → bỏ cờ lỗi, đưa về kho. KHÔNG vào được (sai mật khẩu / captcha / lỗi kỹ thuật — bất kỳ
+    /// lý do gì) → XÓA HẲN tài khoản. Dùng chung engine với mục "Check Shopee Account".
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanCheckErrored))]
+    private async Task CheckErrored()
     {
-        if (Selected is null) return;
-        var a = Selected.Model;
-        var name = a.DisplayName;
-        Status = $"Đang mở Brave kiểm tra \"{name}\"…";
+        var targets = AccountStore.Shared.Accounts.Where(a => a.Disabled).ToList();
+        if (targets.Count == 0)
+        {
+            Dialogs.Show("Không có tài khoản lỗi/captcha nào để kiểm tra.",
+                "Kiểm tra tk lỗi", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        if (Dialogs.Show(
+                $"Sẽ tự đăng nhập lần lượt {targets.Count} tài khoản lỗi/captcha:\n\n" +
+                "• Vào được trang chủ → bỏ cờ lỗi, đưa về kho.\n" +
+                "• KHÔNG vào được (sai mật khẩu / captcha / lỗi) → XÓA HẲN tài khoản.\n\n" +
+                "Thao tác xóa KHÔNG hoàn tác được. Tiếp tục?",
+                "Kiểm tra & dọn tk lỗi", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+            return;
+
+        IsChecking = true;
+        var okNames = new List<string>();
+        var failNames = new List<string>();
         try
         {
-            var bravePath = BrowserLauncher.Detect(BrowserKind.Brave)
-                ?? throw new FileNotFoundException("Không tìm thấy brave.exe. Hãy cài Brave Browser.");
-            var proxy = await ResolveProxyAsync(a);
-            var profileDir = Path.Combine(SuitePaths.ModuleDir("shared"), "profiles", a.Id);
-            Directory.CreateDirectory(profileDir);
-
-            var args = new List<string>
+            for (var i = 0; i < targets.Count; i++)
             {
-                $"--user-data-dir=\"{profileDir}\"",
-                "--profile-directory=Default",
-                "--new-window",
-                "--no-first-run",
-                "--no-default-browser-check",
-                "--hide-crash-restore-bubble",
-            };
-            if (!string.IsNullOrWhiteSpace(proxy)) args.Add($"--proxy-server={proxy}");
-            args.Add("\"https://shopee.vn/\"");
+                var a = targets[i];
+                var name = a.DisplayName;
+                Status = $"[{i + 1}/{targets.Count}] Đang đăng nhập \"{name}\"… (✓ {okNames.Count} · ✗ {failNames.Count})";
 
-            // Cửa sổ này KHÔNG do app quản lý (không CDP) → mở rồi để người dùng tự thao tác/đóng.
-            Process.Start(new ProcessStartInfo
+                var success = false;
+                if (!string.IsNullOrWhiteSpace(a.ShopeeAccountLogin))
+                {
+                    try
+                    {
+                        var proxy = await ResolveProxyAsync(a);
+                        var profileDir = Path.Combine(SuitePaths.ModuleDir("shared"), "profiles", a.Id);
+                        Directory.CreateDirectory(profileDir);
+                        // Giữ trình duyệt mở 10–15s sau khi có kết quả (giả lập người dùng) rồi mới đóng.
+                        var holdMs = _rng.Next(10_000, 15_001);
+                        var checker = new ShopeeAccountChecker();
+                        var result = await checker.CheckAsync(a.ShopeeAccountLogin, proxy, profileDir, holdMs, CancellationToken.None);
+                        success = result.Outcome == CheckOutcome.Success;   // chỉ vào được home mới tính OK
+                    }
+                    catch { success = false; }
+                }
+
+                string verdict;
+                if (success)
+                {
+                    a.Disabled = false;
+                    a.LastError = null;                 // → đưa về kho
+                    AccountStore.Shared.Save();         // Changed → Reload → list refresh NGAY (acc rời danh sách lỗi)
+                    okNames.Add(name);
+                    verdict = "✓ OK → về kho";
+                }
+                else
+                {
+                    AccountStore.Shared.Remove(a.Id);   // Remove tự Save → Changed → Reload → list refresh NGAY (xóa khỏi list)
+                    failNames.Add(name);
+                    verdict = "✗ không vào được → ĐÃ XÓA";
+                }
+
+                // Hiện RÕ kết quả của acc vừa xong (✓/✗) — trình duyệt đã đóng, nghỉ vài giây rồi check tiếp.
+                if (i < targets.Count - 1)
+                {
+                    var gapMs = _rng.Next(3_000, 6_000);
+                    Status = $"[{i + 1}/{targets.Count}] \"{name}\": {verdict} · nghỉ {gapMs / 1000}s rồi tiếp…  (✓ {okNames.Count} · ✗ {failNames.Count})";
+                    await Task.Delay(gapMs);
+                }
+                else
+                {
+                    Status = $"[{i + 1}/{targets.Count}] \"{name}\": {verdict}  (✓ {okNames.Count} · ✗ {failNames.Count})";
+                }
+            }
+
+            // Đã áp dụng từng acc trong vòng lặp (Save/Remove → list refresh ngay).
+            Status = $"Xong: {okNames.Count} OK → kho · {failNames.Count} đã xóa · còn {AccountStore.Shared.Accounts.Count} tk.";
+
+            // Bảng tổng kết: liệt kê RÕ acc nào về kho, acc nào đã xóa (cắt bớt nếu quá dài).
+            static string Section(string title, List<string> names)
             {
-                FileName = bravePath,
-                Arguments = string.Join(" ", args),
-                UseShellExecute = false,
-            });
-            Status = $"Đã mở Brave kiểm tra \"{name}\" (proxy: {proxy ?? "không"}). Giải captcha xong, đóng cửa sổ rồi bấm \"Bật lại\".";
+                if (names.Count == 0) return "";
+                var show = names.Take(40).ToList();
+                var more = names.Count - show.Count;
+                var body = string.Join("\n  • ", show) + (more > 0 ? $"\n  • … và {more} tk nữa" : "");
+                return $"\n\n{title} ({names.Count}):\n  • {body}";
+            }
+            Dialogs.Show(
+                $"Hoàn tất kiểm tra {targets.Count} tài khoản." +
+                Section("✓ OK → về kho", okNames) +
+                Section("✗ Đã xóa (không vào được)", failNames),
+                "Kết quả dọn tk lỗi", MessageBoxButton.OK, MessageBoxImage.Information);
         }
         catch (Exception ex)
         {
-            Dialogs.Show("Không mở được kiểm tra: " + ex.Message, "Kiểm tra", MessageBoxButton.OK, MessageBoxImage.Warning);
-            Status = "Lỗi mở kiểm tra.";
+            Dialogs.Show("Lỗi khi dọn tk: " + ex.Message, "Kiểm tra tk lỗi", MessageBoxButton.OK, MessageBoxImage.Warning);
+            Status = "Đã dừng do lỗi — chưa áp dụng xóa.";
+        }
+        finally
+        {
+            IsChecking = false;
         }
     }
 
@@ -140,7 +228,9 @@ public sealed partial class AccountsViewModel : ObservableObject
             return a.ManualProxy.Contains("://") ? a.ManualProxy.Trim() : "http://" + a.ManualProxy.Trim();
         if (!string.IsNullOrWhiteSpace(a.KiotProxyKey))
         {
-            var r = await KiotProxyClient.FetchNewAsync(a.KiotProxyKey, default, a.ProxyType);
+            // Dùng /current (KHÔNG /new): để IP lúc kiểm tra/đăng nhập TRÙNG với IP lúc scrape (cùng key).
+            // /new ép xoay IP → lần scrape sau IP khác → Shopee bắn captcha lại.
+            var r = await KiotProxyClient.FetchCurrentAsync(a.KiotProxyKey, default, a.ProxyType);
             return r.Proxy;
         }
         return null;
@@ -157,17 +247,31 @@ public sealed partial class AccountsViewModel : ObservableObject
         Status = $"{Items.Count} tài khoản.";
     }
 
+    /// <summary>
+    /// Xóa các tài khoản đang chọn. Nhận danh sách chọn (DataGrid.SelectedItems) qua CommandParameter
+    /// để xóa NHIỀU acc cùng lúc; nếu không có thì xóa acc đang Selected. Xóa hàng loạt bằng 1 lần
+    /// ReplaceAll (ghi file + Reload 1 lần) thay vì Remove từng cái (mỗi cái 1 lần ghi → giật).
+    /// </summary>
     [RelayCommand(CanExecute = nameof(HasSelection))]
-    private void Delete()
+    private void Delete(object? selectedItems)
     {
-        if (Selected is null) return;
-        if (Dialogs.Show($"Xóa tài khoản \"{Selected.DisplayName}\"?", "Xóa tài khoản",
-                MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+        var targets = (selectedItems as System.Collections.IList)?
+                          .Cast<AccountItemViewModel>().ToList()
+                      ?? [];
+        if (targets.Count == 0 && Selected is not null)
+            targets.Add(Selected);
+        if (targets.Count == 0) return;
+
+        var msg = targets.Count == 1
+            ? $"Xóa tài khoản \"{targets[0].DisplayName}\"?"
+            : $"Xóa {targets.Count} tài khoản đã chọn?";
+        if (Dialogs.Show(msg, "Xóa tài khoản", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
             return;
-        AccountStore.Shared.Remove(Selected.Model.Id);
-        Items.Remove(Selected);
-        Selected = Items.FirstOrDefault();
-        Status = $"{Items.Count} tài khoản.";
+
+        var ids = targets.Select(t => t.Model.Id).ToHashSet(StringComparer.Ordinal);
+        // ReplaceAll → Save → Changed → Reload tự dựng lại Items (không cần Items.Remove thủ công).
+        AccountStore.Shared.ReplaceAll(AccountStore.Shared.Accounts.Where(a => !ids.Contains(a.Id)));
+        Status = $"Đã xóa {ids.Count} tài khoản · còn {AccountStore.Shared.Accounts.Count}.";
     }
 
     [RelayCommand]

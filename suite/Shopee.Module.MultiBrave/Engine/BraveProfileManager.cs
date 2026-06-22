@@ -229,6 +229,11 @@ internal static class BraveProfileManager
         try
         {
             var defaultDir = Path.Combine(profileRoot, "Default");
+
+            // Xóa ScriptCache (blob bytecode SW) + Code Cache → buộc Brave nạp lại background.js mới
+            // từ extension. GIỮ "Service Worker/Database" (bản đăng ký) để SW không phải đăng ký lại
+            // cold mỗi lần launch — đăng ký lại cold mở rộng cửa sổ race "top-level chưa chạy xong"
+            // làm các hàm __launcher* tạm thời chưa có (lỗi đó nay được retry, xem IsTransientSwError).
             foreach (var subDir in new[] { Path.Combine("Service Worker", "ScriptCache"), "Code Cache" })
             {
                 var dir = Path.Combine(defaultDir, subDir);

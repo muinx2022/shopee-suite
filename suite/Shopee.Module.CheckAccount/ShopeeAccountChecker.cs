@@ -69,15 +69,25 @@ public sealed class ShopeeAccountChecker
             // Điều hướng lại cho chắc (cookie SPC_F đã set trước khi tải form)
             await TrySend(cdp, "Page.navigate", new { url = LoginUrl }, ct);
 
-            // 3) Chờ form xuất hiện
-            if (!await WaitForFormAsync(cdp, ct))
-                return new CheckResult(CheckOutcome.NeedsManual, "Không thấy form đăng nhập (có thể đã chặn/đổi giao diện).");
+            // 3) Chờ form đăng nhập XUẤT HIỆN, hoặc phát hiện ĐÃ ĐĂNG NHẬP SẴN. Nếu profile còn phiên,
+            //    trang login redirect thẳng ra home → KHÔNG có form → coi là thành công, KHÔNG cần điền.
+            CheckResult result;
+            switch (await WaitForFormOrLoginAsync(cdp, ct))
+            {
+                case FormWait.LoggedIn:
+                    Log?.Invoke("  đã đăng nhập sẵn (redirect ra home) — bỏ qua điền form.");
+                    result = new CheckResult(CheckOutcome.Success, $"Đã đăng nhập sẵn: {username}");
+                    break;
 
-            // 4) Điền form kiểu human
-            await HumanFillAsync(cdp, username, password, ct);
+                case FormWait.None:
+                    result = new CheckResult(CheckOutcome.NeedsManual, "Không thấy form đăng nhập (có thể đã chặn/đổi giao diện).");
+                    break;
 
-            // 5) Chờ & phân loại kết quả
-            var result = await WaitOutcomeAsync(cdp, username, ct);
+                default: // FormWait.Form → điền form kiểu human rồi chờ kết quả
+                    await HumanFillAsync(cdp, username, password, ct);
+                    result = await WaitOutcomeAsync(cdp, username, ct);
+                    break;
+            }
 
             // Giữ trình duyệt mở thêm holdMs (bất kể thành công/thất bại) rồi mới đóng profile.
             if (holdMs > 0)
@@ -130,19 +140,28 @@ public sealed class ShopeeAccountChecker
         }
     }
 
-    private async Task<bool> WaitForFormAsync(CdpSession cdp, CancellationToken ct)
+    /// <summary>Kết quả chờ: form đăng nhập đã hiện / đã đăng nhập sẵn (redirect home) / không thấy gì.</summary>
+    private enum FormWait { Form, LoggedIn, None }
+
+    private async Task<FormWait> WaitForFormOrLoginAsync(CdpSession cdp, CancellationToken ct)
     {
         var deadline = DateTime.UtcNow.AddSeconds(25);
         while (DateTime.UtcNow < deadline)
         {
             ct.ThrowIfCancellationRequested();
+
+            // Đã có cookie phiên (SPC_ST/SPC_EC) → profile còn đăng nhập, trang login đã/ sẽ redirect ra
+            // home và KHÔNG hiện form → coi như đăng nhập sẵn, không cần điền.
+            if (await IsLoggedInAsync(cdp, ct)) return FormWait.LoggedIn;
+
             var has = await EvalBoolAsync(cdp,
                 "!!(document.querySelector('input[name=\"loginKey\"]') || document.querySelector('input[type=\"password\"]'))",
                 ct);
-            if (has) { await DelayAsync(500, 1100, ct); return true; }
+            if (has) { await DelayAsync(500, 1100, ct); return FormWait.Form; }
+
             await Task.Delay(700, ct);
         }
-        return false;
+        return FormWait.None;
     }
 
     private async Task<CheckResult> WaitOutcomeAsync(CdpSession cdp, string username, CancellationToken ct)

@@ -44,11 +44,12 @@ internal static class ExtensionRunnerAutomation
 
     /// <summary>
     /// Số lần mở lại popup tươi liên tiếp mà SW vẫn không phản hồi trước khi leo thang sang
-    /// relaunch profile. Thực tế: khi tái dùng browser/phiên cũ, SW runner THƯỜNG
-    /// không xuất hiện trong CDP và mở lại popup vô ích — chỉ relaunch (browser mới → onInstalled
-    /// → SW khởi động) mới cứu được. Nên để 2 (~15–20s) thay vì 4 để bớt phí thời gian.
+    /// relaunch profile. Khi chạy NHIỀU profile song song (vd 16 lane), CPU nghẽn nên SW
+    /// cold-start cần lâu hơn để thức — nếu vội relaunch (đóng/mở cả Brave) sau 2 lần thì rất
+    /// hao và gây "nhảy trình duyệt" liên tục. Để 6 (~30s đánh thức nhẹ qua popup) cho SW kịp
+    /// lên; nếu SW câm thật thì vẫn relaunch (fallback, MaxExtensionRelaunchRetries) trong deadline 90s.
     /// </summary>
-    private const int MaxPopupReopenBeforeRelaunch = 2;
+    private const int MaxPopupReopenBeforeRelaunch = 6;
 
     /// <summary>Xóa ID cache khi Brave khởi động lại / dừng instance.</summary>
     public static void ClearResolvedExtension(int cdpPort) =>
@@ -1494,6 +1495,10 @@ internal static class ExtensionRunnerAutomation
         return IsPopupBridgeError(message) ||
                message.Contains("No SW", StringComparison.OrdinalIgnoreCase) ||
                message.Contains("service worker", StringComparison.OrdinalIgnoreCase) ||
+               // SW vừa (đăng ký lại + ) khởi động, top-level background.js chưa chạy xong nên các hàm
+               // globalThis.__launcher* CHƯA định nghĩa → "is not a function". Đây là trạng thái TẠM
+               // THỜI (cold start), không phải lỗi thật: retry vài nhịp là SW init xong và hàm có mặt.
+               message.Contains("is not a function", StringComparison.OrdinalIgnoreCase) ||
                message.Contains("Cannot find context", StringComparison.OrdinalIgnoreCase) ||
                message.Contains("remote party closed the WebSocket", StringComparison.OrdinalIgnoreCase) ||
                message.Contains("Target closed", StringComparison.OrdinalIgnoreCase) ||
