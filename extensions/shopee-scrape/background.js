@@ -29,6 +29,7 @@ const writeState = async (patch) => {
   const current = await readState();
   const next = { ...current, ...patch };
   await chrome.storage.local.set({ runnerState: next });
+  syncKeepAlive(next);
   return next;
 };
 
@@ -38,6 +39,49 @@ const broadcastState = async () => {
     await chrome.runtime.sendMessage({ type: "RUNNER_STATE", state });
   } catch (_) {}
 };
+
+// ── Keep-alive cho service worker (MV3) ──────────────────────────────────────
+// SW bị Chromium evict sau ~30s idle. Khi scrape có khoảng nghỉ 2–4 phút giữa các link,
+// SW chết giữa chừng → launcher mất kết nối (SW_NO_RESPONSE / mất hook), dù trước đó đã
+// kết nối ngon. Giữ SW sống bằng ping API mỗi 20s (mỗi lời gọi chrome.* reset bộ đếm idle
+// 30s) + alarm dự phòng để dựng/rearm lại nếu SW vẫn bị recycle. CHỈ bật khi đang chạy để
+// không giữ SW sống vô ích lúc rảnh.
+let __keepAliveTimer = null;
+const KEEPALIVE_PING_MS = 20_000;
+
+const startKeepAlive = () => {
+  if (__keepAliveTimer === null) {
+    __keepAliveTimer = setInterval(() => {
+      try { chrome.runtime.getPlatformInfo(() => {}); } catch (_) {}
+    }, KEEPALIVE_PING_MS);
+  }
+  try { chrome.alarms.create("sw-keepalive", { periodInMinutes: 0.4 }); } catch (_) {}
+};
+
+const stopKeepAlive = () => {
+  if (__keepAliveTimer !== null) {
+    clearInterval(__keepAliveTimer);
+    __keepAliveTimer = null;
+  }
+  try { chrome.alarms.clear("sw-keepalive"); } catch (_) {}
+};
+
+const syncKeepAlive = (state) => {
+  if (state && state.running) startKeepAlive();
+  else stopKeepAlive();
+};
+
+// SW vừa bị recycle giữa lúc đang chạy → alarm đánh thức rồi tự bật lại keepalive.
+try {
+  chrome.alarms.onAlarm.addListener((alarm) => {
+    if (alarm && alarm.name === "sw-keepalive") {
+      readState().then(syncKeepAlive).catch(() => {});
+    }
+  });
+} catch (_) {}
+
+// SW (re)spawn khi run vẫn đang chạy → bật lại keepalive ngay khi load.
+readState().then((s) => { if (s && s.running) startKeepAlive(); }).catch(() => {});
 
 // Fix #3: ghi tiến độ (dòng vừa scrape xong) vào chrome.storage NGAY khi scrape OK — TRƯỚC khi trang
 // reload xong / trước khi trả kết quả về launcher. Nếu SW/CDP rớt do reload làm kết quả không tới được
@@ -477,6 +521,7 @@ const checkCurrentLinkBeforeNext = async (tabId, context) => {
 globalThis.__launcherExecuteScrapeStep = async (payload) => {
   try {
     abortRequested = false;
+    startKeepAlive(); // đang scrape → chắc chắn giữ SW sống dù launcher chưa kịp set running.
     const link = normalizeLink(payload?.link);
     const rowNumber = Number(payload?.rowNumber) || 0;
     const statusText =
@@ -758,6 +803,7 @@ globalThis.__launcherAbortStep = async () => {
 /** Launcher ghi trạng thái hiển thị cho popup (read-only). */
 globalThis.__launcherSetDisplayState = async (state) => {
   await chrome.storage.local.set({ runnerState: state || { running: false } });
+  syncKeepAlive(state || { running: false });
   await broadcastState();
   return { ok: true };
 };

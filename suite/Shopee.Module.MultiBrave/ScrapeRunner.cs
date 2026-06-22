@@ -50,8 +50,14 @@ public sealed class ScrapeRunner
         IReadOnlyList<ScrapeAccountSpec> specs, string? bigSellerCookieFile, int maxConcurrent, CancellationToken ct)
     {
         using var gate = new SemaphoreSlim(Math.Max(1, maxConcurrent));
-        var tasks = specs.Select(async spec =>
+        var tasks = specs.Select(async (spec, index) =>
         {
+            // Giãn khởi động lane đầu (tối đa maxConcurrent cái vào ngay) để không phóng Brave dồn cục.
+            if (index > 0 && index < maxConcurrent)
+            {
+                try { await Task.Delay(index * LaunchStaggerMs, ct).ConfigureAwait(false); }
+                catch (OperationCanceledException) { return; }
+            }
             await gate.WaitAsync(ct).ConfigureAwait(false);
             try
             {
@@ -101,6 +107,11 @@ public sealed class ScrapeRunner
     // (cứu phần còn lại của khối). 1-2 lần có thể do captcha/proxy nhất thời nên vẫn retry.
     private const int MaxStallRetries = 3;
 
+    // Giãn khởi động giữa các lane: phóng tất cả Brave cùng lúc (thundering herd) làm nghẽn CPU,
+    // chậm mở CDP port và khiến service worker MV3 dựng đồng loạt bị throttle → probe timeout.
+    // Lệch mỗi lane ~1.5s khi BẮT ĐẦU (chỉ 1 lần lúc ramp-up; sau đó vẫn giữ đủ N lane song song).
+    private const int LaunchStaggerMs = 1500;
+
     private async Task AutoWorkerAsync(
         int slot, WorkAllocator work, AccountRotation rotation, string? cookieFile,
         Func<Task<ScrapeAccountSpec?>>? borrowReplacement, CancellationToken ct)
@@ -115,6 +126,14 @@ public sealed class ScrapeRunner
         }
 
         var key = "P" + slot;
+
+        // Giãn lần phóng Brave ĐẦU TIÊN của mỗi lane để không dồn cục lúc bắt đầu.
+        if (slot > 1)
+        {
+            try { await Task.Delay((slot - 1) * LaunchStaggerMs, ct).ConfigureAwait(false); }
+            catch (OperationCanceledException) { return; }
+        }
+
         try
         {
             while (!ct.IsCancellationRequested)

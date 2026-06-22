@@ -1903,8 +1903,10 @@ internal static class ExtensionRunnerAutomation
         return null;
     }
 
-    private static readonly TimeSpan CdpDefaultReceiveTimeout = TimeSpan.FromSeconds(8);
-    private static readonly TimeSpan CdpEvaluateReceiveTimeout = TimeSpan.FromSeconds(18);
+    // 8s quá ngắn khi chạy nhiều Brave song song: handshake (Runtime.enable) dồn cục làm CDP đáp
+    // chậm → "Runtime.enable quá thời gian chờ (8s)" dù SW vẫn sống. Nới lên 20s cho tải cao.
+    private static readonly TimeSpan CdpDefaultReceiveTimeout = TimeSpan.FromSeconds(20);
+    private static readonly TimeSpan CdpEvaluateReceiveTimeout = TimeSpan.FromSeconds(20);
 
     private static async Task<JsonElement> SendCdpAsync(
         ClientWebSocket socket,
