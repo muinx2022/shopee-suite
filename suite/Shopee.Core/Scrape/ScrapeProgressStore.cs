@@ -217,6 +217,20 @@ public sealed class ScrapeProgressStore
         }
     }
 
+    /// <summary>Thêm 1 tk Shopee vào đặt-chỗ của 1 BigSeller (khi mượn bù lúc chạy — tk cũ dính captcha).</summary>
+    public void AddReservedShopeeAccount(string accountId, string sheet, string shopeeAccountId)
+    {
+        lock (_lock)
+        {
+            var p = _items.FirstOrDefault(x => KeyEq(x, accountId, sheet));
+            if (p is null || p.ReservedShopeeAccountIds.Contains(shopeeAccountId, StringComparer.Ordinal)) return;
+            p.ReservedShopeeAccountIds.Add(shopeeAccountId);
+            p.ShopeeAccountCount = Math.Max(p.ShopeeAccountCount, p.ReservedShopeeAccountIds.Count);
+            SaveLocked();
+        }
+        Changed?.Invoke();
+    }
+
     /// <summary>Nhả thủ công 1 tk Shopee khỏi đặt chỗ của 1 BigSeller (khi treo/không phụ thuộc tiến trình).</summary>
     public void ReleaseShopeeAccount(string accountId, string sheet, string shopeeAccountId)
     {

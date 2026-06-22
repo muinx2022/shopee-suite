@@ -1041,7 +1041,9 @@ internal static class ExtensionRunnerAutomation
     private static string BuildServiceWorkerMethodExpression(string method, string payloadExpression) =>
         method switch
         {
-            "probe" => "({ hasScrapeStep: typeof globalThis.__launcherExecuteScrapeStep === 'function' })",
+            // Yêu cầu CẢ executeScrapeStep LẪN applyFormConfig: SW cũ (cache trong profile, thiếu hàm mới)
+            // sẽ trượt probe → EnsureRunnerExtensionReadyAsync leo thang chrome.runtime.reload() dựng SW mới.
+            "probe" => "({ hasScrapeStep: typeof globalThis.__launcherExecuteScrapeStep === 'function' && typeof globalThis.__launcherApplyFormConfig === 'function' })",
             "executeScrapeStep" => $"(async () => globalThis.__launcherExecuteScrapeStep({payloadExpression}))()",
             "setDisplayState" => $"(async () => globalThis.__launcherSetDisplayState({payloadExpression}))()",
             "getRunnerState" => "(async () => globalThis.__launcherGetRunnerState())()",

@@ -208,6 +208,9 @@ public sealed partial class ScrapeViewModel : ObservableObject
                 int totalRows;
                 try { totalRows = await Task.Run(() => ScrapeWorkbook.TotalDataRows(account.WorkbookPath, sheet), ct).ConfigureAwait(false); }
                 catch (Exception ex) { Log($"[{account.DisplayName}] ✘ lỗi đọc workbook: {ex.Message} — bỏ qua."); return; }
+                // "Đến dòng" > 0 → DỪNG tại đó (cắt tổng số dòng cần chạy).
+                var endRow = Math.Max(0, target.EndRow);
+                if (endRow > 0 && endRow < totalRows) totalRows = endRow;
                 if (totalRows < startRow) { Log($"[{account.DisplayName}] sheet \"{sheet}\" chỉ có {totalRows} dòng (bắt đầu {startRow}) — bỏ qua."); return; }
 
                 // RESET → xoá tiến độ cũ. Tính các khoảng cần chạy (reset = cả đoạn; resume = phần còn thiếu).
@@ -254,7 +257,24 @@ public sealed partial class ScrapeViewModel : ObservableObject
                 WireRunner(runner, jobIndex, account.DisplayName);
                 lock (_runnersLock) _runners.Add(runner);
                 var specs = usable.Select(a => ToSpec(a, sheet)).ToList();
-                await runner.RunAutoAsync(specs, segments, rowsPer, totalRows, procs, account.CookieFile, ct).ConfigureAwait(false);
+
+                // Mượn BÙ từ kho khi 1 tk hỏng (captcha/lỗi 2 lần): lấy 1 tk còn rảnh, đặt-chỗ + để GiveBack.
+                Task<ScrapeAccountSpec?> BorrowReplacementAsync()
+                {
+                    ShopeeAccount? acc = null;
+                    lock (allocLock)
+                    {
+                        available.RemoveAll(a => a.Disabled);
+                        if (available.Count > 0) { acc = available[0]; available.RemoveAt(0); borrowed!.Add(acc); }
+                    }
+                    if (acc is null) return Task.FromResult<ScrapeAccountSpec?>(null);   // hết tk trong kho
+                    ScrapeProgressStore.Shared.AddReservedShopeeAccount(account.Id, sheet, acc.Id);
+                    Log($"[{account.DisplayName}] ➕ mượn bù tk Shopee \"{acc.DisplayName}\" (thay tk hỏng).");
+                    OnUi(target.RefreshProgress);
+                    return Task.FromResult<ScrapeAccountSpec?>(ToSpec(acc, sheet));
+                }
+
+                await runner.RunAutoAsync(specs, segments, rowsPer, totalRows, procs, account.CookieFile, ct, BorrowReplacementAsync).ConfigureAwait(false);
 
                 // Kết thúc: xong hết [startRow..total] → completed + nhả tk; còn dở → stopped + GIỮ tk.
                 ScrapeProgressStore.Shared.FinishRun(account.Id, sheet, startRow, totalRows);

@@ -72,8 +72,8 @@
                 <Grid DockPanel.Dock="Top" Margin="0,0,0,8">
                     <TextBlock Text="Tài khoản BigSeller" Style="{StaticResource Caption}" VerticalAlignment="Center" />
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                        <Button Content="✔" Width="32" ToolTip="Chọn tất cả" Command="{Binding SelectAllTargetsCommand}" />
-                        <Button Content="✖" Width="32" Margin="6,0,0,0" ToolTip="Bỏ chọn" Command="{Binding UnselectAllTargetsCommand}" />
+                        <Button Content="Tất cả" Padding="10,2" ToolTip="Chọn tất cả" Command="{Binding SelectAllTargetsCommand}" />
+                        <Button Content="Bỏ chọn" Padding="10,2" Margin="6,0,0,0" ToolTip="Bỏ chọn tất cả" Command="{Binding UnselectAllTargetsCommand}" />
                     </StackPanel>
                 </Grid>
                 <Border Style="{StaticResource Card}" ClipToBounds="True">

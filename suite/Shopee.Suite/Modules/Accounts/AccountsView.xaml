@@ -122,17 +122,18 @@
                             <CheckBox Content="Tạm tắt tài khoản này" IsChecked="{Binding Disabled}" />
 
                             <!-- Nút thao tác trên ĐÚNG tài khoản đang chọn: Bật lại (nếu đang lỗi) + Lưu chi tiết. -->
-                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,18,0,0">
-                                <Button Content="🔍  Kiểm tra" MinWidth="120"
+            <!-- WrapPanel: nếu panel hẹp thì xuống dòng thay vì cắt mất nút (trước đây nút "Kiểm tra" bị che). -->
+                            <WrapPanel HorizontalAlignment="Right" Margin="0,18,0,0">
+                                <Button Content="Kiểm tra" MinWidth="100" Margin="0,0,0,6"
                                         ToolTip="Mở Brave với profile + proxy của tài khoản này tới Shopee để giải captcha / kiểm tra đăng nhập"
                                         Command="{Binding DataContext.CheckCommand, ElementName=Root}" />
-                                <Button Content="↻  Bật lại" MinWidth="120" Margin="10,0,0,0"
+                                <Button Content="Bật lại" MinWidth="100" Margin="10,0,0,6"
                                         ToolTip="Bỏ đánh dấu lỗi/captcha của tài khoản này → đưa về rotation Scrape/Search"
                                         Foreground="{StaticResource SuccessBrush}" BorderBrush="{StaticResource SuccessBrush}"
                                         Command="{Binding DataContext.ReenableCommand, ElementName=Root}" />
-                                <Button Style="{StaticResource PrimaryButton}" Content="💾  Lưu thay đổi" MinWidth="140" Margin="10,0,0,0"
+                                <Button Style="{StaticResource PrimaryButton}" Content="Lưu thay đổi" MinWidth="120" Margin="10,0,0,6"
                                         Command="{Binding DataContext.SaveCommand, ElementName=Root}" />
-                            </StackPanel>
+                            </WrapPanel>
                         </StackPanel>
                     </ScrollViewer>
                 </Grid>

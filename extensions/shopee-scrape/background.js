@@ -818,7 +818,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       return {
         ok: true,
         result: {
-          hasScrapeStep: typeof globalThis.__launcherExecuteScrapeStep === "function",
+          // "sẵn sàng" = có ĐỦ các hàm launcher mới (kể cả applyFormConfig) → SW cũ bị cache sẽ báo chưa sẵn.
+          hasScrapeStep:
+            typeof globalThis.__launcherExecuteScrapeStep === "function" &&
+            typeof globalThis.__launcherApplyFormConfig === "function",
         },
       };
     }

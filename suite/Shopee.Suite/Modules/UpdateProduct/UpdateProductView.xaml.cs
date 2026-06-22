@@ -25,8 +25,8 @@ public partial class UpdateProductView : UserControl
         // Click trúng checkbox → để checkbox TỰ toggle (đừng toggle thêm kẻo huỷ lẫn nhau).
         if (FindAncestor<CheckBox>(src) is not null) return;
 
-        // Click thân dòng → TOGGLE tick.
-        vm.IsSelected = !vm.IsSelected;
+        // Click thân dòng → CHỈ tick (không bỏ tick nếu đang tick). Muốn bỏ tick thì bấm checkbox.
+        vm.IsSelected = true;
     }
 
     private static T? FindAncestor<T>(DependencyObject? node) where T : DependencyObject
