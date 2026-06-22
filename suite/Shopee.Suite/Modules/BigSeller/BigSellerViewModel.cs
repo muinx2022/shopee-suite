@@ -42,13 +42,38 @@ public sealed partial class BigSellerViewModel : ObservableObject
 
     private CancellationTokenSource? _loginCts;
 
-    public BigSellerViewModel() => Reload();
+    public BigSellerViewModel()
+    {
+        Reload();
+        // Khôi phục/import (BackupService) cập nhật kho dùng chung rồi bắn Changed → tab này phải nạp lại
+        // (trước đây chỉ Reload lúc khởi tạo nên import xong vẫn trống tới khi mở lại app).
+        BigSellerStore.Shared.Changed += OnStoreChanged;
+    }
+
+    private void OnStoreChanged()
+    {
+        var d = Application.Current?.Dispatcher;
+        if (d is null || d.CheckAccess()) SyncFromStore();
+        else d.BeginInvoke(SyncFromStore);
+    }
+
+    /// <summary>Chỉ nạp lại khi TẬP tài khoản đổi (import/khôi phục, Add/Delete) — KHÔNG rebuild khi chỉ
+    /// sửa thuộc tính (tránh mất focus lúc đang nhập + tránh nhân đôi dòng).</summary>
+    private void SyncFromStore()
+    {
+        var storeIds = BigSellerStore.Shared.Accounts.Select(a => a.Id).ToHashSet();
+        var itemIds = Items.Select(i => i.Model.Id).ToHashSet();
+        if (storeIds.SetEquals(itemIds)) return;
+        Reload();
+    }
 
     private void Reload()
     {
+        var prevId = Selected?.Model.Id;
         Items.Clear();
         foreach (var a in BigSellerStore.Shared.Accounts)
             Items.Add(new BigSellerAccountItemViewModel(a));
+        Selected = Items.FirstOrDefault(i => i.Model.Id == prevId) ?? Items.FirstOrDefault();
         Status = $"{Items.Count} tài khoản BigSeller.";
     }
 
@@ -56,10 +81,8 @@ public sealed partial class BigSellerViewModel : ObservableObject
     private void Add()
     {
         var model = new BigSellerAccount { Label = "BigSeller mới" };
-        BigSellerStore.Shared.Add(model);
-        var vm = new BigSellerAccountItemViewModel(model);
-        Items.Add(vm);
-        Selected = vm;
+        BigSellerStore.Shared.Add(model);   // → Changed → SyncFromStore dựng lại Items (gồm acc mới)
+        Selected = Items.FirstOrDefault(i => i.Model.Id == model.Id);
         Status = $"{Items.Count} tài khoản BigSeller.";
     }
 
@@ -70,8 +93,7 @@ public sealed partial class BigSellerViewModel : ObservableObject
         if (Dialogs.Show($"Xóa tài khoản BigSeller \"{Selected.DisplayName}\"?", "Xóa",
                 MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
             return;
-        BigSellerStore.Shared.Remove(Selected.Model.Id);
-        Items.Remove(Selected);
+        BigSellerStore.Shared.Remove(Selected.Model.Id);   // → Changed → SyncFromStore dựng lại Items
         Selected = Items.FirstOrDefault();
         Status = $"{Items.Count} tài khoản BigSeller.";
     }

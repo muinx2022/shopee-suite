@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using ClosedXML.Excel;
+using Shopee.Core.Ai;
 
 namespace UpdateProduct;
 
@@ -92,14 +93,11 @@ internal sealed class ProductNameRewriteRunner
         if (string.IsNullOrWhiteSpace(sheetName))
             throw new InvalidOperationException("Thiếu tên sheet.");
 
-        var apiKey = ResolveOpenAiApiKey(settings);
-        if (string.IsNullOrWhiteSpace(apiKey))
-            throw new InvalidOperationException("Thiếu OpenAI API key. Vào mục Cài đặt nhập OpenAI API key (Update tên SP CHỈ dùng OpenAI).");
-
-        var model = NullIfEmpty(settings.OpenAiModel?.Trim())
-            ?? NullIfEmpty(Environment.GetEnvironmentVariable("OPENAI_PRODUCT_NAME_MODEL")?.Trim())
-            ?? "gpt-4.1-mini";
-        var batchSize = Math.Clamp(settings.OpenAiBatchSize, 1, 500);
+        // Dùng cấu hình AI CHUNG ở Cài đặt (provider + model + key) — KHÔNG còn cứng OpenAI.
+        var cfg = AiConfigStore.Shared.Current;
+        if (!cfg.HasActiveKey)
+            throw new InvalidOperationException($"Chưa cấu hình API key cho {cfg.Provider} (mục Cài đặt → Nhà cung cấp AI).");
+        var batchSize = Math.Clamp(cfg.BatchSize, 1, 500);
 
         // Cột Excel theo cấu hình của shop. 0 = "không dùng" → fail rõ ràng (KHÔNG âm thầm rơi về cột
         // mặc định D/F/G — sẽ đọc/ghi nhầm cột). Đây là 3 cột BẮT BUỘC của rewrite.
@@ -119,7 +117,7 @@ internal sealed class ProductNameRewriteRunner
 
         var rangeEnd = plan.LastIncludedRow;
         log($"📝 Rewrite tên (C#): workbook='{workbookPath}', sheet='{plan.SheetName}', rows={plan.FirstRow}-{rangeEnd}");
-        log($"📝 Model: {model} | Batch size: {batchSize}");
+        log($"📝 AI: {cfg.Provider} · {cfg.ActiveModel} | Batch size: {batchSize}");
 
         if (plan.RowsToUpdate.Count == 0)
         {
@@ -130,67 +128,30 @@ internal sealed class ProductNameRewriteRunner
 
         log($"📝 Cần rewrite: {plan.UniqueNames.Count} tên unique / {plan.RowsToUpdate.Count} dòng.");
 
-        using var http = CreateOpenAiHttpClient(apiKey);
-
         var updatedCount = 0;
         for (var i = 0; i < plan.UniqueNames.Count; i += batchSize)
         {
             ct.ThrowIfCancellationRequested();
             var batch = plan.UniqueNames.Skip(i).Take(Math.Min(batchSize, plan.UniqueNames.Count - i)).ToList();
-            log($"📝 Rewrite batch {i + 1}-{i + batch.Count}/{plan.UniqueNames.Count} — đang gọi OpenAI…");
+            log($"📝 Rewrite batch {i + 1}-{i + batch.Count}/{plan.UniqueNames.Count} — đang gọi AI…");
 
-            // Step 1: LLM parse -> keyword_1/keyword_2/description/product_code
-            var parsedBatch = await RequestParsedStructuresWithSplitAsync(http, model, batch, log, ct);
-            if (parsedBatch.Count != batch.Count)
-                throw new InvalidOperationException($"Parse structure mismatch. Expected={batch.Count}, actual={parsedBatch.Count}");
-
-            var parsedProducts = new List<ParsedProduct>(batch.Count);
-            var debugByOriginalName = new Dictionary<string, (ParsedStructure Structure, int MaxDescChars)>(StringComparer.Ordinal);
-            for (var idx = 0; idx < batch.Count; idx++)
-            {
-                var originalName = batch[idx];
-                var sku = plan.SkuByOriginalName.GetValueOrDefault(originalName, "");
-                var structure = parsedBatch[idx] with { ProductCode = "" };
-                var normalized = NormalizeParsedStructureForRewrite(structure);
-                var maxChars = CalculateDescriptionCharBudget(normalized, sku, 120);
-                debugByOriginalName[originalName] = (normalized, maxChars);
-                parsedProducts.Add(new ParsedProduct
-                {
-                    Index = idx,
-                    Keyword1 = normalized.Keyword1,
-                    Keyword2 = normalized.Keyword2,
-                    Description = normalized.Description,
-                    ProductCode = "",
-                    MaxDescriptionChars = maxChars,
-                });
-            }
-
-            var rewrittenDescriptions = await RequestRewrittenDescriptionsWithSplitAsync(http, model, parsedProducts, versionCount: 2, log, ct);
-            if (rewrittenDescriptions.Count != parsedProducts.Count)
-                throw new InvalidOperationException($"OpenAI tr? v? s? items không kh?p. Expected={parsedProducts.Count}, actual={rewrittenDescriptions.Count}");
+            // 1 lần gọi AI: tên gốc → tiêu đề SEO hoàn chỉnh (keyword1 - keyword2 + cụm mô tả, KHÔNG kèm SKU).
+            var titles = await RequestSeoTitlesWithSplitAsync(cfg, batch, log, ct);
+            if (titles.Count != batch.Count)
+                throw new InvalidOperationException($"AI trả về số tiêu đề không khớp. Expected={batch.Count}, actual={titles.Count}");
 
             var updates = new List<(int RowNumber, string RewrittenName)>();
-            var nameDebugByRow = new Dictionary<int, (ParsedStructure Structure, int MaxDescChars)>();
             for (var idx = 0; idx < batch.Count; idx++)
             {
                 var originalName = batch[idx];
-                var normalized = NormalizeParsedStructureForRewrite(parsedBatch[idx] with { ProductCode = "" });
-
-                var desc = rewrittenDescriptions[idx];
-                desc = EnsureSafeDescription(desc, normalized, parsedProducts[idx].MaxDescriptionChars);
-
-                var rewrittenBase = ComposeProductName(normalized, desc);
-                var rewrittenBody = SplitNameCode(rewrittenBase).Body;
+                var title = SplitNameCode(titles[idx]).Body;   // phòng khi AI lỡ thêm mã code ở cuối
 
                 foreach (var rowEntry in plan.RowsByOriginalName.GetValueOrDefault(originalName, []))
                 {
-                    var finalName = TruncateProductNamePreservingSku($"{rewrittenBody} {rowEntry.Sku}".Trim(), rowEntry.Sku, 120);
+                    // Ghép SKU CỦA MÌNH theo cú pháp "keyword1 - keyword2 product-desc sku", cắt tối đa 120 ký tự (giữ SKU).
+                    var finalName = TruncateProductNamePreservingSku($"{title} {rowEntry.Sku}".Trim(), rowEntry.Sku, 120);
                     if (!string.IsNullOrWhiteSpace(finalName))
-                    {
                         updates.Add((rowEntry.RowIndex, finalName));
-                        if (debugByOriginalName.TryGetValue(originalName, out var dbg))
-                            nameDebugByRow[rowEntry.RowIndex] = dbg;
-                    }
                 }
             }
 
@@ -220,13 +181,6 @@ internal sealed class ProductNameRewriteRunner
                             log($"Row {rowNumber}");
                             log($"Trước: {beforeName}");
                             log($"Viết lại: {rewrittenName}");
-                            if (nameDebugByRow.TryGetValue(rowNumber, out var dbg))
-                            {
-                                log($"keyword_1: {dbg.Structure.Keyword1}");
-                                log($"keyword_2: {dbg.Structure.Keyword2}");
-                                log($"product_desc: {dbg.Structure.Description}");
-                                log($"max_name_chars: 120 | max_desc_chars: {dbg.MaxDescChars}");
-                            }
                             batchLogged++;
                         }
                     }
@@ -253,9 +207,66 @@ internal sealed class ProductNameRewriteRunner
         return http;
     }
 
+    // ── Viết lại TÊN: 1 lần gọi → tiêu đề SEO hoàn chỉnh (dùng AiConfig + prompt SEO trong Cài đặt) ──
+    private static async Task<List<string>> RequestSeoTitlesWithSplitAsync(
+        AiConfig cfg, List<string> names, Action<string> log, CancellationToken ct)
+    {
+        try
+        {
+            return await ExecuteWithRetryAsync(() => RequestSeoTitlesOnceAsync(cfg, names, ct), "seo-title", log, ct);
+        }
+        catch (AiHttpException) { throw; }   // key/quota/model sai → dừng, không chia nhỏ
+        catch (InvalidOperationException ex)
+        {
+            if (names.Count <= 1)
+            {
+                log($"⚠ Viết tên 1 SP thất bại — giữ tên gốc. ({Shorten(ex.Message)})");
+                return [names[0]];
+            }
+            var mid = names.Count / 2;
+            log($"⚠ Viết tên batch {names.Count} lỗi — chia đôi ({mid}+{names.Count - mid}). ({Shorten(ex.Message)})");
+            var left = await RequestSeoTitlesWithSplitAsync(cfg, names.Take(mid).ToList(), log, ct);
+            var right = await RequestSeoTitlesWithSplitAsync(cfg, names.Skip(mid).ToList(), log, ct);
+            left.AddRange(right);
+            return left;
+        }
+    }
+
+    private static async Task<List<string>> RequestSeoTitlesOnceAsync(AiConfig cfg, List<string> names, CancellationToken ct)
+    {
+        // System = prompt SEO người dùng cấu hình (Cài đặt) + đóng gói JSON cho xử lý nhiều sản phẩm.
+        var system = cfg.EffectiveNameRewritePrompt +
+            "\n\n[XỬ LÝ NHIỀU SẢN PHẨM] Bạn sẽ nhận JSON danh sách {index, name}. Áp dụng đúng quy tắc trên cho TỪNG name. " +
+            "CHỈ trả về DUY NHẤT JSON: {\"items\":[{\"index\":0,\"title\":\"<tiêu đề SEO, KHÔNG kèm SKU>\"}]} — đủ mỗi index input, " +
+            "title chỉ 1 dòng, không kèm giải thích/ghi chú/rào ```.";
+        var user = JsonSerializer.Serialize(
+            new { items = names.Select((name, index) => new { index, name }).ToList() }, JsonOptions);
+
+        var outputText = await AiJsonAsync(cfg, system, user, ct, temperature: 0.4);
+
+        using var parsed = JsonDocument.Parse(outputText);
+        var items = parsed.RootElement.GetProperty("items").EnumerateArray().ToList();
+        var byIndex = new Dictionary<int, string>();
+        foreach (var item in items)
+        {
+            var idx = item.GetProperty("index").GetInt32();
+            var title = (item.GetProperty("title").GetString() ?? "")
+                .Replace('\n', ' ').Replace('\r', ' ').Trim();
+            byIndex[idx] = title;
+        }
+
+        var result = new List<string>(names.Count);
+        for (var i = 0; i < names.Count; i++)
+        {
+            if (!byIndex.TryGetValue(i, out var t) || string.IsNullOrWhiteSpace(t))
+                throw new InvalidOperationException($"AI thiếu title index={i}.");
+            result.Add(t);
+        }
+        return result;
+    }
+
     private static async Task<List<ParsedStructure>> RequestParsedStructuresWithSplitAsync(
-        HttpClient http,
-        string model,
+        AiConfig cfg,
         List<string> productNames,
         Action<string> log,
         CancellationToken ct)
@@ -263,13 +274,12 @@ internal sealed class ProductNameRewriteRunner
         try
         {
             return await ExecuteWithRetryAsync(
-                () => RequestParsedStructuresOnceAsync(http, model, productNames, ct),
+                () => RequestParsedStructuresOnceAsync(cfg, productNames, ct),
                 "parse", log, ct);
         }
-        catch (OpenAiHttpException)
+        catch (AiHttpException)
         {
-            // L?i HTTP (429/5xx/4xx) l?p l?i y nguyên ? m?i c? batch — chia nh? ch? tang
-            // s? request (t? hon khi dang b? rate limit). Fail rõ ràng sau khi dã retry.
+            // Lỗi cấu hình/quyền (key/quota/model) lặp y nguyên ở mọi cỡ batch — không chia nhỏ, fail rõ ràng.
             throw;
         }
         catch (InvalidOperationException ex)
@@ -282,8 +292,8 @@ internal sealed class ProductNameRewriteRunner
 
             var middle = productNames.Count / 2;
             log($"⚠ Parse batch {productNames.Count} tên lỗi — chia đôi thử lại ({middle}+{productNames.Count - middle}). ({Shorten(ex.Message)})");
-            var left = await RequestParsedStructuresWithSplitAsync(http, model, productNames.Take(middle).ToList(), log, ct);
-            var right = await RequestParsedStructuresWithSplitAsync(http, model, productNames.Skip(middle).ToList(), log, ct);
+            var left = await RequestParsedStructuresWithSplitAsync(cfg, productNames.Take(middle).ToList(), log, ct);
+            var right = await RequestParsedStructuresWithSplitAsync(cfg, productNames.Skip(middle).ToList(), log, ct);
             left.AddRange(right);
             return left;
         }
@@ -328,12 +338,34 @@ internal sealed class ProductNameRewriteRunner
 
     private static bool IsTransientOpenAiError(Exception ex, CancellationToken ct) =>
         ex is InvalidOperationException or JsonException or HttpRequestException ||
+        (ex is AiHttpException ah && !ah.IsPermanent) ||   // 429/5xx → retry; key/quota/model (permanent) → dừng
         (ex is TaskCanceledException && !ct.IsCancellationRequested);
 
     private static TimeSpan ComputeRetryDelay(Exception ex, int attempt) =>
         ex is OpenAiHttpException { IsRateLimitOrServer: true }
+            or AiHttpException { StatusCode: 429 } or AiHttpException { StatusCode: >= 500 }
             ? TimeSpan.FromSeconds(15 * attempt)
             : TimeSpan.FromSeconds(2 * attempt);
+
+    /// <summary>Gọi AI (đa provider qua AiChat) yêu cầu trả JSON, rồi trích object JSON từ text trả về.
+    /// Dùng cho cả 2 bước (parse cấu trúc + viết lại) — provider/model/key lấy từ AiConfig (Cài đặt).</summary>
+    private static async Task<string> AiJsonAsync(AiConfig cfg, string system, string user, CancellationToken ct, double temperature = 0)
+    {
+        var text = await AiChat.CompleteAsync(cfg, system, user, ct, temperature, maxTokens: 8192).ConfigureAwait(false);
+        var json = ExtractJsonObject(text);
+        if (string.IsNullOrWhiteSpace(json))
+            throw new InvalidOperationException("AI không trả về JSON hợp lệ: " + Shorten(text));
+        return json;
+    }
+
+    /// <summary>Trích object JSON {...} đầu→cuối từ text (bỏ rào ```json hoặc lời dẫn nếu model thêm).</summary>
+    private static string ExtractJsonObject(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return "";
+        var start = text.IndexOf('{');
+        var end = text.LastIndexOf('}');
+        return start >= 0 && end > start ? text[start..(end + 1)] : "";
+    }
 
     private static string Shorten(string message)
     {
@@ -347,81 +379,29 @@ internal sealed class ProductNameRewriteRunner
         public bool IsRateLimitOrServer => StatusCode == 429 || StatusCode >= 500;
     }
 
+    private const string ParseSystemPrompt =
+        "Bạn sẽ nhận vào danh sách tên sản phẩm (tiếng Việt). " +
+        "Hãy tách mỗi tên thành 4 trường: keyword_1, keyword_2, description, product_code. " +
+        "keyword_1 là cụm từ chỉ loại sản phẩm chính và phải đủ cụ thể (ví dụ: 'Giày cao gót nữ', 'Sandal nữ'). " +
+        "Không chọn keyword_1 quá chung chung chỉ là 'Giày'/'Dép' nếu trong tên có cụm cụ thể hơn. " +
+        "keyword_2 chỉ là phân loại phụ NGẮN (ví dụ: 'Sandal nữ', 'Giày búp bê', 'Boots nữ'), có thể rỗng. " +
+        "Không đưa chất liệu/đặc điểm/đối tượng/công dụng vào keyword_2 (ví dụ: kim tuyến, đính đá, quai ngọc, gót trong, đế vuông, cô dâu, đi tiệc, 5cm/7cm/8cm...). " +
+        "Các phần đó phải để trong description. " +
+        "description là phần còn lại (đặc điểm), có thể rỗng; chỉ tách, không viết lại. " +
+        "product_code là mã sản phẩm nếu có (ví dụ B90429), nếu không có thì để rỗng. " +
+        "Bắt buộc trả về đủ một item cho mỗi index input (0 đến N-1), không được bỏ sót index nào. " +
+        "Không được bịa thêm thông tin mới. " +
+        "CHỈ trả về JSON dạng: {\"items\":[{\"index\":0,\"keyword_1\":\"...\",\"keyword_2\":\"...\",\"description\":\"...\",\"product_code\":\"...\"}]} — không kèm giải thích, không rào ```.";
+
     private static async Task<List<ParsedStructure>> RequestParsedStructuresOnceAsync(
-        HttpClient http,
-        string model,
+        AiConfig cfg,
         List<string> productNames,
         CancellationToken ct)
     {
-        var payload = new
-        {
-            model,
-            temperature = 0,
-            instructions =
-                "B?n s? nh?n vào danh sách tên s?n ph?m (ti?ng Vi?t). " +
-                "Hãy tách m?i tên thành 4 tru?ng: keyword_1, keyword_2, description, product_code. " +
-                "keyword_1 là c?m t? ch? lo?i s?n ph?m chính và ph?i d? c? th? (ví d?: 'Giày cao gót n?', 'Sandal n?'). " +
-                "Không ch?n keyword_1 quá chung chung ch? là 'Giày'/'Dép' n?u trong tên có c?m c? th? hon. " +
-                "keyword_2 ch? là phân lo?i ph? NG?N (ví d?: 'Sandal n?', 'Giày búp bê', 'Boots n?'), có th? r?ng. " +
-                "Không dua ch?t li?u/d?c di?m/d?i tu?ng/công d?ng vào keyword_2 (ví d?: kim tuy?n, dính dá, quai ng?c, gót trong, d? vuông, cô dâu, d? ti?c, 5cm/7cm/8cm...). " +
-                "Các ph?n dó ph?i d? trong description. " +
-                "description là ph?n còn l?i (d?c di?m), có th? r?ng; ch? tách, không vi?t l?i. " +
-                "product_code là mã s?n ph?m n?u có (ví d? B90429), n?u không có thì d? r?ng. " +
-                "B?t bu?c tr? v? d? m?t item cho m?i index input (0 d?n N-1), không du?c b? sót index nào. " +
-                "Không du?c b?a thêm thông tin m?i. Ch? tr? v? JSON theo schema.",
-            input = JsonSerializer.Serialize(new { items = productNames.Select((name, index) => new { index, product_name = name }).ToList() }, JsonOptions),
-            text = new
-            {
-                format = new
-                {
-                    type = "json_schema",
-                    name = "parsed_product_name_structures",
-                    strict = true,
-                    schema = new
-                    {
-                        type = "object",
-                        additionalProperties = false,
-                        properties = new
-                        {
-                            items = new
-                            {
-                                type = "array",
-                                items = new
-                                {
-                                    type = "object",
-                                    additionalProperties = false,
-                                    properties = new
-                                    {
-                                        index = new { type = "integer" },
-                                        keyword_1 = new { type = "string" },
-                                        keyword_2 = new { type = "string" },
-                                        description = new { type = "string" },
-                                        product_code = new { type = "string" },
-                                    },
-                                    required = new[] { "index", "keyword_1", "keyword_2", "description", "product_code" }
-                                }
-                            }
-                        },
-                        required = new[] { "items" }
-                    }
-                }
-            }
-        };
+        var userPrompt = JsonSerializer.Serialize(
+            new { items = productNames.Select((name, index) => new { index, product_name = name }).ToList() }, JsonOptions);
 
-        using var req = new HttpRequestMessage(HttpMethod.Post, "https://api.openai.com/v1/responses")
-        {
-            Content = new StringContent(JsonSerializer.Serialize(payload, JsonOptions), Encoding.UTF8, "application/json")
-        };
-
-        using var res = await http.SendAsync(req, ct);
-        var raw = await res.Content.ReadAsStringAsync(ct);
-        if (!res.IsSuccessStatusCode)
-            throw new OpenAiHttpException((int)res.StatusCode, $"OpenAI parse HTTP {(int)res.StatusCode}: {Shorten(raw)}");
-
-        using var doc = JsonDocument.Parse(raw);
-        var outputText = ExtractResponseText(doc.RootElement);
-        if (string.IsNullOrWhiteSpace(outputText))
-            throw new InvalidOperationException("OpenAI parse response không có output text.");
+        var outputText = await AiJsonAsync(cfg, ParseSystemPrompt, userPrompt, ct);
 
         using var parsed = JsonDocument.Parse(outputText);
         var items = parsed.RootElement.GetProperty("items").EnumerateArray().ToList();
@@ -452,8 +432,7 @@ internal sealed class ProductNameRewriteRunner
     }
 
     private static async Task<List<string>> RequestRewrittenDescriptionsWithSplitAsync(
-        HttpClient http,
-        string model,
+        AiConfig cfg,
         List<ParsedProduct> products,
         int versionCount,
         Action<string> log,
@@ -462,20 +441,20 @@ internal sealed class ProductNameRewriteRunner
         try
         {
             return await ExecuteWithRetryAsync(
-                () => RequestRewrittenDescriptionsOnceAsync(http, model, products, versionCount, ct),
+                () => RequestRewrittenDescriptionsOnceAsync(cfg, products, versionCount, ct),
                 "rewrite", log, ct);
         }
-        catch (OpenAiHttpException)
+        catch (AiHttpException)
         {
-            // L?i HTTP l?p l?i y nguyên ? m?i c? batch — không split (xem chú thích ? parse).
+            // Lỗi cấu hình/quyền lặp y nguyên ở mọi cỡ batch — không chia nhỏ, fail rõ ràng.
             throw;
         }
         catch (InvalidOperationException ex)
         {
             if (products.Count <= 1)
             {
-                // 1 item h?ng không dáng gi?t c? run — gi? mô t? g?c, EnsureSafeDescription
-                // phía trên s? cleanup + c?t theo budget nhu bình thu?ng.
+                // 1 item hỏng không đáng giết cả run — giữ mô tả gốc, EnsureSafeDescription
+                // phía trên sẽ cleanup + cắt theo budget như bình thường.
                 log($"⚠ Rewrite 1 sản phẩm thất bại — giữ mô tả gốc. ({Shorten(ex.Message)})");
                 return [products[0].Description ?? ""];
             }
@@ -483,76 +462,26 @@ internal sealed class ProductNameRewriteRunner
             var middle = products.Count / 2;
             log($"⚠ Rewrite batch {products.Count} sản phẩm lỗi — chia đôi thử lại ({middle}+{products.Count - middle}). ({Shorten(ex.Message)})");
             var left = await RequestRewrittenDescriptionsWithSplitAsync(
-                http, model, ReindexParsedProducts(products.Take(middle).ToList()), versionCount, log, ct);
+                cfg, ReindexParsedProducts(products.Take(middle).ToList()), versionCount, log, ct);
             var right = await RequestRewrittenDescriptionsWithSplitAsync(
-                http, model, ReindexParsedProducts(products.Skip(middle).ToList()), versionCount, log, ct);
+                cfg, ReindexParsedProducts(products.Skip(middle).ToList()), versionCount, log, ct);
             left.AddRange(right);
             return left;
         }
     }
 
     private static async Task<List<string>> RequestRewrittenDescriptionsOnceAsync(
-        HttpClient http,
-        string model,
+        AiConfig cfg,
         List<ParsedProduct> products,
         int versionCount,
         CancellationToken ct)
     {
-        var payload = new
-        {
-            model,
-            temperature = 0.2,
-            instructions = $"{BuildRewriteInstructions(versionCount)} Chi tra ve JSON dung schema.",
-            input = JsonSerializer.Serialize(new { version_count = versionCount, products }, JsonOptions),
-            text = new
-            {
-                format = new
-                {
-                    type = "json_schema",
-                    name = "rewritten_product_name_versions_with_limits",
-                    strict = true,
-                    schema = new
-                    {
-                        type = "object",
-                        additionalProperties = false,
-                        properties = new
-                        {
-                            items = new
-                            {
-                                type = "array",
-                                items = new
-                                {
-                                    type = "object",
-                                    additionalProperties = false,
-                                    properties = new
-                                    {
-                                        index = new { type = "integer" },
-                                        rewritten_descriptions = new { type = "array", items = new { type = "string" } }
-                                    },
-                                    required = new[] { "index", "rewritten_descriptions" }
-                                }
-                            }
-                        },
-                        required = new[] { "items" }
-                    }
-                }
-            }
-        };
+        // System prompt = prompt người dùng cấu hình ở Cài đặt (BuildRewriteInstructions) + yêu cầu JSON.
+        var system = BuildRewriteInstructions(versionCount) +
+            " CHỈ trả về JSON dạng: {\"items\":[{\"index\":0,\"rewritten_descriptions\":[\"...\"]}]} — không kèm giải thích, không rào ```.";
+        var userPrompt = JsonSerializer.Serialize(new { version_count = versionCount, products }, JsonOptions);
 
-        using var req = new HttpRequestMessage(HttpMethod.Post, "https://api.openai.com/v1/responses")
-        {
-            Content = new StringContent(JsonSerializer.Serialize(payload, JsonOptions), Encoding.UTF8, "application/json")
-        };
-
-        using var res = await http.SendAsync(req, ct);
-        var raw = await res.Content.ReadAsStringAsync(ct);
-        if (!res.IsSuccessStatusCode)
-            throw new OpenAiHttpException((int)res.StatusCode, $"OpenAI rewrite HTTP {(int)res.StatusCode}: {Shorten(raw)}");
-
-        using var doc = JsonDocument.Parse(raw);
-        var outputText = ExtractResponseText(doc.RootElement);
-        if (string.IsNullOrWhiteSpace(outputText))
-            throw new InvalidOperationException("OpenAI response không có output text.");
+        var outputText = await AiJsonAsync(cfg, system, userPrompt, ct, temperature: 0.2);
 
         using var parsed = JsonDocument.Parse(outputText);
         var items = parsed.RootElement.GetProperty("items").EnumerateArray().ToList();
