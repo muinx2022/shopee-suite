@@ -1,0 +1,171 @@
+<UserControl
+    x:Class="Shopee.Suite.Modules.Settings.SettingsView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    x:Name="Root">
+    <Grid Margin="28,22,28,24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <!-- Header -->
+        <Grid Grid.Row="0" Margin="0,0,0,16">
+            <StackPanel>
+                <TextBlock Text="Cài đặt" Style="{StaticResource H1}" />
+                <TextBlock Text="Cấu hình AI, system prompt, và sao lưu/khôi phục dữ liệu."
+                           Style="{StaticResource Caption}" Margin="0,3,0,0" />
+            </StackPanel>
+            <Border HorizontalAlignment="Right" VerticalAlignment="Center"
+                    Background="{StaticResource SubtleBrush}" CornerRadius="14" Padding="14,6">
+                <TextBlock Text="{Binding Status}" FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" />
+            </Border>
+        </Grid>
+
+        <TabControl Grid.Row="1" Background="Transparent" BorderThickness="0">
+
+            <!-- ══════════ TAB 1: Nhà cung cấp AI ══════════ -->
+            <TabItem Header="Nhà cung cấp AI">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" Margin="0,12,0,0">
+                    <StackPanel MaxWidth="720" HorizontalAlignment="Left">
+                        <Border Style="{StaticResource Card}" Padding="18" Margin="0,0,0,14">
+                            <StackPanel>
+                                <TextBlock Text="Nhà cung cấp AI đang dùng" Style="{StaticResource H2}" Margin="0,0,0,10" />
+                                <StackPanel Orientation="Horizontal">
+                                    <ComboBox Width="200" SelectedItem="{Binding Provider}" ItemsSource="{Binding ProviderOptions}" />
+                                    <TextBlock Text="Số mục / batch" Style="{StaticResource Caption}" VerticalAlignment="Center" Margin="20,0,8,0" />
+                                    <TextBox Width="70" Text="{Binding BatchSize}" />
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource Card}" Padding="18" Margin="0,0,0,12">
+                            <StackPanel>
+                                <TextBlock Text="OpenAI" Style="{StaticResource H2}" Margin="0,0,0,10" />
+                                <TextBlock Text="Model" Style="{StaticResource Caption}" />
+                                <TextBox Margin="0,3,0,10" Text="{Binding OpenAiModel, UpdateSourceTrigger=PropertyChanged}" />
+                                <TextBlock Text="API key" Style="{StaticResource Caption}" />
+                                <TextBox Margin="0,3,0,0" FontFamily="{StaticResource MonoFont}" FontSize="12"
+                                         Text="{Binding OpenAiApiKey, UpdateSourceTrigger=PropertyChanged}" />
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource Card}" Padding="18" Margin="0,0,0,12">
+                            <StackPanel>
+                                <TextBlock Text="Anthropic (Claude)" Style="{StaticResource H2}" Margin="0,0,0,10" />
+                                <TextBlock Text="Model" Style="{StaticResource Caption}" />
+                                <TextBox Margin="0,3,0,10" Text="{Binding AnthropicModel, UpdateSourceTrigger=PropertyChanged}" />
+                                <TextBlock Text="API key" Style="{StaticResource Caption}" />
+                                <TextBox Margin="0,3,0,0" FontFamily="{StaticResource MonoFont}" FontSize="12"
+                                         Text="{Binding AnthropicApiKey, UpdateSourceTrigger=PropertyChanged}" />
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource Card}" Padding="18" Margin="0,0,0,12">
+                            <StackPanel>
+                                <TextBlock Text="Google Gemini" Style="{StaticResource H2}" Margin="0,0,0,10" />
+                                <TextBlock Text="Model" Style="{StaticResource Caption}" />
+                                <TextBox Margin="0,3,0,10" Text="{Binding GeminiModel, UpdateSourceTrigger=PropertyChanged}" />
+                                <TextBlock Text="API key" Style="{StaticResource Caption}" />
+                                <TextBox Margin="0,3,0,0" FontFamily="{StaticResource MonoFont}" FontSize="12"
+                                         Text="{Binding GeminiApiKey, UpdateSourceTrigger=PropertyChanged}" />
+                            </StackPanel>
+                        </Border>
+
+                        <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                            <Button Style="{StaticResource PrimaryButton}" Content="💾  Lưu" MinWidth="110" Command="{Binding SaveCommand}" />
+                            <Button Content="⚡  Test kết nối" MinWidth="130" Margin="10,0,0,0" Command="{Binding TestCommand}" />
+                        </StackPanel>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <!-- ══════════ TAB 2: System Prompt ══════════ -->
+            <TabItem Header="System Prompt">
+                <Grid Margin="0,12,0,0">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <TextBlock Grid.Row="0" Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,0,0,10"
+                               Text="System prompt cho 2 tác vụ AI ở Update Product. Để trống = dùng mặc định. Prompt viết lại tên có thể chứa {versionCount} (số phương án cần tạo)." />
+
+                    <!-- Prompt viết lại TÊN -->
+                    <DockPanel Grid.Row="1" Margin="0,0,0,12">
+                        <Grid DockPanel.Dock="Top" Margin="0,0,0,4">
+                            <TextBlock Text="Prompt — Viết lại TÊN sản phẩm" Style="{StaticResource H2}" VerticalAlignment="Center" />
+                            <Button HorizontalAlignment="Right" Content="↩ Khôi phục mặc định" Command="{Binding ResetNamePromptCommand}" />
+                        </Grid>
+                        <Border Style="{StaticResource Card}" ClipToBounds="True">
+                            <TextBox Style="{StaticResource MonoTextBox}" FontSize="12"
+                                     Text="{Binding NameRewritePrompt, UpdateSourceTrigger=PropertyChanged}" />
+                        </Border>
+                    </DockPanel>
+
+                    <!-- Prompt viết lại MÔ TẢ -->
+                    <DockPanel Grid.Row="2" Margin="0,0,0,12">
+                        <Grid DockPanel.Dock="Top" Margin="0,0,0,4">
+                            <TextBlock Text="Prompt — Viết lại MÔ TẢ sản phẩm" Style="{StaticResource H2}" VerticalAlignment="Center" />
+                            <Button HorizontalAlignment="Right" Content="↩ Khôi phục mặc định" Command="{Binding ResetDescriptionPromptCommand}" />
+                        </Grid>
+                        <Border Style="{StaticResource Card}" ClipToBounds="True">
+                            <TextBox Style="{StaticResource MonoTextBox}" FontSize="12"
+                                     Text="{Binding DescriptionPrompt, UpdateSourceTrigger=PropertyChanged}" />
+                        </Border>
+                    </DockPanel>
+
+                    <Button Grid.Row="3" HorizontalAlignment="Left" Style="{StaticResource PrimaryButton}"
+                            Content="💾  Lưu prompt" MinWidth="130" Command="{Binding SaveCommand}" />
+                </Grid>
+            </TabItem>
+
+            <!-- ══════════ TAB 3: Sao lưu / Khôi phục ══════════ -->
+            <TabItem Header="Sao lưu / Khôi phục">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" Margin="0,12,0,0">
+                    <Border Style="{StaticResource Card}" Padding="18" MaxWidth="720" HorizontalAlignment="Left">
+                        <StackPanel>
+                            <TextBlock Text="Sao lưu / Khôi phục dữ liệu (đồng bộ sang máy khác)" Style="{StaticResource H2}" Margin="0,0,0,4" />
+                            <TextBlock TextWrapping="Wrap" Style="{StaticResource Caption}" Margin="0,0,0,12"
+                                       Text="Đóng gói tài khoản + cookie + cấu hình ra 1 file .zip để mang sang máy khác. Cookie BigSeller mang theo dùng được; phiên Shopee có thể phải đăng nhập lại trên máy mới." />
+
+                            <TextBlock Text="Chọn mục:" Style="{StaticResource Caption}" Margin="0,0,0,6" />
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,14">
+                                <CheckBox Content="Tài khoản BigSeller (+ cookie)" IsChecked="{Binding BackupBigSeller}" />
+                                <CheckBox Content="Tài khoản Shopee + proxy" IsChecked="{Binding BackupShopee}" Margin="20,0,0,0" />
+                                <CheckBox Content="Cấu hình AI (keys)" IsChecked="{Binding BackupAi}" Margin="20,0,0,0" />
+                            </StackPanel>
+
+                            <Button Style="{StaticResource PrimaryButton}" Content="⬆  Sao lưu ra file .zip" MinWidth="190"
+                                    HorizontalAlignment="Left" Command="{Binding ExportBackupCommand}" />
+
+                            <Border Height="1" Background="{StaticResource BorderBrush}" Margin="0,16,0,14" />
+
+                            <TextBlock Text="Khôi phục từ file .zip (áp dụng cho các mục đã tick ở trên):" Style="{StaticResource Caption}" FontWeight="SemiBold" Margin="0,0,0,8" />
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                                <RadioButton GroupName="impmode" Content="Gộp (thêm mới, giữ tk cũ)" IsChecked="True" VerticalAlignment="Center" />
+                                <RadioButton GroupName="impmode" Content="Thay thế (ghi đè)" Margin="20,0,0,0" VerticalAlignment="Center"
+                                             IsChecked="{Binding ImportReplace}" />
+                            </StackPanel>
+
+                            <TextBlock Text="Thư mục data workbook trên máy này (tuỳ chọn — đổi đường dẫn file Excel của tk khi sang máy khác):" Style="{StaticResource Caption}" Margin="0,0,0,4" TextWrapping="Wrap" />
+                            <Grid Margin="0,0,0,12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBox Grid.Column="0" Text="{Binding RebaseWorkbookDir}" FontFamily="{StaticResource MonoFont}" FontSize="11.5" VerticalContentAlignment="Center" />
+                                <Button Grid.Column="1" Content="📂" Width="40" Margin="8,0,0,0" Command="{Binding BrowseRebaseDirCommand}" />
+                            </Grid>
+
+                            <Button Style="{StaticResource SuccessButton}" Content="⬇  Khôi phục từ file .zip" MinWidth="190"
+                                    HorizontalAlignment="Left" Command="{Binding ImportBackupCommand}" />
+                        </StackPanel>
+                    </Border>
+                </ScrollViewer>
+            </TabItem>
+        </TabControl>
+    </Grid>
+</UserControl>

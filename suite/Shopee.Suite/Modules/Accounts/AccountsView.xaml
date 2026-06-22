@@ -1,0 +1,142 @@
+<UserControl
+    x:Class="Shopee.Suite.Modules.Accounts.AccountsView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    x:Name="Root">
+    <Grid Margin="28,22,28,24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <!-- Header -->
+        <Grid Grid.Row="0" Margin="0,0,0,16">
+            <StackPanel>
+                <TextBlock Text="Tài khoản &amp; Proxy" Style="{StaticResource H1}" />
+                <TextBlock Text="Kho tài khoản Shopee dùng chung — Scrape và Search đều chạy trên danh sách này."
+                           Style="{StaticResource Caption}" Margin="0,3,0,0" />
+            </StackPanel>
+            <Border HorizontalAlignment="Right" VerticalAlignment="Center"
+                    Background="{StaticResource SubtleBrush}" CornerRadius="14" Padding="14,6">
+                <TextBlock Text="{Binding Status}" FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" />
+            </Border>
+        </Grid>
+
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="2*" MinWidth="420" />
+                <ColumnDefinition Width="14" />
+                <ColumnDefinition Width="1*" MinWidth="300" />
+            </Grid.ColumnDefinitions>
+
+            <!-- LEFT: list + toolbar -->
+            <DockPanel Grid.Column="0">
+                <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,10">
+                    <Button Style="{StaticResource SuccessButton}" Content="+  Thêm" MinWidth="80"
+                            Command="{Binding AddCommand}" />
+                    <Button Style="{StaticResource DangerButton}" Content="−  Xóa" MinWidth="80"
+                            Margin="8,0,0,0" Command="{Binding DeleteCommand}" />
+                    <Button Content="⬇  Import…" Margin="8,0,0,0" Command="{Binding ImportCommand}" />
+                    <TextBlock Text="Hiện:" VerticalAlignment="Center" Margin="16,0,6,0" Style="{StaticResource Caption}" />
+                    <ComboBox MinWidth="150" VerticalAlignment="Center"
+                              SelectedItem="{Binding SelectedFilter}" ItemsSource="{Binding FilterOptions}" />
+                </StackPanel>
+
+                <Border Style="{StaticResource Card}" ClipToBounds="True">
+                    <DataGrid ItemsSource="{Binding Items}" SelectedItem="{Binding Selected}" BorderThickness="0"
+                              IsReadOnly="True">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Tên" Binding="{Binding DisplayName}" Width="1.2*" />
+                            <DataGridTextColumn Header="Tài khoản" Binding="{Binding Username}" Width="1.4*">
+                                <DataGridTextColumn.ElementStyle>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="FontFamily" Value="{StaticResource MonoFont}" />
+                                        <Setter Property="VerticalAlignment" Value="Center" />
+                                    </Style>
+                                </DataGridTextColumn.ElementStyle>
+                            </DataGridTextColumn>
+                            <DataGridTextColumn Header="Proxy" Binding="{Binding ProxySummary}" Width="1.2*" />
+                            <DataGridTextColumn Header="Lỗi / captcha" Binding="{Binding LastError}" Width="1.6*">
+                                <DataGridTextColumn.ElementStyle>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Foreground" Value="{StaticResource DangerBrush}" />
+                                        <Setter Property="VerticalAlignment" Value="Center" />
+                                        <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+                                    </Style>
+                                </DataGridTextColumn.ElementStyle>
+                            </DataGridTextColumn>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </Border>
+            </DockPanel>
+
+            <!-- RIGHT: detail editor -->
+            <Border Grid.Column="2" Style="{StaticResource Card}" Padding="18"
+                    DataContext="{Binding Selected}">
+                <Grid>
+                    <TextBlock Text="Chọn một tài khoản để xem / sửa chi tiết."
+                               Style="{StaticResource Caption}" VerticalAlignment="Top"
+                               Visibility="{Binding DataContext.HasSelection, ElementName=Root, Converter={StaticResource InverseBoolToVis}}" />
+
+                    <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                  Visibility="{Binding DataContext.HasSelection, ElementName=Root, Converter={StaticResource BoolToVis}}">
+                        <StackPanel>
+                            <TextBlock Text="Chi tiết tài khoản" Style="{StaticResource H2}" Margin="0,0,0,12" />
+
+                            <TextBlock Text="Tên hiển thị" Style="{StaticResource Caption}" />
+                            <TextBox Text="{Binding Label, UpdateSourceTrigger=PropertyChanged}" Margin="0,3,0,12" />
+
+                            <TextBlock Text="Đăng nhập Shopee (user|pass|.shopee.vn=SPC_F=…)" Style="{StaticResource Caption}" />
+                            <TextBox Style="{StaticResource MonoTextBox}" Height="60" TextWrapping="Wrap"
+                                     Text="{Binding ShopeeAccountLogin, UpdateSourceTrigger=PropertyChanged}" Margin="0,3,0,8" />
+                            <CheckBox Content="Mở với tài khoản Shopee (tự đăng nhập)" Margin="0,0,0,14"
+                                      IsChecked="{Binding OpenWithShopeeAccount}" />
+
+                            <TextBlock Text="PROXY" FontSize="11" FontWeight="SemiBold"
+                                       Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,8" />
+                            <TextBlock Text="KiotProxy key" Style="{StaticResource Caption}" />
+                            <TextBox Text="{Binding KiotProxyKey, UpdateSourceTrigger=PropertyChanged}" Margin="0,3,0,10" />
+
+                            <Grid Margin="0,0,0,10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="12" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock Text="Vùng" Style="{StaticResource Caption}" />
+                                    <ComboBox Margin="0,3,0,0" SelectedItem="{Binding Region}"
+                                              ItemsSource="{Binding DataContext.RegionOptions, ElementName=Root}" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock Text="Loại proxy" Style="{StaticResource Caption}" />
+                                    <ComboBox Margin="0,3,0,0" SelectedItem="{Binding ProxyType}"
+                                              ItemsSource="{Binding DataContext.ProxyTypeOptions, ElementName=Root}" />
+                                </StackPanel>
+                            </Grid>
+
+                            <TextBlock Text="Proxy thủ công (host:port hoặc http://… — nếu không dùng Kiot)"
+                                       Style="{StaticResource Caption}" />
+                            <TextBox Text="{Binding ManualProxy, UpdateSourceTrigger=PropertyChanged}" Margin="0,3,0,10" />
+                            <CheckBox Content="Bắt buộc có proxy mới chạy" IsChecked="{Binding RequireProxy}" Margin="0,0,0,4" />
+                            <CheckBox Content="Tạm tắt tài khoản này" IsChecked="{Binding Disabled}" />
+
+                            <!-- Nút thao tác trên ĐÚNG tài khoản đang chọn: Bật lại (nếu đang lỗi) + Lưu chi tiết. -->
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,18,0,0">
+                                <Button Content="🔍  Kiểm tra" MinWidth="120"
+                                        ToolTip="Mở Brave với profile + proxy của tài khoản này tới Shopee để giải captcha / kiểm tra đăng nhập"
+                                        Command="{Binding DataContext.CheckCommand, ElementName=Root}" />
+                                <Button Content="↻  Bật lại" MinWidth="120" Margin="10,0,0,0"
+                                        ToolTip="Bỏ đánh dấu lỗi/captcha của tài khoản này → đưa về rotation Scrape/Search"
+                                        Foreground="{StaticResource SuccessBrush}" BorderBrush="{StaticResource SuccessBrush}"
+                                        Command="{Binding DataContext.ReenableCommand, ElementName=Root}" />
+                                <Button Style="{StaticResource PrimaryButton}" Content="💾  Lưu thay đổi" MinWidth="140" Margin="10,0,0,0"
+                                        Command="{Binding DataContext.SaveCommand, ElementName=Root}" />
+                            </StackPanel>
+                        </StackPanel>
+                    </ScrollViewer>
+                </Grid>
+            </Border>
+        </Grid>
+    </Grid>
+</UserControl>

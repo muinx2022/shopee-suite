@@ -1,0 +1,476 @@
+using System.Collections.Concurrent;
+using System.Collections.ObjectModel;
+using System.IO;
+using System.Windows;
+using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
+using Shopee.Core.Accounts;
+using Shopee.Core.Infrastructure;
+using Shopee.Core.Proxy;
+using Shopee.Modules.CheckAccount;
+
+namespace Shopee.Suite.Modules.CheckAccount;
+
+/// <summary>
+/// ViewModel cho module "Check tài khoản". Port từ MainForm WinForms cũ: cùng logic luồng/queue,
+/// xoay proxy, giữ profile khi thành công. Tài khoản OK được lưu thẳng vào KHO CHUNG
+/// (Tài khoản & Proxy) — không còn copy sang 2 app v31/shopee-stat như trước.
+/// </summary>
+public sealed partial class CheckAccountViewModel : ObservableObject
+{
+    private static readonly string DataDir = SuitePaths.ModuleDir("check-account");
+    private static readonly string OkFilePath = Path.Combine(DataDir, "tk-ok.txt");
+    private static readonly string SettingsPath = Path.Combine(DataDir, "check-settings.json");
+    // Profile bền theo tài khoản — layout (<dir>/Default) nên copy thẳng sang kho chung được.
+    private static readonly string ProfilesRoot = Path.Combine(DataDir, "profiles");
+    // Profile dùng chung của cả suite (account trong kho chung trỏ vào đây).
+    private static readonly string SharedProfilesDir = Path.Combine(SuitePaths.ModuleDir("shared"), "profiles");
+
+    // Trạng thái proxy theo từng kiotproxy key: IP hiện tại + mốc (epoch ms) được đổi tiếp.
+    private readonly Dictionary<string, (string? ip, long next)> _proxyState = new(StringComparer.Ordinal);
+
+    private ProxyPool? _pool;
+    private CancellationTokenSource? _cts;
+
+    public ObservableCollection<string> LogLines { get; } = [];
+    public ObservableCollection<OkAccountRow> OkAccounts { get; } = [];
+
+    [ObservableProperty] private string _accounts = "";
+    [ObservableProperty] private string _proxyList = "";
+
+    [ObservableProperty] private int _lanes = 2;
+
+    [ObservableProperty] private string _status = "Sẵn sàng.";
+    [ObservableProperty] private string _okStatus = "";
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsIdle))]
+    [NotifyCanExecuteChangedFor(nameof(RunCommand), nameof(StopCommand))]
+    private bool _isRunning;
+
+    public bool IsIdle => !IsRunning;
+
+    [ObservableProperty] private bool _selectAll;
+
+    public CheckAccountViewModel() => LoadSettings();
+
+    // ── Run ────────────────────────────────────────────────────────────────────
+
+    [RelayCommand(CanExecute = nameof(IsIdle))]
+    private async Task RunAsync()
+    {
+        var lines = SplitLines(Accounts);
+        if (lines.Count == 0)
+        {
+            Dialogs.Show("Chưa có tài khoản nào để check.", "Check tài khoản",
+                MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var proxies = SplitLines(ProxyList);
+        SaveSettings();
+
+        _pool = proxies.Count > 0 ? new ProxyPool(proxies, _proxyState) : null;
+        if (_pool is not null) _pool.Log += AppendLog;
+
+        IsRunning = true;
+        _cts = new CancellationTokenSource();
+        LogLines.Clear();
+        AppendLog(_pool is null
+            ? "(không có proxy — chạy bằng IP máy)"
+            : $"({proxies.Count} proxy — mỗi tk 1 IP mới, key chưa tới giờ đổi thì chuyển key khác)");
+
+        var laneCount = Math.Max(1, Math.Min(Lanes, lines.Count));
+        var total = lines.Count;
+        var queue = new ConcurrentQueue<string>(lines);
+
+        var remaining = new List<string>(lines);
+        var remainingLock = new object();
+        var statsLock = new object();
+        var fileLock = new object();
+        var okCount = 0;
+        var failCount = 0;
+        var manualCount = 0;
+        var processed = 0;
+
+        void ResolveRemaining(string line)
+        {
+            string[] snapshot;
+            lock (remainingLock) { remaining.Remove(line); snapshot = remaining.ToArray(); }
+            OnUi(() => Accounts = string.Join(Environment.NewLine, snapshot));
+        }
+
+        AppendLog(laneCount > 1 ? $"▶ Chạy {laneCount} luồng song song." : "▶ Chạy 1 luồng.");
+
+        async Task WorkerAsync(int laneId)
+        {
+            // Mỗi luồng có checker riêng (state chuột/_rng theo từng phiên, không chia sẻ giữa thread).
+            var checker = new ShopeeAccountChecker();
+            void LaneLog(string m) => AppendLog($"[L{laneId}]{m}");
+            checker.Log += LaneLog;
+            try
+            {
+                while (!_cts!.IsCancellationRequested && queue.TryDequeue(out var line))
+                {
+                    var shortName = line.Split('|')[0];
+                    var n = Interlocked.Increment(ref processed);
+                    SetStatus($"Đang chạy {laneCount} luồng… ({n}/{total})");
+                    LaneLog($" ({n}/{total}) {shortName}");
+
+                    // Lấy 1 IP mới cho tài khoản này (xoay key khi key hiện tại chưa tới giờ đổi).
+                    string? proxy = null;
+                    if (_pool is not null)
+                    {
+                        proxy = await _pool.AcquireFreshAsync(_cts.Token);
+                        if (proxy is null)
+                        {
+                            LaneLog("   ⚠ không lấy được proxy nào → giữ lại tk này");
+                            lock (statsLock) manualCount++;
+                            continue;
+                        }
+                    }
+
+                    // Giữ mỗi tk thêm 25–30s bất kể thành công/thất bại để giả lập người dùng.
+                    var hold = Random.Shared.Next(25_000, 30_001);
+
+                    // Profile bền theo tài khoản; tạo mới sạch mỗi lần check để test đúng mật khẩu.
+                    var profileDir = Path.Combine(ProfilesRoot, SafeProfileName(shortName));
+                    TryDeleteDir(profileDir);
+
+                    CheckResult result;
+                    try
+                    {
+                        result = await checker.CheckAsync(line, proxy, profileDir, hold, _cts.Token);
+                    }
+                    catch (Exception ex)
+                    {
+                        result = new CheckResult(CheckOutcome.Error, ex.Message);
+                    }
+
+                    switch (result.Outcome)
+                    {
+                        case CheckOutcome.Success:
+                            lock (statsLock) okCount++;
+                            lock (fileLock) AppendSuccess(line);
+                            ResolveRemaining(line);
+                            LaneLog("   ✔ THÀNH CÔNG → đã lưu vào tk-ok.txt");
+                            LaneLog("   📁 giữ profile: " + profileDir);
+                            break;
+                        case CheckOutcome.WrongPassword:
+                            lock (statsLock) failCount++;
+                            ResolveRemaining(line);
+                            LaneLog("   ✘ SAI MẬT KHẨU → đã xoá khỏi danh sách");
+                            break;
+                        case CheckOutcome.NeedsManual:
+                            lock (statsLock) manualCount++;
+                            LaneLog("   ⚠ " + result.Message + " → giữ lại trong danh sách");
+                            break;
+                        default:
+                            LaneLog("   ⚠ Lỗi: " + result.Message + " → giữ lại trong danh sách");
+                            break;
+                    }
+
+                    // Chỉ giữ profile khi login thành công (để copy sang shopee-stat/v31); còn lại xoá.
+                    if (result.Outcome != CheckOutcome.Success)
+                        TryDeleteDir(profileDir);
+                }
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception ex) { LaneLog("   ⚠ luồng dừng do lỗi: " + ex.Message); }
+            finally { checker.Log -= LaneLog; }
+        }
+
+        try
+        {
+            var workers = Enumerable.Range(1, laneCount).Select(WorkerAsync).ToArray();
+            await Task.WhenAll(workers);
+        }
+        finally
+        {
+            if (_pool is not null)
+            {
+                _pool.Log -= AppendLog;
+                UpdateProxyStateFromPool();
+                SaveSettings();
+                _pool = null;
+            }
+            IsRunning = false;
+            var done = _cts!.IsCancellationRequested ? "Đã dừng." : "Hoàn tất.";
+            SetStatus($"{done} OK={okCount}, sai mật khẩu={failCount}, cần tay={manualCount}.");
+            AppendLog($"── {done} OK={okCount}, sai mật khẩu={failCount}, cần xử lý tay={manualCount} ──");
+            _cts.Dispose();
+            _cts = null;
+        }
+    }
+
+    [RelayCommand(CanExecute = nameof(IsRunning))]
+    private void Stop() => _cts?.Cancel();
+
+    private void UpdateProxyStateFromPool()
+    {
+        if (_pool is null) return;
+        foreach (var e in _pool.Entries)
+            if (e.IsKey)
+                _proxyState[e.Raw] = (e.CurrentIp, e.NextChangeAtMs);
+    }
+
+    [RelayCommand]
+    private void OpenProfiles()
+    {
+        try
+        {
+            Directory.CreateDirectory(ProfilesRoot);
+            Process.Start(new ProcessStartInfo("explorer.exe", $"\"{ProfilesRoot}\"") { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            Dialogs.Show(ex.Message, "Mở thư mục profile", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    // ── TK OK ────────────────────────────────────────────────────────────────────
+
+    [RelayCommand]
+    private void ReloadOk() => LoadOkGrid();
+
+    public void LoadOkGrid()
+    {
+        OkAccounts.Clear();
+        SelectAll = false;
+        List<string> lines;
+        try
+        {
+            lines = File.Exists(OkFilePath)
+                ? File.ReadAllLines(OkFilePath, Encoding.UTF8)
+                    .Select(l => l.Trim()).Where(l => l.Length > 0).Distinct().ToList()
+                : [];
+        }
+        catch (Exception ex)
+        {
+            Dialogs.Show("Lỗi đọc tk-ok.txt: " + ex.Message, "TK OK", MessageBoxButton.OK, MessageBoxImage.Error);
+            return;
+        }
+
+        foreach (var line in lines)
+            OkAccounts.Add(new OkAccountRow(line));
+        SelectAll = false;
+    }
+
+    [RelayCommand]
+    private void OpenOkFile()
+    {
+        try
+        {
+            if (!File.Exists(OkFilePath)) File.WriteAllText(OkFilePath, "", Encoding.UTF8);
+            Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{OkFilePath}\"") { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            Dialogs.Show(ex.Message, "Mở file", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    partial void OnSelectAllChanged(bool value)
+    {
+        foreach (var row in OkAccounts) row.Selected = value;
+    }
+
+    /// <summary>Lưu các tk OK đã chọn vào KHO CHUNG (Tài khoản & Proxy): tạo/cập nhật ShopeeAccount
+    /// và copy profile sang thư mục profile dùng chung. Lưu xong thì XÓA khỏi danh sách TK OK +
+    /// file tk-ok.txt. Scrape/Search dùng lại từ kho chung.</summary>
+    [RelayCommand]
+    private async Task SaveToShared()
+    {
+        var selectedRows = OkAccounts.Where(r => r.Selected && r.Line.Length > 0).ToList();
+        if (selectedRows.Count == 0)
+        {
+            Dialogs.Show("Tích chọn ít nhất 1 tài khoản để lưu.", "Lưu vào kho chung",
+                MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var savedRows = new List<OkAccountRow>();
+        var added = 0; var updated = 0; var missing = 0; var failed = 0;
+        for (var i = 0; i < selectedRows.Count; i++)
+        {
+            var row = selectedRows[i];
+            var line = row.Line;
+            var username = line.Split('|')[0];
+            OkStatus = $"Đang lưu {i + 1}/{selectedRows.Count}: {username}…";
+
+            try
+            {
+                var existing = AccountStore.Shared.Accounts
+                    .FirstOrDefault(a => string.Equals(a.ShopeeAccountLogin, line, StringComparison.Ordinal));
+                var acc = existing ?? new ShopeeAccount { ShopeeAccountLogin = line, Label = username };
+                acc.EnsureProfilePath();
+
+                // Copy profile đã đăng nhập (nếu có) sang thư mục dùng chung theo Id account.
+                var src = Path.Combine(ProfilesRoot, SafeProfileName(username));
+                if (Directory.Exists(Path.Combine(src, "Default")))
+                {
+                    var dest = Path.Combine(SharedProfilesDir, acc.Id);
+                    await Task.Run(() => CopyProfile(src, dest));
+                    acc.ProfileRelativePath = dest;
+                }
+                else
+                {
+                    // Profile chưa đăng nhập → KHÔNG đăng ký vào kho chung và KHÔNG xóa khỏi TK OK,
+                    // để người dùng chạy check lại (giống app gốc CopySelectedAsync).
+                    missing++;
+                    SetRowStatus(line, "⚠ chưa có profile (chạy check lại)");
+                    continue;
+                }
+
+                if (existing is null) { AccountStore.Shared.Add(acc); added++; }
+                else { AccountStore.Shared.Save(); updated++; }
+
+                savedRows.Add(row);
+            }
+            catch (Exception ex)
+            {
+                failed++;
+                SetRowStatus(line, "✘ lỗi: " + ex.Message);
+            }
+        }
+
+        // Đã lưu xong → bỏ khỏi danh sách TK OK + ghi lại file tk-ok.txt (chỉ giữ tk chưa lưu).
+        foreach (var row in savedRows) OkAccounts.Remove(row);
+        RewriteOkFile();
+        SelectAll = false;
+
+        OkStatus = $"Đã lưu {savedRows.Count} tk vào kho chung (thiếu profile {missing}, lỗi {failed}). Còn {OkAccounts.Count} tk.";
+        Dialogs.Show(
+            $"Đã lưu {savedRows.Count} tài khoản vào kho chung và xóa khỏi TK OK.\n" +
+            $"Thêm mới: {added} · Cập nhật: {updated}\nThiếu profile: {missing} · Lỗi: {failed}",
+            "Lưu vào kho chung", MessageBoxButton.OK, MessageBoxImage.Information);
+    }
+
+    /// <summary>Ghi lại tk-ok.txt từ các dòng còn trong lưới (sau khi đã bỏ tk vừa lưu).</summary>
+    private void RewriteOkFile()
+    {
+        try
+        {
+            var remaining = OkAccounts.Select(r => r.Line).Where(l => l.Length > 0).Distinct();
+            File.WriteAllLines(OkFilePath, remaining, Encoding.UTF8);
+        }
+        catch (Exception ex)
+        {
+            AppendLog("  (không ghi lại được tk-ok.txt: " + ex.Message + ")");
+        }
+    }
+
+    private void SetRowStatus(string line, string status)
+    {
+        var row = OkAccounts.FirstOrDefault(r => r.Line == line);
+        if (row is not null) row.Status = status;
+    }
+
+    /// <summary>Copy nguyên user-data-dir (gồm Default + Local State) — ghi đè đích nếu đã có.</summary>
+    private static void CopyProfile(string src, string dest)
+    {
+        if (Directory.Exists(dest)) Directory.Delete(dest, recursive: true);
+        Directory.CreateDirectory(dest);
+        foreach (var file in Directory.GetFiles(src, "*", SearchOption.AllDirectories))
+        {
+            var rel = Path.GetRelativePath(src, file);
+            var targetPath = Path.Combine(dest, rel);
+            Directory.CreateDirectory(Path.GetDirectoryName(targetPath)!);
+            File.Copy(file, targetPath, overwrite: true);
+        }
+    }
+
+    // ── File OK ──────────────────────────────────────────────────────────────────
+
+    private void AppendSuccess(string line)
+    {
+        try { File.AppendAllText(OkFilePath, line + Environment.NewLine, Encoding.UTF8); }
+        catch (Exception ex) { AppendLog("  (không ghi được tk-ok.txt: " + ex.Message + ")"); }
+    }
+
+    // ── Helpers ────────────────────────────────────────────────────────────────────
+
+    private static List<string> SplitLines(string text) => text
+        .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
+        .Select(l => l.Trim()).Where(l => l.Length > 0).ToList();
+
+    /// <summary>Tên thư mục profile an toàn từ username (giữ chữ/số/.-_@, còn lại thay '_').</summary>
+    private static string SafeProfileName(string username)
+    {
+        if (string.IsNullOrWhiteSpace(username)) return "acc-" + Guid.NewGuid().ToString("N")[..8];
+        var sb = new StringBuilder(username.Length);
+        foreach (var ch in username.Trim())
+            sb.Append(char.IsLetterOrDigit(ch) || ch is '.' or '-' or '_' or '@' ? ch : '_');
+        var name = sb.ToString().Trim('_', '.');
+        return name.Length == 0 ? "acc-" + Guid.NewGuid().ToString("N")[..8] : name;
+    }
+
+    private static void TryDeleteDir(string dir)
+    {
+        try { if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true); } catch { }
+    }
+
+    private void SetStatus(string text) => OnUi(() => Status = text);
+
+    private void AppendLog(string text)
+    {
+        var d = Application.Current?.Dispatcher;
+        if (d is null || d.CheckAccess()) LogLines.Add(text);
+        else d.BeginInvoke(() => LogLines.Add(text));
+    }
+
+    private static void OnUi(Action action)
+    {
+        var d = Application.Current?.Dispatcher;
+        if (d is null || d.CheckAccess()) action();
+        else d.BeginInvoke(action);
+    }
+
+    // ── Settings (nhớ proxy key + danh sách) ─────────────────────────────────────
+
+    private void LoadSettings()
+    {
+        try
+        {
+            if (!File.Exists(SettingsPath)) return;
+            using var doc = JsonDocument.Parse(File.ReadAllText(SettingsPath, Encoding.UTF8));
+            var root = doc.RootElement;
+            if (root.TryGetProperty("proxyList", out var pl)) ProxyList = pl.GetString() ?? "";
+            else if (root.TryGetProperty("proxyKey", out var pk)) ProxyList = pk.GetString() ?? ""; // bản cũ
+            if (root.TryGetProperty("accounts", out var acc)) Accounts = acc.GetString() ?? "";
+            if (root.TryGetProperty("lanes", out var ln) && ln.TryGetInt32(out var lanes))
+                Lanes = Math.Max(1, Math.Min(5, lanes));
+
+            _proxyState.Clear();
+            if (root.TryGetProperty("proxyState", out var ps) && ps.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in ps.EnumerateArray())
+                {
+                    var raw = item.TryGetProperty("raw", out var r) ? r.GetString() : null;
+                    if (string.IsNullOrEmpty(raw)) continue;
+                    var ip = item.TryGetProperty("ip", out var ipEl) ? ipEl.GetString() : null;
+                    var next = item.TryGetProperty("next", out var nEl) && nEl.TryGetInt64(out var nn) ? nn : 0;
+                    _proxyState[raw] = (ip, next);
+                }
+            }
+
+        }
+        catch { }
+    }
+
+    private void SaveSettings()
+    {
+        try
+        {
+            var json = JsonSerializer.Serialize(new
+            {
+                proxyList = ProxyList,
+                accounts = Accounts,
+                lanes = Lanes,
+                proxyState = _proxyState.Select(kv => new { raw = kv.Key, ip = kv.Value.ip, next = kv.Value.next }).ToArray(),
+            }, new JsonSerializerOptions { WriteIndented = true });
+            File.WriteAllText(SettingsPath, json, Encoding.UTF8);
+        }
+        catch { }
+    }
+}

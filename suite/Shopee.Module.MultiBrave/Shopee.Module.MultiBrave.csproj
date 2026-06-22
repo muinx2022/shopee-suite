@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Shopee.Modules.MultiBrave</RootNamespace>
+    <AssemblyName>Shopee.Module.MultiBrave</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Shopee.Core\Shopee.Core.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Đọc + giải mã cookie session từ profile Edge đã đăng nhập (import vào Brave → khỏi login form). -->
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="9.0.6" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
+  </ItemGroup>
+</Project>

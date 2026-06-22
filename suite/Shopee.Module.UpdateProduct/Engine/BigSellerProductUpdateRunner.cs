@@ -1,0 +1,1394 @@
+using System.Diagnostics;
+using System.Globalization;
+using System.Text;
+using System.Text.RegularExpressions;
+using ClosedXML.Excel;
+using Microsoft.Playwright;
+using Shopee.Core.Ai;
+using Shopee.Core.Browser;
+
+namespace UpdateProduct;
+
+/// <summary>
+/// Cập nhật sản phẩm trên BigSeller bằng C# + Playwright (thay cho main.py Python).
+/// Quét trang Listing (bsStatus=1), mở từng sản phẩm vào tab edit, đối chiếu workbook theo
+/// Shopee item id, rồi điền tên/SKU/giá/tồn/brand/cân nặng/ảnh/video + mô tả AI và lưu.
+/// Selector giữ nguyên verbatim từ bản Python.
+/// </summary>
+internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
+{
+    // ── CONFIG (từ main.py CONFIG) ──
+    private const string StockValue = "30069";
+    private const string WeightValue = "500";
+    private const int MaxProductNameChars = 120;   // Shopee giới hạn tên SP 120 ký tự (BigSeller báo lỗi nếu vượt)
+    private const int MaxDescriptionChars = 3000;
+    private const int TrimmedDescriptionMaxChars = 2900;
+    private const int TargetDescriptionMinChars = 2700;
+    private const string ListingUrl = "https://www.bigseller.com/web/listing/shopee/index.htm?bsStatus=1";
+
+    private const string DescriptionSystemPrompt =
+        "Bạn là chuyên gia SEO TMĐT chuyên viết mô tả sản phẩm GIÀY – DÉP NỮ để đăng Shopee, Lazada, Tiki, Ozon.\n\n" +
+        "NHIỆM VỤ:\nViết MỘT bài mô tả sản phẩm duy nhất, sẵn sàng đăng bán.\n\n" +
+        "YÊU CẦU BẮT BUỘC:\n" +
+        "- ĐỘ DÀI: cố gắng trong khoảng 2800–2900 ký tự.\n" +
+        "- TUYỆT ĐỐI KHÔNG VƯỢT 3000 ký tự vì Shopee sẽ báo lỗi.\n" +
+        "- Chuẩn SEO theo hành vi tìm kiếm người mua giày nữ online.\n" +
+        "- Lặp tự nhiên từ khóa chính và biến thể liên quan đến giày nữ, không spam.\n" +
+        "- Văn phong chuyên nghiệp, dễ đọc, tập trung lợi ích người dùng nữ.\n\n" +
+        "CẤU TRÚC:\n" +
+        "- Mở bài: giới thiệu sản phẩm, nêu từ khóa chính.\n" +
+        "- Thân bài: thiết kế, chất liệu, đế, form, cảm giác mang, tính ứng dụng.\n" +
+        "- Kết bài: gợi ý phối đồ, đối tượng phù hợp, kêu gọi mua.\n\n" +
+        "QUY ĐỊNH:\n- Không chèn tiêu đề thừa.\n- Không ghi \"Thông số\", \"Cam kết\", \"Chính sách\".\n- Không giải thích SEO.\n\n" +
+        "HASHTAG:\n- Đặt NGAY SAU đoạn mô tả cuối cùng.\n- Viết liền, không tiêu đề.\n- Đúng ngành giày nữ, có mã sản phẩm.\n- CHÍNH XÁC 18 hashtag.\n\n" +
+        "NGUYÊN TẮC CUỐI:\n- Nếu cần điều chỉnh, chỉ thay đổi độ dài câu để nằm trong khoảng 2800–2900 ký tự.\n- Tuyệt đối không thêm hoặc bớt hashtag.";
+
+    // ── SELECTORS (verbatim) ──
+    private const string ListingRows = "tbody.ant-table-tbody tr";
+    private const string ListingEditButton = "a.action_btn.addEditProduct";
+    private const string ListingReadySelector = "tbody.ant-table-tbody tr, .ant-empty, .ant-table-placeholder, a.action_btn.addEditProduct";
+    private const string ListingRowKeyAttr = "data-row-key";
+    private const string DeleteBtn1 = "a.action_btn[title='Xóa']";
+    private const string DeleteBtn2 = "a[title='Xóa']";
+    private const string DeleteBtn3 = "a.action_btn:has(span.bsicon_trash_2)";
+    private const string DeleteConfirmPrimary = ".ant-modal-confirm-btns button.ant-btn-primary";
+    private const string BlockingModalVisible = "div.ant-modal-wrap:visible";
+    private static readonly string[] DismissBtns =
+    {
+        ".ant-modal-confirm-btns button:not(.ant-btn-primary)", ".ant-modal-close",
+        ".ant-modal-footer button:not(.ant-btn-primary)", ".ant-modal-confirm-btns button", ".ant-modal-footer button",
+    };
+
+    private const string SourceLinkInput = "input[autoid='product_source_link_text']";
+    private const string SourceLinkCopyButton = "div.com_input_box:has(input[autoid='product_source_link_text']) button";
+    private const string ProductNameInput = "input[autoid='product_name_text']";
+
+    private const string Md5Button = "span.sell_md5";
+    private const string Md5CompleteStatus = "div.ant-modal:visible div.complete_Status";
+    private const string CloseModalAny = "div.ant-modal:visible";
+    private static readonly string[] CloseModalSels =
+    {
+        "div.ant-modal:visible:has(div.complete_Status) .ant-modal-footer button.ant-btn",
+        "div.ant-modal:visible:has(div.complete_Status) button.ant-modal-close",
+        "div.ant-modal:visible .ant-modal-footer button", "div.ant-modal:visible button.ant-btn",
+        "div.ant-modal:visible button.ant-modal-close", "div.ant-modal:visible .ant-modal-close",
+        "div.ant-modal:visible .ant-modal-close-x",
+    };
+
+    private const string UploadImageRadioWrapper = "label.ant-radio-wrapper";
+    private const string ParentSkuInput = "input[autoid='parent_sku_text']";
+    private const string VariationSkuInputs = "input[autoid^='variation_sku_text_']";
+    private const string VariationStockInputs = "input[autoid^='variation_stock_text_']";
+    private const string VariationPriceInputs = "input[autoid^='variation_price_text_']";
+    private const string ShippingFastWrapper = "label.ant-checkbox-wrapper";
+    private const string ShippingCheckedMark = ".ant-checkbox-checked";
+    private const string WeightInput = "input[autoid='weight_text']";
+
+    private const string BrandBoxXPath1 = "//div[contains(@class, 'page_edit_item')][.//*[contains(normalize-space(), 'Thương hiệu') or contains(normalize-space(), 'Brand')]]//div[contains(@class, 'ant-select-selection')]";
+    private const string BrandBoxXPath2 = "//div[contains(@class, 'ant-form-item')][.//*[contains(normalize-space(), 'Thương hiệu') or contains(normalize-space(), 'Brand')] or .//div[contains(@class, 'ant-form-explain') and contains(normalize-space(), 'Brand cannot be empty')]]//div[contains(@class, 'ant-select-selection')]";
+    private const string BrandBoxCss = "div.ant-form-item:has(div.ant-form-explain:has-text('Brand cannot be empty')) div.ant-select-selection";
+    private const string BrandSelectedValue = ".ant-select-selection-selected-value";
+    private const string BrandSearchInput1 = ".ant-select-open input.ant-select-search__field";
+    private const string BrandSearchInput2 = "input.ant-select-search__field:visible";
+    private const string BrandDropdownReady = ".ant-select-dropdown:not(.ant-select-dropdown-hidden), div.option";
+    private static readonly string[] BrandOptions =
+    {
+        ".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-dropdown-menu-item",
+        ".ant-select-dropdown:not(.ant-select-dropdown-hidden) [role='option']", "div.option:visible",
+    };
+    private static readonly Regex NoBrandRegex = new(@"^\s*No\s*brand\s*$", RegexOptions.IgnoreCase);
+
+    private const string ImageUploadedImg = "div.supp_size_chat div.page_edit_img_item.comm_img_module img[src]";
+    private const string ImageGalleryBox = "div.spc_box";
+    private const string ImageUploadMenuItem = "div.spc_box ul.spc_cho li";
+
+    private const string AddVideoButton = "button:has-text('Thêm video')";
+    private const string UploadLocalVideoOpt = "li[autoid='upload_local_video_option']";
+    private const string VideoBoxes = "div.pro_vid_box div.page_edit_img_item.comm_img_module";
+    private const string VideoSuccessSignal = "span.top_status.bk_green:has-text('Tải lên thành công')";
+    private static readonly string[] VideoErrSels =
+        { ".ant-message-error", ".ant-notification-notice-message", ".ant-notification-notice-description", ".ant-message-notice-content", ".toast", ".el-message--error" };
+
+    private const string DescriptionTextarea = "textarea[autoid='product_description_text']";
+    private const string DescriptionCountBox = "span.count_box";
+
+    private const string SaveButtonWrapper = "div[autoid='save_and_publish_button']";
+    private const string SaveOption = "li[autoid='save_and_publish_option']";
+    private const string ConfirmPrimaryBtn = "div.ant-modal-confirm-btns button.ant-btn-primary";
+    private static readonly string[] SaveErrSels =
+        { "div.ant-message", "div.ant-message-notice", "div.ant-message-notice-content", "div.ant-notification", "div.ant-modal-root", "div[role='alert']", "body" };
+    private const string SuccessTitle = ".ant-modal-confirm-title, .ant-modal-title";
+    private const string SuccessBody = ".ant-modal-body, .ant-modal-confirm-content";
+    private const string SuccessClose = ".ant-modal:visible button";
+
+    private static readonly Regex EditIdRegex = new(@"/edit/(\d+)\.htm", RegexOptions.IgnoreCase);
+
+    private readonly BigSellerWorkflowSettings _settings;
+    private readonly Action<string> _log;
+    private readonly WorkflowPauseToken? _pauseToken;
+    private IPlaywright? _playwright;
+    private IBrowser? _browser;
+    private IBrowserContext? _context;
+    private Process? _braveProcess;
+
+    private Dictionary<string, WorkbookRecord> _records = new();
+    private readonly HashSet<string> _skippedRowKeys = new();
+    private readonly HashSet<string> _skippedEditIds = new();
+    private readonly Dictionary<string, int> _failCounts = new();
+    // True nếu ProcessProduct fail do LỖI TẠM (AI rỗng/mạng) → caller RETRY, KHÔNG xóa dòng (tránh mất SP).
+    private bool _lastProcessTransient;
+
+    private readonly ClaimStore? _claim;
+    private readonly bool _exportCookie;
+
+    public BigSellerProductUpdateRunner(
+        BigSellerWorkflowSettings settings, Action<string> log, WorkflowPauseToken? pauseToken = null,
+        ClaimStore? claim = null, bool exportCookie = true)
+    {
+        _settings = settings;
+        _log = log;
+        _pauseToken = pauseToken;
+        _claim = claim;
+        _exportCookie = exportCookie;
+    }
+
+    private sealed record WorkbookRecord(string Link, string Sku, string ProductName, string Price, int LineIndex);
+
+    public async Task RunAsync(CancellationToken ct)
+    {
+        if (!File.Exists(_settings.BravePath))
+            throw new FileNotFoundException($"Khong tim thay Brave: {_settings.BravePath}");
+
+        await LoadWorkbookRecordsAsync(ct).ConfigureAwait(false);
+        _log($"📒 Workbook: {_records.Count} dòng (khớp theo Shopee item id).");
+
+        StartBrave();
+        _log($"Đã gọi Brave PID={_braveProcess?.Id.ToString() ?? "?"}, chờ CDP port {_settings.DebugPort}...");
+        if (!await new CdpClient(_settings.DebugPort).WaitForReadyAsync(90, 500, ct).ConfigureAwait(false))
+            throw new InvalidOperationException($"CDP port {_settings.DebugPort} không sẵn sàng. Đóng Brave BigSeller cũ rồi chạy lại.");
+
+        await EnsureCookieAsync(ct).ConfigureAwait(false);
+
+        _playwright = await Playwright.CreateAsync();
+        _log($"Kết nối CDP port {_settings.DebugPort}...");
+        for (var attempt = 0; attempt < 8 && _browser is null; attempt++)
+        {
+            ct.ThrowIfCancellationRequested();
+            try { _browser = await _playwright.Chromium.ConnectOverCDPAsync($"http://127.0.0.1:{_settings.DebugPort}", new() { Timeout = 30000 }); }
+            catch { await DelayAsync(3000, ct); }
+        }
+        if (_browser is null)
+            throw new InvalidOperationException("Không kết nối được Brave qua CDP.");
+
+        _context = _browser.Contexts.FirstOrDefault()
+            ?? throw new InvalidOperationException("Brave chưa có browser context.");
+
+        var page = PickListingPage(_context)
+            ?? throw new InvalidOperationException("Không tìm thấy tab BigSeller.");
+        await page.BringToFrontAsync();
+        if (!await GoToListingPageAsync(page, false))
+            throw new InvalidOperationException("Không mở được trang Listing.");
+
+        _log(new string('=', 50));
+        _log("BẮT ĐẦU UPDATE PRODUCT (C#)");
+        _log(new string('=', 50));
+
+        await OuterLoopAsync(page, ct).ConfigureAwait(false);
+    }
+
+    // ── cookie (mirror import runner) ──
+    private async Task EnsureCookieAsync(CancellationToken ct)
+    {
+        var hasLiveSession = false;
+        try
+        {
+            hasLiveSession = BigSellerCookieImporter.HasAuthCookie(
+                await BigSellerCookieImporter.GetBigSellerCookiesAsync(_settings.DebugPort).ConfigureAwait(false));
+        }
+        catch { }
+
+        if (hasLiveSession &&
+            await BigSellerCookieImporter.ProbeLoggedInAsync(_settings.DebugPort, ListingUrl, _log, ct).ConfigureAwait(false) == false)
+        {
+            hasLiveSession = false;
+            _log("Token BigSeller trong profile đã bị thu hồi — nạp lại cookie từ file account.");
+        }
+
+        if (hasLiveSession)
+        {
+            _log("Profile đã đăng nhập BigSeller — giữ phiên hiện tại.");
+            // Chỉ lane 0 ghi cookie ra file (tránh các lane phụ đá token nhau — rotation-war).
+            if (_exportCookie)
+                await BigSellerCookieImporter.TryExportProfileCookiesToFileAsync(
+                    _settings.DebugPort, _settings.BigSellerCookieFile, _log).ConfigureAwait(false);
+        }
+        else
+        {
+            _log("Đang import cookie BigSeller từ file...");
+            await BigSellerCookieImporter.ImportFromFileAsync(
+                _settings.DebugPort, _settings.BigSellerCookieFile ?? "", _log,
+                reloadBigSellerTabs: false, navigateUrl: ListingUrl, ct).ConfigureAwait(false);
+            if (await BigSellerCookieImporter.ProbeLoggedInAsync(_settings.DebugPort, ListingUrl, _log, ct).ConfigureAwait(false) == false)
+                _log("Cookie từ file cũng hết hạn — mở tab Account, login lại rồi Save & close.");
+        }
+    }
+
+    // ── workbook ──
+    // Khóa file khi đọc (chung file giữa nhiều account): serialize với lúc "Update tên SP" đang GHI
+    // cột G → tránh đọc-khi-đang-ghi (IOException/đọc lệch). Khóa chỉ giữ trong lúc nạp (rất nhanh).
+    private async Task LoadWorkbookRecordsAsync(CancellationToken ct)
+    {
+        // Cột bắt buộc: "Tên đã sửa" (tên để update) + ít nhất 1 trong (Item ID / Link) để khớp dòng.
+        // 0 = "không dùng" → fail rõ ràng thay vì đẩy 0 vào ClosedXML (Cell(0) ném lỗi).
+        if (_settings.RewrittenNameColumn <= 0)
+            throw new InvalidOperationException("Chưa map cột 'Tên đã sửa' cho shop (mục BigSeller → Ánh xạ cột).");
+        if (_settings.ItemIdColumn <= 0 && _settings.LinkColumn <= 0)
+            throw new InvalidOperationException("Cần map ít nhất 'Item ID' hoặc 'Link' để khớp dòng (mục BigSeller → Ánh xạ cột).");
+
+        using var _ = await WorkbookFileLockHandle.AcquireAsync(_settings.WorkbookPath, ct).ConfigureAwait(false);
+        var map = new Dictionary<string, WorkbookRecord>();
+        using var wb = new XLWorkbook(_settings.WorkbookPath);
+        var ws = string.IsNullOrWhiteSpace(_settings.DataSheet)
+            ? wb.Worksheets.First()
+            : wb.Worksheet(_settings.DataSheet);
+        var start = Math.Max(2, _settings.StartRow);
+        var last = ws.LastRowUsed()?.RowNumber() ?? 0;
+        var end = _settings.EndRow > 0 ? Math.Min(_settings.EndRow, last) : last;
+
+        var emptyRewriteRows = new List<int>();   // dòng có SP để update nhưng cột G (Tên đã sửa) còn trống
+        for (var r = start; r <= end; r++)
+        {
+            var row = ws.Row(r);
+            // Cột = 0 ("không dùng") → đọc rỗng, KHÔNG gọi Cell(0) (ClosedXML 1-based, Cell(0) ném lỗi).
+            var link = _settings.LinkColumn > 0 ? row.Cell(_settings.LinkColumn).GetString().Trim() : "";
+            var price = _settings.PriceColumn > 0 ? row.Cell(_settings.PriceColumn).GetString().Trim() : "";
+            var sku = _settings.SkuColumn > 0 ? row.Cell(_settings.SkuColumn).GetString().Trim() : "";
+            var colE = _settings.ItemIdColumn > 0 ? row.Cell(_settings.ItemIdColumn).GetString().Trim() : "";
+            var rewritten = row.Cell(_settings.RewrittenNameColumn).GetString().Trim();   // Tên đã sửa (đã validate > 0)
+
+            var rowId = !string.IsNullOrWhiteSpace(colE) ? colE : (ExtractShopeeId(link) ?? "");
+            if (string.IsNullOrWhiteSpace(rowId)) continue;
+
+            // YÊU CẦU cột G: nếu trống → thu lại để DỪNG script (ép chạy "Update tên SP (AI)" trước,
+            // KHÔNG dùng tên gốc cột F).
+            if (string.IsNullOrWhiteSpace(rewritten)) { emptyRewriteRows.Add(r); continue; }
+            map[rowId] = new WorkbookRecord(link, sku, rewritten, price, r);
+        }
+
+        if (emptyRewriteRows.Count > 0)
+        {
+            var preview = string.Join(", ", emptyRewriteRows.Take(10));
+            throw new InvalidOperationException(
+                $"DỪNG: cột G (Tên đã sửa) còn TRỐNG ở {emptyRewriteRows.Count} dòng (vd dòng {preview}). " +
+                "Hãy chạy \"Update tên SP (AI)\" trước để điền cột G, rồi mới Update product.");
+        }
+
+        _records = map;
+    }
+
+    // ── outer loop ──
+    private async Task OuterLoopAsync(IPage page, CancellationToken ct)
+    {
+        var listingErrorStreak = 0;
+        var clickBlockedStreak = 0;
+        var clickBlockedTotal = 0;
+        var emptyWaitSeconds = Math.Max(3, _settings.ListingReloadSeconds);
+
+        while (!ct.IsCancellationRequested)
+        {
+            await WaitIfNotPausedAsync(ct).ConfigureAwait(false);
+            if (page.IsClosed) break;
+
+            try
+            {
+                if (!await GoToListingPageAsync(page, true))
+                {
+                    listingErrorStreak++;
+                    await DelayAsync(Math.Min(5 + listingErrorStreak, 15) * 1000, ct);
+                    if (listingErrorStreak >= 5) break;
+                    continue;
+                }
+                listingErrorStreak = 0;
+
+                var (result, terminal) = await RunFirstListingRowAsync(page, ct, () => clickBlockedStreak,
+                    s => clickBlockedStreak = s, () => clickBlockedTotal, t => clickBlockedTotal = t).ConfigureAwait(false);
+
+                if (terminal) { _log("Dừng script (lỗi edit hoặc Shopee chặn captcha)."); break; }
+
+                switch (result)
+                {
+                    case null:
+                    case "exhausted":
+                        await DelayAsync(emptyWaitSeconds * 1000, ct);
+                        break;
+                    case "retry":
+                        await DelayAsync(1200, ct);
+                        break;
+                    default:
+                        await DelayAsync(800, ct);
+                        break;
+                }
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                listingErrorStreak++;
+                if ((ex.Message ?? "").Contains("closed", StringComparison.OrdinalIgnoreCase)) break;
+                await DelayAsync(Math.Min(5 + listingErrorStreak, 15) * 1000, ct);
+                try { await GoToListingPageAsync(page, false); } catch { }
+                if (listingErrorStreak >= 5) break;
+            }
+        }
+    }
+
+    // result string ("ok"/"deleted"/"retry"/"skipped"/"exhausted"/null), terminal flag
+    private async Task<(string? result, bool terminal)> RunFirstListingRowAsync(
+        IPage page, CancellationToken ct,
+        Func<int> getStreak, Action<int> setStreak, Func<int> getTotal, Action<int> setTotal)
+    {
+        var rows = page.Locator(ListingRows);
+        var count = await rows.CountAsync();
+        if (count == 0) return (null, false);
+
+        for (var i = 0; i < count; i++)
+        {
+            ct.ThrowIfCancellationRequested();
+            var row = rows.Nth(i);
+            try { await row.WaitForAsync(new() { Timeout = 15000 }); } catch { continue; }
+
+            var editLink = row.Locator(ListingEditButton).First;
+            if (await editLink.CountAsync() == 0) continue;
+
+            var rowKey = await DraftRowKeyAsync(row);
+            var editId = await row.GetAttributeAsync(ListingRowKeyAttr) ?? "";
+
+            if (_skippedRowKeys.Contains(rowKey) || (!string.IsNullOrEmpty(editId) && _skippedEditIds.Contains(editId)))
+            {
+                await DeleteListingRowAsync(row);
+                continue;
+            }
+
+            // SONG SONG: giành quyền xử lý dòng này; lane khác đang giữ → bỏ qua (không mở/không xóa).
+            if (_claim is not null && !_claim.TryClaim(rowKey)) continue;
+
+            var res = await RunListingRowAsync(page, row, editLink, rowKey, editId, ct,
+                getStreak, setStreak, getTotal, setTotal).ConfigureAwait(false);
+            // Lỗi TẠM (retry) → trả lại claim để lane/loop sau thử lại; còn lại (ok/deleted/skipped) giữ claim.
+            if (_claim is not null && res.result == "retry") _claim.Release(rowKey);
+            return res;
+        }
+        return ("exhausted", false);
+    }
+
+    private async Task<(string? result, bool terminal)> RunListingRowAsync(
+        IPage page, ILocator row, ILocator editLink, string rowKey, string editId, CancellationToken ct,
+        Func<int> getStreak, Action<int> setStreak, Func<int> getTotal, Action<int> setTotal)
+    {
+        IPage? editPage = null;
+        var keepEditOpen = false;
+        try
+        {
+            var newPage = await _context!.RunAndWaitForPageAsync(async () =>
+            {
+                try { await editLink.ClickAsync(new() { Timeout = 10000 }); }
+                catch (Exception ex) when ((ex.Message ?? "").Contains("intercept", StringComparison.OrdinalIgnoreCase)
+                                          || (ex.Message ?? "").Contains("timeout", StringComparison.OrdinalIgnoreCase))
+                {
+                    await DismissBlockingModalAsync(page);
+                    await editLink.ClickAsync(new() { Timeout = 10000 });
+                }
+            });
+            editPage = newPage;
+            await editPage.WaitForLoadStateAsync(LoadState.DOMContentLoaded, new() { Timeout = 30000 });
+            await DelayAsync(2000, ct);
+
+            var actualEditId = ExtractEditId(editPage.Url);
+            // "skipped" phải nạp rowKey vào skipped → vòng sau KHÔNG chọn lại dòng này (tránh treo bám row #0).
+            if (string.IsNullOrEmpty(actualEditId))
+            {
+                if (!string.IsNullOrEmpty(rowKey)) _skippedRowKeys.Add(rowKey);
+                return ("skipped", false);
+            }
+            if (_skippedEditIds.Contains(actualEditId))
+            {
+                if (!string.IsNullOrEmpty(rowKey)) _skippedRowKeys.Add(rowKey);
+                return ("skipped", false);
+            }
+
+            // SONG SONG — claim TẦNG 2 theo edit-id thật: phòng 2 dòng draft khác nhau cùng trỏ 1 SP
+            // → lane khác đang sửa đúng SP này thì bỏ qua (đóng tab ở finally, KHÔNG xóa).
+            if (_claim is not null && !_claim.TryClaim($"edit:{actualEditId}"))
+            {
+                // Nạp rowKey vào skipped để vòng sau XÓA dòng draft trùng này — nếu không, dòng vẫn nằm
+                // ở listing, lane cứ bám row #0 quét lại mỗi vòng → không tiến/không kết thúc (treo).
+                if (!string.IsNullOrEmpty(rowKey)) _skippedRowKeys.Add(rowKey);
+                return ("skipped", false);
+            }
+
+            var (status, record) = await InspectEditPageAsync(editPage, ct).ConfigureAwait(false);
+            if (status != "needs_update")
+            {
+                _log($"  ↳ {status} → xóa dòng listing.");
+                await DeleteListingRowAsync(row);
+                if (!string.IsNullOrEmpty(actualEditId)) _skippedEditIds.Add(actualEditId);
+                if (!string.IsNullOrEmpty(rowKey)) _skippedRowKeys.Add(rowKey);
+                return ("deleted", false);
+            }
+
+            var ok = await ProcessProductAsync(editPage, record!, ct).ConfigureAwait(false);
+            if (!ok)
+            {
+                // Lỗi TẠM (AI rỗng/mạng) → để dòng lại, thử vòng sau, TUYỆT ĐỐI KHÔNG xóa (tránh mất SP).
+                if (_lastProcessTransient) { _log("  ↳ lỗi tạm (AI) → để lại dòng, thử lại sau."); _claim?.Release($"edit:{actualEditId}"); return ("retry", false); }
+                var failKey = $"shopee:{record!.LineIndex}/edit:{actualEditId}/row:{rowKey}";
+                var fails = _failCounts.TryGetValue(failKey, out var c) ? c + 1 : 1;
+                _failCounts[failKey] = fails;
+                if (fails < 2) { _claim?.Release($"edit:{actualEditId}"); return ("retry", false); }
+                await DeleteListingRowAsync(row);
+                _skippedEditIds.Add(actualEditId);
+                if (!string.IsNullOrEmpty(rowKey)) _skippedRowKeys.Add(rowKey);
+                return ("deleted", false);
+            }
+
+            _skippedEditIds.Add(actualEditId);
+            if (!string.IsNullOrEmpty(rowKey)) _skippedRowKeys.Add(rowKey);
+            _log($"✅ HOÀN TẤT XỬ LÝ SKU: {record.Sku}");
+            return ("ok", false);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            var msg = ex.Message ?? "";
+            if (msg.Contains("intercepts pointer events", StringComparison.OrdinalIgnoreCase) ||
+                msg.Contains("ant-modal", StringComparison.OrdinalIgnoreCase))
+            {
+                setStreak(getStreak() + 1);
+                setTotal(getTotal() + 1);
+                if (getTotal() >= 9) { keepEditOpen = true; return (null, true); }
+                await DismissBlockingModalAsync(page);
+                if (getStreak() >= 3) { await GoToListingPageAsync(page, true); setStreak(0); }
+                return ("retry", false);
+            }
+            _log($"  ↳ Lỗi không phục hồi: {msg}");
+            keepEditOpen = true;
+            return (null, true);
+        }
+        finally
+        {
+            if (!keepEditOpen && editPage is not null)
+            {
+                await ClosePageAcceptingDialogAsync(editPage);
+                try { await page.BringToFrontAsync(); } catch { }
+            }
+        }
+    }
+
+    // ── inspect ──
+    private async Task<(string status, WorkbookRecord? record)> InspectEditPageAsync(IPage editPage, CancellationToken ct)
+    {
+        // wait_for_edit_page_ready
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            try
+            {
+                await editPage.WaitForLoadStateAsync(LoadState.DOMContentLoaded, new() { Timeout = 12000 });
+                await editPage.WaitForSelectorAsync(SourceLinkInput, new() { State = WaitForSelectorState.Visible, Timeout = 12000 });
+                break;
+            }
+            catch
+            {
+                if (attempt == 1) break;
+                try { await editPage.ReloadAsync(new() { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 30000 }); } catch { }
+                await DelayAsync(3000, ct);
+            }
+        }
+
+        string inputVal = "";
+        try { inputVal = await editPage.Locator(SourceLinkInput).InputValueAsync(new() { Timeout = 3000 }); } catch { }
+
+        string clip = "";
+        try
+        {
+            var copyBtn = editPage.Locator(SourceLinkCopyButton).First;
+            await _context!.GrantPermissionsAsync(new[] { "clipboard-read", "clipboard-write" },
+                new() { Origin = "https://www.bigseller.com" });
+            await copyBtn.ClickAsync(new() { Timeout = 5000 });
+            await DelayAsync(1000, ct);
+            clip = await editPage.EvaluateAsync<string>("() => navigator.clipboard.readText()");
+        }
+        catch { }
+
+        string? shopeeId = null;
+        foreach (var url in new[] { inputVal, clip })
+        {
+            if (string.IsNullOrWhiteSpace(url)) continue;
+            if (url.Contains("/verify/captcha") || url.Contains("/verify/traffic"))
+                return ("shopee_blocked", null);
+            shopeeId ??= ExtractShopeeId(url);
+        }
+
+        if (string.IsNullOrEmpty(shopeeId)) return ("missing_shopee_id", null);
+        if (!_records.TryGetValue(shopeeId, out var rec)) return ("not_in_xlsx", null);
+        if (string.IsNullOrWhiteSpace(rec.ProductName)) return ("missing_product_name", null);
+        return ("needs_update", rec);
+    }
+
+    // ── process one product ──
+    private async Task<bool> ProcessProductAsync(IPage page, WorkbookRecord rec, CancellationToken ct)
+    {
+        _lastProcessTransient = false;
+        // [1] name — CẮT ≤120 ký tự (giới hạn Shopee, tránh BigSeller báo lỗi), giữ SKU ở cuối.
+        // fill fail KHÔNG làm rớt cả SP (giữ tên cũ, vẫn lưu phần còn lại như Python).
+        var nameToFill = TruncateProductNamePreservingSku(rec.ProductName, rec.Sku, MaxProductNameChars);
+        var rawLen = (rec.ProductName ?? "").Trim().Length;
+        if (rawLen > MaxProductNameChars)
+            _log($"  ✂ Tên dài {rawLen} ký tự → cắt còn {nameToFill.Length} (≤{MaxProductNameChars}, giữ SKU).");
+        if (!await FillProductNameAsync(page, nameToFill, ct))
+            _log("  ⚠ Không điền được tên SP — giữ tên cũ, tiếp tục xử lý.");
+
+        // [2] md5 sync
+        try
+        {
+            var md5 = page.Locator(Md5Button).First;
+            if (await md5.IsVisibleAsync())
+            {
+                await md5.ScrollIntoViewIfNeededAsync();
+                await md5.ClickAsync();
+                try { await page.Locator(Md5CompleteStatus).First.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 10000 }); } catch { }
+                await CloseVisibleAntModalAsync(page, 5000);
+            }
+        }
+        catch { }
+
+        // [3] radio "Tải lên hình ảnh"
+        try
+        {
+            var r = page.Locator(UploadImageRadioWrapper).Filter(new() { HasTextString = "Tải lên hình ảnh" }).First;
+            if (await r.IsVisibleAsync()) await r.ClickAsync();
+        }
+        catch { }
+
+        // [4] parent SKU
+        try
+        {
+            var s = page.Locator(ParentSkuInput);
+            if (await s.IsVisibleAsync())
+            {
+                await s.FillAsync(rec.Sku);
+                await s.EvaluateAsync("el => el.dispatchEvent(new Event('input', {bubbles:true}))");
+            }
+        }
+        catch { }
+
+        // [5] brand
+        try { await SelectNoBrandAsync(page, ct); } catch { }
+
+        // [6] variation SKUs
+        await ForEachVisibleAsync(page.Locator(VariationSkuInputs), async el =>
+        {
+            await el.ScrollIntoViewIfNeededAsync();
+            await el.FillAsync(rec.Sku);
+            await el.EvaluateAsync("el => el.dispatchEvent(new Event('input', {bubbles:true}))");
+            await el.EvaluateAsync("el => el.blur()");
+        });
+
+        // [7] stock (skip if 0)
+        await ForEachVisibleAsync(page.Locator(VariationStockInputs), async el =>
+        {
+            var cur = ParseDigits(await el.InputValueAsync());
+            if (cur == 0) return;
+            await el.FillAsync(StockValue);
+            await el.EvaluateAsync("el => el.dispatchEvent(new Event('input', {bubbles:true}))");
+            await el.EvaluateAsync("el => el.blur()");
+        });
+
+        // [8] price
+        var newPrice = ParsePrice(rec.Price);
+        await ForEachVisibleAsync(page.Locator(VariationPriceInputs), async el =>
+        {
+            await el.ScrollIntoViewIfNeededAsync();
+            await el.FillAsync(newPrice);
+            await el.EvaluateAsync("el => el.dispatchEvent(new Event('input', {bubbles:true}))");
+            await el.EvaluateAsync("el => el.blur()");
+        });
+
+        // [9] shipping "Nhanh"
+        try
+        {
+            var ship = page.Locator(ShippingFastWrapper).Filter(new() { HasTextString = "Nhanh" }).First;
+            if (await ship.IsVisibleAsync())
+            {
+                await ship.ScrollIntoViewIfNeededAsync();
+                if (await ship.Locator(ShippingCheckedMark).CountAsync() == 0) await ship.ClickAsync();
+            }
+        }
+        catch { }
+
+        // [10] weight
+        try
+        {
+            var w = page.Locator(WeightInput);
+            if (await w.IsVisibleAsync())
+            {
+                await w.ScrollIntoViewIfNeededAsync();
+                await w.FillAsync(WeightValue);
+                await w.EvaluateAsync("el => el.dispatchEvent(new Event('input', {bubbles:true}))");
+                await w.EvaluateAsync("el => el.blur()");
+            }
+        }
+        catch { }
+
+        // video discovery
+        var videoPath = ResolveVideoPath(rec.Sku);
+
+        // [10.5] upload video (non-fatal, 3 attempts)
+        if (videoPath != null)
+        {
+            for (var attempt = 0; attempt < 3; attempt++)
+            {
+                try { if (await UploadVideoAsync(page, videoPath, ct)) break; } catch { }
+                await DelayAsync(3000, ct);
+            }
+        }
+
+        // [11] image (non-fatal)
+        var imagePath = _settings.ImagePath;
+        if (!string.IsNullOrWhiteSpace(imagePath) && File.Exists(imagePath))
+        {
+            try { await UploadImageWithRetryAsync(page, imagePath, 3, ct); } catch { }
+        }
+
+        // [12.1] AI description — rỗng sau retry = LỖI TẠM → retry vòng sau, KHÔNG xóa dòng (tránh mất SP).
+        var aiContent = await GenerateDescriptionAsync(rec.ProductName, ct).ConfigureAwait(false);
+        if (string.IsNullOrWhiteSpace(aiContent)) { _lastProcessTransient = true; return false; }
+        if (!await UpdateDescriptionAsync(page, aiContent, ct)) return false;
+
+        // [12.2] save
+        return await SaveWithImageRetryAsync(page, imagePath, 3, ct).ConfigureAwait(false);
+    }
+
+    // ── [1] fill name ──
+    private async Task<bool> FillProductNameAsync(IPage page, string name, CancellationToken ct)
+    {
+        var target = (name ?? "").Trim();
+        if (string.IsNullOrEmpty(target)) return false;
+
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            try
+            {
+                await page.EvaluateAsync("window.scrollTo(0, 0)");
+                await page.WaitForSelectorAsync(ProductNameInput, new() { State = WaitForSelectorState.Visible, Timeout = 15000 });
+                var input = page.Locator(ProductNameInput).First;
+                await input.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 15000 });
+
+                if ((await input.InputValueAsync()).Trim() == target) return true;
+
+                await input.ScrollIntoViewIfNeededAsync();
+                await input.ClickAsync(new() { Timeout = 15000 });
+                await input.FillAsync(target, new() { Timeout = 15000 });
+                await input.EvaluateAsync("el => el.dispatchEvent(new Event('input', { bubbles: true }))");
+                await page.Keyboard.PressAsync("Space");
+                await page.Keyboard.PressAsync("Backspace");
+                await DelayAsync(300, ct);
+                if ((await input.InputValueAsync()).Trim() == target) return true;
+            }
+            catch
+            {
+                await DelayAsync(2000, ct);
+                try { await page.ReloadAsync(new() { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 30000 }); } catch { }
+                await DelayAsync(2000, ct);
+            }
+        }
+        return false;
+    }
+
+    // ── [5] brand ──
+    private async Task SelectNoBrandAsync(IPage page, CancellationToken ct)
+    {
+        var box = await FirstVisibleAsync(page.Locator(BrandBoxXPath1), page.Locator(BrandBoxXPath2), page.Locator(BrandBoxCss));
+        if (box is null) return;
+
+        if (await IsNoBrandSelectedAsync(box)) return;
+
+        await box.ScrollIntoViewIfNeededAsync();
+        await box.ClickAsync(new() { Force = true });
+        await DelayAsync(400, ct);
+
+        var search = await FirstVisibleAsync(page.Locator(BrandSearchInput1), page.Locator(BrandSearchInput2));
+        if (search is not null)
+        {
+            try { await search.FillAsync("No brand"); }
+            catch
+            {
+                await page.Keyboard.PressAsync("Control+A");
+                await page.Keyboard.PressAsync("Backspace");
+                await search.TypeAsync("No brand", new() { Delay = 30 });
+            }
+        }
+
+        try { await page.WaitForSelectorAsync(BrandDropdownReady, new() { State = WaitForSelectorState.Visible, Timeout = 10000 }); } catch { }
+
+        var clicked = false;
+        foreach (var sel in BrandOptions)
+        {
+            var opts = page.Locator(sel);
+            var n = await opts.CountAsync();
+            for (var i = 0; i < n; i++)
+            {
+                var opt = opts.Nth(i);
+                if (!await opt.IsVisibleAsync()) continue;
+                var txt = (await opt.InnerTextAsync()) ?? "";
+                if (!NoBrandRegex.IsMatch(txt.Trim())) continue;
+                await opt.ClickAsync(new() { Force = true });
+                clicked = true;
+                break;
+            }
+            if (clicked) break;
+        }
+        if (!clicked) await page.Keyboard.PressAsync("Enter");
+
+        // verify ≤5s
+        for (var i = 0; i < 20; i++)
+        {
+            if (await IsNoBrandSelectedAsync(box)) return;
+            await DelayAsync(250, ct);
+        }
+    }
+
+    private static async Task<bool> IsNoBrandSelectedAsync(ILocator box)
+    {
+        string val;
+        try { val = await box.Locator(BrandSelectedValue).First.InnerTextAsync(new() { Timeout = 1000 }); }
+        catch { try { val = await box.InnerTextAsync(); } catch { val = ""; } }
+        return Normalize(val).Replace(" ", "") == "nobrand";
+    }
+
+    // ── video ──
+    private string? ResolveVideoPath(string sku)
+    {
+        var folder = _settings.VideoFolder;
+        if (string.IsNullOrWhiteSpace(folder)) return null;
+        var candidate = Path.Combine(folder, sku + ".mp4");
+        if (!File.Exists(candidate)) return null;
+        var dur = Mp4Duration.TryGetSeconds(candidate);
+        if (dur != null && dur >= 60) return null; // bỏ video dài
+        return candidate;
+    }
+
+    private async Task<bool> UploadVideoAsync(IPage page, string videoPath, CancellationToken ct)
+    {
+        if (!File.Exists(videoPath)) return false;
+        var dur = Mp4Duration.TryGetSeconds(videoPath);
+        if (dur != null && dur >= 60) return false;
+
+        var opt = await OpenLocalVideoUploadOptionAsync(page, ct);
+        if (opt is null) return false;
+
+        var fc = await page.RunAndWaitForFileChooserAsync(async () => await opt.ClickAsync(), new() { Timeout = 10000 });
+        await fc.SetFilesAsync(videoPath);
+
+        for (var i = 0; i < 60; i++)
+        {
+            var ok = page.Locator(VideoSuccessSignal).First;
+            if (await ok.CountAsync() > 0 && await ok.IsVisibleAsync()) return true;
+            if (await DetectVideoUploadErrorAsync(page)) return false;
+            await DelayAsync(1000, ct);
+        }
+        return false;
+    }
+
+    private async Task<ILocator?> OpenLocalVideoUploadOptionAsync(IPage page, CancellationToken ct)
+    {
+        await page.Keyboard.PressAsync("Escape");
+        await DelayAsync(500, ct);
+        var addBtn = page.Locator(AddVideoButton).First;
+        if (await addBtn.CountAsync() == 0) return null;
+        await addBtn.ScrollIntoViewIfNeededAsync();
+        await DelayAsync(500, ct);
+
+        for (var i = 0; i < 3; i++)
+        {
+            try { await addBtn.HoverAsync(); } catch { }
+            await DelayAsync(1000, ct);
+            var opt = page.Locator(UploadLocalVideoOpt).First;
+            if (await opt.CountAsync() > 0)
+            {
+                try { await opt.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 5000 }); return opt; } catch { }
+            }
+            try { await addBtn.ClickAsync(new() { Force = true }); } catch { }
+            await DelayAsync(1000, ct);
+        }
+        return null;
+    }
+
+    private async Task<bool> DetectVideoUploadErrorAsync(IPage page)
+    {
+        foreach (var sel in VideoErrSels)
+        {
+            try
+            {
+                var loc = page.Locator(sel);
+                var n = await loc.CountAsync();
+                for (var i = 0; i < n; i++)
+                {
+                    var txt = Normalize(await loc.Nth(i).InnerTextAsync());
+                    foreach (var kw in new[] { "that bai", "khong thanh cong", "loi", "fail", "failed", "error", "qua", "khong ho tro" })
+                        if (txt.Contains(kw)) return true;
+                }
+            }
+            catch { }
+        }
+        return false;
+    }
+
+    // ── image ──
+    private async Task<bool> UploadImageWithRetryAsync(IPage page, string imagePath, int maxAttempts, CancellationToken ct)
+    {
+        for (var attempt = 0; attempt < maxAttempts; attempt++)
+        {
+            try
+            {
+                if (await IsImageUploadedAsync(page)) return true;
+                var box = page.Locator(ImageGalleryBox).First;
+                await box.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 5000 });
+                await box.ScrollIntoViewIfNeededAsync();
+                await box.ClickAsync();
+                var menuItem = page.Locator(ImageUploadMenuItem).First;
+                await menuItem.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 5000 });
+                var fc = await page.RunAndWaitForFileChooserAsync(async () => await menuItem.ClickAsync(), new() { Timeout = 5000 });
+                await fc.SetFilesAsync(imagePath);
+                var uploaded = page.Locator(ImageUploadedImg).First;
+                await uploaded.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 5000 });
+                var src = await uploaded.GetAttributeAsync("src");
+                if (!string.IsNullOrWhiteSpace(src)) return true;
+            }
+            catch { }
+            await DelayAsync(2500, ct);
+        }
+        return false;
+    }
+
+    private static async Task<bool> IsImageUploadedAsync(IPage page)
+    {
+        try
+        {
+            var img = page.Locator(ImageUploadedImg).First;
+            if (await img.CountAsync() == 0 || !await img.IsVisibleAsync()) return false;
+            return !string.IsNullOrWhiteSpace(await img.GetAttributeAsync("src"));
+        }
+        catch { return false; }
+    }
+
+    // ── AI description ──
+    private async Task<string> GenerateDescriptionAsync(string productName, CancellationToken ct)
+    {
+        var cfg = AiConfigStore.Shared.Current;
+        // Parity Python: temperature 0.6 + ràng buộc độ dài trong user prompt (tránh vượt 3000 bị cắt cứng/reject).
+        var userPrompt =
+            $"Tên sản phẩm: {productName}\n" +
+            $"Giới hạn bắt buộc: TỐI ĐA {MaxDescriptionChars} ký tự, nên trong khoảng {TargetDescriptionMinChars}–{TrimmedDescriptionMaxChars} ký tự.";
+        for (var attempt = 1; attempt <= 3; attempt++)
+        {
+            try
+            {
+                _log($"🤖 Đang tạo mô tả AI cho: {productName}" + (attempt > 1 ? $" (lần {attempt})" : ""));
+                var content = TrimDescriptionForShopee(
+                    await AiChat.CompleteAsync(cfg, cfg.EffectiveDescriptionPrompt, userPrompt, ct, 0.6, 4096).ConfigureAwait(false));
+                if (!string.IsNullOrWhiteSpace(content))
+                {
+                    _log($"✅ Đã tạo mô tả: {content.Length} ký tự");
+                    return content;
+                }
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (AiHttpException ex) when (ex.IsPermanent)
+            {
+                // Key sai / hết quota / model sai → lỗi cấu hình: retry vô ích. Ném ra để DỪNG hẳn run
+                // (báo lỗi rõ) thay vì coi là "lỗi tạm" → lặp mở/đóng tab + đập endpoint AI vô hạn.
+                _log($"✖ Lỗi AI không thể phục hồi ({ex.StatusCode}) — dừng. Kiểm tra OpenAI API key/quota/model trong Cài đặt.");
+                throw;
+            }
+            catch (Exception ex) { _log($"⚠ Lỗi tạo mô tả AI (lần {attempt}): {ex.Message}"); }
+            if (attempt < 3) await DelayAsync(1500 * attempt, ct);
+        }
+        return "";   // 3 lần vẫn rỗng → coi là LỖI TẠM (transient), KHÔNG xóa dòng (xử lý ở ProcessProduct).
+    }
+
+    private async Task<bool> UpdateDescriptionAsync(IPage page, string aiContent, CancellationToken ct)
+    {
+        aiContent = TrimDescriptionForShopee(aiContent);
+        var ta = page.Locator(DescriptionTextarea);
+        if (!await ta.IsVisibleAsync()) return false;
+        await ta.ScrollIntoViewIfNeededAsync();
+        await ta.ClickAsync();
+        await ta.EvaluateAsync("el => el.value = ''");
+        await ta.FillAsync("");
+        await ta.FillAsync(aiContent);
+        await ta.EvaluateAsync("el => el.dispatchEvent(new Event('input', {bubbles:true}))");
+        await ta.EvaluateAsync("el => el.blur()");
+        await DelayAsync(1000, ct);
+
+        try
+        {
+            var cb = page.Locator(DescriptionCountBox).First;
+            var txt = await cb.InnerTextAsync();
+            var first = txt.Split('/')[0];
+            if (int.TryParse(new string(first.Where(char.IsDigit).ToArray()), out var cnt) && cnt > MaxDescriptionChars)
+                return false;
+        }
+        catch { }
+        return true;
+    }
+
+    // ── [12.2] save ──
+    private async Task<bool> SaveWithImageRetryAsync(IPage page, string? imagePath, int maxAttempts, CancellationToken ct)
+    {
+        var wrapper = page.Locator(SaveButtonWrapper);
+        if (!await wrapper.IsVisibleAsync()) return false;
+        var hasImage = !string.IsNullOrWhiteSpace(imagePath) && File.Exists(imagePath);
+
+        for (var attempt = 0; attempt < maxAttempts; attempt++)
+        {
+            try
+            {
+                if (hasImage && !await IsImageUploadedAsync(page))
+                {
+                    if (!await UploadImageWithRetryAsync(page, imagePath!, 1, ct))
+                    {
+                        if (attempt == maxAttempts - 1) return false;
+                        await DelayAsync(2500, ct);
+                        continue;
+                    }
+                }
+
+                await wrapper.ScrollIntoViewIfNeededAsync();
+                await wrapper.HoverAsync();
+                await DelayAsync(1000, ct);
+
+                var opt = page.Locator(SaveOption);
+                if (await opt.IsVisibleAsync()) await opt.ClickAsync(new() { Force = true });
+                else await wrapper.Locator("button").First.ClickAsync();
+
+                var err = await DetectSaveErrorAsync(page, 4000);
+                if (err == "brand") { await SelectNoBrandAsync(page, ct); await DelayAsync(2500, ct); continue; }
+                if (err == "other")
+                {
+                    if (hasImage) await UploadImageWithRetryAsync(page, imagePath!, 1, ct);
+                    await DelayAsync(2500, ct);
+                    continue;
+                }
+
+                try
+                {
+                    var confirm = page.Locator(ConfirmPrimaryBtn);
+                    await confirm.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 5000 });
+                    await confirm.ClickAsync();
+                    var err2 = await DetectSaveErrorAsync(page, 4000);
+                    if (err2 == "brand") { await SelectNoBrandAsync(page, ct); await DelayAsync(2500, ct); continue; }
+                    if (err2 == "other") { if (hasImage) await UploadImageWithRetryAsync(page, imagePath!, 1, ct); await DelayAsync(2500, ct); continue; }
+                }
+                catch
+                {
+                    if (hasImage && (!await IsImageUploadedAsync(page) || await page.Locator(ImageUploadMenuItem).First.IsVisibleAsync()))
+                    {
+                        await UploadImageWithRetryAsync(page, imagePath!, 1, ct);
+                        await DelayAsync(2500, ct);
+                        continue;
+                    }
+                }
+
+                if (await WaitForSaveSuccessAsync(page, 60000))
+                {
+                    await ClosePageAcceptingDialogAsync(page);
+                    return true;
+                }
+            }
+            catch { }
+            await DelayAsync(2500, ct);
+        }
+        return false;
+    }
+
+    private async Task<string?> DetectSaveErrorAsync(IPage page, int timeoutMs)
+    {
+        var deadline = timeoutMs;
+        var step = 400;
+        while (deadline > 0)
+        {
+            foreach (var sel in SaveErrSels)
+            {
+                try
+                {
+                    var loc = page.Locator(sel).First;
+                    if (await loc.CountAsync() == 0) continue;
+                    var txt = Normalize(await loc.InnerTextAsync());
+                    if (txt.Contains("brand cannot be empty")) return "brand";
+                    if (txt.Contains("bieu do kich co khong duoc de trong")) return "other";
+                }
+                catch { }
+            }
+            await DelayAsync(step, CancellationToken.None);
+            deadline -= step;
+        }
+        return null;
+    }
+
+    private async Task<bool> WaitForSaveSuccessAsync(IPage page, int timeoutMs)
+    {
+        var deadline = timeoutMs;
+        var step = 250;
+        while (deadline > 0)
+        {
+            try
+            {
+                var title = Normalize(await SafeInnerTextAsync(page.Locator(SuccessTitle).First));
+                var body = Normalize(await SafeInnerTextAsync(page.Locator(SuccessBody).First));
+                var close = Normalize(await SafeInnerTextAsync(page.Locator(SuccessClose).First));
+                if (title.Contains("thao tac thanh cong") || Regex.IsMatch(title, @"^\s*successfully\s*$", RegexOptions.IgnoreCase) ||
+                    body.Contains("de trinh") || body.Contains("thao tac thanh cong") ||
+                    Regex.IsMatch(body, "pending by shopee", RegexOptions.IgnoreCase) ||
+                    Regex.IsMatch(body, @"publishing\s*/\s*failed\s*/\s*active", RegexOptions.IgnoreCase) ||
+                    Regex.IsMatch(close, "close this page", RegexOptions.IgnoreCase))
+                    return true;
+            }
+            catch { }
+            await DelayAsync(step, CancellationToken.None);
+            deadline -= step;
+        }
+        return false;
+    }
+
+    // ── helpers ──
+    private async Task<string> DraftRowKeyAsync(ILocator row)
+    {
+        var key = await row.GetAttributeAsync(ListingRowKeyAttr);
+        if (!string.IsNullOrEmpty(key)) return $"key:{key}";
+        try
+        {
+            var txt = (await row.InnerTextAsync()) ?? "";
+            txt = Regex.Replace(txt, @"\s+", " ").Trim();
+            if (txt.Length > 200) txt = txt[..200];
+            return $"txt:{txt}";
+        }
+        catch { return "txt:"; }
+    }
+
+    private async Task DeleteListingRowAsync(ILocator row)
+    {
+        try
+        {
+            ILocator? btn = null;
+            foreach (var sel in new[] { DeleteBtn1, DeleteBtn2, DeleteBtn3 })
+            {
+                var loc = row.Locator(sel).First;
+                if (await loc.CountAsync() > 0 && await loc.IsVisibleAsync()) { btn = loc; break; }
+            }
+            if (btn is null) return;
+            await btn.ClickAsync();
+            await DelayAsync(500, CancellationToken.None);
+
+            var confirm = row.Page;
+            var confirmBtns = confirm.Locator(".ant-modal-confirm-btns button").Filter(new() { HasTextString = "Xóa" }).First;
+            if (await confirmBtns.CountAsync() > 0) await confirmBtns.ClickAsync();
+            else { var p = confirm.Locator(DeleteConfirmPrimary).First; if (await p.CountAsync() > 0) await p.ClickAsync(); }
+            await DelayAsync(2000, CancellationToken.None);
+        }
+        catch { }
+    }
+
+    private async Task DismissBlockingModalAsync(IPage page)
+    {
+        try
+        {
+            if (await page.Locator(BlockingModalVisible).CountAsync() > 0)
+            {
+                foreach (var sel in DismissBtns)
+                {
+                    var loc = page.Locator(sel).First;
+                    if (await loc.CountAsync() > 0 && await loc.IsVisibleAsync()) { await loc.ClickAsync(); return; }
+                }
+            }
+            await page.Keyboard.PressAsync("Escape");
+        }
+        catch { }
+    }
+
+    private async Task CloseVisibleAntModalAsync(IPage page, int timeoutMs)
+    {
+        var deadline = timeoutMs;
+        while (deadline > 0)
+        {
+            if (await page.Locator(CloseModalAny).CountAsync() == 0) return;
+            var clicked = false;
+            foreach (var sel in CloseModalSels)
+            {
+                var loc = page.Locator(sel);
+                var n = await loc.CountAsync();
+                for (var i = n - 1; i >= 0; i--)
+                {
+                    var el = loc.Nth(i);
+                    if (!await el.IsVisibleAsync()) continue;
+                    try { await el.ClickAsync(); clicked = true; } catch { }
+                    break;
+                }
+                if (clicked) break;
+            }
+            if (!clicked) { try { await page.Keyboard.PressAsync("Escape"); } catch { } }
+            await page.WaitForTimeoutAsync(300);
+            deadline -= 300;
+        }
+    }
+
+    private static async Task ClosePageAcceptingDialogAsync(IPage page)
+    {
+        try
+        {
+            page.Dialog += async (_, d) => { try { await d.AcceptAsync(); } catch { } };
+            await page.CloseAsync(new() { RunBeforeUnload = true });
+        }
+        catch { try { await page.CloseAsync(); } catch { } }
+    }
+
+    private async Task ForEachVisibleAsync(ILocator locator, Func<ILocator, Task> action)
+    {
+        var n = await locator.CountAsync();
+        for (var i = 0; i < n; i++)
+        {
+            var el = locator.Nth(i);
+            try { if (await el.IsVisibleAsync()) await action(el); } catch { }
+        }
+    }
+
+    private static async Task<ILocator?> FirstVisibleAsync(params ILocator[] locators)
+    {
+        foreach (var loc in locators)
+        {
+            try
+            {
+                var n = await loc.CountAsync();
+                for (var i = 0; i < n; i++)
+                {
+                    var el = loc.Nth(i);
+                    if (await el.IsVisibleAsync()) return el;
+                }
+            }
+            catch { }
+        }
+        return null;
+    }
+
+    private static async Task<string> SafeInnerTextAsync(ILocator loc)
+    {
+        try { return await loc.CountAsync() > 0 ? await loc.InnerTextAsync(new() { Timeout = 500 }) : ""; }
+        catch { return ""; }
+    }
+
+    private IPage? PickListingPage(IBrowserContext context)
+    {
+        foreach (var p in context.Pages)
+            if (IsDraftPage(p.Url)) return p;
+        foreach (var p in context.Pages)
+            if ((p.Url ?? "").Contains("bigseller.com", StringComparison.OrdinalIgnoreCase)) return p;
+        return context.Pages.FirstOrDefault();
+    }
+
+    private static bool IsDraftPage(string? url)
+    {
+        var u = (url ?? "").Replace(" ", "").ToLowerInvariant();
+        return u.Contains("bigseller.com/web/listing/shopee/") && !u.Contains("/edit/") && u.Contains("bsstatus=1");
+    }
+
+    private async Task<bool> GoToListingPageAsync(IPage page, bool forceReload)
+    {
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            try
+            {
+                if (IsDraftPage(page.Url) && !forceReload)
+                {
+                    try { await page.WaitForSelectorAsync(ListingReadySelector, new() { State = WaitForSelectorState.Visible, Timeout = 3000 }); return true; } catch { }
+                }
+
+                if (IsDraftPage(page.Url) && forceReload)
+                    await page.ReloadAsync(new() { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 30000 });
+                else
+                    await page.GotoAsync(ListingUrl, new() { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 30000 });
+
+                await DelayAsync(1500, CancellationToken.None);
+                await page.WaitForSelectorAsync(ListingReadySelector, new() { State = WaitForSelectorState.Visible, Timeout = 10000 });
+                await DelayAsync(1000, CancellationToken.None);
+                return true;
+            }
+            catch
+            {
+                try { await BigSellerCrawlHelper.StopPageLoadingAsync(page); } catch { }
+                await DelayAsync(3000, CancellationToken.None);
+            }
+        }
+        return false;
+    }
+
+    // ── string utils ──
+    private static string Normalize(string? s)
+    {
+        s ??= "";
+        s = s.Normalize(NormalizationForm.FormD);
+        var sb = new StringBuilder();
+        foreach (var c in s)
+        {
+            var cat = CharUnicodeInfo.GetUnicodeCategory(c);
+            if (cat == UnicodeCategory.NonSpacingMark) continue;
+            if (c == 'đ' || c == 'Đ') { sb.Append('d'); continue; }
+            sb.Append(char.ToLowerInvariant(c));
+        }
+        return Regex.Replace(sb.ToString(), @"\s+", " ").Trim();
+    }
+
+    private static int ParseDigits(string? s)
+    {
+        var digits = new string((s ?? "").Where(char.IsDigit).ToArray());
+        return int.TryParse(digits, out var v) ? v : 0;
+    }
+
+    private static string ParsePrice(string? s)
+    {
+        var cleaned = new string((s ?? "").Where(c => char.IsDigit(c) || c == '.').ToArray());
+        if (string.IsNullOrEmpty(cleaned)) return "0";
+        if (double.TryParse(cleaned, NumberStyles.Any, CultureInfo.InvariantCulture, out var d))
+            return ((long)Math.Round(d)).ToString(CultureInfo.InvariantCulture);
+        return new string(cleaned.Where(char.IsDigit).ToArray());
+    }
+
+    private static string? ExtractEditId(string? url)
+    {
+        var m = EditIdRegex.Match(url ?? "");
+        return m.Success ? m.Groups[1].Value : null;
+    }
+
+    private static string? ExtractShopeeId(string? url)
+    {
+        url ??= "";
+        if (url.Contains("/verify/captcha") || url.Contains("/verify/traffic")) return null;
+        foreach (var pat in new[] { @"i\.\d+\.(\d+)", @"product/\d+/(\d+)", @"i\.\d+\.(\d+)\?" })
+        {
+            var m = Regex.Match(url, pat);
+            if (m.Success) return m.Groups[1].Value;
+        }
+        return null;
+    }
+
+    private static string TrimDescriptionForShopee(string? content)
+    {
+        var text = (content ?? "").Replace("\r\n", "\n").Replace("\r", "\n").Trim();
+        if (text.Length <= MaxDescriptionChars) return text;
+
+        var targetMax = Math.Min(TrimmedDescriptionMaxChars, MaxDescriptionChars);
+        var clipped = text[..targetMax].TrimEnd();
+        var lowerBound = Math.Min(TargetDescriptionMinChars, Math.Max(0, targetMax - 220));
+
+        foreach (var sep in new[] { "\n\n", "\n", ". ", "! ", "? " })
+        {
+            var pos = clipped.LastIndexOf(sep, StringComparison.Ordinal);
+            if (pos >= lowerBound)
+            {
+                var end = pos + (sep is ". " or "! " or "? " ? 1 : 0);
+                return clipped[..end].Trim();
+            }
+        }
+        var sp = clipped.LastIndexOf(' ');
+        if (sp >= lowerBound) return clipped[..sp].Trim();
+        return clipped.Trim();
+    }
+
+    // Cắt tên SP về tối đa maxLength ký tự, ƯU TIÊN giữ SKU ở cuối (bỏ bớt từ ở thân). Parity name-rewrite.
+    private static string TruncateProductNamePreservingSku(string? productName, string? sku, int maxLength)
+    {
+        var name = (productName ?? "").Trim();
+        sku = (sku ?? "").Trim();
+        if (name.Length <= maxLength) return name;
+
+        if (!string.IsNullOrWhiteSpace(sku) && name.EndsWith(sku, StringComparison.Ordinal))
+        {
+            var body = name[..^sku.Length].Trim();
+            var words = body.Split(' ', StringSplitOptions.RemoveEmptyEntries).ToList();
+            while (words.Count > 0)
+            {
+                var candidate = $"{string.Join(" ", words)} {sku}".Trim();
+                if (candidate.Length <= maxLength) return candidate;
+                words.RemoveAt(words.Count - 1);
+            }
+            return sku.Length <= maxLength ? sku : sku[..maxLength].Trim();
+        }
+
+        var allWords = name.Split(' ', StringSplitOptions.RemoveEmptyEntries).ToList();
+        while (allWords.Count > 0)
+        {
+            var candidate = string.Join(" ", allWords).Trim();
+            if (candidate.Length <= maxLength) return candidate;
+            allWords.RemoveAt(allWords.Count - 1);
+        }
+        return name[..Math.Min(maxLength, name.Length)].Trim();
+    }
+
+    private void StartBrave()
+    {
+        Directory.CreateDirectory(_settings.ProfileDir);
+        var args = string.Join(" ", new[]
+        {
+            $"--remote-debugging-port={_settings.DebugPort}",
+            $"--user-data-dir=\"{_settings.ProfileDir}\"",
+            "--no-first-run", "--no-default-browser-check", "--no-session-restore",
+            "--restore-last-session=false", "--disable-session-crashed-bubble",
+            "--start-maximized", "--window-size=1920,1080",
+            "--disable-gpu", "--disable-dev-shm-usage", "--disable-software-rasterizer",
+            $"\"{ListingUrl}\"",
+        });
+        _log("Mở Brave BigSeller profile...");
+        _braveProcess = Process.Start(new ProcessStartInfo
+        {
+            FileName = _settings.BravePath, Arguments = args, UseShellExecute = false,
+        });
+    }
+
+    private Task WaitIfNotPausedAsync(CancellationToken ct) =>
+        _pauseToken?.WaitWhileRunningAsync(ct) ?? Task.CompletedTask;
+
+    private Task DelayAsync(int ms, CancellationToken ct) =>
+        _pauseToken?.DelayAsync(ms, ct) ?? Task.Delay(ms, ct);
+
+    public async ValueTask DisposeAsync()
+    {
+        // Lưu cookie CHỈ lane 0 (tránh lane phụ đá token) + TIMEOUT (Brave có thể treo → không để chặn việc kill).
+        if (_exportCookie && _braveProcess is { HasExited: false })
+        {
+            try
+            {
+                await Task.WhenAny(
+                    BigSellerCookieImporter.TryExportProfileCookiesToFileAsync(
+                        _settings.DebugPort, _settings.BigSellerCookieFile, _log, verifySessionAlive: true),
+                    Task.Delay(6000)).ConfigureAwait(false);
+            }
+            catch { }
+        }
+
+        // KILL Brave NGAY (đóng profile + giải phóng RAM) — KHÔNG phụ thuộc dispose browser/playwright (có thể treo).
+        if (_braveProcess is not null)
+        {
+            try { if (!_braveProcess.HasExited) _braveProcess.Kill(entireProcessTree: true); } catch { }
+            try { _braveProcess.Dispose(); } catch { }
+            _braveProcess = null;
+        }
+        // Fallback: Brave hay fork browser thật rồi để stub thoát ngay → _braveProcess.HasExited=true,
+        // Kill ở trên no-op, browser thật thành orphan (giữ profile lock + RAM). Diệt theo --user-data-dir.
+        try { BraveProcessReaper.KillByUserDataDir(_settings.ProfileDir, _log); } catch { }
+
+        if (_browser is not null)
+        {
+            try { await Task.WhenAny(_browser.DisposeAsync().AsTask(), Task.Delay(3000)).ConfigureAwait(false); } catch { }
+            _browser = null;
+        }
+        try { _playwright?.Dispose(); } catch { }
+        _playwright = null;
+    }
+}

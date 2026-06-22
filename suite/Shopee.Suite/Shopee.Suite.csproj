@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Shopee.Suite</RootNamespace>
+    <AssemblyName>ShopeeSuite</AssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.3.2" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Shopee.Core\Shopee.Core.csproj" />
+    <ProjectReference Include="..\Shopee.Module.CheckAccount\Shopee.Module.CheckAccount.csproj" />
+    <ProjectReference Include="..\Shopee.Module.MultiBrave\Shopee.Module.MultiBrave.csproj" />
+    <ProjectReference Include="..\Shopee.Module.Search\Shopee.Module.Search.csproj" />
+    <ProjectReference Include="..\Shopee.Module.UpdateProduct\Shopee.Module.UpdateProduct.csproj" />
+  </ItemGroup>
+
+  <!-- ════ Gói kèm extension vào output để app tự chứa (chạy máy khác không cần repo) ════
+       - extensions/shopee-scrape/ → extensions/shopee-scrape/ (Brave, cho Scrape)
+       - extensions/shopee-search/ → extensions/shopee-search/ (Edge, cho Search)
+       (Update product = C# Playwright thuần, KHÔNG còn Python.) -->
+  <PropertyGroup>
+    <RepoRoot>$(MSBuildProjectDirectory)\..\..</RepoRoot>
+  </PropertyGroup>
+  <ItemGroup>
+    <BraveExtFiles Include="$(RepoRoot)\extensions\shopee-scrape\**\*" />
+    <EdgeExtFiles Include="$(RepoRoot)\extensions\shopee-search\**\*" />
+  </ItemGroup>
+  <Target Name="BundleSuiteAssets" AfterTargets="Build">
+    <Copy SourceFiles="@(BraveExtFiles)" DestinationFiles="@(BraveExtFiles->'$(OutDir)extensions\shopee-scrape\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(EdgeExtFiles)" DestinationFiles="@(EdgeExtFiles->'$(OutDir)extensions\shopee-search\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+  </Target>
+  <Target Name="BundleSuiteAssetsPublish" AfterTargets="Publish">
+    <Copy SourceFiles="@(BraveExtFiles)" DestinationFiles="@(BraveExtFiles->'$(PublishDir)extensions\shopee-scrape\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(EdgeExtFiles)" DestinationFiles="@(EdgeExtFiles->'$(PublishDir)extensions\shopee-search\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+  </Target>
+</Project>

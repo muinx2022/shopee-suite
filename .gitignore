@@ -1,0 +1,20 @@
+# Build output
+[Bb]in/
+[Oo]bj/
+publish/
+*.user
+.vs/
+
+# Runtime data (profile trình duyệt, db, cache — tạo lại khi chạy)
+persistent-data/
+*.db
+*.db-shm
+*.db-wal
+
+# Rider / VS
+.idea/
+*.suo
+
+# Logs / temp
+*.log
+*.tmp

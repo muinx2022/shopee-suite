@@ -1,0 +1,56 @@
+<Application
+    x:Class="Shopee.Suite.App"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:vm="clr-namespace:Shopee.Suite.ViewModels"
+    xmlns:ca="clr-namespace:Shopee.Suite.Modules.CheckAccount"
+    xmlns:acc="clr-namespace:Shopee.Suite.Modules.Accounts"
+    xmlns:bs="clr-namespace:Shopee.Suite.Modules.BigSeller"
+    xmlns:scr="clr-namespace:Shopee.Suite.Modules.Scrape"
+    xmlns:srch="clr-namespace:Shopee.Suite.Modules.Search"
+    xmlns:upd="clr-namespace:Shopee.Suite.Modules.UpdateProduct"
+    xmlns:settings="clr-namespace:Shopee.Suite.Modules.Settings"
+    xmlns:conv="clr-namespace:Shopee.Suite.Infrastructure"
+    xmlns:views="clr-namespace:Shopee.Suite.Views"
+    StartupUri="MainWindow.xaml">
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="Themes/Theme.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+
+            <conv:BoolToVisibilityConverter x:Key="BoolToVis" />
+            <conv:InverseBoolToVisibilityConverter x:Key="InverseBoolToVis" />
+            <conv:CountToVisibilityConverter x:Key="CountToVis" />
+
+            <!-- ViewModel-first navigation: mỗi ViewModel map sang View tương ứng. -->
+            <DataTemplate DataType="{x:Type acc:AccountsViewModel}">
+                <acc:AccountsView />
+            </DataTemplate>
+            <DataTemplate DataType="{x:Type bs:BigSellerViewModel}">
+                <bs:BigSellerView />
+            </DataTemplate>
+            <DataTemplate DataType="{x:Type scr:ScrapeViewModel}">
+                <scr:ScrapeView />
+            </DataTemplate>
+            <DataTemplate DataType="{x:Type srch:SearchViewModel}">
+                <srch:SearchView />
+            </DataTemplate>
+            <DataTemplate DataType="{x:Type upd:UpdateProductViewModel}">
+                <upd:UpdateProductView />
+            </DataTemplate>
+            <DataTemplate DataType="{x:Type settings:SettingsViewModel}">
+                <settings:SettingsView />
+            </DataTemplate>
+            <DataTemplate DataType="{x:Type ca:CheckAccountViewModel}">
+                <ca:CheckAccountView />
+            </DataTemplate>
+            <DataTemplate DataType="{x:Type vm:WelcomeViewModel}">
+                <views:WelcomeView />
+            </DataTemplate>
+            <DataTemplate DataType="{x:Type vm:ComingSoonViewModel}">
+                <views:ComingSoonView />
+            </DataTemplate>
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>

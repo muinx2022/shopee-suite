@@ -1,0 +1,206 @@
+using System.Collections.ObjectModel;
+using System.IO;
+using System.Windows;
+using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
+using Microsoft.Win32;
+using Shopee.Core.BigSeller;
+using Shopee.Core.Infrastructure;
+
+namespace Shopee.Suite.Modules.BigSeller;
+
+/// <summary>
+/// Mục "BigSeller" dùng chung (Scrape + Update Product). Quản lý kho <see cref="BigSellerStore"/>:
+/// tài khoản BigSeller + workbook + danh sách shop (mỗi shop 1 sheet) + đăng nhập lấy cookie chung.
+/// </summary>
+public sealed partial class BigSellerViewModel : ObservableObject
+{
+    public ObservableCollection<BigSellerAccountItemViewModel> Items { get; } = [];
+
+    public ObservableCollection<string> LoginLog { get; } = [];
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasSelection))]
+    [NotifyCanExecuteChangedFor(nameof(DeleteCommand), nameof(LoginCommand), nameof(AddShopCommand))]
+    private BigSellerAccountItemViewModel? _selected;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasShopSelection))]
+    private BigSellerShopViewModel? _selectedShop;
+
+    public bool HasSelection => Selected is not null;
+    public bool HasShopSelection => SelectedShop is not null;
+
+    [ObservableProperty] private string _status = "";
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsIdle))]
+    [NotifyCanExecuteChangedFor(nameof(LoginCommand), nameof(StopLoginCommand))]
+    private bool _isLoggingIn;
+
+    public bool IsIdle => !IsLoggingIn;
+
+    private CancellationTokenSource? _loginCts;
+
+    public BigSellerViewModel() => Reload();
+
+    private void Reload()
+    {
+        Items.Clear();
+        foreach (var a in BigSellerStore.Shared.Accounts)
+            Items.Add(new BigSellerAccountItemViewModel(a));
+        Status = $"{Items.Count} tài khoản BigSeller.";
+    }
+
+    [RelayCommand]
+    private void Add()
+    {
+        var model = new BigSellerAccount { Label = "BigSeller mới" };
+        BigSellerStore.Shared.Add(model);
+        var vm = new BigSellerAccountItemViewModel(model);
+        Items.Add(vm);
+        Selected = vm;
+        Status = $"{Items.Count} tài khoản BigSeller.";
+    }
+
+    [RelayCommand(CanExecute = nameof(HasSelection))]
+    private void Delete()
+    {
+        if (Selected is null) return;
+        if (Dialogs.Show($"Xóa tài khoản BigSeller \"{Selected.DisplayName}\"?", "Xóa",
+                MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+            return;
+        BigSellerStore.Shared.Remove(Selected.Model.Id);
+        Items.Remove(Selected);
+        Selected = Items.FirstOrDefault();
+        Status = $"{Items.Count} tài khoản BigSeller.";
+    }
+
+    [RelayCommand]
+    private void Save()
+    {
+        BigSellerStore.Shared.Save();
+        Status = "Đã lưu cấu hình BigSeller.";
+    }
+
+    [RelayCommand]
+    private void BrowseWorkbook()
+    {
+        if (Selected is null) return;
+        var dlg = new OpenFileDialog { Filter = "Excel|*.xlsx;*.xlsm|Tất cả|*.*", Title = "Chọn workbook" };
+        if (dlg.ShowDialog() == true)
+        {
+            Selected.WorkbookPath = dlg.FileName;
+            Save();
+            Status = $"Workbook có {Selected.SheetOptions.Count} sheet.";
+        }
+    }
+
+    [RelayCommand]
+    private void BrowseCookie()
+    {
+        if (Selected is null) return;
+        var dlg = new SaveFileDialog
+        {
+            Filter = "JSON|*.json", Title = "File cookie BigSeller",
+            FileName = string.IsNullOrWhiteSpace(Selected.CookieFile) ? "bigseller-cookies.json" : Path.GetFileName(Selected.CookieFile),
+            OverwritePrompt = false,
+        };
+        if (dlg.ShowDialog() == true)
+        {
+            Selected.CookieFile = dlg.FileName;
+            Save();
+        }
+    }
+
+    [RelayCommand]
+    private void RefreshSheets()
+    {
+        if (Selected is null) return;
+        Selected.RefreshSheets();
+        Status = $"Workbook có {Selected.SheetOptions.Count} sheet.";
+    }
+
+    [RelayCommand(CanExecute = nameof(HasSelection))]
+    private void AddShop()
+    {
+        if (Selected is null) return;
+        SelectedShop = Selected.AddShop();
+        Save();
+    }
+
+    [RelayCommand]
+    private void RemoveShop()
+    {
+        if (Selected is null || SelectedShop is null) return;
+        Selected.RemoveShop(SelectedShop);
+        SelectedShop = Selected.Shops.FirstOrDefault();
+        Save();
+    }
+
+    // ── Đăng nhập BigSeller (lấy cookie chung) ──────────────────────────────────
+
+    [RelayCommand(CanExecute = nameof(CanLogin))]
+    private async Task LoginAsync()
+    {
+        if (Selected is null) return;
+
+        // Mặc định file cookie nếu chưa đặt.
+        if (string.IsNullOrWhiteSpace(Selected.CookieFile))
+        {
+            Selected.CookieFile = Path.Combine(
+                SuitePaths.ModuleDir("shared"), "bigseller-cookies", Selected.Model.Id + ".json");
+            Save();
+        }
+
+        IsLoggingIn = true;
+        LoginLog.Clear();
+        _loginCts = new CancellationTokenSource();
+        var cookieFile = Selected.CookieFile;
+        var account = Selected;
+        try
+        {
+            // Profile Brave RIÊNG theo từng tài khoản (theo Id) → mỗi tk BigSeller 1 phiên/cookie độc
+            // lập, không bị "đăng nhập vào tk cũ" do dùng chung profile.
+            var profileDir = Path.Combine(SuitePaths.ModuleDir("bigseller-login"), account.Model.Id);
+
+            // Lưu cookie xong, cửa sổ Brave GIỮ NGUYÊN — chỉ đóng khi bấm Dừng. onSaved báo ngay
+            // khi vừa lưu (lúc cửa sổ còn đang mở) để UI cập nhật trạng thái cookie tức thì.
+            var ok = await BigSellerLoginRunner.RunLoginAsync(
+                cookieFile, profileDir, AppendLog, _loginCts.Token, () => OnLoginSaved(account));
+            account.NotifyCookieChanged();
+            Status = ok ? "Đăng nhập BigSeller thành công." : "Chưa lấy được cookie BigSeller.";
+        }
+        finally
+        {
+            IsLoggingIn = false;
+            _loginCts.Dispose();
+            _loginCts = null;
+        }
+    }
+
+    /// <summary>Gọi từ luồng nền của runner ngay khi cookie vừa được lưu (cửa sổ vẫn mở).</summary>
+    private void OnLoginSaved(BigSellerAccountItemViewModel account)
+    {
+        void Apply()
+        {
+            account.NotifyCookieChanged();
+            Status = "✔ Đã lưu cookie — cửa sổ vẫn mở, bấm Dừng khi xong.";
+        }
+        var d = Application.Current?.Dispatcher;
+        if (d is null || d.CheckAccess()) Apply();
+        else d.BeginInvoke(Apply);
+    }
+
+    private bool CanLogin() => HasSelection && IsIdle;
+
+    [RelayCommand(CanExecute = nameof(IsLoggingIn))]
+    private void StopLogin() => _loginCts?.Cancel();
+
+    private void AppendLog(string text)
+    {
+        var d = Application.Current?.Dispatcher;
+        if (d is null || d.CheckAccess()) LoginLog.Add(text);
+        else d.BeginInvoke(() => LoginLog.Add(text));
+    }
+}
