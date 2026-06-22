@@ -331,10 +331,17 @@ public sealed class BraveManager(AppSettingsService appSettings)
 
     private static async Task<(string? Proxy, string? Error)> FetchKiotProxyAsync(string key, string proxyType)
     {
-        // CHỈ /current (KHÔNG /new): để IP lúc đăng nhập Shopee TRÙNG IP lúc search (cùng key) → tránh
-        // captcha. /new ép xoay IP → login-IP ≠ search-IP → Shopee bắn captcha + dễ mất phiên.
+        // ƯU TIÊN /current: giữ IP hiện hành của key (sống ~30') → login Shopee và search DÙNG CHUNG 1 IP
+        // → tránh captcha do nhảy IP. CHỈ /new khi /current chưa có proxy (key chưa kích hoạt / hết hạn) —
+        // /new gán IP mới một lần, các lần sau /current dùng lại. KHÔNG gọi /new mỗi lần (sẽ ép xoay IP).
         var currentUrl = $"https://api.kiotproxy.com/api/v1/proxies/current?key={Uri.EscapeDataString(key)}";
-        return await TryFetchKiotProxyAsync(currentUrl, proxyType);
+        var current = await TryFetchKiotProxyAsync(currentUrl, proxyType);
+        if (current.Proxy is not null)
+            return current;
+
+        var newUrl = $"https://api.kiotproxy.com/api/v1/proxies/new?key={Uri.EscapeDataString(key)}&region=random";
+        var fresh = await TryFetchKiotProxyAsync(newUrl, proxyType);
+        return fresh.Proxy is not null ? fresh : (null, fresh.Error ?? current.Error);
     }
 
     private static async Task<(string? Proxy, string? Error)> TryFetchKiotProxyAsync(

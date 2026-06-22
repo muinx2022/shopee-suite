@@ -1159,27 +1159,33 @@ internal sealed class BraveInstanceSession : IDisposable
             Dictionary<string, object> proxy;
             try
             {
-                // LUÔN dùng /current (IP hiện tại của key, ổn định tới khi Kiot tự xoay ~30'). KHÔNG gọi
-                // /new: ép xoay IP mỗi launch khiến login-IP ≠ scrape-IP → Shopee bắn captcha + hủy session.
-                // Proxy chết mà chưa xoay → throw (avoidFingerprint) → kết thúc run → ScrapeRunner cooldown
-                // + đổi tk khác (đúng flow: proxy lỗi thì nghỉ tk đó, không xoay IP). preferFresh chỉ còn
-                // ảnh hưởng nhịp delay retry phía dưới, không còn ép /new.
+                // ƯU TIÊN /current: giữ IP hiện hành của key (KiotProxy gán qua /new, sống ~30') → login
+                // và scrape DÙNG CHUNG 1 IP trong cửa sổ 30' → tránh captcha do nhảy IP. KHÔNG gọi /new
+                // mỗi launch (sẽ ép xoay IP → login-IP ≠ scrape-IP).
                 proxy = await GetCurrentProxyAsync();
             }
-            catch (Exception ex)
+            catch (Exception curEx) when (IsProxyExpiredError(curEx.Message))
             {
-                lastError = ex;
+                // /current chưa có proxy (key CHƯA kích hoạt lần nào / IP đã hết hạn 30') → /new gán IP
+                // mới MỘT LẦN; các launch sau trong 30' lại dùng /current cùng IP đó.
                 try
                 {
-                    proxy = await GetCurrentProxyAsync();
+                    proxy = await GetProxyAsync();
                 }
-                catch (Exception currentEx)
+                catch (Exception newEx)
                 {
-                    lastError = currentEx;
+                    lastError = newEx;
                     if (attempt < maxAttempts)
                         await Task.Delay(preferFresh ? 10_000 : 2_000).ConfigureAwait(false);
                     continue;
                 }
+            }
+            catch (Exception ex)
+            {
+                lastError = ex;
+                if (attempt < maxAttempts)
+                    await Task.Delay(preferFresh ? 10_000 : 2_000).ConfigureAwait(false);
+                continue;
             }
 
             var proxyServer = BuildProxyServer(proxy, _config!.ProxyType);

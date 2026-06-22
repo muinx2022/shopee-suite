@@ -228,9 +228,12 @@ public sealed partial class AccountsViewModel : ObservableObject
             return a.ManualProxy.Contains("://") ? a.ManualProxy.Trim() : "http://" + a.ManualProxy.Trim();
         if (!string.IsNullOrWhiteSpace(a.KiotProxyKey))
         {
-            // Dùng /current (KHÔNG /new): để IP lúc kiểm tra/đăng nhập TRÙNG với IP lúc scrape (cùng key).
-            // /new ép xoay IP → lần scrape sau IP khác → Shopee bắn captcha lại.
+            // ƯU TIÊN /current để IP lúc kiểm tra/đăng nhập TRÙNG IP lúc scrape (cùng key, sống ~30').
+            // CHỈ /new khi /current chưa có proxy (key chưa kích hoạt / hết hạn) — gán IP mới một lần,
+            // các lần sau /current dùng lại. KHÔNG /new mỗi lần (sẽ xoay IP → scrape sau IP khác → captcha).
             var r = await KiotProxyClient.FetchCurrentAsync(a.KiotProxyKey, default, a.ProxyType);
+            if (r.Proxy is null)
+                r = await KiotProxyClient.FetchNewAsync(a.KiotProxyKey, default, a.ProxyType);
             return r.Proxy;
         }
         return null;
