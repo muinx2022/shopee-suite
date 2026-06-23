@@ -36,7 +36,7 @@
                     <Button Content="↻ Tải lại" Command="{Binding ReloadCommand}" />
                     <Button Style="{StaticResource SuccessButton}" Content="▶  Chạy (reset)" MinWidth="130" Margin="10,0,0,0" Command="{Binding RunCommand}"
                             ToolTip="Chạy lại TỪ ĐẦU — xoá tiến độ đã lưu của các tk BigSeller được tick." />
-                    <Button Content="⏯  Tiếp tục" MinWidth="110" Margin="10,0,0,0" Command="{Binding ResumeCommand}"
+                    <Button Style="{StaticResource PrimaryButton}" Content="⏯  Tiếp tục" MinWidth="110" Margin="10,0,0,0" Command="{Binding ResumeCommand}"
                             ToolTip="Chỉ chạy các dòng CÒN THIẾU theo tiến độ đã lưu." />
                     <Button Style="{StaticResource DangerButton}" Content="■  Dừng" MinWidth="90" Margin="10,0,0,0" Command="{Binding StopCommand}" />
                 </StackPanel>

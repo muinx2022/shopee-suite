@@ -60,6 +60,23 @@
                                 </DataGridTextColumn.ElementStyle>
                             </DataGridTextColumn>
                             <DataGridTextColumn Header="Proxy" Binding="{Binding ProxySummary}" Width="1.2*" />
+                            <DataGridTextColumn Header="Tình trạng" Binding="{Binding UsageStatus}" Width="0.9*">
+                                <DataGridTextColumn.ElementStyle>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="VerticalAlignment" Value="Center" />
+                                        <Setter Property="FontWeight" Value="SemiBold" />
+                                        <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding UsageStatus}" Value="Đang dùng">
+                                                <Setter Property="Foreground" Value="{StaticResource SuccessBrush}" />
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding UsageStatus}" Value="Đã dùng">
+                                                <Setter Property="Foreground" Value="{StaticResource AccentBrush}" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </DataGridTextColumn.ElementStyle>
+                            </DataGridTextColumn>
                             <DataGridTextColumn Header="Lỗi / captcha" Binding="{Binding LastError}" Width="1.6*">
                                 <DataGridTextColumn.ElementStyle>
                                     <Style TargetType="TextBlock">

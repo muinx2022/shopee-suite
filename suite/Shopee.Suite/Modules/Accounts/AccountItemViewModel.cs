@@ -70,6 +70,12 @@ public sealed class AccountItemViewModel : ObservableObject
     public string ProxySummary => Model.ProxySummary;
     public string LastError => Model.LastError ?? "";   // lý do dính captcha/lỗi (khi xem bộ lọc "Bị lỗi")
 
+    /// <summary>Tình trạng dùng tk theo lượt chạy hiện tại (Đang/Đã/Chưa dùng). Không chạy gì → "Chưa dùng".</summary>
+    public string UsageStatus => ShopeeAccountUsage.Shared.Status(Model.Id);
+
+    /// <summary>Báo UI làm mới cột Tình trạng (gọi khi ShopeeAccountUsage đổi).</summary>
+    public void RefreshUsage() => OnPropertyChanged(nameof(UsageStatus));
+
     private void OnChanged(params string[] names)
     {
         foreach (var n in names) OnPropertyChanged(n);

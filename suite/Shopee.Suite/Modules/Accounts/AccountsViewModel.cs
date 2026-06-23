@@ -60,6 +60,18 @@ public sealed partial class AccountsViewModel : ObservableObject
             if (d is null || d.CheckAccess()) Reload();
             else d.BeginInvoke(Reload);
         };
+        // Cột "Tình trạng" cập nhật khi Scrape/Search bắt đầu/kết thúc/mượn/nhả tk — chỉ refresh cột, không reload cả list.
+        ShopeeAccountUsage.Shared.Changed += () =>
+        {
+            var d = Application.Current?.Dispatcher;
+            if (d is null || d.CheckAccess()) RefreshUsageColumn();
+            else d.BeginInvoke(RefreshUsageColumn);
+        };
+    }
+
+    private void RefreshUsageColumn()
+    {
+        foreach (var it in Items) it.RefreshUsage();
     }
 
     private void Reload()

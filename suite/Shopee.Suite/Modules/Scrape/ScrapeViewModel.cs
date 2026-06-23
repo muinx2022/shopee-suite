@@ -138,6 +138,7 @@ public sealed partial class ScrapeViewModel : ObservableObject
         _session = session;
 
         IsBusy = true;
+        ShopeeAccountUsage.Shared.BeginRun();   // bật theo dõi tình trạng tk (cột "Tình trạng")
         LogLines.Clear();
         Instances.Clear();
         ErroredAccounts.Clear();
@@ -174,6 +175,7 @@ public sealed partial class ScrapeViewModel : ObservableObject
             _session = null;                                 // null TRƯỚC khi Dispose để StartOne kịp bail
             session.MasterCts.Dispose();
             IsBusy = false;
+            ShopeeAccountUsage.Shared.EndRun();             // hết lượt chạy → mọi tk về "Chưa dùng"
         }
     }
 
@@ -197,6 +199,7 @@ public sealed partial class ScrapeViewModel : ObservableObject
                         .ToList();
                     foreach (var x in slice) { s.Available.Remove(x); x.LastUsedTick = Interlocked.Increment(ref s.LruTick); }
                     s.BorrowedCount++;
+                    ShopeeAccountUsage.Shared.MarkInUse(slice.Select(a => a.Id));   // cột "Tình trạng": Đang dùng
                     return slice;
                 }
                 if (s.BorrowedCount == 0) return null;   // không ai đang giữ tk để trả + không đủ → bỏ cuộc
@@ -208,6 +211,7 @@ public sealed partial class ScrapeViewModel : ObservableObject
     private static void GiveBack(RunSession s, List<ShopeeAccount> slice)
     {
         lock (s.AllocLock) { s.Available.AddRange(slice.Where(a => !a.Disabled)); s.BorrowedCount--; }
+        ShopeeAccountUsage.Shared.MarkReleased(slice.Select(a => a.Id));   // cột "Tình trạng": Đã dùng
     }
 
     private async Task RunOneJobAsync(RunSession s, JobHandle h, bool resume)
@@ -299,6 +303,7 @@ public sealed partial class ScrapeViewModel : ObservableObject
                     }
                 }
                 if (acc is null) return Task.FromResult<ScrapeAccountSpec?>(null);   // hết tk trong kho
+                ShopeeAccountUsage.Shared.MarkInUse(acc.Id);   // cột "Tình trạng": Đang dùng
                 ScrapeProgressStore.Shared.AddReservedShopeeAccount(account.Id, sheet, acc.Id);
                 Log($"[{account.DisplayName}] ➕ mượn bù tk Shopee \"{acc.DisplayName}\" (thay tk dính captcha).");
                 OnUi(target.RefreshProgress);

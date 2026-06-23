@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Text.RegularExpressions;
+using Shopee.Core.Accounts;
 
 namespace ShopeeStatApp.Services;
 
@@ -79,13 +80,18 @@ public sealed class FileRunCoordinator
 
     public async Task RunAsync(CancellationToken ct)
     {
-        var workers = new List<Task>();
-        for (var lane = 1; lane <= _laneCount; lane++)
+        ShopeeAccountUsage.Shared.BeginRun();   // bật cột "Tình trạng" (Đang/Đã/Chưa dùng)
+        try
         {
-            var laneId = lane;
-            workers.Add(Task.Run(() => WorkerLoopAsync(laneId, ct), ct));
+            var workers = new List<Task>();
+            for (var lane = 1; lane <= _laneCount; lane++)
+            {
+                var laneId = lane;
+                workers.Add(Task.Run(() => WorkerLoopAsync(laneId, ct), ct));
+            }
+            await Task.WhenAll(workers);
         }
-        await Task.WhenAll(workers);
+        finally { ShopeeAccountUsage.Shared.EndRun(); }
     }
 
     /// <summary>Best-effort synchronous kill of every lane's Brave window (Stop / form close).</summary>
@@ -328,6 +334,7 @@ public sealed class FileRunCoordinator
             if (pick is not null)
             {
                 AccountUsed?.Invoke(pick.Id);
+                ShopeeAccountUsage.Shared.MarkInUse(pick.Id);
                 return pick;
             }
             await Task.Delay(500, ct);
@@ -352,6 +359,7 @@ public sealed class FileRunCoordinator
             if (rest)
                 _restUntilTick[account.Id] = Environment.TickCount64 + RestMillis;
         }
+        ShopeeAccountUsage.Shared.MarkReleased(account.Id);
     }
 
     // ── Link helpers ────────────────────────────────────────────────────────────
