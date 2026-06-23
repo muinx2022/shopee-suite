@@ -414,6 +414,8 @@ internal sealed class BraveInstanceSession : IDisposable
                         await Task.Delay(3500, loopToken).ConfigureAwait(false);
                         profileRoot = ResolveProfileRoot()
                             ?? throw new InvalidOperationException("Profile chưa sẵn sàng sau khi mở lại.");
+                        // Mở lại profile có thể mất cookie BigSeller trong phiên → nạp lại (tự bỏ qua nếu đã có).
+                        await ImportBigSellerCookiesIfConfiguredAsync(loopToken).ConfigureAwait(false);
                         proxyAttempt--;
                         continue;
                     }
@@ -1763,19 +1765,30 @@ internal sealed class BraveInstanceSession : IDisposable
         if (string.IsNullOrWhiteSpace(_bigSellerCookieFile) || !_running)
             return;
 
-        try
+        // Đã có muc_token sẵn trong profile (persist từ lần trước / chưa hết hạn) → khỏi nạp lại.
+        if (await BigSellerCookieImporter.HasAuthCookieInBrowserAsync(_cdpPort).ConfigureAwait(false))
+            return;
+
+        // Nạp + XÁC NHẬN có muc_token; thử lại tối đa 3 lần (import lần đầu hay flaky do CDP/page chưa
+        // sẵn sàng → trước đây nuốt lỗi 1 lần là instance đó dính "login bigseller first").
+        for (var attempt = 1; attempt <= 3 && !cancellationToken.IsCancellationRequested; attempt++)
         {
-            await BigSellerCookieImporter.ImportFromFileAsync(
-                _cdpPort, _bigSellerCookieFile, Log, cancellationToken).ConfigureAwait(false);
+            try
+            {
+                await BigSellerCookieImporter.ImportFromFileAsync(
+                    _cdpPort, _bigSellerCookieFile, Log, cancellationToken).ConfigureAwait(false);
+                if (await BigSellerCookieImporter.HasAuthCookieInBrowserAsync(_cdpPort).ConfigureAwait(false))
+                {
+                    if (attempt > 1) Log($"BigSeller cookie: đã xác nhận nạp (lần {attempt}).");
+                    return;
+                }
+                Log($"BigSeller cookie: chưa thấy muc_token sau khi nạp — thử lại ({attempt}/3)…");
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex) { Log($"BigSeller cookie (lần {attempt}): {ex.Message}"); }
+            await Task.Delay(1500, cancellationToken).ConfigureAwait(false);
         }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            Log($"BigSeller cookie: {ex.Message}");
-        }
+        Log("⚠ BigSeller cookie: KHÔNG nạp được muc_token sau 3 lần — instance này có thể bị 'login bigseller first'.");
     }
 
     private void SetStatus(string text)

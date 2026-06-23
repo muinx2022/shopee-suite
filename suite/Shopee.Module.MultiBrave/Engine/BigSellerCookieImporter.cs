@@ -27,6 +27,17 @@ internal static class BigSellerCookieImporter
         return all.Where(IsBigSellerCookie).ToList();
     }
 
+    /// <summary>Kiểm tra browser (qua CDP) đã CÓ cookie đăng nhập BigSeller (muc_token) chưa — để xác nhận import thành công.</summary>
+    public static async Task<bool> HasAuthCookieInBrowserAsync(int debugPort)
+    {
+        try
+        {
+            var cookies = await GetBigSellerCookiesAsync(debugPort).ConfigureAwait(false);
+            return HasAuthCookie(cookies);
+        }
+        catch { return false; }
+    }
+
     public static bool TryWriteCookieFile(
         string cookieFile,
         IReadOnlyCollection<Dictionary<string, object?>> bigSellerCookies,
