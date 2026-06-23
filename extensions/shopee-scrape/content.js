@@ -4,7 +4,8 @@
   }
   window.__shopee27052026ScrapeClickerInjected = true;
 
-  const MAX_WAIT_MS = 30_000;
+  const MAX_FIND_MS = 30_000;     // chờ nút scrape xuất hiện
+  const MAX_RESULT_MS = 60_000;   // chờ BigSeller báo kết quả sau khi click (scrape variant stock có thể lâu)
   const STEP_MS = 500;
 
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -119,6 +120,29 @@
     return Boolean(input?.checked);
   };
 
+  // Đọc kết quả BigSeller báo qua toast (.content_wrap > .icon.success|failed|waiting + h3). Tìm cả trong
+  // shadow DOM. Trả về { state, text } của toast NHẬN DẠNG ĐƯỢC mới nhất; null nếu chưa có toast.
+  const readBigSellerResult = (root) => {
+    let result = null;
+    const wraps = root.querySelectorAll?.(".content_wrap") || [];
+    for (const w of wraps) {
+      const icon = w.querySelector(".icon");
+      if (!icon) continue;
+      const text = (w.querySelector("h3")?.textContent || "").trim();
+      if (icon.classList.contains("success")) result = { state: "success", text };
+      else if (icon.classList.contains("failed")) result = { state: "failed", text };
+      else if (icon.classList.contains("waiting")) result = { state: "waiting", text };
+    }
+    if (result) return result;
+    for (const host of root.querySelectorAll?.("*") || []) {
+      if (host.shadowRoot) {
+        const found = readBigSellerResult(host.shadowRoot);
+        if (found) return found;
+      }
+    }
+    return null;
+  };
+
   const notify = async (detail) => {
     try {
       await chrome.runtime.sendMessage({ type: "SCRAPE_RESULT", detail });
@@ -126,28 +150,57 @@
   };
 
   const run = async () => {
-    const startedAt = Date.now();
-    while (Date.now() - startedAt < MAX_WAIT_MS) {
-      // Link đã scrape rồi → báo OK (không click) để launcher sang link kế, tránh reload lặp.
+    // Đã scrape trước đó → coi như xong, bỏ qua (tránh click lại gây reload lặp).
+    if (isAlreadyScraped(document)) {
+      await notify({ ok: true, alreadyScraped: true, message: "Link đã scrape trước đó — bỏ qua, sang link kế." });
+      return;
+    }
+
+    // 1) Chờ nút scrape xuất hiện rồi click.
+    const findDeadline = Date.now() + MAX_FIND_MS;
+    let button = null;
+    while (Date.now() < findDeadline) {
       if (isAlreadyScraped(document)) {
         await notify({ ok: true, alreadyScraped: true, message: "Link đã scrape trước đó — bỏ qua, sang link kế." });
         return;
       }
-      const button = searchInRoot(document);
-      if (button) {
-        await enableVariantStockScrape();
-        // Báo kết quả TRƯỚC khi click: click nút crawl của BigSeller thường reload trang,
-        // làm content script bị huỷ trước khi chrome.runtime.sendMessage gửi xong → background
-        // không nhận được SCRAPE_RESULT → timeout 15s rồi re-inject/click lại (vòng lặp
-        // "click scrape → chờ → reload → click scrape"). Gửi trước rồi mới click sẽ chắc chắn
-        // launcher nhận được tín hiệu dù trang có reload ngay sau đó.
-        await notify({ ok: true, message: "Đã click nút scrape BigSeller." });
-        button.click();
+      button = searchInRoot(document);
+      if (button) break;
+      await sleep(STEP_MS);
+    }
+    if (!button) {
+      await notify({ ok: false, message: "Không tìm thấy nút scrape." });
+      return;
+    }
+
+    await enableVariantStockScrape();
+    button.click();
+
+    // 2) Chờ BigSeller báo KẾT QUẢ THẬT (không báo xong trước khi scrape xong nữa).
+    const resultDeadline = Date.now() + MAX_RESULT_MS;
+    while (Date.now() < resultDeadline) {
+      const r = readBigSellerResult(document);
+      if (r) {
+        if (r.state === "success") {
+          await notify({ ok: true, message: "BigSeller: " + (r.text || "Successfully Scraped") });
+          return;
+        }
+        if (r.state === "failed") {
+          const low = (r.text || "").toLowerCase();
+          const needLogin = low.includes("log in") || low.includes("login") || low.includes("đăng nhập");
+          await notify({ ok: false, needLogin, message: "BigSeller: " + (r.text || "Failed") });
+          return;
+        }
+        // state === "waiting" → đang scrape, chờ tiếp.
+      }
+      // Có thể chuyển sang trạng thái đã-scraped mà không kịp thấy toast.
+      if (isAlreadyScraped(document)) {
+        await notify({ ok: true, alreadyScraped: true, message: "Đã scrape (phát hiện trạng thái scraped)." });
         return;
       }
       await sleep(STEP_MS);
     }
-    await notify({ ok: false, message: "Không tìm thấy nút scrape." });
+    await notify({ ok: false, message: "Hết giờ chờ kết quả BigSeller (có thể vẫn đang scrape)." });
   };
 
   run().catch(async (error) => {

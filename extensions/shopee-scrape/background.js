@@ -8,11 +8,10 @@
 const SCRAPE_SCRIPT = "content.js";
 const OVERLAY_SCRIPT = "overlay.js";
 const TAB_LOAD_TIMEOUT_MS = 30_000;
-// Phải >= MAX_WAIT_MS trong content.js (30s tìm nút scrape) + buffer. Nếu nhỏ hơn,
-// waiter ở background hết giờ TRƯỚC khi content.js kịp tìm thấy nút trên trang tải chậm
-// → hiện "Thử lại scrape (lần 1)" rồi inject lại oan, dù nút sắp xuất hiện. Để 33s cho
-// content.js dùng trọn 30s tìm nút, lần scrape đầu không bị retry giả.
-const SCRAPE_WAIT_TIMEOUT_MS = 33_000;
+// Phải >= MAX_FIND_MS (30s tìm nút) + MAX_RESULT_MS (60s chờ BigSeller báo kết quả) trong content.js
+// + buffer. content.js nay KHÔNG báo xong trước khi click nữa, mà CLICK rồi CHỜ toast kết quả thật
+// (success/failed/login first). Nếu waiter hết giờ trước → "Thử lại scrape (lần 1)" oan. Để 95s.
+const SCRAPE_WAIT_TIMEOUT_MS = 95_000;
 const CAPTCHA_WAIT_TIMEOUT_MS = 10 * 60_000;
 const CAPTCHA_CHECK_INTERVAL_MS = 2_000;
 const MAX_SCRAPE_RETRIES = 1;
