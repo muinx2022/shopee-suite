@@ -74,7 +74,7 @@
                                     </Grid.ColumnDefinitions>
                                     <!-- Click checkbox: toggle tick + chọn dòng (focusable). Click thân dòng:
                                          chọn dòng + tự tick (xem code-behind TargetRow_Click). -->
-                                    <CheckBox Grid.Column="0" IsChecked="{Binding IsSelected}" VerticalAlignment="Center" />
+                                    <CheckBox Grid.Column="0" IsChecked="{Binding IsSelected}" VerticalAlignment="Center" Click="Checkbox_Click" />
                                     <TextBlock Grid.Column="1" Text="{Binding DisplayName}" FontWeight="SemiBold" FontSize="13"
                                                VerticalAlignment="Center" Margin="8,0,0,0" TextTrimming="CharacterEllipsis" />
                                     <TextBlock Grid.Column="2" Text="{Binding CookieStatus}" VerticalAlignment="Center"

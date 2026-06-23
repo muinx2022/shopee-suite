@@ -180,12 +180,12 @@ public sealed class ScrapeRunner
                         }
                         else
                         {
-                            // Lỗi khác (proxy/đứt/tạm) → cooldown rồi tự quay lại. Nếu đã lỗi ≥2 lần liên tiếp
-                            // (nhiều khả năng proxy) → để dành tk này, MƯỢN tk khác chạy trước, lúc khác quay lại.
-                            var setAside = rotation.Cooldown(spec);
-                            InstanceLog?.Invoke(key, $"⏸ {spec.Label}: {res.Reason} → nghỉ {AccountRotation.CooldownSeconds}s rồi thử lại"
-                                + (setAside ? " (đã lỗi 2 lần — để dành, mượn tk khác chạy trước)." : "."));
-                            if (setAside) await RefillAsync($"thay {spec.Label} lỗi 2 lần").ConfigureAwait(false);
+                            // Lỗi khác (proxy/đứt/tạm) → cooldown rồi RETRY chính tk đó. Lần 1 nghỉ ngắn (15s);
+                            // lỗi ≥2 lần liên tiếp → nghỉ dài (90s) "để dành" cho tiến trình khác nhặt sau.
+                            // KHÔNG mượn tk khác cho proxy/lỗi-khác (mượn bù chỉ dành cho captcha).
+                            var cd = rotation.Cooldown(spec);
+                            InstanceLog?.Invoke(key, $"⏸ {spec.Label}: {res.Reason} → nghỉ {cd.Seconds}s rồi thử lại CÙNG tk"
+                                + (cd.SetAside ? " (lỗi 2 lần — để dành 90s cho tiến trình khác nhặt)." : "."));
                         }
                     }
                     else rotation.Release(spec);
@@ -381,8 +381,13 @@ public sealed class ScrapeRunner
     /// chạy trước, tk này quay lại sau cooldown). Hỗ trợ THÊM tk mượn bù vào vòng khi tk cũ hỏng.</summary>
     private sealed class AccountRotation
     {
-        public const int CooldownSeconds = 90;
-        private const int SetAsideAfterFails = 2;   // lỗi liên tiếp tới ngưỡng này → mượn tk khác chạy trước
+        // Proxy/lỗi-khác: lần 1 nghỉ ngắn rồi RETRY chính tk đó; lỗi liên tiếp tới ngưỡng → nghỉ dài
+        // "để dành" cho tiến trình khác nhặt sau. KHÔNG mượn tk khác (mượn bù chỉ dành cho captcha).
+        public const int ShortCooldownSeconds = 15;   // lần 1 — retry cùng tk
+        public const int LongCooldownSeconds = 90;    // lần 2+ — để dành
+        private const int SetAsideAfterFails = 2;     // lỗi liên tiếp tới ngưỡng này → nghỉ dài (để dành)
+
+        public readonly record struct CooldownResult(int Seconds, bool SetAside);
 
         private readonly List<ScrapeAccountSpec> _pool;
         private readonly HashSet<string> _busy = new(StringComparer.Ordinal);
@@ -441,16 +446,19 @@ public sealed class ScrapeRunner
             lock (_lock) { _busy.Remove(spec.Id); _cooldown.Remove(spec.Id); _quarantined.Add(spec.Id); }
         }
 
-        /// <summary>Proxy/lỗi khác: tạm nghỉ rồi tự quay lại vòng. Trả về true nếu đã lỗi ≥2 lần liên tiếp
-        /// (caller nên mượn tk khác chạy trước, tk này quay lại sau).</summary>
-        public bool Cooldown(ScrapeAccountSpec spec)
+        /// <summary>Proxy/lỗi khác: tạm nghỉ rồi tự quay lại vòng (RETRY cùng tk). Lần 1 nghỉ ngắn (15s);
+        /// lỗi ≥2 lần liên tiếp → nghỉ dài (90s) "để dành" cho tiến trình khác nhặt sau. Trả về số giây
+        /// nghỉ + cờ SetAside để caller log đúng. KHÔNG mượn tk khác (đó là việc của nhánh captcha).</summary>
+        public CooldownResult Cooldown(ScrapeAccountSpec spec)
         {
             lock (_lock)
             {
                 _busy.Remove(spec.Id);
-                _cooldown[spec.Id] = DateTimeOffset.UtcNow.AddSeconds(CooldownSeconds);
                 var n = _fail[spec.Id] = _fail.GetValueOrDefault(spec.Id) + 1;
-                return n >= SetAsideAfterFails;
+                var setAside = n >= SetAsideAfterFails;
+                var secs = setAside ? LongCooldownSeconds : ShortCooldownSeconds;
+                _cooldown[spec.Id] = DateTimeOffset.UtcNow.AddSeconds(secs);
+                return new CooldownResult(secs, setAside);
             }
         }
     }

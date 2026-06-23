@@ -31,6 +31,13 @@ public sealed class ShopeeAccount
     public bool Disabled { get; set; }
     public string? LastError { get; set; }
 
+    /// <summary>
+    /// Mốc tăng dần (tick) của LẦN CUỐI tk này được Scrape cấp phát. Dùng để cấp phát kiểu vòng-LRU:
+    /// luôn lấy tk có giá trị NHỎ NHẤT (nghỉ lâu nhất / chưa dùng = 0) trước, tiến lên rồi vòng lại từ
+    /// đầu — cho mỗi tk Shopee cơ hội nghỉ/hồi phục. Bền qua restart (lưu trong accounts.json).
+    /// </summary>
+    public long LastUsedTick { get; set; }
+
     /// <summary>Username (phần trước dấu '|') — chỉ để hiển thị.</summary>
     public string Username =>
         string.IsNullOrEmpty(ShopeeAccountLogin) ? "" : ShopeeAccountLogin.Split('|')[0].Trim();
