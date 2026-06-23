@@ -175,6 +175,7 @@ public sealed class ScrapeRunner
                             // Captcha → tách hẳn (xử lý sau) + MƯỢN BÙ tk khác để giữ đủ tk chạy.
                             AccountErrored?.Invoke(spec.Id, spec.Label, res.Reason);
                             rotation.Quarantine(spec);
+                            InstanceStatus?.Invoke(key, "🚫 Captcha");
                             InstanceLog?.Invoke(key, $"🚫 {spec.Label}: captcha → tách ra xử lý sau.");
                             await RefillAsync($"thay {spec.Label} dính captcha").ConfigureAwait(false);
                         }
@@ -374,6 +375,12 @@ public sealed class ScrapeRunner
         {
             try { await s.StopRunningWorkAsync(CancellationToken.None).ConfigureAwait(false); } catch { }
         }
+    }
+
+    /// <summary>Đưa cửa sổ Brave của 1 process (key = "P{slot}") lên trước toàn bộ — gọi khi click dòng tiến trình.</summary>
+    public void BringInstanceToFront(string key)
+    {
+        if (_sessions.TryGetValue(key, out var session)) session.BringWindowToFront();
     }
 
     /// <summary>Xoay vòng tk (round-robin): CAPTCHA → quarantine (tách hẳn, xử lý sau); PROXY/lỗi

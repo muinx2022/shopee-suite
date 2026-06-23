@@ -83,6 +83,9 @@ internal sealed class BraveInstanceSession : IDisposable
     public string ProxySummary => _proxySummary;
     public DirectoryInfo? ProfileRoot => _profileRoot;
 
+    /// <summary>Đưa cửa sổ Brave của instance này lên trước toàn bộ (gọi khi click dòng tiến trình).</summary>
+    public void BringWindowToFront() => WindowFocus.BringProcessWindowToFront(_braveProcess);
+
     public BraveInstanceSession(int cdpPort, Action<string> log)
     {
         _cdpPort = cdpPort;

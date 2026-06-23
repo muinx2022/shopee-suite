@@ -50,6 +50,15 @@ public partial class ScrapeView : UserControl
         _ = vm.ToggleAccountDuringRun(t);       // hỏi xác nhận → chạy/dừng riêng tk đó
     }
 
+    /// <summary>Click 1 dòng trong lưới tiến trình → đưa cửa sổ Brave của process đó lên trước toàn bộ.</summary>
+    private void Instance_Click(object sender, MouseButtonEventArgs e)
+    {
+        if (Root.DataContext is not ScrapeViewModel vm) return;
+        var row = FindAncestor<DataGridRow>(e.OriginalSource as DependencyObject);
+        if (row?.Item is ScrapeInstanceViewModel inst)
+            vm.BringInstanceToFront(inst);
+    }
+
     private static T? FindAncestor<T>(DependencyObject? node) where T : DependencyObject
     {
         while (node is not null)

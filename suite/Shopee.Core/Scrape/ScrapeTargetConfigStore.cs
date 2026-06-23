@@ -16,7 +16,6 @@ public sealed class ScrapeTargetConfig
     public int StartRow { get; set; } = 2;
     public int EndRow { get; set; }
     public int RowsPerAccount { get; set; } = 30;
-    public int ShopeeCount { get; set; } = 2;
     public int MaxProcess { get; set; } = 2;
 }
 
@@ -97,7 +96,6 @@ public sealed class ScrapeTargetConfigStore
         StartRow = c.StartRow,
         EndRow = c.EndRow,
         RowsPerAccount = c.RowsPerAccount,
-        ShopeeCount = c.ShopeeCount,
         MaxProcess = c.MaxProcess,
     };
 }

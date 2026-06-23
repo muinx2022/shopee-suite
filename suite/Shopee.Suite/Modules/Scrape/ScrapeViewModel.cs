@@ -216,8 +216,8 @@ public sealed partial class ScrapeViewModel : ObservableObject
         var account = target.Account;
         var shop = target.SelectedShop!;
         var sheet = shop.ShopeeDataSheet;
-        var need = Math.Max(1, target.ShopeeCount);
-        var maxProc = Math.Max(1, Math.Min(target.MaxProcess, need));
+        var need = Math.Max(1, target.MaxProcess);   // số tk Shopee mượn = số process (mỗi process 1 tk)
+        var maxProc = need;
         var startRow = Math.Max(1, target.StartRow);
         var rowsPer = Math.Max(1, target.RowsPerAccount);
         var seq = h.Seq;
@@ -450,6 +450,21 @@ public sealed partial class ScrapeViewModel : ObservableObject
         }
     }
 
+    /// <summary>Click 1 dòng tiến trình → đưa cửa sổ Brave của process đó lên trước toàn bộ.
+    /// Key lưới = "{seq}:P{slot}" → tìm job theo seq → runner.BringInstanceToFront("P{slot}").</summary>
+    public void BringInstanceToFront(ScrapeInstanceViewModel inst)
+    {
+        var s = _session;
+        if (s is null) return;
+        var key = inst.Key;
+        var idx = key.IndexOf(':');
+        if (idx <= 0 || !int.TryParse(key[..idx], out var seq)) return;
+        var slotKey = key[(idx + 1)..];   // "P{slot}"
+        JobHandle? h;
+        lock (s.JobsLock) h = s.Jobs.Values.FirstOrDefault(j => j.Seq == seq);
+        h?.Runner?.BringInstanceToFront(slotKey);
+    }
+
     /// <summary>Kiểm tra 1 đích Scrape có hợp lệ để chạy không (shop/cookie/sheet/workbook/đủ tk).</summary>
     private static bool ValidateTarget(ScrapeTargetViewModel t, int poolCount, out string problem)
     {
@@ -458,7 +473,7 @@ public sealed partial class ScrapeViewModel : ObservableObject
         if (!a.HasCookie) { problem = $"{a.DisplayName}: chưa có cookie BigSeller (đăng nhập ở mục BigSeller)"; return false; }
         if (string.IsNullOrWhiteSpace(s.ShopeeDataSheet)) { problem = $"{a.DisplayName}/{s.DisplayName}: shop chưa gán sheet"; return false; }
         if (string.IsNullOrWhiteSpace(a.WorkbookPath) || !File.Exists(a.WorkbookPath)) { problem = $"{a.DisplayName}: workbook không tồn tại"; return false; }
-        if (Math.Max(1, t.ShopeeCount) > poolCount) { problem = $"{a.DisplayName}: cần {t.ShopeeCount} tk Shopee nhưng kho chỉ có {poolCount}"; return false; }
+        if (Math.Max(1, t.MaxProcess) > poolCount) { problem = $"{a.DisplayName}: cần {t.MaxProcess} tk Shopee nhưng kho chỉ có {poolCount}"; return false; }
         problem = ""; return true;
     }
 

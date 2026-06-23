@@ -138,12 +138,9 @@
                                          ToolTip="Chạy tới dòng này thì dừng. 0 = chạy hết sheet." /></StackPanel>
                             <StackPanel Margin="10,0,0,0"><TextBlock Text="Dòng / lần" Style="{StaticResource Caption}" />
                                 <TextBox Width="84" Margin="0,3,0,0" Text="{Binding RowsPerAccount}" /></StackPanel>
-                            <StackPanel Margin="10,0,0,0"><TextBlock Text="Tk Shopee dùng" Style="{StaticResource Caption}" />
-                                <TextBox Width="100" Margin="0,3,0,0" Text="{Binding ShopeeCount}"
-                                         ToolTip="Số tk Shopee tk BigSeller này chiếm (slice)." /></StackPanel>
                             <StackPanel Margin="10,0,0,0"><TextBlock Text="Số process" Style="{StaticResource Caption}" />
                                 <TextBox Width="90" Margin="0,3,0,0" Text="{Binding MaxProcess}"
-                                         ToolTip="Số process chạy đồng thời trong tk này (≤ Tk Shopee dùng)." /></StackPanel>
+                                         ToolTip="Số cửa sổ Brave chạy song song = số tk Shopee acc này dùng (mỗi process 1 tk; captcha thì tự mượn bù)." /></StackPanel>
                         </StackPanel>
 
                         <!-- Tiến độ đã lưu + Thống kê -->
@@ -163,7 +160,7 @@
 
                 <!-- Tiến trình + tk lỗi -->
                 <DockPanel Grid.Row="1">
-                    <TextBlock DockPanel.Dock="Top" Text="Tiến trình scrape" Style="{StaticResource H2}" Margin="0,0,0,8" />
+                    <TextBlock DockPanel.Dock="Top" Text="Tiến trình scrape (click 1 dòng để đưa cửa sổ Brave đó lên trước)" Style="{StaticResource H2}" Margin="0,0,0,8" />
                     <StackPanel DockPanel.Dock="Bottom" Margin="0,10,0,0"
                                 Visibility="{Binding ErroredAccounts.Count, Converter={StaticResource CountToVis}}">
                         <TextBlock Margin="0,0,0,5" FontSize="12.5" FontWeight="SemiBold" Foreground="{StaticResource DangerBrush}">
@@ -180,7 +177,8 @@
                         </Border>
                     </StackPanel>
                     <Border Style="{StaticResource Card}" ClipToBounds="True">
-                        <DataGrid ItemsSource="{Binding Instances}" BorderThickness="0" IsReadOnly="True">
+                        <DataGrid ItemsSource="{Binding Instances}" BorderThickness="0" IsReadOnly="True"
+                                  PreviewMouseLeftButtonUp="Instance_Click">
                             <DataGrid.Columns>
                                 <DataGridTextColumn Header="Process" Binding="{Binding Label}" Width="1.4*" />
                                 <DataGridTextColumn Header="Tài khoản đang chạy" Binding="{Binding AccountName}" Width="1.4*" />
