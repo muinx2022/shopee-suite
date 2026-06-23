@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Shopee Data Runner",
-  "version": "2.0.4",
+  "version": "2.0.6",
   "description": "Click scrape và hiển thị trạng thái — điều khiển từ Multi Brave Manager",
   "permissions": ["storage", "tabs", "scripting", "activeTab", "alarms"],
   "host_permissions": ["<all_urls>"],

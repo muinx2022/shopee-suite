@@ -16,8 +16,9 @@ namespace Shopee.Suite.Modules.Scrape;
 /// <summary>
 /// Module "Shopee Scrape". Tick chọn 1 hoặc NHIỀU tài khoản BigSeller (mỗi tk 1 shop ↔ sheet/workbook).
 /// Hệ thống TỰ ĐỘNG dùng cả kho tài khoản Shopee (xoay vòng), chạy N process song song. Nhiều tk
-/// BigSeller chạy LẦN LƯỢT (không đồng thời để khỏi tranh kho Shopee + profile). Tk Shopee dính
-/// captcha/proxy lỗi thì tự đổi tk khác.
+/// BigSeller chạy LẦN LƯỢT (cổng BigSellerGate): BigSeller đi qua IP máy (không proxy) nên nếu nhiều
+/// muc_token cùng đổ về 1 IP, server sẽ đá phiên TẤT CẢ acc — chạy lần lượt để mỗi lúc chỉ 1 token
+/// trên IP máy. Tk Shopee dính captcha/proxy lỗi thì tự đổi tk khác.
 /// </summary>
 public sealed partial class ScrapeViewModel : ObservableObject
 {
@@ -174,6 +175,7 @@ public sealed partial class ScrapeViewModel : ObservableObject
             try { AccountStore.Shared.Save(); } catch { }   // lưu LastUsedTick (vòng-LRU) bền qua restart
             _session = null;                                 // null TRƯỚC khi Dispose để StartOne kịp bail
             session.MasterCts.Dispose();
+            session.BigSellerGate.Dispose();
             IsBusy = false;
             ShopeeAccountUsage.Shared.EndRun();             // hết lượt chạy → mọi tk về "Chưa dùng"
         }
@@ -194,7 +196,7 @@ public sealed partial class ScrapeViewModel : ObservableObject
                 {
                     var slice = s.Available
                         .OrderByDescending(a => preferIds.Contains(a.Id))   // resume: ưu tiên tk đã đặt chỗ
-                        .ThenBy(a => a.LastUsedTick)                          // rồi tk NGHỈ LÂU NHẤT (0 = chưa dùng) trước
+                        .ThenBy(_ => Random.Shared.Next())                    // RANDOM toàn kho làm khóa CHÍNH → spread đều, KHÔNG nện mấy acc đầu, acc luân phiên nghỉ
                         .Take(need)
                         .ToList();
                     foreach (var x in slice) { s.Available.Remove(x); x.LastUsedTick = Interlocked.Increment(ref s.LruTick); }
@@ -229,6 +231,7 @@ public sealed partial class ScrapeViewModel : ObservableObject
 
         List<ShopeeAccount>? borrowed = null;
         ScrapeRunner? runner = null;
+        var gateHeld = false;
         try
         {
             int totalRows;
@@ -253,6 +256,20 @@ public sealed partial class ScrapeViewModel : ObservableObject
             // Resume: ưu tiên mượn lại đúng tk đã đặt chỗ trước đó.
             var preferIds = (resume ? ScrapeProgressStore.Shared.Find(account.Id, sheet)?.ReservedShopeeAccountIds : null) ?? [];
 
+            // BigSeller KHÔNG có proxy riêng → đi IP MÁY → phải chạy LẦN LƯỢT: mỗi lúc chỉ 1 tk BigSeller
+            // hoạt động. LÝ DO: nếu NHIỀU muc_token khác nhau cùng đổ về 1 IP máy, server chống gian lận coi
+            // là chia sẻ phiên/bot và ĐÁ phiên của TẤT CẢ acc trên IP đó cùng lúc ("nhiều acc mất hết phiên").
+            // Trong PHẠM VI 1 tk vẫn chạy song song N Brave bình thường (đúng kiểu "1 acc nhiều Brave" vốn OK).
+            // Tk CÓ proxy riêng (KiotProxy key) → mỗi tk 1 IP khác nhau → KHÔNG cần cổng, chạy SONG SONG được.
+            // Lấy cổng TRƯỚC khi mượn tk Shopee để job đang chờ không giữ kho.
+            if (!account.HasProxy)
+            {
+                if (s.BigSellerGate.CurrentCount == 0)
+                    Log($"[{account.DisplayName}] ⏳ chờ tk BigSeller khác chạy xong rồi mới tới lượt (không proxy → đi IP máy → chạy lần lượt để khỏi bị đá phiên)…");
+                await s.BigSellerGate.WaitAsync(ct).ConfigureAwait(false);
+                gateHeld = true;
+            }
+
             int freeNow; lock (s.AllocLock) freeNow = s.Available.Count;
             Log($"[{account.DisplayName}] đang xin {need} tk Shopee từ kho (rảnh {freeNow})"
                 + (freeNow < need ? " — CHỜ tk khác nhả (take-all-or-wait)…" : "…"));
@@ -276,7 +293,8 @@ public sealed partial class ScrapeViewModel : ObservableObject
             else ScrapeProgressStore.Shared.BeginFresh(account.Id, sheet, account.DisplayName, reservedIds, totalRows);
             OnUi(target.RefreshProgress);
 
-            runner = new ScrapeRunner(account.WorkbookPath, VideoDir, braveExe: null, s.SourceUserData, bigSellerAccountName: account.DisplayName);
+            runner = new ScrapeRunner(account.WorkbookPath, VideoDir, braveExe: null, s.SourceUserData, bigSellerAccountName: account.DisplayName,
+                bigSellerKiotKey: account.KiotProxyKey, bigSellerRegion: account.Region, bigSellerProxyType: account.ProxyType);
             lock (s.JobsLock) h.Runner = runner;
             // Mỗi chunk xong → lưu tiến độ ngay (bền với dừng/treo).
             runner.RowsCompleted += (from, to) =>
@@ -296,7 +314,7 @@ public sealed partial class ScrapeViewModel : ObservableObject
                     s.Available.RemoveAll(a => a.Disabled);
                     if (s.Available.Count > 0)
                     {
-                        acc = s.Available.OrderBy(a => a.LastUsedTick).First();   // tk nghỉ lâu nhất
+                        acc = s.Available[Random.Shared.Next(s.Available.Count)];   // RANDOM toàn kho → không nện mấy acc đầu
                         s.Available.Remove(acc);
                         acc.LastUsedTick = Interlocked.Increment(ref s.LruTick);
                         borrowed!.Add(acc);
@@ -329,6 +347,10 @@ public sealed partial class ScrapeViewModel : ObservableObject
         {
             lock (s.JobsLock) s.Jobs.Remove(account.Id);
             if (borrowed is not null) GiveBack(s, borrowed);
+            // Nhả cổng BigSeller SAU khi đã trả tk Shopee về kho → tk BigSeller kế (đang chờ) mới tới lượt
+            // với kho Shopee đầy. Cũng đảm bảo mọi Brave của job này đã đóng (RunAutoAsync đã return) nên
+            // không còn muc_token nào của job này còn "active" trên IP máy lúc job kế bắt đầu.
+            if (gateHeld) s.BigSellerGate.Release();
             // Dọn các dòng process của job này khỏi lưới (trước đây dòng cũ không bao giờ bị xoá).
             var prefix = seq + ":";
             OnUi(() => { for (var i = Instances.Count - 1; i >= 0; i--) if (Instances[i].Key.StartsWith(prefix, StringComparison.Ordinal)) Instances.RemoveAt(i); });
@@ -552,6 +574,8 @@ public sealed partial class ScrapeViewModel : ObservableObject
             if (row is null) ErroredAccounts.Insert(0, new ErroredAccountRow(id, label, reason, now));
             else { row.Reason = reason; row.Time = now; }
             LogLines.Add($"⚠ Tk lỗi: {label} — {reason}");
+            // Cột "Tình trạng" → "⚠ Captcha" cho tk vừa dính captcha/lỗi trong lượt chạy này.
+            ShopeeAccountUsage.Shared.MarkCaptcha(id);
             FlagAccountErrored(id, $"Dính captcha/lỗi (Scrape) — {DateTime.Now:dd/MM HH:mm}: {reason}");
         });
     }
@@ -590,6 +614,9 @@ public sealed partial class ScrapeViewModel : ObservableObject
         public readonly object AllocLock = new();
         public int BorrowedCount;
         public readonly CancellationTokenSource MasterCts = new(); // huỷ TOÀN phiên (Stop)
+        // BigSeller đi qua IP máy (không proxy) → chỉ cho 1 tk BigSeller hoạt động 1 lúc, tránh "nhiều
+        // muc_token / 1 IP" khiến server đá phiên tất cả. Job tk BigSeller mượn cổng này quanh phần chạy.
+        public readonly SemaphoreSlim BigSellerGate = new(1, 1);
         public readonly Dictionary<string, JobHandle> Jobs = new(StringComparer.Ordinal);   // key = BigSeller Account.Id
         public readonly object JobsLock = new();
         public int JobSeq;          // tăng dần — namespace key lưới UI (thay jobIndex cũ)

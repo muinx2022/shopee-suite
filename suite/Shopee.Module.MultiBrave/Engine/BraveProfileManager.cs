@@ -77,7 +77,8 @@ internal static class BraveProfileManager
         string? proxyServer,
         Action<string>? log = null,
         string? sourceUserData = null,
-        bool loadRunnerExtension = true)
+        bool loadRunnerExtension = true,
+        string? bigSellerProxyServer = null)
     {
         var parts = new List<string>
         {
@@ -100,13 +101,29 @@ internal static class BraveProfileManager
             // → extension "Shopee Data Runner" KHÔNG load. Tắt feature này để --load-extension hoạt động lại.
             "--disable-features=CalculateNativeWinOcclusion,IntensiveWakeUpThrottling,DisableLoadExtensionCommandLineSwitch",
         };
-        if (!string.IsNullOrWhiteSpace(proxyServer))
+        if (!string.IsNullOrWhiteSpace(bigSellerProxyServer))
+        {
+            // TK BIGSELLER CÓ PROXY RIÊNG → split-tunnel qua PAC: bigseller.com đi proxy RIÊNG của tk
+            // BigSeller (mỗi tk 1 IP → chạy SONG SONG nhiều tk không bị "nhiều token / 1 IP" → không đá
+            // phiên), còn lại (Shopee) GIỮ proxy instance, localhost đi DIRECT (API dữ liệu 127.0.0.1:8012
+            // KHÔNG qua proxy). Không dùng được --proxy-server cho việc này vì nó áp cho TOÀN browser.
+            var pacUrl = WriteBigSellerSplitPac(userDataDir, proxyServer, bigSellerProxyServer, log);
+            if (pacUrl is not null)
+            {
+                parts.Add($"--proxy-pac-url=\"{pacUrl}\"");
+            }
+            else if (!string.IsNullOrWhiteSpace(proxyServer))
+            {
+                // Ghi PAC lỗi → quay về hành vi cũ (BigSeller qua IP máy) để Shopee KHÔNG mất proxy.
+                parts.Add($"--proxy-server={proxyServer}");
+                parts.Add("--proxy-bypass-list=*.bigseller.com;bigseller.com;*.bigseller.pro;bigseller.pro");
+            }
+        }
+        else if (!string.IsNullOrWhiteSpace(proxyServer))
         {
             parts.Add($"--proxy-server={proxyServer}");
-            // BigSeller PHẢI đi qua IP MÁY (direct), KHÔNG qua proxy của instance: 1 tài khoản BigSeller
-            // mở ở nhiều Brave với proxy IP khác nhau → server BigSeller thấy đăng nhập từ nhiều nơi → xoay
-            // muc_token, đá phiên (mất cookie). Bypass proxy cho domain BigSeller để mọi instance gọi
-            // BigSeller từ CÙNG 1 IP máy → phiên ổn định, không bị đá. (Shopee vẫn đi qua proxy như cũ.)
+            // KHÔNG có proxy riêng cho BigSeller → BigSeller đi qua IP MÁY (bypass proxy). Khi đó các tk
+            // BigSeller phải chạy LẦN LƯỢT (ScrapeViewModel.BigSellerGate) để chỉ 1 token trên IP máy 1 lúc.
             parts.Add("--proxy-bypass-list=*.bigseller.com;bigseller.com;*.bigseller.pro;bigseller.pro");
         }
 
@@ -229,21 +246,80 @@ internal static class BraveProfileManager
         return name;
     }
 
+    /// <summary>
+    /// Ghi file PAC split-tunnel vào profile rồi trả về URL <c>file://</c> cho <c>--proxy-pac-url</c>:
+    /// bigseller.* → proxy RIÊNG của tk BigSeller; localhost → DIRECT (API dữ liệu local); còn lại →
+    /// proxy Shopee (hoặc DIRECT nếu Shopee không proxy). Trả null nếu ghi lỗi (caller fallback IP máy).
+    /// </summary>
+    private static string? WriteBigSellerSplitPac(
+        string userDataDir, string? shopeeProxyServer, string bigSellerProxyServer, Action<string>? log)
+    {
+        try
+        {
+            var bigSeller = ToPacProxy(bigSellerProxyServer);
+            var rest = ToPacProxy(shopeeProxyServer);   // "DIRECT" khi Shopee không proxy
+            var pac =
+                "function FindProxyForURL(url, host) {\n" +
+                "  if (host == \"localhost\" || host == \"127.0.0.1\" || shExpMatch(host, \"127.*\") || host == \"[::1]\") return \"DIRECT\";\n" +
+                "  if (host == \"bigseller.com\" || dnsDomainIs(host, \".bigseller.com\") || host == \"bigseller.pro\" || dnsDomainIs(host, \".bigseller.pro\")) return \"" + bigSeller + "\";\n" +
+                "  return \"" + rest + "\";\n" +
+                "}\n";
+
+            var pacPath = Path.Combine(userDataDir, "bigseller-split.pac");
+            File.WriteAllText(pacPath, pac, Encoding.UTF8);
+            return new Uri(pacPath).AbsoluteUri;   // file:///D:/.../bigseller-split.pac (đã escape khoảng trắng)
+        }
+        catch (Exception ex)
+        {
+            log?.Invoke($"Không ghi được PAC BigSeller ({ex.Message}) — BigSeller tạm đi IP máy.");
+            return null;
+        }
+    }
+
+    /// <summary>Chuyển chuỗi proxy-server ("http://h:p" / "socks5://h:p") sang token PAC ("PROXY h:p" /
+    /// "SOCKS5 h:p"). Trống → "DIRECT".</summary>
+    private static string ToPacProxy(string? proxyServer)
+    {
+        if (string.IsNullOrWhiteSpace(proxyServer))
+            return "DIRECT";
+        var s = proxyServer.Trim();
+        var kind = "PROXY";
+        foreach (var (scheme, pac) in new[] { ("socks5://", "SOCKS5"), ("socks4://", "SOCKS"), ("https://", "PROXY"), ("http://", "PROXY") })
+        {
+            if (s.StartsWith(scheme, StringComparison.OrdinalIgnoreCase)) { kind = pac; s = s[scheme.Length..]; break; }
+        }
+        return $"{kind} {s}";
+    }
+
     private static void ClearSwScriptCache(string profileRoot)
     {
         try
         {
             var defaultDir = Path.Combine(profileRoot, "Default");
 
-            // Xóa ScriptCache (blob bytecode SW) + Code Cache → buộc Brave nạp lại background.js mới
-            // từ extension. GIỮ "Service Worker/Database" (bản đăng ký) để SW không phải đăng ký lại
-            // cold mỗi lần launch — đăng ký lại cold mở rộng cửa sổ race "top-level chưa chạy xong"
-            // làm các hàm __launcher* tạm thời chưa có (lỗi đó nay được retry, xem IsTransientSwError).
-            foreach (var subDir in new[] { Path.Combine("Service Worker", "ScriptCache"), "Code Cache" })
+            // Xóa TRỌN thư mục "Service Worker" (ScriptCache + Database/registration + CacheStorage).
+            // LÝ DO: nếu CHỈ xóa ScriptCache mà GIỮ Database (bản đăng ký SW), Chromium thấy SW "đã đăng
+            // ký" nhưng blob script đã mất → SW KHÔNG start được → /json/list KHÔNG có service_worker
+            // target → popup gửi message báo "Receiving end does not exist" mãi (đúng triệu chứng vài
+            // instance treo 4–5'). Xóa cả thư mục → Brave ĐĂNG KÝ LẠI SW sạch từ extension → SW start
+            // chắc chắn. (Cold-start lại mỗi launch chậm hơn chút, nhưng đổi lấy SW lên ổn định.)
+            var swDir = Path.Combine(defaultDir, "Service Worker");
+            if (Directory.Exists(swDir))
             {
-                var dir = Path.Combine(defaultDir, subDir);
-                if (!Directory.Exists(dir)) continue;
-                foreach (var f in Directory.GetFiles(dir, "*", SearchOption.AllDirectories))
+                try { Directory.Delete(swDir, recursive: true); }
+                catch
+                {
+                    foreach (var f in Directory.GetFiles(swDir, "*", SearchOption.AllDirectories))
+                    {
+                        try { File.Delete(f); } catch { }
+                    }
+                }
+            }
+
+            var codeCache = Path.Combine(defaultDir, "Code Cache");
+            if (Directory.Exists(codeCache))
+            {
+                foreach (var f in Directory.GetFiles(codeCache, "*", SearchOption.AllDirectories))
                 {
                     try { File.Delete(f); } catch { }
                 }

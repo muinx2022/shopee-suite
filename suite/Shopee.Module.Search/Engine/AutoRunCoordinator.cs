@@ -338,7 +338,10 @@ public sealed class AutoRunCoordinator
                 // Chỉ chọn account vừa rảnh vừa hết thời gian nghỉ (rest). Nếu ứng viên còn lại đang bận
                 // (sẽ được trả lại) hoặc đang nghỉ (rest sẽ hết), vòng lặp chờ bên dưới — KHÔNG mượn lại
                 // account đang nghỉ để tôn trọng backoff sau lỗi (rest có giới hạn thời gian nên không kẹt).
-                pick = candidates.FirstOrDefault(a => !_busy.Contains(a.Id) && !IsResting(a.Id, now));
+                // Chọn NGẪU NHIÊN trong nhóm khả dụng (free + hết nghỉ) thay vì luôn lấy acc đầu kho →
+                // không nện mãi mấy acc đầu, để acc luân phiên nghỉ ngơi/hồi phục.
+                var eligible = candidates.Where(a => !_busy.Contains(a.Id) && !IsResting(a.Id, now)).ToList();
+                pick = eligible.Count > 0 ? eligible[Random.Shared.Next(eligible.Count)] : null;
 
                 if (pick is not null)
                     _busy.Add(pick.Id);
@@ -363,6 +366,7 @@ public sealed class AutoRunCoordinator
     private void MarkErrored(InstanceConfig account, string reason)
     {
         lock (_accLock) _errored.Add(account.Id);
+        ShopeeAccountUsage.Shared.MarkCaptcha(account.Id);   // cột "Tình trạng" → "⚠ Captcha"
         AccountErrored?.Invoke(account.Id, reason);
     }
 

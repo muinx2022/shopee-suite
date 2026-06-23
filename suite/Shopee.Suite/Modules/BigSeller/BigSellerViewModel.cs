@@ -186,10 +186,20 @@ public sealed partial class BigSellerViewModel : ObservableObject
             // lập, không bị "đăng nhập vào tk cũ" do dùng chung profile.
             var profileDir = Path.Combine(SuitePaths.ModuleDir("bigseller-login"), account.Model.Id);
 
+            // Tk có proxy riêng (KiotProxy key) → ĐĂNG NHẬP qua đúng proxy đó để token lưu ra khớp IP với
+            // lúc scrape (scrape route bigseller.com qua proxy này). Không có key → mở IP máy như cũ.
+            string? proxyServer = null;
+            if (account.Model.HasProxy)
+            {
+                AppendLog("Đang lấy proxy riêng của tk BigSeller (KiotProxy)…");
+                proxyServer = await OpenMultiBraveLauncherV3.BigSellerProxyResolver.ResolveServerAsync(
+                    account.Model.KiotProxyKey, account.Model.Region, account.Model.ProxyType, AppendLog);
+            }
+
             // Lưu cookie xong, cửa sổ Brave GIỮ NGUYÊN — chỉ đóng khi bấm Dừng. onSaved báo ngay
             // khi vừa lưu (lúc cửa sổ còn đang mở) để UI cập nhật trạng thái cookie tức thì.
             var ok = await BigSellerLoginRunner.RunLoginAsync(
-                cookieFile, profileDir, AppendLog, _loginCts.Token, () => OnLoginSaved(account));
+                cookieFile, profileDir, AppendLog, _loginCts.Token, () => OnLoginSaved(account), proxyServer);
             account.NotifyCookieChanged();
             Status = ok ? "Đăng nhập BigSeller thành công." : "Chưa lấy được cookie BigSeller.";
         }

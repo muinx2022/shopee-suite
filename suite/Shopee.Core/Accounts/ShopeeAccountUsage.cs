@@ -13,6 +13,7 @@ public sealed class ShopeeAccountUsage
     private int _activeRuns;                                   // số lượt chạy (scrape/search) đang mở
     private readonly HashSet<string> _inUse = new(StringComparer.Ordinal);
     private readonly HashSet<string> _used = new(StringComparer.Ordinal);   // đã dùng ít nhất 1 lần trong giai đoạn đang chạy
+    private readonly HashSet<string> _captcha = new(StringComparer.Ordinal); // đang dính captcha trong lượt chạy này
 
     /// <summary>Phát khi trạng thái đổi → UI làm mới cột "Tình trạng".</summary>
     public event Action? Changed;
@@ -37,6 +38,7 @@ public sealed class ShopeeAccountUsage
                 _activeRuns = 0;
                 _inUse.Clear();
                 _used.Clear();
+                _captcha.Clear();
             }
         }
         Changed?.Invoke();
@@ -68,12 +70,22 @@ public sealed class ShopeeAccountUsage
         Changed?.Invoke();
     }
 
-    /// <summary>Trạng thái hiển thị của 1 tk: "Đang dùng" | "Đã dùng" | "Chưa dùng".</summary>
+    /// <summary>Đánh dấu tk đang DÍNH CAPTCHA trong lượt chạy này (hiển thị "⚠ Captcha" ở cột Tình trạng).
+    /// Không còn "đang dùng" nữa (đã bị tách khỏi vòng để xử lý tay).</summary>
+    public void MarkCaptcha(string id)
+    {
+        if (string.IsNullOrEmpty(id)) return;
+        lock (_lock) { _captcha.Add(id); _inUse.Remove(id); _used.Add(id); }
+        Changed?.Invoke();
+    }
+
+    /// <summary>Trạng thái hiển thị của 1 tk: "⚠ Captcha" | "Đang dùng" | "Đã dùng" | "Chưa dùng".</summary>
     public string Status(string id)
     {
         lock (_lock)
         {
             if (_activeRuns <= 0) return "Chưa dùng";
+            if (_captcha.Contains(id)) return "⚠ Captcha";   // ưu tiên cao nhất — đang vướng captcha
             if (_inUse.Contains(id)) return "Đang dùng";
             if (_used.Contains(id)) return "Đã dùng";
             return "Chưa dùng";

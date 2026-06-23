@@ -769,8 +769,13 @@ internal static class ExtensionRunnerAutomation
                 tabId,
             });
 
+            // Scrape-step CHỜ LÂU: BigSeller có thể crawl vài phút. Đặt receive-timeout = 600s (> mức chờ
+            // 540s của extension) để C# KHÔNG hết-giờ-20s rồi retry gọi lại → reload + click GIỮA CHỪNG lúc
+            // đang crawl (đúng triệu chứng "đang scrape chưa xong đã reload" ở tk crawl chậm). Giảm
+            // maxAttempts xuống 2: với timeout dài, một lần hết-giờ nghĩa là treo thật, không nên retry nhiều.
             var val = await EvaluateExtensionMethodAsync(
-                cdpPort, extensionId, "executeScrapeStep", payload, cancellationToken, maxAttempts: 6);
+                cdpPort, extensionId, "executeScrapeStep", payload, cancellationToken,
+                maxAttempts: 2, receiveTimeoutOverride: TimeSpan.FromSeconds(600));
             if (val is null)
                 return new ScrapeStepResult(false, false, false, false, "Extension không phản hồi.", tabId, link);
 
@@ -1097,7 +1102,8 @@ internal static class ExtensionRunnerAutomation
         string method,
         string? payloadJson,
         CancellationToken ct,
-        int maxAttempts = 15)
+        int maxAttempts = 15,
+        TimeSpan? receiveTimeoutOverride = null)
     {
         var payloadExpr = PayloadExpression(payloadJson);
         var evalResult = await EvaluateExtensionRawAsync(
@@ -1106,7 +1112,8 @@ internal static class ExtensionRunnerAutomation
             method,
             payloadJson,
             ct,
-            maxAttempts);
+            maxAttempts,
+            receiveTimeoutOverride);
 
         if (evalResult.TryGetProperty("exceptionDetails", out var exDetails) &&
             exDetails.ValueKind == JsonValueKind.Object)
@@ -1126,7 +1133,8 @@ internal static class ExtensionRunnerAutomation
         string method,
         string? payloadJson,
         CancellationToken ct,
-        int maxAttempts = 15)
+        int maxAttempts = 15,
+        TimeSpan? receiveTimeoutOverride = null)
     {
         var payloadExpr = PayloadExpression(payloadJson);
         var swExpression = BuildServiceWorkerMethodExpression(method, payloadExpr);
@@ -1137,7 +1145,7 @@ internal static class ExtensionRunnerAutomation
         {
             ct.ThrowIfCancellationRequested();
 
-            var swResult = await TryEvaluateOnServiceWorkerAsync(cdpPort, extensionId, swExpression, ct);
+            var swResult = await TryEvaluateOnServiceWorkerAsync(cdpPort, extensionId, swExpression, ct, receiveTimeoutOverride);
             if (swResult is not null &&
                 !HasTransientSwException(swResult.Value) &&
                 (!isProbe || IsReadyProbeResult(swResult.Value)))
@@ -1158,12 +1166,12 @@ internal static class ExtensionRunnerAutomation
                     expression = popupExpression,
                     awaitPromise = true,
                     returnByValue = true,
-                }, ct);
+                }, ct, receiveTimeoutOverride: receiveTimeoutOverride);
 
                 if (!IsPopupBridgeError(popupResult) && !HasTransientSwException(popupResult))
                     return popupResult;
 
-                var swFallback = await TryEvaluateOnServiceWorkerAsync(cdpPort, extensionId, swExpression, ct);
+                var swFallback = await TryEvaluateOnServiceWorkerAsync(cdpPort, extensionId, swExpression, ct, receiveTimeoutOverride);
                 if (swFallback is not null &&
                     !HasTransientSwException(swFallback.Value) &&
                     (!isProbe || IsReadyProbeResult(swFallback.Value)))
@@ -1341,7 +1349,8 @@ internal static class ExtensionRunnerAutomation
         int cdpPort,
         string extensionId,
         string expression,
-        CancellationToken ct)
+        CancellationToken ct,
+        TimeSpan? receiveTimeoutOverride = null)
     {
         // Approach 1: dùng /json/list → webSocketDebuggerUrl trực tiếp
         // (hoạt động khi không có SW pinner đang giữ kết nối)
@@ -1358,7 +1367,7 @@ internal static class ExtensionRunnerAutomation
                     expression,
                     awaitPromise = true,
                     returnByValue = true,
-                }, ct);
+                }, ct, receiveTimeoutOverride: receiveTimeoutOverride);
             }
         }
         catch { }
@@ -1387,7 +1396,7 @@ internal static class ExtensionRunnerAutomation
                             expression,
                             awaitPromise = true,
                             returnByValue = true,
-                        }, ct, sess);
+                        }, ct, sess, receiveTimeoutOverride);
                     }
                 }
             }
@@ -1947,11 +1956,16 @@ internal static class ExtensionRunnerAutomation
         string method,
         object? parameters,
         CancellationToken ct,
-        string? sessionId = null)
+        string? sessionId = null,
+        TimeSpan? receiveTimeoutOverride = null)
     {
-        var receiveTimeout = string.Equals(method, "Runtime.evaluate", StringComparison.Ordinal)
-            ? CdpEvaluateReceiveTimeout
-            : CdpDefaultReceiveTimeout;
+        // receiveTimeoutOverride: dùng cho lệnh CHỜ LÂU (vd executeScrapeStep — BigSeller có thể crawl
+        // vài phút). Nếu không truyền, theo mặc định 20s. KHÔNG để 20s cho scrape-step, nếu không C# sẽ
+        // tưởng hết giờ → retry gọi lại executeScrapeStep → reload + click lại GIỮA CHỪNG khi đang crawl.
+        var receiveTimeout = receiveTimeoutOverride
+            ?? (string.Equals(method, "Runtime.evaluate", StringComparison.Ordinal)
+                ? CdpEvaluateReceiveTimeout
+                : CdpDefaultReceiveTimeout);
 
         string json;
         if (parameters is null)

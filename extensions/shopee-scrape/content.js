@@ -5,7 +5,10 @@
   window.__shopee27052026ScrapeClickerInjected = true;
 
   const MAX_FIND_MS = 30_000;     // chờ nút scrape xuất hiện
-  const MAX_RESULT_MS = 60_000;   // chờ BigSeller báo kết quả sau khi click (scrape variant stock có thể lâu)
+  // Chờ kết quả THEO TRẠNG THÁI BigSeller, KHÔNG đặt giờ cứng: còn "scraping" thì chờ tới khi xong;
+  // chỉ "failed"/"ok" mới làm tiếp. Bỏ chờ DUY NHẤT khi BigSeller im lặng (không còn báo đang crawl,
+  // cũng chưa có kết quả) lâu hơn IDLE_RESULT_MS — chốt an toàn phòng trang hỏng. Watchdog (8') là chặn cuối.
+  const IDLE_RESULT_MS = 90_000;
   const STEP_MS = 500;
 
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -104,12 +107,14 @@
     return null;
   };
 
-  const enableVariantStockScrape = async () => {
+  // Người dùng KHÔNG muốn cào tồn kho biến thể ("Scrape Variant Stock"). Đảm bảo Ô NÀY BỎ TICK trước khi
+  // bấm Scrape — BigSeller có thể nhớ trạng thái tick từ lần trước nên phải chủ động bỏ nếu đang được tick.
+  const disableVariantStockScrape = async () => {
     const target = findVariantStockCheckbox(document);
     if (!target) return false;
 
     const { input, label } = target;
-    if (input?.checked) return true;
+    if (!input?.checked) return true; // đã không tick → không làm gì
 
     const clickable = label && isVisible(label) ? label : input;
     if (clickable && typeof clickable.click === "function") {
@@ -117,23 +122,28 @@
       await sleep(150);
     }
 
-    return Boolean(input?.checked);
+    return !input?.checked;
   };
 
   // Đọc kết quả BigSeller báo qua toast (.content_wrap > .icon.success|failed|waiting + h3). Tìm cả trong
   // shadow DOM. Trả về { state, text } của toast NHẬN DẠNG ĐƯỢC mới nhất; null nếu chưa có toast.
   const readBigSellerResult = (root) => {
-    let result = null;
+    // DOM BigSeller: <div class="content_wrap"><span class="icon success|failed|waiting"></span><h3>…</h3></div>
+    //  • success: "Successfully Scraped"  • failed: "Failed, log in BigSeller first"  • waiting: "Scrapping the product..."
+    // ƯU TIÊN kết quả THẬT (success/failed) hơn toast "đang scrape" còn sót lại (tránh che mất kết quả).
+    let terminal = null;
+    let waiting = null;
     const wraps = root.querySelectorAll?.(".content_wrap") || [];
     for (const w of wraps) {
       const icon = w.querySelector(".icon");
       if (!icon) continue;
       const text = (w.querySelector("h3")?.textContent || "").trim();
-      if (icon.classList.contains("success")) result = { state: "success", text };
-      else if (icon.classList.contains("failed")) result = { state: "failed", text };
-      else if (icon.classList.contains("waiting")) result = { state: "waiting", text };
+      if (icon.classList.contains("success")) terminal = { state: "success", text };
+      else if (icon.classList.contains("failed")) terminal = { state: "failed", text };
+      else if (icon.classList.contains("waiting")) waiting = { state: "waiting", text };
     }
-    if (result) return result;
+    if (terminal) return terminal;
+    if (waiting) return waiting;
     for (const host of root.querySelectorAll?.("*") || []) {
       if (host.shadowRoot) {
         const found = readBigSellerResult(host.shadowRoot);
@@ -173,12 +183,15 @@
       return;
     }
 
-    await enableVariantStockScrape();
+    await disableVariantStockScrape();
     button.click();
 
-    // 2) Chờ BigSeller báo KẾT QUẢ THẬT (không báo xong trước khi scrape xong nữa).
-    const resultDeadline = Date.now() + MAX_RESULT_MS;
-    while (Date.now() < resultDeadline) {
+    // 2) Chờ BigSeller báo KẾT QUẢ THẬT. CHỜ TỚI KHI CRAWL XONG: nếu BigSeller còn đang crawl
+    //    (state="waiting") thì GIA HẠN cửa sổ chờ → KHÔNG bỏ giữa chừng (tránh background tưởng fail
+    //    rồi reload + click lại → vòng "scrape lâu → reload → scrape" khi sản phẩm crawl chậm).
+    //    Chỉ bỏ khi: (a) im lặng quá IDLE_RESULT_MS (không thấy crawl), hoặc (b) quá trần tổng.
+    let idleDeadline = Date.now() + IDLE_RESULT_MS;
+    while (Date.now() < idleDeadline) {
       const r = readBigSellerResult(document);
       if (r) {
         if (r.state === "success") {
@@ -191,7 +204,9 @@
           await notify({ ok: false, needLogin, message: "BigSeller: " + (r.text || "Failed") });
           return;
         }
-        // state === "waiting" → đang scrape, chờ tiếp.
+        // state === "waiting" → BigSeller ĐANG crawl → gia hạn, KIÊN NHẪN chờ tới khi xong (không bỏ
+        // giữa chừng → không để background tưởng fail rồi reload + click lại).
+        if (r.state === "waiting") idleDeadline = Date.now() + IDLE_RESULT_MS;
       }
       // Có thể chuyển sang trạng thái đã-scraped mà không kịp thấy toast.
       if (isAlreadyScraped(document)) {
@@ -200,7 +215,7 @@
       }
       await sleep(STEP_MS);
     }
-    await notify({ ok: false, message: "Hết giờ chờ kết quả BigSeller (có thể vẫn đang scrape)." });
+    await notify({ ok: false, message: "BigSeller im lặng quá lâu (không thấy đang crawl) — bỏ qua dòng này." });
   };
 
   run().catch(async (error) => {

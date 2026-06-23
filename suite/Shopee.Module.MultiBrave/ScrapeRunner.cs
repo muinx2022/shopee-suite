@@ -20,6 +20,9 @@ public sealed class ScrapeRunner
     private readonly string _sourceUserData;
     private readonly string _workbookPath;
     private readonly string _bigSellerAccountName;
+    private readonly string _bigSellerKiotKey;
+    private readonly string _bigSellerRegion;
+    private readonly string _bigSellerProxyType;
     private readonly ConcurrentDictionary<string, BraveInstanceSession> _sessions = new();
 
     /// <summary>(key, dòng log). key = account.Id (manual) hoặc "P{slot}" (auto).</summary>
@@ -33,12 +36,17 @@ public sealed class ScrapeRunner
     /// <summary>(from, to) — khoảng dòng vừa cào XONG (để lưu tiến độ resume). Báo theo từng chunk.</summary>
     public event Action<int, int>? RowsCompleted;
 
-    public ScrapeRunner(string workbookPath, string videoOutputDir, string? braveExe = null, string sourceUserData = "", string bigSellerAccountName = "")
+    public ScrapeRunner(string workbookPath, string videoOutputDir, string? braveExe = null, string sourceUserData = "", string bigSellerAccountName = "",
+        string bigSellerKiotKey = "", string bigSellerRegion = "random", string bigSellerProxyType = "http")
     {
         // Workbook giữ PER-INSTANCE (mang qua InstanceConfig) để chạy song song nhiều BigSeller mỗi
         // workbook khác nhau. VideoOutputDir dùng chung mọi BigSeller nên vẫn để static.
         _workbookPath = workbookPath;
         _bigSellerAccountName = bigSellerAccountName;
+        // Proxy RIÊNG của tk BigSeller (nếu có key) → mỗi instance đẩy bigseller.com qua IP này (split-tunnel).
+        _bigSellerKiotKey = bigSellerKiotKey ?? "";
+        _bigSellerRegion = string.IsNullOrWhiteSpace(bigSellerRegion) ? "random" : bigSellerRegion;
+        _bigSellerProxyType = string.IsNullOrWhiteSpace(bigSellerProxyType) ? "http" : bigSellerProxyType;
         if (!string.IsNullOrWhiteSpace(videoOutputDir)) ScrapeNativeSettings.VideoOutputDir = videoOutputDir;
         _braveExe = braveExe ?? BrowserLauncher.Detect(BrowserKind.Brave)
             ?? throw new FileNotFoundException("Không tìm thấy brave.exe. Hãy cài Brave Browser.");
@@ -111,6 +119,13 @@ public sealed class ScrapeRunner
     // chậm mở CDP port và khiến service worker MV3 dựng đồng loạt bị throttle → probe timeout.
     // Lệch mỗi lane ~1.5s khi BẮT ĐẦU (chỉ 1 lần lúc ramp-up; sau đó vẫn giữ đủ N lane song song).
     private const int LaunchStaggerMs = 1500;
+
+    // CỔNG WARMUP: số instance được "dựng service worker (cold-start)" ĐỒNG THỜI. Đây là nút thắt thật
+    // trên máy yếu — nhiều SW MV3 cold-start cùng lúc → tranh CPU → SW không lên → reopen/reload. Giới
+    // hạn ở đây (mặc định 3) để chỉ vài cái dựng SW một lúc; cái nào SW lên thì THẢ cổng cho cái kế →
+    // tổng số Brave chạy vẫn cao (30-50) mà SW vẫn lên ổn định, chỉ chậm lúc ramp. Chỉnh được từ ngoài.
+    public static int WarmupSlots { get; set; } = 3;
+    private static readonly SemaphoreSlim WarmupGate = new(Math.Max(1, WarmupSlots), Math.Max(1, WarmupSlots));
 
     private async Task AutoWorkerAsync(
         int slot, WorkAllocator work, AccountRotation rotation, string? cookieFile,
@@ -269,6 +284,9 @@ public sealed class ScrapeRunner
         try
         {
             session = new BraveInstanceSession(port, line => InstanceLog?.Invoke(key, line));
+            // Cổng warmup dùng CHUNG mọi instance: giới hạn số SW cold-start đồng thời.
+            session.WarmupAcquire = WarmupGate.WaitAsync;
+            session.WarmupRelease = () => WarmupGate.Release();
             _sessions[key] = session;
             session.StatusChanged += () => InstanceStatus?.Invoke(key, session!.StatusText);
             // Báo tiến độ theo TỪNG DÒNG (live) — engine cập nhật cfg.LastCompletedRow + bắn ExtensionProgressSynced
@@ -286,6 +304,8 @@ public sealed class ScrapeRunner
                 }
             };
             if (!string.IsNullOrWhiteSpace(cookieFile)) session.SetBigSellerCookieFile(cookieFile);
+            // Proxy riêng tk BigSeller (nếu có) → engine phân giải IP mỗi lần mở Brave + split-tunnel bigseller.com.
+            session.SetBigSellerProxy(_bigSellerKiotKey, _bigSellerRegion, _bigSellerProxyType);
             // Import session Shopee đã đăng nhập (profile Edge của tk) → khỏi login form → tránh captcha.
             session.SetShopeeSessionProfileDir(spec.ShopeeProfileDir);
             session.ApplyConfig(cfg);

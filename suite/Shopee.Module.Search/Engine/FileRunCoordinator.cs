@@ -327,7 +327,9 @@ public sealed class FileRunCoordinator
                     return null;
 
                 var now = Environment.TickCount64;
-                pick = candidates.FirstOrDefault(a => !_busy.Contains(a.Id) && !IsResting(a.Id, now));
+                // Chọn NGẪU NHIÊN trong nhóm khả dụng (free + hết nghỉ) → không nện mãi mấy acc đầu, cho acc luân phiên nghỉ.
+                var eligible = candidates.Where(a => !_busy.Contains(a.Id) && !IsResting(a.Id, now)).ToList();
+                pick = eligible.Count > 0 ? eligible[Random.Shared.Next(eligible.Count)] : null;
                 if (pick is not null)
                     _busy.Add(pick.Id);
             }
@@ -348,6 +350,7 @@ public sealed class FileRunCoordinator
     private void MarkErrored(InstanceConfig account, string reason)
     {
         lock (_accLock) _errored.Add(account.Id);
+        ShopeeAccountUsage.Shared.MarkCaptcha(account.Id);   // cột "Tình trạng" → "⚠ Captcha"
         AccountErrored?.Invoke(account.Id, reason);
     }
 

@@ -8,10 +8,10 @@
 const SCRAPE_SCRIPT = "content.js";
 const OVERLAY_SCRIPT = "overlay.js";
 const TAB_LOAD_TIMEOUT_MS = 30_000;
-// Phải >= MAX_FIND_MS (30s tìm nút) + MAX_RESULT_MS (60s chờ BigSeller báo kết quả) trong content.js
-// + buffer. content.js nay KHÔNG báo xong trước khi click nữa, mà CLICK rồi CHỜ toast kết quả thật
-// (success/failed/login first). Nếu waiter hết giờ trước → "Thử lại scrape (lần 1)" oan. Để 95s.
-const SCRAPE_WAIT_TIMEOUT_MS = 95_000;
+// content.js nay chờ kết quả THEO TRẠNG THÁI BigSeller (còn "scraping" thì chờ tới khi xong, không
+// đặt giờ cứng). Waiter background CHỈ là chốt chặn rất rộng để không cắt content.js giữa chừng (cắt
+// sớm → tưởng fail → reload + click lại). Để 9' (> watchdog 8' — watchdog mới là cơ chế xử lý kẹt thật).
+const SCRAPE_WAIT_TIMEOUT_MS = 540_000;
 const CAPTCHA_WAIT_TIMEOUT_MS = 10 * 60_000;
 const CAPTCHA_CHECK_INTERVAL_MS = 2_000;
 const MAX_SCRAPE_RETRIES = 1;
@@ -347,8 +347,13 @@ const checkPageLoadSuccess = async (tabId) => {
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const detectCaptcha = async (tabId) => {
+  // URL của tab đọc qua chrome.tabs (KHÔNG cần inject). Trang /verify/captcha của Shopee có thể CHẶN
+  // inject content script → executeScript ném lỗi → nếu chỉ dựa vào inject sẽ BỎ SÓT captcha. Vì vậy
+  // bắt captcha theo URL ở ngay tầng background (kể cả khi inject lỗi).
+  let tabUrl = "";
+  try { tabUrl = await getCurrentTabUrl(tabId); } catch (_) {}
+  const urlIsVerify = /\/verify(?:\/|$)/i.test(tabUrl);
   try {
-    const tabUrl = await getCurrentTabUrl(tabId);
     const results = await chrome.scripting.executeScript({
       target: { tabId },
       args: [tabUrl],
@@ -410,15 +415,38 @@ const detectCaptcha = async (tabId) => {
           verifyPath = verifyPath || /^\/verify(?:\/|$)/i.test(new URL(url).pathname);
         } catch (_) {}
         const captchaText =
+          // English
           text.includes("verify to continue") ||
-          text.includes("please slide to complete the puzzle");
-        const captchaVisible = captchaText;
+          text.includes("complete the puzzle") ||   // "please slide to complete the puzzle" + biến thể
+          text.includes("slide to verify") ||
+          text.includes("drag the slider") ||
+          text.includes("press & hold") || text.includes("press and hold") ||
+          text.includes("verify it's you") || text.includes("verify its you") ||
+          // Tiếng Việt (Shopee hiển thị captcha theo ngôn ngữ trang)
+          text.includes("trượt để") ||              // "Vui lòng trượt để hoàn thành câu đố"
+          text.includes("hoàn thành câu đố") ||
+          text.includes("xác minh để tiếp tục") ||
+          text.includes("vui lòng xác minh") ||
+          text.includes("xác nhận bạn không phải") || // "...không phải người máy/robot"
+          text.includes("nhấn giữ");                // "Nhấn giữ để xác minh"
+        // Phòng captcha KHÔNG khớp text (vd nằm trong iframe/khung riêng): phát hiện khung captcha hiển thị.
+        let captchaEl = false;
+        try {
+          for (const el of document.querySelectorAll(
+            "iframe[src*='captcha' i], iframe[src*='verify' i], .secsdk-captcha-drag-icon, " +
+            "[class*='captcha_verify' i], [class*='geetest' i], [class*='captcha-slide' i]")) {
+            if (isVisible(el)) { captchaEl = true; break; }
+          }
+        } catch (_) {}
+        const captchaVisible = captchaText || captchaEl;
         return { detected: captchaVisible || verifyPath, scrapeReady, captchaVisible, title: document.title || "", url };
       },
     });
-    return results?.[0]?.result ?? { detected: false, title: "", url: "" };
+    const r = results?.[0]?.result ?? { detected: false, title: "", url: tabUrl };
+    return { ...r, detected: r.detected || urlIsVerify, captchaVisible: r.captchaVisible || urlIsVerify };
   } catch (_) {
-    return { detected: false, title: "", url: "" };
+    // Inject lỗi (trang /verify chặn content script) → vẫn báo captcha dựa trên URL /verify của tab.
+    return { detected: urlIsVerify, scrapeReady: false, captchaVisible: urlIsVerify, title: "", url: tabUrl };
   }
 };
 
@@ -707,7 +735,21 @@ globalThis.__launcherExecuteScrapeStep = async (payload) => {
       scrapeResult = await scrapeWaiterPromise;
     }
 
-    for (let retry = 1; retry <= MAX_SCRAPE_RETRIES && !scrapeResult?.ok && !abortRequested; retry++) {
+    // BigSeller báo "Failed, log in BigSeller first" → token tk này đã chết. RETRY/RELOAD là VÔ NGHĨA
+    // (mọi dòng sẽ fail y hệt) và chính là thủ phạm vòng "scrape → reload → scrape" ở 1 tk khi 3 tk kia
+    // chạy ngon. DỪNG NGAY, báo needLogin để launcher dừng job tk đó + yêu cầu đăng nhập lại — KHÔNG reload.
+    if (scrapeResult?.needLogin) {
+      return {
+        ok: false,
+        scrapeOk: false,
+        needLogin: true,
+        message: scrapeResult.message || "BigSeller chưa đăng nhập — cần đăng nhập lại tài khoản BigSeller.",
+        tabId,
+        pageUrl: await getCurrentTabUrl(tabId, link),
+      };
+    }
+
+    for (let retry = 1; retry <= MAX_SCRAPE_RETRIES && !scrapeResult?.ok && !scrapeResult?.needLogin && !abortRequested; retry++) {
       if (!(await getTabSafe(tabId))) {
         tabId = await openLinkInTab(await findReuseableScrapeTab(), link);
         await waitForTabComplete(tabId);

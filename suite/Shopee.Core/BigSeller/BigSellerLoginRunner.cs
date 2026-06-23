@@ -18,7 +18,8 @@ public static class BigSellerLoginRunner
     /// cookie. Hủy qua <paramref name="ct"/> (nút Dừng). Tự đóng Brave khi xong.
     /// </summary>
     public static async Task<bool> RunLoginAsync(
-        string cookieFile, string profileDir, Action<string> log, CancellationToken ct, Action? onSaved = null)
+        string cookieFile, string profileDir, Action<string> log, CancellationToken ct, Action? onSaved = null,
+        string? proxyServer = null)
     {
         if (string.IsNullOrWhiteSpace(cookieFile))
         {
@@ -39,39 +40,49 @@ public static class BigSellerLoginRunner
         var saved = false;
         try
         {
-            log("Đang mở Brave (không proxy) tới BigSeller…");
-            launcher.Launch(profileDir, proxyServer: null, ListingUrl);
+            // Có proxy riêng cho tk BigSeller → ĐĂNG NHẬP cũng qua proxy đó (cùng IP với lúc scrape, vì
+            // scrape route bigseller.com qua proxy này) → token lưu ra khớp IP, tránh bị nghi phiên lạ.
+            // Không có proxy → mở IP máy như cũ.
+            if (string.IsNullOrWhiteSpace(proxyServer))
+                log("Đang mở Brave (IP máy, không proxy) tới BigSeller…");
+            else
+                log($"Đang mở Brave QUA PROXY {proxyServer} tới BigSeller (khớp IP với scrape)…");
+            launcher.Launch(profileDir, proxyServer, ListingUrl);
             var port = launcher.CdpPort;
 
             // Kết nối cấp BROWSER (không gắn vào 1 page) → đọc cookie không bị đứt khi trang
             // login điều hướng/redirect. Đây là điểm khác bản cũ (page-session chết lúc login).
             cdp = await CdpSession.ConnectToBrowserAsync(port, ct);
 
-            // Đã có cookie lưu trước đó → NẠP vào profile (Storage.setCookies) + reload trang để
-            // hiện ĐĂNG NHẬP SẴN, không bắt login lại. Nếu cookie hết hạn thì trang vẫn hiện form
-            // để đăng nhập mới. Nhờ vậy không phụ thuộc việc profile có giữ phiên hay không.
-            if (File.Exists(cookieFile))
+            // KHÔNG nạp token cũ từ file vào profile rồi navigate lại nữa! Đó CHÍNH là nguyên nhân mất
+            // cookie: nạp muc_token cũ + tải lại trang xác thực BigSeller → server (cơ chế remember/refresh)
+            // TÁI CẤP token mới + VÔ HIỆU token cũ server-side; rồi poll thấy token-vừa-nạp tưởng "đã đăng
+            // nhập" → ghi đè file bằng token CŨ (đã chết) → lần scrape sau báo "log in BigSeller first".
+
+            // XÓA SẠCH cookie cũ trong profile login TRƯỚC khi đăng nhập → ép đăng nhập THẬT. LÝ DO: profile
+            // bền có thể còn muc_token CŨ (đã chết/hết hạn). HasAuthCookie chỉ xét "có cookie dài >5 ký tự",
+            // không phân biệt sống/chết → poll thấy token chết cũng báo "✔ thành công" + lưu token CHẾT ra
+            // file → lần scrape sau cả 2 Brave của tk đó fail "log in BigSeller first" NGAY (đúng kiểu tk 2,4
+            // chết còn 1,3 sống tùy token cũ còn hạn hay không). Xóa sạch → muc_token CHỈ xuất hiện sau khi
+            // user đăng nhập thật → token lưu ra file LUÔN là token đang sống. (Đánh đổi: mỗi lần mở phải đăng
+            // nhập lại — chấp nhận được để đổi lấy token chắc chắn sống.)
+            try
             {
-                var imported = await ImportCookiesFromFileAsync(cdp, cookieFile, ct);
-                if (imported > 0)
-                {
-                    log($"Đã nạp {imported} cookie đã lưu — nếu còn hạn, trang sẽ tự đăng nhập.");
-                    try
-                    {
-                        var pg = await CdpSession.ConnectToPageAsync(port, ct);
-                        await pg.SendNoReplyAsync("Page.navigate", new { url = ListingUrl }, ct);
-                        await pg.DisposeAsync();
-                    }
-                    catch { }
-                    await Task.Delay(1500, ct);
-                }
+                await cdp.SendAsync("Storage.clearCookies", null, ct);
+                var pg = await CdpSession.ConnectToPageAsync(port, ct);
+                await pg.SendNoReplyAsync("Page.navigate", new { url = ListingUrl }, ct);
+                await pg.DisposeAsync();
+                log("Đã xóa phiên cũ — hãy đăng nhập BigSeller để lưu token mới (đảm bảo còn sống).");
             }
+            catch { }
 
             log("Đăng nhập BigSeller trong cửa sổ Brave. Cookie sẽ tự lưu khi phát hiện đăng nhập.");
             log("File cookie: " + cookieFile);
             log("ⓘ Cửa sổ sẽ KHÔNG tự đóng — bấm Dừng khi muốn đóng.");
 
             var pollsBeforeLogin = 0;
+            var lastCookieCount = -1;
+            var stablePolls = 0;
             while (!ct.IsCancellationRequested)
             {
                 await Task.Delay(3000, ct);
@@ -97,13 +108,28 @@ public static class BigSellerLoginRunner
 
                 if (HasAuthCookie(cookies))
                 {
-                    // Đã đăng nhập: lưu (và refresh mỗi vòng để file luôn mới). KHÔNG tự đóng cửa sổ
-                    // và KHÔNG timeout — cứ để mở tới khi người dùng bấm Dừng.
-                    if (TryWriteCookieFile(cookieFile, cookies, log) && !saved)
+                    // CHỜ BỘ COOKIE ỔN ĐỊNH rồi mới lưu. LÝ DO: ngay khi muc_token vừa xuất hiện, phiên
+                    // BigSeller MỚI có vài cookie (vd ~9), CHƯA đủ (~19). Nếu lưu ngay (như trước) → file
+                    // thiếu cookie phiên → scrape báo "log in BigSeller first" dù vừa "đăng nhập thành công".
+                    // Đợi số cookie KHÔNG tăng nữa qua 2 vòng (≈6s) = phiên đã nạp đủ → mới lưu BỘ ĐẦY ĐỦ.
+                    var n = cookies.Count;
+                    if (n == lastCookieCount) stablePolls++;
+                    else { stablePolls = 0; lastCookieCount = n; }
+
+                    if (stablePolls >= 2)
                     {
-                        saved = true;
-                        log("✔ Đăng nhập thành công! Đã lưu cookie. Cửa sổ vẫn mở — bấm Dừng để đóng.");
-                        try { onSaved?.Invoke(); } catch { }
+                        // Lưu (và refresh mỗi vòng để file luôn mới). KHÔNG tự đóng cửa sổ, KHÔNG timeout.
+                        var wrote = TryWriteCookieFile(cookieFile, cookies, log);
+                        if (wrote && !saved)
+                        {
+                            saved = true;
+                            log($"✔ Đăng nhập thành công! Đã lưu {n} cookie (phiên đầy đủ). Bấm Dừng để đóng.");
+                            try { onSaved?.Invoke(); } catch { }
+                        }
+                    }
+                    else if (!saved)
+                    {
+                        log($"Đã đăng nhập — đang chờ phiên nạp đủ cookie ({n})…");
                     }
                     continue;
                 }

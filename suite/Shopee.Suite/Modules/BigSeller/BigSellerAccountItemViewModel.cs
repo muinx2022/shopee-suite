@@ -48,6 +48,31 @@ public sealed class BigSellerAccountItemViewModel : ObservableObject
         set { if (Model.CookieFile != value) { Model.CookieFile = value; OnChanged(nameof(CookieFile), nameof(CookieStatus)); Persist(); } }
     }
 
+    /// <summary>KiotProxy key RIÊNG cho tk BigSeller này. Có key → bigseller.com (login + scrape) đi qua
+    /// IP của proxy này → mỗi tk 1 IP → chạy SONG SONG nhiều tk không bị đá phiên. Trống → đi IP máy
+    /// (khi đó các tk BigSeller chạy LẦN LƯỢT).</summary>
+    public string KiotProxyKey
+    {
+        get => Model.KiotProxyKey;
+        set { if (Model.KiotProxyKey != value) { Model.KiotProxyKey = value; OnChanged(nameof(KiotProxyKey), nameof(ProxyStatus)); Persist(); } }
+    }
+
+    public string Region
+    {
+        get => Model.Region;
+        set { if (Model.Region != value) { Model.Region = value; OnPropertyChanged(); Persist(); } }
+    }
+
+    public string ProxyType
+    {
+        get => Model.ProxyType;
+        set { if (Model.ProxyType != value) { Model.ProxyType = value; OnPropertyChanged(); Persist(); } }
+    }
+
+    public string ProxyStatus => Model.HasProxy
+        ? "✓ Có proxy riêng → chạy song song nhiều tk"
+        : "ⓘ Không proxy → đi IP máy, các tk chạy lần lượt";
+
     public string DisplayName => Model.DisplayName;
     public int ShopCount => Shops.Count;
     public string CookieStatus => Model.HasCookie ? "✓ Đã có cookie BigSeller" : "⚠ Chưa đăng nhập BigSeller";

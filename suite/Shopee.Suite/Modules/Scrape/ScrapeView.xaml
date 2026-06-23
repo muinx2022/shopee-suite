@@ -43,15 +43,17 @@
             </Grid>
         </Border>
 
-        <!-- Master-detail -->
+        <!-- 3 cột: (1) tk BigSeller · (2) cấu hình · (3) danh sách đang chạy -->
         <Grid Grid.Row="2">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="300" MinWidth="240" />
-                <ColumnDefinition Width="14" />
-                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="280" MinWidth="220" />
+                <ColumnDefinition Width="12" />
+                <ColumnDefinition Width="1.05*" MinWidth="350" />
+                <ColumnDefinition Width="12" />
+                <ColumnDefinition Width="1.25*" MinWidth="360" />
             </Grid.ColumnDefinitions>
 
-            <!-- LEFT: BigSeller account list (tick chọn để chạy; click để cấu hình) -->
+            <!-- CỘT 1: BigSeller account list (tick chọn để chạy; click để cấu hình) -->
             <DockPanel Grid.Column="0">
                 <Grid DockPanel.Dock="Top" Margin="0,0,0,8">
                     <TextBlock Text="Tài khoản BigSeller" Style="{StaticResource Caption}" VerticalAlignment="Center" />
@@ -86,109 +88,93 @@
                 </Border>
             </DockPanel>
 
-            <!-- RIGHT: detail config (tk đang click) + tiến trình -->
-            <Grid Grid.Column="2">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="*" />
-                </Grid.RowDefinitions>
+            <!-- CỘT 2: cấu hình chi tiết của tk đang click -->
+            <DockPanel Grid.Column="2">
+                <TextBlock DockPanel.Dock="Top" Text="Cấu hình" Style="{StaticResource Caption}" Margin="0,0,0,8" VerticalAlignment="Center" />
+                <Grid>
+                    <TextBlock Text="Click 1 tài khoản BigSeller bên trái để cấu hình."
+                               Style="{StaticResource Caption}" VerticalAlignment="Top" TextWrapping="Wrap"
+                               Visibility="{Binding HasSelectedTarget, Converter={StaticResource InverseBoolToVis}}" />
 
-                <!-- Detail của tk đang chọn -->
-                <TextBlock Grid.Row="0" Text="Click 1 tài khoản BigSeller bên trái để cấu hình."
-                           Style="{StaticResource Caption}" VerticalAlignment="Top"
-                           Visibility="{Binding HasSelectedTarget, Converter={StaticResource InverseBoolToVis}}" />
+                    <Border Style="{StaticResource Card}" Padding="16"
+                            DataContext="{Binding SelectedTarget}"
+                            Visibility="{Binding DataContext.HasSelectedTarget, ElementName=Root, Converter={StaticResource BoolToVis}}">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <StackPanel>
+                                <Grid Margin="0,0,0,10">
+                                    <TextBlock Text="{Binding DisplayName}" Style="{StaticResource H2}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Text="{Binding CookieStatus}" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                               FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" />
+                                </Grid>
 
-                <Border Grid.Row="0" Style="{StaticResource Card}" Padding="16" Margin="0,0,0,12"
-                        DataContext="{Binding SelectedTarget}"
-                        Visibility="{Binding DataContext.HasSelectedTarget, ElementName=Root, Converter={StaticResource BoolToVis}}">
-                    <StackPanel>
-                        <Grid Margin="0,0,0,10">
-                            <TextBlock Text="{Binding DisplayName}" Style="{StaticResource H2}" VerticalAlignment="Center" />
-                            <TextBlock Text="{Binding CookieStatus}" HorizontalAlignment="Right" VerticalAlignment="Center"
-                                       FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" />
-                        </Grid>
+                                <TextBlock Text="Workbook" Style="{StaticResource Caption}" />
+                                <TextBox Text="{Binding WorkbookPath, Mode=OneWay}" IsReadOnly="True" Margin="0,3,0,10"
+                                         FontFamily="{StaticResource MonoFont}" FontSize="11.5" TextWrapping="Wrap" />
 
-                        <TextBlock Text="Workbook" Style="{StaticResource Caption}" />
-                        <TextBox Text="{Binding WorkbookPath, Mode=OneWay}" IsReadOnly="True" Margin="0,3,0,10"
-                                 FontFamily="{StaticResource MonoFont}" FontSize="11.5" />
-
-                        <Grid Margin="0,0,0,10">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="12" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
-                            <StackPanel Grid.Column="0">
                                 <TextBlock Text="Shop (↔ sheet)" Style="{StaticResource Caption}" />
-                                <ComboBox Margin="0,3,0,0" ItemsSource="{Binding Shops}" SelectedItem="{Binding SelectedShop}" DisplayMemberPath="DisplayName" />
+                                <ComboBox Margin="0,3,0,10" ItemsSource="{Binding Shops}" SelectedItem="{Binding SelectedShop}" DisplayMemberPath="DisplayName" />
+
+                                <TextBlock Text="Phân bổ chạy (engine TỰ chia khối dòng cho từng tk Shopee theo 'Dòng / lần')"
+                                           Style="{StaticResource Caption}" Margin="0,0,0,6" TextWrapping="Wrap" />
+                                <WrapPanel>
+                                    <StackPanel Margin="0,0,10,8"><TextBlock Text="Bắt đầu dòng" Style="{StaticResource Caption}" />
+                                        <TextBox Width="84" Margin="0,3,0,0" Text="{Binding StartRow}" /></StackPanel>
+                                    <StackPanel Margin="0,0,10,8"><TextBlock Text="Đến dòng (0=hết)" Style="{StaticResource Caption}" />
+                                        <TextBox Width="100" Margin="0,3,0,0" Text="{Binding EndRow}"
+                                                 ToolTip="Chạy tới dòng này thì dừng. 0 = chạy hết sheet." /></StackPanel>
+                                    <StackPanel Margin="0,0,10,8"><TextBlock Text="Dòng / lần" Style="{StaticResource Caption}" />
+                                        <TextBox Width="84" Margin="0,3,0,0" Text="{Binding RowsPerAccount}" /></StackPanel>
+                                    <StackPanel Margin="0,0,0,8"><TextBlock Text="Số process" Style="{StaticResource Caption}" />
+                                        <TextBox Width="90" Margin="0,3,0,0" Text="{Binding MaxProcess}"
+                                                 ToolTip="Số cửa sổ Brave chạy song song = số tk Shopee acc này dùng (mỗi process 1 tk; captcha thì tự mượn bù)." /></StackPanel>
+                                </WrapPanel>
+
+                                <!-- Tiến độ đã lưu + Thống kê -->
+                                <Border Background="{StaticResource SubtleBrush}" CornerRadius="6" Padding="10,8" Margin="0,12,0,0">
+                                    <StackPanel>
+                                        <TextBlock Text="Tiến độ đã lưu" Style="{StaticResource Caption}" />
+                                        <TextBlock Text="{Binding ProgressText}" Margin="0,2,0,8" FontSize="12.5" TextWrapping="Wrap" />
+                                        <Button HorizontalAlignment="Left" Content="📊 Thống kê" MinWidth="110"
+                                                Command="{Binding DataContext.ShowStatsCommand, ElementName=Root}"
+                                                ToolTip="Xem đầy đủ: bao nhiêu tk đang giữ, đã xong tới dòng nào, nhả tay khi treo." />
+                                    </StackPanel>
+                                </Border>
                             </StackPanel>
-                            <StackPanel Grid.Column="2">
-                                <TextBlock Text="Sheet đang dùng" Style="{StaticResource Caption}" />
-                                <TextBox Margin="0,3,0,0" Text="{Binding SheetName, Mode=OneWay}" IsReadOnly="True" />
-                            </StackPanel>
-                        </Grid>
+                        </ScrollViewer>
+                    </Border>
+                </Grid>
+            </DockPanel>
 
-                        <TextBlock Text="Phân bổ chạy (engine TỰ chia khối dòng cho từng tk Shopee theo 'Dòng / lần')"
-                                   Style="{StaticResource Caption}" Margin="0,0,0,6" />
-                        <StackPanel Orientation="Horizontal">
-                            <StackPanel><TextBlock Text="Bắt đầu dòng" Style="{StaticResource Caption}" />
-                                <TextBox Width="84" Margin="0,3,0,0" Text="{Binding StartRow}" /></StackPanel>
-                            <StackPanel Margin="10,0,0,0"><TextBlock Text="Đến dòng (0=hết)" Style="{StaticResource Caption}" />
-                                <TextBox Width="100" Margin="0,3,0,0" Text="{Binding EndRow}"
-                                         ToolTip="Chạy tới dòng này thì dừng. 0 = chạy hết sheet." /></StackPanel>
-                            <StackPanel Margin="10,0,0,0"><TextBlock Text="Dòng / lần" Style="{StaticResource Caption}" />
-                                <TextBox Width="84" Margin="0,3,0,0" Text="{Binding RowsPerAccount}" /></StackPanel>
-                            <StackPanel Margin="10,0,0,0"><TextBlock Text="Số process" Style="{StaticResource Caption}" />
-                                <TextBox Width="90" Margin="0,3,0,0" Text="{Binding MaxProcess}"
-                                         ToolTip="Số cửa sổ Brave chạy song song = số tk Shopee acc này dùng (mỗi process 1 tk; captcha thì tự mượn bù)." /></StackPanel>
-                        </StackPanel>
-
-                        <!-- Tiến độ đã lưu + Thống kê -->
-                        <Border Background="{StaticResource SubtleBrush}" CornerRadius="6" Padding="10,8" Margin="0,12,0,0">
-                            <Grid>
-                                <StackPanel VerticalAlignment="Center">
-                                    <TextBlock Text="Tiến độ đã lưu" Style="{StaticResource Caption}" />
-                                    <TextBlock Text="{Binding ProgressText}" Margin="0,2,0,0" FontSize="12.5" TextWrapping="Wrap" />
-                                </StackPanel>
-                                <Button HorizontalAlignment="Right" VerticalAlignment="Center" Content="📊 Thống kê" MinWidth="110"
-                                        Command="{Binding DataContext.ShowStatsCommand, ElementName=Root}"
-                                        ToolTip="Xem đầy đủ: bao nhiêu tk đang giữ, đã xong tới dòng nào, nhả tay khi treo." />
-                            </Grid>
-                        </Border>
-                    </StackPanel>
-                </Border>
-
-                <!-- Tiến trình + tk lỗi -->
-                <DockPanel Grid.Row="1">
-                    <TextBlock DockPanel.Dock="Top" Text="Tiến trình scrape (click 1 dòng để đưa cửa sổ Brave đó lên trước)" Style="{StaticResource H2}" Margin="0,0,0,8" />
-                    <StackPanel DockPanel.Dock="Bottom" Margin="0,10,0,0"
-                                Visibility="{Binding ErroredAccounts.Count, Converter={StaticResource CountToVis}}">
-                        <TextBlock Margin="0,0,0,5" FontSize="12.5" FontWeight="SemiBold" Foreground="{StaticResource DangerBrush}">
-                            <Run Text="⚠ Tài khoản lỗi (" /><Run Text="{Binding ErroredAccounts.Count, Mode=OneWay}" /><Run Text=") — đã tự đổi tk" />
-                        </TextBlock>
-                        <Border Style="{StaticResource Card}" MaxHeight="110" ClipToBounds="True">
-                            <DataGrid ItemsSource="{Binding ErroredAccounts}" BorderThickness="0" IsReadOnly="True">
-                                <DataGrid.Columns>
-                                    <DataGridTextColumn Header="Account" Binding="{Binding Account}" Width="1.4*" />
-                                    <DataGridTextColumn Header="Lỗi" Binding="{Binding Reason}" Width="*" />
-                                    <DataGridTextColumn Header="Lúc" Binding="{Binding Time}" Width="80" />
-                                </DataGrid.Columns>
-                            </DataGrid>
-                        </Border>
-                    </StackPanel>
-                    <Border Style="{StaticResource Card}" ClipToBounds="True">
-                        <DataGrid ItemsSource="{Binding Instances}" BorderThickness="0" IsReadOnly="True"
-                                  PreviewMouseLeftButtonUp="Instance_Click">
+            <!-- CỘT 3: danh sách đang chạy + tk lỗi -->
+            <DockPanel Grid.Column="4">
+                <TextBlock DockPanel.Dock="Top" Text="Đang chạy (click 1 dòng để đưa cửa sổ Brave đó lên trước)" Style="{StaticResource Caption}" Margin="0,0,0,8" TextWrapping="Wrap" />
+                <StackPanel DockPanel.Dock="Bottom" Margin="0,10,0,0"
+                            Visibility="{Binding ErroredAccounts.Count, Converter={StaticResource CountToVis}}">
+                    <TextBlock Margin="0,0,0,5" FontSize="12.5" FontWeight="SemiBold" Foreground="{StaticResource DangerBrush}">
+                        <Run Text="⚠ Tài khoản lỗi (" /><Run Text="{Binding ErroredAccounts.Count, Mode=OneWay}" /><Run Text=") — đã tự đổi tk" />
+                    </TextBlock>
+                    <Border Style="{StaticResource Card}" MaxHeight="110" ClipToBounds="True">
+                        <DataGrid ItemsSource="{Binding ErroredAccounts}" BorderThickness="0" IsReadOnly="True">
                             <DataGrid.Columns>
-                                <DataGridTextColumn Header="Process" Binding="{Binding Label}" Width="1.4*" />
-                                <DataGridTextColumn Header="Tài khoản đang chạy" Binding="{Binding AccountName}" Width="1.4*" />
-                                <DataGridTextColumn Header="Dòng" Binding="{Binding RangeText}" Width="120" />
-                                <DataGridTextColumn Header="Trạng thái" Binding="{Binding Status}" Width="1.8*" />
+                                <DataGridTextColumn Header="Account" Binding="{Binding Account}" Width="1.4*" />
+                                <DataGridTextColumn Header="Lỗi" Binding="{Binding Reason}" Width="*" />
+                                <DataGridTextColumn Header="Lúc" Binding="{Binding Time}" Width="80" />
                             </DataGrid.Columns>
                         </DataGrid>
                     </Border>
-                </DockPanel>
-            </Grid>
+                </StackPanel>
+                <Border Style="{StaticResource Card}" ClipToBounds="True">
+                    <DataGrid ItemsSource="{Binding Instances}" BorderThickness="0" IsReadOnly="True"
+                              PreviewMouseLeftButtonUp="Instance_Click">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Process" Binding="{Binding Label}" Width="1.2*" />
+                            <DataGridTextColumn Header="Tài khoản" Binding="{Binding AccountName}" Width="1.3*" />
+                            <DataGridTextColumn Header="Dòng" Binding="{Binding RangeText}" Width="90" />
+                            <DataGridTextColumn Header="Trạng thái" Binding="{Binding Status}" Width="1.8*" />
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </Border>
+            </DockPanel>
         </Grid>
 
         <!-- Log -->

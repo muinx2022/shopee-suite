@@ -73,6 +73,9 @@
                                             <DataTrigger Binding="{Binding UsageStatus}" Value="Đã dùng">
                                                 <Setter Property="Foreground" Value="{StaticResource AccentBrush}" />
                                             </DataTrigger>
+                                            <DataTrigger Binding="{Binding UsageStatus}" Value="⚠ Captcha">
+                                                <Setter Property="Foreground" Value="{StaticResource DangerBrush}" />
+                                            </DataTrigger>
                                         </Style.Triggers>
                                     </Style>
                                 </DataGridTextColumn.ElementStyle>

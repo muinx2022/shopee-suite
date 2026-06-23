@@ -7,10 +7,18 @@ internal static class KiotProxyService
     private const string NewUrl = "https://api.kiotproxy.com/api/v1/proxies/new";
     private const string CurrentUrl = "https://api.kiotproxy.com/api/v1/proxies/current";
 
-    public static async Task<Dictionary<string, object>> GetNewProxyAsync(InstanceConfig config, Action<string>? log = null)
+    public static Task<Dictionary<string, object>> GetNewProxyAsync(InstanceConfig config, Action<string>? log = null) =>
+        GetNewProxyAsync(config.KiotProxyKey, config.Region, log);
+
+    public static Task<Dictionary<string, object>> GetCurrentProxyAsync(InstanceConfig config) =>
+        GetCurrentProxyAsync(config.KiotProxyKey);
+
+    /// <summary>Cấp IP MỚI cho <paramref name="key"/> (gọi /new). Dùng được cho cả proxy Shopee (qua
+    /// InstanceConfig) lẫn proxy RIÊNG của tk BigSeller (truyền key trực tiếp).</summary>
+    public static async Task<Dictionary<string, object>> GetNewProxyAsync(string? key, string? region, Action<string>? log = null)
     {
-        var key = config.KiotProxyKey.Trim();
-        var region = string.IsNullOrWhiteSpace(config.Region) ? "random" : config.Region.Trim();
+        key = key?.Trim();
+        region = string.IsNullOrWhiteSpace(region) ? "random" : region.Trim();
         if (string.IsNullOrWhiteSpace(key))
             throw new InvalidOperationException("Can nhap KiotProxy key.");
 
@@ -25,9 +33,11 @@ internal static class KiotProxyService
         return ParseProxyResponse(json);
     }
 
-    public static async Task<Dictionary<string, object>> GetCurrentProxyAsync(InstanceConfig config)
+    /// <summary>Lấy IP HIỆN HÀNH (sticky ~30') của <paramref name="key"/> (gọi /current). Ném nếu key chưa
+    /// kích hoạt / IP hết hạn → caller fallback sang /new.</summary>
+    public static async Task<Dictionary<string, object>> GetCurrentProxyAsync(string? key)
     {
-        var key = config.KiotProxyKey.Trim();
+        key = key?.Trim();
         if (string.IsNullOrWhiteSpace(key))
             throw new InvalidOperationException("Can nhap KiotProxy key.");
 

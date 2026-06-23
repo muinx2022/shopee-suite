@@ -119,6 +119,31 @@
                             <TextBlock Text="{Binding CookieStatus}" FontSize="12.5" Margin="0,0,0,10"
                                        Foreground="{StaticResource TextSecondaryBrush}" />
 
+                            <!-- Proxy RIÊNG cho tk BigSeller (tuỳ chọn). Có key → bigseller.com (login + scrape)
+                                 đi qua IP này → mỗi tk 1 IP → chạy SONG SONG nhiều tk không bị đá phiên.
+                                 Trống → đi IP máy, các tk BigSeller chạy LẦN LƯỢT. -->
+                            <TextBlock Text="Proxy riêng cho BigSeller (KiotProxy — tuỳ chọn)" Style="{StaticResource Caption}" />
+                            <Grid Margin="0,3,0,2">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="10" />
+                                    <ColumnDefinition Width="120" />
+                                    <ColumnDefinition Width="10" />
+                                    <ColumnDefinition Width="110" />
+                                </Grid.ColumnDefinitions>
+                                <TextBox Grid.Column="0" Text="{Binding KiotProxyKey, UpdateSourceTrigger=LostFocus}"
+                                         FontFamily="{StaticResource MonoFont}"
+                                         ToolTip="KiotProxy key riêng cho tk BigSeller này. Trống = đi IP máy (các tk chạy lần lượt)." />
+                                <TextBox Grid.Column="2" Text="{Binding Region, UpdateSourceTrigger=LostFocus}"
+                                         ToolTip="Vùng KiotProxy (random/north/central/south)." />
+                                <ComboBox Grid.Column="4" SelectedValue="{Binding ProxyType, Mode=TwoWay}" SelectedValuePath="Content">
+                                    <ComboBoxItem Content="http" />
+                                    <ComboBoxItem Content="socks5" />
+                                </ComboBox>
+                            </Grid>
+                            <TextBlock Text="{Binding ProxyStatus}" FontSize="11.5" Margin="0,0,0,10"
+                                       Foreground="{StaticResource TextSecondaryBrush}" />
+
                             <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
                                 <Button Style="{StaticResource PrimaryButton}" Content="Đăng nhập BigSeller" MinWidth="160"
                                         Command="{Binding DataContext.LoginCommand, ElementName=Root}" />
@@ -126,7 +151,7 @@
                                         Command="{Binding DataContext.StopLoginCommand, ElementName=Root}" />
                                 <TextBlock VerticalAlignment="Center" Margin="12,0,0,0" FontSize="12"
                                            Foreground="{StaticResource TextSecondaryBrush}"
-                                           Text="Brave mở KHÔNG proxy → đăng nhập → cookie tự lưu." />
+                                           Text="Có proxy → đăng nhập qua proxy đó; không → IP máy. Cookie tự lưu." />
                             </StackPanel>
 
                             <Border Height="84" CornerRadius="6" ClipToBounds="True" Margin="0,2,0,14"

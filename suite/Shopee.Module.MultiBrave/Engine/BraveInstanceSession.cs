@@ -66,12 +66,46 @@ internal sealed class BraveInstanceSession : IDisposable
     public void SetBigSellerCookieFile(string? cookieFile) =>
         _bigSellerCookieFile = cookieFile?.Trim() ?? "";
 
+    /// <summary>
+    /// Proxy RIÊNG cho tk BigSeller (KiotProxy key/region/type). Có key → traffic bigseller.com đi qua
+    /// proxy này (split-tunnel PAC, xem BraveProfileManager) thay vì IP máy → mỗi tk BigSeller 1 IP.
+    /// Phân giải LẠI mỗi lần mở Brave (ưu tiên /current sticky) để không dùng IP đã hết hạn.
+    /// </summary>
+    private string _bigSellerProxyKey = "";
+    private string _bigSellerProxyRegion = "random";
+    private string _bigSellerProxyType = "http";
+
+    public void SetBigSellerProxy(string? key, string? region, string? proxyType)
+    {
+        _bigSellerProxyKey = key?.Trim() ?? "";
+        _bigSellerProxyRegion = string.IsNullOrWhiteSpace(region) ? "random" : region!.Trim();
+        _bigSellerProxyType = string.IsNullOrWhiteSpace(proxyType) ? "http" : proxyType!.Trim();
+    }
+
+    private async Task<string?> ResolveBigSellerProxyServerAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_bigSellerProxyKey))
+            return null;
+        var server = await BigSellerProxyResolver.ResolveServerAsync(
+            _bigSellerProxyKey, _bigSellerProxyRegion, _bigSellerProxyType, Log).ConfigureAwait(false);
+        if (server is not null)
+            Log($"Proxy BigSeller (key riêng): {server} — bigseller.com đi IP này, Shopee giữ proxy riêng.");
+        return server;
+    }
+
     public event Action? StatusChanged;
     public event Action<string>? LogLine;
     public event Action? ExtensionProgressSynced;
     public event Action<InstanceConfig>? ExtensionInterrupted;
     /// <summary>Runner loop kết thúc (xong / dừng / lỗi) — dùng cho chạy lượt.</summary>
     public event Action<string>? RunnerLoopEnded;
+
+    // Cổng warmup (do ScrapeRunner cấp): GIỚI HẠN số instance đang "dựng SW" (cold-start) ĐỒNG THỜI.
+    // Acquire trước khi chờ SW (onBeforeExtensionReady), THẢ ngay khi SW lên (onAfterExtensionReady) —
+    // KHÔNG giữ suốt phiên scrape. Nhờ vậy tổng Brave chạy vẫn nhiều, nhưng chỉ vài cái cold-start SW
+    // cùng lúc → máy yếu không nghẽn → SW lên ổn định (kể cả khi định chạy 30-50 Brave).
+    public Func<CancellationToken, Task>? WarmupAcquire { get; set; }
+    public Action? WarmupRelease { get; set; }
 
     public bool IsRunning => _running;
     public bool IsBusy => _busy;
@@ -344,6 +378,10 @@ internal sealed class BraveInstanceSession : IDisposable
         _runnerLoopTask = Task.Run(async () =>
         {
             _runnerLoopRequested = true;
+            // Cổng warmup: giữ trong lúc chờ SW cold-start, thả khi SW lên (onAfter) / lỗi (catch) / kết
+            // thúc (finally). Khai báo NGOÀI try để finally truy cập được → không rò permit (tránh deadlock).
+            var warmupHeld = false;
+            void ReleaseWarmup() { if (warmupHeld) { warmupHeld = false; WarmupRelease?.Invoke(); } }
             try
             {
                 var braveDied = _running && _braveProcess is not null && _braveProcess.HasExited;
@@ -396,10 +434,17 @@ internal sealed class BraveInstanceSession : IDisposable
                             {
                                 StopSwPinner();
                                 await Task.Delay(400, loopToken).ConfigureAwait(false);
+                                // Vào hàng đợi cold-start SW: chỉ vài instance dựng SW cùng lúc (máy yếu đỡ nghẽn).
+                                if (WarmupAcquire is not null)
+                                {
+                                    await WarmupAcquire(loopToken).ConfigureAwait(false);
+                                    warmupHeld = true;
+                                }
                             },
                             onAfterExtensionReady: () =>
                             {
                                 StartSwPinner();
+                                ReleaseWarmup();   // SW đã lên → thả cổng NGAY cho instance kế (không giữ suốt scrape)
                                 return Task.CompletedTask;
                             }).ConfigureAwait(false);
                     }
@@ -408,14 +453,26 @@ internal sealed class BraveInstanceSession : IDisposable
                         extensionRetryCount < MaxExtensionRelaunchRetries &&
                         IsExtensionConnectionError(ex.Message))
                     {
+                        ReleaseWarmup();   // lỗi giữa before↔after → thả cổng trước khi reopen (vòng sau tự acquire lại)
                         extensionRetryCount++;
                         Log($"Extension/CDP không phản hồi — tự đóng/mở lại profile rồi thử chạy lại ({extensionRetryCount}/{MaxExtensionRelaunchRetries})…");
                         await RestartProfileForExtensionErrorAsync().ConfigureAwait(false);
                         await Task.Delay(3500, loopToken).ConfigureAwait(false);
                         profileRoot = ResolveProfileRoot()
                             ?? throw new InvalidOperationException("Profile chưa sẵn sàng sau khi mở lại.");
-                        // Mở lại profile có thể mất cookie BigSeller trong phiên → nạp lại (tự bỏ qua nếu đã có).
-                        await ImportBigSellerCookiesIfConfiguredAsync(loopToken).ConfigureAwait(false);
+                        // Mở lại profile THƯỜNG GIỮ NGUYÊN cookie (Cookies SQLite bền) → token BigSeller ĐANG
+                        // SỐNG (kể cả token server VỪA XOAY lúc scrape) vẫn còn trong browser. CHỈ nạp lại từ
+                        // file khi browser THỰC SỰ mất muc_token. Nạp đè token CŨ (file) lên token đang sống =
+                        // GIẾT phiên → "log in BigSeller first". Đây CHÍNH là lý do thỉnh thoảng 1 instance (vd
+                        // 1/8 Brave) bị "login first" khi chạy nhiều Brave/1 tk: nó tình cờ restart extension
+                        // giữa chừng rồi nạp đè token cũ. App cũ KHÔNG re-import khi restart nên không bị.
+                        if (!string.IsNullOrWhiteSpace(_bigSellerCookieFile))
+                        {
+                            if (await BigSellerCookieImporter.HasAuthCookieInBrowserAsync(_cdpPort).ConfigureAwait(false))
+                                Log("BigSeller cookie: profile mở lại vẫn còn muc_token — GIỮ phiên sống, KHÔNG nạp đè.");
+                            else
+                                await ImportBigSellerCookiesIfConfiguredAsync(loopToken).ConfigureAwait(false);
+                        }
                         proxyAttempt--;
                         continue;
                     }
@@ -468,6 +525,7 @@ internal sealed class BraveInstanceSession : IDisposable
             }
             finally
             {
+                ReleaseWarmup();   // an toàn: thả cổng warmup nếu còn giữ (đường cancel / lỗi khác)
                 _runnerLoopActive = false;
                 ExtensionProgressSynced?.Invoke();
                 if (_runnerLoopRequested && _config is not null)
@@ -847,10 +905,11 @@ internal sealed class BraveInstanceSession : IDisposable
         }
     }
 
-    private string BuildBraveArguments(string userDataDir, string? proxyServer) =>
+    private string BuildBraveArguments(string userDataDir, string? proxyServer, string? bigSellerProxyServer) =>
         BraveProfileManager.BuildBraveArguments(
             _cdpPort, userDataDir, proxyServer, Log, _sourceUserData,
-            loadRunnerExtension: _extensionAutomationEnabled);
+            loadRunnerExtension: _extensionAutomationEnabled,
+            bigSellerProxyServer: bigSellerProxyServer);
 
     /// <summary>
     /// Kill tiến trình Brave đang theo dõi, RỒI đảm bảo CDP port đã nhả hẳn trước khi cho launch lại.
@@ -1094,7 +1153,10 @@ internal sealed class BraveInstanceSession : IDisposable
         PrepareProfileForLaunch(_profileRoot.FullName);
         await KillBraveAndWaitPortFreeAsync().ConfigureAwait(false);
 
-        var args = BuildBraveArguments(_profileRoot.FullName, proxyServer);
+        // Phân giải proxy RIÊNG của tk BigSeller (nếu có key) NGAY trước khi build args → bigseller.com
+        // split-tunnel qua IP này (PAC), Shopee giữ proxyServer của instance. Không key → null = IP máy.
+        var bigSellerProxyServer = await ResolveBigSellerProxyServerAsync().ConfigureAwait(false);
+        var args = BuildBraveArguments(_profileRoot.FullName, proxyServer, bigSellerProxyServer);
         LaunchBrave(_braveExe, args);
         _running = true;
         _proxySummary = proxyServer ?? "(không proxy)";
@@ -1765,9 +1827,10 @@ internal sealed class BraveInstanceSession : IDisposable
         if (string.IsNullOrWhiteSpace(_bigSellerCookieFile) || !_running)
             return;
 
-        // Đã có muc_token sẵn trong profile (persist từ lần trước / chưa hết hạn) → khỏi nạp lại.
-        if (await BigSellerCookieImporter.HasAuthCookieInBrowserAsync(_cdpPort).ConfigureAwait(false))
-            return;
+        // LUÔN re-import token mới nhất từ file (giống app cũ open-multi-brave-v31 vốn chạy tốt với
+        // nhiều Brave/1 BigSeller). KHÔNG skip khi "đã có muc_token": profile bền có thể còn token CŨ
+        // (đã chết sau khi user đăng nhập lại) → skip ⇒ đẩy bằng token chết ⇒ "log in BigSeller first".
+        // Import ghi đè cookie nên luôn cập nhật về token hiện hành trong file.
 
         // Nạp + XÁC NHẬN có muc_token; thử lại tối đa 3 lần (import lần đầu hay flaky do CDP/page chưa
         // sẵn sàng → trước đây nuốt lỗi 1 lần là instance đó dính "login bigseller first").
