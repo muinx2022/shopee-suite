@@ -247,6 +247,9 @@ public sealed partial class ScrapeViewModel : ObservableObject
             // Resume: ưu tiên mượn lại đúng tk đã đặt chỗ trước đó.
             var preferIds = (resume ? ScrapeProgressStore.Shared.Find(account.Id, sheet)?.ReservedShopeeAccountIds : null) ?? [];
 
+            int freeNow; lock (s.AllocLock) freeNow = s.Available.Count;
+            Log($"[{account.DisplayName}] đang xin {need} tk Shopee từ kho (rảnh {freeNow})"
+                + (freeNow < need ? " — CHỜ tk khác nhả (take-all-or-wait)…" : "…"));
             borrowed = await BorrowAsync(s, need, preferIds, ct).ConfigureAwait(false);
             var usable = (borrowed ?? []).Where(a => !a.Disabled).ToList();
             if (usable.Count == 0) { Log($"[{account.DisplayName}] không đủ tk Shopee khả dụng — bỏ qua."); return; }
@@ -357,7 +360,11 @@ public sealed partial class ScrapeViewModel : ObservableObject
         if (s is null || s.MasterCts.IsCancellationRequested) return false;
         var poolCount = AccountStore.Shared.Accounts.Count(a => !a.Disabled);
         if (!ValidateTarget(target, poolCount, out var problem)) { Warn($"Không chạy được: {problem}"); return false; }
-        if (StartJob(s, target, resume: true)) return true;
+        if (StartJob(s, target, resume: true))
+        {
+            Log($"➕ [{target.DisplayName}] đã thêm vào lượt chạy (tiếp tục phần còn thiếu)…");
+            return true;
+        }
         Log($"[{target.DisplayName}] đang chạy rồi — bỏ qua.");
         return false;
     }
