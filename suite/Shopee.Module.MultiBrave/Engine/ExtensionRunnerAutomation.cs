@@ -63,6 +63,11 @@ internal static class ExtensionRunnerAutomation
         int timeoutSeconds = 90)
     {
         var deadline = DateTime.UtcNow.AddSeconds(timeoutSeconds);
+        // Khi trang đang ở captcha/verify mà SW câm: KHÔNG mở lại profile (reload sẽ mất captcha người
+        // dùng đang giải). Chờ giải tay tối đa 3' rồi mới leo thang. Mốc hết hạn chờ-captcha (đặt lần đầu
+        // phát hiện captcha).
+        DateTime? captchaWaitUntil = null;
+        var captchaWaitLogged = false;
         var lastLog = DateTime.MinValue;
         var lastWake = DateTime.MinValue;
         var lastPopupReopen = DateTime.MinValue;
@@ -162,6 +167,29 @@ internal static class ExtensionRunnerAutomation
                     if (noResponseStreak >= MaxPopupReopenBeforeRelaunch)
                     {
                         var swSummary = await GetAllSwTargetsSummaryAsync(cdpPort, cancellationToken);
+
+                        // ĐANG ở captcha/verify → KHÔNG mở lại profile (reload sẽ xoá captcha đang giải).
+                        // Chờ giải tay tối đa 3'; giải xong → trang rời /verify, SW phản hồi lại → probe OK.
+                        var onCaptcha = swSummary.Contains("/verify", StringComparison.OrdinalIgnoreCase)
+                                     || swSummary.Contains("captcha", StringComparison.OrdinalIgnoreCase);
+                        if (onCaptcha)
+                        {
+                            captchaWaitUntil ??= DateTime.UtcNow.AddMinutes(3);
+                            if (DateTime.UtcNow < captchaWaitUntil.Value)
+                            {
+                                if (!captchaWaitLogged)
+                                {
+                                    log?.Invoke("  ⚠ Trang đang ở captcha/verify — CHỜ giải tay (tối đa 3'), KHÔNG mở lại profile…");
+                                    captchaWaitLogged = true;
+                                }
+                                noResponseStreak = 0;
+                                deadline = DateTime.UtcNow.AddSeconds(20); // gia hạn vòng ngoài để không hết 90s khi đang chờ captcha
+                                await Task.Delay(3000, cancellationToken);
+                                continue;
+                            }
+                            // Quá 3' vẫn còn captcha → bỏ cuộc (mở lại / hand off) như thường.
+                        }
+
                         log?.Invoke($"  → SW vẫn không phản hồi sau {noResponseStreak} lần mở popup [json/list: {swSummary}] — mở lại profile để nạp lại extension…");
                         throw new InvalidOperationException(
                             "Service worker extension Shopee Data Runner không phản hồi qua CDP sau nhiều lần thử — mở lại profile.");

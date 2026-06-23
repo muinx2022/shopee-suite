@@ -438,6 +438,13 @@ const markCaptchaTab = async (tabId, label) => {
   } catch (_) {}
 };
 
+// Chờ giải captcha bằng TAY tối đa 3': hiện overlay nhắc giải, poll mỗi vài giây. Giải xong
+// (captcha biến mất) → chạy tiếp (waited:true), KHÔNG đánh dấu. Quá 3' vẫn còn → mới báo captcha
+// để launcher đánh dấu lỗi. (Trước đây hàm này thấy captcha là bỏ NGAY → đánh dấu oan dù người
+// dùng có thể giải tay được.)
+const CAPTCHA_MANUAL_WAIT_MS = 3 * 60_000;
+const CAPTCHA_POLL_MS = 3_000;
+
 const waitForCaptchaToClear = async (tabId, context) => {
   const firstCheck = await detectCaptcha(tabId);
   if (!firstCheck.detected) return { ok: true, waited: false };
@@ -448,16 +455,27 @@ const waitForCaptchaToClear = async (tabId, context) => {
   const rowText = rowNumber > 0 ? `dong ${rowNumber}` : "dong hien tai";
   const skuText = sku ? `\nSKU: ${sku}` : "";
   const message =
-    `CAPTCHA - ${instanceName}\n${rowText}${skuText}\nDang chuyen sang profile ke tiep.`;
+    `CAPTCHA - ${instanceName}\n${rowText}${skuText}\nGiai tay giup — tu dong chay tiep khi xong (toi da 3').`;
 
   await injectOverlayManager(tabId);
   await showOverlay(tabId, message);
   await markCaptchaTab(tabId, `CAPTCHA ${instanceName} ${rowText}`);
 
+  const deadline = Date.now() + CAPTCHA_MANUAL_WAIT_MS;
+  while (Date.now() < deadline) {
+    if (abortRequested)
+      return { ok: false, captcha: true, aborted: true, message: `Da huy khi cho giai captcha - ${instanceName}, ${rowText}.` };
+    await sleep(CAPTCHA_POLL_MS);
+    const check = await detectCaptcha(tabId);
+    if (!check.detected)
+      return { ok: true, waited: true }; // đã giải tay xong → chạy tiếp, không đánh dấu
+  }
+
+  // Quá 3' vẫn còn captcha → để launcher đánh dấu captcha/lỗi.
   return {
     ok: false,
     captcha: true,
-    message: `Dung vi captcha - ${instanceName}, ${rowText}.`,
+    message: `Dung vi captcha (qua 3' khong giai tay) - ${instanceName}, ${rowText}.`,
   };
 };
 
