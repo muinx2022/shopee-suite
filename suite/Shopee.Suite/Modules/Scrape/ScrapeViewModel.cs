@@ -161,7 +161,9 @@ public sealed partial class ScrapeViewModel : ObservableObject
                     running = session.Jobs.Values.Select(h => h.Task).ToArray();
                     if (running.Length == 0) { session.Finalizing = true; break; }   // set + break atomically dưới lock
                 }
-                await Task.WhenAny(running).ConfigureAwait(false);
+                // KHÔNG ConfigureAwait(false): giữ UI thread để finally set Status/IsBusy an toàn
+                // (set ObservableProperty + NotifyCanExecuteChanged phải ở UI thread).
+                await Task.WhenAny(running);
             }
         }
         finally
@@ -360,6 +362,10 @@ public sealed partial class ScrapeViewModel : ObservableObject
         if (s is null || s.MasterCts.IsCancellationRequested) return false;
         var poolCount = AccountStore.Shared.Accounts.Count(a => !a.Disabled);
         if (!ValidateTarget(target, poolCount, out var problem)) { Warn($"Không chạy được: {problem}"); return false; }
+        // Acc này giờ THUỘC lượt chạy → đòi lại các tk Shopee mà CHÍNH nó đang đặt-chỗ (đã bị loại khỏi
+        // kho phiên lúc bắt đầu vì khi đó nó là "BigSeller khác"). Không có bước này, acc start giữa chừng
+        // sẽ thiếu tk và kẹt chờ vô hạn ở BorrowAsync.
+        ReclaimReservedToPool(s, target);
         if (StartJob(s, target, resume: true))
         {
             Log($"➕ [{target.DisplayName}] đã thêm vào lượt chạy (tiếp tục phần còn thiếu)…");
@@ -367,6 +373,42 @@ public sealed partial class ScrapeViewModel : ObservableObject
         }
         Log($"[{target.DisplayName}] đang chạy rồi — bỏ qua.");
         return false;
+    }
+
+    /// <summary>Đưa các tk Shopee mà <paramref name="target"/> đang ĐẶT CHỖ (theo tiến độ đã lưu) trở lại
+    /// kho phiên — chỉ những tk chưa có trong kho và đang rảnh thật (không bị job khác trong phiên giữ).</summary>
+    private void ReclaimReservedToPool(RunSession s, ScrapeTargetViewModel target)
+    {
+        var shop = target.SelectedShop;
+        if (shop is null) return;
+        var reserved = ScrapeProgressStore.Shared.Find(target.Account.Id, shop.ShopeeDataSheet)?.ReservedShopeeAccountIds;
+        if (reserved is null || reserved.Count == 0) return;
+
+        // Tk đang bị các job KHÁC trong phiên giữ (đang đặt-chỗ ở store, status running, không phải acc này) → KHÔNG đòi.
+        var heldByOthers = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var pr in ScrapeProgressStore.Shared.All())
+        {
+            if (string.Equals(pr.Status, "completed", StringComparison.OrdinalIgnoreCase)) continue;
+            if (pr.AccountId == target.Account.Id && string.Equals(pr.Sheet ?? "", shop.ShopeeDataSheet ?? "", StringComparison.OrdinalIgnoreCase)) continue;
+            lock (s.JobsLock) if (!s.Jobs.ContainsKey(pr.AccountId)) continue;   // chỉ né tk của job ĐANG chạy trong phiên
+            foreach (var id in pr.ReservedShopeeAccountIds) heldByOthers.Add(id);
+        }
+
+        var added = 0;
+        lock (s.AllocLock)
+        {
+            var have = new HashSet<string>(s.Available.Select(a => a.Id), StringComparer.Ordinal);
+            foreach (var id in reserved)
+            {
+                if (have.Contains(id) || heldByOthers.Contains(id)) continue;
+                var acc = AccountStore.Shared.Find(id);
+                if (acc is null || acc.Disabled) continue;
+                s.Available.Add(acc);
+                have.Add(id);
+                added++;
+            }
+        }
+        if (added > 0) Log($"↩ [{target.DisplayName}] đòi lại {added} tk Shopee đang đặt-chỗ về kho phiên.");
     }
 
     /// <summary>Dừng RIÊNG 1 tk (untick khi busy): huỷ token + đóng Brave của RIÊNG runner đó; tk khác chạy tiếp.</summary>
