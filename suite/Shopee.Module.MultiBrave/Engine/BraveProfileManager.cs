@@ -103,6 +103,11 @@ internal static class BraveProfileManager
         if (!string.IsNullOrWhiteSpace(proxyServer))
         {
             parts.Add($"--proxy-server={proxyServer}");
+            // BigSeller PHẢI đi qua IP MÁY (direct), KHÔNG qua proxy của instance: 1 tài khoản BigSeller
+            // mở ở nhiều Brave với proxy IP khác nhau → server BigSeller thấy đăng nhập từ nhiều nơi → xoay
+            // muc_token, đá phiên (mất cookie). Bypass proxy cho domain BigSeller để mọi instance gọi
+            // BigSeller từ CÙNG 1 IP máy → phiên ổn định, không bị đá. (Shopee vẫn đi qua proxy như cũ.)
+            parts.Add("--proxy-bypass-list=*.bigseller.com;bigseller.com;*.bigseller.pro;bigseller.pro");
         }
 
         string? runnerPath = null;
