@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
+using Shopee.Core.Infrastructure;
 
 namespace OpenMultiBraveLauncherV3;
 
@@ -43,10 +44,13 @@ internal static class AppSession
         return Path.Combine(all);
     }
 
+    // Dữ liệu bền (profile/cookie login Shopee + BigSeller) lưu ở %AppData%\ShopeeSuite\persistent-data —
+    // KHÔNG neo theo vị trí .exe nữa: trước đây tính BaseDirectory\..\..\.. nên bản publish (thêm cấp
+    // win-x64\publish) trỏ vào trong bin/publish → bị xóa/ghi đè mỗi lần build publish → mất login.
     public static string ResolvePersistentDataPath(params string[] parts)
     {
         var all = new string[parts.Length + 1];
-        all[0] = Path.Combine(ProjectSourceDirectory, "persistent-data");
+        all[0] = SuitePaths.ModuleDir("persistent-data");
         Array.Copy(parts, 0, all, 1, parts.Length);
         return Path.Combine(all);
     }

@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
+using Shopee.Core.Infrastructure;
 
 namespace UpdateProduct;
 
@@ -37,8 +38,11 @@ internal static class AppSession
     public static string ResolveDataPath(params string[] parts) =>
         Combine(RootDirectory, parts);
 
+    // Dữ liệu bền (profile/cookie/login BigSeller…) lưu ở %AppData%\ShopeeSuite\persistent-data —
+    // KHÔNG neo theo vị trí .exe nữa: trước đây tính BaseDirectory\..\..\.. nên bản publish (thêm cấp
+    // win-x64\publish) trỏ vào trong bin/publish → bị xóa/ghi đè mỗi lần build publish → mất login BigSeller.
     public static string ResolvePersistentDataPath(params string[] parts) =>
-        Combine(Path.Combine(ProjectSourceDirectory, "persistent-data"), parts);
+        Combine(SuitePaths.ModuleDir("persistent-data"), parts);
 
     public static void Cleanup()
     {
