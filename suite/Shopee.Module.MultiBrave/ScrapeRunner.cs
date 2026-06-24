@@ -35,6 +35,8 @@ public sealed class ScrapeRunner
     public event Action<string, string, string>? AccountErrored;
     /// <summary>(from, to) — khoảng dòng vừa cào XONG (để lưu tiến độ resume). Báo theo từng chunk.</summary>
     public event Action<int, int>? RowsCompleted;
+    /// <summary>(lý do) — tk BigSeller mất phiên ("log in first"). Toàn bộ job tk này bị dừng; cần đăng nhập lại BigSeller.</summary>
+    public event Action<string>? BigSellerNeedLogin;
 
     public ScrapeRunner(string workbookPath, string videoOutputDir, string? braveExe = null, string sourceUserData = "", string bigSellerAccountName = "",
         string bigSellerKiotKey = "", string bigSellerRegion = "random", string bigSellerProxyType = "http")
@@ -58,19 +60,29 @@ public sealed class ScrapeRunner
         IReadOnlyList<ScrapeAccountSpec> specs, string? bigSellerCookieFile, int maxConcurrent, CancellationToken ct)
     {
         using var gate = new SemaphoreSlim(Math.Max(1, maxConcurrent));
+        // CTS phạm vi 1 job tk BigSeller: 1 lane thấy "log in first" → cancel để dừng mọi lane cùng tk.
+        using var jobCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var jct = jobCts.Token;
         var tasks = specs.Select(async (spec, index) =>
         {
             // Giãn khởi động lane đầu (tối đa maxConcurrent cái vào ngay) để không phóng Brave dồn cục.
             if (index > 0 && index < maxConcurrent)
             {
-                try { await Task.Delay(index * LaunchStaggerMs, ct).ConfigureAwait(false); }
+                try { await Task.Delay(index * LaunchStaggerMs, jct).ConfigureAwait(false); }
                 catch (OperationCanceledException) { return; }
             }
-            await gate.WaitAsync(ct).ConfigureAwait(false);
+            try { await gate.WaitAsync(jct).ConfigureAwait(false); }
+            catch (OperationCanceledException) { return; }
             try
             {
-                var res = await RunChunkAsync(spec, spec.Id, spec.StartRow, spec.EndRow, bigSellerCookieFile, ct).ConfigureAwait(false);
-                if (res.Errored) AccountErrored?.Invoke(spec.Id, spec.Label, res.Reason);
+                var res = await RunChunkAsync(spec, spec.Id, spec.StartRow, spec.EndRow, bigSellerCookieFile, jct).ConfigureAwait(false);
+                if (res.NeedLogin)
+                {
+                    InstanceLog?.Invoke(spec.Id, "⛔ " + res.Reason + " — DỪNG toàn bộ job tk BigSeller này.");
+                    BigSellerNeedLogin?.Invoke(res.Reason);
+                    try { jobCts.Cancel(); } catch { }
+                }
+                else if (res.Errored) AccountErrored?.Invoke(spec.Id, spec.Label, res.Reason);
             }
             finally { gate.Release(); }
         }).ToArray();
@@ -94,8 +106,13 @@ public sealed class ScrapeRunner
         var rotation = new AccountRotation(pool);
 
         var workers = Math.Max(1, Math.Min(numProcesses, pool.Count));
+        // CTS phạm vi 1 job tk BigSeller: nếu 1 worker thấy "log in first" (mất phiên) → cancel để DỪNG
+        // mọi worker cùng tk (vá/retry vô nghĩa khi token đã chết). Linked với ct ngoài (nút Dừng).
+        using var jobCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        // Đếm login-first LIÊN TIẾP toàn job (reset khi có chunk chạy được) — chỉ dừng job khi vượt ngưỡng.
+        var needLoginStreak = new int[1];
         var tasks = Enumerable.Range(1, workers)
-            .Select(slot => AutoWorkerAsync(slot, work, rotation, bigSellerCookieFile, borrowReplacement, ct))
+            .Select(slot => AutoWorkerAsync(slot, work, rotation, bigSellerCookieFile, borrowReplacement, jobCts, needLoginStreak))
             .ToArray();
         await Task.WhenAll(tasks);
 
@@ -115,6 +132,12 @@ public sealed class ScrapeRunner
     // (cứu phần còn lại của khối). 1-2 lần có thể do captcha/proxy nhất thời nên vẫn retry.
     private const int MaxStallRetries = 3;
 
+    // "Log in BigSeller first" từ 1 instance KHÔNG chắc tk BigSeller mất phiên TOÀN CỤC — thường chỉ 1
+    // proxy bị BigSeller từ chối (token vẫn sống ở IP khác; kiểm chứng: đóng mẻ xong mở BigSeller tay vẫn
+    // còn đăng nhập). CHỈ dừng cả job khi login-first xảy ra LIÊN TIẾP tới ngưỡng này (token thật sự chết →
+    // re-import cũng vô ích). Dưới ngưỡng: trả phần dở thành vá + thử lại bằng tk/proxy khác, KHÔNG nuke mẻ.
+    private const int MaxNeedLoginBeforeStop = 5;
+
     // Giãn khởi động giữa các lane: phóng tất cả Brave cùng lúc (thundering herd) làm nghẽn CPU,
     // chậm mở CDP port và khiến service worker MV3 dựng đồng loạt bị throttle → probe timeout.
     // Lệch mỗi lane ~1.5s khi BẮT ĐẦU (chỉ 1 lần lúc ramp-up; sau đó vẫn giữ đủ N lane song song).
@@ -129,8 +152,9 @@ public sealed class ScrapeRunner
 
     private async Task AutoWorkerAsync(
         int slot, WorkAllocator work, AccountRotation rotation, string? cookieFile,
-        Func<Task<ScrapeAccountSpec?>>? borrowReplacement, CancellationToken ct)
+        Func<Task<ScrapeAccountSpec?>>? borrowReplacement, CancellationTokenSource jobCts, int[] needLoginStreak)
     {
+        var ct = jobCts.Token;
         // Mượn 1 tk bù từ kho còn lại rồi thêm vào vòng (khi tk cũ captcha/lỗi nhiều) — giữ đủ tk chạy.
         async Task RefillAsync(string reason)
         {
@@ -177,9 +201,39 @@ public sealed class ScrapeRunner
 
                     SlotAssigned?.Invoke(key, spec.Label, $"{from}–{to}");
                     InstanceLog?.Invoke(key, $"→ tk {spec.Label}, dòng {from}–{to}{(isPatch ? " [vá]" : "")}");
-                    var res = await RunChunkAsync(spec, key, from, to, cookieFile, ct).ConfigureAwait(false);
+                    var res = await RunChunkAsync(spec, key, from, to, cookieFile, ct, needLoginStreak).ConfigureAwait(false);
 
                     if (ct.IsCancellationRequested) { rotation.Release(spec); break; }
+
+                    // Có chunk KHÔNG báo login-first → token tk BigSeller vẫn dùng được → reset chuỗi đếm.
+                    if (!res.NeedLogin) Interlocked.Exchange(ref needLoginStreak[0], 0);
+
+                    // "Log in first" từ 1 instance: thường chỉ 1 proxy bị BigSeller TỪ CHỐI, token tk BigSeller
+                    // VẪN sống (kiểm chứng: đóng mẻ xong mở BigSeller tay vẫn còn đăng nhập). Nên KHÔNG nuke cả
+                    // job ngay — trả phần dở thành vá + thử lại bằng tk/proxy khác (mở lại sẽ re-import token còn
+                    // sống + lấy proxy mới). CHỈ dừng khi login-first LIÊN TIẾP tới ngưỡng (token thật sự chết).
+                    if (res.NeedLogin)
+                    {
+                        var lastDoneNl = res.LastCompletedRow;
+                        if (lastDoneNl >= from) RowsCompleted?.Invoke(from, Math.Min(lastDoneNl, to));
+                        var nlFrom = Math.Max(from, lastDoneNl + 1);
+                        if (nlFrom <= to) work.AddPatch(nlFrom, to, stall);
+
+                        var streak = Interlocked.Increment(ref needLoginStreak[0]);
+                        if (streak >= MaxNeedLoginBeforeStop)
+                        {
+                            rotation.Release(spec);
+                            InstanceLog?.Invoke(key, $"⛔ {res.Reason} — {streak} lần LIÊN TIẾP → DỪNG job (BigSeller thực sự mất phiên, cần đăng nhập lại).");
+                            BigSellerNeedLogin?.Invoke(res.Reason);
+                            try { jobCts.Cancel(); } catch { }
+                            break;
+                        }
+                        var cdNl = rotation.Cooldown(spec);
+                        InstanceLog?.Invoke(key,
+                            $"⚠ {res.Reason} (lần {streak}/{MaxNeedLoginBeforeStop}) — có thể do proxy bị từ chối, token còn sống → " +
+                            $"nghỉ {cdNl.Seconds}s rồi VÁ phần dở bằng tk/proxy khác (KHÔNG dừng cả mẻ).");
+                        continue;
+                    }
 
                     // Phân loại tk lỗi: CAPTCHA → quarantine (để riêng xử lý sau); PROXY/lỗi khác →
                     // cooldown (tự quay lại vòng); không lỗi → trả về vòng ngay.
@@ -260,7 +314,7 @@ public sealed class ScrapeRunner
         return null;
     }
 
-    private readonly record struct ChunkResult(bool Errored, string Reason, int LastCompletedRow, bool IsCaptcha);
+    private readonly record struct ChunkResult(bool Errored, string Reason, int LastCompletedRow, bool IsCaptcha, bool NeedLogin = false);
 
     /// <summary>Dòng cuối ĐÃ scrape xong của 1 chunk (đọc từ cfg do engine ghi per-row). Chưa xong
     /// dòng nào → from-1. Kẹp trong [from-1, to].</summary>
@@ -274,7 +328,8 @@ public sealed class ScrapeRunner
     /// <summary>Chạy 1 khối dòng với 1 account (mở Brave → đăng nhập → extension → đóng). Đọc
     /// cfg.RunnerPhase/LastRunnerMessage sau khi xong để biết captcha/proxy lỗi.</summary>
     private async Task<ChunkResult> RunChunkAsync(
-        ScrapeAccountSpec spec, string key, int from, int to, string? cookieFile, CancellationToken ct)
+        ScrapeAccountSpec spec, string key, int from, int to, string? cookieFile, CancellationToken ct,
+        int[]? needLoginStreak = null)
     {
         BraveInstanceSession? session = null;
         var cfg = BuildConfig(spec, from, to);
@@ -301,6 +356,10 @@ public sealed class ScrapeRunner
                     var lo = reportedRow + 1;
                     reportedRow = lc;
                     RowsCompleted?.Invoke(lo, lc);
+                    // Cào được 1 DÒNG = tk BigSeller CÒN SỐNG → reset chuỗi đếm login-first. Nhờ vậy vài
+                    // instance proxy xấu báo login-first KHÔNG dồn bộ đếm tới ngưỡng khi các instance khác
+                    // vẫn cào ngon → job KHÔNG tự đóng. Chỉ dừng nếu THỰC SỰ không cào được gì + login-first dồn.
+                    if (needLoginStreak is not null) Interlocked.Exchange(ref needLoginStreak[0], 0);
                 }
             };
             if (!string.IsNullOrWhiteSpace(cookieFile)) session.SetBigSellerCookieFile(cookieFile);
@@ -356,6 +415,8 @@ public sealed class ScrapeRunner
         var proxy = msg.Contains("proxy", StringComparison.OrdinalIgnoreCase);
 
         // LastCompletedRow=0 là placeholder — caller ghi đè bằng `with { LastCompletedRow = … }`.
+        if (string.Equals(phase, "needlogin", StringComparison.OrdinalIgnoreCase))
+            return new ChunkResult(true, string.IsNullOrWhiteSpace(msg) ? "BigSeller mất đăng nhập — cần đăng nhập lại" : msg, 0, false, NeedLogin: true);
         if (captcha) return new ChunkResult(true, "Captcha/verify", 0, true);   // IsCaptcha=true → quarantine
         if (proxy) return new ChunkResult(true, "Lỗi proxy", 0, false);
         if (string.Equals(phase, "error", StringComparison.OrdinalIgnoreCase))

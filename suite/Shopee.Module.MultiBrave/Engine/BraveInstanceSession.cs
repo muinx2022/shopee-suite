@@ -82,16 +82,12 @@ internal sealed class BraveInstanceSession : IDisposable
         _bigSellerProxyType = string.IsNullOrWhiteSpace(proxyType) ? "http" : proxyType!.Trim();
     }
 
-    private async Task<string?> ResolveBigSellerProxyServerAsync()
-    {
-        if (string.IsNullOrWhiteSpace(_bigSellerProxyKey))
-            return null;
-        var server = await BigSellerProxyResolver.ResolveServerAsync(
-            _bigSellerProxyKey, _bigSellerProxyRegion, _bigSellerProxyType, Log).ConfigureAwait(false);
-        if (server is not null)
-            Log($"Proxy BigSeller (key riêng): {server} — bigseller.com đi IP này, Shopee giữ proxy riêng.");
-        return server;
-    }
+    // BIGSELLER LUÔN ĐI IP MÁY (direct/bypass) — CHỦ ĐÍCH tắt proxy riêng cho BigSeller.
+    // Lý do: proxy riêng (/current·/new) phân giải LẠI mỗi lần mở Brave, không đồng bộ giữa các lane →
+    // IP đổi giữa chừng / nhiều IP trên 1 token → server đá phiên. Đây vốn là bản vá muộn không hiệu quả.
+    // Trả null → BraveProfileManager dùng --proxy-bypass-list cho bigseller.* (đi IP máy ổn định).
+    // (Muốn bật lại proxy riêng theo tk: khôi phục bản gọi BigSellerProxyResolver.ResolveServerAsync.)
+    private Task<string?> ResolveBigSellerProxyServerAsync() => Task.FromResult<string?>(null);
 
     public event Action? StatusChanged;
     public event Action<string>? LogLine;
@@ -1832,6 +1828,13 @@ internal sealed class BraveInstanceSession : IDisposable
         // (đã chết sau khi user đăng nhập lại) → skip ⇒ đẩy bằng token chết ⇒ "log in BigSeller first".
         // Import ghi đè cookie nên luôn cập nhật về token hiện hành trong file.
 
+        // CHẨN ĐOÁN "token mất đi đâu": ghi token ĐANG có trong browser TRƯỚC khi import (để biết import
+        // có ghi đè token đang sống không, và token có hết hạn không).
+        var tokenBefore = await BigSellerCookieImporter.GetAuthCookieDebugAsync(_cdpPort).ConfigureAwait(false);
+        // Log RÕ tk BigSeller + file cookie đang nạp (để bắt nếu multi-BigSeller nạp nhầm file của tk khác).
+        Log($"BigSeller nạp cookie: tk=\"{_config?.BigSellerAccountName ?? "?"}\" file=\"{Path.GetFileName(_bigSellerCookieFile)}\"");
+        Log($"BigSeller token (trước import): {tokenBefore}");
+
         // Nạp + XÁC NHẬN có muc_token; thử lại tối đa 3 lần (import lần đầu hay flaky do CDP/page chưa
         // sẵn sàng → trước đây nuốt lỗi 1 lần là instance đó dính "login bigseller first").
         for (var attempt = 1; attempt <= 3 && !cancellationToken.IsCancellationRequested; attempt++)
@@ -1842,7 +1845,8 @@ internal sealed class BraveInstanceSession : IDisposable
                     _cdpPort, _bigSellerCookieFile, Log, cancellationToken).ConfigureAwait(false);
                 if (await BigSellerCookieImporter.HasAuthCookieInBrowserAsync(_cdpPort).ConfigureAwait(false))
                 {
-                    if (attempt > 1) Log($"BigSeller cookie: đã xác nhận nạp (lần {attempt}).");
+                    var tokenAfter = await BigSellerCookieImporter.GetAuthCookieDebugAsync(_cdpPort).ConfigureAwait(false);
+                    Log($"BigSeller token (sau import, lần {attempt}): {tokenAfter}");
                     return;
                 }
                 Log($"BigSeller cookie: chưa thấy muc_token sau khi nạp — thử lại ({attempt}/3)…");

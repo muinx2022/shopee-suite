@@ -121,10 +121,12 @@ internal static class BraveProfileManager
         }
         else if (!string.IsNullOrWhiteSpace(proxyServer))
         {
+            // BigSeller ĐI QUA PROXY CỦA INSTANCE (như bản v31 chạy tốt) — KHÔNG bypass về IP máy nữa.
+            // LÝ DO SỬA: bypass dồn MỌI phiên BigSeller của 1 tk về CÙNG 1 IP máy → khi đổi acc/chạy nhiều,
+            // server BigSeller thấy quá nhiều phiên trên 1 IP → ĐÁ phiên (xóa muc_token) → "log in first".
+            // Đi proxy instance: mỗi instance 1 IP → phiên rải ra nhiều IP → không bị đá (đúng v31).
+            // (localhost/127.* Chromium tự bypass mặc định nên API dữ liệu local vẫn đi thẳng.)
             parts.Add($"--proxy-server={proxyServer}");
-            // KHÔNG có proxy riêng cho BigSeller → BigSeller đi qua IP MÁY (bypass proxy). Khi đó các tk
-            // BigSeller phải chạy LẦN LƯỢT (ScrapeViewModel.BigSellerGate) để chỉ 1 token trên IP máy 1 lúc.
-            parts.Add("--proxy-bypass-list=*.bigseller.com;bigseller.com;*.bigseller.pro;bigseller.pro");
         }
 
         string? runnerPath = null;

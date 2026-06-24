@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using Shopee.Core.Browser;
 using Shopee.Core.Cdp;
 
@@ -47,6 +48,10 @@ public static class BigSellerLoginRunner
                 log("Đang mở Brave (IP máy, không proxy) tới BigSeller…");
             else
                 log($"Đang mở Brave QUA PROXY {proxyServer} tới BigSeller (khớp IP với scrape)…");
+            // Cho profile login "hành xử như browser thường": TẮT Brave Shields cho bigseller → cookie
+            // analytics/tracking (_ga/_fbp/_tt/ttcsid…) nạp được → lưu BỘ COOKIE ĐẦY ĐỦ như v31 (profile
+            // mới mặc định Shields BẬT → chặn tracker → chỉ ~9 cookie lõi → phiên trống trải dễ bị đá).
+            EnsureBraveShieldsDown(profileDir);
             launcher.Launch(profileDir, proxyServer, ListingUrl);
             var port = launcher.CdpPort;
 
@@ -54,27 +59,38 @@ public static class BigSellerLoginRunner
             // login điều hướng/redirect. Đây là điểm khác bản cũ (page-session chết lúc login).
             cdp = await CdpSession.ConnectToBrowserAsync(port, ct);
 
-            // KHÔNG nạp token cũ từ file vào profile rồi navigate lại nữa! Đó CHÍNH là nguyên nhân mất
-            // cookie: nạp muc_token cũ + tải lại trang xác thực BigSeller → server (cơ chế remember/refresh)
-            // TÁI CẤP token mới + VÔ HIỆU token cũ server-side; rồi poll thấy token-vừa-nạp tưởng "đã đăng
-            // nhập" → ghi đè file bằng token CŨ (đã chết) → lần scrape sau báo "log in BigSeller first".
-
-            // XÓA SẠCH cookie cũ trong profile login TRƯỚC khi đăng nhập → ép đăng nhập THẬT. LÝ DO: profile
-            // bền có thể còn muc_token CŨ (đã chết/hết hạn). HasAuthCookie chỉ xét "có cookie dài >5 ký tự",
-            // không phân biệt sống/chết → poll thấy token chết cũng báo "✔ thành công" + lưu token CHẾT ra
-            // file → lần scrape sau cả 2 Brave của tk đó fail "log in BigSeller first" NGAY (đúng kiểu tk 2,4
-            // chết còn 1,3 sống tùy token cũ còn hạn hay không). Xóa sạch → muc_token CHỈ xuất hiện sau khi
-            // user đăng nhập thật → token lưu ra file LUÔN là token đang sống. (Đánh đổi: mỗi lần mở phải đăng
-            // nhập lại — chấp nhận được để đổi lấy token chắc chắn sống.)
+            // GIỮ COOKIE qua các lần mở (đúng nhu cầu "login 1 lần → instance nạp cookie → scrape"):
+            // profile login là thư mục BỀN nên Chromium tự giữ muc_token qua các phiên. Khi mở lại →
+            // vào trang listing rồi PROBE xem CÒN đăng nhập không:
+            //  • CÒN SỐNG  → GIỮ phiên, KHÔNG bắt login lại (vòng poll bên dưới sẽ lưu lại token đang sống).
+            //  • ĐÃ CHẾT / chưa có → XÓA sạch rồi ép login TƯƠI (tránh lưu nhầm token CHẾT ra file → scrape
+            //    báo "log in BigSeller first"). Đây là lý do trước đây phải xóa: HasAuthCookie chỉ xét "có
+            //    cookie >5 ký tự", không phân biệt sống/chết. PROBE phân biệt được nên KHÔNG cần xóa khi sống.
+            // (Trước đây xóa VÔ ĐIỀU KIỆN mỗi lần mở → lần nào cũng phải đăng nhập lại — chính là lỗi bạn gặp.)
+            var aliveKept = false;
             try
             {
-                await cdp.SendAsync("Storage.clearCookies", null, ct);
-                var pg = await CdpSession.ConnectToPageAsync(port, ct);
-                await pg.SendNoReplyAsync("Page.navigate", new { url = ListingUrl }, ct);
-                await pg.DisposeAsync();
-                log("Đã xóa phiên cũ — hãy đăng nhập BigSeller để lưu token mới (đảm bảo còn sống).");
+                if (await ProbeLoggedInAsync(port, ct))
+                {
+                    aliveKept = true;
+                    log("✔ Phiên BigSeller còn sống — GIỮ cookie, không cần đăng nhập lại. Bấm Dừng để đóng.");
+                }
             }
+            catch (OperationCanceledException) { throw; }
             catch { }
+
+            if (!aliveKept)
+            {
+                try
+                {
+                    await cdp.SendAsync("Storage.clearCookies", null, ct);
+                    var pg = await CdpSession.ConnectToPageAsync(port, ct);
+                    await pg.SendNoReplyAsync("Page.navigate", new { url = ListingUrl }, ct);
+                    await pg.DisposeAsync();
+                    log("Chưa có phiên sống — hãy đăng nhập BigSeller để lưu token mới (đảm bảo còn sống).");
+                }
+                catch { }
+            }
 
             log("Đăng nhập BigSeller trong cửa sổ Brave. Cookie sẽ tự lưu khi phát hiện đăng nhập.");
             log("File cookie: " + cookieFile);
@@ -83,6 +99,14 @@ public static class BigSellerLoginRunner
             var pollsBeforeLogin = 0;
             var lastCookieCount = -1;
             var stablePolls = 0;
+            var pollsSinceLogin = 0;
+            var lastSavedCount = -1;
+            // Cookie analytics/tracking (_ga, _fbp, _tt, ttcsid, _gcl_au, __lt__cid…) nạp BẤT ĐỒNG BỘ,
+            // chậm hơn cookie phiên. Phải chờ số cookie NGỪNG TĂNG đủ lâu (~15s) rồi mới lưu — nếu lưu vội
+            // (sau ~6s) thì file chỉ có ~9 cookie lõi (thiếu ~30) → phiên import vào browser "trống trải"
+            // → BigSeller nghi & đá sau một lúc. v31 lưu được bộ ~39-43 đầy đủ nên phiên bền.
+            const int requiredStablePolls = 5;   // ~15s không tăng cookie nữa = đã nạp đủ bộ
+            const int maxWaitPolls = 12;          // ~36s: fallback lưu kẻo kẹt nếu cookie cứ refresh
             while (!ct.IsCancellationRequested)
             {
                 await Task.Delay(3000, ct);
@@ -108,28 +132,31 @@ public static class BigSellerLoginRunner
 
                 if (HasAuthCookie(cookies))
                 {
-                    // CHỜ BỘ COOKIE ỔN ĐỊNH rồi mới lưu. LÝ DO: ngay khi muc_token vừa xuất hiện, phiên
-                    // BigSeller MỚI có vài cookie (vd ~9), CHƯA đủ (~19). Nếu lưu ngay (như trước) → file
-                    // thiếu cookie phiên → scrape báo "log in BigSeller first" dù vừa "đăng nhập thành công".
-                    // Đợi số cookie KHÔNG tăng nữa qua 2 vòng (≈6s) = phiên đã nạp đủ → mới lưu BỘ ĐẦY ĐỦ.
+                    // Chờ bộ cookie NẠP ĐỦ (số cookie ngừng tăng ~15s) rồi mới lưu — tránh lưu thiếu (~9).
+                    pollsSinceLogin++;
                     var n = cookies.Count;
                     if (n == lastCookieCount) stablePolls++;
                     else { stablePolls = 0; lastCookieCount = n; }
 
-                    if (stablePolls >= 2)
+                    var fullyLoaded = stablePolls >= requiredStablePolls || pollsSinceLogin >= maxWaitPolls;
+                    if (fullyLoaded && (!saved || n > lastSavedCount))
                     {
-                        // Lưu (và refresh mỗi vòng để file luôn mới). KHÔNG tự đóng cửa sổ, KHÔNG timeout.
-                        var wrote = TryWriteCookieFile(cookieFile, cookies, log);
-                        if (wrote && !saved)
+                        // Lưu BỘ ĐẦY ĐỦ; nếu sau đó cookie còn tăng thì lưu đè (file luôn = bộ lớn nhất).
+                        if (TryWriteCookieFile(cookieFile, cookies, log))
                         {
-                            saved = true;
-                            log($"✔ Đăng nhập thành công! Đã lưu {n} cookie (phiên đầy đủ). Bấm Dừng để đóng.");
-                            try { onSaved?.Invoke(); } catch { }
+                            lastSavedCount = n;
+                            if (!saved)
+                            {
+                                saved = true;
+                                log($"✔ Đăng nhập thành công! Đã lưu {n} cookie (bộ đầy đủ). Bấm Dừng để đóng.");
+                                try { onSaved?.Invoke(); } catch { }
+                            }
+                            else log($"Cập nhật cookie BigSeller → {n}.");
                         }
                     }
                     else if (!saved)
                     {
-                        log($"Đã đăng nhập — đang chờ phiên nạp đủ cookie ({n})…");
+                        log($"Đã đăng nhập — đang chờ nạp đủ cookie ({n})…");
                     }
                     continue;
                 }
@@ -264,6 +291,93 @@ public static class BigSellerLoginRunner
             return (list, false);
         }
     }
+
+    /// <summary>
+    /// Ghi setting "Brave Shields DOWN" cho bigseller vào Preferences của profile login TRƯỚC khi mở Brave
+    /// (đúng giá trị Brave tự ghi khi bấm tắt Shields: content-setting <c>braveShields</c>, key
+    /// <c>"www.bigseller.com,*"</c>, <c>setting=2</c>). Nhờ vậy tracker (_ga/_fbp/_tt…) KHÔNG bị chặn →
+    /// đăng nhập lưu được bộ cookie đầy đủ. Best-effort: lỗi gì cũng bỏ qua (không chặn login).
+    /// </summary>
+    private static void EnsureBraveShieldsDown(string profileDir)
+    {
+        try
+        {
+            var def = Path.Combine(Path.GetFullPath(profileDir), "Default");
+            Directory.CreateDirectory(def);
+            var prefPath = Path.Combine(def, "Preferences");
+
+            var root = File.Exists(prefPath)
+                ? JsonNode.Parse(File.ReadAllText(prefPath)) as JsonObject ?? new JsonObject()
+                : new JsonObject();
+
+            var profile = root["profile"] as JsonObject ?? new JsonObject();
+            root["profile"] = profile;
+            var cs = profile["content_settings"] as JsonObject ?? new JsonObject();
+            profile["content_settings"] = cs;
+            var ex = cs["exceptions"] as JsonObject ?? new JsonObject();
+            cs["exceptions"] = ex;
+            var shields = ex["braveShields"] as JsonObject ?? new JsonObject();
+            ex["braveShields"] = shields;
+
+            // setting=2 = Shields DOWN cho site (giá trị Brave ghi khi tắt Shields). Phủ cả .com/.pro.
+            foreach (var pat in new[] { "www.bigseller.com,*", "bigseller.com,*", "www.bigseller.pro,*", "bigseller.pro,*" })
+                shields[pat] = new JsonObject { ["setting"] = 2 };
+
+            File.WriteAllText(prefPath, root.ToJsonString());
+        }
+        catch { }
+    }
+
+    /// <summary>
+    /// Vào trang listing rồi đọc <c>location.href</c> để biết CÒN đăng nhập không: bị đẩy về trang
+    /// login/passport → phiên đã hết; ở lại khu <c>/web/</c> → còn đăng nhập. Trả true nếu còn sống.
+    /// (Dùng page-session riêng; KHÔNG đụng tới browser-session đang poll cookie.)
+    /// </summary>
+    private static async Task<bool> ProbeLoggedInAsync(int port, CancellationToken ct)
+    {
+        CdpSession? pg = null;
+        try
+        {
+            pg = await CdpSession.ConnectToPageAsync(port, ct);
+            await pg.SendNoReplyAsync("Page.navigate", new { url = ListingUrl }, ct);
+            for (var i = 0; i < 20; i++)   // ~10s
+            {
+                await Task.Delay(500, ct);
+                string href = "", ready = "";
+                try
+                {
+                    var r = await pg.SendAsync("Runtime.evaluate", new
+                    {
+                        expression = "JSON.stringify({href:location.href, ready:document.readyState})",
+                        returnByValue = true,
+                    }, ct);
+                    if (r.TryGetProperty("result", out var rv) && rv.TryGetProperty("value", out var vv) &&
+                        vv.ValueKind == JsonValueKind.String)
+                    {
+                        using var d = JsonDocument.Parse(vv.GetString() ?? "{}");
+                        href = d.RootElement.TryGetProperty("href", out var h) ? h.GetString() ?? "" : "";
+                        ready = d.RootElement.TryGetProperty("ready", out var rd) ? rd.GetString() ?? "" : "";
+                    }
+                }
+                catch (OperationCanceledException) { throw; }
+                catch { continue; }
+
+                if (IsLoginUrl(href)) return false;
+                if (string.Equals(ready, "complete", StringComparison.OrdinalIgnoreCase) &&
+                    href.Contains("/web/", StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+            return false;
+        }
+        catch (OperationCanceledException) { throw; }
+        catch { return false; }
+        finally { if (pg is not null) await pg.DisposeAsync(); }
+    }
+
+    private static bool IsLoginUrl(string url) =>
+        url.Contains("login", StringComparison.OrdinalIgnoreCase) ||
+        url.Contains("passport", StringComparison.OrdinalIgnoreCase) ||
+        url.Contains("signin", StringComparison.OrdinalIgnoreCase);
 
     private static bool HasAuthCookie(IEnumerable<JsonElement> cookies) =>
         cookies.Any(c =>

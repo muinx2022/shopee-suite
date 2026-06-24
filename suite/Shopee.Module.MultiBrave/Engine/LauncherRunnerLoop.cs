@@ -167,6 +167,26 @@ internal static class LauncherRunnerLoop
                     return;
                 }
 
+                if (step.NeedLogin && !step.ScrapeOk)
+                {
+                    // BigSeller báo "log in first" → token tk BigSeller đã mất phiên. Mọi dòng còn lại sẽ
+                    // fail y hệt → DỪNG hẳn job tk này (phase "needlogin" để ScrapeRunner.Classify nhận biết
+                    // và KHÔNG vá/retry), báo rõ cần đăng nhập lại BigSeller.
+                    // CHẨN ĐOÁN "mất đi đâu": đọc token NGAY lúc bị login-first.
+                    //  • còn muc_token + còn hạn → SERVER đá phiên (nhiều phiên/IP), không phải mất token client.
+                    //  • không có muc_token → token bị mất/clobber phía client.
+                    var tokenAtFail = await BigSellerCookieImporter.GetAuthCookieDebugAsync(cdpPort).ConfigureAwait(false);
+                    config.RunnerPhase = "needlogin";
+                    config.LastRunnerMessage =
+                        step.Message ?? $"⚠ BigSeller mất đăng nhập (log in first) - {config.DisplayName}, dừng tại dòng {rowNumber}. Cần đăng nhập lại tài khoản BigSeller.";
+                    await PushDisplayStateAsync(
+                        cdpPort, profileRoot, config, sheet, startRow, endRow.Value,
+                        index + 1, totalLinks, step.TabId, cancellationToken).ConfigureAwait(false);
+                    onProgress();
+                    log($"{config.LastRunnerMessage} [token lúc bị login-first: {tokenAtFail}]");
+                    return;
+                }
+
                 tabId = step.TabId ?? tabId;
 
                 var scrapeOk = step.ScrapeOk;

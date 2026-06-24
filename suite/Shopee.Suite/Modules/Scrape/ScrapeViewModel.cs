@@ -578,6 +578,11 @@ public sealed partial class ScrapeViewModel : ObservableObject
             ShopeeAccountUsage.Shared.MarkCaptcha(id);
             FlagAccountErrored(id, $"Dính captcha/lỗi (Scrape) — {DateTime.Now:dd/MM HH:mm}: {reason}");
         });
+        runner.BigSellerNeedLogin += reason => OnUi(() =>
+        {
+            // Tk BigSeller mất phiên ("log in first") → job tk này đã bị dừng. Báo rõ để user đăng nhập lại.
+            LogLines.Add($"⛔ [{bigSellerName}] BigSeller mất đăng nhập: {reason} — đã DỪNG job tk này. Hãy ĐĂNG NHẬP LẠI BigSeller rồi chạy lại.");
+        });
     }
 
     // Đánh dấu BỀN account dính captcha/lỗi: Disabled (tự bỏ qua lượt sau) + LastError → gom ở mục

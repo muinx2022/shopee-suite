@@ -14,7 +14,8 @@ internal static class ExtensionRunnerAutomation
         bool Aborted,
         string? Message,
         int? TabId,
-        string? PageUrl);
+        string? PageUrl,
+        bool NeedLogin = false);
 
     public sealed record BeforeNextLinkCheckResult(
         bool Ok,
@@ -773,9 +774,25 @@ internal static class ExtensionRunnerAutomation
             // 540s của extension) để C# KHÔNG hết-giờ-20s rồi retry gọi lại → reload + click GIỮA CHỪNG lúc
             // đang crawl (đúng triệu chứng "đang scrape chưa xong đã reload" ở tk crawl chậm). Giảm
             // maxAttempts xuống 2: với timeout dài, một lần hết-giờ nghĩa là treo thật, không nên retry nhiều.
-            var val = await EvaluateExtensionMethodAsync(
-                cdpPort, extensionId, "executeScrapeStep", payload, cancellationToken,
-                maxAttempts: 2, receiveTimeoutOverride: TimeSpan.FromSeconds(600));
+            JsonElement? val;
+            try
+            {
+                val = await EvaluateExtensionMethodAsync(
+                    cdpPort, extensionId, "executeScrapeStep", payload, cancellationToken,
+                    maxAttempts: 2, receiveTimeoutOverride: TimeSpan.FromSeconds(600));
+            }
+            catch (Exception ex) when (IsPopupBridgeError(ex.Message))
+            {
+                // SW của extension chết/ngủ → lệnh executeScrapeStep KHÔNG tới được SW ("Receiving end does
+                // not exist") = crawl CHƯA hề chạy → REVIVE SW (escalate reload nếu cần) rồi thử LẠI 1 lần.
+                // An toàn, KHÔNG double-scrape (vì lệnh trước chưa được nhận). Đây là lý do "mở link nhưng
+                // không bấm scrape được" — trước đây bỏ qua dòng (mất dữ liệu), giờ tự khôi phục + chạy lại.
+                await EnsureRunnerExtensionReadyAsync(cdpPort, profileRoot, null, cancellationToken).ConfigureAwait(false);
+                var extId2 = await ResolveExtensionIdAsync(cdpPort, profileRoot, cancellationToken) ?? extensionId;
+                val = await EvaluateExtensionMethodAsync(
+                    cdpPort, extId2, "executeScrapeStep", payload, cancellationToken,
+                    maxAttempts: 2, receiveTimeoutOverride: TimeSpan.FromSeconds(600));
+            }
             if (val is null)
                 return new ScrapeStepResult(false, false, false, false, "Extension không phản hồi.", tabId, link);
 
@@ -788,7 +805,10 @@ internal static class ExtensionRunnerAutomation
                 val.Value.TryGetProperty("tabId", out var t) && t.ValueKind == JsonValueKind.Number
                     ? t.GetInt32()
                     : tabId,
-                val.Value.TryGetProperty("pageUrl", out var u) ? u.GetString() : link);
+                val.Value.TryGetProperty("pageUrl", out var u) ? u.GetString() : link,
+                // BigSeller báo "Failed, log in BigSeller first" → token tk này đã chết. Truyền cờ này lên
+                // launcher để DỪNG hẳn (không retry/hammer các dòng còn lại — vô nghĩa khi đã mất phiên).
+                val.Value.TryGetProperty("needLogin", out var nl) && nl.ValueKind == JsonValueKind.True);
         }
         catch (Exception ex)
         {

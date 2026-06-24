@@ -38,6 +38,46 @@ internal static class BigSellerCookieImporter
         catch { return false; }
     }
 
+    /// <summary>
+    /// Chuỗi CHẨN ĐOÁN muc_token đang có trong browser: giá trị rút gọn (để so token có ĐỔI không) +
+    /// hạn dùng (để biết HẾT HẠN không). Dùng để trả lời "login first thì token MẤT ĐI ĐÂU":
+    ///  • "(không có muc_token)" → token bị mất/clobber/chưa import (lỗi phía client).
+    ///  • có token + còn hạn nhưng server vẫn báo login-first → server ĐÁ phiên (lỗi phía server: nhiều phiên/IP).
+    ///  • có token nhưng hết hạn → token GIÀ đi (cần refresh/ghi ngược token mới).
+    /// </summary>
+    public static async Task<string> GetAuthCookieDebugAsync(int debugPort)
+    {
+        try
+        {
+            var cookies = await GetBigSellerCookiesAsync(debugPort).ConfigureAwait(false);
+            var c = cookies.FirstOrDefault(x =>
+                string.Equals(x.GetValueOrDefault("name") as string, AuthCookieName, StringComparison.OrdinalIgnoreCase));
+            if (c is null) return "(không có muc_token)";
+
+            var val = c.GetValueOrDefault("value") as string ?? "";
+            var prefix = val.Length <= 8 ? val : val[..8];
+
+            var expStr = "session (không hạn)";
+            if (c.TryGetValue("expires", out var e) && e is not null)
+            {
+                double secs = e switch
+                {
+                    long l => l,
+                    double d => d,
+                    _ => double.TryParse(e.ToString(), out var p) ? p : -1,
+                };
+                if (secs > 0)
+                {
+                    var exp = DateTimeOffset.FromUnixTimeSeconds((long)secs);
+                    var left = exp - DateTimeOffset.Now;
+                    expStr = $"{exp.LocalDateTime:dd/MM HH:mm} (còn {left.TotalHours:0.0}h)";
+                }
+            }
+            return $"muc_token={prefix}…(len {val.Length}) hạn={expStr}";
+        }
+        catch (Exception ex) { return $"(lỗi đọc token: {ex.Message})"; }
+    }
+
     public static bool TryWriteCookieFile(
         string cookieFile,
         IReadOnlyCollection<Dictionary<string, object?>> bigSellerCookies,
