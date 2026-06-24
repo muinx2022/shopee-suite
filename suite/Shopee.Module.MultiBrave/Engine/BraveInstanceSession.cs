@@ -825,12 +825,9 @@ internal sealed class BraveInstanceSession : IDisposable
     private void LaunchBrave(string exePath, string arguments)
     {
         KillBraveProcess();
-        _braveProcess = Process.Start(new ProcessStartInfo
-        {
-            FileName = exePath,
-            Arguments = arguments,
-            UseShellExecute = false,
-        });
+        // Phóng Brave GẮN vào Job Object KILL_ON_JOB_CLOSE của app → app chết kiểu gì (kể cả crash /
+        // force-kill) thì OS tự dọn sạch Brave con, không còn tiến trình mồ côi ăn RAM.
+        _braveProcess = BraveJobObject.Start(exePath, arguments);
         Log($"Brave PID={_braveProcess?.Id}");
     }
 

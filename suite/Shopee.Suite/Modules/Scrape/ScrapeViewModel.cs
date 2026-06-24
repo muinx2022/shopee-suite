@@ -16,9 +16,9 @@ namespace Shopee.Suite.Modules.Scrape;
 /// <summary>
 /// Module "Shopee Scrape". Tick chọn 1 hoặc NHIỀU tài khoản BigSeller (mỗi tk 1 shop ↔ sheet/workbook).
 /// Hệ thống TỰ ĐỘNG dùng cả kho tài khoản Shopee (xoay vòng), chạy N process song song. Nhiều tk
-/// BigSeller chạy LẦN LƯỢT (cổng BigSellerGate): BigSeller đi qua IP máy (không proxy) nên nếu nhiều
-/// muc_token cùng đổ về 1 IP, server sẽ đá phiên TẤT CẢ acc — chạy lần lượt để mỗi lúc chỉ 1 token
-/// trên IP máy. Tk Shopee dính captcha/proxy lỗi thì tự đổi tk khác.
+/// BigSeller chạy SONG SONG: traffic bigseller.com đi qua proxy của instance Shopee (mỗi instance 1 IP)
+/// nên phiên rải nhiều IP, không bị "nhiều token / 1 IP" → KHÔNG cần chạy lần lượt. Tk Shopee dính
+/// captcha/proxy lỗi thì tự đổi tk khác.
 /// </summary>
 public sealed partial class ScrapeViewModel : ObservableObject
 {
@@ -117,21 +117,8 @@ public sealed partial class ScrapeViewModel : ObservableObject
         }
         if (jobs.Count == 0) { Warn("Không có tài khoản hợp lệ để scrape.\n" + string.Join("\n", problems)); return; }
 
-        // Loại khỏi kho các tk Shopee đang bị BigSeller KHÁC (chưa hoàn thành) GIỮ CHỖ — tk chỉ được nhả
-        // khi BigSeller đó chạy xong (hoặc nhả tay ở Thống kê). BigSeller trong lượt này thì giữ lại tk
-        // đặt-chỗ của CHÍNH nó để resume mượn lại.
-        var thisRunKeys = jobs
-            .Select(j => (j.Account.Id, Sheet: j.SelectedShop!.ShopeeDataSheet))
-            .ToHashSet();
-        var lockedByOthers = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var pr in ScrapeProgressStore.Shared.All())
-        {
-            if (string.Equals(pr.Status, "completed", StringComparison.OrdinalIgnoreCase)) continue;
-            if (thisRunKeys.Contains((pr.AccountId, pr.Sheet))) continue;
-            foreach (var id in pr.ReservedShopeeAccountIds) lockedByOthers.Add(id);
-        }
-        var lockedCount = pool.RemoveAll(a => lockedByOthers.Contains(a.Id));
-
+        // Kho tk Shopee = TẤT CẢ tk đang bật, DÙNG CHUNG cho mọi job BigSeller. Không pin tk vào BigSeller
+        // nào nữa: mỗi khối mượn 1 tk nghỉ lâu nhất rồi trả về kho → các BigSeller chia sẻ + tk luân phiên nghỉ.
         var session = new RunSession { SourceUserData = sourceUserData, Resume = resume };
         session.Available.AddRange(pool);
         // Seed bộ đếm vòng-LRU = mốc cao nhất đã lưu → cấp phát tiếp vòng, không nện lại tk đầu sau restart.
@@ -144,7 +131,6 @@ public sealed partial class ScrapeViewModel : ObservableObject
         Instances.Clear();
         ErroredAccounts.Clear();
         foreach (var p in problems) Log($"⚠ Bỏ qua {p}.");
-        if (lockedCount > 0) Log($"ⓘ {lockedCount} tk Shopee đang bị BigSeller khác giữ (chưa hoàn thành) — bỏ qua lượt này.");
         Log(resume
             ? $"⏯ Tiếp tục {jobs.Count} BigSeller — chỉ chạy phần dòng CÒN THIẾU. Kho {pool.Count} tk Shopee."
             : $"▶ Scrape {jobs.Count} BigSeller (RESET — chạy lại từ đầu). Kho {pool.Count} tk Shopee.");
@@ -175,45 +161,39 @@ public sealed partial class ScrapeViewModel : ObservableObject
             try { AccountStore.Shared.Save(); } catch { }   // lưu LastUsedTick (vòng-LRU) bền qua restart
             _session = null;                                 // null TRƯỚC khi Dispose để StartOne kịp bail
             session.MasterCts.Dispose();
-            session.BigSellerGate.Dispose();
             IsBusy = false;
             ShopeeAccountUsage.Shared.EndRun();             // hết lượt chạy → mọi tk về "Chưa dùng"
         }
     }
 
-    // Mượn slice tk Shopee theo VÒNG-LRU (tk nghỉ lâu nhất / chưa dùng trước). take-all-or-wait: chỉ lấy
-    // khi đủ cả slice cùng lúc → không giữ một phần → không deadlock. 1 tk không bị 2 BigSeller mở cùng lúc.
-    private async Task<List<ShopeeAccount>?> BorrowAsync(
-        RunSession s, int need, IReadOnlyCollection<string> preferIds, CancellationToken ct)
+    // Kho tk Shopee DÙNG CHUNG cho auto-run: worker mượn 1 tk (nghỉ lâu nhất) TRƯỚC mỗi khối rồi TRẢ về
+    // kho sau khi chạy xong → xoay vòng toàn kho, cho tk nghỉ luân phiên. MỌI job BigSeller dùng chung kho
+    // này (s.Available) nên không tk nào bị 2 cửa sổ mở cùng lúc (mượn = lấy khỏi kho). Logic vòng-LRU +
+    // cooldown + quarantine nằm trên RunSession (chia sẻ giữa các job); lớp này chỉ bắc cầu spec ↔ tk.
+    private sealed class SessionAccountPool(RunSession s, string sheet) : IScrapeAccountPool
     {
-        while (true)
+        public async Task<ScrapeAccountSpec?> BorrowAsync(CancellationToken ct)
         {
-            ct.ThrowIfCancellationRequested();
-            lock (s.AllocLock)
-            {
-                s.Available.RemoveAll(a => a.Disabled);   // tk dính captcha → loại khỏi kho
-                if (s.Available.Count >= need)
-                {
-                    var slice = s.Available
-                        .OrderByDescending(a => preferIds.Contains(a.Id))   // resume: ưu tiên tk đã đặt chỗ
-                        .ThenBy(_ => Random.Shared.Next())                    // RANDOM toàn kho làm khóa CHÍNH → spread đều, KHÔNG nện mấy acc đầu, acc luân phiên nghỉ
-                        .Take(need)
-                        .ToList();
-                    foreach (var x in slice) { s.Available.Remove(x); x.LastUsedTick = Interlocked.Increment(ref s.LruTick); }
-                    s.BorrowedCount++;
-                    ShopeeAccountUsage.Shared.MarkInUse(slice.Select(a => a.Id));   // cột "Tình trạng": Đang dùng
-                    return slice;
-                }
-                if (s.BorrowedCount == 0) return null;   // không ai đang giữ tk để trả + không đủ → bỏ cuộc
-            }
-            await Task.Delay(500, ct).ConfigureAwait(false);
+            var a = await s.BorrowOneAsync(ct).ConfigureAwait(false);
+            return a is null ? null : ToSpec(a, sheet);
         }
-    }
 
-    private static void GiveBack(RunSession s, List<ShopeeAccount> slice)
-    {
-        lock (s.AllocLock) { s.Available.AddRange(slice.Where(a => !a.Disabled)); s.BorrowedCount--; }
-        ShopeeAccountUsage.Shared.MarkReleased(slice.Select(a => a.Id));   // cột "Tình trạng": Đã dùng
+        public void Release(ScrapeAccountSpec spec)
+        {
+            if (AccountStore.Shared.Find(spec.Id) is { } a) s.ReleaseOne(a);
+        }
+
+        public AccountCooldown Cooldown(ScrapeAccountSpec spec)
+        {
+            if (AccountStore.Shared.Find(spec.Id) is not { } a) return default;
+            var (secs, setAside) = s.CooldownOne(a);
+            return new AccountCooldown(secs, setAside);
+        }
+
+        public void Quarantine(ScrapeAccountSpec spec)
+        {
+            if (AccountStore.Shared.Find(spec.Id) is { } a) s.QuarantineOne(a);
+        }
     }
 
     private async Task RunOneJobAsync(RunSession s, JobHandle h, bool resume)
@@ -222,16 +202,13 @@ public sealed partial class ScrapeViewModel : ObservableObject
         var account = target.Account;
         var shop = target.SelectedShop!;
         var sheet = shop.ShopeeDataSheet;
-        var need = Math.Max(1, target.MaxProcess);   // số tk Shopee mượn = số process (mỗi process 1 tk)
-        var maxProc = need;
+        var maxProc = Math.Max(1, target.MaxProcess);   // = SỐ CỬA SỔ Brave song song (KHÔNG còn = số tk dùng)
         var startRow = Math.Max(1, target.StartRow);
         var rowsPer = Math.Max(1, target.RowsPerAccount);
         var seq = h.Seq;
         var ct = h.Cts.Token;
 
-        List<ShopeeAccount>? borrowed = null;
         ScrapeRunner? runner = null;
-        var gateHeld = false;
         try
         {
             int totalRows;
@@ -253,31 +230,11 @@ public sealed partial class ScrapeViewModel : ObservableObject
                 return;
             }
 
-            // Resume: ưu tiên mượn lại đúng tk đã đặt chỗ trước đó.
-            var preferIds = (resume ? ScrapeProgressStore.Shared.Find(account.Id, sheet)?.ReservedShopeeAccountIds : null) ?? [];
-
-            // BigSeller KHÔNG có proxy riêng → đi IP MÁY → phải chạy LẦN LƯỢT: mỗi lúc chỉ 1 tk BigSeller
-            // hoạt động. LÝ DO: nếu NHIỀU muc_token khác nhau cùng đổ về 1 IP máy, server chống gian lận coi
-            // là chia sẻ phiên/bot và ĐÁ phiên của TẤT CẢ acc trên IP đó cùng lúc ("nhiều acc mất hết phiên").
-            // Trong PHẠM VI 1 tk vẫn chạy song song N Brave bình thường (đúng kiểu "1 acc nhiều Brave" vốn OK).
-            // Tk CÓ proxy riêng (KiotProxy key) → mỗi tk 1 IP khác nhau → KHÔNG cần cổng, chạy SONG SONG được.
-            // Lấy cổng TRƯỚC khi mượn tk Shopee để job đang chờ không giữ kho.
-            if (!account.HasProxy)
-            {
-                if (s.BigSellerGate.CurrentCount == 0)
-                    Log($"[{account.DisplayName}] ⏳ chờ tk BigSeller khác chạy xong rồi mới tới lượt (không proxy → đi IP máy → chạy lần lượt để khỏi bị đá phiên)…");
-                await s.BigSellerGate.WaitAsync(ct).ConfigureAwait(false);
-                gateHeld = true;
-            }
-
-            int freeNow; lock (s.AllocLock) freeNow = s.Available.Count;
-            Log($"[{account.DisplayName}] đang xin {need} tk Shopee từ kho (rảnh {freeNow})"
-                + (freeNow < need ? " — CHỜ tk khác nhả (take-all-or-wait)…" : "…"));
-            borrowed = await BorrowAsync(s, need, preferIds, ct).ConfigureAwait(false);
-            var usable = (borrowed ?? []).Where(a => !a.Disabled).ToList();
-            if (usable.Count == 0) { Log($"[{account.DisplayName}] không đủ tk Shopee khả dụng — bỏ qua."); return; }
-
-            var procs = Math.Max(1, Math.Min(maxProc, usable.Count));
+            // KHÔNG mượn cố định tk nữa: số cửa sổ song song = min(Số process, số tk trong kho). Mỗi khối
+            // sẽ mượn 1 tk nghỉ lâu nhất từ KHO CHUNG rồi trả lại (SessionAccountPool) → xoay vòng toàn kho.
+            int poolSize; lock (s.AllocLock) poolSize = s.Available.Count(a => !a.Disabled);
+            if (poolSize == 0) { Log($"[{account.DisplayName}] kho tk Shopee đang cạn — bỏ qua."); return; }
+            var procs = Math.Max(1, Math.Min(maxProc, poolSize));
             OnUi(() =>
             {
                 for (var i = 1; i <= procs; i++)
@@ -285,12 +242,11 @@ public sealed partial class ScrapeViewModel : ObservableObject
             });
 
             var totalSeg = segments.Sum(x => x.to - x.from + 1);
-            Log($"── {(resume ? "⏯ Tiếp tục" : "▶")} BigSeller \"{account.DisplayName}\" · shop \"{shop.DisplayName}\" · {totalSeg} dòng cần chạy (tổng sheet {totalRows}) · {usable.Count} tk Shopee ({procs} process) ──");
+            Log($"── {(resume ? "⏯ Tiếp tục" : "▶")} BigSeller \"{account.DisplayName}\" · shop \"{shop.DisplayName}\" · {totalSeg} dòng cần chạy (tổng sheet {totalRows}) · {procs} cửa sổ song song · xoay vòng kho {poolSize} tk Shopee ──");
 
-            // Ghi nhận lượt chạy + ĐẶT CHỖ tk Shopee vào store (giữ tới khi hoàn thành / nhả tay).
-            var reservedIds = usable.Select(a => a.Id).ToList();
-            if (resume) ScrapeProgressStore.Shared.BeginResume(account.Id, sheet, account.DisplayName, reservedIds, totalRows);
-            else ScrapeProgressStore.Shared.BeginFresh(account.Id, sheet, account.DisplayName, reservedIds, totalRows);
+            // Ghi nhận lượt chạy (chỉ tiến độ DÒNG — không đặt-chỗ tk nữa vì tk xoay vòng/tự trả về kho).
+            if (resume) ScrapeProgressStore.Shared.BeginResume(account.Id, sheet, account.DisplayName, totalRows);
+            else ScrapeProgressStore.Shared.BeginFresh(account.Id, sheet, account.DisplayName, totalRows);
             OnUi(target.RefreshProgress);
 
             runner = new ScrapeRunner(account.WorkbookPath, VideoDir, braveExe: null, s.SourceUserData, bigSellerAccountName: account.DisplayName,
@@ -303,54 +259,26 @@ public sealed partial class ScrapeViewModel : ObservableObject
                 OnUi(target.RefreshProgress);
             };
             WireRunner(runner, seq, account.DisplayName);
-            var specs = usable.Select(a => ToSpec(a, sheet)).ToList();
 
-            // Mượn BÙ từ kho khi 1 tk dính CAPTCHA: lấy 1 tk nghỉ lâu nhất, đặt-chỗ + để GiveBack.
-            Task<ScrapeAccountSpec?> BorrowReplacementAsync()
-            {
-                ShopeeAccount? acc = null;
-                lock (s.AllocLock)
-                {
-                    s.Available.RemoveAll(a => a.Disabled);
-                    if (s.Available.Count > 0)
-                    {
-                        acc = s.Available[Random.Shared.Next(s.Available.Count)];   // RANDOM toàn kho → không nện mấy acc đầu
-                        s.Available.Remove(acc);
-                        acc.LastUsedTick = Interlocked.Increment(ref s.LruTick);
-                        borrowed!.Add(acc);
-                    }
-                }
-                if (acc is null) return Task.FromResult<ScrapeAccountSpec?>(null);   // hết tk trong kho
-                ShopeeAccountUsage.Shared.MarkInUse(acc.Id);   // cột "Tình trạng": Đang dùng
-                ScrapeProgressStore.Shared.AddReservedShopeeAccount(account.Id, sheet, acc.Id);
-                Log($"[{account.DisplayName}] ➕ mượn bù tk Shopee \"{acc.DisplayName}\" (thay tk dính captcha).");
-                OnUi(target.RefreshProgress);
-                return Task.FromResult<ScrapeAccountSpec?>(ToSpec(acc, sheet));
-            }
+            var pool = new SessionAccountPool(s, sheet);
+            await runner.RunAutoAsync(pool, procs, segments, rowsPer, account.CookieFile, ct).ConfigureAwait(false);
 
-            await runner.RunAutoAsync(specs, segments, rowsPer, totalRows, procs, account.CookieFile, ct, BorrowReplacementAsync).ConfigureAwait(false);
-
-            // Kết thúc: xong hết [startRow..total] → completed + nhả tk; còn dở → stopped + GIỮ tk.
+            // Kết thúc: xong hết [startRow..total] → completed; còn dở → stopped (resume chạy nốt theo dòng).
             ScrapeProgressStore.Shared.FinishRun(account.Id, sheet, startRow, totalRows);
             var after = ScrapeProgressStore.Shared.Find(account.Id, sheet);
             Log(string.Equals(after?.Status, "completed", StringComparison.OrdinalIgnoreCase)
-                ? $"[{account.DisplayName}] ✔ Hoàn thành toàn bộ — đã nhả {need} tk Shopee về kho."
-                : $"[{account.DisplayName}] ■ Chưa xong (xong tới dòng {after?.LastRowReached ?? 0}) — GIỮ tk cho lần Tiếp tục.");
+                ? $"[{account.DisplayName}] ✔ Hoàn thành toàn bộ."
+                : $"[{account.DisplayName}] ■ Chưa xong (xong tới dòng {after?.LastRowReached ?? 0}) — Tiếp tục để chạy nốt.");
         }
         catch (OperationCanceledException)
         {
-            Log($"[{account.DisplayName}] ■ đã dừng — giữ tiến độ + tk cho lần Tiếp tục.");
+            Log($"[{account.DisplayName}] ■ đã dừng — giữ tiến độ cho lần Tiếp tục.");
             try { ScrapeProgressStore.Shared.FinishRun(account.Id, sheet, startRow, 0); } catch { }
         }
         catch (Exception ex) { Log($"[{account.DisplayName}] ✘ lỗi: {ex.Message}"); }
         finally
         {
             lock (s.JobsLock) s.Jobs.Remove(account.Id);
-            if (borrowed is not null) GiveBack(s, borrowed);
-            // Nhả cổng BigSeller SAU khi đã trả tk Shopee về kho → tk BigSeller kế (đang chờ) mới tới lượt
-            // với kho Shopee đầy. Cũng đảm bảo mọi Brave của job này đã đóng (RunAutoAsync đã return) nên
-            // không còn muc_token nào của job này còn "active" trên IP máy lúc job kế bắt đầu.
-            if (gateHeld) s.BigSellerGate.Release();
             // Dọn các dòng process của job này khỏi lưới (trước đây dòng cũ không bao giờ bị xoá).
             var prefix = seq + ":";
             OnUi(() => { for (var i = Instances.Count - 1; i >= 0; i--) if (Instances[i].Key.StartsWith(prefix, StringComparison.Ordinal)) Instances.RemoveAt(i); });
@@ -389,10 +317,8 @@ public sealed partial class ScrapeViewModel : ObservableObject
         if (s is null || s.MasterCts.IsCancellationRequested) return false;
         var poolCount = AccountStore.Shared.Accounts.Count(a => !a.Disabled);
         if (!ValidateTarget(target, poolCount, out var problem)) { Warn($"Không chạy được: {problem}"); return false; }
-        // Acc này giờ THUỘC lượt chạy → đòi lại các tk Shopee mà CHÍNH nó đang đặt-chỗ (đã bị loại khỏi
-        // kho phiên lúc bắt đầu vì khi đó nó là "BigSeller khác"). Không có bước này, acc start giữa chừng
-        // sẽ thiếu tk và kẹt chờ vô hạn ở BorrowAsync.
-        ReclaimReservedToPool(s, target);
+        // Kho tk Shopee dùng chung → acc thêm giữa chừng chỉ việc mượn từ kho như mọi job khác (không cần
+        // đòi lại tk đặt-chỗ vì không còn pin tk vào BigSeller nào).
         if (StartJob(s, target, resume: true))
         {
             Log($"➕ [{target.DisplayName}] đã thêm vào lượt chạy (tiếp tục phần còn thiếu)…");
@@ -400,42 +326,6 @@ public sealed partial class ScrapeViewModel : ObservableObject
         }
         Log($"[{target.DisplayName}] đang chạy rồi — bỏ qua.");
         return false;
-    }
-
-    /// <summary>Đưa các tk Shopee mà <paramref name="target"/> đang ĐẶT CHỖ (theo tiến độ đã lưu) trở lại
-    /// kho phiên — chỉ những tk chưa có trong kho và đang rảnh thật (không bị job khác trong phiên giữ).</summary>
-    private void ReclaimReservedToPool(RunSession s, ScrapeTargetViewModel target)
-    {
-        var shop = target.SelectedShop;
-        if (shop is null) return;
-        var reserved = ScrapeProgressStore.Shared.Find(target.Account.Id, shop.ShopeeDataSheet)?.ReservedShopeeAccountIds;
-        if (reserved is null || reserved.Count == 0) return;
-
-        // Tk đang bị các job KHÁC trong phiên giữ (đang đặt-chỗ ở store, status running, không phải acc này) → KHÔNG đòi.
-        var heldByOthers = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var pr in ScrapeProgressStore.Shared.All())
-        {
-            if (string.Equals(pr.Status, "completed", StringComparison.OrdinalIgnoreCase)) continue;
-            if (pr.AccountId == target.Account.Id && string.Equals(pr.Sheet ?? "", shop.ShopeeDataSheet ?? "", StringComparison.OrdinalIgnoreCase)) continue;
-            lock (s.JobsLock) if (!s.Jobs.ContainsKey(pr.AccountId)) continue;   // chỉ né tk của job ĐANG chạy trong phiên
-            foreach (var id in pr.ReservedShopeeAccountIds) heldByOthers.Add(id);
-        }
-
-        var added = 0;
-        lock (s.AllocLock)
-        {
-            var have = new HashSet<string>(s.Available.Select(a => a.Id), StringComparer.Ordinal);
-            foreach (var id in reserved)
-            {
-                if (have.Contains(id) || heldByOthers.Contains(id)) continue;
-                var acc = AccountStore.Shared.Find(id);
-                if (acc is null || acc.Disabled) continue;
-                s.Available.Add(acc);
-                have.Add(id);
-                added++;
-            }
-        }
-        if (added > 0) Log($"↩ [{target.DisplayName}] đòi lại {added} tk Shopee đang đặt-chỗ về kho phiên.");
     }
 
     /// <summary>Dừng RIÊNG 1 tk (untick khi busy): huỷ token + đóng Brave của RIÊNG runner đó; tk khác chạy tiếp.</summary>
@@ -446,10 +336,11 @@ public sealed partial class ScrapeViewModel : ObservableObject
         JobHandle? h;
         lock (s.JobsLock) s.Jobs.TryGetValue(target.Account.Id, out h);
         if (h is null) return;
-        h.Cts.Cancel();                                   // bẻ gãy chờ BorrowAsync / AcquireAsync / RunChunk
+        h.Cts.Cancel();                                   // bẻ gãy chờ mượn tk / RunChunk
         var runner = h.Runner;
         if (runner is not null) { try { await runner.StopAllAsync(); } catch { } }
-        // finally của job tự dọn: xoá khỏi Jobs, GiveBack, xoá dòng lưới, FinishRun(...,0)=giữ tiến độ+tk.
+        // finally của job tự dọn: xoá khỏi Jobs, xoá dòng lưới, FinishRun(...,0)=giữ tiến độ cho Tiếp tục.
+        // (tk Shopee đang mượn dở được worker trả về kho khi RunChunk bị huỷ.)
     }
 
     /// <summary>Click checkbox khi ĐANG run: hỏi xác nhận rồi chạy/dừng RIÊNG tk đó. Gọi từ code-behind.</summary>
@@ -520,7 +411,7 @@ public sealed partial class ScrapeViewModel : ObservableObject
         // KHÔNG null _session ở đây — coordinator finally lo (sau khi job drain xong).
     }
 
-    /// <summary>Mở cửa sổ Thống kê của tk BigSeller đang chọn: số tk giữ, tiến độ, dòng cuối, nhả tay.</summary>
+    /// <summary>Mở cửa sổ Thống kê của tk BigSeller đang chọn: tiến độ theo sheet, dòng đã xong, xoá tiến độ.</summary>
     [RelayCommand(CanExecute = nameof(HasSelectedTarget))]
     private void ShowStats()
     {
@@ -619,15 +510,92 @@ public sealed partial class ScrapeViewModel : ObservableObject
         public readonly object AllocLock = new();
         public int BorrowedCount;
         public readonly CancellationTokenSource MasterCts = new(); // huỷ TOÀN phiên (Stop)
-        // BigSeller đi qua IP máy (không proxy) → chỉ cho 1 tk BigSeller hoạt động 1 lúc, tránh "nhiều
-        // muc_token / 1 IP" khiến server đá phiên tất cả. Job tk BigSeller mượn cổng này quanh phần chạy.
-        public readonly SemaphoreSlim BigSellerGate = new(1, 1);
         public readonly Dictionary<string, JobHandle> Jobs = new(StringComparer.Ordinal);   // key = BigSeller Account.Id
         public readonly object JobsLock = new();
         public int JobSeq;          // tăng dần — namespace key lưới UI (thay jobIndex cũ)
         public bool Finalizing;     // coordinator đã chốt kết thúc (đặt dưới JobsLock)
         public bool Resume;         // chế độ phiên
         public long LruTick;        // bộ đếm vòng-LRU cấp phát tk Shopee
+        // Tk đang "nghỉ" (proxy/lỗi tạm) — vẫn nằm trong Available nhưng bị bỏ qua tới khi hết hạn.
+        private readonly Dictionary<string, DateTimeOffset> _cooldown = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, int> _fail = new(StringComparer.Ordinal);   // lỗi liên tiếp (reset khi chạy được)
+        private const int ShortCdSec = 15, LongCdSec = 90, SetAsideAfter = 2;
+
+        // ── Kho tk Shopee DÙNG CHUNG: mượn/trả theo TỪNG KHỐI để xoay vòng toàn kho + cho tk nghỉ ──
+        // Mượn 1 tk nghỉ lâu nhất (LRU). Chờ nếu tk đều đang bận/nghỉ; null khi kho cạn hẳn (mọi tk
+        // captcha/disabled, không còn ai trả về). Nhiều job BigSeller gọi chung → không trùng tk.
+        public async Task<ShopeeAccount?> BorrowOneAsync(CancellationToken ct)
+        {
+            while (true)
+            {
+                ct.ThrowIfCancellationRequested();
+                lock (AllocLock)
+                {
+                    Available.RemoveAll(a => a.Disabled);   // captcha/tắt → loại khỏi kho
+                    var now = DateTimeOffset.UtcNow;
+                    var pick = Available
+                        .Where(a => !_cooldown.TryGetValue(a.Id, out var until) || until <= now)
+                        .OrderBy(a => a.LastUsedTick)        // nghỉ lâu nhất trước → tk luân phiên nghỉ
+                        .FirstOrDefault();
+                    if (pick is not null)
+                    {
+                        Available.Remove(pick);
+                        _cooldown.Remove(pick.Id);
+                        BorrowedCount++;
+                        ShopeeAccountUsage.Shared.MarkInUse(pick.Id);   // cột "Tình trạng": Đang dùng
+                        return pick;
+                    }
+                    // Không có tk eligible NGAY: chỉ bỏ cuộc khi không còn tk nào có thể quay lại
+                    // (kho rỗng + không ai đang mượn). Còn tk đang nghỉ/đang mượn → chờ.
+                    if (Available.Count == 0 && BorrowedCount == 0) return null;
+                }
+                await Task.Delay(500, ct).ConfigureAwait(false);
+            }
+        }
+
+        // Chạy ổn → trả tk về kho (đẩy xuống cuối hàng nghỉ qua LastUsedTick).
+        public void ReleaseOne(ShopeeAccount a)
+        {
+            lock (AllocLock)
+            {
+                _fail.Remove(a.Id);
+                _cooldown.Remove(a.Id);
+                a.LastUsedTick = Interlocked.Increment(ref LruTick);
+                if (!a.Disabled && !Available.Any(x => x.Id == a.Id)) Available.Add(a);
+                BorrowedCount--;
+            }
+            ShopeeAccountUsage.Shared.MarkReleased(a.Id);
+        }
+
+        // Lỗi proxy/tạm → cho tk nghỉ rồi tự quay lại kho (lần 1: 15s; ≥2 lần liên tiếp: 90s "để dành").
+        public (int secs, bool setAside) CooldownOne(ShopeeAccount a)
+        {
+            int secs; bool setAside;
+            lock (AllocLock)
+            {
+                var n = _fail[a.Id] = _fail.GetValueOrDefault(a.Id) + 1;
+                setAside = n >= SetAsideAfter;
+                secs = setAside ? LongCdSec : ShortCdSec;
+                _cooldown[a.Id] = DateTimeOffset.UtcNow.AddSeconds(secs);
+                a.LastUsedTick = Interlocked.Increment(ref LruTick);
+                if (!a.Disabled && !Available.Any(x => x.Id == a.Id)) Available.Add(a);
+                BorrowedCount--;
+            }
+            ShopeeAccountUsage.Shared.MarkReleased(a.Id);
+            return (secs, setAside);
+        }
+
+        // Captcha → KHÔNG trả về kho (loại khỏi vòng lượt này; tk cũng được FlagAccountErrored → Disabled).
+        public void QuarantineOne(ShopeeAccount a)
+        {
+            lock (AllocLock)
+            {
+                _fail.Remove(a.Id);
+                _cooldown.Remove(a.Id);
+                BorrowedCount--;
+            }
+            ShopeeAccountUsage.Shared.MarkReleased(a.Id);
+        }
     }
 
     private sealed class JobHandle

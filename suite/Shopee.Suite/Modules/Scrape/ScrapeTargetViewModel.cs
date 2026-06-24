@@ -96,7 +96,7 @@ public sealed partial class ScrapeTargetViewModel : ObservableObject
         get
         {
             var p = ScrapeProgressStore.Shared.Find(Account.Id, SelectedShop?.ShopeeDataSheet ?? "");
-            if (p is null || (p.Completed.Count == 0 && p.ReservedShopeeAccountIds.Count == 0))
+            if (p is null || (p.Completed.Count == 0 && p.LastRowReached == 0))
                 return "Chưa có tiến độ.";
             var status = p.Status switch
             {
@@ -105,8 +105,7 @@ public sealed partial class ScrapeTargetViewModel : ObservableObject
                 "stopped" => "■ Dừng giữa chừng",
                 _ => "—",
             };
-            var keep = p.ReservedShopeeAccountIds.Count > 0 ? $" · giữ {p.ReservedShopeeAccountIds.Count} tk Shopee" : "";
-            return $"{status} · đã xong tới dòng {p.LastRowReached}{keep}";
+            return $"{status} · đã xong tới dòng {p.LastRowReached}";
         }
     }
 

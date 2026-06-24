@@ -17,10 +17,11 @@ public sealed class BigSellerAccount
     public string CookieFile { get; set; } = "";
 
     /// <summary>
-    /// KiotProxy key RIÊNG cho tk BigSeller này. Có key → mọi traffic bigseller.com (cả login lẫn scrape)
-    /// đi qua IP của proxy này → mỗi tk BigSeller 1 IP khác nhau → chạy SONG SONG nhiều tk không bị server
-    /// đá phiên (vì không còn "nhiều token / 1 IP máy"). TRỐNG → đi IP máy như cũ (khi đó các tk chạy
-    /// LẦN LƯỢT để chỉ 1 token trên IP máy 1 lúc). Xem <c>ScrapeViewModel.BigSellerGate</c>.
+    /// KiotProxy key RIÊNG cho tk BigSeller này — dùng cho LUỒNG ĐĂNG NHẬP BigSeller (token lưu ra khớp IP
+    /// proxy, tránh bị nghi phiên lạ). TRỐNG → đăng nhập bằng IP máy. LƯU Ý: lúc SCRAPE, BigSeller KHÔNG đi
+    /// proxy riêng này nữa mà đi qua proxy của instance Shopee (mỗi instance 1 IP → phiên rải nhiều IP →
+    /// chạy SONG SONG không bị "nhiều token / 1 IP"); xem <c>BraveProfileManager</c> và
+    /// <c>BraveInstanceSession.ResolveBigSellerProxyServerAsync</c>.
     /// </summary>
     public string KiotProxyKey { get; set; } = "";
     /// <summary>Vùng KiotProxy khi cấp IP mới cho key trên (random/north/central/south…). Mặc định random.</summary>

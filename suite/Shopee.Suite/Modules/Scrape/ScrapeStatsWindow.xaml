@@ -27,26 +27,8 @@
                                 <TextBlock Text="{Binding RangesText}" TextWrapping="Wrap" Margin="0,4,0,0"
                                            Foreground="{StaticResource TextSecondaryBrush}" FontFamily="{StaticResource MonoFont}" FontSize="12" />
 
-                                <TextBlock Text="Tài khoản Shopee đang giữ:" Margin="0,10,0,4"
-                                           Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" />
-                                <ItemsControl ItemsSource="{Binding Reserved}">
-                                    <ItemsControl.ItemTemplate>
-                                        <DataTemplate>
-                                            <StackPanel Orientation="Horizontal" Margin="0,2">
-                                                <Button Content="Nhả" MinWidth="56" Padding="8,2"
-                                                        Command="{Binding DataContext.ReleaseOneCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                        CommandParameter="{Binding}" />
-                                                <TextBlock Text="{Binding Name}" VerticalAlignment="Center" Margin="10,0,0,0" />
-                                            </StackPanel>
-                                        </DataTemplate>
-                                    </ItemsControl.ItemTemplate>
-                                </ItemsControl>
-
                                 <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
-                                    <Button Content="Nhả tất cả tk" MinWidth="110"
-                                            Command="{Binding DataContext.ReleaseAllCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                            CommandParameter="{Binding}" />
-                                    <Button Style="{StaticResource DangerButton}" Content="Xoá tiến độ" MinWidth="110" Margin="10,0,0,0"
+                                    <Button Style="{StaticResource DangerButton}" Content="Xoá tiến độ" MinWidth="110"
                                             Command="{Binding DataContext.ClearProgressCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                             CommandParameter="{Binding}" />
                                 </StackPanel>

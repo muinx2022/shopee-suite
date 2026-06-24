@@ -10,6 +10,24 @@ public sealed record ScrapeAccountSpec(
     string KiotProxyKey, string Region, string ProxyType, string ManualProxy, bool RequireProxy,
     string Sheet, int StartRow, int EndRow, string ShopeeProfileDir = "");
 
+/// <summary>Kho tk Shopee DÙNG CHUNG cho auto-run: worker mượn 1 tk (nghỉ lâu nhất) TRƯỚC mỗi khối,
+/// chạy xong TRẢ về kho → xoay vòng toàn kho, cho tk nghỉ luân phiên. Nhiều job BigSeller chia sẻ cùng
+/// kho mà không tk nào bị 2 cửa sổ dùng một lúc (mượn = lấy khỏi kho). "Số process" = số worker (cửa sổ)
+/// chạy song song, KHÔNG còn = số tk dùng.</summary>
+public interface IScrapeAccountPool
+{
+    /// <summary>Mượn 1 tk nghỉ lâu nhất. Chờ nếu chưa có tk rảnh; null khi kho cạn hẳn (hết tk khả dụng).</summary>
+    Task<ScrapeAccountSpec?> BorrowAsync(CancellationToken ct);
+    /// <summary>Chạy ổn → trả tk về kho (đẩy xuống cuối hàng nghỉ).</summary>
+    void Release(ScrapeAccountSpec spec);
+    /// <summary>Lỗi proxy/tạm → cho tk nghỉ rồi tự quay lại kho. Trả (giây nghỉ, có "để dành" không) để log.</summary>
+    AccountCooldown Cooldown(ScrapeAccountSpec spec);
+    /// <summary>Captcha → loại tk khỏi kho lượt này (xử lý sau).</summary>
+    void Quarantine(ScrapeAccountSpec spec);
+}
+
+public readonly record struct AccountCooldown(int Seconds, bool SetAside);
+
 /// <summary>
 /// Facade công khai bọc engine scrape v31 (BraveInstanceSession + LauncherRunnerLoop +
 /// ExtensionRunnerAutomation — tất cả là internal). Dữ liệu workbook/video đọc native (không Python).
@@ -90,29 +108,28 @@ public sealed class ScrapeRunner
     }
 
     // ── Auto (mô hình tiến trình động + vá): KHÔNG chia hết khối từ đầu. Có 1 đường biên (frontier)
-    //    = dòng kế tiếp của tiến trình; N process rảnh thì lấy khối kế `[frontier, frontier+N]` và
-    //    đẩy frontier lên (khối rộng N+1 dòng, nối tiếp — vd N=10: 1–11, 12–22, 23–33…). Khi 1 tk
-    //    dừng GIỮA CHỪNG, phần còn lại thành việc VÁ (ưu tiên process rảnh nhặt ngay), KHÔNG tính
-    //    vào frontier. Tk lỗi: CAPTCHA → quarantine (để riêng xử lý sau); PROXY/lỗi khác → cooldown
-    //    90s rồi tự quay lại vòng. Nhờ vậy luôn còn tk nhận phần dở, không mất dòng. ──
+    //    = dòng kế tiếp của tiến trình; worker rảnh thì lấy khối kế `[frontier, frontier+N]` và đẩy
+    //    frontier lên (khối rộng N+1 dòng, nối tiếp — vd N=10: 1–11, 12–22, 23–33…). Khi 1 tk dừng
+    //    GIỮA CHỪNG, phần còn lại thành việc VÁ (ưu tiên worker rảnh nhặt ngay), KHÔNG tính vào frontier.
+    //    MỖI khối mượn 1 tk MỚI (nghỉ lâu nhất) từ KHO CHUNG `pool` rồi trả lại → xoay vòng toàn kho,
+    //    cho tk nghỉ. Tk lỗi: CAPTCHA → pool.Quarantine (loại khỏi kho); PROXY/lỗi khác → pool.Cooldown
+    //    (nghỉ rồi tự quay lại) → khối dở vá bằng tk khác. workerCount = số cửa sổ Brave song song. ──
     public async Task RunAutoAsync(
-        IReadOnlyList<ScrapeAccountSpec> pool, IReadOnlyList<(int from, int to)> segments, int rowsPerChunk,
-        int totalRows, int numProcesses, string? bigSellerCookieFile, CancellationToken ct,
-        Func<Task<ScrapeAccountSpec?>>? borrowReplacement = null)
+        IScrapeAccountPool pool, int workerCount, IReadOnlyList<(int from, int to)> segments,
+        int rowsPerChunk, string? bigSellerCookieFile, CancellationToken ct)
     {
-        if (pool.Count == 0 || segments.Count == 0) return;
+        if (segments.Count == 0 || workerCount <= 0) return;
         var per = Math.Max(1, rowsPerChunk);
         var work = new WorkAllocator(segments, per);
-        var rotation = new AccountRotation(pool);
 
-        var workers = Math.Max(1, Math.Min(numProcesses, pool.Count));
+        var workers = Math.Max(1, workerCount);
         // CTS phạm vi 1 job tk BigSeller: nếu 1 worker thấy "log in first" (mất phiên) → cancel để DỪNG
         // mọi worker cùng tk (vá/retry vô nghĩa khi token đã chết). Linked với ct ngoài (nút Dừng).
         using var jobCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         // Đếm login-first LIÊN TIẾP toàn job (reset khi có chunk chạy được) — chỉ dừng job khi vượt ngưỡng.
         var needLoginStreak = new int[1];
         var tasks = Enumerable.Range(1, workers)
-            .Select(slot => AutoWorkerAsync(slot, work, rotation, bigSellerCookieFile, borrowReplacement, jobCts, needLoginStreak))
+            .Select(slot => AutoWorkerAsync(slot, work, pool, bigSellerCookieFile, jobCts, needLoginStreak))
             .ToArray();
         await Task.WhenAll(tasks);
 
@@ -151,19 +168,10 @@ public sealed class ScrapeRunner
     private static readonly SemaphoreSlim WarmupGate = new(Math.Max(1, WarmupSlots), Math.Max(1, WarmupSlots));
 
     private async Task AutoWorkerAsync(
-        int slot, WorkAllocator work, AccountRotation rotation, string? cookieFile,
-        Func<Task<ScrapeAccountSpec?>>? borrowReplacement, CancellationTokenSource jobCts, int[] needLoginStreak)
+        int slot, WorkAllocator work, IScrapeAccountPool pool, string? cookieFile,
+        CancellationTokenSource jobCts, int[] needLoginStreak)
     {
         var ct = jobCts.Token;
-        // Mượn 1 tk bù từ kho còn lại rồi thêm vào vòng (khi tk cũ captcha/lỗi nhiều) — giữ đủ tk chạy.
-        async Task RefillAsync(string reason)
-        {
-            if (borrowReplacement is null) return;
-            var repl = await borrowReplacement().ConfigureAwait(false);
-            if (repl is not null && rotation.Add(repl))
-                InstanceLog?.Invoke("P" + slot, $"➕ Mượn bù tk \"{repl.Label}\" từ kho ({reason}).");
-        }
-
         var key = "P" + slot;
 
         // Giãn lần phóng Brave ĐẦU TIÊN của mỗi lane để không dồn cục lúc bắt đầu.
@@ -189,10 +197,11 @@ public sealed class ScrapeRunner
 
                 try
                 {
-                    var spec = await AcquireAsync(rotation, borrowReplacement, ct).ConfigureAwait(false);
+                    // Mượn 1 tk MỚI (nghỉ lâu nhất) từ kho chung cho khối này → xoay vòng toàn kho, cho tk nghỉ.
+                    var spec = await pool.BorrowAsync(ct).ConfigureAwait(false);
                     if (spec is null)
                     {
-                        // Hết tk khả dụng trong vòng VÀ kho cũng hết → trả việc lại, dừng worker.
+                        // Kho cạn hẳn (mọi tk captcha/lỗi/disabled) → trả việc lại, dừng worker.
                         work.AddPatch(from, to, stall);
                         InstanceStatus?.Invoke(key, "Hết tài khoản");
                         InstanceLog?.Invoke(key, $"⚠ Hết tk khả dụng (captcha/lỗi) — còn dòng {from}–{to} CHƯA chạy (xử lý rồi chạy lại).");
@@ -203,7 +212,7 @@ public sealed class ScrapeRunner
                     InstanceLog?.Invoke(key, $"→ tk {spec.Label}, dòng {from}–{to}{(isPatch ? " [vá]" : "")}");
                     var res = await RunChunkAsync(spec, key, from, to, cookieFile, ct, needLoginStreak).ConfigureAwait(false);
 
-                    if (ct.IsCancellationRequested) { rotation.Release(spec); break; }
+                    if (ct.IsCancellationRequested) { pool.Release(spec); break; }
 
                     // Có chunk KHÔNG báo login-first → token tk BigSeller vẫn dùng được → reset chuỗi đếm.
                     if (!res.NeedLogin) Interlocked.Exchange(ref needLoginStreak[0], 0);
@@ -222,43 +231,40 @@ public sealed class ScrapeRunner
                         var streak = Interlocked.Increment(ref needLoginStreak[0]);
                         if (streak >= MaxNeedLoginBeforeStop)
                         {
-                            rotation.Release(spec);
+                            pool.Release(spec);
                             InstanceLog?.Invoke(key, $"⛔ {res.Reason} — {streak} lần LIÊN TIẾP → DỪNG job (BigSeller thực sự mất phiên, cần đăng nhập lại).");
                             BigSellerNeedLogin?.Invoke(res.Reason);
                             try { jobCts.Cancel(); } catch { }
                             break;
                         }
-                        var cdNl = rotation.Cooldown(spec);
+                        pool.Cooldown(spec);   // cho tk Shopee nghỉ; phần dở vá bằng tk khác
                         InstanceLog?.Invoke(key,
                             $"⚠ {res.Reason} (lần {streak}/{MaxNeedLoginBeforeStop}) — có thể do proxy bị từ chối, token còn sống → " +
-                            $"nghỉ {cdNl.Seconds}s rồi VÁ phần dở bằng tk/proxy khác (KHÔNG dừng cả mẻ).");
+                            $"VÁ phần dở bằng tk khác (KHÔNG dừng cả mẻ).");
                         continue;
                     }
 
-                    // Phân loại tk lỗi: CAPTCHA → quarantine (để riêng xử lý sau); PROXY/lỗi khác →
-                    // cooldown (tự quay lại vòng); không lỗi → trả về vòng ngay.
+                    // Phân loại tk lỗi: CAPTCHA → loại khỏi kho (xử lý sau); PROXY/lỗi khác → cho nghỉ rồi
+                    // tự quay lại kho; không lỗi → trả về kho ngay (phần dở sẽ vá bằng tk khác đang rảnh).
                     if (res.Errored)
                     {
                         if (res.IsCaptcha)
                         {
-                            // Captcha → tách hẳn (xử lý sau) + MƯỢN BÙ tk khác để giữ đủ tk chạy.
                             AccountErrored?.Invoke(spec.Id, spec.Label, res.Reason);
-                            rotation.Quarantine(spec);
+                            pool.Quarantine(spec);
                             InstanceStatus?.Invoke(key, "🚫 Captcha");
-                            InstanceLog?.Invoke(key, $"🚫 {spec.Label}: captcha → tách ra xử lý sau.");
-                            await RefillAsync($"thay {spec.Label} dính captcha").ConfigureAwait(false);
+                            InstanceLog?.Invoke(key, $"🚫 {spec.Label}: captcha → loại khỏi kho, dùng tk khác.");
                         }
                         else
                         {
-                            // Lỗi khác (proxy/đứt/tạm) → cooldown rồi RETRY chính tk đó. Lần 1 nghỉ ngắn (15s);
-                            // lỗi ≥2 lần liên tiếp → nghỉ dài (90s) "để dành" cho tiến trình khác nhặt sau.
-                            // KHÔNG mượn tk khác cho proxy/lỗi-khác (mượn bù chỉ dành cho captcha).
-                            var cd = rotation.Cooldown(spec);
-                            InstanceLog?.Invoke(key, $"⏸ {spec.Label}: {res.Reason} → nghỉ {cd.Seconds}s rồi thử lại CÙNG tk"
-                                + (cd.SetAside ? " (lỗi 2 lần — để dành 90s cho tiến trình khác nhặt)." : "."));
+                            // Lỗi khác (proxy/đứt/tạm) → cho tk nghỉ. Lần 1 nghỉ ngắn (15s); lỗi ≥2 lần liên
+                            // tiếp → nghỉ dài (90s) "để dành". Phần dở vá bằng tk khác đang rảnh (không chờ tk này).
+                            var cd = pool.Cooldown(spec);
+                            InstanceLog?.Invoke(key, $"⏸ {spec.Label}: {res.Reason} → cho tk nghỉ {cd.Seconds}s, vá phần dở bằng tk khác"
+                                + (cd.SetAside ? " (lỗi 2 lần — nghỉ dài 90s)." : "."));
                         }
                     }
-                    else rotation.Release(spec);
+                    else pool.Release(spec);
 
                     // Chỉ XONG khi scrape tới `to`. Dừng giữa chừng (lỗi HAY không) → phần còn lại
                     // [lastDone+1, to] thành việc VÁ; không mất dòng, không chạy lại dòng đã xong.
@@ -293,25 +299,6 @@ public sealed class ScrapeRunner
         }
         catch (OperationCanceledException) { InstanceStatus?.Invoke(key, "Đã dừng"); }
         catch (Exception ex) { InstanceLog?.Invoke(key, "✘ " + ex.Message); }
-    }
-
-    private static async Task<ScrapeAccountSpec?> AcquireAsync(
-        AccountRotation rotation, Func<Task<ScrapeAccountSpec?>>? borrowReplacement, CancellationToken ct)
-    {
-        while (!ct.IsCancellationRequested)
-        {
-            var s = rotation.TryAcquire();
-            if (s is not null) return s;
-            if (rotation.AllQuarantined)
-            {
-                // Mọi tk trong vòng đã captcha → thử MƯỢN BÙ từ kho; hết kho thật sự thì mới dừng.
-                var extra = borrowReplacement is null ? null : await borrowReplacement().ConfigureAwait(false);
-                if (extra is not null && rotation.Add(extra)) continue;
-                return null;
-            }
-            await Task.Delay(800, ct).ConfigureAwait(false); // tk khác đang bận / cooldown → chờ quay lại
-        }
-        return null;
     }
 
     private readonly record struct ChunkResult(bool Errored, string Reason, int LastCompletedRow, bool IsCaptcha, bool NeedLogin = false);
@@ -462,93 +449,6 @@ public sealed class ScrapeRunner
     public void BringInstanceToFront(string key)
     {
         if (_sessions.TryGetValue(key, out var session)) session.BringWindowToFront();
-    }
-
-    /// <summary>Xoay vòng tk (round-robin): CAPTCHA → quarantine (tách hẳn, xử lý sau); PROXY/lỗi
-    /// khác → cooldown rồi TỰ quay lại vòng. Lỗi ≥2 lần liên tiếp → báo "để dành" (caller mượn tk khác
-    /// chạy trước, tk này quay lại sau cooldown). Hỗ trợ THÊM tk mượn bù vào vòng khi tk cũ hỏng.</summary>
-    private sealed class AccountRotation
-    {
-        // Proxy/lỗi-khác: lần 1 nghỉ ngắn rồi RETRY chính tk đó; lỗi liên tiếp tới ngưỡng → nghỉ dài
-        // "để dành" cho tiến trình khác nhặt sau. KHÔNG mượn tk khác (mượn bù chỉ dành cho captcha).
-        public const int ShortCooldownSeconds = 15;   // lần 1 — retry cùng tk
-        public const int LongCooldownSeconds = 90;    // lần 2+ — để dành
-        private const int SetAsideAfterFails = 2;     // lỗi liên tiếp tới ngưỡng này → nghỉ dài (để dành)
-
-        public readonly record struct CooldownResult(int Seconds, bool SetAside);
-
-        private readonly List<ScrapeAccountSpec> _pool;
-        private readonly HashSet<string> _busy = new(StringComparer.Ordinal);
-        private readonly HashSet<string> _quarantined = new(StringComparer.Ordinal);            // captcha → xử lý sau
-        private readonly Dictionary<string, DateTimeOffset> _cooldown = new(StringComparer.Ordinal); // proxy/lỗi → tạm nghỉ
-        private readonly Dictionary<string, int> _fail = new(StringComparer.Ordinal);           // lỗi liên tiếp (reset khi chạy được)
-        private readonly object _lock = new();
-        private int _cursor;
-
-        public AccountRotation(IReadOnlyList<ScrapeAccountSpec> pool) => _pool = pool.ToList();
-
-        /// <summary>Thêm tk MƯỢN BÙ vào vòng xoay (khi tk cũ dính captcha/lỗi). Bỏ qua nếu đã có.</summary>
-        public bool Add(ScrapeAccountSpec spec)
-        {
-            lock (_lock)
-            {
-                if (_pool.Any(p => p.Id == spec.Id)) return false;
-                _pool.Add(spec);
-                _quarantined.Remove(spec.Id); _cooldown.Remove(spec.Id); _fail.Remove(spec.Id);
-                return true;
-            }
-        }
-
-        /// <summary>true nếu MỌI tk trong vòng đều quarantine (captcha) — không tk nào tự quay lại nữa.</summary>
-        public bool AllQuarantined
-        {
-            get { lock (_lock) return _pool.Count > 0 && _pool.All(p => _quarantined.Contains(p.Id)); }
-        }
-
-        public ScrapeAccountSpec? TryAcquire()
-        {
-            lock (_lock)
-            {
-                var now = DateTimeOffset.UtcNow;
-                for (var i = 0; i < _pool.Count; i++)
-                {
-                    var idx = (_cursor + i) % _pool.Count;
-                    var s = _pool[idx];
-                    if (_busy.Contains(s.Id) || _quarantined.Contains(s.Id)) continue;
-                    if (_cooldown.TryGetValue(s.Id, out var until) && until > now) continue; // còn trong cooldown
-                    _cooldown.Remove(s.Id);
-                    _busy.Add(s.Id);
-                    _cursor = idx + 1;
-                    return s;
-                }
-            }
-            return null;
-        }
-
-        /// <summary>Chạy được → trả về vòng + reset đếm lỗi.</summary>
-        public void Release(ScrapeAccountSpec spec) { lock (_lock) { _busy.Remove(spec.Id); _fail.Remove(spec.Id); } }
-
-        /// <summary>Captcha: tách hẳn tk khỏi run (để riêng xử lý sau), KHÔNG tự quay lại.</summary>
-        public void Quarantine(ScrapeAccountSpec spec)
-        {
-            lock (_lock) { _busy.Remove(spec.Id); _cooldown.Remove(spec.Id); _quarantined.Add(spec.Id); }
-        }
-
-        /// <summary>Proxy/lỗi khác: tạm nghỉ rồi tự quay lại vòng (RETRY cùng tk). Lần 1 nghỉ ngắn (15s);
-        /// lỗi ≥2 lần liên tiếp → nghỉ dài (90s) "để dành" cho tiến trình khác nhặt sau. Trả về số giây
-        /// nghỉ + cờ SetAside để caller log đúng. KHÔNG mượn tk khác (đó là việc của nhánh captcha).</summary>
-        public CooldownResult Cooldown(ScrapeAccountSpec spec)
-        {
-            lock (_lock)
-            {
-                _busy.Remove(spec.Id);
-                var n = _fail[spec.Id] = _fail.GetValueOrDefault(spec.Id) + 1;
-                var setAside = n >= SetAsideAfterFails;
-                var secs = setAside ? LongCooldownSeconds : ShortCooldownSeconds;
-                _cooldown[spec.Id] = DateTimeOffset.UtcNow.AddSeconds(secs);
-                return new CooldownResult(secs, setAside);
-            }
-        }
     }
 
     /// <summary>Cấp việc động cho auto-run: đường biên (frontier) cho TIẾN TRÌNH + hàng VÁ cho phần
