@@ -78,6 +78,70 @@ internal static class BigSellerCookieImporter
         catch (Exception ex) { return $"(lỗi đọc token: {ex.Message})"; }
     }
 
+    /// <summary>muc_token để SO SÁNH "token nào mới hơn": giá trị (so trùng) + hạn (expires). null = không có.</summary>
+    public readonly record struct AuthTokenInfo(string Value, DateTimeOffset? Expires);
+
+    private static AuthTokenInfo? ToAuthTokenInfo(Dictionary<string, object?>? c)
+    {
+        if (c is null) return null;
+        var val = c.GetValueOrDefault("value") as string ?? "";
+        if (val.Length <= 5) return null;
+        DateTimeOffset? exp = null;
+        if (c.TryGetValue("expires", out var e) && e is not null)
+        {
+            double secs = e switch
+            {
+                long l => l,
+                double d => d,
+                _ => double.TryParse(e.ToString(), out var p) ? p : -1,
+            };
+            if (secs > 0) exp = DateTimeOffset.FromUnixTimeSeconds((long)secs);
+        }
+        return new AuthTokenInfo(val, exp);
+    }
+
+    /// <summary>muc_token ĐANG có trong BROWSER (qua CDP). null nếu chưa có. Dùng để quyết định có nên
+    /// nạp đè token từ file không (đừng đè token server vừa xoay = giết phiên → "log in first").</summary>
+    public static async Task<AuthTokenInfo?> GetBrowserAuthTokenInfoAsync(int debugPort)
+    {
+        try
+        {
+            var cookies = await GetBigSellerCookiesAsync(debugPort).ConfigureAwait(false);
+            var c = cookies.FirstOrDefault(x =>
+                string.Equals(x.GetValueOrDefault("name") as string, AuthCookieName, StringComparison.OrdinalIgnoreCase));
+            return ToAuthTokenInfo(c);
+        }
+        catch { return null; }
+    }
+
+    /// <summary>muc_token trong FILE cookie (đọc trực tiếp file, không qua browser). null nếu thiếu.</summary>
+    public static AuthTokenInfo? GetFileAuthTokenInfo(string cookieFile)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(cookieFile) || !File.Exists(cookieFile)) return null;
+            var json = File.ReadAllText(cookieFile);
+            using var doc = JsonDocument.Parse(json);
+            var cookiesEl = doc.RootElement.TryGetProperty("cookies", out var cp) ? cp : doc.RootElement;
+            if (cookiesEl.ValueKind != JsonValueKind.Array) return null;
+            foreach (var ck in cookiesEl.EnumerateArray())
+            {
+                if (ck.ValueKind != JsonValueKind.Object) continue;
+                var name = ck.TryGetProperty("name", out var np) ? np.GetString() : null;
+                if (!string.Equals(name, AuthCookieName, StringComparison.OrdinalIgnoreCase)) continue;
+                var domain = ck.TryGetProperty("domain", out var dp) ? (dp.GetString() ?? "") : "";
+                if (!domain.Contains("bigseller", StringComparison.OrdinalIgnoreCase)) continue;
+                var map = new Dictionary<string, object?>();
+                if (ck.TryGetProperty("value", out var vp)) map["value"] = vp.GetString();
+                if (ck.TryGetProperty("expires", out var ep) && ep.ValueKind == JsonValueKind.Number)
+                    map["expires"] = ep.TryGetInt64(out var l) ? l : ep.GetDouble();
+                return ToAuthTokenInfo(map);
+            }
+            return null;
+        }
+        catch { return null; }
+    }
+
     public static bool TryWriteCookieFile(
         string cookieFile,
         IReadOnlyCollection<Dictionary<string, object?>> bigSellerCookies,

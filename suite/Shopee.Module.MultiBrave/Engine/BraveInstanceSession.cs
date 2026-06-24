@@ -1823,17 +1823,38 @@ internal sealed class BraveInstanceSession : IDisposable
         if (string.IsNullOrWhiteSpace(_bigSellerCookieFile) || !_running)
             return;
 
-        // LUÔN re-import token mới nhất từ file (giống app cũ open-multi-brave-v31 vốn chạy tốt với
-        // nhiều Brave/1 BigSeller). KHÔNG skip khi "đã có muc_token": profile bền có thể còn token CŨ
-        // (đã chết sau khi user đăng nhập lại) → skip ⇒ đẩy bằng token chết ⇒ "log in BigSeller first".
-        // Import ghi đè cookie nên luôn cập nhật về token hiện hành trong file.
-
         // CHẨN ĐOÁN "token mất đi đâu": ghi token ĐANG có trong browser TRƯỚC khi import (để biết import
         // có ghi đè token đang sống không, và token có hết hạn không).
         var tokenBefore = await BigSellerCookieImporter.GetAuthCookieDebugAsync(_cdpPort).ConfigureAwait(false);
         // Log RÕ tk BigSeller + file cookie đang nạp (để bắt nếu multi-BigSeller nạp nhầm file của tk khác).
         Log($"BigSeller nạp cookie: tk=\"{_config?.BigSellerAccountName ?? "?"}\" file=\"{Path.GetFileName(_bigSellerCookieFile)}\"");
         Log($"BigSeller token (trước import): {tokenBefore}");
+
+        // ─── GIỮ TOKEN SỐNG — chống "log in first" sau vài vòng ──────────────────────────────────────
+        // Server BigSeller XOAY muc_token mỗi khi cào → profile bền của instance giữ token MỚI HƠN token
+        // TĨNH trong file. Trước đây hàm này LUÔN nhập đè token-file lên token-đang-sống ⇒ ép browser quay
+        // về token cũ ⇒ sau vài vòng server đã xoay qua từ lâu nên TỪ CHỐI ⇒ "log in BigSeller first"
+        // (xảy ra ở CẢ đi-IP-máy lẫn đi-proxy-instance vì lỗi nằm ở lệnh đè, không phải IP).
+        // Quy tắc mới (cùng tinh thần đường restart-extension ở trên): chỉ nhập từ file khi
+        //   • browser CHƯA có muc_token (seed lần đầu / profile mới), HOẶC
+        //   • token trong file MỚI HƠN browser theo hạn (tức user vừa ĐĂNG NHẬP LẠI → file cập nhật).
+        // Nếu token browser mới hơn/bằng hoặc TRÙNG giá trị file ⇒ GIỮ phiên server vừa cấp, KHÔNG đè.
+        var browserTok = await BigSellerCookieImporter.GetBrowserAuthTokenInfoAsync(_cdpPort).ConfigureAwait(false);
+        if (browserTok is { } bt)
+        {
+            var fileTok = BigSellerCookieImporter.GetFileAuthTokenInfo(_bigSellerCookieFile);
+            var sameValue = fileTok is { } ft && string.Equals(ft.Value, bt.Value, StringComparison.Ordinal);
+            // File mới hơn khi: file CÓ hạn rõ VÀ (browser KHÔNG hạn — session cookie, thường do user vừa
+            // login lại → cần nạp token mới; HOẶC cả hai có hạn nhưng file trễ hơn). Cả hai có hạn mà browser
+            // ≥ file ⇒ server vừa xoay ⇒ GIỮ (đây là fix bug "login first sau vài vòng", KHÔNG được phá).
+            var fileNewer = fileTok is { Expires: { } fe } && (bt.Expires is not { } be || fe > be);
+            if (sameValue || !fileNewer)
+            {
+                Log("BigSeller: browser đã có muc_token sống (server vừa xoay) — GIỮ phiên, KHÔNG nạp đè token cũ từ file.");
+                return;
+            }
+            Log("BigSeller: token trong file MỚI HƠN browser (có thể bạn vừa đăng nhập lại) → nạp đè để cập nhật.");
+        }
 
         // Nạp + XÁC NHẬN có muc_token; thử lại tối đa 3 lần (import lần đầu hay flaky do CDP/page chưa
         // sẵn sàng → trước đây nuốt lỗi 1 lần là instance đó dính "login bigseller first").
