@@ -22,6 +22,9 @@ public interface IScrapeAccountPool
     void Release(ScrapeAccountSpec spec);
     /// <summary>Lỗi proxy/tạm → cho tk nghỉ rồi tự quay lại kho. Trả (giây nghỉ, có "để dành" không) để log.</summary>
     AccountCooldown Cooldown(ScrapeAccountSpec spec);
+    /// <summary>Captcha → CHỜ 3' (giải tay) rồi mới loại: lần đầu cho nghỉ 3' (vẫn trong khung, thử lại sau);
+    /// còn captcha lần nữa → trả true = LOẠI khỏi khung (đánh dấu lỗi). KHÔNG bù tk mới.</summary>
+    bool CaptchaGrace(ScrapeAccountSpec spec);
     /// <summary>Captcha → loại tk khỏi kho lượt này (xử lý sau).</summary>
     void Quarantine(ScrapeAccountSpec spec);
 }
@@ -49,8 +52,9 @@ public sealed class ScrapeRunner
     public event Action<string, string>? InstanceStatus;
     /// <summary>(key, tên account, khối dòng) — auto: khi 1 slot nhận tk + khối mới.</summary>
     public event Action<string, string, string>? SlotAssigned;
-    /// <summary>(accountId, tên account, lý do) — tk dính captcha/proxy lỗi, bị loại khỏi vòng xoay.</summary>
-    public event Action<string, string, string>? AccountErrored;
+    /// <summary>(accountId, tên account, lý do, urlCaptcha?) — tk dính captcha/proxy lỗi, bị loại khỏi vòng
+    /// xoay. urlCaptcha = trang lúc dính captcha (để "Kiểm tra tk lỗi" mở đúng trang đó), null nếu không có.</summary>
+    public event Action<string, string, string, string?>? AccountErrored;
     /// <summary>(from, to) — khoảng dòng vừa cào XONG (để lưu tiến độ resume). Báo theo từng chunk.</summary>
     public event Action<int, int>? RowsCompleted;
     /// <summary>(lý do) — tk BigSeller mất phiên ("log in first"). Toàn bộ job tk này bị dừng; cần đăng nhập lại BigSeller.</summary>
@@ -100,7 +104,7 @@ public sealed class ScrapeRunner
                     BigSellerNeedLogin?.Invoke(res.Reason);
                     try { jobCts.Cancel(); } catch { }
                 }
-                else if (res.Errored) AccountErrored?.Invoke(spec.Id, spec.Label, res.Reason);
+                else if (res.Errored) AccountErrored?.Invoke(spec.Id, spec.Label, res.Reason, res.CaptchaUrl);
             }
             finally { gate.Release(); }
         }).ToArray();
@@ -153,7 +157,7 @@ public sealed class ScrapeRunner
     // proxy bị BigSeller từ chối (token vẫn sống ở IP khác; kiểm chứng: đóng mẻ xong mở BigSeller tay vẫn
     // còn đăng nhập). CHỈ dừng cả job khi login-first xảy ra LIÊN TIẾP tới ngưỡng này (token thật sự chết →
     // re-import cũng vô ích). Dưới ngưỡng: trả phần dở thành vá + thử lại bằng tk/proxy khác, KHÔNG nuke mẻ.
-    private const int MaxNeedLoginBeforeStop = 5;
+    private const int MaxNeedLoginBeforeStop = 3;
 
     // Giãn khởi động giữa các lane: phóng tất cả Brave cùng lúc (thundering herd) làm nghẽn CPU,
     // chậm mở CDP port và khiến service worker MV3 dựng đồng loạt bị throttle → probe timeout.
@@ -228,19 +232,28 @@ public sealed class ScrapeRunner
                         var nlFrom = Math.Max(from, lastDoneNl + 1);
                         if (nlFrom <= to) work.AddPatch(nlFrom, to, stall);
 
+                        // VERIFY "BigSeller out thật?": nếu tk khác TRONG KHUNG vẫn còn muc_token sống →
+                        // account CÒN sống, chỉ tk này glitch → cho nghỉ, vá bằng tk khác, KHÔNG dừng job.
+                        if (await AnySiblingHasBigSellerAuthAsync(key).ConfigureAwait(false))
+                        {
+                            Interlocked.Exchange(ref needLoginStreak[0], 0);
+                            pool.Cooldown(spec);
+                            InstanceLog?.Invoke(key, $"⚠ {res.Reason} — nhưng tk khác trong khung CÒN phiên BigSeller sống → chỉ tk này lỗi, VÁ bằng tk khác (KHÔNG dừng job).");
+                            continue;
+                        }
+                        // Không tk nào trong khung còn phiên → nghi OUT THẬT; xác nhận qua ngưỡng liên tiếp (chống nhiễu 1 nhịp).
                         var streak = Interlocked.Increment(ref needLoginStreak[0]);
                         if (streak >= MaxNeedLoginBeforeStop)
                         {
                             pool.Release(spec);
-                            InstanceLog?.Invoke(key, $"⛔ {res.Reason} — {streak} lần LIÊN TIẾP → DỪNG job (BigSeller thực sự mất phiên, cần đăng nhập lại).");
+                            InstanceLog?.Invoke(key, $"⛔ {res.Reason} — KHÔNG tk nào trong khung còn phiên ({streak} lần) → BigSeller OUT thật → DỪNG job, cần đăng nhập lại.");
                             BigSellerNeedLogin?.Invoke(res.Reason);
                             try { jobCts.Cancel(); } catch { }
                             break;
                         }
                         pool.Cooldown(spec);   // cho tk Shopee nghỉ; phần dở vá bằng tk khác
                         InstanceLog?.Invoke(key,
-                            $"⚠ {res.Reason} (lần {streak}/{MaxNeedLoginBeforeStop}) — có thể do proxy bị từ chối, token còn sống → " +
-                            $"VÁ phần dở bằng tk khác (KHÔNG dừng cả mẻ).");
+                            $"⚠ {res.Reason} (lần {streak}/{MaxNeedLoginBeforeStop}, chưa thấy phiên sống) — thử lại bằng tk khác.");
                         continue;
                     }
 
@@ -250,10 +263,19 @@ public sealed class ScrapeRunner
                     {
                         if (res.IsCaptcha)
                         {
-                            AccountErrored?.Invoke(spec.Id, spec.Label, res.Reason);
-                            pool.Quarantine(spec);
-                            InstanceStatus?.Invoke(key, "🚫 Captcha");
-                            InstanceLog?.Invoke(key, $"🚫 {spec.Label}: captcha → loại khỏi kho, dùng tk khác.");
+                            // Captcha → CHỜ 3' (giải tay) rồi mới loại. Lần đầu: giữ trong khung, nghỉ 3', thử
+                            // lại; còn captcha lần nữa → LOẠI khỏi khung + đánh dấu lỗi (KHÔNG bù tk mới).
+                            if (pool.CaptchaGrace(spec))
+                            {
+                                AccountErrored?.Invoke(spec.Id, spec.Label, res.Reason, res.CaptchaUrl);
+                                InstanceStatus?.Invoke(key, "🚫 Captcha");
+                                InstanceLog?.Invoke(key, $"🚫 {spec.Label}: vẫn captcha sau khi chờ 3' → LOẠI khỏi khung.");
+                            }
+                            else
+                            {
+                                InstanceStatus?.Invoke(key, "🚫 Captcha (chờ 3')");
+                                InstanceLog?.Invoke(key, $"🚫 {spec.Label}: captcha → giữ trong khung, CHỜ 3' (giải tay) rồi thử lại; còn captcha sẽ loại.");
+                            }
                         }
                         else
                         {
@@ -301,7 +323,43 @@ public sealed class ScrapeRunner
         catch (Exception ex) { InstanceLog?.Invoke(key, "✘ " + ex.Message); }
     }
 
-    private readonly record struct ChunkResult(bool Errored, string Reason, int LastCompletedRow, bool IsCaptcha, bool NeedLogin = false);
+    /// <summary>Có process ANH EM nào (khác <paramref name="exceptKey"/>) đang chạy mà browser còn muc_token
+    /// BigSeller sống không. true → BigSeller CÒN sống (process báo login-first chỉ glitch lẻ); false → không
+    /// ai còn phiên (nghi account OUT thật).</summary>
+    private async Task<bool> AnySiblingHasBigSellerAuthAsync(string exceptKey)
+    {
+        foreach (var kv in _sessions)
+        {
+            if (kv.Key == exceptKey) continue;
+            try { if (await kv.Value.HasBigSellerAuthAsync().ConfigureAwait(false)) return true; }
+            catch { }
+        }
+        return false;
+    }
+
+    /// <summary>Chuỗi hiển thị cột "Trạng thái" (cột 3) theo TỪNG DÒNG: "Đang mở dòng X…" / "Đang tải video
+    /// dòng X…" thay cho "Đang chạy — proxy". Đọc pha + dòng hiện tại do engine ghi vào cfg mỗi nhịp.</summary>
+    private static string RowStatus(InstanceConfig cfg)
+    {
+        var row = cfg.CurrentRow;
+        // CAPTCHA ưu tiên CAO NHẤT — hiện NGAY ở cột Trạng thái, không để các nhịp "Đang mở dòng…" đè mất.
+        if (cfg.CaptchaError)
+            return row is > 0 ? $"🚫 Captcha dòng {row} — giải tay" : "🚫 Captcha — giải tay";
+        if (row is not > 0) return cfg.LastRunnerMessage ?? "Đang chuẩn bị…";
+        return (cfg.RunnerPhase ?? "") switch
+        {
+            "opening" or "starting" => $"Đang mở dòng {row}…",
+            "video" => $"Đang tải video dòng {row}…",
+            "waiting" => $"Xong dòng {cfg.LastCompletedRow} · chờ link kế…",
+            "paused" => cfg.LastRunnerMessage ?? $"Tạm dừng (dòng {row})",
+            "needlogin" => $"⚠ BigSeller mất phiên (dòng {row})",
+            "stopped" => "Đã dừng",
+            "finished" => "Xong",
+            _ => $"Đang xử lý dòng {row}…",
+        };
+    }
+
+    private readonly record struct ChunkResult(bool Errored, string Reason, int LastCompletedRow, bool IsCaptcha, bool NeedLogin = false, string? CaptchaUrl = null);
 
     /// <summary>Dòng cuối ĐÃ scrape xong của 1 chunk (đọc từ cfg do engine ghi per-row). Chưa xong
     /// dòng nào → from-1. Kẹp trong [from-1, to].</summary>
@@ -330,13 +388,22 @@ public sealed class ScrapeRunner
             session.WarmupAcquire = WarmupGate.WaitAsync;
             session.WarmupRelease = () => WarmupGate.Release();
             _sessions[key] = session;
-            session.StatusChanged += () => InstanceStatus?.Invoke(key, session!.StatusText);
-            // Báo tiến độ theo TỪNG DÒNG (live) — engine cập nhật cfg.LastCompletedRow + bắn ExtensionProgressSynced
-            // mỗi khi xong 1 link. Nhờ vậy Thống kê thấy ngay (kể cả khi đang chạy / khi dừng giữa chừng),
-            // không phải đợi xong cả khối.
+            session.StatusChanged += () =>
+            {
+                // Cột Trạng thái CHỈ hiện captcha/lỗi từ session. Các trạng thái VÒNG-ĐỜI (Mở Brave / Đang chạy /
+                // Đang đóng profile / Dừng / Đang khởi động) là TRANSIENT giữa 2 chunk (đóng tk cũ → mở tk kế) —
+                // trước đây lọt ra cột Trạng thái trông như "đã dừng" dù chỉ đang xoay tk. Bỏ chúng đi; trạng
+                // thái theo dòng do RowStatus lo, lý do DỪNG THẬT do AutoWorkerAsync set.
+                var st = session!.StatusText;
+                if (st.Contains("Captcha", StringComparison.Ordinal) || st.StartsWith("Lỗi", StringComparison.Ordinal))
+                    InstanceStatus?.Invoke(key, st);
+            };
+            // Báo tiến độ theo TỪNG DÒNG (live) — engine cập nhật cfg.CurrentRow/LastCompletedRow + bắn
+            // ExtensionProgressSynced mỗi nhịp. Cập nhật cột Trạng thái = "Đang mở dòng X…" theo từng dòng.
             var reportedRow = from - 1;
             session.ExtensionProgressSynced += () =>
             {
+                InstanceStatus?.Invoke(key, RowStatus(cfg));
                 var lc = cfg.LastCompletedRow ?? 0;
                 if (lc > reportedRow && lc <= to)
                 {
@@ -404,7 +471,7 @@ public sealed class ScrapeRunner
         // LastCompletedRow=0 là placeholder — caller ghi đè bằng `with { LastCompletedRow = … }`.
         if (string.Equals(phase, "needlogin", StringComparison.OrdinalIgnoreCase))
             return new ChunkResult(true, string.IsNullOrWhiteSpace(msg) ? "BigSeller mất đăng nhập — cần đăng nhập lại" : msg, 0, false, NeedLogin: true);
-        if (captcha) return new ChunkResult(true, "Captcha/verify", 0, true);   // IsCaptcha=true → quarantine
+        if (captcha) return new ChunkResult(true, "Captcha/verify", 0, true, CaptchaUrl: cfg.CaptchaUrl);   // IsCaptcha=true → quarantine
         if (proxy) return new ChunkResult(true, "Lỗi proxy", 0, false);
         if (string.Equals(phase, "error", StringComparison.OrdinalIgnoreCase))
             return new ChunkResult(true, string.IsNullOrWhiteSpace(msg) ? "Lỗi" : msg, 0, false);

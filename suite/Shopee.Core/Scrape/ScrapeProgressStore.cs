@@ -23,6 +23,11 @@ public sealed class ScrapeProgress
     /// <summary>Các khoảng dòng đã cào xong, đã gộp + sắp xếp.</summary>
     public List<RowRange> Completed { get; set; } = [];
 
+    /// <summary>"Khung" tk Shopee được cấp cố định cho tk BigSeller này lúc bắt đầu chạy (reset). Engine
+    /// CHỈ xoay vòng trong khung → BigSeller chỉ thấy ngần ấy thiết bị ổn định → không bị đá phiên. Resume
+    /// giữ NGUYÊN khung này (không phơi tk mới). Reset (Run) cấp khung mới.</summary>
+    public List<string> FrameAccountIds { get; set; } = [];
+
     public int LastRowReached { get; set; }
     public int TotalRowsAtLastRun { get; set; }
 
@@ -174,6 +179,28 @@ public sealed class ScrapeProgressStore
         Changed?.Invoke();
     }
 
+    /// <summary>Lưu "khung" tk Shopee cho (BigSeller + sheet) — gọi lúc reset sau khi đã cấp khung mới.</summary>
+    public void SaveFrame(string accountId, string sheet, IEnumerable<string> ids)
+    {
+        lock (_lock)
+        {
+            var p = GetOrCreateLocked(accountId, sheet, "");
+            p.FrameAccountIds = ids.ToList();
+            SaveLocked();
+        }
+        Changed?.Invoke();
+    }
+
+    /// <summary>Khung tk Shopee đã lưu của (BigSeller + sheet) — rỗng nếu chưa có (resume đọc để giữ khung cũ).</summary>
+    public IReadOnlyList<string> GetFrame(string accountId, string sheet)
+    {
+        lock (_lock)
+        {
+            var p = _items.FirstOrDefault(x => KeyEq(x, accountId, sheet));
+            return p is null ? [] : [.. p.FrameAccountIds];
+        }
+    }
+
     /// <summary>Các khoảng dòng CÒN THIẾU trong [start..total] (để resume chạy đúng phần chưa xong).</summary>
     public List<(int from, int to)> RemainingSegments(string accountId, string sheet, int start, int total)
     {
@@ -202,6 +229,7 @@ public sealed class ScrapeProgressStore
         Sheet = p.Sheet,
         AccountName = p.AccountName,
         Completed = p.Completed.Select(r => new RowRange { From = r.From, To = r.To }).ToList(),
+        FrameAccountIds = [.. p.FrameAccountIds],
         LastRowReached = p.LastRowReached,
         TotalRowsAtLastRun = p.TotalRowsAtLastRun,
         Status = p.Status,

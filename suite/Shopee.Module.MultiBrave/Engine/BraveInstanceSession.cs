@@ -423,7 +423,7 @@ internal sealed class BraveInstanceSession : IDisposable
                             profileRoot,
                             _config,
                             Log,
-                            () => ExtensionProgressSynced?.Invoke(),
+                            () => { RefreshRunStatusFromConfig(); ExtensionProgressSynced?.Invoke(); },
                             preferSuggestedResume: proxyAttempt > 0 || preferSuggestedResume,
                             loopToken,
                             onBeforeExtensionReady: async () =>
@@ -442,7 +442,14 @@ internal sealed class BraveInstanceSession : IDisposable
                                 StartSwPinner();
                                 ReleaseWarmup();   // SW đã lên → thả cổng NGAY cho instance kế (không giữ suốt scrape)
                                 return Task.CompletedTask;
-                            }).ConfigureAwait(false);
+                            },
+                            onCaptchaState: c =>
+                            {
+                                // Engine báo đang ở /verify chờ giải tay (true) hoặc đã qua captcha (false)
+                                // → cập nhật cờ + cột Trạng thái ("🚫 Captcha" ↔ về "Đang chạy — proxy").
+                                if (_config is not null) { _config.CaptchaError = c; RefreshRunStatusFromConfig(); }
+                            },
+                            onScrapeSucceeded: () => WriteBackBigSellerTokenAsync(loopToken)).ConfigureAwait(false);
                     }
                     catch (Exception ex) when (
                         retryExtensionStart &&
@@ -1815,6 +1822,38 @@ internal sealed class BraveInstanceSession : IDisposable
     /// Import BigSeller cookie từ file account vào browser qua CDP.
     /// CDP là kết nối WebSocket local — KHÔNG đi qua proxy của instance.
     /// </summary>
+    /// <summary>Browser của instance này HIỆN có muc_token BigSeller sống không (qua CDP). Dùng để verify
+    /// "BigSeller có out thật không": nếu 1 process báo login-first mà process ANH EM cùng khung vẫn còn
+    /// token sống → account CÒN sống (chỉ process kia glitch), KHÔNG dừng cả job.</summary>
+    public async Task<bool> HasBigSellerAuthAsync()
+    {
+        if (!_running) return false;
+        try { return await BigSellerCookieImporter.HasAuthCookieInBrowserAsync(_cdpPort).ConfigureAwait(false); }
+        catch { return false; }
+    }
+
+    /// <summary>
+    /// GHI NGƯỢC token BigSeller server-VỪA-XOAY về FILE sau khi cào xong 1 dòng. Server xoay muc_token mỗi
+    /// lần dùng → token TĨNH trong file "ôi" dần; process khác rớt token mà nạp lại token ôi = đập server
+    /// bằng token chết → chuỗi auth-thất-bại dồn dập → BigSeller đá nguyên account. Lưu token MỚI NHẤT (từ
+    /// browser vừa cào THÀNH CÔNG nên chắc chắn còn sống) vào file → process khác nạp lại token HIỆN HÀNH →
+    /// tự hồi, không đập server. Best-effort: lỗi ghi không được làm hỏng vòng cào.
+    /// </summary>
+    private async Task WriteBackBigSellerTokenAsync(CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(_bigSellerCookieFile) || !_running || cancellationToken.IsCancellationRequested)
+            return;
+        try
+        {
+            var cookies = await BigSellerCookieImporter.GetBigSellerCookiesAsync(_cdpPort).ConfigureAwait(false);
+            // Chỉ ghi khi token còn sống (có muc_token) — tránh ghi đè file bằng cookie rỗng/chết.
+            if (!BigSellerCookieImporter.HasAuthCookie(cookies))
+                return;
+            BigSellerCookieImporter.TryWriteCookieFile(_bigSellerCookieFile, cookies, Log);
+        }
+        catch { /* best-effort */ }
+    }
+
     private async Task ImportBigSellerCookiesIfConfiguredAsync(CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(_bigSellerCookieFile) || !_running)
@@ -1880,6 +1919,27 @@ internal sealed class BraveInstanceSession : IDisposable
     {
         _statusText = text;
         RaiseStatusChanged();
+    }
+
+    // Status lúc TRƯỚC khi đổi sang Captcha — để khôi phục đúng status cũ khi captcha được giải.
+    private string? _statusBeforeCaptcha;
+
+    /// <summary>Đồng bộ cột "Trạng thái" theo cờ captcha của runner: đang dính captcha → hiện "🚫 Captcha"
+    /// NGAY (thay vì vẫn "Đang chạy — …"); giải xong → trả lại status cũ. Gọi mỗi nhịp onProgress của
+    /// LauncherRunnerLoop (loop set config.CaptchaError tại điểm phát hiện/giải captcha).</summary>
+    private void RefreshRunStatusFromConfig()
+    {
+        if (_config is null) return;
+        if (_config.CaptchaError)
+        {
+            _statusBeforeCaptcha ??= _statusText;
+            if (_statusText != "🚫 Captcha") SetStatus("🚫 Captcha");
+        }
+        else if (_statusBeforeCaptcha is not null)
+        {
+            SetStatus(_statusBeforeCaptcha);
+            _statusBeforeCaptcha = null;
+        }
     }
 
     private void RaiseStatusChanged() => StatusChanged?.Invoke();

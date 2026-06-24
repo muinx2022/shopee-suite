@@ -124,9 +124,12 @@
                                                  ToolTip="Chạy tới dòng này thì dừng. 0 = chạy hết sheet." /></StackPanel>
                                     <StackPanel Margin="0,0,10,8"><TextBlock Text="Dòng / lần" Style="{StaticResource Caption}" />
                                         <TextBox Width="84" Margin="0,3,0,0" Text="{Binding RowsPerAccount}" /></StackPanel>
-                                    <StackPanel Margin="0,0,0,8"><TextBlock Text="Số process" Style="{StaticResource Caption}" />
+                                    <StackPanel Margin="0,0,10,8"><TextBlock Text="Số process" Style="{StaticResource Caption}" />
                                         <TextBox Width="90" Margin="0,3,0,0" Text="{Binding MaxProcess}"
                                                  ToolTip="Số cửa sổ Brave chạy song song = số tk Shopee acc này dùng (mỗi process 1 tk; captcha thì tự mượn bù)." /></StackPanel>
+                                    <StackPanel Margin="0,0,0,8"><TextBlock Text="Số tk / khung" Style="{StaticResource Caption}" />
+                                        <TextBox Width="90" Margin="0,3,0,0" Text="{Binding FrameSize}"
+                                                 ToolTip="Số tk Shopee ĐÓNG KHUNG cố định cho tk BigSeller này (cấp lúc bắt đầu chạy). Chỉ xoay vòng trong khung → BigSeller chỉ thấy ngần ấy thiết bị ổn định → không bị đá phiên. Nên ≥ Số process." /></StackPanel>
                                 </WrapPanel>
 
                                 <!-- Tiến độ đã lưu + Thống kê -->
@@ -166,6 +169,28 @@
                 <Border Style="{StaticResource Card}" ClipToBounds="True">
                     <DataGrid ItemsSource="{Binding Instances}" BorderThickness="0" IsReadOnly="True"
                               PreviewMouseLeftButtonUp="Instance_Click">
+                        <!-- Tô màu nền dòng theo tk BigSeller (mỗi tk 1 màu) → dễ nhìn các process cùng tk khi chạy nhiều tk -->
+                        <DataGrid.RowStyle>
+                            <Style TargetType="DataGridRow">
+                                <Setter Property="Background" Value="{Binding AccountBrush}" />
+                            </Style>
+                        </DataGrid.RowStyle>
+                        <DataGrid.CellStyle>
+                            <Style TargetType="DataGridCell">
+                                <Setter Property="Background" Value="Transparent" />
+                                <Setter Property="BorderBrush" Value="Transparent" />
+                                <Setter Property="Foreground" Value="#1F2937" />
+                                <Style.Triggers>
+                                    <!-- Khi CHỌN dòng: KHÔNG để chữ thành trắng (mờ trên nền nhạt). Giữ chữ
+                                         đậm tối + phủ nền tối nhẹ để vẫn thấy rõ dòng đang chọn. -->
+                                    <Trigger Property="IsSelected" Value="True">
+                                        <Setter Property="Background" Value="#33000000" />
+                                        <Setter Property="Foreground" Value="#111827" />
+                                        <Setter Property="FontWeight" Value="SemiBold" />
+                                    </Trigger>
+                                </Style.Triggers>
+                            </Style>
+                        </DataGrid.CellStyle>
                         <DataGrid.Columns>
                             <DataGridTextColumn Header="Process" Binding="{Binding Label}" Width="1.2*" />
                             <DataGridTextColumn Header="Tài khoản" Binding="{Binding AccountName}" Width="1.3*" />

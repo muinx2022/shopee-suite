@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Shopee.Core.Accounts;
 using Shopee.Core.Scrape;
 
 namespace Shopee.Suite.Modules.Scrape;
@@ -11,8 +12,10 @@ public sealed class SheetProgressRow
     public string Sheet { get; }
     public string Header { get; }
     public string RangesText { get; }
+    /// <summary>Danh sách tk Shopee được "khoanh vùng" (khung) cho tk BigSeller này ở sheet đó.</summary>
+    public string FrameText { get; }
 
-    public SheetProgressRow(ScrapeProgress p)
+    public SheetProgressRow(ScrapeProgress p, IReadOnlyList<string> frameLabels)
     {
         Sheet = p.Sheet;
         var status = p.Status switch
@@ -28,6 +31,9 @@ public sealed class SheetProgressRow
         RangesText = p.Completed.Count == 0
             ? "Đã cào: (chưa có)"
             : "Đã cào: " + string.Join(", ", p.Completed.Select(r => r.From == r.To ? $"{r.From}" : $"{r.From}–{r.To}"));
+        FrameText = frameLabels.Count == 0
+            ? "Khung tk Shopee: (chưa cấp — lần Chạy đầu sẽ khoanh vùng)"
+            : $"Khung tk Shopee ({frameLabels.Count}): " + string.Join(", ", frameLabels);
     }
 }
 
@@ -54,11 +60,20 @@ public sealed partial class ScrapeStatsViewModel : ObservableObject
             .Where(p => p.AccountId == _accountId)
             .OrderBy(p => p.Sheet)
             .ToList();
-        foreach (var p in items) Sheets.Add(new SheetProgressRow(p));
+        foreach (var p in items)
+        {
+            // Resolve id tk Shopee trong khung → tên hiển thị; tk đã bị tắt/loại (captcha) đánh dấu "(lỗi)".
+            var labels = p.FrameAccountIds
+                .Select(id => AccountStore.Shared.Find(id) is { } a
+                    ? (a.Disabled ? $"{a.DisplayName} (lỗi)" : a.DisplayName)
+                    : "(tk đã xoá)")
+                .ToList();
+            Sheets.Add(new SheetProgressRow(p, labels));
+        }
 
         Summary = items.Count == 0
             ? "Chưa có lượt scrape nào cho tài khoản BigSeller này."
-            : $"{items.Count} sheet có tiến độ. (Tk Shopee tự xoay vòng từ kho chung, không giữ riêng.)";
+            : $"{items.Count} sheet có tiến độ. Mỗi tk BigSeller được KHOANH VÙNG một bộ tk Shopee cố định (chỉ xoay vòng trong khung → không bị đá phiên).";
     }
 
     [RelayCommand] private void Refresh() => Load();

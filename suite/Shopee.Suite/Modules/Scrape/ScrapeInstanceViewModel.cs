@@ -1,3 +1,4 @@
+using System.Windows.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using Shopee.Core.Accounts;
 
@@ -13,6 +14,10 @@ public sealed partial class ScrapeInstanceViewModel : ObservableObject
     public string Key { get; }
     public ShopeeAccount? Account { get; }   // null với dòng process auto
 
+    /// <summary>Màu nền dòng theo tk BigSeller (mỗi tk BigSeller 1 màu) — để dễ phân biệt các process cùng
+    /// 1 tk BigSeller khi chạy nhiều tk song song. null = không tô (mặc định).</summary>
+    public Brush? AccountBrush { get; }
+
     /// <summary>Manual: dòng theo 1 account.</summary>
     public ScrapeInstanceViewModel(ShopeeAccount account)
     {
@@ -22,11 +27,12 @@ public sealed partial class ScrapeInstanceViewModel : ObservableObject
         _accountName = account.Username;
     }
 
-    /// <summary>Auto: dòng theo 1 process/slot.</summary>
-    public ScrapeInstanceViewModel(string key, string label)
+    /// <summary>Auto: dòng theo 1 process/slot (accountBrush = màu tk BigSeller của process này).</summary>
+    public ScrapeInstanceViewModel(string key, string label, Brush? accountBrush = null)
     {
         Key = key;
         _label = label;
+        AccountBrush = accountBrush;
     }
 
     [ObservableProperty] private string _label;

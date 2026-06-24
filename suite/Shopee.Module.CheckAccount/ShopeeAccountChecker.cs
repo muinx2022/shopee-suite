@@ -113,6 +113,53 @@ public sealed class ShopeeAccountChecker
         }
     }
 
+    /// <summary>
+    /// MỞ Brave tới ĐÚNG URL lúc tk dính captcha (thay cho luồng auto-login) để user GIẢI TAY tại chính
+    /// trang đó. Giữ cửa sổ mở, chờ tới khi giải xong (đã đăng nhập / rời /verify) hoặc hết <paramref
+    /// name="maxWaitMs"/>. Trả Success nếu đã giải; NeedsManual nếu chưa (caller GIỮ tk để thử lại).
+    /// </summary>
+    public async Task<CheckResult> OpenForManualSolveAsync(
+        string url, string? proxy, string profileDir, int maxWaitMs, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+            return new CheckResult(CheckOutcome.Error, "Không có URL captcha đã lưu.");
+
+        var launcher = new BrowserLauncher(BrowserKind.Brave);
+        CdpSession? cdp = null;
+        try
+        {
+            launcher.Launch(profileDir, proxy, url);
+            cdp = await CdpSession.ConnectToPageAsync(launcher.CdpPort, ct);
+            await TrySend(cdp, "Network.enable", null, ct);
+            await TrySend(cdp, "Page.enable", null, ct);
+            await TrySend(cdp, "Page.navigate", new { url }, ct);
+            Log?.Invoke("  đã mở ĐÚNG trang captcha đã lưu — GIẢI TAY trong cửa sổ Brave…");
+
+            var deadline = DateTime.UtcNow.AddMilliseconds(Math.Max(30_000, maxWaitMs));
+            while (DateTime.UtcNow < deadline)
+            {
+                ct.ThrowIfCancellationRequested();
+                await Task.Delay(2500, ct);
+                if (await IsLoggedInAsync(cdp, ct))
+                    return new CheckResult(CheckOutcome.Success, "Đã giải captcha (đã đăng nhập).");
+                var (u, _) = await ReadPageStateAsync(cdp, ct);
+                var lu = u.ToLowerInvariant();
+                // Đã rời khỏi /verify (và không còn captcha) → coi như đã giải xong.
+                if (!string.IsNullOrWhiteSpace(u) && !lu.Contains("/verify") && !lu.Contains("captcha"))
+                    return new CheckResult(CheckOutcome.Success, "Đã rời trang captcha.");
+            }
+            return new CheckResult(CheckOutcome.NeedsManual, "Chưa giải captcha trong thời gian chờ — giữ tk để thử lại.");
+        }
+        catch (OperationCanceledException) { return new CheckResult(CheckOutcome.Error, "Đã dừng."); }
+        catch (Exception ex) { return new CheckResult(CheckOutcome.NeedsManual, "Cửa sổ đóng/lỗi — giữ tk: " + ex.Message); }
+        finally
+        {
+            if (cdp is not null) await cdp.DisposeAsync();
+            launcher.Kill();
+            await Task.Delay(400, CancellationToken.None);
+        }
+    }
+
     // ── Bước điền form (human) ─────────────────────────────────────────────────
 
     private async Task HumanFillAsync(CdpSession cdp, string username, string password, CancellationToken ct)

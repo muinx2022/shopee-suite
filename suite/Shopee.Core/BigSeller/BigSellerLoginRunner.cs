@@ -111,6 +111,15 @@ public static class BigSellerLoginRunner
             {
                 await Task.Delay(3000, ct);
 
+                // Người dùng TỰ ĐÓNG cửa sổ Brave (không bấm Dừng) → endpoint CDP chết. Probe nhanh
+                // (/json/version, 3s) để THOÁT NGAY thay vì để Storage.getCookies treo tới 20s mới biết
+                // → ViewModel chạy finally (IsLoggingIn=false) → nút "Open Bigseller" hiện/bật lại kịp thời.
+                if (!await CdpSession.IsBrowserAliveAsync(port, ct))
+                {
+                    log("✘ Cửa sổ Brave đã đóng.");
+                    return saved;
+                }
+
                 var (cookies, sessionOk) = await GetBigSellerCookiesAsync(cdp, ct);
                 if (!sessionOk)
                 {

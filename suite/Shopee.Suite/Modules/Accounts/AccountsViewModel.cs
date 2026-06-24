@@ -141,9 +141,9 @@ public sealed partial class AccountsViewModel : ObservableObject
         }
 
         if (Dialogs.Show(
-                $"Sẽ tự đăng nhập lần lượt {targets.Count} tài khoản lỗi/captcha:\n\n" +
-                "• Vào được trang chủ → bỏ cờ lỗi, đưa về kho.\n" +
-                "• KHÔNG vào được (sai mật khẩu / captcha / lỗi) → XÓA HẲN tài khoản.\n\n" +
+                $"Kiểm tra lần lượt {targets.Count} tài khoản lỗi/captcha:\n\n" +
+                "• Tk CÓ link captcha đã lưu → MỞ ĐÚNG trang đó để bạn GIẢI TAY; giải xong → về kho, chưa giải → GIỮ lại.\n" +
+                "• Tk KHÔNG có link → tự đăng nhập: vào được → về kho; KHÔNG vào được → XÓA HẲN.\n\n" +
                 "Thao tác xóa KHÔNG hoàn tác được. Tiếp tục?",
                 "Kiểm tra & dọn tk lỗi", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
             return;
@@ -151,6 +151,7 @@ public sealed partial class AccountsViewModel : ObservableObject
         IsChecking = true;
         var okNames = new List<string>();
         var failNames = new List<string>();
+        var keptNames = new List<string>();   // tk captcha mở URL nhưng chưa giải → GIỮ lại (không xoá)
         try
         {
             for (var i = 0; i < targets.Count; i++)
@@ -159,31 +160,46 @@ public sealed partial class AccountsViewModel : ObservableObject
                 var name = a.DisplayName;
                 Status = $"[{i + 1}/{targets.Count}] Đang đăng nhập \"{name}\"… (✓ {okNames.Count} · ✗ {failNames.Count})";
 
+                var hasCaptchaUrl = !string.IsNullOrWhiteSpace(a.CaptchaUrl);
                 var success = false;
-                if (!string.IsNullOrWhiteSpace(a.ShopeeAccountLogin))
+                try
                 {
-                    try
+                    var proxy = await ResolveProxyAsync(a);
+                    var profileDir = Path.Combine(SuitePaths.ModuleDir("shared"), "profiles", a.Id);
+                    Directory.CreateDirectory(profileDir);
+                    var checker = new ShopeeAccountChecker();
+                    if (hasCaptchaUrl)
                     {
-                        var proxy = await ResolveProxyAsync(a);
-                        var profileDir = Path.Combine(SuitePaths.ModuleDir("shared"), "profiles", a.Id);
-                        Directory.CreateDirectory(profileDir);
-                        // Giữ trình duyệt mở 10–15s sau khi có kết quả (giả lập người dùng) rồi mới đóng.
+                        // CÓ url captcha đã lưu → MỞ ĐÚNG trang đó cho user GIẢI TAY (KHÔNG auto-login).
+                        Status = $"[{i + 1}/{targets.Count}] Mở trang captcha \"{name}\" — giải tay…  (✓ {okNames.Count} · ✗ {failNames.Count})";
+                        var result = await checker.OpenForManualSolveAsync(a.CaptchaUrl!, proxy, profileDir, 180_000, CancellationToken.None);
+                        success = result.Outcome == CheckOutcome.Success;
+                    }
+                    else if (!string.IsNullOrWhiteSpace(a.ShopeeAccountLogin))
+                    {
+                        // FALLBACK (chưa lưu url captcha): luồng login TỰ ĐỘNG như cũ. Giữ trình duyệt 10–15s.
                         var holdMs = _rng.Next(10_000, 15_001);
-                        var checker = new ShopeeAccountChecker();
                         var result = await checker.CheckAsync(a.ShopeeAccountLogin, proxy, profileDir, holdMs, CancellationToken.None);
                         success = result.Outcome == CheckOutcome.Success;   // chỉ vào được home mới tính OK
                     }
-                    catch { success = false; }
                 }
+                catch { success = false; }
 
                 string verdict;
                 if (success)
                 {
                     a.Disabled = false;
                     a.LastError = null;                 // → đưa về kho
+                    a.CaptchaUrl = null;                // đã giải xong → xoá url captcha đã lưu
                     AccountStore.Shared.Save();         // Changed → Reload → list refresh NGAY (acc rời danh sách lỗi)
                     okNames.Add(name);
                     verdict = "✓ OK → về kho";
+                }
+                else if (hasCaptchaUrl)
+                {
+                    // Tk có url captcha nhưng CHƯA giải → GIỮ lại (KHÔNG xoá) để thử lại sau.
+                    keptNames.Add(name);
+                    verdict = "⏳ chưa giải captcha → giữ lại";
                 }
                 else
                 {
@@ -206,7 +222,7 @@ public sealed partial class AccountsViewModel : ObservableObject
             }
 
             // Đã áp dụng từng acc trong vòng lặp (Save/Remove → list refresh ngay).
-            Status = $"Xong: {okNames.Count} OK → kho · {failNames.Count} đã xóa · còn {AccountStore.Shared.Accounts.Count} tk.";
+            Status = $"Xong: {okNames.Count} OK → kho · {keptNames.Count} giữ (chưa giải captcha) · {failNames.Count} đã xóa · còn {AccountStore.Shared.Accounts.Count} tk.";
 
             // Bảng tổng kết: liệt kê RÕ acc nào về kho, acc nào đã xóa (cắt bớt nếu quá dài).
             static string Section(string title, List<string> names)
@@ -220,6 +236,7 @@ public sealed partial class AccountsViewModel : ObservableObject
             Dialogs.Show(
                 $"Hoàn tất kiểm tra {targets.Count} tài khoản." +
                 Section("✓ OK → về kho", okNames) +
+                Section("⏳ Giữ lại (chưa giải captcha)", keptNames) +
                 Section("✗ Đã xóa (không vào được)", failNames),
                 "Kết quả dọn tk lỗi", MessageBoxButton.OK, MessageBoxImage.Information);
         }

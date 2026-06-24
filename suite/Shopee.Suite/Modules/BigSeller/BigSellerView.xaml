@@ -63,12 +63,15 @@
                                VerticalAlignment="Top"
                                Visibility="{Binding HasSelection, Converter={StaticResource InverseBoolToVis}}" />
 
-                    <Grid Visibility="{Binding DataContext.HasSelection, ElementName=Root, Converter={StaticResource BoolToVis}}"
-                          DataContext="{Binding Selected}">
+                    <!-- Cuộn CẢ panel chi tiết (1 thanh cuộn duy nhất) → bảng Shops KHÔNG còn thanh cuộn
+                         nội bộ bó ~2-3 dòng; khi cửa sổ thấp thì cuộn cả form thay vì kẹt riêng phần shop. -->
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                                  Visibility="{Binding DataContext.HasSelection, ElementName=Root, Converter={StaticResource BoolToVis}}">
+                    <Grid DataContext="{Binding Selected}">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
-                            <RowDefinition Height="*" />
+                            <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
 
@@ -145,9 +148,9 @@
                                        Foreground="{StaticResource TextSecondaryBrush}" />
 
                             <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
-                                <Button Style="{StaticResource PrimaryButton}" Content="Đăng nhập BigSeller" MinWidth="160"
+                                <Button Style="{StaticResource PrimaryButton}" Content="Mở Profile Bigseller" MinWidth="160"
                                         Command="{Binding DataContext.LoginCommand, ElementName=Root}" />
-                                <Button Style="{StaticResource DangerButton}" Content="■ Dừng" MinWidth="90" Margin="10,0,0,0"
+                                <Button Style="{StaticResource DangerButton}" Content="Đóng" MinWidth="90" Margin="10,0,0,0"
                                         Command="{Binding DataContext.StopLoginCommand, ElementName=Root}" />
                                 <TextBlock VerticalAlignment="Center" Margin="12,0,0,0" FontSize="12"
                                            Foreground="{StaticResource TextSecondaryBrush}"
@@ -176,7 +179,8 @@
                                  "Cấu hình shop" bên dưới (ngoài DataGrid) để tránh edit-transaction revert. -->
                             <DataGrid ItemsSource="{Binding Shops}"
                                       SelectedItem="{Binding DataContext.SelectedShop, ElementName=Root}"
-                                      BorderThickness="0" AutoGenerateColumns="False" IsReadOnly="True">
+                                      BorderThickness="0" AutoGenerateColumns="False" IsReadOnly="True"
+                                      MinHeight="220" ScrollViewer.VerticalScrollBarVisibility="Disabled">
                                 <DataGrid.Columns>
                                     <DataGridTextColumn Header="Tên shop" Binding="{Binding Name}" Width="1.4*" />
                                     <DataGridTextColumn Header="Sheet" Binding="{Binding ShopeeDataSheet}" Width="1.4*" />
@@ -263,6 +267,7 @@
                             </StackPanel>
                         </Border>
                     </Grid>
+                    </ScrollViewer>
                 </Grid>
             </Border>
         </Grid>

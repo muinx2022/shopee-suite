@@ -61,7 +61,8 @@ internal static class ExtensionRunnerAutomation
         DirectoryInfo profileRoot,
         Action<string>? log,
         CancellationToken cancellationToken = default,
-        int timeoutSeconds = 90)
+        int timeoutSeconds = 90,
+        Action<bool>? onCaptchaState = null)   // true = đang ở /verify chờ giải tay; false = đã qua captcha
     {
         var deadline = DateTime.UtcNow.AddSeconds(timeoutSeconds);
         // Khi trang đang ở captcha/verify mà SW câm: KHÔNG mở lại profile (reload sẽ mất captcha người
@@ -136,6 +137,7 @@ internal static class ExtensionRunnerAutomation
                     cdpPort, id, cancellationToken, deadline);
                 if (probeOk)
                 {
+                    onCaptchaState?.Invoke(false);   // SW phản hồi lại = đã rời /verify (captcha giải xong) → cột Trạng thái về cũ
                     // Ghi nh? ID d� x�c th?c � m?i thao t�c sau d�ng C�NG ID n�y
                     _resolvedExtensionByPort[cdpPort] = id;
                     await CloseRunnerExtensionPopupTabsAsync(cdpPort, profileRoot, cancellationToken);
@@ -178,6 +180,7 @@ internal static class ExtensionRunnerAutomation
                             captchaWaitUntil ??= DateTime.UtcNow.AddMinutes(3);
                             if (DateTime.UtcNow < captchaWaitUntil.Value)
                             {
+                                onCaptchaState?.Invoke(true);   // cột Trạng thái → "🚫 Captcha" suốt lúc chờ giải tay
                                 if (!captchaWaitLogged)
                                 {
                                     log?.Invoke("  ⚠ Trang đang ở captcha/verify — CHỜ giải tay (tối đa 3'), KHÔNG mở lại profile…");
@@ -781,10 +784,11 @@ internal static class ExtensionRunnerAutomation
                     cdpPort, extensionId, "executeScrapeStep", payload, cancellationToken,
                     maxAttempts: 2, receiveTimeoutOverride: TimeSpan.FromSeconds(600));
             }
-            catch (Exception ex) when (IsPopupBridgeError(ex.Message))
+            catch (Exception ex) when (IsPopupBridgeError(ex.Message) ||
+                                       ex.Message.Contains("No SW", StringComparison.OrdinalIgnoreCase))
             {
                 // SW của extension chết/ngủ → lệnh executeScrapeStep KHÔNG tới được SW ("Receiving end does
-                // not exist") = crawl CHƯA hề chạy → REVIVE SW (escalate reload nếu cần) rồi thử LẠI 1 lần.
+                // not exist" / "No SW") = crawl CHƯA hề chạy → REVIVE SW (escalate reload nếu cần) rồi thử LẠI 1 lần.
                 // An toàn, KHÔNG double-scrape (vì lệnh trước chưa được nhận). Đây là lý do "mở link nhưng
                 // không bấm scrape được" — trước đây bỏ qua dòng (mất dữ liệu), giờ tự khôi phục + chạy lại.
                 await EnsureRunnerExtensionReadyAsync(cdpPort, profileRoot, null, cancellationToken).ConfigureAwait(false);

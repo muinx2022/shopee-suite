@@ -36,7 +36,9 @@ internal static class LauncherRunnerLoop
         bool preferSuggestedResume,
         CancellationToken cancellationToken,
         Func<Task>? onBeforeExtensionReady = null,
-        Func<Task>? onAfterExtensionReady = null)
+        Func<Task>? onAfterExtensionReady = null,
+        Action<bool>? onCaptchaState = null,
+        Func<Task>? onScrapeSucceeded = null)
     {
         var sheet = config.DataSheet?.Trim()
             ?? throw new InvalidOperationException("Thiếu sheet.");
@@ -78,7 +80,7 @@ internal static class LauncherRunnerLoop
             await onBeforeExtensionReady().ConfigureAwait(false);
 
         await ExtensionRunnerAutomation.EnsureRunnerExtensionReadyAsync(
-            cdpPort, profileRoot, log, cancellationToken).ConfigureAwait(false);
+            cdpPort, profileRoot, log, cancellationToken, onCaptchaState: onCaptchaState).ConfigureAwait(false);
 
         if (onAfterExtensionReady is not null)
             await onAfterExtensionReady().ConfigureAwait(false);
@@ -106,6 +108,7 @@ internal static class LauncherRunnerLoop
 
         try
         {
+            var captchaWaitedRow = -1;   // dòng đã CHỜ-giải-captcha 1 lần (chống lặp vô hạn nếu captcha lại hiện)
             for (var index = 0; index < items.Count; index++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -155,10 +158,43 @@ internal static class LauncherRunnerLoop
 
                 if (step.Captcha && !step.ScrapeOk)
                 {
-                    // Gặp captcha → DỪNG tại chỗ, giữ nguyên profile (paused) để giải tay rồi chạy tiếp.
+                    // Captcha giữa lúc scrape → BÁO NGAY ở cột Trạng thái + GIỮ cửa sổ Brave MỞ để giải tay
+                    // (trước đây đóng cửa sổ ngay → chưa kịp giải, Shopee đã hủy phiên). Chờ giải tay 1 lần
+                    // (extension giữ trang /verify + chờ). Giải xong → cào LẠI đúng dòng này; quá hạn / chưa
+                    // giải → dừng (paused) cho user xử lý. captchaWaitedRow chống lặp vô hạn nếu captcha lại hiện.
                     config.RunnerPhase = "paused";
+                    config.CaptchaError = true;   // cột "Trạng thái" hiện "🚫 Captcha" NGAY (RowStatus + RefreshRunStatusFromConfig)
+                    config.CaptchaUrl = step.PageUrl ?? link;   // lưu URL captcha → "Kiểm tra tk lỗi" mở đúng trang này
+                    config.LastRunnerMessage = $"🚫 Captcha dòng {rowNumber} ({config.DisplayName}) — GIẢI TAY trong cửa sổ Brave (đang giữ mở)…";
+                    await PushDisplayStateAsync(
+                        cdpPort, profileRoot, config, sheet, startRow, endRow.Value,
+                        index + 1, totalLinks, step.TabId, cancellationToken).ConfigureAwait(false);
+                    onProgress();
+                    log(config.LastRunnerMessage);
+
+                    if (step.TabId is int captchaTab && rowNumber != captchaWaitedRow)
+                    {
+                        captchaWaitedRow = rowNumber;
+                        var chk = await ExtensionRunnerAutomation.CheckBeforeNextLinkAsync(
+                            cdpPort, profileRoot, captchaTab, rowNumber, config.DisplayName, sku, cancellationToken)
+                            .ConfigureAwait(false);
+                        if (chk.Aborted)
+                            throw new OperationCanceledException();
+                        if (chk.Ok)
+                        {
+                            // Giải captcha xong → cào LẠI đúng dòng này (lùi index để for lặp lại item hiện tại).
+                            config.CaptchaError = false;
+                            config.RunnerPhase = "opening";
+                            tabId = chk.TabId ?? tabId;
+                            onProgress();
+                            log($"Đã giải captcha dòng {rowNumber} → cào lại dòng này.");
+                            index--;
+                            continue;
+                        }
+                    }
+                    // Chưa giải / quá hạn → dừng tại chỗ (giữ tiến độ) cho user xử lý (bấm Tiếp tục để chạy lại).
                     config.LastRunnerMessage =
-                        step.Message ?? $"Dừng vì captcha - {config.DisplayName}, dòng {rowNumber} (SKU: {sku}). Giải tay rồi chạy tiếp.";
+                        $"🚫 Dừng vì captcha - {config.DisplayName}, dòng {rowNumber} (SKU: {sku}). Giải tay rồi bấm Tiếp tục.";
                     await PushDisplayStateAsync(
                         cdpPort, profileRoot, config, sheet, startRow, endRow.Value,
                         index + 1, totalLinks, step.TabId, cancellationToken).ConfigureAwait(false);
@@ -187,11 +223,20 @@ internal static class LauncherRunnerLoop
                     return;
                 }
 
+                // SW của extension chết KHÔNG hồi (vd sau khi relaunch đổi proxy giữa chừng) → mọi link sau
+                // báo "No SW", KHÔNG click được nút scrape (chỉ tải video rồi sang dòng kế → "chạy mà không
+                // cào"). Ném lỗi extension để runner tự ĐÓNG/MỞ LẠI profile (dựng lại service worker) rồi chạy
+                // tiếp ĐÚNG dòng, thay vì im lặng "No SW" mọi dòng. (retryExtensionStart cap 4 lần chống lặp.)
+                if (!step.ScrapeOk && (step.Message?.Contains("No SW", StringComparison.OrdinalIgnoreCase) ?? false))
+                    throw new InvalidOperationException(
+                        $"Extension Shopee Data Runner mất kết nối CDP (No SW) tại dòng {rowNumber} — mở lại profile để dựng lại service worker.");
+
                 tabId = step.TabId ?? tabId;
 
                 var scrapeOk = step.ScrapeOk;
                 if (scrapeOk)
                 {
+                    config.CaptchaError = false;   // cào được lại → hết captcha → cột Trạng thái về bình thường
                     // GHI NHẬN dòng đã scrape NGAY (trước bước video). Nếu extension/CDP rớt giữa chừng,
                     // reload có thể làm rớt service worker → launcher relaunch profile và chạy lại RunAsync.
                     // Nếu chưa ghi nhận, RunAsync resume ĐÚNG dòng cũ → mở lại link → scrape → reload → LẶP VÔ HẠN.
@@ -202,6 +247,12 @@ internal static class LauncherRunnerLoop
                     if (step.Captcha)
                         log($"Đã giải captcha và click scrape - dòng {rowNumber}.");
                     log($"Đã click scrape - dòng {rowNumber}.");
+                    // GHI NGƯỢC token BigSeller server-VỪA-XOAY về file: cào xong = token browser CÒN SỐNG +
+                    // server vừa cấp token mới → lưu token MỚI NHẤT vào file để process khác (bị rớt token)
+                    // nạp lại token HIỆN HÀNH thay vì token tĩnh đã "ôi" → không đập server bằng token chết
+                    // (chuỗi auth-thất-bại dồn dập chính là thứ châm ngòi BigSeller đá nguyên account).
+                    if (onScrapeSucceeded is not null)
+                        await onScrapeSucceeded().ConfigureAwait(false);
                     await TryShowOverlayAsync(
                         cdpPort, profileRoot, tabId,
                         $"Đã click scrape - dòng {rowNumber}.\nĐang quét video SKU {sku}…",
@@ -396,6 +447,8 @@ internal static class LauncherRunnerLoop
                         if (!check.Ok)
                         {
                             config.RunnerPhase = check.Captcha ? "paused" : "error";
+                            if (check.Captcha) config.CaptchaError = true;   // cột Trạng thái → "🚫 Captcha" ngay
+                            if (check.Captcha) config.CaptchaUrl = check.PageUrl ?? pageUrl;   // lưu URL captcha
                             config.LastRunnerMessage =
                                 check.Message ?? (check.Captcha
                                     ? $"Dừng vì captcha trước link tiếp theo - {config.DisplayName}, dòng {rowNumber} (SKU: {sku})."

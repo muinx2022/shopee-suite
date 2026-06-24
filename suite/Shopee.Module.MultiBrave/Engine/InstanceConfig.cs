@@ -70,6 +70,8 @@ public sealed class InstanceConfig
     /// Xoá khi user bấm "Đã giải captcha" hoặc khi instance được chạy lại.
     /// </summary>
     public bool CaptchaError { get; set; }
+    /// <summary>URL trang lúc dính captcha (để lưu vào tk Shopee → "Kiểm tra tk lỗi" mở đúng trang đó).</summary>
+    public string? CaptchaUrl { get; set; }
     public List<RunnerLogEntry> RunLog { get; set; } = [];
     public List<PendingScrapeLink> PendingScrapeLinks { get; set; } = [];
     public DateTimeOffset? ProgressSyncedAt { get; set; }

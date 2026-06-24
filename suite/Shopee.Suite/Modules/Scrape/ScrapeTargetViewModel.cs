@@ -41,6 +41,10 @@ public sealed partial class ScrapeTargetViewModel : ObservableObject
     /// <summary>Số process chạy đồng thời = số tk Shopee acc BigSeller này dùng (mỗi process 1 tk).</summary>
     [ObservableProperty] private int _maxProcess = 2;
     partial void OnMaxProcessChanged(int value) => Persist();
+    /// <summary>Số tk Shopee "đóng khung" cố định cho tk BigSeller này — chỉ xoay vòng trong khung này
+    /// (cấp lúc bắt đầu chạy). Để BigSeller chỉ thấy ngần ấy thiết bị ổn định → không bị đá phiên.</summary>
+    [ObservableProperty] private int _frameSize = 10;
+    partial void OnFrameSizeChanged(int value) => Persist();
 
     public ScrapeTargetViewModel(BigSellerAccount account)
     {
@@ -56,6 +60,7 @@ public sealed partial class ScrapeTargetViewModel : ObservableObject
             EndRow = saved.EndRow;
             RowsPerAccount = saved.RowsPerAccount;
             MaxProcess = saved.MaxProcess;
+            FrameSize = saved.FrameSize > 0 ? saved.FrameSize : 10;
             IsSelected = saved.IsSelected;
             SelectedShop = saved.SelectedShopId is not null
                 ? Shops.FirstOrDefault(s => s.Id == saved.SelectedShopId) ?? Shops.FirstOrDefault()
@@ -81,6 +86,7 @@ public sealed partial class ScrapeTargetViewModel : ObservableObject
             EndRow = EndRow,
             RowsPerAccount = RowsPerAccount,
             MaxProcess = MaxProcess,
+            FrameSize = FrameSize,
         });
     }
 

@@ -30,6 +30,9 @@ public sealed class ShopeeAccount
     // ── Trạng thái ──
     public bool Disabled { get; set; }
     public string? LastError { get; set; }
+    /// <summary>URL trang lúc tk này dính captcha (lưu khi Scrape đánh dấu captcha). "Kiểm tra tk lỗi" sẽ
+    /// MỞ ĐÚNG link này (thay vì chạy luồng auto-login) để giải captcha tại chính trang đó.</summary>
+    public string? CaptchaUrl { get; set; }
 
     /// <summary>
     /// Mốc tăng dần (tick) của LẦN CUỐI tk này được Scrape cấp phát. Dùng để cấp phát kiểu vòng-LRU:
