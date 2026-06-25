@@ -124,9 +124,9 @@ public sealed class ScrapeRunner
     {
         if (segments.Count == 0 || workerCount <= 0) return;
         var per = Math.Max(1, rowsPerChunk);
-        var work = new WorkAllocator(segments, per);
-
         var workers = Math.Max(1, workerCount);
+        var work = new WorkAllocator(segments, per, workers);
+
         // CTS phạm vi 1 job tk BigSeller: nếu 1 worker thấy "log in first" (mất phiên) → cancel để DỪNG
         // mọi worker cùng tk (vá/retry vô nghĩa khi token đã chết). Linked với ct ngoài (nút Dừng).
         using var jobCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -539,13 +539,15 @@ public sealed class ScrapeRunner
         private readonly Queue<(int from, int to, int stall)> _patches = new();
         private readonly List<(int from, int to)> _segments;
         private readonly int _per;
+        private readonly int _workers;
         private int _segIdx;
         private int _cursor;     // dòng kế trong segment hiện tại
         private int _inFlight;
 
-        public WorkAllocator(IEnumerable<(int from, int to)> segments, int per)
+        public WorkAllocator(IEnumerable<(int from, int to)> segments, int per, int workers = 1)
         {
             _per = Math.Max(1, per);
+            _workers = Math.Max(1, workers);
             _segments = segments.Where(s => s.to >= s.from).OrderBy(s => s.from).ToList();
             _segIdx = 0;
             _cursor = _segments.Count > 0 ? _segments[0].from : int.MaxValue;
@@ -560,6 +562,17 @@ public sealed class ScrapeRunner
                 if (_patches.Count > 0)
                 {
                     var p = _patches.Dequeue();
+                    // ĐUÔI: mảng vá còn NHIỀU dòng (>= 2×process) → cắt 1 lát, TRẢ phần dư lại hàng để
+                    // worker rảnh khác cùng chạy, thay vì 1 worker ôm cả mảng (chia việc đoạn cuối).
+                    var psize = p.to - p.from + 1;
+                    if (_workers > 1 && psize >= 2 * _workers)
+                    {
+                        var take = (int)Math.Ceiling((double)psize / _workers);
+                        var pieceTo = p.from + take - 1;
+                        _patches.Enqueue((pieceTo + 1, p.to, p.stall));
+                        _inFlight++;
+                        return (p.from, pieceTo, p.stall, true);
+                    }
                     _inFlight++;
                     return (p.from, p.to, p.stall, true);
                 }
@@ -573,13 +586,41 @@ public sealed class ScrapeRunner
                         continue;
                     }
                     var from = _cursor;
-                    var to = Math.Min(seg.to, from + _per);
+                    var to = Math.Min(seg.to, from + ChunkWidth());
                     _cursor = to + 1;
                     _inFlight++;
                     return (from, to, 0, false);
                 }
                 return null;
             }
+        }
+
+        /// <summary>Độ rộng khối kế. Bình thường = _per. Ở ĐUÔI (còn ít việc + nhiều process): thu nhỏ về
+        /// ~còn-lại/process để MỌI worker cùng chạy đoạn cuối thay vì 1 worker ôm hết. Quy tắc: còn
+        /// >= 2×process thì chia, ít hơn thì để 1 worker chạy nốt. Gọi trong [_lock] (từ TryTake).</summary>
+        private int ChunkWidth()
+        {
+            if (_workers <= 1) return _per;
+            var remaining = RemainingRowsLocked();
+            // còn nhiều (mỗi worker vẫn đủ ≥1 khối _per) hoặc còn quá ít (< 2×process) → giữ _per như cũ.
+            if (remaining >= _per * _workers || remaining < 2 * _workers) return _per;
+            // vùng đuôi: chia phần còn lại thành ~_workers lát đều → mỗi worker 1 lát.
+            var rows = (int)Math.Ceiling((double)remaining / _workers);
+            return Math.Clamp(rows - 1, 1, _per);
+        }
+
+        /// <summary>Tổng dòng CHƯA cấp (segment từ cursor + các mảng vá). Gọi trong [_lock].</summary>
+        private int RemainingRowsLocked()
+        {
+            var r = 0;
+            foreach (var p in _patches) r += p.to - p.from + 1;
+            if (_segIdx < _segments.Count)
+            {
+                r += _segments[_segIdx].to - _cursor + 1;
+                for (var i = _segIdx + 1; i < _segments.Count; i++)
+                    r += _segments[i].to - _segments[i].from + 1;
+            }
+            return Math.Max(0, r);
         }
 
         public void AddPatch(int from, int to, int stall) { lock (_lock) _patches.Enqueue((from, to, stall)); }

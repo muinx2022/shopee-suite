@@ -171,9 +171,34 @@ public sealed class UpdateProductRunner
                 var export = lane == 0;
                 tasks.Add(Task.Run(async () =>
                 {
-                    try { await runLane(captured, lane, n, claim, export, ct).ConfigureAwait(false); }
-                    catch (OperationCanceledException) { }
-                    catch (Exception ex) { Log?.Invoke($"[L{lane}] ✖ lỗi lane: {ex.Message}"); }
+                    // GIÁM SÁT LANE: lane chết (8 lỗi liên tiếp → throw / Brave crash / exception) thì TỰ KHỞI
+                    // ĐỘNG LẠI (mở lại Brave, seed cookie, giữ claim chung) thay vì mất hẳn 1 cửa sổ → trước
+                    // đây "chạy 1 lúc rồi worker rụng dần". Chạy được >2' coi như có tiến triển → reset đếm;
+                    // chết NHANH liên tục >6 lần → account/mạng hỏng thật → dừng lane + báo (tránh restart-storm).
+                    var fails = 0;
+                    while (!ct.IsCancellationRequested)
+                    {
+                        var startTick = Environment.TickCount64;
+                        try
+                        {
+                            await runLane(captured, lane, n, claim, export, ct).ConfigureAwait(false);
+                            return;   // lane chạy xong bình thường (hết việc / Stop) — không restart
+                        }
+                        catch (OperationCanceledException) { return; }
+                        catch (Exception ex)
+                        {
+                            if (Environment.TickCount64 - startTick >= 120_000) fails = 0; else fails++;
+                            if (fails > 6)
+                            {
+                                Log?.Invoke($"[L{lane}] ✖ lane chết NHANH liên tục {fails} lần — DỪNG lane. Kiểm tra đăng nhập BigSeller/mạng. Lỗi cuối: {ex.Message}");
+                                return;
+                            }
+                            var delaySec = fails == 0 ? 5 : Math.Min(60, 8 * fails);
+                            Log?.Invoke($"[L{lane}] ✖ lane chết (lần {fails}): {ex.Message} — KHỞI ĐỘNG LẠI sau {delaySec}s (giữ phiên + claim).");
+                            try { await Task.Delay(delaySec * 1000, ct).ConfigureAwait(false); }
+                            catch (OperationCanceledException) { return; }
+                        }
+                    }
                 }, ct));
             }
             await Task.WhenAll(tasks).ConfigureAwait(false);
