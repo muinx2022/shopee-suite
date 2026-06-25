@@ -37,22 +37,35 @@ public sealed partial class SettingsViewModel : ObservableObject
 
     public bool IsIdle => !Testing;
 
-    // ── Hiệu năng (trần cửa sổ Brave) ───────────────────────────────────────────
-    /// <summary>Trần cửa sổ do người dùng đặt. 0 = tự động (min CPU/2, RAM/2).</summary>
-    [ObservableProperty] private int _maxWindows;
+    // ── Hiệu năng (ngân sách CPU/RAM → trần cửa sổ Brave) ────────────────────────
+    /// <summary>Số nhân CPU cho phép app dùng (mỗi cửa sổ Brave ~1 nhân).</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ComputedMaxInfo))]
+    private int _usableCpu;
 
-    /// <summary>Thông tin máy: "CPU: 12 nhân · RAM: 32 GB".</summary>
-    public string MachineInfo => $"CPU: {BraveFleet.CpuCores} nhân   ·   RAM: {BraveFleet.TotalRamGb} GB";
+    /// <summary>RAM (GB) cho phép app dùng (mỗi cửa sổ Brave ~2GB).</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ComputedMaxInfo))]
+    private int _usableRamGb;
 
-    /// <summary>Diễn giải trần tự động: "Tự động = min(CPU/2 = 6, RAM/2 = 16) = 6 cửa sổ".</summary>
-    public string AutoWindowsInfo =>
-        $"Tự động = min(CPU/2 = {System.Math.Max(2, BraveFleet.CpuCores / 2)}, RAM/2 = {BraveFleet.TotalRamGb / 2}) = {BraveFleet.AutoMaxWindows} cửa sổ";
+    /// <summary>Trần vật lý để hiển thị gợi ý "tối đa N".</summary>
+    public int CpuCoresMax => BraveFleet.CpuCores;
+    public int RamGbMax => BraveFleet.TotalRamGb;
+
+    /// <summary>Thông tin máy: "Máy: CPU 12 nhân · RAM 32 GB".</summary>
+    public string MachineInfo => $"Máy: CPU {BraveFleet.CpuCores} nhân   ·   RAM {BraveFleet.TotalRamGb} GB";
+
+    /// <summary>Trần cửa sổ TÍNH live từ ngân sách đang nhập.</summary>
+    public string ComputedMaxInfo =>
+        $"→ Tối đa {BraveFleet.WindowsForBudget(UsableCpu, UsableRamGb)} cửa sổ Brave   (= min(CPU dùng, RAM dùng ÷ 2))";
 
     public SettingsViewModel() => LoadFromStore();
 
     private void LoadFromStore()
     {
-        MaxWindows = PerformanceSettingsStore.Shared.Current.MaxConcurrentWindows;
+        var p = PerformanceSettingsStore.Shared.Current;
+        UsableCpu = p.UsableCpuCores > 0 ? p.UsableCpuCores : System.Math.Max(2, BraveFleet.CpuCores / 2);
+        UsableRamGb = p.UsableRamGb > 0 ? p.UsableRamGb : BraveFleet.TotalRamGb;
         var c = AiConfigStore.Shared.Current;
         Provider = c.Provider;
         OpenAiModel = c.OpenAiModel;
@@ -91,13 +104,13 @@ public sealed partial class SettingsViewModel : ObservableObject
     [RelayCommand]
     private void SavePerformance()
     {
-        var v = System.Math.Max(0, MaxWindows);
-        PerformanceSettingsStore.Shared.Save(new PerformanceSettings { MaxConcurrentWindows = v });
-        // Áp dụng ngay vào RAM (có hiệu lực đầy đủ từ lượt chạy kế tiếp).
-        BraveFleet.MaxConcurrentWindows = v > 0 ? v : BraveFleet.AutoMaxWindows;
-        Status = v > 0
-            ? $"Đã đặt trần {v} cửa sổ Brave (áp dụng từ lượt chạy kế tiếp)."
-            : $"Đã đặt TỰ ĐỘNG — {BraveFleet.AutoMaxWindows} cửa sổ cho máy này.";
+        var cpu = System.Math.Clamp(UsableCpu, 1, BraveFleet.CpuCores);
+        var ram = System.Math.Clamp(UsableRamGb, 1, BraveFleet.TotalRamGb);
+        UsableCpu = cpu; UsableRamGb = ram;   // phản ánh kẹp về UI
+        PerformanceSettingsStore.Shared.Save(new PerformanceSettings { UsableCpuCores = cpu, UsableRamGb = ram });
+        var max = BraveFleet.WindowsForBudget(cpu, ram);
+        BraveFleet.MaxConcurrentWindows = max;   // áp dụng ngay (đầy đủ từ lượt chạy kế tiếp)
+        Status = $"Đã đặt: dùng {cpu} nhân + {ram}GB → tối đa {max} cửa sổ Brave (áp dụng từ lượt chạy kế tiếp).";
     }
 
     [RelayCommand] private void ResetNamePrompt() => NameRewritePrompt = AiPrompts.DefaultNameRewrite;

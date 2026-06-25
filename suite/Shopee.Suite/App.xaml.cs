@@ -29,10 +29,12 @@ public partial class App : Application
         //     thuộc UI nên UI có treo thì việc dọn vẫn chạy.
         try
         {
-            // Nạp trần cửa sổ do người dùng đặt (Cài đặt → Hiệu năng) vào RAM. >0 = đặt tay; 0 = giữ tự
-            // động (min CPU/2, RAM/2). Phải set TRƯỚC ConfigureJobLimits vì trần tiến trình Job tính theo nó.
-            var perfMax = Shopee.Core.Infrastructure.PerformanceSettingsStore.Shared.Current.MaxConcurrentWindows;
-            if (perfMax > 0) Shopee.Core.Browser.BraveFleet.MaxConcurrentWindows = perfMax;
+            // Nạp ngân sách CPU/RAM do người dùng đặt (Cài đặt → Hiệu năng) → tính trần cửa sổ rồi nạp vào
+            // RAM. 0/0 = mặc định (nửa số nhân + toàn bộ RAM). Phải set TRƯỚC ConfigureJobLimits vì trần
+            // tiến trình Job tính theo trần cửa sổ.
+            var perf = Shopee.Core.Infrastructure.PerformanceSettingsStore.Shared.Current;
+            Shopee.Core.Browser.BraveFleet.MaxConcurrentWindows =
+                Shopee.Core.Browser.BraveFleet.WindowsForBudget(perf.UsableCpuCores, perf.UsableRamGb);
             Shopee.Core.Browser.BraveFleet.ConfigureJobLimits();
             var swept = Shopee.Core.Browser.BraveFleet.StartupSweep();
             if (swept > 0) TryLog("BraveFleet.StartupSweep", new Exception($"Đã dọn {swept} Brave mồ côi lúc khởi động."));

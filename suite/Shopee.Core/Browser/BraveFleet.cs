@@ -47,7 +47,7 @@ public static class BraveFleet
 
     private static readonly object _gateLock = new();
     private static SemaphoreSlim? _windowGate;
-    private static int _maxWindows = DefaultMaxWindows();
+    private static int _maxWindows = WindowsForBudget(0, 0);
 
     /// <summary>Trần tổng cửa sổ Brave chạy đồng thời (mọi job cộng lại). Mặc định suy từ RAM. Đặt
     /// TRƯỚC khi bắt đầu run (đổi giữa chừng chỉ áp cho lần tạo gate kế).</summary>
@@ -70,8 +70,19 @@ public static class BraveFleet
     /// <summary>Tổng RAM vật lý của máy (GB, làm tròn) — để hiển thị.</summary>
     public static int TotalRamGb => (int)Math.Round(TotalPhysicalBytes() / (1024.0 * 1024 * 1024));
 
-    /// <summary>Trần TỰ ĐỘNG = min(RAM/2, CPU/2). Là mặc định khi người dùng để 0 (không tự đặt).</summary>
-    public static int AutoMaxWindows => DefaultMaxWindows();
+    /// <summary>Trần TỰ ĐỘNG (khi người dùng chưa đặt ngân sách): nửa số nhân + toàn bộ RAM.</summary>
+    public static int AutoMaxWindows => WindowsForBudget(0, 0);
+
+    /// <summary>Tính trần cửa sổ từ "ngân sách" người dùng cho phép: <paramref name="usableCpu"/> nhân CPU
+    /// (mỗi cửa sổ ~1 nhân) và <paramref name="usableRamGb"/> GB RAM (mỗi cửa sổ ~2GB). Giá trị 0 = MẶC ĐỊNH
+    /// (CPU: nửa số nhân để máy còn mượt; RAM: toàn bộ). Đo thực 25/06: máy 12 nhân chạy ~6 cửa sổ thì mượt,
+    /// 9 thì ì → mặc định nửa số nhân.</summary>
+    public static int WindowsForBudget(int usableCpu, int usableRamGb)
+    {
+        var cpu = usableCpu > 0 ? usableCpu : Math.Max(2, CpuCores / 2);
+        var ram = usableRamGb > 0 ? usableRamGb : TotalRamGb;
+        return Math.Clamp(Math.Min(cpu, ram / 2), 1, 64);
+    }
 
     // RAM trống tối thiểu trước khi cho mở thêm cửa sổ — dưới mức này thì CHỜ (chống dồn tới đơ máy).
     private const ulong MinFreeBytesToLaunch = 1500UL * 1024 * 1024; // ~1.5 GB
@@ -274,17 +285,6 @@ public static class BraveFleet
     }
 
     // ─────────────────────────── TIỆN ÍCH ───────────────────────────
-
-    private static int DefaultMaxWindows()
-    {
-        var gb = TotalPhysicalBytes() / (1024.0 * 1024 * 1024);
-        var byRam = gb > 0 ? (int)(gb / 2.0) : 6;                          // ~2GB/cửa sổ
-        // Mỗi cửa sổ Brave (Shopee JS + cuộn giả lập + extension SW) ngốn ~0.6 NHÂN CPU khi chạy. Đo thực
-        // 25/06: 9 cửa sổ đốt ~6/12 nhân → máy "ì" dù RAM còn ~10GB. Nên giới hạn THEO CPU (để dành ~nửa
-        // số nhân làm headroom), KHÔNG chỉ theo RAM. Lấy ràng buộc CHẶT hơn giữa RAM và CPU.
-        var byCpu = Math.Max(2, System.Environment.ProcessorCount / 2);
-        return Math.Clamp(Math.Min(byRam, byCpu), 2, 16);
-    }
 
     private static bool TryKillTree(int pid)
     {

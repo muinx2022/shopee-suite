@@ -59,7 +59,7 @@ Gỡ sau này (nếu muốn): thay `Add-MpPreference` → `Remove-MpPreference` 
 ## 3. Số cửa sổ Brave song song theo RAM
 - **Tổng cửa sổ Brave = (số job BigSeller chạy cùng lúc) × MaxProcess** mỗi job. Mỗi cửa sổ ≈ 5–8 tiến trình, ~1–1.5GB.
 - App tự chặn tổng ở trần cửa sổ — mặc định lấy ràng buộc CHẶT hơn giữa **RAM/2** và **số_nhân_CPU/2** (vì mỗi cửa sổ ngốn ~0.6 nhân; chạy quá tay làm máy ì dù RAM dư). Vd 32GB + 12 nhân → **6**.
-- **Chỉnh trong app: Cài đặt → tab Hiệu năng** — hiện CPU/RAM máy + ô đặt trần (`0` = tự động, khuyến nghị; số > 0 = đặt tay). Lưu xong có hiệu lực từ lượt chạy kế tiếp.
+- **Chỉnh trong app: Cài đặt → tab Hiệu năng** — hiện CPU/RAM máy + nhập **ngân sách**: *số nhân CPU dùng* (mỗi cửa sổ ~1 nhân) + *RAM dùng (GB)* (mỗi cửa sổ ~2GB) → app tính **tối đa = min(CPU, RAM÷2)** (hiện live). Mặc định = nửa số nhân + toàn bộ RAM. Đặt thấp hơn để chừa máy cho việc khác; cao hơn = nhanh hơn nhưng dễ ì. Lưu xong có hiệu lực từ lượt chạy kế tiếp.
 - "Dòng/lần" (Scrape) mặc định **60** — Brave xoay vòng ít hơn → đỡ cold-start extension liên tục (nguồn giật CPU). Tk đã lưu cấu hình cũ vẫn giữ số cũ, chỉnh tay trong UI nếu muốn.
 - Gợi ý đặt MaxProcess + số job sao cho TỔNG không vượt:
 

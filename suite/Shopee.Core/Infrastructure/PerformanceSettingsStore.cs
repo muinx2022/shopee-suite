@@ -1,10 +1,14 @@
 namespace Shopee.Core.Infrastructure;
 
-/// <summary>Cấu hình hiệu năng do người dùng đặt (mục Cài đặt → Hiệu năng). Lưu bền qua các lần build.</summary>
+/// <summary>Cấu hình hiệu năng do người dùng đặt (mục Cài đặt → Hiệu năng). Lưu bền qua các lần build.
+/// Trần cửa sổ Brave được TÍNH từ ngân sách CPU/RAM: max = min(usableCpu, usableRamGb/2).</summary>
 public sealed class PerformanceSettings
 {
-    /// <summary>Trần cửa sổ Brave chạy đồng thời (toàn app). 0 = TỰ ĐỘNG (min CPU/2, RAM/2).</summary>
-    public int MaxConcurrentWindows { get; set; }
+    /// <summary>Số nhân CPU cho phép app dùng (mỗi cửa sổ Brave ~1 nhân). 0 = mặc định (nửa số nhân máy).</summary>
+    public int UsableCpuCores { get; set; }
+
+    /// <summary>RAM (GB) cho phép app dùng (mỗi cửa sổ Brave ~2GB). 0 = mặc định (toàn bộ RAM máy).</summary>
+    public int UsableRamGb { get; set; }
 }
 
 /// <summary>
