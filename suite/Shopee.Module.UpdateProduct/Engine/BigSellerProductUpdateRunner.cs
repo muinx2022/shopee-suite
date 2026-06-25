@@ -43,13 +43,15 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
         "HASHTAG:\n- Đặt NGAY SAU đoạn mô tả cuối cùng.\n- Viết liền, không tiêu đề.\n- Đúng ngành giày nữ, có mã sản phẩm.\n- CHÍNH XÁC 18 hashtag.\n\n" +
         "NGUYÊN TẮC CUỐI:\n- Nếu cần điều chỉnh, chỉ thay đổi độ dài câu để nằm trong khoảng 2800–2900 ký tự.\n- Tuyệt đối không thêm hoặc bớt hashtag.";
 
-    // ── SELECTORS (verbatim) ──
-    private const string ListingRows = "tbody.ant-table-tbody tr";
-    private const string ListingEditButton = "a.action_btn.addEditProduct";
-    private const string ListingReadySelector = "tbody.ant-table-tbody tr, .ant-empty, .ant-table-placeholder, a.action_btn.addEditProduct";
-    private const string ListingRowKeyAttr = "data-row-key";
-    private const string DeleteBtn1 = "a.action_btn[title='Xóa']";
-    private const string DeleteBtn2 = "a[title='Xóa']";
+    // ── SELECTORS ──
+    // BigSeller đã đổi bảng listing sang vxe-table (dòng = tr.vxe-body--row, khóa dòng = thuộc tính rowid,
+    // nút Delete title="Delete"). Giữ kèm selector ant-table cũ để vẫn chạy nếu trang nào còn dùng bảng cũ.
+    private const string ListingRows = "tr.vxe-body--row, tbody.ant-table-tbody tr";
+    private const string ListingEditButton = "a.action_btn.addEditProduct";   // (vxe vẫn giữ class này)
+    private const string ListingReadySelector = "tr.vxe-body--row, tbody.ant-table-tbody tr, a.action_btn.addEditProduct, .ant-empty, .ant-table-placeholder, .vxe-table--empty-block, .vxe-table--empty-placeholder";
+    private const string ListingRowKeyAttr = "rowid";   // vxe: <tr rowid="..."> (cũ: data-row-key)
+    private const string DeleteBtn1 = "a.action_btn[title='Xóa'], a.action_btn[title='Delete']";
+    private const string DeleteBtn2 = "a[title='Xóa'], a[title='Delete']";
     private const string DeleteBtn3 = "a.action_btn:has(span.bsicon_trash_2)";
     private const string DeleteConfirmPrimary = ".ant-modal-confirm-btns button.ant-btn-primary";
     private const string BlockingModalVisible = "div.ant-modal-wrap:visible";
@@ -137,6 +139,8 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
     private readonly Dictionary<string, int> _failCounts = new();
     // True nếu ProcessProduct fail do LỖI TẠM (AI rỗng/mạng) → caller RETRY, KHÔNG xóa dòng (tránh mất SP).
     private bool _lastProcessTransient;
+    // Đã log chẩn đoán "listing 0 dòng" chưa (log 1 lần/đợt-trống để khỏi spam mỗi vòng chờ).
+    private bool _emptyListingDiagLogged;
 
     private readonly ClaimStore? _claim;
     private readonly bool _exportCookie;
@@ -348,7 +352,12 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
     {
         var rows = page.Locator(ListingRows);
         var count = await rows.CountAsync();
-        if (count == 0) return (null, false);
+        if (count == 0)
+        {
+            await LogEmptyListingDiagnosticsAsync(page).ConfigureAwait(false);
+            return (null, false);
+        }
+        _emptyListingDiagLogged = false;   // có dòng trở lại → cho phép log lại nếu sau này lại trống
 
         for (var i = 0; i < count; i++)
         {
@@ -378,6 +387,30 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
             return res;
         }
         return ("exhausted", false);
+    }
+
+    // Khi không thấy dòng SP nào để update: log RÕ vì sao (trang rỗng/sai status, hay BigSeller đã đổi bảng
+    // sang vxe-table khiến selector ant-table cũ khớp 0 dòng). Log 1 lần/đợt-trống để khỏi spam mỗi vòng chờ.
+    private async Task LogEmptyListingDiagnosticsAsync(IPage page)
+    {
+        if (_emptyListingDiagLogged) return;
+        _emptyListingDiagLogged = true;
+        try
+        {
+            var ant = await page.Locator("tbody.ant-table-tbody tr").CountAsync().ConfigureAwait(false);
+            var vxe = await page.Locator("tr.vxe-body--row").CountAsync().ConfigureAwait(false);
+            var editBtns = await page.Locator(ListingEditButton).CountAsync().ConfigureAwait(false);
+            var empty = await page.Locator(".ant-empty, .ant-table-placeholder").CountAsync().ConfigureAwait(false);
+            _log($"⚠ Không thấy dòng SP để update. URL={page.Url}");
+            _log($"   chẩn đoán: ant-table={ant} dòng · vxe-table={vxe} dòng · nút Edit={editBtns} · bảng-rỗng={empty}.");
+            if (vxe > 0 && ant == 0)
+                _log("   → BigSeller đã đổi bảng listing sang vxe-table; cần đổi selector dòng/edit (báo mình để sửa).");
+            else if (empty > 0 || (ant == 0 && vxe == 0 && editBtns == 0))
+                _log("   → Listing đang TRỐNG thật: kiểm tra đúng tài khoản/shop, SP đã import vào Shopee chưa, và bộ lọc bsStatus.");
+            else
+                _log("   → Có nút Edit nhưng không khớp selector dòng — báo mình kèm dòng log này để chỉnh selector.");
+        }
+        catch (Exception ex) { _log($"   (không đọc được chẩn đoán listing: {ex.Message})"); }
     }
 
     private async Task<(string? result, bool terminal)> RunListingRowAsync(
@@ -1063,6 +1096,7 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
     private async Task<string> DraftRowKeyAsync(ILocator row)
     {
         var key = await row.GetAttributeAsync(ListingRowKeyAttr);
+        if (string.IsNullOrEmpty(key)) key = await row.GetAttributeAsync("data-row-key");   // bảng ant cũ
         if (!string.IsNullOrEmpty(key)) return $"key:{key}";
         try
         {
