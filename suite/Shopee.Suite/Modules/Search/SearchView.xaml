@@ -38,33 +38,36 @@
                     <!-- Card: input + run -->
                     <Border Grid.Row="0" Style="{StaticResource Card}" Padding="18,16" Margin="0,0,0,10">
                         <StackPanel>
-                            <Grid>
+                            <!-- Dòng 1: File link category — riêng 1 dòng, ô đường dẫn rộng hết chiều ngang -->
+                            <TextBlock Text="File link category (.txt: mỗi dòng 1 link)" Style="{StaticResource Caption}" />
+                            <Grid Margin="0,4,0,12">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="Auto" />
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
+                                <TextBox Grid.Column="0" Text="{Binding FilesDisplay}" IsReadOnly="True" FontSize="11.5" VerticalContentAlignment="Center" />
+                                <Button Grid.Column="1" Content="📂  Chọn file" Margin="8,0,0,0" Command="{Binding ChooseFilesCommand}" />
+                                <Button Grid.Column="2" Content="🗑" Width="38" Margin="6,0,0,0" Command="{Binding ClearFilesCommand}" ToolTip="Bỏ file" />
+                            </Grid>
+
+                            <!-- Dòng 2: Bộ lọc Khu vực (Nơi Bán) + Lane + nút chạy -->
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
                                 <StackPanel Grid.Column="0">
-                                    <TextBlock Text="File link category (.txt: mỗi dòng 1 link)" Style="{StaticResource Caption}" />
-                                    <Grid Margin="0,4,0,0">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <TextBox Grid.Column="0" Text="{Binding FilesDisplay}" IsReadOnly="True" FontSize="11.5" VerticalContentAlignment="Center" />
-                                        <Button Grid.Column="1" Content="📂  Chọn file" Margin="8,0,0,0" Command="{Binding ChooseFilesCommand}" />
-                                        <Button Grid.Column="2" Content="🗑" Width="38" Margin="6,0,0,0" Command="{Binding ClearFilesCommand}" ToolTip="Bỏ file" />
-                                    </Grid>
-                                </StackPanel>
-                                <StackPanel Grid.Column="1" Margin="14,0,0,0">
                                     <TextBlock Text="Khu vực (Nơi Bán)" Style="{StaticResource Caption}" />
-                                    <TextBox Width="150" Margin="0,4,0,0" Text="{Binding Region, UpdateSourceTrigger=PropertyChanged}" />
+                                    <TextBox Width="200" Margin="0,4,0,0" Text="{Binding Region, UpdateSourceTrigger=PropertyChanged}" />
                                 </StackPanel>
-                                <StackPanel Grid.Column="2" Margin="14,0,0,0" VerticalAlignment="Bottom" Orientation="Horizontal">
+                                <StackPanel Grid.Column="1" Margin="16,0,0,0" Orientation="Horizontal" VerticalAlignment="Bottom">
                                     <TextBlock Text="Lane" Style="{StaticResource Caption}" VerticalAlignment="Center" Margin="0,0,6,0" />
                                     <TextBox Width="48" Text="{Binding LaneCount}" VerticalAlignment="Center" />
-                                    <Button Content="↻" Width="36" Margin="10,0,0,0" Command="{Binding ReloadCommand}" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Bottom">
+                                    <Button Content="↻" Width="36" Command="{Binding ReloadCommand}" />
                                     <Button Style="{StaticResource SuccessButton}" Content="▶  Tìm kiếm" MinWidth="110" Margin="8,0,0,0" Command="{Binding RunCommand}"
                                             ToolTip="Chạy mới — mỗi link tạo lượt mới từ danh mục đầu." />
                                     <Button Content="⏯ Tiếp tục" MinWidth="96" Margin="8,0,0,0" Command="{Binding ResumeCommand}"

@@ -13,7 +13,7 @@
         <Grid Grid.Row="0" Margin="0,0,0,16">
             <StackPanel>
                 <TextBlock Text="Cài đặt" Style="{StaticResource H1}" />
-                <TextBlock Text="Cấu hình AI, system prompt, và sao lưu/khôi phục dữ liệu."
+                <TextBlock Text="Hiệu năng (trần cửa sổ Brave theo CPU/RAM), cấu hình AI, system prompt, và sao lưu/khôi phục dữ liệu."
                            Style="{StaticResource Caption}" Margin="0,3,0,0" />
             </StackPanel>
             <Border HorizontalAlignment="Right" VerticalAlignment="Center"
@@ -23,6 +23,35 @@
         </Grid>
 
         <TabControl Grid.Row="1" Background="Transparent" BorderThickness="0">
+
+            <!-- ══════════ TAB: Hiệu năng (trần cửa sổ Brave) ══════════ -->
+            <TabItem Header="Hiệu năng">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" Margin="0,12,0,0">
+                    <StackPanel MaxWidth="720" HorizontalAlignment="Left">
+                        <Border Style="{StaticResource Card}" Padding="18" Margin="0,0,0,14">
+                            <StackPanel>
+                                <TextBlock Text="Máy của bạn" Style="{StaticResource H2}" Margin="0,0,0,8" />
+                                <TextBlock Text="{Binding MachineInfo}" FontSize="14.5" FontWeight="SemiBold" />
+                                <TextBlock Text="{Binding AutoWindowsInfo}" Style="{StaticResource Caption}" Margin="0,6,0,0" />
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource Card}" Padding="18">
+                            <StackPanel>
+                                <TextBlock Text="Trần cửa sổ Brave chạy đồng thời (toàn app)" Style="{StaticResource H2}" Margin="0,0,0,10" />
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                    <TextBox Width="90" Text="{Binding MaxWindows}" VerticalContentAlignment="Center" />
+                                    <TextBlock Text="0 = tự động (khuyến nghị)" Style="{StaticResource Caption}" VerticalAlignment="Center" Margin="12,0,0,0" />
+                                </StackPanel>
+                                <TextBlock Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,12,0,0"
+                                           Text="Mỗi cửa sổ Brave ngốn ~0.6 nhân CPU + ~1.5GB RAM khi cào. Tổng cửa sổ (mọi job BigSeller cộng lại) KHÔNG vượt trần này — đặt CAO hơn = cào nhanh hơn nhưng máy dễ ì; để 0 = app tự chọn mức an toàn theo CPU/RAM của máy. Có hiệu lực đầy đủ từ lượt chạy kế tiếp." />
+                                <Button Style="{StaticResource PrimaryButton}" Content="💾  Lưu" MinWidth="110"
+                                        HorizontalAlignment="Left" Margin="0,14,0,0" Command="{Binding SavePerformanceCommand}" />
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
 
             <!-- ══════════ TAB 1: Nhà cung cấp AI ══════════ -->
             <TabItem Header="Nhà cung cấp AI">

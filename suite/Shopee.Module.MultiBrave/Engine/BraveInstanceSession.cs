@@ -805,6 +805,11 @@ internal sealed class BraveInstanceSession : IDisposable
         _swPinnerCts = null;
 
         KillBraveProcess();
+
+        // Gỡ đăng ký SAU khi đã giết Brave của profile → nếu còn sót tiến trình nào, lần sweep kế coi là
+        // mồ côi và dọn nốt (không để rò qua các vòng xoay tk).
+        if (_profileRoot is not null)
+            BraveFleet.UnregisterActiveProfile(_profileRoot.FullName);
     }
 
     private async Task TryStopRunnerBeforeBraveExitAsync(CancellationToken cancellationToken)
@@ -832,6 +837,11 @@ internal sealed class BraveInstanceSession : IDisposable
     private void LaunchBrave(string exePath, string arguments)
     {
         KillBraveProcess();
+        // Đăng ký profile vào "fleet": trình dọn Brave mồ côi (BraveFleet) sẽ CHỪA cửa sổ đang sống này,
+        // chỉ giết Brave thuộc app mà KHÔNG còn session nào nhận (sót sau treo/crash). Đăng ký TRƯỚC khi
+        // phóng để con-trình Brave xuất hiện là đã được bảo vệ.
+        if (_profileRoot is not null)
+            BraveFleet.RegisterActiveProfile(_profileRoot.FullName);
         // Phóng Brave GẮN vào Job Object KILL_ON_JOB_CLOSE của app → app chết kiểu gì (kể cả crash /
         // force-kill) thì OS tự dọn sạch Brave con, không còn tiến trình mồ côi ăn RAM.
         _braveProcess = BraveJobObject.Start(exePath, arguments);

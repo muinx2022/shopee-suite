@@ -21,6 +21,20 @@ public static class BraveJobObject
     private static IntPtr _job = IntPtr.Zero;   // KHÔNG đóng suốt vòng đời app — đóng = giết Brave ngay
     private static bool _failed;
 
+    // Trần CỨNG do OS ép (kể cả khi app treo/chết). 0 = không giới hạn. Đặt TRƯỚC lần phóng Brave đầu.
+    private static int _activeProcessLimit;
+    private static ulong _jobMemoryLimit;
+
+    /// <summary>Đặt trần cho job: số tiến trình tối đa trong job (<paramref name="activeProcessLimit"/>,
+    /// 0=tắt) và tổng RAM-commit tối đa (<paramref name="jobMemoryLimitBytes"/>, 0=tắt). CHỈ có tác dụng
+    /// nếu gọi TRƯỚC khi job được tạo (trước lần phóng Brave đầu tiên). Khi chạm trần tiến trình, OS từ
+    /// chối đẻ thêm tiến trình Brave → bầy Brave không phình thêm dù app đang treo (không cần code app).</summary>
+    public static void ConfigureLimits(int activeProcessLimit, ulong jobMemoryLimitBytes)
+    {
+        _activeProcessLimit = Math.Max(0, activeProcessLimit);
+        _jobMemoryLimit = jobMemoryLimitBytes;
+    }
+
     /// <summary>Phóng Brave và GẮN vào job KILL_ON_JOB_CLOSE. Nếu interop lỗi (Windows hạn chế quyền…)
     /// thì fallback Process.Start thường + cố gán best-effort, để việc mở Brave KHÔNG bao giờ vỡ.</summary>
     public static Process Start(string fileName, string arguments)
@@ -52,12 +66,18 @@ public static class BraveJobObject
             var h = CreateJobObject(IntPtr.Zero, null);
             if (h == IntPtr.Zero) { _failed = true; return false; }
 
+            var flags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            if (_activeProcessLimit > 0) flags |= JOB_OBJECT_LIMIT_ACTIVE_PROCESS;
+            if (_jobMemoryLimit > 0) flags |= JOB_OBJECT_LIMIT_JOB_MEMORY;
+
             var info = new JOBOBJECT_EXTENDED_LIMIT_INFORMATION
             {
                 BasicLimitInformation = new JOBOBJECT_BASIC_LIMIT_INFORMATION
                 {
-                    LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+                    LimitFlags = flags,
+                    ActiveProcessLimit = (uint)_activeProcessLimit,
                 },
+                JobMemoryLimit = _jobMemoryLimit > 0 ? new UIntPtr(_jobMemoryLimit) : UIntPtr.Zero,
             };
             var len = Marshal.SizeOf(info);
             var ptr = Marshal.AllocHGlobal(len);
@@ -113,6 +133,8 @@ public static class BraveJobObject
     private const uint CREATE_SUSPENDED = 0x00000004;
     private const int JobObjectExtendedLimitInformation = 9;
     private const uint JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000;
+    private const uint JOB_OBJECT_LIMIT_ACTIVE_PROCESS = 0x00000008;
+    private const uint JOB_OBJECT_LIMIT_JOB_MEMORY = 0x00000200;
 
     // ── P/Invoke ──
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]

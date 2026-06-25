@@ -3,8 +3,6 @@ namespace ShopeeStatApp.Models;
 public sealed class LauncherSettings
 {
     public List<InstanceConfig> Instances { get; set; } = [];
-    public List<string> Keywords { get; set; } = ["giày nữ"];
-    public List<string> UsedKeywords { get; set; } = [];
     public string BravePath { get; set; } = "";
     public string ExtensionPath { get; set; } = "";
     public int WsPort { get; set; } = 9111;

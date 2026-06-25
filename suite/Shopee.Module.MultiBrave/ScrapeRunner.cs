@@ -381,8 +381,14 @@ public sealed class ScrapeRunner
         cfg.WorkbookPath = _workbookPath;   // per-instance workbook (chạy song song nhiều BigSeller)
         cfg.BigSellerAccountName = _bigSellerAccountName;   // để overlay hiện "Bigseller Account: …"
         var port = PortAllocator.Shared.AllocateInstancePort();
+        var windowSlotHeld = false;
         try
         {
+            // PHANH SỐ CỬA SỔ: giữ tổng cửa sổ Brave (mọi job cộng lại) ≤ trần toàn app + chờ nếu RAM
+            // trống thấp. Đây là thứ chặn "bùng số tiến trình" — nguyên nhân thật làm đơ máy qua đêm.
+            await BraveFleet.AcquireWindowSlotAsync(line => InstanceLog?.Invoke(key, line), ct).ConfigureAwait(false);
+            windowSlotHeld = true;
+
             session = new BraveInstanceSession(port, line => InstanceLog?.Invoke(key, line));
             // Cổng warmup dùng CHUNG mọi instance: giới hạn số SW cold-start đồng thời.
             session.WarmupAcquire = WarmupGate.WaitAsync;
@@ -453,6 +459,8 @@ public sealed class ScrapeRunner
             try { if (session is not null) await session.StopAsync(CancellationToken.None).ConfigureAwait(false); } catch { }
             try { session?.Dispose(); } catch { }
             _sessions.TryRemove(key, out _);
+            // Trả suất cửa sổ về gate (sau khi đã đóng Brave) để worker khác mở cửa sổ kế.
+            if (windowSlotHeld) BraveFleet.ReleaseWindowSlot();
             // Trả port về pool — nếu thiếu dòng này, mỗi chunk rò 1 port → auto run dài cạn pool (600 port) rồi chết.
             PortAllocator.Shared.Release(port);
         }

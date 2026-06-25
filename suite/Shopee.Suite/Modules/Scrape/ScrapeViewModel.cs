@@ -91,7 +91,11 @@ public sealed partial class ScrapeViewModel : ObservableObject
         // Mỗi ScrapeTargetViewModel TỰ nạp config đã lưu (tick chọn + shop + số dòng/process) theo
         // Account.Id từ ScrapeTargetConfigStore → giữ nguyên lựa chọn người dùng qua reload + khởi động lại.
         foreach (var a in BigSellerStore.Shared.Accounts)
-            ScrapeTargets.Add(new ScrapeTargetViewModel(a));
+        {
+            var t = new ScrapeTargetViewModel(a);
+            t.IsShopRunning = shop => IsShopScraping(t, shop);   // "đang scrape" theo job LIVE, không kẹt sau crash
+            ScrapeTargets.Add(t);
+        }
         SelectedTarget = ScrapeTargets.FirstOrDefault(t => t.Account.Id == prevDetailId) ?? ScrapeTargets.FirstOrDefault();
         PoolCount = AccountStore.Shared.Accounts.Count(a => !a.Disabled);
         Status = $"{ScrapeTargets.Count} BigSeller · {PoolCount} acc Shopee (tự xoay vòng).";
@@ -312,6 +316,7 @@ public sealed partial class ScrapeViewModel : ObservableObject
         var ct = h.Cts.Token;
 
         ScrapeRunner? runner = null;
+        var claimedFrameIds = new List<string>();   // tk đã giữ chỗ cho job này → nhả ở finally
         try
         {
             int totalRows;
@@ -339,7 +344,8 @@ public sealed partial class ScrapeViewModel : ObservableObject
             var frameSize = Math.Max(1, target.FrameSize);
             IReadOnlyList<string>? preferIds = resume ? ScrapeProgressStore.Shared.GetFrame(account.Id, sheet) : null;
             var frame = s.ClaimFrame(frameSize, preferIds);
-            if (frame.Count == 0) { Log($"[{account.DisplayName}] kho tk Shopee đã cạn (mọi tk đang thuộc khung khác / bị tắt) — bỏ qua."); return; }
+            claimedFrameIds = frame.Select(a => a.Id).ToList();   // ghi nhận để nhả giữ-chỗ ở finally (kể cả khi job dừng giữa chừng)
+            if (frame.Count == 0) { Log($"[{account.DisplayName}] kho tk Shopee đã cạn (mọi tk đang thuộc khung khác / Search đang giữ / bị tắt) — bỏ qua."); return; }
             ScrapeProgressStore.Shared.SaveFrame(account.Id, sheet, frame.Select(a => a.Id));   // lưu khung để resume giữ nguyên
             var procs = Math.Max(1, Math.Min(maxProc, frame.Count));
             // Mỗi tk BigSeller (job) 1 màu nền → các process CÙNG tk BigSeller cùng màu, dễ nhìn khi chạy nhiều tk.
@@ -350,8 +356,10 @@ public sealed partial class ScrapeViewModel : ObservableObject
                     Instances.Add(new ScrapeInstanceViewModel($"{seq}:P{i}", $"[{account.DisplayName}] P{i}", jobBrush));
             });
 
+            // Đưa thông báo dọn nền (quét Brave mồ côi…) ra log tab Scrape để người dùng thấy.
+            Shopee.Core.Browser.BraveFleet.Notice = Log;
             var totalSeg = segments.Sum(x => x.to - x.from + 1);
-            Log($"── {(resume ? "⏯ Tiếp tục" : "▶")} BigSeller \"{account.DisplayName}\" · shop \"{shop.DisplayName}\" · {totalSeg} dòng cần chạy (tổng sheet {totalRows}) · {procs} cửa sổ · KHUNG {frame.Count} tk Shopee (xoay vòng trong khung) ──");
+            Log($"── {(resume ? "⏯ Tiếp tục" : "▶")} BigSeller \"{account.DisplayName}\" · shop \"{shop.DisplayName}\" · {totalSeg} dòng cần chạy (tổng sheet {totalRows}) · {procs} cửa sổ · KHUNG {frame.Count} tk Shopee (xoay vòng trong khung) · trần tổng app {Shopee.Core.Browser.BraveFleet.MaxConcurrentWindows} cửa sổ ──");
 
             // Ghi nhận lượt chạy (chỉ tiến độ DÒNG — không đặt-chỗ tk nữa vì tk xoay vòng/tự trả về kho).
             if (resume) ScrapeProgressStore.Shared.BeginResume(account.Id, sheet, account.DisplayName, totalRows);
@@ -387,6 +395,8 @@ public sealed partial class ScrapeViewModel : ObservableObject
         catch (Exception ex) { Log($"[{account.DisplayName}] ✘ lỗi: {ex.Message}"); }
         finally
         {
+            // Nhả giữ-chỗ CẢ KHUNG → Search (và job Scrape khác) lại mượn được các tk này.
+            ShopeeAccountUsage.Shared.ReleaseReservation(claimedFrameIds);
             lock (s.JobsLock) s.Jobs.Remove(account.Id);
             // Dọn các dòng process của job này khỏi lưới (trước đây dòng cũ không bao giờ bị xoá).
             var prefix = seq + ":";
@@ -415,7 +425,21 @@ public sealed partial class ScrapeViewModel : ObservableObject
             h.Task = Task.Run(() => RunOneJobAsync(s, h, resume));
             s.Jobs[target.Account.Id] = h;
         }
+        target.RefreshProgress();   // shop vừa chạy chuyển sang "đang scrape" ngay (chip phía trên ô chọn shop)
         return true;
+    }
+
+    /// <summary>true nếu đang có job LIVE cào đúng shop (sheet) này của tk BigSeller → chip hiện "đang scrape".</summary>
+    private bool IsShopScraping(ScrapeTargetViewModel target, BigSellerShop shop)
+    {
+        var s = _session;
+        if (s is null) return false;
+        lock (s.JobsLock)
+        {
+            if (!s.Jobs.TryGetValue(target.Account.Id, out var h)) return false;
+            return string.Equals(
+                h.Target.SelectedShop?.ShopeeDataSheet, shop.ShopeeDataSheet, StringComparison.OrdinalIgnoreCase);
+        }
     }
 
     /// <summary>Chạy RIÊNG 1 tk giữa lúc đang run (tick checkbox khi busy). Mid-run = RESUME.
@@ -637,18 +661,22 @@ public sealed partial class ScrapeViewModel : ObservableObject
             lock (AllocLock)
             {
                 var frame = new List<ShopeeAccount>();
+                // CHỈ lấy tk GIÀNH ĐƯỢC quyền (TryReserve) → KHÔNG đụng tk module khác (Search) đang giữ →
+                // 2 module không bao giờ mở cùng 1 tk Shopee. Khung được NHẢ khi job kết thúc (RunOneJobAsync finally).
                 if (preferIds is not null)
                     foreach (var id in preferIds)
                     {
                         var a = Available.FirstOrDefault(x => x.Id == id && !x.Disabled);
-                        if (a is not null) { frame.Add(a); Available.Remove(a); }
+                        if (a is not null && ShopeeAccountUsage.Shared.TryReserve(a.Id)) { frame.Add(a); Available.Remove(a); }
                     }
-                // Lấp đủ số: chọn NGẪU NHIÊN trong kho (tk còn bật) cho đủ n — không theo LRU/thứ tự cố định.
+                // Lấp đủ số: chọn NGẪU NHIÊN trong kho (tk còn bật + chưa bị module khác giữ) cho đủ n.
                 while (frame.Count < n)
                 {
-                    var candidates = Available.Where(x => !x.Disabled).ToList();
+                    var candidates = Available.Where(x => !x.Disabled && !ShopeeAccountUsage.Shared.IsReserved(x.Id)).ToList();
                     if (candidates.Count == 0) break;
                     var a = candidates[Random.Shared.Next(candidates.Count)];
+                    // Module khác vừa giành mất giữa lúc lọc → bỏ tk này khỏi kho, thử tk khác (không kẹt vì kho co dần).
+                    if (!ShopeeAccountUsage.Shared.TryReserve(a.Id)) { Available.Remove(a); continue; }
                     frame.Add(a); Available.Remove(a);
                 }
                 return frame;

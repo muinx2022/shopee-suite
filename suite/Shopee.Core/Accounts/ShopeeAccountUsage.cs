@@ -15,6 +15,14 @@ public sealed class ShopeeAccountUsage
     private readonly HashSet<string> _used = new(StringComparer.Ordinal);   // đã dùng ít nhất 1 lần trong giai đoạn đang chạy
     private readonly HashSet<string> _captcha = new(StringComparer.Ordinal); // đang dính captcha trong lượt chạy này
 
+    // SỔ GIỮ CHỖ CHÉO-MODULE (cross-module reservation). KHÁC _inUse (chỉ để hiển thị tk đang mở trong 1
+    // cửa sổ NGAY lúc này): _reserved là quyền SỞ HỮU tk giữa các module chạy song song.
+    //  • Scrape giữ CẢ KHUNG suốt 1 job (kể cả tk đang nghỉ trong khung — vì sẽ xoay vòng tới).
+    //  • Search giữ 1 tk khi đang crawl 1 link/keyword.
+    // Module khác hỏi TryReserve/IsReserved TRƯỚC khi mượn → tk module kia đang giữ thì bỏ qua, lấy tk khác
+    // → KHÔNG bao giờ 2 module mở CÙNG 1 tk Shopee cùng lúc (tránh Shopee thấy 1 tk ở 2 phiên → captcha/khóa).
+    private readonly HashSet<string> _reserved = new(StringComparer.Ordinal);
+
     /// <summary>Phát khi trạng thái đổi → UI làm mới cột "Tình trạng".</summary>
     public event Action? Changed;
 
@@ -39,6 +47,7 @@ public sealed class ShopeeAccountUsage
                 _inUse.Clear();
                 _used.Clear();
                 _captcha.Clear();
+                _reserved.Clear();   // không còn lượt chạy nào → nhả mọi giữ chỗ (lưới an toàn chống rò)
             }
         }
         Changed?.Invoke();
@@ -77,6 +86,45 @@ public sealed class ShopeeAccountUsage
         if (string.IsNullOrEmpty(id)) return;
         lock (_lock) { _captcha.Add(id); _inUse.Remove(id); _used.Add(id); }
         Changed?.Invoke();
+    }
+
+    // ── GIỮ CHỖ CHÉO-MODULE ──────────────────────────────────────────────────────────
+    /// <summary>Giành quyền dùng 1 tk. true = giành được; false = module khác đang giữ (hãy lấy tk khác).</summary>
+    public bool TryReserve(string id)
+    {
+        if (string.IsNullOrEmpty(id)) return false;
+        lock (_lock) return _reserved.Add(id);
+    }
+
+    /// <summary>Giành NHIỀU tk (best-effort) — trả về danh sách tk GIÀNH ĐƯỢC (bỏ tk module khác đang giữ).
+    /// Dùng cho Scrape đóng cả khung 1 lần.</summary>
+    public List<string> TryReserveMany(IEnumerable<string> ids)
+    {
+        var got = new List<string>();
+        lock (_lock)
+            foreach (var id in ids)
+                if (!string.IsNullOrEmpty(id) && _reserved.Add(id)) got.Add(id);
+        return got;
+    }
+
+    /// <summary>tk có đang được module nào giữ chỗ không (để bỏ qua khi mượn).</summary>
+    public bool IsReserved(string id)
+    {
+        if (string.IsNullOrEmpty(id)) return false;
+        lock (_lock) return _reserved.Contains(id);
+    }
+
+    /// <summary>Nhả quyền dùng 1 tk (cho module khác mượn được).</summary>
+    public void ReleaseReservation(string id)
+    {
+        if (string.IsNullOrEmpty(id)) return;
+        lock (_lock) _reserved.Remove(id);
+    }
+
+    /// <summary>Nhả quyền dùng nhiều tk (vd cả khung khi 1 job Scrape kết thúc).</summary>
+    public void ReleaseReservation(IEnumerable<string> ids)
+    {
+        lock (_lock) foreach (var id in ids) if (!string.IsNullOrEmpty(id)) _reserved.Remove(id);
     }
 
     /// <summary>Trạng thái hiển thị của 1 tk: "⚠ Captcha" | "Đang dùng" | "Đã dùng" | "Chưa dùng".</summary>

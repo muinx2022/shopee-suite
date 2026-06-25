@@ -1,9 +1,20 @@
 using System.Collections.ObjectModel;
+using System.Windows.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using Shopee.Core.BigSeller;
 using Shopee.Core.Scrape;
 
 namespace Shopee.Suite.Modules.Scrape;
+
+/// <summary>Một chip trạng thái scrape của 1 shop (đã / đang / chưa) — hiện phía trên ô chọn shop.</summary>
+public sealed class ShopScrapeStatus
+{
+    public string DisplayName { get; init; } = "";
+    public string StatusText { get; init; } = "";
+    public Brush Background { get; init; } = Brushes.Transparent;
+    public Brush Foreground { get; init; } = Brushes.Black;
+    public string Tooltip { get; init; } = "";
+}
 
 /// <summary>
 /// Một "đích scrape" = 1 tài khoản BigSeller + 1 shop (↔ sheet/workbook). Tick chọn nhiều tk để chạy
@@ -15,6 +26,10 @@ public sealed partial class ScrapeTargetViewModel : ObservableObject
 {
     public BigSellerAccount Account { get; }
     public ObservableCollection<BigSellerShop> Shops { get; }
+
+    /// <summary>Do ScrapeViewModel cấp: TRẢ true nếu đang có job LIVE cào đúng shop (sheet) này → hiện
+    /// "đang scrape". Dựa vào job sống thay vì cờ "running" trong file tiến độ (cờ này có thể kẹt sau crash).</summary>
+    public Func<BigSellerShop, bool>? IsShopRunning { get; set; }
 
     // Khi true (đang nạp config đã lưu lúc khởi tạo) thì KHÔNG lưu lại — tránh ghi đè vòng vo.
     private bool _loading;
@@ -36,7 +51,7 @@ public sealed partial class ScrapeTargetViewModel : ObservableObject
     [ObservableProperty] private int _endRow;
     partial void OnEndRowChanged(int value) => Persist();
     /// <summary>Số dòng mỗi khối (mỗi tk Shopee nhận 1 khối kế tiếp theo số này).</summary>
-    [ObservableProperty] private int _rowsPerAccount = 30;
+    [ObservableProperty] private int _rowsPerAccount = 60;
     partial void OnRowsPerAccountChanged(int value) => Persist();
     /// <summary>Số process chạy đồng thời = số tk Shopee acc BigSeller này dùng (mỗi process 1 tk).</summary>
     [ObservableProperty] private int _maxProcess = 2;
@@ -115,5 +130,72 @@ public sealed partial class ScrapeTargetViewModel : ObservableObject
         }
     }
 
-    public void RefreshProgress() => OnPropertyChanged(nameof(ProgressText));
+    /// <summary>Trạng thái scrape của TỪNG shop trong tk BigSeller này (đã / đang / chưa) — cho dải chip
+    /// phía trên ô chọn shop. Tính lại mỗi lần <see cref="RefreshProgress"/> (job bắt đầu/xong, mỗi chunk).</summary>
+    public IReadOnlyList<ShopScrapeStatus> ShopStatuses => Shops.Select(BuildShopStatus).ToList();
+
+    private ShopScrapeStatus BuildShopStatus(BigSellerShop shop)
+    {
+        var sheet = shop.ShopeeDataSheet ?? "";
+        if (string.IsNullOrWhiteSpace(sheet))
+            return new ShopScrapeStatus
+            {
+                DisplayName = shop.DisplayName,
+                StatusText = "○ chưa scrape",
+                Background = TodoBg, Foreground = TodoFg,
+                Tooltip = "Shop chưa gán sheet dữ liệu Shopee.",
+            };
+
+        // "Đang" lấy từ job LIVE (chuẩn xác, không kẹt sau crash); "Đã/Chưa" lấy từ tiến độ đã lưu.
+        var live = IsShopRunning?.Invoke(shop) ?? false;
+        var p = ScrapeProgressStore.Shared.Find(Account.Id, sheet);
+
+        if (live)
+            return new ShopScrapeStatus
+            {
+                DisplayName = shop.DisplayName,
+                StatusText = "⏳ đang scrape",
+                Background = RunningBg, Foreground = RunningFg,
+                Tooltip = p is not null ? $"Đang chạy · đã xong tới dòng {p.LastRowReached}." : "Đang chạy…",
+            };
+
+        if (p is not null && string.Equals(p.Status, "completed", StringComparison.OrdinalIgnoreCase))
+            return new ShopScrapeStatus
+            {
+                DisplayName = shop.DisplayName,
+                StatusText = "✓ đã scrape",
+                Background = DoneBg, Foreground = DoneFg,
+                Tooltip = $"Hoàn thành · đã xong tới dòng {p.LastRowReached}.",
+            };
+
+        // Còn lại = chưa scrape. Nếu dở dang (đã chạy một phần) thì gợi ý "Tiếp tục".
+        var hasPartial = p is not null && p.LastRowReached > 0;
+        return new ShopScrapeStatus
+        {
+            DisplayName = shop.DisplayName,
+            StatusText = hasPartial ? "◐ chưa xong" : "○ chưa scrape",
+            Background = TodoBg, Foreground = TodoFg,
+            Tooltip = hasPartial
+                ? $"Dở dang · đã xong tới dòng {p!.LastRowReached} — bấm Tiếp tục để chạy nốt."
+                : "Chưa chạy lần nào.",
+        };
+    }
+
+    public void RefreshProgress()
+    {
+        OnPropertyChanged(nameof(ProgressText));
+        OnPropertyChanged(nameof(ShopStatuses));
+    }
+
+    // Màu chip (nền nhạt + chữ đậm) cho 3 trạng thái — freeze để tái dùng, không tạo brush mỗi lần.
+    private static readonly Brush DoneBg = FrozenBrush("#E8F5E9"), DoneFg = FrozenBrush("#2E7D32");
+    private static readonly Brush RunningBg = FrozenBrush("#FFF3E0"), RunningFg = FrozenBrush("#E65100");
+    private static readonly Brush TodoBg = FrozenBrush("#ECEFF1"), TodoFg = FrozenBrush("#546E7A");
+
+    private static Brush FrozenBrush(string hex)
+    {
+        var b = new SolidColorBrush((Color)ColorConverter.ConvertFromString(hex)!);
+        b.Freeze();
+        return b;
+    }
 }

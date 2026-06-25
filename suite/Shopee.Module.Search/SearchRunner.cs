@@ -20,9 +20,9 @@ public sealed record SearchProductRow(
 public sealed record SearchFilter(long MinPrice, int MinSoldFrom, int MinSoldTo, string? Category);
 
 /// <summary>
-/// Facade công khai bọc engine tìm kiếm stat. Hai chế độ: theo TỪ KHÓA (AutoRunCoordinator) và theo
-/// FILE link (FileRunCoordinator — Mode "shopFromLink"). Chạy nhiều lane song song trên kho account
-/// dùng chung. Tích lũy sản phẩm để xuất Excel có lọc.
+/// Facade công khai bọc engine tìm kiếm stat — chỉ tìm theo FILE link category (FileRunCoordinator,
+/// Mode "categoryFromLink"). Chạy nhiều lane song song trên kho account dùng chung. Tích lũy sản phẩm
+/// để xuất Excel có lọc.
 /// </summary>
 public sealed class SearchRunner
 {
@@ -90,10 +90,6 @@ public sealed class SearchRunner
     public int CollectedCount => _collected.Count;
 
     // ── XUẤT GỘP TỪ CSDL (toàn bộ đã quét, không chỉ lần chạy hiện tại) ──────────────
-    /// <summary>Xuất GỘP mọi sản phẩm tìm theo từ khóa trong CSDL (loại trùng theo ItemId).</summary>
-    public string? ExportAllKeywords(string outputDir, SearchFilter? filter) =>
-        ExportDedup(_store.GetAllKeywordProducts(), outputDir, filter, "tonghop-tatca");
-
     /// <summary>Xuất GỘP mọi sản phẩm của tất cả shop đã quét (theo file), loại trùng theo ItemId.</summary>
     public string? ExportAllShops(string outputDir, SearchFilter? filter) =>
         ExportDedup(_store.GetAllShopProducts(), outputDir, filter, "tonghop-file");
@@ -116,12 +112,6 @@ public sealed class SearchRunner
     }
 
     // ── XÓA DỮ LIỆU (CSDL + store phụ) ─────────────────────────────────────────────
-    public void ClearKeywordHistory()
-    {
-        _store.ClearKeywordSearchHistory();
-        _collected.Clear();
-    }
-
     public void ClearFileHistory(string outputDir, IEnumerable<string> filePaths)
     {
         _store.ClearFileSearchHistory();
@@ -158,10 +148,6 @@ public sealed class SearchRunner
     /// <summary>Sản phẩm của 1 shop từ CSDL (đã chiếu sang SearchProductRow cho UI).</summary>
     public IReadOnlyList<SearchProductRow> GetShopProductsRows(long shopId) =>
         _store.GetShopProducts(shopId).Select(p => Project(0, p)).ToList();
-
-    /// <summary>Toàn bộ sản phẩm tìm theo TỪ KHÓA từ CSDL (để khôi phục phiên khi mở lại app).</summary>
-    public IReadOnlyList<SearchProductRow> GetAllKeywordProductRows() =>
-        _store.GetAllKeywordProducts().Select(p => Project(0, p)).ToList();
 
     /// <summary>Tiến độ lượt chạy gần nhất của 1 link: (trạng thái, danh mục, trang, danh mục #, số SP). Null nếu chưa chạy.</summary>
     public (string Status, string Category, int Page, int CategoryIndex, int ProductCount)? GetLinkProgress(string link)

@@ -41,8 +41,6 @@ public sealed class AppSettingsService
             try { ApiConfig = JsonSerializer.Deserialize<ShopeeApiConfig>(File.ReadAllText(_apiConfigPath), Opts) ?? new(); }
             catch { ApiConfig = new(); }
         }
-
-        NormalizeSettings();
     }
 
     public void SaveSettings()
@@ -73,22 +71,4 @@ public sealed class AppSettingsService
         return dir;
     }
 
-    private void NormalizeSettings()
-    {
-        Settings.Keywords = (Settings.Keywords ?? [])
-            .Where(x => !string.IsNullOrWhiteSpace(x))
-            .Select(x => x.Trim())
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
-
-        if (Settings.Keywords.Count == 0)
-            Settings.Keywords.Add("giày nữ");
-
-        Settings.UsedKeywords = (Settings.UsedKeywords ?? [])
-            .Where(x => !string.IsNullOrWhiteSpace(x))
-            .Select(x => x.Trim())
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Where(x => Settings.Keywords.Any(k => string.Equals(k, x, StringComparison.OrdinalIgnoreCase)))
-            .ToList();
-    }
 }

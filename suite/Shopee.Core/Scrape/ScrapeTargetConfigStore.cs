@@ -15,7 +15,7 @@ public sealed class ScrapeTargetConfig
 
     public int StartRow { get; set; } = 2;
     public int EndRow { get; set; }
-    public int RowsPerAccount { get; set; } = 30;
+    public int RowsPerAccount { get; set; } = 60;
     public int MaxProcess { get; set; } = 2;
     /// <summary>Số tk Shopee được "đóng khung" cố định cho tk BigSeller này (chỉ xoay vòng trong khung
     /// → BigSeller chỉ thấy ngần ấy thiết bị ổn định → không bị đá phiên). Cấp lúc bắt đầu chạy.</summary>

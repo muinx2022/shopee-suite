@@ -29,7 +29,7 @@ public sealed class FileRunCoordinator
     private readonly object _sesLock = new();
     private readonly List<SearchSession> _sessions = [];
 
-    // Account pool guarded by _accLock (same scheme as AutoRunCoordinator).
+    // Account pool guarded by _accLock.
     private readonly object _accLock = new();
     private readonly HashSet<string> _busy = [];
     private readonly Dictionary<string, long> _restUntilTick = [];
@@ -327,9 +327,15 @@ public sealed class FileRunCoordinator
                     return null;
 
                 var now = Environment.TickCount64;
-                // Chọn NGẪU NHIÊN trong nhóm khả dụng (free + hết nghỉ) → không nện mãi mấy acc đầu, cho acc luân phiên nghỉ.
-                var eligible = candidates.Where(a => !_busy.Contains(a.Id) && !IsResting(a.Id, now)).ToList();
+                // Chọn NGẪU NHIÊN trong nhóm khả dụng (free + hết nghỉ + KHÔNG bị module khác giữ chỗ) →
+                // không nện mãi mấy acc đầu, và 2 module (Scrape/Search) không mở cùng 1 tk Shopee.
+                var eligible = candidates
+                    .Where(a => !_busy.Contains(a.Id) && !IsResting(a.Id, now) && !ShopeeAccountUsage.Shared.IsReserved(a.Id))
+                    .ToList();
                 pick = eligible.Count > 0 ? eligible[Random.Shared.Next(eligible.Count)] : null;
+                // Giành quyền NGAY trong _accLock (TryReserve nguyên tử) — nếu module khác vừa giành mất thì bỏ, chờ lượt sau.
+                if (pick is not null && !ShopeeAccountUsage.Shared.TryReserve(pick.Id))
+                    pick = null;
                 if (pick is not null)
                     _busy.Add(pick.Id);
             }
@@ -363,6 +369,7 @@ public sealed class FileRunCoordinator
                 _restUntilTick[account.Id] = Environment.TickCount64 + RestMillis;
         }
         ShopeeAccountUsage.Shared.MarkReleased(account.Id);
+        ShopeeAccountUsage.Shared.ReleaseReservation(account.Id);   // nhả giữ-chỗ → Scrape mượn được tk này
     }
 
     // ── Link helpers ────────────────────────────────────────────────────────────

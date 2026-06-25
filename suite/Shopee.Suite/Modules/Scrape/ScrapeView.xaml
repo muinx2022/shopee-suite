@@ -112,6 +112,28 @@
                                          FontFamily="{StaticResource MonoFont}" FontSize="11.5" TextWrapping="Wrap" />
 
                                 <TextBlock Text="Shop (↔ sheet)" Style="{StaticResource Caption}" />
+
+                                <!-- Trạng thái scrape của TỪNG shop trong tk BigSeller: đã / đang / chưa.
+                                     Dải chip phía trên ô chọn shop — xem nhanh shop nào xong, đang chạy, chưa chạy. -->
+                                <ItemsControl ItemsSource="{Binding ShopStatuses}" Margin="0,4,0,6">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border CornerRadius="10" Padding="8,3" Margin="0,0,6,6"
+                                                    Background="{Binding Background}" ToolTip="{Binding Tooltip}">
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock Text="{Binding DisplayName}" FontSize="11.5" FontWeight="SemiBold"
+                                                               Foreground="{Binding Foreground}" TextTrimming="CharacterEllipsis" MaxWidth="130" />
+                                                    <TextBlock Text="{Binding StatusText}" FontSize="11" Margin="6,0,0,0"
+                                                               Foreground="{Binding Foreground}" />
+                                                </StackPanel>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+
                                 <ComboBox Margin="0,3,0,10" ItemsSource="{Binding Shops}" SelectedItem="{Binding SelectedShop}" DisplayMemberPath="DisplayName" />
 
                                 <TextBlock Text="Phân bổ chạy (engine TỰ chia khối dòng cho từng tk Shopee theo 'Dòng / lần')"

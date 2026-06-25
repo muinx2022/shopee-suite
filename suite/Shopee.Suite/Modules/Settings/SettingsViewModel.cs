@@ -3,6 +3,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.Win32;
 using Shopee.Core.Ai;
+using Shopee.Core.Browser;
 using Shopee.Core.Infrastructure;
 
 namespace Shopee.Suite.Modules.Settings;
@@ -36,10 +37,22 @@ public sealed partial class SettingsViewModel : ObservableObject
 
     public bool IsIdle => !Testing;
 
+    // ── Hiệu năng (trần cửa sổ Brave) ───────────────────────────────────────────
+    /// <summary>Trần cửa sổ do người dùng đặt. 0 = tự động (min CPU/2, RAM/2).</summary>
+    [ObservableProperty] private int _maxWindows;
+
+    /// <summary>Thông tin máy: "CPU: 12 nhân · RAM: 32 GB".</summary>
+    public string MachineInfo => $"CPU: {BraveFleet.CpuCores} nhân   ·   RAM: {BraveFleet.TotalRamGb} GB";
+
+    /// <summary>Diễn giải trần tự động: "Tự động = min(CPU/2 = 6, RAM/2 = 16) = 6 cửa sổ".</summary>
+    public string AutoWindowsInfo =>
+        $"Tự động = min(CPU/2 = {System.Math.Max(2, BraveFleet.CpuCores / 2)}, RAM/2 = {BraveFleet.TotalRamGb / 2}) = {BraveFleet.AutoMaxWindows} cửa sổ";
+
     public SettingsViewModel() => LoadFromStore();
 
     private void LoadFromStore()
     {
+        MaxWindows = PerformanceSettingsStore.Shared.Current.MaxConcurrentWindows;
         var c = AiConfigStore.Shared.Current;
         Provider = c.Provider;
         OpenAiModel = c.OpenAiModel;
@@ -73,6 +86,18 @@ public sealed partial class SettingsViewModel : ObservableObject
     {
         AiConfigStore.Shared.Save(Build());
         Status = $"Đã lưu. Provider đang dùng: {Provider}.";
+    }
+
+    [RelayCommand]
+    private void SavePerformance()
+    {
+        var v = System.Math.Max(0, MaxWindows);
+        PerformanceSettingsStore.Shared.Save(new PerformanceSettings { MaxConcurrentWindows = v });
+        // Áp dụng ngay vào RAM (có hiệu lực đầy đủ từ lượt chạy kế tiếp).
+        BraveFleet.MaxConcurrentWindows = v > 0 ? v : BraveFleet.AutoMaxWindows;
+        Status = v > 0
+            ? $"Đã đặt trần {v} cửa sổ Brave (áp dụng từ lượt chạy kế tiếp)."
+            : $"Đã đặt TỰ ĐỘNG — {BraveFleet.AutoMaxWindows} cửa sổ cho máy này.";
     }
 
     [RelayCommand] private void ResetNamePrompt() => NameRewritePrompt = AiPrompts.DefaultNameRewrite;

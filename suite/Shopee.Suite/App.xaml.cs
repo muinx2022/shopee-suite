@@ -21,6 +21,24 @@ public partial class App : Application
         // Engine scrape v31 + update-product cần session/port block khởi tạo trước khi mở Brave.
         try { MultiBraveRuntime.Initialize(); } catch (Exception ex) { TryLog("MultiBraveRuntime.Init", ex); }
         try { Shopee.Modules.UpdateProduct.UpdateProductRuntime.Initialize(); } catch (Exception ex) { TryLog("UpdateProductRuntime.Init", ex); }
+
+        // Bảo vệ tài nguyên cho bầy Brave (chống "đơ máy" khi chạy dài qua đêm):
+        //  1) Đặt trần CỨNG số tiến trình cho Job Object — PHẢI trước lần phóng Brave đầu (OS tự ép, kể
+        //     cả khi app treo/chết). 2) Dọn Brave mồ côi sót lại từ lần chạy trước bị treo/crash.
+        //  3) Bật vòng dọn nền (GC + trả working set + quét mồ côi) chạy trên luồng threadpool, không phụ
+        //     thuộc UI nên UI có treo thì việc dọn vẫn chạy.
+        try
+        {
+            // Nạp trần cửa sổ do người dùng đặt (Cài đặt → Hiệu năng) vào RAM. >0 = đặt tay; 0 = giữ tự
+            // động (min CPU/2, RAM/2). Phải set TRƯỚC ConfigureJobLimits vì trần tiến trình Job tính theo nó.
+            var perfMax = Shopee.Core.Infrastructure.PerformanceSettingsStore.Shared.Current.MaxConcurrentWindows;
+            if (perfMax > 0) Shopee.Core.Browser.BraveFleet.MaxConcurrentWindows = perfMax;
+            Shopee.Core.Browser.BraveFleet.ConfigureJobLimits();
+            var swept = Shopee.Core.Browser.BraveFleet.StartupSweep();
+            if (swept > 0) TryLog("BraveFleet.StartupSweep", new Exception($"Đã dọn {swept} Brave mồ côi lúc khởi động."));
+            Shopee.Core.Browser.BraveFleet.StartMaintenance();
+        }
+        catch (Exception ex) { TryLog("BraveFleet.Init", ex); }
     }
 
     private void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
