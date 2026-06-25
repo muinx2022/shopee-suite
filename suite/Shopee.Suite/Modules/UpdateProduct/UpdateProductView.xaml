@@ -135,7 +135,9 @@
                             </StackPanel>
                             <StackPanel Grid.Column="2">
                                 <TextBlock Text="Sheet đang dùng" Style="{StaticResource Caption}" />
-                                <TextBox Height="32" Margin="0,3,0,0" VerticalContentAlignment="Center"
+                                <!-- Padding dọc nhỏ lại để vùng chữ đủ cao trong Height=32 (padding mặc định 7,5
+                                     làm vùng chữ chỉ ~20px → cắt mất nửa dưới của tên sheet). -->
+                                <TextBox Height="32" Padding="7,3" Margin="0,3,0,0" VerticalContentAlignment="Center"
                                          Text="{Binding SheetName, Mode=OneWay}" IsReadOnly="True" />
                             </StackPanel>
                             <StackPanel Grid.Column="4">

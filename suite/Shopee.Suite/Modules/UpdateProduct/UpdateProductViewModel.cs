@@ -71,11 +71,10 @@ public sealed partial class UpdateProductViewModel : ObservableObject
         foreach (var a in BigSellerStore.Shared.Accounts)
         {
             var vm = new UpdateRunTargetViewModel(a) { IsSelected = prevSelected.Contains(a.Id) };
-            vm.SelectedShop =
-                (prevShop.TryGetValue(a.Id, out var sid) && sid is not null
-                    ? vm.Shops.FirstOrDefault(s => s.Id == sid)
-                    : null)
-                ?? vm.Shops.FirstOrDefault();
+            // MẶC ĐỊNH CHƯA chọn shop: chỉ khôi phục lựa chọn cũ theo Id (nếu có), KHÔNG tự chọn shop đầu.
+            vm.SelectedShop = prevShop.TryGetValue(a.Id, out var sid) && sid is not null
+                ? vm.Shops.FirstOrDefault(s => s.Id == sid)
+                : null;
             if (prevCfg.TryGetValue(a.Id, out var c))
                 (vm.StartRow, vm.EndRow, vm.ImportWorkers, vm.UpdateWorkers, vm.ListingReloadSeconds) = c;
             RunTargets.Add(vm);
