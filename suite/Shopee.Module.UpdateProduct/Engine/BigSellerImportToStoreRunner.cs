@@ -108,29 +108,10 @@ internal sealed class BigSellerImportToStoreRunner : IAsyncDisposable
                 _log("Cookie tu file account cung da het han — mo tab Account, bam Open BigSeller, login lai roi bam Save & close.");
         }
 
-        _playwright = await Playwright.CreateAsync();
         _log($"Ket noi CDP port {_settings.DebugPort}...");
+        await ConnectBrowserAsync(cancellationToken).ConfigureAwait(false);
 
-        for (var attempt = 0; attempt < 5; attempt++)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            try
-            {
-                _browser = await _playwright.Chromium.ConnectOverCDPAsync(
-                    $"http://127.0.0.1:{_settings.DebugPort}",
-                    new() { Timeout = 30000 });
-                break;
-            }
-            catch
-            {
-                await DelayAsync(3000, cancellationToken);
-            }
-        }
-
-        if (_browser is null)
-            throw new InvalidOperationException("Không kết nối được Brave qua CDP. Kiểm tra BigSeller profile đã đăng nhập chưa.");
-
-        var context = _browser.Contexts.FirstOrDefault()
+        var context = _browser!.Contexts.FirstOrDefault()
             ?? throw new InvalidOperationException("Brave chưa có browser context.");
 
         var page = await FindBigSellerPageAsync(context, cancellationToken)
@@ -151,154 +132,265 @@ internal sealed class BigSellerImportToStoreRunner : IAsyncDisposable
         if (_laneCount > 1)
             _log($"Lane #{_laneIndex + 1}/{_laneCount}: MỖI SP chỉ 1 lane nhận (claim chống trùng) — các lane import SP KHÁC nhau.");
 
+        // Vòng lặp "lì đòn": mọi lỗi KHÔNG phải Stop được ghi log + tự hồi phục tab/CDP (mở lại tab /
+        // kết nối lại CDP / khởi động lại Brave) rồi CHẠY TIẾP, thay vì văng ra ngoài làm chết cả phiên
+        // ("chạy tẹo rồi dừng"). Chỉ thật sự thoát khi bị Stop, hoặc quá nhiều lỗi liên tiếp không đọc nổi
+        // danh sách (coi như hỏng hẳn). Cơ chế chống import-trùng (committed/claim) GIỮ NGUYÊN.
+        var consecutiveErrors = 0;
+        const int maxConsecutiveErrors = 8;
         while (!cancellationToken.IsCancellationRequested)
         {
-            await WaitIfNotPausedAsync(cancellationToken).ConfigureAwait(false);
-            _log("");
-
-            if (!await BigSellerCrawlHelper.GoToCrawlPageAsync(page, targetUrl: crawlUrl, log: _log))
+            try
             {
-                await DelayAsync(5000, cancellationToken);
-                continue;
-            }
-            await SelectSourceTabIfNeededAsync(page, cancellationToken);
+                await WaitIfNotPausedAsync(cancellationToken).ConfigureAwait(false);
+                _log("");
 
-            // ── TAB "ĐÃ NHẬN" (claimed): theo index + xóa dòng sau import (giữ nguyên cách cũ) ──
-            if (_settings.ImportFromClaimedTab)
-            {
-                int claimedCount;
-                try { claimedCount = await GetClaimedImportRowCountAsync(page); }
+                if (!await BigSellerCrawlHelper.GoToCrawlPageAsync(page, targetUrl: crawlUrl, log: _log))
+                {
+                    await DelayAsync(5000, cancellationToken);
+                    continue;
+                }
+                await SelectSourceTabIfNeededAsync(page, cancellationToken);
+
+                // ── TAB "ĐÃ NHẬN" (claimed): theo index + xóa dòng sau import (giữ nguyên cách cũ) ──
+                if (_settings.ImportFromClaimedTab)
+                {
+                    int claimedCount;
+                    try { claimedCount = await GetClaimedImportRowCountAsync(page); }
+                    catch (Exception ex) when (IsTransientNavigationError(ex))
+                    {
+                        _log($"Trang đang reload, thử lại: {ex.Message}");
+                        await DelayAsync(3000, cancellationToken);
+                        continue;
+                    }
+                    consecutiveErrors = 0;   // đọc được danh sách → tab còn sống
+                    _log($"Tab Đã nhận có {claimedCount} sản phẩm.");
+
+                    if (claimedCount == 0 || _laneIndex >= claimedCount)
+                    {
+                        if (await BigSellerCrawlHelper.ClickNextCrawlPageAsync(page, _log))
+                        {
+                            await DelayAsync(2500, cancellationToken);
+                            continue;
+                        }
+                        _log($"Hết SP tab Đã nhận. Đợi {_settings.ListingReloadSeconds}s...");
+                        await DelayAsync(TimeSpan.FromSeconds(Math.Max(3, _settings.ListingReloadSeconds)), cancellationToken);
+                        await BigSellerCrawlHelper.GoToCrawlPageAsync(page, forceReload: true, targetUrl: crawlUrl, log: _log);
+                        await SelectSourceTabIfNeededAsync(page, cancellationToken);
+                        continue;
+                    }
+
+                    await ImportClaimedRowWithRetryAsync(page, _laneIndex, crawlUrl, cancellationToken);
+                    importCount++;
+                    _log($"Đã Import to Stores #{importCount}.");
+                    await DelayAsync(2000, cancellationToken);
+                    await BigSellerCrawlHelper.DismissPostImportDialogsAsync(page, _log);
+                    if (await RemoveClaimedImportRowAsync(page, _laneIndex))
+                        _log("Đã xóa dòng vừa import khỏi bảng hiện tại.");
+                    await DelayAsync(1500, cancellationToken);
+                    continue;
+                }
+
+                // ── CRAWL LIST (mặc định): HÀNG ĐỢI claim theo KEY ổn định → N lane lấy SP KHÁC nhau ──
+                List<(string Key, string Name)> rows;
+                try { rows = await GetImportableRowsAsync(page); }
                 catch (Exception ex) when (IsTransientNavigationError(ex))
                 {
-                    _log($"Trang đang reload, thử lại: {ex.Message}");
+                    _log($"Trang đang reload/đổi ngôn ngữ, thử lại: {ex.Message}");
                     await DelayAsync(3000, cancellationToken);
                     continue;
                 }
-                _log($"Tab Đã nhận có {claimedCount} sản phẩm.");
+                consecutiveErrors = 0;   // đọc được danh sách → tab còn sống
+                _log($"Crawl List có {rows.Count} sản phẩm có nút Import.");
 
-                if (claimedCount == 0 || _laneIndex >= claimedCount)
+                // Lấy SP ĐẦU TIÊN: chưa lane này làm xong (_doneKeys) & chưa lane nào nhận (TryClaim).
+                // TryClaim thành công ở đây = lane này "đặt gạch" SP đó → các lane khác bỏ qua.
+                (string Key, string Name)? pick = null;
+                foreach (var r in rows)
                 {
+                    if (string.IsNullOrEmpty(r.Key) || _doneKeys.Contains(r.Key)) continue;
+                    if (_claim is not null && !_claim.TryClaim(r.Key)) continue;   // lane khác đang/đã nhận
+                    pick = r;
+                    break;
+                }
+
+                if (pick is null)
+                {
+                    // Trang HIỆN TẠI hết SP để nhận (đã import & BigSeller gỡ đi / hoặc lane khác đang giữ). SP còn
+                    // lại nằm ở TRANG SAU → phải phân trang để tới; TUYỆT ĐỐI không reload về trang 1 ở đây, vì
+                    // trang 1 đã cạn còn trang 2+ vẫn còn SP → reload trang 1 rỗng = kẹt = "chạy 1 lúc rồi đơ".
+                    // Hết sạch trang mới đợi + về trang 1 (đón SP crawl mới / lane khác nhả claim do lỗi tạm).
                     if (await BigSellerCrawlHelper.ClickNextCrawlPageAsync(page, _log))
                     {
-                        await DelayAsync(2500, cancellationToken);
+                        await DelayAsync(1000, cancellationToken);
                         continue;
                     }
-                    _log($"Hết SP tab Đã nhận. Đợi {_settings.ListingReloadSeconds}s...");
+                    _log($"Lane #{_laneIndex + 1} đã duyệt hết các trang Crawl List. Đợi {_settings.ListingReloadSeconds}s rồi về trang 1…");
                     await DelayAsync(TimeSpan.FromSeconds(Math.Max(3, _settings.ListingReloadSeconds)), cancellationToken);
+                    await BigSellerCrawlHelper.GoToCrawlPageAsync(page, forceReload: true, targetUrl: crawlUrl, log: _log);
+                    continue;
+                }
+
+                var key = pick.Value.Key;
+                var name = string.IsNullOrWhiteSpace(pick.Value.Name) ? "(không tên)" : pick.Value.Name;
+                var shortName = name.Length > 50 ? name[..50] + "..." : name;
+                _log($"[SP #{importCount + 1}] {shortName}");
+                _log("Click Import to Stores...");
+
+                // committed = true NGAY TRƯỚC khi bấm nút "Import to Stores" (mốc commit). Lỗi SAU mốc này
+                // (thường do trang điều hướng làm mất context) nghĩa là click ĐÃ gửi lên server → KHÔNG được
+                // import lại (sẽ TRÙNG). Lỗi TRƯỚC mốc (mở/chọn modal) thì AN TOÀN để trả claim & thử lại.
+                var committed = false;
+                try
+                {
+                    try { await ClickImportRowByKeyAsync(page, key); }
+                    catch { await ClickImportRowByKeyAsync(page, key); }
+
+                    var modal = page.Locator(".ant-modal-content:visible").Last;
+                    await modal.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 20000 });
+                    await SelectImportShopAndConfirmAsync(modal, _settings.ShopName, () => committed = true);
+                }
+                catch (OperationCanceledException) { throw; }
+                catch (Exception ex)
+                {
+                    // Đã BẤM Import (committed) RỒI gặp lỗi ĐIỀU HƯỚNG/mất-context = click hầu như chắc chắn ĐÃ
+                    // tới server (import xong khiến trang reload) → coi như XONG, KHÔNG làm lại (tránh trùng).
+                    if (committed && IsTransientNavigationError(ex))
+                    {
+                        _doneKeys.Add(key);
+                        importCount++;
+                        consecutiveErrors = 0;
+                        _log($"Import đã gửi (#{importCount}) — trang điều hướng làm mất context, không làm lại tránh trùng.");
+                        await BigSellerCrawlHelper.DismissPostImportDialogsAsync(page, _log);
+                    }
+                    else
+                    {
+                        // Lỗi TRƯỚC khi gửi (chưa mở/chọn được modal, nút chưa kịp bấm, timeout không-điều-hướng)
+                        // → SP CHƯA import → TRẢ claim cho lane/loop sau thử. Quá 3 lần (lane này) → bỏ hẳn SP.
+                        _claim?.Release(key);
+                        var fails = (_failCounts.TryGetValue(key, out var f) ? f : 0) + 1;
+                        _failCounts[key] = fails;
+                        if (fails >= 3) { _doneKeys.Add(key); _log($"Bỏ qua SP lỗi {fails} lần: {shortName} ({ex.Message})"); }
+                        else _log($"Import lỗi (lần {fails}/3), để SP lại thử sau: {ex.Message}");
+                    }
+                    if (IsTransientNavigationError(ex)) await DelayAsync(3000, cancellationToken);
+                    else await DelayAsync(1500, cancellationToken);
                     await BigSellerCrawlHelper.GoToCrawlPageAsync(page, forceReload: true, targetUrl: crawlUrl, log: _log);
                     await SelectSourceTabIfNeededAsync(page, cancellationToken);
                     continue;
                 }
 
-                await ImportClaimedRowWithRetryAsync(page, _laneIndex, crawlUrl, cancellationToken);
+                _doneKeys.Add(key);   // xong → giữ claim + đánh dấu (phòng SP chưa kịp bị gỡ thì lane này vẫn bỏ qua)
                 importCount++;
-                _log($"Đã Import to Stores #{importCount}.");
-                await DelayAsync(2000, cancellationToken);
-                await BigSellerCrawlHelper.DismissPostImportDialogsAsync(page, _log);
-                if (await RemoveClaimedImportRowAsync(page, _laneIndex))
-                    _log("Đã xóa dòng vừa import khỏi bảng hiện tại.");
+                _log($"Đã Import to Stores (#{importCount}) - không vào Hộp nháp.");
+
                 await DelayAsync(1500, cancellationToken);
-                continue;
+                await BigSellerCrawlHelper.DismissPostImportDialogsAsync(page, _log);
+                // Ở LẠI trang hiện tại import SP kế — KHÔNG reload về trang 1. SP vừa import đã bị BigSeller gỡ
+                // (và đã vào done/claim) nên vòng sau quét lại tự lấy SP tiếp trên trang này; trang này hết thì
+                // nhánh pick==null sẽ sang trang sau. Tránh kẹt trang 1 + đỡ churn full-reload mỗi lần import.
+                await DelayAsync(700, cancellationToken);
             }
-
-            // ── CRAWL LIST (mặc định): HÀNG ĐỢI claim theo KEY ổn định → N lane lấy SP KHÁC nhau ──
-            List<(string Key, string Name)> rows;
-            try { rows = await GetImportableRowsAsync(page); }
-            catch (Exception ex) when (IsTransientNavigationError(ex))
-            {
-                _log($"Trang đang reload/đổi ngôn ngữ, thử lại: {ex.Message}");
-                await DelayAsync(3000, cancellationToken);
-                continue;
-            }
-            _log($"Crawl List có {rows.Count} sản phẩm có nút Import.");
-
-            // Lấy SP ĐẦU TIÊN: chưa lane này làm xong (_doneKeys) & chưa lane nào nhận (TryClaim).
-            // TryClaim thành công ở đây = lane này "đặt gạch" SP đó → các lane khác bỏ qua.
-            (string Key, string Name)? pick = null;
-            foreach (var r in rows)
-            {
-                if (string.IsNullOrEmpty(r.Key) || _doneKeys.Contains(r.Key)) continue;
-                if (_claim is not null && !_claim.TryClaim(r.Key)) continue;   // lane khác đang/đã nhận
-                pick = r;
-                break;
-            }
-
-            if (pick is null)
-            {
-                // Trang HIỆN TẠI hết SP để nhận (đã import & BigSeller gỡ đi / hoặc lane khác đang giữ). SP còn
-                // lại nằm ở TRANG SAU → phải phân trang để tới; TUYỆT ĐỐI không reload về trang 1 ở đây, vì
-                // trang 1 đã cạn còn trang 2+ vẫn còn SP → reload trang 1 rỗng = kẹt = "chạy 1 lúc rồi đơ".
-                // Hết sạch trang mới đợi + về trang 1 (đón SP crawl mới / lane khác nhả claim do lỗi tạm).
-                if (await BigSellerCrawlHelper.ClickNextCrawlPageAsync(page, _log))
-                {
-                    await DelayAsync(1000, cancellationToken);
-                    continue;
-                }
-                _log($"Lane #{_laneIndex + 1} đã duyệt hết các trang Crawl List. Đợi {_settings.ListingReloadSeconds}s rồi về trang 1…");
-                await DelayAsync(TimeSpan.FromSeconds(Math.Max(3, _settings.ListingReloadSeconds)), cancellationToken);
-                await BigSellerCrawlHelper.GoToCrawlPageAsync(page, forceReload: true, targetUrl: crawlUrl, log: _log);
-                continue;
-            }
-
-            var key = pick.Value.Key;
-            var name = string.IsNullOrWhiteSpace(pick.Value.Name) ? "(không tên)" : pick.Value.Name;
-            var shortName = name.Length > 50 ? name[..50] + "..." : name;
-            _log($"[SP #{importCount + 1}] {shortName}");
-            _log("Click Import to Stores...");
-
-            // committed = true NGAY TRƯỚC khi bấm nút "Import to Stores" (mốc commit). Lỗi SAU mốc này
-            // (thường do trang điều hướng làm mất context) nghĩa là click ĐÃ gửi lên server → KHÔNG được
-            // import lại (sẽ TRÙNG). Lỗi TRƯỚC mốc (mở/chọn modal) thì AN TOÀN để trả claim & thử lại.
-            var committed = false;
-            try
-            {
-                try { await ClickImportRowByKeyAsync(page, key); }
-                catch { await ClickImportRowByKeyAsync(page, key); }
-
-                var modal = page.Locator(".ant-modal-content:visible").Last;
-                await modal.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 20000 });
-                await SelectImportShopAndConfirmAsync(modal, _settings.ShopName, () => committed = true);
-            }
-            catch (OperationCanceledException) { throw; }
+            catch (OperationCanceledException) { throw; }   // Stop / cancel → thoát sạch
             catch (Exception ex)
             {
-                // Đã BẤM Import (committed) RỒI gặp lỗi ĐIỀU HƯỚNG/mất-context = click hầu như chắc chắn ĐÃ
-                // tới server (import xong khiến trang reload) → coi như XONG, KHÔNG làm lại (tránh trùng).
-                if (committed && IsTransientNavigationError(ex))
+                consecutiveErrors++;
+                _log($"⚠ Lỗi vòng lặp ({consecutiveErrors}/{maxConsecutiveErrors}) — giữ phiên, thử hồi phục rồi chạy tiếp: {ex.Message}");
+                if (consecutiveErrors >= maxConsecutiveErrors)
                 {
-                    _doneKeys.Add(key);
-                    importCount++;
-                    _log($"Import đã gửi (#{importCount}) — trang điều hướng làm mất context, không làm lại tránh trùng.");
-                    await BigSellerCrawlHelper.DismissPostImportDialogsAsync(page, _log);
+                    _log($"✖ Quá {maxConsecutiveErrors} lỗi liên tiếp không đọc nổi danh sách — dừng phiên. Lỗi cuối: {ex.Message}");
+                    throw;
                 }
-                else
-                {
-                    // Lỗi TRƯỚC khi gửi (chưa mở/chọn được modal, nút chưa kịp bấm, timeout không-điều-hướng)
-                    // → SP CHƯA import → TRẢ claim cho lane/loop sau thử. Quá 3 lần (lane này) → bỏ hẳn SP.
-                    _claim?.Release(key);
-                    var fails = (_failCounts.TryGetValue(key, out var f) ? f : 0) + 1;
-                    _failCounts[key] = fails;
-                    if (fails >= 3) { _doneKeys.Add(key); _log($"Bỏ qua SP lỗi {fails} lần: {shortName} ({ex.Message})"); }
-                    else _log($"Import lỗi (lần {fails}/3), để SP lại thử sau: {ex.Message}");
-                }
-                if (IsTransientNavigationError(ex)) await DelayAsync(3000, cancellationToken);
-                else await DelayAsync(1500, cancellationToken);
-                await BigSellerCrawlHelper.GoToCrawlPageAsync(page, forceReload: true, targetUrl: crawlUrl, log: _log);
-                await SelectSourceTabIfNeededAsync(page, cancellationToken);
-                continue;
+                try { page = await RecoverPageAsync(page, crawlUrl, cancellationToken).ConfigureAwait(false); }
+                catch (OperationCanceledException) { throw; }
+                catch (Exception rex) { _log($"  (chưa hồi phục được tab/CDP lần này: {rex.Message})"); }
+                await DelayAsync(3000, cancellationToken);
             }
-
-            _doneKeys.Add(key);   // xong → giữ claim + đánh dấu (phòng SP chưa kịp bị gỡ thì lane này vẫn bỏ qua)
-            importCount++;
-            _log($"Đã Import to Stores (#{importCount}) - không vào Hộp nháp.");
-
-            await DelayAsync(1500, cancellationToken);
-            await BigSellerCrawlHelper.DismissPostImportDialogsAsync(page, _log);
-            // Ở LẠI trang hiện tại import SP kế — KHÔNG reload về trang 1. SP vừa import đã bị BigSeller gỡ
-            // (và đã vào done/claim) nên vòng sau quét lại tự lấy SP tiếp trên trang này; trang này hết thì
-            // nhánh pick==null sẽ sang trang sau. Tránh kẹt trang 1 + đỡ churn full-reload mỗi lần import.
-            await DelayAsync(700, cancellationToken);
         }
+    }
+
+    // Kết nối Playwright sang Brave qua CDP (tạo Playwright nếu chưa có; dọn browser cũ nếu đang rớt).
+    private async Task ConnectBrowserAsync(CancellationToken ct)
+    {
+        _playwright ??= await Playwright.CreateAsync();
+        if (_browser is not null)
+        {
+            try { await _browser.DisposeAsync(); } catch { }
+            _browser = null;
+        }
+        for (var attempt = 0; attempt < 5; attempt++)
+        {
+            ct.ThrowIfCancellationRequested();
+            try
+            {
+                _browser = await _playwright.Chromium.ConnectOverCDPAsync(
+                    $"http://127.0.0.1:{_settings.DebugPort}",
+                    new() { Timeout = 30000 });
+                return;
+            }
+            catch
+            {
+                await DelayAsync(3000, ct);
+            }
+        }
+        throw new InvalidOperationException(
+            "Không kết nối được Brave qua CDP. Kiểm tra BigSeller profile đã đăng nhập chưa.");
+    }
+
+    // Brave chết hẳn (tab crash/OOM/đóng) → khởi động lại Brave cùng profile (phiên login bền trên đĩa),
+    // chờ CDP rồi kết nối lại. Dùng khi vòng lặp gặp lỗi mà tiến trình Brave đã thoát.
+    private async Task RestartBrowserAsync(CancellationToken ct)
+    {
+        if (_browser is not null)
+        {
+            try { await _browser.DisposeAsync(); } catch { }
+            _browser = null;
+        }
+        if (_braveProcess is not null)
+        {
+            try { if (!_braveProcess.HasExited) _braveProcess.Kill(entireProcessTree: true); } catch { }
+            try { _braveProcess.Dispose(); } catch { }
+            _braveProcess = null;
+        }
+
+        StartBraveForBigSeller();
+        _log($"  Đã khởi động lại Brave PID={_braveProcess?.Id.ToString() ?? "unknown"}, chờ CDP port {_settings.DebugPort}…");
+        if (!await new CdpClient(_settings.DebugPort).WaitForReadyAsync(
+                attempts: 30, delayMs: 500, cancellationToken: ct).ConfigureAwait(false))
+            throw new InvalidOperationException(
+                $"CDP port {_settings.DebugPort} không sẵn sàng sau khi khởi động lại Brave.");
+
+        await ConnectBrowserAsync(ct).ConfigureAwait(false);
+    }
+
+    // Hồi phục sau lỗi vòng lặp: Brave chết → khởi động lại; rớt CDP → kết nối lại; tab chết → mở/tìm lại
+    // tab BigSeller. Trả về 1 page sống đang ở Crawl List để vòng lặp chạy tiếp.
+    private async Task<IPage> RecoverPageAsync(IPage current, string crawlUrl, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        if (_braveProcess is null || _braveProcess.HasExited)
+        {
+            _log("  Brave đã thoát — khởi động lại…");
+            await RestartBrowserAsync(ct).ConfigureAwait(false);
+        }
+        else if (_browser is null || !_browser.IsConnected)
+        {
+            _log("  Mất kết nối CDP — kết nối lại…");
+            await ConnectBrowserAsync(ct).ConfigureAwait(false);
+        }
+
+        var context = _browser!.Contexts.FirstOrDefault()
+            ?? throw new InvalidOperationException("Brave chưa có context sau khi hồi phục.");
+        var page = await FindBigSellerPageAsync(context, ct).ConfigureAwait(false);
+        if (page is null || page.IsClosed)
+            page = await context.NewPageAsync().ConfigureAwait(false);
+
+        await page.BringToFrontAsync().ConfigureAwait(false);
+        await BigSellerCrawlHelper.GoToCrawlPageAsync(page, forceReload: true, targetUrl: crawlUrl, log: _log).ConfigureAwait(false);
+        await SelectSourceTabIfNeededAsync(page, ct).ConfigureAwait(false);
+        _log("  ✓ Đã hồi phục tab BigSeller — chạy tiếp.");
+        return page;
     }
 
     private async Task SelectSourceTabIfNeededAsync(IPage page, CancellationToken cancellationToken)
