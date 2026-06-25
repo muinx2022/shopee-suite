@@ -746,7 +746,9 @@ internal sealed class BraveInstanceSession : IDisposable
                     await TryStopRunnerBeforeBraveExitAsync(timeout.Token).ConfigureAwait(false);
                     await Task.Delay(350, CancellationToken.None).ConfigureAwait(false);
                 }
-                await SyncExtensionProgressAsync(silent: true, cancellationToken).ConfigureAwait(false);
+                // timeout.Token (KHÔNG phải cancellationToken=None) — bound luôn bước sync tiến độ vào 5s để
+                // StopAsync không kéo dài nếu CDP chậm; sync chỉ là best-effort trước khi đóng Brave.
+                await SyncExtensionProgressAsync(silent: true, timeout.Token).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -850,6 +852,9 @@ internal sealed class BraveInstanceSession : IDisposable
 
     private void KillBraveProcess(int maxWaitMs = 1500)
     {
+        // Brave sắp chết → đóng kết nối CDP DÙNG CHUNG của port (WS cũ chết theo); lần dùng sau hub tự
+        // nối lại tới Brave mới. Best-effort, không chặn.
+        if (_cdpPort > 0) PortCdpHub.For(_cdpPort).ResetSoon();
         // Giết tiến trình stub mà launcher giữ tham chiếu (nếu còn).
         if (_braveProcess is not null)
         {
@@ -1179,8 +1184,21 @@ internal sealed class BraveInstanceSession : IDisposable
     }
 
     /// <summary>Mở lại profile đang sống (warm restart) — wrapper gọn cho <see cref="BringUpProfileAsync"/>.</summary>
-    private Task RelaunchProfileAsync(string? proxyServer, string? proxyFingerprint) =>
-        BringUpProfileAsync(proxyServer, proxyFingerprint, ensureProfile: false);
+    // PHANH RELAUNCH TOÀN APP. Khi NHIỀU cửa sổ mất SW cùng lúc (đoạn sau), nếu để tất cả relaunch
+    // (Kill + mở lại Brave + cold-start SW + churn WS/popup) ĐỒNG THỜI → bùng tài nguyên = "brave chạy mất
+    // kiểm soát, máy đơ" (đúng triệu chứng: CHỈ đơ lúc không scrape được, không phải lúc chạy thường).
+    // Gate này cho tối đa 2 relaunch một lúc trên TOÀN app → hệ thống hồi TỪ TỐN, không thundering herd.
+    // (WarmupGate chỉ chặn cold-start SW, KHÔNG chặn phần Kill+relaunch nặng.) CHỈ áp cho relaunch — lần
+    // mở đầu đi thẳng BringUpProfileAsync (đã có LaunchStagger) nên không bị gate này serialize.
+    private static readonly SemaphoreSlim RelaunchGate = new(2, 2);
+
+    private async Task RelaunchProfileAsync(string? proxyServer, string? proxyFingerprint)
+    {
+        // Chờ có giới hạn 2': cổng kẹt lâu bất thường thì cứ relaunch để KHÔNG treo teardown/Stop.
+        var got = await RelaunchGate.WaitAsync(TimeSpan.FromMinutes(2)).ConfigureAwait(false);
+        try { await BringUpProfileAsync(proxyServer, proxyFingerprint, ensureProfile: false).ConfigureAwait(false); }
+        finally { if (got) RelaunchGate.Release(); }
+    }
 
     private async Task RestartProfileForExtensionErrorAsync()
     {
@@ -1320,7 +1338,7 @@ internal sealed class BraveInstanceSession : IDisposable
                 // Khi runner đang chạy: KHÔNG để monitor mở lại profile vì proxy thủ công cố định —
                 // mở lại cũng dính cùng proxy chết → kẹt "đang mở link X/Y → reload" lặp vô hạn.
                 // Để runner tự phát hiện proxyError ở bước scrape rồi tạm dừng (handoff) — sạch hơn.
-                if (await HasChromeProxyErrorPageAsync().ConfigureAwait(false) && !_runnerLoopActive)
+                if (!_runnerLoopActive && await HasChromeProxyErrorPageAsync().ConfigureAwait(false))
                 {
                     _restarting = true;
                     Log("Phát hiện ERR_PROXY/No internet - tự khởi động lại profile...");
@@ -1364,7 +1382,7 @@ internal sealed class BraveInstanceSession : IDisposable
             // Trường hợp này user đang phải Đóng profile → Mở lại thủ công. Tự động làm tương tự.
             // Runner đang chạy → để bước scrape tự bắt proxyError và handoff sang profile khác (proxy mới).
             // Monitor mở lại ở đây sẽ huỷ scrape đang chạy + dùng lại proxy cũ → vòng reload cùng một dòng.
-            if (await HasChromeProxyErrorPageAsync().ConfigureAwait(false) && !_runnerLoopActive)
+            if (!_runnerLoopActive && await HasChromeProxyErrorPageAsync().ConfigureAwait(false))
             {
                 _restarting = true;
                 taskRunDispatched = true;

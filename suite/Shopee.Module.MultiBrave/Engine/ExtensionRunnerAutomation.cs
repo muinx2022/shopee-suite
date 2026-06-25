@@ -1257,8 +1257,10 @@ internal static class ExtensionRunnerAutomation
         // SW chết, không ai dựng lại → link kế bị SW_NO_RESPONSE / mất hook (treo ~14 phút). Nay loop
         // tới khi runner dừng (ct hủy).
         var firstAttach = true;
+        var hub = PortCdpHub.For(cdpPort);   // kết nối browser DÙNG CHUNG của port (không mở WS mới mỗi vòng)
         while (!ct.IsCancellationRequested)
         {
+            string? sess = null;
             try
             {
                 await Task.Delay(300, ct).ConfigureAwait(false);
@@ -1267,21 +1269,13 @@ internal static class ExtensionRunnerAutomation
 
                 if (firstAttach)
                     log($"SW pinner: attach flat session tới target {swId[..Math.Min(swId.Length, 16)]}…");
-                using var browser = await ConnectBrowserWebSocketAsync(cdpPort, ct).ConfigureAwait(false);
 
-                var attach = await SendCdpAsync(browser, 1, "Target.attachToTarget", new
-                {
-                    targetId = swId,
-                    flatten = true,
-                }, ct).ConfigureAwait(false);
-
-                if (!attach.TryGetProperty("sessionId", out var sessEl)) continue;
-                var sess = sessEl.GetString();
+                // Gắn flat-session SW qua hub (tái dùng kết nối; SW recycle chỉ re-attach, KHÔNG mở WS mới).
+                sess = await hub.AttachAsync(swId, ct).ConfigureAwait(false);
                 if (string.IsNullOrWhiteSpace(sess)) continue;
 
                 // Bật Runtime trên session của SW để có thể evaluate giữ SW bận.
-                try { await SendCdpAsync(browser, 2, "Runtime.enable", null, ct, sess).ConfigureAwait(false); }
-                catch { }
+                try { await hub.SendAsync("Runtime.enable", null, sess, ct).ConfigureAwait(false); } catch { }
 
                 if (firstAttach)
                 {
@@ -1289,26 +1283,28 @@ internal static class ExtensionRunnerAutomation
                     firstAttach = false;
                 }
 
-                // QUAN TRỌNG: chạy code THẬT bên trong SW mỗi 15s. Chỉ giữ WebSocket mở (Target.getTargets
-                // trên session browser) KHÔNG reset bộ đếm idle ~30s của MV3 service worker → SW vẫn chết.
-                // Evaluate trong context SW mới tính là "hoạt động" và reset idle timer, giữ SW sống thật.
-                var keepAliveId = 100;
-                while (!ct.IsCancellationRequested && browser.State == WebSocketState.Open)
+                // QUAN TRỌNG: chạy code THẬT bên trong SW mỗi 15s. Evaluate trong context SW mới tính là
+                // "hoạt động" và reset bộ đếm idle ~30s của MV3 → giữ SW sống thật. Nếu evaluate ném (SW bị
+                // recycle / session chết / Brave relaunch) → thoát vòng trong, vòng ngoài tự attach lại (hub
+                // tự nối lại tới Brave mới nếu cần).
+                while (!ct.IsCancellationRequested)
                 {
                     await Task.Delay(15_000, ct).ConfigureAwait(false);
-                    if (browser.State != WebSocketState.Open)
-                        break;
-
-                    // Nếu evaluate ném (SW đã bị recycle / session chết) → thoát vòng trong để attach lại.
-                    await SendCdpAsync(browser, keepAliveId++, "Runtime.evaluate", new
-                    {
-                        expression = "true",
-                        returnByValue = true,
-                    }, ct, sess).ConfigureAwait(false);
+                    await hub.SendAsync("Runtime.evaluate", new { expression = "true", returnByValue = true }, sess, ct)
+                        .ConfigureAwait(false);
                 }
             }
             catch (OperationCanceledException) { break; }
             catch { /* SW bị recycle hoặc Brave bận — vòng while sẽ tìm & attach lại */ }
+            finally
+            {
+                // BẮT BUỘC: nhả session SW của vòng này TRƯỚC khi vòng ngoài attach session mới. Không detach
+                // thì mỗi SW recycle/relaunch lại để lại 1 session mồ côi trên kết nối DÙNG CHUNG → tích tụ
+                // dần (hàng chục session sau vài giờ) → nghẽn multiplex → cửa sổ đứng im "Đã dừng". Best-effort;
+                // kết nối đã chết thì detach fail vô hại (Brave tự bỏ session theo target đã huỷ).
+                if (!string.IsNullOrWhiteSpace(sess))
+                    try { await hub.SendAsync("Target.detachFromTarget", new { sessionId = sess }, null, CancellationToken.None).ConfigureAwait(false); } catch { }
+            }
         }
 
         log("SW pinner: dừng giữ SW (runner kết thúc).");
@@ -1376,115 +1372,31 @@ internal static class ExtensionRunnerAutomation
         CancellationToken ct,
         TimeSpan? receiveTimeoutOverride = null)
     {
-        // Approach 1: dùng /json/list → webSocketDebuggerUrl trực tiếp
-        // (hoạt động khi không có SW pinner đang giữ kết nối)
+        // Tìm SW target qua /json/list (HTTP nhẹ; Brave không trả SW qua Target.getTargets).
+        string? swTargetId;
+        try { swTargetId = await GetSwTargetIdFromListAsync(cdpPort, extensionId, ct); }
+        catch { return null; }
+        if (string.IsNullOrWhiteSpace(swTargetId))
+            return null;
+
+        // Gắn flat-session SW qua kết nối DÙNG CHUNG của port (KHÔNG mở WebSocket mới mỗi eval — đây CHÍNH
+        // là chỗ cắt churn lớn nhất, nguồn cạn cổng CDP làm SW câm "đoạn sau"). Mỗi eval: attach → evaluate
+        // → DETACH (để session không tích tụ trên kết nối). Brave relaunch / SW recycle → hub tự nối/attach lại.
+        var hub = PortCdpHub.For(cdpPort);
+        // 20s khớp timeout eval cũ (CdpEvaluateReceiveTimeout) — 30s làm stopRun/eval chậm hơn cần thiết khi
+        // SW câm; ReadLoop-fix đã khiến kết nối chết fail-fast nên không cần nới rộng.
+        var timeoutMs = (int)(receiveTimeoutOverride?.TotalMilliseconds ?? 20_000);
+        string? sess = null;
         try
         {
-            var swWsUrl = await GetSwDebuggerUrlFromListAsync(cdpPort, extensionId, ct);
-            if (!string.IsNullOrWhiteSpace(swWsUrl))
-            {
-                using var swSocket = new ClientWebSocket();
-                await swSocket.ConnectAsync(new Uri(swWsUrl), ct);
-                await SendCdpAsync(swSocket, 1, "Runtime.enable", null, ct);
-                return await SendCdpAsync(swSocket, 2, "Runtime.evaluate", new
-                {
-                    expression,
-                    awaitPromise = true,
-                    returnByValue = true,
-                }, ct, receiveTimeoutOverride: receiveTimeoutOverride);
-            }
-        }
-        catch { }
-
-        // Approach 2: dùng /json/list id → Target.attachToTarget qua browser WS (flat session)
-        // Hoạt động khi SW pinner đang giữ kết nối trực tiếp — flat session là độc lập, không conflict.
-        try
-        {
-            var swTargetId = await GetSwTargetIdFromListAsync(cdpPort, extensionId, ct);
-            if (!string.IsNullOrWhiteSpace(swTargetId))
-            {
-                using var browserWs = await ConnectBrowserWebSocketAsync(cdpPort, ct);
-                var attach = await SendCdpAsync(browserWs, 21, "Target.attachToTarget", new
-                {
-                    targetId = swTargetId,
-                    flatten = true,
-                }, ct);
-                if (attach.TryGetProperty("sessionId", out var sessEl))
-                {
-                    var sess = sessEl.GetString();
-                    if (!string.IsNullOrWhiteSpace(sess))
-                    {
-                        await SendCdpAsync(browserWs, 22, "Runtime.enable", null, ct, sess);
-                        return await SendCdpAsync(browserWs, 23, "Runtime.evaluate", new
-                        {
-                            expression,
-                            awaitPromise = true,
-                            returnByValue = true,
-                        }, ct, sess, receiveTimeoutOverride);
-                    }
-                }
-            }
-        }
-        catch { }
-
-        // Approach 3: Target.getTargets + attachToTarget (Chrome standard, không hoạt động trong Brave)
-        ClientWebSocket? browser = null;
-        try
-        {
-            browser = await ConnectBrowserWebSocketAsync(cdpPort, ct);
-            var targets = await SendCdpAsync(browser, 20, "Target.getTargets", new { }, ct);
-            if (!targets.TryGetProperty("targetInfos", out var targetInfos))
+            sess = await hub.AttachAsync(swTargetId, ct).ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(sess))
                 return null;
-
-            string? targetId = null;
-            var fallbackTargets = new List<string>();
-            foreach (var target in targetInfos.EnumerateArray())
-            {
-                var type = target.TryGetProperty("type", out var typeEl) ? typeEl.GetString() ?? "" : "";
-                var url = target.TryGetProperty("url", out var urlEl) ? urlEl.GetString() ?? "" : "";
-                if (!string.Equals(type, "service_worker", StringComparison.OrdinalIgnoreCase) ||
-                    !url.StartsWith("chrome-extension://", StringComparison.OrdinalIgnoreCase))
-                    continue;
-
-                if (!target.TryGetProperty("targetId", out var targetIdEl))
-                    continue;
-
-                var id = targetIdEl.GetString();
-                if (string.IsNullOrWhiteSpace(id))
-                    continue;
-
-                if (url.Contains(extensionId, StringComparison.OrdinalIgnoreCase))
-                {
-                    targetId = id;
-                    break;
-                }
-
-                fallbackTargets.Add(id);
-            }
-
-            targetId ??= fallbackTargets.FirstOrDefault();
-            if (string.IsNullOrWhiteSpace(targetId))
-                return null;
-
-            var attach = await SendCdpAsync(browser, 21, "Target.attachToTarget", new
-            {
-                targetId,
-                flatten = true,
-            }, ct);
-            if (!attach.TryGetProperty("sessionId", out var sessionEl))
-                return null;
-
-            var sessionId = sessionEl.GetString();
-            if (string.IsNullOrWhiteSpace(sessionId))
-                return null;
-
-            await SendCdpAsync(browser, 22, "Runtime.enable", null, ct, sessionId);
-            return await SendCdpAsync(browser, 23, "Runtime.evaluate", new
-            {
-                expression,
-                awaitPromise = true,
-                returnByValue = true,
-            }, ct, sessionId);
+            try { await hub.SendAsync("Runtime.enable", null, sess, ct).ConfigureAwait(false); } catch { }
+            return await hub.SendAsync(
+                "Runtime.evaluate",
+                new { expression, awaitPromise = true, returnByValue = true },
+                sess, ct, timeoutMs).ConfigureAwait(false);
         }
         catch
         {
@@ -1492,20 +1404,9 @@ internal static class ExtensionRunnerAutomation
         }
         finally
         {
-            if (browser is not null)
-            {
-                try
-                {
-                    if (browser.State == WebSocketState.Open)
-                        await browser.CloseAsync(WebSocketCloseStatus.NormalClosure, "", ct);
-                }
-                catch
-                {
-                    // ignore
-                }
-
-                browser.Dispose();
-            }
+            // Nhả session (không đóng kết nối) — tránh tích tụ session trên kết nối dùng chung.
+            if (!string.IsNullOrWhiteSpace(sess))
+                try { await hub.SendAsync("Target.detachFromTarget", new { sessionId = sess }, null, CancellationToken.None).ConfigureAwait(false); } catch { }
         }
     }
 

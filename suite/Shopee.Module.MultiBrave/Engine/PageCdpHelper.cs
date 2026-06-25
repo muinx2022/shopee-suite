@@ -44,7 +44,37 @@ internal static class PageCdpHelper
               }
             });
           };
-          for (const video of Array.from(document.querySelectorAll("video"))) {
+          // ── CHỈ tải video SẢN PHẨM; KHÔNG tải video trong phần đánh giá/bình luận của người mua ──
+          // Dấu hiệu CÓ video sản phẩm: dải thumbnail gallery (.airUhU) có icon "play video"
+          // (img[alt="icon video play"] / img.NYFAyb). Không có icon đó = sản phẩm KHÔNG có video → bỏ qua,
+          // không tải nhầm video review (trước đây quét cả trang nên SP không video vẫn tải video bình luận).
+          const ICON = 'img[alt="icon video play"], img.NYFAyb';
+          const strip = document.querySelector('.airUhU');
+          let hasProductVideo = false;
+          let scopeRoot = null;
+          if (strip) {
+            hasProductVideo = !!strip.querySelector(ICON);
+            // Thu hẹp về CỤM GALLERY: tổ tiên gần nhất của .airUhU có chứa <video> (loại video ở khu review).
+            let r = strip;
+            for (let i = 0; i < 8 && r && r.parentElement; i++) {
+              if (r.querySelector('video')) break;
+              r = r.parentElement;
+            }
+            scopeRoot = (r && r.querySelector('video')) ? r : (strip.parentElement || strip);
+          } else {
+            // .airUhU đổi class → dựa vào icon play ở NỬA TRÊN trang (gallery), bỏ icon ở khu review phía dưới.
+            const half = (document.documentElement.scrollHeight || 0) * 0.5;
+            const icon = Array.from(document.querySelectorAll(ICON)).find((el) => {
+              const b = el.getBoundingClientRect();
+              return (b.top + (window.scrollY || 0)) < half;
+            });
+            hasProductVideo = !!icon;
+            scopeRoot = icon ? (icon.closest('[class]') || document.body) : null;
+          }
+          if (!hasProductVideo) return [];   // KHÔNG có video sản phẩm → KHÔNG tải gì
+
+          const root = scopeRoot || document;
+          for (const video of Array.from(root.querySelectorAll("video"))) {
             const urls = new Set();
             for (const value of [
               video.currentSrc, video.src, video.getAttribute("src"),
@@ -63,29 +93,32 @@ internal static class PageCdpHelper
             }
           }
 
-          // Fallback 1: lấy từ Performance entries (mp4/m3u8)
-          try {
-            const entries = performance.getEntriesByType("resource") || [];
-            for (const e of entries) {
-              const name = e && typeof e.name === "string" ? e.name : "";
-              if (!name) continue;
-              if (/\.mp4(\?|#|$)/i.test(name) || /\.m3u8(\?|#|$)/i.test(name) || /video/i.test(name)) {
-                addUrl(name, null, "perf");
+          // Fallback CHỈ chạy khi ĐÃ xác nhận có video sản phẩm nhưng <video> trong gallery chưa lộ URL (lazy).
+          // Vẫn ưu tiên URL .mp4/.m3u8 (bỏ điều kiện /video/ quá rộng) để tránh bắt nhầm tài nguyên khác.
+          if (candidates.length === 0) {
+            try {
+              const entries = performance.getEntriesByType("resource") || [];
+              for (const e of entries) {
+                const name = e && typeof e.name === "string" ? e.name : "";
+                if (!name) continue;
+                if (/\.mp4(\?|#|$)/i.test(name) || /\.m3u8(\?|#|$)/i.test(name)) {
+                  addUrl(name, null, "perf");
+                }
               }
-            }
-          } catch (_) {}
-
-          // Fallback 2: quét script JSON/text để tìm mp4/m3u8 (Shopee thường nhúng URL video)
-          try {
-            const scripts = Array.from(document.scripts || []);
-            const rx = /(https?:\/\/[^\s"'\\]+?\.(?:mp4|m3u8)(?:\?[^\s"'\\]*)?)/ig;
-            for (const s of scripts) {
-              const text = (s && (s.textContent || s.innerText)) || "";
-              if (!text || text.length < 20) continue;
-              let m;
-              while ((m = rx.exec(text)) !== null) addUrl(m[1], null, "script");
-            }
-          } catch (_) {}
+            } catch (_) {}
+          }
+          if (candidates.length === 0) {
+            try {
+              const scripts = Array.from(document.scripts || []);
+              const rx = /(https?:\/\/[^\s"'\\]+?\.(?:mp4|m3u8)(?:\?[^\s"'\\]*)?)/ig;
+              for (const s of scripts) {
+                const text = (s && (s.textContent || s.innerText)) || "";
+                if (!text || text.length < 20) continue;
+                let m;
+                while ((m = rx.exec(text)) !== null) addUrl(m[1], null, "script");
+              }
+            } catch (_) {}
+          }
 
           return candidates;
         })()
@@ -118,17 +151,25 @@ internal static class PageCdpHelper
     {
         try
         {
-            var wsUrl = await FindWorkPageWsUrlAsync(cdpPort, pageUrlHint, cancellationToken);
-            if (wsUrl is null)
+            var targetId = await FindWorkPageTargetIdAsync(cdpPort, pageUrlHint, cancellationToken);
+            if (targetId is null)
                 return;
 
-            using var socket = new ClientWebSocket();
-            await socket.ConnectAsync(new Uri(wsUrl), cancellationToken);
-            await SendCdpAsync(socket, 1, "Runtime.evaluate", new
+            // Cuộn giả lập qua flat-session trên kết nối DÙNG CHUNG (không mở WS mới mỗi nhịp ~12-35s).
+            var hub = PortCdpHub.For(cdpPort);
+            string? sess = null;
+            try
             {
-                expression = HumanBrowseJs,
-                returnByValue = true,
-            }, cancellationToken);
+                sess = await hub.AttachAsync(targetId, cancellationToken);
+                if (string.IsNullOrWhiteSpace(sess))
+                    return;
+                await hub.SendAsync("Runtime.evaluate", new { expression = HumanBrowseJs, returnByValue = true }, sess, cancellationToken);
+            }
+            finally
+            {
+                if (!string.IsNullOrWhiteSpace(sess))
+                    try { await hub.SendAsync("Target.detachFromTarget", new { sessionId = sess }, null, CancellationToken.None); } catch { }
+            }
         }
         catch
         {
@@ -136,8 +177,8 @@ internal static class PageCdpHelper
         }
     }
 
-    /// <summary>Chọn ws của tab "làm việc" khớp hint nhất (ưu tiên đúng URL, rồi shopee), bỏ chrome/extension.</summary>
-    private static async Task<string?> FindWorkPageWsUrlAsync(
+    /// <summary>Chọn TARGET ID của tab "làm việc" khớp hint nhất (ưu tiên đúng URL, rồi shopee), bỏ chrome/extension.</summary>
+    private static async Task<string?> FindWorkPageTargetIdAsync(
         int cdpPort, string pageUrlHint, CancellationToken cancellationToken)
     {
         using var response = await AppServices.DirectHttp.GetAsync(
@@ -147,7 +188,7 @@ internal static class PageCdpHelper
 
         using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
         var hint = (pageUrlHint ?? "").Trim();
-        var pages = new List<(string url, string wsUrl)>();
+        var pages = new List<(string url, string id)>();
         foreach (var item in doc.RootElement.EnumerateArray())
         {
             var type = item.TryGetProperty("type", out var t) ? t.GetString() : "";
@@ -158,11 +199,11 @@ internal static class PageCdpHelper
                 url.StartsWith("chrome://", StringComparison.OrdinalIgnoreCase) ||
                 url.StartsWith("chrome-extension://", StringComparison.OrdinalIgnoreCase))
                 continue;
-            if (!item.TryGetProperty("webSocketDebuggerUrl", out var ws))
+            if (!item.TryGetProperty("id", out var idEl))
                 continue;
-            var wsUrl = ws.GetString();
-            if (!string.IsNullOrWhiteSpace(wsUrl))
-                pages.Add((url, wsUrl!));
+            var id = idEl.GetString();
+            if (!string.IsNullOrWhiteSpace(id))
+                pages.Add((url, id!));
         }
 
         if (pages.Count == 0)
@@ -172,7 +213,7 @@ internal static class PageCdpHelper
             .OrderByDescending(p => !string.IsNullOrWhiteSpace(hint) &&
                                     p.url.Contains(hint, StringComparison.OrdinalIgnoreCase))
             .ThenByDescending(p => p.url.Contains("shopee", StringComparison.OrdinalIgnoreCase))
-            .First().wsUrl;
+            .First().id;
     }
 
     public static async Task<List<VideoCandidate>> CollectVideoCandidatesAsync(
@@ -218,7 +259,7 @@ internal static class PageCdpHelper
         using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
         var hint = (pageUrlHint ?? "").Trim();
 
-        var pages = new List<(string url, string wsUrl)>();
+        var pages = new List<(string url, string id)>();
         foreach (var item in doc.RootElement.EnumerateArray())
         {
             var type = item.TryGetProperty("type", out var t) ? t.GetString() : "";
@@ -232,12 +273,12 @@ internal static class PageCdpHelper
                 url.StartsWith("chrome-extension://", StringComparison.OrdinalIgnoreCase))
                 continue;
 
-            if (!item.TryGetProperty("webSocketDebuggerUrl", out var ws))
+            if (!item.TryGetProperty("id", out var idEl))
                 continue;
-            var wsUrl = ws.GetString();
-            if (string.IsNullOrWhiteSpace(wsUrl))
+            var id = idEl.GetString();
+            if (string.IsNullOrWhiteSpace(id))
                 continue;
-            pages.Add((url, wsUrl));
+            pages.Add((url, id));
         }
 
         if (pages.Count == 0)
@@ -268,21 +309,23 @@ internal static class PageCdpHelper
             .ThenByDescending(p => p.url.Contains("shopee", StringComparison.OrdinalIgnoreCase))
             .ToList();
 
+        var hub = PortCdpHub.For(cdpPort);
         JsonElement? best = null;
         var bestCount = -1;
 
-        foreach (var (_, wsUrl) in ordered)
+        foreach (var (_, targetId) in ordered)
         {
+            string? sess = null;
             try
             {
-                using var socket = new ClientWebSocket();
-                await socket.ConnectAsync(new Uri(wsUrl), cancellationToken);
-                var evalResult = await SendCdpAsync(socket, 1, "Runtime.evaluate", new
-                {
-                    expression,
-                    awaitPromise = true,
-                    returnByValue = true,
-                }, cancellationToken);
+                // Eval trên page qua flat-session trên kết nối DÙNG CHUNG (không mở WS mới mỗi lần).
+                sess = await hub.AttachAsync(targetId, cancellationToken);
+                if (string.IsNullOrWhiteSpace(sess))
+                    continue;
+                var evalResult = await hub.SendAsync(
+                    "Runtime.evaluate",
+                    new { expression, awaitPromise = true, returnByValue = true },
+                    sess, cancellationToken);
 
                 if (!evalResult.TryGetProperty("result", out var res) ||
                     !res.TryGetProperty("value", out var val))
@@ -302,18 +345,15 @@ internal static class PageCdpHelper
             {
                 // ignore từng page
             }
+            finally
+            {
+                if (!string.IsNullOrWhiteSpace(sess))
+                    try { await hub.SendAsync("Target.detachFromTarget", new { sessionId = sess }, null, CancellationToken.None); } catch { }
+            }
         }
 
         return best;
     }
-
-    private static Task<JsonElement> SendCdpAsync(
-        ClientWebSocket socket,
-        int id,
-        string method,
-        object? @params,
-        CancellationToken cancellationToken = default) =>
-        CdpClient.SendAsync(socket, id, method, @params);
 }
 
 internal sealed record VideoCandidate(string Url, double? Duration, string Label);

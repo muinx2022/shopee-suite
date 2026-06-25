@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text.Json;
 using Microsoft.Playwright;
+using Shopee.Core.BigSeller;
 
 namespace UpdateProduct;
 
@@ -20,6 +21,7 @@ internal sealed class BigSellerImportToStoreRunner : IAsyncDisposable
     private readonly int _laneCount;
     private readonly ClaimStore? _claim;
     private readonly bool _exportCookie;
+    private long _lastTokenWriteBackTick;   // throttle ghi-ngược muc_token định kỳ trong lúc chạy
     // SONG SONG (Crawl List): SP lane NÀY đã import xong / bỏ qua → không chọn lại; + đếm lỗi để bỏ SP hỏng.
     // Chống-trùng GIỮA các lane do _claim (ConcurrentDictionary dùng chung) lo; _doneKeys chỉ là cục bộ lane.
     private readonly HashSet<string> _doneKeys = new(StringComparer.Ordinal);
@@ -44,6 +46,27 @@ internal sealed class BigSellerImportToStoreRunner : IAsyncDisposable
         _laneCount = Math.Max(1, laneCount);
         _claim = claim;
         _exportCookie = exportCookie;
+    }
+
+    /// <summary>
+    /// Ghi NGƯỢC muc_token (server vừa xoay) ra file ĐỊNH KỲ trong lúc chạy — chỉ lane 0
+    /// (<see cref="_exportCookie"/>), throttle 90s. Bù đúng cái Update trước đây thiếu so với Scrape (chỉ
+    /// export đầu/cuối) → file thiu giữa chừng → import token cũ → BigSeller đá phiên. Engine cookie chung ở Core.
+    /// </summary>
+    private async Task MaybeWriteBackBigSellerTokenAsync(CancellationToken ct)
+    {
+        if (!_exportCookie || string.IsNullOrWhiteSpace(_settings.BigSellerCookieFile))
+            return;
+        var now = Environment.TickCount64;
+        if (now - _lastTokenWriteBackTick < 90_000)
+            return;
+        _lastTokenWriteBackTick = now;
+        try
+        {
+            await BigSellerCookieEngine.WriteBackLiveTokenAsync(
+                _settings.DebugPort, _settings.BigSellerCookieFile!, _log, ct).ConfigureAwait(false);
+        }
+        catch { /* best-effort */ }
     }
 
     public async Task RunAsync(CancellationToken cancellationToken)
@@ -143,6 +166,7 @@ internal sealed class BigSellerImportToStoreRunner : IAsyncDisposable
             try
             {
                 await WaitIfNotPausedAsync(cancellationToken).ConfigureAwait(false);
+                await MaybeWriteBackBigSellerTokenAsync(cancellationToken).ConfigureAwait(false);
                 _log("");
 
                 if (!await BigSellerCrawlHelper.GoToCrawlPageAsync(page, targetUrl: crawlUrl, log: _log))

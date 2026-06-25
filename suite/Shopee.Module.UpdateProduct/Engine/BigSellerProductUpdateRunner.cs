@@ -5,6 +5,7 @@ using System.Text.RegularExpressions;
 using ClosedXML.Excel;
 using Microsoft.Playwright;
 using Shopee.Core.Ai;
+using Shopee.Core.BigSeller;
 using Shopee.Core.Browser;
 
 namespace UpdateProduct;
@@ -144,6 +145,7 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
 
     private readonly ClaimStore? _claim;
     private readonly bool _exportCookie;
+    private long _lastTokenWriteBackTick;   // throttle ghi-ngược muc_token định kỳ trong lúc chạy
 
     public BigSellerProductUpdateRunner(
         BigSellerWorkflowSettings settings, Action<string> log, WorkflowPauseToken? pauseToken = null,
@@ -330,6 +332,7 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
                         break;
                     default:
                         await DelayAsync(800, ct);
+                        await MaybeWriteBackBigSellerTokenAsync(ct).ConfigureAwait(false);
                         break;
                 }
             }
@@ -343,6 +346,28 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
                 if (listingErrorStreak >= 5) break;
             }
         }
+    }
+
+    /// <summary>
+    /// Ghi NGƯỢC muc_token (server vừa xoay) từ browser ra file ĐỊNH KỲ trong lúc chạy — chỉ lane 0
+    /// (<see cref="_exportCookie"/>) để tránh rotation-war, throttle 90s. Đây là điều Scrape làm sau MỖI link
+    /// mà Update trước đây THIẾU (chỉ export lúc đầu + lúc đóng) → file thiu giữa chừng → lane khác / lần chạy
+    /// sau import token CŨ → BigSeller đá phiên ("log in first"). Dùng engine cookie DÙNG CHUNG ở Core.
+    /// </summary>
+    private async Task MaybeWriteBackBigSellerTokenAsync(CancellationToken ct)
+    {
+        if (!_exportCookie || string.IsNullOrWhiteSpace(_settings.BigSellerCookieFile))
+            return;
+        var now = Environment.TickCount64;
+        if (now - _lastTokenWriteBackTick < 90_000)
+            return;
+        _lastTokenWriteBackTick = now;
+        try
+        {
+            await BigSellerCookieEngine.WriteBackLiveTokenAsync(
+                _settings.DebugPort, _settings.BigSellerCookieFile!, _log, ct).ConfigureAwait(false);
+        }
+        catch { /* best-effort */ }
     }
 
     // result string ("ok"/"deleted"/"retry"/"skipped"/"exhausted"/null), terminal flag

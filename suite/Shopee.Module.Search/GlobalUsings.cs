@@ -8,3 +8,4 @@ global using System.Text.RegularExpressions;
 global using ClosedXML.Excel;
 global using ShopeeStatApp.Models;
 global using ShopeeStatApp.Services;
+global using Shopee.Core.Cdp;   // CdpSession dùng chung từ Core (đã xoá bản trùng trong Search)

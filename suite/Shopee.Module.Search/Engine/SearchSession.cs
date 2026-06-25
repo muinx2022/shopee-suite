@@ -255,7 +255,7 @@ public sealed class SearchSession : IAsyncDisposable
                 if (completion.Task.IsCompleted) return;
                 try
                 {
-                    var json = await http.GetStringAsync($"http://localhost:{cdpPort}/json/list", ct);
+                    var json = await http.GetStringAsync($"http://127.0.0.1:{cdpPort}/json/list", ct);
                     using var doc = JsonDocument.Parse(json);
                     var onVerify = doc.RootElement.EnumerateArray().Any(t =>
                         t.TryGetProperty("type", out var ty) && ty.GetString() == "page" &&

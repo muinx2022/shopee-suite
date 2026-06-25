@@ -92,7 +92,8 @@ public sealed class BraveManager(AppSettingsService appSettings)
                 ct.ThrowIfCancellationRequested();
                 try
                 {
-                    var json = await http.GetStringAsync($"http://localhost:{_cdpPort}/json/list", ct);
+                    // 127.0.0.1 (KHÔNG "localhost") — Windows phân giải ::1 IPv6 trước → CDP chậm/timeout.
+                    var json = await http.GetStringAsync($"http://127.0.0.1:{_cdpPort}/json/list", ct);
                     targetsDoc = JsonDocument.Parse(json);
                     if (targetsDoc.RootElement.GetArrayLength() > 0) break;
                 }
@@ -132,7 +133,7 @@ public sealed class BraveManager(AppSettingsService appSettings)
                 try
                 {
                     await http.GetStringAsync(
-                        $"http://localhost:{_cdpPort}/json/close/{Uri.EscapeDataString(target.Id)}",
+                        $"http://127.0.0.1:{_cdpPort}/json/close/{Uri.EscapeDataString(target.Id)}",
                         ct);
                 }
                 catch { }
