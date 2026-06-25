@@ -20,6 +20,10 @@ internal sealed class BigSellerImportToStoreRunner : IAsyncDisposable
     private readonly int _laneCount;
     private readonly ClaimStore? _claim;
     private readonly bool _exportCookie;
+    // SONG SONG (Crawl List): SP lane NÀY đã import xong / bỏ qua → không chọn lại; + đếm lỗi để bỏ SP hỏng.
+    // Chống-trùng GIỮA các lane do _claim (ConcurrentDictionary dùng chung) lo; _doneKeys chỉ là cục bộ lane.
+    private readonly HashSet<string> _doneKeys = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, int> _failCounts = new(StringComparer.Ordinal);
     private IPlaywright? _playwright;
     private IBrowser? _browser;
     private Process? _braveProcess;
@@ -143,153 +147,157 @@ internal sealed class BigSellerImportToStoreRunner : IAsyncDisposable
         _log("BẮT ĐẦU IMPORT TO STORE");
         _log(new string('=', 50));
 
-        var currentIndex = _laneIndex;
-        var loopCount = 0;
         var importCount = 0;
-        _log($"Lane: chi click dong #{_laneIndex + 1}, tong {_laneCount} process.");
+        if (_laneCount > 1)
+            _log($"Lane #{_laneIndex + 1}/{_laneCount}: MỖI SP chỉ 1 lane nhận (claim chống trùng) — các lane import SP KHÁC nhau.");
 
         while (!cancellationToken.IsCancellationRequested)
         {
             await WaitIfNotPausedAsync(cancellationToken).ConfigureAwait(false);
-            loopCount++;
             _log("");
-            _log($"Vòng #{loopCount} | SP thứ {currentIndex + 1} trên Crawl List");
 
             if (!await BigSellerCrawlHelper.GoToCrawlPageAsync(page, targetUrl: crawlUrl, log: _log))
             {
                 await DelayAsync(5000, cancellationToken);
                 continue;
             }
-
             await SelectSourceTabIfNeededAsync(page, cancellationToken);
 
-            int count;
-            try
-            {
-                count = _settings.ImportFromClaimedTab
-                    ? await GetClaimedImportRowCountAsync(page)
-                    : await GetVisibleImportRowCountAsync(page);
-            }
-            catch (Exception ex) when (IsTransientNavigationError(ex))
-            {
-                _log($"Trang BigSeller đang reload/ngôn ngữ thay đổi, thử lại: {ex.Message}");
-                await DelayAsync(3000, cancellationToken);
-                await BigSellerCrawlHelper.GoToCrawlPageAsync(page, targetUrl: crawlUrl, log: _log);
-                await SelectSourceTabIfNeededAsync(page, cancellationToken);
-                continue;
-            }
-            _log($"Crawl List có {count} sản phẩm.");
-
-            if (count == 0)
-            {
-                if (_settings.ImportFromClaimedTab &&
-                    await BigSellerCrawlHelper.ClickNextCrawlPageAsync(page, _log))
-                {
-                    currentIndex = _laneIndex;
-                    await DelayAsync(2500, cancellationToken);
-                    continue;
-                }
-
-                _log($"Hết sản phẩm. Đợi {_settings.ListingReloadSeconds}s...");
-                await DelayAsync(TimeSpan.FromSeconds(Math.Max(3, _settings.ListingReloadSeconds)), cancellationToken);
-                await BigSellerCrawlHelper.GoToCrawlPageAsync(page, forceReload: true, targetUrl: crawlUrl, log: _log);
-                await SelectSourceTabIfNeededAsync(page, cancellationToken);
-                await DelayAsync(5000, cancellationToken);
-                currentIndex = _laneIndex;
-                continue;
-            }
-
-            if (currentIndex >= count)
-            {
-                if (_settings.ImportFromClaimedTab &&
-                    await BigSellerCrawlHelper.ClickNextCrawlPageAsync(page, _log))
-                {
-                    currentIndex = _laneIndex;
-                    await DelayAsync(2500, cancellationToken);
-                    continue;
-                }
-
-                _log($"Chua co dong #{_laneIndex + 1} cho lane nay. Doi {_settings.ListingReloadSeconds}s...");
-                await DelayAsync(TimeSpan.FromSeconds(Math.Max(3, _settings.ListingReloadSeconds)), cancellationToken);
-                await BigSellerCrawlHelper.GoToCrawlPageAsync(page, forceReload: true, targetUrl: crawlUrl, log: _log);
-                await SelectSourceTabIfNeededAsync(page, cancellationToken);
-                currentIndex = _laneIndex;
-                continue;
-            }
-
+            // ── TAB "ĐÃ NHẬN" (claimed): theo index + xóa dòng sau import (giữ nguyên cách cũ) ──
             if (_settings.ImportFromClaimedTab)
             {
-                var claimedProductName = await ImportClaimedRowWithRetryAsync(page, currentIndex, crawlUrl, cancellationToken);
+                int claimedCount;
+                try { claimedCount = await GetClaimedImportRowCountAsync(page); }
+                catch (Exception ex) when (IsTransientNavigationError(ex))
+                {
+                    _log($"Trang đang reload, thử lại: {ex.Message}");
+                    await DelayAsync(3000, cancellationToken);
+                    continue;
+                }
+                _log($"Tab Đã nhận có {claimedCount} sản phẩm.");
+
+                if (claimedCount == 0 || _laneIndex >= claimedCount)
+                {
+                    if (await BigSellerCrawlHelper.ClickNextCrawlPageAsync(page, _log))
+                    {
+                        await DelayAsync(2500, cancellationToken);
+                        continue;
+                    }
+                    _log($"Hết SP tab Đã nhận. Đợi {_settings.ListingReloadSeconds}s...");
+                    await DelayAsync(TimeSpan.FromSeconds(Math.Max(3, _settings.ListingReloadSeconds)), cancellationToken);
+                    await BigSellerCrawlHelper.GoToCrawlPageAsync(page, forceReload: true, targetUrl: crawlUrl, log: _log);
+                    await SelectSourceTabIfNeededAsync(page, cancellationToken);
+                    continue;
+                }
+
+                await ImportClaimedRowWithRetryAsync(page, _laneIndex, crawlUrl, cancellationToken);
                 importCount++;
                 _log($"Đã Import to Stores #{importCount}.");
-
                 await DelayAsync(2000, cancellationToken);
                 await BigSellerCrawlHelper.DismissPostImportDialogsAsync(page, _log);
-
-                if (await RemoveClaimedImportRowAsync(page, currentIndex))
+                if (await RemoveClaimedImportRowAsync(page, _laneIndex))
                     _log("Đã xóa dòng vừa import khỏi bảng hiện tại.");
-                else
-                    _log("Không xóa được dòng vừa import khỏi bảng hiện tại.");
-
-                _log("Import dòng tiếp theo trong tab Đã nhận...");
                 await DelayAsync(1500, cancellationToken);
                 continue;
             }
 
-            var productName = await GetImportRowNameAsync(page, currentIndex);
-
-            if (DateTime.MinValue > DateTime.MaxValue)
+            // ── CRAWL LIST (mặc định): HÀNG ĐỢI claim theo KEY ổn định → N lane lấy SP KHÁC nhau ──
+            List<(string Key, string Name)> rows;
+            try { rows = await GetImportableRowsAsync(page); }
+            catch (Exception ex) when (IsTransientNavigationError(ex))
             {
-                _log("Dòng lỗi HTML -> xóa");
-                if (DateTime.MinValue > DateTime.MaxValue)
+                _log($"Trang đang reload/đổi ngôn ngữ, thử lại: {ex.Message}");
+                await DelayAsync(3000, cancellationToken);
+                continue;
+            }
+            _log($"Crawl List có {rows.Count} sản phẩm có nút Import.");
+
+            // Lấy SP ĐẦU TIÊN: chưa lane này làm xong (_doneKeys) & chưa lane nào nhận (TryClaim).
+            // TryClaim thành công ở đây = lane này "đặt gạch" SP đó → các lane khác bỏ qua.
+            (string Key, string Name)? pick = null;
+            foreach (var r in rows)
+            {
+                if (string.IsNullOrEmpty(r.Key) || _doneKeys.Contains(r.Key)) continue;
+                if (_claim is not null && !_claim.TryClaim(r.Key)) continue;   // lane khác đang/đã nhận
+                pick = r;
+                break;
+            }
+
+            if (pick is null)
+            {
+                // Trang HIỆN TẠI hết SP để nhận (đã import & BigSeller gỡ đi / hoặc lane khác đang giữ). SP còn
+                // lại nằm ở TRANG SAU → phải phân trang để tới; TUYỆT ĐỐI không reload về trang 1 ở đây, vì
+                // trang 1 đã cạn còn trang 2+ vẫn còn SP → reload trang 1 rỗng = kẹt = "chạy 1 lúc rồi đơ".
+                // Hết sạch trang mới đợi + về trang 1 (đón SP crawl mới / lane khác nhả claim do lỗi tạm).
+                if (await BigSellerCrawlHelper.ClickNextCrawlPageAsync(page, _log))
                 {
                     await DelayAsync(1000, cancellationToken);
                     continue;
                 }
-
-                await Task.CompletedTask;
+                _log($"Lane #{_laneIndex + 1} đã duyệt hết các trang Crawl List. Đợi {_settings.ListingReloadSeconds}s rồi về trang 1…");
+                await DelayAsync(TimeSpan.FromSeconds(Math.Max(3, _settings.ListingReloadSeconds)), cancellationToken);
+                await BigSellerCrawlHelper.GoToCrawlPageAsync(page, forceReload: true, targetUrl: crawlUrl, log: _log);
                 continue;
             }
 
-            productName = string.IsNullOrWhiteSpace(productName) ? $"Dong {currentIndex + 1}" : productName;
-            var shortName = productName.Length > 50 ? productName[..50] + "..." : productName;
-            _log($"[SP #{currentIndex + 1}] {shortName}");
+            var key = pick.Value.Key;
+            var name = string.IsNullOrWhiteSpace(pick.Value.Name) ? "(không tên)" : pick.Value.Name;
+            var shortName = name.Length > 50 ? name[..50] + "..." : name;
+            _log($"[SP #{importCount + 1}] {shortName}");
             _log("Click Import to Stores...");
 
+            // committed = true NGAY TRƯỚC khi bấm nút "Import to Stores" (mốc commit). Lỗi SAU mốc này
+            // (thường do trang điều hướng làm mất context) nghĩa là click ĐÃ gửi lên server → KHÔNG được
+            // import lại (sẽ TRÙNG). Lỗi TRƯỚC mốc (mở/chọn modal) thì AN TOÀN để trả claim & thử lại.
+            var committed = false;
             try
             {
-                await ClickImportRowAsync(page, currentIndex);
+                try { await ClickImportRowByKeyAsync(page, key); }
+                catch { await ClickImportRowByKeyAsync(page, key); }
+
+                var modal = page.Locator(".ant-modal-content:visible").Last;
+                await modal.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 20000 });
+                await SelectImportShopAndConfirmAsync(modal, _settings.ShopName, () => committed = true);
             }
-            catch
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
             {
-                await ClickImportRowAsync(page, currentIndex);
+                // Đã BẤM Import (committed) RỒI gặp lỗi ĐIỀU HƯỚNG/mất-context = click hầu như chắc chắn ĐÃ
+                // tới server (import xong khiến trang reload) → coi như XONG, KHÔNG làm lại (tránh trùng).
+                if (committed && IsTransientNavigationError(ex))
+                {
+                    _doneKeys.Add(key);
+                    importCount++;
+                    _log($"Import đã gửi (#{importCount}) — trang điều hướng làm mất context, không làm lại tránh trùng.");
+                    await BigSellerCrawlHelper.DismissPostImportDialogsAsync(page, _log);
+                }
+                else
+                {
+                    // Lỗi TRƯỚC khi gửi (chưa mở/chọn được modal, nút chưa kịp bấm, timeout không-điều-hướng)
+                    // → SP CHƯA import → TRẢ claim cho lane/loop sau thử. Quá 3 lần (lane này) → bỏ hẳn SP.
+                    _claim?.Release(key);
+                    var fails = (_failCounts.TryGetValue(key, out var f) ? f : 0) + 1;
+                    _failCounts[key] = fails;
+                    if (fails >= 3) { _doneKeys.Add(key); _log($"Bỏ qua SP lỗi {fails} lần: {shortName} ({ex.Message})"); }
+                    else _log($"Import lỗi (lần {fails}/3), để SP lại thử sau: {ex.Message}");
+                }
+                if (IsTransientNavigationError(ex)) await DelayAsync(3000, cancellationToken);
+                else await DelayAsync(1500, cancellationToken);
+                await BigSellerCrawlHelper.GoToCrawlPageAsync(page, forceReload: true, targetUrl: crawlUrl, log: _log);
+                await SelectSourceTabIfNeededAsync(page, cancellationToken);
+                continue;
             }
 
-            var modal = page.Locator(".ant-modal-content:visible").Last;
-            await modal.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 20000 });
-
-            await SelectImportShopAndConfirmAsync(modal, _settings.ShopName);
+            _doneKeys.Add(key);   // xong → giữ claim + đánh dấu (phòng SP chưa kịp bị gỡ thì lane này vẫn bỏ qua)
             importCount++;
             _log($"Đã Import to Stores (#{importCount}) - không vào Hộp nháp.");
 
-            await DelayAsync(2000, cancellationToken);
+            await DelayAsync(1500, cancellationToken);
             await BigSellerCrawlHelper.DismissPostImportDialogsAsync(page, _log);
-
-            if (_settings.ImportFromClaimedTab)
-            {
-                _log("Import dòng tiếp theo trong tab Đã nhận...");
-                currentIndex = _laneIndex;
-                await BigSellerCrawlHelper.GoToCrawlPageAsync(page, targetUrl: crawlUrl, log: _log);
-                await SelectSourceTabIfNeededAsync(page, cancellationToken);
-                await DelayAsync(1500, cancellationToken);
-                continue;
-            }
-
-            _log("Quay về Crawl List, import SP tiếp theo...");
-            await BigSellerCrawlHelper.GoToCrawlPageAsync(page, forceReload: true, targetUrl: crawlUrl, log: _log);
-            await SelectSourceTabIfNeededAsync(page, cancellationToken);
-            currentIndex = _laneIndex;
-            await DelayAsync(3000, cancellationToken);
+            // Ở LẠI trang hiện tại import SP kế — KHÔNG reload về trang 1. SP vừa import đã bị BigSeller gỡ
+            // (và đã vào done/claim) nên vòng sau quét lại tự lấy SP tiếp trên trang này; trang này hết thì
+            // nhánh pick==null sẽ sang trang sau. Tránh kẹt trang 1 + đỡ churn full-reload mỗi lần import.
+            await DelayAsync(700, cancellationToken);
         }
     }
 
@@ -388,7 +396,9 @@ internal sealed class BigSellerImportToStoreRunner : IAsyncDisposable
                message.Contains("Cannot find context with specified id", StringComparison.OrdinalIgnoreCase);
     }
 
-    private async Task SelectImportShopAndConfirmAsync(ILocator modal, string shopName)
+    // onCommitting: bắn NGAY TRƯỚC khi bấm nút "Import to Stores" (mốc commit) — caller dùng để biết
+    // lỗi xảy ra TRƯỚC hay SAU khi click (sau = đã gửi lên server → không import lại tránh trùng).
+    private async Task SelectImportShopAndConfirmAsync(ILocator modal, string shopName, Action? onCommitting = null)
     {
         _log($"Chon shop import: {shopName}");
         var selectedLabel = await modal.EvaluateAsync<string>(
@@ -454,6 +464,7 @@ internal sealed class BigSellerImportToStoreRunner : IAsyncDisposable
 
         _log($"Da chon shop import: {selectedLabel}");
         var importButton = modal.Locator("button.ant-btn-primary:has-text('Import to Stores'), button:has-text('Import to Stores')").First;
+        onCommitting?.Invoke();   // sắp click Import → từ đây mọi lỗi coi như "đã gửi" (tránh import lại)
         await importButton.ClickAsync(new() { Force = true, Timeout = 10000 });
     }
     private static Task<bool> IsImportShopCheckedAsync(ILocator modal, string shopName) =>
@@ -488,67 +499,67 @@ internal sealed class BigSellerImportToStoreRunner : IAsyncDisposable
             }",
             shopName);
 
-    private static Task<int> GetVisibleImportRowCountAsync(IPage page) =>
-        page.EvaluateAsync<int>(
-            @"() => {
-                const isVisible = el => {
-                    const rect = el.getBoundingClientRect();
-                    const style = window.getComputedStyle(el);
-                    return rect.width > 0 && rect.height > 0 &&
-                        style.display !== 'none' &&
-                        style.visibility !== 'hidden';
-                };
-                const findButton = row => row.querySelector(""td[colid='col_10'] a.action_btn[title='Import to Stores'], .vxe-body--column.col_10 a.action_btn[title='Import to Stores'], a.action_btn[title='Import to Stores']"");
-                return Array.from(document.querySelectorAll('tr.vxe-body--row'))
-                    .filter(row => isVisible(row) && findButton(row) && isVisible(findButton(row)))
-                    .length;
-            }");
+    // Danh sách SP có nút Import (Crawl List) kèm KEY để claim & click theo key (KHÔNG theo index — index
+    // đổi liên tục giữa các lane/reload). Mỗi lane là 1 Brave RIÊNG nên key phải suy từ NỘI DUNG (giống nhau
+    // ở mọi lane cho cùng 1 SP): gộp href-thật + src ảnh + tên. Bỏ href placeholder (#, javascript:) vì
+    // BigSeller hay render link tên SP dạng placeholder → nếu dùng sẽ MỌI dòng cùng 1 key (đứng sau 1 SP).
+    private static async Task<List<(string Key, string Name)>> GetImportableRowsAsync(IPage page)
+    {
+        var json = await page.EvaluateAsync<string>("() => {" + RowJsHelpers +
+            " return JSON.stringify(importableRows().map(r => ({ key: keyOf(r), name: nameOf(r) }))); }");
+        var list = new List<(string, string)>();
+        if (string.IsNullOrWhiteSpace(json)) return list;
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            foreach (var el in doc.RootElement.EnumerateArray())
+                list.Add((
+                    el.TryGetProperty("key", out var k) ? k.GetString() ?? "" : "",
+                    el.TryGetProperty("name", out var n) ? n.GetString() ?? "" : ""));
+        }
+        catch (JsonException) { /* payload lỗi 1 lần (đang điều hướng) → coi như rỗng, vòng sau thử lại */ }
+        return list;
+    }
 
-    private static Task<string> GetImportRowNameAsync(IPage page, int rowIndex) =>
-        page.EvaluateAsync<string>(
-            @"index => {
-                const isVisible = el => {
-                    const rect = el.getBoundingClientRect();
-                    const style = window.getComputedStyle(el);
-                    return rect.width > 0 && rect.height > 0 &&
-                        style.display !== 'none' &&
-                        style.visibility !== 'hidden';
-                };
-                const findButton = row => row.querySelector(""td[colid='col_10'] a.action_btn[title='Import to Stores'], .vxe-body--column.col_10 a.action_btn[title='Import to Stores'], a.action_btn[title='Import to Stores']"");
-                const rows = Array.from(document.querySelectorAll('tr.vxe-body--row'))
-                    .filter(row => isVisible(row) && findButton(row) && isVisible(findButton(row)));
-                const row = rows[index];
-                if (!row) throw new Error(`Khong tim thay dong import index ${index}. So dong co nut Import: ${rows.length}`);
-                return (
-                    row.querySelector(""td[colid='col_3'] .list_tit_link"")?.textContent ||
-                    row.querySelector(""td[colid='col_3']"")?.textContent ||
-                    row.textContent ||
-                    ''
-                ).replace(/\s+/g, ' ').trim();
-            }",
-            rowIndex);
-
-    private static Task ClickImportRowAsync(IPage page, int rowIndex) =>
+    // Click nút Import của ĐÚNG dòng có key tương ứng (key tính y hệt GetImportableRowsAsync nhờ dùng chung
+    // RowJsHelpers). Có 2 dòng cùng key (SP trùng nội dung) thì click dòng đầu — chấp nhận (hiếm).
+    private static Task ClickImportRowByKeyAsync(IPage page, string key) =>
         page.EvaluateAsync(
-            @"index => {
-                const isVisible = el => {
-                    const rect = el.getBoundingClientRect();
-                    const style = window.getComputedStyle(el);
-                    return rect.width > 0 && rect.height > 0 &&
-                        style.display !== 'none' &&
-                        style.visibility !== 'hidden';
-                };
-                const findButton = row => row.querySelector(""td[colid='col_10'] a.action_btn[title='Import to Stores'], .vxe-body--column.col_10 a.action_btn[title='Import to Stores'], a.action_btn[title='Import to Stores']"");
-                const rows = Array.from(document.querySelectorAll('tr.vxe-body--row'))
-                    .filter(row => isVisible(row) && findButton(row) && isVisible(findButton(row)));
-                const row = rows[index];
-                if (!row) throw new Error(`Khong tim thay dong import index ${index}. So dong co nut Import: ${rows.length}`);
+            "key => {" + RowJsHelpers + @"
+                const row = importableRows().find(r => keyOf(r) === key);
+                if (!row) throw new Error('Khong tim thay dong import voi key: ' + key);
                 const button = findButton(row);
                 if (!button) throw new Error('Khong tim thay nut Import to Stores trong dong');
                 button.scrollIntoView({ block: 'center', inline: 'center' });
                 button.click();
             }",
-            rowIndex);
+            key);
+
+    // Helper JS DÙNG CHUNG (quét/click cùng cách tính key → luôn khớp). isVisible/findButton/nameOf/keyOf
+    // + importableRows(). keyOf gộp [href thật, src ảnh, tên] để duy nhất & ổn định & non-empty.
+    private const string RowJsHelpers = @"
+        const isVisible = el => {
+            const rect = el.getBoundingClientRect();
+            const style = window.getComputedStyle(el);
+            return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+        };
+        const findButton = row => row.querySelector(""td[colid='col_10'] a.action_btn[title='Import to Stores'], .vxe-body--column.col_10 a.action_btn[title='Import to Stores'], a.action_btn[title='Import to Stores']"");
+        const nameOf = row => (
+            row.querySelector(""td[colid='col_3'] .list_tit_link"")?.textContent ||
+            row.querySelector(""td[colid='col_3']"")?.textContent || '').replace(/\s+/g, ' ').trim();
+        const realHref = h => (h && !/^\s*(#|javascript:)/i.test(h)) ? h.trim() : '';
+        const keyOf = row => {
+            const titleA = row.querySelector(""td[colid='col_3'] .list_tit_link, td[colid='col_3'] a"");
+            let href = titleA ? realHref(titleA.getAttribute('href')) : '';
+            if (!href) { href = Array.from(row.querySelectorAll('a')).map(a => realHref(a.getAttribute('href'))).find(Boolean) || ''; }
+            const img = row.querySelector('img');
+            const src = img ? (img.getAttribute('src') || '') : '';
+            const name = nameOf(row);
+            return [href, src, name].filter(Boolean).join('|') || (row.textContent || '').replace(/\s+/g, ' ').trim();
+        };
+        const importableRows = () => Array.from(document.querySelectorAll('tr.vxe-body--row'))
+            .filter(row => isVisible(row) && findButton(row) && isVisible(findButton(row)));
+    ";
 
     private static Task<int> GetClaimedImportRowCountAsync(IPage page) =>
         page.EvaluateAsync<int>(
