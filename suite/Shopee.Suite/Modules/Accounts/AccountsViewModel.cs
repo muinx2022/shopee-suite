@@ -171,8 +171,9 @@ public sealed partial class AccountsViewModel : ObservableObject
                     if (hasCaptchaUrl)
                     {
                         // CÓ url captcha đã lưu → MỞ ĐÚNG trang đó cho user GIẢI TAY (KHÔNG auto-login).
-                        Status = $"[{i + 1}/{targets.Count}] Mở trang captcha \"{name}\" — giải tay…  (✓ {okNames.Count} · ✗ {failNames.Count})";
-                        var result = await checker.OpenForManualSolveAsync(a.CaptchaUrl!, proxy, profileDir, 180_000, CancellationToken.None);
+                        // Giữ trình duyệt ~1 phút để giải; giải xong (đăng nhập được) thì đóng sớm rồi sang tk kế.
+                        Status = $"[{i + 1}/{targets.Count}] Mở trang captcha \"{name}\" — giải tay (~1 phút)…  (✓ {okNames.Count} · ✗ {failNames.Count})";
+                        var result = await checker.OpenForManualSolveAsync(a.CaptchaUrl!, proxy, profileDir, 60_000, CancellationToken.None);
                         success = result.Outcome == CheckOutcome.Success;
                     }
                     else if (!string.IsNullOrWhiteSpace(a.ShopeeAccountLogin))

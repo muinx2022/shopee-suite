@@ -135,7 +135,9 @@ public sealed class ShopeeAccountChecker
             await TrySend(cdp, "Page.navigate", new { url }, ct);
             Log?.Invoke("  đã mở ĐÚNG trang captcha đã lưu — GIẢI TAY trong cửa sổ Brave…");
 
+            // Giữ cửa sổ tối đa maxWaitMs (sàn 30s) — thường ~1' để user giải tay; đăng nhập được thì đóng sớm.
             var deadline = DateTime.UtcNow.AddMilliseconds(Math.Max(30_000, maxWaitMs));
+            var sawCaptcha = false;   // đã từng thấy trang /verify|captcha chưa (để tránh báo "đã rời" GIẢ)
             while (DateTime.UtcNow < deadline)
             {
                 ct.ThrowIfCancellationRequested();
@@ -144,8 +146,11 @@ public sealed class ShopeeAccountChecker
                     return new CheckResult(CheckOutcome.Success, "Đã giải captcha (đã đăng nhập).");
                 var (u, _) = await ReadPageStateAsync(cdp, ct);
                 var lu = u.ToLowerInvariant();
-                // Đã rời khỏi /verify (và không còn captcha) → coi như đã giải xong.
-                if (!string.IsNullOrWhiteSpace(u) && !lu.Contains("/verify") && !lu.Contains("captcha"))
+                if (lu.Contains("/verify") || lu.Contains("captcha")) { sawCaptcha = true; continue; }
+                // CHỈ coi "đã rời trang captcha → giải xong" khi TRƯỚC ĐÓ đã thực sự ở trang verify/captcha.
+                // Tránh: link lưu không phải /verify (fallback lưu link SP) → poll đầu tiên đã báo success GIẢ
+                // và đóng cửa sổ sau ~2.5s (thay vì giữ ~1' cho user thao tác).
+                if (sawCaptcha && !string.IsNullOrWhiteSpace(u))
                     return new CheckResult(CheckOutcome.Success, "Đã rời trang captcha.");
             }
             return new CheckResult(CheckOutcome.NeedsManual, "Chưa giải captcha trong thời gian chờ — giữ tk để thử lại.");
