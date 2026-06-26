@@ -187,12 +187,9 @@ public sealed partial class ScrapeViewModel : ObservableObject
             // Coordinator: chờ tới khi registry rỗng. Cho phép thêm/bớt job ĐỘNG giữa chừng (StartOne/StopOne).
             while (true)
             {
-                Task[] running;
-                lock (session.JobsLock)
-                {
-                    running = session.Jobs.Values.Select(h => h.Task).ToArray();
-                    if (running.Length == 0) { session.Finalizing = true; break; }   // set + break atomically dưới lock
-                }
+                // Rỗng → CHỐT (chặn StartJob thêm) + trả [] ATOMIC dưới lock của registry → không job nào lọt sau khi thấy rỗng.
+                var running = session.Jobs.SnapshotOrSeal(h => h.Task);
+                if (running.Length == 0) break;
                 // KHÔNG ConfigureAwait(false): giữ UI thread để finally set Status/IsBusy an toàn
                 // (set ObservableProperty + NotifyCanExecuteChanged phải ở UI thread).
                 await Task.WhenAny(running);
@@ -399,7 +396,7 @@ public sealed partial class ScrapeViewModel : ObservableObject
 
             runner = new ScrapeRunner(account.WorkbookPath, VideoDir, braveExe: null, s.SourceUserData, bigSellerAccountName: account.DisplayName,
                 bigSellerKiotKey: account.KiotProxyKey, bigSellerRegion: account.Region, bigSellerProxyType: account.ProxyType);
-            lock (s.JobsLock) h.Runner = runner;
+            s.Jobs.TryUpdate(account.Id, j => j.Runner = runner);   // gán Runner DƯỚI lock (vs snapshot ở Stop)
             // Mỗi chunk xong → lưu tiến độ ngay (bền với dừng/treo).
             runner.RowsCompleted += (from, to) =>
             {
@@ -428,7 +425,7 @@ public sealed partial class ScrapeViewModel : ObservableObject
         {
             // Nhả giữ-chỗ CẢ KHUNG → Search (và job Scrape khác) lại mượn được các tk này.
             ShopeeAccountUsage.Shared.ReleaseReservation(claimedFrameIds);
-            lock (s.JobsLock) s.Jobs.Remove(account.Id);
+            s.Jobs.Remove(account.Id);
             // Dọn các dòng process của job này khỏi lưới (trước đây dòng cũ không bao giờ bị xoá).
             var prefix = seq + ":";
             OnUi(() => { for (var i = Instances.Count - 1; i >= 0; i--) if (Instances[i].Key.StartsWith(prefix, StringComparison.Ordinal)) Instances.RemoveAt(i); });
@@ -437,14 +434,13 @@ public sealed partial class ScrapeViewModel : ObservableObject
         }
     }
 
-    /// <summary>Tạo + phóng 1 job cho tk BigSeller. Gán Task TRONG lock (tránh coordinator thấy Task rỗng).
-    /// Trả false nếu phiên đang kết thúc hoặc tk đó đã có job đang chạy.</summary>
+    /// <summary>Tạo + phóng 1 job cho tk BigSeller. Factory CHẠY DƯỚI lock của registry → gán Task xong mới
+    /// vào sổ (coordinator không thấy Task rỗng) và Remove của body phải chờ → "add trước, remove sau".
+    /// Trả false nếu phiên đang kết thúc (sổ đã chốt) hoặc tk đó đã có job đang chạy.</summary>
     private bool StartJob(RunSession s, ScrapeTargetViewModel target, bool resume)
     {
-        lock (s.JobsLock)
+        var started = s.Jobs.TryAdd(target.Account.Id, () =>
         {
-            if (s.Finalizing) return false;
-            if (s.Jobs.ContainsKey(target.Account.Id)) return false;   // chặn trùng job/tk
             var h = new JobHandle
             {
                 Target = target,
@@ -454,8 +450,9 @@ public sealed partial class ScrapeViewModel : ObservableObject
             // KHÔNG truyền token vào Task.Run: nếu token đã huỷ lúc lên lịch, body (và finally dọn dẹp)
             // sẽ KHÔNG chạy → job kẹt trong registry → coordinator lặp vô hạn. Body tự kiểm token + bắt OCE.
             h.Task = Task.Run(() => RunOneJobAsync(s, h, resume));
-            s.Jobs[target.Account.Id] = h;
-        }
+            return h;
+        });
+        if (!started) return false;
         target.RefreshProgress();   // shop vừa chạy chuyển sang "đang scrape" ngay (chip phía trên ô chọn shop)
         return true;
     }
@@ -465,12 +462,9 @@ public sealed partial class ScrapeViewModel : ObservableObject
     {
         var s = _session;
         if (s is null) return false;
-        lock (s.JobsLock)
-        {
-            if (!s.Jobs.TryGetValue(target.Account.Id, out var h)) return false;
-            return string.Equals(
-                h.Target.SelectedShop?.ShopeeDataSheet, shop.ShopeeDataSheet, StringComparison.OrdinalIgnoreCase);
-        }
+        if (!s.Jobs.TryGet(target.Account.Id, out var h)) return false;
+        return string.Equals(
+            h.Target.SelectedShop?.ShopeeDataSheet, shop.ShopeeDataSheet, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>Chạy RIÊNG 1 tk giữa lúc đang run (tick checkbox khi busy). Mid-run = RESUME.
@@ -497,9 +491,7 @@ public sealed partial class ScrapeViewModel : ObservableObject
     {
         var s = _session;
         if (s is null) return;
-        JobHandle? h;
-        lock (s.JobsLock) s.Jobs.TryGetValue(target.Account.Id, out h);
-        if (h is null) return;
+        if (!s.Jobs.TryGet(target.Account.Id, out var h)) return;
         h.Cts.Cancel();                                   // bẻ gãy chờ mượn tk / RunChunk
         var runner = h.Runner;
         if (runner is not null) { try { await runner.StopAllAsync(); } catch { } }
@@ -512,8 +504,7 @@ public sealed partial class ScrapeViewModel : ObservableObject
     {
         var s = _session;
         if (s is null) return;
-        bool running;
-        lock (s.JobsLock) running = s.Jobs.ContainsKey(target.Account.Id);
+        var running = s.Jobs.Contains(target.Account.Id);
 
         if (running)
         {
@@ -542,8 +533,7 @@ public sealed partial class ScrapeViewModel : ObservableObject
         var idx = key.IndexOf(':');
         if (idx <= 0 || !int.TryParse(key[..idx], out var seq)) return;
         var slotKey = key[(idx + 1)..];   // "P{slot}"
-        JobHandle? h;
-        lock (s.JobsLock) h = s.Jobs.Values.FirstOrDefault(j => j.Seq == seq);
+        var h = s.Jobs.SnapshotSelect(j => j).FirstOrDefault(j => j.Seq == seq);
         h?.Runner?.BringInstanceToFront(slotKey);
     }
 
@@ -566,8 +556,8 @@ public sealed partial class ScrapeViewModel : ObservableObject
         if (s is null) return;
         s.MasterCts.Cancel();   // mọi token job (linked) huỷ theo
         Status = "Đang dừng…";
-        List<ScrapeRunner> snapshot;
-        lock (s.JobsLock) snapshot = s.Jobs.Values.Where(h => h.Runner is not null).Select(h => h.Runner!).ToList();
+        // Đọc .Runner DƯỚI lock (qua select của SnapshotSelect) rồi lọc null + StopAll ngoài lock.
+        var snapshot = s.Jobs.SnapshotSelect(h => h.Runner).Where(r => r is not null).Select(r => r!).ToList();
         foreach (var r in snapshot)
         {
             try { await r.StopAllAsync(); } catch { }
@@ -676,10 +666,9 @@ public sealed partial class ScrapeViewModel : ObservableObject
         public readonly List<ShopeeAccount> Available = [];        // kho tk Shopee CÒN LẠI (reserve) — đã trừ các khung
         public readonly object AllocLock = new();
         public readonly CancellationTokenSource MasterCts = new(); // huỷ TOÀN phiên (Stop)
-        public readonly Dictionary<string, JobHandle> Jobs = new(StringComparer.Ordinal);   // key = BigSeller Account.Id
-        public readonly object JobsLock = new();
+        // Sổ job theo tk (key = BigSeller Account.Id). Tự lo lock + dedup + chốt (Finalizing cũ = _sealed nội bộ).
+        public readonly PerAccountJobRegistry<JobHandle> Jobs = new();
         public int JobSeq;          // tăng dần — namespace key lưới UI (thay jobIndex cũ)
-        public bool Finalizing;     // coordinator đã chốt kết thúc (đặt dưới JobsLock)
         public bool Resume;         // chế độ phiên
         public long LruTick;        // bộ đếm vòng-LRU cấp phát tk Shopee (seed cho ClaimFrame)
 
