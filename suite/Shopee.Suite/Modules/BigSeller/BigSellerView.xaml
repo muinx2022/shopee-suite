@@ -13,7 +13,7 @@
         <!-- Header -->
         <Grid Grid.Row="0" Margin="0,0,0,16">
             <StackPanel>
-                <TextBlock Text="BigSeller" Style="{StaticResource H1}" />
+                <TextBlock Text="Cấu hình BigSeller" Style="{StaticResource H1}" />
                 <TextBlock Text="Tài khoản BigSeller + workbook + shop (mỗi shop 1 sheet) + cookie dùng chung cho Scrape và Update Product."
                            Style="{StaticResource Caption}" Margin="0,3,0,0" />
             </StackPanel>
@@ -68,6 +68,13 @@
                     <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
                                   Visibility="{Binding DataContext.HasSelection, ElementName=Root, Converter={StaticResource BoolToVis}}">
                     <Grid DataContext="{Binding Selected}">
+                        <Grid.Resources>
+                            <!-- Ô nhập gọn lại (giống cấu hình Workspace) để form đỡ cao, tránh phải cuộn. -->
+                            <Style TargetType="TextBox" BasedOn="{StaticResource {x:Type TextBox}}">
+                                <Setter Property="Padding" Value="5,2" />
+                                <Setter Property="FontSize" Value="11.5" />
+                            </Style>
+                        </Grid.Resources>
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
@@ -176,11 +183,12 @@
 
                         <Border Grid.Row="2" Style="{StaticResource Card}" ClipToBounds="True">
                             <!-- Bảng CHỈ XEM (read-only) — click 1 hàng để chọn shop; sửa MỌI field ở panel
-                                 "Cấu hình shop" bên dưới (ngoài DataGrid) để tránh edit-transaction revert. -->
+                                 "Cấu hình shop" bên dưới (ngoài DataGrid) để tránh edit-transaction revert.
+                                 Gọn ~4 dòng + tự cuộn nội bộ khi nhiều shop → form không bị đẩy cao. -->
                             <DataGrid ItemsSource="{Binding Shops}"
                                       SelectedItem="{Binding DataContext.SelectedShop, ElementName=Root}"
                                       BorderThickness="0" AutoGenerateColumns="False" IsReadOnly="True"
-                                      MinHeight="220" ScrollViewer.VerticalScrollBarVisibility="Disabled">
+                                      MaxHeight="172" ScrollViewer.VerticalScrollBarVisibility="Auto">
                                 <DataGrid.Columns>
                                     <DataGridTextColumn Header="Tên shop" Binding="{Binding Name}" Width="1.4*" />
                                     <DataGridTextColumn Header="Sheet" Binding="{Binding ShopeeDataSheet}" Width="1.4*" />

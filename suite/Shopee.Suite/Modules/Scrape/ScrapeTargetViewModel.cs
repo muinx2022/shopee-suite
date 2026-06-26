@@ -134,6 +134,9 @@ public sealed partial class ScrapeTargetViewModel : ObservableObject
     /// phía trên ô chọn shop. Tính lại mỗi lần <see cref="RefreshProgress"/> (job bắt đầu/xong, mỗi chunk).</summary>
     public IReadOnlyList<ShopScrapeStatus> ShopStatuses => Shops.Select(BuildShopStatus).ToList();
 
+    /// <summary>Trạng thái scrape của ĐÚNG 1 shop (màn gộp v1.1 lấy theo từng dòng shop trong lưới).</summary>
+    public ShopScrapeStatus StatusFor(BigSellerShop shop) => BuildShopStatus(shop);
+
     private ShopScrapeStatus BuildShopStatus(BigSellerShop shop)
     {
         var sheet = shop.ShopeeDataSheet ?? "";

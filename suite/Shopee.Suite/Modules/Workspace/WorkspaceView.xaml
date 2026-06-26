@@ -1,0 +1,331 @@
+<UserControl
+    x:Class="Shopee.Suite.Modules.Workspace.WorkspaceView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:b="clr-namespace:Shopee.Suite.Behaviors"
+    x:Name="Root">
+    <Grid Margin="28,22,28,24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="230" />
+        </Grid.RowDefinitions>
+
+        <!-- ════ Header ════ -->
+        <Grid Grid.Row="0" Margin="0,0,0,12">
+            <StackPanel>
+                <TextBlock Text="BigSeller Workspace" Style="{StaticResource H1}" />
+                <TextBlock Text="Gộp Cấu hình + Scrape + Update. Chọn 1 tài khoản → thấy các shop, shop nào đã/đang/chưa scrape, rồi Scrape · Import · Update · Tên SP ngay trên từng shop."
+                           Style="{StaticResource Caption}" Margin="0,3,0,0" TextWrapping="Wrap" />
+            </StackPanel>
+            <Border HorizontalAlignment="Right" VerticalAlignment="Center"
+                    Background="{StaticResource SubtleBrush}" CornerRadius="14" Padding="14,6">
+                <TextBlock Text="{Binding Status}" FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" />
+            </Border>
+        </Grid>
+
+        <!-- ════ Thanh trên: hướng dẫn + Dừng tất cả (chạy thì bấm theo từng shop ở dưới) ════ -->
+        <Border Grid.Row="1" Style="{StaticResource Card}" Padding="12,10" Margin="0,0,0,12">
+            <Grid>
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button Content="↻ Tải lại" Command="{Binding ReloadCommand}" />
+                    <TextBlock Text="Bấm 1 tài khoản → chạy theo từng shop (▶ scrape · ⬆ import · ✎ update · 🏷 tên SP)."
+                               Style="{StaticResource Caption}" Margin="14,0,0,0" VerticalAlignment="Center" TextWrapping="Wrap" />
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                    <Button Style="{StaticResource DangerButton}" Content="■ Dừng tất cả" Command="{Binding StopAllCommand}"
+                            ToolTip="Dừng toàn bộ scrape + update đang chạy. (Dừng riêng 1 tk: bấm ■ trên shop đang chạy.)" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- ════ Main: trái = danh sách tk · phải = chi tiết + lưới shop ════ -->
+        <Grid Grid.Row="2">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="300" MinWidth="240" />
+                <ColumnDefinition Width="14" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <!-- LEFT: account list -->
+            <DockPanel Grid.Column="0">
+                <TextBlock DockPanel.Dock="Top" Text="Tài khoản BigSeller (bấm 1 dòng để xem shop + thao tác)"
+                           Style="{StaticResource Caption}" Margin="0,0,0,8" TextWrapping="Wrap" />
+                <Border Style="{StaticResource Card}" ClipToBounds="True">
+                    <ListBox ItemsSource="{Binding Accounts}" SelectedItem="{Binding SelectedAccount}"
+                             BorderThickness="0" Background="Transparent" HorizontalContentAlignment="Stretch">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <StackPanel Margin="2,6">
+                                    <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" FontSize="13" TextTrimming="CharacterEllipsis" />
+                                    <StackPanel Orientation="Horizontal" Margin="0,1,0,0">
+                                        <TextBlock Text="{Binding CookieStatus}" FontSize="10.5" Foreground="{StaticResource TextSecondaryBrush}" />
+                                        <TextBlock Text="  ·  " FontSize="10.5" Foreground="{StaticResource TextSecondaryBrush}" />
+                                        <TextBlock Text="{Binding ScrapeSummary}" FontSize="10.5" Foreground="{StaticResource TextSecondaryBrush}" />
+                                    </StackPanel>
+                                </StackPanel>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </Border>
+            </DockPanel>
+
+            <!-- RIGHT: detail của tk đang chọn -->
+            <Grid Grid.Column="2">
+                <TextBlock Text="Chọn 1 tài khoản BigSeller bên trái để xem shop + thao tác."
+                           Style="{StaticResource Caption}" VerticalAlignment="Top"
+                           Visibility="{Binding HasSelection, Converter={StaticResource InverseBoolToVis}}" />
+
+                <Border Style="{StaticResource Card}" Padding="16"
+                        DataContext="{Binding SelectedAccount}"
+                        Visibility="{Binding DataContext.HasSelection, ElementName=Root, Converter={StaticResource BoolToVis}}">
+                    <DockPanel>
+                        <!-- Header tk + đăng nhập (Top) -->
+                        <StackPanel DockPanel.Dock="Top">
+                            <Grid Margin="0,0,0,10">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="{Binding DisplayName}" Style="{StaticResource H2}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                    <Border Background="{StaticResource SubtleBrush}" CornerRadius="10" Padding="8,2" Margin="10,0,0,0" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding CookieStatus}" FontSize="11.5" Foreground="{StaticResource TextSecondaryBrush}" />
+                                    </Border>
+                                </StackPanel>
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                                    <Button Content="📊 Thống kê" Margin="0,0,8,0"
+                                            Command="{Binding DataContext.Scrape.ShowStatsCommand, ElementName=Root}"
+                                            ToolTip="Tiến độ theo sheet · nhả tay tk bị kẹt · xoá tiến độ scrape" />
+                                    <Button Style="{StaticResource PrimaryButton}" Content="🔐 Đăng nhập / cấu hình ↗"
+                                            Command="{Binding DataContext.GoToBigSellerConfigCommand, ElementName=Root}"
+                                            ToolTip="Mở tab BigSeller để đăng nhập lấy cookie / sửa workbook · cookie · shop · proxy của tài khoản này." />
+                                </StackPanel>
+                            </Grid>
+                            <TextBlock Text="Workbook" Style="{StaticResource Caption}" />
+                            <TextBox Text="{Binding WorkbookPath, Mode=OneWay}" IsReadOnly="True" Margin="0,3,0,10" Padding="6,3"
+                                     FontFamily="{StaticResource MonoFont}" FontSize="11.5" TextWrapping="Wrap" />
+                            <TextBlock Text="Shop (mỗi shop = 1 sheet) — bấm nút ngay trên dòng shop để chạy cho đúng shop đó"
+                                       Style="{StaticResource Caption}" Margin="0,0,0,6" TextWrapping="Wrap" />
+                        </StackPanel>
+
+                        <!-- Lưới SHOP pipeline: cố định ~4 dòng (nhiều hơn thì cuộn trong lưới) -->
+                        <Border DockPanel.Dock="Top" Style="{StaticResource Card}" ClipToBounds="True" MaxHeight="180">
+                            <DataGrid x:Name="ShopGrid" ItemsSource="{Binding Shops}" IsReadOnly="True"
+                                      BorderThickness="0" SelectionChanged="ShopGrid_SelectionChanged" RowHeight="34">
+                                <DataGrid.RowStyle>
+                                    <Style TargetType="DataGridRow">
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsCurrent}" Value="True">
+                                                <Setter Property="Background" Value="#FFEAF3FF" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </DataGrid.RowStyle>
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="Shop" Binding="{Binding Name}" Width="1.1*" />
+                                    <DataGridTextColumn Header="Sheet" Binding="{Binding Sheet}" Width="1.1*" />
+                                    <DataGridTemplateColumn Header="Scrape" Width="1.2*">
+                                        <DataGridTemplateColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <Border CornerRadius="10" Padding="9,3" HorizontalAlignment="Left"
+                                                        Background="{Binding ScrapeBackground}" ToolTip="{Binding ScrapeTooltip}">
+                                                    <TextBlock Text="{Binding ScrapeStatusText}" FontSize="11.5" FontWeight="SemiBold"
+                                                               Foreground="{Binding ScrapeForeground}" />
+                                                </Border>
+                                            </DataTemplate>
+                                        </DataGridTemplateColumn.CellTemplate>
+                                    </DataGridTemplateColumn>
+                                    <DataGridTemplateColumn Header="Scrape ▶" Width="Auto">
+                                        <DataGridTemplateColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <StackPanel Orientation="Horizontal">
+                                                    <Button Content="▶" Padding="9,2" MinWidth="0" ToolTip="Scrape shop này (reset từ 'Từ dòng')"
+                                                            IsEnabled="{Binding CanScrape}"
+                                                            Command="{Binding DataContext.ScrapeShopCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                            CommandParameter="{Binding}" />
+                                                    <Button Content="⏯" Padding="9,2" MinWidth="0" Margin="5,0,0,0" ToolTip="Tiếp tục scrape phần dòng còn thiếu"
+                                                            IsEnabled="{Binding CanScrape}"
+                                                            Command="{Binding DataContext.ResumeShopCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                            CommandParameter="{Binding}" />
+                                                    <Button Content="■" Padding="9,2" MinWidth="0" Margin="5,0,0,0" ToolTip="Dừng scrape shop đang chạy này"
+                                                            IsEnabled="{Binding IsScraping}"
+                                                            Command="{Binding DataContext.StopShopCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                            CommandParameter="{Binding}" />
+                                                </StackPanel>
+                                            </DataTemplate>
+                                        </DataGridTemplateColumn.CellTemplate>
+                                    </DataGridTemplateColumn>
+                                    <DataGridTemplateColumn Header="Update" Width="Auto">
+                                        <DataGridTemplateColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <StackPanel Orientation="Horizontal">
+                                                    <!-- Import ⇄ ■ Dừng -->
+                                                    <Button Content="⬆" Padding="9,2" MinWidth="0" ToolTip="Import to store cho shop này"
+                                                            IsEnabled="{Binding CanStartUpdate}"
+                                                            Visibility="{Binding IsImporting, Converter={StaticResource InverseBoolToVis}}"
+                                                            Command="{Binding DataContext.ImportShopCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                            CommandParameter="{Binding}" />
+                                                    <Button Content="■" Padding="9,2" MinWidth="0" ToolTip="Dừng import shop này"
+                                                            Foreground="{StaticResource DangerBrush}" FontWeight="SemiBold"
+                                                            Visibility="{Binding IsImporting, Converter={StaticResource BoolToVis}}"
+                                                            Command="{Binding DataContext.StopUpdateShopCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                            CommandParameter="{Binding}" />
+                                                    <!-- Update product ⇄ ■ Dừng -->
+                                                    <Button Content="✎" Padding="9,2" MinWidth="0" Margin="5,0,0,0" ToolTip="Update product cho shop này"
+                                                            IsEnabled="{Binding CanStartUpdate}"
+                                                            Visibility="{Binding IsUpdatingShop, Converter={StaticResource InverseBoolToVis}}"
+                                                            Command="{Binding DataContext.UpdateShopCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                            CommandParameter="{Binding}" />
+                                                    <Button Content="■" Padding="9,2" MinWidth="0" Margin="5,0,0,0" ToolTip="Dừng update shop này"
+                                                            Foreground="{StaticResource DangerBrush}" FontWeight="SemiBold"
+                                                            Visibility="{Binding IsUpdatingShop, Converter={StaticResource BoolToVis}}"
+                                                            Command="{Binding DataContext.StopUpdateShopCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                            CommandParameter="{Binding}" />
+                                                    <!-- Tên SP ⇄ ■ Dừng -->
+                                                    <Button Content="🏷" Padding="9,2" MinWidth="0" Margin="5,0,0,0" ToolTip="Update tên SP (AI) cho shop này"
+                                                            IsEnabled="{Binding CanStartUpdate}"
+                                                            Visibility="{Binding IsRewriting, Converter={StaticResource InverseBoolToVis}}"
+                                                            Command="{Binding DataContext.RewriteShopCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                            CommandParameter="{Binding}" />
+                                                    <Button Content="■" Padding="9,2" MinWidth="0" Margin="5,0,0,0" ToolTip="Dừng update tên SP shop này"
+                                                            Foreground="{StaticResource DangerBrush}" FontWeight="SemiBold"
+                                                            Visibility="{Binding IsRewriting, Converter={StaticResource BoolToVis}}"
+                                                            Command="{Binding DataContext.StopUpdateShopCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                            CommandParameter="{Binding}" />
+                                                </StackPanel>
+                                            </DataTemplate>
+                                        </DataGridTemplateColumn.CellTemplate>
+                                    </DataGridTemplateColumn>
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </Border>
+
+                        <!-- Cấu hình chạy (fill, có scroll riêng; ô nhập padding nhỏ) -->
+                        <ScrollViewer VerticalScrollBarVisibility="Auto" Margin="0,12,0,0">
+                            <StackPanel>
+                                <StackPanel.Resources>
+                                    <Style TargetType="TextBox" BasedOn="{StaticResource {x:Type TextBox}}">
+                                        <Setter Property="Padding" Value="5,2" />
+                                        <Setter Property="FontSize" Value="11.5" />
+                                    </Style>
+                                </StackPanel.Resources>
+                                <TextBlock Text="Cấu hình SCRAPE (riêng tài khoản này)" Style="{StaticResource Caption}" FontWeight="SemiBold" Margin="0,0,0,4" />
+                                <WrapPanel>
+                                    <StackPanel Margin="0,0,12,8"><TextBlock Text="Từ dòng" Style="{StaticResource Caption}" />
+                                        <TextBox Width="72" Margin="0,3,0,0" Text="{Binding ScrapeTarget.StartRow}" /></StackPanel>
+                                    <StackPanel Margin="0,0,12,8"><TextBlock Text="Đến dòng (0=hết)" Style="{StaticResource Caption}" />
+                                        <TextBox Width="96" Margin="0,3,0,0" Text="{Binding ScrapeTarget.EndRow}" /></StackPanel>
+                                    <StackPanel Margin="0,0,12,8"><TextBlock Text="Dòng / lần" Style="{StaticResource Caption}" />
+                                        <TextBox Width="80" Margin="0,3,0,0" Text="{Binding ScrapeTarget.RowsPerAccount}" /></StackPanel>
+                                    <StackPanel Margin="0,0,12,8"><TextBlock Text="Số process" Style="{StaticResource Caption}" />
+                                        <TextBox Width="80" Margin="0,3,0,0" Text="{Binding ScrapeTarget.MaxProcess}" /></StackPanel>
+                                    <StackPanel Margin="0,0,12,8"><TextBlock Text="Số tk / khung" Style="{StaticResource Caption}" />
+                                        <TextBox Width="80" Margin="0,3,0,0" Text="{Binding ScrapeTarget.FrameSize}" /></StackPanel>
+                                    <StackPanel Margin="0,0,0,8"><TextBlock Text="Thư mục video" Style="{StaticResource Caption}" />
+                                        <TextBox Width="180" Margin="0,3,0,0" FontFamily="{StaticResource MonoFont}"
+                                                 Text="{Binding DataContext.Scrape.VideoDir, ElementName=Root}" /></StackPanel>
+                                </WrapPanel>
+
+                                <TextBlock Text="Cấu hình UPDATE (riêng tài khoản này)" Style="{StaticResource Caption}" FontWeight="SemiBold" Margin="0,8,0,4" />
+                                <WrapPanel>
+                                    <StackPanel Margin="0,0,12,8"><TextBlock Text="Từ dòng" Style="{StaticResource Caption}" />
+                                        <TextBox Width="72" Margin="0,3,0,0" Text="{Binding UpdateTarget.StartRow}" /></StackPanel>
+                                    <StackPanel Margin="0,0,12,8"><TextBlock Text="Đến dòng (0=hết)" Style="{StaticResource Caption}" />
+                                        <TextBox Width="96" Margin="0,3,0,0" Text="{Binding UpdateTarget.EndRow}" /></StackPanel>
+                                    <StackPanel Margin="0,0,12,8"><TextBlock Text="Update worker" Style="{StaticResource Caption}" />
+                                        <TextBox Width="90" Margin="0,3,0,0" Text="{Binding UpdateTarget.UpdateWorkers}" /></StackPanel>
+                                    <StackPanel Margin="0,0,0,8"><TextBlock Text="Reload (s)" Style="{StaticResource Caption}" />
+                                        <TextBox Width="72" Margin="0,3,0,0" Text="{Binding UpdateTarget.ListingReloadSeconds}" /></StackPanel>
+                                </WrapPanel>
+                                <Grid Margin="0,2,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="Ảnh (chung)" Style="{StaticResource Caption}" VerticalAlignment="Center" Margin="0,0,8,0" />
+                                    <TextBox Grid.Column="1" FontFamily="{StaticResource MonoFont}" VerticalContentAlignment="Center"
+                                             Text="{Binding DataContext.Update.ImagePath, ElementName=Root}" />
+                                    <Button Grid.Column="2" Content="…" Width="34" Margin="6,0,0,0" Command="{Binding DataContext.Update.BrowseImageCommand, ElementName=Root}" />
+                                    <TextBlock Grid.Column="3" Text="Video (chung)" Style="{StaticResource Caption}" VerticalAlignment="Center" Margin="16,0,8,0" />
+                                    <TextBox Grid.Column="4" FontFamily="{StaticResource MonoFont}" VerticalContentAlignment="Center"
+                                             Text="{Binding DataContext.Update.VideoFolder, ElementName=Root}" />
+                                    <Button Grid.Column="5" Content="…" Width="34" Margin="6,0,0,0" Command="{Binding DataContext.Update.BrowseVideoFolderCommand, ElementName=Root}" />
+                                </Grid>
+                            </StackPanel>
+                        </ScrollViewer>
+                    </DockPanel>
+                </Border>
+            </Grid>
+        </Grid>
+
+        <!-- ════ Hoạt động: log RIÊNG từng giai đoạn ════ -->
+        <TabControl Grid.Row="3" Margin="0,12,0,0">
+            <TabItem Header="Scrape">
+                <Grid DataContext="{Binding Scrape}">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="1*" MinWidth="320" />
+                        <ColumnDefinition Width="12" />
+                        <ColumnDefinition Width="1.35*" />
+                    </Grid.ColumnDefinitions>
+                    <DockPanel Grid.Column="0">
+                        <StackPanel DockPanel.Dock="Bottom" Margin="0,8,0,0"
+                                    Visibility="{Binding ErroredAccounts.Count, Converter={StaticResource CountToVis}}">
+                            <TextBlock Margin="0,0,0,4" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource DangerBrush}">
+                                <Run Text="⚠ Tài khoản lỗi (" /><Run Text="{Binding ErroredAccounts.Count, Mode=OneWay}" /><Run Text=") — đã tự đổi tk" />
+                            </TextBlock>
+                            <Border Style="{StaticResource Card}" MaxHeight="70" ClipToBounds="True">
+                                <DataGrid ItemsSource="{Binding ErroredAccounts}" BorderThickness="0" IsReadOnly="True">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="Account" Binding="{Binding Account}" Width="1.4*" />
+                                        <DataGridTextColumn Header="Lỗi" Binding="{Binding Reason}" Width="*" />
+                                        <DataGridTextColumn Header="Lúc" Binding="{Binding Time}" Width="78" />
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                            </Border>
+                        </StackPanel>
+                        <Border Style="{StaticResource Card}" ClipToBounds="True">
+                            <DataGrid ItemsSource="{Binding Instances}" BorderThickness="0" IsReadOnly="True"
+                                      PreviewMouseLeftButtonUp="Instance_Click">
+                                <DataGrid.RowStyle>
+                                    <Style TargetType="DataGridRow">
+                                        <Setter Property="Background" Value="{Binding AccountBrush}" />
+                                    </Style>
+                                </DataGrid.RowStyle>
+                                <DataGrid.CellStyle>
+                                    <Style TargetType="DataGridCell">
+                                        <Setter Property="Background" Value="Transparent" />
+                                        <Setter Property="BorderBrush" Value="Transparent" />
+                                        <Setter Property="Foreground" Value="#1F2937" />
+                                        <Style.Triggers>
+                                            <Trigger Property="IsSelected" Value="True">
+                                                <Setter Property="Background" Value="#33000000" />
+                                                <Setter Property="Foreground" Value="#111827" />
+                                                <Setter Property="FontWeight" Value="SemiBold" />
+                                            </Trigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </DataGrid.CellStyle>
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="Process" Binding="{Binding Label}" Width="1.2*" />
+                                    <DataGridTextColumn Header="Tài khoản" Binding="{Binding AccountName}" Width="1.3*" />
+                                    <DataGridTextColumn Header="Dòng" Binding="{Binding RangeText}" Width="86" />
+                                    <DataGridTextColumn Header="Trạng thái" Binding="{Binding Status}" Width="1.8*" />
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </Border>
+                    </DockPanel>
+                    <Border Grid.Column="2" CornerRadius="8" ClipToBounds="True" Background="{StaticResource LogBackgroundBrush}">
+                        <TextBox Style="{StaticResource LogTextBox}" b:LogText.Source="{Binding LogLines}" />
+                    </Border>
+                </Grid>
+            </TabItem>
+            <TabItem Header="Update">
+                <Border CornerRadius="8" ClipToBounds="True" Background="{StaticResource LogBackgroundBrush}" DataContext="{Binding Update}">
+                    <TextBox Style="{StaticResource LogTextBox}" b:LogText.Source="{Binding LogLines}" />
+                </Border>
+            </TabItem>
+        </TabControl>
+    </Grid>
+</UserControl>

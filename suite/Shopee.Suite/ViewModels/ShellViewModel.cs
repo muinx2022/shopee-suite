@@ -7,6 +7,7 @@ using Shopee.Suite.Modules.Scrape;
 using Shopee.Suite.Modules.Search;
 using Shopee.Suite.Modules.Settings;
 using Shopee.Suite.Modules.UpdateProduct;
+using Shopee.Suite.Modules.Workspace;
 
 namespace Shopee.Suite.ViewModels;
 
@@ -28,23 +29,34 @@ public sealed partial class ShellViewModel : ObservableObject
 
     public ShellViewModel()
     {
+        // Tạo các ViewModel MỘT LẦN — màn gộp v1.1 (Workspace) DÙNG CHUNG đúng 3 VM BigSeller/Scrape/Update
+        // với 3 màn cũ → state luôn đồng bộ, không xung đột (vẫn giữ 3 màn cũ để đối chiếu/dự phòng).
+        var bigSeller = new BigSellerViewModel();
+        var scrape = new ScrapeViewModel();
+        var update = new UpdateProductViewModel();
+        var workspace = new WorkspaceViewModel(bigSeller, scrape, update);
+
+        // Scrape + Update đã GỘP vào "BigSeller Workspace" → ẩn khỏi sidebar (vẫn dùng chung scrape/update
+        // bên dưới; view cũ giữ nguyên để đảo lại nếu cần).
         Modules =
         [
-            new ModuleItem("Tài khoản & Proxy", "👤", "Kho tài khoản Shopee dùng chung",
-                new AccountsViewModel()),
-            new ModuleItem("BigSeller", "🗂", "Workbook + shop + cookie dùng chung",
-                new BigSellerViewModel()),
-            new ModuleItem("Shopee Scrape", "🧭", "Quản lý nhiều Brave + scrape",
-                new ScrapeViewModel()),
+            new ModuleItem("BigSeller Workspace", "🧩", "Scrape · Import · Update theo từng shop",
+                workspace),
+            new ModuleItem("Cấu hình BigSeller", "🗂", "Tài khoản · workbook · cookie · shop · proxy",
+                bigSeller),
             new ModuleItem("Shopee Search", "📊", "Thống kê tìm kiếm sản phẩm",
                 new SearchViewModel()),
-            new ModuleItem("Bigseller Update Product", "🏷", "Đổi tên sản phẩm hàng loạt",
-                new UpdateProductViewModel()),
+            new ModuleItem("Tài khoản & Proxy", "👤", "Kho tài khoản Shopee dùng chung",
+                new AccountsViewModel()),
             new ModuleItem("Check Shopee Account", "🔐", "Kiểm tra tài khoản Shopee",
                 new CheckAccountViewModel()),
             new ModuleItem("Cài đặt", "⚙", "AI provider / model / API key",
                 new SettingsViewModel()),
         ];
+
+        // Workspace bấm "Đăng nhập / cấu hình" → nhảy sidebar sang tab BigSeller (không làm trùng 2 nơi).
+        workspace.RequestNavigate = target =>
+            Selected = Modules.FirstOrDefault(m => ReferenceEquals(m.ViewModel, target));
 
         _welcome = new WelcomeViewModel(this);
         _selected = null; // mặc định: màn hình Welcome, không focus module nào

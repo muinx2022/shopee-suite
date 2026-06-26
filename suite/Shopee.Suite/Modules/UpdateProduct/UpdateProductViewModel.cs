@@ -10,6 +10,9 @@ using Shopee.Modules.UpdateProduct;
 
 namespace Shopee.Suite.Modules.UpdateProduct;
 
+/// <summary>Loại workflow update đang chạy của 1 shop — để UI đổi đúng nút (Import/Update/Tên SP) ⇄ Dừng.</summary>
+public enum UpdateKind { Import, Update, Rewrite }
+
 /// <summary>
 /// Module "Bigseller Update Product". Tick chọn 1 hoặc NHIỀU tài khoản BigSeller (mỗi tk 1 shop ↔ sheet
 /// + map cột riêng) rồi chạy 1 trong 3 workflow SONG SONG cho mọi tk đã chọn: Import to store (Playwright),
@@ -22,8 +25,9 @@ public sealed partial class UpdateProductViewModel : ObservableObject
     public ObservableCollection<string> LogLines { get; } = [];
 
     // Ảnh/Video DÙNG CHUNG cho mọi tk; từ-dòng/đến-dòng/worker là RIÊNG từng tk (xem UpdateRunTargetViewModel).
-    [ObservableProperty] private string _imagePath = "";
-    [ObservableProperty] private string _videoFolder = "";
+    // Điền sẵn mặc định để khỏi gõ lại mỗi lần mở app (vẫn sửa được trong cấu hình update).
+    [ObservableProperty] private string _imagePath = @"D:\images\1.jpg";
+    [ObservableProperty] private string _videoFolder = @"D:\videos";
     [ObservableProperty] private string _openAiKeyFile = "";
     [ObservableProperty] private string _status = "Sẵn sàng.";
 
@@ -50,7 +54,7 @@ public sealed partial class UpdateProductViewModel : ObservableObject
         Reload();
         BigSellerStore.Shared.Changed += () =>
         {
-            if (IsRunning) return;
+            if (IsRunning || HasActiveWsJob) return;   // đang chạy (batch hoặc inline per-shop) → đừng rebuild list
             var d = Application.Current?.Dispatcher;
             if (d is null || d.CheckAccess()) Reload();
             else d.BeginInvoke(Reload);
@@ -124,11 +128,125 @@ public sealed partial class UpdateProductViewModel : ObservableObject
     private Task RunNameRewrite() => RunWorkflowAsync("Update tên SP", (r, ctx, ct) => r.RunNameRewriteAsync(ctx, ct),
         requiresBigSellerLogin: false);
 
+    // ── v1.1 (màn gộp): chạy RIÊNG từng tk BigSeller, CHẠY SONG SONG được — mỗi tk 1 token + runner RIÊNG,
+    //    ĐỘC LẬP với đường batch của màn cũ (không đụng _cts/_runners/IsRunning). Dùng cho nút inline theo shop. ──
+    public Task RunImportSingleAsync(UpdateRunTargetViewModel t) =>
+        RunOneWorkflowAsync("Import to store", UpdateKind.Import, (r, ctx, ct) => r.RunImportAsync(ctx, ct), t, requiresBigSellerLogin: true);
+    public Task RunUpdateSingleAsync(UpdateRunTargetViewModel t) =>
+        RunOneWorkflowAsync("Update product", UpdateKind.Update, (r, ctx, ct) => r.RunUpdateAsync(ctx, ct), t, requiresBigSellerLogin: true);
+    public Task RunNameRewriteSingleAsync(UpdateRunTargetViewModel t) =>
+        RunOneWorkflowAsync("Update tên SP", UpdateKind.Rewrite, (r, ctx, ct) => r.RunNameRewriteAsync(ctx, ct), t, requiresBigSellerLogin: false);
+
+    private sealed class WsJob
+    {
+        public required CancellationTokenSource Cts;
+        public required string ShopId;
+        public required UpdateKind Kind;
+        public UpdateProductRunner? Runner;
+    }
+    private readonly object _wsLock = new();
+    private readonly Dictionary<string, WsJob> _wsJobs = new(StringComparer.Ordinal);   // key = Account.Id
+
+    /// <summary>Bắn khi tập job update đổi (start/finish) — UI đổi nút Import/Update/Tên SP ⇄ Dừng + khoá tk.</summary>
+    public event Action? JobsChanged;
+
+    /// <summary>true nếu tk này đang chạy 1 workflow update (1 tk chỉ 1 workflow tại 1 thời điểm).</summary>
+    public bool IsUpdateRunning(string accountId)
+    {
+        lock (_wsLock) return _wsJobs.ContainsKey(accountId);
+    }
+
+    /// <summary>true nếu CÒN bất kỳ workflow update inline (per-shop) nào đang chạy — để chặn reload/rebuild
+    /// list giữa chừng (đường ws KHÔNG set IsRunning của batch).</summary>
+    public bool HasActiveWsJob
+    {
+        get { lock (_wsLock) return _wsJobs.Count > 0; }
+    }
+
+    /// <summary>Shop + loại workflow đang chạy của tk (để biết nút nào ở dòng nào đổi thành Dừng).</summary>
+    public bool TryGetRunningUpdate(string accountId, out string shopId, out UpdateKind kind)
+    {
+        lock (_wsLock)
+        {
+            if (_wsJobs.TryGetValue(accountId, out var job)) { shopId = job.ShopId; kind = job.Kind; return true; }
+        }
+        shopId = ""; kind = UpdateKind.Import; return false;
+    }
+
+    private void RaiseJobsChanged()
+    {
+        var d = Application.Current?.Dispatcher;
+        if (d is null || d.CheckAccess()) JobsChanged?.Invoke();
+        else d.BeginInvoke(() => JobsChanged?.Invoke());
+    }
+
+    private async Task RunOneWorkflowAsync(
+        string name, UpdateKind kind, Func<UpdateProductRunner, UpdateProductContext, CancellationToken, Task> action,
+        UpdateRunTargetViewModel t, bool requiresBigSellerLogin)
+    {
+        var a = t.Account; var s = t.SelectedShop;
+        if (s is null) { Warn($"{a.DisplayName}: chưa chọn shop."); return; }
+        if (string.IsNullOrWhiteSpace(s.ShopeeDataSheet)) { Warn($"{a.DisplayName}/{s.DisplayName}: shop chưa gán sheet."); return; }
+        if (string.IsNullOrWhiteSpace(a.WorkbookPath) || !File.Exists(a.WorkbookPath)) { Warn($"{a.DisplayName}: workbook không tồn tại."); return; }
+        if (requiresBigSellerLogin && !a.HasCookie) { Warn($"{a.DisplayName}: chưa có cookie BigSeller."); return; }
+
+        var job = new WsJob { Cts = new CancellationTokenSource(), ShopId = s.Id, Kind = kind };
+        lock (_wsLock)
+        {
+            // 1 tk BigSeller CHỈ 1 workflow tại 1 thời điểm → các shop CÙNG tk KHÔNG import/update song song.
+            if (_wsJobs.ContainsKey(a.Id)) { Warn($"{a.DisplayName}: đang chạy 1 workflow rồi — bấm ■ để dừng trước."); job.Cts.Dispose(); return; }
+            _wsJobs[a.Id] = job;
+        }
+        RaiseJobsChanged();   // → UI: nút vừa bấm đổi thành ■, các nút khác cùng tk khoá lại
+
+        var ai = AiConfigStore.Shared.Current;
+        var ctx = BuildContext(t, ai);
+        var prefix = $"[{a.DisplayName}]";
+        var runner = new UpdateProductRunner();
+        runner.Log += m => Log($"{prefix} {m}");
+        job.Runner = runner;
+        Log($"▶ {name} — {prefix} (chạy song song).");
+        try
+        {
+            await action(runner, ctx, job.Cts.Token).ConfigureAwait(false);
+            Log($"{prefix} ✔ xong {name}.");
+        }
+        catch (OperationCanceledException) { Log($"{prefix} ■ đã dừng."); }
+        catch (Exception ex) { Log($"{prefix} ✖ lỗi: {ex.Message}"); }
+        finally
+        {
+            lock (_wsLock) _wsJobs.Remove(a.Id);
+            job.Cts.Dispose();
+            RaiseJobsChanged();   // → UI: trả nút về trạng thái thường
+        }
+    }
+
+    /// <summary>Dừng RIÊNG workflow update của 1 tk (các tk khác chạy tiếp). Cho nút ■ inline theo shop.</summary>
+    public void StopSingle(string accountId)
+    {
+        WsJob? job;
+        lock (_wsLock) _wsJobs.TryGetValue(accountId, out job);
+        if (job is null) return;
+        job.Cts.Cancel();
+        try { job.Runner?.Stop(); } catch { }
+    }
+
+    /// <summary>Dừng TẤT CẢ workflow update đang chạy (mọi tk) — cho nút "Dừng tất cả".</summary>
+    public void StopAllSingle()
+    {
+        List<WsJob> jobs;
+        lock (_wsLock) jobs = _wsJobs.Values.ToList();
+        foreach (var j in jobs) { j.Cts.Cancel(); try { j.Runner?.Stop(); } catch { } }
+    }
+
     private async Task RunWorkflowAsync(
         string name, Func<UpdateProductRunner, UpdateProductContext, CancellationToken, Task> action,
-        bool requiresBigSellerLogin = true)
+        bool requiresBigSellerLogin = true, IReadOnlyList<UpdateRunTargetViewModel>? only = null)
     {
-        var picked = RunTargets.Where(t => t.IsSelected).ToList();
+        // only != null (v1.1): chạy RIÊNG tk được chỉ định. Bảo vệ chặn chạy chồng (đường command đã có
+        // CanExecute=IsIdle; guard này thêm an toàn cho đường gọi single).
+        if (IsRunning) { Warn("Đang chạy — hãy Dừng trước khi chạy lượt mới."); return; }
+        var picked = (only ?? RunTargets.Where(t => t.IsSelected)).ToList();
         if (picked.Count == 0) { Warn("Chưa tick chọn tài khoản BigSeller nào để chạy."); return; }
 
         var ai = AiConfigStore.Shared.Current;
@@ -188,7 +306,7 @@ public sealed partial class UpdateProductViewModel : ObservableObject
             aiModel, "", ai.BatchSize, "",
             t.StartRow, t.EndRow, ImagePath, VideoFolder,
             s.BigSellerCrawlUrl, s.BigSellerImportFromClaimedTab,
-            t.ImportWorkers, t.UpdateWorkers, t.ListingReloadSeconds, ai.OpenAiApiKey,
+            1, t.UpdateWorkers, t.ListingReloadSeconds, ai.OpenAiApiKey,   // Import LUÔN 1 lane (1 process)
             s.ColumnMap.LinkColumn, s.ColumnMap.PriceColumn, s.ColumnMap.SkuColumn,
             s.ColumnMap.ItemIdColumn, s.ColumnMap.ProductNameColumn, s.ColumnMap.RewrittenNameColumn);
     }

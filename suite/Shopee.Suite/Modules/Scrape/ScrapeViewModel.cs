@@ -115,9 +115,22 @@ public sealed partial class ScrapeViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(IsIdle))]
     private Task Resume() => StartAsync(resume: true);
 
-    private async Task StartAsync(bool resume)
+    /// <summary>v1.1 (màn gộp BigSeller): chạy/tiếp tục RIÊNG 1 tk BigSeller mà KHÔNG đụng tick của tk khác.
+    /// Rảnh → mở phiên mới chỉ gồm tk này; đang chạy → thêm job tk này (resume) vào phiên hiện tại.</summary>
+    public Task RunSingleAsync(ScrapeTargetViewModel target, bool resume)
     {
-        var picked = ScrapeTargets.Where(t => t.IsSelected).ToList();
+        if (IsBusy) { StartOneAccount(target); return Task.CompletedTask; }
+        return StartAsync(resume, new[] { target });
+    }
+
+    /// <summary>v1.1 (màn gộp): DỪNG RIÊNG job của 1 tk BigSeller (các tk khác chạy tiếp). Không có job
+    /// đang chạy thì bỏ qua. Giữ tiến độ cho lần Tiếp tục.</summary>
+    public Task StopSingleAsync(ScrapeTargetViewModel target) => StopOneAccount(target);
+
+    private async Task StartAsync(bool resume, IReadOnlyList<ScrapeTargetViewModel>? only = null)
+    {
+        // only != null (màn gộp v1.1): chạy RIÊNG danh sách được chỉ định, KHÔNG đụng tick của tk khác.
+        var picked = (only ?? ScrapeTargets.Where(t => t.IsSelected)).ToList();
         if (picked.Count == 0) { Warn("Tick chọn ít nhất 1 tài khoản BigSeller."); return; }
 
         var pool = AccountStore.Shared.Accounts.Where(a => !a.Disabled).ToList();

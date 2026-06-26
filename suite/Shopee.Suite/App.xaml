@@ -9,6 +9,7 @@
     xmlns:scr="clr-namespace:Shopee.Suite.Modules.Scrape"
     xmlns:srch="clr-namespace:Shopee.Suite.Modules.Search"
     xmlns:upd="clr-namespace:Shopee.Suite.Modules.UpdateProduct"
+    xmlns:ws="clr-namespace:Shopee.Suite.Modules.Workspace"
     xmlns:settings="clr-namespace:Shopee.Suite.Modules.Settings"
     xmlns:conv="clr-namespace:Shopee.Suite.Infrastructure"
     xmlns:views="clr-namespace:Shopee.Suite.Views"
@@ -24,6 +25,9 @@
             <conv:CountToVisibilityConverter x:Key="CountToVis" />
 
             <!-- ViewModel-first navigation: mỗi ViewModel map sang View tương ứng. -->
+            <DataTemplate DataType="{x:Type ws:WorkspaceViewModel}">
+                <ws:WorkspaceView />
+            </DataTemplate>
             <DataTemplate DataType="{x:Type acc:AccountsViewModel}">
                 <acc:AccountsView />
             </DataTemplate>
