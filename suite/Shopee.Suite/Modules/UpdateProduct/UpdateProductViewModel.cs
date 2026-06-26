@@ -184,11 +184,8 @@ public sealed partial class UpdateProductViewModel : ObservableObject
         string name, UpdateKind kind, Func<UpdateProductRunner, UpdateProductContext, CancellationToken, Task> action,
         UpdateRunTargetViewModel t, bool requiresBigSellerLogin)
     {
-        var a = t.Account; var s = t.SelectedShop;
-        if (s is null) { Warn($"{a.DisplayName}: chưa chọn shop."); return; }
-        if (string.IsNullOrWhiteSpace(s.ShopeeDataSheet)) { Warn($"{a.DisplayName}/{s.DisplayName}: shop chưa gán sheet."); return; }
-        if (string.IsNullOrWhiteSpace(a.WorkbookPath) || !File.Exists(a.WorkbookPath)) { Warn($"{a.DisplayName}: workbook không tồn tại."); return; }
-        if (requiresBigSellerLogin && !a.HasCookie) { Warn($"{a.DisplayName}: chưa có cookie BigSeller."); return; }
+        if (!ValidateUpdateTarget(t, requiresBigSellerLogin, out var problem)) { Warn(problem + "."); return; }
+        var a = t.Account; var s = t.SelectedShop!;
 
         var job = new WsJob { Cts = new CancellationTokenSource(), ShopId = s.Id, Kind = kind };
         lock (_wsLock)
@@ -264,12 +261,8 @@ public sealed partial class UpdateProductViewModel : ObservableObject
         var problems = new List<string>();
         foreach (var t in picked)
         {
-            var a = t.Account; var s = t.SelectedShop;
-            if (s is null) { problems.Add($"{a.DisplayName}: chưa chọn shop"); continue; }
-            if (string.IsNullOrWhiteSpace(s.ShopeeDataSheet)) { problems.Add($"{a.DisplayName}/{s.DisplayName}: shop chưa gán sheet"); continue; }
-            if (string.IsNullOrWhiteSpace(a.WorkbookPath) || !File.Exists(a.WorkbookPath)) { problems.Add($"{a.DisplayName}: workbook không tồn tại"); continue; }
-            if (requiresBigSellerLogin && !a.HasCookie) { problems.Add($"{a.DisplayName}: chưa có cookie BigSeller"); continue; }
-            jobs.Add((a, BuildContext(t, ai)));
+            if (!ValidateUpdateTarget(t, requiresBigSellerLogin, out var problem)) { problems.Add(problem); continue; }
+            jobs.Add((t.Account, BuildContext(t, ai)));
         }
 
         if (jobs.Count == 0) { Warn($"Không có tài khoản hợp lệ để chạy {name}.\n" + string.Join("\n", problems)); return; }
@@ -300,6 +293,19 @@ public sealed partial class UpdateProductViewModel : ObservableObject
             _cts = null;
             IsRunning = false;
         }
+    }
+
+    // Validate 1 đích update (shop/sheet/workbook/cookie). true = hợp lệ; false → problem = thông điệp lỗi
+    // KHÔNG có dấu chấm cuối (caller tự thêm). Dùng CHUNG cho đường single (RunOneWorkflowAsync) lẫn batch
+    // (RunWorkflowAsync) → một nguồn sự thật cho "đích nào chạy được".
+    private static bool ValidateUpdateTarget(UpdateRunTargetViewModel t, bool requiresBigSellerLogin, out string problem)
+    {
+        var a = t.Account; var s = t.SelectedShop;
+        if (s is null) { problem = $"{a.DisplayName}: chưa chọn shop"; return false; }
+        if (string.IsNullOrWhiteSpace(s.ShopeeDataSheet)) { problem = $"{a.DisplayName}/{s.DisplayName}: shop chưa gán sheet"; return false; }
+        if (string.IsNullOrWhiteSpace(a.WorkbookPath) || !File.Exists(a.WorkbookPath)) { problem = $"{a.DisplayName}: workbook không tồn tại"; return false; }
+        if (requiresBigSellerLogin && !a.HasCookie) { problem = $"{a.DisplayName}: chưa có cookie BigSeller"; return false; }
+        problem = ""; return true;
     }
 
     private UpdateProductContext BuildContext(UpdateRunTargetViewModel t, AiConfig ai)
