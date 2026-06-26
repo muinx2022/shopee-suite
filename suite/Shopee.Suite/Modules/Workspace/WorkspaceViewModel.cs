@@ -115,31 +115,38 @@ public sealed partial class WorkspaceViewModel : ObservableObject
     }
 
     // ── Scrape theo shop ─────────────────────────────────────────────────────
-    [RelayCommand] private Task ScrapeShop(WorkspaceShopViewModel? shop) => RunScrapeShop(shop, resume: false);
-    [RelayCommand] private Task ResumeShop(WorkspaceShopViewModel? shop) => RunScrapeShop(shop, resume: true);
+    // QUAN TRỌNG: các lệnh chạy là VOID + FIRE-AND-FORGET (không await tác vụ). Nếu await, lần bấm đầu
+    // (account rảnh) gọi RunSingleAsync→StartAsync chạy COORDINATOR tới hết phiên mới trả về → AsyncRelayCommand
+    // (mặc định KHÔNG cho chạy chồng) sẽ tự khoá, nuốt mọi lần bấm sau → account khác "không thực hiện được".
+    // Runner tự xử lý lỗi/log bên trong nên fire-and-forget an toàn.
+    [RelayCommand] private void ScrapeShop(WorkspaceShopViewModel? shop) => RunScrapeShop(shop, resume: false);
+    [RelayCommand] private void ResumeShop(WorkspaceShopViewModel? shop) => RunScrapeShop(shop, resume: true);
 
-    private Task RunScrapeShop(WorkspaceShopViewModel? shop, bool resume)
+    private void RunScrapeShop(WorkspaceShopViewModel? shop, bool resume)
     {
-        if (shop is null) return Task.CompletedTask;
+        if (shop is null) return;
         shop.Parent.ScrapeTarget.SelectedShop = shop.Shop;
-        return Scrape.RunSingleAsync(shop.Parent.ScrapeTarget, resume);
+        _ = Scrape.RunSingleAsync(shop.Parent.ScrapeTarget, resume);
     }
 
     /// <summary>Dừng RIÊNG scrape của tk chứa shop này (1 shop/account) — tk khác chạy tiếp.</summary>
     [RelayCommand]
-    private Task StopShop(WorkspaceShopViewModel? shop)
-        => shop is null ? Task.CompletedTask : Scrape.StopSingleAsync(shop.Parent.ScrapeTarget);
-
-    // ── Update theo shop (Import / Update / Tên SP) ──────────────────────────
-    [RelayCommand] private Task ImportShop(WorkspaceShopViewModel? shop) => RunUpdateShop(shop, t => Update.RunImportSingleAsync(t));
-    [RelayCommand] private Task UpdateShop(WorkspaceShopViewModel? shop) => RunUpdateShop(shop, t => Update.RunUpdateSingleAsync(t));
-    [RelayCommand] private Task RewriteShop(WorkspaceShopViewModel? shop) => RunUpdateShop(shop, t => Update.RunNameRewriteSingleAsync(t));
-
-    private Task RunUpdateShop(WorkspaceShopViewModel? shop, Func<UpdateRunTargetViewModel, Task> run)
+    private void StopShop(WorkspaceShopViewModel? shop)
     {
-        if (shop is null) return Task.CompletedTask;
+        if (shop is null) return;
+        _ = Scrape.StopSingleAsync(shop.Parent.ScrapeTarget);
+    }
+
+    // ── Update theo shop (Import / Update / Tên SP) — cũng fire-and-forget (lý do như trên) ──
+    [RelayCommand] private void ImportShop(WorkspaceShopViewModel? shop) => RunUpdateShop(shop, t => Update.RunImportSingleAsync(t));
+    [RelayCommand] private void UpdateShop(WorkspaceShopViewModel? shop) => RunUpdateShop(shop, t => Update.RunUpdateSingleAsync(t));
+    [RelayCommand] private void RewriteShop(WorkspaceShopViewModel? shop) => RunUpdateShop(shop, t => Update.RunNameRewriteSingleAsync(t));
+
+    private void RunUpdateShop(WorkspaceShopViewModel? shop, Func<UpdateRunTargetViewModel, Task> run)
+    {
+        if (shop is null) return;
         shop.Parent.UpdateTarget.SelectedShop = shop.Shop;
-        return run(shop.Parent.UpdateTarget);
+        _ = run(shop.Parent.UpdateTarget);
     }
 
     /// <summary>Dừng RIÊNG workflow update (import/update/tên SP) của tk chứa shop này — nút ■ inline.</summary>
