@@ -7,6 +7,7 @@ using Microsoft.Win32;
 using Shopee.Core.Ai;
 using Shopee.Core.BigSeller;
 using Shopee.Modules.UpdateProduct;
+using Shopee.Suite.Infrastructure;
 
 namespace Shopee.Suite.Modules.UpdateProduct;
 
@@ -144,32 +145,24 @@ public sealed partial class UpdateProductViewModel : ObservableObject
         public required UpdateKind Kind;
         public UpdateProductRunner? Runner;
     }
-    private readonly object _wsLock = new();
-    private readonly Dictionary<string, WsJob> _wsJobs = new(StringComparer.Ordinal);   // key = Account.Id
+    // Sổ job inline per-shop (key = Account.Id). Kho thuần — refresh UI vẫn do RunOneWorkflowAsync gọi
+    // RaiseJobsChanged() đúng chỗ trong try/finally. Xem PerAccountJobRegistry.
+    private readonly PerAccountJobRegistry<WsJob> _wsJobs = new();
 
     /// <summary>Bắn khi tập job update đổi (start/finish) — UI đổi nút Import/Update/Tên SP ⇄ Dừng + khoá tk.</summary>
     public event Action? JobsChanged;
 
     /// <summary>true nếu tk này đang chạy 1 workflow update (1 tk chỉ 1 workflow tại 1 thời điểm).</summary>
-    public bool IsUpdateRunning(string accountId)
-    {
-        lock (_wsLock) return _wsJobs.ContainsKey(accountId);
-    }
+    public bool IsUpdateRunning(string accountId) => _wsJobs.Contains(accountId);
 
     /// <summary>true nếu CÒN bất kỳ workflow update inline (per-shop) nào đang chạy — để chặn reload/rebuild
     /// list giữa chừng (đường ws KHÔNG set IsRunning của batch).</summary>
-    public bool HasActiveWsJob
-    {
-        get { lock (_wsLock) return _wsJobs.Count > 0; }
-    }
+    public bool HasActiveWsJob => _wsJobs.Count > 0;
 
     /// <summary>Shop + loại workflow đang chạy của tk (để biết nút nào ở dòng nào đổi thành Dừng).</summary>
     public bool TryGetRunningUpdate(string accountId, out string shopId, out UpdateKind kind)
     {
-        lock (_wsLock)
-        {
-            if (_wsJobs.TryGetValue(accountId, out var job)) { shopId = job.ShopId; kind = job.Kind; return true; }
-        }
+        if (_wsJobs.TryGet(accountId, out var job)) { shopId = job.ShopId; kind = job.Kind; return true; }
         shopId = ""; kind = UpdateKind.Import; return false;
     }
 
@@ -187,13 +180,10 @@ public sealed partial class UpdateProductViewModel : ObservableObject
         if (!ValidateUpdateTarget(t, requiresBigSellerLogin, out var problem)) { Warn(problem + "."); return; }
         var a = t.Account; var s = t.SelectedShop!;
 
+        // 1 tk BigSeller CHỈ 1 workflow tại 1 thời điểm → các shop CÙNG tk KHÔNG import/update song song.
+        // TryAdd = dedup + add ATOMIC dưới lock của registry.
         var job = new WsJob { Cts = new CancellationTokenSource(), ShopId = s.Id, Kind = kind };
-        lock (_wsLock)
-        {
-            // 1 tk BigSeller CHỈ 1 workflow tại 1 thời điểm → các shop CÙNG tk KHÔNG import/update song song.
-            if (_wsJobs.ContainsKey(a.Id)) { Warn($"{a.DisplayName}: đang chạy 1 workflow rồi — bấm ■ để dừng trước."); job.Cts.Dispose(); return; }
-            _wsJobs[a.Id] = job;
-        }
+        if (!_wsJobs.TryAdd(a.Id, job)) { Warn($"{a.DisplayName}: đang chạy 1 workflow rồi — bấm ■ để dừng trước."); job.Cts.Dispose(); return; }
         // ĐÃ đăng ký job → MỌI thứ sau đây phải nằm TRONG try/finally để dù setup (BuildContext / ctor runner)
         // ném thì finally vẫn gỡ job khỏi _wsJobs (trước đây setup nằm NGOÀI try → throw làm tk kẹt ■ vĩnh viễn).
         var prefix = $"[{a.DisplayName}]";
@@ -213,7 +203,7 @@ public sealed partial class UpdateProductViewModel : ObservableObject
         catch (Exception ex) { Log($"{prefix} ✖ lỗi: {ex.Message}"); }
         finally
         {
-            lock (_wsLock) _wsJobs.Remove(a.Id);
+            _wsJobs.Remove(a.Id);
             job.Cts.Dispose();
             RaiseJobsChanged();   // → UI: trả nút về trạng thái thường
         }
@@ -222,18 +212,13 @@ public sealed partial class UpdateProductViewModel : ObservableObject
     /// <summary>Dừng RIÊNG workflow update của 1 tk (các tk khác chạy tiếp). Cho nút ■ inline theo shop.</summary>
     public void StopSingle(string accountId)
     {
-        WsJob? job;
-        lock (_wsLock) _wsJobs.TryGetValue(accountId, out job);
-        if (job is null) return;
-        CancelJob(job);
+        if (_wsJobs.TryGet(accountId, out var job)) CancelJob(job);
     }
 
     /// <summary>Dừng TẤT CẢ workflow update đang chạy (mọi tk) — cho nút "Dừng tất cả".</summary>
     public void StopAllSingle()
     {
-        List<WsJob> jobs;
-        lock (_wsLock) jobs = _wsJobs.Values.ToList();
-        foreach (var j in jobs) CancelJob(j);
+        foreach (var j in _wsJobs.SnapshotSelect(j => j)) CancelJob(j);
     }
 
     // Huỷ 1 job an toàn: job có thể vừa xong + finally đã Dispose Cts giữa lúc ta đọc dict → Cancel() ném
