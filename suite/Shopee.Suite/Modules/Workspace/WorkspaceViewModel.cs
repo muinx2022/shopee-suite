@@ -118,7 +118,9 @@ public sealed partial class WorkspaceViewModel : ObservableObject
     // QUAN TRỌNG: các lệnh chạy là VOID + FIRE-AND-FORGET (không await tác vụ). Nếu await, lần bấm đầu
     // (account rảnh) gọi RunSingleAsync→StartAsync chạy COORDINATOR tới hết phiên mới trả về → AsyncRelayCommand
     // (mặc định KHÔNG cho chạy chồng) sẽ tự khoá, nuốt mọi lần bấm sau → account khác "không thực hiện được".
-    // Runner tự xử lý lỗi/log bên trong nên fire-and-forget an toàn.
+    // AN TOÀN fire-and-forget là BẤT BIẾN của callee, không phải may rủi: các entry RunSingleAsync /
+    // StopSingleAsync / Run*SingleAsync là TOTAL — tự bọc try/catch toàn thân, KHÔNG ném ra ngoài và KHÔNG
+    // rò state (IsBusy/_wsJobs gỡ trong finally dù setup ném). Đổi callee thì phải giữ bất biến này.
     [RelayCommand] private void ScrapeShop(WorkspaceShopViewModel? shop) => RunScrapeShop(shop, resume: false);
     [RelayCommand] private void ResumeShop(WorkspaceShopViewModel? shop) => RunScrapeShop(shop, resume: true);
 

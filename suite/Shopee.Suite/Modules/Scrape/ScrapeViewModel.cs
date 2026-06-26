@@ -116,16 +116,25 @@ public sealed partial class ScrapeViewModel : ObservableObject
     private Task Resume() => StartAsync(resume: true);
 
     /// <summary>v1.1 (màn gộp BigSeller): chạy/tiếp tục RIÊNG 1 tk BigSeller mà KHÔNG đụng tick của tk khác.
-    /// Rảnh → mở phiên mới chỉ gồm tk này; đang chạy → thêm job tk này (resume) vào phiên hiện tại.</summary>
-    public Task RunSingleAsync(ScrapeTargetViewModel target, bool resume)
+    /// Rảnh → mở phiên mới chỉ gồm tk này; đang chạy → thêm job tk này (resume) vào phiên hiện tại.
+    /// TOTAL: tự nuốt + log mọi lỗi → an toàn để gọi fire-and-forget (caller không cần try/catch).</summary>
+    public async Task RunSingleAsync(ScrapeTargetViewModel target, bool resume)
     {
-        if (IsBusy) { StartOneAccount(target); return Task.CompletedTask; }
-        return StartAsync(resume, new[] { target });
+        try
+        {
+            if (IsBusy) { StartOneAccount(target); return; }
+            await StartAsync(resume, new[] { target });
+        }
+        catch (Exception ex) { Log($"✖ Lỗi khởi động scrape: {ex.Message}"); }
     }
 
     /// <summary>v1.1 (màn gộp): DỪNG RIÊNG job của 1 tk BigSeller (các tk khác chạy tiếp). Không có job
-    /// đang chạy thì bỏ qua. Giữ tiến độ cho lần Tiếp tục.</summary>
-    public Task StopSingleAsync(ScrapeTargetViewModel target) => StopOneAccount(target);
+    /// đang chạy thì bỏ qua. Giữ tiến độ cho lần Tiếp tục. TOTAL (xem RunSingleAsync).</summary>
+    public async Task StopSingleAsync(ScrapeTargetViewModel target)
+    {
+        try { await StopOneAccount(target); }
+        catch (Exception ex) { Log($"✖ Lỗi dừng scrape: {ex.Message}"); }
+    }
 
     private async Task StartAsync(bool resume, IReadOnlyList<ScrapeTargetViewModel>? only = null)
     {
@@ -156,24 +165,26 @@ public sealed partial class ScrapeViewModel : ObservableObject
         session.Available.AddRange(pool);
         // Seed bộ đếm vòng-LRU = mốc cao nhất đã lưu → cấp phát tiếp vòng, không nện lại tk đầu sau restart.
         session.LruTick = AccountStore.Shared.Accounts.Select(a => a.LastUsedTick).DefaultIfEmpty(0).Max();
-        _session = session;
-
-        IsBusy = true;
-        ShopeeAccountUsage.Shared.BeginRun();   // bật theo dõi tình trạng tk (cột "Tình trạng")
-        LogLines.Clear();
-        Instances.Clear();
-        ErroredAccounts.Clear();
-        foreach (var p in problems) Log($"⚠ Bỏ qua {p}.");
-        Log(resume
-            ? $"⏯ Tiếp tục {jobs.Count} BigSeller — chỉ chạy phần dòng CÒN THIẾU. Kho {pool.Count} tk Shopee."
-            : $"▶ Scrape {jobs.Count} BigSeller (RESET — chạy lại từ đầu). Kho {pool.Count} tk Shopee.");
-
-        // Phóng job cho từng tk đã chọn (mỗi job = 1 token RIÊNG → dừng được lẻ giữa chừng).
-        foreach (var t in jobs) StartJob(session, t, resume);
-
-        // Coordinator: chờ tới khi registry rỗng. Cho phép thêm/bớt job ĐỘNG giữa chừng (StartOne/StopOne).
+        // State "đang chạy" + dọn dẹp ĐỐI XỨNG quanh MỘT try/finally: set _session/IsBusy/BeginRun là
+        // việc ĐẦU TIÊN trong try, clear ở finally → dù setup (StartJob) HAY coordinator ném, IsBusy/_session/
+        // usage-run KHÔNG kẹt (trước đây StartJob nằm NGOÀI try → throw ở đó làm IsBusy treo true vĩnh viễn).
         try
         {
+            _session = session;
+            IsBusy = true;
+            ShopeeAccountUsage.Shared.BeginRun();   // bật theo dõi tình trạng tk (cột "Tình trạng")
+            LogLines.Clear();
+            Instances.Clear();
+            ErroredAccounts.Clear();
+            foreach (var p in problems) Log($"⚠ Bỏ qua {p}.");
+            Log(resume
+                ? $"⏯ Tiếp tục {jobs.Count} BigSeller — chỉ chạy phần dòng CÒN THIẾU. Kho {pool.Count} tk Shopee."
+                : $"▶ Scrape {jobs.Count} BigSeller (RESET — chạy lại từ đầu). Kho {pool.Count} tk Shopee.");
+
+            // Phóng job cho từng tk đã chọn (mỗi job = 1 token RIÊNG → dừng được lẻ giữa chừng).
+            foreach (var t in jobs) StartJob(session, t, resume);
+
+            // Coordinator: chờ tới khi registry rỗng. Cho phép thêm/bớt job ĐỘNG giữa chừng (StartOne/StopOne).
             while (true)
             {
                 Task[] running;
@@ -186,6 +197,13 @@ public sealed partial class ScrapeViewModel : ObservableObject
                 // (set ObservableProperty + NotifyCanExecuteChanged phải ở UI thread).
                 await Task.WhenAny(running);
             }
+        }
+        catch (Exception ex)
+        {
+            // Lỗi BẤT NGỜ khi dựng/điều phối phiên → huỷ token để các job đã phóng dở tự dừng, rồi log
+            // (KHÔNG ném ra ngoài: caller chạy fire-and-forget). Job tự bắt OCE trong RunOneJobAsync.
+            session.MasterCts.Cancel();
+            Log($"✖ Lỗi phiên scrape: {ex.Message}");
         }
         finally
         {

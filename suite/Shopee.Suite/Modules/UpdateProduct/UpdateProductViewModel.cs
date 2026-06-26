@@ -197,17 +197,18 @@ public sealed partial class UpdateProductViewModel : ObservableObject
             if (_wsJobs.ContainsKey(a.Id)) { Warn($"{a.DisplayName}: đang chạy 1 workflow rồi — bấm ■ để dừng trước."); job.Cts.Dispose(); return; }
             _wsJobs[a.Id] = job;
         }
-        RaiseJobsChanged();   // → UI: nút vừa bấm đổi thành ■, các nút khác cùng tk khoá lại
-
-        var ai = AiConfigStore.Shared.Current;
-        var ctx = BuildContext(t, ai);
+        // ĐÃ đăng ký job → MỌI thứ sau đây phải nằm TRONG try/finally để dù setup (BuildContext / ctor runner)
+        // ném thì finally vẫn gỡ job khỏi _wsJobs (trước đây setup nằm NGOÀI try → throw làm tk kẹt ■ vĩnh viễn).
         var prefix = $"[{a.DisplayName}]";
-        var runner = new UpdateProductRunner();
-        runner.Log += m => Log($"{prefix} {m}");
-        job.Runner = runner;
-        Log($"▶ {name} — {prefix} (chạy song song).");
         try
         {
+            RaiseJobsChanged();   // → UI: nút vừa bấm đổi thành ■, các nút khác cùng tk khoá lại
+            var ai = AiConfigStore.Shared.Current;
+            var ctx = BuildContext(t, ai);
+            var runner = new UpdateProductRunner();
+            runner.Log += m => Log($"{prefix} {m}");
+            job.Runner = runner;
+            Log($"▶ {name} — {prefix} (chạy song song).");
             await action(runner, ctx, job.Cts.Token).ConfigureAwait(false);
             Log($"{prefix} ✔ xong {name}.");
         }
@@ -227,8 +228,7 @@ public sealed partial class UpdateProductViewModel : ObservableObject
         WsJob? job;
         lock (_wsLock) _wsJobs.TryGetValue(accountId, out job);
         if (job is null) return;
-        job.Cts.Cancel();
-        try { job.Runner?.Stop(); } catch { }
+        CancelJob(job);
     }
 
     /// <summary>Dừng TẤT CẢ workflow update đang chạy (mọi tk) — cho nút "Dừng tất cả".</summary>
@@ -236,7 +236,15 @@ public sealed partial class UpdateProductViewModel : ObservableObject
     {
         List<WsJob> jobs;
         lock (_wsLock) jobs = _wsJobs.Values.ToList();
-        foreach (var j in jobs) { j.Cts.Cancel(); try { j.Runner?.Stop(); } catch { } }
+        foreach (var j in jobs) CancelJob(j);
+    }
+
+    // Huỷ 1 job an toàn: job có thể vừa xong + finally đã Dispose Cts giữa lúc ta đọc dict → Cancel() ném
+    // ObjectDisposedException. Nuốt hết (Cancel + Stop) để nút ■ (RelayCommand void) không bao giờ làm crash UI.
+    private static void CancelJob(WsJob job)
+    {
+        try { job.Cts.Cancel(); } catch { }
+        try { job.Runner?.Stop(); } catch { }
     }
 
     private async Task RunWorkflowAsync(
