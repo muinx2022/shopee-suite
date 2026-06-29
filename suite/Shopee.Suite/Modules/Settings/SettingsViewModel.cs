@@ -357,7 +357,7 @@ public sealed partial class SettingsViewModel : ObservableObject
                 ImportReplace,
                 string.IsNullOrWhiteSpace(RebaseWorkbookDir) ? null : RebaseWorkbookDir);
             if (BackupAi && r.AiImported) LoadFromStore();   // làm mới ô AI trên màn hình
-            Status = $"✓ Khôi phục: BigSeller +{r.BigSellerAdded}/bỏ {r.BigSellerSkipped} · Shopee +{r.ShopeeAdded}/bỏ {r.ShopeeSkipped} · cookie {r.CookiesCopied} · AI {(r.AiImported ? "có" : "—")}.";
+            Status = $"✓ Khôi phục: BigSeller +{r.BigSellerAdded}/↻{r.BigSellerUpdated}/bỏ {r.BigSellerSkipped} · Shopee +{r.ShopeeAdded}/bỏ {r.ShopeeSkipped} · cookie {r.CookiesCopied} · AI {(r.AiImported ? "có" : "—")}.";
             Dialogs.Show(Status, "Khôi phục", MessageBoxButton.OK, MessageBoxImage.Information);
         }
         catch (Exception ex)

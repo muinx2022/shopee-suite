@@ -61,7 +61,7 @@ public sealed class HubConfigSync
     /// <summary>Kéo tài khoản + proxy + cookie + AI từ Hub về, gộp/append vào máy này.</summary>
     public async Task<ImportResult> PullAccountsAsync(CancellationToken ct = default)
     {
-        int bsA = 0, bsS = 0, shA = 0, shS = 0, cookies = 0;
+        int bsA = 0, bsU = 0, bsS = 0, shA = 0, shS = 0, cookies = 0;
         var ai = false;
 
         // 1) Cookie trước (để RebaseBigSeller trỏ CookieFile vào file local vừa tải).
@@ -88,7 +88,7 @@ public sealed class HubConfigSync
             if (bsBytes is not null)
             {
                 var list = JsonSerializer.Deserialize<List<BigSellerAccount>>(bsBytes) ?? [];
-                (bsA, bsS) = BackupService.MergeBigSeller(list, replace: false, rebaseDir: null);
+                (bsA, bsU, bsS) = BackupService.MergeBigSeller(list, replace: false, rebaseDir: null);
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException) { }
@@ -146,7 +146,7 @@ public sealed class HubConfigSync
         }
         catch { }
 
-        return new ImportResult(bsA, bsS, shA, shS, ai, cookies);
+        return new ImportResult(bsA, bsS, shA, shS, ai, cookies, bsU);
     }
 
     /// <summary>SHA-256 (hex hoa) của 1 file local — so với manifest.Hash để bỏ qua tải workbook không đổi.</summary>

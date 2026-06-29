@@ -11,7 +11,8 @@ public sealed record BackupOptions(bool BigSeller, bool ShopeeAccounts, bool AiC
 
 /// <summary>Kết quả khôi phục để báo người dùng.</summary>
 public sealed record ImportResult(
-    int BigSellerAdded, int BigSellerSkipped, int ShopeeAdded, int ShopeeSkipped, bool AiImported, int CookiesCopied);
+    int BigSellerAdded, int BigSellerSkipped, int ShopeeAdded, int ShopeeSkipped, bool AiImported, int CookiesCopied,
+    int BigSellerUpdated = 0);
 
 /// <summary>
 /// Sao lưu / khôi phục dữ liệu suite ra/từ 1 file .zip để đồng bộ sang máy khác.
@@ -50,7 +51,7 @@ public static class BackupService
     public static ImportResult Import(string zipPath, BackupOptions opt, bool replace, string? rebaseWorkbookDir)
     {
         using var zip = ZipFile.OpenRead(zipPath);
-        int bsAdded = 0, bsSkipped = 0, shAdded = 0, shSkipped = 0, cookies = 0;
+        int bsAdded = 0, bsUpdated = 0, bsSkipped = 0, shAdded = 0, shSkipped = 0, cookies = 0;
         var aiImported = false;
 
         // 1) Giải nén cookie BigSeller trước (để re-base CookieFile khi nạp account).
@@ -69,7 +70,7 @@ public static class BackupService
         if (opt.BigSeller && zip.GetEntry("bigseller.json") is { } bsEntry)
         {
             var imported = Deserialize<List<BigSellerAccount>>(bsEntry) ?? [];
-            (bsAdded, bsSkipped) = MergeBigSeller(imported, replace, rebaseWorkbookDir);
+            (bsAdded, bsUpdated, bsSkipped) = MergeBigSeller(imported, replace, rebaseWorkbookDir);
         }
 
         // 3) Tài khoản Shopee (gộp theo login / thay thế).
@@ -86,32 +87,48 @@ public static class BackupService
             aiImported = true;
         }
 
-        return new ImportResult(bsAdded, bsSkipped, shAdded, shSkipped, aiImported, cookies);
+        return new ImportResult(bsAdded, bsSkipped, shAdded, shSkipped, aiImported, cookies, bsUpdated);
     }
 
-    /// <summary>Gộp danh sách BigSeller vào store (dùng chung cho import-zip + đồng bộ Hub). append = replace:false.</summary>
-    public static (int added, int skipped) MergeBigSeller(List<BigSellerAccount> imported, bool replace, string? rebaseDir)
+    /// <summary>Gộp danh sách BigSeller vào store (dùng chung cho import-zip + đồng bộ Hub). append = replace:false.
+    /// Acc ĐÃ CÓ (theo Id/email) mà nội dung DÙNG CHUNG khác (shop/label/email/proxy) → CẬP NHẬT xuống (Hub là
+    /// nguồn sự thật: sửa shop ở Hub lan tới mọi client), GIỮ NGUYÊN field local: cookie, workbook, lựa chọn UI.</summary>
+    public static (int added, int updated, int skipped) MergeBigSeller(List<BigSellerAccount> imported, bool replace, string? rebaseDir)
     {
         var current = replace ? new List<BigSellerAccount>() : BigSellerStore.Shared.Accounts.ToList();
-        var seenEmail = current.Select(EmailKey).Where(k => k.Length > 0).ToHashSet();
-        var seenId = current.Select(a => a.Id).ToHashSet();
-        int added = 0, skipped = 0;
+        int added = 0, updated = 0, skipped = 0;
         foreach (var a in imported)
         {
-            var key = EmailKey(a);
-            var dup = (key.Length > 0 && seenEmail.Contains(key)) || seenId.Contains(a.Id);
-            if (!replace && dup) { skipped++; continue; }
+            var existing = replace ? null
+                : current.FirstOrDefault(x => x.Id == a.Id)
+                  ?? (EmailKey(a).Length > 0 ? current.FirstOrDefault(x => EmailKey(x) == EmailKey(a)) : null);
+            if (existing is not null)
+            {
+                if (SharedSignature(existing) != SharedSignature(a))
+                {
+                    existing.Label = a.Label; existing.Email = a.Email; existing.Shops = a.Shops;
+                    existing.KiotProxyKey = a.KiotProxyKey; existing.Region = a.Region; existing.ProxyType = a.ProxyType;
+                    updated++;
+                }
+                else skipped++;
+                continue;
+            }
             RebaseBigSeller(a, rebaseDir);
             current.Add(a);
-            if (key.Length > 0) seenEmail.Add(key);
-            seenId.Add(a.Id);
             added++;
         }
-        // Chỉ ghi store khi THỰC SỰ đổi (có thêm mới, hoặc chế độ thay-thế) → auto-pull định kỳ không bắn
-        // sự kiện Changed làm UI dựng lại danh sách dù không có gì mới.
-        if (replace || added > 0) BigSellerStore.Shared.ReplaceAll(current);
-        return (added, skipped);
+        // Chỉ ghi store khi THỰC SỰ đổi (thêm mới / cập nhật / chế độ thay-thế) → auto-pull định kỳ không bắn
+        // sự kiện Changed làm UI dựng lại danh sách khi không có gì mới.
+        if (replace || added > 0 || updated > 0) BigSellerStore.Shared.ReplaceAll(current);
+        return (added, updated, skipped);
     }
+
+    /// <summary>Chữ ký các trường DÙNG CHUNG của 1 acc BigSeller (bỏ qua cookie/workbook/lựa-chọn-UI là field
+    /// cục bộ-theo-máy) → so để biết Hub có sửa nội dung (shop…) hay không.</summary>
+    private static string SharedSignature(BigSellerAccount a) => JsonSerializer.Serialize(new
+    {
+        a.Label, a.Email, a.KiotProxyKey, a.Region, a.ProxyType, a.Shops,
+    });
 
     /// <summary>Gộp danh sách Shopee account (kèm proxy) vào store. append = replace:false.</summary>
     public static (int added, int skipped) MergeShopee(List<ShopeeAccount> imported, bool replace)
