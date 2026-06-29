@@ -510,7 +510,7 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
 
             _skippedEditIds.Add(actualEditId);
             if (!string.IsNullOrEmpty(rowKey)) _skippedRowKeys.Add(rowKey);
-            _log($"✅ HOÀN TẤT XỬ LÝ SKU: {record.Sku}");
+            _log($"✅ HOÀN TẤT XỬ LÝ SKU: {record!.Sku}");
             return ("ok", false);
         }
         catch (OperationCanceledException) { throw; }
@@ -726,7 +726,7 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
         }
 
         // [12.1] AI description — rỗng sau retry = LỖI TẠM → retry vòng sau, KHÔNG xóa dòng (tránh mất SP).
-        var aiContent = await GenerateDescriptionAsync(rec.ProductName, ct).ConfigureAwait(false);
+        var aiContent = await GenerateDescriptionAsync(rec.ProductName ?? "", ct).ConfigureAwait(false);
         if (string.IsNullOrWhiteSpace(aiContent)) { _lastProcessTransient = true; return false; }
         if (!await UpdateDescriptionAsync(page, aiContent, ct)) return false;
 
@@ -790,7 +790,7 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
             {
                 await page.Keyboard.PressAsync("Control+A");
                 await page.Keyboard.PressAsync("Backspace");
-                await search.TypeAsync("No brand", new() { Delay = 30 });
+                await search.PressSequentiallyAsync("No brand", new() { Delay = 30 });
             }
         }
 

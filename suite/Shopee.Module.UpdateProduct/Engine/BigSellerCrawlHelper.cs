@@ -264,12 +264,20 @@ internal static class BigSellerCrawlHelper
         catch { return 0; }
     }
 
+    /// <summary>"Có hiển thị trong vòng timeout không" — thay cho IsVisibleAsync(Timeout) đã obsolete:
+    /// chờ tới khi phần tử visible (true) hoặc hết giờ (false). Giữ nguyên ngữ nghĩa "đợi rồi trả bool".</summary>
+    private static async Task<bool> IsVisibleWithinAsync(ILocator loc, float timeoutMs)
+    {
+        try { await loc.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = timeoutMs }); return true; }
+        catch { return false; }
+    }
+
     public static async Task DismissPostImportDialogsAsync(IPage page, Action<string>? log = null)
     {
         try
         {
             var draftLink = page.Locator("a.has_underline:has-text('Hộp nháp')").First;
-            if (await draftLink.IsVisibleAsync(new() { Timeout = 3000 }))
+            if (await IsVisibleWithinAsync(draftLink, 3000))
             {
                 log?.Invoke("Bỏ qua link Hộp nháp, dùng hộp thoại...");
                 await page.Keyboard.PressAsync("Escape");
@@ -286,7 +294,7 @@ internal static class BigSellerCrawlHelper
 
             try
             {
-                if (await closeBtn.IsVisibleAsync(new() { Timeout = 1000 }))
+                if (await IsVisibleWithinAsync(closeBtn, 1000))
                 {
                     await closeBtn.ClickAsync(new() { Timeout = 3000 });
                     await Task.Delay(400);

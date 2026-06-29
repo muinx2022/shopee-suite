@@ -211,7 +211,7 @@ internal sealed class BraveInstanceSession : IDisposable
                 return false;
             }
 
-            _config.ApplyExtensionProgress(state);
+            _config!.ApplyExtensionProgress(state);
 
             if (state.Running == true)
                 _lastInterruptLogSignature = null;

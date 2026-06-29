@@ -77,6 +77,21 @@ public sealed partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private string _hubServerApiToken = "";
     [ObservableProperty] private string _hubServerStatus = "";
 
+    // ── Bộ chọn vai trò máy (mặc định KHÔNG chọn gì → không hiện panel nào) ──
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowRoleHint))]
+    private bool _isClientRole;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowRoleHint))]
+    private bool _isHubRole;
+
+    /// <summary>true khi chưa chọn vai trò nào → hiện dòng gợi ý.</summary>
+    public bool ShowRoleHint => !IsClientRole && !IsHubRole;
+
+    [RelayCommand] private void SelectClientRole() { IsClientRole = true; IsHubRole = false; }
+    [RelayCommand] private void SelectHubRole() { IsHubRole = true; IsClientRole = false; }
+
     public SettingsViewModel() => LoadFromStore();
 
     private void LoadFromStore()

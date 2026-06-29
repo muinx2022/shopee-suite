@@ -122,7 +122,7 @@ internal sealed class BatchRunnerScheduler
         {
             if (!_active) return;
 
-            var maxConcurrent = Math.Max(1, _getMaxConcurrent());
+            var maxConcurrent = Math.Max(1, _getMaxConcurrent?.Invoke() ?? 1);
             if (_activeSlotIds.Count >= maxConcurrent) return;
             if (_canDispatchMore is not null && !_canDispatchMore()) return;
 

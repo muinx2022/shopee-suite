@@ -463,9 +463,12 @@ public sealed partial class SearchViewModel : ObservableObject
             if (File.Exists(UiSettingsPath) &&
                 JsonSerializer.Deserialize<UiSettings>(File.ReadAllText(UiSettingsPath)) is { } j)
             {
+                // Gán THẲNG field (không qua property) để KHÔNG bắn PropertyChanged/OnChanged khi đang nạp UI.
+#pragma warning disable MVVMTK0034
                 if (!string.IsNullOrWhiteSpace(j.Docx)) _categoryDocxPath = j.Docx;
                 if (!string.IsNullOrWhiteSpace(j.Output)) _outputDir = j.Output;
                 if (!string.IsNullOrWhiteSpace(j.Region)) _region = j.Region;
+#pragma warning restore MVVMTK0034
                 if (j.FilePaths is { } fps)
                 {
                     foreach (var f in fps) if (!string.IsNullOrWhiteSpace(f) && File.Exists(f)) _filePaths.Add(f);

@@ -233,7 +233,18 @@
                             </StackPanel>
                         </Border>
 
-                        <Border Style="{StaticResource Card}" Padding="18">
+                        <!-- Bộ chọn vai trò máy này (mặc định chưa chọn gì) -->
+                        <TextBlock Text="Vai trò máy này:" Style="{StaticResource Caption}" Margin="2,0,0,6" />
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                            <Button Content="👤  Máy này là CLIENT" MinWidth="190" Command="{Binding SelectClientRoleCommand}" />
+                            <Button Content="🖥  Máy này là HUB" MinWidth="190" Margin="10,0,0,0" Command="{Binding SelectHubRoleCommand}" />
+                        </StackPanel>
+                        <TextBlock Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="2,0,0,12"
+                                   Visibility="{Binding ShowRoleHint, Converter={StaticResource BoolToVis}}"
+                                   Text="Chọn CLIENT (máy này kết nối tới Hub) hoặc HUB (máy này làm server cho các máy khác). Bấm vào đúng phần bạn cần." />
+
+                        <Border Style="{StaticResource Card}" Padding="18"
+                                Visibility="{Binding IsClientRole, Converter={StaticResource BoolToVis}}">
                             <StackPanel>
                                 <TextBlock Text="Kết nối tới Hub (server đồng bộ + điều phối)" Style="{StaticResource H2}" Margin="0,0,0,6" />
                                 <TextBlock Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,0,0,12"
@@ -262,7 +273,8 @@
                         </Border>
 
                         <!-- Chế độ Hub: máy này LÀM server -->
-                        <Border Style="{StaticResource Card}" Padding="18" Margin="0,14,0,0">
+                        <Border Style="{StaticResource Card}" Padding="18" Margin="0,0,0,0"
+                                Visibility="{Binding IsHubRole, Converter={StaticResource BoolToVis}}">
                             <StackPanel>
                                 <TextBlock Text="Biến máy này thành Hub (server)" Style="{StaticResource H2}" Margin="0,0,0,6" />
                                 <TextBlock Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,0,0,12"
