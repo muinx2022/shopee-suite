@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -14,6 +15,9 @@ namespace Shopee.Hub;
 /// </summary>
 public sealed class HubServer
 {
+    /// <summary>Trần kích thước 1 lần upload (workbook Excel có thể lớn). Có chặn trên để tránh OOM/đầy đĩa do client lỗi/độc.</summary>
+    private const long MaxUploadBytes = 256L * 1024 * 1024;
+
     private WebApplication? _app;
     private HubDatabase? _db;
 
@@ -30,6 +34,8 @@ public sealed class HubServer
 
         var builder = WebApplication.CreateBuilder();
         builder.Logging.ClearProviders();
+        // Mặc định Kestrel ~28.6MB → workbook lớn bị 413 và đồng bộ "im lặng" không xong. Nâng trần (có chặn trên).
+        builder.WebHost.ConfigureKestrel(o => o.Limits.MaxRequestBodySize = MaxUploadBytes);
         var app = builder.Build();
         app.Urls.Add($"http://127.0.0.1:{cfg.Port}");
 
@@ -88,32 +94,32 @@ public sealed class HubServer
             return res.Ok ? Results.Json(res) : Results.Json(res, statusCode: StatusCodes.Status409Conflict);
         });
 
-        // ── Khoá việc theo shop+op ──
-        app.MapPost("/leases/acquire", (LeaseAcquireRequest r) => Results.Json(db.AcquireLease(r)));
-        app.MapPost("/leases/heartbeat", (LeaseHeartbeatRequest r) => { db.HeartbeatLease(r.Key, r.MachineId); return Results.Ok(); });
-        app.MapPost("/leases/release", (LeaseReleaseRequest r) => { db.ReleaseLease(r.Key, r.MachineId); return Results.Ok(); });
+        // ── Khoá việc theo shop+op ── (body null/sai → 400 thay vì NRE 500)
+        app.MapPost("/leases/acquire", (LeaseAcquireRequest? r) => r is null ? Results.BadRequest() : Results.Json(db.AcquireLease(r)));
+        app.MapPost("/leases/heartbeat", (LeaseHeartbeatRequest? r) => { if (r is null) return Results.BadRequest(); db.HeartbeatLease(r.Key, r.MachineId); return Results.Ok(); });
+        app.MapPost("/leases/release", (LeaseReleaseRequest? r) => { if (r is null) return Results.BadRequest(); db.ReleaseLease(r.Key, r.MachineId); return Results.Ok(); });
 
         // ── Khoá tài khoản Shopee (chống dùng trùng xuyên máy) ──
-        app.MapPost("/accounts/reserve", (AccountReserveRequest r) => Results.Json(db.ReserveAccounts(r)));
-        app.MapPost("/accounts/release", (AccountReleaseRequest r) => { db.ReleaseAccounts(r); return Results.Ok(); });
-        app.MapPost("/accounts/heartbeat", (AccountReleaseRequest r) => { db.HeartbeatAccounts(r); return Results.Ok(); });
+        app.MapPost("/accounts/reserve", (AccountReserveRequest? r) => r?.AccountIds is null ? Results.BadRequest() : Results.Json(db.ReserveAccounts(r)));
+        app.MapPost("/accounts/release", (AccountReleaseRequest? r) => { if (r?.AccountIds is null) return Results.BadRequest(); db.ReleaseAccounts(r); return Results.Ok(); });
+        app.MapPost("/accounts/heartbeat", (AccountReleaseRequest? r) => { if (r?.AccountIds is null) return Results.BadRequest(); db.HeartbeatAccounts(r); return Results.Ok(); });
         app.MapGet("/accounts/active", () => Results.Json(db.ActiveAccountLeases()));
 
         // ── Sổ hoàn thành ──
-        app.MapPost("/ledger", (WorkLedgerRecord r) => { db.PublishLedger(r); return Results.Ok(); });
+        app.MapPost("/ledger", (WorkLedgerRecord? r) => { if (r is null) return Results.BadRequest(); db.PublishLedger(r); return Results.Ok(); });
         app.MapGet("/ledger", () => Results.Json(db.AllLedger()));
 
         // ── Nhịp máy + bảng trạng thái ──
-        app.MapPost("/machines/heartbeat", (MachineHeartbeatRequest r) => { db.MachineHeartbeat(r); return Results.Ok(); });
+        app.MapPost("/machines/heartbeat", (MachineHeartbeatRequest? r) => { if (r is null) return Results.BadRequest(); db.MachineHeartbeat(r); return Results.Ok(); });
         app.MapGet("/fleet", () => Results.Json(db.Fleet()));
 
-        // ── Vai trò máy + giao việc ──
+        // ── Vai trò máy + giao việc ── (body null/sai → 400 thay vì NRE 500)
         app.MapGet("/roles", () => Results.Json(db.AllRoles()));
-        app.MapPost("/roles", (SetRoleRequest r) => { db.SetRole(r.MachineId, r.Role); return Results.Ok(); });
+        app.MapPost("/roles", (SetRoleRequest? r) => { if (r is null) return Results.BadRequest(); db.SetRole(r.MachineId, r.Role); return Results.Ok(); });
         app.MapGet("/assignments", () => Results.Json(db.ListAssignments()));
-        app.MapPost("/assignments", (CreateAssignmentRequest r) => Results.Json(db.CreateAssignment(r)));
-        app.MapPost("/assignments/claim", (ClaimAssignmentsRequest r) => Results.Json(db.ClaimNext(r.MachineId, r.Role, r.Max)));
-        app.MapPost("/assignments/status", (AssignmentStatusRequest r) => { db.UpdateAssignmentStatus(r.Id, r.MachineId, r.Status, r.Error); return Results.Ok(); });
-        app.MapPost("/assignments/cancel", (CancelAssignmentRequest r) => { db.CancelAssignment(r.Id); return Results.Ok(); });
+        app.MapPost("/assignments", (CreateAssignmentRequest? r) => r is null ? Results.BadRequest() : Results.Json(db.CreateAssignment(r)));
+        app.MapPost("/assignments/claim", (ClaimAssignmentsRequest? r) => r is null ? Results.BadRequest() : Results.Json(db.ClaimNext(r.MachineId, r.Role, r.Max)));
+        app.MapPost("/assignments/status", (AssignmentStatusRequest? r) => { if (r is null) return Results.BadRequest(); db.UpdateAssignmentStatus(r.Id, r.MachineId, r.Status, r.Error); return Results.Ok(); });
+        app.MapPost("/assignments/cancel", (CancelAssignmentRequest? r) => { if (r is null) return Results.BadRequest(); db.CancelAssignment(r.Id); return Results.Ok(); });
     }
 }

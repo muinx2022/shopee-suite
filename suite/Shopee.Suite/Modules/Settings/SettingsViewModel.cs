@@ -98,6 +98,11 @@ public sealed partial class SettingsViewModel : ObservableObject
     /// <summary>true khi chưa chọn vai trò nào → hiện dòng gợi ý.</summary>
     public bool ShowRoleHint => !IsClientRole && !IsHubRole;
 
+    // Loại-trừ-nhau do VM kiểm soát (không dùng RadioButton GroupName — vì group bỏ-chọn bằng SetCurrentValue
+    // KHÔNG đẩy false về binding hai chiều, khiến cả hai cờ cùng true). Setter này luôn giữ đúng tối đa 1 vai trò.
+    partial void OnIsClientRoleChanged(bool value) { if (value) IsHubRole = false; }
+    partial void OnIsHubRoleChanged(bool value) { if (value) IsClientRole = false; }
+
     public SettingsViewModel()
     {
         LoadFromStore();
@@ -199,7 +204,12 @@ public sealed partial class SettingsViewModel : ObservableObject
     [RelayCommand]
     private void SaveHubClient()
     {
-        var url = (HubBaseUrl ?? "").Trim().TrimEnd('/');
+        var url = NormalizeHubUrl(HubBaseUrl);
+        if (url is null)   // chỉ null khi nhập KHÁC rỗng nhưng không hợp lệ → tránh new Uri(...) ném lúc khởi động
+        {
+            Status = "✘ URL Hub không hợp lệ. Ví dụ: https://api.tencuaban.com";
+            return;
+        }
         HubBaseUrl = url;
         HubClientConfigStore.Shared.Save(new HubClientConfig
         {
@@ -210,6 +220,17 @@ public sealed partial class SettingsViewModel : ObservableObject
         Status = HubEnabled && !string.IsNullOrWhiteSpace(url)
             ? $"Đã lưu kết nối Hub: {url}. (Có hiệu lực ở lần khởi động kế tiếp.)"
             : "Đã tắt đồng bộ Hub — app chạy độc lập như cũ.";
+    }
+
+    /// <summary>Chuẩn hoá URL Hub: tự thêm "https://" nếu thiếu scheme; "" nếu rỗng; null nếu KHÔNG hợp lệ (http/https tuyệt đối).</summary>
+    private static string? NormalizeHubUrl(string? raw)
+    {
+        var s = (raw ?? "").Trim();
+        if (s.Length == 0) return "";
+        if (!s.Contains("://")) s = "https://" + s;
+        s = s.TrimEnd('/');
+        return Uri.TryCreate(s, UriKind.Absolute, out var u) && (u.Scheme == Uri.UriSchemeHttp || u.Scheme == Uri.UriSchemeHttps)
+            ? s : null;
     }
 
     [RelayCommand]

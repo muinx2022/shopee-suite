@@ -66,37 +66,55 @@ public sealed class HubConfigSync
         // 1) Cookie trước (để RebaseBigSeller trỏ CookieFile vào file local vừa tải).
         var manifest = await _client.ManifestAsync(ct);
         Directory.CreateDirectory(CookieDir);
+        // Mỗi bước bọc try/catch RIÊNG: 1 file hỏng/tải lỗi KHÔNG làm hỏng cả lần kéo (tránh trạng thái dở dang).
+        // OperationCanceledException vẫn để propagate (người dùng huỷ).
         foreach (var m in manifest.Where(m => m.Name.StartsWith("cookies/", StringComparison.OrdinalIgnoreCase)))
         {
-            var bytes = await _client.DownloadAsync(m.Name, ct);
-            if (bytes is null) continue;
-            await File.WriteAllBytesAsync(Path.Combine(CookieDir, Path.GetFileName(m.Name)), bytes, ct);
-            cookies++;
+            try
+            {
+                var bytes = await _client.DownloadAsync(m.Name, ct);
+                if (bytes is null) continue;
+                await File.WriteAllBytesAsync(Path.Combine(CookieDir, Path.GetFileName(m.Name)), bytes, ct);
+                cookies++;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException) { }
         }
 
         // 2) BigSeller (+ rebase CookieFile/WorkbookPath theo máy này).
-        var bsBytes = await _client.DownloadAsync("config/bigseller.json", ct);
-        if (bsBytes is not null)
+        try
         {
-            var list = JsonSerializer.Deserialize<List<BigSellerAccount>>(bsBytes) ?? [];
-            (bsA, bsS) = BackupService.MergeBigSeller(list, replace: false, rebaseDir: null);
+            var bsBytes = await _client.DownloadAsync("config/bigseller.json", ct);
+            if (bsBytes is not null)
+            {
+                var list = JsonSerializer.Deserialize<List<BigSellerAccount>>(bsBytes) ?? [];
+                (bsA, bsS) = BackupService.MergeBigSeller(list, replace: false, rebaseDir: null);
+            }
         }
+        catch (Exception ex) when (ex is not OperationCanceledException) { }
 
         // 3) Shopee (+ proxy).
-        var shBytes = await _client.DownloadAsync("config/accounts.json", ct);
-        if (shBytes is not null)
+        try
         {
-            var list = JsonSerializer.Deserialize<List<ShopeeAccount>>(shBytes) ?? [];
-            (shA, shS) = BackupService.MergeShopee(list, replace: false);
+            var shBytes = await _client.DownloadAsync("config/accounts.json", ct);
+            if (shBytes is not null)
+            {
+                var list = JsonSerializer.Deserialize<List<ShopeeAccount>>(shBytes) ?? [];
+                (shA, shS) = BackupService.MergeShopee(list, replace: false);
+            }
         }
+        catch (Exception ex) when (ex is not OperationCanceledException) { }
 
         // 4) AI (ghi đè — 1 cấu hình duy nhất).
-        var aiBytes = await _client.DownloadAsync("config/ai.json", ct);
-        if (aiBytes is not null && JsonSerializer.Deserialize<AiConfig>(aiBytes) is { } cfg)
+        try
         {
-            AiConfigStore.Shared.Save(cfg);
-            ai = true;
+            var aiBytes = await _client.DownloadAsync("config/ai.json", ct);
+            if (aiBytes is not null && JsonSerializer.Deserialize<AiConfig>(aiBytes) is { } cfg)
+            {
+                AiConfigStore.Shared.Save(cfg);
+                ai = true;
+            }
         }
+        catch (Exception ex) when (ex is not OperationCanceledException) { }
 
         // 5) Workbook Excel — tải về hub-cache và TRỎ WorkbookPath sang bản local (để máy này scrape được).
         try

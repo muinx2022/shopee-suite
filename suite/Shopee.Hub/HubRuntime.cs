@@ -13,6 +13,7 @@ public sealed class HubRuntime
 
     private readonly HubServer _server = new();
     private readonly CloudflaredRunner _tunnel = new();
+    private readonly SemaphoreSlim _gate = new(1, 1);   // tuần tự hoá Start/Stop → tránh double-start (đụng cổng) / đua khi thoát
 
     public bool Running { get; private set; }
     public string PublicUrl { get; private set; } = "";
@@ -25,46 +26,62 @@ public sealed class HubRuntime
 
     public async Task StartAsync(HubServerConfig cfg)
     {
-        if (Running) return;
-        await _server.StartAsync(cfg);
-        Emit($"Hub API chạy local: http://127.0.0.1:{cfg.Port}");
-
-        if (!string.IsNullOrWhiteSpace(cfg.TunnelToken))
+        await _gate.WaitAsync().ConfigureAwait(false);
+        try
         {
-            await _tunnel.EnsureInstalledAsync(Emit);
-            _tunnel.Start(cfg.TunnelToken, Emit);
-            PublicUrl = cfg.PublicUrl;
-            Emit(string.IsNullOrWhiteSpace(PublicUrl)
-                ? "Tunnel đang chạy (đặt domain để hiện URL công khai)."
-                : $"Tunnel đang chạy → {PublicUrl}");
-        }
-        else
-        {
-            Emit("ℹ Không chạy cloudflared từ app. Nếu bạn đã cài cloudflared như Windows service riêng " +
-                 "(cloudflared service install <token>) thì tunnel vẫn ra Internet; nếu chưa, API chỉ truy cập trong máy này.");
-        }
+            if (Running) return;
+            await _server.StartAsync(cfg);
+            Emit($"Hub API chạy local: http://127.0.0.1:{cfg.Port}");
 
-        Running = true;
-        StateChanged?.Invoke();
+            if (!string.IsNullOrWhiteSpace(cfg.TunnelToken))
+            {
+                await _tunnel.EnsureInstalledAsync(Emit);
+                _tunnel.Start(cfg.TunnelToken, Emit);
+                PublicUrl = cfg.PublicUrl;
+                Emit(string.IsNullOrWhiteSpace(PublicUrl)
+                    ? "Tunnel đang chạy (đặt domain để hiện URL công khai)."
+                    : $"Tunnel đang chạy → {PublicUrl}");
+            }
+            else
+            {
+                Emit("ℹ Không chạy cloudflared từ app. Nếu bạn đã cài cloudflared như Windows service riêng " +
+                     "(cloudflared service install <token>) thì tunnel vẫn ra Internet; nếu chưa, API chỉ truy cập trong máy này.");
+            }
+
+            Running = true;
+            StateChanged?.Invoke();
+        }
+        finally { _gate.Release(); }
     }
 
     public async Task StopAsync()
     {
-        _tunnel.Stop();
-        await _server.StopAsync();
-        Running = false;
-        PublicUrl = "";
-        StateChanged?.Invoke();
-        Emit("Đã dừng Hub.");
+        await _gate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            _tunnel.Stop();
+            await _server.StopAsync();
+            Running = false;
+            PublicUrl = "";
+            StateChanged?.Invoke();
+            Emit("Đã dừng Hub.");
+        }
+        finally { _gate.Release(); }
     }
 
     /// <summary>Dừng đồng bộ-chặn (gọi lúc app thoát để không bỏ sót cloudflared mồ côi).</summary>
     public void StopBlocking()
     {
-        try { _tunnel.Stop(); } catch { }
-        try { _server.StopAsync().Wait(TimeSpan.FromSeconds(3)); } catch { }
-        Running = false;
-        StateChanged?.Invoke();
+        var got = _gate.Wait(TimeSpan.FromSeconds(3));   // cố lấy gate để khỏi đua với Start/Stop đang chạy
+        try
+        {
+            try { _tunnel.Stop(); } catch { }
+            try { _server.StopAsync().Wait(TimeSpan.FromSeconds(3)); } catch { }
+            Running = false;
+            PublicUrl = "";
+            StateChanged?.Invoke();
+        }
+        finally { if (got) _gate.Release(); }
     }
 
     private void Emit(string m) { try { Log?.Invoke(m); } catch { } }

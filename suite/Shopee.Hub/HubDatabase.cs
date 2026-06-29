@@ -256,7 +256,7 @@ ON CONFLICT(account_id) DO UPDATE SET machine_id=$m, hostname=$h, heartbeat_at=$
             var now = DateTimeOffset.UtcNow;
             var existing = ReadLedgerLocked(incoming.Key);
             var completed = existing?.Completed ?? new List<RowRange>();
-            foreach (var rr in incoming.Completed)
+            foreach (var rr in incoming.Completed ?? [])
                 completed = RowRangeMath.Merge(completed, rr.From, rr.To);
             var lastRow = Math.Max(existing?.LastRowReached ?? 0, incoming.LastRowReached);
 
@@ -666,29 +666,36 @@ VALUES($id,$b,$s,$sh,$o,$t,$p,'queued','','','',$ca,$ua);";
 
     public byte[]? ReadFile(string name)
     {
-        var safe = SafeRelative(name);
-        if (safe is null) return null;
-        var path = Path.Combine(FilesDir, safe);
-        lock (_gate) return File.Exists(path) ? File.ReadAllBytes(path) : null;
+        var path = SafeFullPath(FilesDir, name);
+        if (path is null) return null;
+        // Đọc blob KHÔNG cần _gate (không đụng SqliteConnection); file ghi nguyên tử qua tmp+Move nên đọc luôn an toàn.
+        return File.Exists(path) ? File.ReadAllBytes(path) : null;
     }
 
     /// <summary>Ghi file. ifMatch != null ⇒ kiểm tra version khớp (optimistic concurrency).</summary>
     public FilePutResponse PutFile(string name, byte[] data, int? ifMatch, string updatedBy)
     {
-        var safe = SafeRelative(name);
-        if (safe is null) return new FilePutResponse(false, 0, "bad-name");
+        var path = SafeFullPath(FilesDir, name);
+        if (path is null) return new FilePutResponse(false, 0, "bad-name");
+
+        // Ghi bytes ra tmp NGOÀI lock (việc nặng) → không chặn lease/heartbeat của cả fleet. Tmp duy nhất (Guid)
+        // để 2 client ghi cùng tên không đạp lên nhau. Chỉ rename + cập nhật DB mới nằm trong lock.
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var hash = Sha256(data);
+        var tmp = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        File.WriteAllBytes(tmp, data);
+
         lock (_gate)
         {
             var current = ReadFileMetaLocked(name);
             if (ifMatch.HasValue && current is not null && current.Version != ifMatch.Value)
+            {
+                try { File.Delete(tmp); } catch { }
                 return new FilePutResponse(false, current.Version, "version-conflict");
+            }
 
             var newVer = (current?.Version ?? 0) + 1;
-            var path = Path.Combine(FilesDir, safe);
-            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            var tmp = path + ".tmp";
-            File.WriteAllBytes(tmp, data);
-            File.Move(tmp, path, overwrite: true);
+            File.Move(tmp, path, overwrite: true);   // rename nhanh, giữ trong lock để khớp với bản ghi DB
 
             var now = DateTimeOffset.UtcNow;
             using var c = _conn.CreateCommand();
@@ -698,7 +705,7 @@ VALUES($n,$v,$h,$s,$mt,$ub,$ua)
 ON CONFLICT(name) DO UPDATE SET version=$v, hash=$h, size=$s, mtime=$mt, updated_by=$ub, updated_at=$ua;";
             c.Parameters.AddWithValue("$n", name);
             c.Parameters.AddWithValue("$v", newVer);
-            c.Parameters.AddWithValue("$h", Sha256(data));
+            c.Parameters.AddWithValue("$h", hash);
             c.Parameters.AddWithValue("$s", (long)data.Length);
             c.Parameters.AddWithValue("$mt", Iso(now));
             c.Parameters.AddWithValue("$ub", updatedBy);
@@ -736,13 +743,20 @@ ON CONFLICT(name) DO UPDATE SET version=$v, hash=$h, size=$s, mtime=$mt, updated
 
     private static string Sha256(byte[] data) => Convert.ToHexString(SHA256.HashData(data));
 
-    /// <summary>Chuẩn hoá tên file thành đường dẫn tương đối an toàn (chặn traversal). null nếu xấu.</summary>
-    private static string? SafeRelative(string name)
+    /// <summary>Chuẩn hoá tên file thành đường dẫn TUYỆT ĐỐI an toàn nằm TRONG <paramref name="baseDir"/>.
+    /// Chặn traversal ("..", "."), đường dẫn có ổ đĩa ("C:\..."), UNC, và alternate-data-stream ("tên:stream"),
+    /// rồi chốt chặn cuối bằng kiểm tra prefix sau khi GetFullPath. null nếu tên xấu / thoát ra ngoài baseDir.</summary>
+    private static string? SafeFullPath(string baseDir, string name)
     {
         if (string.IsNullOrWhiteSpace(name)) return null;
         var rel = name.Replace('\\', '/').Trim('/');
         if (rel.Length == 0) return null;
-        if (rel.Split('/').Any(seg => seg is "" or "." or "..")) return null;
-        return rel.Replace('/', Path.DirectorySeparatorChar);
+        // Mỗi đoạn phải "lành": không rỗng/./.. và KHÔNG chứa ':' ("C:" rooted hoặc ADS "tên:stream").
+        if (rel.Split('/').Any(seg => seg is "" or "." or ".." || seg.Contains(':'))) return null;
+
+        var baseFull = Path.GetFullPath(baseDir);
+        var full = Path.GetFullPath(Path.Combine(baseFull, rel.Replace('/', Path.DirectorySeparatorChar)));
+        var prefix = baseFull.EndsWith(Path.DirectorySeparatorChar) ? baseFull : baseFull + Path.DirectorySeparatorChar;
+        return full.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) ? full : null;
     }
 }
