@@ -9,6 +9,8 @@ public sealed class MachineInfo
     public string Hostname { get; set; } = "";
     /// <summary>Tên hiển thị do người dùng đặt (vd "Máy của ABC"); trống = dùng <see cref="Hostname"/>.</summary>
     public string DisplayName { get; set; } = "";
+    /// <summary>Vai trò máy do người dùng chọn ở Cài đặt: "client" | "hub" | "" (chưa chọn). Để hiện đúng panel khi mở lại.</summary>
+    public string Role { get; set; } = "";
     public DateTimeOffset CreatedAt { get; set; }
 }
 
@@ -46,6 +48,22 @@ public sealed class MachineIdentity
         lock (_lock)
         {
             _info.DisplayName = (name ?? "").Trim();
+            Save(_info);
+        }
+    }
+
+    /// <summary>Vai trò đã chọn ("client"/"hub"/""). Để Cài đặt hiện đúng panel khi mở lại app.</summary>
+    public string Role { get { lock (_lock) return _info.Role ?? ""; } }
+
+    /// <summary>Ghi vai trò máy này (lưu vào machine.json). Giá trị lạ → coi như chưa chọn.</summary>
+    public void SetRole(string role)
+    {
+        lock (_lock)
+        {
+            var r = (role ?? "").Trim().ToLowerInvariant();
+            if (r != "client" && r != "hub") r = "";
+            if (string.Equals(_info.Role ?? "", r, StringComparison.Ordinal)) return;
+            _info.Role = r;
             Save(_info);
         }
     }
@@ -98,7 +116,7 @@ public sealed class MachineIdentity
     }
 
     private static MachineInfo Clone(MachineInfo m) =>
-        new() { MachineId = m.MachineId, Hostname = m.Hostname, DisplayName = m.DisplayName, CreatedAt = m.CreatedAt };
+        new() { MachineId = m.MachineId, Hostname = m.Hostname, DisplayName = m.DisplayName, Role = m.Role, CreatedAt = m.CreatedAt };
 
     private static string Short(string id) => id.Length <= 6 ? id : id[..6];
 }

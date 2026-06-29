@@ -24,6 +24,7 @@
             <conv:BoolToVisibilityConverter x:Key="BoolToVis" />
             <conv:InverseBoolToVisibilityConverter x:Key="InverseBoolToVis" />
             <conv:CountToVisibilityConverter x:Key="CountToVis" />
+            <conv:StringToVisibilityConverter x:Key="StringToVis" />
 
             <!-- ViewModel-first navigation: mỗi ViewModel map sang View tương ứng. -->
             <DataTemplate DataType="{x:Type ws:WorkspaceViewModel}">

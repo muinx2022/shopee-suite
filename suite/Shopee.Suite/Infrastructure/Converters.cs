@@ -24,6 +24,16 @@ public sealed class InverseBoolToVisibilityConverter : IValueConverter
         value is Visibility.Collapsed;
 }
 
+/// <summary>string → Visibility (có nội dung = Visible, rỗng/null = Collapsed).</summary>
+public sealed class StringToVisibilityConverter : IValueConverter
+{
+    public object Convert(object value, Type t, object parameter, CultureInfo c) =>
+        string.IsNullOrWhiteSpace(value as string) ? Visibility.Collapsed : Visibility.Visible;
+
+    public object ConvertBack(object value, Type t, object parameter, CultureInfo c) =>
+        throw new NotSupportedException();
+}
+
 /// <summary>int (count) → Visibility (>0 = Visible, ngược lại Collapsed).</summary>
 public sealed class CountToVisibilityConverter : IValueConverter
 {

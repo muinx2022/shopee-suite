@@ -71,6 +71,8 @@ public sealed partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private bool _hubEnabled;
     [ObservableProperty] private string _hubBaseUrl = "";
     [ObservableProperty] private string _hubApiToken = "";
+    /// <summary>Trạng thái kết nối client→Hub (hiện ngay trên panel client để biết nối được chưa).</summary>
+    [ObservableProperty] private string _hubClientStatus = "";
 
     // ── Chế độ Hub (máy này LÀM server) ─────────────────────────────────────────
     [ObservableProperty] private bool _isHubMode;
@@ -98,10 +100,30 @@ public sealed partial class SettingsViewModel : ObservableObject
     /// <summary>true khi chưa chọn vai trò nào → hiện dòng gợi ý.</summary>
     public bool ShowRoleHint => !IsClientRole && !IsHubRole;
 
+    /// <summary>true trong lúc nạp từ store → chặn ghi-lại vai trò khi đang khôi phục (tránh vòng + ghi thừa).</summary>
+    private bool _loadingRole;
+
     // Loại-trừ-nhau do VM kiểm soát (không dùng RadioButton GroupName — vì group bỏ-chọn bằng SetCurrentValue
     // KHÔNG đẩy false về binding hai chiều, khiến cả hai cờ cùng true). Setter này luôn giữ đúng tối đa 1 vai trò.
-    partial void OnIsClientRoleChanged(bool value) { if (value) IsHubRole = false; }
-    partial void OnIsHubRoleChanged(bool value) { if (value) IsClientRole = false; }
+    partial void OnIsClientRoleChanged(bool value)
+    {
+        if (value)
+        {
+            IsHubRole = false;
+            // Chọn CLIENT = muốn đồng bộ → bật sẵn ô "Bật đồng bộ" (tránh quên tick rồi tưởng không nối được).
+            if (!_loadingRole && !HubEnabled) HubEnabled = true;
+        }
+        PersistRole();
+    }
+
+    partial void OnIsHubRoleChanged(bool value) { if (value) IsClientRole = false; PersistRole(); }
+
+    /// <summary>Ghi vai trò đã chọn vào machine.json để mở lại app hiện đúng panel. Bỏ qua khi đang nạp.</summary>
+    private void PersistRole()
+    {
+        if (_loadingRole) return;
+        MachineIdentity.Shared.SetRole(IsHubRole ? "hub" : IsClientRole ? "client" : "");
+    }
 
     public SettingsViewModel()
     {
@@ -138,6 +160,15 @@ public sealed partial class SettingsViewModel : ObservableObject
         HubServerApiToken = hubSrv.ApiToken;
         IsHubRunning = HubRuntime.Shared.Running;
         HubServerStatus = IsHubRunning ? "🟢 Đang chạy" : "⚪ Chưa chạy";
+
+        // Khôi phục VAI TRÒ đã chọn để mở lại app hiện đúng panel. Ưu tiên giá trị đã lưu; nếu chưa từng
+        // chọn (bản cũ) thì suy từ cấu hình đang bật để không vỡ máy đang dùng. _loadingRole chặn ghi-lại.
+        _loadingRole = true;
+        var role = MachineIdentity.Shared.Role;
+        IsHubRole = role == "hub" || (role.Length == 0 && hubSrv.Enabled);
+        IsClientRole = role == "client" || (role.Length == 0 && !hubSrv.Enabled && hub.Enabled);
+        _loadingRole = false;
+        HubClientStatus = CoordinationRuntime.Active && !hubSrv.Enabled ? "🔵 Đã bật đồng bộ Hub (bấm \"Kiểm tra\" để chắc nối được)." : "";
 
         var p = PerformanceSettingsStore.Shared.Current;
         UsableCpu = p.UsableCpuCores > 0 ? p.UsableCpuCores : System.Math.Max(2, BraveFleet.CpuCores / 2);
@@ -218,8 +249,41 @@ public sealed partial class SettingsViewModel : ObservableObject
             ApiToken = (HubApiToken ?? "").Trim(),
         });
         Status = HubEnabled && !string.IsNullOrWhiteSpace(url)
-            ? $"Đã lưu kết nối Hub: {url}. (Có hiệu lực ở lần khởi động kế tiếp.)"
+            ? $"Đã lưu kết nối Hub: {url}. Bấm \"Kết nối ngay\" để áp dụng (hoặc khởi động lại app)."
             : "Đã tắt đồng bộ Hub — app chạy độc lập như cũ.";
+    }
+
+    /// <summary>Tạo client tạm từ URL/token đang nhập và ping /health để biết NGAY có nối được không.</summary>
+    [RelayCommand]
+    private async Task TestHubClient()
+    {
+        var url = NormalizeHubUrl(HubBaseUrl);
+        if (string.IsNullOrWhiteSpace(url)) { HubClientStatus = "✘ Chưa nhập URL Hub."; return; }
+        HubClientStatus = "⏳ Đang kiểm tra…";
+        var cfg = new HubClientConfig { Enabled = true, BaseUrl = url, ApiToken = (HubApiToken ?? "").Trim() };
+        try
+        {
+            var ok = await new HubClient(cfg, MachineIdentity.Shared.MachineId).PingAsync();
+            HubClientStatus = ok
+                ? "🟢 Kết nối OK — Hub có phản hồi."
+                : "✘ Không nối được: sai URL/token hoặc máy-Hub chưa bật. Kiểm tra lại rồi thử tiếp.";
+        }
+        catch (Exception ex) { HubClientStatus = "✘ Lỗi: " + ex.Message; }
+    }
+
+    /// <summary>Lưu cấu hình client rồi áp dụng NGAY (không cần khởi động lại app) và ping kiểm chứng.</summary>
+    [RelayCommand]
+    private async Task ConnectNow()
+    {
+        SaveHubClient();
+        if (!HubEnabled) { HubClientStatus = "Đồng bộ đang TẮT — tick \"Bật đồng bộ với Hub\" rồi thử lại."; return; }
+        HubClientStatus = "⏳ Đang kết nối…";
+        var active = CoordinationRuntime.Reconnect();
+        if (!active) { HubClientStatus = "✘ Chưa kết nối — kiểm tra URL/token."; return; }
+        var ok = CoordinationRuntime.Client is { } c && await c.PingAsync();
+        HubClientStatus = ok
+            ? "🟢 Đã kết nối Hub (áp dụng ngay, không cần khởi động lại)."
+            : "🟡 Đã bật nhưng Hub chưa phản hồi — kiểm tra URL/token hoặc máy-Hub đã bật chưa.";
     }
 
     /// <summary>Chuẩn hoá URL Hub: tự thêm "https://" nếu thiếu scheme; "" nếu rỗng; null nếu KHÔNG hợp lệ (http/https tuyệt đối).</summary>

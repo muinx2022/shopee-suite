@@ -44,4 +44,20 @@ public static class CoordinationRuntime
         // Ledger→tiến độ local (resume xuyên máy) do poller tự fold ở lần Hub trả lời ĐẦU TIÊN — tránh race
         // lúc máy-Hub mới bật (server localhost chưa kịp nghe). Xem HttpCoordinationHub.PollAsync.
     }
+
+    /// <summary>
+    /// Áp dụng lại cấu hình client→Hub NGAY (sau khi người dùng lưu ở Cài đặt) mà KHÔNG cần khởi động lại app.
+    /// Gỡ kết nối cũ rồi dựng lại từ config hiện tại. Trả về true nếu đã có client (đã cấu hình hợp lệ).
+    /// Các điểm dùng (AssignmentWorker/Scrape/Update/Fleet) đều đọc <see cref="Hub"/>/<see cref="Client"/>
+    /// tươi mỗi lần nên việc tráo singleton này an toàn.
+    /// </summary>
+    public static bool Reconnect()
+    {
+        Client = null;
+        Hub = null;
+        ConfigSync = null;
+        Coordination.Hub = NoOpCoordinationHub.Instance;   // về trạng thái "tắt" trước khi dựng lại
+        InitFromConfig();
+        return Active;
+    }
 }
