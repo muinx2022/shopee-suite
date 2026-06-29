@@ -345,9 +345,11 @@ public sealed partial class ScrapeViewModel : ObservableObject
         var ct = h.Cts.Token;
 
         ScrapeRunner? runner = null;
-        var claimedFrameIds = new List<string>();   // tk đã giữ chỗ cho job này → nhả ở finally
+        var claimedFrameIds = new List<string>();   // CẢ khung đã giữ chỗ cục bộ → nhả TOÀN BỘ ở finally
+        var hubReservedIds = new List<string>();    // tk được Hub cấp lease (tập con) → chỉ nhả/heartbeat ngần này trên Hub
         var coordKey = new CoordKey(account.Id, shop.Id, sheet, CoordOp.Scrape);
         ILeaseHandle? lease = null;
+        Timer? accHeartbeat = null;                 // nhịp account-lease nền (chống hết hạn giữa chunk dài)
         var accHub = CoordinationRuntime.Hub;       // null nếu chưa kết nối Hub (chạy như 1 máy)
         try
         {
@@ -392,13 +394,19 @@ public sealed partial class ScrapeViewModel : ObservableObject
             if (accHub is not null)
             {
                 var granted = await accHub.ReserveAccountsAsync(claimedFrameIds).ConfigureAwait(false);
+                hubReservedIds = claimedFrameIds.Where(granted.Contains).ToList();   // tập con Hub cấp → nhả/heartbeat trên Hub
                 if (granted.Count < claimedFrameIds.Count)
                 {
                     frame = frame.Where(a => granted.Contains(a.Id)).ToList();
                     Log($"[{account.DisplayName}] {claimedFrameIds.Count - granted.Count} tk Shopee đang được máy khác dùng → loại, còn {frame.Count}.");
-                    claimedFrameIds = frame.Select(a => a.Id).ToList();
+                    // KHÔNG thu hẹp claimedFrameIds: finally vẫn nhả-cục-bộ CẢ khung (tránh rò rỉ tk khỏi kho chung).
                 }
                 if (frame.Count == 0) { Log($"[{account.DisplayName}] mọi tk trong khung đang được máy khác dùng — bỏ qua."); return; }
+
+                // Heartbeat account-lease theo TIMER nền (không lệ thuộc tốc độ scrape) → khỏi hết hạn 5' giữa chunk dài.
+                if (hubReservedIds.Count > 0)
+                    accHeartbeat = new Timer(_ => { try { _ = accHub.HeartbeatAccountsAsync(hubReservedIds); } catch { } },
+                        null, TimeSpan.FromSeconds(60), TimeSpan.FromSeconds(60));
             }
             ScrapeProgressStore.Shared.SaveFrame(account.Id, sheet, frame.Select(a => a.Id));   // lưu khung để resume giữ nguyên
             var procs = Math.Max(1, Math.Min(maxProc, frame.Count));
@@ -428,7 +436,6 @@ public sealed partial class ScrapeViewModel : ObservableObject
             {
                 ScrapeProgressStore.Shared.MarkCompleted(account.Id, sheet, from, to);
                 Coordination.Hub.PublishProgress(coordKey, from, to);     // chia sẻ tiến độ lên Hub
-                _ = accHub?.HeartbeatAccountsAsync(claimedFrameIds);      // giữ account-lease sống
                 OnUi(target.RefreshProgress);
             };
             WireRunner(runner, seq, account.DisplayName);
@@ -458,7 +465,8 @@ public sealed partial class ScrapeViewModel : ObservableObject
                 Coordination.Hub.PublishCompletion(coordKey, fin?.Status ?? "stopped", fin?.LastRowReached ?? 0);
             }
             catch { }
-            if (accHub is not null) { try { await accHub.ReleaseAccountsAsync(claimedFrameIds).ConfigureAwait(false); } catch { } }
+            if (accHeartbeat is not null) { try { await accHeartbeat.DisposeAsync().ConfigureAwait(false); } catch { } }
+            if (accHub is not null) { try { await accHub.ReleaseAccountsAsync(hubReservedIds).ConfigureAwait(false); } catch { } }
             if (lease is not null) { try { await lease.DisposeAsync().ConfigureAwait(false); } catch { } }
 
             // Nhả giữ-chỗ CẢ KHUNG → Search (và job Scrape khác) lại mượn được các tk này.
