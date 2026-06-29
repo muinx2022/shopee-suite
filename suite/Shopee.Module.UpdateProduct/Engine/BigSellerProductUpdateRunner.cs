@@ -135,6 +135,8 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
     private Process? _braveProcess;
 
     private Dictionary<string, WorkbookRecord> _records = new();
+    // SP đã xử lý / bỏ qua (gồm cả "không có trong sheet") → đánh dấu để vòng quét sau KHÔNG mở/không xử lý lại.
+    // KHÔNG còn xóa dòng nào trên BigSeller → "skip" là cách duy nhất để tiến tới dòng kế.
     private readonly HashSet<string> _skippedRowKeys = new();
     private readonly HashSet<string> _skippedEditIds = new();
     private readonly Dictionary<string, int> _failCounts = new();
@@ -396,11 +398,9 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
             var rowKey = await DraftRowKeyAsync(row);
             var editId = await row.GetAttributeAsync(ListingRowKeyAttr) ?? "";
 
+            // Dòng đã xử lý/bỏ qua trước đó → BỎ QUA, KHÔNG xóa (yêu cầu: không xóa dòng nào trên BigSeller).
             if (_skippedRowKeys.Contains(rowKey) || (!string.IsNullOrEmpty(editId) && _skippedEditIds.Contains(editId)))
-            {
-                await DeleteListingRowAsync(row);
                 continue;
-            }
 
             // SONG SONG: giành quyền xử lý dòng này; lane khác đang giữ → bỏ qua (không mở/không xóa).
             if (_claim is not null && !_claim.TryClaim(rowKey)) continue;
@@ -486,11 +486,12 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
             var (status, record) = await InspectEditPageAsync(editPage, ct).ConfigureAwait(false);
             if (status != "needs_update")
             {
-                _log($"  ↳ {status} → xóa dòng listing.");
-                await DeleteListingRowAsync(row);
+                // KHÔNG xóa item trên BigSeller cho BẤT KỲ trạng thái nào (not_in_xlsx / blocked / missing…).
+                // Chỉ GIỮ NGUYÊN + đánh dấu để vòng quét sau bỏ qua (khỏi mở lại / khỏi treo ở dòng này).
+                _log($"  ↳ {status} → giữ nguyên trên BigSeller (KHÔNG xóa), bỏ qua dòng.");
                 if (!string.IsNullOrEmpty(actualEditId)) _skippedEditIds.Add(actualEditId);
                 if (!string.IsNullOrEmpty(rowKey)) _skippedRowKeys.Add(rowKey);
-                return ("deleted", false);
+                return ("skipped", false);
             }
 
             var ok = await ProcessProductAsync(editPage, record!, ct).ConfigureAwait(false);
@@ -502,10 +503,11 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
                 var fails = _failCounts.TryGetValue(failKey, out var c) ? c + 1 : 1;
                 _failCounts[failKey] = fails;
                 if (fails < 2) { _claim?.Release($"edit:{actualEditId}"); return ("retry", false); }
-                await DeleteListingRowAsync(row);
+                // 2 lần fail (không phải lỗi tạm) → GIỮ NGUYÊN, KHÔNG xóa; chỉ bỏ qua dòng.
+                _log("  ↳ fail 2 lần → giữ nguyên trên BigSeller (KHÔNG xóa), bỏ qua dòng.");
                 _skippedEditIds.Add(actualEditId);
                 if (!string.IsNullOrEmpty(rowKey)) _skippedRowKeys.Add(rowKey);
-                return ("deleted", false);
+                return ("skipped", false);
             }
 
             _skippedEditIds.Add(actualEditId);
@@ -577,15 +579,24 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
         catch { }
 
         string? shopeeId = null;
+        var sourceUrl = "";
         foreach (var url in new[] { inputVal, clip })
         {
             if (string.IsNullOrWhiteSpace(url)) continue;
             if (url.Contains("/verify/captcha") || url.Contains("/verify/traffic"))
                 return ("shopee_blocked", null);
-            shopeeId ??= ExtractShopeeId(url);
+            if (shopeeId is null) { shopeeId = ExtractShopeeId(url); if (shopeeId is not null) sourceUrl = url; }
         }
 
-        if (string.IsNullOrEmpty(shopeeId)) return ("missing_shopee_id", null);
+        if (string.IsNullOrEmpty(shopeeId))
+        {
+            _log($"   ⚠ KHÔNG trích được item id từ link nguồn: '{(string.IsNullOrWhiteSpace(inputVal) ? clip : inputVal)}'");
+            return ("missing_shopee_id", null);
+        }
+        // LOG để soi: item id của SP đang edit + có trong sheet (dùng để scrape) không + tên sheet/số dòng + link.
+        // Item id "KHÔNG" trong sheet = SP này không đến từ sheet đang chạy (sheet khác / lần scrape trước / thêm tay).
+        var inSheet = _records.ContainsKey(shopeeId);
+        _log($"   item id = {shopeeId} · trong sheet '{_settings.DataSheet}' ({_records.Count} dòng): {(inSheet ? "CÓ" : "KHÔNG")} · link: {sourceUrl}");
         if (!_records.TryGetValue(shopeeId, out var rec)) return ("not_in_xlsx", null);
         if (string.IsNullOrWhiteSpace(rec.ProductName)) return ("missing_product_name", null);
         return ("needs_update", rec);
@@ -1133,6 +1144,8 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
         catch { return "txt:"; }
     }
 
+    // KHÔNG còn được gọi: theo yêu cầu, KHÔNG xóa dòng nào trên BigSeller. Giữ lại để bật lại nhanh nếu cần.
+#pragma warning disable IDE0051 // private member chưa dùng (cố ý)
     private async Task DeleteListingRowAsync(ILocator row)
     {
         try
@@ -1155,6 +1168,7 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
         }
         catch { }
     }
+#pragma warning restore IDE0051
 
     private async Task DismissBlockingModalAsync(IPage page)
     {

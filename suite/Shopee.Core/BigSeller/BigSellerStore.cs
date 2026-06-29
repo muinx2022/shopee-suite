@@ -31,27 +31,44 @@ public sealed class BigSellerStore
         lock (_lock) return _accounts.FirstOrDefault(a => a.Id == id);
     }
 
-    public void Add(BigSellerAccount account)
-    {
-        lock (_lock) _accounts.Add(account);
-        Save();
-    }
-
-    public void Remove(string id)
-    {
-        lock (_lock) _accounts.RemoveAll(a => a.Id == id);
-        Save();
-    }
-
-    /// <summary>Thay toàn bộ danh sách (dùng khi import/khôi phục) rồi lưu.</summary>
-    public void ReplaceAll(IEnumerable<BigSellerAccount> accounts)
+    public bool Add(BigSellerAccount account)
     {
         lock (_lock)
         {
-            _accounts.Clear();
-            _accounts.AddRange(accounts);
+            _accounts.Add(account);
+            if (SaveLocked()) return true;
+            _accounts.Remove(account);
+            return false;
         }
-        Save();
+    }
+
+    public bool Remove(string id)
+    {
+        lock (_lock)
+        {
+            var removed = _accounts.Where(a => a.Id == id).ToList();
+            if (removed.Count == 0) return true;
+            _accounts.RemoveAll(a => a.Id == id);
+            if (SaveLocked()) return true;
+            _accounts.AddRange(removed);
+            return false;
+        }
+    }
+
+    /// <summary>Thay toàn bộ danh sách (dùng khi import/khôi phục) rồi lưu.</summary>
+    public bool ReplaceAll(IEnumerable<BigSellerAccount> accounts)
+    {
+        var incoming = accounts.ToList();
+        lock (_lock)
+        {
+            var previous = _accounts.ToList();
+            _accounts.Clear();
+            _accounts.AddRange(incoming);
+            if (SaveLocked()) return true;
+            _accounts.Clear();
+            _accounts.AddRange(previous);
+            return false;
+        }
     }
 
     public void Load()
@@ -72,17 +89,29 @@ public sealed class BigSellerStore
         }
     }
 
-    public void Save()
+    public bool Save()
+    {
+        lock (_lock)
+        {
+            return SaveLocked();
+        }
+    }
+
+    private bool SaveLocked()
     {
         try
         {
-            string json;
-            lock (_lock) json = JsonSerializer.Serialize(_accounts, JsonOpts);
+            Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
+            var json = JsonSerializer.Serialize(_accounts, JsonOpts);
             var tmp = FilePath + ".tmp";
             File.WriteAllText(tmp, json, Encoding.UTF8);
             File.Move(tmp, FilePath, overwrite: true);
+            Changed?.Invoke();
+            return true;
         }
-        catch { }
-        Changed?.Invoke();
+        catch
+        {
+            return false;
+        }
     }
 }

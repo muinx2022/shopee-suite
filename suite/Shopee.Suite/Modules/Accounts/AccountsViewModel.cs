@@ -74,6 +74,18 @@ public sealed partial class AccountsViewModel : ObservableObject
         foreach (var it in Items) it.RefreshUsage();
     }
 
+    private bool SaveStore(string success, string failure)
+    {
+        if (AccountStore.Shared.Save())
+        {
+            Status = success;
+            return true;
+        }
+
+        Status = failure;
+        return false;
+    }
+
     private void Reload()
     {
         var keepId = Selected?.Model.Id;
@@ -105,8 +117,13 @@ public sealed partial class AccountsViewModel : ObservableObject
         var name = Selected.DisplayName;
         Selected.Model.Disabled = false;
         Selected.Model.LastError = null;
-        AccountStore.Shared.Save();   // Changed đã tự Reload — KHÔNG gọi Reload() lần nữa.
-        Status = $"Đã bật lại \"{name}\" → quay về rotation.";
+        if (!SaveStore(
+                $"Đã bật lại \"{name}\" → quay về rotation.",
+                $"Không lưu được thay đổi của \"{name}\"."))
+        {
+            Selected.Model.Disabled = true;
+            Selected.Model.LastError ??= "Khôi phục trạng thái lỗi do lưu thất bại.";
+        }
     }
 
     private bool CanReenable() => Selected?.Model.Disabled == true;
@@ -189,12 +206,22 @@ public sealed partial class AccountsViewModel : ObservableObject
                 string verdict;
                 if (success)
                 {
+                    var previousCaptchaUrl = a.CaptchaUrl;
                     a.Disabled = false;
                     a.LastError = null;                 // → đưa về kho
                     a.CaptchaUrl = null;                // đã giải xong → xoá url captcha đã lưu
-                    AccountStore.Shared.Save();         // Changed → Reload → list refresh NGAY (acc rời danh sách lỗi)
-                    okNames.Add(name);
-                    verdict = "✓ OK → về kho";
+                    if (AccountStore.Shared.Save())     // Changed → Reload → list refresh NGAY (acc rời danh sách lỗi)
+                    {
+                        okNames.Add(name);
+                        verdict = "✓ OK → về kho";
+                    }
+                    else
+                    {
+                        a.Disabled = true;
+                        a.LastError = "Vẫn đang đánh dấu lỗi/captcha do lưu thất bại.";
+                        a.CaptchaUrl = previousCaptchaUrl;
+                        verdict = "⚠ lưu thất bại → giữ nguyên trạng thái lỗi";
+                    }
                 }
                 else if (hasCaptchaUrl)
                 {
@@ -273,11 +300,15 @@ public sealed partial class AccountsViewModel : ObservableObject
     private void Add()
     {
         var model = new ShopeeAccount { Label = "Tài khoản mới" };
-        AccountStore.Shared.Add(model);
-        var vm = new AccountItemViewModel(model);
-        Items.Add(vm);
-        Selected = vm;
-        Status = $"{Items.Count} tài khoản.";
+        if (AccountStore.Shared.Add(model))
+        {
+            Selected = Items.FirstOrDefault(x => x.Model.Id == model.Id) ?? Selected;
+            Status = $"{Items.Count} tài khoản.";
+        }
+        else
+        {
+            Status = "Không thêm được tài khoản mới.";
+        }
     }
 
     /// <summary>
@@ -303,8 +334,10 @@ public sealed partial class AccountsViewModel : ObservableObject
 
         var ids = targets.Select(t => t.Model.Id).ToHashSet(StringComparer.Ordinal);
         // ReplaceAll → Save → Changed → Reload tự dựng lại Items (không cần Items.Remove thủ công).
-        AccountStore.Shared.ReplaceAll(AccountStore.Shared.Accounts.Where(a => !ids.Contains(a.Id)));
-        Status = $"Đã xóa {ids.Count} tài khoản · còn {AccountStore.Shared.Accounts.Count}.";
+        if (AccountStore.Shared.ReplaceAll(AccountStore.Shared.Accounts.Where(a => !ids.Contains(a.Id))))
+            Status = $"Đã xóa {ids.Count} tài khoản · còn {AccountStore.Shared.Accounts.Count}.";
+        else
+            Status = $"Không xóa được {ids.Count} tài khoản đã chọn.";
     }
 
     [RelayCommand]
@@ -313,10 +346,9 @@ public sealed partial class AccountsViewModel : ObservableObject
         // Kho lưu chung 1 file accounts.json (toàn bộ tk) → mỗi lần lưu ghi lại cả file (tk vừa sửa +
         // các tk khác giữ nguyên). Báo "đã lưu thay đổi" cho rõ thay vì "đã lưu N tk" (gây hiểu nhầm).
         var name = Selected?.DisplayName;
-        AccountStore.Shared.Save();
-        Status = string.IsNullOrWhiteSpace(name)
-            ? "Đã lưu thay đổi."
-            : $"Đã lưu thay đổi \"{name}\".";
+        SaveStore(
+            string.IsNullOrWhiteSpace(name) ? "Đã lưu thay đổi." : $"Đã lưu thay đổi \"{name}\".",
+            string.IsNullOrWhiteSpace(name) ? "Không lưu được thay đổi." : $"Không lưu được thay đổi của \"{name}\".");
     }
 
     [RelayCommand]
@@ -347,8 +379,9 @@ public sealed partial class AccountsViewModel : ObservableObject
             }
             for (var i = 0; i < accs.Count; i++)
                 AssignProxy(accs[i], proxies[i % proxies.Count]);
-            AccountStore.Shared.Save(); // Changed → Reload tự cập nhật lưới
-            Status = $"Đã gán {proxies.Count} proxy (xoay vòng) cho {accs.Count} tài khoản.";
+            SaveStore(
+                $"Đã gán {proxies.Count} proxy (xoay vòng) cho {accs.Count} tài khoản.",
+                $"Không lưu được gán proxy cho {accs.Count} tài khoản.");
             return;
         }
 
@@ -358,8 +391,11 @@ public sealed partial class AccountsViewModel : ObservableObject
         {
             var model = new ShopeeAccount { ShopeeAccountLogin = logins[i] };
             if (proxies.Count > 0) AssignProxy(model, proxies[i % proxies.Count]);
-            AccountStore.Shared.Add(model);
-            Items.Add(new AccountItemViewModel(model));
+            if (!AccountStore.Shared.Add(model))
+            {
+                Status = $"Import dừng lại: không lưu được tài khoản thứ {i + 1}.";
+                return;
+            }
             added++;
         }
         Selected = Items.LastOrDefault();

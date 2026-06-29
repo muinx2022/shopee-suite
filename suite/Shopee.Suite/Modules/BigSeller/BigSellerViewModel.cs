@@ -77,13 +77,31 @@ public sealed partial class BigSellerViewModel : ObservableObject
         Status = $"{Items.Count} tài khoản BigSeller.";
     }
 
+    private bool SaveStore(string success, string failure)
+    {
+        if (BigSellerStore.Shared.Save())
+        {
+            Status = success;
+            return true;
+        }
+
+        Status = failure;
+        return false;
+    }
+
     [RelayCommand]
     private void Add()
     {
         var model = new BigSellerAccount { Label = "BigSeller mới" };
-        BigSellerStore.Shared.Add(model);   // → Changed → SyncFromStore dựng lại Items (gồm acc mới)
-        Selected = Items.FirstOrDefault(i => i.Model.Id == model.Id);
-        Status = $"{Items.Count} tài khoản BigSeller.";
+        if (BigSellerStore.Shared.Add(model))   // → Changed → SyncFromStore dựng lại Items (gồm acc mới)
+        {
+            Selected = Items.FirstOrDefault(i => i.Model.Id == model.Id) ?? Selected;
+            Status = $"{Items.Count} tài khoản BigSeller.";
+        }
+        else
+        {
+            Status = "Không thêm được tài khoản BigSeller mới.";
+        }
     }
 
     [RelayCommand(CanExecute = nameof(HasSelection))]
@@ -93,16 +111,21 @@ public sealed partial class BigSellerViewModel : ObservableObject
         if (Dialogs.Show($"Xóa tài khoản BigSeller \"{Selected.DisplayName}\"?", "Xóa",
                 MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
             return;
-        BigSellerStore.Shared.Remove(Selected.Model.Id);   // → Changed → SyncFromStore dựng lại Items
-        Selected = Items.FirstOrDefault();
-        Status = $"{Items.Count} tài khoản BigSeller.";
+        if (BigSellerStore.Shared.Remove(Selected.Model.Id))   // → Changed → SyncFromStore dựng lại Items
+        {
+            Selected = Items.FirstOrDefault();
+            Status = $"{Items.Count} tài khoản BigSeller.";
+        }
+        else
+        {
+            Status = $"Không xóa được \"{Selected.DisplayName}\".";
+        }
     }
 
     [RelayCommand]
     private void Save()
     {
-        BigSellerStore.Shared.Save();
-        Status = "Đã lưu cấu hình BigSeller.";
+        SaveStore("Đã lưu cấu hình BigSeller.", "Không lưu được cấu hình BigSeller.");
     }
 
     [RelayCommand]
@@ -113,8 +136,9 @@ public sealed partial class BigSellerViewModel : ObservableObject
         if (dlg.ShowDialog() == true)
         {
             Selected.WorkbookPath = dlg.FileName;
-            Save();
-            Status = $"Workbook có {Selected.SheetOptions.Count} sheet.";
+            SaveStore(
+                $"Workbook có {Selected.SheetOptions.Count} sheet.",
+                "Không lưu được đường dẫn workbook.");
         }
     }
 
@@ -131,7 +155,7 @@ public sealed partial class BigSellerViewModel : ObservableObject
         if (dlg.ShowDialog() == true)
         {
             Selected.CookieFile = dlg.FileName;
-            Save();
+            SaveStore("Đã cập nhật file cookie BigSeller.", "Không lưu được file cookie BigSeller.");
         }
     }
 
@@ -148,7 +172,7 @@ public sealed partial class BigSellerViewModel : ObservableObject
     {
         if (Selected is null) return;
         SelectedShop = Selected.AddShop();
-        Save();
+        SaveStore("Đã thêm shop mới.", "Không lưu được shop mới.");
     }
 
     [RelayCommand]
@@ -157,7 +181,7 @@ public sealed partial class BigSellerViewModel : ObservableObject
         if (Selected is null || SelectedShop is null) return;
         Selected.RemoveShop(SelectedShop);
         SelectedShop = Selected.Shops.FirstOrDefault();
-        Save();
+        SaveStore("Đã xóa shop.", "Không lưu được thay đổi danh sách shop.");
     }
 
     // ── Đăng nhập BigSeller (lấy cookie chung) ──────────────────────────────────

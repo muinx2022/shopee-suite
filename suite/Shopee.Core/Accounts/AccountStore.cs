@@ -33,28 +33,46 @@ public sealed class AccountStore
         lock (_lock) return _accounts.FirstOrDefault(a => a.Id == id);
     }
 
-    public void Add(ShopeeAccount account)
+    public bool Add(ShopeeAccount account)
     {
         account.EnsureProfilePath();
-        lock (_lock) _accounts.Add(account);
-        Save();
+        lock (_lock)
+        {
+            _accounts.Add(account);
+            if (SaveLocked()) return true;
+            _accounts.Remove(account);
+            return false;
+        }
     }
 
-    public void Remove(string id)
-    {
-        lock (_lock) _accounts.RemoveAll(a => a.Id == id);
-        Save();
-    }
-
-    /// <summary>Thay toàn bộ danh sách (dùng khi import/sắp xếp lại) rồi lưu.</summary>
-    public void ReplaceAll(IEnumerable<ShopeeAccount> accounts)
+    public bool Remove(string id)
     {
         lock (_lock)
         {
-            _accounts.Clear();
-            foreach (var a in accounts) { a.EnsureProfilePath(); _accounts.Add(a); }
+            var removed = _accounts.Where(a => a.Id == id).ToList();
+            if (removed.Count == 0) return true;
+            _accounts.RemoveAll(a => a.Id == id);
+            if (SaveLocked()) return true;
+            _accounts.AddRange(removed);
+            return false;
         }
-        Save();
+    }
+
+    /// <summary>Thay toàn bộ danh sách (dùng khi import/sắp xếp lại) rồi lưu.</summary>
+    public bool ReplaceAll(IEnumerable<ShopeeAccount> accounts)
+    {
+        var incoming = accounts.ToList();
+        foreach (var a in incoming) a.EnsureProfilePath();
+        lock (_lock)
+        {
+            var previous = _accounts.ToList();
+            _accounts.Clear();
+            _accounts.AddRange(incoming);
+            if (SaveLocked()) return true;
+            _accounts.Clear();
+            _accounts.AddRange(previous);
+            return false;
+        }
     }
 
     public void Load()
@@ -76,17 +94,29 @@ public sealed class AccountStore
         }
     }
 
-    public void Save()
+    public bool Save()
+    {
+        lock (_lock)
+        {
+            return SaveLocked();
+        }
+    }
+
+    private bool SaveLocked()
     {
         try
         {
-            string json;
-            lock (_lock) json = JsonSerializer.Serialize(_accounts, JsonOpts);
+            Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
+            var json = JsonSerializer.Serialize(_accounts, JsonOpts);
             var tmp = FilePath + ".tmp";
             File.WriteAllText(tmp, json, Encoding.UTF8);
             File.Move(tmp, FilePath, overwrite: true);
+            Changed?.Invoke();
+            return true;
         }
-        catch { }
-        Changed?.Invoke();
+        catch
+        {
+            return false;
+        }
     }
 }

@@ -322,8 +322,16 @@ public sealed partial class CheckAccountViewModel : ObservableObject
                     continue;
                 }
 
-                if (existing is null) { AccountStore.Shared.Add(acc); added++; }
-                else { AccountStore.Shared.Save(); updated++; }
+                if (existing is null)
+                {
+                    if (AccountStore.Shared.Add(acc)) added++;
+                    else throw new IOException("Không lưu được tài khoản vào kho chung.");
+                }
+                else
+                {
+                    if (AccountStore.Shared.Save()) updated++;
+                    else throw new IOException("Không cập nhật được tài khoản trong kho chung.");
+                }
 
                 savedRows.Add(row);
             }

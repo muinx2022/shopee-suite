@@ -4,6 +4,14 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:b="clr-namespace:Shopee.Suite.Behaviors"
     x:Name="Root">
+    <UserControl.Resources>
+        <Style x:Key="WorkspaceActionButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="Width" Value="32" />
+            <Setter Property="MinWidth" Value="32" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+        </Style>
+    </UserControl.Resources>
     <Grid Margin="28,22,28,24">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -137,15 +145,15 @@
                                         <DataGridTemplateColumn.CellTemplate>
                                             <DataTemplate>
                                                 <StackPanel Orientation="Horizontal">
-                                                    <Button Content="▶" Padding="9,2" MinWidth="0" ToolTip="Scrape shop này (reset từ 'Từ dòng')"
+                                                    <Button Style="{StaticResource WorkspaceActionButton}" Content="▶" ToolTip="Scrape shop này (reset từ 'Từ dòng')"
                                                             IsEnabled="{Binding CanScrape}"
                                                             Command="{Binding DataContext.ScrapeShopCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
                                                             CommandParameter="{Binding}" />
-                                                    <Button Content="⏯" Padding="9,2" MinWidth="0" Margin="5,0,0,0" ToolTip="Tiếp tục scrape phần dòng còn thiếu"
+                                                    <Button Style="{StaticResource WorkspaceActionButton}" Content="⏯" Margin="5,0,0,0" ToolTip="Tiếp tục scrape phần dòng còn thiếu"
                                                             IsEnabled="{Binding CanScrape}"
                                                             Command="{Binding DataContext.ResumeShopCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
                                                             CommandParameter="{Binding}" />
-                                                    <Button Content="■" Padding="9,2" MinWidth="0" Margin="5,0,0,0" ToolTip="Dừng scrape shop đang chạy này"
+                                                    <Button Style="{StaticResource WorkspaceActionButton}" Content="■" Margin="5,0,0,0" ToolTip="Dừng scrape shop đang chạy này"
                                                             IsEnabled="{Binding IsScraping}"
                                                             Command="{Binding DataContext.StopShopCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
                                                             CommandParameter="{Binding}" />
@@ -158,34 +166,34 @@
                                             <DataTemplate>
                                                 <StackPanel Orientation="Horizontal">
                                                     <!-- Import ⇄ ■ Dừng -->
-                                                    <Button Content="⬆" Padding="9,2" MinWidth="0" ToolTip="Import to store cho shop này"
+                                                    <Button Style="{StaticResource WorkspaceActionButton}" Content="⬆" ToolTip="Import to store cho shop này"
                                                             IsEnabled="{Binding CanStartUpdate}"
                                                             Visibility="{Binding IsImporting, Converter={StaticResource InverseBoolToVis}}"
                                                             Command="{Binding DataContext.ImportShopCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
                                                             CommandParameter="{Binding}" />
-                                                    <Button Content="■" Padding="9,2" MinWidth="0" ToolTip="Dừng import shop này"
+                                                    <Button Style="{StaticResource WorkspaceActionButton}" Content="■" ToolTip="Dừng import shop này"
                                                             Foreground="{StaticResource DangerBrush}" FontWeight="SemiBold"
                                                             Visibility="{Binding IsImporting, Converter={StaticResource BoolToVis}}"
                                                             Command="{Binding DataContext.StopUpdateShopCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
                                                             CommandParameter="{Binding}" />
                                                     <!-- Update product ⇄ ■ Dừng -->
-                                                    <Button Content="✎" Padding="9,2" MinWidth="0" Margin="5,0,0,0" ToolTip="Update product cho shop này"
+                                                    <Button Style="{StaticResource WorkspaceActionButton}" Content="✎" Margin="5,0,0,0" ToolTip="Update product cho shop này"
                                                             IsEnabled="{Binding CanStartUpdate}"
                                                             Visibility="{Binding IsUpdatingShop, Converter={StaticResource InverseBoolToVis}}"
                                                             Command="{Binding DataContext.UpdateShopCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
                                                             CommandParameter="{Binding}" />
-                                                    <Button Content="■" Padding="9,2" MinWidth="0" Margin="5,0,0,0" ToolTip="Dừng update shop này"
+                                                    <Button Style="{StaticResource WorkspaceActionButton}" Content="■" Margin="5,0,0,0" ToolTip="Dừng update shop này"
                                                             Foreground="{StaticResource DangerBrush}" FontWeight="SemiBold"
                                                             Visibility="{Binding IsUpdatingShop, Converter={StaticResource BoolToVis}}"
                                                             Command="{Binding DataContext.StopUpdateShopCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
                                                             CommandParameter="{Binding}" />
                                                     <!-- Tên SP ⇄ ■ Dừng -->
-                                                    <Button Content="🏷" Padding="9,2" MinWidth="0" Margin="5,0,0,0" ToolTip="Update tên SP (AI) cho shop này"
+                                                    <Button Style="{StaticResource WorkspaceActionButton}" Content="🏷" Margin="5,0,0,0" ToolTip="Update tên SP (AI) cho shop này"
                                                             IsEnabled="{Binding CanStartUpdate}"
                                                             Visibility="{Binding IsRewriting, Converter={StaticResource InverseBoolToVis}}"
                                                             Command="{Binding DataContext.RewriteShopCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
                                                             CommandParameter="{Binding}" />
-                                                    <Button Content="■" Padding="9,2" MinWidth="0" Margin="5,0,0,0" ToolTip="Dừng update tên SP shop này"
+                                                    <Button Style="{StaticResource WorkspaceActionButton}" Content="■" Margin="5,0,0,0" ToolTip="Dừng update tên SP shop này"
                                                             Foreground="{StaticResource DangerBrush}" FontWeight="SemiBold"
                                                             Visibility="{Binding IsRewriting, Converter={StaticResource BoolToVis}}"
                                                             Command="{Binding DataContext.StopUpdateShopCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
