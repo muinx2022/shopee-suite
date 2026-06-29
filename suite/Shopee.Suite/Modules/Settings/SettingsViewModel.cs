@@ -98,9 +98,6 @@ public sealed partial class SettingsViewModel : ObservableObject
     /// <summary>true khi chưa chọn vai trò nào → hiện dòng gợi ý.</summary>
     public bool ShowRoleHint => !IsClientRole && !IsHubRole;
 
-    [RelayCommand] private void SelectClientRole() { IsClientRole = true; IsHubRole = false; }
-    [RelayCommand] private void SelectHubRole() { IsHubRole = true; IsClientRole = false; }
-
     public SettingsViewModel()
     {
         LoadFromStore();
