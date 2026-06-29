@@ -74,7 +74,7 @@ public sealed partial class WorkspaceShopViewModel : ObservableObject
         if (localRunning) return (true, MachineIdentity.Shared.DisplayName);
         var hub = CoordinationRuntime.Hub;
         if (hub is null) return (false, "");
-        var key = $"{Parent.Account.Id}__{Shop.Id}__{op.ToString().ToLowerInvariant()}";
+        var key = new CoordKey(Parent.Account.Id, Shop.Id, Shop.ShopeeDataSheet ?? "", op).Id;   // dùng định dạng khoá CHUẨN
         var lease = hub.CurrentFleet.Leases.FirstOrDefault(l => string.Equals(l.Key, key, StringComparison.Ordinal));
         return lease is null ? (false, "") : (true, lease.Hostname);
     }
