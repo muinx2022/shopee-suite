@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using Shopee.Core.BigSeller;
+using Shopee.Core.Coordination;
 using Shopee.Suite.Modules.BigSeller;
 using Shopee.Suite.Modules.Scrape;
 using Shopee.Suite.Modules.UpdateProduct;
@@ -39,7 +40,17 @@ public sealed partial class WorkspaceAccountViewModel : ObservableObject
         // Import/Update/Tên SP ⇄ Dừng + khoá các shop CÙNG tk (1 tk chỉ 1 workflow update tại 1 thời điểm).
         ScrapeTarget.PropertyChanged += OnScrapeChanged;
         UpdateVm.JobsChanged += OnUpdateJobsChanged;
+        Coordination.Hub.Changed += OnFleetChanged;   // fleet đổi (máy khác chạy/xong) → đổi màu action
     }
+
+    private void OnFleetChanged()
+    {
+        var d = System.Windows.Application.Current?.Dispatcher;
+        if (d is null || d.CheckAccess()) RefreshFleetAll();
+        else d.BeginInvoke(RefreshFleetAll);
+    }
+
+    private void RefreshFleetAll() { foreach (var s in Shops) s.RefreshFleet(); }
 
     private void OnUpdateJobsChanged()
     {
@@ -106,5 +117,6 @@ public sealed partial class WorkspaceAccountViewModel : ObservableObject
     {
         ScrapeTarget.PropertyChanged -= OnScrapeChanged;
         UpdateVm.JobsChanged -= OnUpdateJobsChanged;
+        Coordination.Hub.Changed -= OnFleetChanged;
     }
 }

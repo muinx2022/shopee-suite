@@ -70,9 +70,13 @@ public sealed partial class FleetViewModel : ObservableObject
         foreach (var g in f.Ledger.Where(g => !leasedKeys.Contains(g.Key) && g.Status is not ("idle" or "")))
             Rows.Add(MakeRow(g.BigsellerId, g.ShopId, g.Op, g.LastHostname, StateIcon(g.Status), g.UpdatedAt, false));
 
-        Machines = f.Machines.Count == 0 ? "(chưa có máy nào báo danh)"
-            : string.Join("      ", f.Machines.Select(m => $"🖥 {m.Hostname}"));
-        Status = $"{f.Machines.Count} máy · {f.Leases.Count} việc đang chạy · cập nhật {DateTimeOffset.Now:HH:mm:ss}";
+        // Danh sách máy đang kết nối: CHỈ máy Hub được xem (theo yêu cầu). Action thì mọi máy đều thấy.
+        if (HubServerConfigStore.Shared.Current.Enabled)
+            Machines = f.Machines.Count == 0 ? "🖥 (chưa có máy nào kết nối)"
+                : "Máy đang kết nối:   " + string.Join("        ", f.Machines.Select(m => $"🖥 {m.Hostname} · {Ago(m.LastSeen)}"));
+        else
+            Machines = "(danh sách máy đang kết nối chỉ hiển thị trên máy Hub)";
+        Status = $"{f.Leases.Count} việc đang chạy · cập nhật {DateTimeOffset.Now:HH:mm:ss}";
     }
 
     private static FleetRow MakeRow(string bsId, string shopId, string op, string host, string state, DateTimeOffset at, bool running)

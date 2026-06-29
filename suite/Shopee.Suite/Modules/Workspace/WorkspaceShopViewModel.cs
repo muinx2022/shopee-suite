@@ -1,6 +1,7 @@
 using System.Windows.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using Shopee.Core.BigSeller;
+using Shopee.Core.Coordination;
 using Shopee.Suite.Modules.UpdateProduct;
 
 namespace Shopee.Suite.Modules.Workspace;
@@ -59,6 +60,48 @@ public sealed partial class WorkspaceShopViewModel : ObservableObject
         OnPropertyChanged(nameof(IsUpdatingShop));
         OnPropertyChanged(nameof(IsRewriting));
         OnPropertyChanged(nameof(CanStartUpdate));
+        RefreshFleet();
+    }
+
+    // ── Trạng thái action xuyên máy: xanh khi đang chạy (máy này HOẶC máy khác) + tooltip "… by <máy>" ──
+    private static readonly Brush RunningBrush = MakeFrozen(Color.FromRgb(0x1E, 0xA0, 0x55));   // xanh lá
+    private static readonly Brush IdleBrush = Brushes.Black;
+    private static Brush MakeFrozen(Color c) { var b = new SolidColorBrush(c); b.Freeze(); return b; }
+
+    /// <summary>Trạng thái 1 op của shop này: chạy không + máy nào. Ưu tiên local (tức thời), rồi fleet.</summary>
+    private (bool running, string by) OpState(CoordOp op, bool localRunning)
+    {
+        if (localRunning) return (true, MachineIdentity.Shared.DisplayName);
+        var hub = CoordinationRuntime.Hub;
+        if (hub is null) return (false, "");
+        var key = $"{Parent.Account.Id}__{Shop.Id}__{op.ToString().ToLowerInvariant()}";
+        var lease = hub.CurrentFleet.Leases.FirstOrDefault(l => string.Equals(l.Key, key, StringComparison.Ordinal));
+        return lease is null ? (false, "") : (true, lease.Hostname);
+    }
+
+    public Brush ScrapeIconBrush => OpState(CoordOp.Scrape, IsScraping).running ? RunningBrush : IdleBrush;
+    public string ScrapeRunTip { get { var (r, by) = OpState(CoordOp.Scrape, IsScraping); return r ? $"Scraping by {by}" : "Scrape shop này (reset từ 'Từ dòng')"; } }
+
+    public Brush ImportIconBrush => OpState(CoordOp.Import, IsImporting).running ? RunningBrush : IdleBrush;
+    public string ImportTip { get { var (r, by) = OpState(CoordOp.Import, IsImporting); return r ? $"Importing by {by}" : "Import to store cho shop này"; } }
+
+    public Brush UpdateIconBrush => OpState(CoordOp.Update, IsUpdatingShop).running ? RunningBrush : IdleBrush;
+    public string UpdateTip { get { var (r, by) = OpState(CoordOp.Update, IsUpdatingShop); return r ? $"Updating by {by}" : "Update product cho shop này"; } }
+
+    public Brush RewriteIconBrush => OpState(CoordOp.Rewrite, IsRewriting).running ? RunningBrush : IdleBrush;
+    public string RewriteTip { get { var (r, by) = OpState(CoordOp.Rewrite, IsRewriting); return r ? $"Đặt tên SP by {by}" : "Update tên SP (AI) cho shop này"; } }
+
+    /// <summary>true khi shop này đang chạy 1 workflow update TRÊN MÁY NÀY → bật nút ■ Dừng (chỉ dừng việc của mình).</summary>
+    public bool IsUpdatingAnyLocal => IsImporting || IsUpdatingShop || IsRewriting;
+
+    /// <summary>Làm mới màu/tooltip action (gọi khi hub đổi fleet + khi trạng thái local đổi).</summary>
+    public void RefreshFleet()
+    {
+        OnPropertyChanged(nameof(ScrapeIconBrush)); OnPropertyChanged(nameof(ScrapeRunTip));
+        OnPropertyChanged(nameof(ImportIconBrush)); OnPropertyChanged(nameof(ImportTip));
+        OnPropertyChanged(nameof(UpdateIconBrush)); OnPropertyChanged(nameof(UpdateTip));
+        OnPropertyChanged(nameof(RewriteIconBrush)); OnPropertyChanged(nameof(RewriteTip));
+        OnPropertyChanged(nameof(IsUpdatingAnyLocal));
     }
 
     /// <summary>Tính lại trạng thái từ tiến độ scrape (mượn nguyên logic chip của ScrapeTargetViewModel).</summary>
@@ -74,5 +117,6 @@ public sealed partial class WorkspaceShopViewModel : ObservableObject
         OnPropertyChanged(nameof(IsCurrent));
         OnPropertyChanged(nameof(IsScraping));
         OnPropertyChanged(nameof(CanScrape));
+        RefreshFleet();
     }
 }

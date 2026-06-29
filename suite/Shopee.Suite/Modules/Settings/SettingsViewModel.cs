@@ -65,6 +65,9 @@ public sealed partial class SettingsViewModel : ObservableObject
     /// <summary>Nhãn máy này: "TÊN-MÁY (a1b2c3)" — để phân biệt trên bảng trạng thái.</summary>
     public string MachineLabel => MachineIdentity.Shared.Label;
 
+    /// <summary>Tên hiển thị máy này (đặt tuỳ ý; mặc định = tên máy). Dùng để báo "Scraping by …".</summary>
+    [ObservableProperty] private string _machineDisplayName = "";
+
     [ObservableProperty] private bool _hubEnabled;
     [ObservableProperty] private string _hubBaseUrl = "";
     [ObservableProperty] private string _hubApiToken = "";
@@ -119,6 +122,7 @@ public sealed partial class SettingsViewModel : ObservableObject
 
     private void LoadFromStore()
     {
+        MachineDisplayName = MachineIdentity.Shared.DisplayName;
         var hub = HubClientConfigStore.Shared.Current;
         HubEnabled = hub.Enabled;
         HubBaseUrl = hub.BaseUrl;
@@ -185,6 +189,15 @@ public sealed partial class SettingsViewModel : ObservableObject
 
     [RelayCommand] private void ResetNamePrompt() => NameRewritePrompt = AiPrompts.DefaultNameRewrite;
     [RelayCommand] private void ResetDescriptionPrompt() => DescriptionPrompt = AiPrompts.DefaultDescription;
+
+    [RelayCommand]
+    private void SaveMachineName()
+    {
+        MachineIdentity.Shared.SetDisplayName(MachineDisplayName);
+        MachineDisplayName = MachineIdentity.Shared.DisplayName;   // trống → quay về tên máy
+        OnPropertyChanged(nameof(MachineLabel));
+        Status = $"Đã đặt tên máy: {MachineIdentity.Shared.DisplayName}.";
+    }
 
     [RelayCommand]
     private void SaveHubClient()

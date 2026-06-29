@@ -230,6 +230,17 @@
                                 <TextBlock Text="{Binding MachineLabel}" FontSize="14.5" FontWeight="SemiBold" FontFamily="{StaticResource MonoFont}" />
                                 <TextBlock Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,6,0,0"
                                            Text="Tên này nhận diện máy trên bảng trạng thái và khi giành/khoá việc giữa các máy." />
+
+                                <TextBlock Text="Tên hiển thị (đặt tuỳ ý, vd: Máy của ABC):" Style="{StaticResource Caption}" Margin="0,12,0,4" />
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBox Grid.Column="0" VerticalContentAlignment="Center"
+                                             Text="{Binding MachineDisplayName, UpdateSourceTrigger=PropertyChanged}" />
+                                    <Button Grid.Column="1" Content="💾 Lưu tên" Margin="8,0,0,0" Command="{Binding SaveMachineNameCommand}" />
+                                </Grid>
                             </StackPanel>
                         </Border>
 

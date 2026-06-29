@@ -35,7 +35,7 @@ public static class CoordinationRuntime
 
         var machine = MachineIdentity.Shared;
         var client = new HubClient(clientCfg, machine.MachineId);
-        var hub = new HttpCoordinationHub(client, machine.MachineId, machine.Hostname);
+        var hub = new HttpCoordinationHub(client, machine.MachineId);
 
         Client = client;
         ConfigSync = new HubConfigSync(client);

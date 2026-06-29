@@ -11,18 +11,19 @@ public sealed class HttpCoordinationHub : ICoordinationHub, IDisposable
 {
     private readonly HubClient _client;
     private readonly string _machineId;
-    private readonly string _hostname;
     private readonly Timer _poller;
     private volatile FleetSnapshot _fleet = new();
+
+    /// <summary>Tên hiển thị máy này, đọc LIVE → đổi tên trong Settings có hiệu lực ngay lượt gửi kế tiếp.</summary>
+    private static string Host => MachineIdentity.Shared.DisplayName;
 
     public bool Enabled => true;
     public event Action? Changed;
 
-    public HttpCoordinationHub(HubClient client, string machineId, string hostname)
+    public HttpCoordinationHub(HubClient client, string machineId)
     {
         _client = client;
         _machineId = machineId;
-        _hostname = hostname;
         _poller = new Timer(_ => _ = PollAsync(), null, TimeSpan.Zero, TimeSpan.FromSeconds(12));
     }
 
@@ -37,7 +38,7 @@ public sealed class HttpCoordinationHub : ICoordinationHub, IDisposable
     {
         try
         {
-            await _client.MachineHeartbeatAsync(new MachineHeartbeatRequest(_machineId, _hostname, null));
+            await _client.MachineHeartbeatAsync(new MachineHeartbeatRequest(_machineId, Host, null));
             _fleet = await _client.FleetAsync();
             try { Changed?.Invoke(); } catch { }
         }
@@ -49,7 +50,7 @@ public sealed class HttpCoordinationHub : ICoordinationHub, IDisposable
         try
         {
             var req = new LeaseAcquireRequest(
-                key.Id, key.BigsellerId, key.ShopId, key.Sheet, OpStr(key.Op), _machineId, _hostname, force);
+                key.Id, key.BigsellerId, key.ShopId, key.Sheet, OpStr(key.Op), _machineId, Host, force);
             var resp = await _client.AcquireAsync(req, ct);
             if (!resp.Granted) return new LeaseAttempt(AcquireResult.Blocked(resp.BlockedByHostname), null);
             var handle = new LeaseHandle(this, key);
@@ -66,14 +67,14 @@ public sealed class HttpCoordinationHub : ICoordinationHub, IDisposable
     {
         Key = key.Id, BigsellerId = key.BigsellerId, ShopId = key.ShopId, Sheet = key.Sheet, Op = OpStr(key.Op),
         Completed = [new RowRange { From = from, To = to }], LastRowReached = to,
-        Status = "running", LastMachineId = _machineId, LastHostname = _hostname, LastRunAt = DateTimeOffset.Now,
+        Status = "running", LastMachineId = _machineId, LastHostname = Host, LastRunAt = DateTimeOffset.Now,
     });
 
     public void PublishCompletion(CoordKey key, string status, int lastRow) => _ = TryPublish(new WorkLedgerRecord
     {
         Key = key.Id, BigsellerId = key.BigsellerId, ShopId = key.ShopId, Sheet = key.Sheet, Op = OpStr(key.Op),
         LastRowReached = lastRow, Status = status,
-        LastMachineId = _machineId, LastHostname = _hostname, LastRunAt = DateTimeOffset.Now,
+        LastMachineId = _machineId, LastHostname = Host, LastRunAt = DateTimeOffset.Now,
     });
 
     private async Task TryPublish(WorkLedgerRecord rec)
@@ -89,7 +90,7 @@ public sealed class HttpCoordinationHub : ICoordinationHub, IDisposable
         if (list.Count == 0) return [];
         try
         {
-            var r = await _client.ReserveAccountsAsync(new AccountReserveRequest(list, _machineId, _hostname));
+            var r = await _client.ReserveAccountsAsync(new AccountReserveRequest(list, _machineId, Host));
             return r.Granted.ToHashSet(StringComparer.Ordinal);
         }
         catch { return list.ToHashSet(StringComparer.Ordinal); }

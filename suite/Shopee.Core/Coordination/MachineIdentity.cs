@@ -7,6 +7,8 @@ public sealed class MachineInfo
 {
     public string MachineId { get; set; } = "";
     public string Hostname { get; set; } = "";
+    /// <summary>Tên hiển thị do người dùng đặt (vd "Máy của ABC"); trống = dùng <see cref="Hostname"/>.</summary>
+    public string DisplayName { get; set; } = "";
     public DateTimeOffset CreatedAt { get; set; }
 }
 
@@ -32,8 +34,24 @@ public sealed class MachineIdentity
     public string Hostname { get { lock (_lock) return _info.Hostname; } }
     public MachineInfo Current { get { lock (_lock) return Clone(_info); } }
 
-    /// <summary>Nhãn hiển thị: "TÊN-MÁY (a1b2c3)".</summary>
-    public string Label { get { lock (_lock) return $"{_info.Hostname} ({Short(_info.MachineId)})"; } }
+    /// <summary>Tên hiển thị (người dùng đặt) — dùng để báo "Scraping by …", bảng Fleet. Trống → tên máy.</summary>
+    public string DisplayName
+    {
+        get { lock (_lock) return string.IsNullOrWhiteSpace(_info.DisplayName) ? _info.Hostname : _info.DisplayName; }
+    }
+
+    /// <summary>Đặt tên hiển thị máy này (lưu vào machine.json). Trống = quay về tên máy.</summary>
+    public void SetDisplayName(string name)
+    {
+        lock (_lock)
+        {
+            _info.DisplayName = (name ?? "").Trim();
+            Save(_info);
+        }
+    }
+
+    /// <summary>Nhãn: "Máy của ABC (a1b2c3)".</summary>
+    public string Label { get { lock (_lock) return $"{DisplayName} ({Short(_info.MachineId)})"; } }
 
     private static MachineInfo LoadOrCreate()
     {
@@ -80,7 +98,7 @@ public sealed class MachineIdentity
     }
 
     private static MachineInfo Clone(MachineInfo m) =>
-        new() { MachineId = m.MachineId, Hostname = m.Hostname, CreatedAt = m.CreatedAt };
+        new() { MachineId = m.MachineId, Hostname = m.Hostname, DisplayName = m.DisplayName, CreatedAt = m.CreatedAt };
 
     private static string Short(string id) => id.Length <= 6 ? id : id[..6];
 }

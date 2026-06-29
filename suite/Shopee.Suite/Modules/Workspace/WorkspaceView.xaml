@@ -145,11 +145,13 @@
                                         <DataGridTemplateColumn.CellTemplate>
                                             <DataTemplate>
                                                 <StackPanel Orientation="Horizontal">
-                                                    <Button Style="{StaticResource WorkspaceActionButton}" Content="▶" ToolTip="Scrape shop này (reset từ 'Từ dòng')"
+                                                    <Button Style="{StaticResource WorkspaceActionButton}" Content="▶" ToolTip="{Binding ScrapeRunTip}"
+                                                            Foreground="{Binding ScrapeIconBrush}"
                                                             IsEnabled="{Binding CanScrape}"
                                                             Command="{Binding DataContext.ScrapeShopCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
                                                             CommandParameter="{Binding}" />
                                                     <Button Style="{StaticResource WorkspaceActionButton}" Content="⏯" Margin="5,0,0,0" ToolTip="Tiếp tục scrape phần dòng còn thiếu"
+                                                            Foreground="{Binding ScrapeIconBrush}"
                                                             IsEnabled="{Binding CanScrape}"
                                                             Command="{Binding DataContext.ResumeShopCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
                                                             CommandParameter="{Binding}" />
@@ -165,37 +167,23 @@
                                         <DataGridTemplateColumn.CellTemplate>
                                             <DataTemplate>
                                                 <StackPanel Orientation="Horizontal">
-                                                    <!-- Import ⇄ ■ Dừng -->
-                                                    <Button Style="{StaticResource WorkspaceActionButton}" Content="⬆" ToolTip="Import to store cho shop này"
-                                                            IsEnabled="{Binding CanStartUpdate}"
-                                                            Visibility="{Binding IsImporting, Converter={StaticResource InverseBoolToVis}}"
+                                                    <!-- Action LUÔN hiện; xanh khi đang chạy (máy nào cũng thấy), hover xem "… by <máy>" -->
+                                                    <Button Style="{StaticResource WorkspaceActionButton}" Content="⬆" ToolTip="{Binding ImportTip}"
+                                                            Foreground="{Binding ImportIconBrush}" IsEnabled="{Binding CanStartUpdate}"
                                                             Command="{Binding DataContext.ImportShopCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
                                                             CommandParameter="{Binding}" />
-                                                    <Button Style="{StaticResource WorkspaceActionButton}" Content="■" ToolTip="Dừng import shop này"
-                                                            Foreground="{StaticResource DangerBrush}" FontWeight="SemiBold"
-                                                            Visibility="{Binding IsImporting, Converter={StaticResource BoolToVis}}"
-                                                            Command="{Binding DataContext.StopUpdateShopCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                                            CommandParameter="{Binding}" />
-                                                    <!-- Update product ⇄ ■ Dừng -->
-                                                    <Button Style="{StaticResource WorkspaceActionButton}" Content="✎" Margin="5,0,0,0" ToolTip="Update product cho shop này"
-                                                            IsEnabled="{Binding CanStartUpdate}"
-                                                            Visibility="{Binding IsUpdatingShop, Converter={StaticResource InverseBoolToVis}}"
+                                                    <Button Style="{StaticResource WorkspaceActionButton}" Content="✎" Margin="5,0,0,0" ToolTip="{Binding UpdateTip}"
+                                                            Foreground="{Binding UpdateIconBrush}" IsEnabled="{Binding CanStartUpdate}"
                                                             Command="{Binding DataContext.UpdateShopCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
                                                             CommandParameter="{Binding}" />
-                                                    <Button Style="{StaticResource WorkspaceActionButton}" Content="■" Margin="5,0,0,0" ToolTip="Dừng update shop này"
-                                                            Foreground="{StaticResource DangerBrush}" FontWeight="SemiBold"
-                                                            Visibility="{Binding IsUpdatingShop, Converter={StaticResource BoolToVis}}"
-                                                            Command="{Binding DataContext.StopUpdateShopCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                                            CommandParameter="{Binding}" />
-                                                    <!-- Tên SP ⇄ ■ Dừng -->
-                                                    <Button Style="{StaticResource WorkspaceActionButton}" Content="🏷" Margin="5,0,0,0" ToolTip="Update tên SP (AI) cho shop này"
-                                                            IsEnabled="{Binding CanStartUpdate}"
-                                                            Visibility="{Binding IsRewriting, Converter={StaticResource InverseBoolToVis}}"
+                                                    <Button Style="{StaticResource WorkspaceActionButton}" Content="🏷" Margin="5,0,0,0" ToolTip="{Binding RewriteTip}"
+                                                            Foreground="{Binding RewriteIconBrush}" IsEnabled="{Binding CanStartUpdate}"
                                                             Command="{Binding DataContext.RewriteShopCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
                                                             CommandParameter="{Binding}" />
-                                                    <Button Style="{StaticResource WorkspaceActionButton}" Content="■" Margin="5,0,0,0" ToolTip="Dừng update tên SP shop này"
-                                                            Foreground="{StaticResource DangerBrush}" FontWeight="SemiBold"
-                                                            Visibility="{Binding IsRewriting, Converter={StaticResource BoolToVis}}"
+                                                    <!-- Nút ■ Dừng RIÊNG (không thay nút chạy): chỉ bật khi MÁY NÀY đang chạy update shop này -->
+                                                    <Button Style="{StaticResource WorkspaceActionButton}" Content="■" Margin="10,0,0,0"
+                                                            ToolTip="Dừng việc update đang chạy của shop này (trên máy này)"
+                                                            Foreground="{StaticResource DangerBrush}" IsEnabled="{Binding IsUpdatingAnyLocal}"
                                                             Command="{Binding DataContext.StopUpdateShopCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
                                                             CommandParameter="{Binding}" />
                                                 </StackPanel>
