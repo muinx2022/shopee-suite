@@ -107,7 +107,9 @@ public static class BackupService
             seenId.Add(a.Id);
             added++;
         }
-        BigSellerStore.Shared.ReplaceAll(current);
+        // Chỉ ghi store khi THỰC SỰ đổi (có thêm mới, hoặc chế độ thay-thế) → auto-pull định kỳ không bắn
+        // sự kiện Changed làm UI dựng lại danh sách dù không có gì mới.
+        if (replace || added > 0) BigSellerStore.Shared.ReplaceAll(current);
         return (added, skipped);
     }
 
@@ -128,7 +130,7 @@ public static class BackupService
             seenId.Add(a.Id);
             added++;
         }
-        AccountStore.Shared.ReplaceAll(current);
+        if (replace || added > 0) AccountStore.Shared.ReplaceAll(current);
         return (added, skipped);
     }
 

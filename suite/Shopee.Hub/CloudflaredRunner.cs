@@ -18,7 +18,7 @@ public sealed class CloudflaredRunner
 
     /// <summary>SHA-256 (hex) đã xác minh của file tải về. null = CHƯA ghim → chỉ log hash để bạn điền; đã ghim mà
     /// KHÔNG khớp → từ chối cài (chống chuỗi cung ứng).</summary>
-    private const string? ExpectedSha256 = null;
+    private static readonly string? ExpectedSha256 = null;
 
     private Process? _proc;
 

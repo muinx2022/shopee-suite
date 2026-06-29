@@ -14,6 +14,9 @@ public sealed class HttpCoordinationHub : ICoordinationHub, IDisposable
     private readonly Timer _poller;
     private volatile FleetSnapshot _fleet = new();
     private int _foldedLedger;   // 0 = chưa fold ledger→tiến độ local; chỉ fold 1 lần khi Hub LẦN ĐẦU liên lạc được
+    private int _pulling;        // 0/1 chống chồng lấn auto-pull cấu hình
+    private DateTimeOffset _lastAutoPull = DateTimeOffset.MinValue;
+    private static readonly TimeSpan AutoPullEvery = TimeSpan.FromMinutes(3);
 
     /// <summary>Tên hiển thị máy này, đọc LIVE → đổi tên trong Settings có hiệu lực ngay lượt gửi kế tiếp.</summary>
     private static string Host => MachineIdentity.Shared.DisplayName;
@@ -43,23 +46,26 @@ public sealed class HttpCoordinationHub : ICoordinationHub, IDisposable
             _fleet = await _client.FleetAsync();
             // CHỈ 1 lần, SAU khi Hub thật sự trả lời (tránh race lúc máy-Hub vừa khởi động: server localhost chưa
             // kịp lắng nghe). Poller 12s tự chạy ở tick thành công đầu tiên.
-            if (Interlocked.Exchange(ref _foldedLedger, 1) == 0)
-            {
-                _ = SyncIntoProgressAsync();   // fold ledger → tiến độ local (resume xuyên máy)
-                _ = AutoPullIfClientAsync();   // client tự kéo cấu hình + cookie + AI + workbook theo Hub
-            }
+            // Fold ledger 1 LẦN (resume xuyên máy); auto-pull cấu hình/cookie/AI thì chạy ĐỊNH KỲ (xem dưới).
+            if (Interlocked.Exchange(ref _foldedLedger, 1) == 0) _ = SyncIntoProgressAsync();
+            _ = MaybeAutoPullAsync();
             try { Changed?.Invoke(); } catch { }
         }
         catch { /* offline: giữ snapshot cũ, không ném */ }
     }
 
-    /// <summary>CLIENT (không phải máy Hub) tự kéo cấu hình + cookie + AI + workbook về 1 lần khi vừa kết nối →
-    /// "set luôn theo Hub": Hub đăng nhập BigSeller 1 lần (xử lý mã xác nhận email), client chỉ việc dùng cookie
-    /// + key AI dùng chung. Máy Hub KHÔNG kéo (giữ workbook/cookie GỐC của nó, tránh tự trỏ về hub-cache).</summary>
-    private static async Task AutoPullIfClientAsync()
+    /// <summary>CLIENT (không phải máy Hub) tự kéo cấu hình + cookie + AI + workbook theo Hub: NGAY khi vừa kết
+    /// nối (lần poll đầu) rồi ĐỊNH KỲ mỗi vài phút → Hub thêm tài khoản / đổi cookie SAU NÀY, client tự nhận mà
+    /// KHÔNG cần khởi động lại. Máy Hub KHÔNG kéo (giữ bản gốc). Có chốt chống chồng lấn + giãn theo chu kỳ.</summary>
+    private async Task MaybeAutoPullAsync()
     {
-        if (HubServerConfigStore.Shared.Current.Enabled) return;
-        try { if (CoordinationRuntime.ConfigSync is { } sync) await sync.PullAccountsAsync(); } catch { }
+        if (HubServerConfigStore.Shared.Current.Enabled) return;             // máy Hub: giữ workbook/cookie gốc
+        if (CoordinationRuntime.ConfigSync is not { } sync) return;
+        if ((DateTimeOffset.UtcNow - _lastAutoPull) < AutoPullEvery) return; // chưa tới chu kỳ
+        if (Interlocked.Exchange(ref _pulling, 1) == 1) return;              // đang kéo → bỏ lượt này
+        try { await sync.PullAccountsAsync(); }
+        catch { }
+        finally { _lastAutoPull = DateTimeOffset.UtcNow; Interlocked.Exchange(ref _pulling, 0); }
     }
 
     public async Task<LeaseAttempt> AcquireAsync(CoordKey key, bool force, CancellationToken ct)
