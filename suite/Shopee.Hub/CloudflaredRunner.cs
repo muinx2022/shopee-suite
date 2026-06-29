@@ -11,8 +11,14 @@ namespace Shopee.Hub;
 /// </summary>
 public sealed class CloudflaredRunner
 {
+    // Để GHIM phiên bản (chống bản "latest" đổi đột ngột/độc): đổi "latest/download" → "download/<phiên-bản>"
+    // và điền ExpectedSha256 bằng hash đã tự xác minh của đúng file đó.
     private const string DownloadUrl =
         "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe";
+
+    /// <summary>SHA-256 (hex) đã xác minh của file tải về. null = CHƯA ghim → chỉ log hash để bạn điền; đã ghim mà
+    /// KHÔNG khớp → từ chối cài (chống chuỗi cung ứng).</summary>
+    private const string? ExpectedSha256 = null;
 
     private Process? _proc;
 
@@ -36,8 +42,25 @@ public sealed class CloudflaredRunner
         var tmp = ExePath + ".tmp";
         await using (var fs = File.Create(tmp))
             await resp.Content.CopyToAsync(fs, ct);
+
+        // Chống chuỗi cung ứng: nếu đã GHIM hash mà bản tải không khớp → xoá + từ chối cài (không chạy file lạ).
+        var sha = await Sha256FileAsync(tmp, ct);
+        if (ExpectedSha256 is not null && !string.Equals(sha, ExpectedSha256, StringComparison.OrdinalIgnoreCase))
+        {
+            try { File.Delete(tmp); } catch { }
+            throw new InvalidOperationException($"cloudflared SHA-256 không khớp (mong đợi {ExpectedSha256}, nhận {sha}) — huỷ cài để an toàn.");
+        }
         File.Move(tmp, ExePath, overwrite: true);
-        log?.Invoke("Đã tải xong cloudflared.");
+        log?.Invoke(ExpectedSha256 is null
+            ? $"Đã tải xong cloudflared. SHA-256={sha} (ghim giá trị này vào ExpectedSha256 để chống giả mạo)."
+            : "Đã tải & xác minh cloudflared.");
+    }
+
+    private static async Task<string> Sha256FileAsync(string path, CancellationToken ct)
+    {
+        await using var fs = File.OpenRead(path);
+        using var sha = System.Security.Cryptography.SHA256.Create();
+        return Convert.ToHexString(await sha.ComputeHashAsync(fs, ct));
     }
 
     /// <summary>Chạy `cloudflared tunnel run --token &lt;token&gt;` ở tiến trình nền.</summary>
