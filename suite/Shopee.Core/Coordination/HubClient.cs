@@ -63,6 +63,27 @@ public sealed class HubClient
     public async Task<FleetSnapshot> FleetAsync(CancellationToken ct = default)
         => await _http.GetFromJsonAsync<FleetSnapshot>("/fleet", ct) ?? new FleetSnapshot();
 
+    // ── Vai trò máy + giao việc ──
+    public async Task<List<MachineRoleInfo>> RolesAsync(CancellationToken ct = default)
+        => await _http.GetFromJsonAsync<List<MachineRoleInfo>>("/roles", ct) ?? [];
+    public Task SetRoleAsync(SetRoleRequest req, CancellationToken ct = default) => PostAsync("/roles", req, ct);
+    public async Task<List<Assignment>> AssignmentsAsync(CancellationToken ct = default)
+        => await _http.GetFromJsonAsync<List<Assignment>>("/assignments", ct) ?? [];
+    public async Task<Assignment> CreateAssignmentAsync(CreateAssignmentRequest req, CancellationToken ct = default)
+    {
+        var r = await _http.PostAsJsonAsync("/assignments", req, ct);
+        r.EnsureSuccessStatusCode();
+        return await r.Content.ReadFromJsonAsync<Assignment>(ct) ?? new Assignment();
+    }
+    public async Task<List<Assignment>> ClaimAssignmentsAsync(ClaimAssignmentsRequest req, CancellationToken ct = default)
+    {
+        var r = await _http.PostAsJsonAsync("/assignments/claim", req, ct);
+        r.EnsureSuccessStatusCode();
+        return await r.Content.ReadFromJsonAsync<List<Assignment>>(ct) ?? [];
+    }
+    public Task ReportAssignmentAsync(AssignmentStatusRequest req, CancellationToken ct = default) => PostAsync("/assignments/status", req, ct);
+    public Task CancelAssignmentAsync(CancelAssignmentRequest req, CancellationToken ct = default) => PostAsync("/assignments/cancel", req, ct);
+
     // ── File-sync ──
     public async Task<List<FileManifestEntry>> ManifestAsync(CancellationToken ct = default)
         => await _http.GetFromJsonAsync<List<FileManifestEntry>>("/manifest", ct) ?? [];
@@ -80,6 +101,10 @@ public sealed class HubClient
         using var req = new HttpRequestMessage(HttpMethod.Put, "/files/" + EncodePath(name)) { Content = new ByteArrayContent(data) };
         if (ifMatch.HasValue) req.Headers.TryAddWithoutValidation("If-Match", ifMatch.Value.ToString());
         var r = await _http.SendAsync(req, ct);
+        // 200 (ok) và 409 (conflict) đều trả JSON FilePutResponse; còn lại (401/5xx) body là text → trả lỗi
+        // HTTP rõ ràng thay vì để ReadFromJsonAsync ném JsonException khó hiểu.
+        if (!r.IsSuccessStatusCode && r.StatusCode != HttpStatusCode.Conflict)
+            return new FilePutResponse(false, 0, $"http-{(int)r.StatusCode}");
         return await r.Content.ReadFromJsonAsync<FilePutResponse>(ct) ?? new FilePutResponse(false, 0, "no-response");
     }
 

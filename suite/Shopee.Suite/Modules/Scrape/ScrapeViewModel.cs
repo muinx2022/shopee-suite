@@ -119,12 +119,12 @@ public sealed partial class ScrapeViewModel : ObservableObject
     /// <summary>v1.1 (màn gộp BigSeller): chạy/tiếp tục RIÊNG 1 tk BigSeller mà KHÔNG đụng tick của tk khác.
     /// Rảnh → mở phiên mới chỉ gồm tk này; đang chạy → thêm job tk này (resume) vào phiên hiện tại.
     /// TOTAL: tự nuốt + log mọi lỗi → an toàn để gọi fire-and-forget (caller không cần try/catch).</summary>
-    public async Task RunSingleAsync(ScrapeTargetViewModel target, bool resume)
+    public async Task RunSingleAsync(ScrapeTargetViewModel target, bool resume, bool silent = false)
     {
         try
         {
-            if (IsBusy) { StartOneAccount(target); return; }
-            await StartAsync(resume, new[] { target });
+            if (IsBusy) { StartOneAccount(target, silent); return; }
+            await StartAsync(resume, new[] { target }, silent);
         }
         catch (Exception ex) { Log($"✖ Lỗi khởi động scrape: {ex.Message}"); }
     }
@@ -137,18 +137,18 @@ public sealed partial class ScrapeViewModel : ObservableObject
         catch (Exception ex) { Log($"✖ Lỗi dừng scrape: {ex.Message}"); }
     }
 
-    private async Task StartAsync(bool resume, IReadOnlyList<ScrapeTargetViewModel>? only = null)
+    private async Task StartAsync(bool resume, IReadOnlyList<ScrapeTargetViewModel>? only = null, bool silent = false)
     {
         // only != null (màn gộp v1.1): chạy RIÊNG danh sách được chỉ định, KHÔNG đụng tick của tk khác.
         var picked = (only ?? ScrapeTargets.Where(t => t.IsSelected)).ToList();
-        if (picked.Count == 0) { Warn("Tick chọn ít nhất 1 tài khoản BigSeller."); return; }
+        if (picked.Count == 0) { Warn("Tick chọn ít nhất 1 tài khoản BigSeller.", silent); return; }
 
         var pool = AccountStore.Shared.Accounts.Where(a => !a.Disabled).ToList();
-        if (pool.Count == 0) { Warn("Kho chưa có tài khoản Shopee (thêm ở mục Tài khoản & Proxy)."); return; }
+        if (pool.Count == 0) { Warn("Kho chưa có tài khoản Shopee (thêm ở mục Tài khoản & Proxy).", silent); return; }
 
         var sourceUserData = BrowserLauncher.DetectUserData(BrowserKind.Brave);
         if (sourceUserData is null)
-        { Warn("Không tìm thấy User Data của Brave (profile Default). Hãy mở Brave ít nhất 1 lần."); return; }
+        { Warn("Không tìm thấy User Data của Brave (profile Default). Hãy mở Brave ít nhất 1 lần.", silent); return; }
 
         // Validate từng đích (dùng config RIÊNG của từng tk). Đích lỗi bị bỏ qua, không chặn đích khác.
         var jobs = new List<ScrapeTargetViewModel>();
@@ -158,7 +158,7 @@ public sealed partial class ScrapeViewModel : ObservableObject
             if (ValidateTarget(t, pool.Count, out var problem)) jobs.Add(t);
             else problems.Add(problem);
         }
-        if (jobs.Count == 0) { Warn("Không có tài khoản hợp lệ để scrape.\n" + string.Join("\n", problems)); return; }
+        if (jobs.Count == 0) { Warn("Không có tài khoản hợp lệ để scrape.\n" + string.Join("\n", problems), silent); return; }
 
         // Kho tk Shopee = TẤT CẢ tk đang bật, DÙNG CHUNG cho mọi job BigSeller. Không pin tk vào BigSeller
         // nào nữa: mỗi khối mượn 1 tk nghỉ lâu nhất rồi trả về kho → các BigSeller chia sẻ + tk luân phiên nghỉ.
@@ -508,12 +508,12 @@ public sealed partial class ScrapeViewModel : ObservableObject
 
     /// <summary>Chạy RIÊNG 1 tk giữa lúc đang run (tick checkbox khi busy). Mid-run = RESUME.
     /// Trả true nếu đã phóng job.</summary>
-    private bool StartOneAccount(ScrapeTargetViewModel target)
+    private bool StartOneAccount(ScrapeTargetViewModel target, bool silent = false)
     {
         var s = _session;
         if (s is null || s.MasterCts.IsCancellationRequested) return false;
         var poolCount = AccountStore.Shared.Accounts.Count(a => !a.Disabled);
-        if (!ValidateTarget(target, poolCount, out var problem)) { Warn($"Không chạy được: {problem}"); return false; }
+        if (!ValidateTarget(target, poolCount, out var problem)) { Warn($"Không chạy được: {problem}", silent); return false; }
         // Kho tk Shopee dùng chung → acc thêm giữa chừng chỉ việc mượn từ kho như mọi job khác (không cần
         // đòi lại tk đặt-chỗ vì không còn pin tk vào BigSeller nào).
         if (StartJob(s, target, resume: true))
@@ -692,10 +692,21 @@ public sealed partial class ScrapeViewModel : ObservableObject
         else d.BeginInvoke(a);
     }
 
-    private void Warn(string msg)
+    private void Warn(string msg, bool silent = false)
     {
         Status = msg;
-        Dialogs.Show(msg, "Shopee Scrape", MessageBoxButton.OK, MessageBoxImage.Information);
+        if (silent) Log("⚠ " + msg);   // đường push-dispatch: KHÔNG mở modal (tránh treo UI), chỉ ghi log
+        else Dialogs.Show(msg, "Shopee Scrape", MessageBoxButton.OK, MessageBoxImage.Information);
+    }
+
+    /// <summary>Tiền-kiểm điều kiện scrape 1 đích (kho tk Shopee, Brave, cấu hình) — KHÔNG mở dialog.
+    /// Cho <c>AssignmentWorker</c> kiểm TRƯỚC khi chạy để khỏi modal + khỏi kẹt việc 'running'.</summary>
+    public bool CanDispatchScrape(ScrapeTargetViewModel target, out string problem)
+    {
+        var pool = AccountStore.Shared.Accounts.Count(a => !a.Disabled);
+        if (pool == 0) { problem = "kho tài khoản Shopee trống"; return false; }
+        if (BrowserLauncher.DetectUserData(BrowserKind.Brave) is null) { problem = "không tìm thấy User Data Brave"; return false; }
+        return ValidateTarget(target, pool, out problem);
     }
 
     // ── Phiên chạy + handle từng job (để chạy/dừng RIÊNG từng tk khi đang run) ──

@@ -110,6 +110,45 @@ public sealed class HttpCoordinationHub : ICoordinationHub, IDisposable
         try { await _client.HeartbeatAccountsAsync(new AccountReleaseRequest(list, _machineId)); } catch { }
     }
 
+    // ── Vai trò máy + giao việc (Hub đẩy việc cho client) ──
+    /// <summary>Đặt vai trò cho 1 máy (Hub gọi từ bảng điều phối).</summary>
+    public async Task SetRoleAsync(string machineId, string role)
+    {
+        try { await _client.SetRoleAsync(new SetRoleRequest(machineId, role)); } catch { }
+    }
+
+    /// <summary>Tạo 1 việc giao (Hub gọi). Lỗi mạng → trả Assignment rỗng.</summary>
+    public async Task<Assignment?> CreateAssignmentAsync(CreateAssignmentRequest req)
+    {
+        try { return await _client.CreateAssignmentAsync(req); } catch { return null; }
+    }
+
+    /// <summary>Máy này xin nhận tối đa <paramref name="max"/> việc đúng vai trò (client gọi).</summary>
+    public async Task<List<Assignment>> ClaimAssignmentsAsync(string role, int max)
+    {
+        try { return await _client.ClaimAssignmentsAsync(new ClaimAssignmentsRequest(_machineId, role, max)); }
+        catch { return []; }
+    }
+
+    /// <summary>Báo kết quả 1 việc (running/done/failed) về Hub (client gọi).</summary>
+    public async Task ReportAssignmentAsync(string id, string status, string? error = null)
+    {
+        try { await _client.ReportAssignmentAsync(new AssignmentStatusRequest(id, _machineId, status, error)); } catch { }
+    }
+
+    public async Task CancelAssignmentAsync(string id)
+    {
+        try { await _client.CancelAssignmentAsync(new CancelAssignmentRequest(id)); } catch { }
+    }
+
+    /// <summary>Đọc TRẠNG THÁI ledger TƯƠI cho 1 key (round-trip thật, KHÔNG dùng snapshot poll 12s) — để
+    /// worker kết luận done/failed chuẩn, tránh báo nhầm do snapshot trễ. null nếu lỗi/chưa có.</summary>
+    public async Task<string?> FetchLedgerStatusAsync(string coordId)
+    {
+        try { return (await _client.AllLedgerAsync()).FirstOrDefault(l => l.Key == coordId)?.Status; }
+        catch { return null; }
+    }
+
     // ── Ledger → tiến độ local (để Resume bỏ qua dòng máy khác đã làm) ──
     public async Task SyncIntoProgressAsync()
     {

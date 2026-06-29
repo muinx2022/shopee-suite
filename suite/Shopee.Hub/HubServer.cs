@@ -106,5 +106,14 @@ public sealed class HubServer
         // ── Nhịp máy + bảng trạng thái ──
         app.MapPost("/machines/heartbeat", (MachineHeartbeatRequest r) => { db.MachineHeartbeat(r); return Results.Ok(); });
         app.MapGet("/fleet", () => Results.Json(db.Fleet()));
+
+        // ── Vai trò máy + giao việc ──
+        app.MapGet("/roles", () => Results.Json(db.AllRoles()));
+        app.MapPost("/roles", (SetRoleRequest r) => { db.SetRole(r.MachineId, r.Role); return Results.Ok(); });
+        app.MapGet("/assignments", () => Results.Json(db.ListAssignments()));
+        app.MapPost("/assignments", (CreateAssignmentRequest r) => Results.Json(db.CreateAssignment(r)));
+        app.MapPost("/assignments/claim", (ClaimAssignmentsRequest r) => Results.Json(db.ClaimNext(r.MachineId, r.Role, r.Max)));
+        app.MapPost("/assignments/status", (AssignmentStatusRequest r) => { db.UpdateAssignmentStatus(r.Id, r.MachineId, r.Status, r.Error); return Results.Ok(); });
+        app.MapPost("/assignments/cancel", (CancelAssignmentRequest r) => { db.CancelAssignment(r.Id); return Results.Ok(); });
     }
 }

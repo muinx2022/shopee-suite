@@ -5,41 +5,210 @@
     <Grid Margin="28,22,28,24">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
+        <!-- Header -->
         <Grid Grid.Row="0" Margin="0,0,0,12">
             <StackPanel>
-                <TextBlock Text="Trạng thái máy (Fleet)" Style="{StaticResource H1}" />
-                <TextBlock Text="Máy nào đang / đã scrape · import · update từng shop (tổng hợp từ Hub)."
+                <TextBlock Text="Trạng thái &amp; Giao việc" Style="{StaticResource H1}" />
+                <TextBlock Text="Theo dõi máy + Hub giao việc cho từng máy (scrape · import · update theo dây chuyền)."
                            Style="{StaticResource Caption}" Margin="0,3,0,0" />
             </StackPanel>
             <Button HorizontalAlignment="Right" VerticalAlignment="Center" MinWidth="110"
                     Content="⟳  Làm mới" Command="{Binding RefreshCommand}" />
         </Grid>
 
-        <Border Grid.Row="1" Background="{StaticResource SubtleBrush}" CornerRadius="8" Padding="12,8" Margin="0,0,0,12">
-            <StackPanel>
-                <TextBlock Text="{Binding Machines}" FontWeight="SemiBold" TextWrapping="Wrap" />
-                <TextBlock Text="{Binding Status}" Style="{StaticResource Caption}" Margin="0,4,0,8" />
-                <CheckBox Content="⚠ Chạy đè: bỏ qua khoá của máy khác ở các lượt chạy tới (chỉ bật khi chắc máy kia đã dừng)"
-                          IsChecked="{Binding ForceNextRun}" Foreground="{StaticResource TextSecondaryBrush}" />
-            </StackPanel>
-        </Border>
+        <TabControl Grid.Row="1" Background="Transparent" BorderThickness="0">
 
-        <Border Grid.Row="2" Style="{StaticResource Card}" ClipToBounds="True">
-            <DataGrid ItemsSource="{Binding Rows}" AutoGenerateColumns="False" IsReadOnly="True"
-                      HeadersVisibility="Column" CanUserAddRows="False" GridLinesVisibility="Horizontal">
-                <DataGrid.Columns>
-                    <DataGridTextColumn Header="Máy" Binding="{Binding MachineName}" Width="170" />
-                    <DataGridTextColumn Header="Tài khoản" Binding="{Binding AccountLabel}" Width="*" />
-                    <DataGridTextColumn Header="Shop" Binding="{Binding ShopName}" Width="*" />
-                    <DataGridTextColumn Header="Việc" Binding="{Binding Op}" Width="100" />
-                    <DataGridTextColumn Header="Trạng thái" Binding="{Binding State}" Width="140" />
-                    <DataGridTextColumn Header="Cập nhật" Binding="{Binding Updated}" Width="120" />
-                </DataGrid.Columns>
-            </DataGrid>
-        </Border>
+            <!-- ════════════ TAB 1: THEO DÕI ════════════ -->
+            <TabItem Header="Theo dõi">
+                <Grid Margin="0,12,0,0">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <Border Grid.Row="0" Background="{StaticResource SubtleBrush}" CornerRadius="8" Padding="12,8" Margin="0,0,0,12">
+                        <StackPanel>
+                            <TextBlock Text="{Binding Machines}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                            <TextBlock Text="{Binding Status}" Style="{StaticResource Caption}" Margin="0,4,0,8" />
+                            <CheckBox Content="⚠ Chạy đè: bỏ qua khoá của máy khác ở các lượt chạy tới (chỉ bật khi chắc máy kia đã dừng)"
+                                      IsChecked="{Binding ForceNextRun}" Foreground="{StaticResource TextSecondaryBrush}" />
+                        </StackPanel>
+                    </Border>
+                    <Border Grid.Row="1" Style="{StaticResource Card}" ClipToBounds="True">
+                        <DataGrid ItemsSource="{Binding Rows}" AutoGenerateColumns="False" IsReadOnly="True"
+                                  HeadersVisibility="Column" CanUserAddRows="False" GridLinesVisibility="Horizontal">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Máy" Binding="{Binding MachineName}" Width="170" />
+                                <DataGridTextColumn Header="Tài khoản" Binding="{Binding AccountLabel}" Width="*" />
+                                <DataGridTextColumn Header="Shop" Binding="{Binding ShopName}" Width="*" />
+                                <DataGridTextColumn Header="Việc" Binding="{Binding Op}" Width="100" />
+                                <DataGridTextColumn Header="Trạng thái" Binding="{Binding State}" Width="140" />
+                                <DataGridTextColumn Header="Cập nhật" Binding="{Binding Updated}" Width="120" />
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </Border>
+                </Grid>
+            </TabItem>
+
+            <!-- ════════════ TAB 2: GIAO VIỆC ════════════ -->
+            <TabItem Header="Giao việc">
+                <Grid Margin="0,12,0,0">
+
+                    <!-- ───── Bản HUB: bảng điều phối ───── -->
+                    <Grid Visibility="{Binding IsHubBoard, Converter={StaticResource BoolToVis}}">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <!-- Thanh điều khiển -->
+                        <Border Grid.Row="0" Background="{StaticResource SubtleBrush}" CornerRadius="8" Padding="12,10" Margin="0,0,0,10">
+                            <WrapPanel Orientation="Horizontal">
+                                <TextBlock Text="Chế độ:" VerticalAlignment="Center" FontWeight="SemiBold" Margin="0,0,8,0" />
+                                <RadioButton Content="Tự theo vai trò" IsChecked="{Binding AutoMode}" VerticalAlignment="Center" Margin="0,0,12,0" />
+                                <RadioButton Content="Thủ công" IsChecked="{Binding ManualMode}" VerticalAlignment="Center" Margin="0,0,16,0" />
+                                <Button Content="{Binding DispatchButtonText}" Command="{Binding ToggleDispatchCommand}"
+                                        Style="{StaticResource PrimaryButton}" MinWidth="160" Margin="0,0,16,0" />
+                                <CheckBox Content="Tự đồng bộ workbook/cookie khi bàn giao (xuyên máy)" IsChecked="{Binding AutoSyncHandoff}"
+                                          VerticalAlignment="Center" Foreground="{StaticResource TextSecondaryBrush}" />
+                            </WrapPanel>
+                        </Border>
+
+                        <!-- Vai trò máy -->
+                        <Border Grid.Row="1" Style="{StaticResource Card}" Padding="0" Margin="0,0,0,10">
+                            <StackPanel>
+                                <TextBlock Text="Vai trò máy" Style="{StaticResource H2}" Margin="12,10,12,2" />
+                                <TextBlock Text="Gán mỗi máy 1 loại việc — Hub tự đẩy đúng loại cho máy đó (Mọi việc = nhận tất)."
+                                           Style="{StaticResource Caption}" Margin="12,0,12,6" />
+                                <ScrollViewer VerticalScrollBarVisibility="Auto" MaxHeight="190">
+                                    <ItemsControl ItemsSource="{Binding MachineRows}" Margin="0,0,0,8">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Grid Margin="12,5">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="30" />
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="200" />
+                                                        <ColumnDefinition Width="170" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <TextBlock Grid.Column="0" Text="{Binding Dot}" VerticalAlignment="Center" FontSize="14" />
+                                                    <TextBlock Grid.Column="1" Text="{Binding Name}" FontWeight="SemiBold" VerticalAlignment="Center" />
+                                                    <TextBlock Grid.Column="2" Text="{Binding Online}" Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center" />
+                                                    <ComboBox Grid.Column="3" ItemsSource="{Binding RoleOptions}"
+                                                              SelectedItem="{Binding Role, Mode=TwoWay}" Margin="0,2" />
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </ScrollViewer>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Hàng đợi việc -->
+                        <Border Grid.Row="2" Style="{StaticResource Card}" Padding="0" ClipToBounds="True">
+                            <DockPanel>
+                                <TextBlock DockPanel.Dock="Top" Text="Hàng đợi việc (mỗi dòng = 1 shop)"
+                                           Style="{StaticResource H2}" Margin="12,10,12,6" />
+                                <DataGrid ItemsSource="{Binding Queue}" SelectedItem="{Binding SelectedQueue}"
+                                          AutoGenerateColumns="False" IsReadOnly="True" HeadersVisibility="Column"
+                                          CanUserAddRows="False" GridLinesVisibility="Horizontal" SelectionMode="Single">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="Tài khoản" Binding="{Binding AccountLabel}" Width="*" />
+                                        <DataGridTextColumn Header="Shop" Binding="{Binding ShopName}" Width="*" />
+                                        <DataGridTemplateColumn Header="Scrape" Width="150">
+                                            <DataGridTemplateColumn.CellTemplate>
+                                                <DataTemplate>
+                                                    <TextBlock Text="{Binding ScrapeText}" Foreground="{Binding ScrapeBrush}" FontWeight="SemiBold" />
+                                                </DataTemplate>
+                                            </DataGridTemplateColumn.CellTemplate>
+                                        </DataGridTemplateColumn>
+                                        <DataGridTemplateColumn Header="Import" Width="150">
+                                            <DataGridTemplateColumn.CellTemplate>
+                                                <DataTemplate>
+                                                    <TextBlock Text="{Binding ImportText}" Foreground="{Binding ImportBrush}" FontWeight="SemiBold" />
+                                                </DataTemplate>
+                                            </DataGridTemplateColumn.CellTemplate>
+                                        </DataGridTemplateColumn>
+                                        <DataGridTemplateColumn Header="Update" Width="150">
+                                            <DataGridTemplateColumn.CellTemplate>
+                                                <DataTemplate>
+                                                    <TextBlock Text="{Binding UpdateText}" Foreground="{Binding UpdateBrush}" FontWeight="SemiBold" />
+                                                </DataTemplate>
+                                            </DataGridTemplateColumn.CellTemplate>
+                                        </DataGridTemplateColumn>
+                                        <DataGridTextColumn Header="Kế tiếp" Binding="{Binding NextOpText}" Width="140" />
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                            </DockPanel>
+                        </Border>
+
+                        <!-- Giao tay (ghim) -->
+                        <Border Grid.Row="3" Background="{StaticResource SubtleBrush}" CornerRadius="8" Padding="12,10" Margin="0,10,0,0">
+                            <WrapPanel Orientation="Horizontal">
+                                <TextBlock Text="Giao tay:" VerticalAlignment="Center" FontWeight="SemiBold" Margin="0,0,8,0" />
+                                <ComboBox ItemsSource="{Binding PinOps}" SelectedItem="{Binding PinOp}" Width="120" Margin="0,0,8,0" />
+                                <TextBlock Text="cho máy" VerticalAlignment="Center" Margin="0,0,8,0" />
+                                <ComboBox ItemsSource="{Binding MachineRows}" SelectedItem="{Binding PinMachine}"
+                                          DisplayMemberPath="Name" Width="200" Margin="0,0,12,0" />
+                                <Button Content="📌  Ghim cho máy này" Command="{Binding AssignManualCommand}"
+                                        Style="{StaticResource SuccessButton}" Margin="0,0,8,0" />
+                                <Button Content="✖  Huỷ việc của shop đang chọn" Command="{Binding CancelSelectedCommand}"
+                                        Style="{StaticResource DangerButton}" />
+                            </WrapPanel>
+                        </Border>
+                    </Grid>
+
+                    <!-- ───── Bản CLIENT: việc của máy này ───── -->
+                    <Grid Visibility="{Binding IsClientPanel, Converter={StaticResource BoolToVis}}">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <Border Grid.Row="0" Background="{StaticResource SubtleBrush}" CornerRadius="8" Padding="12,10" Margin="0,0,0,10">
+                            <StackPanel>
+                                <TextBlock>
+                                    <Run Text="Việc của máy này — vai trò: " />
+                                    <Run Text="{Binding MyRole}" FontWeight="SemiBold" />
+                                </TextBlock>
+                                <TextBlock Text="Hub tự giao việc đúng vai trò; máy này tự chạy. Vai trò do máy Hub đặt."
+                                           Style="{StaticResource Caption}" Margin="0,3,0,0" />
+                            </StackPanel>
+                        </Border>
+                        <Border Grid.Row="1" Style="{StaticResource Card}" ClipToBounds="True">
+                            <DataGrid ItemsSource="{Binding MyJobs}" AutoGenerateColumns="False" IsReadOnly="True"
+                                      HeadersVisibility="Column" CanUserAddRows="False" GridLinesVisibility="Horizontal">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="Việc" Binding="{Binding Op}" Width="120" />
+                                    <DataGridTextColumn Header="Tài khoản" Binding="{Binding AccountLabel}" Width="*" />
+                                    <DataGridTextColumn Header="Shop" Binding="{Binding ShopName}" Width="*" />
+                                    <DataGridTemplateColumn Header="Trạng thái" Width="170">
+                                        <DataGridTemplateColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <TextBlock Text="{Binding StateText}" Foreground="{Binding StateBrush}" FontWeight="SemiBold" />
+                                            </DataTemplate>
+                                        </DataGridTemplateColumn.CellTemplate>
+                                    </DataGridTemplateColumn>
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </Border>
+                        <Border Grid.Row="2" Margin="0,10,0,0">
+                            <CheckBox Content="⏸ Tạm dừng nhận việc mới (việc đang chạy vẫn xong) — để chạy tay tại máy này"
+                                      IsChecked="{Binding PauseReceiving}" VerticalAlignment="Center" />
+                        </Border>
+                    </Grid>
+
+                    <!-- ───── Chưa bật đồng bộ ───── -->
+                    <TextBlock Visibility="{Binding IsCoordOff, Converter={StaticResource BoolToVis}}"
+                               Margin="0,48,0,0" HorizontalAlignment="Center" TextAlignment="Center"
+                               Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap"
+                               Text="Chưa bật đồng bộ Hub trên máy này.&#x0a;Vào Cài đặt → Đồng bộ nhiều máy để chọn vai trò Client hoặc bật Hub." />
+                </Grid>
+            </TabItem>
+        </TabControl>
     </Grid>
 </UserControl>

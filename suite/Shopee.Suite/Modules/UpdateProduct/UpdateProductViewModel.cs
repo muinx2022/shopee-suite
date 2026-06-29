@@ -160,12 +160,16 @@ public sealed partial class UpdateProductViewModel : ObservableObject
 
     // ── v1.1 (màn gộp): chạy RIÊNG từng tk BigSeller, CHẠY SONG SONG được — mỗi tk 1 token + runner RIÊNG,
     //    ĐỘC LẬP với đường batch của màn cũ (không đụng _cts/_runners/IsRunning). Dùng cho nút inline theo shop. ──
-    public Task RunImportSingleAsync(UpdateRunTargetViewModel t) =>
-        RunOneWorkflowAsync("Import to store", UpdateKind.Import, (r, ctx, ct) => r.RunImportAsync(ctx, ct), t, requiresBigSellerLogin: true);
-    public Task RunUpdateSingleAsync(UpdateRunTargetViewModel t) =>
-        RunOneWorkflowAsync("Update product", UpdateKind.Update, (r, ctx, ct) => r.RunUpdateAsync(ctx, ct), t, requiresBigSellerLogin: true);
-    public Task RunNameRewriteSingleAsync(UpdateRunTargetViewModel t) =>
-        RunOneWorkflowAsync("Update tên SP", UpdateKind.Rewrite, (r, ctx, ct) => r.RunNameRewriteAsync(ctx, ct), t, requiresBigSellerLogin: false);
+    public Task RunImportSingleAsync(UpdateRunTargetViewModel t, bool silent = false) =>
+        RunOneWorkflowAsync("Import to store", UpdateKind.Import, (r, ctx, ct) => r.RunImportAsync(ctx, ct), t, requiresBigSellerLogin: true, silent: silent);
+    public Task RunUpdateSingleAsync(UpdateRunTargetViewModel t, bool silent = false) =>
+        RunOneWorkflowAsync("Update product", UpdateKind.Update, (r, ctx, ct) => r.RunUpdateAsync(ctx, ct), t, requiresBigSellerLogin: true, silent: silent);
+    public Task RunNameRewriteSingleAsync(UpdateRunTargetViewModel t, bool silent = false) =>
+        RunOneWorkflowAsync("Update tên SP", UpdateKind.Rewrite, (r, ctx, ct) => r.RunNameRewriteAsync(ctx, ct), t, requiresBigSellerLogin: false, silent: silent);
+
+    /// <summary>Tiền-kiểm điều kiện chạy import/update/rewrite cho 1 đích — KHÔNG mở dialog. Cho AssignmentWorker.</summary>
+    public bool CanDispatchUpdate(UpdateRunTargetViewModel t, string op, out string problem) =>
+        ValidateUpdateTarget(t, requiresBigSellerLogin: op != "rewrite", out problem);
 
     private sealed class WsJob
     {
@@ -204,15 +208,15 @@ public sealed partial class UpdateProductViewModel : ObservableObject
 
     private async Task RunOneWorkflowAsync(
         string name, UpdateKind kind, Func<UpdateProductRunner, UpdateProductContext, CancellationToken, Task> action,
-        UpdateRunTargetViewModel t, bool requiresBigSellerLogin, bool force = false)
+        UpdateRunTargetViewModel t, bool requiresBigSellerLogin, bool force = false, bool silent = false)
     {
-        if (!ValidateUpdateTarget(t, requiresBigSellerLogin, out var problem)) { Warn(problem + "."); return; }
+        if (!ValidateUpdateTarget(t, requiresBigSellerLogin, out var problem)) { Warn(problem + ".", silent); return; }
         var a = t.Account; var s = t.SelectedShop!;
 
         // 1 tk BigSeller CHỈ 1 workflow tại 1 thời điểm → các shop CÙNG tk KHÔNG import/update song song.
         // TryAdd = dedup + add ATOMIC dưới lock của registry.
         var job = new WsJob { Cts = new CancellationTokenSource(), ShopId = s.Id, Kind = kind };
-        if (!_wsJobs.TryAdd(a.Id, job)) { Warn($"{a.DisplayName}: đang chạy 1 workflow rồi — bấm ■ để dừng trước."); job.Cts.Dispose(); return; }
+        if (!_wsJobs.TryAdd(a.Id, job)) { Warn($"{a.DisplayName}: đang chạy 1 workflow rồi — bấm ■ để dừng trước.", silent); job.Cts.Dispose(); return; }
         // ĐÃ đăng ký job → MỌI thứ sau đây phải nằm TRONG try/finally để dù setup (BuildContext / ctor runner)
         // ném thì finally vẫn gỡ job khỏi _wsJobs (trước đây setup nằm NGOÀI try → throw làm tk kẹt ■ vĩnh viễn).
         var prefix = $"[{a.DisplayName}]";
@@ -388,9 +392,10 @@ public sealed partial class UpdateProductViewModel : ObservableObject
         else d.BeginInvoke(() => LogLines.Add(text));
     }
 
-    private void Warn(string msg)
+    private void Warn(string msg, bool silent = false)
     {
         Status = msg;
-        Dialogs.Show(msg, "Update Product", MessageBoxButton.OK, MessageBoxImage.Information);
+        if (silent) Log("⚠ " + msg);   // đường push-dispatch: KHÔNG mở modal (tránh treo UI), chỉ ghi log
+        else Dialogs.Show(msg, "Update Product", MessageBoxButton.OK, MessageBoxImage.Information);
     }
 }

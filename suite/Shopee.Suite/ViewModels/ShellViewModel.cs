@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
+using Shopee.Suite.Infrastructure;
 using Shopee.Suite.Modules.Accounts;
 using Shopee.Suite.Modules.BigSeller;
 using Shopee.Suite.Modules.CheckAccount;
@@ -37,6 +38,12 @@ public sealed partial class ShellViewModel : ObservableObject
         var update = new UpdateProductViewModel();
         var workspace = new WorkspaceViewModel(bigSeller, scrape, update);
 
+        // Giao việc đa máy: worker (client tự chạy việc Hub giao) + dispatcher (máy Hub tự đẩy việc).
+        // Cả hai tự "ngủ" khi máy chưa có vai trò / chưa bật điều phối → không đổi hành vi 1 máy.
+        var worker = new AssignmentWorker(scrape, update);
+        // Dispatcher (tự đẩy việc) CHỈ chạy timer trên máy Hub — máy client khỏi chạy vô ích.
+        if (Shopee.Core.Coordination.HubServerConfigStore.Shared.Current.Enabled) HubDispatcher.Shared.Start();
+
         // Scrape + Update đã GỘP vào "BigSeller Workspace" → ẩn khỏi sidebar (vẫn dùng chung scrape/update
         // bên dưới; view cũ giữ nguyên để đảo lại nếu cần).
         Modules =
@@ -51,8 +58,8 @@ public sealed partial class ShellViewModel : ObservableObject
                 new AccountsViewModel()),
             new ModuleItem("Check Shopee Account", "🔐", "Kiểm tra tài khoản Shopee",
                 new CheckAccountViewModel()),
-            new ModuleItem("Trạng thái máy", "🖥", "Máy nào đang/đã scrape · import · update (đa máy)",
-                new FleetViewModel()),
+            new ModuleItem("Trạng thái & Giao việc", "🖥", "Theo dõi máy + Hub giao việc cho từng máy (đa máy)",
+                new FleetViewModel(worker)),
             new ModuleItem("Cài đặt", "⚙", "AI provider / model / API key",
                 new SettingsViewModel()),
         ];
