@@ -3,6 +3,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using Shopee.Suite.Modules.Accounts;
 using Shopee.Suite.Modules.BigSeller;
 using Shopee.Suite.Modules.CheckAccount;
+using Shopee.Suite.Modules.Fleet;
 using Shopee.Suite.Modules.Scrape;
 using Shopee.Suite.Modules.Search;
 using Shopee.Suite.Modules.Settings;
@@ -50,6 +51,8 @@ public sealed partial class ShellViewModel : ObservableObject
                 new AccountsViewModel()),
             new ModuleItem("Check Shopee Account", "🔐", "Kiểm tra tài khoản Shopee",
                 new CheckAccountViewModel()),
+            new ModuleItem("Trạng thái máy", "🖥", "Máy nào đang/đã scrape · import · update (đa máy)",
+                new FleetViewModel()),
             new ModuleItem("Cài đặt", "⚙", "AI provider / model / API key",
                 new SettingsViewModel()),
         ];

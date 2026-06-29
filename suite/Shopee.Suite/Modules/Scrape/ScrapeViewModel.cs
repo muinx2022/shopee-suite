@@ -7,6 +7,7 @@ using CommunityToolkit.Mvvm.Input;
 using Shopee.Core.Accounts;
 using Shopee.Core.BigSeller;
 using Shopee.Core.Browser;
+using Shopee.Core.Coordination;
 using Shopee.Core.Infrastructure;
 using Shopee.Core.Scrape;
 using Shopee.Modules.MultiBrave;
@@ -345,6 +346,9 @@ public sealed partial class ScrapeViewModel : ObservableObject
 
         ScrapeRunner? runner = null;
         var claimedFrameIds = new List<string>();   // tk đã giữ chỗ cho job này → nhả ở finally
+        var coordKey = new CoordKey(account.Id, shop.Id, sheet, CoordOp.Scrape);
+        ILeaseHandle? lease = null;
+        var accHub = CoordinationRuntime.Hub;       // null nếu chưa kết nối Hub (chạy như 1 máy)
         try
         {
             int totalRows;
@@ -366,6 +370,15 @@ public sealed partial class ScrapeViewModel : ObservableObject
                 return;
             }
 
+            // KHOÁ VIỆC XUYÊN MÁY: giành quyền scrape shop này. Bị máy khác giữ / mất kết nối Hub → CHẶN.
+            var attempt = await Coordination.Hub.AcquireAsync(coordKey, h.Force || CoordinationRuntime.ForceNextRun, ct).ConfigureAwait(false);
+            if (!attempt.Granted)
+            {
+                Log($"[{account.DisplayName}] ⛔ shop \"{shop.DisplayName}\" đang được máy \"{attempt.Result.BlockedByHostname}\" chạy (hoặc mất kết nối Hub) — bỏ qua. Bấm 'Chạy đè' nếu chắc máy kia đã dừng.");
+                return;
+            }
+            lease = attempt.Handle;
+
             // ĐÓNG KHUNG: cấp một bộ tk Shopee CỐ ĐỊNH (FrameSize) cho job này, GỠ khỏi kho chung → các job
             // RỜI nhau. Resume giữ NGUYÊN khung cũ (đọc id đã lưu) để KHÔNG phơi tk MỚI lên BigSeller; Reset
             // cấp khung mới. Engine chỉ xoay vòng TRONG khung → BigSeller chỉ thấy ngần ấy thiết bị ổn định.
@@ -374,6 +387,19 @@ public sealed partial class ScrapeViewModel : ObservableObject
             var frame = s.ClaimFrame(frameSize, preferIds);
             claimedFrameIds = frame.Select(a => a.Id).ToList();   // ghi nhận để nhả giữ-chỗ ở finally (kể cả khi job dừng giữa chừng)
             if (frame.Count == 0) { Log($"[{account.DisplayName}] kho tk Shopee đã cạn (mọi tk đang thuộc khung khác / Search đang giữ / bị tắt) — bỏ qua."); return; }
+
+            // ACCOUNT-LEASE XUYÊN MÁY: tk nào đang được MÁY KHÁC dùng → loại khỏi khung (chống dùng trùng).
+            if (accHub is not null)
+            {
+                var granted = await accHub.ReserveAccountsAsync(claimedFrameIds).ConfigureAwait(false);
+                if (granted.Count < claimedFrameIds.Count)
+                {
+                    frame = frame.Where(a => granted.Contains(a.Id)).ToList();
+                    Log($"[{account.DisplayName}] {claimedFrameIds.Count - granted.Count} tk Shopee đang được máy khác dùng → loại, còn {frame.Count}.");
+                    claimedFrameIds = frame.Select(a => a.Id).ToList();
+                }
+                if (frame.Count == 0) { Log($"[{account.DisplayName}] mọi tk trong khung đang được máy khác dùng — bỏ qua."); return; }
+            }
             ScrapeProgressStore.Shared.SaveFrame(account.Id, sheet, frame.Select(a => a.Id));   // lưu khung để resume giữ nguyên
             var procs = Math.Max(1, Math.Min(maxProc, frame.Count));
             // Mỗi tk BigSeller (job) 1 màu nền → các process CÙNG tk BigSeller cùng màu, dễ nhìn khi chạy nhiều tk.
@@ -401,6 +427,8 @@ public sealed partial class ScrapeViewModel : ObservableObject
             runner.RowsCompleted += (from, to) =>
             {
                 ScrapeProgressStore.Shared.MarkCompleted(account.Id, sheet, from, to);
+                Coordination.Hub.PublishProgress(coordKey, from, to);     // chia sẻ tiến độ lên Hub
+                _ = accHub?.HeartbeatAccountsAsync(claimedFrameIds);      // giữ account-lease sống
                 OnUi(target.RefreshProgress);
             };
             WireRunner(runner, seq, account.DisplayName);
@@ -423,6 +451,16 @@ public sealed partial class ScrapeViewModel : ObservableObject
         catch (Exception ex) { Log($"[{account.DisplayName}] ✘ lỗi: {ex.Message}"); }
         finally
         {
+            // Hub: đẩy trạng thái hoàn thành lên ledger + nhả khoá việc + nhả account-lease xuyên máy.
+            try
+            {
+                var fin = ScrapeProgressStore.Shared.Find(account.Id, sheet);
+                Coordination.Hub.PublishCompletion(coordKey, fin?.Status ?? "stopped", fin?.LastRowReached ?? 0);
+            }
+            catch { }
+            if (accHub is not null) { try { await accHub.ReleaseAccountsAsync(claimedFrameIds).ConfigureAwait(false); } catch { } }
+            if (lease is not null) { try { await lease.DisposeAsync().ConfigureAwait(false); } catch { } }
+
             // Nhả giữ-chỗ CẢ KHUNG → Search (và job Scrape khác) lại mượn được các tk này.
             ShopeeAccountUsage.Shared.ReleaseReservation(claimedFrameIds);
             s.Jobs.Remove(account.Id);
@@ -437,7 +475,7 @@ public sealed partial class ScrapeViewModel : ObservableObject
     /// <summary>Tạo + phóng 1 job cho tk BigSeller. Factory CHẠY DƯỚI lock của registry → gán Task xong mới
     /// vào sổ (coordinator không thấy Task rỗng) và Remove của body phải chờ → "add trước, remove sau".
     /// Trả false nếu phiên đang kết thúc (sổ đã chốt) hoặc tk đó đã có job đang chạy.</summary>
-    private bool StartJob(RunSession s, ScrapeTargetViewModel target, bool resume)
+    private bool StartJob(RunSession s, ScrapeTargetViewModel target, bool resume, bool force = false)
     {
         var started = s.Jobs.TryAdd(target.Account.Id, () =>
         {
@@ -446,6 +484,7 @@ public sealed partial class ScrapeViewModel : ObservableObject
                 Target = target,
                 Seq = Interlocked.Increment(ref s.JobSeq),
                 Cts = CancellationTokenSource.CreateLinkedTokenSource(s.MasterCts.Token),
+                Force = force,
             };
             // KHÔNG truyền token vào Task.Run: nếu token đã huỷ lúc lên lịch, body (và finally dọn dẹp)
             // sẽ KHÔNG chạy → job kẹt trong registry → coordinator lặp vô hạn. Body tự kiểm token + bắt OCE.
@@ -711,5 +750,6 @@ public sealed partial class ScrapeViewModel : ObservableObject
         public required CancellationTokenSource Cts;   // linked tới MasterCts → dừng RIÊNG 1 tk
         public ScrapeRunner? Runner;
         public Task Task = Task.CompletedTask;
+        public bool Force;   // Chạy đè: bỏ qua khoá hub của máy khác
     }
 }

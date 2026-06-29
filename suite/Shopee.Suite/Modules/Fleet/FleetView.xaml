@@ -1,0 +1,45 @@
+<UserControl
+    x:Class="Shopee.Suite.Modules.Fleet.FleetView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Grid Margin="28,22,28,24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <Grid Grid.Row="0" Margin="0,0,0,12">
+            <StackPanel>
+                <TextBlock Text="Trạng thái máy (Fleet)" Style="{StaticResource H1}" />
+                <TextBlock Text="Máy nào đang / đã scrape · import · update từng shop (tổng hợp từ Hub)."
+                           Style="{StaticResource Caption}" Margin="0,3,0,0" />
+            </StackPanel>
+            <Button HorizontalAlignment="Right" VerticalAlignment="Center" MinWidth="110"
+                    Content="⟳  Làm mới" Command="{Binding RefreshCommand}" />
+        </Grid>
+
+        <Border Grid.Row="1" Background="{StaticResource SubtleBrush}" CornerRadius="8" Padding="12,8" Margin="0,0,0,12">
+            <StackPanel>
+                <TextBlock Text="{Binding Machines}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                <TextBlock Text="{Binding Status}" Style="{StaticResource Caption}" Margin="0,4,0,8" />
+                <CheckBox Content="⚠ Chạy đè: bỏ qua khoá của máy khác ở các lượt chạy tới (chỉ bật khi chắc máy kia đã dừng)"
+                          IsChecked="{Binding ForceNextRun}" Foreground="{StaticResource TextSecondaryBrush}" />
+            </StackPanel>
+        </Border>
+
+        <Border Grid.Row="2" Style="{StaticResource Card}" ClipToBounds="True">
+            <DataGrid ItemsSource="{Binding Rows}" AutoGenerateColumns="False" IsReadOnly="True"
+                      HeadersVisibility="Column" CanUserAddRows="False" GridLinesVisibility="Horizontal">
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="Máy" Binding="{Binding MachineName}" Width="170" />
+                    <DataGridTextColumn Header="Tài khoản" Binding="{Binding AccountLabel}" Width="*" />
+                    <DataGridTextColumn Header="Shop" Binding="{Binding ShopName}" Width="*" />
+                    <DataGridTextColumn Header="Việc" Binding="{Binding Op}" Width="100" />
+                    <DataGridTextColumn Header="Trạng thái" Binding="{Binding State}" Width="140" />
+                    <DataGridTextColumn Header="Cập nhật" Binding="{Binding Updated}" Width="120" />
+                </DataGrid.Columns>
+            </DataGrid>
+        </Border>
+    </Grid>
+</UserControl>

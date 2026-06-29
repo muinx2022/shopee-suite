@@ -10,6 +10,7 @@
     xmlns:srch="clr-namespace:Shopee.Suite.Modules.Search"
     xmlns:upd="clr-namespace:Shopee.Suite.Modules.UpdateProduct"
     xmlns:ws="clr-namespace:Shopee.Suite.Modules.Workspace"
+    xmlns:fleet="clr-namespace:Shopee.Suite.Modules.Fleet"
     xmlns:settings="clr-namespace:Shopee.Suite.Modules.Settings"
     xmlns:conv="clr-namespace:Shopee.Suite.Infrastructure"
     xmlns:views="clr-namespace:Shopee.Suite.Views"
@@ -42,6 +43,9 @@
             </DataTemplate>
             <DataTemplate DataType="{x:Type upd:UpdateProductViewModel}">
                 <upd:UpdateProductView />
+            </DataTemplate>
+            <DataTemplate DataType="{x:Type fleet:FleetViewModel}">
+                <fleet:FleetView />
             </DataTemplate>
             <DataTemplate DataType="{x:Type settings:SettingsViewModel}">
                 <settings:SettingsView />

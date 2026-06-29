@@ -14,6 +14,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Shopee.Core\Shopee.Core.csproj" />
+    <ProjectReference Include="..\Shopee.Hub\Shopee.Hub.csproj" />
     <ProjectReference Include="..\Shopee.Module.CheckAccount\Shopee.Module.CheckAccount.csproj" />
     <ProjectReference Include="..\Shopee.Module.MultiBrave\Shopee.Module.MultiBrave.csproj" />
     <ProjectReference Include="..\Shopee.Module.Search\Shopee.Module.Search.csproj" />

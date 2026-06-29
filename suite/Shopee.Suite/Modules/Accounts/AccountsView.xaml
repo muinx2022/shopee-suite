@@ -41,6 +41,9 @@
                     <Button Content="🔄  Kiểm tra tk lỗi" Margin="8,0,0,0" Command="{Binding CheckErroredCommand}"
                             Visibility="{Binding IsErrorFilter, Converter={StaticResource BoolToVis}}"
                             ToolTip="Tự đăng nhập lần lượt TẤT CẢ tk lỗi/captcha: vào được trang chủ → bỏ cờ lỗi, về kho; KHÔNG vào được (sai mk/captcha/lỗi) → XÓA HẲN." />
+                    <Button Content="⟲  Đồng bộ acc" Margin="8,0,0,0" Command="{Binding SyncFromHubCommand}"
+                            Visibility="{Binding IsHubClient, Converter={StaticResource BoolToVis}}"
+                            ToolTip="Kéo tài khoản + proxy + cookie từ Hub về máy này (gộp/append, không nhân đôi)." />
                     <TextBlock Text="Hiện:" VerticalAlignment="Center" Margin="16,0,6,0" Style="{StaticResource Caption}" />
                     <ComboBox MinWidth="150" VerticalAlignment="Center"
                               SelectedItem="{Binding SelectedFilter}" ItemsSource="{Binding FilterOptions}" />

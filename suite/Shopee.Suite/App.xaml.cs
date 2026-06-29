@@ -41,6 +41,19 @@ public partial class App : Application
             Shopee.Core.Browser.BraveFleet.StartMaintenance();
         }
         catch (Exception ex) { TryLog("BraveFleet.Init", ex); }
+
+        // Đa máy: nếu máy này được đặt làm Hub → tự bật mini-server + Cloudflare Tunnel (nền, không chặn UI).
+        try
+        {
+            var hubCfg = Shopee.Core.Coordination.HubServerConfigStore.Shared.Current;
+            if (hubCfg.Enabled)
+                _ = Shopee.Hub.HubRuntime.Shared.StartAsync(hubCfg);
+        }
+        catch (Exception ex) { TryLog("Hub.Start", ex); }
+
+        // Khởi tạo điều phối phía client (khoá việc, account-lease, ledger). Chưa cấu hình → để NoOp.
+        try { Shopee.Core.Coordination.CoordinationRuntime.InitFromConfig(); }
+        catch (Exception ex) { TryLog("Coordination.Init", ex); }
     }
 
     private void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
@@ -73,6 +86,7 @@ public partial class App : Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        try { Shopee.Hub.HubRuntime.Shared.StopBlocking(); } catch { }
         try { MultiBraveRuntime.Cleanup(); } catch { }
         base.OnExit(e);
     }

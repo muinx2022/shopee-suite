@@ -218,6 +218,97 @@
                     </Border>
                 </ScrollViewer>
             </TabItem>
+
+            <!-- ══════════ TAB 4: Đồng bộ nhiều máy ══════════ -->
+            <TabItem Header="Đồng bộ nhiều máy">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" Margin="0,12,0,0">
+                    <StackPanel MaxWidth="720" HorizontalAlignment="Left">
+
+                        <Border Style="{StaticResource Card}" Padding="18" Margin="0,0,0,14">
+                            <StackPanel>
+                                <TextBlock Text="Máy này" Style="{StaticResource H2}" Margin="0,0,0,8" />
+                                <TextBlock Text="{Binding MachineLabel}" FontSize="14.5" FontWeight="SemiBold" FontFamily="{StaticResource MonoFont}" />
+                                <TextBlock Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,6,0,0"
+                                           Text="Tên này nhận diện máy trên bảng trạng thái và khi giành/khoá việc giữa các máy." />
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource Card}" Padding="18">
+                            <StackPanel>
+                                <TextBlock Text="Kết nối tới Hub (server đồng bộ + điều phối)" Style="{StaticResource H2}" Margin="0,0,0,6" />
+                                <TextBlock Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,0,0,12"
+                                           Text="Dán URL + API token do máy-Hub cung cấp (một máy của bạn bật chế độ Hub qua Cloudflare Tunnel). Khi bật, các máy chia sẻ cấu hình + tránh làm trùng tài khoản. Để trống = chạy độc lập như cũ." />
+
+                                <CheckBox Content="Bật đồng bộ với Hub" IsChecked="{Binding HubEnabled}" Margin="0,0,0,12" />
+
+                                <TextBlock Text="URL Hub" Style="{StaticResource Caption}" />
+                                <TextBox Margin="0,3,0,10" FontFamily="{StaticResource MonoFont}" FontSize="12"
+                                         Text="{Binding HubBaseUrl, UpdateSourceTrigger=PropertyChanged}" />
+
+                                <TextBlock Text="API token" Style="{StaticResource Caption}" />
+                                <TextBox Margin="0,3,0,0" FontFamily="{StaticResource MonoFont}" FontSize="12"
+                                         Text="{Binding HubApiToken, UpdateSourceTrigger=PropertyChanged}" />
+
+                                <TextBlock Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,10,0,0"
+                                           Text="Lưu ý: thay đổi có hiệu lực ở lần khởi động app kế tiếp." />
+
+                                <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
+                                    <Button Style="{StaticResource PrimaryButton}" Content="💾  Lưu kết nối" MinWidth="150"
+                                            Command="{Binding SaveHubClientCommand}" />
+                                    <Button Content="⬆  Đẩy cấu hình lên Hub" Margin="10,0,0,0" Command="{Binding PushConfigToHubCommand}"
+                                            ToolTip="Đẩy accounts/bigseller/ai/cookie hiện tại lên Hub làm nguồn cho các máy khác kéo về." />
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Chế độ Hub: máy này LÀM server -->
+                        <Border Style="{StaticResource Card}" Padding="18" Margin="0,14,0,0">
+                            <StackPanel>
+                                <TextBlock Text="Biến máy này thành Hub (server)" Style="{StaticResource H2}" Margin="0,0,0,6" />
+                                <TextBlock Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,0,0,12"
+                                           Text="Chỉ bật trên ĐÚNG 1 máy (máy luôn bật). Trên dashboard Cloudflare Zero Trust, tạo tunnel + Public Hostname (api.&lt;domain&gt; → HTTP localhost:cổng này). Cách A: dán tunnel token vào đây, app tự tải+chạy cloudflared. Cách B: cài cloudflared như service (cloudflared service install …) rồi ĐỂ TRỐNG ô token. Máy Hub vẫn chạy như một worker bình thường." />
+
+                                <Grid Margin="0,0,0,10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="Cổng local" Style="{StaticResource Caption}" VerticalAlignment="Center" Margin="0,0,10,0" />
+                                    <TextBox Grid.Column="1" Width="90" VerticalContentAlignment="Center"
+                                             Text="{Binding HubPort, UpdateSourceTrigger=PropertyChanged}" />
+                                </Grid>
+
+                                <TextBlock Text="Domain công khai (vd: api.tencuaban.com)" Style="{StaticResource Caption}" />
+                                <TextBox Margin="0,3,0,10" FontFamily="{StaticResource MonoFont}" FontSize="12"
+                                         Text="{Binding HubDomain, UpdateSourceTrigger=PropertyChanged}" />
+
+                                <TextBlock Text="Cloudflare tunnel token" Style="{StaticResource Caption}" />
+                                <TextBox Margin="0,3,0,10" FontFamily="{StaticResource MonoFont}" FontSize="12"
+                                         Text="{Binding HubTunnelToken, UpdateSourceTrigger=PropertyChanged}" />
+
+                                <TextBlock Text="API token (client dùng để kết nối — phát cho các máy khác)" Style="{StaticResource Caption}" />
+                                <Grid Margin="0,3,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBox Grid.Column="0" FontFamily="{StaticResource MonoFont}" FontSize="12" VerticalContentAlignment="Center"
+                                             Text="{Binding HubServerApiToken, UpdateSourceTrigger=PropertyChanged}" />
+                                    <Button Grid.Column="1" Content="🎲 Sinh" Width="70" Margin="8,0,0,0" Command="{Binding GenerateHubServerTokenCommand}" />
+                                </Grid>
+
+                                <StackPanel Orientation="Horizontal" Margin="0,16,0,0">
+                                    <Button Style="{StaticResource SuccessButton}" Content="▶  Bật Hub" MinWidth="130" Command="{Binding StartHubCommand}" />
+                                    <Button Content="■  Dừng Hub" MinWidth="120" Margin="10,0,0,0" Command="{Binding StopHubCommand}" />
+                                    <TextBlock Text="{Binding HubServerStatus}" VerticalAlignment="Center" Margin="16,0,0,0" FontWeight="SemiBold" />
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
         </TabControl>
     </Grid>
 </UserControl>

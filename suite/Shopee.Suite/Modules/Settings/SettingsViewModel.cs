@@ -4,7 +4,9 @@ using CommunityToolkit.Mvvm.Input;
 using Microsoft.Win32;
 using Shopee.Core.Ai;
 using Shopee.Core.Browser;
+using Shopee.Core.Coordination;
 using Shopee.Core.Infrastructure;
+using Shopee.Hub;
 
 namespace Shopee.Suite.Modules.Settings;
 
@@ -59,10 +61,39 @@ public sealed partial class SettingsViewModel : ObservableObject
     public string ComputedMaxInfo =>
         $"→ Tối đa {BraveFleet.WindowsForBudget(UsableCpu, UsableRamGb)} cửa sổ Brave   (= min(CPU dùng, RAM dùng ÷ 2))";
 
+    // ── Đồng bộ nhiều máy (kết nối tới Hub) ─────────────────────────────────────
+    /// <summary>Nhãn máy này: "TÊN-MÁY (a1b2c3)" — để phân biệt trên bảng trạng thái.</summary>
+    public string MachineLabel => MachineIdentity.Shared.Label;
+
+    [ObservableProperty] private bool _hubEnabled;
+    [ObservableProperty] private string _hubBaseUrl = "";
+    [ObservableProperty] private string _hubApiToken = "";
+
+    // ── Chế độ Hub (máy này LÀM server) ─────────────────────────────────────────
+    [ObservableProperty] private bool _isHubMode;
+    [ObservableProperty] private int _hubPort = 8088;
+    [ObservableProperty] private string _hubDomain = "";
+    [ObservableProperty] private string _hubTunnelToken = "";
+    [ObservableProperty] private string _hubServerApiToken = "";
+    [ObservableProperty] private string _hubServerStatus = "";
+
     public SettingsViewModel() => LoadFromStore();
 
     private void LoadFromStore()
     {
+        var hub = HubClientConfigStore.Shared.Current;
+        HubEnabled = hub.Enabled;
+        HubBaseUrl = hub.BaseUrl;
+        HubApiToken = hub.ApiToken;
+
+        var hubSrv = HubServerConfigStore.Shared.Current;
+        IsHubMode = hubSrv.Enabled;
+        HubPort = hubSrv.Port;
+        HubDomain = hubSrv.Domain;
+        HubTunnelToken = hubSrv.TunnelToken;
+        HubServerApiToken = hubSrv.ApiToken;
+        HubServerStatus = HubRuntime.Shared.Running ? "🟢 Đang chạy" : "⚪ Chưa chạy";
+
         var p = PerformanceSettingsStore.Shared.Current;
         UsableCpu = p.UsableCpuCores > 0 ? p.UsableCpuCores : System.Math.Max(2, BraveFleet.CpuCores / 2);
         UsableRamGb = p.UsableRamGb > 0 ? p.UsableRamGb : BraveFleet.TotalRamGb;
@@ -115,6 +146,75 @@ public sealed partial class SettingsViewModel : ObservableObject
 
     [RelayCommand] private void ResetNamePrompt() => NameRewritePrompt = AiPrompts.DefaultNameRewrite;
     [RelayCommand] private void ResetDescriptionPrompt() => DescriptionPrompt = AiPrompts.DefaultDescription;
+
+    [RelayCommand]
+    private void SaveHubClient()
+    {
+        var url = (HubBaseUrl ?? "").Trim().TrimEnd('/');
+        HubBaseUrl = url;
+        HubClientConfigStore.Shared.Save(new HubClientConfig
+        {
+            Enabled = HubEnabled,
+            BaseUrl = url,
+            ApiToken = (HubApiToken ?? "").Trim(),
+        });
+        Status = HubEnabled && !string.IsNullOrWhiteSpace(url)
+            ? $"Đã lưu kết nối Hub: {url}. (Có hiệu lực ở lần khởi động kế tiếp.)"
+            : "Đã tắt đồng bộ Hub — app chạy độc lập như cũ.";
+    }
+
+    [RelayCommand]
+    private void GenerateHubServerToken() =>
+        HubServerApiToken = System.Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(24));
+
+    [RelayCommand]
+    private async Task PushConfigToHub()
+    {
+        var sync = CoordinationRuntime.ConfigSync;
+        if (sync is null) { Status = "Chưa kết nối Hub (bật đồng bộ rồi khởi động lại app)."; return; }
+        try { Status = await sync.PushAsync(); }
+        catch (Exception ex) { Status = "✘ Lỗi đẩy cấu hình: " + ex.Message; }
+    }
+
+    private HubServerConfig BuildHubServerConfig(bool enabled) => new()
+    {
+        Enabled = enabled,
+        Port = HubPort <= 0 ? 8088 : HubPort,
+        Domain = (HubDomain ?? "").Trim(),
+        TunnelToken = (HubTunnelToken ?? "").Trim(),
+        ApiToken = (HubServerApiToken ?? "").Trim(),
+    };
+
+    [RelayCommand]
+    private async Task StartHub()
+    {
+        if (string.IsNullOrWhiteSpace(HubServerApiToken)) GenerateHubServerToken();
+        var cfg = BuildHubServerConfig(enabled: true);
+        HubServerConfigStore.Shared.Save(cfg);
+        HubServerStatus = "⏳ Đang khởi động…";
+        try
+        {
+            await HubRuntime.Shared.StartAsync(cfg);
+            IsHubMode = true;
+            HubServerStatus = "🟢 Đang chạy" + (string.IsNullOrWhiteSpace(cfg.PublicUrl) ? "" : "  ·  " + cfg.PublicUrl);
+            Status = "Hub đang chạy. Dán URL + API token này vào các máy client.";
+        }
+        catch (Exception ex)
+        {
+            HubServerStatus = "✘ Lỗi: " + ex.Message;
+            Dialogs.Show(ex.Message, "Bật Hub", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    [RelayCommand]
+    private async Task StopHub()
+    {
+        try { await HubRuntime.Shared.StopAsync(); } catch { }
+        HubServerConfigStore.Shared.Save(BuildHubServerConfig(enabled: false));
+        IsHubMode = false;
+        HubServerStatus = "⚪ Đã dừng";
+        Status = "Đã dừng chế độ Hub trên máy này.";
+    }
 
     // ── Sao lưu / Khôi phục (đồng bộ sang máy khác) ─────────────────────────────
     [ObservableProperty] private bool _backupBigSeller = true;

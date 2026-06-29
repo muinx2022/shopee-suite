@@ -69,41 +69,14 @@ public static class BackupService
         if (opt.BigSeller && zip.GetEntry("bigseller.json") is { } bsEntry)
         {
             var imported = Deserialize<List<BigSellerAccount>>(bsEntry) ?? [];
-            var current = replace ? new List<BigSellerAccount>() : BigSellerStore.Shared.Accounts.ToList();
-            var seenEmail = current.Select(EmailKey).Where(k => k.Length > 0).ToHashSet();
-            var seenId = current.Select(a => a.Id).ToHashSet();
-            foreach (var a in imported)
-            {
-                var key = EmailKey(a);
-                var dup = (key.Length > 0 && seenEmail.Contains(key)) || seenId.Contains(a.Id);
-                if (!replace && dup) { bsSkipped++; continue; }
-                RebaseBigSeller(a, rebaseWorkbookDir);
-                current.Add(a);
-                if (key.Length > 0) seenEmail.Add(key);
-                seenId.Add(a.Id);
-                bsAdded++;
-            }
-            BigSellerStore.Shared.ReplaceAll(current);
+            (bsAdded, bsSkipped) = MergeBigSeller(imported, replace, rebaseWorkbookDir);
         }
 
         // 3) Tài khoản Shopee (gộp theo login / thay thế).
         if (opt.ShopeeAccounts && zip.GetEntry("accounts.json") is { } shEntry)
         {
             var imported = Deserialize<List<ShopeeAccount>>(shEntry) ?? [];
-            var current = replace ? new List<ShopeeAccount>() : AccountStore.Shared.Accounts.ToList();
-            var seenLogin = current.Select(LoginKey).Where(k => k.Length > 0).ToHashSet();
-            var seenId = current.Select(a => a.Id).ToHashSet();
-            foreach (var a in imported)
-            {
-                var key = LoginKey(a);
-                var dup = (key.Length > 0 && seenLogin.Contains(key)) || seenId.Contains(a.Id);
-                if (!replace && dup) { shSkipped++; continue; }
-                current.Add(a);
-                if (key.Length > 0) seenLogin.Add(key);
-                seenId.Add(a.Id);
-                shAdded++;
-            }
-            AccountStore.Shared.ReplaceAll(current);
+            (shAdded, shSkipped) = MergeShopee(imported, replace);
         }
 
         // 4) Cấu hình AI (luôn ghi đè — là 1 cấu hình duy nhất).
@@ -114,6 +87,49 @@ public static class BackupService
         }
 
         return new ImportResult(bsAdded, bsSkipped, shAdded, shSkipped, aiImported, cookies);
+    }
+
+    /// <summary>Gộp danh sách BigSeller vào store (dùng chung cho import-zip + đồng bộ Hub). append = replace:false.</summary>
+    public static (int added, int skipped) MergeBigSeller(List<BigSellerAccount> imported, bool replace, string? rebaseDir)
+    {
+        var current = replace ? new List<BigSellerAccount>() : BigSellerStore.Shared.Accounts.ToList();
+        var seenEmail = current.Select(EmailKey).Where(k => k.Length > 0).ToHashSet();
+        var seenId = current.Select(a => a.Id).ToHashSet();
+        int added = 0, skipped = 0;
+        foreach (var a in imported)
+        {
+            var key = EmailKey(a);
+            var dup = (key.Length > 0 && seenEmail.Contains(key)) || seenId.Contains(a.Id);
+            if (!replace && dup) { skipped++; continue; }
+            RebaseBigSeller(a, rebaseDir);
+            current.Add(a);
+            if (key.Length > 0) seenEmail.Add(key);
+            seenId.Add(a.Id);
+            added++;
+        }
+        BigSellerStore.Shared.ReplaceAll(current);
+        return (added, skipped);
+    }
+
+    /// <summary>Gộp danh sách Shopee account (kèm proxy) vào store. append = replace:false.</summary>
+    public static (int added, int skipped) MergeShopee(List<ShopeeAccount> imported, bool replace)
+    {
+        var current = replace ? new List<ShopeeAccount>() : AccountStore.Shared.Accounts.ToList();
+        var seenLogin = current.Select(LoginKey).Where(k => k.Length > 0).ToHashSet();
+        var seenId = current.Select(a => a.Id).ToHashSet();
+        int added = 0, skipped = 0;
+        foreach (var a in imported)
+        {
+            var key = LoginKey(a);
+            var dup = (key.Length > 0 && seenLogin.Contains(key)) || seenId.Contains(a.Id);
+            if (!replace && dup) { skipped++; continue; }
+            current.Add(a);
+            if (key.Length > 0) seenLogin.Add(key);
+            seenId.Add(a.Id);
+            added++;
+        }
+        AccountStore.Shared.ReplaceAll(current);
+        return (added, skipped);
     }
 
     private static string EmailKey(BigSellerAccount a) => (a.Email ?? "").Trim().ToLowerInvariant();

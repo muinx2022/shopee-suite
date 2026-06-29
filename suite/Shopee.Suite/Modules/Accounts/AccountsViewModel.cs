@@ -6,6 +6,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Shopee.Core.Accounts;
 using Shopee.Core.Browser;
+using Shopee.Core.Coordination;
 using Shopee.Core.Infrastructure;
 using Shopee.Core.Proxy;
 using Shopee.Modules.CheckAccount;
@@ -294,6 +295,39 @@ public sealed partial class AccountsViewModel : ObservableObject
             return r.Proxy;
         }
         return null;
+    }
+
+    // ── Đồng bộ acc + proxy từ Hub (chỉ hiện khi máy này là client của một Hub) ──
+    /// <summary>true khi máy đã kết nối Hub → hiện nút "Đồng bộ acc".</summary>
+    public bool IsHubClient => CoordinationRuntime.Active;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsSyncIdle))]
+    [NotifyCanExecuteChangedFor(nameof(SyncFromHubCommand))]
+    private bool _isSyncing;
+
+    public bool IsSyncIdle => !IsSyncing;
+    private bool CanSyncFromHub() => IsSyncIdle && CoordinationRuntime.Active;
+
+    [RelayCommand(CanExecute = nameof(CanSyncFromHub))]
+    private async Task SyncFromHub()
+    {
+        var sync = CoordinationRuntime.ConfigSync;
+        if (sync is null) { Status = "Chưa kết nối Hub."; return; }
+        IsSyncing = true;
+        Status = "Đang kéo tài khoản + proxy từ Hub…";
+        try
+        {
+            var r = await sync.PullAccountsAsync();
+            Reload();
+            Status = $"✓ Đồng bộ: Shopee +{r.ShopeeAdded}/bỏ {r.ShopeeSkipped} · BigSeller +{r.BigSellerAdded}/bỏ {r.BigSellerSkipped} · cookie {r.CookiesCopied}.";
+        }
+        catch (Exception ex)
+        {
+            Status = "✘ Lỗi đồng bộ: " + ex.Message;
+            Dialogs.Show(ex.Message, "Đồng bộ acc từ Hub", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        finally { IsSyncing = false; }
     }
 
     [RelayCommand]

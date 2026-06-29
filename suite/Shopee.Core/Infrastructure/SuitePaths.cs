@@ -19,6 +19,19 @@ public static class SuitePaths
         return dir;
     }
 
+    /// <summary>
+    /// Đường dẫn một file cục bộ-theo-máy NGAY DƯỚI Root (KHÔNG đồng bộ): machine.json, hub-client.json.
+    /// Khác ModuleDir ở chỗ không tạo thư mục con; người gọi tự bảo đảm Root tồn tại khi ghi.
+    /// </summary>
+    public static string RootFile(string name) => Path.Combine(Root, name);
+
+    /// <summary>Thư mục cache các file dùng chung tải từ Hub về máy này (workbook, cookie…).</summary>
+    public static string HubCacheDir => ModuleDir("hub-cache");
+
+    /// <summary>Đường dẫn cục bộ của một file "hub-relative" (đã tải từ Hub về <see cref="HubCacheDir"/>).</summary>
+    public static string ResolveHubRelative(string relative) =>
+        Path.Combine(HubCacheDir, relative.Replace('/', Path.DirectorySeparatorChar));
+
     /// <summary>%AppData%\ShopeeStatApp — dữ liệu của app shopee-stat cũ (đích copy account).</summary>
     public static string ShopeeStatDataDir { get; } = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ShopeeStatApp");

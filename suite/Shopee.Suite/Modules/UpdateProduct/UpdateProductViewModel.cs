@@ -6,6 +6,7 @@ using CommunityToolkit.Mvvm.Input;
 using Microsoft.Win32;
 using Shopee.Core.Ai;
 using Shopee.Core.BigSeller;
+using Shopee.Core.Coordination;
 using Shopee.Core.Infrastructure;
 using Shopee.Modules.UpdateProduct;
 using Shopee.Suite.Infrastructure;
@@ -203,7 +204,7 @@ public sealed partial class UpdateProductViewModel : ObservableObject
 
     private async Task RunOneWorkflowAsync(
         string name, UpdateKind kind, Func<UpdateProductRunner, UpdateProductContext, CancellationToken, Task> action,
-        UpdateRunTargetViewModel t, bool requiresBigSellerLogin)
+        UpdateRunTargetViewModel t, bool requiresBigSellerLogin, bool force = false)
     {
         if (!ValidateUpdateTarget(t, requiresBigSellerLogin, out var problem)) { Warn(problem + "."); return; }
         var a = t.Account; var s = t.SelectedShop!;
@@ -215,9 +216,22 @@ public sealed partial class UpdateProductViewModel : ObservableObject
         // ĐÃ đăng ký job → MỌI thứ sau đây phải nằm TRONG try/finally để dù setup (BuildContext / ctor runner)
         // ném thì finally vẫn gỡ job khỏi _wsJobs (trước đây setup nằm NGOÀI try → throw làm tk kẹt ■ vĩnh viễn).
         var prefix = $"[{a.DisplayName}]";
+        var coordOp = kind switch { UpdateKind.Import => CoordOp.Import, UpdateKind.Update => CoordOp.Update, _ => CoordOp.Rewrite };
+        var coordKey = new CoordKey(a.Id, s.Id, s.ShopeeDataSheet, coordOp);
+        ILeaseHandle? lease = null;
         try
         {
             RaiseJobsChanged();   // → UI: nút vừa bấm đổi thành ■, các nút khác cùng tk khoá lại
+
+            // KHOÁ VIỆC XUYÊN MÁY: 2 máy không cùng import/update/rewrite một shop. Bị giữ / mất hub → CHẶN.
+            var attempt = await Coordination.Hub.AcquireAsync(coordKey, force || CoordinationRuntime.ForceNextRun, job.Cts.Token).ConfigureAwait(false);
+            if (!attempt.Granted)
+            {
+                Log($"{prefix} ⛔ {name} đang được máy \"{attempt.Result.BlockedByHostname}\" chạy (hoặc mất kết nối Hub) — bỏ qua. Bấm 'Chạy đè' nếu chắc máy kia đã dừng.");
+                return;
+            }
+            lease = attempt.Handle;
+
             var ai = AiConfigStore.Shared.Current;
             var ctx = BuildContext(t, ai);
             var runner = new UpdateProductRunner();
@@ -226,11 +240,13 @@ public sealed partial class UpdateProductViewModel : ObservableObject
             Log($"▶ {name} — {prefix} (chạy song song).");
             await action(runner, ctx, job.Cts.Token).ConfigureAwait(false);
             Log($"{prefix} ✔ xong {name}.");
+            Coordination.Hub.PublishCompletion(coordKey, "completed", 0);
         }
-        catch (OperationCanceledException) { Log($"{prefix} ■ đã dừng."); }
-        catch (Exception ex) { Log($"{prefix} ✖ lỗi: {ex.Message}"); }
+        catch (OperationCanceledException) { Log($"{prefix} ■ đã dừng."); Coordination.Hub.PublishCompletion(coordKey, "stopped", 0); }
+        catch (Exception ex) { Log($"{prefix} ✖ lỗi: {ex.Message}"); Coordination.Hub.PublishCompletion(coordKey, "stopped", 0); }
         finally
         {
+            if (lease is not null) { try { await lease.DisposeAsync().ConfigureAwait(false); } catch { } }
             _wsJobs.Remove(a.Id);
             job.Cts.Dispose();
             RaiseJobsChanged();   // → UI: trả nút về trạng thái thường
