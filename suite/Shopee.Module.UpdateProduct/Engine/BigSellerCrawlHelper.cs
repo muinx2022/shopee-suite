@@ -243,6 +243,27 @@ internal static class BigSellerCrawlHelper
         }
     }
 
+    /// <summary>Gỡ lớp phủ HƯỚNG DẪN của BigSeller (vd <c>.language_switch_guide_mask</c> — overlay nhắc đổi
+    /// ngôn ngữ) đè lên trang và CHẶN click nút ("…intercepts pointer events"). Xoá hẳn các lớp mask này.
+    /// Best-effort; trả số phần tử đã gỡ.</summary>
+    public static async Task<int> DismissGuideMasksAsync(IPage page, Action<string>? log = null)
+    {
+        try
+        {
+            var removed = await page.EvaluateAsync<int>(
+                @"() => {
+                    let n = 0;
+                    document.querySelectorAll('.language_switch_guide_mask, .language_switch_guide, [class*=""guide_mask""]')
+                        .forEach(el => { try { el.remove(); n++; } catch (e) {} });
+                    return n;
+                }");
+            if (removed > 0)
+                log?.Invoke($"Đã gỡ {removed} lớp phủ hướng dẫn BigSeller (che nút bấm).");
+            return removed;
+        }
+        catch { return 0; }
+    }
+
     public static async Task DismissPostImportDialogsAsync(IPage page, Action<string>? log = null)
     {
         try

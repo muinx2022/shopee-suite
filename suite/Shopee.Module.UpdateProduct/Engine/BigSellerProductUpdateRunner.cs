@@ -277,8 +277,7 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
             var rowId = !string.IsNullOrWhiteSpace(colE) ? colE : (ExtractShopeeId(link) ?? "");
             if (string.IsNullOrWhiteSpace(rowId)) continue;
 
-            // YÊU CẦU cột G: nếu trống → thu lại để DỪNG script (ép chạy "Update tên SP (AI)" trước,
-            // KHÔNG dùng tên gốc cột F).
+            // Cột G trống → BỎ QUA riêng dòng đó (không update tên gốc cột F), vẫn chạy tiếp các dòng khác.
             if (string.IsNullOrWhiteSpace(rewritten)) { emptyRewriteRows.Add(r); continue; }
             map[rowId] = new WorkbookRecord(link, sku, rewritten, price, r);
         }
@@ -286,9 +285,8 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
         if (emptyRewriteRows.Count > 0)
         {
             var preview = string.Join(", ", emptyRewriteRows.Take(10));
-            throw new InvalidOperationException(
-                $"DỪNG: cột G (Tên đã sửa) còn TRỐNG ở {emptyRewriteRows.Count} dòng (vd dòng {preview}). " +
-                "Hãy chạy \"Update tên SP (AI)\" trước để điền cột G, rồi mới Update product.");
+            _log($"⚠ BỎ QUA {emptyRewriteRows.Count} dòng có cột G (Tên đã sửa) TRỐNG (vd dòng {preview}) — " +
+                 "chạy \"Update tên SP (AI)\" để điền cột G nếu muốn update các dòng này.");
         }
 
         _records = map;
@@ -1417,6 +1415,10 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
             "--disable-gpu", "--disable-dev-shm-usage", "--disable-software-rasterizer",
             $"\"{ListingUrl}\"",
         });
+        // Đăng ký profile vào "fleet" TRƯỚC khi phóng → trình dọn Brave mồ côi (BraveFleet) CHỪA cửa sổ
+        // update này. Thiếu bước này = Brave bị quét-giết như mồ côi giữa chừng (xem chú thích ở import).
+        BraveFleet.RegisterActiveProfile(_settings.ProfileDir);
+
         _log("Mở Brave BigSeller profile...");
         _braveProcess = Process.Start(new ProcessStartInfo
         {
@@ -1455,6 +1457,9 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
         // Fallback: Brave hay fork browser thật rồi để stub thoát ngay → _braveProcess.HasExited=true,
         // Kill ở trên no-op, browser thật thành orphan (giữ profile lock + RAM). Diệt theo --user-data-dir.
         try { BraveProcessReaper.KillByUserDataDir(_settings.ProfileDir, _log); } catch { }
+
+        // Gỡ đăng ký SAU khi đã giết → còn sót tiến trình nào thì lần sweep kế dọn nốt.
+        BraveFleet.UnregisterActiveProfile(_settings.ProfileDir);
 
         if (_browser is not null)
         {

@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text.Json;
 using Microsoft.Playwright;
 using Shopee.Core.BigSeller;
+using Shopee.Core.Browser;
 
 namespace UpdateProduct;
 
@@ -489,11 +490,34 @@ internal sealed class BigSellerImportToStoreRunner : IAsyncDisposable
             }");
 
     // Bấm 'Import to Stores' trên THANH CÔNG CỤ (cả lô) — KHÔNG phải nút từng dòng (a.action_btn) / nút trong modal.
-    private static Task ClickToolbarImportAsync(IPage page) =>
-        page.Locator(
+    // Gỡ lớp phủ hướng dẫn (vd .language_switch_guide_mask) hay CHẶN click TRƯỚC; nếu click thật vẫn bị overlay
+    // chặn (intercepts pointer events) → gỡ lại + click bằng JS (gọi thẳng handler, bỏ qua pointer-events).
+    private async Task ClickToolbarImportAsync(IPage page)
+    {
+        await BigSellerCrawlHelper.DismissGuideMasksAsync(page, _log);
+        var btn = page.Locator(
             ".bs-antd-button.mode-sucess button:has-text('Import to Stores'), " +
-            ".rows .lt button:has-text('Import to Stores')")
-            .First.ClickAsync(new() { Timeout = 10000 });
+            ".rows .lt button:has-text('Import to Stores')").First;
+        try
+        {
+            await btn.ClickAsync(new() { Timeout = 10000 });
+        }
+        catch
+        {
+            await BigSellerCrawlHelper.DismissGuideMasksAsync(page, _log);
+            var ok = await page.EvaluateAsync<bool>(
+                @"() => {
+                    const b = Array.from(document.querySelectorAll(
+                        '.bs-antd-button.mode-sucess button, .rows .lt button, button'))
+                        .find(x => (x.textContent || '').includes('Import to Stores'));
+                    if (!b) return false;
+                    b.click();
+                    return true;
+                }");
+            if (!ok) throw;
+            _log("Đã bấm Import to Stores bằng JS (lớp phủ hướng dẫn chặn click thường).");
+        }
+    }
 
     private void StartBraveForBigSeller()
     {
@@ -515,6 +539,12 @@ internal sealed class BigSellerImportToStoreRunner : IAsyncDisposable
             "--disable-software-rasterizer",
             $"\"{BigSellerCrawlHelper.ResolveCrawlUrl(_settings.CrawlUrl)}\"",
         ]);
+
+        // Đăng ký profile vào "fleet" TRƯỚC khi phóng → trình dọn Brave mồ côi (BraveFleet, chạy nền ~4'
+        // trong tiến trình app) sẽ CHỪA cửa sổ import này. Thiếu bước này = Brave import (profile nằm trong
+        // persistent-data nhưng không ai nhận) bị coi là mồ côi và bị giết giữa chừng, còn vòng lặp "lì đòn"
+        // thì cứ mở lại Brave rồi lại bị giết — đúng triệu chứng "tắt Brave nhưng script vẫn chạy".
+        BraveFleet.RegisterActiveProfile(_settings.ProfileDir);
 
         _log("Mở Brave BigSeller profile...");
         _braveProcess = Process.Start(new ProcessStartInfo
@@ -608,6 +638,9 @@ internal sealed class BigSellerImportToStoreRunner : IAsyncDisposable
             try { _braveProcess.Dispose(); } catch { }
             _braveProcess = null;
         }
+
+        // Gỡ đăng ký SAU khi đã giết → nếu còn sót tiến trình nào, lần sweep kế dọn nốt (không rò qua các lượt).
+        BraveFleet.UnregisterActiveProfile(_settings.ProfileDir);
 
         if (_browser is not null)
         {
