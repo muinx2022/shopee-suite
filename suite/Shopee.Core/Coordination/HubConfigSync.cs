@@ -6,9 +6,10 @@ using Shopee.Core.Infrastructure;
 namespace Shopee.Core.Coordination;
 
 /// <summary>
-/// Đồng bộ cấu hình THỦ CÔNG với Hub (người dùng bấm nút, không chạy nền). Kéo = tải file cấu hình
-/// + cookie từ Hub rồi GỘP/APPEND vào store (dedup theo Id+login/email). Đẩy = upload file cấu hình.
-/// Dùng chung logic gộp với <see cref="BackupService"/>.
+/// Đồng bộ cấu hình với Hub. Kéo = tải file cấu hình + cookie + AI + workbook từ Hub rồi GỘP/APPEND vào
+/// store (dedup theo Id+login/email). Đẩy = upload file cấu hình. Chạy khi người dùng bấm "Đồng bộ acc"
+/// HOẶC tự động 1 lần khi CLIENT vừa kết nối được Hub (xem <see cref="HttpCoordinationHub"/>). Dùng chung
+/// logic gộp với <see cref="BackupService"/>.
 /// </summary>
 public sealed class HubConfigSync
 {
@@ -125,11 +126,16 @@ public sealed class HubConfigSync
             {
                 var entry = manifest.FirstOrDefault(m => m.Name.StartsWith($"workbooks/{acct.Id}/", StringComparison.OrdinalIgnoreCase));
                 if (entry is null) continue;
-                var bytes = await _client.DownloadAsync(entry.Name, ct);
-                if (bytes is null) continue;
                 var local = Path.Combine(SuitePaths.HubCacheDir, "workbooks", acct.Id, Path.GetFileName(entry.Name));
                 Directory.CreateDirectory(Path.GetDirectoryName(local)!);
-                await File.WriteAllBytesAsync(local, bytes, ct);
+                // Bỏ qua tải nếu bản local đã KHỚP hash manifest → auto-pull mỗi lần kết nối KHÔNG tải lại workbook lớn.
+                if (!(File.Exists(local) && !string.IsNullOrEmpty(entry.Hash)
+                      && string.Equals(LocalSha256(local), entry.Hash, StringComparison.OrdinalIgnoreCase)))
+                {
+                    var bytes = await _client.DownloadAsync(entry.Name, ct);
+                    if (bytes is null) continue;
+                    await File.WriteAllBytesAsync(local, bytes, ct);
+                }
                 if (!string.Equals(acct.WorkbookPath, local, StringComparison.OrdinalIgnoreCase))
                 {
                     acct.WorkbookPath = local;
@@ -141,5 +147,13 @@ public sealed class HubConfigSync
         catch { }
 
         return new ImportResult(bsA, bsS, shA, shS, ai, cookies);
+    }
+
+    /// <summary>SHA-256 (hex hoa) của 1 file local — so với manifest.Hash để bỏ qua tải workbook không đổi.</summary>
+    private static string LocalSha256(string path)
+    {
+        using var fs = File.OpenRead(path);
+        using var sha = System.Security.Cryptography.SHA256.Create();
+        return Convert.ToHexString(sha.ComputeHash(fs));
     }
 }

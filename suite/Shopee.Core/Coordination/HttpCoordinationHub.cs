@@ -41,12 +41,25 @@ public sealed class HttpCoordinationHub : ICoordinationHub, IDisposable
         {
             await _client.MachineHeartbeatAsync(new MachineHeartbeatRequest(_machineId, Host, null));
             _fleet = await _client.FleetAsync();
-            // Fold ledger→tiến độ local CHỈ 1 lần, SAU khi Hub thật sự trả lời (tránh race lúc máy-Hub vừa khởi động:
-            // server localhost chưa kịp lắng nghe). Poller 12s sẽ tự fold ở tick thành công đầu tiên.
-            if (Interlocked.Exchange(ref _foldedLedger, 1) == 0) _ = SyncIntoProgressAsync();
+            // CHỈ 1 lần, SAU khi Hub thật sự trả lời (tránh race lúc máy-Hub vừa khởi động: server localhost chưa
+            // kịp lắng nghe). Poller 12s tự chạy ở tick thành công đầu tiên.
+            if (Interlocked.Exchange(ref _foldedLedger, 1) == 0)
+            {
+                _ = SyncIntoProgressAsync();   // fold ledger → tiến độ local (resume xuyên máy)
+                _ = AutoPullIfClientAsync();   // client tự kéo cấu hình + cookie + AI + workbook theo Hub
+            }
             try { Changed?.Invoke(); } catch { }
         }
         catch { /* offline: giữ snapshot cũ, không ném */ }
+    }
+
+    /// <summary>CLIENT (không phải máy Hub) tự kéo cấu hình + cookie + AI + workbook về 1 lần khi vừa kết nối →
+    /// "set luôn theo Hub": Hub đăng nhập BigSeller 1 lần (xử lý mã xác nhận email), client chỉ việc dùng cookie
+    /// + key AI dùng chung. Máy Hub KHÔNG kéo (giữ workbook/cookie GỐC của nó, tránh tự trỏ về hub-cache).</summary>
+    private static async Task AutoPullIfClientAsync()
+    {
+        if (HubServerConfigStore.Shared.Current.Enabled) return;
+        try { if (CoordinationRuntime.ConfigSync is { } sync) await sync.PullAccountsAsync(); } catch { }
     }
 
     public async Task<LeaseAttempt> AcquireAsync(CoordKey key, bool force, CancellationToken ct)
