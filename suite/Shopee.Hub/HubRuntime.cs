@@ -20,6 +20,9 @@ public sealed class HubRuntime
     /// <summary>Dòng log tiến trình (server/tunnel) để UI hiển thị nếu cần.</summary>
     public event Action<string>? Log;
 
+    /// <summary>Phát khi <see cref="Running"/> đổi (bật/tắt) — để UI cập nhật nút/trạng thái.</summary>
+    public event Action? StateChanged;
+
     public async Task StartAsync(HubServerConfig cfg)
     {
         if (Running) return;
@@ -42,6 +45,7 @@ public sealed class HubRuntime
         }
 
         Running = true;
+        StateChanged?.Invoke();
     }
 
     public async Task StopAsync()
@@ -50,6 +54,7 @@ public sealed class HubRuntime
         await _server.StopAsync();
         Running = false;
         PublicUrl = "";
+        StateChanged?.Invoke();
         Emit("Đã dừng Hub.");
     }
 
@@ -59,6 +64,7 @@ public sealed class HubRuntime
         try { _tunnel.Stop(); } catch { }
         try { _server.StopAsync().Wait(TimeSpan.FromSeconds(3)); } catch { }
         Running = false;
+        StateChanged?.Invoke();
     }
 
     private void Emit(string m) { try { Log?.Invoke(m); } catch { } }

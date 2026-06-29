@@ -77,6 +77,12 @@ public sealed partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private string _hubServerApiToken = "";
     [ObservableProperty] private string _hubServerStatus = "";
 
+    /// <summary>Hub trên máy này đang chạy? — để bật/tắt nút "Bật Hub" / "Dừng Hub" cho rõ trạng thái.</summary>
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(StartHubCommand))]
+    [NotifyCanExecuteChangedFor(nameof(StopHubCommand))]
+    private bool _isHubRunning;
+
     // ── Bộ chọn vai trò máy (mặc định KHÔNG chọn gì → không hiện panel nào) ──
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ShowRoleHint))]
@@ -92,7 +98,24 @@ public sealed partial class SettingsViewModel : ObservableObject
     [RelayCommand] private void SelectClientRole() { IsClientRole = true; IsHubRole = false; }
     [RelayCommand] private void SelectHubRole() { IsHubRole = true; IsClientRole = false; }
 
-    public SettingsViewModel() => LoadFromStore();
+    public SettingsViewModel()
+    {
+        LoadFromStore();
+        HubRuntime.Shared.StateChanged += OnHubStateChanged;
+    }
+
+    private void OnHubStateChanged()
+    {
+        var d = System.Windows.Application.Current?.Dispatcher;
+        if (d is null || d.CheckAccess()) ApplyHubState();
+        else d.BeginInvoke(ApplyHubState);
+    }
+
+    private void ApplyHubState()
+    {
+        IsHubRunning = HubRuntime.Shared.Running;
+        HubServerStatus = IsHubRunning ? "🟢 Đang chạy" : "⚪ Đã dừng";
+    }
 
     private void LoadFromStore()
     {
@@ -107,7 +130,8 @@ public sealed partial class SettingsViewModel : ObservableObject
         HubDomain = hubSrv.Domain;
         HubTunnelToken = hubSrv.TunnelToken;
         HubServerApiToken = hubSrv.ApiToken;
-        HubServerStatus = HubRuntime.Shared.Running ? "🟢 Đang chạy" : "⚪ Chưa chạy";
+        IsHubRunning = HubRuntime.Shared.Running;
+        HubServerStatus = IsHubRunning ? "🟢 Đang chạy" : "⚪ Chưa chạy";
 
         var p = PerformanceSettingsStore.Shared.Current;
         UsableCpu = p.UsableCpuCores > 0 ? p.UsableCpuCores : System.Math.Max(2, BraveFleet.CpuCores / 2);
@@ -200,7 +224,7 @@ public sealed partial class SettingsViewModel : ObservableObject
         ApiToken = (HubServerApiToken ?? "").Trim(),
     };
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanStartHub))]
     private async Task StartHub()
     {
         if (string.IsNullOrWhiteSpace(HubServerApiToken)) GenerateHubServerToken();
@@ -211,6 +235,7 @@ public sealed partial class SettingsViewModel : ObservableObject
         {
             await HubRuntime.Shared.StartAsync(cfg);
             IsHubMode = true;
+            IsHubRunning = true;
             HubServerStatus = "🟢 Đang chạy" + (string.IsNullOrWhiteSpace(cfg.PublicUrl) ? "" : "  ·  " + cfg.PublicUrl);
             Status = "Hub đang chạy. Dán URL + API token này vào các máy client.";
         }
@@ -221,15 +246,19 @@ public sealed partial class SettingsViewModel : ObservableObject
         }
     }
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanStopHub))]
     private async Task StopHub()
     {
         try { await HubRuntime.Shared.StopAsync(); } catch { }
         HubServerConfigStore.Shared.Save(BuildHubServerConfig(enabled: false));
         IsHubMode = false;
+        IsHubRunning = false;
         HubServerStatus = "⚪ Đã dừng";
         Status = "Đã dừng chế độ Hub trên máy này.";
     }
+
+    private bool CanStartHub() => !IsHubRunning;
+    private bool CanStopHub() => IsHubRunning;
 
     // ── Sao lưu / Khôi phục (đồng bộ sang máy khác) ─────────────────────────────
     [ObservableProperty] private bool _backupBigSeller = true;
