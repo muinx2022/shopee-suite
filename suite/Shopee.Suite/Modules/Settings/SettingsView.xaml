@@ -278,9 +278,10 @@
                         <!-- Bộ chọn vai trò máy này (mặc định chưa chọn gì; nút GIỮ trạng thái đã chọn) -->
                         <TextBlock Text="Vai trò máy này:" Style="{StaticResource Caption}" Margin="2,0,0,6" />
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
-                            <RadioButton GroupName="role" Style="{StaticResource RoleToggle}" Content="👤  Máy này là CLIENT"
+                            <!-- Không dùng GroupName: việc loại-trừ-nhau do VM xử lý (setter), nên binding LUÔN đẩy đúng false về nguồn. -->
+                            <RadioButton Style="{StaticResource RoleToggle}" Content="👤  Máy này là CLIENT"
                                          IsChecked="{Binding IsClientRole, Mode=TwoWay}" />
-                            <RadioButton GroupName="role" Style="{StaticResource RoleToggle}" Content="🖥  Máy này là HUB"
+                            <RadioButton Style="{StaticResource RoleToggle}" Content="🖥  Máy này là HUB"
                                          IsChecked="{Binding IsHubRole, Mode=TwoWay}" />
                         </StackPanel>
                         <TextBlock Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="2,0,0,12"
