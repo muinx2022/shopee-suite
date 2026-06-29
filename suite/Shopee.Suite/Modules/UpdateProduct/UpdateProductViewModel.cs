@@ -6,6 +6,7 @@ using CommunityToolkit.Mvvm.Input;
 using Microsoft.Win32;
 using Shopee.Core.Ai;
 using Shopee.Core.BigSeller;
+using Shopee.Core.Infrastructure;
 using Shopee.Modules.UpdateProduct;
 using Shopee.Suite.Infrastructure;
 
@@ -50,40 +51,67 @@ public sealed partial class UpdateProductViewModel : ObservableObject
     private readonly object _runnersLock = new();
     private readonly List<UpdateProductRunner> _runners = [];
 
+    private bool _uiLoaded;
+
     public UpdateProductViewModel()
     {
+        // Khôi phục ảnh/video/key OpenAI đã LƯU (dùng chung mọi tk) — trước đây mất khi đóng app.
+        var ui = UpdateProductUiStore.Shared.Current;
+        _imagePath = ui.ImagePath;
+        _videoFolder = ui.VideoFolder;
+        _openAiKeyFile = ui.OpenAiKeyFile;
+        _uiLoaded = true;
+
         Reload();
         BigSellerStore.Shared.Changed += () =>
         {
             if (IsRunning || HasActiveWsJob) return;   // đang chạy (batch hoặc inline per-shop) → đừng rebuild list
             var d = Application.Current?.Dispatcher;
-            if (d is null || d.CheckAccess()) Reload();
-            else d.BeginInvoke(Reload);
+            if (d is null || d.CheckAccess()) SyncFromStore();
+            else d.BeginInvoke(SyncFromStore);
         };
+    }
+
+    /// <summary>Chỉ rebuild khi CẤU TRÚC đổi (thêm/bớt account hoặc shop) — KHÔNG rebuild khi chỉ sửa thuộc
+    /// tính (tick/shop/config GIỜ lưu trên model nên không cần dựng lại), tránh mất focus lúc đang gõ +
+    /// tránh vòng lặp Save→Changed→Reload vô ích.</summary>
+    private void SyncFromStore()
+    {
+        var storeSig = Sig(BigSellerStore.Shared.Accounts);
+        var vmSig = string.Join("|", RunTargets.Select(t => t.Account.Id + ":" + string.Join(",", t.Shops.Select(s => s.Id))));
+        if (storeSig == vmSig) return;
+        Reload();
+    }
+
+    private static string Sig(IEnumerable<BigSellerAccount> accounts) =>
+        string.Join("|", accounts.Select(a => a.Id + ":" + string.Join(",", a.Shops.Select(s => s.Id))));
+
+    // Ảnh/Video/key OpenAI (dùng chung) — LƯU ngay khi đổi để bền qua mở lại app.
+    partial void OnImagePathChanged(string value) => SaveUiSettings();
+    partial void OnVideoFolderChanged(string value) => SaveUiSettings();
+    partial void OnOpenAiKeyFileChanged(string value) => SaveUiSettings();
+
+    private void SaveUiSettings()
+    {
+        if (!_uiLoaded) return;   // đừng lưu trong lúc đang nạp ban đầu
+        UpdateProductUiStore.Shared.Save(new UpdateProductUiSettings
+        {
+            ImagePath = ImagePath,
+            VideoFolder = VideoFolder,
+            OpenAiKeyFile = OpenAiKeyFile,
+        });
     }
 
     [RelayCommand]
     private void Reload()
     {
-        // Giữ lựa chọn + cấu hình per-target cũ theo Id để reload không mất trạng thái.
-        var prevSelected = RunTargets.Where(t => t.IsSelected).Select(t => t.Account.Id).ToHashSet();
-        var prevShop = RunTargets.ToDictionary(t => t.Account.Id, t => t.SelectedShop?.Id);
-        var prevCfg = RunTargets.ToDictionary(t => t.Account.Id,
-            t => (t.StartRow, t.EndRow, t.ImportWorkers, t.UpdateWorkers, t.ListingReloadSeconds));
+        // tick chọn + shop đang chọn + cấu hình chạy GIỜ lưu trên model (BigSellerStore) → VM tự đọc lại,
+        // không cần giữ in-memory. Chỉ giữ lựa chọn panel-chi-tiết (thuần UI) theo Id.
         var prevDetailId = SelectedTarget?.Account.Id;
 
         RunTargets.Clear();
         foreach (var a in BigSellerStore.Shared.Accounts)
-        {
-            var vm = new UpdateRunTargetViewModel(a) { IsSelected = prevSelected.Contains(a.Id) };
-            // MẶC ĐỊNH CHƯA chọn shop: chỉ khôi phục lựa chọn cũ theo Id (nếu có), KHÔNG tự chọn shop đầu.
-            vm.SelectedShop = prevShop.TryGetValue(a.Id, out var sid) && sid is not null
-                ? vm.Shops.FirstOrDefault(s => s.Id == sid)
-                : null;
-            if (prevCfg.TryGetValue(a.Id, out var c))
-                (vm.StartRow, vm.EndRow, vm.ImportWorkers, vm.UpdateWorkers, vm.ListingReloadSeconds) = c;
-            RunTargets.Add(vm);
-        }
+            RunTargets.Add(new UpdateRunTargetViewModel(a));   // VM khôi phục tick/shop/config từ model đã LƯU
         SelectedTarget = RunTargets.FirstOrDefault(t => t.Account.Id == prevDetailId) ?? RunTargets.FirstOrDefault();
         Status = $"{RunTargets.Count} tài khoản BigSeller.";
     }

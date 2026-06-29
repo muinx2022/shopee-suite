@@ -34,6 +34,12 @@ public sealed class BigSellerAccount
 
     public List<BigSellerShop> Shops { get; set; } = [];
 
+    // Lựa chọn ở module Update/Import — LƯU để khôi phục sau khi mở lại app (trước đây chỉ là UI-state).
+    /// <summary>Tk này có được TICK chọn để chạy Update/Import không.</summary>
+    public bool UpdateRunSelected { get; set; }
+    /// <summary>Id shop đang chọn ở module Update/Import (panel cấu hình chi tiết). Trống = chưa chọn.</summary>
+    public string UpdateSelectedShopId { get; set; } = "";
+
     public string DisplayName =>
         !string.IsNullOrWhiteSpace(Label) ? Label
         : !string.IsNullOrWhiteSpace(Email) ? Email
