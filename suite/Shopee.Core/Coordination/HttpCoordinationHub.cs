@@ -14,9 +14,11 @@ public sealed class HttpCoordinationHub : ICoordinationHub, IDisposable
     private readonly Timer _poller;
     private volatile FleetSnapshot _fleet = new();
     private int _foldedLedger;   // 0 = chưa fold ledger→tiến độ local; chỉ fold 1 lần khi Hub LẦN ĐẦU liên lạc được
-    private int _pulling;        // 0/1 chống chồng lấn auto-pull cấu hình
+    private int _pulling;        // 0/1 chống chồng lấn auto-pull (client)
+    private int _pushing;        // 0/1 chống chồng lấn auto-push (hub)
     private DateTimeOffset _lastAutoPull = DateTimeOffset.MinValue;
-    private static readonly TimeSpan AutoPullEvery = TimeSpan.FromMinutes(3);
+    private DateTimeOffset _lastAutoPush = DateTimeOffset.MinValue;
+    private static readonly TimeSpan AutoSyncEvery = TimeSpan.FromMinutes(3);
 
     /// <summary>Tên hiển thị máy này, đọc LIVE → đổi tên trong Settings có hiệu lực ngay lượt gửi kế tiếp.</summary>
     private static string Host => MachineIdentity.Shared.DisplayName;
@@ -48,7 +50,8 @@ public sealed class HttpCoordinationHub : ICoordinationHub, IDisposable
             // kịp lắng nghe). Poller 12s tự chạy ở tick thành công đầu tiên.
             // Fold ledger 1 LẦN (resume xuyên máy); auto-pull cấu hình/cookie/AI thì chạy ĐỊNH KỲ (xem dưới).
             if (Interlocked.Exchange(ref _foldedLedger, 1) == 0) _ = SyncIntoProgressAsync();
-            _ = MaybeAutoPullAsync();
+            _ = MaybeAutoPullAsync();   // client: kéo cấu hình/cookie/workbook MỚI từ Hub
+            _ = MaybeAutoPushAsync();   // hub: publish cấu hình/cookie/workbook ĐÃ ĐỔI để client kéo
             try { Changed?.Invoke(); } catch { }
         }
         catch { /* offline: giữ snapshot cũ, không ném */ }
@@ -59,13 +62,27 @@ public sealed class HttpCoordinationHub : ICoordinationHub, IDisposable
     /// KHÔNG cần khởi động lại. Máy Hub KHÔNG kéo (giữ bản gốc). Có chốt chống chồng lấn + giãn theo chu kỳ.</summary>
     private async Task MaybeAutoPullAsync()
     {
-        if (HubServerConfigStore.Shared.Current.Enabled) return;             // máy Hub: giữ workbook/cookie gốc
+        if (HubServerConfigStore.Shared.Current.Enabled) return;              // máy Hub: giữ workbook/cookie gốc
         if (CoordinationRuntime.ConfigSync is not { } sync) return;
-        if ((DateTimeOffset.UtcNow - _lastAutoPull) < AutoPullEvery) return; // chưa tới chu kỳ
-        if (Interlocked.Exchange(ref _pulling, 1) == 1) return;              // đang kéo → bỏ lượt này
+        if ((DateTimeOffset.UtcNow - _lastAutoPull) < AutoSyncEvery) return;  // chưa tới chu kỳ
+        if (Interlocked.Exchange(ref _pulling, 1) == 1) return;               // đang kéo → bỏ lượt này
         try { await sync.PullAccountsAsync(); }
         catch { }
         finally { _lastAutoPull = DateTimeOffset.UtcNow; Interlocked.Exchange(ref _pulling, 0); }
+    }
+
+    /// <summary>MÁY HUB tự publish cấu hình + cookie + workbook ĐÃ ĐỔI lên Hub định kỳ (Hub là nguồn sự thật,
+    /// client chỉ nhận) → "Hub đổi data → client tự có". PushAsync chỉ đẩy file hash KHÁC nên rất rẻ. Client
+    /// KHÔNG push (scrape/update không ghi ngược data lên Hub). Có chốt chống chồng lấn + giãn theo chu kỳ.</summary>
+    private async Task MaybeAutoPushAsync()
+    {
+        if (!HubServerConfigStore.Shared.Current.Enabled) return;            // chỉ máy Hub publish
+        if (CoordinationRuntime.ConfigSync is not { } sync) return;
+        if ((DateTimeOffset.UtcNow - _lastAutoPush) < AutoSyncEvery) return; // chưa tới chu kỳ
+        if (Interlocked.Exchange(ref _pushing, 1) == 1) return;              // đang đẩy → bỏ lượt này
+        try { await sync.PushAsync(); }
+        catch { }
+        finally { _lastAutoPush = DateTimeOffset.UtcNow; Interlocked.Exchange(ref _pushing, 0); }
     }
 
     public async Task<LeaseAttempt> AcquireAsync(CoordKey key, bool force, CancellationToken ct)

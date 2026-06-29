@@ -19,43 +19,48 @@ public sealed class HubConfigSync
     private static string SharedFile(string name) => Path.Combine(SuitePaths.ModuleDir("shared"), name);
     private static string CookieDir => Path.Combine(SuitePaths.ModuleDir("shared"), "bigseller-cookies");
 
-    /// <summary>Đẩy cấu hình hiện tại của máy này lên Hub (làm "nguồn" cho các máy khác kéo về).</summary>
+    /// <summary>Đẩy cấu hình hiện tại của máy này lên Hub (làm "nguồn" cho các máy khác kéo về). CHỈ đẩy file có
+    /// nội dung KHÁC bản trên Hub (so size + SHA-256) → gọi định kỳ rất rẻ (workbook lớn không upload lại vô ích).</summary>
     public async Task<string> PushAsync(CancellationToken ct = default)
     {
+        Dictionary<string, FileManifestEntry> manifest;
+        try { manifest = (await _client.ManifestAsync(ct)).ToDictionary(m => m.Name, m => m, StringComparer.OrdinalIgnoreCase); }
+        catch { manifest = new(StringComparer.OrdinalIgnoreCase); }   // không lấy được manifest → cứ đẩy (an toàn)
+
         int n = 0;
-        n += await PushFileAsync("accounts.json", "config/accounts.json", ct);
-        n += await PushFileAsync("bigseller.json", "config/bigseller.json", ct);
-        n += await PushFileAsync("ai.json", "config/ai.json", ct);
-        n += await PushFileAsync("scrape-targets.json", "config/scrape-targets.json", ct);
+        if (await PushIfChangedAsync(manifest, SharedFile("accounts.json"), "config/accounts.json", ct)) n++;
+        if (await PushIfChangedAsync(manifest, SharedFile("bigseller.json"), "config/bigseller.json", ct)) n++;
+        if (await PushIfChangedAsync(manifest, SharedFile("ai.json"), "config/ai.json", ct)) n++;
+        if (await PushIfChangedAsync(manifest, SharedFile("scrape-targets.json"), "config/scrape-targets.json", ct)) n++;
 
         if (Directory.Exists(CookieDir))
             foreach (var f in Directory.GetFiles(CookieDir, "*.json"))
-            {
-                await _client.UploadAsync("cookies/" + Path.GetFileName(f), await File.ReadAllBytesAsync(f, ct), null, ct);
-                n++;
-            }
+                if (await PushIfChangedAsync(manifest, f, "cookies/" + Path.GetFileName(f), ct)) n++;
 
-        // Workbook Excel (dữ liệu sản phẩm) — upload theo từng tk BigSeller để máy khác kéo về scrape được.
+        // Workbook Excel (dữ liệu sản phẩm) — đẩy theo từng tk BigSeller để máy khác kéo về chạy được.
         foreach (var acct in BigSellerStore.Shared.Accounts)
         {
             if (string.IsNullOrWhiteSpace(acct.WorkbookPath) || !File.Exists(acct.WorkbookPath)) continue;
             try
             {
-                await _client.UploadAsync($"workbooks/{acct.Id}/{Path.GetFileName(acct.WorkbookPath)}",
-                    await File.ReadAllBytesAsync(acct.WorkbookPath, ct), null, ct);
-                n++;
+                if (await PushIfChangedAsync(manifest, acct.WorkbookPath,
+                        $"workbooks/{acct.Id}/{Path.GetFileName(acct.WorkbookPath)}", ct)) n++;
             }
-            catch { }
+            catch (Exception ex) when (ex is not OperationCanceledException) { }
         }
-        return $"Đã đẩy {n} file (cấu hình + cookie + workbook) lên Hub.";
+        return $"Đã đẩy {n} file thay đổi (cấu hình + cookie + workbook) lên Hub.";
     }
 
-    private async Task<int> PushFileAsync(string local, string remote, CancellationToken ct)
+    /// <summary>Upload 1 file nếu nội dung KHÁC bản trên Hub (size hoặc SHA-256 khác). Trả true nếu đã upload.</summary>
+    private async Task<bool> PushIfChangedAsync(Dictionary<string, FileManifestEntry> manifest, string localPath, string remoteName, CancellationToken ct)
     {
-        var path = SharedFile(local);
-        if (!File.Exists(path)) return 0;
-        await _client.UploadAsync(remote, await File.ReadAllBytesAsync(path, ct), null, ct);
-        return 1;
+        if (!File.Exists(localPath)) return false;
+        var len = new FileInfo(localPath).Length;
+        if (manifest.TryGetValue(remoteName, out var m) && m.Size == len
+            && string.Equals(LocalSha256(localPath), m.Hash, StringComparison.OrdinalIgnoreCase))
+            return false;   // không đổi → bỏ qua
+        await _client.UploadAsync(remoteName, await File.ReadAllBytesAsync(localPath, ct), null, ct);
+        return true;
     }
 
     /// <summary>Kéo tài khoản + proxy + cookie + AI từ Hub về, gộp/append vào máy này.</summary>
