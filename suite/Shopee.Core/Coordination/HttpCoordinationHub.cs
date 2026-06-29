@@ -13,6 +13,7 @@ public sealed class HttpCoordinationHub : ICoordinationHub, IDisposable
     private readonly string _machineId;
     private readonly Timer _poller;
     private volatile FleetSnapshot _fleet = new();
+    private int _foldedLedger;   // 0 = chưa fold ledger→tiến độ local; chỉ fold 1 lần khi Hub LẦN ĐẦU liên lạc được
 
     /// <summary>Tên hiển thị máy này, đọc LIVE → đổi tên trong Settings có hiệu lực ngay lượt gửi kế tiếp.</summary>
     private static string Host => MachineIdentity.Shared.DisplayName;
@@ -40,6 +41,9 @@ public sealed class HttpCoordinationHub : ICoordinationHub, IDisposable
         {
             await _client.MachineHeartbeatAsync(new MachineHeartbeatRequest(_machineId, Host, null));
             _fleet = await _client.FleetAsync();
+            // Fold ledger→tiến độ local CHỈ 1 lần, SAU khi Hub thật sự trả lời (tránh race lúc máy-Hub vừa khởi động:
+            // server localhost chưa kịp lắng nghe). Poller 12s sẽ tự fold ở tick thành công đầu tiên.
+            if (Interlocked.Exchange(ref _foldedLedger, 1) == 0) _ = SyncIntoProgressAsync();
             try { Changed?.Invoke(); } catch { }
         }
         catch { /* offline: giữ snapshot cũ, không ném */ }
@@ -57,9 +61,16 @@ public sealed class HttpCoordinationHub : ICoordinationHub, IDisposable
             handle.StartHeartbeat();
             return new LeaseAttempt(AcquireResult.Ok(), handle);
         }
-        catch
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            return new LeaseAttempt(AcquireResult.Blocked("(mất kết nối hub)"), null);
+            throw;   // người dùng/hệ thống HUỶ → để caller xử lý như "đã dừng", KHÔNG coi là bị máy khác giữ
+        }
+        catch (Exception ex)
+        {
+            // Không xác nhận được khoá → CHẶN việc mới cho an toàn. Phân biệt Hub-báo-lỗi với mất-kết-nối để
+            // người dùng biết "Chạy đè" có ích hay không (timeout của HttpClient cũng rơi vào nhánh mất-kết-nối).
+            var why = ex is System.Net.Http.HttpRequestException { StatusCode: not null } ? "(hub báo lỗi)" : "(mất kết nối hub)";
+            return new LeaseAttempt(AcquireResult.Blocked(why), null);
         }
     }
 

@@ -41,6 +41,7 @@ public static class CoordinationRuntime
         ConfigSync = new HubConfigSync(client);
         Hub = hub;
         Coordination.Hub = hub;                 // gán vào locator để các điểm chạy (scrape/update) dùng
-        _ = hub.SyncIntoProgressAsync();        // fold ledger → tiến độ local (resume xuyên máy)
+        // Ledger→tiến độ local (resume xuyên máy) do poller tự fold ở lần Hub trả lời ĐẦU TIÊN — tránh race
+        // lúc máy-Hub mới bật (server localhost chưa kịp nghe). Xem HttpCoordinationHub.PollAsync.
     }
 }
