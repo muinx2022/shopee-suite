@@ -88,7 +88,14 @@ public sealed class HubConfigSync
             {
                 var bytes = await _client.DownloadAsync(m.Name, ct);
                 if (bytes is null) continue;
-                await File.WriteAllBytesAsync(Path.Combine(CookieDir, Path.GetFileName(m.Name)), bytes, ct);
+                var localPath = Path.Combine(CookieDir, Path.GetFileName(m.Name));
+                // GIỮ LOGIN TẠI CHỖ: cookie BigSeller dùng để SCRAPE phải là token máy TỰ đăng nhập — token
+                // kéo từ Hub chỉ hợp để "xem", scrape rải qua nhiều proxy thì BigSeller TỪ CHỐI ("login first").
+                // Nếu file local đang có muc_token CÒN SỐNG và KHÁC token bản Hub (= máy này đã tự login) thì
+                // KHÔNG đè, kẻo phá phiên scrape vừa login (auto-pull 3'/lần sẽ liên tục giết login tại chỗ).
+                // Chỉ seed/refresh khi local thiếu / hết hạn / trùng token Hub.
+                if (LocalCookieShouldWin(localPath, bytes)) continue;
+                await File.WriteAllBytesAsync(localPath, bytes, ct);
                 cookies++;
             }
             catch (Exception ex) when (ex is not OperationCanceledException) { }
@@ -174,5 +181,41 @@ public sealed class HubConfigSync
         using var fs = File.OpenRead(path);
         using var sha = System.Security.Cryptography.SHA256.Create();
         return Convert.ToHexString(sha.ComputeHash(fs));
+    }
+
+    /// <summary>True = GIỮ file cookie LOCAL, KHÔNG đè bằng bản kéo từ Hub. Đúng khi local có muc_token CÒN HẠN
+    /// và giá trị KHÁC token bản Hub — tức máy này đã TỰ đăng nhập BigSeller (token tự-login mới scrape được;
+    /// token Hub chỉ hợp để xem, scrape từ máy khác bị từ chối). Local thiếu / hết hạn / trùng token Hub →
+    /// false (cho seed/refresh từ Hub).</summary>
+    private static bool LocalCookieShouldWin(string localPath, byte[] incoming)
+    {
+        if (BigSellerCookieEngine.GetFileAuthTokenInfo(localPath) is not { } lt) return false; // local không có token → seed
+        if (lt.Expires is { } exp && exp <= DateTimeOffset.Now) return false;                  // local hết hạn → refresh
+        var hubToken = ReadMucTokenValue(incoming);
+        if (hubToken is not null && string.Equals(hubToken, lt.Value, StringComparison.Ordinal)) return false; // trùng → đè vô hại
+        return true;                                                                            // local sống & khác Hub = login tại chỗ → GIỮ
+    }
+
+    /// <summary>Giá trị muc_token (cookie giữ phiên BigSeller) trong JSON cookie dạng bytes (đã bỏ BOM). null nếu thiếu.</summary>
+    private static string? ReadMucTokenValue(byte[] bytes)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(NoBom(bytes).ToArray());
+            var cookiesEl = doc.RootElement.TryGetProperty("cookies", out var cp) ? cp : doc.RootElement;
+            if (cookiesEl.ValueKind != JsonValueKind.Array) return null;
+            foreach (var ck in cookiesEl.EnumerateArray())
+            {
+                if (ck.ValueKind != JsonValueKind.Object) continue;
+                if (!ck.TryGetProperty("name", out var np) ||
+                    !string.Equals(np.GetString(), BigSellerCookieEngine.AuthCookieName, StringComparison.OrdinalIgnoreCase))
+                    continue;
+                var domain = ck.TryGetProperty("domain", out var dp) ? (dp.GetString() ?? "") : "";
+                if (!domain.Contains("bigseller", StringComparison.OrdinalIgnoreCase)) continue;
+                return ck.TryGetProperty("value", out var vp) ? vp.GetString() : null;
+            }
+            return null;
+        }
+        catch { return null; }
     }
 }
