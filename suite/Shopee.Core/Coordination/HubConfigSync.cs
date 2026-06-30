@@ -100,7 +100,7 @@ public sealed class HubConfigSync
             var bsBytes = await _client.DownloadAsync("config/bigseller.json", ct);
             if (bsBytes is not null)
             {
-                var list = JsonSerializer.Deserialize<List<BigSellerAccount>>(bsBytes) ?? [];
+                var list = JsonSerializer.Deserialize<List<BigSellerAccount>>(NoBom(bsBytes)) ?? [];
                 (bsA, bsU, bsS) = BackupService.MergeBigSeller(list, replace: false, rebaseDir: null);
             }
         }
@@ -112,7 +112,7 @@ public sealed class HubConfigSync
             var shBytes = await _client.DownloadAsync("config/accounts.json", ct);
             if (shBytes is not null)
             {
-                var list = JsonSerializer.Deserialize<List<ShopeeAccount>>(shBytes) ?? [];
+                var list = JsonSerializer.Deserialize<List<ShopeeAccount>>(NoBom(shBytes)) ?? [];
                 (shA, shS) = BackupService.MergeShopee(list, replace: false);
             }
         }
@@ -122,7 +122,7 @@ public sealed class HubConfigSync
         try
         {
             var aiBytes = await _client.DownloadAsync("config/ai.json", ct);
-            if (aiBytes is not null && JsonSerializer.Deserialize<AiConfig>(aiBytes) is { } cfg)
+            if (aiBytes is not null && JsonSerializer.Deserialize<AiConfig>(NoBom(aiBytes)) is { } cfg)
             {
                 AiConfigStore.Shared.Save(cfg);
                 ai = true;
@@ -161,6 +161,12 @@ public sealed class HubConfigSync
 
         return new ImportResult(bsA, bsS, shA, shS, ai, cookies, bsU);
     }
+
+    /// <summary>Bỏ BOM UTF-8 (EF BB BF) ở đầu nếu có. Các store ghi config bằng Encoding.UTF8 (CÓ BOM); deserialize
+    /// THẲNG byte[] sẽ ném "'0xEF' is an invalid start of a value" → đây là lý do BigSeller/Shopee/AI = 0 khi kéo
+    /// (Hub đọc bằng ReadAllText nên tự bỏ BOM → không lộ lỗi). Bỏ BOM ở client cho khớp.</summary>
+    private static ReadOnlySpan<byte> NoBom(byte[] b) =>
+        b.Length >= 3 && b[0] == 0xEF && b[1] == 0xBB && b[2] == 0xBF ? b.AsSpan(3) : b.AsSpan();
 
     /// <summary>SHA-256 (hex hoa) của 1 file local — so với manifest.Hash để bỏ qua tải workbook không đổi.</summary>
     private static string LocalSha256(string path)
