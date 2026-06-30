@@ -10,6 +10,12 @@ using Shopee.Core.Browser;
 
 namespace UpdateProduct;
 
+/// <summary>Lỗi khiến một lane Update phải DỪNG bất thường (tab đóng, listing lỗi liên tục, captcha…)
+/// — ném ra để supervisor <c>RunLanesAsync</c> KHỞI ĐỘNG LẠI lane thay vì để nó "nghỉ hưu" âm thầm.
+/// Trước đây các nhánh lỗi dùng <c>break</c> (return bình thường) nên supervisor tưởng "hết việc" →
+/// lane mất hẳn → worker rụng dần 5→1→0.</summary>
+internal sealed class LaneAbortedException(string reason) : Exception(reason);
+
 /// <summary>
 /// Cập nhật sản phẩm trên BigSeller bằng C# + Playwright (thay cho main.py Python).
 /// Quét trang Listing (bsStatus=1), mở từng sản phẩm vào tab edit, đối chiếu workbook theo
@@ -303,7 +309,10 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
         while (!ct.IsCancellationRequested)
         {
             await WaitIfNotPausedAsync(ct).ConfigureAwait(false);
-            if (page.IsClosed) break;
+            // Tab/Brave đóng, listing lỗi liên tục, captcha… = THOÁT BẤT THƯỜNG → ném LaneAbortedException
+            // để supervisor RunLanesAsync KHỞI ĐỘNG LẠI lane. KHÔNG dùng break (return bình thường) vì
+            // supervisor coi return bình thường là "hết việc" → lane nghỉ hưu vĩnh viễn → 5→1→0.
+            if (page.IsClosed) throw new LaneAbortedException("trang/tab BigSeller đã đóng");
 
             try
             {
@@ -311,7 +320,8 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
                 {
                     listingErrorStreak++;
                     await DelayAsync(Math.Min(5 + listingErrorStreak, 15) * 1000, ct);
-                    if (listingErrorStreak >= 5) break;
+                    if (listingErrorStreak >= 5)
+                        throw new LaneAbortedException($"mở trang Listing thất bại {listingErrorStreak} lần liên tục");
                     continue;
                 }
                 listingErrorStreak = 0;
@@ -319,7 +329,7 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
                 var (result, terminal) = await RunFirstListingRowAsync(page, ct, () => clickBlockedStreak,
                     s => clickBlockedStreak = s, () => clickBlockedTotal, t => clickBlockedTotal = t).ConfigureAwait(false);
 
-                if (terminal) { _log("Dừng script (lỗi edit hoặc Shopee chặn captcha)."); break; }
+                if (terminal) throw new LaneAbortedException("Shopee chặn (captcha) hoặc lỗi edit không phục hồi");
 
                 switch (result)
                 {
@@ -337,13 +347,16 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
                 }
             }
             catch (OperationCanceledException) { throw; }
+            catch (LaneAbortedException) { throw; }   // thoát bất thường → để supervisor restart, KHÔNG nuốt vào catch dưới
             catch (Exception ex)
             {
                 listingErrorStreak++;
-                if ((ex.Message ?? "").Contains("closed", StringComparison.OrdinalIgnoreCase)) break;
+                if ((ex.Message ?? "").Contains("closed", StringComparison.OrdinalIgnoreCase))
+                    throw new LaneAbortedException("Brave/tab đã đóng: " + ex.Message);
                 await DelayAsync(Math.Min(5 + listingErrorStreak, 15) * 1000, ct);
                 try { await GoToListingPageAsync(page, false); } catch { }
-                if (listingErrorStreak >= 5) break;
+                if (listingErrorStreak >= 5)
+                    throw new LaneAbortedException($"lỗi listing {listingErrorStreak} lần liên tục: " + ex.Message);
             }
         }
     }
