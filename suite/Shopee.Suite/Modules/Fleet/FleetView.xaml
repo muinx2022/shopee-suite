@@ -215,10 +215,11 @@
                             <DataGrid ItemsSource="{Binding MyJobs}" AutoGenerateColumns="False" IsReadOnly="True"
                                       HeadersVisibility="Column" CanUserAddRows="False" GridLinesVisibility="Horizontal">
                                 <DataGrid.Columns>
-                                    <DataGridTextColumn Header="Việc" Binding="{Binding Op}" Width="120" />
+                                    <DataGridTextColumn Header="Việc" Binding="{Binding Op}" Width="110" />
                                     <DataGridTextColumn Header="Tài khoản" Binding="{Binding AccountLabel}" Width="*" />
                                     <DataGridTextColumn Header="Shop" Binding="{Binding ShopName}" Width="*" />
-                                    <DataGridTemplateColumn Header="Trạng thái" Width="170">
+                                    <DataGridTextColumn Header="Dòng (Hub giao)" Binding="{Binding Rows}" Width="120" />
+                                    <DataGridTemplateColumn Header="Trạng thái" Width="150">
                                         <DataGridTemplateColumn.CellTemplate>
                                             <DataTemplate>
                                                 <TextBlock Text="{Binding StateText}" Foreground="{Binding StateBrush}" FontWeight="SemiBold" />

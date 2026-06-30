@@ -273,6 +273,7 @@ public sealed partial class FleetViewModel : ObservableObject
                 Id = a.Id, Op = OpVi(a.Op),
                 AccountLabel = AcctName(acct, a.BigsellerId),
                 ShopName = shop?.DisplayName ?? Short(a.ShopId),
+                Rows = RowRange(a.StartRow, a.EndRow),
                 StateText = a.Status == "running" ? "▶ đang chạy" : "⏱ chờ tới lượt",
                 StateBrush = a.Status == "running" ? RunningBrush : QueuedBrush,
             });
@@ -303,6 +304,10 @@ public sealed partial class FleetViewModel : ObservableObject
     {
         "scrape" => "Scrape", "import" => "Import", "update" => "Update", "rewrite" => "Tên SP", _ => op,
     };
+
+    /// <summary>Hiển thị khoảng dòng Hub giao: "X→Y" (Y=0 ⇒ "hết"); 0/0 ⇒ "theo client" (Hub không đặt).</summary>
+    private static string RowRange(int start, int end) =>
+        start <= 0 && end <= 0 ? "theo client" : $"{(start > 0 ? start : 2)}→{(end > 0 ? end.ToString() : "hết")}";
 
     internal static string RoleDisplay(string key) => key switch
     {
@@ -415,6 +420,8 @@ public sealed class FleetMyJobRow
     public string Op { get; init; } = "";
     public string AccountLabel { get; init; } = "";
     public string ShopName { get; init; } = "";
+    /// <summary>Khoảng dòng Hub giao cho việc này ("X→Y" hoặc "theo client").</summary>
+    public string Rows { get; init; } = "";
     public string StateText { get; init; } = "";
     public Brush StateBrush { get; init; } = Brushes.Gray;
 }
