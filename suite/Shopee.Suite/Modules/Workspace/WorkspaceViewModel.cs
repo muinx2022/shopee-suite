@@ -159,6 +159,27 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         Update.StopSingle(shop.Parent.Account.Id);
     }
 
+    // ── Nút TOGGLE (1 nút/op): chưa chạy → CHẠY; đang chạy op đó trên máy này → DỪNG. Khoá do Can*/Enabled lo. ──
+    [RelayCommand]
+    private void ScrapeToggle(WorkspaceShopViewModel? shop)
+    {
+        if (shop is null) return;
+        if (shop.IsScraping) _ = Scrape.StopSingleAsync(shop.Parent.ScrapeTarget);
+        else RunScrapeShop(shop, resume: true);   // bấm chạy = tiếp tục dòng còn thiếu
+    }
+
+    [RelayCommand] private void ImportToggle(WorkspaceShopViewModel? shop) => ToggleUpdateOp(shop, shop?.IsImporting ?? false, t => Update.RunImportSingleAsync(t));
+    [RelayCommand] private void UpdateToggle(WorkspaceShopViewModel? shop) => ToggleUpdateOp(shop, shop?.IsUpdatingShop ?? false, t => Update.RunUpdateSingleAsync(t));
+    [RelayCommand] private void RewriteToggle(WorkspaceShopViewModel? shop) => ToggleUpdateOp(shop, shop?.IsRewriting ?? false, t => Update.RunNameRewriteSingleAsync(t));
+
+    private void ToggleUpdateOp(WorkspaceShopViewModel? shop, bool runningThisOp, Func<UpdateRunTargetViewModel, Task> run)
+    {
+        if (shop is null) return;
+        if (runningThisOp) { Update.StopSingle(shop.Parent.Account.Id); return; }
+        shop.Parent.UpdateTarget.SelectedShop = shop.Shop;
+        _ = run(shop.Parent.UpdateTarget);
+    }
+
     // (Map field ↔ cột Excel làm bên tab "Cấu hình BigSeller" khi cài đặt shop — không lặp ở workspace.)
 
     // ── Dừng ──────────────────────────────────────────────────────────────────

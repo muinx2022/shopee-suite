@@ -157,6 +157,9 @@ public sealed class HttpCoordinationHub : ICoordinationHub, IDisposable
         try { await _client.HeartbeatAccountsAsync(new AccountReleaseRequest(list, _machineId)); } catch { }
     }
 
+    /// <summary>Báo Hub xoá máy này khỏi danh sách (người dùng chủ động Ngắt kết nối). Lỗi → bỏ qua.</summary>
+    public async Task LeaveAsync() { try { await _client.LeaveAsync(); } catch { } }
+
     // ── Vai trò máy + giao việc (Hub đẩy việc cho client) ──
     /// <summary>Đặt vai trò cho 1 máy (Hub gọi từ bảng điều phối).</summary>
     public async Task SetRoleAsync(string machineId, string role)

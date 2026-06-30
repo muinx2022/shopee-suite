@@ -81,7 +81,8 @@ public sealed class AssignmentWorker : IDisposable
 
         var myId = hub.MachineId;
         var role = hub.CurrentFleet.Roles.FirstOrDefault(r => r.MachineId == myId)?.Role ?? MachineRoles.Off;
-        if (role == MachineRoles.Off) return;
+        // KHÔNG return sớm khi role==Off: việc GHIM TAY (Giao tay) định tuyến theo MÁY, không cần vai trò.
+        // Server chỉ trả việc ghim-cho-máy-này (+ việc đúng vai trò nếu có) → role=Off vẫn nhận được việc ghim.
 
         var free = MaxConcurrent - _inflight.Count;
         if (free <= 0) return;
@@ -148,7 +149,7 @@ public sealed class AssignmentWorker : IDisposable
                 var shop = t?.Account.Shops.FirstOrDefault(s => s.Id == a.ShopId);
                 if (t is null || shop is null) return false;
                 t.SelectedShop = shop;
-                _ = _scrape.RunSingleAsync(t, resume: true, silent: true);
+                _ = _scrape.RunSingleAsync(t, resume: true, silent: true, a.StartRow, a.EndRow);   // Hub đặt khoảng dòng (0 = dùng cấu hình client)
                 return true;
             }
             case "import":
@@ -159,9 +160,9 @@ public sealed class AssignmentWorker : IDisposable
                 var shop = t?.Account.Shops.FirstOrDefault(s => s.Id == a.ShopId);
                 if (t is null || shop is null) return false;
                 t.SelectedShop = shop;
-                if (a.Op == "import") _ = _update.RunImportSingleAsync(t, silent: true);
-                else if (a.Op == "update") _ = _update.RunUpdateSingleAsync(t, silent: true);
-                else _ = _update.RunNameRewriteSingleAsync(t, silent: true);
+                if (a.Op == "import") _ = _update.RunImportSingleAsync(t, silent: true, a.StartRow, a.EndRow);
+                else if (a.Op == "update") _ = _update.RunUpdateSingleAsync(t, silent: true, a.StartRow, a.EndRow);
+                else _ = _update.RunNameRewriteSingleAsync(t, silent: true, a.StartRow, a.EndRow);
                 return true;
             }
             default: return false;

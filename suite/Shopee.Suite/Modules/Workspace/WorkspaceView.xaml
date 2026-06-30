@@ -141,50 +141,34 @@
                                             </DataTemplate>
                                         </DataGridTemplateColumn.CellTemplate>
                                     </DataGridTemplateColumn>
-                                    <DataGridTemplateColumn Header="Scrape ▶" Width="Auto">
+                                    <DataGridTemplateColumn Header="Scrape" Width="Auto">
                                         <DataGridTemplateColumn.CellTemplate>
                                             <DataTemplate>
-                                                <StackPanel Orientation="Horizontal">
-                                                    <Button Style="{StaticResource WorkspaceActionButton}" Content="▶" ToolTip="{Binding ScrapeRunTip}"
-                                                            Foreground="{Binding ScrapeIconBrush}"
-                                                            IsEnabled="{Binding CanScrape}"
-                                                            Command="{Binding DataContext.ScrapeShopCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                                            CommandParameter="{Binding}" />
-                                                    <Button Style="{StaticResource WorkspaceActionButton}" Content="⏯" Margin="5,0,0,0" ToolTip="Tiếp tục scrape phần dòng còn thiếu"
-                                                            Foreground="{Binding ScrapeIconBrush}"
-                                                            IsEnabled="{Binding CanScrape}"
-                                                            Command="{Binding DataContext.ResumeShopCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                                            CommandParameter="{Binding}" />
-                                                    <Button Style="{StaticResource WorkspaceActionButton}" Content="■" Margin="5,0,0,0" ToolTip="Dừng scrape shop đang chạy này"
-                                                            IsEnabled="{Binding IsScraping}"
-                                                            Command="{Binding DataContext.StopShopCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                                            CommandParameter="{Binding}" />
-                                                </StackPanel>
+                                                <!-- 1 nút toggle: bấm chạy (xanh, ■) ↔ bấm lại dừng (xám, ▶) -->
+                                                <Button Style="{StaticResource WorkspaceActionButton}" Content="{Binding ScrapeToggleContent}"
+                                                        ToolTip="{Binding ScrapeToggleTip}" Foreground="{Binding ScrapeIconBrush}"
+                                                        IsEnabled="{Binding ScrapeToggleEnabled}"
+                                                        Command="{Binding DataContext.ScrapeToggleCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                        CommandParameter="{Binding}" />
                                             </DataTemplate>
                                         </DataGridTemplateColumn.CellTemplate>
                                     </DataGridTemplateColumn>
                                     <DataGridTemplateColumn Header="Update" Width="Auto">
                                         <DataGridTemplateColumn.CellTemplate>
                                             <DataTemplate>
+                                                <!-- 3 nút toggle: Import ⬆ · Update ✎ · Tên SP 🏷. Bấm chạy (xanh, ■) ↔ bấm lại dừng. -->
                                                 <StackPanel Orientation="Horizontal">
-                                                    <!-- Action LUÔN hiện; xanh khi đang chạy (máy nào cũng thấy), hover xem "… by <máy>" -->
-                                                    <Button Style="{StaticResource WorkspaceActionButton}" Content="⬆" ToolTip="{Binding ImportTip}"
-                                                            Foreground="{Binding ImportIconBrush}" IsEnabled="{Binding CanStartUpdate}"
-                                                            Command="{Binding DataContext.ImportShopCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                    <Button Style="{StaticResource WorkspaceActionButton}" Content="{Binding ImportToggleContent}" ToolTip="{Binding ImportToggleTip}"
+                                                            Foreground="{Binding ImportIconBrush}" IsEnabled="{Binding ImportToggleEnabled}"
+                                                            Command="{Binding DataContext.ImportToggleCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
                                                             CommandParameter="{Binding}" />
-                                                    <Button Style="{StaticResource WorkspaceActionButton}" Content="✎" Margin="5,0,0,0" ToolTip="{Binding UpdateTip}"
-                                                            Foreground="{Binding UpdateIconBrush}" IsEnabled="{Binding CanStartUpdate}"
-                                                            Command="{Binding DataContext.UpdateShopCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                    <Button Style="{StaticResource WorkspaceActionButton}" Content="{Binding UpdateToggleContent}" Margin="5,0,0,0" ToolTip="{Binding UpdateToggleTip}"
+                                                            Foreground="{Binding UpdateIconBrush}" IsEnabled="{Binding UpdateToggleEnabled}"
+                                                            Command="{Binding DataContext.UpdateToggleCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
                                                             CommandParameter="{Binding}" />
-                                                    <Button Style="{StaticResource WorkspaceActionButton}" Content="🏷" Margin="5,0,0,0" ToolTip="{Binding RewriteTip}"
-                                                            Foreground="{Binding RewriteIconBrush}" IsEnabled="{Binding CanStartUpdate}"
-                                                            Command="{Binding DataContext.RewriteShopCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                                            CommandParameter="{Binding}" />
-                                                    <!-- Nút ■ Dừng RIÊNG (không thay nút chạy): chỉ bật khi MÁY NÀY đang chạy update shop này -->
-                                                    <Button Style="{StaticResource WorkspaceActionButton}" Content="■" Margin="10,0,0,0"
-                                                            ToolTip="Dừng việc update đang chạy của shop này (trên máy này)"
-                                                            Foreground="{StaticResource DangerBrush}" IsEnabled="{Binding IsUpdatingAnyLocal}"
-                                                            Command="{Binding DataContext.StopUpdateShopCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                    <Button Style="{StaticResource WorkspaceActionButton}" Content="{Binding RewriteToggleContent}" Margin="5,0,0,0" ToolTip="{Binding RewriteToggleTip}"
+                                                            Foreground="{Binding RewriteIconBrush}" IsEnabled="{Binding RewriteToggleEnabled}"
+                                                            Command="{Binding DataContext.RewriteToggleCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
                                                             CommandParameter="{Binding}" />
                                                 </StackPanel>
                                             </DataTemplate>

@@ -11,17 +11,22 @@ namespace Shopee.Core.Coordination;
 public sealed class HubClient
 {
     private readonly HttpClient _http;
+    private readonly string _machineId;
     public string BaseUrl { get; }
 
     public HubClient(HubClientConfig cfg, string machineId)
     {
         BaseUrl = (cfg.BaseUrl ?? "").TrimEnd('/');
+        _machineId = machineId ?? "";
         _http = new HttpClient { BaseAddress = new Uri(BaseUrl), Timeout = TimeSpan.FromSeconds(8) };
         if (!string.IsNullOrWhiteSpace(cfg.ApiToken))
             _http.DefaultRequestHeaders.TryAddWithoutValidation("X-Api-Token", cfg.ApiToken);
         if (!string.IsNullOrWhiteSpace(machineId))
             _http.DefaultRequestHeaders.TryAddWithoutValidation("X-Machine-Id", machineId);
     }
+
+    /// <summary>Báo Hub xoá máy này khỏi danh sách (khi người dùng chủ động Ngắt kết nối).</summary>
+    public Task LeaveAsync(CancellationToken ct = default) => PostAsync("/machines/leave", new MachineLeaveRequest(_machineId), ct);
 
     public async Task<bool> PingAsync(CancellationToken ct = default)
     {

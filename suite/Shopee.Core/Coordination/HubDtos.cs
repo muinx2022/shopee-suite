@@ -90,6 +90,9 @@ public sealed class Assignment
     public string ClaimedByMachineId { get; set; } = "";
     public string ClaimedByHostname { get; set; } = "";
     public string LastError { get; set; } = "";
+    /// <summary>Khoảng dòng Hub đặt cho client chạy (ghi đè cấu hình client lượt này). 0 = dùng cấu hình client.</summary>
+    public int StartRow { get; set; }
+    public int EndRow { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 
@@ -98,7 +101,8 @@ public sealed class Assignment
 
 public sealed record SetRoleRequest(string MachineId, string Role);
 public sealed record CreateAssignmentRequest(
-    string BigsellerId, string ShopId, string Sheet, string Op, string? TargetMachineId, bool Pinned);
+    string BigsellerId, string ShopId, string Sheet, string Op, string? TargetMachineId, bool Pinned,
+    int StartRow = 0, int EndRow = 0);
 public sealed record ClaimAssignmentsRequest(string MachineId, string Role, int Max);
 public sealed record AssignmentStatusRequest(string Id, string MachineId, string Status, string? Error);
 public sealed record CancelAssignmentRequest(string Id);
@@ -122,5 +126,7 @@ public sealed record AccountReserveResponse(List<string> Granted, List<string> B
 public sealed record AccountReleaseRequest(List<string> AccountIds, string MachineId);
 
 public sealed record MachineHeartbeatRequest(string MachineId, string Hostname, string? AppVersion);
+/// <summary>Client báo Hub "tôi rời đi" (bấm Ngắt kết nối) → Hub xoá khỏi danh sách máy ngay.</summary>
+public sealed record MachineLeaveRequest(string MachineId);
 
 public sealed record FilePutResponse(bool Ok, int Version, string? Conflict);

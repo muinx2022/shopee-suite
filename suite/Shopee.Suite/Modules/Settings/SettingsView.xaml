@@ -309,9 +309,9 @@
                                            Text="Bấm &quot;Kiểm tra&quot; để thử URL/token trước; &quot;Kết nối ngay&quot; lưu + áp dụng liền (khỏi khởi động lại)." />
 
                                 <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
-                                    <Button Style="{StaticResource PrimaryButton}" Content="🔌  Kết nối ngay" MinWidth="150"
-                                            Command="{Binding ConnectNowCommand}"
-                                            ToolTip="Lưu URL/token rồi áp dụng ngay (không cần khởi động lại app)." />
+                                    <Button Style="{StaticResource PrimaryButton}" Content="{Binding ConnectToggleText}" MinWidth="150"
+                                            Command="{Binding ConnectToggleCommand}"
+                                            ToolTip="Chưa nối → kết nối; đang nối → ngắt. Áp dụng ngay, không cần khởi động lại." />
                                     <Button Content="⚡  Kiểm tra" Margin="10,0,0,0" Command="{Binding TestHubClientCommand}"
                                             ToolTip="Ping thử Hub bằng URL/token đang nhập để biết có nối được không." />
                                     <Button Content="💾  Chỉ lưu" Margin="10,0,0,0" Command="{Binding SaveHubClientCommand}"

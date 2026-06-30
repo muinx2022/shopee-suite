@@ -50,6 +50,11 @@ public sealed partial class ScrapeTargetViewModel : ObservableObject
     /// <summary>Đến dòng nào thì DỪNG (0 = chạy hết sheet).</summary>
     [ObservableProperty] private int _endRow;
     partial void OnEndRowChanged(int value) => Persist();
+
+    /// <summary>Override khoảng dòng TẠM cho 1 lượt chạy (vd Hub giao việc) — KHÔNG persist, dùng-một-lần.
+    /// null = dùng <see cref="StartRow"/>/<see cref="EndRow"/> của người dùng. Runner đọc rồi tự xoá.</summary>
+    public int? PendingStartRow { get; set; }
+    public int? PendingEndRow { get; set; }
     /// <summary>Số dòng mỗi khối (mỗi tk Shopee nhận 1 khối kế tiếp theo số này).</summary>
     [ObservableProperty] private int _rowsPerAccount = 60;
     partial void OnRowsPerAccountChanged(int value) => Persist();

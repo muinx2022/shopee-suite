@@ -111,6 +111,7 @@ public sealed class HubServer
 
         // ── Nhịp máy + bảng trạng thái ──
         app.MapPost("/machines/heartbeat", (MachineHeartbeatRequest? r) => { if (r is null) return Results.BadRequest(); db.MachineHeartbeat(r); return Results.Ok(); });
+        app.MapPost("/machines/leave", (MachineLeaveRequest? r) => { if (r is null) return Results.BadRequest(); db.RemoveMachine(r.MachineId); return Results.Ok(); });
         app.MapGet("/fleet", () => Results.Json(db.Fleet()));
 
         // ── Vai trò máy + giao việc ── (body null/sai → 400 thay vì NRE 500)

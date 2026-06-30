@@ -160,12 +160,12 @@ public sealed partial class UpdateProductViewModel : ObservableObject
 
     // ── v1.1 (màn gộp): chạy RIÊNG từng tk BigSeller, CHẠY SONG SONG được — mỗi tk 1 token + runner RIÊNG,
     //    ĐỘC LẬP với đường batch của màn cũ (không đụng _cts/_runners/IsRunning). Dùng cho nút inline theo shop. ──
-    public Task RunImportSingleAsync(UpdateRunTargetViewModel t, bool silent = false) =>
-        RunOneWorkflowAsync("Import to store", UpdateKind.Import, (r, ctx, ct) => r.RunImportAsync(ctx, ct), t, requiresBigSellerLogin: true, silent: silent);
-    public Task RunUpdateSingleAsync(UpdateRunTargetViewModel t, bool silent = false) =>
-        RunOneWorkflowAsync("Update product", UpdateKind.Update, (r, ctx, ct) => r.RunUpdateAsync(ctx, ct), t, requiresBigSellerLogin: true, silent: silent);
-    public Task RunNameRewriteSingleAsync(UpdateRunTargetViewModel t, bool silent = false) =>
-        RunOneWorkflowAsync("Update tên SP", UpdateKind.Rewrite, (r, ctx, ct) => r.RunNameRewriteAsync(ctx, ct), t, requiresBigSellerLogin: false, silent: silent);
+    public Task RunImportSingleAsync(UpdateRunTargetViewModel t, bool silent = false, int? startRow = null, int? endRow = null) =>
+        RunOneWorkflowAsync("Import to store", UpdateKind.Import, (r, ctx, ct) => r.RunImportAsync(ctx, ct), t, requiresBigSellerLogin: true, silent: silent, startRow: startRow, endRow: endRow);
+    public Task RunUpdateSingleAsync(UpdateRunTargetViewModel t, bool silent = false, int? startRow = null, int? endRow = null) =>
+        RunOneWorkflowAsync("Update product", UpdateKind.Update, (r, ctx, ct) => r.RunUpdateAsync(ctx, ct), t, requiresBigSellerLogin: true, silent: silent, startRow: startRow, endRow: endRow);
+    public Task RunNameRewriteSingleAsync(UpdateRunTargetViewModel t, bool silent = false, int? startRow = null, int? endRow = null) =>
+        RunOneWorkflowAsync("Update tên SP", UpdateKind.Rewrite, (r, ctx, ct) => r.RunNameRewriteAsync(ctx, ct), t, requiresBigSellerLogin: false, silent: silent, startRow: startRow, endRow: endRow);
 
     /// <summary>Tiền-kiểm điều kiện chạy import/update/rewrite cho 1 đích — KHÔNG mở dialog. Cho AssignmentWorker.</summary>
     public bool CanDispatchUpdate(UpdateRunTargetViewModel t, string op, out string problem) =>
@@ -208,7 +208,8 @@ public sealed partial class UpdateProductViewModel : ObservableObject
 
     private async Task RunOneWorkflowAsync(
         string name, UpdateKind kind, Func<UpdateProductRunner, UpdateProductContext, CancellationToken, Task> action,
-        UpdateRunTargetViewModel t, bool requiresBigSellerLogin, bool force = false, bool silent = false)
+        UpdateRunTargetViewModel t, bool requiresBigSellerLogin, bool force = false, bool silent = false,
+        int? startRow = null, int? endRow = null)
     {
         if (!ValidateUpdateTarget(t, requiresBigSellerLogin, out var problem)) { Warn(problem + ".", silent); return; }
         var a = t.Account; var s = t.SelectedShop!;
@@ -237,7 +238,7 @@ public sealed partial class UpdateProductViewModel : ObservableObject
             lease = attempt.Handle;
 
             var ai = AiConfigStore.Shared.Current;
-            var ctx = BuildContext(t, ai);
+            var ctx = BuildContext(t, ai, startRow, endRow);
             var runner = new UpdateProductRunner();
             runner.Log += m => Log($"{prefix} {m}");
             job.Runner = runner;
@@ -341,17 +342,20 @@ public sealed partial class UpdateProductViewModel : ObservableObject
         problem = ""; return true;
     }
 
-    private UpdateProductContext BuildContext(UpdateRunTargetViewModel t, AiConfig ai)
+    private UpdateProductContext BuildContext(UpdateRunTargetViewModel t, AiConfig ai, int? startRow = null, int? endRow = null)
     {
         var a = t.Account; var s = t.SelectedShop!;
         // AI (viết lại tên/mô tả) dùng cấu hình AI CHUNG ở Cài đặt; key truyền THẲNG qua context
         // (không set biến môi trường process-wide để Brave/Playwright không kế thừa key).
         var aiModel = string.IsNullOrWhiteSpace(ai.OpenAiModel) ? s.OpenAiModel : ai.OpenAiModel;
+        // Khoảng dòng: ưu tiên override (Hub giao việc, >0) → KHÔNG ghi đè cấu hình shop; 0/null = dùng cấu hình.
+        var sr = startRow is int x && x > 0 ? x : t.StartRow;
+        var er = endRow is int y && y > 0 ? y : t.EndRow;
         return new UpdateProductContext(
             a.Id, a.Email, a.WorkbookPath, a.CookieFile,
             s.Id, s.DisplayName, s.ShopeeDataSheet,
             aiModel, "", ai.BatchSize, "",
-            t.StartRow, t.EndRow, ImagePath, VideoFolder,
+            sr, er, ImagePath, VideoFolder,
             s.BigSellerCrawlUrl, s.BigSellerImportFromClaimedTab,
             1, t.UpdateWorkers, t.ListingReloadSeconds, ai.OpenAiApiKey,   // Import LUÔN 1 lane (1 process)
             s.ColumnMap.LinkColumn, s.ColumnMap.PriceColumn, s.ColumnMap.SkuColumn,

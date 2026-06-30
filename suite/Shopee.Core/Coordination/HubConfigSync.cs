@@ -70,7 +70,15 @@ public sealed class HubConfigSync
         var ai = false;
 
         // 1) Cookie trước (để RebaseBigSeller trỏ CookieFile vào file local vừa tải).
-        var manifest = await _client.ManifestAsync(ct);
+        // Bọc RIÊNG manifest: trước đây lỗi ở đây (401 token sai / mất kết nối) giết CẢ lần kéo + bị catch{}
+        // ở auto-pull nuốt sạch → "kết nối được mà không sync". Giờ ném rõ để nút "Đồng bộ acc" hiện lỗi.
+        List<FileManifestEntry> manifest;
+        try { manifest = await _client.ManifestAsync(ct); }
+        catch (OperationCanceledException) { throw; }
+        catch (System.Net.Http.HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+        { throw new InvalidOperationException("Hub từ chối (401): API token client KHÔNG khớp token Hub. Vào Cài đặt → sửa token cho khớp rồi thử lại.", ex); }
+        catch (Exception ex)
+        { throw new InvalidOperationException("Không lấy được dữ liệu từ Hub (mất kết nối / Hub chưa bật): " + ex.Message, ex); }
         Directory.CreateDirectory(CookieDir);
         // Mỗi bước bọc try/catch RIÊNG: 1 file hỏng/tải lỗi KHÔNG làm hỏng cả lần kéo (tránh trạng thái dở dang).
         // OperationCanceledException vẫn để propagate (người dùng huỷ).

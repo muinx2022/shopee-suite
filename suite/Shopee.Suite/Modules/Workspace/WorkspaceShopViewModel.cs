@@ -37,9 +37,9 @@ public sealed partial class WorkspaceShopViewModel : ObservableObject
     /// <summary>true nếu CHÍNH shop này đang scrape (job LIVE) → bật nút ■, các shop khác tắt ▶/⏯.</summary>
     public bool IsScraping => Parent.ScrapeTarget.IsShopRunning?.Invoke(Shop) ?? false;
 
-    /// <summary>true khi tài khoản KHÔNG có shop nào đang scrape → mới cho ▶/⏯ (1 shop/account: đang chạy
-    /// 1 shop thì khoá chạy mọi shop trong tk này).</summary>
-    public bool CanScrape => !Parent.IsScraping;
+    /// <summary>true khi tk KHÔNG có shop nào đang scrape (máy này) VÀ không máy khác bận tk này → mới cho chạy
+    /// (1 shop/account + khoá khi máy khác đang chạy tk).</summary>
+    public bool CanScrape => !Parent.IsScraping && !OtherMachineBusy;
 
     // ── Trạng thái workflow UPDATE (import/update/tên SP) — đổi nút ⇄ ■ Dừng + khoá các shop cùng tk ──
     public bool IsImporting => RunningUpdate(UpdateKind.Import);
@@ -50,9 +50,9 @@ public sealed partial class WorkspaceShopViewModel : ObservableObject
         Parent.UpdateVm.TryGetRunningUpdate(Parent.Account.Id, out var sid, out var k)
         && k == kind && string.Equals(sid, Shop.Id, StringComparison.Ordinal);
 
-    /// <summary>true khi tk CHƯA chạy workflow update nào → mới cho bấm Import/Update/Tên SP (các shop cùng
-    /// tk không chạy update song song).</summary>
-    public bool CanStartUpdate => !Parent.UpdateVm.IsUpdateRunning(Parent.Account.Id);
+    /// <summary>true khi tk CHƯA chạy workflow update nào (máy này) VÀ không máy khác bận tk này → mới cho bấm
+    /// Import/Update/Tên SP (1 workflow update/tk + khoá khi máy khác đang chạy tk).</summary>
+    public bool CanStartUpdate => !Parent.UpdateVm.IsUpdateRunning(Parent.Account.Id) && !OtherMachineBusy;
 
     public void RefreshUpdateState()
     {
@@ -63,7 +63,7 @@ public sealed partial class WorkspaceShopViewModel : ObservableObject
         RefreshFleet();
     }
 
-    // ── Trạng thái action xuyên máy: xanh khi đang chạy (máy này HOẶC máy khác) + tooltip "… by <máy>" ──
+    // ── Nút TOGGLE 1-nút/op: bấm chạy (xanh, icon ■) ↔ bấm lại dừng (xám, icon op). Xanh cả khi máy khác chạy. ──
     private static readonly Brush RunningBrush = MakeFrozen(Color.FromRgb(0x1E, 0xA0, 0x55));   // xanh lá
     private static readonly Brush IdleBrush = Brushes.Black;
     private static Brush MakeFrozen(Color c) { var b = new SolidColorBrush(c); b.Freeze(); return b; }
@@ -79,29 +79,65 @@ public sealed partial class WorkspaceShopViewModel : ObservableObject
         return lease is null ? (false, "") : (true, lease.Hostname);
     }
 
+    /// <summary>true nếu MÁY KHÁC đang giữ bất kỳ lease nào trên tài khoản này → khoá MỌI action ở máy này (kể cả
+    /// update). Fleet poll ~12s nên disable có trễ; lease lúc Acquire vẫn là lưới an toàn cuối.</summary>
+    private bool OtherMachineBusy
+    {
+        get
+        {
+            var hub = CoordinationRuntime.Hub;
+            if (hub is null) return false;
+            var myId = hub.MachineId;
+            return hub.CurrentFleet.Leases.Any(l =>
+                string.Equals(l.BigsellerId, Parent.Account.Id, StringComparison.Ordinal) &&
+                !string.Equals(l.MachineId, myId, StringComparison.Ordinal));
+        }
+    }
+
+    // Foreground nút: xanh khi op này đang chạy (máy nào cũng vậy), xám khi rảnh.
     public Brush ScrapeIconBrush => OpState(CoordOp.Scrape, IsScraping).running ? RunningBrush : IdleBrush;
-    public string ScrapeRunTip { get { var (r, by) = OpState(CoordOp.Scrape, IsScraping); return r ? $"Scraping by {by}" : "Scrape shop này (reset từ 'Từ dòng')"; } }
-
     public Brush ImportIconBrush => OpState(CoordOp.Import, IsImporting).running ? RunningBrush : IdleBrush;
-    public string ImportTip { get { var (r, by) = OpState(CoordOp.Import, IsImporting); return r ? $"Importing by {by}" : "Import to store cho shop này"; } }
-
     public Brush UpdateIconBrush => OpState(CoordOp.Update, IsUpdatingShop).running ? RunningBrush : IdleBrush;
-    public string UpdateTip { get { var (r, by) = OpState(CoordOp.Update, IsUpdatingShop); return r ? $"Updating by {by}" : "Update product cho shop này"; } }
-
     public Brush RewriteIconBrush => OpState(CoordOp.Rewrite, IsRewriting).running ? RunningBrush : IdleBrush;
-    public string RewriteTip { get { var (r, by) = OpState(CoordOp.Rewrite, IsRewriting); return r ? $"Đặt tên SP by {by}" : "Update tên SP (AI) cho shop này"; } }
 
-    /// <summary>true khi shop này đang chạy 1 workflow update TRÊN MÁY NÀY → bật nút ■ Dừng (chỉ dừng việc của mình).</summary>
+    // Icon nút: ■ khi đang chạy (gợi ý bấm để dừng), ngược lại icon op.
+    public string ScrapeToggleContent => OpState(CoordOp.Scrape, IsScraping).running ? "■" : "▶";
+    public string ImportToggleContent => OpState(CoordOp.Import, IsImporting).running ? "■" : "⬆";
+    public string UpdateToggleContent => OpState(CoordOp.Update, IsUpdatingShop).running ? "■" : "✎";
+    public string RewriteToggleContent => OpState(CoordOp.Rewrite, IsRewriting).running ? "■" : "🏷";
+
+    // Bật nút khi: MÁY NÀY đang chạy op đó (để dừng) HOẶC được phép bắt đầu (theo quy tắc khoá).
+    public bool ScrapeToggleEnabled => IsScraping || CanScrape;
+    public bool ImportToggleEnabled => IsImporting || CanStartUpdate;
+    public bool UpdateToggleEnabled => IsUpdatingShop || CanStartUpdate;
+    public bool RewriteToggleEnabled => IsRewriting || CanStartUpdate;
+
+    public string ScrapeToggleTip => ToggleTip("scrape", IsScraping, CoordOp.Scrape, "Scrape shop này (tiếp tục dòng còn thiếu)");
+    public string ImportToggleTip => ToggleTip("import", IsImporting, CoordOp.Import, "Import to store cho shop này");
+    public string UpdateToggleTip => ToggleTip("update", IsUpdatingShop, CoordOp.Update, "Update product cho shop này");
+    public string RewriteToggleTip => ToggleTip("đặt tên SP", IsRewriting, CoordOp.Rewrite, "Update tên SP (AI) cho shop này");
+
+    private string ToggleTip(string verb, bool localRunning, CoordOp op, string idleText)
+    {
+        if (localRunning) return $"Đang {verb} — bấm để dừng";
+        var (r, by) = OpState(op, false);
+        return r ? $"Đang {verb} (máy {by}) — dừng tại máy đó" : idleText;
+    }
+
+    /// <summary>true khi shop này đang chạy 1 workflow update TRÊN MÁY NÀY (giữ cho chỗ khác nếu còn dùng).</summary>
     public bool IsUpdatingAnyLocal => IsImporting || IsUpdatingShop || IsRewriting;
 
-    /// <summary>Làm mới màu/tooltip action (gọi khi hub đổi fleet + khi trạng thái local đổi).</summary>
+    /// <summary>Làm mới màu/tooltip/enabled/icon nút action (gọi khi hub đổi fleet + khi trạng thái local đổi).</summary>
     public void RefreshFleet()
     {
-        OnPropertyChanged(nameof(ScrapeIconBrush)); OnPropertyChanged(nameof(ScrapeRunTip));
-        OnPropertyChanged(nameof(ImportIconBrush)); OnPropertyChanged(nameof(ImportTip));
-        OnPropertyChanged(nameof(UpdateIconBrush)); OnPropertyChanged(nameof(UpdateTip));
-        OnPropertyChanged(nameof(RewriteIconBrush)); OnPropertyChanged(nameof(RewriteTip));
-        OnPropertyChanged(nameof(IsUpdatingAnyLocal));
+        foreach (var n in new[]
+        {
+            nameof(ScrapeIconBrush), nameof(ImportIconBrush), nameof(UpdateIconBrush), nameof(RewriteIconBrush),
+            nameof(ScrapeToggleContent), nameof(ImportToggleContent), nameof(UpdateToggleContent), nameof(RewriteToggleContent),
+            nameof(ScrapeToggleEnabled), nameof(ImportToggleEnabled), nameof(UpdateToggleEnabled), nameof(RewriteToggleEnabled),
+            nameof(ScrapeToggleTip), nameof(ImportToggleTip), nameof(UpdateToggleTip), nameof(RewriteToggleTip),
+            nameof(CanScrape), nameof(CanStartUpdate), nameof(IsUpdatingAnyLocal),
+        }) OnPropertyChanged(n);
     }
 
     /// <summary>Tính lại trạng thái từ tiến độ scrape (mượn nguyên logic chip của ScrapeTargetViewModel).</summary>

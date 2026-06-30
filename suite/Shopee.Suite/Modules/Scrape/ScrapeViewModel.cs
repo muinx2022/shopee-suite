@@ -119,10 +119,14 @@ public sealed partial class ScrapeViewModel : ObservableObject
     /// <summary>v1.1 (màn gộp BigSeller): chạy/tiếp tục RIÊNG 1 tk BigSeller mà KHÔNG đụng tick của tk khác.
     /// Rảnh → mở phiên mới chỉ gồm tk này; đang chạy → thêm job tk này (resume) vào phiên hiện tại.
     /// TOTAL: tự nuốt + log mọi lỗi → an toàn để gọi fire-and-forget (caller không cần try/catch).</summary>
-    public async Task RunSingleAsync(ScrapeTargetViewModel target, bool resume, bool silent = false)
+    public async Task RunSingleAsync(ScrapeTargetViewModel target, bool resume, bool silent = false,
+        int? startRow = null, int? endRow = null)
     {
         try
         {
+            // Override khoảng dòng (Hub giao việc) — KHÔNG ghi đè cấu hình người dùng; runner đọc rồi tự xoá.
+            target.PendingStartRow = startRow is int sr && sr > 0 ? sr : null;
+            target.PendingEndRow = endRow is int er && er > 0 ? er : null;
             if (IsBusy) { StartOneAccount(target, silent); return; }
             await StartAsync(resume, new[] { target }, silent);
         }
@@ -339,7 +343,10 @@ public sealed partial class ScrapeViewModel : ObservableObject
         var shop = target.SelectedShop!;
         var sheet = shop.ShopeeDataSheet;
         var maxProc = Math.Max(1, target.MaxProcess);   // = SỐ CỬA SỔ Brave song song (KHÔNG còn = số tk dùng)
-        var startRow = Math.Max(1, target.StartRow);
+        // Khoảng dòng: ưu tiên override TẠM (Hub giao việc), dùng-một-lần → đọc xong xoá để không lọt sang lượt sau.
+        var startRow = Math.Max(1, target.PendingStartRow ?? target.StartRow);
+        var endRowOverride = target.PendingEndRow;
+        target.PendingStartRow = null; target.PendingEndRow = null;
         var rowsPer = Math.Max(1, target.RowsPerAccount);
         var seq = h.Seq;
         var ct = h.Cts.Token;
@@ -356,8 +363,8 @@ public sealed partial class ScrapeViewModel : ObservableObject
             int totalRows;
             try { totalRows = await Task.Run(() => ScrapeWorkbook.TotalDataRows(account.WorkbookPath, sheet), ct).ConfigureAwait(false); }
             catch (Exception ex) { Log($"[{account.DisplayName}] ✘ lỗi đọc workbook: {ex.Message} — bỏ qua."); return; }
-            // "Đến dòng" > 0 → DỪNG tại đó (cắt tổng số dòng cần chạy).
-            var endRow = Math.Max(0, target.EndRow);
+            // "Đến dòng" > 0 → DỪNG tại đó (cắt tổng số dòng cần chạy). Ưu tiên override TẠM (Hub giao).
+            var endRow = Math.Max(0, endRowOverride ?? target.EndRow);
             if (endRow > 0 && endRow < totalRows) totalRows = endRow;
             if (totalRows < startRow) { Log($"[{account.DisplayName}] sheet \"{sheet}\" chỉ có {totalRows} dòng (bắt đầu {startRow}) — bỏ qua."); return; }
 

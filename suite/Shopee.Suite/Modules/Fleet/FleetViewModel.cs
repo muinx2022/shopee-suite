@@ -50,6 +50,9 @@ public sealed partial class FleetViewModel : ObservableObject
     public IReadOnlyList<string> PinOps { get; } = ["Scrape", "Import", "Update"];
     [ObservableProperty] private string _pinOp = "Scrape";
     [ObservableProperty] private FleetMachineRow? _pinMachine;
+    /// <summary>Khoảng dòng Hub đặt cho việc giao tay (0 = để client tự dùng cấu hình của nó).</summary>
+    [ObservableProperty] private int _pinStartRow;
+    [ObservableProperty] private int _pinEndRow;
 
     public bool DispatchEnabled
     {
@@ -77,8 +80,17 @@ public sealed partial class FleetViewModel : ObservableObject
     public bool PauseReceiving
     {
         get => _worker?.Paused ?? false;
-        set { if (_worker is not null) _worker.Paused = value; OnPropertyChanged(); }
+        set { if (_worker is not null) _worker.Paused = value; OnPropertyChanged(); OnPropertyChanged(nameof(ReceiveToggleText)); OnPropertyChanged(nameof(ReceiveStateText)); }
     }
+
+    /// <summary>Nhãn nút bật/tắt nhận việc (mặc định ĐANG nhận → nút để tạm dừng).</summary>
+    public string ReceiveToggleText => PauseReceiving ? "▶  Bắt đầu nhận việc" : "⏸  Tạm dừng nhận việc";
+    public string ReceiveStateText => PauseReceiving
+        ? "⏸ Đã tạm dừng — máy này KHÔNG nhận việc mới (việc đang chạy vẫn xong)."
+        : "🟢 Đang nhận việc — máy tự chạy khi Hub giao việc cho nó (không cần bấm gì thêm).";
+
+    /// <summary>Bật/tắt nhận việc. Client TỰ chạy khi đang nhận — đây là công tắc duy nhất cần biết.</summary>
+    [RelayCommand] private void ToggleReceive() => PauseReceiving = !PauseReceiving;
 
     /// <summary>Bật → các lượt scrape/update tới chạy ĐÈ khoá máy khác (van thoát khi khoá sót).</summary>
     public bool ForceNextRun
@@ -171,24 +183,30 @@ public sealed partial class FleetViewModel : ObservableObject
         Queue.Clear();
         var running = 0; var queued = 0; var failed = 0;
         foreach (var acct in BigSellerStore.Shared.Accounts)
-        foreach (var shop in acct.Shops)
         {
-            if (string.IsNullOrWhiteSpace(shop.ShopeeDataSheet)) continue;
-            var sc = OpCell(f, acct.Id, shop.Id, "scrape");
-            var im = OpCell(f, acct.Id, shop.Id, "import");
-            var up = OpCell(f, acct.Id, shop.Id, "update");
-            var next = HubDispatcher.NextOp(f, acct.Id, shop.Id);
-            var row = new FleetQueueRow
+            var firstInAcct = true;   // gộp theo tk: chỉ dòng shop ĐẦU của mỗi tk mới hiện tên tài khoản
+            foreach (var shop in acct.Shops)
             {
-                BigsellerId = acct.Id, ShopId = shop.Id, Sheet = shop.ShopeeDataSheet,
-                AccountLabel = AcctName(acct, acct.Id), ShopName = shop.DisplayName,
-                ScrapeText = sc.text, ScrapeBrush = sc.brush,
-                ImportText = im.text, ImportBrush = im.brush,
-                UpdateText = up.text, UpdateBrush = up.brush,
-                NextOpText = next is null ? "✓ hoàn tất" : $"kế tiếp: {OpVi(next)}",
-            };
-            Queue.Add(row);
-            foreach (var c in new[] { sc, im, up }) { if (c.kind == 1) running++; else if (c.kind == 2) queued++; else if (c.kind == 3) failed++; }
+                if (string.IsNullOrWhiteSpace(shop.ShopeeDataSheet)) continue;
+                var sc = OpCell(f, acct.Id, shop.Id, "scrape");
+                var im = OpCell(f, acct.Id, shop.Id, "import");
+                var up = OpCell(f, acct.Id, shop.Id, "update");
+                var next = HubDispatcher.NextOp(f, acct.Id, shop.Id);
+                var row = new FleetQueueRow
+                {
+                    BigsellerId = acct.Id, ShopId = shop.Id, Sheet = shop.ShopeeDataSheet,
+                    AccountLabel = firstInAcct ? AcctName(acct, acct.Id) : "",
+                    IsAccountFirstRow = firstInAcct,
+                    ShopName = shop.DisplayName,
+                    ScrapeText = sc.text, ScrapeBrush = sc.brush,
+                    ImportText = im.text, ImportBrush = im.brush,
+                    UpdateText = up.text, UpdateBrush = up.brush,
+                    NextOpText = next is null ? "✓ hoàn tất" : $"kế tiếp: {OpVi(next)}",
+                };
+                Queue.Add(row);
+                firstInAcct = false;
+                foreach (var c in new[] { sc, im, up }) { if (c.kind == 1) running++; else if (c.kind == 2) queued++; else if (c.kind == 3) failed++; }
+            }
         }
         if (prevSel is { } p) SelectedQueue = Queue.FirstOrDefault(r => r.BigsellerId == p.bs && r.ShopId == p.shop);
         Status = $"{running} đang chạy · {queued} chờ · {failed} dừng/lỗi · cập nhật {DateTimeOffset.Now:HH:mm:ss}";
@@ -221,7 +239,8 @@ public sealed partial class FleetViewModel : ObservableObject
         var hub = CoordinationRuntime.Hub;
         if (hub is null || SelectedQueue is not { } row || PinMachine is not { } m) return;
         var op = PinOp.ToLowerInvariant();
-        await hub.CreateAssignmentAsync(new CreateAssignmentRequest(row.BigsellerId, row.ShopId, row.Sheet, op, m.MachineId, true));
+        await hub.CreateAssignmentAsync(new CreateAssignmentRequest(
+            row.BigsellerId, row.ShopId, row.Sheet, op, m.MachineId, true, Math.Max(0, PinStartRow), Math.Max(0, PinEndRow)));
         Refresh();
     }
 
@@ -380,6 +399,8 @@ public sealed class FleetQueueRow
     public string ShopId { get; init; } = "";
     public string Sheet { get; init; } = "";
     public string AccountLabel { get; init; } = "";
+    /// <summary>true nếu là dòng shop ĐẦU của một tài khoản → kẻ vạch phân nhóm + in đậm tên tk.</summary>
+    public bool IsAccountFirstRow { get; init; }
     public string ShopName { get; init; } = "";
     public string ScrapeText { get; init; } = ""; public Brush ScrapeBrush { get; init; } = Brushes.Gray;
     public string ImportText { get; init; } = ""; public Brush ImportBrush { get; init; } = Brushes.Gray;

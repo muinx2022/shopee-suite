@@ -253,7 +253,8 @@ public sealed partial class SettingsViewModel : ObservableObject
             : "Đã tắt đồng bộ Hub — app chạy độc lập như cũ.";
     }
 
-    /// <summary>Tạo client tạm từ URL/token đang nhập và ping /health để biết NGAY có nối được không.</summary>
+    /// <summary>Kiểm tra URL + TOKEN: ping /health (không cần auth) để biết tới được Hub, rồi gọi /manifest
+    /// (CẦN auth) để bắt token sai (401) — nguyên nhân hay gặp khiến "kết nối được mà không sync".</summary>
     [RelayCommand]
     private async Task TestHubClient()
     {
@@ -261,14 +262,43 @@ public sealed partial class SettingsViewModel : ObservableObject
         if (string.IsNullOrWhiteSpace(url)) { HubClientStatus = "✘ Chưa nhập URL Hub."; return; }
         HubClientStatus = "⏳ Đang kiểm tra…";
         var cfg = new HubClientConfig { Enabled = true, BaseUrl = url, ApiToken = (HubApiToken ?? "").Trim() };
+        var client = new HubClient(cfg, MachineIdentity.Shared.MachineId);
         try
         {
-            var ok = await new HubClient(cfg, MachineIdentity.Shared.MachineId).PingAsync();
-            HubClientStatus = ok
-                ? "🟢 Kết nối OK — Hub có phản hồi."
-                : "✘ Không nối được: sai URL/token hoặc máy-Hub chưa bật. Kiểm tra lại rồi thử tiếp.";
+            if (!await client.PingAsync())
+            { HubClientStatus = "✘ Không tới được Hub (URL sai / máy-Hub chưa bật / tunnel down)."; return; }
+            // Tới được Hub → kiểm TOKEN bằng endpoint cần auth. 401 = token không khớp token Hub.
+            await client.ManifestAsync();
+            HubClientStatus = "🟢 Kết nối OK — URL + token đúng (đồng bộ được).";
         }
-        catch (Exception ex) { HubClientStatus = "✘ Lỗi: " + ex.Message; }
+        catch (System.Net.Http.HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+        { HubClientStatus = "✘ Tới được Hub nhưng TOKEN SAI (401) — dán token KHỚP HỆT token máy Hub."; }
+        catch (Exception ex) { HubClientStatus = "✘ Hub báo lỗi: " + ex.Message; }
+    }
+
+    /// <summary>true nếu máy này đang kết nối Hub (client). Để nút đổi Kết nối ↔ Ngắt kết nối.</summary>
+    public bool IsClientConnected => CoordinationRuntime.Active;
+    public string ConnectToggleText => IsClientConnected ? "■  Ngắt kết nối" : "🔌  Kết nối ngay";
+    private void RaiseConnState() { OnPropertyChanged(nameof(IsClientConnected)); OnPropertyChanged(nameof(ConnectToggleText)); }
+
+    /// <summary>1 nút: chưa nối → KẾT NỐI; đang nối → NGẮT. Cả hai áp dụng NGAY (không cần khởi động lại).</summary>
+    [RelayCommand]
+    private async Task ConnectToggle()
+    {
+        if (IsClientConnected) { await Disconnect(); return; }
+        await ConnectNow();
+    }
+
+    /// <summary>Ngắt kết nối Hub live: báo Hub xoá máy này khỏi danh sách (chủ động ngắt → biến mất; chỉ offline
+    /// thì Hub giữ lại), rồi tắt đồng bộ + lưu + Reconnect (Enabled=false → gỡ về NoOp).</summary>
+    private async Task Disconnect()
+    {
+        try { if (CoordinationRuntime.Hub is { } h) await h.LeaveAsync(); } catch { }   // rời danh sách trước khi gỡ client
+        HubEnabled = false;
+        SaveHubClient();                  // lưu Enabled=false
+        CoordinationRuntime.Reconnect();  // gỡ kết nối ngay
+        HubClientStatus = "⚪ Đã ngắt kết nối Hub — đã rời danh sách máy trên Hub. App chạy độc lập.";
+        RaiseConnState();
     }
 
     /// <summary>Lưu cấu hình client rồi áp dụng NGAY (không cần khởi động lại app) và ping kiểm chứng.</summary>
@@ -276,14 +306,15 @@ public sealed partial class SettingsViewModel : ObservableObject
     private async Task ConnectNow()
     {
         SaveHubClient();
-        if (!HubEnabled) { HubClientStatus = "Đồng bộ đang TẮT — tick \"Bật đồng bộ với Hub\" rồi thử lại."; return; }
+        if (!HubEnabled) { HubClientStatus = "Đồng bộ đang TẮT — tick \"Bật đồng bộ với Hub\" rồi thử lại."; RaiseConnState(); return; }
         HubClientStatus = "⏳ Đang kết nối…";
         var active = CoordinationRuntime.Reconnect();
-        if (!active) { HubClientStatus = "✘ Chưa kết nối — kiểm tra URL/token."; return; }
+        if (!active) { HubClientStatus = "✘ Chưa kết nối — kiểm tra URL/token."; RaiseConnState(); return; }
         var ok = CoordinationRuntime.Client is { } c && await c.PingAsync();
         HubClientStatus = ok
             ? "🟢 Đã kết nối Hub (áp dụng ngay, không cần khởi động lại)."
             : "🟡 Đã bật nhưng Hub chưa phản hồi — kiểm tra URL/token hoặc máy-Hub đã bật chưa.";
+        RaiseConnState();
     }
 
     /// <summary>Chuẩn hoá URL Hub: tự thêm "https://" nếu thiếu scheme; "" nếu rỗng; null nếu KHÔNG hợp lệ (http/https tuyệt đối).</summary>

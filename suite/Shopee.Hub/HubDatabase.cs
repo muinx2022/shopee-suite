@@ -31,6 +31,27 @@ public sealed class HubDatabase : IDisposable
         ExecRaw("PRAGMA journal_mode=WAL;");
         ExecRaw("PRAGMA busy_timeout=5000;");
         EnsureSchema();
+        MigrateSchema();
+    }
+
+    /// <summary>Thêm cột mới vào DB ĐÃ TỒN TẠI (CREATE TABLE IF NOT EXISTS không thêm cột cho bảng cũ).</summary>
+    private void MigrateSchema()
+    {
+        AddColumnIfMissing("assignments", "start_row", "INTEGER DEFAULT 0");
+        AddColumnIfMissing("assignments", "end_row", "INTEGER DEFAULT 0");
+    }
+
+    private void AddColumnIfMissing(string table, string column, string decl)
+    {
+        var exists = false;
+        using (var c = _conn.CreateCommand())
+        {
+            c.CommandText = $"PRAGMA table_info({table})";
+            using var rd = c.ExecuteReader();
+            while (rd.Read())
+                if (string.Equals(rd.GetString(1), column, StringComparison.OrdinalIgnoreCase)) { exists = true; break; }
+        }
+        if (!exists) ExecRaw($"ALTER TABLE {table} ADD COLUMN {column} {decl};");
     }
 
     public void Dispose() { lock (_gate) _conn.Dispose(); }
@@ -56,7 +77,8 @@ CREATE TABLE IF NOT EXISTS machine_roles(
 CREATE TABLE IF NOT EXISTS assignments(
   id TEXT PRIMARY KEY, bigseller_id TEXT, shop_id TEXT, sheet TEXT, op TEXT,
   target_machine_id TEXT, pinned INTEGER, status TEXT,
-  claimed_by TEXT, claimed_host TEXT, last_error TEXT, created_at TEXT, updated_at TEXT);");
+  claimed_by TEXT, claimed_host TEXT, last_error TEXT, created_at TEXT, updated_at TEXT,
+  start_row INTEGER DEFAULT 0, end_row INTEGER DEFAULT 0);");
 
     // ── Leases (khoá việc theo shop+op) ─────────────────────────────────────────
     public LeaseAcquireResponse AcquireLease(LeaseAcquireRequest r)
@@ -340,6 +362,8 @@ ON CONFLICT(machine_id) DO UPDATE SET hostname=$h, last_seen=$ls, app_version=$v
         }
     }
 
+    /// <summary>TẤT CẢ máy đã từng kết nối — GIỮ cả máy offline (mất nhịp/đóng app) để theo dõi. Chỉ máy
+    /// chủ động bấm "Ngắt kết nối" (<see cref="RemoveMachine"/>) mới bị xoá khỏi danh sách.</summary>
     public List<MachinePresence> AllMachines()
     {
         lock (_gate)
@@ -352,6 +376,18 @@ ON CONFLICT(machine_id) DO UPDATE SET hostname=$h, last_seen=$ls, app_version=$v
                 list.Add(new MachinePresence { MachineId = S(rd, 0), Hostname = S(rd, 1), LastSeen = D(rd, 2), AppVersion = rd.IsDBNull(3) ? null : rd.GetString(3) });
             return list;
         }
+    }
+
+    /// <summary>Xoá hẳn 1 máy khỏi danh sách khi nó CHỦ ĐỘNG ngắt kết nối (biến mất NGAY ở lần poll kế). Máy chỉ
+    /// OFFLINE (đóng app/mất nhịp) thì GIỮ lại để theo dõi — KHÔNG tự xoá.</summary>
+    public void RemoveMachine(string machineId) { lock (_gate) DeleteMachineLocked(machineId); }
+
+    private void DeleteMachineLocked(string machineId)
+    {
+        using var c = _conn.CreateCommand();
+        c.CommandText = "DELETE FROM machines WHERE machine_id=$m; DELETE FROM machine_roles WHERE machine_id=$m;";
+        c.Parameters.AddWithValue("$m", machineId);
+        c.ExecuteNonQuery();
     }
 
     public FleetSnapshot Fleet() => new()
@@ -455,12 +491,13 @@ ON CONFLICT(machine_id) DO UPDATE SET role=$r;";
                 Id = Guid.NewGuid().ToString("N"),
                 BigsellerId = r.BigsellerId, ShopId = r.ShopId, Sheet = r.Sheet, Op = r.Op,
                 TargetMachineId = r.TargetMachineId, Pinned = r.Pinned,
+                StartRow = r.StartRow, EndRow = r.EndRow,
                 Status = "queued", CreatedAt = now, UpdatedAt = now,
             };
             using var c = _conn.CreateCommand();
             c.CommandText = @"
-INSERT INTO assignments(id,bigseller_id,shop_id,sheet,op,target_machine_id,pinned,status,claimed_by,claimed_host,last_error,created_at,updated_at)
-VALUES($id,$b,$s,$sh,$o,$t,$p,'queued','','','',$ca,$ua);";
+INSERT INTO assignments(id,bigseller_id,shop_id,sheet,op,target_machine_id,pinned,status,claimed_by,claimed_host,last_error,created_at,updated_at,start_row,end_row)
+VALUES($id,$b,$s,$sh,$o,$t,$p,'queued','','','',$ca,$ua,$sr,$er);";
             c.Parameters.AddWithValue("$id", a.Id);
             c.Parameters.AddWithValue("$b", a.BigsellerId);
             c.Parameters.AddWithValue("$s", a.ShopId);
@@ -470,6 +507,8 @@ VALUES($id,$b,$s,$sh,$o,$t,$p,'queued','','','',$ca,$ua);";
             c.Parameters.AddWithValue("$p", a.Pinned ? 1 : 0);
             c.Parameters.AddWithValue("$ca", Iso(now));
             c.Parameters.AddWithValue("$ua", Iso(now));
+            c.Parameters.AddWithValue("$sr", a.StartRow);
+            c.Parameters.AddWithValue("$er", a.EndRow);
             c.ExecuteNonQuery();
             return a;
         }
@@ -645,6 +684,8 @@ VALUES($id,$b,$s,$sh,$o,$t,$p,'queued','','','',$ca,$ua);";
             Pinned = !rd.IsDBNull(i("pinned")) && rd.GetInt32(i("pinned")) != 0,
             Status = S(rd, i("status")), ClaimedByMachineId = S(rd, i("claimed_by")),
             ClaimedByHostname = S(rd, i("claimed_host")), LastError = S(rd, i("last_error")),
+            StartRow = rd.IsDBNull(i("start_row")) ? 0 : rd.GetInt32(i("start_row")),
+            EndRow = rd.IsDBNull(i("end_row")) ? 0 : rd.GetInt32(i("end_row")),
             CreatedAt = D(rd, i("created_at")), UpdatedAt = D(rd, i("updated_at")),
         };
     }
