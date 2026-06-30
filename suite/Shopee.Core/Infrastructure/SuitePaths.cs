@@ -7,9 +7,34 @@ namespace Shopee.Core.Infrastructure;
 /// </summary>
 public static class SuitePaths
 {
-    /// <summary>%AppData%\ShopeeSuite</summary>
-    public static string Root { get; } = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ShopeeSuite");
+    /// <summary>
+    /// %AppData%\ShopeeSuite — gốc kho dữ liệu. Nếu có file <c>data-dir.txt</c> đặt CẠNH .exe và
+    /// chứa một đường dẫn, dùng <c>&lt;đường dẫn đó&gt;\ShopeeSuite</c> làm gốc → cho phép một bản app
+    /// khác (vd bản "sync") giữ kho dữ liệu RIÊNG, KHÔNG đụng dữ liệu của bản gốc. Đường dẫn tương đối
+    /// được tính theo thư mục .exe; marker lỗi/trống → quay về %AppData%.
+    /// </summary>
+    public static string Root { get; } = Path.Combine(ResolveAppDataBase(), "ShopeeSuite");
+
+    /// <summary>Đọc gốc dữ liệu từ <c>data-dir.txt</c> cạnh .exe; không có/hỏng → %AppData%.</summary>
+    private static string ResolveAppDataBase()
+    {
+        try
+        {
+            var marker = Path.Combine(AppContext.BaseDirectory, "data-dir.txt");
+            if (File.Exists(marker))
+            {
+                var custom = File.ReadAllText(marker).Trim();
+                if (!string.IsNullOrWhiteSpace(custom))
+                {
+                    if (!Path.IsPathRooted(custom))
+                        custom = Path.Combine(AppContext.BaseDirectory, custom);
+                    return Path.GetFullPath(custom);
+                }
+            }
+        }
+        catch { /* marker hỏng → dùng mặc định */ }
+        return Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+    }
 
     /// <summary>Thư mục dữ liệu riêng của một module (tự tạo nếu chưa có).</summary>
     public static string ModuleDir(string module)
