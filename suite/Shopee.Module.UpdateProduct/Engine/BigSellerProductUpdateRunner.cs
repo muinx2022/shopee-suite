@@ -524,6 +524,7 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
             _skippedEditIds.Add(actualEditId);
             if (!string.IsNullOrEmpty(rowKey)) _skippedRowKeys.Add(rowKey);
             _log($"✅ HOÀN TẤT XỬ LÝ SKU: {record!.Sku}");
+            await OverlayAsync($"✅ Hoàn tất SKU {record!.Sku}");
             return ("ok", false);
         }
         catch (OperationCanceledException) { throw; }
@@ -617,6 +618,9 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
     private async Task<bool> ProcessProductAsync(IPage page, WorkbookRecord rec, CancellationToken ct)
     {
         _lastProcessTransient = false;
+        await StepAsync($"Xử lý SKU {rec.Sku}");
+
+        await StepAsync("Sửa tên sản phẩm");
         // [1] name — CẮT ≤120 ký tự (giới hạn Shopee, tránh BigSeller báo lỗi), giữ SKU ở cuối.
         // fill fail KHÔNG làm rớt cả SP (giữ tên cũ, vẫn lưu phần còn lại như Python).
         var nameToFill = TruncateProductNamePreservingSku(rec.ProductName, rec.Sku, MaxProductNameChars);
@@ -626,6 +630,7 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
         if (!await FillProductNameAsync(page, nameToFill, ct))
             _log("  ⚠ Không điền được tên SP — giữ tên cũ, tiếp tục xử lý.");
 
+        await StepAsync("Đồng bộ ảnh (MD5)");
         // [2] md5 sync
         try
         {
@@ -648,6 +653,7 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
         }
         catch { }
 
+        await StepAsync("Điền SKU + thương hiệu");
         // [4] parent SKU
         try
         {
@@ -672,6 +678,7 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
             await el.EvaluateAsync("el => el.blur()");
         });
 
+        await StepAsync("Cập nhật tồn kho + giá");
         // [7] stock (skip if 0)
         await ForEachVisibleAsync(page.Locator(VariationStockInputs), async el =>
         {
@@ -692,6 +699,7 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
             await el.EvaluateAsync("el => el.blur()");
         });
 
+        await StepAsync("Vận chuyển + cân nặng");
         // [9] shipping "Nhanh"
         try
         {
@@ -724,6 +732,7 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
         // [10.5] upload video (non-fatal, 3 attempts)
         if (videoPath != null)
         {
+            await StepAsync("Upload video");
             for (var attempt = 0; attempt < 3; attempt++)
             {
                 try { if (await UploadVideoAsync(page, videoPath, ct)) break; } catch { }
@@ -735,16 +744,62 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
         var imagePath = _settings.ImagePath;
         if (!string.IsNullOrWhiteSpace(imagePath) && File.Exists(imagePath))
         {
+            await StepAsync("Import ảnh");
             try { await UploadImageWithRetryAsync(page, imagePath, 3, ct); } catch { }
         }
 
+        await StepAsync("Tạo mô tả AI");
         // [12.1] AI description — rỗng sau retry = LỖI TẠM → retry vòng sau, KHÔNG xóa dòng (tránh mất SP).
         var aiContent = await GenerateDescriptionAsync(rec.ProductName ?? "", ct).ConfigureAwait(false);
         if (string.IsNullOrWhiteSpace(aiContent)) { _lastProcessTransient = true; return false; }
         if (!await UpdateDescriptionAsync(page, aiContent, ct)) return false;
 
+        await StepAsync("Lưu sản phẩm");
         // [12.2] save
         return await SaveWithImageRetryAsync(page, imagePath, 3, ct).ConfigureAwait(false);
+    }
+
+    // ── overlay tiến độ ngay trên trang Brave để THEO DÕI log (best-effort: lỗi overlay KHÔNG bao giờ
+    // chặn luồng cập nhật). Phát lên MỌI tab đang mở trong context → nhìn tab nào cũng thấy. ──
+    private const string OverlayJs = @"(line) => {
+  let box = document.getElementById('__ssyncOverlay');
+  if (!box) {
+    box = document.createElement('div');
+    box.id = '__ssyncOverlay';
+    box.style.cssText = 'position:fixed;z-index:2147483647;right:10px;bottom:10px;width:430px;max-height:260px;overflow:hidden;background:rgba(17,17,17,.86);color:#7CFC7C;font:12px/1.5 Consolas,Menlo,monospace;padding:8px 10px;border-radius:10px;box-shadow:0 4px 16px rgba(0,0,0,.55);pointer-events:none;white-space:pre-wrap;word-break:break-word';
+    const t = document.createElement('div');
+    t.textContent = '● ShopeeSuite — tiến độ Update';
+    t.style.cssText = 'color:#67d3ff;font-weight:700;margin-bottom:5px';
+    box.appendChild(t);
+    const b = document.createElement('div'); b.id = '__ssyncOverlayBody'; box.appendChild(b);
+    (document.body || document.documentElement).appendChild(box);
+  }
+  const body = document.getElementById('__ssyncOverlayBody');
+  const r = document.createElement('div');
+  const n = new Date();
+  const p = x => String(x).padStart(2, '0');
+  r.textContent = '[' + p(n.getHours()) + ':' + p(n.getMinutes()) + ':' + p(n.getSeconds()) + '] ' + line;
+  body.appendChild(r);
+  while (body.childNodes.length > 12) body.removeChild(body.firstChild);
+}";
+
+    /// <summary>Đẩy 1 dòng lên overlay của MỌI trang đang mở (listing + edit). Lỗi → bỏ qua.</summary>
+    private async Task OverlayAsync(string line)
+    {
+        var ctx = _context;
+        if (ctx is null) return;
+        foreach (var pg in ctx.Pages)
+        {
+            if (pg.IsClosed) continue;
+            try { await pg.EvaluateAsync(OverlayJs, line); } catch { /* overlay best-effort */ }
+        }
+    }
+
+    /// <summary>Báo bắt đầu một bước: ghi log app ("▶ …") + hiện trên overlay Brave.</summary>
+    private async Task StepAsync(string text)
+    {
+        _log("  ▶ " + text);
+        await OverlayAsync("▶ " + text);
     }
 
     // ── [1] fill name ──
