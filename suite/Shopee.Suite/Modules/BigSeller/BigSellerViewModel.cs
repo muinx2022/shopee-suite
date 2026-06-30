@@ -5,6 +5,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.Win32;
 using Shopee.Core.BigSeller;
+using Shopee.Core.Coordination;
 using Shopee.Core.Infrastructure;
 
 namespace Shopee.Suite.Modules.BigSeller;
@@ -226,6 +227,17 @@ public sealed partial class BigSellerViewModel : ObservableObject
                 cookieFile, profileDir, AppendLog, _loginCts.Token, () => OnLoginSaved(account), proxyServer);
             account.NotifyCookieChanged();
             Status = ok ? "Đăng nhập BigSeller thành công." : "Chưa lấy được cookie BigSeller.";
+
+            // MÁY HUB: đẩy cookie vừa lấy lên Hub NGAY để client kéo về liền, khỏi chờ auto-push (3 phút).
+            // Chỉ Hub là nguồn → chỉ Hub push; client (hiếm khi tự login) thì không. KHÔNG truyền _loginCts.Token
+            // (lúc này đã bị Cancel do bấm Dừng để đóng cửa sổ) — push phải chạy độc lập. Best-effort.
+            if (ok && HubServerConfigStore.Shared.Current.Enabled
+                   && CoordinationRuntime.ConfigSync is { } sync)
+            {
+                AppendLog("Đang đẩy cookie mới lên Hub để các máy khác đồng bộ…");
+                try { AppendLog(await sync.PushAsync()); }
+                catch (Exception ex) { AppendLog("✘ Đẩy lên Hub lỗi (sẽ tự đẩy lại ở chu kỳ auto): " + ex.Message); }
+            }
         }
         finally
         {

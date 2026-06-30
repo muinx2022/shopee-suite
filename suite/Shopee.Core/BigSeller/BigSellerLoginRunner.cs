@@ -79,6 +79,29 @@ public static class BigSellerLoginRunner
             catch (OperationCanceledException) { throw; }
             catch { }
 
+            // CHƯA sống nhưng ĐÃ có file cookie (điển hình: CLIENT vừa SYNC cookie từ Hub về — profile Brave
+            // KHÔNG sync giữa máy, chỉ cookie FILE sync) → nạp cookie file vào profile rồi probe LẠI. Nhờ vậy
+            // "Mở profile" trên client thấy ĐÃ đăng nhập thay vì hiện form login. Trên máy Hub (profile đã
+            // sống) nhánh này không chạy vì probe đầu đã alive. Nếu nạp xong vẫn không sống → rơi xuống login.
+            if (!aliveKept && File.Exists(cookieFile))
+            {
+                try
+                {
+                    var seeded = await ImportCookiesFromFileAsync(cdp, cookieFile, ct);
+                    if (seeded > 0)
+                    {
+                        log($"Đã nạp {seeded} cookie đã đồng bộ vào profile — đang kiểm tra phiên…");
+                        if (await ProbeLoggedInAsync(port, ct))
+                        {
+                            aliveKept = true;
+                            log("✔ Phiên BigSeller (từ cookie đã đồng bộ) còn sống — không cần đăng nhập lại. Bấm Dừng để đóng.");
+                        }
+                    }
+                }
+                catch (OperationCanceledException) { throw; }
+                catch { }
+            }
+
             if (!aliveKept)
             {
                 try

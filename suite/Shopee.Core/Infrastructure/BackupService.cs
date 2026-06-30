@@ -104,13 +104,20 @@ public static class BackupService
                   ?? (EmailKey(a).Length > 0 ? current.FirstOrDefault(x => EmailKey(x) == EmailKey(a)) : null);
             if (existing is not null)
             {
+                var changed = false;
                 if (SharedSignature(existing) != SharedSignature(a))
                 {
                     existing.Label = a.Label; existing.Email = a.Email; existing.Shops = a.Shops;
                     existing.KiotProxyKey = a.KiotProxyKey; existing.Region = a.Region; existing.ProxyType = a.ProxyType;
-                    updated++;
+                    changed = true;
                 }
-                else skipped++;
+                // Nối lại CookieFile cho acc ĐÃ tồn tại: trước đây nhánh này bỏ qua cookie HOÀN TOÀN, nên acc
+                // được sync TRƯỚC khi đăng nhập (CookieFile="") thì dù sau đó cookie đã về máy vẫn kẹt "" mãi
+                // → client không thấy phiên, Scrape/Update báo "log in first". RelinkCookie trỏ lại theo TÊN
+                // file bản Hub gửi nếu cookie đã nằm trong CookieDir local (SharedSignature cố ý bỏ qua cookie
+                // nên KHÔNG bao giờ tự kích hoạt nhánh cập nhật → phải nối riêng ở đây).
+                if (RelinkCookie(existing, a)) changed = true;
+                if (changed) updated++; else skipped++;
                 continue;
             }
             RebaseBigSeller(a, rebaseDir);
@@ -165,6 +172,23 @@ public static class BackupService
             var local = Path.Combine(CookieDir, Path.GetFileName(a.CookieFile));
             a.CookieFile = File.Exists(local) ? local : "";
         }
+    }
+
+    /// <summary>Trỏ <see cref="BigSellerAccount.CookieFile"/> của acc ĐÃ-tồn-tại sang file cookie local nếu
+    /// hiện chưa dùng được (rỗng, hoặc trỏ vào file không còn) mà cookie — theo TÊN file bản Hub gửi (nguồn
+    /// sự thật), fallback theo bản local cũ — đã có trong CookieDir. Trả true nếu có đổi. Vá lỗ "acc đăng nhập
+    /// SAU khi đã sync không bao giờ được nối cookie ở client".</summary>
+    private static bool RelinkCookie(BigSellerAccount existing, BigSellerAccount incoming)
+    {
+        if (!string.IsNullOrWhiteSpace(existing.CookieFile) && File.Exists(existing.CookieFile)) return false;
+        var name = !string.IsNullOrWhiteSpace(incoming.CookieFile) ? Path.GetFileName(incoming.CookieFile)
+                 : !string.IsNullOrWhiteSpace(existing.CookieFile) ? Path.GetFileName(existing.CookieFile)
+                 : "";
+        if (name.Length == 0) return false;
+        var local = Path.Combine(CookieDir, name);
+        if (!File.Exists(local)) return false;
+        existing.CookieFile = local;
+        return true;
     }
 
     private static void AddFile(ZipArchive zip, string path, string entryName)
