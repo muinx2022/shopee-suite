@@ -41,6 +41,10 @@ public sealed class ShopeeAccount
     /// </summary>
     public long LastUsedTick { get; set; }
 
+    /// <summary>RIÊNG-MÁY (không nằm trong chữ ký dùng-chung): acc này ĐẾN TỪ HUB (nhận qua đồng bộ). Chỉ acc
+    /// HubOwned mới bị mirror-xóa khi Hub bỏ acc; acc tạo TẠI CHỖ (Check Account/Add tay) = false → KHÔNG bị xóa.</summary>
+    public bool HubOwned { get; set; }
+
     /// <summary>Username (phần trước dấu '|') — chỉ để hiển thị.</summary>
     public string Username =>
         string.IsNullOrEmpty(ShopeeAccountLogin) ? "" : ShopeeAccountLogin.Split('|')[0].Trim();

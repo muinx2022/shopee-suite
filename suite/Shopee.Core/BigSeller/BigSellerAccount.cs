@@ -40,6 +40,10 @@ public sealed class BigSellerAccount
     /// <summary>Id shop đang chọn ở module Update/Import (panel cấu hình chi tiết). Trống = chưa chọn.</summary>
     public string UpdateSelectedShopId { get; set; } = "";
 
+    /// <summary>RIÊNG-MÁY (ngoài chữ ký dùng-chung): acc này ĐẾN TỪ HUB. Chỉ acc HubOwned mới bị mirror-xóa
+    /// khi Hub bỏ acc; acc tạo/đăng nhập TẠI CHỖ = false → KHÔNG bị xóa khi client đồng bộ.</summary>
+    public bool HubOwned { get; set; }
+
     public string DisplayName =>
         !string.IsNullOrWhiteSpace(Label) ? Label
         : !string.IsNullOrWhiteSpace(Email) ? Email

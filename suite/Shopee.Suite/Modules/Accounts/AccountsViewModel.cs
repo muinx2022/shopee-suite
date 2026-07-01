@@ -344,7 +344,7 @@ public sealed partial class AccountsViewModel : ObservableObject
         {
             var r = await sync.PullAccountsAsync();
             Reload();
-            Status = $"✓ Đồng bộ: Shopee +{r.ShopeeAdded}/bỏ {r.ShopeeSkipped} · BigSeller +{r.BigSellerAdded}/↻{r.BigSellerUpdated}/bỏ {r.BigSellerSkipped} · cookie {r.CookiesCopied}.";
+            Status = $"✓ Đồng bộ: Shopee +{r.ShopeeAdded}/↻{r.ShopeeUpdated}/bỏ {r.ShopeeSkipped} · BigSeller +{r.BigSellerAdded}/↻{r.BigSellerUpdated}/bỏ {r.BigSellerSkipped} · cookie {r.CookiesCopied}.";
         }
         catch (Exception ex)
         {

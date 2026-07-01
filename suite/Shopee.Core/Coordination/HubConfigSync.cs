@@ -67,8 +67,11 @@ public sealed class HubConfigSync
     /// <summary>Kéo tài khoản + proxy + cookie + AI từ Hub về, gộp/append vào máy này.</summary>
     public async Task<ImportResult> PullAccountsAsync(CancellationToken ct = default)
     {
-        int bsA = 0, bsU = 0, bsS = 0, shA = 0, shS = 0, cookies = 0;
+        int bsA = 0, bsU = 0, bsS = 0, shA = 0, shU = 0, shS = 0, cookies = 0;
         var ai = false;
+        // MIRROR chỉ trên CLIENT: khớp trọn vẹn danh sách acc theo Hub (cập nhật + thêm + XÓA acc thừa). Máy Hub
+        // KHÔNG mirror (là nguồn sự thật; nút "Đồng bộ acc"/handoff-pull trên Hub chỉ gộp, không tự xóa/revert).
+        var mirror = !HubServerConfigStore.Shared.Current.Enabled;
 
         // 1) Cookie trước (để RebaseBigSeller trỏ CookieFile vào file local vừa tải).
         // Bọc RIÊNG manifest: trước đây lỗi ở đây (401 token sai / mất kết nối) giết CẢ lần kéo + bị catch{}
@@ -109,7 +112,7 @@ public sealed class HubConfigSync
             if (bsBytes is not null)
             {
                 var list = JsonSerializer.Deserialize<List<BigSellerAccount>>(NoBom(bsBytes)) ?? [];
-                (bsA, bsU, bsS) = BackupService.MergeBigSeller(list, replace: false, rebaseDir: null);
+                (bsA, bsU, bsS) = BackupService.MergeBigSeller(list, replace: false, rebaseDir: null, mirror: mirror);
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException) { }
@@ -121,7 +124,7 @@ public sealed class HubConfigSync
             if (shBytes is not null)
             {
                 var list = JsonSerializer.Deserialize<List<ShopeeAccount>>(NoBom(shBytes)) ?? [];
-                (shA, shS) = BackupService.MergeShopee(list, replace: false);
+                (shA, shU, shS) = BackupService.MergeShopee(list, replace: false, mirror: mirror);
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException) { }
@@ -185,7 +188,7 @@ public sealed class HubConfigSync
         }
         catch { }
 
-        return new ImportResult(bsA, bsS, shA, shS, ai, cookies, bsU);
+        return new ImportResult(bsA, bsS, shA, shS, ai, cookies, bsU, shU);
     }
 
     /// <summary>Bỏ BOM UTF-8 (EF BB BF) ở đầu nếu có. Các store ghi config bằng Encoding.UTF8 (CÓ BOM); deserialize

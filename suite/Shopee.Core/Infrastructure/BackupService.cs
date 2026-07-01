@@ -12,7 +12,7 @@ public sealed record BackupOptions(bool BigSeller, bool ShopeeAccounts, bool AiC
 /// <summary>Kết quả khôi phục để báo người dùng.</summary>
 public sealed record ImportResult(
     int BigSellerAdded, int BigSellerSkipped, int ShopeeAdded, int ShopeeSkipped, bool AiImported, int CookiesCopied,
-    int BigSellerUpdated = 0);
+    int BigSellerUpdated = 0, int ShopeeUpdated = 0);
 
 /// <summary>
 /// Sao lưu / khôi phục dữ liệu suite ra/từ 1 file .zip để đồng bộ sang máy khác.
@@ -51,7 +51,7 @@ public static class BackupService
     public static ImportResult Import(string zipPath, BackupOptions opt, bool replace, string? rebaseWorkbookDir)
     {
         using var zip = ZipFile.OpenRead(zipPath);
-        int bsAdded = 0, bsUpdated = 0, bsSkipped = 0, shAdded = 0, shSkipped = 0, cookies = 0;
+        int bsAdded = 0, bsUpdated = 0, bsSkipped = 0, shAdded = 0, shUpdated = 0, shSkipped = 0, cookies = 0;
         var aiImported = false;
 
         // 1) Giải nén cookie BigSeller trước (để re-base CookieFile khi nạp account).
@@ -77,7 +77,7 @@ public static class BackupService
         if (opt.ShopeeAccounts && zip.GetEntry("accounts.json") is { } shEntry)
         {
             var imported = Deserialize<List<ShopeeAccount>>(shEntry) ?? [];
-            (shAdded, shSkipped) = MergeShopee(imported, replace);
+            (shAdded, shUpdated, shSkipped) = MergeShopee(imported, replace);
         }
 
         // 4) Cấu hình AI (luôn ghi đè — là 1 cấu hình duy nhất).
@@ -87,13 +87,13 @@ public static class BackupService
             aiImported = true;
         }
 
-        return new ImportResult(bsAdded, bsSkipped, shAdded, shSkipped, aiImported, cookies, bsUpdated);
+        return new ImportResult(bsAdded, bsSkipped, shAdded, shSkipped, aiImported, cookies, bsUpdated, shUpdated);
     }
 
     /// <summary>Gộp danh sách BigSeller vào store (dùng chung cho import-zip + đồng bộ Hub). append = replace:false.
     /// Acc ĐÃ CÓ (theo Id/email) mà nội dung DÙNG CHUNG khác (shop/label/email/proxy) → CẬP NHẬT xuống (Hub là
     /// nguồn sự thật: sửa shop ở Hub lan tới mọi client), GIỮ NGUYÊN field local: cookie, workbook, lựa chọn UI.</summary>
-    public static (int added, int updated, int skipped) MergeBigSeller(List<BigSellerAccount> imported, bool replace, string? rebaseDir)
+    public static (int added, int updated, int skipped) MergeBigSeller(List<BigSellerAccount> imported, bool replace, string? rebaseDir, bool mirror = false)
     {
         var current = replace ? new List<BigSellerAccount>() : BigSellerStore.Shared.Accounts.ToList();
         int added = 0, updated = 0, skipped = 0;
@@ -117,16 +117,26 @@ public static class BackupService
                 // file bản Hub gửi nếu cookie đã nằm trong CookieDir local (SharedSignature cố ý bỏ qua cookie
                 // nên KHÔNG bao giờ tự kích hoạt nhánh cập nhật → phải nối riêng ở đây).
                 if (RelinkCookie(existing, a)) changed = true;
+                if (mirror) existing.HubOwned = true;   // acc có ở Hub → đánh dấu Hub-quản-lý
                 if (changed) updated++; else skipped++;
                 continue;
             }
             RebaseBigSeller(a, rebaseDir);
+            if (mirror) a.HubOwned = true;   // acc mới từ Hub
             current.Add(a);
             added++;
         }
-        // Chỉ ghi store khi THỰC SỰ đổi (thêm mới / cập nhật / chế độ thay-thế) → auto-pull định kỳ không bắn
+        var removed = 0;
+        // Mirror-xóa CHỈ acc ĐẾN TỪ HUB (HubOwned) mà Hub đã bỏ — KHÔNG đụng acc tạo/đăng nhập TẠI CHỖ.
+        if (mirror && imported.Count > 0)
+        {
+            var keepIds = imported.Select(x => x.Id).ToHashSet();
+            var keepEmails = imported.Select(EmailKey).Where(k => k.Length > 0).ToHashSet();
+            removed = current.RemoveAll(x => x.HubOwned && !keepIds.Contains(x.Id) && !(EmailKey(x).Length > 0 && keepEmails.Contains(EmailKey(x))));
+        }
+        // Chỉ ghi store khi THỰC SỰ đổi (thêm mới / cập nhật / xóa / chế độ thay-thế) → auto-pull định kỳ không bắn
         // sự kiện Changed làm UI dựng lại danh sách khi không có gì mới.
-        if (replace || added > 0 || updated > 0) BigSellerStore.Shared.ReplaceAll(current);
+        if (replace || added > 0 || updated > 0 || removed > 0) BigSellerStore.Shared.ReplaceAll(current);
         return (added, updated, skipped);
     }
 
@@ -137,25 +147,65 @@ public static class BackupService
         a.Label, a.Email, a.KiotProxyKey, a.Region, a.ProxyType, a.Shops,
     });
 
-    /// <summary>Gộp danh sách Shopee account (kèm proxy) vào store. append = replace:false.</summary>
-    public static (int added, int skipped) MergeShopee(List<ShopeeAccount> imported, bool replace)
+    /// <summary>Gộp danh sách Shopee account (kèm proxy) vào store. append = replace:false. Acc ĐÃ CÓ (theo
+    /// Id/login) mà field DÙNG CHUNG khác (login/proxy/label) → CẬP NHẬT xuống; GIỮ NGUYÊN field local (profile,
+    /// cờ login, Disabled/lỗi, LastUsedTick). <paramref name="mirror"/>=true (client sync): còn XÓA acc local
+    /// KHÔNG có ở Hub (chỉ khi list Hub không rỗng) → client khớp trọn vẹn danh sách Hub.</summary>
+    public static (int added, int updated, int skipped) MergeShopee(List<ShopeeAccount> imported, bool replace, bool mirror = false)
     {
         var current = replace ? new List<ShopeeAccount>() : AccountStore.Shared.Accounts.ToList();
-        var seenLogin = current.Select(LoginKey).Where(k => k.Length > 0).ToHashSet();
-        var seenId = current.Select(a => a.Id).ToHashSet();
-        int added = 0, skipped = 0;
+        int added = 0, updated = 0, skipped = 0;
         foreach (var a in imported)
         {
             var key = LoginKey(a);
-            var dup = (key.Length > 0 && seenLogin.Contains(key)) || seenId.Contains(a.Id);
-            if (!replace && dup) { skipped++; continue; }
+            var existing = current.FirstOrDefault(x => x.Id == a.Id)
+                ?? (key.Length > 0 ? current.FirstOrDefault(x => LoginKey(x) == key) : null);
+            if (!replace && existing is not null)
+            {
+                // Cập nhật field DÙNG CHUNG (Hub là nguồn sự thật); GIỮ field riêng-máy.
+                if (ShopeeSharedSignature(existing) != ShopeeSharedSignature(a))
+                {
+                    existing.Label = a.Label; existing.ShopeeAccountLogin = a.ShopeeAccountLogin;
+                    existing.KiotProxyKey = a.KiotProxyKey; existing.Region = a.Region;
+                    existing.ProxyType = a.ProxyType; existing.ManualProxy = a.ManualProxy;
+                    existing.RequireProxy = a.RequireProxy;
+                    updated++;
+                }
+                else skipped++;
+                if (mirror) existing.HubOwned = true;   // acc có ở Hub → đánh dấu Hub-quản-lý (để prune đúng khi Hub bỏ)
+                continue;
+            }
+            if (mirror) { RebaseShopee(a); a.HubOwned = true; }   // acc mới từ Hub: localize profile + đánh dấu Hub-owned
             current.Add(a);
-            if (key.Length > 0) seenLogin.Add(key);
-            seenId.Add(a.Id);
             added++;
         }
-        if (replace || added > 0) AccountStore.Shared.ReplaceAll(current);
-        return (added, skipped);
+        var removed = 0;
+        // Mirror-xóa CHỈ acc ĐẾN TỪ HUB (HubOwned) mà Hub đã bỏ — KHÔNG đụng acc tạo TẠI CHỖ trên client
+        // (Check Account / Add tay: HubOwned=false). Chốt non-empty chống wipe khi tải hụt.
+        if (mirror && imported.Count > 0)
+        {
+            var keepIds = imported.Select(x => x.Id).ToHashSet();
+            var keepLogins = imported.Select(LoginKey).Where(k => k.Length > 0).ToHashSet();
+            removed = current.RemoveAll(x => x.HubOwned && !keepIds.Contains(x.Id) && !(LoginKey(x).Length > 0 && keepLogins.Contains(LoginKey(x))));
+        }
+        if (replace || added > 0 || updated > 0 || removed > 0) AccountStore.Shared.ReplaceAll(current);
+        return (added, updated, skipped);
+    }
+
+    /// <summary>Chữ ký các trường DÙNG CHUNG của 1 acc Shopee (bỏ field riêng-máy: profile/cờ login/lỗi/LRU)
+    /// → so để biết Hub có sửa nội dung (login/proxy/label) không.</summary>
+    private static string ShopeeSharedSignature(ShopeeAccount a) => JsonSerializer.Serialize(new
+    {
+        a.Label, a.ShopeeAccountLogin, a.KiotProxyKey, a.Region, a.ProxyType, a.ManualProxy, a.RequireProxy,
+    });
+
+    /// <summary>Acc Shopee MỚI về từ máy khác: profile trình duyệt là RIÊNG-MÁY (không sync). Path TUYỆT ĐỐI (do
+    /// máy khác lưu) → bỏ để <see cref="ShopeeAccount.EnsureProfilePath"/> đặt lại profiles/{Id} local; path tương
+    /// đối giữ nguyên (giống mọi máy). Acc chưa có phiên → client tự đăng nhập (OpenWithShopeeAccount).</summary>
+    private static void RebaseShopee(ShopeeAccount a)
+    {
+        if (!string.IsNullOrWhiteSpace(a.ProfileRelativePath) && Path.IsPathRooted(a.ProfileRelativePath))
+            a.ProfileRelativePath = "";
     }
 
     private static string EmailKey(BigSellerAccount a) => (a.Email ?? "").Trim().ToLowerInvariant();
