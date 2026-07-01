@@ -218,7 +218,7 @@ public sealed class BraveManager(AppSettingsService appSettings)
     private static bool IsExtensionDir(string path) =>
         Directory.Exists(path) && File.Exists(Path.Combine(path, "manifest.json"));
 
-    private static void KillBraveProcessesForProfile(string profileDir)
+    internal static void KillBraveProcessesForProfile(string profileDir)
     {
         var fullProfileDir = Path.GetFullPath(profileDir).TrimEnd('\\', '/');
         var killedAny = false;

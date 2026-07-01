@@ -67,7 +67,19 @@ public sealed class AppSettingsService
     {
         config.EnsureProfileRelativePath();
         var dir = Path.GetFullPath(config.ProfileRelativePath);
-        Directory.CreateDirectory(Path.Combine(dir, "Default"));
+        var defaultDir = Path.Combine(dir, "Default");
+        // CreateDirectory có thể ném "Access denied" (UnauthorizedAccessException) khi profile đang bị Brave
+        // (mồ côi / đang đóng) khoá / ở trạng thái delete-pending, hoặc antivirus vừa quét file mới ghi.
+        // Thử lại vài nhịp; giữa chừng KILL Brave đang giữ ĐÚNG profile này (an toàn: mỗi profile chỉ 1 lane
+        // dùng nhờ account-lease) → phần lớn tự hồi (lock nhả sau ~1–2s), khỏi "bỏ qua link" oan.
+        for (var attempt = 0; attempt < 6; attempt++)
+        {
+            try { Directory.CreateDirectory(defaultDir); return dir; }
+            catch (Exception) { }
+            if (attempt == 1) { try { BraveManager.KillBraveProcessesForProfile(dir); } catch { } }
+            Thread.Sleep(300);
+        }
+        Directory.CreateDirectory(defaultDir);   // lần cuối KHÔNG nuốt → surface lỗi thật (vd sai quyền) nếu vẫn hỏng
         return dir;
     }
 
