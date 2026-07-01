@@ -502,6 +502,9 @@ public sealed partial class SearchViewModel : ObservableObject
         acc.Disabled = true;
         acc.LastError = reason;
         AccountStore.Shared.Save();
+        // CLIENT: báo Hub acc này dính captcha (Hub xem ở panel + operator quyết giữ/xóa). Hub/standalone: khỏi báo.
+        if (CoordinationRuntime.Active && !HubServerConfigStore.Shared.Current.Enabled)
+            _ = CoordinationRuntime.Hub?.ReportErroredAccountAsync(id, reason, acc.CaptchaUrl, "captcha");
     }
 
     // ── Xuất Excel ──────────────────────────────────────────────────────────────

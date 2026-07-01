@@ -126,6 +126,23 @@ public sealed class SearchJobPayload
 /// là toàn bộ ProductResult serialize (Hub CHỈ lưu blob, không cần biết model engine).</summary>
 public sealed record SearchProductItem(long ItemId, string Json);
 public sealed record SearchProductsPushRequest(string MachineId, string SourceFile, List<SearchProductItem> Products);
+
+// ── Client báo acc Shopee dính captcha/lỗi về Hub (Hub xem + quyết giữ/xóa) ────
+/// <summary>Client báo 1 acc Shopee bị captcha/lỗi. Status: "captcha" (vừa dính, đang tự sửa) | "failed"
+/// (client không sửa được → Hub quyết). Sửa được thì client gọi clear (gỡ báo).</summary>
+public sealed record AccountErrorRequest(
+    string AccountId, string MachineId, string Hostname, string Reason, string? CaptchaUrl, string Status);
+public sealed class AccountError
+{
+    public string AccountId { get; set; } = "";
+    public string MachineId { get; set; } = "";
+    public string Hostname { get; set; } = "";
+    public string Reason { get; set; } = "";
+    public string? CaptchaUrl { get; set; }
+    public string Status { get; set; } = "captcha";
+    public DateTimeOffset ReportedAt { get; set; }
+}
+public sealed record ClearAccountErrorRequest(string AccountId);
 public sealed record ClaimAssignmentsRequest(string MachineId, string Role, int Max);
 public sealed record AssignmentStatusRequest(string Id, string MachineId, string Status, string? Error);
 public sealed record CancelAssignmentRequest(string Id);

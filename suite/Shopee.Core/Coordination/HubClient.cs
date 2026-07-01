@@ -116,6 +116,12 @@ public sealed class HubClient
         r.EnsureSuccessStatusCode();
     }
 
+    // ── Client báo acc Shopee lỗi/captcha ──
+    public Task ReportErroredAccountAsync(AccountErrorRequest req, CancellationToken ct = default) => PostAsync("/accounts/errored", req, ct);
+    public async Task<List<AccountError>> ErroredAccountsAsync(CancellationToken ct = default)
+        => await _http.GetFromJsonAsync<List<AccountError>>("/accounts/errored", ct) ?? [];
+    public Task ClearErroredAccountAsync(ClearAccountErrorRequest req, CancellationToken ct = default) => PostAsync("/accounts/errored/clear", req, ct);
+
     // ── File-sync ──
     public async Task<List<FileManifestEntry>> ManifestAsync(CancellationToken ct = default)
         => await _http.GetFromJsonAsync<List<FileManifestEntry>>("/manifest", ct) ?? [];

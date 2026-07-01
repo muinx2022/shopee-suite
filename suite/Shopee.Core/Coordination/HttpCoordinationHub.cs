@@ -169,6 +169,20 @@ public sealed class HttpCoordinationHub : ICoordinationHub, IDisposable
         try { await _client.HeartbeatAccountsAsync(new AccountReleaseRequest(list, _machineId)); } catch { }
     }
 
+    // ── Client báo acc Shopee lỗi/captcha về Hub; Hub đọc + operator quyết giữ/xóa ──
+    public async Task ReportErroredAccountAsync(string accountId, string reason, string? captchaUrl, string status)
+    {
+        try { await _client.ReportErroredAccountAsync(new AccountErrorRequest(accountId, _machineId, Host, reason, captchaUrl, status)); } catch { }
+    }
+    public async Task<List<AccountError>> ErroredAccountsAsync()
+    {
+        try { return await _client.ErroredAccountsAsync(); } catch { return []; }
+    }
+    public async Task ClearErroredAccountAsync(string accountId)
+    {
+        try { await _client.ClearErroredAccountAsync(new ClearAccountErrorRequest(accountId)); } catch { }
+    }
+
     /// <summary>Báo Hub xoá máy này khỏi danh sách (người dùng chủ động Ngắt kết nối). Lỗi → bỏ qua.</summary>
     public async Task LeaveAsync() { try { await _client.LeaveAsync(); } catch { } }
 

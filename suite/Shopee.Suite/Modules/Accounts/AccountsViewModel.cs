@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
 using System.Windows;
+using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Shopee.Core.Accounts;
@@ -35,6 +36,7 @@ public sealed partial class AccountsViewModel : ObservableObject
     {
         Reload();
         OnPropertyChanged(nameof(IsErrorFilter));
+        OpenForCheckCommand.NotifyCanExecuteChanged();   // double-click mở giải captcha CHỈ ở bộ lọc "Bị lỗi/captcha"
     }
 
     /// <summary>Chỉ true khi đang xem bộ lọc "Bị lỗi / captcha" — nút "Kiểm tra tk lỗi" chỉ hiện lúc đó.</summary>
@@ -79,6 +81,7 @@ public sealed partial class AccountsViewModel : ObservableObject
             if (d is null || d.CheckAccess()) RefreshUsageColumn();
             else d.BeginInvoke(RefreshUsageColumn);
         };
+        StartReportsPolling();   // chỉ Hub: định kỳ nạp "acc client báo lỗi"
     }
 
     private void RefreshUsageColumn()
@@ -140,15 +143,23 @@ public sealed partial class AccountsViewModel : ObservableObject
         // Lấy tên TRƯỚC khi Save(): Save → Changed → Reload đồng bộ; nếu đang lọc "Bị lỗi" thì tk vừa bật
         // hết Disabled → biến mất khỏi danh sách → Selected thành null → dùng Selected sau đó sẽ NRE.
         var name = Selected.DisplayName;
+        var id = Selected.Model.Id;                       // giữ TRƯỚC Save (Save→Reload có thể null Selected)
+        var prevCaptcha = Selected.Model.CaptchaUrl;
         Selected.Model.Disabled = false;
         Selected.Model.LastError = null;
+        Selected.Model.CaptchaUrl = null;                 // đã ổn → xoá luôn link captcha cũ
         if (!SaveStore(
                 $"Đã bật lại \"{name}\" → quay về rotation.",
                 $"Không lưu được thay đổi của \"{name}\"."))
         {
             Selected.Model.Disabled = true;
             Selected.Model.LastError ??= "Khôi phục trạng thái lỗi do lưu thất bại.";
+            Selected.Model.CaptchaUrl = prevCaptcha;
+            return;
         }
+        // Client: bật lại = acc đã ổn → GỠ báo trên Hub (như "Đóng và lưu"), tránh Hub xoá nhầm acc đang tốt.
+        if (CoordinationRuntime.Active && !HubServerConfigStore.Shared.Current.Enabled)
+            _ = CoordinationRuntime.Hub?.ClearErroredAccountAsync(id);
     }
 
     private bool CanReenable() => Selected?.Model.Disabled == true;
@@ -321,6 +332,159 @@ public sealed partial class AccountsViewModel : ObservableObject
         return null;
     }
 
+    // ── Vai trò máy: client chỉ-xem + xử-lý-captcha; Hub/standalone full quản lý ──
+    /// <summary>Client (đã nối Hub, KHÔNG phải máy Hub) → khóa quản lý danh sách (thêm/import/xóa/sửa/proxy).</summary>
+    public bool IsReadOnlyMode => CoordinationRuntime.Active && !HubServerConfigStore.Shared.Current.Enabled;
+    /// <summary>Hub hoặc standalone → full quản lý (thêm/xóa/import/sửa/xóa acc lỗi).</summary>
+    public bool IsFullEditMode => !IsReadOnlyMode;
+    /// <summary>Máy này là Hub → hiện panel "Acc client báo lỗi".</summary>
+    public bool IsHubMode => HubServerConfigStore.Shared.Current.Enabled;
+
+    // ── Xử lý captcha THỦ CÔNG (double-click mở Brave bằng ĐÚNG profile acc, giải rồi đóng) ──
+    private BrowserLauncher? _checkLauncher;
+    private string? _checkingId;
+    private string _checkingName = "";
+    /// <summary>Đang mở 1 Brave để giải captcha → bật các nút "Đóng và …".</summary>
+    public bool IsCheckOpen => _checkLauncher is not null;
+
+    /// <summary>Double-click 1 acc (CHỈ ở bộ lọc "Bị lỗi/captcha") → mở Brave bằng profile acc tại trang captcha
+    /// (hoặc trang chủ) để GIẢI TAY, để MỞ. Giới hạn ở filter lỗi để luôn có nút "Đóng và…" mà đóng lại (khỏi rò Brave).</summary>
+    [RelayCommand(CanExecute = nameof(IsErrorFilter))]
+    private async Task OpenForCheck(AccountItemViewModel? row)
+    {
+        var acc = row?.Model ?? Selected?.Model;
+        if (acc is null || !IsErrorFilter) return;
+        CloseCheckBrowser();
+        try
+        {
+            var proxy = await ResolveProxyAsync(acc);
+            var profileDir = Path.Combine(SuitePaths.ModuleDir("shared"), "profiles", acc.Id);
+            Directory.CreateDirectory(profileDir);
+            var url = !string.IsNullOrWhiteSpace(acc.CaptchaUrl) ? acc.CaptchaUrl! : "https://shopee.vn";
+            _checkLauncher = new BrowserLauncher(BrowserKind.Brave);
+            _checkLauncher.Launch(profileDir, proxy, url);
+            _checkingId = acc.Id; _checkingName = acc.DisplayName;
+            OnCheckStateChanged();
+            Status = $"Đã mở \"{acc.DisplayName}\" — giải captcha xong bấm \"Đóng và lưu\""
+                     + (IsReadOnlyMode ? " (hoặc \"Đóng và báo không sửa được\")." : " (hoặc \"Đóng và xóa tk\").");
+        }
+        catch (Exception ex) { Status = "Không mở được trình duyệt: " + ex.Message; }
+    }
+
+    private void CloseCheckBrowser()
+    {
+        try { _checkLauncher?.Kill(); } catch { }
+        _checkLauncher = null; _checkingId = null; _checkingName = "";
+        OnCheckStateChanged();
+    }
+
+    /// <summary>Đóng Brave check đang mở — gọi khi rời màn Tài khoản / đóng app (khỏi rò cửa sổ có phiên login).</summary>
+    public void KillCheckBrowser() => CloseCheckBrowser();
+
+    private void OnCheckStateChanged()
+    {
+        OnPropertyChanged(nameof(IsCheckOpen));
+        CloseAndSaveCommand.NotifyCanExecuteChanged();
+        CloseAndReportFailedCommand.NotifyCanExecuteChanged();
+        CloseAndDeleteCommand.NotifyCanExecuteChanged();
+    }
+
+    /// <summary>Đã sửa OK: đóng Brave + bật lại acc (bỏ Disabled/lỗi/captcha) + lưu + gỡ báo trên Hub.</summary>
+    [RelayCommand(CanExecute = nameof(IsCheckOpen))]
+    private void CloseAndSave()
+    {
+        var id = _checkingId; var name = _checkingName;
+        CloseCheckBrowser();
+        if (id is null) return;
+        var acc = AccountStore.Shared.Accounts.FirstOrDefault(a => a.Id == id);
+        if (acc is not null) { acc.Disabled = false; acc.LastError = null; acc.CaptchaUrl = null; AccountStore.Shared.Save(); }
+        _ = CoordinationRuntime.Hub?.ClearErroredAccountAsync(id);   // đã sửa → gỡ báo
+        Status = $"✓ Đã sửa & lưu \"{name}\" → quay về kho.";
+    }
+
+    /// <summary>CLIENT không sửa được: đóng Brave, GIỮ acc tắt, báo Hub "failed" để Hub quyết giữ/xóa.</summary>
+    [RelayCommand(CanExecute = nameof(IsCheckOpen))]
+    private void CloseAndReportFailed()
+    {
+        var id = _checkingId; var name = _checkingName;
+        var acc = AccountStore.Shared.Accounts.FirstOrDefault(a => a.Id == id);
+        var reason = acc?.LastError ?? "Client không sửa được captcha";
+        var captchaUrl = acc?.CaptchaUrl;
+        CloseCheckBrowser();
+        if (id is null) return;
+        _ = CoordinationRuntime.Hub?.ReportErroredAccountAsync(id, reason, captchaUrl, "failed");
+        Status = $"Đã báo Hub: không sửa được \"{name}\" (Hub sẽ quyết giữ/xóa).";
+    }
+
+    /// <summary>HUB/standalone: đóng Brave + XÓA acc khỏi kho (mirror gỡ mọi client) + gỡ báo.</summary>
+    [RelayCommand(CanExecute = nameof(IsCheckOpen))]
+    private void CloseAndDelete()
+    {
+        var id = _checkingId; var name = _checkingName;
+        CloseCheckBrowser();
+        if (id is null) return;
+        AccountStore.Shared.Remove(id);
+        _ = CoordinationRuntime.Hub?.ClearErroredAccountAsync(id);
+        Status = $"Đã xóa \"{name}\" khỏi kho.";
+    }
+
+    // ── Panel "Acc client báo lỗi" (CHỈ Hub): client báo captcha/failed về đây, operator quyết ──
+    public ObservableCollection<ClientErrorRow> ClientErrorReports { get; } = [];
+    private DispatcherTimer? _reportTimer;
+
+    private void StartReportsPolling()
+    {
+        if (!IsHubMode) return;
+        _ = RefreshReports();
+        _reportTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(15) };
+        _reportTimer.Tick += (_, _) => _ = RefreshReports();
+        _reportTimer.Start();
+    }
+
+    [RelayCommand]
+    private async Task RefreshReports()
+    {
+        var hub = CoordinationRuntime.Hub;
+        if (hub is null) return;
+        List<AccountError> errs;
+        try { errs = await hub.ErroredAccountsAsync(); } catch { return; }
+        ClientErrorReports.Clear();
+        foreach (var e in errs.OrderByDescending(x => x.ReportedAt))
+        {
+            var acc = AccountStore.Shared.Accounts.FirstOrDefault(a => a.Id == e.AccountId);
+            if (acc is null) { _ = hub.ClearErroredAccountAsync(e.AccountId); continue; }   // acc đã bị xóa → gỡ báo mồ côi
+            ClientErrorReports.Add(new ClientErrorRow
+            {
+                AccountId = e.AccountId,
+                AccountName = acc.DisplayName,
+                Machine = string.IsNullOrWhiteSpace(e.Hostname) ? e.MachineId : e.Hostname,
+                StatusText = e.Status == "failed" ? "✗ Không sửa được" : "⚠ Đang captcha",
+                Reason = e.Reason,
+                When = e.ReportedAt == default ? "" : e.ReportedAt.ToLocalTime().ToString("dd/MM HH:mm"),
+            });
+        }
+    }
+
+    /// <summary>Hub xóa acc client báo lỗi khỏi kho (mirror gỡ mọi máy) + gỡ báo.</summary>
+    [RelayCommand]
+    private void DeleteReportedAccount(ClientErrorRow? row)
+    {
+        if (row is null) return;
+        AccountStore.Shared.Remove(row.AccountId);
+        _ = CoordinationRuntime.Hub?.ClearErroredAccountAsync(row.AccountId);
+        ClientErrorReports.Remove(row);
+        Status = $"Đã xóa acc \"{row.AccountName}\" (client báo lỗi) khỏi kho.";
+    }
+
+    /// <summary>Hub bỏ qua báo (giữ acc; vd để máy khác thử).</summary>
+    [RelayCommand]
+    private void DismissReport(ClientErrorRow? row)
+    {
+        if (row is null) return;
+        _ = CoordinationRuntime.Hub?.ClearErroredAccountAsync(row.AccountId);
+        ClientErrorReports.Remove(row);
+    }
+
     // ── Đồng bộ acc + proxy từ Hub (chỉ hiện khi máy này là client của một Hub) ──
     /// <summary>true khi máy đã kết nối Hub → hiện nút "Đồng bộ acc".</summary>
     public bool IsHubClient => CoordinationRuntime.Active;
@@ -393,7 +557,11 @@ public sealed partial class AccountsViewModel : ObservableObject
         var ids = targets.Select(t => t.Model.Id).ToHashSet(StringComparer.Ordinal);
         // ReplaceAll → Save → Changed → Reload tự dựng lại Items (không cần Items.Remove thủ công).
         if (AccountStore.Shared.ReplaceAll(AccountStore.Shared.Accounts.Where(a => !ids.Contains(a.Id))))
+        {
             Status = $"Đã xóa {ids.Count} tài khoản · còn {AccountStore.Shared.Accounts.Count}.";
+            // Gỡ luôn báo lỗi (nếu có) của các acc vừa xóa → panel "Acc client báo lỗi" không còn dòng mồ côi.
+            foreach (var id in ids) _ = CoordinationRuntime.Hub?.ClearErroredAccountAsync(id);
+        }
         else
             Status = $"Không xóa được {ids.Count} tài khoản đã chọn.";
     }
@@ -471,4 +639,15 @@ public sealed partial class AccountsViewModel : ObservableObject
     private static List<string> SplitLines(string text) => (text ?? "")
         .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
         .Select(l => l.Trim()).Where(l => l.Length > 0).ToList();
+}
+
+/// <summary>1 dòng trong panel "Acc client báo lỗi" trên Hub (acc client báo captcha/không-sửa-được).</summary>
+public sealed class ClientErrorRow
+{
+    public string AccountId { get; init; } = "";
+    public string AccountName { get; init; } = "";
+    public string Machine { get; init; } = "";
+    public string StatusText { get; init; } = "";
+    public string Reason { get; init; } = "";
+    public string When { get; init; } = "";
 }

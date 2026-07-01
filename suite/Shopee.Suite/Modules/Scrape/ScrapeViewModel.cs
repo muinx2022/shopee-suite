@@ -704,6 +704,9 @@ public sealed partial class ScrapeViewModel : ObservableObject
         // Lưu URL captcha để "Kiểm tra tk lỗi" mở đúng trang đó (thay vì auto-login).
         if (!string.IsNullOrWhiteSpace(captchaUrl)) acc.CaptchaUrl = captchaUrl;
         if (!alreadyFlagged || !string.IsNullOrWhiteSpace(captchaUrl)) AccountStore.Shared.Save();
+        // CLIENT: báo Hub acc này dính captcha (Hub xem ở panel + operator quyết giữ/xóa). Hub/standalone: là bản chính, khỏi báo.
+        if (CoordinationRuntime.Active && !HubServerConfigStore.Shared.Current.Enabled)
+            _ = CoordinationRuntime.Hub?.ReportErroredAccountAsync(id, reason, captchaUrl, "captcha");
     }
 
     private void Log(string text) => OnUi(() => LogLines.Add(text));

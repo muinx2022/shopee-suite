@@ -129,5 +129,10 @@ public sealed class HubServer
         app.MapGet("/search-products", () => Results.Json(db.AllSearchProductJson()));
         app.MapGet("/search-products/count", () => Results.Json(db.SearchProductCount()));
         app.MapPost("/search-products/clear", () => { db.ClearSearchProducts(); return Results.Ok(); });
+
+        // ── Client báo acc Shopee lỗi/captcha ──
+        app.MapPost("/accounts/errored", (AccountErrorRequest? r) => { if (r is null) return Results.BadRequest(); db.ReportAccountError(r); return Results.Ok(); });
+        app.MapGet("/accounts/errored", () => Results.Json(db.AllAccountErrors()));
+        app.MapPost("/accounts/errored/clear", (ClearAccountErrorRequest? r) => { if (r is null) return Results.BadRequest(); db.ClearAccountError(r.AccountId); return Results.Ok(); });
     }
 }

@@ -81,7 +81,9 @@ CREATE TABLE IF NOT EXISTS assignments(
   claimed_by TEXT, claimed_host TEXT, last_error TEXT, created_at TEXT, updated_at TEXT,
   start_row INTEGER DEFAULT 0, end_row INTEGER DEFAULT 0, payload TEXT DEFAULT '');
 CREATE TABLE IF NOT EXISTS search_products(
-  item_id INTEGER PRIMARY KEY, json TEXT, machine_id TEXT, source_file TEXT, updated_at TEXT);");
+  item_id INTEGER PRIMARY KEY, json TEXT, machine_id TEXT, source_file TEXT, updated_at TEXT);
+CREATE TABLE IF NOT EXISTS account_errors(
+  account_id TEXT PRIMARY KEY, machine_id TEXT, hostname TEXT, reason TEXT, captcha_url TEXT, status TEXT, reported_at TEXT);");
 
     // ── Leases (khoá việc theo shop+op) ─────────────────────────────────────────
     public LeaseAcquireResponse AcquireLease(LeaseAcquireRequest r)
@@ -799,6 +801,58 @@ ON CONFLICT(item_id) DO UPDATE SET json=$j, machine_id=$m, source_file=$s, updat
     }
 
     public void ClearSearchProducts() { lock (_gate) ExecRaw("DELETE FROM search_products;"); }
+
+    // ── Client báo acc Shopee lỗi/captcha (Hub xem + quyết giữ/xóa) ───────────────
+    public void ReportAccountError(AccountErrorRequest r)
+    {
+        if (string.IsNullOrEmpty(r?.AccountId)) return;
+        lock (_gate)
+        {
+            using var c = _conn.CreateCommand();
+            c.CommandText = @"
+INSERT INTO account_errors(account_id,machine_id,hostname,reason,captcha_url,status,reported_at)
+VALUES($id,$m,$h,$r,$cu,$st,$ua)
+ON CONFLICT(account_id) DO UPDATE SET machine_id=$m, hostname=$h, reason=$r, captcha_url=$cu, status=$st, reported_at=$ua;";
+            c.Parameters.AddWithValue("$id", r.AccountId);
+            c.Parameters.AddWithValue("$m", r.MachineId ?? "");
+            c.Parameters.AddWithValue("$h", r.Hostname ?? "");
+            c.Parameters.AddWithValue("$r", r.Reason ?? "");
+            c.Parameters.AddWithValue("$cu", (object?)r.CaptchaUrl ?? DBNull.Value);
+            c.Parameters.AddWithValue("$st", string.IsNullOrWhiteSpace(r.Status) ? "captcha" : r.Status);
+            c.Parameters.AddWithValue("$ua", Iso(DateTimeOffset.UtcNow));
+            c.ExecuteNonQuery();
+        }
+    }
+
+    public List<AccountError> AllAccountErrors()
+    {
+        lock (_gate)
+        {
+            var list = new List<AccountError>();
+            using var c = _conn.CreateCommand();
+            c.CommandText = "SELECT account_id,machine_id,hostname,reason,captcha_url,status,reported_at FROM account_errors";
+            using var rd = c.ExecuteReader();
+            while (rd.Read())
+                list.Add(new AccountError
+                {
+                    AccountId = S(rd, 0), MachineId = S(rd, 1), Hostname = S(rd, 2), Reason = S(rd, 3),
+                    CaptchaUrl = rd.IsDBNull(4) ? null : rd.GetString(4), Status = S(rd, 5), ReportedAt = D(rd, 6),
+                });
+            return list;
+        }
+    }
+
+    public void ClearAccountError(string accountId)
+    {
+        if (string.IsNullOrEmpty(accountId)) return;
+        lock (_gate)
+        {
+            using var c = _conn.CreateCommand();
+            c.CommandText = "DELETE FROM account_errors WHERE account_id=$id";
+            c.Parameters.AddWithValue("$id", accountId);
+            c.ExecuteNonQuery();
+        }
+    }
 
     // ── Files (manifest + blob trên đĩa) ────────────────────────────────────────
     public List<FileManifestEntry> ListFiles()
