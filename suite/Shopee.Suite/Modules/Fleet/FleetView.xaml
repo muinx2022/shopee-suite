@@ -325,134 +325,180 @@
             <TabItem Header="Search (đa máy)">
                 <Grid Margin="0,12,0,0">
 
-                    <!-- ───── Bản HUB: chia link + giao từng máy ───── -->
-                    <Grid Visibility="{Binding IsHubBoard, Converter={StaticResource BoolToVis}}">
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="0.9*" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="1.4*" />
-                            <RowDefinition Height="Auto" />
-                        </Grid.RowDefinitions>
-
-                        <!-- Bước 1 + cấu hình chia khối -->
-                        <Border Grid.Row="0" Style="{StaticResource Card}" Padding="18,16" Margin="0,0,0,10">
-                            <StackPanel>
-                                <TextBlock Text="Bước 1 — chọn file link category (.txt mỗi dòng 1 link) để chia cho các máy"
-                                           Style="{StaticResource Caption}" />
-                                <Grid Margin="0,4,0,12">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <TextBox Grid.Column="0" Text="{Binding SearchFileDisplay}" IsReadOnly="True"
-                                             FontSize="11.5" VerticalContentAlignment="Center" />
-                                    <Button Grid.Column="1" Content="📂  Chọn file" Margin="8,0,0,0" Command="{Binding ChooseSearchFileCommand}" />
-                                </Grid>
-
-                                <WrapPanel Orientation="Horizontal">
-                                    <StackPanel Margin="0,0,16,0">
-                                        <TextBlock Text="Số acc khóa/máy" Style="{StaticResource Caption}" />
-                                        <TextBox Width="70" Margin="0,4,0,0" Text="{Binding AccountsPerClient}" VerticalContentAlignment="Center"
-                                                 ToolTip="Mỗi máy khóa tối đa ngần này tài khoản Shopee (máy khác không đụng)." />
-                                    </StackPanel>
-                                    <StackPanel Margin="0,0,16,0">
-                                        <TextBlock Text="Lane" Style="{StaticResource Caption}" />
-                                        <TextBox Width="56" Margin="0,4,0,0" Text="{Binding SearchLanes}" VerticalContentAlignment="Center"
-                                                 ToolTip="Số tab/cửa sổ chạy song song trên mỗi máy." />
-                                    </StackPanel>
-                                    <StackPanel Margin="0,0,16,0">
-                                        <TextBlock Text="Khu vực (Nơi Bán)" Style="{StaticResource Caption}" />
-                                        <TextBox Width="160" Margin="0,4,0,0" Text="{Binding SearchRegion}" VerticalContentAlignment="Center" />
-                                    </StackPanel>
-                                </WrapPanel>
-                                <TextBlock Text="{Binding SearchSummary}" FontWeight="SemiBold" Margin="0,12,0,0" />
-                            </StackPanel>
-                        </Border>
-
-                        <!-- Bước 2: danh sách máy — bấm Chạy ở máy nào thì máy đó nhận KHỐI KẾ tiếp -->
-                        <Border Grid.Row="1" Style="{StaticResource Card}" Padding="0" ClipToBounds="True">
-                            <DockPanel>
-                                <TextBlock DockPanel.Dock="Top"
-                                           Text="Bước 2 — bỏ tick máy nào để KHÔNG dùng (link tự chia lại cho các máy còn lại). Bấm ▶ Chạy ở máy nào thì máy đó chạy đúng phần link của nó (khóa acc trước khi chạy)."
-                                           Style="{StaticResource H2}" Margin="12,10,12,6" TextWrapping="Wrap" />
-                                <ScrollViewer VerticalScrollBarVisibility="Auto">
-                                    <ItemsControl ItemsSource="{Binding SearchClients}" Margin="0,0,0,8">
-                                        <ItemsControl.ItemTemplate>
-                                            <DataTemplate>
-                                                <Grid Margin="12,6">
-                                                    <Grid.ColumnDefinitions>
-                                                        <ColumnDefinition Width="34" />
-                                                        <ColumnDefinition Width="*" />
-                                                        <ColumnDefinition Width="220" />
-                                                        <ColumnDefinition Width="170" />
-                                                        <ColumnDefinition Width="Auto" />
-                                                    </Grid.ColumnDefinitions>
-                                                    <CheckBox Grid.Column="0" IsChecked="{Binding IsSelected, Mode=TwoWay}" VerticalAlignment="Center"
-                                                              ToolTip="Bỏ tick để không dùng máy này (link chia lại cho các máy còn lại)." />
-                                                    <TextBlock Grid.Column="1" Text="{Binding Name}" FontWeight="SemiBold" VerticalAlignment="Center" />
-                                                    <TextBlock Grid.Column="2" Text="{Binding StateText}" Foreground="{Binding StateBrush}"
-                                                               FontWeight="SemiBold" VerticalAlignment="Center" />
-                                                    <TextBlock Grid.Column="3" Text="{Binding RangeLabel}" Foreground="{StaticResource TextSecondaryBrush}"
-                                                               VerticalAlignment="Center" />
-                                                    <StackPanel Grid.Column="4" Orientation="Horizontal">
-                                                        <Button Content="▶  Chạy" MinWidth="92" Style="{StaticResource SuccessButton}"
-                                                                Command="{Binding DataContext.RunSearchForClientCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                                                CommandParameter="{Binding}" />
-                                                        <TextBlock Style="{StaticResource SpinnerText}"
-                                                                   Visibility="{Binding PendingRun, Converter={StaticResource BoolToVis}}">
-                                                            <TextBlock.RenderTransform><RotateTransform Angle="0" /></TextBlock.RenderTransform>
-                                                        </TextBlock>
-                                                    </StackPanel>
-                                                </Grid>
-                                            </DataTemplate>
-                                        </ItemsControl.ItemTemplate>
-                                    </ItemsControl>
-                                </ScrollViewer>
-                            </DockPanel>
-                        </Border>
-
-                        <!-- Kho gộp: các client đẩy kết quả về Hub → xuất 1 Excel gộp -->
-                        <Border Grid.Row="2" Background="{StaticResource SubtleBrush}" CornerRadius="8" Padding="12,10" Margin="0,10,0,0">
-                            <Grid>
-                                <TextBlock Text="{Binding MergedProductText}" FontWeight="SemiBold" VerticalAlignment="Center" />
-                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                                    <Button Content="📦  Xuất Excel gộp (tất cả máy)" Command="{Binding ExportMergedCommand}"
-                                            Style="{StaticResource PrimaryButton}" MinWidth="210" />
-                                    <Button Content="🗑  Xóa kho gộp" Command="{Binding ClearMergedCommand}"
-                                            Style="{StaticResource DangerButton}" Margin="8,0,0,0" />
-                                </StackPanel>
-                            </Grid>
-                        </Border>
-
-                        <!-- Kết quả gộp về Hub — lưới cập nhật liên tục (như bảng sản phẩm tab Search cũ) -->
-                        <Border Grid.Row="3" Style="{StaticResource Card}" Padding="0" ClipToBounds="True" Margin="0,10,0,0">
-                            <DockPanel>
-                                <Grid DockPanel.Dock="Top" Margin="12,10,12,6">
-                                    <TextBlock Text="Kết quả gộp về Hub (tự cập nhật khi client đẩy về)"
-                                               Style="{StaticResource H2}" VerticalAlignment="Center" />
-                                    <Button HorizontalAlignment="Right" Content="⟳  Làm mới" MinWidth="96"
-                                            Command="{Binding RefreshMergedCommand}" />
-                                </Grid>
-                                <DataGrid ItemsSource="{Binding MergedProducts}" AutoGenerateColumns="False" IsReadOnly="True"
-                                          HeadersVisibility="Column" CanUserAddRows="False" GridLinesVisibility="Horizontal"
-                                          EnableRowVirtualization="True" BorderThickness="0">
-                                    <DataGrid.Columns>
-                                        <DataGridTextColumn Header="Tên sản phẩm" Binding="{Binding Name}" Width="2.4*" />
-                                        <DataGridTextColumn Header="Giá" Binding="{Binding Price}" Width="90" />
-                                        <DataGridTextColumn Header="Bán/tháng" Binding="{Binding MonthlySold}" Width="90" />
-                                        <DataGridTextColumn Header="Rating" Binding="{Binding Rating}" Width="70" />
-                                        <DataGridTextColumn Header="Danh mục" Binding="{Binding Category}" Width="1.2*" />
-                                        <DataGridTextColumn Header="Khu vực" Binding="{Binding ShopLocation}" Width="1*" />
-                                        <DataGridTextColumn Header="Shop" Binding="{Binding ShopName}" Width="1*" />
-                                    </DataGrid.Columns>
-                                </DataGrid>
-                            </DockPanel>
-                        </Border>
-
-                        <TextBlock Grid.Row="4" Text="{Binding SearchActionStatus}" Margin="2,10,0,0"
+                    <!-- ───── Bản HUB: 2 tab con — ① Cấu hình & Máy | ② Kết quả (status luôn ở đáy) ───── -->
+                    <DockPanel Visibility="{Binding IsHubBoard, Converter={StaticResource BoolToVis}}">
+                        <TextBlock DockPanel.Dock="Bottom" Text="{Binding SearchActionStatus}" Margin="2,8,0,0"
                                    FontWeight="SemiBold" TextWrapping="Wrap" />
-                    </Grid>
+                        <TabControl Background="Transparent" BorderThickness="0">
+
+                            <!-- ① CẤU HÌNH & MÁY -->
+                            <TabItem Header="①  Cấu hình &amp; Máy">
+                                <Grid Margin="0,10,0,0">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="1.3*" />
+                                        <RowDefinition Height="1*" />
+                                    </Grid.RowDefinitions>
+
+                                    <!-- Bước 1 + cấu hình chia khối -->
+                                    <Border Grid.Row="0" Style="{StaticResource Card}" Padding="18,16" Margin="0,0,0,10">
+                                        <StackPanel>
+                                            <TextBlock Text="Bước 1 — chọn file link category (.txt mỗi dòng 1 link) để chia cho các máy"
+                                                       Style="{StaticResource Caption}" />
+                                            <Grid Margin="0,4,0,12">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBox Grid.Column="0" Text="{Binding SearchFileDisplay}" IsReadOnly="True"
+                                                         FontSize="11.5" VerticalContentAlignment="Center" />
+                                                <Button Grid.Column="1" Content="📂  Chọn file" Margin="8,0,0,0" Command="{Binding ChooseSearchFileCommand}" />
+                                            </Grid>
+
+                                            <WrapPanel Orientation="Horizontal">
+                                                <StackPanel Margin="0,0,16,0">
+                                                    <TextBlock Text="Số acc khóa/máy" Style="{StaticResource Caption}" />
+                                                    <TextBox Width="70" Margin="0,4,0,0" Text="{Binding AccountsPerClient}" VerticalContentAlignment="Center"
+                                                             ToolTip="Mỗi máy khóa tối đa ngần này tài khoản Shopee (máy khác không đụng)." />
+                                                </StackPanel>
+                                                <StackPanel Margin="0,0,16,0">
+                                                    <TextBlock Text="Lane" Style="{StaticResource Caption}" />
+                                                    <TextBox Width="56" Margin="0,4,0,0" Text="{Binding SearchLanes}" VerticalContentAlignment="Center"
+                                                             ToolTip="Số tab/cửa sổ chạy song song trên mỗi máy." />
+                                                </StackPanel>
+                                                <StackPanel Margin="0,0,16,0">
+                                                    <TextBlock Text="Khu vực (Nơi Bán)" Style="{StaticResource Caption}" />
+                                                    <TextBox Width="160" Margin="0,4,0,0" Text="{Binding SearchRegion}" VerticalContentAlignment="Center" />
+                                                </StackPanel>
+                                            </WrapPanel>
+                                            <TextBlock Text="{Binding SearchSummary}" FontWeight="SemiBold" Margin="0,12,0,0" />
+                                        </StackPanel>
+                                    </Border>
+
+                                    <!-- Danh sách link: checkbox chọn/bỏ (mặc định tick hết) -->
+                                    <Border Grid.Row="1" Style="{StaticResource Card}" Padding="0" ClipToBounds="True">
+                                        <DockPanel>
+                                            <Grid DockPanel.Dock="Top" Margin="12,10,12,6">
+                                                <TextBlock Text="Chọn link để search (mặc định tick hết — bỏ tick thì tính lại số link + chia lại)"
+                                                           Style="{StaticResource H2}" VerticalAlignment="Center" TextWrapping="Wrap" />
+                                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                                                    <Button Content="Tất cả" MinWidth="66" Command="{Binding SelectAllLinksCommand}" />
+                                                    <Button Content="Bỏ hết" MinWidth="66" Margin="6,0,0,0" Command="{Binding UnselectAllLinksCommand}" />
+                                                </StackPanel>
+                                            </Grid>
+                                            <ListBox ItemsSource="{Binding SearchLinkRows}" BorderThickness="0" Background="Transparent"
+                                                     ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                                     VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling">
+                                                <ListBox.ItemContainerStyle>
+                                                    <Style TargetType="ListBoxItem">
+                                                        <Setter Property="Padding" Value="0" />
+                                                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                                    </Style>
+                                                </ListBox.ItemContainerStyle>
+                                                <ListBox.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <CheckBox IsChecked="{Binding IsSelected, Mode=TwoWay}" Margin="12,2" VerticalContentAlignment="Center">
+                                                            <TextBlock Text="{Binding Link}" TextTrimming="CharacterEllipsis" />
+                                                        </CheckBox>
+                                                    </DataTemplate>
+                                                </ListBox.ItemTemplate>
+                                            </ListBox>
+                                        </DockPanel>
+                                    </Border>
+
+                                    <!-- Bước 2: danh sách máy — bấm Chạy ở máy nào thì máy đó nhận phần link của nó -->
+                                    <Border Grid.Row="2" Style="{StaticResource Card}" Padding="0" ClipToBounds="True" Margin="0,10,0,0">
+                                        <DockPanel>
+                                            <TextBlock DockPanel.Dock="Top"
+                                                       Text="Bước 2 — bỏ tick máy nào để KHÔNG dùng (link tự chia lại cho các máy còn lại). Bấm ▶ Chạy ở máy nào thì máy đó chạy đúng phần link của nó (khóa acc trước khi chạy)."
+                                                       Style="{StaticResource H2}" Margin="12,10,12,6" TextWrapping="Wrap" />
+                                            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                                <ItemsControl ItemsSource="{Binding SearchClients}" Margin="0,0,0,8">
+                                                    <ItemsControl.ItemTemplate>
+                                                        <DataTemplate>
+                                                            <Grid Margin="12,6">
+                                                                <Grid.ColumnDefinitions>
+                                                                    <ColumnDefinition Width="34" />
+                                                                    <ColumnDefinition Width="*" />
+                                                                    <ColumnDefinition Width="220" />
+                                                                    <ColumnDefinition Width="170" />
+                                                                    <ColumnDefinition Width="Auto" />
+                                                                </Grid.ColumnDefinitions>
+                                                                <CheckBox Grid.Column="0" IsChecked="{Binding IsSelected, Mode=TwoWay}" VerticalAlignment="Center"
+                                                                          ToolTip="Bỏ tick để không dùng máy này (link chia lại cho các máy còn lại)." />
+                                                                <TextBlock Grid.Column="1" Text="{Binding Name}" FontWeight="SemiBold" VerticalAlignment="Center" />
+                                                                <TextBlock Grid.Column="2" Text="{Binding StateText}" Foreground="{Binding StateBrush}"
+                                                                           FontWeight="SemiBold" VerticalAlignment="Center" />
+                                                                <TextBlock Grid.Column="3" Text="{Binding RangeLabel}" Foreground="{StaticResource TextSecondaryBrush}"
+                                                                           VerticalAlignment="Center" />
+                                                                <StackPanel Grid.Column="4" Orientation="Horizontal">
+                                                                    <Button Content="▶  Chạy" MinWidth="92" Style="{StaticResource SuccessButton}"
+                                                                            Command="{Binding DataContext.RunSearchForClientCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                                            CommandParameter="{Binding}" />
+                                                                    <TextBlock Style="{StaticResource SpinnerText}"
+                                                                               Visibility="{Binding PendingRun, Converter={StaticResource BoolToVis}}">
+                                                                        <TextBlock.RenderTransform><RotateTransform Angle="0" /></TextBlock.RenderTransform>
+                                                                    </TextBlock>
+                                                                </StackPanel>
+                                                            </Grid>
+                                                        </DataTemplate>
+                                                    </ItemsControl.ItemTemplate>
+                                                </ItemsControl>
+                                            </ScrollViewer>
+                                        </DockPanel>
+                                    </Border>
+                                </Grid>
+                            </TabItem>
+
+                            <!-- ② KẾT QUẢ: kho gộp + lọc/xuất Excel -->
+                            <TabItem Header="②  Kết quả">
+                                <Grid Margin="0,10,0,0">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="*" />
+                                    </Grid.RowDefinitions>
+
+                                    <!-- Kho gộp: các client đẩy kết quả về Hub → xuất 1 Excel gộp -->
+                                    <Border Grid.Row="0" Background="{StaticResource SubtleBrush}" CornerRadius="8" Padding="12,10" Margin="0,0,0,10">
+                                        <Grid>
+                                            <TextBlock Text="{Binding MergedProductText}" FontWeight="SemiBold" VerticalAlignment="Center" />
+                                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                                                <Button Content="📦  Xuất Excel gộp (tất cả máy)" Command="{Binding ExportMergedCommand}"
+                                                        Style="{StaticResource PrimaryButton}" MinWidth="210" />
+                                                <Button Content="🗑  Xóa kho gộp" Command="{Binding ClearMergedCommand}"
+                                                        Style="{StaticResource DangerButton}" Margin="8,0,0,0" />
+                                            </StackPanel>
+                                        </Grid>
+                                    </Border>
+
+                                    <!-- Kết quả gộp về Hub — lưới cập nhật liên tục -->
+                                    <Border Grid.Row="1" Style="{StaticResource Card}" Padding="0" ClipToBounds="True">
+                                        <DockPanel>
+                                            <Grid DockPanel.Dock="Top" Margin="12,10,12,6">
+                                                <TextBlock Text="Kết quả gộp về Hub (tự cập nhật khi client đẩy về)"
+                                                           Style="{StaticResource H2}" VerticalAlignment="Center" />
+                                                <Button HorizontalAlignment="Right" Content="⟳  Làm mới" MinWidth="96"
+                                                        Command="{Binding RefreshMergedCommand}" />
+                                            </Grid>
+                                            <DataGrid ItemsSource="{Binding MergedProducts}" AutoGenerateColumns="False" IsReadOnly="True"
+                                                      HeadersVisibility="Column" CanUserAddRows="False" GridLinesVisibility="Horizontal"
+                                                      EnableRowVirtualization="True" BorderThickness="0">
+                                                <DataGrid.Columns>
+                                                    <DataGridTextColumn Header="Tên sản phẩm" Binding="{Binding Name}" Width="2.4*" />
+                                                    <DataGridTextColumn Header="Giá" Binding="{Binding Price}" Width="90" />
+                                                    <DataGridTextColumn Header="Bán/tháng" Binding="{Binding MonthlySold}" Width="90" />
+                                                    <DataGridTextColumn Header="Rating" Binding="{Binding Rating}" Width="70" />
+                                                    <DataGridTextColumn Header="Danh mục" Binding="{Binding Category}" Width="1.2*" />
+                                                    <DataGridTextColumn Header="Khu vực" Binding="{Binding ShopLocation}" Width="1*" />
+                                                    <DataGridTextColumn Header="Shop" Binding="{Binding ShopName}" Width="1*" />
+                                                </DataGrid.Columns>
+                                            </DataGrid>
+                                        </DockPanel>
+                                    </Border>
+                                </Grid>
+                            </TabItem>
+                        </TabControl>
+                    </DockPanel>
 
                     <!-- ───── Bản CLIENT: việc search xem ở tab Giao việc ───── -->
                     <TextBlock Visibility="{Binding IsClientPanel, Converter={StaticResource BoolToVis}}"

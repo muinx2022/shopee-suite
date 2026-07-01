@@ -111,8 +111,15 @@ public sealed partial class FleetViewModel : ObservableObject
     }
 
     // ── Tab "Search (đa máy)" — bảng điều phối Search phía HUB ──
-    /// <summary>Danh sách link đã nạp từ file (theo thứ tự file) — nguồn để CHIA ĐỀU cho các client được chọn.</summary>
+    /// <summary>TẤT CẢ link nạp từ file (theo thứ tự file).</summary>
     private readonly List<string> _searchLinks = [];
+    /// <summary>Link ĐANG được tick (nguồn CHIA ĐỀU cho client) — làm mới trong RecomputePartition.</summary>
+    private List<string> _activeLinks = [];
+    /// <summary>Khi tick/bỏ-tick HÀNG LOẠT (Chọn tất / Bỏ hết) → hoãn chia lại, chỉ chia 1 lần cuối.</summary>
+    private bool _suppressLinkRecompute;
+
+    /// <summary>Danh sách link + checkbox chọn/bỏ (mặc định tick hết). Bỏ tick → tính lại số link + chia lại.</summary>
+    public ObservableCollection<FleetSearchLinkRow> SearchLinkRows { get; } = [];
 
     public ObservableCollection<FleetSearchClientRow> SearchClients { get; } = [];
     [ObservableProperty] private string _searchFileDisplay = "(chưa chọn file link)";
@@ -132,9 +139,9 @@ public sealed partial class FleetViewModel : ObservableObject
 
     /// <summary>Số máy đang được tick (sẽ được chia link).</summary>
     private int SelectedClientCount => SearchClients.Count(r => r.IsSelected);
-    public string SearchSummary => SearchLinkCount == 0
+    public string SearchSummary => _searchLinks.Count == 0
         ? "Chưa nạp file link."
-        : $"Tổng {SearchLinkCount} link · {SelectedClientCount}/{SearchClients.Count} máy được chọn · chia đều.";
+        : $"Chọn {SearchLinkCount}/{_searchLinks.Count} link · {SelectedClientCount}/{SearchClients.Count} máy · chia đều.";
 
     // Client panel
     [ObservableProperty] private string _myRole = "—";
@@ -474,15 +481,34 @@ public sealed partial class FleetViewModel : ObservableObject
                 .Select(x => x.Link).Where(s => !string.IsNullOrWhiteSpace(s)));
         }
         catch (Exception ex) { SearchActionStatus = "✘ Lỗi nạp file: " + ex.Message; }
+        // Dựng danh sách checkbox link — MẶC ĐỊNH TICK HẾT (không bắn callback từng dòng khi thêm).
+        _suppressLinkRecompute = true;
+        SearchLinkRows.Clear();
+        foreach (var link in _searchLinks) SearchLinkRows.Add(new FleetSearchLinkRow(link, OnLinkSelectionChanged));
+        _suppressLinkRecompute = false;
         _searchFileName = Path.GetFileName(dlg.FileName);
         SearchFileDisplay = _searchLinks.Count > 0
             ? $"{_searchFileName} — {_searchLinks.Count} link"
             : $"{_searchFileName} — (không có link hợp lệ)";
-        SearchLinkCount = _searchLinks.Count;
         SearchActionStatus = "";
         if (CoordinationRuntime.Hub is { } h) UpdateSearchRows(h.CurrentFleet);
-        RecomputePartition();   // chia đều cho các máy đang tick NGAY khi chọn file (poll không tự chia)
+        RecomputePartition();   // set _activeLinks + SearchLinkCount + chia đều NGAY (poll không tự chia)
     }
+
+    /// <summary>Tick TẤT CẢ link (1 lần chia lại).</summary>
+    [RelayCommand] private void SelectAllLinks() => SetAllLinks(true);
+    /// <summary>Bỏ tick TẤT CẢ link (1 lần chia lại).</summary>
+    [RelayCommand] private void UnselectAllLinks() => SetAllLinks(false);
+    private void SetAllLinks(bool value)
+    {
+        _suppressLinkRecompute = true;
+        foreach (var r in SearchLinkRows) r.IsSelected = value;
+        _suppressLinkRecompute = false;
+        RecomputePartition();
+    }
+
+    /// <summary>1 link đổi tick → chia lại (bỏ qua khi đang set hàng loạt).</summary>
+    private void OnLinkSelectionChanged() { if (!_suppressLinkRecompute) RecomputePartition(); }
 
     /// <summary>Giao đúng PHẦN LINK chia đều của 1 máy (ghim, op "search"). Máy đó tự chạy. Chạy lại = resume phần đó.</summary>
     [RelayCommand(CanExecute = nameof(CanRunSearch))]
@@ -492,7 +518,8 @@ public sealed partial class FleetViewModel : ObservableObject
         if (hub is null || row is null || row.RangeCount <= 0) return;
         var start = row.RangeStart;
         var end = start + row.RangeCount;            // 0-based, [start, end)
-        var links = _searchLinks.GetRange(start, row.RangeCount);
+        if (start < 0 || end > _activeLinks.Count) return;   // an toàn: khoảng phải nằm trong list link đã chọn
+        var links = _activeLinks.GetRange(start, row.RangeCount);
         var payload = new SearchJobPayload
         {
             Links = links, AccountsPerClient = Math.Max(1, AccountsPerClient),
@@ -520,7 +547,7 @@ public sealed partial class FleetViewModel : ObservableObject
     /// <summary>Cho Chạy khi: có Hub + máy ĐƯỢC TICK + đang RẢNH + không đang chờ nhận + có phần link chia cho nó.</summary>
     private bool CanRunSearch(FleetSearchClientRow? row)
         => CoordinationRuntime.Hub is not null && row is not null && row.IsSelected && !row.Busy && !row.PendingRun
-           && _searchLinks.Count > 0 && row.RangeCount > 0;
+           && _activeLinks.Count > 0 && row.RangeCount > 0;
 
     /// <summary>Đồng bộ dòng máy + trạng thái việc search, rồi CHIA ĐỀU link cho các máy đang tick.</summary>
     private void UpdateSearchRows(FleetSnapshot f)
@@ -555,9 +582,11 @@ public sealed partial class FleetViewModel : ObservableObject
     /// base hoặc base+1 link (các máy đầu nhận phần dư). Máy bỏ tick / không còn link → "(không dùng)".</summary>
     private void RecomputePartition()
     {
+        _activeLinks = SearchLinkRows.Where(r => r.IsSelected).Select(r => r.Link).ToList();
+        SearchLinkCount = _activeLinks.Count;   // = số link ĐÃ CHỌN (đẩy SearchSummary cập nhật)
         var selected = SearchClients.Where(r => r.IsSelected).ToList();
         var k = selected.Count;
-        var n = _searchLinks.Count;
+        var n = _activeLinks.Count;
         var baseShare = k == 0 ? 0 : n / k;
         var remainder = k == 0 ? 0 : n % k;
 
@@ -870,6 +899,20 @@ public sealed partial class FleetSearchClientRow : ObservableObject
 
     public FleetSearchClientRow(string id, string name, Action onSelectedChanged)
     { MachineId = id; _name = name; _onSelectedChanged = onSelectedChanged; }
+
+    partial void OnIsSelectedChanged(bool value) => _onSelectedChanged();
+}
+
+/// <summary>1 link trong file + checkbox chọn/bỏ. Bỏ tick → Hub tính lại số link ĐÃ CHỌN + chia lại cho client.</summary>
+public sealed partial class FleetSearchLinkRow : ObservableObject
+{
+    private readonly Action _onSelectedChanged;
+    public string Link { get; }
+    /// <summary>Tick = search link này (mặc định). Bỏ tick → loại khỏi việc chia + đếm.</summary>
+    [ObservableProperty] private bool _isSelected = true;
+
+    public FleetSearchLinkRow(string link, Action onSelectedChanged)
+    { Link = link; _onSelectedChanged = onSelectedChanged; }
 
     partial void OnIsSelectedChanged(bool value) => _onSelectedChanged();
 }
