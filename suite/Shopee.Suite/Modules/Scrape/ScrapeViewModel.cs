@@ -371,6 +371,12 @@ public sealed partial class ScrapeViewModel : ObservableObject
 
             // RESET → xoá tiến độ cũ. Tính các khoảng cần chạy (reset = cả đoạn; resume = phần còn thiếu).
             if (!resume) ScrapeProgressStore.Shared.Clear(account.Id, sheet);
+            // HAND-OFF XUYÊN MÁY: trước khi tính phần CÒN THIẾU, kéo ledger TƯƠI của shop này từ Hub → fold vào
+            // tiến độ local. Nhờ đó máy TIẾP QUẢN (khi máy trước rớt net giữa chừng) chỉ scrape đúng phần còn
+            // thiếu chung, KHÔNG làm lại phần máy kia đã đẩy lên Hub (trước đây chỉ fold 1 lần lúc mở app →
+            // tiếp quản nóng bị scrape lại). Best-effort: offline/standalone → dùng tiến độ local như cũ.
+            if (resume && accHub is not null)
+                await accHub.FoldScrapeLedgerAsync(account.Id, sheet).ConfigureAwait(false);
             var segments = resume
                 ? ScrapeProgressStore.Shared.RemainingSegments(account.Id, sheet, startRow, totalRows)
                 : new List<(int from, int to)> { (startRow, totalRows) };

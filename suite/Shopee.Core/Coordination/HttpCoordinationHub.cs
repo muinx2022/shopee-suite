@@ -240,6 +240,27 @@ public sealed class HttpCoordinationHub : ICoordinationHub, IDisposable
         catch { }
     }
 
+    /// <summary>Kéo ledger TƯƠI của ĐÚNG 1 (tài khoản BigSeller + sheet) scrape từ Hub → fold vào tiến độ local
+    /// NGAY trước khi resume. Nhờ đó MÁY TIẾP QUẢN (khi máy trước rớt net giữa chừng) chỉ scrape phần thật sự
+    /// CÒN THIẾU chung, KHÔNG làm lại phần máy kia đã đẩy lên Hub. Khác <see cref="SyncIntoProgressAsync"/> (fold
+    /// TOÀN BỘ, chỉ 1 lần lúc mở app). MarkCompleted là union nên chỉ CỘNG thêm dòng đã xong, không xoá. Best-
+    /// effort: offline → giữ tiến độ local như cũ. Chỉ fold record op=scrape (import/update không đẩy Completed).</summary>
+    public async Task FoldScrapeLedgerAsync(string bigsellerId, string sheet)
+    {
+        if (string.IsNullOrEmpty(bigsellerId)) return;
+        try
+        {
+            foreach (var r in await _client.AllLedgerAsync())
+            {
+                if (r.Op != "scrape" || r.BigsellerId != bigsellerId || r.Completed.Count == 0) continue;
+                if (!string.Equals(r.Sheet ?? "", sheet ?? "", StringComparison.OrdinalIgnoreCase)) continue;
+                foreach (var rr in r.Completed)
+                    ScrapeProgressStore.Shared.MarkCompleted(r.BigsellerId, r.Sheet ?? "", rr.From, rr.To);
+            }
+        }
+        catch { }
+    }
+
     internal Task HeartbeatLeaseAsync(CoordKey key) => _client.HeartbeatLeaseAsync(key.Id, _machineId);
     internal Task ReleaseLeaseAsync(CoordKey key) => _client.ReleaseLeaseAsync(key.Id, _machineId);
 

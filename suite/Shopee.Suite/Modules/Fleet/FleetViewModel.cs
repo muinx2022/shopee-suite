@@ -714,7 +714,9 @@ public sealed partial class FleetViewModel : ObservableObject
         var shop = acct?.Shops.FirstOrDefault(s => s.Id == shopId);
         return new FleetRow
         {
-            MachineName = string.IsNullOrWhiteSpace(host) ? "?" : host,
+            // Ledger đặt tay ("✓ Xong" Bước 3) / set completed KHÔNG do máy nào chạy → last_hostname rỗng.
+            // Hiện "—" (không rõ máy) thay vì "?" cho đỡ trông như lỗi.
+            MachineName = string.IsNullOrWhiteSpace(host) ? "—" : host,
             AccountLabel = AcctName(acct, bsId),
             ShopName = shop?.Name is { Length: > 0 } n ? n : (shop?.ShopeeDataSheet is { Length: > 0 } sh ? sh : Short(shopId)),
             Op = OpVi(op), State = state, Updated = Ago(at), Running = running,
