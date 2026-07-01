@@ -695,6 +695,19 @@ VALUES($id,$b,$s,$sh,$o,$t,$p,'queued','','','',$ca,$ua,$sr,$er,$pl);";
         lock (_gate)
         {
             using var c = _conn.CreateCommand();
+            if (status == "requeue")
+            {
+                // Máy nhận đã claim (running) nhưng CHƯA chạy được vì lỗi TẠM THỜI (client mới chưa kịp đồng bộ
+                // tài khoản/workbook…) → trả việc về 'queued' + bỏ claim để claim lại nhịp sau. Giữ '• đã xếp'
+                // thay vì lặng lẽ 'failed' → về 'chờ'. Chỉ tác động khi CHÍNH máy đó còn giữ (running).
+                c.CommandText = "UPDATE assignments SET status='queued', claimed_by='', claimed_host='', last_error=$e, updated_at=$ua WHERE id=$id AND claimed_by=$m AND status='running'";
+                c.Parameters.AddWithValue("$e", error ?? "");
+                c.Parameters.AddWithValue("$ua", Iso(DateTimeOffset.UtcNow));
+                c.Parameters.AddWithValue("$id", id);
+                c.Parameters.AddWithValue("$m", machineId);
+                c.ExecuteNonQuery();
+                return;
+            }
             // Guard: chỉ đổi khi đang 'running' (hoặc set lại CHÍNH trạng thái đó) → KHÔNG cho nhịp 'running'
             // hồi sinh việc đã done/failed/canceled (giữ Cancel có hiệu lực + không hiện job ma).
             c.CommandText = "UPDATE assignments SET status=$st, last_error=$e, updated_at=$ua WHERE id=$id AND claimed_by=$m AND (status='running' OR status=$st)";

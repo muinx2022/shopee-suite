@@ -71,6 +71,25 @@ public sealed partial class FleetViewModel : ObservableObject
     /// <summary>Phản hồi ngắn cho thao tác Ghim/Huỷ ("⏳ đang…", "✔ đã…", "✘ lỗi…") — hiện cạnh 2 nút.</summary>
     [ObservableProperty] private string _actionStatus = "";
 
+    /// <summary>Đang chờ việc GHIM hiện lên bảng ("• đã xếp"): khoá nút + xoay icon từ lúc bấm tới khi poll xác
+    /// nhận (không còn "nháy" theo nhịp POST). Xoá trong <see cref="ReconcilePinPending"/> khi việc đã hiện /
+    /// kết thúc / quá hạn.</summary>
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(AssignManualCommand))]
+    private bool _pinBusy;
+    private PinPending? _pinPending;
+
+    /// <summary>Đang chờ HUỶ có hiệu lực trên bảng: khoá nút + xoay icon tới khi snapshot hết việc queued/running
+    /// của shop đang chọn.</summary>
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(CancelSelectedCommand))]
+    private bool _cancelBusy;
+    private CancelPending? _cancelPending;
+
+    /// <summary>Việc GHIM vừa gửi, đang chờ hiện lên bảng. Giữ id (để bắt kết thúc) + đích (để khớp queued/running).</summary>
+    private sealed record PinPending(string Id, string BigsellerId, string ShopId, string Op, string MachineId, string Label, DateTimeOffset Deadline);
+    private sealed record CancelPending(string BigsellerId, string ShopId, DateTimeOffset Deadline);
+
     public bool DispatchEnabled
     {
         get => HubDispatcher.Shared.Enabled;
@@ -176,10 +195,56 @@ public sealed partial class FleetViewModel : ObservableObject
         BuildMonitor(f);
         if (IsHubBoard) { SyncMachines(f); BuildQueue(f); UpdateSearchRows(f); }
         if (IsClientPanel) BuildMyJobs(f, hub.MachineId);
+        // Tắt xoay Ghim/Huỷ khi việc đã hiện/huỷ trên snapshot (hoặc quá hạn) — TRƯỚC khi tính lại nút.
+        ReconcilePinPending(f);
+        ReconcileCancelPending(f);
         // Trạng thái assignment/lease đổi sau mỗi poll → tính lại enable/disable các nút.
         AssignManualCommand.NotifyCanExecuteChanged();
         CancelSelectedCommand.NotifyCanExecuteChanged();
         SetStateCommand.NotifyCanExecuteChanged();
+    }
+
+    /// <summary>Việc GHIM đã hiện trên bảng ("• đã xếp"/"⏳ đang chạy") cho đúng (shop,op,máy) → thôi xoay (nút vẫn
+    /// khoá do <see cref="CanAssignManual"/>). Nếu việc đã kết thúc (done/failed/canceled) → thôi xoay + báo kết
+    /// quả. Quá hạn mà chưa thấy → thôi xoay, để trạng thái tự nhiên theo poll.</summary>
+    private void ReconcilePinPending(FleetSnapshot f)
+    {
+        if (_pinPending is not { } p) return;
+        var open = f.Assignments.FirstOrDefault(a =>
+            a.BigsellerId == p.BigsellerId && a.ShopId == p.ShopId && a.Op == p.Op
+            && a.Status is "queued" or "running"
+            && (a.TargetMachineId == p.MachineId || a.ClaimedByMachineId == p.MachineId));
+        if (open is not null)
+        {
+            _pinPending = null; PinBusy = false;
+            ActionStatus = open.Status == "running"
+                ? $"▶ {p.Label} — đang chạy trên {Host(open.ClaimedByHostname)}."
+                : $"✔ Đã xếp {p.Label} — chờ máy nhận.";
+            return;
+        }
+        var settled = f.Assignments.FirstOrDefault(a => a.Id == p.Id && a.Status is "done" or "failed" or "canceled");
+        if (settled is not null)
+        {
+            _pinPending = null; PinBusy = false;
+            ActionStatus = settled.Status switch
+            {
+                "failed" => $"✘ {p.Label}: máy {Host(settled.ClaimedByHostname)} báo lỗi — {settled.LastError}",
+                "canceled" => $"✖ {p.Label} đã bị huỷ.",
+                _ => $"✓ {p.Label} đã xong.",
+            };
+            return;
+        }
+        if (DateTimeOffset.Now >= p.Deadline) { _pinPending = null; PinBusy = false; }
+    }
+
+    /// <summary>HUỶ đã có hiệu lực khi snapshot KHÔNG còn việc queued/running của shop đó → thôi xoay (nút tự
+    /// khoá do <see cref="CanCancelSelected"/>). Quá hạn cũng thôi chờ.</summary>
+    private void ReconcileCancelPending(FleetSnapshot f)
+    {
+        if (_cancelPending is not { } p) return;
+        var stillOpen = f.Assignments.Any(a =>
+            a.BigsellerId == p.BigsellerId && a.ShopId == p.ShopId && a.Status is "queued" or "running");
+        if (!stillOpen || DateTimeOffset.Now >= p.Deadline) { _cancelPending = null; CancelBusy = false; }
     }
 
     // ── Tab Theo dõi ──────────────────────────────────────────────────────────
@@ -273,6 +338,15 @@ public sealed partial class FleetViewModel : ObservableObject
         if (led?.Status == "completed") return ("✓ xong", DoneBrush, 0);
         if (led?.Status == "stopped") return ("■ dừng dở", WarnBrush, 3);
         if (asn is { Status: "queued" }) return ("• đã xếp", QueuedBrush, 2);
+
+        // Việc GHIM vừa 'failed' (máy nhận từ chối SAU khi đã thử lại) → HIỆN lỗi thay vì lặng lẽ về "· chờ".
+        // Chỉ hiện lỗi TƯƠI (≤3') để bảng khỏi kẹt "✘ lỗi" cũ; sau đó về "· chờ" (operator ghim lại được).
+        var failed = f.Assignments
+            .Where(a => a.BigsellerId == bsId && a.ShopId == shopId && a.Op == op && a.Status == "failed")
+            .OrderByDescending(a => a.UpdatedAt).FirstOrDefault();
+        if (failed is not null && (DateTimeOffset.Now - failed.UpdatedAt) < TimeSpan.FromMinutes(3))
+            return ($"✘ lỗi ({Host(failed.ClaimedByHostname)})", FailBrush, 3);
+
         return ("· chờ", IdleBrush, 0);
     }
 
@@ -286,21 +360,35 @@ public sealed partial class FleetViewModel : ObservableObject
         var hub = CoordinationRuntime.Hub;
         if (hub is null || SelectedQueue is not { } row || PinMachine is not { } m) return;
         var op = PinOp.ToLowerInvariant();
-        ActionStatus = $"⏳ Đang ghim {PinOp} · {row.ShopName} → {m.Name}…";
+        var label = $"{PinOp} · {row.ShopName} → {m.Name}";
+        PinBusy = true;   // khoá nút + xoay icon NGAY khi bấm (giữ tới khi poll xác nhận "đã xếp")
+        ActionStatus = $"⏳ Đang ghim {label}…";
         try
         {
-            await hub.CreateAssignmentAsync(new CreateAssignmentRequest(
+            var created = await hub.CreateAssignmentAsync(new CreateAssignmentRequest(
                 row.BigsellerId, row.ShopId, row.Sheet, op, m.MachineId, true, Math.Max(0, PinStartRow), Math.Max(0, PinEndRow)));
-            ActionStatus = $"✔ Đã ghim {PinOp} · {row.ShopName} → {m.Name}";
+            if (created is null || string.IsNullOrEmpty(created.Id))
+            {
+                ActionStatus = "✘ Lỗi ghim việc: không tạo được (mất kết nối Hub?).";
+                _pinPending = null; PinBusy = false;
+            }
+            else
+            {
+                // Giữ PinBusy = true; poll kế tiếp thấy việc trên bảng thì ReconcilePinPending tắt xoay.
+                _pinPending = new PinPending(created.Id, row.BigsellerId, row.ShopId, op, m.MachineId, label,
+                    DateTimeOffset.Now.AddSeconds(30));
+                ActionStatus = $"⏳ Đã gửi ghim {label} — chờ hàng đợi cập nhật…";
+            }
         }
-        catch (Exception ex) { ActionStatus = "✘ Lỗi ghim việc: " + ex.Message; }
+        catch (Exception ex) { ActionStatus = "✘ Lỗi ghim việc: " + ex.Message; _pinPending = null; PinBusy = false; }
         Refresh();
     }
 
     /// <summary>Cho Ghim khi: có Hub + đã chọn shop + chọn máy, và (đúng op + shop + ĐÚNG MÁY đó) CHƯA có việc
-    /// đang chạy/đã xếp. Đang thực hiện rồi → tắt nút để khỏi ghim trùng.</summary>
+    /// đang chạy/đã xếp. Đang gửi/chờ xác nhận (PinBusy) → tắt nút để khỏi ghim trùng.</summary>
     private bool CanAssignManual()
     {
+        if (PinBusy) return false;
         if (CoordinationRuntime.Hub is not { } hub || SelectedQueue is not { } row || PinMachine is not { } m) return false;
         var op = PinOp.ToLowerInvariant();
         var alreadyForThisMachine = hub.CurrentFleet.Assignments.Any(a =>
@@ -318,20 +406,23 @@ public sealed partial class FleetViewModel : ObservableObject
         if (hub is null || SelectedQueue is not { } row) return;
         var targets = hub.CurrentFleet.Assignments.Where(a =>
             a.BigsellerId == row.BigsellerId && a.ShopId == row.ShopId && a.Status is "queued" or "running").ToList();
+        CancelBusy = true;   // khoá nút + xoay icon NGAY (giữ tới khi poll xác nhận đã huỷ)
         ActionStatus = $"⏳ Đang huỷ {targets.Count} việc · {row.ShopName}…";
         try
         {
             foreach (var a in targets) await hub.CancelAssignmentAsync(a.Id);
-            ActionStatus = $"✔ Đã huỷ {targets.Count} việc · {row.ShopName}";
+            _cancelPending = new CancelPending(row.BigsellerId, row.ShopId, DateTimeOffset.Now.AddSeconds(30));
+            ActionStatus = $"⏳ Đã gửi huỷ {targets.Count} việc · {row.ShopName} — chờ cập nhật…";
         }
-        catch (Exception ex) { ActionStatus = "✘ Lỗi huỷ việc: " + ex.Message; }
+        catch (Exception ex) { ActionStatus = "✘ Lỗi huỷ việc: " + ex.Message; _cancelPending = null; CancelBusy = false; }
         Refresh();
     }
 
     /// <summary>Cho Huỷ khi: có Hub + đã chọn shop, và shop đó CÓ ít nhất 1 việc đang chạy/đã xếp. Chưa chạy gì
-    /// → tắt nút.</summary>
+    /// hoặc đang chờ huỷ (CancelBusy) → tắt nút.</summary>
     private bool CanCancelSelected()
     {
+        if (CancelBusy) return false;
         if (CoordinationRuntime.Hub is not { } hub || SelectedQueue is not { } row) return false;
         return hub.CurrentFleet.Assignments.Any(a =>
             a.BigsellerId == row.BigsellerId && a.ShopId == row.ShopId && a.Status is "queued" or "running");
@@ -407,21 +498,28 @@ public sealed partial class FleetViewModel : ObservableObject
             Links = links, AccountsPerClient = Math.Max(1, AccountsPerClient),
             Lanes = Math.Max(1, SearchLanes), Region = SearchRegion, SourceFile = _searchFileName,
         };
+        row.PendingRun = true;   // khoá nút + xoay icon NGAY (giữ tới khi poll thấy máy đã "bận" = đã nhận)
+        row.RunDeadline = DateTimeOffset.Now.AddSeconds(30);
+        RunSearchForClientCommand.NotifyCanExecuteChanged();
         SearchActionStatus = $"⏳ Giao link {start + 1}–{end} → {row.Name}…";
         try
         {
             await hub.CreateAssignmentAsync(new CreateAssignmentRequest(
                 "", $"{row.MachineId}:{start}", _searchFileName, MachineRoles.Search, row.MachineId, true,
                 start + 1, end, JsonSerializer.Serialize(payload)));
-            SearchActionStatus = $"✔ Đã giao link {start + 1}–{end} → {row.Name}";
+            SearchActionStatus = $"⏳ Đã giao link {start + 1}–{end} → {row.Name} — chờ máy nhận…";
         }
-        catch (Exception ex) { SearchActionStatus = "✘ Lỗi giao việc Search: " + ex.Message; }
+        catch (Exception ex)
+        {
+            SearchActionStatus = "✘ Lỗi giao việc Search: " + ex.Message;
+            row.PendingRun = false; RunSearchForClientCommand.NotifyCanExecuteChanged();
+        }
         Refresh();
     }
 
-    /// <summary>Cho Chạy khi: có Hub + máy ĐƯỢC TICK + đang RẢNH + có phần link chia cho nó.</summary>
+    /// <summary>Cho Chạy khi: có Hub + máy ĐƯỢC TICK + đang RẢNH + không đang chờ nhận + có phần link chia cho nó.</summary>
     private bool CanRunSearch(FleetSearchClientRow? row)
-        => CoordinationRuntime.Hub is not null && row is not null && row.IsSelected && !row.Busy
+        => CoordinationRuntime.Hub is not null && row is not null && row.IsSelected && !row.Busy && !row.PendingRun
            && _searchLinks.Count > 0 && row.RangeCount > 0;
 
     /// <summary>Đồng bộ dòng máy + trạng thái việc search, rồi CHIA ĐỀU link cho các máy đang tick.</summary>
@@ -440,6 +538,8 @@ public sealed partial class FleetViewModel : ObservableObject
             if (asn is { Status: "running" }) { row.Busy = true; row.StateText = $"▶ đang chạy (link {asn.StartRow}–{asn.EndRow})"; row.StateBrush = RunningBrush; }
             else if (asn is { Status: "queued" }) { row.Busy = true; row.StateText = $"⏱ chờ nhận (link {asn.StartRow}–{asn.EndRow})"; row.StateBrush = QueuedBrush; }
             else { row.Busy = false; row.StateText = "• rảnh"; row.StateBrush = IdleBrush; }
+            // Việc vừa giao đã hiện trên bảng (busy) hoặc quá hạn → thôi xoay nút Chạy của máy đó.
+            if (row.PendingRun && (row.Busy || DateTimeOffset.Now >= row.RunDeadline)) row.PendingRun = false;
         }
         for (var i = SearchClients.Count - 1; i >= 0; i--)
             if (!seen.Contains(SearchClients[i].MachineId)) SearchClients.RemoveAt(i);
@@ -678,6 +778,7 @@ public sealed partial class FleetViewModel : ObservableObject
     private static readonly Brush WarnBrush = Frozen(0xC8, 0x6A, 0x00);
     private static readonly Brush QueuedBrush = Frozen(0x00, 0x78, 0xD7);
     private static readonly Brush IdleBrush = Frozen(0x6E, 0x72, 0x7A);
+    private static readonly Brush FailBrush = Frozen(0xD1, 0x34, 0x38);
     private static Brush Frozen(byte r, byte g, byte b) { var br = new SolidColorBrush(Color.FromRgb(r, g, b)); br.Freeze(); return br; }
 }
 
@@ -755,10 +856,15 @@ public sealed partial class FleetSearchClientRow : ObservableObject
     [ObservableProperty] private string _rangeLabel = "";
     /// <summary>Máy đang có việc Search (queued/running) → tắt nút Chạy để khỏi giao chồng.</summary>
     [ObservableProperty] private bool _busy;
+    /// <summary>Vừa bấm ▶ Chạy, đang chờ bảng xác nhận đã nhận (busy) → khoá nút + xoay icon. Xoá trong
+    /// <see cref="FleetViewModel.UpdateSearchRows"/> khi máy đã busy hoặc quá hạn.</summary>
+    [ObservableProperty] private bool _pendingRun;
 
     /// <summary>Phần link chia cho máy (0-based start + số lượng) — nguồn để giao đúng slice khi bấm Chạy.</summary>
     public int RangeStart { get; set; }
     public int RangeCount { get; set; }
+    /// <summary>Hạn chờ xác nhận việc Chạy (thôi xoay khi quá hạn dù bảng chưa kịp cập nhật).</summary>
+    public DateTimeOffset RunDeadline { get; set; }
 
     public FleetSearchClientRow(string id, string name, Action onSelectedChanged)
     { MachineId = id; _name = name; _onSelectedChanged = onSelectedChanged; }

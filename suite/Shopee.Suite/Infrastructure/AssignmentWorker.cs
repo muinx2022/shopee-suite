@@ -26,10 +26,15 @@ public sealed class AssignmentWorker : IDisposable
     private readonly System.Threading.Timer _heartbeat;  // nhịp 'running' (luồng NỀN, không bị UI làm nghẽn)
     private readonly Dictionary<string, InFlight> _inflight = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, byte> _liveIds = new(StringComparer.Ordinal);
+    // Số lần đã claim-nhưng-chưa-chạy-được của 1 việc (theo id, sống qua các lần re-queue) → thử lại có mức trần.
+    private readonly ConcurrentDictionary<string, int> _launchAttempts = new(StringComparer.Ordinal);
     private bool _ticking;
 
     private const int MaxConcurrent = 4;
     private const int GraceTicks = 6;   // ~60s: chưa thấy chạy trong ngần này coi như không khởi động được
+    // Tiền-kiểm CHƯA đạt (client mới chưa kịp kéo tk/workbook…) coi là lỗi TẠM THỜI: trả việc về hàng đợi thử
+    // lại ngần này nhịp (~10s/nhịp) trước khi báo 'failed' thật → không mất việc ghim do trễ đồng bộ.
+    private const int MaxLaunchAttempts = 6;
 
     /// <summary>Người ngồi máy bấm "Tạm dừng nhận việc" → ngừng xin việc mới (việc đang chạy vẫn xong).</summary>
     public bool Paused { get; set; }
@@ -101,12 +106,13 @@ public sealed class AssignmentWorker : IDisposable
 
     private async Task LaunchAsync(HttpCoordinationHub hub, Assignment a)
     {
-        // Tiền-kiểm KHÔNG mở dialog: thiếu điều kiện (kho tk/Brave/workbook/cookie/sheet) → báo failed NGAY
-        // (khỏi kẹt việc 'running' chặn single-session tài khoản, và KHÔNG chạm tới đường Warn/modal).
+        // Tiền-kiểm KHÔNG mở dialog: thiếu điều kiện (kho tk/Brave/workbook/cookie/sheet). Trước đây báo 'failed'
+        // NGAY → việc ghim vào máy mới (chưa kịp đồng bộ) chết ngầm, ô về 'chờ'. Giờ coi là lỗi TẠM THỜI: trả về
+        // hàng đợi thử lại vài nhịp, quá trần mới 'failed' (kèm lý do) — xem RequeueOrFailAsync.
         if (!CanLaunch(a, out var problem))
         {
             _inflight.Remove(a.Id);
-            await hub.ReportAssignmentAsync(a.Id, "failed", problem);
+            await RequeueOrFailAsync(hub, a, problem);
             return;
         }
 
@@ -119,9 +125,26 @@ public sealed class AssignmentWorker : IDisposable
         // BeginInvoke (không Invoke) → LaunchCore không chạy trong nested modal pump nếu lỡ có dialog đang mở.
         Application.Current?.Dispatcher.BeginInvoke(() =>
         {
-            if (LaunchCore(a)) _liveIds[a.Id] = 1;
-            else { _inflight.Remove(a.Id); _ = hub.ReportAssignmentAsync(a.Id, "failed", "không khởi động được trên máy này"); }
+            if (LaunchCore(a)) { _liveIds[a.Id] = 1; _launchAttempts.TryRemove(a.Id, out _); }   // đã chạy → xoá bộ đếm thử lại
+            else { _inflight.Remove(a.Id); _ = RequeueOrFailAsync(hub, a, "không khởi động được trên máy này"); }
         });
+    }
+
+    /// <summary>Việc vừa claim nhưng CHƯA chạy được (thường do client mới chưa kịp đồng bộ tk/workbook) = lỗi
+    /// TẠM THỜI: trả về hàng đợi (server: running → queued) để claim lại nhịp sau, GIỮ ô ở "• đã xếp". Quá
+    /// <see cref="MaxLaunchAttempts"/> lần vẫn không được → báo 'failed' kèm lý do để operator thấy rõ.</summary>
+    private async Task RequeueOrFailAsync(HttpCoordinationHub hub, Assignment a, string problem)
+    {
+        var n = _launchAttempts.AddOrUpdate(a.Id, 1, (_, v) => v + 1);
+        if (n < MaxLaunchAttempts)
+        {
+            await hub.ReportAssignmentAsync(a.Id, "requeue", problem);
+        }
+        else
+        {
+            _launchAttempts.TryRemove(a.Id, out _);
+            await hub.ReportAssignmentAsync(a.Id, "failed", $"{problem} (đã thử {n} lần)");
+        }
     }
 
     /// <summary>Tiền-kiểm điều kiện chạy (KHÔNG side-effect mở dialog). false → báo failed ngay.</summary>
@@ -206,6 +229,7 @@ public sealed class AssignmentWorker : IDisposable
             {
                 StopLocal(f.A);
                 _liveIds.TryRemove(f.A.Id, out _);
+                _launchAttempts.TryRemove(f.A.Id, out _);
                 _inflight.Remove(f.A.Id);
             }
         }

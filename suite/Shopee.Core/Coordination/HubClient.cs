@@ -128,7 +128,10 @@ public sealed class HubClient
 
     public async Task<byte[]?> DownloadAsync(string name, CancellationToken ct = default)
     {
-        var r = await _http.GetAsync("/files/" + EncodePath(name), ct);
+        // _bulkHttp (5') CHỨ KHÔNG _http (8s): workbook Excel vài MB tải qua Cloudflare Tunnel thường > 8s →
+        // trước đây TimeoutException bị nuốt ở PullAccountsAsync → WorkbookPath KHÔNG rebase (giữ đường máy Hub)
+        // → client ở XA scrape lỗi, dù client cùng LAN (tải nhanh) vẫn chạy. 8s chỉ hợp control-plane JSON nhỏ.
+        var r = await _bulkHttp.GetAsync("/files/" + EncodePath(name), ct);
         if (r.StatusCode == HttpStatusCode.NotFound) return null;
         r.EnsureSuccessStatusCode();
         return await r.Content.ReadAsByteArrayAsync(ct);
@@ -138,7 +141,9 @@ public sealed class HubClient
     {
         using var req = new HttpRequestMessage(HttpMethod.Put, "/files/" + EncodePath(name)) { Content = new ByteArrayContent(data) };
         if (ifMatch.HasValue) req.Headers.TryAddWithoutValidation("If-Match", ifMatch.Value.ToString());
-        var r = await _http.SendAsync(req, ct);
+        // _bulkHttp (5'): đẩy workbook vài MB qua tunnel cũng cần timeout dài (Hub đẩy lên localhost thì nhanh,
+        // nhưng client đẩy Search/handoff qua tunnel thì 8s không đủ). Đối xứng với DownloadAsync.
+        var r = await _bulkHttp.SendAsync(req, ct);
         // 200 (ok) và 409 (conflict) đều trả JSON FilePutResponse; còn lại (401/5xx) body là text → trả lỗi
         // HTTP rõ ràng thay vì để ReadFromJsonAsync ném JsonException khó hiểu.
         if (!r.IsSuccessStatusCode && r.StatusCode != HttpStatusCode.Conflict)
