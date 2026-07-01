@@ -11,6 +11,9 @@ namespace Shopee.Core.Coordination;
 public sealed class HubClient
 {
     private readonly HttpClient _http;
+    /// <summary>Client riêng cho endpoint TẢI/ĐẨY dữ liệu KHỐI LỚN (kho gộp Search) — timeout dài, vì 8s của
+    /// _http là để phát hiện offline nhanh cho control-plane, không đủ cho vài MB JSON qua tunnel.</summary>
+    private readonly HttpClient _bulkHttp;
     private readonly string _machineId;
     public string BaseUrl { get; }
 
@@ -19,10 +22,17 @@ public sealed class HubClient
         BaseUrl = (cfg.BaseUrl ?? "").TrimEnd('/');
         _machineId = machineId ?? "";
         _http = new HttpClient { BaseAddress = new Uri(BaseUrl), Timeout = TimeSpan.FromSeconds(8) };
+        _bulkHttp = new HttpClient { BaseAddress = new Uri(BaseUrl), Timeout = TimeSpan.FromMinutes(5) };
         if (!string.IsNullOrWhiteSpace(cfg.ApiToken))
+        {
             _http.DefaultRequestHeaders.TryAddWithoutValidation("X-Api-Token", cfg.ApiToken);
+            _bulkHttp.DefaultRequestHeaders.TryAddWithoutValidation("X-Api-Token", cfg.ApiToken);
+        }
         if (!string.IsNullOrWhiteSpace(machineId))
+        {
             _http.DefaultRequestHeaders.TryAddWithoutValidation("X-Machine-Id", machineId);
+            _bulkHttp.DefaultRequestHeaders.TryAddWithoutValidation("X-Machine-Id", machineId);
+        }
     }
 
     /// <summary>Báo Hub xoá máy này khỏi danh sách (khi người dùng chủ động Ngắt kết nối).</summary>
@@ -60,6 +70,7 @@ public sealed class HubClient
 
     // ── Sổ hoàn thành ──
     public Task PublishLedgerAsync(WorkLedgerRecord rec, CancellationToken ct = default) => PostAsync("/ledger", rec, ct);
+    public Task SetLedgerStatusAsync(SetLedgerStatusRequest req, CancellationToken ct = default) => PostAsync("/ledger/set", req, ct);
     public async Task<List<WorkLedgerRecord>> AllLedgerAsync(CancellationToken ct = default)
         => await _http.GetFromJsonAsync<List<WorkLedgerRecord>>("/ledger", ct) ?? [];
 
@@ -88,6 +99,22 @@ public sealed class HubClient
     }
     public Task ReportAssignmentAsync(AssignmentStatusRequest req, CancellationToken ct = default) => PostAsync("/assignments/status", req, ct);
     public Task CancelAssignmentAsync(CancelAssignmentRequest req, CancellationToken ct = default) => PostAsync("/assignments/cancel", req, ct);
+
+    // ── Kho gộp kết quả Search ── (dùng _bulkHttp timeout dài cho push/fetch khối lớn)
+    public async Task PushSearchProductsAsync(SearchProductsPushRequest req, CancellationToken ct = default)
+    {
+        var r = await _bulkHttp.PostAsJsonAsync("/search-products", req, ct);
+        r.EnsureSuccessStatusCode();
+    }
+    public async Task<List<string>> SearchProductsAsync(CancellationToken ct = default)
+        => await _bulkHttp.GetFromJsonAsync<List<string>>("/search-products", ct) ?? [];
+    public async Task<int> SearchProductCountAsync(CancellationToken ct = default)
+        => await _http.GetFromJsonAsync<int>("/search-products/count", ct);
+    public async Task ClearSearchProductsAsync(CancellationToken ct = default)
+    {
+        var r = await _http.PostAsync("/search-products/clear", null, ct);
+        r.EnsureSuccessStatusCode();
+    }
 
     // ── File-sync ──
     public async Task<List<FileManifestEntry>> ManifestAsync(CancellationToken ct = default)

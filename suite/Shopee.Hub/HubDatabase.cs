@@ -39,6 +39,7 @@ public sealed class HubDatabase : IDisposable
     {
         AddColumnIfMissing("assignments", "start_row", "INTEGER DEFAULT 0");
         AddColumnIfMissing("assignments", "end_row", "INTEGER DEFAULT 0");
+        AddColumnIfMissing("assignments", "payload", "TEXT DEFAULT ''");
     }
 
     private void AddColumnIfMissing(string table, string column, string decl)
@@ -78,7 +79,9 @@ CREATE TABLE IF NOT EXISTS assignments(
   id TEXT PRIMARY KEY, bigseller_id TEXT, shop_id TEXT, sheet TEXT, op TEXT,
   target_machine_id TEXT, pinned INTEGER, status TEXT,
   claimed_by TEXT, claimed_host TEXT, last_error TEXT, created_at TEXT, updated_at TEXT,
-  start_row INTEGER DEFAULT 0, end_row INTEGER DEFAULT 0);");
+  start_row INTEGER DEFAULT 0, end_row INTEGER DEFAULT 0, payload TEXT DEFAULT '');
+CREATE TABLE IF NOT EXISTS search_products(
+  item_id INTEGER PRIMARY KEY, json TEXT, machine_id TEXT, source_file TEXT, updated_at TEXT);");
 
     // ── Leases (khoá việc theo shop+op) ─────────────────────────────────────────
     public LeaseAcquireResponse AcquireLease(LeaseAcquireRequest r)
@@ -305,6 +308,42 @@ ON CONFLICT(key) DO UPDATE SET
         }
     }
 
+    /// <summary>Hub ĐẶT TAY trạng thái sổ cho 1 (shop+op). idle/rỗng → XOÁ bản ghi (kèm tiến độ dòng) = "chưa
+    /// chạy" → scrape giao lại + chạy lại từ đầu. completed/stopped → ghi đè status (GIỮ completed/last_row cũ),
+    /// KHÔNG gộp khoảng dòng. Khác PublishLedger (gộp) — đây là can thiệp thủ công của operator.</summary>
+    public void SetLedgerStatus(string key, string bigsellerId, string shopId, string sheet, string op, string status)
+    {
+        if (string.IsNullOrWhiteSpace(key)) return;
+        lock (_gate)
+        {
+            var now = DateTimeOffset.UtcNow;
+            if (string.IsNullOrWhiteSpace(status) || string.Equals(status, "idle", StringComparison.OrdinalIgnoreCase))
+            {
+                using var d = _conn.CreateCommand();
+                d.CommandText = "DELETE FROM ledger WHERE key=$k";
+                d.Parameters.AddWithValue("$k", key);
+                d.ExecuteNonQuery();
+                return;
+            }
+            var existing = ReadLedgerLocked(key);
+            using var c = _conn.CreateCommand();
+            c.CommandText = @"
+INSERT INTO ledger(key,bigseller_id,shop_id,sheet,op,completed_json,last_row,status,last_machine_id,last_hostname,last_run_at,updated_at)
+VALUES($k,$b,$s,$sh,$o,$cj,$lr,$st,'','',$ua,$ua)
+ON CONFLICT(key) DO UPDATE SET status=$st, updated_at=$ua;";
+            c.Parameters.AddWithValue("$k", key);
+            c.Parameters.AddWithValue("$b", bigsellerId);
+            c.Parameters.AddWithValue("$s", shopId);
+            c.Parameters.AddWithValue("$sh", sheet);
+            c.Parameters.AddWithValue("$o", op);
+            c.Parameters.AddWithValue("$cj", existing is null ? "[]" : JsonSerializer.Serialize(existing.Completed));
+            c.Parameters.AddWithValue("$lr", existing?.LastRowReached ?? 0);
+            c.Parameters.AddWithValue("$st", status);
+            c.Parameters.AddWithValue("$ua", Iso(now));
+            c.ExecuteNonQuery();
+        }
+    }
+
     public List<WorkLedgerRecord> AllLedger()
     {
         lock (_gate)
@@ -470,17 +509,22 @@ ON CONFLICT(machine_id) DO UPDATE SET role=$r;";
             var dup = FindOpenAssignmentLocked(r.BigsellerId, r.ShopId, r.Op);
             if (dup is not null)
             {
-                // Cập nhật ghim/đích nếu người dùng đổi.
-                if (dup.Status == "queued" && (dup.Pinned != r.Pinned || dup.TargetMachineId != r.TargetMachineId))
+                // Việc CÒN CHỜ (queued): người dùng giao lại có thể đổi đích/ghim/khoảng dòng/PAYLOAD (vd Search
+                // đổi slice link, lane, khu vực) → cập nhật bản chờ để chạy đúng cái mới. RUNNING thì KHÔNG đụng.
+                if (dup.Status == "queued")
                 {
                     using var u = _conn.CreateCommand();
-                    u.CommandText = "UPDATE assignments SET target_machine_id=$t, pinned=$p, updated_at=$ua WHERE id=$id";
+                    u.CommandText = "UPDATE assignments SET target_machine_id=$t, pinned=$p, start_row=$sr, end_row=$er, payload=$pl, updated_at=$ua WHERE id=$id AND status='queued'";
                     u.Parameters.AddWithValue("$t", (object?)r.TargetMachineId ?? DBNull.Value);
                     u.Parameters.AddWithValue("$p", r.Pinned ? 1 : 0);
+                    u.Parameters.AddWithValue("$sr", r.StartRow);
+                    u.Parameters.AddWithValue("$er", r.EndRow);
+                    u.Parameters.AddWithValue("$pl", r.Payload ?? "");
                     u.Parameters.AddWithValue("$ua", Iso(DateTimeOffset.UtcNow));
                     u.Parameters.AddWithValue("$id", dup.Id);
                     u.ExecuteNonQuery();
                     dup.TargetMachineId = r.TargetMachineId; dup.Pinned = r.Pinned;
+                    dup.StartRow = r.StartRow; dup.EndRow = r.EndRow; dup.Payload = r.Payload ?? "";
                 }
                 return dup;
             }
@@ -491,13 +535,13 @@ ON CONFLICT(machine_id) DO UPDATE SET role=$r;";
                 Id = Guid.NewGuid().ToString("N"),
                 BigsellerId = r.BigsellerId, ShopId = r.ShopId, Sheet = r.Sheet, Op = r.Op,
                 TargetMachineId = r.TargetMachineId, Pinned = r.Pinned,
-                StartRow = r.StartRow, EndRow = r.EndRow,
+                StartRow = r.StartRow, EndRow = r.EndRow, Payload = r.Payload ?? "",
                 Status = "queued", CreatedAt = now, UpdatedAt = now,
             };
             using var c = _conn.CreateCommand();
             c.CommandText = @"
-INSERT INTO assignments(id,bigseller_id,shop_id,sheet,op,target_machine_id,pinned,status,claimed_by,claimed_host,last_error,created_at,updated_at,start_row,end_row)
-VALUES($id,$b,$s,$sh,$o,$t,$p,'queued','','','',$ca,$ua,$sr,$er);";
+INSERT INTO assignments(id,bigseller_id,shop_id,sheet,op,target_machine_id,pinned,status,claimed_by,claimed_host,last_error,created_at,updated_at,start_row,end_row,payload)
+VALUES($id,$b,$s,$sh,$o,$t,$p,'queued','','','',$ca,$ua,$sr,$er,$pl);";
             c.Parameters.AddWithValue("$id", a.Id);
             c.Parameters.AddWithValue("$b", a.BigsellerId);
             c.Parameters.AddWithValue("$s", a.ShopId);
@@ -509,6 +553,7 @@ VALUES($id,$b,$s,$sh,$o,$t,$p,'queued','','','',$ca,$ua,$sr,$er);";
             c.Parameters.AddWithValue("$ua", Iso(now));
             c.Parameters.AddWithValue("$sr", a.StartRow);
             c.Parameters.AddWithValue("$er", a.EndRow);
+            c.Parameters.AddWithValue("$pl", a.Payload ?? "");
             c.ExecuteNonQuery();
             return a;
         }
@@ -557,8 +602,8 @@ VALUES($id,$b,$s,$sh,$o,$t,$p,'queued','','','',$ca,$ua,$sr,$er);";
             var host = HostnameOfLocked(machineId);
             var claimed = new List<Assignment>();
 
-            // Tài khoản BigSeller đang BẬN (lease tươi của BẤT KỲ máy nào, HOẶC assignment đang running).
-            var busy = BusyBigsellersLocked(now);
+            // (Tài khoản, op) đang BẬN cho scrape/import (lease tươi BẤT KỲ máy nào, HOẶC assignment running).
+            var busy = BusyOpsLocked(now);
 
             using var c = _conn.CreateCommand();
             c.CommandText = "SELECT * FROM assignments WHERE status='queued' ORDER BY created_at";
@@ -574,8 +619,9 @@ VALUES($id,$b,$s,$sh,$o,$t,$p,'queued','','','',$ca,$ua,$sr,$er);";
                     ? string.Equals(a.TargetMachineId, machineId, StringComparison.Ordinal)
                     : MachineRoles.Handles(role, a.Op);
                 if (!routed) continue;
-                // Single-session: tài khoản này đang có việc chạy ở đâu đó → chờ.
-                if (busy.Contains(a.BigsellerId)) continue;
+                // Độc-quyền-theo-acc CHO scrape/import: mỗi acc chỉ 1 shop scrape + 1 shop import cùng lúc
+                // (scrape ↔ import vẫn song song được, kể cả cùng shop). UPDATE không giới hạn (shop nào cũng chạy).
+                if (a.Op is "scrape" or "import" && busy.Contains($"{a.BigsellerId}__{a.Op}")) continue;
                 // Thứ tự pipeline.
                 if (!PipelineReadyLocked(a)) continue;
 
@@ -589,32 +635,36 @@ VALUES($id,$b,$s,$sh,$o,$t,$p,'queued','','','',$ca,$ua,$sr,$er);";
                 {
                     a.Status = "running"; a.ClaimedByMachineId = machineId; a.ClaimedByHostname = host; a.UpdatedAt = now;
                     claimed.Add(a);
-                    busy.Add(a.BigsellerId);   // không cấp thêm op khác CÙNG tài khoản trong cùng lượt
+                    if (a.Op is "scrape" or "import") busy.Add($"{a.BigsellerId}__{a.Op}");   // không cấp thêm CÙNG op cho acc này trong cùng lượt
                 }
             }
             return claimed;
         }
     }
 
-    /// <summary>Tập tài khoản BigSeller đang bận: có lease tươi, hoặc assignment đang running.</summary>
-    private HashSet<string> BusyBigsellersLocked(DateTimeOffset now)
+    /// <summary>Tập (tài khoản, op) đang BẬN cho các op CẦN ĐỘC-QUYỀN-THEO-ACC = scrape, import: mỗi acc chỉ
+    /// 1 shop scrape + 1 shop import cùng lúc. scrape ↔ import KHÔNG chặn nhau (cùng/khác shop chạy song song).
+    /// UPDATE KHÔNG tính ở đây (shop nào cũng chạy được, vì đã import chọn shop). Key = "{bigsellerId}__{op}".
+    /// Nguồn bận: lease tươi hoặc assignment đang running.</summary>
+    private HashSet<string> BusyOpsLocked(DateTimeOffset now)
     {
         var set = new HashSet<string>(StringComparer.Ordinal);
         using (var c = _conn.CreateCommand())
         {
-            c.CommandText = "SELECT bigseller_id,heartbeat_at,status FROM leases";
+            c.CommandText = "SELECT bigseller_id,op,heartbeat_at,status FROM leases";
             using var rd = c.ExecuteReader();
             while (rd.Read())
             {
-                var hb = DateTimeOffset.TryParse(S(rd, 1), out var d) ? d : DateTimeOffset.MinValue;
-                if ((now - hb) < StaleLease && S(rd, 2) is "running" or "finishing") set.Add(S(rd, 0));
+                var hb = DateTimeOffset.TryParse(S(rd, 2), out var d) ? d : DateTimeOffset.MinValue;
+                if ((now - hb) < StaleLease && S(rd, 3) is "running" or "finishing" && S(rd, 1) is "scrape" or "import")
+                    set.Add($"{S(rd, 0)}__{S(rd, 1)}");
             }
         }
         using (var c = _conn.CreateCommand())
         {
-            c.CommandText = "SELECT bigseller_id FROM assignments WHERE status='running'";
+            c.CommandText = "SELECT bigseller_id,op FROM assignments WHERE status='running' AND op IN ('scrape','import')";
             using var rd = c.ExecuteReader();
-            while (rd.Read()) set.Add(S(rd, 0));
+            while (rd.Read()) set.Add($"{S(rd, 0)}__{S(rd, 1)}");
         }
         return set;
     }
@@ -623,11 +673,14 @@ VALUES($id,$b,$s,$sh,$o,$t,$p,'queued','','','',$ca,$ua,$sr,$er);";
     /// Op tự động đã 'completed' thì không claim lại (chống re-run khi 1 assignment lỡ lọt vào 'queued').</summary>
     private bool PipelineReadyLocked(Assignment a)
     {
-        if (!a.Pinned)
-        {
-            var self = ReadLedgerLocked($"{a.BigsellerId}__{a.ShopId}__{a.Op}");
-            if (self?.Status == "completed") return false;
-        }
+        // GHIM TAY = operator CHỦ ĐỘNG chọn chạy op này trên máy này → BỎ QUA ràng buộc thứ tự pipeline (đừng
+        // đòi scrape/import phải 'completed' trong ledger). Trước đây pinned vẫn bị chặn nên import/update ghim
+        // tay kẹt 'đã xếp' mãi khi scrape chưa 'completed' (scrape dừng dở / login-first / cào ở máy khác).
+        // Lưới an toàn vẫn còn: tiền-kiểm workbook/sheet phía client (CanDispatchUpdate) + single-session (busy).
+        if (a.Pinned) return true;
+
+        var self = ReadLedgerLocked($"{a.BigsellerId}__{a.ShopId}__{a.Op}");
+        if (self?.Status == "completed") return false;
         string? need = a.Op switch { "import" => "scrape", "update" => "import", _ => null };
         if (need is null) return true;
         var key = $"{a.BigsellerId}__{a.ShopId}__{need}";
@@ -686,9 +739,66 @@ VALUES($id,$b,$s,$sh,$o,$t,$p,'queued','','','',$ca,$ua,$sr,$er);";
             ClaimedByHostname = S(rd, i("claimed_host")), LastError = S(rd, i("last_error")),
             StartRow = rd.IsDBNull(i("start_row")) ? 0 : rd.GetInt32(i("start_row")),
             EndRow = rd.IsDBNull(i("end_row")) ? 0 : rd.GetInt32(i("end_row")),
+            Payload = S(rd, i("payload")),
             CreatedAt = D(rd, i("created_at")), UpdatedAt = D(rd, i("updated_at")),
         };
     }
+
+    // ── Kho gộp kết quả Search (client đẩy sản phẩm cào được → Hub gộp, dedup theo item_id) ──
+    /// <summary>Lưu 1 lô sản phẩm client gửi; trùng item_id thì GHI ĐÈ (bản mới nhất). Chạy trong 1 transaction.</summary>
+    public void SaveSearchProducts(SearchProductsPushRequest r)
+    {
+        if (r?.Products is null || r.Products.Count == 0) return;
+        lock (_gate)
+        {
+            var now = Iso(DateTimeOffset.UtcNow);
+            using var tx = _conn.BeginTransaction();
+            using var c = _conn.CreateCommand();
+            c.Transaction = tx;
+            c.CommandText = @"
+INSERT INTO search_products(item_id,json,machine_id,source_file,updated_at)
+VALUES($i,$j,$m,$s,$u)
+ON CONFLICT(item_id) DO UPDATE SET json=$j, machine_id=$m, source_file=$s, updated_at=$u;";
+            var pI = c.Parameters.Add("$i", SqliteType.Integer);
+            var pJ = c.Parameters.Add("$j", SqliteType.Text);
+            var pM = c.Parameters.Add("$m", SqliteType.Text);
+            var pS = c.Parameters.Add("$s", SqliteType.Text);
+            var pU = c.Parameters.Add("$u", SqliteType.Text);
+            foreach (var p in r.Products)
+            {
+                if (p is null || p.ItemId == 0 || string.IsNullOrEmpty(p.Json)) continue;
+                pI.Value = p.ItemId; pJ.Value = p.Json; pM.Value = r.MachineId ?? ""; pS.Value = r.SourceFile ?? ""; pU.Value = now;
+                c.ExecuteNonQuery();
+            }
+            tx.Commit();
+        }
+    }
+
+    /// <summary>Toàn bộ blob JSON sản phẩm đã gộp (để client xuất Excel gộp). Dedup đã sẵn theo item_id.</summary>
+    public List<string> AllSearchProductJson()
+    {
+        lock (_gate)
+        {
+            var list = new List<string>();
+            using var c = _conn.CreateCommand();
+            c.CommandText = "SELECT json FROM search_products";
+            using var rd = c.ExecuteReader();
+            while (rd.Read()) { var j = S(rd, 0); if (!string.IsNullOrEmpty(j)) list.Add(j); }
+            return list;
+        }
+    }
+
+    public int SearchProductCount()
+    {
+        lock (_gate)
+        {
+            using var c = _conn.CreateCommand();
+            c.CommandText = "SELECT COUNT(*) FROM search_products";
+            return Convert.ToInt32(c.ExecuteScalar() ?? 0);
+        }
+    }
+
+    public void ClearSearchProducts() { lock (_gate) ExecRaw("DELETE FROM search_products;"); }
 
     // ── Files (manifest + blob trên đĩa) ────────────────────────────────────────
     public List<FileManifestEntry> ListFiles()

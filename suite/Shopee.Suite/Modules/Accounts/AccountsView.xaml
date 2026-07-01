@@ -49,6 +49,23 @@
                               SelectedItem="{Binding SelectedFilter}" ItemsSource="{Binding FilterOptions}" />
                 </StackPanel>
 
+                <!-- Kho KiotProxy dùng chung — xoay vòng gán cho acc lúc chạy (không gán cứng khi import nữa) -->
+                <Border DockPanel.Dock="Bottom" Style="{StaticResource Card}" Padding="12,10" Margin="0,10,0,0">
+                    <StackPanel>
+                        <Grid>
+                            <TextBlock Text="Kho KiotProxy dùng chung (xoay vòng lúc chạy)"
+                                       Style="{StaticResource H2}" VerticalAlignment="Center" />
+                            <Button HorizontalAlignment="Right" Style="{StaticResource PrimaryButton}"
+                                    Content="💾  Lưu proxy" MinWidth="110" Command="{Binding SaveProxyPoolCommand}" />
+                        </Grid>
+                        <TextBlock Style="{StaticResource Caption}" Margin="0,2,0,6" TextWrapping="Wrap"
+                                   Text="Mỗi dòng 1 KiotProxy key hoặc host:port. Lúc chạy: acc thứ i → proxy thứ (i mod số proxy). Máy Hub quản lý; client tự nhận (sửa ở client sẽ bị Hub ghi đè)." />
+                        <TextBox Style="{StaticResource MonoTextBox}" Height="90" AcceptsReturn="True" TextWrapping="NoWrap"
+                                 VerticalScrollBarVisibility="Auto"
+                                 Text="{Binding ProxyPoolText, UpdateSourceTrigger=PropertyChanged}" />
+                    </StackPanel>
+                </Border>
+
                 <Border Style="{StaticResource Card}" ClipToBounds="True">
                     <DataGrid x:Name="AccountsGrid" ItemsSource="{Binding Items}" SelectedItem="{Binding Selected}"
                               BorderThickness="0" IsReadOnly="True" SelectionMode="Extended">

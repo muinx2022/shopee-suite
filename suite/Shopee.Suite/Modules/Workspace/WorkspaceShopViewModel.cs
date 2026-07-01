@@ -124,6 +124,20 @@ public sealed partial class WorkspaceShopViewModel : ObservableObject
         return r ? $"Đang {verb} (máy {by}) — dừng tại máy đó" : idleText;
     }
 
+    /// <summary>Op này đã được đánh dấu "✓ xong" trong sổ Hub (ledger.status=completed) chưa — để MỌI client
+    /// thấy trạng thái xong (scrape auto báo; import/update operator đặt tay). KHÔNG tính lúc đang chạy.</summary>
+    private bool IsOpDone(CoordOp op)
+    {
+        var hub = CoordinationRuntime.Hub;
+        if (hub is null) return false;
+        var key = new CoordKey(Parent.Account.Id, Shop.Id, Shop.ShopeeDataSheet ?? "", op).Id;
+        return hub.CurrentFleet.Ledger.Any(l => string.Equals(l.Key, key, StringComparison.Ordinal)
+                                                && string.Equals(l.Status, "completed", StringComparison.OrdinalIgnoreCase));
+    }
+    public bool ScrapeDone => !OpState(CoordOp.Scrape, IsScraping).running && IsOpDone(CoordOp.Scrape);
+    public bool ImportDone => !OpState(CoordOp.Import, IsImporting).running && IsOpDone(CoordOp.Import);
+    public bool UpdateDone => !OpState(CoordOp.Update, IsUpdatingShop).running && IsOpDone(CoordOp.Update);
+
     /// <summary>true khi shop này đang chạy 1 workflow update TRÊN MÁY NÀY (giữ cho chỗ khác nếu còn dùng).</summary>
     public bool IsUpdatingAnyLocal => IsImporting || IsUpdatingShop || IsRewriting;
 
@@ -137,6 +151,7 @@ public sealed partial class WorkspaceShopViewModel : ObservableObject
             nameof(ScrapeToggleEnabled), nameof(ImportToggleEnabled), nameof(UpdateToggleEnabled), nameof(RewriteToggleEnabled),
             nameof(ScrapeToggleTip), nameof(ImportToggleTip), nameof(UpdateToggleTip), nameof(RewriteToggleTip),
             nameof(CanScrape), nameof(CanStartUpdate), nameof(IsUpdatingAnyLocal),
+            nameof(ScrapeDone), nameof(ImportDone), nameof(UpdateDone),
         }) OnPropertyChanged(n);
     }
 

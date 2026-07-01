@@ -55,8 +55,6 @@ internal static class UpdateProductSettings
             settings.BraveExe = DetectBraveExe()?.FullName ?? "";
         if (string.IsNullOrWhiteSpace(settings.SourceUserData))
             settings.SourceUserData = DetectBraveUserData()?.FullName ?? "";
-        if (string.IsNullOrWhiteSpace(settings.OpenAiApiKeyFile))
-            settings.OpenAiApiKeyFile = Path.Combine(AppSession.RepoRootDirectory, "openai.key");
 
         settings.Accounts ??= [];
         if (settings.Accounts.Count == 0)

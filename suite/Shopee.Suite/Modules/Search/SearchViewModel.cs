@@ -7,9 +7,12 @@ using CommunityToolkit.Mvvm.Input;
 using Microsoft.Win32;
 using Shopee.Core.Accounts;
 using Shopee.Core.Ai;
+using Shopee.Core.Coordination;
 using Shopee.Core.Infrastructure;
+using Shopee.Core.Proxy;
 using Shopee.Modules.Search;
 using Shopee.Suite.Infrastructure;
+using ShopeeStatApp.Models;
 using ShopeeStatApp.Services;
 
 namespace Shopee.Suite.Modules.Search;
@@ -80,6 +83,14 @@ public sealed partial class SearchViewModel : ObservableObject
     private CancellationTokenSource? _cts;
     private SearchRunner? _runner;
     private CancellationTokenSource? _aiCts;
+    /// <summary>Id việc Hub đang chạy (op "search") — để AssignmentWorker biết lượt chạy này thuộc việc nào.
+    /// null = đang chạy tay (không phải việc Hub giao).</summary>
+    private string? _assignmentId;
+    /// <summary>ItemId các sản phẩm ĐÃ đẩy lên Hub trong lượt chạy này (chỉ đẩy phần MỚI mỗi chu kỳ → liên tục, không gửi lại).</summary>
+    private readonly HashSet<long> _pushedItemIds = [];
+    /// <summary>Kết quả TERMINAL của việc Search theo id (completed | stopped | failed) — AssignmentWorker đọc
+    /// để báo Hub đúng (crash/dừng dở KHÔNG báo "done"). Search không ghi ledger nên cần kênh này.</summary>
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _assignmentOutcomes = new(StringComparer.Ordinal);
 
     private SearchRunner? _db;
     private SearchRunner Db => _db ??= new SearchRunner();
@@ -242,17 +253,10 @@ public sealed partial class SearchViewModel : ObservableObject
         _usedAccounts.Clear();
         try
         {
-            _runner = new SearchRunner();
-            WireRunner();
-            var specs = _pool.Select(a => new SearchAccountSpec(
-                a.Id, a.DisplayName, a.ShopeeAccountLogin, a.OpenWithShopeeAccount,
-                a.KiotProxyKey, a.ProxyType, a.ManualProxy, a.ProfileRelativePath, a.RequireProxy)).ToList();
-
+            var specs = _pool.Select(ToSpec).ToList();
             Log($"{(resume ? "⏯ Tiếp tục" : "▶ Search")} {items.Count} link · {specs.Count} account · {lanes} lane · khu vực \"{Region}\". Xuất: {OutputDir}\\categories");
-            await _runner.RunCategoryLinksAsync(specs, items, lanes, Region, OutputDir, resume, _cts.Token);
+            await RunCoreAsync(items, specs, lanes, Region, resume, _cts.Token);
             Status = _cts.IsCancellationRequested ? "Đã dừng (giữ phiên)." : "Hoàn tất.";
-            RefreshCategories();
-            RefreshLinkProgress();
             Log($"── {Status} Tổng {_all.Count} sản phẩm trong phiên. ──");
         }
         catch (Exception ex)
@@ -262,17 +266,178 @@ public sealed partial class SearchViewModel : ObservableObject
         }
         finally
         {
-            var changed = false;
-            foreach (var id in _usedAccounts)
-            {
-                var acc = AccountStore.Shared.Accounts.FirstOrDefault(a => a.Id == id);
-                if (acc is not null && acc.OpenWithShopeeAccount) { acc.OpenWithShopeeAccount = false; changed = true; }
-            }
-            if (changed) AccountStore.Shared.Save();
-
+            ResetUsedAccounts();
             _cts?.Dispose();
             _cts = null;
             IsRunning = false;
+        }
+    }
+
+    /// <summary>Lõi chạy dùng chung (chạy tay + việc Hub giao): dựng runner, chạy đúng <paramref name="items"/>
+    /// với <paramref name="specs"/> đã lọc, rồi làm mới danh mục/tiến độ. KHÔNG đụng khoá/cờ chạy (caller lo).</summary>
+    private async Task RunCoreAsync(
+        IReadOnlyList<(int Index, string Link, string SourceFile)> items,
+        IReadOnlyList<SearchAccountSpec> specs, int lanes, string region, bool resume, CancellationToken ct)
+    {
+        _runner = new SearchRunner();
+        WireRunner();
+        await _runner.RunCategoryLinksAsync(specs, items, lanes, region, OutputDir, resume, ct);
+        RefreshCategories();
+        RefreshLinkProgress();
+    }
+
+    /// <summary>Dựng spec cho engine; proxy lấy XOAY VÒNG từ kho KiotProxy dùng chung (ghi đè proxy gắn sẵn
+    /// của acc). Kho rỗng → giữ proxy của acc (fallback tương thích).</summary>
+    private static SearchAccountSpec ToSpec(ShopeeAccount a)
+    {
+        var pooled = KiotProxyPoolStore.Shared.ProxyForAccount(a.Id);
+        var kiot = pooled?.KiotKey ?? a.KiotProxyKey;
+        var manual = pooled?.Manual ?? a.ManualProxy;
+        return new(a.Id, a.DisplayName, a.ShopeeAccountLogin, a.OpenWithShopeeAccount,
+            kiot, a.ProxyType, manual, a.ProfileRelativePath, a.RequireProxy);
+    }
+
+    /// <summary>Sau 1 lượt chạy: nhả cờ OpenWithShopeeAccount của các tk đã đăng nhập (lần sau khỏi login lại).</summary>
+    private void ResetUsedAccounts()
+    {
+        var changed = false;
+        foreach (var id in _usedAccounts)
+        {
+            var acc = AccountStore.Shared.Accounts.FirstOrDefault(a => a.Id == id);
+            if (acc is not null && acc.OpenWithShopeeAccount) { acc.OpenWithShopeeAccount = false; changed = true; }
+        }
+        if (changed) AccountStore.Shared.Save();
+    }
+
+    // ── Việc Search Hub giao (đa máy) ─────────────────────────────────────────────
+    /// <summary>true nếu lượt chạy hiện tại CHÍNH LÀ việc Hub <paramref name="id"/> (cho AssignmentWorker quan sát).</summary>
+    public bool IsRunningAssignment(string id) => IsRunning && _assignmentId == id;
+
+    /// <summary>Dừng lượt chạy nếu nó thuộc việc Hub <paramref name="id"/> (Hub huỷ việc → client dừng).</summary>
+    public void StopAssignment(string id) { if (_assignmentId == id) Stop(); }
+
+    /// <summary>Lấy (và xoá) kết quả terminal của việc Search <paramref name="id"/>: "completed" | "stopped" |
+    /// "failed"; null nếu chưa có (AssignmentWorker sẽ suy theo grace).</summary>
+    public string? TakeAssignmentOutcome(string id) => _assignmentOutcomes.TryRemove(id, out var v) ? v : null;
+
+    /// <summary>
+    /// Chạy đúng KHỐI link Hub giao (silent, KHÔNG mở dialog). Khóa tối đa <c>AccountsPerClient</c> tài khoản
+    /// Shopee qua Hub account-lease (máy khác không đụng), heartbeat nền 60s, chạy resume theo từng link, rồi
+    /// nhả khóa. Bám đúng cơ chế account-lease của Scrape. Trả về khi xong/dừng.
+    /// </summary>
+    public async Task RunAssignmentAsync(string assignmentId, SearchJobPayload p, CancellationToken externalCt)
+    {
+        if (IsRunning) return;   // máy đang chạy 1 search khác — bỏ (AssignmentWorker đã tiền-kiểm)
+        var links = (p.Links ?? []).Where(s => !string.IsNullOrWhiteSpace(s)).ToList();
+        if (links.Count == 0) return;
+        if (_pool.Count == 0) { Log("⚠ Việc Search Hub giao: kho tài khoản Shopee trống — bỏ qua."); return; }
+
+        var region = string.IsNullOrWhiteSpace(p.Region) ? Region : p.Region!;
+        var source = string.IsNullOrWhiteSpace(p.SourceFile) ? "(Hub giao)" : p.SourceFile!;
+
+        // Dựng tab cho từng link của khối (mỗi link 1 tab) — giống chạy tay để theo dõi tiến độ.
+        var items = new List<(int Index, string Link, string SourceFile)>();
+        for (var i = 0; i < links.Count; i++)
+        {
+            var link = links[i];
+            var tab = LinkTabs.FirstOrDefault(t => t.Link == link);
+            if (tab is null) { tab = new SearchFileTab(i + 1, link, source, FileRunCoordinator.CatLabel(link)); LinkTabs.Add(tab); }
+            tab.Status = "chờ";
+            items.Add((i + 1, link, source));
+        }
+        SelectedLinkTab ??= LinkTabs.FirstOrDefault();
+
+        _assignmentId = assignmentId;
+        IsRunning = true;
+        _cts = CancellationTokenSource.CreateLinkedTokenSource(externalCt);
+        _usedAccounts.Clear();
+        lock (_pushedItemIds) _pushedItemIds.Clear();
+
+        var accHub = CoordinationRuntime.Hub;
+        List<string> reserved = [];
+        System.Threading.Timer? accHeartbeat = null;
+        System.Threading.Timer? pushTimer = null;
+        var startedRun = false;
+        var failedRun = false;
+        try
+        {
+            // Khóa tk Shopee xuyên máy: giành cả pool (Hub trả tk KHÔNG bị máy khác giữ) rồi chỉ giữ N cái đầu,
+            // nhả phần thừa để máy khác dùng. Offline (không Hub) → dùng cả pool như chạy 1 máy.
+            var working = _pool.Select(a => a.Id).ToList();
+            if (accHub is not null)
+            {
+                // Giành ĐÚNG số acc cần (N), KHÔNG giành cả pool rồi trả — tránh chặn tạm toàn bộ acc (máy khác
+                // đói) và rò acc nếu release phần thừa lỗi. acc bị máy khác giữ → thử acc kế trong pool cho đủ N.
+                var want = Math.Max(1, p.AccountsPerClient);
+                var candidates = working;
+                var acquired = new List<string>();
+                for (var i = 0; i < candidates.Count && acquired.Count < want; i += want)
+                {
+                    var slice = candidates.Skip(i).Take(want - acquired.Count).ToList();
+                    var g = await accHub.ReserveAccountsAsync(slice);
+                    acquired.AddRange(slice.Where(g.Contains));
+                }
+                reserved = acquired;   // finally nhả ĐÚNG những gì đã giành → không rò acc
+                working = acquired;
+                if (working.Count == 0)
+                { Log("⚠ Việc Search Hub giao: mọi tài khoản Shopee đang được máy khác giữ — bỏ qua."); return; }
+                accHeartbeat = new System.Threading.Timer(_ => { try { _ = accHub.HeartbeatAccountsAsync(reserved); } catch { } },
+                    null, TimeSpan.FromSeconds(60), TimeSpan.FromSeconds(60));
+            }
+
+            var specs = _pool.Where(a => working.Contains(a.Id)).Select(ToSpec).ToList();
+            var lanes = Math.Max(1, Math.Min(Math.Min(p.Lanes <= 0 ? LaneCount : p.Lanes, specs.Count), items.Count));
+            Log($"▶ Search (Hub giao) {items.Count} link · {specs.Count}/{_pool.Count} acc (khóa xuyên máy) · {lanes} lane · khu vực \"{region}\".");
+            startedRun = true;
+            // Đẩy sản phẩm cào được lên Hub theo CHU KỲ 20s trong lúc chạy → kết quả gộp cập nhật LIÊN TỤC.
+            if (CoordinationRuntime.Client is not null)
+                pushTimer = new System.Threading.Timer(_ => _ = PushNewCollectedAsync(_runner, source), null,
+                    TimeSpan.FromSeconds(20), TimeSpan.FromSeconds(20));
+            await RunCoreAsync(items, specs, lanes, region, resume: true, _cts.Token);
+            Log(_cts.IsCancellationRequested ? "── Đã dừng việc Search (giữ phiên). ──" : "── Hoàn tất việc Search Hub giao. ──");
+        }
+        catch (OperationCanceledException) { Log("── Đã dừng việc Search. ──"); }
+        catch (Exception ex) { failedRun = true; Log("✘ Lỗi việc Search Hub giao: " + ex.Message); }
+        finally
+        {
+            if (pushTimer is not null) { try { await pushTimer.DisposeAsync(); } catch { } }
+            if (accHeartbeat is not null) { try { await accHeartbeat.DisposeAsync(); } catch { } }
+            if (accHub is not null && reserved.Count > 0) { try { await accHub.ReleaseAccountsAsync(reserved); } catch { } }
+            // Đẩy nốt phần sản phẩm còn lại lên Hub (kể cả khi dừng dở — gửi phần đã cào).
+            if (startedRun) await PushNewCollectedAsync(_runner, source);
+            // Kết quả terminal cho AssignmentWorker báo Hub đúng: chưa chạy được / lỗi = failed; bị dừng = stopped;
+            // chạy hết bình thường = completed. (Search không ghi ledger nên phải tự ghi outcome ở đây.)
+            var canceled = _cts?.IsCancellationRequested == true;
+            _assignmentOutcomes[assignmentId] = !startedRun || failedRun ? "failed" : canceled ? "stopped" : "completed";
+            ResetUsedAccounts();
+            _assignmentId = null;
+            _cts?.Dispose();
+            _cts = null;
+            IsRunning = false;
+        }
+    }
+
+    /// <summary>Đẩy phần sản phẩm MỚI (chưa đẩy) của lượt chạy này lên Hub để gộp xuyên máy. Best-effort, chia
+    /// lô 500; chỉ đánh dấu "đã đẩy" SAU khi gửi thành công (lỗi mạng → lần sau gửi lại). Gọi định kỳ + lúc kết thúc.</summary>
+    private async Task PushNewCollectedAsync(SearchRunner? runner, string sourceFile)
+    {
+        var client = CoordinationRuntime.Client;
+        if (client is null || runner is null) return;
+        List<ProductResult> fresh;
+        lock (_pushedItemIds)
+            fresh = runner.CollectedProducts().Where(p => p.ItemId != 0 && !_pushedItemIds.Contains(p.ItemId)).ToList();
+        if (fresh.Count == 0) return;
+        var machineId = CoordinationRuntime.Hub?.MachineId ?? "";
+        for (var i = 0; i < fresh.Count; i += 500)
+        {
+            var batch = fresh.GetRange(i, Math.Min(500, fresh.Count - i));
+            var payload = batch.Select(p => new SearchProductItem(p.ItemId, JsonSerializer.Serialize(p))).ToList();
+            try
+            {
+                await client.PushSearchProductsAsync(new SearchProductsPushRequest(machineId, sourceFile, payload));
+                lock (_pushedItemIds) foreach (var p in batch) _pushedItemIds.Add(p.ItemId);
+            }
+            catch { }
         }
     }
 

@@ -32,6 +32,7 @@ public sealed class HubConfigSync
         if (await PushIfChangedAsync(manifest, SharedFile("bigseller.json"), "config/bigseller.json", ct)) n++;
         if (await PushIfChangedAsync(manifest, SharedFile("ai.json"), "config/ai.json", ct)) n++;
         if (await PushIfChangedAsync(manifest, SharedFile("scrape-targets.json"), "config/scrape-targets.json", ct)) n++;
+        if (await PushIfChangedAsync(manifest, SharedFile("kiot-proxies.json"), "config/kiot-proxies.json", ct)) n++;
 
         if (Directory.Exists(CookieDir))
             foreach (var f in Directory.GetFiles(CookieDir, "*.json"))
@@ -136,6 +137,24 @@ public sealed class HubConfigSync
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException) { }
+
+        // 4b) Kho KiotProxy dùng chung (ghi đè — Hub là nguồn sự thật; client tự nhận proxy mới).
+        // CHỈ client mới ghi đè: máy HUB KHÔNG tự ghi đè kho của chính nó bằng bản blob (có thể cũ hơn bản
+        // admin vừa sửa tay chưa kịp push) — tránh mất chỉnh sửa. (Auto-pull đã bỏ qua Hub; đây chặn cả nút
+        // "Đồng bộ acc" tay + handoff-pull chạy trên máy Hub.)
+        if (!HubServerConfigStore.Shared.Current.Enabled)
+        {
+            try
+            {
+                var pxBytes = await _client.DownloadAsync("config/kiot-proxies.json", ct);
+                if (pxBytes is not null)
+                {
+                    var keys = JsonSerializer.Deserialize<List<string>>(NoBom(pxBytes)) ?? [];
+                    Shopee.Core.Proxy.KiotProxyPoolStore.Shared.ReplaceAll(keys);
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException) { }
+        }
 
         // 5) Workbook Excel — tải về hub-cache và TRỎ WorkbookPath sang bản local (để máy này scrape được).
         try

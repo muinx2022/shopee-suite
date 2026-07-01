@@ -129,6 +129,18 @@ public sealed class HttpCoordinationHub : ICoordinationHub, IDisposable
         try { await _client.PublishLedgerAsync(rec); } catch { }
     }
 
+    /// <summary>Hub ĐẶT TAY trạng thái sổ cho 1 việc (operator bấm trên bảng Giao việc): completed = ✓ xong;
+    /// stopped = ■ dừng; idle = chưa chạy (xoá bản ghi → giao lại được). Ghi đè, không gộp.</summary>
+    public async Task SetLedgerStatusAsync(CoordKey key, string status)
+    {
+        try
+        {
+            await _client.SetLedgerStatusAsync(new SetLedgerStatusRequest(
+                key.Id, key.BigsellerId, key.ShopId, key.Sheet, OpStr(key.Op), status));
+        }
+        catch { }
+    }
+
     // ── Account-lease (chống dùng trùng acc Shopee xuyên máy) ──
     /// <summary>Giành các acc; trả về tập ĐƯỢC cấp. Offline → cấp hết (degrade về như 1 máy).</summary>
     public async Task<HashSet<string>> ReserveAccountsAsync(IEnumerable<string> ids)

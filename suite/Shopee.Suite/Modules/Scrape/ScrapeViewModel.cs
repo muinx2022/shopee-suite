@@ -9,6 +9,7 @@ using Shopee.Core.BigSeller;
 using Shopee.Core.Browser;
 using Shopee.Core.Coordination;
 using Shopee.Core.Infrastructure;
+using Shopee.Core.Proxy;
 using Shopee.Core.Scrape;
 using Shopee.Modules.MultiBrave;
 using Shopee.Suite.Infrastructure;
@@ -630,10 +631,17 @@ public sealed partial class ScrapeViewModel : ObservableObject
         SelectedTarget.RefreshProgress();   // có thể đã nhả tay / xoá tiến độ → cập nhật nhãn.
     }
 
-    private static ScrapeAccountSpec ToSpec(ShopeeAccount a, string sheet) => new(
-        a.Id, a.DisplayName, a.ShopeeAccountLogin, a.OpenWithShopeeAccount,
-        a.KiotProxyKey, a.Region, a.ProxyType, a.ManualProxy, a.RequireProxy, sheet, 0, 0,
-        ResolveShopeeProfileDir(a));
+    /// <summary>Proxy lấy XOAY VÒNG từ kho KiotProxy dùng chung (ghi đè proxy gắn sẵn của acc); kho rỗng →
+    /// giữ proxy của acc (fallback).</summary>
+    private static ScrapeAccountSpec ToSpec(ShopeeAccount a, string sheet)
+    {
+        var pooled = KiotProxyPoolStore.Shared.ProxyForAccount(a.Id);
+        var kiot = pooled?.KiotKey ?? a.KiotProxyKey;
+        var manual = pooled?.Manual ?? a.ManualProxy;
+        return new(a.Id, a.DisplayName, a.ShopeeAccountLogin, a.OpenWithShopeeAccount,
+            kiot, a.Region, a.ProxyType, manual, a.RequireProxy, sheet, 0, 0,
+            ResolveShopeeProfileDir(a));
+    }
 
     /// <summary>Thư mục profile (Edge) đã đăng nhập Shopee của tk — engine import session từ đây sang
     /// Brave để khỏi login form. ProfileRelativePath có thể tuyệt đối (do tab Kiểm tra tài khoản lưu)

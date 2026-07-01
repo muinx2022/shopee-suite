@@ -29,6 +29,13 @@ public sealed partial class ShellViewModel : ObservableObject
     /// <summary>ViewModel đang hiển thị: module được chọn, hoặc màn hình Welcome khi chưa chọn gì.</summary>
     public object Current => Selected?.ViewModel ?? _welcome;
 
+    /// <summary>Nhãn vai trò máy hiển thị ở đáy sidebar: HUB (máy chạy Hub) · CLIENT (đã nối Hub) · NONE
+    /// (chưa cấu hình đồng bộ). Cố định theo cấu hình lúc khởi động.</summary>
+    public string RoleBadge =>
+        Shopee.Core.Coordination.HubServerConfigStore.Shared.Current.Enabled ? "HUB"
+        : Shopee.Core.Coordination.CoordinationRuntime.Active ? "CLIENT"
+        : "NONE";
+
     public ShellViewModel()
     {
         // Tạo các ViewModel MỘT LẦN — màn gộp v1.1 (Workspace) DÙNG CHUNG đúng 3 VM BigSeller/Scrape/Update
@@ -36,11 +43,12 @@ public sealed partial class ShellViewModel : ObservableObject
         var bigSeller = new BigSellerViewModel();
         var scrape = new ScrapeViewModel();
         var update = new UpdateProductViewModel();
+        var search = new SearchViewModel();
         var workspace = new WorkspaceViewModel(bigSeller, scrape, update);
 
         // Giao việc đa máy: worker (client tự chạy việc Hub giao) + dispatcher (máy Hub tự đẩy việc).
         // Cả hai tự "ngủ" khi máy chưa có vai trò / chưa bật điều phối → không đổi hành vi 1 máy.
-        var worker = new AssignmentWorker(scrape, update);
+        var worker = new AssignmentWorker(scrape, update, search);
         // Dispatcher (tự đẩy việc) CHỈ chạy timer trên máy Hub — máy client khỏi chạy vô ích.
         if (Shopee.Core.Coordination.HubServerConfigStore.Shared.Current.Enabled) HubDispatcher.Shared.Start();
 
@@ -53,7 +61,7 @@ public sealed partial class ShellViewModel : ObservableObject
             new ModuleItem("Cấu hình BigSeller", "🗂", "Tài khoản · workbook · cookie · shop · proxy",
                 bigSeller),
             new ModuleItem("Shopee Search", "📊", "Thống kê tìm kiếm sản phẩm",
-                new SearchViewModel()),
+                search),
             new ModuleItem("Tài khoản & Proxy", "👤", "Kho tài khoản Shopee dùng chung",
                 new AccountsViewModel()),
             new ModuleItem("Check Shopee Account", "🔐", "Kiểm tra tài khoản Shopee",

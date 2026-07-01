@@ -197,16 +197,6 @@ internal sealed class ProductNameRewriteRunner
         log($"✓ Xong rewrite tên: {updatedCount} dòng thay đổi. Bỏ qua: {plan.SkippedNoName} thiếu 'Tên sp', {plan.SkippedNoSku} thiếu 'SKU', {plan.SkippedExisting} đã có 'Tên sp đã sửa'.");
     }
 
-    private static HttpClient CreateOpenAiHttpClient(string apiKey)
-    {
-        var http = new HttpClient
-        {
-            Timeout = TimeSpan.FromSeconds(75),   // ngắn hơn để lỗi/treo OpenAI hiện ra nhanh thay vì đứng im 3 phút
-        };
-        http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
-        return http;
-    }
-
     // ── Viết lại TÊN: 1 lần gọi → tiêu đề SEO hoàn chỉnh (dùng AiConfig + prompt SEO trong Cài đặt) ──
     private static async Task<List<string>> RequestSeoTitlesWithSplitAsync(
         AiConfig cfg, List<string> names, Action<string> log, CancellationToken ct)
@@ -597,34 +587,6 @@ internal sealed class ProductNameRewriteRunner
             }
         }
         return sb.ToString();
-    }
-
-    private static string? ResolveOpenAiApiKey(BigSellerWorkflowSettings settings)
-    {
-        // Ưu tiên key truyền thẳng từ Cài đặt (không qua biến môi trường process-wide).
-        var direct = NullIfEmpty(settings.OpenAiApiKey?.Trim());
-        if (direct is not null)
-            return direct;
-
-        var env = Environment.GetEnvironmentVariable("OPENAI_API_KEY")?.Trim();
-        if (!string.IsNullOrWhiteSpace(env))
-            return env;
-
-        var filePath = NullIfEmpty(settings.OpenAiApiKeyFile?.Trim())
-            ?? Environment.GetEnvironmentVariable("OPENAI_API_KEY_FILE")?.Trim();
-
-        if (string.IsNullOrWhiteSpace(filePath) || !File.Exists(filePath))
-            return null;
-
-        try
-        {
-            var lines = File.ReadAllLines(filePath);
-            return lines.Select(l => l.Trim()).FirstOrDefault(l => !string.IsNullOrWhiteSpace(l) && !l.StartsWith("#"));
-        }
-        catch
-        {
-            return null;
-        }
     }
 
     private static RewritePlan BuildPlan(

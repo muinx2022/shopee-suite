@@ -107,6 +107,7 @@ public sealed class HubServer
 
         // ── Sổ hoàn thành ──
         app.MapPost("/ledger", (WorkLedgerRecord? r) => { if (r is null) return Results.BadRequest(); db.PublishLedger(r); return Results.Ok(); });
+        app.MapPost("/ledger/set", (SetLedgerStatusRequest? r) => { if (r is null) return Results.BadRequest(); db.SetLedgerStatus(r.Key, r.BigsellerId, r.ShopId, r.Sheet, r.Op, r.Status); return Results.Ok(); });
         app.MapGet("/ledger", () => Results.Json(db.AllLedger()));
 
         // ── Nhịp máy + bảng trạng thái ──
@@ -122,5 +123,11 @@ public sealed class HubServer
         app.MapPost("/assignments/claim", (ClaimAssignmentsRequest? r) => r is null ? Results.BadRequest() : Results.Json(db.ClaimNext(r.MachineId, r.Role, r.Max)));
         app.MapPost("/assignments/status", (AssignmentStatusRequest? r) => { if (r is null) return Results.BadRequest(); db.UpdateAssignmentStatus(r.Id, r.MachineId, r.Status, r.Error); return Results.Ok(); });
         app.MapPost("/assignments/cancel", (CancelAssignmentRequest? r) => { if (r is null) return Results.BadRequest(); db.CancelAssignment(r.Id); return Results.Ok(); });
+
+        // ── Kho gộp kết quả Search (client đẩy sản phẩm → Hub gộp) ──
+        app.MapPost("/search-products", (SearchProductsPushRequest? r) => { if (r is null) return Results.BadRequest(); db.SaveSearchProducts(r); return Results.Ok(); });
+        app.MapGet("/search-products", () => Results.Json(db.AllSearchProductJson()));
+        app.MapGet("/search-products/count", () => Results.Json(db.SearchProductCount()));
+        app.MapPost("/search-products/clear", () => { db.ClearSearchProducts(); return Results.Ok(); });
     }
 }

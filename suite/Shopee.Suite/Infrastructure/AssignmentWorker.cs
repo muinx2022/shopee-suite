@@ -1,9 +1,11 @@
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Text.Json;
 using System.Windows;
 using System.Windows.Threading;
 using Shopee.Core.Coordination;
 using Shopee.Suite.Modules.Scrape;
+using Shopee.Suite.Modules.Search;
 using Shopee.Suite.Modules.UpdateProduct;
 
 namespace Shopee.Suite.Infrastructure;
@@ -19,6 +21,7 @@ public sealed class AssignmentWorker : IDisposable
 {
     private readonly ScrapeViewModel _scrape;
     private readonly UpdateProductViewModel _update;
+    private readonly SearchViewModel _search;
     private readonly DispatcherTimer _timer;             // claim/launch/reconcile (UI thread)
     private readonly System.Threading.Timer _heartbeat;  // nhịp 'running' (luồng NỀN, không bị UI làm nghẽn)
     private readonly Dictionary<string, InFlight> _inflight = new(StringComparer.Ordinal);
@@ -42,10 +45,11 @@ public sealed class AssignmentWorker : IDisposable
         public int IdleTicks;
     }
 
-    public AssignmentWorker(ScrapeViewModel scrape, UpdateProductViewModel update)
+    public AssignmentWorker(ScrapeViewModel scrape, UpdateProductViewModel update, SearchViewModel search)
     {
         _scrape = scrape;
         _update = update;
+        _search = search;
         _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(10) };
         _timer.Tick += (_, _) => Tick();
         _timer.Start();
@@ -124,6 +128,13 @@ public sealed class AssignmentWorker : IDisposable
     private bool CanLaunch(Assignment a, out string problem)
     {
         problem = "";
+        if (a.Op == "search")
+        {
+            if (_search.PoolCount == 0) { problem = "kho tài khoản Shopee trống"; return false; }
+            if (_search.IsRunning) { problem = "máy đang chạy 1 việc Search khác"; return false; }
+            if (string.IsNullOrWhiteSpace(a.Payload)) { problem = "thiếu dữ liệu khối link"; return false; }
+            return true;
+        }
         if (a.Op == "scrape")
         {
             var t = _scrape.ScrapeTargets.FirstOrDefault(x => x.Account.Id == a.BigsellerId);
@@ -165,8 +176,22 @@ public sealed class AssignmentWorker : IDisposable
                 else _ = _update.RunNameRewriteSingleAsync(t, silent: true, a.StartRow, a.EndRow);
                 return true;
             }
+            case "search":
+            {
+                if (_search.IsRunning) return false;   // đang chạy 1 search khác → báo failed NGAY (khỏi kẹt grace 60s)
+                var payload = TryParseSearch(a.Payload);
+                if (payload is null || payload.Links.Count == 0) return false;
+                _ = _search.RunAssignmentAsync(a.Id, payload, CancellationToken.None);
+                return true;
+            }
             default: return false;
         }
+    }
+
+    private static SearchJobPayload? TryParseSearch(string json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return null;
+        try { return JsonSerializer.Deserialize<SearchJobPayload>(json); } catch { return null; }
     }
 
     private async Task ReconcileInflightAsync(HttpCoordinationHub hub)
@@ -199,6 +224,23 @@ public sealed class AssignmentWorker : IDisposable
         // 3) Kết luận dựa trên ledger TƯƠI (round-trip thật) — KHÔNG dùng snapshot poll 12s (tránh báo nhầm).
         foreach (var f in toConclude)
         {
+            // Search KHÔNG ghi ledger → kết luận theo OUTCOME client ghi lại (completed/stopped/failed). Không có
+            // outcome mà đã từng thấy chạy → coi như xong (lưới an toàn); chưa từng chạy → lỗi.
+            if (f.A.Op == "search")
+            {
+                var outcome = _search.TakeAssignmentOutcome(f.A.Id);
+                var searchOk = outcome == "completed" || (outcome is null && f.SeenRunning);
+                var searchErr = searchOk ? null : outcome switch
+                {
+                    "stopped" => "đã dừng dở (khối link chưa xong)",
+                    "failed" => "lỗi khi chạy Search",
+                    _ => "không khởi động được (kho acc trống / bị máy khác giữ)",
+                };
+                await hub.ReportAssignmentAsync(f.A.Id, searchOk ? "done" : "failed", searchErr);
+                _liveIds.TryRemove(f.A.Id, out _);
+                _inflight.Remove(f.A.Id);
+                continue;
+            }
             var status = await hub.FetchLedgerStatusAsync(f.A.CoordId);
             var ok = status == "completed";
             await hub.ReportAssignmentAsync(f.A.Id, ok ? "done" : "failed",
@@ -218,6 +260,7 @@ public sealed class AssignmentWorker : IDisposable
         if (d is null) return;
         d.BeginInvoke(() =>
         {
+            if (a.Op == "search") { _search.StopAssignment(a.Id); return; }
             if (a.Op == "scrape")
             {
                 var t = _scrape.ScrapeTargets.FirstOrDefault(x => x.Account.Id == a.BigsellerId);
@@ -229,6 +272,7 @@ public sealed class AssignmentWorker : IDisposable
 
     private bool IsRunningLocally(Assignment a)
     {
+        if (a.Op == "search") return _search.IsRunningAssignment(a.Id);
         if (a.Op == "scrape")
         {
             var t = _scrape.ScrapeTargets.FirstOrDefault(x => x.Account.Id == a.BigsellerId);

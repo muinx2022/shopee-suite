@@ -51,9 +51,20 @@ public sealed partial class AccountsViewModel : ObservableObject
 
     [ObservableProperty] private string _status = "";
 
+    /// <summary>Nội dung kho KiotProxy dùng chung (mỗi dòng 1 key/host:port) — bind vào textbox.</summary>
+    [ObservableProperty] private string _proxyPoolText = "";
+
     public AccountsViewModel()
     {
         Reload();
+        LoadProxyPool();
+        // Kho proxy đổi (Lưu tay hoặc client tự nhận từ Hub) → cập nhật textbox.
+        KiotProxyPoolStore.Shared.Changed += () =>
+        {
+            var d = Application.Current?.Dispatcher;
+            if (d is null || d.CheckAccess()) LoadProxyPool();
+            else d.BeginInvoke(LoadProxyPool);
+        };
         // Tự làm mới khi kho chung thay đổi (vd: Check Shopee Account lưu tk mới vào).
         AccountStore.Shared.Changed += () =>
         {
@@ -73,6 +84,19 @@ public sealed partial class AccountsViewModel : ObservableObject
     private void RefreshUsageColumn()
     {
         foreach (var it in Items) it.RefreshUsage();
+    }
+
+    private void LoadProxyPool() => ProxyPoolText = string.Join(Environment.NewLine, KiotProxyPoolStore.Shared.Keys);
+
+    /// <summary>Lưu kho KiotProxy dùng chung (mỗi dòng 1 entry). Máy Hub tự đẩy lên → client tự nhận.</summary>
+    [RelayCommand]
+    private void SaveProxyPool()
+    {
+        var entries = (ProxyPoolText ?? "").Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (KiotProxyPoolStore.Shared.ReplaceAll(entries))
+            Status = $"Đã lưu kho proxy: {KiotProxyPoolStore.Shared.Count} proxy (xoay vòng cho acc lúc chạy).";
+        else
+            Status = "Lưu kho proxy thất bại.";
     }
 
     private bool SaveStore(string success, string failure)

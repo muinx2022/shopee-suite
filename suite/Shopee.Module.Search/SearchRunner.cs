@@ -89,6 +89,9 @@ public sealed class SearchRunner
 
     public int CollectedCount => _collected.Count;
 
+    /// <summary>Toàn bộ sản phẩm đã cào trong lượt chạy hiện tại (đủ field ProductResult) — để đẩy gộp lên Hub.</summary>
+    public IReadOnlyList<ProductResult> CollectedProducts() => _collected.ToList();
+
     // ── XUẤT GỘP TỪ CSDL (toàn bộ đã quét, không chỉ lần chạy hiện tại) ──────────────
     /// <summary>Xuất GỘP mọi sản phẩm của tất cả shop đã quét (theo file), loại trùng theo ItemId.</summary>
     public string? ExportAllShops(string outputDir, SearchFilter? filter) =>
@@ -227,6 +230,11 @@ public sealed class SearchRunner
             ProfileRelativePath = s.ProfileRelativePath,
             RequireProxy = s.RequireProxy,
         }).ToList();
+
+    /// <summary>Áp bộ lọc (giá / đã bán / danh mục) lên 1 danh sách sản phẩm bất kỳ. null = không lọc.
+    /// Dùng lại cho xuất Excel gộp ở Hub (cùng logic với bộ lọc tab Search).</summary>
+    public static IReadOnlyList<ProductResult> ApplyFilter(IReadOnlyList<ProductResult> items, SearchFilter? filter)
+        => filter is null ? items : items.Where(p => Pass(p, filter)).ToList();
 
     private static bool Pass(ProductResult p, SearchFilter f) =>
         (f.MinPrice <= 0 || p.PriceVnd >= f.MinPrice)

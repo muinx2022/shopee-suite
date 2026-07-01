@@ -18,10 +18,6 @@ internal static class BigSellerContextFactory
         var shop = ActiveShop(settings);
         BigSellerProfileManager.EnsureWorkflowProfile(settings.Accounts, account, shop);
 
-        var defaultKeyFile = Path.Combine(AppContext.BaseDirectory, "openai.key");
-        if (!File.Exists(defaultKeyFile))
-            defaultKeyFile = Path.Combine(AppSession.RepoRootDirectory, "openai.key");
-
         return new BigSellerWorkflowSettings
         {
             BravePath = settings.BraveExe.Trim(),
@@ -43,7 +39,7 @@ internal static class BigSellerContextFactory
             UpdateMaxProcess = Math.Clamp(shop.BigSellerUpdateMaxProcess, 1, 10),
             ListingReloadSeconds = Math.Clamp(shop.BigSellerListingReloadSeconds, 3, 600),
             OpenAiModel = string.IsNullOrWhiteSpace(shop.OpenAiModel) ? "gpt-4.1-mini" : shop.OpenAiModel,
-            OpenAiApiKeyFile = string.IsNullOrWhiteSpace(settings.OpenAiApiKeyFile) ? defaultKeyFile : settings.OpenAiApiKeyFile,
+            OpenAiApiKeyFile = "",   // BỎ file openai.key — key OpenAI giờ CHỈ lấy từ AiConfig (Cài đặt) qua AiChat
             OpenAiBatchSize = Math.Clamp(shop.OpenAiBatchSize, 1, 500),
         };
     }

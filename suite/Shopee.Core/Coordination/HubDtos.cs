@@ -54,6 +54,9 @@ public static class MachineRoles
     public const string Update = "update";
     public const string All = "all";
 
+    /// <summary>Op "search" KHÔNG có vai trò tự động — luôn giao TAY (ghim máy) từ bảng điều phối Search.</summary>
+    public const string Search = "search";
+
     /// <summary>Vai trò phụ trách op này (rewrite gộp vào nhóm Update).</summary>
     public static string ForOp(string op) => op switch
     {
@@ -82,9 +85,12 @@ public sealed class Assignment
     public string BigsellerId { get; set; } = "";
     public string ShopId { get; set; } = "";
     public string Sheet { get; set; } = "";
-    public string Op { get; set; } = "";                 // scrape | import | update | rewrite
+    public string Op { get; set; } = "";                 // scrape | import | update | rewrite | search
     /// <summary>Ghim cứng vào 1 máy; null = để Hub định tuyến theo vai trò.</summary>
     public string? TargetMachineId { get; set; }
+    /// <summary>Dữ liệu kèm theo việc (JSON). Hiện chỉ op "search" dùng: <see cref="SearchJobPayload"/>
+    /// (danh sách link của khối + số acc khóa + lane + khu vực). Các op khác để rỗng.</summary>
+    public string Payload { get; set; } = "";
     public bool Pinned { get; set; }
     public string Status { get; set; } = "queued";       // queued | running | done | failed | canceled
     public string ClaimedByMachineId { get; set; } = "";
@@ -102,10 +108,31 @@ public sealed class Assignment
 public sealed record SetRoleRequest(string MachineId, string Role);
 public sealed record CreateAssignmentRequest(
     string BigsellerId, string ShopId, string Sheet, string Op, string? TargetMachineId, bool Pinned,
-    int StartRow = 0, int EndRow = 0);
+    int StartRow = 0, int EndRow = 0, string Payload = "");
+
+/// <summary>Dữ liệu việc Search Hub giao cho 1 client: chạy đúng khối link này, khóa tối đa
+/// <see cref="AccountsPerClient"/> tài khoản Shopee (qua account-lease) để máy khác không đụng.</summary>
+public sealed class SearchJobPayload
+{
+    public List<string> Links { get; set; } = [];
+    public int AccountsPerClient { get; set; }
+    public int Lanes { get; set; } = 3;
+    public string? Region { get; set; }
+    public string? SourceFile { get; set; }
+}
+
+// ── Gom kết quả Search về Hub (client đẩy sản phẩm cào được → Hub gộp) ─────────
+/// <summary>1 sản phẩm client gửi lên Hub: <see cref="ItemId"/> để dedup (khoá chính), <see cref="Json"/>
+/// là toàn bộ ProductResult serialize (Hub CHỈ lưu blob, không cần biết model engine).</summary>
+public sealed record SearchProductItem(long ItemId, string Json);
+public sealed record SearchProductsPushRequest(string MachineId, string SourceFile, List<SearchProductItem> Products);
 public sealed record ClaimAssignmentsRequest(string MachineId, string Role, int Max);
 public sealed record AssignmentStatusRequest(string Id, string MachineId, string Status, string? Error);
 public sealed record CancelAssignmentRequest(string Id);
+/// <summary>Hub đặt TAY trạng thái sổ hoàn thành cho 1 (shop+op): completed = ✓ xong; stopped = ■ dừng;
+/// idle = chưa chạy (XOÁ bản ghi + tiến độ dòng → scrape giao lại + chạy lại từ đầu).</summary>
+public sealed record SetLedgerStatusRequest(
+    string Key, string BigsellerId, string ShopId, string Sheet, string Op, string Status);
 
 // ── Request / Response ────────────────────────────────────────────────────────
 

@@ -144,12 +144,17 @@
                                     <DataGridTemplateColumn Header="Scrape" Width="Auto">
                                         <DataGridTemplateColumn.CellTemplate>
                                             <DataTemplate>
-                                                <!-- 1 nút toggle: bấm chạy (xanh, ■) ↔ bấm lại dừng (xám, ▶) -->
-                                                <Button Style="{StaticResource WorkspaceActionButton}" Content="{Binding ScrapeToggleContent}"
-                                                        ToolTip="{Binding ScrapeToggleTip}" Foreground="{Binding ScrapeIconBrush}"
-                                                        IsEnabled="{Binding ScrapeToggleEnabled}"
-                                                        Command="{Binding DataContext.ScrapeToggleCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                                        CommandParameter="{Binding}" />
+                                                <!-- 1 nút toggle: bấm chạy (xanh, ■) ↔ bấm lại dừng (xám, ▶) + ✓ khi Hub báo xong -->
+                                                <StackPanel Orientation="Horizontal">
+                                                    <Button Style="{StaticResource WorkspaceActionButton}" Content="{Binding ScrapeToggleContent}"
+                                                            ToolTip="{Binding ScrapeToggleTip}" Foreground="{Binding ScrapeIconBrush}"
+                                                            IsEnabled="{Binding ScrapeToggleEnabled}"
+                                                            Command="{Binding DataContext.ScrapeToggleCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                            CommandParameter="{Binding}" />
+                                                    <TextBlock Text="✓" Foreground="#1EA055" FontWeight="Bold" FontSize="14" VerticalAlignment="Center"
+                                                               Margin="4,0,0,0" ToolTip="Scrape đã xong (Hub)"
+                                                               Visibility="{Binding ScrapeDone, Converter={StaticResource BoolToVis}}" />
+                                                </StackPanel>
                                             </DataTemplate>
                                         </DataGridTemplateColumn.CellTemplate>
                                     </DataGridTemplateColumn>
@@ -162,10 +167,16 @@
                                                             Foreground="{Binding ImportIconBrush}" IsEnabled="{Binding ImportToggleEnabled}"
                                                             Command="{Binding DataContext.ImportToggleCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
                                                             CommandParameter="{Binding}" />
+                                                    <TextBlock Text="✓" Foreground="#1EA055" FontWeight="Bold" FontSize="14" VerticalAlignment="Center"
+                                                               Margin="3,0,0,0" ToolTip="Import đã xong (Hub)"
+                                                               Visibility="{Binding ImportDone, Converter={StaticResource BoolToVis}}" />
                                                     <Button Style="{StaticResource WorkspaceActionButton}" Content="{Binding UpdateToggleContent}" Margin="5,0,0,0" ToolTip="{Binding UpdateToggleTip}"
                                                             Foreground="{Binding UpdateIconBrush}" IsEnabled="{Binding UpdateToggleEnabled}"
                                                             Command="{Binding DataContext.UpdateToggleCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
                                                             CommandParameter="{Binding}" />
+                                                    <TextBlock Text="✓" Foreground="#1EA055" FontWeight="Bold" FontSize="14" VerticalAlignment="Center"
+                                                               Margin="3,0,0,0" ToolTip="Update đã xong (Hub)"
+                                                               Visibility="{Binding UpdateDone, Converter={StaticResource BoolToVis}}" />
                                                     <Button Style="{StaticResource WorkspaceActionButton}" Content="{Binding RewriteToggleContent}" Margin="5,0,0,0" ToolTip="{Binding RewriteToggleTip}"
                                                             Foreground="{Binding RewriteIconBrush}" IsEnabled="{Binding RewriteToggleEnabled}"
                                                             Command="{Binding DataContext.RewriteToggleCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
