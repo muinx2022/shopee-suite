@@ -606,6 +606,10 @@ VALUES($id,$b,$s,$sh,$o,$t,$p,'queued','','','',$ca,$ua,$sr,$er,$pl);";
 
             // (Tài khoản, op) đang BẬN cho scrape/import (lease tươi BẤT KỲ máy nào, HOẶC assignment running).
             var busy = BusyOpsLocked(now);
+            // Chủ sở hữu acc hiện tại: máy nào đang chạy BẤT KỲ op (scrape/import/update) của acc đó. GHIM acc
+            // về 1 máy tại 1 thời điểm — máy KHÁC không được đụng op của acc đang do máy khác giữ (chống 1 cookie
+            // BigSeller bị dùng từ nhiều IP cùng lúc → BigSeller đá phiên → login lại mãi khi chạy nhiều client).
+            var owner = AccountOwnersLocked(now);
 
             using var c = _conn.CreateCommand();
             c.CommandText = "SELECT * FROM assignments WHERE status='queued' ORDER BY created_at";
@@ -621,8 +625,11 @@ VALUES($id,$b,$s,$sh,$o,$t,$p,'queued','','','',$ca,$ua,$sr,$er,$pl);";
                     ? string.Equals(a.TargetMachineId, machineId, StringComparison.Ordinal)
                     : MachineRoles.Handles(role, a.Op);
                 if (!routed) continue;
-                // Độc-quyền-theo-acc CHO scrape/import: mỗi acc chỉ 1 shop scrape + 1 shop import cùng lúc
-                // (scrape ↔ import vẫn song song được, kể cả cùng shop). UPDATE không giới hạn (shop nào cũng chạy).
+                // GHIM acc về 1 máy (xuyên máy): acc đang do MÁY KHÁC giữ → bỏ qua. Máy ĐANG giữ acc vẫn lấy
+                // thêm op/shop khác của chính acc đó (cùng 1 IP máy, BigSeller không coi là phiên lạ).
+                if (owner.TryGetValue(a.BigsellerId, out var om) && !string.Equals(om, machineId, StringComparison.Ordinal)) continue;
+                // Trong CÙNG máy: giữ giới hạn cũ — mỗi acc chỉ 1 shop scrape + 1 shop import cùng lúc (scrape ↔
+                // import vẫn song song, kể cả cùng shop). UPDATE không giới hạn (shop nào cũng chạy).
                 if (a.Op is "scrape" or "import" && busy.Contains($"{a.BigsellerId}__{a.Op}")) continue;
                 // Thứ tự pipeline.
                 if (!PipelineReadyLocked(a)) continue;
@@ -669,6 +676,36 @@ VALUES($id,$b,$s,$sh,$o,$t,$p,'queued','','','',$ca,$ua,$sr,$er,$pl);";
             while (rd.Read()) set.Add($"{S(rd, 0)}__{S(rd, 1)}");
         }
         return set;
+    }
+
+    /// <summary>Chủ sở hữu hiện tại của mỗi tài khoản BigSeller = máy đang chạy BẤT KỲ op nào (scrape/import/
+    /// update) của acc đó, lấy từ lease TƯƠI hoặc assignment đang 'running'. Dùng để GHIM acc về 1 máy tại 1
+    /// thời điểm: máy khác không được claim op của acc đang do máy khác giữ → 1 cookie BigSeller không bị dùng từ
+    /// nhiều IP cùng lúc (nguyên nhân BigSeller đá phiên, login lại mãi khi chạy nhiều client). Key = bigsellerId
+    /// → machineId (giá trị đầu gặp; sau khi hội tụ chỉ 1 máy/acc — giai đoạn quá độ nếu 2 máy còn giữ thì 1 máy
+    /// được ghi nhận, máy kia bị chặn, tự hội tụ). Máy chết KHÔNG khoá acc vĩnh viễn: SweepStaleLocked đánh 'failed'
+    /// assignment quá hạn nhịp + lease có ngưỡng tươi (StaleLease) nên đều tự nhả.</summary>
+    private Dictionary<string, string> AccountOwnersLocked(DateTimeOffset now)
+    {
+        var map = new Dictionary<string, string>(StringComparer.Ordinal);
+        void Put(string bs, string m) { if (bs.Length > 0 && m.Length > 0 && !map.ContainsKey(bs)) map[bs] = m; }
+        using (var c = _conn.CreateCommand())
+        {
+            c.CommandText = "SELECT bigseller_id,machine_id,heartbeat_at,status FROM leases";
+            using var rd = c.ExecuteReader();
+            while (rd.Read())
+            {
+                var hb = DateTimeOffset.TryParse(S(rd, 2), out var d) ? d : DateTimeOffset.MinValue;
+                if ((now - hb) < StaleLease && S(rd, 3) is "running" or "finishing") Put(S(rd, 0), S(rd, 1));
+            }
+        }
+        using (var c = _conn.CreateCommand())
+        {
+            c.CommandText = "SELECT bigseller_id,claimed_by FROM assignments WHERE status='running'";
+            using var rd = c.ExecuteReader();
+            while (rd.Read()) Put(S(rd, 0), S(rd, 1));
+        }
+        return map;
     }
 
     /// <summary>Import chỉ chạy khi scrape của (bs+shop) đã 'completed'; update khi import đã 'completed'.
