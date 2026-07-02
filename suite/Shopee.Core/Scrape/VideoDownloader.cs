@@ -1,3 +1,5 @@
+using Shopee.Core.Infrastructure;
+
 namespace Shopee.Core.Scrape;
 
 public sealed record VideoCandidate(string Url, double Duration, string Label = "");
@@ -31,6 +33,11 @@ public static class VideoDownloader
 
         try
         {
+            // Van đĩa: ổ đích sắp đầy → BỎ tải (video là rác tái tạo được; không đáng lấp nốt ổ làm hỏng profile).
+            if (!DiskSpaceGuard.HasFreeSpace(outputDir, DiskSpaceGuard.VideoMinFreeBytes))
+                return new VideoDownloadResult(false, null, best.Url, best.Duration, sized[0].size,
+                    $"Bỏ tải video: ổ đĩa đích còn trống < {DiskSpaceGuard.ToGb(DiskSpaceGuard.VideoMinFreeBytes)}.");
+
             Directory.CreateDirectory(outputDir);
             var dest = Path.Combine(outputDir, SanitizeFileName(sku) + ".mp4");
             var tmp = dest + ".part";

@@ -35,16 +35,30 @@ public static class StartupJanitor
     private static readonly TimeSpan TempJunkAge = TimeSpan.FromDays(1);
 
     private static int _started;
+    private static int _runBusy;
+    private static Timer? _periodicTimer;
 
-    /// <summary>Chạy 1 lần trên luồng nền (idempotent trong 1 lần chạy app). Không ném.</summary>
-    public static void RunInBackground()
+    /// <summary>Chạy NGAY 1 lần trên luồng nền, RỒI LẶP LẠI mỗi <paramref name="periodicHours"/> giờ. Idempotent
+    /// (gọi nhiều lần chỉ có tác dụng lần đầu), không ném. Lặp định kỳ là để máy client scrape qua NHIỀU ĐÊM
+    /// không tắt app vẫn được dọn cache/profile mồ côi giữa chừng — trước đây chỉ dọn lúc khởi động nên ổ vẫn
+    /// phình dần trong suốt phiên chạy dài.</summary>
+    public static void RunInBackground(double periodicHours = 8)
     {
         if (Interlocked.CompareExchange(ref _started, 1, 0) != 0)
             return;
-        ThreadPool.QueueUserWorkItem(_ =>
-        {
-            try { Run(); } catch (Exception ex) { Notice?.Invoke("Dọn dẹp lỗi: " + ex.Message); }
-        });
+        ThreadPool.QueueUserWorkItem(_ => RunGuarded());
+        var period = TimeSpan.FromHours(Math.Clamp(periodicHours, 1, 48));
+        _periodicTimer = new Timer(_ => RunGuarded(), null, period, period);
+    }
+
+    // Bọc Run() với chốt chống CHỒNG NHỊP: một lần dọn có thể duyệt hàng chục GB, lâu hơn chu kỳ timer → bỏ
+    // nhịp nếu nhịp trước chưa xong (cùng cách RunMaintenance của BraveFleet). Nuốt lỗi, không chặn.
+    private static void RunGuarded()
+    {
+        if (Interlocked.CompareExchange(ref _runBusy, 1, 0) != 0) return;
+        try { Run(); }
+        catch (Exception ex) { Notice?.Invoke("Dọn dẹp lỗi: " + ex.Message); }
+        finally { Interlocked.Exchange(ref _runBusy, 0); }
     }
 
     /// <summary>Thực thi dọn dẹp (đồng bộ). Public để test/gọi tay được.</summary>

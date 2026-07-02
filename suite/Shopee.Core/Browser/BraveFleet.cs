@@ -87,6 +87,10 @@ public static class BraveFleet
     // RAM trống tối thiểu trước khi cho mở thêm cửa sổ — dưới mức này thì CHỜ (chống dồn tới đơ máy).
     private const ulong MinFreeBytesToLaunch = 1500UL * 1024 * 1024; // ~1.5 GB
 
+    // ĐĨA trống tối thiểu (ổ chứa profile) trước khi cho mở thêm cửa sổ — dưới mức này thì CHỜ. Chống việc
+    // ghi cache/DB tới khi ổ đầy 0 byte làm hỏng profile → mất phiên → captcha. Quan trọng với máy client ít ổ.
+    private const long MinFreeDiskBytesToLaunch = DiskSpaceGuard.DefaultMinFreeBytes; // 5 GB
+
     private static SemaphoreSlim Gate()
     {
         lock (_gateLock)
@@ -112,6 +116,22 @@ public static class BraveFleet
                 ct.ThrowIfCancellationRequested();
                 if (!warned) { log?.Invoke("⏳ RAM trống thấp — hoãn mở cửa sổ Brave mới tới khi hồi…"); warned = true; }
                 await Task.Delay(5000, ct).ConfigureAwait(false);
+            }
+
+            // Ổ chứa profile sắp đầy → hoãn mở cửa sổ mới (giữ slot) tới khi có chỗ. Thà kẹt-cảnh-báo còn hơn
+            // ghi tới khi đầy 0 byte làm hỏng DB profile. FreeBytesFor < 0 = không đọc được → fail-open, chạy tiếp.
+            var diskWarned = false;
+            for (var free = DiskSpaceGuard.FreeBytesFor(ManagedRoot);
+                 free >= 0 && free < MinFreeDiskBytesToLaunch;
+                 free = DiskSpaceGuard.FreeBytesFor(ManagedRoot))
+            {
+                ct.ThrowIfCancellationRequested();
+                if (!diskWarned)
+                {
+                    log?.Invoke($"⚠️ Ổ đĩa còn trống {DiskSpaceGuard.ToGb(free)} (< {DiskSpaceGuard.ToGb(MinFreeDiskBytesToLaunch)}) — HOÃN mở cửa sổ Brave. Hãy dọn bớt đĩa (cache/video/profile cũ).");
+                    diskWarned = true;
+                }
+                await Task.Delay(10000, ct).ConfigureAwait(false);
             }
         }
         catch

@@ -42,9 +42,10 @@ public partial class App : Application
         }
         catch (Exception ex) { TryLog("BraveFleet.Init", ex); }
 
-        // Dọn ĐĨA lúc khởi động (nền, không chặn UI): xoá cache profile Brave phình + profile mồ côi + rác di
-        // sản → chống ổ C đầy khi chạy Scrape nhiều Brave. Phải chạy SAU StartupSweep (đã giết Brave mồ côi nên
-        // file profile không còn bị khoá). An toàn: chỉ dọn khi là ShopeeSuite duy nhất trên máy.
+        // Dọn ĐĨA lúc khởi động + ĐỊNH KỲ (nền, không chặn UI): xoá cache profile Brave phình + profile mồ côi +
+        // rác di sản → chống ổ C đầy khi chạy Scrape nhiều Brave. Lặp định kỳ để máy client scrape qua nhiều đêm
+        // không tắt app vẫn được dọn giữa chừng. Phải chạy SAU StartupSweep (đã giết Brave mồ côi nên file profile
+        // không còn bị khoá). An toàn: chỉ dọn khi là ShopeeSuite duy nhất trên máy.
         try
         {
             Shopee.Core.Infrastructure.StartupJanitor.Notice =
