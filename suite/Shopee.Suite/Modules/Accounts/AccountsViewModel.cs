@@ -195,7 +195,7 @@ public sealed partial class AccountsViewModel : ObservableObject
 
         if (Dialogs.Show(
                 $"Kiểm tra lần lượt {targets.Count} tài khoản lỗi/captcha:\n\n" +
-                "• Tk CÓ link captcha đã lưu → MỞ ĐÚNG trang đó để bạn GIẢI TAY; giải xong → về kho, chưa giải → GIỮ lại.\n" +
+                "• Tk CÓ link captcha đã lưu → TỰ ĐĂNG NHẬP trước (nếu chưa có phiên) rồi MỞ ĐÚNG trang đó để bạn GIẢI TAY; giải xong → về kho, chưa giải → GIỮ lại.\n" +
                 "• Tk KHÔNG có link → tự đăng nhập: vào được → về kho; KHÔNG vào được → XÓA HẲN.\n\n" +
                 "Thao tác xóa KHÔNG hoàn tác được. Tiếp tục?",
                 "Kiểm tra & dọn tk lỗi", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
@@ -223,10 +223,11 @@ public sealed partial class AccountsViewModel : ObservableObject
                     var checker = new ShopeeAccountChecker();
                     if (hasCaptchaUrl)
                     {
-                        // CÓ url captcha đã lưu → MỞ ĐÚNG trang đó cho user GIẢI TAY (KHÔNG auto-login).
-                        // Giữ trình duyệt ~1 phút để giải; giải xong (đăng nhập được) thì đóng sớm rồi sang tk kế.
-                        Status = $"[{i + 1}/{targets.Count}] Mở trang captcha \"{name}\" — giải tay (~1 phút)…  (✓ {okNames.Count} · ✗ {failNames.Count})";
-                        var result = await checker.OpenForManualSolveAsync(a.CaptchaUrl!, proxy, profileDir, 60_000, CancellationToken.None);
+                        // CÓ url captcha đã lưu → TỰ ĐĂNG NHẬP trước (nếu chưa có phiên) rồi MỞ ĐÚNG trang đó
+                        // cho user GIẢI TAY. Giữ trình duyệt ~1 phút để giải; giải xong (đăng nhập được) thì
+                        // đóng sớm rồi sang tk kế.
+                        Status = $"[{i + 1}/{targets.Count}] Tự đăng nhập rồi mở trang captcha \"{name}\" — giải tay (~1 phút)…  (✓ {okNames.Count} · ✗ {failNames.Count})";
+                        var result = await checker.LoginThenManualSolveAsync(a.ShopeeAccountLogin, a.CaptchaUrl!, proxy, profileDir, 60_000, CancellationToken.None);
                         success = result.Outcome == CheckOutcome.Success;
                     }
                     else if (!string.IsNullOrWhiteSpace(a.ShopeeAccountLogin))
@@ -355,20 +356,38 @@ public sealed partial class AccountsViewModel : ObservableObject
         var acc = row?.Model ?? Selected?.Model;
         if (acc is null || !IsErrorFilter) return;
         CloseCheckBrowser();
+        BrowserLauncher? launcher = null;
         try
         {
             var proxy = await ResolveProxyAsync(acc);
             var profileDir = Path.Combine(SuitePaths.ModuleDir("shared"), "profiles", acc.Id);
             Directory.CreateDirectory(profileDir);
             var url = !string.IsNullOrWhiteSpace(acc.CaptchaUrl) ? acc.CaptchaUrl! : "https://shopee.vn";
-            _checkLauncher = new BrowserLauncher(BrowserKind.Brave);
-            _checkLauncher.Launch(profileDir, proxy, url);
-            _checkingId = acc.Id; _checkingName = acc.DisplayName;
+            var hasLogin = !string.IsNullOrWhiteSpace(acc.ShopeeAccountLogin);
+
+            // MỞ cửa sổ + GÁN _checkLauncher ĐỒNG BỘ (KHÔNG await xen giữa) → cửa sổ vừa mở là ĐÃ kill được
+            // ngay: KillCheckBrowser/CloseCheckBrowser (rời màn / đóng app / bấm "Đóng và…") LUÔN với tới,
+            // KHÔNG rò cửa sổ có phiên login kể cả khi auto-login còn đang chạy (có thể lâu).
+            launcher = new BrowserLauncher(BrowserKind.Brave);
+            _checkLauncher = launcher; _checkingId = acc.Id; _checkingName = acc.DisplayName;
+            launcher.Launch(profileDir, proxy, hasLogin ? ShopeeAccountChecker.LoginUrl : url);
             OnCheckStateChanged();
-            Status = $"Đã mở \"{acc.DisplayName}\" — giải captcha xong bấm \"Đóng và lưu\""
+            Status = $"Đang mở & tự đăng nhập \"{acc.DisplayName}\" trước khi giải captcha…";
+
+            // TỰ ĐĂNG NHẬP trước (nếu chưa có phiên) rồi mở URL lỗi trên CHÍNH cửa sổ đó — GIỐNG "Check Shopee Account".
+            await new ShopeeAccountChecker().LoginThenNavigateAsync(launcher, acc.ShopeeAccountLogin, url, CancellationToken.None);
+
+            // Giữa lúc auto-login, user có thể đã bấm "Đóng và…" / rời màn (CloseCheckBrowser đã kill+null)
+            // → đừng ghi đè status/thao tác đó.
+            if (!ReferenceEquals(_checkLauncher, launcher)) return;
+            Status = $"Đã mở \"{acc.DisplayName}\" (đã tự đăng nhập) — giải captcha xong bấm \"Đóng và lưu\""
                      + (IsReadOnlyMode ? " (hoặc \"Đóng và báo không sửa được\")." : " (hoặc \"Đóng và xóa tk\").");
         }
-        catch (Exception ex) { Status = "Không mở được trình duyệt: " + ex.Message; }
+        catch (Exception ex)
+        {
+            if (launcher is not null && ReferenceEquals(_checkLauncher, launcher)) CloseCheckBrowser();
+            Status = "Không mở được trình duyệt: " + ex.Message;
+        }
     }
 
     private void CloseCheckBrowser()

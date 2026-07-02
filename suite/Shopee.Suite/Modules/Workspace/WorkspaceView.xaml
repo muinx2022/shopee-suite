@@ -5,11 +5,47 @@
     xmlns:b="clr-namespace:Shopee.Suite.Behaviors"
     x:Name="Root">
     <UserControl.Resources>
+        <!-- Nút op trên dòng shop. Tag = bool "đang chạy" → viền + icon xanh, nền nhạt (máy nào chạy cũng thấy). -->
         <Style x:Key="WorkspaceActionButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
             <Setter Property="Width" Value="32" />
             <Setter Property="MinWidth" Value="32" />
+            <Setter Property="Height" Value="26" />
             <Setter Property="Padding" Value="0" />
             <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="Foreground" Value="#4B5563" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding Tag, RelativeSource={RelativeSource Self}}" Value="True">
+                    <Setter Property="Foreground" Value="#1EA055" />
+                    <Setter Property="BorderBrush" Value="#1EA055" />
+                    <Setter Property="Background" Value="#EAF8F0" />
+                    <Setter Property="FontWeight" Value="Bold" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+        <!-- Badge ✓ xanh đè góc trên-phải của nút = op đã xong (Hub ghi nhận) — vị trí cố định, không xô lệch layout. -->
+        <Style x:Key="DoneBadge" TargetType="Border">
+            <Setter Property="Width" Value="13" />
+            <Setter Property="Height" Value="13" />
+            <Setter Property="CornerRadius" Value="6.5" />
+            <Setter Property="Background" Value="#1EA055" />
+            <Setter Property="BorderBrush" Value="White" />
+            <Setter Property="BorderThickness" Value="1.5" />
+            <Setter Property="HorizontalAlignment" Value="Right" />
+            <Setter Property="VerticalAlignment" Value="Top" />
+            <Setter Property="Margin" Value="0,-4,-4,0" />
+            <Setter Property="Panel.ZIndex" Value="1" />
+        </Style>
+        <Style x:Key="DoneBadgeText" TargetType="TextBlock">
+            <Setter Property="Text" Value="✓" />
+            <Setter Property="Foreground" Value="White" />
+            <Setter Property="FontSize" Value="8" />
+            <Setter Property="FontWeight" Value="Bold" />
+            <Setter Property="HorizontalAlignment" Value="Center" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+        <Style x:Key="OpColumnHeader" TargetType="DataGridColumnHeader" BasedOn="{StaticResource {x:Type DataGridColumnHeader}}">
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="Padding" Value="8,0" />
         </Style>
     </UserControl.Resources>
     <Grid Margin="28,22,28,24">
@@ -38,7 +74,7 @@
             <Grid>
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                     <Button Content="↻ Tải lại" Command="{Binding ReloadCommand}" />
-                    <TextBlock Text="Bấm 1 tài khoản → chạy theo từng shop (▶ scrape · ⬆ import · ✎ update · 🏷 tên SP)."
+                    <TextBlock Text="Bấm 1 tài khoản → chạy theo từng shop (▶ scrape · ⬆ import · ✎ update · 🏷 tên SP). Nút xanh ■ = đang chạy (bấm để dừng) · huy hiệu ✓ trên góc nút = đã xong."
                                Style="{StaticResource Caption}" Margin="14,0,0,0" VerticalAlignment="Center" TextWrapping="Wrap" />
                 </StackPanel>
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
@@ -117,7 +153,7 @@
                         <!-- Lưới SHOP pipeline: cố định ~4 dòng (nhiều hơn thì cuộn trong lưới) -->
                         <Border DockPanel.Dock="Top" Style="{StaticResource Card}" ClipToBounds="True" MaxHeight="180">
                             <DataGrid x:Name="ShopGrid" ItemsSource="{Binding Shops}" IsReadOnly="True"
-                                      BorderThickness="0" SelectionChanged="ShopGrid_SelectionChanged" RowHeight="34">
+                                      BorderThickness="0" SelectionChanged="ShopGrid_SelectionChanged" RowHeight="36">
                                 <DataGrid.RowStyle>
                                     <Style TargetType="DataGridRow">
                                         <Style.Triggers>
@@ -130,7 +166,7 @@
                                 <DataGrid.Columns>
                                     <DataGridTextColumn Header="Shop" Binding="{Binding Name}" Width="1.1*" />
                                     <DataGridTextColumn Header="Sheet" Binding="{Binding Sheet}" Width="1.1*" />
-                                    <DataGridTemplateColumn Header="Scrape" Width="1.2*">
+                                    <DataGridTemplateColumn Header="Tiến độ" Width="1.2*">
                                         <DataGridTemplateColumn.CellTemplate>
                                             <DataTemplate>
                                                 <Border CornerRadius="10" Padding="9,3" HorizontalAlignment="Left"
@@ -141,47 +177,73 @@
                                             </DataTemplate>
                                         </DataGridTemplateColumn.CellTemplate>
                                     </DataGridTemplateColumn>
-                                    <DataGridTemplateColumn Header="Scrape" Width="Auto">
+                                    <!-- Mỗi op 1 cột, 1 nút toggle: bấm chạy ↔ bấm lại dừng (■). Đang chạy = nút xanh
+                                         (máy nào chạy cũng thấy) · Đã xong = badge ✓ cố định ở góc nút (Hub ghi nhận). -->
+                                    <DataGridTemplateColumn Header="Scrape" Width="60" HeaderStyle="{StaticResource OpColumnHeader}">
                                         <DataGridTemplateColumn.CellTemplate>
                                             <DataTemplate>
-                                                <!-- 1 nút toggle: bấm chạy (xanh, ■) ↔ bấm lại dừng (xám, ▶) + ✓ khi Hub báo xong -->
-                                                <StackPanel Orientation="Horizontal">
+                                                <Grid HorizontalAlignment="Center">
                                                     <Button Style="{StaticResource WorkspaceActionButton}" Content="{Binding ScrapeToggleContent}"
-                                                            ToolTip="{Binding ScrapeToggleTip}" Foreground="{Binding ScrapeIconBrush}"
+                                                            Tag="{Binding ScrapeRunning}" ToolTip="{Binding ScrapeToggleTip}"
                                                             IsEnabled="{Binding ScrapeToggleEnabled}"
                                                             Command="{Binding DataContext.ScrapeToggleCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
                                                             CommandParameter="{Binding}" />
-                                                    <TextBlock Text="✓" Foreground="#1EA055" FontWeight="Bold" FontSize="14" VerticalAlignment="Center"
-                                                               Margin="4,0,0,0" ToolTip="Scrape đã xong (Hub)"
-                                                               Visibility="{Binding ScrapeDone, Converter={StaticResource BoolToVis}}" />
-                                                </StackPanel>
+                                                    <Border Style="{StaticResource DoneBadge}" ToolTip="Scrape đã xong (Hub)"
+                                                            Visibility="{Binding ScrapeDone, Converter={StaticResource BoolToVis}}">
+                                                        <TextBlock Style="{StaticResource DoneBadgeText}" />
+                                                    </Border>
+                                                </Grid>
                                             </DataTemplate>
                                         </DataGridTemplateColumn.CellTemplate>
                                     </DataGridTemplateColumn>
-                                    <DataGridTemplateColumn Header="Update" Width="Auto">
+                                    <DataGridTemplateColumn Header="Import" Width="60" HeaderStyle="{StaticResource OpColumnHeader}">
                                         <DataGridTemplateColumn.CellTemplate>
                                             <DataTemplate>
-                                                <!-- 3 nút toggle: Import ⬆ · Update ✎ · Tên SP 🏷. Bấm chạy (xanh, ■) ↔ bấm lại dừng. -->
-                                                <StackPanel Orientation="Horizontal">
-                                                    <Button Style="{StaticResource WorkspaceActionButton}" Content="{Binding ImportToggleContent}" ToolTip="{Binding ImportToggleTip}"
-                                                            Foreground="{Binding ImportIconBrush}" IsEnabled="{Binding ImportToggleEnabled}"
+                                                <Grid HorizontalAlignment="Center">
+                                                    <Button Style="{StaticResource WorkspaceActionButton}" Content="{Binding ImportToggleContent}"
+                                                            Tag="{Binding ImportRunning}" ToolTip="{Binding ImportToggleTip}"
+                                                            IsEnabled="{Binding ImportToggleEnabled}"
                                                             Command="{Binding DataContext.ImportToggleCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
                                                             CommandParameter="{Binding}" />
-                                                    <TextBlock Text="✓" Foreground="#1EA055" FontWeight="Bold" FontSize="14" VerticalAlignment="Center"
-                                                               Margin="3,0,0,0" ToolTip="Import đã xong (Hub)"
-                                                               Visibility="{Binding ImportDone, Converter={StaticResource BoolToVis}}" />
-                                                    <Button Style="{StaticResource WorkspaceActionButton}" Content="{Binding UpdateToggleContent}" Margin="5,0,0,0" ToolTip="{Binding UpdateToggleTip}"
-                                                            Foreground="{Binding UpdateIconBrush}" IsEnabled="{Binding UpdateToggleEnabled}"
+                                                    <Border Style="{StaticResource DoneBadge}" ToolTip="Import đã xong (Hub)"
+                                                            Visibility="{Binding ImportDone, Converter={StaticResource BoolToVis}}">
+                                                        <TextBlock Style="{StaticResource DoneBadgeText}" />
+                                                    </Border>
+                                                </Grid>
+                                            </DataTemplate>
+                                        </DataGridTemplateColumn.CellTemplate>
+                                    </DataGridTemplateColumn>
+                                    <DataGridTemplateColumn Header="Update" Width="60" HeaderStyle="{StaticResource OpColumnHeader}">
+                                        <DataGridTemplateColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <Grid HorizontalAlignment="Center">
+                                                    <Button Style="{StaticResource WorkspaceActionButton}" Content="{Binding UpdateToggleContent}"
+                                                            Tag="{Binding UpdateRunning}" ToolTip="{Binding UpdateToggleTip}"
+                                                            IsEnabled="{Binding UpdateToggleEnabled}"
                                                             Command="{Binding DataContext.UpdateToggleCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
                                                             CommandParameter="{Binding}" />
-                                                    <TextBlock Text="✓" Foreground="#1EA055" FontWeight="Bold" FontSize="14" VerticalAlignment="Center"
-                                                               Margin="3,0,0,0" ToolTip="Update đã xong (Hub)"
-                                                               Visibility="{Binding UpdateDone, Converter={StaticResource BoolToVis}}" />
-                                                    <Button Style="{StaticResource WorkspaceActionButton}" Content="{Binding RewriteToggleContent}" Margin="5,0,0,0" ToolTip="{Binding RewriteToggleTip}"
-                                                            Foreground="{Binding RewriteIconBrush}" IsEnabled="{Binding RewriteToggleEnabled}"
+                                                    <Border Style="{StaticResource DoneBadge}" ToolTip="Update đã xong (Hub)"
+                                                            Visibility="{Binding UpdateDone, Converter={StaticResource BoolToVis}}">
+                                                        <TextBlock Style="{StaticResource DoneBadgeText}" />
+                                                    </Border>
+                                                </Grid>
+                                            </DataTemplate>
+                                        </DataGridTemplateColumn.CellTemplate>
+                                    </DataGridTemplateColumn>
+                                    <DataGridTemplateColumn Header="Tên SP" Width="60" HeaderStyle="{StaticResource OpColumnHeader}">
+                                        <DataGridTemplateColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <Grid HorizontalAlignment="Center">
+                                                    <Button Style="{StaticResource WorkspaceActionButton}" Content="{Binding RewriteToggleContent}"
+                                                            Tag="{Binding RewriteRunning}" ToolTip="{Binding RewriteToggleTip}"
+                                                            IsEnabled="{Binding RewriteToggleEnabled}"
                                                             Command="{Binding DataContext.RewriteToggleCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
                                                             CommandParameter="{Binding}" />
-                                                </StackPanel>
+                                                    <Border Style="{StaticResource DoneBadge}" ToolTip="Tên SP đã xong (Hub)"
+                                                            Visibility="{Binding RewriteDone, Converter={StaticResource BoolToVis}}">
+                                                        <TextBlock Style="{StaticResource DoneBadgeText}" />
+                                                    </Border>
+                                                </Grid>
                                             </DataTemplate>
                                         </DataGridTemplateColumn.CellTemplate>
                                     </DataGridTemplateColumn>

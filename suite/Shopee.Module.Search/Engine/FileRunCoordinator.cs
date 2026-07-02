@@ -19,7 +19,7 @@ public sealed class FileRunCoordinator
 
     private readonly AppSettingsService _appSettings;
     private readonly SearchTaskStore _taskStore;
-    private readonly IReadOnlyList<InstanceConfig> _accounts;
+    private readonly List<InstanceConfig> _accounts;   // nhóm tk của lượt chạy; BÙ TK có thể thêm vào (dưới _accLock)
     private readonly ConcurrentQueue<LinkItem> _linkQueue;
     private readonly int _laneCount;
     private readonly string _region;
@@ -35,6 +35,12 @@ public sealed class FileRunCoordinator
     private readonly Dictionary<string, long> _restUntilTick = [];
     private readonly HashSet<string> _errored = new(StringComparer.OrdinalIgnoreCase);
     private const long RestMillis = 60_000;
+
+    // BÙ TK THAY THẾ: khi mọi tk trong nhóm đã thử/lỗi (captcha), xin 1 tk RẢNH từ kho chung (đã khóa lease
+    // xuyên máy) rồi thêm vào nhóm → link không "hết account" phải chạy lại. null = không bù (giữ hành vi cũ).
+    private readonly Func<IReadOnlyCollection<string>, CancellationToken, Task<InstanceConfig?>>? _acquireReplacement;
+    private readonly SemaphoreSlim _topUpGate = new(1, 1);
+    private long _noReplUntilTick;   // Environment.TickCount64: backoff sau khi kho hết tk dư (khỏi dội Hub)
 
     // Nghỉ ngẫu nhiên giữa các link để giả lập người dùng + tránh Shopee soi traffic.
     private const int LinkRestMinMs = 8_000;
@@ -67,15 +73,17 @@ public sealed class FileRunCoordinator
         IEnumerable<LinkItem> links,
         int laneCount,
         string region,
-        bool resume = false)
+        bool resume = false,
+        Func<IReadOnlyCollection<string>, CancellationToken, Task<InstanceConfig?>>? acquireReplacement = null)
     {
         _appSettings = appSettings;
         _taskStore = taskStore;
-        _accounts = accounts;
+        _accounts = accounts.ToList();
         _linkQueue = new ConcurrentQueue<LinkItem>(links);
         _laneCount = Math.Max(1, laneCount);
         _region = region ?? "";
         _resume = resume;
+        _acquireReplacement = acquireReplacement;
     }
 
     public async Task RunAsync(CancellationToken ct)
@@ -320,24 +328,26 @@ public sealed class FileRunCoordinator
         while (!ct.IsCancellationRequested)
         {
             InstanceConfig? pick = null;
+            bool noCandidates;
             lock (_accLock)
             {
                 var candidates = _accounts.Where(a => !tried.Contains(a.Id) && !_errored.Contains(a.Id)).ToList();
-                if (candidates.Count == 0)
-                    return null;
-
-                var now = Environment.TickCount64;
-                // Chọn NGẪU NHIÊN trong nhóm khả dụng (free + hết nghỉ + KHÔNG bị module khác giữ chỗ) →
-                // không nện mãi mấy acc đầu, và 2 module (Scrape/Search) không mở cùng 1 tk Shopee.
-                var eligible = candidates
-                    .Where(a => !_busy.Contains(a.Id) && !IsResting(a.Id, now) && !ShopeeAccountUsage.Shared.IsReserved(a.Id))
-                    .ToList();
-                pick = eligible.Count > 0 ? eligible[Random.Shared.Next(eligible.Count)] : null;
-                // Giành quyền NGAY trong _accLock (TryReserve nguyên tử) — nếu module khác vừa giành mất thì bỏ, chờ lượt sau.
-                if (pick is not null && !ShopeeAccountUsage.Shared.TryReserve(pick.Id))
-                    pick = null;
-                if (pick is not null)
-                    _busy.Add(pick.Id);
+                noCandidates = candidates.Count == 0;
+                if (!noCandidates)
+                {
+                    var now = Environment.TickCount64;
+                    // Chọn NGẪU NHIÊN trong nhóm khả dụng (free + hết nghỉ + KHÔNG bị module khác giữ chỗ) →
+                    // không nện mãi mấy acc đầu, và 2 module (Scrape/Search) không mở cùng 1 tk Shopee.
+                    var eligible = candidates
+                        .Where(a => !_busy.Contains(a.Id) && !IsResting(a.Id, now) && !ShopeeAccountUsage.Shared.IsReserved(a.Id))
+                        .ToList();
+                    pick = eligible.Count > 0 ? eligible[Random.Shared.Next(eligible.Count)] : null;
+                    // Giành quyền NGAY trong _accLock (TryReserve nguyên tử) — nếu module khác vừa giành mất thì bỏ, chờ lượt sau.
+                    if (pick is not null && !ShopeeAccountUsage.Shared.TryReserve(pick.Id))
+                        pick = null;
+                    if (pick is not null)
+                        _busy.Add(pick.Id);
+                }
             }
             if (pick is not null)
             {
@@ -345,9 +355,44 @@ public sealed class FileRunCoordinator
                 ShopeeAccountUsage.Shared.MarkInUse(pick.Id);
                 return pick;
             }
+            // Hết sạch ứng viên (mọi tk đã thử-cho-link-này / lỗi) → xin 1 tk THAY THẾ từ kho (khóa lease xuyên máy).
+            if (noCandidates)
+            {
+                if (await TryTopUpAsync(ct).ConfigureAwait(false)) continue;   // đã bù → vòng lại chọn tk mới
+                return null;   // không bù được (kho hết tk dư) → hết account thật
+            }
             await Task.Delay(500, ct);
         }
         return null;
+    }
+
+    /// <summary>Xin 1 tk THAY THẾ từ kho chung (đã khóa lease) và thêm vào nhóm. true = đã bù (dùng chung cho
+    /// mọi lane); false = kho hết tk dư (có backoff để khỏi dội Hub). Nối tiếp 1-tại-1-thời-điểm.</summary>
+    private async Task<bool> TryTopUpAsync(CancellationToken ct)
+    {
+        if (_acquireReplacement is null) return false;
+        if (Environment.TickCount64 < Interlocked.Read(ref _noReplUntilTick)) return false;   // backoff sau khi hết tk dư
+        await _topUpGate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            IReadOnlyCollection<string> excludeIds;
+            lock (_accLock) excludeIds = _accounts.Select(a => a.Id).ToArray();   // khỏi bù trùng tk đã có trong nhóm
+            var repl = await _acquireReplacement(excludeIds, ct).ConfigureAwait(false);
+            if (repl is null)
+            {
+                Interlocked.Exchange(ref _noReplUntilTick, Environment.TickCount64 + 20_000);   // kho hết tk dư → nghỉ 20s
+                return false;
+            }
+            lock (_accLock)
+            {
+                if (_accounts.Any(a => a.Id == repl.Id)) return true;   // đã có (đề phòng trùng) → coi như thành công
+                _accounts.Add(repl);
+                _errored.Remove(repl.Id);   // tk mới toanh → đảm bảo không kẹt trong danh sách lỗi
+            }
+            AccountsChanged?.Invoke();
+            return true;
+        }
+        finally { _topUpGate.Release(); }
     }
 
     private bool IsResting(string accountId, long now) =>

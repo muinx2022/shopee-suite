@@ -59,28 +59,31 @@ public sealed class HttpCoordinationHub : ICoordinationHub, IDisposable
 
     /// <summary>CLIENT (không phải máy Hub) tự kéo cấu hình + cookie + AI + workbook theo Hub: NGAY khi vừa kết
     /// nối (lần poll đầu) rồi ĐỊNH KỲ mỗi vài phút → Hub thêm tài khoản / đổi cookie SAU NÀY, client tự nhận mà
-    /// KHÔNG cần khởi động lại. Máy Hub KHÔNG kéo (giữ bản gốc). Có chốt chống chồng lấn + giãn theo chu kỳ.</summary>
+    /// KHÔNG cần khởi động lại. Máy Hub KHÔNG kéo (giữ bản gốc). Kéo xong ĐẨY NGƯỢC cookie MỚI HƠN (token máy
+    /// này tự login/refresh) lên kho — BigSeller xoay token, mọi máy phải hội tụ về token mới nhất, nếu không
+    /// mỗi máy 1 phiên cũ chết dần ("mất cookie" luân phiên). Có chốt chống chồng lấn + giãn theo chu kỳ.</summary>
     private async Task MaybeAutoPullAsync()
     {
         if (HubServerConfigStore.Shared.Current.Enabled) return;              // máy Hub: giữ workbook/cookie gốc
         if (CoordinationRuntime.ConfigSync is not { } sync) return;
         if ((DateTimeOffset.UtcNow - _lastAutoPull) < AutoSyncEvery) return;  // chưa tới chu kỳ
         if (Interlocked.Exchange(ref _pulling, 1) == 1) return;               // đang kéo → bỏ lượt này
-        try { await sync.PullAccountsAsync(); }
+        try { await sync.PullAccountsAsync(); await sync.PushCookiesIfNewerAsync(); }
         catch { }
         finally { _lastAutoPull = DateTimeOffset.UtcNow; Interlocked.Exchange(ref _pulling, 0); }
     }
 
-    /// <summary>MÁY HUB tự publish cấu hình + cookie + workbook ĐÃ ĐỔI lên Hub định kỳ (Hub là nguồn sự thật,
-    /// client chỉ nhận) → "Hub đổi data → client tự có". PushAsync chỉ đẩy file hash KHÁC nên rất rẻ. Client
-    /// KHÔNG push (scrape/update không ghi ngược data lên Hub). Có chốt chống chồng lấn + giãn theo chu kỳ.</summary>
+    /// <summary>MÁY HUB tự publish cấu hình + cookie + workbook ĐÃ ĐỔI lên Hub định kỳ (Hub là nguồn sự thật
+    /// cho CẤU HÌNH; client chỉ nhận). Riêng COOKIE là 2 CHIỀU theo "token mới hơn thắng": publish xong còn
+    /// KÉO VỀ cookie client vừa tự đăng nhập (client đẩy lên qua PushCookiesIfNewerAsync) → login ở BẤT KỲ
+    /// máy nào cũng lan ra mọi máy trong ~2 chu kỳ. Có chốt chống chồng lấn + giãn theo chu kỳ.</summary>
     private async Task MaybeAutoPushAsync()
     {
         if (!HubServerConfigStore.Shared.Current.Enabled) return;            // chỉ máy Hub publish
         if (CoordinationRuntime.ConfigSync is not { } sync) return;
         if ((DateTimeOffset.UtcNow - _lastAutoPush) < AutoSyncEvery) return; // chưa tới chu kỳ
         if (Interlocked.Exchange(ref _pushing, 1) == 1) return;              // đang đẩy → bỏ lượt này
-        try { await sync.PushAsync(); }
+        try { await sync.PushAsync(); await sync.PullCookiesIfNewerAsync(); }
         catch { }
         finally { _lastAutoPush = DateTimeOffset.UtcNow; Interlocked.Exchange(ref _pushing, 0); }
     }

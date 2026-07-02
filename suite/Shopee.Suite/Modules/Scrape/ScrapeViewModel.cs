@@ -237,11 +237,24 @@ public sealed partial class ScrapeViewModel : ObservableObject
         private long _lru;
         private const int ShortCdSec = 15, LongCdSec = 90, SetAsideAfter = 2;
 
-        public SessionAccountPool(string sheet, IEnumerable<ShopeeAccount> frame)
+        // BÙ TK THAY THẾ: khi captcha loại tk khỏi khung, giữ cỡ khung bằng cách xin 1 tk RẢNH từ kho chung
+        // (khóa lease xuyên máy) → job không cạn khung phải chạy lại. null = không bù (giữ hành vi cũ).
+        private readonly int _targetSize;
+        private readonly Func<IReadOnlyCollection<string>, CancellationToken, Task<ShopeeAccount?>>? _acquireReplacement;
+        private readonly Action<string>? _log;
+        private readonly SemaphoreSlim _topUpGate = new(1, 1);
+        private long _noReplUntilTick;   // Environment.TickCount64: backoff sau khi kho hết tk dư (khỏi dội Hub)
+
+        public SessionAccountPool(string sheet, IEnumerable<ShopeeAccount> frame,
+            Func<IReadOnlyCollection<string>, CancellationToken, Task<ShopeeAccount?>>? acquireReplacement = null,
+            Action<string>? log = null)
         {
             _sheet = sheet;
             _frame = frame.ToList();
             _lru = _frame.Select(a => a.LastUsedTick).DefaultIfEmpty(0).Max();
+            _targetSize = _frame.Count;   // cỡ khung ban đầu (đã trừ tk máy khác giữ) — mốc để bù cho đủ
+            _acquireReplacement = acquireReplacement;
+            _log = log;
         }
 
         public async Task<ScrapeAccountSpec?> BorrowAsync(CancellationToken ct)
@@ -249,6 +262,7 @@ public sealed partial class ScrapeViewModel : ObservableObject
             while (true)
             {
                 ct.ThrowIfCancellationRequested();
+                int usable, borrowedCount;
                 lock (_lock)
                 {
                     var now = DateTimeOffset.UtcNow;
@@ -264,13 +278,45 @@ public sealed partial class ScrapeViewModel : ObservableObject
                         ShopeeAccountUsage.Shared.MarkInUse(pick.Id);
                         return ToSpec(pick, _sheet);
                     }
-                    // Không có tk dùng được NGAY: hết hẳn (mọi tk trong khung Disabled/đã loại) + không ai
-                    // đang mượn → null → worker dừng (hết tk → dừng job). Còn tk đang mượn/cooldown → chờ.
-                    var anyUsable = _frame.Any(a => !a.Disabled && !_dropped.Contains(a.Id));
-                    if (!anyUsable && _borrowed.Count == 0) return null;
+                    usable = _frame.Count(a => !a.Disabled && !_dropped.Contains(a.Id));
+                    borrowedCount = _borrowed.Count;
                 }
+                // Khung THIẾU so với cỡ ban đầu (captcha loại tk) → xin 1 tk THAY THẾ từ kho (khóa lease xuyên máy).
+                // Có backoff sau khi kho hết tk dư để khỏi dội Hub liên tục.
+                if (usable < _targetSize && Environment.TickCount64 >= Interlocked.Read(ref _noReplUntilTick))
+                {
+                    if (await TryTopUpAsync(ct).ConfigureAwait(false)) continue;   // đã bù → vòng lại mượn tk mới
+                    Interlocked.Exchange(ref _noReplUntilTick, Environment.TickCount64 + 20_000);   // hết tk dư → nghỉ 20s
+                }
+                // Không có tk dùng được NGAY + không bù được: hết hẳn (mọi tk Disabled/loại) + không ai đang mượn
+                // → null → worker dừng (hết tk → dừng job). Còn tk đang mượn/cooldown → chờ.
+                if (usable == 0 && borrowedCount == 0) return null;
                 await Task.Delay(500, ct).ConfigureAwait(false);
             }
+        }
+
+        /// <summary>Xin 1 tk THAY THẾ từ kho chung (đã khóa lease) và thêm vào khung để giữ đủ cỡ. true = đã bù
+        /// (hoặc khung đã đủ do worker khác vừa bù); false = kho hết tk dư. Nối tiếp 1-tại-1-thời-điểm.</summary>
+        private async Task<bool> TryTopUpAsync(CancellationToken ct)
+        {
+            if (_acquireReplacement is null) return false;
+            await _topUpGate.WaitAsync(ct).ConfigureAwait(false);
+            try
+            {
+                IReadOnlyCollection<string> frameIds;
+                lock (_lock)
+                {
+                    if (_frame.Count(a => !a.Disabled && !_dropped.Contains(a.Id)) >= _targetSize)
+                        return true;   // worker khác vừa bù đủ → coi như thành công, vòng lại mượn
+                    frameIds = _frame.Select(a => a.Id).ToArray();
+                }
+                var repl = await _acquireReplacement(frameIds, ct).ConfigureAwait(false);
+                if (repl is null) return false;
+                lock (_lock) _frame.Add(repl);
+                _log?.Invoke($"🔁 bù 1 tk thay thế \"{repl.DisplayName}\" vào khung (giữ đủ cỡ, khỏi cạn phải chạy lại).");
+                return true;
+            }
+            finally { _topUpGate.Release(); }
         }
 
         public void Release(ScrapeAccountSpec spec)
@@ -354,7 +400,8 @@ public sealed partial class ScrapeViewModel : ObservableObject
 
         ScrapeRunner? runner = null;
         var claimedFrameIds = new List<string>();   // CẢ khung đã giữ chỗ cục bộ → nhả TOÀN BỘ ở finally
-        var hubReservedIds = new List<string>();    // tk được Hub cấp lease (tập con) → chỉ nhả/heartbeat ngần này trên Hub
+        var hubReservedIds = new List<string>();    // tk được Hub cấp lease (khung ban đầu + tk bù) → nhả/heartbeat trên Hub
+        var reservedLock = new object();            // 2 list trên bị pool BÙ TK thêm vào từ luồng khác → khóa khi đọc/ghi
         var coordKey = new CoordKey(account.Id, shop.Id, sheet, CoordOp.Scrape);
         ILeaseHandle? lease = null;
         Timer? accHeartbeat = null;                 // nhịp account-lease nền (chống hết hạn giữa chunk dài)
@@ -408,7 +455,8 @@ public sealed partial class ScrapeViewModel : ObservableObject
             if (accHub is not null)
             {
                 var granted = await accHub.ReserveAccountsAsync(claimedFrameIds).ConfigureAwait(false);
-                hubReservedIds = claimedFrameIds.Where(granted.Contains).ToList();   // tập con Hub cấp → nhả/heartbeat trên Hub
+                lock (reservedLock) hubReservedIds.AddRange(claimedFrameIds.Where(granted.Contains));   // tập con Hub cấp → nhả/heartbeat trên Hub
+                ShopeeAccountUsage.Shared.MarkHubLeased(granted);   // dấu per-máy → module khác (Search) không cướp lease các tk này
                 if (granted.Count < claimedFrameIds.Count)
                 {
                     frame = frame.Where(a => granted.Contains(a.Id)).ToList();
@@ -417,10 +465,13 @@ public sealed partial class ScrapeViewModel : ObservableObject
                 }
                 if (frame.Count == 0) { Log($"[{account.DisplayName}] mọi tk trong khung đang được máy khác dùng — bỏ qua."); return; }
 
-                // Heartbeat account-lease theo TIMER nền (không lệ thuộc tốc độ scrape) → khỏi hết hạn 5' giữa chunk dài.
-                if (hubReservedIds.Count > 0)
-                    accHeartbeat = new Timer(_ => { try { _ = accHub.HeartbeatAccountsAsync(hubReservedIds); } catch { } },
-                        null, TimeSpan.FromSeconds(60), TimeSpan.FromSeconds(60));
+                // Heartbeat account-lease theo TIMER nền (không lệ thuộc tốc độ scrape) → khỏi hết hạn 5' giữa chunk
+                // dài. Snapshot dưới khóa vì tk BÙ có thể được thêm vào hubReservedIds trong lúc chạy.
+                accHeartbeat = new Timer(_ =>
+                {
+                    List<string> snap; lock (reservedLock) snap = hubReservedIds.ToList();
+                    if (snap.Count > 0) { try { _ = accHub.HeartbeatAccountsAsync(snap); } catch { } }
+                }, null, TimeSpan.FromSeconds(60), TimeSpan.FromSeconds(60));
             }
             ScrapeProgressStore.Shared.SaveFrame(account.Id, sheet, frame.Select(a => a.Id));   // lưu khung để resume giữ nguyên
             var procs = Math.Max(1, Math.Min(maxProc, frame.Count));
@@ -454,7 +505,22 @@ public sealed partial class ScrapeViewModel : ObservableObject
             };
             WireRunner(runner, seq, account.DisplayName);
 
-            var pool = new SessionAccountPool(sheet, frame);
+            // BÙ TK THAY THẾ: khi captcha loại tk khỏi khung, pool xin 1 tk RẢNH từ kho chung (đã khóa lease
+            // xuyên máy) để giữ đủ cỡ khung → job KHÔNG cạn khung phải chạy lại. Ghi nhận để NHẢ đúng ở finally
+            // (giữ-chỗ cục bộ + lease Hub + heartbeat như tk khung ban đầu). Hết tk dư → pool giữ hành vi cũ.
+            async Task<ShopeeAccount?> AcquireReplacementAsync(IReadOnlyCollection<string> excludeIds, CancellationToken rct)
+            {
+                var repl = await Shopee.Core.Accounts.AccountReplenisher.TryAcquireSpareAsync(excludeIds, accHub, rct).ConfigureAwait(false);
+                if (repl is null) return null;
+                lock (reservedLock)
+                {
+                    claimedFrameIds.Add(repl.Id);                          // nhả giữ-chỗ cục bộ ở finally
+                    if (accHub is not null) hubReservedIds.Add(repl.Id);   // heartbeat + nhả lease Hub ở finally
+                }
+                return repl;
+            }
+
+            var pool = new SessionAccountPool(sheet, frame, AcquireReplacementAsync, msg => Log($"[{account.DisplayName}] {msg}"));
             await runner.RunAutoAsync(pool, procs, segments, rowsPer, account.CookieFile, ct).ConfigureAwait(false);
 
             // Kết thúc: xong hết [startRow..total] → completed; còn dở → stopped (resume chạy nốt theo dòng).
@@ -480,11 +546,15 @@ public sealed partial class ScrapeViewModel : ObservableObject
             }
             catch { }
             if (accHeartbeat is not null) { try { await accHeartbeat.DisposeAsync().ConfigureAwait(false); } catch { } }
-            if (accHub is not null) { try { await accHub.ReleaseAccountsAsync(hubReservedIds).ConfigureAwait(false); } catch { } }
+            // Snapshot dưới khóa (khung ban đầu + tk BÙ) → nhả ĐÚNG toàn bộ tk đã giữ, không rò.
+            List<string> hubToRelease, localToRelease;
+            lock (reservedLock) { hubToRelease = hubReservedIds.ToList(); localToRelease = claimedFrameIds.ToList(); }
+            ShopeeAccountUsage.Shared.UnmarkHubLeased(hubToRelease);   // gỡ dấu per-máy TRƯỚC/CÙNG khi nhả lease Hub
+            if (accHub is not null) { try { await accHub.ReleaseAccountsAsync(hubToRelease).ConfigureAwait(false); } catch { } }
             if (lease is not null) { try { await lease.DisposeAsync().ConfigureAwait(false); } catch { } }
 
-            // Nhả giữ-chỗ CẢ KHUNG → Search (và job Scrape khác) lại mượn được các tk này.
-            ShopeeAccountUsage.Shared.ReleaseReservation(claimedFrameIds);
+            // Nhả giữ-chỗ CẢ KHUNG (+ tk bù) → Search (và job Scrape khác) lại mượn được các tk này.
+            ShopeeAccountUsage.Shared.ReleaseReservation(localToRelease);
             s.Jobs.Remove(account.Id);
             // Dọn các dòng process của job này khỏi lưới (trước đây dòng cũ không bao giờ bị xoá).
             var prefix = seq + ":";
@@ -769,13 +839,16 @@ public sealed partial class ScrapeViewModel : ObservableObject
                 if (preferIds is not null)
                     foreach (var id in preferIds)
                     {
-                        var a = Available.FirstOrDefault(x => x.Id == id && !x.Disabled);
+                        // Né tk module khác đang giữ lease Hub trên máy này (IsHubLeased) — khỏi cướp lease chéo-module.
+                        var a = Available.FirstOrDefault(x => x.Id == id && !x.Disabled && !ShopeeAccountUsage.Shared.IsHubLeased(x.Id));
                         if (a is not null && ShopeeAccountUsage.Shared.TryReserve(a.Id)) { frame.Add(a); Available.Remove(a); }
                     }
-                // Lấp đủ số: chọn NGẪU NHIÊN trong kho (tk còn bật + chưa bị module khác giữ) cho đủ n.
+                // Lấp đủ số: chọn NGẪU NHIÊN trong kho (tk còn bật + chưa module khác giữ chỗ/giữ lease Hub) cho đủ n.
                 while (frame.Count < n)
                 {
-                    var candidates = Available.Where(x => !x.Disabled && !ShopeeAccountUsage.Shared.IsReserved(x.Id)).ToList();
+                    var candidates = Available.Where(x => !x.Disabled
+                        && !ShopeeAccountUsage.Shared.IsReserved(x.Id)
+                        && !ShopeeAccountUsage.Shared.IsHubLeased(x.Id)).ToList();
                     if (candidates.Count == 0) break;
                     var a = candidates[Random.Shared.Next(candidates.Count)];
                     // Module khác vừa giành mất giữa lúc lọc → bỏ tk này khỏi kho, thử tk khác (không kẹt vì kho co dần).

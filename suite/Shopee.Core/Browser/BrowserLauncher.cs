@@ -78,12 +78,11 @@ public sealed class BrowserLauncher
 
         _cdpPort = PortAllocator.Reserve();
         var args = BuildArgs(_cdpPort, profileDir, proxyServer, startUrl, extraArgs);
-        _process = Process.Start(new ProcessStartInfo
-        {
-            FileName = exePath,
-            Arguments = args,
-            UseShellExecute = false,
-        });
+        // Phóng QUA Job Object (KILL_ON_JOB_CLOSE) như bầy Brave scrape → cửa sổ automation (kiểm tra tk
+        // lỗi / auto-login / BigSeller login) TỰ CHẾT khi app kết thúc — đóng thường, CRASH, hay force-kill
+        // — kể cả khi WPF KHÔNG kịp gọi KillCheckBrowser (Unloaded không bắn lúc shutdown). KHÔNG còn rò
+        // cửa sổ Brave còn phiên đăng nhập. Interop job lỗi → BraveJobObject tự fallback Process.Start thường.
+        _process = BraveJobObject.Start(exePath, args);
     }
 
     private static string BuildArgs(

@@ -23,6 +23,13 @@ public sealed class ShopeeAccountUsage
     // → KHÔNG bao giờ 2 module mở CÙNG 1 tk Shopee cùng lúc (tránh Shopee thấy 1 tk ở 2 phiên → captcha/khóa).
     private readonly HashSet<string> _reserved = new(StringComparer.Ordinal);
 
+    // SỔ "ĐANG GIỮ LEASE HUB" (per-MÁY, mọi module gộp chung). KHÁC _reserved (per-borrow, Search nhả sớm giữa
+    // các link): _hubLeased giữ SUỐT thời gian máy này còn giữ lease Hub của tk (khung Scrape / nhóm Search +
+    // tk BÙ). Điểm LẤY TK MỚI (bù / đóng khung) phải loại tk _hubLeased để module khác trên CÙNG máy KHÔNG
+    // "cướp" tk mà module này đang giữ lease Hub → tránh: module kia xong trước xóa dòng lease (machine-scoped,
+    // 1 dòng/tk) khiến module còn chạy mất lease → máy KHÁC lấy trùng tk → Shopee thấy 2 phiên → captcha/khóa.
+    private readonly HashSet<string> _hubLeased = new(StringComparer.Ordinal);
+
     /// <summary>Phát khi trạng thái đổi → UI làm mới cột "Tình trạng".</summary>
     public event Action? Changed;
 
@@ -48,6 +55,7 @@ public sealed class ShopeeAccountUsage
                 _used.Clear();
                 _captcha.Clear();
                 _reserved.Clear();   // không còn lượt chạy nào → nhả mọi giữ chỗ (lưới an toàn chống rò)
+                _hubLeased.Clear();  // và mọi dấu "đang giữ lease Hub" (lưới an toàn)
             }
         }
         Changed?.Invoke();
@@ -125,6 +133,27 @@ public sealed class ShopeeAccountUsage
     public void ReleaseReservation(IEnumerable<string> ids)
     {
         lock (_lock) foreach (var id in ids) if (!string.IsNullOrEmpty(id)) _reserved.Remove(id);
+    }
+
+    // ── GIỮ LEASE HUB (per-MÁY, gộp mọi module) ──────────────────────────────────────
+    /// <summary>Đánh dấu máy này ĐANG giữ lease Hub các tk (gọi khi Reserve trên Hub thành công). Điểm lấy tk
+    /// MỚI của module khác sẽ né các tk này (chống module kia xóa nhầm dòng lease đang dùng).</summary>
+    public void MarkHubLeased(IEnumerable<string> ids)
+    {
+        lock (_lock) foreach (var id in ids) if (!string.IsNullOrEmpty(id)) _hubLeased.Add(id);
+    }
+
+    /// <summary>Gỡ dấu giữ lease Hub (gọi khi nhả lease Hub ở finally). An toàn gọi cả tk không có dấu.</summary>
+    public void UnmarkHubLeased(IEnumerable<string> ids)
+    {
+        lock (_lock) foreach (var id in ids) if (!string.IsNullOrEmpty(id)) _hubLeased.Remove(id);
+    }
+
+    /// <summary>tk có đang được máy này giữ lease Hub không (để điểm lấy tk MỚI né, khỏi cướp lease chéo-module).</summary>
+    public bool IsHubLeased(string id)
+    {
+        if (string.IsNullOrEmpty(id)) return false;
+        lock (_lock) return _hubLeased.Contains(id);
     }
 
     /// <summary>Trạng thái hiển thị của 1 tk: "⚠ Captcha" | "Đang dùng" | "Đã dùng" | "Chưa dùng".</summary>

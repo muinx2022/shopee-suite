@@ -125,21 +125,21 @@
                                         <DataGridTemplateColumn Header="Scrape" Width="150">
                                             <DataGridTemplateColumn.CellTemplate>
                                                 <DataTemplate>
-                                                    <TextBlock Text="{Binding ScrapeText}" Foreground="{Binding ScrapeBrush}" FontWeight="SemiBold" />
+                                                    <TextBlock Text="{Binding ScrapeText}" Foreground="{Binding ScrapeBrush}" FontWeight="SemiBold" ToolTip="{Binding ScrapeText}" />
                                                 </DataTemplate>
                                             </DataGridTemplateColumn.CellTemplate>
                                         </DataGridTemplateColumn>
                                         <DataGridTemplateColumn Header="Import" Width="150">
                                             <DataGridTemplateColumn.CellTemplate>
                                                 <DataTemplate>
-                                                    <TextBlock Text="{Binding ImportText}" Foreground="{Binding ImportBrush}" FontWeight="SemiBold" />
+                                                    <TextBlock Text="{Binding ImportText}" Foreground="{Binding ImportBrush}" FontWeight="SemiBold" ToolTip="{Binding ImportText}" />
                                                 </DataTemplate>
                                             </DataGridTemplateColumn.CellTemplate>
                                         </DataGridTemplateColumn>
                                         <DataGridTemplateColumn Header="Update" Width="150">
                                             <DataGridTemplateColumn.CellTemplate>
                                                 <DataTemplate>
-                                                    <TextBlock Text="{Binding UpdateText}" Foreground="{Binding UpdateBrush}" FontWeight="SemiBold" />
+                                                    <TextBlock Text="{Binding UpdateText}" Foreground="{Binding UpdateBrush}" FontWeight="SemiBold" ToolTip="{Binding UpdateText}" />
                                                 </DataTemplate>
                                             </DataGridTemplateColumn.CellTemplate>
                                         </DataGridTemplateColumn>
@@ -157,8 +157,18 @@
                                     <TextBlock Text="Việc" VerticalAlignment="Center" FontWeight="SemiBold" Margin="0,0,8,0" />
                                     <ComboBox ItemsSource="{Binding PinOps}" SelectedItem="{Binding PinOp}" Width="120" Margin="0,0,8,0" />
                                     <TextBlock Text="cho máy" VerticalAlignment="Center" Margin="0,0,8,0" />
+                                    <!-- Hiện chấm 🟢/🟡/⚪ để khỏi ghim nhầm máy đang TẮT (việc sẽ nằm "đã xếp" chờ mãi). -->
                                     <ComboBox ItemsSource="{Binding MachineRows}" SelectedItem="{Binding PinMachine}"
-                                              DisplayMemberPath="Name" Width="200" Margin="0,0,12,0" />
+                                              Width="200" Margin="0,0,12,0">
+                                        <ComboBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <StackPanel Orientation="Horizontal" ToolTip="{Binding Online}">
+                                                    <TextBlock Text="{Binding Dot}" Margin="0,0,6,0" />
+                                                    <TextBlock Text="{Binding Name}" />
+                                                </StackPanel>
+                                            </DataTemplate>
+                                        </ComboBox.ItemTemplate>
+                                    </ComboBox>
                                     <TextBlock Text="dòng" VerticalAlignment="Center" Margin="0,0,6,0" />
                                     <TextBox Width="58" Margin="0,0,4,0" VerticalContentAlignment="Center"
                                              Text="{Binding PinStartRow}" ToolTip="Từ dòng (0 = để client dùng cấu hình của nó)" />

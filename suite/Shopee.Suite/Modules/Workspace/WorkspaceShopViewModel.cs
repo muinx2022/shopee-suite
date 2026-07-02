@@ -63,10 +63,7 @@ public sealed partial class WorkspaceShopViewModel : ObservableObject
         RefreshFleet();
     }
 
-    // ── Nút TOGGLE 1-nút/op: bấm chạy (xanh, icon ■) ↔ bấm lại dừng (xám, icon op). Xanh cả khi máy khác chạy. ──
-    private static readonly Brush RunningBrush = MakeFrozen(Color.FromRgb(0x1E, 0xA0, 0x55));   // xanh lá
-    private static readonly Brush IdleBrush = Brushes.Black;
-    private static Brush MakeFrozen(Color c) { var b = new SolidColorBrush(c); b.Freeze(); return b; }
+    // ── Nút TOGGLE 1-nút/op: bấm chạy ↔ bấm lại dừng. "Đang chạy" tính cả máy khác (fleet). ──
 
     /// <summary>Trạng thái 1 op của shop này: chạy không + máy nào. Ưu tiên local (tức thời), rồi fleet.</summary>
     private (bool running, string by) OpState(CoordOp op, bool localRunning)
@@ -94,17 +91,17 @@ public sealed partial class WorkspaceShopViewModel : ObservableObject
         }
     }
 
-    // Foreground nút: xanh khi op này đang chạy (máy nào cũng vậy), xám khi rảnh.
-    public Brush ScrapeIconBrush => OpState(CoordOp.Scrape, IsScraping).running ? RunningBrush : IdleBrush;
-    public Brush ImportIconBrush => OpState(CoordOp.Import, IsImporting).running ? RunningBrush : IdleBrush;
-    public Brush UpdateIconBrush => OpState(CoordOp.Update, IsUpdatingShop).running ? RunningBrush : IdleBrush;
-    public Brush RewriteIconBrush => OpState(CoordOp.Rewrite, IsRewriting).running ? RunningBrush : IdleBrush;
+    // Đang chạy (máy này HOẶC máy khác) — XAML dựa vào đây tô nút xanh (viền + nền nhạt + icon ■).
+    public bool ScrapeRunning => OpState(CoordOp.Scrape, IsScraping).running;
+    public bool ImportRunning => OpState(CoordOp.Import, IsImporting).running;
+    public bool UpdateRunning => OpState(CoordOp.Update, IsUpdatingShop).running;
+    public bool RewriteRunning => OpState(CoordOp.Rewrite, IsRewriting).running;
 
     // Icon nút: ■ khi đang chạy (gợi ý bấm để dừng), ngược lại icon op.
-    public string ScrapeToggleContent => OpState(CoordOp.Scrape, IsScraping).running ? "■" : "▶";
-    public string ImportToggleContent => OpState(CoordOp.Import, IsImporting).running ? "■" : "⬆";
-    public string UpdateToggleContent => OpState(CoordOp.Update, IsUpdatingShop).running ? "■" : "✎";
-    public string RewriteToggleContent => OpState(CoordOp.Rewrite, IsRewriting).running ? "■" : "🏷";
+    public string ScrapeToggleContent => ScrapeRunning ? "■" : "▶";
+    public string ImportToggleContent => ImportRunning ? "■" : "⬆";
+    public string UpdateToggleContent => UpdateRunning ? "■" : "✎";
+    public string RewriteToggleContent => RewriteRunning ? "■" : "🏷";
 
     // Bật nút khi: MÁY NÀY đang chạy op đó (để dừng) HOẶC được phép bắt đầu (theo quy tắc khoá).
     public bool ScrapeToggleEnabled => IsScraping || CanScrape;
@@ -134,9 +131,10 @@ public sealed partial class WorkspaceShopViewModel : ObservableObject
         return hub.CurrentFleet.Ledger.Any(l => string.Equals(l.Key, key, StringComparison.Ordinal)
                                                 && string.Equals(l.Status, "completed", StringComparison.OrdinalIgnoreCase));
     }
-    public bool ScrapeDone => !OpState(CoordOp.Scrape, IsScraping).running && IsOpDone(CoordOp.Scrape);
-    public bool ImportDone => !OpState(CoordOp.Import, IsImporting).running && IsOpDone(CoordOp.Import);
-    public bool UpdateDone => !OpState(CoordOp.Update, IsUpdatingShop).running && IsOpDone(CoordOp.Update);
+    public bool ScrapeDone => !ScrapeRunning && IsOpDone(CoordOp.Scrape);
+    public bool ImportDone => !ImportRunning && IsOpDone(CoordOp.Import);
+    public bool UpdateDone => !UpdateRunning && IsOpDone(CoordOp.Update);
+    public bool RewriteDone => !RewriteRunning && IsOpDone(CoordOp.Rewrite);
 
     /// <summary>true khi shop này đang chạy 1 workflow update TRÊN MÁY NÀY (giữ cho chỗ khác nếu còn dùng).</summary>
     public bool IsUpdatingAnyLocal => IsImporting || IsUpdatingShop || IsRewriting;
@@ -146,12 +144,12 @@ public sealed partial class WorkspaceShopViewModel : ObservableObject
     {
         foreach (var n in new[]
         {
-            nameof(ScrapeIconBrush), nameof(ImportIconBrush), nameof(UpdateIconBrush), nameof(RewriteIconBrush),
+            nameof(ScrapeRunning), nameof(ImportRunning), nameof(UpdateRunning), nameof(RewriteRunning),
             nameof(ScrapeToggleContent), nameof(ImportToggleContent), nameof(UpdateToggleContent), nameof(RewriteToggleContent),
             nameof(ScrapeToggleEnabled), nameof(ImportToggleEnabled), nameof(UpdateToggleEnabled), nameof(RewriteToggleEnabled),
             nameof(ScrapeToggleTip), nameof(ImportToggleTip), nameof(UpdateToggleTip), nameof(RewriteToggleTip),
             nameof(CanScrape), nameof(CanStartUpdate), nameof(IsUpdatingAnyLocal),
-            nameof(ScrapeDone), nameof(ImportDone), nameof(UpdateDone),
+            nameof(ScrapeDone), nameof(ImportDone), nameof(UpdateDone), nameof(RewriteDone),
         }) OnPropertyChanged(n);
     }
 

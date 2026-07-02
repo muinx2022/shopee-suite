@@ -48,11 +48,16 @@ public sealed class SearchRunner
     public Task RunCategoryLinksAsync(
         IReadOnlyList<SearchAccountSpec> specs,
         IReadOnlyList<(int Index, string Link, string SourceFile)> links,
-        int laneCount, string region, string outputDir, bool resume, CancellationToken ct)
+        int laneCount, string region, string outputDir, bool resume, CancellationToken ct,
+        Func<IReadOnlyCollection<string>, CancellationToken, Task<SearchAccountSpec?>>? acquireReplacement = null)
     {
         var accounts = ToAccounts(specs);
         var items = links.Select(l => new FileRunCoordinator.LinkItem(l.Index, l.Link, l.SourceFile)).ToList();
-        _file = new FileRunCoordinator(_settings, _store, accounts, items, laneCount, region, resume);
+        // BÙ TK THAY THẾ: gói provider (trả SearchAccountSpec) thành provider trả InstanceConfig cho engine.
+        Func<IReadOnlyCollection<string>, CancellationToken, Task<InstanceConfig?>>? acquireInstance = acquireReplacement is null
+            ? null
+            : async (excludeIds, c) => { var s = await acquireReplacement(excludeIds, c).ConfigureAwait(false); return s is null ? null : ToAccount(s); };
+        _file = new FileRunCoordinator(_settings, _store, accounts, items, laneCount, region, resume, acquireInstance);
         _file.LinkStatus += (link, m) => LinkStatus?.Invoke(link, m);
         _file.LinkProduct += (link, p) => { _collected.Add(p); LinkProduct?.Invoke(link, Project(0, p)); };
         _file.LinkAssigned += (link, acc, _) => LinkAssigned?.Invoke(link, acc);
@@ -218,18 +223,20 @@ public sealed class SearchRunner
 
     // ── Helpers ──────────────────────────────────────────────────────────────────
     private static List<InstanceConfig> ToAccounts(IReadOnlyList<SearchAccountSpec> specs) =>
-        specs.Select(s => new InstanceConfig
-        {
-            Id = s.Id,
-            Label = s.Label,
-            ShopeeAccountLogin = s.ShopeeAccountLogin,
-            OpenWithShopeeAccount = s.OpenWithShopeeAccount,
-            KiotProxyKey = s.KiotProxyKey,
-            ProxyType = string.IsNullOrWhiteSpace(s.ProxyType) ? "http" : s.ProxyType,
-            ManualProxy = s.ManualProxy,
-            ProfileRelativePath = s.ProfileRelativePath,
-            RequireProxy = s.RequireProxy,
-        }).ToList();
+        specs.Select(ToAccount).ToList();
+
+    private static InstanceConfig ToAccount(SearchAccountSpec s) => new()
+    {
+        Id = s.Id,
+        Label = s.Label,
+        ShopeeAccountLogin = s.ShopeeAccountLogin,
+        OpenWithShopeeAccount = s.OpenWithShopeeAccount,
+        KiotProxyKey = s.KiotProxyKey,
+        ProxyType = string.IsNullOrWhiteSpace(s.ProxyType) ? "http" : s.ProxyType,
+        ManualProxy = s.ManualProxy,
+        ProfileRelativePath = s.ProfileRelativePath,
+        RequireProxy = s.RequireProxy,
+    };
 
     /// <summary>Áp bộ lọc (giá / đã bán / danh mục) lên 1 danh sách sản phẩm bất kỳ. null = không lọc.
     /// Dùng lại cho xuất Excel gộp ở Hub (cùng logic với bộ lọc tab Search).</summary>

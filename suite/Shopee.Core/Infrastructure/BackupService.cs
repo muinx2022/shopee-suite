@@ -107,6 +107,10 @@ public static class BackupService
                 var changed = false;
                 if (SharedSignature(existing) != SharedSignature(a))
                 {
+                    // Bản Hub KHÔNG được đè cấu hình chạy riêng-máy (khoảng dòng / số worker / reload) —
+                    // chép lại từ shop cũ trước khi thay danh sách (không thì set "Update worker 5" trên
+                    // client cứ bị pull từ Hub kéo về 1 ngay trước lúc chạy việc).
+                    KeepLocalRunConfig(existing.Shops, a.Shops);
                     existing.Label = a.Label; existing.Email = a.Email; existing.Shops = a.Shops;
                     existing.KiotProxyKey = a.KiotProxyKey; existing.Region = a.Region; existing.ProxyType = a.ProxyType;
                     changed = true;
@@ -141,11 +145,37 @@ public static class BackupService
     }
 
     /// <summary>Chữ ký các trường DÙNG CHUNG của 1 acc BigSeller (bỏ qua cookie/workbook/lựa-chọn-UI là field
-    /// cục bộ-theo-máy) → so để biết Hub có sửa nội dung (shop…) hay không.</summary>
+    /// cục bộ-theo-máy) → so để biết Hub có sửa nội dung (shop…) hay không. Shops chỉ tính phần Hub quản
+    /// (tên/sheet/map cột/AI/crawl); cấu hình CHẠY (StartRow/EndRow/worker/reload) là riêng-máy — nếu tính
+    /// vào chữ ký thì set worker trên client làm lệch chữ ký → pull sau đó lấy bản Hub đè ngược mất giá trị.</summary>
     private static string SharedSignature(BigSellerAccount a) => JsonSerializer.Serialize(new
     {
-        a.Label, a.Email, a.KiotProxyKey, a.Region, a.ProxyType, a.Shops,
+        a.Label, a.Email, a.KiotProxyKey, a.Region, a.ProxyType,
+        Shops = a.Shops.Select(s => new
+        {
+            s.Id, s.Name, s.ShopeeDataSheet, s.ColumnMap, s.BigSellerCrawlUrl, s.BigSellerImportFromClaimedTab,
+            s.OpenAiModel, s.OpenAiApiKeyFile, s.OpenAiBatchSize,
+        }).ToList(),
     });
+
+    /// <summary>Chép cấu hình chạy RIÊNG-MÁY (từ dòng / đến dòng / số worker import+update / reload) từ shop
+    /// cũ sang shop mới cùng Id (fallback: cùng sheet) khi thay Shops bằng bản Hub — các field này thuộc về
+    /// từng máy như cookie/workbook, đồng bộ Hub không được đụng.</summary>
+    private static void KeepLocalRunConfig(List<BigSellerShop> old, List<BigSellerShop> incoming)
+    {
+        foreach (var s in incoming)
+        {
+            var o = old.FirstOrDefault(x => x.Id == s.Id)
+                ?? (string.IsNullOrWhiteSpace(s.ShopeeDataSheet) ? null
+                    : old.FirstOrDefault(x => string.Equals(x.ShopeeDataSheet, s.ShopeeDataSheet, StringComparison.OrdinalIgnoreCase)));
+            if (o is null) continue;
+            s.StartRow = o.StartRow;
+            s.EndRow = o.EndRow;
+            s.ImportWorkers = o.ImportWorkers;
+            s.UpdateWorkers = o.UpdateWorkers;
+            s.ListingReloadSeconds = o.ListingReloadSeconds;
+        }
+    }
 
     /// <summary>Gộp danh sách Shopee account (kèm proxy) vào store. append = replace:false. Acc ĐÃ CÓ (theo
     /// Id/login) mà field DÙNG CHUNG khác (login/proxy/label) → CẬP NHẬT xuống; GIỮ NGUYÊN field local (profile,

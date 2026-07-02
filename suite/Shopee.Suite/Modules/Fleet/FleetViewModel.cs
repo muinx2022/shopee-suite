@@ -226,7 +226,9 @@ public sealed partial class FleetViewModel : ObservableObject
             _pinPending = null; PinBusy = false;
             ActionStatus = open.Status == "running"
                 ? $"▶ {p.Label} — đang chạy trên {Host(open.ClaimedByHostname)}."
-                : $"✔ Đã xếp {p.Label} — chờ máy nhận.";
+                : MachineOffline(f, p.MachineId)
+                    ? $"⚠ Đã xếp {p.Label} — nhưng máy đích đang TẮT/mất kết nối nên CHƯA chạy; mở app trên máy đó, hoặc Huỷ rồi ghim máy khác."
+                    : $"✔ Đã xếp {p.Label} — chờ máy nhận.";
             return;
         }
         var settled = f.Assignments.FirstOrDefault(a => a.Id == p.Id && a.Status is "done" or "failed" or "canceled");
@@ -344,7 +346,21 @@ public sealed partial class FleetViewModel : ObservableObject
         var led = f.Ledger.FirstOrDefault(l => l.Key == key);
         if (led?.Status == "completed") return ("✓ xong", DoneBrush, 0);
         if (led?.Status == "stopped") return ("■ dừng dở", WarnBrush, 3);
-        if (asn is { Status: "queued" }) return ("• đã xếp", QueuedBrush, 2);
+        if (asn is { Status: "queued" })
+        {
+            // Máy nhận đã thử nhưng trả lại (requeue) → lộ lý do ra ô (tooltip hiện đủ) thay vì im lặng.
+            var retry = string.IsNullOrWhiteSpace(asn.LastError) ? "" : $" · thử lại: {asn.LastError}";
+            // Việc ghim máy đích: nói rõ đang chờ MÁY NÀO; máy đó tắt/mất kết nối → cảnh báo cam thay vì
+            // "đã xếp" xanh chung chung (lý do "xếp mãi không chạy" hay gặp nhất là ghim nhầm máy đang tắt).
+            if (!string.IsNullOrEmpty(asn.TargetMachineId))
+            {
+                var tm = f.Machines.FirstOrDefault(m => m.MachineId == asn.TargetMachineId);
+                if (MachineOffline(f, asn.TargetMachineId))
+                    return ($"⚠ chờ {Host(tm?.Hostname ?? "")} (máy tắt){retry}", WarnBrush, 2);
+                return ($"• đã xếp → {Host(tm?.Hostname ?? "")}{retry}", QueuedBrush, 2);
+            }
+            return ($"• đã xếp{retry}", QueuedBrush, 2);
+        }
 
         // Việc GHIM vừa 'failed' (máy nhận từ chối SAU khi đã thử lại) → HIỆN lỗi thay vì lặng lẽ về "· chờ".
         // Chỉ hiện lỗi TƯƠI (≤3') để bảng khỏi kẹt "✘ lỗi" cũ; sau đó về "· chờ" (operator ghim lại được).
@@ -384,7 +400,9 @@ public sealed partial class FleetViewModel : ObservableObject
                 // Giữ PinBusy = true; poll kế tiếp thấy việc trên bảng thì ReconcilePinPending tắt xoay.
                 _pinPending = new PinPending(created.Id, row.BigsellerId, row.ShopId, op, m.MachineId, label,
                     DateTimeOffset.Now.AddSeconds(30));
-                ActionStatus = $"⏳ Đã gửi ghim {label} — chờ hàng đợi cập nhật…";
+                ActionStatus = MachineOffline(hub.CurrentFleet, m.MachineId)
+                    ? $"⚠ Đã gửi ghim {label} — máy này đang TẮT/mất kết nối; việc nằm chờ tới khi máy mở app."
+                    : $"⏳ Đã gửi ghim {label} — chờ hàng đợi cập nhật…";
             }
         }
         catch (Exception ex) { ActionStatus = "✘ Lỗi ghim việc: " + ex.Message; _pinPending = null; PinBusy = false; }
@@ -793,6 +811,15 @@ public sealed partial class FleetViewModel : ObservableObject
     };
 
     private static string Host(string h) => string.IsNullOrWhiteSpace(h) ? "?" : h;
+
+    /// <summary>Máy im nhịp ≥3' (ngưỡng ⚪ của <see cref="Presence"/>) hoặc đã biến mất khỏi bảng máy —
+    /// chắc chắn KHÔNG claim việc được; việc ghim cho nó sẽ nằm "đã xếp" tới khi máy mở app lại.</summary>
+    private static bool MachineOffline(FleetSnapshot f, string? machineId)
+    {
+        if (string.IsNullOrEmpty(machineId)) return false;
+        var m = f.Machines.FirstOrDefault(x => x.MachineId == machineId);
+        return m is null || (DateTimeOffset.Now - m.LastSeen).TotalSeconds >= 180;
+    }
 
     private static string Ago(DateTimeOffset at)
     {

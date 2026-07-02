@@ -34,9 +34,11 @@ public sealed class HubConfigSync
         if (await PushIfChangedAsync(manifest, SharedFile("scrape-targets.json"), "config/scrape-targets.json", ct)) n++;
         if (await PushIfChangedAsync(manifest, SharedFile("kiot-proxies.json"), "config/kiot-proxies.json", ct)) n++;
 
+        // Cookie: chỉ đè kho khi token local MỚI HƠN (so iat JWT) — kho Hub luôn giữ token mới nhất mỗi acc,
+        // tránh push sau scrape (client còn giữ bản seed cũ) đè chết token máy khác vừa đăng nhập.
         if (Directory.Exists(CookieDir))
             foreach (var f in Directory.GetFiles(CookieDir, "*.json"))
-                if (await PushIfChangedAsync(manifest, f, "cookies/" + Path.GetFileName(f), ct)) n++;
+                if (await PushCookieIfNewerAsync(manifest, f, "cookies/" + Path.GetFileName(f), ct)) n++;
 
         // Workbook Excel (dữ liệu sản phẩm) — đẩy theo từng tk BigSeller để máy khác kéo về chạy được.
         foreach (var acct in BigSellerStore.Shared.Accounts)
@@ -93,11 +95,9 @@ public sealed class HubConfigSync
                 var bytes = await _client.DownloadAsync(m.Name, ct);
                 if (bytes is null) continue;
                 var localPath = Path.Combine(CookieDir, Path.GetFileName(m.Name));
-                // GIỮ LOGIN TẠI CHỖ: cookie BigSeller dùng để SCRAPE phải là token máy TỰ đăng nhập — token
-                // kéo từ Hub chỉ hợp để "xem", scrape rải qua nhiều proxy thì BigSeller TỪ CHỐI ("login first").
-                // Nếu file local đang có muc_token CÒN SỐNG và KHÁC token bản Hub (= máy này đã tự login) thì
-                // KHÔNG đè, kẻo phá phiên scrape vừa login (auto-pull 3'/lần sẽ liên tục giết login tại chỗ).
-                // Chỉ seed/refresh khi local thiếu / hết hạn / trùng token Hub.
+                // TOKEN MỚI HƠN THẮNG (so iat JWT — xem LocalCookieShouldWin): giữ local khi máy này tự
+                // login/refresh gần hơn; nhận bản Hub khi local thiếu / hết hạn / CŨ HƠN (BigSeller xoay
+                // token → bản cũ chết dần; giữ khư khư bản cũ = kẹt "login first" phải đăng nhập tay mãi).
                 if (LocalCookieShouldWin(localPath, bytes)) continue;
                 await File.WriteAllBytesAsync(localPath, bytes, ct);
                 cookies++;
@@ -205,17 +205,96 @@ public sealed class HubConfigSync
         return Convert.ToHexString(sha.ComputeHash(fs));
     }
 
-    /// <summary>True = GIỮ file cookie LOCAL, KHÔNG đè bằng bản kéo từ Hub. Đúng khi local có muc_token CÒN HẠN
-    /// và giá trị KHÁC token bản Hub — tức máy này đã TỰ đăng nhập BigSeller (token tự-login mới scrape được;
-    /// token Hub chỉ hợp để xem, scrape từ máy khác bị từ chối). Local thiếu / hết hạn / trùng token Hub →
-    /// false (cho seed/refresh từ Hub).</summary>
+    /// <summary>True = GIỮ file cookie LOCAL, KHÔNG đè bằng bản kéo từ Hub. Nguyên tắc: TOKEN MỚI HƠN THẮNG
+    /// (so iat của JWT muc_token) — BigSeller XOAY token định kỳ, bản cũ có thể đã bị vô hiệu. Trước đây
+    /// "local còn hạn &amp; khác Hub = giữ" làm client cầm bản seed CŨ không bao giờ nhận token tươi từ Hub
+    /// (kẹt token chết → phải login tay lại mãi). Local thiếu / hết hạn / trùng / CŨ HƠN → nhận bản Hub.</summary>
     private static bool LocalCookieShouldWin(string localPath, byte[] incoming)
     {
         if (BigSellerCookieEngine.GetFileAuthTokenInfo(localPath) is not { } lt) return false; // local không có token → seed
         if (lt.Expires is { } exp && exp <= DateTimeOffset.Now) return false;                  // local hết hạn → refresh
         var hubToken = ReadMucTokenValue(incoming);
-        if (hubToken is not null && string.Equals(hubToken, lt.Value, StringComparison.Ordinal)) return false; // trùng → đè vô hại
-        return true;                                                                            // local sống & khác Hub = login tại chỗ → GIỮ
+        if (hubToken is null) return true;                                                      // bản Hub không có token → giữ local
+        if (string.Equals(hubToken, lt.Value, StringComparison.Ordinal)) return false;          // trùng → đè vô hại
+        if (BigSellerCookieEngine.GetJwtIssuedAt(lt.Value) is { } localIat
+            && BigSellerCookieEngine.GetJwtIssuedAt(hubToken) is { } hubIat)
+            return localIat >= hubIat;   // giữ local CHỈ khi token local không cũ hơn (máy này login/refresh gần hơn)
+        return true;                     // không so được iat (token lạ) → giữ local như hành vi cũ
+    }
+
+    /// <summary>Đẩy CHỈ các file cookie local có token MỚI HƠN bản kho Hub — để token máy này TỰ đăng nhập
+    /// lan sang Hub + các máy khác (trước đây client không bao giờ đẩy cookie → mỗi máy 1 phiên, login máy
+    /// này xong máy kia "mất cookie" và ngược lại). Trả về số file đã đẩy.</summary>
+    public async Task<int> PushCookiesIfNewerAsync(CancellationToken ct = default)
+    {
+        Dictionary<string, FileManifestEntry> manifest;
+        try { manifest = (await _client.ManifestAsync(ct)).ToDictionary(m => m.Name, m => m, StringComparer.OrdinalIgnoreCase); }
+        catch { return 0; }
+        var n = 0;
+        if (Directory.Exists(CookieDir))
+            foreach (var f in Directory.GetFiles(CookieDir, "*.json"))
+            {
+                try { if (await PushCookieIfNewerAsync(manifest, f, "cookies/" + Path.GetFileName(f), ct)) n++; }
+                catch (Exception ex) when (ex is not OperationCanceledException) { }
+            }
+        return n;
+    }
+
+    /// <summary>Kéo CHỈ cookie từ kho Hub về máy này khi bản kho MỚI HƠN — cho máy HUB nhận token client vừa
+    /// tự đăng nhập (máy Hub không chạy <see cref="PullAccountsAsync"/> nên trước đây không bao giờ nhận).
+    /// An toàn nhờ <see cref="LocalCookieShouldWin"/> mới-hơn-thắng. Trả về số file đã nhận.</summary>
+    public async Task<int> PullCookiesIfNewerAsync(CancellationToken ct = default)
+    {
+        List<FileManifestEntry> manifest;
+        try { manifest = await _client.ManifestAsync(ct); }
+        catch { return 0; }
+        Directory.CreateDirectory(CookieDir);
+        var n = 0;
+        foreach (var m in manifest.Where(m => m.Name.StartsWith("cookies/", StringComparison.OrdinalIgnoreCase)))
+        {
+            try
+            {
+                var localPath = Path.Combine(CookieDir, Path.GetFileName(m.Name));
+                if (File.Exists(localPath) && !string.IsNullOrEmpty(m.Hash)
+                    && string.Equals(LocalSha256(localPath), m.Hash, StringComparison.OrdinalIgnoreCase))
+                    continue;   // y hệt bản kho → khỏi tải
+                var bytes = await _client.DownloadAsync(m.Name, ct);
+                if (bytes is null || LocalCookieShouldWin(localPath, bytes)) continue;
+                await File.WriteAllBytesAsync(localPath, bytes, ct);
+                n++;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException) { }
+        }
+        return n;
+    }
+
+    /// <summary>Upload 1 file cookie CHỈ khi token local MỚI HƠN bản kho (so iat JWT) — chặn đẩy bản seed CŨ
+    /// đè token tươi máy khác vừa đăng nhập (kho Hub luôn giữ token mới nhất của mỗi acc).</summary>
+    private async Task<bool> PushCookieIfNewerAsync(Dictionary<string, FileManifestEntry> manifest, string localPath, string remoteName, CancellationToken ct)
+    {
+        if (BigSellerCookieEngine.GetFileAuthTokenInfo(localPath) is not { } lt) return false;   // local không có token → đừng đẩy rác
+        if (!manifest.TryGetValue(remoteName, out var m))
+        {
+            await _client.UploadAsync(remoteName, await File.ReadAllBytesAsync(localPath, ct), null, ct);
+            return true;
+        }
+        if (m.Size == new FileInfo(localPath).Length
+            && string.Equals(LocalSha256(localPath), m.Hash, StringComparison.OrdinalIgnoreCase))
+            return false;   // không đổi → bỏ qua
+        // Khác nội dung → chỉ đè khi token local KHÔNG CŨ HƠN bản kho (file cookie nhỏ, tải về so là rẻ).
+        try
+        {
+            var remote = await _client.DownloadAsync(remoteName, ct);
+            if (remote is not null
+                && BigSellerCookieEngine.GetJwtIssuedAt(lt.Value) is { } localIat
+                && BigSellerCookieEngine.GetJwtIssuedAt(ReadMucTokenValue(remote)) is { } remoteIat
+                && localIat < remoteIat)
+                return false;   // kho đang giữ token mới hơn → giữ nguyên
+        }
+        catch (OperationCanceledException) { throw; }
+        catch { /* không đọc được bản kho → cứ đẩy như hành vi cũ */ }
+        await _client.UploadAsync(remoteName, await File.ReadAllBytesAsync(localPath, ct), null, ct);
+        return true;
     }
 
     /// <summary>Giá trị muc_token (cookie giữ phiên BigSeller) trong JSON cookie dạng bytes (đã bỏ BOM). null nếu thiếu.</summary>

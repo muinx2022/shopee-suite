@@ -111,6 +111,26 @@ public static class BigSellerCookieEngine
         catch { return null; }
     }
 
+    /// <summary>Thời điểm PHÁT HÀNH (iat) của muc_token — token là JWT, iat là "tuổi" chính xác để so
+    /// "token nào mới hơn" xuyên máy. Thuộc tính expires của cookie bị chuẩn hoá +30 ngày lúc ghi file
+    /// nên KHÔNG phản ánh đúng tuổi. null nếu không phải JWT / thiếu iat.</summary>
+    public static DateTimeOffset? GetJwtIssuedAt(string? tokenValue)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(tokenValue)) return null;
+            var parts = tokenValue.Split('.');
+            if (parts.Length < 2) return null;
+            var b64 = parts[1].Replace('-', '+').Replace('_', '/');
+            b64 = (b64.Length % 4) switch { 2 => b64 + "==", 3 => b64 + "=", _ => b64 };
+            using var doc = JsonDocument.Parse(Convert.FromBase64String(b64));
+            return doc.RootElement.TryGetProperty("iat", out var iat) && iat.TryGetInt64(out var s)
+                ? DateTimeOffset.FromUnixTimeSeconds(s)
+                : null;
+        }
+        catch { return null; }
+    }
+
     /// <summary>muc_token trong FILE cookie (đọc trực tiếp file). null nếu thiếu.</summary>
     public static AuthTokenInfo? GetFileAuthTokenInfo(string cookieFile)
     {
