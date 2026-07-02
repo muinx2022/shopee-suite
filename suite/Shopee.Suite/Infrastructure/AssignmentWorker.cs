@@ -194,7 +194,7 @@ public sealed class AssignmentWorker : IDisposable
                 var shop = t?.Account.Shops.FirstOrDefault(s => s.Id == a.ShopId);
                 if (t is null || shop is null) return false;
                 t.SelectedShop = shop;
-                if (a.Op == "import") _ = _update.RunImportSingleAsync(t, silent: true, a.StartRow, a.EndRow);
+                if (a.Op == "import") _ = _update.RunImportSingleAsync(t, silent: true, a.StartRow, a.EndRow, ImportFromClaimedTab(a));
                 else if (a.Op == "update") _ = _update.RunUpdateSingleAsync(t, silent: true, a.StartRow, a.EndRow);
                 else _ = _update.RunNameRewriteSingleAsync(t, silent: true, a.StartRow, a.EndRow);
                 return true;
@@ -215,6 +215,14 @@ public sealed class AssignmentWorker : IDisposable
     {
         if (string.IsNullOrWhiteSpace(json)) return null;
         try { return JsonSerializer.Deserialize<SearchJobPayload>(json); } catch { return null; }
+    }
+
+    /// <summary>Cờ "import từ tab Đã nhận" Hub ghim trong payload việc import: non-null → ĐÈ cấu hình shop lượt
+    /// này; null (payload rỗng, vd việc tự-động) → client dùng cấu hình của nó.</summary>
+    private static bool? ImportFromClaimedTab(Assignment a)
+    {
+        if (string.IsNullOrWhiteSpace(a.Payload)) return null;
+        try { return JsonSerializer.Deserialize<ImportJobPayload>(a.Payload)?.FromClaimedTab; } catch { return null; }
     }
 
     private async Task ReconcileInflightAsync(HttpCoordinationHub hub)

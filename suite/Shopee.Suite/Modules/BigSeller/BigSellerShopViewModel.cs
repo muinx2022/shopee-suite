@@ -64,12 +64,6 @@ public sealed class BigSellerShopViewModel : ObservableObject
         set { if (Model.BigSellerCrawlUrl != value) { Model.BigSellerCrawlUrl = value; OnPropertyChanged(); Persist(); } }
     }
 
-    public bool BigSellerImportFromClaimedTab
-    {
-        get => Model.BigSellerImportFromClaimedTab;
-        set { if (Model.BigSellerImportFromClaimedTab != value) { Model.BigSellerImportFromClaimedTab = value; OnPropertyChanged(); Persist(); } }
-    }
-
     // ── Ánh xạ field ↔ cột Excel (nhập theo CHỮ cột: A, B, …, AA) ───────────────────
     public string LinkColumnLetter
     {

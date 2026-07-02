@@ -166,8 +166,8 @@ public sealed partial class UpdateProductViewModel : ObservableObject
 
     // ── v1.1 (màn gộp): chạy RIÊNG từng tk BigSeller, CHẠY SONG SONG được — mỗi tk 1 token + runner RIÊNG,
     //    ĐỘC LẬP với đường batch của màn cũ (không đụng _cts/_runners/IsRunning). Dùng cho nút inline theo shop. ──
-    public Task RunImportSingleAsync(UpdateRunTargetViewModel t, bool silent = false, int? startRow = null, int? endRow = null) =>
-        RunOneWorkflowAsync("Import to store", UpdateKind.Import, (r, ctx, ct) => r.RunImportAsync(ctx, ct), t, requiresBigSellerLogin: true, silent: silent, startRow: startRow, endRow: endRow);
+    public Task RunImportSingleAsync(UpdateRunTargetViewModel t, bool silent = false, int? startRow = null, int? endRow = null, bool? importFromClaimedTab = null) =>
+        RunOneWorkflowAsync("Import to store", UpdateKind.Import, (r, ctx, ct) => r.RunImportAsync(ctx, ct), t, requiresBigSellerLogin: true, silent: silent, startRow: startRow, endRow: endRow, importFromClaimedTab: importFromClaimedTab);
     public Task RunUpdateSingleAsync(UpdateRunTargetViewModel t, bool silent = false, int? startRow = null, int? endRow = null) =>
         RunOneWorkflowAsync("Update product", UpdateKind.Update, (r, ctx, ct) => r.RunUpdateAsync(ctx, ct), t, requiresBigSellerLogin: true, silent: silent, startRow: startRow, endRow: endRow);
     public Task RunNameRewriteSingleAsync(UpdateRunTargetViewModel t, bool silent = false, int? startRow = null, int? endRow = null) =>
@@ -215,7 +215,7 @@ public sealed partial class UpdateProductViewModel : ObservableObject
     private async Task RunOneWorkflowAsync(
         string name, UpdateKind kind, Func<UpdateProductRunner, UpdateProductContext, CancellationToken, Task> action,
         UpdateRunTargetViewModel t, bool requiresBigSellerLogin, bool force = false, bool silent = false,
-        int? startRow = null, int? endRow = null)
+        int? startRow = null, int? endRow = null, bool? importFromClaimedTab = null)
     {
         if (!ValidateUpdateTarget(t, requiresBigSellerLogin, out var problem)) { Warn(problem + ".", silent); return; }
         var a = t.Account; var s = t.SelectedShop!;
@@ -244,7 +244,7 @@ public sealed partial class UpdateProductViewModel : ObservableObject
             lease = attempt.Handle;
 
             var ai = AiConfigStore.Shared.Current;
-            var ctx = BuildContext(t, ai, startRow, endRow);
+            var ctx = BuildContext(t, ai, startRow, endRow, importFromClaimedTab);
             var runner = new UpdateProductRunner();
             runner.Log += m => Log($"{prefix} {m}");
             job.Runner = runner;
@@ -348,7 +348,8 @@ public sealed partial class UpdateProductViewModel : ObservableObject
         problem = ""; return true;
     }
 
-    private UpdateProductContext BuildContext(UpdateRunTargetViewModel t, AiConfig ai, int? startRow = null, int? endRow = null)
+    private UpdateProductContext BuildContext(UpdateRunTargetViewModel t, AiConfig ai, int? startRow = null, int? endRow = null,
+        bool? importFromClaimedTab = null)
     {
         var a = t.Account; var s = t.SelectedShop!;
         // AI (viết lại tên/mô tả) dùng cấu hình AI CHUNG ở Cài đặt; key truyền THẲNG qua context
@@ -357,12 +358,14 @@ public sealed partial class UpdateProductViewModel : ObservableObject
         // Khoảng dòng: ưu tiên override (Hub giao việc, >0) → KHÔNG ghi đè cấu hình shop; 0/null = dùng cấu hình.
         var sr = startRow is int x && x > 0 ? x : t.StartRow;
         var er = endRow is int y && y > 0 ? y : t.EndRow;
+        // "Import từ tab Đã nhận": ưu tiên cờ Hub ghim vào việc (checkbox tab Giao việc); null = dùng cấu hình shop.
+        var fromClaimedTab = importFromClaimedTab ?? s.BigSellerImportFromClaimedTab;
         return new UpdateProductContext(
             a.Id, a.Email, a.WorkbookPath, a.CookieFile,
             s.Id, s.DisplayName, s.ShopeeDataSheet,
             aiModel, "", ai.BatchSize, "",
             sr, er, ImagePath, VideoFolder,
-            s.BigSellerCrawlUrl, s.BigSellerImportFromClaimedTab,
+            s.BigSellerCrawlUrl, fromClaimedTab,
             1, t.UpdateWorkers, t.ListingReloadSeconds, ai.OpenAiApiKey,   // Import LUÔN 1 lane (1 process)
             s.ColumnMap.LinkColumn, s.ColumnMap.PriceColumn, s.ColumnMap.SkuColumn,
             s.ColumnMap.ItemIdColumn, s.ColumnMap.ProductNameColumn, s.ColumnMap.RewrittenNameColumn);

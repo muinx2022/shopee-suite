@@ -61,7 +61,13 @@ public sealed partial class FleetViewModel : ObservableObject
     public IReadOnlyList<string> PinOps { get; } = ["Scrape", "Import", "Update"];
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(AssignManualCommand))]
+    [NotifyPropertyChangedFor(nameof(IsPinImport))]
     private string _pinOp = "Scrape";
+    /// <summary>Chỉ hiện tuỳ chọn "Import từ tab Đã nhận" khi việc đang ghim là Import.</summary>
+    public bool IsPinImport => string.Equals(PinOp, "Import", StringComparison.OrdinalIgnoreCase);
+    /// <summary>Ghim Import: lấy sản phẩm từ tab "Đã nhận" (Claimed) thay vì danh sách crawl. Đi kèm việc ghim
+    /// qua <see cref="Assignment.Payload"/> → client override cấu hình shop cho lượt import đó.</summary>
+    [ObservableProperty] private bool _pinImportFromClaimedTab;
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(AssignManualCommand))]
     private FleetMachineRow? _pinMachine;
@@ -384,12 +390,17 @@ public sealed partial class FleetViewModel : ObservableObject
         if (hub is null || SelectedQueue is not { } row || PinMachine is not { } m) return;
         var op = PinOp.ToLowerInvariant();
         var label = $"{PinOp} · {row.ShopName} → {m.Name}";
+        // Import: ghim cờ "từ tab Đã nhận" theo checkbox (payload authoritative cho lượt này — client KHÔNG đọc
+        // cấu hình shop nữa). Op khác để payload rỗng.
+        var payload = op == "import"
+            ? JsonSerializer.Serialize(new ImportJobPayload { FromClaimedTab = PinImportFromClaimedTab })
+            : "";
         PinBusy = true;   // khoá nút + xoay icon NGAY khi bấm (giữ tới khi poll xác nhận "đã xếp")
         ActionStatus = $"⏳ Đang ghim {label}…";
         try
         {
             var created = await hub.CreateAssignmentAsync(new CreateAssignmentRequest(
-                row.BigsellerId, row.ShopId, row.Sheet, op, m.MachineId, true, Math.Max(0, PinStartRow), Math.Max(0, PinEndRow)));
+                row.BigsellerId, row.ShopId, row.Sheet, op, m.MachineId, true, Math.Max(0, PinStartRow), Math.Max(0, PinEndRow), payload));
             if (created is null || string.IsNullOrEmpty(created.Id))
             {
                 ActionStatus = "✘ Lỗi ghim việc: không tạo được (mất kết nối Hub?).";

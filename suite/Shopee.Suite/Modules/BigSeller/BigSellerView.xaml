@@ -194,7 +194,6 @@
                                     <DataGridTextColumn Header="Sheet" Binding="{Binding ShopeeDataSheet}" Width="1.4*" />
                                     <DataGridTextColumn Header="Batch" Binding="{Binding OpenAiBatchSize}" Width="60" />
                                     <DataGridTextColumn Header="Crawl URL (Import)" Binding="{Binding BigSellerCrawlUrl}" Width="1.4*" />
-                                    <DataGridCheckBoxColumn Header="Tab Claimed" Binding="{Binding BigSellerImportFromClaimedTab}" Width="80" />
                                 </DataGrid.Columns>
                             </DataGrid>
                         </Border>
@@ -207,15 +206,14 @@
                                 <!-- Sửa MỌI field per-shop ở đây (ngoài DataGrid) → lưu ngay, không bị revert. -->
                                 <TextBlock Text="Cấu hình shop đang chọn" Style="{StaticResource H2}" Margin="0,0,0,10" />
 
-                                <!-- 1 dòng: Tên shop + Sheet + Batch + Tab Claimed (AI model lấy từ Cài đặt App). -->
+                                <!-- 1 dòng: Tên shop + Sheet + Batch (AI model lấy từ Cài đặt App). Cờ "Import từ tab
+                                     Đã nhận" đã chuyển sang tab Trạng thái & Giao việc (ghim theo từng việc import). -->
                                 <Grid Margin="0,0,0,10">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="12" />
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="12" />
-                                        <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="18" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
                                     <StackPanel Grid.Column="0">
@@ -232,9 +230,6 @@
                                         <TextBlock Text="Batch" Style="{StaticResource Caption}" />
                                         <TextBox Width="64" Margin="0,3,0,0" Text="{Binding OpenAiBatchSize, UpdateSourceTrigger=LostFocus}" />
                                     </StackPanel>
-                                    <CheckBox Grid.Column="6" VerticalAlignment="Bottom" Margin="0,0,0,6"
-                                              IsChecked="{Binding BigSellerImportFromClaimedTab}"
-                                              Content="Import từ tab Claimed" />
                                 </Grid>
 
                                 <!-- Crawl URL -->

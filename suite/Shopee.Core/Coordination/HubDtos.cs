@@ -110,6 +110,13 @@ public sealed record CreateAssignmentRequest(
     string BigsellerId, string ShopId, string Sheet, string Op, string? TargetMachineId, bool Pinned,
     int StartRow = 0, int EndRow = 0, string Payload = "");
 
+/// <summary>Dữ liệu việc Import Hub giao (ghi vào <see cref="Assignment.Payload"/> cho op "import"):
+/// cờ import từ tab "Đã nhận" (Claimed) thay vì danh sách crawl. Payload rỗng = client dùng cấu hình của nó.</summary>
+public sealed class ImportJobPayload
+{
+    public bool FromClaimedTab { get; set; }
+}
+
 /// <summary>Dữ liệu việc Search Hub giao cho 1 client: chạy đúng khối link này, khóa tối đa
 /// <see cref="AccountsPerClient"/> tài khoản Shopee (qua account-lease) để máy khác không đụng.</summary>
 public sealed class SearchJobPayload
