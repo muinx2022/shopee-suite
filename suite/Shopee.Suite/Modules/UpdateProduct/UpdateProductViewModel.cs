@@ -80,9 +80,15 @@ public sealed partial class UpdateProductViewModel : ObservableObject
     {
         var storeSig = Sig(BigSellerStore.Shared.Accounts);
         var vmSig = string.Join("|", RunTargets.Select(t => t.Account.Id + ":" + string.Join(",", t.Shops.Select(s => s.Id))));
-        if (storeSig == vmSig) return;
+        if (storeSig == vmSig && !ShopsDetached()) return;
         Reload();
     }
+
+    /// <summary>Id trùng nhưng OBJECT shop trong VM khác object trong store (bị thay nguyên danh sách, ví dụ
+    /// sync Hub cũ) → phải Reload, không thì SelectedShop "mồ côi": gõ worker/dòng rơi vào object chết,
+    /// Persist không lưu được, Hub giao việc lại đọc object live → chạy sai config.</summary>
+    private bool ShopsDetached() => RunTargets.Any(t =>
+        !t.Shops.SequenceEqual(t.Account.Shops, ReferenceEqualityComparer.Instance));
 
     private static string Sig(IEnumerable<BigSellerAccount> accounts) =>
         string.Join("|", accounts.Select(a => a.Id + ":" + string.Join(",", a.Shops.Select(s => s.Id))));

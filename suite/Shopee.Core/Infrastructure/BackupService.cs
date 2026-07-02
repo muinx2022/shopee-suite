@@ -107,11 +107,13 @@ public static class BackupService
                 var changed = false;
                 if (SharedSignature(existing) != SharedSignature(a))
                 {
-                    // Bản Hub KHÔNG được đè cấu hình chạy riêng-máy (khoảng dòng / số worker / reload) —
-                    // chép lại từ shop cũ trước khi thay danh sách (không thì set "Update worker 5" trên
-                    // client cứ bị pull từ Hub kéo về 1 ngay trước lúc chạy việc).
-                    KeepLocalRunConfig(existing.Shops, a.Shops);
-                    existing.Label = a.Label; existing.Email = a.Email; existing.Shops = a.Shops;
+                    // Gộp shop GIỮ NGUYÊN OBJECT cũ thay vì thay nguyên danh sách bằng object mới: cấu hình
+                    // chạy riêng-máy (khoảng dòng / số worker / reload) tự sống sót không cần graft, và VM
+                    // đang cầm reference (SelectedShop của Update/Scrape) không bị "mồ côi" — trước đây swap
+                    // object làm ô "Update worker 5" ghi vào object chết (không bao giờ được lưu xuống file),
+                    // đến lúc Hub giao việc AssignmentWorker resolve object live (vẫn 1) → chạy 1 lane.
+                    existing.Shops = MergeShopsKeepInstance(existing.Shops, a.Shops);
+                    existing.Label = a.Label; existing.Email = a.Email;
                     existing.KiotProxyKey = a.KiotProxyKey; existing.Region = a.Region; existing.ProxyType = a.ProxyType;
                     changed = true;
                 }
@@ -158,23 +160,45 @@ public static class BackupService
         }).ToList(),
     });
 
-    /// <summary>Chép cấu hình chạy RIÊNG-MÁY (từ dòng / đến dòng / số worker import+update / reload) từ shop
-    /// cũ sang shop mới cùng Id (fallback: cùng sheet) khi thay Shops bằng bản Hub — các field này thuộc về
-    /// từng máy như cookie/workbook, đồng bộ Hub không được đụng.</summary>
-    private static void KeepLocalRunConfig(List<BigSellerShop> old, List<BigSellerShop> incoming)
+    /// <summary>Gộp danh sách shop bản Hub vào danh sách cũ nhưng GIỮ NGUYÊN OBJECT shop cũ (khớp theo Id,
+    /// fallback: cùng sheet): chép các field Hub-quản (đúng bộ trong SharedSignature) lên object cũ; shop
+    /// mới thêm nguyên bản; shop Hub đã bỏ rơi khỏi danh sách. Field RIÊNG-MÁY (StartRow/EndRow/worker/
+    /// reload) nằm sẵn trên object cũ nên tự sống sót — không cần graft như KeepLocalRunConfig trước đây,
+    /// và mọi VM đang giữ reference tới shop tiếp tục nhìn thấy đúng object được persist.</summary>
+    private static List<BigSellerShop> MergeShopsKeepInstance(List<BigSellerShop> old, List<BigSellerShop> incoming)
     {
-        foreach (var s in incoming)
+        // Khớp Id CHÍNH XÁC cho TẤT CẢ trước, rồi mới fallback theo sheet trên phần còn thừa — không thì shop
+        // Hub thêm-mới trùng sheet (đứng trước) có thể "cướp" object cũ mà lẽ ra thuộc shop khớp Id ở sau,
+        // làm shop kia mất cấu hình chạy riêng-máy (tệ hơn cả bản KeepLocalRunConfig khớp-độc-lập trước đây).
+        var used = new HashSet<BigSellerShop>();
+        var match = new BigSellerShop?[incoming.Count];
+        for (int i = 0; i < incoming.Count; i++)
         {
-            var o = old.FirstOrDefault(x => x.Id == s.Id)
-                ?? (string.IsNullOrWhiteSpace(s.ShopeeDataSheet) ? null
-                    : old.FirstOrDefault(x => string.Equals(x.ShopeeDataSheet, s.ShopeeDataSheet, StringComparison.OrdinalIgnoreCase)));
+            var o = old.FirstOrDefault(x => !used.Contains(x) && x.Id == incoming[i].Id);
             if (o is null) continue;
-            s.StartRow = o.StartRow;
-            s.EndRow = o.EndRow;
-            s.ImportWorkers = o.ImportWorkers;
-            s.UpdateWorkers = o.UpdateWorkers;
-            s.ListingReloadSeconds = o.ListingReloadSeconds;
+            used.Add(o); match[i] = o;
         }
+        for (int i = 0; i < incoming.Count; i++)
+        {
+            if (match[i] is not null || string.IsNullOrWhiteSpace(incoming[i].ShopeeDataSheet)) continue;
+            var o = old.FirstOrDefault(x => !used.Contains(x) && string.Equals(x.ShopeeDataSheet, incoming[i].ShopeeDataSheet, StringComparison.OrdinalIgnoreCase));
+            if (o is null) continue;
+            used.Add(o); match[i] = o;
+        }
+
+        var merged = new List<BigSellerShop>(incoming.Count);
+        for (int i = 0; i < incoming.Count; i++)
+        {
+            var s = incoming[i];
+            var o = match[i];
+            if (o is null) { merged.Add(s); continue; }
+            o.Id = s.Id;   // khớp qua fallback sheet → đồng nhất Id theo Hub (assignment resolve shop bằng Id)
+            o.Name = s.Name; o.ShopeeDataSheet = s.ShopeeDataSheet; o.ColumnMap = s.ColumnMap;
+            o.BigSellerCrawlUrl = s.BigSellerCrawlUrl; o.BigSellerImportFromClaimedTab = s.BigSellerImportFromClaimedTab;
+            o.OpenAiModel = s.OpenAiModel; o.OpenAiApiKeyFile = s.OpenAiApiKeyFile; o.OpenAiBatchSize = s.OpenAiBatchSize;
+            merged.Add(o);
+        }
+        return merged;
     }
 
     /// <summary>Gộp danh sách Shopee account (kèm proxy) vào store. append = replace:false. Acc ĐÃ CÓ (theo
