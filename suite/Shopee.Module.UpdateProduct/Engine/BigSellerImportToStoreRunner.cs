@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json;
+using ClosedXML.Excel;
 using Microsoft.Playwright;
 using Shopee.Core.BigSeller;
 using Shopee.Core.Browser;
@@ -18,6 +19,12 @@ internal sealed class BigSellerImportToStoreRunner : IAsyncDisposable
     private IPlaywright? _playwright;
     private IBrowser? _browser;
     private Process? _braveProcess;
+
+    // Tập item id CẦN import = các dòng StartRow→EndRow của sheet shop (nạp 1 lần trước vòng lặp).
+    private HashSet<string> _importIds = new(StringComparer.Ordinal);
+    // Item id ĐÃ gửi import (chốt chặn: bỏ qua ở các lượt quét sau → không import trùng + đảm bảo kết thúc,
+    // độc lập với việc SP có rời tab hay không).
+    private readonly HashSet<string> _importedIds = new(StringComparer.Ordinal);
 
     public BigSellerImportToStoreRunner(
         BigSellerWorkflowSettings settings,
@@ -58,10 +65,48 @@ internal sealed class BigSellerImportToStoreRunner : IAsyncDisposable
         catch { /* best-effort */ }
     }
 
+    // Nạp tập item id cần import từ sheet của shop, khoảng dòng StartRow→EndRow (giống Update, nhưng KHÔNG
+    // đòi cột "Tên đã sửa" vì import không cần). Khoá file khi đọc để serialize với lúc "Update tên SP" đang ghi.
+    private async Task LoadImportItemIdSetAsync(CancellationToken ct)
+    {
+        if (_settings.ItemIdColumn <= 0 && _settings.LinkColumn <= 0)
+            throw new InvalidOperationException("Cần map ít nhất 'Item ID' hoặc 'Link' để lấy item id import (mục BigSeller → Ánh xạ cột).");
+
+        using var _ = await WorkbookFileLockHandle.AcquireAsync(_settings.WorkbookPath, ct).ConfigureAwait(false);
+        var ids = new HashSet<string>(StringComparer.Ordinal);
+        using var wb = new XLWorkbook(_settings.WorkbookPath);
+        var ws = string.IsNullOrWhiteSpace(_settings.DataSheet)
+            ? wb.Worksheets.First()
+            : wb.Worksheet(_settings.DataSheet);
+        var start = Math.Max(2, _settings.StartRow);
+        var last = ws.LastRowUsed()?.RowNumber() ?? 0;
+        var end = _settings.EndRow > 0 ? Math.Min(_settings.EndRow, last) : last;
+
+        for (var r = start; r <= end; r++)
+        {
+            var row = ws.Row(r);
+            var colE = _settings.ItemIdColumn > 0 ? row.Cell(_settings.ItemIdColumn).GetString().Trim() : "";
+            var link = _settings.LinkColumn > 0 ? row.Cell(_settings.LinkColumn).GetString().Trim() : "";
+            var id = !string.IsNullOrWhiteSpace(colE) ? colE : (BigSellerCrawlHelper.ExtractShopeeId(link) ?? "");
+            if (!string.IsNullOrWhiteSpace(id)) ids.Add(id);
+        }
+
+        _importIds = ids;
+        _log($"Nạp {ids.Count} item id từ sheet '{_settings.DataSheet}' (dòng {start}→{(end >= start ? end : start)}).");
+    }
+
     public async Task RunAsync(CancellationToken cancellationToken)
     {
         if (!File.Exists(_settings.BravePath))
             throw new FileNotFoundException($"Khong tim thay Brave: {_settings.BravePath}");
+
+        // Cache item id của sheet (dòng StartRow→EndRow) TRƯỚC khi mở Brave — import CHỈ tick đúng các id này.
+        await LoadImportItemIdSetAsync(cancellationToken).ConfigureAwait(false);
+        if (_importIds.Count == 0)
+        {
+            _log("Sheet không có item id nào trong khoảng dòng đã đặt — không có gì để import. Kết thúc.");
+            return;   // → tầng trên báo Hub "completed" (không có việc để làm)
+        }
 
         StartBraveForBigSeller();
         _log($"Da goi Brave PID={_braveProcess?.Id.ToString() ?? "unknown"}, cho CDP port {_settings.DebugPort}...");
@@ -165,11 +210,18 @@ internal sealed class BigSellerImportToStoreRunner : IAsyncDisposable
                 }
                 await SelectSourceTabIfNeededAsync(page, cancellationToken);
 
-                // ── IMPORT CẢ LÔ — dùng CHUNG cho Crawl List & tab "Đã nhận" (tab "Đã nhận" CHỈ khác ở bước
-                //    click tab, đã làm trong SelectSourceTabIfNeededAsync ở trên): CHỌN TẤT CẢ → nút "Import to
-                //    Stores" trên THANH CÔNG CỤ → chọn shop → reload. Chu kỳ reload = "Reload (s)". 1 process. ──
+                // ── IMPORT THEO ITEM ID — tick từng dòng có item id ∈ sheet (dòng StartRow→EndRow) rồi bấm
+                //    "Import to Stores" (thanh công cụ) → chọn shop → reload về trang 1 → quét lại. Hết trang mà
+                //    không còn item id cần import ⇒ RETURN (kết thúc) → tầng trên báo Hub "completed"/"done".
+                //    _importedIds chống import-trùng + đảm bảo kết thúc (độc lập tab Unclaimed/Claimed/All). ──
+                await BigSellerCrawlHelper.WaitForCrawlListContentAsync(page);   // chờ có dòng HOẶC trạng thái rỗng
                 int rowCount;
-                try { rowCount = await GetBodyRowCountAsync(page); }
+                string[] checkedIds;
+                try
+                {
+                    rowCount = await GetBodyRowCountAsync(page);
+                    checkedIds = await CheckMatchingRowsOnPageAsync(page, _importIds, _importedIds);
+                }
                 catch (Exception ex) when (IsTransientNavigationError(ex))
                 {
                     _log($"Trang đang reload, thử lại: {ex.Message}");
@@ -179,23 +231,23 @@ internal sealed class BigSellerImportToStoreRunner : IAsyncDisposable
                 consecutiveErrors = 0;   // đọc được bảng → tab còn sống
 
                 var cycleSec = Math.Max(3, _settings.ListingReloadSeconds);
-                if (rowCount == 0)
+
+                if (checkedIds.Length == 0)
                 {
-                    _log($"Danh sách trống — đợi {cycleSec}s rồi reload (chờ SP mới, cho tới khi bấm Dừng)…");
-                    await DelayAsync(TimeSpan.FromSeconds(cycleSec), cancellationToken);
-                    await BigSellerCrawlHelper.GoToCrawlPageAsync(page, forceReload: true, targetUrl: crawlUrl, log: _log);
-                    await SelectSourceTabIfNeededAsync(page, cancellationToken);
-                    continue;
+                    // Trang hiện tại không còn item id cần import → sang trang kế (KHÔNG reload để giữ vị trí trang).
+                    if (await BigSellerCrawlHelper.ClickNextCrawlPageAsync(page, _log))
+                        continue;
+
+                    _log($"✔ Hết trang — không còn item id cần import ({_importedIds.Count} SP đã gửi). Kết thúc.");
+                    return;   // → RunOneWorkflowAsync: "✔ xong" + PublishCompletion("completed") ⇒ báo Hub finished
                 }
 
-                _log($"Có {rowCount} SP — Chọn tất cả → Import to Stores (cả lô)…");
+                _log($"Trang có {rowCount} SP — {checkedIds.Length} SP khớp item id → Import to Stores…");
 
                 // committed = true NGAY TRƯỚC khi bấm Import trong modal: lỗi điều hướng SAU đó = đã gửi lên server.
                 var committed = false;
                 try
                 {
-                    await ClickSelectAllAsync(page);
-                    await DelayAsync(500, cancellationToken);
                     await ClickToolbarImportAsync(page);
 
                     var modal = page.Locator(".ant-modal-content:visible").Last;
@@ -203,7 +255,7 @@ internal sealed class BigSellerImportToStoreRunner : IAsyncDisposable
                     await SelectImportShopAndConfirmAsync(modal, _settings.ShopName, () => committed = true);
 
                     importCount++;
-                    _log($"Đã Import to Stores cả lô (#{importCount}) — {rowCount} SP.");
+                    _log($"Đã Import {checkedIds.Length} SP theo item id (#{importCount}).");
                 }
                 catch (OperationCanceledException) { throw; }
                 catch (Exception ex)
@@ -211,13 +263,17 @@ internal sealed class BigSellerImportToStoreRunner : IAsyncDisposable
                     if (committed && IsTransientNavigationError(ex))
                     {
                         importCount++;
-                        _log($"Import cả lô đã gửi (#{importCount}) — trang điều hướng làm mất context.");
+                        _log($"Import lô đã gửi (#{importCount}) — trang điều hướng làm mất context.");
                     }
                     else
                     {
-                        _log($"Import cả lô lỗi (giữ phiên, thử lại lượt sau): {ex.Message}");
+                        _log($"Import lô lỗi (giữ phiên, thử lại lượt sau): {ex.Message}");
                     }
                 }
+
+                // Đã gửi lên server (committed) → đánh dấu để KHÔNG import lại (dù SP còn hiện trong danh sách hay không).
+                if (committed)
+                    foreach (var id in checkedIds) _importedIds.Add(id);
 
                 await DelayAsync(2000, cancellationToken);
                 await BigSellerCrawlHelper.DismissPostImportDialogsAsync(page, _log);
@@ -473,21 +529,53 @@ internal sealed class BigSellerImportToStoreRunner : IAsyncDisposable
             @"() => Array.from(document.querySelectorAll('tr.vxe-body--row'))
                 .filter(row => { const r = row.getBoundingClientRect(); return r.width > 0 && r.height > 0; }).length");
 
-    // Tick 'Chọn tất cả' ở header (chỉ tick khi CHƯA chọn hết — tránh bấm thành BỎ chọn).
-    private static Task ClickSelectAllAsync(IPage page) =>
-        page.EvaluateAsync(
-            @"() => {
+    // Tick từng dòng có item id ∈ tập cần import (và CHƯA import). Trả về mảng item id vừa tick (lô import).
+    // vxe fixed-column render 2 bản CÙNG rowid: bản body chứa item id (.vxe-cell--label) nhưng checkbox
+    // 'fixed--hidden'; bản fixed-left chứa checkbox HIỂN THỊ nhưng không có item id → gom theo rowid rồi ghép.
+    private static async Task<string[]> CheckMatchingRowsOnPageAsync(IPage page, IReadOnlyCollection<string> ids, IReadOnlyCollection<string> done)
+    {
+        var arg = new { ids = ids.ToArray(), done = done.ToArray() };
+        var clicked = await page.EvaluateAsync<string[]>(
+            @"(args) => {
+                const idSet = new Set(args.ids);
+                const doneSet = new Set(args.done);
                 const vis = el => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
-                // vxe fixed-column nhân đôi cột checkbox (1 bản 'fixed--hidden') → CHỈ lấy cái đang HIỂN THỊ,
-                // tránh click bản ẩn = no-op = chọn-tất-cả thất bại = import lô trên 0 dòng.
-                const cells = Array.from(document.querySelectorAll(
-                    ""th.col--checkbox .vxe-cell--checkbox, .vxe-header--column.col--checkbox .vxe-cell--checkbox""));
-                const head = cells.find(vis) || cells[0];
-                if (!head) throw new Error('Khong tim thay checkbox Chon tat ca');
-                const icon = head.querySelector('.vxe-checkbox--icon');
-                const checked = icon && icon.classList.contains('vxe-icon-checkbox-checked');
-                if (!checked) head.click();
-            }");
+                const byId = new Map();   // rowid -> { itemId, checkboxCell, icon }
+                for (const tr of Array.from(document.querySelectorAll('tr.vxe-body--row'))) {
+                    const rowid = tr.getAttribute('rowid');
+                    if (!rowid) continue;
+                    let e = byId.get(rowid);
+                    if (!e) { e = { itemId: null, checkboxCell: null, icon: null }; byId.set(rowid, e); }
+                    if (!e.itemId) {
+                        for (const lb of Array.from(tr.querySelectorAll('.vxe-cell--label'))) {
+                            const t = (lb.textContent || '').trim();
+                            if (/^\d{6,}$/.test(t)) { e.itemId = t; break; }
+                        }
+                    }
+                    if (!e.itemId) {   // fallback: trích item id từ link nguồn trong dòng (i.<shop>.<id>)
+                        for (const a of Array.from(tr.querySelectorAll('a'))) {
+                            const m = (a.getAttribute('href') || '').match(/i\.\d+\.(\d+)|product\/\d+\/(\d+)/);
+                            if (m) { e.itemId = m[1] || m[2]; break; }
+                        }
+                    }
+                    if (!e.checkboxCell) {
+                        const cb = Array.from(tr.querySelectorAll('.vxe-cell--checkbox')).find(vis);
+                        if (cb) { e.checkboxCell = cb; e.icon = cb.querySelector('.vxe-checkbox--icon'); }
+                    }
+                }
+                const clicked = [];
+                for (const e of byId.values()) {
+                    if (!e.itemId || !idSet.has(e.itemId) || doneSet.has(e.itemId)) continue;
+                    if (!e.checkboxCell) continue;
+                    const checked = e.icon && e.icon.classList.contains('vxe-icon-checkbox-checked');
+                    if (!checked) e.checkboxCell.click();
+                    clicked.push(e.itemId);
+                }
+                return clicked;
+            }",
+            arg);
+        return clicked ?? Array.Empty<string>();
+    }
 
     // Bấm 'Import to Stores' trên THANH CÔNG CỤ (cả lô) — KHÔNG phải nút từng dòng (a.action_btn) / nút trong modal.
     // Gỡ lớp phủ hướng dẫn (vd .language_switch_guide_mask) hay CHẶN click TRƯỚC; nếu click thật vẫn bị overlay

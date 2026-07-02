@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Microsoft.Playwright;
 
 namespace UpdateProduct;
@@ -5,6 +6,20 @@ namespace UpdateProduct;
 internal static class BigSellerCrawlHelper
 {
     public const string CrawlUrl = "https://www.bigseller.com/web/crawl/index.htm";
+
+    /// <summary>Trích item id Shopee từ URL nguồn (i.&lt;shop&gt;.&lt;id&gt; / product/&lt;shop&gt;/&lt;id&gt;). Trang verify
+    /// (captcha/traffic) → null. Dùng chung cho Update (khớp dòng) lẫn Import (nạp tập item id từ sheet).</summary>
+    internal static string? ExtractShopeeId(string? url)
+    {
+        url ??= "";
+        if (url.Contains("/verify/captcha") || url.Contains("/verify/traffic")) return null;
+        foreach (var pat in new[] { @"i\.\d+\.(\d+)", @"product/\d+/(\d+)", @"i\.\d+\.(\d+)\?" })
+        {
+            var m = Regex.Match(url, pat);
+            if (m.Success) return m.Groups[1].Value;
+        }
+        return null;
+    }
 
     public static bool IsCrawlPage(IPage page, string? targetUrl = null) =>
         IsTargetCrawlUrl(page.Url ?? "", ResolveCrawlUrl(targetUrl));

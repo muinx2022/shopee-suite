@@ -16,6 +16,80 @@ namespace UpdateProduct;
 /// lane mất hẳn → worker rụng dần 5→1→0.</summary>
 internal sealed class LaneAbortedException(string reason) : Exception(reason);
 
+/// <summary>Một dòng workbook đã map sang dữ liệu update (khớp theo Shopee item id).</summary>
+internal sealed record WorkbookRecord(string Link, string Sku, string ProductName, string Price, int LineIndex);
+
+/// <summary>
+/// Cache DÙNG CHUNG dữ liệu shop (dòng workbook → <see cref="WorkbookRecord"/>, khóa = Shopee item id) cho
+/// TẤT CẢ lane update. Nạp MỘT LẦN trước khi mở Brave rồi chia sẻ (immutable) → thay vì mỗi lane tự đọc
+/// workbook (N lần đọc + N lần khóa file + N lần parse). Đây là "cache chung từ dòng đến dòng" trước khi
+/// từng lane tìm item id trên Listing và sửa.
+/// </summary>
+internal sealed class WorkbookRecordCache
+{
+    public IReadOnlyDictionary<string, WorkbookRecord> Records { get; }
+
+    private WorkbookRecordCache(IReadOnlyDictionary<string, WorkbookRecord> records) => Records = records;
+
+    /// <summary>Nạp + log (dùng ở tầng điều phối, nạp 1 lần cho mọi lane).</summary>
+    public static async Task<WorkbookRecordCache> LoadAsync(BigSellerWorkflowSettings settings, Action<string> log, CancellationToken ct)
+    {
+        var (map, emptyRewriteRows) = await LoadRecordMapAsync(settings, ct).ConfigureAwait(false);
+        if (emptyRewriteRows.Count > 0)
+        {
+            var preview = string.Join(", ", emptyRewriteRows.Take(10));
+            log($"⚠ BỎ QUA {emptyRewriteRows.Count} dòng có cột G (Tên đã sửa) TRỐNG (vd dòng {preview}) — " +
+                "chạy \"Update tên SP (AI)\" để điền cột G nếu muốn update các dòng này.");
+        }
+        log($"📒 Workbook (cache chung mọi lane): {map.Count} dòng (khớp theo Shopee item id).");
+        return new WorkbookRecordCache(map);
+    }
+
+    // Đọc workbook → map item id → record. Khóa file khi đọc (chung file giữa nhiều account): serialize với
+    // lúc "Update tên SP" đang GHI cột G → tránh đọc-khi-đang-ghi (IOException/đọc lệch). Thuần, không log.
+    internal static async Task<(Dictionary<string, WorkbookRecord> map, List<int> emptyRewriteRows)> LoadRecordMapAsync(
+        BigSellerWorkflowSettings settings, CancellationToken ct)
+    {
+        // Cột bắt buộc: "Tên đã sửa" (tên để update) + ít nhất 1 trong (Item ID / Link) để khớp dòng.
+        // 0 = "không dùng" → fail rõ ràng thay vì đẩy 0 vào ClosedXML (Cell(0) ném lỗi).
+        if (settings.RewrittenNameColumn <= 0)
+            throw new InvalidOperationException("Chưa map cột 'Tên đã sửa' cho shop (mục BigSeller → Ánh xạ cột).");
+        if (settings.ItemIdColumn <= 0 && settings.LinkColumn <= 0)
+            throw new InvalidOperationException("Cần map ít nhất 'Item ID' hoặc 'Link' để khớp dòng (mục BigSeller → Ánh xạ cột).");
+
+        using var _ = await WorkbookFileLockHandle.AcquireAsync(settings.WorkbookPath, ct).ConfigureAwait(false);
+        var map = new Dictionary<string, WorkbookRecord>();
+        using var wb = new XLWorkbook(settings.WorkbookPath);
+        var ws = string.IsNullOrWhiteSpace(settings.DataSheet)
+            ? wb.Worksheets.First()
+            : wb.Worksheet(settings.DataSheet);
+        var start = Math.Max(2, settings.StartRow);
+        var last = ws.LastRowUsed()?.RowNumber() ?? 0;
+        var end = settings.EndRow > 0 ? Math.Min(settings.EndRow, last) : last;
+
+        var emptyRewriteRows = new List<int>();   // dòng có SP để update nhưng cột G (Tên đã sửa) còn trống
+        for (var r = start; r <= end; r++)
+        {
+            var row = ws.Row(r);
+            // Cột = 0 ("không dùng") → đọc rỗng, KHÔNG gọi Cell(0) (ClosedXML 1-based, Cell(0) ném lỗi).
+            var link = settings.LinkColumn > 0 ? row.Cell(settings.LinkColumn).GetString().Trim() : "";
+            var price = settings.PriceColumn > 0 ? row.Cell(settings.PriceColumn).GetString().Trim() : "";
+            var sku = settings.SkuColumn > 0 ? row.Cell(settings.SkuColumn).GetString().Trim() : "";
+            var colE = settings.ItemIdColumn > 0 ? row.Cell(settings.ItemIdColumn).GetString().Trim() : "";
+            var rewritten = row.Cell(settings.RewrittenNameColumn).GetString().Trim();   // Tên đã sửa (đã validate > 0)
+
+            var rowId = !string.IsNullOrWhiteSpace(colE) ? colE : (BigSellerCrawlHelper.ExtractShopeeId(link) ?? "");
+            if (string.IsNullOrWhiteSpace(rowId)) continue;
+
+            // Cột G trống → BỎ QUA riêng dòng đó (không update tên gốc cột F), vẫn chạy tiếp các dòng khác.
+            if (string.IsNullOrWhiteSpace(rewritten)) { emptyRewriteRows.Add(r); continue; }
+            map[rowId] = new WorkbookRecord(link, sku, rewritten, price, r);
+        }
+
+        return (map, emptyRewriteRows);
+    }
+}
+
 /// <summary>
 /// Cập nhật sản phẩm trên BigSeller bằng C# + Playwright (thay cho main.py Python).
 /// Quét trang Listing (bsStatus=1), mở từng sản phẩm vào tab edit, đối chiếu workbook theo
@@ -140,7 +214,7 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
     private IBrowserContext? _context;
     private Process? _braveProcess;
 
-    private Dictionary<string, WorkbookRecord> _records = new();
+    private IReadOnlyDictionary<string, WorkbookRecord> _records = new Dictionary<string, WorkbookRecord>();
     // SP đã xử lý / bỏ qua (gồm cả "không có trong sheet") → đánh dấu để vòng quét sau KHÔNG mở/không xử lý lại.
     // KHÔNG còn xóa dòng nào trên BigSeller → "skip" là cách duy nhất để tiến tới dòng kế.
     private readonly HashSet<string> _skippedRowKeys = new();
@@ -153,28 +227,38 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
 
     private readonly ClaimStore? _claim;
     private readonly bool _exportCookie;
+    // Cache dữ liệu shop DÙNG CHUNG mọi lane (nạp 1 lần ở tầng điều phối). null = lane tự đọc workbook (đường 1-lane cũ).
+    private readonly WorkbookRecordCache? _sharedRecords;
     private long _lastTokenWriteBackTick;   // throttle ghi-ngược muc_token định kỳ trong lúc chạy
 
     public BigSellerProductUpdateRunner(
         BigSellerWorkflowSettings settings, Action<string> log, WorkflowPauseToken? pauseToken = null,
-        ClaimStore? claim = null, bool exportCookie = true)
+        ClaimStore? claim = null, bool exportCookie = true, WorkbookRecordCache? sharedRecords = null)
     {
         _settings = settings;
         _log = log;
         _pauseToken = pauseToken;
         _claim = claim;
         _exportCookie = exportCookie;
+        _sharedRecords = sharedRecords;
     }
-
-    private sealed record WorkbookRecord(string Link, string Sku, string ProductName, string Price, int LineIndex);
 
     public async Task RunAsync(CancellationToken ct)
     {
         if (!File.Exists(_settings.BravePath))
             throw new FileNotFoundException($"Khong tim thay Brave: {_settings.BravePath}");
 
-        await LoadWorkbookRecordsAsync(ct).ConfigureAwait(false);
-        _log($"📒 Workbook: {_records.Count} dòng (khớp theo Shopee item id).");
+        // Cache chung có sẵn → dùng luôn (không đọc lại workbook); không có → tự đọc (đường 1-lane).
+        if (_sharedRecords is not null)
+        {
+            _records = _sharedRecords.Records;
+            _log($"📒 Workbook (dùng cache chung): {_records.Count} dòng (khớp theo Shopee item id).");
+        }
+        else
+        {
+            await LoadWorkbookRecordsAsync(ct).ConfigureAwait(false);
+            _log($"📒 Workbook: {_records.Count} dòng (khớp theo Shopee item id).");
+        }
 
         StartBrave();
         _log($"Đã gọi Brave PID={_braveProcess?.Id.ToString() ?? "?"}, chờ CDP port {_settings.DebugPort}...");
@@ -247,63 +331,31 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
         }
     }
 
-    // ── workbook ──
-    // Khóa file khi đọc (chung file giữa nhiều account): serialize với lúc "Update tên SP" đang GHI
-    // cột G → tránh đọc-khi-đang-ghi (IOException/đọc lệch). Khóa chỉ giữ trong lúc nạp (rất nhanh).
+    // ── workbook (đường 1-lane: tự đọc; đa-lane dùng WorkbookRecordCache chung ở tầng điều phối) ──
     private async Task LoadWorkbookRecordsAsync(CancellationToken ct)
     {
-        // Cột bắt buộc: "Tên đã sửa" (tên để update) + ít nhất 1 trong (Item ID / Link) để khớp dòng.
-        // 0 = "không dùng" → fail rõ ràng thay vì đẩy 0 vào ClosedXML (Cell(0) ném lỗi).
-        if (_settings.RewrittenNameColumn <= 0)
-            throw new InvalidOperationException("Chưa map cột 'Tên đã sửa' cho shop (mục BigSeller → Ánh xạ cột).");
-        if (_settings.ItemIdColumn <= 0 && _settings.LinkColumn <= 0)
-            throw new InvalidOperationException("Cần map ít nhất 'Item ID' hoặc 'Link' để khớp dòng (mục BigSeller → Ánh xạ cột).");
-
-        using var _ = await WorkbookFileLockHandle.AcquireAsync(_settings.WorkbookPath, ct).ConfigureAwait(false);
-        var map = new Dictionary<string, WorkbookRecord>();
-        using var wb = new XLWorkbook(_settings.WorkbookPath);
-        var ws = string.IsNullOrWhiteSpace(_settings.DataSheet)
-            ? wb.Worksheets.First()
-            : wb.Worksheet(_settings.DataSheet);
-        var start = Math.Max(2, _settings.StartRow);
-        var last = ws.LastRowUsed()?.RowNumber() ?? 0;
-        var end = _settings.EndRow > 0 ? Math.Min(_settings.EndRow, last) : last;
-
-        var emptyRewriteRows = new List<int>();   // dòng có SP để update nhưng cột G (Tên đã sửa) còn trống
-        for (var r = start; r <= end; r++)
-        {
-            var row = ws.Row(r);
-            // Cột = 0 ("không dùng") → đọc rỗng, KHÔNG gọi Cell(0) (ClosedXML 1-based, Cell(0) ném lỗi).
-            var link = _settings.LinkColumn > 0 ? row.Cell(_settings.LinkColumn).GetString().Trim() : "";
-            var price = _settings.PriceColumn > 0 ? row.Cell(_settings.PriceColumn).GetString().Trim() : "";
-            var sku = _settings.SkuColumn > 0 ? row.Cell(_settings.SkuColumn).GetString().Trim() : "";
-            var colE = _settings.ItemIdColumn > 0 ? row.Cell(_settings.ItemIdColumn).GetString().Trim() : "";
-            var rewritten = row.Cell(_settings.RewrittenNameColumn).GetString().Trim();   // Tên đã sửa (đã validate > 0)
-
-            var rowId = !string.IsNullOrWhiteSpace(colE) ? colE : (ExtractShopeeId(link) ?? "");
-            if (string.IsNullOrWhiteSpace(rowId)) continue;
-
-            // Cột G trống → BỎ QUA riêng dòng đó (không update tên gốc cột F), vẫn chạy tiếp các dòng khác.
-            if (string.IsNullOrWhiteSpace(rewritten)) { emptyRewriteRows.Add(r); continue; }
-            map[rowId] = new WorkbookRecord(link, sku, rewritten, price, r);
-        }
-
+        var (map, emptyRewriteRows) = await WorkbookRecordCache.LoadRecordMapAsync(_settings, ct).ConfigureAwait(false);
         if (emptyRewriteRows.Count > 0)
         {
             var preview = string.Join(", ", emptyRewriteRows.Take(10));
             _log($"⚠ BỎ QUA {emptyRewriteRows.Count} dòng có cột G (Tên đã sửa) TRỐNG (vd dòng {preview}) — " +
                  "chạy \"Update tên SP (AI)\" để điền cột G nếu muốn update các dòng này.");
         }
-
         _records = map;
     }
 
     // ── outer loop ──
+    // PHÂN TRANG: xử lý hết dòng-cần-update trên trang hiện tại (mỗi vòng 1 dòng, claim chống trùng đa-lane)
+    // rồi bấm "Next Page" sang trang kế — GIỮ vị trí trang (KHÔNG reload về trang 1). Vì KHÔNG xóa dòng nào,
+    // reload-về-trang-1 mỗi vòng (bản cũ) = mọi dòng trang 1 bị 'skip' → 'exhausted' → reload → KẸT trang 1
+    // vĩnh viễn, không lane nào sang được trang 2 (đúng lỗi báo). Tới TRANG CUỐI mà không còn item id cần
+    // update ⇒ RETURN (lane kết thúc) → RunOneWorkflowAsync PublishCompletion("completed") ⇒ báo Hub finished.
     private async Task OuterLoopAsync(IPage page, CancellationToken ct)
     {
         var listingErrorStreak = 0;
         var clickBlockedStreak = 0;
         var clickBlockedTotal = 0;
+        var emptyStreak = 0;   // số lần liên tiếp trang hiển thị 0 dòng (phân biệt "đang tải" với "rỗng thật")
         var emptyWaitSeconds = Math.Max(3, _settings.ListingReloadSeconds);
 
         while (!ct.IsCancellationRequested)
@@ -316,7 +368,8 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
 
             try
             {
-                if (!await GoToListingPageAsync(page, true))
+                // forceReload:false → GIỮ vị trí trang phân trang hiện tại (chỉ chờ bảng sẵn sàng, KHÔNG về trang 1).
+                if (!await GoToListingPageAsync(page, false))
                 {
                     listingErrorStreak++;
                     await DelayAsync(Math.Min(5 + listingErrorStreak, 15) * 1000, ct);
@@ -333,14 +386,30 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
 
                 switch (result)
                 {
-                    case null:
-                    case "exhausted":
-                        await DelayAsync(emptyWaitSeconds * 1000, ct);
-                        break;
+                    case null:   // 0 dòng trên trang: có thể đang tải, có thể rỗng thật.
+                        emptyStreak++;
+                        if (emptyStreak < 2)
+                        {
+                            // Chưa chắc rỗng thật → chờ rồi QUÉT LẠI CHÍNH trang này (KHÔNG sang trang, tránh bỏ sót trang đang tải).
+                            await DelayAsync(emptyWaitSeconds * 1000, ct);
+                            break;
+                        }
+                        // Rỗng 2 lần liên tiếp → trang này rỗng thật → sang trang kế nếu còn; hết trang ⇒ kết thúc.
+                        emptyStreak = 0;
+                        if (await ClickNextListingPageAsync(page, ct).ConfigureAwait(false)) break;
+                        _log("✔ Listing rỗng / hết trang cuối — không còn item id cần update. Lane kết thúc.");
+                        return;
+                    case "exhausted":   // Có dòng nhưng trang này hết dòng lane này xử lý được (đã xong/đã skip/lane khác giữ).
+                        emptyStreak = 0;
+                        if (await ClickNextListingPageAsync(page, ct).ConfigureAwait(false)) break;
+                        _log("✔ Hết trang cuối — không còn item id cần update trên mọi trang. Lane kết thúc.");
+                        return;
                     case "retry":
+                        emptyStreak = 0;
                         await DelayAsync(1200, ct);
                         break;
-                    default:
+                    default:   // ok / deleted / skipped → đã tiến 1 dòng, quét tiếp trang hiện tại.
+                        emptyStreak = 0;
                         await DelayAsync(800, ct);
                         await MaybeWriteBackBigSellerTokenAsync(ct).ConfigureAwait(false);
                         break;
@@ -358,6 +427,56 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
                 if (listingErrorStreak >= 5)
                     throw new LaneAbortedException($"lỗi listing {listingErrorStreak} lần liên tục: " + ex.Message);
             }
+        }
+    }
+
+    // ── phân trang Listing ──
+    // Bấm "Next Page" (li.next_item) trên thanh phân trang BigSeller (giống bảng Crawl). Trang cuối →
+    // li.next_item.disabled → KHÔNG có :not(.disabled) → trả false (báo caller: hết trang → kết thúc lane).
+    // Chờ nhãn "X / Y" (li.now_page_item) ĐỔI rồi mới cho quét → tránh quét nhầm DOM trang cũ (nhảy sót trang).
+    private const string PaginationNowPage = ".pagination li.now_page_item";
+    private async Task<bool> ClickNextListingPageAsync(IPage page, CancellationToken ct)
+    {
+        try
+        {
+            string before = "";
+            try { before = (await page.Locator(PaginationNowPage).First.InnerTextAsync(new() { Timeout = 1500 })).Trim(); } catch { }
+
+            var clicked = await page.EvaluateAsync<bool>(
+                @"() => {
+                    const next = document.querySelector('.pagination li.next_item:not(.disabled)');
+                    if (!next) return false;
+                    const action = next.querySelector('a.paging_action, a, button') || next;
+                    action.click();
+                    return true;
+                }");
+            if (!clicked) return false;   // trang cuối (next_item.disabled) → hết trang
+
+            // Chờ nhãn trang "X / Y" ĐỔI = xác nhận trang ĐÃ sang thật. Nếu bấm được nhưng nhãn KHÔNG đổi trong
+            // ~10s ⇒ trang không lật (glitch) → trả FALSE (caller kết thúc lane) thay vì lặp bấm-Next vô tận.
+            var changed = false;
+            for (var i = 0; i < 40; i++)
+            {
+                ct.ThrowIfCancellationRequested();
+                string now = "";
+                try { now = (await page.Locator(PaginationNowPage).First.InnerTextAsync(new() { Timeout = 500 })).Trim(); } catch { }
+                if (!string.IsNullOrEmpty(now) && !string.Equals(now, before, StringComparison.Ordinal)) { changed = true; _log($"→ Sang trang Listing: {before} → {now}."); break; }
+                await DelayAsync(250, ct);
+            }
+            if (!changed)
+            {
+                _log($"  (bấm Next nhưng trang không lật sau ~10s — coi như hết trang: '{before}')");
+                return false;
+            }
+            try { await page.WaitForSelectorAsync(ListingReadySelector, new() { State = WaitForSelectorState.Visible, Timeout = 10000 }); } catch { }
+            await DelayAsync(600, ct);
+            return true;
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            _log($"  (lỗi chuyển trang Listing, coi như chưa sang được: {ex.Message})");
+            return false;
         }
     }
 
@@ -418,8 +537,10 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
 
             var res = await RunListingRowAsync(page, row, editLink, rowKey, editId, ct,
                 getStreak, setStreak, getTotal, setTotal).ConfigureAwait(false);
-            // Lỗi TẠM (retry) → trả lại claim để lane/loop sau thử lại; còn lại (ok/deleted/skipped) giữ claim.
-            if (_claim is not null && res.result == "retry") _claim.Release(rowKey);
+            // NHẢ claim rowKey khi dòng CHƯA xong-hẳn: "retry" (lỗi tạm) HOẶC terminal (lane sắp chết/restart).
+            // Nếu KHÔNG nhả ở terminal → dòng bị "claim mồ côi" (ClaimStore chung không hết-hạn) → sau restart
+            // không lane nào claim lại được → bỏ sót SP mà vẫn báo Hub "completed". Giữ claim CHỈ khi ok/deleted/skipped.
+            if (_claim is not null && (res.terminal || res.result == "retry")) _claim.Release(rowKey);
             return res;
         }
         return ("exhausted", false);
@@ -455,6 +576,8 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
     {
         IPage? editPage = null;
         var keepEditOpen = false;
+        string? editClaimKey = null;   // "edit:{id}" nếu lane NÀY đã claim tầng-2 (để nhả nếu không giữ)
+        var keepClaim = false;         // true = giữ claim (ok/deleted/skipped: đừng cho lane khác mở lại); false = nhả (retry/terminal/lỗi → cho restart/lane khác làm lại)
         try
         {
             var newPage = await _context!.RunAndWaitForPageAsync(async () =>
@@ -476,12 +599,12 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
             if (string.IsNullOrEmpty(actualEditId))
             {
                 if (!string.IsNullOrEmpty(rowKey)) _skippedRowKeys.Add(rowKey);
-                return ("skipped", false);
+                keepClaim = true; return ("skipped", false);
             }
             if (_skippedEditIds.Contains(actualEditId))
             {
                 if (!string.IsNullOrEmpty(rowKey)) _skippedRowKeys.Add(rowKey);
-                return ("skipped", false);
+                keepClaim = true; return ("skipped", false);
             }
 
             // SONG SONG — claim TẦNG 2 theo edit-id thật: phòng 2 dòng draft khác nhau cùng trỏ 1 SP
@@ -491,8 +614,9 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
                 // Nạp rowKey vào skipped để vòng sau XÓA dòng draft trùng này — nếu không, dòng vẫn nằm
                 // ở listing, lane cứ bám row #0 quét lại mỗi vòng → không tiến/không kết thúc (treo).
                 if (!string.IsNullOrEmpty(rowKey)) _skippedRowKeys.Add(rowKey);
-                return ("skipped", false);
+                keepClaim = true; return ("skipped", false);   // claim tầng-2 do LANE KHÁC giữ → KHÔNG nhả hộ (editClaimKey vẫn null)
             }
+            editClaimKey = $"edit:{actualEditId}";   // lane NÀY vừa claim tầng-2 → nhớ để nhả nếu không giữ (retry/terminal/lỗi)
 
             var (status, record) = await InspectEditPageAsync(editPage, ct).ConfigureAwait(false);
             if (status != "needs_update")
@@ -502,30 +626,30 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
                 _log($"  ↳ {status} → giữ nguyên trên BigSeller (KHÔNG xóa), bỏ qua dòng.");
                 if (!string.IsNullOrEmpty(actualEditId)) _skippedEditIds.Add(actualEditId);
                 if (!string.IsNullOrEmpty(rowKey)) _skippedRowKeys.Add(rowKey);
-                return ("skipped", false);
+                keepClaim = true; return ("skipped", false);
             }
 
             var ok = await ProcessProductAsync(editPage, record!, ct).ConfigureAwait(false);
             if (!ok)
             {
-                // Lỗi TẠM (AI rỗng/mạng) → để dòng lại, thử vòng sau, TUYỆT ĐỐI KHÔNG xóa (tránh mất SP).
-                if (_lastProcessTransient) { _log("  ↳ lỗi tạm (AI) → để lại dòng, thử lại sau."); _claim?.Release($"edit:{actualEditId}"); return ("retry", false); }
+                // Lỗi TẠM (AI rỗng/mạng) → để dòng lại, thử vòng sau, TUYỆT ĐỐI KHÔNG xóa (tránh mất SP). NHẢ claim (finally).
+                if (_lastProcessTransient) { _log("  ↳ lỗi tạm (AI) → để lại dòng, thử lại sau."); return ("retry", false); }
                 var failKey = $"shopee:{record!.LineIndex}/edit:{actualEditId}/row:{rowKey}";
                 var fails = _failCounts.TryGetValue(failKey, out var c) ? c + 1 : 1;
                 _failCounts[failKey] = fails;
-                if (fails < 2) { _claim?.Release($"edit:{actualEditId}"); return ("retry", false); }
-                // 2 lần fail (không phải lỗi tạm) → GIỮ NGUYÊN, KHÔNG xóa; chỉ bỏ qua dòng.
+                if (fails < 2) return ("retry", false);   // NHẢ claim (finally) → thử lại vòng sau
+                // 2 lần fail (không phải lỗi tạm) → GIỮ NGUYÊN, KHÔNG xóa; chỉ bỏ qua dòng (giữ claim để khỏi mở lại).
                 _log("  ↳ fail 2 lần → giữ nguyên trên BigSeller (KHÔNG xóa), bỏ qua dòng.");
                 _skippedEditIds.Add(actualEditId);
                 if (!string.IsNullOrEmpty(rowKey)) _skippedRowKeys.Add(rowKey);
-                return ("skipped", false);
+                keepClaim = true; return ("skipped", false);
             }
 
             _skippedEditIds.Add(actualEditId);
             if (!string.IsNullOrEmpty(rowKey)) _skippedRowKeys.Add(rowKey);
             _log($"✅ HOÀN TẤT XỬ LÝ SKU: {record!.Sku}");
             await OverlayAsync($"✅ Hoàn tất SKU {record!.Sku}");
-            return ("ok", false);
+            keepClaim = true; return ("ok", false);
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception ex)
@@ -547,6 +671,10 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
         }
         finally
         {
+            // NHẢ claim tầng-2 khi dòng CHƯA xong-hẳn (retry / terminal / exception ném ra) → để restart hoặc
+            // lane khác claim lại & làm nốt. Không nhả = "claim mồ côi" khóa vĩnh viễn (ClaimStore chung không
+            // hết-hạn) → bỏ sót SP mà vẫn báo Hub "completed". Giữ claim CHỈ khi ok/deleted/skipped (keepClaim).
+            if (!keepClaim && editClaimKey is not null) _claim?.Release(editClaimKey);
             if (!keepEditOpen && editPage is not null)
             {
                 await ClosePageAcceptingDialogAsync(editPage);
@@ -597,7 +725,7 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
             if (string.IsNullOrWhiteSpace(url)) continue;
             if (url.Contains("/verify/captcha") || url.Contains("/verify/traffic"))
                 return ("shopee_blocked", null);
-            if (shopeeId is null) { shopeeId = ExtractShopeeId(url); if (shopeeId is not null) sourceUrl = url; }
+            if (shopeeId is null) { shopeeId = BigSellerCrawlHelper.ExtractShopeeId(url); if (shopeeId is not null) sourceUrl = url; }
         }
 
         if (string.IsNullOrEmpty(shopeeId))
@@ -1403,18 +1531,6 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
     {
         var m = EditIdRegex.Match(url ?? "");
         return m.Success ? m.Groups[1].Value : null;
-    }
-
-    private static string? ExtractShopeeId(string? url)
-    {
-        url ??= "";
-        if (url.Contains("/verify/captcha") || url.Contains("/verify/traffic")) return null;
-        foreach (var pat in new[] { @"i\.\d+\.(\d+)", @"product/\d+/(\d+)", @"i\.\d+\.(\d+)\?" })
-        {
-            var m = Regex.Match(url, pat);
-            if (m.Success) return m.Groups[1].Value;
-        }
-        return null;
     }
 
     private static string TrimDescriptionForShopee(string? content)

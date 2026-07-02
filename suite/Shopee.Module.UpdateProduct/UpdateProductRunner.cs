@@ -124,16 +124,20 @@ public sealed class UpdateProductRunner
     {
         var wf = BuildWorkflow(ctx);
         var n = Math.Clamp(ctx.UpdateMaxProcess, 1, 10);
+        // CACHE CHUNG dữ liệu shop (dòng → record, khớp theo item id): nạp MỘT LẦN trước mọi lane rồi chia sẻ
+        // (immutable) → mỗi lane chỉ tìm id trên Listing rồi sửa, KHỎI đọc-lại/parse-lại workbook N lần.
+        // Nạp trước khi mở Brave → workbook lỗi/thiếu cột báo ngay (chưa tốn công phóng trình duyệt).
+        var records = await WorkbookRecordCache.LoadAsync(wf, m => Log?.Invoke(m), ct).ConfigureAwait(false);
         if (n == 1)
         {
-            await using var runner = new BigSellerProductUpdateRunner(wf, m => Log?.Invoke(m), _pause);
+            await using var runner = new BigSellerProductUpdateRunner(wf, m => Log?.Invoke(m), _pause, sharedRecords: records);
             await runner.RunAsync(ct);
             return;
         }
         Log?.Invoke($"▶ Update SONG SONG {n} lane (claim chống trùng SP; mỗi lane 1 Brave/profile/port riêng).");
         await RunLanesAsync(wf, n, ct, async (laneWf, lane, count, claim, export, c) =>
         {
-            await using var runner = new BigSellerProductUpdateRunner(laneWf, m => Log?.Invoke($"[L{lane}] {m}"), _pause, claim, export);
+            await using var runner = new BigSellerProductUpdateRunner(laneWf, m => Log?.Invoke($"[L{lane}] {m}"), _pause, claim, export, records);
             await runner.RunAsync(c);
         });
     }
