@@ -26,6 +26,14 @@ internal sealed class BigSellerImportToStoreRunner : IAsyncDisposable
     // độc lập với việc SP có rời tab hay không).
     private readonly HashSet<string> _importedIds = new(StringComparer.Ordinal);
 
+    // ── Bắc cầu DOM ↔ item id qua API (BigSeller KHÔNG render source id ra HTML) ──
+    // Crawl list nạp rows từ API /product/crawl/pageList.json; mỗi row có mainImage + crawlUrl. Ta bắt response
+    // đó, trích shopee id từ crawlUrl (i.<shop>.<id> / product/<shop>/<id>), map theo KHOÁ ẢNH (đuôi mainImage)
+    // vì DOM chỉ có <img src> để nhận diện dòng — ô .vxe-cell--label giờ là email, link tiêu đề không có href.
+    private readonly object _apiLock = new();
+    private readonly Dictionary<string, string> _apiImageKeyToShopeeId = new(StringComparer.Ordinal);
+    private IPage? _capturePage;
+
     public BigSellerImportToStoreRunner(
         BigSellerWorkflowSettings settings,
         Action<string> log,
@@ -173,6 +181,7 @@ internal sealed class BigSellerImportToStoreRunner : IAsyncDisposable
 
         var page = await FindBigSellerPageAsync(context, cancellationToken)
             ?? throw new InvalidOperationException("Không tìm thấy tab BigSeller.");
+        AttachApiCapture(page);   // bắt pageList.json để đọc item id (DOM không có id)
 
         await page.BringToFrontAsync();
         _log($"Crawl URL: {crawlUrl}");
@@ -215,12 +224,13 @@ internal sealed class BigSellerImportToStoreRunner : IAsyncDisposable
                 //    không còn item id cần import ⇒ RETURN (kết thúc) → tầng trên báo Hub "completed"/"done".
                 //    _importedIds chống import-trùng + đảm bảo kết thúc (độc lập tab Unclaimed/Claimed/All). ──
                 await BigSellerCrawlHelper.WaitForCrawlListContentAsync(page);   // chờ có dòng HOẶC trạng thái rỗng
+                await WaitForApiCoverageAsync(page, cancellationToken);          // chờ đọc xong pageList.json của trang này
                 int rowCount;
                 string[] checkedIds;
                 try
                 {
                     rowCount = await GetBodyRowCountAsync(page);
-                    checkedIds = await CheckMatchingRowsOnPageAsync(page, _importIds, _importedIds);
+                    checkedIds = await CheckMatchingRowsOnPageAsync(page);
                 }
                 catch (Exception ex) when (IsTransientNavigationError(ex))
                 {
@@ -238,6 +248,9 @@ internal sealed class BigSellerImportToStoreRunner : IAsyncDisposable
                     if (await BigSellerCrawlHelper.ClickNextCrawlPageAsync(page, _log))
                         continue;
 
+                    int cacheCount; lock (_apiLock) cacheCount = _apiImageKeyToShopeeId.Count;
+                    if (cacheCount == 0)
+                        _log("⚠ Không đọc được item id nào từ API crawl (pageList.json) — BigSeller đổi endpoint/response? Không import được gì.");
                     _log($"✔ Hết trang — không còn item id cần import ({_importedIds.Count} SP đã gửi). Kết thúc.");
                     return;   // → RunOneWorkflowAsync: "✔ xong" + PublishCompletion("completed") ⇒ báo Hub finished
                 }
@@ -376,6 +389,7 @@ internal sealed class BigSellerImportToStoreRunner : IAsyncDisposable
         var page = await FindBigSellerPageAsync(context, ct).ConfigureAwait(false);
         if (page is null || page.IsClosed)
             page = await context.NewPageAsync().ConfigureAwait(false);
+        AttachApiCapture(page);   // tab mới sau hồi phục → gắn lại listener pageList.json
 
         await page.BringToFrontAsync().ConfigureAwait(false);
         await BigSellerCrawlHelper.GoToCrawlPageAsync(page, forceReload: true, targetUrl: crawlUrl, log: _log).ConfigureAwait(false);
@@ -529,34 +543,118 @@ internal sealed class BigSellerImportToStoreRunner : IAsyncDisposable
             @"() => Array.from(document.querySelectorAll('tr.vxe-body--row'))
                 .filter(row => { const r = row.getBoundingClientRect(); return r.width > 0 && r.height > 0; }).length");
 
-    // Tick từng dòng có item id ∈ tập cần import (và CHƯA import). Trả về mảng item id vừa tick (lô import).
-    // vxe fixed-column render 2 bản CÙNG rowid: bản body chứa item id (.vxe-cell--label) nhưng checkbox
-    // 'fixed--hidden'; bản fixed-left chứa checkbox HIỂN THỊ nhưng không có item id → gom theo rowid rồi ghép.
-    private static async Task<string[]> CheckMatchingRowsOnPageAsync(IPage page, IReadOnlyCollection<string> ids, IReadOnlyCollection<string> done)
+    // ── Bắc cầu DOM ↔ item id qua API pageList.json ─────────────────────────────
+    // BigSeller KHÔNG render source item id ra HTML (ô .vxe-cell--label là email, link tiêu đề không href).
+    // Nên bắt response API danh sách, trích id từ crawlUrl, và nhận diện dòng DOM qua ẢNH (mainImage ↔ <img src>).
+    private void AttachApiCapture(IPage page)
     {
-        var arg = new { ids = ids.ToArray(), done = done.ToArray() };
+        if (ReferenceEquals(_capturePage, page)) return;
+        if (_capturePage is not null) { try { _capturePage.Response -= OnCrawlResponse; } catch { } }
+        _capturePage = page;
+        page.Response += OnCrawlResponse;
+    }
+
+    private void OnCrawlResponse(object? sender, IResponse response)
+    {
+        if (response.Url.Contains("/product/crawl/pageList.json", StringComparison.OrdinalIgnoreCase))
+            _ = CaptureCrawlRowsAsync(response);
+    }
+
+    // Đọc rows từ 1 response pageList.json → map ẢNH(đuôi mainImage) ↔ shopee id(từ crawlUrl). Gộp dồn (ảnh là
+    // duy nhất theo SP nên gộp nhiều trang vẫn đúng); best-effort, nuốt lỗi để không đụng vòng lặp import.
+    private async Task CaptureCrawlRowsAsync(IResponse response)
+    {
+        try
+        {
+            var text = await response.TextAsync().ConfigureAwait(false);
+            using var doc = JsonDocument.Parse(text);
+            if (!doc.RootElement.TryGetProperty("data", out var data)) return;
+            JsonElement rows;
+            if (!((data.TryGetProperty("page", out var pageEl) && pageEl.TryGetProperty("rows", out rows) && rows.ValueKind == JsonValueKind.Array)
+                  || (data.TryGetProperty("rows", out rows) && rows.ValueKind == JsonValueKind.Array)))
+                return;
+            var added = 0;
+            lock (_apiLock)
+            {
+                foreach (var r in rows.EnumerateArray())
+                {
+                    var img = r.TryGetProperty("mainImage", out var mi) ? mi.GetString() : null;
+                    var url = r.TryGetProperty("crawlUrl", out var cu) ? cu.GetString() : null;
+                    var id = BigSellerCrawlHelper.ExtractShopeeId(url);
+                    var key = ImgKey(img);
+                    if (!string.IsNullOrEmpty(key) && !string.IsNullOrEmpty(id)) { _apiImageKeyToShopeeId[key] = id!; added++; }
+                }
+            }
+            if (added > 0) _log($"Đọc {added} item id từ API crawl (cache {_apiImageKeyToShopeeId.Count}).");
+        }
+        catch { /* best-effort */ }
+    }
+
+    // Khoá ảnh = đoạn cuối URL ảnh (bỏ query) — cầu nối vì cả JSON (mainImage) lẫn DOM (<img src>) đều có.
+    private static string ImgKey(string? url)
+    {
+        if (string.IsNullOrEmpty(url)) return "";
+        var noQuery = url.Split('?')[0].TrimEnd('/');
+        var idx = noQuery.LastIndexOf('/');
+        return idx >= 0 && idx < noQuery.Length - 1 ? noQuery[(idx + 1)..] : noQuery;
+    }
+
+    // Chờ tới khi cache API đã có ít nhất 1 ảnh của trang đang hiển thị (response pageList.json xử lý xong), để
+    // không kết luận nhầm "0 khớp" chỉ vì listener chạy sau. Trang rỗng thật → thoát ngay.
+    private async Task WaitForApiCoverageAsync(IPage page, CancellationToken ct)
+    {
+        for (var i = 0; i < 20; i++)   // ~6s
+        {
+            ct.ThrowIfCancellationRequested();
+            string[] keys;
+            try { keys = await GetVisibleImageKeysAsync(page); } catch { return; }
+            if (keys.Length == 0) return;
+            bool covered;
+            lock (_apiLock) covered = keys.Any(k => _apiImageKeyToShopeeId.ContainsKey(k));
+            if (covered) return;
+            await DelayAsync(300, ct);
+        }
+    }
+
+    private static Task<string[]> GetVisibleImageKeysAsync(IPage page) =>
+        page.EvaluateAsync<string[]>(
+            @"() => {
+                const key = src => { if (!src) return ''; const u = src.split('?')[0].replace(/\/+$/, ''); const p = u.split('/'); return p[p.length - 1] || ''; };
+                const set = new Set();
+                for (const tr of Array.from(document.querySelectorAll('tr.vxe-body--row'))) {
+                    const img = tr.querySelector('img');
+                    if (img) { const k = key(img.getAttribute('src')); if (k) set.add(k); }
+                }
+                return Array.from(set);
+            }");
+
+    // Tick từng dòng có item id ∈ tập cần import (và CHƯA import), nhận diện dòng qua KHOÁ ẢNH lấy từ API.
+    // vxe fixed-column có thể render 2 bản CÙNG rowid: bản body chứa <img>, bản fixed-left chứa checkbox HIỂN
+    // THỊ → gom theo rowid rồi ghép. Trả về mảng shopee id vừa tick (lô import).
+    private async Task<string[]> CheckMatchingRowsOnPageAsync(IPage page)
+    {
+        Dictionary<string, string> toTick;
+        lock (_apiLock)
+        {
+            toTick = _apiImageKeyToShopeeId
+                .Where(kv => _importIds.Contains(kv.Value) && !_importedIds.Contains(kv.Value))
+                .ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.Ordinal);
+        }
+        if (toTick.Count == 0) return Array.Empty<string>();
+
         var clicked = await page.EvaluateAsync<string[]>(
-            @"(args) => {
-                const idSet = new Set(args.ids);
-                const doneSet = new Set(args.done);
+            @"(map) => {
+                const key = src => { if (!src) return ''; const u = src.split('?')[0].replace(/\/+$/, ''); const p = u.split('/'); return p[p.length - 1] || ''; };
                 const vis = el => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
-                const byId = new Map();   // rowid -> { itemId, checkboxCell, icon }
+                const byId = new Map();   // rowid -> { key, checkboxCell, icon }
                 for (const tr of Array.from(document.querySelectorAll('tr.vxe-body--row'))) {
                     const rowid = tr.getAttribute('rowid');
                     if (!rowid) continue;
                     let e = byId.get(rowid);
-                    if (!e) { e = { itemId: null, checkboxCell: null, icon: null }; byId.set(rowid, e); }
-                    if (!e.itemId) {
-                        for (const lb of Array.from(tr.querySelectorAll('.vxe-cell--label'))) {
-                            const t = (lb.textContent || '').trim();
-                            if (/^\d{6,}$/.test(t)) { e.itemId = t; break; }
-                        }
-                    }
-                    if (!e.itemId) {   // fallback: trích item id từ link nguồn trong dòng (i.<shop>.<id>)
-                        for (const a of Array.from(tr.querySelectorAll('a'))) {
-                            const m = (a.getAttribute('href') || '').match(/i\.\d+\.(\d+)|product\/\d+\/(\d+)/);
-                            if (m) { e.itemId = m[1] || m[2]; break; }
-                        }
+                    if (!e) { e = { key: '', checkboxCell: null, icon: null }; byId.set(rowid, e); }
+                    if (!e.key) {
+                        const img = tr.querySelector('img');
+                        if (img) { const k = key(img.getAttribute('src')); if (k && map[k]) e.key = k; }
                     }
                     if (!e.checkboxCell) {
                         const cb = Array.from(tr.querySelectorAll('.vxe-cell--checkbox')).find(vis);
@@ -565,15 +663,14 @@ internal sealed class BigSellerImportToStoreRunner : IAsyncDisposable
                 }
                 const clicked = [];
                 for (const e of byId.values()) {
-                    if (!e.itemId || !idSet.has(e.itemId) || doneSet.has(e.itemId)) continue;
-                    if (!e.checkboxCell) continue;
+                    if (!e.key || !map[e.key] || !e.checkboxCell) continue;
                     const checked = e.icon && e.icon.classList.contains('vxe-icon-checkbox-checked');
                     if (!checked) e.checkboxCell.click();
-                    clicked.push(e.itemId);
+                    clicked.push(map[e.key]);
                 }
                 return clicked;
             }",
-            arg);
+            toTick);
         return clicked ?? Array.Empty<string>();
     }
 
@@ -707,6 +804,8 @@ internal sealed class BigSellerImportToStoreRunner : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        if (_capturePage is not null) { try { _capturePage.Response -= OnCrawlResponse; } catch { } _capturePage = null; }
+
         // Lưu token CHỈ lane 0 (tránh lane phụ đá token) + TIMEOUT — Brave treo không được chặn việc kill.
         if (_exportCookie && _braveProcess is { HasExited: false })
         {
