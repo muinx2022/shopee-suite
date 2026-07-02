@@ -255,8 +255,9 @@ public static class BraveFleet
     }
 
     /// <summary>Đây có phải ShopeeSuite DUY NHẤT đang chạy không (kể cả chính tiến trình này)? Dùng để
-    /// không quét-giết nhầm Brave của instance ShopeeSuite khác (vốn dùng chung persistent-data).</summary>
-    private static bool IsSoleAppInstance()
+    /// không quét-giết nhầm Brave của instance ShopeeSuite khác (vốn dùng chung persistent-data), và để
+    /// <see cref="Shopee.Core.Infrastructure.StartupJanitor"/> chỉ dọn đĩa khi không có instance khác.</summary>
+    public static bool IsSoleAppInstance()
     {
         try
         {

@@ -67,8 +67,19 @@ internal static class BraveProfileManager
     {
         ClearCopiedExtensionInstallState(profileRoot);
         ClearSwScriptCache(profileRoot);
+        ClearHeavyReusableCaches(profileRoot);
         ClearSessionRestoreState(profileRoot);
         MarkProfileCleanShutdown(profileRoot);
+    }
+
+    /// <summary>Xoá các thư mục cache NẶNG, tái tạo được, KHÔNG chứa cookie/đăng nhập (Default\Cache, GPUCache,
+    /// Safe Browsing, component_crx_cache, shader/Dawn cache…) trước mỗi lần launch → profile bền không phình
+    /// dần qua các phiên chạy dài. Cookie (Default\Network\Cookies) + Local State GIỮ NGUYÊN nên không mất
+    /// login/không tăng captcha. Dùng CHUNG danh sách với StartupJanitor (BraveCachePolicy) để không lệch nhau.
+    /// Service Worker do <see cref="ClearSwScriptCache"/> lo trước (xoá lại ở đây vô hại).</summary>
+    private static void ClearHeavyReusableCaches(string profileRoot)
+    {
+        Shopee.Core.Browser.BraveCachePolicy.PruneProfileCache(profileRoot);
     }
 
     public static string BuildBraveArguments(
@@ -101,6 +112,9 @@ internal static class BraveProfileManager
             // → extension "Shopee Data Runner" KHÔNG load. Tắt feature này để --load-extension hoạt động lại.
             "--disable-features=CalculateNativeWinOcclusion,IntensiveWakeUpThrottling,DisableLoadExtensionCommandLineSwitch",
         };
+
+        // Chặn cache phình khi 24 cửa sổ chạy song song (profile bền → cache không tự dọn). Xem BraveCachePolicy.
+        parts.AddRange(Shopee.Core.Browser.BraveCachePolicy.DiskLimitArgs);
         if (!string.IsNullOrWhiteSpace(bigSellerProxyServer))
         {
             // TK BIGSELLER CÓ PROXY RIÊNG → split-tunnel qua PAC: bigseller.com đi proxy RIÊNG của tk

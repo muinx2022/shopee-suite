@@ -103,6 +103,9 @@ public sealed class BrowserLauncher
             $"--remote-debugging-port={cdpPort}",
         };
 
+        // Chặn cache phình cho profile bền (check-account, bigseller-login). Xem BraveCachePolicy.
+        parts.AddRange(BraveCachePolicy.DiskLimitArgs);
+
         if (!string.IsNullOrWhiteSpace(proxy))
             parts.Add($"--proxy-server={proxy}");
 

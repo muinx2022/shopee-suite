@@ -37,7 +37,10 @@ internal static class ChromiumCookieReader
             File.Copy(dbPath, tmp, true);
             try
             {
-                using var conn = new SqliteConnection($"Data Source={tmp};Mode=ReadOnly;Cache=Private");
+                // Pooling=False: KHÔNG giữ connection trong pool sau Dispose → handle file nhả ngay để File.Delete
+                // (finally) xoá được file tạm. Bật pooling (mặc định) + mỗi file 1 GUID = pool giữ handle tới khi
+                // thoát app → rò hàng nghìn ssck_*.db trong %TEMP%.
+                using var conn = new SqliteConnection($"Data Source={tmp};Mode=ReadOnly;Cache=Private;Pooling=False");
                 conn.Open();
                 using var cmd = conn.CreateCommand();
                 cmd.CommandText =

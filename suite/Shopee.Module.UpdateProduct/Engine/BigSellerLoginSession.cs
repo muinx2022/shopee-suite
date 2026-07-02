@@ -29,6 +29,7 @@ internal sealed class BigSellerLoginSession : IAsyncDisposable
             "--no-first-run",
             "--no-default-browser-check",
             "--hide-crash-restore-bubble",
+            Shopee.Core.Browser.BraveCachePolicy.DiskLimitArgString,
             $"\"{BigSellerCookieImporter.DefaultListingUrl}\"",
         ]);
 

@@ -333,6 +333,10 @@ public sealed partial class CheckAccountViewModel : ObservableObject
                     else throw new IOException("Không cập nhật được tài khoản trong kho chung.");
                 }
 
+                // Đã copy cookie sang kho chung + lưu tk thành công → XOÁ bản nguồn check-account\profiles\{username}
+                // (không còn cần). Trước đây giữ lại → mỗi tk tồn 2 bản profile song song, phình ~11 GB vô ích.
+                TryDeleteDir(src);
+
                 savedRows.Add(row);
             }
             catch (Exception ex)
@@ -374,17 +378,50 @@ public sealed partial class CheckAccountViewModel : ObservableObject
         if (row is not null) row.Status = status;
     }
 
-    /// <summary>Copy nguyên user-data-dir (gồm Default + Local State) — ghi đè đích nếu đã có.</summary>
+    /// <summary>
+    /// Copy sang kho chung CHỈ các file cần để đọc/inject cookie session Shopee: <c>Local State</c> (chứa key
+    /// giải mã) + <c>Default\Network\Cookies</c> (+ journal, Preferences). Scrape KHÔNG BAO GIỜ mở profile này
+    /// bằng Brave — chỉ đọc 2 file trên (xem ChromiumCookieReader) — nên copy nguyên user-data-dir như trước
+    /// (kể cả Cache/Service Worker/Safe Browsing ~78 MB/tk) là lãng phí đĩa. Ghi đè đích nếu đã có.
+    /// </summary>
     private static void CopyProfile(string src, string dest)
     {
-        if (Directory.Exists(dest)) Directory.Delete(dest, recursive: true);
-        Directory.CreateDirectory(dest);
-        foreach (var file in Directory.GetFiles(src, "*", SearchOption.AllDirectories))
+        var relFiles = new[]
         {
-            var rel = Path.GetRelativePath(src, file);
-            var targetPath = Path.Combine(dest, rel);
-            Directory.CreateDirectory(Path.GetDirectoryName(targetPath)!);
-            File.Copy(file, targetPath, overwrite: true);
+            "Local State",
+            Path.Combine("Default", "Network", "Cookies"),
+            Path.Combine("Default", "Network", "Cookies-journal"),
+            Path.Combine("Default", "Preferences"),
+        };
+
+        // Chặn ghi đè dest (có thể đang là bản login TỐT từ lần lưu trước) bằng bản nguồn THIẾU cookie: nếu src
+        // không đủ Local State + Default\Network\Cookies thì ném để caller đếm lỗi + giữ nguyên dest cũ.
+        if (!File.Exists(Path.Combine(src, "Local State")) ||
+            !File.Exists(Path.Combine(src, "Default", "Network", "Cookies")))
+            throw new FileNotFoundException("Profile nguồn thiếu Local State/Cookies — không ghi đè kho chung.");
+
+        // Copy vào thư mục TẠM rồi Move đè NGUYÊN TỬ. Nếu copy hỏng giữa chừng (đĩa đầy/IO lỗi khi re-save),
+        // dest CŨ còn nguyên → không mất profile login đang tốt. Move cùng ổ gần như nguyên tử.
+        var tmp = dest + ".new-" + Guid.NewGuid().ToString("N")[..8];
+        try
+        {
+            if (Directory.Exists(tmp)) Directory.Delete(tmp, recursive: true);
+            Directory.CreateDirectory(tmp);
+            foreach (var rel in relFiles)
+            {
+                var s = Path.Combine(src, rel);
+                if (!File.Exists(s)) continue;
+                var targetPath = Path.Combine(tmp, rel);
+                Directory.CreateDirectory(Path.GetDirectoryName(targetPath)!);
+                File.Copy(s, targetPath, overwrite: true);
+            }
+            if (Directory.Exists(dest)) Directory.Delete(dest, recursive: true);
+            Directory.Move(tmp, dest);
+        }
+        catch
+        {
+            try { if (Directory.Exists(tmp)) Directory.Delete(tmp, recursive: true); } catch { }
+            throw;
         }
     }
 

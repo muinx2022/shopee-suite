@@ -1481,6 +1481,7 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
             "--restore-last-session=false", "--disable-session-crashed-bubble",
             "--start-maximized", "--window-size=1920,1080",
             "--disable-gpu", "--disable-dev-shm-usage", "--disable-software-rasterizer",
+            Shopee.Core.Browser.BraveCachePolicy.DiskLimitArgString,
             $"\"{ListingUrl}\"",
         });
         // Đăng ký profile vào "fleet" TRƯỚC khi phóng → trình dọn Brave mồ côi (BraveFleet) CHỪA cửa sổ

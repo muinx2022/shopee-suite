@@ -537,6 +537,7 @@ internal sealed class BigSellerImportToStoreRunner : IAsyncDisposable
             "--disable-gpu",
             "--disable-dev-shm-usage",
             "--disable-software-rasterizer",
+            Shopee.Core.Browser.BraveCachePolicy.DiskLimitArgString,
             $"\"{BigSellerCrawlHelper.ResolveCrawlUrl(_settings.CrawlUrl)}\"",
         ]);
 

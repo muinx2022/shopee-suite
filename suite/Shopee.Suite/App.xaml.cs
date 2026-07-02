@@ -42,6 +42,17 @@ public partial class App : Application
         }
         catch (Exception ex) { TryLog("BraveFleet.Init", ex); }
 
+        // Dọn ĐĨA lúc khởi động (nền, không chặn UI): xoá cache profile Brave phình + profile mồ côi + rác di
+        // sản → chống ổ C đầy khi chạy Scrape nhiều Brave. Phải chạy SAU StartupSweep (đã giết Brave mồ côi nên
+        // file profile không còn bị khoá). An toàn: chỉ dọn khi là ShopeeSuite duy nhất trên máy.
+        try
+        {
+            Shopee.Core.Infrastructure.StartupJanitor.Notice =
+                msg => TryLog("StartupJanitor", new Exception(msg));
+            Shopee.Core.Infrastructure.StartupJanitor.RunInBackground();
+        }
+        catch (Exception ex) { TryLog("StartupJanitor.Init", ex); }
+
         // Đa máy: nếu máy này được đặt làm Hub → tự bật mini-server + Cloudflare Tunnel (nền, không chặn UI).
         try
         {
