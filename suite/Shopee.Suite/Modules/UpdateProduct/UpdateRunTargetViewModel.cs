@@ -22,8 +22,11 @@ public sealed class UpdateRunTargetViewModel : ObservableObject
     {
         Account = account;
         Shops = new ObservableCollection<BigSellerShop>(account.Shops);
-        // Khôi phục shop đã chọn từ Id đã LƯU (gán field trực tiếp để không trigger Persist lúc dựng VM).
-        _selectedShop = Shops.FirstOrDefault(s => s.Id == account.UpdateSelectedShopId);
+        // Khôi phục shop đã chọn từ Id đã LƯU; nếu chưa lưu (hoặc Id không còn khớp) thì MẶC ĐỊNH shop đầu —
+        // GIỐNG ScrapeTargetViewModel. Nếu để null, panel cấu hình (từ dòng/đến dòng/số worker/reload) KHÔNG có
+        // shop để ghi: getter trả default (worker = 1) còn setter im lặng bỏ qua giá trị gõ vào → gõ "3"/"5"
+        // rồi rời ô là tự về 1. (Gán field trực tiếp để không trigger Persist lúc dựng VM.)
+        _selectedShop = Shops.FirstOrDefault(s => s.Id == account.UpdateSelectedShopId) ?? Shops.FirstOrDefault();
     }
 
     private static void Persist() => BigSellerStore.Shared.Save();
