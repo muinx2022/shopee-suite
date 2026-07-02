@@ -655,11 +655,12 @@ public sealed partial class ScrapeViewModel : ObservableObject
     private static string ResolveShopeeProfileDir(ShopeeAccount a)
     {
         var rel = a.ProfileRelativePath;
-        if (string.IsNullOrWhiteSpace(rel))
+        // TRỐNG hoặc TUYỆT ĐỐI → LUÔN dùng gốc profile CỤC BỘ theo Id. KHÔNG tin path tuyệt đối lưu sẵn: nó có
+        // thể là path của MÁY KHÁC (acc đến từ Hub lưu "C:\Users\<user máy Hub>\…") → client tạo profile dưới
+        // C:\Users\<máy khác>\ → "Access denied". Chỉ path TƯƠNG ĐỐI mới ghép với gốc cục bộ (giống mọi máy).
+        if (string.IsNullOrWhiteSpace(rel) || Path.IsPathRooted(rel))
             return Path.Combine(SuitePaths.ModuleDir("shared"), "profiles", a.Id);
-        return Path.IsPathRooted(rel)
-            ? rel
-            : Path.Combine(SuitePaths.ModuleDir("shared"), rel.Replace('/', Path.DirectorySeparatorChar));
+        return Path.Combine(SuitePaths.ModuleDir("shared"), rel.Replace('/', Path.DirectorySeparatorChar));
     }
 
     private void WireRunner(ScrapeRunner runner, int seq, string bigSellerName)

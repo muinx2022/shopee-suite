@@ -251,8 +251,10 @@ public sealed class BraveManager(AppSettingsService appSettings)
         var pids = new List<int>();
         try
         {
+            // Cả brave.exe LẪN crashpad_handler.exe (tiến trình con của Brave — thường là kẻ còn GIỮ profile
+            // ở trạng thái delete-pending sau khi brave cha đã thoát) đều phải bị kill để nhả khoá profile.
             using var searcher = new System.Management.ManagementObjectSearcher(
-                "SELECT ProcessId, CommandLine FROM Win32_Process WHERE Name = 'brave.exe'");
+                "SELECT ProcessId, CommandLine FROM Win32_Process WHERE Name = 'brave.exe' OR Name = 'crashpad_handler.exe'");
             foreach (var obj in searcher.Get())
             {
                 try
@@ -273,6 +275,32 @@ public sealed class BraveManager(AppSettingsService appSettings)
         catch { }
 
         return pids;
+    }
+
+    /// <summary>Liệt kê tiến trình đang tham chiếu profile này ("tên#pid, …") để chẩn đoán khi KHÔNG tạo được
+    /// profile — quét MỌI tiến trình có đường dẫn profile trong command line (không chỉ Brave) để lộ cả kẻ lạ.</summary>
+    internal static string DescribeProfileHolders(string profileDir)
+    {
+        var needle = Path.GetFullPath(profileDir).TrimEnd('\\', '/');
+        var found = new List<string>();
+        try
+        {
+            using var searcher = new System.Management.ManagementObjectSearcher(
+                "SELECT ProcessId, Name, CommandLine FROM Win32_Process");
+            foreach (var obj in searcher.Get())
+            {
+                try
+                {
+                    var cl = obj["CommandLine"] as string;
+                    if (!string.IsNullOrEmpty(cl) && cl.Contains(needle, StringComparison.OrdinalIgnoreCase))
+                        found.Add($"{obj["Name"] as string ?? "?"}#{Convert.ToInt32(obj["ProcessId"])}");
+                }
+                catch { }
+                finally { obj.Dispose(); }
+            }
+        }
+        catch { }
+        return string.Join(", ", found);
     }
 
     private static void ClearExtensionRuntimeCache(string profileDir)

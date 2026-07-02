@@ -294,8 +294,15 @@ public sealed partial class SearchViewModel : ObservableObject
         var kiot = pooled?.KiotKey ?? a.KiotProxyKey;
         var manual = pooled?.Manual ?? a.ManualProxy;
         return new(a.Id, a.DisplayName, a.ShopeeAccountLogin, a.OpenWithShopeeAccount,
-            kiot, a.ProxyType, manual, a.ProfileRelativePath, a.RequireProxy);
+            kiot, a.ProxyType, manual, LocalProfileDir(a), a.RequireProxy);
     }
+
+    /// <summary>Thư mục profile trình duyệt RIÊNG-MÁY của tk: LUÔN dưới gốc profile CỤC BỘ theo Id. KHÔNG dùng
+    /// <see cref="ShopeeAccount.ProfileRelativePath"/> thô — nó có thể là đường dẫn TUYỆT ĐỐI của MÁY KHÁC (acc
+    /// đến từ Hub lưu path "C:\Users\&lt;user máy Hub&gt;\…") khiến client cố tạo profile dưới C:\Users\&lt;máy
+    /// khác&gt;\ → "Access denied". Profile là riêng từng máy nên KHÔNG truyền xuyên máy.</summary>
+    private static string LocalProfileDir(ShopeeAccount a) =>
+        Path.Combine(SuitePaths.ModuleDir("shared"), "profiles", a.Id);
 
     /// <summary>Sau 1 lượt chạy: nhả cờ OpenWithShopeeAccount của các tk đã đăng nhập (lần sau khỏi login lại).</summary>
     private void ResetUsedAccounts()
@@ -386,7 +393,10 @@ public sealed partial class SearchViewModel : ObservableObject
             }
 
             var specs = _pool.Where(a => working.Contains(a.Id)).Select(ToSpec).ToList();
-            var lanes = Math.Max(1, Math.Min(Math.Min(p.Lanes <= 0 ? LaneCount : p.Lanes, specs.Count), items.Count));
+            // Số lane do CHÍNH client quyết theo LaneCount cấu hình của MÁY NÀY (giống Scrape chạy tùy máy) —
+            // KHÔNG theo p.Lanes của Hub. Vẫn kẹp theo số acc giành được và số link của khối (không thể nhiều
+            // lane hơn acc/link).
+            var lanes = Math.Max(1, Math.Min(Math.Min(LaneCount, specs.Count), items.Count));
             Log($"▶ Search (Hub giao) {items.Count} link · {specs.Count}/{_pool.Count} acc (khóa xuyên máy) · {lanes} lane · khu vực \"{region}\".");
             startedRun = true;
             // Đẩy sản phẩm cào được lên Hub theo CHU KỲ 20s trong lúc chạy → kết quả gộp cập nhật LIÊN TỤC.
