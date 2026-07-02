@@ -58,14 +58,16 @@ public sealed partial class BigSellerViewModel : ObservableObject
         else d.BeginInvoke(SyncFromStore);
     }
 
-    /// <summary>Chỉ nạp lại khi TẬP tài khoản đổi (import/khôi phục, Add/Delete) — KHÔNG rebuild khi chỉ
-    /// sửa thuộc tính (tránh mất focus lúc đang nhập + tránh nhân đôi dòng).</summary>
+    /// <summary>Nạp lại toàn bộ khi TẬP tài khoản đổi (import/khôi phục, Add/Delete) — KHÔNG rebuild khi chỉ
+    /// sửa thuộc tính (tránh mất focus lúc đang nhập + tránh nhân đôi dòng). Khi tập acc không đổi, vẫn đối
+    /// chiếu danh sách SHOP của từng acc: Hub sync có thể thêm/bớt shop trên một acc ĐÃ có (tập acc y nguyên
+    /// nên guard trên không bắt được) → trước đây shop mới từ Hub không hiện tới khi khởi động lại app.</summary>
     private void SyncFromStore()
     {
         var storeIds = BigSellerStore.Shared.Accounts.Select(a => a.Id).ToHashSet();
         var itemIds = Items.Select(i => i.Model.Id).ToHashSet();
-        if (storeIds.SetEquals(itemIds)) return;
-        Reload();
+        if (!storeIds.SetEquals(itemIds)) { Reload(); return; }
+        foreach (var item in Items) item.SyncShopsFromModel();   // fast-path rẻ khi tập shop không đổi
     }
 
     private void Reload()

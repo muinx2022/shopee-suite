@@ -94,6 +94,42 @@ public sealed class BigSellerAccountItemViewModel : ObservableObject
         OnPropertyChanged(nameof(ShopCount));
     }
 
+    /// <summary>Đối chiếu lưới <see cref="Shops"/> với <see cref="BigSellerAccount.Shops"/> của model SAU khi
+    /// Hub sync sửa danh sách shop (thêm/bớt/đổi thứ tự) trên acc ĐANG có trong danh sách. Guard SetEquals ở
+    /// <c>BigSellerViewModel.SyncFromStore</c> chỉ dựng lại khi TẬP tài khoản đổi → ca "chỉ thêm shop vào acc
+    /// cũ" bị bỏ sót, shop mới từ Hub không hiện tới khi khởi động lại app. Khớp theo THAM CHIẾU model: tái
+    /// dùng VM cũ cho shop còn giữ (không phá ô đang gõ / selection), tạo VM mới cho shop Hub thêm, bỏ VM cho
+    /// shop Hub gỡ. Có fast-path khi đã khớp sẵn — Save mỗi-phím cũng bắn Changed nên phải rẻ + không đụng
+    /// collection khi tập shop không đổi (chỉ sửa thuộc tính).</summary>
+    public void SyncShopsFromModel()
+    {
+        if (Shops.Count == Model.Shops.Count)
+        {
+            var same = true;
+            for (var i = 0; i < Shops.Count; i++)
+                if (!ReferenceEquals(Shops[i].Model, Model.Shops[i])) { same = false; break; }
+            if (same) return;   // danh sách shop y nguyên → khỏi đụng lưới (giữ focus/selection khi đang gõ)
+        }
+
+        // Bỏ VM shop mà model đã bị Hub gỡ khỏi danh sách.
+        for (var i = Shops.Count - 1; i >= 0; i--)
+            if (!Model.Shops.Contains(Shops[i].Model)) Shops.RemoveAt(i);
+
+        // Duyệt theo thứ tự Model.Shops: chèn shop mới / chuyển shop sai chỗ (tái dùng VM cũ theo tham chiếu).
+        for (var i = 0; i < Model.Shops.Count; i++)
+        {
+            var m = Model.Shops[i];
+            if (i < Shops.Count && ReferenceEquals(Shops[i].Model, m)) continue;
+            var at = -1;
+            for (var j = i + 1; j < Shops.Count; j++)
+                if (ReferenceEquals(Shops[j].Model, m)) { at = j; break; }
+            if (at >= 0) Shops.Move(at, i);
+            else Shops.Insert(i, new BigSellerShopViewModel(m));
+        }
+
+        OnPropertyChanged(nameof(ShopCount));
+    }
+
     public void RefreshSheets()
     {
         // Danh sách mong muốn = sheet trong workbook + sheet đang gán cho các shop (để combo
