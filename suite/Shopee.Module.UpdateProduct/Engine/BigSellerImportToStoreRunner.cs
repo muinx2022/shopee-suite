@@ -203,6 +203,8 @@ internal sealed class BigSellerImportToStoreRunner : IAsyncDisposable
         // ("chạy tẹo rồi dừng"). Chỉ thật sự thoát khi bị Stop, hoặc quá nhiều lỗi liên tiếp không đọc nổi
         // danh sách (coi như hỏng hẳn). Cơ chế chống import-trùng (committed/claim) GIỮ NGUYÊN.
         var consecutiveErrors = 0;
+        var tabSkips = 0;            // số lượt liên tiếp bị đưa về SAI tab (reload đổi ngôn ngữ) — quá ngưỡng thì dừng
+        string? abortReason = null;  // lý do dừng "cứng" (thoát while rồi ném để tầng trên báo lỗi, không nuốt)
         const int maxConsecutiveErrors = 8;
         while (!cancellationToken.IsCancellationRequested)
         {
@@ -217,14 +219,31 @@ internal sealed class BigSellerImportToStoreRunner : IAsyncDisposable
                     await DelayAsync(5000, cancellationToken);
                     continue;
                 }
-                await SelectSourceTabIfNeededAsync(page, cancellationToken);
 
                 // ── IMPORT THEO ITEM ID — tick từng dòng có item id ∈ sheet (dòng StartRow→EndRow) rồi bấm
                 //    "Import to Stores" (thanh công cụ) → chọn shop → reload về trang 1 → quét lại. Hết trang mà
                 //    không còn item id cần import ⇒ RETURN (kết thúc) → tầng trên báo Hub "completed"/"done".
                 //    _importedIds chống import-trùng + đảm bảo kết thúc (độc lập tab Unclaimed/Claimed/All). ──
                 await BigSellerCrawlHelper.WaitForCrawlListContentAsync(page);   // chờ có dòng HOẶC trạng thái rỗng
+                // Đưa/GIỮ đúng tab Đã nhận SAU khi trang đã load. BigSeller hay TỰ đổi ngôn ngữ → reload → về tab
+                // "new"; nếu không ở đúng tab thì BỎ lượt quét (đừng import nhầm từ tab "new"). Chốt lại NGAY trước
+                // khi quét vì reload có thể xảy ra trong lúc chờ nội dung/API.
+                var onClaimed = await SelectSourceTabIfNeededAsync(page, cancellationToken);
                 await WaitForApiCoverageAsync(page, cancellationToken);          // chờ đọc xong pageList.json của trang này
+                if (_settings.ImportFromClaimedTab
+                    && (!onClaimed || !await BigSellerCrawlHelper.IsClaimedTabActiveAsync(page)))
+                {
+                    if (++tabSkips >= 12)
+                    {
+                        abortReason = "Tab 'Đã nhận' liên tục bị đưa về 'new' (BigSeller tự đổi ngôn ngữ khi reload?). "
+                            + "Hãy đặt ngôn ngữ BigSeller = Tiếng Việt cho profile này rồi chạy lại.";
+                        break;
+                    }
+                    _log($"Chưa ở tab Đã nhận (reload đổi ngôn ngữ?) — bỏ lượt {tabSkips}/12, thử lại.");
+                    await DelayAsync(2000, cancellationToken);
+                    continue;
+                }
+                tabSkips = 0;
                 int rowCount;
                 string[] checkedIds;
                 try
@@ -288,6 +307,14 @@ internal sealed class BigSellerImportToStoreRunner : IAsyncDisposable
                 if (committed)
                     foreach (var id in checkedIds) _importedIds.Add(id);
 
+                // Đã gom ĐỦ mọi item id cần import → DỪNG NGAY, khỏi lật hết tab (tab "Đã nhận" có thể tới ~75
+                // trang). _importedIds ⊆ _importIds nên đủ số là đủ tất cả.
+                if (_importedIds.Count >= _importIds.Count)
+                {
+                    _log($"✔ Đã import đủ {_importedIds.Count}/{_importIds.Count} SP — dừng (không lật thêm trang).");
+                    return;
+                }
+
                 await DelayAsync(2000, cancellationToken);
                 await BigSellerCrawlHelper.DismissPostImportDialogsAsync(page, _log);
                 _log($"Reload màn import sau {cycleSec}s…");
@@ -311,6 +338,11 @@ internal sealed class BigSellerImportToStoreRunner : IAsyncDisposable
                 await DelayAsync(3000, cancellationToken);
             }
         }
+
+        // Thoát while do dừng "cứng" (vd tab Đã nhận cứ bị reload về 'new') → ném để tầng trên báo LỖI thật,
+        // không lẫn vào nhánh "hoàn tất" (return) — tránh false-success che lỗi.
+        if (abortReason is not null)
+            throw new InvalidOperationException(abortReason);
     }
 
     // Kết nối Playwright sang Brave qua CDP (tạo Playwright nếu chưa có; dọn browser cũ nếu đang rớt).
@@ -398,17 +430,21 @@ internal sealed class BigSellerImportToStoreRunner : IAsyncDisposable
         return page;
     }
 
-    private async Task SelectSourceTabIfNeededAsync(IPage page, CancellationToken cancellationToken)
+    /// <summary>Đưa trang về tab "Đã nhận" (khi bật cờ). Trả về true nếu đã/đang ở đúng tab; false nếu 3 lần
+    /// vẫn không được. KHÔNG cần → true luôn (tab "new" mặc định).</summary>
+    private async Task<bool> SelectSourceTabIfNeededAsync(IPage page, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (!_settings.ImportFromClaimedTab)
-            return;
+            return true;
 
         for (var attempt = 1; attempt <= 3; attempt++)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            // Gỡ guide "đổi ngôn ngữ" TRƯỚC khi click tab — chính nó hay gây reload đưa trang về tab "new".
+            await BigSellerCrawlHelper.DismissGuideMasksAsync(page, _log);
             var ok = await BigSellerCrawlHelper.SelectClaimedTabByTextAsync(page, _log);
-            if (ok) return;
+            if (ok) return true;
 
             _log($"Tab Đã nhận chưa chọn được (lần {attempt}/3), chờ trang load...");
             await DelayAsync(2000, cancellationToken);
@@ -422,7 +458,8 @@ internal sealed class BigSellerImportToStoreRunner : IAsyncDisposable
             }
         }
 
-        _log("Cảnh báo: Không chọn được tab Đã nhận, tiếp tục vòng lặp kế tiếp...");
+        _log("Cảnh báo: Không chọn được tab Đã nhận.");
+        return false;
     }
 
     private static bool IsTransientNavigationError(Exception ex)

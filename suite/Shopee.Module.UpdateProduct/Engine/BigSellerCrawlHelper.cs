@@ -210,6 +210,39 @@ internal static class BigSellerCrawlHelper
         }
     }
 
+    /// <summary>Tab "Đã nhận" có ĐANG là tab active không (dùng cùng cách nhận diện với
+    /// <see cref="SelectClaimedTabByTextAsync"/>). Dùng làm chốt chặn: reload do BigSeller tự đổi ngôn ngữ hay
+    /// đưa trang về tab "new" — không xác nhận đúng tab thì KHÔNG quét/import (tránh import nhầm tab).</summary>
+    public static async Task<bool> IsClaimedTabActiveAsync(IPage page)
+    {
+        try
+        {
+            return await page.EvaluateAsync<bool>(
+                @"() => {
+                    const normalize = v => (v || '')
+                        .normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[đĐdd]/g, 'd')
+                        .replace(/\s+/g, ' ').trim().toLowerCase();
+                    const selectors = [
+                        '#activeTab li', '#activeTab a', '#activeTab > div', '#activeTab > span',
+                        '.tabs_module li', '.tabs_module a', '.tabs_module > div', '.tabs_module > span',
+                        '.ant-tabs-tab', '[class*=""tab-nav""] li', '[class*=""tab-nav""] a',
+                        '[class*=""tab-list""] li', '[class*=""tab-list""] a', '[class*=""tab-item""]',
+                    ];
+                    const seen = new Set();
+                    const items = selectors
+                        .flatMap(s => Array.from(document.querySelectorAll(s)))
+                        .filter(el => { if (seen.has(el)) return false; seen.add(el); return true; });
+                    let el = items.find(i => normalize(i.textContent).includes('da nhan'));
+                    if (!el && items.length >= 3) el = items[2];
+                    if (!el) return false;
+                    return el.classList.contains('active') ||
+                           el.classList.contains('ant-tabs-tab-active') ||
+                           el.getAttribute('aria-selected') === 'true';
+                }");
+        }
+        catch { return false; }
+    }
+
     public static async Task WaitForCrawlListContentAsync(IPage page, int timeoutMs = 8000)
     {
         const string selector =
@@ -233,8 +266,13 @@ internal static class BigSellerCrawlHelper
         {
             var clicked = await page.EvaluateAsync<bool>(
                 @"() => {
-                    const next = document.querySelector('.pagination .next_item:not(.disabled), li.next_item:not(.disabled)');
+                    // BigSeller dùng Ant Design → pager là .ant-pagination-next (li[aria-disabled] ở trang cuối);
+                    // giữ luôn selector .next_item cũ để tương thích. Bỏ qua nút đang disabled = trang cuối.
+                    const next = document.querySelector(
+                        '.pagination .next_item:not(.disabled), li.next_item:not(.disabled), ' +
+                        'li.ant-pagination-next:not(.ant-pagination-disabled), .ant-pagination-next:not(.ant-pagination-disabled)');
                     if (!next) return false;
+                    if (next.getAttribute('aria-disabled') === 'true') return false;
                     const action = next.querySelector('a.paging_action, a, button') || next;
                     action.click();
                     return true;
