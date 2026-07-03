@@ -29,6 +29,35 @@
                 </Trigger>
             </Style.Triggers>
         </Style>
+
+        <!-- Selectbox trạng thái trên ô lưới (Scrape/Import/Update): mặt ô = HIỆN TRẠNG (mục [0], đọc màu theo
+             Brush); xổ ra chỉ 3 hành động đặt tay (mục [0] IsCurrent bị ẩn khỏi danh sách). Nhẹ chrome (không
+             viền/nền) để đọc như chữ trạng thái cũ nhưng thêm mũi ▾ để đặt tay ngay tại ô. -->
+        <Style x:Key="QueueStateCombo" TargetType="ComboBox">
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Padding" Value="2,1" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="HorizontalContentAlignment" Value="Left" />
+            <Setter Property="ItemContainerStyle">
+                <Setter.Value>
+                    <Style TargetType="ComboBoxItem" BasedOn="{StaticResource {x:Type ComboBoxItem}}">
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsCurrent}" Value="True">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Setter.Value>
+            </Setter>
+            <Setter Property="ItemTemplate">
+                <Setter.Value>
+                    <DataTemplate>
+                        <TextBlock Text="{Binding Text}" Foreground="{Binding Brush}" FontWeight="SemiBold" />
+                    </DataTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </UserControl.Resources>
     <Grid Margin="28,22,28,24">
         <Grid.RowDefinitions>
@@ -90,7 +119,6 @@
                             <RowDefinition Height="*" />
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
 
                         <!-- Bước 1: Hàng đợi việc — chọn 1 shop để giao -->
@@ -122,28 +150,54 @@
                                             </DataGridTextColumn.ElementStyle>
                                         </DataGridTextColumn>
                                         <DataGridTextColumn Header="Shop" Binding="{Binding ShopName}" Width="*" />
+                                        <!-- Mỗi ô op là 1 selectbox: mặt ô hiện trạng thái (màu theo brush), bấm ▾ để đặt tay
+                                             ✓ Xong / Chưa / ■ Dừng ngay tại ô. Nếu op ĐANG CHẠY (…Locked) → chỉ hiện label
+                                             tĩnh, không cho selectbox (khỏi đè ledger giữa chừng phá lượt máy đang chạy). -->
                                         <DataGridTemplateColumn Header="Scrape" Width="150">
                                             <DataGridTemplateColumn.CellTemplate>
                                                 <DataTemplate>
-                                                    <TextBlock Text="{Binding ScrapeText}" Foreground="{Binding ScrapeBrush}" FontWeight="SemiBold" ToolTip="{Binding ScrapeText}" />
+                                                    <Grid>
+                                                        <ComboBox Style="{StaticResource QueueStateCombo}"
+                                                                  ItemsSource="{Binding ScrapeOptions}" SelectedItem="{Binding ScrapeSel, Mode=TwoWay}"
+                                                                  ToolTip="{Binding ScrapeSel.Text}"
+                                                                  Visibility="{Binding ScrapeLocked, Converter={StaticResource InverseBoolToVis}}" />
+                                                        <TextBlock Text="{Binding ScrapeSel.Text}" Foreground="{Binding ScrapeSel.Brush}" FontWeight="SemiBold"
+                                                                   VerticalAlignment="Center" TextTrimming="CharacterEllipsis" ToolTip="{Binding ScrapeSel.Text}"
+                                                                   Visibility="{Binding ScrapeLocked, Converter={StaticResource BoolToVis}}" />
+                                                    </Grid>
                                                 </DataTemplate>
                                             </DataGridTemplateColumn.CellTemplate>
                                         </DataGridTemplateColumn>
                                         <DataGridTemplateColumn Header="Import" Width="150">
                                             <DataGridTemplateColumn.CellTemplate>
                                                 <DataTemplate>
-                                                    <TextBlock Text="{Binding ImportText}" Foreground="{Binding ImportBrush}" FontWeight="SemiBold" ToolTip="{Binding ImportText}" />
+                                                    <Grid>
+                                                        <ComboBox Style="{StaticResource QueueStateCombo}"
+                                                                  ItemsSource="{Binding ImportOptions}" SelectedItem="{Binding ImportSel, Mode=TwoWay}"
+                                                                  ToolTip="{Binding ImportSel.Text}"
+                                                                  Visibility="{Binding ImportLocked, Converter={StaticResource InverseBoolToVis}}" />
+                                                        <TextBlock Text="{Binding ImportSel.Text}" Foreground="{Binding ImportSel.Brush}" FontWeight="SemiBold"
+                                                                   VerticalAlignment="Center" TextTrimming="CharacterEllipsis" ToolTip="{Binding ImportSel.Text}"
+                                                                   Visibility="{Binding ImportLocked, Converter={StaticResource BoolToVis}}" />
+                                                    </Grid>
                                                 </DataTemplate>
                                             </DataGridTemplateColumn.CellTemplate>
                                         </DataGridTemplateColumn>
                                         <DataGridTemplateColumn Header="Update" Width="150">
                                             <DataGridTemplateColumn.CellTemplate>
                                                 <DataTemplate>
-                                                    <TextBlock Text="{Binding UpdateText}" Foreground="{Binding UpdateBrush}" FontWeight="SemiBold" ToolTip="{Binding UpdateText}" />
+                                                    <Grid>
+                                                        <ComboBox Style="{StaticResource QueueStateCombo}"
+                                                                  ItemsSource="{Binding UpdateOptions}" SelectedItem="{Binding UpdateSel, Mode=TwoWay}"
+                                                                  ToolTip="{Binding UpdateSel.Text}"
+                                                                  Visibility="{Binding UpdateLocked, Converter={StaticResource InverseBoolToVis}}" />
+                                                        <TextBlock Text="{Binding UpdateSel.Text}" Foreground="{Binding UpdateSel.Brush}" FontWeight="SemiBold"
+                                                                   VerticalAlignment="Center" TextTrimming="CharacterEllipsis" ToolTip="{Binding UpdateSel.Text}"
+                                                                   Visibility="{Binding UpdateLocked, Converter={StaticResource BoolToVis}}" />
+                                                    </Grid>
                                                 </DataTemplate>
                                             </DataGridTemplateColumn.CellTemplate>
                                         </DataGridTemplateColumn>
-                                        <DataGridTextColumn Header="Kế tiếp" Binding="{Binding NextOpText}" Width="140" />
                                     </DataGrid.Columns>
                                 </DataGrid>
                             </DockPanel>
@@ -228,49 +282,9 @@
                             </StackPanel>
                         </Border>
 
-                        <!-- Bước 3: Đặt trạng thái thủ công cho shop đang chọn (scrape auto vẫn chạy; đặt tay đè được) -->
-                        <Border Grid.Row="2" Background="{StaticResource SubtleBrush}" CornerRadius="8" Padding="12,10" Margin="0,10,0,0">
-                            <StackPanel>
-                                <TextBlock Text="Bước 3 — đặt trạng thái thủ công (shop đang chọn)" Style="{StaticResource H2}" Margin="0,0,0,2" />
-                                <TextBlock Text="✓ Xong = đánh dấu đã xong · Chưa = reset (scrape sẽ giao + chạy lại từ đầu) · ■ Dừng = đánh dấu dừng dở"
-                                           Style="{StaticResource Caption}" Margin="0,0,0,8" />
-                                <Grid>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="78" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <Grid.RowDefinitions>
-                                        <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="Auto" />
-                                    </Grid.RowDefinitions>
-
-                                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Scrape" VerticalAlignment="Center" FontWeight="SemiBold" />
-                                    <StackPanel Grid.Row="0" Grid.Column="1" Orientation="Horizontal" Margin="0,3">
-                                        <Button Content="✓ Xong" Command="{Binding SetStateCommand}" CommandParameter="scrape:completed" Margin="0,0,6,0" />
-                                        <Button Content="Chưa" Command="{Binding SetStateCommand}" CommandParameter="scrape:idle" Margin="0,0,6,0" />
-                                        <Button Content="■ Dừng" Command="{Binding SetStateCommand}" CommandParameter="scrape:stopped" />
-                                    </StackPanel>
-
-                                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Import" VerticalAlignment="Center" FontWeight="SemiBold" />
-                                    <StackPanel Grid.Row="1" Grid.Column="1" Orientation="Horizontal" Margin="0,3">
-                                        <Button Content="✓ Xong" Command="{Binding SetStateCommand}" CommandParameter="import:completed" Margin="0,0,6,0" />
-                                        <Button Content="Chưa" Command="{Binding SetStateCommand}" CommandParameter="import:idle" Margin="0,0,6,0" />
-                                        <Button Content="■ Dừng" Command="{Binding SetStateCommand}" CommandParameter="import:stopped" />
-                                    </StackPanel>
-
-                                    <TextBlock Grid.Row="2" Grid.Column="0" Text="Update" VerticalAlignment="Center" FontWeight="SemiBold" />
-                                    <StackPanel Grid.Row="2" Grid.Column="1" Orientation="Horizontal" Margin="0,3">
-                                        <Button Content="✓ Xong" Command="{Binding SetStateCommand}" CommandParameter="update:completed" Margin="0,0,6,0" />
-                                        <Button Content="Chưa" Command="{Binding SetStateCommand}" CommandParameter="update:idle" Margin="0,0,6,0" />
-                                        <Button Content="■ Dừng" Command="{Binding SetStateCommand}" CommandParameter="update:stopped" />
-                                    </StackPanel>
-                                </Grid>
-                            </StackPanel>
-                        </Border>
-
-                        <!-- Nâng cao: Hub TỰ giao việc theo vai trò (ẩn mặc định — đa số chỉ cần Giao tay ở trên) -->
-                        <Expander Grid.Row="3" Margin="0,10,0,0" Header="⚙  Nâng cao — để Hub tự giao việc theo vai trò">
+                        <!-- Nâng cao: Hub TỰ giao việc theo vai trò (ẩn mặc định — đa số chỉ cần Giao tay ở trên).
+                             Đặt trạng thái thủ công giờ nằm ngay trên lưới (selectbox mỗi ô op ở Bước 1). -->
+                        <Expander Grid.Row="2" Margin="0,10,0,0" Header="⚙  Nâng cao — để Hub tự giao việc theo vai trò">
                             <StackPanel Margin="0,8,0,0">
                                 <Border Background="{StaticResource SubtleBrush}" CornerRadius="8" Padding="12,10" Margin="0,0,0,10">
                                     <WrapPanel Orientation="Horizontal">

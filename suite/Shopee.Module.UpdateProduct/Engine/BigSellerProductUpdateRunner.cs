@@ -810,11 +810,10 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
         });
 
         await StepAsync("Cập nhật tồn kho + giá");
-        // [7] stock (skip if 0)
+        // [7] stock — đặt TẤT CẢ biến thể về StockValue (kể cả ô đang = 0, không còn giữ nguyên ô hết hàng).
         await ForEachVisibleAsync(page.Locator(VariationStockInputs), async el =>
         {
-            var cur = ParseDigits(await el.InputValueAsync());
-            if (cur == 0) return;
+            await el.ScrollIntoViewIfNeededAsync();
             await el.FillAsync(StockValue);
             await el.EvaluateAsync("el => el.dispatchEvent(new Event('input', {bubbles:true}))");
             await el.EvaluateAsync("el => el.blur()");
@@ -1513,12 +1512,6 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
             sb.Append(char.ToLowerInvariant(c));
         }
         return Regex.Replace(sb.ToString(), @"\s+", " ").Trim();
-    }
-
-    private static int ParseDigits(string? s)
-    {
-        var digits = new string((s ?? "").Where(char.IsDigit).ToArray());
-        return int.TryParse(digits, out var v) ? v : 0;
     }
 
     private static string ParsePrice(string? s)

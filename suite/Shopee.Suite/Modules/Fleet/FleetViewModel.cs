@@ -56,7 +56,6 @@ public sealed partial class FleetViewModel : ObservableObject
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(AssignManualCommand))]
     [NotifyCanExecuteChangedFor(nameof(CancelSelectedCommand))]
-    [NotifyCanExecuteChangedFor(nameof(SetStateCommand))]
     [NotifyPropertyChangedFor(nameof(HasCancelableWork))]
     private FleetQueueRow? _selectedQueue;
     public IReadOnlyList<string> PinOps { get; } = ["Scrape", "Import", "Update"];
@@ -220,7 +219,6 @@ public sealed partial class FleetViewModel : ObservableObject
         // Trạng thái assignment/lease đổi sau mỗi poll → tính lại enable/disable các nút + ẩn/hiện nút Huỷ.
         AssignManualCommand.NotifyCanExecuteChanged();
         CancelSelectedCommand.NotifyCanExecuteChanged();
-        SetStateCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(HasCancelableWork));
         _ = RefreshLogsAsync();   // kéo log mới từ Hub (tab Log)
     }
@@ -288,8 +286,9 @@ public sealed partial class FleetViewModel : ObservableObject
             Rows.Add(r.Row);
 
         if (HubServerConfigStore.Shared.Current.Enabled)
-            Machines = f.Machines.Count == 0 ? "🖥 (chưa có máy nào kết nối)"
-                : "Máy đang kết nối:   " + string.Join("        ", f.Machines.Select(m => $"🖥 {m.Hostname} · {Ago(m.LastSeen)}"));
+            // Chấm trạng thái theo Presence: 🟢 online (≤45s) · 🟡 vừa mất nhịp (≤3') · ⚪ offline — thay icon 🖥 chung.
+            Machines = f.Machines.Count == 0 ? "⚪ (chưa có máy nào kết nối)"
+                : "Máy đang kết nối:   " + string.Join("        ", f.Machines.Select(m => $"{Presence(m.LastSeen).dot} {m.Hostname} · {Ago(m.LastSeen)}"));
         else
             Machines = "(danh sách máy đang kết nối chỉ hiển thị trên máy Hub)";
         Status = $"{f.Leases.Count} việc đang chạy · cập nhật {DateTimeOffset.Now:HH:mm:ss}";
@@ -359,18 +358,22 @@ public sealed partial class FleetViewModel : ObservableObject
                 var sc = OpCell(f, acct.Id, shop.Id, "scrape");
                 var im = OpCell(f, acct.Id, shop.Id, "import");
                 var up = OpCell(f, acct.Id, shop.Id, "update");
-                var next = HubDispatcher.NextOp(f, acct.Id, shop.Id);
+                var scOpts = StateOptions(sc.text, sc.brush);
+                var imOpts = StateOptions(im.text, im.brush);
+                var upOpts = StateOptions(up.text, up.brush);
                 var row = new FleetQueueRow
                 {
                     BigsellerId = acct.Id, ShopId = shop.Id, Sheet = shop.ShopeeDataSheet,
                     AccountLabel = firstInAcct ? AcctName(acct, acct.Id) : "",
                     IsAccountFirstRow = firstInAcct,
                     ShopName = shop.DisplayName,
-                    ScrapeText = sc.text, ScrapeBrush = sc.brush,
-                    ImportText = im.text, ImportBrush = im.brush,
-                    UpdateText = up.text, UpdateBrush = up.brush,
-                    NextOpText = next is null ? "✓ hoàn tất" : $"kế tiếp: {OpVi(next)}",
+                    ScrapeOptions = scOpts, ImportOptions = imOpts, UpdateOptions = upOpts,
+                    // Op đang chạy (kind==1) → ô chỉ hiện label, khoá đặt tay (khỏi đè ledger giữa chừng).
+                    ScrapeLocked = sc.kind == 1, ImportLocked = im.kind == 1, UpdateLocked = up.kind == 1,
+                    // Chọn 1 hành động trong selectbox 1 ô → ghi ledger cho đúng op của shop này (đè scrape auto).
+                    OnSetState = (op, st) => _ = SetLedger(acct.Id, shop.Id, shop.ShopeeDataSheet, shop.DisplayName, op, st),
                 };
+                row.ScrapeSel = scOpts[0]; row.ImportSel = imOpts[0]; row.UpdateSel = upOpts[0];   // mặt ô = hiện trạng
                 Queue.Add(row);
                 firstInAcct = false;
                 foreach (var c in new[] { sc, im, up }) { if (c.kind == 1) running++; else if (c.kind == 2) queued++; else if (c.kind == 3) failed++; }
@@ -501,28 +504,31 @@ public sealed partial class FleetViewModel : ObservableObject
     /// huỷ (CancelBusy).</summary>
     private bool CanCancelSelected() => !CancelBusy && HasCancelableWork;
 
-    /// <summary>Đặt TAY trạng thái 1 op của shop đang chọn (ghi ledger). arg = "op:status", vd "scrape:idle",
-    /// "import:completed". status: completed = ✓ xong · idle = chưa chạy (reset → scrape giao + chạy lại từ
-    /// đầu) · stopped = ■ dừng. Cho operator lập baseline + giao lại shop đã-xong.</summary>
-    [RelayCommand(CanExecute = nameof(HasSelectedQueue))]
-    private async Task SetState(string? arg)
+    /// <summary>Dựng danh sách mục cho selectbox 1 ô op: [0] = HIỆN TRẠNG (chỉ hiện trên mặt ô, ẩn khỏi danh
+    /// sách xổ) + 3 hành động đặt tay (✓ Xong / Chưa / ■ Dừng → ghi ledger completed/idle/stopped).</summary>
+    private static List<FleetStateOption> StateOptions(string curText, Brush curBrush) =>
+    [
+        new FleetStateOption { Text = curText, Brush = curBrush },
+        new FleetStateOption { Text = "✓ Xong", Brush = DoneBrush, Status = "completed" },
+        new FleetStateOption { Text = "Chưa", Brush = IdleBrush, Status = "idle" },
+        new FleetStateOption { Text = "■ Dừng", Brush = WarnBrush, Status = "stopped" },
+    ];
+
+    /// <summary>Đặt TAY trạng thái 1 op của 1 shop (ghi ledger) từ selectbox trên lưới. status: completed = ✓ xong ·
+    /// idle = chưa chạy (reset → scrape giao + chạy lại từ đầu) · stopped = ■ dừng. Cho operator lập baseline +
+    /// giao lại shop đã-xong (scrape auto vẫn chạy; đặt tay đè được).</summary>
+    private async Task SetLedger(string bsId, string shopId, string sheet, string shopName, string op, string status)
     {
         var hub = CoordinationRuntime.Hub;
-        if (hub is null || SelectedQueue is not { } row || string.IsNullOrWhiteSpace(arg)) return;
-        var parts = arg.Split(':');
-        if (parts.Length != 2) return;
-        var op = parts[0].Trim().ToLowerInvariant();
-        var status = parts[1].Trim().ToLowerInvariant();
+        if (hub is null) return;
         var coordOp = op switch { "import" => CoordOp.Import, "update" => CoordOp.Update, "rewrite" => CoordOp.Rewrite, _ => CoordOp.Scrape };
-        var coordKey = new CoordKey(row.BigsellerId, row.ShopId, row.Sheet, coordOp);
+        var coordKey = new CoordKey(bsId, shopId, sheet, coordOp);
         var stVi = status switch { "completed" => "✓ xong", "idle" => "chưa chạy", "stopped" => "■ dừng", _ => status };
-        ActionStatus = $"⏳ Đặt {OpVi(op)} · {row.ShopName} = {stVi}…";
-        try { await hub.SetLedgerStatusAsync(coordKey, status); ActionStatus = $"✔ {OpVi(op)} · {row.ShopName} = {stVi}"; }
+        ActionStatus = $"⏳ Đặt {OpVi(op)} · {shopName} = {stVi}…";
+        try { await hub.SetLedgerStatusAsync(coordKey, status); ActionStatus = $"✔ {OpVi(op)} · {shopName} = {stVi}"; }
         catch (Exception ex) { ActionStatus = "✘ Lỗi đặt trạng thái: " + ex.Message; }
         Refresh();
     }
-
-    private bool HasSelectedQueue() => CoordinationRuntime.Hub is not null && SelectedQueue is not null;
 
     // ── Tab "Search (đa máy)": bản HUB ─────────────────────────────────────────
     private string _searchFileName = "";
@@ -980,8 +986,8 @@ public sealed partial class FleetMachineRow : ObservableObject
     public override string ToString() => Name;   // hiển thị trong combo "Giao tay cho máy"
 }
 
-/// <summary>1 dòng hàng đợi: 1 shop/account + trạng thái 3 op + gợi ý op kế tiếp.</summary>
-public sealed class FleetQueueRow
+/// <summary>1 dòng hàng đợi: 1 shop/account + selectbox trạng thái cho từng op (vừa hiện trạng, vừa đặt tay tại ô).</summary>
+public sealed partial class FleetQueueRow : ObservableObject
 {
     public string BigsellerId { get; init; } = "";
     public string ShopId { get; init; } = "";
@@ -990,10 +996,48 @@ public sealed class FleetQueueRow
     /// <summary>true nếu là dòng shop ĐẦU của một tài khoản → kẻ vạch phân nhóm + in đậm tên tk.</summary>
     public bool IsAccountFirstRow { get; init; }
     public string ShopName { get; init; } = "";
-    public string ScrapeText { get; init; } = ""; public Brush ScrapeBrush { get; init; } = Brushes.Gray;
-    public string ImportText { get; init; } = ""; public Brush ImportBrush { get; init; } = Brushes.Gray;
-    public string UpdateText { get; init; } = ""; public Brush UpdateBrush { get; init; } = Brushes.Gray;
-    public string NextOpText { get; init; } = "";
+
+    /// <summary>Mục cho selectbox mỗi ô: [0] = hiện trạng (ẩn khỏi dropdown, chỉ hiện trên mặt ô) + 3 hành động đặt tay.</summary>
+    public List<FleetStateOption> ScrapeOptions { get; init; } = [];
+    public List<FleetStateOption> ImportOptions { get; init; } = [];
+    public List<FleetStateOption> UpdateOptions { get; init; } = [];
+
+    /// <summary>Op đang có client chạy (lease running) → KHOÁ ô: chỉ hiện label, không cho selectbox. Đặt tay đè
+    /// ledger giữa lúc máy đang chạy sẽ phá lượt đó → để máy chạy xong rồi mới cho đặt tay.</summary>
+    public bool ScrapeLocked { get; init; }
+    public bool ImportLocked { get; init; }
+    public bool UpdateLocked { get; init; }
+
+    [ObservableProperty] private FleetStateOption? _scrapeSel;
+    [ObservableProperty] private FleetStateOption? _importSel;
+    [ObservableProperty] private FleetStateOption? _updateSel;
+
+    /// <summary>VM gắn khi dựng hàng: chọn 1 hành động → ghi ledger cho (op, status). Bỏ trống ở dòng mặc định.</summary>
+    public Action<string, string>? OnSetState { get; init; }
+
+    partial void OnScrapeSelChanged(FleetStateOption? value) => Pick("scrape", value, ScrapeOptions, o => ScrapeSel = o);
+    partial void OnImportSelChanged(FleetStateOption? value) => Pick("import", value, ImportOptions, o => ImportSel = o);
+    partial void OnUpdateSelChanged(FleetStateOption? value) => Pick("update", value, UpdateOptions, o => UpdateSel = o);
+
+    /// <summary>Chọn 1 mục: nếu là hành động (Status != null) → ghi ledger rồi TRẢ selectbox về "hiện trạng"
+    /// (poll kế tiếp vẽ lại đủ). Chọn lại đúng dòng hiện trạng → không làm gì (không đệ quy vô hạn: dòng đó Status null).</summary>
+    private void Pick(string op, FleetStateOption? value, List<FleetStateOption> opts, Action<FleetStateOption?> reset)
+    {
+        if (value?.Status is not { } status) return;
+        OnSetState?.Invoke(op, status);
+        reset(opts.FirstOrDefault(o => o.IsCurrent));
+    }
+}
+
+/// <summary>1 mục trong selectbox ô trạng thái: Status = null là DÒNG HIỆN TRẠNG (chỉ hiện trên mặt ô, ẩn khỏi
+/// danh sách xổ); Status có giá trị (completed/idle/stopped) là hành động ĐẶT TAY.</summary>
+public sealed class FleetStateOption
+{
+    public string Text { get; init; } = "";
+    public Brush Brush { get; init; } = Brushes.Gray;
+    public string? Status { get; init; }
+    public bool IsCurrent => Status is null;
+    public override string ToString() => Text;
 }
 
 /// <summary>1 dòng máy trên bảng điều phối Search: tick chọn · tên máy · trạng thái · phần link chia · nút Chạy.</summary>
