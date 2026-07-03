@@ -4,6 +4,7 @@ using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Shopee.Core.BigSeller;
 using Shopee.Core.Browser;
 
 namespace OpenMultiBraveLauncherV3;
@@ -404,6 +405,12 @@ internal sealed class BraveInstanceSession : IDisposable
                     throw new InvalidOperationException(
                         "Không đăng nhập được Shopee (captcha/OTP hoặc sai tài khoản) — bỏ qua instance này.");
 
+                // Phase 4c: TỰ đăng nhập BigSeller đầu phiên (mint token tươi KHỚP IP proxy Brave này) nếu chưa
+                // fresh (TTL) + có mật khẩu. Chạy TRƯỚC bước nạp cookie-file: thành công → token mới nằm trong
+                // browser + xuất ra file; bước nạp cookie ngay dưới thấy "browser có token sống" nên GIỮ (không
+                // đè token cũ). Lane không tự login (fresh/khác) vẫn nạp token mới từ file → cùng IP acc nên hợp lệ.
+                await TryAutoLoginBigSellerAsync(loopToken).ConfigureAwait(false);
+
                 // Import BigSeller cookie (nếu account có cấu hình) — qua CDP local, KHÔNG qua proxy instance.
                 await ImportBigSellerCookiesIfConfiguredAsync(loopToken).ConfigureAwait(false);
 
@@ -412,6 +419,8 @@ internal sealed class BraveInstanceSession : IDisposable
                 ExtensionProgressSynced?.Invoke();
 
                 var extensionRetryCount = 0;
+                var bigSellerReloginTries = 0;          // Phase 4c: số lần tự login lại khi mất phiên giữa chừng
+                const int maxBigSellerReloginTries = 2;
                 for (var proxyAttempt = 0;
                      proxyAttempt < 4 && !loopToken.IsCancellationRequested;
                      proxyAttempt++)
@@ -477,6 +486,24 @@ internal sealed class BraveInstanceSession : IDisposable
                                 await ImportBigSellerCookiesIfConfiguredAsync(loopToken).ConfigureAwait(false);
                         }
                         proxyAttempt--;
+                        continue;
+                    }
+
+                    // Phase 4c: mất phiên BigSeller GIỮA CHỪNG (phase="needlogin") → TỰ đăng nhập lại (mint
+                    // token mới khớp IP proxy này) rồi CHẠY TIẾP từ dòng dừng, thay vì bỏ cả job. Chỉ khi có
+                    // mật khẩu + còn lượt; xoá TTL để ép login lại. `continue` tăng proxyAttempt → vòng sau
+                    // preferSuggestedResume (proxyAttempt>0) tự chạy tiếp từ dòng dừng gần nhất.
+                    if (!loopToken.IsCancellationRequested
+                        && string.Equals(_config?.RunnerPhase, "needlogin", StringComparison.OrdinalIgnoreCase)
+                        && bigSellerReloginTries < maxBigSellerReloginTries
+                        && HasBigSellerPassword())
+                    {
+                        bigSellerReloginTries++;
+                        Log($"BigSeller mất phiên giữa chừng — TỰ đăng nhập lại rồi chạy tiếp ({bigSellerReloginTries}/{maxBigSellerReloginTries})…");
+                        if (!string.IsNullOrWhiteSpace(_config?.AccountId))
+                            BigSellerSessionRegistry.Invalidate(_config!.AccountId);   // ép login lại (bỏ TTL)
+                        await TryAutoLoginBigSellerAsync(loopToken).ConfigureAwait(false);
+                        await ImportBigSellerCookiesIfConfiguredAsync(loopToken).ConfigureAwait(false);
                         continue;
                     }
 
@@ -1880,6 +1907,33 @@ internal sealed class BraveInstanceSession : IDisposable
             BigSellerCookieImporter.TryWriteCookieFile(_bigSellerCookieFile, cookies, Log);
         }
         catch { /* best-effort */ }
+    }
+
+    /// <summary>Phase 4c — ĐẦU PHIÊN: tự đăng nhập BigSeller ngay TRONG Brave scrape (khớp IP proxy) để có
+    /// token tươi. Resolve email/mật khẩu từ kho BigSeller theo <c>AccountId</c> của instance; TTL + attach
+    /// CDP + xuất token do <see cref="BigSellerAutoLogin.EnsureFreshSessionAsync"/> lo. AN TOÀN: chưa nhập mật
+    /// khẩu → im lặng bỏ qua; mọi lỗi rơi về nạp cookie-file như cũ (không phá luồng scrape).</summary>
+    /// <summary>Tk BigSeller của instance này (theo AccountId) đã nhập mật khẩu chưa — để quyết định có thử
+    /// tự đăng nhập lại khi mất phiên giữa chừng không.</summary>
+    private bool HasBigSellerPassword()
+    {
+        if (string.IsNullOrWhiteSpace(_config?.AccountId)) return false;
+        var acct = BigSellerStore.Shared.Accounts.FirstOrDefault(a => a.Id == _config.AccountId);
+        return acct is not null && !string.IsNullOrWhiteSpace(acct.Password);
+    }
+
+    private async Task TryAutoLoginBigSellerAsync(CancellationToken ct)
+    {
+        if (!_running || string.IsNullOrWhiteSpace(_config?.AccountId)) return;
+        var acct = BigSellerStore.Shared.Accounts.FirstOrDefault(a => a.Id == _config.AccountId);
+        if (acct is null || string.IsNullOrWhiteSpace(acct.Password)) return;   // chưa nhập pass → dùng cookie file như cũ
+        try
+        {
+            await BigSellerAutoLogin.EnsureFreshSessionAsync(
+                _cdpPort, _config.AccountId, acct.Email, acct.Password, _bigSellerCookieFile, Log, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex) { Log($"BigSeller auto-login (bỏ qua, dùng cookie file): {ex.Message}"); }
     }
 
     private async Task ImportBigSellerCookiesIfConfiguredAsync(CancellationToken cancellationToken)
