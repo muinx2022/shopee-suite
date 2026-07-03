@@ -74,39 +74,12 @@ internal sealed class BigSellerImportToStoreRunner : IAsyncDisposable
         catch { /* best-effort */ }
     }
 
-    /// <summary>Phase 4 — ĐẦU PHIÊN: đảm bảo có token BigSeller TƯƠI (tự mint) cho máy này. Token sync KHÔNG
-    /// scrape/import được (bị coi là phiên lạ), nên mỗi máy TỰ đăng nhập bằng credential. Trong TTL
-    /// (<see cref="BigSellerSessionRegistry"/>) thì bỏ qua (dùng lại). Chưa nhập mật khẩu → giữ hành vi cũ
-    /// (cookie file). Cần OTP (thiết bị mới) → báo để đăng nhập tay 1 lần tạo device-trust.</summary>
-    private async Task EnsureFreshLoginAsync(IPage page, CancellationToken ct)
-    {
-        if (string.IsNullOrWhiteSpace(_settings.Password))
-        {
-            _log("Chưa nhập mật khẩu BigSeller cho tk này (mục BigSeller) — bỏ auto-login, dùng cookie file như cũ.");
-            return;
-        }
-        if (BigSellerSessionRegistry.IsFresh(_settings.AccountId))
-        {
-            _log("Phiên đăng nhập còn tươi (đã tự login < TTL) — dùng lại, không login lại.");
-            return;
-        }
-        _log("Bắt đầu phiên — TỰ đăng nhập BigSeller để lấy token tươi (mỗi máy tự mint, không phụ thuộc Hub)…");
-        AutoLoginOutcome outcome;
-        try { outcome = await BigSellerAutoLogin.TryAsync(page, _settings.Email, _settings.Password, AiConfigStore.Shared.Current, _log, ct).ConfigureAwait(false); }
-        catch (OperationCanceledException) { throw; }
-        catch (Exception ex) { _log($"Auto-login lỗi: {ex.Message} — thử dùng cookie file như cũ."); return; }
-
-        if (outcome == AutoLoginOutcome.Success)
-        {
-            BigSellerSessionRegistry.MarkLoggedIn(_settings.AccountId);
-            if (_exportCookie && !string.IsNullOrWhiteSpace(_settings.BigSellerCookieFile))
-                await BigSellerCookieImporter.TryExportProfileCookiesToFileAsync(_settings.DebugPort, _settings.BigSellerCookieFile, _log).ConfigureAwait(false);
-        }
-        else if (outcome == AutoLoginOutcome.NeedsOtp)
-            _log("⚠ BigSeller đòi mã xác nhận email (thiết bị mới). Hãy đăng nhập TAY 1 lần trên máy này (Tài khoản → Open BigSeller → login → Save & close) để tạo device-trust; sau đó auto-login chạy được (không cần mã nữa).");
-        else
-            _log("Auto-login thất bại lần này — thử dùng cookie file (có thể vẫn 'login first').");
-    }
+    /// <summary>Phase 4 — ĐẦU PHIÊN: đảm bảo có token BigSeller TƯƠI (tự mint) cho máy này. Ủy thác cho
+    /// <see cref="BigSellerAutoLogin.EnsureFreshSessionAsync"/> (dùng chung với Update/Scrape).</summary>
+    private Task EnsureFreshLoginAsync(IPage page, CancellationToken ct)
+        => BigSellerAutoLogin.EnsureFreshSessionAsync(
+            page, _settings.AccountId, _settings.Email, _settings.Password,
+            _settings.BigSellerCookieFile, _settings.DebugPort, _exportCookie, _log, ct);
 
     // Nạp tập item id cần import từ sheet của shop, khoảng dòng StartRow→EndRow (giống Update, nhưng KHÔNG
     // đòi cột "Tên đã sửa" vì import không cần). Khoá file khi đọc để serialize với lúc "Update tên SP" đang ghi.

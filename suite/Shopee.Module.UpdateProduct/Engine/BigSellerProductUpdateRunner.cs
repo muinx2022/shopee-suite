@@ -284,6 +284,9 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
         var page = PickListingPage(_context)
             ?? throw new InvalidOperationException("Không tìm thấy tab BigSeller.");
         await page.BringToFrontAsync();
+        await BigSellerAutoLogin.EnsureFreshSessionAsync(   // Phase 4b: đầu phiên tự mint token tươi (mỗi máy tự login)
+            page, _settings.AccountId, _settings.Email, _settings.Password,
+            _settings.BigSellerCookieFile, _settings.DebugPort, _exportCookie, _log, ct).ConfigureAwait(false);
         if (!await GoToListingPageAsync(page, false))
             throw new InvalidOperationException("Không mở được trang Listing.");
 
