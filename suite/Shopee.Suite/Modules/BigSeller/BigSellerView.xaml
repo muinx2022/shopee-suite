@@ -100,6 +100,10 @@
                                 </StackPanel>
                             </Grid>
 
+                            <!-- Mật khẩu BigSeller (masked) — cho auto-login tự mint token mỗi máy (Phase 2). -->
+                            <TextBlock Text="Mật khẩu BigSeller (để tự đăng nhập)" Style="{StaticResource Caption}" />
+                            <PasswordBox b:PasswordBoxAssist.BoundPassword="{Binding Password, Mode=TwoWay}" Margin="0,3,0,10" />
+
                             <TextBlock Text="Workbook (Excel)" Style="{StaticResource Caption}" />
                             <Grid Margin="0,3,0,10">
                                 <Grid.ColumnDefinitions>

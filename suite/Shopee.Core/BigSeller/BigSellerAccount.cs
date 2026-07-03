@@ -10,6 +10,9 @@ public sealed class BigSellerAccount
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
     public string Label { get; set; } = "";
     public string Email { get; set; } = "";
+    /// <summary>Mật khẩu BigSeller (plain) — cho auto-login TỰ mint token mỗi máy (Phase 2, user chọn lưu text
+    /// không mã hoá). Field DÙNG CHUNG: sync qua Hub như Email → client login được mà khỏi nhập tay từng máy.</summary>
+    public string Password { get; set; } = "";
 
     /// <summary>Đường dẫn file Excel chứa dữ liệu các shop (mỗi shop 1 sheet).</summary>
     public string WorkbookPath { get; set; } = "";

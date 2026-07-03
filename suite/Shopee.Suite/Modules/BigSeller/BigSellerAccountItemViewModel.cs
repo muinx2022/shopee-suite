@@ -36,6 +36,13 @@ public sealed class BigSellerAccountItemViewModel : ObservableObject
         set { if (Model.Email != value) { Model.Email = value; OnChanged(nameof(Email), nameof(DisplayName)); Persist(); } }
     }
 
+    /// <summary>Mật khẩu BigSeller (plain) — cho auto-login tự mint token mỗi máy. Sync qua Hub như Email.</summary>
+    public string Password
+    {
+        get => Model.Password;
+        set { if (Model.Password != value) { Model.Password = value; OnPropertyChanged(); Persist(); } }
+    }
+
     public string WorkbookPath
     {
         get => Model.WorkbookPath;
