@@ -57,6 +57,7 @@ public sealed partial class FleetViewModel : ObservableObject
     [NotifyCanExecuteChangedFor(nameof(AssignManualCommand))]
     [NotifyCanExecuteChangedFor(nameof(CancelSelectedCommand))]
     [NotifyCanExecuteChangedFor(nameof(SetStateCommand))]
+    [NotifyPropertyChangedFor(nameof(HasCancelableWork))]
     private FleetQueueRow? _selectedQueue;
     public IReadOnlyList<string> PinOps { get; } = ["Scrape", "Import", "Update"];
     [ObservableProperty]
@@ -152,6 +153,11 @@ public sealed partial class FleetViewModel : ObservableObject
     // Client panel
     [ObservableProperty] private string _myRole = "—";
     public ObservableCollection<FleetMyJobRow> MyJobs { get; } = [];
+
+    // ── Tab "Log" — nhật ký nhiều máy gửi về Hub (xem tập trung, mới nhất ở trên) ──
+    public ObservableCollection<FleetLogRow> Logs { get; } = [];
+    private long _lastLogId;
+    private bool _logsRefreshing;
     public bool PauseReceiving
     {
         get => _worker?.Paused ?? false;
@@ -211,10 +217,12 @@ public sealed partial class FleetViewModel : ObservableObject
         // Tắt xoay Ghim/Huỷ khi việc đã hiện/huỷ trên snapshot (hoặc quá hạn) — TRƯỚC khi tính lại nút.
         ReconcilePinPending(f);
         ReconcileCancelPending(f);
-        // Trạng thái assignment/lease đổi sau mỗi poll → tính lại enable/disable các nút.
+        // Trạng thái assignment/lease đổi sau mỗi poll → tính lại enable/disable các nút + ẩn/hiện nút Huỷ.
         AssignManualCommand.NotifyCanExecuteChanged();
         CancelSelectedCommand.NotifyCanExecuteChanged();
         SetStateCommand.NotifyCanExecuteChanged();
+        OnPropertyChanged(nameof(HasCancelableWork));
+        _ = RefreshLogsAsync();   // kéo log mới từ Hub (tab Log)
     }
 
     /// <summary>Việc GHIM đã hiện trên bảng ("• đã xếp"/"⏳ đang chạy") cho đúng (shop,op,máy) → thôi xoay (nút vẫn
@@ -265,13 +273,19 @@ public sealed partial class FleetViewModel : ObservableObject
     // ── Tab Theo dõi ──────────────────────────────────────────────────────────
     private void BuildMonitor(FleetSnapshot f)
     {
-        Rows.Clear();
+        // Gom tất cả dòng KÈM mốc thời gian rồi xếp MỚI NHẤT LÊN ĐẦU (việc/nhịp gần đây nhất ở trên; việc cũ
+        // trôi xuống cuối). Lease đang chạy có heartbeat ~bây giờ nên tự nằm trên cùng.
+        var rows = new List<(FleetRow Row, DateTimeOffset At)>();
         foreach (var l in f.Leases)
-            Rows.Add(MakeRow(l.BigsellerId, l.ShopId, l.Op, l.Hostname, "⏳ đang chạy", l.HeartbeatAt, true));
+            rows.Add((MakeRow(l.BigsellerId, l.ShopId, l.Op, l.Hostname, "⏳ đang chạy", l.HeartbeatAt, true), l.HeartbeatAt));
 
         var leasedKeys = f.Leases.Select(l => l.Key).ToHashSet(StringComparer.Ordinal);
         foreach (var g in f.Ledger.Where(g => !leasedKeys.Contains(g.Key) && g.Status is not ("idle" or "")))
-            Rows.Add(MakeRow(g.BigsellerId, g.ShopId, g.Op, g.LastHostname, StateIcon(g.Status), g.UpdatedAt, false));
+            rows.Add((MakeRow(g.BigsellerId, g.ShopId, g.Op, g.LastHostname, StateIcon(g.Status), g.UpdatedAt, false), g.UpdatedAt));
+
+        Rows.Clear();
+        foreach (var r in rows.OrderByDescending(x => x.At))
+            Rows.Add(r.Row);
 
         if (HubServerConfigStore.Shared.Current.Enabled)
             Machines = f.Machines.Count == 0 ? "🖥 (chưa có máy nào kết nối)"
@@ -420,18 +434,20 @@ public sealed partial class FleetViewModel : ObservableObject
         Refresh();
     }
 
-    /// <summary>Cho Ghim khi: có Hub + đã chọn shop + chọn máy, và (đúng op + shop + ĐÚNG MÁY đó) CHƯA có việc
-    /// đang chạy/đã xếp. Đang gửi/chờ xác nhận (PinBusy) → tắt nút để khỏi ghim trùng.</summary>
+    /// <summary>Shop đang chọn CÓ ít nhất 1 việc queued/running → hiện nút Huỷ, đồng thời KHOÁ nút Ghim (2 nút
+    /// loại trừ nhau: đang có việc thì chỉ Huỷ được; không có việc thì chỉ Ghim được).</summary>
+    public bool HasCancelableWork =>
+        CoordinationRuntime.Hub is { } hub && SelectedQueue is { } row
+        && hub.CurrentFleet.Assignments.Any(a =>
+            a.BigsellerId == row.BigsellerId && a.ShopId == row.ShopId && a.Status is "queued" or "running");
+
+    /// <summary>Cho Ghim khi: có Hub + đã chọn shop + chọn máy, và shop đó CHƯA có việc chạy/xếp nào (đang có
+    /// việc → chỉ cho Huỷ). Đang gửi/chờ xác nhận (PinBusy) → tắt nút để khỏi ghim trùng.</summary>
     private bool CanAssignManual()
     {
         if (PinBusy) return false;
-        if (CoordinationRuntime.Hub is not { } hub || SelectedQueue is not { } row || PinMachine is not { } m) return false;
-        var op = PinOp.ToLowerInvariant();
-        var alreadyForThisMachine = hub.CurrentFleet.Assignments.Any(a =>
-            a.BigsellerId == row.BigsellerId && a.ShopId == row.ShopId && a.Op == op
-            && a.Status is "queued" or "running"
-            && (a.TargetMachineId == m.MachineId || a.ClaimedByMachineId == m.MachineId));
-        return !alreadyForThisMachine;
+        if (CoordinationRuntime.Hub is null || SelectedQueue is null || PinMachine is null) return false;
+        return !HasCancelableWork;
     }
 
     /// <summary>Huỷ mọi việc đang xếp/chạy của shop đang chọn.</summary>
@@ -454,15 +470,9 @@ public sealed partial class FleetViewModel : ObservableObject
         Refresh();
     }
 
-    /// <summary>Cho Huỷ khi: có Hub + đã chọn shop, và shop đó CÓ ít nhất 1 việc đang chạy/đã xếp. Chưa chạy gì
-    /// hoặc đang chờ huỷ (CancelBusy) → tắt nút.</summary>
-    private bool CanCancelSelected()
-    {
-        if (CancelBusy) return false;
-        if (CoordinationRuntime.Hub is not { } hub || SelectedQueue is not { } row) return false;
-        return hub.CurrentFleet.Assignments.Any(a =>
-            a.BigsellerId == row.BigsellerId && a.ShopId == row.ShopId && a.Status is "queued" or "running");
-    }
+    /// <summary>Cho Huỷ khi shop đang chọn CÓ việc chạy/xếp (<see cref="HasCancelableWork"/>) và không đang chờ
+    /// huỷ (CancelBusy).</summary>
+    private bool CanCancelSelected() => !CancelBusy && HasCancelableWork;
 
     /// <summary>Đặt TAY trạng thái 1 op của shop đang chọn (ghi ledger). arg = "op:status", vd "scrape:idle",
     /// "import:completed". status: completed = ✓ xong · idle = chưa chạy (reset → scrape giao + chạy lại từ
@@ -765,6 +775,51 @@ public sealed partial class FleetViewModel : ObservableObject
         }
     }
 
+    // ── Tab "Log" — kéo log tập trung từ Hub theo mỗi nhịp poll ─────────────────
+    private async Task RefreshLogsAsync()
+    {
+        var client = CoordinationRuntime.Client;
+        if (client is null || _logsRefreshing) return;
+        _logsRefreshing = true;
+        try
+        {
+            var entries = await client.LogsAsync(_lastLogId, 300);
+            if (entries.Count == 0) return;
+            void Apply()
+            {
+                foreach (var e in entries)   // tăng dần → Insert(0) đưa MỚI NHẤT lên đầu
+                {
+                    Logs.Insert(0, MakeLogRow(e));
+                    if (e.Id > _lastLogId) _lastLogId = e.Id;
+                }
+                while (Logs.Count > 1000) Logs.RemoveAt(Logs.Count - 1);   // giữ 1000 dòng gần nhất
+            }
+            var d = Application.Current?.Dispatcher;
+            if (d is null || d.CheckAccess()) Apply(); else d.Invoke(Apply);
+        }
+        catch { }
+        finally { _logsRefreshing = false; }
+    }
+
+    private static FleetLogRow MakeLogRow(LogEntry e) => new()
+    {
+        Time = e.Ts.ToLocalTime().ToString("HH:mm:ss"),
+        Machine = e.Hostname,
+        Text = e.Text,
+        Brush = e.Level switch { "ok" => DoneBrush, "warn" => WarnBrush, "error" => FailBrush, _ => IdleBrush },
+    };
+
+    /// <summary>Xoá toàn bộ log trên Hub + lưới (làm sạch trước 1 mẻ theo dõi mới).</summary>
+    [RelayCommand]
+    private async Task ClearLogs()
+    {
+        var client = CoordinationRuntime.Client;
+        if (client is null) return;
+        try { await client.ClearLogsAsync(); } catch { }
+        Logs.Clear();
+        _lastLogId = 0;
+    }
+
     // ── Tiện ích chung ──────────────────────────────────────────────────────────
     private static FleetRow MakeRow(string bsId, string shopId, string op, string host, string state, DateTimeOffset at, bool running)
     {
@@ -953,6 +1008,15 @@ public sealed partial class FleetSearchLinkRow : ObservableObject
     { Link = link; _onSelectedChanged = onSelectedChanged; }
 
     partial void OnIsSelectedChanged(bool value) => _onSelectedChanged();
+}
+
+/// <summary>1 dòng log tập trung (nhiều máy gửi về Hub) hiển thị ở tab Log.</summary>
+public sealed class FleetLogRow
+{
+    public string Time { get; init; } = "";
+    public string Machine { get; init; } = "";
+    public string Text { get; init; } = "";
+    public Brush Brush { get; init; } = Brushes.Gray;
 }
 
 /// <summary>1 việc Hub giao cho máy này (bản client).</summary>

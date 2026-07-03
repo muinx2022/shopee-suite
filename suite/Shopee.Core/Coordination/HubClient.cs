@@ -116,6 +116,13 @@ public sealed class HubClient
         r.EnsureSuccessStatusCode();
     }
 
+    // ── Log tập trung (tab Log gom log nhiều máy) ──
+    public Task AppendLogAsync(AppendLogRequest req, CancellationToken ct = default) => PostAsync("/logs", req, ct);
+    public async Task<List<LogEntry>> LogsAsync(long after, int max, CancellationToken ct = default)
+        => await _http.GetFromJsonAsync<List<LogEntry>>($"/logs?after={after}&max={max}", ct) ?? [];
+    public async Task ClearLogsAsync(CancellationToken ct = default)
+    { var r = await _http.PostAsync("/logs/clear", null, ct); r.EnsureSuccessStatusCode(); }
+
     // ── Client báo acc Shopee lỗi/captcha ──
     public Task ReportErroredAccountAsync(AccountErrorRequest req, CancellationToken ct = default) => PostAsync("/accounts/errored", req, ct);
     public async Task<List<AccountError>> ErroredAccountsAsync(CancellationToken ct = default)

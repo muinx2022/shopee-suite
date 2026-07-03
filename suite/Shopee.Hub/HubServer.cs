@@ -130,6 +130,11 @@ public sealed class HubServer
         app.MapGet("/search-products/count", () => Results.Json(db.SearchProductCount()));
         app.MapPost("/search-products/clear", () => { db.ClearSearchProducts(); return Results.Ok(); });
 
+        // ── Log tập trung (nhiều máy gửi → Hub gom, tab Log xem) ──
+        app.MapPost("/logs", (AppendLogRequest? r) => { if (r is null) return Results.BadRequest(); db.AppendLog(r); return Results.Ok(); });
+        app.MapGet("/logs", (long? after, int? max) => Results.Json(db.GetLogs(after ?? 0, Math.Clamp(max ?? 300, 1, 1000))));
+        app.MapPost("/logs/clear", () => { db.ClearLogs(); return Results.Ok(); });
+
         // ── Client báo acc Shopee lỗi/captcha ──
         app.MapPost("/accounts/errored", (AccountErrorRequest? r) => { if (r is null) return Results.BadRequest(); db.ReportAccountError(r); return Results.Ok(); });
         app.MapGet("/accounts/errored", () => Results.Json(db.AllAccountErrors()));

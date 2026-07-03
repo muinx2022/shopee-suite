@@ -83,7 +83,9 @@ CREATE TABLE IF NOT EXISTS assignments(
 CREATE TABLE IF NOT EXISTS search_products(
   item_id INTEGER PRIMARY KEY, json TEXT, machine_id TEXT, source_file TEXT, updated_at TEXT);
 CREATE TABLE IF NOT EXISTS account_errors(
-  account_id TEXT PRIMARY KEY, machine_id TEXT, hostname TEXT, reason TEXT, captcha_url TEXT, status TEXT, reported_at TEXT);");
+  account_id TEXT PRIMARY KEY, machine_id TEXT, hostname TEXT, reason TEXT, captcha_url TEXT, status TEXT, reported_at TEXT);
+CREATE TABLE IF NOT EXISTS logs(
+  id INTEGER PRIMARY KEY AUTOINCREMENT, machine_id TEXT, hostname TEXT, ts TEXT, level TEXT, text TEXT);");
 
     // ── Leases (khoá việc theo shop+op) ─────────────────────────────────────────
     public LeaseAcquireResponse AcquireLease(LeaseAcquireRequest r)
@@ -851,6 +853,47 @@ ON CONFLICT(item_id) DO UPDATE SET json=$j, machine_id=$m, source_file=$s, updat
     }
 
     public void ClearSearchProducts() { lock (_gate) ExecRaw("DELETE FROM search_products;"); }
+
+    // ── Log tập trung (nhiều máy gửi → Hub gom; giữ ~3000 dòng mới nhất) ──────────
+    public void AppendLog(AppendLogRequest r)
+    {
+        if (string.IsNullOrWhiteSpace(r?.Text)) return;
+        lock (_gate)
+        {
+            using (var c = _conn.CreateCommand())
+            {
+                c.CommandText = "INSERT INTO logs(machine_id,hostname,ts,level,text) VALUES($m,$h,$ts,$lv,$tx)";
+                c.Parameters.AddWithValue("$m", r.MachineId ?? "");
+                c.Parameters.AddWithValue("$h", r.Hostname ?? "");
+                c.Parameters.AddWithValue("$ts", Iso(DateTimeOffset.UtcNow));
+                c.Parameters.AddWithValue("$lv", string.IsNullOrWhiteSpace(r.Level) ? "info" : r.Level);
+                c.Parameters.AddWithValue("$tx", r.Text);
+                c.ExecuteNonQuery();
+            }
+            ExecRaw("DELETE FROM logs WHERE id <= (SELECT MAX(id) FROM logs) - 3000;");   // giữ 3000 mới nhất
+        }
+    }
+
+    /// <summary>Log cho tab Log. after&lt;=0 → 'max' dòng MỚI NHẤT; after&gt;0 → các dòng id&gt;after (tăng dần).</summary>
+    public List<LogEntry> GetLogs(long after, int max)
+    {
+        lock (_gate)
+        {
+            var list = new List<LogEntry>();
+            using var c = _conn.CreateCommand();
+            c.CommandText = after > 0
+                ? "SELECT id,machine_id,hostname,ts,level,text FROM logs WHERE id > $a ORDER BY id ASC LIMIT $n"
+                : "SELECT id,machine_id,hostname,ts,level,text FROM (SELECT * FROM logs ORDER BY id DESC LIMIT $n) ORDER BY id ASC";
+            c.Parameters.AddWithValue("$a", after);
+            c.Parameters.AddWithValue("$n", max);
+            using var rd = c.ExecuteReader();
+            while (rd.Read())
+                list.Add(new LogEntry { Id = rd.GetInt64(0), MachineId = S(rd, 1), Hostname = S(rd, 2), Ts = D(rd, 3), Level = S(rd, 4), Text = S(rd, 5) });
+            return list;
+        }
+    }
+
+    public void ClearLogs() { lock (_gate) ExecRaw("DELETE FROM logs;"); }
 
     // ── Client báo acc Shopee lỗi/captcha (Hub xem + quyết giữ/xóa) ───────────────
     public void ReportAccountError(AccountErrorRequest r)

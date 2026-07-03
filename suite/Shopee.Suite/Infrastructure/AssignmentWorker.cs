@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Threading;
+using Shopee.Core.BigSeller;
 using Shopee.Core.Coordination;
 using Shopee.Suite.Modules.Scrape;
 using Shopee.Suite.Modules.Search;
@@ -125,7 +126,7 @@ public sealed class AssignmentWorker : IDisposable
         // BeginInvoke (không Invoke) → LaunchCore không chạy trong nested modal pump nếu lỡ có dialog đang mở.
         Application.Current?.Dispatcher.BeginInvoke(() =>
         {
-            if (LaunchCore(a)) { _liveIds[a.Id] = 1; _launchAttempts.TryRemove(a.Id, out _); }   // đã chạy → xoá bộ đếm thử lại
+            if (LaunchCore(a)) { _liveIds[a.Id] = 1; _launchAttempts.TryRemove(a.Id, out _); HubLog.Info($"▶ Nhận {Describe(a)}"); }   // đã chạy → xoá bộ đếm thử lại
             else { _inflight.Remove(a.Id); _ = RequeueOrFailAsync(hub, a, "không khởi động được trên máy này"); }
         });
     }
@@ -217,6 +218,19 @@ public sealed class AssignmentWorker : IDisposable
         try { return JsonSerializer.Deserialize<SearchJobPayload>(json); } catch { return null; }
     }
 
+    /// <summary>Mô tả ngắn 1 việc cho dòng log tập trung: "Import · Shop (Tài khoản)" / "Search · file".</summary>
+    private static string Describe(Assignment a)
+    {
+        if (a.Op == MachineRoles.Search)
+            return $"Search · {(string.IsNullOrWhiteSpace(a.Sheet) ? "(file Hub giao)" : a.Sheet)}";
+        var acct = BigSellerStore.Shared.Accounts.FirstOrDefault(x => x.Id == a.BigsellerId);
+        var shop = acct?.Shops.FirstOrDefault(s => s.Id == a.ShopId);
+        var op = a.Op switch { "scrape" => "Scrape", "import" => "Import", "update" => "Update", "rewrite" => "Tên SP", _ => a.Op };
+        var acctName = acct?.DisplayName ?? (a.BigsellerId.Length > 8 ? a.BigsellerId[..8] : a.BigsellerId);
+        var shopName = shop?.DisplayName ?? (a.ShopId.Length > 8 ? a.ShopId[..8] : a.ShopId);
+        return $"{op} · {shopName} ({acctName})";
+    }
+
     /// <summary>Cờ "import từ tab Đã nhận" Hub ghim trong payload việc import: non-null → ĐÈ cấu hình shop lượt
     /// này; null (payload rỗng, vd việc tự-động) → client dùng cấu hình của nó.</summary>
     private static bool? ImportFromClaimedTab(Assignment a)
@@ -236,6 +250,7 @@ public sealed class AssignmentWorker : IDisposable
             if (st == "canceled")
             {
                 StopLocal(f.A);
+                HubLog.Warn($"✖ Huỷ {Describe(f.A)}");
                 _liveIds.TryRemove(f.A.Id, out _);
                 _launchAttempts.TryRemove(f.A.Id, out _);
                 _inflight.Remove(f.A.Id);
@@ -269,6 +284,7 @@ public sealed class AssignmentWorker : IDisposable
                     _ => "không khởi động được (kho acc trống / bị máy khác giữ)",
                 };
                 await hub.ReportAssignmentAsync(f.A.Id, searchOk ? "done" : "failed", searchErr);
+                if (searchOk) HubLog.Ok($"✔ Xong {Describe(f.A)}"); else HubLog.Warn($"■ {Describe(f.A)} — {searchErr}");
                 _liveIds.TryRemove(f.A.Id, out _);
                 _inflight.Remove(f.A.Id);
                 continue;
@@ -277,6 +293,8 @@ public sealed class AssignmentWorker : IDisposable
             var ok = status == "completed";
             await hub.ReportAssignmentAsync(f.A.Id, ok ? "done" : "failed",
                 ok ? null : (f.SeenRunning ? (status ?? "dừng dở") : "không khởi động được (có thể bị chặn khoá)"));
+            if (ok) HubLog.Ok($"✔ Xong {Describe(f.A)}");
+            else HubLog.Warn($"■ {Describe(f.A)} — {(f.SeenRunning ? (status ?? "dừng dở") : "không khởi động được")}");
 
             if (AutoSyncHandoff && f.A.Op == "scrape" && ok)
             { try { _ = CoordinationRuntime.ConfigSync?.PushAsync(); } catch { } }

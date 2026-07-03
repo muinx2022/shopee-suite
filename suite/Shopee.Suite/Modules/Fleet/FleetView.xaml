@@ -150,50 +150,69 @@
                         </Border>
 
                         <!-- Bước 2: Giao việc cho 1 máy (LUỒNG CHÍNH — thủ công) -->
-                        <Border Grid.Row="1" Background="{StaticResource SubtleBrush}" CornerRadius="8" Padding="12,10" Margin="0,10,0,0">
+                        <Border Grid.Row="1" Background="{StaticResource SubtleBrush}" CornerRadius="8" Padding="14,12" Margin="0,10,0,0">
                             <StackPanel>
-                                <TextBlock Text="Bước 2 — giao việc cho 1 máy" Style="{StaticResource H2}" Margin="0,0,0,8" />
-                                <WrapPanel Orientation="Horizontal">
-                                    <TextBlock Text="Việc" VerticalAlignment="Center" FontWeight="SemiBold" Margin="0,0,8,0" />
-                                    <ComboBox ItemsSource="{Binding PinOps}" SelectedItem="{Binding PinOp}" Width="120" Margin="0,0,8,0" />
-                                    <!-- Chỉ hiện khi việc = Import: lấy SP từ tab "Đã nhận" thay vì danh sách crawl. -->
-                                    <CheckBox IsChecked="{Binding PinImportFromClaimedTab}" VerticalAlignment="Center" Margin="0,0,12,0"
-                                              Content="Import từ tab Đã nhận"
-                                              ToolTip="Khi chạy: mở trang Import, chọn tab &quot;Đã nhận&quot; rồi import theo logic sẵn có."
-                                              Visibility="{Binding IsPinImport, Converter={StaticResource BoolToVis}}" />
-                                    <TextBlock Text="cho máy" VerticalAlignment="Center" Margin="0,0,8,0" />
-                                    <!-- Hiện chấm 🟢/🟡/⚪ để khỏi ghim nhầm máy đang TẮT (việc sẽ nằm "đã xếp" chờ mãi). -->
-                                    <ComboBox ItemsSource="{Binding MachineRows}" SelectedItem="{Binding PinMachine}"
-                                              Width="200" Margin="0,0,12,0">
-                                        <ComboBox.ItemTemplate>
-                                            <DataTemplate>
-                                                <StackPanel Orientation="Horizontal" ToolTip="{Binding Online}">
-                                                    <TextBlock Text="{Binding Dot}" Margin="0,0,6,0" />
-                                                    <TextBlock Text="{Binding Name}" />
-                                                </StackPanel>
-                                            </DataTemplate>
-                                        </ComboBox.ItemTemplate>
-                                    </ComboBox>
-                                    <TextBlock Text="dòng" VerticalAlignment="Center" Margin="0,0,6,0" />
-                                    <TextBox Width="58" Margin="0,0,4,0" VerticalContentAlignment="Center"
-                                             Text="{Binding PinStartRow}" ToolTip="Từ dòng (0 = để client dùng cấu hình của nó)" />
-                                    <TextBlock Text="→" VerticalAlignment="Center" Margin="0,0,4,0" />
-                                    <TextBox Width="58" Margin="0,0,12,0" VerticalContentAlignment="Center"
-                                             Text="{Binding PinEndRow}" ToolTip="Đến dòng (0 = hết)" />
+                                <TextBlock Text="Bước 2 — giao việc cho 1 máy" Style="{StaticResource H2}" Margin="0,0,0,10" />
+
+                                <!-- Hàng chọn: mỗi cụm có nhãn nhỏ phía trên → canh đều, đỡ rối -->
+                                <StackPanel Orientation="Horizontal">
+                                    <!-- Việc (+ tuỳ chọn con, chỉ hiện khi Import → không xô ngang các cụm khác) -->
+                                    <StackPanel VerticalAlignment="Top" Margin="0,0,22,0">
+                                        <TextBlock Text="Việc" Style="{StaticResource Caption}" Margin="0,0,0,3" />
+                                        <ComboBox ItemsSource="{Binding PinOps}" SelectedItem="{Binding PinOp}" Width="132" />
+                                        <CheckBox IsChecked="{Binding PinImportFromClaimedTab}" Margin="1,7,0,0"
+                                                  Content="Từ tab &quot;Đã nhận&quot;"
+                                                  ToolTip="Khi chạy: mở trang Import, chọn tab &quot;Đã nhận&quot; rồi import theo logic sẵn có."
+                                                  Visibility="{Binding IsPinImport, Converter={StaticResource BoolToVis}}" />
+                                    </StackPanel>
+
+                                    <!-- Máy đích (chấm 🟢/🟡/⚪ để khỏi ghim nhầm máy đang tắt → việc nằm "đã xếp" chờ mãi) -->
+                                    <StackPanel VerticalAlignment="Top" Margin="0,0,22,0">
+                                        <TextBlock Text="Cho máy" Style="{StaticResource Caption}" Margin="0,0,0,3" />
+                                        <ComboBox ItemsSource="{Binding MachineRows}" SelectedItem="{Binding PinMachine}" Width="220">
+                                            <ComboBox.ItemTemplate>
+                                                <DataTemplate>
+                                                    <StackPanel Orientation="Horizontal" ToolTip="{Binding Online}">
+                                                        <TextBlock Text="{Binding Dot}" Margin="0,0,6,0" />
+                                                        <TextBlock Text="{Binding Name}" />
+                                                    </StackPanel>
+                                                </DataTemplate>
+                                            </ComboBox.ItemTemplate>
+                                        </ComboBox>
+                                    </StackPanel>
+
+                                    <!-- Khoảng dòng -->
+                                    <StackPanel VerticalAlignment="Top">
+                                        <TextBlock Text="Dòng (0 = theo cấu hình máy)" Style="{StaticResource Caption}" Margin="0,0,0,3" />
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBox Width="58" VerticalContentAlignment="Center"
+                                                     Text="{Binding PinStartRow}" ToolTip="Từ dòng (0 = để client dùng cấu hình của nó)" />
+                                            <TextBlock Text="→" VerticalAlignment="Center" Margin="8,0,8,0" />
+                                            <TextBox Width="58" VerticalContentAlignment="Center"
+                                                     Text="{Binding PinEndRow}" ToolTip="Đến dòng (0 = hết)" />
+                                        </StackPanel>
+                                    </StackPanel>
+                                </StackPanel>
+
+                                <!-- Ghim + Huỷ đứng CẠNH nhau. Huỷ chỉ hiện khi shop đang chọn CÓ việc chạy/xếp;
+                                     lúc đó nút Ghim bị khoá (2 nút loại trừ nhau: đang có việc → chỉ Huỷ). -->
+                                <StackPanel Orientation="Horizontal" Margin="0,16,0,0">
                                     <Button Content="📌  Ghim cho máy này" Command="{Binding AssignManualCommand}"
-                                            Style="{StaticResource SuccessButton}" Margin="0,0,8,0" />
+                                            Style="{StaticResource SuccessButton}" MinWidth="160" />
                                     <TextBlock Style="{StaticResource SpinnerText}"
                                                Visibility="{Binding PinBusy, Converter={StaticResource BoolToVis}}">
                                         <TextBlock.RenderTransform><RotateTransform Angle="0" /></TextBlock.RenderTransform>
                                     </TextBlock>
                                     <Button Content="✖  Huỷ việc của shop đang chọn" Command="{Binding CancelSelectedCommand}"
-                                            Style="{StaticResource DangerButton}" Margin="8,0,0,0" />
+                                            Style="{StaticResource DangerButton}" Margin="12,0,0,0"
+                                            Visibility="{Binding HasCancelableWork, Converter={StaticResource BoolToVis}}" />
                                     <TextBlock Style="{StaticResource SpinnerText}"
                                                Visibility="{Binding CancelBusy, Converter={StaticResource BoolToVis}}">
                                         <TextBlock.RenderTransform><RotateTransform Angle="0" /></TextBlock.RenderTransform>
                                     </TextBlock>
-                                </WrapPanel>
-                                <TextBlock Text="{Binding ActionStatus}" Margin="0,8,0,0" TextWrapping="Wrap"
+                                </StackPanel>
+
+                                <TextBlock Text="{Binding ActionStatus}" Margin="0,12,0,0" TextWrapping="Wrap"
                                            FontWeight="SemiBold" />
                             </StackPanel>
                         </Border>
@@ -526,6 +545,39 @@
                                Margin="0,48,0,0" HorizontalAlignment="Center" TextAlignment="Center"
                                Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap"
                                Text="Chưa bật đồng bộ Hub trên máy này.&#x0a;Vào Cài đặt → Đồng bộ nhiều máy để bật Hub." />
+                </Grid>
+            </TabItem>
+
+            <!-- ══════════ TAB LOG (nhật ký nhiều máy gửi về Hub) ══════════ -->
+            <TabItem Header="Log">
+                <Grid Margin="0,10,0,0">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <DockPanel Grid.Row="0" Margin="0,0,0,8">
+                        <Button DockPanel.Dock="Right" Content="🗑  Xoá log" Command="{Binding ClearLogsCommand}"
+                                Style="{StaticResource DangerButton}" />
+                        <TextBlock VerticalAlignment="Center" Style="{StaticResource Caption}"
+                                   Text="Nhật ký từ tất cả các máy (client gửi về Hub) — mới nhất ở trên." />
+                    </DockPanel>
+                    <DataGrid Grid.Row="1" ItemsSource="{Binding Logs}" AutoGenerateColumns="False" IsReadOnly="True"
+                              HeadersVisibility="Column" GridLinesVisibility="Horizontal" CanUserAddRows="False"
+                              Background="Transparent" BorderThickness="0" RowHeaderWidth="0">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Thời gian" Binding="{Binding Time}" Width="90" />
+                            <DataGridTextColumn Header="Máy" Binding="{Binding Machine}" Width="150" />
+                            <DataGridTextColumn Header="Nội dung" Binding="{Binding Text}" Width="*">
+                                <DataGridTextColumn.ElementStyle>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Foreground" Value="{Binding Brush}" />
+                                        <Setter Property="FontWeight" Value="SemiBold" />
+                                        <Setter Property="TextWrapping" Value="Wrap" />
+                                    </Style>
+                                </DataGridTextColumn.ElementStyle>
+                            </DataGridTextColumn>
+                        </DataGrid.Columns>
+                    </DataGrid>
                 </Grid>
             </TabItem>
         </TabControl>

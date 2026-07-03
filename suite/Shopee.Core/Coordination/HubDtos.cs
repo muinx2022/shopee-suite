@@ -134,6 +134,18 @@ public sealed class SearchJobPayload
 public sealed record SearchProductItem(long ItemId, string Json);
 public sealed record SearchProductsPushRequest(string MachineId, string SourceFile, List<SearchProductItem> Products);
 
+// ── Log tập trung (client gửi 1 dòng lên Hub → tab Log xem log nhiều máy) ──────
+public sealed record AppendLogRequest(string MachineId, string Hostname, string Level, string Text);
+public sealed class LogEntry
+{
+    public long Id { get; set; }
+    public string MachineId { get; set; } = "";
+    public string Hostname { get; set; } = "";
+    public DateTimeOffset Ts { get; set; }
+    public string Level { get; set; } = "info";   // info | ok | warn | error
+    public string Text { get; set; } = "";
+}
+
 // ── Client báo acc Shopee dính captcha/lỗi về Hub (Hub xem + quyết giữ/xóa) ────
 /// <summary>Client báo 1 acc Shopee bị captcha/lỗi. Status: "captcha" (vừa dính, đang tự sửa) | "failed"
 /// (client không sửa được → Hub quyết). Sửa được thì client gọi clear (gỡ báo).</summary>
