@@ -4,6 +4,7 @@ public sealed class BigSellerAccountConfig
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
     public string Email { get; set; } = "";
+    public string Password { get; set; } = "";
     public string WorkbookPath { get; set; } = "";
     public string BigSellerCookieFile { get; set; } = "";
     public List<ShopConfig> Shops { get; set; } = [];

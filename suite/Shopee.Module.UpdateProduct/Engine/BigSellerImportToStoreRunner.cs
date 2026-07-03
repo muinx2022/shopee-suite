@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text.Json;
 using ClosedXML.Excel;
 using Microsoft.Playwright;
+using Shopee.Core.Ai;
 using Shopee.Core.BigSeller;
 using Shopee.Core.Browser;
 
@@ -71,6 +72,40 @@ internal sealed class BigSellerImportToStoreRunner : IAsyncDisposable
                 _settings.DebugPort, _settings.BigSellerCookieFile!, _log, ct).ConfigureAwait(false);
         }
         catch { /* best-effort */ }
+    }
+
+    /// <summary>Phase 4 — ĐẦU PHIÊN: đảm bảo có token BigSeller TƯƠI (tự mint) cho máy này. Token sync KHÔNG
+    /// scrape/import được (bị coi là phiên lạ), nên mỗi máy TỰ đăng nhập bằng credential. Trong TTL
+    /// (<see cref="BigSellerSessionRegistry"/>) thì bỏ qua (dùng lại). Chưa nhập mật khẩu → giữ hành vi cũ
+    /// (cookie file). Cần OTP (thiết bị mới) → báo để đăng nhập tay 1 lần tạo device-trust.</summary>
+    private async Task EnsureFreshLoginAsync(IPage page, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(_settings.Password))
+        {
+            _log("Chưa nhập mật khẩu BigSeller cho tk này (mục BigSeller) — bỏ auto-login, dùng cookie file như cũ.");
+            return;
+        }
+        if (BigSellerSessionRegistry.IsFresh(_settings.AccountId))
+        {
+            _log("Phiên đăng nhập còn tươi (đã tự login < TTL) — dùng lại, không login lại.");
+            return;
+        }
+        _log("Bắt đầu phiên — TỰ đăng nhập BigSeller để lấy token tươi (mỗi máy tự mint, không phụ thuộc Hub)…");
+        AutoLoginOutcome outcome;
+        try { outcome = await BigSellerAutoLogin.TryAsync(page, _settings.Email, _settings.Password, AiConfigStore.Shared.Current, _log, ct).ConfigureAwait(false); }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex) { _log($"Auto-login lỗi: {ex.Message} — thử dùng cookie file như cũ."); return; }
+
+        if (outcome == AutoLoginOutcome.Success)
+        {
+            BigSellerSessionRegistry.MarkLoggedIn(_settings.AccountId);
+            if (_exportCookie && !string.IsNullOrWhiteSpace(_settings.BigSellerCookieFile))
+                await BigSellerCookieImporter.TryExportProfileCookiesToFileAsync(_settings.DebugPort, _settings.BigSellerCookieFile, _log).ConfigureAwait(false);
+        }
+        else if (outcome == AutoLoginOutcome.NeedsOtp)
+            _log("⚠ BigSeller đòi mã xác nhận email (thiết bị mới). Hãy đăng nhập TAY 1 lần trên máy này (Tài khoản → Open BigSeller → login → Save & close) để tạo device-trust; sau đó auto-login chạy được (không cần mã nữa).");
+        else
+            _log("Auto-login thất bại lần này — thử dùng cookie file (có thể vẫn 'login first').");
     }
 
     // Nạp tập item id cần import từ sheet của shop, khoảng dòng StartRow→EndRow (giống Update, nhưng KHÔNG
@@ -184,6 +219,7 @@ internal sealed class BigSellerImportToStoreRunner : IAsyncDisposable
         AttachApiCapture(page);   // bắt pageList.json để đọc item id (DOM không có id)
 
         await page.BringToFrontAsync();
+        await EnsureFreshLoginAsync(page, cancellationToken).ConfigureAwait(false);   // Phase 4: đầu phiên tự mint token tươi
         _log($"Crawl URL: {crawlUrl}");
         if (!await BigSellerCrawlHelper.GoToCrawlPageAsync(page, forceReload: true, targetUrl: crawlUrl, log: _log))
             throw new InvalidOperationException("Không mở được Crawl List.");

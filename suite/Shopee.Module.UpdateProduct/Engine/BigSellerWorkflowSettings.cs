@@ -8,6 +8,10 @@ internal sealed record BigSellerWorkflowSettings
     public int DebugPort { get; init; }
     public string ImportProfileDir { get; init; } = "";
     public int ImportDebugPort { get; init; }
+    // Cho auto-login tự mint token (Phase 4) — mỗi máy tự đăng nhập bằng credential này.
+    public string AccountId { get; init; } = "";
+    public string Email { get; init; } = "";
+    public string Password { get; init; } = "";
     public string ShopName { get; init; } = "";
     public string WorkbookPath { get; init; } = "";
     public string DataSheet { get; init; } = "";

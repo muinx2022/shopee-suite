@@ -368,7 +368,8 @@ public sealed partial class UpdateProductViewModel : ObservableObject
             s.BigSellerCrawlUrl, fromClaimedTab,
             1, t.UpdateWorkers, t.ListingReloadSeconds, ai.OpenAiApiKey,   // Import LUÔN 1 lane (1 process)
             s.ColumnMap.LinkColumn, s.ColumnMap.PriceColumn, s.ColumnMap.SkuColumn,
-            s.ColumnMap.ItemIdColumn, s.ColumnMap.ProductNameColumn, s.ColumnMap.RewrittenNameColumn);
+            s.ColumnMap.ItemIdColumn, s.ColumnMap.ProductNameColumn, s.ColumnMap.RewrittenNameColumn,
+            a.Password);
     }
 
     private async Task RunOneAsync(

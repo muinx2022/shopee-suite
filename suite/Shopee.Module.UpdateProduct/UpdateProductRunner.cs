@@ -13,7 +13,8 @@ public sealed record UpdateProductContext(
     int ImportMaxProcess, int UpdateMaxProcess, int ListingReloadSeconds,
     string OpenAiApiKey = "",
     int LinkColumn = 1, int PriceColumn = 3, int SkuColumn = 4,
-    int ItemIdColumn = 5, int ProductNameColumn = 6, int RewrittenNameColumn = 7);
+    int ItemIdColumn = 5, int ProductNameColumn = 6, int RewrittenNameColumn = 7,
+    string Password = "");
 
 /// <summary>
 /// Facade công khai bọc engine update-product. 3 workflow (TẤT CẢ C#, không còn Python):
@@ -47,6 +48,7 @@ public sealed class UpdateProductRunner
                 {
                     Id = ctx.AccountId,
                     Email = ctx.Email,
+                    Password = ctx.Password,
                     WorkbookPath = ctx.WorkbookPath,
                     BigSellerCookieFile = ctx.CookieFile,
                     Shops =
