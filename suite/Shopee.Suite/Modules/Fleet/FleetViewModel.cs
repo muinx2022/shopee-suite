@@ -212,7 +212,7 @@ public sealed partial class FleetViewModel : ObservableObject
 
         var f = hub.CurrentFleet;
         BuildMonitor(f);
-        if (IsHubBoard) { SyncMachines(f); BuildQueue(f); UpdateSearchRows(f); }
+        if (IsHubBoard) { SyncMachines(f); BuildQueue(f); UpdateSearchRows(f); UpdateMachinePinnability(f); }
         if (IsClientPanel) BuildMyJobs(f, hub.MachineId);
         // Tắt xoay Ghim/Huỷ khi việc đã hiện/huỷ trên snapshot (hoặc quá hạn) — TRƯỚC khi tính lại nút.
         ReconcilePinPending(f);
@@ -317,6 +317,33 @@ public sealed partial class FleetViewModel : ObservableObject
 
     private static void OnRolePicked(string machineId, string roleKey)
         => _ = CoordinationRuntime.Hub?.SetRoleAsync(machineId, roleKey);
+
+    /// <summary>Acc BigSeller của shop đang chọn chỉ chạy 1 máy tại 1 thời điểm → nếu đang do máy X giữ (lease
+    /// running / assignment queued-running), CHỈ X được ghim; các máy khác khoá trong combo "Cho máy". Không ai
+    /// giữ → mở hết. Đang chọn máy không hợp lệ → tự chuyển sang máy chủ.</summary>
+    private void UpdateMachinePinnability(FleetSnapshot f)
+    {
+        string? ownerId = null;
+        if (SelectedQueue is { } row)
+        {
+            ownerId = f.Leases.FirstOrDefault(l => l.BigsellerId == row.BigsellerId)?.MachineId;
+            if (string.IsNullOrEmpty(ownerId))
+            {
+                var asn = f.Assignments.FirstOrDefault(a => a.BigsellerId == row.BigsellerId && a.Status is "queued" or "running");
+                ownerId = !string.IsNullOrEmpty(asn?.ClaimedByMachineId) ? asn!.ClaimedByMachineId : asn?.TargetMachineId;
+            }
+            if (string.IsNullOrEmpty(ownerId)) ownerId = null;
+        }
+        foreach (var m in MachineRows) m.CanPin = ownerId is null || ownerId == m.MachineId;
+        if (ownerId is not null && PinMachine is not null && PinMachine.MachineId != ownerId)
+            PinMachine = MachineRows.FirstOrDefault(x => x.MachineId == ownerId);
+    }
+
+    /// <summary>Đổi shop đang chọn → tính lại máy nào được ghim (acc đang do máy khác giữ thì khoá).</summary>
+    partial void OnSelectedQueueChanged(FleetQueueRow? value)
+    {
+        if (CoordinationRuntime.Hub is { } hub) UpdateMachinePinnability(hub.CurrentFleet);
+    }
 
     private void BuildQueue(FleetSnapshot f)
     {
@@ -914,6 +941,9 @@ public sealed partial class FleetMachineRow : ObservableObject
     [ObservableProperty] private string _name;
     [ObservableProperty] private string _online;
     [ObservableProperty] private string _dot;
+    /// <summary>Có được chọn để GHIM việc cho shop đang chọn không: acc BigSeller chỉ chạy 1 máy tại 1 thời
+    /// điểm → nếu acc đang do máy khác giữ thì máy này bị khoá trong combo "Cho máy".</summary>
+    [ObservableProperty] private bool _canPin = true;
 
     public IReadOnlyList<string> RoleOptions { get; } = ["Tắt", "Scrape", "Import", "Update", "Mọi việc"];
 

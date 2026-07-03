@@ -170,6 +170,17 @@
                                     <StackPanel VerticalAlignment="Top" Margin="0,0,22,0">
                                         <TextBlock Text="Cho máy" Style="{StaticResource Caption}" Margin="0,0,0,3" />
                                         <ComboBox ItemsSource="{Binding MachineRows}" SelectedItem="{Binding PinMachine}" Width="220">
+                                            <!-- Acc BigSeller đang do máy khác giữ → máy đó khoá (CanPin=false): acc chỉ 1 máy/1 thời điểm. -->
+                                            <ComboBox.ItemContainerStyle>
+                                                <Style TargetType="ComboBoxItem">
+                                                    <Setter Property="IsEnabled" Value="{Binding CanPin}" />
+                                                    <Style.Triggers>
+                                                        <Trigger Property="IsEnabled" Value="False">
+                                                            <Setter Property="ToolTip" Value="Tài khoản này đang chạy trên máy khác — chỉ ghim được cho đúng máy đó (mỗi acc 1 máy tại 1 thời điểm)." />
+                                                        </Trigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </ComboBox.ItemContainerStyle>
                                             <ComboBox.ItemTemplate>
                                                 <DataTemplate>
                                                     <StackPanel Orientation="Horizontal" ToolTip="{Binding Online}">
