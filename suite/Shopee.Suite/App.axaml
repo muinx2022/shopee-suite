@@ -10,7 +10,13 @@
              xmlns:ca="using:Shopee.Suite.Modules.CheckAccount"
              xmlns:fleet="using:Shopee.Suite.Modules.Fleet"
              xmlns:settings="using:Shopee.Suite.Modules.Settings"
+             xmlns:conv="using:Shopee.Suite.Infrastructure"
              RequestedThemeVariant="Light">
+
+    <Application.Resources>
+        <conv:CountToBoolConverter x:Key="CountToBool" />
+        <conv:StringToBoolConverter x:Key="StringToBool" />
+    </Application.Resources>
 
     <Application.Styles>
         <FluentTheme />
@@ -23,13 +29,13 @@
         <DataTemplate DataType="vm:WelcomeViewModel"><views:WelcomeView /></DataTemplate>
         <DataTemplate DataType="vm:ComingSoonViewModel"><views:ComingSoonView /></DataTemplate>
 
-        <!-- GĐ4: 7 module VM chưa port → placeholder chung (GĐ5 thay bằng view Avalonia thật). -->
-        <DataTemplate DataType="ws:WorkspaceViewModel"><views:ModulePlaceholderView /></DataTemplate>
-        <DataTemplate DataType="bs:BigSellerViewModel"><views:ModulePlaceholderView /></DataTemplate>
-        <DataTemplate DataType="srch:SearchViewModel"><views:ModulePlaceholderView /></DataTemplate>
-        <DataTemplate DataType="acc:AccountsViewModel"><views:ModulePlaceholderView /></DataTemplate>
-        <DataTemplate DataType="ca:CheckAccountViewModel"><views:ModulePlaceholderView /></DataTemplate>
-        <DataTemplate DataType="fleet:FleetViewModel"><views:ModulePlaceholderView /></DataTemplate>
-        <DataTemplate DataType="settings:SettingsViewModel"><views:ModulePlaceholderView /></DataTemplate>
+        <!-- GĐ5: 7 module view Avalonia thật. -->
+        <DataTemplate DataType="ws:WorkspaceViewModel"><ws:WorkspaceView /></DataTemplate>
+        <DataTemplate DataType="bs:BigSellerViewModel"><bs:BigSellerView /></DataTemplate>
+        <DataTemplate DataType="srch:SearchViewModel"><srch:SearchView /></DataTemplate>
+        <DataTemplate DataType="acc:AccountsViewModel"><acc:AccountsView /></DataTemplate>
+        <DataTemplate DataType="ca:CheckAccountViewModel"><ca:CheckAccountView /></DataTemplate>
+        <DataTemplate DataType="fleet:FleetViewModel"><fleet:FleetView /></DataTemplate>
+        <DataTemplate DataType="settings:SettingsViewModel"><settings:SettingsView /></DataTemplate>
     </Application.DataTemplates>
 </Application>

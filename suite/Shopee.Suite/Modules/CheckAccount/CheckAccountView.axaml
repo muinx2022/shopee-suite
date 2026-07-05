@@ -1,25 +1,21 @@
-<UserControl
-    x:Class="Shopee.Suite.Modules.CheckAccount.CheckAccountView"
-    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:sys="clr-namespace:System;assembly=mscorlib"
-    x:Name="Root">
-    <Grid Margin="28,22,28,24">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="*" />
-        </Grid.RowDefinitions>
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:sys="using:System"
+             xmlns:b="using:Shopee.Suite.Behaviors"
+             x:Class="Shopee.Suite.Modules.CheckAccount.CheckAccountView"
+             x:Name="Root">
+    <Grid Margin="28,22,28,24" RowDefinitions="Auto,*">
 
         <!-- Header -->
         <Grid Grid.Row="0" Margin="0,0,0,16">
             <StackPanel>
-                <TextBlock Text="Check tài khoản Shopee" Style="{StaticResource H1}" />
-                <TextBlock Text="Kiểm tra hàng loạt tài khoản qua Edge + proxy, giữ profile khi đăng nhập thành công."
-                           Style="{StaticResource Caption}" Margin="0,3,0,0" />
+                <TextBlock Classes="h1" Text="Check tài khoản Shopee" />
+                <TextBlock Classes="caption" Margin="0,3,0,0"
+                           Text="Kiểm tra hàng loạt tài khoản qua Edge + proxy, giữ profile khi đăng nhập thành công." />
             </StackPanel>
             <Border HorizontalAlignment="Right" VerticalAlignment="Center"
-                    Background="{StaticResource SubtleBrush}" CornerRadius="14" Padding="14,6">
-                <TextBlock Text="{Binding Status}" FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" />
+                    Background="{DynamicResource SubtleBrush}" CornerRadius="14" Padding="14,6">
+                <TextBlock Text="{Binding Status}" FontSize="12.5" Foreground="{DynamicResource TextSecondaryBrush}" />
             </Border>
         </Grid>
 
@@ -38,35 +34,35 @@
 
                     <!-- Accounts -->
                     <DockPanel Grid.Row="0">
-                        <TextBlock DockPanel.Dock="Top" Style="{StaticResource Caption}" Margin="0,0,0,5"
+                        <TextBlock DockPanel.Dock="Top" Classes="caption" Margin="0,0,0,5"
                                    Text="Danh sách tài khoản (mỗi dòng: user|pass  hoặc  user|pass|.shopee.vn=SPC_F=...)" />
-                        <TextBox Style="{StaticResource MonoTextBox}"
+                        <TextBox Classes="mono"
                                  IsReadOnly="{Binding IsRunning}"
-                                 Text="{Binding Accounts, UpdateSourceTrigger=PropertyChanged}" />
+                                 Text="{Binding Accounts}" />
                     </DockPanel>
 
                     <!-- Proxy -->
                     <DockPanel Grid.Row="2" Margin="0,12,0,0">
-                        <TextBlock DockPanel.Dock="Top" Style="{StaticResource Caption}" Margin="0,0,0,5"
+                        <TextBlock DockPanel.Dock="Top" Classes="caption" Margin="0,0,0,5"
                                    Text="Danh sách proxy (mỗi dòng 1 kiotproxy key hoặc host:port — nhiều key để mỗi tk 1 IP mới)" />
-                        <TextBox Style="{StaticResource MonoTextBox}"
+                        <TextBox Classes="mono"
                                  IsReadOnly="{Binding IsRunning}"
-                                 Text="{Binding ProxyList, UpdateSourceTrigger=PropertyChanged}" />
+                                 Text="{Binding ProxyList}" />
                     </DockPanel>
 
                     <!-- Button row -->
                     <Grid Grid.Row="3" Margin="0,14,0,12">
                         <StackPanel Orientation="Horizontal">
-                            <Button Style="{StaticResource SuccessButton}" Content="▶  Chạy"
+                            <Button Classes="success" Content="▶  Chạy"
                                     MinWidth="120" Command="{Binding RunCommand}" />
-                            <Button Style="{StaticResource DangerButton}" Content="■  Dừng"
+                            <Button Classes="danger" Content="■  Dừng"
                                     MinWidth="100" Margin="10,0,0,0" Command="{Binding StopCommand}" />
                             <Button Content="📁  Thư mục profile" Margin="10,0,0,0"
                                     Command="{Binding OpenProfilesCommand}" />
                         </StackPanel>
                         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
                             <TextBlock Text="Số luồng" VerticalAlignment="Center" Margin="0,0,8,0"
-                                       Foreground="{StaticResource TextSecondaryBrush}" />
+                                       Foreground="{DynamicResource TextSecondaryBrush}" />
                             <ComboBox Width="64" SelectedItem="{Binding Lanes}" IsEnabled="{Binding IsIdle}">
                                 <sys:Int32>1</sys:Int32>
                                 <sys:Int32>2</sys:Int32>
@@ -79,53 +75,45 @@
 
                     <!-- Log -->
                     <Border Grid.Row="4" CornerRadius="8" ClipToBounds="True"
-                            Background="{StaticResource LogBackgroundBrush}">
-                        <TextBox x:Name="LogBox" Style="{StaticResource LogTextBox}" />
+                            Background="{DynamicResource LogBackgroundBrush}">
+                        <TextBox x:Name="LogBox" Classes="log" b:LogText.Source="{Binding LogLines}" />
                     </Border>
                 </Grid>
             </TabItem>
 
             <!-- ══════════ TAB 2: TK OK ══════════ -->
             <TabItem Header="TK OK">
-                <Grid>
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="*" />
-                    </Grid.RowDefinitions>
+                <Grid RowDefinitions="Auto,*">
 
                     <Grid Grid.Row="0" Margin="0,0,0,12">
                         <StackPanel Orientation="Horizontal">
                             <CheckBox Content="Chọn tất cả" VerticalAlignment="Center" Margin="2,0,14,0"
                                       IsChecked="{Binding SelectAll}" />
                             <Button Content="↻  Tải lại" Command="{Binding ReloadOkCommand}" />
-                            <Button Style="{StaticResource PrimaryButton}" Content="→  Lưu vào kho chung"
+                            <Button Classes="primary" Content="→  Lưu vào kho chung"
                                     Margin="10,0,0,0" Command="{Binding SaveToSharedCommand}" />
                             <Button Content="📂  Mở file" Margin="10,0,0,0" Command="{Binding OpenOkFileCommand}" />
                         </StackPanel>
                         <TextBlock Text="{Binding OkStatus}" HorizontalAlignment="Right" VerticalAlignment="Center"
-                                   Foreground="{StaticResource AccentBrush}" FontSize="12.5" />
+                                   Foreground="{DynamicResource AccentBrush}" FontSize="12.5" />
                     </Grid>
 
-                    <Border Grid.Row="1" Style="{StaticResource Card}" ClipToBounds="True">
-                        <DataGrid ItemsSource="{Binding OkAccounts}" BorderThickness="0">
+                    <Border Grid.Row="1" Classes="card" ClipToBounds="True">
+                        <DataGrid ItemsSource="{Binding OkAccounts}" AutoGenerateColumns="False" BorderThickness="0">
                             <DataGrid.Columns>
                                 <DataGridTemplateColumn Width="46" Header="✓" CanUserResize="False" CanUserSort="False">
                                     <DataGridTemplateColumn.CellTemplate>
                                         <DataTemplate>
                                             <CheckBox HorizontalAlignment="Center"
-                                                      IsChecked="{Binding Selected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                                      IsChecked="{Binding Selected, Mode=TwoWay}" />
                                         </DataTemplate>
                                     </DataGridTemplateColumn.CellTemplate>
                                 </DataGridTemplateColumn>
-                                <DataGridTextColumn Header="Tài khoản" Binding="{Binding Account, Mode=OneWay}" Width="2*" IsReadOnly="True">
-                                    <DataGridTextColumn.ElementStyle>
-                                        <Style TargetType="TextBlock">
-                                            <Setter Property="FontFamily" Value="{StaticResource MonoFont}" />
-                                            <Setter Property="VerticalAlignment" Value="Center" />
-                                        </Style>
-                                    </DataGridTextColumn.ElementStyle>
-                                </DataGridTextColumn>
-                                <DataGridTextColumn Header="Trạng thái" Binding="{Binding Status, Mode=OneWay}" Width="*" IsReadOnly="True" />
+                                <DataGridTextColumn Header="Tài khoản" Binding="{Binding Account, Mode=OneWay}"
+                                                    Width="2*" IsReadOnly="True"
+                                                    FontFamily="{DynamicResource MonoFont}" />
+                                <DataGridTextColumn Header="Trạng thái" Binding="{Binding Status, Mode=OneWay}"
+                                                    Width="*" IsReadOnly="True" />
                             </DataGrid.Columns>
                         </DataGrid>
                     </Border>

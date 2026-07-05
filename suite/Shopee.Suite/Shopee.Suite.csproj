@@ -31,24 +31,6 @@
     <ProjectReference Include="..\Shopee.Module.UpdateProduct\Shopee.Module.UpdateProduct.csproj" />
   </ItemGroup>
 
-  <!-- ════ GĐ4 (Avalonia skeleton): 9 module view UserControl + behavior/converter WPF CHƯA port → loại khỏi
-       build (code-behind dùng System.Windows). VM của chúng vẫn build + hiện DataTemplate placeholder. File .xaml
-       cũ để nguyên (Avalonia chỉ build *.axaml nên chúng trơ) làm tham chiếu port ở GĐ5. ════ -->
-  <ItemGroup>
-    <Compile Remove="Modules\Workspace\WorkspaceView.xaml.cs" />
-    <Compile Remove="Modules\Fleet\FleetView.xaml.cs" />
-    <Compile Remove="Modules\Settings\SettingsView.xaml.cs" />
-    <Compile Remove="Modules\Search\SearchView.xaml.cs" />
-    <Compile Remove="Modules\BigSeller\BigSellerView.xaml.cs" />
-    <Compile Remove="Modules\Accounts\AccountsView.xaml.cs" />
-    <Compile Remove="Modules\Scrape\ScrapeView.xaml.cs" />
-    <Compile Remove="Modules\UpdateProduct\UpdateProductView.xaml.cs" />
-    <Compile Remove="Modules\CheckAccount\CheckAccountView.xaml.cs" />
-    <Compile Remove="Behaviors\PasswordBoxAssist.cs" />
-    <Compile Remove="Behaviors\LogText.cs" />
-    <Compile Remove="Infrastructure\Converters.cs" />
-  </ItemGroup>
-
   <!-- ════ Gói kèm extension vào output để app tự chứa (chạy máy khác không cần repo) ════ -->
   <PropertyGroup>
     <RepoRoot>$(MSBuildProjectDirectory)\..\..</RepoRoot>

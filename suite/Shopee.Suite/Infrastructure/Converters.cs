@@ -1,45 +1,25 @@
 using System.Globalization;
-using System.Windows;
-using System.Windows.Data;
+using Avalonia.Data.Converters;
 
 namespace Shopee.Suite.Infrastructure;
 
-/// <summary>bool → Visibility (true = Visible, false = Collapsed).</summary>
-public sealed class BoolToVisibilityConverter : IValueConverter
+/// <summary>int (count) → bool (>0). Dùng cho IsVisible="{Binding Count, Converter={StaticResource CountToBool}}".
+/// (bool → ẩn/hiện dùng thẳng IsVisible="{Binding X}" / "{Binding !X}", không cần converter.)</summary>
+public sealed class CountToBoolConverter : IValueConverter
 {
-    public object Convert(object value, Type t, object parameter, CultureInfo c) =>
-        value is true ? Visibility.Visible : Visibility.Collapsed;
+    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        value is int n && n > 0;
 
-    public object ConvertBack(object value, Type t, object parameter, CultureInfo c) =>
-        value is Visibility.Visible;
-}
-
-/// <summary>bool đảo → Visibility (true = Collapsed, false = Visible).</summary>
-public sealed class InverseBoolToVisibilityConverter : IValueConverter
-{
-    public object Convert(object value, Type t, object parameter, CultureInfo c) =>
-        value is true ? Visibility.Collapsed : Visibility.Visible;
-
-    public object ConvertBack(object value, Type t, object parameter, CultureInfo c) =>
-        value is Visibility.Collapsed;
-}
-
-/// <summary>string → Visibility (có nội dung = Visible, rỗng/null = Collapsed).</summary>
-public sealed class StringToVisibilityConverter : IValueConverter
-{
-    public object Convert(object value, Type t, object parameter, CultureInfo c) =>
-        string.IsNullOrWhiteSpace(value as string) ? Visibility.Collapsed : Visibility.Visible;
-
-    public object ConvertBack(object value, Type t, object parameter, CultureInfo c) =>
+    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) =>
         throw new NotSupportedException();
 }
 
-/// <summary>int (count) → Visibility (>0 = Visible, ngược lại Collapsed).</summary>
-public sealed class CountToVisibilityConverter : IValueConverter
+/// <summary>string → bool (có nội dung = true). Dùng cho IsVisible theo chuỗi rỗng/null.</summary>
+public sealed class StringToBoolConverter : IValueConverter
 {
-    public object Convert(object value, Type t, object parameter, CultureInfo c) =>
-        value is int n && n > 0 ? Visibility.Visible : Visibility.Collapsed;
+    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        !string.IsNullOrWhiteSpace(value as string);
 
-    public object ConvertBack(object value, Type t, object parameter, CultureInfo c) =>
+    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) =>
         throw new NotSupportedException();
 }
