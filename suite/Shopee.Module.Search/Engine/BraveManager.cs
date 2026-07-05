@@ -243,34 +243,18 @@ public sealed class BraveManager(AppSettingsService appSettings)
         catch { }
     }
 
+    // Cả brave.exe LẪN crashpad_handler.exe (tiến trình con của Brave — thường là kẻ còn GIỮ profile ở
+    // trạng thái delete-pending sau khi brave cha đã thoát) đều phải bị kill để nhả khoá profile.
+    private static readonly string[] BraveAndCrashpad = ["brave.exe", "crashpad_handler.exe"];
+
     private static List<int> FindBravePidsByCommandLine(string profileDirNeedle)
     {
         var pids = new List<int>();
-        try
+        foreach (var p in Shopee.Core.Platform.PlatformServices.ProcessFinder.Enumerate(BraveAndCrashpad))
         {
-            // Cả brave.exe LẪN crashpad_handler.exe (tiến trình con của Brave — thường là kẻ còn GIỮ profile
-            // ở trạng thái delete-pending sau khi brave cha đã thoát) đều phải bị kill để nhả khoá profile.
-            using var searcher = new System.Management.ManagementObjectSearcher(
-                "SELECT ProcessId, CommandLine FROM Win32_Process WHERE Name = 'brave.exe' OR Name = 'crashpad_handler.exe'");
-            foreach (var obj in searcher.Get())
-            {
-                try
-                {
-                    var commandLine = obj["CommandLine"] as string;
-                    if (!string.IsNullOrEmpty(commandLine) &&
-                        commandLine.Contains(profileDirNeedle, StringComparison.OrdinalIgnoreCase))
-                    {
-                        var pid = Convert.ToInt32(obj["ProcessId"]);
-                        if (pid > 0)
-                            pids.Add(pid);
-                    }
-                }
-                catch { }
-                finally { obj.Dispose(); }
-            }
+            if (p.CommandLine.Contains(profileDirNeedle, StringComparison.OrdinalIgnoreCase) && p.Pid > 0)
+                pids.Add(p.Pid);
         }
-        catch { }
-
         return pids;
     }
 
@@ -280,23 +264,12 @@ public sealed class BraveManager(AppSettingsService appSettings)
     {
         var needle = Path.GetFullPath(profileDir).TrimEnd('\\', '/');
         var found = new List<string>();
-        try
+        // Quét MỌI tiến trình (names=null) để lộ cả kẻ lạ đang giữ profile, không chỉ Brave.
+        foreach (var p in Shopee.Core.Platform.PlatformServices.ProcessFinder.Enumerate(null))
         {
-            using var searcher = new System.Management.ManagementObjectSearcher(
-                "SELECT ProcessId, Name, CommandLine FROM Win32_Process");
-            foreach (var obj in searcher.Get())
-            {
-                try
-                {
-                    var cl = obj["CommandLine"] as string;
-                    if (!string.IsNullOrEmpty(cl) && cl.Contains(needle, StringComparison.OrdinalIgnoreCase))
-                        found.Add($"{obj["Name"] as string ?? "?"}#{Convert.ToInt32(obj["ProcessId"])}");
-                }
-                catch { }
-                finally { obj.Dispose(); }
-            }
+            if (p.CommandLine.Contains(needle, StringComparison.OrdinalIgnoreCase))
+                found.Add($"{(string.IsNullOrEmpty(p.Name) ? "?" : p.Name)}#{p.Pid}");
         }
-        catch { }
         return string.Join(", ", found);
     }
 

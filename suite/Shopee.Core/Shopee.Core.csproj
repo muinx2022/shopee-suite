@@ -9,5 +9,8 @@
   <ItemGroup>
     <PackageReference Include="System.Management" Version="10.0.0" />
     <PackageReference Include="ClosedXML" Version="0.105.0" />
+    <!-- DPAPI cho WindowsOsCrypt (giải key os_crypt Chromium). Trên net8.0-windows Registry đã có sẵn trong
+         framework nên chưa cần package Microsoft.Win32.Registry (sẽ thêm ở GĐ2 khi bỏ -windows). -->
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
   </ItemGroup>
 </Project>

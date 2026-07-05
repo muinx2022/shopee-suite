@@ -1,8 +1,7 @@
 using System.Diagnostics;
-using System.Management;
 using System.Runtime;
-using System.Runtime.InteropServices;
 using Shopee.Core.Infrastructure;
+using Shopee.Core.Platform;
 
 namespace Shopee.Core.Browser;
 
@@ -202,7 +201,7 @@ public static class BraveFleet
             GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
             GC.WaitForPendingFinalizers();
             GC.Collect();
-            EmptyWorkingSet(Process.GetCurrentProcess().Handle);
+            PlatformServices.WorkingSet.TrimCurrentProcess();
         }
         catch { }
     }
@@ -239,37 +238,21 @@ public static class BraveFleet
         return killed;
     }
 
+    private static readonly string[] BraveOnly = ["brave.exe"];
+
     private static List<(int pid, string dir, DateTime? started)> EnumerateOurBrave(Action<string>? log)
     {
         var list = new List<(int, string, DateTime?)>();
-        try
+        foreach (var p in PlatformServices.ProcessFinder.Enumerate(BraveOnly, log))
         {
-            using var searcher = new ManagementObjectSearcher(
-                "SELECT ProcessId, CommandLine FROM Win32_Process WHERE Name = 'brave.exe'");
-            using var results = searcher.Get();
-            foreach (var obj in results)
-            {
-                try
-                {
-                    var cl = obj["CommandLine"] as string;
-                    if (string.IsNullOrEmpty(cl)) continue;
-                    var dir = ExtractUserDataDir(cl);
-                    if (dir is null) continue;
-                    var nd = NormalizePath(dir);
-                    if (!IsUnderManagedRoot(nd)) continue;   // KHÔNG phải Brave của app → bỏ qua
-                    var pid = Convert.ToInt32(obj["ProcessId"]);
-                    if (pid <= 0) continue;
-                    DateTime? started = null;
-                    try { started = Process.GetProcessById(pid).StartTime; } catch { }
-                    list.Add((pid, nd, started));
-                }
-                catch { }
-                finally { obj.Dispose(); }
-            }
-        }
-        catch (Exception ex)
-        {
-            log?.Invoke($"Quét Brave (WMI) lỗi: {ex.Message}");
+            var dir = ExtractUserDataDir(p.CommandLine);
+            if (dir is null) continue;
+            var nd = NormalizePath(dir);
+            if (!IsUnderManagedRoot(nd)) continue;   // KHÔNG phải Brave của app → bỏ qua
+            if (p.Pid <= 0) continue;
+            DateTime? started = null;
+            try { started = Process.GetProcessById(p.Pid).StartTime; } catch { }
+            list.Add((p.Pid, nd, started));
         }
         return list;
     }
@@ -343,36 +326,7 @@ public static class BraveFleet
         catch { return path.Trim().Trim('"').TrimEnd('\\', '/'); }
     }
 
-    // ── Bộ nhớ hệ thống (GlobalMemoryStatusEx) + trả working set (EmptyWorkingSet) ──
-    private static ulong AvailablePhysicalBytes() => Mem().ullAvailPhys;
-    private static ulong TotalPhysicalBytes() => Mem().ullTotalPhys;
-
-    private static MEMORYSTATUSEX Mem()
-    {
-        var m = new MEMORYSTATUSEX { dwLength = (uint)Marshal.SizeOf<MEMORYSTATUSEX>() };
-        try { GlobalMemoryStatusEx(ref m); } catch { }
-        return m;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct MEMORYSTATUSEX
-    {
-        public uint dwLength;
-        public uint dwMemoryLoad;
-        public ulong ullTotalPhys;
-        public ulong ullAvailPhys;
-        public ulong ullTotalPageFile;
-        public ulong ullAvailPageFile;
-        public ulong ullTotalVirtual;
-        public ulong ullAvailVirtual;
-        public ulong ullAvailExtendedVirtual;
-    }
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool GlobalMemoryStatusEx(ref MEMORYSTATUSEX lpBuffer);
-
-    [DllImport("psapi.dll")]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool EmptyWorkingSet(IntPtr hProcess);
+    // ── Bộ nhớ hệ thống (qua PlatformServices.Memory) ──
+    private static ulong AvailablePhysicalBytes() => PlatformServices.Memory.AvailablePhysicalBytes();
+    private static ulong TotalPhysicalBytes() => PlatformServices.Memory.TotalPhysicalBytes();
 }

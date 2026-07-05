@@ -1,4 +1,4 @@
-using Microsoft.Win32;
+using Shopee.Core.Browser;
 
 namespace UpdateProduct;
 
@@ -48,42 +48,10 @@ internal static class UpdateProductSettings
     public static string ResolveAccountCookieFile(BigSellerAccountConfig account) =>
         AppSession.ResolvePersistentDataPath("account-cookies", $"{account.Id}-bigseller.json");
 
-    private static FileInfo? DetectBraveExe()
-    {
-        var candidates = new List<string>();
-        foreach (var folder in new[]
-        {
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
-            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
-        })
-        {
-            if (!string.IsNullOrWhiteSpace(folder))
-                candidates.Add(Path.Combine(folder, "BraveSoftware", "Brave-Browser", "Application", "brave.exe"));
-        }
-
-        foreach (var (root, sub) in new[]
-        {
-            (Registry.CurrentUser, @"Software\Microsoft\Windows\CurrentVersion\App Paths\brave.exe"),
-            (Registry.LocalMachine, @"Software\Microsoft\Windows\CurrentVersion\App Paths\brave.exe"),
-        })
-        {
-            try
-            {
-                using var key = root.OpenSubKey(sub);
-                var value = key?.GetValue(string.Empty)?.ToString();
-                if (!string.IsNullOrWhiteSpace(value))
-                    candidates.Add(value);
-            }
-            catch { }
-        }
-
-        foreach (var candidate in candidates)
-            if (File.Exists(candidate))
-                return new FileInfo(candidate);
-
-        return null;
-    }
+    // Định vị Brave (đường dẫn cố định + registry App Paths) đã gộp về bộ định vị chung của Core, chạy sau
+    // facade nền tảng (Windows dùng registry, Linux GĐ3 dùng which/usr/bin…).
+    private static FileInfo? DetectBraveExe() =>
+        BrowserLauncher.Detect(BrowserKind.Brave) is { } exe ? new FileInfo(exe) : null;
 
     private static DirectoryInfo? DetectBraveUserData()
     {

@@ -1,4 +1,5 @@
 using Shopee.Core.Infrastructure;
+using Shopee.Core.Platform;
 
 namespace Shopee.Core.Browser;
 
@@ -28,32 +29,11 @@ public sealed class BrowserLauncher
 
     /// <summary>Thư mục "User Data" mẫu của trình duyệt (phải có Default) — dùng làm nguồn copy
     /// extension-state khi tạo profile mới. null nếu chưa từng mở trình duyệt.</summary>
-    public static string? DetectUserData(BrowserKind kind)
-    {
-        var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        var path = kind == BrowserKind.Brave
-            ? Path.Combine(local, "BraveSoftware", "Brave-Browser", "User Data")
-            : Path.Combine(local, "Microsoft", "Edge", "User Data");
-        return Directory.Exists(Path.Combine(path, "Default")) ? path : null;
-    }
+    public static string? DetectUserData(BrowserKind kind) =>
+        PlatformServices.BrowserLocator.DetectUserData(kind);
 
-    public static string? Detect(BrowserKind kind)
-    {
-        var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        var candidates = kind == BrowserKind.Brave
-            ?
-            [
-                Path.Combine(local, @"BraveSoftware\Brave-Browser\Application\brave.exe"),
-                @"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe",
-                @"C:\Program Files (x86)\BraveSoftware\Brave-Browser\Application\brave.exe",
-            ]
-            : new[]
-            {
-                @"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
-                @"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
-            };
-        return candidates.FirstOrDefault(File.Exists);
-    }
+    public static string? Detect(BrowserKind kind) =>
+        PlatformServices.BrowserLocator.DetectExe(kind);
 
     /// <summary>Mở trình duyệt tới <paramref name="startUrl"/>. Ném exception nếu không tìm thấy exe.</summary>
     public void Launch(string profileDir, string? proxyServer, string startUrl, IReadOnlyList<string>? extraArgs = null)

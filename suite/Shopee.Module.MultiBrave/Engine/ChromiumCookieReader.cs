@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
+using Shopee.Core.Platform;
 
 namespace OpenMultiBraveLauncherV3;
 
@@ -82,7 +83,7 @@ internal static class ChromiumCookieReader
             if (string.IsNullOrEmpty(b64)) return null;
             var enc = Convert.FromBase64String(b64);
             if (enc.Length < 6) return null;          // bỏ prefix "DPAPI" (5 byte)
-            return ProtectedData.Unprotect(enc[5..], null, DataProtectionScope.CurrentUser);
+            return PlatformServices.OsCrypt.UnprotectCurrentUser(enc[5..]);
         }
         catch { return null; }
     }
@@ -106,7 +107,8 @@ internal static class ChromiumCookieReader
                 return Encoding.UTF8.GetString(plain);
             }
             // Cookie cũ (trước v10) mã hoá DPAPI trực tiếp.
-            return Encoding.UTF8.GetString(ProtectedData.Unprotect(enc, null, DataProtectionScope.CurrentUser));
+            var plainLegacy = PlatformServices.OsCrypt.UnprotectCurrentUser(enc);
+            return plainLegacy is null ? "" : Encoding.UTF8.GetString(plainLegacy);
         }
         catch { return ""; }
     }
