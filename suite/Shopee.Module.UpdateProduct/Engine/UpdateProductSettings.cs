@@ -1,54 +1,9 @@
-using System.Text.Json;
 using Microsoft.Win32;
 
 namespace UpdateProduct;
 
 internal static class UpdateProductSettings
 {
-    private const string FileName = "update-product-settings.json";
-    private static readonly object SaveLock = new();
-
-    public static string SettingsPath => Path.Combine(AppSession.ProjectSourceDirectory, FileName);
-
-    public static UpdateProductSettingsFile LoadOrCreate()
-    {
-        if (File.Exists(SettingsPath))
-        {
-            try
-            {
-                var data = JsonSerializer.Deserialize<UpdateProductSettingsFile>(File.ReadAllText(SettingsPath));
-                if (data is not null)
-                {
-                    Normalize(data);
-                    Save(data);
-                    return data;
-                }
-            }
-            catch (Exception ex)
-            {
-                AppDiagnostics.LogException("UpdateProductSettings.LoadOrCreate", ex);
-            }
-        }
-
-        var settings = new UpdateProductSettingsFile();
-        Normalize(settings);
-        Save(settings);
-        return settings;
-    }
-
-    public static void Save(UpdateProductSettingsFile settings)
-    {
-        lock (SaveLock)
-        {
-            Normalize(settings);
-            var json = JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true });
-            Directory.CreateDirectory(Path.GetDirectoryName(SettingsPath) ?? AppSession.ProjectSourceDirectory);
-            var tmp = $"{SettingsPath}.{Environment.ProcessId}.tmp";
-            File.WriteAllText(tmp, json);
-            File.Move(tmp, SettingsPath, overwrite: true);
-        }
-    }
-
     public static void Normalize(UpdateProductSettingsFile settings)
     {
         if (string.IsNullOrWhiteSpace(settings.BraveExe))

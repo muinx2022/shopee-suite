@@ -65,8 +65,6 @@ public sealed class HubClient
     }
     public Task ReleaseAccountsAsync(AccountReleaseRequest req, CancellationToken ct = default) => PostAsync("/accounts/release", req, ct);
     public Task HeartbeatAccountsAsync(AccountReleaseRequest req, CancellationToken ct = default) => PostAsync("/accounts/heartbeat", req, ct);
-    public async Task<List<AccountLease>> ActiveAccountsAsync(CancellationToken ct = default)
-        => await _http.GetFromJsonAsync<List<AccountLease>>("/accounts/active", ct) ?? [];
 
     // ── Sổ hoàn thành ──
     public Task PublishLedgerAsync(WorkLedgerRecord rec, CancellationToken ct = default) => PostAsync("/ledger", rec, ct);
@@ -80,11 +78,7 @@ public sealed class HubClient
         => await _http.GetFromJsonAsync<FleetSnapshot>("/fleet", ct) ?? new FleetSnapshot();
 
     // ── Vai trò máy + giao việc ──
-    public async Task<List<MachineRoleInfo>> RolesAsync(CancellationToken ct = default)
-        => await _http.GetFromJsonAsync<List<MachineRoleInfo>>("/roles", ct) ?? [];
     public Task SetRoleAsync(SetRoleRequest req, CancellationToken ct = default) => PostAsync("/roles", req, ct);
-    public async Task<List<Assignment>> AssignmentsAsync(CancellationToken ct = default)
-        => await _http.GetFromJsonAsync<List<Assignment>>("/assignments", ct) ?? [];
     public async Task<Assignment> CreateAssignmentAsync(CreateAssignmentRequest req, CancellationToken ct = default)
     {
         var r = await _http.PostAsJsonAsync("/assignments", req, ct);

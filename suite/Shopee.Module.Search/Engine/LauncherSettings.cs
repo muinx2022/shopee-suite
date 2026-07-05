@@ -23,8 +23,5 @@ public sealed class LauncherSettings
     /// và bị Shopee đánh dấu "traffic error" sau mỗi lần dừng/chạy lại.
     /// </summary>
     public string LastUsedAccountId { get; set; } = "";
-
-    /// <summary>Cấu hình AI (nhà cung cấp + model + API key) cho chức năng "Cập nhật danh mục (AI)".</summary>
-    public AiSettings Ai { get; set; } = new();
 }
 

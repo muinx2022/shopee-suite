@@ -5,11 +5,9 @@ namespace OpenMultiBraveLauncherV3;
 internal sealed class PortAllocator
 {
     private const int InstanceBasePort = 9330;
-    private const int CookieBasePort = 10400;
 
     private readonly object _lock = new();
     private readonly Queue<int> _instancePorts;
-    private readonly Queue<int> _cookiePorts;
     private readonly HashSet<int> _leased = [];
 
     public static PortAllocator Shared { get; } = new();
@@ -17,12 +15,9 @@ internal sealed class PortAllocator
     public PortAllocator()
     {
         _instancePorts = CreatePortQueue(InstanceBasePort + AppSession.PortOffset, 600);
-        _cookiePorts = CreatePortQueue(CookieBasePort + AppSession.PortOffset, 200);
     }
 
     public int AllocateInstancePort() => Allocate(_instancePorts, "Shopee instance");
-
-    public int AllocateCookiePort() => Allocate(_cookiePorts, "cookie capture");
 
     public void Release(int port)
     {
@@ -33,8 +28,6 @@ internal sealed class PortAllocator
 
             if (IsInRange(port, InstanceBasePort, 600))
                 EnqueueSorted(_instancePorts, port);
-            else if (IsInRange(port, CookieBasePort, 200))
-                EnqueueSorted(_cookiePorts, port);
         }
     }
 

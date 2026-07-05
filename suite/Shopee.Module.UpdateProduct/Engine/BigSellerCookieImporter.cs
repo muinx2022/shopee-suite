@@ -20,14 +20,6 @@ internal static class BigSellerCookieImporter
             string.Equals(c.GetValueOrDefault("name") as string, AuthCookieName, StringComparison.OrdinalIgnoreCase) &&
             (c.GetValueOrDefault("value") as string ?? "").Length > 5);
 
-    public static string BuildAuthStamp(IEnumerable<Dictionary<string, object?>> cookies) =>
-        string.Join("\n", cookies
-            .Where(c =>
-                IsBigSellerCookie(c) &&
-                string.Equals(c.GetValueOrDefault("name") as string, AuthCookieName, StringComparison.OrdinalIgnoreCase))
-            .Select(c => $"{c.GetValueOrDefault("domain")}|{c.GetValueOrDefault("value")}")
-            .OrderBy(s => s, StringComparer.Ordinal));
-
     public static async Task<List<Dictionary<string, object?>>> GetBigSellerCookiesAsync(int debugPort)
     {
         var cookies = await new CookieService(new CdpClient(debugPort))
