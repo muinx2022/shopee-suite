@@ -36,14 +36,8 @@
             <DataTemplate DataType="{x:Type bs:BigSellerViewModel}">
                 <bs:BigSellerView />
             </DataTemplate>
-            <DataTemplate DataType="{x:Type scr:ScrapeViewModel}">
-                <scr:ScrapeView />
-            </DataTemplate>
             <DataTemplate DataType="{x:Type srch:SearchViewModel}">
                 <srch:SearchView />
-            </DataTemplate>
-            <DataTemplate DataType="{x:Type upd:UpdateProductViewModel}">
-                <upd:UpdateProductView />
             </DataTemplate>
             <DataTemplate DataType="{x:Type fleet:FleetViewModel}">
                 <fleet:FleetView />
