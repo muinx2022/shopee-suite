@@ -44,47 +44,6 @@ public sealed class SearchTaskStore
         }
     }
 
-    public void ResetTask(long taskId, SearchConfig config, InstanceConfig account)
-    {
-        lock (_sync)
-        {
-            using var con = Open();
-            using var tx = con.BeginTransaction();
-            using (var del = con.CreateCommand())
-            {
-                del.Transaction = tx;
-                del.CommandText = "DELETE FROM task_products WHERE task_id = $id";
-                Add(del, "$id", taskId);
-                del.ExecuteNonQuery();
-            }
-
-            using (var cmd = con.CreateCommand())
-            {
-                cmd.Transaction = tx;
-                cmd.CommandText = """
-                    UPDATE search_tasks
-                    SET keyword=$keyword, account_id=$accountId, account_name=$accountName,
-                        region_filter=$region, min_price=$minPrice, min_sold=$minSold, check_stock=$checkStock,
-                        status='Running', resume_category_index=1, current_category='', current_page=0,
-                        product_count=0, updated_at=$now, last_error=''
-                    WHERE id=$id
-                    """;
-                Add(cmd, "$id", taskId);
-                Add(cmd, "$keyword", config.Keyword);
-                Add(cmd, "$accountId", account.Id);
-                Add(cmd, "$accountName", account.DisplayName);
-                Add(cmd, "$region", config.RegionFilterText);
-                Add(cmd, "$minPrice", config.MinPriceVnd);
-                Add(cmd, "$minSold", config.MinMonthlySold);
-                Add(cmd, "$checkStock", config.CheckVariantStock ? 1 : 0);
-                Add(cmd, "$now", DateTime.Now.ToString("O"));
-                cmd.ExecuteNonQuery();
-            }
-
-            tx.Commit();
-        }
-    }
-
     public void SaveProduct(long taskId, ProductResult product)
     {
         if (taskId <= 0 || product.ItemId <= 0 || product.ShopId <= 0) return;
@@ -182,21 +141,6 @@ public sealed class SearchTaskStore
         }
     }
 
-    public List<SearchTaskRecord> GetTasks()
-    {
-        lock (_sync)
-        {
-            using var con = Open();
-            using var cmd = con.CreateCommand();
-            cmd.CommandText = "SELECT * FROM search_tasks ORDER BY updated_at DESC, id DESC LIMIT 500";
-            using var reader = cmd.ExecuteReader();
-            var tasks = new List<SearchTaskRecord>();
-            while (reader.Read())
-                tasks.Add(ReadTask(reader));
-            return tasks;
-        }
-    }
-
     public SearchTaskRecord? GetTask(long id)
     {
         lock (_sync)
@@ -254,110 +198,6 @@ public sealed class SearchTaskStore
                 GetInt(reader, "current_page"),
                 GetInt(reader, "resume_category_index"),
                 GetInt(reader, "product_count"));
-        }
-    }
-
-    /// <summary>Keywords that have a non-completed task (status Running/Failed/Stopped) — i.e. started
-    /// but "chưa kết thúc", còn resume được. Case-insensitive set.</summary>
-    public HashSet<string> GetResumableKeywords()
-    {
-        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        lock (_sync)
-        {
-            using var con = Open();
-            using var cmd = con.CreateCommand();
-            cmd.CommandText = "SELECT DISTINCT keyword FROM search_tasks WHERE status IN ('Running','Failed','Stopped')";
-            using var reader = cmd.ExecuteReader();
-            while (reader.Read())
-            {
-                var kw = reader.IsDBNull(0) ? "" : reader.GetString(0);
-                if (!string.IsNullOrWhiteSpace(kw)) set.Add(kw);
-            }
-        }
-        return set;
-    }
-
-    /// <summary>True if any task is still "Running" — a previous run was cut off mid-crawl.</summary>
-    public bool HasRunningTask()
-    {
-        lock (_sync)
-        {
-            using var con = Open();
-            using var cmd = con.CreateCommand();
-            cmd.CommandText = "SELECT EXISTS(SELECT 1 FROM search_tasks WHERE status='Running')";
-            return Convert.ToInt64(cmd.ExecuteScalar() ?? 0L) != 0;
-        }
-    }
-
-    public List<ProductResult> GetProducts(long taskId)
-    {
-        lock (_sync)
-        {
-            using var con = Open();
-            using var cmd = con.CreateCommand();
-            cmd.CommandText = "SELECT * FROM task_products WHERE task_id=$taskId ORDER BY id";
-            Add(cmd, "$taskId", taskId);
-            using var reader = cmd.ExecuteReader();
-            var products = new List<ProductResult>();
-            while (reader.Read())
-            {
-                products.Add(new ProductResult
-                {
-                    ItemId = reader.GetInt64(reader.GetOrdinal("item_id")),
-                    ShopId = reader.GetInt64(reader.GetOrdinal("shop_id")),
-                    Name = GetString(reader, "name"),
-                    PriceVnd = GetDecimal(reader, "price_vnd"),
-                    PriceOriginalVnd = GetDecimal(reader, "original_price_vnd"),
-                    MonthlySold = GetInt(reader, "monthly_sold"),
-                    Rating = GetDouble(reader, "rating"),
-                    LikedCount = GetInt(reader, "liked_count"),
-                    CommentCount = GetInt(reader, "comment_count"),
-                    ShopLocation = GetString(reader, "shop_location"),
-                    ImageUrl = GetString(reader, "image_url"),
-                    Category = GetString(reader, "category"),
-                    ShopName = GetString(reader, "shop_name"),
-                });
-            }
-            return products;
-        }
-    }
-
-    /// <summary>
-    /// All keyword-mode products across EVERY task, de-duplicated by itemId (shopId may repeat across
-    /// keywords but itemId is unique). Keeps the most-recently-updated row per itemId. For the
-    /// "Xuất tất cả (gộp)" combined export.
-    /// </summary>
-    public List<ProductResult> GetAllKeywordProducts()
-    {
-        lock (_sync)
-        {
-            using var con = Open();
-            using var cmd = con.CreateCommand();
-            cmd.CommandText = "SELECT * FROM task_products ORDER BY updated_at DESC, id DESC";
-            using var reader = cmd.ExecuteReader();
-            var byItem = new Dictionary<long, ProductResult>();
-            while (reader.Read())
-            {
-                var itemId = reader.GetInt64(reader.GetOrdinal("item_id"));
-                if (byItem.ContainsKey(itemId)) continue; // đã có bản mới nhất → bỏ trùng itemId
-                byItem[itemId] = new ProductResult
-                {
-                    ItemId = itemId,
-                    ShopId = reader.GetInt64(reader.GetOrdinal("shop_id")),
-                    Name = GetString(reader, "name"),
-                    PriceVnd = GetDecimal(reader, "price_vnd"),
-                    PriceOriginalVnd = GetDecimal(reader, "original_price_vnd"),
-                    MonthlySold = GetInt(reader, "monthly_sold"),
-                    Rating = GetDouble(reader, "rating"),
-                    LikedCount = GetInt(reader, "liked_count"),
-                    CommentCount = GetInt(reader, "comment_count"),
-                    ShopLocation = GetString(reader, "shop_location"),
-                    ImageUrl = GetString(reader, "image_url"),
-                    Category = GetString(reader, "category"),
-                    ShopName = GetString(reader, "shop_name"),
-                };
-            }
-            return byItem.Values.ToList();
         }
     }
 
@@ -721,22 +561,6 @@ public sealed class SearchTaskStore
                 };
             }
             return byItem.Values.ToList();
-        }
-    }
-
-    /// <summary>Xóa task + sản phẩm của tab "Tìm với từ khóa" (keyword không phải URL).</summary>
-    public void ClearKeywordSearchHistory()
-    {
-        lock (_sync)
-        {
-            using var con = Open();
-            using var tx = con.BeginTransaction();
-            Exec(con, tx, """
-                DELETE FROM task_products
-                WHERE task_id IN (SELECT id FROM search_tasks WHERE keyword NOT LIKE 'http%')
-                """);
-            Exec(con, tx, "DELETE FROM search_tasks WHERE keyword NOT LIKE 'http%'");
-            tx.Commit();
         }
     }
 

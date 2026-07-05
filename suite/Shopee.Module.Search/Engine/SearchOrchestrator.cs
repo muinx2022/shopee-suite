@@ -15,9 +15,6 @@ public sealed class SearchOrchestrator
     private bool _extensionReady;
     public IReadOnlyList<ProductResult> Results => _results;
 
-    /// <summary>Shop name captured from the shop page (shop-from-link mode); null until known.</summary>
-    public string? ShopName { get; private set; }
-
     public event Action<string>? ProgressChanged;
     public event Action<ProductResult>? ProductFound;
     public event Action<ProductResult>? ProductPersisted;
@@ -45,18 +42,10 @@ public sealed class SearchOrchestrator
         _searchConfig = config;
         _searchActive = true;
         _results.Clear();
-        ShopName = null;
 
         // Extension already connected (e.g. it connected from the launch URL hash before we
         // finished logging in)? Send "start" now — there won't be another "ready" to trigger it.
         if (_extensionReady) SendPendingSearchOnReady();
-    }
-
-    public async Task StartAsync(SearchConfig config)
-    {
-        _searchConfig = config;
-        _searchActive = true;
-        await SendStartCommandAsync(config);
     }
 
     private async Task SendStartCommandAsync(SearchConfig config)
@@ -80,35 +69,10 @@ public sealed class SearchOrchestrator
         });
     }
 
-    /// <summary>
-    /// Resumes after a captcha/verify pause by re-issuing the search command from
-    /// the latest checkpoint. The extension's startSearch() calls stopSearch() first,
-    /// so a fresh "start" cleanly replaces the dead crawl loop instead of trying to
-    /// revive it. _searchConfig.ResumeCategoryIndex is kept current in HandlePageData.
-    /// </summary>
-    public async Task ResumeFromCheckpointAsync()
-    {
-        if (_searchConfig is null) return;
-        _searchActive = true;
-        await SendStartCommandAsync(_searchConfig);
-    }
-
     public async Task StopAsync()
     {
         _searchActive = false;
         await _ws.SendAsync(new { action = "stop" });
-    }
-
-    /// <summary>Pauses the live crawl: the extension waits at the next safe point. Brave/WS stay alive.</summary>
-    public async Task PauseAsync()
-    {
-        await _ws.SendAsync(new { action = "pause" });
-    }
-
-    /// <summary>Resumes a live paused crawl (no error involved) — continues where it left off.</summary>
-    public async Task ResumeAsync()
-    {
-        await _ws.SendAsync(new { action = "resume" });
     }
 
     private void OnMessage(JsonDocument doc)
@@ -123,18 +87,6 @@ public sealed class SearchOrchestrator
                 _extensionReady = true;
                 ProgressChanged?.Invoke("Extension sẵn sàng.");
                 SendPendingSearchOnReady();
-                break;
-
-            case "shopInfo":
-                if (root.TryGetProperty("name", out var shopNameEl))
-                {
-                    var name = shopNameEl.GetString();
-                    if (!string.IsNullOrWhiteSpace(name))
-                    {
-                        ShopName = name.Trim();
-                        ProgressChanged?.Invoke($"Shop: {ShopName}");
-                    }
-                }
                 break;
 
             case "captcha":
