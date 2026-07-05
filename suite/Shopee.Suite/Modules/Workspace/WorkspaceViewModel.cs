@@ -1,11 +1,11 @@
 using System.Collections.ObjectModel;
-using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Shopee.Core.BigSeller;
 using Shopee.Suite.Modules.BigSeller;
 using Shopee.Suite.Modules.Scrape;
 using Shopee.Suite.Modules.UpdateProduct;
+using Shopee.Suite.Services;
 
 namespace Shopee.Suite.Modules.Workspace;
 
@@ -53,9 +53,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         // Đang chạy: các sub-VM giữ nguyên list (Scrape bỏ qua reload khi busy) → khỏi rebuild để không
         // churn tham chiếu job đang chạy. Bao gồm cả update inline per-shop (HasActiveWsJob, không set IsRunning).
         if (Scrape.IsBusy || Update.IsRunning || Update.HasActiveWsJob) return;
-        var d = Application.Current?.Dispatcher;
-        if (d is null || d.CheckAccess()) Rebuild();
-        else d.BeginInvoke(Rebuild);
+        UiThread.Post(Rebuild);
     }
 
     private void Rebuild()

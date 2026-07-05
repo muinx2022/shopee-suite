@@ -17,6 +17,9 @@ public partial class App : Application
         DispatcherUnhandledException += OnDispatcherUnhandledException;
         AppDomain.CurrentDomain.UnhandledException += (_, args) =>
             TryLog("AppDomain", args.ExceptionObject as Exception);
+        // Lỗi lọt từ callback UiThread (Post/Enqueue/UiTimer) — cùng chính sách với DispatcherUnhandledException.
+        // Đây là lưới chính khi chuyển Avalonia (không có DispatcherUnhandledException để "Handled" như WPF).
+        Shopee.Suite.Services.UiThread.OnError = HandleUiCallbackException;
 
         // Engine scrape v31 + update-product cần session/port block khởi tạo trước khi mở Brave.
         try { MultiBraveRuntime.Initialize(); } catch (Exception ex) { TryLog("MultiBraveRuntime.Init", ex); }
@@ -70,13 +73,18 @@ public partial class App : Application
 
     private void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
     {
-        TryLog("Dispatcher", e.Exception);
+        HandleUiCallbackException(e.Exception);
+        e.Handled = true;
+    }
+
+    private static void HandleUiCallbackException(Exception ex)
+    {
+        TryLog("Dispatcher", ex);
         // Lỗi teardown LÀNH TÍNH khi dừng/hủy (tác vụ async sót lại dùng token/CTS đã hủy) → chỉ log,
         // KHÔNG popup (tránh "The CancellationTokenSource has been disposed" làm phiền sau khi bấm Dừng).
-        if (IsBenignTeardown(e.Exception)) { e.Handled = true; return; }
+        if (IsBenignTeardown(ex)) return;
         // Không cho app tắt vì 1 lỗi UI — báo lỗi rồi tiếp tục.
-        Dialogs.Show(e.Exception.Message, "Lỗi", MessageBoxButton.OK, MessageBoxImage.Error);
-        e.Handled = true;
+        Dialogs.Notify(ex.Message, "Lỗi", Shopee.Suite.Services.DialogIcon.Error);
     }
 
     private static bool IsBenignTeardown(Exception? ex)

@@ -1,6 +1,5 @@
 using System.Collections.ObjectModel;
 using System.IO;
-using System.Windows;
 using System.Windows.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -13,6 +12,7 @@ using Shopee.Core.Proxy;
 using Shopee.Core.Scrape;
 using Shopee.Modules.MultiBrave;
 using Shopee.Suite.Infrastructure;
+using Shopee.Suite.Services;
 
 namespace Shopee.Suite.Modules.Scrape;
 
@@ -78,9 +78,7 @@ public sealed partial class ScrapeViewModel : ObservableObject
     private void OnStoresChanged()
     {
         if (IsBusy) return;
-        var d = Application.Current?.Dispatcher;
-        if (d is null || d.CheckAccess()) Reload();
-        else d.BeginInvoke(Reload);
+        UiThread.Post(Reload);
     }
 
     [RelayCommand]
@@ -639,16 +637,16 @@ public sealed partial class ScrapeViewModel : ObservableObject
 
         if (running)
         {
-            if (Dialogs.Show($"Xác nhận HỦY chạy \"{target.DisplayName}\"?\nCác tài khoản khác vẫn chạy bình thường.",
-                    "Hủy chạy tài khoản", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+            if (!await Dialogs.ConfirmAsync($"Xác nhận HỦY chạy \"{target.DisplayName}\"?\nCác tài khoản khác vẫn chạy bình thường.",
+                    "Hủy chạy tài khoản"))
                 return;
             await StopOneAccount(target);
             target.IsSelected = false;
         }
         else
         {
-            if (Dialogs.Show($"Xác nhận CHẠY \"{target.DisplayName}\" (tiếp tục phần dòng còn thiếu)?",
-                    "Chạy tài khoản", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+            if (!await Dialogs.ConfirmAsync($"Xác nhận CHẠY \"{target.DisplayName}\" (tiếp tục phần dòng còn thiếu)?",
+                    "Chạy tài khoản"))
                 return;
             if (StartOneAccount(target)) target.IsSelected = true;
         }
@@ -698,13 +696,13 @@ public sealed partial class ScrapeViewModel : ObservableObject
 
     /// <summary>Mở cửa sổ Thống kê của tk BigSeller đang chọn: tiến độ theo sheet, dòng đã xong, xoá tiến độ.</summary>
     [RelayCommand(CanExecute = nameof(HasSelectedTarget))]
-    private void ShowStats()
+    private async Task ShowStatsAsync()
     {
-        if (SelectedTarget is null) return;
-        var vm = new ScrapeStatsViewModel(SelectedTarget.Account.Id, SelectedTarget.Account.DisplayName);
-        var win = new ScrapeStatsWindow(vm) { Owner = Application.Current?.MainWindow };
-        win.ShowDialog();
-        SelectedTarget.RefreshProgress();   // có thể đã nhả tay / xoá tiến độ → cập nhật nhãn.
+        var sel = SelectedTarget;
+        if (sel is null) return;
+        var vm = new ScrapeStatsViewModel(sel.Account.Id, sel.Account.DisplayName);
+        await WindowHost.ShowDialogAsync(new ScrapeStatsWindow(vm));
+        sel.RefreshProgress();   // có thể đã nhả tay / xoá tiến độ → cập nhật nhãn.
     }
 
     /// <summary>Proxy lấy XOAY VÒNG từ kho KiotProxy dùng chung (ghi đè proxy gắn sẵn của acc); kho rỗng →
@@ -788,18 +786,13 @@ public sealed partial class ScrapeViewModel : ObservableObject
 
     private void Log(string text) => OnUi(() => LogLines.Add(text));
 
-    private static void OnUi(Action a)
-    {
-        var d = Application.Current?.Dispatcher;
-        if (d is null || d.CheckAccess()) a();
-        else d.BeginInvoke(a);
-    }
+    private static void OnUi(Action a) => UiThread.Post(a);
 
     private void Warn(string msg, bool silent = false)
     {
         Status = msg;
         if (silent) Log("⚠ " + msg);   // đường push-dispatch: KHÔNG mở modal (tránh treo UI), chỉ ghi log
-        else Dialogs.Show(msg, "Shopee Scrape", MessageBoxButton.OK, MessageBoxImage.Information);
+        else Dialogs.Notify(msg, "Shopee Scrape");
     }
 
     /// <summary>Tiền-kiểm điều kiện scrape 1 đích (kho tk Shopee, Brave, cấu hình) — KHÔNG mở dialog.

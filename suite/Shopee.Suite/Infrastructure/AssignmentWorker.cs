@@ -1,13 +1,12 @@
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Text.Json;
-using System.Windows;
-using System.Windows.Threading;
 using Shopee.Core.BigSeller;
 using Shopee.Core.Coordination;
 using Shopee.Suite.Modules.Scrape;
 using Shopee.Suite.Modules.Search;
 using Shopee.Suite.Modules.UpdateProduct;
+using Shopee.Suite.Services;
 
 namespace Shopee.Suite.Infrastructure;
 
@@ -23,7 +22,7 @@ public sealed class AssignmentWorker : IDisposable
     private readonly ScrapeViewModel _scrape;
     private readonly UpdateProductViewModel _update;
     private readonly SearchViewModel _search;
-    private readonly DispatcherTimer _timer;             // claim/launch/reconcile (UI thread)
+    private readonly UiThread.UiTimer _timer;            // claim/launch/reconcile (UI thread)
     private readonly System.Threading.Timer _heartbeat;  // nhịp 'running' (luồng NỀN, không bị UI làm nghẽn)
     private readonly Dictionary<string, InFlight> _inflight = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, byte> _liveIds = new(StringComparer.Ordinal);
@@ -56,8 +55,7 @@ public sealed class AssignmentWorker : IDisposable
         _scrape = scrape;
         _update = update;
         _search = search;
-        _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(10) };
-        _timer.Tick += (_, _) => Tick();
+        _timer = UiThread.Interval(TimeSpan.FromSeconds(10), Tick);
         _timer.Start();
         // Nhịp giữ-sống chạy trên luồng nền → KHÔNG bị log-flood của scrape (10-20 cửa sổ) làm nghẽn, nên
         // SweepStaleLocked (5') không đánh nhầm 'failed' việc đang chạy thật.
@@ -123,8 +121,8 @@ public sealed class AssignmentWorker : IDisposable
             try { if (CoordinationRuntime.ConfigSync is { } sync) await sync.PullAccountsAsync(); } catch { }
         }
 
-        // BeginInvoke (không Invoke) → LaunchCore không chạy trong nested modal pump nếu lỡ có dialog đang mở.
-        Application.Current?.Dispatcher.BeginInvoke(() =>
+        // Enqueue (luôn xếp hàng, không chạy inline) → LaunchCore không chạy trong nested modal pump nếu lỡ có dialog đang mở.
+        UiThread.Enqueue(() =>
         {
             if (LaunchCore(a)) { _liveIds[a.Id] = 1; _launchAttempts.TryRemove(a.Id, out _); HubLog.Info($"▶ Nhận {Describe(a)}"); }   // đã chạy → xoá bộ đếm thử lại
             else { _inflight.Remove(a.Id); _ = RequeueOrFailAsync(hub, a, "không khởi động được trên máy này"); }
@@ -306,9 +304,7 @@ public sealed class AssignmentWorker : IDisposable
 
     private void StopLocal(Assignment a)
     {
-        var d = Application.Current?.Dispatcher;
-        if (d is null) return;
-        d.BeginInvoke(() =>
+        UiThread.Enqueue(() =>
         {
             if (a.Op == "search") { _search.StopAssignment(a.Id); return; }
             if (a.Op == "scrape")

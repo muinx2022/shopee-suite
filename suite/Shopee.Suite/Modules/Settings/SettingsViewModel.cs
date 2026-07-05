@@ -1,12 +1,11 @@
-using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using Microsoft.Win32;
 using Shopee.Core.Ai;
 using Shopee.Core.Browser;
 using Shopee.Core.Coordination;
 using Shopee.Core.Infrastructure;
 using Shopee.Hub;
+using Shopee.Suite.Services;
 
 namespace Shopee.Suite.Modules.Settings;
 
@@ -131,12 +130,7 @@ public sealed partial class SettingsViewModel : ObservableObject
         HubRuntime.Shared.StateChanged += OnHubStateChanged;
     }
 
-    private void OnHubStateChanged()
-    {
-        var d = System.Windows.Application.Current?.Dispatcher;
-        if (d is null || d.CheckAccess()) ApplyHubState();
-        else d.BeginInvoke(ApplyHubState);
-    }
+    private void OnHubStateChanged() => UiThread.Post(ApplyHubState);
 
     private void ApplyHubState()
     {
@@ -368,7 +362,7 @@ public sealed partial class SettingsViewModel : ObservableObject
         catch (Exception ex)
         {
             HubServerStatus = "✘ Lỗi: " + ex.Message;
-            Dialogs.Show(ex.Message, "Bật Hub", MessageBoxButton.OK, MessageBoxImage.Warning);
+            Dialogs.Notify(ex.Message, "Bật Hub", DialogIcon.Warning);
         }
     }
 
@@ -404,61 +398,57 @@ public sealed partial class SettingsViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private void ExportBackup()
+    private async Task ExportBackupAsync()
     {
         if (!BackupBigSeller && !BackupShopee && !BackupAi) { Status = "Chọn ít nhất 1 mục để sao lưu."; return; }
-        var dlg = new SaveFileDialog
-        {
-            Filter = "ShopeeSuite backup|*.zip",
-            FileName = $"shopeesuite-backup-{DateTime.Now:yyyyMMdd-HHmmss}.zip",
-            Title = "Lưu file sao lưu",
-        };
-        if (dlg.ShowDialog() != true) return;
+        var path = await FilePicker.SaveFileAsync("Lưu file sao lưu", "ShopeeSuite backup|*.zip",
+            defaultFileName: $"shopeesuite-backup-{DateTime.Now:yyyyMMdd-HHmmss}.zip");
+        if (path is null) return;
         try
         {
-            BackupService.Export(dlg.FileName, new BackupOptions(BackupBigSeller, BackupShopee, BackupAi));
-            Status = "✓ Đã sao lưu: " + dlg.FileName;
-            Dialogs.Show($"Đã sao lưu xong:\n{dlg.FileName}\n\nGồm: {SelectedParts()}.\n⚠ File chứa cookie + API key — giữ bảo mật.",
-                "Sao lưu", MessageBoxButton.OK, MessageBoxImage.Information);
+            BackupService.Export(path, new BackupOptions(BackupBigSeller, BackupShopee, BackupAi));
+            Status = "✓ Đã sao lưu: " + path;
+            await Dialogs.InfoAsync($"Đã sao lưu xong:\n{path}\n\nGồm: {SelectedParts()}.\n⚠ File chứa cookie + API key — giữ bảo mật.",
+                "Sao lưu");
         }
         catch (Exception ex)
         {
             Status = "✘ Lỗi sao lưu: " + ex.Message;
-            Dialogs.Show(ex.Message, "Sao lưu", MessageBoxButton.OK, MessageBoxImage.Warning);
+            Dialogs.Notify(ex.Message, "Sao lưu", DialogIcon.Warning);
         }
     }
 
     [RelayCommand]
-    private void BrowseRebaseDir()
+    private async Task BrowseRebaseDirAsync()
     {
-        var dlg = new OpenFolderDialog { Title = "Chọn thư mục chứa file data workbook trên máy này" };
-        if (dlg.ShowDialog() == true) RebaseWorkbookDir = dlg.FolderName;
+        var dir = await FilePicker.PickFolderAsync("Chọn thư mục chứa file data workbook trên máy này");
+        if (dir is not null) RebaseWorkbookDir = dir;
     }
 
     [RelayCommand]
-    private void ImportBackup()
+    private async Task ImportBackupAsync()
     {
         if (!BackupBigSeller && !BackupShopee && !BackupAi) { Status = "Chọn ít nhất 1 mục để khôi phục."; return; }
-        var dlg = new OpenFileDialog { Filter = "ShopeeSuite backup|*.zip|Tất cả|*.*", Title = "Chọn file sao lưu (.zip)" };
-        if (dlg.ShowDialog() != true) return;
+        var path = await FilePicker.OpenFileAsync("Chọn file sao lưu (.zip)", "ShopeeSuite backup|*.zip|Tất cả|*.*");
+        if (path is null) return;
 
         var mode = ImportReplace ? "THAY THẾ (xóa tk cũ rồi ghi đè)" : "GỘP (thêm mới, giữ tk cũ)";
-        if (Dialogs.Show($"Khôi phục từ:\n{dlg.FileName}\n\nChế độ: {mode}\nMục: {SelectedParts()}\n\nTiếp tục?",
-                "Khôi phục", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+        if (!await Dialogs.ConfirmAsync($"Khôi phục từ:\n{path}\n\nChế độ: {mode}\nMục: {SelectedParts()}\n\nTiếp tục?",
+                "Khôi phục")) return;
         try
         {
-            var r = BackupService.Import(dlg.FileName,
+            var r = BackupService.Import(path,
                 new BackupOptions(BackupBigSeller, BackupShopee, BackupAi),
                 ImportReplace,
                 string.IsNullOrWhiteSpace(RebaseWorkbookDir) ? null : RebaseWorkbookDir);
             if (BackupAi && r.AiImported) LoadFromStore();   // làm mới ô AI trên màn hình
             Status = $"✓ Khôi phục: BigSeller +{r.BigSellerAdded}/↻{r.BigSellerUpdated}/bỏ {r.BigSellerSkipped} · Shopee +{r.ShopeeAdded}/↻{r.ShopeeUpdated}/bỏ {r.ShopeeSkipped} · cookie {r.CookiesCopied} · AI {(r.AiImported ? "có" : "—")}.";
-            Dialogs.Show(Status, "Khôi phục", MessageBoxButton.OK, MessageBoxImage.Information);
+            await Dialogs.InfoAsync(Status, "Khôi phục");
         }
         catch (Exception ex)
         {
             Status = "✘ Lỗi khôi phục: " + ex.Message;
-            Dialogs.Show(ex.Message, "Khôi phục", MessageBoxButton.OK, MessageBoxImage.Warning);
+            Dialogs.Notify(ex.Message, "Khôi phục", DialogIcon.Warning);
         }
     }
 
@@ -478,7 +468,7 @@ public sealed partial class SettingsViewModel : ObservableObject
         catch (Exception ex)
         {
             Status = "✘ Lỗi: " + ex.Message;
-            Dialogs.Show(ex.Message, "Test AI", MessageBoxButton.OK, MessageBoxImage.Warning);
+            Dialogs.Notify(ex.Message, "Test AI", DialogIcon.Warning);
         }
         finally { Testing = false; }
     }

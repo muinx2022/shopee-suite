@@ -43,12 +43,7 @@ public sealed partial class WorkspaceAccountViewModel : ObservableObject
         Coordination.Hub.Changed += OnFleetChanged;   // fleet đổi (máy khác chạy/xong) → đổi màu action
     }
 
-    private void OnFleetChanged()
-    {
-        var d = System.Windows.Application.Current?.Dispatcher;
-        if (d is null || d.CheckAccess()) RefreshFleetAll();
-        else d.BeginInvoke(RefreshFleetAll);
-    }
+    private void OnFleetChanged() => Services.UiThread.Post(RefreshFleetAll);
 
     private void RefreshFleetAll() { foreach (var s in Shops) s.RefreshFleet(); }
 

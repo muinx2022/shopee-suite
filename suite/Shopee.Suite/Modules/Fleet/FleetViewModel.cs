@@ -1,11 +1,9 @@
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Text.Json;
-using System.Windows;
 using System.Windows.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using Microsoft.Win32;
 using Shopee.Core.BigSeller;
 using Shopee.Core.Coordination;
 using Shopee.Core.Infrastructure;
@@ -13,6 +11,7 @@ using Shopee.Modules.Search;
 using Shopee.Suite.Infrastructure;
 using Shopee.Suite.Modules.Scrape;
 using Shopee.Suite.Modules.UpdateProduct;
+using Shopee.Suite.Services;
 using ShopeeStatApp.Models;
 using ShopeeStatApp.Services;
 
@@ -192,12 +191,7 @@ public sealed partial class FleetViewModel : ObservableObject
         }
     }
 
-    private void OnHubChanged()
-    {
-        var d = Application.Current?.Dispatcher;
-        if (d is null || d.CheckAccess()) Refresh();
-        else d.BeginInvoke(Refresh);
-    }
+    private void OnHubChanged() => UiThread.Post(Refresh);
 
     [RelayCommand]
     private void Refresh()
@@ -538,18 +532,15 @@ public sealed partial class FleetViewModel : ObservableObject
 
     /// <summary>Nạp file link (tái dùng parser của engine Search) → chia đều cho các máy đang tick.</summary>
     [RelayCommand]
-    private void ChooseSearchFile()
+    private async Task ChooseSearchFileAsync()
     {
-        var dlg = new OpenFileDialog
-        {
-            Filter = "Text (mỗi dòng 1 link)|*.txt|Excel|*.xlsx;*.xlsm|Tất cả|*.*",
-            Title = "Chọn file link category để chia cho các máy",
-        };
-        if (dlg.ShowDialog() != true) return;
+        var file = await FilePicker.OpenFileAsync("Chọn file link category để chia cho các máy",
+            "Text (mỗi dòng 1 link)|*.txt|Excel|*.xlsx;*.xlsm|Tất cả|*.*");
+        if (file is null) return;
         _searchLinks.Clear();
         try
         {
-            _searchLinks.AddRange(LinkParser.LoadFileLinks(dlg.FileName)
+            _searchLinks.AddRange(LinkParser.LoadFileLinks(file)
                 .Select(x => x.Link).Where(s => !string.IsNullOrWhiteSpace(s)));
         }
         catch (Exception ex) { SearchActionStatus = "✘ Lỗi nạp file: " + ex.Message; }
@@ -558,7 +549,7 @@ public sealed partial class FleetViewModel : ObservableObject
         SearchLinkRows.Clear();
         foreach (var link in _searchLinks) SearchLinkRows.Add(new FleetSearchLinkRow(link, OnLinkSelectionChanged));
         _suppressLinkRecompute = false;
-        _searchFileName = Path.GetFileName(dlg.FileName);
+        _searchFileName = Path.GetFileName(file);
         SearchFileDisplay = _searchLinks.Count > 0
             ? $"{_searchFileName} — {_searchLinks.Count} link"
             : $"{_searchFileName} — (không có link hợp lệ)";
@@ -743,15 +734,15 @@ public sealed partial class FleetViewModel : ObservableObject
             // Hộp thoại bộ lọc (giá / đã bán / danh mục) — cùng bộ lọc tab Search, để lọc trước khi xuất.
             var cats = deduped.Select(p => p.Category).Where(c => !string.IsNullOrWhiteSpace(c))
                 .Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(c => c).ToList();
-            var dlg = new SearchExportFilterWindow(cats) { Owner = Application.Current?.MainWindow };
-            if (dlg.ShowDialog() != true) { SearchActionStatus = "Đã hủy xuất."; return; }
+            var dlg = new SearchExportFilterWindow(cats);
+            if (await WindowHost.ShowDialogAsync(dlg) != true) { SearchActionStatus = "Đã hủy xuất."; return; }
 
             var filtered = SearchRunner.ApplyFilter(deduped, dlg.Filter);
             if (filtered.Count == 0) { SearchActionStatus = "Không có sản phẩm nào khớp bộ lọc."; return; }
             var dir = Path.Combine(SuitePaths.ModuleDir("search"), "hub-merged");
             var path = ExcelExporter.Export(filtered, dir, $"tonghop-hub-{filtered.Count}sp");
             SearchActionStatus = $"✔ Đã xuất {filtered.Count}/{deduped.Count} sản phẩm → {path}";
-            try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(dir) { UseShellExecute = true }); } catch { }
+            ShellOpener.OpenFolder(dir);
         }
         catch (Exception ex) { SearchActionStatus = "✘ Lỗi xuất kho gộp: " + ex.Message; }
         finally { _ = RefreshMergedAsync(force: true); }
@@ -763,8 +754,8 @@ public sealed partial class FleetViewModel : ObservableObject
     {
         var client = CoordinationRuntime.Client;
         if (client is null) return;
-        if (Dialogs.Show("Xóa toàn bộ kho gộp kết quả Search trên Hub? Không thể hoàn tác.",
-                "Xóa kho gộp", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
+        if (!await Dialogs.ConfirmAsync("Xóa toàn bộ kho gộp kết quả Search trên Hub? Không thể hoàn tác.",
+                "Xóa kho gộp", DialogIcon.Warning)) return;
         try { await client.ClearSearchProductsAsync(); SearchActionStatus = "✔ Đã xóa kho gộp."; }
         catch (Exception ex) { SearchActionStatus = "✘ Lỗi xóa kho gộp: " + ex.Message; }
         _ = RefreshMergedAsync(force: true);
@@ -827,8 +818,9 @@ public sealed partial class FleetViewModel : ObservableObject
                 }
                 while (Logs.Count > 1000) Logs.RemoveAt(Logs.Count - 1);   // giữ 1000 dòng gần nhất
             }
-            var d = Application.Current?.Dispatcher;
-            if (d is null || d.CheckAccess()) Apply(); else d.Invoke(Apply);
+            // Đợi Apply chạy XONG trên UI thread rồi mới nhả guard — _lastLogId cập nhật trong Apply;
+            // nhả sớm sẽ cho lượt poll sau đọc trùng log cũ → dòng lặp đôi.
+            await UiThread.InvokeAsync(Apply);
         }
         catch { }
         finally { _logsRefreshing = false; }

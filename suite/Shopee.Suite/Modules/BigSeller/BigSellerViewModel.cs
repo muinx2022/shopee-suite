@@ -1,12 +1,11 @@
 using System.Collections.ObjectModel;
 using System.IO;
-using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using Microsoft.Win32;
 using Shopee.Core.BigSeller;
 using Shopee.Core.Coordination;
 using Shopee.Core.Infrastructure;
+using Shopee.Suite.Services;
 
 namespace Shopee.Suite.Modules.BigSeller;
 
@@ -51,12 +50,7 @@ public sealed partial class BigSellerViewModel : ObservableObject
         BigSellerStore.Shared.Changed += OnStoreChanged;
     }
 
-    private void OnStoreChanged()
-    {
-        var d = Application.Current?.Dispatcher;
-        if (d is null || d.CheckAccess()) SyncFromStore();
-        else d.BeginInvoke(SyncFromStore);
-    }
+    private void OnStoreChanged() => UiThread.Post(SyncFromStore);
 
     /// <summary>Nạp lại toàn bộ khi TẬP tài khoản đổi (import/khôi phục, Add/Delete) — KHÔNG rebuild khi chỉ
     /// sửa thuộc tính (tránh mất focus lúc đang nhập + tránh nhân đôi dòng). Khi tập acc không đổi, vẫn đối
@@ -108,20 +102,20 @@ public sealed partial class BigSellerViewModel : ObservableObject
     }
 
     [RelayCommand(CanExecute = nameof(HasSelection))]
-    private void Delete()
+    private async Task DeleteAsync()
     {
-        if (Selected is null) return;
-        if (Dialogs.Show($"Xóa tài khoản BigSeller \"{Selected.DisplayName}\"?", "Xóa",
-                MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+        var sel = Selected;
+        if (sel is null) return;
+        if (!await Dialogs.ConfirmAsync($"Xóa tài khoản BigSeller \"{sel.DisplayName}\"?", "Xóa"))
             return;
-        if (BigSellerStore.Shared.Remove(Selected.Model.Id))   // → Changed → SyncFromStore dựng lại Items
+        if (BigSellerStore.Shared.Remove(sel.Model.Id))   // → Changed → SyncFromStore dựng lại Items
         {
             Selected = Items.FirstOrDefault();
             Status = $"{Items.Count} tài khoản BigSeller.";
         }
         else
         {
-            Status = $"Không xóa được \"{Selected.DisplayName}\".";
+            Status = $"Không xóa được \"{sel.DisplayName}\".";
         }
     }
 
@@ -132,34 +126,29 @@ public sealed partial class BigSellerViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private void BrowseWorkbook()
+    private async Task BrowseWorkbookAsync()
     {
-        if (Selected is null) return;
-        var dlg = new OpenFileDialog { Filter = "Excel|*.xlsx;*.xlsm|Tất cả|*.*", Title = "Chọn workbook" };
-        if (dlg.ShowDialog() == true)
-        {
-            Selected.WorkbookPath = dlg.FileName;
-            SaveStore(
-                $"Workbook có {Selected.SheetOptions.Count} sheet.",
-                "Không lưu được đường dẫn workbook.");
-        }
+        var sel = Selected;
+        if (sel is null) return;
+        var path = await FilePicker.OpenFileAsync("Chọn workbook", "Excel|*.xlsx;*.xlsm|Tất cả|*.*");
+        if (path is null) return;
+        sel.WorkbookPath = path;
+        SaveStore(
+            $"Workbook có {sel.SheetOptions.Count} sheet.",
+            "Không lưu được đường dẫn workbook.");
     }
 
     [RelayCommand]
-    private void BrowseCookie()
+    private async Task BrowseCookieAsync()
     {
-        if (Selected is null) return;
-        var dlg = new SaveFileDialog
-        {
-            Filter = "JSON|*.json", Title = "File cookie BigSeller",
-            FileName = string.IsNullOrWhiteSpace(Selected.CookieFile) ? "bigseller-cookies.json" : Path.GetFileName(Selected.CookieFile),
-            OverwritePrompt = false,
-        };
-        if (dlg.ShowDialog() == true)
-        {
-            Selected.CookieFile = dlg.FileName;
-            SaveStore("Đã cập nhật file cookie BigSeller.", "Không lưu được file cookie BigSeller.");
-        }
+        var sel = Selected;
+        if (sel is null) return;
+        var path = await FilePicker.SaveFileAsync("File cookie BigSeller", "JSON|*.json",
+            defaultFileName: string.IsNullOrWhiteSpace(sel.CookieFile) ? "bigseller-cookies.json" : Path.GetFileName(sel.CookieFile),
+            overwritePrompt: false);
+        if (path is null) return;
+        sel.CookieFile = path;
+        SaveStore("Đã cập nhật file cookie BigSeller.", "Không lưu được file cookie BigSeller.");
     }
 
     [RelayCommand]
@@ -257,9 +246,7 @@ public sealed partial class BigSellerViewModel : ObservableObject
             account.NotifyCookieChanged();
             Status = "✔ Đã lưu cookie — cửa sổ vẫn mở, bấm Dừng khi xong.";
         }
-        var d = Application.Current?.Dispatcher;
-        if (d is null || d.CheckAccess()) Apply();
-        else d.BeginInvoke(Apply);
+        UiThread.Post(Apply);
     }
 
     private bool CanLogin() => HasSelection && IsIdle;
@@ -267,10 +254,5 @@ public sealed partial class BigSellerViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(IsLoggingIn))]
     private void StopLogin() => _loginCts?.Cancel();
 
-    private void AppendLog(string text)
-    {
-        var d = Application.Current?.Dispatcher;
-        if (d is null || d.CheckAccess()) LoginLog.Add(text);
-        else d.BeginInvoke(() => LoginLog.Add(text));
-    }
+    private void AppendLog(string text) => UiThread.Post(() => LoginLog.Add(text));
 }

@@ -1,10 +1,8 @@
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Text.Json;
-using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using Microsoft.Win32;
 using Shopee.Core.Accounts;
 using Shopee.Core.Ai;
 using Shopee.Core.Coordination;
@@ -12,6 +10,7 @@ using Shopee.Core.Infrastructure;
 using Shopee.Core.Proxy;
 using Shopee.Modules.Search;
 using Shopee.Suite.Infrastructure;
+using Shopee.Suite.Services;
 using ShopeeStatApp.Models;
 using ShopeeStatApp.Services;
 
@@ -104,9 +103,7 @@ public sealed partial class SearchViewModel : ObservableObject
         AccountStore.Shared.Changed += () =>
         {
             if (IsRunning) return;
-            var d = Application.Current?.Dispatcher;
-            if (d is null || d.CheckAccess()) Reload();
-            else d.BeginInvoke(Reload);
+            UiThread.Post(Reload);
         };
     }
 
@@ -132,17 +129,13 @@ public sealed partial class SearchViewModel : ObservableObject
 
     // ── Nạp file link + chọn link ───────────────────────────────────────────────
     [RelayCommand]
-    private void ChooseFiles()
+    private async Task ChooseFilesAsync()
     {
-        var dlg = new OpenFileDialog
-        {
-            Filter = "Text (mỗi dòng 1 link)|*.txt|Excel|*.xlsx;*.xlsm|Tất cả|*.*",
-            Multiselect = true,
-            Title = "Chọn file link category",
-        };
-        if (dlg.ShowDialog() != true) return;
+        var files = await FilePicker.OpenFilesAsync("Chọn file link category",
+            "Text (mỗi dòng 1 link)|*.txt|Excel|*.xlsx;*.xlsm|Tất cả|*.*");
+        if (files.Length == 0) return;
         _filePaths.Clear();
-        _filePaths.AddRange(dlg.FileNames);
+        _filePaths.AddRange(files);
         FilesDisplay = $"{_filePaths.Count} file: " + string.Join(", ", _filePaths.Select(Path.GetFileName));
         LoadLinks();
         SaveUiSettings();
@@ -570,24 +563,24 @@ public sealed partial class SearchViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private void BrowseOutputDir()
+    private async Task BrowseOutputDirAsync()
     {
-        var dlg = new OpenFolderDialog { Title = "Chọn thư mục lưu Excel" };
-        if (dlg.ShowDialog() == true) OutputDir = dlg.FolderName;
+        var dir = await FilePicker.PickFolderAsync("Chọn thư mục lưu Excel");
+        if (dir is not null) OutputDir = dir;
     }
 
     [RelayCommand]
     private void OpenOutput()
     {
-        try { if (Directory.Exists(OutputDir)) System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(OutputDir) { UseShellExecute = true }); }
+        try { if (Directory.Exists(OutputDir)) ShellOpener.OpenFolder(OutputDir); }
         catch (Exception ex) { Warn("Không mở được thư mục: " + ex.Message); }
     }
 
     [RelayCommand]
-    private void ClearData()
+    private async Task ClearDataAsync()
     {
-        if (Dialogs.Show("Xóa toàn bộ sản phẩm đã quét trong CSDL? Không thể hoàn tác.", "Xóa dữ liệu",
-                MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
+        if (!await Dialogs.ConfirmAsync("Xóa toàn bộ sản phẩm đã quét trong CSDL? Không thể hoàn tác.", "Xóa dữ liệu",
+                DialogIcon.Warning)) return;
         Db.ClearFileHistory(OutputDir, _filePaths);
         _all.Clear(); _seenLinks.Clear();
         foreach (var t in LinkTabs) { t.Products.Clear(); t.ProductCount = 0; }
@@ -597,10 +590,10 @@ public sealed partial class SearchViewModel : ObservableObject
 
     // ── Tab Danh mục (AI) ───────────────────────────────────────────────────────
     [RelayCommand]
-    private void BrowseDocx()
+    private async Task BrowseDocxAsync()
     {
-        var dlg = new OpenFileDialog { Filter = "Word/Excel danh mục|*.docx;*.xlsx|Tất cả|*.*", Title = "Chọn file danh mục lá Shopee" };
-        if (dlg.ShowDialog() == true) CategoryDocxPath = dlg.FileName;
+        var path = await FilePicker.OpenFileAsync("Chọn file danh mục lá Shopee", "Word/Excel danh mục|*.docx;*.xlsx|Tất cả|*.*");
+        if (path is not null) CategoryDocxPath = path;
     }
 
     [RelayCommand]
@@ -636,17 +629,17 @@ public sealed partial class SearchViewModel : ObservableObject
     private async Task UpdateCategoriesExcelAsync()
     {
         if (!ValidateAi(out var ai)) return;
-        var dlg = new OpenFileDialog { Filter = "Excel|*.xlsx", Title = "Chọn file Excel (cột tên sản phẩm) để gán danh mục" };
-        if (dlg.ShowDialog() != true) return;
+        var excelPath = await FilePicker.OpenFileAsync("Chọn file Excel (cột tên sản phẩm) để gán danh mục", "Excel|*.xlsx");
+        if (excelPath is null) return;
 
         AiBusy = true; _aiCts = new CancellationTokenSource();
         try
         {
-            Log("🤖 Cập nhật danh mục (AI) cho file: " + Path.GetFileName(dlg.FileName));
-            var n = await Db.UpdateCategoriesExcelAsync(ai, CategoryDocxPath, dlg.FileName,
+            Log("🤖 Cập nhật danh mục (AI) cho file: " + Path.GetFileName(excelPath));
+            var n = await Db.UpdateCategoriesExcelAsync(ai, CategoryDocxPath, excelPath,
                 (d, t) => OnUi(() => AiProgress = $"{d}/{t}"), _aiCts.Token);
             Status = $"Đã ghi danh mục cho {n} dòng trong file.";
-            Log($"✔ AI: ghi danh mục {n} dòng → {dlg.FileName}");
+            Log($"✔ AI: ghi danh mục {n} dòng → {excelPath}");
         }
         catch (OperationCanceledException) { Status = "Đã dừng."; }
         catch (Exception ex) { Warn("Lỗi cập nhật danh mục Excel: " + ex.Message); }
@@ -722,13 +715,8 @@ public sealed partial class SearchViewModel : ObservableObject
     private void Warn(string msg)
     {
         Status = msg;
-        Dialogs.Show(msg, "Shopee Search", MessageBoxButton.OK, MessageBoxImage.Information);
+        Dialogs.Notify(msg, "Shopee Search");
     }
 
-    private static void OnUi(Action a)
-    {
-        var d = Application.Current?.Dispatcher;
-        if (d is null || d.CheckAccess()) a();
-        else d.BeginInvoke(a);
-    }
+    private static void OnUi(Action a) => UiThread.Post(a);
 }

@@ -1,6 +1,6 @@
-using System.Windows.Threading;
 using Shopee.Core.BigSeller;
 using Shopee.Core.Coordination;
+using Shopee.Suite.Services;
 
 namespace Shopee.Suite.Infrastructure;
 
@@ -14,7 +14,7 @@ public sealed class HubDispatcher
 {
     public static HubDispatcher Shared { get; } = new();
 
-    private readonly DispatcherTimer _timer;
+    private readonly UiThread.UiTimer _timer;
     private bool _ticking;
 
     /// <summary>Bật/tắt việc Hub tự đẩy job ("▶ Bật điều phối" / "■ Dừng").</summary>
@@ -25,8 +25,7 @@ public sealed class HubDispatcher
 
     private HubDispatcher()
     {
-        _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(10) };
-        _timer.Tick += (_, _) => Tick();
+        _timer = UiThread.Interval(TimeSpan.FromSeconds(10), Tick);
     }
 
     /// <summary>Gọi 1 lần lúc app khởi động trên máy Hub.</summary>

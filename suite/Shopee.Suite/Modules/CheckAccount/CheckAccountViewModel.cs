@@ -1,13 +1,13 @@
 using System.Collections.Concurrent;
 using System.Collections.ObjectModel;
 using System.IO;
-using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Shopee.Core.Accounts;
 using Shopee.Core.Infrastructure;
 using Shopee.Core.Proxy;
 using Shopee.Modules.CheckAccount;
+using Shopee.Suite.Services;
 
 namespace Shopee.Suite.Modules.CheckAccount;
 
@@ -62,8 +62,7 @@ public sealed partial class CheckAccountViewModel : ObservableObject
         var lines = SplitLines(Accounts);
         if (lines.Count == 0)
         {
-            Dialogs.Show("Chưa có tài khoản nào để check.", "Check tài khoản",
-                MessageBoxButton.OK, MessageBoxImage.Information);
+            await Dialogs.InfoAsync("Chưa có tài khoản nào để check.", "Check tài khoản");
             return;
         }
 
@@ -220,11 +219,11 @@ public sealed partial class CheckAccountViewModel : ObservableObject
         try
         {
             Directory.CreateDirectory(ProfilesRoot);
-            Process.Start(new ProcessStartInfo("explorer.exe", $"\"{ProfilesRoot}\"") { UseShellExecute = true });
+            ShellOpener.OpenFolder(ProfilesRoot);
         }
         catch (Exception ex)
         {
-            Dialogs.Show(ex.Message, "Mở thư mục profile", MessageBoxButton.OK, MessageBoxImage.Error);
+            Dialogs.Notify(ex.Message, "Mở thư mục profile", DialogIcon.Error);
         }
     }
 
@@ -247,7 +246,7 @@ public sealed partial class CheckAccountViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            Dialogs.Show("Lỗi đọc tk-ok.txt: " + ex.Message, "TK OK", MessageBoxButton.OK, MessageBoxImage.Error);
+            Dialogs.Notify("Lỗi đọc tk-ok.txt: " + ex.Message, "TK OK", DialogIcon.Error);
             return;
         }
 
@@ -262,11 +261,11 @@ public sealed partial class CheckAccountViewModel : ObservableObject
         try
         {
             if (!File.Exists(OkFilePath)) File.WriteAllText(OkFilePath, "", Encoding.UTF8);
-            Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{OkFilePath}\"") { UseShellExecute = true });
+            ShellOpener.RevealFile(OkFilePath);
         }
         catch (Exception ex)
         {
-            Dialogs.Show(ex.Message, "Mở file", MessageBoxButton.OK, MessageBoxImage.Error);
+            Dialogs.Notify(ex.Message, "Mở file", DialogIcon.Error);
         }
     }
 
@@ -284,8 +283,7 @@ public sealed partial class CheckAccountViewModel : ObservableObject
         var selectedRows = OkAccounts.Where(r => r.Selected && r.Line.Length > 0).ToList();
         if (selectedRows.Count == 0)
         {
-            Dialogs.Show("Tích chọn ít nhất 1 tài khoản để lưu.", "Lưu vào kho chung",
-                MessageBoxButton.OK, MessageBoxImage.Information);
+            await Dialogs.InfoAsync("Tích chọn ít nhất 1 tài khoản để lưu.", "Lưu vào kho chung");
             return;
         }
 
@@ -352,10 +350,10 @@ public sealed partial class CheckAccountViewModel : ObservableObject
         SelectAll = false;
 
         OkStatus = $"Đã lưu {savedRows.Count} tk vào kho chung (thiếu profile {missing}, lỗi {failed}). Còn {OkAccounts.Count} tk.";
-        Dialogs.Show(
+        await Dialogs.InfoAsync(
             $"Đã lưu {savedRows.Count} tài khoản vào kho chung và xóa khỏi TK OK.\n" +
             $"Thêm mới: {added} · Cập nhật: {updated}\nThiếu profile: {missing} · Lỗi: {failed}",
-            "Lưu vào kho chung", MessageBoxButton.OK, MessageBoxImage.Information);
+            "Lưu vào kho chung");
     }
 
     /// <summary>Ghi lại tk-ok.txt từ các dòng còn trong lưới (sau khi đã bỏ tk vừa lưu).</summary>
@@ -457,19 +455,9 @@ public sealed partial class CheckAccountViewModel : ObservableObject
 
     private void SetStatus(string text) => OnUi(() => Status = text);
 
-    private void AppendLog(string text)
-    {
-        var d = Application.Current?.Dispatcher;
-        if (d is null || d.CheckAccess()) LogLines.Add(text);
-        else d.BeginInvoke(() => LogLines.Add(text));
-    }
+    private void AppendLog(string text) => UiThread.Post(() => LogLines.Add(text));
 
-    private static void OnUi(Action action)
-    {
-        var d = Application.Current?.Dispatcher;
-        if (d is null || d.CheckAccess()) action();
-        else d.BeginInvoke(action);
-    }
+    private static void OnUi(Action action) => UiThread.Post(action);
 
     // ── Settings (nhớ proxy key + danh sách) ─────────────────────────────────────
 

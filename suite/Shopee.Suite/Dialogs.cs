@@ -1,40 +1,25 @@
-using System.Windows;
+using Shopee.Suite.Services;
 
 namespace Shopee.Suite;
 
 /// <summary>
-/// Hộp thoại căn giữa theo CỬA SỔ APP (owner). Dùng <see cref="MessageDialog"/> (Window WPF) thay cho
-/// MessageBox native — native căn owner SAI khi Windows scaling ≠ 100% (DPI), gây lệch ra góc. Tự dispatch
-/// về UI thread nếu gọi từ luồng nền; fallback MessageBox native khi chưa có cửa sổ app.
+/// Facade tĩnh hộp thoại của app — ViewModel gọi qua đây, không đụng MessageBox/framework UI trực tiếp.
+/// Ruột là <see cref="IDialogService"/> (hiện <see cref="WpfDialogService"/>, sẽ swap khi chuyển Avalonia).
+/// API async vì dialog Avalonia vốn async; impl tự marshal UI thread nên gọi được từ luồng nền.
 /// </summary>
 public static class Dialogs
 {
-    public static MessageBoxResult Show(string text, string caption, MessageBoxButton button, MessageBoxImage icon)
-    {
-        var owner = OwnerWindow();
-        if (owner is null)
-            return MessageBox.Show(text, caption, button, icon);
-        if (!owner.Dispatcher.CheckAccess())
-            return owner.Dispatcher.Invoke(() => ShowCore(owner, text, caption, button, icon));
-        return ShowCore(owner, text, caption, button, icon);
-    }
+    public static IDialogService Service { get; set; } = new WpfDialogService();
 
-    public static MessageBoxResult Show(string text, string caption) =>
-        Show(text, caption, MessageBoxButton.OK, MessageBoxImage.None);
+    /// <summary>Hộp Có/Không. true = Có.</summary>
+    public static Task<bool> ConfirmAsync(string text, string caption = "", DialogIcon icon = DialogIcon.Question) =>
+        Service.ConfirmAsync(text, caption, icon);
 
-    public static MessageBoxResult Show(string text) =>
-        Show(text, "", MessageBoxButton.OK, MessageBoxImage.None);
+    /// <summary>Hộp OK, đợi người dùng đóng.</summary>
+    public static Task InfoAsync(string text, string caption = "", DialogIcon icon = DialogIcon.Info) =>
+        Service.InfoAsync(text, caption, icon);
 
-    private static MessageBoxResult ShowCore(Window owner, string text, string caption, MessageBoxButton button, MessageBoxImage icon)
-    {
-        var dlg = new MessageDialog(text, caption, button, icon) { Owner = owner };
-        dlg.ShowDialog();
-        return dlg.Result;
-    }
-
-    private static Window? OwnerWindow()
-    {
-        var mw = Application.Current?.MainWindow;
-        return mw is { IsVisible: true } && mw.WindowState != WindowState.Minimized ? mw : null;
-    }
+    /// <summary>Hộp OK bắn-rồi-quên — an toàn từ mọi thread.</summary>
+    public static void Notify(string text, string caption = "", DialogIcon icon = DialogIcon.Info) =>
+        Service.Notify(text, caption, icon);
 }

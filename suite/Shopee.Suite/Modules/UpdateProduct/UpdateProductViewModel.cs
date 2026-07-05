@@ -1,15 +1,14 @@
 using System.Collections.ObjectModel;
 using System.IO;
-using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using Microsoft.Win32;
 using Shopee.Core.Ai;
 using Shopee.Core.BigSeller;
 using Shopee.Core.Coordination;
 using Shopee.Core.Infrastructure;
 using Shopee.Modules.UpdateProduct;
 using Shopee.Suite.Infrastructure;
+using Shopee.Suite.Services;
 
 namespace Shopee.Suite.Modules.UpdateProduct;
 
@@ -67,9 +66,7 @@ public sealed partial class UpdateProductViewModel : ObservableObject
         BigSellerStore.Shared.Changed += () =>
         {
             if (IsRunning || HasActiveWsJob) return;   // đang chạy (batch hoặc inline per-shop) → đừng rebuild list
-            var d = Application.Current?.Dispatcher;
-            if (d is null || d.CheckAccess()) SyncFromStore();
-            else d.BeginInvoke(SyncFromStore);
+            UiThread.Post(SyncFromStore);
         };
     }
 
@@ -130,27 +127,26 @@ public sealed partial class UpdateProductViewModel : ObservableObject
     private void UnselectAllTargets() { foreach (var t in RunTargets) t.IsSelected = false; }
 
     [RelayCommand]
-    private void BrowseImage()
+    private async Task BrowseImageAsync()
     {
-        var dlg = new OpenFileDialog { Filter = "Ảnh|*.jpg;*.jpeg;*.png;*.webp|Tất cả|*.*", Title = "Chọn ảnh" };
-        if (dlg.ShowDialog() == true) ImagePath = dlg.FileName;
+        var path = await FilePicker.OpenFileAsync("Chọn ảnh", "Ảnh|*.jpg;*.jpeg;*.png;*.webp|Tất cả|*.*");
+        if (path is not null) ImagePath = path;
     }
 
     [RelayCommand]
-    private void BrowseVideoFolder()
+    private async Task BrowseVideoFolderAsync()
     {
-        var dlg = new OpenFolderDialog { Title = "Chọn thư mục video" };
-        if (dlg.ShowDialog() == true) VideoFolder = dlg.FolderName;
+        var dir = await FilePicker.PickFolderAsync("Chọn thư mục video");
+        if (dir is not null) VideoFolder = dir;
     }
 
     /// <summary>Mở dialog map field ↔ cột Excel cho shop của 1 đích chạy (mỗi shop dữ liệu có thể khác).</summary>
     [RelayCommand]
-    private void OpenMap(UpdateRunTargetViewModel? target)
+    private async Task OpenMapAsync(UpdateRunTargetViewModel? target)
     {
         var shop = target?.SelectedShop;
         if (shop is null) { Warn("Chọn shop trước khi map dữ liệu."); return; }
-        var win = new ColumnMapWindow(shop) { Owner = Application.Current?.MainWindow };
-        win.ShowDialog();
+        await WindowHost.ShowDialogAsync(new ColumnMapWindow(shop));
     }
 
     [RelayCommand(CanExecute = nameof(IsIdle))]
@@ -205,12 +201,7 @@ public sealed partial class UpdateProductViewModel : ObservableObject
         shopId = ""; kind = UpdateKind.Import; return false;
     }
 
-    private void RaiseJobsChanged()
-    {
-        var d = Application.Current?.Dispatcher;
-        if (d is null || d.CheckAccess()) JobsChanged?.Invoke();
-        else d.BeginInvoke(() => JobsChanged?.Invoke());
-    }
+    private void RaiseJobsChanged() => UiThread.Post(() => JobsChanged?.Invoke());
 
     private async Task RunOneWorkflowAsync(
         string name, UpdateKind kind, Func<UpdateProductRunner, UpdateProductContext, CancellationToken, Task> action,
@@ -399,17 +390,12 @@ public sealed partial class UpdateProductViewModel : ObservableObject
         Status = "Đang dừng…";
     }
 
-    private void Log(string text)
-    {
-        var d = Application.Current?.Dispatcher;
-        if (d is null || d.CheckAccess()) LogLines.Add(text);
-        else d.BeginInvoke(() => LogLines.Add(text));
-    }
+    private void Log(string text) => UiThread.Post(() => LogLines.Add(text));
 
     private void Warn(string msg, bool silent = false)
     {
         Status = msg;
         if (silent) Log("⚠ " + msg);   // đường push-dispatch: KHÔNG mở modal (tránh treo UI), chỉ ghi log
-        else Dialogs.Show(msg, "Update Product", MessageBoxButton.OK, MessageBoxImage.Information);
+        else Dialogs.Notify(msg, "Update Product");
     }
 }

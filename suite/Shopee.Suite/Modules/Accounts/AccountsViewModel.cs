@@ -1,8 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
-using System.Windows;
-using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Shopee.Core.Accounts;
@@ -11,6 +9,7 @@ using Shopee.Core.Coordination;
 using Shopee.Core.Infrastructure;
 using Shopee.Core.Proxy;
 using Shopee.Modules.CheckAccount;
+using Shopee.Suite.Services;
 
 namespace Shopee.Suite.Modules.Accounts;
 
@@ -61,26 +60,11 @@ public sealed partial class AccountsViewModel : ObservableObject
         Reload();
         LoadProxyPool();
         // Kho proxy đổi (Lưu tay hoặc client tự nhận từ Hub) → cập nhật textbox.
-        KiotProxyPoolStore.Shared.Changed += () =>
-        {
-            var d = Application.Current?.Dispatcher;
-            if (d is null || d.CheckAccess()) LoadProxyPool();
-            else d.BeginInvoke(LoadProxyPool);
-        };
+        KiotProxyPoolStore.Shared.Changed += () => UiThread.Post(LoadProxyPool);
         // Tự làm mới khi kho chung thay đổi (vd: Check Shopee Account lưu tk mới vào).
-        AccountStore.Shared.Changed += () =>
-        {
-            var d = Application.Current?.Dispatcher;
-            if (d is null || d.CheckAccess()) Reload();
-            else d.BeginInvoke(Reload);
-        };
+        AccountStore.Shared.Changed += () => UiThread.Post(Reload);
         // Cột "Tình trạng" cập nhật khi Scrape/Search bắt đầu/kết thúc/mượn/nhả tk — chỉ refresh cột, không reload cả list.
-        ShopeeAccountUsage.Shared.Changed += () =>
-        {
-            var d = Application.Current?.Dispatcher;
-            if (d is null || d.CheckAccess()) RefreshUsageColumn();
-            else d.BeginInvoke(RefreshUsageColumn);
-        };
+        ShopeeAccountUsage.Shared.Changed += () => UiThread.Post(RefreshUsageColumn);
         StartReportsPolling();   // chỉ Hub: định kỳ nạp "acc client báo lỗi"
     }
 
@@ -188,17 +172,16 @@ public sealed partial class AccountsViewModel : ObservableObject
         var targets = AccountStore.Shared.Accounts.Where(a => a.Disabled).ToList();
         if (targets.Count == 0)
         {
-            Dialogs.Show("Không có tài khoản lỗi/captcha nào để kiểm tra.",
-                "Kiểm tra tk lỗi", MessageBoxButton.OK, MessageBoxImage.Information);
+            await Dialogs.InfoAsync("Không có tài khoản lỗi/captcha nào để kiểm tra.", "Kiểm tra tk lỗi");
             return;
         }
 
-        if (Dialogs.Show(
+        if (!await Dialogs.ConfirmAsync(
                 $"Kiểm tra lần lượt {targets.Count} tài khoản lỗi/captcha:\n\n" +
                 "• Tk CÓ link captcha đã lưu → TỰ ĐĂNG NHẬP trước (nếu chưa có phiên) rồi MỞ ĐÚNG trang đó để bạn GIẢI TAY; giải xong → về kho, chưa giải → GIỮ lại.\n" +
                 "• Tk KHÔNG có link → tự đăng nhập: vào được → về kho; KHÔNG vào được → XÓA HẲN.\n\n" +
                 "Thao tác xóa KHÔNG hoàn tác được. Tiếp tục?",
-                "Kiểm tra & dọn tk lỗi", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+                "Kiểm tra & dọn tk lỗi", DialogIcon.Warning))
             return;
 
         IsChecking = true;
@@ -298,16 +281,16 @@ public sealed partial class AccountsViewModel : ObservableObject
                 var body = string.Join("\n  • ", show) + (more > 0 ? $"\n  • … và {more} tk nữa" : "");
                 return $"\n\n{title} ({names.Count}):\n  • {body}";
             }
-            Dialogs.Show(
+            await Dialogs.InfoAsync(
                 $"Hoàn tất kiểm tra {targets.Count} tài khoản." +
                 Section("✓ OK → về kho", okNames) +
                 Section("⏳ Giữ lại (chưa giải captcha)", keptNames) +
                 Section("✗ Đã xóa (không vào được)", failNames),
-                "Kết quả dọn tk lỗi", MessageBoxButton.OK, MessageBoxImage.Information);
+                "Kết quả dọn tk lỗi");
         }
         catch (Exception ex)
         {
-            Dialogs.Show("Lỗi khi dọn tk: " + ex.Message, "Kiểm tra tk lỗi", MessageBoxButton.OK, MessageBoxImage.Warning);
+            Dialogs.Notify("Lỗi khi dọn tk: " + ex.Message, "Kiểm tra tk lỗi", DialogIcon.Warning);
             Status = "Đã dừng do lỗi — chưa áp dụng xóa.";
         }
         finally
@@ -449,14 +432,13 @@ public sealed partial class AccountsViewModel : ObservableObject
 
     // ── Panel "Acc client báo lỗi" (CHỈ Hub): client báo captcha/failed về đây, operator quyết ──
     public ObservableCollection<ClientErrorRow> ClientErrorReports { get; } = [];
-    private DispatcherTimer? _reportTimer;
+    private UiThread.UiTimer? _reportTimer;
 
     private void StartReportsPolling()
     {
         if (!IsHubMode) return;
         _ = RefreshReports();
-        _reportTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(15) };
-        _reportTimer.Tick += (_, _) => _ = RefreshReports();
+        _reportTimer = UiThread.Interval(TimeSpan.FromSeconds(15), () => _ = RefreshReports());
         _reportTimer.Start();
     }
 
@@ -532,7 +514,7 @@ public sealed partial class AccountsViewModel : ObservableObject
         catch (Exception ex)
         {
             Status = "✘ Lỗi đồng bộ: " + ex.Message;
-            Dialogs.Show(ex.Message, "Đồng bộ acc từ Hub", MessageBoxButton.OK, MessageBoxImage.Warning);
+            Dialogs.Notify(ex.Message, "Đồng bộ acc từ Hub", DialogIcon.Warning);
         }
         finally { IsSyncing = false; }
     }
@@ -558,7 +540,7 @@ public sealed partial class AccountsViewModel : ObservableObject
     /// ReplaceAll (ghi file + Reload 1 lần) thay vì Remove từng cái (mỗi cái 1 lần ghi → giật).
     /// </summary>
     [RelayCommand(CanExecute = nameof(HasSelection))]
-    private void Delete(object? selectedItems)
+    private async Task DeleteAsync(object? selectedItems)
     {
         var targets = (selectedItems as System.Collections.IList)?
                           .Cast<AccountItemViewModel>().ToList()
@@ -570,7 +552,7 @@ public sealed partial class AccountsViewModel : ObservableObject
         var msg = targets.Count == 1
             ? $"Xóa tài khoản \"{targets[0].DisplayName}\"?"
             : $"Xóa {targets.Count} tài khoản đã chọn?";
-        if (Dialogs.Show(msg, "Xóa tài khoản", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+        if (!await Dialogs.ConfirmAsync(msg, "Xóa tài khoản"))
             return;
 
         var ids = targets.Select(t => t.Model.Id).ToHashSet(StringComparer.Ordinal);
@@ -597,17 +579,17 @@ public sealed partial class AccountsViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private void Import()
+    private async Task ImportAsync()
     {
-        var dlg = new ImportAccountsWindow { Owner = Application.Current.MainWindow };
-        if (dlg.ShowDialog() != true) return;
+        var dlg = new ImportAccountsWindow();
+        if (await WindowHost.ShowDialogAsync(dlg) != true) return;
 
         var logins = SplitLines(dlg.Logins);
         var proxies = SplitLines(dlg.ProxyKeys);
 
         if (logins.Count == 0 && proxies.Count == 0)
         {
-            Dialogs.Show("Chưa nhập gì.", "Import", MessageBoxButton.OK, MessageBoxImage.Information);
+            await Dialogs.InfoAsync("Chưa nhập gì.", "Import");
             return;
         }
 
@@ -618,8 +600,8 @@ public sealed partial class AccountsViewModel : ObservableObject
             var accs = AccountStore.Shared.Accounts.ToList();
             if (accs.Count == 0)
             {
-                Dialogs.Show("Chưa có tài khoản nào để gán proxy. Hãy nhập tài khoản trước.",
-                    "Import proxy", MessageBoxButton.OK, MessageBoxImage.Information);
+                await Dialogs.InfoAsync("Chưa có tài khoản nào để gán proxy. Hãy nhập tài khoản trước.",
+                    "Import proxy");
                 return;
             }
             for (var i = 0; i < accs.Count; i++)
