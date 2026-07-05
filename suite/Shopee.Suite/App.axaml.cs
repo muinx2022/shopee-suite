@@ -63,6 +63,8 @@ public partial class App : Application
             desktop.MainWindow = new MainWindow { DataContext = new ShellViewModel() };
             desktop.ShutdownRequested += (_, _) =>
             {
+                // Flush ghi đĩa hoãn (PersistDebounce) để không mất sửa BigSeller cuối nếu đóng nhanh.
+                try { Shopee.Core.BigSeller.BigSellerStore.Shared.Save(); } catch { }
                 try { Shopee.Hub.HubRuntime.Shared.StopBlocking(); } catch { }
                 try { MultiBraveRuntime.Cleanup(); } catch { }
             };

@@ -75,10 +75,22 @@
                             <DataGridTextColumn Header="Tài khoản" Binding="{Binding Username}" Width="1.4*"
                                                 FontFamily="{DynamicResource MonoFont}" />
                             <DataGridTextColumn Header="Proxy" Binding="{Binding ProxySummary}" Width="1.2*" />
-                            <DataGridTextColumn Header="Tình trạng" Binding="{Binding UsageStatus}" Width="0.9*"
-                                                FontWeight="SemiBold" Foreground="{DynamicResource TextSecondaryBrush}" />
-                            <DataGridTextColumn Header="Lỗi / captcha" Binding="{Binding LastError}" Width="1.6*"
-                                                Foreground="{DynamicResource DangerBrush}" />
+                            <DataGridTemplateColumn Header="Tình trạng" Width="0.9*">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding UsageStatus}" Foreground="{Binding UsageStatusBrush}"
+                                                   FontWeight="SemiBold" VerticalAlignment="Center" Margin="10,0" />
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                            <DataGridTemplateColumn Header="Lỗi / captcha" Width="1.6*">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding LastError}" Foreground="{DynamicResource DangerBrush}"
+                                                   TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Margin="10,0" />
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
                         </DataGrid.Columns>
                     </DataGrid>
                 </Border>

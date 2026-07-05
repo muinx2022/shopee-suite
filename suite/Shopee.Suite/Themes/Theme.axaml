@@ -105,6 +105,12 @@
         <Setter Property="CornerRadius" Value="8" />
     </Style>
 
+    <!-- ══════════ DATAGRID ══════════ -->
+    <!-- Canh giữa dọc nội dung ô (WPF căn giữa mặc định; Avalonia mặc định căn trên). -->
+    <Style Selector="DataGridCell">
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+    </Style>
+
     <!-- ══════════ SIDEBAR NAV (ListBox.nav) ══════════ -->
     <Style Selector="ListBox.nav">
         <Setter Property="Background" Value="Transparent" />

@@ -1,7 +1,17 @@
+using Avalonia.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using Shopee.Core.Accounts;
 
 namespace Shopee.Suite.Modules.Accounts;
+
+/// <summary>Màu cột "Tình trạng" theo giá trị (thay DataTrigger của WPF — Avalonia DataGrid không có ElementStyle/trigger).</summary>
+internal static class UsageBrushes
+{
+    public static readonly IBrush Success = new SolidColorBrush(Color.Parse("#00783C"));
+    public static readonly IBrush Accent = new SolidColorBrush(Color.Parse("#0078D7"));
+    public static readonly IBrush Danger = new SolidColorBrush(Color.Parse("#C8463C"));
+    public static readonly IBrush Muted = new SolidColorBrush(Color.Parse("#6E727A"));
+}
 
 /// <summary>Bao một <see cref="ShopeeAccount"/> để bind 2 chiều trong lưới + form chi tiết.
 /// Mọi setter ghi thẳng vào model nền nên chỉ cần gọi store.Save() là lưu được.</summary>
@@ -73,8 +83,17 @@ public sealed class AccountItemViewModel : ObservableObject
     /// <summary>Tình trạng dùng tk theo lượt chạy hiện tại (Đang/Đã/Chưa dùng). Không chạy gì → "Chưa dùng".</summary>
     public string UsageStatus => ShopeeAccountUsage.Shared.Status(Model.Id);
 
+    /// <summary>Màu chữ cột Tình trạng theo giá trị (xanh=đang · accent=đã · đỏ=captcha · xám=chưa).</summary>
+    public IBrush UsageStatusBrush => UsageStatus switch
+    {
+        "Đang dùng" => UsageBrushes.Success,
+        "Đã dùng" => UsageBrushes.Accent,
+        "⚠ Captcha" => UsageBrushes.Danger,
+        _ => UsageBrushes.Muted,
+    };
+
     /// <summary>Báo UI làm mới cột Tình trạng (gọi khi ShopeeAccountUsage đổi).</summary>
-    public void RefreshUsage() => OnPropertyChanged(nameof(UsageStatus));
+    public void RefreshUsage() { OnPropertyChanged(nameof(UsageStatus)); OnPropertyChanged(nameof(UsageStatusBrush)); }
 
     private void OnChanged(params string[] names)
     {

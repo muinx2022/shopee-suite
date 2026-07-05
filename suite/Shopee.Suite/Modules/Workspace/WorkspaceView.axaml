@@ -33,9 +33,12 @@
             <Setter Property="Margin" Value="0,-4,-4,0" />
             <Setter Property="ZIndex" Value="1" />
         </Style>
-        <!-- Tô nền dòng process (tab Scrape) theo tài khoản. -->
+        <!-- Tô nền dòng process (tab Scrape) theo tài khoản. Cell phải trong suốt để lộ màu nền dòng. -->
         <Style Selector="DataGrid.instances DataGridRow">
             <Setter Property="Background" Value="{Binding AccountBrush}" />
+        </Style>
+        <Style Selector="DataGrid.instances DataGridCell">
+            <Setter Property="Background" Value="Transparent" />
         </Style>
     </UserControl.Styles>
 

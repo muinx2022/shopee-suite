@@ -21,8 +21,10 @@ public sealed class BigSellerAccountItemViewModel : ObservableObject
         RefreshSheets();
     }
 
-    // Mọi chỉnh sửa account tự LƯU ngay (tránh mất khi chuyển module / khởi động lại).
-    private static void Persist() => BigSellerStore.Shared.Save();
+    // Mọi chỉnh sửa account tự LƯU (tránh mất khi chuyển module / khởi động lại). GỘP nhiều lần sửa liên tiếp
+    // (gõ từng phím) thành 1 lần ghi đĩa ~500ms sau lần sửa cuối — thay UpdateSourceTrigger=LostFocus của WPF
+    // (Avalonia bind Text cập nhật mỗi phím). Model đã cập nhật ngay nên chuyển module/lưu tay vẫn đúng dữ liệu.
+    internal static void Persist() => PersistDebounce.Schedule();
 
     public string Label
     {
