@@ -1,6 +1,6 @@
 using System.Collections.ObjectModel;
 using System.IO;
-using System.Windows.Media;
+using Avalonia.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Shopee.Core.Accounts;
@@ -54,17 +54,13 @@ public sealed partial class ScrapeViewModel : ObservableObject
     private RunSession? _session;
 
     // Bảng màu nền NHẠT phân biệt process theo tk BigSeller (mỗi job 1 màu, xoay vòng) — chạy nhiều tk dễ nhìn.
-    private static readonly Brush[] JobPalette = BuildPalette();
-    private static Brush[] BuildPalette()
+    private static readonly IBrush[] JobPalette = BuildPalette();
+    private static IBrush[] BuildPalette()
     {
         string[] hex = { "#FFF6DA", "#E3F2FD", "#E8F5E9", "#FCE4EC", "#F3E5F5", "#FFF3E0", "#E0F7FA", "#F1F8E9" };
-        var arr = new Brush[hex.Length];
+        var arr = new IBrush[hex.Length];
         for (var i = 0; i < hex.Length; i++)
-        {
-            var b = new SolidColorBrush((Color)ColorConverter.ConvertFromString(hex[i])!);
-            b.Freeze();
-            arr[i] = b;
-        }
+            arr[i] = new SolidColorBrush(Color.Parse(hex[i]));
         return arr;
     }
 

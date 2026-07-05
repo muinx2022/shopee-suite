@@ -1,19 +1,31 @@
-using System.Windows;
+using Avalonia;
+using Avalonia.Controls;
+using Avalonia.Controls.ApplicationLifetimes;
+using Avalonia.Threading;
 
 namespace Shopee.Suite.Services;
 
 /// <summary>
-/// Mở cửa sổ modal: gán owner (cửa sổ chính) + marshal UI thread ở MỘT chỗ, để ViewModel không tự đụng
-/// Application.Current/ShowDialog. Chữ ký async sẵn — Avalonia ShowDialog vốn là async, WPF bọc lại.
+/// Mở cửa sổ modal: gán owner (cửa sổ chính) + marshal UI thread ở MỘT chỗ. Avalonia ShowDialog vốn async.
+/// Trả DialogResult (null nếu đóng bằng X); các cửa sổ tuỳ biến Close(true)/Close(false).
 /// </summary>
 public static class WindowHost
 {
-    /// <summary>Mở <paramref name="dialog"/> dạng modal trên cửa sổ chính. Trả DialogResult (null nếu đóng bằng X).</summary>
-    public static Task<bool?> ShowDialogAsync(Window dialog) =>
-        UiThread.InvokeAsync<bool?>(() =>
-        {
-            var mw = Application.Current?.MainWindow;
-            if (mw is { IsVisible: true }) dialog.Owner = mw;
-            return dialog.ShowDialog();
-        });
+    public static Task<bool?> ShowDialogAsync(Window dialog) => OnUi(async () =>
+    {
+        var owner = MainWindow();
+        if (owner is { IsVisible: true })
+            return await dialog.ShowDialog<bool?>(owner);
+        dialog.Show();
+        return (bool?)null;
+    });
+
+    private static Window? MainWindow() =>
+        (Application.Current?.ApplicationLifetime as IClassicDesktopStyleApplicationLifetime)?.MainWindow;
+
+    private static async Task<T> OnUi<T>(Func<Task<T>> f)
+    {
+        if (Dispatcher.UIThread.CheckAccess()) return await f();
+        return await Dispatcher.UIThread.InvokeAsync(f);
+    }
 }

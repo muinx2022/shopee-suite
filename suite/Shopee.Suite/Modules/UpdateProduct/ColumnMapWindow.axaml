@@ -1,0 +1,38 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="Shopee.Suite.Modules.UpdateProduct.ColumnMapWindow"
+        Title="Map dữ liệu" SizeToContent="Height" Width="460" CanResize="False"
+        WindowStartupLocation="CenterOwner"
+        Background="{DynamicResource WindowBackgroundBrush}" FontFamily="{DynamicResource UiFont}">
+    <StackPanel Margin="20">
+        <TextBlock Classes="caption" Margin="0,0,0,4" TextWrapping="Wrap">
+            <Run Text="Map field BigSeller ↔ cột Excel cho shop: " /><Run Text="{Binding ShopName, Mode=OneWay}" FontWeight="SemiBold" />
+        </TextBlock>
+        <TextBlock Classes="caption" Text="Nhập CHỮ cột (A, B, C…); để trống = không dùng field đó." Margin="0,0,0,14" TextWrapping="Wrap" />
+
+        <Grid ColumnDefinitions="150,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto">
+            <TextBlock Grid.Row="0" Grid.Column="0" Text="Tên sp (tên đã sửa)" VerticalAlignment="Center" Margin="0,5" />
+            <TextBox Grid.Row="0" Grid.Column="1" Margin="0,5" Text="{Binding RewrittenName}" />
+
+            <TextBlock Grid.Row="1" Grid.Column="0" Text="Tên gốc" VerticalAlignment="Center" Margin="0,5" />
+            <TextBox Grid.Row="1" Grid.Column="1" Margin="0,5" Text="{Binding ProductName}" />
+
+            <TextBlock Grid.Row="2" Grid.Column="0" Text="SKU" VerticalAlignment="Center" Margin="0,5" />
+            <TextBox Grid.Row="2" Grid.Column="1" Margin="0,5" Text="{Binding Sku}" />
+
+            <TextBlock Grid.Row="3" Grid.Column="0" Text="Giá bán" VerticalAlignment="Center" Margin="0,5" />
+            <TextBox Grid.Row="3" Grid.Column="1" Margin="0,5" Text="{Binding Price}" />
+
+            <TextBlock Grid.Row="4" Grid.Column="0" Text="Item ID (Shopee)" VerticalAlignment="Center" Margin="0,5" />
+            <TextBox Grid.Row="4" Grid.Column="1" Margin="0,5" Text="{Binding ItemId}" />
+
+            <TextBlock Grid.Row="5" Grid.Column="0" Text="Link" VerticalAlignment="Center" Margin="0,5" />
+            <TextBox Grid.Row="5" Grid.Column="1" Margin="0,5" Text="{Binding Link}" />
+        </Grid>
+
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="10" Margin="0,18,0,0">
+            <Button Content="Hủy" MinWidth="90" Click="OnCancel" />
+            <Button Classes="primary" Content="OK" MinWidth="110" Click="OnOk" />
+        </StackPanel>
+    </StackPanel>
+</Window>

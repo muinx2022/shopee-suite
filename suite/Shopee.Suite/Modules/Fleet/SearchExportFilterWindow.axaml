@@ -1,0 +1,39 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="Shopee.Suite.Modules.Fleet.SearchExportFilterWindow"
+        Title="Xuất Excel gộp — bộ lọc" Width="460" Height="330" CanResize="False"
+        WindowStartupLocation="CenterOwner"
+        Background="{DynamicResource WindowBackgroundBrush}" FontFamily="{DynamicResource UiFont}">
+    <Grid Margin="20" RowDefinitions="Auto,Auto,Auto,*,Auto">
+        <TextBlock Grid.Row="0" Classes="caption" Margin="0,0,0,12" TextWrapping="Wrap"
+                   Text="Chọn bộ lọc rồi bấm Xuất — chỉ các sản phẩm khớp mới được đưa vào file Excel gộp." />
+
+        <Grid Grid.Row="1" Margin="0,0,0,12" ColumnDefinitions="Auto,16,Auto,8,Auto">
+            <StackPanel Grid.Column="0">
+                <TextBlock Classes="caption" Text="Giá ≥" />
+                <TextBox x:Name="MinPriceBox" Width="130" Margin="0,4,0,0" Text="0" VerticalContentAlignment="Center" />
+            </StackPanel>
+            <StackPanel Grid.Column="2">
+                <TextBlock Classes="caption" Text="Bán/tháng từ" />
+                <TextBox x:Name="MinSoldFromBox" Width="100" Margin="0,4,0,0" Text="0" VerticalContentAlignment="Center" />
+            </StackPanel>
+            <StackPanel Grid.Column="4">
+                <TextBlock Classes="caption" Text="đến" />
+                <TextBox x:Name="MinSoldToBox" Width="100" Margin="0,4,0,0" Text="0" VerticalContentAlignment="Center" />
+            </StackPanel>
+        </Grid>
+
+        <StackPanel Grid.Row="2">
+            <TextBlock Classes="caption" Text="Danh mục" />
+            <ComboBox x:Name="CategoryBox" Margin="0,4,0,0" HorizontalAlignment="Stretch" />
+        </StackPanel>
+
+        <TextBlock Grid.Row="3" VerticalAlignment="Bottom" Classes="caption" TextWrapping="Wrap"
+                   Text="Để 0 = không giới hạn. Danh mục = (Tất cả) để lấy hết." />
+
+        <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="10" Margin="0,16,0,0">
+            <Button Content="Hủy" MinWidth="90" Click="OnCancel" />
+            <Button Classes="primary" Content="📦  Xuất" MinWidth="120" Click="OnOk" />
+        </StackPanel>
+    </Grid>
+</Window>

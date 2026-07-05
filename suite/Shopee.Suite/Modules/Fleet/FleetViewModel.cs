@@ -1,7 +1,7 @@
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Text.Json;
-using System.Windows.Media;
+using Avalonia.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Shopee.Core.BigSeller;
@@ -378,7 +378,7 @@ public sealed partial class FleetViewModel : ObservableObject
     }
 
     /// <summary>Tính ô trạng thái 1 op của 1 shop. kind: 0 nghỉ/xong · 1 đang chạy · 2 đã xếp · 3 dừng/lỗi.</summary>
-    private static (string text, Brush brush, int kind) OpCell(FleetSnapshot f, string bsId, string shopId, string op)
+    private static (string text, IBrush brush, int kind) OpCell(FleetSnapshot f, string bsId, string shopId, string op)
     {
         var key = $"{bsId}__{shopId}__{op}";
         var lease = f.Leases.FirstOrDefault(l => l.Key == key);
@@ -500,7 +500,7 @@ public sealed partial class FleetViewModel : ObservableObject
 
     /// <summary>Dựng danh sách mục cho selectbox 1 ô op: [0] = HIỆN TRẠNG (chỉ hiện trên mặt ô, ẩn khỏi danh
     /// sách xổ) + 3 hành động đặt tay (✓ Xong / Chưa / ■ Dừng → ghi ledger completed/idle/stopped).</summary>
-    private static List<FleetStateOption> StateOptions(string curText, Brush curBrush) =>
+    private static List<FleetStateOption> StateOptions(string curText, IBrush curBrush) =>
     [
         new FleetStateOption { Text = curText, Brush = curBrush },
         new FleetStateOption { Text = "✓ Xong", Brush = DoneBrush, Status = "completed" },
@@ -922,13 +922,13 @@ public sealed partial class FleetViewModel : ObservableObject
 
     private static string Short(string id) => string.IsNullOrEmpty(id) ? "?" : id[..Math.Min(8, id.Length)];
 
-    private static readonly Brush RunningBrush = Frozen(0x1E, 0xA0, 0x55);
-    private static readonly Brush DoneBrush = Frozen(0x2E, 0x7D, 0x32);
-    private static readonly Brush WarnBrush = Frozen(0xC8, 0x6A, 0x00);
-    private static readonly Brush QueuedBrush = Frozen(0x00, 0x78, 0xD7);
-    private static readonly Brush IdleBrush = Frozen(0x6E, 0x72, 0x7A);
-    private static readonly Brush FailBrush = Frozen(0xD1, 0x34, 0x38);
-    private static Brush Frozen(byte r, byte g, byte b) { var br = new SolidColorBrush(Color.FromRgb(r, g, b)); br.Freeze(); return br; }
+    private static readonly IBrush RunningBrush = Frozen(0x1E, 0xA0, 0x55);
+    private static readonly IBrush DoneBrush = Frozen(0x2E, 0x7D, 0x32);
+    private static readonly IBrush WarnBrush = Frozen(0xC8, 0x6A, 0x00);
+    private static readonly IBrush QueuedBrush = Frozen(0x00, 0x78, 0xD7);
+    private static readonly IBrush IdleBrush = Frozen(0x6E, 0x72, 0x7A);
+    private static readonly IBrush FailBrush = Frozen(0xD1, 0x34, 0x38);
+    private static IBrush Frozen(byte r, byte g, byte b) => new SolidColorBrush(Color.FromRgb(r, g, b));
 }
 
 /// <summary>1 dòng máy trong strip vai trò: chọn vai trò → đẩy lên Hub qua callback.</summary>
@@ -1026,7 +1026,7 @@ public sealed partial class FleetQueueRow : ObservableObject
 public sealed class FleetStateOption
 {
     public string Text { get; init; } = "";
-    public Brush Brush { get; init; } = Brushes.Gray;
+    public IBrush Brush { get; init; } = Brushes.Gray;
     public string? Status { get; init; }
     public bool IsCurrent => Status is null;
     public override string ToString() => Text;
@@ -1041,7 +1041,7 @@ public sealed partial class FleetSearchClientRow : ObservableObject
     /// <summary>Tick = dùng máy này (mặc định). Bỏ tick → loại khỏi việc chia link (tính lại phần các máy khác).</summary>
     [ObservableProperty] private bool _isSelected = true;
     [ObservableProperty] private string _stateText = "";
-    [ObservableProperty] private Brush _stateBrush = Brushes.Gray;
+    [ObservableProperty] private IBrush _stateBrush = Brushes.Gray;
     /// <summary>Nhãn phần link chia cho máy này, vd "link 1–6" (hoặc "(không dùng)" khi bỏ tick).</summary>
     [ObservableProperty] private string _rangeLabel = "";
     /// <summary>Máy đang có việc Search (queued/running) → tắt nút Chạy để khỏi giao chồng.</summary>
@@ -1082,7 +1082,7 @@ public sealed class FleetLogRow
     public string Time { get; init; } = "";
     public string Machine { get; init; } = "";
     public string Text { get; init; } = "";
-    public Brush Brush { get; init; } = Brushes.Gray;
+    public IBrush Brush { get; init; } = Brushes.Gray;
 }
 
 /// <summary>1 việc Hub giao cho máy này (bản client).</summary>
@@ -1095,5 +1095,5 @@ public sealed class FleetMyJobRow
     /// <summary>Khoảng dòng Hub giao cho việc này ("X→Y" hoặc "theo client").</summary>
     public string Rows { get; init; } = "";
     public string StateText { get; init; } = "";
-    public Brush StateBrush { get; init; } = Brushes.Gray;
+    public IBrush StateBrush { get; init; } = Brushes.Gray;
 }

@@ -1,0 +1,35 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="Shopee.Suite.App"
+             xmlns:vm="using:Shopee.Suite.ViewModels"
+             xmlns:views="using:Shopee.Suite.Views"
+             xmlns:ws="using:Shopee.Suite.Modules.Workspace"
+             xmlns:bs="using:Shopee.Suite.Modules.BigSeller"
+             xmlns:srch="using:Shopee.Suite.Modules.Search"
+             xmlns:acc="using:Shopee.Suite.Modules.Accounts"
+             xmlns:ca="using:Shopee.Suite.Modules.CheckAccount"
+             xmlns:fleet="using:Shopee.Suite.Modules.Fleet"
+             xmlns:settings="using:Shopee.Suite.Modules.Settings"
+             RequestedThemeVariant="Light">
+
+    <Application.Styles>
+        <FluentTheme />
+        <StyleInclude Source="avares://Avalonia.Controls.DataGrid/Themes/Fluent.xaml" />
+        <StyleInclude Source="/Themes/Theme.axaml" />
+    </Application.Styles>
+
+    <Application.DataTemplates>
+        <!-- ViewModel-first navigation. Đã port: Welcome, ComingSoon. -->
+        <DataTemplate DataType="vm:WelcomeViewModel"><views:WelcomeView /></DataTemplate>
+        <DataTemplate DataType="vm:ComingSoonViewModel"><views:ComingSoonView /></DataTemplate>
+
+        <!-- GĐ4: 7 module VM chưa port → placeholder chung (GĐ5 thay bằng view Avalonia thật). -->
+        <DataTemplate DataType="ws:WorkspaceViewModel"><views:ModulePlaceholderView /></DataTemplate>
+        <DataTemplate DataType="bs:BigSellerViewModel"><views:ModulePlaceholderView /></DataTemplate>
+        <DataTemplate DataType="srch:SearchViewModel"><views:ModulePlaceholderView /></DataTemplate>
+        <DataTemplate DataType="acc:AccountsViewModel"><views:ModulePlaceholderView /></DataTemplate>
+        <DataTemplate DataType="ca:CheckAccountViewModel"><views:ModulePlaceholderView /></DataTemplate>
+        <DataTemplate DataType="fleet:FleetViewModel"><views:ModulePlaceholderView /></DataTemplate>
+        <DataTemplate DataType="settings:SettingsViewModel"><views:ModulePlaceholderView /></DataTemplate>
+    </Application.DataTemplates>
+</Application>

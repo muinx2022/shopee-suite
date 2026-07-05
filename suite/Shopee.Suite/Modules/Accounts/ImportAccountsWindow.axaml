@@ -1,0 +1,24 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="Shopee.Suite.Modules.Accounts.ImportAccountsWindow"
+        Title="Import tài khoản" Width="720" Height="560"
+        WindowStartupLocation="CenterOwner"
+        Background="{DynamicResource WindowBackgroundBrush}" FontFamily="{DynamicResource UiFont}">
+    <Grid Margin="20" RowDefinitions="*,Auto,0.7*,Auto">
+        <DockPanel Grid.Row="0">
+            <TextBlock DockPanel.Dock="Top" Classes="caption" Margin="0,0,0,5"
+                       Text="Tài khoản Shopee (mỗi dòng 1 tk: user|pass  hoặc  user|pass|.shopee.vn=SPC_F=value)" />
+            <TextBox x:Name="LoginsBox" Classes="mono" AcceptsReturn="True" />
+        </DockPanel>
+
+        <TextBlock Grid.Row="1" Classes="caption" Margin="0,12,0,5"
+                   Text="Proxy (mỗi dòng 1 kiotproxy key hoặc host:port) — ghép xoay vòng cho từng tài khoản. Nếu CHỈ nhập proxy (để trống tài khoản) thì gán xoay vòng cho các tài khoản ĐÃ CÓ." />
+
+        <TextBox Grid.Row="2" x:Name="KeysBox" Classes="mono" AcceptsReturn="True" />
+
+        <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="10" Margin="0,16,0,0">
+            <Button Content="Hủy" MinWidth="90" Click="OnCancel" />
+            <Button Classes="primary" Content="Import" MinWidth="110" Click="OnOk" />
+        </StackPanel>
+    </Grid>
+</Window>

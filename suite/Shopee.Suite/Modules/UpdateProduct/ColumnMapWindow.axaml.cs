@@ -1,4 +1,5 @@
-using System.Windows;
+using Avalonia.Controls;
+using Avalonia.Interactivity;
 using Shopee.Core.BigSeller;
 
 namespace Shopee.Suite.Modules.UpdateProduct;
@@ -7,6 +8,8 @@ public partial class ColumnMapWindow : Window
 {
     private readonly ColumnMapEditViewModel _vm;
 
+    public ColumnMapWindow() => InitializeComponent();
+
     public ColumnMapWindow(BigSellerShop shop)
     {
         InitializeComponent();
@@ -14,11 +17,11 @@ public partial class ColumnMapWindow : Window
         DataContext = _vm;
     }
 
-    private void OnOk(object sender, RoutedEventArgs e)
+    private void OnOk(object? sender, RoutedEventArgs e)
     {
         _vm.Apply();
-        DialogResult = true;
+        Close(true);
     }
 
-    private void OnCancel(object sender, RoutedEventArgs e) => DialogResult = false;
+    private void OnCancel(object? sender, RoutedEventArgs e) => Close(false);
 }

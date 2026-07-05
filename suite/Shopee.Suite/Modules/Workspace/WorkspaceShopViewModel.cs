@@ -1,4 +1,4 @@
-using System.Windows.Media;
+using Avalonia.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using Shopee.Core.BigSeller;
 using Shopee.Core.Coordination;
@@ -27,8 +27,8 @@ public sealed partial class WorkspaceShopViewModel : ObservableObject
     public string Sheet => string.IsNullOrWhiteSpace(Shop.ShopeeDataSheet) ? "— chưa gán sheet" : Shop.ShopeeDataSheet;
 
     [ObservableProperty] private string _scrapeStatusText = "";
-    [ObservableProperty] private Brush _scrapeBackground = Brushes.Transparent;
-    [ObservableProperty] private Brush _scrapeForeground = Brushes.Black;
+    [ObservableProperty] private IBrush _scrapeBackground = Brushes.Transparent;
+    [ObservableProperty] private IBrush _scrapeForeground = Brushes.Black;
     [ObservableProperty] private string _scrapeTooltip = "";
 
     /// <summary>true nếu shop này đang là shop được chọn của tk (1 shop/account) → tô đậm dòng đang chọn.</summary>

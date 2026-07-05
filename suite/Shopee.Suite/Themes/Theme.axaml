@@ -1,0 +1,129 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <Styles.Resources>
+        <!-- ══════════ COLOR / BRUSH TOKENS ══════════ -->
+        <SolidColorBrush x:Key="AccentBrush" Color="#0078D7" />
+        <SolidColorBrush x:Key="AccentHoverBrush" Color="#106EBE" />
+        <SolidColorBrush x:Key="AccentPressedBrush" Color="#005A9E" />
+        <SolidColorBrush x:Key="SuccessBrush" Color="#00783C" />
+        <SolidColorBrush x:Key="SuccessHoverBrush" Color="#06632F" />
+        <SolidColorBrush x:Key="DangerBrush" Color="#C8463C" />
+        <SolidColorBrush x:Key="DangerHoverBrush" Color="#B23A31" />
+        <SolidColorBrush x:Key="WarningBrush" Color="#C88200" />
+
+        <SolidColorBrush x:Key="WindowBackgroundBrush" Color="#F5F7FA" />
+        <SolidColorBrush x:Key="CardBackgroundBrush" Color="#FFFFFF" />
+        <SolidColorBrush x:Key="BorderBrush" Color="#D7D9DE" />
+        <SolidColorBrush x:Key="SubtleBrush" Color="#EEF1F5" />
+
+        <SolidColorBrush x:Key="SidebarBackgroundBrush" Color="#1E2230" />
+        <SolidColorBrush x:Key="SidebarHeaderBrush" Color="#161925" />
+        <SolidColorBrush x:Key="SidebarItemHoverBrush" Color="#2A3042" />
+        <SolidColorBrush x:Key="SidebarSelectedBrush" Color="#2A3042" />
+        <SolidColorBrush x:Key="SidebarTextBrush" Color="#C7CCD6" />
+        <SolidColorBrush x:Key="SidebarMutedBrush" Color="#7E869B" />
+
+        <SolidColorBrush x:Key="LogBackgroundBrush" Color="#121212" />
+        <SolidColorBrush x:Key="LogForegroundBrush" Color="#D2D2D2" />
+
+        <SolidColorBrush x:Key="TextPrimaryBrush" Color="#1B1F24" />
+        <SolidColorBrush x:Key="TextSecondaryBrush" Color="#6E727A" />
+        <SolidColorBrush x:Key="TextOnAccentBrush" Color="#FFFFFF" />
+
+        <!-- ══════════ FONTS ══════════ -->
+        <!-- Inter nhúng (phủ tiếng Việt, giống hệt Win/Ubuntu). Mono cho log/list; Emoji cho icon chuỗi. -->
+        <FontFamily x:Key="UiFont">avares://Avalonia.Fonts.Inter/Assets#Inter</FontFamily>
+        <FontFamily x:Key="MonoFont">Consolas, Cascadia Mono, DejaVu Sans Mono, Liberation Mono, monospace</FontFamily>
+        <FontFamily x:Key="EmojiFont">Segoe UI Emoji, Noto Color Emoji, sans-serif</FontFamily>
+    </Styles.Resources>
+
+    <!-- ══════════ TYPOGRAPHY (class) ══════════ -->
+    <Style Selector="TextBlock.h1">
+        <Setter Property="FontSize" Value="20" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+    </Style>
+    <Style Selector="TextBlock.h2">
+        <Setter Property="FontSize" Value="15" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+    </Style>
+    <Style Selector="TextBlock.body">
+        <Setter Property="FontSize" Value="13" />
+        <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+        <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+    <Style Selector="TextBlock.caption">
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+        <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+    <Style Selector="TextBlock.emoji">
+        <Setter Property="FontFamily" Value="{DynamicResource EmojiFont}" />
+    </Style>
+
+    <!-- ══════════ BUTTON variants (class) — FluentTheme lo phần còn lại ══════════ -->
+    <Style Selector="Button.primary">
+        <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style Selector="Button.success">
+        <Setter Property="Foreground" Value="{DynamicResource SuccessBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource SuccessBrush}" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style Selector="Button.danger">
+        <Setter Property="Foreground" Value="{DynamicResource DangerBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource DangerBrush}" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+
+    <!-- ══════════ TEXTBOX variants (class) ══════════ -->
+    <Style Selector="TextBox.mono">
+        <Setter Property="FontFamily" Value="{DynamicResource MonoFont}" />
+        <Setter Property="FontSize" Value="12.5" />
+        <Setter Property="AcceptsReturn" Value="True" />
+        <Setter Property="TextWrapping" Value="NoWrap" />
+    </Style>
+    <Style Selector="TextBox.log">
+        <Setter Property="FontFamily" Value="{DynamicResource MonoFont}" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="Foreground" Value="{DynamicResource LogForegroundBrush}" />
+        <Setter Property="Background" Value="{DynamicResource LogBackgroundBrush}" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="IsReadOnly" Value="True" />
+        <Setter Property="TextWrapping" Value="NoWrap" />
+    </Style>
+
+    <!-- ══════════ CARD (class trên Border) ══════════ -->
+    <Style Selector="Border.card">
+        <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="8" />
+    </Style>
+
+    <!-- ══════════ SIDEBAR NAV (ListBox.nav) ══════════ -->
+    <Style Selector="ListBox.nav">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="Padding" Value="0" />
+    </Style>
+    <Style Selector="ListBox.nav ListBoxItem">
+        <Setter Property="Margin" Value="12,3" />
+        <Setter Property="Padding" Value="6,8" />
+        <Setter Property="CornerRadius" Value="11" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+    </Style>
+    <Style Selector="ListBox.nav ListBoxItem:pointerover /template/ ContentPresenter">
+        <Setter Property="Background" Value="{DynamicResource SidebarItemHoverBrush}" />
+        <Setter Property="CornerRadius" Value="11" />
+    </Style>
+    <Style Selector="ListBox.nav ListBoxItem:selected /template/ ContentPresenter">
+        <Setter Property="Background" Value="{DynamicResource SidebarSelectedBrush}" />
+        <Setter Property="CornerRadius" Value="11" />
+    </Style>
+</Styles>

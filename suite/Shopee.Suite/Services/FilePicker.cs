@@ -3,7 +3,7 @@ namespace Shopee.Suite.Services;
 /// <summary>Facade tĩnh chọn file/thư mục (khớp phong cách .Shared của codebase). Ruột swap khi chuyển Avalonia.</summary>
 public static class FilePicker
 {
-    public static IFilePickerService Service { get; set; } = new WpfFilePickerService();
+    public static IFilePickerService Service { get; set; } = new AvaloniaFilePickerService();
 
     public static Task<string?> OpenFileAsync(string title, string filter) => Service.OpenFileAsync(title, filter);
     public static Task<string[]> OpenFilesAsync(string title, string filter) => Service.OpenFilesAsync(title, filter);

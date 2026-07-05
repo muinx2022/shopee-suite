@@ -1,5 +1,5 @@
 using System.Collections.ObjectModel;
-using System.Windows.Media;
+using Avalonia.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using Shopee.Core.BigSeller;
 using Shopee.Core.Scrape;
@@ -11,8 +11,8 @@ public sealed class ShopScrapeStatus
 {
     public string DisplayName { get; init; } = "";
     public string StatusText { get; init; } = "";
-    public Brush Background { get; init; } = Brushes.Transparent;
-    public Brush Foreground { get; init; } = Brushes.Black;
+    public IBrush Background { get; init; } = Brushes.Transparent;
+    public IBrush Foreground { get; init; } = Brushes.Black;
     public string Tooltip { get; init; } = "";
 }
 
@@ -196,14 +196,9 @@ public sealed partial class ScrapeTargetViewModel : ObservableObject
     }
 
     // Màu chip (nền nhạt + chữ đậm) cho 3 trạng thái — freeze để tái dùng, không tạo brush mỗi lần.
-    private static readonly Brush DoneBg = FrozenBrush("#E8F5E9"), DoneFg = FrozenBrush("#2E7D32");
-    private static readonly Brush RunningBg = FrozenBrush("#FFF3E0"), RunningFg = FrozenBrush("#E65100");
-    private static readonly Brush TodoBg = FrozenBrush("#ECEFF1"), TodoFg = FrozenBrush("#546E7A");
+    private static readonly IBrush DoneBg = FrozenBrush("#E8F5E9"), DoneFg = FrozenBrush("#2E7D32");
+    private static readonly IBrush RunningBg = FrozenBrush("#FFF3E0"), RunningFg = FrozenBrush("#E65100");
+    private static readonly IBrush TodoBg = FrozenBrush("#ECEFF1"), TodoFg = FrozenBrush("#546E7A");
 
-    private static Brush FrozenBrush(string hex)
-    {
-        var b = new SolidColorBrush((Color)ColorConverter.ConvertFromString(hex)!);
-        b.Freeze();
-        return b;
-    }
+    private static IBrush FrozenBrush(string hex) => new SolidColorBrush(Color.Parse(hex));
 }

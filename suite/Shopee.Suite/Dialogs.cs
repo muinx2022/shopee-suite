@@ -9,7 +9,7 @@ namespace Shopee.Suite;
 /// </summary>
 public static class Dialogs
 {
-    public static IDialogService Service { get; set; } = new WpfDialogService();
+    public static IDialogService Service { get; set; } = new AvaloniaDialogService();
 
     /// <summary>Hộp Có/Không. true = Có.</summary>
     public static Task<bool> ConfirmAsync(string text, string caption = "", DialogIcon icon = DialogIcon.Question) =>
