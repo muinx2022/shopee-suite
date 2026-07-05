@@ -1,0 +1,2 @@
+# Script shell chạy trên Ubuntu → BẮT BUỘC line-ending LF (CRLF làm "bad interpreter"/lỗi chạy).
+*.sh text eol=lf
