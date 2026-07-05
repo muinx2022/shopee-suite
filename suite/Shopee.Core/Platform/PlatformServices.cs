@@ -1,3 +1,4 @@
+using Shopee.Core.Platform.Linux;
 using Shopee.Core.Platform.Windows;
 
 namespace Shopee.Core.Platform;
@@ -30,12 +31,20 @@ public static class PlatformServices
             WindowActivator = new WindowsWindowActivator();
             OsCrypt = new WindowsOsCrypt();
         }
+        else if (OperatingSystem.IsLinux())
+        {
+            ProcessLifetime = new LinuxProcessLifetimeScope();
+            Memory = new LinuxSystemMemoryInfo();
+            WorkingSet = new LinuxWorkingSetTrimmer();
+            ProcessFinder = new LinuxBrowserProcessFinder();
+            BrowserLocator = new LinuxBrowserLocator();
+            WindowActivator = new NoopWindowActivator();
+            OsCrypt = new NoopOsCrypt();
+        }
         else
         {
-            // GĐ3 lắp impl Linux (systemd-run scope, /proc finder, /proc/meminfo, locator, no-op focus/DPAPI).
-            // GĐ1–2 chỉ chạy Windows nên nhánh này không bao giờ tới lúc runtime.
-            throw new PlatformNotSupportedException(
-                "Impl Linux chưa lắp (GĐ3). Bản hiện tại chỉ chạy trên Windows.");
+            // macOS/khác chưa hỗ trợ (dự án chỉ nhắm Windows + Ubuntu).
+            throw new PlatformNotSupportedException("Chỉ hỗ trợ Windows và Linux.");
         }
     }
 }
