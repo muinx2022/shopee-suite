@@ -24,8 +24,6 @@ public sealed class BrowserLauncher
     public int CdpPort => _cdpPort;
     public BrowserKind Kind => _kind;
 
-    private string ProcessName => _kind == BrowserKind.Brave ? "brave.exe" : "msedge.exe";
-
     public string? DetectExePath() => Detect(_kind);
 
     /// <summary>Thư mục "User Data" mẫu của trình duyệt (phải có Default) — dùng làm nguồn copy
@@ -127,9 +125,10 @@ public sealed class BrowserLauncher
 
         // Chromium tách tiến trình: exe vừa Start thường thoát ngay sau khi bàn giao cho tiến
         // trình cửa sổ thật (PID khác) → _process.Kill() không giết được cửa sổ. Phải kill theo
-        // --user-data-dir (mỗi tk 1 profile riêng nên match chính xác, không đụng trình duyệt khác).
+        // --user-data-dir qua BraveProcessReaper (khớp ĐÚNG giá trị, không Contains — tránh giết nhầm
+        // "acc_1" khi target "acc_10", vì profile CheckAccount lấy theo username có thể là tiền tố nhau).
         if (!string.IsNullOrWhiteSpace(_profileDir))
-            KillProcessesForProfile(ProcessName, _profileDir);
+            BraveProcessReaper.KillByUserDataDir(_profileDir);
 
         try { _process?.Dispose(); } catch { }
         _process = null;
@@ -175,39 +174,4 @@ public sealed class BrowserLauncher
         catch { }
     }
 
-    private static void KillProcessesForProfile(string processName, string profileDir)
-    {
-        var needle = profileDir.TrimEnd('\\', '/');
-        var killedAny = false;
-        try
-        {
-            using var searcher = new System.Management.ManagementObjectSearcher(
-                $"SELECT ProcessId, CommandLine FROM Win32_Process WHERE Name = '{processName}'");
-            foreach (var obj in searcher.Get())
-            {
-                try
-                {
-                    var commandLine = obj["CommandLine"] as string;
-                    if (string.IsNullOrEmpty(commandLine) ||
-                        !commandLine.Contains(needle, StringComparison.OrdinalIgnoreCase))
-                        continue;
-
-                    var pid = Convert.ToInt32(obj["ProcessId"]);
-                    if (pid <= 0) continue;
-                    using var p = Process.GetProcessById(pid);
-                    if (!p.HasExited)
-                    {
-                        p.Kill(entireProcessTree: true);
-                        killedAny = true;
-                    }
-                }
-                catch { }
-                finally { obj.Dispose(); }
-            }
-
-            if (killedAny)
-                Thread.Sleep(400);
-        }
-        catch { }
-    }
 }

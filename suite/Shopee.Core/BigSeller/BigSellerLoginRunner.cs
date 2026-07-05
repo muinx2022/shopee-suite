@@ -416,28 +416,8 @@ public static class BigSellerLoginRunner
             c.TryGetProperty("name", out var n) && n.GetString() == AuthCookieName &&
             c.TryGetProperty("value", out var v) && (v.GetString()?.Length ?? 0) > 5);
 
+    // Ghi file cookie qua engine chung (atomic tmp+move, có retry) — file này bị Hub sync + importer đọc
+    // đồng thời trong lúc login đang poll & ghi lặp; ghi trực tiếp trước đây gây torn-read cookie hỏng đa máy.
     private static bool TryWriteCookieFile(string cookieFile, IReadOnlyCollection<JsonElement> cookies, Action<string> log)
-    {
-        try
-        {
-            using var stream = new MemoryStream();
-            using (var writer = new Utf8JsonWriter(stream, new JsonWriterOptions { Indented = true }))
-            {
-                writer.WriteStartObject();
-                writer.WriteString("exportedAt", DateTimeOffset.UtcNow.ToString("o"));
-                writer.WritePropertyName("cookies");
-                writer.WriteStartArray();
-                foreach (var c in cookies) c.WriteTo(writer);
-                writer.WriteEndArray();
-                writer.WriteEndObject();
-            }
-            File.WriteAllBytes(cookieFile, stream.ToArray());
-            return true;
-        }
-        catch (Exception ex)
-        {
-            log("  (không ghi được file cookie: " + ex.Message + ")");
-            return false;
-        }
-    }
+        => BigSellerCookieEngine.TryWriteCookieFile(cookieFile, cookies, log);
 }

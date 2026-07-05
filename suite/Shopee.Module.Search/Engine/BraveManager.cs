@@ -69,12 +69,9 @@ public sealed class BraveManager(AppSettingsService appSettings)
         _cdpPort = FindFreePort();
         _currentProfileDir = Path.GetFullPath(profileDir);
         var args = BuildArgs(_cdpPort, profileDir, proxyServer, extPath, wsPort);
-        _process = Process.Start(new ProcessStartInfo
-        {
-            FileName = bravePath,
-            Arguments = args,
-            UseShellExecute = false,
-        });
+        // Phóng qua BraveJobObject (KILL_ON_JOB_CLOSE): app tắt/crash/force-kill → OS tự giết Brave này,
+        // không để lại cửa sổ mồ côi. Trước đây Search dùng Process.Start trần → Brave sống sót qua crash.
+        _process = Shopee.Core.Browser.BraveJobObject.Start(bravePath, args);
     }
 
     public async Task CleanupRestoredTabsAsync(int wsPort, CancellationToken ct = default)
@@ -348,6 +345,10 @@ public sealed class BraveManager(AppSettingsService appSettings)
             $"--remote-debugging-port={cdpPort}",
             $"--load-extension=\"{extPath}\"",
         };
+
+        // Profile Search cũng BỀN (giữ cookie login) → phải chặn cache phình như mọi Brave khác của app.
+        // Thiếu bước này chính là nguồn cache 27 GB đã đo (xem BraveCachePolicy).
+        parts.AddRange(Shopee.Core.Browser.BraveCachePolicy.DiskLimitArgs);
 
         if (!string.IsNullOrWhiteSpace(proxy))
             parts.Add($"--proxy-server={proxy}");

@@ -397,6 +397,9 @@ internal sealed class BigSellerImportToStoreRunner : IAsyncDisposable
             try { _braveProcess.Dispose(); } catch { }
             _braveProcess = null;
         }
+        // Brave fork browser thật rồi stub thoát → Kill no-op, browser cũ giữ profile lock. Phải diệt
+        // orphan theo --user-data-dir TRƯỚC khi mở lại cùng profile, kẻo instance mới đụng lock/port cũ.
+        try { BraveProcessReaper.KillByUserDataDir(_settings.ProfileDir, _log); } catch { }
 
         StartBraveForBigSeller();
         _log($"  Đã khởi động lại Brave PID={_braveProcess?.Id.ToString() ?? "unknown"}, chờ CDP port {_settings.DebugPort}…");
@@ -779,12 +782,9 @@ internal sealed class BigSellerImportToStoreRunner : IAsyncDisposable
         BraveFleet.RegisterActiveProfile(_settings.ProfileDir);
 
         _log("Mở Brave BigSeller profile...");
-        _braveProcess = Process.Start(new ProcessStartInfo
-        {
-            FileName = _settings.BravePath,
-            Arguments = args,
-            UseShellExecute = false,
-        });
+        // Phóng qua BraveJobObject (KILL_ON_JOB_CLOSE): app tắt/crash → OS tự giết Brave này. Vẫn cần
+        // reaper ở DisposeAsync/RestartBrowserAsync vì Brave fork browser thật rồi stub thoát.
+        _braveProcess = BraveJobObject.Start(_settings.BravePath, args);
     }
 
     private static void ClearSessionTabs(string profileDir)
@@ -872,6 +872,9 @@ internal sealed class BigSellerImportToStoreRunner : IAsyncDisposable
             try { _braveProcess.Dispose(); } catch { }
             _braveProcess = null;
         }
+        // Fallback: Brave hay fork browser thật rồi để stub thoát ngay → _braveProcess.HasExited=true,
+        // Kill ở trên no-op, browser thật thành orphan (giữ profile lock + RAM). Diệt theo --user-data-dir.
+        try { BraveProcessReaper.KillByUserDataDir(_settings.ProfileDir, _log); } catch { }
 
         // Gỡ đăng ký SAU khi đã giết → nếu còn sót tiến trình nào, lần sweep kế dọn nốt (không rò qua các lượt).
         BraveFleet.UnregisterActiveProfile(_settings.ProfileDir);

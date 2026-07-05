@@ -1601,10 +1601,9 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
         BraveFleet.RegisterActiveProfile(_settings.ProfileDir);
 
         _log("Mở Brave BigSeller profile...");
-        _braveProcess = Process.Start(new ProcessStartInfo
-        {
-            FileName = _settings.BravePath, Arguments = args, UseShellExecute = false,
-        });
+        // Phóng qua BraveJobObject (KILL_ON_JOB_CLOSE): app tắt/crash → OS tự giết Brave này. Vẫn cần
+        // reaper ở DisposeAsync vì Brave fork browser thật rồi stub thoát (job chỉ dọn khi app chết hẳn).
+        _braveProcess = BraveJobObject.Start(_settings.BravePath, args);
     }
 
     private Task WaitIfNotPausedAsync(CancellationToken ct) =>

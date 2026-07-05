@@ -1128,7 +1128,9 @@ internal sealed class ProductNameRewriteRunner
                 return candidate;
             allWords.RemoveAt(allWords.Count - 1);
         }
-        return "";
+        // Fallback: 1 từ duy nhất dài hơn maxLength → cắt cứng thay vì trả "" (title rỗng làm hỏng sản phẩm).
+        // Khớp hành vi bản trong BigSellerProductUpdateRunner.
+        return productName[..Math.Min(maxLength, productName.Length)].Trim();
     }
 
     private static string? NullIfEmpty(string? value)
