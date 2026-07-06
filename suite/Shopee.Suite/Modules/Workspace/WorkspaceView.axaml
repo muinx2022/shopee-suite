@@ -42,7 +42,8 @@
         </Style>
     </UserControl.Styles>
 
-    <Grid Margin="28,22,28,24" RowDefinitions="Auto,Auto,*,230">
+    <!-- Hàng cuối (log) 150px: nhường chiều cao cho vùng cấu hình tk (Scrape+Update+ảnh/video) khỏi sinh scroll dọc. -->
+    <Grid Margin="28,22,28,24" RowDefinitions="Auto,Auto,*,150">
 
         <!-- ════ Header ════ -->
         <Grid Grid.Row="0" Margin="0,0,0,12">
@@ -126,15 +127,17 @@
                                             ToolTip.Tip="Mở tab BigSeller để đăng nhập lấy cookie / sửa workbook · cookie · shop · proxy của tài khoản này." />
                                 </StackPanel>
                             </Grid>
-                            <TextBlock Text="Workbook" Classes="caption" />
-                            <TextBox Text="{Binding WorkbookPath, Mode=OneWay}" IsReadOnly="True" Margin="0,3,0,10" Padding="6,3"
-                                     FontFamily="{DynamicResource MonoFont}" FontSize="11.5" TextWrapping="Wrap" />
-                            <TextBlock Text="Shop (mỗi shop = 1 sheet) — bấm nút ngay trên dòng shop để chạy cho đúng shop đó"
-                                       Classes="caption" Margin="0,0,0,6" TextWrapping="Wrap" />
+                            <Grid ColumnDefinitions="Auto,*" Margin="0,0,0,6">
+                                <TextBlock Grid.Column="0" Text="Workbook" Classes="caption" VerticalAlignment="Center" Margin="0,0,8,0" />
+                                <TextBox Grid.Column="1" Text="{Binding WorkbookPath, Mode=OneWay}" IsReadOnly="True" Padding="6,2"
+                                         FontFamily="{DynamicResource MonoFont}" FontSize="11.5" TextWrapping="NoWrap" MinHeight="26" />
+                            </Grid>
+                            <TextBlock Text="Shop (mỗi shop = 1 sheet) — bấm nút trên dòng shop để chạy đúng shop đó"
+                                       Classes="caption" Margin="0,0,0,3" TextWrapping="NoWrap" />
                         </StackPanel>
 
                         <!-- Lưới SHOP pipeline -->
-                        <Border DockPanel.Dock="Top" Classes="card" ClipToBounds="True" MaxHeight="180">
+                        <Border DockPanel.Dock="Top" Classes="card" ClipToBounds="True" MaxHeight="148">
                             <DataGrid x:Name="ShopGrid" ItemsSource="{Binding Shops}" IsReadOnly="True"
                                       BorderThickness="0" SelectionChanged="ShopGrid_SelectionChanged" RowHeight="36"
                                       AutoGenerateColumns="False">
@@ -237,40 +240,43 @@
                         <ScrollViewer VerticalScrollBarVisibility="Auto" Margin="0,12,0,0">
                             <StackPanel>
                                 <StackPanel.Styles>
+                                    <!-- Ô nhập gọn cho Full HD: Fluent mặc định cao ~32 → 26, padding chặt, để cụm cấu hình
+                                         KHÔNG tràn vùng → hết scrollbar dọc. -->
                                     <Style Selector="TextBox">
-                                        <Setter Property="Padding" Value="5,2" />
+                                        <Setter Property="Padding" Value="6,1" />
                                         <Setter Property="FontSize" Value="11.5" />
+                                        <Setter Property="MinHeight" Value="26" />
                                     </Style>
                                 </StackPanel.Styles>
                                 <TextBlock Text="Cấu hình SCRAPE (riêng tài khoản này)" Classes="caption" FontWeight="SemiBold" Margin="0,0,0,4" />
                                 <WrapPanel>
-                                    <StackPanel Margin="0,0,12,8"><TextBlock Text="Từ dòng" Classes="caption" />
-                                        <TextBox Width="72" Margin="0,3,0,0" Text="{Binding ScrapeTarget.StartRow}" /></StackPanel>
-                                    <StackPanel Margin="0,0,12,8"><TextBlock Text="Đến dòng (0=hết)" Classes="caption" />
-                                        <TextBox Width="96" Margin="0,3,0,0" Text="{Binding ScrapeTarget.EndRow}" /></StackPanel>
-                                    <StackPanel Margin="0,0,12,8"><TextBlock Text="Dòng / lần" Classes="caption" />
-                                        <TextBox Width="80" Margin="0,3,0,0" Text="{Binding ScrapeTarget.RowsPerAccount}" /></StackPanel>
-                                    <StackPanel Margin="0,0,12,8"><TextBlock Text="Số process" Classes="caption" />
-                                        <TextBox Width="80" Margin="0,3,0,0" Text="{Binding ScrapeTarget.MaxProcess}" /></StackPanel>
-                                    <StackPanel Margin="0,0,12,8"><TextBlock Text="Số tk / khung" Classes="caption" />
-                                        <TextBox Width="80" Margin="0,3,0,0" Text="{Binding ScrapeTarget.FrameSize}" /></StackPanel>
-                                    <StackPanel Margin="0,0,0,8"><TextBlock Text="Thư mục video" Classes="caption" />
-                                        <TextBox Width="180" Margin="0,3,0,0" FontFamily="{DynamicResource MonoFont}"
+                                    <StackPanel Margin="0,0,10,2"><TextBlock Text="Từ dòng" Classes="caption" />
+                                        <TextBox Width="72" Margin="0,1,0,0" Text="{Binding ScrapeTarget.StartRow}" /></StackPanel>
+                                    <StackPanel Margin="0,0,10,2"><TextBlock Text="Đến dòng (0=hết)" Classes="caption" />
+                                        <TextBox Width="96" Margin="0,1,0,0" Text="{Binding ScrapeTarget.EndRow}" /></StackPanel>
+                                    <StackPanel Margin="0,0,10,2"><TextBlock Text="Dòng / lần" Classes="caption" />
+                                        <TextBox Width="80" Margin="0,1,0,0" Text="{Binding ScrapeTarget.RowsPerAccount}" /></StackPanel>
+                                    <StackPanel Margin="0,0,10,2"><TextBlock Text="Số process" Classes="caption" />
+                                        <TextBox Width="80" Margin="0,1,0,0" Text="{Binding ScrapeTarget.MaxProcess}" /></StackPanel>
+                                    <StackPanel Margin="0,0,10,2"><TextBlock Text="Số tk / khung" Classes="caption" />
+                                        <TextBox Width="80" Margin="0,1,0,0" Text="{Binding ScrapeTarget.FrameSize}" /></StackPanel>
+                                    <StackPanel Margin="0,0,0,2"><TextBlock Text="Thư mục video" Classes="caption" />
+                                        <TextBox Width="180" Margin="0,1,0,0" FontFamily="{DynamicResource MonoFont}"
                                                  Text="{Binding #Root.DataContext.Scrape.VideoDir}" /></StackPanel>
                                 </WrapPanel>
 
-                                <TextBlock Text="Cấu hình UPDATE (riêng tài khoản này)" Classes="caption" FontWeight="SemiBold" Margin="0,8,0,4" />
+                                <TextBlock Text="Cấu hình UPDATE (riêng tài khoản này)" Classes="caption" FontWeight="SemiBold" Margin="0,2,0,3" />
                                 <WrapPanel>
-                                    <StackPanel Margin="0,0,12,8"><TextBlock Text="Từ dòng" Classes="caption" />
-                                        <TextBox Width="72" Margin="0,3,0,0" Text="{Binding UpdateTarget.StartRow}" /></StackPanel>
-                                    <StackPanel Margin="0,0,12,8"><TextBlock Text="Đến dòng (0=hết)" Classes="caption" />
-                                        <TextBox Width="96" Margin="0,3,0,0" Text="{Binding UpdateTarget.EndRow}" /></StackPanel>
-                                    <StackPanel Margin="0,0,12,8"><TextBlock Text="Update worker" Classes="caption" />
-                                        <TextBox Width="90" Margin="0,3,0,0" Text="{Binding UpdateTarget.UpdateWorkers}" /></StackPanel>
-                                    <StackPanel Margin="0,0,0,8"><TextBlock Text="Reload (s)" Classes="caption" />
-                                        <TextBox Width="72" Margin="0,3,0,0" Text="{Binding UpdateTarget.ListingReloadSeconds}" /></StackPanel>
+                                    <StackPanel Margin="0,0,10,2"><TextBlock Text="Từ dòng" Classes="caption" />
+                                        <TextBox Width="72" Margin="0,1,0,0" Text="{Binding UpdateTarget.StartRow}" /></StackPanel>
+                                    <StackPanel Margin="0,0,10,2"><TextBlock Text="Đến dòng (0=hết)" Classes="caption" />
+                                        <TextBox Width="96" Margin="0,1,0,0" Text="{Binding UpdateTarget.EndRow}" /></StackPanel>
+                                    <StackPanel Margin="0,0,10,2"><TextBlock Text="Update worker" Classes="caption" />
+                                        <TextBox Width="90" Margin="0,1,0,0" Text="{Binding UpdateTarget.UpdateWorkers}" /></StackPanel>
+                                    <StackPanel Margin="0,0,0,2"><TextBlock Text="Reload (s)" Classes="caption" />
+                                        <TextBox Width="72" Margin="0,1,0,0" Text="{Binding UpdateTarget.ListingReloadSeconds}" /></StackPanel>
                                 </WrapPanel>
-                                <Grid Margin="0,2,0,0" ColumnDefinitions="Auto,*,Auto,Auto,*,Auto">
+                                <Grid Margin="0,3,0,0" ColumnDefinitions="Auto,*,Auto,Auto,*,Auto">
                                     <TextBlock Grid.Column="0" Text="Ảnh (chung)" Classes="caption" VerticalAlignment="Center" Margin="0,0,8,0" />
                                     <TextBox Grid.Column="1" FontFamily="{DynamicResource MonoFont}" VerticalContentAlignment="Center"
                                              Text="{Binding #Root.DataContext.Update.ImagePath}" />
