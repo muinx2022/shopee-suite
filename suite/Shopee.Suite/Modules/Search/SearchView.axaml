@@ -89,8 +89,27 @@
                         </Border>
                     </DockPanel>
 
-                    <!-- Mỗi link = 1 tab: tài khoản + trạng thái + sản phẩm crawl được -->
+                    <!-- Mỗi link = 1 tab: tài khoản + trạng thái + sản phẩm crawl được. Nhiều link → dải tab
+                         GIỮ 1 HÀNG + cuộn ngang (không wrap xuống nhiều hàng làm vỡ/đẩy form). -->
                     <TabControl Grid.Row="2" ItemsSource="{Binding LinkTabs}" SelectedItem="{Binding SelectedLinkTab}">
+                        <TabControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <StackPanel Orientation="Horizontal" />
+                            </ItemsPanelTemplate>
+                        </TabControl.ItemsPanel>
+                        <TabControl.Template>
+                            <ControlTemplate>
+                                <Grid RowDefinitions="Auto,*">
+                                    <ScrollViewer Grid.Row="0" HorizontalScrollBarVisibility="Auto"
+                                                  VerticalScrollBarVisibility="Disabled">
+                                        <ItemsPresenter Name="PART_ItemsPresenter" ItemsPanel="{TemplateBinding ItemsPanel}" />
+                                    </ScrollViewer>
+                                    <ContentPresenter Grid.Row="1" Name="PART_SelectedContentHost"
+                                                      Content="{TemplateBinding SelectedContent}"
+                                                      ContentTemplate="{TemplateBinding SelectedContentTemplate}" />
+                                </Grid>
+                            </ControlTemplate>
+                        </TabControl.Template>
                         <TabControl.ItemTemplate>
                             <DataTemplate>
                                 <StackPanel Orientation="Horizontal">
