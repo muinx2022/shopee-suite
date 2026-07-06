@@ -4,38 +4,6 @@
     x:Class="Shopee.Suite.Modules.Settings.SettingsView"
     x:Name="Root">
 
-    <UserControl.Styles>
-        <!-- Nút chọn vai trò (RadioButton style-thành-nút): GIỮ trạng thái đã chọn, không mất khi rê chuột ra -->
-        <Style Selector="RadioButton.roleToggle">
-            <Setter Property="MinWidth" Value="200" />
-            <Setter Property="Padding" Value="14,9" />
-            <Setter Property="Margin" Value="0,0,10,0" />
-            <Setter Property="Cursor" Value="Hand" />
-            <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
-            <Setter Property="Template">
-                <ControlTemplate>
-                    <Border Name="bd" CornerRadius="8" Padding="{TemplateBinding Padding}"
-                            Background="{DynamicResource SubtleBrush}" BorderThickness="1.5"
-                            BorderBrush="{DynamicResource BorderBrush}">
-                        <ContentPresenter Content="{TemplateBinding Content}"
-                                          HorizontalAlignment="Center" VerticalAlignment="Center" />
-                    </Border>
-                </ControlTemplate>
-            </Setter>
-        </Style>
-        <Style Selector="RadioButton.roleToggle:pointerover /template/ Border#bd">
-            <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
-        </Style>
-        <Style Selector="RadioButton.roleToggle:checked /template/ Border#bd">
-            <Setter Property="Background" Value="{DynamicResource AccentBrush}" />
-            <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
-        </Style>
-        <Style Selector="RadioButton.roleToggle:checked">
-            <Setter Property="Foreground" Value="{DynamicResource TextOnAccentBrush}" />
-            <Setter Property="FontWeight" Value="SemiBold" />
-        </Style>
-    </UserControl.Styles>
-
     <Grid Margin="28,22,28,24" RowDefinitions="Auto,*">
 
         <!-- Header -->
@@ -252,19 +220,12 @@
                             </StackPanel>
                         </Border>
 
-                        <!-- Vai trò máy này: chỉ còn CLIENT (app là client-only) -->
-                        <TextBlock Text="Vai trò máy này:" Classes="caption" Margin="2,0,0,6" />
-                        <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
-                            <RadioButton Classes="roleToggle" Content="👤  Máy này là CLIENT"
-                                         IsChecked="{Binding IsClientRole, Mode=TwoWay}" />
-                        </StackPanel>
-
-                        <Border Classes="card" Padding="18"
-                                IsVisible="{Binding IsClientRole}">
+                        <!-- App là CLIENT-only (Hub đã tách sang server web riêng) → luôn hiện phần Kết nối. -->
+                        <Border Classes="card" Padding="18">
                             <StackPanel>
                                 <TextBlock Text="Kết nối tới Hub (server đồng bộ + điều phối)" Classes="h2" Margin="0,0,0,6" />
                                 <TextBlock Classes="caption" TextWrapping="Wrap" Margin="0,0,0,12"
-                                           Text="Dán URL + API token do máy-Hub cung cấp (một máy của bạn bật chế độ Hub qua Cloudflare Tunnel). Khi bật, các máy chia sẻ cấu hình + tránh làm trùng tài khoản. Để trống = chạy độc lập như cũ." />
+                                           Text="Dán URL + API token của Hub (server đồng bộ chạy riêng qua Cloudflare Tunnel). Khi bật, các máy chia sẻ cấu hình + tránh làm trùng tài khoản. Để trống = chạy độc lập như cũ." />
 
                                 <CheckBox Content="Bật đồng bộ với Hub" IsChecked="{Binding HubEnabled}" Margin="0,0,0,12" />
 

@@ -1,61 +1,59 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         x:Class="Shopee.Suite.MainWindow"
-        Title="Shopee Suite" Width="1240" Height="780" MinWidth="980" MinHeight="600"
+        Title="Shopee Suite" Width="1500" Height="940" MinWidth="1080" MinHeight="680"
         WindowStartupLocation="CenterScreen"
         Background="{DynamicResource WindowBackgroundBrush}"
         FontFamily="{DynamicResource UiFont}">
 
-    <Grid ColumnDefinitions="244,*">
-        <!-- ══════════ SIDEBAR ══════════ -->
-        <Border Grid.Column="0" Background="{DynamicResource SidebarBackgroundBrush}">
-            <DockPanel>
-                <!-- Brand header -->
-                <Border DockPanel.Dock="Top" Background="{DynamicResource SidebarHeaderBrush}" Height="76">
-                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="18,0">
-                        <Border Width="38" Height="38" CornerRadius="10" Background="{DynamicResource AccentBrush}">
-                            <TextBlock Text="S" FontSize="20" FontWeight="Bold" Foreground="White"
+    <Grid RowDefinitions="56,*">
+        <!-- ══════════ TOP APP BAR ══════════ -->
+        <Border Grid.Row="0" ZIndex="1" Background="{DynamicResource SidebarBackgroundBrush}"
+                BoxShadow="0 1 6 0 #22000000">
+            <Grid ColumnDefinitions="Auto,*">
+                <!-- Brand — bấm để quay về màn hình Welcome -->
+                <Button Grid.Column="0" Classes="brand" VerticalAlignment="Stretch"
+                        Command="{Binding GoHomeCommand}" ToolTip.Tip="Về màn hình chính">
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <Border Width="34" Height="34" CornerRadius="9" Background="{DynamicResource AccentBrush}">
+                            <TextBlock Text="S" FontSize="18" FontWeight="Bold" Foreground="White"
                                        HorizontalAlignment="Center" VerticalAlignment="Center" />
                         </Border>
-                        <StackPanel Margin="12,0,0,0" VerticalAlignment="Center">
-                            <TextBlock Text="Shopee Suite" FontSize="15.5" FontWeight="SemiBold" Foreground="White" />
-                            <TextBlock Text="Bộ công cụ hợp nhất" FontSize="11"
-                                       Foreground="{DynamicResource SidebarMutedBrush}" Margin="0,1,0,0" />
-                        </StackPanel>
+                        <TextBlock Text="Shopee Suite" FontSize="15" FontWeight="SemiBold" Foreground="White"
+                                   Margin="11,0,0,0" VerticalAlignment="Center" />
                     </StackPanel>
-                </Border>
+                </Button>
 
-                <TextBlock DockPanel.Dock="Top" Text="MODULE" FontSize="10.5" FontWeight="SemiBold"
-                           Foreground="{DynamicResource SidebarMutedBrush}" Margin="20,16,0,8" />
+                <!-- Vạch ngăn brand ↔ tab -->
+                <Border Grid.Column="0" Width="1" HorizontalAlignment="Right" Margin="0,14"
+                        Background="{DynamicResource SidebarItemHoverBrush}" />
 
-                <!-- (Đã bỏ badge vai trò HUB/CLIENT/NONE — app chỉ còn là client, không xác định Hub trên app.) -->
-
-                <!-- Nav list -->
-                <ListBox Classes="nav" ItemsSource="{Binding Modules}" SelectedItem="{Binding Selected}"
-                         ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                <!-- Tab module (ngang, cuộn ngang nếu tràn) -->
+                <ListBox Grid.Column="1" Classes="topnav" VerticalAlignment="Center" Margin="6,0"
+                         ItemsSource="{Binding Modules}" SelectedItem="{Binding Selected}"
+                         ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                         ScrollViewer.VerticalScrollBarVisibility="Disabled">
+                    <ListBox.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <StackPanel Orientation="Horizontal" />
+                        </ItemsPanelTemplate>
+                    </ListBox.ItemsPanel>
                     <ListBox.ItemTemplate>
                         <DataTemplate>
-                            <Grid ColumnDefinitions="Auto,*">
-                                <Border Grid.Column="0" Width="36" Height="36" CornerRadius="10"
-                                        Background="{DynamicResource SidebarItemHoverBrush}" VerticalAlignment="Center">
-                                    <TextBlock Classes="emoji" Text="{Binding Glyph}" FontSize="17"
-                                               HorizontalAlignment="Center" VerticalAlignment="Center" />
-                                </Border>
-                                <StackPanel Grid.Column="1" Margin="12,0,8,0" VerticalAlignment="Center">
-                                    <TextBlock Text="{Binding Title}" FontSize="13" FontWeight="SemiBold"
-                                               Foreground="{DynamicResource SidebarTextBrush}" />
-                                    <TextBlock Text="{Binding Subtitle}" FontSize="10.5"
-                                               Foreground="{DynamicResource SidebarMutedBrush}"
-                                               TextTrimming="CharacterEllipsis" Margin="0,1,0,0" />
-                                </StackPanel>
-                            </Grid>
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center"
+                                        ToolTip.Tip="{Binding Subtitle}">
+                                <TextBlock Classes="emoji" Text="{Binding Glyph}" FontSize="15"
+                                           VerticalAlignment="Center" />
+                                <TextBlock Text="{Binding NavTitle}" FontSize="13" FontWeight="SemiBold"
+                                           Margin="8,0,0,0" VerticalAlignment="Center" />
+                            </StackPanel>
                         </DataTemplate>
                     </ListBox.ItemTemplate>
                 </ListBox>
-            </DockPanel>
+            </Grid>
         </Border>
 
         <!-- ══════════ CONTENT ══════════ -->
-        <ContentControl Grid.Column="1" Content="{Binding Current}" />
+        <ContentControl Grid.Row="1" Content="{Binding Current}" />
     </Grid>
 </Window>

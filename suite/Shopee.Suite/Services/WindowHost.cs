@@ -20,6 +20,19 @@ public static class WindowHost
         return (bool?)null;
     });
 
+    /// <summary>Mở cửa sổ KHÔNG modal (không chặn cửa sổ chính), gán owner nếu có. Marshal về UI thread.</summary>
+    public static void Show(Window window)
+    {
+        void DoShow()
+        {
+            var owner = MainWindow();
+            if (owner is { IsVisible: true }) window.Show(owner);
+            else window.Show();
+        }
+        if (Dispatcher.UIThread.CheckAccess()) DoShow();
+        else Dispatcher.UIThread.Post(DoShow);
+    }
+
     private static Window? MainWindow() =>
         (Application.Current?.ApplicationLifetime as IClassicDesktopStyleApplicationLifetime)?.MainWindow;
 

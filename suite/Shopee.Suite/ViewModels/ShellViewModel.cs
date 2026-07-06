@@ -1,9 +1,9 @@
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
 using Shopee.Suite.Infrastructure;
 using Shopee.Suite.Modules.Accounts;
 using Shopee.Suite.Modules.BigSeller;
-using Shopee.Suite.Modules.CheckAccount;
 using Shopee.Suite.Modules.Fleet;
 using Shopee.Suite.Modules.Scrape;
 using Shopee.Suite.Modules.Search;
@@ -47,22 +47,21 @@ public sealed partial class ShellViewModel : ObservableObject
 
         // Scrape + Update đã GỘP vào "BigSeller Workspace" → ẩn khỏi sidebar (vẫn dùng chung scrape/update
         // bên dưới; view cũ giữ nguyên để đảo lại nếu cần).
+        // navTitle (tham số cuối) = nhãn NGẮN cho tab trên top bar; Title (đầy đủ) vẫn dùng cho thẻ Welcome.
         Modules =
         [
             new ModuleItem("BigSeller Workspace", "🧩", "Scrape · Import · Update theo từng shop",
-                workspace),
+                workspace, "Workspace"),
             new ModuleItem("Cấu hình BigSeller", "🗂", "Tài khoản · workbook · cookie · shop · proxy",
-                bigSeller),
+                bigSeller, "Cấu hình"),
             new ModuleItem("Shopee Search", "📊", "Thống kê tìm kiếm sản phẩm",
-                search),
-            new ModuleItem("Tài khoản & Proxy", "👤", "Kho tài khoản Shopee dùng chung",
-                new AccountsViewModel()),
-            new ModuleItem("Check Shopee Account", "🔐", "Kiểm tra tài khoản Shopee",
-                new CheckAccountViewModel()),
+                search, "Search"),
+            new ModuleItem("Tài khoản & Proxy", "👤", "Kho tài khoản Shopee dùng chung · Check tài khoản",
+                new AccountsViewModel(), "Tài khoản"),
             new ModuleItem("Trạng thái & Giao việc", "🖥", "Theo dõi máy + Hub giao việc cho từng máy (đa máy)",
-                new FleetViewModel(worker)),
+                new FleetViewModel(worker), "Trạng thái"),
             new ModuleItem("Cài đặt", "⚙", "AI provider / model / API key",
-                new SettingsViewModel()),
+                new SettingsViewModel(), "Cài đặt"),
         ];
 
         // Workspace bấm "Đăng nhập / cấu hình" → nhảy sidebar sang tab BigSeller (không làm trùng 2 nơi).
@@ -74,4 +73,8 @@ public sealed partial class ShellViewModel : ObservableObject
     }
 
     partial void OnSelectedChanged(ModuleItem? value) => OnPropertyChanged(nameof(Current));
+
+    /// <summary>Bấm logo/brand trên top bar → bỏ chọn module, quay về màn hình Welcome.</summary>
+    [RelayCommand]
+    private void GoHome() => Selected = null;
 }

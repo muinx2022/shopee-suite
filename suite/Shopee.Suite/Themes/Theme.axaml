@@ -196,25 +196,58 @@
         <Setter Property="VerticalContentAlignment" Value="Center" />
     </Style>
 
-    <!-- ══════════ SIDEBAR NAV (ListBox.nav) ══════════ -->
-    <Style Selector="ListBox.nav">
+    <!-- ══════════ TOP NAV (ListBox.topnav) — tab module ngang trên app bar tối ══════════ -->
+    <Style Selector="ListBox.topnav">
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="BorderThickness" Value="0" />
-        <Setter Property="Padding" Value="0" />
+        <Setter Property="Padding" Value="4,0" />
     </Style>
-    <Style Selector="ListBox.nav ListBoxItem">
-        <Setter Property="Margin" Value="12,3" />
-        <Setter Property="Padding" Value="6,8" />
-        <Setter Property="CornerRadius" Value="11" />
+    <Style Selector="ListBox.topnav ListBoxItem">
+        <Setter Property="Margin" Value="2,0" />
+        <Setter Property="Padding" Value="12,7" />
+        <Setter Property="CornerRadius" Value="8" />
         <Setter Property="Background" Value="Transparent" />
-        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        <Setter Property="Foreground" Value="{DynamicResource SidebarTextBrush}" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="Cursor" Value="Hand" />
     </Style>
-    <Style Selector="ListBox.nav ListBoxItem:pointerover /template/ ContentPresenter">
+    <Style Selector="ListBox.topnav ListBoxItem:pointerover /template/ ContentPresenter">
         <Setter Property="Background" Value="{DynamicResource SidebarItemHoverBrush}" />
-        <Setter Property="CornerRadius" Value="11" />
+        <Setter Property="CornerRadius" Value="8" />
     </Style>
-    <Style Selector="ListBox.nav ListBoxItem:selected /template/ ContentPresenter">
-        <Setter Property="Background" Value="{DynamicResource SidebarSelectedBrush}" />
-        <Setter Property="CornerRadius" Value="11" />
+    <!-- Tab đang chọn: nền accent + chữ trắng (Foreground truyền xuống các TextBlock không tự đặt màu). -->
+    <Style Selector="ListBox.topnav ListBoxItem:selected">
+        <Setter Property="Foreground" Value="White" />
+    </Style>
+    <Style Selector="ListBox.topnav ListBoxItem:selected /template/ ContentPresenter">
+        <Setter Property="Background" Value="{DynamicResource AccentBrush}" />
+        <Setter Property="CornerRadius" Value="8" />
+    </Style>
+    <Style Selector="ListBox.topnav ListBoxItem:selected:pointerover /template/ ContentPresenter">
+        <Setter Property="Background" Value="{DynamicResource AccentHoverBrush}" />
+    </Style>
+    <!-- Màu chữ tab: xám sáng trên nền tối; tab đang chọn → trắng. Đặt TRỰC TIẾP lên TextBlock con
+         (không set inline trong template) để thắng mọi setter mặc định của Fluent. Rule :selected phải
+         đứng SAU rule nền để thắng theo thứ tự tài liệu (Avalonia ưu tiên rule khai báo sau khi cùng cấp). -->
+    <Style Selector="ListBox.topnav ListBoxItem TextBlock">
+        <Setter Property="Foreground" Value="{DynamicResource SidebarTextBrush}" />
+    </Style>
+    <Style Selector="ListBox.topnav ListBoxItem:selected TextBlock">
+        <Setter Property="Foreground" Value="White" />
+    </Style>
+
+    <!-- Brand trên app bar tối: nút phẳng, nền trong suốt, hover tối nhẹ (dùng lại template Button toàn cục). -->
+    <Style Selector="Button.brand">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderBrush" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="CornerRadius" Value="0" />
+        <Setter Property="Padding" Value="16,0" />
+    </Style>
+    <Style Selector="Button.brand:pointerover /template/ Border#PART_bd">
+        <Setter Property="Background" Value="{DynamicResource SidebarHeaderBrush}" />
+    </Style>
+    <Style Selector="Button.brand:pressed /template/ Border#PART_bd">
+        <Setter Property="Background" Value="{DynamicResource SidebarHeaderBrush}" />
     </Style>
 </Styles>

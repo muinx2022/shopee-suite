@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Shopee.Core.BigSeller;
@@ -31,6 +32,10 @@ public sealed partial class WorkspaceViewModel : ObservableObject
 
     public bool HasSelection => SelectedAccount is not null;
 
+    /// <summary>Có bất kỳ việc nào đang chạy? scrape · update batch · update inline theo shop.
+    /// Dùng bật/tắt nút "Dừng tất cả" (không có gì chạy → nút mờ, không bấm được).</summary>
+    public bool AnyRunning => Scrape.IsBusy || Update.IsRunning || Update.HasActiveWsJob;
+
     [ObservableProperty] private string _status = "";
 
     /// <summary>Shell cấp: điều hướng sidebar sang ViewModel khác (mở tab BigSeller để đăng nhập/cấu hình).</summary>
@@ -46,15 +51,36 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         // Handler này đăng ký SAU 3 sub-VM (Shell tạo chúng trước) → khi store đổi, chúng reload trước,
         // rồi tới đây zip lại danh sách hợp nhất.
         BigSellerStore.Shared.Changed += OnStoreChanged;
+
+        // Nút "Dừng tất cả" bật/tắt theo trạng thái chạy: IsBusy (scrape) + IsRunning (update batch) bắn
+        // PropertyChanged; update inline per-shop (HasActiveWsJob) đổi → báo qua JobsChanged. Các VM này sống
+        // suốt vòng đời app (như Workspace) nên không cần gỡ handler.
+        Scrape.PropertyChanged += OnRunStateChanged;
+        Update.PropertyChanged += OnRunStateChanged;
+        Update.JobsChanged += OnRunJobsChanged;
     }
 
     private void OnStoreChanged()
     {
         // Đang chạy: các sub-VM giữ nguyên list (Scrape bỏ qua reload khi busy) → khỏi rebuild để không
         // churn tham chiếu job đang chạy. Bao gồm cả update inline per-shop (HasActiveWsJob, không set IsRunning).
-        if (Scrape.IsBusy || Update.IsRunning || Update.HasActiveWsJob) return;
+        if (AnyRunning) return;
         UiThread.Post(Rebuild);
     }
+
+    private void OnRunStateChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is nameof(ScrapeViewModel.IsBusy) or nameof(UpdateProductViewModel.IsRunning))
+            NotifyAnyRunning();
+    }
+
+    private void OnRunJobsChanged() => NotifyAnyRunning();
+
+    private void NotifyAnyRunning() => UiThread.Post(() =>
+    {
+        OnPropertyChanged(nameof(AnyRunning));
+        StopAllCommand.NotifyCanExecuteChanged();
+    });
 
     private void Rebuild()
     {
@@ -184,8 +210,8 @@ public sealed partial class WorkspaceViewModel : ObservableObject
     // (Dừng RIÊNG 1 tk = bấm ■ trên shop đang chạy của tk đó — mỗi tk chỉ 1 action/1 shop tại 1 thời điểm
     //  nên nút ■ của shop chính là "dừng action của tk này". Không cần nút "Dừng tk đang chọn" riêng.)
 
-    /// <summary>Dừng TẤT CẢ scrape + update đang chạy.</summary>
-    [RelayCommand]
+    /// <summary>Dừng TẤT CẢ scrape + update đang chạy. Chỉ bật khi <see cref="AnyRunning"/> = true.</summary>
+    [RelayCommand(CanExecute = nameof(AnyRunning))]
     private void StopAll()
     {
         Update.StopAllSingle();

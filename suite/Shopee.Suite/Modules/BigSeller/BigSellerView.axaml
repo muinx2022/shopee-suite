@@ -59,191 +59,196 @@
                 </Border>
             </DockPanel>
 
-            <!-- RIGHT: detail -->
+            <!-- RIGHT: detail — 2 CỘT (trái: tài khoản/kết nối · phải: shops) để dùng chiều ngang,
+                 tránh dồn dọc phải cuộn. Mỗi cột tự lo chiều cao (cột trái cuộn riêng nếu quá thấp;
+                 lưới shop lấp đầy + cuộn nội bộ) → cửa sổ bình thường KHÔNG cần cuộn. -->
             <Border Grid.Column="2" Classes="card" Padding="18">
                 <Grid>
                     <TextBlock Text="Chọn hoặc thêm một tài khoản BigSeller." Classes="caption"
                                VerticalAlignment="Top"
                                IsVisible="{Binding !HasSelection}" />
 
-                    <!-- Cuộn CẢ panel chi tiết (1 thanh cuộn duy nhất) → bảng Shops KHÔNG còn thanh cuộn
-                         nội bộ bó ~2-3 dòng; khi cửa sổ thấp thì cuộn cả form thay vì kẹt riêng phần shop. -->
-                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
-                                  IsVisible="{Binding #Root.DataContext.HasSelection}">
-                    <Grid DataContext="{Binding Selected}" RowDefinitions="Auto,Auto,Auto,Auto">
+                    <Grid DataContext="{Binding Selected}" ColumnDefinitions="1*,18,1.1*"
+                          IsVisible="{Binding #Root.DataContext.HasSelection}">
                         <Grid.Styles>
-                            <!-- Ô nhập gọn lại (giống cấu hình Workspace) để form đỡ cao, tránh phải cuộn. -->
+                            <!-- Ô nhập gọn (như cấu hình Workspace) để form đỡ cao. -->
                             <Style Selector="TextBox">
                                 <Setter Property="Padding" Value="5,2" />
                                 <Setter Property="FontSize" Value="11.5" />
                             </Style>
                         </Grid.Styles>
 
-                        <!-- Account info -->
-                        <StackPanel Grid.Row="0">
-                            <Grid ColumnDefinitions="*,12,*">
-                                <StackPanel Grid.Column="0">
-                                    <TextBlock Text="Tên hiển thị" Classes="caption" />
-                                    <TextBox Text="{Binding Label}" Margin="0,3,0,10" />
-                                </StackPanel>
-                                <StackPanel Grid.Column="2">
-                                    <TextBlock Text="Email BigSeller" Classes="caption" />
-                                    <TextBox Text="{Binding Email}" Margin="0,3,0,10" />
-                                </StackPanel>
-                            </Grid>
-
-                            <!-- Mật khẩu BigSeller (masked) — cho auto-login tự mint token mỗi máy (Phase 2). -->
-                            <TextBlock Text="Mật khẩu BigSeller (để tự đăng nhập)" Classes="caption" />
-                            <TextBox PasswordChar="●" Text="{Binding Password, Mode=TwoWay}" Margin="0,3,0,10" />
-
-                            <TextBlock Text="Workbook (Excel)" Classes="caption" />
-                            <Grid Margin="0,3,0,10" ColumnDefinitions="*,Auto,Auto">
-                                <TextBox Grid.Column="0" Text="{Binding WorkbookPath}" IsReadOnly="True"
-                                         Classes="mono" />
-                                <Button Grid.Column="1" Content="…" Width="40" Margin="8,0,0,0"
-                                        Command="{Binding #Root.DataContext.BrowseWorkbookCommand}" />
-                                <Button Grid.Column="2" Content="↻ Sheet" Margin="8,0,0,0"
-                                        Command="{Binding #Root.DataContext.RefreshSheetsCommand}" />
-                            </Grid>
-
-                            <TextBlock Text="File cookie BigSeller (muc_token — dùng chung)" Classes="caption" />
-                            <Grid Margin="0,3,0,8" ColumnDefinitions="*,Auto">
-                                <TextBox Grid.Column="0" Text="{Binding CookieFile}" IsReadOnly="True"
-                                         Classes="mono" />
-                                <Button Grid.Column="1" Content="…" Width="40" Margin="8,0,0,0"
-                                        Command="{Binding #Root.DataContext.BrowseCookieCommand}" />
-                            </Grid>
-                            <TextBlock Text="{Binding CookieStatus}" FontSize="12.5" Margin="0,0,0,10"
-                                       Foreground="{DynamicResource TextSecondaryBrush}" />
-
-                            <!-- Proxy RIÊNG cho tk BigSeller (tuỳ chọn). Có key → bigseller.com (login + scrape)
-                                 đi qua IP này → mỗi tk 1 IP → chạy SONG SONG nhiều tk không bị đá phiên.
-                                 Trống → đi IP máy, các tk BigSeller chạy LẦN LƯỢT. -->
-                            <TextBlock Text="Proxy riêng cho BigSeller (KiotProxy — tuỳ chọn)" Classes="caption" />
-                            <Grid Margin="0,3,0,2" ColumnDefinitions="*,10,120,10,110">
-                                <TextBox Grid.Column="0" Text="{Binding KiotProxyKey}"
-                                         Classes="mono"
-                                         ToolTip.Tip="KiotProxy key riêng cho tk BigSeller này. Trống = đi IP máy (các tk chạy lần lượt)." />
-                                <TextBox Grid.Column="2" Text="{Binding Region}"
-                                         ToolTip.Tip="Vùng KiotProxy (random/north/central/south)." />
-                                <ComboBox Grid.Column="4" SelectedItem="{Binding ProxyType, Mode=TwoWay}">
-                                    <sys:String>http</sys:String>
-                                    <sys:String>socks5</sys:String>
-                                </ComboBox>
-                            </Grid>
-                            <TextBlock Text="{Binding ProxyStatus}" FontSize="11.5" Margin="0,0,0,10"
-                                       Foreground="{DynamicResource TextSecondaryBrush}" />
-
-                            <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
-                                <Button Classes="primary" Content="Mở Profile Bigseller" MinWidth="160"
-                                        Command="{Binding #Root.DataContext.LoginCommand}" />
-                                <Button Classes="danger" Content="Đóng" MinWidth="90" Margin="10,0,0,0"
-                                        Command="{Binding #Root.DataContext.StopLoginCommand}" />
-                                <TextBlock VerticalAlignment="Center" Margin="12,0,0,0" FontSize="12"
-                                           Foreground="{DynamicResource TextSecondaryBrush}"
-                                           Text="Có proxy → đăng nhập qua proxy đó; không → IP máy. Cookie tự lưu." />
-                            </StackPanel>
-
-                            <Border Height="84" CornerRadius="6" ClipToBounds="True" Margin="0,2,0,14"
-                                    Background="{DynamicResource LogBackgroundBrush}">
-                                <TextBox Classes="log" FontSize="11.5" Padding="8,6"
-                                         b:LogText.Source="{Binding #Root.DataContext.LoginLog}" />
-                            </Border>
-                        </StackPanel>
-
-                        <!-- Shops -->
-                        <Grid Grid.Row="1" Margin="0,0,0,8">
-                            <TextBlock Text="Shops (mỗi shop 1 sheet)" Classes="h2" VerticalAlignment="Center" />
-                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                                <Button Content="+ Thêm shop" Command="{Binding #Root.DataContext.AddShopCommand}" />
-                                <Button Content="− Xóa shop" Margin="8,0,0,0"
-                                        Command="{Binding #Root.DataContext.RemoveShopCommand}" />
-                            </StackPanel>
-                        </Grid>
-
-                        <Border Grid.Row="2" Classes="card" ClipToBounds="True">
-                            <!-- Bảng CHỈ XEM (read-only) — click 1 hàng để chọn shop; sửa MỌI field ở panel
-                                 "Cấu hình shop" bên dưới (ngoài DataGrid) để tránh edit-transaction revert.
-                                 Gọn ~4 dòng + tự cuộn nội bộ khi nhiều shop → form không bị đẩy cao. -->
-                            <DataGrid ItemsSource="{Binding Shops}"
-                                      SelectedItem="{Binding #Root.DataContext.SelectedShop}"
-                                      BorderThickness="0" AutoGenerateColumns="False" IsReadOnly="True"
-                                      MaxHeight="172" ScrollViewer.VerticalScrollBarVisibility="Auto">
-                                <DataGrid.Columns>
-                                    <DataGridTextColumn Header="Tên shop" Binding="{Binding Name}" Width="1.4*" />
-                                    <DataGridTextColumn Header="Sheet" Binding="{Binding ShopeeDataSheet}" Width="1.4*" />
-                                    <DataGridTextColumn Header="Batch" Binding="{Binding OpenAiBatchSize}" Width="60" />
-                                    <DataGridTextColumn Header="Crawl URL (Import)" Binding="{Binding BigSellerCrawlUrl}" Width="1.4*" />
-                                </DataGrid.Columns>
-                            </DataGrid>
-                        </Border>
-
-                        <!-- Ánh xạ field BigSeller ↔ cột Excel cho SHOP đang chọn (mỗi shop/sheet 1 map riêng) -->
-                        <Border Grid.Row="3" Classes="card" Padding="14" Margin="0,10,0,0"
-                                DataContext="{Binding #Root.DataContext.SelectedShop}"
-                                IsVisible="{Binding #Root.DataContext.HasShopSelection}">
+                        <!-- ══════════ CỘT TRÁI: tài khoản + kết nối ══════════ -->
+                        <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto"
+                                      HorizontalScrollBarVisibility="Disabled">
                             <StackPanel>
-                                <!-- Sửa MỌI field per-shop ở đây (ngoài DataGrid) → lưu ngay, không bị revert. -->
-                                <TextBlock Text="Cấu hình shop đang chọn" Classes="h2" Margin="0,0,0,10" />
-
-                                <!-- 1 dòng: Tên shop + Sheet + Batch (AI model lấy từ Cài đặt App). Cờ "Import từ tab
-                                     Đã nhận" đã chuyển sang tab Trạng thái & Giao việc (ghim theo từng việc import). -->
-                                <Grid Margin="0,0,0,10" ColumnDefinitions="*,12,*,12,Auto">
+                                <Grid ColumnDefinitions="*,12,*">
                                     <StackPanel Grid.Column="0">
-                                        <TextBlock Text="Tên shop" Classes="caption" />
-                                        <TextBox Margin="0,3,0,0" Text="{Binding Name}" />
+                                        <TextBlock Text="Tên hiển thị" Classes="caption" />
+                                        <TextBox Text="{Binding Label}" Margin="0,3,0,10" />
                                     </StackPanel>
                                     <StackPanel Grid.Column="2">
-                                        <TextBlock Text="Sheet dữ liệu (↔ shop này)" Classes="caption" />
-                                        <ComboBox Margin="0,3,0,0" HorizontalAlignment="Stretch"
-                                                  ItemsSource="{Binding #Root.DataContext.Selected.SheetOptions}"
-                                                  SelectedItem="{Binding ShopeeDataSheet, Mode=TwoWay}" />
-                                    </StackPanel>
-                                    <StackPanel Grid.Column="4">
-                                        <TextBlock Text="Batch" Classes="caption" />
-                                        <TextBox Width="64" Margin="0,3,0,0" Text="{Binding OpenAiBatchSize}" />
+                                        <TextBlock Text="Email BigSeller" Classes="caption" />
+                                        <TextBox Text="{Binding Email}" Margin="0,3,0,10" />
                                     </StackPanel>
                                 </Grid>
 
-                                <!-- Crawl URL -->
-                                <StackPanel Margin="0,0,0,12">
-                                    <TextBlock Text="Crawl URL (Import từ BigSeller)" Classes="caption" />
-                                    <TextBox Margin="0,3,0,0" Text="{Binding BigSellerCrawlUrl}"
-                                             Classes="mono" FontSize="11.5" />
-                                </StackPanel>
+                                <!-- Mật khẩu BigSeller (masked) — cho auto-login tự mint token mỗi máy. -->
+                                <TextBlock Text="Mật khẩu BigSeller (để tự đăng nhập)" Classes="caption" />
+                                <TextBox PasswordChar="●" Text="{Binding Password, Mode=TwoWay}" Margin="0,3,0,10" />
 
-                                <TextBlock Text="Ánh xạ field ↔ cột Excel (nhập chữ cột: A, B, C…; trống = không dùng)"
-                                           Classes="caption" Margin="0,0,0,8" />
-                                <UniformGrid Columns="6">
-                                    <StackPanel Margin="0,0,8,0">
-                                        <TextBlock Text="Link" Classes="caption" />
-                                        <TextBox Text="{Binding LinkColumnLetter}" Margin="0,3,0,0" />
-                                    </StackPanel>
-                                    <StackPanel Margin="0,0,8,0">
-                                        <TextBlock Text="Item ID" Classes="caption" />
-                                        <TextBox Text="{Binding ItemIdColumnLetter}" Margin="0,3,0,0" />
-                                    </StackPanel>
-                                    <StackPanel Margin="0,0,8,0">
-                                        <TextBlock Text="Giá" Classes="caption" />
-                                        <TextBox Text="{Binding PriceColumnLetter}" Margin="0,3,0,0" />
-                                    </StackPanel>
-                                    <StackPanel Margin="0,0,8,0">
-                                        <TextBlock Text="SKU" Classes="caption" />
-                                        <TextBox Text="{Binding SkuColumnLetter}" Margin="0,3,0,0" />
-                                    </StackPanel>
-                                    <StackPanel Margin="0,0,8,0">
-                                        <TextBlock Text="Tên gốc" Classes="caption" />
-                                        <TextBox Text="{Binding ProductNameColumnLetter}" Margin="0,3,0,0" />
-                                    </StackPanel>
-                                    <StackPanel>
-                                        <TextBlock Text="Tên đã sửa" Classes="caption" />
-                                        <TextBox Text="{Binding RewrittenNameColumnLetter}" Margin="0,3,0,0" />
-                                    </StackPanel>
-                                </UniformGrid>
+                                <TextBlock Text="Workbook (Excel)" Classes="caption" />
+                                <Grid Margin="0,3,0,10" ColumnDefinitions="*,Auto,Auto">
+                                    <TextBox Grid.Column="0" Text="{Binding WorkbookPath}" IsReadOnly="True"
+                                             Classes="mono" />
+                                    <Button Grid.Column="1" Content="…" Width="40" Margin="8,0,0,0"
+                                            Command="{Binding #Root.DataContext.BrowseWorkbookCommand}" />
+                                    <Button Grid.Column="2" Content="↻ Sheet" Margin="8,0,0,0"
+                                            Command="{Binding #Root.DataContext.RefreshSheetsCommand}" />
+                                </Grid>
+
+                                <TextBlock Text="File cookie BigSeller (muc_token — dùng chung)" Classes="caption" />
+                                <Grid Margin="0,3,0,8" ColumnDefinitions="*,Auto">
+                                    <TextBox Grid.Column="0" Text="{Binding CookieFile}" IsReadOnly="True"
+                                             Classes="mono" />
+                                    <Button Grid.Column="1" Content="…" Width="40" Margin="8,0,0,0"
+                                            Command="{Binding #Root.DataContext.BrowseCookieCommand}" />
+                                </Grid>
+                                <TextBlock Text="{Binding CookieStatus}" FontSize="12.5" Margin="0,0,0,10"
+                                           Foreground="{DynamicResource TextSecondaryBrush}" />
+
+                                <!-- Proxy RIÊNG cho tk BigSeller (tuỳ chọn). Có key → mỗi tk 1 IP → chạy SONG SONG.
+                                     Trống → đi IP máy, các tk BigSeller chạy LẦN LƯỢT. -->
+                                <TextBlock Text="Proxy riêng cho BigSeller (KiotProxy — tuỳ chọn)" Classes="caption" />
+                                <Grid Margin="0,3,0,2" ColumnDefinitions="*,10,110,10,96">
+                                    <TextBox Grid.Column="0" Text="{Binding KiotProxyKey}"
+                                             Classes="mono"
+                                             ToolTip.Tip="KiotProxy key riêng cho tk BigSeller này. Trống = đi IP máy (các tk chạy lần lượt)." />
+                                    <TextBox Grid.Column="2" Text="{Binding Region}"
+                                             ToolTip.Tip="Vùng KiotProxy (random/north/central/south)." />
+                                    <ComboBox Grid.Column="4" SelectedItem="{Binding ProxyType, Mode=TwoWay}">
+                                        <sys:String>http</sys:String>
+                                        <sys:String>socks5</sys:String>
+                                    </ComboBox>
+                                </Grid>
+                                <TextBlock Text="{Binding ProxyStatus}" FontSize="11.5" Margin="0,0,0,10"
+                                           Foreground="{DynamicResource TextSecondaryBrush}" />
+
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                    <Button Classes="primary" Content="Mở Profile Bigseller" MinWidth="150"
+                                            Command="{Binding #Root.DataContext.LoginCommand}" />
+                                    <Button Classes="danger" Content="Đóng" MinWidth="80" Margin="10,0,0,0"
+                                            Command="{Binding #Root.DataContext.StopLoginCommand}" />
+                                </StackPanel>
+                                <TextBlock Classes="caption" Margin="0,0,0,8" TextWrapping="Wrap"
+                                           Text="Có proxy → đăng nhập qua proxy đó; không → IP máy. Cookie tự lưu." />
+
+                                <Border Height="88" CornerRadius="6" ClipToBounds="True" Margin="0,2,0,0"
+                                        Background="{DynamicResource LogBackgroundBrush}">
+                                    <TextBox Classes="log" FontSize="11.5" Padding="8,6"
+                                             b:LogText.Source="{Binding #Root.DataContext.LoginLog}" />
+                                </Border>
                             </StackPanel>
-                        </Border>
+                        </ScrollViewer>
+
+                        <!-- ══════════ CỘT PHẢI: shops + cấu hình shop ══════════ -->
+                        <Grid Grid.Column="2" RowDefinitions="Auto,*,Auto">
+                            <!-- Header + thêm/xóa shop -->
+                            <Grid Grid.Row="0" Margin="0,0,0,8">
+                                <TextBlock Text="Shops (mỗi shop 1 sheet)" Classes="h2" VerticalAlignment="Center" />
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                                    <Button Content="+ Thêm shop" Command="{Binding #Root.DataContext.AddShopCommand}" />
+                                    <Button Content="− Xóa shop" Margin="8,0,0,0"
+                                            Command="{Binding #Root.DataContext.RemoveShopCommand}" />
+                                </StackPanel>
+                            </Grid>
+
+                            <!-- Bảng shop CHỈ XEM — lấp đầy chiều cao còn lại + cuộn nội bộ khi nhiều shop.
+                                 Sửa mọi field ở panel "Cấu hình shop" bên dưới (tránh edit-transaction revert). -->
+                            <Border Grid.Row="1" Classes="card" ClipToBounds="True">
+                                <DataGrid ItemsSource="{Binding Shops}"
+                                          SelectedItem="{Binding #Root.DataContext.SelectedShop}"
+                                          BorderThickness="0" AutoGenerateColumns="False" IsReadOnly="True"
+                                          ScrollViewer.VerticalScrollBarVisibility="Auto">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="Tên shop" Binding="{Binding Name}" Width="1.4*" />
+                                        <DataGridTextColumn Header="Sheet" Binding="{Binding ShopeeDataSheet}" Width="1.4*" />
+                                        <DataGridTextColumn Header="Batch" Binding="{Binding OpenAiBatchSize}" Width="60" />
+                                        <DataGridTextColumn Header="Crawl URL (Import)" Binding="{Binding BigSellerCrawlUrl}" Width="1.4*" />
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                            </Border>
+
+                            <!-- Ánh xạ field BigSeller ↔ cột Excel cho SHOP đang chọn -->
+                            <Border Grid.Row="2" Classes="card" Padding="14" Margin="0,10,0,0"
+                                    DataContext="{Binding #Root.DataContext.SelectedShop}"
+                                    IsVisible="{Binding #Root.DataContext.HasShopSelection}">
+                                <StackPanel>
+                                    <StackPanel.Styles>
+                                        <Style Selector="TextBox">
+                                            <Setter Property="Padding" Value="5,2" />
+                                            <Setter Property="FontSize" Value="11.5" />
+                                        </Style>
+                                    </StackPanel.Styles>
+                                    <TextBlock Text="Cấu hình shop đang chọn" Classes="h2" Margin="0,0,0,10" />
+
+                                    <!-- Tên shop + Sheet + Batch -->
+                                    <Grid Margin="0,0,0,10" ColumnDefinitions="*,12,*,12,Auto">
+                                        <StackPanel Grid.Column="0">
+                                            <TextBlock Text="Tên shop" Classes="caption" />
+                                            <TextBox Margin="0,3,0,0" Text="{Binding Name}" />
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="2">
+                                            <TextBlock Text="Sheet dữ liệu (↔ shop này)" Classes="caption" />
+                                            <ComboBox Margin="0,3,0,0" HorizontalAlignment="Stretch"
+                                                      ItemsSource="{Binding #Root.DataContext.Selected.SheetOptions}"
+                                                      SelectedItem="{Binding ShopeeDataSheet, Mode=TwoWay}" />
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="4">
+                                            <TextBlock Text="Batch" Classes="caption" />
+                                            <TextBox Width="64" Margin="0,3,0,0" Text="{Binding OpenAiBatchSize}" />
+                                        </StackPanel>
+                                    </Grid>
+
+                                    <!-- Crawl URL -->
+                                    <StackPanel Margin="0,0,0,12">
+                                        <TextBlock Text="Crawl URL (Import từ BigSeller)" Classes="caption" />
+                                        <TextBox Margin="0,3,0,0" Text="{Binding BigSellerCrawlUrl}"
+                                                 Classes="mono" FontSize="11.5" />
+                                    </StackPanel>
+
+                                    <TextBlock Text="Ánh xạ field ↔ cột Excel (nhập chữ cột: A, B, C…; trống = không dùng)"
+                                               Classes="caption" Margin="0,0,0,8" />
+                                    <UniformGrid Columns="6">
+                                        <StackPanel Margin="0,0,8,0">
+                                            <TextBlock Text="Link" Classes="caption" />
+                                            <TextBox Text="{Binding LinkColumnLetter}" Margin="0,3,0,0" />
+                                        </StackPanel>
+                                        <StackPanel Margin="0,0,8,0">
+                                            <TextBlock Text="Item ID" Classes="caption" />
+                                            <TextBox Text="{Binding ItemIdColumnLetter}" Margin="0,3,0,0" />
+                                        </StackPanel>
+                                        <StackPanel Margin="0,0,8,0">
+                                            <TextBlock Text="Giá" Classes="caption" />
+                                            <TextBox Text="{Binding PriceColumnLetter}" Margin="0,3,0,0" />
+                                        </StackPanel>
+                                        <StackPanel Margin="0,0,8,0">
+                                            <TextBlock Text="SKU" Classes="caption" />
+                                            <TextBox Text="{Binding SkuColumnLetter}" Margin="0,3,0,0" />
+                                        </StackPanel>
+                                        <StackPanel Margin="0,0,8,0">
+                                            <TextBlock Text="Tên gốc" Classes="caption" />
+                                            <TextBox Text="{Binding ProductNameColumnLetter}" Margin="0,3,0,0" />
+                                        </StackPanel>
+                                        <StackPanel>
+                                            <TextBlock Text="Tên đã sửa" Classes="caption" />
+                                            <TextBox Text="{Binding RewrittenNameColumnLetter}" Margin="0,3,0,0" />
+                                        </StackPanel>
+                                    </UniformGrid>
+                                </StackPanel>
+                            </Border>
+                        </Grid>
                     </Grid>
-                    </ScrollViewer>
                 </Grid>
             </Border>
         </Grid>

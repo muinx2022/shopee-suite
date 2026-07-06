@@ -155,14 +155,14 @@ public sealed partial class SettingsViewModel : ObservableObject
         IsHubRunning = HubRuntime.Shared.Running;
         HubServerStatus = IsHubRunning ? "🟢 Đang chạy" : "⚪ Chưa chạy";
 
-        // Khôi phục VAI TRÒ đã chọn để mở lại app hiện đúng panel. Ưu tiên giá trị đã lưu; nếu chưa từng
-        // chọn (bản cũ) thì suy từ cấu hình đang bật để không vỡ máy đang dùng. _loadingRole chặn ghi-lại.
+        // App giờ là CLIENT-only (Hub đã tách sang server web riêng) → LUÔN là client, luôn hiện phần Kết nối.
+        // Chuẩn hoá cả config cũ (role "hub"/rỗng) về "client". _loadingRole chặn ghi-lại trong lúc nạp.
         _loadingRole = true;
-        var role = MachineIdentity.Shared.Role;
-        IsHubRole = role == "hub" || (role.Length == 0 && hubSrv.Enabled);
-        IsClientRole = role == "client" || (role.Length == 0 && !hubSrv.Enabled && hub.Enabled);
+        IsHubRole = false;
+        IsClientRole = true;
         _loadingRole = false;
-        HubClientStatus = CoordinationRuntime.Active && !hubSrv.Enabled ? "🔵 Đã bật đồng bộ Hub (bấm \"Kiểm tra\" để chắc nối được)." : "";
+        if (MachineIdentity.Shared.Role != "client") MachineIdentity.Shared.SetRole("client");
+        HubClientStatus = CoordinationRuntime.Active ? "🔵 Đã bật đồng bộ Hub (bấm \"Kiểm tra\" để chắc nối được)." : "";
 
         var p = PerformanceSettingsStore.Shared.Current;
         UsableCpu = p.UsableCpuCores > 0 ? p.UsableCpuCores : System.Math.Max(2, BraveFleet.CpuCores / 2);

@@ -12,10 +12,20 @@
                 <TextBlock Text="Kho tài khoản Shopee dùng chung — Scrape và Search đều chạy trên danh sách này."
                            Classes="caption" Margin="0,3,0,0" />
             </StackPanel>
-            <Border HorizontalAlignment="Right" VerticalAlignment="Center"
-                    Background="{DynamicResource SubtleBrush}" CornerRadius="14" Padding="14,6">
-                <TextBlock Text="{Binding Status}" FontSize="12.5" Foreground="{DynamicResource TextSecondaryBrush}" />
-            </Border>
+            <StackPanel HorizontalAlignment="Right" VerticalAlignment="Center"
+                        Orientation="Horizontal" Spacing="12">
+                <Button Classes="primary" MinWidth="120" Command="{Binding OpenCheckAccountCommand}"
+                        AutomationProperties.Name="Check Acc"
+                        ToolTip.Tip="Mở form kiểm tra hàng loạt tài khoản Shopee (Edge + proxy).">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Classes="emoji" Text="🔐" VerticalAlignment="Center" />
+                        <TextBlock Text="Check Acc" Margin="7,0,0,0" VerticalAlignment="Center" />
+                    </StackPanel>
+                </Button>
+                <Border Background="{DynamicResource SubtleBrush}" CornerRadius="14" Padding="14,6">
+                    <TextBlock Text="{Binding Status}" FontSize="12.5" Foreground="{DynamicResource TextSecondaryBrush}" />
+                </Border>
+            </StackPanel>
         </Grid>
 
         <Grid Grid.Row="1">

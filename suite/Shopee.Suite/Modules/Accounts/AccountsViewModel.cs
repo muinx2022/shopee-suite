@@ -9,6 +9,7 @@ using Shopee.Core.Coordination;
 using Shopee.Core.Infrastructure;
 using Shopee.Core.Proxy;
 using Shopee.Modules.CheckAccount;
+using Shopee.Suite.Modules.CheckAccount;
 using Shopee.Suite.Services;
 
 namespace Shopee.Suite.Modules.Accounts;
@@ -54,6 +55,10 @@ public sealed partial class AccountsViewModel : ObservableObject
 
     /// <summary>Nội dung kho KiotProxy dùng chung (mỗi dòng 1 key/host:port) — bind vào textbox.</summary>
     [ObservableProperty] private string _proxyPoolText = "";
+
+    /// <summary>Form "Check tài khoản" — giữ 1 instance để phiên check đang chạy không mất khi đóng/mở lại cửa sổ.</summary>
+    public CheckAccountViewModel CheckAccount { get; } = new();
+    private CheckAccountWindow? _checkWindow;
 
     public AccountsViewModel()
     {
@@ -576,6 +581,17 @@ public sealed partial class AccountsViewModel : ObservableObject
         SaveStore(
             string.IsNullOrWhiteSpace(name) ? "Đã lưu thay đổi." : $"Đã lưu thay đổi \"{name}\".",
             string.IsNullOrWhiteSpace(name) ? "Không lưu được thay đổi." : $"Không lưu được thay đổi của \"{name}\".");
+    }
+
+    /// <summary>Mở form Check tài khoản trong cửa sổ riêng (không chặn màn Tài khoản). Đã mở thì kích hoạt lại.</summary>
+    [RelayCommand]
+    private void OpenCheckAccount()
+    {
+        if (_checkWindow is not null) { _checkWindow.Activate(); return; }
+        var win = new CheckAccountWindow { DataContext = CheckAccount };
+        win.Closed += (_, _) => _checkWindow = null;
+        _checkWindow = win;
+        WindowHost.Show(win);
     }
 
     [RelayCommand]
