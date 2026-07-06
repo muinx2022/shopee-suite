@@ -18,9 +18,12 @@ public static class BigSellerLoginRunner
     /// Chạy toàn bộ luồng đăng nhập: mở Brave → chờ login → lưu cookie. Trả về true nếu lấy được
     /// cookie. Hủy qua <paramref name="ct"/> (nút Dừng). Tự đóng Brave khi xong.
     /// </summary>
+    /// <param name="tryAutoLogin">Khi phát hiện CHƯA đăng nhập: hàm tự-đăng-nhập (điền form + giải captcha) chạy
+    /// TRONG Brave này (nhận cdpPort). Trả true nếu thành công (vòng poll sẽ lưu cookie). null = đợi đăng nhập TAY
+    /// như cũ. Truyền từ Suite để Core khỏi phụ thuộc Playwright.</param>
     public static async Task<bool> RunLoginAsync(
         string cookieFile, string profileDir, Action<string> log, CancellationToken ct, Action? onSaved = null,
-        string? proxyServer = null)
+        string? proxyServer = null, Func<int, CancellationToken, Task<bool>>? tryAutoLogin = null)
     {
         if (string.IsNullOrWhiteSpace(cookieFile))
         {
@@ -113,6 +116,22 @@ public static class BigSellerLoginRunner
                     log("Chưa có phiên sống — hãy đăng nhập BigSeller để lưu token mới (đảm bảo còn sống).");
                 }
                 catch { }
+
+                // CHƯA đăng nhập → TỰ đăng nhập nếu Suite có cung cấp (điền email/mật khẩu + giải captcha AI).
+                // Thành công → vòng poll bên dưới bắt được cookie & lưu. Thất bại/NeedsOtp → rơi về đăng nhập TAY.
+                if (tryAutoLogin is not null)
+                {
+                    log("Đang thử TỰ đăng nhập BigSeller (điền tài khoản + giải captcha)…");
+                    try
+                    {
+                        if (await tryAutoLogin(port, ct))
+                            log("✔ Tự đăng nhập được — đang chờ lưu cookie…");
+                        else
+                            log("Tự đăng nhập chưa xong — hãy đăng nhập TAY trong cửa sổ Brave.");
+                    }
+                    catch (OperationCanceledException) { throw; }
+                    catch (Exception ex) { log("Tự đăng nhập lỗi: " + ex.Message + " — hãy đăng nhập tay."); }
+                }
             }
 
             log("Đăng nhập BigSeller trong cửa sổ Brave. Cookie sẽ tự lưu khi phát hiện đăng nhập.");

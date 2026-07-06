@@ -212,10 +212,25 @@ public sealed partial class BigSellerViewModel : ObservableObject
                     account.Model.KiotProxyKey, account.Model.Region, account.Model.ProxyType, AppendLog);
             }
 
+            // Tk có email + mật khẩu → khi mở profile mà CHƯA đăng nhập, TỰ điền form + giải captcha (AI) thay vì
+            // đợi login tay. Chạy trong CHÍNH Brave vừa mở (khớp IP proxy nếu có). Thiếu email/mật khẩu → đợi tay như cũ.
+            Func<int, CancellationToken, Task<bool>>? autoLogin = null;
+            if (!string.IsNullOrWhiteSpace(account.Model.Email) && !string.IsNullOrWhiteSpace(account.Model.Password))
+            {
+                autoLogin = async (port, token) =>
+                {
+                    var outcome = await OpenMultiBraveLauncherV3.BigSellerAutoLogin.ForceLoginInBraveAsync(
+                        port, account.Model.Id, account.Model.Email, account.Model.Password, cookieFile, AppendLog, token);
+                    if (outcome == OpenMultiBraveLauncherV3.AutoLoginOutcome.NeedsOtp)
+                        AppendLog("⚠ BigSeller đòi mã email (thiết bị mới) — đăng nhập TAY 1 lần trong cửa sổ để tạo device-trust; sau đó auto-login chạy được (chỉ captcha).");
+                    return outcome == OpenMultiBraveLauncherV3.AutoLoginOutcome.Success;
+                };
+            }
+
             // Lưu cookie xong, cửa sổ Brave GIỮ NGUYÊN — chỉ đóng khi bấm Dừng. onSaved báo ngay
             // khi vừa lưu (lúc cửa sổ còn đang mở) để UI cập nhật trạng thái cookie tức thì.
             var ok = await BigSellerLoginRunner.RunLoginAsync(
-                cookieFile, profileDir, AppendLog, _loginCts.Token, () => OnLoginSaved(account), proxyServer);
+                cookieFile, profileDir, AppendLog, _loginCts.Token, () => OnLoginSaved(account), proxyServer, autoLogin);
             account.NotifyCookieChanged();
             Status = ok ? "Đăng nhập BigSeller thành công." : "Chưa lấy được cookie BigSeller.";
 
