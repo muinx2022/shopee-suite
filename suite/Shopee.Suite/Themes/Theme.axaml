@@ -47,7 +47,10 @@
         <CornerRadius x:Key="ControlCornerRadius">6</CornerRadius>
         <!-- Tab: Fluent mặc định font header RẤT to (~24) → thu về gọn. (Chỉ override FontSize — các key khác
              sai kiểu/không tồn tại sẽ làm vỡ template TabControl → view trống.) -->
-        <sys:Double x:Key="TabItemHeaderFontSize">14</sys:Double>
+        <sys:Double x:Key="TabItemHeaderFontSize">13</sys:Double>
+        <!-- Cỡ chữ nội dung control Fluent (button/textbox/combo/list/datagrid…) — nhỏ lại để hợp màn Full HD
+             (bản trước hơi to; máy dev 4K nhìn khác). Fluent mặc định 14. -->
+        <sys:Double x:Key="ControlContentThemeFontSize">12.5</sys:Double>
 
         <!-- Button PHẲNG bo góc (thay template Fluent) — nền thẻ + viền mảnh, hover đổi nền nhưng GIỮ màu chữ/viền
              của variant (primary/success/danger là outline: chữ+viền màu, không tô nền). Card (Welcome) bo tròn hơn. -->
@@ -56,9 +59,9 @@
             <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="6" />
-            <Setter Property="Padding" Value="14,7" />
+            <Setter Property="Padding" Value="13,6" />
             <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
-            <Setter Property="FontSize" Value="13" />
+            <Setter Property="FontSize" Value="12" />
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="HorizontalContentAlignment" Value="Center" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
@@ -89,24 +92,24 @@
         </ControlTheme>
     </Styles.Resources>
 
-    <!-- ══════════ TYPOGRAPHY (class) ══════════ -->
+    <!-- ══════════ TYPOGRAPHY (class) — cỡ chữ gọn cho Full HD ══════════ -->
     <Style Selector="TextBlock.h1">
-        <Setter Property="FontSize" Value="20" />
+        <Setter Property="FontSize" Value="18" />
         <Setter Property="FontWeight" Value="SemiBold" />
         <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
     </Style>
     <Style Selector="TextBlock.h2">
-        <Setter Property="FontSize" Value="15" />
+        <Setter Property="FontSize" Value="14" />
         <Setter Property="FontWeight" Value="SemiBold" />
         <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
     </Style>
     <Style Selector="TextBlock.body">
-        <Setter Property="FontSize" Value="13" />
+        <Setter Property="FontSize" Value="12.5" />
         <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
         <Setter Property="TextWrapping" Value="Wrap" />
     </Style>
     <Style Selector="TextBlock.caption">
-        <Setter Property="FontSize" Value="12" />
+        <Setter Property="FontSize" Value="11.5" />
         <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
         <Setter Property="TextWrapping" Value="Wrap" />
     </Style>

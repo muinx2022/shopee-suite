@@ -1,41 +1,34 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         x:Class="Shopee.Suite.MainWindow"
-        Title="Shopee Suite" Width="1480" Height="1040" MinWidth="1180" MinHeight="720"
+        Title="Shopee Suite" Width="1240" Height="780" MinWidth="980" MinHeight="600"
         WindowStartupLocation="CenterScreen"
         Background="{DynamicResource WindowBackgroundBrush}"
         FontFamily="{DynamicResource UiFont}">
 
-    <Grid ColumnDefinitions="288,*">
+    <Grid ColumnDefinitions="244,*">
         <!-- ══════════ SIDEBAR ══════════ -->
         <Border Grid.Column="0" Background="{DynamicResource SidebarBackgroundBrush}">
             <DockPanel>
                 <!-- Brand header -->
-                <Border DockPanel.Dock="Top" Background="{DynamicResource SidebarHeaderBrush}" Height="92">
-                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="22,0">
-                        <Border Width="46" Height="46" CornerRadius="12" Background="{DynamicResource AccentBrush}">
-                            <TextBlock Text="S" FontSize="24" FontWeight="Bold" Foreground="White"
+                <Border DockPanel.Dock="Top" Background="{DynamicResource SidebarHeaderBrush}" Height="76">
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="18,0">
+                        <Border Width="38" Height="38" CornerRadius="10" Background="{DynamicResource AccentBrush}">
+                            <TextBlock Text="S" FontSize="20" FontWeight="Bold" Foreground="White"
                                        HorizontalAlignment="Center" VerticalAlignment="Center" />
                         </Border>
-                        <StackPanel Margin="14,0,0,0" VerticalAlignment="Center">
-                            <TextBlock Text="Shopee Suite" FontSize="18.5" FontWeight="SemiBold" Foreground="White" />
-                            <TextBlock Text="Bộ công cụ hợp nhất" FontSize="12"
+                        <StackPanel Margin="12,0,0,0" VerticalAlignment="Center">
+                            <TextBlock Text="Shopee Suite" FontSize="15.5" FontWeight="SemiBold" Foreground="White" />
+                            <TextBlock Text="Bộ công cụ hợp nhất" FontSize="11"
                                        Foreground="{DynamicResource SidebarMutedBrush}" Margin="0,1,0,0" />
                         </StackPanel>
                     </StackPanel>
                 </Border>
 
-                <TextBlock DockPanel.Dock="Top" Text="MODULE" FontSize="11" FontWeight="SemiBold"
-                           Foreground="{DynamicResource SidebarMutedBrush}" Margin="24,20,0,10" />
+                <TextBlock DockPanel.Dock="Top" Text="MODULE" FontSize="10.5" FontWeight="SemiBold"
+                           Foreground="{DynamicResource SidebarMutedBrush}" Margin="20,16,0,8" />
 
-                <!-- Badge vai trò máy: HUB / CLIENT / NONE (đáy sidebar) -->
-                <Border DockPanel.Dock="Bottom" Margin="18,10,18,16" CornerRadius="10" Padding="12,8"
-                        Background="#3A3F4B">
-                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
-                        <TextBlock Classes="emoji" Text="🖥" FontSize="13" VerticalAlignment="Center" Margin="0,0,8,0" />
-                        <TextBlock Text="{Binding RoleBadge}" FontSize="13.5" FontWeight="Bold" Foreground="White" VerticalAlignment="Center" />
-                    </StackPanel>
-                </Border>
+                <!-- (Đã bỏ badge vai trò HUB/CLIENT/NONE — app chỉ còn là client, không xác định Hub trên app.) -->
 
                 <!-- Nav list -->
                 <ListBox Classes="nav" ItemsSource="{Binding Modules}" SelectedItem="{Binding Selected}"
@@ -43,15 +36,15 @@
                     <ListBox.ItemTemplate>
                         <DataTemplate>
                             <Grid ColumnDefinitions="Auto,*">
-                                <Border Grid.Column="0" Width="42" Height="42" CornerRadius="11"
+                                <Border Grid.Column="0" Width="36" Height="36" CornerRadius="10"
                                         Background="{DynamicResource SidebarItemHoverBrush}" VerticalAlignment="Center">
-                                    <TextBlock Classes="emoji" Text="{Binding Glyph}" FontSize="19"
+                                    <TextBlock Classes="emoji" Text="{Binding Glyph}" FontSize="17"
                                                HorizontalAlignment="Center" VerticalAlignment="Center" />
                                 </Border>
-                                <StackPanel Grid.Column="1" Margin="14,0,8,0" VerticalAlignment="Center">
-                                    <TextBlock Text="{Binding Title}" FontSize="14.5" FontWeight="SemiBold"
+                                <StackPanel Grid.Column="1" Margin="12,0,8,0" VerticalAlignment="Center">
+                                    <TextBlock Text="{Binding Title}" FontSize="13" FontWeight="SemiBold"
                                                Foreground="{DynamicResource SidebarTextBrush}" />
-                                    <TextBlock Text="{Binding Subtitle}" FontSize="11.5"
+                                    <TextBlock Text="{Binding Subtitle}" FontSize="10.5"
                                                Foreground="{DynamicResource SidebarMutedBrush}"
                                                TextTrimming="CharacterEllipsis" Margin="0,1,0,0" />
                                 </StackPanel>

@@ -29,13 +29,6 @@ public sealed partial class ShellViewModel : ObservableObject
     /// <summary>ViewModel đang hiển thị: module được chọn, hoặc màn hình Welcome khi chưa chọn gì.</summary>
     public object Current => Selected?.ViewModel ?? _welcome;
 
-    /// <summary>Nhãn vai trò máy hiển thị ở đáy sidebar: HUB (máy chạy Hub) · CLIENT (đã nối Hub) · NONE
-    /// (chưa cấu hình đồng bộ). Cố định theo cấu hình lúc khởi động.</summary>
-    public string RoleBadge =>
-        Shopee.Core.Coordination.HubServerConfigStore.Shared.Current.Enabled ? "HUB"
-        : Shopee.Core.Coordination.CoordinationRuntime.Active ? "CLIENT"
-        : "NONE";
-
     public ShellViewModel()
     {
         // Tạo các ViewModel MỘT LẦN — màn gộp v1.1 (Workspace) DÙNG CHUNG đúng 3 VM BigSeller/Scrape/Update
