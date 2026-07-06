@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.IO;
 using Avalonia.Media;
+using Avalonia.Media.Immutable;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Shopee.Core.Accounts;
@@ -60,7 +61,7 @@ public sealed partial class ScrapeViewModel : ObservableObject
         string[] hex = { "#FFF6DA", "#E3F2FD", "#E8F5E9", "#FCE4EC", "#F3E5F5", "#FFF3E0", "#E0F7FA", "#F1F8E9" };
         var arr = new IBrush[hex.Length];
         for (var i = 0; i < hex.Length; i++)
-            arr[i] = new SolidColorBrush(Color.Parse(hex[i]));
+            arr[i] = new ImmutableSolidColorBrush(Color.Parse(hex[i]));
         return arr;
     }
 

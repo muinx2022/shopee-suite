@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using Avalonia.Media;
+using Avalonia.Media.Immutable;
 using CommunityToolkit.Mvvm.ComponentModel;
 using Shopee.Core.BigSeller;
 using Shopee.Core.Scrape;
@@ -200,5 +201,5 @@ public sealed partial class ScrapeTargetViewModel : ObservableObject
     private static readonly IBrush RunningBg = FrozenBrush("#FFF3E0"), RunningFg = FrozenBrush("#E65100");
     private static readonly IBrush TodoBg = FrozenBrush("#ECEFF1"), TodoFg = FrozenBrush("#546E7A");
 
-    private static IBrush FrozenBrush(string hex) => new SolidColorBrush(Color.Parse(hex));
+    private static IBrush FrozenBrush(string hex) => new ImmutableSolidColorBrush(Color.Parse(hex));
 }

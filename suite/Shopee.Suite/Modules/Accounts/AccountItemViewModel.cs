@@ -1,4 +1,5 @@
 using Avalonia.Media;
+using Avalonia.Media.Immutable;
 using CommunityToolkit.Mvvm.ComponentModel;
 using Shopee.Core.Accounts;
 
@@ -7,10 +8,10 @@ namespace Shopee.Suite.Modules.Accounts;
 /// <summary>Màu cột "Tình trạng" theo giá trị (thay DataTrigger của WPF — Avalonia DataGrid không có ElementStyle/trigger).</summary>
 internal static class UsageBrushes
 {
-    public static readonly IBrush Success = new SolidColorBrush(Color.Parse("#00783C"));
-    public static readonly IBrush Accent = new SolidColorBrush(Color.Parse("#0078D7"));
-    public static readonly IBrush Danger = new SolidColorBrush(Color.Parse("#C8463C"));
-    public static readonly IBrush Muted = new SolidColorBrush(Color.Parse("#6E727A"));
+    public static readonly IBrush Success = new ImmutableSolidColorBrush(Color.Parse("#00783C"));
+    public static readonly IBrush Accent = new ImmutableSolidColorBrush(Color.Parse("#0078D7"));
+    public static readonly IBrush Danger = new ImmutableSolidColorBrush(Color.Parse("#C8463C"));
+    public static readonly IBrush Muted = new ImmutableSolidColorBrush(Color.Parse("#6E727A"));
 }
 
 /// <summary>Bao một <see cref="ShopeeAccount"/> để bind 2 chiều trong lưới + form chi tiết.

@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.IO;
 using System.Text.Json;
 using Avalonia.Media;
+using Avalonia.Media.Immutable;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Shopee.Core.BigSeller;
@@ -928,7 +929,7 @@ public sealed partial class FleetViewModel : ObservableObject
     private static readonly IBrush QueuedBrush = Frozen(0x00, 0x78, 0xD7);
     private static readonly IBrush IdleBrush = Frozen(0x6E, 0x72, 0x7A);
     private static readonly IBrush FailBrush = Frozen(0xD1, 0x34, 0x38);
-    private static IBrush Frozen(byte r, byte g, byte b) => new SolidColorBrush(Color.FromRgb(r, g, b));
+    private static IBrush Frozen(byte r, byte g, byte b) => new ImmutableSolidColorBrush(Color.FromRgb(r, g, b));
 }
 
 /// <summary>1 dòng máy trong strip vai trò: chọn vai trò → đẩy lên Hub qua callback.</summary>
