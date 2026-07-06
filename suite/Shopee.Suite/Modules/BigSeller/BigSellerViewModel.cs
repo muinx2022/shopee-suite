@@ -35,7 +35,7 @@ public sealed partial class BigSellerViewModel : ObservableObject
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsIdle))]
-    [NotifyCanExecuteChangedFor(nameof(LoginCommand), nameof(StopLoginCommand))]
+    [NotifyCanExecuteChangedFor(nameof(LoginCommand), nameof(StopLoginCommand), nameof(LoginAllCommand))]
     private bool _isLoggingIn;
 
     public bool IsIdle => !IsLoggingIn;
@@ -252,6 +252,76 @@ public sealed partial class BigSellerViewModel : ObservableObject
             _loginCts = null;
         }
     }
+
+    /// <summary>TỰ ĐĂNG NHẬP TẤT CẢ (headless, KHÔNG hiện cửa sổ): lần lượt từng tk có đủ Email+Mật khẩu → mở
+    /// Brave --headless, điền form + giải captcha (AI) → LƯU cookie ra file (client dùng chung). Tk đòi mã email
+    /// (thiết bị mới) sẽ được báo để đăng nhập TAY 1 lần (Mở Profile) tạo device-trust.</summary>
+    [RelayCommand(CanExecute = nameof(CanLoginAll))]
+    private async Task LoginAllAsync()
+    {
+        var accts = Items.Where(a => !string.IsNullOrWhiteSpace(a.Model.Email) && !string.IsNullOrWhiteSpace(a.Model.Password)).ToList();
+        if (accts.Count == 0)
+        {
+            await Dialogs.InfoAsync("Chưa tài khoản nào điền đủ Email + Mật khẩu BigSeller để tự đăng nhập.", "Đăng nhập tất cả");
+            return;
+        }
+        if (!await Dialogs.ConfirmAsync(
+                $"Tự đăng nhập HEADLESS (không hiện cửa sổ) {accts.Count} tài khoản BigSeller rồi lưu cookie?\n\n" +
+                "• Cần API key OpenAI (Cài đặt) để giải captcha.\n" +
+                "• Tk đòi mã email (thiết bị mới) sẽ được báo — vào Mở Profile đăng nhập tay 1 lần để tạo device-trust.",
+                "Đăng nhập tất cả"))
+            return;
+
+        IsLoggingIn = true;
+        LoginLog.Clear();
+        _loginCts = new CancellationTokenSource();
+        int ok = 0, otp = 0, fail = 0;
+        try
+        {
+            for (var i = 0; i < accts.Count; i++)
+            {
+                _loginCts.Token.ThrowIfCancellationRequested();
+                var a = accts[i];
+                Status = $"[{i + 1}/{accts.Count}] Đang tự đăng nhập \"{a.DisplayName}\"…  (✔{ok} ⚠{otp} ✘{fail})";
+                AppendLog($"[{i + 1}/{accts.Count}] {a.DisplayName} — tự đăng nhập headless…");
+
+                // Mặc định file cookie nếu chưa đặt (client dùng chung với scrape/update).
+                if (string.IsNullOrWhiteSpace(a.CookieFile))
+                {
+                    a.CookieFile = Path.Combine(SuitePaths.ModuleDir("shared"), "bigseller-cookies", a.Model.Id + ".json");
+                    Save();
+                }
+
+                // Proxy riêng của tk (nếu có) → token mint khớp IP với scrape.
+                string? proxy = null;
+                if (a.Model.HasProxy)
+                {
+                    try { proxy = await OpenMultiBraveLauncherV3.BigSellerProxyResolver.ResolveServerAsync(a.Model.KiotProxyKey, a.Model.Region, a.Model.ProxyType, AppendLog); }
+                    catch (Exception ex) { AppendLog("  Lấy proxy lỗi: " + ex.Message + " — thử IP máy."); }
+                }
+
+                var outcome = await OpenMultiBraveLauncherV3.BigSellerAutoLogin.LoginHeadlessAsync(
+                    a.Model.Id, a.Model.Email, a.Model.Password, a.CookieFile, proxy, AppendLog, _loginCts.Token);
+
+                switch (outcome)
+                {
+                    case OpenMultiBraveLauncherV3.AutoLoginOutcome.Success:
+                        ok++; a.NotifyCookieChanged(); AppendLog($"  ✔ {a.DisplayName}: đã lưu cookie."); break;
+                    case OpenMultiBraveLauncherV3.AutoLoginOutcome.NeedsOtp:
+                        otp++; AppendLog($"  ⚠ {a.DisplayName}: BigSeller đòi mã email (thiết bị mới) — vào Mở Profile đăng nhập TAY 1 lần."); break;
+                    default:
+                        fail++; AppendLog($"  ✘ {a.DisplayName}: chưa đăng nhập được (kiểm mật khẩu / thử lại)."); break;
+                }
+            }
+            Status = $"Đăng nhập tất cả xong: ✔ {ok} · ⚠ {otp} cần OTP · ✘ {fail} lỗi (/{accts.Count} tk).";
+            await Dialogs.InfoAsync(Status, "Đăng nhập tất cả");
+        }
+        catch (OperationCanceledException) { Status = $"Đã dừng. Đã xong ✔{ok} ⚠{otp} ✘{fail}."; }
+        catch (Exception ex) { Status = "✘ Lỗi: " + ex.Message; }
+        finally { IsLoggingIn = false; _loginCts?.Dispose(); _loginCts = null; }
+    }
+
+    private bool CanLoginAll() => IsIdle && Items.Count > 0;
 
     /// <summary>Gọi từ luồng nền của runner ngay khi cookie vừa được lưu (cửa sổ vẫn mở).</summary>
     private void OnLoginSaved(BigSellerAccountItemViewModel account)

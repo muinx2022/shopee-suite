@@ -349,7 +349,7 @@ public static class BigSellerLoginRunner
     /// <c>"www.bigseller.com,*"</c>, <c>setting=2</c>). Nhờ vậy tracker (_ga/_fbp/_tt…) KHÔNG bị chặn →
     /// đăng nhập lưu được bộ cookie đầy đủ. Best-effort: lỗi gì cũng bỏ qua (không chặn login).
     /// </summary>
-    private static void EnsureBraveShieldsDown(string profileDir)
+    public static void EnsureBraveShieldsDown(string profileDir)
     {
         try
         {
