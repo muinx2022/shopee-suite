@@ -26,7 +26,7 @@
         <SolidColorBrush x:Key="SidebarMutedBrush" Color="#7E869B" />
 
         <SolidColorBrush x:Key="LogBackgroundBrush" Color="#121212" />
-        <SolidColorBrush x:Key="LogForegroundBrush" Color="#D2D2D2" />
+        <SolidColorBrush x:Key="LogForegroundBrush" Color="#E8E8E8" />
 
         <SolidColorBrush x:Key="TextPrimaryBrush" Color="#1B1F24" />
         <SolidColorBrush x:Key="TextSecondaryBrush" Color="#6E727A" />
@@ -160,6 +160,26 @@
         <Setter Property="BorderThickness" Value="0" />
         <Setter Property="IsReadOnly" Value="True" />
         <Setter Property="TextWrapping" Value="NoWrap" />
+    </Style>
+    <!-- Giữ NỀN TỐI khi hover/focus: FluentTheme mặc định đổi nền TextBox sang sáng lúc pointerover/focus (đè
+         nền tối của log) → chữ log sáng trở nên mờ trên nền sáng. Ép border-element giữ nền/chữ log. -->
+    <Style Selector="TextBox.log /template/ Border#PART_BorderElement">
+        <Setter Property="Background" Value="{DynamicResource LogBackgroundBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource LogBackgroundBrush}" />
+    </Style>
+    <Style Selector="TextBox.log:pointerover /template/ Border#PART_BorderElement">
+        <Setter Property="Background" Value="{DynamicResource LogBackgroundBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource LogBackgroundBrush}" />
+    </Style>
+    <Style Selector="TextBox.log:focus /template/ Border#PART_BorderElement">
+        <Setter Property="Background" Value="{DynamicResource LogBackgroundBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource LogBackgroundBrush}" />
+    </Style>
+    <Style Selector="TextBox.log:pointerover">
+        <Setter Property="Foreground" Value="{DynamicResource LogForegroundBrush}" />
+    </Style>
+    <Style Selector="TextBox.log:focus">
+        <Setter Property="Foreground" Value="{DynamicResource LogForegroundBrush}" />
     </Style>
 
     <!-- ══════════ CARD (class trên Border) ══════════ -->
