@@ -1,5 +1,6 @@
 <Styles xmlns="https://github.com/avaloniaui"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:sys="using:System">
 
     <Styles.Resources>
         <!-- ══════════ COLOR / BRUSH TOKENS ══════════ -->
@@ -36,6 +37,56 @@
         <FontFamily x:Key="UiFont">avares://Avalonia.Fonts.Inter/Assets#Inter</FontFamily>
         <FontFamily x:Key="MonoFont">Consolas, Cascadia Mono, DejaVu Sans Mono, Liberation Mono, monospace</FontFamily>
         <FontFamily x:Key="EmojiFont">Segoe UI Emoji, Noto Color Emoji, sans-serif</FontFamily>
+
+        <!-- ══════════ RESKIN FLUENTTHEME → look phẳng/gọn/pro như bản WPF ══════════ -->
+        <!-- Accent xanh của app (tab đang chọn, viền focus, highlight…). -->
+        <Color x:Key="SystemAccentColor">#0078D7</Color>
+        <Color x:Key="SystemAccentColorLight1">#1C86E0</Color>
+        <Color x:Key="SystemAccentColorDark1">#106EBE</Color>
+        <!-- Bo góc chung cho control Fluent (TextBox/ComboBox/…) — Fluent mặc định hơi vuông. -->
+        <CornerRadius x:Key="ControlCornerRadius">6</CornerRadius>
+        <!-- Tab: Fluent mặc định font header RẤT to (~24) → thu về gọn. (Chỉ override FontSize — các key khác
+             sai kiểu/không tồn tại sẽ làm vỡ template TabControl → view trống.) -->
+        <sys:Double x:Key="TabItemHeaderFontSize">14</sys:Double>
+
+        <!-- Button PHẲNG bo góc (thay template Fluent) — nền thẻ + viền mảnh, hover đổi nền nhưng GIỮ màu chữ/viền
+             của variant (primary/success/danger là outline: chữ+viền màu, không tô nền). Card (Welcome) bo tròn hơn. -->
+        <ControlTheme x:Key="{x:Type Button}" TargetType="Button">
+            <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="Padding" Value="14,7" />
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="Template">
+                <ControlTemplate>
+                    <Border Name="PART_bd" Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="{TemplateBinding CornerRadius}">
+                        <ContentPresenter Name="PART_ContentPresenter"
+                                          Content="{TemplateBinding Content}" ContentTemplate="{TemplateBinding ContentTemplate}"
+                                          Foreground="{TemplateBinding Foreground}" Padding="{TemplateBinding Padding}"
+                                          HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                          VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}"
+                                          RecognizesAccessKey="True" />
+                    </Border>
+                </ControlTemplate>
+            </Setter>
+            <Style Selector="^:pointerover /template/ Border#PART_bd">
+                <Setter Property="Background" Value="{DynamicResource SubtleBrush}" />
+            </Style>
+            <Style Selector="^:pressed /template/ Border#PART_bd">
+                <Setter Property="Background" Value="{DynamicResource SubtleBrush}" />
+                <Setter Property="Opacity" Value="0.9" />
+            </Style>
+            <Style Selector="^:disabled">
+                <Setter Property="Opacity" Value="0.45" />
+            </Style>
+        </ControlTheme>
     </Styles.Resources>
 
     <!-- ══════════ TYPOGRAPHY (class) ══════════ -->
@@ -63,7 +114,7 @@
         <Setter Property="FontFamily" Value="{DynamicResource EmojiFont}" />
     </Style>
 
-    <!-- ══════════ BUTTON variants (class) — FluentTheme lo phần còn lại ══════════ -->
+    <!-- ══════════ BUTTON variants (class) — outline: chữ + viền màu trên nền thẻ ══════════ -->
     <Style Selector="Button.primary">
         <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
@@ -78,6 +129,17 @@
         <Setter Property="Foreground" Value="{DynamicResource DangerBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource DangerBrush}" />
         <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+
+    <!-- Thẻ bấm được (màn Welcome): bo tròn hơn, canh trái, hover viền accent + nền xanh nhạt. -->
+    <Style Selector="Button.card">
+        <Setter Property="CornerRadius" Value="12" />
+        <Setter Property="Padding" Value="18,16" />
+        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+    </Style>
+    <Style Selector="Button.card:pointerover /template/ Border#PART_bd">
+        <Setter Property="Background" Value="#F4F9FF" />
+        <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
     </Style>
 
     <!-- ══════════ TEXTBOX variants (class) ══════════ -->
