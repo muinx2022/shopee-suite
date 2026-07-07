@@ -124,7 +124,7 @@
                                      IsReadOnly="{Binding #Root.DataContext.IsReadOnlyMode}" />
 
                             <TextBlock Text="Đăng nhập Shopee (user|pass|.shopee.vn=SPC_F=…)" Classes="caption" />
-                            <TextBox Classes="mono" Height="60" TextWrapping="Wrap"
+                            <TextBox Classes="mono" AcceptsReturn="True" Height="60" TextWrapping="Wrap"
                                      Text="{Binding ShopeeAccountLogin}" Margin="0,3,0,8"
                                      IsReadOnly="{Binding #Root.DataContext.IsReadOnlyMode}" />
                             <CheckBox Content="Mở với tài khoản Shopee (tự đăng nhập)" Margin="0,0,0,14"

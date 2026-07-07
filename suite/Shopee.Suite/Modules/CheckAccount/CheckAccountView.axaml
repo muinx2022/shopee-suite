@@ -36,7 +36,7 @@
                     <DockPanel Grid.Row="0">
                         <TextBlock DockPanel.Dock="Top" Classes="caption" Margin="0,0,0,5"
                                    Text="Danh sách tài khoản (mỗi dòng: user|pass  hoặc  user|pass|.shopee.vn=SPC_F=...)" />
-                        <TextBox Classes="mono"
+                        <TextBox Classes="mono" AcceptsReturn="True"
                                  IsReadOnly="{Binding IsRunning}"
                                  Text="{Binding Accounts}" />
                     </DockPanel>
@@ -45,7 +45,7 @@
                     <DockPanel Grid.Row="2" Margin="0,12,0,0">
                         <TextBlock DockPanel.Dock="Top" Classes="caption" Margin="0,0,0,5"
                                    Text="Danh sách proxy (mỗi dòng 1 kiotproxy key hoặc host:port — nhiều key để mỗi tk 1 IP mới)" />
-                        <TextBox Classes="mono"
+                        <TextBox Classes="mono" AcceptsReturn="True"
                                  IsReadOnly="{Binding IsRunning}"
                                  Text="{Binding ProxyList}" />
                     </DockPanel>

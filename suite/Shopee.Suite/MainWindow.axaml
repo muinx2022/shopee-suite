@@ -6,30 +6,32 @@
         Background="{DynamicResource WindowBackgroundBrush}"
         FontFamily="{DynamicResource UiFont}">
 
-    <Grid RowDefinitions="56,*">
+    <Grid RowDefinitions="58,*">
         <!-- ══════════ TOP APP BAR ══════════ -->
-        <Border Grid.Row="0" ZIndex="1" Background="{DynamicResource SidebarBackgroundBrush}"
-                BoxShadow="0 1 6 0 #22000000">
-            <Grid ColumnDefinitions="Auto,*">
+        <Border Grid.Row="0" ZIndex="1" Background="{DynamicResource NavBarBrush}"
+                BorderBrush="{DynamicResource NavBarBorderBrush}" BorderThickness="0,0,0,1"
+                BoxShadow="0 2 12 0 #33000000">
+            <Grid ColumnDefinitions="Auto,Auto,*">
                 <!-- Brand — bấm để quay về màn hình Welcome -->
                 <Button Grid.Column="0" Classes="brand" VerticalAlignment="Stretch"
                         Command="{Binding GoHomeCommand}" ToolTip.Tip="Về màn hình chính">
-                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                        <Border Width="34" Height="34" CornerRadius="9" Background="{DynamicResource AccentBrush}">
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Spacing="11">
+                        <Border Width="34" Height="34" CornerRadius="10" Background="{DynamicResource BrandBadgeBrush}"
+                                BoxShadow="0 2 6 0 #400A6BD8">
                             <TextBlock Text="S" FontSize="18" FontWeight="Bold" Foreground="White"
                                        HorizontalAlignment="Center" VerticalAlignment="Center" />
                         </Border>
-                        <TextBlock Text="Shopee Suite" FontSize="15" FontWeight="SemiBold" Foreground="White"
-                                   Margin="11,0,0,0" VerticalAlignment="Center" />
+                        <TextBlock Text="Shopee Suite" FontSize="15.5" FontWeight="SemiBold" Foreground="White"
+                                   VerticalAlignment="Center" />
                     </StackPanel>
                 </Button>
 
                 <!-- Vạch ngăn brand ↔ tab -->
-                <Border Grid.Column="0" Width="1" HorizontalAlignment="Right" Margin="0,14"
-                        Background="{DynamicResource SidebarItemHoverBrush}" />
+                <Rectangle Grid.Column="1" Width="1" Margin="6,15" VerticalAlignment="Stretch"
+                           Fill="{DynamicResource NavDividerBrush}" />
 
                 <!-- Tab module (ngang, cuộn ngang nếu tràn) -->
-                <ListBox Grid.Column="1" Classes="topnav" VerticalAlignment="Center" Margin="6,0"
+                <ListBox Grid.Column="2" Classes="topnav" VerticalAlignment="Center" Margin="8,0"
                          ItemsSource="{Binding Modules}" SelectedItem="{Binding Selected}"
                          ScrollViewer.HorizontalScrollBarVisibility="Auto"
                          ScrollViewer.VerticalScrollBarVisibility="Disabled">
@@ -40,12 +42,11 @@
                     </ListBox.ItemsPanel>
                     <ListBox.ItemTemplate>
                         <DataTemplate>
-                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center"
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Spacing="9"
                                         ToolTip.Tip="{Binding Subtitle}">
-                                <TextBlock Classes="emoji" Text="{Binding Glyph}" FontSize="15"
-                                           VerticalAlignment="Center" />
+                                <PathIcon Data="{Binding Icon}" Width="18" Height="18" VerticalAlignment="Center" />
                                 <TextBlock Text="{Binding NavTitle}" FontSize="13" FontWeight="SemiBold"
-                                           Margin="8,0,0,0" VerticalAlignment="Center" />
+                                           VerticalAlignment="Center" />
                             </StackPanel>
                         </DataTemplate>
                     </ListBox.ItemTemplate>
