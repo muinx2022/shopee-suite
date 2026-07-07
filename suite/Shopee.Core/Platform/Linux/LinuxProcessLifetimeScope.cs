@@ -34,7 +34,9 @@ internal sealed class LinuxProcessLifetimeScope : IProcessLifetimeScope
         _activeProcessLimit = Math.Max(0, activeProcessLimit);
     }
 
-    public Process Start(string fileName, string arguments)
+    // startMinimized: chỉ có ý nghĩa trên Windows (STARTUPINFO show state). Linux automation chạy headless /
+    // không window-manager để "thu nhỏ" → bỏ qua tham số.
+    public Process Start(string fileName, string arguments, bool startMinimized = false)
     {
         HookCleanupOnce();
 

@@ -44,7 +44,7 @@ public sealed class HttpCoordinationHub : ICoordinationHub, IDisposable
     {
         try
         {
-            await _client.MachineHeartbeatAsync(new MachineHeartbeatRequest(_machineId, Host, null));
+            await _client.MachineHeartbeatAsync(new MachineHeartbeatRequest(_machineId, Host, Infrastructure.AppInfo.Version));
             _fleet = await _client.FleetAsync();
             // CHỈ 1 lần, SAU khi Hub thật sự trả lời (tránh race lúc máy-Hub vừa khởi động: server localhost chưa
             // kịp lắng nghe). Poller 12s tự chạy ở tick thành công đầu tiên.

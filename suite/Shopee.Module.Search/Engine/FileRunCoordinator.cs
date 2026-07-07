@@ -61,7 +61,7 @@ public sealed class FileRunCoordinator
     public event Action? AccountsChanged;
     public event Action<string>? AccountUsed;
     public event Action<string>? AccountLoggedIn;
-    public event Action<string, string>? AccountErrored;
+    public event Action<string, string, string?>? AccountErrored;   // id, reason, captchaUrl (link đang cào lúc dính captcha)
 
     /// <summary>Persist a finished link's products to Excel (linkLabel, products). Off the UI thread.</summary>
     public Func<string, IReadOnlyList<ProductResult>, Task>? SaveLinkExcel;
@@ -285,7 +285,7 @@ public sealed class FileRunCoordinator
                     triedForLink.Add(account.Id);
                     if (outcome == SearchRunOutcome.CaptchaOrVerify)
                     {
-                        MarkErrored(account, "Verify/captcha");
+                        MarkErrored(account, "Verify/captcha", item.Link);   // lưu LINK đang cào (KHÔNG lưu trang /verify)
                         ReleaseAccount(account, rest: false);
                         LinkStatus?.Invoke(item.Link, $"\"{account.DisplayName}\" bị verify/captcha — đổi account, thử lại.");
                     }
@@ -398,11 +398,11 @@ public sealed class FileRunCoordinator
     private bool IsResting(string accountId, long now) =>
         _restUntilTick.TryGetValue(accountId, out var until) && now < until;
 
-    private void MarkErrored(InstanceConfig account, string reason)
+    private void MarkErrored(InstanceConfig account, string reason, string? captchaUrl = null)
     {
         lock (_accLock) _errored.Add(account.Id);
         ShopeeAccountUsage.Shared.MarkCaptcha(account.Id);   // cột "Tình trạng" → "⚠ Captcha"
-        AccountErrored?.Invoke(account.Id, reason);
+        AccountErrored?.Invoke(account.Id, reason, captchaUrl);
     }
 
     private void ReleaseAccount(InstanceConfig account, bool rest)

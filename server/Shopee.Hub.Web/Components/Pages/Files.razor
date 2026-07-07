@@ -1,0 +1,136 @@
+@page "/files"
+@attribute [Authorize(Policy = "Web")]
+@inject HubDatabase Db
+@inject FileStoreConfigService Config
+
+<h1>Files (kho dùng chung)</h1>
+<p class="hint">Workbook Excel + config + cookie. Bytes nằm ở <code>files\</code>; version tăng dần (client kéo theo manifest).</p>
+
+<h2>Tải workbook lên</h2>
+<div class="editcard" style="max-width:640px">
+    <label>Tài khoản BigSeller
+        <select @bind="_uploadAcctId">
+            <option value="">— chọn acc —</option>
+            @foreach (var a in _accounts)
+            {
+                <option value="@a.Id">@a.DisplayName</option>
+            }
+        </select>
+    </label>
+    <label>File .xlsx <InputFile OnChange="OnUpload" accept=".xlsx" /></label>
+    <div class="action">@_uploadStatus</div>
+</div>
+
+<h2>Ảnh mặc định cho Update (dùng chung)</h2>
+<div class="editcard" style="max-width:640px">
+    <p class="hint">1 ảnh duy nhất cho toàn hệ. Client tự kéo về khi chạy Update — máy nào thiếu ảnh local vẫn dùng ảnh này (thiếu cả hai thì bỏ qua ảnh như cũ). Key cố định <code>@FileStoreConfigService.DefaultUpdateImageFile</code>.</p>
+    <label>Ảnh (.jpg/.png) <InputFile OnChange="OnUploadDefaultImage" accept="image/*" /></label>
+    <div class="action">@_imgStatus</div>
+    @if (_imgPreview is not null)
+    {
+        <div style="margin-top:12px">
+            <img src="@_imgPreview" alt="ảnh Update dùng chung"
+                 style="max-width:240px;max-height:240px;border:1px solid var(--stroke);border-radius:var(--radius-sm);background:#fff;padding:4px" />
+            <div class="hint" style="margin-top:4px">Ảnh hiện tại trên Hub — v@_imgVer.</div>
+        </div>
+    }
+    else
+    {
+        <div class="hint" style="margin-top:8px">Chưa có ảnh nào trên Hub.</div>
+    }
+</div>
+
+<h2>Manifest (@_files.Count file)</h2>
+<div class="tablewrap">
+<table class="grid sm">
+    <thead><tr><th>Tên</th><th>Ver</th><th>Kích thước</th><th>SHA-256</th><th>Sửa lúc</th><th></th></tr></thead>
+    <tbody>
+    @foreach (var f in _files.OrderBy(x => x.Name))
+    {
+        <tr>
+            <td>@f.Name</td>
+            <td>@f.Version</td>
+            <td>@Size(f.Size)</td>
+            <td class="mono">@(f.Hash.Length > 12 ? f.Hash[..12] : f.Hash)…</td>
+            <td>@f.Mtime.LocalDateTime.ToString("MM-dd HH:mm")</td>
+            <td>
+                <a class="btn sm" href="/dl/@f.Name" target="_blank">⬇</a>
+                @if (!f.Name.StartsWith("config/", StringComparison.OrdinalIgnoreCase)
+                     && !string.Equals(f.Name, FileStoreConfigService.DefaultUpdateImageFile, StringComparison.OrdinalIgnoreCase))
+                {
+                    <button class="btn danger sm" @onclick="() => Delete(f.Name)">×</button>
+                }
+            </td>
+        </tr>
+    }
+    </tbody>
+</table>
+</div>
+
+@code {
+    private List<FileManifestEntry> _files = new();
+    private List<BigSellerAccount> _accounts = new();
+    private string _uploadAcctId = "";
+    private string _uploadStatus = "";
+    private string _imgStatus = "";
+    private string? _imgPreview;
+    private int _imgVer;
+
+    protected override void OnInitialized() { Reload(); _accounts = Config.BigSellerAccounts(); LoadImagePreview(); }
+
+    private void Reload() => _files = Db.ListFiles();
+
+    // Nhúng ảnh Update dùng chung dạng data-URI (né /dl trả application/octet-stream). Sniff MIME theo magic byte
+    // (PNG 89 50 4E 47, còn lại coi là JPEG). Gọi lại sau mỗi upload để xem trước cập nhật ngay.
+    private void LoadImagePreview()
+    {
+        _imgPreview = null;
+        var entry = _files.FirstOrDefault(f => string.Equals(f.Name, FileStoreConfigService.DefaultUpdateImageFile, StringComparison.OrdinalIgnoreCase));
+        if (entry is null) return;
+        var bytes = Db.ReadFile(FileStoreConfigService.DefaultUpdateImageFile);
+        if (bytes is null || bytes.Length == 0) return;
+        var isPng = bytes.Length >= 4 && bytes[0] == 0x89 && bytes[1] == 0x50 && bytes[2] == 0x4E && bytes[3] == 0x47;
+        _imgPreview = $"data:{(isPng ? "image/png" : "image/jpeg")};base64,{Convert.ToBase64String(bytes)}";
+        _imgVer = entry.Version;
+    }
+
+    private async Task OnUpload(InputFileChangeEventArgs e)
+    {
+        if (string.IsNullOrEmpty(_uploadAcctId)) { _uploadStatus = "⚠ Chọn tài khoản trước."; return; }
+        var file = e.File;
+        try
+        {
+            await using var s = file.OpenReadStream(maxAllowedSize: 256L * 1024 * 1024);
+            using var ms = new MemoryStream();
+            await s.CopyToAsync(ms);
+            var name = $"workbooks/{_uploadAcctId}/{file.Name}";
+            var res = Db.PutFile(name, ms.ToArray(), null, "hub-web");
+            _uploadStatus = res.Ok ? $"✔ Đã tải {name} (v{res.Version})." : $"✘ Lỗi: {res.Conflict}";
+            Reload();
+        }
+        catch (Exception ex) { _uploadStatus = "✘ Lỗi tải lên: " + ex.Message; }
+    }
+
+    // Ảnh Update dùng chung: key CỐ ĐỊNH, không cần chọn account, ghi đè (ifMatch=null → version tự tăng,
+    // client re-pull ở chu kỳ manifest/lần Update kế). accept="image/*" nên đọc byte thô, không phải JSON.
+    private async Task OnUploadDefaultImage(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        try
+        {
+            await using var s = file.OpenReadStream(maxAllowedSize: 32L * 1024 * 1024);
+            using var ms = new MemoryStream();
+            await s.CopyToAsync(ms);
+            var res = Db.PutFile(FileStoreConfigService.DefaultUpdateImageFile, ms.ToArray(), null, "hub-web");
+            _imgStatus = res.Ok ? $"✔ Đã cập nhật ảnh Update dùng chung (v{res.Version})." : $"✘ Lỗi: {res.Conflict}";
+            Reload();
+            LoadImagePreview();
+        }
+        catch (Exception ex) { _imgStatus = "✘ Lỗi tải ảnh: " + ex.Message; }
+    }
+
+    private void Delete(string name) { Db.DeleteFile(name); Reload(); }
+
+    private static string Size(long b) =>
+        b < 1024 ? $"{b} B" : b < 1024 * 1024 ? $"{b / 1024.0:0.#} KB" : $"{b / 1024.0 / 1024.0:0.##} MB";
+}

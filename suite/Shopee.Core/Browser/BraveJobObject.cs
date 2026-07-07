@@ -15,7 +15,9 @@ public static class BraveJobObject
     public static void ConfigureLimits(int activeProcessLimit, ulong jobMemoryLimitBytes) =>
         PlatformServices.ProcessLifetime.ConfigureLimits(activeProcessLimit, jobMemoryLimitBytes);
 
-    /// <summary>Phóng Brave trong scope "chết theo app". Không bao giờ ném — lỗi thì fallback phóng thường.</summary>
-    public static Process Start(string fileName, string arguments) =>
-        PlatformServices.ProcessLifetime.Start(fileName, arguments);
+    /// <summary>Phóng Brave trong scope "chết theo app". Không bao giờ ném — lỗi thì fallback phóng thường.
+    /// <paramref name="startMinimized"/>=true → cửa sổ mở THU NHỎ, không chiếm màn hình/không cướp focus
+    /// (Windows). Nhớ BỎ cờ '--start-maximized' ở args khi bật, kẻo cờ dòng lệnh đè lại thành maximize.</summary>
+    public static Process Start(string fileName, string arguments, bool startMinimized = false) =>
+        PlatformServices.ProcessLifetime.Start(fileName, arguments, startMinimized);
 }

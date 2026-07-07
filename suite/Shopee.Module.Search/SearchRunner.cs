@@ -31,7 +31,7 @@ public sealed class SearchRunner
     private readonly ConcurrentBag<ProductResult> _collected = new();
     private FileRunCoordinator? _file;
 
-    public event Action<string, string>? AccountErrored;
+    public event Action<string, string, string?>? AccountErrored;   // id, reason, captchaUrl (link đang cào lúc dính captcha)
     /// <summary>accountId — tk vừa được dùng (đã đăng nhập/chạy) để ghi lại "không cần login lần sau".</summary>
     public event Action<string>? AccountUsed;
     /// <summary>accountId — login Shopee THÀNH CÔNG (đánh dấu "lần sau khỏi login" đúng tk có phiên).</summary>
@@ -63,7 +63,7 @@ public sealed class SearchRunner
         _file.LinkAssigned += (link, acc, _) => LinkAssigned?.Invoke(link, acc);
         _file.LinkConnection += (link, c) => LinkConnection?.Invoke(link, c);
         _file.LinkFinished += link => LinkFinished?.Invoke(link);
-        _file.AccountErrored += (id, reason) => AccountErrored?.Invoke(id, reason);
+        _file.AccountErrored += (id, reason, captchaUrl) => AccountErrored?.Invoke(id, reason, captchaUrl);
         _file.AccountUsed += id => AccountUsed?.Invoke(id);
         _file.AccountLoggedIn += id => AccountLoggedIn?.Invoke(id);
         _file.SaveLinkExcel = (label, products) =>

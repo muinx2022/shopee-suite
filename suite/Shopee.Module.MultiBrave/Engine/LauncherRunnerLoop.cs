@@ -164,7 +164,7 @@ internal static class LauncherRunnerLoop
                     // giải → dừng (paused) cho user xử lý. captchaWaitedRow chống lặp vô hạn nếu captcha lại hiện.
                     config.RunnerPhase = "paused";
                     config.CaptchaError = true;   // cột "Trạng thái" hiện "🚫 Captcha" NGAY (RowStatus + RefreshRunStatusFromConfig)
-                    config.CaptchaUrl = step.PageUrl ?? link;   // lưu URL captcha → "Kiểm tra tk lỗi" mở đúng trang này
+                    config.CaptchaUrl = link;   // lưu LINK ĐÍCH đang mở (KHÔNG lưu trang /verify) → "Kiểm tra tk lỗi" mở lại đúng link này
                     config.LastRunnerMessage = $"🚫 Captcha dòng {rowNumber} ({config.DisplayName}) — GIẢI TAY trong cửa sổ Brave (đang giữ mở)…";
                     await PushDisplayStateAsync(
                         cdpPort, profileRoot, config, sheet, startRow, endRow.Value,
@@ -448,7 +448,7 @@ internal static class LauncherRunnerLoop
                         {
                             config.RunnerPhase = check.Captcha ? "paused" : "error";
                             if (check.Captcha) config.CaptchaError = true;   // cột Trạng thái → "🚫 Captcha" ngay
-                            if (check.Captcha) config.CaptchaUrl = check.PageUrl ?? pageUrl;   // lưu URL captcha
+                            if (check.Captcha) config.CaptchaUrl = pageUrl;   // lưu LINK trang vừa cào (KHÔNG lưu trang /verify)
                             config.LastRunnerMessage =
                                 check.Message ?? (check.Captcha
                                     ? $"Dừng vì captcha trước link tiếp theo - {config.DisplayName}, dòng {rowNumber} (SKU: {sku})."

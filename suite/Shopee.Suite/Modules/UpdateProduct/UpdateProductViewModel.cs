@@ -153,7 +153,7 @@ public sealed partial class UpdateProductViewModel : ObservableObject
     private Task RunImport() => RunWorkflowAsync("Import to store", (r, ctx, ct) => r.RunImportAsync(ctx, ct));
 
     [RelayCommand(CanExecute = nameof(IsIdle))]
-    private Task RunUpdate() => RunWorkflowAsync("Update product", (r, ctx, ct) => r.RunUpdateAsync(ctx, ct));
+    private Task RunUpdate() => RunWorkflowAsync("Update product", (r, ctx, ct) => r.RunUpdateAsync(ctx, ct), pullSharedImage: true);
 
     // Name-rewrite chỉ đọc workbook + OpenAI, KHÔNG mở BigSeller → không cần kiểm tra đăng nhập.
     [RelayCommand(CanExecute = nameof(IsIdle))]
@@ -235,7 +235,9 @@ public sealed partial class UpdateProductViewModel : ObservableObject
             lease = attempt.Handle;
 
             var ai = AiConfigStore.Shared.Current;
-            var ctx = BuildContext(t, ai, startRow, endRow, importFromClaimedTab);
+            // CHỈ Update: kéo ảnh dùng chung từ Hub (null nếu Hub chưa có/offline → BuildContext fallback ImagePath local).
+            var imageOverride = kind == UpdateKind.Update ? await ResolveUpdateImageAsync(job.Cts.Token).ConfigureAwait(false) : null;
+            var ctx = BuildContext(t, ai, startRow, endRow, importFromClaimedTab, imageOverride);
             var runner = new UpdateProductRunner();
             runner.Log += m => Log($"{prefix} {m}");
             job.Runner = runner;
@@ -277,7 +279,7 @@ public sealed partial class UpdateProductViewModel : ObservableObject
 
     private async Task RunWorkflowAsync(
         string name, Func<UpdateProductRunner, UpdateProductContext, CancellationToken, Task> action,
-        bool requiresBigSellerLogin = true, IReadOnlyList<UpdateRunTargetViewModel>? only = null)
+        bool requiresBigSellerLogin = true, IReadOnlyList<UpdateRunTargetViewModel>? only = null, bool pullSharedImage = false)
     {
         // only != null (v1.1): chạy RIÊNG tk được chỉ định. Bảo vệ chặn chạy chồng (đường command đã có
         // CanExecute=IsIdle; guard này thêm an toàn cho đường gọi single).
@@ -287,13 +289,17 @@ public sealed partial class UpdateProductViewModel : ObservableObject
 
         var ai = AiConfigStore.Shared.Current;
 
+        // CHỈ Update: kéo ảnh dùng chung từ Hub MỘT LẦN trước khi build/chạy song song (tránh N task đua ghi cùng
+        // file cache). Chưa có CTS của lượt chạy ở đây nên dùng None — pull nhanh, best-effort, tự có timeout _bulkHttp.
+        var imageOverride = pullSharedImage ? await ResolveUpdateImageAsync(CancellationToken.None).ConfigureAwait(false) : null;
+
         // Validate từng đích; tk lỗi (chưa cookie/sheet/workbook) bị bỏ qua, không chặn các tk khác.
         var jobs = new List<(BigSellerAccount Account, UpdateProductContext Ctx)>();
         var problems = new List<string>();
         foreach (var t in picked)
         {
             if (!ValidateUpdateTarget(t, requiresBigSellerLogin, out var problem)) { problems.Add(problem); continue; }
-            jobs.Add((t.Account, BuildContext(t, ai)));
+            jobs.Add((t.Account, BuildContext(t, ai, imageOverride: imageOverride)));
         }
 
         if (jobs.Count == 0) { Warn($"Không có tài khoản hợp lệ để chạy {name}.\n" + string.Join("\n", problems)); return; }
@@ -339,8 +345,24 @@ public sealed partial class UpdateProductViewModel : ObservableObject
         problem = ""; return true;
     }
 
+    /// <summary>CHỈ cho luồng Update: kéo ảnh dùng chung từ Hub về cache rồi trả đường dẫn để BuildContext dùng thay
+    /// ImagePath local. Trả null nếu chưa nối Hub / Hub chưa upload ảnh / offline / lỗi → BuildContext fallback về
+    /// ImagePath (mặc định D:\images\1.jpg). Best-effort, nuốt mọi lỗi — offline không bao giờ chặn Update.</summary>
+    private static async Task<string?> ResolveUpdateImageAsync(CancellationToken ct)
+    {
+        try
+        {
+            var sync = CoordinationRuntime.ConfigSync;
+            if (sync is null) return null;
+            var local = SuitePaths.ResolveHubRelative(HubConfigSync.DefaultUpdateImageRemote);
+            var path = await sync.PullSharedAssetAsync(HubConfigSync.DefaultUpdateImageRemote, local, ct).ConfigureAwait(false);
+            return !string.IsNullOrEmpty(path) && File.Exists(path) ? path : null;
+        }
+        catch { return null; }
+    }
+
     private UpdateProductContext BuildContext(UpdateRunTargetViewModel t, AiConfig ai, int? startRow = null, int? endRow = null,
-        bool? importFromClaimedTab = null)
+        bool? importFromClaimedTab = null, string? imageOverride = null)
     {
         var a = t.Account; var s = t.SelectedShop!;
         // AI (viết lại tên/mô tả) dùng cấu hình AI CHUNG ở Cài đặt; key truyền THẲNG qua context
@@ -355,7 +377,7 @@ public sealed partial class UpdateProductViewModel : ObservableObject
             a.Id, a.Email, a.WorkbookPath, a.CookieFile,
             s.Id, s.DisplayName, s.ShopeeDataSheet,
             aiModel, "", ai.BatchSize, "",
-            sr, er, ImagePath, VideoFolder,
+            sr, er, imageOverride ?? ImagePath, VideoFolder,
             s.BigSellerCrawlUrl, fromClaimedTab,
             1, t.UpdateWorkers, t.ListingReloadSeconds, ai.OpenAiApiKey,   // Import LUÔN 1 lane (1 process)
             s.ColumnMap.LinkColumn, s.ColumnMap.PriceColumn, s.ColumnMap.SkuColumn,

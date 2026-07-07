@@ -58,6 +58,11 @@ public partial class App : Application
         try { Shopee.Core.Coordination.CoordinationRuntime.InitFromConfig(); }
         catch (Exception ex) { TryLog("Coordination.Init", ex); }
 
+        // Tự cập nhật (Velopack): kiểm tra + TẢI nền bản mới. KHÔNG tự khởi động lại — chỉ báo sẵn để
+        // người dùng bấm cập nhật khi rảnh (khỏi cắt job). No-op nếu chạy từ dev/bin (chưa cài qua Velopack).
+        try { _ = Services.UpdateService.Shared.CheckAsync(); }
+        catch (Exception ex) { TryLog("UpdateService.Check", ex); }
+
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
             desktop.MainWindow = new MainWindow { DataContext = new ShellViewModel() };

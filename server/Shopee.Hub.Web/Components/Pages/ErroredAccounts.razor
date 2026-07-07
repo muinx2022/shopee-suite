@@ -1,0 +1,63 @@
+@page "/config/errored"
+@attribute [Authorize(Policy = "Web")]
+@implements IDisposable
+@inject FileStoreConfigService Config
+@inject FleetStateService Fleet
+@inject HubDatabase Db
+
+<h1>Tài khoản lỗi / captcha</h1>
+<p class="hint">Acc Shopee do client báo dính captcha hoặc lỗi. Gỡ báo khi đã xử lý.</p>
+
+<div class="bar">
+    <span class="stat">@_errors.Count acc đang báo lỗi</span>
+    <button class="btn" @onclick="Refresh">↻ Cập nhật</button>
+</div>
+
+@if (_errors.Count == 0)
+{
+    <p class="hint">Không có acc nào đang báo lỗi. 🎉</p>
+}
+else
+{
+    <div class="tablewrap">
+    <table class="grid sm">
+        <thead><tr><th>Acc</th><th>Máy</th><th>Lý do</th><th>Captcha URL</th><th>Trạng thái</th><th>Lúc</th><th></th></tr></thead>
+        <tbody>
+        @foreach (var e in _errors.OrderByDescending(x => x.ReportedAt))
+        {
+            <tr>
+                <td>@AccLabel(e.AccountId)</td>
+                <td>@e.Hostname</td>
+                <td>@e.Reason</td>
+                <td>@(string.IsNullOrEmpty(e.CaptchaUrl) ? "" : (MarkupString)$"<a href=\"{e.CaptchaUrl}\" target=\"_blank\">mở</a>")</td>
+                <td><span class="pill @(e.Status == "failed" ? "fail" : "warn")">@e.Status</span></td>
+                <td>@FleetStateService.Ago(e.ReportedAt)</td>
+                <td><button class="btn sm" @onclick="() => ClearError(e.AccountId)">Gỡ báo</button></td>
+            </tr>
+        }
+        </tbody>
+    </table>
+    </div>
+}
+
+@code {
+    private List<AccountError> _errors = new();
+    private List<ShopeeAccount> _accounts = new();
+
+    protected override void OnInitialized()
+    {
+        Fleet.Changed += OnChanged;
+        Refresh();
+        _accounts = Config.ShopeeAccounts();
+    }
+
+    private void OnChanged() => InvokeAsync(() => { _errors = Db.AllAccountErrors(); StateHasChanged(); });
+    private void Refresh() => _errors = Db.AllAccountErrors();
+
+    private string AccLabel(string id) =>
+        _accounts.FirstOrDefault(a => a.Id == id)?.DisplayName ?? id[..Math.Min(8, id.Length)];
+
+    private void ClearError(string id) { Db.ClearAccountError(id); Refresh(); }
+
+    public void Dispose() => Fleet.Changed -= OnChanged;
+}

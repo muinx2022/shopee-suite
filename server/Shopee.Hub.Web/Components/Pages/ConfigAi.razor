@@ -1,0 +1,61 @@
+@page "/config/ai"
+@attribute [Authorize(Policy = "Web")]
+@inject FileStoreConfigService Config
+
+<h1>Cấu hình AI</h1>
+<p class="hint">Dùng cho viết lại tên/mô tả sản phẩm + phân loại danh mục (client kéo về).</p>
+
+<div class="editcard" style="max-width:640px">
+    <label>Nhà cung cấp
+        <select @bind="_ai.Provider">
+            <option value="OpenAI">OpenAI</option>
+            <option value="Anthropic">Anthropic</option>
+            <option value="Gemini">Gemini</option>
+        </select>
+    </label>
+    <div class="row">
+        <label>OpenAI model <input @bind="_ai.OpenAiModel" /></label>
+        <label>OpenAI API key <input @bind="_ai.OpenAiApiKey" type="password" /></label>
+    </div>
+    <div class="row">
+        <label>Anthropic model <input @bind="_ai.AnthropicModel" /></label>
+        <label>Anthropic API key <input @bind="_ai.AnthropicApiKey" type="password" /></label>
+    </div>
+    <div class="row">
+        <label>Gemini model <input @bind="_ai.GeminiModel" /></label>
+        <label>Gemini API key <input @bind="_ai.GeminiApiKey" type="password" /></label>
+    </div>
+    <label>Batch size <input type="number" @bind="_ai.BatchSize" style="width:90px" /></label>
+    <label>Prompt viết lại TÊN (trống = mặc định)
+        <textarea @bind="_ai.NameRewritePrompt" rows="4"></textarea>
+    </label>
+    <label>Prompt viết lại MÔ TẢ (trống = mặc định)
+        <textarea @bind="_ai.DescriptionPrompt" rows="4"></textarea>
+    </label>
+    <div class="bar">
+        <button class="btn primary" @onclick="Save">💾 Lưu</button>
+        <span class="action">@_status</span>
+    </div>
+</div>
+
+@code {
+    private AiConfig _ai = new();
+    private int _version;
+    private string _status = "";
+
+    protected override void OnInitialized() => Load();
+
+    private void Load()
+    {
+        _ai = Config.Ai();
+        _version = Config.VersionOf(FileStoreConfigService.AiFile);
+    }
+
+    private void Save()
+    {
+        var res = Config.Save(FileStoreConfigService.AiFile, _ai, _version);
+        if (res.Ok) { _version = res.Version; _status = $"✔ Đã lưu (v{res.Version})."; }
+        else if (res.Conflict == "version-conflict") { _status = "⚠ Client vừa đẩy bản mới — đã tải lại."; Load(); }
+        else _status = $"✘ Lỗi lưu: {res.Conflict}";
+    }
+}

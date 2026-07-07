@@ -1,0 +1,126 @@
+@page "/machines"
+@attribute [Authorize(Policy = "Web")]
+@implements IDisposable
+@inject FleetStateService Fleet
+@inject HubDatabase Db
+
+<h1>Quản lý máy client</h1>
+<p class="hint">Máy tự đăng ký bằng token. Ở đây bạn reset việc (nhả khoá acc ngay), đặt vai trò, hoặc xoá &amp; chặn máy.</p>
+
+<div class="bar">
+    <span class="stat">@_snap.Machines.Count máy · @RunningCount đang chạy · @QueuedCount chờ</span>
+    <button class="btn danger" @onclick="CancelAllWork">✖ Huỷ MỌI việc (chạy + chờ)</button>
+    <span class="action">@_status</span>
+</div>
+
+<div class="tablewrap">
+<table class="grid sm">
+    <thead><tr><th>Máy</th><th>Trạng thái</th><th>Việc đang giữ</th><th>Vai trò (auto)</th><th>Hành động</th></tr></thead>
+    <tbody>
+    @foreach (var m in _snap.Machines.OrderByDescending(x => x.LastSeen))
+    {
+        var pres = FleetStateService.Status(_snap, m);
+        var role = _snap.Roles.FirstOrDefault(r => r.MachineId == m.MachineId)?.Role ?? MachineRoles.Off;
+        var held = _snap.Assignments.Count(a => a.Status is "running" or "queued" && (a.ClaimedByMachineId == m.MachineId || a.TargetMachineId == m.MachineId))
+                   + _snap.Leases.Count(l => l.MachineId == m.MachineId);
+        <tr>
+            <td><b>@m.Hostname</b><div class="mono" style="font-size:11px;color:#64748b">@m.MachineId[..Math.Min(12, m.MachineId.Length)]</div></td>
+            <td>@pres.Dot @pres.Label</td>
+            <td>@(held > 0 ? $"{held}" : "—")</td>
+            <td>
+                <select value="@role" @onchange="e => SetRole(m.MachineId, e.Value?.ToString())">
+                    @foreach (var (key, disp) in FleetStateService.RoleChoices)
+                    {
+                        <option value="@key" selected="@(key == role)">@disp</option>
+                    }
+                </select>
+            </td>
+            <td>
+                <button class="btn sm" @onclick="() => ResetMachine(m.MachineId, m.Hostname)">⟳ Reset việc</button>
+                <button class="btn danger sm" @onclick="() => DeleteMachine(m.MachineId, m.Hostname)">🗑 Xoá &amp; chặn</button>
+            </td>
+        </tr>
+    }
+    @if (_snap.Machines.Count == 0)
+    {
+        <tr><td colspan="5" class="empty">Chưa có máy nào kết nối.</td></tr>
+    }
+    </tbody>
+</table>
+</div>
+
+@if (_revoked.Count > 0)
+{
+    <h2>Máy bị chặn (@_revoked.Count)</h2>
+    <p class="hint">Máy này bị 401 khi kết nối (dù còn token). Bỏ chặn để cho phép vào lại.</p>
+    <div class="tablewrap">
+    <table class="grid sm">
+        <thead><tr><th>Machine ID</th><th></th></tr></thead>
+        <tbody>
+        @foreach (var id in _revoked)
+        {
+            <tr><td class="mono">@id</td><td><button class="btn sm" @onclick="() => Unblock(id)">Bỏ chặn</button></td></tr>
+        }
+        </tbody>
+    </table>
+    </div>
+}
+
+@code {
+    private FleetSnapshot _snap = new();
+    private List<string> _revoked = new();
+    private string _status = "";
+
+    private int RunningCount => _snap.Assignments.Count(a => a.Status == "running");
+    private int QueuedCount => _snap.Assignments.Count(a => a.Status == "queued");
+
+    protected override void OnInitialized()
+    {
+        Fleet.Changed += OnChanged;
+        _snap = Fleet.Snapshot;
+        _revoked = Db.RevokedMachines();
+    }
+
+    private void OnChanged() => InvokeAsync(() => { _snap = Fleet.Snapshot; StateHasChanged(); });
+
+    private void SetRole(string machineId, string? role)
+    {
+        Db.SetRole(machineId, string.IsNullOrWhiteSpace(role) ? MachineRoles.Off : role);
+        Fleet.Refresh();
+    }
+
+    private void ResetMachine(string machineId, string host)
+    {
+        var n = Db.ResetMachineWork(machineId);
+        _status = $"⟳ Đã reset {host}: huỷ {n} việc + nhả khoá acc/lease. Acc được nhả ngay — ghim lại được.";
+        Fleet.Refresh();
+    }
+
+    private void DeleteMachine(string machineId, string host)
+    {
+        Db.ResetMachineWork(machineId);   // nhả việc trước
+        Db.RevokeMachine(machineId);       // chặn (401 khi vào lại)
+        Db.RemoveMachine(machineId);       // xoá khỏi danh sách
+        _revoked = Db.RevokedMachines();
+        _status = $"🗑 Đã xoá & chặn {host}. Máy này sẽ bị 401 (mất kết nối) dù còn token.";
+        Fleet.Refresh();
+    }
+
+    private void Unblock(string machineId)
+    {
+        Db.UnrevokeMachine(machineId);
+        _revoked = Db.RevokedMachines();
+        _status = "✔ Đã bỏ chặn — máy vào lại được.";
+    }
+
+    private void CancelAllWork()
+    {
+        var n = 0;
+        foreach (var a in _snap.Assignments.Where(a => a.Status is "running" or "queued"))
+        { Db.CancelAssignment(a.Id); n++; }
+        _status = $"✖ Đã huỷ {n} việc (chạy + chờ).";
+        Fleet.Refresh();
+    }
+
+    public void Dispose() => Fleet.Changed -= OnChanged;
+}

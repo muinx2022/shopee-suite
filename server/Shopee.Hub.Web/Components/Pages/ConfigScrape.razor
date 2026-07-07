@@ -1,0 +1,58 @@
+@page "/config/scrape"
+@attribute [Authorize(Policy = "Web")]
+@inject FileStoreConfigService Config
+
+<h1>Scrape targets</h1>
+<p class="hint">Cấu hình đích scrape theo tài khoản BigSeller (client kéo về).</p>
+
+<div class="bar">
+    <button class="btn" @onclick="Add">+ Thêm target</button>
+    <button class="btn primary" @onclick="Save">💾 Lưu</button>
+    <span class="action">@_status</span>
+</div>
+
+<div class="tablewrap">
+<table class="grid sm">
+    <thead><tr><th>AccountId (BigSeller)</th><th>ShopId chọn</th><th>Tick chạy</th><th>StartRow</th><th>EndRow</th><th>Dòng/acc</th><th>MaxProcess</th><th>FrameSize</th><th></th></tr></thead>
+    <tbody>
+    @foreach (var t in _targets)
+    {
+        <tr>
+            <td><input @bind="t.AccountId" style="width:200px" /></td>
+            <td><input @bind="t.SelectedShopId" style="width:160px" /></td>
+            <td style="text-align:center"><input type="checkbox" @bind="t.IsSelected" /></td>
+            <td><input type="number" @bind="t.StartRow" class="ci" /></td>
+            <td><input type="number" @bind="t.EndRow" class="ci" /></td>
+            <td><input type="number" @bind="t.RowsPerAccount" class="ci" /></td>
+            <td><input type="number" @bind="t.MaxProcess" class="ci" /></td>
+            <td><input type="number" @bind="t.FrameSize" class="ci" /></td>
+            <td><button class="btn danger sm" @onclick="() => _targets.Remove(t)">×</button></td>
+        </tr>
+    }
+    </tbody>
+</table>
+</div>
+
+@code {
+    private List<ScrapeTargetConfig> _targets = new();
+    private int _version;
+    private string _status = "";
+
+    protected override void OnInitialized() => Load();
+
+    private void Load()
+    {
+        _targets = Config.ScrapeTargets();
+        _version = Config.VersionOf(FileStoreConfigService.ScrapeTargetsFile);
+    }
+
+    private void Add() => _targets.Add(new ScrapeTargetConfig());
+
+    private void Save()
+    {
+        var res = Config.Save(FileStoreConfigService.ScrapeTargetsFile, _targets, _version);
+        if (res.Ok) { _version = res.Version; _status = $"✔ Đã lưu (v{res.Version})."; }
+        else if (res.Conflict == "version-conflict") { _status = "⚠ Client vừa đẩy bản mới — đã tải lại."; Load(); }
+        else _status = $"✘ Lỗi lưu: {res.Conflict}";
+    }
+}

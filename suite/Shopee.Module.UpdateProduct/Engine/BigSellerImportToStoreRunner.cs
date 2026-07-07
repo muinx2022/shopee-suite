@@ -766,7 +766,7 @@ internal sealed class BigSellerImportToStoreRunner : IAsyncDisposable
             "--no-session-restore",
             "--restore-last-session=false",
             "--disable-session-crashed-bubble",
-            "--start-maximized",
+            // KHÔNG '--start-maximized': muốn Brave mở THU NHỎ (startMinimized) — cờ maximize sẽ đè show-state.
             "--window-size=1920,1080",
             "--disable-gpu",
             "--disable-dev-shm-usage",
@@ -781,10 +781,11 @@ internal sealed class BigSellerImportToStoreRunner : IAsyncDisposable
         // thì cứ mở lại Brave rồi lại bị giết — đúng triệu chứng "tắt Brave nhưng script vẫn chạy".
         BraveFleet.RegisterActiveProfile(_settings.ProfileDir);
 
-        _log("Mở Brave BigSeller profile...");
+        _log("Mở Brave BigSeller profile (thu nhỏ)...");
         // Phóng qua BraveJobObject (KILL_ON_JOB_CLOSE): app tắt/crash → OS tự giết Brave này. Vẫn cần
         // reaper ở DisposeAsync/RestartBrowserAsync vì Brave fork browser thật rồi stub thoát.
-        _braveProcess = BraveJobObject.Start(_settings.BravePath, args);
+        // startMinimized: mở cửa sổ ở trạng thái thu nhỏ, KHÔNG chiếm màn hình/không cướp focus của người dùng.
+        _braveProcess = BraveJobObject.Start(_settings.BravePath, args, startMinimized: true);
     }
 
     private static void ClearSessionTabs(string profileDir)

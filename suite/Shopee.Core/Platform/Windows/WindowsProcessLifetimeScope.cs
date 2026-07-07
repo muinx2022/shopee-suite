@@ -32,11 +32,11 @@ internal sealed class WindowsProcessLifetimeScope : IProcessLifetimeScope
         _jobMemoryLimit = jobMemoryLimitBytes;
     }
 
-    public Process Start(string fileName, string arguments)
+    public Process Start(string fileName, string arguments, bool startMinimized = false)
     {
         if (EnsureJob())
         {
-            var p = TryStartInJob(fileName, arguments);
+            var p = TryStartInJob(fileName, arguments, startMinimized);
             if (p is not null) return p;
         }
         var proc = Process.Start(new ProcessStartInfo
@@ -44,6 +44,8 @@ internal sealed class WindowsProcessLifetimeScope : IProcessLifetimeScope
             FileName = fileName,
             Arguments = arguments,
             UseShellExecute = false,
+            // Fallback (job lỗi): .NET dịch WindowStyle → STARTUPINFO.wShowWindow. Minimized = SW_SHOWMINIMIZED.
+            WindowStyle = startMinimized ? ProcessWindowStyle.Minimized : ProcessWindowStyle.Normal,
         })!;
         try { if (_job != IntPtr.Zero) AssignProcessToJobObject(_job, proc.Handle); } catch { }
         return proc;
@@ -93,10 +95,18 @@ internal sealed class WindowsProcessLifetimeScope : IProcessLifetimeScope
         }
     }
 
-    private Process? TryStartInJob(string fileName, string arguments)
+    private Process? TryStartInJob(string fileName, string arguments, bool startMinimized)
     {
         var si = new STARTUPINFO();
         si.cb = Marshal.SizeOf(si);
+        if (startMinimized)
+        {
+            // Mở Brave THU NHỎ (không đè màn hình). Chromium chỉ đọc SW_SHOWMAXIMIZED/SW_SHOWMINIMIZED từ
+            // STARTUPINFO cho cửa sổ đầu (SW_SHOWMINNOACTIVE bị coi như 'normal') → PHẢI dùng SW_SHOWMINIMIZED.
+            // Cửa sổ hạ xuống taskbar; Windows chặn cướp-foreground nên chỉ nháy taskbar, không chiếm màn hình.
+            si.dwFlags |= STARTF_USESHOWWINDOW;
+            si.wShowWindow = SW_SHOWMINIMIZED;
+        }
 
         var cmd = new StringBuilder();
         cmd.Append('"').Append(fileName).Append('"');
@@ -126,6 +136,8 @@ internal sealed class WindowsProcessLifetimeScope : IProcessLifetimeScope
 
     // ── Hằng số ──
     private const uint CREATE_SUSPENDED = 0x00000004;
+    private const int STARTF_USESHOWWINDOW = 0x00000001;
+    private const short SW_SHOWMINIMIZED = 2;   // Chromium đọc đúng cờ này cho cửa sổ đầu → mở thu nhỏ
     private const int JobObjectExtendedLimitInformation = 9;
     private const uint JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000;
     private const uint JOB_OBJECT_LIMIT_ACTIVE_PROCESS = 0x00000008;

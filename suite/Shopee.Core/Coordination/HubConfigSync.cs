@@ -19,6 +19,14 @@ public sealed class HubConfigSync
     private static string SharedFile(string name) => Path.Combine(SuitePaths.ModuleDir("shared"), name);
     private static string CookieDir => Path.Combine(SuitePaths.ModuleDir("shared"), "bigseller-cookies");
 
+    /// <summary>Key ảnh Update dùng chung trên Hub — PHẢI khớp FileStoreConfigService.DefaultUpdateImageFile (server).
+    /// Chữ thường cố định vì VM Linux phân biệt hoa-thường.</summary>
+    public const string DefaultUpdateImageRemote = "images/default-update.jpg";
+
+    // Chống đua ghi khi nhiều đích Update kéo cùng 1 file asset về cùng đường cache (hash-skip bên trong → chỉ
+    // đứa đầu tải, các đứa sau bỏ qua). Rẻ vì asset nhỏ + hiếm.
+    private static readonly SemaphoreSlim _assetGate = new(1, 1);
+
     /// <summary>Đẩy cấu hình hiện tại của máy này lên Hub (làm "nguồn" cho các máy khác kéo về). CHỈ đẩy file có
     /// nội dung KHÁC bản trên Hub (so size + SHA-256) → gọi định kỳ rất rẻ (workbook lớn không upload lại vô ích).</summary>
     public async Task<string> PushAsync(CancellationToken ct = default)
@@ -196,6 +204,38 @@ public sealed class HubConfigSync
     /// (Hub đọc bằng ReadAllText nên tự bỏ BOM → không lộ lỗi). Bỏ BOM ở client cho khớp.</summary>
     private static ReadOnlySpan<byte> NoBom(byte[] b) =>
         b.Length >= 3 && b[0] == 0xEF && b[1] == 0xBB && b[2] == 0xBF ? b.AsSpan(3) : b.AsSpan();
+
+    /// <summary>Kéo 1 file "dùng chung" (vd ảnh Update mặc định) từ Hub về <paramref name="localPath"/>. Sao y khối
+    /// kéo workbook: manifest → bỏ qua nếu bản local đã khớp hash → tải qua _bulkHttp (5') → ghi BYTE THÔ (KHÔNG NoBom,
+    /// đây là ảnh nhị phân). Trả về localPath nếu có sẵn/tải được; null nếu Hub CHƯA CÓ (404) / offline / lỗi →
+    /// caller tự fallback về đường ảnh local mặc định. BEST-EFFORT: mọi lỗi nuốt hết, không bao giờ ném vào đường chạy.</summary>
+    public async Task<string?> PullSharedAssetAsync(string remoteName, string localPath, CancellationToken ct = default)
+    {
+        await _assetGate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            List<FileManifestEntry> manifest;
+            try { manifest = await _client.ManifestAsync(ct); }
+            catch { return File.Exists(localPath) ? localPath : null; }   // offline → dùng bản cache cũ nếu còn
+
+            var entry = manifest.FirstOrDefault(m => string.Equals(m.Name, remoteName, StringComparison.OrdinalIgnoreCase));
+            if (entry is null) return File.Exists(localPath) ? localPath : null;   // Hub chưa upload ảnh → fallback
+
+            // Bản local đã khớp hash manifest → khỏi tải lại (giữ guard Hash không rỗng như khối workbook).
+            if (File.Exists(localPath) && !string.IsNullOrEmpty(entry.Hash)
+                && string.Equals(LocalSha256(localPath), entry.Hash, StringComparison.OrdinalIgnoreCase))
+                return localPath;
+
+            var bytes = await _client.DownloadAsync(entry.Name, ct);
+            if (bytes is null) return File.Exists(localPath) ? localPath : null;   // 404/offline → cache cũ nếu còn
+
+            Directory.CreateDirectory(Path.GetDirectoryName(localPath)!);
+            await File.WriteAllBytesAsync(localPath, bytes, ct);
+            return localPath;
+        }
+        catch { return File.Exists(localPath) ? localPath : null; }
+        finally { _assetGate.Release(); }
+    }
 
     /// <summary>SHA-256 (hex hoa) của 1 file local — so với manifest.Hash để bỏ qua tải workbook không đổi.</summary>
     private static string LocalSha256(string path)

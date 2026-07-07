@@ -523,7 +523,7 @@ public sealed partial class SearchViewModel : ObservableObject
         });
         _runner.LinkFinished += link => OnUi(() => { var t = Tab(link); if (t is not null && t.Status.StartsWith("Đang")) t.Status = "đã đóng"; });
         _runner.AccountLoggedIn += id => OnUi(() => _usedAccounts.Add(id));
-        _runner.AccountErrored += (id, reason) => OnUi(() =>
+        _runner.AccountErrored += (id, reason, captchaUrl) => OnUi(() =>
         {
             var label = _pool.FirstOrDefault(a => a.Id == id)?.DisplayName ?? id;
             var now = DateTime.Now.ToString("HH:mm:ss");
@@ -531,17 +531,20 @@ public sealed partial class SearchViewModel : ObservableObject
             if (row is null) ErroredAccounts.Insert(0, new ErroredAccountRow(id, label, reason, now));
             else { row.Reason = reason; row.Time = now; }
             LogLines.Add($"⚠ Tk lỗi: {label} — {reason} (engine tự đổi account khác)");
-            FlagAccountErrored(id, $"Dính captcha/lỗi (Search) — {DateTime.Now:dd/MM HH:mm}: {reason}");
+            FlagAccountErrored(id, $"Dính captcha/lỗi (Search) — {DateTime.Now:dd/MM HH:mm}: {reason}", captchaUrl);
         });
     }
 
-    private static void FlagAccountErrored(string id, string reason)
+    private static void FlagAccountErrored(string id, string reason, string? captchaUrl = null)
     {
         var acc = AccountStore.Shared.Accounts.FirstOrDefault(a => a.Id == id);
-        if (acc is null || acc.Disabled) return;
+        if (acc is null) return;
+        var alreadyFlagged = acc.Disabled;
         acc.Disabled = true;
         acc.LastError = reason;
-        AccountStore.Shared.Save();
+        // Lưu LINK đang cào lúc dính captcha (KHÔNG lưu trang /verify) → "Kiểm tra tk lỗi" mở lại đúng link.
+        if (!string.IsNullOrWhiteSpace(captchaUrl)) acc.CaptchaUrl = captchaUrl;
+        if (!alreadyFlagged || !string.IsNullOrWhiteSpace(captchaUrl)) AccountStore.Shared.Save();
         // CLIENT: báo Hub acc này dính captcha (Hub xem ở panel + operator quyết giữ/xóa). Hub/standalone: khỏi báo.
         if (CoordinationRuntime.Active && !HubServerConfigStore.Shared.Current.Enabled)
             _ = CoordinationRuntime.Hub?.ReportErroredAccountAsync(id, reason, acc.CaptchaUrl, "captcha");

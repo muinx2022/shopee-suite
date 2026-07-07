@@ -1,0 +1,188 @@
+@page "/locks"
+@attribute [Authorize(Policy = "Web")]
+@implements IDisposable
+@inject FleetStateService Fleet
+@inject FileStoreConfigService Config
+@inject HubDatabase Db
+@using Shopee.Core.Coordination
+
+<h1>🔒 Khoá đang giữ tài khoản</h1>
+<p class="hint">
+    Mọi thứ đang GHIM một tài khoản BigSeller về một máy: <b>lease việc</b>, <b>assignment đang chạy/chờ</b>, và
+    <b>account-lease</b>. Còn hiện ở đây = khoá còn "tươi" (có client heartbeat ≤5'). Nếu máy giữ đã <b>⚪ offline</b>
+    hoặc <b>không có trong fleet</b> mà khoá vẫn nằm đây → <b>mồ côi</b> (kẹt): bấm <b>Nhả</b> để giải phóng ngay,
+    khỏi chờ 5'. "Máy giữ" hiện luôn <b>machine_id</b> để lộ trường hợp trùng tên máy nhưng khác id.
+</p>
+
+<div class="bar">
+    <span class="stat">@_locks.Count khoá · @_lockedAccounts acc bị khoá · @_orphans mồ côi</span>
+    <button class="btn danger" disabled="@(_orphans == 0)" @onclick="ReleaseOrphans">✖ Nhả hết khoá mồ côi (@_orphans)</button>
+    <span class="action">@_status</span>
+</div>
+
+<div class="tablewrap">
+<table class="grid sm">
+    <thead><tr><th>Loại</th><th>Tài khoản · Shop · Op</th><th>Máy giữ (machine_id)</th><th>Tình trạng máy</th><th>Nhịp cuối</th><th>Hành động</th></tr></thead>
+    <tbody>
+    @foreach (var l in _locks)
+    {
+        <tr style="@(l.Orphan ? "background:rgba(127,29,29,.18)" : "")">
+            <td>@l.KindLabel</td>
+            <td>
+                @l.Title
+                @if (l.DupHost) { <span style="margin-left:6px;color:#f59e0b;font-size:11px">⚠ trùng tên máy</span> }
+            </td>
+            <td><b>@l.Hostname</b><div class="mono" style="font-size:11px;color:#64748b">@l.MachineShort</div></td>
+            <td>
+                @l.PresDot @l.PresLabel
+                @if (l.Orphan) { <span style="margin-left:6px;color:#f87171;font-size:11px">⚠ mồ côi</span> }
+            </td>
+            <td>@l.Age</td>
+            <td><button class="btn sm" @onclick="() => Release(l)">✖ Nhả</button></td>
+        </tr>
+    }
+    @if (_locks.Count == 0)
+    {
+        <tr><td colspan="6" class="empty">Không có khoá nào — mọi tài khoản đang tự do, ghim lại được thoải mái.</td></tr>
+    }
+    </tbody>
+</table>
+</div>
+
+@code {
+    private sealed record LockRow(
+        string Kind, string KindLabel, string Title, string Bs, string MachineId, string Hostname,
+        string MachineShort, string PresDot, string PresLabel, string Age, bool Orphan, bool DupHost,
+        bool Locks, string? LeaseKey, string? AssignmentId);
+
+    private FleetSnapshot _snap = new();
+    private List<Shopee.Core.BigSeller.BigSellerAccount> _accounts = new();
+    private List<LockRow> _locks = new();
+    private int _lockedAccounts;
+    private int _orphans;
+    private string _status = "";
+
+    protected override void OnInitialized()
+    {
+        Fleet.Changed += OnChanged;
+        _accounts = SafeAccounts();
+        _snap = Fleet.Snapshot;
+        Build();
+    }
+
+    private void OnChanged() => InvokeAsync(() => { _snap = Fleet.Snapshot; Build(); StateHasChanged(); });
+
+    private List<Shopee.Core.BigSeller.BigSellerAccount> SafeAccounts()
+    {
+        try { return Config.BigSellerAccounts(); } catch { return new(); }
+    }
+
+    private void Build()
+    {
+        var snap = _snap;
+        var list = new List<LockRow>();
+        var dupHosts = snap.Machines.GroupBy(m => m.Hostname)
+            .Where(g => g.Count() > 1).Select(g => g.Key)
+            .ToHashSet(StringComparer.Ordinal);
+
+        LockRow Make(string kind, string kindLabel, bool locks, string bs, string shop, string op,
+            string machineId, string hostFallback, string? leaseKey, string? asnId, DateTimeOffset at)
+        {
+            var mrow = snap.Machines.FirstOrDefault(m => m.MachineId == machineId);
+            var host = mrow?.Hostname
+                ?? (string.IsNullOrWhiteSpace(hostFallback) ? "(máy lạ)" : hostFallback);
+            string dot, label; bool orphan;
+            if (string.IsNullOrEmpty(machineId)) { dot = "•"; label = "(theo vai trò — chưa gán máy)"; orphan = false; }
+            else if (mrow is null) { dot = "⚪"; label = "không có trong fleet"; orphan = true; }
+            else { var p = FleetStateService.Presence(mrow.LastSeen); dot = p.Dot; label = p.Label; orphan = !p.Online; }
+
+            var opl = op switch
+            {
+                "scrape" => "scrape", "import" => "import", "update" => "update",
+                "rewrite" => "tên SP", "search" => "search", "" => "—", _ => op,
+            };
+            var title = $"{AccName(bs)} · {ShopName(bs, shop)} · {opl}";
+            var mshort = string.IsNullOrEmpty(machineId) ? "(rỗng)" : machineId[..Math.Min(12, machineId.Length)];
+            return new LockRow(kind, kindLabel, title, bs, machineId, host, mshort, dot, label,
+                FleetStateService.Ago(at), orphan, dupHosts.Contains(host), locks, leaseKey, asnId);
+        }
+
+        // 1) Lease việc (khoá acc thật sự — OwnerOf dùng cái này).
+        foreach (var le in snap.Leases)
+            list.Add(Make("lease", "🔑 lease việc", locks: true, le.BigsellerId, le.ShopId, le.Op,
+                le.MachineId, le.Hostname, le.Key, null, le.HeartbeatAt));
+
+        // 2) Assignment: running KHOÁ acc; queued chỉ "đã xếp" (hiện để thấy đích + máy tắt).
+        foreach (var a in snap.Assignments.Where(a => a.Status is "running" or "queued"))
+        {
+            var running = a.Status == "running";
+            var mid = running ? a.ClaimedByMachineId : (a.TargetMachineId ?? "");
+            var hostFb = running ? a.ClaimedByHostname : "";
+            list.Add(Make("asn", running ? "▶ assignment chạy" : "• assignment chờ", locks: running,
+                a.BigsellerId, a.ShopId, a.Op, mid, hostFb, null, a.Id, a.UpdatedAt));
+        }
+
+        // 3) Account-lease (giữ chỗ acc Shopee xuyên máy — không feed OwnerOf, nhưng Reset máy cũng xoá nó).
+        foreach (var al in snap.AccountLeases)
+            list.Add(Make("acclease", "👤 account-lease", locks: false, al.AccountId, "", "",
+                al.MachineId, al.Hostname, null, null, al.HeartbeatAt));
+
+        _locks = list
+            .OrderByDescending(x => x.Orphan)
+            .ThenByDescending(x => x.Locks)
+            .ThenBy(x => x.Title, StringComparer.Ordinal)
+            .ToList();
+        _lockedAccounts = list.Where(x => x.Locks && x.Bs.Length > 0)
+            .Select(x => x.Bs).Distinct(StringComparer.Ordinal).Count();
+        _orphans = list.Count(x => x.Orphan);
+    }
+
+    private string AccName(string bs)
+    {
+        if (string.IsNullOrEmpty(bs)) return "(search / không acc)";
+        var a = _accounts.FirstOrDefault(x => x.Id == bs);
+        return a?.DisplayName ?? (bs.Length > 8 ? bs[..8] + "…" : bs);
+    }
+
+    private string ShopName(string bs, string shop)
+    {
+        if (string.IsNullOrEmpty(shop)) return "—";
+        var a = _accounts.FirstOrDefault(x => x.Id == bs);
+        var s = a?.Shops.FirstOrDefault(x => x.Id == shop);
+        return s?.DisplayName ?? (shop.Length > 8 ? shop[..8] + "…" : shop);
+    }
+
+    private void Release(LockRow l)
+    {
+        ReleaseCore(l);
+        _status = $"✖ Đã nhả {l.KindLabel} · {l.Title} (máy {l.Hostname}).";
+        Fleet.Refresh();
+    }
+
+    private void ReleaseOrphans()
+    {
+        var n = 0;
+        foreach (var l in _locks.Where(x => x.Orphan)) { ReleaseCore(l); n++; }
+        _status = $"✖ Đã nhả {n} khoá mồ côi — acc được giải phóng, ghim lại được.";
+        Fleet.Refresh();
+    }
+
+    private void ReleaseCore(LockRow l)
+    {
+        try
+        {
+            switch (l.Kind)
+            {
+                case "lease" when l.LeaseKey is not null:
+                    Db.ReleaseLease(l.LeaseKey, l.MachineId); break;
+                case "asn" when l.AssignmentId is not null:
+                    Db.CancelAssignment(l.AssignmentId); break;
+                case "acclease":
+                    Db.ReleaseAccounts(new AccountReleaseRequest(new() { l.Bs }, l.MachineId)); break;
+            }
+        }
+        catch { /* best-effort: bản ghi có thể vừa tự rụng */ }
+    }
+
+    public void Dispose() => Fleet.Changed -= OnChanged;
+}

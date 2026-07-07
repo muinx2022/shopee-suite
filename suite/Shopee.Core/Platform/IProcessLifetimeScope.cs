@@ -13,6 +13,7 @@ public interface IProcessLifetimeScope
     void ConfigureLimits(int activeProcessLimit, ulong jobMemoryLimitBytes);
 
     /// <summary>Phóng tiến trình đã nằm SẴN trong scope (con cháu cũng thuộc scope). Không bao giờ ném —
-    /// interop lỗi thì fallback phóng thường best-effort.</summary>
-    Process Start(string fileName, string arguments);
+    /// interop lỗi thì fallback phóng thường best-effort. <paramref name="startMinimized"/>=true → mở cửa sổ
+    /// ở trạng thái THU NHỎ, không chiếm màn hình/không cướp focus (chỉ có tác dụng trên Windows).</summary>
+    Process Start(string fileName, string arguments, bool startMinimized = false);
 }

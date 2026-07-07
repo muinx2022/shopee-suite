@@ -6,6 +6,9 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>Shopee.Suite</RootNamespace>
     <AssemblyName>ShopeeSuite</AssemblyName>
+    <!-- Phiên bản đọc từ version.txt (repo root) = NGUỒN DUY NHẤT. Script release cũng đọc file này để
+         truyền cho vpk pack (packVersion). Bump 1 chỗ, app và bản phát hành luôn khớp nhau. -->
+    <Version>$([System.IO.File]::ReadAllText('$(MSBuildThisFileDirectory)../../version.txt').Trim())</Version>
     <!-- Reflection binding (không ép x:DataType) → hành vi giống WPF, tránh churn lúc port. Compiled binding
          là tối ưu để sau. -->
     <AvaloniaUseCompiledBindingsByDefault>false</AvaloniaUseCompiledBindingsByDefault>
@@ -20,6 +23,8 @@
     <PackageReference Include="Avalonia.Controls.DataGrid" Version="11.3.0" />
     <PackageReference Include="Avalonia.Fonts.Inter" Version="11.3.0" />
     <PackageReference Include="Avalonia.Diagnostics" Version="11.3.0" Condition="'$(Configuration)' == 'Debug'" />
+    <!-- Tự cập nhật đa nền tảng (Win Setup.exe + Linux AppImage), tải delta, apply atomic có rollback. -->
+    <PackageReference Include="Velopack" Version="1.2.0" />
   </ItemGroup>
 
   <ItemGroup>

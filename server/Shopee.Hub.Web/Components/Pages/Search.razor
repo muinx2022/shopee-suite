@@ -1,0 +1,331 @@
+@page "/search"
+@attribute [Authorize(Policy = "Web")]
+@implements IDisposable
+@inject FleetStateService Fleet
+@inject SearchBoardService Board
+@inject HubOptions Opts
+@using System.Text
+
+<h1>Search đa máy</h1>
+
+<div class="editcard">
+    <div class="row">
+        <label>File link (.txt / .xlsx)
+            <InputFile OnChange="OnFile" accept=".txt,.xlsx" />
+        </label>
+        <span class="stat">@_fileInfo</span>
+    </div>
+    <div class="row">
+        <label>Acc/máy <input type="number" @bind="_accountsPerClient" style="width:70px" /></label>
+        <label>Lanes <input type="number" @bind="_lanes" style="width:70px" /></label>
+        <label>Vùng <input @bind="_region" style="width:120px" placeholder="(trống)" /></label>
+    </div>
+</div>
+
+@if (Board.Links.Count > 0)
+{
+    <h2>Chọn link (@Board.SelectedLinkCount/@Board.Links.Count)</h2>
+    <p class="hint">Tick/bỏ tick link nào cần dùng — CHỈ link được chọn mới chia cho các máy (không chia cả file).</p>
+    <div class="bar">
+        <button class="btn sm" @onclick="() => SetAllLinks(true)">☑ Chọn tất cả</button>
+        <button class="btn sm" @onclick="() => SetAllLinks(false)">☐ Bỏ chọn tất cả</button>
+        <span class="stat">@Board.SelectedLinkCount / @Board.Links.Count link được chọn</span>
+    </div>
+    <div class="tablewrap" style="max-height:300px;overflow:auto">
+    <table class="grid sm">
+        <thead><tr><th style="width:44px">Dùng</th><th style="width:44px">#</th><th>Link</th></tr></thead>
+        <tbody>
+        @foreach (var (idx, link) in _linkRows)
+        {
+            <tr>
+                <td style="text-align:center"><input type="checkbox" checked="@Board.IsLinkSelected(idx)" @onchange="e => ToggleLink(idx, e.Value is true)" /></td>
+                <td class="mono" style="color:#64748b">@(idx + 1)</td>
+                <td style="max-width:640px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+                    <a href="@link" target="_blank">@link</a></td>
+            </tr>
+        }
+        </tbody>
+    </table>
+    </div>
+}
+
+<h2>Chia link cho máy</h2>
+<p class="hint">Tick máy → số link ĐÃ CHỌN ở trên tự chia đều cho các máy đó, rồi bấm Chạy (mỗi máy tự nhận phần của nó). Máy online được tự tick sẵn khi nạp file.</p>
+<div class="bar">
+    <span class="stat">@_partitionSummary</span>
+    <button class="btn primary" disabled="@(!_canRunAny)" @onclick="RunAll">▶ Chạy tất cả (@_runnableCount)</button>
+    <button class="btn danger" disabled="@(!_anyBusy)" @onclick="StopAll">■ Dừng tất cả</button>
+    <span class="action">@_action</span>
+</div>
+<div class="tablewrap">
+<table class="grid sm">
+    <thead><tr><th>Dùng</th><th>Máy</th><th>Trạng thái</th><th>Phần link</th><th></th></tr></thead>
+    <tbody>
+    @foreach (var m in _machines)
+    {
+        var slice = _slices.FirstOrDefault(s => s.MachineId == m.MachineId);
+        var (busy, txt) = SearchBoardService.SearchState(_snap, m.MachineId);
+        var st = FleetStateService.Status(_snap, m);
+        <tr>
+            <td style="text-align:center"><input type="checkbox" checked="@_selected.Contains(m.MachineId)" @onchange="e => ToggleMachine(m.MachineId, e.Value is true)" /></td>
+            <td>@st.Dot @m.Hostname</td>
+            <td><span class="pill @(busy ? "run" : "idle")">@txt</span></td>
+            <td>@(slice is { Count: > 0 } ? slice.Label : "(không dùng)")</td>
+            <td>
+                @if (busy)
+                {
+                    <button class="btn danger sm" @onclick="() => Stop(m.MachineId)">■ Dừng</button>
+                }
+                else
+                {
+                    <button class="btn sm" disabled="@(slice is null || slice.Count == 0)"
+                            @onclick="() => Run(slice!)">▶ Chạy</button>
+                }
+            </td>
+        </tr>
+    }
+    @if (_machines.Count == 0)
+    {
+        <tr><td colspan="5" class="empty">Chưa có máy nào kết nối.</td></tr>
+    }
+    </tbody>
+</table>
+</div>
+
+<h2>Kết quả search theo máy</h2>
+<div class="bar">
+    <span class="stat">Kho gộp ở Hub: <b>@_mergedCount</b> sản phẩm</span>
+    <button class="btn" @onclick="RefreshMerged">↻ Cập nhật</button>
+    <button class="btn danger" @onclick="ClearMerged">🗑 Xoá kho gộp</button>
+</div>
+@if (_perMachine.Count > 0)
+{
+    <div class="tablewrap">
+    <table class="grid sm" style="max-width:420px">
+        <thead><tr><th>Máy</th><th>SP đã đẩy về</th></tr></thead>
+        <tbody>
+        @foreach (var (mid, cnt) in _perMachine.OrderByDescending(x => x.Count))
+        {
+            <tr><td>@HostOf(mid)</td><td>@cnt</td></tr>
+        }
+        </tbody>
+    </table>
+    </div>
+}
+else
+{
+    <p class="hint">Chưa có sản phẩm nào. Chạy search ở trên — kết quả từng máy đẩy về sẽ hiện ở đây (cập nhật mỗi 2s).</p>
+}
+
+@if (_results.Count > 0)
+{
+    <h3>Sản phẩm@(_results.Count >= ResultLimit ? $" ({ResultLimit}+ — giới hạn hiển thị)" : $" ({_results.Count})")</h3>
+    <div class="tablewrap">
+    <table class="grid sm">
+        <thead><tr><th>Máy</th><th>Tên</th><th>Giá</th><th>Đã bán</th><th>⭐</th><th>Danh mục</th><th>Shop</th><th>Khu vực</th></tr></thead>
+        <tbody>
+        @foreach (var r in _results)
+        {
+            <tr>
+                <td>@HostOf(r.MachineId)</td>
+                <td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+                    <a href="@r.Link" target="_blank">@r.Name</a></td>
+                <td>@r.Price.ToString("#,0")</td>
+                <td>@r.Sold</td>
+                <td>@r.Rating.ToString("0.0")</td>
+                <td>@r.Category</td>
+                <td>@r.ShopName</td>
+                <td>@r.Location</td>
+            </tr>
+        }
+        </tbody>
+    </table>
+    </div>
+}
+
+<h2>Xuất Excel gộp (lọc)</h2>
+<div class="editcard" style="max-width:640px">
+    <div class="row">
+        <label>Giá ≥ <input type="number" @bind="_minPrice" style="width:110px" /></label>
+        <label>Giá ≤ <input type="number" @bind="_maxPrice" style="width:110px" /></label>
+        <label>Đã bán/tháng ≥ <input type="number" @bind="_minSold" style="width:90px" /></label>
+    </div>
+    <button class="btn primary" @onclick="Export">⬇ Xuất &amp; tải Excel</button>
+    @if (_exportUrl is not null)
+    {
+        <a class="dl" href="@_exportUrl" target="_blank">📥 @_exportName</a>
+    }
+</div>
+
+@code {
+    private const int ResultLimit = 200;
+
+    private FleetSnapshot _snap = new();
+    private List<MachinePresence> _machines = new();
+    private readonly HashSet<string> _selected = new(StringComparer.Ordinal);
+    private List<SearchSlice> _slices = new();
+    private bool _autoPicked;
+
+    private List<(int Idx, string Link)> _linkRows = new();
+    private List<string> _activeLinks = new();
+
+    private string _fileInfo = "Chưa chọn file.";
+    private int _accountsPerClient = 3, _lanes = 3;
+    private string _region = "";
+    private string _action = "";
+    private string _partitionSummary = "Chưa nạp file link.";
+    private int _runnableCount;
+    private bool _canRunAny;
+    private bool _anyBusy;
+
+    private int _mergedCount;
+    private int _lastResultCount = -1;
+    private List<(string MachineId, int Count)> _perMachine = new();
+    private List<SearchBoardService.SearchResultRow> _results = new();
+    private decimal _minPrice, _maxPrice;
+    private int _minSold;
+    private string? _exportUrl, _exportName;
+
+    protected override void OnInitialized()
+    {
+        Fleet.Changed += OnChanged;
+        _snap = Fleet.Snapshot;
+        if (Board.Links.Count > 0) _fileInfo = $"{Board.FileName}: {Board.Links.Count} link";
+        RebuildLinkRows();
+        RefreshMachines();
+        RefreshResults();
+    }
+
+    private void OnChanged() => InvokeAsync(() =>
+    {
+        _snap = Fleet.Snapshot;
+        RefreshMachines();
+        RefreshResults();
+        StateHasChanged();
+    });
+
+    private void RebuildLinkRows()
+        => _linkRows = Board.Links.Select((l, i) => (i, l)).ToList();
+
+    private void RefreshMachines()
+    {
+        _machines = _snap.Machines.OrderBy(m => m.Hostname).ToList();
+        _selected.RemoveWhere(id => _machines.All(m => m.MachineId != id));
+        // Tự tick máy đang online LẦN ĐẦU khi đã có link (đỡ phải tick tay).
+        if (!_autoPicked && Board.Links.Count > 0 && _machines.Count > 0)
+        {
+            foreach (var m in _machines.Where(m => !FleetStateService.MachineOffline(_snap, m.MachineId)))
+                _selected.Add(m.MachineId);
+            _autoPicked = true;
+        }
+        Repartition();
+    }
+
+    private async Task OnFile(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        try
+        {
+            await using var s = file.OpenReadStream(maxAllowedSize: 64L * 1024 * 1024);
+            using var ms = new MemoryStream();
+            await s.CopyToAsync(ms);
+            ms.Position = 0;
+            var links = file.Name.EndsWith(".xlsx", StringComparison.OrdinalIgnoreCase)
+                ? SearchBoardService.ParseXlsx(ms)
+                : SearchBoardService.ParseTxt(Encoding.UTF8.GetString(ms.ToArray()));
+            Board.SetLinks(links, file.Name);   // giữ ở singleton (mặc định chọn hết) → sống qua reconnect
+            _fileInfo = $"{file.Name}: {links.Count} link";
+            _autoPicked = false;                // file mới → tự tick lại máy online
+            RebuildLinkRows();
+            RefreshMachines();
+        }
+        catch (Exception ex) { _fileInfo = "✘ Lỗi đọc file: " + ex.Message; }
+    }
+
+    private void ToggleLink(int i, bool on) { Board.SetLinkSelected(i, on); Repartition(); }
+    private void SetAllLinks(bool on) { Board.SetAllLinks(on); Repartition(); }
+
+    private void ToggleMachine(string id, bool on)
+    {
+        if (on) _selected.Add(id); else _selected.Remove(id);
+        Repartition();
+    }
+
+    private void Repartition()
+    {
+        _activeLinks = Board.ActiveLinks();
+        var sel = _machines.Where(m => _selected.Contains(m.MachineId)).ToList();
+        _slices = Board.Partition(sel, _activeLinks.Count, _snap);
+        _runnableCount = _slices.Count(s => s.Count > 0 && !s.Busy);
+        _canRunAny = _runnableCount > 0;
+        _anyBusy = _machines.Any(m => SearchBoardService.OpenSearchAssignment(_snap, m.MachineId) is not null);
+        _partitionSummary = Board.Links.Count == 0
+            ? "Chưa nạp file link."
+            : $"{_activeLinks.Count}/{Board.Links.Count} link đã chọn · {sel.Count} máy · sẵn sàng chạy: {_runnableCount}.";
+    }
+
+    private void Run(SearchSlice slice)
+    {
+        Board.Dispatch(slice, _activeLinks, Board.FileName, _accountsPerClient, _lanes,
+            string.IsNullOrWhiteSpace(_region) ? null : _region);
+        _action = $"⏳ Đã giao {slice.Label} → {slice.Hostname}.";
+        Fleet.Refresh();
+    }
+
+    private void RunAll()
+    {
+        var n = 0;
+        foreach (var slice in _slices.Where(s => s.Count > 0 && !s.Busy))
+        {
+            Board.Dispatch(slice, _activeLinks, Board.FileName, _accountsPerClient, _lanes,
+                string.IsNullOrWhiteSpace(_region) ? null : _region);
+            n++;
+        }
+        _action = n > 0 ? $"⏳ Đã giao search cho {n} máy." : "Không có máy rảnh để giao.";
+        Fleet.Refresh();
+    }
+
+    private void Stop(string machineId)
+    {
+        _action = Board.StopMachine(_snap, machineId)
+            ? $"■ Đã yêu cầu dừng search trên {HostOf(machineId)} (máy dừng ở nhịp sau ≤12s)."
+            : $"Không có việc search đang mở trên {HostOf(machineId)}.";
+        Fleet.Refresh();
+    }
+
+    private void StopAll()
+    {
+        var n = Board.StopAllSearch(_snap);
+        _action = n > 0 ? $"■ Đã yêu cầu dừng {n} việc search (các máy dừng ở nhịp sau ≤12s)." : "Không có việc search nào đang chạy.";
+        Fleet.Refresh();
+    }
+
+    private void RefreshMerged() { _lastResultCount = -1; RefreshResults(); }
+    private void ClearMerged() { Board.ClearMerged(); _lastResultCount = -1; RefreshResults(); }
+
+    private void RefreshResults()
+    {
+        _mergedCount = Board.MergedCount();
+        _perMachine = Board.ResultCountByMachine();
+        if (_mergedCount != _lastResultCount)   // chỉ deserialize lại lưới khi số đổi (khỏi nặng mỗi 2s)
+        {
+            _results = _mergedCount > 0 ? Board.Results(ResultLimit) : new();
+            _lastResultCount = _mergedCount;
+        }
+    }
+
+    private string HostOf(string mid)
+        => _snap.Machines.FirstOrDefault(m => m.MachineId == mid)?.Hostname
+           ?? (string.IsNullOrEmpty(mid) ? "(?)" : mid[..Math.Min(10, mid.Length)]);
+
+    private void Export()
+    {
+        var dir = Path.Combine(Opts.DataDir, "exports");
+        var path = Board.ExportMerged(dir, _minPrice, _maxPrice, _minSold, null);
+        _exportName = Path.GetFileName(path);
+        _exportUrl = "/exports/" + Uri.EscapeDataString(_exportName);
+        _action = $"✔ Đã xuất {_exportName}.";
+    }
+
+    public void Dispose() => Fleet.Changed -= OnChanged;
+}

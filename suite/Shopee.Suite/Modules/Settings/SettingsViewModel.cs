@@ -128,7 +128,44 @@ public sealed partial class SettingsViewModel : ObservableObject
     {
         LoadFromStore();
         HubRuntime.Shared.StateChanged += OnHubStateChanged;
+        UpdateService.Shared.Changed += OnUpdateChanged;   // VM là singleton (tạo 1 lần) → không rò event
+        OnUpdateChanged();                                  // seed trạng thái hiện tại
     }
+
+    // ── Phiên bản + tự cập nhật (Velopack) ──────────────────────────────────────
+    /// <summary>"Phiên bản: v1.0.0" — đọc từ assembly (nướng lúc build từ version.txt).</summary>
+    public string AppVersionText => $"Phiên bản: v{Shopee.Core.Infrastructure.AppInfo.Version}";
+
+    /// <summary>Câu trạng thái cập nhật (đang kiểm tra / mới nhất / đã tải bản mới…).</summary>
+    [ObservableProperty] private string _updateStatus = "";
+
+    /// <summary>true khi app cài qua Velopack → hiện nút "Kiểm tra bản mới". Chạy dev/bin thì ẩn.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(UpdateNotSupported))]
+    private bool _updateSupported;
+
+    /// <summary>Nghịch đảo — hiện dòng nhắc "auto-update chỉ chạy khi cài qua bộ cài Velopack".</summary>
+    public bool UpdateNotSupported => !UpdateSupported;
+
+    /// <summary>true khi đã TẢI xong bản mới, chờ người dùng bấm áp dụng.</summary>
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(ApplyUpdateCommand))]
+    private bool _updateReady;
+
+    private void OnUpdateChanged() => UiThread.Post(() =>
+    {
+        UpdateSupported = UpdateService.Shared.IsSupported;
+        UpdateReady = UpdateService.Shared.UpdateReady;
+        UpdateStatus = UpdateService.Shared.Status;
+    });
+
+    /// <summary>Kiểm tra + tải nền bản mới (nút bấm tay). Kết quả cập nhật qua sự kiện Changed.</summary>
+    [RelayCommand]
+    private async Task CheckUpdate() => await UpdateService.Shared.CheckAsync();
+
+    /// <summary>Áp dụng bản đã tải + khởi động lại NGAY (đóng app). Chỉ hiện khi UpdateReady.</summary>
+    [RelayCommand(CanExecute = nameof(UpdateReady))]
+    private void ApplyUpdate() => UpdateService.Shared.ApplyAndRestart();
 
     private void OnHubStateChanged() => UiThread.Post(ApplyHubState);
 

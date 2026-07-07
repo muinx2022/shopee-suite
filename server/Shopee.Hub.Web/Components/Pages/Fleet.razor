@@ -1,0 +1,308 @@
+@page "/"
+@* KHÔNG dùng @@page "/fleet": route đó thuộc API client (GET /fleet trả JSON). Trang này ở "/". *@
+@attribute [Authorize(Policy = "Web")]
+@implements IDisposable
+@inject FleetStateService FleetState
+@inject FileStoreConfigService Config
+@inject DispatcherService Dispatcher
+@inject HubDatabase Db
+
+<div class="fleetpage">
+<div class="kpis">
+    <div class="kpi">
+        <div class="kpi-ic green">@Kpi("machines")</div>
+        <div><div class="kpi-val">@_kMachines</div><div class="kpi-label">Máy online</div></div>
+    </div>
+    <div class="kpi">
+        <div class="kpi-ic blue">@Kpi("run")</div>
+        <div><div class="kpi-val">@_kRunning</div><div class="kpi-label">Việc đang chạy</div></div>
+    </div>
+    <div class="kpi">
+        <div class="kpi-ic amber">@Kpi("clock")</div>
+        <div><div class="kpi-val">@_kQueued</div><div class="kpi-label">Việc chờ</div></div>
+    </div>
+    <div class="kpi">
+        <div class="kpi-ic blue">@Kpi("cookie")</div>
+        <div><div class="kpi-val">@_kCookies</div><div class="kpi-label">Acc có cookie</div></div>
+    </div>
+</div>
+
+<div class="bar">
+    <span class="stat">@_summary</span>
+    <label class="toggle">
+        <input type="checkbox" checked="@Dispatcher.Enabled" @onchange="ToggleDispatch" />
+        Điều phối tự động (scrape→import→update)
+    </label>
+</div>
+
+<h2>Máy trong fleet</h2>
+<div class="machines">
+    @foreach (var m in _snap.Machines.OrderBy(x => x.Hostname))
+    {
+        var st = FleetStateService.Status(_snap, m);
+        <div class="machine">
+            <div class="mline"><span class="dot">@st.Dot</span><b>@m.Hostname</b></div>
+            <div class="mmeta">@st.Label</div>
+        </div>
+    }
+    @if (_snap.Machines.Count == 0)
+    {
+        <div class="empty">Chưa có máy nào kết nối.</div>
+    }
+</div>
+
+<h2>Lưới trạng thái (tài khoản × shop)</h2>
+<div class="tablewrap">
+<table class="grid">
+    <thead><tr><th>Tài khoản / Shop</th><th>Scrape</th><th>Import</th><th>Update</th></tr></thead>
+    <tbody>
+    @foreach (var acct in _accounts)
+    {
+        var firstShopShown = false;
+        @foreach (var shop in acct.Shops.Where(s => !string.IsNullOrWhiteSpace(s.ShopeeDataSheet)))
+        {
+            var selected = _selBs == acct.Id && _selShop == shop.Id;
+            <tr class="@(selected ? "sel" : "")" @onclick="() => Select(acct.Id, shop.Id, shop.ShopeeDataSheet, shop.DisplayName)">
+                <td>
+                    @if (!firstShopShown) { <div class="acct">@acct.DisplayName</div> }
+                    <div class="shop">@shop.DisplayName</div>
+                </td>
+                @foreach (var op in Ops)
+                {
+                    var cell = FleetStateService.OpCell(_snap, acct.Id, shop.Id, op);
+                    <td>
+                        <span class="pill @cell.Css">@cell.Text</span>
+                        @* Máy đang chạy (cell.Locked == Kind 1) → ẩn combo đặt-tay; chỉ hiện khi KHÔNG có máy chạy ô này. *@
+                        @if (!cell.Locked)
+                        {
+                            <select class="cellset"
+                                    @onclick:stopPropagation="true"
+                                    @onchange="e => SetLedger(acct.Id, shop.Id, shop.ShopeeDataSheet, op, e.Value?.ToString())">
+                                <option value="">⋯</option>
+                                <option value="completed">✓ Xong</option>
+                                <option value="idle">Chưa (reset)</option>
+                                <option value="stopped">■ Dừng</option>
+                            </select>
+                        }
+                    </td>
+                }
+            </tr>
+            firstShopShown = true;
+        }
+    }
+    </tbody>
+</table>
+</div>
+
+<div class="pinpanel">
+<h2>📌 Giao việc thủ công (ghim máy)</h2>
+@if (_selBs is null)
+{
+    <p class="hint">Chọn 1 shop ở lưới trên để ghim việc.</p>
+}
+else
+{
+    <div class="pin">
+        <div>Shop: <b>@_selShopName</b></div>
+        <label>Op
+            <select @bind="_pinOp">
+                <option value="">-- Chọn Op --</option>
+                <option value="scrape">Scrape</option>
+                <option value="import">Import</option>
+                <option value="update">Update</option>
+            </select>
+        </label>
+        <label>Máy
+            <select @bind="_pinMachine">
+                <option value="">— chọn máy —</option>
+                @foreach (var m in _pinnableMachines)
+                {
+                    var off = FleetStateService.MachineOffline(_snap, m.MachineId);
+                    <option value="@m.MachineId" disabled="@off">@(off ? "⚪" : "🟢") @m.Hostname @(off ? "(offline)" : "")</option>
+                }
+            </select>
+        </label>
+        <label>Từ dòng <input type="number" @bind="_pinStart" style="width:80px" /></label>
+        <label>Đến dòng <input type="number" @bind="_pinEnd" style="width:80px" /></label>
+        @if (_pinOp == "import")
+        {
+            <label><input type="checkbox" @bind="_pinFromClaimed" /> Import từ tab "Đã nhận"</label>
+        }
+        <button class="btn primary" disabled="@(string.IsNullOrEmpty(_pinMachine) || string.IsNullOrEmpty(_pinOp) || _hasWork || _pinBlocked)" @onclick="Pin">📌 Ghim việc</button>
+        @if (_hasWork)
+        {
+            <button class="btn danger" @onclick="CancelSelected">✖ Huỷ việc (hub giao)</button>
+        }
+    </div>
+    <div class="action">@_action</div>
+    @if (_pinBlocked)
+    {
+        <div class="warn">⚠ Máy này KHÁC máy đang giữ acc (<b>@_accountOwnerWarn</b>) — 1 acc chỉ chạy 1 máy. Chọn <b>@_accountOwnerWarn</b>, hoặc vào 🖥️ Máy client → Reset máy đó trước.</div>
+    }
+    else if (_manualLease is not null)
+    {
+        <div class="hint" style="margin-top:4px">▶ Shop đang <b>chạy TAY</b> trên máy <b>@_manualLease.Hostname</b> — hub KHÔNG huỷ việc chạy tay; dừng bằng nút ■ trong app trên máy đó (client sẽ tự báo hub khi dừng). Việc do <b>hub giao</b> mới huỷ được ở đây.</div>
+    }
+    else if (_accountOwnerWarn is not null)
+    {
+        <div class="hint" style="margin-top:4px">ℹ Acc đang do máy <b>@_accountOwnerWarn</b> dùng — ghim thêm nên vào máy đó.</div>
+    }
+}
+</div>
+</div>
+
+@code {
+    private static readonly string[] Ops = ["scrape", "import", "update"];
+
+    private FleetSnapshot _snap = new();
+    private List<BigSellerAccount> _accounts = new();
+    private string _summary = "";
+    private int _kMachines, _kRunning, _kQueued, _kCookies;
+
+    private string? _selBs, _selShop, _selSheet, _selShopName;
+    private string _pinOp = "";
+    private string _pinMachine = "";
+    private int _pinStart, _pinEnd;
+    private bool _pinFromClaimed;
+    private string _action = "";
+    private DateTimeOffset _accountsLoadedAt;
+
+    protected override void OnInitialized()
+    {
+        FleetState.Changed += OnFleetChanged;
+        _snap = FleetState.Snapshot;
+        ReloadAccounts();
+        RecomputeSummary();
+    }
+
+    private void OnFleetChanged() => InvokeAsync(() =>
+    {
+        _snap = FleetState.Snapshot;
+        // Config đọc lại tối đa mỗi 10s (khỏi đọc file mỗi 2s).
+        if ((DateTimeOffset.UtcNow - _accountsLoadedAt).TotalSeconds > 10) ReloadAccounts();
+        RecomputeSummary();
+        StateHasChanged();
+    });
+
+    private void ReloadAccounts()
+    {
+        _accounts = Config.BigSellerAccounts();
+        _accountsLoadedAt = DateTimeOffset.UtcNow;
+        try { _kCookies = Db.ListFiles().Count(f => f.Name.StartsWith("cookies/", StringComparison.OrdinalIgnoreCase)); } catch { }
+    }
+
+    private void RecomputeSummary()
+    {
+        _kMachines = _snap.Machines.Count(m => (DateTimeOffset.Now - m.LastSeen).TotalSeconds < 45);
+        int running = 0, queued = 0, failed = 0;
+        foreach (var a in _accounts)
+        foreach (var s in a.Shops.Where(x => !string.IsNullOrWhiteSpace(x.ShopeeDataSheet)))
+        foreach (var op in Ops)
+        {
+            var k = FleetStateService.OpCell(_snap, a.Id, s.Id, op).Kind;
+            if (k == 1) running++; else if (k == 2) queued++; else if (k == 3) failed++;
+        }
+        // KPI phải KHỚP lưới/summary → lấy từ cùng nguồn OpCell (không đếm Assignments.Status, field đó không mang "running").
+        _kRunning = running;
+        _kQueued = queued;
+        _summary = $"{running} đang chạy · {queued} chờ · {failed} dừng/lỗi · {_snap.Machines.Count} máy · cập nhật {DateTimeOffset.Now:HH:mm:ss}";
+    }
+
+    private void Select(string bs, string shop, string sheet, string name)
+    {
+        _selBs = bs; _selShop = shop; _selSheet = sheet; _selShopName = name; _action = "";
+    }
+
+    private void SetRole(string machineId, string? role)
+    {
+        Db.SetRole(machineId, string.IsNullOrWhiteSpace(role) ? MachineRoles.Off : role);
+        FleetState.Refresh();
+    }
+
+    private void SetLedger(string bs, string shop, string sheet, string op, string? status)
+    {
+        if (string.IsNullOrEmpty(status)) return;
+        Db.SetLedgerStatus($"{bs}__{shop}__{op}", bs, shop, sheet, op, status);
+        FleetState.Refresh();
+    }
+
+    private void ToggleDispatch(ChangeEventArgs e)
+    {
+        Dispatcher.Enabled = e.Value is true;
+        FleetState.Refresh();
+    }
+
+    private void Pin()
+    {
+        if (_selBs is null || _selShop is null || string.IsNullOrEmpty(_pinMachine) || string.IsNullOrEmpty(_pinOp)) return;
+        var payload = _pinOp == "import"
+            ? JsonSerializer.Serialize(new ImportJobPayload { FromClaimedTab = _pinFromClaimed })
+            : "";
+        Db.CreateAssignment(new CreateAssignmentRequest(
+            _selBs, _selShop, _selSheet ?? "", _pinOp, _pinMachine, true,
+            Math.Max(0, _pinStart), Math.Max(0, _pinEnd), payload));
+        var host = _snap.Machines.FirstOrDefault(m => m.MachineId == _pinMachine)?.Hostname ?? _pinMachine;
+        _action = FleetStateService.MachineOffline(_snap, _pinMachine)
+            ? $"⚠ Đã ghim {_pinOp} · {_selShopName} → {host} (máy đang TẮT — chờ tới khi mở app)."
+            : $"✔ Đã ghim {_pinOp} · {_selShopName} → {host}.";
+        FleetState.Refresh();
+    }
+
+    private void CancelSelected()
+    {
+        if (_selBs is null || _selShop is null) return;
+        var n = 0;
+        foreach (var a in _snap.Assignments.Where(a =>
+            a.BigsellerId == _selBs && a.ShopId == _selShop && a.Status is "queued" or "running"))
+        { Db.CancelAssignment(a.Id); n++; }
+        _action = $"✖ Đã huỷ {n} việc của shop {_selShopName}.";
+        FleetState.Refresh();
+    }
+
+    // Shop đang chọn có việc HUB-GIAO (assignment) queued/running → hub huỷ được (khoá Ghim).
+    private bool _hasWork => _selBs is not null && _snap.Assignments.Any(a =>
+        a.BigsellerId == _selBs && a.ShopId == _selShop && a.Status is "queued" or "running");
+
+    // Shop đang chọn có LEASE nhưng KHÔNG có assignment hub-giao = việc CHẠY TAY trên client. Hub không huỷ được
+    // (client tự dừng bằng nút ■ rồi nhả lease báo hub); chỉ hiện chú thích cho rõ, không phải nút chết.
+    private LeaseRecord? _manualLease => (_selBs is null || _hasWork) ? null
+        : _snap.Leases.FirstOrDefault(l => l.BigsellerId == _selBs && l.ShopId == _selShop);
+
+    // Chủ sở hữu acc hiện tại (nếu có) — ràng buộc máy ghim được.
+    private string? _accountOwnerMachine => _selBs is null ? null : OwnerOf(_selBs);
+    private string? _accountOwnerWarn => _accountOwnerMachine is { } mid
+        ? _snap.Machines.FirstOrDefault(m => m.MachineId == mid)?.Hostname ?? mid : null;
+
+    // Hiện MỌI máy trong dropdown; chỉ CHẶN (nút Ghim mờ + cảnh báo) khi chọn máy KHÁC máy đang giữ acc.
+    private IEnumerable<MachinePresence> _pinnableMachines => _snap.Machines;
+
+    /// <summary>Đang chọn máy KHÁC máy đang giữ acc → ghim sẽ bị khoá 1-acc-1-máy (việc nằm chờ mãi) → chặn.</summary>
+    private bool _pinBlocked => _accountOwnerMachine is { } o && !string.IsNullOrEmpty(_pinMachine)
+        && !string.Equals(_pinMachine, o, StringComparison.Ordinal);
+
+    private string? OwnerOf(string bs)
+    {
+        // Máy đang giữ lease tươi hoặc assignment running của acc này.
+        var lease = _snap.Leases.FirstOrDefault(l => l.BigsellerId == bs);
+        if (lease is not null) return lease.MachineId;
+        var asn = _snap.Assignments.FirstOrDefault(a => a.BigsellerId == bs && a.Status == "running");
+        return asn?.ClaimedByMachineId;
+    }
+
+    public void Dispose() => FleetState.Changed -= OnFleetChanged;
+
+    // ── KPI icons (Lucide-style, stroke=currentColor) ──
+    private static readonly Dictionary<string, string> KpiIcons = new()
+    {
+        ["machines"] = "<rect x='2' y='3' width='20' height='14' rx='2'/><path d='M8 21h8M12 17v4'/>",
+        ["run"] = "<polygon points='6 3 20 12 6 21 6 3'/>",
+        ["clock"] = "<circle cx='12' cy='12' r='9'/><path d='M12 7v5l3 2'/>",
+        ["cookie"] = "<path d='M12 2a10 10 0 1 0 10 10 4 4 0 0 1-5-5 4 4 0 0 1-5-5z'/><path d='M8.5 8.5h.01M15 9h.01M9.5 14.5h.01M14 15h.01M12 12h.01'/>",
+    };
+
+    private static MarkupString Kpi(string key)
+    {
+        var body = KpiIcons.TryGetValue(key, out var b) ? b : "";
+        return new MarkupString($"<svg width='22' height='22' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'>{body}</svg>");
+    }
+}
