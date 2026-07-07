@@ -284,12 +284,14 @@
                                                 <TextBox Width="90" Margin="0,1,0,0" Text="{Binding UpdateTarget.UpdateWorkers}" /></StackPanel>
                                             <StackPanel Margin="0,0,10,2"><TextBlock Text="Reload (s)" Classes="caption" />
                                                 <TextBox Width="72" Margin="0,1,0,0" Text="{Binding UpdateTarget.ListingReloadSeconds}" /></StackPanel>
-                                            <StackPanel Margin="0,0,10,2"><TextBlock Text="Ảnh (chung)" Classes="caption" />
+                                            <StackPanel Margin="0,0,10,2"><TextBlock Text="Ảnh Update (máy này)" Classes="caption" />
                                                 <StackPanel Orientation="Horizontal">
                                                     <TextBox Width="200" FontFamily="{DynamicResource MonoFont}" VerticalContentAlignment="Center"
                                                              Text="{Binding #Root.DataContext.Update.ImagePath}" />
                                                     <Button Content="…" Width="34" Margin="6,0,0,0" Command="{Binding #Root.DataContext.Update.BrowseImageCommand}" />
-                                                </StackPanel></StackPanel>
+                                                </StackPanel>
+                                                <TextBlock Text="Có ảnh này → dùng nó. Thiếu (quên đặt/chưa tải) → tự lấy ảnh chung từ Hub."
+                                                           Classes="caption" FontSize="10" Opacity="0.65" Margin="0,2,0,0" MaxWidth="240" TextWrapping="Wrap" /></StackPanel>
                                             <StackPanel Margin="0,0,0,2"><TextBlock Text="Video (chung)" Classes="caption" />
                                                 <StackPanel Orientation="Horizontal">
                                                     <TextBox Width="200" FontFamily="{DynamicResource MonoFont}" VerticalContentAlignment="Center"

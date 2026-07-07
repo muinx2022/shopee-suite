@@ -67,6 +67,10 @@ public sealed partial class UpdateProductViewModel : ObservableObject
         {
             if (IsRunning || HasActiveWsJob) return;   // đang chạy (batch hoặc inline per-shop) → đừng rebuild list
             UiThread.Post(SyncFromStore);
+            // Máy THIẾU ảnh local → sau khi sync acc/workbook, tự kéo ảnh chung Hub về khu workbook + trỏ ô chọn ảnh
+            // (chỉ khi đang không có ảnh hợp lệ → tránh gọi mạng liên tục; bản Hub đổi sẽ được lấy lại lúc chạy Update).
+            if (string.IsNullOrWhiteSpace(ImagePath) || !File.Exists(ImagePath))
+                _ = EnsureUpdateImageAsync(CancellationToken.None);
         };
     }
 
@@ -235,9 +239,15 @@ public sealed partial class UpdateProductViewModel : ObservableObject
             lease = attempt.Handle;
 
             var ai = AiConfigStore.Shared.Current;
-            // CHỈ Update: kéo ảnh dùng chung từ Hub (null nếu Hub chưa có/offline → BuildContext fallback ImagePath local).
-            var imageOverride = kind == UpdateKind.Update ? await ResolveUpdateImageAsync(job.Cts.Token).ConfigureAwait(false) : null;
-            var ctx = BuildContext(t, ai, startRow, endRow, importFromClaimedTab, imageOverride);
+            // CHỈ Update: ảnh local riêng (nếu có) hoặc kéo ảnh chung Hub về khu workbook + trỏ ô chọn ảnh.
+            var img = kind == UpdateKind.Update ? await EnsureUpdateImageAsync(job.Cts.Token).ConfigureAwait(false) : ImagePath;
+            if (kind == UpdateKind.Update && (string.IsNullOrWhiteSpace(img) || !File.Exists(img)))
+            {
+                Log($"{prefix} ⚠ Chưa có ảnh Update — BigSeller cần ảnh để cập nhật SP. Upload ảnh chung trên Hub (trang Files) hoặc đặt ảnh local.");
+                Coordination.Hub.PublishCompletion(coordKey, "stopped", 0);
+                return;
+            }
+            var ctx = BuildContext(t, ai, startRow, endRow, importFromClaimedTab, kind == UpdateKind.Update ? img : null);
             var runner = new UpdateProductRunner();
             runner.Log += m => Log($"{prefix} {m}");
             job.Runner = runner;
@@ -289,9 +299,18 @@ public sealed partial class UpdateProductViewModel : ObservableObject
 
         var ai = AiConfigStore.Shared.Current;
 
-        // CHỈ Update: kéo ảnh dùng chung từ Hub MỘT LẦN trước khi build/chạy song song (tránh N task đua ghi cùng
-        // file cache). Chưa có CTS của lượt chạy ở đây nên dùng None — pull nhanh, best-effort, tự có timeout _bulkHttp.
-        var imageOverride = pullSharedImage ? await ResolveUpdateImageAsync(CancellationToken.None).ConfigureAwait(false) : null;
+        // CHỈ Update: đảm bảo ảnh MỘT LẦN trước khi build/chạy song song (ảnh local riêng hoặc kéo ảnh chung Hub về
+        // khu workbook + trỏ ô chọn ảnh). Chưa có CTS ở đây nên dùng None — pull nhanh, best-effort, timeout _bulkHttp.
+        var img = pullSharedImage ? await EnsureUpdateImageAsync(CancellationToken.None).ConfigureAwait(false) : ImagePath;
+
+        // BigSeller BẮT BUỘC có ảnh để update SP → thiếu ảnh = update fail. Cả local lẫn Hub đều KHÔNG có (offline /
+        // chưa upload) → CHẶN sớm + báo rõ, khỏi chạy rồi lỗi từng SP.
+        if (pullSharedImage && (string.IsNullOrWhiteSpace(img) || !File.Exists(img)))
+        {
+            Warn("Chưa có ảnh Update — BigSeller cần ảnh để cập nhật SP.\n" +
+                 "→ Upload ảnh chung trên Hub (trang Files) HOẶC chọn ảnh local ở ô \"Ảnh Update (máy này)\".");
+            return;
+        }
 
         // Validate từng đích; tk lỗi (chưa cookie/sheet/workbook) bị bỏ qua, không chặn các tk khác.
         var jobs = new List<(BigSellerAccount Account, UpdateProductContext Ctx)>();
@@ -299,7 +318,7 @@ public sealed partial class UpdateProductViewModel : ObservableObject
         foreach (var t in picked)
         {
             if (!ValidateUpdateTarget(t, requiresBigSellerLogin, out var problem)) { problems.Add(problem); continue; }
-            jobs.Add((t.Account, BuildContext(t, ai, imageOverride: imageOverride)));
+            jobs.Add((t.Account, BuildContext(t, ai, imageOverride: pullSharedImage ? img : null)));
         }
 
         if (jobs.Count == 0) { Warn($"Không có tài khoản hợp lệ để chạy {name}.\n" + string.Join("\n", problems)); return; }
@@ -345,20 +364,39 @@ public sealed partial class UpdateProductViewModel : ObservableObject
         problem = ""; return true;
     }
 
-    /// <summary>CHỈ cho luồng Update: kéo ảnh dùng chung từ Hub về cache rồi trả đường dẫn để BuildContext dùng thay
-    /// ImagePath local. Trả null nếu chưa nối Hub / Hub chưa upload ảnh / offline / lỗi → BuildContext fallback về
-    /// ImagePath (mặc định D:\images\1.jpg). Best-effort, nuốt mọi lỗi — offline không bao giờ chặn Update.</summary>
-    private static async Task<string?> ResolveUpdateImageAsync(CancellationToken ct)
+    /// <summary>Đường dẫn ảnh Update dùng chung tải từ Hub về — nằm CÙNG khu workbook (hub-cache\workbooks\).
+    /// BigSeller cần ảnh THẬT (đường dẫn cụ thể) để update; đây là ảnh "chọn sẵn" cho máy thiếu ảnh local.</summary>
+    private static string SyncedUpdateImagePath => Path.Combine(SuitePaths.HubCacheDir, "workbooks", "default-update.jpg");
+
+    /// <summary>Đảm bảo có ảnh Update rồi TRẢ đường dẫn ảnh hiệu lực (để chạy) + tự trỏ ô chọn ảnh sang đó.
+    /// Quy tắc: (1) ImagePath là ảnh LOCAL RIÊNG hợp lệ (khác ảnh-Hub-đã-sync, file có thật) → GIỮ, không kéo Hub
+    /// (tôn trọng nút "…"). (2) Ngược lại (trống / file không tồn tại / đang trỏ chính ảnh-Hub) → KÉO ảnh chung Hub
+    /// về khu workbook (hash-skip nếu không đổi → tự cập nhật khi admin đổi ảnh) rồi trỏ ImagePath sang đó (hiện
+    /// trong ô + tự lưu). Kéo lỗi/offline → trả ImagePath hiện tại (guard chặn nếu thiếu). Best-effort, không ném.</summary>
+    private async Task<string> EnsureUpdateImageAsync(CancellationToken ct)
     {
+        var synced = SyncedUpdateImagePath;
+        var isCustomLocal = !string.IsNullOrWhiteSpace(ImagePath)
+            && !string.Equals(ImagePath, synced, StringComparison.OrdinalIgnoreCase)
+            && File.Exists(ImagePath);
+        if (isCustomLocal) return ImagePath;   // ảnh local riêng của user → giữ nguyên
+
         try
         {
             var sync = CoordinationRuntime.ConfigSync;
-            if (sync is null) return null;
-            var local = SuitePaths.ResolveHubRelative(HubConfigSync.DefaultUpdateImageRemote);
-            var path = await sync.PullSharedAssetAsync(HubConfigSync.DefaultUpdateImageRemote, local, ct).ConfigureAwait(false);
-            return !string.IsNullOrEmpty(path) && File.Exists(path) ? path : null;
+            if (sync is not null)
+            {
+                var got = await sync.PullSharedAssetAsync(HubConfigSync.DefaultUpdateImageRemote, synced, ct).ConfigureAwait(false);
+                if (!string.IsNullOrEmpty(got) && File.Exists(got))
+                {
+                    if (!string.Equals(ImagePath, got, StringComparison.OrdinalIgnoreCase))
+                        UiThread.Post(() => ImagePath = got);   // hiện trong ô chọn ảnh + OnImagePathChanged tự lưu
+                    return got;
+                }
+            }
         }
-        catch { return null; }
+        catch { }
+        return ImagePath;   // không kéo được → giữ (guard sẽ chặn nếu file thiếu)
     }
 
     private UpdateProductContext BuildContext(UpdateRunTargetViewModel t, AiConfig ai, int? startRow = null, int? endRow = null,
