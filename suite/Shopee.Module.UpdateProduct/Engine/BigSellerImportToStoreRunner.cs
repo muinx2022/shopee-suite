@@ -37,7 +37,8 @@ internal sealed class BigSellerImportToStoreRunner : BigSellerBraveRunner
     protected override string StartUrl => BigSellerCrawlHelper.ResolveCrawlUrl(_settings.CrawlUrl);
 
     // Import xoá các file session-tab của profile TRƯỚC khi phóng Brave (tránh Brave khôi phục tab cũ).
-    protected override void PrepareProfileBeforeLaunch() => ClearSessionTabs(_settings.ProfileDir);
+    protected override void PrepareProfileBeforeLaunch() =>
+        BraveCachePolicy.PrepareProfileForLaunch(_settings.ProfileDir, ProfileLaunchPrep.ClearSessionRestore);
 
     public BigSellerImportToStoreRunner(
         BigSellerWorkflowSettings settings,
@@ -661,40 +662,6 @@ internal sealed class BigSellerImportToStoreRunner : BigSellerBraveRunner
                 }");
             if (!ok) throw;
             _log("Đã bấm Import to Stores bằng JS (lớp phủ hướng dẫn chặn click thường).");
-        }
-    }
-
-    private static void ClearSessionTabs(string profileDir)
-    {
-        var profilePath = new DirectoryInfo(profileDir);
-        if (!profilePath.Exists)
-            return;
-
-        var patterns = new[] { "Current Session", "Current Tabs", "Last Session", "Last Tabs" };
-        var dirs = new List<DirectoryInfo> { profilePath };
-        dirs.AddRange(profilePath.GetDirectories("Profile *"));
-        var defaultDir = Path.Combine(profilePath.FullName, "Default");
-        if (Directory.Exists(defaultDir))
-            dirs.Add(new DirectoryInfo(defaultDir));
-
-        foreach (var dir in dirs)
-        {
-            foreach (var pattern in patterns)
-            {
-                foreach (var file in dir.GetFiles(pattern))
-                {
-                    try { file.Delete(); } catch { }
-                }
-
-                var sessions = Path.Combine(dir.FullName, "Sessions");
-                if (!Directory.Exists(sessions))
-                    continue;
-
-                foreach (var file in Directory.GetFiles(sessions, pattern))
-                {
-                    try { File.Delete(file); } catch { }
-                }
-            }
         }
     }
 

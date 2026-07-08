@@ -61,7 +61,8 @@ public sealed class BraveManager(AppSettingsService appSettings)
 
         // Close only the Brave instance/profile managed by this app.
         Kill();
-        ClearExtensionRuntimeCache(profileDir);
+        Shopee.Core.Browser.BraveCachePolicy.PrepareProfileForLaunch(
+            profileDir, Shopee.Core.Browser.ProfileLaunchPrep.ClearRuntimeCache);
 
         _cdpPort = Shopee.Core.Infrastructure.PortAllocator.Reserve();
         _currentProfileDir = Path.GetFullPath(profileDir);
@@ -225,32 +226,6 @@ public sealed class BraveManager(AppSettingsService appSettings)
                 found.Add($"{(string.IsNullOrEmpty(p.Name) ? "?" : p.Name)}#{p.Pid}");
         }
         return string.Join(", ", found);
-    }
-
-    private static void ClearExtensionRuntimeCache(string profileDir)
-    {
-        try
-        {
-            var defaultDir = Path.Combine(Path.GetFullPath(profileDir), "Default");
-            var cacheDirs = new[]
-            {
-                Path.Combine(defaultDir, "Service Worker"),
-                Path.Combine(defaultDir, "Code Cache"),
-                Path.Combine(defaultDir, "Cache"),
-                Path.Combine(defaultDir, "GPUCache"),
-            };
-
-            foreach (var dir in cacheDirs)
-            {
-                try
-                {
-                    if (Directory.Exists(dir))
-                        Directory.Delete(dir, recursive: true);
-                }
-                catch { }
-            }
-        }
-        catch { }
     }
 
     private static string BuildArgs(int cdpPort, string userDataDir, string? proxy, string extPath, int wsPort)
