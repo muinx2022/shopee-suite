@@ -1,5 +1,7 @@
+using System.Net.WebSockets;
 using System.Text.Json;
 using Shopee.Core.Cdp;
+using Shopee.Core.Infrastructure;
 
 namespace Shopee.Core.BigSeller;
 
@@ -474,5 +476,303 @@ public static class BigSellerCookieEngine
             TryWriteCookieFile(cookieFile, cookies, log);
         }
         catch { /* best-effort */ }
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────────
+    //  TRANSPORT CdpClient (port-based, WebSocket dùng-một-lần) — cho module phóng Brave
+    // ──────────────────────────────────────────────────────────────────────────────
+    //  Các module Scrape (MultiBrave) + Update/Import (UpdateProduct) nạp cookie qua <see cref="CdpClient"/>
+    //  (mở/đóng WS theo thao tác) với cơ chế "belt-and-suspenders": Network.setCookie (page) + Storage.setCookies
+    //  (browser) + fallback bỏ sourceScheme/sourcePort + copy sang bigseller.pro. GIỮ NGUYÊN hành vi đang chạy
+    //  (gộp từ 2 bản BigSellerCookieImporter + CookieCdpWriter của 2 module). KHÁC path CdpSession ở trên (chỉ
+    //  Storage.setCookies) — cố ý giữ CẢ HAI transport để không đổi hành vi bản production.
+
+    private static bool IsBigSellerUrl(string url) =>
+        Uri.TryCreate(url, UriKind.Absolute, out var uri) &&
+        uri.Host.Contains("bigseller", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsLoginUrl(string url) =>
+        url.Contains("login", StringComparison.OrdinalIgnoreCase) ||
+        url.Contains("passport", StringComparison.OrdinalIgnoreCase) ||
+        url.Contains("signin", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Import cookie BigSeller từ file vào browser qua CDP (transport CdpClient: Network.setCookie +
+    /// Storage.setCookies + copy .pro). <paramref name="navigateUrl"/> != null → điều hướng tab BigSeller tới đó
+    /// sau khi nạp; ngược lại nếu <paramref name="reloadBigSellerTabs"/> → reload tab. Dùng chung cho MultiBrave
+    /// (không reload/navigate) + UpdateProduct (navigate crawl/listing URL).</summary>
+    public static async Task<int> ImportFromFileAsync(
+        int cdpPort, string cookieFile, Action<string>? log,
+        bool reloadBigSellerTabs, string? navigateUrl, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(cookieFile))
+        {
+            log?.Invoke("Account chưa cấu hình BigSeller cookie file — bỏ qua.");
+            return 0;
+        }
+        if (!File.Exists(cookieFile))
+        {
+            log?.Invoke($"BigSeller cookie file không tìm thấy: {cookieFile}");
+            return 0;
+        }
+
+        var client = new CdpClient(cdpPort);
+        if (!await client.WaitForReadyAsync(cancellationToken: ct).ConfigureAwait(false))
+        {
+            log?.Invoke($"CDP port {cdpPort} chưa sẵn sàng để import cookie.");
+            return 0;
+        }
+
+        var cookiesEl = await CookieFileHelper.ParseCookiesRootFromFileAsync(cookieFile, ct).ConfigureAwait(false);
+        CookieFileHelper.ValidateCookiesArray(cookiesEl);
+
+        log?.Invoke("Đang nạp cookie BigSeller vào browser…");
+        var count = await SetBigSellerCookiesViaCdpClientAsync(client, cookiesEl, log, ct).ConfigureAwait(false);
+
+        if (count > 0 && !string.IsNullOrWhiteSpace(navigateUrl))
+        {
+            await NavigateBigSellerTabsAsync(client, navigateUrl!).ConfigureAwait(false);
+            log?.Invoke($"Đã điều hướng BigSeller tới: {navigateUrl}");
+            await Task.Delay(2000, ct).ConfigureAwait(false);
+        }
+        else if (count > 0 && reloadBigSellerTabs)
+        {
+            await client.ReloadPageTargetsAsync(IsBigSellerUrl).ConfigureAwait(false);
+            await Task.Delay(2000, ct).ConfigureAwait(false);
+        }
+
+        log?.Invoke($"BigSeller: đã import {count} cookie.");
+        return count;
+    }
+
+    /// <summary>Probe xem tab BigSeller có ĐANG đăng nhập không (điều hướng + poll location.href/readyState):
+    /// false = bị đá về trang login / không vào được khu /web/; true = ổn định trong khu app; null = không probe
+    /// được (lỗi tạm). Dùng để quyết định có nạp lại cookie từ file hay giữ phiên hiện tại.</summary>
+    public static async Task<bool?> ProbeLoggedInAsync(
+        int cdpPort, string? probeUrl = null, Action<string>? log = null, CancellationToken ct = default)
+    {
+        var url = string.IsNullOrWhiteSpace(probeUrl) ? DefaultListingUrl : probeUrl;
+        var client = new CdpClient(cdpPort);
+        try
+        {
+            var wsUrl = await client.EnsurePageTargetAsync(IsBigSellerUrl, url).ConfigureAwait(false);
+            using var page = new ClientWebSocket();
+            await page.ConnectAsync(new Uri(wsUrl), ct).ConfigureAwait(false);
+            await CdpClient.SendAsync(page, 60, "Page.navigate", new { url }).ConfigureAwait(false);
+
+            var stableOkPolls = 0;
+            for (var i = 0; i < 40; i++)
+            {
+                ct.ThrowIfCancellationRequested();
+                await Task.Delay(500, ct).ConfigureAwait(false);
+
+                string href;
+                string ready;
+                try
+                {
+                    var result = await CdpClient.SendAsync(page, 61 + i, "Runtime.evaluate", new
+                    {
+                        expression = "JSON.stringify({href: location.href, ready: document.readyState})",
+                        returnByValue = true,
+                    }).ConfigureAwait(false);
+                    if (!result.TryGetProperty("result", out var rv) || !rv.TryGetProperty("value", out var vv))
+                        continue;
+
+                    using var doc = JsonDocument.Parse(vv.GetString() ?? "{}");
+                    href = doc.RootElement.TryGetProperty("href", out var h) ? h.GetString() ?? "" : "";
+                    ready = doc.RootElement.TryGetProperty("ready", out var r) ? r.GetString() ?? "" : "";
+                }
+                catch
+                {
+                    continue;
+                }
+
+                if (IsLoginUrl(href))
+                    return false;
+                if (!string.Equals(ready, "complete", StringComparison.OrdinalIgnoreCase))
+                {
+                    stableOkPolls = 0;
+                    continue;
+                }
+                if (!href.Contains("/web/", StringComparison.OrdinalIgnoreCase))
+                    return false;
+                if (++stableOkPolls >= 3)
+                    return true;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            log?.Invoke($"Cookie: khong probe duoc trang BigSeller: {ex.Message}");
+        }
+        return null;
+    }
+
+    /// <summary>Xuất cookie BigSeller ĐANG có trong browser (profile này) ra file account — chỉ khi còn muc_token
+    /// sống. <paramref name="verifySessionAlive"/> → probe thêm để chắc phiên chưa bị server thu hồi trước khi ghi
+    /// (tránh ghi đè file bằng token đã chết). Dùng cho lane ghi-cookie của Update/Import.</summary>
+    public static async Task<bool> TryExportProfileCookiesToFileAsync(
+        int cdpPort, string? cookieFile, Action<string>? log = null, bool verifySessionAlive = false)
+    {
+        var file = (cookieFile ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(file))
+            return false;
+
+        try
+        {
+            var bigseller = await GetBigSellerCookiesAsync(cdpPort).ConfigureAwait(false);
+            if (!HasAuthCookie(bigseller))
+                return false;
+
+            if (verifySessionAlive &&
+                await ProbeLoggedInAsync(cdpPort, log: log).ConfigureAwait(false) != true)
+            {
+                log?.Invoke("Cookie: phien BigSeller khong con song — bo qua luu cookie ra file.");
+                return false;
+            }
+
+            if (!TryWriteCookieFile(file, bigseller, log))
+                return false;
+
+            log?.Invoke($"Cookie: da luu {bigseller.Count} cookie BigSeller moi vao file account ({Path.GetFileName(file)}).");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            log?.Invoke($"Cookie: khong luu duoc cookie BigSeller ra file: {ex.Message}");
+            return false;
+        }
+    }
+
+    // Nạp từng cookie BigSeller: Storage.setCookies (browser) TRƯỚC + Network.setCookie (page) + fallback bỏ
+    // sourceScheme/sourcePort nếu chưa ok, rồi copy sang bigseller.pro. Đếm "thành công" khi Network.setCookie ok
+    // HOẶC Storage.setCookies ok (bản UpdateProduct — chắc-ăn hơn bản MultiBrave vốn chỉ đếm Network.setCookie;
+    // khác biệt CHỈ ở con số trong log, xác nhận phiên vẫn qua HasAuthCookieInBrowser sau đó).
+    private static async Task<int> SetBigSellerCookiesViaCdpClientAsync(
+        CdpClient client, JsonElement cookiesArray, Action<string>? log, CancellationToken ct)
+    {
+        var wsUrl = await client.GetPageWebSocketUrlAsync().ConfigureAwait(false);
+        using var socket = new ClientWebSocket();
+        await socket.ConnectAsync(new Uri(wsUrl), ct).ConfigureAwait(false);
+        await CdpClient.SendAsync(socket, 1, "Network.enable", new { }).ConfigureAwait(false);
+
+        var succeeded = 0;
+        var cmdId = 1000;
+
+        foreach (var cookie in cookiesArray.EnumerateArray())
+        {
+            ct.ThrowIfCancellationRequested();
+            if (cookie.ValueKind != JsonValueKind.Object)
+                continue;
+
+            var domain = cookie.TryGetProperty("domain", out var dp) ? (dp.GetString() ?? "") : "";
+            if (!domain.Contains("bigseller", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            var payload = BuildCookiePayload(cookie);
+            if (payload is null)
+                continue;
+
+            try
+            {
+                var storageOk = await TrySetCookieWithBrowserStorageAsync(client, payload, ct).ConfigureAwait(false);
+                var result = await CdpClient.SendAsync(socket, cmdId++, "Network.setCookie", payload).ConfigureAwait(false);
+                var ok = result.TryGetProperty("success", out var sp) && sp.GetBoolean();
+                if (!ok)
+                {
+                    var fb = new Dictionary<string, object?>(payload);
+                    fb.Remove("sourceScheme");
+                    fb.Remove("sourcePort");
+                    var fbResult = await CdpClient.SendAsync(socket, cmdId++, "Network.setCookie", fb).ConfigureAwait(false);
+                    ok = fbResult.TryGetProperty("success", out var fp) && fp.GetBoolean();
+                }
+                if (!ok && storageOk)
+                    ok = true;
+
+                // Copy sang bigseller.pro cho tương thích (best-effort).
+                if (TryBuildProPayload(payload, out var proPayload))
+                {
+                    try
+                    {
+                        await TrySetCookieWithBrowserStorageAsync(client, proPayload, ct).ConfigureAwait(false);
+                        var proResult = await CdpClient.SendAsync(socket, cmdId++, "Network.setCookie", proPayload).ConfigureAwait(false);
+                        var proOk = proResult.TryGetProperty("success", out var psp) && psp.GetBoolean();
+                        if (!proOk)
+                        {
+                            var fb = new Dictionary<string, object?>(proPayload);
+                            fb.Remove("sourceScheme");
+                            fb.Remove("sourcePort");
+                            try { await CdpClient.SendAsync(socket, cmdId++, "Network.setCookie", fb).ConfigureAwait(false); } catch { }
+                        }
+                    }
+                    catch { /* copy .pro chỉ là best-effort; .com vẫn là bản chính */ }
+                }
+
+                if (ok) succeeded++;
+            }
+            catch (Exception ex)
+            {
+                var name = payload.TryGetValue("name", out var nv) ? nv as string ?? "" : "";
+                log?.Invoke($"Cookie {name}: {ex.Message}");
+            }
+        }
+
+        return succeeded;
+    }
+
+    private static async Task<bool> TrySetCookieWithBrowserStorageAsync(
+        CdpClient client, Dictionary<string, object?> payload, CancellationToken ct)
+    {
+        try
+        {
+            using var browser = new ClientWebSocket();
+            await browser.ConnectAsync(
+                new Uri(await client.GetBrowserWebSocketUrlAsync().ConfigureAwait(false)), ct).ConfigureAwait(false);
+            await CdpClient.SendAsync(browser, 700, "Storage.setCookies", new { cookies = new[] { payload } }).ConfigureAwait(false);
+            return true;
+        }
+        catch { return false; }
+    }
+
+    private static async Task NavigateBigSellerTabsAsync(CdpClient client, string targetUrl)
+    {
+        try
+        {
+            using var response = await AppServices.DirectHttp
+                .GetAsync($"http://127.0.0.1:{client.Port}/json/list").ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+                return;
+
+            using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync().ConfigureAwait(false));
+            var navigated = false;
+            foreach (var item in doc.RootElement.EnumerateArray())
+            {
+                var type = item.TryGetProperty("type", out var t) ? t.GetString() : null;
+                if (!string.Equals(type, "page", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                var url = item.TryGetProperty("url", out var u) ? u.GetString() ?? "" : "";
+                if (!IsBigSellerUrl(url))
+                    continue;
+
+                var ws = item.TryGetProperty("webSocketDebuggerUrl", out var wsProp) ? wsProp.GetString() : null;
+                if (string.IsNullOrWhiteSpace(ws))
+                    continue;
+
+                using var page = new ClientWebSocket();
+                await page.ConnectAsync(new Uri(ws), CancellationToken.None).ConfigureAwait(false);
+                await CdpClient.SendAsync(page, 92, "Page.navigate", new { url = targetUrl }).ConfigureAwait(false);
+                navigated = true;
+            }
+
+            if (!navigated)
+                await client.EnsurePageTargetAsync(IsBigSellerUrl, targetUrl).ConfigureAwait(false);
+        }
+        catch
+        {
+            // navigation is best-effort
+        }
     }
 }

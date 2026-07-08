@@ -12,8 +12,8 @@ public enum AutoLoginOutcome { Success, NeedsOtp, Failed }
 
 /// <summary>
 /// TỰ ĐĂNG NHẬP BigSeller (headless) trên 1 <see cref="IPage"/> — BẢN SAO của
-/// <c>UpdateProduct.BigSellerAutoLogin</c> cho module Scrape (MultiBrave dùng stack riêng: raw CDP + không
-/// tham chiếu UpdateProduct, nên nhân bản như <c>BigSellerCookieImporter</c>/<c>CdpClient</c> vốn đã nhân bản).
+/// <c>UpdateProduct.BigSellerAutoLogin</c> cho module Scrape (MultiBrave dùng stack Playwright riêng; cookie
+/// + CDP dùng chung qua <see cref="BigSellerCookieEngine"/>/<c>CdpClient</c> ở Core).
 /// Mở trang login (en_US) → điền email/mật khẩu → đóng popup "Warm Tips" → giải captcha
 /// (<see cref="BigSellerCaptchaSolver"/>, AI vision) → tick "I agree" → submit → RETRY. Trả về Success (có
 /// token mới KHỚP IP proxy của Brave này — token sync KHÔNG scrape được vì bị coi phiên lạ), NeedsOtp (thiết
@@ -55,9 +55,9 @@ public static class BigSellerAutoLogin
                 {
                     try
                     {
-                        var cookies = await BigSellerCookieImporter.GetBigSellerCookiesAsync(cdpPort).ConfigureAwait(false);
-                        if (BigSellerCookieImporter.HasAuthCookie(cookies))
-                            BigSellerCookieImporter.TryWriteCookieFile(cookieFile!, cookies, log);
+                        var cookies = await BigSellerCookieEngine.GetBigSellerCookiesAsync(cdpPort).ConfigureAwait(false);
+                        if (BigSellerCookieEngine.HasAuthCookie(cookies))
+                            BigSellerCookieEngine.TryWriteCookieFile(cookieFile!, cookies, log);
                     }
                     catch (Exception ex) { log?.Invoke($"BigSeller: xuất token mới ra file lỗi: {ex.Message}"); }
                 }
@@ -108,9 +108,9 @@ public static class BigSellerAutoLogin
                 {
                     try
                     {
-                        var cookies = await BigSellerCookieImporter.GetBigSellerCookiesAsync(cdpPort).ConfigureAwait(false);
-                        if (BigSellerCookieImporter.HasAuthCookie(cookies))
-                            BigSellerCookieImporter.TryWriteCookieFile(cookieFile!, cookies, log);
+                        var cookies = await BigSellerCookieEngine.GetBigSellerCookiesAsync(cdpPort).ConfigureAwait(false);
+                        if (BigSellerCookieEngine.HasAuthCookie(cookies))
+                            BigSellerCookieEngine.TryWriteCookieFile(cookieFile!, cookies, log);
                     }
                     catch (Exception ex) { log?.Invoke($"BigSeller: xuất token mới ra file lỗi: {ex.Message}"); }
                 }
@@ -175,9 +175,9 @@ public static class BigSellerAutoLogin
                 await Task.Delay(4000, ct).ConfigureAwait(false);   // chờ tracker nạp thêm cho bộ cookie đầy đủ
                 try
                 {
-                    var cookies = await BigSellerCookieImporter.GetBigSellerCookiesAsync(port).ConfigureAwait(false);
-                    if (BigSellerCookieImporter.HasAuthCookie(cookies))
-                        BigSellerCookieImporter.TryWriteCookieFile(cookieFile, cookies, log);
+                    var cookies = await BigSellerCookieEngine.GetBigSellerCookiesAsync(port).ConfigureAwait(false);
+                    if (BigSellerCookieEngine.HasAuthCookie(cookies))
+                        BigSellerCookieEngine.TryWriteCookieFile(cookieFile, cookies, log);
                     else { log?.Invoke("Đăng nhập xong nhưng chưa thấy cookie auth — bỏ lưu."); return AutoLoginOutcome.Failed; }
                 }
                 catch (Exception ex) { log?.Invoke($"Lưu cookie lỗi: {ex.Message}"); return AutoLoginOutcome.Failed; }

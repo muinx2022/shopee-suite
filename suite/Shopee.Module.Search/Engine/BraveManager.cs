@@ -2,9 +2,6 @@ namespace ShopeeStatApp.Services;
 
 public sealed class BraveManager(AppSettingsService appSettings)
 {
-    // Dùng chung 1 HttpClient cho gọi kiotproxy: tạo mới mỗi lần (mỗi account/lane relaunch) cạn socket/TIME_WAIT.
-    private static readonly HttpClient ProxyHttp = new() { Timeout = TimeSpan.FromSeconds(12) };
-
     private Process? _process;
     private int _cdpPort;
     private string? _currentProfileDir;
@@ -291,78 +288,15 @@ public sealed class BraveManager(AppSettingsService appSettings)
 
     private static async Task<(string? Proxy, string? Error)> FetchKiotProxyAsync(string key, string proxyType)
     {
-        // ƯU TIÊN /current: giữ IP hiện hành của key (sống ~30') → login Shopee và search DÙNG CHUNG 1 IP
-        // → tránh captcha do nhảy IP. CHỈ /new khi /current chưa có proxy (key chưa kích hoạt / hết hạn) —
-        // /new gán IP mới một lần, các lần sau /current dùng lại. KHÔNG gọi /new mỗi lần (sẽ ép xoay IP).
-        var currentUrl = $"https://api.kiotproxy.com/api/v1/proxies/current?key={Uri.EscapeDataString(key)}";
-        var current = await TryFetchKiotProxyAsync(currentUrl, proxyType);
+        // ƯU TIÊN /current: giữ IP hiện hành của key (sống ~30') → login Shopee và search DÙNG CHUNG 1 IP →
+        // tránh captcha do nhảy IP. CHỈ /new khi /current chưa có proxy (key chưa kích hoạt / hết hạn). Dùng
+        // chung KiotProxyClient (Core) — cùng URL/schema với Scrape/Update, không nhân bản parse proxy nữa.
+        var current = await Shopee.Core.Proxy.KiotProxyClient.FetchCurrentAsync(key, default, proxyType);
         if (current.Proxy is not null)
-            return current;
+            return (current.Proxy, null);
 
-        var newUrl = $"https://api.kiotproxy.com/api/v1/proxies/new?key={Uri.EscapeDataString(key)}&region=random";
-        var fresh = await TryFetchKiotProxyAsync(newUrl, proxyType);
-        return fresh.Proxy is not null ? fresh : (null, fresh.Error ?? current.Error);
-    }
-
-    private static async Task<(string? Proxy, string? Error)> TryFetchKiotProxyAsync(
-        string url,
-        string proxyType)
-    {
-        string response;
-        try
-        {
-            response = await ProxyHttp.GetStringAsync(url);
-        }
-        catch (HttpRequestException ex)
-        {
-            response = ex.Message;
-            if (ex.StatusCode is not null)
-            {
-                try { response = await ProxyHttp.GetStringAsync(url); } catch { }
-            }
-        }
-        catch (Exception ex)
-        {
-            return (null, ex.Message);
-        }
-
-        try
-        {
-            using var doc = JsonDocument.Parse(response);
-            var root = doc.RootElement;
-            if (root.TryGetProperty("success", out var successProp) && !successProp.GetBoolean())
-            {
-                var message = root.TryGetProperty("message", out var msg) ? msg.GetString() : null;
-                return (null, message);
-            }
-
-            var data = root.TryGetProperty("data", out var dataProp) ? dataProp : root;
-            var fieldName = string.Equals(proxyType, "socks5", StringComparison.OrdinalIgnoreCase)
-                ? "socks5"
-                : "http";
-
-            if (data.TryGetProperty(fieldName, out var proxyProp))
-            {
-                var proxy = proxyProp.GetString();
-                if (!string.IsNullOrWhiteSpace(proxy))
-                    return ($"{fieldName}://{proxy}", null);
-            }
-
-            if (!data.TryGetProperty("host", out var hostProp)) return (null, "KiotProxy không trả về host/proxy.");
-            var host = hostProp.GetString();
-            if (string.IsNullOrWhiteSpace(host)) return (null, "KiotProxy trả về host rỗng.");
-
-            var portField = string.Equals(fieldName, "socks5", StringComparison.OrdinalIgnoreCase)
-                ? "socks5Port"
-                : "httpPort";
-            if (!data.TryGetProperty(portField, out var portProp)) return (null, $"KiotProxy không trả về {portField}.");
-
-            return ($"{fieldName}://{host}:{portProp.GetInt32()}", null);
-        }
-        catch (JsonException)
-        {
-            return (null, response);
-        }
+        var fresh = await Shopee.Core.Proxy.KiotProxyClient.FetchNewAsync(key, default, proxyType);
+        return fresh.Proxy is not null ? (fresh.Proxy, null) : (null, fresh.Error ?? current.Error);
     }
 
     public void Kill()

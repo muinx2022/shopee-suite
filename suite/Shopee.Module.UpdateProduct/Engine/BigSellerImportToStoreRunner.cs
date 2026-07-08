@@ -137,8 +137,8 @@ internal sealed class BigSellerImportToStoreRunner : IAsyncDisposable
         var hasLiveSession = false;
         try
         {
-            hasLiveSession = BigSellerCookieImporter.HasAuthCookie(
-                await BigSellerCookieImporter.GetBigSellerCookiesAsync(_settings.DebugPort).ConfigureAwait(false));
+            hasLiveSession = BigSellerCookieEngine.HasAuthCookie(
+                await BigSellerCookieEngine.GetBigSellerCookiesAsync(_settings.DebugPort).ConfigureAwait(false));
         }
         catch
         {
@@ -146,7 +146,7 @@ internal sealed class BigSellerImportToStoreRunner : IAsyncDisposable
         }
 
         if (hasLiveSession &&
-            await BigSellerCookieImporter.ProbeLoggedInAsync(
+            await BigSellerCookieEngine.ProbeLoggedInAsync(
                 _settings.DebugPort, crawlUrl, _log, cancellationToken).ConfigureAwait(false) == false)
         {
             hasLiveSession = false;
@@ -158,13 +158,13 @@ internal sealed class BigSellerImportToStoreRunner : IAsyncDisposable
             _log("Profile da dang nhap BigSeller — giu phien hien tai, khong ghi de cookie tu file.");
             // Chỉ lane 0 (profile base) ghi cookie ra file → tránh các lane phụ đá token (rotation-war).
             if (_exportCookie)
-                await BigSellerCookieImporter.TryExportProfileCookiesToFileAsync(
+                await BigSellerCookieEngine.TryExportProfileCookiesToFileAsync(
                     _settings.DebugPort, _settings.BigSellerCookieFile, _log).ConfigureAwait(false);
         }
         else
         {
             _log("CDP da san sang, dang import cookie BigSeller...");
-            await BigSellerCookieImporter.ImportFromFileAsync(
+            await BigSellerCookieEngine.ImportFromFileAsync(
                 _settings.DebugPort,
                 _settings.BigSellerCookieFile ?? "",
                 _log,
@@ -173,7 +173,7 @@ internal sealed class BigSellerImportToStoreRunner : IAsyncDisposable
                 cancellationToken).ConfigureAwait(false);
             _log("Da xu ly cookie BigSeller.");
 
-            if (await BigSellerCookieImporter.ProbeLoggedInAsync(
+            if (await BigSellerCookieEngine.ProbeLoggedInAsync(
                     _settings.DebugPort, crawlUrl, _log, cancellationToken).ConfigureAwait(false) == false)
                 _log("Cookie tu file account cung da het han — mo tab Account, bam Open BigSeller, login lai roi bam Save & close.");
         }
@@ -861,7 +861,7 @@ internal sealed class BigSellerImportToStoreRunner : IAsyncDisposable
             try
             {
                 await Task.WhenAny(
-                    BigSellerCookieImporter.TryExportProfileCookiesToFileAsync(
+                    BigSellerCookieEngine.TryExportProfileCookiesToFileAsync(
                         _settings.DebugPort, _settings.BigSellerCookieFile, _log, verifySessionAlive: true),
                     Task.Delay(6000)).ConfigureAwait(false);
             }
