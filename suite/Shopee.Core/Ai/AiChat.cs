@@ -171,6 +171,66 @@ public static class AiChat
         };
     }
 
+    /// <summary>Số lần thử mặc định (gồm lần đầu) cho một lệnh gọi AI.</summary>
+    public const int DefaultMaxAttempts = 3;
+
+    /// <summary>
+    /// Chạy một hành động gọi AI với RETRY THỐNG NHẤT cho toàn suite (thay các vòng retry tự chế trước đây ở
+    /// ProductUpdate.GenerateDescription + NameRewrite.ExecuteWithRetry). Phân loại lỗi:
+    ///  • <see cref="AiHttpException.IsPermanent"/> (400/401/403/404 = key/quota/model sai) → NÉM NGAY, không retry.
+    ///  • Người dùng hủy (token <paramref name="ct"/> đã cancel) → ném ngay.
+    ///  • MỌI lỗi còn lại (mạng, timeout HttpClient, JSON hỏng, nội dung không hợp lệ do action tự ném…) → TẠM, thử lại.
+    /// Backoff tuyến tính theo lần: 429/5xx chờ lâu (<paramref name="rateLimitDelayMs"/>×lần), còn lại
+    /// <paramref name="delayMs"/>×lần. Hết lượt → ném lỗi cuối (đã qua <paramref name="mapError"/> nếu có);
+    /// caller tự quyết nuốt (trả rỗng) hay để ném lên. <paramref name="delay"/> cho phép truyền hàm chờ
+    /// tôn trọng Pause (DelayAsync) thay cho Task.Delay.
+    /// </summary>
+    public static async Task<T> ExecuteWithRetryAsync<T>(
+        Func<CancellationToken, Task<T>> action,
+        CancellationToken ct = default,
+        int maxAttempts = DefaultMaxAttempts,
+        int delayMs = 2000,
+        int rateLimitDelayMs = 15000,
+        string label = "AI",
+        Action<string>? log = null,
+        Func<Exception, Exception>? mapError = null,
+        Func<int, CancellationToken, Task>? delay = null)
+    {
+        delay ??= (ms, c) => Task.Delay(ms, c);
+        Exception? lastError = null;
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            ct.ThrowIfCancellationRequested();
+            try
+            {
+                return await action(ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (IsStopError(ex, ct))
+            {
+                throw;   // key/quota/model sai hoặc người dùng hủy → dừng, không retry
+            }
+            catch (Exception ex)
+            {
+                lastError = mapError?.Invoke(ex) ?? ex;
+                if (attempt == maxAttempts)
+                    break;
+                var ms = IsRateLimitOrServer(ex) ? rateLimitDelayMs * attempt : delayMs * attempt;
+                log?.Invoke($"⚠ {label} lỗi (lần {attempt}/{maxAttempts}): {Trunc(ex.Message)} — thử lại sau {ms / 1000}s.");
+                await delay(ms, ct).ConfigureAwait(false);
+            }
+        }
+        throw lastError ?? new InvalidOperationException($"{label} thất bại sau {maxAttempts} lần.");
+    }
+
+    /// <summary>Lỗi phải DỪNG ngay (không retry): lỗi cấu hình/quyền AI (permanent) hoặc người dùng đã hủy.</summary>
+    private static bool IsStopError(Exception ex, CancellationToken ct) =>
+        (ex is AiHttpException ah && ah.IsPermanent) ||
+        (ex is OperationCanceledException && ct.IsCancellationRequested);
+
+    /// <summary>429 (rate limit) hoặc 5xx (server) → nên chờ LÂU hơn trước khi thử lại.</summary>
+    private static bool IsRateLimitOrServer(Exception ex) =>
+        ex is AiHttpException { StatusCode: 429 } or AiHttpException { StatusCode: >= 500 };
+
     private static StringContent JsonContent(object o) =>
         new(JsonSerializer.Serialize(o), Encoding.UTF8, "application/json");
 

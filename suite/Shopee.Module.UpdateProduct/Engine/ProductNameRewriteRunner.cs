@@ -212,7 +212,17 @@ internal sealed class ProductNameRewriteRunner
     {
         try
         {
-            return await ExecuteWithRetryAsync(() => RequestSeoTitlesOnceAsync(cfg, names, ct), "seo-title", log, ct);
+            // Retry chung ở Core (AiChat): 429/5xx chờ lâu; key/quota/model sai (permanent) ném ngay; JSON hỏng
+            // gói thành InvalidOperationException để nhánh chia-đôi bên dưới bắt được như bản cũ.
+            return await AiChat.ExecuteWithRetryAsync(
+                c => RequestSeoTitlesOnceAsync(cfg, names, c),
+                ct,
+                maxAttempts: OpenAiMaxRetries,
+                label: "OpenAI seo-title",
+                log: log,
+                mapError: ex => ex is JsonException
+                    ? new InvalidOperationException($"OpenAI seo-title JSON lỗi: {ex.Message}", ex)
+                    : ex);
         }
         catch (AiHttpException) { throw; }   // key/quota/model sai → dừng, không chia nhỏ
         catch (InvalidOperationException ex)
@@ -265,54 +275,6 @@ internal sealed class ProductNameRewriteRunner
     }
 
 
-    /// <summary>
-    /// Retry chung cho m?i request OpenAI: b?t c? l?i m?ng (HttpRequestException) và
-    /// timeout HttpClient (TaskCanceledException không ph?i do user d?ng) — tru?c dây
-    /// hai lo?i này l?t qua retry làm ch?t run ngay l?n l?i d?u tiên.
-    /// 429/5xx ch? lâu hon (15s/30s) d? qua rate limit thay vì 2s/4s.
-    /// </summary>
-    private static async Task<T> ExecuteWithRetryAsync<T>(
-        Func<Task<T>> action,
-        string label,
-        Action<string> log,
-        CancellationToken ct)
-    {
-        Exception? lastError = null;
-        for (var attempt = 1; attempt <= OpenAiMaxRetries; attempt++)
-        {
-            ct.ThrowIfCancellationRequested();
-            try
-            {
-                return await action();
-            }
-            catch (Exception ex) when (IsTransientOpenAiError(ex, ct))
-            {
-                lastError = ex is JsonException
-                    ? new InvalidOperationException($"OpenAI {label} JSON lỗi: {ex.Message}", ex)
-                    : ex;
-                if (attempt == OpenAiMaxRetries)
-                    break;
-
-                var delay = ComputeRetryDelay(ex, attempt);
-                log($"⚠ OpenAI {label} lỗi (lần {attempt}/{OpenAiMaxRetries}): {Shorten(ex.Message)} — thử lại sau {delay.TotalSeconds:0}s.");
-                await Task.Delay(delay, ct);
-            }
-        }
-
-        throw lastError ?? new InvalidOperationException($"OpenAI {label} request failed.");
-    }
-
-    private static bool IsTransientOpenAiError(Exception ex, CancellationToken ct) =>
-        ex is InvalidOperationException or JsonException or HttpRequestException ||
-        (ex is AiHttpException ah && !ah.IsPermanent) ||   // 429/5xx → retry; key/quota/model (permanent) → dừng
-        (ex is TaskCanceledException && !ct.IsCancellationRequested);
-
-    private static TimeSpan ComputeRetryDelay(Exception ex, int attempt) =>
-        ex is OpenAiHttpException { IsRateLimitOrServer: true }
-            or AiHttpException { StatusCode: 429 } or AiHttpException { StatusCode: >= 500 }
-            ? TimeSpan.FromSeconds(15 * attempt)
-            : TimeSpan.FromSeconds(2 * attempt);
-
     /// <summary>Gọi AI (đa provider qua AiChat) yêu cầu trả JSON, rồi trích object JSON từ text trả về.
     /// Dùng cho cả 2 bước (parse cấu trúc + viết lại) — provider/model/key lấy từ AiConfig (Cài đặt).</summary>
     private static async Task<string> AiJsonAsync(AiConfig cfg, string system, string user, CancellationToken ct, double temperature = 0)
@@ -338,13 +300,6 @@ internal sealed class ProductNameRewriteRunner
         message = (message ?? "").ReplaceLineEndings(" ").Trim();
         return message.Length <= 300 ? message : message[..300] + "…";
     }
-
-    private sealed class OpenAiHttpException(int statusCode, string message) : InvalidOperationException(message)
-    {
-        public int StatusCode { get; } = statusCode;
-        public bool IsRateLimitOrServer => StatusCode == 429 || StatusCode >= 500;
-    }
-
 
     private static RewritePlan BuildPlan(
         string workbookPath, string sheetName, int startRow, int endRow,
