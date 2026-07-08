@@ -45,15 +45,25 @@ public sealed class FleetStateService : IHostedService, IDisposable
         catch { /* offline/khóa DB nhất thời → giữ snapshot cũ */ }
     }
 
+    /// <summary>Ngưỡng "CÒN CHẠY" để HIỂN THỊ ⏳: nhịp lease/máy trong 120s (= 4 nhịp heartbeat 30s bị lỡ; &lt; 180s
+    /// offline). Client đóng/crash → nhịp đóng băng → sau ~2' ô việc THÔI báo running (khớp dòng máy đã ⚪), thay vì
+    /// kẹt ⏳ tới 5' như trước. KHÁC StaleLease(5') — cái đó dùng KHOÁ acc chống 2 máy + sweep huỷ; ở đây CHỈ sửa vị
+    /// ngữ HIỂN THỊ, KHÔNG đụng khoá/sweep (việc hub-giao vẫn 'running' nội bộ, vẫn huỷ + hồi sinh được).</summary>
+    private static readonly TimeSpan LeaseFresh = TimeSpan.FromSeconds(120);
+
     // ── Hàm tính trạng thái (port FleetViewModel) ────────────────────────────────
     public static OpCellState OpCell(FleetSnapshot f, string bsId, string shopId, string op)
     {
         var key = $"{bsId}__{shopId}__{op}";
         var lease = f.Leases.FirstOrDefault(l => l.Key == key);
-        if (lease is not null) return new($"⏳ {Host(lease.Hostname)}", "run", 1);
+        // Chỉ ⏳ khi lease CÒN TƯƠI (client còn nhịp). Client đã đóng/crash → nhịp đóng băng → rơi xuống ledger/idle.
+        if (lease is not null && (DateTimeOffset.Now - lease.HeartbeatAt) < LeaseFresh)
+            return new($"⏳ {Host(lease.Hostname)}", "run", 1);
 
         var asn = f.Assignments.FirstOrDefault(a => a.BigsellerId == bsId && a.ShopId == shopId && a.Op == op && a.Status is "queued" or "running");
-        if (asn is { Status: "running" }) return new($"⏳ {Host(asn.ClaimedByHostname)}", "run", 1);
+        // Assignment 'running' nhưng máy đã OFFLINE (≥180s) → thôi báo ⏳ (nội bộ vẫn 'running' để huỷ/hồi sinh).
+        if (asn is { Status: "running" } && !MachineOffline(f, asn.ClaimedByMachineId))
+            return new($"⏳ {Host(asn.ClaimedByHostname)}", "run", 1);
 
         var led = f.Ledger.FirstOrDefault(l => l.Key == key);
         if (led?.Status == "completed") return new("✓ xong", "done", 0);
@@ -94,7 +104,7 @@ public sealed class FleetStateService : IHostedService, IDisposable
     {
         if ((DateTimeOffset.Now - m.LastSeen).TotalSeconds >= 180)
             return new("⚪", "offline · " + Ago(m.LastSeen), false);
-        var working = f.Leases.Any(l => l.MachineId == m.MachineId)
+        var working = f.Leases.Any(l => l.MachineId == m.MachineId && (DateTimeOffset.Now - l.HeartbeatAt) < LeaseFresh)
             || f.Assignments.Any(a => a.Status == "running" && a.ClaimedByMachineId == m.MachineId);
         return working
             ? new("🟢", "online · đang chạy", true)
