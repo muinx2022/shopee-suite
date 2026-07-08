@@ -36,103 +36,103 @@ public sealed class HubClient
     }
 
     /// <summary>Báo Hub xoá máy này khỏi danh sách (khi người dùng chủ động Ngắt kết nối).</summary>
-    public Task LeaveAsync(CancellationToken ct = default) => PostAsync("/machines/leave", new MachineLeaveRequest(_machineId), ct);
+    public Task LeaveAsync(CancellationToken ct = default) => PostAsync(HubRoutes.MachineLeave, new MachineLeaveRequest(_machineId), ct);
 
     public async Task<bool> PingAsync(CancellationToken ct = default)
     {
-        try { return (await _http.GetAsync("/health", ct)).IsSuccessStatusCode; }
+        try { return (await _http.GetAsync(HubRoutes.Health, ct)).IsSuccessStatusCode; }
         catch { return false; }
     }
 
     // ── Khoá việc ──
     public async Task<LeaseAcquireResponse> AcquireAsync(LeaseAcquireRequest req, CancellationToken ct = default)
     {
-        var r = await _http.PostAsJsonAsync("/leases/acquire", req, ct);
+        var r = await _http.PostAsJsonAsync(HubRoutes.LeasesAcquire, req, ct);
         r.EnsureSuccessStatusCode();
         return await r.Content.ReadFromJsonAsync<LeaseAcquireResponse>(ct) ?? new LeaseAcquireResponse(false, null);
     }
     public Task HeartbeatLeaseAsync(string key, string machineId, CancellationToken ct = default)
-        => PostAsync("/leases/heartbeat", new LeaseHeartbeatRequest(key, machineId), ct);
+        => PostAsync(HubRoutes.LeasesHeartbeat, new LeaseHeartbeatRequest(key, machineId), ct);
     public Task ReleaseLeaseAsync(string key, string machineId, CancellationToken ct = default)
-        => PostAsync("/leases/release", new LeaseReleaseRequest(key, machineId), ct);
+        => PostAsync(HubRoutes.LeasesRelease, new LeaseReleaseRequest(key, machineId), ct);
 
     // ── Khoá tài khoản ──
     public async Task<AccountReserveResponse> ReserveAccountsAsync(AccountReserveRequest req, CancellationToken ct = default)
     {
-        var r = await _http.PostAsJsonAsync("/accounts/reserve", req, ct);
+        var r = await _http.PostAsJsonAsync(HubRoutes.AccountsReserve, req, ct);
         r.EnsureSuccessStatusCode();
         return await r.Content.ReadFromJsonAsync<AccountReserveResponse>(ct) ?? new AccountReserveResponse([], []);
     }
-    public Task ReleaseAccountsAsync(AccountReleaseRequest req, CancellationToken ct = default) => PostAsync("/accounts/release", req, ct);
-    public Task HeartbeatAccountsAsync(AccountReleaseRequest req, CancellationToken ct = default) => PostAsync("/accounts/heartbeat", req, ct);
+    public Task ReleaseAccountsAsync(AccountReleaseRequest req, CancellationToken ct = default) => PostAsync(HubRoutes.AccountsRelease, req, ct);
+    public Task HeartbeatAccountsAsync(AccountReleaseRequest req, CancellationToken ct = default) => PostAsync(HubRoutes.AccountsHeartbeat, req, ct);
 
     // ── Sổ hoàn thành ──
-    public Task PublishLedgerAsync(WorkLedgerRecord rec, CancellationToken ct = default) => PostAsync("/ledger", rec, ct);
-    public Task SetLedgerStatusAsync(SetLedgerStatusRequest req, CancellationToken ct = default) => PostAsync("/ledger/set", req, ct);
+    public Task PublishLedgerAsync(WorkLedgerRecord rec, CancellationToken ct = default) => PostAsync(HubRoutes.Ledger, rec, ct);
+    public Task SetLedgerStatusAsync(SetLedgerStatusRequest req, CancellationToken ct = default) => PostAsync(HubRoutes.LedgerSet, req, ct);
     public async Task<List<WorkLedgerRecord>> AllLedgerAsync(CancellationToken ct = default)
-        => await _http.GetFromJsonAsync<List<WorkLedgerRecord>>("/ledger", ct) ?? [];
+        => await _http.GetFromJsonAsync<List<WorkLedgerRecord>>(HubRoutes.Ledger, ct) ?? [];
 
     // ── Nhịp máy + bảng ──
-    public Task MachineHeartbeatAsync(MachineHeartbeatRequest req, CancellationToken ct = default) => PostAsync("/machines/heartbeat", req, ct);
+    public Task MachineHeartbeatAsync(MachineHeartbeatRequest req, CancellationToken ct = default) => PostAsync(HubRoutes.MachineHeartbeat, req, ct);
     public async Task<FleetSnapshot> FleetAsync(CancellationToken ct = default)
-        => await _http.GetFromJsonAsync<FleetSnapshot>("/fleet", ct) ?? new FleetSnapshot();
+        => await _http.GetFromJsonAsync<FleetSnapshot>(HubRoutes.Fleet, ct) ?? new FleetSnapshot();
 
     // ── Vai trò máy + giao việc ──
-    public Task SetRoleAsync(SetRoleRequest req, CancellationToken ct = default) => PostAsync("/roles", req, ct);
+    public Task SetRoleAsync(SetRoleRequest req, CancellationToken ct = default) => PostAsync(HubRoutes.Roles, req, ct);
     public async Task<Assignment> CreateAssignmentAsync(CreateAssignmentRequest req, CancellationToken ct = default)
     {
-        var r = await _http.PostAsJsonAsync("/assignments", req, ct);
+        var r = await _http.PostAsJsonAsync(HubRoutes.Assignments, req, ct);
         r.EnsureSuccessStatusCode();
         return await r.Content.ReadFromJsonAsync<Assignment>(ct) ?? new Assignment();
     }
     public async Task<List<Assignment>> ClaimAssignmentsAsync(ClaimAssignmentsRequest req, CancellationToken ct = default)
     {
-        var r = await _http.PostAsJsonAsync("/assignments/claim", req, ct);
+        var r = await _http.PostAsJsonAsync(HubRoutes.AssignmentsClaim, req, ct);
         r.EnsureSuccessStatusCode();
         return await r.Content.ReadFromJsonAsync<List<Assignment>>(ct) ?? [];
     }
-    public Task ReportAssignmentAsync(AssignmentStatusRequest req, CancellationToken ct = default) => PostAsync("/assignments/status", req, ct);
-    public Task CancelAssignmentAsync(CancelAssignmentRequest req, CancellationToken ct = default) => PostAsync("/assignments/cancel", req, ct);
+    public Task ReportAssignmentAsync(AssignmentStatusRequest req, CancellationToken ct = default) => PostAsync(HubRoutes.AssignmentsStatus, req, ct);
+    public Task CancelAssignmentAsync(CancelAssignmentRequest req, CancellationToken ct = default) => PostAsync(HubRoutes.AssignmentsCancel, req, ct);
 
     // ── Kho gộp kết quả Search ── (dùng _bulkHttp timeout dài cho push/fetch khối lớn)
     public async Task PushSearchProductsAsync(SearchProductsPushRequest req, CancellationToken ct = default)
     {
-        var r = await _bulkHttp.PostAsJsonAsync("/search-products", req, ct);
+        var r = await _bulkHttp.PostAsJsonAsync(HubRoutes.SearchProducts, req, ct);
         r.EnsureSuccessStatusCode();
     }
     public async Task<List<string>> SearchProductsAsync(CancellationToken ct = default)
-        => await _bulkHttp.GetFromJsonAsync<List<string>>("/search-products", ct) ?? [];
+        => await _bulkHttp.GetFromJsonAsync<List<string>>(HubRoutes.SearchProducts, ct) ?? [];
     public async Task<int> SearchProductCountAsync(CancellationToken ct = default)
-        => await _http.GetFromJsonAsync<int>("/search-products/count", ct);
+        => await _http.GetFromJsonAsync<int>(HubRoutes.SearchProductsCount, ct);
     public async Task ClearSearchProductsAsync(CancellationToken ct = default)
     {
-        var r = await _http.PostAsync("/search-products/clear", null, ct);
+        var r = await _http.PostAsync(HubRoutes.SearchProductsClear, null, ct);
         r.EnsureSuccessStatusCode();
     }
 
     // ── Log tập trung (tab Log gom log nhiều máy) ──
-    public Task AppendLogAsync(AppendLogRequest req, CancellationToken ct = default) => PostAsync("/logs", req, ct);
+    public Task AppendLogAsync(AppendLogRequest req, CancellationToken ct = default) => PostAsync(HubRoutes.Logs, req, ct);
     public async Task<List<LogEntry>> LogsAsync(long after, int max, CancellationToken ct = default)
-        => await _http.GetFromJsonAsync<List<LogEntry>>($"/logs?after={after}&max={max}", ct) ?? [];
+        => await _http.GetFromJsonAsync<List<LogEntry>>($"{HubRoutes.Logs}?after={after}&max={max}", ct) ?? [];
     public async Task ClearLogsAsync(CancellationToken ct = default)
-    { var r = await _http.PostAsync("/logs/clear", null, ct); r.EnsureSuccessStatusCode(); }
+    { var r = await _http.PostAsync(HubRoutes.LogsClear, null, ct); r.EnsureSuccessStatusCode(); }
 
     // ── Client báo acc Shopee lỗi/captcha ──
-    public Task ReportErroredAccountAsync(AccountErrorRequest req, CancellationToken ct = default) => PostAsync("/accounts/errored", req, ct);
+    public Task ReportErroredAccountAsync(AccountErrorRequest req, CancellationToken ct = default) => PostAsync(HubRoutes.AccountsErrored, req, ct);
     public async Task<List<AccountError>> ErroredAccountsAsync(CancellationToken ct = default)
-        => await _http.GetFromJsonAsync<List<AccountError>>("/accounts/errored", ct) ?? [];
-    public Task ClearErroredAccountAsync(ClearAccountErrorRequest req, CancellationToken ct = default) => PostAsync("/accounts/errored/clear", req, ct);
+        => await _http.GetFromJsonAsync<List<AccountError>>(HubRoutes.AccountsErrored, ct) ?? [];
+    public Task ClearErroredAccountAsync(ClearAccountErrorRequest req, CancellationToken ct = default) => PostAsync(HubRoutes.AccountsErroredClear, req, ct);
 
     // ── File-sync ──
     public async Task<List<FileManifestEntry>> ManifestAsync(CancellationToken ct = default)
-        => await _http.GetFromJsonAsync<List<FileManifestEntry>>("/manifest", ct) ?? [];
+        => await _http.GetFromJsonAsync<List<FileManifestEntry>>(HubRoutes.Manifest, ct) ?? [];
 
     public async Task<byte[]?> DownloadAsync(string name, CancellationToken ct = default)
     {
         // _bulkHttp (5') CHỨ KHÔNG _http (8s): workbook Excel vài MB tải qua Cloudflare Tunnel thường > 8s →
         // trước đây TimeoutException bị nuốt ở PullAccountsAsync → WorkbookPath KHÔNG rebase (giữ đường máy Hub)
         // → client ở XA scrape lỗi, dù client cùng LAN (tải nhanh) vẫn chạy. 8s chỉ hợp control-plane JSON nhỏ.
-        var r = await _bulkHttp.GetAsync("/files/" + EncodePath(name), ct);
+        var r = await _bulkHttp.GetAsync(HubRoutes.Files + EncodePath(name), ct);
         if (r.StatusCode == HttpStatusCode.NotFound) return null;
         r.EnsureSuccessStatusCode();
         return await r.Content.ReadAsByteArrayAsync(ct);
@@ -140,7 +140,7 @@ public sealed class HubClient
 
     public async Task<FilePutResponse> UploadAsync(string name, byte[] data, int? ifMatch, CancellationToken ct = default)
     {
-        using var req = new HttpRequestMessage(HttpMethod.Put, "/files/" + EncodePath(name)) { Content = new ByteArrayContent(data) };
+        using var req = new HttpRequestMessage(HttpMethod.Put, HubRoutes.Files + EncodePath(name)) { Content = new ByteArrayContent(data) };
         if (ifMatch.HasValue) req.Headers.TryAddWithoutValidation("If-Match", ifMatch.Value.ToString());
         // _bulkHttp (5'): đẩy workbook vài MB qua tunnel cũng cần timeout dài (Hub đẩy lên localhost thì nhanh,
         // nhưng client đẩy Search/handoff qua tunnel thì 8s không đủ). Đối xứng với DownloadAsync.
