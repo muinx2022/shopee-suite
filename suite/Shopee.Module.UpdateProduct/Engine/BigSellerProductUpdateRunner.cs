@@ -97,7 +97,7 @@ internal sealed class WorkbookRecordCache
 /// Shopee item id, rồi điền tên/SKU/giá/tồn/brand/cân nặng/ảnh/video + mô tả AI và lưu.
 /// Selector giữ nguyên verbatim từ bản Python.
 /// </summary>
-internal sealed partial class BigSellerProductUpdateRunner : IAsyncDisposable
+internal sealed partial class BigSellerProductUpdateRunner : BigSellerBraveRunner
 {
     // ── CONFIG (từ main.py CONFIG) ──
     private const string StockValue = "30069";
@@ -125,13 +125,7 @@ internal sealed partial class BigSellerProductUpdateRunner : IAsyncDisposable
         "HASHTAG:\n- Đặt NGAY SAU đoạn mô tả cuối cùng.\n- Viết liền, không tiêu đề.\n- Đúng ngành giày nữ, có mã sản phẩm.\n- CHÍNH XÁC 18 hashtag.\n\n" +
         "NGUYÊN TẮC CUỐI:\n- Nếu cần điều chỉnh, chỉ thay đổi độ dài câu để nằm trong khoảng 2800–2900 ký tự.\n- Tuyệt đối không thêm hoặc bớt hashtag.";
 
-    private readonly BigSellerWorkflowSettings _settings;
-    private readonly Action<string> _log;
-    private readonly WorkflowPauseToken? _pauseToken;
-    private IPlaywright? _playwright;
-    private IBrowser? _browser;
     private IBrowserContext? _context;
-    private Process? _braveProcess;
 
     private IReadOnlyDictionary<string, WorkbookRecord> _records = new Dictionary<string, WorkbookRecord>();
 
@@ -150,22 +144,19 @@ internal sealed partial class BigSellerProductUpdateRunner : IAsyncDisposable
     private bool _emptyListingDiagLogged;
 
     private readonly ClaimStore? _claim;
-    private readonly bool _exportCookie;
     // Cache dữ liệu shop DÙNG CHUNG mọi lane (nạp 1 lần ở tầng điều phối). null = lane tự đọc workbook (đường 1-lane cũ).
     private readonly WorkbookRecordCache? _sharedRecords;
-    private readonly BigSellerTokenWriteBack _tokenWriteBack = new();
     // Dọn Material Center (thư viện ảnh) — tách sang class riêng; khởi tạo sau khi có browser context.
     private BigSellerMaterialCenterCleaner? _mediaCleaner;
+
+    protected override string StartUrl => ListingUrl;
 
     public BigSellerProductUpdateRunner(
         BigSellerWorkflowSettings settings, Action<string> log, WorkflowPauseToken? pauseToken = null,
         ClaimStore? claim = null, bool exportCookie = true, WorkbookRecordCache? sharedRecords = null)
+        : base(settings, log, pauseToken, exportCookie)
     {
-        _settings = settings;
-        _log = log;
-        _pauseToken = pauseToken;
         _claim = claim;
-        _exportCookie = exportCookie;
         _sharedRecords = sharedRecords;
     }
 
@@ -188,23 +179,16 @@ internal sealed partial class BigSellerProductUpdateRunner : IAsyncDisposable
 
         StartBrave();
         _log($"Đã gọi Brave PID={_braveProcess?.Id.ToString() ?? "?"}, chờ CDP port {_settings.DebugPort}...");
-        if (!await new CdpClient(_settings.DebugPort).WaitForReadyAsync(90, 500, ct).ConfigureAwait(false))
-            throw new InvalidOperationException($"CDP port {_settings.DebugPort} không sẵn sàng. Đóng Brave BigSeller cũ rồi chạy lại.");
+        await EnsureCdpReadyAsync(90,
+            $"CDP port {_settings.DebugPort} không sẵn sàng. Đóng Brave BigSeller cũ rồi chạy lại.", ct)
+            .ConfigureAwait(false);
 
         await EnsureCookieAsync(ct).ConfigureAwait(false);
 
-        _playwright = await Playwright.CreateAsync();
         _log($"Kết nối CDP port {_settings.DebugPort}...");
-        for (var attempt = 0; attempt < 8 && _browser is null; attempt++)
-        {
-            ct.ThrowIfCancellationRequested();
-            try { _browser = await _playwright.Chromium.ConnectOverCDPAsync($"http://127.0.0.1:{_settings.DebugPort}", new() { Timeout = 30000 }); }
-            catch { await DelayAsync(3000, ct); }
-        }
-        if (_browser is null)
-            throw new InvalidOperationException("Không kết nối được Brave qua CDP.");
+        await ConnectBrowserAsync(ct).ConfigureAwait(false);
 
-        _context = _browser.Contexts.FirstOrDefault()
+        _context = _browser!.Contexts.FirstOrDefault()
             ?? throw new InvalidOperationException("Brave chưa có browser context.");
         _mediaCleaner = new BigSellerMaterialCenterCleaner(_context, _claim, _log, DelayAsync, OverlayAsync);
 
@@ -222,43 +206,6 @@ internal sealed partial class BigSellerProductUpdateRunner : IAsyncDisposable
         _log(new string('=', 50));
 
         await OuterLoopAsync(page, ct).ConfigureAwait(false);
-    }
-
-    // ── cookie (mirror import runner) ──
-    private async Task EnsureCookieAsync(CancellationToken ct)
-    {
-        var hasLiveSession = false;
-        try
-        {
-            hasLiveSession = BigSellerCookieEngine.HasAuthCookie(
-                await BigSellerCookieEngine.GetBigSellerCookiesAsync(_settings.DebugPort).ConfigureAwait(false));
-        }
-        catch { }
-
-        if (hasLiveSession &&
-            await BigSellerCookieEngine.ProbeLoggedInAsync(_settings.DebugPort, ListingUrl, _log, ct).ConfigureAwait(false) == false)
-        {
-            hasLiveSession = false;
-            _log("Token BigSeller trong profile đã bị thu hồi — nạp lại cookie từ file account.");
-        }
-
-        if (hasLiveSession)
-        {
-            _log("Profile đã đăng nhập BigSeller — giữ phiên hiện tại.");
-            // Chỉ lane 0 ghi cookie ra file (tránh các lane phụ đá token nhau — rotation-war).
-            if (_exportCookie)
-                await BigSellerCookieEngine.TryExportProfileCookiesToFileAsync(
-                    _settings.DebugPort, _settings.BigSellerCookieFile, _log).ConfigureAwait(false);
-        }
-        else
-        {
-            _log("Đang import cookie BigSeller từ file...");
-            await BigSellerCookieEngine.ImportFromFileAsync(
-                _settings.DebugPort, _settings.BigSellerCookieFile ?? "", _log,
-                reloadBigSellerTabs: false, navigateUrl: ListingUrl, ct).ConfigureAwait(false);
-            if (await BigSellerCookieEngine.ProbeLoggedInAsync(_settings.DebugPort, ListingUrl, _log, ct).ConfigureAwait(false) == false)
-                _log("Cookie từ file cũng hết hạn — mở tab Account, login lại rồi Save & close.");
-        }
     }
 
     // ── workbook (đường 1-lane: tự đọc; đa-lane dùng WorkbookRecordCache chung ở tầng điều phối) ──
@@ -411,16 +358,6 @@ internal sealed partial class BigSellerProductUpdateRunner : IAsyncDisposable
             return false;
         }
     }
-
-    /// <summary>
-    /// Ghi NGƯỢC muc_token (server vừa xoay) từ browser ra file ĐỊNH KỲ trong lúc chạy — chỉ lane 0
-    /// (<see cref="_exportCookie"/>) để tránh rotation-war, throttle 90s. Đây là điều Scrape làm sau MỖI link
-    /// mà Update trước đây THIẾU (chỉ export lúc đầu + lúc đóng) → file thiu giữa chừng → lane khác / lần chạy
-    /// sau import token CŨ → BigSeller đá phiên ("log in first"). Dùng engine cookie DÙNG CHUNG ở Core.
-    /// </summary>
-    private Task MaybeWriteBackBigSellerTokenAsync(CancellationToken ct)
-        => _tokenWriteBack.MaybeWriteBackAsync(
-            _exportCookie, _settings.DebugPort, _settings.BigSellerCookieFile, _log, ct);
 
     // ── dọn media định kỳ → uỷ quyền BigSellerMaterialCenterCleaner (giữ wrapper mỏng để call-site không đổi) ──
     // Sau mỗi 10 SP LƯU thành công, cleaner xóa sạch Material Center; wipe khoá qua ClaimStore (1 lần/account).
@@ -1113,73 +1050,4 @@ internal sealed partial class BigSellerProductUpdateRunner : IAsyncDisposable
         return clipped.Trim();
     }
 
-    private void StartBrave()
-    {
-        Directory.CreateDirectory(_settings.ProfileDir);
-        var args = string.Join(" ", new[]
-        {
-            $"--remote-debugging-port={_settings.DebugPort}",
-            $"--user-data-dir=\"{_settings.ProfileDir}\"",
-            "--no-first-run", "--no-default-browser-check", "--no-session-restore",
-            "--restore-last-session=false", "--disable-session-crashed-bubble",
-            // KHÔNG '--start-maximized': muốn Brave mở THU NHỎ (startMinimized) — cờ maximize sẽ đè show-state.
-            "--window-size=1920,1080",
-            "--disable-gpu", "--disable-dev-shm-usage", "--disable-software-rasterizer",
-            Shopee.Core.Browser.BraveCachePolicy.DiskLimitArgString,
-            $"\"{ListingUrl}\"",
-        });
-        // Đăng ký profile vào "fleet" TRƯỚC khi phóng → trình dọn Brave mồ côi (BraveFleet) CHỪA cửa sổ
-        // update này. Thiếu bước này = Brave bị quét-giết như mồ côi giữa chừng (xem chú thích ở import).
-        BraveFleet.RegisterActiveProfile(_settings.ProfileDir);
-
-        _log("Mở Brave BigSeller profile (thu nhỏ)...");
-        // Phóng qua BraveJobObject (KILL_ON_JOB_CLOSE): app tắt/crash → OS tự giết Brave này. Vẫn cần
-        // reaper ở DisposeAsync vì Brave fork browser thật rồi stub thoát (job chỉ dọn khi app chết hẳn).
-        // startMinimized: mở cửa sổ ở trạng thái thu nhỏ, KHÔNG chiếm màn hình/không cướp focus của người dùng.
-        _braveProcess = BraveJobObject.Start(_settings.BravePath, args, startMinimized: true);
-    }
-
-    private Task WaitIfNotPausedAsync(CancellationToken ct) =>
-        _pauseToken?.WaitWhileRunningAsync(ct) ?? Task.CompletedTask;
-
-    private Task DelayAsync(int ms, CancellationToken ct) =>
-        _pauseToken?.DelayAsync(ms, ct) ?? Task.Delay(ms, ct);
-
-    public async ValueTask DisposeAsync()
-    {
-        // Lưu cookie CHỈ lane 0 (tránh lane phụ đá token) + TIMEOUT (Brave có thể treo → không để chặn việc kill).
-        if (_exportCookie && _braveProcess is { HasExited: false })
-        {
-            try
-            {
-                await Task.WhenAny(
-                    BigSellerCookieEngine.TryExportProfileCookiesToFileAsync(
-                        _settings.DebugPort, _settings.BigSellerCookieFile, _log, verifySessionAlive: true),
-                    Task.Delay(6000)).ConfigureAwait(false);
-            }
-            catch { }
-        }
-
-        // KILL Brave NGAY (đóng profile + giải phóng RAM) — KHÔNG phụ thuộc dispose browser/playwright (có thể treo).
-        if (_braveProcess is not null)
-        {
-            try { if (!_braveProcess.HasExited) _braveProcess.Kill(entireProcessTree: true); } catch { }
-            try { _braveProcess.Dispose(); } catch { }
-            _braveProcess = null;
-        }
-        // Fallback: Brave hay fork browser thật rồi để stub thoát ngay → _braveProcess.HasExited=true,
-        // Kill ở trên no-op, browser thật thành orphan (giữ profile lock + RAM). Diệt theo --user-data-dir.
-        try { BraveProcessReaper.KillByUserDataDir(_settings.ProfileDir, _log); } catch { }
-
-        // Gỡ đăng ký SAU khi đã giết → còn sót tiến trình nào thì lần sweep kế dọn nốt.
-        BraveFleet.UnregisterActiveProfile(_settings.ProfileDir);
-
-        if (_browser is not null)
-        {
-            try { await Task.WhenAny(_browser.DisposeAsync().AsTask(), Task.Delay(3000)).ConfigureAwait(false); } catch { }
-            _browser = null;
-        }
-        try { _playwright?.Dispose(); } catch { }
-        _playwright = null;
-    }
 }
