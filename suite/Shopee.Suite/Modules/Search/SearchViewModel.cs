@@ -355,9 +355,7 @@ public sealed partial class SearchViewModel : ObservableObject
         lock (_pushedItemIds) _pushedItemIds.Clear();
 
         var accHub = CoordinationRuntime.Hub;
-        List<string> reserved = [];
-        var reservedLock = new object();   // BÙ TK có thể thêm vào reserved từ luồng lane → khóa khi đọc/ghi
-        System.Threading.Timer? accHeartbeat = null;
+        AccountLeaseScope? accScope = null;   // khóa tk Shopee xuyên máy: reserve→heartbeat→bù→nhả (gói)
         System.Threading.Timer? pushTimer = null;
         var startedRun = false;
         var failedRun = false;
@@ -371,39 +369,14 @@ public sealed partial class SearchViewModel : ObservableObject
             var working = _pool.Select(a => a.Id).ToList();
             if (accHub is not null)
             {
-                // Giành ĐÚNG số acc cần (N) — KHÔNG giành cả pool rồi trả. Với TỪNG acc (mirror Scrape.ClaimFrame
-                // để lease cục bộ + Hub KHỚP nhau, chống 2 module cùng máy xóa nhầm 1 dòng lease machine-scoped):
-                //  1) né acc module khác cùng máy đang giữ (IsReserved / IsHubLeased);
-                //  2) TryReserve cục bộ (chốt atomic tạm) rồi ReserveAccounts trên Hub;
-                //  3) grant → MarkHubLeased TRƯỚC khi nhả chốt tạm (luôn có ≥1 dấu suốt → Scrape không cướp),
-                //     rồi nhả reserve cục bộ để lane Search TryReserve lại kiểu per-borrow như cũ.
-                var want = Math.Max(1, p.AccountsPerClient);
-                var acquired = new List<string>();
-                foreach (var id in working)
-                {
-                    if (acquired.Count >= want) break;
-                    if (ShopeeAccountUsage.Shared.IsHubLeased(id) || ShopeeAccountUsage.Shared.IsReserved(id)) continue;
-                    if (!ShopeeAccountUsage.Shared.TryReserve(id)) continue;
-                    HashSet<string> g;
-                    try { g = await accHub.ReserveAccountsAsync(new[] { id }); }
-                    catch { g = new HashSet<string>(StringComparer.Ordinal) { id }; }   // Hub lỗi → degrade như 1 máy
-                    if (g.Contains(id))
-                    {
-                        ShopeeAccountUsage.Shared.MarkHubLeased(new[] { id });   // dấu per-máy TRƯỚC khi nhả chốt tạm
-                        acquired.Add(id);
-                    }
-                    ShopeeAccountUsage.Shared.ReleaseReservation(id);   // nhả chốt tạm → lane per-borrow TryReserve lại
-                }
-                reserved = acquired;   // finally nhả ĐÚNG những gì đã giành → không rò acc
-                working = acquired;
+                // Giành ĐÚNG số acc cần (N) — KHÔNG giành cả pool rồi trả. Cơ chế per-account (khớp lease cục bộ +
+                // Hub từng cái, chống 2 module cùng máy xóa nhầm 1 dòng lease machine-scoped) gói trong
+                // AccountLeaseScope; heartbeat nền 60s + bù tk cũng do scope lo. (Trước là bản mirror Scrape.)
+                List<string> acquired;
+                (accScope, acquired) = await AccountLeaseScope.AcquirePerAccountAsync(accHub, working, Math.Max(1, p.AccountsPerClient));
+                working = acquired;   // finally (Dispose scope) nhả ĐÚNG những gì đã giành → không rò acc
                 if (working.Count == 0)
                 { Log("⚠ Việc Search Hub giao: mọi tài khoản Shopee đang được máy khác giữ — bỏ qua."); return; }
-                // Snapshot dưới khóa vì tk BÙ có thể được thêm vào reserved trong lúc chạy.
-                accHeartbeat = new System.Threading.Timer(_ =>
-                {
-                    List<string> snap; lock (reservedLock) snap = reserved.ToList();
-                    if (snap.Count > 0) { try { _ = accHub.HeartbeatAccountsAsync(snap); } catch { } }
-                }, null, TimeSpan.FromSeconds(60), TimeSpan.FromSeconds(60));
             }
 
             var specs = _pool.Where(a => working.Contains(a.Id)).Select(ToSpec).ToList();
@@ -417,17 +390,14 @@ public sealed partial class SearchViewModel : ObservableObject
             if (CoordinationRuntime.Client is not null)
                 pushTimer = new System.Threading.Timer(_ => _ = PushNewCollectedAsync(_runner, source), null,
                     TimeSpan.FromSeconds(20), TimeSpan.FromSeconds(20));
-            // BÙ TK THAY THẾ: khi 1 tk trong nhóm dính captcha, xin 1 tk RẢNH từ kho (đã khóa lease xuyên máy),
-            // ghi vào reserved (heartbeat + nhả ở finally) rồi NHẢ giữ-chỗ cục bộ để lane borrow như tk ban đầu.
+            // BÙ TK THAY THẾ: khi 1 tk trong nhóm dính captcha, scope xin 1 tk RẢNH từ kho (đã khóa lease xuyên
+            // máy), ghi vào sổ lease (heartbeat + nhả ở finally) rồi NHẢ giữ-chỗ cục bộ để lane borrow như tk ban đầu.
             Func<IReadOnlyCollection<string>, CancellationToken, Task<SearchAccountSpec?>>? acquireReplacement = null;
-            if (accHub is not null)
+            if (accScope is not null)
                 acquireReplacement = async (excludeIds, rct) =>
                 {
-                    var repl = await Shopee.Core.Accounts.AccountReplenisher.TryAcquireSpareAsync(excludeIds, accHub, rct).ConfigureAwait(false);
-                    if (repl is null) return null;
-                    lock (reservedLock) reserved.Add(repl.Id);   // lease Hub → heartbeat + nhả ở finally
-                    ShopeeAccountUsage.Shared.ReleaseReservation(repl.Id);   // nhả giữ-chỗ cục bộ → lane borrow bình thường (như tk nhóm ban đầu)
-                    return ToSpec(repl);
+                    var repl = await accScope.AcquireReplacementAsync(excludeIds, rct).ConfigureAwait(false);
+                    return repl is null ? null : ToSpec(repl);
                 };
             await RunCoreAsync(items, specs, lanes, region, resume: true, _cts.Token, acquireReplacement);
             Log(_cts.IsCancellationRequested ? "── Đã dừng việc Search (giữ phiên). ──" : "── Hoàn tất việc Search Hub giao. ──");
@@ -437,11 +407,8 @@ public sealed partial class SearchViewModel : ObservableObject
         finally
         {
             if (pushTimer is not null) { try { await pushTimer.DisposeAsync(); } catch { } }
-            if (accHeartbeat is not null) { try { await accHeartbeat.DisposeAsync(); } catch { } }
-            // Snapshot dưới khóa (nhóm ban đầu + tk BÙ) → nhả ĐÚNG toàn bộ lease đã giữ, không rò.
-            List<string> toRelease; lock (reservedLock) toRelease = reserved.ToList();
-            ShopeeAccountUsage.Shared.UnmarkHubLeased(toRelease);   // gỡ dấu per-máy TRƯỚC/CÙNG khi nhả lease Hub
-            if (accHub is not null && toRelease.Count > 0) { try { await accHub.ReleaseAccountsAsync(toRelease); } catch { } }
+            // Nhả account-lease (heartbeat → UnmarkHubLeased → ReleaseAccountsAsync Hub), snapshot-under-lock chống rò.
+            if (accScope is not null) { try { await accScope.DisposeAsync().ConfigureAwait(false); } catch { } }
             // Đẩy nốt phần sản phẩm còn lại lên Hub (kể cả khi dừng dở — gửi phần đã cào).
             if (startedRun) await PushNewCollectedAsync(_runner, source);
             // Kết quả terminal cho AssignmentWorker báo Hub đúng: chưa chạy được / lỗi = failed; bị dừng = stopped;

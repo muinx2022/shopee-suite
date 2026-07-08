@@ -395,12 +395,9 @@ public sealed partial class ScrapeViewModel : ObservableObject
         var ct = h.Cts.Token;
 
         ScrapeRunner? runner = null;
-        var claimedFrameIds = new List<string>();   // CẢ khung đã giữ chỗ cục bộ → nhả TOÀN BỘ ở finally
-        var hubReservedIds = new List<string>();    // tk được Hub cấp lease (khung ban đầu + tk bù) → nhả/heartbeat trên Hub
-        var reservedLock = new object();            // 2 list trên bị pool BÙ TK thêm vào từ luồng khác → khóa khi đọc/ghi
         var coordKey = new CoordKey(account.Id, shop.Id, sheet, CoordOp.Scrape);
         ILeaseHandle? lease = null;
-        Timer? accHeartbeat = null;                 // nhịp account-lease nền (chống hết hạn giữa chunk dài)
+        AccountLeaseScope? accScope = null;         // khóa tk Shopee xuyên máy: reserve→heartbeat→bù→nhả (gói)
         var accHub = CoordinationRuntime.Hub;       // null nếu chưa kết nối Hub (chạy như 1 máy)
         try
         {
@@ -444,30 +441,23 @@ public sealed partial class ScrapeViewModel : ObservableObject
             var frameSize = Math.Max(1, target.FrameSize);
             IReadOnlyList<string>? preferIds = resume ? ScrapeProgressStore.Shared.GetFrame(account.Id, sheet) : null;
             var frame = s.ClaimFrame(frameSize, preferIds);
-            claimedFrameIds = frame.Select(a => a.Id).ToList();   // ghi nhận để nhả giữ-chỗ ở finally (kể cả khi job dừng giữa chừng)
+            var frameIds = frame.Select(a => a.Id).ToList();
+            // Gói account-lease: GIỮ giữ-chỗ cục bộ CẢ khung (ClaimFrame đã TryReserve) tới lúc Dispose nhả — kể cả
+            // khi job dừng giữa chừng / Hub loại bớt tk (KHÔNG thu hẹp khung để tránh rò tk khỏi kho chung). Tạo
+            // NGAY (kể cả offline) để mọi lối ra đều nhả giữ-chỗ cục bộ; reserve Hub + heartbeat + bù do scope lo.
+            accScope = AccountLeaseScope.ForFrame(accHub, frameIds);
             if (frame.Count == 0) { Log($"[{account.DisplayName}] kho tk Shopee đã cạn (mọi tk đang thuộc khung khác / Search đang giữ / bị tắt) — bỏ qua."); return; }
 
             // ACCOUNT-LEASE XUYÊN MÁY: tk nào đang được MÁY KHÁC dùng → loại khỏi khung (chống dùng trùng).
             if (accHub is not null)
             {
-                var granted = await accHub.ReserveAccountsAsync(claimedFrameIds).ConfigureAwait(false);
-                lock (reservedLock) hubReservedIds.AddRange(claimedFrameIds.Where(granted.Contains));   // tập con Hub cấp → nhả/heartbeat trên Hub
-                ShopeeAccountUsage.Shared.MarkHubLeased(granted);   // dấu per-máy → module khác (Search) không cướp lease các tk này
-                if (granted.Count < claimedFrameIds.Count)
+                var granted = await accScope.ReserveHubAsync(frameIds).ConfigureAwait(false);
+                if (granted.Count < frameIds.Count)
                 {
                     frame = frame.Where(a => granted.Contains(a.Id)).ToList();
-                    Log($"[{account.DisplayName}] {claimedFrameIds.Count - granted.Count} tk Shopee đang được máy khác dùng → loại, còn {frame.Count}.");
-                    // KHÔNG thu hẹp claimedFrameIds: finally vẫn nhả-cục-bộ CẢ khung (tránh rò rỉ tk khỏi kho chung).
+                    Log($"[{account.DisplayName}] {frameIds.Count - granted.Count} tk Shopee đang được máy khác dùng → loại, còn {frame.Count}.");
                 }
                 if (frame.Count == 0) { Log($"[{account.DisplayName}] mọi tk trong khung đang được máy khác dùng — bỏ qua."); return; }
-
-                // Heartbeat account-lease theo TIMER nền (không lệ thuộc tốc độ scrape) → khỏi hết hạn 5' giữa chunk
-                // dài. Snapshot dưới khóa vì tk BÙ có thể được thêm vào hubReservedIds trong lúc chạy.
-                accHeartbeat = new Timer(_ =>
-                {
-                    List<string> snap; lock (reservedLock) snap = hubReservedIds.ToList();
-                    if (snap.Count > 0) { try { _ = accHub.HeartbeatAccountsAsync(snap); } catch { } }
-                }, null, TimeSpan.FromSeconds(60), TimeSpan.FromSeconds(60));
             }
             ScrapeProgressStore.Shared.SaveFrame(account.Id, sheet, frame.Select(a => a.Id));   // lưu khung để resume giữ nguyên
             var procs = Math.Max(1, Math.Min(maxProc, frame.Count));
@@ -502,21 +492,9 @@ public sealed partial class ScrapeViewModel : ObservableObject
             WireRunner(runner, seq, account.DisplayName);
 
             // BÙ TK THAY THẾ: khi captcha loại tk khỏi khung, pool xin 1 tk RẢNH từ kho chung (đã khóa lease
-            // xuyên máy) để giữ đủ cỡ khung → job KHÔNG cạn khung phải chạy lại. Ghi nhận để NHẢ đúng ở finally
-            // (giữ-chỗ cục bộ + lease Hub + heartbeat như tk khung ban đầu). Hết tk dư → pool giữ hành vi cũ.
-            async Task<ShopeeAccount?> AcquireReplacementAsync(IReadOnlyCollection<string> excludeIds, CancellationToken rct)
-            {
-                var repl = await Shopee.Core.Accounts.AccountReplenisher.TryAcquireSpareAsync(excludeIds, accHub, rct).ConfigureAwait(false);
-                if (repl is null) return null;
-                lock (reservedLock)
-                {
-                    claimedFrameIds.Add(repl.Id);                          // nhả giữ-chỗ cục bộ ở finally
-                    if (accHub is not null) hubReservedIds.Add(repl.Id);   // heartbeat + nhả lease Hub ở finally
-                }
-                return repl;
-            }
-
-            var pool = new SessionAccountPool(sheet, frame, AcquireReplacementAsync, msg => Log($"[{account.DisplayName}] {msg}"));
+            // xuyên máy) để giữ đủ cỡ khung → job KHÔNG cạn khung phải chạy lại. Scope ghi nhận để NHẢ đúng ở
+            // finally (giữ-chỗ cục bộ + lease Hub + heartbeat như tk khung ban đầu). Hết tk dư → pool giữ hành vi cũ.
+            var pool = new SessionAccountPool(sheet, frame, accScope.AcquireReplacementAsync, msg => Log($"[{account.DisplayName}] {msg}"));
             await runner.RunAutoAsync(pool, procs, segments, rowsPer, account.CookieFile, ct).ConfigureAwait(false);
 
             // Kết thúc: xong hết [startRow..total] → completed; còn dở → stopped (resume chạy nốt theo dòng).
@@ -541,16 +519,11 @@ public sealed partial class ScrapeViewModel : ObservableObject
                 Coordination.Hub.PublishCompletion(coordKey, fin?.Status ?? "stopped", fin?.LastRowReached ?? 0);
             }
             catch { }
-            if (accHeartbeat is not null) { try { await accHeartbeat.DisposeAsync().ConfigureAwait(false); } catch { } }
-            // Snapshot dưới khóa (khung ban đầu + tk BÙ) → nhả ĐÚNG toàn bộ tk đã giữ, không rò.
-            List<string> hubToRelease, localToRelease;
-            lock (reservedLock) { hubToRelease = hubReservedIds.ToList(); localToRelease = claimedFrameIds.ToList(); }
-            ShopeeAccountUsage.Shared.UnmarkHubLeased(hubToRelease);   // gỡ dấu per-máy TRƯỚC/CÙNG khi nhả lease Hub
-            if (accHub is not null) { try { await accHub.ReleaseAccountsAsync(hubToRelease).ConfigureAwait(false); } catch { } }
+            // Nhả account-lease (heartbeat → UnmarkHubLeased → ReleaseAccountsAsync Hub → ReleaseReservation CẢ
+            // khung + tk bù, snapshot-under-lock chống rò) TRƯỚC, rồi nhả khoá VIỆC shop. Trước đây khoá việc nhả
+            // xen giữa nhả-lease-Hub và nhả-giữ-chỗ-cục-bộ; 3 tài nguyên độc lập nên thứ tự này tương đương.
+            if (accScope is not null) { try { await accScope.DisposeAsync().ConfigureAwait(false); } catch { } }
             if (lease is not null) { try { await lease.DisposeAsync().ConfigureAwait(false); } catch { } }
-
-            // Nhả giữ-chỗ CẢ KHUNG (+ tk bù) → Search (và job Scrape khác) lại mượn được các tk này.
-            ShopeeAccountUsage.Shared.ReleaseReservation(localToRelease);
             s.Jobs.Remove(account.Id);
             // Dọn các dòng process của job này khỏi lưới (trước đây dòng cũ không bao giờ bị xoá).
             var prefix = seq + ":";
