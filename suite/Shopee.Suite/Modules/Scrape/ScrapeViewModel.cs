@@ -9,7 +9,6 @@ using Shopee.Core.BigSeller;
 using Shopee.Core.Browser;
 using Shopee.Core.Coordination;
 using Shopee.Core.Infrastructure;
-using Shopee.Core.Proxy;
 using Shopee.Core.Scrape;
 using Shopee.Modules.MultiBrave;
 using Shopee.Suite.Infrastructure;
@@ -269,7 +268,7 @@ public sealed partial class ScrapeViewModel : ModuleViewModelBase
                         _borrowed.Add(pick.Id);
                         _cooldown.Remove(pick.Id);
                         ShopeeAccountUsage.Shared.MarkInUse(pick.Id);
-                        return ToSpec(pick, _sheet);
+                        return ShopeeAccountSpecFactory.ToScrapeSpec(pick, _sheet);
                     }
                     usable = _frame.Count(a => !a.Disabled && !_dropped.Contains(a.Id));
                     borrowedCount = _borrowed.Count;
@@ -673,32 +672,6 @@ public sealed partial class ScrapeViewModel : ModuleViewModelBase
         sel.RefreshProgress();   // có thể đã nhả tay / xoá tiến độ → cập nhật nhãn.
     }
 
-    /// <summary>Proxy lấy XOAY VÒNG từ kho KiotProxy dùng chung (ghi đè proxy gắn sẵn của acc); kho rỗng →
-    /// giữ proxy của acc (fallback).</summary>
-    private static ScrapeAccountSpec ToSpec(ShopeeAccount a, string sheet)
-    {
-        var pooled = KiotProxyPoolStore.Shared.ProxyForAccount(a.Id);
-        var kiot = pooled?.KiotKey ?? a.KiotProxyKey;
-        var manual = pooled?.Manual ?? a.ManualProxy;
-        return new(a.Id, a.DisplayName, a.ShopeeAccountLogin, a.OpenWithShopeeAccount,
-            kiot, a.Region, a.ProxyType, manual, a.RequireProxy, sheet, 0, 0,
-            ResolveShopeeProfileDir(a));
-    }
-
-    /// <summary>Thư mục profile (Edge) đã đăng nhập Shopee của tk — engine import session từ đây sang
-    /// Brave để khỏi login form. ProfileRelativePath có thể tuyệt đối (do tab Kiểm tra tài khoản lưu)
-    /// hoặc tương đối "profiles/{Id}".</summary>
-    private static string ResolveShopeeProfileDir(ShopeeAccount a)
-    {
-        var rel = a.ProfileRelativePath;
-        // TRỐNG hoặc TUYỆT ĐỐI → LUÔN dùng gốc profile CỤC BỘ theo Id. KHÔNG tin path tuyệt đối lưu sẵn: nó có
-        // thể là path của MÁY KHÁC (acc đến từ Hub lưu "C:\Users\<user máy Hub>\…") → client tạo profile dưới
-        // C:\Users\<máy khác>\ → "Access denied". Chỉ path TƯƠNG ĐỐI mới ghép với gốc cục bộ (giống mọi máy).
-        if (string.IsNullOrWhiteSpace(rel) || Path.IsPathRooted(rel))
-            return Path.Combine(SuitePaths.ModuleDir("shared"), "profiles", a.Id);
-        return Path.Combine(SuitePaths.ModuleDir("shared"), rel.Replace('/', Path.DirectorySeparatorChar));
-    }
-
     private void WireRunner(ScrapeRunner runner, int seq, string bigSellerName)
     {
         string K(string key) => $"{seq}:{key}";   // namespace key theo job để nhiều BigSeller chạy đồng thời không đụng lưới
@@ -719,37 +692,16 @@ public sealed partial class ScrapeViewModel : ModuleViewModelBase
         });
         runner.AccountErrored += (id, label, reason, captchaUrl) => OnUi(() =>
         {
-            var now = DateTime.Now.ToString("HH:mm:ss");
-            var row = ErroredAccounts.FirstOrDefault(x => x.Id == id);
-            if (row is null) ErroredAccounts.Insert(0, new ErroredAccountRow(id, label, reason, now));
-            else { row.Reason = reason; row.Time = now; }
+            AccountErrorReporter.Report(ErroredAccounts, id, label, reason, "Scrape", captchaUrl);
             LogLines.Add($"⚠ Tk lỗi: {label} — {reason}");
             // Cột "Tình trạng" → "⚠ Captcha" cho tk vừa dính captcha/lỗi trong lượt chạy này.
             ShopeeAccountUsage.Shared.MarkCaptcha(id);
-            FlagAccountErrored(id, $"Dính captcha/lỗi (Scrape) — {DateTime.Now:dd/MM HH:mm}: {reason}", captchaUrl);
         });
         runner.BigSellerNeedLogin += reason => OnUi(() =>
         {
             // Tk BigSeller mất phiên ("log in first") → job tk này đã bị dừng. Báo rõ để user đăng nhập lại.
             LogLines.Add($"⛔ [{bigSellerName}] BigSeller mất đăng nhập: {reason} — đã DỪNG job tk này. Hãy ĐĂNG NHẬP LẠI BigSeller rồi chạy lại.");
         });
-    }
-
-    // Đánh dấu BỀN account dính captcha/lỗi: Disabled (tự bỏ qua lượt sau) + LastError → gom ở mục
-    // "Tài khoản & Proxy" (bộ lọc "Bị lỗi / captcha") để xử lý sau rồi "Bật lại".
-    private static void FlagAccountErrored(string id, string reason, string? captchaUrl = null)
-    {
-        var acc = AccountStore.Shared.Accounts.FirstOrDefault(a => a.Id == id);
-        if (acc is null) return;
-        var alreadyFlagged = acc.Disabled;
-        acc.Disabled = true;
-        acc.LastError = reason;
-        // Lưu URL captcha để "Kiểm tra tk lỗi" mở đúng trang đó (thay vì auto-login).
-        if (!string.IsNullOrWhiteSpace(captchaUrl)) acc.CaptchaUrl = captchaUrl;
-        if (!alreadyFlagged || !string.IsNullOrWhiteSpace(captchaUrl)) AccountStore.Shared.Save();
-        // CLIENT: báo Hub acc này dính captcha (Hub xem ở panel + operator quyết giữ/xóa). Hub/standalone: là bản chính, khỏi báo.
-        if (CoordinationRuntime.Active && !HubServerConfigStore.Shared.Current.Enabled)
-            _ = CoordinationRuntime.Hub?.ReportErroredAccountAsync(id, reason, captchaUrl, "captcha");
     }
 
     /// <summary>Tiền-kiểm điều kiện scrape 1 đích (kho tk Shopee, Brave, cấu hình) — KHÔNG mở dialog.

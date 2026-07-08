@@ -7,7 +7,6 @@ using Shopee.Core.Accounts;
 using Shopee.Core.Ai;
 using Shopee.Core.Coordination;
 using Shopee.Core.Infrastructure;
-using Shopee.Core.Proxy;
 using Shopee.Modules.Search;
 using Shopee.Suite.Infrastructure;
 using Shopee.Suite.Services;
@@ -244,7 +243,7 @@ public sealed partial class SearchViewModel : ModuleViewModelBase
         _usedAccounts.Clear();
         try
         {
-            var specs = _pool.Select(ToSpec).ToList();
+            var specs = _pool.Select(ShopeeAccountSpecFactory.ToSearchSpec).ToList();
             Log($"{(resume ? "⏯ Tiếp tục" : "▶ Search")} {items.Count} link · {specs.Count} account · {lanes} lane · khu vực \"{Region}\". Xuất: {OutputDir}\\categories");
             await RunCoreAsync(items, specs, lanes, Region, resume, _cts.Token);
             Status = _cts.IsCancellationRequested ? "Đã dừng (giữ phiên)." : "Hoàn tất.";
@@ -277,24 +276,6 @@ public sealed partial class SearchViewModel : ModuleViewModelBase
         RefreshCategories();
         RefreshLinkProgress();
     }
-
-    /// <summary>Dựng spec cho engine; proxy lấy XOAY VÒNG từ kho KiotProxy dùng chung (ghi đè proxy gắn sẵn
-    /// của acc). Kho rỗng → giữ proxy của acc (fallback tương thích).</summary>
-    private static SearchAccountSpec ToSpec(ShopeeAccount a)
-    {
-        var pooled = KiotProxyPoolStore.Shared.ProxyForAccount(a.Id);
-        var kiot = pooled?.KiotKey ?? a.KiotProxyKey;
-        var manual = pooled?.Manual ?? a.ManualProxy;
-        return new(a.Id, a.DisplayName, a.ShopeeAccountLogin, a.OpenWithShopeeAccount,
-            kiot, a.ProxyType, manual, LocalProfileDir(a), a.RequireProxy);
-    }
-
-    /// <summary>Thư mục profile trình duyệt RIÊNG-MÁY của tk: LUÔN dưới gốc profile CỤC BỘ theo Id. KHÔNG dùng
-    /// <see cref="ShopeeAccount.ProfileRelativePath"/> thô — nó có thể là đường dẫn TUYỆT ĐỐI của MÁY KHÁC (acc
-    /// đến từ Hub lưu path "C:\Users\&lt;user máy Hub&gt;\…") khiến client cố tạo profile dưới C:\Users\&lt;máy
-    /// khác&gt;\ → "Access denied". Profile là riêng từng máy nên KHÔNG truyền xuyên máy.</summary>
-    private static string LocalProfileDir(ShopeeAccount a) =>
-        Path.Combine(SuitePaths.ModuleDir("shared"), "profiles", a.Id);
 
     /// <summary>Sau 1 lượt chạy: nhả cờ OpenWithShopeeAccount của các tk đã đăng nhập (lần sau khỏi login lại).</summary>
     private void ResetUsedAccounts()
@@ -377,7 +358,7 @@ public sealed partial class SearchViewModel : ModuleViewModelBase
                 { Log("⚠ Việc Search Hub giao: mọi tài khoản Shopee đang được máy khác giữ — bỏ qua."); return; }
             }
 
-            var specs = _pool.Where(a => working.Contains(a.Id)).Select(ToSpec).ToList();
+            var specs = _pool.Where(a => working.Contains(a.Id)).Select(ShopeeAccountSpecFactory.ToSearchSpec).ToList();
             // Số lane do CHÍNH client quyết theo LaneCount cấu hình của MÁY NÀY (giống Scrape chạy tùy máy) —
             // KHÔNG theo p.Lanes của Hub. Vẫn kẹp theo số acc giành được và số link của khối (không thể nhiều
             // lane hơn acc/link).
@@ -395,7 +376,7 @@ public sealed partial class SearchViewModel : ModuleViewModelBase
                 acquireReplacement = async (excludeIds, rct) =>
                 {
                     var repl = await accScope.AcquireReplacementAsync(excludeIds, rct).ConfigureAwait(false);
-                    return repl is null ? null : ToSpec(repl);
+                    return repl is null ? null : ShopeeAccountSpecFactory.ToSearchSpec(repl);
                 };
             await RunCoreAsync(items, specs, lanes, region, resume: true, _cts.Token, acquireReplacement);
             Log(_cts.IsCancellationRequested ? "── Đã dừng việc Search (giữ phiên). ──" : "── Hoàn tất việc Search Hub giao. ──");
@@ -491,28 +472,9 @@ public sealed partial class SearchViewModel : ModuleViewModelBase
         _runner.AccountErrored += (id, reason, captchaUrl) => OnUi(() =>
         {
             var label = _pool.FirstOrDefault(a => a.Id == id)?.DisplayName ?? id;
-            var now = DateTime.Now.ToString("HH:mm:ss");
-            var row = ErroredAccounts.FirstOrDefault(x => x.Id == id);
-            if (row is null) ErroredAccounts.Insert(0, new ErroredAccountRow(id, label, reason, now));
-            else { row.Reason = reason; row.Time = now; }
+            AccountErrorReporter.Report(ErroredAccounts, id, label, reason, "Search", captchaUrl);
             LogLines.Add($"⚠ Tk lỗi: {label} — {reason} (engine tự đổi account khác)");
-            FlagAccountErrored(id, $"Dính captcha/lỗi (Search) — {DateTime.Now:dd/MM HH:mm}: {reason}", captchaUrl);
         });
-    }
-
-    private static void FlagAccountErrored(string id, string reason, string? captchaUrl = null)
-    {
-        var acc = AccountStore.Shared.Accounts.FirstOrDefault(a => a.Id == id);
-        if (acc is null) return;
-        var alreadyFlagged = acc.Disabled;
-        acc.Disabled = true;
-        acc.LastError = reason;
-        // Lưu LINK đang cào lúc dính captcha (KHÔNG lưu trang /verify) → "Kiểm tra tk lỗi" mở lại đúng link.
-        if (!string.IsNullOrWhiteSpace(captchaUrl)) acc.CaptchaUrl = captchaUrl;
-        if (!alreadyFlagged || !string.IsNullOrWhiteSpace(captchaUrl)) AccountStore.Shared.Save();
-        // CLIENT: báo Hub acc này dính captcha (Hub xem ở panel + operator quyết giữ/xóa). Hub/standalone: khỏi báo.
-        if (CoordinationRuntime.Active && !HubServerConfigStore.Shared.Current.Enabled)
-            _ = CoordinationRuntime.Hub?.ReportErroredAccountAsync(id, reason, acc.CaptchaUrl, "captcha");
     }
 
     // ── Xuất Excel ──────────────────────────────────────────────────────────────
