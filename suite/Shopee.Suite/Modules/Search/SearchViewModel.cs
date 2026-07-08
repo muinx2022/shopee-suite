@@ -21,7 +21,7 @@ namespace Shopee.Suite.Modules.Search;
 /// tick chọn link → chạy MỖI LINK 1 tab/lane/account: mở category → lặp mọi sub-category → lọc Nơi Bán
 /// khớp khu vực + Bán chạy → cào sp. Bộ lọc (giá / đã bán / danh mục) áp lúc hiển thị + xuất Excel.
 /// </summary>
-public sealed partial class SearchViewModel : ObservableObject
+public sealed partial class SearchViewModel : ModuleViewModelBase
 {
     private readonly List<ShopeeAccount> _pool = [];
     private readonly HashSet<string> _usedAccounts = new(StringComparer.Ordinal);
@@ -34,7 +34,6 @@ public sealed partial class SearchViewModel : ObservableObject
 
     public ObservableCollection<ErroredAccountRow> ErroredAccounts { get; } = [];
     public ObservableCollection<string> Categories { get; } = ["(Tất cả)"];
-    public LogBuffer LogLines { get; } = new("search.log");
 
     // Tab "Danh mục (AI)"
     public ObservableCollection<SearchTaskStore.CategoryRow> CategoryRows { get; } = [];
@@ -51,7 +50,6 @@ public sealed partial class SearchViewModel : ObservableObject
 
     [ObservableProperty] private int _laneCount = 3;
     [ObservableProperty] private string _outputDir = Path.Combine(SuitePaths.ModuleDir("search"), "output");
-    [ObservableProperty] private string _status = "Sẵn sàng.";
 
     // Bộ lọc hiển thị + export
     [ObservableProperty] private long _minPrice;
@@ -94,7 +92,7 @@ public sealed partial class SearchViewModel : ObservableObject
     private SearchRunner? _db;
     private SearchRunner Db => _db ??= new SearchRunner();
 
-    public SearchViewModel()
+    public SearchViewModel() : base("search.log", "Shopee Search")
     {
         LoadUiSettings();
         Reload();
@@ -680,13 +678,4 @@ public sealed partial class SearchViewModel : ObservableObject
             if (!Categories.Contains(c)) Categories.Add(c);
     }
 
-    private void Log(string text) => OnUi(() => LogLines.Add(text));
-
-    private void Warn(string msg)
-    {
-        Status = msg;
-        Dialogs.Notify(msg, "Shopee Search");
-    }
-
-    private static void OnUi(Action a) => UiThread.Post(a);
 }

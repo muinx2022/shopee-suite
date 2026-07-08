@@ -17,7 +17,7 @@ namespace Shopee.Suite.Modules.CheckAccount;
 /// xoay proxy, giữ profile khi thành công. Tài khoản OK được lưu thẳng vào KHO CHUNG
 /// (Tài khoản & Proxy) — không còn copy sang 2 app v31/shopee-stat như trước.
 /// </summary>
-public sealed partial class CheckAccountViewModel : ObservableObject
+public sealed partial class CheckAccountViewModel : ModuleViewModelBase
 {
     private static readonly string DataDir = SuitePaths.ModuleDir("check-account");
     private static readonly string OkFilePath = Path.Combine(DataDir, "tk-ok.txt");
@@ -33,7 +33,6 @@ public sealed partial class CheckAccountViewModel : ObservableObject
     private ProxyPool? _pool;
     private CancellationTokenSource? _cts;
 
-    public LogBuffer LogLines { get; } = new("check-account.log");
     public ObservableCollection<OkAccountRow> OkAccounts { get; } = [];
 
     [ObservableProperty] private string _accounts = "";
@@ -41,7 +40,6 @@ public sealed partial class CheckAccountViewModel : ObservableObject
 
     [ObservableProperty] private int _lanes = 2;
 
-    [ObservableProperty] private string _status = "Sẵn sàng.";
     [ObservableProperty] private string _okStatus = "";
 
     [ObservableProperty]
@@ -53,7 +51,7 @@ public sealed partial class CheckAccountViewModel : ObservableObject
 
     [ObservableProperty] private bool _selectAll;
 
-    public CheckAccountViewModel() => LoadSettings();
+    public CheckAccountViewModel() : base("check-account.log", "Check tài khoản") => LoadSettings();
 
     // ── Run ────────────────────────────────────────────────────────────────────
 
@@ -71,12 +69,12 @@ public sealed partial class CheckAccountViewModel : ObservableObject
         SaveSettings();
 
         _pool = proxies.Count > 0 ? new ProxyPool(proxies, _proxyState) : null;
-        if (_pool is not null) _pool.Log += AppendLog;
+        if (_pool is not null) _pool.Log += Log;
 
         IsRunning = true;
         _cts = new CancellationTokenSource();
         LogLines.Clear();
-        AppendLog(_pool is null
+        Log(_pool is null
             ? "(không có proxy — chạy bằng IP máy)"
             : $"({proxies.Count} proxy — mỗi tk 1 IP mới, key chưa tới giờ đổi thì chuyển key khác)");
 
@@ -100,13 +98,13 @@ public sealed partial class CheckAccountViewModel : ObservableObject
             OnUi(() => Accounts = string.Join(Environment.NewLine, snapshot));
         }
 
-        AppendLog(laneCount > 1 ? $"▶ Chạy {laneCount} luồng song song." : "▶ Chạy 1 luồng.");
+        Log(laneCount > 1 ? $"▶ Chạy {laneCount} luồng song song." : "▶ Chạy 1 luồng.");
 
         async Task WorkerAsync(int laneId)
         {
             // Mỗi luồng có checker riêng (state chuột/_rng theo từng phiên, không chia sẻ giữa thread).
             var checker = new ShopeeAccountChecker();
-            void LaneLog(string m) => AppendLog($"[L{laneId}]{m}");
+            void LaneLog(string m) => Log($"[L{laneId}]{m}");
             checker.Log += LaneLog;
             try
             {
@@ -189,7 +187,7 @@ public sealed partial class CheckAccountViewModel : ObservableObject
         {
             if (_pool is not null)
             {
-                _pool.Log -= AppendLog;
+                _pool.Log -= Log;
                 UpdateProxyStateFromPool();
                 SaveSettings();
                 _pool = null;
@@ -197,7 +195,7 @@ public sealed partial class CheckAccountViewModel : ObservableObject
             IsRunning = false;
             var done = _cts!.IsCancellationRequested ? "Đã dừng." : "Hoàn tất.";
             SetStatus($"{done} OK={okCount}, sai mật khẩu={failCount}, cần tay={manualCount}.");
-            AppendLog($"── {done} OK={okCount}, sai mật khẩu={failCount}, cần xử lý tay={manualCount} ──");
+            Log($"── {done} OK={okCount}, sai mật khẩu={failCount}, cần xử lý tay={manualCount} ──");
             _cts.Dispose();
             _cts = null;
         }
@@ -367,7 +365,7 @@ public sealed partial class CheckAccountViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            AppendLog("  (không ghi lại được tk-ok.txt: " + ex.Message + ")");
+            Log("  (không ghi lại được tk-ok.txt: " + ex.Message + ")");
         }
     }
 
@@ -429,7 +427,7 @@ public sealed partial class CheckAccountViewModel : ObservableObject
     private void AppendSuccess(string line)
     {
         try { File.AppendAllText(OkFilePath, line + Environment.NewLine, Encoding.UTF8); }
-        catch (Exception ex) { AppendLog("  (không ghi được tk-ok.txt: " + ex.Message + ")"); }
+        catch (Exception ex) { Log("  (không ghi được tk-ok.txt: " + ex.Message + ")"); }
     }
 
     // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -455,10 +453,6 @@ public sealed partial class CheckAccountViewModel : ObservableObject
     }
 
     private void SetStatus(string text) => OnUi(() => Status = text);
-
-    private void AppendLog(string text) => UiThread.Post(() => LogLines.Add(text));
-
-    private static void OnUi(Action action) => UiThread.Post(action);
 
     // ── Settings (nhớ proxy key + danh sách) ─────────────────────────────────────
 

@@ -5,6 +5,7 @@ using CommunityToolkit.Mvvm.Input;
 using Shopee.Core.BigSeller;
 using Shopee.Core.Coordination;
 using Shopee.Core.Infrastructure;
+using Shopee.Suite.Infrastructure;
 using Shopee.Suite.Services;
 
 namespace Shopee.Suite.Modules.BigSeller;
@@ -13,11 +14,9 @@ namespace Shopee.Suite.Modules.BigSeller;
 /// Mục "BigSeller" dùng chung (Scrape + Update Product). Quản lý kho <see cref="BigSellerStore"/>:
 /// tài khoản BigSeller + workbook + danh sách shop (mỗi shop 1 sheet) + đăng nhập lấy cookie chung.
 /// </summary>
-public sealed partial class BigSellerViewModel : ObservableObject
+public sealed partial class BigSellerViewModel : ModuleViewModelBase
 {
     public ObservableCollection<BigSellerAccountItemViewModel> Items { get; } = [];
-
-    public ObservableCollection<string> LoginLog { get; } = [];
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasSelection))]
@@ -31,8 +30,6 @@ public sealed partial class BigSellerViewModel : ObservableObject
     public bool HasSelection => Selected is not null;
     public bool HasShopSelection => SelectedShop is not null;
 
-    [ObservableProperty] private string _status = "";
-
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsIdle))]
     [NotifyCanExecuteChangedFor(nameof(LoginCommand), nameof(StopLoginCommand), nameof(LoginAllCommand))]
@@ -42,7 +39,7 @@ public sealed partial class BigSellerViewModel : ObservableObject
 
     private CancellationTokenSource? _loginCts;
 
-    public BigSellerViewModel()
+    public BigSellerViewModel() : base("bigseller-login.log", "BigSeller")
     {
         Reload();
         // Khôi phục/import (BackupService) cập nhật kho dùng chung rồi bắn Changed → tab này phải nạp lại
@@ -192,7 +189,7 @@ public sealed partial class BigSellerViewModel : ObservableObject
         }
 
         IsLoggingIn = true;
-        LoginLog.Clear();
+        LogLines.Clear();
         _loginCts = new CancellationTokenSource();
         var cookieFile = Selected.CookieFile;
         var account = Selected;
@@ -207,9 +204,9 @@ public sealed partial class BigSellerViewModel : ObservableObject
             string? proxyServer = null;
             if (account.Model.HasProxy)
             {
-                AppendLog("Đang lấy proxy riêng của tk BigSeller (KiotProxy)…");
+                Log("Đang lấy proxy riêng của tk BigSeller (KiotProxy)…");
                 proxyServer = await OpenMultiBraveLauncherV3.BigSellerProxyResolver.ResolveServerAsync(
-                    account.Model.KiotProxyKey, account.Model.Region, account.Model.ProxyType, AppendLog);
+                    account.Model.KiotProxyKey, account.Model.Region, account.Model.ProxyType, Log);
             }
 
             // Tk có email + mật khẩu → khi mở profile mà CHƯA đăng nhập, TỰ điền form + giải captcha (AI) thay vì
@@ -220,9 +217,9 @@ public sealed partial class BigSellerViewModel : ObservableObject
                 autoLogin = async (port, token) =>
                 {
                     var outcome = await OpenMultiBraveLauncherV3.BigSellerAutoLogin.ForceLoginInBraveAsync(
-                        port, account.Model.Id, account.Model.Email, account.Model.Password, cookieFile, AppendLog, token);
+                        port, account.Model.Id, account.Model.Email, account.Model.Password, cookieFile, Log, token);
                     if (outcome == OpenMultiBraveLauncherV3.AutoLoginOutcome.NeedsOtp)
-                        AppendLog("⚠ BigSeller đòi mã email (thiết bị mới) — đăng nhập TAY 1 lần trong cửa sổ để tạo device-trust; sau đó auto-login chạy được (chỉ captcha).");
+                        Log("⚠ BigSeller đòi mã email (thiết bị mới) — đăng nhập TAY 1 lần trong cửa sổ để tạo device-trust; sau đó auto-login chạy được (chỉ captcha).");
                     return outcome == OpenMultiBraveLauncherV3.AutoLoginOutcome.Success;
                 };
             }
@@ -230,7 +227,7 @@ public sealed partial class BigSellerViewModel : ObservableObject
             // Lưu cookie xong, cửa sổ Brave GIỮ NGUYÊN — chỉ đóng khi bấm Dừng. onSaved báo ngay
             // khi vừa lưu (lúc cửa sổ còn đang mở) để UI cập nhật trạng thái cookie tức thì.
             var ok = await BigSellerLoginRunner.RunLoginAsync(
-                cookieFile, profileDir, AppendLog, _loginCts.Token, () => OnLoginSaved(account), proxyServer, autoLogin);
+                cookieFile, profileDir, Log, _loginCts.Token, () => OnLoginSaved(account), proxyServer, autoLogin);
             account.NotifyCookieChanged();
             Status = ok ? "Đăng nhập BigSeller thành công." : "Chưa lấy được cookie BigSeller.";
 
@@ -240,9 +237,9 @@ public sealed partial class BigSellerViewModel : ObservableObject
             if (ok && HubServerConfigStore.Shared.Current.Enabled
                    && CoordinationRuntime.ConfigSync is { } sync)
             {
-                AppendLog("Đang đẩy cookie mới lên Hub để các máy khác đồng bộ…");
-                try { AppendLog(await sync.PushAsync()); }
-                catch (Exception ex) { AppendLog("✘ Đẩy lên Hub lỗi (sẽ tự đẩy lại ở chu kỳ auto): " + ex.Message); }
+                Log("Đang đẩy cookie mới lên Hub để các máy khác đồng bộ…");
+                try { Log(await sync.PushAsync()); }
+                catch (Exception ex) { Log("✘ Đẩy lên Hub lỗi (sẽ tự đẩy lại ở chu kỳ auto): " + ex.Message); }
             }
         }
         finally
@@ -273,7 +270,7 @@ public sealed partial class BigSellerViewModel : ObservableObject
             return;
 
         IsLoggingIn = true;
-        LoginLog.Clear();
+        LogLines.Clear();
         _loginCts = new CancellationTokenSource();
         int ok = 0, otp = 0, fail = 0;
         try
@@ -283,7 +280,7 @@ public sealed partial class BigSellerViewModel : ObservableObject
                 _loginCts.Token.ThrowIfCancellationRequested();
                 var a = accts[i];
                 Status = $"[{i + 1}/{accts.Count}] Đang tự đăng nhập \"{a.DisplayName}\"…  (✔{ok} ⚠{otp} ✘{fail})";
-                AppendLog($"[{i + 1}/{accts.Count}] {a.DisplayName} — tự đăng nhập headless…");
+                Log($"[{i + 1}/{accts.Count}] {a.DisplayName} — tự đăng nhập headless…");
 
                 // Mặc định file cookie nếu chưa đặt (client dùng chung với scrape/update).
                 if (string.IsNullOrWhiteSpace(a.CookieFile))
@@ -296,21 +293,21 @@ public sealed partial class BigSellerViewModel : ObservableObject
                 string? proxy = null;
                 if (a.Model.HasProxy)
                 {
-                    try { proxy = await OpenMultiBraveLauncherV3.BigSellerProxyResolver.ResolveServerAsync(a.Model.KiotProxyKey, a.Model.Region, a.Model.ProxyType, AppendLog); }
-                    catch (Exception ex) { AppendLog("  Lấy proxy lỗi: " + ex.Message + " — thử IP máy."); }
+                    try { proxy = await OpenMultiBraveLauncherV3.BigSellerProxyResolver.ResolveServerAsync(a.Model.KiotProxyKey, a.Model.Region, a.Model.ProxyType, Log); }
+                    catch (Exception ex) { Log("  Lấy proxy lỗi: " + ex.Message + " — thử IP máy."); }
                 }
 
                 var outcome = await OpenMultiBraveLauncherV3.BigSellerAutoLogin.LoginHeadlessAsync(
-                    a.Model.Id, a.Model.Email, a.Model.Password, a.CookieFile, proxy, AppendLog, _loginCts.Token);
+                    a.Model.Id, a.Model.Email, a.Model.Password, a.CookieFile, proxy, Log, _loginCts.Token);
 
                 switch (outcome)
                 {
                     case OpenMultiBraveLauncherV3.AutoLoginOutcome.Success:
-                        ok++; a.NotifyCookieChanged(); AppendLog($"  ✔ {a.DisplayName}: đã lưu cookie."); break;
+                        ok++; a.NotifyCookieChanged(); Log($"  ✔ {a.DisplayName}: đã lưu cookie."); break;
                     case OpenMultiBraveLauncherV3.AutoLoginOutcome.NeedsOtp:
-                        otp++; AppendLog($"  ⚠ {a.DisplayName}: BigSeller đòi mã email (thiết bị mới) — vào Mở Profile đăng nhập TAY 1 lần."); break;
+                        otp++; Log($"  ⚠ {a.DisplayName}: BigSeller đòi mã email (thiết bị mới) — vào Mở Profile đăng nhập TAY 1 lần."); break;
                     default:
-                        fail++; AppendLog($"  ✘ {a.DisplayName}: chưa đăng nhập được (kiểm mật khẩu / thử lại)."); break;
+                        fail++; Log($"  ✘ {a.DisplayName}: chưa đăng nhập được (kiểm mật khẩu / thử lại)."); break;
                 }
             }
             Status = $"Đăng nhập tất cả xong: ✔ {ok} · ⚠ {otp} cần OTP · ✘ {fail} lỗi (/{accts.Count} tk).";
@@ -338,6 +335,4 @@ public sealed partial class BigSellerViewModel : ObservableObject
 
     [RelayCommand(CanExecute = nameof(IsLoggingIn))]
     private void StopLogin() => _loginCts?.Cancel();
-
-    private void AppendLog(string text) => UiThread.Post(() => LoginLog.Add(text));
 }

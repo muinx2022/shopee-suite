@@ -24,16 +24,13 @@ namespace Shopee.Suite.Modules.Scrape;
 /// nên phiên rải nhiều IP, không bị "nhiều token / 1 IP" → KHÔNG cần chạy lần lượt. Tk Shopee dính
 /// captcha/proxy lỗi thì tự đổi tk khác.
 /// </summary>
-public sealed partial class ScrapeViewModel : ObservableObject
+public sealed partial class ScrapeViewModel : ModuleViewModelBase
 {
     public ObservableCollection<ScrapeTargetViewModel> ScrapeTargets { get; } = [];
     public ObservableCollection<ScrapeInstanceViewModel> Instances { get; } = [];
     public ObservableCollection<ErroredAccountRow> ErroredAccounts { get; } = [];
-    /// <summary>Nhật ký scrape: giữ 500 dòng cuối trên UI (khỏi đơ) + ghi ĐẦY ĐỦ ra logs\workspace-scrape.log.</summary>
-    public LogBuffer LogLines { get; } = new("workspace-scrape.log");
 
     [ObservableProperty] private string _videoDir = @"D:\videos";
-    [ObservableProperty] private string _status = "Sẵn sàng.";
     [ObservableProperty] private int _poolCount;
 
     /// <summary>Tk BigSeller đang click để xem/sửa config chi tiết (panel phải).</summary>
@@ -66,7 +63,7 @@ public sealed partial class ScrapeViewModel : ObservableObject
         return arr;
     }
 
-    public ScrapeViewModel()
+    public ScrapeViewModel() : base("workspace-scrape.log", "Shopee Scrape")
     {
         Reload();
         AccountStore.Shared.Changed += OnStoresChanged;
@@ -676,10 +673,6 @@ public sealed partial class ScrapeViewModel : ObservableObject
         sel.RefreshProgress();   // có thể đã nhả tay / xoá tiến độ → cập nhật nhãn.
     }
 
-    /// <summary>Mở file log ĐẦY ĐỦ (UI chỉ giữ 500 dòng cuối) — logs\workspace-scrape.log.</summary>
-    [RelayCommand]
-    private void OpenLogFile() => ShellOpener.RevealFile(LogLines.FilePath);
-
     /// <summary>Proxy lấy XOAY VÒNG từ kho KiotProxy dùng chung (ghi đè proxy gắn sẵn của acc); kho rỗng →
     /// giữ proxy của acc (fallback).</summary>
     private static ScrapeAccountSpec ToSpec(ShopeeAccount a, string sheet)
@@ -757,17 +750,6 @@ public sealed partial class ScrapeViewModel : ObservableObject
         // CLIENT: báo Hub acc này dính captcha (Hub xem ở panel + operator quyết giữ/xóa). Hub/standalone: là bản chính, khỏi báo.
         if (CoordinationRuntime.Active && !HubServerConfigStore.Shared.Current.Enabled)
             _ = CoordinationRuntime.Hub?.ReportErroredAccountAsync(id, reason, captchaUrl, "captcha");
-    }
-
-    private void Log(string text) => OnUi(() => LogLines.Add(text));
-
-    private static void OnUi(Action a) => UiThread.Post(a);
-
-    private void Warn(string msg, bool silent = false)
-    {
-        Status = msg;
-        if (silent) Log("⚠ " + msg);   // đường push-dispatch: KHÔNG mở modal (tránh treo UI), chỉ ghi log
-        else Dialogs.Notify(msg, "Shopee Scrape");
     }
 
     /// <summary>Tiền-kiểm điều kiện scrape 1 đích (kho tk Shopee, Brave, cấu hình) — KHÔNG mở dialog.
