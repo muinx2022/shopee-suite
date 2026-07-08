@@ -47,18 +47,24 @@ internal abstract class BigSellerBraveRunner : IAsyncDisposable
     {
         Directory.CreateDirectory(_settings.ProfileDir);
         PrepareProfileBeforeLaunch();
-        var args = string.Join(" ", new[]
-        {
-            $"--remote-debugging-port={_settings.DebugPort}",
-            $"--user-data-dir=\"{_settings.ProfileDir}\"",
-            "--no-first-run", "--no-default-browser-check", "--no-session-restore",
-            "--restore-last-session=false", "--disable-session-crashed-bubble",
+        // Runner CDP lắp cờ theo thứ tự riêng (KHÔNG dùng khối cửa sổ Window: không profile-directory/new-window,
+        // dùng --disable-session-crashed-bubble thay --hide-crash-restore-bubble). Giữ nguyên từng cờ gốc.
+        var args = BraveArgsBuilder.Create()
+            .RemoteDebuggingPort(_settings.DebugPort)
+            .UserDataDir(_settings.ProfileDir)
+            .NoFirstRun()
+            .NoDefaultBrowserCheck()
+            .Add("--no-session-restore")
+            .Add("--restore-last-session=false")
+            .Add("--disable-session-crashed-bubble")
             // KHÔNG '--start-maximized': muốn Brave mở THU NHỎ (startMinimized) — cờ maximize sẽ đè show-state.
-            "--window-size=1920,1080",
-            "--disable-gpu", "--disable-dev-shm-usage", "--disable-software-rasterizer",
-            Shopee.Core.Browser.BraveCachePolicy.DiskLimitArgString,
-            $"\"{StartUrl}\"",
-        });
+            .WindowSize(1920, 1080)
+            .DisableGpu()
+            .Add("--disable-dev-shm-usage")
+            .Add("--disable-software-rasterizer")
+            .DiskCacheLimit()
+            .StartUrl(StartUrl)
+            .Build();
         // Đăng ký profile vào "fleet" TRƯỚC khi phóng → trình dọn Brave mồ côi (BraveFleet) CHỪA cửa sổ này.
         // Thiếu bước này = Brave bị quét-giết như mồ côi giữa chừng (còn vòng lặp thì cứ mở lại rồi lại bị giết).
         BraveFleet.RegisterActiveProfile(_settings.ProfileDir);

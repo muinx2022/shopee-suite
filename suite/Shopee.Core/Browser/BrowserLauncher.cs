@@ -66,32 +66,21 @@ public sealed class BrowserLauncher
     private static string BuildArgs(
         int cdpPort, string userDataDir, string? proxy, string startUrl, IReadOnlyList<string>? extraArgs)
     {
-        var parts = new List<string>
-        {
-            $"--user-data-dir=\"{userDataDir}\"",
-            "--profile-directory=Default",
-            "--new-window",
-            "--no-first-run",
-            "--no-default-browser-check",
-            "--hide-crash-restore-bubble",
-            "--no-restore-last-session",
-            "--restore-last-session=false",
-            "--disable-background-mode",
-            "--proxy-bypass-list=\"localhost;127.0.0.1\"",
-            $"--remote-debugging-port={cdpPort}",
-        };
-
-        // Chặn cache phình cho profile bền (check-account, bigseller-login). Xem BraveCachePolicy.
-        parts.AddRange(BraveCachePolicy.DiskLimitArgs);
-
-        if (!string.IsNullOrWhiteSpace(proxy))
-            parts.Add($"--proxy-server={proxy}");
+        // Khối 6 cờ nền cửa sổ (BraveArgsBuilder.Window) + cờ RIÊNG của launcher này giữ nguyên thứ tự gốc.
+        var b = BraveArgsBuilder.Window(userDataDir)
+            .Add("--no-restore-last-session")
+            .Add("--restore-last-session=false")
+            .Add("--disable-background-mode")
+            .Add("--proxy-bypass-list=\"localhost;127.0.0.1\"")
+            .RemoteDebuggingPort(cdpPort)
+            // Chặn cache phình cho profile bền (check-account, bigseller-login). Xem BraveCachePolicy.
+            .DiskCacheLimit()
+            .ProxyServer(proxy);
 
         if (extraArgs is not null)
-            parts.AddRange(extraArgs);
+            b.AddRange(extraArgs);
 
-        parts.Add($"\"{startUrl}\"");
-        return string.Join(" ", parts);
+        return b.StartUrl(startUrl).Build();
     }
 
     public void Kill()

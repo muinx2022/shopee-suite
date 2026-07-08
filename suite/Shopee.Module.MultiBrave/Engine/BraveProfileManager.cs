@@ -91,30 +91,22 @@ internal static class BraveProfileManager
         bool loadRunnerExtension = true,
         string? bigSellerProxyServer = null)
     {
-        var parts = new List<string>
-        {
-            $"--user-data-dir=\"{userDataDir}\"",
-            "--profile-directory=Default",
-            "--new-window",
-            "--no-first-run",
-            "--no-default-browser-check",
-            "--hide-crash-restore-bubble",
-            $"--remote-debugging-port={cdpPort}",
+        // Khối 6 cờ nền cửa sổ (BraveArgsBuilder.Window) + remote-debugging-port, rồi cờ RIÊNG scrape giữ nguyên thứ tự gốc.
+        var parts = Shopee.Core.Browser.BraveArgsBuilder.Window(userDataDir)
+            .RemoteDebuggingPort(cdpPort)
 
             // GIỮ CỬA SỔ NỀN LUÔN HOẠT ĐỘNG. Khi chạy nhiều instance, mở/đưa cửa sổ instance khác lên
             // trước làm các cửa sổ còn lại bị che (occluded)/chạy nền → Brave bóp timer + renderer +
             // service worker → scrape "đứng hình" (đúng triệu chứng: kẹt lúc mở sang instance khác).
             // Các cờ dưới tắt toàn bộ cơ chế tiết kiệm tài nguyên đó để mọi instance scrape song song ổn định.
-            "--disable-background-timer-throttling",
-            "--disable-backgrounding-occluded-windows",
-            "--disable-renderer-backgrounding",
+            .Add("--disable-background-timer-throttling")
+            .Add("--disable-backgrounding-occluded-windows")
+            .Add("--disable-renderer-backgrounding")
             // DisableLoadExtensionCommandLineSwitch: Brave/Chrome 137+ MẶC ĐỊNH chặn --load-extension
             // → extension "Shopee Data Runner" KHÔNG load. Tắt feature này để --load-extension hoạt động lại.
-            "--disable-features=CalculateNativeWinOcclusion,IntensiveWakeUpThrottling,DisableLoadExtensionCommandLineSwitch",
-        };
-
-        // Chặn cache phình khi 24 cửa sổ chạy song song (profile bền → cache không tự dọn). Xem BraveCachePolicy.
-        parts.AddRange(Shopee.Core.Browser.BraveCachePolicy.DiskLimitArgs);
+            .Add("--disable-features=CalculateNativeWinOcclusion,IntensiveWakeUpThrottling,DisableLoadExtensionCommandLineSwitch")
+            // Chặn cache phình khi 24 cửa sổ chạy song song (profile bền → cache không tự dọn). Xem BraveCachePolicy.
+            .DiskCacheLimit();
         if (!string.IsNullOrWhiteSpace(bigSellerProxyServer))
         {
             // TK BIGSELLER CÓ PROXY RIÊNG → split-tunnel qua PAC: bigseller.com đi proxy RIÊNG của tk
@@ -183,7 +175,7 @@ internal static class BraveProfileManager
         if (extPaths.Count > 0)
             parts.Add($"--load-extension=\"{string.Join(",", extPaths)}\"");
 
-        return string.Join(" ", parts);
+        return parts.Build();
     }
 
     private static List<string> CollectExtensionLoadPaths(string? runnerPath)
