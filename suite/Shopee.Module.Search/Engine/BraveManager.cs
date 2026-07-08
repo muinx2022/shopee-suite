@@ -316,7 +316,8 @@ public sealed class BraveManager(AppSettingsService appSettings)
         {
             // Giết ĐÚNG Brave của profile này theo giá trị --user-data-dir (khớp CHÍNH XÁC, không Contains →
             // không giết nhầm acc_1 vs acc_10). Nếu có process bị giết, chờ ngắn cho khoá profile (delete-pending) buông.
-            if (Shopee.Core.Browser.BraveProcessReaper.KillByUserDataDir(_currentProfileDir) > 0)
+            if (Shopee.Core.Browser.BraveProcessReaper.KillByUserDataDir(
+                    _currentProfileDir, includeCrashpadOrphans: true) > 0)
                 Thread.Sleep(400);
         }
 

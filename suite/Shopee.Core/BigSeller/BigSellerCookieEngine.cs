@@ -269,7 +269,7 @@ public static class BigSellerCookieEngine
         if (cookiesEl.ValueKind != JsonValueKind.Array)
             throw new InvalidOperationException("File cookie BigSeller không hợp lệ (mảng cookies không tìm thấy).");
 
-        log?.Invoke("Đang nạp cookie BigSeller vào browser…");
+        log?.Invoke($"Đang nạp cookie BigSeller từ account: {cookieFile}");
         var count = await SetBigSellerCookiesToBrowserAsync(cdpPort, cookiesEl, log, ct).ConfigureAwait(false);
         log?.Invoke($"BigSeller: đã import {count} cookie.");
         return count;
@@ -339,6 +339,16 @@ public static class BigSellerCookieEngine
             if (!string.IsNullOrEmpty(ds)) payload["url"] = $"https://{ds}/";
         }
         if (!payload.ContainsKey("url") && !payload.ContainsKey("domain")) return null;
+
+        // Cookie tiền tố __Host- theo spec cookie-prefix KHÔNG được kèm domain và BUỘC path="/". Giữ lại
+        // domain sẽ khiến CDP từ chối set (mất cookie). Bỏ domain (url đã suy ra từ domain ở trên) + ép
+        // path="/". Port từ CookieCdpWriter của UpdateProduct — hành vi đang chạy live trước refactor.
+        var cookieName = payload.TryGetValue("name", out var nv) ? nv as string ?? "" : "";
+        if (cookieName.StartsWith("__Host-", StringComparison.OrdinalIgnoreCase))
+        {
+            payload.Remove("domain");
+            payload["path"] = "/";
+        }
 
         SanitizeCookiePayloadForCdp(payload, persistSessionCookie: true);
         return payload;
@@ -525,7 +535,7 @@ public static class BigSellerCookieEngine
         var cookiesEl = await CookieFileHelper.ParseCookiesRootFromFileAsync(cookieFile, ct).ConfigureAwait(false);
         CookieFileHelper.ValidateCookiesArray(cookiesEl);
 
-        log?.Invoke("Đang nạp cookie BigSeller vào browser…");
+        log?.Invoke($"Đang nạp cookie BigSeller từ account: {cookieFile}");
         var count = await SetBigSellerCookiesViaCdpClientAsync(client, cookiesEl, log, ct).ConfigureAwait(false);
 
         if (count > 0 && !string.IsNullOrWhiteSpace(navigateUrl))

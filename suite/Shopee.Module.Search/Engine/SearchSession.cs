@@ -106,7 +106,7 @@ public sealed class SearchSession : IAsyncDisposable
 
         // Bind the WS server on `port` and wire the orchestrator BEFORE launching Brave, so the
         // extension reaches a live server the instant it connects: no window for another lane's
-        // FindFreePort to grab this port, and no connect-before-listen race. The crawl stays gated —
+        // PortAllocator.Reserve to grab this port, and no connect-before-listen race. The crawl stays gated —
         // PrepareSearch() runs only AFTER login below, so the extension's early "ready" (the launch
         // URL carries #_ss_ws={port}) is a no-op until we're logged in.
         // Reuse an existing task when resuming a keyword (keeps its accumulated products + checkpoint

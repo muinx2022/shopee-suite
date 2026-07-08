@@ -12,8 +12,9 @@ public enum AutoLoginOutcome { Success, NeedsOtp, Failed }
 
 /// <summary>
 /// TỰ ĐĂNG NHẬP BigSeller (headless) trên 1 <see cref="IPage"/> — BẢN SAO của
-/// <c>UpdateProduct.BigSellerAutoLogin</c> cho module Scrape (MultiBrave dùng stack Playwright riêng; cookie
-/// + CDP dùng chung qua <see cref="BigSellerCookieEngine"/>/<c>CdpClient</c> ở Core).
+/// <c>UpdateProduct.BigSellerAutoLogin</c> cho module Scrape (MultiBrave dùng stack Playwright riêng). Riêng
+/// phần cookie/CDP KHÔNG còn nhân bản: <c>CdpClient</c> đã về Core và <c>BigSellerCookieImporter</c> đã hợp
+/// nhất vào <see cref="BigSellerCookieEngine"/> ở Core — cả hai stack dùng chung.
 /// Mở trang login (en_US) → điền email/mật khẩu → đóng popup "Warm Tips" → giải captcha
 /// (<see cref="BigSellerCaptchaSolver"/>, AI vision) → tick "I agree" → submit → RETRY. Trả về Success (có
 /// token mới KHỚP IP proxy của Brave này — token sync KHÔNG scrape được vì bị coi phiên lạ), NeedsOtp (thiết
