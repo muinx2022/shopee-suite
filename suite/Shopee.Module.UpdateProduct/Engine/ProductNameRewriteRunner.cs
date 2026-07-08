@@ -153,7 +153,7 @@ internal sealed class ProductNameRewriteRunner
                 foreach (var rowEntry in plan.RowsByOriginalName.GetValueOrDefault(originalName, []))
                 {
                     // Ghép SKU CỦA MÌNH theo cú pháp "keyword1 - keyword2 product-desc sku", cắt tối đa 120 ký tự (giữ SKU).
-                    var finalName = TruncateProductNamePreservingSku($"{title} {rowEntry.Sku}".Trim(), rowEntry.Sku, 120);
+                    var finalName = BigSellerText.TruncateProductNamePreservingSku($"{title} {rowEntry.Sku}".Trim(), rowEntry.Sku, 120);
                     if (!string.IsNullOrWhiteSpace(finalName))
                         updates.Add((rowEntry.RowIndex, finalName));
                 }
@@ -478,41 +478,6 @@ internal sealed class ProductNameRewriteRunner
             return (normalized, null);
         var body = normalized[..match.Index].Trim();
         return (body, match.Groups[1].Value);
-    }
-
-
-    private static string TruncateProductNamePreservingSku(string productName, string sku, int maxLength)
-    {
-        productName = (productName ?? "").Trim();
-        sku = (sku ?? "").Trim();
-        if (productName.Length <= maxLength)
-            return productName;
-
-        if (!string.IsNullOrWhiteSpace(sku) && productName.EndsWith(sku, StringComparison.Ordinal))
-        {
-            var body = productName[..^sku.Length].Trim();
-            var words = body.Split(' ', StringSplitOptions.RemoveEmptyEntries).ToList();
-            while (words.Count > 0)
-            {
-                var candidate = $"{string.Join(" ", words)} {sku}".Trim();
-                if (candidate.Length <= maxLength)
-                    return candidate;
-                words.RemoveAt(words.Count - 1);
-            }
-            return sku.Length <= maxLength ? sku : sku[..maxLength].Trim();
-        }
-
-        var allWords = productName.Split(' ', StringSplitOptions.RemoveEmptyEntries).ToList();
-        while (allWords.Count > 0)
-        {
-            var candidate = string.Join(" ", allWords).Trim();
-            if (candidate.Length <= maxLength)
-                return candidate;
-            allWords.RemoveAt(allWords.Count - 1);
-        }
-        // Fallback: 1 từ duy nhất dài hơn maxLength → cắt cứng thay vì trả "" (title rỗng làm hỏng sản phẩm).
-        // Khớp hành vi bản trong BigSellerProductUpdateRunner.
-        return productName[..Math.Min(maxLength, productName.Length)].Trim();
     }
 
 

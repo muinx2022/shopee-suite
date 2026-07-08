@@ -5,6 +5,7 @@ using Microsoft.Playwright;
 using Shopee.Core.Ai;
 using Shopee.Core.BigSeller;
 using Shopee.Core.Browser;
+using Shopee.Core.Cdp;
 
 namespace UpdateProduct;
 
@@ -16,7 +17,7 @@ internal sealed class BigSellerImportToStoreRunner : IAsyncDisposable
     private readonly int _laneIndex;
     private readonly int _laneCount;
     private readonly bool _exportCookie;
-    private long _lastTokenWriteBackTick;   // throttle ghi-ngược muc_token định kỳ trong lúc chạy
+    private readonly BigSellerTokenWriteBack _tokenWriteBack = new();
     private IPlaywright? _playwright;
     private IBrowser? _browser;
     private Process? _braveProcess;
@@ -64,21 +65,9 @@ internal sealed class BigSellerImportToStoreRunner : IAsyncDisposable
     /// (<see cref="_exportCookie"/>), throttle 90s. Bù đúng cái Update trước đây thiếu so với Scrape (chỉ
     /// export đầu/cuối) → file thiu giữa chừng → import token cũ → BigSeller đá phiên. Engine cookie chung ở Core.
     /// </summary>
-    private async Task MaybeWriteBackBigSellerTokenAsync(CancellationToken ct)
-    {
-        if (!_exportCookie || string.IsNullOrWhiteSpace(_settings.BigSellerCookieFile))
-            return;
-        var now = Environment.TickCount64;
-        if (now - _lastTokenWriteBackTick < 90_000)
-            return;
-        _lastTokenWriteBackTick = now;
-        try
-        {
-            await BigSellerCookieEngine.WriteBackLiveTokenAsync(
-                _settings.DebugPort, _settings.BigSellerCookieFile!, _log, ct).ConfigureAwait(false);
-        }
-        catch { /* best-effort */ }
-    }
+    private Task MaybeWriteBackBigSellerTokenAsync(CancellationToken ct)
+        => _tokenWriteBack.MaybeWriteBackAsync(
+            _exportCookie, _settings.DebugPort, _settings.BigSellerCookieFile, _log, ct);
 
     /// <summary>Phase 4 — ĐẦU PHIÊN: đảm bảo có token BigSeller TƯƠI (tự mint) cho máy này. Ủy thác cho
     /// <see cref="BigSellerAutoLogin.EnsureFreshSessionAsync"/> (dùng chung với Update/Scrape).</summary>

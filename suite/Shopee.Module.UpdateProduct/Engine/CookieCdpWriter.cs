@@ -1,5 +1,6 @@
 using System.Net.WebSockets;
 using System.Text.Json;
+using Shopee.Core.Cdp;
 
 namespace UpdateProduct;
 

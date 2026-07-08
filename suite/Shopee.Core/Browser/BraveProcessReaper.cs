@@ -58,7 +58,8 @@ public static class BraveProcessReaper
         return pids;
     }
 
-    private static bool TryKillTree(int pid)
+    /// <summary>Giết cả cây tiến trình theo PID (best-effort). Dùng chung với <see cref="BraveFleet"/>.</summary>
+    internal static bool TryKillTree(int pid)
     {
         try
         {
@@ -75,8 +76,9 @@ public static class BraveProcessReaper
         }
     }
 
-    /// <summary>Trích giá trị của cờ <c>--user-data-dir=</c> từ command-line (hỗ trợ có/không dấu nháy).</summary>
-    private static string? ExtractUserDataDir(string commandLine)
+    /// <summary>Trích giá trị của cờ <c>--user-data-dir=</c> từ command-line (hỗ trợ có/không dấu nháy).
+    /// Dùng chung với <see cref="BraveFleet"/>.</summary>
+    internal static string? ExtractUserDataDir(string commandLine)
     {
         const string flag = "--user-data-dir=";
         var idx = commandLine.IndexOf(flag, StringComparison.OrdinalIgnoreCase);

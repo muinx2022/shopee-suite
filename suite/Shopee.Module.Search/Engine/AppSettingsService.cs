@@ -77,7 +77,7 @@ public sealed class AppSettingsService
         {
             try { Directory.CreateDirectory(defaultDir); return dir; }
             catch (Exception) { }
-            if (attempt == 0 || attempt == 3) { try { BraveManager.KillBraveProcessesForProfile(dir); } catch { } }
+            if (attempt == 0 || attempt == 3) { try { Shopee.Core.Browser.BraveProcessReaper.KillByUserDataDir(dir); } catch { } }
             if (attempt == 1) { try { ClearReadOnly(dir); } catch { } }
             Thread.Sleep(200 + attempt * 150);   // 200,350,…,1550ms (tổng ~8.6s) — đủ để lock/AV/delete-pending nhả
         }

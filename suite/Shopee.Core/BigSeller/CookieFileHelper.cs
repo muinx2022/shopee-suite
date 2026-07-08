@@ -1,9 +1,11 @@
-using System.Text;
-using System.Text.Json;
+namespace Shopee.Core.BigSeller;
 
-namespace UpdateProduct;
-
-internal static class CookieFileHelper
+/// <summary>
+/// Tiện ích đọc/ghi file cookie (JSON) dùng chung cho các module xuất-nhập cookie BigSeller. Gộp về Core
+/// từ 2 bản nhân đôi byte-identical (MultiBrave/UpdateProduct). Ghi qua file .tmp rồi <c>File.Move</c>
+/// overwrite (atomic) + retry IOException → không để file cookie hỏng dở khi 2 lane cùng ghi.
+/// </summary>
+public static class CookieFileHelper
 {
     public static JsonElement ParseCookiesRoot(string json)
     {

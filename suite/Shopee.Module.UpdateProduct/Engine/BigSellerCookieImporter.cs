@@ -1,5 +1,8 @@
 using System.Net.WebSockets;
 using System.Text.Json;
+using Shopee.Core.BigSeller;
+using Shopee.Core.Cdp;
+using Shopee.Core.Infrastructure;
 
 namespace UpdateProduct;
 

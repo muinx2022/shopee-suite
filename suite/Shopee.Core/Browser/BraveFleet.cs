@@ -231,7 +231,7 @@ public static class BraveFleet
                 if (ActiveProfiles.ContainsKey(dir)) continue;
                 if (started is { } t && (DateTime.Now - t) < TimeSpan.FromSeconds(60)) continue;
             }
-            if (TryKillTree(pid)) killed++;
+            if (BraveProcessReaper.TryKillTree(pid)) killed++;
         }
         if (killed > 0)
             log?.Invoke($"🧹 Đã dọn {killed} tiến trình Brave mồ côi (sót sau treo/đóng bẩn).");
@@ -245,7 +245,7 @@ public static class BraveFleet
         var list = new List<(int, string, DateTime?)>();
         foreach (var p in PlatformServices.ProcessFinder.Enumerate(BraveOnly, log))
         {
-            var dir = ExtractUserDataDir(p.CommandLine);
+            var dir = BraveProcessReaper.ExtractUserDataDir(p.CommandLine);
             if (dir is null) continue;
             var nd = NormalizePath(dir);
             if (!IsUnderManagedRoot(nd)) continue;   // KHÔNG phải Brave của app → bỏ qua
@@ -290,36 +290,9 @@ public static class BraveFleet
 
     // ─────────────────────────── TIỆN ÍCH ───────────────────────────
 
-    private static bool TryKillTree(int pid)
-    {
-        try
-        {
-            using var proc = Process.GetProcessById(pid);
-            if (proc.HasExited) return false;
-            proc.Kill(entireProcessTree: true);
-            proc.WaitForExit(2000);
-            return true;
-        }
-        catch { return false; }
-    }
-
-    /// <summary>Trích giá trị cờ <c>--user-data-dir=</c> từ command-line (hỗ trợ có/không dấu nháy).</summary>
-    private static string? ExtractUserDataDir(string commandLine)
-    {
-        const string flag = "--user-data-dir=";
-        var idx = commandLine.IndexOf(flag, StringComparison.OrdinalIgnoreCase);
-        if (idx < 0) return null;
-        var rest = commandLine[(idx + flag.Length)..];
-        if (rest.Length == 0) return null;
-        if (rest[0] == '"')
-        {
-            var end = rest.IndexOf('"', 1);
-            return end < 0 ? rest[1..] : rest[1..end];
-        }
-        var space = rest.IndexOf(' ');
-        return space < 0 ? rest : rest[..space];
-    }
-
+    // NormalizePath ở đây CỐ Ý khác BraveProcessReaper: dùng Path.GetFullPath để so khớp ManagedRoot theo
+    // đường dẫn tuyệt đối (registry profile-sống + IsUnderManagedRoot). Reaper chỉ so đúng chuỗi --user-data-dir
+    // nên KHÔNG chia sẻ hàm này (khác hành vi).
     private static string NormalizePath(string path)
     {
         try { return Path.GetFullPath(path.Trim().Trim('"')).TrimEnd('\\', '/'); }

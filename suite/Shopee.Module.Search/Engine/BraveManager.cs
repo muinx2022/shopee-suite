@@ -66,7 +66,7 @@ public sealed class BraveManager(AppSettingsService appSettings)
         Kill();
         ClearExtensionRuntimeCache(profileDir);
 
-        _cdpPort = FindFreePort();
+        _cdpPort = Shopee.Core.Infrastructure.PortAllocator.Reserve();
         _currentProfileDir = Path.GetFullPath(profileDir);
         var args = BuildArgs(_cdpPort, profileDir, proxyServer, extPath, wsPort);
         // Phóng qua BraveJobObject (KILL_ON_JOB_CLOSE): app tắt/crash/force-kill → OS tự giết Brave này,
@@ -214,49 +214,6 @@ public sealed class BraveManager(AppSettingsService appSettings)
 
     private static bool IsExtensionDir(string path) =>
         Directory.Exists(path) && File.Exists(Path.Combine(path, "manifest.json"));
-
-    internal static void KillBraveProcessesForProfile(string profileDir)
-    {
-        var fullProfileDir = Path.GetFullPath(profileDir).TrimEnd('\\', '/');
-        var killedAny = false;
-        try
-        {
-            // One WMI query collects brave.exe processes and command lines, then kills
-            // only processes whose command line points to this managed profile.
-            foreach (var pid in FindBravePidsByCommandLine(fullProfileDir))
-            {
-                try
-                {
-                    using var p = Process.GetProcessById(pid);
-                    if (!p.HasExited)
-                    {
-                        p.Kill(entireProcessTree: true);
-                        killedAny = true;
-                    }
-                }
-                catch { }
-            }
-
-            if (killedAny)
-                Thread.Sleep(400);
-        }
-        catch { }
-    }
-
-    // Cả brave.exe LẪN crashpad_handler.exe (tiến trình con của Brave — thường là kẻ còn GIỮ profile ở
-    // trạng thái delete-pending sau khi brave cha đã thoát) đều phải bị kill để nhả khoá profile.
-    private static readonly string[] BraveAndCrashpad = ["brave.exe", "crashpad_handler.exe"];
-
-    private static List<int> FindBravePidsByCommandLine(string profileDirNeedle)
-    {
-        var pids = new List<int>();
-        foreach (var p in Shopee.Core.Platform.PlatformServices.ProcessFinder.Enumerate(BraveAndCrashpad))
-        {
-            if (p.CommandLine.Contains(profileDirNeedle, StringComparison.OrdinalIgnoreCase) && p.Pid > 0)
-                pids.Add(p.Pid);
-        }
-        return pids;
-    }
 
     /// <summary>Liệt kê tiến trình đang tham chiếu profile này ("tên#pid, …") để chẩn đoán khi KHÔNG tạo được
     /// profile — quét MỌI tiến trình có đường dẫn profile trong command line (không chỉ Brave) để lộ cả kẻ lạ.</summary>
@@ -408,44 +365,6 @@ public sealed class BraveManager(AppSettingsService appSettings)
         }
     }
 
-    // Ports handed out by FindFreePort but not yet bound by their consumer (Brave's CDP
-    // server or a lane's HttpListener). The OS frees an ephemeral port the instant the
-    // probe listener closes, so without this two lanes starting together — and binding
-    // seconds later, after proxy resolution — can be handed the SAME number and collide
-    // (one lane's Brave then talks to another lane's WS/CDP). Guarded by _portLock.
-    private static readonly object _portLock = new();
-    private static readonly HashSet<int> _reservedPorts = [];
-
-    /// <summary>
-    /// Allocates a free loopback TCP port (used for CDP and per-lane WS servers), unique
-    /// across concurrent callers: a port handed out here won't be handed out again until
-    /// <see cref="ReleasePort"/> frees it (call that once the consumer has bound, or torn down).
-    /// </summary>
-    public static int FindFreePort()
-    {
-        lock (_portLock)
-        {
-            for (var attempt = 0; attempt < 50; attempt++)
-            {
-                var l = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
-                l.Start();
-                var port = ((System.Net.IPEndPoint)l.LocalEndpoint).Port;
-                l.Stop();
-                // Skip ports already reserved by a sibling lane that hasn't bound yet —
-                // a fresh probe listener gets a different ephemeral port on retry.
-                if (_reservedPorts.Add(port))
-                    return port;
-            }
-            throw new InvalidOperationException("Không cấp phát được cổng trống cho lane.");
-        }
-    }
-
-    /// <summary>Frees a port previously returned by <see cref="FindFreePort"/> so it can be reused.</summary>
-    public static void ReleasePort(int port)
-    {
-        lock (_portLock) _reservedPorts.Remove(port);
-    }
-
     public void Kill()
     {
         try
@@ -460,12 +379,17 @@ public sealed class BraveManager(AppSettingsService appSettings)
         try { _process?.Dispose(); } catch { }
 
         if (!string.IsNullOrWhiteSpace(_currentProfileDir))
-            KillBraveProcessesForProfile(_currentProfileDir);
+        {
+            // Giết ĐÚNG Brave của profile này theo giá trị --user-data-dir (khớp CHÍNH XÁC, không Contains →
+            // không giết nhầm acc_1 vs acc_10). Nếu có process bị giết, chờ ngắn cho khoá profile (delete-pending) buông.
+            if (Shopee.Core.Browser.BraveProcessReaper.KillByUserDataDir(_currentProfileDir) > 0)
+                Thread.Sleep(400);
+        }
 
         // The CDP port was reserved for this browser's lifetime; free it now that Brave is gone.
         if (_cdpPort > 0)
         {
-            ReleasePort(_cdpPort);
+            Shopee.Core.Infrastructure.PortAllocator.Release(_cdpPort);
             _cdpPort = 0;
         }
 

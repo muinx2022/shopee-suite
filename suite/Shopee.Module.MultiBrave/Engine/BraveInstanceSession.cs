@@ -6,6 +6,8 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Shopee.Core.BigSeller;
 using Shopee.Core.Browser;
+using Shopee.Core.Cdp;
+using Shopee.Core.Infrastructure;
 
 namespace OpenMultiBraveLauncherV3;
 
