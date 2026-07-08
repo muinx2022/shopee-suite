@@ -7,6 +7,7 @@ using Microsoft.Playwright;
 using Shopee.Core.Ai;
 using Shopee.Core.BigSeller;
 using Shopee.Core.Browser;
+using Shopee.Core.Cdp;
 
 namespace UpdateProduct;
 
@@ -326,7 +327,7 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
     private readonly bool _exportCookie;
     // Cache dữ liệu shop DÙNG CHUNG mọi lane (nạp 1 lần ở tầng điều phối). null = lane tự đọc workbook (đường 1-lane cũ).
     private readonly WorkbookRecordCache? _sharedRecords;
-    private long _lastTokenWriteBackTick;   // throttle ghi-ngược muc_token định kỳ trong lúc chạy
+    private readonly BigSellerTokenWriteBack _tokenWriteBack = new();
 
     public BigSellerProductUpdateRunner(
         BigSellerWorkflowSettings settings, Action<string> log, WorkflowPauseToken? pauseToken = null,
@@ -400,13 +401,13 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
         var hasLiveSession = false;
         try
         {
-            hasLiveSession = BigSellerCookieImporter.HasAuthCookie(
-                await BigSellerCookieImporter.GetBigSellerCookiesAsync(_settings.DebugPort).ConfigureAwait(false));
+            hasLiveSession = BigSellerCookieEngine.HasAuthCookie(
+                await BigSellerCookieEngine.GetBigSellerCookiesAsync(_settings.DebugPort).ConfigureAwait(false));
         }
         catch { }
 
         if (hasLiveSession &&
-            await BigSellerCookieImporter.ProbeLoggedInAsync(_settings.DebugPort, ListingUrl, _log, ct).ConfigureAwait(false) == false)
+            await BigSellerCookieEngine.ProbeLoggedInAsync(_settings.DebugPort, ListingUrl, _log, ct).ConfigureAwait(false) == false)
         {
             hasLiveSession = false;
             _log("Token BigSeller trong profile đã bị thu hồi — nạp lại cookie từ file account.");
@@ -417,16 +418,16 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
             _log("Profile đã đăng nhập BigSeller — giữ phiên hiện tại.");
             // Chỉ lane 0 ghi cookie ra file (tránh các lane phụ đá token nhau — rotation-war).
             if (_exportCookie)
-                await BigSellerCookieImporter.TryExportProfileCookiesToFileAsync(
+                await BigSellerCookieEngine.TryExportProfileCookiesToFileAsync(
                     _settings.DebugPort, _settings.BigSellerCookieFile, _log).ConfigureAwait(false);
         }
         else
         {
             _log("Đang import cookie BigSeller từ file...");
-            await BigSellerCookieImporter.ImportFromFileAsync(
+            await BigSellerCookieEngine.ImportFromFileAsync(
                 _settings.DebugPort, _settings.BigSellerCookieFile ?? "", _log,
                 reloadBigSellerTabs: false, navigateUrl: ListingUrl, ct).ConfigureAwait(false);
-            if (await BigSellerCookieImporter.ProbeLoggedInAsync(_settings.DebugPort, ListingUrl, _log, ct).ConfigureAwait(false) == false)
+            if (await BigSellerCookieEngine.ProbeLoggedInAsync(_settings.DebugPort, ListingUrl, _log, ct).ConfigureAwait(false) == false)
                 _log("Cookie từ file cũng hết hạn — mở tab Account, login lại rồi Save & close.");
         }
     }
@@ -588,21 +589,9 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
     /// mà Update trước đây THIẾU (chỉ export lúc đầu + lúc đóng) → file thiu giữa chừng → lane khác / lần chạy
     /// sau import token CŨ → BigSeller đá phiên ("log in first"). Dùng engine cookie DÙNG CHUNG ở Core.
     /// </summary>
-    private async Task MaybeWriteBackBigSellerTokenAsync(CancellationToken ct)
-    {
-        if (!_exportCookie || string.IsNullOrWhiteSpace(_settings.BigSellerCookieFile))
-            return;
-        var now = Environment.TickCount64;
-        if (now - _lastTokenWriteBackTick < 90_000)
-            return;
-        _lastTokenWriteBackTick = now;
-        try
-        {
-            await BigSellerCookieEngine.WriteBackLiveTokenAsync(
-                _settings.DebugPort, _settings.BigSellerCookieFile!, _log, ct).ConfigureAwait(false);
-        }
-        catch { /* best-effort */ }
-    }
+    private Task MaybeWriteBackBigSellerTokenAsync(CancellationToken ct)
+        => _tokenWriteBack.MaybeWriteBackAsync(
+            _exportCookie, _settings.DebugPort, _settings.BigSellerCookieFile, _log, ct);
 
     // ── dọn media định kỳ (parity main.py _record_success → image_manager.delete_all_images) ──
     // Sau mỗi DeleteMediaAfterUpdates SP LƯU thành công, xóa sạch Material Center. Mỗi lần edit BigSeller đẩy
@@ -1190,7 +1179,7 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
         await StepAsync("Sửa tên sản phẩm");
         // [1] name — CẮT ≤120 ký tự (giới hạn Shopee, tránh BigSeller báo lỗi), giữ SKU ở cuối.
         // fill fail KHÔNG làm rớt cả SP (giữ tên cũ, vẫn lưu phần còn lại như Python).
-        var nameToFill = TruncateProductNamePreservingSku(rec.ProductName, rec.Sku, MaxProductNameChars);
+        var nameToFill = BigSellerText.TruncateProductNamePreservingSku(rec.ProductName, rec.Sku, MaxProductNameChars);
         var rawLen = (rec.ProductName ?? "").Trim().Length;
         if (rawLen > MaxProductNameChars)
             _log($"  ✂ Tên dài {rawLen} ký tự → cắt còn {nameToFill.Length} (≤{MaxProductNameChars}, giữ SKU).");
@@ -2034,36 +2023,6 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
         return clipped.Trim();
     }
 
-    // Cắt tên SP về tối đa maxLength ký tự, ƯU TIÊN giữ SKU ở cuối (bỏ bớt từ ở thân). Parity name-rewrite.
-    private static string TruncateProductNamePreservingSku(string? productName, string? sku, int maxLength)
-    {
-        var name = (productName ?? "").Trim();
-        sku = (sku ?? "").Trim();
-        if (name.Length <= maxLength) return name;
-
-        if (!string.IsNullOrWhiteSpace(sku) && name.EndsWith(sku, StringComparison.Ordinal))
-        {
-            var body = name[..^sku.Length].Trim();
-            var words = body.Split(' ', StringSplitOptions.RemoveEmptyEntries).ToList();
-            while (words.Count > 0)
-            {
-                var candidate = $"{string.Join(" ", words)} {sku}".Trim();
-                if (candidate.Length <= maxLength) return candidate;
-                words.RemoveAt(words.Count - 1);
-            }
-            return sku.Length <= maxLength ? sku : sku[..maxLength].Trim();
-        }
-
-        var allWords = name.Split(' ', StringSplitOptions.RemoveEmptyEntries).ToList();
-        while (allWords.Count > 0)
-        {
-            var candidate = string.Join(" ", allWords).Trim();
-            if (candidate.Length <= maxLength) return candidate;
-            allWords.RemoveAt(allWords.Count - 1);
-        }
-        return name[..Math.Min(maxLength, name.Length)].Trim();
-    }
-
     private void StartBrave()
     {
         Directory.CreateDirectory(_settings.ProfileDir);
@@ -2104,7 +2063,7 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
             try
             {
                 await Task.WhenAny(
-                    BigSellerCookieImporter.TryExportProfileCookiesToFileAsync(
+                    BigSellerCookieEngine.TryExportProfileCookiesToFileAsync(
                         _settings.DebugPort, _settings.BigSellerCookieFile, _log, verifySessionAlive: true),
                     Task.Delay(6000)).ConfigureAwait(false);
             }

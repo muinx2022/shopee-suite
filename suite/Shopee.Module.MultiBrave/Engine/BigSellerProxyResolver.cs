@@ -1,3 +1,5 @@
+using Shopee.Core.Proxy;
+
 namespace OpenMultiBraveLauncherV3;
 
 /// <summary>
@@ -26,7 +28,7 @@ public static class BigSellerProxyResolver
         Exception? lastCurErr = null;
         for (var attempt = 1; attempt <= 3 && proxy is null; attempt++)
         {
-            try { proxy = await KiotProxyService.GetCurrentProxyAsync(key).ConfigureAwait(false); }
+            try { proxy = await KiotProxyClient.GetCurrentProxyAsync(key).ConfigureAwait(false); }
             catch (Exception ex)
             {
                 lastCurErr = ex;
@@ -38,7 +40,7 @@ public static class BigSellerProxyResolver
             try
             {
                 log?.Invoke($"Proxy BigSeller: /current chưa có IP ({lastCurErr?.Message}) → cấp IP mới (/new).");
-                proxy = await KiotProxyService.GetNewProxyAsync(key, region, log).ConfigureAwait(false);
+                proxy = await KiotProxyClient.GetNewProxyAsync(key, region, log).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -49,7 +51,7 @@ public static class BigSellerProxyResolver
 
         try
         {
-            return KiotProxyService.BuildProxyServer(proxy, type);
+            return KiotProxyClient.BuildProxyServer(proxy, type);
         }
         catch (Exception ex)
         {

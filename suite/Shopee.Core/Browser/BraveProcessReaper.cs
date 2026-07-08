@@ -15,9 +15,12 @@ public static class BraveProcessReaper
     /// <summary>
     /// Giết mọi brave.exe có cờ <c>--user-data-dir</c> trỏ ĐÚNG tới <paramref name="userDataDir"/>.
     /// Khớp đúng giá trị (không phải Contains) nên không đụng Brave cá nhân hay profile khác.
-    /// Best-effort, không ném lỗi.
+    /// <paramref name="includeCrashpadOrphans"/> = true → giết THÊM crashpad_handler mồ côi còn giữ profile
+    /// (delete-pending) sau khi brave cha đã thoát; khớp theo RANH GIỚI path để không giết nhầm profile khác.
+    /// Best-effort, không ném lỗi. Trả về số tiến trình đã giết.
     /// </summary>
-    public static int KillByUserDataDir(string? userDataDir, Action<string>? log = null)
+    public static int KillByUserDataDir(
+        string? userDataDir, Action<string>? log = null, bool includeCrashpadOrphans = false)
     {
         if (string.IsNullOrWhiteSpace(userDataDir))
             return 0;
@@ -33,12 +36,25 @@ public static class BraveProcessReaper
                 killed++;
         }
 
+        // Crashpad mồ côi: brave cha đã thoát nên nó KHÔNG nằm trong cây tiến trình nào (kill brave ở trên
+        // bỏ sót nó) mà vẫn giữ profile ở trạng thái delete-pending → CreateDirectory fail. Chỉ quét khi
+        // caller yêu cầu (luồng Search) để giữ nguyên hành vi các caller khác.
+        if (includeCrashpadOrphans)
+        {
+            foreach (var pid in FindCrashpadOrphanPidsByCommandLine(needle, log))
+            {
+                if (TryKillTree(pid))
+                    killed++;
+            }
+        }
+
         if (killed > 0)
             log?.Invoke($"Đã dọn {killed} tiến trình Brave còn sót của profile.");
         return killed;
     }
 
     private static readonly string[] BraveOnly = ["brave.exe"];
+    private static readonly string[] CrashpadOnly = ["crashpad_handler.exe"];
 
     private static List<int> FindBravePidsByCommandLine(string normalizedNeedle, Action<string>? log)
     {
@@ -58,7 +74,51 @@ public static class BraveProcessReaper
         return pids;
     }
 
-    private static bool TryKillTree(int pid)
+    // crashpad_handler KHÔNG mang cờ --user-data-dir riêng (đường dẫn profile nằm trong --database=…\Crashpad,
+    // --metrics-dir=… v.v.) nên không thể khớp-đúng-giá-trị như brave.exe. Khớp theo RANH GIỚI path: needle phải
+    // theo sau bằng \ / " hoặc hết chuỗi/khoảng trắng → tránh giết nhầm acc_1 khi profile là acc_10 (chặt hơn
+    // bản cũ vốn dùng Contains trần).
+    private static List<int> FindCrashpadOrphanPidsByCommandLine(string normalizedNeedle, Action<string>? log)
+    {
+        var pids = new List<int>();
+        foreach (var p in PlatformServices.ProcessFinder.Enumerate(CrashpadOnly, log))
+        {
+            if (p.Pid > 0 && CommandLineReferencesPath(p.CommandLine, normalizedNeedle))
+                pids.Add(p.Pid);
+        }
+        return pids;
+    }
+
+    /// <summary>true nếu <paramref name="commandLine"/> nhắc tới ĐÚNG <paramref name="normalizedNeedle"/> theo ranh
+    /// giới path (ký tự ngay sau là <c>\</c> <c>/</c> <c>"</c>, khoảng trắng, hoặc hết chuỗi) — không khớp
+    /// acc_1 nằm trong acc_10.</summary>
+    private static bool CommandLineReferencesPath(string commandLine, string normalizedNeedle)
+    {
+        if (string.IsNullOrEmpty(commandLine) || normalizedNeedle.Length == 0)
+            return false;
+
+        var from = 0;
+        while (from <= commandLine.Length - normalizedNeedle.Length)
+        {
+            var idx = commandLine.IndexOf(normalizedNeedle, from, StringComparison.OrdinalIgnoreCase);
+            if (idx < 0)
+                return false;
+
+            var after = idx + normalizedNeedle.Length;
+            if (after >= commandLine.Length)
+                return true; // path ở cuối chuỗi
+
+            var c = commandLine[after];
+            if (c == '\\' || c == '/' || c == '"' || char.IsWhiteSpace(c))
+                return true; // ranh giới hợp lệ
+
+            from = idx + 1; // trùng dở (vd acc_1 trong acc_10) → dò tiếp
+        }
+        return false;
+    }
+
+    /// <summary>Giết cả cây tiến trình theo PID (best-effort). Dùng chung với <see cref="BraveFleet"/>.</summary>
+    internal static bool TryKillTree(int pid)
     {
         try
         {
@@ -75,8 +135,9 @@ public static class BraveProcessReaper
         }
     }
 
-    /// <summary>Trích giá trị của cờ <c>--user-data-dir=</c> từ command-line (hỗ trợ có/không dấu nháy).</summary>
-    private static string? ExtractUserDataDir(string commandLine)
+    /// <summary>Trích giá trị của cờ <c>--user-data-dir=</c> từ command-line (hỗ trợ có/không dấu nháy).
+    /// Dùng chung với <see cref="BraveFleet"/>.</summary>
+    internal static string? ExtractUserDataDir(string commandLine)
     {
         const string flag = "--user-data-dir=";
         var idx = commandLine.IndexOf(flag, StringComparison.OrdinalIgnoreCase);

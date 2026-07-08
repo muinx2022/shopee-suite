@@ -1,10 +1,14 @@
-using System.Net.WebSockets;
-using System.Text;
-using System.Text.Json;
+using Shopee.Core.Infrastructure;
 
-namespace OpenMultiBraveLauncherV3;
+namespace Shopee.Core.Cdp;
 
-internal sealed class CdpClient(int cdpPort)
+/// <summary>
+/// CDP client "port-based" (HTTP <c>/json</c> + WebSocket dùng-một-lần) dùng chung cho các module phóng
+/// Brave (MultiBrave/UpdateProduct). Khác <see cref="CdpSession"/> (kết nối bền, đa lệnh qua flat-session):
+/// lớp này mở/đóng WebSocket theo từng thao tác — hợp với luồng login/cookie ngắn. Gộp về Core từ 2 bản
+/// nhân đôi byte-identical ở 2 module (chỉ khác namespace).
+/// </summary>
+public sealed class CdpClient(int cdpPort)
 {
     public int Port { get; } = cdpPort;
 

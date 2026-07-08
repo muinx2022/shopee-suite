@@ -77,7 +77,17 @@ public sealed class AppSettingsService
         {
             try { Directory.CreateDirectory(defaultDir); return dir; }
             catch (Exception) { }
-            if (attempt == 0 || attempt == 3) { try { BraveManager.KillBraveProcessesForProfile(dir); } catch { } }
+            if (attempt == 0 || attempt == 3)
+            {
+                // Giết brave + crashpad mồ côi giữ ĐÚNG profile này; nếu có process bị giết, chờ 400ms cho
+                // khoá profile (delete-pending) buông trước khi thử lại CreateDirectory.
+                try
+                {
+                    if (Shopee.Core.Browser.BraveProcessReaper.KillByUserDataDir(dir, includeCrashpadOrphans: true) > 0)
+                        Thread.Sleep(400);
+                }
+                catch { }
+            }
             if (attempt == 1) { try { ClearReadOnly(dir); } catch { } }
             Thread.Sleep(200 + attempt * 150);   // 200,350,…,1550ms (tổng ~8.6s) — đủ để lock/AV/delete-pending nhả
         }

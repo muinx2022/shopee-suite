@@ -88,7 +88,7 @@ public sealed class SearchSession : IAsyncDisposable
         LastError = null;
         Touch(); // mốc hoạt động đầu tiên cho watchdog của lần chạy này
 
-        var port = BraveManager.FindFreePort();
+        var port = Shopee.Core.Infrastructure.PortAllocator.Reserve();
 
         string? profileDir;
         string? proxy;
@@ -100,13 +100,13 @@ public sealed class SearchSession : IAsyncDisposable
         catch (Exception ex)
         {
             Log?.Invoke(ex.Message);
-            BraveManager.ReleasePort(port); // never bound — don't leak the reservation
+            Shopee.Core.Infrastructure.PortAllocator.Release(port); // never bound — don't leak the reservation
             return SearchRunOutcome.Error;
         }
 
         // Bind the WS server on `port` and wire the orchestrator BEFORE launching Brave, so the
         // extension reaches a live server the instant it connects: no window for another lane's
-        // FindFreePort to grab this port, and no connect-before-listen race. The crawl stays gated —
+        // PortAllocator.Reserve to grab this port, and no connect-before-listen race. The crawl stays gated —
         // PrepareSearch() runs only AFTER login below, so the extension's early "ready" (the launch
         // URL carries #_ss_ws={port}) is a no-op until we're logged in.
         // Reuse an existing task when resuming a keyword (keeps its accumulated products + checkpoint
@@ -165,7 +165,7 @@ public sealed class SearchSession : IAsyncDisposable
         _ws.Start();
         // The listener now owns the port (HTTP.sys binds synchronously), so the OS won't
         // hand it to another lane — release the reservation that guarded the pre-bind gap.
-        BraveManager.ReleasePort(port);
+        Shopee.Core.Infrastructure.PortAllocator.Release(port);
 
         _brave.Launch(account, profileDir, proxy, port);
         Log?.Invoke("Brave đang khởi động...");

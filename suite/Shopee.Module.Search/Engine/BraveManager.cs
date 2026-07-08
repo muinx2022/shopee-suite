@@ -2,9 +2,6 @@ namespace ShopeeStatApp.Services;
 
 public sealed class BraveManager(AppSettingsService appSettings)
 {
-    // Dùng chung 1 HttpClient cho gọi kiotproxy: tạo mới mỗi lần (mỗi account/lane relaunch) cạn socket/TIME_WAIT.
-    private static readonly HttpClient ProxyHttp = new() { Timeout = TimeSpan.FromSeconds(12) };
-
     private Process? _process;
     private int _cdpPort;
     private string? _currentProfileDir;
@@ -66,7 +63,7 @@ public sealed class BraveManager(AppSettingsService appSettings)
         Kill();
         ClearExtensionRuntimeCache(profileDir);
 
-        _cdpPort = FindFreePort();
+        _cdpPort = Shopee.Core.Infrastructure.PortAllocator.Reserve();
         _currentProfileDir = Path.GetFullPath(profileDir);
         var args = BuildArgs(_cdpPort, profileDir, proxyServer, extPath, wsPort);
         // Phóng qua BraveJobObject (KILL_ON_JOB_CLOSE): app tắt/crash/force-kill → OS tự giết Brave này,
@@ -215,49 +212,6 @@ public sealed class BraveManager(AppSettingsService appSettings)
     private static bool IsExtensionDir(string path) =>
         Directory.Exists(path) && File.Exists(Path.Combine(path, "manifest.json"));
 
-    internal static void KillBraveProcessesForProfile(string profileDir)
-    {
-        var fullProfileDir = Path.GetFullPath(profileDir).TrimEnd('\\', '/');
-        var killedAny = false;
-        try
-        {
-            // One WMI query collects brave.exe processes and command lines, then kills
-            // only processes whose command line points to this managed profile.
-            foreach (var pid in FindBravePidsByCommandLine(fullProfileDir))
-            {
-                try
-                {
-                    using var p = Process.GetProcessById(pid);
-                    if (!p.HasExited)
-                    {
-                        p.Kill(entireProcessTree: true);
-                        killedAny = true;
-                    }
-                }
-                catch { }
-            }
-
-            if (killedAny)
-                Thread.Sleep(400);
-        }
-        catch { }
-    }
-
-    // Cả brave.exe LẪN crashpad_handler.exe (tiến trình con của Brave — thường là kẻ còn GIỮ profile ở
-    // trạng thái delete-pending sau khi brave cha đã thoát) đều phải bị kill để nhả khoá profile.
-    private static readonly string[] BraveAndCrashpad = ["brave.exe", "crashpad_handler.exe"];
-
-    private static List<int> FindBravePidsByCommandLine(string profileDirNeedle)
-    {
-        var pids = new List<int>();
-        foreach (var p in Shopee.Core.Platform.PlatformServices.ProcessFinder.Enumerate(BraveAndCrashpad))
-        {
-            if (p.CommandLine.Contains(profileDirNeedle, StringComparison.OrdinalIgnoreCase) && p.Pid > 0)
-                pids.Add(p.Pid);
-        }
-        return pids;
-    }
-
     /// <summary>Liệt kê tiến trình đang tham chiếu profile này ("tên#pid, …") để chẩn đoán khi KHÔNG tạo được
     /// profile — quét MỌI tiến trình có đường dẫn profile trong command line (không chỉ Brave) để lộ cả kẻ lạ.</summary>
     internal static string DescribeProfileHolders(string profileDir)
@@ -334,116 +288,15 @@ public sealed class BraveManager(AppSettingsService appSettings)
 
     private static async Task<(string? Proxy, string? Error)> FetchKiotProxyAsync(string key, string proxyType)
     {
-        // ƯU TIÊN /current: giữ IP hiện hành của key (sống ~30') → login Shopee và search DÙNG CHUNG 1 IP
-        // → tránh captcha do nhảy IP. CHỈ /new khi /current chưa có proxy (key chưa kích hoạt / hết hạn) —
-        // /new gán IP mới một lần, các lần sau /current dùng lại. KHÔNG gọi /new mỗi lần (sẽ ép xoay IP).
-        var currentUrl = $"https://api.kiotproxy.com/api/v1/proxies/current?key={Uri.EscapeDataString(key)}";
-        var current = await TryFetchKiotProxyAsync(currentUrl, proxyType);
+        // ƯU TIÊN /current: giữ IP hiện hành của key (sống ~30') → login Shopee và search DÙNG CHUNG 1 IP →
+        // tránh captcha do nhảy IP. CHỈ /new khi /current chưa có proxy (key chưa kích hoạt / hết hạn). Dùng
+        // chung KiotProxyClient (Core) — cùng URL/schema với Scrape/Update, không nhân bản parse proxy nữa.
+        var current = await Shopee.Core.Proxy.KiotProxyClient.FetchCurrentAsync(key, default, proxyType);
         if (current.Proxy is not null)
-            return current;
+            return (current.Proxy, null);
 
-        var newUrl = $"https://api.kiotproxy.com/api/v1/proxies/new?key={Uri.EscapeDataString(key)}&region=random";
-        var fresh = await TryFetchKiotProxyAsync(newUrl, proxyType);
-        return fresh.Proxy is not null ? fresh : (null, fresh.Error ?? current.Error);
-    }
-
-    private static async Task<(string? Proxy, string? Error)> TryFetchKiotProxyAsync(
-        string url,
-        string proxyType)
-    {
-        string response;
-        try
-        {
-            response = await ProxyHttp.GetStringAsync(url);
-        }
-        catch (HttpRequestException ex)
-        {
-            response = ex.Message;
-            if (ex.StatusCode is not null)
-            {
-                try { response = await ProxyHttp.GetStringAsync(url); } catch { }
-            }
-        }
-        catch (Exception ex)
-        {
-            return (null, ex.Message);
-        }
-
-        try
-        {
-            using var doc = JsonDocument.Parse(response);
-            var root = doc.RootElement;
-            if (root.TryGetProperty("success", out var successProp) && !successProp.GetBoolean())
-            {
-                var message = root.TryGetProperty("message", out var msg) ? msg.GetString() : null;
-                return (null, message);
-            }
-
-            var data = root.TryGetProperty("data", out var dataProp) ? dataProp : root;
-            var fieldName = string.Equals(proxyType, "socks5", StringComparison.OrdinalIgnoreCase)
-                ? "socks5"
-                : "http";
-
-            if (data.TryGetProperty(fieldName, out var proxyProp))
-            {
-                var proxy = proxyProp.GetString();
-                if (!string.IsNullOrWhiteSpace(proxy))
-                    return ($"{fieldName}://{proxy}", null);
-            }
-
-            if (!data.TryGetProperty("host", out var hostProp)) return (null, "KiotProxy không trả về host/proxy.");
-            var host = hostProp.GetString();
-            if (string.IsNullOrWhiteSpace(host)) return (null, "KiotProxy trả về host rỗng.");
-
-            var portField = string.Equals(fieldName, "socks5", StringComparison.OrdinalIgnoreCase)
-                ? "socks5Port"
-                : "httpPort";
-            if (!data.TryGetProperty(portField, out var portProp)) return (null, $"KiotProxy không trả về {portField}.");
-
-            return ($"{fieldName}://{host}:{portProp.GetInt32()}", null);
-        }
-        catch (JsonException)
-        {
-            return (null, response);
-        }
-    }
-
-    // Ports handed out by FindFreePort but not yet bound by their consumer (Brave's CDP
-    // server or a lane's HttpListener). The OS frees an ephemeral port the instant the
-    // probe listener closes, so without this two lanes starting together — and binding
-    // seconds later, after proxy resolution — can be handed the SAME number and collide
-    // (one lane's Brave then talks to another lane's WS/CDP). Guarded by _portLock.
-    private static readonly object _portLock = new();
-    private static readonly HashSet<int> _reservedPorts = [];
-
-    /// <summary>
-    /// Allocates a free loopback TCP port (used for CDP and per-lane WS servers), unique
-    /// across concurrent callers: a port handed out here won't be handed out again until
-    /// <see cref="ReleasePort"/> frees it (call that once the consumer has bound, or torn down).
-    /// </summary>
-    public static int FindFreePort()
-    {
-        lock (_portLock)
-        {
-            for (var attempt = 0; attempt < 50; attempt++)
-            {
-                var l = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
-                l.Start();
-                var port = ((System.Net.IPEndPoint)l.LocalEndpoint).Port;
-                l.Stop();
-                // Skip ports already reserved by a sibling lane that hasn't bound yet —
-                // a fresh probe listener gets a different ephemeral port on retry.
-                if (_reservedPorts.Add(port))
-                    return port;
-            }
-            throw new InvalidOperationException("Không cấp phát được cổng trống cho lane.");
-        }
-    }
-
-    /// <summary>Frees a port previously returned by <see cref="FindFreePort"/> so it can be reused.</summary>
-    public static void ReleasePort(int port)
-    {
-        lock (_portLock) _reservedPorts.Remove(port);
+        var fresh = await Shopee.Core.Proxy.KiotProxyClient.FetchNewAsync(key, default, proxyType);
+        return fresh.Proxy is not null ? (fresh.Proxy, null) : (null, fresh.Error ?? current.Error);
     }
 
     public void Kill()
@@ -460,12 +313,18 @@ public sealed class BraveManager(AppSettingsService appSettings)
         try { _process?.Dispose(); } catch { }
 
         if (!string.IsNullOrWhiteSpace(_currentProfileDir))
-            KillBraveProcessesForProfile(_currentProfileDir);
+        {
+            // Giết ĐÚNG Brave của profile này theo giá trị --user-data-dir (khớp CHÍNH XÁC, không Contains →
+            // không giết nhầm acc_1 vs acc_10). Nếu có process bị giết, chờ ngắn cho khoá profile (delete-pending) buông.
+            if (Shopee.Core.Browser.BraveProcessReaper.KillByUserDataDir(
+                    _currentProfileDir, includeCrashpadOrphans: true) > 0)
+                Thread.Sleep(400);
+        }
 
         // The CDP port was reserved for this browser's lifetime; free it now that Brave is gone.
         if (_cdpPort > 0)
         {
-            ReleasePort(_cdpPort);
+            Shopee.Core.Infrastructure.PortAllocator.Release(_cdpPort);
             _cdpPort = 0;
         }
 

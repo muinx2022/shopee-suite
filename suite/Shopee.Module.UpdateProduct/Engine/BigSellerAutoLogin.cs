@@ -50,7 +50,7 @@ internal static class BigSellerAutoLogin
         {
             BigSellerSessionRegistry.MarkLoggedIn(accountId);
             if (exportCookie && !string.IsNullOrWhiteSpace(cookieFile))
-                await BigSellerCookieImporter.TryExportProfileCookiesToFileAsync(debugPort, cookieFile!, log).ConfigureAwait(false);
+                await BigSellerCookieEngine.TryExportProfileCookiesToFileAsync(debugPort, cookieFile!, log).ConfigureAwait(false);
         }
         else if (outcome == AutoLoginOutcome.NeedsOtp)
             log?.Invoke("⚠ BigSeller đòi mã xác nhận email (thiết bị mới). Hãy đăng nhập TAY 1 lần trên máy này (Tài khoản → Open BigSeller → login → Save & close) để tạo device-trust; sau đó auto-login chạy được (không cần mã nữa).");

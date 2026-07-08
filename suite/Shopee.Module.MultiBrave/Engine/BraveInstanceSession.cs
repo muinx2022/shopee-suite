@@ -6,6 +6,9 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Shopee.Core.BigSeller;
 using Shopee.Core.Browser;
+using Shopee.Core.Cdp;
+using Shopee.Core.Infrastructure;
+using Shopee.Core.Proxy;
 
 namespace OpenMultiBraveLauncherV3;
 
@@ -444,7 +447,7 @@ internal sealed class BraveInstanceSession : IDisposable
                         // giữa chừng rồi nạp đè token cũ. App cũ KHÔNG re-import khi restart nên không bị.
                         if (!string.IsNullOrWhiteSpace(_bigSellerCookieFile))
                         {
-                            if (await BigSellerCookieImporter.HasAuthCookieInBrowserAsync(_cdpPort).ConfigureAwait(false))
+                            if (await BigSellerCookieEngine.HasAuthCookieInBrowserAsync(_cdpPort).ConfigureAwait(false))
                                 Log("BigSeller cookie: profile mở lại vẫn còn muc_token — GIỮ phiên sống, KHÔNG nạp đè.");
                             else
                                 await ImportBigSellerCookiesIfConfiguredAsync(loopToken).ConfigureAwait(false);
@@ -1219,7 +1222,7 @@ internal sealed class BraveInstanceSession : IDisposable
     private Task<Dictionary<string, object>> GetProxyAsync()
     {
         if (_config is null) throw new InvalidOperationException("Chua cau hinh instance.");
-        return KiotProxyService.GetNewProxyAsync(_config, Log);
+        return KiotProxyClient.GetNewProxyAsync(_config.KiotProxyKey, _config.Region, Log);
     }
     private async Task<Dictionary<string, object>> GetWorkingProxyAsync(
         int maxAttempts = 5,
@@ -1284,12 +1287,12 @@ internal sealed class BraveInstanceSession : IDisposable
     private Task<Dictionary<string, object>> GetCurrentProxyAsync()
     {
         if (_config is null) throw new InvalidOperationException("Chua cau hinh instance.");
-        return KiotProxyService.GetCurrentProxyAsync(_config);
+        return KiotProxyClient.GetCurrentProxyAsync(_config.KiotProxyKey);
     }
     private static string BuildProxyServer(Dictionary<string, object> proxy, string selectedType) =>
-        KiotProxyService.BuildProxyServer(proxy, selectedType);
+        KiotProxyClient.BuildProxyServer(proxy, selectedType);
     private static string BuildFingerprint(Dictionary<string, object> proxy) =>
-        KiotProxyService.BuildFingerprint(proxy);
+        KiotProxyClient.BuildFingerprint(proxy);
     private static bool IsProxyExpiredError(string msg) =>
         msg.Contains("KiotProxy current", StringComparison.OrdinalIgnoreCase) ||
         msg.Contains("KiotProxy new", StringComparison.OrdinalIgnoreCase) ||
@@ -1796,7 +1799,7 @@ internal sealed class BraveInstanceSession : IDisposable
     public async Task<bool> HasBigSellerAuthAsync()
     {
         if (!_running) return false;
-        try { return await BigSellerCookieImporter.HasAuthCookieInBrowserAsync(_cdpPort).ConfigureAwait(false); }
+        try { return await BigSellerCookieEngine.HasAuthCookieInBrowserAsync(_cdpPort).ConfigureAwait(false); }
         catch { return false; }
     }
 
@@ -1813,11 +1816,11 @@ internal sealed class BraveInstanceSession : IDisposable
             return;
         try
         {
-            var cookies = await BigSellerCookieImporter.GetBigSellerCookiesAsync(_cdpPort).ConfigureAwait(false);
+            var cookies = await BigSellerCookieEngine.GetBigSellerCookiesAsync(_cdpPort).ConfigureAwait(false);
             // Chỉ ghi khi token còn sống (có muc_token) — tránh ghi đè file bằng cookie rỗng/chết.
-            if (!BigSellerCookieImporter.HasAuthCookie(cookies))
+            if (!BigSellerCookieEngine.HasAuthCookie(cookies))
                 return;
-            BigSellerCookieImporter.TryWriteCookieFile(_bigSellerCookieFile, cookies, Log);
+            BigSellerCookieEngine.TryWriteCookieFile(_bigSellerCookieFile, cookies, Log);
         }
         catch { /* best-effort */ }
     }
@@ -1856,7 +1859,7 @@ internal sealed class BraveInstanceSession : IDisposable
 
         // CHẨN ĐOÁN "token mất đi đâu": ghi token ĐANG có trong browser TRƯỚC khi import (để biết import
         // có ghi đè token đang sống không, và token có hết hạn không).
-        var tokenBefore = await BigSellerCookieImporter.GetAuthCookieDebugAsync(_cdpPort).ConfigureAwait(false);
+        var tokenBefore = await BigSellerCookieEngine.GetAuthCookieDebugAsync(_cdpPort).ConfigureAwait(false);
         // Log RÕ tk BigSeller + file cookie đang nạp (để bắt nếu multi-BigSeller nạp nhầm file của tk khác).
         Log($"BigSeller nạp cookie: tk=\"{_config?.BigSellerAccountName ?? "?"}\" file=\"{Path.GetFileName(_bigSellerCookieFile)}\"");
         Log($"BigSeller token (trước import): {tokenBefore}");
@@ -1870,10 +1873,10 @@ internal sealed class BraveInstanceSession : IDisposable
         //   • browser CHƯA có muc_token (seed lần đầu / profile mới), HOẶC
         //   • token trong file MỚI HƠN browser theo hạn (tức user vừa ĐĂNG NHẬP LẠI → file cập nhật).
         // Nếu token browser mới hơn/bằng hoặc TRÙNG giá trị file ⇒ GIỮ phiên server vừa cấp, KHÔNG đè.
-        var browserTok = await BigSellerCookieImporter.GetBrowserAuthTokenInfoAsync(_cdpPort).ConfigureAwait(false);
+        var browserTok = await BigSellerCookieEngine.GetBrowserAuthTokenInfoAsync(_cdpPort).ConfigureAwait(false);
         if (browserTok is { } bt)
         {
-            var fileTok = BigSellerCookieImporter.GetFileAuthTokenInfo(_bigSellerCookieFile);
+            var fileTok = BigSellerCookieEngine.GetFileAuthTokenInfo(_bigSellerCookieFile);
             var sameValue = fileTok is { } ft && string.Equals(ft.Value, bt.Value, StringComparison.Ordinal);
             // File mới hơn khi: file CÓ hạn rõ VÀ (browser KHÔNG hạn — session cookie, thường do user vừa
             // login lại → cần nạp token mới; HOẶC cả hai có hạn nhưng file trễ hơn). Cả hai có hạn mà browser
@@ -1893,11 +1896,12 @@ internal sealed class BraveInstanceSession : IDisposable
         {
             try
             {
-                await BigSellerCookieImporter.ImportFromFileAsync(
-                    _cdpPort, _bigSellerCookieFile, Log, cancellationToken).ConfigureAwait(false);
-                if (await BigSellerCookieImporter.HasAuthCookieInBrowserAsync(_cdpPort).ConfigureAwait(false))
+                await BigSellerCookieEngine.ImportFromFileAsync(
+                    _cdpPort, _bigSellerCookieFile, Log,
+                    reloadBigSellerTabs: false, navigateUrl: null, cancellationToken).ConfigureAwait(false);
+                if (await BigSellerCookieEngine.HasAuthCookieInBrowserAsync(_cdpPort).ConfigureAwait(false))
                 {
-                    var tokenAfter = await BigSellerCookieImporter.GetAuthCookieDebugAsync(_cdpPort).ConfigureAwait(false);
+                    var tokenAfter = await BigSellerCookieEngine.GetAuthCookieDebugAsync(_cdpPort).ConfigureAwait(false);
                     Log($"BigSeller token (sau import, lần {attempt}): {tokenAfter}");
                     return;
                 }
