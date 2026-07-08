@@ -45,15 +45,6 @@ public partial class App : Application
         }
         catch (Exception ex) { TryLog("StartupJanitor.Init", ex); }
 
-        // Hub nhúng: code GIỮ NGUYÊN (chưa xoá — còn port sang web). Trên client hubCfg.Enabled=false → no-op.
-        try
-        {
-            var hubCfg = Shopee.Core.Coordination.HubServerConfigStore.Shared.Current;
-            if (hubCfg.Enabled)
-                _ = Shopee.Hub.HubRuntime.Shared.StartAsync(hubCfg);
-        }
-        catch (Exception ex) { TryLog("Hub.Start", ex); }
-
         // Điều phối phía CLIENT (khoá việc, account-lease, nhận việc Hub giao). Chưa cấu hình → NoOp.
         try { Shopee.Core.Coordination.CoordinationRuntime.InitFromConfig(); }
         catch (Exception ex) { TryLog("Coordination.Init", ex); }
@@ -70,7 +61,6 @@ public partial class App : Application
             {
                 // Flush ghi đĩa hoãn (PersistDebounce) để không mất sửa BigSeller cuối nếu đóng nhanh.
                 try { Shopee.Core.BigSeller.BigSellerStore.Shared.Save(); } catch { }
-                try { Shopee.Hub.HubRuntime.Shared.StopBlocking(); } catch { }
                 try { MultiBraveRuntime.Cleanup(); } catch { }
             };
         }

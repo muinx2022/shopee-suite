@@ -4,7 +4,6 @@ using Shopee.Core.Ai;
 using Shopee.Core.Browser;
 using Shopee.Core.Coordination;
 using Shopee.Core.Infrastructure;
-using Shopee.Hub;
 using Shopee.Suite.Services;
 
 namespace Shopee.Suite.Modules.Settings;
@@ -73,20 +72,6 @@ public sealed partial class SettingsViewModel : ObservableObject
     /// <summary>Trạng thái kết nối client→Hub (hiện ngay trên panel client để biết nối được chưa).</summary>
     [ObservableProperty] private string _hubClientStatus = "";
 
-    // ── Chế độ Hub (máy này LÀM server) ─────────────────────────────────────────
-    [ObservableProperty] private bool _isHubMode;
-    [ObservableProperty] private int _hubPort = 8088;
-    [ObservableProperty] private string _hubDomain = "";
-    [ObservableProperty] private string _hubTunnelToken = "";
-    [ObservableProperty] private string _hubServerApiToken = "";
-    [ObservableProperty] private string _hubServerStatus = "";
-
-    /// <summary>Hub trên máy này đang chạy? — để bật/tắt nút "Bật Hub" / "Dừng Hub" cho rõ trạng thái.</summary>
-    [ObservableProperty]
-    [NotifyCanExecuteChangedFor(nameof(StartHubCommand))]
-    [NotifyCanExecuteChangedFor(nameof(StopHubCommand))]
-    private bool _isHubRunning;
-
     // ── Bộ chọn vai trò máy (mặc định KHÔNG chọn gì → không hiện panel nào) ──
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ShowRoleHint))]
@@ -127,7 +112,6 @@ public sealed partial class SettingsViewModel : ObservableObject
     public SettingsViewModel()
     {
         LoadFromStore();
-        HubRuntime.Shared.StateChanged += OnHubStateChanged;
         UpdateService.Shared.Changed += OnUpdateChanged;   // VM là singleton (tạo 1 lần) → không rò event
         OnUpdateChanged();                                  // seed trạng thái hiện tại
     }
@@ -167,14 +151,6 @@ public sealed partial class SettingsViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(UpdateReady))]
     private void ApplyUpdate() => UpdateService.Shared.ApplyAndRestart();
 
-    private void OnHubStateChanged() => UiThread.Post(ApplyHubState);
-
-    private void ApplyHubState()
-    {
-        IsHubRunning = HubRuntime.Shared.Running;
-        HubServerStatus = IsHubRunning ? "🟢 Đang chạy" : "⚪ Đã dừng";
-    }
-
     private void LoadFromStore()
     {
         MachineDisplayName = MachineIdentity.Shared.DisplayName;
@@ -182,15 +158,6 @@ public sealed partial class SettingsViewModel : ObservableObject
         HubEnabled = hub.Enabled;
         HubBaseUrl = hub.BaseUrl;
         HubApiToken = hub.ApiToken;
-
-        var hubSrv = HubServerConfigStore.Shared.Current;
-        IsHubMode = hubSrv.Enabled;
-        HubPort = hubSrv.Port;
-        HubDomain = hubSrv.Domain;
-        HubTunnelToken = hubSrv.TunnelToken;
-        HubServerApiToken = hubSrv.ApiToken;
-        IsHubRunning = HubRuntime.Shared.Running;
-        HubServerStatus = IsHubRunning ? "🟢 Đang chạy" : "⚪ Chưa chạy";
 
         // App giờ là CLIENT-only (Hub đã tách sang server web riêng) → LUÔN là client, luôn hiện phần Kết nối.
         // Chuẩn hoá cả config cũ (role "hub"/rỗng) về "client". _loadingRole chặn ghi-lại trong lúc nạp.
@@ -360,10 +327,6 @@ public sealed partial class SettingsViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private void GenerateHubServerToken() =>
-        HubServerApiToken = System.Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(24));
-
-    [RelayCommand]
     private async Task PushConfigToHub()
     {
         var sync = CoordinationRuntime.ConfigSync;
@@ -371,51 +334,6 @@ public sealed partial class SettingsViewModel : ObservableObject
         try { Status = await sync.PushAsync(); }
         catch (Exception ex) { Status = "✘ Lỗi đẩy cấu hình: " + ex.Message; }
     }
-
-    private HubServerConfig BuildHubServerConfig(bool enabled) => new()
-    {
-        Enabled = enabled,
-        Port = HubPort <= 0 ? 8088 : HubPort,
-        Domain = (HubDomain ?? "").Trim(),
-        TunnelToken = (HubTunnelToken ?? "").Trim(),
-        ApiToken = (HubServerApiToken ?? "").Trim(),
-    };
-
-    [RelayCommand(CanExecute = nameof(CanStartHub))]
-    private async Task StartHub()
-    {
-        if (string.IsNullOrWhiteSpace(HubServerApiToken)) GenerateHubServerToken();
-        var cfg = BuildHubServerConfig(enabled: true);
-        HubServerConfigStore.Shared.Save(cfg);
-        HubServerStatus = "⏳ Đang khởi động…";
-        try
-        {
-            await HubRuntime.Shared.StartAsync(cfg);
-            IsHubMode = true;
-            IsHubRunning = true;
-            HubServerStatus = "🟢 Đang chạy" + (string.IsNullOrWhiteSpace(cfg.PublicUrl) ? "" : "  ·  " + cfg.PublicUrl);
-            Status = "Hub đang chạy. Dán URL + API token này vào các máy client.";
-        }
-        catch (Exception ex)
-        {
-            HubServerStatus = "✘ Lỗi: " + ex.Message;
-            Dialogs.Notify(ex.Message, "Bật Hub", DialogIcon.Warning);
-        }
-    }
-
-    [RelayCommand(CanExecute = nameof(CanStopHub))]
-    private async Task StopHub()
-    {
-        try { await HubRuntime.Shared.StopAsync(); } catch { }
-        HubServerConfigStore.Shared.Save(BuildHubServerConfig(enabled: false));
-        IsHubMode = false;
-        IsHubRunning = false;
-        HubServerStatus = "⚪ Đã dừng";
-        Status = "Đã dừng chế độ Hub trên máy này.";
-    }
-
-    private bool CanStartHub() => !IsHubRunning;
-    private bool CanStopHub() => IsHubRunning;
 
     // ── Sao lưu / Khôi phục (đồng bộ sang máy khác) ─────────────────────────────
     [ObservableProperty] private bool _backupBigSeller = true;
