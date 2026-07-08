@@ -243,37 +243,34 @@ internal sealed partial class BigSellerProductUpdateRunner
         var userPrompt =
             $"Tên sản phẩm: {productName}\n" +
             $"Giới hạn bắt buộc: TỐI ĐA {MaxDescriptionChars} ký tự, nên trong khoảng {TargetDescriptionMinChars}–{TrimmedDescriptionMaxChars} ký tự.";
-        try
+        // Backoff & timeout RIÊNG của call site này (khác NameRewrite): chờ phẳng 1500ms×lần cho mọi lỗi tạm,
+        // và timeout HttpClient (OperationCanceledException dù ct chưa hủy) ném NGAY không thử lại — nên KHÔNG
+        // dùng AiChat.ExecuteWithRetryAsync (mặc định 2000/15000ms×lần + coi timeout là lỗi tạm để retry).
+        for (var attempt = 1; attempt <= 3; attempt++)
         {
-            // Retry chung ở Core (AiChat): mô tả rỗng bị coi là lỗi tạm (ném để thử lại); delay tôn trọng Pause.
-            return await AiChat.ExecuteWithRetryAsync(
-                async c =>
+            try
+            {
+                _log($"🤖 Đang tạo mô tả AI cho: {productName}" + (attempt > 1 ? $" (lần {attempt})" : ""));
+                var content = TrimDescriptionForShopee(
+                    await AiChat.CompleteAsync(cfg, cfg.EffectiveDescriptionPrompt, userPrompt, ct, 0.6, 4096).ConfigureAwait(false));
+                if (!string.IsNullOrWhiteSpace(content))
                 {
-                    _log($"🤖 Đang tạo mô tả AI cho: {productName}");
-                    var content = TrimDescriptionForShopee(
-                        await AiChat.CompleteAsync(cfg, cfg.EffectiveDescriptionPrompt, userPrompt, c, 0.6, 4096).ConfigureAwait(false));
-                    if (string.IsNullOrWhiteSpace(content))
-                        throw new InvalidOperationException("AI trả về mô tả rỗng.");
                     _log($"✅ Đã tạo mô tả: {content.Length} ký tự");
                     return content;
-                },
-                ct,
-                label: "mô tả AI",
-                log: _log,
-                delay: (ms, c) => DelayAsync(ms, c));
+                }
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (AiHttpException ex) when (ex.IsPermanent)
+            {
+                // Key sai / hết quota / model sai → lỗi cấu hình: retry vô ích. Ném ra để DỪNG hẳn run
+                // (báo lỗi rõ) thay vì coi là "lỗi tạm" → lặp mở/đóng tab + đập endpoint AI vô hạn.
+                _log($"✖ Lỗi AI không thể phục hồi ({ex.StatusCode}) — dừng. Kiểm tra OpenAI API key/quota/model trong Cài đặt.");
+                throw;
+            }
+            catch (Exception ex) { _log($"⚠ Lỗi tạo mô tả AI (lần {attempt}): {ex.Message}"); }
+            if (attempt < 3) await DelayAsync(1500 * attempt, ct);
         }
-        catch (AiHttpException ex) when (ex.IsPermanent)
-        {
-            // Key sai / hết quota / model sai → lỗi cấu hình: retry vô ích. Ném ra để DỪNG hẳn run
-            // (báo lỗi rõ) thay vì coi là "lỗi tạm" → lặp mở/đóng tab + đập endpoint AI vô hạn.
-            _log($"✖ Lỗi AI không thể phục hồi ({ex.StatusCode}) — dừng. Kiểm tra OpenAI API key/quota/model trong Cài đặt.");
-            throw;
-        }
-        catch (OperationCanceledException) { throw; }
-        catch (Exception)
-        {
-            return "";   // 3 lần vẫn rỗng/lỗi tạm → coi là LỖI TẠM (transient), KHÔNG xóa dòng (xử lý ở ProcessProduct).
-        }
+        return "";   // 3 lần vẫn rỗng → coi là LỖI TẠM (transient), KHÔNG xóa dòng (xử lý ở ProcessProduct).
     }
 
     private async Task<bool> UpdateDescriptionAsync(IPage page, string aiContent, CancellationToken ct)
