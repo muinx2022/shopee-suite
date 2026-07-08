@@ -164,6 +164,12 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
     };
 
     private const string UploadImageRadioWrapper = "label.ant-radio-wrapper";
+    // Radio "tự upload ảnh": khớp text 2 ngôn ngữ (VN "Tải lên hình ảnh" / EN "Upload Image"). Fallback theo
+    // input value='1' (value='0' = dùng template Seller Center) — độc lập ngôn ngữ, scope trong div.sizeContent
+    // để không dính radio khác trên trang. BẮT BUỘC tick radio này thì div.sizeChartContent (mặc định display:none)
+    // mới hiện, kéo theo div.spc_box (menu chọn ảnh) — không tick = không chọn được ảnh.
+    private static readonly Regex UploadImageRadioText = new("Tải lên hình ảnh|Upload Image", RegexOptions.IgnoreCase);
+    private const string UploadImageRadioByValue = "div.sizeContent label.ant-radio-wrapper:has(input.ant-radio-input[value='1'])";
     private const string ParentSkuInput = "input[autoid='parent_sku_text']";
     private const string VariationSkuInputs = "input[autoid^='variation_sku_text_']";
     private const string VariationStockInputs = "input[autoid^='variation_stock_text_']";
@@ -205,55 +211,87 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
     private const string ConfirmPrimaryBtn = "div.ant-modal-confirm-btns button.ant-btn-primary";
     private static readonly string[] SaveErrSels =
         { "div.ant-message", "div.ant-message-notice", "div.ant-message-notice-content", "div.ant-notification", "div.ant-modal-root", "div[role='alert']", "body" };
-    private const string SuccessTitle = ".ant-modal-confirm-title, .ant-modal-title";
-    private const string SuccessBody = ".ant-modal-body, .ant-modal-confirm-content";
-    private const string SuccessClose = ".ant-modal:visible button";
+    // Modal "thành công" sau khi Lưu: đọc TOÀN BỘ text của (các) modal ĐANG HIỆN. Bản EN title RỖNG, chữ
+    // "Successfully" ở body + nút "Close this page"; bản VN chữ ở title. KHÔNG dùng .ant-modal-body trần + .First
+    // vì trang edit có nhiều .ant-modal ẩn → .First dễ vớ nhầm modal rỗng → tưởng chưa xong → KHÔNG đóng tab (lỗi EN).
+    private const string VisibleModal = "div.ant-modal:visible";
 
     // ── Material Center (dọn media định kỳ — selector verbatim từ image_manager.py) ──
+    // BigSeller render 2 ngôn ngữ (VN/EN). ƯU TIÊN selector CẤU TRÚC (class/icon, độc-lập-ngôn-ngữ) rồi mới
+    // tới text 2 thứ tiếng. Đã đối chiếu HTML EN: Select All = label.bs-antd-check-all; Bulk Delete =
+    // button:has(i.bsicon_trash_2); nút xác nhận trong modal bs-micro = button.bs-micro-btn-dangerous.
+    // (Lọc-text-VN cũ "Chọn tất cả"/"Xóa hàng loạt"/"Xóa" KHÔNG khớp EN → nếu thiếu fallback cấu trúc thì
+    // dọn media im lặng thất bại → kho ảnh đầy quota → popup "Media Center space is insufficient" chặn upload.)
     private static readonly string[] MaterialPopupCloseSels =
     {
         "button.ant-modal-close",
-        "div.ant-modal-footer button.ant-btn:has-text('Hủy')",
         "button[aria-label='Close']",
+        ".bs-micro-modal-close",
+        "div.ant-modal-footer button.ant-btn:has-text('Hủy')",
+        "div.ant-modal-footer button.ant-btn:has-text('Cancel')",
     };
     private static readonly string[] MaterialSelectAllSels =
     {
+        // KHÔNG dùng '.bs-antd-check-all' TRẦN: popup "sắp hết hạn dung lượng" cũng có label.bs-antd-check-all
+        // ("Don't remind me again") → dễ tick nhầm. Bắt buộc scope trong action row, hoặc khớp text "Select All".
+        "section.material_action_row label.bs-antd-check-all",
+        "div.material_batch_actions label.bs-antd-check-all",
+        "section.material_action_row label.bs-micro-checkbox-wrapper:has-text('Select All')",
         "section.material_action_row label.bs-micro-checkbox-wrapper:has-text('Chọn tất cả')",
+        "label.bs-micro-checkbox-wrapper:has-text('Select All')",
         "label.bs-micro-checkbox-wrapper:has-text('Chọn tất cả')",
-        "label.bs-antd-check-all",
         "label.ant-checkbox-wrapper:has-text('Chọn tất cả')",
-        ".bs-antd-check-all",
     };
     private static readonly string[] MaterialDeleteBatchSels =
     {
-        "section.material_action_row button:has-text('Xóa hàng loạt')",
-        "button:has-text('Xóa hàng loạt')",
         "section.material_action_row button:has(i.bsicon_trash_2)",
         "button:has(i.bsicon_trash_2)",
+        "section.material_action_row button:has-text('Xóa hàng loạt')",
+        "section.material_action_row button:has-text('Bulk Delete')",
+        "section.material_action_row button:has-text('Batch Delete')",
+        "button:has-text('Xóa hàng loạt')",
+        "button:has-text('Bulk Delete')",
         "button.ant-btn-success:has-text('Xóa')",
-        "button:has-text('Xóa')",
         ".ant-btn-success",
     };
     private static readonly string[] MaterialEmptySels =
     {
-        "section.material_state_panel .bs-micro-empty:has-text('Trống')",
         "section.material_state_panel .bs-micro-empty",
-        ".bs-micro-empty:has-text('Trống')",
-        ".bs-micro-empty-description:has-text('Trống')",
+        ".bs-micro-empty",
+        ".bs-micro-empty-description",
         "div.page_list_empty",
         ".page_list_empty",
     };
     private static readonly string[] MaterialDeleteConfirmSels =
     {
-        ".bs-micro-modal-confirm-btns button.bs-micro-btn-dangerous:has-text('Xóa')",
+        ".bs-micro-modal-confirm-btns button.bs-micro-btn-dangerous",
+        ".bs-micro-modal-confirm-btns button.bs-micro-btn-primary",
         ".bs-micro-modal-confirm-btns button:has-text('Xóa')",
+        ".bs-micro-modal-confirm-btns button:has-text('Delete')",
+        ".bs-micro-modal-confirm-btns button:has-text('Confirm')",
         ".bs-micro-modal-confirm button:has-text('Xóa')",
-        "button.ant-btn-primary:has-text('OK')",
         "button.ant-btn-primary:has-text('Xác nhận')",
-        "button.ant-btn-primary:has-text('Xóa')",
-        "button:has-text('OK')",
+        "button.ant-btn-primary:has-text('Confirm')",
+        "button.ant-btn-primary:has-text('OK')",
+        "button.ant-btn-primary:has-text('Delete')",
         "button:has-text('Xác nhận')",
         ".ant-modal button.ant-btn-primary",
+    };
+
+    // BigSeller có 2 popup dung-lượng (đều .bs-micro-modal, đều có nút "Expand Space" = bs-micro-btn-primary =
+    // nâng cấp/mua thêm → TUYỆT ĐỐI KHÔNG bấm). Nhận diện & đóng bằng CLASS nên độc-lập-ngôn-ngữ (VN/EN như nhau):
+    //  • "Insufficient media storage space" (.space_insufficient_modal_*): kho ĐẦY → CHẶN upload → cần DỌN kho.
+    //  • "Media storage space is about to expire" (.space_recharge_modal_*): chỉ NHẮC gia hạn (chưa đầy) → chỉ ĐÓNG.
+    // Đóng bằng X (bs-micro-modal-close) hoặc Cancel (bs-micro-btn-default); Expand Space là bs-micro-btn-primary → né.
+    private const string MediaFullTitle = ".space_insufficient_modal_title, .space_insufficient_modal_desc";
+    private static readonly string[] StorageNagDismissSels =
+    {
+        ".bs-micro-modal:has(.space_insufficient_modal_title) button.bs-micro-modal-close",
+        ".bs-micro-modal:has(.space_recharge_modal_title) button.bs-micro-modal-close",
+        ".space_insufficient_modal_actions button.bs-micro-btn-default",
+        ".space_recharge_modal_actions button.bs-micro-btn-default",
+        ".bs-micro-modal:has(.space_insufficient_modal_title) button[aria-label='Close']",
+        ".bs-micro-modal:has(.space_recharge_modal_title) button[aria-label='Close']",
     };
 
     private static readonly Regex EditIdRegex = new(@"/edit/(\d+)\.htm", RegexOptions.IgnoreCase);
@@ -573,25 +611,61 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
         if (_updateSuccessCount < DeleteMediaAfterUpdates) return;
         _updateSuccessCount = 0;
 
+        _log(new string('=', 50));
+        _log($"ĐÃ UPDATE {DeleteMediaAfterUpdates} SP → XÓA THƯ VIỆN ẢNH (Material Center)");
+        _log(new string('=', 50));
+        try { await RunMediaCleanupLockedAsync(ct).ConfigureAwait(false); }
+        finally { try { if (!listingPage.IsClosed) await listingPage.BringToFrontAsync(); } catch { } }
+    }
+
+    // Dọn Material Center có KHÓA chống trùng đa-lane (mọi lane chung 1 account → 1 wipe dọn cho cả account).
+    // Trả về true nếu CHÍNH lane này đã chạy wipe; false nếu lane khác đang giữ khóa (caller nên chờ nó xong).
+    private async Task<bool> RunMediaCleanupLockedAsync(CancellationToken ct)
+    {
         const string mediaLock = "media-cleanup";
         if (_claim is not null && !_claim.TryClaim(mediaLock))
         {
             _log("  ↳ Lane khác đang dọn Material Center — bỏ qua (1 wipe đã dọn chung cho cả account).");
-            return;
+            return false;
         }
         try
         {
-            _log(new string('=', 50));
-            _log($"ĐÃ UPDATE {DeleteMediaAfterUpdates} SP → XÓA THƯ VIỆN ẢNH (Material Center)");
-            _log(new string('=', 50));
             await OverlayAsync("🗑️ Dọn Material Center…");
             await DeleteAllMediaAsync(ct).ConfigureAwait(false);
+            return true;
         }
-        finally
+        finally { _claim?.Release(mediaLock); }
+    }
+
+    // Popup "Insufficient media storage space" đang hiện? (chặn upload ảnh)
+    private static async Task<bool> IsMediaFullPopupAsync(IPage page)
+    {
+        try
         {
-            _claim?.Release(mediaLock);
-            try { if (!listingPage.IsClosed) await listingPage.BringToFrontAsync(); } catch { }
+            var el = page.Locator(MediaFullTitle).First;
+            return await el.CountAsync() > 0 && await el.IsVisibleAsync();
         }
+        catch { return false; }
+    }
+
+    // Đóng popup dung-lượng (đầy HOẶC sắp hết hạn) bằng X/Cancel — KHÔNG bao giờ bấm "Expand Space". True nếu có đóng.
+    private async Task<bool> DismissStorageNagAsync(IPage page)
+    {
+        foreach (var sel in StorageNagDismissSels)
+        {
+            try
+            {
+                var btn = page.Locator(sel).First;
+                if (await btn.CountAsync() > 0 && await btn.IsVisibleAsync())
+                {
+                    await btn.ClickAsync(new() { Force = true, Timeout = 2000 });
+                    await page.WaitForTimeoutAsync(600);
+                    return true;
+                }
+            }
+            catch { }
+        }
+        return false;
     }
 
     /// <summary>Xóa TẤT CẢ media trong BigSeller Material Center (port image_manager.delete_all_images).
@@ -668,6 +742,9 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
 
     private async Task CloseMaterialPopupAsync(IPage page)
     {
+        // Popup dung-lượng (đầy/sắp hết hạn) chặn trang Material Center → đóng bằng X/Cancel trước (né "Expand Space");
+        // cũng để "Don't remind me again" của nó không nhiễu FindMaterialSelectAllAsync (cùng class bs-antd-check-all).
+        if (await DismissStorageNagAsync(page)) return;
         foreach (var sel in MaterialPopupCloseSels)
         {
             try
@@ -800,7 +877,7 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
             var changed = await page.EvaluateAsync<bool>(
                 @"() => {
                     const label = Array.from(document.querySelectorAll('label'))
-                        .find(el => (el.textContent || '').includes('Chọn tất cả'));
+                        .find(el => { const t = el.textContent || ''; if (t.includes('Chọn tất cả') || t.includes('Select All')) return true; return el.classList.contains('bs-antd-check-all') && !!el.closest('.material_action_row, .material_batch_actions'); });
                     if (!label) { return false; }
                     const input = label.querySelector('input[type=""checkbox""]');
                     if (input && !input.checked) {
@@ -1129,11 +1206,19 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
         }
         catch { }
 
-        // [3] radio "Tải lên hình ảnh"
+        // [3] radio "Tải lên hình ảnh" / "Upload Image" — tick để hiện khối upload ảnh (div.spc_box).
+        // Trước đây lọc-text-VN cứng nên bản EN ("Upload Image") KHÔNG khớp → radio không tick → không chọn được ảnh.
         try
         {
-            var r = page.Locator(UploadImageRadioWrapper).Filter(new() { HasTextString = "Tải lên hình ảnh" }).First;
-            if (await r.IsVisibleAsync()) await r.ClickAsync();
+            var r = page.Locator(UploadImageRadioWrapper).Filter(new() { HasTextRegex = UploadImageRadioText }).First;
+            if (await r.CountAsync() == 0) r = page.Locator(UploadImageRadioByValue).First;   // fallback độc-lập-ngôn-ngữ
+            if (await r.CountAsync() > 0 && await r.IsVisibleAsync())
+            {
+                await r.ScrollIntoViewIfNeededAsync();
+                await r.ClickAsync();
+                // chờ khối upload (spc_box) hiện sau khi sizeChartContent bỏ display:none
+                try { await page.Locator(ImageGalleryBox).First.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 4000 }); } catch { }
+            }
         }
         catch { }
 
@@ -1463,6 +1548,7 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
     // ── image ──
     private async Task<bool> UploadImageWithRetryAsync(IPage page, string imagePath, int maxAttempts, CancellationToken ct)
     {
+        var cleanedForFull = false;   // chỉ dọn kho 1 lần/lượt upload (dọn xong không lên được nữa thì thôi)
         for (var attempt = 0; attempt < maxAttempts; attempt++)
         {
             try
@@ -1482,6 +1568,21 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
                 if (!string.IsNullOrWhiteSpace(src)) return true;
             }
             catch { }
+
+            // Đóng mọi popup dung-lượng đang chặn upload (đầy / sắp hết hạn) bằng X/Cancel (KHÔNG bấm Expand Space).
+            // Riêng popup ĐẦY thì còn dọn Material Center 1 lần → vòng sau upload lại (đã có chỗ). Phá thế kẹt
+            // "đầy → không lưu được → không đủ 10 SP để auto-dọn".
+            var mediaFull = await IsMediaFullPopupAsync(page);
+            if (await DismissStorageNagAsync(page) && mediaFull)
+            {
+                if (!cleanedForFull)
+                {
+                    cleanedForFull = true;
+                    _log("⚠ Media Center đầy khi upload ảnh → dọn kho rồi thử lại.");
+                    if (!await RunMediaCleanupLockedAsync(ct)) await DelayAsync(8000, ct);   // lane khác đang dọn → chờ
+                    try { await page.BringToFrontAsync(); } catch { }
+                }
+            }
             await DelayAsync(2500, ct);
         }
         return false;
@@ -1581,12 +1682,24 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
                 }
 
                 await wrapper.ScrollIntoViewIfNeededAsync();
-                await wrapper.HoverAsync();
-                await DelayAsync(1000, ct);
 
+                // "Save & Publish" (bản EN) giờ là DROPDOWN: nút chính là ant-dropdown-trigger nên bấm nút
+                // CHỈ mở menu, KHÔNG lưu — phải bấm đúng <li autoid='save_and_publish_option'>. Bản cũ (VN)
+                // là nút thường → bấm nút là lưu luôn. Vì hover có thể KHÔNG mở menu (trigger='click'), ta:
+                // hover thử → nếu option chưa hiện mà đây là dropdown thì click nút để mở → chờ option → bấm.
                 var opt = page.Locator(SaveOption);
-                if (await opt.IsVisibleAsync()) await opt.ClickAsync(new() { Force = true });
-                else await wrapper.Locator("button").First.ClickAsync();
+                var btn = wrapper.Locator("button").First;
+
+                await btn.HoverAsync();
+                await DelayAsync(500, ct);
+                if (!await opt.IsVisibleAsync() && await wrapper.Locator(".ant-dropdown-trigger").CountAsync() > 0)
+                {
+                    try { await btn.ClickAsync(); } catch { }   // click nút = mở dropdown (chưa lưu)
+                    try { await opt.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 3000 }); } catch { }
+                }
+
+                if (await opt.IsVisibleAsync()) await opt.ClickAsync(new() { Force = true });   // chọn option = lưu
+                else await btn.ClickAsync();   // fallback: bản nút-thường cũ → bấm là lưu
 
                 var err = await DetectSaveErrorAsync(page, 4000);
                 if (err == "brand") { await SelectNoBrandAsync(page, ct); await DelayAsync(2500, ct); continue; }
@@ -1660,14 +1773,14 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
         {
             try
             {
-                var title = Normalize(await SafeInnerTextAsync(page.Locator(SuccessTitle).First));
-                var body = Normalize(await SafeInnerTextAsync(page.Locator(SuccessBody).First));
-                var close = Normalize(await SafeInnerTextAsync(page.Locator(SuccessClose).First));
-                if (title.Contains("thao tac thanh cong") || Regex.IsMatch(title, @"^\s*successfully\s*$", RegexOptions.IgnoreCase) ||
-                    body.Contains("de trinh") || body.Contains("thao tac thanh cong") ||
-                    Regex.IsMatch(body, "pending by shopee", RegexOptions.IgnoreCase) ||
-                    Regex.IsMatch(body, @"publishing\s*/\s*failed\s*/\s*active", RegexOptions.IgnoreCase) ||
-                    Regex.IsMatch(close, "close this page", RegexOptions.IgnoreCase))
+                // Gộp text MỌI modal đang hiện (thường chỉ 1 = modal thành công) → khớp tín hiệu thành công song ngữ.
+                var texts = await page.Locator(VisibleModal).AllInnerTextsAsync();
+                var m = Normalize(string.Join(" \n ", texts));
+                if (m.Contains("thao tac thanh cong") || m.Contains("successfully") ||
+                    m.Contains("de trinh") || m.Contains("pending by shopee") ||
+                    Regex.IsMatch(m, @"publishing\s*/\s*failed\s*/\s*active") ||
+                    m.Contains("close this page") || m.Contains("dong trang nay") ||
+                    m.Contains("create next product") || m.Contains("tao san pham tiep"))
                     return true;
             }
             catch { }
@@ -1814,12 +1927,6 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
             catch { }
         }
         return null;
-    }
-
-    private static async Task<string> SafeInnerTextAsync(ILocator loc)
-    {
-        try { return await loc.CountAsync() > 0 ? await loc.InnerTextAsync(new() { Timeout = 500 }) : ""; }
-        catch { return ""; }
     }
 
     private IPage? PickListingPage(IBrowserContext context)
