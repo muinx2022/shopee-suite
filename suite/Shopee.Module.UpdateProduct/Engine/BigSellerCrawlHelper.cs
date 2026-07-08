@@ -260,38 +260,93 @@ internal static class BigSellerCrawlHelper
         catch { }
     }
 
-    public static async Task<bool> ClickNextCrawlPageAsync(IPage page, Action<string>? log = null)
+    // Selector nút "Trang kế" mặc định (Crawl List): BigSeller dùng Ant Design → .ant-pagination-next
+    // (li[aria-disabled] ở trang cuối); giữ luôn .next_item cũ để tương thích.
+    public const string DefaultNextPageSelector =
+        ".pagination .next_item:not(.disabled), li.next_item:not(.disabled), " +
+        "li.ant-pagination-next:not(.ant-pagination-disabled), .ant-pagination-next:not(.ant-pagination-disabled)";
+
+    /// <summary>
+    /// Bấm "Trang kế" trên thanh phân trang BigSeller — DÙNG CHUNG cho Crawl List (Import) lẫn Listing (Update).
+    /// <paramref name="nextSelector"/> chọn nút Next chưa-disabled (trang cuối → không khớp → trả false = hết trang).
+    /// Nếu truyền <paramref name="nowPageSelector"/> (nhãn "X / Y") → CHỜ nhãn ĐỔI mới coi là đã lật (bản Listing:
+    /// chống kẹt/nhảy sót trang); null → chỉ chờ 1.5s cố định (bản Crawl). Sau khi lật: chờ
+    /// <paramref name="readySelector"/> visible nếu có, không thì chờ nội dung crawl-list. <paramref name="delay"/>
+    /// (nếu có) = hàm chờ có-nhận-pause của caller; null → Task.Delay thường.
+    /// </summary>
+    public static async Task<bool> ClickNextCrawlPageAsync(
+        IPage page, Action<string>? log = null,
+        string nextSelector = DefaultNextPageSelector,
+        string? nowPageSelector = null, string? readySelector = null,
+        Func<int, CancellationToken, Task>? delay = null,
+        CancellationToken ct = default)
     {
+        Task Wait(int ms) => delay is not null ? delay(ms, ct) : Task.Delay(ms, ct);
         try
         {
+            // (Listing) đọc nhãn "X / Y" TRƯỚC để lát so sánh, xác nhận đã lật trang thật.
+            string before = "";
+            if (nowPageSelector is not null)
+                try { before = (await page.Locator(nowPageSelector).First.InnerTextAsync(new() { Timeout = 1500 })).Trim(); } catch { }
+
             var clicked = await page.EvaluateAsync<bool>(
-                @"() => {
-                    // BigSeller dùng Ant Design → pager là .ant-pagination-next (li[aria-disabled] ở trang cuối);
-                    // giữ luôn selector .next_item cũ để tương thích. Bỏ qua nút đang disabled = trang cuối.
-                    const next = document.querySelector(
-                        '.pagination .next_item:not(.disabled), li.next_item:not(.disabled), ' +
-                        'li.ant-pagination-next:not(.ant-pagination-disabled), .ant-pagination-next:not(.ant-pagination-disabled)');
+                @"(sel) => {
+                    const next = document.querySelector(sel);
                     if (!next) return false;
                     if (next.getAttribute('aria-disabled') === 'true') return false;
                     const action = next.querySelector('a.paging_action, a, button') || next;
                     action.click();
                     return true;
-                }");
+                }", nextSelector);
 
             if (!clicked)
             {
-            log?.Invoke("Không còn trang tiếp theo.");
+                if (nowPageSelector is null) log?.Invoke("Không còn trang tiếp theo.");   // (Crawl) log; Listing im lặng như bản cũ
                 return false;
             }
 
-            log?.Invoke("Chuyển sang trang tiếp theo...");
-            await Task.Delay(1500);
-            await WaitForCrawlListContentAsync(page, 10000);
+            if (nowPageSelector is not null)
+            {
+                // Chờ nhãn trang "X / Y" ĐỔI = xác nhận trang ĐÃ sang thật. Nếu bấm được nhưng nhãn KHÔNG đổi trong
+                // ~10s ⇒ trang không lật (glitch) → trả FALSE (caller kết thúc lane) thay vì lặp bấm-Next vô tận.
+                var changed = false;
+                for (var i = 0; i < 40; i++)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    string now = "";
+                    try { now = (await page.Locator(nowPageSelector).First.InnerTextAsync(new() { Timeout = 500 })).Trim(); } catch { }
+                    if (!string.IsNullOrEmpty(now) && !string.Equals(now, before, StringComparison.Ordinal)) { changed = true; log?.Invoke($"→ Sang trang Listing: {before} → {now}."); break; }
+                    await Wait(250);
+                }
+                if (!changed)
+                {
+                    log?.Invoke($"  (bấm Next nhưng trang không lật sau ~10s — coi như hết trang: '{before}')");
+                    return false;
+                }
+            }
+            else
+            {
+                log?.Invoke("Chuyển sang trang tiếp theo...");
+                await Task.Delay(1500);
+            }
+
+            if (readySelector is not null)
+            {
+                try { await page.WaitForSelectorAsync(readySelector, new() { State = WaitForSelectorState.Visible, Timeout = 10000 }); } catch { }
+                await Wait(600);
+            }
+            else
+            {
+                await WaitForCrawlListContentAsync(page, 10000);
+            }
             return true;
         }
+        catch (OperationCanceledException) { throw; }
         catch (Exception ex)
         {
-            log?.Invoke($"Chuyển trang tiếp theo lỗi: {ex.Message}");
+            log?.Invoke(nowPageSelector is not null
+                ? $"  (lỗi chuyển trang Listing, coi như chưa sang được: {ex.Message})"
+                : $"Chuyển trang tiếp theo lỗi: {ex.Message}");
             return false;
         }
     }

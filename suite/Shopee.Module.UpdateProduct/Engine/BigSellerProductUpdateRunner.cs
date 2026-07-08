@@ -309,55 +309,16 @@ internal sealed partial class BigSellerProductUpdateRunner : BigSellerBraveRunne
         }
     }
 
-    // ── phân trang Listing ──
-    // Bấm "Next Page" (li.next_item) trên thanh phân trang BigSeller (giống bảng Crawl). Trang cuối →
-    // li.next_item.disabled → KHÔNG có :not(.disabled) → trả false (báo caller: hết trang → kết thúc lane).
-    // Chờ nhãn "X / Y" (li.now_page_item) ĐỔI rồi mới cho quét → tránh quét nhầm DOM trang cũ (nhảy sót trang).
+    // ── phân trang Listing → uỷ quyền BigSellerCrawlHelper.ClickNextCrawlPageAsync (bản chung Crawl + Listing) ──
+    // Nút Next bảng Listing dùng li.next_item (trang cuối → li.next_item.disabled → không khớp :not(.disabled)
+    // → trả false = hết trang → kết thúc lane). Truyền PaginationNowPage để helper CHỜ nhãn "X / Y" ĐỔI rồi mới
+    // cho quét (tránh quét nhầm DOM trang cũ / nhảy sót trang) + ListingReadySelector để chờ bảng listing sẵn sàng.
+    private const string ListingNextPageSelector = ".pagination li.next_item:not(.disabled)";
     private const string PaginationNowPage = ".pagination li.now_page_item";
-    private async Task<bool> ClickNextListingPageAsync(IPage page, CancellationToken ct)
-    {
-        try
-        {
-            string before = "";
-            try { before = (await page.Locator(PaginationNowPage).First.InnerTextAsync(new() { Timeout = 1500 })).Trim(); } catch { }
 
-            var clicked = await page.EvaluateAsync<bool>(
-                @"() => {
-                    const next = document.querySelector('.pagination li.next_item:not(.disabled)');
-                    if (!next) return false;
-                    const action = next.querySelector('a.paging_action, a, button') || next;
-                    action.click();
-                    return true;
-                }");
-            if (!clicked) return false;   // trang cuối (next_item.disabled) → hết trang
-
-            // Chờ nhãn trang "X / Y" ĐỔI = xác nhận trang ĐÃ sang thật. Nếu bấm được nhưng nhãn KHÔNG đổi trong
-            // ~10s ⇒ trang không lật (glitch) → trả FALSE (caller kết thúc lane) thay vì lặp bấm-Next vô tận.
-            var changed = false;
-            for (var i = 0; i < 40; i++)
-            {
-                ct.ThrowIfCancellationRequested();
-                string now = "";
-                try { now = (await page.Locator(PaginationNowPage).First.InnerTextAsync(new() { Timeout = 500 })).Trim(); } catch { }
-                if (!string.IsNullOrEmpty(now) && !string.Equals(now, before, StringComparison.Ordinal)) { changed = true; _log($"→ Sang trang Listing: {before} → {now}."); break; }
-                await DelayAsync(250, ct);
-            }
-            if (!changed)
-            {
-                _log($"  (bấm Next nhưng trang không lật sau ~10s — coi như hết trang: '{before}')");
-                return false;
-            }
-            try { await page.WaitForSelectorAsync(ListingReadySelector, new() { State = WaitForSelectorState.Visible, Timeout = 10000 }); } catch { }
-            await DelayAsync(600, ct);
-            return true;
-        }
-        catch (OperationCanceledException) { throw; }
-        catch (Exception ex)
-        {
-            _log($"  (lỗi chuyển trang Listing, coi như chưa sang được: {ex.Message})");
-            return false;
-        }
-    }
+    private Task<bool> ClickNextListingPageAsync(IPage page, CancellationToken ct) =>
+        BigSellerCrawlHelper.ClickNextCrawlPageAsync(
+            page, _log, ListingNextPageSelector, PaginationNowPage, ListingReadySelector, DelayAsync, ct);
 
     // ── dọn media định kỳ → uỷ quyền BigSellerMaterialCenterCleaner (giữ wrapper mỏng để call-site không đổi) ──
     // Sau mỗi 10 SP LƯU thành công, cleaner xóa sạch Material Center; wipe khoá qua ClaimStore (1 lần/account).
