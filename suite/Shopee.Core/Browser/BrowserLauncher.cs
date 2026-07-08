@@ -1,4 +1,5 @@
 using Shopee.Core.Infrastructure;
+using Shopee.Core.Platform;
 
 namespace Shopee.Core.Browser;
 
@@ -24,38 +25,15 @@ public sealed class BrowserLauncher
     public int CdpPort => _cdpPort;
     public BrowserKind Kind => _kind;
 
-    private string ProcessName => _kind == BrowserKind.Brave ? "brave.exe" : "msedge.exe";
-
     public string? DetectExePath() => Detect(_kind);
 
     /// <summary>Thư mục "User Data" mẫu của trình duyệt (phải có Default) — dùng làm nguồn copy
     /// extension-state khi tạo profile mới. null nếu chưa từng mở trình duyệt.</summary>
-    public static string? DetectUserData(BrowserKind kind)
-    {
-        var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        var path = kind == BrowserKind.Brave
-            ? Path.Combine(local, "BraveSoftware", "Brave-Browser", "User Data")
-            : Path.Combine(local, "Microsoft", "Edge", "User Data");
-        return Directory.Exists(Path.Combine(path, "Default")) ? path : null;
-    }
+    public static string? DetectUserData(BrowserKind kind) =>
+        PlatformServices.BrowserLocator.DetectUserData(kind);
 
-    public static string? Detect(BrowserKind kind)
-    {
-        var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        var candidates = kind == BrowserKind.Brave
-            ?
-            [
-                Path.Combine(local, @"BraveSoftware\Brave-Browser\Application\brave.exe"),
-                @"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe",
-                @"C:\Program Files (x86)\BraveSoftware\Brave-Browser\Application\brave.exe",
-            ]
-            : new[]
-            {
-                @"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
-                @"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
-            };
-        return candidates.FirstOrDefault(File.Exists);
-    }
+    public static string? Detect(BrowserKind kind) =>
+        PlatformServices.BrowserLocator.DetectExe(kind);
 
     /// <summary>Mở trình duyệt tới <paramref name="startUrl"/>. Ném exception nếu không tìm thấy exe.</summary>
     public void Launch(string profileDir, string? proxyServer, string startUrl, IReadOnlyList<string>? extraArgs = null)
@@ -127,9 +105,10 @@ public sealed class BrowserLauncher
 
         // Chromium tách tiến trình: exe vừa Start thường thoát ngay sau khi bàn giao cho tiến
         // trình cửa sổ thật (PID khác) → _process.Kill() không giết được cửa sổ. Phải kill theo
-        // --user-data-dir (mỗi tk 1 profile riêng nên match chính xác, không đụng trình duyệt khác).
+        // --user-data-dir qua BraveProcessReaper (khớp ĐÚNG giá trị, không Contains — tránh giết nhầm
+        // "acc_1" khi target "acc_10", vì profile CheckAccount lấy theo username có thể là tiền tố nhau).
         if (!string.IsNullOrWhiteSpace(_profileDir))
-            KillProcessesForProfile(ProcessName, _profileDir);
+            BraveProcessReaper.KillByUserDataDir(_profileDir);
 
         try { _process?.Dispose(); } catch { }
         _process = null;
@@ -175,39 +154,4 @@ public sealed class BrowserLauncher
         catch { }
     }
 
-    private static void KillProcessesForProfile(string processName, string profileDir)
-    {
-        var needle = profileDir.TrimEnd('\\', '/');
-        var killedAny = false;
-        try
-        {
-            using var searcher = new System.Management.ManagementObjectSearcher(
-                $"SELECT ProcessId, CommandLine FROM Win32_Process WHERE Name = '{processName}'");
-            foreach (var obj in searcher.Get())
-            {
-                try
-                {
-                    var commandLine = obj["CommandLine"] as string;
-                    if (string.IsNullOrEmpty(commandLine) ||
-                        !commandLine.Contains(needle, StringComparison.OrdinalIgnoreCase))
-                        continue;
-
-                    var pid = Convert.ToInt32(obj["ProcessId"]);
-                    if (pid <= 0) continue;
-                    using var p = Process.GetProcessById(pid);
-                    if (!p.HasExited)
-                    {
-                        p.Kill(entireProcessTree: true);
-                        killedAny = true;
-                    }
-                }
-                catch { }
-                finally { obj.Dispose(); }
-            }
-
-            if (killedAny)
-                Thread.Sleep(400);
-        }
-        catch { }
-    }
 }

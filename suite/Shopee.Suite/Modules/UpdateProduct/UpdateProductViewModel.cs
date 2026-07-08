@@ -1,15 +1,14 @@
 using System.Collections.ObjectModel;
 using System.IO;
-using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using Microsoft.Win32;
 using Shopee.Core.Ai;
 using Shopee.Core.BigSeller;
 using Shopee.Core.Coordination;
 using Shopee.Core.Infrastructure;
 using Shopee.Modules.UpdateProduct;
 using Shopee.Suite.Infrastructure;
+using Shopee.Suite.Services;
 
 namespace Shopee.Suite.Modules.UpdateProduct;
 
@@ -25,7 +24,8 @@ public sealed partial class UpdateProductViewModel : ObservableObject
 {
     /// <summary>Mỗi tài khoản BigSeller là 1 "đích chạy" (tick chọn + chọn shop) — chạy được nhiều tk song song.</summary>
     public ObservableCollection<UpdateRunTargetViewModel> RunTargets { get; } = [];
-    public ObservableCollection<string> LogLines { get; } = [];
+    /// <summary>Nhật ký update: giữ 500 dòng cuối trên UI (khỏi đơ) + ghi ĐẦY ĐỦ ra logs\workspace-update.log.</summary>
+    public LogBuffer LogLines { get; } = new("workspace-update.log");
 
     // Ảnh/Video DÙNG CHUNG cho mọi tk; từ-dòng/đến-dòng/worker là RIÊNG từng tk (xem UpdateRunTargetViewModel).
     // Điền sẵn mặc định để khỏi gõ lại mỗi lần mở app (vẫn sửa được trong cấu hình update).
@@ -67,9 +67,11 @@ public sealed partial class UpdateProductViewModel : ObservableObject
         BigSellerStore.Shared.Changed += () =>
         {
             if (IsRunning || HasActiveWsJob) return;   // đang chạy (batch hoặc inline per-shop) → đừng rebuild list
-            var d = Application.Current?.Dispatcher;
-            if (d is null || d.CheckAccess()) SyncFromStore();
-            else d.BeginInvoke(SyncFromStore);
+            UiThread.Post(SyncFromStore);
+            // Máy THIẾU ảnh local → sau khi sync acc/workbook, tự kéo ảnh chung Hub về khu workbook + trỏ ô chọn ảnh
+            // (chỉ khi đang không có ảnh hợp lệ → tránh gọi mạng liên tục; bản Hub đổi sẽ được lấy lại lúc chạy Update).
+            if (string.IsNullOrWhiteSpace(ImagePath) || !File.Exists(ImagePath))
+                _ = EnsureUpdateImageAsync(CancellationToken.None);
         };
     }
 
@@ -130,34 +132,33 @@ public sealed partial class UpdateProductViewModel : ObservableObject
     private void UnselectAllTargets() { foreach (var t in RunTargets) t.IsSelected = false; }
 
     [RelayCommand]
-    private void BrowseImage()
+    private async Task BrowseImageAsync()
     {
-        var dlg = new OpenFileDialog { Filter = "Ảnh|*.jpg;*.jpeg;*.png;*.webp|Tất cả|*.*", Title = "Chọn ảnh" };
-        if (dlg.ShowDialog() == true) ImagePath = dlg.FileName;
+        var path = await FilePicker.OpenFileAsync("Chọn ảnh", "Ảnh|*.jpg;*.jpeg;*.png;*.webp|Tất cả|*.*");
+        if (path is not null) ImagePath = path;
     }
 
     [RelayCommand]
-    private void BrowseVideoFolder()
+    private async Task BrowseVideoFolderAsync()
     {
-        var dlg = new OpenFolderDialog { Title = "Chọn thư mục video" };
-        if (dlg.ShowDialog() == true) VideoFolder = dlg.FolderName;
+        var dir = await FilePicker.PickFolderAsync("Chọn thư mục video");
+        if (dir is not null) VideoFolder = dir;
     }
 
     /// <summary>Mở dialog map field ↔ cột Excel cho shop của 1 đích chạy (mỗi shop dữ liệu có thể khác).</summary>
     [RelayCommand]
-    private void OpenMap(UpdateRunTargetViewModel? target)
+    private async Task OpenMapAsync(UpdateRunTargetViewModel? target)
     {
         var shop = target?.SelectedShop;
         if (shop is null) { Warn("Chọn shop trước khi map dữ liệu."); return; }
-        var win = new ColumnMapWindow(shop) { Owner = Application.Current?.MainWindow };
-        win.ShowDialog();
+        await WindowHost.ShowDialogAsync(new ColumnMapWindow(shop));
     }
 
     [RelayCommand(CanExecute = nameof(IsIdle))]
     private Task RunImport() => RunWorkflowAsync("Import to store", (r, ctx, ct) => r.RunImportAsync(ctx, ct));
 
     [RelayCommand(CanExecute = nameof(IsIdle))]
-    private Task RunUpdate() => RunWorkflowAsync("Update product", (r, ctx, ct) => r.RunUpdateAsync(ctx, ct));
+    private Task RunUpdate() => RunWorkflowAsync("Update product", (r, ctx, ct) => r.RunUpdateAsync(ctx, ct), pullSharedImage: true);
 
     // Name-rewrite chỉ đọc workbook + OpenAI, KHÔNG mở BigSeller → không cần kiểm tra đăng nhập.
     [RelayCommand(CanExecute = nameof(IsIdle))]
@@ -205,12 +206,7 @@ public sealed partial class UpdateProductViewModel : ObservableObject
         shopId = ""; kind = UpdateKind.Import; return false;
     }
 
-    private void RaiseJobsChanged()
-    {
-        var d = Application.Current?.Dispatcher;
-        if (d is null || d.CheckAccess()) JobsChanged?.Invoke();
-        else d.BeginInvoke(() => JobsChanged?.Invoke());
-    }
+    private void RaiseJobsChanged() => UiThread.Post(() => JobsChanged?.Invoke());
 
     private async Task RunOneWorkflowAsync(
         string name, UpdateKind kind, Func<UpdateProductRunner, UpdateProductContext, CancellationToken, Task> action,
@@ -244,9 +240,20 @@ public sealed partial class UpdateProductViewModel : ObservableObject
             lease = attempt.Handle;
 
             var ai = AiConfigStore.Shared.Current;
-            var ctx = BuildContext(t, ai, startRow, endRow, importFromClaimedTab);
+            // CHỈ Update: ảnh local riêng (nếu có) hoặc kéo ảnh chung Hub về khu workbook + trỏ ô chọn ảnh.
+            var img = kind == UpdateKind.Update ? await EnsureUpdateImageAsync(job.Cts.Token).ConfigureAwait(false) : ImagePath;
+            if (kind == UpdateKind.Update && (string.IsNullOrWhiteSpace(img) || !File.Exists(img)))
+            {
+                Log($"{prefix} ⚠ Chưa có ảnh Update — BigSeller cần ảnh để cập nhật SP. Upload ảnh chung trên Hub (trang Files) hoặc đặt ảnh local.");
+                Coordination.Hub.PublishCompletion(coordKey, "stopped", 0);
+                return;
+            }
+            var ctx = BuildContext(t, ai, startRow, endRow, importFromClaimedTab, kind == UpdateKind.Update ? img : null);
             var runner = new UpdateProductRunner();
             runner.Log += m => Log($"{prefix} {m}");
+            // Mỗi dòng import/update/rewrite xong → đẩy lên ledger Hub (khoảng dòng) cho Thống kê "shop này đã làm
+            // những dòng nào". Fire-and-forget, no-op khi Hub tắt (chạy 1 máy).
+            runner.RowsCompleted += (from, to) => Coordination.Hub.PublishProgress(coordKey, from, to);
             job.Runner = runner;
             Log($"▶ {name} — {prefix} (chạy song song).");
             await action(runner, ctx, job.Cts.Token).ConfigureAwait(false);
@@ -286,7 +293,7 @@ public sealed partial class UpdateProductViewModel : ObservableObject
 
     private async Task RunWorkflowAsync(
         string name, Func<UpdateProductRunner, UpdateProductContext, CancellationToken, Task> action,
-        bool requiresBigSellerLogin = true, IReadOnlyList<UpdateRunTargetViewModel>? only = null)
+        bool requiresBigSellerLogin = true, IReadOnlyList<UpdateRunTargetViewModel>? only = null, bool pullSharedImage = false)
     {
         // only != null (v1.1): chạy RIÊNG tk được chỉ định. Bảo vệ chặn chạy chồng (đường command đã có
         // CanExecute=IsIdle; guard này thêm an toàn cho đường gọi single).
@@ -296,13 +303,26 @@ public sealed partial class UpdateProductViewModel : ObservableObject
 
         var ai = AiConfigStore.Shared.Current;
 
+        // CHỈ Update: đảm bảo ảnh MỘT LẦN trước khi build/chạy song song (ảnh local riêng hoặc kéo ảnh chung Hub về
+        // khu workbook + trỏ ô chọn ảnh). Chưa có CTS ở đây nên dùng None — pull nhanh, best-effort, timeout _bulkHttp.
+        var img = pullSharedImage ? await EnsureUpdateImageAsync(CancellationToken.None).ConfigureAwait(false) : ImagePath;
+
+        // BigSeller BẮT BUỘC có ảnh để update SP → thiếu ảnh = update fail. Cả local lẫn Hub đều KHÔNG có (offline /
+        // chưa upload) → CHẶN sớm + báo rõ, khỏi chạy rồi lỗi từng SP.
+        if (pullSharedImage && (string.IsNullOrWhiteSpace(img) || !File.Exists(img)))
+        {
+            Warn("Chưa có ảnh Update — BigSeller cần ảnh để cập nhật SP.\n" +
+                 "→ Upload ảnh chung trên Hub (trang Files) HOẶC chọn ảnh local ở ô \"Ảnh Update (máy này)\".");
+            return;
+        }
+
         // Validate từng đích; tk lỗi (chưa cookie/sheet/workbook) bị bỏ qua, không chặn các tk khác.
         var jobs = new List<(BigSellerAccount Account, UpdateProductContext Ctx)>();
         var problems = new List<string>();
         foreach (var t in picked)
         {
             if (!ValidateUpdateTarget(t, requiresBigSellerLogin, out var problem)) { problems.Add(problem); continue; }
-            jobs.Add((t.Account, BuildContext(t, ai)));
+            jobs.Add((t.Account, BuildContext(t, ai, imageOverride: pullSharedImage ? img : null)));
         }
 
         if (jobs.Count == 0) { Warn($"Không có tài khoản hợp lệ để chạy {name}.\n" + string.Join("\n", problems)); return; }
@@ -348,8 +368,43 @@ public sealed partial class UpdateProductViewModel : ObservableObject
         problem = ""; return true;
     }
 
+    /// <summary>Đường dẫn ảnh Update dùng chung tải từ Hub về — nằm CÙNG khu workbook (hub-cache\workbooks\).
+    /// BigSeller cần ảnh THẬT (đường dẫn cụ thể) để update; đây là ảnh "chọn sẵn" cho máy thiếu ảnh local.</summary>
+    private static string SyncedUpdateImagePath => Path.Combine(SuitePaths.HubCacheDir, "workbooks", "default-update.jpg");
+
+    /// <summary>Đảm bảo có ảnh Update rồi TRẢ đường dẫn ảnh hiệu lực (để chạy) + tự trỏ ô chọn ảnh sang đó.
+    /// Quy tắc: (1) ImagePath là ảnh LOCAL RIÊNG hợp lệ (khác ảnh-Hub-đã-sync, file có thật) → GIỮ, không kéo Hub
+    /// (tôn trọng nút "…"). (2) Ngược lại (trống / file không tồn tại / đang trỏ chính ảnh-Hub) → KÉO ảnh chung Hub
+    /// về khu workbook (hash-skip nếu không đổi → tự cập nhật khi admin đổi ảnh) rồi trỏ ImagePath sang đó (hiện
+    /// trong ô + tự lưu). Kéo lỗi/offline → trả ImagePath hiện tại (guard chặn nếu thiếu). Best-effort, không ném.</summary>
+    private async Task<string> EnsureUpdateImageAsync(CancellationToken ct)
+    {
+        var synced = SyncedUpdateImagePath;
+        var isCustomLocal = !string.IsNullOrWhiteSpace(ImagePath)
+            && !string.Equals(ImagePath, synced, StringComparison.OrdinalIgnoreCase)
+            && File.Exists(ImagePath);
+        if (isCustomLocal) return ImagePath;   // ảnh local riêng của user → giữ nguyên
+
+        try
+        {
+            var sync = CoordinationRuntime.ConfigSync;
+            if (sync is not null)
+            {
+                var got = await sync.PullSharedAssetAsync(HubConfigSync.DefaultUpdateImageRemote, synced, ct).ConfigureAwait(false);
+                if (!string.IsNullOrEmpty(got) && File.Exists(got))
+                {
+                    if (!string.Equals(ImagePath, got, StringComparison.OrdinalIgnoreCase))
+                        UiThread.Post(() => ImagePath = got);   // hiện trong ô chọn ảnh + OnImagePathChanged tự lưu
+                    return got;
+                }
+            }
+        }
+        catch { }
+        return ImagePath;   // không kéo được → giữ (guard sẽ chặn nếu file thiếu)
+    }
+
     private UpdateProductContext BuildContext(UpdateRunTargetViewModel t, AiConfig ai, int? startRow = null, int? endRow = null,
-        bool? importFromClaimedTab = null)
+        bool? importFromClaimedTab = null, string? imageOverride = null)
     {
         var a = t.Account; var s = t.SelectedShop!;
         // AI (viết lại tên/mô tả) dùng cấu hình AI CHUNG ở Cài đặt; key truyền THẲNG qua context
@@ -364,7 +419,7 @@ public sealed partial class UpdateProductViewModel : ObservableObject
             a.Id, a.Email, a.WorkbookPath, a.CookieFile,
             s.Id, s.DisplayName, s.ShopeeDataSheet,
             aiModel, "", ai.BatchSize, "",
-            sr, er, ImagePath, VideoFolder,
+            sr, er, imageOverride ?? ImagePath, VideoFolder,
             s.BigSellerCrawlUrl, fromClaimedTab,
             1, t.UpdateWorkers, t.ListingReloadSeconds, ai.OpenAiApiKey,   // Import LUÔN 1 lane (1 process)
             s.ColumnMap.LinkColumn, s.ColumnMap.PriceColumn, s.ColumnMap.SkuColumn,
@@ -399,17 +454,16 @@ public sealed partial class UpdateProductViewModel : ObservableObject
         Status = "Đang dừng…";
     }
 
-    private void Log(string text)
-    {
-        var d = Application.Current?.Dispatcher;
-        if (d is null || d.CheckAccess()) LogLines.Add(text);
-        else d.BeginInvoke(() => LogLines.Add(text));
-    }
+    /// <summary>Mở file log ĐẦY ĐỦ (UI chỉ giữ 500 dòng cuối) — logs\workspace-update.log.</summary>
+    [RelayCommand]
+    private void OpenLogFile() => ShellOpener.RevealFile(LogLines.FilePath);
+
+    private void Log(string text) => UiThread.Post(() => LogLines.Add(text));
 
     private void Warn(string msg, bool silent = false)
     {
         Status = msg;
         if (silent) Log("⚠ " + msg);   // đường push-dispatch: KHÔNG mở modal (tránh treo UI), chỉ ghi log
-        else Dialogs.Show(msg, "Update Product", MessageBoxButton.OK, MessageBoxImage.Information);
+        else Dialogs.Notify(msg, "Update Product");
     }
 }

@@ -1,0 +1,199 @@
+<UserControl
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    x:Class="Shopee.Suite.Modules.Accounts.AccountsView"
+    x:Name="Root" Unloaded="OnUnloaded">
+    <Grid Margin="28,22,28,24" RowDefinitions="Auto,*">
+
+        <!-- Header -->
+        <Grid Grid.Row="0" Margin="0,0,0,16">
+            <StackPanel>
+                <TextBlock Text="Tài khoản &amp; Proxy" Classes="h1" />
+                <TextBlock Text="Kho tài khoản Shopee dùng chung — Scrape và Search đều chạy trên danh sách này."
+                           Classes="caption" Margin="0,3,0,0" />
+            </StackPanel>
+            <StackPanel HorizontalAlignment="Right" VerticalAlignment="Center"
+                        Orientation="Horizontal" Spacing="12">
+                <Button Classes="primary" MinWidth="120" Command="{Binding OpenCheckAccountCommand}"
+                        AutomationProperties.Name="Check Acc"
+                        ToolTip.Tip="Mở form kiểm tra hàng loạt tài khoản Shopee (Edge + proxy).">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Classes="emoji" Text="🔐" VerticalAlignment="Center" />
+                        <TextBlock Text="Check Acc" Margin="7,0,0,0" VerticalAlignment="Center" />
+                    </StackPanel>
+                </Button>
+                <Border Background="{DynamicResource SubtleBrush}" CornerRadius="14" Padding="14,6">
+                    <TextBlock Text="{Binding Status}" FontSize="12.5" Foreground="{DynamicResource TextSecondaryBrush}" />
+                </Border>
+            </StackPanel>
+        </Grid>
+
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="2*" MinWidth="420" />
+                <ColumnDefinition Width="14" />
+                <ColumnDefinition Width="1*" MinWidth="300" />
+            </Grid.ColumnDefinitions>
+
+            <!-- LEFT: list + toolbar -->
+            <DockPanel Grid.Column="0">
+                <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,10">
+                    <!-- Quản lý danh sách CHỈ trên standalone; client read-only (chỉ xem + xử lý captcha + Đồng bộ). -->
+                    <Button Classes="success" Content="+  Thêm" MinWidth="80"
+                            Command="{Binding AddCommand}"
+                            IsVisible="{Binding IsFullEditMode}" />
+                    <Button Classes="danger" Content="−  Xóa" MinWidth="80"
+                            Margin="8,0,0,0" Command="{Binding DeleteCommand}"
+                            CommandParameter="{Binding #AccountsGrid.SelectedItems}"
+                            IsVisible="{Binding IsFullEditMode}" />
+                    <Button Content="⬇  Import…" Margin="8,0,0,0" Command="{Binding ImportCommand}"
+                            IsVisible="{Binding IsFullEditMode}" />
+                    <Button Content="⟲  Đồng bộ acc" Margin="8,0,0,0" Command="{Binding SyncFromHubCommand}"
+                            IsVisible="{Binding IsHubClient}"
+                            ToolTip.Tip="Kéo tài khoản + proxy + cookie từ Hub về máy này (gộp/append, không nhân đôi)." />
+                    <TextBlock Text="Hiện:" VerticalAlignment="Center" Margin="16,0,6,0" Classes="caption" />
+                    <ComboBox MinWidth="150" VerticalAlignment="Center"
+                              SelectedItem="{Binding SelectedFilter}" ItemsSource="{Binding FilterOptions}" />
+                    <TextBlock Text="Mẹo: bấm đúp 1 acc lỗi để mở giải captcha." VerticalAlignment="Center" Margin="16,0,0,0"
+                               Classes="caption" IsVisible="{Binding IsErrorFilter}" />
+                </StackPanel>
+
+                <!-- Kho KiotProxy dùng chung — xoay vòng gán cho acc lúc chạy (standalone sửa; client nhận) -->
+                <Border DockPanel.Dock="Bottom" Classes="card" Padding="12,10" Margin="0,10,0,0"
+                        IsVisible="{Binding IsFullEditMode}">
+                    <StackPanel>
+                        <Grid>
+                            <TextBlock Text="Kho KiotProxy dùng chung (xoay vòng lúc chạy)"
+                                       Classes="h2" VerticalAlignment="Center" />
+                            <Button HorizontalAlignment="Right" Classes="primary"
+                                    Content="💾  Lưu proxy" MinWidth="110" Command="{Binding SaveProxyPoolCommand}" />
+                        </Grid>
+                        <TextBlock Classes="caption" Margin="0,2,0,6" TextWrapping="Wrap"
+                                   Text="Mỗi dòng 1 KiotProxy key hoặc host:port. Lúc chạy: acc thứ i → proxy thứ (i mod số proxy). Máy Hub quản lý; client tự nhận (sửa ở client sẽ bị Hub ghi đè)." />
+                        <TextBox Classes="mono" Height="90" AcceptsReturn="True" TextWrapping="NoWrap"
+                                 ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                 Text="{Binding ProxyPoolText}" />
+                    </StackPanel>
+                </Border>
+
+                <Border Classes="card" ClipToBounds="True">
+                    <DataGrid x:Name="AccountsGrid" ItemsSource="{Binding Items}" SelectedItem="{Binding Selected}"
+                              DoubleTapped="AccountsGrid_DoubleClick"
+                              BorderThickness="0" IsReadOnly="True" SelectionMode="Extended">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Tên" Binding="{Binding DisplayName}" Width="1.2*" />
+                            <DataGridTextColumn Header="Tài khoản" Binding="{Binding Username}" Width="1.4*"
+                                                FontFamily="{DynamicResource MonoFont}" />
+                            <DataGridTextColumn Header="Proxy" Binding="{Binding ProxySummary}" Width="1.2*" />
+                            <DataGridTemplateColumn Header="Tình trạng" Width="0.9*">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding UsageStatus}" Foreground="{Binding UsageStatusBrush}"
+                                                   FontWeight="SemiBold" VerticalAlignment="Center" Margin="10,0" />
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                            <DataGridTemplateColumn Header="Lỗi / captcha" Width="1.6*">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding LastError}" Foreground="{DynamicResource DangerBrush}"
+                                                   TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Margin="10,0" />
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </Border>
+            </DockPanel>
+
+            <!-- RIGHT: detail editor -->
+            <Border Grid.Column="2" Classes="card" Padding="18"
+                    DataContext="{Binding Selected}">
+                <Grid>
+                    <TextBlock Text="Chọn một tài khoản để xem / sửa chi tiết."
+                               Classes="caption" VerticalAlignment="Top"
+                               IsVisible="{Binding !#Root.DataContext.HasSelection}" />
+
+                    <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                  IsVisible="{Binding #Root.DataContext.HasSelection}">
+                        <StackPanel>
+                            <TextBlock Text="Chi tiết tài khoản" Classes="h2" Margin="0,0,0,12" />
+
+                            <TextBlock Text="Tên hiển thị" Classes="caption" />
+                            <TextBox Text="{Binding Label}" Margin="0,3,0,12"
+                                     IsReadOnly="{Binding #Root.DataContext.IsReadOnlyMode}" />
+
+                            <TextBlock Text="Đăng nhập Shopee (user|pass|.shopee.vn=SPC_F=…)" Classes="caption" />
+                            <TextBox Classes="mono" AcceptsReturn="True" Height="60" TextWrapping="Wrap"
+                                     Text="{Binding ShopeeAccountLogin}" Margin="0,3,0,8"
+                                     IsReadOnly="{Binding #Root.DataContext.IsReadOnlyMode}" />
+                            <CheckBox Content="Mở với tài khoản Shopee (tự đăng nhập)" Margin="0,0,0,14"
+                                      IsChecked="{Binding OpenWithShopeeAccount}"
+                                      IsEnabled="{Binding #Root.DataContext.IsFullEditMode}" />
+
+                            <TextBlock Text="PROXY" FontSize="11" FontWeight="SemiBold"
+                                       Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,8" />
+                            <TextBlock Text="KiotProxy key" Classes="caption" />
+                            <TextBox Text="{Binding KiotProxyKey}" Margin="0,3,0,10"
+                                     IsReadOnly="{Binding #Root.DataContext.IsReadOnlyMode}" />
+
+                            <Grid Margin="0,0,0,10" IsEnabled="{Binding #Root.DataContext.IsFullEditMode}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="12" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock Text="Vùng" Classes="caption" />
+                                    <ComboBox Margin="0,3,0,0" HorizontalAlignment="Stretch" SelectedItem="{Binding Region}"
+                                              ItemsSource="{Binding #Root.DataContext.RegionOptions}" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock Text="Loại proxy" Classes="caption" />
+                                    <ComboBox Margin="0,3,0,0" HorizontalAlignment="Stretch" SelectedItem="{Binding ProxyType}"
+                                              ItemsSource="{Binding #Root.DataContext.ProxyTypeOptions}" />
+                                </StackPanel>
+                            </Grid>
+
+                            <TextBlock Text="Proxy thủ công (host:port hoặc http://… — nếu không dùng Kiot)"
+                                       Classes="caption" />
+                            <TextBox Text="{Binding ManualProxy}" Margin="0,3,0,10"
+                                     IsReadOnly="{Binding #Root.DataContext.IsReadOnlyMode}" />
+                            <CheckBox Content="Bắt buộc có proxy mới chạy" IsChecked="{Binding RequireProxy}" Margin="0,0,0,4"
+                                      IsEnabled="{Binding #Root.DataContext.IsFullEditMode}" />
+                            <CheckBox Content="Tạm tắt tài khoản này" IsChecked="{Binding Disabled}"
+                                      IsEnabled="{Binding #Root.DataContext.IsFullEditMode}" />
+
+                            <!-- Nút thao tác. Xử lý captcha (double-click mở Brave) → "Đóng và …". -->
+                            <WrapPanel HorizontalAlignment="Left" Margin="0,18,0,0">
+                                <Button Content="Bật lại" MinWidth="100" Margin="0,0,10,6"
+                                        ToolTip.Tip="Bỏ đánh dấu lỗi/captcha của tài khoản này → đưa về rotation Scrape/Search"
+                                        Foreground="{DynamicResource SuccessBrush}" BorderBrush="{DynamicResource SuccessBrush}"
+                                        Command="{Binding #Root.DataContext.ReenableCommand}" />
+                                <Button Classes="primary" Content="Lưu thay đổi" MinWidth="120" Margin="0,0,10,6"
+                                        Command="{Binding #Root.DataContext.SaveCommand}"
+                                        IsVisible="{Binding #Root.DataContext.IsFullEditMode}" />
+                            </WrapPanel>
+
+                            <!-- Xử lý captcha (chỉ khi lọc "Bị lỗi/captcha"): đóng Brave vừa mở kiểm tra rồi lưu/xóa/báo. -->
+                            <WrapPanel HorizontalAlignment="Left" Margin="0,0,0,0"
+                                       IsVisible="{Binding #Root.DataContext.IsErrorFilter}">
+                                <Button Classes="success" Content="✔  Đóng và lưu" MinWidth="120" Margin="0,0,10,6"
+                                        ToolTip.Tip="Đã giải captcha xong: đóng Brave + bật lại acc + gỡ báo trên Hub."
+                                        Command="{Binding #Root.DataContext.CloseAndSaveCommand}" />
+                                <Button Content="⚠  Đóng và báo không sửa được" MinWidth="180" Margin="0,0,10,6"
+                                        ToolTip.Tip="Đóng Brave, giữ acc tắt, báo Hub — Hub quyết giữ/xóa."
+                                        Command="{Binding #Root.DataContext.CloseAndReportFailedCommand}"
+                                        IsVisible="{Binding #Root.DataContext.IsReadOnlyMode}" />
+                                <Button Classes="danger" Content="🗑  Đóng và xóa tk" MinWidth="140" Margin="0,0,10,6"
+                                        ToolTip.Tip="Đóng Brave + xóa acc khỏi kho (đồng bộ gỡ mọi máy)."
+                                        Command="{Binding #Root.DataContext.CloseAndDeleteCommand}"
+                                        IsVisible="{Binding #Root.DataContext.IsFullEditMode}" />
+                            </WrapPanel>
+                        </StackPanel>
+                    </ScrollViewer>
+                </Grid>
+            </Border>
+        </Grid>
+    </Grid>
+</UserControl>

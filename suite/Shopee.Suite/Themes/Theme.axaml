@@ -1,0 +1,367 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:sys="using:System">
+
+    <Styles.Resources>
+        <!-- ══════════ COLOR / BRUSH TOKENS ══════════ -->
+        <SolidColorBrush x:Key="AccentBrush" Color="#0078D7" />
+        <SolidColorBrush x:Key="AccentHoverBrush" Color="#106EBE" />
+        <SolidColorBrush x:Key="AccentPressedBrush" Color="#005A9E" />
+        <SolidColorBrush x:Key="SuccessBrush" Color="#00783C" />
+        <SolidColorBrush x:Key="SuccessHoverBrush" Color="#06632F" />
+        <SolidColorBrush x:Key="DangerBrush" Color="#C8463C" />
+        <SolidColorBrush x:Key="DangerHoverBrush" Color="#B23A31" />
+        <SolidColorBrush x:Key="WarningBrush" Color="#C88200" />
+
+        <SolidColorBrush x:Key="WindowBackgroundBrush" Color="#F5F7FA" />
+        <SolidColorBrush x:Key="CardBackgroundBrush" Color="#FFFFFF" />
+        <SolidColorBrush x:Key="BorderBrush" Color="#D7D9DE" />
+        <SolidColorBrush x:Key="SubtleBrush" Color="#EEF1F5" />
+
+        <SolidColorBrush x:Key="SidebarBackgroundBrush" Color="#1E2230" />
+        <SolidColorBrush x:Key="SidebarHeaderBrush" Color="#161925" />
+        <SolidColorBrush x:Key="SidebarItemHoverBrush" Color="#2A3042" />
+        <SolidColorBrush x:Key="SidebarSelectedBrush" Color="#2A3042" />
+        <SolidColorBrush x:Key="SidebarTextBrush" Color="#C7CCD6" />
+        <SolidColorBrush x:Key="SidebarMutedBrush" Color="#7E869B" />
+
+        <!-- ══════════ TOP APP BAR (nav) — nền có chiều sâu + trạng thái tab ══════════ -->
+        <!-- Nền bar: gradient tối nhẹ (sáng trên → tối dưới) cho cảm giác nổi khối, không phẳng thô. -->
+        <LinearGradientBrush x:Key="NavBarBrush" StartPoint="0%,0%" EndPoint="0%,100%">
+            <GradientStop Offset="0" Color="#252B3B" />
+            <GradientStop Offset="1" Color="#191D28" />
+        </LinearGradientBrush>
+        <SolidColorBrush x:Key="NavBarBorderBrush" Color="#0F1219" />
+        <SolidColorBrush x:Key="NavDividerBrush" Color="#333B4E" />
+        <!-- Huy hiệu "S" + tab đang chọn: cùng dải accent gradient → nhận diện thương hiệu nhất quán. -->
+        <LinearGradientBrush x:Key="BrandBadgeBrush" StartPoint="0%,0%" EndPoint="0%,100%">
+            <GradientStop Offset="0" Color="#2A93F0" />
+            <GradientStop Offset="1" Color="#0A6BD8" />
+        </LinearGradientBrush>
+        <LinearGradientBrush x:Key="NavActiveBrush" StartPoint="0%,0%" EndPoint="0%,100%">
+            <GradientStop Offset="0" Color="#2A93F0" />
+            <GradientStop Offset="1" Color="#0A6BD8" />
+        </LinearGradientBrush>
+        <SolidColorBrush x:Key="NavItemHoverBrush" Color="#2C3346" />
+        <SolidColorBrush x:Key="NavTextBrush" Color="#9BA3B5" />
+        <SolidColorBrush x:Key="NavTextHoverBrush" Color="#EAEDF3" />
+
+        <SolidColorBrush x:Key="LogBackgroundBrush" Color="#121212" />
+        <SolidColorBrush x:Key="LogForegroundBrush" Color="#E8E8E8" />
+
+        <SolidColorBrush x:Key="TextPrimaryBrush" Color="#1B1F24" />
+        <SolidColorBrush x:Key="TextSecondaryBrush" Color="#6E727A" />
+        <SolidColorBrush x:Key="TextOnAccentBrush" Color="#FFFFFF" />
+
+        <!-- ══════════ FONTS ══════════ -->
+        <!-- Inter nhúng (phủ tiếng Việt, giống hệt Win/Ubuntu). Mono cho log/list; Emoji cho icon chuỗi. -->
+        <FontFamily x:Key="UiFont">avares://Avalonia.Fonts.Inter/Assets#Inter</FontFamily>
+        <FontFamily x:Key="MonoFont">Consolas, Cascadia Mono, DejaVu Sans Mono, Liberation Mono, monospace</FontFamily>
+        <FontFamily x:Key="EmojiFont">Segoe UI Emoji, Noto Color Emoji, sans-serif</FontFamily>
+
+        <!-- ══════════ RESKIN FLUENTTHEME → look phẳng/gọn/pro như bản WPF ══════════ -->
+        <!-- Accent xanh của app (tab đang chọn, viền focus, highlight…). -->
+        <Color x:Key="SystemAccentColor">#0078D7</Color>
+        <Color x:Key="SystemAccentColorLight1">#1C86E0</Color>
+        <Color x:Key="SystemAccentColorDark1">#106EBE</Color>
+        <!-- Bo góc chung cho control Fluent (TextBox/ComboBox/…) — Fluent mặc định hơi vuông. -->
+        <CornerRadius x:Key="ControlCornerRadius">6</CornerRadius>
+        <!-- Tab: Fluent mặc định font header RẤT to (~24) → thu về gọn. (Chỉ override FontSize — các key khác
+             sai kiểu/không tồn tại sẽ làm vỡ template TabControl → view trống.) -->
+        <sys:Double x:Key="TabItemHeaderFontSize">13</sys:Double>
+        <!-- Cỡ chữ nội dung control Fluent (button/textbox/combo/list/datagrid…) — nhỏ lại để hợp màn Full HD
+             (bản trước hơi to; máy dev 4K nhìn khác). Fluent mặc định 14. -->
+        <sys:Double x:Key="ControlContentThemeFontSize">12.5</sys:Double>
+
+        <!-- ══════════ FOCUS INPUT + LƯỚI — bỏ look "thô" khi click/focus ══════════ -->
+        <!-- TextBox/ComboBox: Fluent mặc định focus = gạch chân accent 2px (0,0,0,2) trông thô & "nhảy".
+             → viền accent 1px ĐỀU quanh ô. Hover chỉ đậm viền xám nhẹ (không nhảy sang accent chói). -->
+        <Thickness x:Key="TextControlBorderThemeThicknessFocused">1</Thickness>
+        <SolidColorBrush x:Key="TextControlBorderBrushFocused" Color="#0078D7" />
+        <SolidColorBrush x:Key="TextControlBorderBrushPointerOver" Color="#AEB3BD" />
+        <!-- ComboBox focus: viền accent (khớp TextBox) cho cả focus chuột lẫn bàn phím. HighlightBackground
+             (lớp trên) chỉ hiện khi focus bàn phím → đổi luôn brush của nó sang accent. -->
+        <SolidColorBrush x:Key="ComboBoxBackgroundBorderBrushFocused" Color="#0078D7" />
+
+        <!-- Tab trong module (TabControl): chữ tab CHƯA chọn — xám đậm-vừa RÕ (không nhợt như Fluent mặc định). -->
+        <SolidColorBrush x:Key="TabUnselectedBrush" Color="#565C66" />
+
+        <!-- DataGrid: BỎ khung ô màu đen (SystemBaseHighColor) vẽ quanh ô khi click — thủ phạm "thô" chính. -->
+        <SolidColorBrush x:Key="DataGridCellFocusVisualPrimaryBrush" Color="Transparent" />
+        <SolidColorBrush x:Key="DataGridCellFocusVisualSecondaryBrush" Color="Transparent" />
+        <!-- Dòng đang chọn: Fluent tô accent ~60% (hơi gắt) → nền accent NHẠT, chữ giữ đen dễ đọc. -->
+        <SolidColorBrush x:Key="DataGridRowSelectedBackgroundBrush" Color="#0078D7" />
+        <SolidColorBrush x:Key="DataGridRowSelectedHoveredBackgroundBrush" Color="#0078D7" />
+        <SolidColorBrush x:Key="DataGridRowSelectedUnfocusedBackgroundBrush" Color="#0078D7" />
+        <SolidColorBrush x:Key="DataGridRowSelectedHoveredUnfocusedBackgroundBrush" Color="#0078D7" />
+        <sys:Double x:Key="DataGridRowSelectedBackgroundOpacity">0.14</sys:Double>
+        <sys:Double x:Key="DataGridRowSelectedHoveredBackgroundOpacity">0.20</sys:Double>
+        <sys:Double x:Key="DataGridRowSelectedUnfocusedBackgroundOpacity">0.11</sys:Double>
+        <sys:Double x:Key="DataGridRowSelectedHoveredUnfocusedBackgroundOpacity">0.17</sys:Double>
+
+        <!-- Button PHẲNG bo góc (thay template Fluent) — nền thẻ + viền mảnh, hover đổi nền nhưng GIỮ màu chữ/viền
+             của variant (primary/success/danger là outline: chữ+viền màu, không tô nền). Card (Welcome) bo tròn hơn. -->
+        <ControlTheme x:Key="{x:Type Button}" TargetType="Button">
+            <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="Padding" Value="13,6" />
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="Template">
+                <ControlTemplate>
+                    <Border Name="PART_bd" Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="{TemplateBinding CornerRadius}">
+                        <ContentPresenter Name="PART_ContentPresenter"
+                                          Content="{TemplateBinding Content}" ContentTemplate="{TemplateBinding ContentTemplate}"
+                                          Foreground="{TemplateBinding Foreground}" Padding="{TemplateBinding Padding}"
+                                          HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                          VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}"
+                                          RecognizesAccessKey="True" />
+                    </Border>
+                </ControlTemplate>
+            </Setter>
+            <Style Selector="^:pointerover /template/ Border#PART_bd">
+                <Setter Property="Background" Value="{DynamicResource SubtleBrush}" />
+            </Style>
+            <Style Selector="^:pressed /template/ Border#PART_bd">
+                <Setter Property="Background" Value="{DynamicResource SubtleBrush}" />
+                <Setter Property="Opacity" Value="0.9" />
+            </Style>
+            <Style Selector="^:disabled">
+                <Setter Property="Opacity" Value="0.45" />
+            </Style>
+        </ControlTheme>
+    </Styles.Resources>
+
+    <!-- ══════════ TYPOGRAPHY (class) — cỡ chữ gọn cho Full HD ══════════ -->
+    <Style Selector="TextBlock.h1">
+        <Setter Property="FontSize" Value="18" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+    </Style>
+    <Style Selector="TextBlock.h2">
+        <Setter Property="FontSize" Value="14" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+    </Style>
+    <Style Selector="TextBlock.body">
+        <Setter Property="FontSize" Value="12.5" />
+        <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+        <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+    <Style Selector="TextBlock.caption">
+        <Setter Property="FontSize" Value="11.5" />
+        <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+        <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+    <Style Selector="TextBlock.emoji">
+        <Setter Property="FontFamily" Value="{DynamicResource EmojiFont}" />
+    </Style>
+
+    <!-- ══════════ BUTTON variants (class) — outline: chữ + viền màu trên nền thẻ ══════════ -->
+    <Style Selector="Button.primary">
+        <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style Selector="Button.success">
+        <Setter Property="Foreground" Value="{DynamicResource SuccessBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource SuccessBrush}" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style Selector="Button.danger">
+        <Setter Property="Foreground" Value="{DynamicResource DangerBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource DangerBrush}" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+
+    <!-- Thẻ bấm được (màn Welcome): bo tròn hơn, canh trái, hover viền accent + nền xanh nhạt. -->
+    <Style Selector="Button.card">
+        <Setter Property="CornerRadius" Value="12" />
+        <Setter Property="Padding" Value="18,16" />
+        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+    </Style>
+    <Style Selector="Button.card:pointerover /template/ Border#PART_bd">
+        <Setter Property="Background" Value="#F4F9FF" />
+        <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+    </Style>
+
+    <!-- ══════════ TEXTBOX variants (class) ══════════ -->
+    <!-- .mono = chữ mono, KHÔNG mặc định nhiều dòng: ô mono dùng cho cả path 1 dòng lẫn ô nhập nhiều dòng.
+         Ô nhiều dòng tự đặt AcceptsReturn="True" tại chỗ. (Trước: style ép AcceptsReturn=True cho MỌI ô mono
+         → ô path 1 dòng cũng bị coi là nhiều dòng nên chữ dính mép trên.) -->
+    <Style Selector="TextBox.mono">
+        <Setter Property="FontFamily" Value="{DynamicResource MonoFont}" />
+        <Setter Property="FontSize" Value="12.5" />
+        <Setter Property="TextWrapping" Value="NoWrap" />
+    </Style>
+    <Style Selector="TextBox.log">
+        <Setter Property="FontFamily" Value="{DynamicResource MonoFont}" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="Foreground" Value="{DynamicResource LogForegroundBrush}" />
+        <Setter Property="Background" Value="{DynamicResource LogBackgroundBrush}" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="IsReadOnly" Value="True" />
+        <Setter Property="TextWrapping" Value="NoWrap" />
+    </Style>
+    <!-- Giữ NỀN TỐI khi hover/focus: FluentTheme mặc định đổi nền TextBox sang sáng lúc pointerover/focus (đè
+         nền tối của log) → chữ log sáng trở nên mờ trên nền sáng. Ép border-element giữ nền/chữ log. -->
+    <Style Selector="TextBox.log /template/ Border#PART_BorderElement">
+        <Setter Property="Background" Value="{DynamicResource LogBackgroundBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource LogBackgroundBrush}" />
+    </Style>
+    <Style Selector="TextBox.log:pointerover /template/ Border#PART_BorderElement">
+        <Setter Property="Background" Value="{DynamicResource LogBackgroundBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource LogBackgroundBrush}" />
+    </Style>
+    <Style Selector="TextBox.log:focus /template/ Border#PART_BorderElement">
+        <Setter Property="Background" Value="{DynamicResource LogBackgroundBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource LogBackgroundBrush}" />
+    </Style>
+    <Style Selector="TextBox.log:pointerover">
+        <Setter Property="Foreground" Value="{DynamicResource LogForegroundBrush}" />
+    </Style>
+    <Style Selector="TextBox.log:focus">
+        <Setter Property="Foreground" Value="{DynamicResource LogForegroundBrush}" />
+    </Style>
+
+    <!-- ══════════ CĂN GIỮA DỌC chữ trong ô nhập 1 DÒNG ══════════ -->
+    <!-- Fluent để VerticalContentAlignment mặc định = Stretch → chữ 1 dòng dính mép TRÊN khi ô cao hơn nội
+         dung (rõ nhất ở form dùng padding gọn). Căn giữa cho ô 1 dòng; ô NHIỀU DÒNG (AcceptsReturn) và LOG
+         giữ chữ chảy từ TRÊN xuống. -->
+    <Style Selector="TextBox">
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+    </Style>
+    <Style Selector="TextBox[AcceptsReturn=True]">
+        <Setter Property="VerticalContentAlignment" Value="Stretch" />
+    </Style>
+    <Style Selector="TextBox.log">
+        <Setter Property="VerticalContentAlignment" Value="Stretch" />
+    </Style>
+
+    <!-- ══════════ CARD (class trên Border) ══════════ -->
+    <Style Selector="Border.card">
+        <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="8" />
+    </Style>
+
+    <!-- ══════════ DATAGRID ══════════ -->
+    <!-- Ô: canh giữa dọc + CỠ CHỮ 12.5 khớp toàn app (Fluent hard-code 15 → to/thô lệch với form),
+         dòng cao thoáng hơn chút. -->
+    <Style Selector="DataGridCell">
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="FontSize" Value="12.5" />
+        <Setter Property="MinHeight" Value="34" />
+    </Style>
+    <!-- Header: dải nền xám nhạt + chữ SemiBold màu phụ → ra dáng tiêu đề bảng (trước: 12px xám nhạt,
+         NHỎ HƠN cả chữ ô 15px nên nhìn ngược cấp/nhợt). -->
+    <Style Selector="DataGridColumnHeader">
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+        <Setter Property="Background" Value="{DynamicResource SubtleBrush}" />
+        <Setter Property="MinHeight" Value="36" />
+        <Setter Property="Padding" Value="12,0,0,0" />
+    </Style>
+    <!-- Bỏ đường kẻ dọc mảnh giữa các ô (gọn hơn); chỉ giữ kẻ ngang giữa dòng. -->
+    <Style Selector="DataGrid">
+        <Setter Property="GridLinesVisibility" Value="Horizontal" />
+    </Style>
+
+    <!-- ══════════ COMBOBOX — focus viền accent mảnh (đồng bộ TextBox, thay ring thô) ══════════ -->
+    <Style Selector="ComboBox:focus /template/ Border#Background">
+        <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+    </Style>
+
+    <!-- ══════════ TAB TRONG MODULE (TabControl/TabItem) — chữ đậm & rõ, hết "nhờ nhờ" ══════════ -->
+    <!-- Mặc định Fluent: tab chưa chọn xám nhợt + weight thường → mờ. Giờ: chưa chọn = xám đậm-vừa
+         SemiBold; đang chọn = accent Bold (kèm gạch chân accent sẵn có); hover = chữ đen rõ. -->
+    <Style Selector="TabItem">
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Foreground" Value="{DynamicResource TabUnselectedBrush}" />
+    </Style>
+    <Style Selector="TabItem:selected">
+        <Setter Property="FontWeight" Value="Bold" />
+        <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+    </Style>
+    <Style Selector="TabItem:pointerover /template/ Border#PART_LayoutRoot">
+        <Setter Property="TextElement.Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+    </Style>
+    <!-- Tab đang chọn mà rê chuột: GIỮ accent (Fluent đổi màu lúc hover → mất nhận diện). -->
+    <Style Selector="TabItem:selected:pointerover /template/ Border#PART_LayoutRoot">
+        <Setter Property="TextElement.Foreground" Value="{DynamicResource AccentBrush}" />
+    </Style>
+
+    <!-- ══════════ TOP NAV (ListBox.topnav) — tab module ngang trên app bar tối ══════════ -->
+    <Style Selector="ListBox.topnav">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="Padding" Value="4,0" />
+    </Style>
+    <Style Selector="ListBox.topnav ListBoxItem">
+        <Setter Property="Margin" Value="2,0" />
+        <Setter Property="Padding" Value="13,8" />
+        <Setter Property="CornerRadius" Value="9" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Foreground" Value="{DynamicResource NavTextBrush}" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="Cursor" Value="Hand" />
+    </Style>
+    <Style Selector="ListBox.topnav ListBoxItem:pointerover /template/ ContentPresenter">
+        <Setter Property="Background" Value="{DynamicResource NavItemHoverBrush}" />
+        <Setter Property="CornerRadius" Value="9" />
+    </Style>
+    <!-- Tab đang chọn: chip accent gradient (nổi khối, không phẳng thô) + chữ/icon trắng. -->
+    <Style Selector="ListBox.topnav ListBoxItem:selected /template/ ContentPresenter">
+        <Setter Property="Background" Value="{DynamicResource NavActiveBrush}" />
+        <Setter Property="CornerRadius" Value="9" />
+    </Style>
+    <Style Selector="ListBox.topnav ListBoxItem:selected:pointerover /template/ ContentPresenter">
+        <Setter Property="Background" Value="{DynamicResource NavActiveBrush}" />
+    </Style>
+
+    <!-- Màu chữ + icon tab: xám dịu (thường) → sáng (hover) → trắng (đang chọn). Đặt TRỰC TIẾP lên
+         TextBlock/PathIcon con để thắng mọi setter mặc định của Fluent. Thứ tự khai báo: thường → hover
+         → selected (Avalonia ưu tiên rule khai báo SAU khi cùng độ đặc hiệu, nên selected luôn thắng). -->
+    <Style Selector="ListBox.topnav ListBoxItem TextBlock">
+        <Setter Property="Foreground" Value="{DynamicResource NavTextBrush}" />
+    </Style>
+    <Style Selector="ListBox.topnav ListBoxItem PathIcon">
+        <Setter Property="Foreground" Value="{DynamicResource NavTextBrush}" />
+    </Style>
+    <Style Selector="ListBox.topnav ListBoxItem:pointerover TextBlock">
+        <Setter Property="Foreground" Value="{DynamicResource NavTextHoverBrush}" />
+    </Style>
+    <Style Selector="ListBox.topnav ListBoxItem:pointerover PathIcon">
+        <Setter Property="Foreground" Value="{DynamicResource NavTextHoverBrush}" />
+    </Style>
+    <Style Selector="ListBox.topnav ListBoxItem:selected TextBlock">
+        <Setter Property="Foreground" Value="White" />
+    </Style>
+    <Style Selector="ListBox.topnav ListBoxItem:selected PathIcon">
+        <Setter Property="Foreground" Value="White" />
+    </Style>
+
+    <!-- Brand trên app bar tối: nút phẳng, nền trong suốt, hover tối nhẹ (dùng lại template Button toàn cục). -->
+    <Style Selector="Button.brand">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderBrush" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="CornerRadius" Value="0" />
+        <Setter Property="Padding" Value="16,0" />
+    </Style>
+    <Style Selector="Button.brand:pointerover /template/ Border#PART_bd">
+        <Setter Property="Background" Value="{DynamicResource SidebarHeaderBrush}" />
+    </Style>
+    <Style Selector="Button.brand:pressed /template/ Border#PART_bd">
+        <Setter Property="Background" Value="{DynamicResource SidebarHeaderBrush}" />
+    </Style>
+</Styles>

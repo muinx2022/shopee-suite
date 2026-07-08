@@ -52,9 +52,6 @@ public sealed class SearchSession : IAsyncDisposable
     /// coordinator relaunch + tiếp tục từ checkpoint với cùng account. Không đụng tới account pool.</summary>
     public void RequestReconnect() => _runCompletion?.TrySetResult(SearchRunOutcome.Reconnect);
 
-    /// <summary>The shop name captured during a shop-from-link run (read before CloseBrowserAsync).</summary>
-    public string ShopName => _orchestrator?.ShopName ?? "";
-
     /// <summary>Latest crawl checkpoint (1-based) from the last run — used to resume on account swap.</summary>
     public int LastCategoryIndex { get; private set; } = 1;
     public int LastPage { get; private set; } = 1;

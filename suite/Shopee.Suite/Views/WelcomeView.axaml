@@ -1,0 +1,54 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="Shopee.Suite.Views.WelcomeView" x:Name="Root">
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <Grid Margin="40,36" RowDefinitions="Auto,Auto,*">
+            <!-- Hero -->
+            <StackPanel Grid.Row="0" Orientation="Horizontal">
+                <Border Width="56" Height="56" CornerRadius="15" Background="{DynamicResource BrandBadgeBrush}"
+                        BoxShadow="0 3 10 0 #330A6BD8">
+                    <TextBlock Text="S" FontSize="30" FontWeight="Bold" Foreground="White"
+                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Border>
+                <StackPanel Margin="18,0,0,0" VerticalAlignment="Center">
+                    <TextBlock Text="Shopee Suite" FontSize="28" FontWeight="SemiBold"
+                               Foreground="{DynamicResource TextPrimaryBrush}" />
+                    <TextBlock Classes="caption" Margin="0,2,0,0"
+                               Text="Bộ công cụ hợp nhất — quản lý tài khoản, scrape, tìm kiếm và cập nhật sản phẩm Shopee." />
+                </StackPanel>
+            </StackPanel>
+
+            <TextBlock Grid.Row="1" Classes="h2" Text="Bắt đầu" Margin="2,32,0,12" />
+
+            <!-- Module tiles -->
+            <ItemsControl Grid.Row="2" ItemsSource="{Binding Tiles}">
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <WrapPanel />
+                    </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Button Classes="card" Width="300" Margin="0,0,16,16"
+                                Command="{Binding $parent[ItemsControl].DataContext.OpenCommand}"
+                                CommandParameter="{Binding}">
+                            <StackPanel Orientation="Horizontal">
+                                <Border Width="44" Height="44" CornerRadius="11" Background="{DynamicResource SubtleBrush}"
+                                        VerticalAlignment="Top">
+                                    <PathIcon Data="{Binding Icon}" Width="23" Height="23"
+                                              Foreground="{DynamicResource AccentBrush}"
+                                              HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                </Border>
+                                <StackPanel Margin="14,0,0,0" VerticalAlignment="Center" Width="190">
+                                    <TextBlock Text="{Binding Title}" FontSize="15" FontWeight="SemiBold"
+                                               Foreground="{DynamicResource TextPrimaryBrush}" />
+                                    <TextBlock Classes="caption" Text="{Binding Subtitle}" Margin="0,2,0,0" />
+                                </StackPanel>
+                            </StackPanel>
+                        </Button>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </Grid>
+    </ScrollViewer>
+</UserControl>

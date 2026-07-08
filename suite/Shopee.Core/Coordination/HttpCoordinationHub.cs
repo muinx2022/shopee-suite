@@ -44,7 +44,7 @@ public sealed class HttpCoordinationHub : ICoordinationHub, IDisposable
     {
         try
         {
-            await _client.MachineHeartbeatAsync(new MachineHeartbeatRequest(_machineId, Host, null));
+            await _client.MachineHeartbeatAsync(new MachineHeartbeatRequest(_machineId, Host, Infrastructure.AppInfo.Version));
             _fleet = await _client.FleetAsync();
             // CHỈ 1 lần, SAU khi Hub thật sự trả lời (tránh race lúc máy-Hub vừa khởi động: server localhost chưa
             // kịp lắng nghe). Poller 12s tự chạy ở tick thành công đầu tiên.
@@ -235,6 +235,10 @@ public sealed class HttpCoordinationHub : ICoordinationHub, IDisposable
         {
             foreach (var r in await _client.AllLedgerAsync())
             {
+                // CHỈ fold op=scrape: import/update/rewrite GIỜ cũng đẩy Completed (dòng đã làm) lên ledger để
+                // Thống kê xem "dòng nào đã import/update"; nhưng ĐÓ KHÔNG phải tiến độ scrape → nếu fold vào
+                // ScrapeProgressStore thì scrape sẽ tưởng các dòng ấy đã cào xong → BỎ SÓT khi Tiếp tục.
+                if (r.Op != "scrape") continue;
                 if (string.IsNullOrEmpty(r.BigsellerId) || r.Completed.Count == 0) continue;
                 foreach (var rr in r.Completed)
                     ScrapeProgressStore.Shared.MarkCompleted(r.BigsellerId, r.Sheet, rr.From, rr.To);

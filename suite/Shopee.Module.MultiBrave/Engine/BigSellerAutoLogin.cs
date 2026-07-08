@@ -1,11 +1,14 @@
 using Microsoft.Playwright;
 using Shopee.Core.Ai;
 using Shopee.Core.BigSeller;
+using Shopee.Core.Browser;
+using Shopee.Core.Cdp;
+using Shopee.Core.Infrastructure;
 
 namespace OpenMultiBraveLauncherV3;
 
 /// <summary>Kết quả 1 lần auto-login BigSeller.</summary>
-internal enum AutoLoginOutcome { Success, NeedsOtp, Failed }
+public enum AutoLoginOutcome { Success, NeedsOtp, Failed }
 
 /// <summary>
 /// TỰ ĐĂNG NHẬP BigSeller (headless) trên 1 <see cref="IPage"/> — BẢN SAO của
@@ -17,9 +20,58 @@ internal enum AutoLoginOutcome { Success, NeedsOtp, Failed }
 /// bị lạ → cần giải mã email tay 1 lần tạo device-trust), hoặc Failed. Orchestration (TTL + attach CDP +
 /// xuất token ra file) nằm ở <c>BraveInstanceSession.TryAutoLoginBigSellerAsync</c>.
 /// </summary>
-internal static class BigSellerAutoLogin
+public static class BigSellerAutoLogin
 {
     private const string LoginUrl = "https://www.bigseller.com/en_US/login.htm";
+
+    /// <summary>BUỘC tự đăng nhập ngay trong Brave đang mở tại <paramref name="cdpPort"/> (BỎ guard TTL/IsFresh) —
+    /// dùng cho nút "Mở Profile Bigseller" khi phát hiện CHƯA đăng nhập. Attach Playwright qua CDP → điền
+    /// email/mật khẩu + giải captcha (AI) → thành công thì mark + xuất token ra <paramref name="cookieFile"/>.
+    /// Trả outcome (NeedsOtp = thiết bị mới, cần đăng nhập TAY 1 lần tạo device-trust). ADDITIVE: mọi lỗi nuốt,
+    /// trả Failed → caller rơi về đăng nhập tay như cũ.</summary>
+    public static async Task<AutoLoginOutcome> ForceLoginInBraveAsync(
+        int cdpPort, string accountId, string email, string password, string? cookieFile,
+        Action<string>? log, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(password))
+        { log?.Invoke("BigSeller: thiếu email/mật khẩu cho tk này — không tự đăng nhập được, hãy đăng nhập tay."); return AutoLoginOutcome.Failed; }
+
+        IPlaywright? pw = null;
+        IBrowser? browser = null;
+        try
+        {
+            pw = await Playwright.CreateAsync().ConfigureAwait(false);
+            browser = await pw.Chromium.ConnectOverCDPAsync($"http://127.0.0.1:{cdpPort}", new() { Timeout = 30000 }).ConfigureAwait(false);
+            var context = browser.Contexts.FirstOrDefault();
+            if (context is null) { log?.Invoke("BigSeller auto-login: Brave chưa có context."); return AutoLoginOutcome.Failed; }
+            var page = context.Pages.FirstOrDefault(p => (p.Url ?? "").Contains("bigseller", StringComparison.OrdinalIgnoreCase))
+                       ?? await context.NewPageAsync().ConfigureAwait(false);
+
+            var outcome = await TryAsync(page, email, password, AiConfigStore.Shared.Current, log, ct).ConfigureAwait(false);
+            if (outcome == AutoLoginOutcome.Success)
+            {
+                BigSellerSessionRegistry.MarkLoggedIn(accountId);
+                if (!string.IsNullOrWhiteSpace(cookieFile))
+                {
+                    try
+                    {
+                        var cookies = await BigSellerCookieImporter.GetBigSellerCookiesAsync(cdpPort).ConfigureAwait(false);
+                        if (BigSellerCookieImporter.HasAuthCookie(cookies))
+                            BigSellerCookieImporter.TryWriteCookieFile(cookieFile!, cookies, log);
+                    }
+                    catch (Exception ex) { log?.Invoke($"BigSeller: xuất token mới ra file lỗi: {ex.Message}"); }
+                }
+            }
+            return outcome;
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex) { log?.Invoke($"BigSeller auto-login lỗi: {ex.Message}"); return AutoLoginOutcome.Failed; }
+        finally
+        {
+            // ConnectOverCDP: Dispose Playwright chỉ NGẮT kết nối (Brave do launcher mở, KHÔNG đóng theo).
+            try { pw?.Dispose(); } catch { }
+        }
+    }
 
     /// <summary>ĐẦU PHIÊN SCRAPE: đảm bảo phiên BigSeller "tươi" bằng cách TỰ ĐĂNG NHẬP ngay TRONG Brave scrape
     /// (attach Playwright qua CDP port <paramref name="cdpPort"/>) → token mint ra KHỚP IP proxy của Brave này
@@ -74,6 +126,70 @@ internal static class BigSellerAutoLogin
         {
             // ConnectOverCDP: Dispose Playwright chỉ NGẮT kết nối (Brave do launcher mở, KHÔNG bị đóng theo).
             try { pw?.Dispose(); } catch { }
+        }
+    }
+
+    /// <summary>Tự đăng nhập 1 tk BigSeller HEADLESS (KHÔNG hiện cửa sổ): TỰ mở Brave --headless (profile riêng
+    /// theo <paramref name="accountId"/>, có proxy nếu truyền) → điền email/mật khẩu + giải captcha (AI) → LƯU
+    /// cookie ra <paramref name="cookieFile"/> → đóng. Dùng cho nút "Đăng nhập tất cả". Đã đăng nhập sẵn (profile
+    /// bền) → TryAsync trả Success ngay (giữ token, vẫn lưu lại). NeedsOtp = thiết bị mới → cần đăng nhập TAY 1
+    /// lần (mục Cấu hình BigSeller → Mở Profile). Mọi lỗi → Failed (không ném ra ngoài, để vòng "tất cả" chạy tiếp).</summary>
+    public static async Task<AutoLoginOutcome> LoginHeadlessAsync(
+        string accountId, string email, string password, string cookieFile, string? proxyServer,
+        Action<string>? log, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(password))
+        { log?.Invoke("Thiếu email/mật khẩu — bỏ qua tk này."); return AutoLoginOutcome.Failed; }
+        if (string.IsNullOrWhiteSpace(cookieFile))
+        { log?.Invoke("Thiếu file cookie — bỏ qua tk này."); return AutoLoginOutcome.Failed; }
+
+        var profileDir = Path.Combine(SuitePaths.ModuleDir("bigseller-login"), accountId);
+        Directory.CreateDirectory(profileDir);
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(cookieFile))!);
+        // TẮT Brave Shields cho bigseller → tracker (_ga/_fbp/_tt…) nạp được → lưu BỘ cookie ĐẦY ĐỦ (phiên bền).
+        BigSellerLoginRunner.EnsureBraveShieldsDown(profileDir);
+
+        var launcher = new BrowserLauncher(BrowserKind.Brave);
+        IPlaywright? pw = null;
+        IBrowser? browser = null;
+        try
+        {
+            // Mở Brave HEADLESS (không hiện cửa sổ) — proxy riêng nếu tk có (token mint khớp IP với scrape).
+            launcher.Launch(profileDir, proxyServer, LoginUrl, new[] { "--headless=new" });
+            var port = launcher.CdpPort;
+
+            // Chờ CDP sẵn sàng (~tối đa 15s) trước khi attach Playwright.
+            for (var i = 0; i < 30 && !await CdpSession.IsBrowserAliveAsync(port, ct).ConfigureAwait(false); i++)
+                await Task.Delay(500, ct).ConfigureAwait(false);
+
+            pw = await Playwright.CreateAsync().ConfigureAwait(false);
+            browser = await pw.Chromium.ConnectOverCDPAsync($"http://127.0.0.1:{port}", new() { Timeout = 30000 }).ConfigureAwait(false);
+            var context = browser.Contexts.FirstOrDefault();
+            if (context is null) { log?.Invoke("Brave headless chưa có context."); return AutoLoginOutcome.Failed; }
+            var page = context.Pages.FirstOrDefault() ?? await context.NewPageAsync().ConfigureAwait(false);
+
+            var outcome = await TryAsync(page, email, password, AiConfigStore.Shared.Current, log, ct).ConfigureAwait(false);
+            if (outcome == AutoLoginOutcome.Success)
+            {
+                BigSellerSessionRegistry.MarkLoggedIn(accountId);
+                await Task.Delay(4000, ct).ConfigureAwait(false);   // chờ tracker nạp thêm cho bộ cookie đầy đủ
+                try
+                {
+                    var cookies = await BigSellerCookieImporter.GetBigSellerCookiesAsync(port).ConfigureAwait(false);
+                    if (BigSellerCookieImporter.HasAuthCookie(cookies))
+                        BigSellerCookieImporter.TryWriteCookieFile(cookieFile, cookies, log);
+                    else { log?.Invoke("Đăng nhập xong nhưng chưa thấy cookie auth — bỏ lưu."); return AutoLoginOutcome.Failed; }
+                }
+                catch (Exception ex) { log?.Invoke($"Lưu cookie lỗi: {ex.Message}"); return AutoLoginOutcome.Failed; }
+            }
+            return outcome;
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex) { log?.Invoke($"Auto-login headless lỗi: {ex.Message}"); return AutoLoginOutcome.Failed; }
+        finally
+        {
+            try { pw?.Dispose(); } catch { }
+            launcher.Kill();   // đóng Brave headless
         }
     }
 

@@ -1,0 +1,78 @@
+@page "/settings"
+@attribute [Authorize(Policy = "Web")]
+@using Shopee.Hub.Web.Auth
+@inject HubDatabase Db
+@inject AdminAccountService Admin
+@inject IJSRuntime JS
+
+<h1>Cài đặt hub</h1>
+
+<h2>API Token — client dùng để kết nối</h2>
+<div class="editcard" style="max-width:720px">
+    <p class="hint">Mọi máy client nhập token này (app → Cài đặt → ApiToken, BaseUrl = <code>https://api.schedra.net</code>) để vào fleet.
+       <b>Đổi token → TẤT CẢ client phải nhập lại token mới</b> (token cũ sẽ bị 401).</p>
+    <label>Token hiện tại</label>
+    <div class="row">
+        <input readonly value="@_token" style="width:440px;font-family:monospace" @onclick="SelectAll" />
+        <button class="btn" @onclick="CopyToken">📋 Copy</button>
+        <span class="action">@_copyStatus</span>
+    </div>
+    <label style="margin-top:12px">Đổi token</label>
+    <div class="row">
+        <input @bind="_newToken" placeholder="dán token mới, hoặc bấm Sinh ngẫu nhiên" style="width:440px;font-family:monospace" />
+        <button class="btn" @onclick="GenToken">🎲 Sinh ngẫu nhiên</button>
+    </div>
+    <div class="bar">
+        <button class="btn danger" @onclick="SaveToken">💾 Lưu token mới (client phải nhập lại!)</button>
+        <span class="action">@_tokenStatus</span>
+    </div>
+</div>
+
+<h2>Đổi mật khẩu admin (đăng nhập web)</h2>
+<div class="editcard" style="max-width:720px">
+    <label>Mật khẩu mới (≥ 6 ký tự)</label>
+    <input @bind="_newPass" type="password" style="width:320px" />
+    <div class="bar">
+        <button class="btn primary" @onclick="SavePass">💾 Đổi mật khẩu</button>
+        <span class="action">@_passStatus</span>
+    </div>
+</div>
+
+@code {
+    private string _token = "";
+    private string _newToken = "";
+    private string _tokenStatus = "";
+    private string _copyStatus = "";
+    private string _newPass = "";
+    private string _passStatus = "";
+
+    protected override void OnInitialized() => _token = Db.GetSetting(SettingKeys.ApiToken) ?? "";
+
+    private void GenToken() =>
+        _newToken = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(24));
+
+    private async Task CopyToken()
+    {
+        try { await JS.InvokeVoidAsync("navigator.clipboard.writeText", _token); _copyStatus = "✔ đã copy"; }
+        catch { _copyStatus = "⚠ trình duyệt chặn — bôi đen ô để copy tay"; }
+    }
+
+    private async Task SelectAll(MouseEventArgs _) { try { await JS.InvokeVoidAsync("eval", "document.activeElement && document.activeElement.select && document.activeElement.select()"); } catch { } }
+
+    private void SaveToken()
+    {
+        var t = _newToken.Trim();
+        if (t.Length < 8) { _tokenStatus = "⚠ Token quá ngắn (≥ 8 ký tự)."; return; }
+        Db.SetSetting(SettingKeys.ApiToken, t);
+        _token = t; _newToken = "";
+        _tokenStatus = "✔ Đã đổi token — hiệu lực NGAY. Nhập token này vào MỌI client (token cũ giờ bị 401).";
+    }
+
+    private void SavePass()
+    {
+        if (_newPass.Length < 6) { _passStatus = "⚠ Mật khẩu < 6 ký tự."; return; }
+        Admin.SetAdmin(Admin.Username ?? "admin", _newPass);
+        _newPass = "";
+        _passStatus = "✔ Đã đổi mật khẩu admin (lần đăng nhập sau dùng mật khẩu mới).";
+    }
+}

@@ -1,0 +1,221 @@
+@page "/config/bigseller"
+@attribute [Authorize(Policy = "Web")]
+@implements IDisposable
+@inject FileStoreConfigService Config
+@inject HubDatabase Db
+@inject BigSellerLoginService Login
+
+<h1>Cấu hình BigSeller</h1>
+<p class="hint">Web hub là <b>nguồn sự thật</b>. Lưu xong, client tự kéo về trong ≤3 phút. Workbook Excel tải lên đây (client kéo về dùng). StartRow/EndRow/số worker là cấu hình <b>giao việc</b> — đặt ở tab Fleet lúc ghim việc, không đặt ở đây.</p>
+
+<div class="bar">
+    <button class="btn" @onclick="AddAccount">+ Thêm tài khoản</button>
+    <button class="btn primary" @onclick="Save">💾 Lưu tất cả</button>
+    <span class="action">@_status</span>
+</div>
+
+@foreach (var acct in _accounts)
+{
+    <div class="editcard">
+        <div class="row">
+            <label>Nhãn <input @bind="acct.Label" /></label>
+            <label>Email <input @bind="acct.Email" /></label>
+            <label>Mật khẩu <input @bind="acct.Password" /></label>
+            <label>KiotProxy key <input @bind="acct.KiotProxyKey" /></label>
+            <label>Vùng <input @bind="acct.Region" style="width:90px" /></label>
+            <button class="btn danger sm" @onclick="() => RemoveAccount(acct)">Xoá acc</button>
+        </div>
+        <div class="wbrow">
+            <span class="wblabel">📗 Workbook:</span>
+            <span class="wbname">@WorkbookName(acct.Id)</span>
+            <label class="btn sm">
+                @(WorkbookName(acct.Id) == "(chưa có)" ? "⬆ Tải lên" : "⬆ Thay file")
+                <InputFile OnChange="e => UploadWorkbook(e, acct.Id)" accept=".xlsx" style="display:none" />
+            </label>
+            @if (_wbStatus.TryGetValue(acct.Id, out var ws)) { <span class="action">@ws</span> }
+        </div>
+        @{ var ls = Login.GetState(acct.Id); }
+        <div class="wbrow">
+            <span class="wblabel">🔑 Login BigSeller:</span>
+            <button class="btn sm" disabled="@(ls?.Status is "running" or "needsOtp")"
+                    @onclick="() => StartLogin(acct)">
+                @(ls?.Status is "running" or "needsOtp" ? "⏳ đang chạy…" : "Đăng nhập trên hub")
+            </button>
+            @if (ls is not null)
+            {
+                <span class="action">@StatusIcon(ls.Status) @ls.Message</span>
+            }
+            @if (ls?.NeedsOtp == true)
+            {
+                <input placeholder="Mã email (OTP)" @bind="_otp" style="width:130px" />
+                <button class="btn primary sm" @onclick="() => SubmitOtp(acct.Id)">Gửi mã</button>
+            }
+        </div>
+        @if (Login.GetState(acct.Id) is { } lg && lg.Log.Count > 0 && (lg.Status is "running" or "needsOtp" or "failed"))
+        {
+            <div class="loginlog">@string.Join("\n", lg.Log.TakeLast(6))</div>
+        }
+        <div class="subhead">Shops <button class="btn sm" @onclick="() => AddShop(acct)">+ shop</button></div>
+        <div class="tablewrap">
+        <table class="grid sm">
+            <thead><tr>
+                <th>Tên</th><th>Sheet</th><th>Link</th><th>Giá</th><th>SKU</th><th>ItemId</th><th>Tên gốc</th><th>Tên sửa</th>
+                <th>Crawl URL</th><th>Claimed</th><th>AI model</th><th></th>
+            </tr></thead>
+            <tbody>
+            @foreach (var shop in acct.Shops)
+            {
+                <tr>
+                    <td><input @bind="shop.Name" style="width:120px" /></td>
+                    <td>
+                        @{ var sheets = GetSheetNames(acct.Id); }
+                        @if (sheets.Count > 0)
+                        {
+                            <select @bind="shop.ShopeeDataSheet" style="width:120px">
+                                <option value="">-- sheet --</option>
+                                @foreach (var sn in sheets)
+                                {
+                                    <option value="@sn" selected="@(sn == shop.ShopeeDataSheet)">@sn</option>
+                                }
+                            </select>
+                        }
+                        else
+                        {
+                            <input @bind="shop.ShopeeDataSheet" style="width:100px" placeholder="(tải workbook)" />
+                        }
+                    </td>
+                    <td><input type="number" @bind="shop.ColumnMap.LinkColumn" class="ci" /></td>
+                    <td><input type="number" @bind="shop.ColumnMap.PriceColumn" class="ci" /></td>
+                    <td><input type="number" @bind="shop.ColumnMap.SkuColumn" class="ci" /></td>
+                    <td><input type="number" @bind="shop.ColumnMap.ItemIdColumn" class="ci" /></td>
+                    <td><input type="number" @bind="shop.ColumnMap.ProductNameColumn" class="ci" /></td>
+                    <td><input type="number" @bind="shop.ColumnMap.RewrittenNameColumn" class="ci" /></td>
+                    <td><input @bind="shop.BigSellerCrawlUrl" style="width:160px" /></td>
+                    <td style="text-align:center"><input type="checkbox" @bind="shop.BigSellerImportFromClaimedTab" /></td>
+                    <td><input @bind="shop.OpenAiModel" style="width:110px" /></td>
+                    <td><button class="btn danger sm" @onclick="() => acct.Shops.Remove(shop)">×</button></td>
+                </tr>
+            }
+            </tbody>
+        </table>
+        </div>
+    </div>
+}
+
+@code {
+    private List<BigSellerAccount> _accounts = new();
+    private int _version;
+    private string _status = "";
+    private List<FileManifestEntry> _manifest = new();
+    private readonly Dictionary<string, string> _wbStatus = new();
+    private string _otp = "";
+    private Timer? _poll;
+
+    protected override void OnInitialized()
+    {
+        Load();
+        // Poll trạng thái login 1.5s/lần để log + OTP prompt tự cập nhật.
+        _poll = new Timer(_ => InvokeAsync(StateHasChanged), null, TimeSpan.FromSeconds(1.5), TimeSpan.FromSeconds(1.5));
+    }
+
+    private void StartLogin(BigSellerAccount a)
+    {
+        if (string.IsNullOrWhiteSpace(a.Email) || string.IsNullOrWhiteSpace(a.Password))
+        { _status = "⚠ Cần Email + Mật khẩu cho acc trước khi login."; return; }
+        Login.Start(a.Id, a.Email.Trim(), a.Password);
+    }
+
+    private void SubmitOtp(string acctId)
+    {
+        if (!string.IsNullOrWhiteSpace(_otp)) { Login.SubmitOtp(acctId, _otp); _otp = ""; }
+    }
+
+    private static string StatusIcon(string st) => st switch
+    {
+        "success" => "✔", "failed" => "✘", "needsOtp" => "⚠", "running" => "⏳", _ => "",
+    };
+
+    public void Dispose() => _poll?.Dispose();
+
+    private void Load()
+    {
+        _accounts = Config.BigSellerAccounts();
+        _version = Config.VersionOf(FileStoreConfigService.BigSellerFile);
+        _manifest = Db.ListFiles();
+    }
+
+    /// <summary>Tên file workbook đang có trên hub cho 1 acc (workbooks/{id}/*). "(chưa có)" nếu chưa upload.</summary>
+    private string WorkbookName(string acctId)
+    {
+        var prefix = $"workbooks/{acctId}/";
+        var f = _manifest.FirstOrDefault(x => x.Name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+        return f is null ? "(chưa có)" : f.Name[prefix.Length..];
+    }
+
+    private readonly Dictionary<string, List<string>> _sheetCache = new();
+
+    /// <summary>Tên các sheet trong workbook của 1 acc (đọc nhanh từ xl/workbook.xml trong file zip, không parse
+    /// toàn bộ Excel). Cache theo acctId; rỗng nếu chưa có workbook.</summary>
+    private List<string> GetSheetNames(string acctId)
+    {
+        if (_sheetCache.TryGetValue(acctId, out var cached)) return cached;
+        var list = new List<string>();
+        var prefix = $"workbooks/{acctId}/";
+        var f = _manifest.FirstOrDefault(x => x.Name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+        if (f is not null)
+        {
+            try
+            {
+                var bytes = Db.ReadFile(f.Name);
+                if (bytes is not null)
+                {
+                    using var ms = new MemoryStream(bytes);
+                    using var zip = new System.IO.Compression.ZipArchive(ms, System.IO.Compression.ZipArchiveMode.Read);
+                    var entry = zip.GetEntry("xl/workbook.xml");
+                    if (entry is not null)
+                    {
+                        using var sr = new StreamReader(entry.Open());
+                        var xml = sr.ReadToEnd();
+                        foreach (System.Text.RegularExpressions.Match m in
+                                 System.Text.RegularExpressions.Regex.Matches(xml, "<sheet[^>]*\\bname=\"([^\"]+)\""))
+                            list.Add(System.Net.WebUtility.HtmlDecode(m.Groups[1].Value));
+                    }
+                }
+            }
+            catch { }
+        }
+        _sheetCache[acctId] = list;
+        return list;
+    }
+
+    private async Task UploadWorkbook(InputFileChangeEventArgs e, string acctId)
+    {
+        var file = e.File;
+        _wbStatus[acctId] = "⏳ đang tải…";
+        try
+        {
+            await using var s = file.OpenReadStream(maxAllowedSize: 256L * 1024 * 1024);
+            using var ms = new MemoryStream();
+            await s.CopyToAsync(ms);
+            var name = $"workbooks/{acctId}/{file.Name}";
+            var res = Db.PutFile(name, ms.ToArray(), null, "hub-web");
+            _wbStatus[acctId] = res.Ok ? $"✔ đã tải {file.Name} (v{res.Version})" : $"✘ {res.Conflict}";
+            _manifest = Db.ListFiles();
+            _sheetCache.Remove(acctId);   // đọc lại sheet từ workbook mới
+        }
+        catch (Exception ex) { _wbStatus[acctId] = "✘ lỗi: " + ex.Message; }
+    }
+
+    private void AddAccount() => _accounts.Add(new BigSellerAccount { Label = "Tài khoản mới" });
+    private void RemoveAccount(BigSellerAccount a) => _accounts.Remove(a);
+    private void AddShop(BigSellerAccount a) => a.Shops.Add(new BigSellerShop { Name = "Shop mới" });
+
+    private void Save()
+    {
+        var res = Config.Save(FileStoreConfigService.BigSellerFile, _accounts, _version);
+        if (res.Ok) { _version = res.Version; _status = $"✔ Đã lưu (v{res.Version})."; }
+        else if (res.Conflict == "version-conflict")
+        { _status = "⚠ Có client vừa đẩy bản mới — đang tải lại, hãy sửa lại rồi lưu."; Load(); }
+        else _status = $"✘ Lỗi lưu: {res.Conflict}";
+    }
+}

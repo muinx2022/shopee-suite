@@ -495,13 +495,4 @@ internal static class BraveProfileManager
         {
         }
     }
-
-    private static void CopyDir(string src, string dst)
-    {
-        Directory.CreateDirectory(dst);
-        foreach (var f in Directory.GetFiles(src))
-            File.Copy(f, Path.Combine(dst, Path.GetFileName(f)), overwrite: true);
-        foreach (var d in Directory.GetDirectories(src))
-            CopyDir(d, Path.Combine(dst, Path.GetFileName(d)));
-    }
 }

@@ -1587,12 +1587,6 @@ internal static class ExtensionRunnerAutomation
         return null;
     }
 
-    private static async Task<string?> ResolveExtensionIdAsync(
-        int cdpPort,
-        DirectoryInfo profileRoot,
-        CancellationToken ct) =>
-        await ResolveExtensionIdAsync(cdpPort, profileRoot, ct, allowProfileFallback: true);
-
     private static async Task<bool> ExtensionHasLauncherHookAsync(int cdpPort, string extensionId, CancellationToken ct)
     {
         var (ok, _) = await ProbeExtensionWithReasonAsync(cdpPort, extensionId, ct);
@@ -1673,50 +1667,6 @@ internal static class ExtensionRunnerAutomation
         }
     }
 
-    private static async Task<string?> FindServiceWorkerTargetInfoAsync(
-        int cdpPort, string extensionId, CancellationToken ct)
-    {
-        try
-        {
-            var browser = await ConnectBrowserWebSocketAsync(cdpPort, ct);
-            try
-            {
-                var targets = await SendCdpAsync(browser, 40, "Target.getTargets", new { }, ct);
-                if (!targets.TryGetProperty("targetInfos", out var infos))
-                    return null;
-
-                foreach (var t in infos.EnumerateArray())
-                {
-                    var type = t.TryGetProperty("type", out var ty) ? ty.GetString() ?? "" : "";
-                    var url = t.TryGetProperty("url", out var u) ? u.GetString() ?? "" : "";
-                    if (string.Equals(type, "service_worker", StringComparison.OrdinalIgnoreCase) &&
-                        url.Contains(extensionId, StringComparison.OrdinalIgnoreCase))
-                    {
-                        return t.TryGetProperty("targetId", out var tid) ? tid.GetString() : null;
-                    }
-                }
-            }
-            finally
-            {
-                try { if (browser.State == WebSocketState.Open) await browser.CloseAsync(WebSocketCloseStatus.NormalClosure, "", ct); } catch { }
-                browser.Dispose();
-            }
-        }
-        catch { }
-        return null;
-    }
-
-    private static object? JsonValueToObject(JsonElement el) =>
-        el.ValueKind switch
-        {
-            JsonValueKind.String => el.GetString(),
-            JsonValueKind.Number => el.TryGetInt64(out var i) ? i : el.GetDouble(),
-            JsonValueKind.True => true,
-            JsonValueKind.False => false,
-            JsonValueKind.Null => null,
-            _ => el.ToString(),
-        };
-
     // ĐỌC NATIVE (ClosedXML) thay cho API Python — workbook truyền per-instance (chạy song song nhiều BigSeller).
     public static Task<int> ResolveEndRowAsync(string workbookPath, string sheet, int startRow, CancellationToken ct)
     {
@@ -1745,65 +1695,6 @@ internal static class ExtensionRunnerAutomation
 
         return Task.FromResult(new SheetLinkFetchResult(
             items, res.SkippedMissingProductName, res.SkippedMissingLink));
-    }
-
-    private static bool HasColumnFProductName(JsonElement row)
-    {
-        if (row.ValueKind != JsonValueKind.Object)
-            return false;
-
-        var index = 0;
-        foreach (var prop in row.EnumerateObject())
-        {
-            index++;
-            if (index != 6)
-                continue;
-
-            return !string.IsNullOrWhiteSpace(prop.Value.ToString());
-        }
-
-        return false;
-    }
-
-    private static string ExtractFirstColumnLink(JsonElement row)
-    {
-        if (row.ValueKind != JsonValueKind.Object)
-            return "";
-
-        foreach (var prop in row.EnumerateObject())
-        {
-            return NormalizeLink(prop.Value.ToString());
-        }
-
-        return "";
-    }
-
-    private static string NormalizeLink(string? value)
-    {
-        var trimmed = (value ?? "").Trim();
-        if (string.IsNullOrWhiteSpace(trimmed)) return "";
-        if (trimmed.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
-            trimmed.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
-            return trimmed;
-        if (trimmed.StartsWith("www.", StringComparison.OrdinalIgnoreCase))
-            return "https://" + trimmed;
-        return trimmed;
-    }
-
-    private static async Task<JsonDocument> GetJsonAsync(string url, CancellationToken ct)
-    {
-        try
-        {
-            using var response = await AppServices.DirectHttp.GetAsync(url, ct);
-            var text = await response.Content.ReadAsStringAsync(ct);
-            if (!response.IsSuccessStatusCode)
-                throw new InvalidOperationException($"API lỗi {(int)response.StatusCode}: {text}");
-            return JsonDocument.Parse(text);
-        }
-        catch (Exception ex) when (ApiServerHelper.IsConnectionRefused(ex))
-        {
-            throw new ApiNotRunningException(ApiServerHelper.ConnectionRefusedHelp, ex);
-        }
     }
 
     private static async Task<string?> FindExtensionPopupDebuggerUrlAsync(

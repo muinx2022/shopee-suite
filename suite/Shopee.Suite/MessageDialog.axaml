@@ -1,0 +1,19 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="Shopee.Suite.MessageDialog"
+        SizeToContent="WidthAndHeight" WindowStartupLocation="CenterOwner"
+        CanResize="False" ShowInTaskbar="False"
+        MinWidth="360" MaxWidth="560"
+        Background="{DynamicResource WindowBackgroundBrush}"
+        FontFamily="{DynamicResource UiFont}">
+    <StackPanel Margin="24,22,24,18">
+        <StackPanel Orientation="Horizontal">
+            <TextBlock x:Name="IconText" FontFamily="{DynamicResource EmojiFont}" FontSize="26"
+                       Margin="0,0,16,0" VerticalAlignment="Top" />
+            <TextBlock x:Name="MessageText" TextWrapping="Wrap" MaxWidth="430" FontSize="13.5"
+                       LineHeight="20" VerticalAlignment="Center"
+                       Foreground="{DynamicResource TextPrimaryBrush}" />
+        </StackPanel>
+        <StackPanel x:Name="Buttons" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="10" Margin="0,22,0,0" />
+    </StackPanel>
+</Window>

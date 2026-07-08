@@ -2,8 +2,13 @@
 [Bb]in/
 [Oo]bj/
 publish/
+publish-linux/
+Releases/
 *.user
 .vs/
+
+# Cau hinh ky so thuc (theo tung tai khoan Azure) — giu ban .example, khong commit ban that
+signing/trusted-signing.json
 
 # Runtime data (profile trình duyệt, db, cache — tạo lại khi chạy)
 persistent-data/

@@ -199,8 +199,25 @@ public static class BigSellerCookieEngine
         string cookieFile,
         IReadOnlyCollection<Dictionary<string, object?>> bigSellerCookies,
         Action<string>? log = null)
+        => WriteAtomic(cookieFile,
+            JsonSerializer.Serialize(new { exportedAt = DateTimeOffset.Now, cookies = bigSellerCookies }, FileJsonOpts),
+            log);
+
+    /// <summary>Overload ghi trực tiếp danh sách <see cref="JsonElement"/> (dùng cho login runner vốn giữ
+    /// cookie ở dạng JsonElement thô) — CÙNG cơ chế atomic tmp+move, để chỉ có MỘT bản ghi file cookie.</summary>
+    public static bool TryWriteCookieFile(
+        string cookieFile,
+        IReadOnlyCollection<JsonElement> cookies,
+        Action<string>? log = null)
+        => WriteAtomic(cookieFile,
+            JsonSerializer.Serialize(new { exportedAt = DateTimeOffset.Now, cookies }, FileJsonOpts),
+            log);
+
+    // Ghi NGUYÊN TỬ: tmp unique (tránh race đa-instance) → File.Move(overwrite) có retry. File cookie này
+    // được Hub sync + các importer đọc đồng thời; ghi trực tiếp (WriteAllText/Bytes) sinh torn-read → cookie
+    // hỏng lan ra đa máy. Mọi nơi ghi file cookie PHẢI đi qua đây.
+    private static bool WriteAtomic(string cookieFile, string json, Action<string>? log)
     {
-        // Tên tmp unique để tránh race khi nhiều instance write đồng thời.
         var tmp = $"{cookieFile}.{Environment.ProcessId}-{Guid.NewGuid():N}.tmp";
         try
         {
@@ -208,8 +225,6 @@ public static class BigSellerCookieEngine
             if (!string.IsNullOrWhiteSpace(dir))
                 Directory.CreateDirectory(dir);
 
-            var json = JsonSerializer.Serialize(
-                new { exportedAt = DateTimeOffset.Now, cookies = bigSellerCookies }, FileJsonOpts);
             File.WriteAllText(tmp, json);
 
             for (var attempt = 0; ; attempt++)

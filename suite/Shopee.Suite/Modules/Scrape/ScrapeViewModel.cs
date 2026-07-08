@@ -1,7 +1,7 @@
 using System.Collections.ObjectModel;
 using System.IO;
-using System.Windows;
-using System.Windows.Media;
+using Avalonia.Media;
+using Avalonia.Media.Immutable;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Shopee.Core.Accounts;
@@ -13,6 +13,7 @@ using Shopee.Core.Proxy;
 using Shopee.Core.Scrape;
 using Shopee.Modules.MultiBrave;
 using Shopee.Suite.Infrastructure;
+using Shopee.Suite.Services;
 
 namespace Shopee.Suite.Modules.Scrape;
 
@@ -28,7 +29,8 @@ public sealed partial class ScrapeViewModel : ObservableObject
     public ObservableCollection<ScrapeTargetViewModel> ScrapeTargets { get; } = [];
     public ObservableCollection<ScrapeInstanceViewModel> Instances { get; } = [];
     public ObservableCollection<ErroredAccountRow> ErroredAccounts { get; } = [];
-    public ObservableCollection<string> LogLines { get; } = [];
+    /// <summary>Nhật ký scrape: giữ 500 dòng cuối trên UI (khỏi đơ) + ghi ĐẦY ĐỦ ra logs\workspace-scrape.log.</summary>
+    public LogBuffer LogLines { get; } = new("workspace-scrape.log");
 
     [ObservableProperty] private string _videoDir = @"D:\videos";
     [ObservableProperty] private string _status = "Sẵn sàng.";
@@ -54,17 +56,13 @@ public sealed partial class ScrapeViewModel : ObservableObject
     private RunSession? _session;
 
     // Bảng màu nền NHẠT phân biệt process theo tk BigSeller (mỗi job 1 màu, xoay vòng) — chạy nhiều tk dễ nhìn.
-    private static readonly Brush[] JobPalette = BuildPalette();
-    private static Brush[] BuildPalette()
+    private static readonly IBrush[] JobPalette = BuildPalette();
+    private static IBrush[] BuildPalette()
     {
         string[] hex = { "#FFF6DA", "#E3F2FD", "#E8F5E9", "#FCE4EC", "#F3E5F5", "#FFF3E0", "#E0F7FA", "#F1F8E9" };
-        var arr = new Brush[hex.Length];
+        var arr = new IBrush[hex.Length];
         for (var i = 0; i < hex.Length; i++)
-        {
-            var b = new SolidColorBrush((Color)ColorConverter.ConvertFromString(hex[i])!);
-            b.Freeze();
-            arr[i] = b;
-        }
+            arr[i] = new ImmutableSolidColorBrush(Color.Parse(hex[i]));
         return arr;
     }
 
@@ -78,9 +76,7 @@ public sealed partial class ScrapeViewModel : ObservableObject
     private void OnStoresChanged()
     {
         if (IsBusy) return;
-        var d = Application.Current?.Dispatcher;
-        if (d is null || d.CheckAccess()) Reload();
-        else d.BeginInvoke(Reload);
+        UiThread.Post(Reload);
     }
 
     [RelayCommand]
@@ -639,16 +635,16 @@ public sealed partial class ScrapeViewModel : ObservableObject
 
         if (running)
         {
-            if (Dialogs.Show($"Xác nhận HỦY chạy \"{target.DisplayName}\"?\nCác tài khoản khác vẫn chạy bình thường.",
-                    "Hủy chạy tài khoản", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+            if (!await Dialogs.ConfirmAsync($"Xác nhận HỦY chạy \"{target.DisplayName}\"?\nCác tài khoản khác vẫn chạy bình thường.",
+                    "Hủy chạy tài khoản"))
                 return;
             await StopOneAccount(target);
             target.IsSelected = false;
         }
         else
         {
-            if (Dialogs.Show($"Xác nhận CHẠY \"{target.DisplayName}\" (tiếp tục phần dòng còn thiếu)?",
-                    "Chạy tài khoản", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+            if (!await Dialogs.ConfirmAsync($"Xác nhận CHẠY \"{target.DisplayName}\" (tiếp tục phần dòng còn thiếu)?",
+                    "Chạy tài khoản"))
                 return;
             if (StartOneAccount(target)) target.IsSelected = true;
         }
@@ -698,14 +694,18 @@ public sealed partial class ScrapeViewModel : ObservableObject
 
     /// <summary>Mở cửa sổ Thống kê của tk BigSeller đang chọn: tiến độ theo sheet, dòng đã xong, xoá tiến độ.</summary>
     [RelayCommand(CanExecute = nameof(HasSelectedTarget))]
-    private void ShowStats()
+    private async Task ShowStatsAsync()
     {
-        if (SelectedTarget is null) return;
-        var vm = new ScrapeStatsViewModel(SelectedTarget.Account.Id, SelectedTarget.Account.DisplayName);
-        var win = new ScrapeStatsWindow(vm) { Owner = Application.Current?.MainWindow };
-        win.ShowDialog();
-        SelectedTarget.RefreshProgress();   // có thể đã nhả tay / xoá tiến độ → cập nhật nhãn.
+        var sel = SelectedTarget;
+        if (sel is null) return;
+        var vm = new ScrapeStatsViewModel(sel.Account.Id, sel.Account.DisplayName);
+        await WindowHost.ShowDialogAsync(new ScrapeStatsWindow(vm));
+        sel.RefreshProgress();   // có thể đã nhả tay / xoá tiến độ → cập nhật nhãn.
     }
+
+    /// <summary>Mở file log ĐẦY ĐỦ (UI chỉ giữ 500 dòng cuối) — logs\workspace-scrape.log.</summary>
+    [RelayCommand]
+    private void OpenLogFile() => ShellOpener.RevealFile(LogLines.FilePath);
 
     /// <summary>Proxy lấy XOAY VÒNG từ kho KiotProxy dùng chung (ghi đè proxy gắn sẵn của acc); kho rỗng →
     /// giữ proxy của acc (fallback).</summary>
@@ -788,18 +788,13 @@ public sealed partial class ScrapeViewModel : ObservableObject
 
     private void Log(string text) => OnUi(() => LogLines.Add(text));
 
-    private static void OnUi(Action a)
-    {
-        var d = Application.Current?.Dispatcher;
-        if (d is null || d.CheckAccess()) a();
-        else d.BeginInvoke(a);
-    }
+    private static void OnUi(Action a) => UiThread.Post(a);
 
     private void Warn(string msg, bool silent = false)
     {
         Status = msg;
         if (silent) Log("⚠ " + msg);   // đường push-dispatch: KHÔNG mở modal (tránh treo UI), chỉ ghi log
-        else Dialogs.Show(msg, "Shopee Scrape", MessageBoxButton.OK, MessageBoxImage.Information);
+        else Dialogs.Notify(msg, "Shopee Scrape");
     }
 
     /// <summary>Tiền-kiểm điều kiện scrape 1 đích (kho tk Shopee, Brave, cấu hình) — KHÔNG mở dialog.

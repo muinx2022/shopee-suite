@@ -1,0 +1,10 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:ca="using:Shopee.Suite.Modules.CheckAccount"
+        x:Class="Shopee.Suite.Modules.CheckAccount.CheckAccountWindow"
+        Title="Check tài khoản Shopee" Width="940" Height="760" MinWidth="720" MinHeight="560"
+        WindowStartupLocation="CenterOwner"
+        Background="{DynamicResource WindowBackgroundBrush}" FontFamily="{DynamicResource UiFont}">
+    <!-- DataContext = CheckAccountViewModel (do AccountsViewModel truyền vào khi mở). -->
+    <ca:CheckAccountView />
+</Window>

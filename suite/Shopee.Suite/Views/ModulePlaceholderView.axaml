@@ -1,0 +1,20 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="Shopee.Suite.Views.ModulePlaceholderView">
+    <Grid Margin="32">
+        <Border Classes="card" Padding="48" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="600">
+            <StackPanel HorizontalAlignment="Center">
+                <Border Width="64" Height="64" CornerRadius="16" Background="{DynamicResource SubtleBrush}"
+                        HorizontalAlignment="Center">
+                    <TextBlock Classes="emoji" Text="🚧" FontSize="30"
+                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Border>
+                <TextBlock Classes="h1" Text="Màn hình đang chuyển sang Avalonia"
+                           HorizontalAlignment="Center" Margin="0,20,0,0" />
+                <TextBlock Classes="body" Foreground="{DynamicResource TextSecondaryBrush}" TextAlignment="Center"
+                           Margin="0,16,0,0" MaxWidth="460"
+                           Text="View của module này sẽ được port ở GĐ5. Engine (scrape/import/update/đồng bộ) vẫn chạy nền bình thường — chỉ giao diện tạm thời hiển thị bản chờ." />
+            </StackPanel>
+        </Border>
+    </Grid>
+</UserControl>

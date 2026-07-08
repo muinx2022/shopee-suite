@@ -1,5 +1,5 @@
 using System.Diagnostics;
-using System.Management;
+using Shopee.Core.Platform;
 
 namespace Shopee.Core.Browser;
 
@@ -38,49 +38,23 @@ public static class BraveProcessReaper
         return killed;
     }
 
+    private static readonly string[] BraveOnly = ["brave.exe"];
+
     private static List<int> FindBravePidsByCommandLine(string normalizedNeedle, Action<string>? log)
     {
         var pids = new List<int>();
-        try
+        foreach (var p in PlatformServices.ProcessFinder.Enumerate(BraveOnly, log))
         {
-            using var searcher = new ManagementObjectSearcher(
-                "SELECT ProcessId, CommandLine FROM Win32_Process WHERE Name = 'brave.exe'");
-            using var results = searcher.Get();
-            foreach (var obj in results)
+            // Phải khớp ĐÚNG giá trị --user-data-dir (không dùng Contains): profile "acc_1" là
+            // chuỗi con của "acc_10" → Contains sẽ giết nhầm browser account khác khi có ≥10 account.
+            var dir = ExtractUserDataDir(p.CommandLine);
+            if (dir is not null &&
+                string.Equals(NormalizePath(dir), normalizedNeedle, StringComparison.OrdinalIgnoreCase))
             {
-                try
-                {
-                    var commandLine = obj["CommandLine"] as string;
-                    if (string.IsNullOrEmpty(commandLine))
-                        continue;
-
-                    // Phải khớp ĐÚNG giá trị --user-data-dir (không dùng Contains): profile "acc_1" là
-                    // chuỗi con của "acc_10" → Contains sẽ giết nhầm browser account khác khi có ≥10 account.
-                    var dir = ExtractUserDataDir(commandLine);
-                    if (dir is not null &&
-                        string.Equals(NormalizePath(dir), normalizedNeedle, StringComparison.OrdinalIgnoreCase))
-                    {
-                        var pid = Convert.ToInt32(obj["ProcessId"]);
-                        if (pid > 0)
-                            pids.Add(pid);
-                    }
-                }
-                catch
-                {
-                    // bỏ qua tiến trình không đọc được thuộc tính
-                }
-                finally
-                {
-                    obj.Dispose();
-                }
+                if (p.Pid > 0)
+                    pids.Add(p.Pid);
             }
         }
-        catch (Exception ex)
-        {
-            // WMI có thể bị tắt/hạn chế quyền — không chặn việc đóng profile.
-            log?.Invoke($"Quét tiến trình Brave (WMI) lỗi: {ex.Message}");
-        }
-
         return pids;
     }
 

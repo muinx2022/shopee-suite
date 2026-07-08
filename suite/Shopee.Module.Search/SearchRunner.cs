@@ -31,7 +31,7 @@ public sealed class SearchRunner
     private readonly ConcurrentBag<ProductResult> _collected = new();
     private FileRunCoordinator? _file;
 
-    public event Action<string, string>? AccountErrored;
+    public event Action<string, string, string?>? AccountErrored;   // id, reason, captchaUrl (link đang cào lúc dính captcha)
     /// <summary>accountId — tk vừa được dùng (đã đăng nhập/chạy) để ghi lại "không cần login lần sau".</summary>
     public event Action<string>? AccountUsed;
     /// <summary>accountId — login Shopee THÀNH CÔNG (đánh dấu "lần sau khỏi login" đúng tk có phiên).</summary>
@@ -63,7 +63,7 @@ public sealed class SearchRunner
         _file.LinkAssigned += (link, acc, _) => LinkAssigned?.Invoke(link, acc);
         _file.LinkConnection += (link, c) => LinkConnection?.Invoke(link, c);
         _file.LinkFinished += link => LinkFinished?.Invoke(link);
-        _file.AccountErrored += (id, reason) => AccountErrored?.Invoke(id, reason);
+        _file.AccountErrored += (id, reason, captchaUrl) => AccountErrored?.Invoke(id, reason, captchaUrl);
         _file.AccountUsed += id => AccountUsed?.Invoke(id);
         _file.AccountLoggedIn += id => AccountLoggedIn?.Invoke(id);
         _file.SaveLinkExcel = (label, products) =>
@@ -71,28 +71,10 @@ public sealed class SearchRunner
         return _file.RunAsync(ct);
     }
 
-    /// <summary>Dừng/đóng 1 link đang chạy (✕ trên tab link).</summary>
-    public void StopLink(string link) { try { _file?.StopLink(link); } catch { } }
-
     public void Stop()
     {
         try { _file?.KillAllBrowsers(); } catch { }
     }
-
-    /// <summary>Xuất Excel các sản phẩm đã thu (áp bộ lọc nếu có). Trả về đường dẫn file, null nếu rỗng.</summary>
-    public string? ExportFiltered(string outputDir, SearchFilter? filter, string fileName)
-    {
-        var items = _collected.ToList();
-        if (filter is not null) items = items.Where(p => Pass(p, filter)).ToList();
-        if (items.Count == 0) return null;
-        return ExcelExporter.Export(items, outputDir, fileName);
-    }
-
-    public IReadOnlyList<string> CollectedCategories() =>
-        _collected.Select(p => p.Category).Where(c => !string.IsNullOrWhiteSpace(c))
-            .Distinct().OrderBy(c => c).ToList();
-
-    public int CollectedCount => _collected.Count;
 
     /// <summary>Toàn bộ sản phẩm đã cào trong lượt chạy hiện tại (đủ field ProductResult) — để đẩy gộp lên Hub.</summary>
     public IReadOnlyList<ProductResult> CollectedProducts() => _collected.ToList();
@@ -101,15 +83,6 @@ public sealed class SearchRunner
     /// <summary>Xuất GỘP mọi sản phẩm của tất cả shop đã quét (theo file), loại trùng theo ItemId.</summary>
     public string? ExportAllShops(string outputDir, SearchFilter? filter) =>
         ExportDedup(_store.GetAllShopProducts(), outputDir, filter, "tonghop-file");
-
-    /// <summary>Xuất sản phẩm của 1 shop (theo shopId) từ CSDL.</summary>
-    public string? ExportShop(long shopId, string outputDir, SearchFilter? filter)
-    {
-        var items = _store.GetShopProducts(shopId);
-        if (filter is not null) items = items.Where(p => Pass(p, filter)).ToList();
-        if (items.Count == 0) return null;
-        return ExcelExporter.Export(items, outputDir, $"shop-{shopId}-{items.Count}sp");
-    }
 
     private static string? ExportDedup(List<ProductResult> all, string outputDir, SearchFilter? filter, string prefix)
     {
@@ -123,28 +96,9 @@ public sealed class SearchRunner
     public void ClearFileHistory(string outputDir, IEnumerable<string> filePaths)
     {
         _store.ClearFileSearchHistory();
-        try { new ScannedShopStore(string.IsNullOrWhiteSpace(outputDir) ? "." : outputDir).ClearAll(); } catch { }
         foreach (var f in filePaths)
             try { new LinkFileStore(f).ClearAllStatuses(); } catch { }
         _collected.Clear();
-    }
-
-    // ── QUÉT LẠI 1 shop: xóa khỏi store đã-quét + reset trạng thái MỌI dòng (trong các file) trỏ
-    // tới shop đó → lần chạy sau sẽ quét lại shop này. ──
-    public void RescanShop(long shopId, string outputDir, IEnumerable<string> filePaths)
-    {
-        try { new ScannedShopStore(string.IsNullOrWhiteSpace(outputDir) ? "." : outputDir).Remove(shopId); } catch { }
-        foreach (var f in filePaths)
-        {
-            try
-            {
-                var store = new LinkFileStore(f);
-                foreach (var row in store.Load())
-                    if (FileRunCoordinator.ParseShopId(row.Link) == shopId)
-                        store.MarkStatus(row.RowNumber, "");
-            }
-            catch { }
-        }
     }
 
     // ── DANH MỤC (cho lưới tab Danh mục) ───────────────────────────────────────────
@@ -152,10 +106,6 @@ public sealed class SearchRunner
 
     public IReadOnlyList<SearchProductRow> GetProductsByCategory(string category) =>
         _store.GetShopProductsByCategory(category).Select(p => Project(0, p)).ToList();
-
-    /// <summary>Sản phẩm của 1 shop từ CSDL (đã chiếu sang SearchProductRow cho UI).</summary>
-    public IReadOnlyList<SearchProductRow> GetShopProductsRows(long shopId) =>
-        _store.GetShopProducts(shopId).Select(p => Project(0, p)).ToList();
 
     /// <summary>Tiến độ lượt chạy gần nhất của 1 link: (trạng thái, danh mục, trang, danh mục #, số SP). Null nếu chưa chạy.</summary>
     public (string Status, string Category, int Page, int CategoryIndex, int ProductCount)? GetLinkProgress(string link)

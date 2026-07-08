@@ -1,12 +1,11 @@
-using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using Microsoft.Win32;
 using Shopee.Core.Ai;
 using Shopee.Core.Browser;
 using Shopee.Core.Coordination;
 using Shopee.Core.Infrastructure;
 using Shopee.Hub;
+using Shopee.Suite.Services;
 
 namespace Shopee.Suite.Modules.Settings;
 
@@ -129,14 +128,46 @@ public sealed partial class SettingsViewModel : ObservableObject
     {
         LoadFromStore();
         HubRuntime.Shared.StateChanged += OnHubStateChanged;
+        UpdateService.Shared.Changed += OnUpdateChanged;   // VM là singleton (tạo 1 lần) → không rò event
+        OnUpdateChanged();                                  // seed trạng thái hiện tại
     }
 
-    private void OnHubStateChanged()
+    // ── Phiên bản + tự cập nhật (Velopack) ──────────────────────────────────────
+    /// <summary>"Phiên bản: v1.0.0" — đọc từ assembly (nướng lúc build từ version.txt).</summary>
+    public string AppVersionText => $"Phiên bản: v{Shopee.Core.Infrastructure.AppInfo.Version}";
+
+    /// <summary>Câu trạng thái cập nhật (đang kiểm tra / mới nhất / đã tải bản mới…).</summary>
+    [ObservableProperty] private string _updateStatus = "";
+
+    /// <summary>true khi app cài qua Velopack → hiện nút "Kiểm tra bản mới". Chạy dev/bin thì ẩn.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(UpdateNotSupported))]
+    private bool _updateSupported;
+
+    /// <summary>Nghịch đảo — hiện dòng nhắc "auto-update chỉ chạy khi cài qua bộ cài Velopack".</summary>
+    public bool UpdateNotSupported => !UpdateSupported;
+
+    /// <summary>true khi đã TẢI xong bản mới, chờ người dùng bấm áp dụng.</summary>
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(ApplyUpdateCommand))]
+    private bool _updateReady;
+
+    private void OnUpdateChanged() => UiThread.Post(() =>
     {
-        var d = System.Windows.Application.Current?.Dispatcher;
-        if (d is null || d.CheckAccess()) ApplyHubState();
-        else d.BeginInvoke(ApplyHubState);
-    }
+        UpdateSupported = UpdateService.Shared.IsSupported;
+        UpdateReady = UpdateService.Shared.UpdateReady;
+        UpdateStatus = UpdateService.Shared.Status;
+    });
+
+    /// <summary>Kiểm tra + tải nền bản mới (nút bấm tay). Kết quả cập nhật qua sự kiện Changed.</summary>
+    [RelayCommand]
+    private async Task CheckUpdate() => await UpdateService.Shared.CheckAsync();
+
+    /// <summary>Áp dụng bản đã tải + khởi động lại NGAY (đóng app). Chỉ hiện khi UpdateReady.</summary>
+    [RelayCommand(CanExecute = nameof(UpdateReady))]
+    private void ApplyUpdate() => UpdateService.Shared.ApplyAndRestart();
+
+    private void OnHubStateChanged() => UiThread.Post(ApplyHubState);
 
     private void ApplyHubState()
     {
@@ -161,14 +192,14 @@ public sealed partial class SettingsViewModel : ObservableObject
         IsHubRunning = HubRuntime.Shared.Running;
         HubServerStatus = IsHubRunning ? "🟢 Đang chạy" : "⚪ Chưa chạy";
 
-        // Khôi phục VAI TRÒ đã chọn để mở lại app hiện đúng panel. Ưu tiên giá trị đã lưu; nếu chưa từng
-        // chọn (bản cũ) thì suy từ cấu hình đang bật để không vỡ máy đang dùng. _loadingRole chặn ghi-lại.
+        // App giờ là CLIENT-only (Hub đã tách sang server web riêng) → LUÔN là client, luôn hiện phần Kết nối.
+        // Chuẩn hoá cả config cũ (role "hub"/rỗng) về "client". _loadingRole chặn ghi-lại trong lúc nạp.
         _loadingRole = true;
-        var role = MachineIdentity.Shared.Role;
-        IsHubRole = role == "hub" || (role.Length == 0 && hubSrv.Enabled);
-        IsClientRole = role == "client" || (role.Length == 0 && !hubSrv.Enabled && hub.Enabled);
+        IsHubRole = false;
+        IsClientRole = true;
         _loadingRole = false;
-        HubClientStatus = CoordinationRuntime.Active && !hubSrv.Enabled ? "🔵 Đã bật đồng bộ Hub (bấm \"Kiểm tra\" để chắc nối được)." : "";
+        if (MachineIdentity.Shared.Role != "client") MachineIdentity.Shared.SetRole("client");
+        HubClientStatus = CoordinationRuntime.Active ? "🔵 Đã bật đồng bộ Hub (bấm \"Kiểm tra\" để chắc nối được)." : "";
 
         var p = PerformanceSettingsStore.Shared.Current;
         UsableCpu = p.UsableCpuCores > 0 ? p.UsableCpuCores : System.Math.Max(2, BraveFleet.CpuCores / 2);
@@ -368,7 +399,7 @@ public sealed partial class SettingsViewModel : ObservableObject
         catch (Exception ex)
         {
             HubServerStatus = "✘ Lỗi: " + ex.Message;
-            Dialogs.Show(ex.Message, "Bật Hub", MessageBoxButton.OK, MessageBoxImage.Warning);
+            Dialogs.Notify(ex.Message, "Bật Hub", DialogIcon.Warning);
         }
     }
 
@@ -404,61 +435,57 @@ public sealed partial class SettingsViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private void ExportBackup()
+    private async Task ExportBackupAsync()
     {
         if (!BackupBigSeller && !BackupShopee && !BackupAi) { Status = "Chọn ít nhất 1 mục để sao lưu."; return; }
-        var dlg = new SaveFileDialog
-        {
-            Filter = "ShopeeSuite backup|*.zip",
-            FileName = $"shopeesuite-backup-{DateTime.Now:yyyyMMdd-HHmmss}.zip",
-            Title = "Lưu file sao lưu",
-        };
-        if (dlg.ShowDialog() != true) return;
+        var path = await FilePicker.SaveFileAsync("Lưu file sao lưu", "ShopeeSuite backup|*.zip",
+            defaultFileName: $"shopeesuite-backup-{DateTime.Now:yyyyMMdd-HHmmss}.zip");
+        if (path is null) return;
         try
         {
-            BackupService.Export(dlg.FileName, new BackupOptions(BackupBigSeller, BackupShopee, BackupAi));
-            Status = "✓ Đã sao lưu: " + dlg.FileName;
-            Dialogs.Show($"Đã sao lưu xong:\n{dlg.FileName}\n\nGồm: {SelectedParts()}.\n⚠ File chứa cookie + API key — giữ bảo mật.",
-                "Sao lưu", MessageBoxButton.OK, MessageBoxImage.Information);
+            BackupService.Export(path, new BackupOptions(BackupBigSeller, BackupShopee, BackupAi));
+            Status = "✓ Đã sao lưu: " + path;
+            await Dialogs.InfoAsync($"Đã sao lưu xong:\n{path}\n\nGồm: {SelectedParts()}.\n⚠ File chứa cookie + API key — giữ bảo mật.",
+                "Sao lưu");
         }
         catch (Exception ex)
         {
             Status = "✘ Lỗi sao lưu: " + ex.Message;
-            Dialogs.Show(ex.Message, "Sao lưu", MessageBoxButton.OK, MessageBoxImage.Warning);
+            Dialogs.Notify(ex.Message, "Sao lưu", DialogIcon.Warning);
         }
     }
 
     [RelayCommand]
-    private void BrowseRebaseDir()
+    private async Task BrowseRebaseDirAsync()
     {
-        var dlg = new OpenFolderDialog { Title = "Chọn thư mục chứa file data workbook trên máy này" };
-        if (dlg.ShowDialog() == true) RebaseWorkbookDir = dlg.FolderName;
+        var dir = await FilePicker.PickFolderAsync("Chọn thư mục chứa file data workbook trên máy này");
+        if (dir is not null) RebaseWorkbookDir = dir;
     }
 
     [RelayCommand]
-    private void ImportBackup()
+    private async Task ImportBackupAsync()
     {
         if (!BackupBigSeller && !BackupShopee && !BackupAi) { Status = "Chọn ít nhất 1 mục để khôi phục."; return; }
-        var dlg = new OpenFileDialog { Filter = "ShopeeSuite backup|*.zip|Tất cả|*.*", Title = "Chọn file sao lưu (.zip)" };
-        if (dlg.ShowDialog() != true) return;
+        var path = await FilePicker.OpenFileAsync("Chọn file sao lưu (.zip)", "ShopeeSuite backup|*.zip|Tất cả|*.*");
+        if (path is null) return;
 
         var mode = ImportReplace ? "THAY THẾ (xóa tk cũ rồi ghi đè)" : "GỘP (thêm mới, giữ tk cũ)";
-        if (Dialogs.Show($"Khôi phục từ:\n{dlg.FileName}\n\nChế độ: {mode}\nMục: {SelectedParts()}\n\nTiếp tục?",
-                "Khôi phục", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+        if (!await Dialogs.ConfirmAsync($"Khôi phục từ:\n{path}\n\nChế độ: {mode}\nMục: {SelectedParts()}\n\nTiếp tục?",
+                "Khôi phục")) return;
         try
         {
-            var r = BackupService.Import(dlg.FileName,
+            var r = BackupService.Import(path,
                 new BackupOptions(BackupBigSeller, BackupShopee, BackupAi),
                 ImportReplace,
                 string.IsNullOrWhiteSpace(RebaseWorkbookDir) ? null : RebaseWorkbookDir);
             if (BackupAi && r.AiImported) LoadFromStore();   // làm mới ô AI trên màn hình
             Status = $"✓ Khôi phục: BigSeller +{r.BigSellerAdded}/↻{r.BigSellerUpdated}/bỏ {r.BigSellerSkipped} · Shopee +{r.ShopeeAdded}/↻{r.ShopeeUpdated}/bỏ {r.ShopeeSkipped} · cookie {r.CookiesCopied} · AI {(r.AiImported ? "có" : "—")}.";
-            Dialogs.Show(Status, "Khôi phục", MessageBoxButton.OK, MessageBoxImage.Information);
+            await Dialogs.InfoAsync(Status, "Khôi phục");
         }
         catch (Exception ex)
         {
             Status = "✘ Lỗi khôi phục: " + ex.Message;
-            Dialogs.Show(ex.Message, "Khôi phục", MessageBoxButton.OK, MessageBoxImage.Warning);
+            Dialogs.Notify(ex.Message, "Khôi phục", DialogIcon.Warning);
         }
     }
 
@@ -478,7 +505,7 @@ public sealed partial class SettingsViewModel : ObservableObject
         catch (Exception ex)
         {
             Status = "✘ Lỗi: " + ex.Message;
-            Dialogs.Show(ex.Message, "Test AI", MessageBoxButton.OK, MessageBoxImage.Warning);
+            Dialogs.Notify(ex.Message, "Test AI", DialogIcon.Warning);
         }
         finally { Testing = false; }
     }

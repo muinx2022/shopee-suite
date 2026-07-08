@@ -26,6 +26,12 @@ internal sealed class BigSellerImportToStoreRunner : IAsyncDisposable
     // Item id ĐÃ gửi import (chốt chặn: bỏ qua ở các lượt quét sau → không import trùng + đảm bảo kết thúc,
     // độc lập với việc SP có rời tab hay không).
     private readonly HashSet<string> _importedIds = new(StringComparer.Ordinal);
+    // item id → dòng sheet (dòng đầu gặp id đó) — để khi import xong 1 id, báo ledger đúng DÒNG nào đã import.
+    private Dictionary<string, int> _rowByImportId = new(StringComparer.Ordinal);
+
+    /// <summary>Bắn (rowIndex, rowIndex) mỗi khi 1 dòng sheet vừa được IMPORT XONG (item id gửi lên store) →
+    /// caller đẩy lên ledger Hub để Thống kê biết "shop này đã import những dòng nào".</summary>
+    public event Action<int, int>? RowsDone;
 
     // ── Bắc cầu DOM ↔ item id qua API (BigSeller KHÔNG render source id ra HTML) ──
     // Crawl list nạp rows từ API /product/crawl/pageList.json; mỗi row có mainImage + crawlUrl. Ta bắt response
@@ -90,6 +96,7 @@ internal sealed class BigSellerImportToStoreRunner : IAsyncDisposable
 
         using var _ = await WorkbookFileLockHandle.AcquireAsync(_settings.WorkbookPath, ct).ConfigureAwait(false);
         var ids = new HashSet<string>(StringComparer.Ordinal);
+        var rowById = new Dictionary<string, int>(StringComparer.Ordinal);
         using var wb = new XLWorkbook(_settings.WorkbookPath);
         var ws = string.IsNullOrWhiteSpace(_settings.DataSheet)
             ? wb.Worksheets.First()
@@ -104,10 +111,11 @@ internal sealed class BigSellerImportToStoreRunner : IAsyncDisposable
             var colE = _settings.ItemIdColumn > 0 ? row.Cell(_settings.ItemIdColumn).GetString().Trim() : "";
             var link = _settings.LinkColumn > 0 ? row.Cell(_settings.LinkColumn).GetString().Trim() : "";
             var id = !string.IsNullOrWhiteSpace(colE) ? colE : (BigSellerCrawlHelper.ExtractShopeeId(link) ?? "");
-            if (!string.IsNullOrWhiteSpace(id)) ids.Add(id);
+            if (!string.IsNullOrWhiteSpace(id)) { ids.Add(id); rowById.TryAdd(id, r); }
         }
 
         _importIds = ids;
+        _rowByImportId = rowById;
         _log($"Nạp {ids.Count} item id từ sheet '{_settings.DataSheet}' (dòng {start}→{(end >= start ? end : start)}).");
     }
 
@@ -314,7 +322,12 @@ internal sealed class BigSellerImportToStoreRunner : IAsyncDisposable
 
                 // Đã gửi lên server (committed) → đánh dấu để KHÔNG import lại (dù SP còn hiện trong danh sách hay không).
                 if (committed)
-                    foreach (var id in checkedIds) _importedIds.Add(id);
+                    foreach (var id in checkedIds)
+                    {
+                        _importedIds.Add(id);
+                        // Báo ledger đúng DÒNG sheet của id vừa import (nếu biết) → Thống kê "đã import dòng nào".
+                        if (_rowByImportId.TryGetValue(id, out var row)) RowsDone?.Invoke(row, row);
+                    }
 
                 // Đã gom ĐỦ mọi item id cần import → DỪNG NGAY, khỏi lật hết tab (tab "Đã nhận" có thể tới ~75
                 // trang). _importedIds ⊆ _importIds nên đủ số là đủ tất cả.
@@ -397,6 +410,9 @@ internal sealed class BigSellerImportToStoreRunner : IAsyncDisposable
             try { _braveProcess.Dispose(); } catch { }
             _braveProcess = null;
         }
+        // Brave fork browser thật rồi stub thoát → Kill no-op, browser cũ giữ profile lock. Phải diệt
+        // orphan theo --user-data-dir TRƯỚC khi mở lại cùng profile, kẻo instance mới đụng lock/port cũ.
+        try { BraveProcessReaper.KillByUserDataDir(_settings.ProfileDir, _log); } catch { }
 
         StartBraveForBigSeller();
         _log($"  Đã khởi động lại Brave PID={_braveProcess?.Id.ToString() ?? "unknown"}, chờ CDP port {_settings.DebugPort}…");
@@ -763,7 +779,7 @@ internal sealed class BigSellerImportToStoreRunner : IAsyncDisposable
             "--no-session-restore",
             "--restore-last-session=false",
             "--disable-session-crashed-bubble",
-            "--start-maximized",
+            // KHÔNG '--start-maximized': muốn Brave mở THU NHỎ (startMinimized) — cờ maximize sẽ đè show-state.
             "--window-size=1920,1080",
             "--disable-gpu",
             "--disable-dev-shm-usage",
@@ -778,13 +794,11 @@ internal sealed class BigSellerImportToStoreRunner : IAsyncDisposable
         // thì cứ mở lại Brave rồi lại bị giết — đúng triệu chứng "tắt Brave nhưng script vẫn chạy".
         BraveFleet.RegisterActiveProfile(_settings.ProfileDir);
 
-        _log("Mở Brave BigSeller profile...");
-        _braveProcess = Process.Start(new ProcessStartInfo
-        {
-            FileName = _settings.BravePath,
-            Arguments = args,
-            UseShellExecute = false,
-        });
+        _log("Mở Brave BigSeller profile (thu nhỏ)...");
+        // Phóng qua BraveJobObject (KILL_ON_JOB_CLOSE): app tắt/crash → OS tự giết Brave này. Vẫn cần
+        // reaper ở DisposeAsync/RestartBrowserAsync vì Brave fork browser thật rồi stub thoát.
+        // startMinimized: mở cửa sổ ở trạng thái thu nhỏ, KHÔNG chiếm màn hình/không cướp focus của người dùng.
+        _braveProcess = BraveJobObject.Start(_settings.BravePath, args, startMinimized: true);
     }
 
     private static void ClearSessionTabs(string profileDir)
@@ -872,6 +886,9 @@ internal sealed class BigSellerImportToStoreRunner : IAsyncDisposable
             try { _braveProcess.Dispose(); } catch { }
             _braveProcess = null;
         }
+        // Fallback: Brave hay fork browser thật rồi để stub thoát ngay → _braveProcess.HasExited=true,
+        // Kill ở trên no-op, browser thật thành orphan (giữ profile lock + RAM). Diệt theo --user-data-dir.
+        try { BraveProcessReaper.KillByUserDataDir(_settings.ProfileDir, _log); } catch { }
 
         // Gỡ đăng ký SAU khi đã giết → nếu còn sót tiến trình nào, lần sweep kế dọn nốt (không rò qua các lượt).
         BraveFleet.UnregisterActiveProfile(_settings.ProfileDir);

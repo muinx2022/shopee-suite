@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Shopee.Hub.Web</RootNamespace>
+    <AssemblyName>Shopee.Hub.Web</AssemblyName>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- Kho code dùng chung (POCO/DTO) được LINK từ suite\ thay vì di chuyển, để KHÔNG đụng project WPF
+         đang được agent Avalonia sửa song song. Nếu file gốc bị đổi tên/di chuyển → build gãy rõ ràng. -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.10" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Systemd" Version="8.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="8.0.1" />
+    <PackageReference Include="ClosedXML" Version="0.105.0" />
+    <PackageReference Include="Microsoft.Playwright" Version="1.60.0" />
+  </ItemGroup>
+
+  <!-- ── Nguồn dùng chung được LINK (file gốc giữ nguyên trong suite\Shopee.Core & Shopee.Module.Search) ── -->
+  <ItemGroup>
+    <Compile Include="..\..\suite\Shopee.Core\Coordination\HubDtos.cs" Link="Shared\Coordination\HubDtos.cs" />
+    <Compile Include="..\..\suite\Shopee.Core\Coordination\ICoordinationHub.cs" Link="Shared\Coordination\ICoordinationHub.cs" />
+    <Compile Include="..\..\suite\Shopee.Core\Coordination\HubDefaults.cs" Link="Shared\Coordination\HubDefaults.cs" />
+    <Compile Include="..\..\suite\Shopee.Core\BigSeller\BigSellerAccount.cs" Link="Shared\BigSeller\BigSellerAccount.cs" />
+    <Compile Include="..\..\suite\Shopee.Core\BigSeller\BigSellerShop.cs" Link="Shared\BigSeller\BigSellerShop.cs" />
+    <Compile Include="..\..\suite\Shopee.Core\BigSeller\BigSellerColumnMap.cs" Link="Shared\BigSeller\BigSellerColumnMap.cs" />
+    <Compile Include="..\..\suite\Shopee.Core\Accounts\ShopeeAccount.cs" Link="Shared\Accounts\ShopeeAccount.cs" />
+    <Compile Include="..\..\suite\Shopee.Core\Ai\AiConfig.cs" Link="Shared\Ai\AiConfig.cs" />
+    <Compile Include="..\..\suite\Shopee.Core\Ai\AiPrompts.cs" Link="Shared\Ai\AiPrompts.cs" />
+    <Compile Include="..\..\suite\Shopee.Core\Ai\AiChat.cs" Link="Shared\Ai\AiChat.cs" />
+    <Compile Include="..\..\suite\Shopee.Core\Ai\AiHttpException.cs" Link="Shared\Ai\AiHttpException.cs" />
+    <Compile Include="..\..\suite\Shopee.Core\BigSeller\BigSellerCaptchaSolver.cs" Link="Shared\BigSeller\BigSellerCaptchaSolver.cs" />
+    <Compile Include="..\..\suite\Shopee.Module.Search\Engine\ProductResult.cs" Link="Shared\Search\ProductResult.cs" />
+    <Compile Include="..\..\suite\Shopee.Module.Search\Engine\ExcelExporter.cs" Link="Shared\Search\ExcelExporter.cs" />
+  </ItemGroup>
+</Project>

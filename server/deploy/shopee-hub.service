@@ -1,0 +1,25 @@
+[Unit]
+Description=Shopee Hub Web (fleet coordinator)
+After=network.target
+
+[Service]
+Type=notify
+# Thư mục cài (copy nội dung bin/publish/linux-x64 vào đây)
+WorkingDirectory=/opt/shopee-hub
+ExecStart=/opt/shopee-hub/Shopee.Hub.Web
+Restart=always
+RestartSec=3
+User=shopeehub
+Group=shopeehub
+
+# Dữ liệu (hub.db + files/ + dp-keys/ + backups/ + exports/) TÁCH khỏi thư mục cài để redeploy không mất.
+Environment=HUB_DATA_DIR=/var/lib/shopee-hub
+Environment=ASPNETCORE_URLS=http://127.0.0.1:8088
+# Token dùng chung với client (SEED từ hub-server.json cũ lúc cutover). Sau đó nằm trong hub.db, có thể bỏ dòng này.
+Environment=HUB_API_TOKEN=CHANGE_ME
+# Admin đăng nhập web lần đầu (bỏ sau khi đã tạo admin; hoặc dùng trang /setup).
+Environment=HUB_ADMIN_USER=admin
+Environment=HUB_ADMIN_PASSWORD=CHANGE_ME_TOO
+
+[Install]
+WantedBy=multi-user.target

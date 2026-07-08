@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net8.0-windows</TargetFramework>
+    <TargetFramework>net8.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>Shopee.Modules.MultiBrave</RootNamespace>
@@ -14,6 +14,6 @@
     <PackageReference Include="Microsoft.Data.Sqlite" Version="9.0.6" />
     <!-- Auto-login BigSeller đầu phiên scrape: attach Playwright qua CDP vào Brave scrape (khớp phiên bản UpdateProduct). -->
     <PackageReference Include="Microsoft.Playwright" Version="1.60.0" />
-    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
+    <!-- DPAPI đã dời về Core (WindowsOsCrypt) — ChromiumCookieReader gọi qua PlatformServices.OsCrypt. -->
   </ItemGroup>
 </Project>

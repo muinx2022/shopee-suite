@@ -59,7 +59,9 @@ public sealed class WorkLedgerRecord
     public string Sheet { get; set; } = "";
     public string Op { get; set; } = "";
 
-    /// <summary>Khoảng dòng đã xong (chỉ áp dụng scrape).</summary>
+    /// <summary>Khoảng dòng (trong sheet) đã xong. Scrape: dòng đã cào. Import/Update/Rewrite: dòng SP đã
+    /// xử lý xong — để Thống kê trên Hub xem "shop này đã import/update được những dòng nào". Fold-về-tiến-độ
+    /// scrape CHỈ dùng record op=scrape (xem HttpCoordinationHub.SyncIntoProgressAsync/FoldScrapeLedgerAsync).</summary>
     public List<RowRange> Completed { get; set; } = [];
     public int LastRowReached { get; set; }
     public string Status { get; set; } = "idle";   // idle | running | stopped | completed

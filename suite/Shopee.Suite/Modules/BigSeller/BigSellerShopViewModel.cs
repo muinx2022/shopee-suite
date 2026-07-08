@@ -16,7 +16,8 @@ public sealed class BigSellerShopViewModel : ObservableObject
         Model.ColumnMap ??= new BigSellerColumnMap();   // dữ liệu cũ (json thiếu columnMap) → tránh null
     }
 
-    private static void Persist() => BigSellerStore.Shared.Save();
+    // Gộp ghi đĩa (Avalonia bind cập nhật mỗi phím) — xem PersistDebounce, thay LostFocus của WPF. Model cập nhật ngay.
+    private static void Persist() => PersistDebounce.Schedule();
 
     public string Name
     {

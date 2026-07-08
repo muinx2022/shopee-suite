@@ -1,0 +1,276 @@
+<UserControl
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:b="using:Shopee.Suite.Behaviors"
+    x:Class="Shopee.Suite.Modules.Search.SearchView"
+    x:Name="Root">
+    <Grid Margin="28,22,28,24" RowDefinitions="Auto,*">
+
+        <!-- ══ Header ══ -->
+        <Grid Grid.Row="0" Margin="0,0,0,12">
+            <StackPanel>
+                <TextBlock Text="Shopee Search" Classes="h1" />
+                <TextBlock Text="Nạp file link CATEGORY (.txt mỗi dòng 1 link) → tick chọn → mỗi link 1 tab/account: mọi sub-category · lọc Nơi Bán · Bán chạy."
+                           Classes="caption" Margin="0,3,0,0" />
+            </StackPanel>
+            <Border HorizontalAlignment="Right" VerticalAlignment="Center"
+                    Background="{DynamicResource SubtleBrush}" CornerRadius="14" Padding="14,6">
+                <TextBlock Text="{Binding Status}" FontSize="12.5" Foreground="{DynamicResource TextSecondaryBrush}" />
+            </Border>
+        </Grid>
+
+        <TabControl Grid.Row="1">
+            <!-- ════════════ TAB 1: TÌM KIẾM ════════════ -->
+            <TabItem Header="Tìm kiếm">
+                <Grid Margin="0,12,0,0" RowDefinitions="Auto,190,*,Auto,150">
+
+                    <!-- Card: input + run -->
+                    <Border Grid.Row="0" Classes="card" Padding="18,16" Margin="0,0,0,10">
+                        <StackPanel>
+                            <!-- Dòng 1: File link category — riêng 1 dòng, ô đường dẫn rộng hết chiều ngang -->
+                            <TextBlock Text="File link category (.txt: mỗi dòng 1 link)" Classes="caption" />
+                            <Grid Margin="0,4,0,12" ColumnDefinitions="*,Auto,Auto">
+                                <TextBox Grid.Column="0" Text="{Binding FilesDisplay}" IsReadOnly="True" FontSize="11.5" VerticalContentAlignment="Center" />
+                                <Button Grid.Column="1" Content="📂  Chọn file" Margin="8,0,0,0" Command="{Binding ChooseFilesCommand}" />
+                                <Button Grid.Column="2" Content="🗑" Width="38" Margin="6,0,0,0" Command="{Binding ClearFilesCommand}" ToolTip.Tip="Bỏ file" />
+                            </Grid>
+
+                            <!-- Dòng 2: Bộ lọc Khu vực (Nơi Bán) + Lane + nút chạy -->
+                            <Grid ColumnDefinitions="Auto,Auto,*">
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock Text="Khu vực (Nơi Bán)" Classes="caption" />
+                                    <TextBox Width="200" Margin="0,4,0,0" Text="{Binding Region}" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="1" Margin="16,0,0,0" Orientation="Horizontal" VerticalAlignment="Bottom">
+                                    <TextBlock Text="Lane" Classes="caption" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                    <TextBox Width="48" Text="{Binding LaneCount}" VerticalAlignment="Center" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Bottom">
+                                    <Button Content="↻" Width="36" Command="{Binding ReloadCommand}" />
+                                    <Button Classes="success" Content="▶  Tìm kiếm" MinWidth="110" Margin="8,0,0,0" Command="{Binding RunCommand}"
+                                            ToolTip.Tip="Chạy mới — mỗi link tạo lượt mới từ danh mục đầu." />
+                                    <Button Content="⏯ Tiếp tục" MinWidth="96" Margin="8,0,0,0" Command="{Binding ResumeCommand}"
+                                            ToolTip.Tip="Resume các link chưa kết thúc ĐÚNG từ danh mục/trang đã dừng (giữ SP đã cào)." />
+                                    <Button Classes="danger" Content="■  Dừng" MinWidth="80" Margin="8,0,0,0" Command="{Binding StopCommand}" />
+                                </StackPanel>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Danh sách link nạp được — tick chọn link để search -->
+                    <DockPanel Grid.Row="1" Margin="0,0,0,10">
+                        <Grid DockPanel.Dock="Top" Margin="0,0,0,6">
+                            <TextBlock Classes="caption" VerticalAlignment="Center">
+                                <Run Text="Link đã nạp — tick chọn để search (" /><Run Text="{Binding LoadedLinks.Count, Mode=OneWay}" /><Run Text=")" />
+                            </TextBlock>
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                                <Button Content="✔ Chọn tất cả" Command="{Binding SelectAllLinksCommand}" />
+                                <Button Content="✖ Bỏ chọn" Margin="8,0,0,0" Command="{Binding UnselectAllLinksCommand}" />
+                                <Button Classes="danger" Content="🗑 Xóa link đã chọn" Margin="8,0,0,0"
+                                        Command="{Binding RemoveSelectedLinksCommand}" ToolTip.Tip="Xóa các link đang tick khỏi danh sách." />
+                            </StackPanel>
+                        </Grid>
+                        <Border Classes="card" ClipToBounds="True">
+                            <DataGrid ItemsSource="{Binding LoadedLinks}" BorderThickness="0" AutoGenerateColumns="False">
+                                <DataGrid.Columns>
+                                    <DataGridTemplateColumn Header="Chọn" Width="48">
+                                        <DataGridTemplateColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <CheckBox IsChecked="{Binding IsSelected}" HorizontalAlignment="Center" />
+                                            </DataTemplate>
+                                        </DataGridTemplateColumn.CellTemplate>
+                                    </DataGridTemplateColumn>
+                                    <DataGridTextColumn Header="Dòng" Binding="{Binding Row}" Width="50" IsReadOnly="True" />
+                                    <DataGridTextColumn Header="Link" Binding="{Binding Link}" Width="2.4*" IsReadOnly="True" />
+                                    <DataGridTextColumn Header="Trạng thái" Binding="{Binding Status}" Width="0.9*" IsReadOnly="True" />
+                                    <DataGridTextColumn Header="Tiến độ (resume)" Binding="{Binding Progress}" Width="1.6*" IsReadOnly="True" />
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </Border>
+                    </DockPanel>
+
+                    <!-- Mỗi link = 1 tab: tài khoản + trạng thái + sản phẩm crawl được. Nhiều link → dải tab
+                         GIỮ 1 HÀNG + cuộn ngang (không wrap xuống nhiều hàng làm vỡ/đẩy form). -->
+                    <TabControl Grid.Row="2" ItemsSource="{Binding LinkTabs}" SelectedItem="{Binding SelectedLinkTab}">
+                        <TabControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <StackPanel Orientation="Horizontal" />
+                            </ItemsPanelTemplate>
+                        </TabControl.ItemsPanel>
+                        <TabControl.Template>
+                            <ControlTemplate>
+                                <Grid RowDefinitions="Auto,*">
+                                    <ScrollViewer Grid.Row="0" HorizontalScrollBarVisibility="Auto"
+                                                  VerticalScrollBarVisibility="Disabled">
+                                        <ItemsPresenter Name="PART_ItemsPresenter" ItemsPanel="{TemplateBinding ItemsPanel}" />
+                                    </ScrollViewer>
+                                    <ContentPresenter Grid.Row="1" Name="PART_SelectedContentHost"
+                                                      Content="{TemplateBinding SelectedContent}"
+                                                      ContentTemplate="{TemplateBinding SelectedContentTemplate}" />
+                                </Grid>
+                            </ControlTemplate>
+                        </TabControl.Template>
+                        <TabControl.ItemTemplate>
+                            <DataTemplate>
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="{Binding Header}" VerticalAlignment="Center" />
+                                    <Button Content="✕" ToolTip.Tip="Đóng tab (dừng link nếu đang chạy)" Margin="6,0,0,0" Padding="4,0" FontSize="11" MinWidth="0" Height="20"
+                                            Command="{Binding $parent[UserControl].DataContext.CloseLinkTabCommand}"
+                                            CommandParameter="{Binding}" />
+                                </StackPanel>
+                            </DataTemplate>
+                        </TabControl.ItemTemplate>
+                        <TabControl.ContentTemplate>
+                            <DataTemplate>
+                                <DockPanel Margin="0,10,0,0">
+                                    <TextBlock DockPanel.Dock="Top" Margin="2,0,0,8" FontSize="12.5" Foreground="{DynamicResource TextSecondaryBrush}" TextWrapping="Wrap">
+                                        <Run Text="Tài khoản: " /><Run Text="{Binding Account, Mode=OneWay}" FontWeight="SemiBold" /><Run Text="   ·   " /><Run Text="{Binding Status, Mode=OneWay}" /><Run Text="   ·   " /><Run Text="{Binding Link, Mode=OneWay}" />
+                                    </TextBlock>
+                                    <Border Classes="card" ClipToBounds="True">
+                                        <DataGrid ItemsSource="{Binding Products}" BorderThickness="0" IsReadOnly="True" AutoGenerateColumns="False">
+                                            <DataGrid.Columns>
+                                                <DataGridTextColumn Header="Tên sản phẩm" Binding="{Binding Name}" Width="2.4*" />
+                                                <DataGridTextColumn Header="Giá" Binding="{Binding Price}" Width="90" />
+                                                <DataGridTextColumn Header="Bán/tháng" Binding="{Binding MonthlySold}" Width="90" />
+                                                <DataGridTextColumn Header="Rating" Binding="{Binding Rating}" Width="70" />
+                                                <DataGridTextColumn Header="Danh mục" Binding="{Binding Category}" Width="1.2*" />
+                                                <DataGridTextColumn Header="Khu vực" Binding="{Binding ShopLocation}" Width="1*" />
+                                                <DataGridTextColumn Header="Shop" Binding="{Binding ShopName}" Width="1*" />
+                                            </DataGrid.Columns>
+                                        </DataGrid>
+                                    </Border>
+                                </DockPanel>
+                            </DataTemplate>
+                        </TabControl.ContentTemplate>
+                    </TabControl>
+
+                    <!-- Errored accounts -->
+                    <StackPanel Grid.Row="3" Margin="0,10,0,0"
+                                IsVisible="{Binding ErroredAccounts.Count, Converter={StaticResource CountToBool}}">
+                        <TextBlock Margin="0,0,0,5" FontSize="12.5" FontWeight="SemiBold" Foreground="{DynamicResource DangerBrush}">
+                            <Run Text="⚠ Tài khoản lỗi (" /><Run Text="{Binding ErroredAccounts.Count, Mode=OneWay}" /><Run Text=") — engine tự đổi tk" />
+                        </TextBlock>
+                        <Border Classes="card" MaxHeight="90" ClipToBounds="True">
+                            <DataGrid ItemsSource="{Binding ErroredAccounts}" BorderThickness="0" IsReadOnly="True" AutoGenerateColumns="False">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="Account" Binding="{Binding Account}" Width="1.4*" />
+                                    <DataGridTextColumn Header="Lỗi" Binding="{Binding Reason}" Width="*" />
+                                    <DataGridTextColumn Header="Lúc" Binding="{Binding Time}" Width="80" />
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </Border>
+                    </StackPanel>
+
+                    <!-- Log -->
+                    <Border Grid.Row="4" CornerRadius="8" ClipToBounds="True" Margin="0,12,0,0" Background="{DynamicResource LogBackgroundBrush}">
+                        <TextBox Classes="log" b:LogText.Source="{Binding LogLines}" />
+                    </Border>
+                </Grid>
+            </TabItem>
+
+            <!-- ════════════ TAB 2: XUẤT EXCEL ════════════ -->
+            <TabItem Header="Xuất Excel">
+                <Grid Margin="0,12,0,0" VerticalAlignment="Top">
+                    <StackPanel MaxWidth="900" HorizontalAlignment="Left">
+                        <Border Classes="card" Padding="18,16" Margin="0,0,0,12">
+                            <StackPanel>
+                                <TextBlock Text="Bộ lọc (áp khi xuất Excel)" Classes="h2" Margin="0,0,0,12" />
+                                <Grid ColumnDefinitions="Auto,14,Auto,8,Auto,14,*">
+                                    <StackPanel Grid.Column="0"><TextBlock Text="Giá ≥" Classes="caption" />
+                                        <TextBox Width="120" Margin="0,4,0,0" Text="{Binding MinPrice}" /></StackPanel>
+                                    <StackPanel Grid.Column="2"><TextBlock Text="Bán/tháng từ" Classes="caption" />
+                                        <TextBox Width="90" Margin="0,4,0,0" Text="{Binding MinSoldFrom}" /></StackPanel>
+                                    <StackPanel Grid.Column="4"><TextBlock Text="đến" Classes="caption" />
+                                        <TextBox Width="90" Margin="0,4,0,0" Text="{Binding MinSoldTo}" /></StackPanel>
+                                    <StackPanel Grid.Column="6"><TextBlock Text="Danh mục" Classes="caption" />
+                                        <ComboBox Margin="0,4,0,0" ItemsSource="{Binding Categories}" SelectedItem="{Binding CategoryFilter}" /></StackPanel>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Classes="card" Padding="18,16" Margin="0,0,0,12">
+                            <StackPanel>
+                                <TextBlock Text="Thư mục lưu file Excel" Classes="h2" Margin="0,0,0,12" />
+                                <Grid ColumnDefinitions="*,Auto,Auto">
+                                    <TextBox Grid.Column="0" Classes="mono" Text="{Binding OutputDir}" FontSize="11.5" VerticalContentAlignment="Center" />
+                                    <Button Grid.Column="1" Content="📂  Chọn thư mục" Margin="8,0,0,0" Command="{Binding BrowseOutputDirCommand}" />
+                                    <Button Grid.Column="2" Content="↗  Mở" Width="64" Margin="8,0,0,0" Command="{Binding OpenOutputCommand}" />
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Classes="card" Padding="18,16">
+                            <StackPanel>
+                                <TextBlock Text="Xuất Excel" Classes="h2" Margin="0,0,0,12" />
+                                <StackPanel Orientation="Horizontal">
+                                    <Button Classes="primary" Content="📦  Xuất tất cả (đã quét)" MinWidth="190" Command="{Binding ExportAllCommand}" />
+                                    <Button Classes="danger" Content="🗑  Xóa dữ liệu đã quét" MinWidth="190" Margin="8,0,0,0" Command="{Binding ClearDataCommand}" />
+                                </StackPanel>
+                                <TextBlock Text="Mỗi link sau khi crawl xong tự xuất 1 file Excel ở thư mục con “categories”."
+                                           Classes="caption" Margin="0,8,0,0" />
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </Grid>
+            </TabItem>
+
+            <!-- ════════════ TAB 3: DANH MỤC (AI) ════════════ -->
+            <TabItem Header="Danh mục (AI)">
+                <Grid Margin="0,12,0,0" RowDefinitions="Auto,*">
+
+                    <Border Grid.Row="0" Classes="card" Padding="18,16" Margin="0,0,0,12">
+                        <StackPanel>
+                            <TextBlock Classes="caption" Margin="0,0,0,4">
+                                <Run Text="File danh mục lá Shopee (.docx) — provider AI đang dùng: " /><Run Text="{Binding AiProviderName, Mode=OneWay}" FontWeight="SemiBold" />
+                            </TextBlock>
+                            <Grid ColumnDefinitions="*,Auto">
+                                <TextBox Grid.Column="0" Classes="mono" Text="{Binding CategoryDocxPath}" FontSize="11.5" VerticalContentAlignment="Center" />
+                                <Button Grid.Column="1" Content="📂  Chọn file danh mục" Margin="8,0,0,0" Command="{Binding BrowseDocxCommand}" />
+                            </Grid>
+                            <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                                <Button Classes="primary" Content="🤖  Cập nhật danh mục CSDL (AI)" MinWidth="210" Command="{Binding UpdateCategoriesAiCommand}" />
+                                <Button Content="📄  Gán danh mục cho file Excel (AI)" MinWidth="220" Margin="8,0,0,0" Command="{Binding UpdateCategoriesExcelCommand}" />
+                                <Button Content="↻  Làm mới" MinWidth="96" Margin="8,0,0,0" Command="{Binding RefreshCategoryGridCommand}" />
+                                <Button Classes="danger" Content="■  Dừng" MinWidth="80" Margin="8,0,0,0" Command="{Binding StopAiCommand}" />
+                                <TextBlock Text="{Binding AiProgress}" VerticalAlignment="Center" Margin="14,0,0,0" FontSize="12.5" Foreground="{DynamicResource TextSecondaryBrush}" />
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <Grid Grid.Row="1" ColumnDefinitions="1.1*,14,1.6*">
+                        <DockPanel Grid.Column="0">
+                            <TextBlock DockPanel.Dock="Top" Classes="h2" Margin="0,0,0,8">
+                                <Run Text="Danh mục trong CSDL (" /><Run Text="{Binding CategoryRows.Count, Mode=OneWay}" /><Run Text=")" />
+                            </TextBlock>
+                            <Border Classes="card" ClipToBounds="True">
+                                <DataGrid ItemsSource="{Binding CategoryRows}" SelectedItem="{Binding SelectedCategoryRow}" BorderThickness="0" IsReadOnly="True" AutoGenerateColumns="False">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="Danh mục" Binding="{Binding Name}" Width="*" />
+                                        <DataGridTextColumn Header="Số SP" Binding="{Binding ProductCount}" Width="64" />
+                                        <DataGridTextColumn Header="Số shop" Binding="{Binding ShopCount}" Width="68" />
+                                        <DataGridTextColumn Header="Lần cuối" Binding="{Binding LastSeen}" Width="120" />
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                            </Border>
+                        </DockPanel>
+                        <DockPanel Grid.Column="2">
+                            <TextBlock DockPanel.Dock="Top" Classes="h2" Margin="0,0,0,8">
+                                <Run Text="Sản phẩm: " /><Run Text="{Binding SelectedCategoryName, Mode=OneWay}" FontWeight="SemiBold" />
+                            </TextBlock>
+                            <Border Classes="card" ClipToBounds="True">
+                                <DataGrid ItemsSource="{Binding CategoryProducts}" BorderThickness="0" IsReadOnly="True" AutoGenerateColumns="False">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="Tên sản phẩm" Binding="{Binding Name}" Width="2.4*" />
+                                        <DataGridTextColumn Header="Giá" Binding="{Binding Price}" Width="90" />
+                                        <DataGridTextColumn Header="Bán/tháng" Binding="{Binding MonthlySold}" Width="90" />
+                                        <DataGridTextColumn Header="Shop" Binding="{Binding ShopName}" Width="1.1*" />
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                            </Border>
+                        </DockPanel>
+                    </Grid>
+                </Grid>
+            </TabItem>
+        </TabControl>
+    </Grid>
+</UserControl>

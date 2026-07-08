@@ -103,7 +103,6 @@ public sealed class HubServer
         app.MapPost("/accounts/reserve", (AccountReserveRequest? r) => r?.AccountIds is null ? Results.BadRequest() : Results.Json(db.ReserveAccounts(r)));
         app.MapPost("/accounts/release", (AccountReleaseRequest? r) => { if (r?.AccountIds is null) return Results.BadRequest(); db.ReleaseAccounts(r); return Results.Ok(); });
         app.MapPost("/accounts/heartbeat", (AccountReleaseRequest? r) => { if (r?.AccountIds is null) return Results.BadRequest(); db.HeartbeatAccounts(r); return Results.Ok(); });
-        app.MapGet("/accounts/active", () => Results.Json(db.ActiveAccountLeases()));
 
         // ── Sổ hoàn thành ──
         app.MapPost("/ledger", (WorkLedgerRecord? r) => { if (r is null) return Results.BadRequest(); db.PublishLedger(r); return Results.Ok(); });
@@ -116,9 +115,7 @@ public sealed class HubServer
         app.MapGet("/fleet", () => Results.Json(db.Fleet()));
 
         // ── Vai trò máy + giao việc ── (body null/sai → 400 thay vì NRE 500)
-        app.MapGet("/roles", () => Results.Json(db.AllRoles()));
         app.MapPost("/roles", (SetRoleRequest? r) => { if (r is null) return Results.BadRequest(); db.SetRole(r.MachineId, r.Role); return Results.Ok(); });
-        app.MapGet("/assignments", () => Results.Json(db.ListAssignments()));
         app.MapPost("/assignments", (CreateAssignmentRequest? r) => r is null ? Results.BadRequest() : Results.Json(db.CreateAssignment(r)));
         app.MapPost("/assignments/claim", (ClaimAssignmentsRequest? r) => r is null ? Results.BadRequest() : Results.Json(db.ClaimNext(r.MachineId, r.Role, r.Max)));
         app.MapPost("/assignments/status", (AssignmentStatusRequest? r) => { if (r is null) return Results.BadRequest(); db.UpdateAssignmentStatus(r.Id, r.MachineId, r.Status, r.Error); return Results.Ok(); });

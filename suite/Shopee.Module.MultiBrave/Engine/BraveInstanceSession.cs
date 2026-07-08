@@ -260,42 +260,6 @@ internal sealed class BraveInstanceSession : IDisposable
         state.StartRow is > 0 ||
         !string.IsNullOrWhiteSpace(state.SheetName);
 
-    public async Task PushFormConfigToExtensionAsync(
-        bool logSuccess = false,
-        CancellationToken cancellationToken = default)
-    {
-        if (!_running || _config is null)
-            return;
-
-        var profileRoot = ResolveProfileRoot();
-        if (profileRoot is null)
-            return;
-
-        var sheet = _config.DataSheet?.Trim() ?? "";
-        if (string.IsNullOrWhiteSpace(sheet))
-            return;
-
-        try
-        {
-            var ok = await ExtensionProgressCoordinator.PushFormConfigAsync(
-                _cdpPort,
-                profileRoot,
-                sheet,
-                _config.StartRow,
-                _config.EndRow,
-                cancellationToken).ConfigureAwait(false);
-            if (ok && logSuccess)
-        Log($"Đã cập nhật extension: sheet \"{sheet}\", dòng {_config.StartRow}–{_config.EndRow ?? 0}.");
-            if (ok)
-                await ExtensionRunnerAutomation.TryBroadcastRunnerStateAsync(
-                    _cdpPort, profileRoot, cancellationToken).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            Log($"Cập nhật extension: {ex.Message}");
-        }
-    }
-
     public void ApplyConfig(InstanceConfig config) => _config = config;
 
     public async Task<bool> WaitForCdpReadyAsync(
@@ -1005,17 +969,6 @@ internal sealed class BraveInstanceSession : IDisposable
         }
     }
 
-    private bool _allowNoProxyForSession;
-
-    /// <summary>
-    /// User đã xác nhận "vẫn mở dù chưa có proxy" — bỏ qua guard RequireProxy cho instance này
-    /// đến hết phiên (kể cả khi runner tự mở lại profile). Reset khi dừng hẳn.
-    /// </summary>
-    public void AllowNoProxyForSession() => _allowNoProxyForSession = true;
-
-    /// <summary>User đã xác nhận cho mở dù chưa có proxy (để khỏi hỏi lại trong phiên).</summary>
-    public bool NoProxyAllowed => _allowNoProxyForSession;
-
     private async Task<(string? proxyServer, Dictionary<string, object>? proxyData)> ResolveProxyForLaunchAsync()
     {
         if (_config is null)
@@ -1037,7 +990,7 @@ internal sealed class BraveInstanceSession : IDisposable
             return (server, null);
         }
 
-        if (_config.RequireProxy && !_allowNoProxyForSession)
+        if (_config.RequireProxy)
             throw new InvalidOperationException(
                 "Instance chưa có proxy (KiotProxy key / proxy thủ công) — không mở profile để tránh login Shopee bằng IP máy.");
 
@@ -1494,35 +1447,6 @@ internal sealed class BraveInstanceSession : IDisposable
         return false;
     }
 
-    public async Task ExportCookiesToFileAsync(string fileName)
-    {
-        var cookies = await GetAllCookiesFromBraveAsync();
-        Directory.CreateDirectory(Path.GetDirectoryName(fileName) ?? AppSession.RootDirectory);
-        CookieFileHelper.TryWriteCookieFile(fileName, cookies, Log);
-        Log($"Đã lưu {cookies.Count} cookie -> {fileName}");
-    }
-
-    public async Task<int> ImportCookiesFromFileAsync(
-        string fileName,
-        bool includeShopee)
-    {
-        if (string.IsNullOrWhiteSpace(fileName))
-            return 0;
-        if (!File.Exists(fileName))
-            throw new FileNotFoundException("Không tìm thấy file cookie.", fileName);
-
-        var json = await File.ReadAllTextAsync(fileName, Encoding.UTF8);
-        var cookiesEl = CookieFileHelper.ParseCookiesRoot(json);
-        CookieFileHelper.ValidateCookiesArray(cookiesEl);
-
-        if (!await WaitForCdpReadyAsync().ConfigureAwait(false))
-            throw new InvalidOperationException("Profile khong con ket noi CDP (co the dang restart hoac da tat).");
-
-        return await SetCookiesToBraveAsync(
-            cookiesEl,
-            includeShopee).ConfigureAwait(false);
-    }
-
     /// <summary>
     /// Kiểm tra cookie phiên Shopee (SPC_ST / SPC_EC) — có giá trị thật nghĩa là đã đăng nhập.
     /// </summary>
@@ -1853,8 +1777,6 @@ internal sealed class BraveInstanceSession : IDisposable
             throw lastError;
     }
 
-    private Task<string> GetCdpWebSocketUrlAsync() =>
-        _cdpClient.GetPageWebSocketUrlAsync();
     private Task<string> GetBrowserWebSocketUrlAsync() =>
         _cdpClient.GetBrowserWebSocketUrlAsync();
     private Task<string?> FindPageWebSocketUrlAsync(Func<string, bool> urlMatches) =>
@@ -1863,15 +1785,6 @@ internal sealed class BraveInstanceSession : IDisposable
         CdpClient.SendAsync(socket, id, method, @params);
     private Task<List<Dictionary<string, object?>>> GetAllCookiesFromBraveAsync() =>
         _cookieService.GetShopeeCookiesAsync();
-
-    private Task<int> SetCookiesToBraveAsync(
-        JsonElement cookiesArray,
-        bool includeShopee) =>
-        CookieCdpWriter.SetCookiesFromJsonAsync(
-            _cdpClient,
-            cookiesArray,
-            new CookieImportFilter(includeShopee),
-            Log);
 
     /// <summary>
     /// Import BigSeller cookie từ file account vào browser qua CDP.

@@ -1,68 +1,70 @@
 using System.Collections;
 using System.Collections.Specialized;
-using System.Windows;
-using System.Windows.Controls;
+using System.Text;
+using Avalonia;
+using Avalonia.Controls;
 
 namespace Shopee.Suite.Behaviors;
 
 /// <summary>
-/// Gắn một collection log (ObservableCollection&lt;string&gt;) vào một <see cref="TextBox"/> read-only để
-/// hiển thị log mà VẪN chọn/copy được (Ctrl+C, Ctrl+A, menu chuột phải Copy/Select All) — thay cho
-/// ItemsControl chỉ xem. Tự nối dòng mới + cuộn xuống cuối; Reset (Clear) thì xoá hết.
-/// Dùng: <c>&lt;TextBox Style="{StaticResource LogTextBox}" b:LogText.Source="{Binding LogLines}" /&gt;</c>
+/// Gắn 1 collection log (ObservableCollection&lt;string&gt;) vào 1 <see cref="TextBox"/> read-only để hiển thị
+/// mà VẪN chọn/copy được — thay ItemsControl chỉ xem. Tự nối dòng mới + cuộn cuối; Reset (Clear) thì xoá hết.
+/// Avalonia TextBox không có AppendText/ScrollToEnd → set Text + CaretIndex ở cuối. Dùng:
+/// <c>&lt;TextBox Classes="log" b:LogText.Source="{Binding LogLines}" /&gt;</c>.
 /// </summary>
-public static class LogText
+public class LogText : AvaloniaObject
 {
-    public static readonly DependencyProperty SourceProperty = DependencyProperty.RegisterAttached(
-        "Source", typeof(IEnumerable), typeof(LogText), new PropertyMetadata(null, OnSourceChanged));
+    public static readonly AttachedProperty<IEnumerable?> SourceProperty =
+        AvaloniaProperty.RegisterAttached<LogText, TextBox, IEnumerable?>("Source");
 
-    public static IEnumerable? GetSource(DependencyObject d) => (IEnumerable?)d.GetValue(SourceProperty);
-    public static void SetSource(DependencyObject d, IEnumerable? value) => d.SetValue(SourceProperty, value);
+    public static IEnumerable? GetSource(TextBox e) => e.GetValue(SourceProperty);
+    public static void SetSource(TextBox e, IEnumerable? v) => e.SetValue(SourceProperty, v);
 
     // Giữ handler theo từng TextBox để gỡ đăng ký khi đổi nguồn (tránh rò + nối nhầm log của VM cũ).
-    private static readonly DependencyProperty HandlerProperty = DependencyProperty.RegisterAttached(
-        "Handler", typeof(NotifyCollectionChangedEventHandler), typeof(LogText), new PropertyMetadata(null));
+    private static readonly AttachedProperty<NotifyCollectionChangedEventHandler?> HandlerProperty =
+        AvaloniaProperty.RegisterAttached<LogText, TextBox, NotifyCollectionChangedEventHandler?>("Handler");
 
-    private static void OnSourceChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    static LogText()
     {
-        if (d is not TextBox box)
-            return;
+        SourceProperty.Changed.AddClassHandler<TextBox>(OnSourceChanged);
+    }
 
+    private static void OnSourceChanged(TextBox box, AvaloniaPropertyChangedEventArgs e)
+    {
         if (e.OldValue is INotifyCollectionChanged oldNotify &&
-            box.GetValue(HandlerProperty) is NotifyCollectionChangedEventHandler oldHandler)
+            box.GetValue(HandlerProperty) is { } oldHandler)
             oldNotify.CollectionChanged -= oldHandler;
 
-        box.Clear();
-
-        if (e.NewValue is not IEnumerable items)
-        {
-            box.SetValue(HandlerProperty, null);
-            return;
-        }
-
-        // Hiển thị lại các dòng đã có (vd quay lại module sau khi đã chạy).
-        foreach (var line in items)
-            box.AppendText(line + "\n");
-        box.ScrollToEnd();
+        var items = e.NewValue as IEnumerable;
+        Rebuild(box, items);
 
         if (e.NewValue is INotifyCollectionChanged notify)
         {
-            void Handler(object? _, NotifyCollectionChangedEventArgs args)
-            {
-                if (args.Action == NotifyCollectionChangedAction.Reset)
-                {
-                    box.Clear();
-                    return;
-                }
-                if (args.NewItems is null)
-                    return;
-                foreach (var item in args.NewItems)
-                    box.AppendText(item + "\n");
-                box.ScrollToEnd();
-            }
+            // Nguồn giờ là LogBuffer CÓ TRẦN (tự cắt dòng đầu khi vượt trần) → mỗi lần đổi cứ dựng lại TOÀN BỘ
+            // text từ tập hiện tại. Vì tập ≤ trần (500 dòng) nên rẻ, và xử lý ĐÚNG cả khi cắt-đầu (Remove) —
+            // trước đây chỉ nối thêm khi Add, bỏ qua Remove → text vẫn phình vô hạn dù collection đã cắt.
+            void Handler(object? _, NotifyCollectionChangedEventArgs args) => Rebuild(box, items);
 
             box.SetValue(HandlerProperty, (NotifyCollectionChangedEventHandler)Handler);
             notify.CollectionChanged += Handler;
         }
+        else
+        {
+            box.SetValue(HandlerProperty, null);
+        }
+    }
+
+    private static void Rebuild(TextBox box, IEnumerable? items)
+    {
+        var sb = new StringBuilder();
+        if (items is not null)
+            foreach (var line in items) sb.Append(line).Append('\n');
+        SetText(box, sb.ToString());
+    }
+
+    private static void SetText(TextBox box, string text)
+    {
+        box.Text = text;
+        box.CaretIndex = text.Length;   // đưa con trỏ về cuối → TextBox tự cuộn xuống
     }
 }

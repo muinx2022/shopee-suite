@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <base href="/" />
+    <title>Shopee Hub</title>
+    <script>
+        (function () { try { if (localStorage.getItem('theme') === 'dark') document.documentElement.classList.add('dark'); } catch (e) { } })();
+        window.toggleTheme = function () {
+            var d = document.documentElement.classList.toggle('dark');
+            try { localStorage.setItem('theme', d ? 'dark' : 'light'); } catch (e) { }
+        };
+    </script>
+    <link rel="stylesheet" href="app.css?v=12" />
+    <HeadOutlet @rendermode="RenderMode.InteractiveServer" />
+</head>
+<body>
+    <Routes @rendermode="RenderMode.InteractiveServer" />
+    <script src="_framework/blazor.web.js"></script>
+</body>
+</html>

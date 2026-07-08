@@ -7,11 +7,15 @@ internal sealed class CookieService(CdpClient cdpClient)
 {
     public async Task<List<Dictionary<string, object?>>> GetShopeeAndBigSellerCookiesAsync()
     {
-        var wsUrl = await cdpClient.GetPageWebSocketUrlAsync().ConfigureAwait(false);
+        // Đọc ở cấp BROWSER (Storage.getCookies) — trả TOÀN BỘ cookie store, KHÔNG phụ thuộc tab
+        // đang mở. Trước đây đọc page-level (Network.getAllCookies) lúc tab còn about:blank/newtab
+        // → không thấy cookie .shopee.vn/.bigseller lúc nào cũng "rỗng" → tưởng chưa đăng nhập →
+        // import token chết từ file đè token sống → login lại + captcha mỗi lần chạy.
+        var wsUrl = await cdpClient.GetBrowserWebSocketUrlAsync().ConfigureAwait(false);
         using var socket = new ClientWebSocket();
         await socket.ConnectAsync(new Uri(wsUrl), CancellationToken.None);
 
-        var result = await CdpClient.SendAsync(socket, 1, "Network.getAllCookies", null).ConfigureAwait(false);
+        var result = await CdpClient.SendAsync(socket, 1, "Storage.getCookies", null).ConfigureAwait(false);
         if (!result.TryGetProperty("cookies", out var cookiesEl) || cookiesEl.ValueKind != JsonValueKind.Array)
             return [];
 
@@ -38,20 +42,5 @@ internal sealed class CookieService(CdpClient cdpClient)
             list.Add(map);
         }
         return list;
-    }
-
-    public async Task<int> CountDomainCookiesAsync(string domainPart)
-    {
-        try
-        {
-            var cookies = await GetShopeeAndBigSellerCookiesAsync().ConfigureAwait(false);
-            return cookies.Count(c =>
-                c.TryGetValue("domain", out var domain) &&
-                (domain?.ToString() ?? "").Contains(domainPart, StringComparison.OrdinalIgnoreCase));
-        }
-        catch
-        {
-            return 0;
-        }
     }
 }

@@ -1,0 +1,71 @@
+@page "/logs-view"
+@attribute [Authorize(Policy = "Web")]
+@implements IDisposable
+@inject HubDatabase Db
+
+<div class="logpage">
+    <div class="bar">
+        <label>Máy
+            <select @bind="_machineFilter">
+                <option value="">— tất cả —</option>
+                @foreach (var h in _hosts)
+                {
+                    <option value="@h">@h</option>
+                }
+            </select>
+        </label>
+        <label>Mức
+            <select @bind="_levelFilter">
+                <option value="">— tất cả —</option>
+                <option value="info">info</option>
+                <option value="ok">ok</option>
+                <option value="warn">warn</option>
+                <option value="error">error</option>
+            </select>
+        </label>
+        <button class="btn danger" @onclick="Clear">🗑 Xoá log</button>
+        <span class="stat">@_logs.Count dòng</span>
+    </div>
+
+    <div class="logbox">
+        @foreach (var e in Filtered())
+        {
+            <div class="logline @e.Level">
+                <span class="t">@e.Ts.LocalDateTime.ToString("HH:mm:ss")</span>
+                <span class="h">@e.Hostname</span>
+                <span class="lv @e.Level">@e.Level</span>
+                <span class="tx">@e.Text</span>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    private List<LogEntry> _logs = new();
+    private List<string> _hosts = new();
+    private string _machineFilter = "";
+    private string _levelFilter = "";
+    private Timer? _timer;
+
+    protected override void OnInitialized()
+    {
+        Load();
+        _timer = new Timer(_ => InvokeAsync(() => { Load(); StateHasChanged(); }), null,
+            TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2));
+    }
+
+    private void Load()
+    {
+        _logs = Db.GetLogs(0, 500);
+        _hosts = _logs.Select(l => l.Hostname).Where(h => !string.IsNullOrEmpty(h)).Distinct().OrderBy(x => x).ToList();
+    }
+
+    private IEnumerable<LogEntry> Filtered() => _logs
+        .Where(l => string.IsNullOrEmpty(_machineFilter) || l.Hostname == _machineFilter)
+        .Where(l => string.IsNullOrEmpty(_levelFilter) || l.Level == _levelFilter)
+        .OrderByDescending(l => l.Id);
+
+    private void Clear() { Db.ClearLogs(); Load(); }
+
+    public void Dispose() => _timer?.Dispose();
+}

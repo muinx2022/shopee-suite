@@ -1,0 +1,144 @@
+<UserControl
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    x:Class="Shopee.Suite.Modules.Fleet.FleetView">
+    <Grid Margin="28,22,28,24" RowDefinitions="Auto,*">
+
+        <!-- Header -->
+        <Grid Grid.Row="0" Margin="0,0,0,12">
+            <StackPanel>
+                <TextBlock Text="Trạng thái &amp; Giao việc" Classes="h1" />
+                <TextBlock Text="Theo dõi máy + Hub giao việc cho từng máy (scrape · import · update theo dây chuyền)."
+                           Classes="caption" Margin="0,3,0,0" />
+            </StackPanel>
+            <Button HorizontalAlignment="Right" VerticalAlignment="Center" MinWidth="110"
+                    Content="⟳  Làm mới" Command="{Binding RefreshCommand}" />
+        </Grid>
+
+        <TabControl Grid.Row="1" Background="Transparent" BorderThickness="0">
+
+            <!-- ════════════ TAB 1: THEO DÕI ════════════ -->
+            <TabItem Header="Theo dõi">
+                <Grid Margin="0,12,0,0" RowDefinitions="Auto,*">
+                    <Border Grid.Row="0" Background="{DynamicResource SubtleBrush}" CornerRadius="8" Padding="12,8" Margin="0,0,0,12">
+                        <StackPanel>
+                            <TextBlock Text="{Binding Machines}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                            <TextBlock Text="{Binding Status}" Classes="caption" Margin="0,4,0,8" />
+                            <CheckBox Content="⚠ Chạy đè: bỏ qua khoá của máy khác ở các lượt chạy tới (chỉ bật khi chắc máy kia đã dừng)"
+                                      IsChecked="{Binding ForceNextRun}" Foreground="{DynamicResource TextSecondaryBrush}" />
+                        </StackPanel>
+                    </Border>
+                    <Border Grid.Row="1" Classes="card" ClipToBounds="True">
+                        <DataGrid ItemsSource="{Binding Rows}" AutoGenerateColumns="False" IsReadOnly="True"
+                                  GridLinesVisibility="Horizontal">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Máy" Binding="{Binding MachineName}" Width="170" />
+                                <DataGridTextColumn Header="Tài khoản" Binding="{Binding AccountLabel}" Width="*" />
+                                <DataGridTextColumn Header="Shop" Binding="{Binding ShopName}" Width="*" />
+                                <DataGridTextColumn Header="Việc" Binding="{Binding Op}" Width="100" />
+                                <DataGridTextColumn Header="Trạng thái" Binding="{Binding State}" Width="140" />
+                                <DataGridTextColumn Header="Cập nhật" Binding="{Binding Updated}" Width="120" />
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </Border>
+                </Grid>
+            </TabItem>
+
+            <!-- ════════════ TAB 2: GIAO VIỆC (chỉ phần CLIENT) ════════════ -->
+            <TabItem Header="Giao việc">
+                <Grid Margin="0,12,0,0">
+
+                    <!-- ───── Bản CLIENT: việc của máy này ───── -->
+                    <Grid IsVisible="{Binding IsClientPanel}" RowDefinitions="Auto,*,Auto">
+                        <Border Grid.Row="0" Background="{DynamicResource SubtleBrush}" CornerRadius="8" Padding="12,10" Margin="0,0,0,10">
+                            <Grid>
+                                <StackPanel VerticalAlignment="Center">
+                                    <TextBlock Text="{Binding ReceiveStateText}" FontWeight="SemiBold" FontSize="13.5" />
+                                    <TextBlock Classes="caption" Margin="0,3,0,0" TextWrapping="Wrap">
+                                        <Run Text="Vai trò Hub đặt: " /><Run Text="{Binding MyRole}" FontWeight="SemiBold" /><Run Text="   ·   Việc &quot;Giao tay&quot; (ghim) thì máy chạy dù chưa có vai trò." />
+                                    </TextBlock>
+                                </StackPanel>
+                                <Button HorizontalAlignment="Right" VerticalAlignment="Center" MinWidth="180" Margin="12,0,0,0"
+                                        Content="{Binding ReceiveToggleText}" Command="{Binding ToggleReceiveCommand}"
+                                        Classes="primary"
+                                        ToolTip.Tip="Bật/tắt nhận việc Hub giao. Đang nhận = máy tự chạy khi có việc." />
+                            </Grid>
+                        </Border>
+                        <Border Grid.Row="1" Classes="card" ClipToBounds="True">
+                            <DataGrid ItemsSource="{Binding MyJobs}" AutoGenerateColumns="False" IsReadOnly="True"
+                                      GridLinesVisibility="Horizontal">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="Việc" Binding="{Binding Op}" Width="110" />
+                                    <DataGridTextColumn Header="Tài khoản" Binding="{Binding AccountLabel}" Width="*" />
+                                    <DataGridTextColumn Header="Shop" Binding="{Binding ShopName}" Width="*" />
+                                    <DataGridTextColumn Header="Dòng (Hub giao)" Binding="{Binding Rows}" Width="120" />
+                                    <DataGridTemplateColumn Header="Trạng thái" Width="150">
+                                        <DataGridTemplateColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <TextBlock Text="{Binding StateText}" Foreground="{Binding StateBrush}" FontWeight="SemiBold"
+                                                           VerticalAlignment="Center" Margin="8,0,0,0" />
+                                            </DataTemplate>
+                                        </DataGridTemplateColumn.CellTemplate>
+                                    </DataGridTemplateColumn>
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </Border>
+                        <TextBlock Grid.Row="2" Margin="2,8,0,0" Classes="caption" TextWrapping="Wrap"
+                                   Text="Mẹo: muốn máy này dừng nhận việc mới (để chạy tay) thì bấm nút ở trên cùng." />
+                    </Grid>
+
+                    <!-- ───── Chưa bật đồng bộ ───── -->
+                    <TextBlock IsVisible="{Binding IsCoordOff}"
+                               Margin="0,48,0,0" HorizontalAlignment="Center" TextAlignment="Center"
+                               Foreground="{DynamicResource TextSecondaryBrush}" TextWrapping="Wrap"
+                               Text="Chưa bật đồng bộ Hub trên máy này.&#x0a;Vào Cài đặt → Đồng bộ nhiều máy để chọn vai trò Client hoặc bật Hub." />
+                </Grid>
+            </TabItem>
+
+            <!-- ════════════ TAB 3: SEARCH (ĐA MÁY) — chỉ thông báo phía CLIENT ════════════ -->
+            <TabItem Header="Search (đa máy)">
+                <Grid Margin="0,12,0,0">
+
+                    <!-- ───── Bản CLIENT: việc search xem ở tab Giao việc ───── -->
+                    <TextBlock IsVisible="{Binding IsClientPanel}"
+                               Margin="0,48,0,0" HorizontalAlignment="Center" TextAlignment="Center"
+                               Foreground="{DynamicResource TextSecondaryBrush}" TextWrapping="Wrap"
+                               Text="Bảng chia link Search chỉ hiển thị trên máy Hub.&#x0a;Việc Search mà Hub giao cho máy này sẽ chạy tự động và hiện ở tab “Giao việc” (mục Việc của máy này)." />
+
+                    <!-- ───── Chưa bật đồng bộ ───── -->
+                    <TextBlock IsVisible="{Binding IsCoordOff}"
+                               Margin="0,48,0,0" HorizontalAlignment="Center" TextAlignment="Center"
+                               Foreground="{DynamicResource TextSecondaryBrush}" TextWrapping="Wrap"
+                               Text="Chưa bật đồng bộ Hub trên máy này.&#x0a;Vào Cài đặt → Đồng bộ nhiều máy để bật Hub." />
+                </Grid>
+            </TabItem>
+
+            <!-- ══════════ TAB LOG (nhật ký nhiều máy gửi về Hub) ══════════ -->
+            <TabItem Header="Log">
+                <Grid Margin="0,10,0,0" RowDefinitions="Auto,*">
+                    <DockPanel Grid.Row="0" Margin="0,0,0,8">
+                        <Button DockPanel.Dock="Right" Content="🗑  Xoá log" Command="{Binding ClearLogsCommand}"
+                                Classes="danger" />
+                        <TextBlock VerticalAlignment="Center" Classes="caption"
+                                   Text="Nhật ký từ tất cả các máy (client gửi về Hub) — mới nhất ở trên." />
+                    </DockPanel>
+                    <DataGrid Grid.Row="1" ItemsSource="{Binding Logs}" AutoGenerateColumns="False" IsReadOnly="True"
+                              GridLinesVisibility="Horizontal" Background="Transparent" BorderThickness="0">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Thời gian" Binding="{Binding Time}" Width="90" />
+                            <DataGridTextColumn Header="Máy" Binding="{Binding Machine}" Width="150" />
+                            <DataGridTemplateColumn Header="Nội dung" Width="*">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding Text}" Foreground="{Binding Brush}"
+                                                   FontWeight="SemiBold" TextWrapping="Wrap" Margin="8,2,8,2" />
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </Grid>
+            </TabItem>
+        </TabControl>
+    </Grid>
+</UserControl>

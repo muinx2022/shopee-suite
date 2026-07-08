@@ -18,9 +18,12 @@ public static class BigSellerLoginRunner
     /// Chạy toàn bộ luồng đăng nhập: mở Brave → chờ login → lưu cookie. Trả về true nếu lấy được
     /// cookie. Hủy qua <paramref name="ct"/> (nút Dừng). Tự đóng Brave khi xong.
     /// </summary>
+    /// <param name="tryAutoLogin">Khi phát hiện CHƯA đăng nhập: hàm tự-đăng-nhập (điền form + giải captcha) chạy
+    /// TRONG Brave này (nhận cdpPort). Trả true nếu thành công (vòng poll sẽ lưu cookie). null = đợi đăng nhập TAY
+    /// như cũ. Truyền từ Suite để Core khỏi phụ thuộc Playwright.</param>
     public static async Task<bool> RunLoginAsync(
         string cookieFile, string profileDir, Action<string> log, CancellationToken ct, Action? onSaved = null,
-        string? proxyServer = null)
+        string? proxyServer = null, Func<int, CancellationToken, Task<bool>>? tryAutoLogin = null)
     {
         if (string.IsNullOrWhiteSpace(cookieFile))
         {
@@ -113,6 +116,22 @@ public static class BigSellerLoginRunner
                     log("Chưa có phiên sống — hãy đăng nhập BigSeller để lưu token mới (đảm bảo còn sống).");
                 }
                 catch { }
+
+                // CHƯA đăng nhập → TỰ đăng nhập nếu Suite có cung cấp (điền email/mật khẩu + giải captcha AI).
+                // Thành công → vòng poll bên dưới bắt được cookie & lưu. Thất bại/NeedsOtp → rơi về đăng nhập TAY.
+                if (tryAutoLogin is not null)
+                {
+                    log("Đang thử TỰ đăng nhập BigSeller (điền tài khoản + giải captcha)…");
+                    try
+                    {
+                        if (await tryAutoLogin(port, ct))
+                            log("✔ Tự đăng nhập được — đang chờ lưu cookie…");
+                        else
+                            log("Tự đăng nhập chưa xong — hãy đăng nhập TAY trong cửa sổ Brave.");
+                    }
+                    catch (OperationCanceledException) { throw; }
+                    catch (Exception ex) { log("Tự đăng nhập lỗi: " + ex.Message + " — hãy đăng nhập tay."); }
+                }
             }
 
             log("Đăng nhập BigSeller trong cửa sổ Brave. Cookie sẽ tự lưu khi phát hiện đăng nhập.");
@@ -330,7 +349,7 @@ public static class BigSellerLoginRunner
     /// <c>"www.bigseller.com,*"</c>, <c>setting=2</c>). Nhờ vậy tracker (_ga/_fbp/_tt…) KHÔNG bị chặn →
     /// đăng nhập lưu được bộ cookie đầy đủ. Best-effort: lỗi gì cũng bỏ qua (không chặn login).
     /// </summary>
-    private static void EnsureBraveShieldsDown(string profileDir)
+    public static void EnsureBraveShieldsDown(string profileDir)
     {
         try
         {
@@ -416,28 +435,8 @@ public static class BigSellerLoginRunner
             c.TryGetProperty("name", out var n) && n.GetString() == AuthCookieName &&
             c.TryGetProperty("value", out var v) && (v.GetString()?.Length ?? 0) > 5);
 
+    // Ghi file cookie qua engine chung (atomic tmp+move, có retry) — file này bị Hub sync + importer đọc
+    // đồng thời trong lúc login đang poll & ghi lặp; ghi trực tiếp trước đây gây torn-read cookie hỏng đa máy.
     private static bool TryWriteCookieFile(string cookieFile, IReadOnlyCollection<JsonElement> cookies, Action<string> log)
-    {
-        try
-        {
-            using var stream = new MemoryStream();
-            using (var writer = new Utf8JsonWriter(stream, new JsonWriterOptions { Indented = true }))
-            {
-                writer.WriteStartObject();
-                writer.WriteString("exportedAt", DateTimeOffset.UtcNow.ToString("o"));
-                writer.WritePropertyName("cookies");
-                writer.WriteStartArray();
-                foreach (var c in cookies) c.WriteTo(writer);
-                writer.WriteEndArray();
-                writer.WriteEndObject();
-            }
-            File.WriteAllBytes(cookieFile, stream.ToArray());
-            return true;
-        }
-        catch (Exception ex)
-        {
-            log("  (không ghi được file cookie: " + ex.Message + ")");
-            return false;
-        }
-    }
+        => BigSellerCookieEngine.TryWriteCookieFile(cookieFile, cookies, log);
 }
