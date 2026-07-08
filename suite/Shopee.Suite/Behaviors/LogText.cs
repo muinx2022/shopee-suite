@@ -35,21 +35,15 @@ public class LogText : AvaloniaObject
             box.GetValue(HandlerProperty) is { } oldHandler)
             oldNotify.CollectionChanged -= oldHandler;
 
-        var sb = new StringBuilder();
-        if (e.NewValue is IEnumerable items)
-            foreach (var line in items) sb.Append(line).Append('\n');
-        SetText(box, sb.ToString());
+        var items = e.NewValue as IEnumerable;
+        Rebuild(box, items);
 
         if (e.NewValue is INotifyCollectionChanged notify)
         {
-            void Handler(object? _, NotifyCollectionChangedEventArgs args)
-            {
-                if (args.Action == NotifyCollectionChangedAction.Reset) { SetText(box, ""); return; }
-                if (args.NewItems is null) return;
-                var b = new StringBuilder(box.Text ?? "");
-                foreach (var item in args.NewItems) b.Append(item).Append('\n');
-                SetText(box, b.ToString());
-            }
+            // Nguồn giờ là LogBuffer CÓ TRẦN (tự cắt dòng đầu khi vượt trần) → mỗi lần đổi cứ dựng lại TOÀN BỘ
+            // text từ tập hiện tại. Vì tập ≤ trần (500 dòng) nên rẻ, và xử lý ĐÚNG cả khi cắt-đầu (Remove) —
+            // trước đây chỉ nối thêm khi Add, bỏ qua Remove → text vẫn phình vô hạn dù collection đã cắt.
+            void Handler(object? _, NotifyCollectionChangedEventArgs args) => Rebuild(box, items);
 
             box.SetValue(HandlerProperty, (NotifyCollectionChangedEventHandler)Handler);
             notify.CollectionChanged += Handler;
@@ -58,6 +52,14 @@ public class LogText : AvaloniaObject
         {
             box.SetValue(HandlerProperty, null);
         }
+    }
+
+    private static void Rebuild(TextBox box, IEnumerable? items)
+    {
+        var sb = new StringBuilder();
+        if (items is not null)
+            foreach (var line in items) sb.Append(line).Append('\n');
+        SetText(box, sb.ToString());
     }
 
     private static void SetText(TextBox box, string text)

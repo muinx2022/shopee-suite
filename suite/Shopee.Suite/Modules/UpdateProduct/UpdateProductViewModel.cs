@@ -24,7 +24,8 @@ public sealed partial class UpdateProductViewModel : ObservableObject
 {
     /// <summary>Mỗi tài khoản BigSeller là 1 "đích chạy" (tick chọn + chọn shop) — chạy được nhiều tk song song.</summary>
     public ObservableCollection<UpdateRunTargetViewModel> RunTargets { get; } = [];
-    public ObservableCollection<string> LogLines { get; } = [];
+    /// <summary>Nhật ký update: giữ 500 dòng cuối trên UI (khỏi đơ) + ghi ĐẦY ĐỦ ra logs\workspace-update.log.</summary>
+    public LogBuffer LogLines { get; } = new("workspace-update.log");
 
     // Ảnh/Video DÙNG CHUNG cho mọi tk; từ-dòng/đến-dòng/worker là RIÊNG từng tk (xem UpdateRunTargetViewModel).
     // Điền sẵn mặc định để khỏi gõ lại mỗi lần mở app (vẫn sửa được trong cấu hình update).
@@ -250,6 +251,9 @@ public sealed partial class UpdateProductViewModel : ObservableObject
             var ctx = BuildContext(t, ai, startRow, endRow, importFromClaimedTab, kind == UpdateKind.Update ? img : null);
             var runner = new UpdateProductRunner();
             runner.Log += m => Log($"{prefix} {m}");
+            // Mỗi dòng import/update/rewrite xong → đẩy lên ledger Hub (khoảng dòng) cho Thống kê "shop này đã làm
+            // những dòng nào". Fire-and-forget, no-op khi Hub tắt (chạy 1 máy).
+            runner.RowsCompleted += (from, to) => Coordination.Hub.PublishProgress(coordKey, from, to);
             job.Runner = runner;
             Log($"▶ {name} — {prefix} (chạy song song).");
             await action(runner, ctx, job.Cts.Token).ConfigureAwait(false);
@@ -449,6 +453,10 @@ public sealed partial class UpdateProductViewModel : ObservableObject
             foreach (var r in _runners) { try { r.Stop(); } catch { } }
         Status = "Đang dừng…";
     }
+
+    /// <summary>Mở file log ĐẦY ĐỦ (UI chỉ giữ 500 dòng cuối) — logs\workspace-update.log.</summary>
+    [RelayCommand]
+    private void OpenLogFile() => ShellOpener.RevealFile(LogLines.FilePath);
 
     private void Log(string text) => UiThread.Post(() => LogLines.Add(text));
 

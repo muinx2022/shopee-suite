@@ -20,6 +20,10 @@ internal sealed class ProductNameRewriteRunner
     private CancellationTokenSource? _cts;
     private Task? _task;
 
+    /// <summary>Bắn (rowIndex, rowIndex) mỗi dòng vừa GHI XONG tên mới vào workbook (sau khi Save batch) →
+    /// caller đẩy lên ledger Hub để Thống kê biết "shop này đã rewrite những dòng nào".</summary>
+    public event Action<int, int>? RowsDone;
+
     public bool IsRunning
     {
         get { lock (_gate) return _task is { IsCompleted: false }; }
@@ -81,7 +85,7 @@ internal sealed class ProductNameRewriteRunner
         }
     }
 
-    private static async Task RunAsync(BigSellerWorkflowSettings settings, Action<string> log, CancellationToken ct)
+    private async Task RunAsync(BigSellerWorkflowSettings settings, Action<string> log, CancellationToken ct)
     {
         var workbookPath = settings.WorkbookPath?.Trim();
         var sheetName = settings.DataSheet?.Trim();
@@ -158,6 +162,7 @@ internal sealed class ProductNameRewriteRunner
             var batchUpdated = 0;
             var batchLogged = 0;
             const int MaxLogPerBatch = 20;
+            var changedRows = new List<int>();
             using (await WorkbookFileLockHandle.AcquireAsync(workbookPath, ct))
             {
                 ct.ThrowIfCancellationRequested();
@@ -175,6 +180,7 @@ internal sealed class ProductNameRewriteRunner
                         cell.Value = rewrittenName;
                         updatedCount++;
                         batchUpdated++;
+                        changedRows.Add(rowNumber);
 
                         if (batchLogged < MaxLogPerBatch)
                         {
@@ -188,6 +194,9 @@ internal sealed class ProductNameRewriteRunner
 
                 wb.Save();
             }
+
+            // Đã Save xong batch → báo caller (đẩy ledger) đúng các dòng vừa ghi tên mới.
+            foreach (var rn in changedRows) RowsDone?.Invoke(rn, rn);
 
             log($"💾 Đã save batch {i + 1}-{i + batch.Count}/{plan.UniqueNames.Count}: {batchUpdated} dòng đổi tên.");
             if (batchUpdated > 0)

@@ -227,6 +227,26 @@ html.dark .pill.run { background: rgba(56, 189, 248, .16); color: #56c7f5; }
 .pill.fail { background: var(--danger-bg); color: var(--danger); }
 .cellset { font-size: 11px; padding: 3px 5px; margin-top: 4px; }
 
+/* ── Trang Thống kê (ma trận 1 dòng/shop + panel chi tiết) ── */
+.statspage .bar label { display: flex; align-items: center; gap: 6px; color: var(--body); font-size: 13px; }
+.statspage .bar input[type=text] { padding: 6px 9px; border: 1px solid var(--stroke); border-radius: 8px; background: var(--card); color: var(--text); }
+.statspage .tablewrap { max-height: 52vh; overflow-y: auto; }
+/* dòng nhóm tài khoản (gộp các shop cùng 1 tài khoản) */
+table.grid tr.acctrow td { background: var(--gray); font-weight: 700; color: var(--text); font-size: 12.5px; letter-spacing: 0; text-transform: none; }
+table.grid tr.acctrow .cnt { font-weight: 500; color: var(--body); font-size: 12px; }
+table.grid tr.acctrow:hover td { background: var(--gray); }
+/* ô việc rỗng (chưa có record) */
+.statspage .dash { color: var(--faint); font-weight: 700; }
+/* panel chi tiết */
+.opcards { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; margin-top: 6px; }
+.opcard { background: var(--card); border: 1px solid var(--stroke); border-radius: var(--radius); padding: 12px 14px; }
+.opcard.empty0 { opacity: .6; }
+.opcard .ohead { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.opcard .olabel { font-weight: 700; color: var(--text); font-size: 13.5px; }
+.opcard .n { font-size: 20px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
+.opcard .sub { color: var(--body); font-size: 12px; margin-top: 2px; }
+.opcard .rng { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 12px; color: var(--body); background: var(--gray); border-radius: var(--radius-sm); padding: 6px 8px; margin: 6px 0; word-break: break-word; }
+
 /* ==================== Modal ==================== */
 .modal-overlay { position: fixed; inset: 0; background: rgba(28, 36, 52, .45); backdrop-filter: blur(2px); display: flex; align-items: center; justify-content: center; z-index: 100; }
 .modal { background: var(--card); border-radius: 14px; width: 580px; max-width: 92vw; max-height: 88vh; display: flex; flex-direction: column; box-shadow: var(--shadow-lg); }

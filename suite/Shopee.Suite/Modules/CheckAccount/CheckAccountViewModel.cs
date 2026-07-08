@@ -7,6 +7,7 @@ using Shopee.Core.Accounts;
 using Shopee.Core.Infrastructure;
 using Shopee.Core.Proxy;
 using Shopee.Modules.CheckAccount;
+using Shopee.Suite.Infrastructure;
 using Shopee.Suite.Services;
 
 namespace Shopee.Suite.Modules.CheckAccount;
@@ -32,7 +33,7 @@ public sealed partial class CheckAccountViewModel : ObservableObject
     private ProxyPool? _pool;
     private CancellationTokenSource? _cts;
 
-    public ObservableCollection<string> LogLines { get; } = [];
+    public LogBuffer LogLines { get; } = new("check-account.log");
     public ObservableCollection<OkAccountRow> OkAccounts { get; } = [];
 
     [ObservableProperty] private string _accounts = "";

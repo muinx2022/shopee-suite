@@ -305,6 +305,11 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
     private Process? _braveProcess;
 
     private IReadOnlyDictionary<string, WorkbookRecord> _records = new Dictionary<string, WorkbookRecord>();
+
+    /// <summary>Bắn (rowIndex, rowIndex) mỗi khi 1 dòng sheet vừa UPDATE XONG (lưu thật, result="ok") →
+    /// caller đẩy lên ledger Hub để Thống kê biết "shop này đã update những dòng nào".</summary>
+    public event Action<int, int>? RowsDone;
+
     // SP đã xử lý / bỏ qua (gồm cả "không có trong sheet") → đánh dấu để vòng quét sau KHÔNG mở/không xử lý lại.
     // KHÔNG còn xóa dòng nào trên BigSeller → "skip" là cách duy nhất để tiến tới dòng kế.
     private readonly HashSet<string> _skippedRowKeys = new();
@@ -1082,6 +1087,7 @@ internal sealed class BigSellerProductUpdateRunner : IAsyncDisposable
             if (!string.IsNullOrEmpty(rowKey)) _skippedRowKeys.Add(rowKey);
             _log($"✅ HOÀN TẤT XỬ LÝ SKU: {record!.Sku}");
             await OverlayAsync($"✅ Hoàn tất SKU {record!.Sku}");
+            if (record!.LineIndex > 0) RowsDone?.Invoke(record.LineIndex, record.LineIndex);   // báo ledger đúng dòng đã update
             keepClaim = true; return ("ok", false);
         }
         catch (OperationCanceledException) { throw; }

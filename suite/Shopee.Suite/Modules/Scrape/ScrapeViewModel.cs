@@ -29,7 +29,8 @@ public sealed partial class ScrapeViewModel : ObservableObject
     public ObservableCollection<ScrapeTargetViewModel> ScrapeTargets { get; } = [];
     public ObservableCollection<ScrapeInstanceViewModel> Instances { get; } = [];
     public ObservableCollection<ErroredAccountRow> ErroredAccounts { get; } = [];
-    public ObservableCollection<string> LogLines { get; } = [];
+    /// <summary>Nhật ký scrape: giữ 500 dòng cuối trên UI (khỏi đơ) + ghi ĐẦY ĐỦ ra logs\workspace-scrape.log.</summary>
+    public LogBuffer LogLines { get; } = new("workspace-scrape.log");
 
     [ObservableProperty] private string _videoDir = @"D:\videos";
     [ObservableProperty] private string _status = "Sẵn sàng.";
@@ -701,6 +702,10 @@ public sealed partial class ScrapeViewModel : ObservableObject
         await WindowHost.ShowDialogAsync(new ScrapeStatsWindow(vm));
         sel.RefreshProgress();   // có thể đã nhả tay / xoá tiến độ → cập nhật nhãn.
     }
+
+    /// <summary>Mở file log ĐẦY ĐỦ (UI chỉ giữ 500 dòng cuối) — logs\workspace-scrape.log.</summary>
+    [RelayCommand]
+    private void OpenLogFile() => ShellOpener.RevealFile(LogLines.FilePath);
 
     /// <summary>Proxy lấy XOAY VÒNG từ kho KiotProxy dùng chung (ghi đè proxy gắn sẵn của acc); kho rỗng →
     /// giữ proxy của acc (fallback).</summary>

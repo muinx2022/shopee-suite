@@ -28,6 +28,10 @@ public sealed class UpdateProductRunner
 {
     public event Action<string>? Log;
 
+    /// <summary>Bắn (rowIndex, rowIndex) mỗi dòng sheet vừa xử lý xong (import/update/rewrite) → caller đẩy lên
+    /// ledger Hub cho Thống kê. Gom từ 3 runner con.</summary>
+    public event Action<int, int>? RowsCompleted;
+
     private ProductNameRewriteRunner? _nameRunner;
     private readonly WorkflowPauseToken _pause = new();
 
@@ -95,6 +99,7 @@ public sealed class UpdateProductRunner
         var wf = BuildWorkflow(ctx);
         var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var runner = new ProductNameRewriteRunner();
+        runner.RowsDone += (f, t) => RowsCompleted?.Invoke(f, t);
         _nameRunner = runner;
         runner.Start(wf, m => Log?.Invoke(m), () => done.TrySetResult());
         using (ct.Register(() => { try { runner.Stop(m => Log?.Invoke(m)); } catch { } done.TrySetResult(); }))
@@ -110,6 +115,7 @@ public sealed class UpdateProductRunner
         if (n == 1)
         {
             await using var runner = new BigSellerImportToStoreRunner(wf, m => Log?.Invoke(m), _pause, 0, 1);
+            runner.RowsDone += (f, t) => RowsCompleted?.Invoke(f, t);
             await runner.RunAsync(ct);
             return;
         }
@@ -117,6 +123,7 @@ public sealed class UpdateProductRunner
         await RunLanesAsync(wf, n, ct, async (laneWf, lane, count, claim, export, c) =>
         {
             await using var runner = new BigSellerImportToStoreRunner(laneWf, m => Log?.Invoke($"[L{lane}] {m}"), _pause, lane, count, claim, export);
+            runner.RowsDone += (f, t) => RowsCompleted?.Invoke(f, t);
             await runner.RunAsync(c);
         });
     }
@@ -133,6 +140,7 @@ public sealed class UpdateProductRunner
         if (n == 1)
         {
             await using var runner = new BigSellerProductUpdateRunner(wf, m => Log?.Invoke(m), _pause, sharedRecords: records);
+            runner.RowsDone += (f, t) => RowsCompleted?.Invoke(f, t);
             await runner.RunAsync(ct);
             return;
         }
@@ -140,6 +148,7 @@ public sealed class UpdateProductRunner
         await RunLanesAsync(wf, n, ct, async (laneWf, lane, count, claim, export, c) =>
         {
             await using var runner = new BigSellerProductUpdateRunner(laneWf, m => Log?.Invoke($"[L{lane}] {m}"), _pause, claim, export, records);
+            runner.RowsDone += (f, t) => RowsCompleted?.Invoke(f, t);
             await runner.RunAsync(c);
         });
     }

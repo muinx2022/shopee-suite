@@ -1,0 +1,5 @@
+{
+  "Endpoint": "https://eus.codesigning.azure.net/",
+  "CodeSigningAccountName": "ten-tai-khoan-trusted-signing",
+  "CertificateProfileName": "ten-certificate-profile"
+}

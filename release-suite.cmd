@@ -23,7 +23,16 @@ dotnet publish suite\Shopee.Suite\Shopee.Suite.csproj -c Release -r win-x64 --se
 if errorlevel 1 goto :fail
 
 REM 3) Dong goi Velopack: Setup.exe + goi full + goi delta.
-vpk pack --packId ShopeeSuite --packTitle "Shopee Suite" --packAuthors "Shopee Suite" --packVersion %VER% --packDir "%PUB%" --mainExe ShopeeSuite.exe --icon assets\app-icon.ico --channel win --outputDir %OUT%
+REM    KY SO co dieu kien: co signing\trusted-signing.json -> ky qua Azure Trusted Signing (can `az login` truoc).
+REM    Khong co -> pack CHUA KY (may client bat Smart App Control se chan; xem signing\README.md).
+set SIGN=
+if exist "signing\trusted-signing.json" (
+  set SIGN=--azureTrustedSignFile signing\trusted-signing.json
+  echo [ky so] Dung Azure Trusted Signing ^(signing\trusted-signing.json^). Nho da chay `az login`.
+) else (
+  echo [canh bao] CHUA cau hinh ky so ^(signing\trusted-signing.json^) -^> ban CHUA KY. Xem signing\README.md.
+)
+vpk pack --packId ShopeeSuite --packTitle "Shopee Suite" --packAuthors "Shopee Suite" --packVersion %VER% --packDir "%PUB%" --mainExe ShopeeSuite.exe --icon assets\app-icon.ico --channel win --outputDir %OUT% %SIGN%
 if errorlevel 1 goto :fail
 
 REM 4) Day len GitHub Releases neu co GITHUB_TOKEN (quyen ghi repo). Khong co token -> chi dong goi cuc bo.

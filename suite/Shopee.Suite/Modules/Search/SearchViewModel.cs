@@ -34,7 +34,7 @@ public sealed partial class SearchViewModel : ObservableObject
 
     public ObservableCollection<ErroredAccountRow> ErroredAccounts { get; } = [];
     public ObservableCollection<string> Categories { get; } = ["(Tất cả)"];
-    public ObservableCollection<string> LogLines { get; } = [];
+    public LogBuffer LogLines { get; } = new("search.log");
 
     // Tab "Danh mục (AI)"
     public ObservableCollection<SearchTaskStore.CategoryRow> CategoryRows { get; } = [];

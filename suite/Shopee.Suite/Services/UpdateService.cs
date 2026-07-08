@@ -34,7 +34,15 @@ public sealed class UpdateService
     public string Status { get; private set; } = "";
 
     private UpdateService()
-        => _mgr = new UpdateManager(new GithubSource(RepoUrl, accessToken: null, prerelease: false));
+    {
+        // Cửa hậu STAGING/TEST: đặt env SHOPEE_UPDATE_FEED = thư mục hoặc URL chứa bản phát hành →
+        // lấy bản mới từ đó thay vì GitHub. Để thử trọn vòng cập nhật trên máy dev mà KHÔNG phát hành công khai.
+        // Không đặt (prod) → mặc định GitHub Releases (repo public, khỏi token).
+        var feed = Environment.GetEnvironmentVariable("SHOPEE_UPDATE_FEED");
+        _mgr = string.IsNullOrWhiteSpace(feed)
+            ? new UpdateManager(new GithubSource(RepoUrl, accessToken: null, prerelease: false))
+            : new UpdateManager(feed);
+    }
 
     private void Set(string status) { Status = status; Changed?.Invoke(); }
 
