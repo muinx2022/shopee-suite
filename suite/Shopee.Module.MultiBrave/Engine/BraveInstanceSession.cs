@@ -1,7 +1,6 @@
 using System.Diagnostics;
 using System.Net.Http;
 using System.Net.WebSockets;
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Shopee.Core.BigSeller;
@@ -397,7 +396,7 @@ internal sealed class BraveInstanceSession : IDisposable
                         await LauncherRunnerLoop.RunAsync(
                             _cdpPort,
                             profileRoot,
-                            _config,
+                            _config!,   // non-null: ResumeContinueAsync throw nếu _config null trước khi lên Task.Run; ApplyConfig chỉ gán non-null.
                             Log,
                             () => { RefreshRunStatusFromConfig(); ExtensionProgressSynced?.Invoke(); },
                             preferSuggestedResume: proxyAttempt > 0 || preferSuggestedResume,

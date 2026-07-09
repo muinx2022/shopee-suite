@@ -6,7 +6,7 @@ namespace Shopee.Suite.Modules.UpdateProduct;
 
 public partial class ColumnMapWindow : Window
 {
-    private readonly ColumnMapEditViewModel _vm;
+    private readonly ColumnMapEditViewModel _vm = null!;   // ctor rỗng chỉ cho XAML designer; runtime luôn qua ctor(shop) nên _vm non-null khi OnOk/OnCancel.
 
     public ColumnMapWindow() => InitializeComponent();
 

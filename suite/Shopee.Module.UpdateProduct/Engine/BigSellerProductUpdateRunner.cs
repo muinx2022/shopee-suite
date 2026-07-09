@@ -1,13 +1,10 @@
-using System.Diagnostics;
 using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
 using ClosedXML.Excel;
 using Microsoft.Playwright;
-using Shopee.Core.Ai;
 using Shopee.Core.BigSeller;
 using Shopee.Core.Browser;
-using Shopee.Core.Cdp;
 
 namespace UpdateProduct;
 
