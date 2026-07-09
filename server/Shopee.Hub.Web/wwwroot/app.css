@@ -219,6 +219,17 @@ html.dark .pinpanel { background: rgba(60, 80, 224, .10); border-color: rgba(60,
 .wsacct:hover, .wsshop:hover { background: var(--gray); }
 .wsacct.sel, .wsshop.sel { background: var(--info-bg); }
 .wsshop.ghost { opacity: .55; }
+/* Shop ĐANG CHẠY — phải nhìn phát thấy ngay: nền xanh + viền trái đậm + chấm nhấp nháy + badge "chạy".
+   (Trước chỉ có glyph ⏳ nhỏ — user báo khó thấy shop nào đang chạy.) */
+.wsshop.run { background: var(--success-bg); border-left: 3px solid var(--success); padding-left: 15px; font-weight: 700; }
+.wsshop.run:hover { background: var(--success-bg); }
+.wsshop.run.sel { box-shadow: inset 0 0 0 2px var(--success); }
+.rundot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--success); animation: runpulse 1.1s ease-in-out infinite; }
+.runbadge { margin-left: auto; flex-shrink: 0; font-size: 10.5px; font-weight: 700; letter-spacing: .4px; color: #fff; background: var(--success); border-radius: 999px; padding: 1px 8px; }
+@keyframes runpulse {
+    0%, 100% { opacity: 1; box-shadow: 0 0 0 0 color-mix(in srgb, var(--success) 45%, transparent); }
+    50% { opacity: .55; box-shadow: 0 0 0 5px transparent; }
+}
 .wsmain { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; overflow-y: auto; }
 .wsmain h2 { margin-top: 2px; }
 /* Bảng trong panel phải tự cuộn (panel đã cuộn dọc); giới hạn cao để form/thẻ dưới không bị đẩy khuất. */

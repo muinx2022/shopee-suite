@@ -48,8 +48,16 @@
             @foreach (var row in g.Shops)
             {
                 var sel = _selShopKey is { } k && k.AccountId == row.AccountId && k.ShopId == row.ShopId;
-                <div class="wsshop @(sel ? "sel" : "") @(row.InConfig ? "" : "ghost")" title="@GlyphTitle(row)" @onclick="() => SelectShop(row)">
-                    <span class="glyph">@GlyphOf(row)</span> @row.ShopName
+                var run = IsRunningShop(row);
+                <div class="wsshop @(sel ? "sel" : "") @(row.InConfig ? "" : "ghost") @(run ? "run" : "")" title="@GlyphTitle(row)" @onclick="() => SelectShop(row)">
+                    @if (run)
+                    {
+                        <span class="glyph"><span class="rundot"></span></span> @row.ShopName <span class="runbadge">chạy</span>
+                    }
+                    else
+                    {
+                        <span class="glyph">@GlyphOf(row)</span> @row.ShopName
+                    }
                 </div>
             }
         }
@@ -533,6 +541,10 @@
         if (cells.All(c => c.Text.StartsWith("✓"))) return "✓";
         return "·";
     }
+
+    // Shop có op ĐANG CHẠY? → danh sách trái tô nổi hẳn (nền xanh + chấm nhấp nháy + badge "chạy").
+    private bool IsRunningShop(ShopRow r) =>
+        SummaryOps.Any(op => FleetStateService.OpCell(Snap, r.AccountId, r.ShopId, op).Kind == 1);
 
     private string GlyphTitle(ShopRow r) =>
         r.InConfig && string.IsNullOrEmpty(r.Sheet) ? "chưa gán sheet" : "";
