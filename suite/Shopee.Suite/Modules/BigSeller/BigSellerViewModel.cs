@@ -39,8 +39,14 @@ public sealed partial class BigSellerViewModel : ModuleViewModelBase
 
     private CancellationTokenSource? _loginCts;
 
+    // Chiếu kho BigSeller → Items, giữ Selected theo Id (idiom Store.Changed→Reload gom vào ObservableProjection).
+    private readonly ObservableProjection<BigSellerAccount, BigSellerAccountItemViewModel> _projection;
+
     public BigSellerViewModel() : base("bigseller-login.log", "BigSeller")
     {
+        _projection = new ObservableProjection<BigSellerAccount, BigSellerAccountItemViewModel>(
+            Items, () => BigSellerStore.Shared.Accounts, a => new BigSellerAccountItemViewModel(a),
+            i => i.Model.Id, a => a.Id, () => Selected, v => Selected = v);
         Reload();
         // Khôi phục/import (BackupService) cập nhật kho dùng chung rồi bắn Changed → tab này phải nạp lại
         // (trước đây chỉ Reload lúc khởi tạo nên import xong vẫn trống tới khi mở lại app).
@@ -55,19 +61,15 @@ public sealed partial class BigSellerViewModel : ModuleViewModelBase
     /// nên guard trên không bắt được) → trước đây shop mới từ Hub không hiện tới khi khởi động lại app.</summary>
     private void SyncFromStore()
     {
-        var storeIds = BigSellerStore.Shared.Accounts.Select(a => a.Id).ToHashSet();
-        var itemIds = Items.Select(i => i.Model.Id).ToHashSet();
-        if (!storeIds.SetEquals(itemIds)) { Reload(); return; }
+        // Tập acc đổi → rebuild (giữ Selected theo Id); tập y nguyên → fast-path rẻ: chỉ đối chiếu danh sách
+        // SHOP của từng acc (Hub sync có thể thêm/bớt shop trên một acc ĐÃ có → guard tập-acc không bắt được).
+        if (_projection.ReloadIfChanged()) { Status = $"{Items.Count} tài khoản BigSeller."; return; }
         foreach (var item in Items) item.SyncShopsFromModel();   // fast-path rẻ khi tập shop không đổi
     }
 
     private void Reload()
     {
-        var prevId = Selected?.Model.Id;
-        Items.Clear();
-        foreach (var a in BigSellerStore.Shared.Accounts)
-            Items.Add(new BigSellerAccountItemViewModel(a));
-        Selected = Items.FirstOrDefault(i => i.Model.Id == prevId) ?? Items.FirstOrDefault();
+        _projection.Rebuild();
         Status = $"{Items.Count} tài khoản BigSeller.";
     }
 
