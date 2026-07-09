@@ -209,11 +209,43 @@ internal sealed class BigSellerMaterialCenterCleaner
             await mediaPage.GotoAsync(MaterialCenterUrl, new() { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 60000 });
             await mediaPage.BringToFrontAsync();
             _log("📂 Đã mở Material Center");
-            await _delay(3000, ct);
-            await CloseMaterialPopupAsync(mediaPage);
-            await _delay(1000, ct);
+            // Mạng chậm → grid media render TRỄ; trước đây các check 'trống' ăn nhầm trạng thái loading/skeleton →
+            // thoát sớm oan ("hết file để xóa" trong khi kho còn media). Chờ list SẴN SÀNG (action row hiện HOẶC
+            // đếm được item) tối đa 30s, mỗi nhịp đóng popup che; hết giờ vẫn KHÔNG return, chỉ cảnh báo rồi vào vòng.
+            if (!await WaitMaterialListReadyAsync(mediaPage, 30000, ct).ConfigureAwait(false))
+                _log("⚠ Trang Material Center tải chậm/không render sau 30s — vẫn thử tiếp.");
 
             var disabledDeleteCount = 0;
+            var emptyStreak = 0;   // số lần LIÊN TIẾP nghi 'trống' + 0 checkbox item (cần 2 để chốt) — reset khi thấy item.
+
+            // Chống-oan 2 lớp cho MỌI dấu hiệu 'trống' (dùng chung cho cả 3 đường kết luận-trống bên dưới):
+            //  • Lớp 1 — veto theo item: CountItemCheckboxesAsync > 0 nghĩa là list CÒN item (chỉ đang tải/ẩn nút)
+            //    → KHÔNG kết luận trống: log chẩn đoán + chờ rồi retry.
+            //  • Lớp 2 — xác nhận 2 lần: 0 checkbox → tăng emptyStreak; lần đầu reload + chờ sẵn-sàng rút gọn để
+            //    vòng sau soi lại; đủ 2 lần LIÊN TIẾP mới chốt trống. Trả "confirmed" (caller return) / "retry" (continue).
+            async Task<string> HandleSuspectedEmptyAsync(IPage page, string reason)
+            {
+                var count = await CountItemCheckboxesAsync(page).ConfigureAwait(false);
+                if (count > 0)
+                {
+                    emptyStreak = 0;
+                    _log($"⚠ Thấy dấu 'trống' ({reason}) nhưng còn {count} checkbox item — list có thể đang tải, thử lại.");
+                    await _delay(2000, ct);
+                    return "retry";
+                }
+                if (++emptyStreak >= 2)
+                {
+                    _log("✅ Material Center trống (xác nhận 2 lần) — không còn media để xóa.");
+                    return "confirmed";
+                }
+                // Lần đầu nghi trống: mạng chậm có thể khiến grid chưa render → reload + chờ sẵn-sàng rút gọn rồi soi lại.
+                _log($"… Nghi Material Center trống ({reason}) — reload xác nhận lần 2.");
+                try { await page.ReloadAsync(new() { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 30000 }); } catch { }
+                await WaitMaterialListReadyAsync(page, 8000, ct).ConfigureAwait(false);
+                await CloseMaterialPopupAsync(page);
+                return "retry";
+            }
+
             for (var loop = 1; loop <= 50; loop++)   // cap 50 vòng chống lặp vô hạn (parity Python)
             {
                 ct.ThrowIfCancellationRequested();
@@ -221,10 +253,20 @@ internal sealed class BigSellerMaterialCenterCleaner
                 {
                     await CloseMaterialPopupAsync(mediaPage);
 
-                    if (await IsMaterialEmptyAsync(mediaPage)) { _log("✅ Material Center trống — không còn media để xóa."); return; }
+                    // Đường (1): selector 'trống' xuất hiện → qua chống-oan 2 lớp (không return thẳng như trước).
+                    if (await IsMaterialEmptyAsync(mediaPage))
+                    {
+                        if ((await HandleSuspectedEmptyAsync(mediaPage, "selector 'trống' xuất hiện")) == "confirmed") return;
+                        continue;
+                    }
 
                     var selectResult = await EnsureMaterialSelectAllAsync(mediaPage, ct).ConfigureAwait(false);
-                    if (selectResult == "empty") return;
+                    // Đường (2): click 'Chọn tất cả' không tick được → CHỈ nghi trống khi 0 checkbox (qua chống-oan 2 lớp).
+                    if (selectResult == "empty")
+                    {
+                        if ((await HandleSuspectedEmptyAsync(mediaPage, "click 'Chọn tất cả' không tick được")) == "confirmed") return;
+                        continue;
+                    }
                     if (selectResult == "missing")
                     {
                         await CloseMaterialPopupAsync(mediaPage);
@@ -235,12 +277,23 @@ internal sealed class BigSellerMaterialCenterCleaner
                     var deleteBtn = await WaitMaterialDeleteEnabledAsync(mediaPage, 8000).ConfigureAwait(false);
                     if (deleteBtn is null)
                     {
-                        if (await IsMaterialEmptyAsync(mediaPage)) { _log("✅ Material Center trống — không còn media để xóa."); return; }
-                        if (++disabledDeleteCount >= 3) { _log("✅ Nút xóa vẫn disabled sau nhiều lần chọn tất cả → coi như đã hết media."); return; }
+                        // Đường (3): nút xóa disabled → có thể list rỗng THẬT hoặc đang tải (chưa có item để bật nút).
+                        if (await IsMaterialEmptyAsync(mediaPage))
+                        {
+                            if ((await HandleSuspectedEmptyAsync(mediaPage, "nút xóa disabled + có dấu 'trống'")) == "confirmed") return;
+                            continue;
+                        }
+                        if (++disabledDeleteCount >= 3)
+                        {
+                            if ((await HandleSuspectedEmptyAsync(mediaPage, "nút xóa disabled ≥3 lần")) == "confirmed") return;
+                            disabledDeleteCount = 0;   // chưa chốt trống (còn item) → đếm lại chuỗi disabled
+                            continue;
+                        }
                         await _delay(2000, ct);
                         continue;
                     }
                     disabledDeleteCount = 0;
+                    emptyStreak = 0;   // có nút xóa enabled = list CÒN item → reset chuỗi nghi 'trống'.
 
                     await deleteBtn.ScrollIntoViewIfNeededAsync();
                     await _delay(500, ct);
@@ -270,6 +323,9 @@ internal sealed class BigSellerMaterialCenterCleaner
 
     private async Task CloseMaterialPopupAsync(IPage page)
     {
+        // Popup "Guide: switch the language" cũng hiện ở Material Center và CHẶN click 'Chọn tất cả' → đóng/né NGAY
+        // đầu (helper check nhanh-rẻ, thoát ngay khi không có popup).
+        await BigSellerCrawlHelper.DismissLanguageGuideAsync(page, _log, CancellationToken.None);
         // Popup dung-lượng (đầy/sắp hết hạn) chặn trang Material Center → đóng bằng X/Cancel trước (né "Expand Space");
         // cũng để "Don't remind me again" của nó không nhiễu FindMaterialSelectAllAsync (cùng class bs-antd-check-all).
         if (await DismissStorageNagAsync(page)) return;
@@ -299,6 +355,52 @@ internal sealed class BigSellerMaterialCenterCleaner
                 if (await el.CountAsync() > 0 && await el.IsVisibleAsync()) return true;
             }
             catch { }
+        }
+        return false;
+    }
+
+    // Đếm SỐ ITEM THẬT trong grid Material Center = số checkbox VISIBLE (offsetParent !== null), TRỪ: (a) checkbox
+    // 'Chọn tất cả' trong action row (section.material_action_row / div.material_batch_actions), (b) checkbox trong
+    // popup (.bs-micro-modal / .ant-modal, vd "Don't remind me again"). >0 = list CÒN item; ==0 = trống HOẶC đang
+    // tải (chưa render). Best-effort: lỗi → -1 (không biết) để caller đừng vội kết luận trống.
+    private static async Task<int> CountItemCheckboxesAsync(IPage page)
+    {
+        try
+        {
+            return await page.EvaluateAsync<int>(
+                @"() => {
+                    let n = 0;
+                    for (const cb of document.querySelectorAll('input[type=""checkbox""]')) {
+                        if (cb.offsetParent === null) continue;                                     // ẩn / không hiển thị
+                        if (cb.closest('.material_action_row, .material_batch_actions')) continue;   // 'Chọn tất cả'
+                        if (cb.closest('.bs-micro-modal, .ant-modal')) continue;                     // popup che
+                        n++;
+                    }
+                    return n;
+                }");
+        }
+        catch { return -1; }
+    }
+
+    // Chờ trang Material Center SẴN SÀNG trước khi tin các dấu hiệu 'trống': mạng chậm → grid render trễ, skeleton
+    // dễ bị đọc nhầm là rỗng. Poll mỗi ~1s tới timeoutMs, mỗi nhịp đóng popup che; thoát sớm khi (a) action row hiện
+    // (= list đã render) HOẶC (b) đếm được >0 item. Trả true nếu thấy sẵn sàng, false nếu hết giờ (caller KHÔNG return).
+    private async Task<bool> WaitMaterialListReadyAsync(IPage page, int timeoutMs, CancellationToken ct)
+    {
+        var deadline = timeoutMs;
+        while (deadline > 0)
+        {
+            ct.ThrowIfCancellationRequested();
+            await CloseMaterialPopupAsync(page);
+            try
+            {
+                var actionRow = page.Locator("section.material_action_row, div.material_batch_actions").First;
+                if (await actionRow.CountAsync() > 0 && await actionRow.IsVisibleAsync()) return true;
+            }
+            catch { }
+            if (await CountItemCheckboxesAsync(page) > 0) return true;
+            await _delay(1000, ct);
+            deadline -= 1000;
         }
         return false;
     }
@@ -433,7 +535,7 @@ internal sealed class BigSellerMaterialCenterCleaner
         var final = await FindMaterialSelectAllAsync(page);
         if (final is not null && !await IsMaterialSelectAllCheckedAsync(final))
         {
-            _log("✅ Click 'Chọn tất cả' nhưng checkbox vẫn un-checked → coi như đã hết media.");
+            _log("… Click 'Chọn tất cả' nhưng checkbox vẫn un-checked → nghi hết media (caller sẽ xác nhận).");
             return "empty";
         }
         _log("⚠ Click 'Chọn tất cả' không xác nhận được trạng thái checkbox.");

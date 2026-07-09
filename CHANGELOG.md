@@ -5,6 +5,21 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Hiệu năng. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.0.6 — 2026-07-09
+
+Chủ đề: **mất session BigSeller giữa chừng tự đăng nhập lại + Xóa Medias hết báo trống oan**.
+
+- Update/Import: khi BigSeller đá phiên GIỮA lúc chạy (lane restart), trước đây guard
+  TTL 4h coi phiên "còn tươi" nên không đăng nhập lại → lane quay vòng vô ích tới hết
+  TTL. Giờ `EnsureCookieAsync` phát hiện cả phiên profile lẫn cookie file đều chết →
+  `Invalidate` dấu TTL → bước auto-login ngay sau đó ĐĂNG NHẬP LẠI thật (cần Email +
+  Mật khẩu; captcha giải bằng AI như đầu phiên).
+- Xóa Medias / dọn Material Center: mạng chậm làm grid render trễ → script đọc nhầm
+  trạng thái loading thành "hết file để xóa" rồi tự đóng. Fix 3 lớp: chờ list sẵn sàng
+  tối đa 30s trước khi tin dấu "trống"; veto khi vẫn đếm được checkbox item; mọi kết
+  luận "trống" phải xác nhận 2 lần liên tiếp (có reload giữa 2 lần). Popup "Guide:
+  switch the language" ở Material Center cũng được đóng/chọn Tiếng Việt.
+
 ## v1.0.5 — 2026-07-09
 
 Chủ đề: **hết kẹt "nhấp nháy" ở Listing vì popup chọn ngôn ngữ BigSeller**.

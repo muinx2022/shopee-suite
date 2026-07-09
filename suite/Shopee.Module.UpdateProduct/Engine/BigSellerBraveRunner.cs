@@ -158,7 +158,14 @@ internal abstract class BigSellerBraveRunner : IAsyncDisposable
                 _settings.DebugPort, _settings.BigSellerCookieFile ?? "", _log,
                 reloadBigSellerTabs: false, navigateUrl: StartUrl, ct).ConfigureAwait(false);
             if (await BigSellerCookieEngine.ProbeLoggedInAsync(_settings.DebugPort, StartUrl, _log, ct).ConfigureAwait(false) == false)
-                _log("Cookie từ file cũng hết hạn — mở tab Account, login lại rồi Save & close.");
+            {
+                _log("Cookie từ file cũng hết hạn — xóa dấu TTL phiên để bước auto-login ngay sau ĐĂNG NHẬP LẠI thật.");
+                // Phiên CHẾT THẬT (profile lẫn file đều hỏng — vd BigSeller đá token giữa chừng → lane restart).
+                // Không Invalidate thì EnsureFreshSessionAsync bị guard TTL 4h chặn ("phiên còn tươi — dùng lại")
+                // → lane cứ restart vô ích tới hết TTL mới chịu login. Xóa dấu → login lại ngay (cần Email +
+                // Mật khẩu; acc thiếu credential thì hành vi như cũ: chờ login tay).
+                BigSellerSessionRegistry.Invalidate(_settings.AccountId);
+            }
         }
     }
 
