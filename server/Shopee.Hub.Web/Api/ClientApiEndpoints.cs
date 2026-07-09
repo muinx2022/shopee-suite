@@ -18,13 +18,13 @@ public static class ClientApiEndpoints
     public static void MapClientApi(this WebApplication app, HubDatabase db)
     {
         // /health — KHÔNG auth (client dò kết nối trước khi có token).
-        app.MapGet("/health", () => Results.Json(new { ok = true, ts = DateTimeOffset.UtcNow })).AllowAnonymous();
+        app.MapGet(HubRoutes.Health, () => Results.Json(new { ok = true, ts = DateTimeOffset.UtcNow })).AllowAnonymous();
 
         // Gom mọi route client vào 1 group yêu cầu policy "Client" (X-Api-Token).
         var api = app.MapGroup("").RequireAuthorization("Client");
 
         // ── File-sync (manifest + blob) ──
-        api.MapGet("/manifest", () => Results.Json(db.ListFiles()));
+        api.MapGet(HubRoutes.Manifest, () => Results.Json(db.ListFiles()));
         api.MapGet("/files/{*name}", (string name) =>
         {
             var stream = db.OpenFileRead(name);
@@ -44,47 +44,47 @@ public static class ClientApiEndpoints
         });
 
         // ── Khoá việc theo shop+op ──
-        api.MapPost("/leases/acquire", (LeaseAcquireRequest? r) => r is null ? Results.BadRequest() : Results.Json(db.AcquireLease(r)));
-        api.MapPost("/leases/heartbeat", (LeaseHeartbeatRequest? r) => { if (r is null) return Results.BadRequest(); db.HeartbeatLease(r.Key, r.MachineId); return Results.Ok(); });
-        api.MapPost("/leases/release", (LeaseReleaseRequest? r) => { if (r is null) return Results.BadRequest(); db.ReleaseLease(r.Key, r.MachineId); return Results.Ok(); });
+        api.MapPost(HubRoutes.LeasesAcquire, (LeaseAcquireRequest? r) => r is null ? Results.BadRequest() : Results.Json(db.AcquireLease(r)));
+        api.MapPost(HubRoutes.LeasesHeartbeat, (LeaseHeartbeatRequest? r) => { if (r is null) return Results.BadRequest(); db.HeartbeatLease(r.Key, r.MachineId); return Results.Ok(); });
+        api.MapPost(HubRoutes.LeasesRelease, (LeaseReleaseRequest? r) => { if (r is null) return Results.BadRequest(); db.ReleaseLease(r.Key, r.MachineId); return Results.Ok(); });
 
         // ── Khoá tài khoản Shopee ──
-        api.MapPost("/accounts/reserve", (AccountReserveRequest? r) => r?.AccountIds is null ? Results.BadRequest() : Results.Json(db.ReserveAccounts(r)));
-        api.MapPost("/accounts/release", (AccountReleaseRequest? r) => { if (r?.AccountIds is null) return Results.BadRequest(); db.ReleaseAccounts(r); return Results.Ok(); });
-        api.MapPost("/accounts/heartbeat", (AccountReleaseRequest? r) => { if (r?.AccountIds is null) return Results.BadRequest(); db.HeartbeatAccounts(r); return Results.Ok(); });
+        api.MapPost(HubRoutes.AccountsReserve, (AccountReserveRequest? r) => r?.AccountIds is null ? Results.BadRequest() : Results.Json(db.ReserveAccounts(r)));
+        api.MapPost(HubRoutes.AccountsRelease, (AccountReleaseRequest? r) => { if (r?.AccountIds is null) return Results.BadRequest(); db.ReleaseAccounts(r); return Results.Ok(); });
+        api.MapPost(HubRoutes.AccountsHeartbeat, (AccountReleaseRequest? r) => { if (r?.AccountIds is null) return Results.BadRequest(); db.HeartbeatAccounts(r); return Results.Ok(); });
 
         // ── Sổ hoàn thành ──
-        api.MapPost("/ledger", (WorkLedgerRecord? r) => { if (r is null) return Results.BadRequest(); db.PublishLedger(r); return Results.Ok(); });
-        api.MapPost("/ledger/set", (SetLedgerStatusRequest? r) => { if (r is null) return Results.BadRequest(); db.SetLedgerStatus(r.Key, r.BigsellerId, r.ShopId, r.Sheet, r.Op, r.Status); return Results.Ok(); });
-        api.MapGet("/ledger", () => Results.Json(db.AllLedger()));
+        api.MapPost(HubRoutes.Ledger, (WorkLedgerRecord? r) => { if (r is null) return Results.BadRequest(); db.PublishLedger(r); return Results.Ok(); });
+        api.MapPost(HubRoutes.LedgerSet, (SetLedgerStatusRequest? r) => { if (r is null) return Results.BadRequest(); db.SetLedgerStatus(r.Key, r.BigsellerId, r.ShopId, r.Sheet, r.Op, r.Status); return Results.Ok(); });
+        api.MapGet(HubRoutes.Ledger, () => Results.Json(db.AllLedger()));
 
         // ── Nhịp máy + bảng trạng thái ──
-        api.MapPost("/machines/heartbeat", (MachineHeartbeatRequest? r) => { if (r is null) return Results.BadRequest(); db.MachineHeartbeat(r); return Results.Ok(); });
-        api.MapPost("/machines/leave", (MachineLeaveRequest? r) => { if (r is null) return Results.BadRequest(); db.RemoveMachine(r.MachineId); return Results.Ok(); });
-        api.MapGet("/fleet", () => Results.Json(db.Fleet()));
+        api.MapPost(HubRoutes.MachineHeartbeat, (MachineHeartbeatRequest? r) => { if (r is null) return Results.BadRequest(); db.MachineHeartbeat(r); return Results.Ok(); });
+        api.MapPost(HubRoutes.MachineLeave, (MachineLeaveRequest? r) => { if (r is null) return Results.BadRequest(); db.RemoveMachine(r.MachineId); return Results.Ok(); });
+        api.MapGet(HubRoutes.Fleet, () => Results.Json(db.Fleet()));
 
         // ── Vai trò máy + giao việc ──
-        api.MapPost("/roles", (SetRoleRequest? r) => { if (r is null) return Results.BadRequest(); db.SetRole(r.MachineId, r.Role); return Results.Ok(); });
-        api.MapPost("/assignments", (CreateAssignmentRequest? r) => r is null ? Results.BadRequest() : Results.Json(db.CreateAssignment(r)));
-        api.MapPost("/assignments/claim", (ClaimAssignmentsRequest? r) => r is null ? Results.BadRequest() : Results.Json(db.ClaimNext(r.MachineId, r.Role, r.Max)));
-        api.MapPost("/assignments/status", (AssignmentStatusRequest? r) => { if (r is null) return Results.BadRequest(); db.UpdateAssignmentStatus(r.Id, r.MachineId, r.Status, r.Error); return Results.Ok(); });
-        api.MapPost("/assignments/cancel", (CancelAssignmentRequest? r) => { if (r is null) return Results.BadRequest(); db.CancelAssignment(r.Id); return Results.Ok(); });
+        api.MapPost(HubRoutes.Roles, (SetRoleRequest? r) => { if (r is null) return Results.BadRequest(); db.SetRole(r.MachineId, r.Role); return Results.Ok(); });
+        api.MapPost(HubRoutes.Assignments, (CreateAssignmentRequest? r) => r is null ? Results.BadRequest() : Results.Json(db.CreateAssignment(r)));
+        api.MapPost(HubRoutes.AssignmentsClaim, (ClaimAssignmentsRequest? r) => r is null ? Results.BadRequest() : Results.Json(db.ClaimNext(r.MachineId, r.Role, r.Max)));
+        api.MapPost(HubRoutes.AssignmentsStatus, (AssignmentStatusRequest? r) => { if (r is null) return Results.BadRequest(); db.UpdateAssignmentStatus(r.Id, r.MachineId, r.Status, r.Error); return Results.Ok(); });
+        api.MapPost(HubRoutes.AssignmentsCancel, (CancelAssignmentRequest? r) => { if (r is null) return Results.BadRequest(); db.CancelAssignment(r.Id); return Results.Ok(); });
 
         // ── Kho gộp kết quả Search ──
-        api.MapPost("/search-products", (SearchProductsPushRequest? r) => { if (r is null) return Results.BadRequest(); db.SaveSearchProducts(r); return Results.Ok(); });
-        api.MapGet("/search-products", () => Results.Json(db.AllSearchProductJson()));
-        api.MapGet("/search-products/count", () => Results.Json(db.SearchProductCount()));
-        api.MapPost("/search-products/clear", () => { db.ClearSearchProducts(); return Results.Ok(); });
+        api.MapPost(HubRoutes.SearchProducts, (SearchProductsPushRequest? r) => { if (r is null) return Results.BadRequest(); db.SaveSearchProducts(r); return Results.Ok(); });
+        api.MapGet(HubRoutes.SearchProducts, () => Results.Json(db.AllSearchProductJson()));
+        api.MapGet(HubRoutes.SearchProductsCount, () => Results.Json(db.SearchProductCount()));
+        api.MapPost(HubRoutes.SearchProductsClear, () => { db.ClearSearchProducts(); return Results.Ok(); });
 
         // ── Log tập trung ──
-        api.MapPost("/logs", (AppendLogRequest? r) => { if (r is null) return Results.BadRequest(); db.AppendLog(r); return Results.Ok(); });
-        api.MapGet("/logs", (long? after, int? max) => Results.Json(db.GetLogs(after ?? 0, Math.Clamp(max ?? 300, 1, 1000))));
-        api.MapPost("/logs/clear", () => { db.ClearLogs(); return Results.Ok(); });
+        api.MapPost(HubRoutes.Logs, (AppendLogRequest? r) => { if (r is null) return Results.BadRequest(); db.AppendLog(r); return Results.Ok(); });
+        api.MapGet(HubRoutes.Logs, (long? after, int? max) => Results.Json(db.GetLogs(after ?? 0, Math.Clamp(max ?? 300, 1, 1000))));
+        api.MapPost(HubRoutes.LogsClear, () => { db.ClearLogs(); return Results.Ok(); });
 
         // ── Client báo acc Shopee lỗi/captcha ──
-        api.MapPost("/accounts/errored", (AccountErrorRequest? r) => { if (r is null) return Results.BadRequest(); db.ReportAccountError(r); return Results.Ok(); });
-        api.MapGet("/accounts/errored", () => Results.Json(db.AllAccountErrors()));
-        api.MapPost("/accounts/errored/clear", (ClearAccountErrorRequest? r) => { if (r is null) return Results.BadRequest(); db.ClearAccountError(r.AccountId); return Results.Ok(); });
+        api.MapPost(HubRoutes.AccountsErrored, (AccountErrorRequest? r) => { if (r is null) return Results.BadRequest(); db.ReportAccountError(r); return Results.Ok(); });
+        api.MapGet(HubRoutes.AccountsErrored, () => Results.Json(db.AllAccountErrors()));
+        api.MapPost(HubRoutes.AccountsErroredClear, (ClearAccountErrorRequest? r) => { if (r is null) return Results.BadRequest(); db.ClearAccountError(r.AccountId); return Results.Ok(); });
 
         // ── MỚI: client đẩy acc Shopee OK mới check lên (web-hub là nguồn sự thật; client hết push accounts.json) ──
         api.MapPost("/accounts/append", (List<ShopeeAccount>? r, FileStoreConfigService cfg) =>
