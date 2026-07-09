@@ -97,7 +97,10 @@
                                     @* Máy đang chạy (Locked) → ẩn combo. Rewrite + shop mồ côi + shop chưa gán sheet cũng không đặt-tay được. *@
                                     @if (op != "rewrite" && row.InConfig && !cell.Locked && !string.IsNullOrEmpty(row.Sheet))
                                     {
-                                        <select class="cellset"
+                                        @* Select UNCONTROLLED → PHẢI @key theo (acc|shop|op|thế hệ): thiếu key thì Blazor tái dùng
+                                           đúng element DOM cũ khi đổi shop → lựa chọn vừa đặt (vd "Chưa (reset)") hiện dính sang
+                                           MỌI shop khác; sau khi đặt-tay xong cũng nhảy thế hệ để combo dựng lại, quay về ⋯. *@
+                                        <select class="cellset" @key="@($"{row.AccountId}|{row.ShopId}|{op}|{_cellsetGen}")"
                                                 @onchange="e => SetLedger(row.AccountId, row.ShopId, row.Sheet, op, e.Value?.ToString())">
                                             <option value="">⋯</option>
                                             <option value="completed">✓ Xong</option>
@@ -607,10 +610,14 @@
     private void OnShopDeleted() { _selShopKey = null; _selRow = null; OnConfigChanged(); }
     private void OnAcctDeleted() { _selAcctId = null; _selShopKey = null; _selRow = null; OnConfigChanged(); }
 
+    // Thế hệ của các combo đặt-tay ledger — nhảy sau mỗi lần đặt để @key đổi → element dựng lại về ⋯.
+    private int _cellsetGen;
+
     private void SetLedger(string bs, string shop, string sheet, string op, string? status)
     {
         if (string.IsNullOrEmpty(status)) return;
         Db.SetLedgerStatus($"{bs}__{shop}__{op}", bs, shop, sheet, op, status);
+        _cellsetGen++;
         FleetState.Refresh();
     }
 

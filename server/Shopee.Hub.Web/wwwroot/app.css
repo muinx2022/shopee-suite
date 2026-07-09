@@ -109,7 +109,8 @@ code { font-family: var(--mono); background: var(--gray); border: 1px solid var(
 .theme-btn .ico-sun { display: none; }
 html.dark .theme-btn .ico-moon { display: none; }
 html.dark .theme-btn .ico-sun { display: block; }
-.content { flex: 1; padding: 26px 34px 60px; max-width: 1520px; width: 100%; }
+/* KHÔNG max-width: màn rộng phải lấp đầy (trước cap 1520px → maximize là content co về trái, thừa cả khúc phải). */
+.content { flex: 1; padding: 26px 34px 60px; width: 100%; min-width: 0; }
 
 /* ==================== KPI cards ==================== */
 .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin: 6px 0 22px; }
