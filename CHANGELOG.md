@@ -5,6 +5,20 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Hiệu năng. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.0.5 — 2026-07-09
+
+Chủ đề: **hết kẹt "nhấp nháy" ở Listing vì popup chọn ngôn ngữ BigSeller**.
+
+- Update/Import: popup "Guide: Click here to switch the language" (không phải
+  ant-modal) chặn click Edit khiến vòng update retry mãi ở Listing. Thêm
+  `DismissLanguageGuideAsync`: ưu tiên **chọn hẳn "Tiếng Việt"** khi menu ngôn ngữ
+  đang hiện (BigSeller nhớ lựa chọn → lần sau không hiện), không thì đóng X → ESC.
+  Nối ở 4 điểm: vào Listing, click Edit bị chặn (Update), mở tab "Đã nhận" và nút
+  Import to Stores bị chặn (Import).
+- Brave automation thêm `--noerrdialogs`: chặn dialog "Brave Browser quit
+  unexpectedly / send diagnostic" (browser-chrome, không click tự động được) hiện
+  đè sau lần crash trước.
+
 ## v1.0.4 — 2026-07-09
 
 Chủ đề: **Brave tự động không còn cướp focus màn hình**.

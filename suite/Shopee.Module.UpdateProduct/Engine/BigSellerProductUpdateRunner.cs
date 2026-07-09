@@ -839,6 +839,8 @@ internal sealed partial class BigSellerProductUpdateRunner : BigSellerBraveRunne
     {
         try
         {
+            // Popup hướng dẫn đổi ngôn ngữ (KHÔNG phải ant-modal) cũng chặn click Edit → thử chọn Tiếng Việt/đóng trước.
+            if (await BigSellerCrawlHelper.DismissLanguageGuideAsync(page, _log, CancellationToken.None)) return;
             if (await page.Locator(BlockingModalVisible).CountAsync() > 0)
             {
                 foreach (var sel in DismissBtns)
@@ -950,6 +952,8 @@ internal sealed partial class BigSellerProductUpdateRunner : BigSellerBraveRunne
                 await DelayAsync(1500, CancellationToken.None);
                 await page.WaitForSelectorAsync(ListingReadySelector, new() { State = WaitForSelectorState.Visible, Timeout = 10000 });
                 await DelayAsync(1000, CancellationToken.None);
+                // Dọn ngay popup hướng dẫn đổi ngôn ngữ khi vừa vào Listing (khỏi đợi tới lúc click Edit bị chặn).
+                await BigSellerCrawlHelper.DismissLanguageGuideAsync(page, _log, CancellationToken.None);
                 return true;
             }
             catch

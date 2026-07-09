@@ -372,6 +372,82 @@ internal static class BigSellerCrawlHelper
         catch { return 0; }
     }
 
+    /// <summary>Đóng popup hướng dẫn đổi ngôn ngữ của BigSeller ("Guide: Click here to switch the language…"
+    /// + menu ngôn ngữ mở sẵn) — popup này KHÔNG phải ant-modal nên DismissBlockingModal thường không đóng được,
+    /// chặn click Edit trên Listing → vòng update kẹt "nhấp nháy". Ưu tiên CHỌN HẲN "Tiếng Việt" khi menu đang
+    /// hiện (BigSeller nhớ lựa chọn → lần sau không hiện nữa; selector của ta hỗ trợ VN/EN); không thấy menu thì
+    /// đóng nút X của guide, cuối cùng ESC. Best-effort, không ném. Trả true nếu có thao tác gì đó.</summary>
+    public static async Task<bool> DismissLanguageGuideAsync(IPage page, Action<string>? log, CancellationToken ct)
+    {
+        // 1. Check nhanh: guide có ĐANG hiện không. Đường nóng gọi thường xuyên nên phải RẺ — chưa thấy thì
+        //    thoát NGAY (khỏi chạy JS quét toàn DOM khi không có popup).
+        try
+        {
+            var guide = page.Locator("text=switch the language").First;
+            if (await guide.CountAsync() == 0 || !await guide.IsVisibleAsync())
+                return false;
+        }
+        catch { return false; }
+
+        // 2. Guide đang hiện → thử CHỌN "Tiếng Việt" (BigSeller nhớ lựa chọn → lần sau không hiện lại). Click
+        //    element lá đúng text 'Tiếng Việt' đang visible → bubble lên parent handler đổi ngôn ngữ.
+        try
+        {
+            var pickedVn = await page.EvaluateAsync<bool>(
+                @"() => {
+                    const items = Array.from(document.querySelectorAll('li,a,span,div'))
+                        .filter(el => el.childElementCount === 0 && (el.textContent || '').trim() === 'Tiếng Việt'
+                                   && el.offsetParent !== null);
+                    if (items.length) { items[0].click(); return true; }
+                    return false;
+                }");
+            if (pickedVn)
+            {
+                log?.Invoke("🌐 Popup chọn ngôn ngữ BigSeller → đã chọn Tiếng Việt.");
+                await Task.Delay(1500, ct);   // đổi ngôn ngữ có thể reload nội dung
+                return true;
+            }
+        }
+        catch (OperationCanceledException) { throw; }
+        catch { }
+
+        // 3. Không có mục ngôn ngữ để chọn → đóng nút X của guide: leo tổ tiên của node chứa text tới container,
+        //    tìm phần tử close bên trong; không được thì click mọi lá visible có text '×'/'✕' gần đó.
+        try
+        {
+            var closed = await page.EvaluateAsync<bool>(
+                @"() => {
+                    const nodes = Array.from(document.querySelectorAll('*'))
+                        .filter(el => el.childElementCount === 0 && (el.textContent || '').includes('switch the language'));
+                    for (const n of nodes) {
+                        let box = n;
+                        for (let i = 0; i < 6 && box; i++) {
+                            const close = box.querySelector('[class*=""close"" i], .anticon-close, svg');
+                            if (close) { close.click(); return true; }
+                            box = box.parentElement;
+                        }
+                    }
+                    const marks = Array.from(document.querySelectorAll('*'))
+                        .filter(el => el.childElementCount === 0 && el.offsetParent !== null
+                                   && ['×', '✕'].includes((el.textContent || '').trim()));
+                    if (marks.length) { marks[0].click(); return true; }
+                    return false;
+                }");
+            if (closed)
+            {
+                log?.Invoke("🌐 Đã đóng popup hướng dẫn đổi ngôn ngữ BigSeller (nút X).");
+                await Task.Delay(300, ct);
+                return true;
+            }
+        }
+        catch (OperationCanceledException) { throw; }
+        catch { }
+
+        // 4. Chốt hạ: ESC.
+        try { await page.Keyboard.PressAsync("Escape"); return true; } catch { }
+        return false;
+    }
+
     /// <summary>"Có hiển thị trong vòng timeout không" — thay cho IsVisibleAsync(Timeout) đã obsolete:
     /// chờ tới khi phần tử visible (true) hoặc hết giờ (false). Giữ nguyên ngữ nghĩa "đợi rồi trả bool".</summary>
     private static async Task<bool> IsVisibleWithinAsync(ILocator loc, float timeoutMs)

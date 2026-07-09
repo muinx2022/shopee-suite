@@ -365,6 +365,8 @@ internal sealed class BigSellerImportToStoreRunner : BigSellerBraveRunner
             cancellationToken.ThrowIfCancellationRequested();
             // Gỡ guide "đổi ngôn ngữ" TRƯỚC khi click tab — chính nó hay gây reload đưa trang về tab "new".
             await BigSellerCrawlHelper.DismissGuideMasksAsync(page, _log);
+            // Popup hướng dẫn đổi ngôn ngữ (KHÔNG phải mask/ant-modal) cũng chặn click — thử chọn Tiếng Việt/đóng.
+            await BigSellerCrawlHelper.DismissLanguageGuideAsync(page, _log, cancellationToken);
             var ok = await BigSellerCrawlHelper.SelectClaimedTabByTextAsync(page, _log);
             if (ok) return true;
 
@@ -649,6 +651,8 @@ internal sealed class BigSellerImportToStoreRunner : BigSellerBraveRunner
         catch
         {
             await BigSellerCrawlHelper.DismissGuideMasksAsync(page, _log);
+            // Popup hướng dẫn đổi ngôn ngữ (KHÔNG phải mask/ant-modal) cũng chặn click — thử chọn Tiếng Việt/đóng.
+            await BigSellerCrawlHelper.DismissLanguageGuideAsync(page, _log, CancellationToken.None);
             var ok = await page.EvaluateAsync<bool>(
                 @"() => {
                     const b = Array.from(document.querySelectorAll(

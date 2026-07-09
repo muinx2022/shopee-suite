@@ -57,6 +57,9 @@ internal abstract class BigSellerBraveRunner : IAsyncDisposable
             .Add("--no-session-restore")
             .Add("--restore-last-session=false")
             .Add("--disable-session-crashed-bubble")
+            // Chặn dialog "Brave Browser quit unexpectedly / send diagnostic" (browser-chrome, Playwright không
+            // click được) hiện đè sau lần crash trước.
+            .Add("--noerrdialogs")
             // KHÔNG '--start-maximized': muốn Brave mở THU NHỎ (startMinimized) — cờ maximize sẽ đè show-state.
             .WindowSize(1920, 1080)
             .DisableGpu()
