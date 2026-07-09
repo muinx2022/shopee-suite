@@ -224,12 +224,18 @@ html.dark .pinpanel { background: rgba(60, 80, 224, .10); border-color: rgba(60,
 .wsshop.run { background: var(--success-bg); border-left: 3px solid var(--success); padding-left: 15px; font-weight: 700; }
 .wsshop.run:hover { background: var(--success-bg); }
 .wsshop.run.sel { box-shadow: inset 0 0 0 2px var(--success); }
-.rundot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--success); animation: runpulse 1.1s ease-in-out infinite; }
+.rundot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; color: var(--success); background: currentColor; animation: runpulse 1.1s ease-in-out infinite; }
 .runbadge { margin-left: auto; flex-shrink: 0; font-size: 10.5px; font-weight: 700; letter-spacing: .4px; color: #fff; background: var(--success); border-radius: 999px; padding: 1px 8px; }
+/* Nhịp nhấp nháy dùng currentColor → tái dùng cho chấm xanh (đang chạy/đang giao) lẫn đỏ (đang hủy). */
 @keyframes runpulse {
-    0%, 100% { opacity: 1; box-shadow: 0 0 0 0 color-mix(in srgb, var(--success) 45%, transparent); }
+    0%, 100% { opacity: 1; box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 45%, transparent); }
     50% { opacity: .55; box-shadow: 0 0 0 5px transparent; }
 }
+/* Dòng trạng thái chuyển tiếp ở panel ghim việc — "Đang giao việc…" (xanh) / "Đang hủy…" (đỏ), bám theo lease client. */
+.busyline { display: flex; align-items: center; gap: 7px; margin-top: 6px; font-size: 12.5px; font-weight: 700; }
+.busyline .dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; animation: runpulse 1.1s ease-in-out infinite; flex-shrink: 0; }
+.busyline.assigning { color: var(--primary); }
+.busyline.canceling { color: var(--danger); }
 .wsmain { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; overflow-y: auto; }
 .wsmain h2 { margin-top: 2px; }
 /* Bảng trong panel phải tự cuộn (panel đã cuộn dọc); giới hạn cao để form/thẻ dưới không bị đẩy khuất. */

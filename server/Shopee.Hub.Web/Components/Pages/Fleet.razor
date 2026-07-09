@@ -151,14 +151,29 @@
                                 <label><input type="checkbox" @bind="_pinFromClaimed" /> Import từ tab "Đã nhận"</label>
                             }
                         </div>
-                        @* Nút hành động ở hàng riêng, khỏi trôi lơ lửng theo flex-wrap của hàng field. *@
+                        @* Nút hành động ở hàng riêng, khỏi trôi lơ lửng theo flex-wrap của hàng field.
+                           CHỈ 1 trong 2 nút hiện tại 1 thời điểm: có việc (hoặc đang hủy dở) → nút Huỷ; rảnh → nút Ghim.
+                           Trạng thái chuyển tiếp bám THEO CLIENT thật (lease) chứ không lạc quan theo DB:
+                           • Ghim xong → "Đang giao việc…" (xanh) tới khi client nhận + chạy thật (lease xuất hiện).
+                           • Huỷ → nút Huỷ DISABLED + "Đang hủy…" (đỏ) tới khi client dừng hẳn (lease biến mất) → về nút Ghim. *@
                         <div class="pin pinbtns">
-                            <button class="btn primary" disabled="@(string.IsNullOrEmpty(_pinMachine) || string.IsNullOrEmpty(_pinOp) || _hasWork || _pinBlocked)" @onclick="Pin">📌 Ghim việc</button>
-                            @if (_hasWork)
+                            @if (_hasWork || _canceling)
                             {
-                                <button class="btn danger" @onclick="CancelSelected">✖ Huỷ việc (hub giao)</button>
+                                <button class="btn danger" disabled="@_canceling" @onclick="CancelSelected">✖ Huỷ việc (hub giao)</button>
+                            }
+                            else
+                            {
+                                <button class="btn primary" disabled="@(string.IsNullOrEmpty(_pinMachine) || string.IsNullOrEmpty(_pinOp) || _pinBlocked)" @onclick="Pin">📌 Ghim việc</button>
                             }
                         </div>
+                        @if (_assigning)
+                        {
+                            <div class="busyline assigning"><span class="dot"></span> Đang giao việc @OpLabel(_activeAsn!.Op) cho máy <b>@AsnMachineName(_activeAsn!)</b>…</div>
+                        }
+                        else if (_canceling)
+                        {
+                            <div class="busyline canceling"><span class="dot"></span> Đang hủy — chờ máy <b>@(_shopLease?.Hostname ?? "client")</b> dừng hẳn…</div>
+                        }
                         <div class="action">@_action</div>
                         @if (_pinBlocked)
                         {
@@ -643,14 +658,35 @@
         FleetState.Refresh();
     }
 
-    // Shop đang chọn có việc HUB-GIAO (assignment) queued/running → hub huỷ được (khoá Ghim).
-    private bool _hasWork => _selRow is not null && Snap.Assignments.Any(a =>
+    // Assignment hub-giao ĐANG HIỆU LỰC (queued/running) của shop đang chọn — nguồn cho nút Huỷ + "Đang giao việc…".
+    private Assignment? _activeAsn => _selRow is null ? null : Snap.Assignments.FirstOrDefault(a =>
         a.BigsellerId == _selRow.AccountId && a.ShopId == _selRow.ShopId && a.Status is "queued" or "running");
 
-    // Shop đang chọn có LEASE nhưng KHÔNG có assignment hub-giao = việc CHẠY TAY trên client. Hub không huỷ được
-    // (client tự dừng bằng nút ■ rồi nhả lease báo hub); chỉ hiện chú thích cho rõ, không phải nút chết.
-    private LeaseRecord? _manualLease => (_selRow is null || _hasWork) ? null
+    // Shop đang chọn có việc HUB-GIAO (assignment) queued/running → hub huỷ được (khoá Ghim).
+    private bool _hasWork => _activeAsn is not null;
+
+    // Lease sống của shop = client THẬT SỰ đang chạy op trên máy (nguồn sự thật cho "đã chạy"/"đã dừng hẳn").
+    private LeaseRecord? _shopLease => _selRow is null ? null
         : Snap.Leases.FirstOrDefault(l => l.BigsellerId == _selRow.AccountId && l.ShopId == _selRow.ShopId);
+
+    // Đã ghim nhưng client CHƯA thật sự chạy (chưa có lease — đang chờ máy claim + khởi động) → "Đang giao việc…" (xanh).
+    private bool _assigning => _activeAsn is not null && _shopLease is null;
+
+    // Đã bấm Huỷ (assignment vừa 'canceled') nhưng client CHƯA dừng hẳn (lease cùng op còn sống) → nút Huỷ
+    // DISABLED + "Đang hủy…" (đỏ); lease biến mất = hủy xong → về nút Ghim. Cửa sổ 15' tránh khớp nhầm bản
+    // 'canceled' cũ (còn trong list 2h) với lần chạy TAY sau đó.
+    private bool _canceling => _selRow is not null && _activeAsn is null && _shopLease is { } l
+        && Snap.Assignments.Any(a => a.BigsellerId == _selRow.AccountId && a.ShopId == _selRow.ShopId
+            && a.Status == "canceled" && a.Op == l.Op
+            && (DateTimeOffset.UtcNow - a.UpdatedAt) < TimeSpan.FromMinutes(15));
+
+    // Máy nhận việc để hiện ở "Đang giao việc…": đã claim thì tên máy claim, chưa thì máy được ghim.
+    private string AsnMachineName(Assignment a) =>
+        HostName(!string.IsNullOrEmpty(a.ClaimedByMachineId) ? a.ClaimedByMachineId : a.TargetMachineId ?? "");
+
+    // Shop đang chọn có LEASE nhưng KHÔNG có assignment hub-giao (và không phải đang-hủy-dở) = việc CHẠY TAY trên
+    // client. Hub không huỷ được (client tự dừng bằng nút ■ rồi nhả lease báo hub); chỉ hiện chú thích cho rõ.
+    private LeaseRecord? _manualLease => (_selRow is null || _hasWork || _canceling) ? null : _shopLease;
 
     // Chủ sở hữu acc hiện tại (nếu có) — ràng buộc máy ghim được.
     private string? _accountOwnerMachine => _selRow is null ? null : OwnerOf(_selRow.AccountId);
