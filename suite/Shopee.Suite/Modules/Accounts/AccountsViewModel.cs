@@ -9,6 +9,7 @@ using Shopee.Core.Coordination;
 using Shopee.Core.Infrastructure;
 using Shopee.Core.Proxy;
 using Shopee.Modules.CheckAccount;
+using Shopee.Suite.Infrastructure;
 using Shopee.Suite.Modules.CheckAccount;
 using Shopee.Suite.Services;
 
@@ -60,8 +61,15 @@ public sealed partial class AccountsViewModel : ObservableObject
     public CheckAccountViewModel CheckAccount { get; } = new();
     private CheckAccountWindow? _checkWindow;
 
+    // Chiếu kho Shopee (đã lọc theo SelectedFilter) → Items, giữ Selected theo Id (idiom Store.Changed→Reload
+    // gom vào ObservableProjection). KHÔNG guard id-set: Reload còn tính lại số hiển thị/tổng/lỗi mỗi lần.
+    private readonly ObservableProjection<ShopeeAccount, AccountItemViewModel> _projection;
+
     public AccountsViewModel()
     {
+        _projection = new ObservableProjection<ShopeeAccount, AccountItemViewModel>(
+            Items, FilteredAccounts, a => new AccountItemViewModel(a),
+            x => x.Model.Id, a => a.Id, () => Selected, v => Selected = v);
         Reload();
         LoadProxyPool();
         // Kho proxy đổi (Lưu tay hoặc client tự nhận từ Hub) → cập nhật textbox.
@@ -103,19 +111,17 @@ public sealed partial class AccountsViewModel : ObservableObject
         return false;
     }
 
+    /// <summary>Nguồn hiển thị theo bộ lọc: mặc định chỉ tk còn dùng được; "Bị lỗi/captcha" = tk Disabled; "Tất cả".</summary>
+    private IEnumerable<ShopeeAccount> FilteredAccounts() => SelectedFilter switch
+    {
+        "Bị lỗi / captcha" => AccountStore.Shared.Accounts.Where(a => a.Disabled),
+        "Tất cả" => AccountStore.Shared.Accounts,
+        _ => AccountStore.Shared.Accounts.Where(a => !a.Disabled),   // "Còn dùng được" (mặc định)
+    };
+
     private void Reload()
     {
-        var keepId = Selected?.Model.Id;
-        Items.Clear();
-        IEnumerable<ShopeeAccount> src = SelectedFilter switch
-        {
-            "Bị lỗi / captcha" => AccountStore.Shared.Accounts.Where(a => a.Disabled),
-            "Tất cả" => AccountStore.Shared.Accounts,
-            _ => AccountStore.Shared.Accounts.Where(a => !a.Disabled),   // "Còn dùng được" (mặc định)
-        };
-        foreach (var a in src)
-            Items.Add(new AccountItemViewModel(a));
-        Selected = Items.FirstOrDefault(x => x.Model.Id == keepId) ?? Items.FirstOrDefault();
+        _projection.Rebuild();   // dựng lại Items theo bộ lọc + giữ Selected theo Id
         var total = AccountStore.Shared.Accounts.Count;
         var err = ErroredCount;
         Status = err > 0

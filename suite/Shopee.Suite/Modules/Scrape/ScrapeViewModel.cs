@@ -62,8 +62,24 @@ public sealed partial class ScrapeViewModel : ModuleViewModelBase
         return arr;
     }
 
+    // Chiếu kho BigSeller → ScrapeTargets, giữ SelectedTarget theo Id (idiom Store.Changed→Reload gom vào
+    // ObservableProjection). KHÔNG guard id-set: Reload còn tính lại PoolCount theo kho Shopee nên rebuild vô
+    // điều kiện như cũ (bám cả AccountStore.Changed lẫn thay đổi shop trên acc sẵn có).
+    private readonly ObservableProjection<BigSellerAccount, ScrapeTargetViewModel> _targets;
+
     public ScrapeViewModel() : base("workspace-scrape.log", "Shopee Scrape")
     {
+        // Mỗi ScrapeTargetViewModel TỰ nạp config đã lưu (tick chọn + shop + số dòng/process) theo Account.Id
+        // từ ScrapeTargetConfigStore → giữ nguyên lựa chọn người dùng qua reload + khởi động lại.
+        _targets = new ObservableProjection<BigSellerAccount, ScrapeTargetViewModel>(
+            ScrapeTargets, () => BigSellerStore.Shared.Accounts,
+            a =>
+            {
+                var t = new ScrapeTargetViewModel(a);
+                t.IsShopRunning = shop => IsShopScraping(t, shop);   // "đang scrape" theo job LIVE, không kẹt sau crash
+                return t;
+            },
+            t => t.Account.Id, a => a.Id, () => SelectedTarget, v => SelectedTarget = v);
         Reload();
         AccountStore.Shared.Changed += OnStoresChanged;
         BigSellerStore.Shared.Changed += OnStoresChanged;
@@ -78,19 +94,8 @@ public sealed partial class ScrapeViewModel : ModuleViewModelBase
     [RelayCommand]
     private void Reload()
     {
-        // Tk đang xem ở panel chi tiết — chỉ là trạng thái UI (không lưu), giữ lại qua reload cho mượt.
-        var prevDetailId = SelectedTarget?.Account.Id;
-
-        ScrapeTargets.Clear();
-        // Mỗi ScrapeTargetViewModel TỰ nạp config đã lưu (tick chọn + shop + số dòng/process) theo
-        // Account.Id từ ScrapeTargetConfigStore → giữ nguyên lựa chọn người dùng qua reload + khởi động lại.
-        foreach (var a in BigSellerStore.Shared.Accounts)
-        {
-            var t = new ScrapeTargetViewModel(a);
-            t.IsShopRunning = shop => IsShopScraping(t, shop);   // "đang scrape" theo job LIVE, không kẹt sau crash
-            ScrapeTargets.Add(t);
-        }
-        SelectedTarget = ScrapeTargets.FirstOrDefault(t => t.Account.Id == prevDetailId) ?? ScrapeTargets.FirstOrDefault();
+        // Dựng lại ScrapeTargets từ kho BigSeller + giữ lựa chọn panel-chi-tiết (thuần UI) theo Id — projection lo.
+        _targets.Rebuild();
         PoolCount = AccountStore.Shared.Accounts.Count(a => !a.Disabled);
         Status = $"{ScrapeTargets.Count} BigSeller · {PoolCount} acc Shopee (tự xoay vòng).";
     }

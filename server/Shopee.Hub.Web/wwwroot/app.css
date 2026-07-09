@@ -163,6 +163,16 @@ label.btn { cursor: pointer; }
 .editcard .row input { width: auto; }
 .subhead { font-weight: 600; margin: 16px 0 9px; display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--text); }
 
+/* Tabs (trang config) */
+.tabs { display: flex; gap: 4px; border-bottom: 2px solid var(--stroke); margin: 4px 0 18px; }
+.tabs button { appearance: none; background: none; border: none; border-bottom: 2px solid transparent; margin-bottom: -2px; padding: 9px 16px; font-family: inherit; font-size: 13.5px; font-weight: 600; color: var(--body); cursor: pointer; transition: color .13s, border-color .13s; }
+.tabs button:hover { color: var(--text); }
+.tabs button.active { color: var(--primary); border-bottom-color: var(--primary); }
+
+/* Lưới 2 prompt AI cạnh nhau, textarea cao gần hết màn hình */
+.promptgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.promptgrid textarea { min-height: 58vh; resize: vertical; }
+
 input, select, textarea { background: var(--card); color: var(--text); border: 1px solid var(--stroke); border-radius: var(--radius-sm); padding: 8px 11px; font-size: 13px; font-family: inherit; transition: border-color .13s, box-shadow .13s; }
 /* Guardrail mobile: input có width cứng inline (vd ô token 440px ở Settings) không được tràn container. */
 input, select, textarea { max-width: 100%; }
@@ -342,6 +352,10 @@ table.grid tr.acctrow:hover td { background: var(--gray); }
     .kpi-ic { width: 40px; height: 40px; }
     .kpi-val { font-size: 20px; }
     .bar { gap: 8px; }
+
+    /* Prompt AI: 1 cột trên mobile, textarea thấp lại. */
+    .promptgrid { grid-template-columns: 1fr; }
+    .promptgrid textarea { min-height: 40vh; }
 
     /* Panel Giao việc (Fleet): control xếp dọc, nút full-width. */
     .pinpanel .pin { flex-direction: column; align-items: stretch; }

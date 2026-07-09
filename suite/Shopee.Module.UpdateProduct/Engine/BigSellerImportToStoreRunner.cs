@@ -1,11 +1,9 @@
-using System.Diagnostics;
 using System.Text.Json;
 using ClosedXML.Excel;
 using Microsoft.Playwright;
 using Shopee.Core.Ai;
 using Shopee.Core.BigSeller;
 using Shopee.Core.Browser;
-using Shopee.Core.Cdp;
 
 namespace UpdateProduct;
 

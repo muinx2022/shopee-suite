@@ -4,43 +4,60 @@
 
 <p class="hint m-hide">Dùng cho viết lại tên/mô tả sản phẩm + phân loại danh mục (client kéo về).</p>
 
-<div class="editcard" style="max-width:640px">
-    <label>Nhà cung cấp
-        <select @bind="_ai.Provider">
-            <option value="OpenAI">OpenAI</option>
-            <option value="Anthropic">Anthropic</option>
-            <option value="Gemini">Gemini</option>
-        </select>
-    </label>
-    <div class="row">
-        <label>OpenAI model <input @bind="_ai.OpenAiModel" /></label>
-        <label>OpenAI API key <input @bind="_ai.OpenAiApiKey" type="password" /></label>
+<div class="tabs">
+    <button class="@(_tab == "config" ? "active" : "")" @onclick="@(() => _tab = "config")">⚙ Cấu hình AI</button>
+    <button class="@(_tab == "prompt" ? "active" : "")" @onclick="@(() => _tab = "prompt")">📝 Prompt</button>
+</div>
+
+@if (_tab == "config")
+{
+    <div class="editcard">
+        <label>Nhà cung cấp
+            <select @bind="_ai.Provider">
+                <option value="OpenAI">OpenAI</option>
+                <option value="Anthropic">Anthropic</option>
+                <option value="Gemini">Gemini</option>
+            </select>
+        </label>
+        <div class="row">
+            <label>OpenAI model <input @bind="_ai.OpenAiModel" /></label>
+            <label>OpenAI API key <input @bind="_ai.OpenAiApiKey" type="password" /></label>
+        </div>
+        <div class="row">
+            <label>Anthropic model <input @bind="_ai.AnthropicModel" /></label>
+            <label>Anthropic API key <input @bind="_ai.AnthropicApiKey" type="password" /></label>
+        </div>
+        <div class="row">
+            <label>Gemini model <input @bind="_ai.GeminiModel" /></label>
+            <label>Gemini API key <input @bind="_ai.GeminiApiKey" type="password" /></label>
+        </div>
+        <label>Batch size <input type="number" @bind="_ai.BatchSize" style="width:90px" /></label>
     </div>
-    <div class="row">
-        <label>Anthropic model <input @bind="_ai.AnthropicModel" /></label>
-        <label>Anthropic API key <input @bind="_ai.AnthropicApiKey" type="password" /></label>
+}
+else
+{
+    <div class="editcard">
+        <div class="promptgrid">
+            <label>Prompt viết lại TÊN (trống = mặc định)
+                <textarea @bind="_ai.NameRewritePrompt"></textarea>
+            </label>
+            <label>Prompt viết lại MÔ TẢ (trống = mặc định)
+                <textarea @bind="_ai.DescriptionPrompt"></textarea>
+            </label>
+        </div>
     </div>
-    <div class="row">
-        <label>Gemini model <input @bind="_ai.GeminiModel" /></label>
-        <label>Gemini API key <input @bind="_ai.GeminiApiKey" type="password" /></label>
-    </div>
-    <label>Batch size <input type="number" @bind="_ai.BatchSize" style="width:90px" /></label>
-    <label>Prompt viết lại TÊN (trống = mặc định)
-        <textarea @bind="_ai.NameRewritePrompt" rows="4"></textarea>
-    </label>
-    <label>Prompt viết lại MÔ TẢ (trống = mặc định)
-        <textarea @bind="_ai.DescriptionPrompt" rows="4"></textarea>
-    </label>
-    <div class="bar">
-        <button class="btn primary" @onclick="Save">💾 Lưu</button>
-        <span class="action">@_status</span>
-    </div>
+}
+
+<div class="bar">
+    <button class="btn primary" @onclick="Save">💾 Lưu</button>
+    <span class="action">@_status</span>
 </div>
 
 @code {
     private AiConfig _ai = new();
     private int _version;
     private string _status = "";
+    private string _tab = "config";
 
     protected override void OnInitialized() => Load();
 

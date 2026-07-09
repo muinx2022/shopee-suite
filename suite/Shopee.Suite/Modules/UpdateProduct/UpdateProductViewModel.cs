@@ -51,6 +51,10 @@ public sealed partial class UpdateProductViewModel : ModuleViewModelBase
 
     private bool _uiLoaded;
 
+    // Chiếu kho BigSeller → RunTargets, giữ SelectedTarget theo Id (idiom Store.Changed→Reload gom vào
+    // ObservableProjection). Guard "chỉ rebuild khi cấu trúc đổi" vẫn nằm ở SyncFromStore (richer than id-set).
+    private readonly ObservableProjection<BigSellerAccount, UpdateRunTargetViewModel> _projection;
+
     public UpdateProductViewModel() : base("workspace-update.log", "Update Product")
     {
         // Khôi phục ảnh/video/key OpenAI đã LƯU (dùng chung mọi tk) — trước đây mất khi đóng app.
@@ -60,6 +64,9 @@ public sealed partial class UpdateProductViewModel : ModuleViewModelBase
         _openAiKeyFile = ui.OpenAiKeyFile;
         _uiLoaded = true;
 
+        _projection = new ObservableProjection<BigSellerAccount, UpdateRunTargetViewModel>(
+            RunTargets, () => BigSellerStore.Shared.Accounts, a => new UpdateRunTargetViewModel(a),
+            t => t.Account.Id, a => a.Id, () => SelectedTarget, v => SelectedTarget = v);
         Reload();
         BigSellerStore.Shared.Changed += () =>
         {
@@ -111,14 +118,10 @@ public sealed partial class UpdateProductViewModel : ModuleViewModelBase
     [RelayCommand]
     private void Reload()
     {
-        // tick chọn + shop đang chọn + cấu hình chạy GIỜ lưu trên model (BigSellerStore) → VM tự đọc lại,
-        // không cần giữ in-memory. Chỉ giữ lựa chọn panel-chi-tiết (thuần UI) theo Id.
-        var prevDetailId = SelectedTarget?.Account.Id;
-
-        RunTargets.Clear();
-        foreach (var a in BigSellerStore.Shared.Accounts)
-            RunTargets.Add(new UpdateRunTargetViewModel(a));   // VM khôi phục tick/shop/config từ model đã LƯU
-        SelectedTarget = RunTargets.FirstOrDefault(t => t.Account.Id == prevDetailId) ?? RunTargets.FirstOrDefault();
+        // tick chọn + shop đang chọn + cấu hình chạy GIỜ lưu trên model (BigSellerStore) → VM (factory của
+        // projection) tự khôi phục tick/shop/config từ model đã LƯU. Chỉ giữ lựa chọn panel-chi-tiết (thuần
+        // UI) theo Id — ObservableProjection lo.
+        _projection.Rebuild();
         Status = $"{RunTargets.Count} tài khoản BigSeller.";
     }
 

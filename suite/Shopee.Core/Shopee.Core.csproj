@@ -13,6 +13,8 @@
   <ItemGroup>
     <PackageReference Include="System.Management" Version="10.0.0" />
     <PackageReference Include="ClosedXML" Version="0.105.0" />
+    <!-- Playwright cho lõi login BigSeller dùng chung (BigSellerLoginForm). Khớp version module (1.60.0). -->
+    <PackageReference Include="Microsoft.Playwright" Version="1.60.0" />
     <!-- DPAPI cho WindowsOsCrypt (giải key os_crypt Chromium). -->
     <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
     <!-- Registry cho WindowsBrowserLocator (App Paths\brave.exe). Không còn implicit khi bỏ -windows. -->
