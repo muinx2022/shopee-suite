@@ -129,12 +129,8 @@ public sealed class BigSellerLoginService : IAsyncDisposable
             var ai = _config.Ai();
             if (!ai.HasActiveKey) { Say(s, "✘ Chưa cấu hình API key AI (tab AI) để giải captcha."); Fail(s); return; }
 
-            await page.GotoAsync(LoginUrl, new() { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 25000 });
-            await Task.Delay(2000, ct);
-
-            if (!(page.Url ?? "").Contains("login", StringComparison.OrdinalIgnoreCase))
-            { Say(s, "Đã đăng nhập sẵn."); await CaptureAndSaveAsync(acctId, ctx, s); return; }
-
+            // RunFormLoginAsync tự điều hướng tới trang login + phát hiện "đã đăng nhập sẵn" (url không chứa
+            // "login" → Success ngay, khỏi captcha) → FillLoginLoop trả true → xuống CaptureAndSave như cũ.
             var ok = await FillLoginLoopAsync(page, email, password, ai, s, ct);
             if (!ok) return;   // FillLoginLoop tự set trạng thái (needsOtp→success, hoặc failed)
 
