@@ -44,7 +44,8 @@ public static class BigSellerAutoLogin
             var page = context.Pages.FirstOrDefault(p => (p.Url ?? "").Contains("bigseller", StringComparison.OrdinalIgnoreCase))
                        ?? await context.NewPageAsync().ConfigureAwait(false);
 
-            var outcome = Map(await BigSellerLoginForm.RunFormLoginAsync(page, email, password, AiConfigStore.Shared.Current, log, ct).ConfigureAwait(false));
+            var aiCfg = await HubAiConfig.GetAsync(ct).ConfigureAwait(false);
+            var outcome = Map(await BigSellerLoginForm.RunFormLoginAsync(page, email, password, aiCfg, log, ct).ConfigureAwait(false));
             if (outcome == AutoLoginOutcome.Success)
             {
                 BigSellerSessionRegistry.MarkLoggedIn(accountId);
@@ -97,7 +98,8 @@ public static class BigSellerAutoLogin
             var page = context.Pages.FirstOrDefault(p => (p.Url ?? "").Contains("bigseller", StringComparison.OrdinalIgnoreCase))
                        ?? await context.NewPageAsync().ConfigureAwait(false);
 
-            var outcome = Map(await BigSellerLoginForm.RunFormLoginAsync(page, email, password, AiConfigStore.Shared.Current, log, ct).ConfigureAwait(false));
+            var aiCfg = await HubAiConfig.GetAsync(ct).ConfigureAwait(false);
+            var outcome = Map(await BigSellerLoginForm.RunFormLoginAsync(page, email, password, aiCfg, log, ct).ConfigureAwait(false));
             if (outcome == AutoLoginOutcome.Success)
             {
                 BigSellerSessionRegistry.MarkLoggedIn(accountId);
@@ -165,7 +167,8 @@ public static class BigSellerAutoLogin
             if (context is null) { log?.Invoke("Brave headless chưa có context."); return AutoLoginOutcome.Failed; }
             var page = context.Pages.FirstOrDefault() ?? await context.NewPageAsync().ConfigureAwait(false);
 
-            var outcome = Map(await BigSellerLoginForm.RunFormLoginAsync(page, email, password, AiConfigStore.Shared.Current, log, ct).ConfigureAwait(false));
+            var aiCfg = await HubAiConfig.GetAsync(ct).ConfigureAwait(false);
+            var outcome = Map(await BigSellerLoginForm.RunFormLoginAsync(page, email, password, aiCfg, log, ct).ConfigureAwait(false));
             if (outcome == AutoLoginOutcome.Success)
             {
                 BigSellerSessionRegistry.MarkLoggedIn(accountId);

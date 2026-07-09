@@ -40,8 +40,9 @@ internal static class BigSellerAutoLogin
             return;
         }
         log?.Invoke("Bắt đầu phiên — TỰ đăng nhập BigSeller để lấy token tươi (mỗi máy tự mint, không phụ thuộc Hub)…");
+        var aiCfg = await HubAiConfig.GetAsync(ct).ConfigureAwait(false);
         AutoLoginOutcome outcome;
-        try { outcome = Map(await BigSellerLoginForm.RunFormLoginAsync(page, email, password, AiConfigStore.Shared.Current, log, ct).ConfigureAwait(false)); }
+        try { outcome = Map(await BigSellerLoginForm.RunFormLoginAsync(page, email, password, aiCfg, log, ct).ConfigureAwait(false)); }
         catch (OperationCanceledException) { throw; }
         catch (Exception ex) { log?.Invoke($"Auto-login lỗi: {ex.Message} — thử dùng cookie file như cũ."); return; }
 

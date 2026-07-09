@@ -2,7 +2,8 @@ using Shopee.Core.Infrastructure;
 
 namespace Shopee.Core.Ai;
 
-/// <summary>Kho cấu hình AI dùng chung, lưu tại %AppData%\ShopeeSuite\shared\ai.json. Singleton.</summary>
+/// <summary>Kho cấu hình AI dùng chung, lưu tại %AppData%\ShopeeSuite\shared\ai.json. Singleton.
+/// Giờ CHỈ là CACHE/FALLBACK của bản Hub (nguồn sự thật) — client lấy tươi qua <see cref="HubAiConfig"/>.</summary>
 public sealed class AiConfigStore
 {
     private static readonly Lazy<AiConfigStore> _shared = new(() => new AiConfigStore());

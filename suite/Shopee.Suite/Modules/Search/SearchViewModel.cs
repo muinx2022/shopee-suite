@@ -539,7 +539,7 @@ public sealed partial class SearchViewModel : ModuleViewModelBase
     [RelayCommand(CanExecute = nameof(CanRunAi))]
     private async Task UpdateCategoriesAiAsync()
     {
-        if (!ValidateAi(out var ai)) return;
+        if (await ValidateAiAsync() is not { } ai) return;
         AiBusy = true; _aiCts = new CancellationTokenSource();
         try
         {
@@ -558,7 +558,7 @@ public sealed partial class SearchViewModel : ModuleViewModelBase
     [RelayCommand(CanExecute = nameof(CanRunAi))]
     private async Task UpdateCategoriesExcelAsync()
     {
-        if (!ValidateAi(out var ai)) return;
+        if (await ValidateAiAsync() is not { } ai) return;
         var excelPath = await FilePicker.OpenFileAsync("Chọn file Excel (cột tên sản phẩm) để gán danh mục", "Excel|*.xlsx");
         if (excelPath is null) return;
 
@@ -579,13 +579,13 @@ public sealed partial class SearchViewModel : ModuleViewModelBase
     [RelayCommand(CanExecute = nameof(AiBusy))]
     private void StopAi() => _aiCts?.Cancel();
 
-    private bool ValidateAi(out AiConfig ai)
+    private async Task<AiConfig?> ValidateAiAsync()
     {
-        ai = AiConfigStore.Shared.Current;
-        if (!ai.HasActiveKey) { Warn($"Chưa cấu hình API key cho {ai.Provider} (mục Cài đặt)."); return false; }
+        var ai = await HubAiConfig.GetAsync();
+        if (!ai.HasActiveKey) { Warn($"Chưa cấu hình API key cho {ai.Provider} (trang Cấu hình AI trên Hub)."); return null; }
         if (string.IsNullOrWhiteSpace(CategoryDocxPath) || !File.Exists(CategoryDocxPath))
-        { Warn("Chọn file danh mục lá Shopee (.docx) hợp lệ trước."); return false; }
-        return true;
+        { Warn("Chọn file danh mục lá Shopee (.docx) hợp lệ trước."); return null; }
+        return ai;
     }
 
     // ── Lưu/nạp cấu hình UI nhỏ ─────────────────────────────────────────────────

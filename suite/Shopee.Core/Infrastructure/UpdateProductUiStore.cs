@@ -1,11 +1,12 @@
 namespace Shopee.Core.Infrastructure;
 
-/// <summary>Cài đặt UI DÙNG CHUNG của module "Bigseller Update Product" (ảnh/video/key OpenAI áp cho mọi
-/// tk) — lưu để khôi phục sau khi mở lại app (trước đây là UI-state nên mất khi đóng app).</summary>
+/// <summary>Cài đặt UI DÙNG CHUNG của module "Bigseller Update Product" (ảnh/video áp cho mọi tk) —
+/// lưu để khôi phục sau khi mở lại app (trước đây là UI-state nên mất khi đóng app).</summary>
 public sealed class UpdateProductUiSettings
 {
     public string ImagePath { get; set; } = "";
     public string VideoFolder { get; set; } = "";
+    /// <summary>LEGACY — không còn UI/engine nào đọc (key AI giờ lấy từ AiConfig trên Hub); giữ để JSON cũ đọc được.</summary>
     public string OpenAiKeyFile { get; set; } = "";
 }
 

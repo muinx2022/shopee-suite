@@ -38,7 +38,8 @@ public sealed class HubConfigSync
         int n = 0;
         if (await PushIfChangedAsync(manifest, SharedFile("accounts.json"), "config/accounts.json", ct)) n++;
         if (await PushIfChangedAsync(manifest, SharedFile("bigseller.json"), "config/bigseller.json", ct)) n++;
-        if (await PushIfChangedAsync(manifest, SharedFile("ai.json"), "config/ai.json", ct)) n++;
+        // AI config giờ CHỈ sửa trên Hub (trang Cấu hình AI) — client KHÔNG đẩy ai.json nữa để bản cache cũ
+        // không đè bản Hub mới (client chỉ pull về làm cache/fallback offline).
         if (await PushIfChangedAsync(manifest, SharedFile("scrape-targets.json"), "config/scrape-targets.json", ct)) n++;
         if (await PushIfChangedAsync(manifest, SharedFile("kiot-proxies.json"), "config/kiot-proxies.json", ct)) n++;
 
@@ -137,7 +138,7 @@ public sealed class HubConfigSync
         }
         catch (Exception ex) when (ex is not OperationCanceledException) { }
 
-        // 4) AI (ghi đè — 1 cấu hình duy nhất).
+        // 4) AI (ghi đè cache — nguồn sự thật ở Hub, client chỉ giữ bản cache/fallback).
         try
         {
             var aiBytes = await _client.DownloadAsync("config/ai.json", ct);

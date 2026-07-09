@@ -37,7 +37,7 @@
                     <Button Classes="primary" Content="🔐  Đăng nhập tất cả (headless)"
                             HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
                             Command="{Binding LoginAllCommand}"
-                            ToolTip.Tip="Tự đăng nhập HEADLESS mọi tk có đủ Email + Mật khẩu rồi lưu cookie cho client. Cần API key OpenAI (Cài đặt) để giải captcha; tk đòi mã email sẽ được báo để đăng nhập tay 1 lần." />
+                            ToolTip.Tip="Tự đăng nhập HEADLESS mọi tk có đủ Email + Mật khẩu rồi lưu cookie cho client. Cần API key OpenAI (trang Cấu hình AI trên Hub) để giải captcha; tk đòi mã email sẽ được báo để đăng nhập tay 1 lần." />
                     <Button Classes="danger" Content="■ Dừng" Margin="0,6,0,0"
                             HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
                             IsVisible="{Binding IsLoggingIn}" Command="{Binding StopLoginCommand}" />

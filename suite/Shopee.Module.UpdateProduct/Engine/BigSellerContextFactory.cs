@@ -42,7 +42,7 @@ internal static class BigSellerContextFactory
             UpdateMaxProcess = Math.Clamp(shop.BigSellerUpdateMaxProcess, 1, 10),
             ListingReloadSeconds = Math.Clamp(shop.BigSellerListingReloadSeconds, 3, 600),
             OpenAiModel = string.IsNullOrWhiteSpace(shop.OpenAiModel) ? "gpt-4.1-mini" : shop.OpenAiModel,
-            OpenAiApiKeyFile = "",   // BỎ file openai.key — key OpenAI giờ CHỈ lấy từ AiConfig (Cài đặt) qua AiChat
+            OpenAiApiKeyFile = "",   // BỎ file openai.key — key OpenAI giờ CHỈ lấy từ AiConfig (trên Hub) qua AiChat
             OpenAiBatchSize = Math.Clamp(shop.OpenAiBatchSize, 1, 500),
         };
     }

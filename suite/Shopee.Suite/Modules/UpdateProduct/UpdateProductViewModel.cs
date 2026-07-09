@@ -239,7 +239,7 @@ public sealed partial class UpdateProductViewModel : ModuleViewModelBase
             }
             lease = attempt.Handle;
 
-            var ai = AiConfigStore.Shared.Current;
+            var ai = await HubAiConfig.GetAsync(job.Cts.Token).ConfigureAwait(false);
             // CHỈ Update: ảnh local riêng (nếu có) hoặc kéo ảnh chung Hub về khu workbook + trỏ ô chọn ảnh.
             var img = kind == UpdateKind.Update ? await EnsureUpdateImageAsync(job.Cts.Token).ConfigureAwait(false) : ImagePath;
             if (kind == UpdateKind.Update && (string.IsNullOrWhiteSpace(img) || !File.Exists(img)))
@@ -301,7 +301,7 @@ public sealed partial class UpdateProductViewModel : ModuleViewModelBase
         var picked = (only ?? RunTargets.Where(t => t.IsSelected)).ToList();
         if (picked.Count == 0) { Warn("Chưa tick chọn tài khoản BigSeller nào để chạy."); return; }
 
-        var ai = AiConfigStore.Shared.Current;
+        var ai = await HubAiConfig.GetAsync(CancellationToken.None).ConfigureAwait(false);
 
         // CHỈ Update: đảm bảo ảnh MỘT LẦN trước khi build/chạy song song (ảnh local riêng hoặc kéo ảnh chung Hub về
         // khu workbook + trỏ ô chọn ảnh). Chưa có CTS ở đây nên dùng None — pull nhanh, best-effort, timeout _bulkHttp.
@@ -407,7 +407,7 @@ public sealed partial class UpdateProductViewModel : ModuleViewModelBase
         bool? importFromClaimedTab = null, string? imageOverride = null)
     {
         var a = t.Account; var s = t.SelectedShop!;
-        // AI (viết lại tên/mô tả) dùng cấu hình AI CHUNG ở Cài đặt; key truyền THẲNG qua context
+        // AI (viết lại tên/mô tả) dùng cấu hình AI CHUNG lấy từ Hub; key truyền THẲNG qua context
         // (không set biến môi trường process-wide để Brave/Playwright không kế thừa key).
         var aiModel = string.IsNullOrWhiteSpace(ai.OpenAiModel) ? s.OpenAiModel : ai.OpenAiModel;
         // Khoảng dòng: ưu tiên override (Hub giao việc, >0) → KHÔNG ghi đè cấu hình shop; 0/null = dùng cấu hình.

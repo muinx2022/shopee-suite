@@ -95,10 +95,10 @@ internal sealed class ProductNameRewriteRunner
         if (string.IsNullOrWhiteSpace(sheetName))
             throw new InvalidOperationException("Thiếu tên sheet.");
 
-        // Dùng cấu hình AI CHUNG ở Cài đặt (provider + model + key) — KHÔNG còn cứng OpenAI.
-        var cfg = AiConfigStore.Shared.Current;
+        // Dùng cấu hình AI CHUNG lấy TƯƠI từ Hub (provider + model + key) — KHÔNG còn cứng OpenAI.
+        var cfg = await HubAiConfig.GetAsync(ct).ConfigureAwait(false);
         if (!cfg.HasActiveKey)
-            throw new InvalidOperationException($"Chưa cấu hình API key cho {cfg.Provider} (mục Cài đặt → Nhà cung cấp AI).");
+            throw new InvalidOperationException($"Chưa cấu hình API key cho {cfg.Provider} (trang Cấu hình AI trên Hub).");
         var batchSize = Math.Clamp(cfg.BatchSize, 1, 500);
 
         // Cột Excel theo cấu hình của shop. 0 = "không dùng" → fail rõ ràng (KHÔNG âm thầm rơi về cột
@@ -204,7 +204,7 @@ internal sealed class ProductNameRewriteRunner
         log($"✓ Xong rewrite tên: {updatedCount} dòng thay đổi. Bỏ qua: {plan.SkippedNoName} thiếu 'Tên sp', {plan.SkippedNoSku} thiếu 'SKU', {plan.SkippedExisting} đã có 'Tên sp đã sửa'.");
     }
 
-    // ── Viết lại TÊN: 1 lần gọi → tiêu đề SEO hoàn chỉnh (dùng AiConfig + prompt SEO trong Cài đặt) ──
+    // ── Viết lại TÊN: 1 lần gọi → tiêu đề SEO hoàn chỉnh (dùng AiConfig + prompt SEO cấu hình trên Hub) ──
     private static async Task<List<string>> RequestSeoTitlesWithSplitAsync(
         AiConfig cfg, List<string> names, Action<string> log, CancellationToken ct)
     {
@@ -241,7 +241,7 @@ internal sealed class ProductNameRewriteRunner
 
     private static async Task<List<string>> RequestSeoTitlesOnceAsync(AiConfig cfg, List<string> names, CancellationToken ct)
     {
-        // System = prompt SEO người dùng cấu hình (Cài đặt) + đóng gói JSON cho xử lý nhiều sản phẩm.
+        // System = prompt SEO người dùng cấu hình (trên Hub) + đóng gói JSON cho xử lý nhiều sản phẩm.
         var system = cfg.EffectiveNameRewritePrompt +
             "\n\n[XỬ LÝ NHIỀU SẢN PHẨM] Bạn sẽ nhận JSON danh sách {index, name}. Áp dụng đúng quy tắc trên cho TỪNG name. " +
             "CHỈ trả về DUY NHẤT JSON: {\"items\":[{\"index\":0,\"title\":\"<tiêu đề SEO, KHÔNG kèm SKU>\"}]} — đủ mỗi index input, " +
@@ -274,7 +274,7 @@ internal sealed class ProductNameRewriteRunner
 
 
     /// <summary>Gọi AI (đa provider qua AiChat) yêu cầu trả JSON, rồi trích object JSON từ text trả về.
-    /// Dùng cho cả 2 bước (parse cấu trúc + viết lại) — provider/model/key lấy từ AiConfig (Cài đặt).</summary>
+    /// Dùng cho cả 2 bước (parse cấu trúc + viết lại) — provider/model/key lấy từ AiConfig (trên Hub).</summary>
     private static async Task<string> AiJsonAsync(AiConfig cfg, string system, string user, CancellationToken ct, double temperature = 0)
     {
         var text = await AiChat.CompleteAsync(cfg, system, user, ct, temperature, maxTokens: 8192).ConfigureAwait(false);

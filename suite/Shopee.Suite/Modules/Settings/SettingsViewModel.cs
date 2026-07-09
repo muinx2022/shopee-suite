@@ -1,6 +1,5 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using Shopee.Core.Ai;
 using Shopee.Core.Browser;
 using Shopee.Core.Coordination;
 using Shopee.Core.Infrastructure;
@@ -9,45 +8,12 @@ using Shopee.Suite.Services;
 namespace Shopee.Suite.Modules.Settings;
 
 /// <summary>
-/// Mục "Cài đặt" — cấu hình AI dùng chung (provider + model + API key) cho viết lại tên/mô tả SP và
-/// cập nhật danh mục. Lưu vào <see cref="AiConfigStore"/>.
+/// Mục "Cài đặt" — hiệu năng (trần cửa sổ Brave theo CPU/RAM), đồng bộ nhiều máy qua Hub, và phiên bản/tự
+/// cập nhật + tên máy. Cấu hình AI + prompt giờ đặt trên Hub (client tự kéo về khi gọi AI).
 /// </summary>
 public sealed partial class SettingsViewModel : ObservableObject
 {
-    public string[] ProviderOptions { get; } = ["OpenAI", "Anthropic", "Gemini"];
-
-    [ObservableProperty] private string _provider = "OpenAI";
-    [ObservableProperty] private string _openAiModel = "";
-    [ObservableProperty] private string _openAiApiKey = "";
-    [ObservableProperty] private string _anthropicModel = "";
-    [ObservableProperty] private string _anthropicApiKey = "";
-    [ObservableProperty] private string _geminiModel = "";
-    [ObservableProperty] private string _geminiApiKey = "";
-    [ObservableProperty] private int _batchSize = 40;
     [ObservableProperty] private string _status = "";
-
-    // Card của provider ĐANG CHỌN được đánh dấu (viền accent + chip "✓ Đang dùng"). Cập nhật khi Provider đổi.
-    public bool IsOpenAiActive => Provider == "OpenAI";
-    public bool IsAnthropicActive => Provider == "Anthropic";
-    public bool IsGeminiActive => Provider == "Gemini";
-
-    partial void OnProviderChanged(string value)
-    {
-        OnPropertyChanged(nameof(IsOpenAiActive));
-        OnPropertyChanged(nameof(IsAnthropicActive));
-        OnPropertyChanged(nameof(IsGeminiActive));
-    }
-
-    // System prompt cho 2 tác vụ AI (Update Product). Rỗng = dùng mặc định; ở đây prefill bản đang dùng.
-    [ObservableProperty] private string _nameRewritePrompt = "";
-    [ObservableProperty] private string _descriptionPrompt = "";
-
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsIdle))]
-    [NotifyCanExecuteChangedFor(nameof(TestCommand))]
-    private bool _testing;
-
-    public bool IsIdle => !Testing;
 
     // ── Hiệu năng (ngân sách CPU/RAM → trần cửa sổ Brave) ────────────────────────
     /// <summary>Số nhân CPU cho phép app dùng (mỗi cửa sổ Brave ~1 nhân).</summary>
@@ -183,39 +149,6 @@ public sealed partial class SettingsViewModel : ObservableObject
         var p = PerformanceSettingsStore.Shared.Current;
         UsableCpu = p.UsableCpuCores > 0 ? p.UsableCpuCores : System.Math.Max(2, BraveFleet.CpuCores / 2);
         UsableRamGb = p.UsableRamGb > 0 ? p.UsableRamGb : BraveFleet.TotalRamGb;
-        var c = AiConfigStore.Shared.Current;
-        Provider = c.Provider;
-        OpenAiModel = c.OpenAiModel;
-        OpenAiApiKey = c.OpenAiApiKey;
-        AnthropicModel = c.AnthropicModel;
-        AnthropicApiKey = c.AnthropicApiKey;
-        GeminiModel = c.GeminiModel;
-        GeminiApiKey = c.GeminiApiKey;
-        BatchSize = c.BatchSize;
-        // Prefill bằng prompt ĐANG DÙNG (mặc định nếu chưa đặt) để người dùng sửa trực tiếp.
-        NameRewritePrompt = c.EffectiveNameRewritePrompt;
-        DescriptionPrompt = c.EffectiveDescriptionPrompt;
-    }
-
-    private AiConfig Build() => new()
-    {
-        Provider = Provider,
-        OpenAiModel = OpenAiModel.Trim(),
-        OpenAiApiKey = OpenAiApiKey.Trim(),
-        AnthropicModel = AnthropicModel.Trim(),
-        AnthropicApiKey = AnthropicApiKey.Trim(),
-        GeminiModel = GeminiModel.Trim(),
-        GeminiApiKey = GeminiApiKey.Trim(),
-        BatchSize = Math.Clamp(BatchSize <= 0 ? 40 : BatchSize, 1, 500),
-        NameRewritePrompt = (NameRewritePrompt ?? "").Trim(),
-        DescriptionPrompt = (DescriptionPrompt ?? "").Trim(),
-    };
-
-    [RelayCommand]
-    private void Save()
-    {
-        AiConfigStore.Shared.Save(Build());
-        Status = $"Đã lưu. Provider đang dùng: {Provider}.";
     }
 
     [RelayCommand]
@@ -229,9 +162,6 @@ public sealed partial class SettingsViewModel : ObservableObject
         BraveFleet.MaxConcurrentWindows = max;   // áp dụng ngay (đầy đủ từ lượt chạy kế tiếp)
         Status = $"Đã đặt: dùng {cpu} nhân + {ram}GB → tối đa {max} cửa sổ Brave (áp dụng từ lượt chạy kế tiếp).";
     }
-
-    [RelayCommand] private void ResetNamePrompt() => NameRewritePrompt = AiPrompts.DefaultNameRewrite;
-    [RelayCommand] private void ResetDescriptionPrompt() => DescriptionPrompt = AiPrompts.DefaultDescription;
 
     [RelayCommand]
     private void SaveMachineName()
@@ -345,26 +275,5 @@ public sealed partial class SettingsViewModel : ObservableObject
         if (sync is null) { Status = "Chưa kết nối Hub (bật đồng bộ rồi khởi động lại app)."; return; }
         try { Status = await sync.PushAsync(); }
         catch (Exception ex) { Status = "✘ Lỗi đẩy cấu hình: " + ex.Message; }
-    }
-
-    [RelayCommand(CanExecute = nameof(IsIdle))]
-    private async Task Test()
-    {
-        var cfg = Build();
-        if (!cfg.HasActiveKey) { Status = $"Chưa nhập API key cho {Provider}."; return; }
-        Testing = true;
-        Status = $"Đang test {Provider} ({cfg.ActiveModel})…";
-        try
-        {
-            var reply = await AiChat.CompleteAsync(cfg,
-                "Bạn là trợ lý kiểm tra kết nối.", "Trả lời đúng một từ: OK", default, temperature: 0, maxTokens: 16);
-            Status = $"✓ {Provider} OK — phản hồi: \"{reply.Trim()}\"";
-        }
-        catch (Exception ex)
-        {
-            Status = "✘ Lỗi: " + ex.Message;
-            Dialogs.Notify(ex.Message, "Test AI", DialogIcon.Warning);
-        }
-        finally { Testing = false; }
     }
 }

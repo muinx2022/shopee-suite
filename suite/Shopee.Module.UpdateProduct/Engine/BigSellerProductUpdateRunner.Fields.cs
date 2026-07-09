@@ -238,7 +238,7 @@ internal sealed partial class BigSellerProductUpdateRunner
     // ── AI description ──
     private async Task<string> GenerateDescriptionAsync(string productName, CancellationToken ct)
     {
-        var cfg = AiConfigStore.Shared.Current;
+        var cfg = await HubAiConfig.GetAsync(ct).ConfigureAwait(false);
         // Parity Python: temperature 0.6 + ràng buộc độ dài trong user prompt (tránh vượt 3000 bị cắt cứng/reject).
         var userPrompt =
             $"Tên sản phẩm: {productName}\n" +
@@ -264,7 +264,7 @@ internal sealed partial class BigSellerProductUpdateRunner
             {
                 // Key sai / hết quota / model sai → lỗi cấu hình: retry vô ích. Ném ra để DỪNG hẳn run
                 // (báo lỗi rõ) thay vì coi là "lỗi tạm" → lặp mở/đóng tab + đập endpoint AI vô hạn.
-                _log($"✖ Lỗi AI không thể phục hồi ({ex.StatusCode}) — dừng. Kiểm tra OpenAI API key/quota/model trong Cài đặt.");
+                _log($"✖ Lỗi AI không thể phục hồi ({ex.StatusCode}) — dừng. Kiểm tra OpenAI API key/quota/model trên Hub (trang Cấu hình AI).");
                 throw;
             }
             catch (Exception ex) { _log($"⚠ Lỗi tạo mô tả AI (lần {attempt}): {ex.Message}"); }

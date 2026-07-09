@@ -4,21 +4,13 @@
     x:Class="Shopee.Suite.Modules.Settings.SettingsView"
     x:Name="Root">
 
-    <UserControl.Styles>
-        <!-- Card của provider AI đang chọn: viền accent đậm hơn để nổi bật (dùng cùng Border.card). -->
-        <Style Selector="Border.card.active">
-            <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
-            <Setter Property="BorderThickness" Value="1.5" />
-        </Style>
-    </UserControl.Styles>
-
     <Grid Margin="28,22,28,24" RowDefinitions="Auto,*">
 
         <!-- Header -->
         <Grid Grid.Row="0" Margin="0,0,0,16">
             <StackPanel>
                 <TextBlock Text="Cài đặt" Classes="h1" />
-                <TextBlock Text="Hiệu năng (trần cửa sổ Brave theo CPU/RAM), cấu hình AI, system prompt, và đồng bộ nhiều máy qua Hub."
+                <TextBlock Text="Hiệu năng (trần cửa sổ Brave theo CPU/RAM) và đồng bộ nhiều máy qua Hub. Cấu hình AI + prompt đặt trên Hub."
                            Classes="caption" Margin="0,3,0,0" />
             </StackPanel>
             <Border HorizontalAlignment="Right" VerticalAlignment="Center"
@@ -103,130 +95,7 @@
                 </ScrollViewer>
             </TabItem>
 
-            <!-- ══════════ TAB 1: Nhà cung cấp AI ══════════ -->
-            <TabItem Header="Nhà cung cấp AI">
-                <ScrollViewer VerticalScrollBarVisibility="Auto" Margin="0,12,0,0">
-                    <Grid MaxWidth="1200" HorizontalAlignment="Left" RowDefinitions="Auto,Auto,Auto">
-
-                        <!-- Hàng 1: provider đang dùng + batch (full width) -->
-                        <Border Grid.Row="0" Classes="card" Padding="18">
-                            <StackPanel>
-                                <TextBlock Text="Nhà cung cấp AI đang dùng" Classes="h2" Margin="0,0,0,10" />
-                                <StackPanel Orientation="Horizontal">
-                                    <ComboBox Width="200" SelectedItem="{Binding Provider}" ItemsSource="{Binding ProviderOptions}" />
-                                    <TextBlock Text="Số mục / batch" Classes="caption" VerticalAlignment="Center" Margin="20,0,8,0" />
-                                    <TextBox Width="70" Text="{Binding BatchSize}" />
-                                </StackPanel>
-                            </StackPanel>
-                        </Border>
-
-                        <!-- Hàng 2: 3 card provider cạnh nhau; card đang dùng có viền accent + chip -->
-                        <Grid Grid.Row="1" Margin="0,14,0,0" ColumnDefinitions="*,12,*,12,*">
-
-                            <Border Grid.Column="0" Classes="card" Classes.active="{Binding IsOpenAiActive}" Padding="18" VerticalAlignment="Top">
-                                <StackPanel>
-                                    <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,10">
-                                        <TextBlock Text="OpenAI" Classes="h2" VerticalAlignment="Center" />
-                                        <Border Grid.Column="1" Background="{DynamicResource SubtleBrush}" CornerRadius="10" Padding="8,2"
-                                                VerticalAlignment="Center" IsVisible="{Binding IsOpenAiActive}">
-                                            <TextBlock Text="✓ Đang dùng" FontSize="11" Foreground="{DynamicResource AccentBrush}" FontWeight="SemiBold" />
-                                        </Border>
-                                    </Grid>
-                                    <TextBlock Text="Model" Classes="caption" />
-                                    <TextBox Margin="0,3,0,10" Text="{Binding OpenAiModel}" />
-                                    <TextBlock Text="API key" Classes="caption" />
-                                    <TextBox Margin="0,3,0,0" FontFamily="{DynamicResource MonoFont}" FontSize="12"
-                                             Text="{Binding OpenAiApiKey}" />
-                                </StackPanel>
-                            </Border>
-
-                            <Border Grid.Column="2" Classes="card" Classes.active="{Binding IsAnthropicActive}" Padding="18" VerticalAlignment="Top">
-                                <StackPanel>
-                                    <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,10">
-                                        <TextBlock Text="Anthropic (Claude)" Classes="h2" VerticalAlignment="Center" />
-                                        <Border Grid.Column="1" Background="{DynamicResource SubtleBrush}" CornerRadius="10" Padding="8,2"
-                                                VerticalAlignment="Center" IsVisible="{Binding IsAnthropicActive}">
-                                            <TextBlock Text="✓ Đang dùng" FontSize="11" Foreground="{DynamicResource AccentBrush}" FontWeight="SemiBold" />
-                                        </Border>
-                                    </Grid>
-                                    <TextBlock Text="Model" Classes="caption" />
-                                    <TextBox Margin="0,3,0,10" Text="{Binding AnthropicModel}" />
-                                    <TextBlock Text="API key" Classes="caption" />
-                                    <TextBox Margin="0,3,0,0" FontFamily="{DynamicResource MonoFont}" FontSize="12"
-                                             Text="{Binding AnthropicApiKey}" />
-                                </StackPanel>
-                            </Border>
-
-                            <Border Grid.Column="4" Classes="card" Classes.active="{Binding IsGeminiActive}" Padding="18" VerticalAlignment="Top">
-                                <StackPanel>
-                                    <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,10">
-                                        <TextBlock Text="Google Gemini" Classes="h2" VerticalAlignment="Center" />
-                                        <Border Grid.Column="1" Background="{DynamicResource SubtleBrush}" CornerRadius="10" Padding="8,2"
-                                                VerticalAlignment="Center" IsVisible="{Binding IsGeminiActive}">
-                                            <TextBlock Text="✓ Đang dùng" FontSize="11" Foreground="{DynamicResource AccentBrush}" FontWeight="SemiBold" />
-                                        </Border>
-                                    </Grid>
-                                    <TextBlock Text="Model" Classes="caption" />
-                                    <TextBox Margin="0,3,0,10" Text="{Binding GeminiModel}" />
-                                    <TextBlock Text="API key" Classes="caption" />
-                                    <TextBox Margin="0,3,0,0" FontFamily="{DynamicResource MonoFont}" FontSize="12"
-                                             Text="{Binding GeminiApiKey}" />
-                                </StackPanel>
-                            </Border>
-                        </Grid>
-
-                        <!-- Hàng 3: nút Lưu + Test -->
-                        <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,14,0,0">
-                            <Button Classes="primary" Content="💾  Lưu" MinWidth="110" Command="{Binding SaveCommand}" />
-                            <Button Content="⚡  Test kết nối" MinWidth="130" Margin="10,0,0,0" Command="{Binding TestCommand}" />
-                        </StackPanel>
-                    </Grid>
-                </ScrollViewer>
-            </TabItem>
-
-            <!-- ══════════ TAB 2: System Prompt ══════════ -->
-            <TabItem Header="System Prompt">
-                <Grid Margin="0,12,0,0" RowDefinitions="Auto,*,Auto">
-
-                    <TextBlock Grid.Row="0" Classes="caption" TextWrapping="Wrap" Margin="0,0,0,10"
-                               Text="System prompt cho 2 tác vụ AI ở Update Product. Để trống = dùng mặc định. Prompt viết lại tên có thể chứa {versionCount} (số phương án cần tạo)." />
-
-                    <!-- 2 editor cạnh nhau: TÊN | MÔ TẢ -->
-                    <Grid Grid.Row="1" ColumnDefinitions="*,14,*">
-
-                        <!-- Prompt viết lại TÊN -->
-                        <DockPanel Grid.Column="0">
-                            <Grid DockPanel.Dock="Top" Margin="0,0,0,4">
-                                <TextBlock Text="Prompt — Viết lại TÊN sản phẩm" Classes="h2" VerticalAlignment="Center" />
-                                <Button HorizontalAlignment="Right" Content="↩ Khôi phục mặc định" Command="{Binding ResetNamePromptCommand}" />
-                            </Grid>
-                            <Border Classes="card" ClipToBounds="True">
-                                <TextBox Classes="mono" FontSize="12" TextWrapping="Wrap" AcceptsReturn="True"
-                                         VerticalAlignment="Stretch" ScrollViewer.VerticalScrollBarVisibility="Auto"
-                                         Text="{Binding NameRewritePrompt}" />
-                            </Border>
-                        </DockPanel>
-
-                        <!-- Prompt viết lại MÔ TẢ -->
-                        <DockPanel Grid.Column="2">
-                            <Grid DockPanel.Dock="Top" Margin="0,0,0,4">
-                                <TextBlock Text="Prompt — Viết lại MÔ TẢ sản phẩm" Classes="h2" VerticalAlignment="Center" />
-                                <Button HorizontalAlignment="Right" Content="↩ Khôi phục mặc định" Command="{Binding ResetDescriptionPromptCommand}" />
-                            </Grid>
-                            <Border Classes="card" ClipToBounds="True">
-                                <TextBox Classes="mono" FontSize="12" TextWrapping="Wrap" AcceptsReturn="True"
-                                         VerticalAlignment="Stretch" ScrollViewer.VerticalScrollBarVisibility="Auto"
-                                         Text="{Binding DescriptionPrompt}" />
-                            </Border>
-                        </DockPanel>
-                    </Grid>
-
-                    <Button Grid.Row="2" HorizontalAlignment="Left" Classes="primary" Margin="0,12,0,0"
-                            Content="💾  Lưu prompt" MinWidth="130" Command="{Binding SaveCommand}" />
-                </Grid>
-            </TabItem>
-
-            <!-- ══════════ TAB 3: Đồng bộ nhiều máy (chỉ phần CLIENT) ══════════ -->
+            <!-- ══════════ TAB: Đồng bộ nhiều máy (chỉ phần CLIENT) ══════════ -->
             <TabItem Header="Đồng bộ nhiều máy">
                 <ScrollViewer VerticalScrollBarVisibility="Auto" Margin="0,12,0,0">
                     <Grid MaxWidth="1200" HorizontalAlignment="Left" ColumnDefinitions="1*,14,1.35*">
@@ -282,7 +151,7 @@
 
                                 <Button Content="⬆  Đẩy cấu hình lên Hub" HorizontalAlignment="Left" Margin="0,12,0,0"
                                         Command="{Binding PushConfigToHubCommand}"
-                                        ToolTip.Tip="Đẩy accounts/bigseller/ai/cookie hiện tại lên Hub làm nguồn cho các máy khác kéo về." />
+                                        ToolTip.Tip="Đẩy accounts/bigseller/cookie hiện tại lên Hub làm nguồn cho các máy khác kéo về." />
                             </StackPanel>
                         </Border>
 

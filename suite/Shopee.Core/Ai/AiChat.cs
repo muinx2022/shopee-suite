@@ -18,7 +18,7 @@ public static class AiChat
         double temperature = 0.7, int maxTokens = 4096)
     {
         if (!cfg.HasActiveKey)
-            throw new InvalidOperationException($"Chưa cấu hình API key cho {cfg.Provider} (mục Cài đặt).");
+            throw new InvalidOperationException($"Chưa cấu hình API key cho {cfg.Provider} (trang Cấu hình AI trên Hub).");
 
         var model = cfg.ActiveModel;
         var key = cfg.ActiveApiKey;
@@ -92,7 +92,7 @@ public static class AiChat
         double temperature = 0, int maxTokens = 16)
     {
         if (!cfg.HasActiveKey)
-            throw new InvalidOperationException($"Chưa cấu hình API key cho {cfg.Provider} (mục Cài đặt).");
+            throw new InvalidOperationException($"Chưa cấu hình API key cho {cfg.Provider} (trang Cấu hình AI trên Hub).");
 
         var model = cfg.ActiveModel;
         var key = cfg.ActiveApiKey;

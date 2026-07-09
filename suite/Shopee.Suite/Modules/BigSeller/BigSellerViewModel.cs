@@ -266,7 +266,7 @@ public sealed partial class BigSellerViewModel : ModuleViewModelBase
         }
         if (!await Dialogs.ConfirmAsync(
                 $"Tự đăng nhập HEADLESS (không hiện cửa sổ) {accts.Count} tài khoản BigSeller rồi lưu cookie?\n\n" +
-                "• Cần API key OpenAI (Cài đặt) để giải captcha.\n" +
+                "• Cần API key OpenAI (trang Cấu hình AI trên Hub) để giải captcha.\n" +
                 "• Tk đòi mã email (thiết bị mới) sẽ được báo — vào Mở Profile đăng nhập tay 1 lần để tạo device-trust.",
                 "Đăng nhập tất cả"))
             return;

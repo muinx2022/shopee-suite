@@ -1,8 +1,8 @@
 namespace Shopee.Core.Ai;
 
 /// <summary>
-/// System prompt MẶC ĐỊNH cho 2 tác vụ AI ở Update Product. Người dùng có thể ghi đè trong
-/// Cài đặt → tab "System Prompt" (lưu vào <see cref="AiConfig"/>). Rỗng = dùng mặc định ở đây.
+/// System prompt MẶC ĐỊNH cho 2 tác vụ AI ở Update Product. Người dùng có thể ghi đè trên Hub
+/// (trang Cấu hình AI → tab Prompt, lưu vào <see cref="AiConfig"/>). Rỗng = dùng mặc định ở đây.
 /// </summary>
 public static class AiPrompts
 {

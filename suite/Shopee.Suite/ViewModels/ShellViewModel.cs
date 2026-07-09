@@ -60,7 +60,7 @@ public sealed partial class ShellViewModel : ObservableObject
                 new AccountsViewModel(), "Tài khoản"),
             new ModuleItem("Trạng thái & Giao việc", AppIcons.Servers, "Theo dõi máy + Hub giao việc cho từng máy (đa máy)",
                 new FleetViewModel(worker), "Trạng thái"),
-            new ModuleItem("Cài đặt", AppIcons.Settings, "AI provider / model / API key",
+            new ModuleItem("Cài đặt", AppIcons.Settings, "Hiệu năng · đồng bộ Hub · cập nhật",
                 new SettingsViewModel(), "Cài đặt"),
         ];
 
