@@ -62,6 +62,11 @@ internal abstract class BigSellerBraveRunner : IAsyncDisposable
             .DisableGpu()
             .Add("--disable-dev-shm-usage")
             .Add("--disable-software-rasterizer")
+            // Cửa sổ mở THU NHỎ (startMinimized) → Chromium bóp timer/renderer khi cửa sổ bị che/thu nhỏ,
+            // làm Update/Import chậm/treo ngầm. Tắt 3 cơ chế tiết kiệm đó (giống scrape) để chạy nền ổn định.
+            .Add("--disable-backgrounding-occluded-windows")
+            .Add("--disable-renderer-backgrounding")
+            .Add("--disable-background-timer-throttling")
             .DiskCacheLimit()
             .StartUrl(StartUrl)
             .Build();

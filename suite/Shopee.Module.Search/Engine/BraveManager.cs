@@ -69,7 +69,9 @@ public sealed class BraveManager(AppSettingsService appSettings)
         var args = BuildArgs(_cdpPort, profileDir, proxyServer, extPath, wsPort);
         // Phóng qua BraveJobObject (KILL_ON_JOB_CLOSE): app tắt/crash/force-kill → OS tự giết Brave này,
         // không để lại cửa sổ mồ côi. Trước đây Search dùng Process.Start trần → Brave sống sót qua crash.
-        _process = Shopee.Core.Browser.BraveJobObject.Start(bravePath, args);
+        // startMinimized: cửa sổ Search tự động mở THU NHỎ, không cướp focus màn hình người dùng; watchdog
+        // trong BraveJobObject lo cửa sổ browser fork/mở lại.
+        _process = Shopee.Core.Browser.BraveJobObject.Start(bravePath, args, startMinimized: true);
     }
 
     public async Task CleanupRestoredTabsAsync(int wsPort, CancellationToken ct = default)
@@ -235,6 +237,11 @@ public sealed class BraveManager(AppSettingsService appSettings)
             .Add("--no-restore-last-session")
             .Add("--restore-last-session=false")
             .Add("--disable-background-mode")
+            // Search chạy cửa sổ THU NHỎ (startMinimized) → Chromium bóp timer/renderer khi cửa sổ bị
+            // che/thu nhỏ, làm cào chậm/treo ngầm. Tắt 3 cơ chế tiết kiệm đó (giống scrape) để chạy nền ổn định.
+            .Add("--disable-backgrounding-occluded-windows")
+            .Add("--disable-renderer-backgrounding")
+            .Add("--disable-background-timer-throttling")
             // Brave/Chrome 137+ mặc định chặn --load-extension (DisableLoadExtensionCommandLineSwitch) →
             // tắt feature đó để extension Shopee Search load được (giống engine Scrape).
             .Add("--disable-features=DisableLoadExtensionCommandLineSwitch")

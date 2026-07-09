@@ -30,7 +30,7 @@ public static class BraveProcessReaper
             return 0;
 
         var killed = 0;
-        foreach (var pid in FindBravePidsByCommandLine(needle, log))
+        foreach (var pid in FindPidsByUserDataDir(userDataDir, log))
         {
             if (TryKillTree(pid))
                 killed++;
@@ -56,16 +56,24 @@ public static class BraveProcessReaper
     private static readonly string[] BraveOnly = ["brave.exe"];
     private static readonly string[] CrashpadOnly = ["crashpad_handler.exe"];
 
-    private static List<int> FindBravePidsByCommandLine(string normalizedNeedle, Action<string>? log)
+    /// <summary>Tìm PID mọi brave.exe có cờ <c>--user-data-dir</c> trỏ ĐÚNG tới <paramref name="userDataDir"/>
+    /// (khớp CHÍNH XÁC giá trị đã chuẩn hoá, KHÔNG Contains: profile "acc_1" là chuỗi con của "acc_10" → Contains
+    /// sẽ đụng account khác khi có ≥10 account). Dùng chung cho <see cref="KillByUserDataDir"/> lẫn
+    /// <see cref="BraveWindowMinimizer"/> (không đổi hành vi kill). Trả rỗng nếu path rỗng.</summary>
+    internal static List<int> FindPidsByUserDataDir(string userDataDir, Action<string>? log = null)
     {
         var pids = new List<int>();
+        if (string.IsNullOrWhiteSpace(userDataDir))
+            return pids;
+        var needle = NormalizePath(userDataDir);
+        if (needle.Length == 0)
+            return pids;
+
         foreach (var p in PlatformServices.ProcessFinder.Enumerate(BraveOnly, log))
         {
-            // Phải khớp ĐÚNG giá trị --user-data-dir (không dùng Contains): profile "acc_1" là
-            // chuỗi con của "acc_10" → Contains sẽ giết nhầm browser account khác khi có ≥10 account.
             var dir = ExtractUserDataDir(p.CommandLine);
             if (dir is not null &&
-                string.Equals(NormalizePath(dir), normalizedNeedle, StringComparison.OrdinalIgnoreCase))
+                string.Equals(NormalizePath(dir), needle, StringComparison.OrdinalIgnoreCase))
             {
                 if (p.Pid > 0)
                     pids.Add(p.Pid);
@@ -158,6 +166,8 @@ public static class BraveProcessReaper
         return space < 0 ? rest : rest[..space];
     }
 
-    private static string NormalizePath(string path) =>
+    /// <summary>Chuẩn hoá đường dẫn để so khớp: bỏ khoảng trắng + dấu nháy hai đầu + dấu <c>\</c>/<c>/</c> cuối.
+    /// Dùng chung với <see cref="BraveWindowMinimizer"/>.</summary>
+    internal static string NormalizePath(string path) =>
         path.Trim().Trim('"').TrimEnd('\\', '/');
 }

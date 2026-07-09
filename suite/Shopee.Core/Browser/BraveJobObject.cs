@@ -18,6 +18,15 @@ public static class BraveJobObject
     /// <summary>Phóng Brave trong scope "chết theo app". Không bao giờ ném — lỗi thì fallback phóng thường.
     /// <paramref name="startMinimized"/>=true → cửa sổ mở THU NHỎ, không chiếm màn hình/không cướp focus
     /// (Windows). Nhớ BỎ cờ '--start-maximized' ở args khi bật, kẻo cờ dòng lệnh đè lại thành maximize.</summary>
-    public static Process Start(string fileName, string arguments, bool startMinimized = false) =>
-        PlatformServices.ProcessLifetime.Start(fileName, arguments, startMinimized);
+    public static Process Start(string fileName, string arguments, bool startMinimized = false)
+    {
+        var proc = PlatformServices.ProcessLifetime.Start(fileName, arguments, startMinimized);
+        // STARTUPINFO chỉ ép được cửa sổ ĐẦU của tiến trình stub; Brave fork browser THẬT (PID khác, không
+        // thừa hưởng show-state) + cửa sổ mở LẠI khi relaunch/hồi phục không qua STARTUPINFO → bung ra cướp
+        // focus. Watchdog quét thêm ~10s hạ MỌI cửa sổ của đúng profile xuống taskbar + trả focus về app đang
+        // dùng. Chỉ khi startMinimized (luồng automation); luồng tương tác (BrowserLauncher) phải hiện + focus.
+        if (startMinimized)
+            BraveWindowMinimizer.Register(arguments);
+        return proc;
+    }
 }

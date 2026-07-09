@@ -5,6 +5,21 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Hiệu năng. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.0.4 — 2026-07-09
+
+Chủ đề: **Brave tự động không còn cướp focus màn hình**.
+
+- Mọi cửa sổ Brave AUTOMATION (Scrape xoay vòng, Search, Update/Import, mở lại khi
+  hồi phục) giờ mở **thu nhỏ dưới taskbar, không cướp focus** app bạn đang dùng.
+  Fix 3 lớp: Scrape + Search trước đây phóng cửa sổ bình thường (thiếu cờ thu nhỏ);
+  thêm watchdog `BraveWindowMinimizer` quét ~10s sau mỗi lần phóng để hạ cả cửa sổ
+  do Brave fork/mở lại (STARTUPINFO chỉ ép được cửa sổ đầu của stub) + trả focus
+  về cửa sổ đang làm việc. Đã verify bằng harness thật: cửa sổ nằm taskbar, foreground
+  không rời app.
+- Thêm cờ chống throttle (`--disable-backgrounding-occluded-windows` …) cho Search +
+  Update/Import để chạy nền thu nhỏ không bị Chromium bóp timer/renderer (Scrape đã có).
+- Cửa sổ TƯƠNG TÁC (mở profile giải captcha, đăng nhập tay) vẫn hiện + focus bình thường.
+
 ## v1.0.3 — 2026-07-09
 
 Chủ đề: **xóa media BigSeller theo yêu cầu + đếm dọn media theo lần bắt đầu sửa**.
