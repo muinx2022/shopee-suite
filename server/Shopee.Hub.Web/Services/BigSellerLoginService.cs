@@ -145,54 +145,16 @@ public sealed class BigSellerLoginService : IAsyncDisposable
         finally { if (ctx is not null) { try { await ctx.CloseAsync(); } catch { } } }
     }
 
-    /// <summary>Vòng điền form + captcha (port BigSellerAutoLogin). Xử lý OTP: dừng chờ admin nhập rồi điền tiếp.
+    /// <summary>Vòng điền form + captcha — nay ủy cho lõi chung <see cref="BigSellerLoginForm.RunFormLoginAsync"/>.
+    /// Rẽ nhánh trang "security" (thiết bị mới) đưa về <see cref="HandleOtpAsync"/> (dừng chờ admin nhập OTP).
     /// Trả true nếu vào được (caller bắt cookie); false nếu đã Fail.</summary>
     private async Task<bool> FillLoginLoopAsync(IPage page, string email, string password, AiConfig ai, Session s, CancellationToken ct)
     {
-        for (var attempt = 1; attempt <= 5; attempt++)
-        {
-            ct.ThrowIfCancellationRequested();
-            await DismissWarmTipsAsync(page);
-            try
-            {
-                await page.FillAsync("input[name=account]", email);
-                await page.FillAsync("input[name=password]", password);
-                if (!await page.IsCheckedAsync("input.el-checkbox__original"))
-                    await page.Locator(".el-checkbox").First.ClickAsync(new() { Timeout = 3000 });
-
-                var src = await page.GetAttributeAsync("img.comb-code-img", "src");
-                if (string.IsNullOrEmpty(src) || !src.Contains("base64,"))
-                { Say(s, "Không thấy ảnh captcha."); await Task.Delay(1500, ct); continue; }
-                var png = Convert.FromBase64String(src[(src.IndexOf("base64,", StringComparison.Ordinal) + 7)..]);
-                var code = await BigSellerCaptchaSolver.SolveAsync(ai, png, ct);
-                Say(s, $"Lần {attempt}: captcha '{code}'.");
-                if (code.Length < 4) { await RefreshCaptchaAsync(page); await Task.Delay(800, ct); continue; }
-
-                await page.FillAsync("input[name=picVerificationCode]", code);
-                try { await page.WaitForFunctionAsync("() => { const b = document.querySelector('button.opt-btn'); return b && !b.disabled; }", null, new() { Timeout = 4000 }); } catch { }
-                await page.Locator("button.opt-btn").First.ClickAsync(new() { Force = true, Timeout = 5000 });
-            }
-            catch (OperationCanceledException) { throw; }
-            catch (Exception ex) { Say(s, "Điền form lỗi: " + ex.Message); }
-
-            await Task.Delay(4500, ct);
-            await DismissWarmTipsAsync(page);
-            var url = page.Url ?? "";
-
-            if (url.Contains("security", StringComparison.OrdinalIgnoreCase))
-            {
-                // Thiết bị mới → BigSeller đòi mã email. DỪNG chờ admin nhập OTP trên web.
-                if (await HandleOtpAsync(page, s, ct)) return true;   // vào được sau OTP
-                return false;   // OTP sai/timeout → HandleOtp đã Fail
-            }
-            if (!url.Contains("login", StringComparison.OrdinalIgnoreCase))
-            { Say(s, "✔ Vào được (không cần OTP)."); return true; }
-
-            Say(s, "Captcha sai/khác — thử lại.");
-            await RefreshCaptchaAsync(page);
-            await Task.Delay(1000, ct);
-        }
-        Say(s, "✘ Thất bại sau 5 lần."); Fail(s);
+        var outcome = await BigSellerLoginForm.RunFormLoginAsync(
+            page, email, password, ai, msg => Say(s, msg), ct,
+            maxAttempts: 5, onSecurityChallenge: (p, c) => HandleOtpAsync(p, s, c));
+        if (outcome == BigSellerLoginOutcome.Success) return true;
+        Fail(s);
         return false;
     }
 
@@ -320,26 +282,6 @@ public sealed class BigSellerLoginService : IAsyncDisposable
     }
 
     private void Fail(Session s) { lock (_gate) if (s.State.Status != "success") s.State.Status = "failed"; }
-
-    private static async Task DismissWarmTipsAsync(IPage page)
-    {
-        try
-        {
-            for (var i = 0; i < 3; i++)
-            {
-                var box = page.Locator(".el-message-box, .el-overlay-message-box");
-                if (await box.CountAsync() == 0 || !await box.First.IsVisibleAsync()) return;
-                var cancel = page.Locator(".el-message-box__btns .el-button:not(.el-button--primary), .el-overlay-message-box .el-button:not(.el-button--primary)");
-                if (await cancel.CountAsync() > 0) await cancel.First.ClickAsync(new() { Timeout = 2000 });
-                else { try { await page.Keyboard.PressAsync("Escape"); } catch { } }
-                await Task.Delay(500);
-            }
-        }
-        catch { }
-    }
-
-    private static async Task RefreshCaptchaAsync(IPage page)
-    { try { await page.Locator("button.comb-code").First.ClickAsync(new() { Timeout = 2000 }); } catch { } }
 
     /// <summary>Chẩn đoán không cần OTP: launch Chromium → mở trang login BigSeller → đọc captcha → giải bằng AI.
     /// Verify toàn bộ pipeline hạ tầng (Chromium + Playwright + captcha + OpenAI) trên VM.</summary>

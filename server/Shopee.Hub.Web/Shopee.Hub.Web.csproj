@@ -32,6 +32,7 @@
     <Compile Include="..\..\suite\Shopee.Core\Ai\AiChat.cs" Link="Shared\Ai\AiChat.cs" />
     <Compile Include="..\..\suite\Shopee.Core\Ai\AiHttpException.cs" Link="Shared\Ai\AiHttpException.cs" />
     <Compile Include="..\..\suite\Shopee.Core\BigSeller\BigSellerCaptchaSolver.cs" Link="Shared\BigSeller\BigSellerCaptchaSolver.cs" />
+    <Compile Include="..\..\suite\Shopee.Core\BigSeller\BigSellerLoginForm.cs" Link="Shared\BigSeller\BigSellerLoginForm.cs" />
     <Compile Include="..\..\suite\Shopee.Module.Search\Engine\ProductResult.cs" Link="Shared\Search\ProductResult.cs" />
     <Compile Include="..\..\suite\Shopee.Module.Search\Engine\ExcelExporter.cs" Link="Shared\Search\ExcelExporter.cs" />
   </ItemGroup>
