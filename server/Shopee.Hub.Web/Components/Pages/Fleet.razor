@@ -1,5 +1,7 @@
 @page "/"
-@* KHÔNG dùng @@page "/fleet": route đó thuộc API client (GET /fleet trả JSON). Trang này ở "/". *@
+@* KHÔNG dùng @@page "/fleet": route đó thuộc API client (GET /fleet trả JSON). Trang này ở "/".
+   Trang vận hành DUY NHẤT — bố cục WORKSPACE master-detail: KPI + danh sách acc→shop bên TRÁI,
+   bên PHẢI 3 tab (Hành động / Thống kê / Cấu hình) cho mục đang chọn. *@
 @attribute [Authorize(Policy = "Web")]
 @inherits FleetPageBase
 @inject FileStoreConfigService Config
@@ -34,148 +36,348 @@
     </label>
 </div>
 
-<h2>Máy trong fleet</h2>
-<div class="machines">
-    @foreach (var m in Snap.Machines.OrderBy(x => x.Hostname))
-    {
-        var st = FleetStateService.Status(Snap, m);
-        <div class="machine">
-            <div class="mline"><span class="dot">@st.Dot</span><b>@m.Hostname</b></div>
-            <div class="mmeta">@st.Label</div>
-        </div>
-    }
-    @if (Snap.Machines.Count == 0)
-    {
-        <div class="empty">Chưa có máy nào kết nối.</div>
-    }
-</div>
-
-<h2>Lưới trạng thái (tài khoản × shop)</h2>
-<div class="tablewrap">
-<table class="grid">
-    <thead><tr><th>Tài khoản / Shop</th><th>Scrape</th><th>Import</th><th>Update</th></tr></thead>
-    <tbody>
-    @foreach (var acct in _accounts)
-    {
-        var firstShopShown = false;
-        @foreach (var shop in acct.Shops.Where(s => !string.IsNullOrWhiteSpace(s.ShopeeDataSheet)))
+<div class="workspace">
+    <div class="wslist">
+        <input type="text" @bind="_search" @bind:event="oninput" placeholder="tìm acc / shop…" />
+        <button class="btn sm" style="margin-bottom:8px" @onclick="AddAccount">+ Thêm tài khoản</button>
+        @foreach (var g in Filtered())
         {
-            var selected = _selBs == acct.Id && _selShop == shop.Id;
-            <tr class="@(selected ? "sel" : "")" @onclick="() => Select(acct.Id, shop.Id, shop.ShopeeDataSheet, shop.DisplayName)">
-                <td>
-                    @if (!firstShopShown) { <div class="acct">@acct.DisplayName</div> }
-                    <div class="shop">@shop.DisplayName</div>
-                </td>
-                @foreach (var op in Ops)
-                {
-                    var cell = FleetStateService.OpCell(Snap, acct.Id, shop.Id, op);
-                    <td>
-                        <span class="pill @cell.Css">@cell.Text</span>
-                        @* Máy đang chạy (cell.Locked == Kind 1) → ẩn combo đặt-tay; chỉ hiện khi KHÔNG có máy chạy ô này. *@
-                        @if (!cell.Locked)
-                        {
-                            <select class="cellset m-hide"
-                                    @onclick:stopPropagation="true"
-                                    @onchange="e => SetLedger(acct.Id, shop.Id, shop.ShopeeDataSheet, op, e.Value?.ToString())">
-                                <option value="">⋯</option>
-                                <option value="completed">✓ Xong</option>
-                                <option value="idle">Chưa (reset)</option>
-                                <option value="stopped">■ Dừng</option>
-                            </select>
-                        }
-                    </td>
-                }
-            </tr>
-            firstShopShown = true;
+            <div class="wsacct @(_selRow is null && _selAcctId == g.AccountId ? "sel" : "")" @onclick="() => SelectAcct(g.AccountId)">
+                @g.AccountName <span class="cnt">@g.Shops.Count shop</span>
+            </div>
+            @foreach (var row in g.Shops)
+            {
+                var sel = _selShopKey is { } k && k.AccountId == row.AccountId && k.ShopId == row.ShopId;
+                <div class="wsshop @(sel ? "sel" : "") @(row.InConfig ? "" : "ghost")" title="@GlyphTitle(row)" @onclick="() => SelectShop(row)">
+                    <span class="glyph">@GlyphOf(row)</span> @row.ShopName
+                </div>
+            }
         }
-    }
-    </tbody>
-</table>
-</div>
-
-<div class="pinpanel">
-<h2>📌 Giao việc thủ công (ghim máy)</h2>
-@if (_selBs is null)
-{
-    <p class="hint">Chọn 1 shop ở lưới trên để ghim việc.</p>
-}
-else
-{
-    <div class="pin">
-        <div>Shop: <b>@_selShopName</b></div>
-        <label>Op
-            <select @bind="_pinOp">
-                <option value="">-- Chọn Op --</option>
-                <option value="scrape">Scrape</option>
-                <option value="import">Import</option>
-                <option value="update">Update</option>
-            </select>
-        </label>
-        <label>Máy
-            <select @bind="_pinMachine">
-                <option value="">— chọn máy —</option>
-                @foreach (var m in _pinnableMachines)
-                {
-                    var off = FleetStateService.MachineOffline(Snap, m.MachineId);
-                    <option value="@m.MachineId" disabled="@off">@(off ? "⚪" : "🟢") @m.Hostname @(off ? "(offline)" : "")</option>
-                }
-            </select>
-        </label>
-        <label>Từ dòng <input type="number" @bind="_pinStart" style="width:80px" /></label>
-        <label>Đến dòng <input type="number" @bind="_pinEnd" style="width:80px" /></label>
-        @if (_pinOp == "import")
+        @if (!Filtered().Any())
         {
-            <label><input type="checkbox" @bind="_pinFromClaimed" /> Import từ tab "Đã nhận"</label>
-        }
-        <button class="btn primary" disabled="@(string.IsNullOrEmpty(_pinMachine) || string.IsNullOrEmpty(_pinOp) || _hasWork || _pinBlocked)" @onclick="Pin">📌 Ghim việc</button>
-        @if (_hasWork)
-        {
-            <button class="btn danger" @onclick="CancelSelected">✖ Huỷ việc (hub giao)</button>
+            <div class="empty">@(_rows.Count == 0 && _accounts.Count == 0 ? "Chưa có tài khoản." : "Không khớp tìm kiếm.")</div>
         }
     </div>
-    <div class="action">@_action</div>
-    @if (_pinBlocked)
-    {
-        <div class="warn">⚠ Máy này KHÁC máy đang giữ acc (<b>@_accountOwnerWarn</b>) — 1 acc chỉ chạy 1 máy. Chọn <b>@_accountOwnerWarn</b>, hoặc vào 🖥️ Máy client → Reset máy đó trước.</div>
-    }
-    else if (_manualLease is not null)
-    {
-        <div class="hint" style="margin-top:4px">▶ Shop đang <b>chạy TAY</b> trên máy <b>@_manualLease.Hostname</b> — hub KHÔNG huỷ việc chạy tay; dừng bằng nút ■ trong app trên máy đó (client sẽ tự báo hub khi dừng). Việc do <b>hub giao</b> mới huỷ được ở đây.</div>
-    }
-    else if (_accountOwnerWarn is not null)
-    {
-        <div class="hint" style="margin-top:4px">ℹ Acc đang do máy <b>@_accountOwnerWarn</b> dùng — ghim thêm nên vào máy đó.</div>
-    }
+
+    <div class="wsmain">
+        <h2>@AcctName@(_selRow is not null ? " › " + _selRow.ShopName : "")</h2>
+        <div class="tabs">
+            <button class="@(_tab == "action" ? "active" : "")" @onclick='() => _tab = "action"'>⚡ Hành động</button>
+            <button class="@(_tab == "stats" ? "active" : "")" @onclick='() => _tab = "stats"'>📊 Thống kê</button>
+            <button class="@(_tab == "config" ? "active" : "")" @onclick='() => _tab = "config"'>⚙ Cấu hình</button>
+        </div>
+
+        @if (_selRow is not null)
+        {
+            var row = _selRow!;
+            @if (_tab == "action")
+            {
+                @* (a) Trạng thái 4 op của shop + combo đặt-tay ledger *@
+                <div class="tablewrap">
+                <table class="grid sm">
+                    <thead><tr><th>Việc</th><th>Trạng thái</th><th>Dòng</th><th></th></tr></thead>
+                    <tbody>
+                        @foreach (var op in OpOrder)
+                        {
+                            var cell = FleetStateService.OpCell(Snap, row.AccountId, row.ShopId, op);
+                            var st = row.Ops.GetValueOrDefault(op);
+                            <tr>
+                                <td>@OpLabel(op)</td>
+                                <td><span class="pill @cell.Css" title="@(st is null ? "" : $"{st.Machine} · {st.LastAgo}")">@cell.Text</span></td>
+                                <td>@(st is { RowCount: > 0 } ? st.RowCount.ToString("N0") : "")</td>
+                                <td>
+                                    @* Máy đang chạy (Locked) → ẩn combo. Rewrite + shop mồ côi + shop chưa gán sheet cũng không đặt-tay được. *@
+                                    @if (op != "rewrite" && row.InConfig && !cell.Locked && !string.IsNullOrEmpty(row.Sheet))
+                                    {
+                                        <select class="cellset"
+                                                @onchange="e => SetLedger(row.AccountId, row.ShopId, row.Sheet, op, e.Value?.ToString())">
+                                            <option value="">⋯</option>
+                                            <option value="completed">✓ Xong</option>
+                                            <option value="idle">Chưa (reset)</option>
+                                            <option value="stopped">■ Dừng</option>
+                                        </select>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+                </div>
+
+                @* (b) Form ghim việc *@
+                @if (!row.InConfig)
+                {
+                    <p class="hint">Shop không còn trong cấu hình — chỉ xem tiến độ.</p>
+                }
+                else if (string.IsNullOrEmpty(row.Sheet))
+                {
+                    <p class="hint">Shop chưa gán sheet — vào tab ⚙ Cấu hình.</p>
+                }
+                else
+                {
+                    <div class="pinpanel">
+                        <div class="pin">
+                            <div>Shop: <b>@row.ShopName</b></div>
+                            <label>Op
+                                <select @bind="_pinOp">
+                                    <option value="">-- Chọn Op --</option>
+                                    <option value="scrape">Scrape</option>
+                                    <option value="import">Import</option>
+                                    <option value="update">Update</option>
+                                </select>
+                            </label>
+                            <label>Máy
+                                <select @bind="_pinMachine">
+                                    <option value="">— chọn máy —</option>
+                                    @foreach (var m in _pinnableMachines)
+                                    {
+                                        var off = FleetStateService.MachineOffline(Snap, m.MachineId);
+                                        <option value="@m.MachineId" disabled="@off">@(off ? "⚪" : "🟢") @m.Hostname @(off ? "(offline)" : "")</option>
+                                    }
+                                </select>
+                            </label>
+                            <label>Từ dòng <input type="number" @bind="_pinStart" style="width:80px" /></label>
+                            <label>Đến dòng <input type="number" @bind="_pinEnd" style="width:80px" /></label>
+                            @if (_pinOp == "import")
+                            {
+                                <label><input type="checkbox" @bind="_pinFromClaimed" /> Import từ tab "Đã nhận"</label>
+                            }
+                        </div>
+                        @* Nút hành động ở hàng riêng, khỏi trôi lơ lửng theo flex-wrap của hàng field. *@
+                        <div class="pin pinbtns">
+                            <button class="btn primary" disabled="@(string.IsNullOrEmpty(_pinMachine) || string.IsNullOrEmpty(_pinOp) || _hasWork || _pinBlocked)" @onclick="Pin">📌 Ghim việc</button>
+                            @if (_hasWork)
+                            {
+                                <button class="btn danger" @onclick="CancelSelected">✖ Huỷ việc (hub giao)</button>
+                            }
+                        </div>
+                        <div class="action">@_action</div>
+                        @if (_pinBlocked)
+                        {
+                            <div class="warn">⚠ Máy này KHÁC máy đang giữ acc (<b>@_accountOwnerWarn</b>) — 1 acc chỉ chạy 1 máy. Chọn <b>@_accountOwnerWarn</b>, hoặc vào 🖥️ Máy client → Reset máy đó trước.</div>
+                        }
+                        else if (_manualLease is not null)
+                        {
+                            <div class="hint" style="margin-top:4px">▶ Shop đang <b>chạy TAY</b> trên máy <b>@_manualLease.Hostname</b> — hub KHÔNG huỷ việc chạy tay; dừng bằng nút ■ trong app trên máy đó (client sẽ tự báo hub khi dừng). Việc do <b>hub giao</b> mới huỷ được ở đây.</div>
+                        }
+                        else if (_accountOwnerWarn is not null)
+                        {
+                            <div class="hint" style="margin-top:4px">ℹ Acc đang do máy <b>@_accountOwnerWarn</b> dùng — ghim thêm nên vào máy đó.</div>
+                        }
+                    </div>
+                }
+            }
+            else if (_tab == "stats")
+            {
+                <div class="opcards">
+                    @foreach (var op in OpOrder)
+                    {
+                        var st = row.Ops.GetValueOrDefault(op);
+                        <div class="opcard @(st is null ? "empty0" : "")">
+                            <div class="ohead">
+                                <span class="olabel">@OpLabel(op)</span>
+                                @if (st is not null)
+                                {
+                                    <span class="pill @st.StatusCss">@st.StatusText</span>
+                                }
+                                else
+                                {
+                                    <span class="pill idle">chưa chạy</span>
+                                }
+                            </div>
+                            @if (st is not null)
+                            {
+                                <div class="n">@st.RowCount.ToString("N0") <span class="sub">dòng</span>
+                                    <button class="linkbtn" @onclick="() => OpenMap(op)">🔍 xem dòng</button>
+                                </div>
+                                <div class="sub">tới dòng @st.LastRow</div>
+                                <div class="rng m-hide">@st.Ranges</div>
+                                <div class="sub" title="@st.LastAbs">Gần nhất: @(string.IsNullOrEmpty(st.Machine) ? "—" : st.Machine)@(string.IsNullOrEmpty(st.LastAgo) ? "" : $" · {st.LastAgo}")</div>
+                                @if (st.Machines.Count > 1)
+                                {
+                                    <div class="sub m-hide">Đã tham gia (@st.Machines.Count máy): @string.Join(", ", st.Machines)</div>
+                                }
+                            }
+                            else
+                            {
+                                <div class="sub">Chưa có lượt chạy nào cho việc này.</div>
+                            }
+                        </div>
+                    }
+                </div>
+            }
+            else
+            {
+                @if (row.InConfig)
+                {
+                    <ShopConfigPanel AccountId="@row.AccountId" ShopId="@row.ShopId" OnChanged="OnConfigChanged" OnDeleted="OnShopDeleted" />
+                }
+                else
+                {
+                    <p class="hint">Shop không còn trong cấu hình — chỉ xem tiến độ.</p>
+                }
+            }
+        }
+        else if (_selAcctId is not null)
+        {
+            @if (_tab == "action")
+            {
+                @* Mini ma-trận acc×shop (chỉ shop của acc này) — bấm dòng để mở shop *@
+                <div class="tablewrap">
+                <table class="grid sm">
+                    <thead><tr><th>Shop</th><th>Scrape</th><th>Import</th><th>Update</th><th>Tên SP</th></tr></thead>
+                    <tbody>
+                        @foreach (var r in AcctShops())
+                        {
+                            <tr @onclick="() => SelectShop(r)">
+                                <td class="shop">@r.ShopName</td>
+                                @foreach (var op in OpOrder)
+                                {
+                                    <td>
+                                        @if (string.IsNullOrEmpty(r.Sheet))
+                                        {
+                                            <span class="sub">—</span>
+                                        }
+                                        else
+                                        {
+                                            var cell = FleetStateService.OpCell(Snap, r.AccountId, r.ShopId, op);
+                                            var st = r.Ops.GetValueOrDefault(op);
+                                            <span class="pill @cell.Css" title="@(st is null ? "" : $"{st.Machine} · {st.LastAgo}")">@cell.Text@(st is { RowCount: > 0 } ? $" · {st.RowCount:N0}" : "")</span>
+                                        }
+                                    </td>
+                                }
+                            </tr>
+                        }
+                        @if (!AcctShops().Any())
+                        {
+                            <tr><td colspan="5" class="empty">Tài khoản chưa có shop nào.</td></tr>
+                        }
+                    </tbody>
+                </table>
+                </div>
+            }
+            else if (_tab == "stats")
+            {
+                <div class="tablewrap">
+                <table class="grid sm">
+                    <thead><tr><th>Shop</th><th>Scrape</th><th>Import</th><th>Update</th><th>Tên SP</th></tr></thead>
+                    <tbody>
+                        @foreach (var r in AcctShops())
+                        {
+                            <tr @onclick="() => SelectShop(r)">
+                                <td class="shop">@r.ShopName</td>
+                                @foreach (var op in OpOrder)
+                                {
+                                    var n = r.Ops.GetValueOrDefault(op)?.RowCount ?? 0;
+                                    <td>@(n > 0 ? n.ToString("N0") : "·")</td>
+                                }
+                            </tr>
+                        }
+                        @if (AcctShops().Any())
+                        {
+                            <tr class="acctrow">
+                                <td>Tổng</td>
+                                @foreach (var op in OpOrder)
+                                {
+                                    var tot = AcctShops().Sum(r => r.Ops.GetValueOrDefault(op)?.RowCount ?? 0);
+                                    <td>@tot.ToString("N0")</td>
+                                }
+                            </tr>
+                        }
+                        else
+                        {
+                            <tr><td colspan="5" class="empty">Tài khoản chưa có shop nào.</td></tr>
+                        }
+                    </tbody>
+                </table>
+                </div>
+            }
+            else
+            {
+                @if (_accounts.Any(a => a.Id == _selAcctId))
+                {
+                    <AccountConfigPanel AccountId="@(_selAcctId!)" OnChanged="OnConfigChanged" OnDeleted="OnAcctDeleted" />
+                }
+                else
+                {
+                    <p class="hint">Tài khoản không còn trong cấu hình (chỉ còn lịch sử).</p>
+                }
+            }
+        }
+        else
+        {
+            <p class="hint">Chọn 1 tài khoản hoặc shop ở danh sách bên trái.</p>
+        }
+    </div>
+</div>
+</div>
+
+@if (_map is not null)
+{
+    <RowMapModal Title="@_map.Title" Op="@_map.Op" OpLabel="@_map.OpLabel" AccountId="@_map.AccountId"
+                 Sheet="@_map.Sheet" Ledger="_map.Ledger" OnClose="() => _map = null" />
 }
-</div>
-</div>
 
 @code {
-    private static readonly string[] Ops = ["scrape", "import", "update"];
+    // Cột lưới + thẻ Tiến độ (4 op). Đếm running/queued/failed cho summary CHỈ 3 op hub-điều-phối.
+    private static readonly string[] OpOrder = ["scrape", "import", "update", "rewrite"];
+    private static readonly string[] SummaryOps = ["scrape", "import", "update"];
 
     private List<BigSellerAccount> _accounts = new();
+    private List<ShopRow> _rows = new();
     private string _summary = "";
     private int _kMachines, _kRunning, _kQueued, _kCookies;
+    private DateTimeOffset _accountsLoadedAt;
 
-    private string? _selBs, _selShop, _selSheet, _selShopName;
+    private string _search = "";
+    // Selection master-detail: chọn shop set cả 2 (acct = của shop); chọn acc thì _selShopKey = null.
+    private string? _selAcctId;
+    private (string AccountId, string ShopId)? _selShopKey;
+    private ShopRow? _selRow;
+    private string _tab = "action";
+
     private string _pinOp = "";
     private string _pinMachine = "";
     private int _pinStart, _pinEnd;
     private bool _pinFromClaimed;
     private string _action = "";
-    private DateTimeOffset _accountsLoadedAt;
+
+    // Ngữ cảnh modal bản đồ dòng (heatmap) — mở modal = dựng ctx, đóng = null.
+    private RowMapCtx? _map;
+    private sealed record RowMapCtx(string Title, string Op, string OpLabel, string AccountId, string Sheet, WorkLedgerRecord? Ledger);
+
+    private sealed record AcctGroup(string AccountId, string AccountName, List<ShopRow> Shops);
+
+    private sealed class OpStat
+    {
+        public string StatusText = "", StatusCss = "", Ranges = "—", Machine = "", LastAgo = "", LastAbs = "";
+        public int RowCount, LastRow;
+        public List<string> Machines = new();   // hostnames đã tham gia việc này
+    }
+
+    private sealed class ShopRow
+    {
+        public string AccountId = "", AccountName = "", ShopId = "", ShopName = "", Sheet = "";
+        public bool InConfig;
+        public Dictionary<string, OpStat> Ops = new();
+    }
 
     protected override void OnInitialized()
     {
         base.OnInitialized();
         ReloadAccounts();
+        Rebuild();
         RecomputeSummary();
     }
+
+    // Modal heatmap dùng dữ liệu chụp lúc mở → dừng hẳn nhịp vẽ (cả StateHasChanged) khỏi diff 20k ô mỗi 2s.
+    protected override bool ShouldTickRender() => _map is null;
 
     protected override void OnFleetTick()
     {
         // Config đọc lại tối đa mỗi 10s (khỏi đọc file mỗi 2s).
         if ((DateTimeOffset.UtcNow - _accountsLoadedAt).TotalSeconds > 10) ReloadAccounts();
+        Rebuild();
         RecomputeSummary();
     }
 
@@ -186,27 +388,197 @@ else
         try { _kCookies = Db.ListFiles().Count(f => f.Name.StartsWith("cookies/", StringComparison.OrdinalIgnoreCase)); } catch { }
     }
 
+    private void Rebuild()
+    {
+        var byId = _accounts.ToDictionary(a => a.Id, a => a);
+        var shops = new Dictionary<string, ShopRow>(StringComparer.Ordinal);
+
+        // 1) Từ config: mọi acct, MỌI shop (kể cả chưa gán sheet) → dòng danh sách (InConfig = true).
+        //    Shop chưa sheet vẫn hiện (glyph ⚠) để đợt 2 còn cấu hình được — nhưng KHÔNG ghim/đặt-tay được.
+        foreach (var acct in _accounts)
+        foreach (var shop in acct.Shops)
+        {
+            shops[acct.Id + "__" + shop.Id] = new ShopRow
+            {
+                AccountId = acct.Id,
+                AccountName = acct.DisplayName,
+                ShopId = shop.Id,
+                ShopName = shop.DisplayName,
+                Sheet = shop.ShopeeDataSheet ?? "",
+                InConfig = true,
+            };
+        }
+
+        // 2) Overlay ledger: shop không còn trong config → dòng mồ côi (InConfig = false, chỉ xem tiến độ).
+        foreach (var l in Snap.Ledger)
+        {
+            if (string.IsNullOrEmpty(l.BigsellerId)) continue;   // (search dùng bảng khác, không nằm ở ledger)
+            byId.TryGetValue(l.BigsellerId, out var acct);
+            var key = l.BigsellerId + "__" + l.ShopId;
+            if (!shops.TryGetValue(key, out var row))
+            {
+                var shop = acct?.Shops.FirstOrDefault(s => s.Id == l.ShopId);
+                row = new ShopRow
+                {
+                    AccountId = l.BigsellerId,
+                    AccountName = acct?.DisplayName ?? ShortId(l.BigsellerId),
+                    ShopId = l.ShopId,
+                    ShopName = shop?.DisplayName ?? (string.IsNullOrWhiteSpace(l.Sheet) ? ShortId(l.ShopId) : l.Sheet),
+                    Sheet = !string.IsNullOrWhiteSpace(shop?.ShopeeDataSheet) ? shop!.ShopeeDataSheet : (l.Sheet ?? ""),
+                    InConfig = false,
+                };
+                shops[key] = row;
+            }
+            var (stText, stCss) = LedgerStatus(l.Status);
+            var last = l.LastRunAt ?? l.UpdatedAt;
+            row.Ops[l.Op] = new OpStat
+            {
+                StatusText = stText, StatusCss = stCss,
+                RowCount = CountRows(l.Completed), LastRow = l.LastRowReached,
+                Ranges = FormatRanges(l.Completed), Machine = Machine(l),
+                LastAgo = FleetStateService.Ago(last),
+                LastAbs = last == default ? "" : last.LocalDateTime.ToString("dd/MM/yyyy HH:mm:ss"),
+                Machines = l.MachineIds.Select(HostName).Where(h => !string.IsNullOrEmpty(h)).Distinct().ToList(),
+            };
+        }
+
+        _rows = shops.Values
+            .OrderBy(r => r.AccountName, StringComparer.CurrentCultureIgnoreCase)
+            .ThenBy(r => r.ShopName, StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
+
+        // Giữ shop đang chọn qua các lần refresh (đọc lại tham chiếu mới theo key).
+        _selRow = _selShopKey is { } k
+            ? _rows.FirstOrDefault(r => r.AccountId == k.AccountId && r.ShopId == k.ShopId)
+            : null;
+
+        // Mặc định: chưa chọn gì → chọn acc đầu tiên theo thứ tự hiển thị (luôn có 1 mục được chọn).
+        if (_selAcctId is null && _selShopKey is null)
+            _selAcctId = OrderedGroups().FirstOrDefault()?.AccountId;
+    }
+
     private void RecomputeSummary()
     {
         _kMachines = Snap.Machines.Count(m => (DateTimeOffset.Now - m.LastSeen).TotalSeconds < 45);
         int running = 0, queued = 0, failed = 0;
-        foreach (var a in _accounts)
-        foreach (var s in a.Shops.Where(x => !string.IsNullOrWhiteSpace(x.ShopeeDataSheet)))
-        foreach (var op in Ops)
+        foreach (var r in _rows)
+        foreach (var op in SummaryOps)
         {
-            var k = FleetStateService.OpCell(Snap, a.Id, s.Id, op).Kind;
+            var k = FleetStateService.OpCell(Snap, r.AccountId, r.ShopId, op).Kind;
             if (k == 1) running++; else if (k == 2) queued++; else if (k == 3) failed++;
         }
-        // KPI phải KHỚP lưới/summary → lấy từ cùng nguồn OpCell (không đếm Assignments.Status, field đó không mang "running").
+        // KPI phải KHỚP lưới → lấy từ cùng nguồn OpCell (không đếm Assignments.Status, field đó không mang "running").
         _kRunning = running;
         _kQueued = queued;
-        _summary = $"{running} đang chạy · {queued} chờ · {failed} dừng/lỗi · {Snap.Machines.Count} máy · cập nhật {DateTimeOffset.Now:HH:mm:ss}";
+        var tScrape = _rows.Sum(r => r.Ops.GetValueOrDefault("scrape")?.RowCount ?? 0);
+        var tImport = _rows.Sum(r => r.Ops.GetValueOrDefault("import")?.RowCount ?? 0);
+        var tUpdate = _rows.Sum(r => r.Ops.GetValueOrDefault("update")?.RowCount ?? 0);
+        var tRewrite = _rows.Sum(r => r.Ops.GetValueOrDefault("rewrite")?.RowCount ?? 0);
+        _summary = $"{running} đang chạy · {queued} chờ · {failed} dừng/lỗi · {Snap.Machines.Count} máy · "
+            + $"{tScrape:N0} scrape · {tImport:N0} import · {tUpdate:N0} update · {tRewrite:N0} tên SP · cập nhật {DateTimeOffset.Now:HH:mm:ss}";
     }
 
-    private void Select(string bs, string shop, string sheet, string name)
+    // Nhóm shop theo account cho danh sách trái (gồm mồ côi + acc config chưa có shop nào), sắp theo tên acc.
+    private List<AcctGroup> OrderedGroups()
     {
-        _selBs = bs; _selShop = shop; _selSheet = sheet; _selShopName = name; _action = "";
+        var groups = _rows
+            .GroupBy(r => r.AccountId)
+            .ToDictionary(g => g.Key, g => new AcctGroup(g.Key, g.First().AccountName, g.ToList()));
+        foreach (var a in _accounts)
+            if (!groups.ContainsKey(a.Id))
+                groups[a.Id] = new AcctGroup(a.Id, a.DisplayName, new List<ShopRow>());
+        return groups.Values
+            .OrderBy(g => g.AccountName, StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
     }
+
+    // Lọc danh sách trái theo ô tìm: acc khớp → cả nhóm; shop khớp → shop + dòng acc; không khớp → ẩn nhóm.
+    private IEnumerable<AcctGroup> Filtered()
+    {
+        var q = _search?.Trim() ?? "";
+        var ordered = OrderedGroups();
+        if (q.Length == 0) return ordered;
+        var result = new List<AcctGroup>();
+        foreach (var g in ordered)
+        {
+            if (g.AccountName.Contains(q, StringComparison.OrdinalIgnoreCase))
+                result.Add(g);
+            else
+            {
+                var matched = g.Shops.Where(s => s.ShopName.Contains(q, StringComparison.OrdinalIgnoreCase)).ToList();
+                if (matched.Count > 0) result.Add(g with { Shops = matched });
+            }
+        }
+        return result;
+    }
+
+    private List<ShopRow> AcctShops() =>
+        _selAcctId is null ? new() : _rows.Where(r => r.AccountId == _selAcctId).ToList();
+
+    // Tên acc hiển thị ở header (chọn acc-không-shop cũng lấy được tên từ config).
+    private string AcctName =>
+        _selRow?.AccountName
+        ?? (_selAcctId is null ? ""
+            : _rows.FirstOrDefault(r => r.AccountId == _selAcctId)?.AccountName
+              ?? _accounts.FirstOrDefault(a => a.Id == _selAcctId)?.DisplayName
+              ?? "");
+
+    // Glyph trạng thái nhanh của shop cho danh sách trái.
+    private string GlyphOf(ShopRow r)
+    {
+        if (r.InConfig && string.IsNullOrEmpty(r.Sheet)) return "⚠";
+        var cells = SummaryOps.Select(op => FleetStateService.OpCell(Snap, r.AccountId, r.ShopId, op)).ToList();
+        if (cells.Any(c => c.Kind == 1)) return "⏳";
+        if (cells.Any(c => c.Kind == 3)) return "■";
+        if (cells.All(c => c.Text.StartsWith("✓"))) return "✓";
+        return "·";
+    }
+
+    private string GlyphTitle(ShopRow r) =>
+        r.InConfig && string.IsNullOrEmpty(r.Sheet) ? "chưa gán sheet" : "";
+
+    private void SelectShop(ShopRow r)
+    {
+        _selShopKey = (r.AccountId, r.ShopId);
+        _selAcctId = r.AccountId;
+        _selRow = r;
+        _action = "";
+    }
+
+    private void SelectAcct(string accountId)
+    {
+        _selAcctId = accountId;
+        _selShopKey = null;
+        _selRow = null;
+        _action = "";
+    }
+
+    // Thêm 1 acc BigSeller rỗng, lưu ngay (đọc list+version tươi), rồi chọn nó ở tab Cấu hình để điền tiếp.
+    private void AddAccount()
+    {
+        var all = Config.BigSellerAccounts();
+        var version = Config.VersionOf(FileStoreConfigService.BigSellerFile);
+        var acc = new BigSellerAccount { Label = "Tài khoản mới" };
+        all.Add(acc);
+        ConfigSave.Apply(Config, FileStoreConfigService.BigSellerFile, all, ref version, () => { });
+        ReloadAccounts();
+        Rebuild();
+        RecomputeSummary();
+        SelectAcct(acc.Id);
+        _tab = "config";
+    }
+
+    // Panel con báo đã lưu/đổi cấu hình → parent nạp lại + vẽ lại ngay (khỏi chờ nhịp 2s).
+    private void OnConfigChanged()
+    {
+        ReloadAccounts();
+        Rebuild();
+        RecomputeSummary();
+    }
+
+    // Xoá shop → bỏ chọn shop (vẫn đứng ở acc); xoá acc → bỏ chọn hết (Rebuild tự chọn acc đầu).
+    private void OnShopDeleted() { _selShopKey = null; _selRow = null; OnConfigChanged(); }
+    private void OnAcctDeleted() { _selAcctId = null; _selShopKey = null; _selRow = null; OnConfigChanged(); }
 
     private void SetLedger(string bs, string shop, string sheet, string op, string? status)
     {
@@ -221,44 +593,55 @@ else
         FleetState.Refresh();
     }
 
+    /// <summary>Mở bản đồ dòng của 1 việc trên shop đang chọn: chỉ dựng ctx → RowMapModal tự đọc sheet + tô dòng.</summary>
+    private void OpenMap(string op)
+    {
+        if (_selRow is null) return;
+        var shop = _selRow;
+        _map = new RowMapCtx(
+            $"{OpLabel(op)} · {shop.ShopName} · sheet '{shop.Sheet}'",
+            op, OpLabel(op), shop.AccountId, shop.Sheet,
+            Snap.Ledger.FirstOrDefault(l => l.Key == $"{shop.AccountId}__{shop.ShopId}__{op}"));
+    }
+
     private void Pin()
     {
-        if (_selBs is null || _selShop is null || string.IsNullOrEmpty(_pinMachine) || string.IsNullOrEmpty(_pinOp)) return;
+        if (_selRow is null || string.IsNullOrEmpty(_pinMachine) || string.IsNullOrEmpty(_pinOp)) return;
         var payload = _pinOp == "import"
             ? JsonSerializer.Serialize(new ImportJobPayload { FromClaimedTab = _pinFromClaimed })
             : "";
         Db.CreateAssignment(new CreateAssignmentRequest(
-            _selBs, _selShop, _selSheet ?? "", _pinOp, _pinMachine, true,
+            _selRow.AccountId, _selRow.ShopId, _selRow.Sheet, _pinOp, _pinMachine, true,
             Math.Max(0, _pinStart), Math.Max(0, _pinEnd), payload));
         var host = Snap.Machines.FirstOrDefault(m => m.MachineId == _pinMachine)?.Hostname ?? _pinMachine;
         _action = FleetStateService.MachineOffline(Snap, _pinMachine)
-            ? $"⚠ Đã ghim {_pinOp} · {_selShopName} → {host} (máy đang TẮT — chờ tới khi mở app)."
-            : $"✔ Đã ghim {_pinOp} · {_selShopName} → {host}.";
+            ? $"⚠ Đã ghim {_pinOp} · {_selRow.ShopName} → {host} (máy đang TẮT — chờ tới khi mở app)."
+            : $"✔ Đã ghim {_pinOp} · {_selRow.ShopName} → {host}.";
         FleetState.Refresh();
     }
 
     private void CancelSelected()
     {
-        if (_selBs is null || _selShop is null) return;
+        if (_selRow is null) return;
         var n = 0;
         foreach (var a in Snap.Assignments.Where(a =>
-            a.BigsellerId == _selBs && a.ShopId == _selShop && a.Status is "queued" or "running"))
+            a.BigsellerId == _selRow.AccountId && a.ShopId == _selRow.ShopId && a.Status is "queued" or "running"))
         { Db.CancelAssignment(a.Id); n++; }
-        _action = $"✖ Đã huỷ {n} việc của shop {_selShopName}.";
+        _action = $"✖ Đã huỷ {n} việc của shop {_selRow.ShopName}.";
         FleetState.Refresh();
     }
 
     // Shop đang chọn có việc HUB-GIAO (assignment) queued/running → hub huỷ được (khoá Ghim).
-    private bool _hasWork => _selBs is not null && Snap.Assignments.Any(a =>
-        a.BigsellerId == _selBs && a.ShopId == _selShop && a.Status is "queued" or "running");
+    private bool _hasWork => _selRow is not null && Snap.Assignments.Any(a =>
+        a.BigsellerId == _selRow.AccountId && a.ShopId == _selRow.ShopId && a.Status is "queued" or "running");
 
     // Shop đang chọn có LEASE nhưng KHÔNG có assignment hub-giao = việc CHẠY TAY trên client. Hub không huỷ được
     // (client tự dừng bằng nút ■ rồi nhả lease báo hub); chỉ hiện chú thích cho rõ, không phải nút chết.
-    private LeaseRecord? _manualLease => (_selBs is null || _hasWork) ? null
-        : Snap.Leases.FirstOrDefault(l => l.BigsellerId == _selBs && l.ShopId == _selShop);
+    private LeaseRecord? _manualLease => (_selRow is null || _hasWork) ? null
+        : Snap.Leases.FirstOrDefault(l => l.BigsellerId == _selRow.AccountId && l.ShopId == _selRow.ShopId);
 
     // Chủ sở hữu acc hiện tại (nếu có) — ràng buộc máy ghim được.
-    private string? _accountOwnerMachine => _selBs is null ? null : OwnerOf(_selBs);
+    private string? _accountOwnerMachine => _selRow is null ? null : OwnerOf(_selRow.AccountId);
     private string? _accountOwnerWarn => _accountOwnerMachine is { } mid
         ? Snap.Machines.FirstOrDefault(m => m.MachineId == mid)?.Hostname ?? mid : null;
 
@@ -277,5 +660,43 @@ else
         var asn = Snap.Assignments.FirstOrDefault(a => a.BigsellerId == bs && a.Status == "running");
         return asn?.ClaimedByMachineId;
     }
+
+    private string Machine(WorkLedgerRecord l)
+    {
+        if (!string.IsNullOrEmpty(l.LastMachineId))
+        {
+            var m = Snap.Machines.FirstOrDefault(x => x.MachineId == l.LastMachineId);
+            if (m is not null && !string.IsNullOrWhiteSpace(m.Hostname)) return m.Hostname;
+        }
+        return string.IsNullOrWhiteSpace(l.LastHostname) ? "" : l.LastHostname;
+    }
+
+    private string HostName(string machineId)
+    {
+        if (string.IsNullOrEmpty(machineId)) return "";
+        var m = Snap.Machines.FirstOrDefault(x => x.MachineId == machineId);
+        return m is not null && !string.IsNullOrWhiteSpace(m.Hostname) ? m.Hostname : ShortId(machineId);
+    }
+
+    private static (string text, string css) LedgerStatus(string s) => s switch
+    {
+        "completed" => ("✓ xong", "done"),
+        "stopped" => ("■ dừng dở", "warn"),
+        "running" => ("⏳ đang chạy", "run"),
+        _ => ("· chưa xong", "idle"),
+    };
+
+    private static string OpLabel(string op) => op switch
+    {
+        "scrape" => "Scrape", "import" => "Import", "update" => "Update", "rewrite" => "Tên SP", _ => op,
+    };
+
+    private static int CountRows(List<RowRange> rr) => rr.Sum(r => Math.Max(0, r.To - r.From + 1));
+
+    private static string FormatRanges(List<RowRange> rr) => rr.Count == 0
+        ? "—"
+        : string.Join(", ", rr.OrderBy(r => r.From).Select(r => r.From == r.To ? $"{r.From}" : $"{r.From}–{r.To}"));
+
+    private static string ShortId(string id) => string.IsNullOrEmpty(id) ? "?" : (id.Length <= 8 ? id : id[..8] + "…");
 
 }

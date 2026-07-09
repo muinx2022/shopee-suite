@@ -148,12 +148,6 @@ h3 { font-size: 14px; font-weight: 600; color: var(--text); margin: 22px 0 10px;
 .btn:disabled { opacity: .45; cursor: not-allowed; }
 label.btn { cursor: pointer; }
 
-/* ==================== Machines strip ==================== */
-.machines { display: flex; flex-wrap: wrap; gap: 12px; }
-.machine { background: var(--card); border: 1px solid var(--stroke); border-radius: var(--radius); padding: 14px 16px; min-width: 185px; box-shadow: var(--shadow); }
-.mline { display: flex; align-items: center; gap: 7px; font-size: 14px; color: var(--text); }
-.mmeta { color: var(--body); font-size: 12px; margin-top: 5px; }
-
 /* ==================== Cards & forms ==================== */
 .editcard { background: var(--card); border: 1px solid var(--stroke); border-radius: var(--radius); padding: 18px 20px; margin-bottom: 16px; box-shadow: var(--shadow); }
 .editcard label { display: block; margin: 10px 0; color: var(--text); font-size: 13.5px; }
@@ -192,6 +186,8 @@ input[type=number].ci { -moz-appearance: textfield; appearance: textfield; }
 .pinpanel > h2 { color: var(--primary); margin: 16px 0 14px; }
 .pinpanel .pin { background: none; border: 0; box-shadow: none; padding: 0; gap: 16px 18px; }
 .pinpanel .pin label { font-size: 13.5px; }
+/* Hàng nút Ghim/Huỷ tách riêng dưới hàng field. */
+.pinpanel .pin.pinbtns { margin-top: 14px; }
 .pinpanel .action { margin-top: 10px; }
 html.dark .pinpanel { background: rgba(60, 80, 224, .10); border-color: rgba(60, 80, 224, .42); border-left-color: var(--primary); }
 
@@ -211,7 +207,22 @@ html.dark .pinpanel { background: rgba(60, 80, 224, .10); border-color: rgba(60,
 .content:has(.fleetpage) { display: flex; flex-direction: column; min-height: 0; overflow: hidden; padding-bottom: 22px; }
 .fleetpage { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 .fleetpage > * { flex-shrink: 0; }
-.fleetpage .tablewrap { flex: 1 1 auto; min-height: 140px; overflow-y: auto; }
+
+/* ── Workspace master-detail: danh sách acc→shop (trái) + 3 tab của mục đang chọn (phải) ── */
+.workspace { display: flex; gap: 18px; flex: 1 1 auto; min-height: 0; }
+.wslist { flex: 0 0 270px; display: flex; flex-direction: column; gap: 4px; overflow-y: auto; background: var(--card); border: 1px solid var(--stroke); border-radius: var(--radius); padding: 12px; box-shadow: var(--shadow); }
+.wslist input { margin-bottom: 8px; }
+.wsacct { font-weight: 700; color: var(--text); padding: 7px 9px; border-radius: var(--radius-sm); cursor: pointer; margin-top: 6px; font-size: 13px; }
+.wsacct .cnt { font-weight: 500; color: var(--body); font-size: 12px; }
+.wsshop { display: flex; align-items: center; gap: 7px; padding: 6px 9px 6px 18px; border-radius: var(--radius-sm); cursor: pointer; color: var(--text); font-size: 13px; }
+.wsshop .glyph { width: 18px; text-align: center; flex-shrink: 0; }
+.wsacct:hover, .wsshop:hover { background: var(--gray); }
+.wsacct.sel, .wsshop.sel { background: var(--info-bg); }
+.wsshop.ghost { opacity: .55; }
+.wsmain { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; overflow-y: auto; }
+.wsmain h2 { margin-top: 2px; }
+/* Bảng trong panel phải tự cuộn (panel đã cuộn dọc); giới hạn cao để form/thẻ dưới không bị đẩy khuất. */
+.wsmain .tablewrap { max-height: 46vh; overflow-y: auto; }
 table.grid { border-collapse: collapse; width: 100%; }
 table.grid th, table.grid td { text-align: left; padding: 11px 14px; border-bottom: 1px solid var(--stroke); vertical-align: middle; color: var(--text); }
 table.grid.sm th, table.grid.sm td { padding: 8px 11px; font-size: 13px; }
@@ -239,16 +250,13 @@ html.dark .pill.run { background: rgba(56, 189, 248, .16); color: #56c7f5; }
 .pill.fail { background: var(--danger-bg); color: var(--danger); }
 .cellset { font-size: 11px; padding: 3px 5px; margin-top: 4px; }
 
-/* ── Trang Thống kê (ma trận 1 dòng/shop + panel chi tiết) ── */
-.statspage .bar label { display: flex; align-items: center; gap: 6px; color: var(--body); font-size: 13px; }
-.statspage .bar input[type=text] { padding: 6px 9px; border: 1px solid var(--stroke); border-radius: 8px; background: var(--card); color: var(--text); }
-.statspage .tablewrap { max-height: 52vh; overflow-y: auto; }
+/* ── Lưới trạng thái Fleet (ma trận acc×shop + panel chi tiết) ── */
+.fleetpage .bar label { display: flex; align-items: center; gap: 6px; color: var(--body); font-size: 13px; }
+.fleetpage .bar input[type=text] { padding: 6px 9px; border: 1px solid var(--stroke); border-radius: 8px; background: var(--card); color: var(--text); }
 /* dòng nhóm tài khoản (gộp các shop cùng 1 tài khoản) */
 table.grid tr.acctrow td { background: var(--gray); font-weight: 700; color: var(--text); font-size: 12.5px; letter-spacing: 0; text-transform: none; }
 table.grid tr.acctrow .cnt { font-weight: 500; color: var(--body); font-size: 12px; }
 table.grid tr.acctrow:hover td { background: var(--gray); }
-/* ô việc rỗng (chưa có record) */
-.statspage .dash { color: var(--faint); font-weight: 700; }
 /* panel chi tiết */
 .opcards { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; margin-top: 6px; }
 .opcard { background: var(--card); border: 1px solid var(--stroke); border-radius: var(--radius); padding: 12px 14px; }
@@ -301,9 +309,6 @@ table.grid tr.acctrow:hover td { background: var(--gray); }
 
 .grow { flex: 1; }
 
-/* m-only: chỉ hiện trên mobile (ngược với m-hide trong @media). */
-.m-only { display: none; }
-
 /* ==================== Responsive — màn hẹp / điện thoại ==================== */
 /* Icon-rail thuần CSS: sidebar co còn 64px chỉ-icon (ẩn chữ), KHÔNG cần JS/hamburger.
    Bảng đã tự cuộn ngang qua .tablewrap nên nội dung vẫn xem được. */
@@ -323,10 +328,6 @@ table.grid tr.acctrow:hover td { background: var(--gray); }
 
     /* Giấu thông tin phụ trên mobile (markup đánh dấu m-hide) — desktop hiện đầy đủ. */
     .m-hide { display: none !important; }
-    .m-only { display: inline-flex; }
-    /* Mục Shops của mỗi acc BigSeller: mobile mặc định thu gọn, bấm nút mới bung. */
-    .shopsec { display: none; }
-    .shopsec.open { display: block; }
 
     .topbar { padding: 0 14px; }
     .topbar-user { display: none; }
@@ -338,7 +339,10 @@ table.grid tr.acctrow:hover td { background: var(--gray); }
     /* Fleet trên phone: bỏ khoá viewport (cuộn trang tự nhiên dễ dùng hơn cuộn-trong-lưới), lưới tự giới hạn cao. */
     .main:has(.fleetpage) { height: auto; overflow: visible; }
     .content:has(.fleetpage) { display: block; overflow: visible; }
-    .fleetpage .tablewrap { max-height: 60vh; max-height: 60dvh; }
+    .wsmain .tablewrap { max-height: 60vh; max-height: 60dvh; }
+    /* Workspace xếp dọc: danh sách trên, panel dưới. */
+    .workspace { flex-direction: column; }
+    .wslist { flex: none; max-height: 34vh; }
 
     /* Bảng + control gọn lại nhưng touch-target to lên. */
     table.grid th, table.grid td { padding: 8px 9px; }

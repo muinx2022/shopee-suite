@@ -19,12 +19,10 @@
         <div class="side-scroll">
             <div class="navsec">Điều khiển</div>
             <NavLink class="nav" href="/" Match="NavLinkMatch.All"><span class="nav-ic">@HubIcons.Svg("fleet")</span><span>Fleet</span></NavLink>
-            <NavLink class="nav" href="/stats"><span class="nav-ic">@HubIcons.Svg("stats")</span><span>Thống kê</span></NavLink>
             <NavLink class="nav" href="/machines"><span class="nav-ic">@HubIcons.Svg("machines")</span><span>Máy client</span></NavLink>
             <NavLink class="nav" href="/search"><span class="nav-ic">@HubIcons.Svg("search")</span><span>Search</span></NavLink>
 
             <div class="navsec">Cấu hình</div>
-            <NavLink class="nav" href="/config/bigseller"><span class="nav-ic">@HubIcons.Svg("bigseller")</span><span>BigSeller</span></NavLink>
             <NavLink class="nav" href="/config/accounts"><span class="nav-ic">@HubIcons.Svg("users")</span><span>Acc Shopee &amp; Proxy</span></NavLink>
             <NavLink class="nav" href="/config/errored"><span class="nav-ic">@HubIcons.Svg("alert")</span><span>Acc lỗi</span></NavLink>
             <NavLink class="nav" href="/config/ai"><span class="nav-ic">@HubIcons.Svg("ai")</span><span>AI</span></NavLink>
@@ -93,11 +91,9 @@
         p = p.TrimEnd('/');
         _pageTitle = p switch
         {
-            "" => "Fleet",
-            "stats" => "Thống kê (dòng đã scrape / import / update theo shop)",
+            "" => "Fleet — vận hành & tiến độ",
             "machines" => "Quản lý máy client",
             "search" => "Search đa máy",
-            "config/bigseller" => "Cấu hình BigSeller",
             "config/accounts" => "Tài khoản Shopee & Proxy",
             "config/errored" => "Tài khoản lỗi / captcha",
             "config/ai" => "Cấu hình AI",

@@ -1,0 +1,153 @@
+@* Cấu hình 1 shop BigSeller (tab ⚙ Cấu hình của Fleet, khi chọn 1 shop). Port từ trang cấu hình BigSeller cũ.
+   Guard _loadedKey: parent tick 2s re-render con MỖI TICK → chỉ reload bản-đang-sửa khi acct/shop ĐỔI THẬT. *@
+@inject FileStoreConfigService Config
+@inject HubDatabase Db
+
+@if (_acct is null || _shop is null)
+{
+    <p class="hint">Shop không còn trong cấu hình.</p>
+}
+else
+{
+    <div class="editcard">
+        <div class="row">
+            <label>Tên shop <input @bind="_shop.Name" style="width:180px" /></label>
+            <label>Sheet
+                @{ var sheets = GetSheetNames(_acct.Id); }
+                @if (sheets.Count > 0)
+                {
+                    <select @bind="_shop.ShopeeDataSheet" style="width:160px">
+                        <option value="">-- sheet --</option>
+                        @foreach (var sn in sheets)
+                        {
+                            <option value="@sn" selected="@(sn == _shop.ShopeeDataSheet)">@sn</option>
+                        }
+                    </select>
+                }
+                else
+                {
+                    <input @bind="_shop.ShopeeDataSheet" style="width:140px" placeholder="(tải workbook)" />
+                }
+            </label>
+        </div>
+
+        <div class="subhead">Cột Excel (1-based, 0 = không dùng)</div>
+        <div class="row">
+            <label>Link <input type="number" @bind="_shop.ColumnMap.LinkColumn" class="ci" /></label>
+            <label>Giá <input type="number" @bind="_shop.ColumnMap.PriceColumn" class="ci" /></label>
+            <label>SKU <input type="number" @bind="_shop.ColumnMap.SkuColumn" class="ci" /></label>
+            <label>ItemId <input type="number" @bind="_shop.ColumnMap.ItemIdColumn" class="ci" /></label>
+            <label>Tên gốc <input type="number" @bind="_shop.ColumnMap.ProductNameColumn" class="ci" /></label>
+            <label>Tên sửa <input type="number" @bind="_shop.ColumnMap.RewrittenNameColumn" class="ci" /></label>
+        </div>
+
+        <div class="row">
+            <label>Crawl URL <input @bind="_shop.BigSellerCrawlUrl" style="width:280px" /></label>
+            <label>AI model <input @bind="_shop.OpenAiModel" style="width:150px" /></label>
+        </div>
+        <label style="display:flex;align-items:center;gap:7px;margin:12px 0;color:var(--text);font-size:13.5px">
+            <input type="checkbox" @bind="_shop.BigSellerImportFromClaimedTab" /> Import từ tab "Đã nhận"
+        </label>
+
+        <div class="bar">
+            <button class="btn primary" @onclick="Save">💾 Lưu</button>
+            @if (!_confirmDelete)
+            {
+                <button class="btn danger sm" @onclick="() => _confirmDelete = true">🗑 Xoá shop</button>
+            }
+            else
+            {
+                <button class="btn danger sm" @onclick="DeleteShop">Bấm lần nữa để xoá</button>
+                <button class="btn sm" @onclick="() => _confirmDelete = false">Huỷ</button>
+            }
+            <span class="action">@_status</span>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public string AccountId { get; set; } = "";
+    [Parameter] public string ShopId { get; set; } = "";
+    [Parameter] public EventCallback OnChanged { get; set; }
+    [Parameter] public EventCallback OnDeleted { get; set; }
+
+    private List<BigSellerAccount> _all = new();
+    private int _version;
+    private BigSellerAccount? _acct;
+    private BigSellerShop? _shop;
+    private List<FileManifestEntry> _manifest = new();
+    private string _status = "";
+    private bool _confirmDelete;
+    private string _loadedKey = "\0";
+
+    protected override void OnParametersSet()
+    {
+        var key = AccountId + "|" + ShopId;
+        if (key == _loadedKey) return;
+        _loadedKey = key;
+        _confirmDelete = false;
+        _status = "";
+        Load();
+    }
+
+    private void Load()
+    {
+        _all = Config.BigSellerAccounts();
+        _version = Config.VersionOf(FileStoreConfigService.BigSellerFile);
+        _manifest = Db.ListFiles();
+        _acct = _all.FirstOrDefault(a => a.Id == AccountId);
+        _shop = _acct?.Shops.FirstOrDefault(s => s.Id == ShopId);
+        _sheetCache.Clear();
+    }
+
+    private readonly Dictionary<string, List<string>> _sheetCache = new();
+
+    /// <summary>Tên các sheet trong workbook của 1 acc (đọc nhanh từ xl/workbook.xml trong file zip, không parse
+    /// toàn bộ Excel). Cache theo acctId; rỗng nếu chưa có workbook.</summary>
+    private List<string> GetSheetNames(string acctId)
+    {
+        if (_sheetCache.TryGetValue(acctId, out var cached)) return cached;
+        var list = new List<string>();
+        var prefix = $"workbooks/{acctId}/";
+        var f = _manifest.FirstOrDefault(x => x.Name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+        if (f is not null)
+        {
+            try
+            {
+                var bytes = Db.ReadFile(f.Name);
+                if (bytes is not null)
+                {
+                    using var ms = new MemoryStream(bytes);
+                    using var zip = new System.IO.Compression.ZipArchive(ms, System.IO.Compression.ZipArchiveMode.Read);
+                    var entry = zip.GetEntry("xl/workbook.xml");
+                    if (entry is not null)
+                    {
+                        using var sr = new StreamReader(entry.Open());
+                        var xml = sr.ReadToEnd();
+                        foreach (System.Text.RegularExpressions.Match m in
+                                 System.Text.RegularExpressions.Regex.Matches(xml, "<sheet[^>]*\\bname=\"([^\"]+)\""))
+                            list.Add(System.Net.WebUtility.HtmlDecode(m.Groups[1].Value));
+                    }
+                }
+            }
+            catch { }
+        }
+        _sheetCache[acctId] = list;
+        return list;
+    }
+
+    private async Task Save()
+    {
+        _status = ConfigSave.Apply(Config, FileStoreConfigService.BigSellerFile, _all, ref _version, Load);
+        await OnChanged.InvokeAsync();
+    }
+
+    private async Task DeleteShop()
+    {
+        if (_acct is null || _shop is null) return;
+        _acct.Shops.RemoveAll(s => s.Id == _shop.Id);
+        _status = ConfigSave.Apply(Config, FileStoreConfigService.BigSellerFile, _all, ref _version, Load);
+        _confirmDelete = false;
+        await OnDeleted.InvokeAsync();
+    }
+}

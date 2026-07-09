@@ -1,0 +1,169 @@
+@* Cấu hình 1 tài khoản BigSeller (tab ⚙ Cấu hình của Fleet, khi chọn 1 acc). Port từ trang cấu hình BigSeller cũ.
+   Parent tick 2s re-render panel MỖI TICK → chỉ reload bản-đang-sửa khi AccountId THẬT SỰ đổi (guard _loadedKey),
+   tuyệt đối không reload mỗi tick kẻo mất chữ đang gõ. Login state đọc trực tiếp từ service → tươi theo nhịp parent. *@
+@inject FileStoreConfigService Config
+@inject HubDatabase Db
+@inject BigSellerLoginService Login
+
+@if (_acct is null)
+{
+    <p class="hint">Tài khoản không còn trong cấu hình.</p>
+}
+else
+{
+    <div class="editcard">
+        <div class="row">
+            <label>Nhãn <input @bind="_acct.Label" /></label>
+            <label>Email <input @bind="_acct.Email" /></label>
+            <label>Mật khẩu <input @bind="_acct.Password" /></label>
+            <label>KiotProxy key <input @bind="_acct.KiotProxyKey" /></label>
+            <label>Vùng <input @bind="_acct.Region" style="width:90px" /></label>
+        </div>
+
+        <div class="wbrow">
+            <span class="wblabel">📗 Workbook:</span>
+            <span class="wbname">@WorkbookName(_acct.Id)</span>
+            <label class="btn sm">
+                @(WorkbookName(_acct.Id) == "(chưa có)" ? "⬆ Tải lên" : "⬆ Thay file")
+                <InputFile OnChange="e => UploadWorkbook(e, _acct.Id)" accept=".xlsx" style="display:none" />
+            </label>
+            @if (!string.IsNullOrEmpty(_wbStatus)) { <span class="action">@_wbStatus</span> }
+        </div>
+
+        @{ var ls = Login.GetState(_acct.Id); }
+        <div class="wbrow">
+            <span class="wblabel">🔑 Login BigSeller:</span>
+            <button class="btn sm" disabled="@(ls?.Status is "running" or "needsOtp")"
+                    @onclick="() => StartLogin(_acct)">
+                @(ls?.Status is "running" or "needsOtp" ? "⏳ đang chạy…" : "Đăng nhập trên hub")
+            </button>
+            @if (ls is not null)
+            {
+                <span class="action">@StatusIcon(ls.Status) @ls.Message</span>
+            }
+            @if (ls?.NeedsOtp == true)
+            {
+                <input placeholder="Mã email (OTP)" @bind="_otp" style="width:130px" />
+                <button class="btn primary sm" @onclick="() => SubmitOtp(_acct.Id)">Gửi mã</button>
+            }
+        </div>
+        @if (Login.GetState(_acct.Id) is { } lg && lg.Log.Count > 0 && (lg.Status is "running" or "needsOtp" or "failed"))
+        {
+            <div class="loginlog">@string.Join("\n", lg.Log.TakeLast(6))</div>
+        }
+
+        <div class="subhead">Shops (@_acct.Shops.Count) <button class="btn sm" @onclick="AddShop">+ Thêm shop</button></div>
+        <p class="hint">Cấu hình chi tiết từng shop: chọn shop ở danh sách bên trái → tab ⚙ Cấu hình. Shop vừa thêm cần bấm <b>Lưu</b> mới hiện ra.</p>
+
+        <div class="bar">
+            <button class="btn primary" @onclick="Save">💾 Lưu</button>
+            @if (!_confirmDelete)
+            {
+                <button class="btn danger sm" @onclick="() => _confirmDelete = true">🗑 Xoá tài khoản</button>
+            }
+            else
+            {
+                <button class="btn danger sm" @onclick="DeleteAccount">Bấm lần nữa để xoá</button>
+                <button class="btn sm" @onclick="() => _confirmDelete = false">Huỷ</button>
+            }
+            <span class="action">@_status</span>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public string AccountId { get; set; } = "";
+    [Parameter] public EventCallback OnChanged { get; set; }
+    [Parameter] public EventCallback OnDeleted { get; set; }
+
+    private List<BigSellerAccount> _all = new();
+    private int _version;
+    private BigSellerAccount? _acct;
+    private List<FileManifestEntry> _manifest = new();
+    private string _status = "", _wbStatus = "", _otp = "";
+    private bool _confirmDelete;
+    private string _loadedKey = "\0";   // chưa load lần nào (khác mọi AccountId thật)
+
+    // Guard chống reload theo nhịp: parent re-render mỗi 2s → OnParametersSet chạy lại, chỉ nạp lại bản-đang-sửa
+    // khi AccountId ĐỔI THẬT (giữ chữ user đang gõ + tick login vẫn tươi vì đọc Login.GetState trực tiếp lúc render).
+    protected override void OnParametersSet()
+    {
+        if (AccountId == _loadedKey) return;
+        _loadedKey = AccountId;
+        _confirmDelete = false;
+        _status = _wbStatus = "";
+        Load();
+    }
+
+    private void Load()
+    {
+        _all = Config.BigSellerAccounts();
+        _version = Config.VersionOf(FileStoreConfigService.BigSellerFile);
+        _manifest = Db.ListFiles();
+        _acct = _all.FirstOrDefault(a => a.Id == AccountId);
+    }
+
+    /// <summary>Tên file workbook đang có trên hub cho 1 acc (workbooks/{id}/*). "(chưa có)" nếu chưa upload.</summary>
+    private string WorkbookName(string acctId)
+    {
+        var prefix = $"workbooks/{acctId}/";
+        var f = _manifest.FirstOrDefault(x => x.Name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+        return f is null ? "(chưa có)" : f.Name[prefix.Length..];
+    }
+
+    private async Task UploadWorkbook(InputFileChangeEventArgs e, string acctId)
+    {
+        var file = e.File;
+        _wbStatus = "⏳ đang tải…";
+        try
+        {
+            await using var s = file.OpenReadStream(maxAllowedSize: 256L * 1024 * 1024);
+            using var ms = new MemoryStream();
+            await s.CopyToAsync(ms);
+            var name = $"workbooks/{acctId}/{file.Name}";
+            var res = Db.PutFile(name, ms.ToArray(), null, "hub-web");
+            _wbStatus = res.Ok ? $"✔ đã tải {file.Name} (v{res.Version})" : $"✘ {res.Conflict}";
+            _manifest = Db.ListFiles();
+            await OnChanged.InvokeAsync();
+        }
+        catch (Exception ex) { _wbStatus = "✘ lỗi: " + ex.Message; }
+    }
+
+    private void StartLogin(BigSellerAccount a)
+    {
+        if (string.IsNullOrWhiteSpace(a.Email) || string.IsNullOrWhiteSpace(a.Password))
+        { _status = "⚠ Cần Email + Mật khẩu cho acc trước khi login."; return; }
+        Login.Start(a.Id, a.Email.Trim(), a.Password);
+    }
+
+    private void SubmitOtp(string acctId)
+    {
+        if (!string.IsNullOrWhiteSpace(_otp)) { Login.SubmitOtp(acctId, _otp); _otp = ""; }
+    }
+
+    private static string StatusIcon(string st) => st switch
+    {
+        "success" => "✔", "failed" => "✘", "needsOtp" => "⚠", "running" => "⏳", _ => "",
+    };
+
+    private void AddShop()
+    {
+        if (_acct is null) return;
+        _acct.Shops.Add(new BigSellerShop { Name = "Shop mới" });
+    }
+
+    private async Task Save()
+    {
+        _status = ConfigSave.Apply(Config, FileStoreConfigService.BigSellerFile, _all, ref _version, Load);
+        await OnChanged.InvokeAsync();
+    }
+
+    private async Task DeleteAccount()
+    {
+        if (_acct is null) return;
+        _all.RemoveAll(a => a.Id == _acct.Id);
+        _status = ConfigSave.Apply(Config, FileStoreConfigService.BigSellerFile, _all, ref _version, Load);
+        _confirmDelete = false;
+        await OnDeleted.InvokeAsync();
+    }
+}

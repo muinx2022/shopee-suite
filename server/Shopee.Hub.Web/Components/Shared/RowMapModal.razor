@@ -1,0 +1,95 @@
+@* Modal "bản đồ dòng" (heatmap): mỗi ô = 1 dòng dữ liệu của sheet; xanh = đã làm việc này, xám = chưa.
+   Tách nguyên từ trang Stats cũ → dùng lại ở trang Fleet. Dữ liệu chụp lúc mở (không tự refresh). *@
+@inject SheetMapService SheetMap
+
+<div class="modal-overlay" @onclick="OnClose">
+    <div class="modal wide" @onclick:stopPropagation="true">
+        <div class="modal-head">
+            <span>🗺️ @Title</span>
+            <button class="linkbtn" @onclick="OnClose">✕</button>
+        </div>
+        <div class="modal-body">
+            @if (_loading)
+            {
+                <div class="hint">Đang đọc cấu trúc sheet…</div>
+            }
+            else if (_error is not null)
+            {
+                <div class="warn">@_error</div>
+            }
+            else if (_cells.Count == 0)
+            {
+                <div class="empty">Sheet không có dòng dữ liệu.</div>
+            }
+            else
+            {
+                <div class="hmbar">
+                    <span class="stat"><b>@_done.ToString("N0")</b> / @_total.ToString("N0") dòng đã @OpLabel</span>
+                    <span class="hmleg"><span class="hm-cell on"></span> đã làm &nbsp; <span class="hm-cell"></span> chưa</span>
+                </div>
+                <div class="heatmap">
+                    @foreach (var cell in _cells)
+                    {
+                        <span class="hm-cell @(cell.Done ? "on" : "")" title="@(cell.Done ? $"dòng {cell.Row} · đã {OpLabel}" : $"dòng {cell.Row} · chưa")"></span>
+                    }
+                </div>
+                @if (_capped)
+                {
+                    <div class="sub">Hiển thị @_cells.Count.ToString("N0") ô đầu (sheet rất lớn) — đủ để thấy vùng đã làm.</div>
+                }
+            }
+        </div>
+        <div class="modal-foot">
+            <button class="btn" @onclick="OnClose">Đóng</button>
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter] public string Title { get; set; } = "";
+    [Parameter] public string Op { get; set; } = "";
+    [Parameter] public string OpLabel { get; set; } = "";
+    [Parameter] public string AccountId { get; set; } = "";
+    [Parameter] public string Sheet { get; set; } = "";
+    [Parameter] public WorkLedgerRecord? Ledger { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private bool _loading = true, _capped;
+    private string? _error;
+    private int _total, _done;
+    private List<(int Row, bool Done)> _cells = new();
+    private const int MapCap = 20000;
+
+    // Đọc cấu trúc sheet (cache) rồi tô dòng đã làm. Chạy 1 lần lúc mở; render loading trước, xong thì vẽ heatmap.
+    protected override async Task OnInitializedAsync()
+    {
+        var info = await SheetMap.GetAsync(AccountId, Sheet);
+        if (!info.Found) { _error = info.Error; _loading = false; return; }
+
+        var abs = info.DataRows;                 // số dòng tuyệt đối, tăng dần; vị trí i ↔ chỉ số dồn i+1
+        var ranges = Ledger?.Completed ?? new List<RowRange>();
+        var done = new bool[abs.Count];
+        if (Op == "scrape")
+        {
+            // scrape: ledger là CHỈ SỐ DỒN (1-based) → phần tử thứ p trong danh sách.
+            foreach (var rr in ranges)
+                for (var p = Math.Max(1, rr.From); p <= rr.To && p <= abs.Count; p++)
+                    done[p - 1] = true;
+        }
+        else
+        {
+            // import/update: ledger là SỐ DÒNG TUYỆT ĐỐI → tra vị trí trong danh sách.
+            var idx = new Dictionary<int, int>(abs.Count);
+            for (var i = 0; i < abs.Count; i++) idx[abs[i]] = i;
+            foreach (var rr in ranges)
+                for (var a = rr.From; a <= rr.To; a++)
+                    if (idx.TryGetValue(a, out var i)) done[i] = true;
+        }
+        _total = abs.Count;
+        _done = done.Count(b => b);
+        var cells = abs.Select((rowNum, i) => (Row: rowNum, Done: done[i]));
+        _capped = abs.Count > MapCap;
+        _cells = (_capped ? cells.Take(MapCap) : cells).ToList();
+        _loading = false;
+    }
+}
