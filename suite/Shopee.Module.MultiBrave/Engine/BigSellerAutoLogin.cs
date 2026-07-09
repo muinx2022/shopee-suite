@@ -11,20 +11,16 @@ namespace OpenMultiBraveLauncherV3;
 public enum AutoLoginOutcome { Success, NeedsOtp, Failed }
 
 /// <summary>
-/// TỰ ĐĂNG NHẬP BigSeller (headless) trên 1 <see cref="IPage"/> — BẢN SAO của
-/// <c>UpdateProduct.BigSellerAutoLogin</c> cho module Scrape (MultiBrave dùng stack Playwright riêng). Riêng
-/// phần cookie/CDP KHÔNG còn nhân bản: <c>CdpClient</c> đã về Core và <c>BigSellerCookieImporter</c> đã hợp
-/// nhất vào <see cref="BigSellerCookieEngine"/> ở Core — cả hai stack dùng chung.
-/// Mở trang login (en_US) → điền email/mật khẩu → đóng popup "Warm Tips" → giải captcha
-/// (<see cref="BigSellerCaptchaSolver"/>, AI vision) → tick "I agree" → submit → RETRY. Trả về Success (có
-/// token mới KHỚP IP proxy của Brave này — token sync KHÔNG scrape được vì bị coi phiên lạ), NeedsOtp (thiết
-/// bị lạ → cần giải mã email tay 1 lần tạo device-trust), hoặc Failed. Orchestration (TTL + attach CDP +
-/// xuất token ra file) nằm ở <c>BraveInstanceSession.TryAutoLoginBigSellerAsync</c>.
+/// ĐIỀU PHỐI tự đăng nhập BigSeller cho module Scrape (MultiBrave, stack Playwright riêng): attach Brave qua
+/// CDP hoặc mở Brave headless → gọi LÕI điền form dùng chung <see cref="BigSellerLoginForm"/> (mở trang login,
+/// điền email/mật khẩu, giải captcha AI, tick "I agree", submit, retry) → thành công thì mark phiên + xuất token
+/// mới ra cookie-file. Phần cookie/CDP cũng đã về Core (<c>CdpClient</c>, <see cref="BigSellerCookieEngine"/>).
+/// Trả về Success (token mới KHỚP IP proxy của Brave này — token sync KHÔNG scrape được vì bị coi phiên lạ),
+/// NeedsOtp (thiết bị lạ → cần giải mã email tay 1 lần tạo device-trust), hoặc Failed. Orchestration (TTL +
+/// attach CDP + xuất token ra file) nằm ở <c>BraveInstanceSession.TryAutoLoginBigSellerAsync</c>.
 /// </summary>
 public static class BigSellerAutoLogin
 {
-    private const string LoginUrl = "https://www.bigseller.com/en_US/login.htm";
-
     /// <summary>BUỘC tự đăng nhập ngay trong Brave đang mở tại <paramref name="cdpPort"/> (BỎ guard TTL/IsFresh) —
     /// dùng cho nút "Mở Profile Bigseller" khi phát hiện CHƯA đăng nhập. Attach Playwright qua CDP → điền
     /// email/mật khẩu + giải captcha (AI) → thành công thì mark + xuất token ra <paramref name="cookieFile"/>.
@@ -48,7 +44,7 @@ public static class BigSellerAutoLogin
             var page = context.Pages.FirstOrDefault(p => (p.Url ?? "").Contains("bigseller", StringComparison.OrdinalIgnoreCase))
                        ?? await context.NewPageAsync().ConfigureAwait(false);
 
-            var outcome = await TryAsync(page, email, password, AiConfigStore.Shared.Current, log, ct).ConfigureAwait(false);
+            var outcome = Map(await BigSellerLoginForm.RunFormLoginAsync(page, email, password, AiConfigStore.Shared.Current, log, ct).ConfigureAwait(false));
             if (outcome == AutoLoginOutcome.Success)
             {
                 BigSellerSessionRegistry.MarkLoggedIn(accountId);
@@ -101,7 +97,7 @@ public static class BigSellerAutoLogin
             var page = context.Pages.FirstOrDefault(p => (p.Url ?? "").Contains("bigseller", StringComparison.OrdinalIgnoreCase))
                        ?? await context.NewPageAsync().ConfigureAwait(false);
 
-            var outcome = await TryAsync(page, email, password, AiConfigStore.Shared.Current, log, ct).ConfigureAwait(false);
+            var outcome = Map(await BigSellerLoginForm.RunFormLoginAsync(page, email, password, AiConfigStore.Shared.Current, log, ct).ConfigureAwait(false));
             if (outcome == AutoLoginOutcome.Success)
             {
                 BigSellerSessionRegistry.MarkLoggedIn(accountId);
@@ -133,7 +129,7 @@ public static class BigSellerAutoLogin
     /// <summary>Tự đăng nhập 1 tk BigSeller HEADLESS (KHÔNG hiện cửa sổ): TỰ mở Brave --headless (profile riêng
     /// theo <paramref name="accountId"/>, có proxy nếu truyền) → điền email/mật khẩu + giải captcha (AI) → LƯU
     /// cookie ra <paramref name="cookieFile"/> → đóng. Dùng cho nút "Đăng nhập tất cả". Đã đăng nhập sẵn (profile
-    /// bền) → TryAsync trả Success ngay (giữ token, vẫn lưu lại). NeedsOtp = thiết bị mới → cần đăng nhập TAY 1
+    /// bền) → lõi form-fill trả Success ngay (giữ token, vẫn lưu lại). NeedsOtp = thiết bị mới → cần đăng nhập TAY 1
     /// lần (mục Cấu hình BigSeller → Mở Profile). Mọi lỗi → Failed (không ném ra ngoài, để vòng "tất cả" chạy tiếp).</summary>
     public static async Task<AutoLoginOutcome> LoginHeadlessAsync(
         string accountId, string email, string password, string cookieFile, string? proxyServer,
@@ -156,7 +152,7 @@ public static class BigSellerAutoLogin
         try
         {
             // Mở Brave HEADLESS (không hiện cửa sổ) — proxy riêng nếu tk có (token mint khớp IP với scrape).
-            launcher.Launch(profileDir, proxyServer, LoginUrl, new[] { "--headless=new" });
+            launcher.Launch(profileDir, proxyServer, BigSellerLoginForm.LoginUrl, new[] { "--headless=new" });
             var port = launcher.CdpPort;
 
             // Chờ CDP sẵn sàng (~tối đa 15s) trước khi attach Playwright.
@@ -169,7 +165,7 @@ public static class BigSellerAutoLogin
             if (context is null) { log?.Invoke("Brave headless chưa có context."); return AutoLoginOutcome.Failed; }
             var page = context.Pages.FirstOrDefault() ?? await context.NewPageAsync().ConfigureAwait(false);
 
-            var outcome = await TryAsync(page, email, password, AiConfigStore.Shared.Current, log, ct).ConfigureAwait(false);
+            var outcome = Map(await BigSellerLoginForm.RunFormLoginAsync(page, email, password, AiConfigStore.Shared.Current, log, ct).ConfigureAwait(false));
             if (outcome == AutoLoginOutcome.Success)
             {
                 BigSellerSessionRegistry.MarkLoggedIn(accountId);
@@ -194,82 +190,11 @@ public static class BigSellerAutoLogin
         }
     }
 
-    public static async Task<AutoLoginOutcome> TryAsync(
-        IPage page, string email, string password, AiConfig ai, Action<string>? log, CancellationToken ct, int maxAttempts = 5)
+    /// <summary>Map kết quả lõi form-fill (Core) → enum outcome của module (giữ nguyên 3 nhánh).</summary>
+    private static AutoLoginOutcome Map(BigSellerLoginOutcome o) => o switch
     {
-        if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(password))
-        { log?.Invoke("Thiếu email/mật khẩu BigSeller — không thể auto-login."); return AutoLoginOutcome.Failed; }
-
-        await page.GotoAsync(LoginUrl, new() { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 20000 });
-        await Task.Delay(2000, ct);
-
-        // Đã đăng nhập sẵn (redirect khỏi trang login) → coi như thành công.
-        if (!(page.Url ?? "").Contains("login", StringComparison.OrdinalIgnoreCase))
-            return AutoLoginOutcome.Success;
-
-        for (var attempt = 1; attempt <= maxAttempts; attempt++)
-        {
-            ct.ThrowIfCancellationRequested();
-            await DismissWarmTipsAsync(page);
-            try
-            {
-                await page.FillAsync("input[name=account]", email);
-                await page.FillAsync("input[name=password]", password);
-                if (!await page.IsCheckedAsync("input.el-checkbox__original"))
-                    await page.Locator(".el-checkbox").First.ClickAsync(new() { Timeout = 3000 });
-
-                var src = await page.GetAttributeAsync("img.comb-code-img", "src");
-                if (string.IsNullOrEmpty(src) || !src.Contains("base64,"))
-                { log?.Invoke("Không thấy ảnh captcha trên form login."); await Task.Delay(1500, ct); continue; }
-                var png = Convert.FromBase64String(src[(src.IndexOf("base64,", StringComparison.Ordinal) + 7)..]);
-                var code = await BigSellerCaptchaSolver.SolveAsync(ai, png, ct);
-                log?.Invoke($"Auto-login lần {attempt}: captcha đọc '{code}'.");
-                if (code.Length < 4) { await RefreshCaptchaAsync(page); await Task.Delay(800, ct); continue; }
-
-                await page.FillAsync("input[name=picVerificationCode]", code);
-                try { await page.WaitForFunctionAsync("() => { const b = document.querySelector('button.opt-btn'); return b && !b.disabled; }", null, new() { Timeout = 4000 }); } catch { }
-                await page.Locator("button.opt-btn").First.ClickAsync(new() { Force = true, Timeout = 5000 });
-            }
-            catch (OperationCanceledException) { throw; }
-            catch (Exception ex) { log?.Invoke($"Auto-login bước điền lỗi: {ex.Message}"); }
-
-            await Task.Delay(4500, ct);
-            await DismissWarmTipsAsync(page);
-            var url = page.Url ?? "";
-            if (url.Contains("security", StringComparison.OrdinalIgnoreCase))
-            { log?.Invoke("⚠ BigSeller đòi mã xác nhận email (thiết bị mới) — cần giải tay 1 lần để tạo device-trust."); return AutoLoginOutcome.NeedsOtp; }
-            if (!url.Contains("login", StringComparison.OrdinalIgnoreCase))
-            { log?.Invoke("✔ Auto-login thành công — có token mới (khớp IP proxy này)."); return AutoLoginOutcome.Success; }
-
-            log?.Invoke("Captcha sai/khác — đổi captcha thử lại.");
-            await RefreshCaptchaAsync(page);
-            await Task.Delay(1000, ct);
-        }
-        return AutoLoginOutcome.Failed;
-    }
-
-    /// <summary>Đóng popup "Warm Tips" (China/pro) hay che form — bấm nút KHÔNG-primary ("No Prompt"/đóng),
-    /// TRÁNH "Jump Now" (primary → nhảy sang bigseller.pro).</summary>
-    private static async Task DismissWarmTipsAsync(IPage page)
-    {
-        try
-        {
-            for (var i = 0; i < 3; i++)
-            {
-                var box = page.Locator(".el-message-box, .el-overlay-message-box");
-                if (await box.CountAsync() == 0 || !await box.First.IsVisibleAsync()) return;
-                var cancel = page.Locator(".el-message-box__btns .el-button:not(.el-button--primary), .el-overlay-message-box .el-button:not(.el-button--primary)");
-                if (await cancel.CountAsync() > 0) await cancel.First.ClickAsync(new() { Timeout = 2000 });
-                else { try { await page.Keyboard.PressAsync("Escape"); } catch { } }
-                await Task.Delay(500);
-            }
-        }
-        catch { }
-    }
-
-    /// <summary>Bấm ảnh captcha để server phát captcha MỚI (sau khi giải sai).</summary>
-    private static async Task RefreshCaptchaAsync(IPage page)
-    {
-        try { await page.Locator("button.comb-code").First.ClickAsync(new() { Timeout = 2000 }); } catch { }
-    }
+        BigSellerLoginOutcome.Success => AutoLoginOutcome.Success,
+        BigSellerLoginOutcome.NeedsOtp => AutoLoginOutcome.NeedsOtp,
+        _ => AutoLoginOutcome.Failed,
+    };
 }

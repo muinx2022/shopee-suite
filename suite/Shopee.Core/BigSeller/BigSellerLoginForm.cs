@@ -17,7 +17,8 @@ public enum BigSellerLoginOutcome { Success, NeedsOtp, Failed }
 /// </summary>
 public static class BigSellerLoginForm
 {
-    private const string LoginUrl = "https://www.bigseller.com/en_US/login.htm";
+    /// <summary>URL trang login BigSeller (en_US) — cả lõi form-fill lẫn orchestration (mở/điều hướng Brave) dùng chung.</summary>
+    public const string LoginUrl = "https://www.bigseller.com/en_US/login.htm";
 
     /// <summary>Điền form login BigSeller + giải captcha + retry (<paramref name="maxAttempts"/> lần).
     /// <paramref name="onSecurityChallenge"/>: khi URL nhảy sang "security" (thiết bị mới) — null (module) → trả
