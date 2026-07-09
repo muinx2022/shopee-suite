@@ -20,19 +20,16 @@ public enum UpdateKind { Import, Update, Rewrite }
 /// + map cột riêng) rồi chạy 1 trong 3 workflow SONG SONG cho mọi tk đã chọn: Import to store (Playwright),
 /// Update product (C#/Playwright), Update tên SP (AI). Cookie BigSeller lấy từ kho chung.
 /// </summary>
-public sealed partial class UpdateProductViewModel : ObservableObject
+public sealed partial class UpdateProductViewModel : ModuleViewModelBase
 {
     /// <summary>Mỗi tài khoản BigSeller là 1 "đích chạy" (tick chọn + chọn shop) — chạy được nhiều tk song song.</summary>
     public ObservableCollection<UpdateRunTargetViewModel> RunTargets { get; } = [];
-    /// <summary>Nhật ký update: giữ 500 dòng cuối trên UI (khỏi đơ) + ghi ĐẦY ĐỦ ra logs\workspace-update.log.</summary>
-    public LogBuffer LogLines { get; } = new("workspace-update.log");
 
     // Ảnh/Video DÙNG CHUNG cho mọi tk; từ-dòng/đến-dòng/worker là RIÊNG từng tk (xem UpdateRunTargetViewModel).
     // Điền sẵn mặc định để khỏi gõ lại mỗi lần mở app (vẫn sửa được trong cấu hình update).
     [ObservableProperty] private string _imagePath = @"D:\images\1.jpg";
     [ObservableProperty] private string _videoFolder = @"D:\videos";
     [ObservableProperty] private string _openAiKeyFile = "";
-    [ObservableProperty] private string _status = "Sẵn sàng.";
 
     /// <summary>Tk BigSeller đang click để xem/sửa cấu hình chi tiết (panel phải) — giống Shopee Scrape.</summary>
     [ObservableProperty]
@@ -54,7 +51,7 @@ public sealed partial class UpdateProductViewModel : ObservableObject
 
     private bool _uiLoaded;
 
-    public UpdateProductViewModel()
+    public UpdateProductViewModel() : base("workspace-update.log", "Update Product")
     {
         // Khôi phục ảnh/video/key OpenAI đã LƯU (dùng chung mọi tk) — trước đây mất khi đóng app.
         var ui = UpdateProductUiStore.Shared.Current;
@@ -454,16 +451,4 @@ public sealed partial class UpdateProductViewModel : ObservableObject
         Status = "Đang dừng…";
     }
 
-    /// <summary>Mở file log ĐẦY ĐỦ (UI chỉ giữ 500 dòng cuối) — logs\workspace-update.log.</summary>
-    [RelayCommand]
-    private void OpenLogFile() => ShellOpener.RevealFile(LogLines.FilePath);
-
-    private void Log(string text) => UiThread.Post(() => LogLines.Add(text));
-
-    private void Warn(string msg, bool silent = false)
-    {
-        Status = msg;
-        if (silent) Log("⚠ " + msg);   // đường push-dispatch: KHÔNG mở modal (tránh treo UI), chỉ ghi log
-        else Dialogs.Notify(msg, "Update Product");
-    }
 }

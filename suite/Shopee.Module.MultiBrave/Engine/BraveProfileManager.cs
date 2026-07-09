@@ -66,17 +66,20 @@ internal static class BraveProfileManager
     public static void PrepareProfileForLaunch(string profileRoot)
     {
         ClearCopiedExtensionInstallState(profileRoot);
-        ClearSwScriptCache(profileRoot);
         ClearHeavyReusableCaches(profileRoot);
-        ClearSessionRestoreState(profileRoot);
-        MarkProfileCleanShutdown(profileRoot);
+        // Gộp về Core: dọn cache runtime (SW/Code Cache/Cache/GPUCache) + trạng thái phiên/tab + đánh dấu
+        // thoát sạch. Thứ tự với ClearHeavyReusableCaches không quan trọng (khác hạng mục file).
+        Shopee.Core.Browser.BraveCachePolicy.PrepareProfileForLaunch(
+            profileRoot,
+            Shopee.Core.Browser.ProfileLaunchPrep.ClearRuntimeCache
+            | Shopee.Core.Browser.ProfileLaunchPrep.ClearSessionRestore
+            | Shopee.Core.Browser.ProfileLaunchPrep.MarkCleanShutdown);
     }
 
     /// <summary>Xoá các thư mục cache NẶNG, tái tạo được, KHÔNG chứa cookie/đăng nhập (Default\Cache, GPUCache,
     /// Safe Browsing, component_crx_cache, shader/Dawn cache…) trước mỗi lần launch → profile bền không phình
     /// dần qua các phiên chạy dài. Cookie (Default\Network\Cookies) + Local State GIỮ NGUYÊN nên không mất
-    /// login/không tăng captcha. Dùng CHUNG danh sách với StartupJanitor (BraveCachePolicy) để không lệch nhau.
-    /// Service Worker do <see cref="ClearSwScriptCache"/> lo trước (xoá lại ở đây vô hại).</summary>
+    /// login/không tăng captcha. Dùng CHUNG danh sách với StartupJanitor (BraveCachePolicy) để không lệch nhau.</summary>
     private static void ClearHeavyReusableCaches(string profileRoot)
     {
         Shopee.Core.Browser.BraveCachePolicy.PruneProfileCache(profileRoot);
@@ -91,30 +94,22 @@ internal static class BraveProfileManager
         bool loadRunnerExtension = true,
         string? bigSellerProxyServer = null)
     {
-        var parts = new List<string>
-        {
-            $"--user-data-dir=\"{userDataDir}\"",
-            "--profile-directory=Default",
-            "--new-window",
-            "--no-first-run",
-            "--no-default-browser-check",
-            "--hide-crash-restore-bubble",
-            $"--remote-debugging-port={cdpPort}",
+        // Khối 6 cờ nền cửa sổ (BraveArgsBuilder.Window) + remote-debugging-port, rồi cờ RIÊNG scrape giữ nguyên thứ tự gốc.
+        var parts = Shopee.Core.Browser.BraveArgsBuilder.Window(userDataDir)
+            .RemoteDebuggingPort(cdpPort)
 
             // GIỮ CỬA SỔ NỀN LUÔN HOẠT ĐỘNG. Khi chạy nhiều instance, mở/đưa cửa sổ instance khác lên
             // trước làm các cửa sổ còn lại bị che (occluded)/chạy nền → Brave bóp timer + renderer +
             // service worker → scrape "đứng hình" (đúng triệu chứng: kẹt lúc mở sang instance khác).
             // Các cờ dưới tắt toàn bộ cơ chế tiết kiệm tài nguyên đó để mọi instance scrape song song ổn định.
-            "--disable-background-timer-throttling",
-            "--disable-backgrounding-occluded-windows",
-            "--disable-renderer-backgrounding",
+            .Add("--disable-background-timer-throttling")
+            .Add("--disable-backgrounding-occluded-windows")
+            .Add("--disable-renderer-backgrounding")
             // DisableLoadExtensionCommandLineSwitch: Brave/Chrome 137+ MẶC ĐỊNH chặn --load-extension
             // → extension "Shopee Data Runner" KHÔNG load. Tắt feature này để --load-extension hoạt động lại.
-            "--disable-features=CalculateNativeWinOcclusion,IntensiveWakeUpThrottling,DisableLoadExtensionCommandLineSwitch",
-        };
-
-        // Chặn cache phình khi 24 cửa sổ chạy song song (profile bền → cache không tự dọn). Xem BraveCachePolicy.
-        parts.AddRange(Shopee.Core.Browser.BraveCachePolicy.DiskLimitArgs);
+            .Add("--disable-features=CalculateNativeWinOcclusion,IntensiveWakeUpThrottling,DisableLoadExtensionCommandLineSwitch")
+            // Chặn cache phình khi 24 cửa sổ chạy song song (profile bền → cache không tự dọn). Xem BraveCachePolicy.
+            .DiskCacheLimit();
         if (!string.IsNullOrWhiteSpace(bigSellerProxyServer))
         {
             // TK BIGSELLER CÓ PROXY RIÊNG → split-tunnel qua PAC: bigseller.com đi proxy RIÊNG của tk
@@ -183,7 +178,7 @@ internal static class BraveProfileManager
         if (extPaths.Count > 0)
             parts.Add($"--load-extension=\"{string.Join(",", extPaths)}\"");
 
-        return string.Join(" ", parts);
+        return parts.Build();
     }
 
     private static List<string> CollectExtensionLoadPaths(string? runnerPath)
@@ -307,90 +302,6 @@ internal static class BraveProfileManager
             if (s.StartsWith(scheme, StringComparison.OrdinalIgnoreCase)) { kind = pac; s = s[scheme.Length..]; break; }
         }
         return $"{kind} {s}";
-    }
-
-    private static void ClearSwScriptCache(string profileRoot)
-    {
-        try
-        {
-            var defaultDir = Path.Combine(profileRoot, "Default");
-
-            // Xóa TRỌN thư mục "Service Worker" (ScriptCache + Database/registration + CacheStorage).
-            // LÝ DO: nếu CHỈ xóa ScriptCache mà GIỮ Database (bản đăng ký SW), Chromium thấy SW "đã đăng
-            // ký" nhưng blob script đã mất → SW KHÔNG start được → /json/list KHÔNG có service_worker
-            // target → popup gửi message báo "Receiving end does not exist" mãi (đúng triệu chứng vài
-            // instance treo 4–5'). Xóa cả thư mục → Brave ĐĂNG KÝ LẠI SW sạch từ extension → SW start
-            // chắc chắn. (Cold-start lại mỗi launch chậm hơn chút, nhưng đổi lấy SW lên ổn định.)
-            var swDir = Path.Combine(defaultDir, "Service Worker");
-            if (Directory.Exists(swDir))
-            {
-                try { Directory.Delete(swDir, recursive: true); }
-                catch
-                {
-                    foreach (var f in Directory.GetFiles(swDir, "*", SearchOption.AllDirectories))
-                    {
-                        try { File.Delete(f); } catch { }
-                    }
-                }
-            }
-
-            var codeCache = Path.Combine(defaultDir, "Code Cache");
-            if (Directory.Exists(codeCache))
-            {
-                foreach (var f in Directory.GetFiles(codeCache, "*", SearchOption.AllDirectories))
-                {
-                    try { File.Delete(f); } catch { }
-                }
-            }
-        }
-        catch { }
-    }
-
-    private static void ClearSessionRestoreState(string profileRoot)
-    {
-        try
-        {
-            var defaultDir = Path.Combine(profileRoot, "Default");
-            foreach (var subDir in new[] { "Sessions" })
-            {
-                var dir = Path.Combine(defaultDir, subDir);
-                if (!Directory.Exists(dir)) continue;
-                foreach (var file in Directory.GetFiles(dir, "*", SearchOption.AllDirectories))
-                {
-                    try { File.Delete(file); } catch { }
-                }
-            }
-        }
-        catch { }
-    }
-
-    private static void MarkProfileCleanShutdown(string profileRoot)
-    {
-        var preferencesPath = Path.Combine(profileRoot, "Default", "Preferences");
-        if (!File.Exists(preferencesPath))
-            return;
-
-        try
-        {
-            var root = JsonNode.Parse(File.ReadAllText(preferencesPath)) as JsonObject;
-            if (root is null) return;
-
-            var profile = root["profile"] as JsonObject;
-            if (profile is null)
-            {
-                profile = new JsonObject();
-                root["profile"] = profile;
-            }
-
-            profile["exit_type"] = "Normal";
-            profile["exited_cleanly"] = true;
-
-            File.WriteAllText(
-                preferencesPath,
-                root.ToJsonString(new JsonSerializerOptions { WriteIndented = false }),
-                Encoding.UTF8);
-        }
-        catch { }
     }
 
     private static void CopyExtensionState(DirectoryInfo src, DirectoryInfo dst)

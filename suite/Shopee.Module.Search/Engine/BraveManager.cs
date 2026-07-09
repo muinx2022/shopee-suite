@@ -61,7 +61,8 @@ public sealed class BraveManager(AppSettingsService appSettings)
 
         // Close only the Brave instance/profile managed by this app.
         Kill();
-        ClearExtensionRuntimeCache(profileDir);
+        Shopee.Core.Browser.BraveCachePolicy.PrepareProfileForLaunch(
+            profileDir, Shopee.Core.Browser.ProfileLaunchPrep.ClearRuntimeCache);
 
         _cdpPort = Shopee.Core.Infrastructure.PortAllocator.Reserve();
         _currentProfileDir = Path.GetFullPath(profileDir);
@@ -227,63 +228,25 @@ public sealed class BraveManager(AppSettingsService appSettings)
         return string.Join(", ", found);
     }
 
-    private static void ClearExtensionRuntimeCache(string profileDir)
-    {
-        try
-        {
-            var defaultDir = Path.Combine(Path.GetFullPath(profileDir), "Default");
-            var cacheDirs = new[]
-            {
-                Path.Combine(defaultDir, "Service Worker"),
-                Path.Combine(defaultDir, "Code Cache"),
-                Path.Combine(defaultDir, "Cache"),
-                Path.Combine(defaultDir, "GPUCache"),
-            };
-
-            foreach (var dir in cacheDirs)
-            {
-                try
-                {
-                    if (Directory.Exists(dir))
-                        Directory.Delete(dir, recursive: true);
-                }
-                catch { }
-            }
-        }
-        catch { }
-    }
-
     private static string BuildArgs(int cdpPort, string userDataDir, string? proxy, string extPath, int wsPort)
     {
-        var parts = new List<string>
-        {
-            $"--user-data-dir=\"{userDataDir}\"",
-            "--profile-directory=Default",
-            "--new-window",
-            "--no-first-run",
-            "--no-default-browser-check",
-            "--hide-crash-restore-bubble",
-            "--no-restore-last-session",
-            "--restore-last-session=false",
-            "--disable-background-mode",
+        // Khối 6 cờ nền cửa sổ (BraveArgsBuilder.Window) + cờ RIÊNG của Search giữ nguyên thứ tự gốc.
+        return Shopee.Core.Browser.BraveArgsBuilder.Window(userDataDir)
+            .Add("--no-restore-last-session")
+            .Add("--restore-last-session=false")
+            .Add("--disable-background-mode")
             // Brave/Chrome 137+ mặc định chặn --load-extension (DisableLoadExtensionCommandLineSwitch) →
             // tắt feature đó để extension Shopee Search load được (giống engine Scrape).
-            "--disable-features=DisableLoadExtensionCommandLineSwitch",
-            $"--remote-debugging-port={cdpPort}",
-            $"--load-extension=\"{extPath}\"",
-        };
-
-        // Profile Search cũng BỀN (giữ cookie login) → phải chặn cache phình như mọi Brave khác của app.
-        // Thiếu bước này chính là nguồn cache 27 GB đã đo (xem BraveCachePolicy).
-        parts.AddRange(Shopee.Core.Browser.BraveCachePolicy.DiskLimitArgs);
-
-        if (!string.IsNullOrWhiteSpace(proxy))
-            parts.Add($"--proxy-server={proxy}");
-
-        // Extension reads WS port from URL hash on first tab
-        parts.Add($"\"https://shopee.vn/#_ss_ws={wsPort}\"");
-
-        return string.Join(" ", parts);
+            .Add("--disable-features=DisableLoadExtensionCommandLineSwitch")
+            .RemoteDebuggingPort(cdpPort)
+            .LoadExtension(extPath)
+            // Profile Search cũng BỀN (giữ cookie login) → phải chặn cache phình như mọi Brave khác của app.
+            // Thiếu bước này chính là nguồn cache 27 GB đã đo (xem BraveCachePolicy).
+            .DiskCacheLimit()
+            .ProxyServer(proxy)
+            // Extension reads WS port from URL hash on first tab
+            .StartUrl($"https://shopee.vn/#_ss_ws={wsPort}")
+            .Build();
     }
 
     private static async Task<(string? Proxy, string? Error)> FetchKiotProxyAsync(string key, string proxyType)

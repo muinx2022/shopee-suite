@@ -9,7 +9,6 @@ using Shopee.Core.BigSeller;
 using Shopee.Core.Browser;
 using Shopee.Core.Coordination;
 using Shopee.Core.Infrastructure;
-using Shopee.Core.Proxy;
 using Shopee.Core.Scrape;
 using Shopee.Modules.MultiBrave;
 using Shopee.Suite.Infrastructure;
@@ -24,16 +23,13 @@ namespace Shopee.Suite.Modules.Scrape;
 /// nên phiên rải nhiều IP, không bị "nhiều token / 1 IP" → KHÔNG cần chạy lần lượt. Tk Shopee dính
 /// captcha/proxy lỗi thì tự đổi tk khác.
 /// </summary>
-public sealed partial class ScrapeViewModel : ObservableObject
+public sealed partial class ScrapeViewModel : ModuleViewModelBase
 {
     public ObservableCollection<ScrapeTargetViewModel> ScrapeTargets { get; } = [];
     public ObservableCollection<ScrapeInstanceViewModel> Instances { get; } = [];
     public ObservableCollection<ErroredAccountRow> ErroredAccounts { get; } = [];
-    /// <summary>Nhật ký scrape: giữ 500 dòng cuối trên UI (khỏi đơ) + ghi ĐẦY ĐỦ ra logs\workspace-scrape.log.</summary>
-    public LogBuffer LogLines { get; } = new("workspace-scrape.log");
 
     [ObservableProperty] private string _videoDir = @"D:\videos";
-    [ObservableProperty] private string _status = "Sẵn sàng.";
     [ObservableProperty] private int _poolCount;
 
     /// <summary>Tk BigSeller đang click để xem/sửa config chi tiết (panel phải).</summary>
@@ -66,7 +62,7 @@ public sealed partial class ScrapeViewModel : ObservableObject
         return arr;
     }
 
-    public ScrapeViewModel()
+    public ScrapeViewModel() : base("workspace-scrape.log", "Shopee Scrape")
     {
         Reload();
         AccountStore.Shared.Changed += OnStoresChanged;
@@ -272,7 +268,7 @@ public sealed partial class ScrapeViewModel : ObservableObject
                         _borrowed.Add(pick.Id);
                         _cooldown.Remove(pick.Id);
                         ShopeeAccountUsage.Shared.MarkInUse(pick.Id);
-                        return ToSpec(pick, _sheet);
+                        return ShopeeAccountSpecFactory.ToScrapeSpec(pick, _sheet);
                     }
                     usable = _frame.Count(a => !a.Disabled && !_dropped.Contains(a.Id));
                     borrowedCount = _borrowed.Count;
@@ -395,12 +391,9 @@ public sealed partial class ScrapeViewModel : ObservableObject
         var ct = h.Cts.Token;
 
         ScrapeRunner? runner = null;
-        var claimedFrameIds = new List<string>();   // CẢ khung đã giữ chỗ cục bộ → nhả TOÀN BỘ ở finally
-        var hubReservedIds = new List<string>();    // tk được Hub cấp lease (khung ban đầu + tk bù) → nhả/heartbeat trên Hub
-        var reservedLock = new object();            // 2 list trên bị pool BÙ TK thêm vào từ luồng khác → khóa khi đọc/ghi
         var coordKey = new CoordKey(account.Id, shop.Id, sheet, CoordOp.Scrape);
         ILeaseHandle? lease = null;
-        Timer? accHeartbeat = null;                 // nhịp account-lease nền (chống hết hạn giữa chunk dài)
+        AccountLeaseScope? accScope = null;         // khóa tk Shopee xuyên máy: reserve→heartbeat→bù→nhả (gói)
         var accHub = CoordinationRuntime.Hub;       // null nếu chưa kết nối Hub (chạy như 1 máy)
         try
         {
@@ -444,30 +437,23 @@ public sealed partial class ScrapeViewModel : ObservableObject
             var frameSize = Math.Max(1, target.FrameSize);
             IReadOnlyList<string>? preferIds = resume ? ScrapeProgressStore.Shared.GetFrame(account.Id, sheet) : null;
             var frame = s.ClaimFrame(frameSize, preferIds);
-            claimedFrameIds = frame.Select(a => a.Id).ToList();   // ghi nhận để nhả giữ-chỗ ở finally (kể cả khi job dừng giữa chừng)
+            var frameIds = frame.Select(a => a.Id).ToList();
+            // Gói account-lease: GIỮ giữ-chỗ cục bộ CẢ khung (ClaimFrame đã TryReserve) tới lúc Dispose nhả — kể cả
+            // khi job dừng giữa chừng / Hub loại bớt tk (KHÔNG thu hẹp khung để tránh rò tk khỏi kho chung). Tạo
+            // NGAY (kể cả offline) để mọi lối ra đều nhả giữ-chỗ cục bộ; reserve Hub + heartbeat + bù do scope lo.
+            accScope = AccountLeaseScope.ForFrame(accHub, frameIds);
             if (frame.Count == 0) { Log($"[{account.DisplayName}] kho tk Shopee đã cạn (mọi tk đang thuộc khung khác / Search đang giữ / bị tắt) — bỏ qua."); return; }
 
             // ACCOUNT-LEASE XUYÊN MÁY: tk nào đang được MÁY KHÁC dùng → loại khỏi khung (chống dùng trùng).
             if (accHub is not null)
             {
-                var granted = await accHub.ReserveAccountsAsync(claimedFrameIds).ConfigureAwait(false);
-                lock (reservedLock) hubReservedIds.AddRange(claimedFrameIds.Where(granted.Contains));   // tập con Hub cấp → nhả/heartbeat trên Hub
-                ShopeeAccountUsage.Shared.MarkHubLeased(granted);   // dấu per-máy → module khác (Search) không cướp lease các tk này
-                if (granted.Count < claimedFrameIds.Count)
+                var granted = await accScope.ReserveHubAsync(frameIds).ConfigureAwait(false);
+                if (granted.Count < frameIds.Count)
                 {
                     frame = frame.Where(a => granted.Contains(a.Id)).ToList();
-                    Log($"[{account.DisplayName}] {claimedFrameIds.Count - granted.Count} tk Shopee đang được máy khác dùng → loại, còn {frame.Count}.");
-                    // KHÔNG thu hẹp claimedFrameIds: finally vẫn nhả-cục-bộ CẢ khung (tránh rò rỉ tk khỏi kho chung).
+                    Log($"[{account.DisplayName}] {frameIds.Count - granted.Count} tk Shopee đang được máy khác dùng → loại, còn {frame.Count}.");
                 }
                 if (frame.Count == 0) { Log($"[{account.DisplayName}] mọi tk trong khung đang được máy khác dùng — bỏ qua."); return; }
-
-                // Heartbeat account-lease theo TIMER nền (không lệ thuộc tốc độ scrape) → khỏi hết hạn 5' giữa chunk
-                // dài. Snapshot dưới khóa vì tk BÙ có thể được thêm vào hubReservedIds trong lúc chạy.
-                accHeartbeat = new Timer(_ =>
-                {
-                    List<string> snap; lock (reservedLock) snap = hubReservedIds.ToList();
-                    if (snap.Count > 0) { try { _ = accHub.HeartbeatAccountsAsync(snap); } catch { } }
-                }, null, TimeSpan.FromSeconds(60), TimeSpan.FromSeconds(60));
             }
             ScrapeProgressStore.Shared.SaveFrame(account.Id, sheet, frame.Select(a => a.Id));   // lưu khung để resume giữ nguyên
             var procs = Math.Max(1, Math.Min(maxProc, frame.Count));
@@ -502,21 +488,9 @@ public sealed partial class ScrapeViewModel : ObservableObject
             WireRunner(runner, seq, account.DisplayName);
 
             // BÙ TK THAY THẾ: khi captcha loại tk khỏi khung, pool xin 1 tk RẢNH từ kho chung (đã khóa lease
-            // xuyên máy) để giữ đủ cỡ khung → job KHÔNG cạn khung phải chạy lại. Ghi nhận để NHẢ đúng ở finally
-            // (giữ-chỗ cục bộ + lease Hub + heartbeat như tk khung ban đầu). Hết tk dư → pool giữ hành vi cũ.
-            async Task<ShopeeAccount?> AcquireReplacementAsync(IReadOnlyCollection<string> excludeIds, CancellationToken rct)
-            {
-                var repl = await Shopee.Core.Accounts.AccountReplenisher.TryAcquireSpareAsync(excludeIds, accHub, rct).ConfigureAwait(false);
-                if (repl is null) return null;
-                lock (reservedLock)
-                {
-                    claimedFrameIds.Add(repl.Id);                          // nhả giữ-chỗ cục bộ ở finally
-                    if (accHub is not null) hubReservedIds.Add(repl.Id);   // heartbeat + nhả lease Hub ở finally
-                }
-                return repl;
-            }
-
-            var pool = new SessionAccountPool(sheet, frame, AcquireReplacementAsync, msg => Log($"[{account.DisplayName}] {msg}"));
+            // xuyên máy) để giữ đủ cỡ khung → job KHÔNG cạn khung phải chạy lại. Scope ghi nhận để NHẢ đúng ở
+            // finally (giữ-chỗ cục bộ + lease Hub + heartbeat như tk khung ban đầu). Hết tk dư → pool giữ hành vi cũ.
+            var pool = new SessionAccountPool(sheet, frame, accScope.AcquireReplacementAsync, msg => Log($"[{account.DisplayName}] {msg}"));
             await runner.RunAutoAsync(pool, procs, segments, rowsPer, account.CookieFile, ct).ConfigureAwait(false);
 
             // Kết thúc: xong hết [startRow..total] → completed; còn dở → stopped (resume chạy nốt theo dòng).
@@ -541,16 +515,11 @@ public sealed partial class ScrapeViewModel : ObservableObject
                 Coordination.Hub.PublishCompletion(coordKey, fin?.Status ?? "stopped", fin?.LastRowReached ?? 0);
             }
             catch { }
-            if (accHeartbeat is not null) { try { await accHeartbeat.DisposeAsync().ConfigureAwait(false); } catch { } }
-            // Snapshot dưới khóa (khung ban đầu + tk BÙ) → nhả ĐÚNG toàn bộ tk đã giữ, không rò.
-            List<string> hubToRelease, localToRelease;
-            lock (reservedLock) { hubToRelease = hubReservedIds.ToList(); localToRelease = claimedFrameIds.ToList(); }
-            ShopeeAccountUsage.Shared.UnmarkHubLeased(hubToRelease);   // gỡ dấu per-máy TRƯỚC/CÙNG khi nhả lease Hub
-            if (accHub is not null) { try { await accHub.ReleaseAccountsAsync(hubToRelease).ConfigureAwait(false); } catch { } }
+            // Nhả account-lease (heartbeat → UnmarkHubLeased → ReleaseAccountsAsync Hub → ReleaseReservation CẢ
+            // khung + tk bù, snapshot-under-lock chống rò) TRƯỚC, rồi nhả khoá VIỆC shop. Trước đây khoá việc nhả
+            // xen giữa nhả-lease-Hub và nhả-giữ-chỗ-cục-bộ; 3 tài nguyên độc lập nên thứ tự này tương đương.
+            if (accScope is not null) { try { await accScope.DisposeAsync().ConfigureAwait(false); } catch { } }
             if (lease is not null) { try { await lease.DisposeAsync().ConfigureAwait(false); } catch { } }
-
-            // Nhả giữ-chỗ CẢ KHUNG (+ tk bù) → Search (và job Scrape khác) lại mượn được các tk này.
-            ShopeeAccountUsage.Shared.ReleaseReservation(localToRelease);
             s.Jobs.Remove(account.Id);
             // Dọn các dòng process của job này khỏi lưới (trước đây dòng cũ không bao giờ bị xoá).
             var prefix = seq + ":";
@@ -703,36 +672,6 @@ public sealed partial class ScrapeViewModel : ObservableObject
         sel.RefreshProgress();   // có thể đã nhả tay / xoá tiến độ → cập nhật nhãn.
     }
 
-    /// <summary>Mở file log ĐẦY ĐỦ (UI chỉ giữ 500 dòng cuối) — logs\workspace-scrape.log.</summary>
-    [RelayCommand]
-    private void OpenLogFile() => ShellOpener.RevealFile(LogLines.FilePath);
-
-    /// <summary>Proxy lấy XOAY VÒNG từ kho KiotProxy dùng chung (ghi đè proxy gắn sẵn của acc); kho rỗng →
-    /// giữ proxy của acc (fallback).</summary>
-    private static ScrapeAccountSpec ToSpec(ShopeeAccount a, string sheet)
-    {
-        var pooled = KiotProxyPoolStore.Shared.ProxyForAccount(a.Id);
-        var kiot = pooled?.KiotKey ?? a.KiotProxyKey;
-        var manual = pooled?.Manual ?? a.ManualProxy;
-        return new(a.Id, a.DisplayName, a.ShopeeAccountLogin, a.OpenWithShopeeAccount,
-            kiot, a.Region, a.ProxyType, manual, a.RequireProxy, sheet, 0, 0,
-            ResolveShopeeProfileDir(a));
-    }
-
-    /// <summary>Thư mục profile (Edge) đã đăng nhập Shopee của tk — engine import session từ đây sang
-    /// Brave để khỏi login form. ProfileRelativePath có thể tuyệt đối (do tab Kiểm tra tài khoản lưu)
-    /// hoặc tương đối "profiles/{Id}".</summary>
-    private static string ResolveShopeeProfileDir(ShopeeAccount a)
-    {
-        var rel = a.ProfileRelativePath;
-        // TRỐNG hoặc TUYỆT ĐỐI → LUÔN dùng gốc profile CỤC BỘ theo Id. KHÔNG tin path tuyệt đối lưu sẵn: nó có
-        // thể là path của MÁY KHÁC (acc đến từ Hub lưu "C:\Users\<user máy Hub>\…") → client tạo profile dưới
-        // C:\Users\<máy khác>\ → "Access denied". Chỉ path TƯƠNG ĐỐI mới ghép với gốc cục bộ (giống mọi máy).
-        if (string.IsNullOrWhiteSpace(rel) || Path.IsPathRooted(rel))
-            return Path.Combine(SuitePaths.ModuleDir("shared"), "profiles", a.Id);
-        return Path.Combine(SuitePaths.ModuleDir("shared"), rel.Replace('/', Path.DirectorySeparatorChar));
-    }
-
     private void WireRunner(ScrapeRunner runner, int seq, string bigSellerName)
     {
         string K(string key) => $"{seq}:{key}";   // namespace key theo job để nhiều BigSeller chạy đồng thời không đụng lưới
@@ -753,48 +692,16 @@ public sealed partial class ScrapeViewModel : ObservableObject
         });
         runner.AccountErrored += (id, label, reason, captchaUrl) => OnUi(() =>
         {
-            var now = DateTime.Now.ToString("HH:mm:ss");
-            var row = ErroredAccounts.FirstOrDefault(x => x.Id == id);
-            if (row is null) ErroredAccounts.Insert(0, new ErroredAccountRow(id, label, reason, now));
-            else { row.Reason = reason; row.Time = now; }
+            AccountErrorReporter.Report(ErroredAccounts, id, label, reason, "Scrape", captchaUrl);
             LogLines.Add($"⚠ Tk lỗi: {label} — {reason}");
             // Cột "Tình trạng" → "⚠ Captcha" cho tk vừa dính captcha/lỗi trong lượt chạy này.
             ShopeeAccountUsage.Shared.MarkCaptcha(id);
-            FlagAccountErrored(id, $"Dính captcha/lỗi (Scrape) — {DateTime.Now:dd/MM HH:mm}: {reason}", captchaUrl);
         });
         runner.BigSellerNeedLogin += reason => OnUi(() =>
         {
             // Tk BigSeller mất phiên ("log in first") → job tk này đã bị dừng. Báo rõ để user đăng nhập lại.
             LogLines.Add($"⛔ [{bigSellerName}] BigSeller mất đăng nhập: {reason} — đã DỪNG job tk này. Hãy ĐĂNG NHẬP LẠI BigSeller rồi chạy lại.");
         });
-    }
-
-    // Đánh dấu BỀN account dính captcha/lỗi: Disabled (tự bỏ qua lượt sau) + LastError → gom ở mục
-    // "Tài khoản & Proxy" (bộ lọc "Bị lỗi / captcha") để xử lý sau rồi "Bật lại".
-    private static void FlagAccountErrored(string id, string reason, string? captchaUrl = null)
-    {
-        var acc = AccountStore.Shared.Accounts.FirstOrDefault(a => a.Id == id);
-        if (acc is null) return;
-        var alreadyFlagged = acc.Disabled;
-        acc.Disabled = true;
-        acc.LastError = reason;
-        // Lưu URL captcha để "Kiểm tra tk lỗi" mở đúng trang đó (thay vì auto-login).
-        if (!string.IsNullOrWhiteSpace(captchaUrl)) acc.CaptchaUrl = captchaUrl;
-        if (!alreadyFlagged || !string.IsNullOrWhiteSpace(captchaUrl)) AccountStore.Shared.Save();
-        // CLIENT: báo Hub acc này dính captcha (Hub xem ở panel + operator quyết giữ/xóa). Hub/standalone: là bản chính, khỏi báo.
-        if (CoordinationRuntime.Active && !HubServerConfigStore.Shared.Current.Enabled)
-            _ = CoordinationRuntime.Hub?.ReportErroredAccountAsync(id, reason, captchaUrl, "captcha");
-    }
-
-    private void Log(string text) => OnUi(() => LogLines.Add(text));
-
-    private static void OnUi(Action a) => UiThread.Post(a);
-
-    private void Warn(string msg, bool silent = false)
-    {
-        Status = msg;
-        if (silent) Log("⚠ " + msg);   // đường push-dispatch: KHÔNG mở modal (tránh treo UI), chỉ ghi log
-        else Dialogs.Notify(msg, "Shopee Scrape");
     }
 
     /// <summary>Tiền-kiểm điều kiện scrape 1 đích (kho tk Shopee, Brave, cấu hình) — KHÔNG mở dialog.
