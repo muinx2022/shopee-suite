@@ -5,6 +5,23 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Hiệu năng. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.0.3 — 2026-07-09
+
+Chủ đề: **xóa media BigSeller theo yêu cầu + đếm dọn media theo lần bắt đầu sửa**.
+
+- Trang cấu hình BigSeller thêm nút **🗑 Xóa Medias**: xóa toàn bộ thư viện ảnh
+  (Material Center) của tk đang chọn theo yêu cầu — mở Brave riêng bằng cookie tk
+  (profile `-mediaclean` + port riêng, không đụng update đang chạy), dọn xong tự
+  đóng; có nút ■ Dừng, log về khung log của trang.
+- Update sản phẩm: dọn Material Center sau **10 lần BẮT ĐẦU sửa SP** (đánh dấu
+  ngay khi vào sửa, kể cả lưu fail — vì ảnh đã bị đẩy vào kho từ lúc đó) thay vì
+  10 lần lưu thành công như trước; SP mở ra rồi bỏ qua không tính.
+- Hub web (deploy riêng, không thuộc gói client): luật giao việc mới —
+  **1 acc = 1 client + 1 việc tại 1 thời điểm (bất kể scrape/import/update/tên SP,
+  vì chung cookie); 1 client chạy NHIỀU acc song song** (bỏ luật "1 client = 1 acc"
+  từng khiến ghim 3 shop × 3 acc vào 1 máy mà chỉ 1 cái chạy); việc cùng acc xếp
+  hàng chạy nối tiếp thay vì failed oan sau 60s.
+
 ## v1.0.2 — 2026-07-09
 
 Chủ đề: **chuyển cấu hình AI từ desktop lên Hub** (quản lý tập trung, các máy tự đồng bộ).

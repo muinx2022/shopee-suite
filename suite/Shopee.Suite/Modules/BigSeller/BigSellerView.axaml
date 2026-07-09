@@ -144,6 +144,17 @@
                                 </StackPanel>
                                 <TextBlock Classes="caption" Margin="0,0,0,8" TextWrapping="Wrap"
                                            Text="Có proxy → đăng nhập qua proxy đó; không → IP máy. Cookie tự lưu." />
+
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                    <Button Content="🗑 Xóa Medias" MinWidth="150"
+                                            Command="{Binding #Root.DataContext.CleanMediasCommand}"
+                                            ToolTip.Tip="Xóa TOÀN BỘ media trong thư viện ảnh (Material Center) BigSeller của tk này — luồng dọn media của Update sản phẩm. Mở Brave riêng bằng cookie tk, dọn xong tự đóng." />
+                                    <Button Classes="danger" Content="■ Dừng" MinWidth="80" Margin="10,0,0,0"
+                                            IsVisible="{Binding #Root.DataContext.IsCleaningMedia}"
+                                            Command="{Binding #Root.DataContext.StopCleanMediasCommand}" />
+                                </StackPanel>
+                                <TextBlock Classes="caption" Margin="0,0,0,8" TextWrapping="Wrap"
+                                           Text="Xóa Medias: dọn sạch thư viện ảnh khi kho đầy (BigSeller chặn upload ảnh lúc update)." />
                             </StackPanel>
                         </ScrollViewer>
 

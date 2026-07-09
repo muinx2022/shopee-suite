@@ -4,17 +4,19 @@ namespace UpdateProduct;
 
 /// <summary>
 /// Dọn "thư viện ảnh" (Material Center) của BigSeller định kỳ trong lúc Update sản phẩm — tách khỏi
-/// <see cref="BigSellerProductUpdateRunner"/> (port image_manager.py). Mỗi lần edit BigSeller đẩy ảnh vào
-/// Material Center; không dọn thì đầy quota → popup cảnh báo dung lượng CHẶN upload ảnh các SP sau. Đếm
-/// PER-LANE (mỗi runner 1 cleaner), nhưng mọi lane DÙNG CHUNG 1 account (Material Center server-side chung)
+/// <see cref="BigSellerProductUpdateRunner"/> (port image_manager.py). Mỗi lần VÀO sửa 1 SP BigSeller đã đẩy
+/// ảnh vào Material Center (kể cả khi lưu fail); không dọn thì đầy quota → popup cảnh báo dung lượng CHẶN
+/// upload ảnh các SP sau. Đếm theo số lần BẮT ĐẦU sửa SP (vào trang edit và thực sự điền/sửa), PER-LANE
+/// (mỗi runner 1 cleaner), nhưng mọi lane DÙNG CHUNG 1 account (Material Center server-side chung)
 /// nên khoá qua <see cref="ClaimStore"/> để mỗi lần chỉ 1 lane wipe — lane khác bỏ qua vì 1 wipe đã dọn
 /// sạch cho cả account. Nhận sẵn browser context (mở tab Material Center), ClaimStore, log + delegate delay
 /// (tôn trọng pause) + overlay từ runner để GIỮ NGUYÊN hành vi.
 /// </summary>
 internal sealed class BigSellerMaterialCenterCleaner
 {
-    private const string MaterialCenterUrl = "https://www.bigseller.com/web/product/materialCenter/index.htm";
-    // Sau mỗi X SP LƯU thành công thì xóa sạch Material Center (thư viện ảnh) — mirror main.py DELETE_IMAGES_AFTER.
+    internal const string MaterialCenterUrl = "https://www.bigseller.com/web/product/materialCenter/index.htm";
+    // Sau mỗi X lần BẮT ĐẦU sửa SP (vào trang edit + thực sự điền/sửa, kể cả lưu fail) thì xóa sạch Material
+    // Center (thư viện ảnh) — mirror main.py DELETE_IMAGES_AFTER.
     private const int DeleteMediaAfterUpdates = 10;
 
     // ── Material Center (dọn media định kỳ — selector verbatim từ image_manager.py) ──
@@ -101,8 +103,8 @@ internal sealed class BigSellerMaterialCenterCleaner
     private readonly Func<int, CancellationToken, Task> _delay;
     private readonly Func<string, Task> _overlay;
 
-    // Số SP đã LƯU thành công (per-lane) từ lần dọn media gần nhất → đạt DeleteMediaAfterUpdates thì xóa Material Center.
-    private int _updateSuccessCount;
+    // Số lần BẮT ĐẦU sửa SP (per-lane) từ lần dọn media gần nhất → đạt DeleteMediaAfterUpdates thì xóa Material Center.
+    private int _editStartCount;
 
     public BigSellerMaterialCenterCleaner(
         IBrowserContext context, ClaimStore? claim, Action<string> log,
@@ -116,19 +118,29 @@ internal sealed class BigSellerMaterialCenterCleaner
     }
 
     // ── dọn media định kỳ (parity main.py _record_success → image_manager.delete_all_images) ──
-    // Sau mỗi DeleteMediaAfterUpdates SP LƯU thành công, xóa sạch Material Center. Mỗi lần edit BigSeller đẩy
-    // ảnh vào "thư viện" (Material Center); không dọn thì đầy quota → popup cảnh báo dung lượng CHẶN upload ảnh
-    // các SP sau. Đếm PER-LANE, nhưng mọi lane DÙNG CHUNG 1 account (Material Center server-side chung) nên khoá
-    // qua ClaimStore để mỗi lần chỉ 1 lane wipe — lane khác bỏ qua vì 1 wipe đã dọn sạch cho cả account.
-    public async Task RecordSuccessAndMaybeClearMediaAsync(IPage listingPage, CancellationToken ct)
+    // Đếm theo số lần BẮT ĐẦU sửa SP (KHÔNG phải số lần lưu thành công): mỗi lần VÀO sửa 1 SP BigSeller đã đẩy
+    // ảnh vào "thư viện" (Material Center) kể cả khi lưu fail; không dọn thì đầy quota → popup cảnh báo dung
+    // lượng CHẶN upload ảnh các SP sau. Đếm PER-LANE, nhưng mọi lane DÙNG CHUNG 1 account (Material Center
+    // server-side chung) nên khoá qua ClaimStore để mỗi lần chỉ 1 lane wipe — lane khác bỏ qua vì 1 wipe đã
+    // dọn sạch cho cả account.
+
+    /// <summary>Đánh dấu vừa BẮT ĐẦU sửa 1 SP (đã vào trang edit + thực sự điền/sửa) → tăng bộ đếm. Gọi TRƯỚC
+    /// khi lưu để đếm cả SP lưu fail (ảnh đã bị đẩy vào Material Center rồi).</summary>
+    public void RecordEditStart()
     {
-        _updateSuccessCount++;
-        _log($"Đã update {_updateSuccessCount}/{DeleteMediaAfterUpdates} SP.");
-        if (_updateSuccessCount < DeleteMediaAfterUpdates) return;
-        _updateSuccessCount = 0;
+        _editStartCount++;
+        _log($"✏ Bắt đầu sửa SP {_editStartCount}/{DeleteMediaAfterUpdates} (từ lần dọn media trước).");
+    }
+
+    /// <summary>Đạt ngưỡng BẮT ĐẦU sửa DeleteMediaAfterUpdates SP thì xóa sạch Material Center; chưa đủ thì
+    /// no-op rẻ (chỉ so bộ đếm). Gọi từ OuterLoopAsync sau khi tab edit đã đóng — KHÔNG chạy giữa lúc đang sửa.</summary>
+    public async Task MaybeClearMediaAsync(IPage listingPage, CancellationToken ct)
+    {
+        if (_editStartCount < DeleteMediaAfterUpdates) return;
+        _editStartCount = 0;
 
         _log(new string('=', 50));
-        _log($"ĐÃ UPDATE {DeleteMediaAfterUpdates} SP → XÓA THƯ VIỆN ẢNH (Material Center)");
+        _log($"ĐÃ BẮT ĐẦU SỬA {DeleteMediaAfterUpdates} SP → XÓA THƯ VIỆN ẢNH (Material Center)");
         _log(new string('=', 50));
         try { await RunMediaCleanupLockedAsync(ct).ConfigureAwait(false); }
         finally { try { if (!listingPage.IsClosed) await listingPage.BringToFrontAsync(); } catch { } }

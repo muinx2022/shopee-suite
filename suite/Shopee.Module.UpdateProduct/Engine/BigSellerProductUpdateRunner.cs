@@ -280,12 +280,15 @@ internal sealed partial class BigSellerProductUpdateRunner : BigSellerBraveRunne
                         return;
                     case "retry":
                         emptyStreak = 0;
+                        // SP có thể ĐÃ bắt đầu sửa rồi mới fail tạm → vẫn check ngưỡng dọn media (đếm đã diễn ra lúc bắt đầu sửa).
+                        await MaybeClearMediaAfterEditsAsync(page, ct).ConfigureAwait(false);
                         await DelayAsync(1200, ct);
                         break;
                     default:   // ok / deleted / skipped → đã tiến 1 dòng, quét tiếp trang hiện tại.
                         emptyStreak = 0;
-                        // CHỈ "ok" = LƯU thật mới đếm để dọn media (skipped/deleted không đẩy ảnh vào Material Center).
-                        if (result == "ok") await RecordSuccessAndMaybeClearMediaAsync(page, ct).ConfigureAwait(false);
+                        // Đếm đã diễn ra lúc BẮT ĐẦU sửa (RecordEditStart trong RunListingRowAsync) → ở đây chỉ
+                        // check-ngưỡng-và-dọn; no-op rẻ khi chưa đủ 10 lần bắt đầu sửa.
+                        await MaybeClearMediaAfterEditsAsync(page, ct).ConfigureAwait(false);
                         await DelayAsync(800, ct);
                         await MaybeWriteBackBigSellerTokenAsync(ct).ConfigureAwait(false);
                         break;
@@ -318,9 +321,10 @@ internal sealed partial class BigSellerProductUpdateRunner : BigSellerBraveRunne
             page, _log, ListingNextPageSelector, PaginationNowPage, ListingReadySelector, DelayAsync, ct);
 
     // ── dọn media định kỳ → uỷ quyền BigSellerMaterialCenterCleaner (giữ wrapper mỏng để call-site không đổi) ──
-    // Sau mỗi 10 SP LƯU thành công, cleaner xóa sạch Material Center; wipe khoá qua ClaimStore (1 lần/account).
-    private Task RecordSuccessAndMaybeClearMediaAsync(IPage listingPage, CancellationToken ct)
-        => _mediaCleaner!.RecordSuccessAndMaybeClearMediaAsync(listingPage, ct);
+    // Sau mỗi 10 lần BẮT ĐẦU sửa SP (đếm ở RecordEditStart, kể cả lưu fail), cleaner xóa sạch Material Center;
+    // wipe khoá qua ClaimStore (1 lần/account). Đây chỉ check-ngưỡng-và-dọn (no-op rẻ khi chưa đủ 10).
+    private Task MaybeClearMediaAfterEditsAsync(IPage listingPage, CancellationToken ct)
+        => _mediaCleaner!.MaybeClearMediaAsync(listingPage, ct);
 
     private Task<bool> RunMediaCleanupLockedAsync(CancellationToken ct)
         => _mediaCleaner!.RunMediaCleanupLockedAsync(ct);
@@ -461,6 +465,9 @@ internal sealed partial class BigSellerProductUpdateRunner : BigSellerBraveRunne
                 keepClaim = true; return ("skipped", false);
             }
 
+            // ĐÂY là điểm "bắt đầu sửa" — SP chỉ bị mở rồi skip ở các nhánh trên (không có edit-id / đã skip /
+            // lane khác giữ / not_in_xlsx / thiếu tên) KHÔNG đếm; chỉ đếm khi thực sự vào điền/sửa SP.
+            _mediaCleaner!.RecordEditStart();
             var ok = await ProcessProductAsync(editPage, record!, ct).ConfigureAwait(false);
             if (!ok)
             {

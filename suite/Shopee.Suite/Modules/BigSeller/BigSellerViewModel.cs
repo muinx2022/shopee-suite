@@ -5,6 +5,7 @@ using CommunityToolkit.Mvvm.Input;
 using Shopee.Core.BigSeller;
 using Shopee.Core.Coordination;
 using Shopee.Core.Infrastructure;
+using Shopee.Modules.UpdateProduct;
 using Shopee.Suite.Infrastructure;
 using Shopee.Suite.Services;
 
@@ -20,7 +21,7 @@ public sealed partial class BigSellerViewModel : ModuleViewModelBase
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasSelection))]
-    [NotifyCanExecuteChangedFor(nameof(DeleteCommand), nameof(LoginCommand), nameof(AddShopCommand))]
+    [NotifyCanExecuteChangedFor(nameof(DeleteCommand), nameof(LoginCommand), nameof(AddShopCommand), nameof(CleanMediasCommand))]
     private BigSellerAccountItemViewModel? _selected;
 
     [ObservableProperty]
@@ -38,6 +39,12 @@ public sealed partial class BigSellerViewModel : ModuleViewModelBase
     public bool IsIdle => !IsLoggingIn;
 
     private CancellationTokenSource? _loginCts;
+
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(CleanMediasCommand), nameof(StopCleanMediasCommand))]
+    private bool _isCleaningMedia;
+
+    private CancellationTokenSource? _mediaCts;
 
     // Chiếu kho BigSeller → Items, giữ Selected theo Id (idiom Store.Changed→Reload gom vào ObservableProjection).
     private readonly ObservableProjection<BigSellerAccount, BigSellerAccountItemViewModel> _projection;
@@ -251,6 +258,66 @@ public sealed partial class BigSellerViewModel : ModuleViewModelBase
             _loginCts = null;
         }
     }
+
+    /// <summary>Xóa TOÀN BỘ media trong Material Center (thư viện ảnh) BigSeller của tk đang chọn — chạy
+    /// luồng dọn media của Update sản phẩm theo yêu cầu (mở Brave riêng bằng cookie tk, dọn xong tự đóng).</summary>
+    [RelayCommand(CanExecute = nameof(CanCleanMedias))]
+    private async Task CleanMediasAsync()
+    {
+        var sel = Selected;
+        if (sel is null) return;
+
+        // Chưa có cookie → không có phiên BigSeller để dọn; hướng người dùng đăng nhập trước.
+        if (!sel.Model.HasCookie)
+        {
+            Warn($"{sel.DisplayName}: chưa có cookie BigSeller — bấm \"Mở Profile Bigseller\" hoặc \"Đăng nhập tất cả\" trước.");
+            return;
+        }
+
+        // Xóa trên server BigSeller, KHÔNG hoàn tác → hỏi xác nhận rõ ràng.
+        if (!await Dialogs.ConfirmAsync(
+                $"Xóa TOÀN BỘ media trong thư viện ảnh (Material Center) của tk \"{sel.DisplayName}\" trên BigSeller?\n\n" +
+                "• Xóa trên server BigSeller, KHÔNG hoàn tác được.\n" +
+                "• App sẽ mở 1 cửa sổ Brave riêng (thu nhỏ), dọn xong tự đóng — không ảnh hưởng update đang chạy.",
+                "Xóa Medias"))
+            return;
+
+        IsCleaningMedia = true;
+        LogLines.Clear();
+        _mediaCts = new CancellationTokenSource();
+        var a = sel.Model;
+        var s = a.Shops.FirstOrDefault();
+        try
+        {
+            Status = $"Đang xóa media (Material Center) của \"{sel.DisplayName}\"…";
+            // Context tối thiểu: dọn media chỉ cần account/cookie (+ shop để lấy profile/port); workbook/AI không dùng.
+            var ctx = new UpdateProductContext(
+                a.Id, a.Email, a.WorkbookPath, a.CookieFile,
+                s?.Id ?? "", s?.DisplayName ?? "", s?.ShopeeDataSheet ?? "",
+                "", "", 1, "",
+                0, 0,
+                "", "", "", false,
+                1, 1, 5,
+                Password: a.Password);
+            var runner = new UpdateProductRunner();
+            runner.Log += Log;
+            await runner.RunMediaCleanupAsync(ctx, _mediaCts.Token);
+            Status = $"✔ Đã xóa media (Material Center) của \"{sel.DisplayName}\".";
+        }
+        catch (OperationCanceledException) { Status = "■ Đã dừng xóa media."; Log(Status); }
+        catch (Exception ex) { Status = "✘ Lỗi xóa media: " + ex.Message; Log(Status); }
+        finally
+        {
+            IsCleaningMedia = false;
+            _mediaCts.Dispose();
+            _mediaCts = null;
+        }
+    }
+
+    private bool CanCleanMedias() => HasSelection && !IsCleaningMedia;
+
+    [RelayCommand(CanExecute = nameof(IsCleaningMedia))]
+    private void StopCleanMedias() => _mediaCts?.Cancel();
 
     /// <summary>TỰ ĐĂNG NHẬP TẤT CẢ (headless, KHÔNG hiện cửa sổ): lần lượt từng tk có đủ Email+Mật khẩu → mở
     /// Brave --headless, điền form + giải captcha (AI) → LƯU cookie ra file (client dùng chung). Tk đòi mã email

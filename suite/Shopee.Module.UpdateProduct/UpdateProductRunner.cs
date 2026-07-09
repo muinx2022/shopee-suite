@@ -153,6 +153,22 @@ public sealed class UpdateProductRunner
         });
     }
 
+    // ── Xóa media (Material Center) thủ công — nút "Xóa Medias" ở trang cấu hình BigSeller ──
+    public async Task RunMediaCleanupAsync(UpdateProductContext ctx, CancellationToken ct)
+    {
+        var wf = BuildWorkflow(ctx);
+        // Profile/port RIÊNG để KHÔNG tranh CDP/profile-lock với lane update đang chạy cùng tk; cookie seed
+        // từ file qua EnsureCookieAsync (giữ phiên nếu còn sống, login lại nếu thiu).
+        var port = PortAllocator.Shared.AllocateBigSellerPort();
+        try
+        {
+            wf = wf with { ProfileDir = wf.ProfileDir + "-mediaclean", DebugPort = port };
+            await using var runner = new BigSellerMediaCleanupRunner(wf, m => Log?.Invoke(m));
+            await runner.RunAsync(ct);
+        }
+        finally { PortAllocator.Shared.Release(port); }
+    }
+
     // Spawn N lane song song: lane 0 dùng profile/port BASE (giữ phiên login); lane phụ có profile
     // "<base>-p{i}" + port cấp riêng (PortAllocator) + seed cookie từ file, CHỈ lane 0 ghi cookie ra file.
     // ClaimStore dùng chung chống 2 lane xử lý trùng 1 SP. Stagger launch để né rate-limit + đua login.
