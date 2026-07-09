@@ -1,8 +1,7 @@
 @page "/"
 @* KHÔNG dùng @@page "/fleet": route đó thuộc API client (GET /fleet trả JSON). Trang này ở "/". *@
 @attribute [Authorize(Policy = "Web")]
-@implements IDisposable
-@inject FleetStateService FleetState
+@inherits FleetPageBase
 @inject FileStoreConfigService Config
 @inject DispatcherService Dispatcher
 @inject HubDatabase Db
@@ -10,25 +9,25 @@
 <div class="fleetpage">
 <div class="kpis">
     <div class="kpi">
-        <div class="kpi-ic green">@Kpi("machines")</div>
+        <div class="kpi-ic green">@HubIcons.Svg("machines", 22)</div>
         <div><div class="kpi-val">@_kMachines</div><div class="kpi-label">Máy online</div></div>
     </div>
     <div class="kpi">
-        <div class="kpi-ic blue">@Kpi("run")</div>
+        <div class="kpi-ic blue">@HubIcons.Svg("run", 22)</div>
         <div><div class="kpi-val">@_kRunning</div><div class="kpi-label">Việc đang chạy</div></div>
     </div>
     <div class="kpi">
-        <div class="kpi-ic amber">@Kpi("clock")</div>
+        <div class="kpi-ic amber">@HubIcons.Svg("clock", 22)</div>
         <div><div class="kpi-val">@_kQueued</div><div class="kpi-label">Việc chờ</div></div>
     </div>
-    <div class="kpi">
-        <div class="kpi-ic blue">@Kpi("cookie")</div>
+    <div class="kpi m-hide">
+        <div class="kpi-ic blue">@HubIcons.Svg("cookie", 22)</div>
         <div><div class="kpi-val">@_kCookies</div><div class="kpi-label">Acc có cookie</div></div>
     </div>
 </div>
 
 <div class="bar">
-    <span class="stat">@_summary</span>
+    <span class="stat m-hide">@_summary</span>
     <label class="toggle">
         <input type="checkbox" checked="@Dispatcher.Enabled" @onchange="ToggleDispatch" />
         Điều phối tự động (scrape→import→update)
@@ -37,15 +36,15 @@
 
 <h2>Máy trong fleet</h2>
 <div class="machines">
-    @foreach (var m in _snap.Machines.OrderBy(x => x.Hostname))
+    @foreach (var m in Snap.Machines.OrderBy(x => x.Hostname))
     {
-        var st = FleetStateService.Status(_snap, m);
+        var st = FleetStateService.Status(Snap, m);
         <div class="machine">
             <div class="mline"><span class="dot">@st.Dot</span><b>@m.Hostname</b></div>
             <div class="mmeta">@st.Label</div>
         </div>
     }
-    @if (_snap.Machines.Count == 0)
+    @if (Snap.Machines.Count == 0)
     {
         <div class="empty">Chưa có máy nào kết nối.</div>
     }
@@ -69,13 +68,13 @@
                 </td>
                 @foreach (var op in Ops)
                 {
-                    var cell = FleetStateService.OpCell(_snap, acct.Id, shop.Id, op);
+                    var cell = FleetStateService.OpCell(Snap, acct.Id, shop.Id, op);
                     <td>
                         <span class="pill @cell.Css">@cell.Text</span>
                         @* Máy đang chạy (cell.Locked == Kind 1) → ẩn combo đặt-tay; chỉ hiện khi KHÔNG có máy chạy ô này. *@
                         @if (!cell.Locked)
                         {
-                            <select class="cellset"
+                            <select class="cellset m-hide"
                                     @onclick:stopPropagation="true"
                                     @onchange="e => SetLedger(acct.Id, shop.Id, shop.ShopeeDataSheet, op, e.Value?.ToString())">
                                 <option value="">⋯</option>
@@ -117,7 +116,7 @@ else
                 <option value="">— chọn máy —</option>
                 @foreach (var m in _pinnableMachines)
                 {
-                    var off = FleetStateService.MachineOffline(_snap, m.MachineId);
+                    var off = FleetStateService.MachineOffline(Snap, m.MachineId);
                     <option value="@m.MachineId" disabled="@off">@(off ? "⚪" : "🟢") @m.Hostname @(off ? "(offline)" : "")</option>
                 }
             </select>
@@ -154,7 +153,6 @@ else
 @code {
     private static readonly string[] Ops = ["scrape", "import", "update"];
 
-    private FleetSnapshot _snap = new();
     private List<BigSellerAccount> _accounts = new();
     private string _summary = "";
     private int _kMachines, _kRunning, _kQueued, _kCookies;
@@ -169,20 +167,17 @@ else
 
     protected override void OnInitialized()
     {
-        FleetState.Changed += OnFleetChanged;
-        _snap = FleetState.Snapshot;
+        base.OnInitialized();
         ReloadAccounts();
         RecomputeSummary();
     }
 
-    private void OnFleetChanged() => InvokeAsync(() =>
+    protected override void OnFleetTick()
     {
-        _snap = FleetState.Snapshot;
         // Config đọc lại tối đa mỗi 10s (khỏi đọc file mỗi 2s).
         if ((DateTimeOffset.UtcNow - _accountsLoadedAt).TotalSeconds > 10) ReloadAccounts();
         RecomputeSummary();
-        StateHasChanged();
-    });
+    }
 
     private void ReloadAccounts()
     {
@@ -193,30 +188,24 @@ else
 
     private void RecomputeSummary()
     {
-        _kMachines = _snap.Machines.Count(m => (DateTimeOffset.Now - m.LastSeen).TotalSeconds < 45);
+        _kMachines = Snap.Machines.Count(m => (DateTimeOffset.Now - m.LastSeen).TotalSeconds < 45);
         int running = 0, queued = 0, failed = 0;
         foreach (var a in _accounts)
         foreach (var s in a.Shops.Where(x => !string.IsNullOrWhiteSpace(x.ShopeeDataSheet)))
         foreach (var op in Ops)
         {
-            var k = FleetStateService.OpCell(_snap, a.Id, s.Id, op).Kind;
+            var k = FleetStateService.OpCell(Snap, a.Id, s.Id, op).Kind;
             if (k == 1) running++; else if (k == 2) queued++; else if (k == 3) failed++;
         }
         // KPI phải KHỚP lưới/summary → lấy từ cùng nguồn OpCell (không đếm Assignments.Status, field đó không mang "running").
         _kRunning = running;
         _kQueued = queued;
-        _summary = $"{running} đang chạy · {queued} chờ · {failed} dừng/lỗi · {_snap.Machines.Count} máy · cập nhật {DateTimeOffset.Now:HH:mm:ss}";
+        _summary = $"{running} đang chạy · {queued} chờ · {failed} dừng/lỗi · {Snap.Machines.Count} máy · cập nhật {DateTimeOffset.Now:HH:mm:ss}";
     }
 
     private void Select(string bs, string shop, string sheet, string name)
     {
         _selBs = bs; _selShop = shop; _selSheet = sheet; _selShopName = name; _action = "";
-    }
-
-    private void SetRole(string machineId, string? role)
-    {
-        Db.SetRole(machineId, string.IsNullOrWhiteSpace(role) ? MachineRoles.Off : role);
-        FleetState.Refresh();
     }
 
     private void SetLedger(string bs, string shop, string sheet, string op, string? status)
@@ -241,8 +230,8 @@ else
         Db.CreateAssignment(new CreateAssignmentRequest(
             _selBs, _selShop, _selSheet ?? "", _pinOp, _pinMachine, true,
             Math.Max(0, _pinStart), Math.Max(0, _pinEnd), payload));
-        var host = _snap.Machines.FirstOrDefault(m => m.MachineId == _pinMachine)?.Hostname ?? _pinMachine;
-        _action = FleetStateService.MachineOffline(_snap, _pinMachine)
+        var host = Snap.Machines.FirstOrDefault(m => m.MachineId == _pinMachine)?.Hostname ?? _pinMachine;
+        _action = FleetStateService.MachineOffline(Snap, _pinMachine)
             ? $"⚠ Đã ghim {_pinOp} · {_selShopName} → {host} (máy đang TẮT — chờ tới khi mở app)."
             : $"✔ Đã ghim {_pinOp} · {_selShopName} → {host}.";
         FleetState.Refresh();
@@ -252,7 +241,7 @@ else
     {
         if (_selBs is null || _selShop is null) return;
         var n = 0;
-        foreach (var a in _snap.Assignments.Where(a =>
+        foreach (var a in Snap.Assignments.Where(a =>
             a.BigsellerId == _selBs && a.ShopId == _selShop && a.Status is "queued" or "running"))
         { Db.CancelAssignment(a.Id); n++; }
         _action = $"✖ Đã huỷ {n} việc của shop {_selShopName}.";
@@ -260,21 +249,21 @@ else
     }
 
     // Shop đang chọn có việc HUB-GIAO (assignment) queued/running → hub huỷ được (khoá Ghim).
-    private bool _hasWork => _selBs is not null && _snap.Assignments.Any(a =>
+    private bool _hasWork => _selBs is not null && Snap.Assignments.Any(a =>
         a.BigsellerId == _selBs && a.ShopId == _selShop && a.Status is "queued" or "running");
 
     // Shop đang chọn có LEASE nhưng KHÔNG có assignment hub-giao = việc CHẠY TAY trên client. Hub không huỷ được
     // (client tự dừng bằng nút ■ rồi nhả lease báo hub); chỉ hiện chú thích cho rõ, không phải nút chết.
     private LeaseRecord? _manualLease => (_selBs is null || _hasWork) ? null
-        : _snap.Leases.FirstOrDefault(l => l.BigsellerId == _selBs && l.ShopId == _selShop);
+        : Snap.Leases.FirstOrDefault(l => l.BigsellerId == _selBs && l.ShopId == _selShop);
 
     // Chủ sở hữu acc hiện tại (nếu có) — ràng buộc máy ghim được.
     private string? _accountOwnerMachine => _selBs is null ? null : OwnerOf(_selBs);
     private string? _accountOwnerWarn => _accountOwnerMachine is { } mid
-        ? _snap.Machines.FirstOrDefault(m => m.MachineId == mid)?.Hostname ?? mid : null;
+        ? Snap.Machines.FirstOrDefault(m => m.MachineId == mid)?.Hostname ?? mid : null;
 
     // Hiện MỌI máy trong dropdown; chỉ CHẶN (nút Ghim mờ + cảnh báo) khi chọn máy KHÁC máy đang giữ acc.
-    private IEnumerable<MachinePresence> _pinnableMachines => _snap.Machines;
+    private IEnumerable<MachinePresence> _pinnableMachines => Snap.Machines;
 
     /// <summary>Đang chọn máy KHÁC máy đang giữ acc → ghim sẽ bị khoá 1-acc-1-máy (việc nằm chờ mãi) → chặn.</summary>
     private bool _pinBlocked => _accountOwnerMachine is { } o && !string.IsNullOrEmpty(_pinMachine)
@@ -283,26 +272,10 @@ else
     private string? OwnerOf(string bs)
     {
         // Máy đang giữ lease tươi hoặc assignment running của acc này.
-        var lease = _snap.Leases.FirstOrDefault(l => l.BigsellerId == bs);
+        var lease = Snap.Leases.FirstOrDefault(l => l.BigsellerId == bs);
         if (lease is not null) return lease.MachineId;
-        var asn = _snap.Assignments.FirstOrDefault(a => a.BigsellerId == bs && a.Status == "running");
+        var asn = Snap.Assignments.FirstOrDefault(a => a.BigsellerId == bs && a.Status == "running");
         return asn?.ClaimedByMachineId;
     }
 
-    public void Dispose() => FleetState.Changed -= OnFleetChanged;
-
-    // ── KPI icons (Lucide-style, stroke=currentColor) ──
-    private static readonly Dictionary<string, string> KpiIcons = new()
-    {
-        ["machines"] = "<rect x='2' y='3' width='20' height='14' rx='2'/><path d='M8 21h8M12 17v4'/>",
-        ["run"] = "<polygon points='6 3 20 12 6 21 6 3'/>",
-        ["clock"] = "<circle cx='12' cy='12' r='9'/><path d='M12 7v5l3 2'/>",
-        ["cookie"] = "<path d='M12 2a10 10 0 1 0 10 10 4 4 0 0 1-5-5 4 4 0 0 1-5-5z'/><path d='M8.5 8.5h.01M15 9h.01M9.5 14.5h.01M14 15h.01M12 12h.01'/>",
-    };
-
-    private static MarkupString Kpi(string key)
-    {
-        var body = KpiIcons.TryGetValue(key, out var b) ? b : "";
-        return new MarkupString($"<svg width='22' height='22' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'>{body}</svg>");
-    }
 }

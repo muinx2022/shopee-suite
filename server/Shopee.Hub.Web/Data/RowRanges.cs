@@ -60,21 +60,3 @@ public static class RowRangeMath
         return gaps;
     }
 }
-
-/// <summary>
-/// COPY POCO từ suite\Shopee.Core\Scrape\ScrapeTargetConfigStore.cs (bỏ phần store bám SuitePaths).
-/// Cấu hình scrape RIÊNG của một tài khoản BigSeller — web hub sửa qua file store config/scrape-targets.json.
-/// </summary>
-public sealed class ScrapeTargetConfig
-{
-    public string AccountId { get; set; } = "";       // tài khoản BigSeller
-    public string? SelectedShopId { get; set; }        // shop (↔ sheet) đang chọn
-    public bool IsSelected { get; set; }               // có tick để chạy không
-
-    public int StartRow { get; set; } = 2;
-    public int EndRow { get; set; }
-    public int RowsPerAccount { get; set; } = 60;
-    public int MaxProcess { get; set; } = 2;
-    /// <summary>Số tk Shopee được "đóng khung" cố định cho tk BigSeller này.</summary>
-    public int FrameSize { get; set; } = 10;
-}

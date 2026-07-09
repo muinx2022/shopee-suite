@@ -27,8 +27,8 @@ public static class ClientApiEndpoints
         api.MapGet("/manifest", () => Results.Json(db.ListFiles()));
         api.MapGet("/files/{*name}", (string name) =>
         {
-            var bytes = db.ReadFile(name);
-            return bytes is null ? Results.NotFound() : Results.Bytes(bytes, "application/octet-stream");
+            var stream = db.OpenFileRead(name);
+            return stream is null ? Results.NotFound() : Results.Stream(stream, "application/octet-stream");
         });
         api.MapPut("/files/{*name}", async (string name, HttpRequest req, HubOptions opts) =>
         {

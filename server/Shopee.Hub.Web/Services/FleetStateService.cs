@@ -129,12 +129,6 @@ public sealed class FleetStateService : IHostedService, IDisposable
         return s < 60 ? $"{(int)s}s trước" : s < 3600 ? $"{(int)(s / 60)} phút trước" : $"{(int)(s / 3600)} giờ trước";
     }
 
-    public static string RoleDisplay(string key) => key switch
-    {
-        MachineRoles.Scrape => "Scrape", MachineRoles.Import => "Import",
-        MachineRoles.Update => "Update", MachineRoles.All => "Mọi việc", _ => "Tắt",
-    };
-
     public static readonly (string key, string display)[] RoleChoices =
     [
         (MachineRoles.Off, "Tắt"), (MachineRoles.Scrape, "Scrape"), (MachineRoles.Import, "Import"),

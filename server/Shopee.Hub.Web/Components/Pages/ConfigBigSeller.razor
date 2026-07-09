@@ -5,16 +5,26 @@
 @inject HubDatabase Db
 @inject BigSellerLoginService Login
 
-<h1>Cấu hình BigSeller</h1>
-<p class="hint">Web hub là <b>nguồn sự thật</b>. Lưu xong, client tự kéo về trong ≤3 phút. Workbook Excel tải lên đây (client kéo về dùng). StartRow/EndRow/số worker là cấu hình <b>giao việc</b> — đặt ở tab Fleet lúc ghim việc, không đặt ở đây.</p>
+<p class="hint m-hide">Web hub là <b>nguồn sự thật</b>. Lưu xong, client tự kéo về trong ≤3 phút. Workbook Excel tải lên đây (client kéo về dùng). StartRow/EndRow/số worker là cấu hình <b>giao việc</b> — đặt ở tab Fleet lúc ghim việc, không đặt ở đây.</p>
 
 <div class="bar">
     <button class="btn" @onclick="AddAccount">+ Thêm tài khoản</button>
     <button class="btn primary" @onclick="Save">💾 Lưu tất cả</button>
+    <label>Tìm acc <input @bind="_search" @bind:event="oninput" @bind:after="() => _page = 0" placeholder="nhãn / email…" style="width:150px" /></label>
+    <label>Mỗi trang
+        <select @bind="_pageSize">
+            <option value="5">5</option>
+            <option value="10">10</option>
+            <option value="20">20</option>
+        </select>
+    </label>
+    <button class="btn sm" disabled="@(_page <= 0)" @onclick="() => _page--">◀</button>
+    <span class="stat">@(_page + 1)/@PageCount · @Filtered().Count acc</span>
+    <button class="btn sm" disabled="@(_page >= PageCount - 1)" @onclick="() => _page++">▶</button>
     <span class="action">@_status</span>
 </div>
 
-@foreach (var acct in _accounts)
+@foreach (var acct in Paged())
 {
     <div class="editcard">
         <div class="row">
@@ -55,6 +65,10 @@
         {
             <div class="loginlog">@string.Join("\n", lg.Log.TakeLast(6))</div>
         }
+        <button class="btn sm m-only" @onclick="() => ToggleShops(acct.Id)">
+            @(_shopsOpen.Contains(acct.Id) ? "▾ Ẩn shop" : $"▸ Shop ({acct.Shops.Count})")
+        </button>
+        <div class="shopsec @(_shopsOpen.Contains(acct.Id) ? "open" : "")">
         <div class="subhead">Shops <button class="btn sm" @onclick="() => AddShop(acct)">+ shop</button></div>
         <div class="tablewrap">
         <table class="grid sm">
@@ -99,6 +113,7 @@
             </tbody>
         </table>
         </div>
+        </div>
     </div>
 }
 
@@ -110,12 +125,22 @@
     private readonly Dictionary<string, string> _wbStatus = new();
     private string _otp = "";
     private Timer? _poll;
+    private bool _wasActive;
+    private string _search = "";
+    private int _pageSize = 5;
+    private int _page;
+    private readonly HashSet<string> _shopsOpen = new();
 
     protected override void OnInitialized()
     {
         Load();
-        // Poll trạng thái login 1.5s/lần để log + OTP prompt tự cập nhật.
-        _poll = new Timer(_ => InvokeAsync(StateHasChanged), null, TimeSpan.FromSeconds(1.5), TimeSpan.FromSeconds(1.5));
+        // Poll 1.5s nhưng CHỈ re-render khi có phiên login sống (hoặc vừa kết thúc — vẽ nốt trạng thái chốt).
+        _poll = new Timer(_ =>
+        {
+            var act = Login.AnyActive;
+            if (act || _wasActive) InvokeAsync(StateHasChanged);
+            _wasActive = act;
+        }, null, TimeSpan.FromSeconds(1.5), TimeSpan.FromSeconds(1.5));
     }
 
     private void StartLogin(BigSellerAccount a)
@@ -206,16 +231,34 @@
         catch (Exception ex) { _wbStatus[acctId] = "✘ lỗi: " + ex.Message; }
     }
 
-    private void AddAccount() => _accounts.Add(new BigSellerAccount { Label = "Tài khoản mới" });
+    private List<BigSellerAccount> Filtered()
+    {
+        var q = _search?.Trim() ?? "";
+        return q.Length == 0 ? _accounts
+            : _accounts.Where(a => (a.Label ?? "").Contains(q, StringComparison.OrdinalIgnoreCase)
+                                || (a.Email ?? "").Contains(q, StringComparison.OrdinalIgnoreCase)).ToList();
+    }
+    private int PageCount => Math.Max(1, (int)Math.Ceiling(Filtered().Count / (double)_pageSize));
+    private IEnumerable<BigSellerAccount> Paged()
+    {
+        if (_page >= PageCount) _page = PageCount - 1;
+        if (_page < 0) _page = 0;
+        return Filtered().Skip(_page * _pageSize).Take(_pageSize);
+    }
+
+    private void ToggleShops(string id) { if (!_shopsOpen.Remove(id)) _shopsOpen.Add(id); }
+
+    private void AddAccount()
+    {
+        _accounts.Add(new BigSellerAccount { Label = "Tài khoản mới" });
+        _search = "";
+        _page = Math.Max(0, (int)Math.Ceiling(_accounts.Count / (double)_pageSize) - 1);
+    }
     private void RemoveAccount(BigSellerAccount a) => _accounts.Remove(a);
     private void AddShop(BigSellerAccount a) => a.Shops.Add(new BigSellerShop { Name = "Shop mới" });
 
     private void Save()
     {
-        var res = Config.Save(FileStoreConfigService.BigSellerFile, _accounts, _version);
-        if (res.Ok) { _version = res.Version; _status = $"✔ Đã lưu (v{res.Version})."; }
-        else if (res.Conflict == "version-conflict")
-        { _status = "⚠ Có client vừa đẩy bản mới — đang tải lại, hãy sửa lại rồi lưu."; Load(); }
-        else _status = $"✘ Lỗi lưu: {res.Conflict}";
+        _status = ConfigSave.Apply(Config, FileStoreConfigService.BigSellerFile, _accounts, ref _version, Load);
     }
 }

@@ -20,6 +20,12 @@ public sealed class SearchBoardService
     // WebSocket qua tunnel KHÔNG mất danh sách link đã chọn). Chỉ 1 admin nên chia sẻ 1 bản là đủ. ──
     public IReadOnlyList<string> Links { get; private set; } = [];
     public string FileName { get; private set; } = "";
+
+    // Tham số chạy search — giữ ở singleton cùng lý do với Links (sống qua reconnect circuit).
+    public int AccountsPerClient { get; set; } = 3;
+    public int Lanes { get; set; } = 3;
+    public string Region { get; set; } = "";
+
     private readonly HashSet<int> _selLinks = new();
 
     public void SetLinks(List<string> links, string fileName)
@@ -202,21 +208,5 @@ public sealed class SearchBoardService
         var list = q.ToList();
         var fileName = $"tonghop-hub_{list.Count}sp_{DateTime.UtcNow:yyyyMMdd_HHmmss}.xlsx";
         return ExcelExporter.Export(list, outputDir, fileName);
-    }
-
-    /// <summary>Danh sách danh mục có trong kho gộp (cho bộ lọc export).</summary>
-    public List<string> MergedCategories()
-    {
-        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var json in _db.AllSearchProductJson())
-        {
-            try
-            {
-                var p = JsonSerializer.Deserialize<ProductResult>(json);
-                if (p is not null) set.Add(string.IsNullOrWhiteSpace(p.Category) ? "Khác" : p.Category.Trim());
-            }
-            catch { }
-        }
-        return set.OrderBy(x => x).ToList();
     }
 }

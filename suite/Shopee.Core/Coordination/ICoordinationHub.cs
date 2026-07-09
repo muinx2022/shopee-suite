@@ -67,6 +67,11 @@ public sealed class WorkLedgerRecord
     public string Status { get; set; } = "idle";   // idle | running | stopped | completed
     public string LastMachineId { get; set; } = "";
     public string LastHostname { get; set; } = "";
+
+    /// <summary>Tập machine_id ĐÃ tham gia việc này. Hub TỰ tích luỹ mỗi lần publish (union LastMachineId) →
+    /// Thống kê xem "các máy nào đã cùng scrape/import/update shop này". Client KHÔNG set (Hub tự gom).</summary>
+    public List<string> MachineIds { get; set; } = [];
+
     public DateTimeOffset? LastRunAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 }

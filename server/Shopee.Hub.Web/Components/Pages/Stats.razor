@@ -3,33 +3,33 @@
    đã scrape/import/update/tên-SP được NHỮNG DÒNG NÀO. Dữ liệu nằm ở Hub nên xem tập trung, không phụ thuộc
    client nào đang chạy việc gì. Bố cục: KPI + ma trận 1 dòng/shop + panel chi tiết khi bấm 1 shop. *@
 @attribute [Authorize(Policy = "Web")]
-@implements IDisposable
-@inject FleetStateService FleetState
+@inherits FleetPageBase
 @inject FileStoreConfigService Config
+@inject SheetMapService SheetMap
 
 <div class="statspage">
-    <p class="hint">Tổng hợp từ Hub — mỗi shop đã scrape / import / update / đổi tên được bao nhiêu dòng, không phụ thuộc máy nào đang chạy. Bấm 1 shop để xem khoảng dòng chi tiết.</p>
+    <p class="hint m-hide">Tổng hợp từ Hub — mỗi shop đã scrape / import / update / đổi tên được bao nhiêu dòng, không phụ thuộc máy nào đang chạy. Bấm 1 shop để xem khoảng dòng chi tiết.</p>
 
     <div class="kpis">
         <div class="kpi">
-            <div class="kpi-ic green">@Kpi("shop")</div>
+            <div class="kpi-ic green">@HubIcons.Svg("shop", 22)</div>
             <div><div class="kpi-val">@_kShops</div><div class="kpi-label">Shop có tiến độ</div></div>
         </div>
         <div class="kpi">
-            <div class="kpi-ic blue">@Kpi("scrape")</div>
+            <div class="kpi-ic blue">@HubIcons.Svg("scrape", 22)</div>
             <div><div class="kpi-val">@_kScrape.ToString("N0")</div><div class="kpi-label">Dòng đã scrape</div></div>
         </div>
         <div class="kpi">
-            <div class="kpi-ic blue">@Kpi("import")</div>
+            <div class="kpi-ic blue">@HubIcons.Svg("import", 22)</div>
             <div><div class="kpi-val">@_kImport.ToString("N0")</div><div class="kpi-label">Dòng đã import</div></div>
         </div>
         <div class="kpi">
-            <div class="kpi-ic amber">@Kpi("update")</div>
+            <div class="kpi-ic amber">@HubIcons.Svg("update", 22)</div>
             <div><div class="kpi-val">@_kUpdate.ToString("N0")</div><div class="kpi-label">Dòng đã update</div></div>
         </div>
         <div class="kpi">
-            <div class="kpi-ic blue">@Kpi("tag")</div>
-            <div><div class="kpi-val">@_kRewrite.ToString("N0")</div><div class="kpi-label">Dòng đã đổi tên</div></div>
+            <div class="kpi-ic amber">@HubIcons.Svg("tag", 22)</div>
+            <div><div class="kpi-val">@_kRewrite.ToString("N0")</div><div class="kpi-label">Dòng đổi tên SP</div></div>
         </div>
     </div>
 
@@ -101,10 +101,16 @@
                         </div>
                         @if (st is not null)
                         {
-                            <div class="n">@st.RowCount.ToString("N0") <span class="sub">dòng</span></div>
+                            <div class="n">@st.RowCount.ToString("N0") <span class="sub">dòng</span>
+                                <button class="linkbtn" @onclick="() => OpenMap(op)">🔍 xem dòng</button>
+                            </div>
                             <div class="sub">tới dòng @st.LastRow</div>
-                            <div class="rng">@st.Ranges</div>
-                            <div class="sub" title="@st.LastAbs">@(string.IsNullOrEmpty(st.Machine) ? "—" : st.Machine)@(string.IsNullOrEmpty(st.LastAgo) ? "" : $" · {st.LastAgo}")</div>
+                            <div class="rng m-hide">@st.Ranges</div>
+                            <div class="sub" title="@st.LastAbs">Gần nhất: @(string.IsNullOrEmpty(st.Machine) ? "—" : st.Machine)@(string.IsNullOrEmpty(st.LastAgo) ? "" : $" · {st.LastAgo}")</div>
+                            @if (st.Machines.Count > 1)
+                            {
+                                <div class="sub m-hide">Đã tham gia (@st.Machines.Count máy): @string.Join(", ", st.Machines)</div>
+                            }
                         }
                         else
                         {
@@ -119,10 +125,55 @@
     {
         <p class="hint">Bấm 1 shop ở bảng trên để xem khoảng dòng chi tiết.</p>
     }
+
+    @if (_mapOpen)
+    {
+        <div class="modal-overlay" @onclick="CloseMap">
+            <div class="modal wide" @onclick:stopPropagation="true">
+                <div class="modal-head">
+                    <span>🗺️ @_mapTitle</span>
+                    <button class="linkbtn" @onclick="CloseMap">✕</button>
+                </div>
+                <div class="modal-body">
+                    @if (_mapLoading)
+                    {
+                        <div class="hint">Đang đọc cấu trúc sheet…</div>
+                    }
+                    else if (_mapError is not null)
+                    {
+                        <div class="warn">@_mapError</div>
+                    }
+                    else if (_mapCells.Count == 0)
+                    {
+                        <div class="empty">Sheet không có dòng dữ liệu.</div>
+                    }
+                    else
+                    {
+                        <div class="hmbar">
+                            <span class="stat"><b>@_mapDone.ToString("N0")</b> / @_mapTotal.ToString("N0") dòng đã @_mapOpLabel</span>
+                            <span class="hmleg"><span class="hm-cell on"></span> đã làm &nbsp; <span class="hm-cell"></span> chưa</span>
+                        </div>
+                        <div class="heatmap">
+                            @foreach (var cell in _mapCells)
+                            {
+                                <span class="hm-cell @(cell.Done ? "on" : "")" title="@(cell.Done ? $"dòng {cell.Row} · đã {_mapOpLabel}" : $"dòng {cell.Row} · chưa")"></span>
+                            }
+                        </div>
+                        @if (_mapCapped)
+                        {
+                            <div class="sub">Hiển thị @_mapCells.Count.ToString("N0") ô đầu (sheet rất lớn) — đủ để thấy vùng đã làm.</div>
+                        }
+                    }
+                </div>
+                <div class="modal-foot">
+                    <button class="btn" @onclick="CloseMap">Đóng</button>
+                </div>
+            </div>
+        </div>
+    }
 </div>
 
 @code {
-    private FleetSnapshot _snap = new();
     private List<BigSellerAccount> _accounts = new();
     private List<ShopRow> _rows = new();
     private string _summary = "";
@@ -140,29 +191,37 @@
     {
         public string StatusText = "", StatusCss = "", Ranges = "—", Machine = "", LastAgo = "", LastAbs = "";
         public int RowCount, LastRow;
+        public List<string> Machines = new();   // hostnames đã tham gia việc này
     }
 
     private sealed class ShopRow
     {
-        public string AccountId = "", AccountName = "", ShopId = "", ShopName = "";
+        public string AccountId = "", AccountName = "", ShopId = "", ShopName = "", Sheet = "";
         public Dictionary<string, OpStat> Ops = new();
     }
 
+    // ── Bản đồ dòng (heatmap) ──
+    private bool _mapOpen, _mapLoading, _mapCapped;
+    private string? _mapError, _mapTitle, _mapOpLabel;
+    private int _mapTotal, _mapDone;
+    private List<(int Row, bool Done)> _mapCells = new();
+    private const int MapCap = 20000;
+
     protected override void OnInitialized()
     {
-        FleetState.Changed += OnChanged;
-        _snap = FleetState.Snapshot;
+        base.OnInitialized();
         ReloadAccounts();
         Rebuild();
     }
 
-    private void OnChanged() => InvokeAsync(() =>
+    // Modal heatmap dùng dữ liệu chụp lúc mở → dừng hẳn nhịp vẽ (cả StateHasChanged) khỏi diff 20k ô mỗi 2s.
+    protected override bool ShouldTickRender() => !_mapOpen;
+
+    protected override void OnFleetTick()
     {
-        _snap = FleetState.Snapshot;
         if ((DateTimeOffset.UtcNow - _accountsLoadedAt).TotalSeconds > 10) ReloadAccounts();
         Rebuild();
-        StateHasChanged();
-    });
+    }
 
     private void ReloadAccounts()
     {
@@ -175,7 +234,7 @@
         var byId = _accounts.ToDictionary(a => a.Id, a => a);
         var shops = new Dictionary<string, ShopRow>(StringComparer.Ordinal);
 
-        foreach (var l in _snap.Ledger)
+        foreach (var l in Snap.Ledger)
         {
             if (string.IsNullOrEmpty(l.BigsellerId)) continue;   // (search dùng bảng khác, không nằm ở ledger)
             byId.TryGetValue(l.BigsellerId, out var acct);
@@ -189,6 +248,7 @@
                     AccountName = acct?.DisplayName ?? ShortId(l.BigsellerId),
                     ShopId = l.ShopId,
                     ShopName = shop?.DisplayName ?? (string.IsNullOrWhiteSpace(l.Sheet) ? ShortId(l.ShopId) : l.Sheet),
+                    Sheet = !string.IsNullOrWhiteSpace(shop?.ShopeeDataSheet) ? shop!.ShopeeDataSheet : (l.Sheet ?? ""),
                 };
                 shops[key] = row;
             }
@@ -201,6 +261,7 @@
                 Ranges = FormatRanges(l.Completed), Machine = Machine(l),
                 LastAgo = FleetStateService.Ago(last),
                 LastAbs = last == default ? "" : last.LocalDateTime.ToString("dd/MM/yyyy HH:mm:ss"),
+                Machines = l.MachineIds.Select(HostName).Where(h => !string.IsNullOrEmpty(h)).Distinct().ToList(),
             };
         }
 
@@ -238,6 +299,51 @@
         _selAcctId = r.AccountId; _selShopId = r.ShopId; _sel = r;
     }
 
+    /// <summary>Mở bản đồ dòng của 1 việc trên shop đang chọn: đọc cấu trúc sheet (cache) rồi tô dòng đã làm.</summary>
+    private async Task OpenMap(string op)
+    {
+        if (_sel is null) return;
+        var shop = _sel;
+        _mapOpen = true; _mapLoading = true; _mapError = null; _mapCapped = false;
+        _mapCells = new(); _mapTotal = _mapDone = 0; _mapOpLabel = OpLabel(op);
+        _mapTitle = $"{OpLabel(op)} · {shop.ShopName} · sheet '{shop.Sheet}'";
+        StateHasChanged();
+
+        var info = await SheetMap.GetAsync(shop.AccountId, shop.Sheet);
+        if (!_mapOpen) return;   // người dùng đã đóng modal trong lúc đọc
+        if (!info.Found) { _mapError = info.Error; _mapLoading = false; StateHasChanged(); return; }
+
+        var abs = info.DataRows;                 // số dòng tuyệt đối, tăng dần; vị trí i ↔ chỉ số dồn i+1
+        var led = Snap.Ledger.FirstOrDefault(l => l.Key == $"{shop.AccountId}__{shop.ShopId}__{op}");
+        var ranges = led?.Completed ?? new List<RowRange>();
+        var done = new bool[abs.Count];
+        if (op == "scrape")
+        {
+            // scrape: ledger là CHỈ SỐ DỒN (1-based) → phần tử thứ p trong danh sách.
+            foreach (var rr in ranges)
+                for (var p = Math.Max(1, rr.From); p <= rr.To && p <= abs.Count; p++)
+                    done[p - 1] = true;
+        }
+        else
+        {
+            // import/update: ledger là SỐ DÒNG TUYỆT ĐỐI → tra vị trí trong danh sách.
+            var idx = new Dictionary<int, int>(abs.Count);
+            for (var i = 0; i < abs.Count; i++) idx[abs[i]] = i;
+            foreach (var rr in ranges)
+                for (var a = rr.From; a <= rr.To; a++)
+                    if (idx.TryGetValue(a, out var i)) done[i] = true;
+        }
+        _mapTotal = abs.Count;
+        _mapDone = done.Count(b => b);
+        var cells = abs.Select((rowNum, i) => (Row: rowNum, Done: done[i]));
+        _mapCapped = abs.Count > MapCap;
+        _mapCells = (_mapCapped ? cells.Take(MapCap) : cells).ToList();
+        _mapLoading = false;
+        StateHasChanged();
+    }
+
+    private void CloseMap() { _mapOpen = false; _mapCells = new(); }
+
     // Ô việc trong ma trận: có record → pill màu + glyph + số dòng; không có → dấu chấm mờ.
     private RenderFragment Chip(ShopRow r, string op) => builder =>
     {
@@ -261,10 +367,17 @@
     {
         if (!string.IsNullOrEmpty(l.LastMachineId))
         {
-            var m = _snap.Machines.FirstOrDefault(x => x.MachineId == l.LastMachineId);
+            var m = Snap.Machines.FirstOrDefault(x => x.MachineId == l.LastMachineId);
             if (m is not null && !string.IsNullOrWhiteSpace(m.Hostname)) return m.Hostname;
         }
         return string.IsNullOrWhiteSpace(l.LastHostname) ? "" : l.LastHostname;
+    }
+
+    private string HostName(string machineId)
+    {
+        if (string.IsNullOrEmpty(machineId)) return "";
+        var m = Snap.Machines.FirstOrDefault(x => x.MachineId == machineId);
+        return m is not null && !string.IsNullOrWhiteSpace(m.Hostname) ? m.Hostname : ShortId(machineId);
     }
 
     private static (string text, string css) LedgerStatus(string s) => s switch
@@ -288,21 +401,4 @@
 
     private static string ShortId(string id) => string.IsNullOrEmpty(id) ? "?" : (id.Length <= 8 ? id : id[..8] + "…");
 
-    public void Dispose() => FleetState.Changed -= OnChanged;
-
-    // ── KPI icons (Lucide-style, stroke=currentColor) ──
-    private static readonly Dictionary<string, string> KpiIcons = new()
-    {
-        ["shop"]   = "<path d='M3 9l1.5-5h15L21 9'/><path d='M4 9v10a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1V9'/><path d='M9 20v-6h6v6'/>",
-        ["scrape"] = "<polygon points='6 3 20 12 6 21 6 3'/>",
-        ["import"] = "<path d='M12 3v13'/><path d='m7 11 5 5 5-5'/><path d='M5 21h14'/>",
-        ["update"] = "<path d='M21 12a9 9 0 1 1-2.6-6.4L21 8'/><path d='M21 3v5h-5'/>",
-        ["tag"]    = "<path d='M20.6 11.4 12 2.8H4v8l8.6 8.6a2 2 0 0 0 2.8 0l5.2-5.2a2 2 0 0 0 0-2.8z'/><circle cx='7.5' cy='7.5' r='1.3'/>",
-    };
-
-    private static MarkupString Kpi(string key)
-    {
-        var body = KpiIcons.TryGetValue(key, out var b) ? b : "";
-        return new MarkupString($"<svg width='22' height='22' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'>{body}</svg>");
-    }
 }

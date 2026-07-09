@@ -1,33 +1,32 @@
 @page "/machines"
 @attribute [Authorize(Policy = "Web")]
-@implements IDisposable
-@inject FleetStateService Fleet
+@inherits FleetPageBase
 @inject HubDatabase Db
+@inject IJSRuntime JS
 
-<h1>Quản lý máy client</h1>
-<p class="hint">Máy tự đăng ký bằng token. Ở đây bạn reset việc (nhả khoá acc ngay), đặt vai trò, hoặc xoá &amp; chặn máy.</p>
+<p class="hint m-hide">Máy tự đăng ký bằng token. Ở đây bạn reset việc (nhả khoá acc ngay), đặt vai trò, hoặc xoá &amp; chặn máy.</p>
 
 <div class="bar">
-    <span class="stat">@_snap.Machines.Count máy · @RunningCount đang chạy · @QueuedCount chờ</span>
+    <span class="stat">@Snap.Machines.Count máy · @RunningCount đang chạy · @QueuedCount chờ</span>
     <button class="btn danger" @onclick="CancelAllWork">✖ Huỷ MỌI việc (chạy + chờ)</button>
     <span class="action">@_status</span>
 </div>
 
 <div class="tablewrap">
-<table class="grid sm">
+<table class="grid sm stack-sm">
     <thead><tr><th>Máy</th><th>Trạng thái</th><th>Việc đang giữ</th><th>Vai trò (auto)</th><th>Hành động</th></tr></thead>
     <tbody>
-    @foreach (var m in _snap.Machines.OrderByDescending(x => x.LastSeen))
+    @foreach (var m in Snap.Machines.OrderByDescending(x => x.LastSeen))
     {
-        var pres = FleetStateService.Status(_snap, m);
-        var role = _snap.Roles.FirstOrDefault(r => r.MachineId == m.MachineId)?.Role ?? MachineRoles.Off;
-        var held = _snap.Assignments.Count(a => a.Status is "running" or "queued" && (a.ClaimedByMachineId == m.MachineId || a.TargetMachineId == m.MachineId))
-                   + _snap.Leases.Count(l => l.MachineId == m.MachineId);
+        var pres = FleetStateService.Status(Snap, m);
+        var role = Snap.Roles.FirstOrDefault(r => r.MachineId == m.MachineId)?.Role ?? MachineRoles.Off;
+        var held = Snap.Assignments.Count(a => a.Status is "running" or "queued" && (a.ClaimedByMachineId == m.MachineId || a.TargetMachineId == m.MachineId))
+                   + Snap.Leases.Count(l => l.MachineId == m.MachineId);
         <tr>
-            <td><b>@m.Hostname</b><div class="mono" style="font-size:11px;color:#64748b">@m.MachineId[..Math.Min(12, m.MachineId.Length)]</div></td>
-            <td>@pres.Dot @pres.Label</td>
-            <td>@(held > 0 ? $"{held}" : "—")</td>
-            <td>
+            <td><b>@m.Hostname</b><div class="mono m-hide" style="font-size:11px;color:#64748b">@m.MachineId[..Math.Min(12, m.MachineId.Length)]</div></td>
+            <td data-label="Trạng thái">@pres.Dot @pres.Label</td>
+            <td data-label="Việc đang giữ">@(held > 0 ? $"{held}" : "—")</td>
+            <td data-label="Vai trò">
                 <select value="@role" @onchange="e => SetRole(m.MachineId, e.Value?.ToString())">
                     @foreach (var (key, disp) in FleetStateService.RoleChoices)
                     {
@@ -35,13 +34,13 @@
                     }
                 </select>
             </td>
-            <td>
+            <td data-label="Hành động">
                 <button class="btn sm" @onclick="() => ResetMachine(m.MachineId, m.Hostname)">⟳ Reset việc</button>
                 <button class="btn danger sm" @onclick="() => DeleteMachine(m.MachineId, m.Hostname)">🗑 Xoá &amp; chặn</button>
             </td>
         </tr>
     }
-    @if (_snap.Machines.Count == 0)
+    @if (Snap.Machines.Count == 0)
     {
         <tr><td colspan="5" class="empty">Chưa có máy nào kết nối.</td></tr>
     }
@@ -67,43 +66,41 @@
 }
 
 @code {
-    private FleetSnapshot _snap = new();
     private List<string> _revoked = new();
     private string _status = "";
 
-    private int RunningCount => _snap.Assignments.Count(a => a.Status == "running");
-    private int QueuedCount => _snap.Assignments.Count(a => a.Status == "queued");
+    private int RunningCount => Snap.Assignments.Count(a => a.Status == "running");
+    private int QueuedCount => Snap.Assignments.Count(a => a.Status == "queued");
 
     protected override void OnInitialized()
     {
-        Fleet.Changed += OnChanged;
-        _snap = Fleet.Snapshot;
+        base.OnInitialized();
         _revoked = Db.RevokedMachines();
     }
-
-    private void OnChanged() => InvokeAsync(() => { _snap = Fleet.Snapshot; StateHasChanged(); });
 
     private void SetRole(string machineId, string? role)
     {
         Db.SetRole(machineId, string.IsNullOrWhiteSpace(role) ? MachineRoles.Off : role);
-        Fleet.Refresh();
+        FleetState.Refresh();
     }
 
-    private void ResetMachine(string machineId, string host)
+    private async Task ResetMachine(string machineId, string host)
     {
+        if (!await JS.InvokeAsync<bool>("confirm", $"Reset máy {host}? Mọi việc máy đang giữ sẽ bị huỷ, khoá acc nhả ngay.")) return;
         var n = Db.ResetMachineWork(machineId);
         _status = $"⟳ Đã reset {host}: huỷ {n} việc + nhả khoá acc/lease. Acc được nhả ngay — ghim lại được.";
-        Fleet.Refresh();
+        FleetState.Refresh();
     }
 
-    private void DeleteMachine(string machineId, string host)
+    private async Task DeleteMachine(string machineId, string host)
     {
+        if (!await JS.InvokeAsync<bool>("confirm", $"Xoá & CHẶN máy {host}? Máy này sẽ bị 401 (mất kết nối) dù còn token.")) return;
         Db.ResetMachineWork(machineId);   // nhả việc trước
         Db.RevokeMachine(machineId);       // chặn (401 khi vào lại)
         Db.RemoveMachine(machineId);       // xoá khỏi danh sách
         _revoked = Db.RevokedMachines();
         _status = $"🗑 Đã xoá & chặn {host}. Máy này sẽ bị 401 (mất kết nối) dù còn token.";
-        Fleet.Refresh();
+        FleetState.Refresh();
     }
 
     private void Unblock(string machineId)
@@ -113,14 +110,13 @@
         _status = "✔ Đã bỏ chặn — máy vào lại được.";
     }
 
-    private void CancelAllWork()
+    private async Task CancelAllWork()
     {
+        if (!await JS.InvokeAsync<bool>("confirm", $"Huỷ TẤT CẢ {RunningCount + QueuedCount} việc (đang chạy + chờ) trên mọi máy?")) return;
         var n = 0;
-        foreach (var a in _snap.Assignments.Where(a => a.Status is "running" or "queued"))
+        foreach (var a in Snap.Assignments.Where(a => a.Status is "running" or "queued"))
         { Db.CancelAssignment(a.Id); n++; }
         _status = $"✖ Đã huỷ {n} việc (chạy + chờ).";
-        Fleet.Refresh();
+        FleetState.Refresh();
     }
-
-    public void Dispose() => Fleet.Changed -= OnChanged;
 }

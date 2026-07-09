@@ -2,9 +2,9 @@
 @attribute [Authorize(Policy = "Web")]
 @inject HubDatabase Db
 @inject FileStoreConfigService Config
+@inject IJSRuntime JS
 
-<h1>Files (kho dùng chung)</h1>
-<p class="hint">Workbook Excel + config + cookie. Bytes nằm ở <code>files\</code>; version tăng dần (client kéo theo manifest).</p>
+<p class="hint m-hide">Workbook Excel + config + cookie. Bytes nằm ở <code>files\</code>; version tăng dần (client kéo theo manifest).</p>
 
 <h2>Tải workbook lên</h2>
 <div class="editcard" style="max-width:640px">
@@ -23,7 +23,7 @@
 
 <h2>Ảnh mặc định cho Update (dùng chung)</h2>
 <div class="editcard" style="max-width:640px">
-    <p class="hint">1 ảnh duy nhất cho toàn hệ. Client tự kéo về khi chạy Update — máy nào thiếu ảnh local vẫn dùng ảnh này (thiếu cả hai thì bỏ qua ảnh như cũ). Key cố định <code>@FileStoreConfigService.DefaultUpdateImageFile</code>.</p>
+    <p class="hint m-hide">1 ảnh duy nhất cho toàn hệ. Client tự kéo về khi chạy Update — máy nào thiếu ảnh local vẫn dùng ảnh này (thiếu cả hai thì bỏ qua ảnh như cũ). Key cố định <code>@FileStoreConfigService.DefaultUpdateImageFile</code>.</p>
     <label>Ảnh (.jpg/.png) <InputFile OnChange="OnUploadDefaultImage" accept="image/*" /></label>
     <div class="action">@_imgStatus</div>
     @if (_imgPreview is not null)
@@ -43,15 +43,15 @@
 <h2>Manifest (@_files.Count file)</h2>
 <div class="tablewrap">
 <table class="grid sm">
-    <thead><tr><th>Tên</th><th>Ver</th><th>Kích thước</th><th>SHA-256</th><th>Sửa lúc</th><th></th></tr></thead>
+    <thead><tr><th>Tên</th><th class="m-hide">Ver</th><th>Kích thước</th><th class="m-hide">SHA-256</th><th>Sửa lúc</th><th></th></tr></thead>
     <tbody>
     @foreach (var f in _files.OrderBy(x => x.Name))
     {
         <tr>
             <td>@f.Name</td>
-            <td>@f.Version</td>
+            <td class="m-hide">@f.Version</td>
             <td>@Size(f.Size)</td>
-            <td class="mono">@(f.Hash.Length > 12 ? f.Hash[..12] : f.Hash)…</td>
+            <td class="mono m-hide">@(f.Hash.Length > 12 ? f.Hash[..12] : f.Hash)…</td>
             <td>@f.Mtime.LocalDateTime.ToString("MM-dd HH:mm")</td>
             <td>
                 <a class="btn sm" href="/dl/@f.Name" target="_blank">⬇</a>
@@ -129,7 +129,12 @@
         catch (Exception ex) { _imgStatus = "✘ Lỗi tải ảnh: " + ex.Message; }
     }
 
-    private void Delete(string name) { Db.DeleteFile(name); Reload(); }
+    private async Task Delete(string name)
+    {
+        if (!await JS.InvokeAsync<bool>("confirm", $"Xoá file {name} khỏi kho dùng chung?")) return;
+        Db.DeleteFile(name);
+        Reload();
+    }
 
     private static string Size(long b) =>
         b < 1024 ? $"{b} B" : b < 1024 * 1024 ? $"{b / 1024.0:0.#} KB" : $"{b / 1024.0 / 1024.0:0.##} MB";

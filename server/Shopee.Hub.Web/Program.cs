@@ -47,6 +47,8 @@ builder.Services.AddSingleton<LoginRateLimit>();
 // FleetStateService: vừa là IHostedService (nền refresh 2s) vừa được inject vào trang Blazor → 1 singleton.
 builder.Services.AddSingleton<FleetStateService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<FleetStateService>());
+// SheetMapService: đọc + cache cấu trúc dòng workbook cho "bản đồ dòng" trang Thống kê.
+builder.Services.AddSingleton<SheetMapService>();
 // DispatcherService: BackgroundService + được inject (endpoint /dispatcher, trang Fleet) → 1 singleton.
 builder.Services.AddSingleton<DispatcherService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<DispatcherService>());
@@ -97,6 +99,9 @@ builder.Services.Configure<ForwardedHeadersOptions>(o =>
 builder.Services.AddRazorComponents().AddInteractiveServerComponents();
 
 var app = builder.Build();
+
+// db đăng ký AddSingleton(instance) nên DI KHÔNG tự Dispose khi tắt → tự đăng ký để đóng SqliteConnection sạch.
+app.Lifetime.ApplicationStopped.Register(db.Dispose);
 
 // Seed token API + admin (từ env) nếu DB chưa có.
 {
@@ -165,10 +170,10 @@ app.MapPost("/logout", async (HttpContext ctx) =>
 // ── Tải file cho ADMIN qua trình duyệt (khoá cookie, khác /files/{*name} của client dùng X-Api-Token) ──
 app.MapGet("/dl/{*name}", (string name, HubDatabase database) =>
 {
-    var bytes = database.ReadFile(name);
-    if (bytes is null) return Results.NotFound();
+    var stream = database.OpenFileRead(name);
+    if (stream is null) return Results.NotFound();
     var download = name.Contains('/') ? name[(name.LastIndexOf('/') + 1)..] : name;
-    return Results.File(bytes, "application/octet-stream", download);
+    return Results.Stream(stream, "application/octet-stream", download);
 }).RequireAuthorization("Web");
 
 app.MapGet("/exports/{name}", (string name, HubOptions opts) =>
@@ -240,7 +245,7 @@ internal static class LoginPages
         <form class="card" method="post" action="/setup">
           <div class="logo">S</div>
           <h1>Tạo tài khoản admin</h1><p class="sub">Lần đầu chạy — đặt user/mật khẩu quản trị</p>
-          {(string.IsNullOrEmpty(err) ? "" : $"<div class=\"err\">{err}</div>")}
+          {(string.IsNullOrEmpty(err) ? "" : $"<div class=\"err\">{System.Net.WebUtility.HtmlEncode(err)}</div>")}
           <label>Tên đăng nhập</label><input name="u" autofocus autocomplete="username">
           <label>Mật khẩu (≥ 6 ký tự)</label><input name="p" type="password" autocomplete="new-password">
           <button type="submit">Tạo & tiếp tục</button>

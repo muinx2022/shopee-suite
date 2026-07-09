@@ -51,6 +51,12 @@ public sealed class BigSellerLoginService : IAsyncDisposable
         lock (_gate) return _sessions.TryGetValue(acctId, out var s) ? s.State : null;
     }
 
+    /// <summary>Có phiên login nào đang chạy/chờ OTP không — trang Config dùng để chỉ re-render khi cần.</summary>
+    public bool AnyActive
+    {
+        get { lock (_gate) return _sessions.Values.Any(s => s.State.Status is "running" or "needsOtp"); }
+    }
+
     /// <summary>Bắt đầu login cho 1 acc (fire-and-forget). Trả false nếu đang chạy.</summary>
     public bool Start(string acctId, string email, string password)
     {
@@ -87,11 +93,13 @@ public sealed class BigSellerLoginService : IAsyncDisposable
 
     private async Task EnsureBrowserAsync(CancellationToken ct)
     {
-        if (_browser is not null) return;
+        if (_browser is { IsConnected: true }) return;
         await _initLock.WaitAsync(ct);
         try
         {
-            if (_browser is not null) return;
+            if (_browser is { IsConnected: true }) return;
+            // Chromium đã crash/rớt kết nối → đóng bản chết rồi launch lại (thay vì hỏng mọi login tới khi restart app).
+            if (_browser is not null) { try { await _browser.CloseAsync(); } catch { } _browser = null; }
             _pw ??= await Playwright.CreateAsync();
             _browser = await _pw.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
             {
@@ -312,19 +320,6 @@ public sealed class BigSellerLoginService : IAsyncDisposable
     }
 
     private void Fail(Session s) { lock (_gate) if (s.State.Status != "success") s.State.Status = "failed"; }
-
-    private static async Task<bool> FillFirstAsync(IPage page, string value, string[] selectors)
-    {
-        foreach (var sel in selectors)
-            try { if (await page.Locator(sel).CountAsync() > 0) { await page.FillAsync(sel, value, new() { Timeout = 3000 }); return true; } } catch { }
-        return false;
-    }
-
-    private static async Task ClickFirstAsync(IPage page, string[] selectors)
-    {
-        foreach (var sel in selectors)
-            try { if (await page.Locator(sel).CountAsync() > 0) { await page.Locator(sel).First.ClickAsync(new() { Timeout = 3000, Force = true }); return; } } catch { }
-    }
 
     private static async Task DismissWarmTipsAsync(IPage page)
     {

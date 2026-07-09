@@ -2,8 +2,7 @@
 @attribute [Authorize(Policy = "Web")]
 @inject FileStoreConfigService Config
 
-<h1>Cấu hình AI</h1>
-<p class="hint">Dùng cho viết lại tên/mô tả sản phẩm + phân loại danh mục (client kéo về).</p>
+<p class="hint m-hide">Dùng cho viết lại tên/mô tả sản phẩm + phân loại danh mục (client kéo về).</p>
 
 <div class="editcard" style="max-width:640px">
     <label>Nhà cung cấp
@@ -53,9 +52,6 @@
 
     private void Save()
     {
-        var res = Config.Save(FileStoreConfigService.AiFile, _ai, _version);
-        if (res.Ok) { _version = res.Version; _status = $"✔ Đã lưu (v{res.Version})."; }
-        else if (res.Conflict == "version-conflict") { _status = "⚠ Client vừa đẩy bản mới — đã tải lại."; Load(); }
-        else _status = $"✘ Lỗi lưu: {res.Conflict}";
+        _status = ConfigSave.Apply(Config, FileStoreConfigService.AiFile, _ai, ref _version, Load);
     }
 }

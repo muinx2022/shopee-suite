@@ -2,8 +2,7 @@
 @attribute [Authorize(Policy = "Web")]
 @inject FileStoreConfigService Config
 
-<h1>Tài khoản Shopee &amp; Proxy</h1>
-<p class="hint">Web hub là nguồn sự thật. Client kéo về, giữ trạng thái riêng-máy (profile/disabled/captcha).</p>
+<p class="hint m-hide">Web hub là nguồn sự thật. Client kéo về, giữ trạng thái riêng-máy (profile/disabled/captcha).</p>
 
 <div class="bar">
     <button class="btn" @onclick="AddAccount">+ Thêm acc</button>
@@ -48,7 +47,7 @@
 </div>
 
 <h2>Kho proxy (KiotProxy)</h2>
-<p class="hint">Mỗi dòng 1 key KiotProxy hoặc host:port. Client round-robin theo index acc.</p>
+<p class="hint m-hide">Mỗi dòng 1 key KiotProxy hoặc host:port. Client round-robin theo index acc.</p>
 <div class="editcard" style="max-width:640px">
     <textarea @bind="_proxyText" rows="10" style="width:100%;font-family:monospace"></textarea>
     <div class="bar">
@@ -173,18 +172,12 @@
 
     private void Save()
     {
-        var res = Config.Save(FileStoreConfigService.AccountsFile, _accounts, _version);
-        if (res.Ok) { _version = res.Version; _status = $"✔ Đã lưu {_accounts.Count} acc (v{res.Version})."; }
-        else if (res.Conflict == "version-conflict") { _status = "⚠ Client vừa đẩy bản mới — đã tải lại."; Load(); }
-        else _status = $"✘ Lỗi lưu: {res.Conflict}";
+        _status = ConfigSave.Apply(Config, FileStoreConfigService.AccountsFile, _accounts, ref _version, Load, $" {_accounts.Count} acc");
     }
 
     private void SaveProxy()
     {
         var list = Lines(_proxyText).Distinct().ToList();
-        var res = Config.Save(FileStoreConfigService.KiotProxiesFile, list, _proxyVersion);
-        if (res.Ok) { _proxyVersion = res.Version; _proxyStatus = $"✔ Đã lưu {list.Count} proxy (v{res.Version})."; }
-        else if (res.Conflict == "version-conflict") { _proxyStatus = "⚠ Client vừa đẩy bản mới — đã tải lại."; Load(); }
-        else _proxyStatus = $"✘ Lỗi lưu: {res.Conflict}";
+        _proxyStatus = ConfigSave.Apply(Config, FileStoreConfigService.KiotProxiesFile, list, ref _proxyVersion, Load, $" {list.Count} proxy");
     }
 }

@@ -2,7 +2,6 @@ using Shopee.Core.Accounts;
 using Shopee.Core.Ai;
 using Shopee.Core.BigSeller;
 using Shopee.Core.Coordination;
-using Shopee.Core.Scrape;
 using Shopee.Hub;
 
 namespace Shopee.Hub.Web.Services;
@@ -20,7 +19,6 @@ public sealed class FileStoreConfigService
     public const string BigSellerFile = "config/bigseller.json";
     public const string AccountsFile = "config/accounts.json";
     public const string AiFile = "config/ai.json";
-    public const string ScrapeTargetsFile = "config/scrape-targets.json";
     public const string KiotProxiesFile = "config/kiot-proxies.json";
 
     /// <summary>Ảnh mặc định DÙNG CHUNG cho luồng Update — 1 file cho cả hệ, client tự kéo về (không phải chọn tay).
@@ -59,7 +57,6 @@ public sealed class FileStoreConfigService
     // ── Đọc từng loại (bản sao — sửa xong gọi Save để ghi lại) ──
     public List<BigSellerAccount> BigSellerAccounts() => ReadList<List<BigSellerAccount>>(BigSellerFile);
     public List<ShopeeAccount> ShopeeAccounts() => ReadList<List<ShopeeAccount>>(AccountsFile);
-    public List<ScrapeTargetConfig> ScrapeTargets() => ReadList<List<ScrapeTargetConfig>>(ScrapeTargetsFile);
     public List<string> KiotProxies() => ReadList<List<string>>(KiotProxiesFile);
 
     public AiConfig Ai()
@@ -73,13 +70,15 @@ public sealed class FileStoreConfigService
     // ── Gộp acc Shopee từ client (endpoint /accounts/append & /accounts/remove) ──
     /// <summary>Gộp danh sách acc Shopee client gửi lên vào config/accounts.json: KHỚP theo Id rồi login, có
     /// thì cập nhật field dùng-chung, không có thì THÊM (đánh HubOwned=true). KHÔNG BAO GIỜ xoá. Bump version →
-    /// client khác pull về. Thử lại tối đa 3 lần nếu dính version-conflict (client khác đẩy chen). Trả số acc mới.</summary>
+    /// client khác pull về. Không có gì đổi thật → KHÔNG lưu (khỏi bump version làm cả fleet re-pull vô ích).
+    /// Thử lại tối đa 3 lần nếu dính version-conflict (client khác đẩy chen). Trả số acc mới.</summary>
     public int AppendShopeeAccounts(IReadOnlyList<ShopeeAccount> incoming)
     {
         for (var attempt = 0; attempt < 3; attempt++)
         {
             var list = ShopeeAccounts();
             var added = 0;
+            var changed = false;
             foreach (var a in incoming)
             {
                 if (a is null) continue;
@@ -91,23 +90,22 @@ public sealed class FileStoreConfigService
                     a.HubOwned = true;
                     list.Add(a);
                     added++;
+                    changed = true;
                 }
                 else
                 {
-                    // Cập nhật field dùng-chung (giữ Id + trạng thái riêng-máy của bản Hub).
-                    if (!string.IsNullOrWhiteSpace(a.Label)) match.Label = a.Label;
-                    if (login.Length > 0) match.ShopeeAccountLogin = login;
-                    match.KiotProxyKey = a.KiotProxyKey;
-                    match.Region = a.Region;
-                    match.ProxyType = a.ProxyType;
-                    match.ManualProxy = a.ManualProxy;
-                    match.RequireProxy = a.RequireProxy;
+                    // Cập nhật field dùng-chung (giữ Id + trạng thái riêng-máy của bản Hub). Chỉ gán khi KHÁC
+                    // giá trị cũ → nếu incoming trùng khớp bản đang có thì không đánh dấu đổi (khỏi bump version).
+                    if (!string.IsNullOrWhiteSpace(a.Label) && match.Label != a.Label) { match.Label = a.Label; changed = true; }
+                    if (login.Length > 0 && match.ShopeeAccountLogin != login) { match.ShopeeAccountLogin = login; changed = true; }
+                    if (match.KiotProxyKey != a.KiotProxyKey) { match.KiotProxyKey = a.KiotProxyKey; changed = true; }
+                    if (match.Region != a.Region) { match.Region = a.Region; changed = true; }
+                    if (match.ProxyType != a.ProxyType) { match.ProxyType = a.ProxyType; changed = true; }
+                    if (match.ManualProxy != a.ManualProxy) { match.ManualProxy = a.ManualProxy; changed = true; }
+                    if (match.RequireProxy != a.RequireProxy) { match.RequireProxy = a.RequireProxy; changed = true; }
                 }
             }
-            if (added == 0 && incoming.Count > 0)
-            {
-                // chỉ cập nhật, vẫn lưu để lan field mới; nhưng nếu KHÔNG có gì đổi thực sự thì thôi.
-            }
+            if (!changed) return added;   // KHÔNG có gì đổi thật → không Save, không bump version (khỏi cả fleet re-pull).
             var res = Save(AccountsFile, list, VersionOf(AccountsFile));
             if (res.Ok) return added;
             // version-conflict → vòng lặp đọc lại bản mới rồi gộp lại.

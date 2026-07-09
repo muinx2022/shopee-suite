@@ -5,15 +5,13 @@
 @inject AdminAccountService Admin
 @inject IJSRuntime JS
 
-<h1>Cài đặt hub</h1>
-
 <h2>API Token — client dùng để kết nối</h2>
 <div class="editcard" style="max-width:720px">
-    <p class="hint">Mọi máy client nhập token này (app → Cài đặt → ApiToken, BaseUrl = <code>https://api.schedra.net</code>) để vào fleet.
+    <p class="hint m-hide">Mọi máy client nhập token này (app → Cài đặt → ApiToken, BaseUrl = <code>https://api.schedra.net</code>) để vào fleet.
        <b>Đổi token → TẤT CẢ client phải nhập lại token mới</b> (token cũ sẽ bị 401).</p>
     <label>Token hiện tại</label>
     <div class="row">
-        <input readonly value="@_token" style="width:440px;font-family:monospace" @onclick="SelectAll" />
+        <input readonly value="@_token" style="width:440px;font-family:monospace" onfocus="this.select()" />
         <button class="btn" @onclick="CopyToken">📋 Copy</button>
         <span class="action">@_copyStatus</span>
     </div>
@@ -57,12 +55,11 @@
         catch { _copyStatus = "⚠ trình duyệt chặn — bôi đen ô để copy tay"; }
     }
 
-    private async Task SelectAll(MouseEventArgs _) { try { await JS.InvokeVoidAsync("eval", "document.activeElement && document.activeElement.select && document.activeElement.select()"); } catch { } }
-
-    private void SaveToken()
+    private async Task SaveToken()
     {
         var t = _newToken.Trim();
         if (t.Length < 8) { _tokenStatus = "⚠ Token quá ngắn (≥ 8 ký tự)."; return; }
+        if (!await JS.InvokeAsync<bool>("confirm", "Đổi token → MỌI client mất kết nối cho tới khi nhập token mới. Tiếp tục?")) return;
         Db.SetSetting(SettingKeys.ApiToken, t);
         _token = t; _newToken = "";
         _tokenStatus = "✔ Đã đổi token — hiệu lực NGAY. Nhập token này vào MỌI client (token cũ giờ bị 401).";

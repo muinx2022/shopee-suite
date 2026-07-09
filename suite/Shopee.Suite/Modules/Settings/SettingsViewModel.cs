@@ -26,6 +26,18 @@ public sealed partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private int _batchSize = 40;
     [ObservableProperty] private string _status = "";
 
+    // Card của provider ĐANG CHỌN được đánh dấu (viền accent + chip "✓ Đang dùng"). Cập nhật khi Provider đổi.
+    public bool IsOpenAiActive => Provider == "OpenAI";
+    public bool IsAnthropicActive => Provider == "Anthropic";
+    public bool IsGeminiActive => Provider == "Gemini";
+
+    partial void OnProviderChanged(string value)
+    {
+        OnPropertyChanged(nameof(IsOpenAiActive));
+        OnPropertyChanged(nameof(IsAnthropicActive));
+        OnPropertyChanged(nameof(IsGeminiActive));
+    }
+
     // System prompt cho 2 tác vụ AI (Update Product). Rỗng = dùng mặc định; ở đây prefill bản đang dùng.
     [ObservableProperty] private string _nameRewritePrompt = "";
     [ObservableProperty] private string _descriptionPrompt = "";
@@ -333,78 +345,6 @@ public sealed partial class SettingsViewModel : ObservableObject
         if (sync is null) { Status = "Chưa kết nối Hub (bật đồng bộ rồi khởi động lại app)."; return; }
         try { Status = await sync.PushAsync(); }
         catch (Exception ex) { Status = "✘ Lỗi đẩy cấu hình: " + ex.Message; }
-    }
-
-    // ── Sao lưu / Khôi phục (đồng bộ sang máy khác) ─────────────────────────────
-    [ObservableProperty] private bool _backupBigSeller = true;
-    [ObservableProperty] private bool _backupShopee = true;
-    [ObservableProperty] private bool _backupAi = true;
-    /// <summary>false = GỘP (thêm mới, giữ cũ); true = THAY THẾ (ghi đè).</summary>
-    [ObservableProperty] private bool _importReplace;
-    [ObservableProperty] private string _rebaseWorkbookDir = "";
-
-    private string SelectedParts()
-    {
-        var parts = new List<string>();
-        if (BackupBigSeller) parts.Add("Tài khoản BigSeller (+ cookie)");
-        if (BackupShopee) parts.Add("Tài khoản Shopee + proxy");
-        if (BackupAi) parts.Add("Cấu hình AI (keys)");
-        return parts.Count == 0 ? "(chưa chọn)" : string.Join(", ", parts);
-    }
-
-    [RelayCommand]
-    private async Task ExportBackupAsync()
-    {
-        if (!BackupBigSeller && !BackupShopee && !BackupAi) { Status = "Chọn ít nhất 1 mục để sao lưu."; return; }
-        var path = await FilePicker.SaveFileAsync("Lưu file sao lưu", "ShopeeSuite backup|*.zip",
-            defaultFileName: $"shopeesuite-backup-{DateTime.Now:yyyyMMdd-HHmmss}.zip");
-        if (path is null) return;
-        try
-        {
-            BackupService.Export(path, new BackupOptions(BackupBigSeller, BackupShopee, BackupAi));
-            Status = "✓ Đã sao lưu: " + path;
-            await Dialogs.InfoAsync($"Đã sao lưu xong:\n{path}\n\nGồm: {SelectedParts()}.\n⚠ File chứa cookie + API key — giữ bảo mật.",
-                "Sao lưu");
-        }
-        catch (Exception ex)
-        {
-            Status = "✘ Lỗi sao lưu: " + ex.Message;
-            Dialogs.Notify(ex.Message, "Sao lưu", DialogIcon.Warning);
-        }
-    }
-
-    [RelayCommand]
-    private async Task BrowseRebaseDirAsync()
-    {
-        var dir = await FilePicker.PickFolderAsync("Chọn thư mục chứa file data workbook trên máy này");
-        if (dir is not null) RebaseWorkbookDir = dir;
-    }
-
-    [RelayCommand]
-    private async Task ImportBackupAsync()
-    {
-        if (!BackupBigSeller && !BackupShopee && !BackupAi) { Status = "Chọn ít nhất 1 mục để khôi phục."; return; }
-        var path = await FilePicker.OpenFileAsync("Chọn file sao lưu (.zip)", "ShopeeSuite backup|*.zip|Tất cả|*.*");
-        if (path is null) return;
-
-        var mode = ImportReplace ? "THAY THẾ (xóa tk cũ rồi ghi đè)" : "GỘP (thêm mới, giữ tk cũ)";
-        if (!await Dialogs.ConfirmAsync($"Khôi phục từ:\n{path}\n\nChế độ: {mode}\nMục: {SelectedParts()}\n\nTiếp tục?",
-                "Khôi phục")) return;
-        try
-        {
-            var r = BackupService.Import(path,
-                new BackupOptions(BackupBigSeller, BackupShopee, BackupAi),
-                ImportReplace,
-                string.IsNullOrWhiteSpace(RebaseWorkbookDir) ? null : RebaseWorkbookDir);
-            if (BackupAi && r.AiImported) LoadFromStore();   // làm mới ô AI trên màn hình
-            Status = $"✓ Khôi phục: BigSeller +{r.BigSellerAdded}/↻{r.BigSellerUpdated}/bỏ {r.BigSellerSkipped} · Shopee +{r.ShopeeAdded}/↻{r.ShopeeUpdated}/bỏ {r.ShopeeSkipped} · cookie {r.CookiesCopied} · AI {(r.AiImported ? "có" : "—")}.";
-            await Dialogs.InfoAsync(Status, "Khôi phục");
-        }
-        catch (Exception ex)
-        {
-            Status = "✘ Lỗi khôi phục: " + ex.Message;
-            Dialogs.Notify(ex.Message, "Khôi phục", DialogIcon.Warning);
-        }
     }
 
     [RelayCommand(CanExecute = nameof(IsIdle))]

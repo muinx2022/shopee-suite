@@ -2,6 +2,7 @@
 @attribute [Authorize(Policy = "Web")]
 @implements IDisposable
 @inject HubDatabase Db
+@inject IJSRuntime JS
 
 <div class="logpage">
     <div class="bar">
@@ -65,7 +66,12 @@
         .Where(l => string.IsNullOrEmpty(_levelFilter) || l.Level == _levelFilter)
         .OrderByDescending(l => l.Id);
 
-    private void Clear() { Db.ClearLogs(); Load(); }
+    private async Task Clear()
+    {
+        if (!await JS.InvokeAsync<bool>("confirm", "Xoá toàn bộ log trên hub?")) return;
+        Db.ClearLogs();
+        Load();
+    }
 
     public void Dispose() => _timer?.Dispose();
 }
