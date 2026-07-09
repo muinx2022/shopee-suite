@@ -3,7 +3,7 @@ using Shopee.Core.Coordination;
 
 namespace Shopee.Hub;
 
-/// <summary>Phần HubDatabase: giao việc Hub→client (assignments) — tạo, claim theo pipeline/single-session, sweep hết-nhịp, huỷ.</summary>
+/// <summary>Phần HubDatabase: giao việc Hub→client (assignments) — tạo, claim theo pipeline + độc quyền acc (1 acc = 1 máy), sweep hết-nhịp, huỷ.</summary>
 public sealed partial class HubDatabase
 {
     // ── Vai trò máy + Giao việc (Hub đẩy việc cho client) ────────────────────────
@@ -147,8 +147,10 @@ VALUES($id,$b,$s,$sh,$o,$t,$p,'queued','','','',$ca,$ua,$sr,$er,$pl);";
 
     /// <summary>
     /// Máy <paramref name="machineId"/> (vai trò <paramref name="role"/>) lấy tối đa <paramref name="max"/> việc
-    /// đủ điều kiện: đúng vai trò / được ghim, GIỮ nguyên tắc single-session (1 op/1 tài khoản BigSeller),
-    /// đúng thứ tự pipeline (import sau khi scrape xong, update sau khi import xong). Atomic dưới _gate.
+    /// đủ điều kiện: đúng vai trò / được ghim, đúng thứ tự pipeline (import sau khi scrape xong, update sau khi
+    /// import xong). Luật độc quyền acc: 1 acc chỉ do 1 MÁY chạy tại 1 thời điểm (owner, xuyên máy) — NHƯNG 1 máy
+    /// được chạy NHIỀU acc song song; trong 1 acc chỉ 1 việc (scrape/import/update/rewrite) tại 1 thời điểm
+    /// (mọi op dùng CHUNG cookie BigSeller của acc → không cho chồng). Atomic dưới _gate.
     /// </summary>
     public List<Assignment> ClaimNext(string machineId, string role, int max)
     {
@@ -160,20 +162,14 @@ VALUES($id,$b,$s,$sh,$o,$t,$p,'queued','','','',$ca,$ua,$sr,$er,$pl);";
             var host = HostnameOfLocked(machineId);
             var claimed = new List<Assignment>();
 
-            // (Tài khoản, op) đang BẬN cho scrape/import (lease tươi BẤT KỲ máy nào, HOẶC assignment running).
+            // Tài khoản đang BẬN (lease tươi BẤT KỲ máy nào, HOẶC assignment running) — mỗi acc chỉ 1 việc
+            // scrape/import/update/rewrite tại 1 thời điểm (chung cookie BigSeller).
             var busy = BusyOpsLocked(now);
-            // Chủ sở hữu acc hiện tại: máy nào đang chạy BẤT KỲ op (scrape/import/update) của acc đó. GHIM acc
-            // về 1 máy tại 1 thời điểm — máy KHÁC không được đụng op của acc đang do máy khác giữ (chống 1 cookie
+            // Chủ sở hữu acc hiện tại: máy nào đang chạy BẤT KỲ op (scrape/import/update/rewrite) của acc đó. GHIM
+            // acc về 1 máy tại 1 thời điểm — máy KHÁC không được đụng op của acc đang do máy khác giữ (chống 1 cookie
             // BigSeller bị dùng từ nhiều IP cùng lúc → BigSeller đá phiên → login lại mãi khi chạy nhiều client).
+            // 1 máy VẪN được chạy NHIỀU acc song song (không còn luật "1 client = 1 acc").
             var owner = AccountOwnersLocked(now);
-
-            // MỖI CLIENT CHỈ CHẠY 1 TÀI KHOẢN BigSeller TẠI 1 THỜI ĐIỂM: nếu máy này ĐANG giữ 1 acc (owner map),
-            // chỉ cho nhận thêm việc của CHÍNH acc đó; chưa giữ acc nào thì acc đầu tiên nhận trong lượt này sẽ
-            // khoá máy vào acc đó tới hết lượt. Search (bigseller_id rỗng) KHÔNG tính. Kết hợp với khoá acc-về-1-máy
-            // ở trên → tại 1 thời điểm client↔acc là 1:1, tránh 1 máy mở nhiều phiên BigSeller song song.
-            string? myAccount = null;
-            foreach (var kv in owner)
-                if (string.Equals(kv.Value, machineId, StringComparison.Ordinal) && kv.Key.Length > 0) { myAccount = kv.Key; break; }
 
             using var c = _conn.CreateCommand();
             c.CommandText = "SELECT * FROM assignments WHERE status='queued' ORDER BY created_at";
@@ -192,11 +188,12 @@ VALUES($id,$b,$s,$sh,$o,$t,$p,'queued','','','',$ca,$ua,$sr,$er,$pl);";
                 // GHIM acc về 1 máy (xuyên máy): acc đang do MÁY KHÁC giữ → bỏ qua. Máy ĐANG giữ acc vẫn lấy
                 // thêm op/shop khác của chính acc đó (cùng 1 IP máy, BigSeller không coi là phiên lạ).
                 if (owner.TryGetValue(a.BigsellerId, out var om) && !string.Equals(om, machineId, StringComparison.Ordinal)) continue;
-                // 1 CLIENT = 1 ACC: máy đã bận acc khác → bỏ qua (acc khác rỗng nghĩa search thì không chặn).
-                if (myAccount is not null && a.BigsellerId.Length > 0 && !string.Equals(a.BigsellerId, myAccount, StringComparison.Ordinal)) continue;
-                // Trong CÙNG máy: giữ giới hạn cũ — mỗi acc chỉ 1 shop scrape + 1 shop import cùng lúc (scrape ↔
-                // import vẫn song song, kể cả cùng shop). UPDATE không giới hạn (shop nào cũng chạy).
-                if (a.Op is "scrape" or "import" && busy.Contains($"{a.BigsellerId}__{a.Op}")) continue;
+                // Mỗi acc chỉ 1 việc tại 1 thời điểm (scrape/import/update/rewrite đều đụng CHUNG cookie acc —
+                // scrape ghi ngược muc_token sau mỗi link, update/import ghi định kỳ → 2 việc song song cùng acc
+                // = 2 phiên cùng ghi 1 file cookie → nguy cơ đè token mới bằng token cũ → "log in first"). Cũng
+                // khớp sổ job client (_wsJobs: 1 workflow/acc) — việc thứ 2 nằm 'queued' chạy nối tiếp, không failed oan.
+                var fam = OpFamily(a.Op);
+                if (fam is not null && a.BigsellerId.Length > 0 && busy.Contains($"{a.BigsellerId}__{fam}")) continue;
                 // Thứ tự pipeline.
                 if (!PipelineReadyLocked(a)) continue;
 
@@ -210,18 +207,26 @@ VALUES($id,$b,$s,$sh,$o,$t,$p,'queued','','','',$ca,$ua,$sr,$er,$pl);";
                 {
                     a.Status = "running"; a.ClaimedByMachineId = machineId; a.ClaimedByHostname = host; a.UpdatedAt = now;
                     claimed.Add(a);
-                    if (a.Op is "scrape" or "import") busy.Add($"{a.BigsellerId}__{a.Op}");   // không cấp thêm CÙNG op cho acc này trong cùng lượt
-                    if (myAccount is null && a.BigsellerId.Length > 0) myAccount = a.BigsellerId;   // khoá máy vào acc vừa nhận (1 client = 1 acc)
+                    if (fam is not null && a.BigsellerId.Length > 0) busy.Add($"{a.BigsellerId}__{fam}");   // không cấp thêm việc cho acc này trong cùng lượt
                 }
             }
             return claimed;
         }
     }
 
-    /// <summary>Tập (tài khoản, op) đang BẬN cho các op CẦN ĐỘC-QUYỀN-THEO-ACC = scrape, import: mỗi acc chỉ
-    /// 1 shop scrape + 1 shop import cùng lúc. scrape ↔ import KHÔNG chặn nhau (cùng/khác shop chạy song song).
-    /// UPDATE KHÔNG tính ở đây (shop nào cũng chạy được, vì đã import chọn shop). Key = "{bigsellerId}__{op}".
-    /// Nguồn bận: lease tươi hoặc assignment đang running.</summary>
+    /// <summary>Nhóm op để tính "bận theo acc": scrape/import/update/rewrite gộp CHUNG nhóm "bs" — mọi op đều
+    /// dùng cookie BigSeller của acc (scrape ghi ngược muc_token sau mỗi link, update/import ghi định kỳ) nên
+    /// 2 việc bất kỳ của cùng acc chạy song song = 2 phiên cùng ghi 1 file cookie → nguy cơ rotation-war token
+    /// ("log in first"). null = op KHÔNG tính bận (vd "search" — không đụng cookie BigSeller).</summary>
+    private static string? OpFamily(string op) => op switch
+    {
+        "scrape" or "import" or "update" or "rewrite" => "bs",
+        _ => null,
+    };
+
+    /// <summary>Tập tài khoản đang BẬN (key = "{bigsellerId}__{family}"): mỗi acc chỉ 1 việc scrape/import/
+    /// update/rewrite tại 1 thời điểm (chung cookie BigSeller — xem <see cref="OpFamily"/>); việc kế cùng acc
+    /// nằm 'queued' chạy nối tiếp. Nguồn bận: lease tươi hoặc assignment đang running.</summary>
     private HashSet<string> BusyOpsLocked(DateTimeOffset now)
     {
         var set = new HashSet<string>(StringComparer.Ordinal);
@@ -232,15 +237,20 @@ VALUES($id,$b,$s,$sh,$o,$t,$p,'queued','','','',$ca,$ua,$sr,$er,$pl);";
             while (rd.Read())
             {
                 var hb = DateTimeOffset.TryParse(S(rd, 2), out var d) ? d : DateTimeOffset.MinValue;
-                if ((now - hb) < StaleLease && S(rd, 3) is "running" or "finishing" && S(rd, 1) is "scrape" or "import")
-                    set.Add($"{S(rd, 0)}__{S(rd, 1)}");
+                var fam = OpFamily(S(rd, 1));
+                if ((now - hb) < StaleLease && S(rd, 3) is "running" or "finishing" && fam is not null)
+                    set.Add($"{S(rd, 0)}__{fam}");
             }
         }
         using (var c = _conn.CreateCommand())
         {
-            c.CommandText = "SELECT bigseller_id,op FROM assignments WHERE status='running' AND op IN ('scrape','import')";
+            c.CommandText = "SELECT bigseller_id,op FROM assignments WHERE status='running' AND op IN ('scrape','import','update','rewrite')";
             using var rd = c.ExecuteReader();
-            while (rd.Read()) set.Add($"{S(rd, 0)}__{S(rd, 1)}");
+            while (rd.Read())
+            {
+                var fam = OpFamily(S(rd, 1));
+                if (fam is not null) set.Add($"{S(rd, 0)}__{fam}");
+            }
         }
         return set;
     }
