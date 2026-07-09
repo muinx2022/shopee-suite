@@ -71,7 +71,11 @@
         <h2>@AcctName@(_selRow is not null ? " › " + _selRow.ShopName : "")</h2>
         <div class="tabs">
             <button class="@(_tab == "action" ? "active" : "")" @onclick='() => _tab = "action"'>⚡ Hành động</button>
-            <button class="@(_tab == "stats" ? "active" : "")" @onclick='() => _tab = "stats"'>📊 Thống kê</button>
+            @* Thống kê chỉ còn ở mức SHOP; mức ACC đã gộp vào dashboard của tab Hành động. *@
+            @if (_selRow is not null)
+            {
+                <button class="@(_tab == "stats" ? "active" : "")" @onclick='() => _tab = "stats"'>📊 Thống kê</button>
+            }
             <button class="@(_tab == "config" ? "active" : "")" @onclick='() => _tab = "config"'>⚙ Cấu hình</button>
         </div>
 
@@ -248,8 +252,30 @@
         {
             @if (_tab == "action")
             {
-                @* Mini ma-trận acc×shop (chỉ shop của acc này) — bấm dòng để mở shop *@
-                <div class="tablewrap">
+                @* Dashboard gọn của ACC: 4 ô tổng quan theo op (tổng dòng + số shop ✓) + việc đang chạy +
+                   máy giữ acc + ma-trận shop (trạng thái · số dòng, bấm dòng mở shop). Tab Thống kê mức acc
+                   đã GỘP vào đây (dòng Tổng nằm cuối bảng). *@
+                <div class="kpis acct">
+                    @foreach (var op in OpOrder)
+                    {
+                        var s = AcctOpSummary(op);
+                        <div class="kpi">
+                            <div>
+                                <div class="kpi-val">@s.Rows.ToString("N0")</div>
+                                <div class="kpi-label">@OpLabel(op) · @s.Done/@s.Total shop ✓</div>
+                            </div>
+                        </div>
+                    }
+                </div>
+                @foreach (var l in AcctLeases())
+                {
+                    <div class="busyline running"><span class="dot"></span> Đang chạy: <b>@ShopNameOf(l.ShopId)</b> · @OpLabel(l.Op) · máy <b>@l.Hostname</b></div>
+                }
+                @if (!AcctLeases().Any() && OwnerOf(_selAcctId!) is { } om)
+                {
+                    <div class="hint" style="margin:2px 0 8px">🔒 Acc đang do máy <b>@HostName(om)</b> giữ — việc mới của acc sẽ vào máy này.</div>
+                }
+                <div class="tablewrap" style="margin-top:10px">
                 <table class="grid sm">
                     <thead><tr><th>Shop</th><th>Scrape</th><th>Import</th><th>Update</th><th>Tên SP</th></tr></thead>
                     <tbody>
@@ -271,31 +297,6 @@
                                             <span class="pill @cell.Css" title="@(st is null ? "" : $"{st.Machine} · {st.LastAgo}")">@cell.Text@(st is { RowCount: > 0 } ? $" · {st.RowCount:N0}" : "")</span>
                                         }
                                     </td>
-                                }
-                            </tr>
-                        }
-                        @if (!AcctShops().Any())
-                        {
-                            <tr><td colspan="5" class="empty">Tài khoản chưa có shop nào.</td></tr>
-                        }
-                    </tbody>
-                </table>
-                </div>
-            }
-            else if (_tab == "stats")
-            {
-                <div class="tablewrap">
-                <table class="grid sm">
-                    <thead><tr><th>Shop</th><th>Scrape</th><th>Import</th><th>Update</th><th>Tên SP</th></tr></thead>
-                    <tbody>
-                        @foreach (var r in AcctShops())
-                        {
-                            <tr @onclick="() => SelectShop(r)">
-                                <td class="shop">@r.ShopName</td>
-                                @foreach (var op in OpOrder)
-                                {
-                                    var n = r.Ops.GetValueOrDefault(op)?.RowCount ?? 0;
-                                    <td>@(n > 0 ? n.ToString("N0") : "·")</td>
                                 }
                             </tr>
                         }
@@ -541,6 +542,28 @@
     private List<ShopRow> AcctShops() =>
         _selAcctId is null ? new() : _rows.Where(r => r.AccountId == _selAcctId).ToList();
 
+    // ── Dashboard gọn của acc (panel phải khi chưa chọn shop) ──
+    /// <summary>Tổng quan 1 op trên toàn acc: tổng dòng đã làm + số shop đã ✓ / tổng shop.</summary>
+    private (long Rows, int Done, int Total) AcctOpSummary(string op)
+    {
+        var shops = AcctShops();
+        long rows = 0; var done = 0;
+        foreach (var r in shops)
+        {
+            rows += r.Ops.GetValueOrDefault(op)?.RowCount ?? 0;
+            if (FleetStateService.OpCell(Snap, r.AccountId, r.ShopId, op).Text.StartsWith("✓")) done++;
+        }
+        return (rows, done, shops.Count);
+    }
+
+    /// <summary>Lease sống của acc đang chọn — mỗi lease = 1 việc đang chạy thật (shop/op/máy).</summary>
+    private List<LeaseRecord> AcctLeases() =>
+        _selAcctId is null ? new() : Snap.Leases.Where(l => l.BigsellerId == _selAcctId).ToList();
+
+    private string ShopNameOf(string shopId) =>
+        _rows.FirstOrDefault(r => r.AccountId == _selAcctId && r.ShopId == shopId)?.ShopName
+        ?? (shopId.Length > 8 ? shopId[..8] : shopId);
+
     // Tên acc hiển thị ở header (chọn acc-không-shop cũng lấy được tên từ config).
     private string AcctName =>
         _selRow?.AccountName
@@ -581,6 +604,7 @@
         _selShopKey = null;
         _selRow = null;
         _action = "";
+        if (_tab == "stats") _tab = "action";   // mức acc không còn tab Thống kê (đã gộp vào dashboard)
     }
 
     // Thêm 1 acc BigSeller rỗng, lưu ngay (đọc list+version tươi), rồi chọn nó ở tab Cấu hình để điền tiếp.
