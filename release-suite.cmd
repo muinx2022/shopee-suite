@@ -40,7 +40,7 @@ if defined GITHUB_TOKEN (
   echo === Dang day len GitHub Releases ... ===
   vpk upload github --repoUrl %REPO% --channel win --outputDir %OUT% --publish true --merge true --releaseName "Shopee Suite v%VER%" --tag v%VER% --token %GITHUB_TOKEN%
   if errorlevel 1 goto :fail
-  echo === DA PHAT HANH v%VER% (win) len GitHub ===
+  echo === DA PHAT HANH v%VER% ^(win^) len GitHub ===
 ) else (
   echo.
   echo Da dong goi xong vao %OUT%\ nhung CHUA day len GitHub ^(thieu bien moi truong GITHUB_TOKEN^).
