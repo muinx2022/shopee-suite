@@ -5,6 +5,26 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Hiệu năng. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.0.9 — 2026-07-10
+
+Chủ đề: **gộp cấu hình chạy về mức tài khoản + Hub giao việc kèm tham số + quỹ Brave**.
+
+- Workspace: 2 khối cấu hình (SCRAPE / UPDATE) gộp thành 1 — "Cấu hình CHẠY (tài khoản
+  này · máy này)": Từ dòng, Đến dòng, Dòng/lần, Số process (áp dụng MỌI op — import
+  hết bị ép 1 lane), Số tk/khung, Reload(s), Ảnh Update, Thư mục video (1 ô chung cho
+  cả scrape lẫn update — trước đây ô video scrape không được lưu, mở lại app chạy nhầm
+  D:\videos). Cấu hình theo TÀI KHOẢN, shop không set riêng nữa; tự chuyển từ cấu hình
+  cũ 1 lần. Riêng-máy, không bị sync Hub đè.
+- Settings → Hiệu năng: bấm Lưu báo Hub ngay trần cửa sổ Brave của máy (hiện cột
+  "Brave max" ở trang Máy client trên Hub); heartbeat cũng luôn kèm số này.
+- Hub giao việc kèm tham số Số process / Số tk·khung / Reload(s) — client chạy theo
+  tham số Hub (0 = dùng cấu hình máy); thư mục video/ảnh luôn dùng của máy client.
+- Quỹ Brave phía client: tổng cửa sổ các việc hub-giao không vượt trần máy; việc cuối
+  được cấp phần còn thiếu (max − đã dùng), hết quỹ thì việc nằm "đã xếp" chờ nhả quỹ
+  — không còn bị đánh "failed" oan vì chờ lâu.
+- Hub web (deploy riêng): DB tự migrate 4 cột mới (machines.max_brave +
+  assignments.processes/frame_size/reload_seconds), tương thích client cũ 2 chiều.
+
 ## v1.0.8 — 2026-07-10
 
 Chủ đề: **hủy việc Import/Update/Tên SP giữa chừng bị báo nhầm "✓ xong"**.

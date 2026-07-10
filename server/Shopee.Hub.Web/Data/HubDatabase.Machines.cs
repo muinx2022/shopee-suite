@@ -92,13 +92,14 @@ public sealed partial class HubDatabase
         {
             using var c = _conn.CreateCommand();
             c.CommandText = @"
-INSERT INTO machines(machine_id,hostname,last_seen,app_version)
-VALUES($m,$h,$ls,$v)
-ON CONFLICT(machine_id) DO UPDATE SET hostname=$h, last_seen=$ls, app_version=$v;";
+INSERT INTO machines(machine_id,hostname,last_seen,app_version,max_brave)
+VALUES($m,$h,$ls,$v,$mb)
+ON CONFLICT(machine_id) DO UPDATE SET hostname=$h, last_seen=$ls, app_version=$v, max_brave=$mb;";
             c.Parameters.AddWithValue("$m", r.MachineId);
             c.Parameters.AddWithValue("$h", r.Hostname);
             c.Parameters.AddWithValue("$ls", Iso(DateTimeOffset.UtcNow));
             c.Parameters.AddWithValue("$v", (object?)r.AppVersion ?? DBNull.Value);
+            c.Parameters.AddWithValue("$mb", r.MaxBrave);
             c.ExecuteNonQuery();
         }
     }
@@ -111,10 +112,10 @@ ON CONFLICT(machine_id) DO UPDATE SET hostname=$h, last_seen=$ls, app_version=$v
         {
             var list = new List<MachinePresence>();
             using var c = _conn.CreateCommand();
-            c.CommandText = "SELECT machine_id,hostname,last_seen,app_version FROM machines";
+            c.CommandText = "SELECT machine_id,hostname,last_seen,app_version,max_brave FROM machines";
             using var rd = c.ExecuteReader();
             while (rd.Read())
-                list.Add(new MachinePresence { MachineId = S(rd, 0), Hostname = S(rd, 1), LastSeen = D(rd, 2), AppVersion = rd.IsDBNull(3) ? null : rd.GetString(3) });
+                list.Add(new MachinePresence { MachineId = S(rd, 0), Hostname = S(rd, 1), LastSeen = D(rd, 2), AppVersion = rd.IsDBNull(3) ? null : rd.GetString(3), MaxBrave = rd.IsDBNull(4) ? 0 : rd.GetInt32(4) });
             return list;
         }
     }

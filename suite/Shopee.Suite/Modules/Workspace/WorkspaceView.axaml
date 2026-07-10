@@ -257,7 +257,7 @@
                                                 <Setter Property="MinHeight" Value="26" />
                                             </Style>
                                         </StackPanel.Styles>
-                                        <TextBlock Text="Cấu hình SCRAPE (riêng tài khoản này)" Classes="caption" FontWeight="SemiBold" Margin="0,0,0,4" />
+                                        <TextBlock Text="Cấu hình CHẠY (tài khoản này · máy này)" Classes="caption" FontWeight="SemiBold" Margin="0,0,0,4" />
                                         <WrapPanel>
                                             <StackPanel Margin="0,0,10,2"><TextBlock Text="Từ dòng" Classes="caption" />
                                                 <TextBox Width="72" Margin="0,1,0,0" Text="{Binding ScrapeTarget.StartRow}" /></StackPanel>
@@ -265,23 +265,10 @@
                                                 <TextBox Width="96" Margin="0,1,0,0" Text="{Binding ScrapeTarget.EndRow}" /></StackPanel>
                                             <StackPanel Margin="0,0,10,2"><TextBlock Text="Dòng / lần" Classes="caption" />
                                                 <TextBox Width="90" Margin="0,1,0,0" Text="{Binding ScrapeTarget.RowsPerAccount}" /></StackPanel>
-                                            <StackPanel Margin="0,0,10,2"><TextBlock Text="Số process" Classes="caption" />
-                                                <TextBox Width="90" Margin="0,1,0,0" Text="{Binding ScrapeTarget.MaxProcess}" /></StackPanel>
+                                            <StackPanel Margin="0,0,10,2"><TextBlock Text="Số process (mọi op)" Classes="caption" />
+                                                <TextBox Width="120" Margin="0,1,0,0" Text="{Binding ScrapeTarget.MaxProcess}" /></StackPanel>
                                             <StackPanel Margin="0,0,10,2"><TextBlock Text="Số tk / khung" Classes="caption" />
                                                 <TextBox Width="90" Margin="0,1,0,0" Text="{Binding ScrapeTarget.FrameSize}" /></StackPanel>
-                                            <StackPanel Margin="0,0,0,2"><TextBlock Text="Thư mục video" Classes="caption" />
-                                                <TextBox Width="180" Margin="0,1,0,0" FontFamily="{DynamicResource MonoFont}"
-                                                         Text="{Binding #Root.DataContext.Scrape.VideoDir}" /></StackPanel>
-                                        </WrapPanel>
-
-                                        <TextBlock Text="Cấu hình UPDATE (riêng tài khoản này)" Classes="caption" FontWeight="SemiBold" Margin="0,6,0,3" />
-                                        <WrapPanel>
-                                            <StackPanel Margin="0,0,10,2"><TextBlock Text="Từ dòng" Classes="caption" />
-                                                <TextBox Width="72" Margin="0,1,0,0" Text="{Binding UpdateTarget.StartRow}" /></StackPanel>
-                                            <StackPanel Margin="0,0,10,2"><TextBlock Text="Đến dòng (0=hết)" Classes="caption" />
-                                                <TextBox Width="96" Margin="0,1,0,0" Text="{Binding UpdateTarget.EndRow}" /></StackPanel>
-                                            <StackPanel Margin="0,0,10,2"><TextBlock Text="Update worker" Classes="caption" />
-                                                <TextBox Width="90" Margin="0,1,0,0" Text="{Binding UpdateTarget.UpdateWorkers}" /></StackPanel>
                                             <StackPanel Margin="0,0,10,2"><TextBlock Text="Reload (s)" Classes="caption" />
                                                 <TextBox Width="72" Margin="0,1,0,0" Text="{Binding UpdateTarget.ListingReloadSeconds}" /></StackPanel>
                                             <StackPanel Margin="0,0,10,2"><TextBlock Text="Ảnh Update (máy này)" Classes="caption" />
@@ -292,11 +279,11 @@
                                                 </StackPanel>
                                                 <TextBlock Text="Có ảnh này → dùng nó. Thiếu (quên đặt/chưa tải) → tự lấy ảnh chung từ Hub."
                                                            Classes="caption" FontSize="10" Opacity="0.65" Margin="0,2,0,0" MaxWidth="240" TextWrapping="Wrap" /></StackPanel>
-                                            <StackPanel Margin="0,0,0,2"><TextBlock Text="Video (chung)" Classes="caption" />
+                                            <StackPanel Margin="0,0,0,2"><TextBlock Text="Thư mục video (máy này)" Classes="caption" />
                                                 <StackPanel Orientation="Horizontal">
                                                     <TextBox Width="200" FontFamily="{DynamicResource MonoFont}" VerticalContentAlignment="Center"
-                                                             Text="{Binding #Root.DataContext.Update.VideoFolder}" />
-                                                    <Button Content="…" Width="34" Margin="6,0,0,0" Command="{Binding #Root.DataContext.Update.BrowseVideoFolderCommand}" />
+                                                             Text="{Binding #Root.DataContext.VideoDir}" />
+                                                    <Button Content="…" Width="34" Margin="6,0,0,0" Command="{Binding #Root.DataContext.BrowseVideoDirCommand}" />
                                                 </StackPanel></StackPanel>
                                         </WrapPanel>
                                     </StackPanel>

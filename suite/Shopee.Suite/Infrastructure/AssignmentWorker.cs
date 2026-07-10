@@ -48,6 +48,8 @@ public sealed class AssignmentWorker : IDisposable
         public required Assignment A;
         public bool SeenRunning;
         public int IdleTicks;
+        /// <summary>Số cửa sổ Brave đã CẤP cho việc này (để tính quỹ; 0 = việc không dùng trình duyệt, vd rewrite).</summary>
+        public int GrantedBraves;
     }
 
     public AssignmentWorker(ScrapeViewModel scrape, UpdateProductViewModel update, SearchViewModel search)
@@ -95,15 +97,50 @@ public sealed class AssignmentWorker : IDisposable
         var free = MaxConcurrent - _inflight.Count;
         if (free <= 0) return;
 
+        // QUỸ BRAVE: tổng cửa sổ các việc HUB-GIAO đang chạy KHÔNG vượt trần MaxConcurrentWindows. Luật: việc cuối
+        // được cấp phần CÒN THIẾU (max − đã dùng); hết quỹ thì việc mới NẰM CHỜ ('queued') trên hub tới khi 1 việc
+        // xong nhả quỹ. Quỹ CHỈ đếm việc hub-giao (job chạy TAY do user tự chịu; lưới an toàn cuối là gate semaphore
+        // trong BraveFleet cho scrape).
+        var usedBraves = _inflight.Values.Sum(f => f.GrantedBraves);
+        var freeBraves = Shopee.Core.Browser.BraveFleet.MaxConcurrentWindows - usedBraves;
+        if (freeBraves <= 0) return;   // hết quỹ → KHÔNG claim việc mới (để việc nằm 'queued' trên hub = phần đợi)
+
         foreach (var a in await hub.ClaimAssignmentsAsync(role, free))
         {
             if (_inflight.ContainsKey(a.Id)) continue;
-            _inflight[a.Id] = new InFlight { A = a };
-            await LaunchAsync(hub, a);
+            var need = RequiredBraves(a);
+            // Cạn quỹ giữa lượt (việc trước vừa lấy hết) mà việc này CẦN Brave → TRẢ VỀ HÀNG ĐỢI, KHÔNG đếm số lần
+            // thử: chờ quỹ là chuyện BÌNH THƯỜNG có thể lâu; RequeueOrFailAsync sẽ báo 'failed' oan sau 6 nhịp. Dùng
+            // 'requeue' thẳng để giữ ô ở "• đã xếp" cho tới khi có quỹ (tái dùng đường 'requeue' sẵn có, không đổi giao thức).
+            if (need > 0 && freeBraves <= 0)
+            {
+                // "Đang dùng" tính từ freeBraves HIỆN TẠI (không dùng usedBraves chụp trước vòng lặp) — việc vừa
+                // được cấp trong CHÍNH tick này cũng phải tính, kẻo message báo "0/10" dù quỹ vừa cạn.
+                var inUse = Shopee.Core.Browser.BraveFleet.MaxConcurrentWindows - freeBraves;
+                await hub.ReportAssignmentAsync(a.Id, "requeue", $"chờ quỹ Brave ({inUse}/{Shopee.Core.Browser.BraveFleet.MaxConcurrentWindows} đang dùng)");
+                continue;
+            }
+            // Cấp phần còn thiếu cho việc cuối; việc không dùng trình duyệt (need==0) cấp 0 (không trừ quỹ).
+            var grant = need == 0 ? 0 : Math.Min(need, freeBraves);
+            freeBraves -= grant;
+            _inflight[a.Id] = new InFlight { A = a, GrantedBraves = grant };
+            await LaunchAsync(hub, a, grant);
         }
     }
 
-    private async Task LaunchAsync(HttpCoordinationHub hub, Assignment a)
+    /// <summary>Số cửa sổ Brave 1 việc CẦN để tính quỹ. rewrite/search KHÔNG mở trình duyệt → 0. scrape/import/update:
+    /// ưu tiên Processes Hub đặt cho lượt này, else cấu hình client (RunConfig.Processes, mặc định 2). Clamp theo trần
+    /// engine: update/import 1..10, scrape 1..64.</summary>
+    private static int RequiredBraves(Assignment a)
+    {
+        if (a.Op is "rewrite" or "search") return 0;
+        var n = a.Processes > 0
+            ? a.Processes
+            : (BigSellerStore.Shared.Accounts.FirstOrDefault(x => x.Id == a.BigsellerId)?.RunConfig?.Processes ?? 2);
+        return a.Op == "scrape" ? Math.Clamp(n, 1, 64) : Math.Clamp(n, 1, 10);
+    }
+
+    private async Task LaunchAsync(HttpCoordinationHub hub, Assignment a, int grant)
     {
         // Tiền-kiểm KHÔNG mở dialog: thiếu điều kiện (kho tk/Brave/workbook/cookie/sheet). Trước đây báo 'failed'
         // NGAY → việc ghim vào máy mới (chưa kịp đồng bộ) chết ngầm, ô về 'chờ'. Giờ coi là lỗi TẠM THỜI: trả về
@@ -124,7 +161,7 @@ public sealed class AssignmentWorker : IDisposable
         // Enqueue (luôn xếp hàng, không chạy inline) → LaunchCore không chạy trong nested modal pump nếu lỡ có dialog đang mở.
         UiThread.Enqueue(() =>
         {
-            if (LaunchCore(a)) { _liveIds[a.Id] = 1; _launchAttempts.TryRemove(a.Id, out _); HubLog.Info($"▶ Nhận {Describe(a)}"); }   // đã chạy → xoá bộ đếm thử lại
+            if (LaunchCore(a, grant)) { _liveIds[a.Id] = 1; _launchAttempts.TryRemove(a.Id, out _); HubLog.Info($"▶ Nhận {Describe(a)}"); }   // đã chạy → xoá bộ đếm thử lại
             else { _inflight.Remove(a.Id); _ = RequeueOrFailAsync(hub, a, "không khởi động được trên máy này"); }
         });
     }
@@ -172,7 +209,7 @@ public sealed class AssignmentWorker : IDisposable
         return _update.CanDispatchUpdate(ut, a.Op, out problem);
     }
 
-    private bool LaunchCore(Assignment a)
+    private bool LaunchCore(Assignment a, int grant)
     {
         switch (a.Op)
         {
@@ -182,7 +219,9 @@ public sealed class AssignmentWorker : IDisposable
                 var shop = t?.Account.Shops.FirstOrDefault(s => s.Id == a.ShopId);
                 if (t is null || shop is null) return false;
                 t.SelectedShop = shop;
-                _ = _scrape.RunSingleAsync(t, resume: true, silent: true, a.StartRow, a.EndRow);   // Hub đặt khoảng dòng (0 = dùng cấu hình client)
+                // Hub đặt khoảng dòng + số cửa sổ (= quỹ cấp) + cỡ khung cho lượt này (0/null = dùng cấu hình client).
+                _ = _scrape.RunSingleAsync(t, resume: true, silent: true, a.StartRow, a.EndRow,
+                    grant > 0 ? grant : (int?)null, a.FrameSize > 0 ? a.FrameSize : (int?)null);
                 return true;
             }
             case "import":
@@ -193,8 +232,12 @@ public sealed class AssignmentWorker : IDisposable
                 var shop = t?.Account.Shops.FirstOrDefault(s => s.Id == a.ShopId);
                 if (t is null || shop is null) return false;
                 t.SelectedShop = shop;
-                if (a.Op == "import") _ = _update.RunImportSingleAsync(t, silent: true, a.StartRow, a.EndRow, ImportFromClaimedTab(a));
-                else if (a.Op == "update") _ = _update.RunUpdateSingleAsync(t, silent: true, a.StartRow, a.EndRow);
+                // import/update: số lane = quỹ Brave cấp; reload theo Hub đặt (0/null = dùng cấu hình client).
+                // rewrite: KHÔNG mở trình duyệt → processes null (quỹ đã cấp grant=0 cho op này).
+                if (a.Op == "import") _ = _update.RunImportSingleAsync(t, silent: true, a.StartRow, a.EndRow, ImportFromClaimedTab(a),
+                    processes: grant > 0 ? grant : (int?)null, reloadSeconds: a.ReloadSeconds > 0 ? a.ReloadSeconds : (int?)null);
+                else if (a.Op == "update") _ = _update.RunUpdateSingleAsync(t, silent: true, a.StartRow, a.EndRow,
+                    processes: grant > 0 ? grant : (int?)null, reloadSeconds: a.ReloadSeconds > 0 ? a.ReloadSeconds : (int?)null);
                 else _ = _update.RunNameRewriteSingleAsync(t, silent: true, a.StartRow, a.EndRow);
                 return true;
             }

@@ -43,45 +43,66 @@ public sealed partial class ScrapeTargetViewModel : ObservableObject
     private BigSellerShop? _selectedShop;
     partial void OnSelectedShopChanged(BigSellerShop? value) => Persist();
 
-    // Cấu hình RIÊNG cho từng tk BigSeller (sửa ở panel detail bên phải). Được LƯU theo Account.Id
-    // (ScrapeTargetConfigStore) → giữ lại qua reload + khởi động lại app.
+    // Cấu hình CHẠY giờ ở MỨC ACCOUNT (Account.RunConfig) — 1 bộ DÙNG CHUNG cho mọi op; các property dưới
+    // là PROXY đọc/ghi thẳng RunConfig (map MaxProcess ↔ Processes). Setter LƯU xuống bigseller.json
+    // (BigSellerStore); UpdateRunTargetViewModel proxy cùng object nên giá trị luôn nhất quán. RIÊNG-MÁY.
+    private BigSellerRunConfig Cfg => Account.RunConfig ??= new BigSellerRunConfig();
+
     /// <summary>Bắt đầu từ dòng nào của sheet. Mặc định 2 vì dòng 1 là header (engine yêu cầu ≥ 2).</summary>
-    [ObservableProperty] private int _startRow = 2;
-    partial void OnStartRowChanged(int value) => Persist();
+    public int StartRow
+    {
+        get => Cfg.StartRow;
+        set { if (Cfg.StartRow != value) { Cfg.StartRow = value; OnPropertyChanged(); BigSellerStore.Shared.Save(); } }
+    }
     /// <summary>Đến dòng nào thì DỪNG (0 = chạy hết sheet).</summary>
-    [ObservableProperty] private int _endRow;
-    partial void OnEndRowChanged(int value) => Persist();
+    public int EndRow
+    {
+        get => Cfg.EndRow;
+        set { if (Cfg.EndRow != value) { Cfg.EndRow = value; OnPropertyChanged(); BigSellerStore.Shared.Save(); } }
+    }
 
     /// <summary>Override khoảng dòng TẠM cho 1 lượt chạy (vd Hub giao việc) — KHÔNG persist, dùng-một-lần.
     /// null = dùng <see cref="StartRow"/>/<see cref="EndRow"/> của người dùng. Runner đọc rồi tự xoá.</summary>
     public int? PendingStartRow { get; set; }
     public int? PendingEndRow { get; set; }
+    /// <summary>Override số cửa sổ / cỡ khung TẠM cho 1 lượt chạy (Hub giao việc) — KHÔNG persist, dùng-một-lần.
+    /// null = dùng <see cref="MaxProcess"/>/<see cref="FrameSize"/> của người dùng. Runner đọc rồi tự xoá.</summary>
+    public int? PendingMaxProcess { get; set; }
+    public int? PendingFrameSize { get; set; }
     /// <summary>Số dòng mỗi khối (mỗi tk Shopee nhận 1 khối kế tiếp theo số này).</summary>
-    [ObservableProperty] private int _rowsPerAccount = 60;
-    partial void OnRowsPerAccountChanged(int value) => Persist();
-    /// <summary>Số process chạy đồng thời = số tk Shopee acc BigSeller này dùng (mỗi process 1 tk).</summary>
-    [ObservableProperty] private int _maxProcess = 2;
-    partial void OnMaxProcessChanged(int value) => Persist();
+    public int RowsPerAccount
+    {
+        get => Cfg.RowsPerAccount;
+        set { if (Cfg.RowsPerAccount != value) { Cfg.RowsPerAccount = value; OnPropertyChanged(); BigSellerStore.Shared.Save(); } }
+    }
+    /// <summary>Số process chạy đồng thời = số cửa sổ Brave (áp dụng mọi op) — map RunConfig.Processes.</summary>
+    public int MaxProcess
+    {
+        get => Cfg.Processes;
+        set { if (Cfg.Processes != value) { Cfg.Processes = value; OnPropertyChanged(); BigSellerStore.Shared.Save(); } }
+    }
     /// <summary>Số tk Shopee "đóng khung" cố định cho tk BigSeller này — chỉ xoay vòng trong khung này
     /// (cấp lúc bắt đầu chạy). Để BigSeller chỉ thấy ngần ấy thiết bị ổn định → không bị đá phiên.</summary>
-    [ObservableProperty] private int _frameSize = 10;
-    partial void OnFrameSizeChanged(int value) => Persist();
+    public int FrameSize
+    {
+        get => Cfg.FrameSize;
+        set { if (Cfg.FrameSize != value) { Cfg.FrameSize = value; OnPropertyChanged(); BigSellerStore.Shared.Save(); } }
+    }
 
     public ScrapeTargetViewModel(BigSellerAccount account)
     {
         Account = account;
         Shops = new ObservableCollection<BigSellerShop>(account.Shops);
 
-        // Nạp config đã lưu (nếu có) → giữ lựa chọn người dùng qua reload/khởi động lại.
+        // Cấu hình CHẠY giờ ở mức account (Account.RunConfig) — migrate 1 lần từ nguồn cũ nếu chưa có; proxy
+        // StartRow/EndRow/… đọc-ghi thẳng RunConfig nên KHỎI nạp vào field ở đây.
+        Infrastructure.RunConfigMigration.EnsureRunConfig(account);
+
+        // Nạp lựa chọn SHOP + tick chọn đã lưu (ScrapeTargetConfigStore CHỈ còn giữ 2 thứ này) → giữ qua reload/mở lại.
         _loading = true;
         var saved = ScrapeTargetConfigStore.Shared.Find(account.Id);
         if (saved is not null)
         {
-            StartRow = saved.StartRow;
-            EndRow = saved.EndRow;
-            RowsPerAccount = saved.RowsPerAccount;
-            MaxProcess = saved.MaxProcess;
-            FrameSize = saved.FrameSize > 0 ? saved.FrameSize : 10;
             IsSelected = saved.IsSelected;
             SelectedShop = saved.SelectedShopId is not null
                 ? Shops.FirstOrDefault(s => s.Id == saved.SelectedShopId) ?? Shops.FirstOrDefault()

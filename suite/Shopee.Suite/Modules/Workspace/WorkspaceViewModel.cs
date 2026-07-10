@@ -38,6 +38,20 @@ public sealed partial class WorkspaceViewModel : ObservableObject
 
     [ObservableProperty] private string _status = "";
 
+    /// <summary>Thư mục video DÙNG CHUNG (máy này) — gộp 2 ô cũ (Scrape.VideoDir + Update.VideoFolder) về 1 ô.
+    /// Đọc từ Update.VideoFolder (nguồn sự thật ĐÃ LƯU qua UpdateProductUiStore) trước, fallback Scrape.VideoDir
+    /// (chỉ là ObservableProperty mặc định, KHÔNG persist); ghi → set CẢ HAI để 2 luồng dùng chung.</summary>
+    public string VideoDir
+    {
+        get => !string.IsNullOrWhiteSpace(Update.VideoFolder) ? Update.VideoFolder : Scrape.VideoDir;
+        set
+        {
+            Scrape.VideoDir = value;
+            Update.VideoFolder = value;   // OnVideoFolderChanged tự lưu UpdateProductUiStore
+            OnPropertyChanged();
+        }
+    }
+
     /// <summary>Shell cấp: điều hướng sidebar sang ViewModel khác (mở tab BigSeller để đăng nhập/cấu hình).</summary>
     public Action<object>? RequestNavigate { get; set; }
 
@@ -46,6 +60,12 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         BigSeller = bigSeller;
         Scrape = scrape;
         Update = update;
+
+        // Seed lại Scrape.VideoDir từ Update.VideoFolder sau restart: Scrape.VideoDir KHÔNG persist (luôn về
+        // mặc định "D:\videos" lúc khởi động), còn Update.VideoFolder là nguồn sự thật ĐÃ LƯU (UpdateProductUiStore)
+        // → thiếu bước này thì engine SCRAPE chạy nhầm thư mục mặc định dù user đã chọn thư mục khác.
+        if (!string.IsNullOrWhiteSpace(Update.VideoFolder) && Update.VideoFolder != Scrape.VideoDir)
+            Scrape.VideoDir = Update.VideoFolder;
 
         Rebuild();
         // Handler này đăng ký SAU 3 sub-VM (Shell tạo chúng trước) → khi store đổi, chúng reload trước,
@@ -118,6 +138,14 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         Scrape.ReloadCommand.Execute(null);
         Update.ReloadCommand.Execute(null);
         Rebuild();
+    }
+
+    /// <summary>Chọn thư mục video dùng chung (ghi cả Scrape.VideoDir lẫn Update.VideoFolder qua setter VideoDir).</summary>
+    [RelayCommand]
+    private async Task BrowseVideoDir()
+    {
+        var dir = await FilePicker.PickFolderAsync("Chọn thư mục video");
+        if (dir is not null) VideoDir = dir;
     }
 
     // ── Đăng nhập / cấu hình: KHÔNG làm tại đây (tránh trùng 2 nơi) — chuyển sang tab BigSeller ──

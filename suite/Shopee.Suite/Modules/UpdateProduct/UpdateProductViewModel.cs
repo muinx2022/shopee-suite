@@ -167,12 +167,13 @@ public sealed partial class UpdateProductViewModel : ModuleViewModelBase
 
     // ── v1.1 (màn gộp): chạy RIÊNG từng tk BigSeller, CHẠY SONG SONG được — mỗi tk 1 token + runner RIÊNG,
     //    ĐỘC LẬP với đường batch của màn cũ (không đụng _cts/_runners/IsRunning). Dùng cho nút inline theo shop. ──
-    public Task RunImportSingleAsync(UpdateRunTargetViewModel t, bool silent = false, int? startRow = null, int? endRow = null, bool? importFromClaimedTab = null) =>
-        RunOneWorkflowAsync("Import to store", UpdateKind.Import, (r, ctx, ct) => r.RunImportAsync(ctx, ct), t, requiresBigSellerLogin: true, silent: silent, startRow: startRow, endRow: endRow, importFromClaimedTab: importFromClaimedTab);
-    public Task RunUpdateSingleAsync(UpdateRunTargetViewModel t, bool silent = false, int? startRow = null, int? endRow = null) =>
-        RunOneWorkflowAsync("Update product", UpdateKind.Update, (r, ctx, ct) => r.RunUpdateAsync(ctx, ct), t, requiresBigSellerLogin: true, silent: silent, startRow: startRow, endRow: endRow);
-    public Task RunNameRewriteSingleAsync(UpdateRunTargetViewModel t, bool silent = false, int? startRow = null, int? endRow = null) =>
-        RunOneWorkflowAsync("Update tên SP", UpdateKind.Rewrite, (r, ctx, ct) => r.RunNameRewriteAsync(ctx, ct), t, requiresBigSellerLogin: false, silent: silent, startRow: startRow, endRow: endRow);
+    public Task RunImportSingleAsync(UpdateRunTargetViewModel t, bool silent = false, int? startRow = null, int? endRow = null, bool? importFromClaimedTab = null, int? processes = null, int? reloadSeconds = null) =>
+        RunOneWorkflowAsync("Import to store", UpdateKind.Import, (r, ctx, ct) => r.RunImportAsync(ctx, ct), t, requiresBigSellerLogin: true, silent: silent, startRow: startRow, endRow: endRow, importFromClaimedTab: importFromClaimedTab, processes: processes, reloadSeconds: reloadSeconds);
+    public Task RunUpdateSingleAsync(UpdateRunTargetViewModel t, bool silent = false, int? startRow = null, int? endRow = null, int? processes = null, int? reloadSeconds = null) =>
+        RunOneWorkflowAsync("Update product", UpdateKind.Update, (r, ctx, ct) => r.RunUpdateAsync(ctx, ct), t, requiresBigSellerLogin: true, silent: silent, startRow: startRow, endRow: endRow, processes: processes, reloadSeconds: reloadSeconds);
+    // Rewrite KHÔNG mở trình duyệt → processes vô nghĩa (caller truyền null); giữ param cho đồng nhất chữ ký.
+    public Task RunNameRewriteSingleAsync(UpdateRunTargetViewModel t, bool silent = false, int? startRow = null, int? endRow = null, int? processes = null, int? reloadSeconds = null) =>
+        RunOneWorkflowAsync("Update tên SP", UpdateKind.Rewrite, (r, ctx, ct) => r.RunNameRewriteAsync(ctx, ct), t, requiresBigSellerLogin: false, silent: silent, startRow: startRow, endRow: endRow, processes: processes, reloadSeconds: reloadSeconds);
 
     /// <summary>Tiền-kiểm điều kiện chạy import/update/rewrite cho 1 đích — KHÔNG mở dialog. Cho AssignmentWorker.</summary>
     public bool CanDispatchUpdate(UpdateRunTargetViewModel t, string op, out string problem) =>
@@ -211,7 +212,8 @@ public sealed partial class UpdateProductViewModel : ModuleViewModelBase
     private async Task RunOneWorkflowAsync(
         string name, UpdateKind kind, Func<UpdateProductRunner, UpdateProductContext, CancellationToken, Task> action,
         UpdateRunTargetViewModel t, bool requiresBigSellerLogin, bool force = false, bool silent = false,
-        int? startRow = null, int? endRow = null, bool? importFromClaimedTab = null)
+        int? startRow = null, int? endRow = null, bool? importFromClaimedTab = null,
+        int? processes = null, int? reloadSeconds = null)
     {
         if (!ValidateUpdateTarget(t, requiresBigSellerLogin, out var problem)) { Warn(problem + ".", silent); return; }
         var a = t.Account; var s = t.SelectedShop!;
@@ -248,7 +250,7 @@ public sealed partial class UpdateProductViewModel : ModuleViewModelBase
                 Coordination.Hub.PublishCompletion(coordKey, "stopped", 0);
                 return;
             }
-            var ctx = BuildContext(t, ai, startRow, endRow, importFromClaimedTab, kind == UpdateKind.Update ? img : null);
+            var ctx = BuildContext(t, ai, startRow, endRow, importFromClaimedTab, kind == UpdateKind.Update ? img : null, processes, reloadSeconds);
             var runner = new UpdateProductRunner();
             runner.Log += m => Log($"{prefix} {m}");
             // Mỗi dòng import/update/rewrite xong → đẩy lên ledger Hub (khoảng dòng) cho Thống kê "shop này đã làm
@@ -415,7 +417,7 @@ public sealed partial class UpdateProductViewModel : ModuleViewModelBase
     }
 
     private UpdateProductContext BuildContext(UpdateRunTargetViewModel t, AiConfig ai, int? startRow = null, int? endRow = null,
-        bool? importFromClaimedTab = null, string? imageOverride = null)
+        bool? importFromClaimedTab = null, string? imageOverride = null, int? processes = null, int? reloadSeconds = null)
     {
         var a = t.Account; var s = t.SelectedShop!;
         // AI (viết lại tên/mô tả) dùng cấu hình AI CHUNG lấy từ Hub; key truyền THẲNG qua context
@@ -424,6 +426,9 @@ public sealed partial class UpdateProductViewModel : ModuleViewModelBase
         // Khoảng dòng: ưu tiên override (Hub giao việc, >0) → KHÔNG ghi đè cấu hình shop; 0/null = dùng cấu hình.
         var sr = startRow is int x && x > 0 ? x : t.StartRow;
         var er = endRow is int y && y > 0 ? y : t.EndRow;
+        // Số lane + reload: ưu tiên override (Hub giao việc, >0) → KHÔNG ghi đè cấu hình account; 0/null = dùng cấu hình.
+        var lanes = processes is int p && p > 0 ? p : t.UpdateWorkers;
+        var reload = reloadSeconds is int r && r > 0 ? r : t.ListingReloadSeconds;
         // "Import từ tab Đã nhận": ưu tiên cờ Hub ghim vào việc (checkbox tab Giao việc); null = dùng cấu hình shop.
         var fromClaimedTab = importFromClaimedTab ?? s.BigSellerImportFromClaimedTab;
         return new UpdateProductContext(
@@ -432,7 +437,7 @@ public sealed partial class UpdateProductViewModel : ModuleViewModelBase
             aiModel, "", ai.BatchSize, "",
             sr, er, imageOverride ?? ImagePath, VideoFolder,
             s.BigSellerCrawlUrl, fromClaimedTab,
-            1, t.UpdateWorkers, t.ListingReloadSeconds, ai.OpenAiApiKey,   // Import LUÔN 1 lane (1 process)
+            lanes, lanes, reload, ai.OpenAiApiKey,   // Import & Update dùng CHUNG số lane (RunConfig.Processes); Hub giao có thể ghi đè
             s.ColumnMap.LinkColumn, s.ColumnMap.PriceColumn, s.ColumnMap.SkuColumn,
             s.ColumnMap.ItemIdColumn, s.ColumnMap.ProductNameColumn, s.ColumnMap.RewrittenNameColumn,
             a.Password);

@@ -153,11 +153,21 @@
                             </label>
                             <label>Từ dòng <input type="number" @bind="_pinStart" style="width:80px" /></label>
                             <label>Đến dòng <input type="number" @bind="_pinEnd" style="width:80px" /></label>
+                            <label>Số process <input type="number" @bind="_pinProcs" style="width:70px" /></label>
+                            @if (_pinOp == "scrape")
+                            {
+                                <label>Số tk / khung <input type="number" @bind="_pinFrame" style="width:70px" /></label>
+                            }
+                            @if (_pinOp == "import" || _pinOp == "update")
+                            {
+                                <label>Reload (s) <input type="number" @bind="_pinReload" style="width:70px" /></label>
+                            }
                             @if (_pinOp == "import")
                             {
                                 <label><input type="checkbox" @bind="_pinFromClaimed" /> Import từ tab "Đã nhận"</label>
                             }
                         </div>
+                        <p class="hint">Tham số truyền cho client lượt này (0 = dùng cấu hình client). Thư mục video/ảnh luôn dùng của máy client.</p>
                         @* Nút hành động ở hàng riêng, khỏi trôi lơ lửng theo flex-wrap của hàng field.
                            CHỈ 1 trong 2 nút hiện tại 1 thời điểm: có việc (hoặc đang hủy dở) → nút Huỷ; rảnh → nút Ghim.
                            Trạng thái chuyển tiếp bám THEO CLIENT thật (lease) chứ không lạc quan theo DB:
@@ -366,6 +376,10 @@
     private string _pinOp = "";
     private string _pinMachine = "";
     private int _pinStart, _pinEnd;
+    // Tham số chạy Hub đặt cho lượt này (mặc định = default của BigSellerRunConfig; 0 = client tự dùng cấu hình).
+    private int _pinProcs = 2;
+    private int _pinFrame = 10;
+    private int _pinReload = 20;
     private bool _pinFromClaimed;
     private string _action = "";
 
@@ -668,9 +682,13 @@
         var payload = _pinOp == "import"
             ? JsonSerializer.Serialize(new ImportJobPayload { FromClaimedTab = _pinFromClaimed })
             : "";
+        // FrameSize chỉ scrape đọc, Reload chỉ import/update đọc → op khác truyền 0 để sạch dữ liệu. Processes áp mọi op.
         Db.CreateAssignment(new CreateAssignmentRequest(
             _selRow.AccountId, _selRow.ShopId, _selRow.Sheet, _pinOp, _pinMachine, true,
-            Math.Max(0, _pinStart), Math.Max(0, _pinEnd), payload));
+            Math.Max(0, _pinStart), Math.Max(0, _pinEnd), payload,
+            Processes: Math.Max(0, _pinProcs),
+            FrameSize: _pinOp == "scrape" ? Math.Max(0, _pinFrame) : 0,
+            ReloadSeconds: _pinOp is "import" or "update" ? Math.Max(0, _pinReload) : 0));
         var host = Snap.Machines.FirstOrDefault(m => m.MachineId == _pinMachine)?.Hostname ?? _pinMachine;
         _action = FleetStateService.MachineOffline(Snap, _pinMachine)
             ? $"⚠ Đã ghim {_pinOp} · {_selRow.ShopName} → {host} (máy đang TẮT — chờ tới khi mở app)."

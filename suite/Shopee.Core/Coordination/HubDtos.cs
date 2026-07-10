@@ -18,6 +18,8 @@ public sealed class MachinePresence
     public string Hostname { get; set; } = "";
     public DateTimeOffset LastSeen { get; set; }
     public string? AppVersion { get; set; }
+    /// <summary>Trần cửa sổ Brave máy này tự báo lên (0 = chưa báo/không rõ). Hub dùng để chia quỹ khi giao việc.</summary>
+    public int MaxBrave { get; set; }
 }
 
 /// <summary>Mục manifest của một file dùng chung trên Hub.</summary>
@@ -99,6 +101,10 @@ public sealed class Assignment
     /// <summary>Khoảng dòng Hub đặt cho client chạy (ghi đè cấu hình client lượt này). 0 = dùng cấu hình client.</summary>
     public int StartRow { get; set; }
     public int EndRow { get; set; }
+    /// <summary>Tham số chạy Hub đặt cho lượt này (ghi đè cấu hình client). 0 = dùng cấu hình client.</summary>
+    public int Processes { get; set; }
+    public int FrameSize { get; set; }
+    public int ReloadSeconds { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 
@@ -106,9 +112,13 @@ public sealed class Assignment
 }
 
 public sealed record SetRoleRequest(string MachineId, string Role);
+// Processes/FrameSize/ReloadSeconds đặt SAU Payload (không phải "trước Payload") vì các call-site hiện có
+// truyền StartRow/EndRow/Payload THEO VỊ TRÍ (Fleet.razor, FleetViewModel, SearchBoardService…) — chèn param
+// int vào giữa sẽ nuốt nhầm đối số Payload (string) → vỡ build. Sau Payload thì mọi call-site cũ giữ nguyên.
 public sealed record CreateAssignmentRequest(
     string BigsellerId, string ShopId, string Sheet, string Op, string? TargetMachineId, bool Pinned,
-    int StartRow = 0, int EndRow = 0, string Payload = "");
+    int StartRow = 0, int EndRow = 0, string Payload = "",
+    int Processes = 0, int FrameSize = 0, int ReloadSeconds = 0);
 
 /// <summary>Dữ liệu việc Import Hub giao (ghi vào <see cref="Assignment.Payload"/> cho op "import"):
 /// cờ import từ tab "Đã nhận" (Claimed) thay vì danh sách crawl. Payload rỗng = client dùng cấu hình của nó.</summary>
@@ -188,7 +198,7 @@ public sealed record AccountReserveResponse(List<string> Granted, List<string> B
 
 public sealed record AccountReleaseRequest(List<string> AccountIds, string MachineId);
 
-public sealed record MachineHeartbeatRequest(string MachineId, string Hostname, string? AppVersion);
+public sealed record MachineHeartbeatRequest(string MachineId, string Hostname, string? AppVersion, int MaxBrave = 0);
 /// <summary>Client báo Hub "tôi rời đi" (bấm Ngắt kết nối) → Hub xoá khỏi danh sách máy ngay.</summary>
 public sealed record MachineLeaveRequest(string MachineId);
 

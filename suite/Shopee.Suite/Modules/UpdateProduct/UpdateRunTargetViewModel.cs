@@ -22,10 +22,11 @@ public sealed class UpdateRunTargetViewModel : ObservableObject
     {
         Account = account;
         Shops = new ObservableCollection<BigSellerShop>(account.Shops);
+        // Cấu hình CHẠY giờ ở mức account (Account.RunConfig) — migrate 1 lần từ nguồn cũ nếu chưa có.
+        Shopee.Suite.Infrastructure.RunConfigMigration.EnsureRunConfig(account);
         // Khôi phục shop đã chọn từ Id đã LƯU; nếu chưa lưu (hoặc Id không còn khớp) thì MẶC ĐỊNH shop đầu —
-        // GIỐNG ScrapeTargetViewModel. Nếu để null, panel cấu hình (từ dòng/đến dòng/số worker/reload) KHÔNG có
-        // shop để ghi: getter trả default (worker = 1) còn setter im lặng bỏ qua giá trị gõ vào → gõ "3"/"5"
-        // rồi rời ô là tự về 1. (Gán field trực tiếp để không trigger Persist lúc dựng VM.)
+        // GIỐNG ScrapeTargetViewModel. SelectedShop vẫn cần cho sheet/map/import; cấu hình chạy KHÔNG còn theo
+        // shop nên đổi shop KHÔNG đổi giá trị. (Gán field trực tiếp để không trigger Persist lúc dựng VM.)
         _selectedShop = Shops.FirstOrDefault(s => s.Id == account.UpdateSelectedShopId) ?? Shops.FirstOrDefault();
     }
 
@@ -51,50 +52,43 @@ public sealed class UpdateRunTargetViewModel : ObservableObject
             OnPropertyChanged();
             OnPropertyChanged(nameof(SheetName));
             OnPropertyChanged(nameof(ShopChosen));
-            // Cấu hình chạy đọc theo shop đang chọn → báo đổi để UI nạp lại giá trị của shop mới.
-            OnPropertyChanged(nameof(StartRow));
-            OnPropertyChanged(nameof(EndRow));
-            OnPropertyChanged(nameof(ImportWorkers));
-            OnPropertyChanged(nameof(UpdateWorkers));
-            OnPropertyChanged(nameof(ListingReloadSeconds));
+            // Cấu hình chạy GIỜ theo account (Account.RunConfig), KHÔNG theo shop → đổi shop KHÔNG đổi giá trị,
+            // khỏi notify StartRow/EndRow/UpdateWorkers/ListingReloadSeconds.
             Persist();
         }
     }
 
-    // ── Cấu hình chạy RIÊNG theo SHOP đã chọn (lưu trên model BigSellerShop) ──
+    // ── Cấu hình CHẠY giờ ở MỨC ACCOUNT (Account.RunConfig) — proxy đọc/ghi thẳng RunConfig, DÙNG CHUNG với
+    //    ScrapeTargetViewModel (cùng object) nên nhất quán. (UpdateWorkers ↔ Processes, ListingReloadSeconds ↔
+    //    ReloadSeconds.) Setter LƯU xuống bigseller.json (BigSellerStore). RIÊNG-MÁY. ──
+    private BigSellerRunConfig Cfg => Account.RunConfig ??= new BigSellerRunConfig();
+
     /// <summary>Bắt đầu từ dòng nào của sheet (≥2 vì dòng 1 là header).</summary>
     public int StartRow
     {
-        get => SelectedShop?.StartRow ?? 2;
-        set { if (SelectedShop is { } s && s.StartRow != value) { s.StartRow = value; OnPropertyChanged(); Persist(); } }
+        get => Cfg.StartRow;
+        set { if (Cfg.StartRow != value) { Cfg.StartRow = value; OnPropertyChanged(); Persist(); } }
     }
 
     /// <summary>Đến dòng (0 = hết).</summary>
     public int EndRow
     {
-        get => SelectedShop?.EndRow ?? 0;
-        set { if (SelectedShop is { } s && s.EndRow != value) { s.EndRow = value; OnPropertyChanged(); Persist(); } }
+        get => Cfg.EndRow;
+        set { if (Cfg.EndRow != value) { Cfg.EndRow = value; OnPropertyChanged(); Persist(); } }
     }
 
-    /// <summary>Số worker (lane) cho Import to store.</summary>
-    public int ImportWorkers
-    {
-        get => SelectedShop?.ImportWorkers ?? 1;
-        set { if (SelectedShop is { } s && s.ImportWorkers != value) { s.ImportWorkers = value; OnPropertyChanged(); Persist(); } }
-    }
-
-    /// <summary>Số worker (lane) cho Update product.</summary>
+    /// <summary>Số worker (lane) — map RunConfig.Processes (dùng cho CẢ import lẫn update).</summary>
     public int UpdateWorkers
     {
-        get => SelectedShop?.UpdateWorkers ?? 1;
-        set { if (SelectedShop is { } s && s.UpdateWorkers != value) { s.UpdateWorkers = value; OnPropertyChanged(); Persist(); } }
+        get => Cfg.Processes;
+        set { if (Cfg.Processes != value) { Cfg.Processes = value; OnPropertyChanged(); Persist(); } }
     }
 
-    /// <summary>Reload trang listing mỗi N giây.</summary>
+    /// <summary>Reload trang listing mỗi N giây — map RunConfig.ReloadSeconds.</summary>
     public int ListingReloadSeconds
     {
-        get => SelectedShop?.ListingReloadSeconds ?? 20;
-        set { if (SelectedShop is { } s && s.ListingReloadSeconds != value) { s.ListingReloadSeconds = value; OnPropertyChanged(); Persist(); } }
+        get => Cfg.ReloadSeconds;
+        set { if (Cfg.ReloadSeconds != value) { Cfg.ReloadSeconds = value; OnPropertyChanged(); Persist(); } }
     }
 
     public string DisplayName => Account.DisplayName;

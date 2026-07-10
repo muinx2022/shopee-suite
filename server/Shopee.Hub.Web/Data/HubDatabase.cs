@@ -50,6 +50,12 @@ public sealed partial class HubDatabase : IDisposable
         AddColumnIfMissing("assignments", "start_row", "INTEGER DEFAULT 0");
         AddColumnIfMissing("assignments", "end_row", "INTEGER DEFAULT 0");
         AddColumnIfMissing("assignments", "payload", "TEXT DEFAULT ''");
+        // Tham số chạy Hub đặt cho lượt việc (ghi đè cấu hình client; 0 = dùng cấu hình client).
+        AddColumnIfMissing("assignments", "processes", "INTEGER DEFAULT 0");
+        AddColumnIfMissing("assignments", "frame_size", "INTEGER DEFAULT 0");
+        AddColumnIfMissing("assignments", "reload_seconds", "INTEGER DEFAULT 0");
+        // Trần cửa sổ Brave máy client tự báo lên (0 = chưa báo).
+        AddColumnIfMissing("machines", "max_brave", "INTEGER DEFAULT 0");
         // Tập máy đã tham gia mỗi việc (Thống kê). Backfill: khởi tạo = [last_machine_id] cho bản ghi cũ
         // (machine_id là hex GUID, an toàn để nối chuỗi JSON). Publish sau sẽ union thêm máy mới.
         if (AddColumnIfMissing("ledger", "machines_json", "TEXT DEFAULT ''"))
@@ -104,7 +110,7 @@ CREATE TABLE IF NOT EXISTS ledger(
   last_machine_id TEXT, last_hostname TEXT, last_run_at TEXT, updated_at TEXT,
   machines_json TEXT DEFAULT '');
 CREATE TABLE IF NOT EXISTS machines(
-  machine_id TEXT PRIMARY KEY, hostname TEXT, last_seen TEXT, app_version TEXT);
+  machine_id TEXT PRIMARY KEY, hostname TEXT, last_seen TEXT, app_version TEXT, max_brave INTEGER DEFAULT 0);
 CREATE TABLE IF NOT EXISTS files(
   name TEXT PRIMARY KEY, version INTEGER, hash TEXT, size INTEGER, mtime TEXT,
   updated_by TEXT, updated_at TEXT);
@@ -114,7 +120,8 @@ CREATE TABLE IF NOT EXISTS assignments(
   id TEXT PRIMARY KEY, bigseller_id TEXT, shop_id TEXT, sheet TEXT, op TEXT,
   target_machine_id TEXT, pinned INTEGER, status TEXT,
   claimed_by TEXT, claimed_host TEXT, last_error TEXT, created_at TEXT, updated_at TEXT,
-  start_row INTEGER DEFAULT 0, end_row INTEGER DEFAULT 0, payload TEXT DEFAULT '');
+  start_row INTEGER DEFAULT 0, end_row INTEGER DEFAULT 0, payload TEXT DEFAULT '',
+  processes INTEGER DEFAULT 0, frame_size INTEGER DEFAULT 0, reload_seconds INTEGER DEFAULT 0);
 CREATE TABLE IF NOT EXISTS search_products(
   item_id INTEGER PRIMARY KEY, json TEXT, machine_id TEXT, source_file TEXT, updated_at TEXT);
 CREATE TABLE IF NOT EXISTS account_errors(

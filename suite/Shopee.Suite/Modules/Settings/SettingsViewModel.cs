@@ -160,7 +160,11 @@ public sealed partial class SettingsViewModel : ObservableObject
         PerformanceSettingsStore.Shared.Save(new PerformanceSettings { UsableCpuCores = cpu, UsableRamGb = ram });
         var max = BraveFleet.WindowsForBudget(cpu, ram);
         BraveFleet.MaxConcurrentWindows = max;   // áp dụng ngay (đầy đủ từ lượt chạy kế tiếp)
-        Status = $"Đã đặt: dùng {cpu} nhân + {ram}GB → tối đa {max} cửa sổ Brave (áp dụng từ lượt chạy kế tiếp).";
+        // Báo Hub NGAY trần Brave mới (khỏi chờ nhịp poll 12s) → Hub chia quỹ giao việc theo số đúng.
+        var reported = false;
+        if (CoordinationRuntime.Hub is { } hub) { _ = hub.NotifyMachineNowAsync(); reported = true; }
+        Status = $"Đã đặt: dùng {cpu} nhân + {ram}GB → tối đa {max} cửa sổ Brave (áp dụng từ lượt chạy kế tiếp)."
+            + (reported ? " · đã báo Hub" : "");
     }
 
     [RelayCommand]

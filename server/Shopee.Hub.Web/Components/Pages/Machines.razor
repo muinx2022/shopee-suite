@@ -14,7 +14,7 @@
 
 <div class="tablewrap">
 <table class="grid sm stack-sm">
-    <thead><tr><th>Máy</th><th>Trạng thái</th><th>Việc đang giữ</th><th>Vai trò (auto)</th><th>Hành động</th></tr></thead>
+    <thead><tr><th>Máy</th><th>Trạng thái</th><th title="Trần cửa sổ Brave client tự báo (Settings → Hiệu năng)">Brave max</th><th>Việc đang giữ</th><th>Vai trò (auto)</th><th>Hành động</th></tr></thead>
     <tbody>
     @foreach (var m in Snap.Machines.OrderByDescending(x => x.LastSeen))
     {
@@ -25,6 +25,7 @@
         <tr>
             <td><b>@m.Hostname</b><div class="mono m-hide" style="font-size:11px;color:#64748b">@m.MachineId[..Math.Min(12, m.MachineId.Length)]</div></td>
             <td data-label="Trạng thái">@pres.Dot @pres.Label</td>
+            <td data-label="Brave max">@(m.MaxBrave > 0 ? m.MaxBrave.ToString() : "—")</td>
             <td data-label="Việc đang giữ">@(held > 0 ? $"{held}" : "—")</td>
             <td data-label="Vai trò">
                 <select value="@role" @onchange="e => SetRole(m.MachineId, e.Value?.ToString())">
@@ -42,7 +43,7 @@
     }
     @if (Snap.Machines.Count == 0)
     {
-        <tr><td colspan="5" class="empty">Chưa có máy nào kết nối.</td></tr>
+        <tr><td colspan="6" class="empty">Chưa có máy nào kết nối.</td></tr>
     }
     </tbody>
 </table>

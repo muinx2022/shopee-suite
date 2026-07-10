@@ -47,6 +47,12 @@ public sealed class BigSellerAccount
     /// khi Hub bỏ acc; acc tạo/đăng nhập TẠI CHỖ = false → KHÔNG bị xóa khi client đồng bộ.</summary>
     public bool HubOwned { get; set; }
 
+    /// <summary>Cấu hình CHẠY (dòng / process / khung / reload) — 1 bộ cho MỌI op (scrape/import/update).
+    /// null = chưa migrate (seed 1 lần từ nguồn cũ qua RunConfigMigration khi VM đầu tiên chạm tới).
+    /// RIÊNG-MÁY: KHÔNG đưa vào SharedSignature/MergeBigSeller (xem BackupService) — mỗi máy giữ cấu hình
+    /// chạy của nó (lỗi "field riêng-máy lọt vào chữ ký sync" đã lặp nhiều lần trong lịch sử repo).</summary>
+    public BigSellerRunConfig? RunConfig { get; set; }
+
     public string DisplayName =>
         !string.IsNullOrWhiteSpace(Label) ? Label
         : !string.IsNullOrWhiteSpace(Email) ? Email

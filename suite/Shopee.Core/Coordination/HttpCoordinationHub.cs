@@ -44,7 +44,7 @@ public sealed class HttpCoordinationHub : ICoordinationHub, IDisposable
     {
         try
         {
-            await _client.MachineHeartbeatAsync(new MachineHeartbeatRequest(_machineId, Host, Infrastructure.AppInfo.Version));
+            await _client.MachineHeartbeatAsync(new MachineHeartbeatRequest(_machineId, Host, Infrastructure.AppInfo.Version, Shopee.Core.Browser.BraveFleet.MaxConcurrentWindows));
             _fleet = await _client.FleetAsync();
             // CHỈ 1 lần, SAU khi Hub thật sự trả lời (tránh race lúc máy-Hub vừa khởi động: server localhost chưa
             // kịp lắng nghe). Poller 12s tự chạy ở tick thành công đầu tiên.
@@ -55,6 +55,14 @@ public sealed class HttpCoordinationHub : ICoordinationHub, IDisposable
             try { Changed?.Invoke(); } catch { }
         }
         catch { /* offline: giữ snapshot cũ, không ném */ }
+    }
+
+    /// <summary>Bắn NGAY 1 heartbeat (kèm MaxBrave hiện tại) — gọi khi user đổi cấu hình hiệu năng để Hub thấy
+    /// MaxBrave mới ngay, khỏi chờ nhịp poll 12s. Best-effort: nuốt lỗi (offline → lượt poll kế bù).</summary>
+    public async Task NotifyMachineNowAsync()
+    {
+        try { await _client.MachineHeartbeatAsync(new MachineHeartbeatRequest(_machineId, Host, Infrastructure.AppInfo.Version, Shopee.Core.Browser.BraveFleet.MaxConcurrentWindows)); }
+        catch { }
     }
 
     /// <summary>CLIENT (không phải máy Hub) tự kéo cấu hình + cookie + AI + workbook theo Hub: NGAY khi vừa kết

@@ -22,8 +22,8 @@ public sealed class BigSellerShop
     public string OpenAiApiKeyFile { get; set; } = "";
     public int OpenAiBatchSize { get; set; } = 40;
 
-    // Cấu hình CHẠY (Update/Import) RIÊNG theo shop — LƯU để khôi phục sau khi mở lại app
-    // (trước đây chỉ ở UI-state UpdateRunTargetViewModel nên khởi động lại là mất).
+    // LEGACY — đã gộp về BigSellerAccount.RunConfig (mức account); chỉ còn đọc 1 lần khi migrate
+    // (RunConfigMigration). Đừng dùng cho luồng chạy. Giữ lại để deserialize file cũ + migration đọc.
     /// <summary>Bắt đầu từ dòng nào của sheet (≥2 vì dòng 1 là header).</summary>
     public int StartRow { get; set; } = 2;
     /// <summary>Đến dòng (0 = hết).</summary>

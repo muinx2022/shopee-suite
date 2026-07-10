@@ -118,13 +118,15 @@ public sealed partial class ScrapeViewModel : ModuleViewModelBase
     /// Rảnh → mở phiên mới chỉ gồm tk này; đang chạy → thêm job tk này (resume) vào phiên hiện tại.
     /// TOTAL: tự nuốt + log mọi lỗi → an toàn để gọi fire-and-forget (caller không cần try/catch).</summary>
     public async Task RunSingleAsync(ScrapeTargetViewModel target, bool resume, bool silent = false,
-        int? startRow = null, int? endRow = null)
+        int? startRow = null, int? endRow = null, int? processes = null, int? frameSize = null)
     {
         try
         {
-            // Override khoảng dòng (Hub giao việc) — KHÔNG ghi đè cấu hình người dùng; runner đọc rồi tự xoá.
+            // Override khoảng dòng + số cửa sổ + cỡ khung (Hub giao việc) — KHÔNG ghi đè cấu hình người dùng; runner đọc rồi tự xoá.
             target.PendingStartRow = startRow is int sr && sr > 0 ? sr : null;
             target.PendingEndRow = endRow is int er && er > 0 ? er : null;
+            target.PendingMaxProcess = processes is int pp && pp > 0 ? pp : null;
+            target.PendingFrameSize = frameSize is int fs && fs > 0 ? fs : null;
             if (IsBusy) { StartOneAccount(target, silent); return; }
             await StartAsync(resume, new[] { target }, silent);
         }
@@ -386,11 +388,14 @@ public sealed partial class ScrapeViewModel : ModuleViewModelBase
         var account = target.Account;
         var shop = target.SelectedShop!;
         var sheet = shop.ShopeeDataSheet;
-        var maxProc = Math.Max(1, target.MaxProcess);   // = SỐ CỬA SỔ Brave song song (KHÔNG còn = số tk dùng)
-        // Khoảng dòng: ưu tiên override TẠM (Hub giao việc), dùng-một-lần → đọc xong xoá để không lọt sang lượt sau.
+        // Override TẠM (Hub giao việc) cho khoảng dòng + số cửa sổ + cỡ khung — dùng-một-lần → đọc xong XOÁ HẾT ở
+        // ĐÂY (đúng chỗ config được chốt cho job) để không lọt sang lượt chạy sau. null = dùng cấu hình người dùng.
+        var maxProc = Math.Max(1, target.PendingMaxProcess ?? target.MaxProcess);   // = SỐ CỬA SỔ Brave song song (KHÔNG còn = số tk dùng)
         var startRow = Math.Max(1, target.PendingStartRow ?? target.StartRow);
         var endRowOverride = target.PendingEndRow;
+        var frameSizeOverride = target.PendingFrameSize;
         target.PendingStartRow = null; target.PendingEndRow = null;
+        target.PendingMaxProcess = null; target.PendingFrameSize = null;
         var rowsPer = Math.Max(1, target.RowsPerAccount);
         var seq = h.Seq;
         var ct = h.Cts.Token;
@@ -439,7 +444,7 @@ public sealed partial class ScrapeViewModel : ModuleViewModelBase
             // ĐÓNG KHUNG: cấp một bộ tk Shopee CỐ ĐỊNH (FrameSize) cho job này, GỠ khỏi kho chung → các job
             // RỜI nhau. Resume giữ NGUYÊN khung cũ (đọc id đã lưu) để KHÔNG phơi tk MỚI lên BigSeller; Reset
             // cấp khung mới. Engine chỉ xoay vòng TRONG khung → BigSeller chỉ thấy ngần ấy thiết bị ổn định.
-            var frameSize = Math.Max(1, target.FrameSize);
+            var frameSize = Math.Max(1, frameSizeOverride ?? target.FrameSize);
             IReadOnlyList<string>? preferIds = resume ? ScrapeProgressStore.Shared.GetFrame(account.Id, sheet) : null;
             var frame = s.ClaimFrame(frameSize, preferIds);
             var frameIds = frame.Select(a => a.Id).ToList();
