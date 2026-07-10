@@ -5,6 +5,23 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Hiệu năng. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.0.10 — 2026-07-10
+
+Chủ đề: **soi được vì sao Thống kê Hub 0 dòng update/import + không đốt giờ khi workbook chưa sẵn sàng**.
+
+- Update: workbook không có dòng nào đủ điều kiện (cột G "Tên đã sửa" trống hết — chưa
+  chạy Tên SP) → DỪNG NGAY trước khi mở Brave kèm hướng dẫn, thay vì mở từng SP để bỏ
+  qua hàng giờ rồi vẫn báo "✓ xong". Cuối mỗi lane log tổng kết "Σ update OK X · bỏ
+  qua Y (không-trong-sheet Z) · đã báo Thống kê N dòng" — nhìn 1 dòng biết lỗi ở
+  workbook/sheet hay ở đường báo cáo.
+- Import: SP import xong mà không khớp được dòng sheet (id crawl ≠ id sheet) giờ được
+  log + đếm (trước im lặng, Thống kê thiếu dòng không ai biết); cuối lượt log tổng kết.
+- Đẩy dòng lên Thống kê Hub thất bại (mạng/hub lỗi) giờ hiện cảnh báo ở tab Log
+  (throttle 1 dòng/60s) — trước nuốt im lặng mọi lỗi.
+- Hub web (deploy riêng): thẻ Thống kê ưu tiên trạng thái "⏳ đang chạy · máy X" theo
+  lease đang sống — hết cảnh shop đang chạy mà thẻ báo "chưa chạy" khi ledger chưa có
+  bản ghi (per-row chưa về / operator vừa reset).
+
 ## v1.0.9 — 2026-07-10
 
 Chủ đề: **gộp cấu hình chạy về mức tài khoản + Hub giao việc kèm tham số + quỹ Brave**.

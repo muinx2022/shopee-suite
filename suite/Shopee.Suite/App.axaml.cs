@@ -49,6 +49,11 @@ public partial class App : Application
         try { Shopee.Core.Coordination.CoordinationRuntime.InitFromConfig(); }
         catch (Exception ex) { TryLog("Coordination.Init", ex); }
 
+        // Cho TryPublish (đẩy ledger nền) HẾT CÂM: lỗi POST ledger giờ báo lên tab Log Hub (throttle 1 dòng/60s
+        // ở HttpCoordinationHub) → nếu Thống kê thiếu dòng vì mạng/hub, ta THẤY thay vì đoán mò. Gán 1 lần lúc boot.
+        try { Shopee.Core.Coordination.HttpCoordinationHub.DiagLog = Shopee.Core.Coordination.HubLog.Warn; }
+        catch (Exception ex) { TryLog("Coordination.DiagLog", ex); }
+
         // Tự cập nhật (Velopack): kiểm tra + TẢI nền bản mới. KHÔNG tự khởi động lại — chỉ báo sẵn để
         // người dùng bấm cập nhật khi rảnh (khỏi cắt job). No-op nếu chạy từ dev/bin (chưa cài qua Velopack).
         try { _ = Services.UpdateService.Shared.CheckAsync(); }

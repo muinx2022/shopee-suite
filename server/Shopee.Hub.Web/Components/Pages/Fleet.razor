@@ -212,11 +212,18 @@
                 <div class="opcards">
                     @foreach (var op in OpOrder)
                     {
+                        var cell = FleetStateService.OpCell(Snap, row.AccountId, row.ShopId, op);
                         var st = row.Ops.GetValueOrDefault(op);
                         <div class="opcard @(st is null ? "empty0" : "")">
                             <div class="ohead">
                                 <span class="olabel">@OpLabel(op)</span>
-                                @if (st is not null)
+                                @* Đang chạy (lease sống) → ưu tiên chip ⏳+máy từ OpCell, kể cả khi ledger chưa có
+                                   bản ghi (per-row chưa về / bị reset) — tránh báo "chưa chạy" gây hiểu nhầm. *@
+                                @if (cell.Kind == 1)
+                                {
+                                    <span class="pill @cell.Css">@cell.Text</span>
+                                }
+                                else if (st is not null)
                                 {
                                     <span class="pill @st.StatusCss">@st.StatusText</span>
                                 }
@@ -237,6 +244,10 @@
                                 {
                                     <div class="sub m-hide">Đã tham gia (@st.Machines.Count máy): @string.Join(", ", st.Machines)</div>
                                 }
+                            }
+                            else if (cell.Kind == 1)
+                            {
+                                <div class="sub">Đang chạy — chưa có dòng nào báo về.</div>
                             }
                             else
                             {

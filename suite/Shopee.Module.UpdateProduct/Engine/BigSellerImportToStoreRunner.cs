@@ -20,6 +20,11 @@ internal sealed class BigSellerImportToStoreRunner : BigSellerBraveRunner
     // item id → dòng sheet (dòng đầu gặp id đó) — để khi import xong 1 id, báo ledger đúng DÒNG nào đã import.
     private Dictionary<string, int> _rowByImportId = new(StringComparer.Ordinal);
 
+    // Đếm để soi vì sao Thống kê Hub thiếu dòng import: _ledgerHit = số dòng ĐÃ báo (RowsDone bắn) · _ledgerMiss =
+    // số SP import xong nhưng KHÔNG khớp được dòng sheet (id crawl ≠ id sheet) → không có dòng để báo.
+    private int _ledgerHitCount;
+    private int _ledgerMissCount;
+
     /// <summary>Bắn (rowIndex, rowIndex) mỗi khi 1 dòng sheet vừa được IMPORT XONG (item id gửi lên store) →
     /// caller đẩy lên ledger Hub để Thống kê biết "shop này đã import những dòng nào".</summary>
     public event Action<int, int>? RowsDone;
@@ -215,6 +220,7 @@ internal sealed class BigSellerImportToStoreRunner : BigSellerBraveRunner
                     if (cacheCount == 0)
                         _log("⚠ Không đọc được item id nào từ API crawl (pageList.json) — BigSeller đổi endpoint/response? Không import được gì.");
                     _log($"✔ Hết trang — không còn item id cần import ({_importedIds.Count} SP đã gửi). Kết thúc.");
+                    LogLedgerSummary();
                     return;   // → RunOneWorkflowAsync: "✔ xong" + PublishCompletion("completed") ⇒ báo Hub finished
                 }
 
@@ -253,7 +259,15 @@ internal sealed class BigSellerImportToStoreRunner : BigSellerBraveRunner
                     {
                         _importedIds.Add(id);
                         // Báo ledger đúng DÒNG sheet của id vừa import (nếu biết) → Thống kê "đã import dòng nào".
-                        if (_rowByImportId.TryGetValue(id, out var row)) RowsDone?.Invoke(row, row);
+                        if (_rowByImportId.TryGetValue(id, out var row)) { RowsDone?.Invoke(row, row); _ledgerHitCount++; }
+                        else
+                        {
+                            // TRƯỢT map = id (từ crawlUrl API) KHÔNG có trong _rowByImportId (id sheet) → SP import xong
+                            // mà Thống kê Hub THIẾU dòng, IM LẶNG. Log lần ĐẦU + mỗi 10 lần (tránh spam vòng lặp).
+                            _ledgerMissCount++;
+                            if (_ledgerMissCount == 1 || _ledgerMissCount % 10 == 0)
+                                _log($"⚠ SP import xong nhưng không khớp được dòng sheet (import-id={id}) → Thống kê Hub sẽ thiếu dòng ({_ledgerMissCount} SP như vậy).");
+                        }
                     }
 
                 // Đã gom ĐỦ mọi item id cần import → DỪNG NGAY, khỏi lật hết tab (tab "Đã nhận" có thể tới ~75
@@ -261,6 +275,7 @@ internal sealed class BigSellerImportToStoreRunner : BigSellerBraveRunner
                 if (_importedIds.Count >= _importIds.Count)
                 {
                     _log($"✔ Đã import đủ {_importedIds.Count}/{_importIds.Count} SP — dừng (không lật thêm trang).");
+                    LogLedgerSummary();
                     return;
                 }
 
@@ -687,6 +702,12 @@ internal sealed class BigSellerImportToStoreRunner : BigSellerBraveRunner
 
     private Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken) =>
         _pauseToken?.DelayAsync(delay, cancellationToken) ?? Task.Delay(delay, cancellationToken);
+
+    // Tổng kết ledger khi import kết thúc BÌNH THƯỜNG: đã báo Thống kê bao nhiêu dòng vs bao nhiêu SP import xong
+    // mà không khớp được dòng sheet → soi nhanh vì sao Thống kê Hub thiếu dòng import (miss=0 mà Thống kê vẫn thiếu
+    // ⇒ ngờ TryPublish/Hub, xem DiagLog; miss cao ⇒ id crawl ≠ id sheet, cần soi cách khớp _rowByImportId).
+    private void LogLedgerSummary() =>
+        _log($"Σ import: đã báo Thống kê {_ledgerHitCount} dòng · không khớp dòng sheet {_ledgerMissCount} SP.");
 
     // Detach listener API pageList.json trước khi base kill Brave (phần dọn Brave chung ở BigSellerBraveRunner).
     protected override void OnBeforeDispose()

@@ -140,6 +140,14 @@ internal sealed partial class BigSellerProductUpdateRunner : BigSellerBraveRunne
     // Đã log chẩn đoán "listing 0 dòng" chưa (log 1 lần/đợt-trống để khỏi spam mỗi vòng chờ).
     private bool _emptyListingDiagLogged;
 
+    // ── Bộ đếm tổng kết lane (soi "chạy hàng giờ mà Thống kê 0 dòng"): update OK / bỏ qua / không-trong-sheet /
+    //    số dòng THỰC BÁO lên ledger. _reportedRows CHỈ tăng khi thực bắn RowsDone (LineIndex>0) → nếu OK cao mà
+    //    _reportedRows=0 thì lỗi ở tầng ledger/Hub, không phải ở đây. ──
+    private int _okCount;
+    private int _skipCount;
+    private int _notInSheetCount;
+    private int _reportedRows;
+
     private readonly ClaimStore? _claim;
     // Cache dữ liệu shop DÙNG CHUNG mọi lane (nạp 1 lần ở tầng điều phối). null = lane tự đọc workbook (đường 1-lane cũ).
     private readonly WorkbookRecordCache? _sharedRecords;
@@ -172,6 +180,16 @@ internal sealed partial class BigSellerProductUpdateRunner : BigSellerBraveRunne
         {
             await LoadWorkbookRecordsAsync(ct).ConfigureAwait(false);
             _log($"📒 Workbook: {_records.Count} dòng (khớp theo Shopee item id).");
+        }
+
+        // MAP RỖNG (đường 1-lane tự nạp; đa-lane đã chặn ở facade) → mọi SP trên Listing đều "not_in_xlsx" → BỎ QUA
+        // hết, chạy hàng giờ vô ích rồi vẫn báo "✓ xong". DỪNG NGAY trước StartBrave, đừng phóng trình duyệt.
+        if (_records.Count == 0)
+        {
+            _log($"⚠ KHÔNG có dòng nào đủ điều kiện update trong sheet '{_settings.DataSheet}' (cột 'Tên đã sửa' trống hết " +
+                 "hoặc khoảng dòng không có SP) — mọi SP trên Listing sẽ chỉ bị BỎ QUA nên DỪNG NGAY, không mở Brave. " +
+                 "→ Chạy 'Update tên SP (AI)' để điền cột G trước, rồi chạy lại Update.");
+            return;
         }
 
         StartBrave();
@@ -272,11 +290,13 @@ internal sealed partial class BigSellerProductUpdateRunner : BigSellerBraveRunne
                         emptyStreak = 0;
                         if (await ClickNextListingPageAsync(page, ct).ConfigureAwait(false)) break;
                         _log("✔ Listing rỗng / hết trang cuối — không còn item id cần update. Lane kết thúc.");
+                        LogSummary();
                         return;
                     case "exhausted":   // Có dòng nhưng trang này hết dòng lane này xử lý được (đã xong/đã skip/lane khác giữ).
                         emptyStreak = 0;
                         if (await ClickNextListingPageAsync(page, ct).ConfigureAwait(false)) break;
                         _log("✔ Hết trang cuối — không còn item id cần update trên mọi trang. Lane kết thúc.");
+                        LogSummary();
                         return;
                     case "retry":
                         emptyStreak = 0;
@@ -307,7 +327,15 @@ internal sealed partial class BigSellerProductUpdateRunner : BigSellerBraveRunne
                     throw new LaneAbortedException($"lỗi listing {listingErrorStreak} lần liên tục: " + ex.Message);
             }
         }
+        // Thoát while VÌ CANCEL (Stop) — thoát bình thường → tổng kết. (Đường LaneAbortedException ném ra ngoài,
+        // KHÔNG qua đây, cố ý: thoát bất thường supervisor sẽ restart, đừng log tổng kết nửa vời mỗi lần restart.)
+        LogSummary();
     }
+
+    // Tổng kết lane khi thoát BÌNH THƯỜNG (hết trang / bị Stop): OK cao mà "đã báo Thống kê"=0 ⇒ ngờ ledger/Hub;
+    // "bỏ qua" cao với "không-trong-sheet" cao ⇒ map thiếu dòng (chạy nhầm sheet / chưa điền cột G), KHÔNG phải Hub.
+    private void LogSummary() =>
+        _log($"Σ lane: update OK {_okCount} · bỏ qua {_skipCount} (không-trong-sheet {_notInSheetCount}) · đã báo Thống kê {_reportedRows} dòng.");
 
     // ── phân trang Listing → uỷ quyền BigSellerCrawlHelper.ClickNextCrawlPageAsync (bản chung Crawl + Listing) ──
     // Nút Next bảng Listing dùng li.next_item (trang cuối → li.next_item.disabled → không khớp :not(.disabled)
@@ -435,12 +463,12 @@ internal sealed partial class BigSellerProductUpdateRunner : BigSellerBraveRunne
             if (string.IsNullOrEmpty(actualEditId))
             {
                 if (!string.IsNullOrEmpty(rowKey)) _skippedRowKeys.Add(rowKey);
-                keepClaim = true; return ("skipped", false);
+                _skipCount++; keepClaim = true; return ("skipped", false);
             }
             if (_skippedEditIds.Contains(actualEditId))
             {
                 if (!string.IsNullOrEmpty(rowKey)) _skippedRowKeys.Add(rowKey);
-                keepClaim = true; return ("skipped", false);
+                _skipCount++; keepClaim = true; return ("skipped", false);
             }
 
             // SONG SONG — claim TẦNG 2 theo edit-id thật: phòng 2 dòng draft khác nhau cùng trỏ 1 SP
@@ -450,7 +478,7 @@ internal sealed partial class BigSellerProductUpdateRunner : BigSellerBraveRunne
                 // Nạp rowKey vào skipped để vòng sau XÓA dòng draft trùng này — nếu không, dòng vẫn nằm
                 // ở listing, lane cứ bám row #0 quét lại mỗi vòng → không tiến/không kết thúc (treo).
                 if (!string.IsNullOrEmpty(rowKey)) _skippedRowKeys.Add(rowKey);
-                keepClaim = true; return ("skipped", false);   // claim tầng-2 do LANE KHÁC giữ → KHÔNG nhả hộ (editClaimKey vẫn null)
+                _skipCount++; keepClaim = true; return ("skipped", false);   // claim tầng-2 do LANE KHÁC giữ → KHÔNG nhả hộ (editClaimKey vẫn null)
             }
             editClaimKey = $"edit:{actualEditId}";   // lane NÀY vừa claim tầng-2 → nhớ để nhả nếu không giữ (retry/terminal/lỗi)
 
@@ -462,7 +490,10 @@ internal sealed partial class BigSellerProductUpdateRunner : BigSellerBraveRunne
                 _log($"  ↳ {status} → giữ nguyên trên BigSeller (KHÔNG xóa), bỏ qua dòng.");
                 if (!string.IsNullOrEmpty(actualEditId)) _skippedEditIds.Add(actualEditId);
                 if (!string.IsNullOrEmpty(rowKey)) _skippedRowKeys.Add(rowKey);
-                keepClaim = true; return ("skipped", false);
+                // "not_in_xlsx" = SP trên Listing KHÔNG có trong map → đây là loại "bỏ qua" cần soi riêng: nếu số này
+                // ≈ tổng SP mà OK=0 thì đang chạy nhầm sheet / map thiếu, KHÔNG phải Hub nuốt event.
+                if (status == "not_in_xlsx") _notInSheetCount++;
+                _skipCount++; keepClaim = true; return ("skipped", false);
             }
 
             // ĐÂY là điểm "bắt đầu sửa" — SP chỉ bị mở rồi skip ở các nhánh trên (không có edit-id / đã skip /
@@ -481,14 +512,18 @@ internal sealed partial class BigSellerProductUpdateRunner : BigSellerBraveRunne
                 _log("  ↳ fail 2 lần → giữ nguyên trên BigSeller (KHÔNG xóa), bỏ qua dòng.");
                 _skippedEditIds.Add(actualEditId);
                 if (!string.IsNullOrEmpty(rowKey)) _skippedRowKeys.Add(rowKey);
-                keepClaim = true; return ("skipped", false);
+                _skipCount++; keepClaim = true; return ("skipped", false);
             }
 
             _skippedEditIds.Add(actualEditId);
             if (!string.IsNullOrEmpty(rowKey)) _skippedRowKeys.Add(rowKey);
             _log($"✅ HOÀN TẤT XỬ LÝ SKU: {record!.Sku}");
             await OverlayAsync($"✅ Hoàn tất SKU {record!.Sku}");
-            if (record!.LineIndex > 0) RowsDone?.Invoke(record.LineIndex, record.LineIndex);   // báo ledger đúng dòng đã update
+            _okCount++;
+            if (record!.LineIndex > 0) { RowsDone?.Invoke(record.LineIndex, record.LineIndex); _reportedRows++; }   // báo ledger đúng dòng đã update
+            // LineIndex=0 gần như KHÔNG xảy ra (record đến từ workbook, luôn có số dòng) — nếu có thì SP này update
+            // xong mà KHÔNG báo được lên Thống kê → log để soi (record dựng thiếu LineIndex ở đâu đó).
+            else _log("  ⚠ LineIndex=0 — update xong nhưng KHÔNG báo được lên Thống kê (dòng này sẽ thiếu trên Hub).");
             keepClaim = true; return ("ok", false);
         }
         catch (OperationCanceledException) { throw; }

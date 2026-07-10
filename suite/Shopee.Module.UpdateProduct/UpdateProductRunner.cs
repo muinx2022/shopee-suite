@@ -137,6 +137,16 @@ public sealed class UpdateProductRunner
         // (immutable) → mỗi lane chỉ tìm id trên Listing rồi sửa, KHỎI đọc-lại/parse-lại workbook N lần.
         // Nạp trước khi mở Brave → workbook lỗi/thiếu cột báo ngay (chưa tốn công phóng trình duyệt).
         var records = await WorkbookRecordCache.LoadAsync(wf, m => Log?.Invoke(m), ct).ConfigureAwait(false);
+        // MAP RỖNG = 0 dòng đủ điều kiện update (cột "Tên đã sửa" trống hết / khoảng dòng không có SP). Nếu vẫn mở
+        // Brave thì MỌI SP trên Listing đều "not_in_xlsx" → bị BỎ QUA → chạy HÀNG GIỜ vô ích rồi vẫn báo "✓ xong".
+        // → DỪNG NGAY tại facade (trước khi spawn lane/mở Brave nào). Return sạch = lane "hết việc", KHÔNG restart.
+        if (records.Records.Count == 0)
+        {
+            Log?.Invoke($"⚠ KHÔNG có dòng nào đủ điều kiện update trong sheet '{wf.DataSheet}' (cột 'Tên đã sửa' trống hết " +
+                "hoặc khoảng dòng không có SP) — mọi SP trên Listing sẽ chỉ bị BỎ QUA nên DỪNG NGAY, không mở Brave. " +
+                "→ Chạy 'Update tên SP (AI)' để điền cột G trước, rồi chạy lại Update.");
+            return;
+        }
         if (n == 1)
         {
             await using var runner = new BigSellerProductUpdateRunner(wf, m => Log?.Invoke(m), _pause, sharedRecords: records);

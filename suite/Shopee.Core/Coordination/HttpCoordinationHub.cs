@@ -26,6 +26,13 @@ public sealed class HttpCoordinationHub : ICoordinationHub, IDisposable
     public bool Enabled => true;
     public event Action? Changed;
 
+    /// <summary>Hook chẩn đoán khi ĐẨY LEDGER lên Hub THẤT BẠI. App gán về <c>HubLog.Warn</c> lúc khởi động.
+    /// static vì <see cref="TryPublish"/> chạy NỀN (fire-and-forget) — KHÔNG có context log của lane/việc để bám.</summary>
+    public static Action<string>? DiagLog { get; set; }
+    // Throttle log lỗi đẩy ledger: tối đa 1 dòng / 60s. POST hỏng thường lỗi HÀNG LOẠT (mất net) → không có
+    // throttle thì mỗi dòng RowsDone hỏng đẻ 1 log → ngập. So mốc bằng Environment.TickCount64 (ms từ lúc bật máy).
+    private static long _lastDiagTick;
+
     public HttpCoordinationHub(HubClient client, string machineId)
     {
         _client = client;
@@ -137,7 +144,16 @@ public sealed class HttpCoordinationHub : ICoordinationHub, IDisposable
 
     private async Task TryPublish(WorkLedgerRecord rec)
     {
-        try { await _client.PublishLedgerAsync(rec); } catch { }
+        try { await _client.PublishLedgerAsync(rec); }
+        catch (Exception ex)
+        {
+            // TRƯỚC ĐÂY nuốt IM LẶNG mọi lỗi → POST ledger hỏng thì Thống kê thiếu dòng mà KHÔNG AI BIẾT
+            // (đúng nghi án "import/update = 0 dòng"). Giờ báo qua DiagLog, THROTTLE 1 dòng/60s (CAS chống đua nền).
+            var now = Environment.TickCount64;
+            var prev = Interlocked.Read(ref _lastDiagTick);
+            if (now - prev >= 60_000 && Interlocked.CompareExchange(ref _lastDiagTick, now, prev) == prev)
+                DiagLog?.Invoke($"⚠ đẩy ledger lên Hub thất bại ({rec.Op}): {ex.Message}");
+        }
     }
 
     /// <summary>Hub ĐẶT TAY trạng thái sổ cho 1 việc (operator bấm trên bảng Giao việc): completed = ✓ xong;
