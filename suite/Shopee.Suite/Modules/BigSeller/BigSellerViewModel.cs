@@ -278,7 +278,7 @@ public sealed partial class BigSellerViewModel : ModuleViewModelBase
         if (!await Dialogs.ConfirmAsync(
                 $"Xóa TOÀN BỘ media trong thư viện ảnh (Material Center) của tk \"{sel.DisplayName}\" trên BigSeller?\n\n" +
                 "• Xóa trên server BigSeller, KHÔNG hoàn tác được.\n" +
-                "• App sẽ mở 1 cửa sổ Brave riêng (thu nhỏ), dọn xong tự đóng — không ảnh hưởng update đang chạy.",
+                "• App sẽ mở 1 cửa sổ Brave riêng, dọn xong tự đóng — không ảnh hưởng update đang chạy.",
                 "Xóa Medias"))
             return;
 

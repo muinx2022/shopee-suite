@@ -5,6 +5,15 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Hiệu năng. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.0.15 — 2026-07-11
+
+Chủ đề: **Brave mở bình thường — bỏ hẳn thu nhỏ + hết nhấp nháy**.
+
+- Mọi cửa sổ Brave automation (Update/Import, Scrape, Search, Xóa Medias) giờ mở
+  BÌNH THƯỜNG theo yêu cầu. Trước đây mở thu-nhỏ kèm một watchdog quét ~10 giây liên
+  tục đè cửa sổ xuống taskbar — Brave tự bung lên, watchdog lại đè xuống → chính là
+  hiện tượng "nhấp nháy mở lên mở xuống" thấy ở các bản gần đây.
+
 ## v1.0.14 — 2026-07-11
 
 Chủ đề: **kho đầy phát hiện trong vài giây đầu mỗi SP + không còn nhánh fail im lặng ở bước Lưu**.

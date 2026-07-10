@@ -16,8 +16,10 @@ public static class BraveJobObject
         PlatformServices.ProcessLifetime.ConfigureLimits(activeProcessLimit, jobMemoryLimitBytes);
 
     /// <summary>Phóng Brave trong scope "chết theo app". Không bao giờ ném — lỗi thì fallback phóng thường.
-    /// <paramref name="startMinimized"/>=true → cửa sổ mở THU NHỎ, không chiếm màn hình/không cướp focus
-    /// (Windows). Nhớ BỎ cờ '--start-maximized' ở args khi bật, kẻo cờ dòng lệnh đè lại thành maximize.</summary>
+    /// <paramref name="startMinimized"/>=true → cửa sổ mở THU NHỎ + watchdog đè cửa sổ fork/mở-lại (Windows).
+    /// LƯU Ý 2026-07-11: user yêu cầu BỎ minimize cho MỌI luồng automation (scrape/update/search đều truyền
+    /// false) — watchdog đè-thu-nhỏ gây "nhấp nháy" cửa sổ. ĐỪNG bật lại true ở call site nếu user không đổi ý.
+    /// Nếu bật: nhớ BỎ cờ '--start-maximized' ở args, kẻo cờ dòng lệnh đè lại thành maximize.</summary>
     public static Process Start(string fileName, string arguments, bool startMinimized = false)
     {
         var proc = PlatformServices.ProcessLifetime.Start(fileName, arguments, startMinimized);

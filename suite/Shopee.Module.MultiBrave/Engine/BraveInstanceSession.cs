@@ -839,9 +839,9 @@ internal sealed class BraveInstanceSession : IDisposable
             BraveFleet.RegisterActiveProfile(_profileRoot.FullName);
         // Phóng Brave GẮN vào Job Object KILL_ON_JOB_CLOSE của app → app chết kiểu gì (kể cả crash /
         // force-kill) thì OS tự dọn sạch Brave con, không còn tiến trình mồ côi ăn RAM.
-        // startMinimized: cửa sổ scrape tự động (xoay vòng 10–20 cửa sổ, mở lại liên tục) mở THU NHỎ, không
-        // cướp focus màn hình người dùng; watchdog trong BraveJobObject lo cửa sổ browser fork/mở lại.
-        _braveProcess = BraveJobObject.Start(exePath, arguments, startMinimized: true);
+        // startMinimized: TẮT theo yêu cầu user 2026-07-11 — mở BÌNH THƯỜNG; bản thu-nhỏ cũ kèm watchdog
+        // BraveWindowMinimizer đè cửa sổ ~10s gây "nhấp nháy mở lên mở xuống" (Brave tự bung, watchdog lại đè).
+        _braveProcess = BraveJobObject.Start(exePath, arguments, startMinimized: false);
         Log($"Brave PID={_braveProcess?.Id}");
     }
 

@@ -60,13 +60,13 @@ internal abstract class BigSellerBraveRunner : IAsyncDisposable
             // Chặn dialog "Brave Browser quit unexpectedly / send diagnostic" (browser-chrome, Playwright không
             // click được) hiện đè sau lần crash trước.
             .Add("--noerrdialogs")
-            // KHÔNG '--start-maximized': muốn Brave mở THU NHỎ (startMinimized) — cờ maximize sẽ đè show-state.
+            // KHÔNG '--start-maximized': mở cỡ cửa sổ mặc định (WindowSize dưới), không chiếm cả màn hình.
             .WindowSize(1920, 1080)
             .DisableGpu()
             .Add("--disable-dev-shm-usage")
             .Add("--disable-software-rasterizer")
-            // Cửa sổ mở THU NHỎ (startMinimized) → Chromium bóp timer/renderer khi cửa sổ bị che/thu nhỏ,
-            // làm Update/Import chậm/treo ngầm. Tắt 3 cơ chế tiết kiệm đó (giống scrape) để chạy nền ổn định.
+            // Chromium bóp timer/renderer khi cửa sổ bị che/thu nhỏ → Update/Import chậm/treo ngầm khi user
+            // tự thu nhỏ hoặc cửa sổ bị đè. Tắt 3 cơ chế tiết kiệm đó (giống scrape) để chạy nền ổn định.
             .Add("--disable-backgrounding-occluded-windows")
             .Add("--disable-renderer-backgrounding")
             .Add("--disable-background-timer-throttling")
@@ -77,11 +77,12 @@ internal abstract class BigSellerBraveRunner : IAsyncDisposable
         // Thiếu bước này = Brave bị quét-giết như mồ côi giữa chừng (còn vòng lặp thì cứ mở lại rồi lại bị giết).
         BraveFleet.RegisterActiveProfile(_settings.ProfileDir);
 
-        _log("Mở Brave BigSeller profile (thu nhỏ)...");
+        _log("Mở Brave BigSeller profile...");
         // Phóng qua BraveJobObject (KILL_ON_JOB_CLOSE): app tắt/crash → OS tự giết Brave này. Vẫn cần
         // reaper ở DisposeAsync vì Brave fork browser thật rồi stub thoát (job chỉ dọn khi app chết hẳn).
-        // startMinimized: mở cửa sổ ở trạng thái thu nhỏ, KHÔNG chiếm màn hình/không cướp focus của người dùng.
-        _braveProcess = BraveJobObject.Start(_settings.BravePath, args, startMinimized: true);
+        // startMinimized: TẮT theo yêu cầu user 2026-07-11 — mở BÌNH THƯỜNG; bản thu-nhỏ cũ kèm watchdog
+        // BraveWindowMinimizer đè cửa sổ ~10s gây "nhấp nháy mở lên mở xuống" (Brave tự bung, watchdog lại đè).
+        _braveProcess = BraveJobObject.Start(_settings.BravePath, args, startMinimized: false);
     }
 
     /// <summary>Chờ CDP port sẵn sàng (số lần thử + thông điệp lỗi do caller quyết → giữ nguyên timing/log của

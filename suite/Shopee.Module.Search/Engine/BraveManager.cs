@@ -69,9 +69,9 @@ public sealed class BraveManager(AppSettingsService appSettings)
         var args = BuildArgs(_cdpPort, profileDir, proxyServer, extPath, wsPort);
         // Phóng qua BraveJobObject (KILL_ON_JOB_CLOSE): app tắt/crash/force-kill → OS tự giết Brave này,
         // không để lại cửa sổ mồ côi. Trước đây Search dùng Process.Start trần → Brave sống sót qua crash.
-        // startMinimized: cửa sổ Search tự động mở THU NHỎ, không cướp focus màn hình người dùng; watchdog
-        // trong BraveJobObject lo cửa sổ browser fork/mở lại.
-        _process = Shopee.Core.Browser.BraveJobObject.Start(bravePath, args, startMinimized: true);
+        // startMinimized: TẮT theo yêu cầu user 2026-07-11 — mở BÌNH THƯỜNG; bản thu-nhỏ cũ kèm watchdog
+        // BraveWindowMinimizer đè cửa sổ ~10s gây "nhấp nháy mở lên mở xuống" (Brave tự bung, watchdog lại đè).
+        _process = Shopee.Core.Browser.BraveJobObject.Start(bravePath, args, startMinimized: false);
     }
 
     public async Task CleanupRestoredTabsAsync(int wsPort, CancellationToken ct = default)
