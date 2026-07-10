@@ -475,10 +475,10 @@ internal sealed partial class BigSellerProductUpdateRunner : BigSellerBraveRunne
             var res = await RunListingRowAsync(page, row, editLink, rowKey, editId, ct,
                 getStreak, setStreak, getTotal, setTotal).ConfigureAwait(false);
             // NHẢ claim rowKey khi dòng CHƯA xong-hẳn: "retry" (lỗi tạm) / terminal (lane sắp chết/restart) /
-            // "media_full" (làm lại sau khi dọn kho). Nếu KHÔNG nhả → dòng bị "claim mồ côi" (ClaimStore chung không
-            // hết-hạn) → sau restart không lane nào claim lại được → bỏ sót SP mà vẫn báo Hub "completed". Giữ claim
-            // CHỈ khi ok/deleted/skipped.
-            if (_claim is not null && (res.terminal || res.result == "retry" || res.result == "media_full")) _claim.Release(rowKey);
+            // "media_full" (làm lại sau khi dọn kho) / "failed" (lane này bỏ cuộc sau fail 2 lần — để lane khác thử).
+            // Nếu KHÔNG nhả → dòng bị "claim mồ côi" (ClaimStore chung không hết-hạn) → sau restart không lane nào
+            // claim lại được → bỏ sót SP mà vẫn báo Hub "completed". Giữ claim (rowKey) CHỈ khi ok/deleted/skipped.
+            if (_claim is not null && (res.terminal || res.result == "retry" || res.result == "media_full" || res.result == "failed")) _claim.Release(rowKey);
             return res;
         }
         return ("exhausted", false);
@@ -600,11 +600,14 @@ internal sealed partial class BigSellerProductUpdateRunner : BigSellerBraveRunne
                 var fails = _failCounts.TryGetValue(failKey, out var c) ? c + 1 : 1;
                 _failCounts[failKey] = fails;
                 if (fails < 2) return ("retry", false);   // NHẢ claim (finally) → thử lại vòng sau
-                // 2 lần fail (không phải lỗi tạm) → GIỮ NGUYÊN, KHÔNG xóa; chỉ bỏ qua dòng (giữ claim để khỏi mở lại).
-                _log("  ↳ fail 2 lần → giữ nguyên trên BigSeller (KHÔNG xóa), bỏ qua dòng.");
+                // 2 lần fail (không phải lỗi tạm) → lane NÀY bỏ cuộc. skip-set PER-LANE chặn lane này chọn lại dòng
+                // (khỏi lặp vô hạn), nhưng NHẢ khóa (keepClaim=false → finally nhả edit-id; "failed" → nhả rowKey ở
+                // RunFirstListingRow) để LANE KHÁC có 2 lượt thử riêng → tổng tự chặn ở 2×N lane, KHÔNG khóa oan SP
+                // (bug prod: kho media đầy → "fail 2 lần" khóa vĩnh viễn dù dọn xong lane khác sửa được).
+                _log("  ↳ fail 2 lần → lane này bỏ qua, NHẢ khóa cho lane khác thử (không xóa trên BigSeller).");
                 _skippedEditIds.Add(actualEditId);
                 if (!string.IsNullOrEmpty(rowKey)) _skippedRowKeys.Add(rowKey);
-                _skipCount++; keepClaim = true; return ("skipped", false);
+                _skipCount++; keepClaim = false; return ("failed", false);
             }
 
             _skippedEditIds.Add(actualEditId);
@@ -615,6 +618,9 @@ internal sealed partial class BigSellerProductUpdateRunner : BigSellerBraveRunne
             // Helper PHẢI đã gọi onSaved lúc đóng tab; nếu CHƯA (đường success nào đó không qua helper) vẫn báo để Hub
             // không thiếu dòng — cờ reported chống bắn đúp.
             if (!reported && record!.LineIndex > 0) { RowsDone?.Invoke(record.LineIndex, record.LineIndex); _reportedRows++; _log("  ⚠ báo Thống kê qua fallback (onSaved không được gọi trong helper — soi lại luồng save)."); }
+            // THÀNH CÔNG → chốt cả khóa edit-id lẫn khóa dòng-draft vào mảng-2 (_done): khóa VĨNH VIỄN trong lượt
+            // chạy, không lane nào (kể cả lane này sau restart) mở lại. keepClaim=true nên finally không nhả.
+            _claim?.MarkDone(editClaimKey); _claim?.MarkDone(rowKey);
             keepClaim = true; return ("ok", false);
         }
         catch (OperationCanceledException) { throw; }

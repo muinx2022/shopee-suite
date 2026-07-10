@@ -5,6 +5,17 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Hiệu năng. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.0.13 — 2026-07-11
+
+Chủ đề: **khóa SP tách 2 mảng "đang sửa" / "đã sửa xong" — SP sửa hỏng không còn bị khóa oan**.
+
+- Trước: một SP "fail 2 lần" (ví dụ vì kho media đầy đúng lúc đó) bị GIỮ KHÓA vĩnh viễn
+  trong lượt chạy — không cửa sổ nào khác được thử lại, kể cả sau khi kho đã được dọn.
+- Giờ khóa tách 2 mảng: (1) "đang có worker sửa" — sửa FAIL thì nhả khóa để cửa sổ khác
+  còn cơ hội (mỗi cửa sổ có 2 lượt thử riêng nên không lặp vô hạn); (2) "đã sửa THÀNH
+  CÔNG" — khóa vĩnh viễn trong lượt, không ai mở lại (kể cả cửa sổ vừa khởi động lại),
+  không lo update trùng / báo dòng trùng lên Hub.
+
 ## v1.0.12 — 2026-07-11
 
 Chủ đề: **bắt được toast "kho media đầy" thật sự (v1.0.11 luôn trượt vì check trễ hơn vòng đời toast)**.
