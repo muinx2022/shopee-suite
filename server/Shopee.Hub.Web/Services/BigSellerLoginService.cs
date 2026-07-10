@@ -25,6 +25,10 @@ public sealed class BigSellerLoginService : IAsyncDisposable
 {
     private const string LoginUrl = "https://www.bigseller.com/en_US/login.htm";
     private const string AuthCookieName = "muc_token";
+    // Cookie KHÔNG seed lại trước khi login: muc_token + JSESSIONID là auth theo-ngữ-cảnh — nạp lại thì BigSeller
+    // BOUNCE (Test A 2026-07-03) làm login hỏng. Bỏ chúng để ép form-login captcha-only (mint token mới) NHƯNG giữ
+    // fingerPrint & phần còn lại → BigSeller không coi là thiết bị mới → KHÔNG đòi mã email (OTP).
+    private static readonly string[] SkipSeedCookies = { AuthCookieName, "JSESSIONID" };
 
     private readonly HubDatabase _db;
     private readonly FileStoreConfigService _config;
@@ -124,6 +128,8 @@ public sealed class BigSellerLoginService : IAsyncDisposable
                 UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
                 ViewportSize = new ViewportSize { Width = 1366, Height = 768 },
             });
+            // Nạp lại device-trust đã lưu TRƯỚC khi login (điểm A) → tránh BigSeller coi là thiết bị mới → hết OTP oan.
+            await SeedDeviceTrustCookiesAsync(acctId, ctx, s);
             var page = await ctx.NewPageAsync();
 
             var ai = _config.Ai();
@@ -139,6 +145,69 @@ public sealed class BigSellerLoginService : IAsyncDisposable
         catch (OperationCanceledException) { Say(s, "■ Đã huỷ."); Fail(s); }
         catch (Exception ex) { Say(s, "✘ Lỗi: " + ex.Message); Fail(s); }
         finally { if (ctx is not null) { try { await ctx.CloseAsync(); } catch { } } }
+    }
+
+    /// <summary>Nạp lại device-trust từ kho <c>cookies/{acctId}.json</c> (format do CaptureAndSaveAsync ghi) vào
+    /// context TRƯỚC khi login. Verify 2026-07-03: nạp bộ cookie cũ TRỪ muc_token/JSESSIONID → login chỉ captcha,
+    /// KHÔNG đòi mã email; giữ fingerPrint = không bị coi thiết bị mới. Lỗi đọc/parse → log + đi tiếp (context trắng
+    /// như cũ, có thể phải nhập OTP). Bỏ cookie đã hết hạn (Playwright coi vô nghĩa/ném).</summary>
+    private async Task SeedDeviceTrustCookiesAsync(string acctId, IBrowserContext ctx, Session s)
+    {
+        try
+        {
+            var bytes = _db.ReadFile($"cookies/{acctId}.json");
+            if (bytes is null || bytes.Length == 0) { Say(s, "• Chưa có cookie đã lưu → login từ đầu (có thể cần mã email)."); return; }
+            using var doc = JsonDocument.Parse(bytes);
+            if (!doc.RootElement.TryGetProperty("cookies", out var arr) || arr.ValueKind != JsonValueKind.Array)
+            { Say(s, "• File cookie không có mảng 'cookies' → login từ đầu."); return; }
+
+            var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            var seed = new List<Cookie>();
+            var skippedExpired = 0;
+            foreach (var c in arr.EnumerateArray())
+            {
+                var name = c.TryGetProperty("name", out var nEl) ? nEl.GetString() ?? "" : "";
+                if (name.Length == 0) continue;
+                if (SkipSeedCookies.Contains(name, StringComparer.Ordinal)) continue;   // bỏ auth token (bounce)
+                var domain = c.TryGetProperty("domain", out var dEl) ? dEl.GetString() ?? "" : "";
+                if (domain.Length == 0) continue;
+
+                var cookie = new Cookie
+                {
+                    Name = name,
+                    Value = c.TryGetProperty("value", out var vEl) ? vEl.GetString() ?? "" : "",
+                    Domain = domain,
+                    Path = c.TryGetProperty("path", out var pEl) ? pEl.GetString() ?? "/" : "/",
+                    Secure = c.TryGetProperty("secure", out var secEl) && secEl.ValueKind == JsonValueKind.True,
+                    HttpOnly = c.TryGetProperty("httpOnly", out var hoEl) && hoEl.ValueKind == JsonValueKind.True,
+                };
+                // expires: null/<=0 = session cookie (không set). >0 mà đã quá hạn → BỎ (nạp lại vô nghĩa/gây lỗi).
+                if (c.TryGetProperty("expires", out var exEl) && exEl.ValueKind == JsonValueKind.Number)
+                {
+                    var exp = exEl.GetInt64();
+                    if (exp > 0)
+                    {
+                        if (exp < now) { skippedExpired++; continue; }
+                        cookie.Expires = exp;
+                    }
+                }
+                // sameSite string → enum; rỗng/không map được → bỏ qua field (dùng mặc định của Playwright).
+                if (c.TryGetProperty("sameSite", out var ssEl) && ssEl.ValueKind == JsonValueKind.String)
+                    cookie.SameSite = ssEl.GetString() switch
+                    {
+                        "Strict" => SameSiteAttribute.Strict,
+                        "Lax" => SameSiteAttribute.Lax,
+                        "None" => SameSiteAttribute.None,
+                        _ => null,
+                    };
+                seed.Add(cookie);
+            }
+
+            if (seed.Count == 0) { Say(s, "• Cookie đã lưu rỗng/hết hạn hết → login từ đầu."); return; }
+            await ctx.AddCookiesAsync(seed);
+            Say(s, $"• Nạp {seed.Count} cookie device-trust (bỏ muc_token/JSESSIONID{(skippedExpired > 0 ? $" + {skippedExpired} cookie hết hạn" : "")}) → login captcha-only nếu trust còn.");
+        }
+        catch (Exception ex) { Say(s, "• Không nạp được cookie đã lưu (" + ex.Message + ") → login từ đầu."); }
     }
 
     /// <summary>Vòng điền form + captcha — nay ủy cho lõi chung <see cref="BigSellerLoginForm.RunFormLoginAsync"/>.

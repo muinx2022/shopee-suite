@@ -53,6 +53,8 @@ builder.Services.AddSingleton<SheetMapService>();
 builder.Services.AddSingleton<DispatcherService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<DispatcherService>());
 builder.Services.AddHostedService<MaintenanceService>();
+// Re-login BigSeller định kỳ ~7 ngày, RẢI 1 acc/giờ → device-trust không hết hạn, không bị đòi mã email đồng loạt.
+builder.Services.AddHostedService<BigSellerReloginScheduler>();
 
 // Khoá Data Protection lưu ra đĩa → cookie đăng nhập web sống qua restart/redeploy.
 builder.Services.AddDataProtection()
