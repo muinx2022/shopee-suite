@@ -5,6 +5,22 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Hiệu năng. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.0.7 — 2026-07-10
+
+Chủ đề: **popup ngôn ngữ BigSeller tái phát khi UI đã là tiếng Việt — đổi cách nhận diện**.
+
+- Update/Import/Material Center: sau khi ta chọn "Tiếng Việt" (fix v1.0.5), BigSeller
+  chuyển CẢ popup guide sang tiếng Việt → cách nhận diện cũ theo text tiếng Anh
+  ("switch the language") không thấy nữa → dropdown ngôn ngữ bị guide banh ra vẫn
+  đè cột Thao tác, không click được Edit. Giờ nhận diện theo CẤU TRÚC DOM (class
+  `language_switch_guide`/`guide_mask` + menu `sub_lang_nav_setting_list` đang hiện,
+  check visible bằng `getClientRects` — bắt được cả mask position:fixed); text tiếng
+  Anh chỉ còn là fallback.
+- UI chưa phải tiếng Việt → vẫn chọn hẳn "Tiếng Việt" như trước. UI ĐÃ là tiếng Việt
+  (click lại vô nghĩa, menu vẫn treo) → click X của guide nếu có, gỡ hẳn node
+  guide/mask và ép ẩn dropdown đang banh (`display:none !important`, thắng CSS hover)
+  — không phụ thuộc handler của BigSeller nên chắc chắn trả lại nút Edit.
+
 ## v1.0.6 — 2026-07-09
 
 Chủ đề: **mất session BigSeller giữa chừng tự đăng nhập lại + Xóa Medias hết báo trống oan**.

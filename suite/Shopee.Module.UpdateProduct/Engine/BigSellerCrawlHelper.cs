@@ -373,69 +373,82 @@ internal static class BigSellerCrawlHelper
     }
 
     /// <summary>Đóng popup hướng dẫn đổi ngôn ngữ của BigSeller ("Guide: Click here to switch the language…"
-    /// + menu ngôn ngữ mở sẵn) — popup này KHÔNG phải ant-modal nên DismissBlockingModal thường không đóng được,
-    /// chặn click Edit trên Listing → vòng update kẹt "nhấp nháy". Ưu tiên CHỌN HẲN "Tiếng Việt" khi menu đang
-    /// hiện (BigSeller nhớ lựa chọn → lần sau không hiện nữa; selector của ta hỗ trợ VN/EN); không thấy menu thì
-    /// đóng nút X của guide, cuối cùng ESC. Best-effort, không ném. Trả true nếu có thao tác gì đó.</summary>
+    /// + menu ngôn ngữ bị banh sẵn ra) — popup này KHÔNG phải ant-modal nên DismissBlockingModal thường không
+    /// đóng được; dropdown góc phải đè đúng cột Thao tác → không click được Edit. Nhận diện THEO CẤU TRÚC
+    /// (class <c>language_switch_guide</c>/<c>guide_mask</c> + <c>ul.sub_lang_nav_setting_list</c> đang hiện)
+    /// chứ KHÔNG theo text: sau khi đã chọn Tiếng Việt, guide cũng nói tiếng Việt nên gate text tiếng Anh cũ
+    /// ("switch the language") bỏ lọt hoàn toàn. UI chưa phải tiếng Việt → CHỌN HẲN "Tiếng Việt" (BigSeller
+    /// nhớ lựa chọn); UI đã vi rồi thì click lại vô nghĩa (menu vẫn treo) → click X nếu có, gỡ guide/mask và
+    /// ép ẩn dropdown đang banh. Best-effort, không ném. Trả true nếu có thao tác gì đó.</summary>
     public static async Task<bool> DismissLanguageGuideAsync(IPage page, Action<string>? log, CancellationToken ct)
     {
-        // 1. Check nhanh: guide có ĐANG hiện không. Đường nóng gọi thường xuyên nên phải RẺ — chưa thấy thì
-        //    thoát NGAY (khỏi chạy JS quét toàn DOM khi không có popup).
+        // 1. Check nhanh: guide/menu có ĐANG hiện không. Đường nóng gọi thường xuyên nên phải RẺ — check bằng
+        //    querySelector theo class (không quét text toàn DOM). getClientRects thay offsetParent vì mask
+        //    thường position:fixed (offsetParent null dù đang hiện).
+        string state;
         try
         {
-            var guide = page.Locator("text=switch the language").First;
-            if (await guide.CountAsync() == 0 || !await guide.IsVisibleAsync())
-                return false;
+            state = await page.EvaluateAsync<string>(
+                @"() => {
+                    const vis = el => !!el && el.getClientRects().length > 0;
+                    const guideShown =
+                        Array.from(document.querySelectorAll('[class*=""language_switch_guide""], [class*=""guide_mask""]')).some(vis) ||
+                        Array.from(document.querySelectorAll('ul.sub_lang_nav_setting_list')).some(vis);
+                    if (!guideShown) return '';
+                    const nav = document.querySelector('ul.nav_setting_list');
+                    const lang = ((nav && nav.getAttribute('lang')) || document.documentElement.lang || '').toLowerCase();
+                    return lang.startsWith('vi') ? 'close' : 'pick';
+                }");
+            if (string.IsNullOrEmpty(state))
+            {
+                // Fallback text tiếng Anh cho biến thể guide không mang class quen thuộc (hành vi bản cũ).
+                var guide = page.Locator("text=switch the language").First;
+                if (await guide.CountAsync() == 0 || !await guide.IsVisibleAsync())
+                    return false;
+                state = "pick";
+            }
         }
         catch { return false; }
 
-        // 2. Guide đang hiện → thử CHỌN "Tiếng Việt" (BigSeller nhớ lựa chọn → lần sau không hiện lại). Click
-        //    element lá đúng text 'Tiếng Việt' đang visible → bubble lên parent handler đổi ngôn ngữ.
-        try
+        // 2. UI chưa phải tiếng Việt → CHỌN "Tiếng Việt" (BigSeller nhớ lựa chọn → lần sau không hiện lại).
+        //    Ưu tiên đúng menu ul.sub_lang_nav_setting_list; fallback mọi lá visible có text 'Tiếng Việt'.
+        if (state == "pick")
         {
-            var pickedVn = await page.EvaluateAsync<bool>(
-                @"() => {
-                    const items = Array.from(document.querySelectorAll('li,a,span,div'))
-                        .filter(el => el.childElementCount === 0 && (el.textContent || '').trim() === 'Tiếng Việt'
-                                   && el.offsetParent !== null);
-                    if (items.length) { items[0].click(); return true; }
-                    return false;
-                }");
-            if (pickedVn)
+            try
             {
-                log?.Invoke("🌐 Popup chọn ngôn ngữ BigSeller → đã chọn Tiếng Việt.");
-                await Task.Delay(1500, ct);   // đổi ngôn ngữ có thể reload nội dung
-                return true;
+                var pickedVn = await page.EvaluateAsync<bool>(
+                    @"() => {
+                        const vis = el => !!el && el.getClientRects().length > 0;
+                        let item = Array.from(document.querySelectorAll('ul.sub_lang_nav_setting_list a'))
+                            .find(el => vis(el) && (el.textContent || '').trim() === 'Tiếng Việt');
+                        if (!item)
+                            item = Array.from(document.querySelectorAll('li,a,span,div'))
+                                .find(el => el.childElementCount === 0 && (el.textContent || '').trim() === 'Tiếng Việt' && vis(el));
+                        if (item) { item.click(); return true; }
+                        return false;
+                    }");
+                if (pickedVn)
+                {
+                    log?.Invoke("🌐 Popup chọn ngôn ngữ BigSeller → đã chọn Tiếng Việt.");
+                    await Task.Delay(1500, ct);   // đổi ngôn ngữ có thể reload nội dung
+                    // Dọn nốt tàn dư nếu không reload (mask/menu còn treo) — best-effort, trang có thể đang reload.
+                    try { await CleanupLanguageGuideLeftoversAsync(page); } catch { }
+                    return true;
+                }
             }
+            catch (OperationCanceledException) { throw; }
+            catch { }
         }
-        catch (OperationCanceledException) { throw; }
-        catch { }
 
-        // 3. Không có mục ngôn ngữ để chọn → đóng nút X của guide: leo tổ tiên của node chứa text tới container,
-        //    tìm phần tử close bên trong; không được thì click mọi lá visible có text '×'/'✕' gần đó.
+        // 3. UI đã tiếng Việt (hoặc không chọn được): click X của guide nếu có (để BigSeller ghi 'đã xem'),
+        //    rồi gỡ hẳn guide/mask + ép ẩn dropdown đang banh ra. Đây là đường quyết định — không phụ thuộc
+        //    handler của BigSeller nên chắc chắn trả lại nút Edit.
         try
         {
-            var closed = await page.EvaluateAsync<bool>(
-                @"() => {
-                    const nodes = Array.from(document.querySelectorAll('*'))
-                        .filter(el => el.childElementCount === 0 && (el.textContent || '').includes('switch the language'));
-                    for (const n of nodes) {
-                        let box = n;
-                        for (let i = 0; i < 6 && box; i++) {
-                            const close = box.querySelector('[class*=""close"" i], .anticon-close, svg');
-                            if (close) { close.click(); return true; }
-                            box = box.parentElement;
-                        }
-                    }
-                    const marks = Array.from(document.querySelectorAll('*'))
-                        .filter(el => el.childElementCount === 0 && el.offsetParent !== null
-                                   && ['×', '✕'].includes((el.textContent || '').trim()));
-                    if (marks.length) { marks[0].click(); return true; }
-                    return false;
-                }");
-            if (closed)
+            var cleaned = await CleanupLanguageGuideLeftoversAsync(page);
+            if (cleaned)
             {
-                log?.Invoke("🌐 Đã đóng popup hướng dẫn đổi ngôn ngữ BigSeller (nút X).");
+                log?.Invoke("🌐 Đã đóng guide/menu ngôn ngữ BigSeller đè lên trang.");
                 await Task.Delay(300, ct);
                 return true;
             }
@@ -446,6 +459,30 @@ internal static class BigSellerCrawlHelper
         // 4. Chốt hạ: ESC.
         try { await page.Keyboard.PressAsync("Escape"); return true; } catch { }
         return false;
+    }
+
+    /// <summary>Dọn tàn dư guide ngôn ngữ: click X (nếu có) → remove các node guide/mask → ép ẩn
+    /// (display:none !important, thắng CSS :hover) dropdown <c>ul.nav_setting_list</c>/<c>ul.sub_lang_nav_setting_list</c>
+    /// đang hiện. Chỉ ẩn cái ĐANG hiện — trạng thái ẩn bình thường không bị đụng; automation không dùng menu này
+    /// và điều hướng trang sẽ render lại nên không mất gì. Trả true nếu có dọn được gì.</summary>
+    private static async Task<bool> CleanupLanguageGuideLeftoversAsync(IPage page)
+    {
+        return await page.EvaluateAsync<bool>(
+            @"() => {
+                let acted = false;
+                const vis = el => !!el && el.getClientRects().length > 0;
+                const x = Array.from(document.querySelectorAll(
+                        '[class*=""language_switch_guide""] [class*=""close"" i], [class*=""language_switch_guide""] svg'))
+                    .find(vis);
+                if (x) { try { x.click(); acted = true; } catch (e) {} }
+                document.querySelectorAll('[class*=""language_switch_guide""], [class*=""guide_mask""]')
+                    .forEach(el => { try { el.remove(); acted = true; } catch (e) {} });
+                document.querySelectorAll('ul.sub_lang_nav_setting_list, ul.nav_setting_list')
+                    .forEach(el => {
+                        if (vis(el)) { el.style.setProperty('display', 'none', 'important'); acted = true; }
+                    });
+                return acted;
+            }");
     }
 
     /// <summary>"Có hiển thị trong vòng timeout không" — thay cho IsVisibleAsync(Timeout) đã obsolete:
