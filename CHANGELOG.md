@@ -5,6 +5,22 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Hiệu năng. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.0.12 — 2026-07-11
+
+Chủ đề: **bắt được toast "kho media đầy" thật sự (v1.0.11 luôn trượt vì check trễ hơn vòng đời toast)**.
+
+- Toast báo đầy kho tự ẩn sau ~3 giây, trong khi mọi điểm kiểm tra đều tới muộn hơn
+  (đợi ảnh hiện 5s, chờ MD5 xong 10s) → v1.0.11 không bao giờ nhìn thấy toast, worker
+  vẫn cố import ảnh, không kích hoạt dừng-toàn-bộ. Fix: cài "máy ghi toast"
+  (MutationObserver) vào mọi tab edit ngay từ lúc mở — toast nào từng hiện, dù chỉ 1
+  giây, cũng được ghi lại; các điểm kiểm tra đọc lại sổ ghi thay vì phải canh đúng
+  khoảnh khắc. Mỗi SP một tab mới nên sổ tự sạch, không dính toast của SP trước.
+- Thợ dọn chờ các lane khác tạm dừng (tối đa 180s) giờ log tiến độ mỗi 15s
+  ("⏳ chờ các lane khác đậu: 1/4 lane · đã chờ 30s…") + "🧹 Bắt đầu dọn Material
+  Center…" — trước đây khoảng chờ im lặng hoàn toàn, nhìn như treo nên dễ bấm dừng oan
+  ngay sau dòng "⛔ TẠM DỪNG toàn bộ lane".
+- Dòng log tự khai toast lạ giờ đọc cả sổ ghi (trước chỉ đọc DOM sống nên cũng trượt).
+
 ## v1.0.11 — 2026-07-11
 
 Chủ đề: **Update báo được dòng lên Thống kê Hub (gốc bệnh 0 dòng) + kho media đầy thì dừng cả cụm để dọn**.

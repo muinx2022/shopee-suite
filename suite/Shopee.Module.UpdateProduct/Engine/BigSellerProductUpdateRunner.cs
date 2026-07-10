@@ -224,6 +224,11 @@ internal sealed partial class BigSellerProductUpdateRunner : BigSellerBraveRunne
 
         _context = _browser!.Contexts.FirstOrDefault()
             ?? throw new InvalidOperationException("Brave chưa có browser context.");
+        // Cài "máy ghi" toast NGAY khi có context: toast media-đầy sống ~3s, mọi điểm check của ta đều có thể trễ hơn
+        // (đợi ảnh 5s / MD5 complete 10s) → ngó-đúng-khoảnh-khắc MISS (bug prod v1.0.11: kho đầy, toast hiện, worker
+        // vẫn import 3 attempt, không pause-all). AddInitScript áp cho MỌI tab edit mở sau → observer ghi toast vào
+        // buffer, các điểm check hiện có đọc buffer thay vì phải bắt đúng lúc toast còn hiện.
+        await BigSellerMaterialCenterCleaner.InstallToastRecorderAsync(_context).ConfigureAwait(false);
         _mediaCleaner = new BigSellerMaterialCenterCleaner(_context, _claim, _log, DelayAsync, OverlayAsync);
 
         var page = PickListingPage(_context)
@@ -407,8 +412,10 @@ internal sealed partial class BigSellerProductUpdateRunner : BigSellerBraveRunne
                 _log($"⛔ Media Center đầy/{reason} — TẠM DỪNG toàn bộ lane, dọn kho…");
                 try
                 {
-                    // Chờ các lane khác đậu hết (best-effort, cap 180s: lane đang dở AI call có thể lâu) rồi mới dọn.
-                    await _mediaCoord.WaitForOthersParkedAsync(180_000, ct).ConfigureAwait(false);
+                    // Chờ các lane khác đậu hết (best-effort, cap 180s: lane đang dở AI call/save có thể lâu) rồi mới
+                    // dọn — truyền _log để khoảng chờ có nhịp tiến độ, không im lặng như treo (user từng bấm dừng oan).
+                    await _mediaCoord.WaitForOthersParkedAsync(180_000, ct, _log).ConfigureAwait(false);
+                    _log($"🧹 Bắt đầu dọn Material Center ({_mediaCoord.Parked + 1}/{_mediaCoord.Registered} lane đã dừng)…");
                     await RunMediaCleanupLockedAsync(ct).ConfigureAwait(false);
                 }
                 finally { _mediaCoord.EndCleanup(); }   // BẮT BUỘC mở cổng lại — không để lane khác kẹt vĩnh viễn

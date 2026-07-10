@@ -31,6 +31,11 @@ internal sealed class MediaCleanupCoordinator
     /// <summary>Số lần dọn đã hoàn tất (mỗi <see cref="EndCleanup"/> +1). Lane so sánh để biết kho vừa được làm sạch.</summary>
     public int Generation => Volatile.Read(ref _generation);
 
+    /// <summary>Số lane đang ĐẬU ở cổng (đọc-only, cho log tiến độ).</summary>
+    public int Parked => Volatile.Read(ref _parked);
+    /// <summary>Số lane đang SỐNG (đọc-only, cho log tiến độ).</summary>
+    public int Registered => Volatile.Read(ref _registered);
+
     /// <summary>Đã có yêu cầu dọn đang chờ (đủ ngưỡng 10 toàn account HOẶC phát hiện kho đầy).</summary>
     public bool CleanupPending => Volatile.Read(ref _cleanupPending) == 1;
 
@@ -97,18 +102,28 @@ internal sealed class MediaCleanupCoordinator
     }
 
     /// <summary>Thợ dọn chờ các lane KHÁC đậu hết trước khi dọn: poll 500ms tới khi parked ≥ registered−1 hoặc hết
-    /// timeout. Lane đang dở AI call có thể lâu → cap rồi cứ dọn (best-effort; hành vi cũ còn dọn ngay không chờ ai).</summary>
-    public async Task WaitForOthersParkedAsync(int timeoutMs, CancellationToken ct)
+    /// timeout. Lane đang dở AI call/save có thể lâu → cap rồi cứ dọn (best-effort; hành vi cũ còn dọn ngay không chờ ai).
+    /// <paramref name="log"/>: báo tiến độ mỗi ~15s — không có thì khoảng chờ (tới 3') IM LẶNG hoàn toàn, nhìn y như
+    /// treo → user từng bấm dừng oan ngay sau dòng "⛔ TẠM DỪNG toàn bộ lane" (production 2026-07-11).</summary>
+    public async Task WaitForOthersParkedAsync(int timeoutMs, CancellationToken ct, Action<string>? log = null)
     {
-        var deadline = timeoutMs;
-        while (deadline > 0)
+        var waited = 0;
+        var nextLogAt = 15_000;
+        while (waited < timeoutMs)
         {
             ct.ThrowIfCancellationRequested();
             // Thợ dọn KHÔNG tự đậu (đang chạy) → mốc là mọi lane KHÁC (registered−1). Single-lane: registered−1=0 → về ngay.
-            if (Volatile.Read(ref _parked) >= Volatile.Read(ref _registered) - 1) return;
+            var others = Volatile.Read(ref _registered) - 1;
+            if (Volatile.Read(ref _parked) >= others) return;
+            if (waited >= nextLogAt)
+            {
+                log?.Invoke($"⏳ chờ các lane khác đậu để dọn kho: {Volatile.Read(ref _parked)}/{others} lane · đã chờ {waited / 1000}s (tối đa {timeoutMs / 1000}s — lane đang dở SP sẽ đậu khi xong SP đó).");
+                nextLogAt += 15_000;
+            }
             await Task.Delay(500, ct).ConfigureAwait(false);
-            deadline -= 500;
+            waited += 500;
         }
+        log?.Invoke($"⚠ hết {timeoutMs / 1000}s chờ — {Volatile.Read(ref _parked)}/{Math.Max(0, Volatile.Read(ref _registered) - 1)} lane đã đậu, vẫn tiến hành dọn (lane còn lại có thể lỗi upload trong lúc dọn — SP đó sẽ được làm lại).");
     }
 
     private sealed class LaneRegistration(MediaCleanupCoordinator owner) : IDisposable

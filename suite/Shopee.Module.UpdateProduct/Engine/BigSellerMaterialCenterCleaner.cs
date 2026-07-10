@@ -180,9 +180,86 @@ internal sealed class BigSellerMaterialCenterCleaner
     // BigSeller báo đầy qua toast, cấu trúc DOM thật (user chụp production): div.ant-message
     // .ant-message-custom-content.ant-message-error > span. Selector/text nhận diện CHỈ ở file này.
     private const string ErrorToast = "div.ant-message .ant-message-custom-content.ant-message-error";
+    private const string CustomContent = "div.ant-message .ant-message-custom-content";
+
+    // ── Máy ghi toast (MutationObserver) ──────────────────────────────────────────────────────────────────────
+    // Toast ant-message TỰ ẨN sau ~3s. Mọi điểm check của ta đều có thể trễ hơn (đợi ảnh 5s / MD5 complete 10s) →
+    // "ngó đúng khoảnh khắc" MISS (bug prod v1.0.11: kho đầy thật, toast hiện, worker vẫn import 3 attempt, không
+    // pause-all). Giải: cài MutationObserver ngay khi page tạo → toast nào hiện dù 1s cũng bị ghi vào window
+    // .__ssyncToastLog; C# đọc buffer sau. Toàn bộ bọc try/catch, KHÔNG side-effect ngoài window.__ssyncToastLog.
+    private const string ToastRecorderInitScript = @"(() => {
+  try {
+    if (window.__ssyncToastInstalled) return;
+    window.__ssyncToastInstalled = true;
+    window.__ssyncToastLog = window.__ssyncToastLog || [];
+    var CAP = 30;
+    var record = function(node) {
+      try {
+        if (!node || node.nodeType !== 1) return;
+        var hits = [];
+        if (node.matches && node.matches('.ant-message-custom-content')) hits.push(node);
+        if (node.querySelectorAll) {
+          var found = node.querySelectorAll('.ant-message-custom-content');
+          for (var i = 0; i < found.length; i++) hits.push(found[i]);
+        }
+        for (var j = 0; j < hits.length; j++) {
+          var t = (hits[j].innerText || hits[j].textContent || '').trim();
+          if (!t) continue;
+          window.__ssyncToastLog.push({ t: t, ts: Date.now() });
+          while (window.__ssyncToastLog.length > CAP) window.__ssyncToastLog.shift();
+        }
+      } catch (e) {}
+    };
+    var startObserve = function() {
+      try {
+        var target = document.documentElement || document.body;
+        if (!target) return;
+        var existing = document.querySelectorAll('.ant-message-custom-content');   // toast đã hiện trước observer
+        for (var i = 0; i < existing.length; i++) record(existing[i]);
+        var obs = new MutationObserver(function(muts) {
+          for (var m = 0; m < muts.length; m++) {
+            var added = muts[m].addedNodes;
+            for (var k = 0; k < added.length; k++) record(added[k]);
+          }
+        });
+        obs.observe(target, { childList: true, subtree: true });   // documentElement: có sẵn lúc init-script chạy (body chưa)
+      } catch (e) {}
+    };
+    if (document.documentElement) startObserve();
+    else document.addEventListener('DOMContentLoaded', startObserve, { once: true });
+  } catch (e) {}
+})();";
+
+    /// <summary>Cài máy ghi toast cho context: AddInitScript áp cho MỌI page/navigation MỚI trong context (tab edit
+    /// mở sau đều tự dính) → observer chạy trước script trang, ghi toast vào window.__ssyncToastLog. Gọi 1 lần đầu phiên.</summary>
+    public static Task InstallToastRecorderAsync(IBrowserContext ctx)
+        => ctx.AddInitScriptAsync(ToastRecorderInitScript);
+
+    /// <summary>Đọc buffer toast đã ghi (kể cả toast đã ẩn). Lỗi / chưa cài máy ghi → mảng rỗng.</summary>
+    public static async Task<string[]> ReadRecordedToastsAsync(IPage page)
+    {
+        try { return await page.EvaluateAsync<string[]>("() => (window.__ssyncToastLog || []).map(x => x.t)"); }
+        catch { return Array.Empty<string>(); }
+    }
+
+    // Text đã chuẩn hoá (bỏ dấu, thường) có phải toast "kho đầy" không. 2 tầng mẫu, dùng chung cho DOM sống lẫn buffer.
+    //  Tầng 1 — mẫu ĐÃ XÁC NHẬN từ DOM production (user chụp 2026-07-11):
+    //   EN nguyên văn: "The Media Center space is insufficient, please delete images or recharge in Gallery."
+    //   VN nguyên văn: "Dung lượng lưu trữ của Trung tâm Media không đủ, vui lòng xóa tư liệu trong Trung tâm Media
+    //                   hoặc nạp thêm dung lượng và thử lại."
+    //  Tầng 2 — fallback tổ hợp rộng, đề phòng BigSeller đổi wording (mẫu mới lộ qua DumpErrorToastOnceAsync).
+    private static bool MatchesMediaInsufficient(string t)
+    {
+        if (t.Contains("media center") && t.Contains("insufficient")) return true;
+        if (t.Contains("trung tam media") && t.Contains("khong du")) return true;
+        var mediaWord = t.Contains("media") || t.Contains("thu vien") || t.Contains("gallery");
+        var fullWord = t.Contains("khong du") || t.Contains("da day") || t.Contains("het dung luong") || t.Contains("insufficient");
+        return mediaWord && fullWord;
+    }
 
     public static async Task<bool> IsMediaInsufficientToastAsync(IPage page)
     {
+        // (1) DOM SỐNG — bắt được khi toast còn hiện.
         try
         {
             var loc = page.Locator(ErrorToast);
@@ -191,20 +268,14 @@ internal sealed class BigSellerMaterialCenterCleaner
             {
                 var el = loc.Nth(i);
                 if (!await el.IsVisibleAsync()) continue;
-                var t = BigSellerSaveSuccessHelper.Normalize(await el.InnerTextAsync());
-                // Tầng 1 — mẫu ĐÃ XÁC NHẬN từ DOM production (user chụp 2026-07-11):
-                //  EN nguyên văn: "The Media Center space is insufficient, please delete images or recharge in Gallery."
-                //  VN nguyên văn: "Dung lượng lưu trữ của Trung tâm Media không đủ, vui lòng xóa tư liệu trong Trung
-                //                  tâm Media hoặc nạp thêm dung lượng và thử lại."
-                if (t.Contains("media center") && t.Contains("insufficient")) return true;
-                if (t.Contains("trung tam media") && t.Contains("khong du")) return true;
-                // Tầng 2 — fallback tổ hợp rộng, đề phòng BigSeller đổi wording (mẫu mới sẽ lộ qua DumpErrorToastOnceAsync).
-                var mediaWord = t.Contains("media") || t.Contains("thu vien") || t.Contains("gallery");
-                var fullWord = t.Contains("khong du") || t.Contains("da day") || t.Contains("het dung luong") || t.Contains("insufficient");
-                if (mediaWord && fullWord) return true;
+                if (MatchesMediaInsufficient(BigSellerSaveSuccessHelper.Normalize(await el.InnerTextAsync()))) return true;
             }
         }
         catch { }
+        // (2) BUFFER máy ghi — chốt được cả khi check trễ 5-10s (toast đã ẩn). Tab edit MỞ MỚI cho từng SP nên buffer
+        // tự sạch theo SP (window mới mỗi page), không cần clear thủ công.
+        foreach (var t in await ReadRecordedToastsAsync(page))
+            if (MatchesMediaInsufficient(BigSellerSaveSuccessHelper.Normalize(t))) return true;
         return false;
     }
 
@@ -214,15 +285,21 @@ internal sealed class BigSellerMaterialCenterCleaner
 
     // Fail nhưng KHÔNG khớp tín hiệu đầy → log NGUYÊN VĂN toast lỗi (1 lần/lane qua claimLogSlot) để bổ sung bộ nhận
     // diện: BigSeller đổi wording (đặc biệt bản ngôn ngữ mới) thì có ngay mẫu thật để thêm vào file này, khỏi ngồi canh.
+    // Đọc CẢ DOM sống LẪN buffer máy ghi (gộp, dedup) — buffer bắt cả toast đã ẩn mà DOM sống bỏ lỡ.
     public static async Task DumpErrorToastOnceAsync(IPage page, Action<string> log, Func<bool> claimLogSlot)
     {
         try
         {
-            var texts = await page.Locator("div.ant-message .ant-message-custom-content").AllInnerTextsAsync();
-            var joined = string.Join(" | ", texts.Select(x => (x ?? "").Trim()).Where(x => x.Length > 0));
-            if (joined.Length == 0) return;
+            var seen = new HashSet<string>();
+            var parts = new List<string>();
+            void Add(string? raw) { var s = (raw ?? "").Trim(); if (s.Length > 0 && seen.Add(s)) parts.Add(s); }
+
+            try { foreach (var x in await page.Locator(CustomContent).AllInnerTextsAsync()) Add(x); } catch { }
+            foreach (var x in await ReadRecordedToastsAsync(page)) Add(x);
+
+            if (parts.Count == 0) return;
             if (!claimLogSlot()) return;   // claim slot CHỈ khi có text để log → không phí "1 lần/lane" lúc không có toast
-            log("⚠ toast lỗi CHƯA nhận diện (gửi dòng log này để bổ sung bộ nhận diện media-đầy): " + joined);
+            log("⚠ toast lỗi CHƯA nhận diện (gửi dòng log này để bổ sung bộ nhận diện media-đầy): " + string.Join(" | ", parts));
         }
         catch { }
     }
