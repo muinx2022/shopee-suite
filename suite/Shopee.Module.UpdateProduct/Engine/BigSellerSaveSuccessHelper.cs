@@ -136,6 +136,14 @@ internal static class BigSellerSaveSuccessHelper
         try
         {
             var items = await page.EvaluateAsync<string[]>(DumpVisibleDialogsJs);
+            if (items.Length == 0)
+            {
+                // KHÔNG dialog nào hiện lúc TIMEOUT cũng là thông tin quan trọng (save-click có thể không submit —
+                // bản EN nút thường chỉ mở menu; hoặc trang treo) → in URL + IsClosed thay vì nuốt câm.
+                string url; try { url = page.Url; } catch { url = "?"; }
+                log($"⚠ SaveSuccess TIMEOUT — KHÔNG dialog nào đang hiện · URL={url} · IsClosed={page.IsClosed}");
+                return;
+            }
             foreach (var it in items)
                 log("⚠ SaveSuccess TIMEOUT — dialog đang hiện: " + it);
         }

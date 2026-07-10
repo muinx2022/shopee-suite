@@ -5,6 +5,25 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Hiệu năng. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.0.14 — 2026-07-11
+
+Chủ đề: **kho đầy phát hiện trong vài giây đầu mỗi SP + không còn nhánh fail im lặng ở bước Lưu**.
+
+- Đổi thứ tự bước Update: Sửa tên → tick radio Upload Image → **Import ảnh NGAY** →
+  MD5 → SKU/thương hiệu → tồn/giá → vận chuyển/cân → video → AI → Lưu. Import ảnh là
+  bước làm bật toast "kho đầy" nên đặt lên đầu — dính là dừng SP tức thì, chuyển sang
+  dọn Media Center, không tốn công điền form + đốt AI cho SP chắc chắn không lưu nổi
+  (bước Lưu có tiên quyết ảnh-đã-lên: ảnh không lên thì save không bao giờ được bấm).
+- 3 lớp phát hiện kho đầy, từ nhanh tới chắc: (1) check 0,5 giây ngay sau khi OK chọn
+  ảnh; (2) đọc sổ máy-ghi-toast sau timeout chờ ảnh; (3) 2 SP liên tiếp không lên ảnh
+  mà không thấy toast → vẫn NGHI kho đầy → chủ động dừng-toàn-bộ + dọn (tín hiệu này
+  không phụ thuộc BigSeller báo kiểu gì — đổi giao diện cũng không thoát).
+- Bước Lưu hết nhánh câm: mọi đường thất bại đều in lý do — ảnh không lên (kẹt ở bước
+  nào: spc_box / menu upload / file chooser / chờ ảnh hiện), bấm Lưu theo nhánh
+  dropdown hay nút thường, BigSeller báo lỗi gì khi lưu, exception gì, timeout mà
+  không có dialog nào hiện (kèm URL). Hết cảnh "▶ Lưu sản phẩm" rồi im bặt → "fail
+  2 lần" không rõ vì sao.
+
 ## v1.0.13 — 2026-07-11
 
 Chủ đề: **khóa SP tách 2 mảng "đang sửa" / "đã sửa xong" — SP sửa hỏng không còn bị khóa oan**.

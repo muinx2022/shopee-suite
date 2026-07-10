@@ -142,6 +142,9 @@ internal sealed partial class BigSellerProductUpdateRunner : BigSellerBraveRunne
     private bool _mediaFullDetected;
     // Đã dump 1 toast lỗi CHƯA-nhận-diện chưa (throttle 1 lần/lane để khỏi spam khi lỗi lặp).
     private bool _errorToastDumped;
+    // Số SP LIÊN TIẾP (per-lane) mà import ảnh fail dù KHÔNG bắt được toast/popup đầy → ngưỡng 2 = NGHI kho đầy
+    // (detection trượt) → chủ động RequestCleanup. Reset khi ảnh lên OK hoặc sau khi kho vừa được dọn (Generation đổi).
+    private int _imageUploadFailStreak;
     // Generation của coordinator lần cuối lane này thấy (biết kho vừa dọn sạch giữa 2 vòng — chỉ đồng bộ, không hành động thêm).
     private int _lastSeenMediaGen;
     // Đã log chẩn đoán "listing 0 dòng" chưa (log 1 lần/đợt-trống để khỏi spam mỗi vòng chờ).
@@ -284,7 +287,8 @@ internal sealed partial class BigSellerProductUpdateRunner : BigSellerBraveRunne
             {
                 await _mediaCoord.WaitWhileClosedAsync(ct).ConfigureAwait(false);
                 var gen = _mediaCoord.Generation;
-                if (gen != _lastSeenMediaGen) _lastSeenMediaGen = gen;
+                // Generation đổi = kho vừa được dọn sạch → reset streak ảnh-fail (đếm lại từ đầu, kho đã có chỗ).
+                if (gen != _lastSeenMediaGen) { _lastSeenMediaGen = gen; _imageUploadFailStreak = 0; }
             }
             // Tab/Brave đóng, listing lỗi liên tục, captcha… = THOÁT BẤT THƯỜNG → ném LaneAbortedException
             // để supervisor RunLanesAsync KHỞI ĐỘNG LẠI lane. KHÔNG dùng break (return bình thường) vì
@@ -732,9 +736,61 @@ internal sealed partial class BigSellerProductUpdateRunner : BigSellerBraveRunne
         if (!await FillProductNameAsync(page, nameToFill, ct))
             _log("  ⚠ Không điền được tên SP — giữ tên cũ, tiếp tục xử lý.");
 
+        // THỨ TỰ MỚI: radio + import ảnh đẩy lên NGAY SAU đổi tên. Import ảnh là bước NỔ toast kho-đầy ("add from
+        // computer → chọn ảnh → OK → toast") → đặt đầu để bắt tín hiệu đầy trong vài giây ĐẦU của SP rồi dừng sang
+        // nhánh dọn media (media_full → pause-all → wipe), KHỎI tốn công MD5/SKU/giá/tồn/video/AI cho SP chắc chắn
+        // không lưu nổi (trước đây ảnh áp chót → làm gần hết việc mới biết kho đầy). Bước Lưu có TIÊN QUYẾT ảnh-đã-lên.
+
+        // [2] radio "Tải lên hình ảnh" / "Upload Image" — tick để hiện khối upload ảnh (div.spc_box).
+        // Trước đây lọc-text-VN cứng nên bản EN ("Upload Image") KHÔNG khớp → radio không tick → không chọn được ảnh.
+        try
+        {
+            var r = page.Locator(UploadImageRadioWrapper).Filter(new() { HasTextRegex = UploadImageRadioText }).First;
+            if (await r.CountAsync() == 0) r = page.Locator(UploadImageRadioByValue).First;   // fallback độc-lập-ngôn-ngữ
+            if (await r.CountAsync() > 0 && await r.IsVisibleAsync())
+            {
+                await r.ScrollIntoViewIfNeededAsync();
+                await r.ClickAsync();
+                // chờ khối upload (spc_box) hiện sau khi sizeChartContent bỏ display:none
+                try { await page.Locator(ImageGalleryBox).First.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 4000 }); } catch { }
+            }
+        }
+        catch { }
+
+        // [3] image — bước Lưu TIÊN QUYẾT ảnh-đã-lên (SaveWithImageRetry không bấm Lưu khi ảnh chưa lên) → ảnh KHÔNG
+        // lên = save không bao giờ được bấm → đi tiếp chỉ ĐỐT AI vô ích. Ảnh fail thì THOÁT SỚM để SP thử lại.
+        var imagePath = _settings.ImagePath;
+        var hasImage = !string.IsNullOrWhiteSpace(imagePath) && File.Exists(imagePath);
+        if (hasImage)
+        {
+            await StepAsync("Import ảnh");
+            var imgOk = false;
+            try { imgOk = await UploadImageWithRetryAsync(page, imagePath!, 3, ct); }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex) { _log($"  ↳ Import ảnh lỗi: {ex.Message}"); }
+
+            if (!imgOk)
+            {
+                if (_mediaFullDetected) return false;   // toast/modal đã bắt được → "media_full" lo phần dọn (pause-all)
+                // Ảnh fail mà KHÔNG bắt được tín hiệu đầy (toast trượt): đếm streak per-lane. 2 SP liên tiếp ảnh-fail =
+                // NGHI kho đầy → chủ động RequestCleanup + coi như media_full (không ăn fail-strike; HandleMediaEmergency
+                // chạy ở ranh giới vòng lặp). Dưới ngưỡng: chỉ thoát sớm (SP thử lại), TUYỆT ĐỐI không đi tiếp AI/Lưu.
+                _imageUploadFailStreak++;
+                _log($"⚠ Import ảnh CHƯA lên sau 3 lượt ({_imageUploadFailStreak} SP liên tiếp) — bỏ bước AI/Lưu, SP sẽ thử lại.");
+                if (_imageUploadFailStreak >= 2)
+                {
+                    _log($"⚠ Upload ảnh fail {_imageUploadFailStreak} SP liên tiếp — NGHI kho media đầy (không bắt được toast/popup) → chủ động dọn.");
+                    _mediaCoord?.RequestCleanup();
+                    _mediaFullDetected = true;
+                }
+                return false;
+            }
+            _imageUploadFailStreak = 0;   // ảnh lên OK → reset streak
+        }
+
         await StepAsync("Đồng bộ ảnh (MD5)");
-        // [2] md5 sync — MD5 + import ảnh là 2 hành động ĐẨY ảnh vào Material Center; toast "kho đầy" bật NGAY tại đây
-        // và tự ẩn sau ~3s → phải bắt tại NGUỒN (tới lúc save là mất dấu). Dính tín hiệu → thoát SP sớm (khỏi tốn AI/save).
+        // [4] md5 sync — MD5 cũng ĐẨY ảnh vào Material Center; toast "kho đầy" bật NGAY tại đây và tự ẩn ~3s → bắt
+        // tại NGUỒN (tới lúc save là mất dấu). Dính tín hiệu → thoát SP sớm (khỏi tốn SKU/giá/AI/save).
         try
         {
             var md5 = page.Locator(Md5Button).First;
@@ -753,24 +809,8 @@ internal sealed partial class BigSellerProductUpdateRunner : BigSellerBraveRunne
         if (await BigSellerMaterialCenterCleaner.IsMediaInsufficientSignalAsync(page))
         { _mediaFullDetected = true; await DismissStorageNagAsync(page); return false; }
 
-        // [3] radio "Tải lên hình ảnh" / "Upload Image" — tick để hiện khối upload ảnh (div.spc_box).
-        // Trước đây lọc-text-VN cứng nên bản EN ("Upload Image") KHÔNG khớp → radio không tick → không chọn được ảnh.
-        try
-        {
-            var r = page.Locator(UploadImageRadioWrapper).Filter(new() { HasTextRegex = UploadImageRadioText }).First;
-            if (await r.CountAsync() == 0) r = page.Locator(UploadImageRadioByValue).First;   // fallback độc-lập-ngôn-ngữ
-            if (await r.CountAsync() > 0 && await r.IsVisibleAsync())
-            {
-                await r.ScrollIntoViewIfNeededAsync();
-                await r.ClickAsync();
-                // chờ khối upload (spc_box) hiện sau khi sizeChartContent bỏ display:none
-                try { await page.Locator(ImageGalleryBox).First.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 4000 }); } catch { }
-            }
-        }
-        catch { }
-
         await StepAsync("Điền SKU + thương hiệu");
-        // [4] parent SKU
+        // [5] parent SKU
         try
         {
             var s = page.Locator(ParentSkuInput);
@@ -782,10 +822,10 @@ internal sealed partial class BigSellerProductUpdateRunner : BigSellerBraveRunne
         }
         catch { }
 
-        // [5] brand
+        // [6] brand
         try { await SelectNoBrandAsync(page, ct); } catch { }
 
-        // [6] variation SKUs
+        // [7] variation SKUs
         await ForEachVisibleAsync(page.Locator(VariationSkuInputs), async el =>
         {
             await el.ScrollIntoViewIfNeededAsync();
@@ -795,7 +835,7 @@ internal sealed partial class BigSellerProductUpdateRunner : BigSellerBraveRunne
         });
 
         await StepAsync("Cập nhật tồn kho + giá");
-        // [7] stock — đặt TẤT CẢ biến thể về StockValue (kể cả ô đang = 0, không còn giữ nguyên ô hết hàng).
+        // [8] stock — đặt TẤT CẢ biến thể về StockValue (kể cả ô đang = 0, không còn giữ nguyên ô hết hàng).
         await ForEachVisibleAsync(page.Locator(VariationStockInputs), async el =>
         {
             await el.ScrollIntoViewIfNeededAsync();
@@ -804,7 +844,7 @@ internal sealed partial class BigSellerProductUpdateRunner : BigSellerBraveRunne
             await el.EvaluateAsync("el => el.blur()");
         });
 
-        // [8] price
+        // [9] price
         var newPrice = ParsePrice(rec.Price);
         await ForEachVisibleAsync(page.Locator(VariationPriceInputs), async el =>
         {
@@ -815,7 +855,7 @@ internal sealed partial class BigSellerProductUpdateRunner : BigSellerBraveRunne
         });
 
         await StepAsync("Vận chuyển + cân nặng");
-        // [9] shipping "Nhanh"
+        // [10] shipping "Nhanh"
         try
         {
             var ship = page.Locator(ShippingFastWrapper).Filter(new() { HasTextString = "Nhanh" }).First;
@@ -827,7 +867,7 @@ internal sealed partial class BigSellerProductUpdateRunner : BigSellerBraveRunne
         }
         catch { }
 
-        // [10] weight
+        // [11] weight
         try
         {
             var w = page.Locator(WeightInput);
@@ -844,7 +884,7 @@ internal sealed partial class BigSellerProductUpdateRunner : BigSellerBraveRunne
         // video discovery
         var videoPath = ResolveVideoPath(rec.Sku);
 
-        // [10.5] upload video (non-fatal, 3 attempts)
+        // [12] upload video (non-fatal, 3 attempts)
         if (videoPath != null)
         {
             await StepAsync("Upload video");
@@ -854,25 +894,16 @@ internal sealed partial class BigSellerProductUpdateRunner : BigSellerBraveRunne
                 await DelayAsync(3000, ct);
             }
         }
-        if (_mediaFullDetected) return false;   // kho đầy phát hiện lúc upload video → AI/ảnh/lưu vô ích, thoát sớm cho rẻ
-
-        // [11] image (non-fatal)
-        var imagePath = _settings.ImagePath;
-        if (!string.IsNullOrWhiteSpace(imagePath) && File.Exists(imagePath))
-        {
-            await StepAsync("Import ảnh");
-            try { await UploadImageWithRetryAsync(page, imagePath, 3, ct); } catch { }
-        }
-        if (_mediaFullDetected) return false;   // kho đầy lúc upload ảnh → thoát sớm; HandleMediaEmergencyAsync sẽ dọn
+        if (_mediaFullDetected) return false;   // kho đầy phát hiện lúc upload video → AI/lưu vô ích, thoát sớm cho rẻ
 
         await StepAsync("Tạo mô tả AI");
-        // [12.1] AI description — rỗng sau retry = LỖI TẠM → retry vòng sau, KHÔNG xóa dòng (tránh mất SP).
+        // [13] AI description — rỗng sau retry = LỖI TẠM → retry vòng sau, KHÔNG xóa dòng (tránh mất SP).
         var aiContent = await GenerateDescriptionAsync(rec.ProductName ?? "", ct).ConfigureAwait(false);
         if (string.IsNullOrWhiteSpace(aiContent)) { _lastProcessTransient = true; return false; }
         if (!await UpdateDescriptionAsync(page, aiContent, ct)) return false;
 
         await StepAsync("Lưu sản phẩm");
-        // [12.2] save
+        // [14] save
         return await SaveWithImageRetryAsync(page, imagePath, 3, onSaved, ct).ConfigureAwait(false);
     }
 

@@ -187,19 +187,34 @@ internal sealed partial class BigSellerProductUpdateRunner
     // ── image ──
     private async Task<bool> UploadImageWithRetryAsync(IPage page, string imagePath, int maxAttempts, CancellationToken ct)
     {
+        var lastStep = "khởi tạo";   // bước gần nhất trước khi lỗi → in ở attempt cuối để biết KẸT ở đâu (catch nuốt = mù)
         for (var attempt = 0; attempt < maxAttempts; attempt++)
         {
             try
             {
                 if (await IsImageUploadedAsync(page)) return true;
+                lastStep = "chờ spc_box";
                 var box = page.Locator(ImageGalleryBox).First;
                 await box.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 5000 });
                 await box.ScrollIntoViewIfNeededAsync();
                 await box.ClickAsync();
+                lastStep = "mở menu upload";
                 var menuItem = page.Locator(ImageUploadMenuItem).First;
                 await menuItem.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 5000 });
+                lastStep = "file chooser";
                 var fc = await page.RunAndWaitForFileChooserAsync(async () => await menuItem.ClickAsync(), new() { Timeout = 5000 });
                 await fc.SetFilesAsync(imagePath);
+                // Toast "kho đầy" bật gần như TỨC THÌ sau khi chọn file → check sớm sau ~0.5s, khỏi đốt 5s chờ ảnh-hiện
+                // rồi mới biết (fast-path; toast bật trễ hơn thì nhánh fail-sau-timeout vẫn bắt qua buffer máy ghi).
+                await DelayAsync(500, ct);
+                if (await BigSellerMaterialCenterCleaner.IsMediaInsufficientSignalAsync(page))
+                {
+                    _log("⚠ Media Center đầy (toast ngay sau khi chọn ảnh) — dừng SP này, chuyển sang quy trình dọn toàn cục.");
+                    await DismissStorageNagAsync(page);
+                    _mediaFullDetected = true;
+                    return false;
+                }
+                lastStep = "chờ ảnh hiện sau upload";
                 var uploaded = page.Locator(ImageUploadedImg).First;
                 await uploaded.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 5000 });
                 var src = await uploaded.GetAttributeAsync("src");
@@ -217,15 +232,18 @@ internal sealed partial class BigSellerProductUpdateRunner
                 _mediaFullDetected = true;
                 return false;
             }
-            // Fail nhưng KHÔNG khớp tín hiệu đầy: ở attempt CUỐI, dump toast lỗi CHƯA nhận diện (1 lần/lane) để bổ
-            // sung bộ nhận diện — trả lời "UI tiếng Việt thì sao": lần đầu gặp wording mới, log tự khai nguyên văn.
+            // Fail nhưng KHÔNG khớp tín hiệu đầy: ở attempt CUỐI, log BƯỚC KẸT gần nhất (khỏi mù "im lặng") + dump toast
+            // lỗi CHƯA nhận diện (1 lần/lane) để bổ sung bộ nhận diện — lần đầu gặp wording mới, log tự khai nguyên văn.
             if (attempt == maxAttempts - 1)
+            {
+                _log($"⚠ Upload ảnh thất bại sau {maxAttempts} lượt — kẹt ở bước: {lastStep}.");
                 await BigSellerMaterialCenterCleaner.DumpErrorToastOnceAsync(page, _log, () =>
                 {
                     if (_errorToastDumped) return false;
                     _errorToastDumped = true;
                     return true;
                 });
+            }
             await DismissStorageNagAsync(page);   // đóng popup "sắp hết hạn dung lượng" nếu có (né Expand Space) — như cũ
             await DelayAsync(2500, ct);
         }
