@@ -5,6 +5,18 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Hiệu năng. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.0.8 — 2026-07-10
+
+Chủ đề: **hủy việc Import/Update/Tên SP giữa chừng bị báo nhầm "✓ xong"**.
+
+- Hủy việc hub-giao (hoặc bấm ■ dừng) khi shop đang chạy → engine thoát êm không ném
+  exception (vòng ngoài check IsCancellationRequested ở đầu vòng; supervisor đa-lane
+  cố ý nuốt OperationCanceledException để lane nghỉ hưu) → tầng workflow tưởng chạy
+  trọn vẹn, đẩy ledger `completed` → ô trên Hub hiện "✓ xong" oan. Nguy hiểm hơn:
+  auto-dispatch coi op đã xong nên nhảy sang op kế (vd Update dở → chạy Tên SP), bỏ
+  sót SP chưa làm. Giờ sau khi engine trả về, kiểm tra token hủy: bị hủy → báo
+  `stopped` ("■ dừng dở") thay vì `completed`; áp cho cả 3 op Import/Update/Tên SP.
+
 ## v1.0.7 — 2026-07-10
 
 Chủ đề: **popup ngôn ngữ BigSeller tái phát khi UI đã là tiếng Việt — đổi cách nhận diện**.

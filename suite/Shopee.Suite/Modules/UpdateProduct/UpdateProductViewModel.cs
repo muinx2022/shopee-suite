@@ -257,8 +257,19 @@ public sealed partial class UpdateProductViewModel : ModuleViewModelBase
             job.Runner = runner;
             Log($"▶ {name} — {prefix} (chạy song song).");
             await action(runner, ctx, job.Cts.Token).ConfigureAwait(false);
-            Log($"{prefix} ✔ xong {name}.");
-            Coordination.Hub.PublishCompletion(coordKey, "completed", 0);
+            // Engine có thể thoát ÊM khi bị hủy (OuterLoop check IsCancellationRequested ở đầu vòng; supervisor
+            // đa-lane CỐ Ý nuốt OCE để lane nghỉ hưu) → "không exception" KHÔNG có nghĩa là xong. Bị hủy mà báo
+            // "completed" → ledger hiện ✓ xong oan + HubDispatcher tưởng op xong, nhảy op kế, bỏ sót SP.
+            if (job.Cts.Token.IsCancellationRequested)
+            {
+                Log($"{prefix} ■ đã dừng (hủy giữa chừng).");
+                Coordination.Hub.PublishCompletion(coordKey, "stopped", 0);
+            }
+            else
+            {
+                Log($"{prefix} ✔ xong {name}.");
+                Coordination.Hub.PublishCompletion(coordKey, "completed", 0);
+            }
         }
         catch (OperationCanceledException) { Log($"{prefix} ■ đã dừng."); Coordination.Hub.PublishCompletion(coordKey, "stopped", 0); }
         catch (Exception ex) { Log($"{prefix} ✖ lỗi: {ex.Message}"); Coordination.Hub.PublishCompletion(coordKey, "stopped", 0); }
