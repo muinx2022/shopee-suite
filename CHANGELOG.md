@@ -5,6 +5,29 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Hiệu năng. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.0.11 — 2026-07-11
+
+Chủ đề: **Update báo được dòng lên Thống kê Hub (gốc bệnh 0 dòng) + kho media đầy thì dừng cả cụm để dọn**.
+
+- Update: viết lại xác nhận "lưu thành công" — nhận qua 3 tín hiệu (modal thành công /
+  URL rời trang edit / BigSeller tự đóng tab), thay vì bám cứng 1 selector modal (DOM
+  BigSeller đang chuyển sang Vue + dialog tự đóng nhanh → hụt tín hiệu, SP publish thật
+  nhưng bị coi là fail → Hub 0 dòng dù update cả buổi). Sự kiện báo dòng bắn ĐÚNG thời
+  điểm đóng tab; toàn bộ selector gom về 1 helper — DOM đổi lần nữa chỉ sửa 1 file, và
+  khi không nhận diện được thì log tự dump class/text dialog đang hiện để chỉnh ngay.
+- Lane chết hết đổ oan "Shopee chặn (captcha)" — thông báo giờ kèm lỗi thật (lỗi edit
+  không phục hồi nào, hay click bị modal chặn 9 lần).
+- Media Center: bộ đếm "10 SP thì dọn kho" chuyển về đếm TOÀN account (trước đếm riêng
+  từng cửa sổ → chạy 5 cửa sổ phải ~50 SP mới dọn lần đầu, cửa sổ restart lại mất đếm
+  → gần như không bao giờ dọn); đếm sống xuyên restart, chỉ reset sau khi dọn xong.
+- Kho media ĐẦY (toast "The Media Center space is insufficient…" / "Dung lượng lưu trữ
+  của Trung tâm Media không đủ…" — cả EN lẫn VN đã xác nhận từ DOM thật, hoặc popup
+  modal) → TẠM DỪNG toàn bộ cửa sổ, một cửa sổ dọn sạch kho, xong tất cả quay lại quét
+  Listing. SP dính lúc kho đầy được làm lại sau khi dọn — không còn bị "fail 2 lần →
+  bỏ qua oan". Toast bắt ngay tại nguồn (đồng bộ MD5, import ảnh/video — toast tự ẩn
+  sau ~3s nên không đợi tới lúc lưu); toast lỗi lạ chưa nhận diện sẽ được log nguyên
+  văn để bổ sung bộ nhận diện.
+
 ## v1.0.10 — 2026-07-10
 
 Chủ đề: **soi được vì sao Thống kê Hub 0 dòng update/import + không đốt giờ khi workbook chưa sẵn sàng**.

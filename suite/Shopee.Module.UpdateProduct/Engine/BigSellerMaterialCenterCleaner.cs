@@ -176,6 +176,57 @@ internal sealed class BigSellerMaterialCenterCleaner
         catch { return false; }
     }
 
+    // Toast "kho đầy" (ant-message error góc trên) — KHÁC popup modal .bs-micro-modal ở IsMediaFullPopupAsync:
+    // BigSeller báo đầy qua toast, cấu trúc DOM thật (user chụp production): div.ant-message
+    // .ant-message-custom-content.ant-message-error > span. Selector/text nhận diện CHỈ ở file này.
+    private const string ErrorToast = "div.ant-message .ant-message-custom-content.ant-message-error";
+
+    public static async Task<bool> IsMediaInsufficientToastAsync(IPage page)
+    {
+        try
+        {
+            var loc = page.Locator(ErrorToast);
+            var n = await loc.CountAsync();
+            for (var i = 0; i < n; i++)
+            {
+                var el = loc.Nth(i);
+                if (!await el.IsVisibleAsync()) continue;
+                var t = BigSellerSaveSuccessHelper.Normalize(await el.InnerTextAsync());
+                // Tầng 1 — mẫu ĐÃ XÁC NHẬN từ DOM production (user chụp 2026-07-11):
+                //  EN nguyên văn: "The Media Center space is insufficient, please delete images or recharge in Gallery."
+                //  VN nguyên văn: "Dung lượng lưu trữ của Trung tâm Media không đủ, vui lòng xóa tư liệu trong Trung
+                //                  tâm Media hoặc nạp thêm dung lượng và thử lại."
+                if (t.Contains("media center") && t.Contains("insufficient")) return true;
+                if (t.Contains("trung tam media") && t.Contains("khong du")) return true;
+                // Tầng 2 — fallback tổ hợp rộng, đề phòng BigSeller đổi wording (mẫu mới sẽ lộ qua DumpErrorToastOnceAsync).
+                var mediaWord = t.Contains("media") || t.Contains("thu vien") || t.Contains("gallery");
+                var fullWord = t.Contains("khong du") || t.Contains("da day") || t.Contains("het dung luong") || t.Contains("insufficient");
+                if (mediaWord && fullWord) return true;
+            }
+        }
+        catch { }
+        return false;
+    }
+
+    // Tín hiệu kho đầy TỔNG HỢP: modal (class-based, độc lập ngôn ngữ) HOẶC toast ant-message. Gọi ở upload ảnh/video.
+    public static async Task<bool> IsMediaInsufficientSignalAsync(IPage page)
+        => await IsMediaFullPopupAsync(page) || await IsMediaInsufficientToastAsync(page);
+
+    // Fail nhưng KHÔNG khớp tín hiệu đầy → log NGUYÊN VĂN toast lỗi (1 lần/lane qua claimLogSlot) để bổ sung bộ nhận
+    // diện: BigSeller đổi wording (đặc biệt bản ngôn ngữ mới) thì có ngay mẫu thật để thêm vào file này, khỏi ngồi canh.
+    public static async Task DumpErrorToastOnceAsync(IPage page, Action<string> log, Func<bool> claimLogSlot)
+    {
+        try
+        {
+            var texts = await page.Locator("div.ant-message .ant-message-custom-content").AllInnerTextsAsync();
+            var joined = string.Join(" | ", texts.Select(x => (x ?? "").Trim()).Where(x => x.Length > 0));
+            if (joined.Length == 0) return;
+            if (!claimLogSlot()) return;   // claim slot CHỈ khi có text để log → không phí "1 lần/lane" lúc không có toast
+            log("⚠ toast lỗi CHƯA nhận diện (gửi dòng log này để bổ sung bộ nhận diện media-đầy): " + joined);
+        }
+        catch { }
+    }
+
     // Đóng popup dung-lượng (đầy HOẶC sắp hết hạn) bằng X/Cancel — KHÔNG bao giờ bấm "Expand Space". True nếu có đóng.
     public async Task<bool> DismissStorageNagAsync(IPage page)
     {

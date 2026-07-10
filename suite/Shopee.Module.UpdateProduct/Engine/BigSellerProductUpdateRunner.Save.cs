@@ -1,4 +1,3 @@
-using System.Text.RegularExpressions;
 using Microsoft.Playwright;
 
 namespace UpdateProduct;
@@ -7,14 +6,21 @@ namespace UpdateProduct;
 internal sealed partial class BigSellerProductUpdateRunner
 {
     // ── [12.2] save ──
-    private async Task<bool> SaveWithImageRetryAsync(IPage page, string? imagePath, int maxAttempts, CancellationToken ct)
+    private async Task<bool> SaveWithImageRetryAsync(IPage page, string? imagePath, int maxAttempts, Func<Task>? onSaved, CancellationToken ct)
     {
+        // Tab đóng TRƯỚC khi kịp submit save = chưa lưu gì → KHÔNG được báo dòng oan (đó là thất bại thật).
+        if (page.IsClosed) return false;
         var wrapper = page.Locator(SaveButtonWrapper);
         if (!await wrapper.IsVisibleAsync()) return false;
         var hasImage = !string.IsNullOrWhiteSpace(imagePath) && File.Exists(imagePath);
 
         for (var attempt = 0; attempt < maxAttempts; attempt++)
         {
+            // Attempt TRƯỚC đã submit save; tab tự đóng giữa chừng = dấu hiệu BigSeller đóng sau khi lưu OK (nó
+            // hay tự đóng tab rất nhanh). Bug cũ nuốt exception 3 vòng rồi trả false oan → Hub nhận 0 dòng; nay
+            // xác nhận qua context còn sống (helper) thay vì coi tab-đóng là thất bại.
+            if (page.IsClosed)
+                return await BigSellerSaveSuccessHelper.ConfirmSavedThenCloseAsync(page, _context!, 5000, _log, DelayAsync, onSaved, ct);
             try
             {
                 if (hasImage && !await IsImageUploadedAsync(page))
@@ -75,11 +81,7 @@ internal sealed partial class BigSellerProductUpdateRunner
                     }
                 }
 
-                if (await WaitForSaveSuccessAsync(page, 60000))
-                {
-                    await ClosePageAcceptingDialogAsync(page);
-                    return true;
-                }
+                if (await BigSellerSaveSuccessHelper.ConfirmSavedThenCloseAsync(page, _context!, 60000, _log, DelayAsync, onSaved, ct)) return true;
             }
             catch { }
             await DelayAsync(2500, ct);
@@ -109,30 +111,5 @@ internal sealed partial class BigSellerProductUpdateRunner
             deadline -= step;
         }
         return null;
-    }
-
-    private async Task<bool> WaitForSaveSuccessAsync(IPage page, int timeoutMs)
-    {
-        var deadline = timeoutMs;
-        var step = 250;
-        while (deadline > 0)
-        {
-            try
-            {
-                // Gộp text MỌI modal đang hiện (thường chỉ 1 = modal thành công) → khớp tín hiệu thành công song ngữ.
-                var texts = await page.Locator(VisibleModal).AllInnerTextsAsync();
-                var m = Normalize(string.Join(" \n ", texts));
-                if (m.Contains("thao tac thanh cong") || m.Contains("successfully") ||
-                    m.Contains("de trinh") || m.Contains("pending by shopee") ||
-                    Regex.IsMatch(m, @"publishing\s*/\s*failed\s*/\s*active") ||
-                    m.Contains("close this page") || m.Contains("dong trang nay") ||
-                    m.Contains("create next product") || m.Contains("tao san pham tiep"))
-                    return true;
-            }
-            catch { }
-            await DelayAsync(step, CancellationToken.None);
-            deadline -= step;
-        }
-        return false;
     }
 }

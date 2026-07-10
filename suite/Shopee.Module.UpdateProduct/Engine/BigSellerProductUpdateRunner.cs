@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Text;
 using System.Text.RegularExpressions;
 using ClosedXML.Excel;
 using Microsoft.Playwright;
@@ -137,6 +136,14 @@ internal sealed partial class BigSellerProductUpdateRunner : BigSellerBraveRunne
     private readonly Dictionary<string, int> _failCounts = new();
     // True nếu ProcessProduct fail do LỖI TẠM (AI rỗng/mạng) → caller RETRY, KHÔNG xóa dòng (tránh mất SP).
     private bool _lastProcessTransient;
+    // True nếu phát hiện Material Center ĐẦY giữa lúc xử lý SP (toast/popup lúc upload ảnh/video/save) → thoát SP sớm,
+    // dồn về HandleMediaEmergencyAsync (pause-all + dọn toàn cục) thay vì fail lẻ tẻ → SP bị "fail 2 lần → bỏ oan".
+    // Reset đầu mỗi ProcessProductAsync.
+    private bool _mediaFullDetected;
+    // Đã dump 1 toast lỗi CHƯA-nhận-diện chưa (throttle 1 lần/lane để khỏi spam khi lỗi lặp).
+    private bool _errorToastDumped;
+    // Generation của coordinator lần cuối lane này thấy (biết kho vừa dọn sạch giữa 2 vòng — chỉ đồng bộ, không hành động thêm).
+    private int _lastSeenMediaGen;
     // Đã log chẩn đoán "listing 0 dòng" chưa (log 1 lần/đợt-trống để khỏi spam mỗi vòng chờ).
     private bool _emptyListingDiagLogged;
 
@@ -147,8 +154,14 @@ internal sealed partial class BigSellerProductUpdateRunner : BigSellerBraveRunne
     private int _skipCount;
     private int _notInSheetCount;
     private int _reportedRows;
+    // Nguyên nhân THẬT khiến dòng thành "terminal" (lỗi edit không phục hồi / click bị chặn) → đính vào
+    // LaneAbortedException thay message cũ đổ oan Shopee/captcha (làm user tưởng dính captcha Shopee).
+    private string? _lastTerminalReason;
 
     private readonly ClaimStore? _claim;
+    // Điều phối dọn Material Center DÙNG CHUNG mọi lane (đếm bắt-đầu-sửa TOÀN account + cổng pause-all khi kho đầy).
+    // Facade truyền ở cả đường 1-lane lẫn đa-lane; null = đường trực tiếp/test → giữ hành vi cũ (cleaner tự đếm per-lane).
+    private readonly MediaCleanupCoordinator? _mediaCoord;
     // Cache dữ liệu shop DÙNG CHUNG mọi lane (nạp 1 lần ở tầng điều phối). null = lane tự đọc workbook (đường 1-lane cũ).
     private readonly WorkbookRecordCache? _sharedRecords;
     // Dọn Material Center (thư viện ảnh) — tách sang class riêng; khởi tạo sau khi có browser context.
@@ -158,10 +171,12 @@ internal sealed partial class BigSellerProductUpdateRunner : BigSellerBraveRunne
 
     public BigSellerProductUpdateRunner(
         BigSellerWorkflowSettings settings, Action<string> log, WorkflowPauseToken? pauseToken = null,
-        ClaimStore? claim = null, bool exportCookie = true, WorkbookRecordCache? sharedRecords = null)
+        ClaimStore? claim = null, MediaCleanupCoordinator? mediaCoord = null,
+        bool exportCookie = true, WorkbookRecordCache? sharedRecords = null)
         : base(settings, log, pauseToken, exportCookie)
     {
         _claim = claim;
+        _mediaCoord = mediaCoord;
         _sharedRecords = sharedRecords;
     }
 
@@ -191,6 +206,10 @@ internal sealed partial class BigSellerProductUpdateRunner : BigSellerBraveRunne
                  "→ Chạy 'Update tên SP (AI)' để điền cột G trước, rồi chạy lại Update.");
             return;
         }
+
+        // Đăng ký lane với coordinator dọn-kho (đếm lane sống cho barrier pause-all). Lane chết→restart thì runner mới
+        // đăng ký lại. null-safe: đường không có coordinator thì using-null là no-op.
+        using var _laneReg = _mediaCoord?.RegisterLane();
 
         StartBrave();
         _log($"Đã gọi Brave PID={_braveProcess?.Id.ToString() ?? "?"}, chờ CDP port {_settings.DebugPort}...");
@@ -253,6 +272,15 @@ internal sealed partial class BigSellerProductUpdateRunner : BigSellerBraveRunne
         while (!ct.IsCancellationRequested)
         {
             await WaitIfNotPausedAsync(ct).ConfigureAwait(false);
+            // Có lane đang dọn Material Center → ĐẬU tại đây tới khi dọn xong (mọi lane quay lại quét Listing cùng lúc,
+            // GIỮ vị trí trang hiện tại). Cổng mở thì về ngay (rẻ). Qua cổng rồi đồng bộ Generation đã thấy (kho vừa
+            // được dọn sạch — không cần làm gì thêm vì đếm đã ở coordinator).
+            if (_mediaCoord != null)
+            {
+                await _mediaCoord.WaitWhileClosedAsync(ct).ConfigureAwait(false);
+                var gen = _mediaCoord.Generation;
+                if (gen != _lastSeenMediaGen) _lastSeenMediaGen = gen;
+            }
             // Tab/Brave đóng, listing lỗi liên tục, captcha… = THOÁT BẤT THƯỜNG → ném LaneAbortedException
             // để supervisor RunLanesAsync KHỞI ĐỘNG LẠI lane. KHÔNG dùng break (return bình thường) vì
             // supervisor coi return bình thường là "hết việc" → lane nghỉ hưu vĩnh viễn → 5→1→0.
@@ -274,7 +302,9 @@ internal sealed partial class BigSellerProductUpdateRunner : BigSellerBraveRunne
                 var (result, terminal) = await RunFirstListingRowAsync(page, ct, () => clickBlockedStreak,
                     s => clickBlockedStreak = s, () => clickBlockedTotal, t => clickBlockedTotal = t).ConfigureAwait(false);
 
-                if (terminal) throw new LaneAbortedException("Shopee chặn (captcha) hoặc lỗi edit không phục hồi");
+                // Message cũ đổ oan Shopee/captcha → user tưởng dính captcha Shopee trong khi thực tế là lỗi
+                // edit/modal. Đính nguyên nhân THẬT (_lastTerminalReason) do RunListingRowAsync ghi.
+                if (terminal) throw new LaneAbortedException("lỗi edit không phục hồi: " + (_lastTerminalReason ?? "không rõ nguyên nhân"));
 
                 switch (result)
                 {
@@ -292,6 +322,10 @@ internal sealed partial class BigSellerProductUpdateRunner : BigSellerBraveRunne
                         _log("✔ Listing rỗng / hết trang cuối — không còn item id cần update. Lane kết thúc.");
                         LogSummary();
                         return;
+                    case "media_full":   // Toast/popup báo kho đầy → dừng-toàn-cục + dọn; vòng sau quét lại Listing
+                        emptyStreak = 0;   // GIỮ vị trí trang (KHÔNG reload về trang 1 — bug kẹt trang 1 cũ).
+                        await HandleMediaEmergencyAsync(page, "toast/popup báo đầy", ct).ConfigureAwait(false);
+                        break;
                     case "exhausted":   // Có dòng nhưng trang này hết dòng lane này xử lý được (đã xong/đã skip/lane khác giữ).
                         emptyStreak = 0;
                         if (await ClickNextListingPageAsync(page, ct).ConfigureAwait(false)) break;
@@ -348,17 +382,52 @@ internal sealed partial class BigSellerProductUpdateRunner : BigSellerBraveRunne
         BigSellerCrawlHelper.ClickNextCrawlPageAsync(
             page, _log, ListingNextPageSelector, PaginationNowPage, ListingReadySelector, DelayAsync, ct);
 
-    // ── dọn media định kỳ → uỷ quyền BigSellerMaterialCenterCleaner (giữ wrapper mỏng để call-site không đổi) ──
-    // Sau mỗi 10 lần BẮT ĐẦU sửa SP (đếm ở RecordEditStart, kể cả lưu fail), cleaner xóa sạch Material Center;
-    // wipe khoá qua ClaimStore (1 lần/account). Đây chỉ check-ngưỡng-và-dọn (no-op rẻ khi chưa đủ 10).
-    private Task MaybeClearMediaAfterEditsAsync(IPage listingPage, CancellationToken ct)
-        => _mediaCleaner!.MaybeClearMediaAsync(listingPage, ct);
+    // ── dọn media định kỳ ──
+    // Đường CŨ (không coordinator): cleaner tự đếm per-lane + wipe khi đủ 10. Đường coordinator: bộ đếm ở
+    // coordinator (toàn account), ở đây chỉ kiểm cờ CleanupPending (đủ 10 toàn account HOẶC media-đầy) rồi vào
+    // quy trình dọn-toàn-cục (pause-all). Gọi từ OuterLoop sau khi tab edit đã đóng — KHÔNG chạy giữa lúc đang sửa.
+    private async Task MaybeClearMediaAfterEditsAsync(IPage listingPage, CancellationToken ct)
+    {
+        if (_mediaCoord == null) { await _mediaCleaner!.MaybeClearMediaAsync(listingPage, ct).ConfigureAwait(false); return; }
+        if (_mediaCoord.CleanupPending) await HandleMediaEmergencyAsync(listingPage, "đủ 10 SP (toàn account)", ct).ConfigureAwait(false);
+    }
+
+    // Kho ĐẦY (toast/popup) hoặc đủ ngưỡng 10 SP toàn account → DỪNG TOÀN BỘ lane, dọn 1 lần, xong thì mọi lane quay
+    // lại quét Listing. Trước đây mỗi lane tự dọn tại chỗ trong khi lane khác vẫn chạy → save fail hàng loạt → SP bị
+    // "fail 2 lần → bỏ oan". Dồn về đây (pause-all) để không lane nào upload/lưu trong lúc kho đang bị dọn.
+    private async Task HandleMediaEmergencyAsync(IPage listingPage, string reason, CancellationToken ct)
+    {
+        _mediaFullDetected = false;   // đã tiếp nhận tín hiệu → xoá cờ kẻo vòng sau tưởng còn đầy
+        if (_mediaCoord == null) { await RunMediaCleanupLockedAsync(ct).ConfigureAwait(false); return; }   // fallback đường cũ
+
+        try
+        {
+            if (_mediaCoord.TryBeginCleanup())   // lane NÀY nhận vai thợ dọn (đóng cổng)
+            {
+                _log($"⛔ Media Center đầy/{reason} — TẠM DỪNG toàn bộ lane, dọn kho…");
+                try
+                {
+                    // Chờ các lane khác đậu hết (best-effort, cap 180s: lane đang dở AI call có thể lâu) rồi mới dọn.
+                    await _mediaCoord.WaitForOthersParkedAsync(180_000, ct).ConfigureAwait(false);
+                    await RunMediaCleanupLockedAsync(ct).ConfigureAwait(false);
+                }
+                finally { _mediaCoord.EndCleanup(); }   // BẮT BUỘC mở cổng lại — không để lane khác kẹt vĩnh viễn
+                _log("▶ Dọn kho xong — các lane chạy lại từ Listing.");
+            }
+            else   // lane khác đang làm thợ dọn → mình chỉ đậu chờ cổng mở
+            {
+                _log("⏸ Lane tạm dừng — chờ lane khác dọn Media Center…");
+                await _mediaCoord.WaitWhileClosedAsync(ct).ConfigureAwait(false);
+            }
+        }
+        finally
+        {
+            try { if (!listingPage.IsClosed) await listingPage.BringToFrontAsync(); } catch { }
+        }
+    }
 
     private Task<bool> RunMediaCleanupLockedAsync(CancellationToken ct)
         => _mediaCleaner!.RunMediaCleanupLockedAsync(ct);
-
-    private static Task<bool> IsMediaFullPopupAsync(IPage page)
-        => BigSellerMaterialCenterCleaner.IsMediaFullPopupAsync(page);
 
     private Task<bool> DismissStorageNagAsync(IPage page)
         => _mediaCleaner!.DismissStorageNagAsync(page);
@@ -398,10 +467,11 @@ internal sealed partial class BigSellerProductUpdateRunner : BigSellerBraveRunne
 
             var res = await RunListingRowAsync(page, row, editLink, rowKey, editId, ct,
                 getStreak, setStreak, getTotal, setTotal).ConfigureAwait(false);
-            // NHẢ claim rowKey khi dòng CHƯA xong-hẳn: "retry" (lỗi tạm) HOẶC terminal (lane sắp chết/restart).
-            // Nếu KHÔNG nhả ở terminal → dòng bị "claim mồ côi" (ClaimStore chung không hết-hạn) → sau restart
-            // không lane nào claim lại được → bỏ sót SP mà vẫn báo Hub "completed". Giữ claim CHỈ khi ok/deleted/skipped.
-            if (_claim is not null && (res.terminal || res.result == "retry")) _claim.Release(rowKey);
+            // NHẢ claim rowKey khi dòng CHƯA xong-hẳn: "retry" (lỗi tạm) / terminal (lane sắp chết/restart) /
+            // "media_full" (làm lại sau khi dọn kho). Nếu KHÔNG nhả → dòng bị "claim mồ côi" (ClaimStore chung không
+            // hết-hạn) → sau restart không lane nào claim lại được → bỏ sót SP mà vẫn báo Hub "completed". Giữ claim
+            // CHỈ khi ok/deleted/skipped.
+            if (_claim is not null && (res.terminal || res.result == "retry" || res.result == "media_full")) _claim.Release(rowKey);
             return res;
         }
         return ("exhausted", false);
@@ -498,10 +568,25 @@ internal sealed partial class BigSellerProductUpdateRunner : BigSellerBraveRunne
 
             // ĐÂY là điểm "bắt đầu sửa" — SP chỉ bị mở rồi skip ở các nhánh trên (không có edit-id / đã skip /
             // lane khác giữ / not_in_xlsx / thiếu tên) KHÔNG đếm; chỉ đếm khi thực sự vào điền/sửa SP.
-            _mediaCleaner!.RecordEditStart();
-            var ok = await ProcessProductAsync(editPage, record!, ct).ConfigureAwait(false);
+            // Coordinator đếm TOÀN account (quota Material Center per-account; đếm per-lane ở cleaner là LỆCH —
+            // 5 lane phải ~50 lần mới đủ 10, lại reset khi lane restart). null → giữ đường cũ per-lane.
+            if (_mediaCoord != null) _mediaCoord.RecordEditStart(_log);
+            else _mediaCleaner!.RecordEditStart();
+            var reported = false;
+            Func<Task> onSaved = () =>
+            {
+                // Bắn RowsDone ĐÚNG thời điểm đóng tab sau save thành công (yêu cầu thiết kế): helper là nơi duy nhất
+                // quyết định "thành công"; tầng này chỉ ánh xạ sang dòng sheet. LineIndex luôn >0 (record từ workbook).
+                if (record!.LineIndex > 0) { RowsDone?.Invoke(record.LineIndex, record.LineIndex); _reportedRows++; reported = true; }
+                else _log("  ⚠ LineIndex=0 — update xong nhưng KHÔNG báo được lên Thống kê (dòng này sẽ thiếu trên Hub).");
+                return Task.CompletedTask;
+            };
+            var ok = await ProcessProductAsync(editPage, record!, onSaved, ct).ConfigureAwait(false);
             if (!ok)
             {
+                // Kho ĐẦY giữa chừng → KHÔNG đếm fail / KHÔNG add skip-set: SP này sẽ được làm lại SAU khi dọn kho
+                // (pause-all). keepClaim vẫn false → finally nhả claim tầng-2 cho lane/vòng sau claim lại.
+                if (_mediaFullDetected) return ("media_full", false);
                 // Lỗi TẠM (AI rỗng/mạng) → để dòng lại, thử vòng sau, TUYỆT ĐỐI KHÔNG xóa (tránh mất SP). NHẢ claim (finally).
                 if (_lastProcessTransient) { _log("  ↳ lỗi tạm (AI) → để lại dòng, thử lại sau."); return ("retry", false); }
                 var failKey = $"shopee:{record!.LineIndex}/edit:{actualEditId}/row:{rowKey}";
@@ -520,10 +605,9 @@ internal sealed partial class BigSellerProductUpdateRunner : BigSellerBraveRunne
             _log($"✅ HOÀN TẤT XỬ LÝ SKU: {record!.Sku}");
             await OverlayAsync($"✅ Hoàn tất SKU {record!.Sku}");
             _okCount++;
-            if (record!.LineIndex > 0) { RowsDone?.Invoke(record.LineIndex, record.LineIndex); _reportedRows++; }   // báo ledger đúng dòng đã update
-            // LineIndex=0 gần như KHÔNG xảy ra (record đến từ workbook, luôn có số dòng) — nếu có thì SP này update
-            // xong mà KHÔNG báo được lên Thống kê → log để soi (record dựng thiếu LineIndex ở đâu đó).
-            else _log("  ⚠ LineIndex=0 — update xong nhưng KHÔNG báo được lên Thống kê (dòng này sẽ thiếu trên Hub).");
+            // Helper PHẢI đã gọi onSaved lúc đóng tab; nếu CHƯA (đường success nào đó không qua helper) vẫn báo để Hub
+            // không thiếu dòng — cờ reported chống bắn đúp.
+            if (!reported && record!.LineIndex > 0) { RowsDone?.Invoke(record.LineIndex, record.LineIndex); _reportedRows++; _log("  ⚠ báo Thống kê qua fallback (onSaved không được gọi trong helper — soi lại luồng save)."); }
             keepClaim = true; return ("ok", false);
         }
         catch (OperationCanceledException) { throw; }
@@ -535,12 +619,13 @@ internal sealed partial class BigSellerProductUpdateRunner : BigSellerBraveRunne
             {
                 setStreak(getStreak() + 1);
                 setTotal(getTotal() + 1);
-                if (getTotal() >= 9) { keepEditOpen = true; return (null, true); }
+                if (getTotal() >= 9) { _lastTerminalReason = "click bị modal chặn 9 lần liên tục (popup/modal lạ trên trang?)"; keepEditOpen = true; return (null, true); }
                 await DismissBlockingModalAsync(page);
                 if (getStreak() >= 3) { await GoToListingPageAsync(page, true); setStreak(0); }
                 return ("retry", false);
             }
             _log($"  ↳ Lỗi không phục hồi: {msg}");
+            _lastTerminalReason = msg;
             keepEditOpen = true;
             return (null, true);
         }
@@ -618,9 +703,10 @@ internal sealed partial class BigSellerProductUpdateRunner : BigSellerBraveRunne
     }
 
     // ── process one product ──
-    private async Task<bool> ProcessProductAsync(IPage page, WorkbookRecord rec, CancellationToken ct)
+    private async Task<bool> ProcessProductAsync(IPage page, WorkbookRecord rec, Func<Task>? onSaved, CancellationToken ct)
     {
         _lastProcessTransient = false;
+        _mediaFullDetected = false;   // reset cờ kho-đầy cho SP này (upload ảnh/video/save sẽ bật khi gặp tín hiệu đầy)
         await StepAsync($"Xử lý SKU {rec.Sku}");
 
         await StepAsync("Sửa tên sản phẩm");
@@ -634,7 +720,8 @@ internal sealed partial class BigSellerProductUpdateRunner : BigSellerBraveRunne
             _log("  ⚠ Không điền được tên SP — giữ tên cũ, tiếp tục xử lý.");
 
         await StepAsync("Đồng bộ ảnh (MD5)");
-        // [2] md5 sync
+        // [2] md5 sync — MD5 + import ảnh là 2 hành động ĐẨY ảnh vào Material Center; toast "kho đầy" bật NGAY tại đây
+        // và tự ẩn sau ~3s → phải bắt tại NGUỒN (tới lúc save là mất dấu). Dính tín hiệu → thoát SP sớm (khỏi tốn AI/save).
         try
         {
             var md5 = page.Locator(Md5Button).First;
@@ -642,11 +729,16 @@ internal sealed partial class BigSellerProductUpdateRunner : BigSellerBraveRunne
             {
                 await md5.ScrollIntoViewIfNeededAsync();
                 await md5.ClickAsync();
+                if (await BigSellerMaterialCenterCleaner.IsMediaInsufficientSignalAsync(page))
+                { _mediaFullDetected = true; await DismissStorageNagAsync(page); return false; }   // return KHÔNG bị catch nuốt
                 try { await page.Locator(Md5CompleteStatus).First.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 10000 }); } catch { }
                 await CloseVisibleAntModalAsync(page, 5000);
             }
         }
         catch { }
+        // Check LẦN NỮA sau block md5, NGOÀI try để catch { } không nuốt mất đường return (1 query DOM, rẻ).
+        if (await BigSellerMaterialCenterCleaner.IsMediaInsufficientSignalAsync(page))
+        { _mediaFullDetected = true; await DismissStorageNagAsync(page); return false; }
 
         // [3] radio "Tải lên hình ảnh" / "Upload Image" — tick để hiện khối upload ảnh (div.spc_box).
         // Trước đây lọc-text-VN cứng nên bản EN ("Upload Image") KHÔNG khớp → radio không tick → không chọn được ảnh.
@@ -749,6 +841,7 @@ internal sealed partial class BigSellerProductUpdateRunner : BigSellerBraveRunne
                 await DelayAsync(3000, ct);
             }
         }
+        if (_mediaFullDetected) return false;   // kho đầy phát hiện lúc upload video → AI/ảnh/lưu vô ích, thoát sớm cho rẻ
 
         // [11] image (non-fatal)
         var imagePath = _settings.ImagePath;
@@ -757,6 +850,7 @@ internal sealed partial class BigSellerProductUpdateRunner : BigSellerBraveRunne
             await StepAsync("Import ảnh");
             try { await UploadImageWithRetryAsync(page, imagePath, 3, ct); } catch { }
         }
+        if (_mediaFullDetected) return false;   // kho đầy lúc upload ảnh → thoát sớm; HandleMediaEmergencyAsync sẽ dọn
 
         await StepAsync("Tạo mô tả AI");
         // [12.1] AI description — rỗng sau retry = LỖI TẠM → retry vòng sau, KHÔNG xóa dòng (tránh mất SP).
@@ -766,7 +860,7 @@ internal sealed partial class BigSellerProductUpdateRunner : BigSellerBraveRunne
 
         await StepAsync("Lưu sản phẩm");
         // [12.2] save
-        return await SaveWithImageRetryAsync(page, imagePath, 3, ct).ConfigureAwait(false);
+        return await SaveWithImageRetryAsync(page, imagePath, 3, onSaved, ct).ConfigureAwait(false);
     }
 
     // ── overlay tiến độ ngay trên trang Brave để THEO DÕI log (best-effort: lỗi overlay KHÔNG bao giờ
@@ -1001,20 +1095,9 @@ internal sealed partial class BigSellerProductUpdateRunner : BigSellerBraveRunne
     }
 
     // ── string utils ──
-    private static string Normalize(string? s)
-    {
-        s ??= "";
-        s = s.Normalize(NormalizationForm.FormD);
-        var sb = new StringBuilder();
-        foreach (var c in s)
-        {
-            var cat = CharUnicodeInfo.GetUnicodeCategory(c);
-            if (cat == UnicodeCategory.NonSpacingMark) continue;
-            if (c == 'đ' || c == 'Đ') { sb.Append('d'); continue; }
-            sb.Append(char.ToLowerInvariant(c));
-        }
-        return Regex.Replace(sb.ToString(), @"\s+", " ").Trim();
-    }
+    // Bỏ dấu tiếng Việt: impl đã DỜI sang BigSellerSaveSuccessHelper (nơi duy nhất nhận diện success); giữ wrapper
+    // vì DetectSaveErrorAsync (Save.cs) còn gọi Normalize với chữ ký cũ.
+    private static string Normalize(string? s) => BigSellerSaveSuccessHelper.Normalize(s);
 
     private static string ParsePrice(string? s)
     {

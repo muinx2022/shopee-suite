@@ -134,6 +134,9 @@ internal sealed partial class BigSellerProductUpdateRunner
             if (await DetectVideoUploadErrorAsync(page)) return false;
             await DelayAsync(1000, ct);
         }
+        // Video KHÔNG lên sau 60s — nếu do kho đầy thì bật cờ để dồn về HandleMediaEmergencyAsync. Video vốn non-fatal
+        // nên KHÔNG return sớm giữa vòng: ProcessProductAsync check _mediaFullDetected NGAY SAU bước video.
+        if (await BigSellerMaterialCenterCleaner.IsMediaInsufficientSignalAsync(page)) _mediaFullDetected = true;
         return false;
     }
 
@@ -184,7 +187,6 @@ internal sealed partial class BigSellerProductUpdateRunner
     // ── image ──
     private async Task<bool> UploadImageWithRetryAsync(IPage page, string imagePath, int maxAttempts, CancellationToken ct)
     {
-        var cleanedForFull = false;   // chỉ dọn kho 1 lần/lượt upload (dọn xong không lên được nữa thì thôi)
         for (var attempt = 0; attempt < maxAttempts; attempt++)
         {
             try
@@ -205,20 +207,26 @@ internal sealed partial class BigSellerProductUpdateRunner
             }
             catch { }
 
-            // Đóng mọi popup dung-lượng đang chặn upload (đầy / sắp hết hạn) bằng X/Cancel (KHÔNG bấm Expand Space).
-            // Riêng popup ĐẦY thì còn dọn Material Center 1 lần → vòng sau upload lại (đã có chỗ). Phá thế kẹt
-            // "đầy → không lưu được → không đủ 10 SP để auto-dọn".
-            var mediaFull = await IsMediaFullPopupAsync(page);
-            if (await DismissStorageNagAsync(page) && mediaFull)
+            // Kho ĐẦY (toast ant-message HOẶC popup modal) → KHÔNG dọn tại chỗ nữa: dọn cục bộ trong khi các lane
+            // khác vẫn chạy = save fail hàng loạt → SP bị "fail 2 lần → bỏ oan". Dừng SP này, bật cờ để
+            // HandleMediaEmergencyAsync xử lý pause-all + dọn toàn cục.
+            if (await BigSellerMaterialCenterCleaner.IsMediaInsufficientSignalAsync(page))
             {
-                if (!cleanedForFull)
-                {
-                    cleanedForFull = true;
-                    _log("⚠ Media Center đầy khi upload ảnh → dọn kho rồi thử lại.");
-                    if (!await RunMediaCleanupLockedAsync(ct)) await DelayAsync(8000, ct);   // lane khác đang dọn → chờ
-                    try { await page.BringToFrontAsync(); } catch { }
-                }
+                _log("⚠ Media Center đầy khi upload ảnh — dừng SP này, chuyển sang quy trình dọn toàn cục.");
+                await DismissStorageNagAsync(page);
+                _mediaFullDetected = true;
+                return false;
             }
+            // Fail nhưng KHÔNG khớp tín hiệu đầy: ở attempt CUỐI, dump toast lỗi CHƯA nhận diện (1 lần/lane) để bổ
+            // sung bộ nhận diện — trả lời "UI tiếng Việt thì sao": lần đầu gặp wording mới, log tự khai nguyên văn.
+            if (attempt == maxAttempts - 1)
+                await BigSellerMaterialCenterCleaner.DumpErrorToastOnceAsync(page, _log, () =>
+                {
+                    if (_errorToastDumped) return false;
+                    _errorToastDumped = true;
+                    return true;
+                });
+            await DismissStorageNagAsync(page);   // đóng popup "sắp hết hạn dung lượng" nếu có (né Expand Space) — như cũ
             await DelayAsync(2500, ct);
         }
         return false;

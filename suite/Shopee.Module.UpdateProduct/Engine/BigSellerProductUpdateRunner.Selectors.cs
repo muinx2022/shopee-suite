@@ -89,10 +89,7 @@ internal sealed partial class BigSellerProductUpdateRunner
     private const string ConfirmPrimaryBtn = "div.ant-modal-confirm-btns button.ant-btn-primary";
     private static readonly string[] SaveErrSels =
         { "div.ant-message", "div.ant-message-notice", "div.ant-message-notice-content", "div.ant-notification", "div.ant-modal-root", "div[role='alert']", "body" };
-    // Modal "thành công" sau khi Lưu: đọc TOÀN BỘ text của (các) modal ĐANG HIỆN. Bản EN title RỖNG, chữ
-    // "Successfully" ở body + nút "Close this page"; bản VN chữ ở title. KHÔNG dùng .ant-modal-body trần + .First
-    // vì trang edit có nhiều .ant-modal ẩn → .First dễ vớ nhầm modal rỗng → tưởng chưa xong → KHÔNG đóng tab (lỗi EN).
-    private const string VisibleModal = "div.ant-modal:visible";
+    // (Selector modal "thành công" sau khi Lưu đã DỜI sang BigSellerSaveSuccessHelper — nơi duy nhất nhận diện success.)
 
     private static readonly Regex EditIdRegex = new(@"/edit/(\d+)\.htm", RegexOptions.IgnoreCase);
 }

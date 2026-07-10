@@ -147,9 +147,12 @@ public sealed class UpdateProductRunner
                 "→ Chạy 'Update tên SP (AI)' để điền cột G trước, rồi chạy lại Update.");
             return;
         }
+        // Điều phối dọn Material Center DÙNG CHUNG mọi lane (1 account): đếm bắt-đầu-sửa TOÀN account (quota kho
+        // per-account, đếm per-lane là lệch) + cổng pause-all khi kho đầy. Sống ở facade → xuyên qua lane-restart.
+        var mediaCoord = new MediaCleanupCoordinator();
         if (n == 1)
         {
-            await using var runner = new BigSellerProductUpdateRunner(wf, m => Log?.Invoke(m), _pause, sharedRecords: records);
+            await using var runner = new BigSellerProductUpdateRunner(wf, m => Log?.Invoke(m), _pause, mediaCoord: mediaCoord, sharedRecords: records);
             runner.RowsDone += (f, t) => RowsCompleted?.Invoke(f, t);
             await runner.RunAsync(ct);
             return;
@@ -157,7 +160,7 @@ public sealed class UpdateProductRunner
         Log?.Invoke($"▶ Update SONG SONG {n} lane (claim chống trùng SP; mỗi lane 1 Brave/profile/port riêng).");
         await RunLanesAsync(wf, n, ct, async (laneWf, lane, count, claim, export, c) =>
         {
-            await using var runner = new BigSellerProductUpdateRunner(laneWf, m => Log?.Invoke($"[L{lane}] {m}"), _pause, claim, export, records);
+            await using var runner = new BigSellerProductUpdateRunner(laneWf, m => Log?.Invoke($"[L{lane}] {m}"), _pause, claim, mediaCoord, export, records);
             runner.RowsDone += (f, t) => RowsCompleted?.Invoke(f, t);
             await runner.RunAsync(c);
         });
