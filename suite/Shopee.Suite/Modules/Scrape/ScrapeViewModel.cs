@@ -412,8 +412,26 @@ public sealed partial class ScrapeViewModel : ModuleViewModelBase
         try
         {
             int totalRows;
-            try { totalRows = await Task.Run(() => ScrapeWorkbook.TotalDataRows(account.WorkbookPath, sheet), ct).ConfigureAwait(false); }
-            catch (Exception ex) { LogA($"[{account.DisplayName}] ✘ lỗi đọc workbook: {ex.Message} — bỏ qua."); return; }
+            try
+            {
+                if (account.UsesHubData)
+                {
+                    // HUB-MODE: tổng dòng = Rows (tổng dền = MỌI dòng có thật) của sheet trên kho Hub — khớp
+                    // TotalDataRows của Excel (chỉ-số-dồn tính trên mọi dòng, kể cả dòng thiếu link/tên) nên tiến độ
+                    // scrape giữ nguyên khi acc excel→hub. Hub chưa kết nối/chưa sẵn sàng → ném → catch dưới ghi log
+                    // rõ + bỏ qua (KHÔNG âm thầm về Excel).
+                    var client = CoordinationRuntime.Client
+                        ?? throw new InvalidOperationException("⛔ Tk ở chế độ kho Hub nhưng chưa kết nối Hub — kiểm tra Cài đặt → Hub.");
+                    var sheets = await client.GetProductSheetsAsync(account.Id, ct).ConfigureAwait(false)
+                        ?? throw new InvalidOperationException("⛔ Hub chưa sẵn sàng (kho sản phẩm Postgres) — thử lại sau.");
+                    totalRows = sheets.FirstOrDefault(x => string.Equals(x.Sheet, sheet, StringComparison.Ordinal))?.Rows ?? 0;
+                }
+                else
+                {
+                    totalRows = await Task.Run(() => ScrapeWorkbook.TotalDataRows(account.WorkbookPath, sheet), ct).ConfigureAwait(false);
+                }
+            }
+            catch (Exception ex) { LogA($"[{account.DisplayName}] ✘ lỗi đọc {(account.UsesHubData ? "kho Hub" : "workbook")}: {ex.Message} — bỏ qua."); return; }
             // "Đến dòng" > 0 → DỪNG tại đó (cắt tổng số dòng cần chạy). Ưu tiên override TẠM (Hub giao).
             var endRow = Math.Max(0, endRowOverride ?? target.EndRow);
             if (endRow > 0 && endRow < totalRows) totalRows = endRow;
@@ -490,7 +508,8 @@ public sealed partial class ScrapeViewModel : ModuleViewModelBase
             OnUi(target.RefreshProgress);
 
             runner = new ScrapeRunner(account.WorkbookPath, VideoDir, braveExe: null, s.SourceUserData, bigSellerAccountName: account.DisplayName,
-                bigSellerKiotKey: account.KiotProxyKey, bigSellerRegion: account.Region, bigSellerProxyType: account.ProxyType);
+                bigSellerKiotKey: account.KiotProxyKey, bigSellerRegion: account.Region, bigSellerProxyType: account.ProxyType,
+                bigSellerAccountId: account.Id, useHubData: account.UsesHubData);   // hub-mode: engine nạp link từ kho Hub
             s.Jobs.TryUpdate(account.Id, j => j.Runner = runner);   // gán Runner DƯỚI lock (vs snapshot ở Stop)
             // Mỗi chunk xong → lưu tiến độ ngay (bền với dừng/treo).
             runner.RowsCompleted += (from, to) =>

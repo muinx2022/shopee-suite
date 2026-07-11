@@ -14,6 +14,10 @@ internal sealed record BigSellerWorkflowSettings
     public string Password { get; init; } = "";
     public string ShopName { get; init; } = "";
     public string WorkbookPath { get; init; } = "";
+    /// <summary>Tk này lấy dữ liệu sản phẩm từ kho Hub (Postgres) thay vì workbook Excel local. Bật →
+    /// các runner (update/import/rewrite) đọc/ghi dòng qua HubClient (<see cref="AccountId"/> khoá kho),
+    /// KHÔNG mở <see cref="WorkbookPath"/>. Mọi nhánh hub-mode phải nằm SAU cờ này để acc excel giữ nguyên.</summary>
+    public bool UseHubData { get; init; }
     public string DataSheet { get; init; } = "";
     public string BigSellerCookieFile { get; init; } = "";
     public string BatchId { get; init; } = "";

@@ -6,11 +6,15 @@ namespace Shopee.Hub;
 /// <summary>
 /// Phần ProductDb: truy vấn/ghi dòng sản phẩm — SQL viết TAY (như HubDatabase). Mở connection PER-CALL từ
 /// pool <c>_dataSource</c>. "Blank" NHẤT QUÁN = NULL hoặc trim rỗng → <c>NULLIF(btrim(col),'') IS NOT NULL</c>.
-/// Hai kiểu đánh số: dense = ROW_NUMBER() trên tập dòng hợp lệ (link + tên gốc non-blank); rowNo = số dòng thật.
+/// Hai kiểu đánh số (khớp ScrapeWorkbook của Excel): dense = ROW_NUMBER() trên MỌI dòng của (acct, sheet) —
+/// dòng thiếu link/tên VẪN chiếm chỗ dense, chỉ bị lọc khi TRẢ (xem GetLinksAsync); rowNo = số dòng thật.
 /// </summary>
 public sealed partial class ProductDb
 {
     // ── Tóm tắt sheet của 1 tài khoản (LEFT JOIN metadata file nguồn) ──────────────
+    // Rows = count(*) = TỔNG DỀN (mọi dòng có thật) — dùng cho TotalDataRows của scrape (khớp Excel: đếm mọi
+    // dòng dữ liệu, kể cả dòng thiếu link/tên). DenseRows = số dòng HỢP LỆ (link + tên gốc non-blank) — chỉ còn
+    // là thông tin (KHÔNG dùng làm tổng dòng scrape nữa).
     public async Task<List<ProductSheetInfo>> GetSheetsAsync(string acct, CancellationToken ct)
     {
         const string sql = @"
@@ -45,6 +49,10 @@ ORDER BY r.sheet;";
     }
 
     // ── Link để scrape theo chỉ-số-dồn [fromDense..toDense] (toDense<=0 = đến hết) ─
+    // NGỮ NGHĨA DENSE KHỚP ScrapeWorkbook (Excel): dense = ROW_NUMBER trên MỌI dòng của (acct, sheet) — dòng
+    // THIẾU link/tên VẪN chiếm chỗ dense (như ws.RowsUsed() của Excel), chỉ bị LỌC ở WHERE NGOÀI subquery (sau khi
+    // đã đánh số) nên không được TRẢ về — y hệt skipName/skipLink của FetchLinks. Nhờ vậy tiến độ scrape (đánh số
+    // dense trong scrape-progress.json + ledger) GIỮ NGUYÊN hiệu lực khi acc chuyển excel→hub.
     public async Task<List<ProductLinkRow>> GetLinksAsync(string acct, string sheet, int fromDense, int toDense, CancellationToken ct)
     {
         const string sql = @"
@@ -53,10 +61,10 @@ SELECT dense, row_no, link, sku, name_original FROM (
          ROW_NUMBER() OVER (ORDER BY row_no) AS dense
   FROM product_rows
   WHERE account_id = $1 AND sheet = $2
-    AND NULLIF(btrim(link),'')          IS NOT NULL
-    AND NULLIF(btrim(name_original),'') IS NOT NULL
 ) t
 WHERE dense >= $3 AND ($4 <= 0 OR dense <= $4)
+  AND NULLIF(btrim(link),'')          IS NOT NULL
+  AND NULLIF(btrim(name_original),'') IS NOT NULL
 ORDER BY dense;";
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
         await using var cmd = new NpgsqlCommand(sql, conn);

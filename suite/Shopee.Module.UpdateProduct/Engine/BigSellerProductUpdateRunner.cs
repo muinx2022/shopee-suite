@@ -4,6 +4,7 @@ using ClosedXML.Excel;
 using Microsoft.Playwright;
 using Shopee.Core.BigSeller;
 using Shopee.Core.Browser;
+using Shopee.Core.Coordination;
 
 namespace UpdateProduct;
 
@@ -47,6 +48,11 @@ internal sealed class WorkbookRecordCache
     internal static async Task<(Dictionary<string, WorkbookRecord> map, List<int> emptyRewriteRows)> LoadRecordMapAsync(
         BigSellerWorkflowSettings settings, CancellationToken ct)
     {
+        // HUB-MODE: dòng đã có tên-sửa lấy từ kho Hub (Postgres) — KHÔNG ánh xạ cột, KHÔNG khoá file. Đặt TRƯỚC
+        // validate cột (cột chỉ áp cho workbook Excel). Excel-mode giữ nguyên toàn bộ nhánh dưới.
+        if (settings.UseHubData)
+            return await LoadRecordMapFromHubAsync(settings, ct).ConfigureAwait(false);
+
         // Cột bắt buộc: "Tên đã sửa" (tên để update) + ít nhất 1 trong (Item ID / Link) để khớp dòng.
         // 0 = "không dùng" → fail rõ ràng thay vì đẩy 0 vào ClosedXML (Cell(0) ném lỗi).
         if (settings.RewrittenNameColumn <= 0)
@@ -84,6 +90,30 @@ internal sealed class WorkbookRecordCache
         }
 
         return (map, emptyRewriteRows);
+    }
+
+    // HUB-MODE của LoadRecordMapAsync: server đã LỌC đúng dòng cần update (name_rewritten non-blank AND có
+    // itemId/link) trong [StartRow..EndRow] và trả field cấu trúc → dựng CÙNG map itemId→WorkbookRecord như nhánh
+    // Excel (itemId ưu tiên ItemId, rỗng thì suy từ Link; LineIndex=RowNo; ProductName=NameRewritten; Price=PriceSale).
+    // emptyRewriteRows rỗng: server không trả dòng "cột G trống" nên KHÔNG có gì để cảnh báo. KHÔNG khoá file.
+    private static async Task<(Dictionary<string, WorkbookRecord> map, List<int> emptyRewriteRows)> LoadRecordMapFromHubAsync(
+        BigSellerWorkflowSettings settings, CancellationToken ct)
+    {
+        var client = CoordinationRuntime.Client
+            ?? throw new InvalidOperationException("⛔ Tk ở chế độ kho Hub nhưng chưa kết nối Hub — kiểm tra Cài đặt → Hub rồi chạy lại.");
+        var start = Math.Max(2, settings.StartRow);
+        var end = settings.EndRow;   // 0 = đến hết (server: toRow<=0 → không chặn trên)
+        var rows = await client.GetProductRecordMapAsync(settings.AccountId, settings.DataSheet, start, end, ct).ConfigureAwait(false)
+            ?? throw new InvalidOperationException("⛔ Hub chưa sẵn sàng (kho sản phẩm Postgres) — thử lại sau.");
+
+        var map = new Dictionary<string, WorkbookRecord>();
+        foreach (var r in rows)
+        {
+            var rowId = !string.IsNullOrWhiteSpace(r.ItemId) ? r.ItemId.Trim() : (BigSellerCrawlHelper.ExtractShopeeId(r.Link) ?? "");
+            if (string.IsNullOrWhiteSpace(rowId)) continue;
+            map[rowId] = new WorkbookRecord(r.Link, r.Sku, r.NameRewritten, r.PriceSale, r.RowNo);
+        }
+        return (map, new List<int>());
     }
 }
 

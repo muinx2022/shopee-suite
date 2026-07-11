@@ -2,16 +2,20 @@ namespace Shopee.Core.Coordination;
 
 // ── DTO kho SẢN PHẨM trên Hub (Postgres) — dùng chung client + server ──────────
 // Thay dần workbook Excel: 1 acc BigSeller = 1 kho, 1 shop = 1 "sheet". Mọi ô để text
-// (copy nguyên trạng như Excel); runner phía client tự parse số/tiền. Hai kiểu đánh số:
-//  · "chỉ-số-dồn" (dense) = vị trí 1-based trong tập dòng HỢP LỆ (link + tên gốc non-blank) → dùng cho scrape.
+// (copy nguyên trạng như Excel); runner phía client tự parse số/tiền. Hai kiểu đánh số (khớp ScrapeWorkbook):
+//  · "chỉ-số-dồn" (dense) = vị trí 1-based trong danh sách DÒNG-CÓ-THẬT đã nén → dùng cho scrape. Dòng thiếu
+//    link/tên gốc VẪN chiếm chỗ dense (như ws.RowsUsed() của Excel) nhưng KHÔNG được trả trong /products/links.
 //  · "số dòng tuyệt đối" (rowNo) = số dòng thật trên sheet Excel gốc (có lỗ hổng) → dùng cho import/update/rewrite.
 
-/// <summary>Tóm tắt 1 sheet (shop) của tài khoản: đếm dòng + mốc file nguồn.</summary>
+/// <summary>Tóm tắt 1 sheet (shop) của tài khoản: đếm dòng + mốc file nguồn. <see cref="Rows"/> = TỔNG DỀN (mọi
+/// dòng có thật) — nguồn TotalDataRows của scrape (khớp Excel); <see cref="DenseRows"/> = số dòng HỢP LỆ (link +
+/// tên gốc non-blank), giờ chỉ còn là thông tin.</summary>
 public sealed record ProductSheetInfo(
     string Sheet, int Rows, int LastRow, int DenseRows, int RewrittenCount,
     string? SourceFile, DateTimeOffset? ImportedAt);
 
-/// <summary>1 dòng link để scrape — <see cref="DenseIndex"/> là chỉ-số-dồn, <see cref="RowNo"/> là dòng tuyệt đối.</summary>
+/// <summary>1 dòng link để scrape — <see cref="DenseIndex"/> là chỉ-số-dồn (đánh trên MỌI dòng-có-thật, chỉ dòng
+/// hợp lệ được trả về), <see cref="RowNo"/> là dòng tuyệt đối.</summary>
 public sealed record ProductLinkRow(int DenseIndex, int RowNo, string Link, string Sku, string NameOriginal);
 
 /// <summary>1 dòng đã có tên-sửa để đẩy (update) lên BigSeller. Trả cả itemId LẪN link thô — client tự suy

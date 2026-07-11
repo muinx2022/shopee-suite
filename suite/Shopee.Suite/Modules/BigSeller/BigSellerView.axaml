@@ -100,14 +100,19 @@
                                 <TextBox PasswordChar="●" Text="{Binding Password, Mode=TwoWay}" Margin="0,3,0,10" />
 
                                 <TextBlock Text="Workbook (Excel)" Classes="caption" />
-                                <Grid Margin="0,3,0,10" ColumnDefinitions="*,Auto,Auto">
+                                <Grid Margin="0,3,0,3" ColumnDefinitions="*,Auto,Auto">
+                                    <!-- Hub-mode: khoá nút chọn file (kho dữ liệu ở Hub, không dùng workbook); "↻ Sheet" vẫn bật (nạp sheet từ Hub). -->
                                     <TextBox Grid.Column="0" Text="{Binding WorkbookPath}" IsReadOnly="True"
-                                             Classes="mono" />
+                                             Classes="mono" IsEnabled="{Binding CanPickWorkbook}" />
                                     <Button Grid.Column="1" Content="…" Width="40" Margin="8,0,0,0"
+                                            IsEnabled="{Binding CanPickWorkbook}"
                                             Command="{Binding #Root.DataContext.BrowseWorkbookCommand}" />
                                     <Button Grid.Column="2" Content="↻ Sheet" Margin="8,0,0,0"
                                             Command="{Binding #Root.DataContext.RefreshSheetsCommand}" />
                                 </Grid>
+                                <TextBlock Text="{Binding DataSourceLabel}" IsVisible="{Binding IsHubData}"
+                                           FontSize="12.5" Margin="0,0,0,10" TextWrapping="Wrap"
+                                           Foreground="{DynamicResource TextSecondaryBrush}" />
 
                                 <TextBlock Text="File cookie BigSeller (muc_token — dùng chung)" Classes="caption" />
                                 <Grid Margin="0,3,0,8" ColumnDefinitions="*,Auto">
