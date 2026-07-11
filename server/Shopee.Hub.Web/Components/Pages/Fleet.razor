@@ -345,6 +345,7 @@
                 @if (_accounts.Any(a => a.Id == _selAcctId))
                 {
                     <AccountConfigPanel AccountId="@(_selAcctId!)" OnChanged="OnConfigChanged" OnDeleted="OnAcctDeleted" />
+                    <DataStorePanel AccountId="@(_selAcctId!)" OnChanged="OnConfigChanged" />
                 }
                 else
                 {

@@ -145,6 +145,23 @@ public sealed class FileStoreConfigService
         }
     }
 
+    /// <summary>Đặt DataSource ("excel" | "hub") của 1 acc BigSeller khi cutover kho dữ liệu ở trang Fleet. Field
+    /// DÙNG CHUNG → bump version → client tự đổi hành vi khi sync về (≤3'). Đọc bản MỚI NHẤT ngay trước khi ghi +
+    /// thử lại nếu dính version-conflict (import/export đã chạy xong nên KHÔNG được để mất cú lật cờ này). No-op nếu
+    /// đã đúng giá trị.</summary>
+    public void SetBigSellerDataSource(string acctId, string dataSource)
+    {
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            var list = BigSellerAccounts();
+            var acc = list.FirstOrDefault(a => a.Id == acctId);
+            if (acc is null) return;
+            if (string.Equals(acc.DataSource, dataSource, StringComparison.Ordinal)) return;   // đã đúng
+            acc.DataSource = dataSource;
+            if (Save(BigSellerFile, list, VersionOf(BigSellerFile)).Ok) return;
+        }
+    }
+
     /// <summary>Bỏ BOM UTF-8 đầu file (store WPF ghi CÓ BOM; System.Text.Json ném lỗi nếu còn BOM).</summary>
     private static string NoBom(byte[] bytes)
     {

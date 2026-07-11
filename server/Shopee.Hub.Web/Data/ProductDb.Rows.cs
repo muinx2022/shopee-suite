@@ -48,6 +48,22 @@ ORDER BY r.sheet;";
         return list;
     }
 
+    // ── Danh sách row_no (tăng dần) của 1 sheet — "bản đồ dòng" cho trang Thống kê (SheetMapService nhánh Hub) ─
+    // Thứ tự = ánh xạ dense p ↔ row_no[p-1], KHỚP ROW_NUMBER() OVER (ORDER BY row_no) của GetLinksAsync: MỌI dòng
+    // có thật chiếm chỗ (kể cả thiếu link/tên) → giữ đúng ngữ nghĩa dense của scrape khi acc chuyển excel→hub.
+    public async Task<List<int>> GetRowNosAsync(string acct, string sheet, CancellationToken ct)
+    {
+        const string sql = "SELECT row_no FROM product_rows WHERE account_id = $1 AND sheet = $2 ORDER BY row_no;";
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue(acct);
+        cmd.Parameters.AddWithValue(sheet);
+        var list = new List<int>();
+        await using var rd = await cmd.ExecuteReaderAsync(ct);
+        while (await rd.ReadAsync(ct)) list.Add(rd.GetInt32(0));
+        return list;
+    }
+
     // ── Link để scrape theo chỉ-số-dồn [fromDense..toDense] (toDense<=0 = đến hết) ─
     // NGỮ NGHĨA DENSE KHỚP ScrapeWorkbook (Excel): dense = ROW_NUMBER trên MỌI dòng của (acct, sheet) — dòng
     // THIẾU link/tên VẪN chiếm chỗ dense (như ws.RowsUsed() của Excel), chỉ bị LỌC ở WHERE NGOÀI subquery (sau khi
