@@ -103,7 +103,11 @@ public sealed partial class ProductDb
     }
 
     // ── Export: sheet rỗng = mọi sheet của acc; đặt dữ liệu đúng row_no (lỗ hổng để trống) ──
-    public async Task<(byte[] Bytes, string FileName)> ExportXlsxAsync(string acct, string? sheet, CancellationToken ct)
+    // sheetTitles = ánh xạ khoá-ngăn (ShopeeDataSheet) → TÊN SHOP để đặt tên worksheet (hết lộ GUID). Ngăn không
+    // khớp shop nào → giữ khoá ngăn làm tiêu đề (ResolveSheetTitles lo sanitize/dedupe theo thứ tự ORDER BY sheet).
+    public async Task<(byte[] Bytes, string FileName)> ExportXlsxAsync(
+        string acct, string? sheet, CancellationToken ct,
+        IReadOnlyDictionary<string, string>? sheetTitles = null)
     {
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
 
@@ -120,9 +124,10 @@ public sealed partial class ProductDb
             while (await rd.ReadAsync(ct)) sheets.Add(rd.GetString(0));
         }
 
+        var titleMap = ProductXlsxCodec.ResolveSheetTitles(sheets, sheetTitles);
         var data = new List<(string Sheet, IReadOnlyList<ProductXlsxCodec.ParsedRow> Rows)>();
         foreach (var sh in sheets)
-            data.Add((sh, await ReadSheetRowsAsync(conn, acct, sh, ct)));
+            data.Add((titleMap.GetValueOrDefault(sh, sh), await ReadSheetRowsAsync(conn, acct, sh, ct)));
 
         var bytes = ProductXlsxCodec.Write(data);
         var fileName = await ResolveSourceFileAsync(conn, acct, sheet, ct) ?? $"{acct}.xlsx";

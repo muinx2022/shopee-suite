@@ -127,7 +127,9 @@
                 }
                 else if (string.IsNullOrEmpty(row.Sheet))
                 {
-                    <p class="hint">Shop chưa gán sheet — vào tab ⚙ Cấu hình.</p>
+                    <p class="hint">@(IsHubAcct(row.AccountId)
+                        ? "Shop thiếu ngăn dữ liệu — mở tab ⚙ Cấu hình bấm Lưu để vá."
+                        : "Shop chưa gán sheet — vào tab ⚙ Cấu hình.")</p>
                 }
                 else
                 {
@@ -349,7 +351,7 @@
             {
                 @if (_accounts.Any(a => a.Id == _selAcctId))
                 {
-                    <AccountConfigPanel AccountId="@(_selAcctId!)" OnChanged="OnConfigChanged" OnDeleted="OnAcctDeleted" OnShopAdded="OnShopAdded" />
+                    <AccountConfigPanel AccountId="@(_selAcctId!)" OnChanged="OnConfigChanged" OnDeleted="OnAcctDeleted" OnShopAdded="OnShopAdded" OnShopOpen="OnShopOpen" />
                     <DataStorePanel AccountId="@(_selAcctId!)" OnChanged="OnConfigChanged" />
                 }
                 else
@@ -619,7 +621,13 @@
         SummaryOps.Any(op => FleetStateService.OpCell(Snap, r.AccountId, r.ShopId, op).Kind == 1);
 
     private string GlyphTitle(ShopRow r) =>
-        r.InConfig && string.IsNullOrEmpty(r.Sheet) ? "chưa gán sheet" : "";
+        r.InConfig && string.IsNullOrEmpty(r.Sheet)
+            ? (IsHubAcct(r.AccountId) ? "thiếu ngăn dữ liệu" : "chưa gán sheet")
+            : "";
+
+    // Acc này đang ở chế độ kho Hub (Postgres) — dùng để chọn chữ hiển thị (né "sheet/workbook" của excel-mode).
+    private bool IsHubAcct(string accountId) =>
+        _accounts.FirstOrDefault(a => a.Id == accountId)?.UsesHubData == true;
 
     private void SelectShop(ShopRow r)
     {
@@ -643,7 +651,9 @@
     {
         var all = Config.BigSellerAccounts();
         var version = Config.VersionOf(FileStoreConfigService.BigSellerFile);
-        var acc = new BigSellerAccount { Label = "Tài khoản mới" };
+        // Acc tạo trên web hub mặc định dùng KHO HUB (Postgres) — bản mới không còn workbook Excel; excel-mode
+        // chỉ còn là đường chuyển tiếp cho acc cũ (tạo từ client hoặc migrate dở).
+        var acc = new BigSellerAccount { Label = "Tài khoản mới", DataSource = "hub" };
         all.Add(acc);
         ConfigSave.Apply(Config, FileStoreConfigService.BigSellerFile, all, ref version, () => { });
         ReloadAccounts();
@@ -661,9 +671,17 @@
         RecomputeSummary();
     }
 
-    // "+ Thêm shop" ở AccountConfigPanel đã LƯU shop mới → nạp lại rows TRƯỚC rồi tự chọn shop đó + mở tab Cấu hình
-    // (user cấu hình tên/sheet ngay, khỏi tìm trong list trái).
-    private void OnShopAdded(string shopId)
+    // "➕ Thêm"/🗑 xoá shop ở lưới AccountConfigPanel đã LƯU → chỉ rebuild list trái, KHÔNG nhảy panel (shop mới
+    // dùng được ngay, khỏi ép user vào màn cấu hình).
+    private void OnShopAdded()
+    {
+        ReloadAccounts();
+        Rebuild();
+        RecomputeSummary();
+    }
+
+    // Nút ⚙ trong lưới shop → chọn shop đó + mở tab Cấu hình nâng cao (ShopConfigPanel).
+    private void OnShopOpen(string shopId)
     {
         ReloadAccounts();
         Rebuild();

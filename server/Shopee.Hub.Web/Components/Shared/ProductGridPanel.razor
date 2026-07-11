@@ -19,7 +19,10 @@
     }
     else if (string.IsNullOrEmpty(Sheet))
     {
-        <p class="hint">Shop chưa gán sheet — vào tab ⚙ Cấu hình để gán sheet trước.</p>
+        @* Hub-mode: shop mới luôn có ngăn dữ liệu; chỉ shop hub CŨ (tạo trước luật sheet=Id) mới rơi vào đây. *@
+        <p class="hint">@(_acct.UsesHubData
+            ? "Shop thiếu ngăn dữ liệu — mở tab ⚙ Cấu hình bấm Lưu để vá."
+            : "Shop chưa gán sheet — vào tab ⚙ Cấu hình để gán sheet trước.")</p>
     }
     else
     {
@@ -35,14 +38,10 @@
             <button class="btn sm" disabled="@(!pgReady || _busy)" @onclick="DoSearch">🔍 Tìm</button>
             <span class="action">@_total.ToString("N0") dòng@(string.IsNullOrEmpty(_appliedSearch) ? "" : " khớp")</span>
             <span style="flex:1"></span>
-            @* Nhập Excel vào ĐÚNG ngăn này: Ghi đè = xoá-rồi-nạp; Nối thêm = thêm vào cuối. Ánh xạ cột CHUẨN (A..Q). *@
-            <label class="btn sm" style="@(pgReady && !_busy ? "" : "opacity:.45;cursor:not-allowed")">⬆ Nhập Excel
-                <InputFile OnChange="ImportExcel" accept=".xlsx" disabled="@(!pgReady || _busy)" style="display:none" />
+            @* Nhập Excel vào ĐÚNG ngăn này qua WIZARD: chọn file → chọn sheet + map cột + khoảng dòng + chế độ → OK. *@
+            <label class="btn sm" style="@(pgReady && !_busy && !_wizBusy ? "" : "opacity:.45;cursor:not-allowed")">⬆ Nhập Excel
+                <InputFile OnChange="ImportExcel" accept=".xlsx" disabled="@(!pgReady || _busy || _wizBusy)" style="display:none" />
             </label>
-            <select @bind="_importMode" disabled="@(!pgReady || _busy)" style="width:104px" title="Chế độ nhập Excel">
-                <option value="replace">Ghi đè</option>
-                <option value="append">Nối thêm</option>
-            </select>
             <button class="btn sm" disabled="@(!pgReady || _busy)" @onclick="ToggleAll">@(_showAll ? "Ẩn cột phụ" : "Hiện đủ 17 cột")</button>
             <button class="btn primary sm" disabled="@(!pgReady || _busy)" @onclick="AddRow">➕ Thêm dòng</button>
         </div>
@@ -166,13 +165,107 @@
     }
 </div>
 
+@* ── Wizard nhập Excel: chọn sheet → xem trước → map cột → khoảng dòng → chế độ → OK ── (đặt NGOÀI .editcard để
+   không dính .editcard input{width:100%}; overlay position:fixed nên vị trí DOM không quan trọng) *@
+@if (_wizOpen)
+{
+    <div class="modal-overlay" @onclick="WizCancel">
+        <div class="modal wide" @onclick:stopPropagation="true">
+            <div class="modal-head">
+                <span>⬆ Nhập Excel vào shop</span>
+                <button class="linkbtn" @onclick="WizCancel">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="wbrow">
+                    <span class="wblabel">📄 File:</span>
+                    <span class="wbname">@_wizFileName</span>
+                    <span class="wblabel" style="margin-left:auto">Sheet:</span>
+                    <select value="@_wizSheet" @onchange="WizSelectSheet" disabled="@(_wizBusy || _wizSheets.Count == 0)" style="width:220px">
+                        @foreach (var sh in _wizSheets)
+                        {
+                            <option value="@sh">@sh</option>
+                        }
+                    </select>
+                </div>
+
+                @if (!string.IsNullOrEmpty(_wizError))
+                {
+                    <div class="warn">@_wizError</div>
+                }
+
+                <div class="subhead">Xem trước (@_wizPreview.Count dòng đầu)</div>
+                <div class="tablewrap" style="max-height:210px">
+                    <table class="grid sm">
+                        <thead>
+                            <tr>
+                                <th style="width:52px">Dòng</th>
+                                @foreach (var c in _wizCols) { <th>@c</th> }
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @if (_wizPreview.Count == 0)
+                            {
+                                <tr><td colspan="@(_wizCols.Count + 1)" class="empty">Sheet không có dòng dữ liệu.</td></tr>
+                            }
+                            else
+                            {
+                                @foreach (var (rowNo, cells) in _wizPreview)
+                                {
+                                    <tr>
+                                        <td>@rowNo</td>
+                                        @foreach (var cell in cells)
+                                        {
+                                            <td style="@Clip" title="@cell">@cell</td>
+                                        }
+                                    </tr>
+                                }
+                            }
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="subhead">Ánh xạ cột (1-based, 0 = bỏ trường)</div>
+                <div style="display:flex;flex-wrap:wrap;gap:10px 16px;align-items:flex-end">
+                    <label style="@MapLbl">Link <input type="number" @bind="_wizLink" class="ci" /></label>
+                    <label style="@MapLbl">Giá bán <input type="number" @bind="_wizPrice" class="ci" /></label>
+                    <label style="@MapLbl">SKU <input type="number" @bind="_wizSku" class="ci" /></label>
+                    <label style="@MapLbl">Item ID <input type="number" @bind="_wizItem" class="ci" /></label>
+                    <label style="@MapLbl">Tên gốc <input type="number" @bind="_wizName" class="ci" /></label>
+                    <label style="@MapLbl">Tên đã sửa <input type="number" @bind="_wizRewritten" class="ci" /></label>
+                </div>
+                <p class="hint">Các cột phụ (giá gốc, danh mục, rating…) đọc theo vị trí chuẩn B, H..Q nếu có.</p>
+
+                <div style="display:flex;flex-wrap:wrap;gap:10px 16px;align-items:flex-end">
+                    <label style="@MapLbl">Từ dòng <input type="number" @bind="_wizFrom" class="ci" /></label>
+                    <label style="@MapLbl">Đến dòng <input type="number" @bind="_wizTo" class="ci" /></label>
+                    <span class="hint" style="margin:0 0 4px">(dòng 1 là tiêu đề; đến dòng 0 = hết)</span>
+                    <label style="@MapLbl">Chế độ
+                        <select @bind="_wizMode" style="width:180px">
+                            <option value="replace">Ghi đè (thay toàn bộ)</option>
+                            <option value="append">Nối thêm (vào cuối)</option>
+                        </select>
+                    </label>
+                </div>
+            </div>
+            <div class="modal-foot">
+                @if (_wizBusy) { <span class="action">⏳ đang xử lý…</span> }
+                <button class="btn" @onclick="WizCancel" disabled="@_wizBusy">Huỷ</button>
+                <button class="btn primary" @onclick="WizImport" disabled="@(_wizBusy || _wizSheets.Count == 0 || string.IsNullOrEmpty(_wizSheet))">OK — Nhập</button>
+            </div>
+        </div>
+    </div>
+}
+
 @code {
     [Parameter] public string AccountId { get; set; } = "";
     [Parameter] public string Sheet { get; set; } = "";
 
     private const int PageSize = 100;
+    private const int PreviewRows = 5;   // số dòng dữ liệu hiện trong bảng xem trước của wizard
     // Ô cắt ngắn text dài (Link/Tên/Ảnh…) — bảng vẫn cuộn ngang qua .tablewrap; title giữ giá trị đầy đủ.
     private const string Clip = "max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
+    // Label cột dọc trong modal (modal-body label mặc định display:block → ép flex-column cho input nằm dưới chữ).
+    private const string MapLbl = "display:flex;flex-direction:column;gap:4px;margin:0;font-size:12.5px";
 
     private BigSellerAccount? _acct;
     private List<(int RowNo, ProductRowData Data)> _rows = new();
@@ -183,7 +276,16 @@
     private RowEdit? _edit;
     private readonly HashSet<int> _selected = new();
     private string _loadedKey = "\0";   // chưa load lần nào (khác mọi khoá thật)
-    private string _importMode = "replace";   // "replace" = ghi đè ngăn, "append" = nối cuối
+
+    // ── State wizard nhập Excel (sống qua tick 2s: chỉ reset trong guard _loadedKey khi acc|sheet ĐỔI THẬT) ──
+    private bool _wizOpen, _wizBusy;
+    private byte[]? _wizBytes;
+    private string _wizFileName = "", _wizSheet = "", _wizError = "", _wizMode = "replace";
+    private List<string> _wizSheets = new(), _wizCols = new();
+    private List<(int RowNo, List<string> Cells)> _wizPreview = new();
+    // Ánh xạ 6 field nghiệp vụ (1-based; 0 = bỏ) — mặc định = ColumnOverrides.Default (1,3,4,5,6,7).
+    private int _wizLink = 1, _wizPrice = 3, _wizSku = 4, _wizItem = 5, _wizName = 6, _wizRewritten = 7;
+    private int _wizFrom = 2, _wizTo;   // khoảng dòng; _wizTo = 0 = hết
 
     private ProductDb? Pg => Sp.GetService<ProductDb>();
     private int PageCount => Math.Max(1, (_total + PageSize - 1) / PageSize);
@@ -199,6 +301,7 @@
         _acct = Config.BigSellerAccounts().FirstOrDefault(a => a.Id == AccountId);
         _search = _appliedSearch = _status = "";
         _page = 1; _busy = _showAll = false; _editRowNo = null; _edit = null; _selected.Clear();
+        _wizOpen = false; _wizBusy = false; _wizBytes = null; _wizError = "";   // đổi shop → đóng wizard
         await LoadAsync();
     }
 
@@ -318,23 +421,16 @@
         finally { _busy = false; }
     }
 
-    // ── Nhập Excel vào ĐÚNG ngăn (sheet) này ─────────────────────────────────────────
-    // Ghi đè + file 1 sheet → giữ RowNo gốc (kể cả lỗ hổng). Ghi đè + file nhiều sheet → gộp mọi sheet, đánh LẠI
-    // số dòng liên tục từ 2. Nối thêm → gộp mọi sheet, ProductDb tự cấp row_no từ max+1 (bỏ RowNo gốc). Ánh xạ cột
-    // CHUẨN (A..Q) như import cả-file ở DataStorePanel. Op nặng (parse xlsx + ghi DB) chạy trên Task.Run.
+    // ── Wizard nhập Excel vào ĐÚNG ngăn (sheet) này ──────────────────────────────────
+    // Chọn file → KHÔNG import ngay: đọc bytes (256MB), Task.Run lấy tên sheet + xem trước sheet đầu → MỞ modal.
+    // Parse/xem-trước/ghi-DB đều nặng → chạy Task.Run, không khoá circuit Blazor.
     private async Task ImportExcel(InputFileChangeEventArgs e)
     {
-        if (_busy) return;
+        if (_busy || _wizBusy) return;
         var pg = Pg;
         if (pg is null || !pg.IsReady || _acct is null || string.IsNullOrEmpty(Sheet)) return;
         var file = e.File;
-        var replace = !string.Equals(_importMode, "append", StringComparison.Ordinal);
-        if (!await JS.InvokeAsync<bool>("confirm", replace
-                ? $"Nhập '{file.Name}' theo chế độ GHI ĐÈ — XOÁ toàn bộ dòng hiện có của ngăn này rồi nạp lại từ file. Tiếp tục?"
-                : $"Nhập '{file.Name}' theo chế độ NỐI THÊM — giữ nguyên dòng hiện có, thêm dòng từ file vào cuối ngăn. Tiếp tục?"))
-            return;
-
-        _busy = true; _status = "⏳ Đang nhập Excel…";
+        _wizBusy = true; _wizError = ""; _status = "";
         try
         {
             byte[] bytes;
@@ -345,40 +441,90 @@
                 bytes = buf.ToArray();
             }
 
-            var acct = _acct.Id; var sheet = Sheet; var src = file.Name;
-            // Parse + gom dòng (đồng bộ, có thể nặng) chạy trên thread pool → không khoá circuit Blazor.
-            var (rows, multi) = await Task.Run(() =>
+            var load = await Task.Run(() =>
             {
-                using var ms = new MemoryStream(bytes);
-                var parsed = ProductXlsxCodec.Parse(ms, null);   // ánh xạ cột CHUẨN
-                var multiSheet = parsed.Count > 1;
-                List<ProductXlsxCodec.ParsedRow> flat;
-                if (replace && parsed.Count == 1)
+                try
                 {
-                    flat = parsed[0].Rows;   // giữ nguyên RowNo gốc (lỗ hổng bảo toàn)
+                    List<string> sheets;
+                    using (var ms = new MemoryStream(bytes)) sheets = ProductXlsxCodec.ListSheetNames(ms);
+                    if (sheets.Count == 0)
+                        return (sheets, "", new List<string>(), new List<(int, List<string>)>(), "File không có worksheet nào.");
+                    var s0 = sheets[0];
+                    using var msp = new MemoryStream(bytes);
+                    var pv = ProductXlsxCodec.PreviewSheet(msp, s0, PreviewRows);
+                    return (sheets, s0, pv.ColLetters, pv.Rows, "");
                 }
-                else
+                catch (Exception ex)
                 {
-                    // Nhiều sheet (ghi đè) HOẶC nối thêm → gộp mọi sheet, đánh lại số liên tục từ 2 (nối thêm sẽ bị
-                    // ProductDb cấp lại row_no từ max+1 nên số này chỉ là chỗ giữ chỗ).
-                    flat = new();
-                    var n = 2;
-                    foreach (var (_, rs) in parsed)
-                        foreach (var pr in rs)
-                            flat.Add(new ProductXlsxCodec.ParsedRow(n++, pr.Data));
+                    return (new List<string>(), "", new List<string>(), new List<(int, List<string>)>(), "Không đọc được file: " + ex.Message);
                 }
-                return (flat, multiSheet);
             });
 
-            var count = await Task.Run(() => pg.ImportIntoSheetAsync(acct, sheet, rows, replace, src, "hub-web", CancellationToken.None));
+            // Nạp state modal + reset map/khoảng dòng/chế độ về mặc định cho lần nhập này.
+            _wizBytes = bytes; _wizFileName = file.Name;
+            _wizSheets = load.Item1; _wizSheet = load.Item2; _wizCols = load.Item3; _wizPreview = load.Item4; _wizError = load.Item5;
+            _wizLink = 1; _wizPrice = 3; _wizSku = 4; _wizItem = 5; _wizName = 6; _wizRewritten = 7;
+            _wizFrom = 2; _wizTo = 0; _wizMode = "replace";
+            _wizOpen = true;   // mở modal kể cả khi có lỗi (báo lỗi trong modal, không đóng)
+        }
+        catch (Exception ex) { _status = "✘ Lỗi đọc file: " + ex.Message; }
+        finally { _wizBusy = false; }
+    }
+
+    // Đổi sheet trong modal → parse lại xem trước (Task.Run). Lỗi → báo trong modal, giữ modal mở.
+    private async Task WizSelectSheet(ChangeEventArgs e)
+    {
+        _wizSheet = e.Value?.ToString() ?? "";
+        if (_wizBytes is null || string.IsNullOrEmpty(_wizSheet)) return;
+        _wizBusy = true; _wizError = "";
+        try
+        {
+            var bytes = _wizBytes; var sheet = _wizSheet;
+            var res = await Task.Run(() =>
+            {
+                try { using var ms = new MemoryStream(bytes); var pv = ProductXlsxCodec.PreviewSheet(ms, sheet, PreviewRows); return (pv.ColLetters, pv.Rows, ""); }
+                catch (Exception ex) { return (new List<string>(), new List<(int, List<string>)>(), "Không đọc được sheet: " + ex.Message); }
+            });
+            _wizCols = res.Item1; _wizPreview = res.Item2; _wizError = res.Item3;
+        }
+        finally { _wizBusy = false; }
+    }
+
+    private void WizCancel() { _wizOpen = false; _wizBytes = null; _wizError = ""; }
+
+    // OK → confirm chế độ → ParseSheet(bytes, sheet, ov, from, to) → ImportIntoSheetAsync. Ghi đè giữ RowNo từ
+    // ParseSheet (ngăn chỉ còn đúng khoảng dòng đã chọn); nối thêm để ProductDb tự cấp row_no từ max+1. Lỗi → giữ modal.
+    private async Task WizImport()
+    {
+        if (_wizBusy || _wizBytes is null || string.IsNullOrEmpty(_wizSheet)) return;
+        var pg = Pg;
+        if (pg is null || !pg.IsReady || _acct is null || string.IsNullOrEmpty(Sheet)) return;
+        var replace = !string.Equals(_wizMode, "append", StringComparison.Ordinal);
+        if (!await JS.InvokeAsync<bool>("confirm", replace
+                ? $"Nhập từ sheet '{_wizSheet}' theo GHI ĐÈ — XOÁ toàn bộ dòng hiện có của shop rồi nạp phần đã chọn. Tiếp tục?"
+                : $"Nhập từ sheet '{_wizSheet}' theo NỐI THÊM — thêm phần đã chọn vào cuối shop. Tiếp tục?"))
+            return;
+
+        _wizBusy = true; _wizError = "";
+        try
+        {
+            var bytes = _wizBytes; var sheet = _wizSheet; var src = _wizFileName;
+            var acct = _acct.Id; var dest = Sheet; var from = _wizFrom; var to = _wizTo;
+            var ov = new ProductXlsxCodec.ColumnOverrides(
+                Math.Max(0, _wizLink), Math.Max(0, _wizPrice), Math.Max(0, _wizSku),
+                Math.Max(0, _wizItem), Math.Max(0, _wizName), Math.Max(0, _wizRewritten));
+
+            var rows = await Task.Run(() => { using var ms = new MemoryStream(bytes); return ProductXlsxCodec.ParseSheet(ms, sheet, ov, from, to); });
+            var count = await Task.Run(() => pg.ImportIntoSheetAsync(acct, dest, rows, replace, src, "hub-web", CancellationToken.None));
+
+            _wizOpen = false; _wizBytes = null;
             _editRowNo = null; _edit = null; _selected.Clear(); _search = _appliedSearch = "";
             _page = replace ? 1 : int.MaxValue;   // ghi đè → về trang 1; nối thêm → nhảy trang cuối (LoadAsync kẹp lại)
             await LoadAsync();
-            var note = (multi && replace) ? " — file nhiều sheet → đã đánh lại số dòng" : "";
-            _status = $"✔ Đã nhập {count:N0} dòng ({(replace ? "ghi đè" : "nối thêm")}){note}.";
+            _status = $"✔ Đã nhập {count:N0} dòng vào shop ({(replace ? "ghi đè" : "nối thêm")}).";
         }
-        catch (Exception ex) { _status = "✘ Lỗi nhập Excel: " + ex.Message; }
-        finally { _busy = false; }
+        catch (Exception ex) { _wizError = "✘ Lỗi nhập: " + ex.Message; }
+        finally { _wizBusy = false; }
     }
 
     // Bản sao MUTABLE của 17 ô để bind input (ProductRowData là record bất biến). RowNo giữ để biết dòng đang sửa.

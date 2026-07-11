@@ -1,5 +1,6 @@
 using Shopee.Core.Coordination;
 using Shopee.Hub;
+using Shopee.Hub.Web.Services;
 
 namespace Shopee.Hub.Web.Api;
 
@@ -104,14 +105,27 @@ public static class ProductApiEndpoints
             return Results.Json(res);
         });
 
-        // ── Export: file xlsx dựng lại từ kho ──
+        // ── Export: file xlsx dựng lại từ kho (worksheet đặt tên = TÊN SHOP, hết lộ GUID ngăn dữ liệu) ──
         api.MapGet(HubRoutes.ProductsExportXlsx, async (string? acct, string? sheet, IServiceProvider sp, CancellationToken ct) =>
         {
             var pdb = sp.GetService<ProductDb>();
             if (pdb is null || !pdb.IsReady) return PgNotReady();
             if (string.IsNullOrEmpty(acct)) return Results.BadRequest();
-            var (bytes, fileName) = await pdb.ExportXlsxAsync(acct, sheet, ct);
+            var (bytes, fileName) = await pdb.ExportXlsxAsync(acct, sheet, ct, ShopTitles(sp, acct));
             return Results.File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fileName);
         });
+    }
+
+    /// <summary>Ánh xạ ShopeeDataSheet (khoá ngăn) → TÊN SHOP cho 1 acc, để export đặt tên worksheet. Đọc config
+    /// dùng-chung qua <see cref="FileStoreConfigService"/>; acc không có/không cấu hình → null (export giữ khoá ngăn).</summary>
+    private static IReadOnlyDictionary<string, string>? ShopTitles(IServiceProvider sp, string acct)
+    {
+        var a = sp.GetService<FileStoreConfigService>()?.BigSellerAccounts().FirstOrDefault(x => x.Id == acct);
+        if (a is null) return null;
+        var map = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var s in a.Shops)
+            if (!string.IsNullOrWhiteSpace(s.ShopeeDataSheet))
+                map[s.ShopeeDataSheet] = s.Name;
+        return map;
     }
 }

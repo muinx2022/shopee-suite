@@ -20,15 +20,20 @@ else
             <label>Vùng <input @bind="_acct.Region" style="width:90px" /></label>
         </div>
 
-        <div class="wbrow">
-            <span class="wblabel">📗 Workbook:</span>
-            <span class="wbname">@WorkbookName(_acct.Id)</span>
-            <label class="btn sm">
-                @(WorkbookName(_acct.Id) == "(chưa có)" ? "⬆ Tải lên" : "⬆ Thay file")
-                <InputFile OnChange="e => UploadWorkbook(e, _acct.Id)" accept=".xlsx" style="display:none" />
-            </label>
-            @if (!string.IsNullOrEmpty(_wbStatus)) { <span class="action">@_wbStatus</span> }
-        </div>
+        @* Workbook Excel CHỈ có nghĩa với acc excel-mode (chưa migrate) — dùng để tải file cũ lên rồi nhập vào
+           kho Hub ở khối 🗄 Kho dữ liệu. Acc hub-mode (kho Postgres) không còn khái niệm workbook. *@
+        @if (!_acct.UsesHubData)
+        {
+            <div class="wbrow">
+                <span class="wblabel">📗 Workbook:</span>
+                <span class="wbname">@WorkbookName(_acct.Id)</span>
+                <label class="btn sm">
+                    @(WorkbookName(_acct.Id) == "(chưa có)" ? "⬆ Tải lên" : "⬆ Thay file")
+                    <InputFile OnChange="e => UploadWorkbook(e, _acct.Id)" accept=".xlsx" style="display:none" />
+                </label>
+                @if (!string.IsNullOrEmpty(_wbStatus)) { <span class="action">@_wbStatus</span> }
+            </div>
+        }
 
         @{ var ls = Login.GetState(_acct.Id); }
         <div class="wbrow">
@@ -52,8 +57,39 @@ else
             <div class="loginlog">@string.Join("\n", lg.Log.TakeLast(6))</div>
         }
 
-        <div class="subhead">Shops (@_acct.Shops.Count) <button class="btn sm" @onclick="AddShop">+ Thêm shop</button></div>
-        <p class="hint">Cấu hình chi tiết từng shop: chọn shop ở danh sách bên trái → tab ⚙ Cấu hình. Bấm <b>+ Thêm shop</b> → shop được lưu và mở cấu hình ngay.</p>
+        @* Lưới quản lý shop NGAY trong panel acc (CRUD): sửa tên inline (bấm 💾 Lưu dưới để ghi), ⚙ mở cấu hình
+           nâng cao, 🗑 xoá. Hàng cuối: nhập tên + ➕ Thêm → tạo shop CHỈ CẦN TÊN (hub-mode tự gán ngăn dữ liệu). *@
+        <div class="subhead">🏪 Shop (@_acct.Shops.Count)</div>
+        <div class="tablewrap">
+        <table class="grid sm">
+            <thead><tr><th>Tên shop</th><th style="width:150px">Thao tác</th></tr></thead>
+            <tbody>
+                @foreach (var shop in _acct.Shops)
+                {
+                    <tr>
+                        <td><input @bind="shop.Name" placeholder="tên shop" /></td>
+                        <td>
+                            <button class="linkbtn" title="Cấu hình nâng cao" @onclick="() => OpenShop(shop.Id)">⚙</button>
+                            @if (_confirmDeleteShop == shop.Id)
+                            {
+                                <button class="linkbtn" style="color:var(--danger)" @onclick="() => DeleteShop(shop.Id)">Xoá?</button>
+                                <button class="linkbtn" @onclick="() => _confirmDeleteShop = null">Huỷ</button>
+                            }
+                            else
+                            {
+                                <button class="linkbtn" style="color:var(--danger)" title="Xoá shop" @onclick="() => _confirmDeleteShop = shop.Id">🗑</button>
+                            }
+                        </td>
+                    </tr>
+                }
+                <tr>
+                    <td><input @bind="_newShopName" placeholder="tên shop mới…" @onkeydown="AddShopKey" /></td>
+                    <td><button class="btn sm" @onclick="AddShop">➕ Thêm</button></td>
+                </tr>
+            </tbody>
+        </table>
+        </div>
+        <p class="hint">Sửa tên shop ngay trong lưới rồi bấm <b>💾 Lưu</b>. Shop mới chỉ cần TÊN là dùng được (⚙ để chỉnh crawl URL / AI / import nếu cần).</p>
 
         <div class="bar">
             <button class="btn primary" @onclick="Save">💾 Lưu</button>
@@ -75,15 +111,18 @@ else
     [Parameter] public string AccountId { get; set; } = "";
     [Parameter] public EventCallback OnChanged { get; set; }
     [Parameter] public EventCallback OnDeleted { get; set; }
-    // Sau khi "+ Thêm shop" LƯU xong → báo parent (Fleet) shop.Id để tự chọn shop mới + mở tab Cấu hình.
-    [Parameter] public EventCallback<string> OnShopAdded { get; set; }
+    // Sau khi "➕ Thêm" shop LƯU xong → báo parent (Fleet) rebuild list trái (KHÔNG nhảy panel: shop dùng được luôn).
+    [Parameter] public EventCallback OnShopAdded { get; set; }
+    // Nút ⚙ trong lưới → báo parent (Fleet) chọn shop đó + mở tab Cấu hình nâng cao.
+    [Parameter] public EventCallback<string> OnShopOpen { get; set; }
 
     private List<BigSellerAccount> _all = new();
     private int _version;
     private BigSellerAccount? _acct;
     private List<FileManifestEntry> _manifest = new();
-    private string _status = "", _wbStatus = "", _otp = "";
+    private string _status = "", _wbStatus = "", _otp = "", _newShopName = "";
     private bool _confirmDelete;
+    private string? _confirmDeleteShop;   // shop.Id đang chờ xác nhận xoá (bấm-2-lần), null = không có
     private string _loadedKey = "\0";   // chưa load lần nào (khác mọi AccountId thật)
 
     // Guard chống reload theo nhịp: parent re-render mỗi 2s → OnParametersSet chạy lại, chỉ nạp lại bản-đang-sửa
@@ -93,7 +132,8 @@ else
         if (AccountId == _loadedKey) return;
         _loadedKey = AccountId;
         _confirmDelete = false;
-        _status = _wbStatus = "";
+        _confirmDeleteShop = null;
+        _status = _wbStatus = _newShopName = "";
         Load();
     }
 
@@ -148,22 +188,46 @@ else
         "success" => "✔", "failed" => "✘", "needsOtp" => "⚠", "running" => "⏳", _ => "",
     };
 
-    // Thêm shop + LƯU NGAY (đúng pattern Save: version-conflict → reload + báo). Lưu OK → báo parent chọn shop mới.
+    private async Task AddShopKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await AddShop();
+    }
+
+    // Thêm shop CHỈ CẦN TÊN + LƯU NGAY (đúng pattern Save: version-conflict → reload + báo). Lưu OK → báo parent
+    // rebuild list trái nhưng KHÔNG nhảy panel (shop mới dùng được luôn). Tên rỗng → không làm gì.
     private async Task AddShop()
     {
         if (_acct is null) return;
-        var shop = new BigSellerShop { Name = "Shop mới" };
+        var name = _newShopName.Trim();
+        if (name.Length == 0) return;
+        var shop = new BigSellerShop { Name = name };
         // Acc hub-mode: "sheet" chỉ là tên ngăn dữ liệu nội bộ hệ thống tự quản → gán = shop.Id (GUID ổn định,
-        // không đổi khi rename shop → ngăn dữ liệu không trôi). Acc excel-mode để trống, user gán sheet sau.
+        // không đổi khi rename shop → ngăn dữ liệu không trôi). Acc excel-mode để trống, user gán sheet sau qua ⚙.
         if (_acct.UsesHubData) shop.ShopeeDataSheet = shop.Id;
         _acct.Shops.Add(shop);
         _status = ConfigSave.Apply(Config, FileStoreConfigService.BigSellerFile, _all, ref _version, Load);
         if (_status.StartsWith('✔'))
         {
-            _status = "✔ Đã thêm shop";
-            await OnShopAdded.InvokeAsync(shop.Id);
+            _status = $"✔ Đã thêm shop '{name}'";
+            _newShopName = "";
+            await OnShopAdded.InvokeAsync();   // parent rebuild list trái (không SelectShop, không nhảy trang)
         }
         else { await OnChanged.InvokeAsync(); }   // conflict/lỗi: shop đã bị reload bỏ đi → chỉ refresh parent
+    }
+
+    // ⚙ trong lưới → báo parent chọn shop đó + mở cấu hình nâng cao (ShopConfigPanel). Lưu inline chưa ghi sẽ mất
+    // khi parent reload — user nên bấm 💾 Lưu trước nếu vừa sửa tên.
+    private async Task OpenShop(string shopId) => await OnShopOpen.InvokeAsync(shopId);
+
+    // Xoá 1 shop khỏi lưới + LƯU NGAY, rồi báo parent rebuild list trái.
+    private async Task DeleteShop(string shopId)
+    {
+        if (_acct is null) return;
+        _acct.Shops.RemoveAll(s => s.Id == shopId);
+        _confirmDeleteShop = null;
+        _status = ConfigSave.Apply(Config, FileStoreConfigService.BigSellerFile, _all, ref _version, Load);
+        if (_status.StartsWith('✔')) _status = "✔ Đã xoá shop";
+        await OnShopAdded.InvokeAsync();   // rebuild list trái (dùng chung handler: chỉ rebuild, không nhảy panel)
     }
 
     private async Task Save()
