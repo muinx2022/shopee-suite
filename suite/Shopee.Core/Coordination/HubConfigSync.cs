@@ -52,6 +52,7 @@ public sealed class HubConfigSync
         // Workbook Excel (dữ liệu sản phẩm) — đẩy theo từng tk BigSeller để máy khác kéo về chạy được.
         foreach (var acct in BigSellerStore.Shared.Accounts)
         {
+            if (acct.UsesHubData) continue;   // acc hub-mode: dữ liệu ở kho Postgres, KHÔNG còn workbook để đẩy
             if (string.IsNullOrWhiteSpace(acct.WorkbookPath) || !File.Exists(acct.WorkbookPath)) continue;
             try
             {
@@ -175,6 +176,9 @@ public sealed class HubConfigSync
             var changed = false;
             foreach (var acct in accts)
             {
+                // acc hub-mode: dữ liệu ở kho Postgres → KHÔNG tải workbook và KHÔNG rebase WorkbookPath (giữ
+                // nguyên đường cũ để nếu user chuyển acc về excel-mode thì bản workbook cũ vẫn còn dùng được).
+                if (acct.UsesHubData) continue;
                 var entry = manifest.FirstOrDefault(m => m.Name.StartsWith($"workbooks/{acct.Id}/", StringComparison.OrdinalIgnoreCase));
                 if (entry is null) continue;
                 var local = Path.Combine(SuitePaths.HubCacheDir, "workbooks", acct.Id, Path.GetFileName(entry.Name));

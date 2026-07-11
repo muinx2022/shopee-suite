@@ -124,6 +124,7 @@ public static class BackupService
                     existing.Shops = MergeShopsKeepInstance(existing.Shops, a.Shops);
                     existing.Label = a.Label; existing.Email = a.Email; existing.Password = a.Password;
                     existing.KiotProxyKey = a.KiotProxyKey; existing.Region = a.Region; existing.ProxyType = a.ProxyType;
+                    existing.DataSource = a.DataSource;   // field CHUNG (excel/hub): Hub là nguồn sự thật cho chế độ kho
                     changed = true;
                 }
                 // Nối lại CookieFile cho acc ĐÃ tồn tại: trước đây nhánh này bỏ qua cookie HOÀN TOÀN, nên acc
@@ -161,7 +162,7 @@ public static class BackupService
     /// vào chữ ký thì set worker trên client làm lệch chữ ký → pull sau đó lấy bản Hub đè ngược mất giá trị.</summary>
     private static string SharedSignature(BigSellerAccount a) => JsonSerializer.Serialize(new
     {
-        a.Label, a.Email, a.Password, a.KiotProxyKey, a.Region, a.ProxyType,
+        a.Label, a.Email, a.Password, a.KiotProxyKey, a.Region, a.ProxyType, a.DataSource,
         Shops = a.Shops.Select(s => new
         {
             s.Id, s.Name, s.ShopeeDataSheet, s.ColumnMap, s.BigSellerCrawlUrl, s.BigSellerImportFromClaimedTab,

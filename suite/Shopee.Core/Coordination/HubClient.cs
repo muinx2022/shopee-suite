@@ -110,6 +110,44 @@ public sealed class HubClient
         r.EnsureSuccessStatusCode();
     }
 
+    // ── Kho sản phẩm (Postgres — thay dần workbook Excel) ── (dùng _bulkHttp: payload dòng có thể vài MB qua tunnel)
+    // Lỗi theo convention GET/POST hiện có: non-2xx → HttpRequestException (kèm StatusCode → 503 pg-not-ready
+    // phân biệt được với mất kết nối StatusCode=null); timeout → TaskCanceledException. Lớp trên tự nuốt/chặn việc.
+    // Sheet có thể chứa dấu cách/ký tự Việt → Uri.EscapeDataString từng tham số.
+    public async Task<List<ProductSheetInfo>?> GetProductSheetsAsync(string acct, CancellationToken ct = default)
+        => await _bulkHttp.GetFromJsonAsync<List<ProductSheetInfo>>(
+            $"{HubRoutes.ProductsSheets}?acct={Uri.EscapeDataString(acct)}", ct);
+
+    public async Task<List<ProductLinkRow>?> GetProductLinksAsync(string acct, string sheet, int fromDense, int toDense, CancellationToken ct = default)
+        => await _bulkHttp.GetFromJsonAsync<List<ProductLinkRow>>(
+            $"{HubRoutes.ProductsLinks}?acct={Uri.EscapeDataString(acct)}&sheet={Uri.EscapeDataString(sheet)}&fromDense={fromDense}&toDense={toDense}", ct);
+
+    public async Task<List<ProductRecordRow>?> GetProductRecordMapAsync(string acct, string sheet, int fromRow, int toRow, CancellationToken ct = default)
+        => await _bulkHttp.GetFromJsonAsync<List<ProductRecordRow>>(
+            $"{HubRoutes.ProductsRecordMap}?acct={Uri.EscapeDataString(acct)}&sheet={Uri.EscapeDataString(sheet)}&fromRow={fromRow}&toRow={toRow}", ct);
+
+    public async Task<List<ProductImportIdRow>?> GetProductImportIdsAsync(string acct, string sheet, int fromRow, int toRow, CancellationToken ct = default)
+        => await _bulkHttp.GetFromJsonAsync<List<ProductImportIdRow>>(
+            $"{HubRoutes.ProductsImportIds}?acct={Uri.EscapeDataString(acct)}&sheet={Uri.EscapeDataString(sheet)}&fromRow={fromRow}&toRow={toRow}", ct);
+
+    public async Task<List<ProductRewritePendingRow>?> GetProductRewritePendingAsync(string acct, string sheet, int fromRow, int toRow, CancellationToken ct = default)
+        => await _bulkHttp.GetFromJsonAsync<List<ProductRewritePendingRow>>(
+            $"{HubRoutes.ProductsRewritePending}?acct={Uri.EscapeDataString(acct)}&sheet={Uri.EscapeDataString(sheet)}&fromRow={fromRow}&toRow={toRow}", ct);
+
+    public async Task<ProductRewrittenResponse?> PostProductRewrittenAsync(ProductRewrittenRequest req, CancellationToken ct = default)
+    {
+        var r = await _bulkHttp.PostAsJsonAsync(HubRoutes.ProductsRewritten, req, ct);
+        r.EnsureSuccessStatusCode();
+        return await r.Content.ReadFromJsonAsync<ProductRewrittenResponse>(ct);
+    }
+
+    public async Task<ProductAppendResponse?> PostProductAppendAsync(ProductAppendRequest req, CancellationToken ct = default)
+    {
+        var r = await _bulkHttp.PostAsJsonAsync(HubRoutes.ProductsAppend, req, ct);
+        r.EnsureSuccessStatusCode();
+        return await r.Content.ReadFromJsonAsync<ProductAppendResponse>(ct);
+    }
+
     // ── Log tập trung (tab Log gom log nhiều máy) ──
     public Task AppendLogAsync(AppendLogRequest req, CancellationToken ct = default) => PostAsync(HubRoutes.Logs, req, ct);
     public async Task<List<LogEntry>> LogsAsync(long after, int max, CancellationToken ct = default)
