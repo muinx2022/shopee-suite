@@ -9,7 +9,8 @@
 @inject IJSRuntime JS
 
 <div class="editcard">
-    <div class="subhead">📋 Dữ liệu sản phẩm@(string.IsNullOrEmpty(Sheet) ? "" : $" · sheet '{Sheet}'")</div>
+    @* Acc hub-mode: "sheet" là ngăn nội bộ (= GUID) → KHÔNG phô ra subtitle; chỉ excel-mode mới hiện tên sheet. *@
+    <div class="subhead">📋 Dữ liệu sản phẩm@(string.IsNullOrEmpty(Sheet) || _acct?.UsesHubData == true ? "" : $" · sheet '{Sheet}'")</div>
 
     @{ var pg = Pg; var pgReady = pg is not null && pg.IsReady; }
     @if (_acct is null)
@@ -20,10 +21,6 @@
     {
         <p class="hint">Shop chưa gán sheet — vào tab ⚙ Cấu hình để gán sheet trước.</p>
     }
-    else if (!pgReady)
-    {
-        <p class="hint">Postgres chưa sẵn sàng — cấu hình <span class="wbname">HUB_PG_CONN</span> để bật kho sản phẩm trên Hub.</p>
-    }
     else
     {
         @if (!_acct.UsesHubData)
@@ -31,15 +28,31 @@
             <div class="warn">⚠ Tài khoản đang ở chế độ Excel — dữ liệu này chỉ dùng khi chuyển sang Kho Hub. Vẫn xem/sửa được trước khi cutover.</div>
         }
 
+        @* Thanh công cụ hiện KỂ CẢ khi Postgres chưa sẵn sàng — các nút disable theo pgReady (để user thấy có nút
+           Nhập Excel/Thêm dòng, biết chỗ dùng khi kho đã lên). *@
         <div class="bar">
-            <input placeholder="tìm sku / itemId / tên / link…" @bind="_search" @bind:event="oninput" @onkeydown="OnSearchKey" style="width:240px" />
-            <button class="btn sm" disabled="@_busy" @onclick="DoSearch">🔍 Tìm</button>
+            <input placeholder="tìm sku / itemId / tên / link…" @bind="_search" @bind:event="oninput" @onkeydown="OnSearchKey" disabled="@(!pgReady || _busy)" style="width:240px" />
+            <button class="btn sm" disabled="@(!pgReady || _busy)" @onclick="DoSearch">🔍 Tìm</button>
             <span class="action">@_total.ToString("N0") dòng@(string.IsNullOrEmpty(_appliedSearch) ? "" : " khớp")</span>
             <span style="flex:1"></span>
-            <button class="btn sm" @onclick="ToggleAll">@(_showAll ? "Ẩn cột phụ" : "Hiện đủ 17 cột")</button>
-            <button class="btn primary sm" disabled="@_busy" @onclick="AddRow">➕ Thêm dòng</button>
+            @* Nhập Excel vào ĐÚNG ngăn này: Ghi đè = xoá-rồi-nạp; Nối thêm = thêm vào cuối. Ánh xạ cột CHUẨN (A..Q). *@
+            <label class="btn sm" style="@(pgReady && !_busy ? "" : "opacity:.45;cursor:not-allowed")">⬆ Nhập Excel
+                <InputFile OnChange="ImportExcel" accept=".xlsx" disabled="@(!pgReady || _busy)" style="display:none" />
+            </label>
+            <select @bind="_importMode" disabled="@(!pgReady || _busy)" style="width:104px" title="Chế độ nhập Excel">
+                <option value="replace">Ghi đè</option>
+                <option value="append">Nối thêm</option>
+            </select>
+            <button class="btn sm" disabled="@(!pgReady || _busy)" @onclick="ToggleAll">@(_showAll ? "Ẩn cột phụ" : "Hiện đủ 17 cột")</button>
+            <button class="btn primary sm" disabled="@(!pgReady || _busy)" @onclick="AddRow">➕ Thêm dòng</button>
         </div>
 
+        @if (!pgReady)
+        {
+            <p class="hint">Postgres chưa sẵn sàng — cấu hình <span class="wbname">HUB_PG_CONN</span> để bật kho sản phẩm trên Hub.</p>
+        }
+        else
+        {
         <div class="bar">
             <button class="btn sm" disabled="@(_page <= 1 || _busy)" @onclick="() => GoPage(_page - 1)">‹</button>
             <span class="action">trang @_page / @PageCount</span>
@@ -144,6 +157,7 @@
                 </tbody>
             </table>
         </div>
+        }
     }
 
     @if (!string.IsNullOrEmpty(_status))
@@ -169,6 +183,7 @@
     private RowEdit? _edit;
     private readonly HashSet<int> _selected = new();
     private string _loadedKey = "\0";   // chưa load lần nào (khác mọi khoá thật)
+    private string _importMode = "replace";   // "replace" = ghi đè ngăn, "append" = nối cuối
 
     private ProductDb? Pg => Sp.GetService<ProductDb>();
     private int PageCount => Math.Max(1, (_total + PageSize - 1) / PageSize);
@@ -300,6 +315,69 @@
             _status = $"✔ Đã xoá {del} dòng.";
         }
         catch (Exception ex) { _status = "✘ Lỗi xoá: " + ex.Message; }
+        finally { _busy = false; }
+    }
+
+    // ── Nhập Excel vào ĐÚNG ngăn (sheet) này ─────────────────────────────────────────
+    // Ghi đè + file 1 sheet → giữ RowNo gốc (kể cả lỗ hổng). Ghi đè + file nhiều sheet → gộp mọi sheet, đánh LẠI
+    // số dòng liên tục từ 2. Nối thêm → gộp mọi sheet, ProductDb tự cấp row_no từ max+1 (bỏ RowNo gốc). Ánh xạ cột
+    // CHUẨN (A..Q) như import cả-file ở DataStorePanel. Op nặng (parse xlsx + ghi DB) chạy trên Task.Run.
+    private async Task ImportExcel(InputFileChangeEventArgs e)
+    {
+        if (_busy) return;
+        var pg = Pg;
+        if (pg is null || !pg.IsReady || _acct is null || string.IsNullOrEmpty(Sheet)) return;
+        var file = e.File;
+        var replace = !string.Equals(_importMode, "append", StringComparison.Ordinal);
+        if (!await JS.InvokeAsync<bool>("confirm", replace
+                ? $"Nhập '{file.Name}' theo chế độ GHI ĐÈ — XOÁ toàn bộ dòng hiện có của ngăn này rồi nạp lại từ file. Tiếp tục?"
+                : $"Nhập '{file.Name}' theo chế độ NỐI THÊM — giữ nguyên dòng hiện có, thêm dòng từ file vào cuối ngăn. Tiếp tục?"))
+            return;
+
+        _busy = true; _status = "⏳ Đang nhập Excel…";
+        try
+        {
+            byte[] bytes;
+            await using (var s = file.OpenReadStream(maxAllowedSize: 256L * 1024 * 1024))
+            using (var buf = new MemoryStream())
+            {
+                await s.CopyToAsync(buf);
+                bytes = buf.ToArray();
+            }
+
+            var acct = _acct.Id; var sheet = Sheet; var src = file.Name;
+            // Parse + gom dòng (đồng bộ, có thể nặng) chạy trên thread pool → không khoá circuit Blazor.
+            var (rows, multi) = await Task.Run(() =>
+            {
+                using var ms = new MemoryStream(bytes);
+                var parsed = ProductXlsxCodec.Parse(ms, null);   // ánh xạ cột CHUẨN
+                var multiSheet = parsed.Count > 1;
+                List<ProductXlsxCodec.ParsedRow> flat;
+                if (replace && parsed.Count == 1)
+                {
+                    flat = parsed[0].Rows;   // giữ nguyên RowNo gốc (lỗ hổng bảo toàn)
+                }
+                else
+                {
+                    // Nhiều sheet (ghi đè) HOẶC nối thêm → gộp mọi sheet, đánh lại số liên tục từ 2 (nối thêm sẽ bị
+                    // ProductDb cấp lại row_no từ max+1 nên số này chỉ là chỗ giữ chỗ).
+                    flat = new();
+                    var n = 2;
+                    foreach (var (_, rs) in parsed)
+                        foreach (var pr in rs)
+                            flat.Add(new ProductXlsxCodec.ParsedRow(n++, pr.Data));
+                }
+                return (flat, multiSheet);
+            });
+
+            var count = await Task.Run(() => pg.ImportIntoSheetAsync(acct, sheet, rows, replace, src, "hub-web", CancellationToken.None));
+            _editRowNo = null; _edit = null; _selected.Clear(); _search = _appliedSearch = "";
+            _page = replace ? 1 : int.MaxValue;   // ghi đè → về trang 1; nối thêm → nhảy trang cuối (LoadAsync kẹp lại)
+            await LoadAsync();
+            var note = (multi && replace) ? " — file nhiều sheet → đã đánh lại số dòng" : "";
+            _status = $"✔ Đã nhập {count:N0} dòng ({(replace ? "ghi đè" : "nối thêm")}){note}.";
+        }
+        catch (Exception ex) { _status = "✘ Lỗi nhập Excel: " + ex.Message; }
         finally { _busy = false; }
     }
 

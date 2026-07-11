@@ -53,7 +53,7 @@ else
         }
 
         <div class="subhead">Shops (@_acct.Shops.Count) <button class="btn sm" @onclick="AddShop">+ Thêm shop</button></div>
-        <p class="hint">Cấu hình chi tiết từng shop: chọn shop ở danh sách bên trái → tab ⚙ Cấu hình. Shop vừa thêm cần bấm <b>Lưu</b> mới hiện ra.</p>
+        <p class="hint">Cấu hình chi tiết từng shop: chọn shop ở danh sách bên trái → tab ⚙ Cấu hình. Bấm <b>+ Thêm shop</b> → shop được lưu và mở cấu hình ngay.</p>
 
         <div class="bar">
             <button class="btn primary" @onclick="Save">💾 Lưu</button>
@@ -75,6 +75,8 @@ else
     [Parameter] public string AccountId { get; set; } = "";
     [Parameter] public EventCallback OnChanged { get; set; }
     [Parameter] public EventCallback OnDeleted { get; set; }
+    // Sau khi "+ Thêm shop" LƯU xong → báo parent (Fleet) shop.Id để tự chọn shop mới + mở tab Cấu hình.
+    [Parameter] public EventCallback<string> OnShopAdded { get; set; }
 
     private List<BigSellerAccount> _all = new();
     private int _version;
@@ -146,10 +148,22 @@ else
         "success" => "✔", "failed" => "✘", "needsOtp" => "⚠", "running" => "⏳", _ => "",
     };
 
-    private void AddShop()
+    // Thêm shop + LƯU NGAY (đúng pattern Save: version-conflict → reload + báo). Lưu OK → báo parent chọn shop mới.
+    private async Task AddShop()
     {
         if (_acct is null) return;
-        _acct.Shops.Add(new BigSellerShop { Name = "Shop mới" });
+        var shop = new BigSellerShop { Name = "Shop mới" };
+        // Acc hub-mode: "sheet" chỉ là tên ngăn dữ liệu nội bộ hệ thống tự quản → gán = shop.Id (GUID ổn định,
+        // không đổi khi rename shop → ngăn dữ liệu không trôi). Acc excel-mode để trống, user gán sheet sau.
+        if (_acct.UsesHubData) shop.ShopeeDataSheet = shop.Id;
+        _acct.Shops.Add(shop);
+        _status = ConfigSave.Apply(Config, FileStoreConfigService.BigSellerFile, _all, ref _version, Load);
+        if (_status.StartsWith('✔'))
+        {
+            _status = "✔ Đã thêm shop";
+            await OnShopAdded.InvokeAsync(shop.Id);
+        }
+        else { await OnChanged.InvokeAsync(); }   // conflict/lỗi: shop đã bị reload bỏ đi → chỉ refresh parent
     }
 
     private async Task Save()

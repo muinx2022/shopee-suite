@@ -56,6 +56,52 @@ public sealed partial class ProductDb
         return new ProductImportResult(result, total);
     }
 
+    // ── Import các dòng đã parse vào ĐÚNG 1 ngăn (sheet) — cho nút "⬆ Nhập Excel" per-shop ở trang Dữ liệu ──
+    /// <summary>Nạp <paramref name="rows"/> (đã parse ở <see cref="ProductXlsxCodec"/>) vào 1 sheet, trong 1
+    /// transaction. <paramref name="replace"/> = xoá sạch ngăn trước rồi chèn theo <see cref="ProductXlsxCodec.ParsedRow.RowNo"/>
+    /// mang sẵn (giữ lỗ hổng); ngược lại NỐI THÊM — bỏ RowNo gốc, cấp row_no tuần tự từ COALESCE(max,1)+1 (như
+    /// <see cref="AppendRowsAsync"/>). <see cref="TouchSheetAsync"/> đặt source_file/imported_at KHI ghi đè, chỉ chạm
+    /// updated_at khi nối thêm. Trả số dòng đã chèn.</summary>
+    public async Task<int> ImportIntoSheetAsync(
+        string acct, string sheet, List<ProductXlsxCodec.ParsedRow> rows, bool replace,
+        string? sourceFile, string updatedBy, CancellationToken ct)
+    {
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        await using var tx = await conn.BeginTransactionAsync(ct);
+
+        if (replace)
+        {
+            await using var del = new NpgsqlCommand(
+                "DELETE FROM product_rows WHERE account_id=$1 AND sheet=$2;", conn, tx);
+            del.Parameters.AddWithValue(acct);
+            del.Parameters.AddWithValue(sheet);
+            await del.ExecuteNonQueryAsync(ct);
+        }
+
+        // Nối thêm → điểm bắt đầu row_no (bảng trống → 2, khớp AppendRowsAsync); ghi đè → dùng RowNo mang sẵn.
+        var baseRow = 0;
+        if (!replace)
+        {
+            await using var q = new NpgsqlCommand(
+                "SELECT COALESCE(max(row_no),1)+1 FROM product_rows WHERE account_id=$1 AND sheet=$2;", conn, tx);
+            q.Parameters.AddWithValue(acct);
+            q.Parameters.AddWithValue(sheet);
+            baseRow = Convert.ToInt32(await q.ExecuteScalarAsync(ct));
+        }
+
+        for (var i = 0; i < rows.Count; i++)
+        {
+            var rowNo = replace ? rows[i].RowNo : baseRow + i;
+            await using var cmd = new NpgsqlCommand(InsertRowSql, conn, tx);
+            BindRow(cmd, acct, sheet, rowNo, rows[i].Data, updatedBy);
+            await cmd.ExecuteNonQueryAsync(ct);
+        }
+
+        await TouchSheetAsync(conn, tx, acct, sheet, sourceFile, setImported: replace, ct);
+        await tx.CommitAsync(ct);
+        return rows.Count;
+    }
+
     // ── Export: sheet rỗng = mọi sheet của acc; đặt dữ liệu đúng row_no (lỗ hổng để trống) ──
     public async Task<(byte[] Bytes, string FileName)> ExportXlsxAsync(string acct, string? sheet, CancellationToken ct)
     {

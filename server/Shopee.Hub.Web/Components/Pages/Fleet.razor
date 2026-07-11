@@ -349,7 +349,7 @@
             {
                 @if (_accounts.Any(a => a.Id == _selAcctId))
                 {
-                    <AccountConfigPanel AccountId="@(_selAcctId!)" OnChanged="OnConfigChanged" OnDeleted="OnAcctDeleted" />
+                    <AccountConfigPanel AccountId="@(_selAcctId!)" OnChanged="OnConfigChanged" OnDeleted="OnAcctDeleted" OnShopAdded="OnShopAdded" />
                     <DataStorePanel AccountId="@(_selAcctId!)" OnChanged="OnConfigChanged" />
                 }
                 else
@@ -661,6 +661,17 @@
         RecomputeSummary();
     }
 
+    // "+ Thêm shop" ở AccountConfigPanel đã LƯU shop mới → nạp lại rows TRƯỚC rồi tự chọn shop đó + mở tab Cấu hình
+    // (user cấu hình tên/sheet ngay, khỏi tìm trong list trái).
+    private void OnShopAdded(string shopId)
+    {
+        ReloadAccounts();
+        Rebuild();
+        RecomputeSummary();
+        var row = _rows.FirstOrDefault(r => r.AccountId == _selAcctId && r.ShopId == shopId);
+        if (row is not null) { SelectShop(row); _tab = "config"; }
+    }
+
     // Xoá shop → bỏ chọn shop (vẫn đứng ở acc); xoá acc → bỏ chọn hết (Rebuild tự chọn acc đầu).
     private void OnShopDeleted() { _selShopKey = null; _selRow = null; OnConfigChanged(); }
     private void OnAcctDeleted() { _selAcctId = null; _selShopKey = null; _selRow = null; OnConfigChanged(); }
@@ -687,9 +698,13 @@
     {
         if (_selRow is null) return;
         var shop = _selRow;
+        // Acc hub-mode: "sheet" là ngăn nội bộ (= GUID) → KHÔNG phô ra tiêu đề; chỉ excel-mode mới hiện tên sheet.
+        var hub = _accounts.FirstOrDefault(a => a.Id == shop.AccountId)?.UsesHubData == true;
+        var title = hub
+            ? $"{OpLabel(op)} · {shop.ShopName}"
+            : $"{OpLabel(op)} · {shop.ShopName} · sheet '{shop.Sheet}'";
         _map = new RowMapCtx(
-            $"{OpLabel(op)} · {shop.ShopName} · sheet '{shop.Sheet}'",
-            op, OpLabel(op), shop.AccountId, shop.Sheet,
+            title, op, OpLabel(op), shop.AccountId, shop.Sheet,
             Snap.Ledger.FirstOrDefault(l => l.Key == $"{shop.AccountId}__{shop.ShopId}__{op}"));
     }
 
