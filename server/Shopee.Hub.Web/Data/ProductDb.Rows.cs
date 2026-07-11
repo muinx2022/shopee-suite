@@ -223,6 +223,123 @@ WHERE account_id = $1 AND sheet = $2 AND row_no = $3;";
         return new ProductAppendResponse(rows.Count, baseRow, baseRow + rows.Count - 1);
     }
 
+    // ══ CRUD dòng cho trang web Hub (Fleet → tab 📋 Dữ liệu). Blazor gọi THẲNG in-process (không qua API HTTP). ══
+
+    /// <summary>Mệnh đề WHERE chung cho đếm/tìm: khớp (acct, sheet) và ($3 rỗng → MỌI dòng) HOẶC ILIKE $4 trên 5
+    /// cột tìm (sku, item_id, name_original, name_rewritten, link). Ký tự đặc biệt của search escape ở
+    /// <see cref="EscapeLike"/>; bind qua <see cref="BindSearch"/>.</summary>
+    private const string SearchWhere = @"
+WHERE account_id = $1 AND sheet = $2
+  AND ($3 = '' OR sku ILIKE $4 OR item_id ILIKE $4 OR name_original ILIKE $4
+                 OR name_rewritten ILIKE $4 OR link ILIKE $4)";
+
+    // ── Đếm dòng khớp tìm (search rỗng = mọi dòng) — cho phân trang ──
+    public async Task<int> CountRowsAsync(string acct, string sheet, string search, CancellationToken ct)
+    {
+        const string sql = "SELECT count(*) FROM product_rows" + SearchWhere + ";";
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        BindSearch(cmd, acct, sheet, search);
+        return Convert.ToInt32(await cmd.ExecuteScalarAsync(ct));
+    }
+
+    // ── Đọc 1 trang dòng (ORDER BY row_no, LIMIT/OFFSET) khớp tìm — cho lưới CRUD ──
+    public async Task<List<(int RowNo, ProductRowData Data)>> GetRowsPageAsync(
+        string acct, string sheet, string search, int offset, int limit, CancellationToken ct)
+    {
+        const string sql = @"
+SELECT row_no, link, price_original, price_sale, sku, item_id, name_original, name_rewritten,
+       category, shop_name, rating, sold_month, likes, reviews, region, image, meta_shop_id, meta_item_id
+FROM product_rows" + SearchWhere + @"
+ORDER BY row_no
+LIMIT $5 OFFSET $6;";
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        BindSearch(cmd, acct, sheet, search);          // $1..$4
+        cmd.Parameters.AddWithValue(limit);            // $5
+        cmd.Parameters.AddWithValue(offset);           // $6
+        var list = new List<(int RowNo, ProductRowData Data)>();
+        await using var rd = await cmd.ExecuteReaderAsync(ct);
+        while (await rd.ReadAsync(ct))
+        {
+            var data = new ProductRowData(
+                Link: S(rd, 1), PriceOriginal: S(rd, 2), PriceSale: S(rd, 3), Sku: S(rd, 4), ItemId: S(rd, 5),
+                NameOriginal: S(rd, 6), NameRewritten: S(rd, 7), Category: S(rd, 8), ShopName: S(rd, 9),
+                Rating: S(rd, 10), SoldMonth: S(rd, 11), Likes: S(rd, 12), Reviews: S(rd, 13), Region: S(rd, 14),
+                Image: S(rd, 15), MetaShopId: S(rd, 16), MetaItemId: S(rd, 17));
+            list.Add((rd.GetInt32(0), data));
+        }
+        return list;
+    }
+
+    /// <summary>UPDATE 17 cột dữ liệu + updated_at(now)/updated_by. <c>rewritten_at</c> đổi theo bước đổi tên-sửa
+    /// (CASE so OLD name_rewritten với $10 mới — trong Postgres, biểu thức SET đọc GIÁ TRỊ CŨ của dòng): blank→
+    /// non-blank = now(); non-blank→blank = NULL; còn lại giữ nguyên. $1..$21 TRÙNG thứ tự <see cref="BindRow"/>
+    /// nên dùng lại BindRow để bind.</summary>
+    private const string UpdateRowSql = @"
+UPDATE product_rows SET
+  link=$4, price_original=$5, price_sale=$6, sku=$7, item_id=$8,
+  name_original=$9, name_rewritten=$10, category=$11, shop_name=$12, rating=$13,
+  sold_month=$14, likes=$15, reviews=$16, region=$17, image=$18,
+  meta_shop_id=$19, meta_item_id=$20,
+  rewritten_at = CASE
+    WHEN NULLIF(btrim(name_rewritten),'') IS NULL     AND NULLIF(btrim($10),'') IS NOT NULL THEN now()
+    WHEN NULLIF(btrim(name_rewritten),'') IS NOT NULL AND NULLIF(btrim($10),'') IS NULL     THEN NULL
+    ELSE rewritten_at
+  END,
+  updated_at = now(), updated_by = $21
+WHERE account_id=$1 AND sheet=$2 AND row_no=$3;";
+
+    // ── Sửa 1 dòng — trả false nếu row_no không tồn tại (0 dòng) ──
+    public async Task<bool> UpdateRowAsync(string acct, string sheet, int rowNo, ProductRowData d, string updatedBy, CancellationToken ct)
+    {
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        await using var cmd = new NpgsqlCommand(UpdateRowSql, conn);
+        BindRow(cmd, acct, sheet, rowNo, d, updatedBy);
+        return await cmd.ExecuteNonQueryAsync(ct) > 0;
+    }
+
+    // ── Xoá N dòng theo row_no (ANY($3)) — trả số dòng đã xoá ──
+    public async Task<int> DeleteRowsAsync(string acct, string sheet, int[] rowNos, CancellationToken ct)
+    {
+        // KHÔNG đánh lại row_no cho các dòng còn lại → chấp nhận LỖ HỔNG số dòng: dense (scrape) tính động bằng
+        // ROW_NUMBER() nên không vỡ; row_no (import/update/rewrite + ledger) giữ nguyên ý nghĩa dòng cũ.
+        if (rowNos is null || rowNos.Length == 0) return 0;
+        const string sql = "DELETE FROM product_rows WHERE account_id=$1 AND sheet=$2 AND row_no = ANY($3);";
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue(acct);
+        cmd.Parameters.AddWithValue(sheet);
+        cmd.Parameters.AddWithValue(rowNos);
+        return await cmd.ExecuteNonQueryAsync(ct);
+    }
+
+    // ── Chèn 1 dòng vào CUỐI sheet (row_no = COALESCE(max,1)+1, như AppendRowsAsync) — trả row_no vừa cấp ──
+    public async Task<int> InsertRowAtEndAsync(string acct, string sheet, ProductRowData d, string updatedBy, CancellationToken ct)
+    {
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        await using var tx = await conn.BeginTransactionAsync(ct);
+
+        int rowNo;
+        await using (var q = new NpgsqlCommand(
+            "SELECT COALESCE(max(row_no),1)+1 FROM product_rows WHERE account_id=$1 AND sheet=$2;", conn, tx))
+        {
+            q.Parameters.AddWithValue(acct);
+            q.Parameters.AddWithValue(sheet);
+            rowNo = Convert.ToInt32(await q.ExecuteScalarAsync(ct));
+        }
+
+        await using (var cmd = new NpgsqlCommand(InsertRowSql, conn, tx))
+        {
+            BindRow(cmd, acct, sheet, rowNo, d, updatedBy);
+            await cmd.ExecuteNonQueryAsync(ct);
+        }
+
+        await TouchSheetAsync(conn, tx, acct, sheet, sourceFile: null, setImported: false, ct);
+        await tx.CommitAsync(ct);
+        return rowNo;
+    }
+
     // ── Helper dùng chung ──────────────────────────────────────────────────────────
 
     /// <summary>Cột INSERT/UPSERT của 1 dòng — 3 khoá + 17 ô dữ liệu + updated_at(now) + updated_by.
@@ -290,6 +407,21 @@ ON CONFLICT (account_id, sheet, row_no) DO UPDATE SET
         if (setImported) cmd.Parameters.AddWithValue((object?)sourceFile ?? DBNull.Value);
         await cmd.ExecuteNonQueryAsync(ct);
     }
+
+    /// <summary>Bind $1..$4 cho <see cref="SearchWhere"/>: acct, sheet, search THÔ (để check rỗng), pattern ILIKE.</summary>
+    private static void BindSearch(NpgsqlCommand cmd, string acct, string sheet, string search)
+    {
+        var s = search ?? "";
+        cmd.Parameters.AddWithValue(acct);                       // $1
+        cmd.Parameters.AddWithValue(sheet);                      // $2
+        cmd.Parameters.AddWithValue(s);                          // $3 (rỗng → mọi dòng)
+        cmd.Parameters.AddWithValue("%" + EscapeLike(s) + "%");  // $4 pattern ILIKE
+    }
+
+    /// <summary>Escape ký tự đặc biệt của LIKE/ILIKE (\ % _) → literal (escape mặc định Postgres = \). Thay \ TRƯỚC
+    /// để không nhân đôi các \ vừa chèn cho % và _.</summary>
+    private static string EscapeLike(string s) => s
+        .Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_");
 
     /// <summary>Text hoặc NULL (ô rỗng → NULL cho bảng gọn; check blank vẫn qua NULLIF(btrim…)).</summary>
     private static object N(string? s) => string.IsNullOrEmpty(s) ? DBNull.Value : s;

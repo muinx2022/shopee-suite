@@ -75,6 +75,7 @@
             @if (_selRow is not null)
             {
                 <button class="@(_tab == "stats" ? "active" : "")" @onclick='() => _tab = "stats"'>📊 Thống kê</button>
+                <button class="@(_tab == "data" ? "active" : "")" @onclick='() => _tab = "data"'>📋 Dữ liệu</button>
             }
             <button class="@(_tab == "config" ? "active" : "")" @onclick='() => _tab = "config"'>⚙ Cấu hình</button>
         </div>
@@ -256,6 +257,10 @@
                         </div>
                     }
                 </div>
+            }
+            else if (_tab == "data")
+            {
+                <ProductGridPanel AccountId="@row.AccountId" Sheet="@row.Sheet" />
             }
             else
             {
@@ -630,7 +635,7 @@
         _selShopKey = null;
         _selRow = null;
         _action = "";
-        if (_tab == "stats") _tab = "action";   // mức acc không còn tab Thống kê (đã gộp vào dashboard)
+        if (_tab is "stats" or "data") _tab = "action";   // mức acc không có tab Thống kê/Dữ liệu (chỉ ở mức shop)
     }
 
     // Thêm 1 acc BigSeller rỗng, lưu ngay (đọc list+version tươi), rồi chọn nó ở tab Cấu hình để điền tiếp.

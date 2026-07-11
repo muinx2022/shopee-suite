@@ -1,0 +1,327 @@
+@* Lưới CRUD dòng sản phẩm của 1 (acc, sheet) — tab 📋 Dữ liệu của Fleet. Blazor gọi THẲNG ProductDb in-process
+   (không API HTTP; client desktop không dùng màn này). Parent tick 2s re-render con MỖI TICK → guard _loadedKey:
+   chỉ reload bản-đang-xem khi (AccountId|Sheet) ĐỔI THẬT; dữ liệu đang sửa nằm trong _edit (state component), chỉ
+   nạp lại khi Lưu/Huỷ/đổi trang. ProductDb có thể chưa đăng ký DI (chưa cấu hình Postgres) → resolve qua
+   IServiceProvider (null = "Postgres chưa sẵn sàng"), KHÔNG crash trang. *@
+@using Microsoft.Extensions.DependencyInjection
+@inject FileStoreConfigService Config
+@inject IServiceProvider Sp
+@inject IJSRuntime JS
+
+<div class="editcard">
+    <div class="subhead">📋 Dữ liệu sản phẩm@(string.IsNullOrEmpty(Sheet) ? "" : $" · sheet '{Sheet}'")</div>
+
+    @{ var pg = Pg; var pgReady = pg is not null && pg.IsReady; }
+    @if (_acct is null)
+    {
+        <p class="hint">Tài khoản không còn trong cấu hình.</p>
+    }
+    else if (string.IsNullOrEmpty(Sheet))
+    {
+        <p class="hint">Shop chưa gán sheet — vào tab ⚙ Cấu hình để gán sheet trước.</p>
+    }
+    else if (!pgReady)
+    {
+        <p class="hint">Postgres chưa sẵn sàng — cấu hình <span class="wbname">HUB_PG_CONN</span> để bật kho sản phẩm trên Hub.</p>
+    }
+    else
+    {
+        @if (!_acct.UsesHubData)
+        {
+            <div class="warn">⚠ Tài khoản đang ở chế độ Excel — dữ liệu này chỉ dùng khi chuyển sang Kho Hub. Vẫn xem/sửa được trước khi cutover.</div>
+        }
+
+        <div class="bar">
+            <input placeholder="tìm sku / itemId / tên / link…" @bind="_search" @bind:event="oninput" @onkeydown="OnSearchKey" style="width:240px" />
+            <button class="btn sm" disabled="@_busy" @onclick="DoSearch">🔍 Tìm</button>
+            <span class="action">@_total.ToString("N0") dòng@(string.IsNullOrEmpty(_appliedSearch) ? "" : " khớp")</span>
+            <span style="flex:1"></span>
+            <button class="btn sm" @onclick="ToggleAll">@(_showAll ? "Ẩn cột phụ" : "Hiện đủ 17 cột")</button>
+            <button class="btn primary sm" disabled="@_busy" @onclick="AddRow">➕ Thêm dòng</button>
+        </div>
+
+        <div class="bar">
+            <button class="btn sm" disabled="@(_page <= 1 || _busy)" @onclick="() => GoPage(_page - 1)">‹</button>
+            <span class="action">trang @_page / @PageCount</span>
+            <button class="btn sm" disabled="@(_page >= PageCount || _busy)" @onclick="() => GoPage(_page + 1)">›</button>
+            @if (_selected.Count > 0)
+            {
+                <span style="flex:1"></span>
+                <button class="btn danger sm" disabled="@_busy" @onclick="DeleteSelected">🗑 Xoá @_selected.Count dòng</button>
+            }
+        </div>
+
+        <div class="tablewrap">
+            <table class="grid sm">
+                <thead>
+                    <tr>
+                        <th style="width:26px"></th>
+                        <th style="width:50px">Dòng</th>
+                        <th style="width:96px"></th>
+                        <th>Link</th>
+                        <th>Giá bán</th>
+                        <th>SKU</th>
+                        <th>ItemId</th>
+                        <th>Tên gốc</th>
+                        <th>Tên đã sửa</th>
+                        @if (_showAll)
+                        {
+                            <th>Giá gốc</th><th>Danh mục</th><th>Shop</th><th>Rating</th><th>Bán/tháng</th>
+                            <th>Thích</th><th>Đánh giá</th><th>Vùng</th><th>Ảnh</th><th>MetaShopId</th><th>MetaItemId</th>
+                        }
+                    </tr>
+                </thead>
+                <tbody>
+                    @if (_rows.Count == 0)
+                    {
+                        <tr><td colspan="@ColCount" class="empty">@(string.IsNullOrEmpty(_appliedSearch) ? "Chưa có dòng nào." : "Không có dòng khớp tìm kiếm.")</td></tr>
+                    }
+                    else
+                    {
+                        @foreach (var (rowNo, data) in _rows)
+                        {
+                            @if (_editRowNo == rowNo && _edit is not null)
+                            {
+                                <tr class="sel">
+                                    <td></td>
+                                    <td>@rowNo</td>
+                                    <td>
+                                        <button class="linkbtn" disabled="@_busy" @onclick="SaveEdit">✔ Lưu</button>
+                                        <button class="linkbtn" @onclick="CancelEdit">✖ Huỷ</button>
+                                    </td>
+                                    <td><input @bind="_edit.Link" /></td>
+                                    <td><input @bind="_edit.PriceSale" /></td>
+                                    <td><input @bind="_edit.Sku" /></td>
+                                    <td><input @bind="_edit.ItemId" /></td>
+                                    <td><input @bind="_edit.NameOriginal" /></td>
+                                    <td><input @bind="_edit.NameRewritten" /></td>
+                                    @if (_showAll)
+                                    {
+                                        <td><input @bind="_edit.PriceOriginal" /></td>
+                                        <td><input @bind="_edit.Category" /></td>
+                                        <td><input @bind="_edit.ShopName" /></td>
+                                        <td><input @bind="_edit.Rating" /></td>
+                                        <td><input @bind="_edit.SoldMonth" /></td>
+                                        <td><input @bind="_edit.Likes" /></td>
+                                        <td><input @bind="_edit.Reviews" /></td>
+                                        <td><input @bind="_edit.Region" /></td>
+                                        <td><input @bind="_edit.Image" /></td>
+                                        <td><input @bind="_edit.MetaShopId" /></td>
+                                        <td><input @bind="_edit.MetaItemId" /></td>
+                                    }
+                                </tr>
+                            }
+                            else
+                            {
+                                <tr>
+                                    <td><input type="checkbox" style="width:auto;margin:0" checked="@_selected.Contains(rowNo)" @onchange="e => ToggleSel(rowNo, e)" /></td>
+                                    <td>@rowNo</td>
+                                    <td><button class="linkbtn" disabled="@(_editRowNo is not null || _busy)" @onclick="() => BeginEdit(rowNo, data)">✏ Sửa</button></td>
+                                    <td style="@Clip" title="@data.Link">@data.Link</td>
+                                    <td>@data.PriceSale</td>
+                                    <td>@data.Sku</td>
+                                    <td>@data.ItemId</td>
+                                    <td style="@Clip" title="@data.NameOriginal">@data.NameOriginal</td>
+                                    <td style="@Clip" title="@data.NameRewritten">@data.NameRewritten</td>
+                                    @if (_showAll)
+                                    {
+                                        <td>@data.PriceOriginal</td>
+                                        <td style="@Clip" title="@data.Category">@data.Category</td>
+                                        <td style="@Clip" title="@data.ShopName">@data.ShopName</td>
+                                        <td>@data.Rating</td>
+                                        <td>@data.SoldMonth</td>
+                                        <td>@data.Likes</td>
+                                        <td>@data.Reviews</td>
+                                        <td>@data.Region</td>
+                                        <td style="@Clip" title="@data.Image">@data.Image</td>
+                                        <td>@data.MetaShopId</td>
+                                        <td>@data.MetaItemId</td>
+                                    }
+                                </tr>
+                            }
+                        }
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+
+    @if (!string.IsNullOrEmpty(_status))
+    {
+        <div class="action" style="margin-top:10px">@_status</div>
+    }
+</div>
+
+@code {
+    [Parameter] public string AccountId { get; set; } = "";
+    [Parameter] public string Sheet { get; set; } = "";
+
+    private const int PageSize = 100;
+    // Ô cắt ngắn text dài (Link/Tên/Ảnh…) — bảng vẫn cuộn ngang qua .tablewrap; title giữ giá trị đầy đủ.
+    private const string Clip = "max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
+
+    private BigSellerAccount? _acct;
+    private List<(int RowNo, ProductRowData Data)> _rows = new();
+    private int _total, _page = 1;
+    private string _search = "", _appliedSearch = "", _status = "";
+    private bool _busy, _showAll;
+    private int? _editRowNo;
+    private RowEdit? _edit;
+    private readonly HashSet<int> _selected = new();
+    private string _loadedKey = "\0";   // chưa load lần nào (khác mọi khoá thật)
+
+    private ProductDb? Pg => Sp.GetService<ProductDb>();
+    private int PageCount => Math.Max(1, (_total + PageSize - 1) / PageSize);
+    private int ColCount => 9 + (_showAll ? 11 : 0);
+
+    // Guard chống reload theo nhịp: parent re-render mỗi 2s → chỉ nạp lại khi (acc|sheet) ĐỔI THẬT (giữ trang/tìm/
+    // dòng đang sửa qua các tick).
+    protected override async Task OnParametersSetAsync()
+    {
+        var key = AccountId + "|" + Sheet;
+        if (key == _loadedKey) return;
+        _loadedKey = key;
+        _acct = Config.BigSellerAccounts().FirstOrDefault(a => a.Id == AccountId);
+        _search = _appliedSearch = _status = "";
+        _page = 1; _busy = _showAll = false; _editRowNo = null; _edit = null; _selected.Clear();
+        await LoadAsync();
+    }
+
+    /// <summary>Đếm tổng + đọc trang hiện tại (kẹp _page vào [1..PageCount] TRƯỚC khi tính offset). Pg null/chưa
+    /// sẵn sàng/sheet rỗng → rỗng, không ném.</summary>
+    private async Task LoadAsync()
+    {
+        _rows = new();
+        var pg = Pg;
+        if (pg is null || !pg.IsReady || _acct is null || string.IsNullOrEmpty(Sheet)) { _total = 0; _page = 1; return; }
+        try
+        {
+            var acct = _acct.Id; var sheet = Sheet; var search = _appliedSearch;
+            _total = await Task.Run(() => pg.CountRowsAsync(acct, sheet, search, CancellationToken.None));
+            _page = Math.Clamp(_page, 1, PageCount);
+            var offset = (_page - 1) * PageSize;
+            _rows = await Task.Run(() => pg.GetRowsPageAsync(acct, sheet, search, offset, PageSize, CancellationToken.None));
+        }
+        catch (Exception ex) { _status = "✘ Lỗi đọc dữ liệu: " + ex.Message; }
+    }
+
+    private async Task DoSearch()
+    {
+        _appliedSearch = (_search ?? "").Trim();
+        _page = 1; _editRowNo = null; _edit = null; _selected.Clear(); _status = "";
+        await LoadAsync();
+    }
+
+    private async Task OnSearchKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await DoSearch();
+    }
+
+    private async Task GoPage(int p)
+    {
+        p = Math.Clamp(p, 1, PageCount);
+        _page = p; _editRowNo = null; _edit = null; _selected.Clear();
+        await LoadAsync();
+    }
+
+    private void ToggleAll() => _showAll = !_showAll;
+
+    private void ToggleSel(int rowNo, ChangeEventArgs e)
+    {
+        if (e.Value is true) _selected.Add(rowNo); else _selected.Remove(rowNo);
+    }
+
+    private void BeginEdit(int rowNo, ProductRowData d)
+    {
+        _editRowNo = rowNo;
+        _edit = RowEdit.From(rowNo, d);
+        _status = "";
+    }
+
+    private void CancelEdit() { _editRowNo = null; _edit = null; }
+
+    private async Task SaveEdit()
+    {
+        if (_edit is null || _busy) return;
+        var pg = Pg;
+        if (pg is null || !pg.IsReady || _acct is null) return;
+        _busy = true; _status = "⏳ Đang lưu…";
+        try
+        {
+            var acct = _acct.Id; var sheet = Sheet; var rowNo = _edit.RowNo; var d = _edit.ToData();
+            var ok = await Task.Run(() => pg.UpdateRowAsync(acct, sheet, rowNo, d, "hub-web", CancellationToken.None));
+            _editRowNo = null; _edit = null;
+            await LoadAsync();
+            _status = ok ? $"✔ Đã lưu dòng {rowNo}." : $"✘ Không tìm thấy dòng {rowNo} (đã bị xoá?).";
+        }
+        catch (Exception ex) { _status = "✘ Lỗi lưu: " + ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task AddRow()
+    {
+        if (_busy) return;
+        var pg = Pg;
+        if (pg is null || !pg.IsReady || _acct is null || string.IsNullOrEmpty(Sheet)) return;
+        _busy = true; _status = "⏳ Đang thêm dòng…";
+        try
+        {
+            var empty = new ProductRowData("", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "");
+            var acct = _acct.Id; var sheet = Sheet;
+            var rowNo = await Task.Run(() => pg.InsertRowAtEndAsync(acct, sheet, empty, "hub-web", CancellationToken.None));
+            // Dòng rỗng nằm ở CUỐI → bỏ bộ lọc tìm (dòng rỗng không khớp) rồi nhảy tới trang cuối + mở sửa dòng đó.
+            _search = _appliedSearch = ""; _selected.Clear();
+            _page = PageCount + 1;   // LoadAsync kẹp về trang cuối (đã +1 dòng nên PageCount có thể tăng)
+            await LoadAsync();
+            _editRowNo = rowNo;
+            _edit = RowEdit.From(rowNo, empty);
+            _status = $"✔ Đã thêm dòng {rowNo} — điền dữ liệu rồi bấm ✔ Lưu.";
+        }
+        catch (Exception ex) { _status = "✘ Lỗi thêm: " + ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task DeleteSelected()
+    {
+        if (_selected.Count == 0 || _busy) return;
+        var pg = Pg;
+        if (pg is null || !pg.IsReady || _acct is null) return;
+        var n = _selected.Count;
+        if (!await JS.InvokeAsync<bool>("confirm",
+            $"Xoá {n} dòng đã chọn? Số dòng (row_no) của các dòng CÒN LẠI giữ nguyên — KHÔNG đánh lại (chấp nhận lỗ hổng số dòng)."))
+            return;
+        _busy = true; _status = "⏳ Đang xoá…";
+        try
+        {
+            var acct = _acct.Id; var sheet = Sheet; var ids = _selected.ToArray();
+            var del = await Task.Run(() => pg.DeleteRowsAsync(acct, sheet, ids, CancellationToken.None));
+            _selected.Clear(); _editRowNo = null; _edit = null;
+            await LoadAsync();
+            _status = $"✔ Đã xoá {del} dòng.";
+        }
+        catch (Exception ex) { _status = "✘ Lỗi xoá: " + ex.Message; }
+        finally { _busy = false; }
+    }
+
+    // Bản sao MUTABLE của 17 ô để bind input (ProductRowData là record bất biến). RowNo giữ để biết dòng đang sửa.
+    private sealed class RowEdit
+    {
+        public int RowNo;
+        public string Link = "", PriceOriginal = "", PriceSale = "", Sku = "", ItemId = "",
+            NameOriginal = "", NameRewritten = "", Category = "", ShopName = "", Rating = "",
+            SoldMonth = "", Likes = "", Reviews = "", Region = "", Image = "", MetaShopId = "", MetaItemId = "";
+
+        public static RowEdit From(int rowNo, ProductRowData d) => new()
+        {
+            RowNo = rowNo,
+            Link = d.Link, PriceOriginal = d.PriceOriginal, PriceSale = d.PriceSale, Sku = d.Sku, ItemId = d.ItemId,
+            NameOriginal = d.NameOriginal, NameRewritten = d.NameRewritten, Category = d.Category, ShopName = d.ShopName,
+            Rating = d.Rating, SoldMonth = d.SoldMonth, Likes = d.Likes, Reviews = d.Reviews, Region = d.Region,
+            Image = d.Image, MetaShopId = d.MetaShopId, MetaItemId = d.MetaItemId,
+        };
+
+        public ProductRowData ToData() => new(
+            Link, PriceOriginal, PriceSale, Sku, ItemId, NameOriginal, NameRewritten, Category, ShopName, Rating,
+            SoldMonth, Likes, Reviews, Region, Image, MetaShopId, MetaItemId);
+    }
+}
