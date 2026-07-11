@@ -20,6 +20,8 @@ Environment=HUB_API_TOKEN=CHANGE_ME
 # Admin đăng nhập web lần đầu (bỏ sau khi đã tạo admin; hoặc dùng trang /setup).
 Environment=HUB_ADMIN_USER=admin
 Environment=HUB_ADMIN_PASSWORD=CHANGE_ME_TOO
+# Kho sản phẩm Postgres (Docker cạnh hub) — bỏ dấu # + đổi mật khẩu để BẬT (để comment = hub chạy như cũ, không cần Postgres).
+# Environment=HUB_PG_CONN=Host=127.0.0.1;Port=5432;Database=shopee;Username=shopee;Password=DOI_MAT_KHAU
 
 [Install]
 WantedBy=multi-user.target

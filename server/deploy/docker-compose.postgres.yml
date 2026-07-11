@@ -1,0 +1,20 @@
+# Postgres cho KHO SẢN PHẨM của hub — chạy trong VM Ubuntu, cạnh service shopee-hub.
+# Chạy trên VM:
+#   cd thư mục chứa file này
+#   echo 'PG_PASSWORD=doi-mat-khau-that' > .env      # file .env cạnh compose, KHÔNG commit
+#   docker compose -f docker-compose.postgres.yml up -d
+# Bind 127.0.0.1 → chỉ nghe loopback trong VM, KHÔNG lộ ra Cloudflare Tunnel (hub nối qua localhost).
+# Bật hub đọc Postgres: đặt HUB_PG_CONN trong shopee-hub.service (xem comment mẫu ở đó).
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: shopee-pg
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5432:5432"
+    environment:
+      POSTGRES_DB: shopee
+      POSTGRES_USER: shopee
+      POSTGRES_PASSWORD: ${PG_PASSWORD:?dat PG_PASSWORD trong file .env canh compose}
+    volumes:
+      - /var/lib/shopee-pg:/var/lib/postgresql/data

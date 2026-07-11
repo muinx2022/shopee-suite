@@ -17,8 +17,15 @@ public static class ClientApiEndpoints
 {
     public static void MapClientApi(this WebApplication app, HubDatabase db)
     {
-        // /health — KHÔNG auth (client dò kết nối trước khi có token).
-        app.MapGet(HubRoutes.Health, () => Results.Json(new { ok = true, ts = DateTimeOffset.UtcNow })).AllowAnonymous();
+        // /health — KHÔNG auth (client dò kết nối trước khi có token). Postgres CHƯA cấu hình → GIỮ NGUYÊN shape
+        // cũ {ok,ts} (client cũ đang parse, đừng thêm field); CÓ cấu hình → thêm pg = IsReady && ping OK.
+        app.MapGet(HubRoutes.Health, async (IServiceProvider sp, CancellationToken ct) =>
+        {
+            var pdb = sp.GetService<ProductDb>();
+            if (pdb is null) return Results.Json(new { ok = true, ts = DateTimeOffset.UtcNow });
+            var pg = pdb.IsReady && await pdb.PingAsync(ct);
+            return Results.Json(new { ok = true, ts = DateTimeOffset.UtcNow, pg });
+        }).AllowAnonymous();
 
         // Gom mọi route client vào 1 group yêu cầu policy "Client" (X-Api-Token).
         var api = app.MapGroup("").RequireAuthorization("Client");
