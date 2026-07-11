@@ -25,6 +25,7 @@
     <Compile Include="..\..\suite\Shopee.Core\Coordination\ICoordinationHub.cs" Link="Shared\Coordination\ICoordinationHub.cs" />
     <Compile Include="..\..\suite\Shopee.Core\Coordination\HubDefaults.cs" Link="Shared\Coordination\HubDefaults.cs" />
     <Compile Include="..\..\suite\Shopee.Core\Coordination\HubRoutes.cs" Link="Shared\Coordination\HubRoutes.cs" />
+    <Compile Include="..\..\suite\Shopee.Core\Coordination\ProductDtos.cs" Link="Shared\Coordination\ProductDtos.cs" />
     <Compile Include="..\..\suite\Shopee.Core\BigSeller\BigSellerAccount.cs" Link="Shared\BigSeller\BigSellerAccount.cs" />
     <Compile Include="..\..\suite\Shopee.Core\BigSeller\BigSellerRunConfig.cs" Link="Shared\BigSeller\BigSellerRunConfig.cs" />
     <Compile Include="..\..\suite\Shopee.Core\BigSeller\BigSellerShop.cs" Link="Shared\BigSeller\BigSellerShop.cs" />

@@ -210,6 +210,9 @@ app.MapGet("/admin/chromium-test", async (BigSellerLoginService svc) =>
 // ── API client (giữ nguyên giao thức) ──
 app.MapClientApi(db);
 
+// ── API kho sản phẩm (Postgres) — 503 pg-not-ready nếu chưa cấu hình/chưa migrate ──
+app.MapProductApi();
+
 // ── Blazor UI (khoá sau cookie) ──
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode()

@@ -47,6 +47,17 @@ public static class HubRoutes
     public const string Logs = "/logs";
     public const string LogsClear = "/logs/clear";
 
+    // ── Kho sản phẩm (Postgres — thay dần workbook Excel) ──
+    public const string ProductsSheets = "/products/sheets";
+    public const string ProductsLinks = "/products/links";
+    public const string ProductsRecordMap = "/products/record-map";
+    public const string ProductsImportIds = "/products/import-ids";
+    public const string ProductsRewritePending = "/products/rewrite-pending";
+    public const string ProductsRewritten = "/products/rewritten";
+    public const string ProductsAppend = "/products/rows/append";
+    public const string ProductsImportXlsx = "/products/import-xlsx";
+    public const string ProductsExportXlsx = "/products/export-xlsx";
+
     // ── File-sync ──
     public const string Manifest = "/manifest";
 

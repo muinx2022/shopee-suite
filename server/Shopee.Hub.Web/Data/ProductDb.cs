@@ -13,7 +13,7 @@ namespace Shopee.Hub;
 ///  - Mọi cột dữ liệu để <c>text</c> để copy nguyên trạng từ Excel; runner phía client tự parse số/tiền.
 ///  - <c>sheet</c> = tên sheet cũ, là ĐỊNH DANH shop, khớp ledger key hiện tại.
 /// </summary>
-public sealed class ProductDb : IAsyncDisposable
+public sealed partial class ProductDb : IAsyncDisposable
 {
     private readonly NpgsqlDataSource _dataSource;
 
