@@ -1,3 +1,4 @@
+using System.IO;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Shopee.Suite.Services;
@@ -23,6 +24,10 @@ public abstract partial class ModuleViewModelBase : ObservableObject
     /// <summary>Nhật ký module: giữ 500 dòng cuối trên UI (khỏi đơ) + ghi ĐẦY ĐỦ ra logs\{fileName}.</summary>
     public LogBuffer LogLines { get; }
 
+    /// <summary>Kho log RIÊNG theo tk BigSeller (tạo-khi-cần) — tab log per-acc đợt sau bind vào đây; buffer bền
+    /// qua rebuild VM per-acc. <see cref="LogLines"/> vẫn là buffer GỘP toàn module như cũ.</summary>
+    public AccountLogRegistry AccountLogs { get; }
+
     private readonly string _dialogTitle;
 
     [ObservableProperty] private string _status = "Sẵn sàng.";
@@ -30,11 +35,16 @@ public abstract partial class ModuleViewModelBase : ObservableObject
     protected ModuleViewModelBase(string logFileName, string dialogTitle)
     {
         LogLines = new LogBuffer(logFileName);
+        AccountLogs = new AccountLogRegistry(Path.GetFileNameWithoutExtension(logFileName));
         _dialogTitle = dialogTitle;
     }
 
     /// <summary>Ghi 1 dòng log (marshal sang UI thread — an toàn gọi từ luồng nền).</summary>
     protected void Log(string text) => OnUi(() => LogLines.Add(text));
+
+    /// <summary>Ghi 1 dòng log vào CẢ buffer module (file gộp như cũ) LẪN buffer riêng của acc (UI đợt sau bind vào).</summary>
+    protected void LogAcc(string accountId, string displayName, string text)
+        => OnUi(() => { LogLines.Add(text); AccountLogs.Get(accountId, displayName).Add(text); });
 
     /// <summary>Chạy NGAY nếu đang ở UI thread, ngược lại xếp hàng sang UI thread.</summary>
     protected static void OnUi(Action action) => UiThread.Post(action);

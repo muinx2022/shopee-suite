@@ -130,7 +130,7 @@ public sealed partial class ScrapeViewModel : ModuleViewModelBase
             if (IsBusy) { StartOneAccount(target, silent); return; }
             await StartAsync(resume, new[] { target }, silent);
         }
-        catch (Exception ex) { Log($"✖ Lỗi khởi động scrape: {ex.Message}"); }
+        catch (Exception ex) { LogAcc(target.Account.Id, target.Account.DisplayName, $"✖ Lỗi khởi động scrape: {ex.Message}"); }
     }
 
     /// <summary>v1.1 (màn gộp): DỪNG RIÊNG job của 1 tk BigSeller (các tk khác chạy tiếp). Không có job
@@ -138,7 +138,7 @@ public sealed partial class ScrapeViewModel : ModuleViewModelBase
     public async Task StopSingleAsync(ScrapeTargetViewModel target)
     {
         try { await StopOneAccount(target); }
-        catch (Exception ex) { Log($"✖ Lỗi dừng scrape: {ex.Message}"); }
+        catch (Exception ex) { LogAcc(target.Account.Id, target.Account.DisplayName, $"✖ Lỗi dừng scrape: {ex.Message}"); }
     }
 
     private async Task StartAsync(bool resume, IReadOnlyList<ScrapeTargetViewModel>? only = null, bool silent = false)
@@ -386,6 +386,10 @@ public sealed partial class ScrapeViewModel : ModuleViewModelBase
     {
         var target = h.Target;
         var account = target.Account;
+        // Log gắn tk này → ghi vào CẢ buffer gộp lẫn buffer riêng của acc (tab log per-acc đợt sau bind vào).
+        void LogA(string m) => LogAcc(account.Id, account.DisplayName, m);
+        // Mỗi lượt chạy hiện log TƯƠI của acc → xoá phần XEM buffer riêng (file vẫn giữ đầy đủ).
+        OnUi(() => AccountLogs.Get(account.Id, account.DisplayName).Clear());
         var shop = target.SelectedShop!;
         var sheet = shop.ShopeeDataSheet;
         // Override TẠM (Hub giao việc) cho khoảng dòng + số cửa sổ + cỡ khung — dùng-một-lần → đọc xong XOÁ HẾT ở
@@ -409,11 +413,11 @@ public sealed partial class ScrapeViewModel : ModuleViewModelBase
         {
             int totalRows;
             try { totalRows = await Task.Run(() => ScrapeWorkbook.TotalDataRows(account.WorkbookPath, sheet), ct).ConfigureAwait(false); }
-            catch (Exception ex) { Log($"[{account.DisplayName}] ✘ lỗi đọc workbook: {ex.Message} — bỏ qua."); return; }
+            catch (Exception ex) { LogA($"[{account.DisplayName}] ✘ lỗi đọc workbook: {ex.Message} — bỏ qua."); return; }
             // "Đến dòng" > 0 → DỪNG tại đó (cắt tổng số dòng cần chạy). Ưu tiên override TẠM (Hub giao).
             var endRow = Math.Max(0, endRowOverride ?? target.EndRow);
             if (endRow > 0 && endRow < totalRows) totalRows = endRow;
-            if (totalRows < startRow) { Log($"[{account.DisplayName}] sheet \"{sheet}\" chỉ có {totalRows} dòng (bắt đầu {startRow}) — bỏ qua."); return; }
+            if (totalRows < startRow) { LogA($"[{account.DisplayName}] sheet \"{sheet}\" chỉ có {totalRows} dòng (bắt đầu {startRow}) — bỏ qua."); return; }
 
             // RESET → xoá tiến độ cũ. Tính các khoảng cần chạy (reset = cả đoạn; resume = phần còn thiếu).
             if (!resume) ScrapeProgressStore.Shared.Clear(account.Id, sheet);
@@ -428,7 +432,7 @@ public sealed partial class ScrapeViewModel : ModuleViewModelBase
                 : new List<(int from, int to)> { (startRow, totalRows) };
             if (segments.Count == 0)
             {
-                Log($"[{account.DisplayName}] ✓ Không còn dòng nào để chạy (đã xong tới {totalRows}). Thêm dòng mới rồi Tiếp tục.");
+                LogA($"[{account.DisplayName}] ✓ Không còn dòng nào để chạy (đã xong tới {totalRows}). Thêm dòng mới rồi Tiếp tục.");
                 return;
             }
 
@@ -436,7 +440,7 @@ public sealed partial class ScrapeViewModel : ModuleViewModelBase
             var attempt = await Coordination.Hub.AcquireAsync(coordKey, h.Force || CoordinationRuntime.ForceNextRun, ct).ConfigureAwait(false);
             if (!attempt.Granted)
             {
-                Log($"[{account.DisplayName}] ⛔ shop \"{shop.DisplayName}\" đang được máy \"{attempt.Result.BlockedByHostname}\" chạy (hoặc mất kết nối Hub) — bỏ qua. Bấm 'Chạy đè' nếu chắc máy kia đã dừng.");
+                LogA($"[{account.DisplayName}] ⛔ shop \"{shop.DisplayName}\" đang được máy \"{attempt.Result.BlockedByHostname}\" chạy (hoặc mất kết nối Hub) — bỏ qua. Bấm 'Chạy đè' nếu chắc máy kia đã dừng.");
                 return;
             }
             lease = attempt.Handle;
@@ -452,7 +456,7 @@ public sealed partial class ScrapeViewModel : ModuleViewModelBase
             // khi job dừng giữa chừng / Hub loại bớt tk (KHÔNG thu hẹp khung để tránh rò tk khỏi kho chung). Tạo
             // NGAY (kể cả offline) để mọi lối ra đều nhả giữ-chỗ cục bộ; reserve Hub + heartbeat + bù do scope lo.
             accScope = AccountLeaseScope.ForFrame(accHub, frameIds);
-            if (frame.Count == 0) { Log($"[{account.DisplayName}] kho tk Shopee đã cạn (mọi tk đang thuộc khung khác / Search đang giữ / bị tắt) — bỏ qua."); return; }
+            if (frame.Count == 0) { LogA($"[{account.DisplayName}] kho tk Shopee đã cạn (mọi tk đang thuộc khung khác / Search đang giữ / bị tắt) — bỏ qua."); return; }
 
             // ACCOUNT-LEASE XUYÊN MÁY: tk nào đang được MÁY KHÁC dùng → loại khỏi khung (chống dùng trùng).
             if (accHub is not null)
@@ -461,9 +465,9 @@ public sealed partial class ScrapeViewModel : ModuleViewModelBase
                 if (granted.Count < frameIds.Count)
                 {
                     frame = frame.Where(a => granted.Contains(a.Id)).ToList();
-                    Log($"[{account.DisplayName}] {frameIds.Count - granted.Count} tk Shopee đang được máy khác dùng → loại, còn {frame.Count}.");
+                    LogA($"[{account.DisplayName}] {frameIds.Count - granted.Count} tk Shopee đang được máy khác dùng → loại, còn {frame.Count}.");
                 }
-                if (frame.Count == 0) { Log($"[{account.DisplayName}] mọi tk trong khung đang được máy khác dùng — bỏ qua."); return; }
+                if (frame.Count == 0) { LogA($"[{account.DisplayName}] mọi tk trong khung đang được máy khác dùng — bỏ qua."); return; }
             }
             ScrapeProgressStore.Shared.SaveFrame(account.Id, sheet, frame.Select(a => a.Id));   // lưu khung để resume giữ nguyên
             var procs = Math.Max(1, Math.Min(maxProc, frame.Count));
@@ -478,7 +482,7 @@ public sealed partial class ScrapeViewModel : ModuleViewModelBase
             // Đưa thông báo dọn nền (quét Brave mồ côi…) ra log tab Scrape để người dùng thấy.
             Shopee.Core.Browser.BraveFleet.Notice = Log;
             var totalSeg = segments.Sum(x => x.to - x.from + 1);
-            Log($"── {(resume ? "⏯ Tiếp tục" : "▶")} BigSeller \"{account.DisplayName}\" · shop \"{shop.DisplayName}\" · {totalSeg} dòng cần chạy (tổng sheet {totalRows}) · {procs} cửa sổ · KHUNG {frame.Count} tk Shopee (xoay vòng trong khung) · trần tổng app {Shopee.Core.Browser.BraveFleet.MaxConcurrentWindows} cửa sổ ──");
+            LogA($"── {(resume ? "⏯ Tiếp tục" : "▶")} BigSeller \"{account.DisplayName}\" · shop \"{shop.DisplayName}\" · {totalSeg} dòng cần chạy (tổng sheet {totalRows}) · {procs} cửa sổ · KHUNG {frame.Count} tk Shopee (xoay vòng trong khung) · trần tổng app {Shopee.Core.Browser.BraveFleet.MaxConcurrentWindows} cửa sổ ──");
 
             // Ghi nhận lượt chạy (chỉ tiến độ DÒNG — không đặt-chỗ tk nữa vì tk xoay vòng/tự trả về kho).
             if (resume) ScrapeProgressStore.Shared.BeginResume(account.Id, sheet, account.DisplayName, totalRows);
@@ -495,27 +499,27 @@ public sealed partial class ScrapeViewModel : ModuleViewModelBase
                 Coordination.Hub.PublishProgress(coordKey, from, to);     // chia sẻ tiến độ lên Hub
                 OnUi(target.RefreshProgress);
             };
-            WireRunner(runner, seq, account.DisplayName);
+            WireRunner(runner, seq, account);
 
             // BÙ TK THAY THẾ: khi captcha loại tk khỏi khung, pool xin 1 tk RẢNH từ kho chung (đã khóa lease
             // xuyên máy) để giữ đủ cỡ khung → job KHÔNG cạn khung phải chạy lại. Scope ghi nhận để NHẢ đúng ở
             // finally (giữ-chỗ cục bộ + lease Hub + heartbeat như tk khung ban đầu). Hết tk dư → pool giữ hành vi cũ.
-            var pool = new SessionAccountPool(sheet, frame, accScope.AcquireReplacementAsync, msg => Log($"[{account.DisplayName}] {msg}"));
+            var pool = new SessionAccountPool(sheet, frame, accScope.AcquireReplacementAsync, msg => LogA($"[{account.DisplayName}] {msg}"));
             await runner.RunAutoAsync(pool, procs, segments, rowsPer, account.CookieFile, ct).ConfigureAwait(false);
 
             // Kết thúc: xong hết [startRow..total] → completed; còn dở → stopped (resume chạy nốt theo dòng).
             ScrapeProgressStore.Shared.FinishRun(account.Id, sheet, startRow, totalRows);
             var after = ScrapeProgressStore.Shared.Find(account.Id, sheet);
-            Log(string.Equals(after?.Status, "completed", StringComparison.OrdinalIgnoreCase)
+            LogA(string.Equals(after?.Status, "completed", StringComparison.OrdinalIgnoreCase)
                 ? $"[{account.DisplayName}] ✔ Hoàn thành toàn bộ."
                 : $"[{account.DisplayName}] ■ Chưa xong (xong tới dòng {after?.LastRowReached ?? 0}) — Tiếp tục để chạy nốt.");
         }
         catch (OperationCanceledException)
         {
-            Log($"[{account.DisplayName}] ■ đã dừng — giữ tiến độ cho lần Tiếp tục.");
+            LogA($"[{account.DisplayName}] ■ đã dừng — giữ tiến độ cho lần Tiếp tục.");
             try { ScrapeProgressStore.Shared.FinishRun(account.Id, sheet, startRow, 0); } catch { }
         }
-        catch (Exception ex) { Log($"[{account.DisplayName}] ✘ lỗi: {ex.Message}"); }
+        catch (Exception ex) { LogA($"[{account.DisplayName}] ✘ lỗi: {ex.Message}"); }
         finally
         {
             // Hub: đẩy trạng thái hoàn thành lên ledger + nhả khoá việc + nhả account-lease xuyên máy.
@@ -585,10 +589,10 @@ public sealed partial class ScrapeViewModel : ModuleViewModelBase
         // đòi lại tk đặt-chỗ vì không còn pin tk vào BigSeller nào).
         if (StartJob(s, target, resume: true))
         {
-            Log($"➕ [{target.DisplayName}] đã thêm vào lượt chạy (tiếp tục phần còn thiếu)…");
+            LogAcc(target.Account.Id, target.DisplayName, $"➕ [{target.DisplayName}] đã thêm vào lượt chạy (tiếp tục phần còn thiếu)…");
             return true;
         }
-        Log($"[{target.DisplayName}] đang chạy rồi — bỏ qua.");
+        LogAcc(target.Account.Id, target.DisplayName, $"[{target.DisplayName}] đang chạy rồi — bỏ qua.");
         return false;
     }
 
@@ -682,13 +686,17 @@ public sealed partial class ScrapeViewModel : ModuleViewModelBase
         sel.RefreshProgress();   // có thể đã nhả tay / xoá tiến độ → cập nhật nhãn.
     }
 
-    private void WireRunner(ScrapeRunner runner, int seq, string bigSellerName)
+    private void WireRunner(ScrapeRunner runner, int seq, BigSellerAccount account)
     {
+        var bigSellerName = account.DisplayName;
         string K(string key) => $"{seq}:{key}";   // namespace key theo job để nhiều BigSeller chạy đồng thời không đụng lưới
+        // Đang Ở UI thread (trong OnUi) + cần tra Instances → ghi THẲNG cả 2 buffer, khỏi lồng OnUi thừa (LogAcc).
         runner.InstanceLog += (key, line) => OnUi(() =>
         {
             var inst = Instances.FirstOrDefault(x => x.Key == K(key));
-            LogLines.Add($"[{bigSellerName}][{inst?.Label ?? key}] {line}");
+            var text = $"[{bigSellerName}][{inst?.Label ?? key}] {line}";
+            LogLines.Add(text);
+            AccountLogs.Get(account.Id, bigSellerName).Add(text);
         });
         runner.InstanceStatus += (key, st) => OnUi(() =>
         {
@@ -703,14 +711,18 @@ public sealed partial class ScrapeViewModel : ModuleViewModelBase
         runner.AccountErrored += (id, label, reason, captchaUrl) => OnUi(() =>
         {
             AccountErrorReporter.Report(ErroredAccounts, id, label, reason, "Scrape", captchaUrl);
-            LogLines.Add($"⚠ Tk lỗi: {label} — {reason}");
+            var text = $"⚠ Tk lỗi: {label} — {reason}";
+            LogLines.Add(text);
+            AccountLogs.Get(account.Id, bigSellerName).Add(text);
             // Cột "Tình trạng" → "⚠ Captcha" cho tk vừa dính captcha/lỗi trong lượt chạy này.
             ShopeeAccountUsage.Shared.MarkCaptcha(id);
         });
         runner.BigSellerNeedLogin += reason => OnUi(() =>
         {
             // Tk BigSeller mất phiên ("log in first") → job tk này đã bị dừng. Báo rõ để user đăng nhập lại.
-            LogLines.Add($"⛔ [{bigSellerName}] BigSeller mất đăng nhập: {reason} — đã DỪNG job tk này. Hãy ĐĂNG NHẬP LẠI BigSeller rồi chạy lại.");
+            var text = $"⛔ [{bigSellerName}] BigSeller mất đăng nhập: {reason} — đã DỪNG job tk này. Hãy ĐĂNG NHẬP LẠI BigSeller rồi chạy lại.";
+            LogLines.Add(text);
+            AccountLogs.Get(account.Id, bigSellerName).Add(text);
         });
     }
 

@@ -5,6 +5,19 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Hiệu năng. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.0.16 — 2026-07-11
+
+Chủ đề: **Workspace tách log theo từng tài khoản BigSeller + nút dừng việc của acc đang chọn**.
+
+- 2 tab "Theo dõi Scrape" / "Theo dõi Update" giờ hiển thị log RIÊNG của tài khoản
+  đang chọn bên trái — chạy nhiều acc song song không còn trộn dòng của 6 acc vào một
+  ô. Mỗi acc có file log riêng (`logs\workspace-update-{tên}.log`, `workspace-scrape-{tên}.log`);
+  nút "📂 Log acc này" mở file riêng, "📂 Log gộp" mở file trộn chung như cũ (vẫn ghi
+  đầy đủ). Mỗi lượt chạy mới, ô log của acc đó tự bắt đầu tươi (file giữ trọn lịch sử).
+- Thêm nút "■ Dừng việc shop này" ở góc phải hàng tab: dừng scrape / import / update /
+  tên SP đang chạy của tài khoản đang chọn (acc khác chạy tiếp). Acc không có việc nào
+  chạy → nút tự ẩn.
+
 ## v1.0.15 — 2026-07-11
 
 Chủ đề: **Brave mở bình thường — bỏ hẳn thu nhỏ + hết nhấp nháy**.

@@ -3,6 +3,7 @@ using System.ComponentModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using Shopee.Core.BigSeller;
 using Shopee.Core.Coordination;
+using Shopee.Suite.Infrastructure;
 using Shopee.Suite.Modules.BigSeller;
 using Shopee.Suite.Modules.Scrape;
 using Shopee.Suite.Modules.UpdateProduct;
@@ -22,16 +23,23 @@ public sealed partial class WorkspaceAccountViewModel : ObservableObject
     public UpdateRunTargetViewModel UpdateTarget { get; }
     public UpdateProductViewModel UpdateVm { get; }
 
+    /// <summary>Log scrape RIÊNG của tk này (buffer + file riêng, bền qua rebuild VM) — tab "Theo dõi Scrape" bind vào.</summary>
+    public LogBuffer ScrapeLog { get; }
+    /// <summary>Log import/update/tên SP RIÊNG của tk này — tab "Theo dõi Update" bind vào.</summary>
+    public LogBuffer UpdateLog { get; }
+
     public ObservableCollection<WorkspaceShopViewModel> Shops { get; } = [];
 
     public WorkspaceAccountViewModel(
         BigSellerAccountItemViewModel bs, ScrapeTargetViewModel scrape, UpdateRunTargetViewModel update,
-        UpdateProductViewModel updateVm)
+        UpdateProductViewModel updateVm, LogBuffer scrapeLog, LogBuffer updateLog)
     {
         Bs = bs;
         ScrapeTarget = scrape;
         UpdateTarget = update;
         UpdateVm = updateVm;
+        ScrapeLog = scrapeLog;
+        UpdateLog = updateLog;
         Account = bs.Model;
 
         foreach (var s in Account.Shops) Shops.Add(new WorkspaceShopViewModel(this, s));
@@ -50,6 +58,8 @@ public sealed partial class WorkspaceAccountViewModel : ObservableObject
     private void OnUpdateJobsChanged()
     {
         foreach (var s in Shops) s.RefreshUpdateState();
+        // JobsChanged bắn trên UI thread (RaiseJobsChanged dùng UiThread.Post) → raise thẳng được.
+        OnPropertyChanged(nameof(HasRunningWork));
     }
 
     private void OnScrapeChanged(object? sender, PropertyChangedEventArgs e)
@@ -59,6 +69,7 @@ public sealed partial class WorkspaceAccountViewModel : ObservableObject
             or nameof(ScrapeTargetViewModel.ProgressText))
         {
             OnPropertyChanged(nameof(IsScraping));
+            OnPropertyChanged(nameof(HasRunningWork));
             foreach (var s in Shops) s.RefreshStatus();
             OnPropertyChanged(nameof(ScrapeSummary));
         }
@@ -67,6 +78,9 @@ public sealed partial class WorkspaceAccountViewModel : ObservableObject
     /// <summary>true nếu tk này đang scrape 1 shop nào đó (job LIVE) → khoá ▶/⏯ các shop còn lại
     /// (1 shop/account: đang chạy 1 shop thì các shop khác không cho chạy chồng).</summary>
     public bool IsScraping => Shops.Any(s => ScrapeTarget.IsShopRunning?.Invoke(s.Shop) ?? false);
+
+    /// <summary>Điều khiển nút "■ Dừng việc shop này" — ẩn khi acc không có action nào chạy (scrape LẪN update).</summary>
+    public bool HasRunningWork => IsScraping || UpdateVm.IsUpdateRunning(Account.Id);
 
     /// <summary>Tick để chạy BATCH — đồng bộ cả scrape lẫn update (1 lần tick dùng cho cả 2 giai đoạn).</summary>
     public bool IsSelected

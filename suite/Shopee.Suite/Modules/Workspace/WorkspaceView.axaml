@@ -102,8 +102,9 @@
                 </Border>
             </DockPanel>
 
-            <!-- RIGHT: TabControl -->
-            <TabControl Grid.Column="2" Padding="0">
+            <!-- RIGHT: TabControl + nút "Dừng việc shop này" đè góc trên-phải, thẳng hàng dải tab -->
+            <Grid Grid.Column="2">
+            <TabControl Padding="0">
 
                 <!-- ══════════ TAB 1: Shop & cấu hình ══════════ -->
                 <TabItem Header="Shop &amp; cấu hình">
@@ -327,13 +328,21 @@
                         </DockPanel>
                         <DockPanel Grid.Column="2">
                             <Grid DockPanel.Dock="Top" Margin="0,0,0,6">
-                                <TextBlock Text="Nhật ký Scrape (hiện 500 dòng cuối)" Classes="caption" FontWeight="SemiBold" VerticalAlignment="Center" />
-                                <Button HorizontalAlignment="Right" Padding="8,2" FontSize="11.5" Content="📂 Mở log đầy đủ"
-                                        Command="{Binding OpenLogFileCommand}"
-                                        ToolTip.Tip="UI chỉ giữ 500 dòng cuối cho nhẹ máy. Bấm để mở file log đầy đủ (logs\workspace-scrape.log)." />
+                                <!-- DataContext vùng này = Scrape → binding tới workspace phải qua #Root.DataContext. -->
+                                <TextBlock Classes="caption" FontWeight="SemiBold" VerticalAlignment="Center" TextTrimming="CharacterEllipsis">
+                                    <Run Text="Nhật ký Scrape — " /><Run Text="{Binding #Root.DataContext.SelectedAccount.DisplayName}" /><Run Text=" (500 dòng cuối · riêng acc này)" />
+                                </TextBlock>
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                                    <Button Padding="8,2" FontSize="11.5" Content="📂 Log acc này" Margin="0,0,6,0"
+                                            Command="{Binding #Root.DataContext.OpenScrapeAccLogCommand}"
+                                            ToolTip.Tip="Mở file log RIÊNG của tài khoản đang chọn (chỉ dòng scrape của acc này)." />
+                                    <Button Padding="8,2" FontSize="11.5" Content="📂 Log gộp"
+                                            Command="{Binding OpenLogFileCommand}"
+                                            ToolTip.Tip="Mở file log GỘP mọi acc trộn chung (file cũ logs\workspace-scrape.log)." />
+                                </StackPanel>
                             </Grid>
                             <Border CornerRadius="8" ClipToBounds="True" Background="{DynamicResource LogBackgroundBrush}">
-                                <TextBox Classes="log" b:LogText.Source="{Binding LogLines}" />
+                                <TextBox Classes="log" b:LogText.Source="{Binding #Root.DataContext.SelectedAccount.ScrapeLog}" />
                             </Border>
                         </DockPanel>
                     </Grid>
@@ -343,17 +352,34 @@
                 <TabItem Header="Theo dõi Update">
                     <DockPanel DataContext="{Binding Update}" Margin="0,10,0,0">
                         <Grid DockPanel.Dock="Top" Margin="0,0,0,6">
-                            <TextBlock Text="Nhật ký Update (hiện 500 dòng cuối)" Classes="caption" FontWeight="SemiBold" VerticalAlignment="Center" />
-                            <Button HorizontalAlignment="Right" Padding="8,2" FontSize="11.5" Content="📂 Mở log đầy đủ"
-                                    Command="{Binding OpenLogFileCommand}"
-                                    ToolTip.Tip="UI chỉ giữ 500 dòng cuối cho nhẹ máy. Bấm để mở file log đầy đủ (logs\workspace-update.log)." />
+                            <!-- DataContext vùng này = Update → binding tới workspace phải qua #Root.DataContext. -->
+                            <TextBlock Classes="caption" FontWeight="SemiBold" VerticalAlignment="Center" TextTrimming="CharacterEllipsis">
+                                <Run Text="Nhật ký Update — " /><Run Text="{Binding #Root.DataContext.SelectedAccount.DisplayName}" /><Run Text=" (500 dòng cuối · riêng acc này)" />
+                            </TextBlock>
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                                <Button Padding="8,2" FontSize="11.5" Content="📂 Log acc này" Margin="0,0,6,0"
+                                        Command="{Binding #Root.DataContext.OpenUpdateAccLogCommand}"
+                                        ToolTip.Tip="Mở file log RIÊNG của tài khoản đang chọn (chỉ dòng import/update/tên SP của acc này)." />
+                                <Button Padding="8,2" FontSize="11.5" Content="📂 Log gộp"
+                                        Command="{Binding OpenLogFileCommand}"
+                                        ToolTip.Tip="Mở file log GỘP mọi acc trộn chung (file cũ logs\workspace-update.log)." />
+                            </StackPanel>
                         </Grid>
                         <Border CornerRadius="8" ClipToBounds="True" Background="{DynamicResource LogBackgroundBrush}">
-                            <TextBox Classes="log" b:LogText.Source="{Binding LogLines}" />
+                            <TextBox Classes="log" b:LogText.Source="{Binding #Root.DataContext.SelectedAccount.UpdateLog}" />
                         </Border>
                     </DockPanel>
                 </TabItem>
             </TabControl>
+
+                <!-- Nút Dừng: DataContext của Grid này = WorkspaceViewModel (không cần #Root). FallbackValue=False
+                     → acc null / không chạy gì thì ẨN HẲN. Tab bên trái, nút bên phải nên không đè lên tab. -->
+                <Button Classes="danger" Content="■ Dừng việc shop này"
+                        HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,2,0,0"
+                        IsVisible="{Binding SelectedAccount.HasRunningWork, FallbackValue=False}"
+                        Command="{Binding StopSelectedWorkCommand}"
+                        ToolTip.Tip="Dừng scrape / import / update / tên SP đang chạy của tài khoản đang chọn (shop đang chạy). Tài khoản khác chạy tiếp." />
+            </Grid>
         </Grid>
     </Grid>
 </UserControl>

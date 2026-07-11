@@ -114,7 +114,10 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             var scrape = Scrape.ScrapeTargets.FirstOrDefault(t => t.Account.Id == bs.Model.Id);
             var update = Update.RunTargets.FirstOrDefault(t => t.Account.Id == bs.Model.Id);
             if (scrape is null || update is null) continue;   // sub-VM chưa kịp đồng bộ → bỏ qua vòng này
-            Accounts.Add(new WorkspaceAccountViewModel(bs, scrape, update, Update));
+            // Buffer log RIÊNG acc (theo Account.Id) — registry cache-khi-cần, bền qua rebuild → tab log per-acc bind vào.
+            var scrapeLog = Scrape.AccountLogs.Get(bs.Model.Id, bs.Model.DisplayName);
+            var updateLog = Update.AccountLogs.Get(bs.Model.Id, bs.Model.DisplayName);
+            Accounts.Add(new WorkspaceAccountViewModel(bs, scrape, update, Update, scrapeLog, updateLog));
         }
 
         SelectedAccount = Accounts.FirstOrDefault(a => a.Account.Id == prevId) ?? Accounts.FirstOrDefault();
@@ -155,6 +158,10 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         if (SelectedAccount is not null) BigSeller.Selected = SelectedAccount.Bs;   // mở đúng tk bên tab kia
         RequestNavigate?.Invoke(BigSeller);
     }
+
+    // ── Mở FILE log RIÊNG của acc đang chọn (buffer UI chỉ giữ 500 dòng cuối; file có đủ) ──
+    [RelayCommand] private void OpenScrapeAccLog() { if (SelectedAccount is { } a) ShellOpener.RevealFile(a.ScrapeLog.FilePath); }
+    [RelayCommand] private void OpenUpdateAccLog() { if (SelectedAccount is { } a) ShellOpener.RevealFile(a.UpdateLog.FilePath); }
 
     // ── Chọn shop (1 shop/account) ───────────────────────────────────────────
     [RelayCommand]
@@ -235,8 +242,15 @@ public sealed partial class WorkspaceViewModel : ObservableObject
     // (Map field ↔ cột Excel làm bên tab "Cấu hình BigSeller" khi cài đặt shop — không lặp ở workspace.)
 
     // ── Dừng ──────────────────────────────────────────────────────────────────
-    // (Dừng RIÊNG 1 tk = bấm ■ trên shop đang chạy của tk đó — mỗi tk chỉ 1 action/1 shop tại 1 thời điểm
-    //  nên nút ■ của shop chính là "dừng action của tk này". Không cần nút "Dừng tk đang chọn" riêng.)
+
+    /// <summary>Nút "■ Dừng việc shop này" (góc phải hàng tab): dừng scrape + update đang chạy của acc đang chọn.</summary>
+    [RelayCommand]
+    private void StopSelectedWork()
+    {
+        if (SelectedAccount is not { } a) return;
+        if (a.IsScraping) _ = Scrape.StopSingleAsync(a.ScrapeTarget);
+        Update.StopSingle(a.Account.Id);   // không có job thì tự bỏ qua
+    }
 
     /// <summary>Dừng TẤT CẢ scrape + update đang chạy. Chỉ bật khi <see cref="AnyRunning"/> = true.</summary>
     [RelayCommand(CanExecute = nameof(AnyRunning))]

@@ -222,6 +222,8 @@ public sealed partial class UpdateProductViewModel : ModuleViewModelBase
         // TryAdd = dedup + add ATOMIC dưới lock của registry.
         var job = new WsJob { Cts = new CancellationTokenSource(), ShopId = s.Id, Kind = kind };
         if (!_wsJobs.TryAdd(a.Id, job)) { Warn($"{a.DisplayName}: đang chạy 1 workflow rồi — bấm ■ để dừng trước.", silent); job.Cts.Dispose(); return; }
+        // Log gắn tk này → ghi vào CẢ buffer gộp lẫn buffer riêng của acc (tab log per-acc đợt sau bind vào).
+        void LogA(string m) => LogAcc(a.Id, a.DisplayName, m);
         // ĐÃ đăng ký job → MỌI thứ sau đây phải nằm TRONG try/finally để dù setup (BuildContext / ctor runner)
         // ném thì finally vẫn gỡ job khỏi _wsJobs (trước đây setup nằm NGOÀI try → throw làm tk kẹt ■ vĩnh viễn).
         var prefix = $"[{a.DisplayName}]";
@@ -231,12 +233,14 @@ public sealed partial class UpdateProductViewModel : ModuleViewModelBase
         try
         {
             RaiseJobsChanged();   // → UI: nút vừa bấm đổi thành ■, các nút khác cùng tk khoá lại
+            // Mỗi lượt chạy hiện log TƯƠI của acc → xoá phần XEM buffer riêng (file vẫn giữ đầy đủ, Clear chỉ xoá phần xem).
+            OnUi(() => AccountLogs.Get(a.Id, a.DisplayName).Clear());
 
             // KHOÁ VIỆC XUYÊN MÁY: 2 máy không cùng import/update/rewrite một shop. Bị giữ / mất hub → CHẶN.
             var attempt = await Coordination.Hub.AcquireAsync(coordKey, force || CoordinationRuntime.ForceNextRun, job.Cts.Token).ConfigureAwait(false);
             if (!attempt.Granted)
             {
-                Log($"{prefix} ⛔ {name} đang được máy \"{attempt.Result.BlockedByHostname}\" chạy (hoặc mất kết nối Hub) — bỏ qua. Bấm 'Chạy đè' nếu chắc máy kia đã dừng.");
+                LogA($"{prefix} ⛔ {name} đang được máy \"{attempt.Result.BlockedByHostname}\" chạy (hoặc mất kết nối Hub) — bỏ qua. Bấm 'Chạy đè' nếu chắc máy kia đã dừng.");
                 return;
             }
             lease = attempt.Handle;
@@ -246,35 +250,35 @@ public sealed partial class UpdateProductViewModel : ModuleViewModelBase
             var img = kind == UpdateKind.Update ? await EnsureUpdateImageAsync(job.Cts.Token).ConfigureAwait(false) : ImagePath;
             if (kind == UpdateKind.Update && (string.IsNullOrWhiteSpace(img) || !File.Exists(img)))
             {
-                Log($"{prefix} ⚠ Chưa có ảnh Update — BigSeller cần ảnh để cập nhật SP. Upload ảnh chung trên Hub (trang Files) hoặc đặt ảnh local.");
+                LogA($"{prefix} ⚠ Chưa có ảnh Update — BigSeller cần ảnh để cập nhật SP. Upload ảnh chung trên Hub (trang Files) hoặc đặt ảnh local.");
                 Coordination.Hub.PublishCompletion(coordKey, "stopped", 0);
                 return;
             }
             var ctx = BuildContext(t, ai, startRow, endRow, importFromClaimedTab, kind == UpdateKind.Update ? img : null, processes, reloadSeconds);
             var runner = new UpdateProductRunner();
-            runner.Log += m => Log($"{prefix} {m}");
+            runner.Log += m => LogA($"{prefix} {m}");
             // Mỗi dòng import/update/rewrite xong → đẩy lên ledger Hub (khoảng dòng) cho Thống kê "shop này đã làm
             // những dòng nào". Fire-and-forget, no-op khi Hub tắt (chạy 1 máy).
             runner.RowsCompleted += (from, to) => Coordination.Hub.PublishProgress(coordKey, from, to);
             job.Runner = runner;
-            Log($"▶ {name} — {prefix} (chạy song song).");
+            LogA($"▶ {name} — {prefix} (chạy song song).");
             await action(runner, ctx, job.Cts.Token).ConfigureAwait(false);
             // Engine có thể thoát ÊM khi bị hủy (OuterLoop check IsCancellationRequested ở đầu vòng; supervisor
             // đa-lane CỐ Ý nuốt OCE để lane nghỉ hưu) → "không exception" KHÔNG có nghĩa là xong. Bị hủy mà báo
             // "completed" → ledger hiện ✓ xong oan + HubDispatcher tưởng op xong, nhảy op kế, bỏ sót SP.
             if (job.Cts.Token.IsCancellationRequested)
             {
-                Log($"{prefix} ■ đã dừng (hủy giữa chừng).");
+                LogA($"{prefix} ■ đã dừng (hủy giữa chừng).");
                 Coordination.Hub.PublishCompletion(coordKey, "stopped", 0);
             }
             else
             {
-                Log($"{prefix} ✔ xong {name}.");
+                LogA($"{prefix} ✔ xong {name}.");
                 Coordination.Hub.PublishCompletion(coordKey, "completed", 0);
             }
         }
-        catch (OperationCanceledException) { Log($"{prefix} ■ đã dừng."); Coordination.Hub.PublishCompletion(coordKey, "stopped", 0); }
-        catch (Exception ex) { Log($"{prefix} ✖ lỗi: {ex.Message}"); Coordination.Hub.PublishCompletion(coordKey, "stopped", 0); }
+        catch (OperationCanceledException) { LogA($"{prefix} ■ đã dừng."); Coordination.Hub.PublishCompletion(coordKey, "stopped", 0); }
+        catch (Exception ex) { LogA($"{prefix} ✖ lỗi: {ex.Message}"); Coordination.Hub.PublishCompletion(coordKey, "stopped", 0); }
         finally
         {
             if (lease is not null) { try { await lease.DisposeAsync().ConfigureAwait(false); } catch { } }
@@ -448,16 +452,19 @@ public sealed partial class UpdateProductViewModel : ModuleViewModelBase
         BigSellerAccount account, UpdateProductContext ctx, CancellationToken ct)
     {
         var prefix = $"[{account.DisplayName}]";
+        void LogA(string m) => LogAcc(account.Id, account.DisplayName, m);
+        // Mỗi lượt chạy hiện log TƯƠI của acc → xoá phần XEM buffer riêng (file vẫn giữ đầy đủ).
+        OnUi(() => AccountLogs.Get(account.Id, account.DisplayName).Clear());
         var runner = new UpdateProductRunner();
-        runner.Log += m => Log($"{prefix} {m}");
+        runner.Log += m => LogA($"{prefix} {m}");
         lock (_runnersLock) _runners.Add(runner);
         try
         {
             await action(runner, ctx, ct).ConfigureAwait(false);
-            Log($"{prefix} ✔ xong {name}.");
+            LogA($"{prefix} ✔ xong {name}.");
         }
-        catch (OperationCanceledException) { Log($"{prefix} ■ đã dừng."); }
-        catch (Exception ex) { Log($"{prefix} ✖ lỗi: {ex.Message}"); }
+        catch (OperationCanceledException) { LogA($"{prefix} ■ đã dừng."); }
+        catch (Exception ex) { LogA($"{prefix} ✖ lỗi: {ex.Message}"); }
         finally { lock (_runnersLock) _runners.Remove(runner); }
     }
 
