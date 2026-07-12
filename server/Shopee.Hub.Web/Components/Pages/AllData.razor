@@ -79,6 +79,7 @@
                 <span style="flex:1"></span>
                 <button class="btn sm" disabled="@_busy" @onclick="() => _selected.Clear()">✖ Bỏ chọn (@_selected.Count)</button>
                 <button class="btn sm" style="background:var(--success-bg);color:var(--success)" disabled="@_busy" @onclick="MarkSold">✔ Đã bán (@_selected.Count)</button>
+                <button class="btn sm" disabled="@_busy" @onclick="ResetSold" title="Xoá lịch sử đã bán của các dòng chọn (sold về 0)">↺ Đã bán = 0 (@_selected.Count)</button>
                 <button class="btn sm" disabled="@_busy" @onclick="RegenSkus" title="Cấp SKU B##### mới cho các dòng chọn (vá đuôi tên nếu có tên-sửa)">🆕 Sinh SKU mới (@_selected.Count)</button>
                 <button class="btn danger sm" disabled="@_busy" @onclick="DeleteSelected">🗑 Xóa nhiều (@_selected.Count)</button>
             }
@@ -540,6 +541,28 @@
             _status = $"✔ +1 đã bán cho {n} dòng.";
         }
         catch (Exception ex) { _status = "✘ Lỗi đánh dấu đã bán: " + ProductDb.Friendly(ex); }
+        finally { _busy = false; }
+    }
+
+    // Đặt "đã bán" về 0 (xoá bản ghi product_sold) cho các dòng chọn — confirm trước. GIỮ selection (dòng hết xanh).
+    private async Task ResetSold()
+    {
+        if (_selected.Count == 0 || _busy) return;
+        var pg = Pg;
+        if (pg is null || !pg.IsReady) return;
+        var n = _selected.Count;
+        if (!await JS.InvokeAsync<bool>("confirm",
+            $"Đặt 'đã bán' về 0 cho {n} dòng đã chọn (xoá lịch sử bán của các dòng đó)?"))
+            return;
+        _busy = true; _status = "⏳ Đang đặt đã bán về 0…";
+        try
+        {
+            var keys = _selected.Select(k => (k.Acct, k.Sheet, k.RowNo)).ToList();
+            await Task.Run(() => pg.ResetSoldAsync(keys, CancellationToken.None));
+            await LoadAsync();   // GIỮ selection: dòng hết xanh + sold_count = 0
+            _status = $"✔ Đã đặt đã-bán = 0 cho {n} dòng.";
+        }
+        catch (Exception ex) { _status = "✘ Lỗi đặt đã bán về 0: " + ProductDb.Friendly(ex); }
         finally { _busy = false; }
     }
 

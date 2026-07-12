@@ -66,6 +66,7 @@ public static class HubRoutes
     // ── Trang "📦 Dữ liệu" (mọi shop) — client desktop thao tác qua các route này ──
     public const string ProductsAllData = "/products/all-data";
     public const string ProductsMarkSold = "/products/mark-sold";
+    public const string ProductsResetSold = "/products/reset-sold";
     public const string ProductsRegenSkus = "/products/regen-skus";
     public const string ProductsDeleteRows = "/products/rows/delete";
     public const string ProductsUpdateRow = "/products/rows/update";

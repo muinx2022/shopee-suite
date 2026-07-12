@@ -108,6 +108,30 @@ ON CONFLICT (account_id, sheet, row_no) DO UPDATE SET
         return n;
     }
 
+    /// <summary>Đặt "đã bán" về 0 cho các khoá vị trí (1 transaction) — gộp theo (acct, sheet) rồi
+    /// <c>DELETE FROM product_sold WHERE … row_no = ANY(…)</c> (như nhánh product_sold của <see cref="DeleteRowsByKeysAsync"/>,
+    /// nhưng GIỮ product_rows). Xoá bản ghi = xoá cả lịch sử first/last_sold_at → lưới đọc COALESCE(sold_count,0)=0.
+    /// Trả TỔNG số bản ghi product_sold đã xoá (dòng CHƯA TỪNG bán không có bản ghi → không tính vào tổng).</summary>
+    public async Task<int> ResetSoldAsync(List<(string Acct, string Sheet, int RowNo)> keys, CancellationToken ct)
+    {
+        if (keys is null || keys.Count == 0) return 0;
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        await using var tx = await conn.BeginTransactionAsync(ct);
+        var deleted = 0;
+        foreach (var g in keys.GroupBy(k => (k.Acct, k.Sheet)))
+        {
+            var rowNos = g.Select(k => k.RowNo).ToArray();
+            await using var cmd = new NpgsqlCommand(
+                "DELETE FROM product_sold WHERE account_id=$1 AND sheet=$2 AND row_no = ANY($3);", conn, tx);
+            cmd.Parameters.AddWithValue(g.Key.Acct);
+            cmd.Parameters.AddWithValue(g.Key.Sheet);
+            cmd.Parameters.AddWithValue(rowNos);
+            deleted += await cmd.ExecuteNonQueryAsync(ct);
+        }
+        await tx.CommitAsync(ct);
+        return deleted;
+    }
+
     /// <summary>Xoá các dòng theo khoá vị trí (1 transaction) — gộp theo (acct, sheet) rồi xoá <c>row_no = ANY(…)</c>
     /// trên CẢ product_rows LẪN product_sold (xoá dòng chủ động → xoá kèm lịch sử bán). Trả tổng dòng product_rows đã xoá.</summary>
     public async Task<int> DeleteRowsByKeysAsync(List<(string Acct, string Sheet, int RowNo)> keys, CancellationToken ct)

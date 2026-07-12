@@ -368,6 +368,29 @@ public sealed partial class DataViewModel : ObservableObject
     }
 
     [RelayCommand]
+    private async Task ResetSold()
+    {
+        if (IsBusy || _selectedKeys.Count == 0) return;
+        var client = CoordinationRuntime.Client;
+        if (client is null) return;
+        var keys = _selectedKeys.ToList();
+        var n = keys.Count;
+        if (!await Dialogs.ConfirmAsync(
+            $"Đặt 'đã bán' về 0 cho {n} dòng đã chọn (xoá lịch sử bán của các dòng đó)?", "Đặt đã bán về 0"))
+            return;
+        IsBusy = true;
+        Status = "⏳ Đang đặt đã bán về 0…";
+        try
+        {
+            await client.ResetProductsSoldAsync(keys);
+            await LoadCoreAsync();   // GIỮ selection: dòng hết xanh + sold_count = 0
+            Status = $"✔ Đã đặt đã-bán = 0 cho {n} dòng.";
+        }
+        catch (Exception ex) { Status = "✘ Lỗi đặt đã bán về 0: " + FriendlyError(ex); }
+        finally { IsBusy = false; }
+    }
+
+    [RelayCommand]
     private async Task RegenSkus()
     {
         if (IsBusy || _selectedKeys.Count == 0) return;

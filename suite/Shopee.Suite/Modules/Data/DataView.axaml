@@ -94,6 +94,10 @@
                 <Button Classes="success" Margin="8,0,0,0" Command="{Binding MarkSoldCommand}" IsEnabled="{Binding CanInteract}">
                     <TextBlock><Run Text="✔ Đã bán (" /><Run Text="{Binding SelectedCount}" /><Run Text=")" /></TextBlock>
                 </Button>
+                <Button Margin="8,0,0,0" Command="{Binding ResetSoldCommand}" IsEnabled="{Binding CanInteract}"
+                        ToolTip.Tip="Xoá lịch sử đã bán của các dòng chọn (sold về 0)">
+                    <TextBlock><Run Text="↺ Đã bán = 0 (" /><Run Text="{Binding SelectedCount}" /><Run Text=")" /></TextBlock>
+                </Button>
                 <Button Margin="8,0,0,0" Command="{Binding RegenSkusCommand}" IsEnabled="{Binding CanInteract}"
                         ToolTip.Tip="Cấp SKU B##### mới cho các dòng chọn (vá đuôi tên nếu có tên-sửa)">
                     <TextBlock><Run Text="🆕 Sinh SKU mới (" /><Run Text="{Binding SelectedCount}" /><Run Text=")" /></TextBlock>

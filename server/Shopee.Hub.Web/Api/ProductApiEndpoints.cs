@@ -168,6 +168,16 @@ public static class ProductApiEndpoints
             return Results.Json(new ProductCountResponse(await pdb.MarkSoldAsync(keys, ct)));
         });
 
+        // ── Ghi: đặt "đã bán" về 0 (xoá lịch sử bán) cho các khoá vị trí ──
+        api.MapPost(HubRoutes.ProductsResetSold, async (ProductKeysRequest? r, IServiceProvider sp, CancellationToken ct) =>
+        {
+            var pdb = sp.GetService<ProductDb>();
+            if (pdb is null || !pdb.IsReady) return PgNotReady();
+            if (r is null) return Results.BadRequest();
+            var keys = r.Keys.Select(k => (k.Acct, k.Sheet, k.RowNo)).ToList();
+            return Results.Json(new ProductCountResponse(await pdb.ResetSoldAsync(keys, ct)));
+        });
+
         // ── Ghi: cấp lại SKU mới cho các khoá vị trí ──
         api.MapPost(HubRoutes.ProductsRegenSkus, async (ProductKeysRequest? r, IServiceProvider sp, CancellationToken ct) =>
         {

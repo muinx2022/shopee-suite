@@ -199,6 +199,13 @@ public sealed class HubClient
         return (await r.Content.ReadFromJsonAsync<ProductCountResponse>(ct))?.Count ?? 0;
     }
 
+    public async Task<int> ResetProductsSoldAsync(List<ProductRowKey> keys, CancellationToken ct = default)
+    {
+        var r = await _bulkHttp.PostAsJsonAsync(HubRoutes.ProductsResetSold, new ProductKeysRequest(keys), ct);
+        r.EnsureSuccessStatusCode();
+        return (await r.Content.ReadFromJsonAsync<ProductCountResponse>(ct))?.Count ?? 0;
+    }
+
     public async Task<int> RegenProductSkusAsync(List<ProductRowKey> keys, CancellationToken ct = default)
     {
         var r = await _bulkHttp.PostAsJsonAsync(HubRoutes.ProductsRegenSkus, new ProductKeysRequest(keys), ct);
