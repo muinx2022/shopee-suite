@@ -5,6 +5,21 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Hiệu năng. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.3.0 — 2026-07-13
+
+Chủ đề: **Tab "Dữ liệu" ngay trong Workspace + tab Dữ liệu từng shop trên web Hub đủ thao tác — một lõi logic dùng chung cho cả hub lẫn app.**
+
+- Workspace có tab **Dữ liệu** mới (ngay cạnh "Shop & cấu hình"): xem/lọc/thêm/sửa/xoá/đã bán/reset
+  đã bán/cấp SKU cho kho sản phẩm của tài khoản đang chọn — không cần rời màn chạy hay mở web Hub.
+- Nút **↺ Đã bán = 0**: đặt lại số "đã bán" về 0 cho các dòng chọn (xoá lịch sử bán) — có ở cả tab
+  Dữ liệu trên app lẫn trang /data + tab per-shop trên web Hub.
+- Tab 📋 Dữ liệu của từng shop trên web Hub (Fleet) giờ đủ thao tác như trang /data: ✔ Đã bán,
+  ↺ Đã bán = 0, 🆕 Sinh SKU mới, 🗑 Xoá nhiều, ✏ sửa qua form chung (bỏ sửa-trong-ô), thêm cột
+  Đã bán; **lưới giãn hết chiều cao trang** thay vì lọt thỏm giữa trang.
+- Dưới nắp: toàn bộ logic lưới (lọc, phân trang, chọn nhiều, thao tác, thông báo/xác nhận) rút về
+  MỘT lõi dùng chung (`ProductGridEngine`) cho cả web Hub lẫn app — hành vi 2 nơi y hệt, sửa 1 chỗ
+  ăn cả hai; ô Tìm per-shop nay tìm đa trường (SKU / itemId / tên / link) ngay trên kho.
+
 ## v1.2.0 — 2026-07-13
 
 Chủ đề: **Tab "Dữ liệu" quản lý kho sản phẩm ngay trên app + việc gián đoạn chạy TIẾP phần còn thiếu (resume), không làm lại từ đầu.**
