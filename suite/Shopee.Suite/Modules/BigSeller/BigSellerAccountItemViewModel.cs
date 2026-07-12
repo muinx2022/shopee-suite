@@ -19,7 +19,7 @@ public sealed class BigSellerAccountItemViewModel : ObservableObject
     public BigSellerAccountItemViewModel(BigSellerAccount model)
     {
         Model = model;
-        foreach (var s in model.Shops) Shops.Add(new BigSellerShopViewModel(s));
+        foreach (var s in model.Shops) Shops.Add(new BigSellerShopViewModel(s, model.UsesHubData));
         RefreshSheets();
     }
 
@@ -109,7 +109,7 @@ public sealed class BigSellerAccountItemViewModel : ObservableObject
         // trống (user gán sheet workbook sau). Shop mới sẽ được đẩy lên Hub qua HubBigSellerUpsert.
         if (Model.UsesHubData) shop.ShopeeDataSheet = shop.Id;
         Model.Shops.Add(shop);
-        var vm = new BigSellerShopViewModel(shop);
+        var vm = new BigSellerShopViewModel(shop, Model.UsesHubData);
         Shops.Add(vm);
         OnPropertyChanged(nameof(ShopCount));
         return vm;
@@ -152,7 +152,7 @@ public sealed class BigSellerAccountItemViewModel : ObservableObject
             for (var j = i + 1; j < Shops.Count; j++)
                 if (ReferenceEquals(Shops[j].Model, m)) { at = j; break; }
             if (at >= 0) Shops.Move(at, i);
-            else Shops.Insert(i, new BigSellerShopViewModel(m));
+            else Shops.Insert(i, new BigSellerShopViewModel(m, Model.UsesHubData));
         }
 
         OnPropertyChanged(nameof(ShopCount));

@@ -10,11 +10,20 @@ public sealed class BigSellerShopViewModel : ObservableObject
 {
     public BigSellerShop Model { get; }
 
-    public BigSellerShopViewModel(BigSellerShop model)
+    /// <summary>Tk cha ở chế độ kho Hub (Postgres)? Chỉ dùng để ẨN các khái niệm Excel (sheet / map cột) khỏi
+    /// mắt user — sheet ở hub-mode chỉ là tên ngăn dữ liệu nội bộ (= shop.Id). Logic runner KHÔNG đổi.</summary>
+    public bool UsesHubData { get; }
+
+    public BigSellerShopViewModel(BigSellerShop model, bool usesHubData = false)
     {
         Model = model;
+        UsesHubData = usesHubData;
         Model.ColumnMap ??= new BigSellerColumnMap();   // dữ liệu cũ (json thiếu columnMap) → tránh null
     }
+
+    /// <summary>Giá trị hiển thị cột "Sheet" trong lưới shop: hub-mode để TRỐNG (sheet = GUID ngăn nội bộ,
+    /// không phô cho user); excel-mode hiện tên sheet như cũ. ShopeeDataSheet (dùng cho runner) KHÔNG đổi.</summary>
+    public string SheetDisplay => UsesHubData ? "" : Model.ShopeeDataSheet;
 
     // Gộp ghi đĩa (Avalonia bind cập nhật mỗi phím) — xem PersistDebounce, thay LostFocus của WPF. Model cập nhật ngay.
     private static void Persist() => PersistDebounce.Schedule();
@@ -37,7 +46,7 @@ public sealed class BigSellerShopViewModel : ObservableObject
             // sheet thật luôn là chuỗi != null; muốn bỏ sheet thì chọn item rỗng (chuỗi "", vẫn cho qua).
             if (value is null) return;
             if (Model.ShopeeDataSheet == value) return;
-            Model.ShopeeDataSheet = value; OnPropertyChanged(); Persist();
+            Model.ShopeeDataSheet = value; OnPropertyChanged(); OnPropertyChanged(nameof(SheetDisplay)); Persist();
         }
     }
 

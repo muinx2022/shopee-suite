@@ -135,7 +135,8 @@
                                                     ToolTip.Tip="Mở tab BigSeller để đăng nhập lấy cookie / sửa workbook · cookie · shop · proxy của tài khoản này." />
                                         </StackPanel>
                                     </Grid>
-                                    <Grid ColumnDefinitions="Auto,*" Margin="0,0,0,6">
+                                    <!-- Hàng Workbook chỉ excel-mode; hub-mode ẨN (kho SP ở Hub, không dùng workbook Excel). -->
+                                    <Grid ColumnDefinitions="Auto,*" Margin="0,0,0,6" IsVisible="{Binding !UsesHubData}">
                                         <TextBlock Grid.Column="0" Text="Workbook" Classes="caption" VerticalAlignment="Center" Margin="0,0,8,0" />
                                         <TextBox Grid.Column="1" Text="{Binding WorkbookPath, Mode=OneWay}" IsReadOnly="True" Padding="6,2"
                                                  FontFamily="{DynamicResource MonoFont}" FontSize="11.5" TextWrapping="NoWrap" MinHeight="26" />

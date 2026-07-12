@@ -98,6 +98,9 @@ public sealed partial class WorkspaceAccountViewModel : ObservableObject
     public string DisplayName => Account.DisplayName;
     public string CookieStatus => Bs.CookieStatus;
     public string WorkbookPath => Account.WorkbookPath;
+    /// <summary>Hub-mode → ẨN hàng "Workbook" ở tab Shop &amp; cấu hình (kho SP ở Hub, không dùng workbook Excel).
+    /// Excel-mode hiện như cũ. Cố định theo vòng đời VM (đổi chế độ trên Hub sẽ re-sync dựng lại VM).</summary>
+    public bool UsesHubData => Account.UsesHubData;
     public int ShopCount => Shops.Count;
 
     /// <summary>Tóm tắt "đã scrape X/Y shop" cho dòng tài khoản bên trái (theo dõi nhanh).</summary>

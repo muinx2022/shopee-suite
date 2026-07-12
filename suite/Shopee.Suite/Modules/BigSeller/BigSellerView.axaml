@@ -99,13 +99,13 @@
                                 <TextBlock Text="Mật khẩu BigSeller (để tự đăng nhập)" Classes="caption" />
                                 <TextBox PasswordChar="●" Text="{Binding Password, Mode=TwoWay}" Margin="0,3,0,10" />
 
-                                <TextBlock Text="Workbook (Excel)" Classes="caption" />
-                                <Grid Margin="0,3,0,3" ColumnDefinitions="*,Auto,Auto">
-                                    <!-- Hub-mode: khoá nút chọn file (kho dữ liệu ở Hub, không dùng workbook); "↻ Sheet" vẫn bật (nạp sheet từ Hub). -->
+                                <!-- Cả cụm Workbook (label + ô path + chọn file + ↻ Sheet) CHỈ cho excel-mode; hub-mode
+                                     ẨN sạch (kho dữ liệu ở Hub, không có khái niệm workbook/sheet) → chỉ còn DataSourceLabel. -->
+                                <TextBlock Text="Workbook (Excel)" Classes="caption" IsVisible="{Binding CanPickWorkbook}" />
+                                <Grid Margin="0,3,0,3" ColumnDefinitions="*,Auto,Auto" IsVisible="{Binding CanPickWorkbook}">
                                     <TextBox Grid.Column="0" Text="{Binding WorkbookPath}" IsReadOnly="True"
-                                             Classes="mono" IsEnabled="{Binding CanPickWorkbook}" />
+                                             Classes="mono" />
                                     <Button Grid.Column="1" Content="…" Width="40" Margin="8,0,0,0"
-                                            IsEnabled="{Binding CanPickWorkbook}"
                                             Command="{Binding #Root.DataContext.BrowseWorkbookCommand}" />
                                     <Button Grid.Column="2" Content="↻ Sheet" Margin="8,0,0,0"
                                             Command="{Binding #Root.DataContext.RefreshSheetsCommand}" />
@@ -188,7 +188,8 @@
                                           ScrollViewer.VerticalScrollBarVisibility="Auto">
                                     <DataGrid.Columns>
                                         <DataGridTextColumn Header="Tên shop" Binding="{Binding Name}" Width="1.4*" />
-                                        <DataGridTextColumn Header="Sheet" Binding="{Binding ShopeeDataSheet}" Width="1.4*" />
+                                        <!-- Hub-mode: cột để TRỐNG (SheetDisplay), không phô GUID ngăn; excel-mode: tên sheet. -->
+                                        <DataGridTextColumn Header="Sheet" Binding="{Binding SheetDisplay}" Width="1.4*" />
                                         <DataGridTextColumn Header="Batch" Binding="{Binding OpenAiBatchSize}" Width="60" />
                                         <DataGridTextColumn Header="Crawl URL (Import)" Binding="{Binding BigSellerCrawlUrl}" Width="1.4*" />
                                     </DataGrid.Columns>
@@ -214,7 +215,8 @@
                                             <TextBlock Text="Tên shop" Classes="caption" />
                                             <TextBox Margin="0,3,0,0" Text="{Binding Name}" />
                                         </StackPanel>
-                                        <StackPanel Grid.Column="2">
+                                        <!-- Sheet dữ liệu: chỉ excel-mode; hub-mode ẨN (sheet = ngăn nội bộ tự gán = shop.Id). -->
+                                        <StackPanel Grid.Column="2" IsVisible="{Binding !UsesHubData}">
                                             <TextBlock Text="Sheet dữ liệu (↔ shop này)" Classes="caption" />
                                             <ComboBox Margin="0,3,0,0" HorizontalAlignment="Stretch"
                                                       ItemsSource="{Binding #Root.DataContext.Selected.SheetOptions}"
@@ -233,9 +235,10 @@
                                                  Classes="mono" FontSize="11.5" />
                                     </StackPanel>
 
+                                    <!-- Ánh xạ field ↔ cột Excel: chỉ excel-mode; hub-mode ẨN sạch (kho SP ở Hub, không có cột Excel). -->
                                     <TextBlock Text="Ánh xạ field ↔ cột Excel (nhập chữ cột: A, B, C…; trống = không dùng)"
-                                               Classes="caption" Margin="0,0,0,8" />
-                                    <UniformGrid Columns="6">
+                                               Classes="caption" Margin="0,0,0,8" IsVisible="{Binding !UsesHubData}" />
+                                    <UniformGrid Columns="6" IsVisible="{Binding !UsesHubData}">
                                         <StackPanel Margin="0,0,8,0">
                                             <TextBlock Text="Link" Classes="caption" />
                                             <TextBox Text="{Binding LinkColumnLetter}" Margin="0,3,0,0" />
