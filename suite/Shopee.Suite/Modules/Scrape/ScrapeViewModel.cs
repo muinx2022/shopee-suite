@@ -438,7 +438,16 @@ public sealed partial class ScrapeViewModel : ModuleViewModelBase
             if (totalRows < startRow) { LogA($"[{account.DisplayName}] sheet \"{sheet}\" chỉ có {totalRows} dòng (bắt đầu {startRow}) — bỏ qua."); return; }
 
             // RESET → xoá tiến độ cũ. Tính các khoảng cần chạy (reset = cả đoạn; resume = phần còn thiếu).
-            if (!resume) ScrapeProgressStore.Shared.Clear(account.Id, sheet);
+            if (!resume)
+            {
+                ScrapeProgressStore.Shared.Clear(account.Id, sheet);
+                // XOÁ LOCAL CHƯA ĐỦ: ledger hub còn nguyên khoảng-dòng cũ → lượt Resume sau (hoặc mở lại app:
+                // SyncIntoProgressAsync fold TOÀN BỘ ledger về tiến độ local) kéo lại tiến độ CŨ → resume tưởng
+                // đã xong phần user vừa muốn cào lại từ đầu → BỎ SÓT dòng ("fold-poisoning"). Xoá luôn ledger hub
+                // op scrape của shop này (status "idle" = server xoá bản ghi ledger + tiến độ dòng). Fire-and-forget,
+                // có try/catch: offline/lỗi → thôi (local đã clear là đủ để chạy lại từ đầu).
+                if (accHub is not null) { try { _ = accHub.SetLedgerStatusAsync(coordKey, "idle"); } catch { } }
+            }
             // HAND-OFF XUYÊN MÁY: trước khi tính phần CÒN THIẾU, kéo ledger TƯƠI của shop này từ Hub → fold vào
             // tiến độ local. Nhờ đó máy TIẾP QUẢN (khi máy trước rớt net giữa chừng) chỉ scrape đúng phần còn
             // thiếu chung, KHÔNG làm lại phần máy kia đã đẩy lên Hub (trước đây chỉ fold 1 lần lúc mở app →

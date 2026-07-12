@@ -1,3 +1,4 @@
+using Shopee.Core.Progress;
 using UpdateProduct;
 
 namespace Shopee.Modules.UpdateProduct;
@@ -149,12 +150,16 @@ public sealed class UpdateProductRunner
                 "→ Chạy 'Update tên SP (AI)' để điền cột G trước, rồi chạy lại Update.");
             return;
         }
+        // RESUME: tiến độ update đã lưu (itemId → tên đã điền) — đọc 1 LẦN ở facade, chia CHUNG mọi lane (nhiều lane
+        // chung 1 store). Runner bỏ qua SP đã update ĐÚNG tên hiện tại; MarkDone lúc save gọi thẳng OpProgressStore
+        // singleton (thread-safe) nên snapshot này chỉ để SKIP, không cần refresh trong lượt.
+        var updateDone = OpProgressStore.Shared.GetDone(wf.AccountId, wf.DataSheet, "update");
         // Điều phối dọn Material Center DÙNG CHUNG mọi lane (1 account): đếm bắt-đầu-sửa TOÀN account (quota kho
         // per-account, đếm per-lane là lệch) + cổng pause-all khi kho đầy. Sống ở facade → xuyên qua lane-restart.
         var mediaCoord = new MediaCleanupCoordinator();
         if (n == 1)
         {
-            await using var runner = new BigSellerProductUpdateRunner(wf, m => Log?.Invoke(m), _pause, mediaCoord: mediaCoord, sharedRecords: records);
+            await using var runner = new BigSellerProductUpdateRunner(wf, m => Log?.Invoke(m), _pause, mediaCoord: mediaCoord, sharedRecords: records, updateDone: updateDone);
             runner.RowsDone += (f, t) => RowsCompleted?.Invoke(f, t);
             await runner.RunAsync(ct);
             return;
@@ -162,7 +167,7 @@ public sealed class UpdateProductRunner
         Log?.Invoke($"▶ Update SONG SONG {n} lane (claim chống trùng SP; mỗi lane 1 Brave/profile/port riêng).");
         await RunLanesAsync(wf, n, ct, async (laneWf, lane, count, claim, export, c) =>
         {
-            await using var runner = new BigSellerProductUpdateRunner(laneWf, m => Log?.Invoke($"[L{lane}] {m}"), _pause, claim, mediaCoord, export, records);
+            await using var runner = new BigSellerProductUpdateRunner(laneWf, m => Log?.Invoke($"[L{lane}] {m}"), _pause, claim, mediaCoord, export, records, updateDone);
             runner.RowsDone += (f, t) => RowsCompleted?.Invoke(f, t);
             await runner.RunAsync(c);
         });

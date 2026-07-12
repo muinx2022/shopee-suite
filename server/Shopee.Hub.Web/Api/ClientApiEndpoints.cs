@@ -77,6 +77,10 @@ public static class ClientApiEndpoints
         api.MapPost(HubRoutes.AssignmentsClaim, (ClaimAssignmentsRequest? r) => r is null ? Results.BadRequest() : Results.Json(db.ClaimNext(r.MachineId, r.Role, r.Max)));
         api.MapPost(HubRoutes.AssignmentsStatus, (AssignmentStatusRequest? r) => { if (r is null) return Results.BadRequest(); db.UpdateAssignmentStatus(r.Id, r.MachineId, r.Status, r.Error); return Results.Ok(); });
         api.MapPost(HubRoutes.AssignmentsCancel, (CancelAssignmentRequest? r) => { if (r is null) return Results.BadRequest(); db.CancelAssignment(r.Id); return Results.Ok(); });
+        // Tiếp tục 1 việc đã dừng/huỷ → 'queued'. error null = OK; ngược lại là lý do từ chối (client hiển thị).
+        api.MapPost(HubRoutes.AssignmentsResume, (ResumeAssignmentRequest? r) => r is null ? Results.BadRequest() : Results.Ok(new { error = db.ResumeAssignment(r.Id) }));
+        // Client khởi động lại xin nhận lại việc dở của chính máy mình → trả số việc đưa lại về 'queued'.
+        api.MapPost(HubRoutes.AssignmentsResumeMine, (ResumeMineRequest? r) => r is null ? Results.BadRequest() : Results.Ok(new { requeued = db.ResumeMachineWork(r.MachineId) }));
 
         // ── Kho gộp kết quả Search ──
         api.MapPost(HubRoutes.SearchProducts, (SearchProductsPushRequest? r) => { if (r is null) return Results.BadRequest(); db.SaveSearchProducts(r); return Results.Ok(); });

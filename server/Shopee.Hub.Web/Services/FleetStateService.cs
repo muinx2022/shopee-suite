@@ -81,6 +81,15 @@ public sealed class FleetStateService : IHostedService, IDisposable
             return new($"• đã xếp{retry}", "queued", 2);
         }
 
+        // Ledger 'running' mà TỚI ĐÂY nghĩa là: KHÔNG còn lease tươi (đã qua nhánh đầu), KHÔNG có assignment
+        // running đại diện (nhánh assignment-running ở trên đã return) và KHÔNG có bản queued (vừa xét ở trên).
+        // → tiến trình chạy TAY (không tạo assignment) đã CHẾT giữa chừng (crash/tắt máy). Trước đây rơi thẳng
+        // xuống "· chờ" nên việc chết dở thành VÔ HÌNH; giờ báo "■ dừng dở (mất kết nối)" cùng kind/màu nhánh
+        // 'stopped' để operator thấy & ▶ tiếp tục lại trên máy cũ. (asn đang 'running'-nhưng-offline vẫn thuộc
+        // cơ chế assignment nội bộ → loại khỏi đây, giữ nguyên hành vi cũ.)
+        if (led?.Status == "running" && asn is not { Status: "running" })
+            return new("■ dừng dở (mất kết nối)", "warn", 3);
+
         var failed = f.Assignments
             .Where(a => a.BigsellerId == bsId && a.ShopId == shopId && a.Op == op && a.Status == "failed")
             .OrderByDescending(a => a.UpdatedAt).FirstOrDefault();

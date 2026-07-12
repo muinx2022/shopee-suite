@@ -29,6 +29,11 @@ public sealed class AssignmentWorker : IDisposable
     // Số lần đã claim-nhưng-chưa-chạy-được của 1 việc (theo id, sống qua các lần re-queue) → thử lại có mức trần.
     private readonly ConcurrentDictionary<string, int> _launchAttempts = new(StringComparer.Ordinal);
     private bool _ticking;
+    // Đã gọi resume-mine (tự nhận lại việc dở của máy này lúc khởi động) chưa — chỉ chạy MỘT LẦN mỗi process.
+    private bool _resumedMine;
+    // Đang chuẩn bị TẮT máy để cập nhật app → Tick NGỪNG nhận việc mới VÀ NGỪNG reconcile (khỏi kết luận
+    // 'failed' oan cho việc mình vừa chủ động 'requeue' + dừng trong PrepareForShutdownAsync).
+    private bool _shuttingDown;
 
     private const int MaxConcurrent = 4;
     private const int GraceTicks = 6;   // ~60s: chưa thấy chạy trong ngần này coi như không khởi động được
@@ -67,6 +72,40 @@ public sealed class AssignmentWorker : IDisposable
 
     public void Dispose() { _timer.Stop(); _heartbeat.Dispose(); }
 
+    /// <summary>
+    /// Chuẩn bị TẮT MÁY ÊM trước khi Velopack áp bản mới + khởi động lại: TRẢ mọi việc Hub-giao đang chạy về
+    /// HÀNG CHỜ hub (GIỮ nguyên tham số StartRow/EndRow/Processes… vì 'requeue' chỉ đổi trạng thái + xoá claim),
+    /// dừng runner local, rồi ĐỢI tất cả dừng hẳn (tối đa <paramref name="timeout"/>). Nhờ đó bản mới khởi động
+    /// lại tự claim lại việc còn dở thay vì để nó chết cứng (khoá acc treo tới khi hub sweep 5'). Đặt
+    /// <see cref="Paused"/> + cờ _shuttingDown để Tick ngừng nhận việc mới VÀ ngừng reconcile (khỏi báo 'failed'
+    /// oan cho việc mình vừa chủ động dừng). Trả về SỐ việc đã trả lại hàng chờ (hub null → 0, vẫn set Paused).
+    /// </summary>
+    public async Task<int> PrepareForShutdownAsync(TimeSpan timeout)
+    {
+        Paused = true;
+        _shuttingDown = true;
+        var hub = CoordinationRuntime.Hub;
+        var jobs = _inflight.Values.ToList();
+        foreach (var f in jobs)
+        {
+            // 'requeue' (running → queued + xoá claim) dùng lại đường sẵn có cho "chờ quỹ Brave" — GIỮ tham số
+            // việc. hub null → chỉ dừng local (không có gì để trả về hàng chờ).
+            if (hub is not null) await hub.ReportAssignmentAsync(f.A.Id, "requeue", "tạm dừng để cập nhật app");
+            StopLocal(f.A);
+            HubLog.Info($"⏸ Trả về hàng chờ hub: {Describe(f.A)} — cập nhật app");
+            _liveIds.TryRemove(f.A.Id, out _);
+            _launchAttempts.TryRemove(f.A.Id, out _);
+            _inflight.Remove(f.A.Id);
+        }
+        // Đợi runner dừng HẲN. StopLocal enqueue lên UI thread nên KHÔNG .Wait()/.Result (kẹt UI) — poll
+        // IsRunningLocally mỗi ~500ms tới khi hết việc chạy hoặc quá hạn (job kẹt thì hub sweep + resume-mine lo,
+        // không được treo nút cập nhật vĩnh viễn).
+        var deadline = DateTime.UtcNow + timeout;
+        while (DateTime.UtcNow < deadline && jobs.Any(f => IsRunningLocally(f.A)))
+            await Task.Delay(500);
+        return hub is null ? 0 : jobs.Count;
+    }
+
     private void Heartbeat()
     {
         var hub = CoordinationRuntime.Hub;
@@ -83,8 +122,30 @@ public sealed class AssignmentWorker : IDisposable
 
     private async Task TickAsync()
     {
+        // Đang chuẩn bị tắt máy để cập nhật → dừng HẲN vòng lặp: không nhận việc mới, KHÔNG reconcile (việc đang
+        // dở đã được PrepareForShutdownAsync chủ động 'requeue' + dừng; reconcile lúc này chỉ đẻ 'failed' oan).
+        if (_shuttingDown) return;
+
         var hub = CoordinationRuntime.Hub;
         if (hub is null) return;
+
+        // Tự NHẬN LẠI việc đang dở SAU KHI KHỞI ĐỘNG LẠI (chạy 1 lần/process): process cũ chết (Velopack áp bản
+        // mới / crash / tắt máy) để lại lease MỒ CÔI khoá acc tới 5' + việc còn 'running' của máy này treo trên
+        // hub. resume-mine nhả lease chết NGAY + đưa việc ấy về 'queued' → được claim LUÔN trong tick này (đặt
+        // TRƯỚC phần claim), khỏi cần người ngồi máy nhớ bấm gì.
+        if (!_resumedMine && _inflight.Count == 0)
+        {
+            // Điều kiện _inflight RỖNG: resume-mine phía server requeue MỌI việc 'running' của máy này + xoá lease
+            // của máy — chỉ an toàn khi process này CHƯA chạy gì (mọi thứ 'running' đứng tên máy chắc chắn là mồ côi
+            // của process cũ). Đã nhận việc rồi mà retry (vì tick trước rớt mạng đúng 1 request) sẽ requeue nhầm
+            // việc ĐANG SỐNG → thôi, coi như đã re-attach.
+            var n = await hub.ResumeMineAsync();
+            // -1 = chưa gọi được hub (boot đúng lúc rớt mạng/hub chưa lên) → GIỮ cờ để thử lại nhịp sau; chỉ chốt
+            // "đã re-attach" khi round-trip thành công (kể cả 0 việc), kẻo mất re-attach cả phiên vì 1 tick xui.
+            if (n >= 0) _resumedMine = true;
+            if (n > 0) HubLog.Info($"⏯ Nhận lại {n} việc đang dở sau khi khởi động lại");
+        }
+        else if (!_resumedMine) _resumedMine = true;   // đã có việc trong tay → quá cửa sổ re-attach an toàn
 
         await ReconcileInflightAsync(hub);
 

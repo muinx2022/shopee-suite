@@ -96,6 +96,8 @@ ORDER BY dense;";
     }
 
     // ── Dòng đã có tên-sửa để update lên BigSeller (name_rewritten non-blank AND (item_id OR link)) ──
+    // RESUME: loại dòng ĐÃ update ĐÚNG tên hiện tại (store_updated_name TRÙNG name_rewritten). IS DISTINCT FROM để
+    // NULL (chưa update bao giờ) vẫn coi là "khác" → được trả về; tên đổi sau đó → lệch → tự vào lại diện update.
     public async Task<List<ProductRecordRow>> GetRecordMapAsync(string acct, string sheet, int fromRow, int toRow, CancellationToken ct)
     {
         const string sql = @"
@@ -105,6 +107,7 @@ WHERE account_id = $1 AND sheet = $2
   AND row_no >= $3 AND ($4 <= 0 OR row_no <= $4)
   AND NULLIF(btrim(name_rewritten),'') IS NOT NULL
   AND (NULLIF(btrim(item_id),'') IS NOT NULL OR NULLIF(btrim(link),'') IS NOT NULL)
+  AND (store_updated_name IS DISTINCT FROM name_rewritten)
 ORDER BY row_no;";
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
         await using var cmd = new NpgsqlCommand(sql, conn);
@@ -120,6 +123,7 @@ ORDER BY row_no;";
     }
 
     // ── Dòng để import (item_id non-blank HOẶC link non-blank) ─────────────────────
+    // RESUME: dòng đã Import-to-store (store_imported_at non-null) KHÔNG trả về nữa — import lại luôn là SAI (SP trùng).
     public async Task<List<ProductImportIdRow>> GetImportIdsAsync(string acct, string sheet, int fromRow, int toRow, CancellationToken ct)
     {
         const string sql = @"
@@ -128,6 +132,7 @@ FROM product_rows
 WHERE account_id = $1 AND sheet = $2
   AND row_no >= $3 AND ($4 <= 0 OR row_no <= $4)
   AND (NULLIF(btrim(item_id),'') IS NOT NULL OR NULLIF(btrim(link),'') IS NOT NULL)
+  AND store_imported_at IS NULL
 ORDER BY row_no;";
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
         await using var cmd = new NpgsqlCommand(sql, conn);
@@ -165,6 +170,52 @@ ORDER BY row_no;";
         while (await rd.ReadAsync(ct))
             list.Add(new ProductRewritePendingRow(rd.GetInt32(0), S(rd, 1), S(rd, 2)));
         return list;
+    }
+
+    // ── RESUME (tiến độ per-SP xuyên kill): đánh dấu đã Import / đã Update N item id ──────────────────────
+    // Khớp theo btrim(item_id) = ANY($3) (text[]). Dòng có item_id BLANK (id suy từ link) sẽ KHÔNG khớp — chấp
+    // nhận: đây chỉ là TỐI ƯU server-side, chốt chặn CHÍNH là OpProgressStore local phía client (seed _importedIds).
+    public async Task<int> MarkImportedAsync(string acct, string sheet, string[] itemIds, CancellationToken ct)
+    {
+        if (itemIds is null || itemIds.Length == 0) return 0;
+        const string sql = @"
+UPDATE product_rows SET store_imported_at = now()
+WHERE account_id = $1 AND sheet = $2 AND btrim(item_id) = ANY($3);";
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue(acct);
+        cmd.Parameters.AddWithValue(sheet);
+        cmd.Parameters.AddWithValue(itemIds);
+        return await cmd.ExecuteNonQueryAsync(ct);
+    }
+
+    // store_updated_name = name_rewritten HIỆN TẠI của dòng → record-map loại dòng này tới khi tên-sửa đổi.
+    public async Task<int> MarkUpdatedAsync(string acct, string sheet, string[] itemIds, CancellationToken ct)
+    {
+        if (itemIds is null || itemIds.Length == 0) return 0;
+        const string sql = @"
+UPDATE product_rows SET store_updated_at = now(), store_updated_name = name_rewritten
+WHERE account_id = $1 AND sheet = $2 AND btrim(item_id) = ANY($3);";
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue(acct);
+        cmd.Parameters.AddWithValue(sheet);
+        cmd.Parameters.AddWithValue(itemIds);
+        return await cmd.ExecuteNonQueryAsync(ct);
+    }
+
+    // Xoá tiến độ store của cả 1 (acc + sheet) cho 1 op → "Chạy lại từ đầu". op lạ → 0 dòng (không đụng bảng).
+    public async Task<int> ResetStoreProgressAsync(string acct, string sheet, string op, CancellationToken ct)
+    {
+        string sql;
+        if (op == "import") sql = "UPDATE product_rows SET store_imported_at = NULL WHERE account_id = $1 AND sheet = $2;";
+        else if (op == "update") sql = "UPDATE product_rows SET store_updated_at = NULL, store_updated_name = NULL WHERE account_id = $1 AND sheet = $2;";
+        else return 0;
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue(acct);
+        cmd.Parameters.AddWithValue(sheet);
+        return await cmd.ExecuteNonQueryAsync(ct);
     }
 
     // ── Ghi tên-sửa (batch, IDEMPOTENT). rowNo không tồn tại → gom vào missing ─────

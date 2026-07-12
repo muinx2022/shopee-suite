@@ -3,18 +3,6 @@ using Shopee.Core.Coordination;
 
 namespace Shopee.Hub;
 
-/// <summary>Bộ lọc trang "📦 Dữ liệu" (mọi shop): mỗi field null/blank/0 = KHÔNG lọc chiều đó.
-/// <see cref="PriceMin"/>/<see cref="PriceMax"/> so trên SỐ tách từ text price_sale (dòng không parse được bị loại
-/// khi có lọc giá). <see cref="SoldOnly"/> = chỉ dòng đã có bản ghi product_sold (sold_count &gt; 0).
-/// <see cref="DupSkuOnly"/> = chỉ dòng có SKU non-blank TRÙNG với dòng khác TRONG CÙNG shop (soi trùng để dọn).</summary>
-public sealed record AllDataFilter(
-    string? Acct, string? Sheet, string? Sku, long? PriceMin, long? PriceMax, bool SoldOnly, bool DupSkuOnly);
-
-/// <summary>1 dòng cho lưới "📦 Dữ liệu": khoá vị trí (AccountId, Sheet, RowNo) + ĐỦ 17 ô dữ liệu (để sửa inline;
-/// lưới vẫn hiển thị 1 phần) + số đã bán (0 nếu chưa có bản ghi product_sold) + lúc sửa.</summary>
-public sealed record AllDataRow(
-    string AccountId, string Sheet, int RowNo, ProductRowData Data, int SoldCount, DateTimeOffset UpdatedAt);
-
 /// <summary>
 /// Phần ProductDb cho trang web "📦 Dữ liệu" — truy vấn LIÊN-SHOP (mọi account_id/sheet) + đánh dấu "đã bán" +
 /// xoá dòng theo khoá vị trí. SQL viết TAY như các partial khác. Số tham số CỐ ĐỊNH ($1..$7 cho filter, dạng

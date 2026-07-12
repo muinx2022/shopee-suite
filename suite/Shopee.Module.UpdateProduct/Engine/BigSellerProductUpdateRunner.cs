@@ -5,6 +5,7 @@ using Microsoft.Playwright;
 using Shopee.Core.BigSeller;
 using Shopee.Core.Browser;
 using Shopee.Core.Coordination;
+using Shopee.Core.Progress;
 
 namespace UpdateProduct;
 
@@ -197,6 +198,10 @@ internal sealed partial class BigSellerProductUpdateRunner : BigSellerBraveRunne
     private readonly MediaCleanupCoordinator? _mediaCoord;
     // Cache dữ liệu shop DÙNG CHUNG mọi lane (nạp 1 lần ở tầng điều phối). null = lane tự đọc workbook (đường 1-lane cũ).
     private readonly WorkbookRecordCache? _sharedRecords;
+    // RESUME: tiến độ update đã lưu (itemId Shopee → tên đã điền lúc save) nạp 1 lần ở facade, chia CHUNG mọi lane
+    // (nhiều lane chung 1 store). SP có key khớp & doneName == tên hiện tại → BỎ QUA (không sửa lại) — bền qua
+    // kill/restart. Rỗng = chạy mới / không có tiến độ. MarkDone lúc save gọi thẳng OpProgressStore.Shared (thread-safe).
+    private readonly IReadOnlyDictionary<string, string?> _updateDone;
     // Dọn Material Center (thư viện ảnh) — tách sang class riêng; khởi tạo sau khi có browser context.
     private BigSellerMaterialCenterCleaner? _mediaCleaner;
 
@@ -205,12 +210,14 @@ internal sealed partial class BigSellerProductUpdateRunner : BigSellerBraveRunne
     public BigSellerProductUpdateRunner(
         BigSellerWorkflowSettings settings, Action<string> log, WorkflowPauseToken? pauseToken = null,
         ClaimStore? claim = null, MediaCleanupCoordinator? mediaCoord = null,
-        bool exportCookie = true, WorkbookRecordCache? sharedRecords = null)
+        bool exportCookie = true, WorkbookRecordCache? sharedRecords = null,
+        IReadOnlyDictionary<string, string?>? updateDone = null)
         : base(settings, log, pauseToken, exportCookie)
     {
         _claim = claim;
         _mediaCoord = mediaCoord;
         _sharedRecords = sharedRecords;
+        _updateDone = updateDone ?? new Dictionary<string, string?>(StringComparer.Ordinal);
     }
 
     public async Task RunAsync(CancellationToken ct)
@@ -410,6 +417,33 @@ internal sealed partial class BigSellerProductUpdateRunner : BigSellerBraveRunne
     private void LogSummary() =>
         _log($"Σ lane: update OK {_okCount} · bỏ qua {_skipCount} (không-trong-sheet {_notInSheetCount}) · đã báo Thống kê {_reportedRows} dòng.");
 
+    // RESUME: ghi tiến độ update (itemId → tên vừa điền) NGAY sau save thành công (bền với kill) — nguồn CHÍNH phía
+    // client để lượt sau bỏ qua SP đã xong. Hub-mode: báo server (mark-updated) để record-map lượt sau lọc bớt —
+    // best-effort, lỗi mạng KHÔNG làm hỏng lượt chạy (store local vẫn đủ). itemId rỗng (không xảy ra ở nhánh
+    // needs_update — luôn có shopeeId) → bỏ qua an toàn.
+    private void MarkUpdateProgress(string itemId, string productName)
+    {
+        if (string.IsNullOrEmpty(itemId)) return;
+        try
+        {
+            OpProgressStore.Shared.MarkDone(_settings.AccountId, _settings.DataSheet, "update",
+                new[] { new KeyValuePair<string, string?>(itemId, productName) });
+        }
+        catch { }
+        if (_settings.UseHubData) _ = MarkUpdatedHubAsync(itemId);
+    }
+
+    private async Task MarkUpdatedHubAsync(string itemId)
+    {
+        try
+        {
+            var client = CoordinationRuntime.Client;
+            if (client is null) return;
+            await client.MarkProductUpdatedAsync(_settings.AccountId, _settings.DataSheet, new[] { itemId }, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception ex) { _log($"  (mark-updated Hub lỗi, bỏ qua — store local là chính: {ex.Message})"); }
+    }
+
     // ── phân trang Listing → uỷ quyền BigSellerCrawlHelper.ClickNextCrawlPageAsync (bản chung Crawl + Listing) ──
     // Nút Next bảng Listing dùng li.next_item (trang cuối → li.next_item.disabled → không khớp :not(.disabled)
     // → trả false = hết trang → kết thúc lane). Truyền PaginationNowPage để helper CHỜ nhãn "X / Y" ĐỔI rồi mới
@@ -593,7 +627,7 @@ internal sealed partial class BigSellerProductUpdateRunner : BigSellerBraveRunne
             }
             editClaimKey = $"edit:{actualEditId}";   // lane NÀY vừa claim tầng-2 → nhớ để nhả nếu không giữ (retry/terminal/lỗi)
 
-            var (status, record) = await InspectEditPageAsync(editPage, ct).ConfigureAwait(false);
+            var (status, record, itemId) = await InspectEditPageAsync(editPage, ct).ConfigureAwait(false);
             if (status != "needs_update")
             {
                 // KHÔNG xóa item trên BigSeller cho BẤT KỲ trạng thái nào (not_in_xlsx / blocked / missing…).
@@ -607,8 +641,21 @@ internal sealed partial class BigSellerProductUpdateRunner : BigSellerBraveRunne
                 _skipCount++; keepClaim = true; return ("skipped", false);
             }
 
+            // RESUME (tiến độ đã lưu): SP đã update ĐÚNG tên hiện tại ở lượt trước → BỎ QUA, KHÔNG mở/sửa lại (bền
+            // qua kill/restart). Excel-mode: _updateDone local là chốt duy nhất. Hub-mode: record-map server đã lọc
+            // dòng này (double protection) nhưng vẫn check phòng lỗi mạng lúc mark-updated lượt trước. Xử lý như
+            // nhánh 'skipped' (giữ claim + chốt MarkDone để lane restart không mở lại) — không đếm là "bắt đầu sửa".
+            if (_updateDone.TryGetValue(itemId, out var doneName) && doneName == record!.ProductName)
+            {
+                _log("  ⏭ đã update trước đó (tiến độ đã lưu) — bỏ qua, không sửa lại.");
+                _skippedEditIds.Add(actualEditId);
+                if (!string.IsNullOrEmpty(rowKey)) _skippedRowKeys.Add(rowKey);
+                _claim?.MarkDone(editClaimKey); _claim?.MarkDone(rowKey);
+                _skipCount++; keepClaim = true; return ("skipped", false);
+            }
+
             // ĐÂY là điểm "bắt đầu sửa" — SP chỉ bị mở rồi skip ở các nhánh trên (không có edit-id / đã skip /
-            // lane khác giữ / not_in_xlsx / thiếu tên) KHÔNG đếm; chỉ đếm khi thực sự vào điền/sửa SP.
+            // lane khác giữ / not_in_xlsx / thiếu tên / đã-update-trước-đó) KHÔNG đếm; chỉ đếm khi thực sự vào điền/sửa SP.
             // Coordinator đếm TOÀN account (quota Material Center per-account; đếm per-lane ở cleaner là LỆCH —
             // 5 lane phải ~50 lần mới đủ 10, lại reset khi lane restart). null → giữ đường cũ per-lane.
             if (_mediaCoord != null) _mediaCoord.RecordEditStart(_log);
@@ -618,7 +665,11 @@ internal sealed partial class BigSellerProductUpdateRunner : BigSellerBraveRunne
             {
                 // Bắn RowsDone ĐÚNG thời điểm đóng tab sau save thành công (yêu cầu thiết kế): helper là nơi duy nhất
                 // quyết định "thành công"; tầng này chỉ ánh xạ sang dòng sheet. LineIndex luôn >0 (record từ workbook).
-                if (record!.LineIndex > 0) { RowsDone?.Invoke(record.LineIndex, record.LineIndex); _reportedRows++; reported = true; }
+                if (record!.LineIndex > 0)
+                {
+                    RowsDone?.Invoke(record.LineIndex, record.LineIndex); _reportedRows++; reported = true;
+                    MarkUpdateProgress(itemId, record.ProductName);   // RESUME: chốt tiến độ update (bền với kill)
+                }
                 else _log("  ⚠ LineIndex=0 — update xong nhưng KHÔNG báo được lên Thống kê (dòng này sẽ thiếu trên Hub).");
                 return Task.CompletedTask;
             };
@@ -651,7 +702,7 @@ internal sealed partial class BigSellerProductUpdateRunner : BigSellerBraveRunne
             _okCount++;
             // Helper PHẢI đã gọi onSaved lúc đóng tab; nếu CHƯA (đường success nào đó không qua helper) vẫn báo để Hub
             // không thiếu dòng — cờ reported chống bắn đúp.
-            if (!reported && record!.LineIndex > 0) { RowsDone?.Invoke(record.LineIndex, record.LineIndex); _reportedRows++; _log("  ⚠ báo Thống kê qua fallback (onSaved không được gọi trong helper — soi lại luồng save)."); }
+            if (!reported && record!.LineIndex > 0) { RowsDone?.Invoke(record.LineIndex, record.LineIndex); _reportedRows++; MarkUpdateProgress(itemId, record.ProductName); _log("  ⚠ báo Thống kê qua fallback (onSaved không được gọi trong helper — soi lại luồng save)."); }
             // THÀNH CÔNG → chốt cả khóa edit-id lẫn khóa dòng-draft vào mảng-2 (_done): khóa VĨNH VIỄN trong lượt
             // chạy, không lane nào (kể cả lane này sau restart) mở lại. keepClaim=true nên finally không nhả.
             _claim?.MarkDone(editClaimKey); _claim?.MarkDone(rowKey);
@@ -691,7 +742,9 @@ internal sealed partial class BigSellerProductUpdateRunner : BigSellerBraveRunne
     }
 
     // ── inspect ──
-    private async Task<(string status, WorkbookRecord? record)> InspectEditPageAsync(IPage editPage, CancellationToken ct)
+    // Trả THÊM itemId (Shopee id trích từ link nguồn) để caller đối chiếu tiến độ update đã lưu (_updateDone) —
+    // "" ở các nhánh chưa/không trích được id.
+    private async Task<(string status, WorkbookRecord? record, string itemId)> InspectEditPageAsync(IPage editPage, CancellationToken ct)
     {
         // wait_for_edit_page_ready
         for (var attempt = 0; attempt < 2; attempt++)
@@ -731,22 +784,22 @@ internal sealed partial class BigSellerProductUpdateRunner : BigSellerBraveRunne
         {
             if (string.IsNullOrWhiteSpace(url)) continue;
             if (url.Contains("/verify/captcha") || url.Contains("/verify/traffic"))
-                return ("shopee_blocked", null);
+                return ("shopee_blocked", null, "");
             if (shopeeId is null) { shopeeId = BigSellerCrawlHelper.ExtractShopeeId(url); if (shopeeId is not null) sourceUrl = url; }
         }
 
         if (string.IsNullOrEmpty(shopeeId))
         {
             _log($"   ⚠ KHÔNG trích được item id từ link nguồn: '{(string.IsNullOrWhiteSpace(inputVal) ? clip : inputVal)}'");
-            return ("missing_shopee_id", null);
+            return ("missing_shopee_id", null, "");
         }
         // LOG để soi: item id của SP đang edit + có trong sheet (dùng để scrape) không + tên sheet/số dòng + link.
         // Item id "KHÔNG" trong sheet = SP này không đến từ sheet đang chạy (sheet khác / lần scrape trước / thêm tay).
         var inSheet = _records.ContainsKey(shopeeId);
         _log($"   item id = {shopeeId} · trong sheet '{_settings.DataSheet}' ({_records.Count} dòng): {(inSheet ? "CÓ" : "KHÔNG")} · link: {sourceUrl}");
-        if (!_records.TryGetValue(shopeeId, out var rec)) return ("not_in_xlsx", null);
-        if (string.IsNullOrWhiteSpace(rec.ProductName)) return ("missing_product_name", null);
-        return ("needs_update", rec);
+        if (!_records.TryGetValue(shopeeId, out var rec)) return ("not_in_xlsx", null, shopeeId);
+        if (string.IsNullOrWhiteSpace(rec.ProductName)) return ("missing_product_name", null, shopeeId);
+        return ("needs_update", rec, shopeeId);
     }
 
     // ── process one product ──

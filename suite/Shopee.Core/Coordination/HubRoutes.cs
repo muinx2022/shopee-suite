@@ -37,6 +37,8 @@ public static class HubRoutes
     public const string AssignmentsClaim = "/assignments/claim";
     public const string AssignmentsStatus = "/assignments/status";
     public const string AssignmentsCancel = "/assignments/cancel";
+    public const string AssignmentsResume = "/assignments/resume";
+    public const string AssignmentsResumeMine = "/assignments/resume-mine";
 
     // ── Kho gộp kết quả Search ──
     public const string SearchProducts = "/search-products";
@@ -57,6 +59,18 @@ public static class HubRoutes
     public const string ProductsAppend = "/products/rows/append";
     public const string ProductsImportXlsx = "/products/import-xlsx";
     public const string ProductsExportXlsx = "/products/export-xlsx";
+    // ── RESUME per-SP (tiến độ Import/Update bền xuyên kill) ──
+    public const string ProductsMarkImported = "/products/mark-imported";
+    public const string ProductsMarkUpdated = "/products/mark-updated";
+    public const string ProductsResetStoreProgress = "/products/reset-store-progress";
+    // ── Trang "📦 Dữ liệu" (mọi shop) — client desktop thao tác qua các route này ──
+    public const string ProductsAllData = "/products/all-data";
+    public const string ProductsMarkSold = "/products/mark-sold";
+    public const string ProductsRegenSkus = "/products/regen-skus";
+    public const string ProductsDeleteRows = "/products/rows/delete";
+    public const string ProductsUpdateRow = "/products/rows/update";
+    public const string ProductsInsertRow = "/products/rows/insert";
+    public const string ProductsSkuExists = "/products/sku-exists";
 
     // ── Cấu hình BigSeller (client → hub upsert) ──
     /// <summary>Client đẩy (upsert) acc/shop BigSeller của máy mình lên hub — client giờ là nguồn phát sinh

@@ -4,6 +4,7 @@ using CommunityToolkit.Mvvm.Input;
 using Shopee.Suite.Infrastructure;
 using Shopee.Suite.Modules.Accounts;
 using Shopee.Suite.Modules.BigSeller;
+using Shopee.Suite.Modules.Data;
 using Shopee.Suite.Modules.Fleet;
 using Shopee.Suite.Modules.Scrape;
 using Shopee.Suite.Modules.Search;
@@ -39,11 +40,26 @@ public sealed partial class ShellViewModel : ObservableObject
         var search = new SearchViewModel();
         var workspace = new WorkspaceViewModel(bigSeller, scrape, update);
 
+        // Màn "Dữ liệu sản phẩm" (kho Hub) — thao tác trang /data của hub qua HTTP. Ctor không I/O (nạp ở EnsureLoaded).
+        var data = new DataViewModel();
+
         // Giao việc đa máy: worker (client tự chạy việc Hub giao) + dispatcher (máy Hub tự đẩy việc).
         // Cả hai tự "ngủ" khi máy chưa có vai trò / chưa bật điều phối → không đổi hành vi 1 máy.
         var worker = new AssignmentWorker(scrape, update, search);
         // Dispatcher (tự đẩy việc) CHỈ chạy timer trên máy Hub — máy client khỏi chạy vô ích.
         if (Shopee.Core.Coordination.HubServerConfigStore.Shared.Current.Enabled) HubDispatcher.Shared.Start();
+
+        // Nút "Cập nhật & khởi động lại" (Cài đặt) DỪNG ÊM trước khi Velopack restart: (1) dừng các job CHẠY TAY
+        // qua đúng đường cancel → runner ghi ledger 'stopped' + nhả lease NGAY; (2) trả việc HUB-GIAO đang chạy về
+        // hàng chờ hub rồi đợi dừng hẳn. Không làm vậy thì Velopack kill giữa chừng → khoá acc treo tới hub sweep 5'.
+        var settings = new SettingsViewModel();
+        settings.PrepareUpdateShutdownAsync = async () =>
+        {
+            update.StopAllSingle();   // không có job thì tự bỏ qua
+            if (scrape.StopCommand.CanExecute(null)) scrape.StopCommand.Execute(null);
+            if (search.StopCommand.CanExecute(null)) search.StopCommand.Execute(null);
+            await worker.PrepareForShutdownAsync(TimeSpan.FromSeconds(40));
+        };
 
         // Scrape + Update đã GỘP vào "BigSeller Workspace" → ẩn khỏi sidebar (vẫn dùng chung scrape/update
         // bên dưới; view cũ giữ nguyên để đảo lại nếu cần).
@@ -52,6 +68,8 @@ public sealed partial class ShellViewModel : ObservableObject
         [
             new ModuleItem("BigSeller Workspace", AppIcons.Dashboard, "Scrape · Import · Update theo từng shop",
                 workspace, "Workspace"),
+            new ModuleItem("Dữ liệu sản phẩm", AppIcons.Inventory, "Kho sản phẩm trên Hub — lọc · thêm/sửa · đã bán · SKU · xoá",
+                data, "Dữ liệu"),
             new ModuleItem("Cấu hình BigSeller", AppIcons.Database, "Tài khoản · workbook · cookie · shop · proxy",
                 bigSeller, "Cấu hình"),
             new ModuleItem("Shopee Search", AppIcons.Search, "Thống kê tìm kiếm sản phẩm",
@@ -61,7 +79,7 @@ public sealed partial class ShellViewModel : ObservableObject
             new ModuleItem("Trạng thái & Giao việc", AppIcons.Servers, "Theo dõi máy + Hub giao việc cho từng máy (đa máy)",
                 new FleetViewModel(worker), "Trạng thái"),
             new ModuleItem("Cài đặt", AppIcons.Settings, "Hiệu năng · đồng bộ Hub · cập nhật",
-                new SettingsViewModel(), "Cài đặt"),
+                settings, "Cài đặt"),
         ];
 
         // Workspace bấm "Đăng nhập / cấu hình" → nhảy sidebar sang tab BigSeller (không làm trùng 2 nơi).

@@ -49,7 +49,7 @@
                 <Grid Margin="0,12,0,0">
 
                     <!-- ───── Bản CLIENT: việc của máy này ───── -->
-                    <Grid IsVisible="{Binding IsClientPanel}" RowDefinitions="Auto,*,Auto">
+                    <Grid IsVisible="{Binding IsClientPanel}" RowDefinitions="Auto,*,Auto,Auto">
                         <Border Grid.Row="0" Background="{DynamicResource SubtleBrush}" CornerRadius="8" Padding="12,10" Margin="0,0,0,10">
                             <Grid>
                                 <StackPanel VerticalAlignment="Center">
@@ -83,7 +83,43 @@
                                 </DataGrid.Columns>
                             </DataGrid>
                         </Border>
-                        <TextBlock Grid.Row="2" Margin="2,8,0,0" Classes="caption" TextWrapping="Wrap"
+                        <!-- ───── Việc gián đoạn (failed/canceled, chưa xong) — bấm Tiếp tục để hub giao lại ───── -->
+                        <Border Grid.Row="2" IsVisible="{Binding HasInterrupted}" Classes="card" Margin="0,10,0,0" Padding="14,12">
+                            <StackPanel>
+                                <Grid>
+                                    <TextBlock Text="{Binding InterruptedHeader}" FontWeight="SemiBold" FontSize="13.5" VerticalAlignment="Center" />
+                                    <Button HorizontalAlignment="Right" VerticalAlignment="Center" MinWidth="150"
+                                            Content="▶  Tiếp tục tất cả" Command="{Binding ResumeAllJobsCommand}"
+                                            ToolTip.Tip="Đưa TẤT CẢ việc gián đoạn về hàng chờ hub để chạy tiếp." />
+                                </Grid>
+                                <TextBlock Classes="caption" TextWrapping="Wrap" Margin="0,4,0,0"
+                                           Text="Việc bị dừng/lỗi giữa chừng (chưa xong). Bấm Tiếp tục → hub giao lại, máy phù hợp tự chạy nốt phần còn thiếu." />
+                                <TextBlock Text="{Binding InterruptedStatus}" Margin="0,6,0,0" FontWeight="SemiBold" TextWrapping="Wrap"
+                                           IsVisible="{Binding InterruptedStatus, Converter={StaticResource StringToBool}}" />
+                                <ScrollViewer MaxHeight="220" Margin="0,8,0,0" VerticalScrollBarVisibility="Auto">
+                                    <ItemsControl ItemsSource="{Binding InterruptedJobs}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Border Background="{DynamicResource SubtleBrush}" CornerRadius="6" Padding="12,8" Margin="0,0,0,6">
+                                                    <Grid ColumnDefinitions="*,Auto">
+                                                        <StackPanel VerticalAlignment="Center">
+                                                            <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                                            <TextBlock Text="{Binding Detail}" Classes="caption" Margin="0,2,0,0" TextWrapping="Wrap" />
+                                                        </StackPanel>
+                                                        <Button Grid.Column="1" VerticalAlignment="Center" Margin="12,0,0,0" MinWidth="110"
+                                                                Content="▶  Tiếp tục"
+                                                                Command="{Binding $parent[ItemsControl].DataContext.ResumeJobCommand}"
+                                                                CommandParameter="{Binding}" />
+                                                    </Grid>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </ScrollViewer>
+                            </StackPanel>
+                        </Border>
+
+                        <TextBlock Grid.Row="3" Margin="2,8,0,0" Classes="caption" TextWrapping="Wrap"
                                    Text="Mẹo: muốn máy này dừng nhận việc mới (để chạy tay) thì bấm nút ở trên cùng." />
                     </Grid>
 

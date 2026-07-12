@@ -39,6 +39,33 @@
         <input type="checkbox" checked="@Dispatcher.Enabled" @onchange="ToggleDispatch" />
         Điều phối tự động (scrape→import→update)
     </label>
+    @* Hành động hàng loạt (chuyển từ trang Máy sang): huỷ MỌI việc + tiếp tục MỌI việc gián đoạn. Cả hai xác nhận
+       2-bước (bấm-lần-nữa) theo pattern repo. Badge N gián đoạn cập nhật theo snapshot 2s. *@
+    @if (!_confirmCancelAll)
+    {
+        <button class="btn danger sm" title="Huỷ mọi việc hub-giao đang chạy/chờ. Việc đã hủy GIỮ NGUYÊN tham số — bấm ▶ Tiếp tục để chạy lại."
+                @onclick="() => _confirmCancelAll = true">✖ Huỷ MỌI việc</button>
+    }
+    else
+    {
+        <button class="btn danger sm" @onclick="CancelAllWork">Bấm lần nữa để huỷ @_openWorkCount việc</button>
+        <button class="btn sm" @onclick="() => _confirmCancelAll = false">Huỷ</button>
+    }
+    @if (!_confirmResumeAll)
+    {
+        <button class="btn primary sm" disabled="@(_interruptedCount == 0)"
+                title="Đưa mọi việc gián đoạn (dừng/lỗi, chưa xong) về hàng chờ để client chạy lại (giữ tham số)."
+                @onclick="() => _confirmResumeAll = true">▶ Tiếp tục @_interruptedCount việc gián đoạn</button>
+    }
+    else
+    {
+        <button class="btn primary sm" @onclick="ResumeAllInterrupted">Bấm lần nữa để tiếp tục @_interruptedCount việc</button>
+        <button class="btn sm" @onclick="() => _confirmResumeAll = false">Huỷ</button>
+    }
+    @if (!string.IsNullOrEmpty(_barMsg))
+    {
+        <span class="action">@_barMsg</span>
+    }
 </div>
 
 <div class="workspace">
@@ -99,6 +126,7 @@
                         {
                             var cell = FleetStateService.OpCell(Snap, row.AccountId, row.ShopId, op);
                             var st = row.Ops.GetValueOrDefault(op);
+                            var resumeLed = ManualResumeLedger(row, op, cell);   // ≠ null = việc chạy-TAY dừng dở, tiếp-tục-được
                             <tr>
                                 <td>@OpLabel(op)</td>
                                 <td><span class="pill @cell.Css" title="@(st is null ? "" : $"{st.Machine} · {st.LastAgo}")">@cell.Text</span></td>
@@ -117,6 +145,14 @@
                                             <option value="idle">Chưa (reset)</option>
                                             <option value="stopped">■ Dừng</option>
                                         </select>
+                                    }
+                                    @* Việc chạy TAY dừng dở (không assignment, không nằm trong Interrupted) → giao lại cho máy cũ.
+                                       Tham số 0 = client dùng cấu hình của nó; ghim để đúng máy đã có tiến độ. Không áp cho rewrite. *@
+                                    @if (resumeLed is not null)
+                                    {
+                                        <button class="btn primary sm" style="margin-top:4px"
+                                                title="Việc chạy tay dừng dở — giao lại cho máy cũ (client tự dùng cấu hình của nó)."
+                                                @onclick="() => ResumeManual(row, op, resumeLed)">▶ Tiếp tục trên máy @Machine(resumeLed)</button>
                                     }
                                 </td>
                             </tr>
@@ -211,6 +247,27 @@
                         else if (_accountOwnerWarn is not null)
                         {
                             <div class="hint" style="margin-top:4px">ℹ Acc đang do máy <b>@_accountOwnerWarn</b> dùng — ghim thêm nên vào máy đó.</div>
+                        }
+
+                        @* ⏯ Việc gián đoạn của shop này (assignment hub-giao đã dừng/lỗi, chưa xong) — đặt NGAY DƯỚI
+                           nút Ghim/Huỷ để operator thấy cạnh nhau. Mỗi dòng: op · máy cuối · lý do · lúc + ▶ Tiếp tục. *@
+                        @if (_shopInterrupted is { Count: > 0 } ints)
+                        {
+                            <div style="margin-top:14px">
+                                <div class="subhead">⏯ Việc gián đoạn (@ints.Count)</div>
+                                @foreach (var a in ints)
+                                {
+                                    <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:6px">
+                                        <span class="pill warn">@OpLabel(a.Op)</span>
+                                        <span class="hint" style="margin:0; flex:1 1 auto">máy <b>@IntMachine(a)</b> · @IntReason(a) · @a.UpdatedAt.LocalDateTime.ToString("dd/MM HH:mm")</span>
+                                        <button class="btn primary sm" @onclick="() => ResumeOne(a.Id)">▶ Tiếp tục</button>
+                                    </div>
+                                }
+                                @if (!string.IsNullOrEmpty(_resumeMsg))
+                                {
+                                    <div class="warn" style="margin-top:8px">@_resumeMsg</div>
+                                }
+                            </div>
                         }
                     </div>
                 }
@@ -714,6 +771,7 @@
         _selRow = r;
         _action = "";
         _rwActionMsg = "";
+        _resumeMsg = "";
         // Shop kho-Hub → nạp trước số dòng chờ rewrite (không chặn render); ngược lại xoá cache.
         if (IsHubAcct(r.AccountId) && !string.IsNullOrEmpty(r.Sheet)) RefreshRewritePending(r.AccountId, r.Sheet);
         else { _rwPending = null; _rwPendingKey = null; }
@@ -935,6 +993,49 @@
         FleetState.Refresh();
     }
 
+    // ── Hành động hàng loạt trên thanh đầu trang ──────────────────────────────────
+    private bool _confirmCancelAll;    // arm 2-bước nút Huỷ MỌI việc
+    private bool _confirmResumeAll;    // arm 2-bước nút Tiếp tục mọi việc gián đoạn
+    private string _barMsg = "";
+
+    private int _openWorkCount => Snap.Assignments.Count(a => a.Status is "running" or "queued");
+    private int _interruptedCount => Snap.Interrupted.Count;
+
+    // Huỷ mọi assignment hub-giao đang chạy/chờ (chuyển từ trang Máy sang). Bản 'canceled' GIỮ NGUYÊN tham số →
+    // sticky-cancel không tự tạo lại; operator bấm ▶ Tiếp tục để chạy lại đúng lượt cũ.
+    private void CancelAllWork()
+    {
+        _confirmCancelAll = false;
+        var n = 0;
+        foreach (var a in Snap.Assignments.Where(a => a.Status is "running" or "queued"))
+        { Db.CancelAssignment(a.Id); n++; }
+        _barMsg = $"✖ Đã huỷ {n} việc (chạy + chờ). Bấm ▶ Tiếp tục để chạy lại (tham số giữ nguyên).";
+        FleetState.Refresh();
+    }
+
+    // Tiếp tục TẤT CẢ việc gián đoạn: đưa từng bản về 'queued' (giữ tham số), gom message lỗi (nếu có).
+    private void ResumeAllInterrupted()
+    {
+        _confirmResumeAll = false;
+        var (ok, errs) = ResumeMany(Snap.Interrupted);
+        _barMsg = errs.Count == 0
+            ? $"▶ Đã cho {ok} việc gián đoạn chạy lại (về hàng chờ)."
+            : $"▶ Tiếp tục {ok} việc; {errs.Count} không được: {string.Join("; ", errs.Distinct())}";
+        FleetState.Refresh();
+    }
+
+    // Lặp ResumeAssignment cho một tập việc → (số OK, danh sách message lỗi tiếng Việt).
+    private (int Ok, List<string> Errors) ResumeMany(IEnumerable<Assignment> items)
+    {
+        var ok = 0; var errs = new List<string>();
+        foreach (var a in items)
+        {
+            var err = Db.ResumeAssignment(a.Id);
+            if (err is null) ok++; else errs.Add(err);
+        }
+        return (ok, errs);
+    }
+
     /// <summary>Mở bản đồ dòng của 1 việc trên shop đang chọn: chỉ dựng ctx → RowMapModal tự đọc sheet + tô dòng.</summary>
     private void OpenMap(string op)
     {
@@ -978,6 +1079,50 @@
             a.BigsellerId == _selRow.AccountId && a.ShopId == _selRow.ShopId && a.Status is "queued" or "running"))
         { Db.CancelAssignment(a.Id); n++; }
         _action = $"✖ Đã huỷ {n} việc của shop {_selRow.ShopName}.";
+        FleetState.Refresh();
+    }
+
+    // ── Việc gián đoạn của shop đang chọn (khối ⏯ trong tab Hành động) ─────────────
+    private string _resumeMsg = "";   // message lỗi inline khi ▶ Tiếp tục 1 việc (rỗng = OK); clear khi đổi shop
+
+    // Assignment hub-giao gián đoạn (failed/canceled, chưa xong) của (acc,shop) đang chọn.
+    private List<Assignment> _shopInterrupted => _selRow is null ? new()
+        : Snap.Interrupted.Where(a => a.BigsellerId == _selRow.AccountId && a.ShopId == _selRow.ShopId).ToList();
+
+    // Máy cuối của việc gián đoạn: hostname đã claim (failed), fallback máy đích (canceled lúc còn queued chỉ có target).
+    private string IntMachine(Assignment a) =>
+        !string.IsNullOrWhiteSpace(a.ClaimedByHostname) ? a.ClaimedByHostname
+        : (!string.IsNullOrEmpty(a.TargetMachineId) ? HostName(a.TargetMachineId) : "—");
+
+    private static string IntReason(Assignment a) =>
+        !string.IsNullOrWhiteSpace(a.LastError) ? a.LastError : (a.Status == "canceled" ? "đã huỷ" : "lỗi");
+
+    private void ResumeOne(string id)
+    {
+        _resumeMsg = Db.ResumeAssignment(id) is { } err ? $"✘ {err}" : "";
+        FleetState.Refresh();
+    }
+
+    // ── Tiếp tục việc CHẠY TAY dừng dở (không assignment) → tạo assignment mới ghim máy cũ ─────────────
+    /// <summary>Trả ledger record nếu (shop,op) là việc chạy-TAY dừng dở tiếp-tục-được, ngược lại null. Điều kiện:
+    /// ô đang là "■ dừng dở"/"dừng dở (mất kết nối)" (kind 3, css warn — CHỈ do ledger, KHÔNG phải ✘ lỗi assignment),
+    /// KHÔNG có assignment mở (queued/running) và KHÔNG nằm trong Interrupted (để tránh trùng nút ▶ ở khối trên),
+    /// và ledger có LastMachineId để ghim lại. Không áp cho op=rewrite (rewrite hub-mode chạy bằng khối Rewrite).</summary>
+    private WorkLedgerRecord? ManualResumeLedger(ShopRow row, string op, OpCellState cell)
+    {
+        if (op == "rewrite" || !row.InConfig || string.IsNullOrEmpty(row.Sheet)) return null;
+        if (cell.Kind != 3 || cell.Css != "warn") return null;
+        if (Snap.Assignments.Any(a => a.BigsellerId == row.AccountId && a.ShopId == row.ShopId && a.Op == op && a.Status is "queued" or "running")) return null;
+        if (Snap.Interrupted.Any(a => a.BigsellerId == row.AccountId && a.ShopId == row.ShopId && a.Op == op)) return null;
+        var led = Snap.Ledger.FirstOrDefault(l => l.Key == $"{row.AccountId}__{row.ShopId}__{op}");
+        return led is not null && !string.IsNullOrEmpty(led.LastMachineId) ? led : null;
+    }
+
+    private void ResumeManual(ShopRow row, string op, WorkLedgerRecord led)
+    {
+        // Việc chạy tay KHÔNG có assignment → tạo mới, ghim vào máy cuối, tham số 0 = client dùng cấu hình của nó.
+        Db.CreateAssignment(new CreateAssignmentRequest(row.AccountId, row.ShopId, row.Sheet, op, led.LastMachineId, Pinned: true));
+        _action = $"▶ Đã tiếp tục {OpLabel(op)} · {row.ShopName} → máy {Machine(led)} (client dùng cấu hình của nó).";
         FleetState.Refresh();
     }
 

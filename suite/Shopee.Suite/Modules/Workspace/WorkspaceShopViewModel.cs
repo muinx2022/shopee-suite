@@ -1,5 +1,6 @@
 using Avalonia.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
 using Shopee.Core.BigSeller;
 using Shopee.Core.Coordination;
 using Shopee.Suite.Modules.UpdateProduct;
@@ -154,6 +155,19 @@ public sealed partial class WorkspaceShopViewModel : ObservableObject
             nameof(CanScrape), nameof(CanStartUpdate), nameof(IsUpdatingAnyLocal),
             nameof(ScrapeDone), nameof(ImportDone), nameof(UpdateDone), nameof(RewriteDone),
         }) OnPropertyChanged(n);
+    }
+
+    // ── Xoá tiến độ RESUME per-SP của shop này ("chạy lại từ đầu") — ContextMenu 2-bước trên nút Import/Update.
+    //    Đặt command Ở ĐÂY (không phải WorkspaceViewModel) để MenuItem trong ContextMenu bind qua DataContext
+    //    kế thừa (= shop này); popup của ContextMenu KHÔNG nằm trong visual tree UserControl nên $parent[...]
+    //    không tra ngược tới WorkspaceViewModel được. Fire-and-forget: ResetOpProgressAsync tự nuốt lỗi Hub. ──
+    [RelayCommand] private void ResetImportProgress() => ResetOpProgress("import");
+    [RelayCommand] private void ResetUpdateProgress() => ResetOpProgress("update");
+
+    private void ResetOpProgress(string op)
+    {
+        Parent.UpdateTarget.SelectedShop = Shop;   // ResetOpProgressAsync đọc target.SelectedShop
+        _ = Parent.UpdateVm.ResetOpProgressAsync(Parent.UpdateTarget, op);
     }
 
     /// <summary>Tính lại trạng thái từ tiến độ scrape (mượn nguyên logic chip của ScrapeTargetViewModel).</summary>

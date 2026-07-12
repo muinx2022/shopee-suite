@@ -261,6 +261,22 @@ public sealed class HttpCoordinationHub : ICoordinationHub, IDisposable
         try { await _client.CancelAssignmentAsync(new CancelAssignmentRequest(id)); } catch { }
     }
 
+    /// <summary>Operator bấm ▶ Tiếp tục 1 việc đã dừng/huỷ → Hub đưa về 'queued'. Trả message lỗi (server từ
+    /// chối) hoặc null (OK / offline nuốt lỗi).</summary>
+    public async Task<string?> ResumeAssignmentAsync(string id)
+    {
+        try { return await _client.ResumeAssignmentAsync(new ResumeAssignmentRequest(id)); } catch { return null; }
+    }
+
+    /// <summary>Máy này KHỞI ĐỘNG LẠI: xin nhận lại việc đang dở của CHÍNH mình (nhả lease chết của process cũ +
+    /// việc 'running'/'failed-oan' về 'queued'). Trả số việc được đưa lại hàng chờ; -1 = CHƯA GỌI ĐƯỢC hub
+    /// (offline/lỗi mạng) — caller phân biệt với 0 (gọi được nhưng không có gì) để còn THỬ LẠI nhịp sau,
+    /// kẻo boot đúng lúc rớt mạng là mất re-attach cả phiên.</summary>
+    public async Task<int> ResumeMineAsync()
+    {
+        try { return await _client.ResumeMineAsync(new ResumeMineRequest(_machineId)); } catch { return -1; }
+    }
+
     /// <summary>Đọc TRẠNG THÁI ledger TƯƠI cho 1 key (round-trip thật, KHÔNG dùng snapshot poll 12s) — để
     /// worker kết luận done/failed chuẩn, tránh báo nhầm do snapshot trễ. null nếu lỗi/chưa có.</summary>
     public async Task<string?> FetchLedgerStatusAsync(string coordId)

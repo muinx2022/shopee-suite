@@ -43,6 +43,8 @@ public sealed class FleetSnapshot
     // ── Giao việc (Hub đẩy việc cho client) ──
     public List<MachineRoleInfo> Roles { get; set; } = [];
     public List<Assignment> Assignments { get; set; } = [];
+    /// <summary>Việc GIÁN ĐOẠN (failed/canceled, chưa xong) — operator bấm ▶ Tiếp tục. Field mới: client cũ bỏ qua.</summary>
+    public List<Assignment> Interrupted { get; set; } = [];
 }
 
 // ── Giao việc (Hub chủ động giao việc cho client) ─────────────────────────────
@@ -175,6 +177,14 @@ public sealed record ClearAccountErrorRequest(string AccountId);
 public sealed record ClaimAssignmentsRequest(string MachineId, string Role, int Max);
 public sealed record AssignmentStatusRequest(string Id, string MachineId, string Status, string? Error);
 public sealed record CancelAssignmentRequest(string Id);
+/// <summary>Operator bấm ▶ Tiếp tục 1 việc đã dừng/huỷ → Hub đưa về 'queued' (giữ nguyên tham số).</summary>
+public sealed record ResumeAssignmentRequest(string Id);
+/// <summary>Client khởi động lại → xin nhận lại việc đang dở của CHÍNH máy mình (nhả lease chết + việc về 'queued').</summary>
+public sealed record ResumeMineRequest(string MachineId);
+/// <summary>Kết quả POST /assignments/resume: Error null = tiếp tục OK; ngược lại là lý do từ chối (tiếng Việt).</summary>
+public sealed record ResumeAssignmentResponse(string? Error);
+/// <summary>Kết quả POST /assignments/resume-mine: số việc máy này được đưa lại về 'queued'.</summary>
+public sealed record ResumeMineResponse(int Requeued);
 /// <summary>Hub đặt TAY trạng thái sổ hoàn thành cho 1 (shop+op): completed = ✓ xong; stopped = ■ dừng;
 /// idle = chưa chạy (XOÁ bản ghi + tiến độ dòng → scrape giao lại + chạy lại từ đầu).</summary>
 public sealed record SetLedgerStatusRequest(

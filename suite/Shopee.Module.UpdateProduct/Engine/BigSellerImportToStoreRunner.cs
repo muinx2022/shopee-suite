@@ -5,6 +5,7 @@ using Shopee.Core.Ai;
 using Shopee.Core.BigSeller;
 using Shopee.Core.Browser;
 using Shopee.Core.Coordination;
+using Shopee.Core.Progress;
 
 namespace UpdateProduct;
 
@@ -135,6 +136,20 @@ internal sealed class BigSellerImportToStoreRunner : BigSellerBraveRunner
         {
             _log("Sheet không có item id nào trong khoảng dòng đã đặt — không có gì để import. Kết thúc.");
             return;   // → tầng trên báo Hub "completed" (không có việc để làm)
+        }
+
+        // RESUME: seed _importedIds từ tiến độ ĐÃ LƯU (kill/dừng giữa chừng rồi chạy lại → KHÔNG import trùng —
+        // chốt chặn cũ chỉ là HashSet trong RAM, mất khi thoát). Chỉ lấy id CÒN trong _importIds (khoảng dòng /
+        // tập id có thể đã đổi giữa 2 lần chạy). Đủ hết ngay từ tiến độ → khỏi mở Brave.
+        var doneImport = OpProgressStore.Shared.GetDone(_settings.AccountId, _settings.DataSheet, "import");
+        var seeded = 0;
+        foreach (var id in doneImport.Keys)
+            if (_importIds.Contains(id)) { _importedIds.Add(id); seeded++; }
+        if (seeded > 0) _log($"Bỏ qua {seeded} SP đã import trước đó (tiến độ đã lưu).");
+        if (_importedIds.Count >= _importIds.Count)
+        {
+            _log($"✔ Đã import đủ {_importedIds.Count}/{_importIds.Count} SP theo tiến độ đã lưu — không mở Brave. Kết thúc.");
+            return;
         }
 
         StartBrave();
@@ -282,6 +297,7 @@ internal sealed class BigSellerImportToStoreRunner : BigSellerBraveRunner
 
                 // Đã gửi lên server (committed) → đánh dấu để KHÔNG import lại (dù SP còn hiện trong danh sách hay không).
                 if (committed)
+                {
                     foreach (var id in checkedIds)
                     {
                         _importedIds.Add(id);
@@ -296,6 +312,13 @@ internal sealed class BigSellerImportToStoreRunner : BigSellerBraveRunner
                                 _log($"⚠ SP import xong nhưng không khớp được dòng sheet (import-id={id}) → Thống kê Hub sẽ thiếu dòng ({_ledgerMissCount} SP như vậy).");
                         }
                     }
+                    // RESUME: ghi tiến độ import NGAY (bền với kill) → lượt sau seed _importedIds, không import trùng.
+                    // Import chỉ cần biết "đã import" nên doneName = null. Hub-mode: báo server để GetImportIds lượt sau
+                    // lọc bớt (best-effort; store local là chính, lỗi mạng KHÔNG làm hỏng lượt chạy).
+                    OpProgressStore.Shared.MarkDone(_settings.AccountId, _settings.DataSheet, "import",
+                        checkedIds.Select(id => new KeyValuePair<string, string?>(id, null)));
+                    if (_settings.UseHubData) _ = MarkImportedHubAsync(checkedIds);
+                }
 
                 // Đã gom ĐỦ mọi item id cần import → DỪNG NGAY, khỏi lật hết tab (tab "Đã nhận" có thể tới ~75
                 // trang). _importedIds ⊆ _importIds nên đủ số là đủ tất cả.
@@ -729,6 +752,19 @@ internal sealed class BigSellerImportToStoreRunner : BigSellerBraveRunner
 
     private Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken) =>
         _pauseToken?.DelayAsync(delay, cancellationToken) ?? Task.Delay(delay, cancellationToken);
+
+    // RESUME (hub-mode): báo Hub các itemId vừa import → GetImportIds lượt sau lọc bớt. Best-effort, fire-and-forget:
+    // store local đã là nguồn chính, lỗi mạng ở đây KHÔNG được làm hỏng lượt chạy (nuốt + log ngắn).
+    private async Task MarkImportedHubAsync(string[] ids)
+    {
+        try
+        {
+            var client = CoordinationRuntime.Client;
+            if (client is null || ids.Length == 0) return;
+            await client.MarkProductImportedAsync(_settings.AccountId, _settings.DataSheet, ids, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception ex) { _log($"  (mark-imported Hub lỗi, bỏ qua — tiến độ local là chính: {ex.Message})"); }
+    }
 
     // Tổng kết ledger khi import kết thúc BÌNH THƯỜNG: đã báo Thống kê bao nhiêu dòng vs bao nhiêu SP import xong
     // mà không khớp được dòng sheet → soi nhanh vì sao Thống kê Hub thiếu dòng import (miss=0 mà Thống kê vẫn thiếu

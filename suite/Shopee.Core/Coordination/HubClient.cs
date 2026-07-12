@@ -94,6 +94,18 @@ public sealed class HubClient
     }
     public Task ReportAssignmentAsync(AssignmentStatusRequest req, CancellationToken ct = default) => PostAsync(HubRoutes.AssignmentsStatus, req, ct);
     public Task CancelAssignmentAsync(CancelAssignmentRequest req, CancellationToken ct = default) => PostAsync(HubRoutes.AssignmentsCancel, req, ct);
+    public async Task<string?> ResumeAssignmentAsync(ResumeAssignmentRequest req, CancellationToken ct = default)
+    {
+        var r = await _http.PostAsJsonAsync(HubRoutes.AssignmentsResume, req, ct);
+        r.EnsureSuccessStatusCode();
+        return (await r.Content.ReadFromJsonAsync<ResumeAssignmentResponse>(ct))?.Error;
+    }
+    public async Task<int> ResumeMineAsync(ResumeMineRequest req, CancellationToken ct = default)
+    {
+        var r = await _http.PostAsJsonAsync(HubRoutes.AssignmentsResumeMine, req, ct);
+        r.EnsureSuccessStatusCode();
+        return (await r.Content.ReadFromJsonAsync<ResumeMineResponse>(ct))?.Requeued ?? 0;
+    }
 
     // ── Kho gộp kết quả Search ── (dùng _bulkHttp timeout dài cho push/fetch khối lớn)
     public async Task PushSearchProductsAsync(SearchProductsPushRequest req, CancellationToken ct = default)
@@ -147,6 +159,79 @@ public sealed class HubClient
         var r = await _bulkHttp.PostAsJsonAsync(HubRoutes.ProductsAppend, req, ct);
         r.EnsureSuccessStatusCode();
         return await r.Content.ReadFromJsonAsync<ProductAppendResponse>(ct);
+    }
+
+    // ── RESUME per-SP: báo Hub đã Import / đã Update N itemId (tối ưu lọc lượt sau). Lỗi mạng → ném theo convention;
+    //    chỗ GỌI ở runner tự try/catch nuốt (store local là nguồn chính, mark-* thất bại KHÔNG làm hỏng lượt chạy). ──
+    public async Task<int> MarkProductImportedAsync(string acct, string sheet, string[] itemIds, CancellationToken ct = default)
+    {
+        var r = await _bulkHttp.PostAsJsonAsync(HubRoutes.ProductsMarkImported, new ProductMarkStoreRequest(acct, sheet, itemIds), ct);
+        r.EnsureSuccessStatusCode();
+        return (await r.Content.ReadFromJsonAsync<ProductMarkStoreResponse>(ct))?.Updated ?? 0;
+    }
+
+    public async Task<int> MarkProductUpdatedAsync(string acct, string sheet, string[] itemIds, CancellationToken ct = default)
+    {
+        var r = await _bulkHttp.PostAsJsonAsync(HubRoutes.ProductsMarkUpdated, new ProductMarkStoreRequest(acct, sheet, itemIds), ct);
+        r.EnsureSuccessStatusCode();
+        return (await r.Content.ReadFromJsonAsync<ProductMarkStoreResponse>(ct))?.Updated ?? 0;
+    }
+
+    public async Task<int> ResetProductStoreProgressAsync(string acct, string sheet, string op, CancellationToken ct = default)
+    {
+        var r = await _bulkHttp.PostAsJsonAsync(HubRoutes.ProductsResetStoreProgress, new ProductResetStoreRequest(acct, sheet, op), ct);
+        r.EnsureSuccessStatusCode();
+        return (await r.Content.ReadFromJsonAsync<ProductResetStoreResponse>(ct))?.Reset ?? 0;
+    }
+
+    // ── Trang "📦 Dữ liệu" (mọi shop) — client desktop thao tác qua HTTP ──
+    public async Task<AllDataPage?> QueryProductAllDataAsync(AllDataQueryRequest req, CancellationToken ct = default)
+    {
+        var r = await _bulkHttp.PostAsJsonAsync(HubRoutes.ProductsAllData, req, ct);
+        r.EnsureSuccessStatusCode();
+        return await r.Content.ReadFromJsonAsync<AllDataPage>(ct);
+    }
+
+    public async Task<int> MarkProductsSoldAsync(List<ProductRowKey> keys, CancellationToken ct = default)
+    {
+        var r = await _bulkHttp.PostAsJsonAsync(HubRoutes.ProductsMarkSold, new ProductKeysRequest(keys), ct);
+        r.EnsureSuccessStatusCode();
+        return (await r.Content.ReadFromJsonAsync<ProductCountResponse>(ct))?.Count ?? 0;
+    }
+
+    public async Task<int> RegenProductSkusAsync(List<ProductRowKey> keys, CancellationToken ct = default)
+    {
+        var r = await _bulkHttp.PostAsJsonAsync(HubRoutes.ProductsRegenSkus, new ProductKeysRequest(keys), ct);
+        r.EnsureSuccessStatusCode();
+        return (await r.Content.ReadFromJsonAsync<ProductCountResponse>(ct))?.Count ?? 0;
+    }
+
+    public async Task<int> DeleteProductRowsAsync(List<ProductRowKey> keys, CancellationToken ct = default)
+    {
+        var r = await _bulkHttp.PostAsJsonAsync(HubRoutes.ProductsDeleteRows, new ProductKeysRequest(keys), ct);
+        r.EnsureSuccessStatusCode();
+        return (await r.Content.ReadFromJsonAsync<ProductCountResponse>(ct))?.Count ?? 0;
+    }
+
+    public async Task<bool> UpdateProductRowAsync(ProductUpdateRowRequest req, CancellationToken ct = default)
+    {
+        var r = await _bulkHttp.PostAsJsonAsync(HubRoutes.ProductsUpdateRow, req, ct);
+        r.EnsureSuccessStatusCode();
+        return (await r.Content.ReadFromJsonAsync<ProductUpdateRowResponse>(ct))?.Ok ?? false;
+    }
+
+    public async Task<ProductInsertRowResponse?> InsertProductRowAsync(ProductInsertRowRequest req, CancellationToken ct = default)
+    {
+        var r = await _bulkHttp.PostAsJsonAsync(HubRoutes.ProductsInsertRow, req, ct);
+        r.EnsureSuccessStatusCode();
+        return await r.Content.ReadFromJsonAsync<ProductInsertRowResponse>(ct);
+    }
+
+    public async Task<bool> ProductSkuExistsAsync(string acct, string sheet, string sku, int excludeRowNo, CancellationToken ct = default)
+    {
+        var url = $"{HubRoutes.ProductsSkuExists}?acct={Uri.EscapeDataString(acct)}&sheet={Uri.EscapeDataString(sheet)}"
+                + $"&sku={Uri.EscapeDataString(sku)}&excludeRowNo={excludeRowNo}";
+        return (await _bulkHttp.GetFromJsonAsync<ProductSkuExistsResponse>(url, ct))?.Exists ?? false;
     }
 
     // ── Log tập trung (tab Log gom log nhiều máy) ──

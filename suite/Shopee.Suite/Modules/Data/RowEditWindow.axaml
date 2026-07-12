@@ -1,0 +1,96 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="Shopee.Suite.Modules.Data.RowEditWindow"
+        Title="Dòng dữ liệu" SizeToContent="Height" Width="600" CanResize="False"
+        WindowStartupLocation="CenterOwner"
+        Background="{DynamicResource WindowBackgroundBrush}" FontFamily="{DynamicResource UiFont}">
+    <Window.Styles>
+        <!-- Mỗi ô = nhãn caption trên + TextBox dưới, cách đều nhau khi wrap. -->
+        <Style Selector="StackPanel.field">
+            <Setter Property="Margin" Value="0,0,14,10" />
+        </Style>
+        <Style Selector="StackPanel.field > TextBlock">
+            <Setter Property="Margin" Value="0,0,0,3" />
+        </Style>
+    </Window.Styles>
+
+    <DockPanel Margin="18">
+        <TextBlock DockPanel.Dock="Top" Text="{Binding Title}" Classes="h2" Margin="0,0,0,12" />
+
+        <!-- Chân: nhập-đủ-17-cột + Huỷ/Lưu -->
+        <Grid DockPanel.Dock="Bottom" Margin="0,14,0,0" ColumnDefinitions="Auto,*,Auto,Auto">
+            <CheckBox Grid.Column="0" Content="Nhập đủ 17 cột" IsChecked="{Binding ShowAll}" VerticalAlignment="Center" />
+            <Button Grid.Column="2" Content="Huỷ" MinWidth="90" Click="OnCancel" IsEnabled="{Binding CanSave}" />
+            <Button Grid.Column="3" Classes="primary" Content="✔ Lưu" MinWidth="110" Margin="10,0,0,0"
+                    Click="OnSave" IsEnabled="{Binding CanSave}" />
+        </Grid>
+
+        <!-- Dòng lỗi trong window -->
+        <TextBlock DockPanel.Dock="Bottom" Text="{Binding Error}" Foreground="{DynamicResource DangerBrush}"
+                   TextWrapping="Wrap" Margin="0,10,0,0"
+                   IsVisible="{Binding Error, Converter={StaticResource StringToBool}}" />
+
+        <ScrollViewer MaxHeight="520" VerticalScrollBarVisibility="Auto">
+            <StackPanel>
+                <!-- THÊM: chọn tài khoản + shop -->
+                <StackPanel Orientation="Horizontal" Spacing="16" Margin="0,0,0,4" IsVisible="{Binding IsAddMode}">
+                    <StackPanel>
+                        <TextBlock Text="Tài khoản *" Classes="caption" Margin="0,0,0,3" />
+                        <ComboBox Width="250" ItemsSource="{Binding AccountOptions}" SelectedItem="{Binding SelectedAccount}">
+                            <ComboBox.ItemTemplate>
+                                <DataTemplate><TextBlock Text="{Binding Label}" /></DataTemplate>
+                            </ComboBox.ItemTemplate>
+                        </ComboBox>
+                    </StackPanel>
+                    <StackPanel>
+                        <TextBlock Text="Shop *" Classes="caption" Margin="0,0,0,3" />
+                        <ComboBox Width="250" ItemsSource="{Binding ShopOptions}" SelectedItem="{Binding SelectedShop}">
+                            <ComboBox.ItemTemplate>
+                                <DataTemplate><TextBlock Text="{Binding Label}" /></DataTemplate>
+                            </ComboBox.ItemTemplate>
+                        </ComboBox>
+                    </StackPanel>
+                </StackPanel>
+
+                <!-- SỬA: đích cố định -->
+                <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,0,0,4" IsVisible="{Binding IsEdit}">
+                    <TextBlock Text="Tài khoản:" Classes="caption" VerticalAlignment="Center" />
+                    <TextBlock Text="{Binding AccountLabel}" FontWeight="SemiBold" VerticalAlignment="Center" />
+                    <TextBlock Text="Shop:" Classes="caption" VerticalAlignment="Center" Margin="12,0,0,0" />
+                    <TextBlock Text="{Binding ShopLabel}" FontWeight="SemiBold" VerticalAlignment="Center" />
+                </StackPanel>
+
+                <TextBlock Text="Dữ liệu dòng" Classes="h2" Margin="0,8,0,8" />
+
+                <!-- 6 ô chính -->
+                <WrapPanel>
+                    <StackPanel Classes="field"><TextBlock Text="Link" Classes="caption" /><TextBox Width="260" Text="{Binding Link}" /></StackPanel>
+                    <StackPanel Classes="field"><TextBlock Text="Giá bán" Classes="caption" /><TextBox Width="120" Text="{Binding PriceSale}" /></StackPanel>
+                    <StackPanel Classes="field">
+                        <TextBlock Text="SKU" Classes="caption" />
+                        <TextBox Width="140" Text="{Binding Sku}" Watermark="B#####" />
+                        <TextBlock Text="Để trống → tự sinh B#####" Classes="caption" Margin="0,3,0,0" IsVisible="{Binding IsAddMode}" />
+                    </StackPanel>
+                    <StackPanel Classes="field"><TextBlock Text="ItemId" Classes="caption" /><TextBox Width="150" Text="{Binding ItemId}" /></StackPanel>
+                    <StackPanel Classes="field"><TextBlock Text="Tên gốc" Classes="caption" /><TextBox Width="260" Text="{Binding NameOriginal}" /></StackPanel>
+                    <StackPanel Classes="field"><TextBlock Text="Tên đã sửa" Classes="caption" /><TextBox Width="260" Text="{Binding NameRewritten}" /></StackPanel>
+                </WrapPanel>
+
+                <!-- 11 ô còn lại (nhập đủ 17 cột) -->
+                <WrapPanel IsVisible="{Binding ShowAll}" Margin="0,4,0,0">
+                    <StackPanel Classes="field"><TextBlock Text="Giá gốc" Classes="caption" /><TextBox Width="120" Text="{Binding PriceOriginal}" /></StackPanel>
+                    <StackPanel Classes="field"><TextBlock Text="Danh mục" Classes="caption" /><TextBox Width="170" Text="{Binding Category}" /></StackPanel>
+                    <StackPanel Classes="field"><TextBlock Text="Shop (tên)" Classes="caption" /><TextBox Width="170" Text="{Binding ShopName}" /></StackPanel>
+                    <StackPanel Classes="field"><TextBlock Text="Rating" Classes="caption" /><TextBox Width="90" Text="{Binding Rating}" /></StackPanel>
+                    <StackPanel Classes="field"><TextBlock Text="Bán/tháng" Classes="caption" /><TextBox Width="100" Text="{Binding SoldMonth}" /></StackPanel>
+                    <StackPanel Classes="field"><TextBlock Text="Thích" Classes="caption" /><TextBox Width="90" Text="{Binding Likes}" /></StackPanel>
+                    <StackPanel Classes="field"><TextBlock Text="Đánh giá" Classes="caption" /><TextBox Width="90" Text="{Binding Reviews}" /></StackPanel>
+                    <StackPanel Classes="field"><TextBlock Text="Vùng" Classes="caption" /><TextBox Width="120" Text="{Binding Region}" /></StackPanel>
+                    <StackPanel Classes="field"><TextBlock Text="Ảnh" Classes="caption" /><TextBox Width="260" Text="{Binding Image}" /></StackPanel>
+                    <StackPanel Classes="field"><TextBlock Text="MetaShopId" Classes="caption" /><TextBox Width="150" Text="{Binding MetaShopId}" /></StackPanel>
+                    <StackPanel Classes="field"><TextBlock Text="MetaItemId" Classes="caption" /><TextBox Width="150" Text="{Binding MetaItemId}" /></StackPanel>
+                </WrapPanel>
+            </StackPanel>
+        </ScrollViewer>
+    </DockPanel>
+</Window>

@@ -74,6 +74,14 @@ CREATE TABLE product_sold (
   last_sold_at  timestamptz,
   PRIMARY KEY (account_id, sheet, row_no)
 );"),
+        // Tiến độ per-SP của 2 workflow đẩy-lên-BigSeller (resume xuyên kill/restart, KHỚP OpProgressStore phía
+        // client): store_imported_at = mốc đã Import-to-store dòng này (import lại là SAI → GetImportIds LỌC bỏ);
+        // store_updated_at/store_updated_name = mốc + TÊN đã update lên. record-map loại dòng có store_updated_name
+        // TRÙNG name_rewritten hiện tại (đổi tên sau đó → store_updated_name lệch → tự vào lại diện update).
+        (3, @"
+ALTER TABLE product_rows ADD COLUMN store_imported_at  timestamptz;
+ALTER TABLE product_rows ADD COLUMN store_updated_at   timestamptz;
+ALTER TABLE product_rows ADD COLUMN store_updated_name text;"),
     };
 
     public ProductDb(string connString)

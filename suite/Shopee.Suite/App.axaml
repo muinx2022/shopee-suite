@@ -5,6 +5,7 @@
              xmlns:views="using:Shopee.Suite.Views"
              xmlns:ws="using:Shopee.Suite.Modules.Workspace"
              xmlns:bs="using:Shopee.Suite.Modules.BigSeller"
+             xmlns:data="using:Shopee.Suite.Modules.Data"
              xmlns:srch="using:Shopee.Suite.Modules.Search"
              xmlns:acc="using:Shopee.Suite.Modules.Accounts"
              xmlns:ca="using:Shopee.Suite.Modules.CheckAccount"
@@ -32,6 +33,7 @@
         <!-- GĐ5: 7 module view Avalonia thật. -->
         <DataTemplate DataType="ws:WorkspaceViewModel"><ws:WorkspaceView /></DataTemplate>
         <DataTemplate DataType="bs:BigSellerViewModel"><bs:BigSellerView /></DataTemplate>
+        <DataTemplate DataType="data:DataViewModel"><data:DataView /></DataTemplate>
         <DataTemplate DataType="srch:SearchViewModel"><srch:SearchView /></DataTemplate>
         <DataTemplate DataType="acc:AccountsViewModel"><acc:AccountsView /></DataTemplate>
         <DataTemplate DataType="ca:CheckAccountViewModel"><ca:CheckAccountView /></DataTemplate>

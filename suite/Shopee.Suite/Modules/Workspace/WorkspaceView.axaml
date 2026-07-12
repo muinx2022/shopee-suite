@@ -69,6 +69,11 @@
                                Classes="caption" Margin="14,0,0,0" VerticalAlignment="Center" TextWrapping="Wrap" />
                 </StackPanel>
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                    <!-- Chỉ hiện khi có việc chạy-tay còn dở (mở lại app / bị dừng). Bấm = chạy tiếp TẤT CẢ. -->
+                    <Button Classes="primary" Content="{Binding ResumeButtonText}" Margin="0,0,8,0"
+                            IsVisible="{Binding HasResumePending}"
+                            Command="{Binding ResumePendingWorkCommand}"
+                            ToolTip.Tip="{Binding ResumeTooltip}" />
                     <!-- Không có việc nào chạy → nút mờ, không bấm được (CanExecute = AnyRunning). -->
                     <Button Classes="danger" Content="■ Dừng tất cả" Command="{Binding StopAllCommand}"
                             ToolTip.Tip="Dừng toàn bộ scrape + update đang chạy. (Dừng riêng 1 tk: bấm ■ trên shop đang chạy.)" />
@@ -197,7 +202,18 @@
                                                                         ToolTip.Tip="{Binding ImportToggleTip}"
                                                                         IsEnabled="{Binding ImportToggleEnabled}"
                                                                         Command="{Binding $parent[UserControl].DataContext.ImportToggleCommand}"
-                                                                        CommandParameter="{Binding}" />
+                                                                        CommandParameter="{Binding}">
+                                                                    <!-- Chuột phải → xoá tiến độ resume import (2 bước xác nhận, khỏi dialog).
+                                                                         ContextMenu kế thừa DataContext = shop → bind thẳng command trên WorkspaceShopViewModel. -->
+                                                                    <Button.ContextMenu>
+                                                                        <ContextMenu>
+                                                                            <MenuItem Header="↺ Xoá tiến độ import (chạy lại từ đầu)…">
+                                                                                <MenuItem Header="Xác nhận: xoá tiến độ import"
+                                                                                          Command="{Binding ResetImportProgressCommand}" />
+                                                                            </MenuItem>
+                                                                        </ContextMenu>
+                                                                    </Button.ContextMenu>
+                                                                </Button>
                                                                 <Border Classes="doneBadge" ToolTip.Tip="Import đã xong (Hub)"
                                                                         IsVisible="{Binding ImportDone}">
                                                                     <TextBlock Text="✓" Foreground="White" FontSize="8" FontWeight="Bold"
@@ -216,7 +232,17 @@
                                                                         ToolTip.Tip="{Binding UpdateToggleTip}"
                                                                         IsEnabled="{Binding UpdateToggleEnabled}"
                                                                         Command="{Binding $parent[UserControl].DataContext.UpdateToggleCommand}"
-                                                                        CommandParameter="{Binding}" />
+                                                                        CommandParameter="{Binding}">
+                                                                    <!-- Chuột phải → xoá tiến độ resume update (2 bước xác nhận, khỏi dialog). -->
+                                                                    <Button.ContextMenu>
+                                                                        <ContextMenu>
+                                                                            <MenuItem Header="↺ Xoá tiến độ update (chạy lại từ đầu)…">
+                                                                                <MenuItem Header="Xác nhận: xoá tiến độ update"
+                                                                                          Command="{Binding ResetUpdateProgressCommand}" />
+                                                                            </MenuItem>
+                                                                        </ContextMenu>
+                                                                    </Button.ContextMenu>
+                                                                </Button>
                                                                 <Border Classes="doneBadge" ToolTip.Tip="Update đã xong (Hub)"
                                                                         IsVisible="{Binding UpdateDone}">
                                                                     <TextBlock Text="✓" Foreground="White" FontSize="8" FontWeight="Bold"

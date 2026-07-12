@@ -165,6 +165,7 @@ CREATE TABLE IF NOT EXISTS revoked_machines(
         Machines = AllMachines(),
         Roles = AllRoles(),
         Assignments = ListAssignments(),
+        Interrupted = ListInterrupted(),
     };
 
     // ── Tiện ích ────────────────────────────────────────────────────────────────

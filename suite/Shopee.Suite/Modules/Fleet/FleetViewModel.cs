@@ -153,6 +153,15 @@ public sealed partial class FleetViewModel : ObservableObject
     [ObservableProperty] private string _myRole = "—";
     public ObservableCollection<FleetMyJobRow> MyJobs { get; } = [];
 
+    // ── Khối "Việc gián đoạn" (failed/canceled, chưa xong) — hub tính sẵn (FleetSnapshot.Interrupted); client
+    //    bấm ▶ Tiếp tục để đưa lại hàng chờ hub (chạy tiếp thay vì mất việc). ──
+    public ObservableCollection<FleetInterruptedRow> InterruptedJobs { get; } = [];
+    /// <summary>Hiện cả khối khi CÓ việc gián đoạn (rỗng → ẩn).</summary>
+    [ObservableProperty] private bool _hasInterrupted;
+    public string InterruptedHeader => $"⏯  Việc gián đoạn ({InterruptedJobs.Count})";
+    /// <summary>Phản hồi ngắn cho thao tác Tiếp tục (message lỗi hub trả về hiện ở đây).</summary>
+    [ObservableProperty] private string _interruptedStatus = "";
+
     // ── Tab "Log" — nhật ký nhiều máy gửi về Hub (xem tập trung, mới nhất ở trên) ──
     public ObservableCollection<FleetLogRow> Logs { get; } = [];
     private long _lastLogId;
@@ -206,6 +215,7 @@ public sealed partial class FleetViewModel : ObservableObject
 
         var f = hub.CurrentFleet;
         BuildMonitor(f);
+        BuildInterrupted(f);   // khối "Việc gián đoạn" (hub tính sẵn) — hiện dưới việc của máy này
         if (IsHubBoard) { SyncMachines(f); BuildQueue(f); UpdateSearchRows(f); UpdateMachinePinnability(f); }
         if (IsClientPanel) BuildMyJobs(f, hub.MachineId);
         // Tắt xoay Ghim/Huỷ khi việc đã hiện/huỷ trên snapshot (hoặc quá hạn) — TRƯỚC khi tính lại nút.
@@ -800,6 +810,77 @@ public sealed partial class FleetViewModel : ObservableObject
         }
     }
 
+    // ── Khối "Việc gián đoạn" — dựng từ FleetSnapshot.Interrupted (hub tính sẵn) ──
+    private void BuildInterrupted(FleetSnapshot f)
+    {
+        InterruptedJobs.Clear();
+        foreach (var a in f.Interrupted)
+            InterruptedJobs.Add(new FleetInterruptedRow { Id = a.Id, Title = DescribeAssignment(a), Detail = InterruptedDetail(a) });
+        HasInterrupted = InterruptedJobs.Count > 0;
+        OnPropertyChanged(nameof(InterruptedHeader));
+    }
+
+    /// <summary>Mô tả 1 việc: "Import · Shop (Tài khoản)" / "Search · file" (giống AssignmentWorker.Describe —
+    /// viết riêng vì method của worker là private static).</summary>
+    private static string DescribeAssignment(Assignment a)
+    {
+        if (a.Op == MachineRoles.Search)
+            return $"Search · {(string.IsNullOrWhiteSpace(a.Sheet) ? "(file Hub giao)" : a.Sheet)}";
+        var acct = BigSellerStore.Shared.Accounts.FirstOrDefault(x => x.Id == a.BigsellerId);
+        var shop = acct?.Shops.FirstOrDefault(s => s.Id == a.ShopId);
+        return $"{OpVi(a.Op)} · {shop?.DisplayName ?? Short(a.ShopId)} ({AcctName(acct, a.BigsellerId)})";
+    }
+
+    /// <summary>Dòng phụ: máy giữ cuối · lý do (LastError) · thời điểm (giờ local).</summary>
+    private static string InterruptedDetail(Assignment a)
+    {
+        var host = string.IsNullOrWhiteSpace(a.ClaimedByHostname) ? "—" : a.ClaimedByHostname;
+        var reason = string.IsNullOrWhiteSpace(a.LastError) ? (a.Status == "canceled" ? "đã huỷ" : "lỗi") : a.LastError;
+        return $"Máy: {host}   ·   {reason}   ·   {a.UpdatedAt.ToLocalTime():HH:mm:ss}";
+    }
+
+    /// <summary>▶ Tiếp tục 1 việc gián đoạn → hub đưa về hàng chờ. Message lỗi hub trả về (non-null) hiện ra
+    /// <see cref="InterruptedStatus"/>; OK → gỡ optimistic khỏi list ngay (nhịp poll kế cũng tự cập nhật).</summary>
+    [RelayCommand]
+    private async Task ResumeJob(FleetInterruptedRow? row)
+    {
+        var hub = CoordinationRuntime.Hub;
+        if (hub is null || row is null) return;
+        InterruptedStatus = $"⏳ Đang tiếp tục: {row.Title}…";
+        var err = await hub.ResumeAssignmentAsync(row.Id);
+        if (err is null)
+        {
+            InterruptedStatus = $"✔ Đã đưa lại hàng chờ: {row.Title}";
+            InterruptedJobs.Remove(row);
+            HasInterrupted = InterruptedJobs.Count > 0;
+            OnPropertyChanged(nameof(InterruptedHeader));
+        }
+        else InterruptedStatus = $"✘ {row.Title}: {err}";
+    }
+
+    /// <summary>▶ Tiếp tục TẤT CẢ việc gián đoạn (lặp từng việc); gom lỗi cuối (nếu có) ra status.</summary>
+    [RelayCommand]
+    private async Task ResumeAllJobs()
+    {
+        var hub = CoordinationRuntime.Hub;
+        if (hub is null) return;
+        var rows = InterruptedJobs.ToList();
+        if (rows.Count == 0) return;
+        InterruptedStatus = $"⏳ Đang tiếp tục {rows.Count} việc…";
+        var ok = 0; string? lastErr = null;
+        foreach (var row in rows)
+        {
+            var err = await hub.ResumeAssignmentAsync(row.Id);
+            if (err is null) { ok++; InterruptedJobs.Remove(row); }
+            else lastErr = err;
+        }
+        HasInterrupted = InterruptedJobs.Count > 0;
+        OnPropertyChanged(nameof(InterruptedHeader));
+        InterruptedStatus = lastErr is null
+            ? $"✔ Đã đưa lại hàng chờ {ok} việc."
+            : $"⚠ Tiếp tục {ok}/{rows.Count} việc — lỗi cuối: {lastErr}";
+    }
+
     // ── Tab "Log" — kéo log tập trung từ Hub theo mỗi nhịp poll ─────────────────
     private async Task RefreshLogsAsync()
     {
@@ -1097,4 +1178,15 @@ public sealed class FleetMyJobRow
     public string Rows { get; init; } = "";
     public string StateText { get; init; } = "";
     public IBrush StateBrush { get; init; } = Brushes.Gray;
+}
+
+/// <summary>1 việc GIÁN ĐOẠN (failed/canceled, chưa xong) ở khối "Việc gián đoạn" — bấm ▶ Tiếp tục để đưa lại
+/// hàng chờ hub. Id để gọi ResumeAssignmentAsync; Title/Detail chỉ để hiển thị.</summary>
+public sealed class FleetInterruptedRow
+{
+    public string Id { get; init; } = "";
+    /// <summary>Mô tả việc: "Import · Shop (Tài khoản)" / "Search · file".</summary>
+    public string Title { get; init; } = "";
+    /// <summary>Máy giữ cuối · lý do · thời điểm (giờ local).</summary>
+    public string Detail { get; init; } = "";
 }

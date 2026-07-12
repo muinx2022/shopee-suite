@@ -1,0 +1,165 @@
+<UserControl
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    x:Class="Shopee.Suite.Modules.Data.DataView"
+    x:Name="Root">
+    <UserControl.Styles>
+        <!-- Tô nền dòng đã-bán (RowBackground trên item); cell trong suốt để lộ màu nền dòng (mẫu Workspace). -->
+        <Style Selector="DataGrid.data DataGridRow">
+            <Setter Property="Background" Value="{Binding RowBackground}" />
+        </Style>
+        <Style Selector="DataGrid.data DataGridCell">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+        <!-- TextBlock trong ô lưới: căn giữa dọc + lề trái nhẹ + cắt ellipsis. -->
+        <Style Selector="DataGrid.data TextBlock.cell">
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Margin" Value="10,0,6,0" />
+            <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+        </Style>
+    </UserControl.Styles>
+
+    <Grid Margin="28,22,28,24" RowDefinitions="Auto,Auto,Auto,Auto,*,Auto">
+
+        <!-- ════ Header + hint (như hub) ════ -->
+        <StackPanel Grid.Row="0" Margin="0,0,0,12">
+            <TextBlock Text="Dữ liệu sản phẩm" Classes="h1" />
+            <TextBlock Text="Trang quản lý dữ liệu TOÀN BỘ acc/shop — thêm/sửa/xoá/đánh dấu bán. Nhập Excel: dùng web Hub."
+                       Classes="caption" Margin="0,3,0,0" TextWrapping="Wrap" />
+        </StackPanel>
+
+        <!-- ════ Banner suy giảm (chưa cấu hình Hub / Postgres chưa sẵn sàng) ════ -->
+        <Border Grid.Row="1" Classes="card" Padding="12,8" Margin="0,0,0,10" IsVisible="{Binding IsDegraded}"
+                Background="#FFF7E6" BorderBrush="{DynamicResource WarningBrush}">
+            <TextBlock Text="{Binding DegradedMessage}" Foreground="{DynamicResource WarningBrush}" TextWrapping="Wrap" />
+        </Border>
+
+        <!-- ════ Bar lọc ════ -->
+        <Border Grid.Row="2" Classes="card" Padding="12,10" Margin="0,0,0,10">
+            <Grid ColumnDefinitions="*,Auto">
+                <WrapPanel Grid.Column="0">
+                    <ComboBox Width="200" Margin="0,0,8,6" VerticalAlignment="Center" IsEnabled="{Binding CanInteract}"
+                              ItemsSource="{Binding AccountOptions}" SelectedItem="{Binding SelectedAccountOption}">
+                        <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Label}" /></DataTemplate></ComboBox.ItemTemplate>
+                    </ComboBox>
+                    <ComboBox Width="200" Margin="0,0,8,6" VerticalAlignment="Center" IsEnabled="{Binding CanInteract}"
+                              ItemsSource="{Binding ShopOptions}" SelectedItem="{Binding SelectedShopOption}">
+                        <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Label}" /></DataTemplate></ComboBox.ItemTemplate>
+                    </ComboBox>
+                    <TextBox Width="150" Margin="0,0,8,6" VerticalAlignment="Center" Watermark="SKU…"
+                             Text="{Binding SkuFilter}" IsEnabled="{Binding CanInteract}">
+                        <TextBox.KeyBindings>
+                            <KeyBinding Gesture="Enter" Command="{Binding FilterCommand}" />
+                        </TextBox.KeyBindings>
+                    </TextBox>
+                    <TextBox Width="110" Margin="0,0,8,6" VerticalAlignment="Center" Watermark="Giá từ"
+                             Text="{Binding PriceMinText}" IsEnabled="{Binding CanInteract}" />
+                    <TextBox Width="110" Margin="0,0,8,6" VerticalAlignment="Center" Watermark="Giá đến"
+                             Text="{Binding PriceMaxText}" IsEnabled="{Binding CanInteract}" />
+                    <CheckBox Content="Đã bán" Margin="0,0,8,6" VerticalAlignment="Center"
+                              IsChecked="{Binding SoldOnly}" IsEnabled="{Binding CanInteract}" />
+                    <CheckBox Content="SKU trùng trong shop" Margin="0,0,8,6" VerticalAlignment="Center"
+                              IsChecked="{Binding DupSkuOnly}" IsEnabled="{Binding CanInteract}" />
+                    <Button Classes="primary" Content="🔍 Lọc" Margin="0,0,8,6" Command="{Binding FilterCommand}" IsEnabled="{Binding CanInteract}" />
+                    <Button Content="✖ Xóa lọc" Margin="0,0,8,6" Command="{Binding ClearFilterCommand}" IsEnabled="{Binding CanInteract}"
+                            ToolTip.Tip="Xoá mọi điều kiện lọc, hiện lại toàn bộ" />
+                </WrapPanel>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button Content="➕ Thêm dòng" Command="{Binding AddRowCommand}" IsEnabled="{Binding CanInteract}"
+                            ToolTip.Tip="Thêm 1 dòng dữ liệu vào 1 shop (chọn trong form)" />
+                    <Button Content="⟳ Tải lại" Margin="8,0,0,0" Command="{Binding RefreshCommand}" IsEnabled="{Binding CanInteract}" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- ════ Bar phân trang + hành động khi có chọn ════ -->
+        <Grid Grid.Row="3" ColumnDefinitions="Auto,*,Auto" Margin="0,0,0,10">
+            <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                <Button Content="«" Width="38" Command="{Binding FirstPageCommand}" IsEnabled="{Binding CanFirstPrev}" ToolTip.Tip="Trang đầu" />
+                <Button Content="‹" Width="38" Margin="6,0,0,0" Command="{Binding PrevPageCommand}" IsEnabled="{Binding CanFirstPrev}" />
+                <TextBlock Text="{Binding PageText}" VerticalAlignment="Center" Margin="12,0,12,0"
+                           FontSize="12.5" Foreground="{DynamicResource TextSecondaryBrush}" />
+                <Button Content="›" Width="38" Command="{Binding NextPageCommand}" IsEnabled="{Binding CanNextLast}" />
+                <Button Content="»" Width="38" Margin="6,0,0,0" Command="{Binding LastPageCommand}" IsEnabled="{Binding CanNextLast}" ToolTip.Tip="Trang cuối" />
+                <TextBlock Text="dòng/trang" VerticalAlignment="Center" Margin="14,0,6,0"
+                           FontSize="12.5" Foreground="{DynamicResource TextSecondaryBrush}" />
+                <ComboBox Width="80" VerticalAlignment="Center" ItemsSource="{Binding PageSizes}"
+                          SelectedItem="{Binding PageSize}" IsEnabled="{Binding CanInteract}" />
+            </StackPanel>
+
+            <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" IsVisible="{Binding HasSelection}">
+                <Button Command="{Binding ClearSelectionCommand}" IsEnabled="{Binding CanInteract}">
+                    <TextBlock><Run Text="✖ Bỏ chọn (" /><Run Text="{Binding SelectedCount}" /><Run Text=")" /></TextBlock>
+                </Button>
+                <Button Classes="success" Margin="8,0,0,0" Command="{Binding MarkSoldCommand}" IsEnabled="{Binding CanInteract}">
+                    <TextBlock><Run Text="✔ Đã bán (" /><Run Text="{Binding SelectedCount}" /><Run Text=")" /></TextBlock>
+                </Button>
+                <Button Margin="8,0,0,0" Command="{Binding RegenSkusCommand}" IsEnabled="{Binding CanInteract}"
+                        ToolTip.Tip="Cấp SKU B##### mới cho các dòng chọn (vá đuôi tên nếu có tên-sửa)">
+                    <TextBlock><Run Text="🆕 Sinh SKU mới (" /><Run Text="{Binding SelectedCount}" /><Run Text=")" /></TextBlock>
+                </Button>
+                <Button Classes="danger" Margin="8,0,0,0" Command="{Binding DeleteSelectedCommand}" IsEnabled="{Binding CanInteract}">
+                    <TextBlock><Run Text="🗑 Xóa nhiều (" /><Run Text="{Binding SelectedCount}" /><Run Text=")" /></TextBlock>
+                </Button>
+            </StackPanel>
+        </Grid>
+
+        <!-- ════ Lưới dữ liệu ════ -->
+        <Border Grid.Row="4" Classes="card" ClipToBounds="True">
+            <DataGrid Classes="data" ItemsSource="{Binding Rows}" BorderThickness="0" IsReadOnly="True"
+                      AutoGenerateColumns="False" CanUserSortColumns="False" HeadersVisibility="Column">
+                <DataGrid.Columns>
+                    <DataGridTemplateColumn Width="40">
+                        <DataGridTemplateColumn.CellTemplate>
+                            <DataTemplate><CheckBox IsChecked="{Binding IsSelected}" HorizontalAlignment="Center" /></DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                    </DataGridTemplateColumn>
+                    <DataGridTemplateColumn Width="44">
+                        <DataGridTemplateColumn.CellTemplate>
+                            <DataTemplate>
+                                <Button Content="✏" Width="28" Height="26" Padding="0" HorizontalAlignment="Center" ToolTip.Tip="Sửa dòng"
+                                        Command="{Binding $parent[UserControl].DataContext.EditRowCommand}" CommandParameter="{Binding}" />
+                            </DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                    </DataGridTemplateColumn>
+                    <DataGridTemplateColumn Header="Acc" Width="130">
+                        <DataGridTemplateColumn.CellTemplate>
+                            <DataTemplate><TextBlock Classes="cell" Text="{Binding AccLabel}" ToolTip.Tip="{Binding AccLabel}" /></DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                    </DataGridTemplateColumn>
+                    <DataGridTemplateColumn Header="Shop" Width="150">
+                        <DataGridTemplateColumn.CellTemplate>
+                            <DataTemplate><TextBlock Classes="cell" Text="{Binding ShopLabel}" ToolTip.Tip="{Binding ShopLabel}" /></DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                    </DataGridTemplateColumn>
+                    <DataGridTextColumn Header="Dòng" Binding="{Binding RowNo}" Width="55" />
+                    <DataGridTemplateColumn Header="Link" Width="1.4*">
+                        <DataGridTemplateColumn.CellTemplate>
+                            <DataTemplate><TextBlock Classes="cell" Text="{Binding Link}" ToolTip.Tip="{Binding Link}" /></DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                    </DataGridTemplateColumn>
+                    <DataGridTextColumn Header="Giá bán" Binding="{Binding PriceSale}" Width="90" />
+                    <DataGridTextColumn Header="SKU" Binding="{Binding Sku}" Width="110" />
+                    <DataGridTextColumn Header="ItemId" Binding="{Binding ItemId}" Width="120" />
+                    <DataGridTemplateColumn Header="Tên gốc" Width="1.6*">
+                        <DataGridTemplateColumn.CellTemplate>
+                            <DataTemplate><TextBlock Classes="cell" Text="{Binding NameOriginal}" ToolTip.Tip="{Binding NameOriginal}" /></DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                    </DataGridTemplateColumn>
+                    <DataGridTemplateColumn Header="Tên đã sửa" Width="1.6*">
+                        <DataGridTemplateColumn.CellTemplate>
+                            <DataTemplate><TextBlock Classes="cell" Text="{Binding NameRewritten}" ToolTip.Tip="{Binding NameRewritten}" /></DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                    </DataGridTemplateColumn>
+                    <DataGridTextColumn Header="Đã bán" Binding="{Binding SoldCount}" Width="70" />
+                    <DataGridTextColumn Header="Sửa lúc" Binding="{Binding UpdatedLocal}" Width="120" />
+                </DataGrid.Columns>
+            </DataGrid>
+        </Border>
+
+        <!-- ════ Status cuối ════ -->
+        <TextBlock Grid.Row="5" Margin="2,10,0,0" Text="{Binding Status}" FontSize="12.5"
+                   Foreground="{DynamicResource TextSecondaryBrush}"
+                   IsVisible="{Binding Status, Converter={StaticResource StringToBool}}" />
+    </Grid>
+</UserControl>

@@ -3,6 +3,9 @@ using System.ComponentModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Shopee.Core.BigSeller;
+using Shopee.Core.Coordination;
+using Shopee.Core.Progress;
+using Shopee.Core.Scrape;
 using Shopee.Suite.Modules.BigSeller;
 using Shopee.Suite.Modules.Scrape;
 using Shopee.Suite.Modules.UpdateProduct;
@@ -78,7 +81,15 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         Scrape.PropertyChanged += OnRunStateChanged;
         Update.PropertyChanged += OnRunStateChanged;
         Update.JobsChanged += OnRunJobsChanged;
+
+        // Nút "⏯ Tiếp tục việc dở": đếm lại số việc CHẠY TAY còn dở khi tiến độ 2 store đổi (BeginRun/FinishRun/
+        // Clear đều bắn Changed) — các store bắn từ luồng runner nên marshal về UI thread. Đếm lần đầu do
+        // Rebuild() phía trên đã gọi RecomputeResumePending().
+        ScrapeProgressStore.Shared.Changed += OnProgressStoresChanged;
+        OpProgressStore.Shared.Changed += OnProgressStoresChanged;
     }
+
+    private void OnProgressStoresChanged() => UiThread.Post(RecomputeResumePending);
 
     private void OnStoreChanged()
     {
@@ -100,6 +111,9 @@ public sealed partial class WorkspaceViewModel : ObservableObject
     {
         OnPropertyChanged(nameof(AnyRunning));
         StopAllCommand.NotifyCanExecuteChanged();
+        // Việc chuyển running→stopped (user bấm Dừng) làm 1 mục thành "còn dở" — đếm lại luôn tại đây (ngoài
+        // đường store Changed) để nút "⏯ Tiếp tục việc dở" hiện ngay khi vừa dừng.
+        RecomputeResumePending();
     });
 
     private void Rebuild()
@@ -122,6 +136,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
 
         SelectedAccount = Accounts.FirstOrDefault(a => a.Account.Id == prevId) ?? Accounts.FirstOrDefault();
         Status = $"{Accounts.Count} tài khoản BigSeller.";
+        RecomputeResumePending();   // list acc đổi → map lại các mục "còn dở" theo acc/shop hiện có
     }
 
     partial void OnSelectedAccountChanged(WorkspaceAccountViewModel? value)
@@ -258,5 +273,114 @@ public sealed partial class WorkspaceViewModel : ObservableObject
     {
         Update.StopAllSingle();
         if (Scrape.StopCommand.CanExecute(null)) Scrape.StopCommand.Execute(null);
+    }
+
+    // ── Tiếp tục việc CHẠY TAY còn dở (sau khi mở lại app / bị dừng giữa chừng) ─────────────────────────
+    // Chỉ dành cho việc user tự bấm chạy tại Workspace. Việc HUB giao có đường resume riêng (AssignmentWorker
+    // ResumeMineAsync + nút ▶ trên Fleet) → LOẠI khỏi đây để tránh chạy đôi.
+
+    /// <summary>1 việc chạy-tay còn dở: op (scrape/import/update) + tk gộp + shop cụ thể (để set SelectedShop
+    /// rồi phóng đúng entry-point silent).</summary>
+    private sealed record ResumeItem(string Op, WorkspaceAccountViewModel Acct, BigSellerShop Shop);
+
+    private readonly List<ResumeItem> _resumePending = [];
+
+    /// <summary>Số việc chạy-tay còn dở mà máy này tiếp tục được (đã loại việc hub quản + việc đang chạy thật).</summary>
+    public int ResumePendingCount => _resumePending.Count;
+    public bool HasResumePending => _resumePending.Count > 0;
+    public string ResumeButtonText => $"⏯ Tiếp tục việc dở ({_resumePending.Count})";
+
+    /// <summary>Tooltip liệt kê từng mục dở (op · shop · acc, mỗi mục 1 dòng).</summary>
+    public string ResumeTooltip => _resumePending.Count == 0
+        ? ""
+        : "Chạy tiếp các việc còn dở:\n" +
+          string.Join("\n", _resumePending.Select(r => $"• {OpLabel(r.Op)} · {r.Shop.DisplayName} ({r.Acct.DisplayName})"));
+
+    private static string OpLabel(string op) => op switch
+    {
+        "scrape" => "Scrape", "import" => "Import", "update" => "Update", _ => op,
+    };
+
+    /// <summary>true nếu Hub ĐANG quản việc (acc,shop,op) này: assignment còn SỐNG (queued|running — hub sắp/đang
+    /// chạy) hoặc nằm trong danh sách gián đoạn (có nút ▶ resume riêng trên Fleet) → KHÔNG mời tiếp-tục-tay để
+    /// tránh chạy đôi. Bản đã KẾT THÚC (done/failed/canceled còn trong snapshot 2h) KHÔNG tính — việc hub đã xong/
+    /// đã huỷ hẳn thì việc chạy-tay dở của user vẫn phải tiếp tục được.</summary>
+    private static bool HubManages(string accId, string shopId, string op)
+    {
+        var fleet = CoordinationRuntime.Hub?.CurrentFleet;
+        if (fleet is null) return false;
+        bool Match(Assignment a) =>
+            string.Equals(a.BigsellerId, accId, StringComparison.Ordinal) &&
+            string.Equals(a.ShopId, shopId, StringComparison.Ordinal) &&
+            string.Equals(a.Op, op, StringComparison.Ordinal);
+        return fleet.Assignments.Any(a => Match(a) && a.Status is "queued" or "running") || fleet.Interrupted.Any(Match);
+    }
+
+    /// <summary>Đếm lại các việc chạy-tay còn dở: scrape (ScrapeProgressStore) + import/update (OpProgressStore)
+    /// có status ∈ {running (kẹt do crash), stopped (dừng dở)}, map về acc/shop hiện có, loại việc hub quản +
+    /// việc đang chạy thật lúc này. Gọi trên UI thread (đọc Accounts + set observable).</summary>
+    private void RecomputeResumePending()
+    {
+        _resumePending.Clear();
+
+        // Scrape: mỗi (acc, sheet) có tiến độ running/stopped → ứng viên tiếp tục dòng còn thiếu.
+        foreach (var p in ScrapeProgressStore.Shared.All())
+        {
+            if (p.Status is not ("running" or "stopped")) continue;
+            var acct = Accounts.FirstOrDefault(a => a.Account.Id == p.AccountId);
+            var shop = acct?.Account.Shops.FirstOrDefault(s =>
+                string.Equals(s.ShopeeDataSheet ?? "", p.Sheet ?? "", StringComparison.OrdinalIgnoreCase));
+            if (acct is null || shop is null) continue;                               // acc/shop đã xoá → bỏ
+            if (HubManages(p.AccountId, shop.Id, "scrape")) continue;                 // hub quản → bỏ
+            if (acct.ScrapeTarget.IsShopRunning?.Invoke(shop) ?? false) continue;     // đang scrape thật → bỏ
+            _resumePending.Add(new ResumeItem("scrape", acct, shop));
+        }
+
+        // Import/Update: tiến độ per-SP running/stopped → ứng viên.
+        foreach (var (accId, sheet, op, status) in OpProgressStore.Shared.Snapshot())
+        {
+            if (op is not ("import" or "update")) continue;
+            if (status is not ("running" or "stopped")) continue;
+            var acct = Accounts.FirstOrDefault(a => a.Account.Id == accId);
+            var shop = acct?.Account.Shops.FirstOrDefault(s =>
+                string.Equals(s.ShopeeDataSheet ?? "", sheet ?? "", StringComparison.OrdinalIgnoreCase));
+            if (acct is null || shop is null) continue;
+            if (HubManages(accId, shop.Id, op)) continue;
+            if (Update.IsUpdateRunning(accId)) continue;   // acc đang chạy 1 workflow update thật → bỏ
+            _resumePending.Add(new ResumeItem(op, acct, shop));
+        }
+
+        OnPropertyChanged(nameof(ResumePendingCount));
+        OnPropertyChanged(nameof(HasResumePending));
+        OnPropertyChanged(nameof(ResumeButtonText));
+        OnPropertyChanged(nameof(ResumeTooltip));
+        ResumePendingWorkCommand.NotifyCanExecuteChanged();
+    }
+
+    /// <summary>Nút "⏯ Tiếp tục việc dở (N)": chạy lại TẤT CẢ mục còn dở qua đúng entry-point silent (fire-and-
+    /// forget như AssignmentWorker.LaunchCore) — KHÔNG truyền override dòng/process → dùng cấu hình client.</summary>
+    [RelayCommand(CanExecute = nameof(HasResumePending))]
+    private void ResumePendingWork()
+    {
+        // Chụp danh sách trước: launch khiến 2 store bắn Changed → RecomputeResumePending làm rỗng _resumePending.
+        foreach (var item in _resumePending.ToList())
+        {
+            switch (item.Op)
+            {
+                case "scrape":
+                    item.Acct.ScrapeTarget.SelectedShop = item.Shop;
+                    _ = Scrape.RunSingleAsync(item.Acct.ScrapeTarget, resume: true, silent: true);
+                    break;
+                case "import":
+                    item.Acct.UpdateTarget.SelectedShop = item.Shop;
+                    _ = Update.RunImportSingleAsync(item.Acct.UpdateTarget, silent: true);
+                    break;
+                case "update":
+                    item.Acct.UpdateTarget.SelectedShop = item.Shop;
+                    _ = Update.RunUpdateSingleAsync(item.Acct.UpdateTarget, silent: true);
+                    break;
+            }
+        }
+        RecomputeResumePending();
     }
 }

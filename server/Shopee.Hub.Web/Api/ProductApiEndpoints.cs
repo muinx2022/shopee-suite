@@ -85,6 +85,33 @@ public static class ProductApiEndpoints
             return Results.Json(await pdb.AppendRowsAsync(r, by, ct));
         });
 
+        // ── RESUME: đánh dấu đã Import-to-store N itemId (import lại là SAI → GetImportIds lọc bỏ) ──
+        api.MapPost(HubRoutes.ProductsMarkImported, async (ProductMarkStoreRequest? r, IServiceProvider sp, CancellationToken ct) =>
+        {
+            var pdb = sp.GetService<ProductDb>();
+            if (pdb is null || !pdb.IsReady) return PgNotReady();
+            if (r is null) return Results.BadRequest();
+            return Results.Json(new ProductMarkStoreResponse(await pdb.MarkImportedAsync(r.Acct, r.Sheet, r.ItemIds ?? [], ct)));
+        });
+
+        // ── RESUME: đánh dấu đã Update N itemId (store_updated_name = tên hiện tại → record-map loại tới khi đổi tên) ──
+        api.MapPost(HubRoutes.ProductsMarkUpdated, async (ProductMarkStoreRequest? r, IServiceProvider sp, CancellationToken ct) =>
+        {
+            var pdb = sp.GetService<ProductDb>();
+            if (pdb is null || !pdb.IsReady) return PgNotReady();
+            if (r is null) return Results.BadRequest();
+            return Results.Json(new ProductMarkStoreResponse(await pdb.MarkUpdatedAsync(r.Acct, r.Sheet, r.ItemIds ?? [], ct)));
+        });
+
+        // ── RESUME: xoá tiến độ store (op="import"|"update") của 1 (acc + sheet) — "Chạy lại từ đầu" ──
+        api.MapPost(HubRoutes.ProductsResetStoreProgress, async (ProductResetStoreRequest? r, IServiceProvider sp, CancellationToken ct) =>
+        {
+            var pdb = sp.GetService<ProductDb>();
+            if (pdb is null || !pdb.IsReady) return PgNotReady();
+            if (r is null) return Results.BadRequest();
+            return Results.Json(new ProductResetStoreResponse(await pdb.ResetStoreProgressAsync(r.Acct, r.Sheet, r.Op ?? "", ct)));
+        });
+
         // ── Import: body = bytes xlsx (đọc Request.Body như PUT /files, KHÔNG [FromBody]) ──
         api.MapPost(HubRoutes.ProductsImportXlsx, async (string? acct, string? mode, string? file,
             int? linkCol, int? priceCol, int? skuCol, int? itemCol, int? nameCol, int? rewrittenCol,
@@ -113,6 +140,95 @@ public static class ProductApiEndpoints
             if (string.IsNullOrEmpty(acct)) return Results.BadRequest();
             var (bytes, fileName) = await pdb.ExportXlsxAsync(acct, sheet, ct, ShopTitles(sp, acct));
             return Results.File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fileName);
+        });
+
+        // ══ Trang "📦 Dữ liệu" (mọi shop) — client desktop thao tác qua HTTP như Blazor gọi in-process ══
+
+        // ── Đọc: đếm + 1 trang khớp lọc (Limit kẹp [1..500], Offset ≥ 0) trong 1 round-trip ──
+        api.MapPost(HubRoutes.ProductsAllData, async (AllDataQueryRequest? r, IServiceProvider sp, CancellationToken ct) =>
+        {
+            var pdb = sp.GetService<ProductDb>();
+            if (pdb is null || !pdb.IsReady) return PgNotReady();
+            if (r is null) return Results.BadRequest();
+            var f = r.Filter ?? new AllDataFilter(null, null, null, null, null, false, false);   // JSON thiếu filter → không lọc
+            var limit = Math.Clamp(r.Limit, 1, 500);
+            var offset = Math.Max(0, r.Offset);
+            var total = await pdb.CountAllAsync(f, ct);
+            var rows = await pdb.QueryAllAsync(f, offset, limit, ct);
+            return Results.Json(new AllDataPage(total, rows));
+        });
+
+        // ── Ghi: đánh dấu "đã bán" cho các khoá vị trí ──
+        api.MapPost(HubRoutes.ProductsMarkSold, async (ProductKeysRequest? r, IServiceProvider sp, CancellationToken ct) =>
+        {
+            var pdb = sp.GetService<ProductDb>();
+            if (pdb is null || !pdb.IsReady) return PgNotReady();
+            if (r is null) return Results.BadRequest();
+            var keys = r.Keys.Select(k => (k.Acct, k.Sheet, k.RowNo)).ToList();
+            return Results.Json(new ProductCountResponse(await pdb.MarkSoldAsync(keys, ct)));
+        });
+
+        // ── Ghi: cấp lại SKU mới cho các khoá vị trí ──
+        api.MapPost(HubRoutes.ProductsRegenSkus, async (ProductKeysRequest? r, IServiceProvider sp, CancellationToken ct) =>
+        {
+            var pdb = sp.GetService<ProductDb>();
+            if (pdb is null || !pdb.IsReady) return PgNotReady();
+            if (r is null) return Results.BadRequest();
+            var keys = r.Keys.Select(k => (k.Acct, k.Sheet, k.RowNo)).ToList();
+            return Results.Json(new ProductCountResponse(await pdb.RegenerateSkusAsync(keys, ct)));
+        });
+
+        // ── Ghi: xoá các dòng theo khoá vị trí (kèm lịch sử bán) ──
+        api.MapPost(HubRoutes.ProductsDeleteRows, async (ProductKeysRequest? r, IServiceProvider sp, CancellationToken ct) =>
+        {
+            var pdb = sp.GetService<ProductDb>();
+            if (pdb is null || !pdb.IsReady) return PgNotReady();
+            if (r is null) return Results.BadRequest();
+            var keys = r.Keys.Select(k => (k.Acct, k.Sheet, k.RowNo)).ToList();
+            return Results.Json(new ProductCountResponse(await pdb.DeleteRowsByKeysAsync(keys, ct)));
+        });
+
+        // ── Ghi: sửa 1 dòng (Ok=false = không tìm thấy, ví dụ đã bị xoá) ──
+        api.MapPost(HubRoutes.ProductsUpdateRow, async (ProductUpdateRowRequest? r, HttpRequest req,
+            IServiceProvider sp, CancellationToken ct) =>
+        {
+            var pdb = sp.GetService<ProductDb>();
+            if (pdb is null || !pdb.IsReady) return PgNotReady();
+            if (r is null) return Results.BadRequest();
+            var by = req.Headers["X-Machine-Id"].ToString();
+            var ok = await pdb.UpdateRowAsync(r.Acct, r.Sheet, r.RowNo, r.Data, by, ct);
+            return Results.Json(new ProductUpdateRowResponse(ok));
+        });
+
+        // ── Ghi: thêm 1 dòng vào cuối sheet — SKU trống → server tự sinh B##### rồi trả về ──
+        api.MapPost(HubRoutes.ProductsInsertRow, async (ProductInsertRowRequest? r, HttpRequest req,
+            IServiceProvider sp, CancellationToken ct) =>
+        {
+            var pdb = sp.GetService<ProductDb>();
+            if (pdb is null || !pdb.IsReady) return PgNotReady();
+            if (r is null) return Results.BadRequest();
+            if (string.IsNullOrEmpty(r.Acct) || string.IsNullOrEmpty(r.Sheet)) return Results.BadRequest();
+            var data = r.Data;
+            if (string.IsNullOrWhiteSpace(data.Sku))
+            {
+                var codes = await pdb.GenerateSkusAsync(r.Acct, r.Sheet, 1, ct);
+                data = data with { Sku = codes.Count > 0 ? codes[0] : "" };
+            }
+            var by = req.Headers["X-Machine-Id"].ToString();
+            var rowNo = await pdb.InsertRowAtEndAsync(r.Acct, r.Sheet, data, by, ct);
+            return Results.Json(new ProductInsertRowResponse(rowNo, data.Sku));
+        });
+
+        // ── Đọc: có dòng KHÁC trong shop cùng SKU? (sku rỗng → false; excludeRowNo mặc định -1 = không loại dòng nào) ──
+        api.MapGet(HubRoutes.ProductsSkuExists, async (string? acct, string? sheet, string? sku, int? excludeRowNo,
+            IServiceProvider sp, CancellationToken ct) =>
+        {
+            var pdb = sp.GetService<ProductDb>();
+            if (pdb is null || !pdb.IsReady) return PgNotReady();
+            var s = (sku ?? "").Trim();
+            if (s.Length == 0) return Results.Json(new ProductSkuExistsResponse(false));
+            var exists = await pdb.ExistsSkuInShopAsync(acct ?? "", sheet ?? "", s, excludeRowNo ?? -1, ct);
+            return Results.Json(new ProductSkuExistsResponse(exists));
         });
     }
 

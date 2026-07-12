@@ -4,11 +4,10 @@
 @inject HubDatabase Db
 @inject IJSRuntime JS
 
-<p class="hint m-hide">Máy tự đăng ký bằng token. Ở đây bạn reset việc (nhả khoá acc ngay), đặt vai trò, hoặc xoá &amp; chặn máy.</p>
+<p class="hint m-hide">Máy tự đăng ký bằng token. Ở đây bạn reset việc (nhả khoá acc ngay), tiếp tục việc gián đoạn của máy, đặt vai trò, hoặc xoá &amp; chặn máy.</p>
 
 <div class="bar">
     <span class="stat">@Snap.Machines.Count máy · @RunningCount đang chạy · @QueuedCount chờ</span>
-    <button class="btn danger" @onclick="CancelAllWork">✖ Huỷ MỌI việc (chạy + chờ)</button>
     <span class="action">@_status</span>
 </div>
 
@@ -22,11 +21,19 @@
         var role = Snap.Roles.FirstOrDefault(r => r.MachineId == m.MachineId)?.Role ?? MachineRoles.Off;
         var held = Snap.Assignments.Count(a => a.Status is "running" or "queued" && (a.ClaimedByMachineId == m.MachineId || a.TargetMachineId == m.MachineId))
                    + Snap.Leases.Count(l => l.MachineId == m.MachineId);
+        // Việc gián đoạn của MÁY NÀY: failed có claimed_by (máy đã claim); canceled lúc còn queued chỉ có target.
+        var interrupted = Snap.Interrupted.Count(a => a.ClaimedByMachineId == m.MachineId || a.TargetMachineId == m.MachineId);
         <tr>
             <td><b>@m.Hostname</b><div class="mono m-hide" style="font-size:11px;color:#64748b">@m.MachineId[..Math.Min(12, m.MachineId.Length)]</div></td>
             <td data-label="Trạng thái">@pres.Dot @pres.Label</td>
             <td data-label="Brave max">@(m.MaxBrave > 0 ? m.MaxBrave.ToString() : "—")</td>
-            <td data-label="Việc đang giữ">@(held > 0 ? $"{held}" : "—")</td>
+            <td data-label="Việc đang giữ">
+                @(held > 0 ? $"{held}" : "—")
+                @if (interrupted > 0)
+                {
+                    <div><span class="pill warn" title="Việc gián đoạn (dừng/lỗi, chưa xong) của máy này — bấm ▶ Tiếp tục để đưa về hàng chờ.">⏯ @interrupted việc gián đoạn</span></div>
+                }
+            </td>
             <td data-label="Vai trò">
                 <select value="@role" @onchange="e => SetRole(m.MachineId, e.Value?.ToString())">
                     @foreach (var (key, disp) in FleetStateService.RoleChoices)
@@ -36,6 +43,10 @@
                 </select>
             </td>
             <td data-label="Hành động">
+                @if (interrupted > 0)
+                {
+                    <button class="btn primary sm" title="Đưa mọi việc gián đoạn của máy về hàng chờ (giữ tham số) — dùng sau khi update app máy này." @onclick="() => ResumeMachine(m.MachineId, m.Hostname)">▶ Tiếp tục (@interrupted)</button>
+                }
                 <button class="btn sm" @onclick="() => ResetMachine(m.MachineId, m.Hostname)">⟳ Reset việc</button>
                 <button class="btn danger sm" @onclick="() => DeleteMachine(m.MachineId, m.Hostname)">🗑 Xoá &amp; chặn</button>
             </td>
@@ -111,13 +122,21 @@
         _status = "✔ Đã bỏ chặn — máy vào lại được.";
     }
 
-    private async Task CancelAllWork()
+    // Tiếp tục MỌI việc gián đoạn của 1 máy: đưa từng bản về 'queued' (giữ tham số) → thao tác chính sau khi
+    // update app máy đó (mọi việc đang dở của nó quay lại hàng chờ). Không cần confirm — chỉ requeue, không phá gì.
+    private void ResumeMachine(string machineId, string host)
     {
-        if (!await JS.InvokeAsync<bool>("confirm", $"Huỷ TẤT CẢ {RunningCount + QueuedCount} việc (đang chạy + chờ) trên mọi máy?")) return;
-        var n = 0;
-        foreach (var a in Snap.Assignments.Where(a => a.Status is "running" or "queued"))
-        { Db.CancelAssignment(a.Id); n++; }
-        _status = $"✖ Đã huỷ {n} việc (chạy + chờ).";
+        var items = Snap.Interrupted.Where(a => a.ClaimedByMachineId == machineId || a.TargetMachineId == machineId).ToList();
+        if (items.Count == 0) return;
+        var ok = 0; var errs = new List<string>();
+        foreach (var a in items)
+        {
+            var err = Db.ResumeAssignment(a.Id);
+            if (err is null) ok++; else errs.Add(err);
+        }
+        _status = errs.Count == 0
+            ? $"▶ Đã cho {ok} việc của {host} chạy lại (về hàng chờ)."
+            : $"▶ Tiếp tục {ok} việc của {host}; {errs.Count} không được: {string.Join("; ", errs.Distinct())}";
         FleetState.Refresh();
     }
 }

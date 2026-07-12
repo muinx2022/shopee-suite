@@ -6,6 +6,7 @@ using Shopee.Core.Ai;
 using Shopee.Core.BigSeller;
 using Shopee.Core.Coordination;
 using Shopee.Core.Infrastructure;
+using Shopee.Core.Progress;
 using Shopee.Modules.UpdateProduct;
 using Shopee.Suite.Infrastructure;
 using Shopee.Suite.Services;
@@ -229,6 +230,9 @@ public sealed partial class UpdateProductViewModel : ModuleViewModelBase
         var prefix = $"[{a.DisplayName}]";
         var coordOp = kind switch { UpdateKind.Import => CoordOp.Import, UpdateKind.Update => CoordOp.Update, _ => CoordOp.Rewrite };
         var coordKey = new CoordKey(a.Id, s.Id, s.ShopeeDataSheet, coordOp);
+        // RESUME per-SP (chỉ Import/Update — rewrite không có tiến độ store): đánh dấu running lúc chạy, completed/
+        // stopped lúc kết thúc để UI biết lượt nào còn dở. null = op không theo dõi (rewrite).
+        var opProg = kind == UpdateKind.Import ? "import" : kind == UpdateKind.Update ? "update" : null;
         ILeaseHandle? lease = null;
         try
         {
@@ -261,6 +265,7 @@ public sealed partial class UpdateProductViewModel : ModuleViewModelBase
             // những dòng nào". Fire-and-forget, no-op khi Hub tắt (chạy 1 máy).
             runner.RowsCompleted += (from, to) => Coordination.Hub.PublishProgress(coordKey, from, to);
             job.Runner = runner;
+            if (opProg != null) OpProgressStore.Shared.BeginRun(a.Id, s.ShopeeDataSheet, opProg, a.DisplayName);
             LogA($"▶ {name} — {prefix} (chạy song song).");
             await action(runner, ctx, job.Cts.Token).ConfigureAwait(false);
             // Engine có thể thoát ÊM khi bị hủy (OuterLoop check IsCancellationRequested ở đầu vòng; supervisor
@@ -270,15 +275,17 @@ public sealed partial class UpdateProductViewModel : ModuleViewModelBase
             {
                 LogA($"{prefix} ■ đã dừng (hủy giữa chừng).");
                 Coordination.Hub.PublishCompletion(coordKey, "stopped", 0);
+                if (opProg != null) OpProgressStore.Shared.FinishRun(a.Id, s.ShopeeDataSheet, opProg, completed: false);
             }
             else
             {
                 LogA($"{prefix} ✔ xong {name}.");
                 Coordination.Hub.PublishCompletion(coordKey, "completed", 0);
+                if (opProg != null) OpProgressStore.Shared.FinishRun(a.Id, s.ShopeeDataSheet, opProg, completed: true);
             }
         }
-        catch (OperationCanceledException) { LogA($"{prefix} ■ đã dừng."); Coordination.Hub.PublishCompletion(coordKey, "stopped", 0); }
-        catch (Exception ex) { LogA($"{prefix} ✖ lỗi: {ex.Message}"); Coordination.Hub.PublishCompletion(coordKey, "stopped", 0); }
+        catch (OperationCanceledException) { LogA($"{prefix} ■ đã dừng."); Coordination.Hub.PublishCompletion(coordKey, "stopped", 0); if (opProg != null) OpProgressStore.Shared.FinishRun(a.Id, s.ShopeeDataSheet, opProg, completed: false); }
+        catch (Exception ex) { LogA($"{prefix} ✖ lỗi: {ex.Message}"); Coordination.Hub.PublishCompletion(coordKey, "stopped", 0); if (opProg != null) OpProgressStore.Shared.FinishRun(a.Id, s.ShopeeDataSheet, opProg, completed: false); }
         finally
         {
             if (lease is not null) { try { await lease.DisposeAsync().ConfigureAwait(false); } catch { } }
@@ -298,6 +305,27 @@ public sealed partial class UpdateProductViewModel : ModuleViewModelBase
     public void StopAllSingle()
     {
         foreach (var j in _wsJobs.SnapshotSelect(j => j)) CancelJob(j);
+    }
+
+    /// <summary>Xoá tiến độ RESUME per-SP của 1 shop cho 1 op ("import"|"update") — "Chạy lại từ đầu": Clear store
+    /// local + (acc hub-mode) gọi Hub xoá mốc store_imported_at/store_updated_at. CHƯA gắn UI (hạng mục khác làm nút),
+    /// chỉ expose method + log. Lỗi Hub KHÔNG chặn — store local đã xoá là đủ để lượt sau làm lại từ đầu.</summary>
+    public async Task ResetOpProgressAsync(UpdateRunTargetViewModel target, string op)
+    {
+        if (target?.SelectedShop is not { } s) return;
+        var a = target.Account;
+        var sheet = s.ShopeeDataSheet;
+        OpProgressStore.Shared.Clear(a.Id, sheet, op);
+        LogAcc(a.Id, a.DisplayName, $"↺ đã xoá tiến độ {op} (chạy lại từ đầu) cho shop {s.Name}.");
+        if (a.UsesHubData && CoordinationRuntime.Client is { } client)
+        {
+            try
+            {
+                var n = await client.ResetProductStoreProgressAsync(a.Id, sheet, op).ConfigureAwait(false);
+                LogAcc(a.Id, a.DisplayName, $"↺ Hub: xoá mốc store {op} — {n} dòng.");
+            }
+            catch (Exception ex) { LogAcc(a.Id, a.DisplayName, $"↺ Hub reset {op} lỗi (store local đã xoá là đủ): {ex.Message}"); }
+        }
     }
 
     // Huỷ 1 job an toàn: job có thể vừa xong + finally đã Dispose Cts giữa lúc ta đọc dict → Cancel() ném

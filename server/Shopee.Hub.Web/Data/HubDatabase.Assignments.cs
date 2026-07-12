@@ -153,6 +153,47 @@ VALUES($id,$b,$s,$sh,$o,$t,$p,'queued','','','',$ca,$ua,$sr,$er,$pl,$pr,$fs,$rl)
         }
     }
 
+    /// <summary>Việc GIÁN ĐOẠN để operator bấm ▶ Tiếp tục (resume): bản MỚI NHẤT của mỗi nhóm (acc,shop,op)
+    /// đang 'failed'/'canceled' trong 7 ngày, MÀ nhóm đó không còn bản queued|running đang mở VÀ ledger CHƯA
+    /// 'completed'. Sweep trước như <see cref="ListAssignments"/> để 'running' chết được quy về 'failed' rồi mới lọc.</summary>
+    public List<Assignment> ListInterrupted()
+    {
+        lock (_gate)
+        {
+            SweepStaleLocked(DateTimeOffset.UtcNow);
+            return ListInterruptedLocked();
+        }
+    }
+
+    /// <summary>Lõi ListInterrupted (gọi TRONG lock). Quét mọi bản 'failed'/'canceled' trong 7 ngày, sắp mới→cũ,
+    /// giữ bản MỚI NHẤT mỗi nhóm (acc,shop,op); loại nhóm còn việc đang mở (đang chạy tiếp) hoặc ledger đã
+    /// 'completed' (đã xong, khỏi mời tiếp tục). op='search' KHÔNG ghi ledger → bỏ điều kiện ledger.</summary>
+    private List<Assignment> ListInterruptedLocked()
+    {
+        var cut = Iso(DateTimeOffset.UtcNow - TimeSpan.FromDays(7));
+        var rows = new List<Assignment>();
+        using (var c = _conn.CreateCommand())
+        {
+            c.CommandText = "SELECT * FROM assignments WHERE status IN ('failed','canceled') AND updated_at >= $cut ORDER BY updated_at DESC";
+            c.Parameters.AddWithValue("$cut", cut);
+            using var rd = c.ExecuteReader();
+            while (rd.Read()) rows.Add(ReadAssignmentRow(rd));
+        }
+        var result = new List<Assignment>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);   // nhóm đã xét (chỉ giữ bản mới nhất — đã ORDER BY desc)
+        foreach (var a in rows)
+        {
+            var grp = $"{a.BigsellerId}__{a.ShopId}__{a.Op}";
+            if (!seen.Add(grp)) continue;                          // bản cũ hơn của nhóm đã lấy → bỏ
+            // Nhóm còn việc queued|running → KHÔNG "gián đoạn" (đang chờ/chạy tiếp) → bỏ.
+            if (FindOpenAssignmentLocked(a.BigsellerId, a.ShopId, a.Op) is not null) continue;
+            // Đã xong theo ledger → khỏi mời tiếp tục (search không ghi ledger nên bỏ qua điều kiện này).
+            if (a.Op != "search" && ReadLedgerLocked(grp)?.Status == "completed") continue;
+            result.Add(a);
+        }
+        return result;
+    }
+
     /// <summary>
     /// Máy <paramref name="machineId"/> (vai trò <paramref name="role"/>) lấy tối đa <paramref name="max"/> việc
     /// đủ điều kiện: đúng vai trò / được ghim, đúng thứ tự pipeline (import sau khi scrape xong, update sau khi
@@ -351,6 +392,108 @@ VALUES($id,$b,$s,$sh,$o,$t,$p,'queued','','','',$ca,$ua,$sr,$er,$pl,$pr,$fs,$rl)
             c.Parameters.AddWithValue("$ua", Iso(DateTimeOffset.UtcNow));
             c.Parameters.AddWithValue("$id", id);
             c.ExecuteNonQuery();
+        }
+    }
+
+    /// <summary>Operator bấm ▶ Tiếp tục 1 việc đã dừng/huỷ: đưa về 'queued' để claim lại, GIỮ NGUYÊN mọi cột
+    /// tham số (khoảng dòng/payload/processes/frame/reload/đích/ghim) → chạy tiếp đúng lượt cũ. Trả null = OK;
+    /// chuỗi tiếng Việt = lý do từ chối. Chỉ tiếp tục được việc 'failed'/'canceled'; nhóm (acc,shop,op) đang có
+    /// việc mở thì từ chối (kẻo 2 bản chạy song song → 2 phiên cùng cookie BigSeller).</summary>
+    public string? ResumeAssignment(string id)
+    {
+        lock (_gate)
+        {
+            Assignment? a;
+            using (var c = _conn.CreateCommand())
+            {
+                c.CommandText = "SELECT * FROM assignments WHERE id=$id";
+                c.Parameters.AddWithValue("$id", id);
+                using var rd = c.ExecuteReader();
+                a = rd.Read() ? ReadAssignmentRow(rd) : null;
+            }
+            if (a is null) return "không tìm thấy việc để tiếp tục";
+            if (a.Status is not ("failed" or "canceled")) return "chỉ tiếp tục được việc đã dừng/hủy";
+            if (FindOpenAssignmentLocked(a.BigsellerId, a.ShopId, a.Op) is not null)
+                return "đã có việc khác đang mở cho op này";
+
+            // Chỉ đụng status + bỏ claim + xoá cờ lỗi; KHÔNG chạm các cột tham số → lượt chạy lại y lệnh cũ.
+            using var u = _conn.CreateCommand();
+            u.CommandText = "UPDATE assignments SET status='queued', claimed_by='', claimed_host='', last_error='', updated_at=$ua WHERE id=$id";
+            u.Parameters.AddWithValue("$ua", Iso(DateTimeOffset.UtcNow));
+            u.Parameters.AddWithValue("$id", id);
+            u.ExecuteNonQuery();
+            return null;
+        }
+    }
+
+    /// <summary>Client gọi lúc KHỞI ĐỘNG LẠI (re-attach) để nhận lại việc đang dở của CHÍNH máy mình. Khác
+    /// <see cref="ResetMachineWork"/> (operator CHỦ ĐỘNG xoá máy → HUỶ việc): đây là máy vừa bật lại nên process
+    /// cũ CHẮC CHẮN đã chết → nhả khoá của nó rồi ĐƯA VIỆC VỀ HÀNG CHỜ, không huỷ. Trả tổng số việc về 'queued'.</summary>
+    public int ResumeMachineWork(string machineId)
+    {
+        if (string.IsNullOrWhiteSpace(machineId)) return 0;
+        lock (_gate)
+        {
+            var now = Iso(DateTimeOffset.UtcNow);
+            // (1) Nhả lease + account-lease của process ĐÃ CHẾT (máy vừa khởi động lại) → khoá single-session nhả
+            //     NGAY, khỏi chờ 5' stale. KHÔNG cancel assignment (khác ResetMachineWork).
+            foreach (var tbl in new[] { "leases", "account_leases" })
+                using (var c = _conn.CreateCommand())
+                {
+                    c.CommandText = $"DELETE FROM {tbl} WHERE machine_id=$m";
+                    c.Parameters.AddWithValue("$m", machineId);
+                    c.ExecuteNonQuery();
+                }
+
+            // (2) Việc 'running' CHÍNH máy này đang giữ (mồ côi vì process cũ chết) → về 'queued' + bỏ claim để
+            //     claim lại vòng sau.
+            int n;
+            using (var c = _conn.CreateCommand())
+            {
+                c.CommandText = "UPDATE assignments SET status='queued', claimed_by='', claimed_host='', last_error='', updated_at=$ua WHERE claimed_by=$m AND status='running'";
+                c.Parameters.AddWithValue("$ua", now);
+                c.Parameters.AddWithValue("$m", machineId);
+                n = c.ExecuteNonQuery();
+            }
+
+            // (3) Hồi việc bị SweepStaleLocked đánh 'failed' OAN khi máy chết giữa chừng (đúng cờ 'hết nhịp'). Làm
+            //     TỪNG bản: chỉ hồi khi nhóm (acc,shop,op) KHÔNG còn bản mở khác (kể cả bản vừa queued ở bước 2) VÀ
+            //     ledger ≠ 'completed' → chặn chạy lại việc đã xong ở máy khác / tránh 2 bản mở cùng nhóm.
+            var revive = new List<Assignment>();
+            using (var c = _conn.CreateCommand())
+            {
+                c.CommandText = "SELECT * FROM assignments WHERE claimed_by=$m AND status='failed' AND last_error='hết nhịp (máy nhận có thể đã thoát)'";
+                c.Parameters.AddWithValue("$m", machineId);
+                using var rd = c.ExecuteReader();
+                while (rd.Read()) revive.Add(ReadAssignmentRow(rd));
+            }
+            foreach (var a in revive)
+            {
+                if (FindOpenAssignmentLocked(a.BigsellerId, a.ShopId, a.Op) is not null) continue;   // nhóm còn bản mở → bỏ
+                if (ReadLedgerLocked($"{a.BigsellerId}__{a.ShopId}__{a.Op}")?.Status == "completed") continue;   // đã xong ở máy khác
+                using var u = _conn.CreateCommand();
+                u.CommandText = "UPDATE assignments SET status='queued', claimed_by='', claimed_host='', last_error='', updated_at=$ua WHERE id=$id AND status='failed'";
+                u.Parameters.AddWithValue("$ua", now);
+                u.Parameters.AddWithValue("$id", a.Id);
+                if (u.ExecuteNonQuery() == 1) n++;
+            }
+            return n;
+        }
+    }
+
+    /// <summary>Trạng thái của bản assignment MỚI NHẤT của nhóm (acc,shop,op); null nếu chưa từng có việc.
+    /// DispatcherService dùng cho "sticky-cancel": nhóm mà bản mới nhất bị operator HUỶ ('canceled') thì auto
+    /// KHÔNG tạo lại. Query nhẹ (LIMIT 1) — đừng nạp cả bảng.</summary>
+    public string? LatestAssignmentStatus(string bs, string shop, string op)
+    {
+        lock (_gate)
+        {
+            using var c = _conn.CreateCommand();
+            c.CommandText = "SELECT status FROM assignments WHERE bigseller_id=$b AND shop_id=$s AND op=$o ORDER BY updated_at DESC LIMIT 1";
+            c.Parameters.AddWithValue("$b", bs);
+            c.Parameters.AddWithValue("$s", shop);
+            c.Parameters.AddWithValue("$o", op);
+            return c.ExecuteScalar() as string;
         }
     }
 
