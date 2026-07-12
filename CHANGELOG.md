@@ -5,6 +5,21 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Hiệu năng. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.2.0 — 2026-07-13
+
+Chủ đề: **Tab "Dữ liệu" quản lý kho sản phẩm ngay trên app + việc gián đoạn chạy TIẾP phần còn thiếu (resume), không làm lại từ đầu.**
+
+- Tab mới **Dữ liệu** (giữa Workspace và Cấu hình): quản lý kho sản phẩm Hub ngay trên app —
+  lọc theo tài khoản/shop/SKU/khoảng giá/đã bán/SKU trùng trong shop, phân trang, thêm/sửa dòng
+  (đủ 17 cột, SKU để trống tự sinh `B#####`), đánh dấu ✔ đã bán, 🆕 cấp SKU mới, 🗑 xoá nhiều dòng —
+  y như trang "Dữ liệu" trên web Hub (nhập Excel vẫn làm trên web).
+- Việc hub-giao bị dừng/lỗi giữa chừng giờ **tiếp tục được**: tiến độ import/update nhớ theo TỪNG
+  sản phẩm — bấm **▶ Tiếp tục** (tab Trạng thái hoặc Workspace) là chạy nốt phần thiếu; máy khởi động
+  lại tự nhận lại việc dở của chính nó; việc đã bấm Huỷ sẽ KHÔNG bị hub tự giao lại (muốn chạy lại thì
+  bấm Tiếp tục); chuột phải shop → xoá tiến độ import/update để chạy lại từ đầu.
+- Nút "Cập nhật & khởi động lại" **dừng êm** mọi việc đang chạy trước khi cập nhật (ghi sổ + nhả khoá
+  tài khoản ngay) — hết cảnh update xong khoá acc còn treo tới 5 phút.
+
 ## v1.1.0 — 2026-07-12
 
 Chủ đề: **Kho sản phẩm chuyển từ file Excel sang Postgres trên Hub — client đọc/ghi dữ liệu qua API, không còn đồng bộ workbook.**
