@@ -36,6 +36,10 @@
         <div class="bar">
             <input placeholder="tìm sku / itemId / tên / link…" @bind="_search" @bind:event="oninput" @onkeydown="OnSearchKey" disabled="@(!pgReady || _busy)" style="width:240px" />
             <button class="btn sm" disabled="@(!pgReady || _busy)" @onclick="DoSearch">🔍 Tìm</button>
+            @if (!string.IsNullOrEmpty(_search) || !string.IsNullOrEmpty(_appliedSearch))
+            {
+                <button class="btn sm" disabled="@(!pgReady || _busy)" @onclick="ClearSearch" title="Xoá ô tìm, hiện lại toàn bộ">✖</button>
+            }
             <span class="action">@_total.ToString("N0") dòng@(string.IsNullOrEmpty(_appliedSearch) ? "" : " khớp")</span>
             <span style="flex:1"></span>
             @* Nhập Excel vào ĐÚNG ngăn này qua WIZARD: chọn file → chọn sheet + map cột + khoảng dòng + chế độ → OK. *@
@@ -328,6 +332,14 @@
         _appliedSearch = (_search ?? "").Trim();
         _page = 1; _editRowNo = null; _edit = null; _selected.Clear(); _status = "";
         await LoadAsync();
+    }
+
+    /// <summary>Xoá ô tìm + bỏ lọc đang áp (nếu có) → hiện lại toàn bộ từ trang 1.</summary>
+    private async Task ClearSearch()
+    {
+        var hadApplied = !string.IsNullOrEmpty(_appliedSearch);
+        _search = "";
+        if (hadApplied) await DoSearch();   // đang lọc thật → nạp lại toàn bộ; chưa áp → chỉ xoá chữ trong ô
     }
 
     private async Task OnSearchKey(KeyboardEventArgs e)

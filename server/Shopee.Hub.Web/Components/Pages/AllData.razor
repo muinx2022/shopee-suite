@@ -40,6 +40,7 @@
         <input type="number" placeholder="Giá đến" @bind="_fPriceMax" disabled="@(!pgReady || _busy)" style="width:110px" />
         <label class="toggle"><input type="checkbox" @bind="_fSoldOnly" disabled="@(!pgReady || _busy)" /> Đã bán</label>
         <button class="btn primary sm" disabled="@(!pgReady || _busy)" @onclick="DoFilter">🔍 Lọc</button>
+        <button class="btn sm" disabled="@(!pgReady || _busy)" @onclick="ClearFilter" title="Xoá mọi điều kiện lọc, hiện lại toàn bộ">✖ Xóa lọc</button>
     </div>
 
     @if (!pgReady)
@@ -213,6 +214,15 @@
         _applied = BuildFilter();
         _page = 1; _selected.Clear(); _status = "";
         await LoadAsync();
+    }
+
+    /// <summary>Xoá sạch mọi điều kiện lọc về mặc định rồi nạp lại từ trang 1 (= bấm Lọc với ô trống).</summary>
+    private async Task ClearFilter()
+    {
+        _fAcct = _fSheet = _fSku = "";
+        _fPriceMin = _fPriceMax = null;
+        _fSoldOnly = false;
+        await DoFilter();
     }
 
     private async Task GoPage(int p)
