@@ -264,7 +264,7 @@
             }
             else if (_tab == "data")
             {
-                <ProductGridPanel AccountId="@row.AccountId" Sheet="@row.Sheet" />
+                <ProductGridPanel AccountId="@row.AccountId" Sheet="@row.Sheet" InitialState="_gridInitial" OnViewChanged="OnGridViewChanged" />
             }
             else
             {
@@ -393,6 +393,10 @@
     private (string AccountId, string ShopId)? _selShopKey;
     private ShopRow? _selRow;
     private string _tab = "action";
+    // Trạng thái XEM của lưới per-shop (tab data) để URL-hoá: _gridInitial áp XUỐNG panel đúng 1 lần (deep-link/F5);
+    // _gridView nhận LÊN từ panel (OnViewChanged) để ghi vào URL. Cả hai clear khi đổi chọn (Select*/SetTab).
+    private (string Q, int P, int Ps)? _gridInitial;
+    private (string Q, int P, int Ps)? _gridView;
 
     private string _pinOp = "";
     private string _pinMachine = "";
@@ -640,6 +644,7 @@
         _selAcctId = r.AccountId;
         _selRow = r;
         _action = "";
+        ClearGridView();
         UpdateUrl();
     }
 
@@ -650,12 +655,24 @@
         _selRow = null;
         _action = "";
         if (_tab is "stats" or "data") _tab = "action";   // mức acc không có tab Thống kê/Dữ liệu (chỉ ở mức shop)
+        ClearGridView();
         UpdateUrl();
     }
 
     private void SetTab(string tab)
     {
         _tab = tab;
+        ClearGridView();   // đổi tab → bỏ view lưới per-shop khỏi URL (tab data mới sẽ nạp view mặc định)
+        UpdateUrl();
+    }
+
+    // Bỏ trạng thái xem lưới per-shop (deep-link + view hiện tại) — mọi lần đổi chọn/tab để URL không dính view cũ.
+    private void ClearGridView() { _gridInitial = null; _gridView = null; }
+
+    // Panel per-shop báo view đổi (tìm/trang/cỡ) → lưu + ghi vào URL. KHÔNG set ngược xuống panel (tránh loop).
+    private void OnGridViewChanged((string Q, int P, int Ps) v)
+    {
+        _gridView = v;
         UpdateUrl();
     }
 
@@ -671,16 +688,24 @@
         var acc = _selAcctId ?? "";
         var shop = _selShopKey?.ShopId ?? "";
         var tab = _selAcctId is null ? "" : _tab;   // tab vô nghĩa khi chưa chọn gì
+        // Trạng thái xem lưới per-shop CHỈ khi đang ở tab data của 1 shop (q=search đã áp, p>1, ps≠100).
+        var gv = (tab == "data" && _selRow is not null) ? _gridView : null;
 
+        var want = new (string K, string V)[]
+        {
+            ("acc",  acc),
+            ("shop", shop),
+            ("tab",  tab),
+            ("q",    gv?.Q ?? ""),
+            ("p",    gv is { } g1 && g1.P > 1 ? g1.P.ToString() : ""),
+            ("ps",   gv is { } g2 && g2.Ps != 100 ? g2.Ps.ToString() : ""),
+        };
         var q = QueryHelpers.ParseQuery(new Uri(Nav.Uri).Query);
         string cur(string k) => q.TryGetValue(k, out var v) ? v.ToString() : "";
-        if (cur("acc") == acc && cur("shop") == shop && cur("tab") == tab) return;   // đã khớp → khỏi navigate
+        if (want.All(w => cur(w.K) == w.V)) return;   // query đã khớp → khỏi navigate
 
-        var parts = new List<string>(3);
-        if (acc.Length > 0) parts.Add("acc=" + Uri.EscapeDataString(acc));
-        if (shop.Length > 0) parts.Add("shop=" + Uri.EscapeDataString(shop));
-        if (tab.Length > 0) parts.Add("tab=" + Uri.EscapeDataString(tab));
-        Nav.NavigateTo(parts.Count == 0 ? "/" : "/?" + string.Join("&", parts), forceLoad: false, replace: true);
+        var query = string.Join("&", want.Where(w => w.V.Length > 0).Select(w => w.K + "=" + Uri.EscapeDataString(w.V)));
+        Nav.NavigateTo(query.Length == 0 ? "/" : "/?" + query, forceLoad: false, replace: true);
     }
 
     // Đọc query lúc vào trang: shop khớp (acc+shop) → chọn shop; chỉ acc khớp → chọn acc; không khớp gì (đã xoá) →
@@ -701,6 +726,15 @@
             {
                 SelectShop(row);
                 _tab = NormalizeTab(qTab, shopLevel: true);
+                // Tab data → nạp view lưới per-shop từ query (áp xuống panel lần đầu + giữ trong URL).
+                if (_tab == "data")
+                {
+                    var gq = q.TryGetValue("q", out var gqv) ? gqv.ToString() : "";
+                    var gp = q.TryGetValue("p", out var gpv) && int.TryParse(gpv.ToString(), out var pp) && pp > 1 ? pp : 1;
+                    var gps = q.TryGetValue("ps", out var gsv) && int.TryParse(gsv.ToString(), out var ss) ? ss : 100;
+                    _gridInitial = (gq, gp, gps);
+                    _gridView = (gq, gp, gps);
+                }
             }
             else if (qAcc.Length > 0 && (_rows.Any(r => r.AccountId == qAcc) || _accounts.Any(a => a.Id == qAcc)))
             {

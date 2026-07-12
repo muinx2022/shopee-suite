@@ -22,6 +22,10 @@ public sealed partial class ProductDb
         using (var ms = new MemoryStream(xlsx))
             parsed = ProductXlsxCodec.Parse(ms, overrides);
 
+        // Pre-check MỌI sheet TRƯỚC khi ghi bất kỳ sheet nào → không partial-commit khi 1 sheet có SKU trùng nội bộ
+        // (báo lỗi rõ thay vì unique_violation 23505 giữa transaction).
+        foreach (var (_, rows) in parsed) CheckNoDupSkuWithin(rows);
+
         var result = new List<ProductSheetImport>();
         var total = 0;
 
@@ -66,6 +70,8 @@ public sealed partial class ProductDb
         string acct, string sheet, List<ProductXlsxCodec.ParsedRow> rows, bool replace,
         string? sourceFile, string updatedBy, CancellationToken ct)
     {
+        // Pre-check trùng SKU nội bộ lô → báo lỗi rõ trước khi mở transaction (tránh 23505 khó hiểu giữa chừng).
+        CheckNoDupSkuWithin(rows);
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
         await using var tx = await conn.BeginTransactionAsync(ct);
 

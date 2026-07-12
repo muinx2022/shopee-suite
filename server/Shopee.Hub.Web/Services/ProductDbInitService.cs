@@ -25,6 +25,10 @@ public sealed class ProductDbInitService : BackgroundService
             {
                 await _pdb.InitAsync(ct);
                 _log.LogInformation("Postgres sẵn sàng — schema sản phẩm đã migrate.");
+                // Bật UNIQUE INDEX SKU per-shop RỜI migration (fail = còn trùng trong shop → chỉ warning, KHÔNG chặn hub).
+                var idxErr = await _pdb.TryEnsureSkuIndexAsync(ct);
+                if (idxErr is null) _log.LogInformation("Index SKU per-shop (ux_pr_shop_sku) đã bật.");
+                else _log.LogWarning("Chưa bật được index SKU per-shop (còn SKU trùng trong cùng shop?): {Error}", idxErr);
                 return;
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { return; }

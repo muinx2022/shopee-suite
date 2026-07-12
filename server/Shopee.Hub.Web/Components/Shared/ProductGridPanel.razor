@@ -74,6 +74,7 @@
             @if (_selected.Count > 0)
             {
                 <span style="flex:1"></span>
+                <button class="btn sm" disabled="@_busy" @onclick="() => _selected.Clear()">✖ Bỏ chọn (@_selected.Count)</button>
                 <button class="btn danger sm" disabled="@_busy" @onclick="DeleteSelected">🗑 Xoá @_selected.Count dòng</button>
             }
         </div>
@@ -260,6 +261,7 @@
                             <option value="append">Nối thêm (vào cuối)</option>
                         </select>
                     </label>
+                    <label class="toggle" style="margin:0 0 4px"><input type="checkbox" @bind="_wizFillSku" /> Tự sinh SKU cho dòng thiếu (B#####)</label>
                 </div>
             </div>
             <div class="modal-foot">
@@ -274,6 +276,10 @@
 @code {
     [Parameter] public string AccountId { get; set; } = "";
     [Parameter] public string Sheet { get; set; } = "";
+    // Trạng thái XEM deep-link (search đã áp, trang, dòng/trang) — áp ĐÚNG 1 LẦN lúc (acct|sheet) load lần đầu.
+    [Parameter] public (string Q, int P, int Ps)? InitialState { get; set; }
+    // Bắn khi user đổi view (tìm/đổi trang/đổi cỡ) → parent ghi vào URL. KHÔNG bắn lúc load-guard (tránh loop).
+    [Parameter] public EventCallback<(string Q, int P, int Ps)> OnViewChanged { get; set; }
 
     private static readonly int[] PageSizes = { 50, 100, 200, 500 };
     private int _pageSize = 100;
@@ -290,6 +296,7 @@
     private bool _busy, _showAll;
     private int? _editRowNo;
     private RowEdit? _edit;
+    private string _editOrigSku = "";   // SKU gốc của dòng đang sửa (biết SKU có đổi → cảnh báo trùng trong shop)
     private readonly HashSet<int> _selected = new();
     private string _loadedKey = "\0";   // chưa load lần nào (khác mọi khoá thật)
 
@@ -302,6 +309,7 @@
     // Ánh xạ 6 field nghiệp vụ (1-based; 0 = bỏ) — mặc định = ColumnOverrides.Default (1,3,4,5,6,7).
     private int _wizLink = 1, _wizPrice = 3, _wizSku = 4, _wizItem = 5, _wizName = 6, _wizRewritten = 7;
     private int _wizFrom = 2, _wizTo;   // khoảng dòng; _wizTo = 0 = hết
+    private bool _wizFillSku = true;    // tự sinh SKU 'B#####' cho dòng file thiếu SKU (mặc định BẬT)
 
     private ProductDb? Pg => Sp.GetService<ProductDb>();
     private int PageCount => Math.Max(1, (_total + _pageSize - 1) / _pageSize);
@@ -316,9 +324,22 @@
         _loadedKey = key;
         _acct = Config.BigSellerAccounts().FirstOrDefault(a => a.Id == AccountId);
         _search = _appliedSearch = _status = "";
-        _page = 1; _busy = _showAll = false; _editRowNo = null; _edit = null; _selected.Clear();
+        _page = 1; _pageSize = 100; _busy = _showAll = false; _editRowNo = null; _edit = null; _selected.Clear();
         _wizOpen = false; _wizBusy = false; _wizBytes = null; _wizError = "";   // đổi shop → đóng wizard
+        // Áp trạng thái XEM deep-link (F5) CHỈ lần đầu load shop này — KHÔNG bắn OnViewChanged (khỏi loop về parent).
+        if (InitialState is { } st)
+        {
+            _search = _appliedSearch = st.Q ?? "";
+            if (st.Ps > 0 && PageSizes.Contains(st.Ps)) _pageSize = st.Ps;
+            _page = Math.Max(1, st.P);
+        }
         await LoadAsync();
+    }
+
+    // Báo parent (Fleet) trạng thái xem hiện tại để ghi vào URL — CHỈ gọi từ hành động user (không gọi lúc load-guard).
+    private async Task NotifyView()
+    {
+        if (OnViewChanged.HasDelegate) await OnViewChanged.InvokeAsync((_appliedSearch, _page, _pageSize));
     }
 
     /// <summary>Đếm tổng + đọc trang hiện tại (kẹp _page vào [1..PageCount] TRƯỚC khi tính offset). Pg null/chưa
@@ -344,6 +365,7 @@
         _appliedSearch = (_search ?? "").Trim();
         _page = 1; _editRowNo = null; _edit = null; _selected.Clear(); _status = "";
         await LoadAsync();
+        await NotifyView();
     }
 
     /// <summary>Xoá ô tìm + bỏ lọc đang áp (nếu có) → hiện lại toàn bộ từ trang 1.</summary>
@@ -364,6 +386,7 @@
         p = Math.Clamp(p, 1, PageCount);
         _page = p; _editRowNo = null; _edit = null; _selected.Clear();
         await LoadAsync();
+        await NotifyView();
     }
 
     // Đổi số dòng/trang → về trang 1, thoát edit + bỏ chọn (như đổi trang), nạp lại. Giá trị rác → giữ _pageSize.
@@ -372,6 +395,7 @@
         if (int.TryParse(e.Value?.ToString(), out var sz) && sz > 0) _pageSize = sz;
         _page = 1; _editRowNo = null; _edit = null; _selected.Clear();
         await LoadAsync();
+        await NotifyView();
     }
 
     // Ô nhập số trang (Enter/blur) → GoPage tự kẹp [1..PageCount]. Giá trị rác → bỏ qua (re-render đưa value về _page).
@@ -391,6 +415,7 @@
     {
         _editRowNo = rowNo;
         _edit = RowEdit.From(rowNo, d);
+        _editOrigSku = d.Sku;
         _status = "";
     }
 
@@ -401,16 +426,25 @@
         if (_edit is null || _busy) return;
         var pg = Pg;
         if (pg is null || !pg.IsReady || _acct is null) return;
+        var acct = _acct.Id; var sheet = Sheet; var rowNo = _edit.RowNo; var d = _edit.ToData();
+        // SKU đổi + non-blank + đã có dòng khác trong shop mang SKU đó → cảnh báo (index sẽ chặn nếu vẫn cố).
+        var newSku = (d.Sku ?? "").Trim();
+        if (newSku.Length > 0 && !string.Equals(newSku, (_editOrigSku ?? "").Trim(), StringComparison.Ordinal))
+        {
+            var dup = await pg.ExistsSkuInShopAsync(acct, sheet, newSku, rowNo, CancellationToken.None);
+            if (dup && !await JS.InvokeAsync<bool>("confirm",
+                $"SKU '{newSku}' đã tồn tại trong shop này — vẫn lưu? (kho sẽ CHẶN nếu trùng thật)."))
+                return;
+        }
         _busy = true; _status = "⏳ Đang lưu…";
         try
         {
-            var acct = _acct.Id; var sheet = Sheet; var rowNo = _edit.RowNo; var d = _edit.ToData();
             var ok = await Task.Run(() => pg.UpdateRowAsync(acct, sheet, rowNo, d, "hub-web", CancellationToken.None));
             _editRowNo = null; _edit = null;
             await LoadAsync();
             _status = ok ? $"✔ Đã lưu dòng {rowNo}." : $"✘ Không tìm thấy dòng {rowNo} (đã bị xoá?).";
         }
-        catch (Exception ex) { _status = "✘ Lỗi lưu: " + ex.Message; }
+        catch (Exception ex) { _status = "✘ Lỗi lưu: " + ProductDb.Friendly(ex); }
         finally { _busy = false; }
     }
 
@@ -429,11 +463,13 @@
             _search = _appliedSearch = ""; _selected.Clear();
             _page = PageCount + 1;   // LoadAsync kẹp về trang cuối (đã +1 dòng nên PageCount có thể tăng)
             await LoadAsync();
+            await NotifyView();      // view đổi (bỏ tìm + nhảy trang cuối) → URL phản ánh
             _editRowNo = rowNo;
             _edit = RowEdit.From(rowNo, empty);
+            _editOrigSku = empty.Sku;
             _status = $"✔ Đã thêm dòng {rowNo} — điền dữ liệu rồi bấm ✔ Lưu.";
         }
-        catch (Exception ex) { _status = "✘ Lỗi thêm: " + ex.Message; }
+        catch (Exception ex) { _status = "✘ Lỗi thêm: " + ProductDb.Friendly(ex); }
         finally { _busy = false; }
     }
 
@@ -453,9 +489,10 @@
             var del = await Task.Run(() => pg.DeleteRowsAsync(acct, sheet, ids, CancellationToken.None));
             _selected.Clear(); _editRowNo = null; _edit = null;
             await LoadAsync();
+            await NotifyView();   // trang có thể bị kẹp lại sau khi xoá → URL phản ánh
             _status = $"✔ Đã xoá {del} dòng.";
         }
-        catch (Exception ex) { _status = "✘ Lỗi xoá: " + ex.Message; }
+        catch (Exception ex) { _status = "✘ Lỗi xoá: " + ProductDb.Friendly(ex); }
         finally { _busy = false; }
     }
 
@@ -502,7 +539,7 @@
             _wizBytes = bytes; _wizFileName = file.Name;
             _wizSheets = load.Item1; _wizSheet = load.Item2; _wizCols = load.Item3; _wizPreview = load.Item4; _wizError = load.Item5;
             _wizLink = 1; _wizPrice = 3; _wizSku = 4; _wizItem = 5; _wizName = 6; _wizRewritten = 7;
-            _wizFrom = 2; _wizTo = 0; _wizMode = "replace";
+            _wizFrom = 2; _wizTo = 0; _wizMode = "replace"; _wizFillSku = true;
             _wizOpen = true;   // mở modal kể cả khi có lỗi (báo lỗi trong modal, không đóng)
         }
         catch (Exception ex) { _status = "✘ Lỗi đọc file: " + ex.Message; }
@@ -553,15 +590,20 @@
                 Math.Max(0, _wizItem), Math.Max(0, _wizName), Math.Max(0, _wizRewritten));
 
             var rows = await Task.Run(() => { using var ms = new MemoryStream(bytes); return ProductXlsxCodec.ParseSheet(ms, sheet, ov, from, to); });
+            // Tự sinh SKU 'B#####' cho dòng file THIẾU SKU (nếu bật) → dòng nào cũng đạt chuẩn per-shop trước khi ghi.
+            var filled = 0;
+            if (_wizFillSku) (rows, filled) = await Task.Run(() => pg.FillMissingSkusAsync(acct, dest, rows, CancellationToken.None));
             var count = await Task.Run(() => pg.ImportIntoSheetAsync(acct, dest, rows, replace, src, "hub-web", CancellationToken.None));
 
             _wizOpen = false; _wizBytes = null;
             _editRowNo = null; _edit = null; _selected.Clear(); _search = _appliedSearch = "";
             _page = replace ? 1 : int.MaxValue;   // ghi đè → về trang 1; nối thêm → nhảy trang cuối (LoadAsync kẹp lại)
             await LoadAsync();
-            _status = $"✔ Đã nhập {count:N0} dòng vào shop ({(replace ? "ghi đè" : "nối thêm")}).";
+            await NotifyView();   // view đổi (bỏ tìm + đổi trang) → URL phản ánh
+            _status = $"✔ Đã nhập {count:N0} dòng vào shop ({(replace ? "ghi đè" : "nối thêm")})"
+                + (filled > 0 ? $" — tự sinh SKU cho {filled:N0} dòng thiếu." : ".");
         }
-        catch (Exception ex) { _wizError = "✘ Lỗi nhập: " + ex.Message; }
+        catch (Exception ex) { _wizError = "✘ Lỗi nhập: " + ProductDb.Friendly(ex); }
         finally { _wizBusy = false; }
     }
 

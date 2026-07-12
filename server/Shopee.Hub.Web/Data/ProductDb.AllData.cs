@@ -1,18 +1,19 @@
 using Npgsql;
+using Shopee.Core.Coordination;
 
 namespace Shopee.Hub;
 
 /// <summary>Bộ lọc trang "📦 Dữ liệu" (mọi shop): mỗi field null/blank/0 = KHÔNG lọc chiều đó.
 /// <see cref="PriceMin"/>/<see cref="PriceMax"/> so trên SỐ tách từ text price_sale (dòng không parse được bị loại
-/// khi có lọc giá). <see cref="SoldOnly"/> = chỉ dòng đã có bản ghi product_sold (sold_count &gt; 0).</summary>
+/// khi có lọc giá). <see cref="SoldOnly"/> = chỉ dòng đã có bản ghi product_sold (sold_count &gt; 0).
+/// <see cref="DupSkuOnly"/> = chỉ dòng có SKU non-blank TRÙNG với dòng khác TRONG CÙNG shop (soi trùng để dọn).</summary>
 public sealed record AllDataFilter(
-    string? Acct, string? Sheet, string? Sku, long? PriceMin, long? PriceMax, bool SoldOnly);
+    string? Acct, string? Sheet, string? Sku, long? PriceMin, long? PriceMax, bool SoldOnly, bool DupSkuOnly);
 
-/// <summary>1 dòng cho lưới "📦 Dữ liệu": khoá vị trí (AccountId, Sheet, RowNo) + ô hiển thị + số đã bán (0 nếu chưa
-/// có bản ghi product_sold).</summary>
+/// <summary>1 dòng cho lưới "📦 Dữ liệu": khoá vị trí (AccountId, Sheet, RowNo) + ĐỦ 17 ô dữ liệu (để sửa inline;
+/// lưới vẫn hiển thị 1 phần) + số đã bán (0 nếu chưa có bản ghi product_sold) + lúc sửa.</summary>
 public sealed record AllDataRow(
-    string AccountId, string Sheet, int RowNo, string Link, string PriceSale, string Sku, string ItemId,
-    string NameOriginal, string NameRewritten, int SoldCount, DateTimeOffset UpdatedAt);
+    string AccountId, string Sheet, int RowNo, ProductRowData Data, int SoldCount, DateTimeOffset UpdatedAt);
 
 /// <summary>
 /// Phần ProductDb cho trang web "📦 Dữ liệu" — truy vấn LIÊN-SHOP (mọi account_id/sheet) + đánh dấu "đã bán" +
@@ -26,17 +27,22 @@ public sealed partial class ProductDb
 FROM product_rows r
 LEFT JOIN product_sold s USING (account_id, sheet, row_no)";
 
-    // Điều kiện lọc CỐ ĐỊNH 7 tham số ($1 acct, $2 sheet, $3 sku thô, $4 sku pattern ILIKE, $5 giá min, $6 giá max,
-    // $7 chỉ-đã-bán). Mỗi vế tự vô hiệu khi tham số "trống" ('' cho text, <=0 cho giá, false cho $7). Giá: tách chữ
-    // số khỏi price_sale rồi ép bigint — dòng KHÔNG có chữ số → NULL → bị loại (NULL không thoả >= / <=) khi lọc giá.
-    // '\D' để nguyên nhờ verbatim string (@"") — KHÔNG được viết chuỗi thường kẻo \D thành escape lỗi.
+    // Điều kiện lọc CỐ ĐỊNH 8 tham số ($1 acct, $2 sheet, $3 sku thô, $4 sku pattern ILIKE, $5 giá min, $6 giá max,
+    // $7 chỉ-đã-bán, $8 chỉ-SKU-trùng-trong-shop). Mỗi vế tự vô hiệu khi tham số "trống" ('' cho text, <=0 cho giá,
+    // false cho $7/$8). Giá: tách chữ số khỏi price_sale rồi ép bigint — dòng KHÔNG có chữ số → NULL → bị loại (NULL
+    // không thoả >= / <=) khi lọc giá. '\D' để nguyên nhờ verbatim string (@"") — KHÔNG được viết chuỗi thường kẻo
+    // \D thành escape lỗi. $8 (SKU trùng): SKU non-blank + tồn tại dòng KHÁC cùng (acct, sheet) có btrim(sku) bằng.
     private const string AllWhere = @"
 WHERE ($1 = '' OR r.account_id = $1)
   AND ($2 = '' OR r.sheet = $2)
   AND ($3 = '' OR r.sku ILIKE $4)
   AND ($5 <= 0 OR NULLIF(regexp_replace(r.price_sale, '\D', '', 'g'), '')::bigint >= $5)
   AND ($6 <= 0 OR NULLIF(regexp_replace(r.price_sale, '\D', '', 'g'), '')::bigint <= $6)
-  AND (NOT $7 OR COALESCE(s.sold_count, 0) > 0)";
+  AND (NOT $7 OR COALESCE(s.sold_count, 0) > 0)
+  AND (NOT $8 OR (NULLIF(btrim(r.sku),'') IS NOT NULL AND EXISTS (
+        SELECT 1 FROM product_rows r2
+        WHERE r2.account_id = r.account_id AND r2.sheet = r.sheet
+          AND btrim(r2.sku) = btrim(r.sku) AND r2.row_no <> r.row_no)))";
 
     // ── Đếm dòng khớp lọc (cho phân trang) ──
     public async Task<int> CountAllAsync(AllDataFilter f, CancellationToken ct)
@@ -48,35 +54,42 @@ WHERE ($1 = '' OR r.account_id = $1)
         return Convert.ToInt32(await cmd.ExecuteScalarAsync(ct));
     }
 
-    // ── Đọc 1 trang dòng khớp lọc (ORDER BY khoá vị trí, LIMIT/OFFSET) ──
+    // ── Đọc 1 trang dòng khớp lọc (ĐỦ 17 cột để sửa inline; LIMIT/OFFSET) ──
+    // ORDER BY: khi $8 (SKU trùng) bật → gom theo btrim(sku) cho các dòng trùng đứng cạnh nhau; $8 tắt → CASE trả NULL
+    // (mọi dòng bằng nhau ở vế đó) nên rơi về sắp theo row_no như cũ.
     public async Task<List<AllDataRow>> QueryAllAsync(AllDataFilter f, int offset, int limit, CancellationToken ct)
     {
         const string sql = @"
-SELECT r.account_id, r.sheet, r.row_no, r.link, r.price_sale, r.sku, r.item_id,
-       r.name_original, r.name_rewritten, COALESCE(s.sold_count, 0) AS sold_count, r.updated_at"
+SELECT r.account_id, r.sheet, r.row_no,
+       r.link, r.price_original, r.price_sale, r.sku, r.item_id, r.name_original, r.name_rewritten,
+       r.category, r.shop_name, r.rating, r.sold_month, r.likes, r.reviews, r.region, r.image,
+       r.meta_shop_id, r.meta_item_id,
+       COALESCE(s.sold_count, 0) AS sold_count, r.updated_at"
             + AllFrom + AllWhere + @"
-ORDER BY r.account_id, r.sheet, r.row_no
-LIMIT $8 OFFSET $9;";
+ORDER BY r.account_id, r.sheet, CASE WHEN $8 THEN btrim(r.sku) END, r.row_no
+LIMIT $9 OFFSET $10;";
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
         await using var cmd = new NpgsqlCommand(sql, conn);
-        BindAll(cmd, f);                        // $1..$7
-        cmd.Parameters.AddWithValue(limit);     // $8
-        cmd.Parameters.AddWithValue(offset);    // $9
+        BindAll(cmd, f);                        // $1..$8
+        cmd.Parameters.AddWithValue(limit);     // $9
+        cmd.Parameters.AddWithValue(offset);    // $10
         var list = new List<AllDataRow>();
         await using var rd = await cmd.ExecuteReaderAsync(ct);
         while (await rd.ReadAsync(ct))
+        {
+            var data = new ProductRowData(
+                Link: S(rd, 3), PriceOriginal: S(rd, 4), PriceSale: S(rd, 5), Sku: S(rd, 6), ItemId: S(rd, 7),
+                NameOriginal: S(rd, 8), NameRewritten: S(rd, 9), Category: S(rd, 10), ShopName: S(rd, 11),
+                Rating: S(rd, 12), SoldMonth: S(rd, 13), Likes: S(rd, 14), Reviews: S(rd, 15), Region: S(rd, 16),
+                Image: S(rd, 17), MetaShopId: S(rd, 18), MetaItemId: S(rd, 19));
             list.Add(new AllDataRow(
                 AccountId: rd.GetString(0),
                 Sheet: rd.GetString(1),
                 RowNo: rd.GetInt32(2),
-                Link: S(rd, 3),
-                PriceSale: S(rd, 4),
-                Sku: S(rd, 5),
-                ItemId: S(rd, 6),
-                NameOriginal: S(rd, 7),
-                NameRewritten: S(rd, 8),
-                SoldCount: rd.GetInt32(9),
-                UpdatedAt: rd.GetFieldValue<DateTimeOffset>(10)));
+                Data: data,
+                SoldCount: rd.GetInt32(20),
+                UpdatedAt: rd.GetFieldValue<DateTimeOffset>(21)));
+        }
         return list;
     }
 
@@ -139,8 +152,8 @@ ON CONFLICT (account_id, sheet, row_no) DO UPDATE SET
         return deleted;
     }
 
-    /// <summary>Bind $1..$7 cho <see cref="AllWhere"/>: acct/sheet/sku thô (check '' → bỏ lọc), pattern ILIKE
-    /// (<see cref="EscapeLike"/>), giá min/max (null/≤0 → bỏ), cờ chỉ-đã-bán.</summary>
+    /// <summary>Bind $1..$8 cho <see cref="AllWhere"/>: acct/sheet/sku thô (check '' → bỏ lọc), pattern ILIKE
+    /// (<see cref="EscapeLike"/>), giá min/max (null/≤0 → bỏ), cờ chỉ-đã-bán, cờ chỉ-SKU-trùng.</summary>
     private static void BindAll(NpgsqlCommand cmd, AllDataFilter f)
     {
         var sku = (f.Sku ?? "").Trim();
@@ -151,5 +164,6 @@ ON CONFLICT (account_id, sheet, row_no) DO UPDATE SET
         cmd.Parameters.AddWithValue(f.PriceMin ?? 0L);               // $5 (≤0 → bỏ lọc min)
         cmd.Parameters.AddWithValue(f.PriceMax ?? 0L);               // $6 (≤0 → bỏ lọc max)
         cmd.Parameters.AddWithValue(f.SoldOnly);                     // $7
+        cmd.Parameters.AddWithValue(f.DupSkuOnly);                   // $8
     }
 }

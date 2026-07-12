@@ -164,8 +164,11 @@ else
                 {
                     var (shop, isNew) = ResolveOrCreateShop(acct, wsName);
                     if (string.IsNullOrEmpty(shop.ShopeeDataSheet)) shop.ShopeeDataSheet = shop.Id;
-                    await pg.ImportIntoSheetAsync(acct.Id, shop.ShopeeDataSheet, rows, true, src, "hub-web", CancellationToken.None);
-                    log.Add($"{wsName} → {shop.DisplayName} ({(isNew ? "mới" : "khớp")}): {rows.Count:N0} dòng");
+                    // Tự sinh SKU 'B#####' cho dòng file THIẾU SKU (luôn bật ở đây) → đạt chuẩn per-shop trước khi ghi.
+                    var (filledRows, filled) = await pg.FillMissingSkusAsync(acct.Id, shop.ShopeeDataSheet, rows, CancellationToken.None);
+                    await pg.ImportIntoSheetAsync(acct.Id, shop.ShopeeDataSheet, filledRows, true, src, "hub-web", CancellationToken.None);
+                    log.Add($"{wsName} → {shop.DisplayName} ({(isNew ? "mới" : "khớp")}): {filledRows.Count:N0} dòng"
+                        + (filled > 0 ? $" (+{filled:N0} SKU tự sinh)" : ""));
                 }
                 return log;
             });
@@ -179,7 +182,7 @@ else
             _status = $"✔ Đã nhập {lines.Count} sheet → chuyển sang Kho Hub. " + string.Join(" · ", lines);
             await OnChanged.InvokeAsync();
         }
-        catch (Exception ex) { _status = "✘ Lỗi nhập: " + ex.Message; }
+        catch (Exception ex) { _status = "✘ Lỗi nhập: " + ProductDb.Friendly(ex); }
         finally { _busy = false; }
     }
 

@@ -107,6 +107,27 @@ CREATE TABLE product_sold (
         IsReady = true;
     }
 
+    /// <summary>Bật UNIQUE INDEX per-shop cho SKU: (account_id, sheet, btrim(sku)) trên dòng SKU non-blank — trùng
+    /// GIỮA các shop vẫn hợp lệ (cùng catalog nhiều shop). KHÔNG nằm trong <see cref="Migrations"/> vì fail (data cũ
+    /// còn trùng TRONG shop) sẽ khiến migration retry mãi → chặn <see cref="IsReady"/>; ở đây gọi RỜI sau InitAsync,
+    /// lỗi chỉ log-warning. <c>IF NOT EXISTS</c> → idempotent (đã có thì no-op). Trả null khi thành công; message lỗi
+    /// (thường là còn trùng SKU trong shop) khi không tạo được.</summary>
+    public async Task<string?> TryEnsureSkuIndexAsync(CancellationToken ct)
+    {
+        const string sql = @"
+CREATE UNIQUE INDEX IF NOT EXISTS ux_pr_shop_sku
+ON product_rows (account_id, sheet, btrim(sku))
+WHERE NULLIF(btrim(sku),'') IS NOT NULL;";
+        try
+        {
+            await using var conn = await _dataSource.OpenConnectionAsync(ct);
+            await using var cmd = new NpgsqlCommand(sql, conn);
+            await cmd.ExecuteNonQueryAsync(ct);
+            return null;
+        }
+        catch (Exception ex) { return ex.Message; }
+    }
+
     private static async Task ApplyMigrationsAsync(NpgsqlConnection conn, CancellationToken ct)
     {
         // Bảng theo dõi bản đã áp (như user_version của SQLite nhưng nhiều-bản).

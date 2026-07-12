@@ -39,5 +39,8 @@
     <Compile Include="..\..\suite\Shopee.Core\BigSeller\BigSellerLoginForm.cs" Link="Shared\BigSeller\BigSellerLoginForm.cs" />
     <Compile Include="..\..\suite\Shopee.Module.Search\Engine\ProductResult.cs" Link="Shared\Search\ProductResult.cs" />
     <Compile Include="..\..\suite\Shopee.Module.Search\Engine\ExcelExporter.cs" Link="Shared\Search\ExcelExporter.cs" />
+    <!-- Cắt tên SP giữ SKU ở đuôi (TruncateProductNamePreservingSku) — REUSE để vá đuôi name_rewritten khi đổi SKU
+         khớp BYTE-ĐÚNG cách ProductNameRewriteRunner tạo tên. File static thuần BCL. -->
+    <Compile Include="..\..\suite\Shopee.Module.UpdateProduct\Engine\BigSellerText.cs" Link="Shared\UpdateProduct\BigSellerText.cs" />
   </ItemGroup>
 </Project>
