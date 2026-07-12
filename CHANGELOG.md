@@ -5,6 +5,11 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Hiệu năng. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.3.2 — 2026-07-13
+
+- Các lưới Dữ liệu (app + web Hub): thêm nút **☑ Chọn tất cả** — chọn mọi dòng của trang đang xem
+  (dòng đã chọn ở trang khác giữ nguyên; bỏ chọn dùng nút ✖ Bỏ chọn như cũ).
+
 ## v1.3.1 — 2026-07-13
 
 - Các lưới Dữ liệu (app + web Hub): **bấm bất kỳ đâu trên dòng = tick/untick chọn** — không cần
