@@ -7,6 +7,7 @@ using Shopee.Core.Coordination;
 using Shopee.Core.Progress;
 using Shopee.Core.Scrape;
 using Shopee.Suite.Modules.BigSeller;
+using Shopee.Suite.Modules.Data;
 using Shopee.Suite.Modules.Scrape;
 using Shopee.Suite.Modules.UpdateProduct;
 using Shopee.Suite.Services;
@@ -34,6 +35,10 @@ public sealed partial class WorkspaceViewModel : ObservableObject
     private WorkspaceAccountViewModel? _selectedAccount;
 
     public bool HasSelection => SelectedAccount is not null;
+
+    /// <summary>Tab "Dữ liệu": lưới dữ liệu của tài khoản đang chọn (fixed-acct). Tạo 1 LẦN; đổi tài khoản qua
+    /// <see cref="DataViewModel.Rescope"/>. KHÔNG EnsureLoaded lúc tạo — DataView tự gọi khi tab được mở (lazy).</summary>
+    public DataViewModel AccountData { get; } = new((string?)null);
 
     /// <summary>Có bất kỳ việc nào đang chạy? scrape · update batch · update inline theo shop.
     /// Dùng bật/tắt nút "Dừng tất cả" (không có gì chạy → nút mờ, không bấm được).</summary>
@@ -147,6 +152,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         Scrape.SelectedTarget = value?.ScrapeTarget;
         Update.SelectedTarget = value?.UpdateTarget;
         value?.RefreshAll();
+        AccountData.Rescope(value?.Account.Id);   // tab "Dữ liệu" theo tài khoản đang chọn
     }
 
     // ── Tài khoản ────────────────────────────────────────────────────────────

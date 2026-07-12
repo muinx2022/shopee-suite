@@ -1,0 +1,184 @@
+@* Modal CHUNG "Thêm / Sửa 1 dòng dữ liệu" — tách từ AllData.razor để trang /data (chọn acc/shop trong form,
+   prefill từ bộ lọc) và lưới per-shop (đích CỐ ĐỊNH qua FixedTarget, ẩn 2 select) dùng chung. Mọi validate SKU-trùng
+   + confirm + status nằm trong ProductGridEngine.SaveRowAsync (confirm = Func trang cha tiêm vào engine) — modal chỉ
+   dựng form + gọi engine + báo parent qua OnSaved khi lưu OK. Mở qua @ref (OpenAdd/OpenEdit). KHÔNG đóng khi bấm ra
+   backdrop (dễ nhầm mất dữ liệu đang nhập) — chỉ ✕ / Huỷ / Lưu-thành-công mới đóng. *@
+
+@if (_open)
+{
+    <div class="modal-overlay">
+        <div class="modal wide" @onclick:stopPropagation="true">
+            <div class="modal-head">
+                <span>@(_isEdit ? $"✏ Sửa dòng {_rowNo}" : "➕ Thêm dòng dữ liệu")</span>
+                <button class="linkbtn" title="Đóng" @onclick="Close">✕</button>
+            </div>
+            <div class="modal-body">
+                @* Thêm ở /data (không cố định đích) → 2 select Acc/Shop; sửa HOẶC đích cố định (per-shop) → label read-only. *@
+                @if (!_isEdit && !FixedTarget)
+                {
+                    <div style="display:flex;flex-wrap:wrap;gap:10px 16px;align-items:flex-end">
+                        <label style="@MapLbl">Tài khoản *
+                            <select value="@_acct" @onchange="OnAcct" disabled="@_busy" style="width:220px">
+                                <option value="">— chọn tài khoản —</option>
+                                @foreach (var a in Accounts) { <option value="@a.Id">@a.DisplayName</option> }
+                            </select>
+                        </label>
+                        <label style="@MapLbl">Shop *
+                            <select value="@_sheet" @onchange="OnSheet" disabled="@(_busy || string.IsNullOrEmpty(_acct))" style="width:220px">
+                                <option value="">— chọn shop —</option>
+                                @foreach (var s in AddShopOptions()) { <option value="@s.ShopeeDataSheet">@s.DisplayName</option> }
+                            </select>
+                        </label>
+                    </div>
+                }
+                else
+                {
+                    <div class="wbrow">
+                        <span class="wblabel">Tài khoản:</span> <span class="wbname">@AcctLabelText(_acct)</span>
+                        <span class="wblabel" style="margin-left:16px">Shop:</span> <span class="wbname">@ShopLabelText(_acct, _sheet)</span>
+                    </div>
+                }
+
+                @if (!Engine.PgReady)
+                {
+                    <div class="warn" style="margin-top:8px">Postgres chưa sẵn sàng — xem form được nhưng chưa lưu được.</div>
+                }
+
+                <div class="subhead" style="margin-top:12px">Dữ liệu dòng</div>
+                <div style="display:flex;flex-wrap:wrap;gap:10px 16px;align-items:flex-start">
+                    <label style="@MapLbl">Link <input @bind="_edit.Link" style="width:240px" /></label>
+                    <label style="@MapLbl">Giá bán <input @bind="_edit.PriceSale" style="width:120px" /></label>
+                    <label style="@MapLbl">SKU <input @bind="_edit.Sku" placeholder="B#####" style="width:120px" />
+                        @if (!_isEdit) { <span class="hint" style="margin:0">Để trống → tự sinh B#####</span> }
+                    </label>
+                    <label style="@MapLbl">ItemId <input @bind="_edit.ItemId" style="width:140px" /></label>
+                    <label style="@MapLbl">Tên gốc <input @bind="_edit.NameOriginal" style="width:240px" /></label>
+                    <label style="@MapLbl">Tên đã sửa <input @bind="_edit.NameRewritten" style="width:240px" /></label>
+                </div>
+
+                @if (_all)
+                {
+                    <div style="display:flex;flex-wrap:wrap;gap:10px 16px;align-items:flex-end;margin-top:8px">
+                        <label style="@MapLbl">Giá gốc <input @bind="_edit.PriceOriginal" style="width:120px" /></label>
+                        <label style="@MapLbl">Danh mục <input @bind="_edit.Category" style="width:160px" /></label>
+                        <label style="@MapLbl">Shop (tên) <input @bind="_edit.ShopName" style="width:160px" /></label>
+                        <label style="@MapLbl">Rating <input @bind="_edit.Rating" style="width:90px" /></label>
+                        <label style="@MapLbl">Bán/tháng <input @bind="_edit.SoldMonth" style="width:100px" /></label>
+                        <label style="@MapLbl">Thích <input @bind="_edit.Likes" style="width:90px" /></label>
+                        <label style="@MapLbl">Đánh giá <input @bind="_edit.Reviews" style="width:90px" /></label>
+                        <label style="@MapLbl">Vùng <input @bind="_edit.Region" style="width:120px" /></label>
+                        <label style="@MapLbl">Ảnh <input @bind="_edit.Image" style="width:240px" /></label>
+                        <label style="@MapLbl">MetaShopId <input @bind="_edit.MetaShopId" style="width:140px" /></label>
+                        <label style="@MapLbl">MetaItemId <input @bind="_edit.MetaItemId" style="width:140px" /></label>
+                    </div>
+                }
+            </div>
+            <div class="modal-foot">
+                @if (_busy) { <span class="action">⏳ đang lưu…</span> }
+                <label class="toggle" style="margin-right:auto"><input type="checkbox" @bind="_all" /> Nhập đủ 17 cột</label>
+                <button class="btn" @onclick="Close" disabled="@_busy">Huỷ</button>
+                <button class="btn primary" @onclick="Save"
+                        disabled="@(_busy || !Engine.PgReady || string.IsNullOrEmpty(_acct) || string.IsNullOrEmpty(_sheet))">@(_isEdit ? "✔ Lưu" : "➕ Thêm")</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    /// <summary>Lõi lưới chủ quản (parent tiêm) — SaveRowAsync gói validate + confirm + status; PgReady gate nút Lưu.</summary>
+    [Parameter, EditorRequired] public ProductGridEngine Engine { get; set; } = default!;
+
+    // Đích CỐ ĐỊNH (per-shop): ẩn 2 select, dùng nhãn FixedAcctLabel/FixedShopLabel cho hàng read-only.
+    [Parameter] public bool FixedTarget { get; set; }
+    [Parameter] public string FixedAcct { get; set; } = "";
+    [Parameter] public string FixedSheet { get; set; } = "";
+    [Parameter] public string FixedAcctLabel { get; set; } = "";
+    [Parameter] public string FixedShopLabel { get; set; } = "";
+
+    // Chế độ /data: chọn acc/shop trong form + prefill; AcctLabel/ShopLabel dựng nhãn read-only khi SỬA.
+    [Parameter] public List<BigSellerAccount> Accounts { get; set; } = new();
+    [Parameter] public Func<string, string>? AcctLabel { get; set; }
+    [Parameter] public Func<string, string, string>? ShopLabel { get; set; }
+
+    /// <summary>Bắn sau khi lưu THÀNH CÔNG (parent quyết reload/URL) — (thêm‖sửa, acct, sheet, rowNo cuối, sku cuối).</summary>
+    [Parameter] public EventCallback<(bool IsEdit, string Acct, string Sheet, int RowNo, string Sku)> OnSaved { get; set; }
+
+    // Label cột dọc trong modal (modal-body label mặc định display:block → ép flex-column cho input nằm dưới chữ).
+    private const string MapLbl = "display:flex;flex-direction:column;gap:4px;margin:0;font-size:12.5px";
+
+    private bool _open, _busy, _all, _isEdit;
+    private string _acct = "", _sheet = "", _origSku = "";
+    private int _rowNo;
+    private RowEdit _edit = new();
+
+    /// <summary>Mở ở chế độ THÊM. per-shop: đích = Fixed*; /data: prefill từ bộ lọc (SKU trống → engine tự sinh).</summary>
+    public void OpenAdd(string? prefillAcct, string? prefillSheet)
+    {
+        _isEdit = false; _rowNo = 0; _origSku = "";
+        _edit = new RowEdit();
+        if (FixedTarget) { _acct = FixedAcct; _sheet = FixedSheet; }
+        else { _acct = prefillAcct ?? ""; _sheet = prefillSheet ?? ""; }
+        _all = false; _open = true;
+        StateHasChanged();
+    }
+
+    /// <summary>Mở ở chế độ SỬA — đích = shop của dòng (read-only), prefill 17 field, KHÔNG auto-gen SKU.</summary>
+    public void OpenEdit(AllDataRow row)
+    {
+        _isEdit = true; _rowNo = row.RowNo; _origSku = row.Data.Sku;
+        _edit = RowEdit.From(row.Data);
+        _acct = row.AccountId; _sheet = row.Sheet;
+        _all = false; _open = true;
+        StateHasChanged();
+    }
+
+    private void Close() { _open = false; }
+
+    private void OnAcct(ChangeEventArgs e) { _acct = e.Value?.ToString() ?? ""; _sheet = ""; }
+    private void OnSheet(ChangeEventArgs e) => _sheet = e.Value?.ToString() ?? "";
+
+    // Shop (có ngăn dữ liệu) của acc đang chọn — chỉ dùng cho select ở /data-add.
+    private IEnumerable<BigSellerShop> AddShopOptions() =>
+        Accounts.FirstOrDefault(a => a.Id == _acct)?.Shops.Where(s => !string.IsNullOrWhiteSpace(s.ShopeeDataSheet))
+        ?? Enumerable.Empty<BigSellerShop>();
+
+    private string AcctLabelText(string id) => FixedTarget ? FixedAcctLabel : (AcctLabel?.Invoke(id) ?? id);
+    private string ShopLabelText(string acct, string sheet) => FixedTarget ? FixedShopLabel : (ShopLabel?.Invoke(acct, sheet) ?? sheet);
+
+    // Lưu qua engine (tự lo check SKU trùng + confirm + status). Ok=true → đóng + báo parent; Ok=false (huỷ/lỗi) → giữ mở.
+    private async Task Save()
+    {
+        if (_busy || string.IsNullOrEmpty(_acct) || string.IsNullOrEmpty(_sheet)) return;
+        _busy = true;
+        try
+        {
+            var (ok, rowNo, sku) = await Engine.SaveRowAsync(_isEdit, _acct, _sheet, _rowNo, _origSku, _edit.ToData());
+            if (ok)
+            {
+                _open = false;
+                await OnSaved.InvokeAsync((_isEdit, _acct, _sheet, rowNo, sku));
+            }
+        }
+        finally { _busy = false; }
+    }
+
+    // Bản sao MUTABLE của 17 ô để bind input (ProductRowData là record bất biến). Cột ẩn (giá gốc, danh mục…) pass-through.
+    private sealed class RowEdit
+    {
+        public string Link = "", PriceOriginal = "", PriceSale = "", Sku = "", ItemId = "",
+            NameOriginal = "", NameRewritten = "", Category = "", ShopName = "", Rating = "",
+            SoldMonth = "", Likes = "", Reviews = "", Region = "", Image = "", MetaShopId = "", MetaItemId = "";
+
+        public static RowEdit From(ProductRowData d) => new()
+        {
+            Link = d.Link, PriceOriginal = d.PriceOriginal, PriceSale = d.PriceSale, Sku = d.Sku, ItemId = d.ItemId,
+            NameOriginal = d.NameOriginal, NameRewritten = d.NameRewritten, Category = d.Category, ShopName = d.ShopName,
+            Rating = d.Rating, SoldMonth = d.SoldMonth, Likes = d.Likes, Reviews = d.Reviews, Region = d.Region,
+            Image = d.Image, MetaShopId = d.MetaShopId, MetaItemId = d.MetaItemId,
+        };
+
+        public ProductRowData ToData() => new(
+            Link, PriceOriginal, PriceSale, Sku, ItemId, NameOriginal, NameRewritten, Category, ShopName, Rating,
+            SoldMonth, Likes, Reviews, Region, Image, MetaShopId, MetaItemId);
+    }
+}

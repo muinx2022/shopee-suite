@@ -5,8 +5,8 @@ namespace Shopee.Hub;
 
 /// <summary>
 /// Phần ProductDb cho trang web "📦 Dữ liệu" — truy vấn LIÊN-SHOP (mọi account_id/sheet) + đánh dấu "đã bán" +
-/// xoá dòng theo khoá vị trí. SQL viết TAY như các partial khác. Số tham số CỐ ĐỊNH ($1..$7 cho filter, dạng
-/// <c>($n = '' OR …)</c> như <see cref="SearchWhere"/>) để khỏi dựng SQL động.
+/// xoá dòng theo khoá vị trí. SQL viết TAY như các partial khác. Số tham số CỐ ĐỊNH ($1..$10 cho filter, dạng
+/// <c>($n = '' OR …)</c>) để khỏi dựng SQL động.
 /// </summary>
 public sealed partial class ProductDb
 {
@@ -15,11 +15,13 @@ public sealed partial class ProductDb
 FROM product_rows r
 LEFT JOIN product_sold s USING (account_id, sheet, row_no)";
 
-    // Điều kiện lọc CỐ ĐỊNH 8 tham số ($1 acct, $2 sheet, $3 sku thô, $4 sku pattern ILIKE, $5 giá min, $6 giá max,
-    // $7 chỉ-đã-bán, $8 chỉ-SKU-trùng-trong-shop). Mỗi vế tự vô hiệu khi tham số "trống" ('' cho text, <=0 cho giá,
-    // false cho $7/$8). Giá: tách chữ số khỏi price_sale rồi ép bigint — dòng KHÔNG có chữ số → NULL → bị loại (NULL
-    // không thoả >= / <=) khi lọc giá. '\D' để nguyên nhờ verbatim string (@"") — KHÔNG được viết chuỗi thường kẻo
-    // \D thành escape lỗi. $8 (SKU trùng): SKU non-blank + tồn tại dòng KHÁC cùng (acct, sheet) có btrim(sku) bằng.
+    // Điều kiện lọc CỐ ĐỊNH 10 tham số ($1 acct, $2 sheet, $3 sku thô, $4 sku pattern ILIKE, $5 giá min, $6 giá max,
+    // $7 chỉ-đã-bán, $8 chỉ-SKU-trùng-trong-shop, $9 text thô, $10 text pattern ILIKE). Mỗi vế tự vô hiệu khi tham số
+    // "trống" ('' cho text, <=0 cho giá, false cho $7/$8). Giá: tách chữ số khỏi price_sale rồi ép bigint — dòng KHÔNG
+    // có chữ số → NULL → bị loại (NULL không thoả >= / <=) khi lọc giá. '\D' để nguyên nhờ verbatim string (@"") —
+    // KHÔNG được viết chuỗi thường kẻo \D thành escape lỗi. $8 (SKU trùng): SKU non-blank + tồn tại dòng KHÁC cùng
+    // (acct, sheet) có btrim(sku) bằng. $9/$10 (tìm đa trường): chứa text trên BẤT KỲ sku/item_id/tên gốc/tên sửa/link
+    // → phục vụ lưới per-shop (tab 📋 Dữ liệu Fleet) qua CHUNG đường AllData thay cho SearchWhere cũ.
     private const string AllWhere = @"
 WHERE ($1 = '' OR r.account_id = $1)
   AND ($2 = '' OR r.sheet = $2)
@@ -30,7 +32,9 @@ WHERE ($1 = '' OR r.account_id = $1)
   AND (NOT $8 OR (NULLIF(btrim(r.sku),'') IS NOT NULL AND EXISTS (
         SELECT 1 FROM product_rows r2
         WHERE r2.account_id = r.account_id AND r2.sheet = r.sheet
-          AND btrim(r2.sku) = btrim(r.sku) AND r2.row_no <> r.row_no)))";
+          AND btrim(r2.sku) = btrim(r.sku) AND r2.row_no <> r.row_no)))
+  AND ($9 = '' OR r.sku ILIKE $10 OR r.item_id ILIKE $10 OR r.name_original ILIKE $10
+                 OR r.name_rewritten ILIKE $10 OR r.link ILIKE $10)";
 
     // ── Đếm dòng khớp lọc (cho phân trang) ──
     public async Task<int> CountAllAsync(AllDataFilter f, CancellationToken ct)
@@ -55,12 +59,12 @@ SELECT r.account_id, r.sheet, r.row_no,
        COALESCE(s.sold_count, 0) AS sold_count, r.updated_at"
             + AllFrom + AllWhere + @"
 ORDER BY r.account_id, r.sheet, CASE WHEN $8 THEN btrim(r.sku) END, r.row_no
-LIMIT $9 OFFSET $10;";
+LIMIT $11 OFFSET $12;";
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
         await using var cmd = new NpgsqlCommand(sql, conn);
-        BindAll(cmd, f);                        // $1..$8
-        cmd.Parameters.AddWithValue(limit);     // $9
-        cmd.Parameters.AddWithValue(offset);    // $10
+        BindAll(cmd, f);                        // $1..$10
+        cmd.Parameters.AddWithValue(limit);     // $11
+        cmd.Parameters.AddWithValue(offset);    // $12
         var list = new List<AllDataRow>();
         await using var rd = await cmd.ExecuteReaderAsync(ct);
         while (await rd.ReadAsync(ct))
@@ -164,11 +168,13 @@ ON CONFLICT (account_id, sheet, row_no) DO UPDATE SET
         return deleted;
     }
 
-    /// <summary>Bind $1..$8 cho <see cref="AllWhere"/>: acct/sheet/sku thô (check '' → bỏ lọc), pattern ILIKE
-    /// (<see cref="EscapeLike"/>), giá min/max (null/≤0 → bỏ), cờ chỉ-đã-bán, cờ chỉ-SKU-trùng.</summary>
+    /// <summary>Bind $1..$10 cho <see cref="AllWhere"/>: acct/sheet/sku thô (check '' → bỏ lọc), pattern ILIKE
+    /// (<see cref="EscapeLike"/>), giá min/max (null/≤0 → bỏ), cờ chỉ-đã-bán, cờ chỉ-SKU-trùng, text thô + pattern
+    /// ILIKE tìm đa trường (rỗng → bỏ lọc).</summary>
     private static void BindAll(NpgsqlCommand cmd, AllDataFilter f)
     {
         var sku = (f.Sku ?? "").Trim();
+        var text = (f.Text ?? "").Trim();
         cmd.Parameters.AddWithValue(f.Acct ?? "");                    // $1
         cmd.Parameters.AddWithValue(f.Sheet ?? "");                   // $2
         cmd.Parameters.AddWithValue(sku);                            // $3 (rỗng → bỏ lọc sku)
@@ -177,5 +183,7 @@ ON CONFLICT (account_id, sheet, row_no) DO UPDATE SET
         cmd.Parameters.AddWithValue(f.PriceMax ?? 0L);               // $6 (≤0 → bỏ lọc max)
         cmd.Parameters.AddWithValue(f.SoldOnly);                     // $7
         cmd.Parameters.AddWithValue(f.DupSkuOnly);                   // $8
+        cmd.Parameters.AddWithValue(text);                          // $9 (rỗng → bỏ lọc tìm đa trường)
+        cmd.Parameters.AddWithValue("%" + EscapeLike(text) + "%");  // $10 pattern ILIKE tìm đa trường
     }
 }

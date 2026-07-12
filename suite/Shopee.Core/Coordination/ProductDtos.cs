@@ -68,9 +68,12 @@ public sealed record ProductImportResult(List<ProductSheetImport> Sheets, int To
 /// <summary>Bộ lọc trang "📦 Dữ liệu" (mọi shop): mỗi field null/blank/0 = KHÔNG lọc chiều đó.
 /// <see cref="PriceMin"/>/<see cref="PriceMax"/> so trên SỐ tách từ text price_sale (dòng không parse được bị loại
 /// khi có lọc giá). <see cref="SoldOnly"/> = chỉ dòng đã có bản ghi product_sold (sold_count &gt; 0).
-/// <see cref="DupSkuOnly"/> = chỉ dòng có SKU non-blank TRÙNG với dòng khác TRONG CÙNG shop (soi trùng để dọn).</summary>
+/// <see cref="DupSkuOnly"/> = chỉ dòng có SKU non-blank TRÙNG với dòng khác TRONG CÙNG shop (soi trùng để dọn).
+/// <see cref="Text"/> = tìm CHỨA (ILIKE) trên BẤT KỲ: sku / item_id / name_original / name_rewritten / link — dùng
+/// cho lưới per-shop tìm đa trường (client cũ gửi thiếu → null → không lọc chiều này).</summary>
 public sealed record AllDataFilter(
-    string? Acct, string? Sheet, string? Sku, long? PriceMin, long? PriceMax, bool SoldOnly, bool DupSkuOnly);
+    string? Acct, string? Sheet, string? Sku, long? PriceMin, long? PriceMax, bool SoldOnly, bool DupSkuOnly,
+    string? Text);
 
 /// <summary>1 dòng cho lưới "📦 Dữ liệu": khoá vị trí (AccountId, Sheet, RowNo) + ĐỦ 17 ô dữ liệu (để sửa inline;
 /// lưới vẫn hiển thị 1 phần) + số đã bán (0 nếu chưa có bản ghi product_sold) + lúc sửa.</summary>

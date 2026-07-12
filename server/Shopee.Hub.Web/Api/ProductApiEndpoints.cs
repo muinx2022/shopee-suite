@@ -145,17 +145,17 @@ public static class ProductApiEndpoints
         // ══ Trang "📦 Dữ liệu" (mọi shop) — client desktop thao tác qua HTTP như Blazor gọi in-process ══
 
         // ── Đọc: đếm + 1 trang khớp lọc (Limit kẹp [1..500], Offset ≥ 0) trong 1 round-trip ──
+        // Dùng chung ProductDbDataOps (một nguồn logic với ProductGridEngine phía UI); pdb đã ready ở guard trên.
         api.MapPost(HubRoutes.ProductsAllData, async (AllDataQueryRequest? r, IServiceProvider sp, CancellationToken ct) =>
         {
             var pdb = sp.GetService<ProductDb>();
             if (pdb is null || !pdb.IsReady) return PgNotReady();
             if (r is null) return Results.BadRequest();
-            var f = r.Filter ?? new AllDataFilter(null, null, null, null, null, false, false);   // JSON thiếu filter → không lọc
+            var f = r.Filter ?? new AllDataFilter(null, null, null, null, null, false, false, null);   // JSON thiếu filter → không lọc
             var limit = Math.Clamp(r.Limit, 1, 500);
             var offset = Math.Max(0, r.Offset);
-            var total = await pdb.CountAllAsync(f, ct);
-            var rows = await pdb.QueryAllAsync(f, offset, limit, ct);
-            return Results.Json(new AllDataPage(total, rows));
+            var page = await new ProductDbDataOps(pdb, "").QueryAllAsync(f, offset, limit, ct);   // đọc: updated_by không dùng
+            return Results.Json(page);
         });
 
         // ── Ghi: đánh dấu "đã bán" cho các khoá vị trí ──
@@ -211,6 +211,7 @@ public static class ProductApiEndpoints
         });
 
         // ── Ghi: thêm 1 dòng vào cuối sheet — SKU trống → server tự sinh B##### rồi trả về ──
+        // Auto-SKU + chèn gói trong ProductDbDataOps.InsertRowAsync (hết trùng logic với adapter engine).
         api.MapPost(HubRoutes.ProductsInsertRow, async (ProductInsertRowRequest? r, HttpRequest req,
             IServiceProvider sp, CancellationToken ct) =>
         {
@@ -218,15 +219,9 @@ public static class ProductApiEndpoints
             if (pdb is null || !pdb.IsReady) return PgNotReady();
             if (r is null) return Results.BadRequest();
             if (string.IsNullOrEmpty(r.Acct) || string.IsNullOrEmpty(r.Sheet)) return Results.BadRequest();
-            var data = r.Data;
-            if (string.IsNullOrWhiteSpace(data.Sku))
-            {
-                var codes = await pdb.GenerateSkusAsync(r.Acct, r.Sheet, 1, ct);
-                data = data with { Sku = codes.Count > 0 ? codes[0] : "" };
-            }
             var by = req.Headers["X-Machine-Id"].ToString();
-            var rowNo = await pdb.InsertRowAtEndAsync(r.Acct, r.Sheet, data, by, ct);
-            return Results.Json(new ProductInsertRowResponse(rowNo, data.Sku));
+            var (rowNo, sku) = await new ProductDbDataOps(pdb, by).InsertRowAsync(r.Acct, r.Sheet, r.Data, ct);
+            return Results.Json(new ProductInsertRowResponse(rowNo, sku));
         });
 
         // ── Đọc: có dòng KHÁC trong shop cùng SKU? (sku rỗng → false; excludeRowNo mặc định -1 = không loại dòng nào) ──

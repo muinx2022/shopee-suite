@@ -26,6 +26,12 @@
     <Compile Include="..\..\suite\Shopee.Core\Coordination\HubDefaults.cs" Link="Shared\Coordination\HubDefaults.cs" />
     <Compile Include="..\..\suite\Shopee.Core\Coordination\HubRoutes.cs" Link="Shared\Coordination\HubRoutes.cs" />
     <Compile Include="..\..\suite\Shopee.Core\Coordination\ProductDtos.cs" Link="Shared\Coordination\ProductDtos.cs" />
+    <!-- Cổng thao tác kho + exception + LÕI lưới dùng chung — ProductDbDataOps (hub) hiện thực IProductDataOps;
+         ProductGridEngine là lõi lưới cho trang /data + tab 📋 Dữ liệu của Fleet. KHÔNG link HubApiProductDataOps:
+         adapter-client cần HubClient (chưa link vào hub). -->
+    <Compile Include="..\..\suite\Shopee.Core\Products\IProductDataOps.cs" Link="Shared\Products\IProductDataOps.cs" />
+    <Compile Include="..\..\suite\Shopee.Core\Products\ProductStoreNotReadyException.cs" Link="Shared\Products\ProductStoreNotReadyException.cs" />
+    <Compile Include="..\..\suite\Shopee.Core\Products\ProductGridEngine.cs" Link="Shared\Products\ProductGridEngine.cs" />
     <Compile Include="..\..\suite\Shopee.Core\BigSeller\BigSellerAccount.cs" Link="Shared\BigSeller\BigSellerAccount.cs" />
     <Compile Include="..\..\suite\Shopee.Core\BigSeller\BigSellerRunConfig.cs" Link="Shared\BigSeller\BigSellerRunConfig.cs" />
     <Compile Include="..\..\suite\Shopee.Core\BigSeller\BigSellerShop.cs" Link="Shared\BigSeller\BigSellerShop.cs" />

@@ -1,15 +1,15 @@
 using System.Collections.ObjectModel;
-using System.Net;
-using System.Net.Http;
 using CommunityToolkit.Mvvm.ComponentModel;
 using Shopee.Core.BigSeller;
 using Shopee.Core.Coordination;
+using Shopee.Core.Products;
 
 namespace Shopee.Suite.Modules.Data;
 
 /// <summary>
-/// ViewModel cửa sổ THÊM/SỬA 1 dòng dữ liệu. Tự thực hiện lưu qua <see cref="HubClient"/> (validate → kiểm SKU
-/// trùng → Insert/Update), phơi kết quả (RowNo/Sku/Status) cho <see cref="DataViewModel"/> đọc sau khi đóng.
+/// ViewModel cửa sổ THÊM/SỬA 1 dòng dữ liệu. Lưu QUA <see cref="ProductGridEngine.SaveRowAsync"/> của VM cha
+/// (engine tự validate SKU-trùng + Insert/Update + đặt Status), phơi kết quả (RowNo/Sku/Status) cho
+/// <see cref="DataViewModel"/> đọc sau khi đóng.
 ///  · THÊM: chọn tài khoản + shop (bắt buộc), SKU trống → server tự sinh B#####.
 ///  · SỬA: acc/shop cố định (hiển thị nhãn), prefill đủ 17 ô, KHÔNG auto-gen SKU.
 /// </summary>
@@ -29,6 +29,8 @@ public sealed partial class RowEditViewModel : ObservableObject
     public string AccountLabel { get; } = "";
     public string ShopLabel { get; } = "";
 
+    private readonly ProductGridEngine _engine;
+    private readonly Action<Func<string, Task<bool>>?> _setConfirmOverride;   // bật/tắt confirm owner=modal ở VM cha
     private readonly IReadOnlyList<BigSellerAccount> _accounts;
     private readonly string _acct = "";     // đích SỬA
     private readonly string _sheet = "";
@@ -65,7 +67,7 @@ public sealed partial class RowEditViewModel : ObservableObject
     public bool CanSave => !IsBusy;
 
     /// <summary>Hàm confirm SỞ HỮU bởi cửa sổ (window gán) — để hộp "SKU trùng" bám chính modal, tránh nested
-    /// modal owner=MainWindow bị khuất sau form. Null → fallback <see cref="Dialogs.ConfirmAsync"/>.</summary>
+    /// modal owner=MainWindow bị khuất sau form. Null → engine dùng confirm mặc định của VM cha.</summary>
     public Func<string, Task<bool>>? ConfirmOwner { get; set; }
 
     // ── Kết quả (VM cha đọc sau khi đóng true) ──
@@ -76,8 +78,11 @@ public sealed partial class RowEditViewModel : ObservableObject
     public string ResultStatus { get; private set; } = "";
 
     /// <summary>Chế độ THÊM: prefill acc/shop từ bộ lọc đang áp (nếu có).</summary>
-    public RowEditViewModel(IReadOnlyList<BigSellerAccount> accounts, string? prefillAcct, string? prefillSheet)
+    public RowEditViewModel(ProductGridEngine engine, Action<Func<string, Task<bool>>?> setConfirmOverride,
+        IReadOnlyList<BigSellerAccount> accounts, string? prefillAcct, string? prefillSheet)
     {
+        _engine = engine;
+        _setConfirmOverride = setConfirmOverride;
         IsEdit = false;
         _accounts = accounts;
         Title = "➕ Thêm dòng dữ liệu";
@@ -103,8 +108,11 @@ public sealed partial class RowEditViewModel : ObservableObject
     }
 
     /// <summary>Chế độ SỬA: đích = shop của dòng (cố định), prefill đủ 17 ô.</summary>
-    public RowEditViewModel(AllDataRow row, string acctLabel, string shopLabel)
+    public RowEditViewModel(ProductGridEngine engine, Action<Func<string, Task<bool>>?> setConfirmOverride,
+        AllDataRow row, string acctLabel, string shopLabel)
     {
+        _engine = engine;
+        _setConfirmOverride = setConfirmOverride;
         IsEdit = true;
         _accounts = Array.Empty<BigSellerAccount>();
         _acct = row.AccountId;
@@ -145,74 +153,37 @@ public sealed partial class RowEditViewModel : ObservableObject
     public async Task<bool> SaveAsync()
     {
         if (IsBusy) return false;
-        var client = CoordinationRuntime.Client;
-        if (client is null) { Error = "Chưa kết nối Hub — bật đồng bộ Hub trong Cài đặt."; return false; }
 
         // Validate đích.
-        string acct, sheet, shopDisplay;
-        if (IsEdit) { acct = _acct; sheet = _sheet; shopDisplay = ShopLabel; }
+        string acct, sheet;
+        if (IsEdit) { acct = _acct; sheet = _sheet; }
         else
         {
             acct = SelectedAccount?.Id ?? "";
             sheet = SelectedShop?.Sheet ?? "";
-            shopDisplay = SelectedShop?.Label ?? sheet;
             if (string.IsNullOrEmpty(acct) || string.IsNullOrEmpty(sheet)) { Error = "Chọn tài khoản + shop."; return false; }
         }
 
         var sku = (Sku ?? "").Trim();
-        // SKU non-blank + (thêm, hoặc sửa mà SKU ĐỔI) → cảnh báo nếu trùng dòng khác trong shop.
-        if (sku.Length > 0)
-        {
-            var skuChanged = !IsEdit || !string.Equals(sku, _origSku.Trim(), StringComparison.Ordinal);
-            if (skuChanged)
-            {
-                IsBusy = true;
-                bool dup;
-                try { dup = await client.ProductSkuExistsAsync(acct, sheet, sku, IsEdit ? _rowNo : -1); }
-                catch (Exception ex) { Error = "Lỗi kiểm tra SKU: " + DataViewModel.FriendlyError(ex); IsBusy = false; return false; }
-                IsBusy = false;
-                if (dup)
-                {
-                    var text = $"SKU '{sku}' đã tồn tại trong shop này — vẫn lưu? (kho sẽ CHẶN nếu trùng thật).";
-                    var ok = ConfirmOwner is not null ? await ConfirmOwner(text) : await Dialogs.ConfirmAsync(text, "SKU trùng");
-                    if (!ok) return false;
-                }
-            }
-        }
-
-        IsBusy = true;
         Error = "";
+        IsBusy = true;
+        _setConfirmOverride(ConfirmOwner);   // hộp "SKU trùng" (do engine gọi) bám chính modal này, không MainWindow
         try
         {
-            if (IsEdit)
+            // Engine tự check SKU-trùng (+ confirm qua callback vừa trỏ về modal) + Insert/Update + đặt Status.
+            var (ok, rowNo, resSku) = await _engine.SaveRowAsync(IsEdit, acct, sheet, _rowNo, _origSku, BuildData(sku));
+            if (!ok)
             {
-                // Sửa KHÔNG auto-gen SKU (giữ nguyên user nhập).
-                var ok = await client.UpdateProductRowAsync(new ProductUpdateRowRequest(acct, sheet, _rowNo, BuildData(sku)));
-                if (!ok) { Error = "Không tìm thấy dòng (đã bị xoá?)."; return false; }
-                ResultAcct = acct; ResultSheet = sheet; ResultRowNo = _rowNo; ResultSku = sku;
-                ResultStatus = $"✔ Đã lưu dòng {_rowNo}.";
-                return true;
+                // Kho chưa sẵn sàng / lỗi engine → hiện trong form; huỷ confirm SKU-trùng (không phải lỗi) → form im.
+                Error = !_engine.PgReady ? "Kho Hub (Postgres) chưa sẵn sàng."
+                      : _engine.Status.StartsWith("✘") ? _engine.Status
+                      : "";
+                return false;
             }
-            else
-            {
-                // SKU trống → server tự sinh B##### (duy nhất trong shop) rồi trả về mã cuối cùng.
-                var res = await client.InsertProductRowAsync(new ProductInsertRowRequest(acct, sheet, BuildData(sku)));
-                if (res is null) { Error = "Không thêm được dòng."; return false; }
-                ResultAcct = acct; ResultSheet = sheet; ResultRowNo = res.RowNo; ResultSku = res.Sku;
-                ResultStatus = $"✔ Đã thêm dòng {res.RowNo} vào {shopDisplay} (SKU {res.Sku}).";
-                return true;
-            }
+            ResultAcct = acct; ResultSheet = sheet; ResultRowNo = rowNo; ResultSku = resSku;
+            ResultStatus = _engine.Status;   // chuỗi do engine đặt (thêm: "✔ Đã thêm dòng R (SKU S).")
+            return true;
         }
-        catch (HttpRequestException ex) when (ex.StatusCode == HttpStatusCode.ServiceUnavailable)
-        {
-            Error = "Kho Hub (Postgres) chưa sẵn sàng.";
-            return false;
-        }
-        catch (Exception ex)
-        {
-            Error = "Lỗi lưu: " + DataViewModel.FriendlyError(ex);
-            return false;
-        }
-        finally { IsBusy = false; }
+        finally { IsBusy = false; _setConfirmOverride(null); }
     }
 }
