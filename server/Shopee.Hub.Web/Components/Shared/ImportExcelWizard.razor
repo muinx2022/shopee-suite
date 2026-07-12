@@ -15,11 +15,12 @@
 
 @if (_open)
 {
-    <div class="modal-overlay" @onclick="Cancel">
+    @* KHÔNG đóng khi bấm ra backdrop (dễ nhầm mất dữ liệu đang nhập) — chỉ ✕ / Huỷ / OK-thành-công mới đóng. *@
+    <div class="modal-overlay">
         <div class="modal wide" @onclick:stopPropagation="true">
             <div class="modal-head">
                 <span>⬆ Nhập Excel vào shop</span>
-                <button class="linkbtn" @onclick="Cancel">✕</button>
+                <button class="linkbtn" title="Đóng" @onclick="Cancel">✕</button>
             </div>
             <div class="modal-body">
                 @* Chọn đích (chỉ khi KHÔNG cố định) — 2 select Acc/Shop đầu form, prefill từ bộ lọc. *@

@@ -89,7 +89,7 @@
                 <thead>
                     <tr>
                         <th style="width:26px"></th>
-                        <th style="width:96px"></th>
+                        <th style="width:36px"></th>
                         <th>Acc</th>
                         <th>Shop</th>
                         <th style="width:50px">Dòng</th>
@@ -114,45 +114,22 @@
                         {
                             var key = new RowKey(r.AccountId, r.Sheet, r.RowNo);
                             var shop = ShopCell(r.AccountId, r.Sheet);
-                            @if (_editKey == key && _edit is not null)
-                            {
-                                <tr class="sel">
-                                    <td></td>
-                                    <td>
-                                        <button class="linkbtn" disabled="@_busy" @onclick="SaveEdit">✔ Lưu</button>
-                                        <button class="linkbtn" @onclick="CancelEdit">✖ Huỷ</button>
-                                    </td>
-                                    <td style="@Clip" title="@r.AccountId">@AcctLabel(r.AccountId)</td>
-                                    <td style="@Clip" title="@shop">@shop</td>
-                                    <td>@r.RowNo</td>
-                                    <td><input @bind="_edit.Link" /></td>
-                                    <td><input @bind="_edit.PriceSale" /></td>
-                                    <td><input @bind="_edit.Sku" /></td>
-                                    <td><input @bind="_edit.ItemId" /></td>
-                                    <td><input @bind="_edit.NameOriginal" /></td>
-                                    <td><input @bind="_edit.NameRewritten" /></td>
-                                    <td>@(r.SoldCount > 0 ? r.SoldCount.ToString() : "")</td>
-                                    <td>@r.UpdatedAt.LocalDateTime.ToString("dd/MM/yyyy HH:mm")</td>
-                                </tr>
-                            }
-                            else
-                            {
-                                <tr class="@(r.SoldCount > 0 ? "soldrow" : "")" @onclick="() => ToggleSel(key)">
-                                    <td><input type="checkbox" checked="@_selected.Contains(key)" style="pointer-events:none;margin:0;width:auto" /></td>
-                                    <td><button class="linkbtn" disabled="@(_editKey is not null || _busy)" @onclick="() => BeginEdit(r)" @onclick:stopPropagation="true">✏ Sửa</button></td>
-                                    <td style="@Clip" title="@r.AccountId">@AcctLabel(r.AccountId)</td>
-                                    <td style="@Clip" title="@shop">@shop</td>
-                                    <td>@r.RowNo</td>
-                                    <td style="@Clip" title="@r.Data.Link">@r.Data.Link</td>
-                                    <td>@r.Data.PriceSale</td>
-                                    <td>@r.Data.Sku</td>
-                                    <td>@r.Data.ItemId</td>
-                                    <td style="@Clip" title="@r.Data.NameOriginal">@r.Data.NameOriginal</td>
-                                    <td style="@Clip" title="@r.Data.NameRewritten">@r.Data.NameRewritten</td>
-                                    <td>@(r.SoldCount > 0 ? r.SoldCount.ToString() : "")</td>
-                                    <td>@r.UpdatedAt.LocalDateTime.ToString("dd/MM/yyyy HH:mm")</td>
-                                </tr>
-                            }
+                            @* Cột thao tác CỐ ĐỊNH (icon ✏) — sửa mở CHUNG modal Thêm/Sửa (không còn inline co giãn cột). *@
+                            <tr class="@(r.SoldCount > 0 ? "soldrow" : "")" @onclick="() => ToggleSel(key)">
+                                <td><input type="checkbox" checked="@_selected.Contains(key)" style="pointer-events:none;margin:0;width:auto" /></td>
+                                <td style="white-space:nowrap"><button class="linkbtn" title="Sửa dòng" disabled="@(_addOpen || _busy)" @onclick="() => OpenEditRow(r)" @onclick:stopPropagation="true">✏</button></td>
+                                <td style="@Clip" title="@r.AccountId">@AcctLabel(r.AccountId)</td>
+                                <td style="@Clip" title="@shop">@shop</td>
+                                <td>@r.RowNo</td>
+                                <td style="@Clip" title="@r.Data.Link">@r.Data.Link</td>
+                                <td>@r.Data.PriceSale</td>
+                                <td>@r.Data.Sku</td>
+                                <td>@r.Data.ItemId</td>
+                                <td style="@Clip" title="@r.Data.NameOriginal">@r.Data.NameOriginal</td>
+                                <td style="@Clip" title="@r.Data.NameRewritten">@r.Data.NameRewritten</td>
+                                <td>@(r.SoldCount > 0 ? r.SoldCount.ToString() : "")</td>
+                                <td>@r.UpdatedAt.LocalDateTime.ToString("dd/MM/yyyy HH:mm")</td>
+                            </tr>
                         }
                     }
                 </tbody>
@@ -166,30 +143,42 @@
     }
 </div>
 
-@* ── Modal "Thêm dòng": chọn acc/shop (prefill từ bộ lọc) + 6 ô chính + toggle đủ 17 cột; SKU trống → tự sinh khi lưu ── *@
+@* ── Modal CHUNG Thêm/Sửa dòng: add = chọn acc/shop + tự-sinh-SKU; edit = acc/shop read-only, prefill 17 field, KHÔNG
+   auto-gen. KHÔNG đóng khi bấm ra backdrop (dễ nhầm) — chỉ ✕ / Huỷ / Lưu-thành-công mới đóng. ── *@
 @if (_addOpen)
 {
-    <div class="modal-overlay" @onclick="CloseAddRow">
+    <div class="modal-overlay">
         <div class="modal wide" @onclick:stopPropagation="true">
             <div class="modal-head">
-                <span>➕ Thêm dòng dữ liệu</span>
-                <button class="linkbtn" @onclick="CloseAddRow">✕</button>
+                <span>@(_editKey is { } ek ? $"✏ Sửa dòng {ek.RowNo}" : "➕ Thêm dòng dữ liệu")</span>
+                <button class="linkbtn" title="Đóng" @onclick="CloseAddRow">✕</button>
             </div>
             <div class="modal-body">
-                <div style="display:flex;flex-wrap:wrap;gap:10px 16px;align-items:flex-end">
-                    <label style="@MapLbl">Tài khoản *
-                        <select value="@_addAcct" @onchange="OnAddAcct" disabled="@_addBusy" style="width:220px">
-                            <option value="">— chọn tài khoản —</option>
-                            @foreach (var a in _accounts) { <option value="@a.Id">@a.DisplayName</option> }
-                        </select>
-                    </label>
-                    <label style="@MapLbl">Shop *
-                        <select value="@_addSheet" @onchange="OnAddSheet" disabled="@(_addBusy || string.IsNullOrEmpty(_addAcct))" style="width:220px">
-                            <option value="">— chọn shop —</option>
-                            @foreach (var s in AddShopOptions()) { <option value="@s.ShopeeDataSheet">@s.DisplayName</option> }
-                        </select>
-                    </label>
-                </div>
+                @if (_editKey is null)
+                {
+                    <div style="display:flex;flex-wrap:wrap;gap:10px 16px;align-items:flex-end">
+                        <label style="@MapLbl">Tài khoản *
+                            <select value="@_addAcct" @onchange="OnAddAcct" disabled="@_addBusy" style="width:220px">
+                                <option value="">— chọn tài khoản —</option>
+                                @foreach (var a in _accounts) { <option value="@a.Id">@a.DisplayName</option> }
+                            </select>
+                        </label>
+                        <label style="@MapLbl">Shop *
+                            <select value="@_addSheet" @onchange="OnAddSheet" disabled="@(_addBusy || string.IsNullOrEmpty(_addAcct))" style="width:220px">
+                                <option value="">— chọn shop —</option>
+                                @foreach (var s in AddShopOptions()) { <option value="@s.ShopeeDataSheet">@s.DisplayName</option> }
+                            </select>
+                        </label>
+                    </div>
+                }
+                else
+                {
+                    @* Edit: đích cố định = shop của dòng, không cho đổi. *@
+                    <div class="wbrow">
+                        <span class="wblabel">Tài khoản:</span> <span class="wbname">@AcctLabel(_addAcct)</span>
+                        <span class="wblabel" style="margin-left:16px">Shop:</span> <span class="wbname">@ShopCell(_addAcct, _addSheet)</span>
+                    </div>
+                }
 
                 @if (Pg is not { IsReady: true })
                 {
@@ -201,7 +190,7 @@
                     <label style="@MapLbl">Link <input @bind="_addEdit.Link" style="width:240px" /></label>
                     <label style="@MapLbl">Giá bán <input @bind="_addEdit.PriceSale" style="width:120px" /></label>
                     <label style="@MapLbl">SKU <input @bind="_addEdit.Sku" placeholder="B#####" style="width:120px" />
-                        <span class="hint" style="margin:0">Để trống → tự sinh B#####</span>
+                        @if (_editKey is null) { <span class="hint" style="margin:0">Để trống → tự sinh B#####</span> }
                     </label>
                     <label style="@MapLbl">ItemId <input @bind="_addEdit.ItemId" style="width:140px" /></label>
                     <label style="@MapLbl">Tên gốc <input @bind="_addEdit.NameOriginal" style="width:240px" /></label>
@@ -229,8 +218,8 @@
                 @if (_addBusy) { <span class="action">⏳ đang lưu…</span> }
                 <label class="toggle" style="margin-right:auto"><input type="checkbox" @bind="_addAll" /> Nhập đủ 17 cột</label>
                 <button class="btn" @onclick="CloseAddRow" disabled="@_addBusy">Huỷ</button>
-                <button class="btn primary" @onclick="AddRowSave"
-                        disabled="@(_addBusy || Pg is not { IsReady: true } || string.IsNullOrEmpty(_addAcct) || string.IsNullOrEmpty(_addSheet))">➕ Thêm</button>
+                <button class="btn primary" @onclick="ModalSave"
+                        disabled="@(_addBusy || Pg is not { IsReady: true } || string.IsNullOrEmpty(_addAcct) || string.IsNullOrEmpty(_addSheet))">@(_editKey is { } ? "✔ Lưu" : "➕ Thêm")</button>
             </div>
         </div>
     </div>
@@ -261,9 +250,8 @@
     private bool _busy;
     private readonly HashSet<RowKey> _selected = new();
 
-    // Sửa inline 1 dòng 1 lúc (khoá vị trí + bản sao mutable 17 ô); _editOrigSku để biết SKU có đổi (cảnh báo trùng).
+    // Modal CHUNG add/edit đang ở chế độ SỬA dòng nào (null = THÊM); _editOrigSku để biết SKU có đổi (cảnh báo trùng).
     private RowKey? _editKey;
-    private RowEdit? _edit;
     private string _editOrigSku = "";
 
     // Khoá vị trí 1 dòng (bền qua reload/đổi trang vì so-sánh-giá-trị) — nguồn chọn + hành động mark/xoá/sửa.
@@ -391,7 +379,7 @@
     private async Task DoFilter()
     {
         _applied = BuildFilter();
-        _page = 1; _selected.Clear(); _editKey = null; _edit = null; _status = "";
+        _page = 1; _selected.Clear(); _status = "";
         await LoadAsync();
         UpdateUrl();
     }
@@ -408,16 +396,16 @@
     private async Task GoPage(int p)
     {
         _page = Math.Clamp(p, 1, PageCount);
-        _selected.Clear(); _editKey = null; _edit = null;
+        _selected.Clear();
         await LoadAsync();
         UpdateUrl();
     }
 
-    // Đổi số dòng/trang → về trang 1, bỏ chọn, thoát edit, nạp lại (giá trị rác → giữ nguyên _pageSize hiện tại).
+    // Đổi số dòng/trang → về trang 1, bỏ chọn, nạp lại (giá trị rác → giữ nguyên _pageSize hiện tại).
     private async Task OnPageSizeChange(ChangeEventArgs e)
     {
         if (int.TryParse(e.Value?.ToString(), out var sz) && sz > 0) _pageSize = sz;
-        _page = 1; _selected.Clear(); _editKey = null; _edit = null;
+        _page = 1; _selected.Clear();
         await LoadAsync();
         UpdateUrl();
     }
@@ -433,47 +421,23 @@
         if (!_selected.Remove(k)) _selected.Add(k);
     }
 
-    // ── Sửa inline 1 dòng ────────────────────────────────────────────────────────────
-    private void BeginEdit(AllDataRow r)
+    // ── Sửa 1 dòng: mở CHUNG modal ở chế độ EDIT (đích = shop của dòng, prefill 17 field) ──
+    private void OpenEditRow(AllDataRow r)
     {
         _editKey = new RowKey(r.AccountId, r.Sheet, r.RowNo);
-        _edit = RowEdit.From(r.Data);
         _editOrigSku = r.Data.Sku;
+        _addEdit = RowEdit.From(r.Data);
+        _addAcct = r.AccountId;
+        _addSheet = r.Sheet;
+        _addAll = false;
+        _addOpen = true;
         _status = "";
-    }
-
-    private void CancelEdit() { _editKey = null; _edit = null; }
-
-    private async Task SaveEdit()
-    {
-        if (_edit is null || _editKey is not { } key || _busy) return;
-        var pg = Pg;
-        if (pg is null || !pg.IsReady) return;
-        // SKU đổi + non-blank + đã có dòng khác trong shop mang SKU đó → cảnh báo (index sẽ chặn nếu vẫn cố lưu).
-        var newSku = (_edit.Sku ?? "").Trim();
-        if (newSku.Length > 0 && !string.Equals(newSku, (_editOrigSku ?? "").Trim(), StringComparison.Ordinal))
-        {
-            var dup = await pg.ExistsSkuInShopAsync(key.Acct, key.Sheet, newSku, key.RowNo, CancellationToken.None);
-            if (dup && !await JS.InvokeAsync<bool>("confirm",
-                $"SKU '{newSku}' đã tồn tại trong shop này — vẫn lưu? (kho sẽ CHẶN nếu trùng thật)."))
-                return;
-        }
-        _busy = true; _status = "⏳ Đang lưu…";
-        try
-        {
-            var d = _edit.ToData();
-            var ok = await Task.Run(() => pg.UpdateRowAsync(key.Acct, key.Sheet, key.RowNo, d, "hub-web", CancellationToken.None));
-            _editKey = null; _edit = null;
-            await LoadAsync();
-            _status = ok ? $"✔ Đã lưu dòng {key.RowNo}." : $"✘ Không tìm thấy dòng {key.RowNo} (đã bị xoá?).";
-        }
-        catch (Exception ex) { _status = "✘ Lỗi lưu: " + ProductDb.Friendly(ex); }
-        finally { _busy = false; }
     }
 
     // ── Thêm dòng qua MODAL (chọn acc/shop trong form; SKU trống → tự sinh khi lưu) ──
     private void OpenAddRow()
     {
+        _editKey = null;      // chế độ THÊM
         _addEdit = new RowEdit();
         _addAcct = _fAcct;    // prefill từ bộ lọc đang chọn (nếu có)
         _addSheet = _fSheet;
@@ -482,7 +446,7 @@
         _status = "";
     }
 
-    private void CloseAddRow() => _addOpen = false;
+    private void CloseAddRow() { _addOpen = false; _editKey = null; }
 
     private void OnAddAcct(ChangeEventArgs e) { _addAcct = e.Value?.ToString() ?? ""; _addSheet = ""; }
     private void OnAddSheet(ChangeEventArgs e) => _addSheet = e.Value?.ToString() ?? "";
@@ -492,41 +456,60 @@
         _accounts.FirstOrDefault(a => a.Id == _addAcct)?.Shops.Where(s => !string.IsNullOrWhiteSpace(s.ShopeeDataSheet))
         ?? Enumerable.Empty<BigSellerShop>();
 
-    private async Task AddRowSave()
+    // Lưu modal CHUNG: edit (_editKey set) → UpdateRow, KHÔNG auto-gen SKU, reload trang hiện tại; add → InsertRowAtEnd,
+    // SKU trống tự sinh, reload nếu bộ lọc phủ (acct,sheet). SKU non-blank + đổi/mới trùng shop → confirm (index chặn thật).
+    private async Task ModalSave()
     {
         if (_addBusy) return;
         var pg = Pg;
         if (pg is null || !pg.IsReady) return;
         var acct = _addAcct; var sheet = _addSheet;
         if (string.IsNullOrEmpty(acct) || string.IsNullOrEmpty(sheet)) { _status = "✘ Chọn tài khoản + shop."; return; }
+        var isEdit = _editKey is not null;
+        var editRowNo = _editKey?.RowNo ?? -1;
         var sku = (_addEdit.Sku ?? "").Trim();
-        // SKU nhập tay + đã tồn tại trong shop → cảnh báo (index sẽ chặn nếu vẫn cố).
+        // Dup-confirm khi SKU non-blank: add → mọi SKU tay; edit → chỉ khi SKU ĐỔI (loại chính dòng đang sửa).
         if (sku.Length > 0)
         {
-            var dup = await pg.ExistsSkuInShopAsync(acct, sheet, sku, -1, CancellationToken.None);
-            if (dup && !await JS.InvokeAsync<bool>("confirm",
-                $"SKU '{sku}' đã tồn tại trong shop này — vẫn thêm? (kho sẽ CHẶN nếu trùng thật)."))
-                return;
+            var skuChanged = !isEdit || !string.Equals(sku, (_editOrigSku ?? "").Trim(), StringComparison.Ordinal);
+            if (skuChanged)
+            {
+                var dup = await pg.ExistsSkuInShopAsync(acct, sheet, sku, editRowNo, CancellationToken.None);
+                if (dup && !await JS.InvokeAsync<bool>("confirm",
+                    $"SKU '{sku}' đã tồn tại trong shop này — vẫn lưu? (kho sẽ CHẶN nếu trùng thật)."))
+                    return;
+            }
         }
         _addBusy = true;
         try
         {
-            // SKU trống → tự sinh 1 mã B##### (duy nhất trong shop).
-            if (sku.Length == 0)
+            if (isEdit)
             {
-                var codes = await pg.GenerateSkusAsync(acct, sheet, 1, CancellationToken.None);
-                sku = codes.Count > 0 ? codes[0] : "";
+                var data = _addEdit.ToData();   // edit KHÔNG auto-gen SKU (giữ nguyên user nhập)
+                var ok = await Task.Run(() => pg.UpdateRowAsync(acct, sheet, editRowNo, data, "hub-web", CancellationToken.None));
+                _addOpen = false; _editKey = null;
+                _status = ok ? $"✔ Đã lưu dòng {editRowNo}." : $"✘ Không tìm thấy dòng {editRowNo} (đã bị xoá?).";
+                await LoadAsync();   // reload trang hiện tại
             }
-            _addEdit.Sku = sku;
-            var data = _addEdit.ToData();
-            var rowNo = await Task.Run(() => pg.InsertRowAtEndAsync(acct, sheet, data, "hub-web", CancellationToken.None));
-            _addOpen = false;
-            var shopName = _shopName.GetValueOrDefault((acct, sheet), sheet);
-            _status = $"✔ Đã thêm dòng {rowNo} vào {shopName} (SKU {sku}).";
-            // Nếu bộ lọc đang áp PHỦ (acct, sheet) này → reload trang hiện tại. KHÔNG tự đổi bộ lọc.
-            if (FilterCovers(acct, sheet)) { _selected.Clear(); await LoadAsync(); }
+            else
+            {
+                // SKU trống → tự sinh 1 mã B##### (duy nhất trong shop).
+                if (sku.Length == 0)
+                {
+                    var codes = await pg.GenerateSkusAsync(acct, sheet, 1, CancellationToken.None);
+                    sku = codes.Count > 0 ? codes[0] : "";
+                }
+                _addEdit.Sku = sku;
+                var data = _addEdit.ToData();
+                var rowNo = await Task.Run(() => pg.InsertRowAtEndAsync(acct, sheet, data, "hub-web", CancellationToken.None));
+                _addOpen = false;
+                var shopName = _shopName.GetValueOrDefault((acct, sheet), sheet);
+                _status = $"✔ Đã thêm dòng {rowNo} vào {shopName} (SKU {sku}).";
+                // Nếu bộ lọc đang áp PHỦ (acct, sheet) này → reload trang hiện tại. KHÔNG tự đổi bộ lọc.
+                if (FilterCovers(acct, sheet)) { _selected.Clear(); await LoadAsync(); }
+            }
         }
-        catch (Exception ex) { _status = "✘ Lỗi thêm: " + ProductDb.Friendly(ex); }
+        catch (Exception ex) { _status = "✘ Lỗi lưu: " + ProductDb.Friendly(ex); }
         finally { _addBusy = false; }
     }
 
@@ -600,7 +583,7 @@
         {
             var keys = _selected.Select(k => (k.Acct, k.Sheet, k.RowNo)).ToList();
             var del = await Task.Run(() => pg.DeleteRowsByKeysAsync(keys, CancellationToken.None));
-            _selected.Clear(); _editKey = null; _edit = null;
+            _selected.Clear();
             await LoadAsync();
             _status = $"✔ Đã xoá {del} dòng.";
         }

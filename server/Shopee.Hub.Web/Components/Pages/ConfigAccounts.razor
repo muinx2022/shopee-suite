@@ -58,9 +58,10 @@
 
 @if (_showImport)
 {
-    <div class="modal-overlay" @onclick="() => _showImport = false">
+    @* KHÔNG đóng khi bấm ra backdrop (dễ nhầm mất dữ liệu đang nhập) — chỉ ✕ / Huỷ mới đóng. *@
+    <div class="modal-overlay">
         <div class="modal" @onclick:stopPropagation="true">
-            <div class="modal-head">Import acc / proxy <button class="btn sm" @onclick="() => _showImport = false">✕</button></div>
+            <div class="modal-head">Import acc / proxy <button class="btn sm" title="Đóng" @onclick="() => _showImport = false">✕</button></div>
             <div class="modal-body">
                 <label>Tài khoản Shopee — mỗi dòng <code>user|pass</code> hoặc <code>user|pass|.shopee.vn=SPC_F=…</code></label>
                 <textarea @bind="_importAccText" rows="6" style="width:100%;font-family:monospace" placeholder="user1|pass1&#10;user2|pass2"></textarea>

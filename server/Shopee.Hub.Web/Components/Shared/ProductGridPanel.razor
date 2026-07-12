@@ -83,7 +83,7 @@
                     <tr>
                         <th style="width:26px"></th>
                         <th style="width:50px">Dòng</th>
-                        <th style="width:96px"></th>
+                        <th style="width:64px"></th>
                         <th>Link</th>
                         <th>Giá bán</th>
                         <th>SKU</th>
@@ -111,9 +111,9 @@
                                 <tr class="sel">
                                     <td></td>
                                     <td>@rowNo</td>
-                                    <td>
-                                        <button class="linkbtn" disabled="@_busy" @onclick="SaveEdit">✔ Lưu</button>
-                                        <button class="linkbtn" @onclick="CancelEdit">✖ Huỷ</button>
+                                    <td style="white-space:nowrap">
+                                        <button class="linkbtn" title="Lưu" disabled="@_busy" @onclick="SaveEdit">✔</button>
+                                        <button class="linkbtn" title="Huỷ" @onclick="CancelEdit">✖</button>
                                     </td>
                                     <td><input @bind="_edit.Link" /></td>
                                     <td><input @bind="_edit.PriceSale" /></td>
@@ -142,7 +142,7 @@
                                 <tr>
                                     <td><input type="checkbox" style="width:auto;margin:0" checked="@_selected.Contains(rowNo)" @onchange="e => ToggleSel(rowNo, e)" /></td>
                                     <td>@rowNo</td>
-                                    <td><button class="linkbtn" disabled="@(_editRowNo is not null || _busy)" @onclick="() => BeginEdit(rowNo, data)">✏ Sửa</button></td>
+                                    <td style="white-space:nowrap"><button class="linkbtn" title="Sửa" disabled="@(_editRowNo is not null || _busy)" @onclick="() => BeginEdit(rowNo, data)">✏</button></td>
                                     <td style="@Clip" title="@data.Link">@data.Link</td>
                                     <td>@data.PriceSale</td>
                                     <td>@data.Sku</td>
