@@ -112,8 +112,8 @@
                                     <td></td>
                                     <td>@rowNo</td>
                                     <td style="white-space:nowrap">
-                                        <button class="linkbtn" title="Lưu" disabled="@_busy" @onclick="SaveEdit">✔</button>
-                                        <button class="linkbtn" title="Huỷ" @onclick="CancelEdit">✖</button>
+                                        <button class="linkbtn" style="display:inline-flex;align-items:center;color:var(--success)" title="Lưu" disabled="@_busy" @onclick="SaveEdit">@HubIcons.Svg("check", 15, "2.4")</button>
+                                        <button class="linkbtn" style="display:inline-flex;align-items:center" title="Huỷ" @onclick="CancelEdit">@HubIcons.Svg("x", 15, "2.4")</button>
                                     </td>
                                     <td><input @bind="_edit.Link" /></td>
                                     <td><input @bind="_edit.PriceSale" /></td>
@@ -142,7 +142,7 @@
                                 <tr>
                                     <td><input type="checkbox" style="width:auto;margin:0" checked="@_selected.Contains(rowNo)" @onchange="e => ToggleSel(rowNo, e)" /></td>
                                     <td>@rowNo</td>
-                                    <td style="white-space:nowrap"><button class="linkbtn" title="Sửa" disabled="@(_editRowNo is not null || _busy)" @onclick="() => BeginEdit(rowNo, data)">✏</button></td>
+                                    <td style="white-space:nowrap"><button class="linkbtn" style="display:inline-flex;align-items:center" title="Sửa" disabled="@(_editRowNo is not null || _busy)" @onclick="() => BeginEdit(rowNo, data)">@HubIcons.Svg("edit", 15)</button></td>
                                     <td style="@Clip" title="@data.Link">@data.Link</td>
                                     <td>@data.PriceSale</td>
                                     <td>@data.Sku</td>

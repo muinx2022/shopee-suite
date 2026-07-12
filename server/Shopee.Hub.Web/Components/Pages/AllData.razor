@@ -117,7 +117,7 @@
                             @* Cột thao tác CỐ ĐỊNH (icon ✏) — sửa mở CHUNG modal Thêm/Sửa (không còn inline co giãn cột). *@
                             <tr class="@(r.SoldCount > 0 ? "soldrow" : "")" @onclick="() => ToggleSel(key)">
                                 <td><input type="checkbox" checked="@_selected.Contains(key)" style="pointer-events:none;margin:0;width:auto" /></td>
-                                <td style="white-space:nowrap"><button class="linkbtn" title="Sửa dòng" disabled="@(_addOpen || _busy)" @onclick="() => OpenEditRow(r)" @onclick:stopPropagation="true">✏</button></td>
+                                <td style="white-space:nowrap"><button class="linkbtn" style="display:inline-flex;align-items:center" title="Sửa dòng" disabled="@(_addOpen || _busy)" @onclick="() => OpenEditRow(r)" @onclick:stopPropagation="true">@HubIcons.Svg("edit", 15)</button></td>
                                 <td style="@Clip" title="@r.AccountId">@AcctLabel(r.AccountId)</td>
                                 <td style="@Clip" title="@shop">@shop</td>
                                 <td>@r.RowNo</td>

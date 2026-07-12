@@ -32,6 +32,11 @@ public static class HubIcons
         ["import"] = "<path d='M12 3v13'/><path d='m7 11 5 5 5-5'/><path d='M5 21h14'/>",
         ["update"] = "<path d='M21 12a9 9 0 1 1-2.6-6.4L21 8'/><path d='M21 3v5h-5'/>",
         ["tag"] = "<path d='M20.6 11.4 12 2.8H4v8l8.6 8.6a2 2 0 0 0 2.8 0l5.2-5.2a2 2 0 0 0 0-2.8z'/><circle cx='7.5' cy='7.5' r='1.3'/>",
+
+        // Nút hành động trên hàng lưới dữ liệu (emoji ✏ trên Windows mờ như nét gạch → SVG nét rõ, ăn currentColor)
+        ["edit"] = "<path d='M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z'/>",
+        ["check"] = "<path d='M20 6 9 17l-5-5'/>",
+        ["x"] = "<path d='M18 6 6 18M6 6l12 12'/>",
     };
 
     /// <summary>SVG inline stroke=currentColor. key lạ → svg rỗng (không vỡ trang).</summary>
