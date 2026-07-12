@@ -112,7 +112,7 @@
 
         <!-- ════ Lưới dữ liệu ════ -->
         <Border Grid.Row="4" Classes="card" ClipToBounds="True">
-            <DataGrid Classes="data" ItemsSource="{Binding Rows}" BorderThickness="0" IsReadOnly="True"
+            <DataGrid x:Name="RowsGrid" Classes="data" ItemsSource="{Binding Rows}" BorderThickness="0" IsReadOnly="True"
                       AutoGenerateColumns="False" CanUserSortColumns="False" HeadersVisibility="Column">
                 <DataGrid.Columns>
                     <DataGridTemplateColumn Width="40">

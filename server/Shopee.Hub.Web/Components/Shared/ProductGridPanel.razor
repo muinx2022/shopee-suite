@@ -15,6 +15,7 @@
     .wsmain > .editcard.gridpanel { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
     .editcard.gridpanel .tablewrap { flex: 1 1 auto; min-height: 0; max-height: none; overflow: auto; }
     .editcard.gridpanel .soldrow > td { background: var(--success-bg); }
+    .editcard.gridpanel tbody tr { cursor: pointer; }   /* bấm cả dòng = tick/untick chọn (như /data) */
 </style>
 
 <div class="editcard gridpanel">
@@ -120,11 +121,12 @@
                         @foreach (var r in _engine.Rows)
                         {
                             var key = new ProductRowKey(r.AccountId, r.Sheet, r.RowNo);
-                            @* Sửa mở CHUNG modal Thêm/Sửa (đích CỐ ĐỊNH = shop này) — hết inline-edit co giãn cột. *@
-                            <tr class="@(r.SoldCount > 0 ? "soldrow" : "")">
-                                <td><input type="checkbox" style="width:auto;margin:0" checked="@_engine.IsSelected(key)" @onchange="() => _engine.ToggleSelect(key)" /></td>
+                            @* Sửa mở CHUNG modal Thêm/Sửa (đích CỐ ĐỊNH = shop này) — hết inline-edit co giãn cột.
+                               Bấm CẢ DÒNG = tick/untick chọn (như /data) — checkbox chỉ hiển thị, nút ✏ chặn nổi bọt. *@
+                            <tr class="@(r.SoldCount > 0 ? "soldrow" : "")" @onclick="() => _engine.ToggleSelect(key)">
+                                <td><input type="checkbox" style="pointer-events:none;width:auto;margin:0" checked="@_engine.IsSelected(key)" /></td>
                                 <td>@r.RowNo</td>
-                                <td style="white-space:nowrap"><button class="linkbtn" style="display:inline-flex;align-items:center" title="Sửa" disabled="@busy" @onclick="() => _modal?.OpenEdit(r)">@HubIcons.Svg("edit", 15)</button></td>
+                                <td style="white-space:nowrap"><button class="linkbtn" style="display:inline-flex;align-items:center" title="Sửa" disabled="@busy" @onclick="() => _modal?.OpenEdit(r)" @onclick:stopPropagation="true">@HubIcons.Svg("edit", 15)</button></td>
                                 <td style="@Clip" title="@r.Data.Link">@r.Data.Link</td>
                                 <td>@r.Data.PriceSale</td>
                                 <td>@r.Data.Sku</td>
