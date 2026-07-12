@@ -21,7 +21,7 @@
 <div class="alldata">
     @{ var pg = Pg; var pgReady = pg is not null && pg.IsReady; }
 
-    <p class="hint m-hide">Dữ liệu sản phẩm của TẤT CẢ shop. Lọc rồi bấm dòng để chọn — "✔ Đã bán" cộng số bán +1 và tô xanh, "🆕 Sinh SKU mới" cấp SKU B##### mới, "🗑 Xóa nhiều" xoá dòng; ✏ để sửa 1 dòng.</p>
+    <p class="hint m-hide">Trang quản lý dữ liệu TOÀN BỘ acc/shop — thêm/sửa/xoá/nhập Excel/đánh dấu bán tại đây. (Tab Dữ liệu trong Cấu hình shop chỉ để xem + thao tác phạm vi shop đó.)</p>
 
     @* ── Hàng lọc (disable khi Postgres chưa sẵn sàng) ── *@
     <div class="bar">
@@ -46,8 +46,11 @@
         <label class="toggle"><input type="checkbox" @bind="_fDupSku" disabled="@(!pgReady || _busy)" /> SKU trùng trong shop</label>
         <button class="btn primary sm" disabled="@(!pgReady || _busy)" @onclick="DoFilter">🔍 Lọc</button>
         <button class="btn sm" disabled="@(!pgReady || _busy)" @onclick="ClearFilter" title="Xoá mọi điều kiện lọc, hiện lại toàn bộ">✖ Xóa lọc</button>
-        <button class="btn sm" disabled="@(!CanAddRow)" @onclick="AddRow"
-                title="@(CanAddRow ? "Thêm 1 dòng trống vào shop đang lọc" : "Lọc đúng 1 tài khoản + 1 shop rồi mới thêm được dòng")">➕ Thêm dòng</button>
+        <span style="flex:1"></span>
+        @* Thêm dòng = MODAL (chọn acc/shop trong form, KHÔNG cần lọc trước) — mở được luôn để xem form; nút Lưu trong
+           modal mới gated theo Postgres. Nhập Excel = wizard dùng chung (gated pgReady). *@
+        <button class="btn sm" disabled="@_busy" @onclick="OpenAddRow" title="Thêm 1 dòng dữ liệu vào 1 shop (chọn trong form)">➕ Thêm dòng</button>
+        <ImportExcelWizard PrefillAcct="@_fAcct" PrefillSheet="@_fSheet" Disabled="@_busy" OnImported="OnWizardImported" />
     </div>
 
     @if (!pgReady)
@@ -163,7 +166,80 @@
     }
 </div>
 
+@* ── Modal "Thêm dòng": chọn acc/shop (prefill từ bộ lọc) + 6 ô chính + toggle đủ 17 cột; SKU trống → tự sinh khi lưu ── *@
+@if (_addOpen)
+{
+    <div class="modal-overlay" @onclick="CloseAddRow">
+        <div class="modal wide" @onclick:stopPropagation="true">
+            <div class="modal-head">
+                <span>➕ Thêm dòng dữ liệu</span>
+                <button class="linkbtn" @onclick="CloseAddRow">✕</button>
+            </div>
+            <div class="modal-body">
+                <div style="display:flex;flex-wrap:wrap;gap:10px 16px;align-items:flex-end">
+                    <label style="@MapLbl">Tài khoản *
+                        <select value="@_addAcct" @onchange="OnAddAcct" disabled="@_addBusy" style="width:220px">
+                            <option value="">— chọn tài khoản —</option>
+                            @foreach (var a in _accounts) { <option value="@a.Id">@a.DisplayName</option> }
+                        </select>
+                    </label>
+                    <label style="@MapLbl">Shop *
+                        <select value="@_addSheet" @onchange="OnAddSheet" disabled="@(_addBusy || string.IsNullOrEmpty(_addAcct))" style="width:220px">
+                            <option value="">— chọn shop —</option>
+                            @foreach (var s in AddShopOptions()) { <option value="@s.ShopeeDataSheet">@s.DisplayName</option> }
+                        </select>
+                    </label>
+                </div>
+
+                @if (Pg is not { IsReady: true })
+                {
+                    <div class="warn" style="margin-top:8px">Postgres chưa sẵn sàng — xem form được nhưng chưa lưu được.</div>
+                }
+
+                <div class="subhead" style="margin-top:12px">Dữ liệu dòng</div>
+                <div style="display:flex;flex-wrap:wrap;gap:10px 16px;align-items:flex-start">
+                    <label style="@MapLbl">Link <input @bind="_addEdit.Link" style="width:240px" /></label>
+                    <label style="@MapLbl">Giá bán <input @bind="_addEdit.PriceSale" style="width:120px" /></label>
+                    <label style="@MapLbl">SKU <input @bind="_addEdit.Sku" placeholder="B#####" style="width:120px" />
+                        <span class="hint" style="margin:0">Để trống → tự sinh B#####</span>
+                    </label>
+                    <label style="@MapLbl">ItemId <input @bind="_addEdit.ItemId" style="width:140px" /></label>
+                    <label style="@MapLbl">Tên gốc <input @bind="_addEdit.NameOriginal" style="width:240px" /></label>
+                    <label style="@MapLbl">Tên đã sửa <input @bind="_addEdit.NameRewritten" style="width:240px" /></label>
+                </div>
+
+                @if (_addAll)
+                {
+                    <div style="display:flex;flex-wrap:wrap;gap:10px 16px;align-items:flex-end;margin-top:8px">
+                        <label style="@MapLbl">Giá gốc <input @bind="_addEdit.PriceOriginal" style="width:120px" /></label>
+                        <label style="@MapLbl">Danh mục <input @bind="_addEdit.Category" style="width:160px" /></label>
+                        <label style="@MapLbl">Shop (tên) <input @bind="_addEdit.ShopName" style="width:160px" /></label>
+                        <label style="@MapLbl">Rating <input @bind="_addEdit.Rating" style="width:90px" /></label>
+                        <label style="@MapLbl">Bán/tháng <input @bind="_addEdit.SoldMonth" style="width:100px" /></label>
+                        <label style="@MapLbl">Thích <input @bind="_addEdit.Likes" style="width:90px" /></label>
+                        <label style="@MapLbl">Đánh giá <input @bind="_addEdit.Reviews" style="width:90px" /></label>
+                        <label style="@MapLbl">Vùng <input @bind="_addEdit.Region" style="width:120px" /></label>
+                        <label style="@MapLbl">Ảnh <input @bind="_addEdit.Image" style="width:240px" /></label>
+                        <label style="@MapLbl">MetaShopId <input @bind="_addEdit.MetaShopId" style="width:140px" /></label>
+                        <label style="@MapLbl">MetaItemId <input @bind="_addEdit.MetaItemId" style="width:140px" /></label>
+                    </div>
+                }
+            </div>
+            <div class="modal-foot">
+                @if (_addBusy) { <span class="action">⏳ đang lưu…</span> }
+                <label class="toggle" style="margin-right:auto"><input type="checkbox" @bind="_addAll" /> Nhập đủ 17 cột</label>
+                <button class="btn" @onclick="CloseAddRow" disabled="@_addBusy">Huỷ</button>
+                <button class="btn primary" @onclick="AddRowSave"
+                        disabled="@(_addBusy || Pg is not { IsReady: true } || string.IsNullOrEmpty(_addAcct) || string.IsNullOrEmpty(_addSheet))">➕ Thêm</button>
+            </div>
+        </div>
+    </div>
+}
+
 @code {
+    // Label cột dọc trong modal (modal-body label mặc định display:block → ép flex-column cho input nằm dưới chữ).
+    private const string MapLbl = "display:flex;flex-direction:column;gap:4px;margin:0;font-size:12.5px";
+
     private static readonly int[] PageSizes = { 50, 100, 200, 500 };
     private int _pageSize = 100;
     // Ô cắt ngắn text dài (Link/Tên/Acc/Shop…) — bảng cuộn ngang qua .tablewrap; title giữ giá trị đầy đủ.
@@ -196,9 +272,10 @@
     private ProductDb? Pg => Sp.GetService<ProductDb>();
     private int PageCount => Math.Max(1, (_total + _pageSize - 1) / _pageSize);
 
-    // Thêm dòng CHỈ khi đang lọc ĐÚNG 1 acc + 1 shop (đã áp) + không đang sửa dòng khác.
-    private bool CanAddRow => Pg is { IsReady: true } && !_busy && _editKey is null
-        && _applied.Acct is not null && _applied.Sheet is not null;
+    // ── Modal "Thêm dòng" (chọn acc/shop trong form, không phụ thuộc bộ lọc) ──
+    private bool _addOpen, _addBusy, _addAll;
+    private string _addAcct = "", _addSheet = "";
+    private RowEdit _addEdit = new();
 
     protected override async Task OnInitializedAsync()
     {
@@ -394,30 +471,75 @@
         finally { _busy = false; }
     }
 
-    private async Task AddRow()
+    // ── Thêm dòng qua MODAL (chọn acc/shop trong form; SKU trống → tự sinh khi lưu) ──
+    private void OpenAddRow()
     {
-        if (!CanAddRow) return;
+        _addEdit = new RowEdit();
+        _addAcct = _fAcct;    // prefill từ bộ lọc đang chọn (nếu có)
+        _addSheet = _fSheet;
+        _addAll = false;
+        _addOpen = true;
+        _status = "";
+    }
+
+    private void CloseAddRow() => _addOpen = false;
+
+    private void OnAddAcct(ChangeEventArgs e) { _addAcct = e.Value?.ToString() ?? ""; _addSheet = ""; }
+    private void OnAddSheet(ChangeEventArgs e) => _addSheet = e.Value?.ToString() ?? "";
+
+    // Shop (có ngăn dữ liệu) của acc đang chọn trong modal thêm dòng.
+    private IEnumerable<BigSellerShop> AddShopOptions() =>
+        _accounts.FirstOrDefault(a => a.Id == _addAcct)?.Shops.Where(s => !string.IsNullOrWhiteSpace(s.ShopeeDataSheet))
+        ?? Enumerable.Empty<BigSellerShop>();
+
+    private async Task AddRowSave()
+    {
+        if (_addBusy) return;
         var pg = Pg;
         if (pg is null || !pg.IsReady) return;
-        var acct = _applied.Acct!; var sheet = _applied.Sheet!;
-        _busy = true; _status = "⏳ Đang thêm dòng…";
+        var acct = _addAcct; var sheet = _addSheet;
+        if (string.IsNullOrEmpty(acct) || string.IsNullOrEmpty(sheet)) { _status = "✘ Chọn tài khoản + shop."; return; }
+        var sku = (_addEdit.Sku ?? "").Trim();
+        // SKU nhập tay + đã tồn tại trong shop → cảnh báo (index sẽ chặn nếu vẫn cố).
+        if (sku.Length > 0)
+        {
+            var dup = await pg.ExistsSkuInShopAsync(acct, sheet, sku, -1, CancellationToken.None);
+            if (dup && !await JS.InvokeAsync<bool>("confirm",
+                $"SKU '{sku}' đã tồn tại trong shop này — vẫn thêm? (kho sẽ CHẶN nếu trùng thật)."))
+                return;
+        }
+        _addBusy = true;
         try
         {
-            var empty = new ProductRowData("", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "");
-            var rowNo = await Task.Run(() => pg.InsertRowAtEndAsync(acct, sheet, empty, "hub-web", CancellationToken.None));
-            // Chỉ giữ lọc acct+sheet để dòng trống (SKU/tên rỗng) chắc chắn hiện → nhảy trang cuối + mở sửa.
-            _fAcct = acct; _fSheet = sheet; _fSku = ""; _fPriceMin = _fPriceMax = null; _fSoldOnly = _fDupSku = false;
-            _applied = BuildFilter();
-            _selected.Clear();
-            _page = int.MaxValue;   // LoadAsync kẹp về trang cuối
-            await LoadAsync();
-            var row = _rows.FirstOrDefault(r => r.AccountId == acct && r.Sheet == sheet && r.RowNo == rowNo);
-            if (row is not null) BeginEdit(row);
-            UpdateUrl();
-            _status = $"✔ Đã thêm dòng {rowNo} — điền dữ liệu rồi bấm ✔ Lưu.";
+            // SKU trống → tự sinh 1 mã B##### (duy nhất trong shop).
+            if (sku.Length == 0)
+            {
+                var codes = await pg.GenerateSkusAsync(acct, sheet, 1, CancellationToken.None);
+                sku = codes.Count > 0 ? codes[0] : "";
+            }
+            _addEdit.Sku = sku;
+            var data = _addEdit.ToData();
+            var rowNo = await Task.Run(() => pg.InsertRowAtEndAsync(acct, sheet, data, "hub-web", CancellationToken.None));
+            _addOpen = false;
+            var shopName = _shopName.GetValueOrDefault((acct, sheet), sheet);
+            _status = $"✔ Đã thêm dòng {rowNo} vào {shopName} (SKU {sku}).";
+            // Nếu bộ lọc đang áp PHỦ (acct, sheet) này → reload trang hiện tại. KHÔNG tự đổi bộ lọc.
+            if (FilterCovers(acct, sheet)) { _selected.Clear(); await LoadAsync(); }
         }
         catch (Exception ex) { _status = "✘ Lỗi thêm: " + ProductDb.Friendly(ex); }
-        finally { _busy = false; }
+        finally { _addBusy = false; }
+    }
+
+    // Bộ lọc đang áp có phủ (acct, sheet)? (acc/sheet null = mọi → phủ; ngược lại phải khớp).
+    private bool FilterCovers(string acct, string sheet) =>
+        (_applied.Acct is null || _applied.Acct == acct) && (_applied.Sheet is null || _applied.Sheet == sheet);
+
+    // Wizard nhập Excel (chọn shop trong form) xong → reload view hiện tại + status. KHÔNG đổi bộ lọc/URL.
+    private async Task OnWizardImported(ImportExcelWizard.ImportResult r)
+    {
+        _selected.Clear();
+        await LoadAsync();
+        _status = r.Message;
     }
 
     private async Task MarkSold()
