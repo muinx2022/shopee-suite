@@ -2,6 +2,7 @@ using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Shopee.Core.Coordination;
 using Shopee.Core.Infrastructure;
 
 namespace OpenMultiBraveLauncherV3;
@@ -1669,21 +1670,63 @@ internal static class ExtensionRunnerAutomation
     }
 
     // ĐỌC NATIVE (ClosedXML) thay cho API Python — workbook truyền per-instance (chạy song song nhiều BigSeller).
-    public static Task<int> ResolveEndRowAsync(string workbookPath, string sheet, int startRow, CancellationToken ct)
+    // HUB-MODE (useHubData): tổng dòng = Rows (tổng dền = MỌI dòng có thật) của sheet trên kho Hub (Postgres) —
+    // khớp TotalDataRows của Excel (dense đánh trên mọi dòng, kể cả dòng thiếu link/tên) → chỉ-số-dồn khớp GetProductLinks.
+    public static async Task<int> ResolveEndRowAsync(
+        string workbookPath, string sheet, int startRow, CancellationToken ct,
+        bool useHubData = false, string accountId = "")
     {
-        var total = Shopee.Core.Scrape.ScrapeWorkbook.TotalDataRows(workbookPath, sheet);
+        int total;
+        if (useHubData)
+        {
+            var client = CoordinationRuntime.Client
+                ?? throw new InvalidOperationException("⛔ Tk ở chế độ kho Hub nhưng chưa kết nối Hub — kiểm tra Cài đặt → Hub rồi chạy lại.");
+            var sheets = await client.GetProductSheetsAsync(accountId, ct).ConfigureAwait(false)
+                ?? throw new InvalidOperationException("⛔ Hub chưa sẵn sàng (kho sản phẩm Postgres) — thử lại sau.");
+            total = sheets.FirstOrDefault(s => string.Equals(s.Sheet, sheet, StringComparison.Ordinal))?.Rows ?? 0;
+        }
+        else
+        {
+            total = Shopee.Core.Scrape.ScrapeWorkbook.TotalDataRows(workbookPath, sheet);
+        }
         if (total < startRow)
             throw new InvalidOperationException($"Từ dòng {startRow} vượt quá số dòng sheet ({total}).");
-        return Task.FromResult(total);
+        return total;
     }
 
-    public static Task<SheetLinkFetchResult> FetchSheetLinksAsync(
+    public static async Task<SheetLinkFetchResult> FetchSheetLinksAsync(
         string workbookPath,
         string sheet,
         int startRow,
         int endRow,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool useHubData = false,
+        string accountId = "")
     {
+        if (useHubData)
+        {
+            var client = CoordinationRuntime.Client
+                ?? throw new InvalidOperationException("⛔ Tk ở chế độ kho Hub nhưng chưa kết nối Hub — kiểm tra Cài đặt → Hub rồi chạy lại.");
+            var links = await client.GetProductLinksAsync(accountId, sheet, startRow, endRow, ct).ConfigureAwait(false)
+                ?? throw new InvalidOperationException("⛔ Hub chưa sẵn sàng (kho sản phẩm Postgres) — thử lại sau.");
+            // Server đánh chỉ-số-dồn (DenseIndex) trên MỌI dòng (dòng thiếu link/tên vẫn chiếm chỗ, khớp Excel) rồi
+            // CHỈ TRẢ dòng HỢP LỆ (link + tên gốc non-blank) trong khoảng dense → dòng bị lọc không xuất hiện ở đây
+            // (client không cần đếm skip riêng). RowData mang SKU (+ tên gốc/link) để ExtractSkuFromRow đặt tên video
+            // {sku}.mp4 y như đọc từ cột SKU của workbook.
+            var hubItems = links
+                .Select(l => new SheetLinkItem(
+                    l.DenseIndex,
+                    new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["sku"] = l.Sku,
+                        ["name"] = l.NameOriginal,
+                        ["link"] = l.Link,
+                    },
+                    l.Link))
+                .ToList();
+            return new SheetLinkFetchResult(hubItems, 0, 0);
+        }
+
         var res = Shopee.Core.Scrape.ScrapeWorkbook.FetchLinks(
             workbookPath, sheet, startRow, endRow);
 
@@ -1694,8 +1737,8 @@ internal static class ExtensionRunnerAutomation
                 it.Link))
             .ToList();
 
-        return Task.FromResult(new SheetLinkFetchResult(
-            items, res.SkippedMissingProductName, res.SkippedMissingLink));
+        return new SheetLinkFetchResult(
+            items, res.SkippedMissingProductName, res.SkippedMissingLink);
     }
 
     private static async Task<string?> FindExtensionPopupDebuggerUrlAsync(

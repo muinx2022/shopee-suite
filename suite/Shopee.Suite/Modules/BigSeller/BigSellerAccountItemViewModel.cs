@@ -1,6 +1,8 @@
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using Shopee.Core.BigSeller;
+using Shopee.Core.Coordination;
+using Shopee.Suite.Services;
 
 namespace Shopee.Suite.Modules.BigSeller;
 
@@ -17,7 +19,7 @@ public sealed class BigSellerAccountItemViewModel : ObservableObject
     public BigSellerAccountItemViewModel(BigSellerAccount model)
     {
         Model = model;
-        foreach (var s in model.Shops) Shops.Add(new BigSellerShopViewModel(s));
+        foreach (var s in model.Shops) Shops.Add(new BigSellerShopViewModel(s, model.UsesHubData));
         RefreshSheets();
     }
 
@@ -86,11 +88,28 @@ public sealed class BigSellerAccountItemViewModel : ObservableObject
     public int ShopCount => Shops.Count;
     public string CookieStatus => Model.HasCookie ? "✓ Đã có cookie BigSeller" : "⚠ Chưa đăng nhập BigSeller";
 
+    /// <summary>Tk này lấy dữ liệu SP từ kho Hub (Postgres) thay vì workbook Excel local. CHỈ HIỂN THỊ ở client —
+    /// đổi chế độ làm trên web Hub. Đọc từ Model (đặt lúc dựng VM / khi Hub sync + rebuild projection).</summary>
+    public bool IsHubData => Model.UsesHubData;
+    /// <summary>Nhãn chế độ kho hiện cạnh ô workbook (rỗng ở chế độ Excel để không chiếm chỗ).</summary>
+    public string DataSourceLabel => Model.UsesHubData
+        ? "🗄 Kho Hub (Postgres) — dữ liệu SP lấy từ Hub; đổi chế độ trên web Hub."
+        : "";
+    /// <summary>Chỉ chế độ Excel mới cho chọn file workbook (hub-mode không dùng file → khoá nút chọn).</summary>
+    public bool CanPickWorkbook => !Model.UsesHubData;
+    /// <summary>Hint cạnh ô workbook cho acc excel-mode: file workbook giờ là FILE LOCAL của máy (đường chuyển
+    /// tiếp) — KHÔNG còn đồng bộ qua Hub (kho SP đã sang Postgres). Rỗng ở hub-mode (đã có DataSourceLabel).</summary>
+    public string WorkbookSyncHint => Model.UsesHubData ? "" : "(file local — không còn đồng bộ qua Hub)";
+
     public BigSellerShopViewModel AddShop()
     {
         var shop = new BigSellerShop { Name = "Shop mới" };
+        // Acc hub-mode: "sheet" chỉ là tên ngăn dữ liệu nội bộ hệ thống tự quản → gán = shop.Id (GUID ổn định,
+        // không đổi khi rename shop). CÙNG luật với AccountConfigPanel.AddShop trên web Hub. Acc excel-mode để
+        // trống (user gán sheet workbook sau). Shop mới sẽ được đẩy lên Hub qua HubBigSellerUpsert.
+        if (Model.UsesHubData) shop.ShopeeDataSheet = shop.Id;
         Model.Shops.Add(shop);
-        var vm = new BigSellerShopViewModel(shop);
+        var vm = new BigSellerShopViewModel(shop, Model.UsesHubData);
         Shops.Add(vm);
         OnPropertyChanged(nameof(ShopCount));
         return vm;
@@ -133,7 +152,7 @@ public sealed class BigSellerAccountItemViewModel : ObservableObject
             for (var j = i + 1; j < Shops.Count; j++)
                 if (ReferenceEquals(Shops[j].Model, m)) { at = j; break; }
             if (at >= 0) Shops.Move(at, i);
-            else Shops.Insert(i, new BigSellerShopViewModel(m));
+            else Shops.Insert(i, new BigSellerShopViewModel(m, Model.UsesHubData));
         }
 
         OnPropertyChanged(nameof(ShopCount));
@@ -141,15 +160,52 @@ public sealed class BigSellerAccountItemViewModel : ObservableObject
 
     public void RefreshSheets()
     {
+        // HUB-MODE: danh sách sheet lấy từ kho Hub (async) thay vì đọc file workbook. Fire-and-forget: nuốt lỗi
+        // → rỗng (UI không vỡ; runner mới là chỗ chặn cứng khi Hub chưa sẵn sàng).
+        if (Model.UsesHubData) { _ = RefreshSheetsFromHubAsync(); return; }
+
         // Danh sách mong muốn = sheet trong workbook + sheet đang gán cho các shop (để combo
         // SelectedItem luôn khớp, không bị reset null).
         var desired = WorkbookSheets.ListSheetNames(Model.WorkbookPath);
+        MergeShopSheets(desired);
+        ApplySheetOptions(desired);
+    }
+
+    // Nạp tên sheet từ kho Hub (GetProductSheetsAsync) → SheetOptions. Nuốt MỌI lỗi → dùng phần rỗng (chỉ còn
+    // sheet đang gán cho shop). Cập nhật collection trên UI thread (SheetOptions bind trực tiếp vào combo).
+    private async Task RefreshSheetsFromHubAsync()
+    {
+        var desired = new List<string>();
+        try
+        {
+            var client = CoordinationRuntime.Client;
+            if (client is not null)
+            {
+                var sheets = await client.GetProductSheetsAsync(Model.Id).ConfigureAwait(false);
+                if (sheets is not null)
+                    foreach (var s in sheets)
+                        if (!string.IsNullOrWhiteSpace(s.Sheet) && !desired.Contains(s.Sheet))
+                            desired.Add(s.Sheet);
+            }
+        }
+        catch { desired.Clear(); }
+
+        MergeShopSheets(desired);
+        UiThread.Post(() => ApplySheetOptions(desired));
+    }
+
+    /// <summary>Bổ sung sheet đang gán cho các shop (để combo SelectedItem luôn khớp, không bị reset null).</summary>
+    private void MergeShopSheets(List<string> desired)
+    {
         foreach (var s in Model.Shops)
             if (!string.IsNullOrWhiteSpace(s.ShopeeDataSheet) && !desired.Contains(s.ShopeeDataSheet))
                 desired.Add(s.ShopeeDataSheet);
+    }
 
-        // Cập nhật TĂNG DẦN (KHÔNG Clear) — nếu Clear thì combo mất giá trị giữa chừng → ghi null
-        // ngược + auto-save làm MẤT sheet đã chọn. Chỉ xoá cái thừa, thêm cái thiếu.
+    /// <summary>Cập nhật TĂNG DẦN (KHÔNG Clear) — nếu Clear thì combo mất giá trị giữa chừng → ghi null ngược +
+    /// auto-save làm MẤT sheet đã chọn. Chỉ xoá cái thừa, thêm cái thiếu.</summary>
+    private void ApplySheetOptions(List<string> desired)
+    {
         for (var i = SheetOptions.Count - 1; i >= 0; i--)
             if (!desired.Contains(SheetOptions[i])) SheetOptions.RemoveAt(i);
         foreach (var name in desired)

@@ -41,6 +41,8 @@ public sealed class ScrapeRunner
     private readonly string _sourceUserData;
     private readonly string _workbookPath;
     private readonly string _bigSellerAccountName;
+    private readonly string _bigSellerAccountId;
+    private readonly bool _useHubData;
     private readonly string _bigSellerKiotKey;
     private readonly string _bigSellerRegion;
     private readonly string _bigSellerProxyType;
@@ -61,12 +63,16 @@ public sealed class ScrapeRunner
     public event Action<string>? BigSellerNeedLogin;
 
     public ScrapeRunner(string workbookPath, string videoOutputDir, string? braveExe = null, string sourceUserData = "", string bigSellerAccountName = "",
-        string bigSellerKiotKey = "", string bigSellerRegion = "random", string bigSellerProxyType = "http")
+        string bigSellerKiotKey = "", string bigSellerRegion = "random", string bigSellerProxyType = "http",
+        string bigSellerAccountId = "", bool useHubData = false)
     {
         // Workbook giữ PER-INSTANCE (mang qua InstanceConfig) để chạy song song nhiều BigSeller mỗi
         // workbook khác nhau. VideoOutputDir dùng chung mọi BigSeller nên vẫn để static.
         _workbookPath = workbookPath;
         _bigSellerAccountName = bigSellerAccountName;
+        // Hub-mode: link/tổng-dòng đọc từ kho Hub theo accountId (thay workbook). Mang qua InstanceConfig.
+        _bigSellerAccountId = bigSellerAccountId ?? "";
+        _useHubData = useHubData;
         // Proxy RIÊNG của tk BigSeller (nếu có key) → mỗi instance đẩy bigseller.com qua IP này (split-tunnel).
         _bigSellerKiotKey = bigSellerKiotKey ?? "";
         _bigSellerRegion = string.IsNullOrWhiteSpace(bigSellerRegion) ? "random" : bigSellerRegion;
@@ -379,6 +385,8 @@ public sealed class ScrapeRunner
         BraveInstanceSession? session = null;
         var cfg = BuildConfig(spec, from, to);
         cfg.WorkbookPath = _workbookPath;   // per-instance workbook (chạy song song nhiều BigSeller)
+        cfg.UseHubData = _useHubData;   // hub-mode: đọc link/tổng-dòng từ kho Hub thay vì workbook
+        cfg.HubAccountId = _bigSellerAccountId;   // khoá kho Hub theo tk BigSeller (TÁCH khỏi AccountId auto-login)
         cfg.BigSellerAccountName = _bigSellerAccountName;   // để overlay hiện "Bigseller Account: …"
         var port = PortAllocator.Shared.AllocateInstancePort();
         var windowSlotHeld = false;

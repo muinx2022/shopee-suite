@@ -51,20 +51,27 @@ internal static class LauncherRunnerLoop
 
         var startRow = runRow.Value;
 
+        // HUB-MODE: nguồn link là kho Hub (Postgres) theo HubAccountId — KHÔNG cần workbook file. Excel-mode giữ
+        // nguyên: bắt buộc file tồn tại. Guard file chỉ chạy ở excel-mode (workbookPath hub-mode có thể rỗng).
+        var useHubData = config.UseHubData;
+        var hubAccountId = config.HubAccountId;
         var workbookPath = config.WorkbookPath;
-        if (string.IsNullOrWhiteSpace(workbookPath) || !File.Exists(workbookPath))
+        if (!useHubData && (string.IsNullOrWhiteSpace(workbookPath) || !File.Exists(workbookPath)))
             throw new InvalidOperationException(
                 "Workbook không tồn tại — kiểm tra cấu hình ở mục BigSeller.");
 
         var endRow = config.EndRow;
         if (endRow is null || endRow < startRow)
-            endRow = await ExtensionRunnerAutomation.ResolveEndRowAsync(workbookPath, sheet, startRow, cancellationToken);
+            endRow = await ExtensionRunnerAutomation.ResolveEndRowAsync(
+                workbookPath, sheet, startRow, cancellationToken, useHubData, hubAccountId);
 
         config.EndRow = endRow;
 
-        log($"Đang tải dữ liệu: {sheet} dòng {startRow}–{endRow}…");
+        log(useHubData
+            ? $"Đang tải dữ liệu (kho Hub): {sheet} dòng {startRow}–{endRow}…"
+            : $"Đang tải dữ liệu: {sheet} dòng {startRow}–{endRow}…");
         var fetch = await ExtensionRunnerAutomation.FetchSheetLinksAsync(
-            workbookPath, sheet, startRow, endRow.Value, cancellationToken);
+            workbookPath, sheet, startRow, endRow.Value, cancellationToken, useHubData, hubAccountId);
         var items = fetch.Items;
 
         if (items.Count == 0)

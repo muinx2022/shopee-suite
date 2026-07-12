@@ -444,7 +444,7 @@ public sealed partial class UpdateProductViewModel : ModuleViewModelBase
             lanes, lanes, reload, ai.OpenAiApiKey,   // Import & Update dùng CHUNG số lane (RunConfig.Processes); Hub giao có thể ghi đè
             s.ColumnMap.LinkColumn, s.ColumnMap.PriceColumn, s.ColumnMap.SkuColumn,
             s.ColumnMap.ItemIdColumn, s.ColumnMap.ProductNameColumn, s.ColumnMap.RewrittenNameColumn,
-            a.Password);
+            a.Password, a.UsesHubData);   // hub-mode: đọc/ghi kho Hub (Postgres) thay vì workbook Excel local
     }
 
     private async Task RunOneAsync(

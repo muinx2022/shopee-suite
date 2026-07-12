@@ -12,6 +12,7 @@ public static class HubIcons
         ["stats"] = "<path d='M3 3v18h18'/><rect x='7' y='12' width='3' height='6'/><rect x='12' y='8' width='3' height='10'/><rect x='17' y='4' width='3' height='14'/>",
         ["machines"] = "<rect x='2' y='3' width='20' height='14' rx='2'/><path d='M8 21h8M12 17v4'/>",
         ["search"] = "<circle cx='11' cy='11' r='7'/><path d='M21 21l-4.3-4.3'/>",
+        ["data"] = "<path d='M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z'/><path d='M3.27 6.96 12 12.01l8.73-5.05'/><path d='M12 22.08V12'/>",
         ["bigseller"] = "<path d='M12 2 2 7l10 5 10-5-10-5z'/><path d='M2 17l10 5 10-5'/><path d='M2 12l10 5 10-5'/>",
         ["users"] = "<path d='M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2'/><circle cx='9' cy='7' r='4'/><path d='M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75'/>",
         ["alert"] = "<path d='M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z'/><path d='M12 9v4M12 17h.01'/>",
@@ -31,6 +32,11 @@ public static class HubIcons
         ["import"] = "<path d='M12 3v13'/><path d='m7 11 5 5 5-5'/><path d='M5 21h14'/>",
         ["update"] = "<path d='M21 12a9 9 0 1 1-2.6-6.4L21 8'/><path d='M21 3v5h-5'/>",
         ["tag"] = "<path d='M20.6 11.4 12 2.8H4v8l8.6 8.6a2 2 0 0 0 2.8 0l5.2-5.2a2 2 0 0 0 0-2.8z'/><circle cx='7.5' cy='7.5' r='1.3'/>",
+
+        // Nút hành động trên hàng lưới dữ liệu (emoji ✏ trên Windows mờ như nét gạch → SVG nét rõ, ăn currentColor)
+        ["edit"] = "<path d='M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z'/>",
+        ["check"] = "<path d='M20 6 9 17l-5-5'/>",
+        ["x"] = "<path d='M18 6 6 18M6 6l12 12'/>",
     };
 
     /// <summary>SVG inline stroke=currentColor. key lạ → svg rỗng (không vỡ trang).</summary>

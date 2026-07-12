@@ -14,7 +14,8 @@ public sealed record UpdateProductContext(
     string OpenAiApiKey = "",
     int LinkColumn = 1, int PriceColumn = 3, int SkuColumn = 4,
     int ItemIdColumn = 5, int ProductNameColumn = 6, int RewrittenNameColumn = 7,
-    string Password = "");
+    string Password = "",
+    bool UseHubData = false);
 
 /// <summary>
 /// Facade công khai bọc engine update-product. 3 workflow (TẤT CẢ C#, không còn Python):
@@ -90,6 +91,7 @@ public sealed class UpdateProductRunner
             ItemIdColumn = ctx.ItemIdColumn,
             ProductNameColumn = ctx.ProductNameColumn,
             RewrittenNameColumn = ctx.RewrittenNameColumn,
+            UseHubData = ctx.UseHubData,   // hub-mode: runner đọc/ghi dòng qua HubClient thay vì mở WorkbookPath
         };
     }
 

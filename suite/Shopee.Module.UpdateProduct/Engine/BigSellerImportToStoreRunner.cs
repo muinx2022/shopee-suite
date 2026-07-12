@@ -4,6 +4,7 @@ using Microsoft.Playwright;
 using Shopee.Core.Ai;
 using Shopee.Core.BigSeller;
 using Shopee.Core.Browser;
+using Shopee.Core.Coordination;
 
 namespace UpdateProduct;
 
@@ -69,6 +70,9 @@ internal sealed class BigSellerImportToStoreRunner : BigSellerBraveRunner
     // đòi cột "Tên đã sửa" vì import không cần). Khoá file khi đọc để serialize với lúc "Update tên SP" đang ghi.
     private async Task LoadImportItemIdSetAsync(CancellationToken ct)
     {
+        // HUB-MODE: tập item id lấy từ kho Hub (Postgres) — KHÔNG ánh xạ cột, KHÔNG khoá file. Excel-mode giữ nguyên.
+        if (_settings.UseHubData) { await LoadImportItemIdSetFromHubAsync(ct).ConfigureAwait(false); return; }
+
         if (_settings.ItemIdColumn <= 0 && _settings.LinkColumn <= 0)
             throw new InvalidOperationException("Cần map ít nhất 'Item ID' hoặc 'Link' để lấy item id import (mục BigSeller → Ánh xạ cột).");
 
@@ -95,6 +99,29 @@ internal sealed class BigSellerImportToStoreRunner : BigSellerBraveRunner
         _importIds = ids;
         _rowByImportId = rowById;
         _log($"Nạp {ids.Count} item id từ sheet '{_settings.DataSheet}' (dòng {start}→{(end >= start ? end : start)}).");
+    }
+
+    // HUB-MODE của LoadImportItemIdSetAsync: server trả dòng có itemId non-blank HOẶC link non-blank trong
+    // [StartRow..EndRow] → dựng CÙNG tập (itemId ưu tiên ItemId, rỗng thì ExtractShopeeId(Link)) + map id→dòng đầu.
+    private async Task LoadImportItemIdSetFromHubAsync(CancellationToken ct)
+    {
+        var client = CoordinationRuntime.Client
+            ?? throw new InvalidOperationException("⛔ Tk ở chế độ kho Hub nhưng chưa kết nối Hub — kiểm tra Cài đặt → Hub rồi chạy lại.");
+        var start = Math.Max(2, _settings.StartRow);
+        var end = _settings.EndRow;   // 0 = đến hết (server: toRow<=0 → không chặn trên)
+        var rows = await client.GetProductImportIdsAsync(_settings.AccountId, _settings.DataSheet, start, end, ct).ConfigureAwait(false)
+            ?? throw new InvalidOperationException("⛔ Hub chưa sẵn sàng (kho sản phẩm Postgres) — thử lại sau.");
+
+        var ids = new HashSet<string>(StringComparer.Ordinal);
+        var rowById = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var r in rows)
+        {
+            var id = !string.IsNullOrWhiteSpace(r.ItemId) ? r.ItemId.Trim() : (BigSellerCrawlHelper.ExtractShopeeId(r.Link) ?? "");
+            if (!string.IsNullOrWhiteSpace(id)) { ids.Add(id); rowById.TryAdd(id, r.RowNo); }
+        }
+        _importIds = ids;
+        _rowByImportId = rowById;
+        _log($"Nạp {ids.Count} item id từ kho Hub — sheet '{_settings.DataSheet}' (dòng {start}→{(end > 0 ? end.ToString() : "hết")}).");
     }
 
     public async Task RunAsync(CancellationToken cancellationToken)

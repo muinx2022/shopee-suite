@@ -2,11 +2,12 @@
    Tách nguyên từ trang Stats cũ → dùng lại ở trang Fleet. Dữ liệu chụp lúc mở (không tự refresh). *@
 @inject SheetMapService SheetMap
 
-<div class="modal-overlay" @onclick="OnClose">
+@* KHÔNG đóng khi bấm ra backdrop (dễ nhầm) — chỉ ✕ mới đóng. *@
+<div class="modal-overlay">
     <div class="modal wide" @onclick:stopPropagation="true">
         <div class="modal-head">
             <span>🗺️ @Title</span>
-            <button class="linkbtn" @onclick="OnClose">✕</button>
+            <button class="linkbtn" title="Đóng" @onclick="OnClose">✕</button>
         </div>
         <div class="modal-body">
             @if (_loading)

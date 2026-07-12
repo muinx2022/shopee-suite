@@ -24,7 +24,10 @@ public sealed partial class WorkspaceShopViewModel : ObservableObject
     }
 
     public string Name => Shop.DisplayName;
-    public string Sheet => string.IsNullOrWhiteSpace(Shop.ShopeeDataSheet) ? "— chưa gán sheet" : Shop.ShopeeDataSheet;
+    // Hub-mode: cột "Sheet" để TRỐNG (sheet = GUID ngăn nội bộ, không phô cho user); excel-mode giữ như cũ.
+    public string Sheet => Parent.Account.UsesHubData
+        ? ""
+        : (string.IsNullOrWhiteSpace(Shop.ShopeeDataSheet) ? "— chưa gán sheet" : Shop.ShopeeDataSheet);
 
     [ObservableProperty] private string _scrapeStatusText = "";
     [ObservableProperty] private IBrush _scrapeBackground = Brushes.Transparent;

@@ -95,11 +95,14 @@ public sealed partial class BigSellerViewModel : ModuleViewModelBase
     [RelayCommand]
     private void Add()
     {
-        var model = new BigSellerAccount { Label = "BigSeller mới" };
+        // Acc MỚI tạo từ client mặc định hub-mode (kho SP ở Postgres — workbook Excel đã bỏ đồng bộ). Đổi lại
+        // sang excel-mode làm trên web Hub nếu cần bản chuyển tiếp.
+        var model = new BigSellerAccount { Label = "BigSeller mới", DataSource = "hub" };
         if (BigSellerStore.Shared.Add(model))   // → Changed → SyncFromStore dựng lại Items (gồm acc mới)
         {
             Selected = Items.FirstOrDefault(i => i.Model.Id == model.Id) ?? Selected;
             Status = $"{Items.Count} tài khoản BigSeller.";
+            HubBigSellerUpsert.Schedule();   // đẩy acc mới lên Hub (kẻo lượt pull kế mirror-xoá)
         }
         else
         {
@@ -128,7 +131,8 @@ public sealed partial class BigSellerViewModel : ModuleViewModelBase
     [RelayCommand]
     private void Save()
     {
-        SaveStore("Đã lưu cấu hình BigSeller.", "Không lưu được cấu hình BigSeller.");
+        if (SaveStore("Đã lưu cấu hình BigSeller.", "Không lưu được cấu hình BigSeller."))
+            HubBigSellerUpsert.Schedule();   // lưu tay → đẩy field chung mới lên Hub
     }
 
     [RelayCommand]
@@ -170,7 +174,8 @@ public sealed partial class BigSellerViewModel : ModuleViewModelBase
     {
         if (Selected is null) return;
         SelectedShop = Selected.AddShop();
-        SaveStore("Đã thêm shop mới.", "Không lưu được shop mới.");
+        if (SaveStore("Đã thêm shop mới.", "Không lưu được shop mới."))
+            HubBigSellerUpsert.Schedule();   // đẩy shop mới lên Hub
     }
 
     [RelayCommand]

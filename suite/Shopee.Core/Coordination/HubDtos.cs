@@ -203,3 +203,7 @@ public sealed record MachineHeartbeatRequest(string MachineId, string Hostname, 
 public sealed record MachineLeaveRequest(string MachineId);
 
 public sealed record FilePutResponse(bool Ok, int Version, string? Conflict);
+
+/// <summary>Kết quả upsert acc BigSeller từ client lên hub (POST /bigseller/upsert): số acc mới thêm, số acc đã
+/// có được cập nhật (field chung hoặc shop), tổng số shop mới thêm. Hub KHÔNG bao giờ xoá acc/shop.</summary>
+public sealed record BigSellerUpsertResult(int Added, int Updated, int ShopsAdded);

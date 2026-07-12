@@ -1,0 +1,181 @@
+using Npgsql;
+using Shopee.Core.Coordination;
+
+namespace Shopee.Hub;
+
+/// <summary>
+/// Phần ProductDb: import/export workbook xlsx. Parse/ghi Excel nằm TRỌN ở <see cref="ProductXlsxCodec"/> (hàm
+/// thuần, test không cần DB); ở đây CHỈ đổ codec ↔ SQL. Mỗi sheet 1 transaction (replace = xoá rồi chèn;
+/// upsert = ON CONFLICT đè cột dữ liệu).
+/// </summary>
+public sealed partial class ProductDb
+{
+    // ── Import: body = bytes xlsx; đọc MỌI worksheet ───────────────────────────────
+    public async Task<ProductImportResult> ImportXlsxAsync(
+        string acct, string mode, string? sourceFile, byte[] xlsx,
+        ProductXlsxCodec.ColumnOverrides overrides, string updatedBy, CancellationToken ct)
+    {
+        var replace = !string.Equals(mode, "upsert", StringComparison.OrdinalIgnoreCase);   // mặc định replace
+        var insertSql = replace ? InsertRowSql : InsertRowSql + "\n" + OnConflictUpdateSql;
+
+        List<(string Sheet, List<ProductXlsxCodec.ParsedRow> Rows)> parsed;
+        using (var ms = new MemoryStream(xlsx))
+            parsed = ProductXlsxCodec.Parse(ms, overrides);
+
+        // Pre-check MỌI sheet TRƯỚC khi ghi bất kỳ sheet nào → không partial-commit khi 1 sheet có SKU trùng nội bộ
+        // (báo lỗi rõ thay vì unique_violation 23505 giữa transaction).
+        foreach (var (_, rows) in parsed) CheckNoDupSkuWithin(rows);
+
+        var result = new List<ProductSheetImport>();
+        var total = 0;
+
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        foreach (var (sheet, rows) in parsed)
+        {
+            await using var tx = await conn.BeginTransactionAsync(ct);
+
+            if (replace)
+            {
+                await using var del = new NpgsqlCommand(
+                    "DELETE FROM product_rows WHERE account_id=$1 AND sheet=$2;", conn, tx);
+                del.Parameters.AddWithValue(acct);
+                del.Parameters.AddWithValue(sheet);
+                await del.ExecuteNonQueryAsync(ct);
+            }
+
+            foreach (var pr in rows)
+            {
+                await using var cmd = new NpgsqlCommand(insertSql, conn, tx);
+                BindRow(cmd, acct, sheet, pr.RowNo, pr.Data, updatedBy);
+                await cmd.ExecuteNonQueryAsync(ct);
+            }
+
+            await TouchSheetAsync(conn, tx, acct, sheet, sourceFile, setImported: true, ct);
+            await tx.CommitAsync(ct);
+
+            result.Add(new ProductSheetImport(sheet, rows.Count));
+            total += rows.Count;
+        }
+
+        return new ProductImportResult(result, total);
+    }
+
+    // ── Import các dòng đã parse vào ĐÚNG 1 ngăn (sheet) — cho nút "⬆ Nhập Excel" per-shop ở trang Dữ liệu ──
+    /// <summary>Nạp <paramref name="rows"/> (đã parse ở <see cref="ProductXlsxCodec"/>) vào 1 sheet, trong 1
+    /// transaction. <paramref name="replace"/> = xoá sạch ngăn trước rồi chèn theo <see cref="ProductXlsxCodec.ParsedRow.RowNo"/>
+    /// mang sẵn (giữ lỗ hổng); ngược lại NỐI THÊM — bỏ RowNo gốc, cấp row_no tuần tự từ COALESCE(max,1)+1 (như
+    /// <see cref="AppendRowsAsync"/>). <see cref="TouchSheetAsync"/> đặt source_file/imported_at KHI ghi đè, chỉ chạm
+    /// updated_at khi nối thêm. Trả số dòng đã chèn.</summary>
+    public async Task<int> ImportIntoSheetAsync(
+        string acct, string sheet, List<ProductXlsxCodec.ParsedRow> rows, bool replace,
+        string? sourceFile, string updatedBy, CancellationToken ct)
+    {
+        // Pre-check trùng SKU nội bộ lô → báo lỗi rõ trước khi mở transaction (tránh 23505 khó hiểu giữa chừng).
+        CheckNoDupSkuWithin(rows);
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        await using var tx = await conn.BeginTransactionAsync(ct);
+
+        if (replace)
+        {
+            await using var del = new NpgsqlCommand(
+                "DELETE FROM product_rows WHERE account_id=$1 AND sheet=$2;", conn, tx);
+            del.Parameters.AddWithValue(acct);
+            del.Parameters.AddWithValue(sheet);
+            await del.ExecuteNonQueryAsync(ct);
+        }
+
+        // Nối thêm → điểm bắt đầu row_no (bảng trống → 2, khớp AppendRowsAsync); ghi đè → dùng RowNo mang sẵn.
+        var baseRow = 0;
+        if (!replace)
+        {
+            await using var q = new NpgsqlCommand(
+                "SELECT COALESCE(max(row_no),1)+1 FROM product_rows WHERE account_id=$1 AND sheet=$2;", conn, tx);
+            q.Parameters.AddWithValue(acct);
+            q.Parameters.AddWithValue(sheet);
+            baseRow = Convert.ToInt32(await q.ExecuteScalarAsync(ct));
+        }
+
+        for (var i = 0; i < rows.Count; i++)
+        {
+            var rowNo = replace ? rows[i].RowNo : baseRow + i;
+            await using var cmd = new NpgsqlCommand(InsertRowSql, conn, tx);
+            BindRow(cmd, acct, sheet, rowNo, rows[i].Data, updatedBy);
+            await cmd.ExecuteNonQueryAsync(ct);
+        }
+
+        await TouchSheetAsync(conn, tx, acct, sheet, sourceFile, setImported: replace, ct);
+        await tx.CommitAsync(ct);
+        return rows.Count;
+    }
+
+    // ── Export: sheet rỗng = mọi sheet của acc; đặt dữ liệu đúng row_no (lỗ hổng để trống) ──
+    // sheetTitles = ánh xạ khoá-ngăn (ShopeeDataSheet) → TÊN SHOP để đặt tên worksheet (hết lộ GUID). Ngăn không
+    // khớp shop nào → giữ khoá ngăn làm tiêu đề (ResolveSheetTitles lo sanitize/dedupe theo thứ tự ORDER BY sheet).
+    public async Task<(byte[] Bytes, string FileName)> ExportXlsxAsync(
+        string acct, string? sheet, CancellationToken ct,
+        IReadOnlyDictionary<string, string>? sheetTitles = null)
+    {
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+
+        // Danh sách sheet cần xuất.
+        var sheets = new List<string>();
+        if (!string.IsNullOrEmpty(sheet))
+            sheets.Add(sheet);
+        else
+        {
+            await using var q = new NpgsqlCommand(
+                "SELECT DISTINCT sheet FROM product_rows WHERE account_id=$1 ORDER BY sheet;", conn);
+            q.Parameters.AddWithValue(acct);
+            await using var rd = await q.ExecuteReaderAsync(ct);
+            while (await rd.ReadAsync(ct)) sheets.Add(rd.GetString(0));
+        }
+
+        var titleMap = ProductXlsxCodec.ResolveSheetTitles(sheets, sheetTitles);
+        var data = new List<(string Sheet, IReadOnlyList<ProductXlsxCodec.ParsedRow> Rows)>();
+        foreach (var sh in sheets)
+            data.Add((titleMap.GetValueOrDefault(sh, sh), await ReadSheetRowsAsync(conn, acct, sh, ct)));
+
+        var bytes = ProductXlsxCodec.Write(data);
+        var fileName = await ResolveSourceFileAsync(conn, acct, sheet, ct) ?? $"{acct}.xlsx";
+        return (bytes, fileName);
+    }
+
+    private static async Task<List<ProductXlsxCodec.ParsedRow>> ReadSheetRowsAsync(
+        NpgsqlConnection conn, string acct, string sheet, CancellationToken ct)
+    {
+        const string sql = @"
+SELECT row_no, link, price_original, price_sale, sku, item_id, name_original, name_rewritten,
+       category, shop_name, rating, sold_month, likes, reviews, region, image, meta_shop_id, meta_item_id
+FROM product_rows
+WHERE account_id=$1 AND sheet=$2
+ORDER BY row_no;";
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue(acct);
+        cmd.Parameters.AddWithValue(sheet);
+        var rows = new List<ProductXlsxCodec.ParsedRow>();
+        await using var rd = await cmd.ExecuteReaderAsync(ct);
+        while (await rd.ReadAsync(ct))
+        {
+            var data = new ProductRowData(
+                Link: S(rd, 1), PriceOriginal: S(rd, 2), PriceSale: S(rd, 3), Sku: S(rd, 4), ItemId: S(rd, 5),
+                NameOriginal: S(rd, 6), NameRewritten: S(rd, 7), Category: S(rd, 8), ShopName: S(rd, 9),
+                Rating: S(rd, 10), SoldMonth: S(rd, 11), Likes: S(rd, 12), Reviews: S(rd, 13), Region: S(rd, 14),
+                Image: S(rd, 15), MetaShopId: S(rd, 16), MetaItemId: S(rd, 17));
+            rows.Add(new ProductXlsxCodec.ParsedRow(rd.GetInt32(0), data));
+        }
+        return rows;
+    }
+
+    private static async Task<string?> ResolveSourceFileAsync(NpgsqlConnection conn, string acct, string? sheet, CancellationToken ct)
+    {
+        const string sql = @"
+SELECT source_file FROM product_sheets
+WHERE account_id=$1 AND ($2='' OR sheet=$2) AND source_file IS NOT NULL
+LIMIT 1;";
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue(acct);
+        cmd.Parameters.AddWithValue(sheet ?? "");
+        var v = await cmd.ExecuteScalarAsync(ct);
+        return v is string s && !string.IsNullOrWhiteSpace(s) ? s : null;
+    }
+}

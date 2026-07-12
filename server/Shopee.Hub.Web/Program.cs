@@ -41,8 +41,23 @@ builder.Services.AddSingleton(hubOptions);
 builder.Services.AddSingleton<FileStoreConfigService>();
 builder.Services.AddSingleton<SearchBoardService>();
 builder.Services.AddSingleton<BigSellerLoginService>();
+// Rewrite tên chạy NGAY TRÊN HUB (hub quản toàn bộ dữ liệu Postgres) — 1 worker nền, resolve ProductDb tuỳ lúc
+// (có thể chưa cấu hình Postgres). Đăng ký LUÔN (không phụ thuộc pgConn) → UI hiện được cả khi pg chưa sẵn sàng.
+builder.Services.AddSingleton<RewriteJobService>();
 builder.Services.AddSingleton<AdminAccountService>();
 builder.Services.AddSingleton<LoginRateLimit>();
+
+// ── Postgres (kho sản phẩm — Docker cạnh hub): env HUB_PG_CONN ưu tiên → config Hub:PgConn → rỗng = KHÔNG bật
+// (hub chạy y như cũ, không cần Postgres). Cùng pattern HUB_DATA_DIR ở trên. ──
+var pgConn = Environment.GetEnvironmentVariable("HUB_PG_CONN")
+             ?? builder.Configuration["Hub:PgConn"];
+ProductDb? productDb = null;
+if (!string.IsNullOrWhiteSpace(pgConn))
+{
+    productDb = new ProductDb(pgConn);
+    builder.Services.AddSingleton(productDb);
+    builder.Services.AddHostedService<ProductDbInitService>();   // connect + migrate ở nền, retry tới khi Postgres lên
+}
 
 // FleetStateService: vừa là IHostedService (nền refresh 2s) vừa được inject vào trang Blazor → 1 singleton.
 builder.Services.AddSingleton<FleetStateService>();
@@ -104,6 +119,9 @@ var app = builder.Build();
 
 // db đăng ký AddSingleton(instance) nên DI KHÔNG tự Dispose khi tắt → tự đăng ký để đóng SqliteConnection sạch.
 app.Lifetime.ApplicationStopped.Register(db.Dispose);
+// ProductDb cũng AddSingleton(instance) → tự đóng NpgsqlDataSource sạch khi tắt (nếu có cấu hình Postgres).
+if (productDb is not null)
+    app.Lifetime.ApplicationStopped.Register(() => productDb.DisposeAsync().AsTask().GetAwaiter().GetResult());
 
 // Seed token API + admin (từ env) nếu DB chưa có.
 {
@@ -194,6 +212,9 @@ app.MapGet("/admin/chromium-test", async (BigSellerLoginService svc) =>
 
 // ── API client (giữ nguyên giao thức) ──
 app.MapClientApi(db);
+
+// ── API kho sản phẩm (Postgres) — 503 pg-not-ready nếu chưa cấu hình/chưa migrate ──
+app.MapProductApi();
 
 // ── Blazor UI (khoá sau cookie) ──
 app.MapRazorComponents<App>()

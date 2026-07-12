@@ -1,19 +1,11 @@
-using System.Text.Json;
-using System.Text.Json.Serialization;
 using ClosedXML.Excel;
 using Shopee.Core.Ai;
+using Shopee.Core.Coordination;
 
 namespace UpdateProduct;
 
 internal sealed class ProductNameRewriteRunner
 {
-    private const int OpenAiMaxRetries = 3;
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-    };
-
     private readonly object _gate = new();
     private CancellationTokenSource? _cts;
     private Task? _task;
@@ -85,12 +77,20 @@ internal sealed class ProductNameRewriteRunner
 
     private async Task RunAsync(BigSellerWorkflowSettings settings, Action<string> log, CancellationToken ct)
     {
-        var workbookPath = settings.WorkbookPath?.Trim();
+        // HUB-MODE: nguồn dòng-chờ-rewrite là kho Hub (Postgres) — KHÔNG cần workbook file, KHÔNG ánh xạ cột,
+        // KHÔNG mở XLWorkbook (đọc lẫn ghi). Excel-mode giữ nguyên từng byte ở các nhánh else bên dưới.
+        var useHub = settings.UseHubData;
+        HubClient? client = null;
+        if (useHub)
+            client = CoordinationRuntime.Client
+                ?? throw new InvalidOperationException("⛔ Tk ở chế độ kho Hub nhưng chưa kết nối Hub — kiểm tra Cài đặt → Hub rồi chạy lại.");
+
+        var workbookPath = settings.WorkbookPath?.Trim() ?? "";   // non-null: hub-mode có thể rỗng (không dùng); excel-mode guard dưới chặn rỗng
         var sheetName = settings.DataSheet?.Trim();
         var startRow = Math.Max(2, settings.StartRow);
         var endRow = Math.Max(0, settings.EndRow);
 
-        if (string.IsNullOrWhiteSpace(workbookPath) || !File.Exists(workbookPath))
+        if (!useHub && (string.IsNullOrWhiteSpace(workbookPath) || !File.Exists(workbookPath)))
             throw new FileNotFoundException($"Không tìm thấy workbook: {workbookPath}");
         if (string.IsNullOrWhiteSpace(sheetName))
             throw new InvalidOperationException("Thiếu tên sheet.");
@@ -100,31 +100,49 @@ internal sealed class ProductNameRewriteRunner
         if (!cfg.HasActiveKey)
             throw new InvalidOperationException($"Chưa cấu hình API key cho {cfg.Provider} (trang Cấu hình AI trên Hub).");
         var batchSize = Math.Clamp(cfg.BatchSize, 1, 500);
+        // LÕI viết-lại-tên tách về Core (dùng chung với hub) — client giữ NGUYÊN hành vi: truyền hàm cắt-giữ-SKU
+        // của module + để engine dùng AiChat mặc định. Prompt/retry/parse/fallback nằm trong engine (byte-đúng).
+        var engine = new NameRewriteEngine(cfg, BigSellerText.TruncateProductNamePreservingSku);
 
         // Cột Excel theo cấu hình của shop. 0 = "không dùng" → fail rõ ràng (KHÔNG âm thầm rơi về cột
-        // mặc định D/F/G — sẽ đọc/ghi nhầm cột). Đây là 3 cột BẮT BUỘC của rewrite.
+        // mặc định D/F/G — sẽ đọc/ghi nhầm cột). Đây là 3 cột BẮT BUỘC của rewrite (chỉ áp cho workbook).
         var skuCol = settings.SkuColumn;
         var nameCol = settings.ProductNameColumn;
         var rewrittenCol = settings.RewrittenNameColumn;
-        if (skuCol <= 0 || nameCol <= 0 || rewrittenCol <= 0)
+        if (!useHub && (skuCol <= 0 || nameCol <= 0 || rewrittenCol <= 0))
             throw new InvalidOperationException(
                 "Chưa map đủ cột 'SKU' / 'Tên gốc' / 'Tên đã sửa' cho shop (mục BigSeller → Ánh xạ cột).");
 
         RewritePlan plan;
-        using (await WorkbookFileLockHandle.AcquireAsync(workbookPath, ct))
+        if (useHub)
         {
-            ct.ThrowIfCancellationRequested();
-            plan = BuildPlan(workbookPath, sheetName, startRow, endRow, nameCol, skuCol, rewrittenCol);
+            // Server đã LỌC đúng luật BuildPlan (Tên gốc + SKU non-blank, Tên-sửa blank) trong [startRow..endRow].
+            plan = await BuildPlanFromHubAsync(client!, settings.AccountId, sheetName, startRow, endRow, nameCol, skuCol, rewrittenCol, ct);
+        }
+        else
+        {
+            using (await WorkbookFileLockHandle.AcquireAsync(workbookPath, ct))
+            {
+                ct.ThrowIfCancellationRequested();
+                plan = BuildPlan(workbookPath, sheetName, startRow, endRow, nameCol, skuCol, rewrittenCol);
+            }
         }
 
         var rangeEnd = plan.LastIncludedRow;
-        log($"📝 Rewrite tên (C#): workbook='{workbookPath}', sheet='{plan.SheetName}', rows={plan.FirstRow}-{rangeEnd}");
+        log(useHub
+            ? $"📝 Rewrite tên (kho Hub): acct='{settings.AccountId}', sheet='{plan.SheetName}', rows={plan.FirstRow}-{rangeEnd}"
+            : $"📝 Rewrite tên (C#): workbook='{workbookPath}', sheet='{plan.SheetName}', rows={plan.FirstRow}-{rangeEnd}");
         log($"📝 AI: {cfg.Provider} · {cfg.ActiveModel} | Batch size: {batchSize}");
 
         if (plan.RowsToUpdate.Count == 0)
         {
-            log($"✓ Không còn dòng cần rewrite (bỏ qua: {plan.SkippedNoName} thiếu cột F 'Tên sp', {plan.SkippedNoSku} thiếu cột D 'SKU', {plan.SkippedExisting} đã có cột G 'Tên sp đã sửa').");
-            LogEmptyPlanDiagnostics(plan, log);
+            if (useHub)
+                log($"✓ Không còn dòng cần rewrite trên kho Hub (sheet '{plan.SheetName}', dòng {plan.FirstRow}+): mọi dòng đã có tên-sửa hoặc thiếu Tên gốc/SKU.");
+            else
+            {
+                log($"✓ Không còn dòng cần rewrite (bỏ qua: {plan.SkippedNoName} thiếu cột F 'Tên sp', {plan.SkippedNoSku} thiếu cột D 'SKU', {plan.SkippedExisting} đã có cột G 'Tên sp đã sửa').");
+                LogEmptyPlanDiagnostics(plan, log);
+            }
             return;
         }
 
@@ -138,7 +156,7 @@ internal sealed class ProductNameRewriteRunner
             log($"📝 Rewrite batch {i + 1}-{i + batch.Count}/{plan.UniqueNames.Count} — đang gọi AI…");
 
             // 1 lần gọi AI: tên gốc → tiêu đề SEO hoàn chỉnh (keyword1 - keyword2 + cụm mô tả, KHÔNG kèm SKU).
-            var titles = await RequestSeoTitlesWithSplitAsync(cfg, batch, log, ct);
+            var titles = await engine.RewriteTitlesAsync(batch, log, ct);
             if (titles.Count != batch.Count)
                 throw new InvalidOperationException($"AI trả về số tiêu đề không khớp. Expected={batch.Count}, actual={titles.Count}");
 
@@ -146,12 +164,10 @@ internal sealed class ProductNameRewriteRunner
             for (var idx = 0; idx < batch.Count; idx++)
             {
                 var originalName = batch[idx];
-                var title = SplitNameCode(titles[idx]).Body;   // phòng khi AI lỡ thêm mã code ở cuối
-
                 foreach (var rowEntry in plan.RowsByOriginalName.GetValueOrDefault(originalName, []))
                 {
                     // Ghép SKU CỦA MÌNH theo cú pháp "keyword1 - keyword2 product-desc sku", cắt tối đa 120 ký tự (giữ SKU).
-                    var finalName = BigSellerText.TruncateProductNamePreservingSku($"{title} {rowEntry.Sku}".Trim(), rowEntry.Sku, 120);
+                    var finalName = engine.ComposeFinalName(titles[idx], rowEntry.Sku);
                     if (!string.IsNullOrWhiteSpace(finalName))
                         updates.Add((rowEntry.RowIndex, finalName));
                 }
@@ -161,39 +177,75 @@ internal sealed class ProductNameRewriteRunner
             var batchLogged = 0;
             const int MaxLogPerBatch = 20;
             var changedRows = new List<int>();
-            using (await WorkbookFileLockHandle.AcquireAsync(workbookPath, ct))
+            if (useHub)
             {
-                ct.ThrowIfCancellationRequested();
-                using var wb = new XLWorkbook(workbookPath);
-                var ws = ResolveWorksheet(wb, sheetName);
-                EnsureRewrittenNameColumnHeader(ws, plan.RewrittenNameColumn);
-
+                // HUB-MODE: server chỉ trả dòng CHƯA có tên-sửa → mọi dòng trong batch là ghi MỚI (không cần dedup
+                // 'current != rewrittenName' như Excel). WRITE-AHEAD ra journal TRƯỚC khi POST (chống mất tiền AI khi
+                // mất mạng/503), rồi POST; POST OK → flush tồn đọng cũ nhân tiện (fire-and-forget); POST fail → log
+                // + TIẾP batch sau (kết quả đã nằm journal, TryFlushAsync đẩy lại sau). KHÔNG mở XLWorkbook.
+                var items = new List<ProductRewrittenItem>(updates.Count);
                 foreach (var (rowNumber, rewrittenName) in updates)
                 {
-                    var beforeName = (ws.Cell(rowNumber, plan.ProductNameColumn).GetValue<string>() ?? "").Trim();
-                    var cell = ws.Cell(rowNumber, plan.RewrittenNameColumn);
-                    var current = (cell.GetValue<string>() ?? "").Trim();
-                    if (current != rewrittenName)
+                    items.Add(new ProductRewrittenItem(rowNumber, rewrittenName));
+                    updatedCount++;
+                    batchUpdated++;
+                    changedRows.Add(rowNumber);
+                    if (batchLogged < MaxLogPerBatch)
                     {
-                        cell.Value = rewrittenName;
-                        updatedCount++;
-                        batchUpdated++;
-                        changedRows.Add(rowNumber);
-
-                        if (batchLogged < MaxLogPerBatch)
-                        {
-                            log($"Row {rowNumber}");
-                            log($"Trước: {beforeName}");
-                            log($"Viết lại: {rewrittenName}");
-                            batchLogged++;
-                        }
+                        log($"Row {rowNumber}");
+                        log($"Viết lại: {rewrittenName}");
+                        batchLogged++;
                     }
                 }
+                if (items.Count > 0)
+                {
+                    PendingRewriteJournal.Append(settings.AccountId, plan.SheetName, items);
+                    try
+                    {
+                        await client!.PostProductRewrittenAsync(
+                            new ProductRewrittenRequest(settings.AccountId, plan.SheetName, items), ct).ConfigureAwait(false);
+                        _ = FlushJournalQuietlyAsync(client!);
+                    }
+                    catch (OperationCanceledException) { throw; }
+                    catch (Exception ex) { log($"⚠ Đẩy tên-sửa lên Hub lỗi (đã ghi journal, sẽ tự flush sau): {Shorten(ex.Message)}"); }
+                }
+            }
+            else
+            {
+                using (await WorkbookFileLockHandle.AcquireAsync(workbookPath, ct))
+                {
+                    ct.ThrowIfCancellationRequested();
+                    using var wb = new XLWorkbook(workbookPath);
+                    var ws = ResolveWorksheet(wb, sheetName);
+                    EnsureRewrittenNameColumnHeader(ws, plan.RewrittenNameColumn);
 
-                wb.Save();
+                    foreach (var (rowNumber, rewrittenName) in updates)
+                    {
+                        var beforeName = (ws.Cell(rowNumber, plan.ProductNameColumn).GetValue<string>() ?? "").Trim();
+                        var cell = ws.Cell(rowNumber, plan.RewrittenNameColumn);
+                        var current = (cell.GetValue<string>() ?? "").Trim();
+                        if (current != rewrittenName)
+                        {
+                            cell.Value = rewrittenName;
+                            updatedCount++;
+                            batchUpdated++;
+                            changedRows.Add(rowNumber);
+
+                            if (batchLogged < MaxLogPerBatch)
+                            {
+                                log($"Row {rowNumber}");
+                                log($"Trước: {beforeName}");
+                                log($"Viết lại: {rewrittenName}");
+                                batchLogged++;
+                            }
+                        }
+                    }
+
+                    wb.Save();
+                }
             }
 
-            // Đã Save xong batch → báo caller (đẩy ledger) đúng các dòng vừa ghi tên mới.
+            // Đã ghi xong batch (Excel: Save; Hub: POST/journal) → báo caller (đẩy ledger) đúng các dòng vừa ghi tên mới.
             foreach (var rn in changedRows) RowsDone?.Invoke(rn, rn);
 
             log($"💾 Đã save batch {i + 1}-{i + batch.Count}/{plan.UniqueNames.Count}: {batchUpdated} dòng đổi tên.");
@@ -202,95 +254,6 @@ internal sealed class ProductNameRewriteRunner
         }
 
         log($"✓ Xong rewrite tên: {updatedCount} dòng thay đổi. Bỏ qua: {plan.SkippedNoName} thiếu 'Tên sp', {plan.SkippedNoSku} thiếu 'SKU', {plan.SkippedExisting} đã có 'Tên sp đã sửa'.");
-    }
-
-    // ── Viết lại TÊN: 1 lần gọi → tiêu đề SEO hoàn chỉnh (dùng AiConfig + prompt SEO cấu hình trên Hub) ──
-    private static async Task<List<string>> RequestSeoTitlesWithSplitAsync(
-        AiConfig cfg, List<string> names, Action<string> log, CancellationToken ct)
-    {
-        try
-        {
-            // Retry chung ở Core (AiChat): 429/5xx chờ lâu; key/quota/model sai (permanent) ném ngay; JSON hỏng
-            // gói thành InvalidOperationException để nhánh chia-đôi bên dưới bắt được như bản cũ.
-            return await AiChat.ExecuteWithRetryAsync(
-                c => RequestSeoTitlesOnceAsync(cfg, names, c),
-                ct,
-                maxAttempts: OpenAiMaxRetries,
-                label: "OpenAI seo-title",
-                log: log,
-                mapError: ex => ex is JsonException
-                    ? new InvalidOperationException($"OpenAI seo-title JSON lỗi: {ex.Message}", ex)
-                    : ex);
-        }
-        catch (AiHttpException) { throw; }   // key/quota/model sai → dừng, không chia nhỏ
-        catch (InvalidOperationException ex)
-        {
-            if (names.Count <= 1)
-            {
-                log($"⚠ Viết tên 1 SP thất bại — giữ tên gốc. ({Shorten(ex.Message)})");
-                return [names[0]];
-            }
-            var mid = names.Count / 2;
-            log($"⚠ Viết tên batch {names.Count} lỗi — chia đôi ({mid}+{names.Count - mid}). ({Shorten(ex.Message)})");
-            var left = await RequestSeoTitlesWithSplitAsync(cfg, names.Take(mid).ToList(), log, ct);
-            var right = await RequestSeoTitlesWithSplitAsync(cfg, names.Skip(mid).ToList(), log, ct);
-            left.AddRange(right);
-            return left;
-        }
-    }
-
-    private static async Task<List<string>> RequestSeoTitlesOnceAsync(AiConfig cfg, List<string> names, CancellationToken ct)
-    {
-        // System = prompt SEO người dùng cấu hình (trên Hub) + đóng gói JSON cho xử lý nhiều sản phẩm.
-        var system = cfg.EffectiveNameRewritePrompt +
-            "\n\n[XỬ LÝ NHIỀU SẢN PHẨM] Bạn sẽ nhận JSON danh sách {index, name}. Áp dụng đúng quy tắc trên cho TỪNG name. " +
-            "CHỈ trả về DUY NHẤT JSON: {\"items\":[{\"index\":0,\"title\":\"<tiêu đề SEO, KHÔNG kèm SKU>\"}]} — đủ mỗi index input, " +
-            "title chỉ 1 dòng, không kèm giải thích/ghi chú/rào ```.";
-        var user = JsonSerializer.Serialize(
-            new { items = names.Select((name, index) => new { index, name }).ToList() }, JsonOptions);
-
-        var outputText = await AiJsonAsync(cfg, system, user, ct, temperature: 0.4);
-
-        using var parsed = JsonDocument.Parse(outputText);
-        var items = parsed.RootElement.GetProperty("items").EnumerateArray().ToList();
-        var byIndex = new Dictionary<int, string>();
-        foreach (var item in items)
-        {
-            var idx = item.GetProperty("index").GetInt32();
-            var title = (item.GetProperty("title").GetString() ?? "")
-                .Replace('\n', ' ').Replace('\r', ' ').Trim();
-            byIndex[idx] = title;
-        }
-
-        var result = new List<string>(names.Count);
-        for (var i = 0; i < names.Count; i++)
-        {
-            if (!byIndex.TryGetValue(i, out var t) || string.IsNullOrWhiteSpace(t))
-                throw new InvalidOperationException($"AI thiếu title index={i}.");
-            result.Add(t);
-        }
-        return result;
-    }
-
-
-    /// <summary>Gọi AI (đa provider qua AiChat) yêu cầu trả JSON, rồi trích object JSON từ text trả về.
-    /// Dùng cho cả 2 bước (parse cấu trúc + viết lại) — provider/model/key lấy từ AiConfig (trên Hub).</summary>
-    private static async Task<string> AiJsonAsync(AiConfig cfg, string system, string user, CancellationToken ct, double temperature = 0)
-    {
-        var text = await AiChat.CompleteAsync(cfg, system, user, ct, temperature, maxTokens: 8192).ConfigureAwait(false);
-        var json = ExtractJsonObject(text);
-        if (string.IsNullOrWhiteSpace(json))
-            throw new InvalidOperationException("AI không trả về JSON hợp lệ: " + Shorten(text));
-        return json;
-    }
-
-    /// <summary>Trích object JSON {...} đầu→cuối từ text (bỏ rào ```json hoặc lời dẫn nếu model thêm).</summary>
-    private static string ExtractJsonObject(string text)
-    {
-        if (string.IsNullOrWhiteSpace(text)) return "";
-        var start = text.IndexOf('{');
-        var end = text.LastIndexOf('}');
-        return start >= 0 && end > start ? text[start..(end + 1)] : "";
     }
 
     private static string Shorten(string message)
@@ -371,6 +334,67 @@ internal sealed class ProductNameRewriteRunner
         };
     }
 
+    // HUB-MODE của BuildPlan: server (GetRewritePendingAsync) đã lọc đúng luật (name_original + sku non-blank,
+    // name_rewritten blank) trong [startRow..endRow] và ORDER BY row_no → dựng CÙNG RewritePlan như đọc workbook
+    // (dedup theo tên gốc, gom rows theo tên, SKU đầu-tiên mỗi tên). Skip counts = 0 (server không trả dòng bị lọc).
+    // Column* mang theo cho đủ record nhưng KHÔNG dùng khi ghi (hub-mode POST theo RowNo, không đụng cột Excel).
+    private static async Task<RewritePlan> BuildPlanFromHubAsync(
+        HubClient client, string acct, string sheetName, int startRow, int endRow,
+        int productNameColumn, int skuColumn, int rewrittenNameColumn, CancellationToken ct)
+    {
+        var firstRow = Math.Max(2, startRow);
+        var rows = await client.GetProductRewritePendingAsync(acct, sheetName, firstRow, endRow, ct).ConfigureAwait(false)
+            ?? throw new InvalidOperationException("⛔ Hub chưa sẵn sàng (kho sản phẩm Postgres) — thử lại sau.");
+
+        var rowsToUpdate = new List<(int RowIndex, string OriginalName, string Sku)>();
+        var uniqueNames = new List<string>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var rowsByName = new Dictionary<string, List<(int RowIndex, string Sku)>>(StringComparer.Ordinal);
+        var skuByName = new Dictionary<string, string>(StringComparer.Ordinal);
+        var lastIncludedRow = firstRow;
+
+        foreach (var r in rows)
+        {
+            var originalName = (r.NameOriginal ?? "").Trim();
+            var sku = (r.Sku ?? "").Trim();
+            if (string.IsNullOrWhiteSpace(originalName) || string.IsNullOrWhiteSpace(sku)) continue;   // phòng thủ (server đã lọc)
+            if (r.RowNo > lastIncludedRow) lastIncludedRow = r.RowNo;
+
+            rowsToUpdate.Add((r.RowNo, originalName, sku));
+            rowsByName.TryAdd(originalName, []);
+            rowsByName[originalName].Add((r.RowNo, sku));
+            if (!skuByName.ContainsKey(originalName))
+                skuByName[originalName] = sku;
+            if (seen.Add(originalName))
+                uniqueNames.Add(originalName);
+        }
+
+        return new RewritePlan
+        {
+            WorkbookPath = "",
+            SheetName = sheetName,
+            ProductNameColumn = productNameColumn,
+            SkuColumn = skuColumn,
+            RewrittenNameColumn = rewrittenNameColumn,
+            FirstRow = firstRow,
+            LastIncludedRow = lastIncludedRow,
+            RowsToUpdate = rowsToUpdate,
+            UniqueNames = uniqueNames,
+            RowsByOriginalName = rowsByName,
+            SkuByOriginalName = skuByName,
+            SkippedNoName = 0,
+            SkippedNoSku = 0,
+            SkippedExisting = 0,
+        };
+    }
+
+    /// <summary>Flush tồn đọng journal fire-and-forget sau POST thành công — nuốt MỌI lỗi (kể cả OCE) để không
+    /// sinh unobserved-task-exception; không truyền ct (chạy độc lập với vòng rewrite hiện tại).</summary>
+    private static async Task FlushJournalQuietlyAsync(HubClient client)
+    {
+        try { await PendingRewriteJournal.TryFlushAsync(client).ConfigureAwait(false); } catch { }
+    }
+
     private static void LogEmptyPlanDiagnostics(RewritePlan plan, Action<string> log)
     {
         using var wb = new XLWorkbook(plan.WorkbookPath);
@@ -416,22 +440,9 @@ internal sealed class ProductNameRewriteRunner
             ws.Cell(1, rewrittenNameColumn).Value = "Tên sp đã sửa";
     }
 
-    // ====== Name structure + cleaning (ported) ======
+    // ====== Name structure + cleaning ======
 
     private static string NormalizeText(string? value) => (value ?? "").Trim().ToLowerInvariant();
-
-    private static string NormalizeDash(string text)
-        => System.Text.RegularExpressions.Regex.Replace((text ?? "").Trim(), "\\s*[–—-]\\s*", " - ");
-
-    private static (string Body, string? Code) SplitNameCode(string productName)
-    {
-        var normalized = NormalizeDash(productName);
-        var match = System.Text.RegularExpressions.Regex.Match(normalized, "\\s+-\\s+([A-Z]\\d+)\\s*$");
-        if (!match.Success)
-            return (normalized, null);
-        var body = normalized[..match.Index].Trim();
-        return (body, match.Groups[1].Value);
-    }
 
 
     private sealed record RewritePlan

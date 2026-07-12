@@ -12,6 +12,7 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.10" />
+    <PackageReference Include="Npgsql" Version="8.0.7" />
     <PackageReference Include="Microsoft.Extensions.Hosting.Systemd" Version="8.0.1" />
     <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="8.0.1" />
     <PackageReference Include="ClosedXML" Version="0.105.0" />
@@ -24,6 +25,7 @@
     <Compile Include="..\..\suite\Shopee.Core\Coordination\ICoordinationHub.cs" Link="Shared\Coordination\ICoordinationHub.cs" />
     <Compile Include="..\..\suite\Shopee.Core\Coordination\HubDefaults.cs" Link="Shared\Coordination\HubDefaults.cs" />
     <Compile Include="..\..\suite\Shopee.Core\Coordination\HubRoutes.cs" Link="Shared\Coordination\HubRoutes.cs" />
+    <Compile Include="..\..\suite\Shopee.Core\Coordination\ProductDtos.cs" Link="Shared\Coordination\ProductDtos.cs" />
     <Compile Include="..\..\suite\Shopee.Core\BigSeller\BigSellerAccount.cs" Link="Shared\BigSeller\BigSellerAccount.cs" />
     <Compile Include="..\..\suite\Shopee.Core\BigSeller\BigSellerRunConfig.cs" Link="Shared\BigSeller\BigSellerRunConfig.cs" />
     <Compile Include="..\..\suite\Shopee.Core\BigSeller\BigSellerShop.cs" Link="Shared\BigSeller\BigSellerShop.cs" />
@@ -33,9 +35,14 @@
     <Compile Include="..\..\suite\Shopee.Core\Ai\AiPrompts.cs" Link="Shared\Ai\AiPrompts.cs" />
     <Compile Include="..\..\suite\Shopee.Core\Ai\AiChat.cs" Link="Shared\Ai\AiChat.cs" />
     <Compile Include="..\..\suite\Shopee.Core\Ai\AiHttpException.cs" Link="Shared\Ai\AiHttpException.cs" />
+    <!-- LÕI viết-lại-tên (dedup + gọi AI + ghép SKU/cắt 120) — dùng chung với client; RewriteJobService chạy trên hub. -->
+    <Compile Include="..\..\suite\Shopee.Core\Ai\NameRewriteEngine.cs" Link="Shared\Ai\NameRewriteEngine.cs" />
     <Compile Include="..\..\suite\Shopee.Core\BigSeller\BigSellerCaptchaSolver.cs" Link="Shared\BigSeller\BigSellerCaptchaSolver.cs" />
     <Compile Include="..\..\suite\Shopee.Core\BigSeller\BigSellerLoginForm.cs" Link="Shared\BigSeller\BigSellerLoginForm.cs" />
     <Compile Include="..\..\suite\Shopee.Module.Search\Engine\ProductResult.cs" Link="Shared\Search\ProductResult.cs" />
     <Compile Include="..\..\suite\Shopee.Module.Search\Engine\ExcelExporter.cs" Link="Shared\Search\ExcelExporter.cs" />
+    <!-- Cắt tên SP giữ SKU ở đuôi (TruncateProductNamePreservingSku) — REUSE để vá đuôi name_rewritten khi đổi SKU
+         khớp BYTE-ĐÚNG cách ProductNameRewriteRunner tạo tên. File static thuần BCL. -->
+    <Compile Include="..\..\suite\Shopee.Module.UpdateProduct\Engine\BigSellerText.cs" Link="Shared\UpdateProduct\BigSellerText.cs" />
   </ItemGroup>
 </Project>

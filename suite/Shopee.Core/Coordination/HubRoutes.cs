@@ -47,6 +47,22 @@ public static class HubRoutes
     public const string Logs = "/logs";
     public const string LogsClear = "/logs/clear";
 
+    // ── Kho sản phẩm (Postgres — thay dần workbook Excel) ──
+    public const string ProductsSheets = "/products/sheets";
+    public const string ProductsLinks = "/products/links";
+    public const string ProductsRecordMap = "/products/record-map";
+    public const string ProductsImportIds = "/products/import-ids";
+    public const string ProductsRewritePending = "/products/rewrite-pending";
+    public const string ProductsRewritten = "/products/rewritten";
+    public const string ProductsAppend = "/products/rows/append";
+    public const string ProductsImportXlsx = "/products/import-xlsx";
+    public const string ProductsExportXlsx = "/products/export-xlsx";
+
+    // ── Cấu hình BigSeller (client → hub upsert) ──
+    /// <summary>Client đẩy (upsert) acc/shop BigSeller của máy mình lên hub — client giờ là nguồn phát sinh
+    /// acc/shop; hub gộp KHÔNG XÓA (kẻo lượt pull mirror-xoá acc client vừa thêm).</summary>
+    public const string BigSellerUpsert = "/bigseller/upsert";
+
     // ── File-sync ──
     public const string Manifest = "/manifest";
 

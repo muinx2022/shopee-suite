@@ -37,6 +37,15 @@ public sealed class BigSellerAccount
 
     public List<BigSellerShop> Shops { get; set; } = [];
 
+    /// <summary>NGUỒN dữ liệu sản phẩm của tk này: <c>"excel"</c> (workbook Excel per-máy, MẶC ĐỊNH) hoặc
+    /// <c>"hub"</c> (kho Postgres trên Hub — runner đọc/ghi dòng qua API /products/*). Field DÙNG CHUNG: mọi máy
+    /// phải cùng chế độ cho 1 acc → NẰM TRONG SharedSignature + được copy trong MergeBigSeller (xem BackupService);
+    /// nếu để lọt thì lỗi "field chung không đồng bộ" (đã lặp nhiều lần trong lịch sử repo). JSON cũ THIẾU field →
+    /// default "excel" (không vỡ bản cũ). Đổi sang "hub" rồi về "excel" vẫn dùng lại WorkbookPath cũ (không xoá).</summary>
+    public string DataSource { get; set; } = "excel";
+    /// <summary>Tk này lấy dữ liệu sản phẩm từ kho Hub (Postgres) thay vì workbook Excel local.</summary>
+    public bool UsesHubData => DataSource == "hub";
+
     // Lựa chọn ở module Update/Import — LƯU để khôi phục sau khi mở lại app (trước đây chỉ là UI-state).
     /// <summary>Tk này có được TICK chọn để chạy Update/Import không.</summary>
     public bool UpdateRunSelected { get; set; }

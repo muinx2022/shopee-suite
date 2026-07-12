@@ -4,6 +4,7 @@ using System.IO;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Shopee.Core.Accounts;
+using Shopee.Core.BigSeller;
 using Shopee.Core.Browser;
 using Shopee.Core.Coordination;
 using Shopee.Core.Infrastructure;
@@ -518,6 +519,14 @@ public sealed partial class AccountsViewModel : ObservableObject
         Status = "Đang kéo tài khoản + proxy từ Hub…";
         try
         {
+            // ĐẨY acc/shop BigSeller máy này LÊN TRƯỚC rồi mới KÉO về — để acc/shop vừa thêm ở client KHÔNG bị
+            // lượt pull (MergeBigSeller mirror) coi là "Hub đã bỏ" mà xoá mất. Hub gộp KHÔNG xoá; lỗi upsert →
+            // vẫn kéo (nuốt lỗi). Shopee acc client tạo TẠI CHỖ mang HubOwned=false nên vốn không bị mirror-xoá.
+            if (CoordinationRuntime.Client is { } client)
+            {
+                try { await client.PostBigSellerUpsertAsync(BigSellerStore.Shared.Accounts.ToList()); }
+                catch { }
+            }
             var r = await sync.PullAccountsAsync();
             Reload();
             Status = $"✓ Đồng bộ: Shopee +{r.ShopeeAdded}/↻{r.ShopeeUpdated}/bỏ {r.ShopeeSkipped} · BigSeller +{r.BigSellerAdded}/↻{r.BigSellerUpdated}/bỏ {r.BigSellerSkipped} · cookie {r.CookiesCopied}.";

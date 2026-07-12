@@ -14,6 +14,7 @@ public sealed class HttpCoordinationHub : ICoordinationHub, IDisposable
     private readonly Timer _poller;
     private volatile FleetSnapshot _fleet = new();
     private int _foldedLedger;   // 0 = chưa fold ledger→tiến độ local; chỉ fold 1 lần khi Hub LẦN ĐẦU liên lạc được
+    private int _flushedJournal;  // 0 = chưa flush journal rewrite tồn đọng; chỉ thử 1 lần khi Hub LẦN ĐẦU liên lạc được
     private int _pulling;        // 0/1 chống chồng lấn auto-pull (client)
     private int _pushing;        // 0/1 chống chồng lấn auto-push (hub)
     private DateTimeOffset _lastAutoPull = DateTimeOffset.MinValue;
@@ -57,11 +58,26 @@ public sealed class HttpCoordinationHub : ICoordinationHub, IDisposable
             // kịp lắng nghe). Poller 12s tự chạy ở tick thành công đầu tiên.
             // Fold ledger 1 LẦN (resume xuyên máy); auto-pull cấu hình/cookie/AI thì chạy ĐỊNH KỲ (xem dưới).
             if (Interlocked.Exchange(ref _foldedLedger, 1) == 0) _ = SyncIntoProgressAsync();
-            _ = MaybeAutoPullAsync();   // client: kéo cấu hình/cookie/workbook MỚI từ Hub
-            _ = MaybeAutoPushAsync();   // hub: publish cấu hình/cookie/workbook ĐÃ ĐỔI để client kéo
+            // Flush 1 LẦN các kết quả rewrite AI ghi write-ahead mà lượt trước mất mạng/503 chưa đẩy được (chống
+            // mất tiền AI). Server idempotent nên vô hại nếu trùng. Nền, nuốt lỗi (lần mở app sau bù).
+            if (Interlocked.Exchange(ref _flushedJournal, 1) == 0) _ = TryFlushJournalAsync();
+            _ = MaybeAutoPullAsync();   // client: kéo cấu hình/cookie MỚI từ Hub (workbook không còn sync)
+            _ = MaybeAutoPushAsync();   // hub: publish cấu hình/cookie ĐÃ ĐỔI để client kéo
             try { Changed?.Invoke(); } catch { }
         }
         catch { /* offline: giữ snapshot cũ, không ném */ }
+    }
+
+    /// <summary>Đẩy các kết quả rewrite AI tồn đọng (write-ahead journal) lên Hub — chạy 1 lần khi vừa kết nối
+    /// được Hub. Best-effort: nuốt lỗi (mất mạng giữa chừng → lần mở app sau flush tiếp; journal bền qua restart).</summary>
+    private async Task TryFlushJournalAsync()
+    {
+        try
+        {
+            var n = await PendingRewriteJournal.TryFlushAsync(_client);
+            if (n > 0) DiagLog?.Invoke($"↻ đã đẩy {n} tên-sửa (rewrite) tồn đọng lên Hub");
+        }
+        catch { }
     }
 
     /// <summary>Bắn NGAY 1 heartbeat (kèm MaxBrave hiện tại) — gọi khi user đổi cấu hình hiệu năng để Hub thấy
@@ -72,14 +88,15 @@ public sealed class HttpCoordinationHub : ICoordinationHub, IDisposable
         catch { }
     }
 
-    /// <summary>CLIENT (không phải máy Hub) tự kéo cấu hình + cookie + AI + workbook theo Hub: NGAY khi vừa kết
-    /// nối (lần poll đầu) rồi ĐỊNH KỲ mỗi vài phút → Hub thêm tài khoản / đổi cookie SAU NÀY, client tự nhận mà
-    /// KHÔNG cần khởi động lại. Máy Hub KHÔNG kéo (giữ bản gốc). Kéo xong ĐẨY NGƯỢC cookie MỚI HƠN (token máy
+    /// <summary>CLIENT (không phải máy Hub) tự kéo cấu hình + cookie + AI theo Hub: NGAY khi vừa kết nối (lần
+    /// poll đầu) rồi ĐỊNH KỲ mỗi vài phút → Hub thêm tài khoản / đổi cookie SAU NÀY, client tự nhận mà KHÔNG
+    /// cần khởi động lại (workbook không còn sync — kho SP ở Postgres). Máy Hub KHÔNG kéo (giữ bản gốc). Kéo
+    /// xong ĐẨY NGƯỢC cookie MỚI HƠN (token máy
     /// này tự login/refresh) lên kho — BigSeller xoay token, mọi máy phải hội tụ về token mới nhất, nếu không
     /// mỗi máy 1 phiên cũ chết dần ("mất cookie" luân phiên). Có chốt chống chồng lấn + giãn theo chu kỳ.</summary>
     private async Task MaybeAutoPullAsync()
     {
-        if (HubServerConfigStore.Shared.Current.Enabled) return;              // máy Hub: giữ workbook/cookie gốc
+        if (HubServerConfigStore.Shared.Current.Enabled) return;              // máy Hub: giữ cookie gốc, không kéo
         if (CoordinationRuntime.ConfigSync is not { } sync) return;
         if ((DateTimeOffset.UtcNow - _lastAutoPull) < AutoSyncEvery) return;  // chưa tới chu kỳ
         if (Interlocked.Exchange(ref _pulling, 1) == 1) return;               // đang kéo → bỏ lượt này
@@ -88,7 +105,7 @@ public sealed class HttpCoordinationHub : ICoordinationHub, IDisposable
         finally { _lastAutoPull = DateTimeOffset.UtcNow; Interlocked.Exchange(ref _pulling, 0); }
     }
 
-    /// <summary>MÁY HUB tự publish cấu hình + cookie + workbook ĐÃ ĐỔI lên Hub định kỳ (Hub là nguồn sự thật
+    /// <summary>MÁY HUB tự publish cấu hình + cookie ĐÃ ĐỔI lên Hub định kỳ (Hub là nguồn sự thật
     /// cho CẤU HÌNH; client chỉ nhận). Riêng COOKIE là 2 CHIỀU theo "token mới hơn thắng": publish xong còn
     /// KÉO VỀ cookie client vừa tự đăng nhập (client đẩy lên qua PushCookiesIfNewerAsync) → login ở BẤT KỲ
     /// máy nào cũng lan ra mọi máy trong ~2 chu kỳ. Có chốt chống chồng lấn + giãn theo chu kỳ.</summary>

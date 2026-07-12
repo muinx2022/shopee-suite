@@ -44,6 +44,16 @@ public sealed class InstanceConfig
     /// workbook khác nhau — thay cho biến static dùng chung).</summary>
     public string WorkbookPath { get; set; } = "";
 
+    /// <summary>Tk BigSeller lấy link scrape từ kho Hub (Postgres) thay vì <see cref="WorkbookPath"/>. Bật →
+    /// LauncherRunnerLoop nạp link/tổng-dòng qua HubClient theo <see cref="HubAccountId"/>. RIÊNG-MÁY: chỉ mang
+    /// từ ScrapeRunner sang engine trong 1 lượt chạy (không persist — không đưa vào chữ ký sync).</summary>
+    public bool UseHubData { get; set; }
+
+    /// <summary>Id tk BigSeller dùng KHOÁ kho Hub khi <see cref="UseHubData"/> bật (tham số acct của
+    /// /products/*). TÁCH khỏi <see cref="AccountId"/> (vốn là khoá auto-login BigSeller trong scrape) để
+    /// KHÔNG chạm luồng đăng nhập hiện có — cờ này chỉ đổi NGUỒN DỮ LIỆU link.</summary>
+    public string HubAccountId { get; set; } = "";
+
     /// <summary>Từ dòng — nhập trên launcher (nguồn đúng).</summary>
     public int? StartRow { get; set; }
 
