@@ -5,6 +5,23 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Hiệu năng. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.1.0 — 2026-07-12
+
+Chủ đề: **Kho sản phẩm chuyển từ file Excel sang Postgres trên Hub — client đọc/ghi dữ liệu qua API, không còn đồng bộ workbook.**
+
+- Tài khoản BigSeller có chế độ kho dữ liệu: **Kho Hub (Postgres)** — scrape/import/update/rewrite
+  đọc dòng sản phẩm thẳng từ Hub theo từng khối/lượt chạy, không cần file Excel trên máy;
+  acc excel-mode cũ vẫn chạy từ file local (đường chuyển tiếp) nhưng KHÔNG còn đồng bộ workbook qua Hub.
+- Rewrite tên: kết quả AI ghi lên Hub theo batch kèm **journal chống mất** (mất mạng giữa chừng
+  không mất tiền AI — tự đẩy lại khi có kết nối). Với acc Kho Hub, rewrite có thể chạy NGAY TRÊN HUB
+  (bấm từ web, không cần máy client).
+- Thêm acc/shop ngay trên client giờ **tự đẩy lên Hub** (~2s, không bao giờ xoá gì trên Hub);
+  nút "Đồng bộ acc" đẩy-lên-trước-kéo-về-sau nên acc mới tạo không bị mất; acc tạo mới mặc định Kho Hub.
+- UI acc Kho Hub ẩn toàn bộ khái niệm Excel (workbook/sheet/ánh xạ cột); quản lý dữ liệu
+  (xem/sửa/thêm/xoá/nhập Excel/đã bán/SKU) làm trên web Hub — trang "Dữ liệu".
+- SKU chuẩn `B#####`, duy nhất trong từng shop (DB cưỡng chế bằng unique index); nhập Excel
+  thiếu SKU tự sinh mã.
+
 ## v1.0.16 — 2026-07-11
 
 Chủ đề: **Workspace tách log theo từng tài khoản BigSeller + nút dừng việc của acc đang chọn**.
