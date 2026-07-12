@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Json;
+using Shopee.Core.BigSeller;
 
 namespace Shopee.Core.Coordination;
 
@@ -160,6 +161,15 @@ public sealed class HubClient
     public async Task<List<AccountError>> ErroredAccountsAsync(CancellationToken ct = default)
         => await _http.GetFromJsonAsync<List<AccountError>>(HubRoutes.AccountsErrored, ct) ?? [];
     public Task ClearErroredAccountAsync(ClearAccountErrorRequest req, CancellationToken ct = default) => PostAsync(HubRoutes.AccountsErroredClear, req, ct);
+
+    // ── Upsert acc/shop BigSeller client → hub (client là nguồn phát sinh; hub gộp KHÔNG xóa) ──
+    // Dùng _http (control-plane 8s): payload chỉ là danh sách acc/shop (không có workbook) → nhỏ.
+    public async Task<BigSellerUpsertResult?> PostBigSellerUpsertAsync(List<BigSellerAccount> accounts, CancellationToken ct = default)
+    {
+        var r = await _http.PostAsJsonAsync(HubRoutes.BigSellerUpsert, accounts, ct);
+        r.EnsureSuccessStatusCode();
+        return await r.Content.ReadFromJsonAsync<BigSellerUpsertResult>(ct);
+    }
 
     // ── File-sync ──
     public async Task<List<FileManifestEntry>> ManifestAsync(CancellationToken ct = default)

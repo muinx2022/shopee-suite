@@ -97,10 +97,17 @@ public sealed class BigSellerAccountItemViewModel : ObservableObject
         : "";
     /// <summary>Chỉ chế độ Excel mới cho chọn file workbook (hub-mode không dùng file → khoá nút chọn).</summary>
     public bool CanPickWorkbook => !Model.UsesHubData;
+    /// <summary>Hint cạnh ô workbook cho acc excel-mode: file workbook giờ là FILE LOCAL của máy (đường chuyển
+    /// tiếp) — KHÔNG còn đồng bộ qua Hub (kho SP đã sang Postgres). Rỗng ở hub-mode (đã có DataSourceLabel).</summary>
+    public string WorkbookSyncHint => Model.UsesHubData ? "" : "(file local — không còn đồng bộ qua Hub)";
 
     public BigSellerShopViewModel AddShop()
     {
         var shop = new BigSellerShop { Name = "Shop mới" };
+        // Acc hub-mode: "sheet" chỉ là tên ngăn dữ liệu nội bộ hệ thống tự quản → gán = shop.Id (GUID ổn định,
+        // không đổi khi rename shop). CÙNG luật với AccountConfigPanel.AddShop trên web Hub. Acc excel-mode để
+        // trống (user gán sheet workbook sau). Shop mới sẽ được đẩy lên Hub qua HubBigSellerUpsert.
+        if (Model.UsesHubData) shop.ShopeeDataSheet = shop.Id;
         Model.Shops.Add(shop);
         var vm = new BigSellerShopViewModel(shop);
         Shops.Add(vm);

@@ -1,4 +1,5 @@
 using Shopee.Core.Accounts;
+using Shopee.Core.BigSeller;
 using Shopee.Core.Coordination;
 using Shopee.Hub;
 using Shopee.Hub.Web.Auth;
@@ -104,6 +105,16 @@ public static class ClientApiEndpoints
         {
             if (r is null || string.IsNullOrWhiteSpace(r.Id)) return Results.BadRequest();
             return Results.Json(new { removed = cfg.RemoveShopeeAccount(r.Id) });
+        });
+
+        // ── MỚI: client đẩy (upsert) acc/shop BigSeller lên hub. Client GIỜ phát sinh acc/shop; hub là nguồn sự
+        //    thật nhưng client không có đường đẩy → lượt pull (MergeBigSeller mirror) xoá mất acc client vừa thêm.
+        //    Hub gộp KHÔNG XÓA; chỉ thêm/cập nhật field chung. KHÔNG bị AllowClientConfigPush chặn (đây là đường
+        //    hợp lệ để client góp acc/shop, khác PUT /files/config/* bị chặn sau cutover). ──
+        api.MapPost(HubRoutes.BigSellerUpsert, (List<BigSellerAccount>? r, FileStoreConfigService cfg) =>
+        {
+            if (r is null) return Results.BadRequest();
+            return Results.Json(cfg.UpsertBigSellerAccounts(r));
         });
 
         // ── MỚI: xem/đổi trạng thái điều phối (web UI + có thể client đọc) ──

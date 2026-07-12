@@ -6,10 +6,11 @@ using Shopee.Core.Infrastructure;
 namespace Shopee.Core.Coordination;
 
 /// <summary>
-/// Đồng bộ cấu hình với Hub. Kéo = tải file cấu hình + cookie + AI + workbook từ Hub rồi GỘP/APPEND vào
-/// store (dedup theo Id+login/email). Đẩy = upload file cấu hình. Chạy khi người dùng bấm "Đồng bộ acc"
-/// HOẶC tự động 1 lần khi CLIENT vừa kết nối được Hub (xem <see cref="HttpCoordinationHub"/>). Dùng chung
-/// logic gộp với <see cref="BackupService"/>.
+/// Đồng bộ cấu hình với Hub. Kéo = tải file cấu hình + cookie + AI từ Hub rồi GỘP/APPEND vào store (dedup
+/// theo Id+login/email). Đẩy = upload file cấu hình + cookie. Chạy khi người dùng bấm "Đồng bộ acc" HOẶC tự
+/// động 1 lần khi CLIENT vừa kết nối được Hub (xem <see cref="HttpCoordinationHub"/>). Dùng chung logic gộp với
+/// <see cref="BackupService"/>. Workbook Excel KHÔNG còn đồng bộ qua Hub (kho SP đã sang Postgres — acc hub-mode);
+/// acc/shop client đẩy lên Hub qua endpoint riêng /bigseller/upsert (xem <see cref="HubClient.PostBigSellerUpsertAsync"/>).
 /// </summary>
 public sealed class HubConfigSync
 {
@@ -49,19 +50,10 @@ public sealed class HubConfigSync
             foreach (var f in Directory.GetFiles(CookieDir, "*.json"))
                 if (await PushCookieIfNewerAsync(manifest, f, "cookies/" + Path.GetFileName(f), ct)) n++;
 
-        // Workbook Excel (dữ liệu sản phẩm) — đẩy theo từng tk BigSeller để máy khác kéo về chạy được.
-        foreach (var acct in BigSellerStore.Shared.Accounts)
-        {
-            if (acct.UsesHubData) continue;   // acc hub-mode: dữ liệu ở kho Postgres, KHÔNG còn workbook để đẩy
-            if (string.IsNullOrWhiteSpace(acct.WorkbookPath) || !File.Exists(acct.WorkbookPath)) continue;
-            try
-            {
-                if (await PushIfChangedAsync(manifest, acct.WorkbookPath,
-                        $"workbooks/{acct.Id}/{Path.GetFileName(acct.WorkbookPath)}", ct)) n++;
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException) { }
-        }
-        return $"Đã đẩy {n} file thay đổi (cấu hình + cookie + workbook) lên Hub.";
+        // Workbook Excel KHÔNG còn đẩy lên Hub: kho sản phẩm đã sang Postgres (acc hub-mode), workbook chỉ còn là
+        // FILE LOCAL của máy (đường chuyển tiếp cho acc excel-mode) — không đồng bộ qua Hub nữa. Acc/shop giờ đẩy
+        // lên Hub qua endpoint /bigseller/upsert (HubClient.PostBigSellerUpsertAsync), không phải file này.
+        return $"Đã đẩy {n} file thay đổi (cấu hình + cookie) lên Hub.";
     }
 
     /// <summary>Upload 1 file nếu nội dung KHÁC bản trên Hub (size hoặc SHA-256 khác). Trả true nếu đã upload.</summary>
@@ -169,38 +161,8 @@ public sealed class HubConfigSync
             catch (Exception ex) when (ex is not OperationCanceledException) { }
         }
 
-        // 5) Workbook Excel — tải về hub-cache và TRỎ WorkbookPath sang bản local (để máy này scrape được).
-        try
-        {
-            var accts = BigSellerStore.Shared.Accounts.ToList();
-            var changed = false;
-            foreach (var acct in accts)
-            {
-                // acc hub-mode: dữ liệu ở kho Postgres → KHÔNG tải workbook và KHÔNG rebase WorkbookPath (giữ
-                // nguyên đường cũ để nếu user chuyển acc về excel-mode thì bản workbook cũ vẫn còn dùng được).
-                if (acct.UsesHubData) continue;
-                var entry = manifest.FirstOrDefault(m => m.Name.StartsWith($"workbooks/{acct.Id}/", StringComparison.OrdinalIgnoreCase));
-                if (entry is null) continue;
-                var local = Path.Combine(SuitePaths.HubCacheDir, "workbooks", acct.Id, Path.GetFileName(entry.Name));
-                Directory.CreateDirectory(Path.GetDirectoryName(local)!);
-                // Bỏ qua tải nếu bản local đã KHỚP hash manifest → auto-pull mỗi lần kết nối KHÔNG tải lại workbook lớn.
-                if (!(File.Exists(local) && !string.IsNullOrEmpty(entry.Hash)
-                      && string.Equals(LocalSha256(local), entry.Hash, StringComparison.OrdinalIgnoreCase)))
-                {
-                    var bytes = await _client.DownloadAsync(entry.Name, ct);
-                    if (bytes is null) continue;
-                    await File.WriteAllBytesAsync(local, bytes, ct);
-                }
-                if (!string.Equals(acct.WorkbookPath, local, StringComparison.OrdinalIgnoreCase))
-                {
-                    acct.WorkbookPath = local;
-                    changed = true;
-                }
-            }
-            if (changed) BigSellerStore.Shared.ReplaceAll(accts);
-        }
-        catch { }
-
+        // Workbook Excel KHÔNG còn tải về / rebase WorkbookPath: kho sản phẩm đã sang Postgres (acc hub-mode).
+        // Acc excel-mode (chuyển tiếp) dùng thẳng file workbook LOCAL do user tự chọn — không đồng bộ qua Hub.
         return new ImportResult(bsA, bsS, shA, shS, ai, cookies, bsU, shU);
     }
 

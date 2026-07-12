@@ -110,6 +110,10 @@
                                     <Button Grid.Column="2" Content="↻ Sheet" Margin="8,0,0,0"
                                             Command="{Binding #Root.DataContext.RefreshSheetsCommand}" />
                                 </Grid>
+                                <!-- Excel-mode (chuyển tiếp): workbook giờ là FILE LOCAL, không còn sync qua Hub. -->
+                                <TextBlock Text="{Binding WorkbookSyncHint}" IsVisible="{Binding CanPickWorkbook}"
+                                           FontSize="11.5" Margin="0,0,0,10" TextWrapping="Wrap"
+                                           Foreground="{DynamicResource TextSecondaryBrush}" />
                                 <TextBlock Text="{Binding DataSourceLabel}" IsVisible="{Binding IsHubData}"
                                            FontSize="12.5" Margin="0,0,0,10" TextWrapping="Wrap"
                                            Foreground="{DynamicResource TextSecondaryBrush}" />

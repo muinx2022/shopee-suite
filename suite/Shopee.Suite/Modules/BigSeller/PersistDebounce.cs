@@ -21,5 +21,8 @@ internal static class PersistDebounce
             _timer ??= new Timer(_ => { try { BigSellerStore.Shared.Save(); } catch { } });
             _timer.Change(500, Timeout.Infinite);
         }
+        // Mọi lần sửa field acc/shop (gõ phím) cũng hẹn đẩy bản mới LÊN Hub (debounce riêng 2s) — client giờ là
+        // nguồn phát sinh acc/shop; hub gộp KHÔNG xoá + không đổi thật thì không bump version → chạy thừa vô hại.
+        HubBigSellerUpsert.Schedule();
     }
 }

@@ -39,8 +39,9 @@ public sealed class AssignmentWorker : IDisposable
     /// <summary>Người ngồi máy bấm "Tạm dừng nhận việc" → ngừng xin việc mới (việc đang chạy vẫn xong).</summary>
     public bool Paused { get; set; }
 
-    /// <summary>Tự kéo workbook/cookie trước import/update và đẩy sau scrape (bàn giao xuyên máy). Mặc định
-    /// TẮT để không đụng cấu hình máy đang chạy 1 máy; bật từ bảng điều phối khi tách vai trò qua nhiều máy.</summary>
+    /// <summary>Tự kéo cấu hình/cookie MỚI trước import/update và đẩy cấu hình/cookie ĐÃ ĐỔI sau scrape (bàn
+    /// giao xuyên máy). Mặc định TẮT để không đụng cấu hình máy đang chạy 1 máy; bật từ bảng điều phối khi tách
+    /// vai trò qua nhiều máy. (Workbook KHÔNG còn sync — kho SP đã sang Postgres; chỉ còn cấu hình + cookie.)</summary>
     public bool AutoSyncHandoff { get; set; }
 
     private sealed class InFlight
@@ -152,7 +153,7 @@ public sealed class AssignmentWorker : IDisposable
             return;
         }
 
-        // Bàn giao xuyên máy: kéo workbook/cookie mới nhất trước khi import/update.
+        // Bàn giao xuyên máy: kéo cấu hình/cookie mới nhất trước khi import/update (workbook không còn sync).
         if (AutoSyncHandoff && a.Op is "import" or "update" or "rewrite")
         {
             try { if (CoordinationRuntime.ConfigSync is { } sync) await sync.PullAccountsAsync(); } catch { }

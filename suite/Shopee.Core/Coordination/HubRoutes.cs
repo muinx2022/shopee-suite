@@ -58,6 +58,11 @@ public static class HubRoutes
     public const string ProductsImportXlsx = "/products/import-xlsx";
     public const string ProductsExportXlsx = "/products/export-xlsx";
 
+    // ── Cấu hình BigSeller (client → hub upsert) ──
+    /// <summary>Client đẩy (upsert) acc/shop BigSeller của máy mình lên hub — client giờ là nguồn phát sinh
+    /// acc/shop; hub gộp KHÔNG XÓA (kẻo lượt pull mirror-xoá acc client vừa thêm).</summary>
+    public const string BigSellerUpsert = "/bigseller/upsert";
+
     // ── File-sync ──
     public const string Manifest = "/manifest";
 

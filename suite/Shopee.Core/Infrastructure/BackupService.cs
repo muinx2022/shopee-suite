@@ -106,10 +106,11 @@ public static class BackupService
             {
                 var changed = false;
                 // Đồng nhất Id theo Hub khi acc khớp bằng EMAIL nhưng Id LỆCH (client này từng tạo/đồng bộ acc
-                // độc lập nên mang Id khác Hub). Workbook đồng bộ theo path `workbooks/{acct.Id}/` VÀ Hub giao
-                // việc import/update/scrape resolve acc theo `BigsellerId == acct.Id` → Id lệch khiến CHÍNH máy
-                // này không kéo được workbook (tải nhầm thư mục) và job Hub báo "không thấy tài khoản", DÙ cookie
-                // + shop vẫn về (khớp theo email / graft tại chỗ). Chỉ chỉnh ở chế độ MIRROR (client) — Hub là
+                // độc lập nên mang Id khác Hub). Hub giao việc import/update/scrape resolve acc theo
+                // `BigsellerId == acct.Id` + kho SP Postgres keyed theo acct.Id → Id lệch khiến job Hub báo
+                // "không thấy tài khoản" DÙ cookie + shop vẫn về (khớp theo email / graft tại chỗ). (Trước đây
+                // còn lỗi kéo workbook nhầm thư mục `workbooks/{acct.Id}/` — nay workbook đã bỏ đồng bộ.) Chỉ
+                // chỉnh ở chế độ MIRROR (client) — Hub là
                 // nguồn sự thật của Id. An toàn khỏi trùng Id: chỉ tới được nhánh email khi KHÔNG acc nào trùng
                 // Id Hub (trùng thì đã khớp bằng Id ở trên). Lưu ý: tiến độ scrape local (key theo acct.Id) dưới
                 // Id cũ bị mồ côi — chấp nhận được (acc lệch Id vốn không chạy được nên không có tiến độ giá trị).
