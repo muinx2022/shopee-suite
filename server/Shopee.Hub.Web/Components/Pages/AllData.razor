@@ -50,9 +50,20 @@
     else
     {
         <div class="bar">
+            <button class="btn sm" disabled="@(_page <= 1 || _busy)" @onclick="() => GoPage(1)" title="Trang đầu">«</button>
             <button class="btn sm" disabled="@(_page <= 1 || _busy)" @onclick="() => GoPage(_page - 1)">‹</button>
-            <span class="action">trang @_page / @PageCount · @_total.ToString("N0") dòng</span>
+            <span class="action">trang
+                <input type="number" class="ci" style="width:64px" min="1" max="@PageCount" value="@_page" @onchange="OnPageInput" disabled="@_busy" />
+                / @PageCount · @_total.ToString("N0") dòng</span>
             <button class="btn sm" disabled="@(_page >= PageCount || _busy)" @onclick="() => GoPage(_page + 1)">›</button>
+            <button class="btn sm" disabled="@(_page >= PageCount || _busy)" @onclick="() => GoPage(PageCount)" title="Trang cuối">»</button>
+            <span class="action" style="margin-left:8px">dòng/trang</span>
+            <select value="@_pageSize" @onchange="OnPageSizeChange" disabled="@_busy" style="width:74px">
+                @foreach (var sz in PageSizes)
+                {
+                    <option value="@sz">@sz</option>
+                }
+            </select>
             @if (_selected.Count > 0)
             {
                 <span style="flex:1"></span>
@@ -118,7 +129,8 @@
 </div>
 
 @code {
-    private const int PageSize = 100;
+    private static readonly int[] PageSizes = { 50, 100, 200, 500 };
+    private int _pageSize = 100;
     // Ô cắt ngắn text dài (Link/Tên/Acc/Shop…) — bảng cuộn ngang qua .tablewrap; title giữ giá trị đầy đủ.
     private const string Clip = "max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
 
@@ -142,7 +154,7 @@
     private readonly record struct RowKey(string Acct, string Sheet, int RowNo);
 
     private ProductDb? Pg => Sp.GetService<ProductDb>();
-    private int PageCount => Math.Max(1, (_total + PageSize - 1) / PageSize);
+    private int PageCount => Math.Max(1, (_total + _pageSize - 1) / _pageSize);
 
     protected override async Task OnInitializedAsync()
     {
@@ -184,8 +196,8 @@
             var f = _applied;
             _total = await Task.Run(() => pg.CountAllAsync(f, CancellationToken.None));
             _page = Math.Clamp(_page, 1, PageCount);
-            var offset = (_page - 1) * PageSize;
-            _rows = await Task.Run(() => pg.QueryAllAsync(f, offset, PageSize, CancellationToken.None));
+            var offset = (_page - 1) * _pageSize;
+            _rows = await Task.Run(() => pg.QueryAllAsync(f, offset, _pageSize, CancellationToken.None));
         }
         catch (Exception ex) { _status = "✘ Lỗi đọc dữ liệu: " + ex.Message; }
     }
@@ -230,6 +242,21 @@
         _page = Math.Clamp(p, 1, PageCount);
         _selected.Clear();
         await LoadAsync();
+    }
+
+    // Đổi số dòng/trang → về trang 1, bỏ chọn, nạp lại (giá trị rác → giữ nguyên _pageSize hiện tại).
+    private async Task OnPageSizeChange(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out var sz) && sz > 0) _pageSize = sz;
+        _page = 1; _selected.Clear();
+        await LoadAsync();
+    }
+
+    // Ô nhập số trang (Enter/blur) → nhảy tới trang đó (GoPage tự kẹp [1..PageCount]). Giá trị rác → bỏ qua,
+    // Blazor re-render sau handler tự đưa value về _page.
+    private async Task OnPageInput(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out var p)) await GoPage(p);
     }
 
     private void ToggleSel(RowKey k)

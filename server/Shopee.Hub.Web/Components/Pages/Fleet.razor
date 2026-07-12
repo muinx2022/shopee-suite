@@ -3,10 +3,12 @@
    Trang vận hành DUY NHẤT — bố cục WORKSPACE master-detail: KPI + danh sách acc→shop bên TRÁI,
    bên PHẢI 3 tab (Hành động / Thống kê / Cấu hình) cho mục đang chọn. *@
 @attribute [Authorize(Policy = "Web")]
+@using Microsoft.AspNetCore.WebUtilities
 @inherits FleetPageBase
 @inject FileStoreConfigService Config
 @inject DispatcherService Dispatcher
 @inject HubDatabase Db
+@inject NavigationManager Nav
 
 <div class="fleetpage">
 <div class="kpis">
@@ -70,14 +72,14 @@
     <div class="wsmain">
         <h2>@AcctName@(_selRow is not null ? " › " + _selRow.ShopName : "")</h2>
         <div class="tabs">
-            <button class="@(_tab == "action" ? "active" : "")" @onclick='() => _tab = "action"'>⚡ Hành động</button>
+            <button class="@(_tab == "action" ? "active" : "")" @onclick='() => SetTab("action")'>⚡ Hành động</button>
             @* Thống kê chỉ còn ở mức SHOP; mức ACC đã gộp vào dashboard của tab Hành động. *@
             @if (_selRow is not null)
             {
-                <button class="@(_tab == "stats" ? "active" : "")" @onclick='() => _tab = "stats"'>📊 Thống kê</button>
-                <button class="@(_tab == "data" ? "active" : "")" @onclick='() => _tab = "data"'>📋 Dữ liệu</button>
+                <button class="@(_tab == "stats" ? "active" : "")" @onclick='() => SetTab("stats")'>📊 Thống kê</button>
+                <button class="@(_tab == "data" ? "active" : "")" @onclick='() => SetTab("data")'>📋 Dữ liệu</button>
             }
-            <button class="@(_tab == "config" ? "active" : "")" @onclick='() => _tab = "config"'>⚙ Cấu hình</button>
+            <button class="@(_tab == "config" ? "active" : "")" @onclick='() => SetTab("config")'>⚙ Cấu hình</button>
         </div>
 
         @if (_selRow is not null)
@@ -427,6 +429,9 @@
         base.OnInitialized();
         ReloadAccounts();
         Rebuild();
+        // F5/deep-link: khôi phục acc/shop/tab từ query SAU KHI _rows dựng xong. Không navigate ở đây (còn ở
+        // giai đoạn prerender → NavigateTo sẽ ném redirect); URL chỉ được ghi lại khi user thao tác sau đó.
+        RestoreSelectionFromUrl();
         RecomputeSummary();
     }
 
@@ -635,6 +640,7 @@
         _selAcctId = r.AccountId;
         _selRow = r;
         _action = "";
+        UpdateUrl();
     }
 
     private void SelectAcct(string accountId)
@@ -644,7 +650,71 @@
         _selRow = null;
         _action = "";
         if (_tab is "stats" or "data") _tab = "action";   // mức acc không có tab Thống kê/Dữ liệu (chỉ ở mức shop)
+        UpdateUrl();
     }
+
+    private void SetTab(string tab)
+    {
+        _tab = tab;
+        UpdateUrl();
+    }
+
+    // ── Selection ↔ URL query (?acc=…&shop=…&tab=…) — F5/deep-link giữ nguyên focus ──────────────────────
+    private bool _selectionRestored;   // cờ once: chỉ khôi phục từ URL 1 lần lúc init, KHÔNG re-restore mỗi tick
+    private bool _suppressUrl;          // chặn ghi URL trong lúc restore (SelectShop/SelectAcct gọi UpdateUrl bên trong)
+
+    // Ghi selection hiện tại vào query (replace → khỏi phình history); CHỈ navigate khi query thật sự đổi để tránh
+    // loop render. Bỏ chọn → param rỗng bị loại. Không chạy trong lúc restore/prerender.
+    private void UpdateUrl()
+    {
+        if (_suppressUrl) return;
+        var acc = _selAcctId ?? "";
+        var shop = _selShopKey?.ShopId ?? "";
+        var tab = _selAcctId is null ? "" : _tab;   // tab vô nghĩa khi chưa chọn gì
+
+        var q = QueryHelpers.ParseQuery(new Uri(Nav.Uri).Query);
+        string cur(string k) => q.TryGetValue(k, out var v) ? v.ToString() : "";
+        if (cur("acc") == acc && cur("shop") == shop && cur("tab") == tab) return;   // đã khớp → khỏi navigate
+
+        var parts = new List<string>(3);
+        if (acc.Length > 0) parts.Add("acc=" + Uri.EscapeDataString(acc));
+        if (shop.Length > 0) parts.Add("shop=" + Uri.EscapeDataString(shop));
+        if (tab.Length > 0) parts.Add("tab=" + Uri.EscapeDataString(tab));
+        Nav.NavigateTo(parts.Count == 0 ? "/" : "/?" + string.Join("&", parts), forceLoad: false, replace: true);
+    }
+
+    // Đọc query lúc vào trang: shop khớp (acc+shop) → chọn shop; chỉ acc khớp → chọn acc; không khớp gì (đã xoá) →
+    // im lặng bỏ qua, giữ mặc định (Rebuild đã tự chọn acc đầu). _tab kẹp về giá trị hợp lệ theo cấp đang chọn.
+    private void RestoreSelectionFromUrl()
+    {
+        if (_selectionRestored) return;
+        _selectionRestored = true;
+        var q = QueryHelpers.ParseQuery(new Uri(Nav.Uri).Query);
+        var qAcc = q.TryGetValue("acc", out var av) ? av.ToString() : "";
+        var qShop = q.TryGetValue("shop", out var sv) ? sv.ToString() : "";
+        var qTab = q.TryGetValue("tab", out var tv) ? tv.ToString() : "";
+        _suppressUrl = true;
+        try
+        {
+            if (qAcc.Length > 0 && qShop.Length > 0
+                && _rows.FirstOrDefault(r => r.AccountId == qAcc && r.ShopId == qShop) is { } row)
+            {
+                SelectShop(row);
+                _tab = NormalizeTab(qTab, shopLevel: true);
+            }
+            else if (qAcc.Length > 0 && (_rows.Any(r => r.AccountId == qAcc) || _accounts.Any(a => a.Id == qAcc)))
+            {
+                SelectAcct(qAcc);
+                _tab = NormalizeTab(qTab, shopLevel: false);
+            }
+        }
+        finally { _suppressUrl = false; }
+    }
+
+    // Cấp shop có 4 tab (action/stats/data/config); cấp acc chỉ action/config. Giá trị lạ → "action".
+    private static string NormalizeTab(string? tab, bool shopLevel) => shopLevel
+        ? (tab is "action" or "stats" or "data" or "config" ? tab! : "action")
+        : (tab is "action" or "config" ? tab! : "action");
 
     // Thêm 1 acc BigSeller rỗng, lưu ngay (đọc list+version tươi), rồi chọn nó ở tab Cấu hình để điền tiếp.
     private void AddAccount()
@@ -660,7 +730,7 @@
         Rebuild();
         RecomputeSummary();
         SelectAcct(acc.Id);
-        _tab = "config";
+        SetTab("config");
     }
 
     // Panel con báo đã lưu/đổi cấu hình → parent nạp lại + vẽ lại ngay (khỏi chờ nhịp 2s).
@@ -687,12 +757,13 @@
         Rebuild();
         RecomputeSummary();
         var row = _rows.FirstOrDefault(r => r.AccountId == _selAcctId && r.ShopId == shopId);
-        if (row is not null) { SelectShop(row); _tab = "config"; }
+        if (row is not null) { SelectShop(row); SetTab("config"); }
     }
 
-    // Xoá shop → bỏ chọn shop (vẫn đứng ở acc); xoá acc → bỏ chọn hết (Rebuild tự chọn acc đầu).
-    private void OnShopDeleted() { _selShopKey = null; _selRow = null; OnConfigChanged(); }
-    private void OnAcctDeleted() { _selAcctId = null; _selShopKey = null; _selRow = null; OnConfigChanged(); }
+    // Xoá shop → bỏ chọn shop (vẫn đứng ở acc); xoá acc → bỏ chọn hết (Rebuild tự chọn acc đầu). UpdateUrl SAU
+    // OnConfigChanged để bắt cả acc mới được Rebuild tự chọn.
+    private void OnShopDeleted() { _selShopKey = null; _selRow = null; OnConfigChanged(); UpdateUrl(); }
+    private void OnAcctDeleted() { _selAcctId = null; _selShopKey = null; _selRow = null; OnConfigChanged(); UpdateUrl(); }
 
     // Thế hệ của các combo đặt-tay ledger — nhảy sau mỗi lần đặt để @key đổi → element dựng lại về ⋯.
     private int _cellsetGen;
