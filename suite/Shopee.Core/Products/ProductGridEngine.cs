@@ -205,6 +205,15 @@ public sealed class ProductGridEngine
         Raise();
     }
 
+    /// <summary>Chọn TẤT CẢ dòng của TRANG hiện tại (thêm vào tập chọn — dòng chọn ở trang khác giữ nguyên;
+    /// bỏ chọn dùng <see cref="ClearSelection"/> / nút "✖ Bỏ chọn").</summary>
+    public void SelectAllOnPage()
+    {
+        if (_rows.Count == 0) return;
+        foreach (var r in _rows) _selected.Add(new ProductRowKey(r.AccountId, r.Sheet, r.RowNo));
+        Raise();
+    }
+
     // ── Thao tác trên tập chọn ───────────────────────────────────────────────────────
 
     /// <summary>+1 "đã bán" cho các dòng chọn (KHÔNG confirm, như /data). GIỮ chọn.</summary>

@@ -79,6 +79,8 @@
                     <option value="@sz">@sz</option>
                 }
             </select>
+            <button class="btn sm" style="margin-left:8px" disabled="@(busy || _engine.Rows.Count == 0)"
+                    @onclick="() => _engine.SelectAllOnPage()" title="Chọn tất cả dòng của trang này">☑ Chọn tất cả</button>
             @if (_engine.SelectedCount > 0)
             {
                 <span style="flex:1"></span>

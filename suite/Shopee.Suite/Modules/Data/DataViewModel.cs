@@ -344,6 +344,7 @@ public sealed partial class DataViewModel : ObservableObject
     [RelayCommand] private Task Refresh() => _engine?.ReloadAsync() ?? Task.CompletedTask;
 
     [RelayCommand] private void ClearSelection() => _engine?.ClearSelection();
+    [RelayCommand] private void SelectAllPage() => _engine?.SelectAllOnPage();
 
     [RelayCommand] private Task MarkSold() => _engine?.MarkSoldAsync() ?? Task.CompletedTask;
     [RelayCommand] private Task ResetSold() => _engine?.ResetSoldAsync() ?? Task.CompletedTask;

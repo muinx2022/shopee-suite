@@ -87,6 +87,8 @@
                            FontSize="12.5" Foreground="{DynamicResource TextSecondaryBrush}" />
                 <ComboBox Width="80" VerticalAlignment="Center" ItemsSource="{Binding PageSizes}"
                           SelectedItem="{Binding PageSize}" IsEnabled="{Binding CanInteract}" />
+                <Button Content="☑ Chọn tất cả" Margin="14,0,0,0" Command="{Binding SelectAllPageCommand}"
+                        IsEnabled="{Binding CanInteract}" ToolTip.Tip="Chọn tất cả dòng của trang này" />
             </StackPanel>
 
             <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" IsVisible="{Binding HasSelection}">
