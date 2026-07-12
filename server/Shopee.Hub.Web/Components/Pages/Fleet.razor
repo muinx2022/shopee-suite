@@ -4,11 +4,14 @@
    bên PHẢI 3 tab (Hành động / Thống kê / Cấu hình) cho mục đang chọn. *@
 @attribute [Authorize(Policy = "Web")]
 @using Microsoft.AspNetCore.WebUtilities
+@using Microsoft.Extensions.DependencyInjection
 @inherits FleetPageBase
 @inject FileStoreConfigService Config
 @inject DispatcherService Dispatcher
 @inject HubDatabase Db
 @inject NavigationManager Nav
+@inject RewriteJobService Rewrite
+@inject IServiceProvider Sp
 
 <div class="fleetpage">
 <div class="kpis">
@@ -211,6 +214,61 @@
                         }
                     </div>
                 }
+
+                @* (c) Rewrite tên CHẠY TRÊN HUB — chỉ acc kho-Hub (client excel-mode tự lo qua module Update). *@
+                @if (IsHubAcct(row.AccountId) && row.InConfig && !string.IsNullOrEmpty(row.Sheet))
+                {
+                    var rw = Rewrite.GetState(row.AccountId, row.Sheet);
+                    var rwBusy = rw is not null && rw.Status is "running" or "queued";
+                    <div class="pinpanel" style="margin-top:14px">
+                        <div class="subhead">✎ Rewrite tên (chạy trên hub)</div>
+                        @if (!PgReady)
+                        {
+                            <p class="hint">Kho Postgres chưa sẵn sàng — cấu hình <span class="wbname">HUB_PG_CONN</span> để bật rewrite trên hub.</p>
+                            <div class="pin pinbtns">
+                                <button class="btn primary" disabled>▶ Chạy</button>
+                            </div>
+                        }
+                        else
+                        {
+                            <p class="hint">
+                                @if (_rwPendingKey == RwKey(row) && _rwPending is { } pc)
+                                {
+                                    <span>Còn <b>@pc.ToString("N0")</b> dòng chờ rewrite (tên gốc + SKU, chưa có tên-sửa).</span>
+                                }
+                                else
+                                {
+                                    <span>Đang đếm dòng chờ…</span>
+                                }
+                                <button class="linkbtn" @onclick="() => RefreshRewritePending(row.AccountId, row.Sheet)">⟳ làm mới</button>
+                            </p>
+                            <div class="pin pinbtns">
+                                <button class="btn primary" disabled="@rwBusy" @onclick="() => StartRewrite(row)">▶ Chạy</button>
+                                @if (rwBusy)
+                                {
+                                    <button class="btn danger" @onclick="() => Rewrite.Cancel(row.AccountId, row.Sheet)">■ Dừng</button>
+                                }
+                            </div>
+                            @if (!string.IsNullOrEmpty(_rwActionMsg))
+                            {
+                                <div class="warn" style="margin-top:8px">@_rwActionMsg</div>
+                            }
+                            @if (rw is not null)
+                            {
+                                <div class="action" style="margin-top:10px">@RewriteStatusLine(rw)</div>
+                                @if (rw.Log.Count > 0)
+                                {
+                                    <div style="margin-top:8px; max-height:150px; overflow:auto; font-family:var(--mono); font-size:11.5px; line-height:1.5; color:var(--body)">
+                                        @foreach (var line in rw.Log)
+                                        {
+                                            <div>@line</div>
+                                        }
+                                    </div>
+                                }
+                            }
+                        }
+                    </div>
+                }
             }
             else if (_tab == "stats")
             {
@@ -408,6 +466,16 @@
     private bool _pinFromClaimed;
     private string _action = "";
 
+    // Rewrite-tên-trên-hub (tab Hành động của shop hub-mode): số dòng chờ (cache theo shop), thông báo Start, và
+    // theo dõi chuyển trạng thái để tự làm-mới số dòng chờ khi 1 lượt chạy xong.
+    private int? _rwPending;
+    private string? _rwPendingKey;
+    private string _rwActionMsg = "";
+    private (string Key, string Status)? _rwWatch;
+
+    private bool PgReady => Sp.GetService<ProductDb>() is { IsReady: true };
+    private static string RwKey(ShopRow r) => r.AccountId + " " + r.Sheet;
+
     // Ngữ cảnh modal bản đồ dòng (heatmap) — mở modal = dựng ctx, đóng = null.
     private RowMapCtx? _map;
     private sealed record RowMapCtx(string Title, string Op, string OpLabel, string AccountId, string Sheet, WorkLedgerRecord? Ledger);
@@ -448,6 +516,7 @@
         if ((DateTimeOffset.UtcNow - _accountsLoadedAt).TotalSeconds > 10) ReloadAccounts();
         Rebuild();
         RecomputeSummary();
+        MaybeAutoRefreshRewrite();
     }
 
     private void ReloadAccounts()
@@ -644,9 +713,59 @@
         _selAcctId = r.AccountId;
         _selRow = r;
         _action = "";
+        _rwActionMsg = "";
+        // Shop kho-Hub → nạp trước số dòng chờ rewrite (không chặn render); ngược lại xoá cache.
+        if (IsHubAcct(r.AccountId) && !string.IsNullOrEmpty(r.Sheet)) RefreshRewritePending(r.AccountId, r.Sheet);
+        else { _rwPending = null; _rwPendingKey = null; }
         ClearGridView();
         UpdateUrl();
     }
+
+    // ── Rewrite tên trên hub ─────────────────────────────────────────────────────────
+    private void StartRewrite(ShopRow r)
+    {
+        _rwActionMsg = Rewrite.Start(r.AccountId, r.Sheet, r.ShopName) ?? "";   // null = xếp hàng OK
+    }
+
+    // Nạp lại số dòng chờ (fire-and-forget; key-guard chống ghi đè khi đổi chọn nhanh).
+    private void RefreshRewritePending(string acct, string sheet)
+    {
+        var key = acct + " " + sheet;
+        _rwPendingKey = key;
+        _rwPending = null;
+        _ = LoadRewritePendingAsync(acct, sheet, key);
+    }
+
+    private async Task LoadRewritePendingAsync(string acct, string sheet, string key)
+    {
+        try
+        {
+            var n = await Rewrite.CountPendingAsync(acct, sheet, CancellationToken.None);
+            if (_rwPendingKey == key) { _rwPending = n; await InvokeAsync(StateHasChanged); }
+        }
+        catch { /* pg lỗi/đổi chọn → giữ "đang đếm" */ }
+    }
+
+    // Chuyển running → done ở shop đang xem → tự làm mới số dòng chờ (đã rewrite bớt).
+    private void MaybeAutoRefreshRewrite()
+    {
+        if (_selRow is not { } r || !IsHubAcct(r.AccountId) || string.IsNullOrEmpty(r.Sheet)) { _rwWatch = null; return; }
+        var key = RwKey(r);
+        var st = Rewrite.GetState(r.AccountId, r.Sheet)?.Status ?? "idle";
+        var prev = _rwWatch;
+        _rwWatch = (key, st);
+        if (prev is { } p && p.Key == key && p.Status == "running" && st == "done")
+            RefreshRewritePending(r.AccountId, r.Sheet);
+    }
+
+    private static string RewriteStatusLine(RewriteState rw) => rw.Status switch
+    {
+        "queued" => "⏳ Đã xếp hàng — chờ tới lượt…",
+        "running" => $"⏳ Đang chạy: {rw.Done}/{rw.Total} tên · {rw.RowsWritten:N0} dòng — {rw.Message}",
+        "done" => rw.Message,
+        "failed" => rw.Message,
+        _ => rw.Message,
+    };
 
     private void SelectAcct(string accountId)
     {

@@ -41,6 +41,9 @@ builder.Services.AddSingleton(hubOptions);
 builder.Services.AddSingleton<FileStoreConfigService>();
 builder.Services.AddSingleton<SearchBoardService>();
 builder.Services.AddSingleton<BigSellerLoginService>();
+// Rewrite tên chạy NGAY TRÊN HUB (hub quản toàn bộ dữ liệu Postgres) — 1 worker nền, resolve ProductDb tuỳ lúc
+// (có thể chưa cấu hình Postgres). Đăng ký LUÔN (không phụ thuộc pgConn) → UI hiện được cả khi pg chưa sẵn sàng.
+builder.Services.AddSingleton<RewriteJobService>();
 builder.Services.AddSingleton<AdminAccountService>();
 builder.Services.AddSingleton<LoginRateLimit>();
 
