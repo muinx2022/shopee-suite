@@ -1,0 +1,271 @@
+@page "/data"
+@* Trang DỮ LIỆU liên-shop (mọi account BigSeller) — lọc theo acc/shop/sku/giá + "đã bán"; click dòng để chọn,
+   rồi "✔ Đã bán" (mark +1, tô xanh) hoặc "🗑 Xóa nhiều" (xoá vĩnh viễn cả lịch sử bán). Blazor gọi THẲNG ProductDb
+   in-process. Trang STANDALONE (không tick 2s như Fleet) — chỉ load theo thao tác (Lọc / đổi trang / hành động).
+   ProductDb có thể chưa đăng ký DI (chưa cấu hình Postgres) → resolve qua IServiceProvider (null = "chưa sẵn sàng"). *@
+@attribute [Authorize(Policy = "Web")]
+@using Microsoft.Extensions.DependencyInjection
+@inject FileStoreConfigService Config
+@inject IServiceProvider Sp
+@inject IJSRuntime JS
+
+<style>
+    .alldata tbody tr { cursor: pointer; }
+    .alldata tr.soldrow > td { background: var(--success-bg); }
+</style>
+
+<div class="alldata">
+    @{ var pg = Pg; var pgReady = pg is not null && pg.IsReady; }
+
+    <p class="hint m-hide">Dữ liệu sản phẩm của TẤT CẢ shop. Lọc rồi bấm dòng để chọn — "✔ Đã bán" cộng số bán +1 và tô xanh, "🗑 Xóa nhiều" xoá dòng (kèm lịch sử bán).</p>
+
+    @* ── Hàng lọc (disable khi Postgres chưa sẵn sàng) ── *@
+    <div class="bar">
+        <select value="@_fAcct" @onchange="OnAcctChange" disabled="@(!pgReady || _busy)" style="width:200px">
+            <option value="">— mọi tài khoản —</option>
+            @foreach (var a in _accounts)
+            {
+                <option value="@a.Id">@a.DisplayName</option>
+            }
+        </select>
+        <select @bind="_fSheet" disabled="@(!pgReady || _busy || string.IsNullOrEmpty(_fAcct))" style="width:200px">
+            <option value="">— mọi shop —</option>
+            @foreach (var s in ShopOptions())
+            {
+                <option value="@s.ShopeeDataSheet">@s.DisplayName</option>
+            }
+        </select>
+        <input placeholder="SKU…" @bind="_fSku" @bind:event="oninput" @onkeydown="OnSkuKey" disabled="@(!pgReady || _busy)" style="width:150px" />
+        <input type="number" placeholder="Giá từ" @bind="_fPriceMin" disabled="@(!pgReady || _busy)" style="width:110px" />
+        <input type="number" placeholder="Giá đến" @bind="_fPriceMax" disabled="@(!pgReady || _busy)" style="width:110px" />
+        <label class="toggle"><input type="checkbox" @bind="_fSoldOnly" disabled="@(!pgReady || _busy)" /> Đã bán</label>
+        <button class="btn primary sm" disabled="@(!pgReady || _busy)" @onclick="DoFilter">🔍 Lọc</button>
+    </div>
+
+    @if (!pgReady)
+    {
+        <p class="hint">Postgres chưa sẵn sàng — cấu hình <span class="wbname">HUB_PG_CONN</span> để bật kho sản phẩm trên Hub.</p>
+    }
+    else
+    {
+        <div class="bar">
+            <button class="btn sm" disabled="@(_page <= 1 || _busy)" @onclick="() => GoPage(_page - 1)">‹</button>
+            <span class="action">trang @_page / @PageCount · @_total.ToString("N0") dòng</span>
+            <button class="btn sm" disabled="@(_page >= PageCount || _busy)" @onclick="() => GoPage(_page + 1)">›</button>
+            @if (_selected.Count > 0)
+            {
+                <span style="flex:1"></span>
+                <button class="btn sm" style="background:var(--success-bg);color:var(--success)" disabled="@_busy" @onclick="MarkSold">✔ Đã bán (@_selected.Count)</button>
+                <button class="btn danger sm" disabled="@_busy" @onclick="DeleteSelected">🗑 Xóa nhiều (@_selected.Count)</button>
+            }
+        </div>
+
+        <div class="tablewrap">
+            <table class="grid sm">
+                <thead>
+                    <tr>
+                        <th style="width:26px"></th>
+                        <th>Acc</th>
+                        <th>Shop</th>
+                        <th style="width:50px">Dòng</th>
+                        <th>Link</th>
+                        <th>Giá bán</th>
+                        <th>SKU</th>
+                        <th>ItemId</th>
+                        <th>Tên gốc</th>
+                        <th>Tên đã sửa</th>
+                        <th style="width:64px">Đã bán</th>
+                        <th>Sửa lúc</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @if (_rows.Count == 0)
+                    {
+                        <tr><td colspan="12" class="empty">@(_total == 0 ? "Không có dòng nào khớp bộ lọc." : "Trang trống.")</td></tr>
+                    }
+                    else
+                    {
+                        @foreach (var r in _rows)
+                        {
+                            var key = new RowKey(r.AccountId, r.Sheet, r.RowNo);
+                            var shop = ShopCell(r.AccountId, r.Sheet);
+                            <tr class="@(r.SoldCount > 0 ? "soldrow" : "")" @onclick="() => ToggleSel(key)">
+                                <td><input type="checkbox" checked="@_selected.Contains(key)" style="pointer-events:none;margin:0;width:auto" /></td>
+                                <td style="@Clip" title="@r.AccountId">@AcctLabel(r.AccountId)</td>
+                                <td style="@Clip" title="@shop">@shop</td>
+                                <td>@r.RowNo</td>
+                                <td style="@Clip" title="@r.Link">@r.Link</td>
+                                <td>@r.PriceSale</td>
+                                <td>@r.Sku</td>
+                                <td>@r.ItemId</td>
+                                <td style="@Clip" title="@r.NameOriginal">@r.NameOriginal</td>
+                                <td style="@Clip" title="@r.NameRewritten">@r.NameRewritten</td>
+                                <td>@(r.SoldCount > 0 ? r.SoldCount.ToString() : "")</td>
+                                <td>@r.UpdatedAt.LocalDateTime.ToString("dd/MM/yyyy HH:mm")</td>
+                            </tr>
+                        }
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+
+    @if (!string.IsNullOrEmpty(_status))
+    {
+        <div class="action" style="margin-top:10px">@_status</div>
+    }
+</div>
+
+@code {
+    private const int PageSize = 100;
+    // Ô cắt ngắn text dài (Link/Tên/Acc/Shop…) — bảng cuộn ngang qua .tablewrap; title giữ giá trị đầy đủ.
+    private const string Clip = "max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
+
+    private List<BigSellerAccount> _accounts = new();
+    private Dictionary<string, string> _acctLabel = new();                  // accountId → nhãn hiển thị
+    private Dictionary<(string, string), string> _shopName = new();         // (accountId, sheet) → tên shop
+
+    // Ô lọc trên UI (chỉ áp vào query khi bấm Lọc / đổi trang qua _applied).
+    private string _fAcct = "", _fSheet = "", _fSku = "";
+    private long? _fPriceMin, _fPriceMax;
+    private bool _fSoldOnly;
+    private AllDataFilter _applied = new(null, null, null, null, null, false);
+
+    private List<AllDataRow> _rows = new();
+    private int _total, _page = 1;
+    private string _status = "";
+    private bool _busy;
+    private readonly HashSet<RowKey> _selected = new();
+
+    // Khoá vị trí 1 dòng (bền qua reload/đổi trang vì so-sánh-giá-trị) — nguồn chọn + hành động mark/xoá.
+    private readonly record struct RowKey(string Acct, string Sheet, int RowNo);
+
+    private ProductDb? Pg => Sp.GetService<ProductDb>();
+    private int PageCount => Math.Max(1, (_total + PageSize - 1) / PageSize);
+
+    protected override async Task OnInitializedAsync()
+    {
+        LoadAccounts();
+        await LoadAsync();
+    }
+
+    private void LoadAccounts()
+    {
+        _accounts = Config.BigSellerAccounts();
+        _acctLabel = _accounts.ToDictionary(a => a.Id, a => a.DisplayName);
+        _shopName = new();
+        foreach (var a in _accounts)
+        foreach (var s in a.Shops)
+            if (!string.IsNullOrWhiteSpace(s.ShopeeDataSheet))
+                _shopName[(a.Id, s.ShopeeDataSheet)] = s.DisplayName;
+    }
+
+    // Shop của acc đang chọn (chỉ shop có ShopeeDataSheet); acc "mọi" → rỗng (select shop cũng bị disable).
+    private IEnumerable<BigSellerShop> ShopOptions() =>
+        _accounts.FirstOrDefault(a => a.Id == _fAcct)?.Shops.Where(s => !string.IsNullOrWhiteSpace(s.ShopeeDataSheet))
+        ?? Enumerable.Empty<BigSellerShop>();
+
+    private string AcctLabel(string id) => _acctLabel.GetValueOrDefault(id, ShortId(id));
+
+    // Tên shop từ config; ngăn không khớp shop nào (shop đã xoá / sheet lạ) → hiện khoá ngăn có 🔒.
+    private string ShopCell(string acct, string sheet) =>
+        _shopName.TryGetValue((acct, sheet), out var n) ? n : "🔒 " + sheet;
+
+    /// <summary>Đếm tổng + đọc trang hiện tại (kẹp _page vào [1..PageCount] TRƯỚC khi tính offset). Pg null/chưa
+    /// sẵn sàng → rỗng, không ném.</summary>
+    private async Task LoadAsync()
+    {
+        _rows = new();
+        var pg = Pg;
+        if (pg is null || !pg.IsReady) { _total = 0; _page = 1; return; }
+        try
+        {
+            var f = _applied;
+            _total = await Task.Run(() => pg.CountAllAsync(f, CancellationToken.None));
+            _page = Math.Clamp(_page, 1, PageCount);
+            var offset = (_page - 1) * PageSize;
+            _rows = await Task.Run(() => pg.QueryAllAsync(f, offset, PageSize, CancellationToken.None));
+        }
+        catch (Exception ex) { _status = "✘ Lỗi đọc dữ liệu: " + ex.Message; }
+    }
+
+    private AllDataFilter BuildFilter() => new(
+        Acct: string.IsNullOrEmpty(_fAcct) ? null : _fAcct,
+        Sheet: string.IsNullOrEmpty(_fSheet) ? null : _fSheet,
+        Sku: string.IsNullOrWhiteSpace(_fSku) ? null : _fSku.Trim(),
+        PriceMin: _fPriceMin is > 0 ? _fPriceMin : null,
+        PriceMax: _fPriceMax is > 0 ? _fPriceMax : null,
+        SoldOnly: _fSoldOnly);
+
+    private void OnAcctChange(ChangeEventArgs e)
+    {
+        _fAcct = e.Value?.ToString() ?? "";
+        _fSheet = "";   // đổi acc → reset shop (options shop cũng đổi theo)
+    }
+
+    private async Task OnSkuKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await DoFilter();
+    }
+
+    private async Task DoFilter()
+    {
+        _applied = BuildFilter();
+        _page = 1; _selected.Clear(); _status = "";
+        await LoadAsync();
+    }
+
+    private async Task GoPage(int p)
+    {
+        _page = Math.Clamp(p, 1, PageCount);
+        _selected.Clear();
+        await LoadAsync();
+    }
+
+    private void ToggleSel(RowKey k)
+    {
+        if (!_selected.Remove(k)) _selected.Add(k);
+    }
+
+    private async Task MarkSold()
+    {
+        if (_selected.Count == 0 || _busy) return;
+        var pg = Pg;
+        if (pg is null || !pg.IsReady) return;
+        var n = _selected.Count;
+        _busy = true; _status = "⏳ Đang đánh dấu đã bán…";
+        try
+        {
+            var keys = _selected.Select(k => (k.Acct, k.Sheet, k.RowNo)).ToList();
+            await Task.Run(() => pg.MarkSoldAsync(keys, CancellationToken.None));
+            await LoadAsync();   // GIỮ selection: dòng lên xanh + sold_count +1 (bấm lại = +1 nữa)
+            _status = $"✔ +1 đã bán cho {n} dòng.";
+        }
+        catch (Exception ex) { _status = "✘ Lỗi đánh dấu đã bán: " + ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task DeleteSelected()
+    {
+        if (_selected.Count == 0 || _busy) return;
+        var pg = Pg;
+        if (pg is null || !pg.IsReady) return;
+        var n = _selected.Count;
+        if (!await JS.InvokeAsync<bool>("confirm",
+            $"Xoá VĨNH VIỄN {n} dòng đã chọn (kèm lịch sử đã bán của các dòng đó)? Không thể hoàn tác."))
+            return;
+        _busy = true; _status = "⏳ Đang xoá…";
+        try
+        {
+            var keys = _selected.Select(k => (k.Acct, k.Sheet, k.RowNo)).ToList();
+            var del = await Task.Run(() => pg.DeleteRowsByKeysAsync(keys, CancellationToken.None));
+            _selected.Clear();
+            await LoadAsync();
+            _status = $"✔ Đã xoá {del} dòng.";
+        }
+        catch (Exception ex) { _status = "✘ Lỗi xoá: " + ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private static string ShortId(string id) => string.IsNullOrEmpty(id) ? "?" : (id.Length <= 8 ? id : id[..8] + "…");
+}

@@ -299,19 +299,34 @@ WHERE account_id=$1 AND sheet=$2 AND row_no=$3;";
         return await cmd.ExecuteNonQueryAsync(ct) > 0;
     }
 
-    // ── Xoá N dòng theo row_no (ANY($3)) — trả số dòng đã xoá ──
+    // ── Xoá N dòng theo row_no (ANY($3)) — trả số dòng product_rows đã xoá ──
     public async Task<int> DeleteRowsAsync(string acct, string sheet, int[] rowNos, CancellationToken ct)
     {
         // KHÔNG đánh lại row_no cho các dòng còn lại → chấp nhận LỖ HỔNG số dòng: dense (scrape) tính động bằng
         // ROW_NUMBER() nên không vỡ; row_no (import/update/rewrite + ledger) giữ nguyên ý nghĩa dòng cũ.
         if (rowNos is null || rowNos.Length == 0) return 0;
-        const string sql = "DELETE FROM product_rows WHERE account_id=$1 AND sheet=$2 AND row_no = ANY($3);";
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await using var cmd = new NpgsqlCommand(sql, conn);
-        cmd.Parameters.AddWithValue(acct);
-        cmd.Parameters.AddWithValue(sheet);
-        cmd.Parameters.AddWithValue(rowNos);
-        return await cmd.ExecuteNonQueryAsync(ct);
+        await using var tx = await conn.BeginTransactionAsync(ct);
+        int deleted;
+        await using (var cmd = new NpgsqlCommand(
+            "DELETE FROM product_rows WHERE account_id=$1 AND sheet=$2 AND row_no = ANY($3);", conn, tx))
+        {
+            cmd.Parameters.AddWithValue(acct);
+            cmd.Parameters.AddWithValue(sheet);
+            cmd.Parameters.AddWithValue(rowNos);
+            deleted = await cmd.ExecuteNonQueryAsync(ct);
+        }
+        // Xoá DÒNG chủ động → xoá KÈM lịch sử "đã bán" cùng vị trí (khác re-import ghi đè: re-import giữ lịch sử).
+        await using (var cmd = new NpgsqlCommand(
+            "DELETE FROM product_sold WHERE account_id=$1 AND sheet=$2 AND row_no = ANY($3);", conn, tx))
+        {
+            cmd.Parameters.AddWithValue(acct);
+            cmd.Parameters.AddWithValue(sheet);
+            cmd.Parameters.AddWithValue(rowNos);
+            await cmd.ExecuteNonQueryAsync(ct);
+        }
+        await tx.CommitAsync(ct);
+        return deleted;
     }
 
     // ── Chèn 1 dòng vào CUỐI sheet (row_no = COALESCE(max,1)+1, như AppendRowsAsync) — trả row_no vừa cấp ──

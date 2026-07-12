@@ -61,6 +61,19 @@ CREATE TABLE product_sheets (
   updated_at  timestamptz,
   PRIMARY KEY (account_id, sheet)
 );"),
+        // Lịch sử "đã bán" của 1 dòng — keyed theo VỊ TRÍ dòng (account_id, sheet, row_no) KHỚP product_rows.
+        // Tách bảng riêng (không nhét cột vào product_rows) để RE-IMPORT ghi đè product_rows KHÔNG xoá lịch sử bán
+        // (cùng sản phẩm nằm cùng chỗ vẫn giữ số đã bán); CHỈ xoá DÒNG chủ động (DeleteRows*) mới xoá kèm bản ghi này.
+        (2, @"
+CREATE TABLE product_sold (
+  account_id    text NOT NULL,
+  sheet         text NOT NULL,
+  row_no        int  NOT NULL,
+  sold_count    int  NOT NULL DEFAULT 0,
+  first_sold_at timestamptz,
+  last_sold_at  timestamptz,
+  PRIMARY KEY (account_id, sheet, row_no)
+);"),
     };
 
     public ProductDb(string connString)
