@@ -5,6 +5,11 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Hiệu năng. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.3.1 — 2026-07-13
+
+- Các lưới Dữ liệu (app + web Hub): **bấm bất kỳ đâu trên dòng = tick/untick chọn** — không cần
+  nhắm đúng ô checkbox; bấm nút ✏ hoặc chính checkbox vẫn hoạt động riêng như cũ.
+
 ## v1.3.0 — 2026-07-13
 
 Chủ đề: **Tab "Dữ liệu" ngay trong Workspace + tab Dữ liệu từng shop trên web Hub đủ thao tác — một lõi logic dùng chung cho cả hub lẫn app.**
