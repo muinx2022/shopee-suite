@@ -5,6 +5,11 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Hiệu năng. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.3.4 — 2026-07-13
+
+- Sửa tab **📊 Thống kê** (Workspace) bị trắng trơn ở v1.3.3: DataContext đặt trên TabItem không
+  truyền xuống nội dung tab (bug Avalonia #10958) — chuyển vào root content, tab hiện số liệu bình thường.
+
 ## v1.3.3 — 2026-07-13
 
 - Workspace có tab **📊 Thống kê** mới (ngay sau "Shop & cấu hình"): thống kê từng shop × từng việc
