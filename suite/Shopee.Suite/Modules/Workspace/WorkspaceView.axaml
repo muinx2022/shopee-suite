@@ -323,8 +323,10 @@
                 </TabItem>
 
                 <!-- ══════════ TAB 2: Thống kê (per-shop × per-op — đọc sổ hoàn thành trên Hub, giống tab Hub) ══════════ -->
-                <TabItem Header="Thống kê" DataContext="{Binding Stats}">
-                    <Grid Margin="0,10,0,0">
+                <TabItem Header="Thống kê">
+                    <!-- DataContext đặt ở ROOT CONTENT (không đặt trên TabItem): Avalonia không truyền
+                         DataContext của TabItem xuống content (issue #10958) → đặt trên TabItem là tab trắng. -->
+                    <Grid Margin="0,10,0,0" DataContext="{Binding Stats}">
                         <!-- Gợi ý rỗng: chưa kết nối Hub · chưa chọn acc · acc không shop -->
                         <TextBlock Text="{Binding EmptyHint}" Classes="caption" VerticalAlignment="Top"
                                    TextWrapping="Wrap" IsVisible="{Binding ShowEmptyHint}" />
