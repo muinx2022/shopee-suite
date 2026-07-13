@@ -5,6 +5,15 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Hiệu năng. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.3.6 — 2026-07-13
+
+- **Hub ra lệnh cập nhật app cho toàn fleet**: trang Máy client trên hub có nút ⬆ Cập nhật (từng máy /
+  tất cả máy online lệch bản) — client tự tải bản mới, dừng êm rồi khởi động lại, báo tiến trình về hub;
+  apply hỏng thì báo failed đúng 1 lần (không lặp restart). Nút tay trong Settings → Hiệu năng vẫn dùng
+  được, đi chung một đường với lệnh hub.
+- LƯU Ý: máy đang chạy bản ≤1.3.5 chưa có handler nhận lệnh — đợt này vẫn bấm tay "Cập nhật & khởi động
+  lại" lần cuối; từ v1.3.6 trở đi hub điều khiển hoàn toàn.
+
 ## v1.3.5 — 2026-07-13
 
 - Lưới **Dữ liệu** (màn Dữ liệu + tab Dữ liệu trong Workspace): phân trang chuyển **xuống dưới lưới**
