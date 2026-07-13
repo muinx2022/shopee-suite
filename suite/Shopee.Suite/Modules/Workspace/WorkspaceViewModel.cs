@@ -40,6 +40,10 @@ public sealed partial class WorkspaceViewModel : ObservableObject
     /// <see cref="DataViewModel.Rescope"/>. KHÔNG EnsureLoaded lúc tạo — DataView tự gọi khi tab được mở (lazy).</summary>
     public DataViewModel AccountData { get; } = new((string?)null);
 
+    /// <summary>Tab "Thống kê": số liệu per-shop × per-op của tài khoản đang chọn (đọc sổ hoàn thành trên Hub,
+    /// giống tab Thống kê của Hub). Tạo 1 LẦN; đổi tài khoản qua <see cref="WorkspaceStatsViewModel.Rescope"/>.</summary>
+    public WorkspaceStatsViewModel Stats { get; } = new();
+
     /// <summary>Có bất kỳ việc nào đang chạy? scrape · update batch · update inline theo shop.
     /// Dùng bật/tắt nút "Dừng tất cả" (không có gì chạy → nút mờ, không bấm được).</summary>
     public bool AnyRunning => Scrape.IsBusy || Update.IsRunning || Update.HasActiveWsJob;
@@ -153,6 +157,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         Update.SelectedTarget = value?.UpdateTarget;
         value?.RefreshAll();
         AccountData.Rescope(value?.Account.Id);   // tab "Dữ liệu" theo tài khoản đang chọn
+        Stats.Rescope(value?.Account);            // tab "Thống kê" theo tài khoản đang chọn
     }
 
     // ── Tài khoản ────────────────────────────────────────────────────────────

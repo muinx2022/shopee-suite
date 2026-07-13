@@ -322,12 +322,102 @@
                     </Grid>
                 </TabItem>
 
-                <!-- ══════════ TAB 2: Dữ liệu (lưới kho SP của tài khoản đang chọn — fixed-acct) ══════════ -->
+                <!-- ══════════ TAB 2: Thống kê (per-shop × per-op — đọc sổ hoàn thành trên Hub, giống tab Hub) ══════════ -->
+                <TabItem Header="Thống kê" DataContext="{Binding Stats}">
+                    <Grid Margin="0,10,0,0">
+                        <!-- Gợi ý rỗng: chưa kết nối Hub · chưa chọn acc · acc không shop -->
+                        <TextBlock Text="{Binding EmptyHint}" Classes="caption" VerticalAlignment="Top"
+                                   TextWrapping="Wrap" IsVisible="{Binding ShowEmptyHint}" />
+
+                        <!-- Nội dung khi có dữ liệu: hàng KPI trên cùng + lưới shop cuộn dưới -->
+                        <Grid RowDefinitions="Auto,*" IsVisible="{Binding !ShowEmptyHint}">
+
+                            <!-- KPI tổng tài khoản: 4 thẻ op nằm ngang -->
+                            <ItemsControl Grid.Row="0" ItemsSource="{Binding Kpis}" Margin="0,0,0,12">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate><WrapPanel Orientation="Horizontal" /></ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border Classes="card" Padding="14,10" Margin="0,0,10,0" MinWidth="150">
+                                            <StackPanel>
+                                                <TextBlock Text="{Binding OpLabel}" Classes="caption" FontWeight="SemiBold" />
+                                                <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
+                                                    <TextBlock Text="{Binding RowsText}" FontSize="20" FontWeight="SemiBold" VerticalAlignment="Bottom" />
+                                                    <TextBlock Text="dòng" Classes="caption" Margin="5,0,0,3" VerticalAlignment="Bottom" />
+                                                </StackPanel>
+                                                <TextBlock Text="{Binding ShopsDoneText}" Classes="caption" Margin="0,2,0,0" />
+                                            </StackPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+
+                            <!-- Lưới shop: mỗi shop 1 card, trong đó 4 thẻ op dàn theo bề ngang -->
+                            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                                <ItemsControl ItemsSource="{Binding Shops}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border Classes="card" Margin="0,0,0,10" Padding="14,12">
+                                                <StackPanel>
+                                                    <StackPanel Orientation="Horizontal">
+                                                        <TextBlock Text="{Binding ShopName}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                                        <TextBlock Text="{Binding SheetText}" Classes="caption" Margin="8,0,0,0" VerticalAlignment="Center"
+                                                                   IsVisible="{Binding SheetText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                                                    </StackPanel>
+                                                    <ItemsControl ItemsSource="{Binding Ops}">
+                                                        <ItemsControl.ItemsPanel>
+                                                            <ItemsPanelTemplate><WrapPanel Orientation="Horizontal" /></ItemsPanelTemplate>
+                                                        </ItemsControl.ItemsPanel>
+                                                        <ItemsControl.ItemTemplate>
+                                                            <DataTemplate>
+                                                                <Border Width="230" Margin="0,8,10,0" Padding="10,8" CornerRadius="8"
+                                                                        Background="{DynamicResource SubtleBrush}">
+                                                                    <StackPanel>
+                                                                        <!-- Hàng 1: nhãn op + pill trạng thái -->
+                                                                        <Grid ColumnDefinitions="*,Auto">
+                                                                            <TextBlock Grid.Column="0" Text="{Binding OpLabel}" FontWeight="SemiBold" VerticalAlignment="Center" />
+                                                                            <Border Grid.Column="1" CornerRadius="10" Padding="8,2" Background="{Binding StatusBg}"
+                                                                                    ToolTip.Tip="{Binding Tooltip}">
+                                                                                <TextBlock Text="{Binding StatusText}" FontSize="11" FontWeight="SemiBold"
+                                                                                           Foreground="{Binding StatusFg}" />
+                                                                            </Border>
+                                                                        </Grid>
+                                                                        <!-- Hàng 2: tổng dòng + tới dòng -->
+                                                                        <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                                                                            <TextBlock Text="{Binding RowsText}" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Bottom" />
+                                                                            <TextBlock Text="{Binding LastRowText}" Classes="caption" Margin="8,0,0,2" VerticalAlignment="Bottom"
+                                                                                       IsVisible="{Binding LastRowText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                                                                        </StackPanel>
+                                                                        <!-- Hàng 3: các khoảng dòng đã làm -->
+                                                                        <TextBlock Text="{Binding RangesText}" FontFamily="{DynamicResource MonoFont}" FontSize="11"
+                                                                                   TextWrapping="Wrap" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,4,0,0" />
+                                                                        <!-- Hàng 4: máy + gần nhất -->
+                                                                        <TextBlock Text="{Binding LastText}" Classes="caption" Margin="0,4,0,0" TextWrapping="Wrap" />
+                                                                        <!-- Hàng 5: các máy đã tham gia (ẩn khi ≤1 máy) -->
+                                                                        <TextBlock Text="{Binding MachinesText}" Classes="caption" Margin="0,2,0,0" TextWrapping="Wrap"
+                                                                                   IsVisible="{Binding MachinesText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                                                                    </StackPanel>
+                                                                </Border>
+                                                            </DataTemplate>
+                                                        </ItemsControl.ItemTemplate>
+                                                    </ItemsControl>
+                                                </StackPanel>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </ScrollViewer>
+                        </Grid>
+                    </Grid>
+                </TabItem>
+
+                <!-- ══════════ TAB 3: Dữ liệu (lưới kho SP của tài khoản đang chọn — fixed-acct) ══════════ -->
                 <TabItem Header="Dữ liệu">
                     <data:DataView DataContext="{Binding AccountData}" />
                 </TabItem>
 
-                <!-- ══════════ TAB 3: Theo dõi Scrape (log đầy màn) ══════════ -->
+                <!-- ══════════ TAB 4: Theo dõi Scrape (log đầy màn) ══════════ -->
                 <TabItem Header="Theo dõi Scrape">
                     <Grid DataContext="{Binding Scrape}" ColumnDefinitions="1*,12,1.35*" Margin="0,10,0,0">
                         <DockPanel Grid.Column="0">
@@ -381,7 +471,7 @@
                     </Grid>
                 </TabItem>
 
-                <!-- ══════════ TAB 4: Theo dõi Update (log đầy màn) ══════════ -->
+                <!-- ══════════ TAB 5: Theo dõi Update (log đầy màn) ══════════ -->
                 <TabItem Header="Theo dõi Update">
                     <DockPanel DataContext="{Binding Update}" Margin="0,10,0,0">
                         <Grid DockPanel.Dock="Top" Margin="0,0,0,6">

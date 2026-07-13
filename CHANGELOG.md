@@ -5,6 +5,14 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Hiệu năng. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.4.0 — 2026-07-13
+
+- Workspace có tab **📊 Thống kê** mới (ngay sau "Shop & cấu hình"): thống kê từng shop × từng việc
+  (Scrape / Import / Update / Tên SP) y như tab Thống kê trên web Hub — trạng thái (⏳ đang chạy · máy nào,
+  ✓ xong, ■ dừng dở, • đã xếp, ✘ lỗi), số dòng đã làm, tới dòng nào, các khoảng dòng, máy chạy gần nhất
+  và các máy đã tham gia; đầu tab có 4 ô tổng theo việc của tài khoản (tổng dòng + x/y shop ✓).
+  Số liệu đọc từ sổ hoàn thành trên Hub, tự làm mới theo nhịp ~12–15s.
+
 ## v1.3.2 — 2026-07-13
 
 - Các lưới Dữ liệu (app + web Hub): thêm nút **☑ Chọn tất cả** — chọn mọi dòng của trang đang xem
