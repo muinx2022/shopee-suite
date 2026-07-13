@@ -14,7 +14,8 @@ namespace Shopee.Hub;
 /// COPY từ suite\Shopee.Hub\HubDatabase.cs (bản nhúng WPF vẫn dùng file gốc tới lúc cutover). Bản web-hub
 /// BỔ SUNG: bảng key/value <c>settings</c> (thay hub-server.json: admin PBKDF2, api token, cờ điều phối),
 /// <see cref="DeleteFile"/>, guard tên file trùng khác hoa-thường (Linux case-sensitive), và khoá theo
-/// TÀI KHOẢN BigSeller trong <see cref="AcquireLease"/> (chống 2 máy cùng ghi 1 workbook / 1 cookie nhiều IP).
+/// TÀI KHOẢN BigSeller trong <see cref="AcquireLease"/> (chống 2 máy cùng dùng 1 acc BigSeller — cookie xoay
+/// theo IP, 2 máy cùng phiên là bay cookie).
 /// </summary>
 public sealed partial class HubDatabase : IDisposable
 {
@@ -26,8 +27,8 @@ public sealed partial class HubDatabase : IDisposable
     public TimeSpan StaleAccount { get; init; } = TimeSpan.FromMinutes(5);
 
     /// <summary>Bật khoá xuyên-máy theo TÀI KHOẢN BigSeller ở <see cref="AcquireLease"/>: máy KHÁC đang giữ
-    /// lease tươi của cùng bigseller_id (op bất kỳ) → từ chối cấp (Blocked). Chống 2 máy cùng ghi 1 workbook
-    /// (bản chính giờ ở Hub) và 1 cookie dùng từ nhiều IP. Client cũ xử lý Blocked(...) sẵn nên bật an toàn.</summary>
+    /// lease tươi của cùng bigseller_id (op bất kỳ) → từ chối cấp (Blocked). Chống 2 máy cùng dùng 1 acc
+    /// BigSeller (cookie xoay theo IP — 2 máy cùng phiên là bay cookie). Client cũ xử lý Blocked(...) sẵn nên bật an toàn.</summary>
     public bool AccountScopedLease { get; init; } = true;
 
     public HubDatabase(string dataDir)

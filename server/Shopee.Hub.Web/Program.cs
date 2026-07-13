@@ -31,7 +31,7 @@ var hubOptions = new HubOptions
     AllowClientConfigPush = builder.Configuration.GetValue("Hub:AllowClientConfigPush", true),
 };
 
-// Trần upload = 256MB (workbook Excel lớn). Giống hub nhúng cũ (mặc định Kestrel ~28MB gây 413).
+// Trần upload = 256MB (file nhập/xuất lớn qua API /files: cookie/ảnh/xlsx). Giống hub nhúng cũ (mặc định Kestrel ~28MB gây 413).
 builder.WebHost.ConfigureKestrel(o => o.Limits.MaxRequestBodySize = 256L * 1024 * 1024);
 
 // ── DI ──
@@ -64,7 +64,7 @@ if (!string.IsNullOrWhiteSpace(pgConn))
 // FleetStateService: vừa là IHostedService (nền refresh 2s) vừa được inject vào trang Blazor → 1 singleton.
 builder.Services.AddSingleton<FleetStateService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<FleetStateService>());
-// SheetMapService: đọc + cache cấu trúc dòng workbook cho "bản đồ dòng" trang Thống kê.
+// SheetMapService: đọc + cache cấu trúc dòng kho sản phẩm (Postgres) cho "bản đồ dòng" trang Thống kê.
 builder.Services.AddSingleton<SheetMapService>();
 // DispatcherService: BackgroundService + được inject (endpoint /dispatcher, trang Fleet) → 1 singleton.
 builder.Services.AddSingleton<DispatcherService>();

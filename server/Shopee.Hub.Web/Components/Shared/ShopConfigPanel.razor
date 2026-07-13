@@ -1,11 +1,6 @@
 @* Cấu hình 1 shop BigSeller (tab ⚙ Cấu hình của Fleet, khi chọn 1 shop). Port từ trang cấu hình BigSeller cũ.
-   Guard _loadedKey: parent tick 2s re-render con MỖI TICK → chỉ reload bản-đang-sửa khi acct/shop ĐỔI THẬT.
-   Gợi ý tên sheet hợp 2 nguồn: blob workbook + kho Hub (Postgres, khi acc hub-mode / chưa có workbook). ProductDb
-   có thể chưa đăng ký DI (chưa cấu hình Postgres) → resolve qua IServiceProvider (null/!IsReady → bỏ qua). *@
-@using Microsoft.Extensions.DependencyInjection
+   Guard _loadedKey: parent tick 2s re-render con MỖI TICK → chỉ reload bản-đang-sửa khi acct/shop ĐỔI THẬT. *@
 @inject FileStoreConfigService Config
-@inject HubDatabase Db
-@inject IServiceProvider Sp
 
 @if (_acct is null || _shop is null)
 {
@@ -16,38 +11,7 @@ else
     <div class="editcard">
         <div class="row">
             <label>Tên shop <input @bind="_shop.Name" style="width:180px" /></label>
-            @* Acc hub-mode (kho Postgres): "sheet" là ngăn dữ liệu nội bộ hệ thống tự quản → KHÔNG hiện cho user
-               gõ. Chỉ acc excel-mode mới gán sheet của workbook. *@
-            @if (!_acct.UsesHubData)
-            {
-                <label>Sheet
-                    @* input list + datalist: gõ tự do (sheet chưa tồn tại vẫn nhập được) + gợi ý từ kho/workbook.
-                       id datalist unique theo shop kẻo Blazor tái dùng gợi ý shop khác. *@
-                    <input list="@_dlId" @bind="_shop.ShopeeDataSheet" style="width:160px"
-                           placeholder="tên sheet (gợi ý từ kho/workbook)" />
-                    <datalist id="@_dlId">
-                        @foreach (var sn in _sheetNames)
-                        {
-                            <option value="@sn"></option>
-                        }
-                    </datalist>
-                </label>
-            }
         </div>
-
-        @* Khối ánh xạ Cột Excel chỉ dùng cho excel-mode; hub-mode runner đọc/ghi kho Postgres, không theo cột. *@
-        @if (!_acct.UsesHubData)
-        {
-            <div class="subhead">Cột Excel (1-based, 0 = không dùng)</div>
-            <div class="row">
-                <label>Link <input type="number" @bind="_shop.ColumnMap.LinkColumn" class="ci" /></label>
-                <label>Giá <input type="number" @bind="_shop.ColumnMap.PriceColumn" class="ci" /></label>
-                <label>SKU <input type="number" @bind="_shop.ColumnMap.SkuColumn" class="ci" /></label>
-                <label>ItemId <input type="number" @bind="_shop.ColumnMap.ItemIdColumn" class="ci" /></label>
-                <label>Tên gốc <input type="number" @bind="_shop.ColumnMap.ProductNameColumn" class="ci" /></label>
-                <label>Tên sửa <input type="number" @bind="_shop.ColumnMap.RewrittenNameColumn" class="ci" /></label>
-            </div>
-        }
 
         <div class="row">
             <label>Crawl URL <input @bind="_shop.BigSellerCrawlUrl" style="width:min(280px,100%)" /></label>
@@ -83,14 +47,11 @@ else
     private int _version;
     private BigSellerAccount? _acct;
     private BigSellerShop? _shop;
-    private List<FileManifestEntry> _manifest = new();
     private string _status = "";
     private bool _confirmDelete;
     private string _loadedKey = "\0";
-    private List<string> _sheetNames = new();   // gợi ý cho datalist (workbook ∪ kho Hub), nạp 1 lần khi đổi acct/shop
-    private string _dlId => "sheets-" + ShopId;  // id datalist unique theo shop
 
-    protected override async Task OnParametersSetAsync()
+    protected override void OnParametersSet()
     {
         var key = AccountId + "|" + ShopId;
         if (key == _loadedKey) return;
@@ -98,78 +59,14 @@ else
         _confirmDelete = false;
         _status = "";
         Load();
-        await LoadSheetNamesAsync();
     }
 
     private void Load()
     {
         _all = Config.BigSellerAccounts();
         _version = Config.VersionOf(FileStoreConfigService.BigSellerFile);
-        _manifest = Db.ListFiles();
         _acct = _all.FirstOrDefault(a => a.Id == AccountId);
         _shop = _acct?.Shops.FirstOrDefault(s => s.Id == ShopId);
-    }
-
-    /// <summary>Nạp gợi ý tên sheet: hợp 2 nguồn — sheet trong blob workbook + sheet trong kho Hub (Postgres) khi
-    /// acc hub-mode HOẶC chưa có workbook. Giữ thứ tự, distinct (workbook trước). Async vì đọc Postgres — chạy 1 lần
-    /// mỗi khi acct/shop đổi (guard _loadedKey), không gọi mỗi tick.</summary>
-    private async Task LoadSheetNamesAsync()
-    {
-        _sheetNames = new();
-        if (_acct?.UsesHubData == true) return;   // hub-mode: ô Sheet bị ẩn → khỏi query gợi ý
-
-        var names = new List<string>();
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        void AddRange(IEnumerable<string> src)
-        {
-            foreach (var n in src)
-                if (!string.IsNullOrWhiteSpace(n) && seen.Add(n)) names.Add(n);
-        }
-
-        AddRange(WorkbookSheetNames(AccountId));
-
-        // Nguồn 2: kho Hub (Postgres). ProductDb có thể chưa đăng ký DI (chưa cấu hình Postgres) → resolve qua
-        // IServiceProvider, null/!IsReady → bỏ qua (không crash trang).
-        var noWorkbook = !_manifest.Any(x => x.Name.StartsWith($"workbooks/{AccountId}/", StringComparison.OrdinalIgnoreCase));
-        if ((_acct?.UsesHubData == true || noWorkbook) && !string.IsNullOrEmpty(AccountId)
-            && Sp.GetService<ProductDb>() is { IsReady: true } pg)
-        {
-            try { AddRange((await pg.GetSheetsAsync(AccountId, CancellationToken.None)).Select(s => s.Sheet)); }
-            catch { }
-        }
-        _sheetNames = names;
-    }
-
-    /// <summary>Tên các sheet trong blob workbook của 1 acc (đọc nhanh từ xl/workbook.xml trong file zip, không parse
-    /// toàn bộ Excel). Rỗng nếu chưa có workbook.</summary>
-    private List<string> WorkbookSheetNames(string acctId)
-    {
-        var list = new List<string>();
-        var prefix = $"workbooks/{acctId}/";
-        var f = _manifest.FirstOrDefault(x => x.Name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
-        if (f is not null)
-        {
-            try
-            {
-                var bytes = Db.ReadFile(f.Name);
-                if (bytes is not null)
-                {
-                    using var ms = new MemoryStream(bytes);
-                    using var zip = new System.IO.Compression.ZipArchive(ms, System.IO.Compression.ZipArchiveMode.Read);
-                    var entry = zip.GetEntry("xl/workbook.xml");
-                    if (entry is not null)
-                    {
-                        using var sr = new StreamReader(entry.Open());
-                        var xml = sr.ReadToEnd();
-                        foreach (System.Text.RegularExpressions.Match m in
-                                 System.Text.RegularExpressions.Regex.Matches(xml, "<sheet[^>]*\\bname=\"([^\"]+)\""))
-                            list.Add(System.Net.WebUtility.HtmlDecode(m.Groups[1].Value));
-                    }
-                }
-            }
-            catch { }
-        }
-        return list;
     }
 
     private async Task Save()

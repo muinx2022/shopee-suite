@@ -2,7 +2,6 @@
    Parent tick 2s re-render panel MỖI TICK → chỉ reload bản-đang-sửa khi AccountId THẬT SỰ đổi (guard _loadedKey),
    tuyệt đối không reload mỗi tick kẻo mất chữ đang gõ. Login state đọc trực tiếp từ service → tươi theo nhịp parent. *@
 @inject FileStoreConfigService Config
-@inject HubDatabase Db
 @inject BigSellerLoginService Login
 
 @if (_acct is null)
@@ -19,21 +18,6 @@ else
             <label>KiotProxy key <input @bind="_acct.KiotProxyKey" /></label>
             <label>Vùng <input @bind="_acct.Region" style="width:90px" /></label>
         </div>
-
-        @* Workbook Excel CHỈ có nghĩa với acc excel-mode (chưa migrate) — dùng để tải file cũ lên rồi nhập vào
-           kho Hub ở khối 🗄 Kho dữ liệu. Acc hub-mode (kho Postgres) không còn khái niệm workbook. *@
-        @if (!_acct.UsesHubData)
-        {
-            <div class="wbrow">
-                <span class="wblabel">📗 Workbook:</span>
-                <span class="wbname">@WorkbookName(_acct.Id)</span>
-                <label class="btn sm">
-                    @(WorkbookName(_acct.Id) == "(chưa có)" ? "⬆ Tải lên" : "⬆ Thay file")
-                    <InputFile OnChange="e => UploadWorkbook(e, _acct.Id)" accept=".xlsx" style="display:none" />
-                </label>
-                @if (!string.IsNullOrEmpty(_wbStatus)) { <span class="action">@_wbStatus</span> }
-            </div>
-        }
 
         @{ var ls = Login.GetState(_acct.Id); }
         <div class="wbrow">
@@ -119,8 +103,7 @@ else
     private List<BigSellerAccount> _all = new();
     private int _version;
     private BigSellerAccount? _acct;
-    private List<FileManifestEntry> _manifest = new();
-    private string _status = "", _wbStatus = "", _otp = "", _newShopName = "";
+    private string _status = "", _otp = "", _newShopName = "";
     private bool _confirmDelete;
     private string? _confirmDeleteShop;   // shop.Id đang chờ xác nhận xoá (bấm-2-lần), null = không có
     private string _loadedKey = "\0";   // chưa load lần nào (khác mọi AccountId thật)
@@ -133,7 +116,7 @@ else
         _loadedKey = AccountId;
         _confirmDelete = false;
         _confirmDeleteShop = null;
-        _status = _wbStatus = _newShopName = "";
+        _status = _newShopName = "";
         Load();
     }
 
@@ -141,34 +124,7 @@ else
     {
         _all = Config.BigSellerAccounts();
         _version = Config.VersionOf(FileStoreConfigService.BigSellerFile);
-        _manifest = Db.ListFiles();
         _acct = _all.FirstOrDefault(a => a.Id == AccountId);
-    }
-
-    /// <summary>Tên file workbook đang có trên hub cho 1 acc (workbooks/{id}/*). "(chưa có)" nếu chưa upload.</summary>
-    private string WorkbookName(string acctId)
-    {
-        var prefix = $"workbooks/{acctId}/";
-        var f = _manifest.FirstOrDefault(x => x.Name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
-        return f is null ? "(chưa có)" : f.Name[prefix.Length..];
-    }
-
-    private async Task UploadWorkbook(InputFileChangeEventArgs e, string acctId)
-    {
-        var file = e.File;
-        _wbStatus = "⏳ đang tải…";
-        try
-        {
-            await using var s = file.OpenReadStream(maxAllowedSize: 256L * 1024 * 1024);
-            using var ms = new MemoryStream();
-            await s.CopyToAsync(ms);
-            var name = $"workbooks/{acctId}/{file.Name}";
-            var res = Db.PutFile(name, ms.ToArray(), null, "hub-web");
-            _wbStatus = res.Ok ? $"✔ đã tải {file.Name} (v{res.Version})" : $"✘ {res.Conflict}";
-            _manifest = Db.ListFiles();
-            await OnChanged.InvokeAsync();
-        }
-        catch (Exception ex) { _wbStatus = "✘ lỗi: " + ex.Message; }
     }
 
     private void StartLogin(BigSellerAccount a)

@@ -1,14 +1,12 @@
-@* Khối "🗄 Kho dữ liệu" trong tab ⚙ Cấu hình của 1 acc BigSeller (Fleet). Cutover kho sản phẩm giữa workbook
-   Excel (per-máy) ↔ kho Hub (Postgres): nhập workbook → Postgres, xuất Postgres → Excel, và rollback trọn gói.
+@* Khối "🗄 Kho dữ liệu" trong tab ⚙ Cấu hình của 1 acc BigSeller (Fleet): tóm tắt kho Postgres per-acc + xuất
+   Excel (Excel giờ chỉ là ĐỊNH DẠNG file xuất), kèm nút vá acc lạc còn cờ excel cũ → chuyển về kho Hub.
    Parent tick 2s re-render con MỖI TICK → guard _loadedKey: chỉ reload bản-đang-xem khi AccountId ĐỔI THẬT (giữ
    trạng thái _status/link tải/đang-chạy qua các tick). ProductDb có thể chưa đăng ký DI (chưa cấu hình Postgres)
    → resolve qua IServiceProvider (null = "Postgres chưa sẵn sàng"), KHÔNG crash trang. *@
 @using Microsoft.Extensions.DependencyInjection
 @inject FileStoreConfigService Config
-@inject HubDatabase Db
 @inject HubOptions Opts
 @inject IServiceProvider Sp
-@inject IJSRuntime JS
 
 @if (_acct is null)
 {
@@ -20,10 +18,6 @@ else
         <div class="subhead">🗄 Kho dữ liệu</div>
 
         @{ var pg = Pg; var pgReady = pg is not null && pg.IsReady; var hub = _acct.UsesHubData; }
-        <div class="wbrow">
-            <span class="wblabel">Chế độ hiện tại:</span>
-            <span class="wbname">@(hub ? "Kho Hub (Postgres)" : "Excel (workbook per-máy)")</span>
-        </div>
 
         @if (!pgReady)
         {
@@ -60,7 +54,6 @@ else
 
                 <div class="bar">
                     <button class="btn" disabled="@_busy" @onclick="Export">⬇ Xuất Excel</button>
-                    <button class="btn danger sm" disabled="@_busy" @onclick="Rollback">↩ Về chế độ Excel</button>
                     @if (_exportUrl is not null)
                     {
                         <a class="dl" href="@_exportUrl" target="_blank">📥 @_exportName</a>
@@ -69,17 +62,8 @@ else
             }
             else
             {
-                var nonDef = ShopsWithNonDefaultColumns();
-                @if (nonDef.Count > 0)
-                {
-                    <div class="warn">⚠ Shop <b>@string.Join(", ", nonDef)</b> dùng ánh xạ cột khác chuẩn (1,3,4,5,6,7) —
-                        import dùng ánh xạ CHUẨN cho cả file, hãy kiểm tra lại dữ liệu sau khi nhập.</div>
-                }
-                <p class="hint">Nhập dữ liệu từ file Excel cũ (tự tạo shop theo từng sheet trong file) rồi chuyển tài
-                    khoản sang chế độ Kho Hub — client tự nhận qua đồng bộ ≤3'.</p>
-                <div class="bar">
-                    <button class="btn primary" disabled="@_busy" @onclick="Import">⬆ Nhập từ file Excel cũ</button>
-                </div>
+                <div class="warn">⚠ Tài khoản còn gắn cờ chế độ Excel cũ — hệ thống đã bỏ workbook, dữ liệu luôn nằm ở kho Hub (Postgres). Bấm chuyển để client dùng kho Hub.</div>
+                <div class="bar"><button class="btn primary" @onclick="SwitchToHub">→ Chuyển sang kho Hub</button></div>
             }
         }
 
@@ -124,66 +108,15 @@ else
         catch (Exception ex) { _status = "✘ Lỗi đọc kho: " + ex.Message; }
     }
 
-    // ── Nhập file Excel cũ → Postgres (TỰ TẠO shop theo từng worksheet), rồi chuyển acc sang hub-mode ──
-    // Với TỪNG worksheet W: khớp shop theo (a) ShopeeDataSheet==W.Name, (b) Name==W.Name; không có → TẠO shop mới
-    // { Name=W.Name, ShopeeDataSheet=Id }. Ngăn đích = shop.ShopeeDataSheet (rỗng → vá = shop.Id). Nạp dòng vào
-    // ngăn đích bằng ImportIntoSheetAsync(replace, giữ RowNo gốc). Xong: LƯU shop mới + cờ hub trong 1 lần ghi
-    // (retry chống version-conflict — không để mất cú lật cờ). KHÔNG dùng ImportXlsxAsync (nạp theo tên worksheet thô).
-    private async Task Import()
+    // Acc lạc còn cờ excel cũ (client cũ tạo) → lật về kho Hub. SetBigSellerDataSource có sẵn retry version-conflict.
+    private async Task SwitchToHub()
     {
-        if (_acct is null || _busy) return;
-        var pg = Pg;
-        if (pg is null || !pg.IsReady) return;
-        var wb = LatestWorkbook();
-        if (wb is null) { _status = "✘ Chưa có file Excel trên hub cho tài khoản này."; return; }
-        if (!await JS.InvokeAsync<bool>("confirm",
-            $"Nhập file Excel '{Base(wb.Name)}' vào kho Hub — mỗi sheet trong file thành 1 shop (GHI ĐÈ dòng cũ của shop trùng tên), rồi chuyển sang chế độ Kho Hub. Tiếp tục?"))
-            return;
-
-        _busy = true; _status = "⏳ Đang nhập dữ liệu từ file Excel…"; _exportUrl = _exportName = null;
-        try
-        {
-            var bytes = Db.ReadFile(wb.Name);
-            if (bytes is null || bytes.Length == 0) { _status = "✘ Không đọc được file Excel."; return; }
-            var src = Base(wb.Name);
-
-            // Đọc list config TƯƠI để tạo/khớp shop (mutate rồi persist cuối). _acct chỉ để lấy Id.
-            var all = Config.BigSellerAccounts();
-            var acct = all.FirstOrDefault(a => a.Id == _acct.Id);
-            if (acct is null) { _status = "✘ Tài khoản không còn trong cấu hình."; return; }
-
-            // Task.Run: parse xlsx + ghi DB (đồng bộ, có thể nặng) chạy trên thread pool → không khoá circuit Blazor.
-            var lines = await Task.Run(async () =>
-            {
-                List<(string Sheet, List<ProductXlsxCodec.ParsedRow> Rows)> parsed;
-                using (var ms = new MemoryStream(bytes))
-                    parsed = ProductXlsxCodec.Parse(ms, ProductXlsxCodec.ColumnOverrides.Default);
-
-                var log = new List<string>();
-                foreach (var (wsName, rows) in parsed)
-                {
-                    var (shop, isNew) = ResolveOrCreateShop(acct, wsName);
-                    if (string.IsNullOrEmpty(shop.ShopeeDataSheet)) shop.ShopeeDataSheet = shop.Id;
-                    // Tự sinh SKU 'B#####' cho dòng file THIẾU SKU (luôn bật ở đây) → đạt chuẩn per-shop trước khi ghi.
-                    var (filledRows, filled) = await pg.FillMissingSkusAsync(acct.Id, shop.ShopeeDataSheet, rows, CancellationToken.None);
-                    await pg.ImportIntoSheetAsync(acct.Id, shop.ShopeeDataSheet, filledRows, true, src, "hub-web", CancellationToken.None);
-                    log.Add($"{wsName} → {shop.DisplayName} ({(isNew ? "mới" : "khớp")}): {filledRows.Count:N0} dòng"
-                        + (filled > 0 ? $" (+{filled:N0} SKU tự sinh)" : ""));
-                }
-                return log;
-            });
-
-            // LƯU shop mới + cờ hub (1 lần ghi, retry chống version-conflict).
-            if (!PersistShops(acct, "hub"))
-            { _status = "✘ Đã nhập dữ liệu nhưng LƯU CẤU HÌNH thất bại (client khác vừa đẩy bản mới) — thử lại."; return; }
-
-            _acct = Config.BigSellerAccounts().FirstOrDefault(a => a.Id == AccountId);
-            await LoadSheetsAsync();
-            _status = $"✔ Đã nhập {lines.Count} sheet → chuyển sang Kho Hub. " + string.Join(" · ", lines);
-            await OnChanged.InvokeAsync();
-        }
-        catch (Exception ex) { _status = "✘ Lỗi nhập: " + ProductDb.Friendly(ex); }
-        finally { _busy = false; }
+        if (_acct is null) return;
+        Config.SetBigSellerDataSource(_acct.Id, "hub");
+        _acct = Config.BigSellerAccounts().FirstOrDefault(a => a.Id == AccountId);
+        await LoadSheetsAsync();
+        _status = "✔ Đã chuyển tài khoản sang kho Hub.";
+        await OnChanged.InvokeAsync();
     }
 
     // ── Xuất kho Hub ra file Excel để tải về (ghi vào {DataDir}/exports/, phục vụ qua /exports/{name}) ──
@@ -210,66 +143,13 @@ else
         finally { _busy = false; }
     }
 
-    // ── Rollback trọn gói: xuất kho Hub → GHI ĐÈ blob workbook (version tăng → client excel-mode pull bản mới) →
-    //    gán lại ShopeeDataSheet = TÊN worksheet thật (excel runner cần) → chuyển acc về excel-mode. ──
-    // Worksheet đặt tên theo TÊN SHOP (sanitize/dedupe), rồi gán ĐÚNG tiêu đề đó vào từng shop bằng CÙNG hàm
-    // ResolveSheetTitles → 2 bên khớp tuyệt đối. Shop không có dòng nào (không được xuất) → giữ nguyên ngăn cũ.
-    private async Task Rollback()
-    {
-        if (_acct is null || _busy) return;
-        var pg = Pg;
-        if (pg is null || !pg.IsReady) return;
-        if (!await JS.InvokeAsync<bool>("confirm",
-            "Về chế độ Excel: xuất kho Hub ra file Excel, GHI ĐÈ file trên hub (client excel-mode sẽ tải bản mới), rồi chuyển tài khoản về chế độ Excel. Tiếp tục?"))
-            return;
-
-        _busy = true; _status = "⏳ Đang xuất + ghi đè file Excel…"; _exportUrl = _exportName = null;
-        try
-        {
-            var titles = ShopTitleMap();   // ShopeeDataSheet (khoá ngăn) → TÊN SHOP
-            // Tính SẴN tiêu đề worksheet cuối theo cùng thứ tự ORDER BY sheet như export → gán lại được cho shop.
-            var infos = await Task.Run(() => pg.GetSheetsAsync(_acct.Id, CancellationToken.None));
-            var resolved = ProductXlsxCodec.ResolveSheetTitles(infos.Select(s => s.Sheet).ToList(), titles);
-
-            var (bytes, fileName) = await Task.Run(() => pg.ExportXlsxAsync(_acct.Id, null, CancellationToken.None, titles));
-            var existing = LatestWorkbook();
-            var blobName = existing?.Name ?? $"workbooks/{_acct.Id}/{SafeName(fileName)}";
-            var put = Db.PutFile(blobName, bytes, null, "hub-web");   // ifMatch null → luôn ghi đè, bump version
-            if (!put.Ok) { _status = "✘ Lỗi ghi file Excel: " + put.Conflict; return; }
-
-            // Gán ShopeeDataSheet = tiêu đề worksheet thật + cờ excel (1 lần ghi, retry chống version-conflict).
-            if (!PersistRollbackSheets(_acct.Id, resolved))
-            { _status = "✘ Đã ghi file Excel nhưng LƯU CẤU HÌNH thất bại (client khác vừa đẩy bản mới) — thử lại."; return; }
-
-            _acct = Config.BigSellerAccounts().FirstOrDefault(a => a.Id == AccountId);
-            await LoadSheetsAsync();
-            _status = $"✔ Đã ghi file Excel '{Base(blobName)}' (v{put.Version}) + chuyển về chế độ Excel. Client sẽ tải bản mới trong ≤3'.";
-            await OnChanged.InvokeAsync();
-        }
-        catch (Exception ex) { _status = "✘ Lỗi: " + ex.Message; }
-        finally { _busy = false; }
-    }
-
-    /// <summary>Blob workbook mới nhất của acc trên hub (workbooks/{id}/*), theo mtime rồi version giảm dần.</summary>
-    private FileManifestEntry? LatestWorkbook()
-    {
-        var prefix = $"workbooks/{_acct!.Id}/";
-        return Db.ListFiles()
-            .Where(f => f.Name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-            .OrderByDescending(f => f.Mtime).ThenByDescending(f => f.Version)
-            .FirstOrDefault();
-    }
-
-    private static string Base(string name)
-        => name.Contains('/') ? name[(name.LastIndexOf('/') + 1)..] : name;
-
     private static string SafeName(string name)
     {
         var n = Path.GetFileName(name ?? "");
         return string.IsNullOrWhiteSpace(n) ? "export.xlsx" : n;
     }
 
-    /// <summary>Ánh xạ ShopeeDataSheet (khoá ngăn) → TÊN SHOP của acc đang xem — export/rollback đặt tên worksheet.</summary>
+    /// <summary>Ánh xạ ShopeeDataSheet (khoá ngăn) → TÊN SHOP của acc đang xem — export đặt tên worksheet.</summary>
     private IReadOnlyDictionary<string, string> ShopTitleMap()
     {
         var map = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -285,76 +165,5 @@ else
     {
         var s = _acct?.Shops.FirstOrDefault(x => string.Equals(x.ShopeeDataSheet, sheet, StringComparison.Ordinal));
         return s is not null ? s.DisplayName : sheet;
-    }
-
-    /// <summary>Khớp/tạo shop cho 1 worksheet: (a) ShopeeDataSheet==W, (b) Name==W, (c) tạo mới { Name=W, sheet=Id }.
-    /// Mutate <paramref name="acct"/>.Shops khi tạo mới. Trả (shop, đã-tạo-mới?).</summary>
-    private static (BigSellerShop Shop, bool IsNew) ResolveOrCreateShop(BigSellerAccount acct, string worksheet)
-    {
-        var shop = acct.Shops.FirstOrDefault(s => string.Equals(s.ShopeeDataSheet, worksheet, StringComparison.Ordinal))
-                ?? acct.Shops.FirstOrDefault(s => string.Equals(s.Name, worksheet, StringComparison.Ordinal));
-        if (shop is not null) return (shop, false);
-        shop = new BigSellerShop { Name = worksheet };
-        shop.ShopeeDataSheet = shop.Id;
-        acct.Shops.Add(shop);
-        return (shop, true);
-    }
-
-    /// <summary>Persist trạng thái shop của bản <paramref name="mutated"/> + đặt DataSource, retry 3× chống
-    /// version-conflict (đọc lại bản mới, KHỚP shop theo Id: thêm shop mới / vá ShopeeDataSheet, rồi ghi). Không để
-    /// mất cú lật cờ + shop mới dù client khác chen giữa. Match theo Id → idempotent qua các lần retry.</summary>
-    private bool PersistShops(BigSellerAccount mutated, string dataSource)
-    {
-        for (var attempt = 0; attempt < 3; attempt++)
-        {
-            var all = Config.BigSellerAccounts();
-            var acct = all.FirstOrDefault(a => a.Id == mutated.Id);
-            if (acct is null) return false;
-            foreach (var s in mutated.Shops)
-            {
-                var ex = acct.Shops.FirstOrDefault(x => x.Id == s.Id);
-                if (ex is null) acct.Shops.Add(s);
-                else if (!string.IsNullOrEmpty(s.ShopeeDataSheet)) ex.ShopeeDataSheet = s.ShopeeDataSheet;
-            }
-            acct.DataSource = dataSource;
-            if (Config.Save(FileStoreConfigService.BigSellerFile, all, Config.VersionOf(FileStoreConfigService.BigSellerFile)).Ok)
-                return true;
-        }
-        return false;
-    }
-
-    /// <summary>Rollback: gán ShopeeDataSheet = tiêu đề worksheet thật (map khoá-ngăn-cũ → tiêu đề) + DataSource=excel,
-    /// retry chống version-conflict. Bản đọc lại vẫn còn khoá ngăn cũ nên lookup vẫn khớp qua các lần retry.</summary>
-    private bool PersistRollbackSheets(string acctId, IReadOnlyDictionary<string, string> sheetByOldKey)
-    {
-        for (var attempt = 0; attempt < 3; attempt++)
-        {
-            var all = Config.BigSellerAccounts();
-            var acct = all.FirstOrDefault(a => a.Id == acctId);
-            if (acct is null) return false;
-            foreach (var s in acct.Shops)
-                if (!string.IsNullOrEmpty(s.ShopeeDataSheet) && sheetByOldKey.TryGetValue(s.ShopeeDataSheet, out var title))
-                    s.ShopeeDataSheet = title;
-            acct.DataSource = "excel";
-            if (Config.Save(FileStoreConfigService.BigSellerFile, all, Config.VersionOf(FileStoreConfigService.BigSellerFile)).Ok)
-                return true;
-        }
-        return false;
-    }
-
-    /// <summary>Shop của acc có ColumnMap KHÁC mặc định (1,3,4,5,6,7) → cảnh báo (import vẫn dùng ánh xạ chuẩn).</summary>
-    private List<string> ShopsWithNonDefaultColumns()
-    {
-        var result = new List<string>();
-        if (_acct is null) return result;
-        var d = ProductXlsxCodec.ColumnOverrides.Default;   // (1,3,4,5,6,7)
-        foreach (var s in _acct.Shops)
-        {
-            var m = s.ColumnMap;
-            if (m.LinkColumn != d.Link || m.PriceColumn != d.Price || m.SkuColumn != d.Sku
-                || m.ItemIdColumn != d.Item || m.ProductNameColumn != d.Name || m.RewrittenNameColumn != d.Rewritten)
-                result.Add(s.DisplayName);
-        }
-        return result;
     }
 }

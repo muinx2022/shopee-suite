@@ -106,7 +106,7 @@ ON CONFLICT(name) DO UPDATE SET version=$v, hash=$h, size=$s, mtime=$mt, updated
     }
 
     /// <summary>Xoá 1 file dùng chung: bỏ bản ghi manifest + blob trên đĩa. Trả false nếu tên xấu.
-    /// (Web-hub: trang Files cho admin xoá workbook cũ; UI CHẶN xoá config/* để khỏi tự bắn chân.)</summary>
+    /// (Web-hub: trang Files cho admin xoá file cũ (blob workbook legacy còn sót vẫn xoá được ở đây); UI CHẶN xoá config/* để khỏi tự bắn chân.)</summary>
     public bool DeleteFile(string name)
     {
         var path = SafeFullPath(FilesDir, name);

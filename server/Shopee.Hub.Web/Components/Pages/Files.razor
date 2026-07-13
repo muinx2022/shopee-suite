@@ -1,25 +1,9 @@
 @page "/files"
 @attribute [Authorize(Policy = "Web")]
 @inject HubDatabase Db
-@inject FileStoreConfigService Config
 @inject IJSRuntime JS
 
-<p class="hint m-hide">Workbook Excel + config + cookie. Bytes nằm ở <code>files\</code>; version tăng dần (client kéo theo manifest).</p>
-
-<h2>Tải workbook lên</h2>
-<div class="editcard" style="max-width:640px">
-    <label>Tài khoản BigSeller
-        <select @bind="_uploadAcctId">
-            <option value="">— chọn acc —</option>
-            @foreach (var a in _accounts)
-            {
-                <option value="@a.Id">@a.DisplayName</option>
-            }
-        </select>
-    </label>
-    <label>File .xlsx <InputFile OnChange="OnUpload" accept=".xlsx" /></label>
-    <div class="action">@_uploadStatus</div>
-</div>
+<p class="hint m-hide">Config + cookie + ảnh dùng chung của fleet. Bytes nằm ở <code>files\</code>; version tăng dần (client kéo theo manifest).</p>
 
 <h2>Ảnh mặc định cho Update (dùng chung)</h2>
 <div class="editcard" style="max-width:640px">
@@ -69,14 +53,11 @@
 
 @code {
     private List<FileManifestEntry> _files = new();
-    private List<BigSellerAccount> _accounts = new();
-    private string _uploadAcctId = "";
-    private string _uploadStatus = "";
     private string _imgStatus = "";
     private string? _imgPreview;
     private int _imgVer;
 
-    protected override void OnInitialized() { Reload(); _accounts = Config.BigSellerAccounts(); LoadImagePreview(); }
+    protected override void OnInitialized() { Reload(); LoadImagePreview(); }
 
     private void Reload() => _files = Db.ListFiles();
 
@@ -92,23 +73,6 @@
         var isPng = bytes.Length >= 4 && bytes[0] == 0x89 && bytes[1] == 0x50 && bytes[2] == 0x4E && bytes[3] == 0x47;
         _imgPreview = $"data:{(isPng ? "image/png" : "image/jpeg")};base64,{Convert.ToBase64String(bytes)}";
         _imgVer = entry.Version;
-    }
-
-    private async Task OnUpload(InputFileChangeEventArgs e)
-    {
-        if (string.IsNullOrEmpty(_uploadAcctId)) { _uploadStatus = "⚠ Chọn tài khoản trước."; return; }
-        var file = e.File;
-        try
-        {
-            await using var s = file.OpenReadStream(maxAllowedSize: 256L * 1024 * 1024);
-            using var ms = new MemoryStream();
-            await s.CopyToAsync(ms);
-            var name = $"workbooks/{_uploadAcctId}/{file.Name}";
-            var res = Db.PutFile(name, ms.ToArray(), null, "hub-web");
-            _uploadStatus = res.Ok ? $"✔ Đã tải {name} (v{res.Version})." : $"✘ Lỗi: {res.Conflict}";
-            Reload();
-        }
-        catch (Exception ex) { _uploadStatus = "✘ Lỗi tải lên: " + ex.Message; }
     }
 
     // Ảnh Update dùng chung: key CỐ ĐỊNH, không cần chọn account, ghi đè (ifMatch=null → version tự tăng,

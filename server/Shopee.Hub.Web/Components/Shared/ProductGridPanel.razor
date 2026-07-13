@@ -36,13 +36,13 @@
         @* Hub-mode: shop mới luôn có ngăn dữ liệu; chỉ shop hub CŨ (tạo trước luật sheet=Id) mới rơi vào đây. *@
         <p class="hint">@(_acct.UsesHubData
             ? "Shop thiếu ngăn dữ liệu — mở tab ⚙ Cấu hình bấm Lưu để vá."
-            : "Shop chưa gán sheet — vào tab ⚙ Cấu hình để gán sheet trước.")</p>
+            : "Shop chưa có ngăn dữ liệu — mở tab ⚙ Cấu hình bấm Lưu để vá (acc còn cờ Excel cũ: chuyển kho Hub trước ở 🗄 Kho dữ liệu).")</p>
     }
     else
     {
         @if (!_acct.UsesHubData)
         {
-            <div class="warn">⚠ Tài khoản đang ở chế độ Excel — dữ liệu này chỉ dùng khi chuyển sang Kho Hub. Vẫn xem/sửa được trước khi cutover.</div>
+            <div class="warn">⚠ Tài khoản còn gắn cờ chế độ Excel cũ (đã ngừng hỗ trợ) — vào tab ⚙ Cấu hình › 🗄 Kho dữ liệu bấm "Chuyển sang kho Hub".</div>
         }
 
         @* Thanh công cụ hiện KỂ CẢ khi Postgres chưa sẵn sàng — các nút disable theo pgReady (để user thấy có nút
