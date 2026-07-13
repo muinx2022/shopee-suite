@@ -19,7 +19,7 @@
         </Style>
     </UserControl.Styles>
 
-    <Grid Margin="28,22,28,24" RowDefinitions="Auto,Auto,Auto,Auto,*,Auto">
+    <Grid Margin="28,22,28,24" RowDefinitions="Auto,Auto,Auto,Auto,*,Auto,Auto">
 
         <!-- ════ Header + hint (như hub) ════ -->
         <StackPanel Grid.Row="0" Margin="0,0,0,12">
@@ -74,25 +74,13 @@
             </Grid>
         </Border>
 
-        <!-- ════ Bar phân trang + hành động khi có chọn ════ -->
-        <Grid Grid.Row="3" ColumnDefinitions="Auto,*,Auto" Margin="0,0,0,10">
-            <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
-                <Button Content="«" Width="38" Command="{Binding FirstPageCommand}" IsEnabled="{Binding CanFirstPrev}" ToolTip.Tip="Trang đầu" />
-                <Button Content="‹" Width="38" Margin="6,0,0,0" Command="{Binding PrevPageCommand}" IsEnabled="{Binding CanFirstPrev}" />
-                <TextBlock Text="{Binding PageText}" VerticalAlignment="Center" Margin="12,0,12,0"
-                           FontSize="12.5" Foreground="{DynamicResource TextSecondaryBrush}" />
-                <Button Content="›" Width="38" Command="{Binding NextPageCommand}" IsEnabled="{Binding CanNextLast}" />
-                <Button Content="»" Width="38" Margin="6,0,0,0" Command="{Binding LastPageCommand}" IsEnabled="{Binding CanNextLast}" ToolTip.Tip="Trang cuối" />
-                <TextBlock Text="dòng/trang" VerticalAlignment="Center" Margin="14,0,6,0"
-                           FontSize="12.5" Foreground="{DynamicResource TextSecondaryBrush}" />
-                <ComboBox Width="80" VerticalAlignment="Center" ItemsSource="{Binding PageSizes}"
-                          SelectedItem="{Binding PageSize}" IsEnabled="{Binding CanInteract}" />
-                <Button Content="☑ Chọn tất cả" Margin="14,0,0,0" Command="{Binding SelectAllPageCommand}"
-                        IsEnabled="{Binding CanInteract}" ToolTip.Tip="Chọn tất cả dòng của trang này" />
-            </StackPanel>
+        <!-- ════ Bar HÀNH ĐỘNG (căn phải) — phân trang chuyển XUỐNG DƯỚI lưới để 2 cụm khỏi che nhau khi hẹp ════ -->
+        <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,0,10">
+            <Button Content="☑ Chọn tất cả" Command="{Binding SelectAllPageCommand}"
+                    IsEnabled="{Binding CanInteract}" ToolTip.Tip="Chọn tất cả dòng của trang này" />
 
-            <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" IsVisible="{Binding HasSelection}">
-                <Button Command="{Binding ClearSelectionCommand}" IsEnabled="{Binding CanInteract}">
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" IsVisible="{Binding HasSelection}">
+                <Button Margin="8,0,0,0" Command="{Binding ClearSelectionCommand}" IsEnabled="{Binding CanInteract}">
                     <TextBlock><Run Text="✖ Bỏ chọn (" /><Run Text="{Binding SelectedCount}" /><Run Text=")" /></TextBlock>
                 </Button>
                 <Button Classes="success" Margin="8,0,0,0" Command="{Binding MarkSoldCommand}" IsEnabled="{Binding CanInteract}">
@@ -110,7 +98,7 @@
                     <TextBlock><Run Text="🗑 Xóa nhiều (" /><Run Text="{Binding SelectedCount}" /><Run Text=")" /></TextBlock>
                 </Button>
             </StackPanel>
-        </Grid>
+        </StackPanel>
 
         <!-- ════ Lưới dữ liệu ════ -->
         <Border Grid.Row="4" Classes="card" ClipToBounds="True">
@@ -165,8 +153,22 @@
             </DataGrid>
         </Border>
 
+        <!-- ════ Bar PHÂN TRANG (căn phải, dưới lưới) ════ -->
+        <StackPanel Grid.Row="5" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,10,0,0">
+            <Button Content="«" Width="38" Command="{Binding FirstPageCommand}" IsEnabled="{Binding CanFirstPrev}" ToolTip.Tip="Trang đầu" />
+            <Button Content="‹" Width="38" Margin="6,0,0,0" Command="{Binding PrevPageCommand}" IsEnabled="{Binding CanFirstPrev}" />
+            <TextBlock Text="{Binding PageText}" VerticalAlignment="Center" Margin="12,0,12,0"
+                       FontSize="12.5" Foreground="{DynamicResource TextSecondaryBrush}" />
+            <Button Content="›" Width="38" Command="{Binding NextPageCommand}" IsEnabled="{Binding CanNextLast}" />
+            <Button Content="»" Width="38" Margin="6,0,0,0" Command="{Binding LastPageCommand}" IsEnabled="{Binding CanNextLast}" ToolTip.Tip="Trang cuối" />
+            <TextBlock Text="dòng/trang" VerticalAlignment="Center" Margin="14,0,6,0"
+                       FontSize="12.5" Foreground="{DynamicResource TextSecondaryBrush}" />
+            <ComboBox Width="80" VerticalAlignment="Center" ItemsSource="{Binding PageSizes}"
+                      SelectedItem="{Binding PageSize}" IsEnabled="{Binding CanInteract}" />
+        </StackPanel>
+
         <!-- ════ Status cuối ════ -->
-        <TextBlock Grid.Row="5" Margin="2,10,0,0" Text="{Binding Status}" FontSize="12.5"
+        <TextBlock Grid.Row="6" Margin="2,10,0,0" Text="{Binding Status}" FontSize="12.5"
                    Foreground="{DynamicResource TextSecondaryBrush}"
                    IsVisible="{Binding Status, Converter={StaticResource StringToBool}}" />
     </Grid>
