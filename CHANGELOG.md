@@ -5,6 +5,11 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Hiệu năng. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.3.5 — 2026-07-13
+
+- Lưới **Dữ liệu** (màn Dữ liệu + tab Dữ liệu trong Workspace): phân trang chuyển **xuống dưới lưới**
+  (căn phải); hàng trên lưới chỉ còn các nút hành động (căn phải) — hết cảnh 2 cụm che nhau khi cửa sổ hẹp.
+
 ## v1.3.4 — 2026-07-13
 
 - Sửa tab **📊 Thống kê** (Workspace) bị trắng trơn ở v1.3.3: DataContext đặt trên TabItem không
