@@ -34,6 +34,12 @@ public sealed class HttpCoordinationHub : ICoordinationHub, IDisposable
     // throttle thì mỗi dòng RowsDone hỏng đẻ 1 log → ngập. So mốc bằng Environment.TickCount64 (ms từ lúc bật máy).
     private static long _lastDiagTick;
 
+    /// <summary>Hook lệnh UPDATE app do operator ra từ Hub. Suite gán lúc khởi động (về RemoteUpdateService);
+    /// bắn từ <see cref="PollAsync"/> khi heartbeat mang lệnh — tham số 2 = chuỗi ISO lúc ra lệnh, handler dùng làm
+    /// ID dedup (mỗi lệnh xử 1 lần). static (cùng lý do DiagLog: PollAsync chạy NỀN); handler TỰ dedup + TỰ lo
+    /// luồng, KHÔNG được block poll.</summary>
+    public static Action<HttpCoordinationHub, string>? UpdateRequested { get; set; }
+
     public HttpCoordinationHub(HubClient client, string machineId)
     {
         _client = client;
@@ -52,7 +58,7 @@ public sealed class HttpCoordinationHub : ICoordinationHub, IDisposable
     {
         try
         {
-            await _client.MachineHeartbeatAsync(new MachineHeartbeatRequest(_machineId, Host, Infrastructure.AppInfo.Version, Shopee.Core.Browser.BraveFleet.MaxConcurrentWindows));
+            var resp = await _client.MachineHeartbeatAsync(new MachineHeartbeatRequest(_machineId, Host, Infrastructure.AppInfo.Version, Shopee.Core.Browser.BraveFleet.MaxConcurrentWindows));
             _fleet = await _client.FleetAsync();
             // CHỈ 1 lần, SAU khi Hub thật sự trả lời (tránh race lúc máy-Hub vừa khởi động: server localhost chưa
             // kịp lắng nghe). Poller 12s tự chạy ở tick thành công đầu tiên.
@@ -64,6 +70,11 @@ public sealed class HttpCoordinationHub : ICoordinationHub, IDisposable
             _ = MaybeAutoPullAsync();   // client: kéo cấu hình/cookie MỚI từ Hub (workbook không còn sync)
             _ = MaybeAutoPushAsync();   // hub: publish cấu hình/cookie ĐÃ ĐỔI để client kéo
             try { Changed?.Invoke(); } catch { }
+            // Hub đẩy lệnh update xuống? Bắn hook (handler tự dedup + chạy nền). ĐẶT CUỐI + bọc try/catch để KHÔNG
+            // chặn phần điều phối ở trên — mọi thứ khác vẫn chạy dù handler lỗi.
+            var reqAt = resp?.UpdateRequestedAt;
+            if (!string.IsNullOrEmpty(reqAt))
+                try { UpdateRequested?.Invoke(this, reqAt); } catch { }
         }
         catch { /* offline: giữ snapshot cũ, không ném */ }
     }
@@ -84,8 +95,17 @@ public sealed class HttpCoordinationHub : ICoordinationHub, IDisposable
     /// MaxBrave mới ngay, khỏi chờ nhịp poll 12s. Best-effort: nuốt lỗi (offline → lượt poll kế bù).</summary>
     public async Task NotifyMachineNowAsync()
     {
+        // Bỏ qua response ở đây: chỉ PollAsync là đường bắn lệnh update DUY NHẤT (dễ lần, khỏi 2 chỗ cùng bắn).
         try { await _client.MachineHeartbeatAsync(new MachineHeartbeatRequest(_machineId, Host, Infrastructure.AppInfo.Version, Shopee.Core.Browser.BraveFleet.MaxConcurrentWindows)); }
         catch { }
+    }
+
+    /// <summary>Ack tiến trình/kết quả tự-update app lên Hub. true = gửi được; false = offline/lỗi mạng (Hub GIỮ
+    /// cờ lệnh → lượt poll sau lệnh lại về, handler dedup xử tiếp). Nuốt lỗi để không nổ ra nền.</summary>
+    public async Task<bool> TryAckUpdateAsync(string status)
+    {
+        try { await _client.AckUpdateAsync(new UpdateAckRequest(_machineId, status)); return true; }
+        catch { return false; }
     }
 
     /// <summary>CLIENT (không phải máy Hub) tự kéo cấu hình + cookie + AI theo Hub: NGAY khi vừa kết nối (lần

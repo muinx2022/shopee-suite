@@ -11,6 +11,7 @@ using Shopee.Suite.Modules.Search;
 using Shopee.Suite.Modules.Settings;
 using Shopee.Suite.Modules.UpdateProduct;
 using Shopee.Suite.Modules.Workspace;
+using Shopee.Suite.Services;
 
 namespace Shopee.Suite.ViewModels;
 
@@ -53,13 +54,17 @@ public sealed partial class ShellViewModel : ObservableObject
         // qua đúng đường cancel → runner ghi ledger 'stopped' + nhả lease NGAY; (2) trả việc HUB-GIAO đang chạy về
         // hàng chờ hub rồi đợi dừng hẳn. Không làm vậy thì Velopack kill giữa chừng → khoá acc treo tới hub sweep 5'.
         var settings = new SettingsViewModel();
-        settings.PrepareUpdateShutdownAsync = async () =>
+        UpdateService.PrepareShutdownAsync = async () =>
         {
             update.StopAllSingle();   // không có job thì tự bỏ qua
             if (scrape.StopCommand.CanExecute(null)) scrape.StopCommand.Execute(null);
             if (search.StopCommand.CanExecute(null)) search.StopCommand.Execute(null);
             await worker.PrepareForShutdownAsync(TimeSpan.FromSeconds(40));
         };
+        // Lệnh update từ Hub (operator bấm trên bảng) → cùng đường dừng-êm + restart như nút tay, qua
+        // RemoteUpdateService (tự dedup theo mốc lệnh + chống vòng lặp restart khi apply hỏng).
+        Shopee.Core.Coordination.HttpCoordinationHub.UpdateRequested =
+            (hub, requestedAt) => RemoteUpdateService.Shared.OnCommand(hub, requestedAt);
 
         // Scrape + Update đã GỘP vào "BigSeller Workspace" → ẩn khỏi sidebar (vẫn dùng chung scrape/update
         // bên dưới; view cũ giữ nguyên để đảo lại nếu cần).

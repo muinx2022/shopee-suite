@@ -24,10 +24,10 @@ else
         @foreach (var e in _errors.OrderByDescending(x => x.ReportedAt))
         {
             <tr>
-                <td>@AccLabel(e.AccountId)</td>
+                <td data-label="Acc">@AccLabel(e.AccountId)</td>
                 <td data-label="Máy">@e.Hostname</td>
                 <td data-label="Lý do">@e.Reason</td>
-                <td data-label="Captcha">@if (!string.IsNullOrEmpty(e.CaptchaUrl)) { <a href="@e.CaptchaUrl" target="_blank">mở</a> }</td>
+                <td data-label="Captcha">@if (!string.IsNullOrEmpty(e.CaptchaUrl)) { <a class="btn sm" href="@e.CaptchaUrl" target="_blank">mở</a> } else { <text>—</text> }</td>
                 <td data-label="Trạng thái"><span class="pill @(e.Status == "failed" ? "fail" : "warn")">@e.Status</span></td>
                 <td data-label="Lúc">@FleetStateService.Ago(e.ReportedAt)</td>
                 <td data-label=""><button class="btn sm" @onclick="() => ClearError(e.AccountId)">Gỡ báo</button></td>

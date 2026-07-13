@@ -92,15 +92,15 @@
         p = p.TrimEnd('/');
         _pageTitle = p switch
         {
-            "" => "Fleet — vận hành & tiến độ",
-            "machines" => "Quản lý máy client",
+            "" => "Fleet",
+            "machines" => "Máy client",
             "search" => "Search đa máy",
-            "data" => "Dữ liệu sản phẩm (mọi shop)",
+            "data" => "Dữ liệu sản phẩm",
             "config/accounts" => "Tài khoản Shopee & Proxy",
             "config/errored" => "Tài khoản lỗi / captcha",
             "config/ai" => "Cấu hình AI",
             "settings" => "Cài đặt hub",
-            "files" => "Files (kho dùng chung)",
+            "files" => "Files",
             "logs-view" => "Logs",
             _ => "Shopee Hub",
         };

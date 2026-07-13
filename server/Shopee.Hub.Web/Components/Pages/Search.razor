@@ -35,11 +35,11 @@
         <thead><tr><th style="width:44px">Dùng</th><th style="width:44px">#</th><th>Link</th></tr></thead>
         <tbody>
         <Virtualize Items="_linkRows" Context="row" ItemSize="33" SpacerElement="tr">
-            <tr>
-                <td style="text-align:center"><input type="checkbox" checked="@Board.IsLinkSelected(row.Idx)" @onchange="e => ToggleLink(row.Idx, e.Value is true)" /></td>
+            <tr style="cursor:pointer" @onclick="() => ToggleLink(row.Idx, !Board.IsLinkSelected(row.Idx))">
+                <td style="text-align:center"><input type="checkbox" checked="@Board.IsLinkSelected(row.Idx)" style="pointer-events:none" /></td>
                 <td class="mono" style="color:#64748b">@(row.Idx + 1)</td>
                 <td style="max-width:640px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
-                    <a href="@row.Link" target="_blank">@row.Link</a></td>
+                    <a href="@row.Link" target="_blank" @onclick:stopPropagation="true">@row.Link</a></td>
             </tr>
         </Virtualize>
         </tbody>
@@ -64,20 +64,20 @@
         var slice = _slices.FirstOrDefault(s => s.MachineId == m.MachineId);
         var (busy, txt) = SearchBoardService.SearchState(Snap, m.MachineId);
         var st = FleetStateService.Status(Snap, m);
-        <tr>
-            <td style="text-align:center"><input type="checkbox" checked="@_selected.Contains(m.MachineId)" @onchange="e => ToggleMachine(m.MachineId, e.Value is true)" /></td>
+        <tr style="cursor:pointer" @onclick="() => ToggleMachine(m.MachineId, !_selected.Contains(m.MachineId))">
+            <td style="text-align:center"><input type="checkbox" checked="@_selected.Contains(m.MachineId)" style="pointer-events:none" /></td>
             <td>@st.Dot @m.Hostname</td>
             <td><span class="pill @(busy ? "run" : "idle")">@txt</span></td>
             <td>@(slice is { Count: > 0 } ? slice.Label : "(không dùng)")</td>
             <td>
                 @if (busy)
                 {
-                    <button class="btn danger sm" @onclick="() => Stop(m.MachineId)">■ Dừng</button>
+                    <button class="btn danger sm" @onclick="() => Stop(m.MachineId)" @onclick:stopPropagation="true">■ Dừng</button>
                 }
                 else
                 {
                     <button class="btn sm" disabled="@(slice is null || slice.Count == 0)"
-                            @onclick="() => Run(slice!)">▶ Chạy</button>
+                            @onclick="() => Run(slice!)" @onclick:stopPropagation="true">▶ Chạy</button>
                 }
             </td>
         </tr>
@@ -126,7 +126,7 @@ else
         {
             <tr>
                 <td class="m-hide">@HostOf(r.MachineId)</td>
-                <td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+                <td style="max-width:min(280px,55vw);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
                     <a href="@r.Link" target="_blank">@r.Name</a></td>
                 <td>@r.Price.ToString("#,0")</td>
                 <td>@r.Sold</td>

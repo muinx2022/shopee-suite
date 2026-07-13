@@ -16,6 +16,7 @@
 <style>
     .alldata tbody tr { cursor: pointer; }
     .alldata tr.soldrow > td { background: var(--success-bg); }
+    .alldata tr.sel > td { background: var(--info-bg); }
 </style>
 
 <div class="alldata">
@@ -118,13 +119,13 @@
                             var key = new ProductRowKey(r.AccountId, r.Sheet, r.RowNo);
                             var shop = ShopCell(r.AccountId, r.Sheet);
                             @* Cột thao tác CỐ ĐỊNH (icon ✏) — sửa mở CHUNG modal Thêm/Sửa (không còn inline co giãn cột). *@
-                            <tr class="@(r.SoldCount > 0 ? "soldrow" : "")" @onclick="() => _engine.ToggleSelect(key)">
-                                <td><input type="checkbox" checked="@_engine.IsSelected(key)" style="pointer-events:none;margin:0;width:auto" /></td>
+                            <tr class="@(((r.SoldCount > 0) ? "soldrow " : "") + (_engine.IsSelected(key) ? "sel" : ""))" @onclick="() => _engine.ToggleSelect(key)">
+                                <td><input type="checkbox" checked="@_engine.IsSelected(key)" style="pointer-events:none;margin:0" /></td>
                                 <td style="white-space:nowrap"><button class="linkbtn" style="display:inline-flex;align-items:center" title="Sửa dòng" disabled="@busy" @onclick="() => _modal?.OpenEdit(r)" @onclick:stopPropagation="true">@HubIcons.Svg("edit", 15)</button></td>
                                 <td style="@Clip" title="@r.AccountId">@AcctLabel(r.AccountId)</td>
                                 <td style="@Clip" title="@shop">@shop</td>
                                 <td>@r.RowNo</td>
-                                <td style="@Clip" title="@r.Data.Link">@r.Data.Link</td>
+                                <td style="@Clip" title="@r.Data.Link">@if (!string.IsNullOrWhiteSpace(r.Data.Link)) { <a href="@r.Data.Link" target="_blank" rel="noopener" @onclick:stopPropagation="true">@r.Data.Link</a> }</td>
                                 <td>@r.Data.PriceSale</td>
                                 <td>@r.Data.Sku</td>
                                 <td>@r.Data.ItemId</td>

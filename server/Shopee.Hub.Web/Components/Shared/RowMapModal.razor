@@ -27,11 +27,27 @@
                 <div class="hmbar">
                     <span class="stat"><b>@_done.ToString("N0")</b> / @_total.ToString("N0") dòng đã @OpLabel</span>
                     <span class="hmleg"><span class="hm-cell on"></span> đã làm &nbsp; <span class="hm-cell"></span> chưa</span>
+                    @* Touch không có tooltip title → chạm ô đổ thông tin dòng ra đây (chỉ hiện khi đã chạm). *@
+                    @if (_pickedInfo is not null)
+                    {
+                        <span class="stat">@_pickedInfo</span>
+                    }
                 </div>
+                @* Chỉ gắn @onclick per-ô khi ≤4000 ô: sheet vài chục nghìn ô → handler mỗi ô làm nặng render (parent
+                   tick 2s re-render). Trên sheet lớn giữ span thuần, info vẫn nằm ở title (chuột hover). *@
+                var clickable = _cells.Count <= 4000;
                 <div class="heatmap">
                     @foreach (var cell in _cells)
                     {
-                        <span class="hm-cell @(cell.Done ? "on" : "")" title="@(cell.Done ? $"dòng {cell.Row} · đã {OpLabel}" : $"dòng {cell.Row} · chưa")"></span>
+                        var info = cell.Done ? $"dòng {cell.Row} · đã {OpLabel}" : $"dòng {cell.Row} · chưa";
+                        if (clickable)
+                        {
+                            <span class="hm-cell @(cell.Done ? "on" : "")" style="cursor:pointer" title="@info" @onclick="() => _pickedInfo = info"></span>
+                        }
+                        else
+                        {
+                            <span class="hm-cell @(cell.Done ? "on" : "")" title="@info"></span>
+                        }
                     }
                 </div>
                 @if (_capped)
@@ -57,6 +73,7 @@
 
     private bool _loading = true, _capped;
     private string? _error;
+    private string? _pickedInfo;   // info dòng vừa chạm (touch: thay tooltip title) — null = chưa chạm ô nào
     private int _total, _done;
     private List<(int Row, bool Done)> _cells = new();
     private const int MapCap = 20000;

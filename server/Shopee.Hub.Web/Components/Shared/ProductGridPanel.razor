@@ -12,8 +12,12 @@
 <style>
     /* Lưới per-shop GIÃN đến cuối vùng chi tiết: editcard chiếm hết chiều cao còn lại của .wsmain (flex-column),
        vùng bảng tự cuộn thay vì cao theo nội dung. Chỉ nhắm .gridpanel → KHÔNG đụng .editcard tab khác (cấu hình…). */
-    .wsmain > .editcard.gridpanel { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
-    .editcard.gridpanel .tablewrap { flex: 1 1 auto; min-height: 0; max-height: none; overflow: auto; }
+    @* Flex-fill CHỈ áp desktop (≥921px): dưới ngưỡng đó specificity (0,3,0) này đè mất cap 60dvh của app.css → bảng
+       100 dòng bung thành trang cuộn dài; còn màn desktop thấp bị Fleet khoá viewport ép bảng ~0px → thêm sàn 240px. *@
+    @@media (min-width: 921px) {
+        .wsmain > .editcard.gridpanel { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+        .editcard.gridpanel .tablewrap { flex: 1 1 auto; min-height: 240px; max-height: none; overflow: auto; }
+    }
     .editcard.gridpanel .soldrow > td { background: var(--success-bg); }
     .editcard.gridpanel tbody tr { cursor: pointer; }   /* bấm cả dòng = tick/untick chọn (như /data) */
 </style>

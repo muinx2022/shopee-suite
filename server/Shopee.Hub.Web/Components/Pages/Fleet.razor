@@ -48,7 +48,7 @@
     }
     else
     {
-        <button class="btn danger sm" @onclick="CancelAllWork">Bấm lần nữa để huỷ @_openWorkCount việc</button>
+        <button class="btn danger sm" @onclick="CancelAllWork">Bấm lần nữa để huỷ @_openWorkCount việc đang chạy/chờ</button>
         <button class="btn sm" @onclick="() => _confirmCancelAll = false">Huỷ</button>
     }
     @if (!_confirmResumeAll)
@@ -61,6 +61,17 @@
     {
         <button class="btn primary sm" @onclick="ResumeAllInterrupted">Bấm lần nữa để tiếp tục @_interruptedCount việc</button>
         <button class="btn sm" @onclick="() => _confirmResumeAll = false">Huỷ</button>
+    }
+    @if (!_confirmDismissAll)
+    {
+        <button class="btn sm" disabled="@(_interruptedCount == 0)"
+                title="Bỏ hẳn mọi việc gián đoạn khỏi danh sách (kể cả việc không gắn máy nào) — không tiếp tục lại được từ đây; ledger/thống kê giữ nguyên."
+                @onclick="() => _confirmDismissAll = true">✕ Bỏ @_interruptedCount việc gián đoạn</button>
+    }
+    else
+    {
+        <button class="btn sm" @onclick="DismissAllInterrupted">Bấm lần nữa để BỎ HẲN @_interruptedCount việc — không tiếp tục lại được</button>
+        <button class="btn sm" @onclick="() => _confirmDismissAll = false">Huỷ</button>
     }
     @if (!string.IsNullOrEmpty(_barMsg))
     {
@@ -259,7 +270,7 @@
                                 {
                                     <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:6px">
                                         <span class="pill warn">@OpLabel(a.Op)</span>
-                                        <span class="hint" style="margin:0; flex:1 1 auto">máy <b>@IntMachine(a)</b> · @IntReason(a) · @a.UpdatedAt.LocalDateTime.ToString("dd/MM HH:mm")</span>
+                                        <span class="hint" style="margin:0; flex:1 1 auto; min-width:0; overflow-wrap:anywhere">máy <b>@IntMachine(a)</b> · @IntReason(a) · @a.UpdatedAt.LocalDateTime.ToString("dd/MM HH:mm")</span>
                                         <button class="btn primary sm" @onclick="() => ResumeOne(a.Id)">▶ Tiếp tục</button>
                                     </div>
                                 }
@@ -315,7 +326,7 @@
                                 <div class="action" style="margin-top:10px">@RewriteStatusLine(rw)</div>
                                 @if (rw.Log.Count > 0)
                                 {
-                                    <div style="margin-top:8px; max-height:150px; overflow:auto; font-family:var(--mono); font-size:11.5px; line-height:1.5; color:var(--body)">
+                                    <div style="margin-top:8px; max-height:150px; overflow:auto; font-family:var(--mono); font-size:11.5px; line-height:1.5; color:var(--body); overflow-wrap:anywhere">
                                         @foreach (var line in rw.Log)
                                         {
                                             <div>@line</div>
@@ -996,6 +1007,7 @@
     // ── Hành động hàng loạt trên thanh đầu trang ──────────────────────────────────
     private bool _confirmCancelAll;    // arm 2-bước nút Huỷ MỌI việc
     private bool _confirmResumeAll;    // arm 2-bước nút Tiếp tục mọi việc gián đoạn
+    private bool _confirmDismissAll;   // arm 2-bước nút Bỏ hẳn mọi việc gián đoạn
     private string _barMsg = "";
 
     private int _openWorkCount => Snap.Assignments.Count(a => a.Status is "running" or "queued");
@@ -1021,6 +1033,16 @@
         _barMsg = errs.Count == 0
             ? $"▶ Đã cho {ok} việc gián đoạn chạy lại (về hàng chờ)."
             : $"▶ Tiếp tục {ok} việc; {errs.Count} không được: {string.Join("; ", errs.Distinct())}";
+        FleetState.Refresh();
+    }
+
+    // Bỏ hẳn MỌI việc gián đoạn khỏi danh sách (dismissed=1) — kể cả việc không gắn máy nào. Không tiếp tục lại
+    // được từ đây; ledger/thống kê giữ nguyên; sticky-cancel giữ nguyên (status không đổi).
+    private void DismissAllInterrupted()
+    {
+        _confirmDismissAll = false;
+        var n = Db.DismissAllInterrupted();
+        _barMsg = $"✕ Đã bỏ {n} việc gián đoạn khỏi danh sách.";
         FleetState.Refresh();
     }
 

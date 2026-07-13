@@ -166,8 +166,9 @@ VALUES($id,$b,$s,$sh,$o,$t,$p,'queued','','','',$ca,$ua,$sr,$er,$pl,$pr,$fs,$rl)
     }
 
     /// <summary>Lõi ListInterrupted (gọi TRONG lock). Quét mọi bản 'failed'/'canceled' trong 7 ngày, sắp mới→cũ,
-    /// giữ bản MỚI NHẤT mỗi nhóm (acc,shop,op); loại nhóm còn việc đang mở (đang chạy tiếp) hoặc ledger đã
-    /// 'completed' (đã xong, khỏi mời tiếp tục). op='search' KHÔNG ghi ledger → bỏ điều kiện ledger.</summary>
+    /// giữ bản MỚI NHẤT mỗi nhóm (acc,shop,op); loại nhóm có bản mới nhất đã bị operator BỎ (dismissed) hoặc còn
+    /// việc đang mở (đang chạy tiếp) hoặc ledger đã 'completed' (đã xong, khỏi mời tiếp tục). op='search' KHÔNG ghi
+    /// ledger → bỏ điều kiện ledger.</summary>
     private List<Assignment> ListInterruptedLocked()
     {
         var cut = Iso(DateTimeOffset.UtcNow - TimeSpan.FromDays(7));
@@ -185,6 +186,7 @@ VALUES($id,$b,$s,$sh,$o,$t,$p,'queued','','','',$ca,$ua,$sr,$er,$pl,$pr,$fs,$rl)
         {
             var grp = $"{a.BigsellerId}__{a.ShopId}__{a.Op}";
             if (!seen.Add(grp)) continue;                          // bản cũ hơn của nhóm đã lấy → bỏ
+            if (a.Dismissed) continue;   // bản MỚI NHẤT của nhóm đã bị operator bỏ → ẩn cả nhóm (không cho bản cũ trồi lên)
             // Nhóm còn việc queued|running → KHÔNG "gián đoạn" (đang chờ/chạy tiếp) → bỏ.
             if (FindOpenAssignmentLocked(a.BigsellerId, a.ShopId, a.Op) is not null) continue;
             // Đã xong theo ledger → khỏi mời tiếp tục (search không ghi ledger nên bỏ qua điều kiện này).
@@ -417,8 +419,9 @@ VALUES($id,$b,$s,$sh,$o,$t,$p,'queued','','','',$ca,$ua,$sr,$er,$pl,$pr,$fs,$rl)
                 return "đã có việc khác đang mở cho op này";
 
             // Chỉ đụng status + bỏ claim + xoá cờ lỗi; KHÔNG chạm các cột tham số → lượt chạy lại y lệnh cũ.
+            // dismissed=0: bản từng bị bỏ mà operator chủ động Tiếp tục qua API thì trở lại vòng đời bình thường.
             using var u = _conn.CreateCommand();
-            u.CommandText = "UPDATE assignments SET status='queued', claimed_by='', claimed_host='', last_error='', updated_at=$ua WHERE id=$id";
+            u.CommandText = "UPDATE assignments SET status='queued', dismissed=0, claimed_by='', claimed_host='', last_error='', updated_at=$ua WHERE id=$id";
             u.Parameters.AddWithValue("$ua", Iso(DateTimeOffset.UtcNow));
             u.Parameters.AddWithValue("$id", id);
             u.ExecuteNonQuery();
@@ -462,7 +465,8 @@ VALUES($id,$b,$s,$sh,$o,$t,$p,'queued','','','',$ca,$ua,$sr,$er,$pl,$pr,$fs,$rl)
             var revive = new List<Assignment>();
             using (var c = _conn.CreateCommand())
             {
-                c.CommandText = "SELECT * FROM assignments WHERE claimed_by=$m AND status='failed' AND last_error='hết nhịp (máy nhận có thể đã thoát)'";
+                // dismissed=0: bản operator đã Reset máy thì KHÔNG hồi (họ chủ động xoá, không phải máy chết oan).
+                c.CommandText = "SELECT * FROM assignments WHERE claimed_by=$m AND status='failed' AND last_error='hết nhịp (máy nhận có thể đã thoát)' AND dismissed=0";
                 c.Parameters.AddWithValue("$m", machineId);
                 using var rd = c.ExecuteReader();
                 while (rd.Read()) revive.Add(ReadAssignmentRow(rd));
@@ -478,6 +482,19 @@ VALUES($id,$b,$s,$sh,$o,$t,$p,'queued','','','',$ca,$ua,$sr,$er,$pl,$pr,$fs,$rl)
                 if (u.ExecuteNonQuery() == 1) n++;
             }
             return n;
+        }
+    }
+
+    /// <summary>Operator bấm "✕ Bỏ hẳn" trên /fleet: ẩn MỌI việc gián đoạn (failed/canceled) khỏi danh sách — kể cả
+    /// bản không gắn máy nào. KHÔNG bump updated_at (dismissed đơn thuần là cờ ẩn; xem lý do ở ResetMachineWork).
+    /// Ledger/thống kê giữ nguyên; sticky-cancel giữ nguyên vì status không đổi. Trả số hàng vừa ẩn.</summary>
+    public int DismissAllInterrupted()
+    {
+        lock (_gate)
+        {
+            using var c = _conn.CreateCommand();
+            c.CommandText = "UPDATE assignments SET dismissed=1 WHERE status IN ('failed','canceled') AND dismissed=0";
+            return c.ExecuteNonQuery();
         }
     }
 
@@ -507,7 +524,9 @@ VALUES($id,$b,$s,$sh,$o,$t,$p,'queued','','','',$ca,$ua,$sr,$er,$pl,$pr,$fs,$rl)
             Sheet = S(rd, i("sheet")), Op = S(rd, i("op")),
             TargetMachineId = rd.IsDBNull(i("target_machine_id")) ? null : rd.GetString(i("target_machine_id")),
             Pinned = !rd.IsDBNull(i("pinned")) && rd.GetInt32(i("pinned")) != 0,
-            Status = S(rd, i("status")), ClaimedByMachineId = S(rd, i("claimed_by")),
+            Status = S(rd, i("status")),
+            Dismissed = !rd.IsDBNull(i("dismissed")) && rd.GetInt32(i("dismissed")) != 0,
+            ClaimedByMachineId = S(rd, i("claimed_by")),
             ClaimedByHostname = S(rd, i("claimed_host")), LastError = S(rd, i("last_error")),
             StartRow = rd.IsDBNull(i("start_row")) ? 0 : rd.GetInt32(i("start_row")),
             EndRow = rd.IsDBNull(i("end_row")) ? 0 : rd.GetInt32(i("end_row")),

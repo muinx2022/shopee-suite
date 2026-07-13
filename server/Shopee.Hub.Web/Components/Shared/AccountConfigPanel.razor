@@ -48,7 +48,7 @@ else
             }
             @if (ls?.NeedsOtp == true)
             {
-                <input placeholder="Mã email (OTP)" @bind="_otp" style="width:130px" />
+                <input placeholder="Mã email (OTP)" @bind="_otp" style="width:min(130px,100%)" />
                 <button class="btn primary sm" @onclick="() => SubmitOtp(_acct.Id)">Gửi mã</button>
             }
         </div>

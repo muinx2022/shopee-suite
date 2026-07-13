@@ -46,6 +46,8 @@ builder.Services.AddSingleton<BigSellerLoginService>();
 builder.Services.AddSingleton<RewriteJobService>();
 builder.Services.AddSingleton<AdminAccountService>();
 builder.Services.AddSingleton<LoginRateLimit>();
+// Đọc bản release mới nhất từ GitHub (cache) → trang /machines đánh dấu máy cũ + ra lệnh update.
+builder.Services.AddSingleton<LatestReleaseService>();
 
 // ── Postgres (kho sản phẩm — Docker cạnh hub): env HUB_PG_CONN ưu tiên → config Hub:PgConn → rỗng = KHÔNG bật
 // (hub chạy y như cũ, không cần Postgres). Cùng pattern HUB_DATA_DIR ở trên. ──
@@ -227,25 +229,28 @@ app.Run();
 internal static class LoginPages
 {
     private const string Style = """
+        <script>(function(){try{var t=localStorage.getItem('theme');if(t==='dark')document.documentElement.classList.add('dark');else if(t==='light')document.documentElement.classList.add('light');}catch(e){}})();</script>
         <style>
-          :root{color-scheme:light}
+          :root{color-scheme:light;--bg:#f1f5f9;--card:#fff;--text:#1c2434;--sub:#64748b;--stroke:#e2e8f0;--lbl:#334155;--err-bg:#fbe9eb;--err-tx:#b3283a;--err-bd:#f0b8bf}
+          html.dark{color-scheme:dark;--bg:#0f1623;--card:#1a2332;--text:#e7edf6;--sub:#97a6bd;--stroke:#2a3648;--lbl:#97a6bd;--err-bg:rgba(248,113,113,.16);--err-tx:#f87171;--err-bd:rgba(248,113,113,.35)}
+          @media (prefers-color-scheme:dark){html:not(.light){color-scheme:dark;--bg:#0f1623;--card:#1a2332;--text:#e7edf6;--sub:#97a6bd;--stroke:#2a3648;--lbl:#97a6bd;--err-bg:rgba(248,113,113,.16);--err-tx:#f87171;--err-bd:rgba(248,113,113,.35)}}
           *{box-sizing:border-box}
           body{font-family:"Inter",system-ui,-apple-system,Segoe UI,Roboto,sans-serif;display:flex;min-height:100vh;
-               align-items:center;justify-content:center;margin:0;background:#f1f5f9;color:#1c2434}
-          .card{background:#fff;padding:34px 32px;border-radius:14px;width:340px;
-                box-shadow:0 10px 40px rgba(16,24,40,.1),0 1px 3px rgba(16,24,40,.06);border:1px solid #e2e8f0}
+               align-items:center;justify-content:center;margin:0;background:var(--bg);color:var(--text)}
+          .card{background:var(--card);padding:34px 32px;border-radius:14px;width:340px;
+                box-shadow:0 10px 40px rgba(16,24,40,.1),0 1px 3px rgba(16,24,40,.06);border:1px solid var(--stroke)}
           .logo{width:46px;height:46px;border-radius:12px;background:linear-gradient(135deg,#3c50e0,#6f81f0);
                 display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:23px;
                 margin-bottom:16px;box-shadow:0 6px 16px rgba(60,80,224,.4)}
-          h1{font-size:20px;margin:0 0 4px;color:#1c2434} p.sub{margin:0 0 22px;color:#64748b;font-size:13px}
-          label{display:block;font-size:13px;margin:14px 0 5px;color:#334155;font-weight:500}
-          input{width:100%;padding:11px 12px;border-radius:8px;border:1px solid #e2e8f0;background:#fff;
-                color:#1c2434;font-size:14px;transition:border-color .13s,box-shadow .13s}
+          h1{font-size:20px;margin:0 0 4px;color:var(--text)} p.sub{margin:0 0 22px;color:var(--sub);font-size:13px}
+          label{display:block;font-size:13px;margin:14px 0 5px;color:var(--lbl);font-weight:500}
+          input{width:100%;padding:11px 12px;border-radius:8px;border:1px solid var(--stroke);background:var(--card);
+                color:var(--text);font-size:16px;transition:border-color .13s,box-shadow .13s}
           input:focus{outline:none;border-color:#3c50e0;box-shadow:0 0 0 3px rgba(60,80,224,.1)}
           button{width:100%;margin-top:22px;padding:12px;border:0;border-radius:8px;background:#3c50e0;
                  color:#fff;font-size:14px;font-weight:600;cursor:pointer;transition:background .13s}
           button:hover{background:#2f41c4}
-          .err{background:#fbe9eb;color:#b3283a;padding:9px 12px;border-radius:8px;font-size:13px;margin-bottom:14px;border:1px solid #f0b8bf}
+          .err{background:var(--err-bg);color:var(--err-tx);padding:9px 12px;border-radius:8px;font-size:13px;margin-bottom:14px;border:1px solid var(--err-bd)}
         </style>
         """;
 

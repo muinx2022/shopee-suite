@@ -74,7 +74,20 @@ public sealed class HubClient
         => await _http.GetFromJsonAsync<List<WorkLedgerRecord>>(HubRoutes.Ledger, ct) ?? [];
 
     // ── Nhịp máy + bảng ──
-    public Task MachineHeartbeatAsync(MachineHeartbeatRequest req, CancellationToken ct = default) => PostAsync(HubRoutes.MachineHeartbeat, req, ct);
+    /// <summary>Gửi nhịp máy; TRẢ VỀ phản hồi (kênh Hub đẩy lệnh xuống client, vd lệnh update app). Lỗi HTTP/mạng
+    /// GIỮ NÉM (EnsureSuccessStatusCode) — PollAsync dựa vào catch để giữ đúng hành vi offline cũ. Nhưng body RỖNG
+    /// (Hub CŨ chưa nâng cấp trả 200 body rỗng) / JSON hỏng → trả null trong try/catch riêng, KHÔNG ném: không có
+    /// lệnh, chứ không phải mất kết nối (kẻo nuốt luôn heartbeat vừa gửi THÀNH CÔNG thành "offline").</summary>
+    public async Task<MachineHeartbeatResponse?> MachineHeartbeatAsync(MachineHeartbeatRequest req, CancellationToken ct = default)
+    {
+        var r = await _http.PostAsJsonAsync(HubRoutes.MachineHeartbeat, req, ct);
+        r.EnsureSuccessStatusCode();
+        try { return await r.Content.ReadFromJsonAsync<MachineHeartbeatResponse>(ct); }
+        catch { return null; }
+    }
+    /// <summary>Client báo tiến trình/kết quả tự-update app về Hub (lỗi mạng → ném theo convention PostAsync;
+    /// chỗ gọi ở HttpCoordinationHub tự nuốt).</summary>
+    public Task AckUpdateAsync(UpdateAckRequest req, CancellationToken ct = default) => PostAsync(HubRoutes.MachineUpdateAck, req, ct);
     public async Task<FleetSnapshot> FleetAsync(CancellationToken ct = default)
         => await _http.GetFromJsonAsync<FleetSnapshot>(HubRoutes.Fleet, ct) ?? new FleetSnapshot();
 

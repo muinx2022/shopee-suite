@@ -3,17 +3,20 @@
 @inherits FleetPageBase
 @inject HubDatabase Db
 @inject IJSRuntime JS
+@inject LatestReleaseService Releases
 
-<p class="hint m-hide">Máy tự đăng ký bằng token. Ở đây bạn reset việc (nhả khoá acc ngay), tiếp tục việc gián đoạn của máy, đặt vai trò, hoặc xoá &amp; chặn máy.</p>
+<p class="hint m-hide">Máy tự đăng ký bằng token. Ở đây bạn ra lệnh cập nhật app, reset việc (huỷ + bỏ việc gián đoạn, nhả khoá acc ngay), tiếp tục việc gián đoạn của máy, đặt vai trò, hoặc xoá &amp; chặn máy.</p>
 
 <div class="bar">
     <span class="stat">@Snap.Machines.Count máy · @RunningCount đang chạy · @QueuedCount chờ</span>
+    <span class="stat">bản mới nhất: @(_latest is null ? "?" : $"v{_latest}")</span>
+    <button class="btn primary sm" disabled="@(UpdatableCount == 0)" title="Ra lệnh cập nhật app cho các máy online còn bản cũ — máy tự khởi động lại bản mới rồi tự nhận lại việc." @onclick="UpdateAll">⬆ Cập nhật tất cả (@UpdatableCount)</button>
     <span class="action">@_status</span>
 </div>
 
 <div class="tablewrap">
 <table class="grid sm stack-sm">
-    <thead><tr><th>Máy</th><th>Trạng thái</th><th title="Trần cửa sổ Brave client tự báo (Settings → Hiệu năng)">Brave max</th><th>Việc đang giữ</th><th>Vai trò (auto)</th><th>Hành động</th></tr></thead>
+    <thead><tr><th>Máy</th><th>Trạng thái</th><th>Phiên bản</th><th title="Trần cửa sổ Brave client tự báo (Settings → Hiệu năng)">Brave max</th><th>Việc đang giữ</th><th>Vai trò (auto)</th><th>Hành động</th></tr></thead>
     <tbody>
     @foreach (var m in Snap.Machines.OrderByDescending(x => x.LastSeen))
     {
@@ -24,8 +27,19 @@
         // Việc gián đoạn của MÁY NÀY: failed có claimed_by (máy đã claim); canceled lúc còn queued chỉ có target.
         var interrupted = Snap.Interrupted.Count(a => a.ClaimedByMachineId == m.MachineId || a.TargetMachineId == m.MachineId);
         <tr>
-            <td><b>@m.Hostname</b><div class="mono m-hide" style="font-size:11px;color:#64748b">@m.MachineId[..Math.Min(12, m.MachineId.Length)]</div></td>
+            <td data-label="Máy"><b>@m.Hostname</b><div class="mono m-hide" style="font-size:11px;color:#64748b">@m.MachineId[..Math.Min(12, m.MachineId.Length)]</div></td>
             <td data-label="Trạng thái">@pres.Dot @pres.Label</td>
+            <td data-label="Phiên bản">
+                @(string.IsNullOrEmpty(m.AppVersion) ? "—" : $"v{m.AppVersion}")
+                @if (_latest is not null && (m.AppVersion ?? "") != _latest)
+                {
+                    <span class="pill warn" title="Máy đang chạy bản cũ hơn bản mới nhất (v@(_latest)).">cũ</span>
+                }
+                @if (!string.IsNullOrEmpty(m.UpdateStatus))
+                {
+                    <div style="font-size:11px;color:#64748b">@m.UpdateStatus@(OverdueUpdate(m) ? " · ⚠ quá 10' chưa thấy lên bản mới" : "")</div>
+                }
+            </td>
             <td data-label="Brave max">@(m.MaxBrave > 0 ? m.MaxBrave.ToString() : "—")</td>
             <td data-label="Việc đang giữ">
                 @(held > 0 ? $"{held}" : "—")
@@ -47,14 +61,15 @@
                 {
                     <button class="btn primary sm" title="Đưa mọi việc gián đoạn của máy về hàng chờ (giữ tham số) — dùng sau khi update app máy này." @onclick="() => ResumeMachine(m.MachineId, m.Hostname)">▶ Tiếp tục (@interrupted)</button>
                 }
-                <button class="btn sm" @onclick="() => ResetMachine(m.MachineId, m.Hostname)">⟳ Reset việc</button>
+                <button class="btn sm" title="Ra lệnh cập nhật app cho máy này — máy tự khởi động lại bản mới rồi tự nhận lại việc." @onclick="() => UpdateMachine(m.MachineId, m.Hostname, pres.Online)">⬆ Cập nhật</button>
+                <button class="btn sm" title="Huỷ mọi việc đang giữ + bỏ hẳn việc gián đoạn của máy — máy về trạng thái trắng." @onclick="() => ResetMachine(m.MachineId, m.Hostname)">⟳ Reset việc</button>
                 <button class="btn danger sm" @onclick="() => DeleteMachine(m.MachineId, m.Hostname)">🗑 Xoá &amp; chặn</button>
             </td>
         </tr>
     }
     @if (Snap.Machines.Count == 0)
     {
-        <tr><td colspan="6" class="empty">Chưa có máy nào kết nối.</td></tr>
+        <tr><td colspan="7" class="empty">Chưa có máy nào kết nối.</td></tr>
     }
     </tbody>
 </table>
@@ -80,14 +95,32 @@
 @code {
     private List<string> _revoked = new();
     private string _status = "";
+    private string? _latest;   // bản mới nhất trên GitHub (null = chưa đọc được → hiện "?")
 
     private int RunningCount => Snap.Assignments.Count(a => a.Status == "running");
     private int QueuedCount => Snap.Assignments.Count(a => a.Status == "queued");
+
+    // Máy nên update = ĐANG ONLINE và (không biết bản mới nhất → mọi máy online; biết → chỉ máy khác bản mới nhất).
+    private bool NeedsUpdate(MachinePresence m)
+        => FleetStateService.Status(Snap, m).Online && (_latest is null || (m.AppVersion ?? "") != _latest);
+    private int UpdatableCount => Snap.Machines.Count(NeedsUpdate);
+
+    // Đã ra lệnh > 10' mà máy chưa lên bản mới (cờ chưa tự clear) → nhắc operator soi (máy kẹt/không cài Velopack).
+    private static bool OverdueUpdate(MachinePresence m)
+        => m.UpdateRequestedAt is { } at && (DateTimeOffset.Now - at) > TimeSpan.FromMinutes(10);
 
     protected override void OnInitialized()
     {
         base.OnInitialized();
         _revoked = Db.RevokedMachines();
+    }
+
+    // Đọc bản mới nhất SAU render đầu (khỏi block hiển thị trang tới 5s nếu GitHub chậm) → có thì vẽ lại.
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        _latest = await Releases.GetLatestVersionAsync();
+        await InvokeAsync(StateHasChanged);
     }
 
     private void SetRole(string machineId, string? role)
@@ -98,16 +131,16 @@
 
     private async Task ResetMachine(string machineId, string host)
     {
-        if (!await JS.InvokeAsync<bool>("confirm", $"Reset máy {host}? Mọi việc máy đang giữ sẽ bị huỷ, khoá acc nhả ngay.")) return;
+        if (!await JS.InvokeAsync<bool>("confirm", $"Reset máy {host}? Huỷ mọi việc đang giữ + bỏ hẳn việc gián đoạn của máy (nút ▶ Tiếp tục biến mất), khoá acc nhả ngay.")) return;
         var n = Db.ResetMachineWork(machineId);
-        _status = $"⟳ Đã reset {host}: huỷ {n} việc + nhả khoá acc/lease. Acc được nhả ngay — ghim lại được.";
+        _status = $"⟳ Đã reset {host}: huỷ {n.Canceled} việc, bỏ {n.Dismissed} việc gián đoạn, nhả khoá acc. Máy về trạng thái trắng.";
         FleetState.Refresh();
     }
 
     private async Task DeleteMachine(string machineId, string host)
     {
         if (!await JS.InvokeAsync<bool>("confirm", $"Xoá & CHẶN máy {host}? Máy này sẽ bị 401 (mất kết nối) dù còn token.")) return;
-        Db.ResetMachineWork(machineId);   // nhả việc trước
+        _ = Db.ResetMachineWork(machineId);   // nhả việc trước
         Db.RevokeMachine(machineId);       // chặn (401 khi vào lại)
         Db.RemoveMachine(machineId);       // xoá khỏi danh sách
         _revoked = Db.RevokedMachines();
@@ -137,6 +170,28 @@
         _status = errs.Count == 0
             ? $"▶ Đã cho {ok} việc của {host} chạy lại (về hàng chờ)."
             : $"▶ Tiếp tục {ok} việc của {host}; {errs.Count} không được: {string.Join("; ", errs.Distinct())}";
+        FleetState.Refresh();
+    }
+
+    // Ra lệnh update cho MỌI máy online còn bản cũ: mỗi máy nhận lệnh ở heartbeat kế, tự dừng êm + khởi động lại
+    // bản mới rồi tự nhận lại việc. Chỉ ghi cờ (client tự làm phần còn lại), không phá việc đang chạy tức thì.
+    private async Task UpdateAll()
+    {
+        var targets = Snap.Machines.Where(NeedsUpdate).ToList();
+        if (targets.Count == 0) return;
+        if (!await JS.InvokeAsync<bool>("confirm", $"Ra lệnh cập nhật {targets.Count} máy? Mỗi máy sẽ dừng êm việc đang chạy, tự khởi động lại bản mới rồi tự nhận lại việc.")) return;
+        var n = targets.Count(t => Db.RequestUpdate(t.MachineId));
+        _status = $"⬆ Đã ra lệnh cập nhật cho {n} máy — chờ mỗi máy nhận lệnh (nhịp 12s), tự update rồi tự nhận lại việc.";
+        FleetState.Refresh();
+    }
+
+    private async Task UpdateMachine(string machineId, string host, bool online)
+    {
+        var extra = online ? "" : " Máy đang offline — lệnh sẽ chờ tới khi máy online.";
+        if (!await JS.InvokeAsync<bool>("confirm", $"Ra lệnh cập nhật {host}? Máy sẽ dừng êm việc đang chạy, tự khởi động lại bản mới rồi tự nhận lại việc.{extra}")) return;
+        _status = Db.RequestUpdate(machineId)
+            ? $"⬆ Đã ra lệnh cập nhật {host} — chờ máy nhận lệnh (nhịp 12s)."
+            : $"⚠ Không ra lệnh được cho {host} (không tìm thấy máy).";
         FleetState.Refresh();
     }
 }

@@ -29,14 +29,22 @@
     </div>
 
     <div class="logbox">
-        @foreach (var e in Filtered())
+        @{ var lines = Filtered().ToList(); }
+        @if (lines.Count == 0)
         {
-            <div class="logline @e.Level">
-                <span class="t">@e.Ts.LocalDateTime.ToString("HH:mm:ss")</span>
-                <span class="h">@e.Hostname</span>
-                <span class="lv @e.Level">@e.Level</span>
-                <span class="tx">@e.Text</span>
-            </div>
+            <div class="empty">Chưa có log.</div>
+        }
+        else
+        {
+            @foreach (var e in lines)
+            {
+                <div class="logline @e.Level">
+                    <span class="t">@e.Ts.LocalDateTime.ToString("HH:mm:ss")</span>
+                    <span class="h">@e.Hostname</span>
+                    <span class="lv @e.Level">@e.Level</span>
+                    <span class="tx">@e.Text</span>
+                </div>
+            }
         }
     </div>
 </div>

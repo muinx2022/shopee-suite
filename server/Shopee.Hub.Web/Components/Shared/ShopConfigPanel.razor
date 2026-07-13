@@ -50,8 +50,8 @@ else
         }
 
         <div class="row">
-            <label>Crawl URL <input @bind="_shop.BigSellerCrawlUrl" style="width:280px" /></label>
-            <label>AI model <input @bind="_shop.OpenAiModel" style="width:150px" /></label>
+            <label>Crawl URL <input @bind="_shop.BigSellerCrawlUrl" style="width:min(280px,100%)" /></label>
+            <label>AI model <input @bind="_shop.OpenAiModel" style="width:min(150px,100%)" /></label>
         </div>
         <label style="display:flex;align-items:center;gap:7px;margin:12px 0;color:var(--text);font-size:13.5px">
             <input type="checkbox" @bind="_shop.BigSellerImportFromClaimedTab" /> Import từ tab "Đã nhận"

@@ -28,13 +28,13 @@
                 {
                     <div style="display:flex;flex-wrap:wrap;gap:10px 16px;align-items:flex-end">
                         <label style="@MapLbl">Tài khoản *
-                            <select value="@_selAcct" @onchange="OnSelAcct" disabled="@_wizBusy" style="width:220px">
+                            <select value="@_selAcct" @onchange="OnSelAcct" disabled="@_wizBusy" style="width:min(220px,100%)">
                                 <option value="">— chọn tài khoản —</option>
                                 @foreach (var a in _accounts) { <option value="@a.Id">@a.DisplayName</option> }
                             </select>
                         </label>
                         <label style="@MapLbl">Shop *
-                            <select value="@_selSheet" @onchange="OnSelSheet" disabled="@(_wizBusy || string.IsNullOrEmpty(_selAcct))" style="width:220px">
+                            <select value="@_selSheet" @onchange="OnSelSheet" disabled="@(_wizBusy || string.IsNullOrEmpty(_selAcct))" style="width:min(220px,100%)">
                                 <option value="">— chọn shop —</option>
                                 @foreach (var s in SelShopOptions()) { <option value="@s.ShopeeDataSheet">@s.DisplayName</option> }
                             </select>
@@ -46,7 +46,7 @@
                     <span class="wblabel">📄 File:</span>
                     <span class="wbname">@_wizFileName</span>
                     <span class="wblabel" style="margin-left:auto">Sheet:</span>
-                    <select value="@_wizSheet" @onchange="WizSelectSheet" disabled="@(_wizBusy || _wizSheets.Count == 0)" style="width:220px">
+                    <select value="@_wizSheet" @onchange="WizSelectSheet" disabled="@(_wizBusy || _wizSheets.Count == 0)" style="width:min(220px,100%)">
                         @foreach (var sh in _wizSheets)
                         {
                             <option value="@sh">@sh</option>

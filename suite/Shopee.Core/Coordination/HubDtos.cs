@@ -20,6 +20,11 @@ public sealed class MachinePresence
     public string? AppVersion { get; set; }
     /// <summary>Trần cửa sổ Brave máy này tự báo lên (0 = chưa báo/không rõ). Hub dùng để chia quỹ khi giao việc.</summary>
     public int MaxBrave { get; set; }
+    /// <summary>Dòng trạng thái lệnh update app cho máy này (⏳ đã ra lệnh / 🔄 đang khởi động lại / ✓ đã lên bản…).
+    /// Rỗng = chưa từng ra lệnh. Field mới: client cũ parse /fleet bỏ qua field lạ → an toàn.</summary>
+    public string UpdateStatus { get; set; } = "";
+    /// <summary>Thời điểm operator ra lệnh update (còn hiệu lực). null = không có lệnh đang chờ.</summary>
+    public DateTimeOffset? UpdateRequestedAt { get; set; }
 }
 
 /// <summary>Mục manifest của một file dùng chung trên Hub.</summary>
@@ -97,6 +102,8 @@ public sealed class Assignment
     public string Payload { get; set; } = "";
     public bool Pinned { get; set; }
     public string Status { get; set; } = "queued";       // queued | running | done | failed | canceled
+    /// <summary>Operator đã bỏ khỏi danh sách gián đoạn (hub-side; client không dùng) — ẩn khỏi ▶ Tiếp tục; status giữ nguyên.</summary>
+    public bool Dismissed { get; set; }
     public string ClaimedByMachineId { get; set; } = "";
     public string ClaimedByHostname { get; set; } = "";
     public string LastError { get; set; } = "";
@@ -209,6 +216,16 @@ public sealed record AccountReserveResponse(List<string> Granted, List<string> B
 public sealed record AccountReleaseRequest(List<string> AccountIds, string MachineId);
 
 public sealed record MachineHeartbeatRequest(string MachineId, string Hostname, string? AppVersion, int MaxBrave = 0);
+/// <summary>Phản hồi heartbeat: kênh Hub đẩy lệnh xuống client. <see cref="UpdateRequestedAt"/> null/rỗng = không có
+/// lệnh; có giá trị = chuỗi ISO lúc operator ra lệnh update, client dùng làm ID dedup (chỉ update 1 lần/lệnh).
+/// Là class để sau này thêm lệnh khác chỉ cần thêm field (client cũ bỏ qua field lạ).</summary>
+public sealed class MachineHeartbeatResponse
+{
+    public string? UpdateRequestedAt { get; set; }
+}
+/// <summary>Client báo tiến trình/kết quả tự-update app về Hub. Status: "checking" | "restarting" | "already-latest"
+/// | "unsupported" | "failed: &lt;lý do&gt;" — Hub map thành dòng trạng thái + clear cờ khi terminal.</summary>
+public sealed record UpdateAckRequest(string MachineId, string Status);
 /// <summary>Client báo Hub "tôi rời đi" (bấm Ngắt kết nối) → Hub xoá khỏi danh sách máy ngay.</summary>
 public sealed record MachineLeaveRequest(string MachineId);
 

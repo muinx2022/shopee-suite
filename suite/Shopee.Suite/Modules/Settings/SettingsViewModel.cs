@@ -125,24 +125,12 @@ public sealed partial class SettingsViewModel : ObservableObject
     [RelayCommand]
     private async Task CheckUpdate() => await UpdateService.Shared.CheckAsync();
 
-    /// <summary>Chuỗi DỪNG ÊM trước khi khởi động lại (ShellViewModel gán): trả việc Hub-giao về hàng chờ + dừng
-    /// các job chạy tay qua đường cancel chuẩn. null (VM tạo lẻ, không có worker) → bỏ qua, restart thẳng.</summary>
-    public Func<Task>? PrepareUpdateShutdownAsync { get; set; }
-
-    /// <summary>Áp dụng bản đã tải + khởi động lại NGAY (đóng app). Chỉ hiện khi UpdateReady. Trước khi restart:
-    /// dừng ÊM việc đang chạy (Hub-giao → hàng chờ; chạy tay → cancel chuẩn) để bản mới tự nhận lại + nhả lease
-    /// ngay, tránh Velopack kill giữa chừng làm khoá acc treo. Trần tổng ~45s: quá thì vẫn restart (job kẹt để
-    /// hub sweep + resume-mine lo, không treo nút vĩnh viễn).</summary>
+    /// <summary>Áp dụng bản đã tải + khởi động lại NGAY (đóng app). Chỉ hiện khi UpdateReady. Đi CHUNG đường với
+    /// lệnh update từ Hub qua <see cref="UpdateService.ApplyAfterPrepareAsync"/>: dừng ÊM việc đang chạy (Hub-giao →
+    /// hàng chờ; chạy tay → cancel chuẩn) để bản mới tự nhận lại + nhả lease ngay, tránh Velopack kill giữa chừng
+    /// làm khoá acc treo. Dòng trạng thái đi qua sự kiện Changed của UpdateService (OnUpdateChanged đã subscribe).</summary>
     [RelayCommand(CanExecute = nameof(UpdateReady))]
-    private async Task ApplyUpdate()
-    {
-        if (PrepareUpdateShutdownAsync is { } prepare)
-        {
-            UpdateStatus = "⏳ Đang dừng việc đang chạy để cập nhật… (app sẽ tự khởi động lại)";
-            try { await Task.WhenAny(prepare(), Task.Delay(TimeSpan.FromSeconds(45))); } catch { }
-        }
-        UpdateService.Shared.ApplyAndRestart();
-    }
+    private async Task ApplyUpdate() => await UpdateService.Shared.ApplyAfterPrepareAsync();
 
     private void LoadFromStore()
     {

@@ -13,6 +13,7 @@ public static class HubRoutes
     // ── Máy ──
     public const string MachineLeave = "/machines/leave";
     public const string MachineHeartbeat = "/machines/heartbeat";
+    public const string MachineUpdateAck = "/machines/update-ack";
     public const string Fleet = "/fleet";
     public const string Roles = "/roles";
 

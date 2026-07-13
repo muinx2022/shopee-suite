@@ -153,19 +153,19 @@ label.btn { cursor: pointer; }
 .editcard { background: var(--card); border: 1px solid var(--stroke); border-radius: var(--radius); padding: 18px 20px; margin-bottom: 16px; box-shadow: var(--shadow); }
 .editcard label { display: block; margin: 10px 0; color: var(--text); font-size: 13.5px; }
 .editcard .row { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-end; }
-.editcard .row label { display: flex; flex-direction: column; gap: 5px; margin: 0; color: var(--body); font-size: 12.5px; }
+.editcard .row label { display: flex; flex-direction: column; gap: 5px; margin: 0; color: var(--body); font-size: 12.5px; min-width: 0; }
 .editcard input, .editcard textarea, .editcard select { width: 100%; }
 .editcard .row input { width: auto; }
 .subhead { font-weight: 600; margin: 16px 0 9px; display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--text); }
 
 /* Tabs (trang config) */
-.tabs { display: flex; gap: 4px; border-bottom: 2px solid var(--stroke); margin: 4px 0 18px; }
-.tabs button { appearance: none; background: none; border: none; border-bottom: 2px solid transparent; margin-bottom: -2px; padding: 9px 16px; font-family: inherit; font-size: 13.5px; font-weight: 600; color: var(--body); cursor: pointer; transition: color .13s, border-color .13s; }
+.tabs { display: flex; flex-wrap: wrap; gap: 4px; border-bottom: 2px solid var(--stroke); margin: 4px 0 18px; }
+.tabs button { appearance: none; background: none; border: none; border-bottom: 2px solid transparent; margin-bottom: -2px; padding: 9px 16px; font-family: inherit; font-size: 13.5px; font-weight: 600; color: var(--body); cursor: pointer; white-space: nowrap; transition: color .13s, border-color .13s; }
 .tabs button:hover { color: var(--text); }
 .tabs button.active { color: var(--primary); border-bottom-color: var(--primary); }
 
 /* Lưới 2 prompt AI cạnh nhau, textarea cao gần hết màn hình */
-.promptgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.promptgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 18px; }
 .promptgrid textarea { min-height: 58vh; resize: vertical; }
 
 input, select, textarea { background: var(--card); color: var(--text); border: 1px solid var(--stroke); border-radius: var(--radius-sm); padding: 8px 11px; font-size: 13px; font-family: inherit; transition: border-color .13s, box-shadow .13s; }
@@ -192,11 +192,11 @@ input[type=number].ci { -moz-appearance: textfield; appearance: textfield; }
 .pinpanel .action { margin-top: 10px; }
 html.dark .pinpanel { background: rgba(60, 80, 224, .10); border-color: rgba(60, 80, 224, .42); border-left-color: var(--primary); }
 
-.dl { display: inline-block; margin-left: 12px; color: var(--primary); font-weight: 500; }
-.wbrow { display: flex; align-items: center; gap: 10px; margin: 12px 0 6px; padding: 10px 13px; background: var(--gray); border: 1px solid var(--stroke); border-radius: var(--radius-sm); }
+.dl { display: inline-block; margin-left: 12px; color: var(--primary); font-weight: 500; overflow-wrap: anywhere; }
+.wbrow { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin: 12px 0 6px; padding: 10px 13px; background: var(--gray); border: 1px solid var(--stroke); border-radius: var(--radius-sm); }
 .wblabel { color: var(--body); font-size: 13px; }
-.wbname { font-family: var(--mono); color: var(--primary); font-size: 12.5px; }
-.loginlog { white-space: pre-wrap; font-family: var(--mono); font-size: 11.5px; color: #cbd5e1; background: #1c2434; border-radius: var(--radius-sm); padding: 10px 12px; margin: 6px 0 10px; }
+.wbname { font-family: var(--mono); color: var(--primary); font-size: 12.5px; overflow-wrap: anywhere; }
+.loginlog { white-space: pre-wrap; font-family: var(--mono); font-size: 11.5px; color: #cbd5e1; background: #1c2434; border-radius: var(--radius-sm); padding: 10px 12px; margin: 6px 0 10px; overflow-wrap: anywhere; }
 
 /* ==================== Tables ==================== */
 .tablewrap { overflow-x: auto; border: 1px solid var(--stroke); border-radius: var(--radius); background: var(--card); box-shadow: var(--shadow); }
@@ -239,7 +239,7 @@ html.dark .pinpanel { background: rgba(60, 80, 224, .10); border-color: rgba(60,
 .busyline.canceling { color: var(--danger); }
 .busyline.running { color: var(--success); margin: 2px 0; }
 /* Dashboard gọn của acc (panel phải): tái dùng thẻ .kpi nhưng nhỏ hơn, 4 cột đều nhau. */
-.kpis.acct { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 2px 0 12px; }
+.kpis.acct { grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; margin: 2px 0 12px; }
 .kpis.acct .kpi { padding: 12px 16px; }
 .kpis.acct .kpi-val { font-size: 20px; }
 .wsmain { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; overflow-y: auto; }
@@ -285,6 +285,8 @@ table.grid tr.acctrow:hover td { background: var(--gray); }
 .opcard { background: var(--card); border: 1px solid var(--stroke); border-radius: var(--radius); padding: 12px 14px; }
 .opcard.empty0 { opacity: .6; }
 .opcard .ohead { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+/* pill "⏳ tên-máy" nowrap: cắt bằng ellipsis thay vì tràn khỏi thẻ ở khung hẹp. */
+.opcard .ohead .pill { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .opcard .olabel { font-weight: 700; color: var(--text); font-size: 13.5px; }
 .opcard .n { font-size: 20px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
 .opcard .sub { color: var(--body); font-size: 12px; margin-top: 2px; }
@@ -373,8 +375,9 @@ table.grid tr.acctrow:hover td { background: var(--gray); }
     .btn { padding: 10px 14px; }
     .btn.sm { padding: 8px 11px; font-size: 12.5px; }
     .cellset { font-size: 12.5px; padding: 6px 7px; }
-    .kpis { display: flex; overflow-x: auto; padding-bottom: 4px; }
-    .kpis .kpi { flex: 0 0 auto; min-width: 148px; }
+    /* Dải KPI cuộn ngang có điểm dừng snap → đỡ cảm giác "thẻ bị chém" giữa chừng. */
+    .kpis { display: flex; overflow-x: auto; padding-bottom: 4px; scroll-snap-type: x proximity; }
+    .kpis .kpi { flex: 0 0 auto; min-width: 148px; scroll-snap-align: start; }
     .kpi { padding: 12px; gap: 10px; }
     .kpi-ic { width: 40px; height: 40px; }
     .kpi-val { font-size: 20px; }
@@ -393,7 +396,23 @@ table.grid tr.acctrow:hover td { background: var(--gray); }
     table.grid.stack-sm thead { display: none; }
     table.grid.stack-sm tbody tr { display: block; padding: 4px 0 8px; border-bottom: 6px solid var(--bg); }
     table.grid.stack-sm tbody tr:last-child { border-bottom: 0; }
-    table.grid.stack-sm tbody td { display: flex; justify-content: space-between; align-items: center; gap: 12px; border-bottom: 0; padding: 5px 13px; }
+    table.grid.stack-sm tbody td { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; row-gap: 6px; border-bottom: 0; padding: 5px 13px; }
     table.grid.stack-sm tbody td::before { content: attr(data-label); color: var(--body); font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; flex-shrink: 0; }
     table.grid.stack-sm tbody td[colspan] { display: block; }   /* dòng empty "Chưa có máy..." */
+
+    /* Nút-link nhỏ (Sửa ✏ / ✕ đóng modal / ⚙ 🗑 lưới shop) — nở vùng chạm chuẩn touch;
+       margin dọc âm giữ nguyên chiều cao dòng bảng (media chỉ phóng .btn, bỏ sót .linkbtn). */
+    .linkbtn { display: inline-flex; align-items: center; justify-content: center; min-width: 36px; min-height: 36px; padding: 6px 10px; margin: -8px 0; }
+    .modal-foot { flex-wrap: wrap; }
+
+    /* Trang Logs ở khung hẹp: bỏ flex (.h 96px + .lv 46px không co làm cột text còn ~20px) → các span
+       chảy inline, gãy chữ tự nhiên. */
+    .logbox .logline { display: block; }
+    .logbox .logline .tx { overflow-wrap: anywhere; }
+
+    /* Checkbox trong bảng to lên cho dễ chạm (mặc định 15px). */
+    table.grid input[type=checkbox] { width: 20px; height: 20px; }
+
+    /* Trang /data (100 dòng/trang tạo trang cuộn rất dài, sticky header chết): cap chiều cao để bảng tự cuộn trong khung. */
+    .alldata .tablewrap { max-height: 70vh; max-height: 70dvh; }
 }

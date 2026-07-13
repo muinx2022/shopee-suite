@@ -67,7 +67,9 @@ public static class ClientApiEndpoints
         api.MapGet(HubRoutes.Ledger, () => Results.Json(db.AllLedger()));
 
         // ── Nhịp máy + bảng trạng thái ──
-        api.MapPost(HubRoutes.MachineHeartbeat, (MachineHeartbeatRequest? r) => { if (r is null) return Results.BadRequest(); db.MachineHeartbeat(r); return Results.Ok(); });
+        // Heartbeat giờ TRẢ JSON (lệnh update trong body). Client cũ bỏ qua body → đổi shape vô hại.
+        api.MapPost(HubRoutes.MachineHeartbeat, (MachineHeartbeatRequest? r) => r is null ? Results.BadRequest() : Results.Json(db.MachineHeartbeat(r)));
+        api.MapPost(HubRoutes.MachineUpdateAck, (UpdateAckRequest? r) => { if (r is null) return Results.BadRequest(); db.AckUpdate(r.MachineId, r.Status); return Results.Ok(); });
         api.MapPost(HubRoutes.MachineLeave, (MachineLeaveRequest? r) => { if (r is null) return Results.BadRequest(); db.RemoveMachine(r.MachineId); return Results.Ok(); });
         api.MapGet(HubRoutes.Fleet, () => Results.Json(db.Fleet()));
 

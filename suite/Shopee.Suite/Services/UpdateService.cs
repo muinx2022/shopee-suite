@@ -48,11 +48,13 @@ public sealed class UpdateService
 
     /// <summary>
     /// Kiểm tra bản mới rồi TẢI nền nếu có. An toàn gọi lúc khởi động — nuốt lỗi mạng, không ném.
+    /// Trả về null = check TRỌN VẸN (kể cả "đang dùng bản mới nhất"); chuỗi = lý do lỗi (để lệnh update từ Hub
+    /// ack "failed: …" thay vì treo mãi ở "checking"). Caller cũ (App khởi động, nút "Kiểm tra") bỏ qua kết quả.
     /// </summary>
-    public async Task CheckAsync()
+    public async Task<string?> CheckAsync()
     {
-        if (!IsSupported) { Set(""); return; }
-        if (Busy) return;
+        if (!IsSupported) { Set(""); return null; }
+        if (Busy) return null;
         Busy = true;
         try
         {
@@ -62,7 +64,7 @@ public sealed class UpdateService
             {
                 _pending = null; UpdateReady = false; AvailableVersion = null;
                 Set("🟢 Đang dùng bản mới nhất.");
-                return;
+                return null;
             }
 
             AvailableVersion = info.TargetFullRelease?.Version?.ToString() ?? "?";
@@ -72,15 +74,37 @@ public sealed class UpdateService
             _pending = info;
             UpdateReady = true;
             Set($"⬆ Đã tải xong bản mới v{AvailableVersion}. Bấm \"Cập nhật & khởi động lại\" khi rảnh.");
+            return null;
         }
         catch (Exception ex)
         {
             Set("Kiểm tra cập nhật lỗi: " + ex.Message);
+            return ex.Message;
         }
         finally
         {
             Busy = false;
         }
+    }
+
+    /// <summary>Chuỗi DỪNG ÊM trước khi khởi động lại (ShellViewModel gán): trả việc Hub-giao về hàng chờ + dừng
+    /// các job chạy tay qua đường cancel chuẩn. null (chưa gán / VM tạo lẻ không có worker) → bỏ qua, restart thẳng.
+    /// static vì cả nút TAY (SettingsViewModel) lẫn lệnh HUB (RemoteUpdateService) đi CHUNG qua ApplyAfterPrepareAsync.</summary>
+    public static Func<Task>? PrepareShutdownAsync { get; set; }
+
+    /// <summary>Dừng ÊM việc đang chạy (Hub-giao → hàng chờ; chạy tay → cancel chuẩn) RỒI áp dụng bản đã tải +
+    /// khởi động lại. Nút "Cập nhật & khởi động lại" TAY và lệnh update từ Hub đi CHUNG đường này. Không có bản
+    /// pending / không hỗ trợ → no-op (trả về, app còn sống — caller lệnh-Hub coi là apply hỏng). Trần tổng ~45s:
+    /// quá thì vẫn restart (job kẹt để hub sweep + resume-mine lo, không treo restart vĩnh viễn).</summary>
+    public async Task ApplyAfterPrepareAsync()
+    {
+        if (_pending is null || !IsSupported) return;
+        if (PrepareShutdownAsync is { } prepare)
+        {
+            Set("⏳ Đang dừng việc đang chạy để cập nhật… (app sẽ tự khởi động lại)");
+            try { await Task.WhenAny(prepare(), Task.Delay(TimeSpan.FromSeconds(45))); } catch { }
+        }
+        ApplyAndRestart();
     }
 
     /// <summary>
