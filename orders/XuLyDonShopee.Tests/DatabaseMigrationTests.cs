@@ -289,4 +289,34 @@ CREATE TABLE orders (
         var pending = repo.GetForGsheetPush(9);
         Assert.Single(pending); // đơn cũ SNGS vẫn trả dù không có vận đơn
     }
+
+    // ==== Migration cột hub_synced_at cho bảng orders (đẩy đơn lên hub) ====
+
+    [Fact]
+    public void KhoiTao_DbCu_Orders_ThieuHubSyncedAt_DuocThemCot_KhongMatDuLieu_PendingHoatDong()
+    {
+        using var temp = new TempDatabase();
+        CreateOldOrdersSchemaWithRow(temp.Path, accountId: 11, orderSn: "SNHUB");
+
+        // Trước migration: schema orders cũ chưa có cột hub_synced_at.
+        Assert.False(HasColumn(temp.Path, "orders", "hub_synced_at"));
+
+        // Khởi tạo Database mới trỏ cùng file → Initialize() chạy migration ALTER TABLE.
+        _ = new Database(temp.Path);
+
+        // Sau migration: đã có cột; đơn cũ CÒN NGUYÊN.
+        Assert.True(HasColumn(temp.Path, "orders", "hub_synced_at"));
+
+        var repo = new OrdersRepository(new Database(temp.Path));
+        var row = Assert.Single(repo.Query(accountId: 11));
+        Assert.Equal("SNHUB", row.OrderSn);
+
+        // hub_synced_at mặc định NULL → đơn cũ vào hàng đợi đẩy hub (GetForHubPush trả về).
+        var pending = repo.GetForHubPush(11);
+        Assert.Equal(new[] { "SNHUB" }, pending.Select(o => o.OrderSn));
+
+        // Đánh dấu → biến khỏi hàng đợi (chống đẩy trùng).
+        repo.MarkHubSynced(11, new[] { "SNHUB" }, DateTime.UtcNow);
+        Assert.Empty(repo.GetForHubPush(11));
+    }
 }

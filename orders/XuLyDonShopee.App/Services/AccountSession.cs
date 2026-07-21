@@ -692,6 +692,12 @@ public partial class AccountSession : ObservableObject, IAccountSession
             // của Sync trọn gói treo số cũ rất lâu sau Sync. Chạy nền để nhịp đọc số chạy ngay.
             StartGsheetPushInBackground(log, tok);
 
+            // Đẩy đơn lên HUB đơn hàng chạy NỀN (y pattern GSheet: chỉ đụng DB + HTTP, không đụng trình duyệt).
+            // KHÔNG điều kiện insertedOrders: kể cả lượt này không có đơn MỚI vẫn thử đẩy để BÙ backlog những đơn
+            // các lượt trước đẩy hụt (hub offline). Hook chưa được rót (app Đơn hàng chạy độc lập / hub tắt) →
+            // tự return im lặng bên trong.
+            StartHubPushInBackground(log, tok);
+
             // Báo "đơn MỚI" (Slack/Discord/Telegram) — CHỈ khi lượt này có đơn INSERT. Chạy NỀN fire-and-forget
             // (y pattern GSheet): thông báo chỉ đụng HTTP nên không cần giữ _navigating, không kéo dài lượt sync;
             // lỗi mạng chỉ log, KHÔNG phá sync. Tin nhắn mang dữ liệu ĐÃ sync (kể cả mã vận đơn nếu có sau bước
@@ -795,6 +801,134 @@ public partial class AccountSession : ObservableObject, IAccountSession
             try { await PushOrdersToGsheetAsync(log, ct).ConfigureAwait(false); }
             finally { Interlocked.Exchange(ref _gsheetPushing, 0); }
         }, CancellationToken.None);
+    }
+
+    /// <summary>Kích thước LÔ tối đa mỗi lần đẩy đơn lên hub — chia nhỏ để không nghẽn tunnel; timeout 5' của
+    /// <c>_bulkHttp</c> phía hub-client đủ rộng cho một lô.</summary>
+    public const int HubPushBatchSize = 200;
+
+    /// <summary>Cờ CHỐNG CHỒNG lượt đẩy hub trên CÙNG phiên (0 = rảnh, 1 = đang đẩy) — y <see cref="_gsheetPushing"/>.</summary>
+    private int _hubPushing;
+
+    /// <summary>
+    /// Kích hoạt đẩy đơn lên HUB đơn hàng CHẠY NỀN (fire-and-forget) sau khi Sync đã tổng kết — y pattern
+    /// <see cref="StartGsheetPushInBackground"/>. Cờ <see cref="_hubPushing"/> (Interlocked) chống 2 lượt đẩy
+    /// chồng nhau: lượt trước còn chạy → bỏ qua, log 1 dòng (lượt sync sau tự đẩy phần thiếu nhờ cờ DB
+    /// <c>hub_synced_at</c>). <paramref name="ct"/> là token phiên → dừng phiên thì lượt đẩy tự hủy.
+    /// <see cref="PushOrdersToHubAsync"/> tự nuốt mọi exception nên task nền KHÔNG bao giờ ném unobserved.
+    /// </summary>
+    private void StartHubPushInBackground(Action<string> log, CancellationToken ct)
+    {
+        if (Interlocked.CompareExchange(ref _hubPushing, 1, 0) != 0)
+        {
+            log("Hub: lượt đẩy trước còn đang chạy — bỏ qua (lượt sync sau tự đẩy phần thiếu).");
+            return;
+        }
+
+        _ = Task.Run(async () =>
+        {
+            try { await PushOrdersToHubAsync(log, ct).ConfigureAwait(false); }
+            finally { Interlocked.Exchange(ref _hubPushing, 0); }
+        }, CancellationToken.None);
+    }
+
+    /// <summary>
+    /// Đẩy các đơn CHƯA đẩy hub của tài khoản này lên HUB đơn hàng qua hook <see cref="AppServices.PushOrdersToHub"/>
+    /// (do shell suite rót). <b>Không bao giờ ném</b> (sync DB đã xong — lỗi hub chỉ ghi log): hủy CHỦ ĐỘNG → thôi;
+    /// lỗi khác → log "Hub: lỗi — ...". Hook null (app Đơn hàng chạy độc lập / hub chưa cấu hình) → return im lặng
+    /// (không đổi hành vi cũ, KHÔNG đụng DB). Không có đơn chờ → return. Logic chia lô + đánh dấu tách sang hàm thuần
+    /// <see cref="PushPendingToHubAsync"/> (test được, không đụng trình duyệt).
+    /// </summary>
+    private async Task PushOrdersToHubAsync(Action<string> log, CancellationToken ct)
+    {
+        var push = _services.PushOrdersToHub;
+        if (push is null)
+        {
+            return; // hub tắt / app Đơn hàng chạy độc lập → im lặng, không đụng DB
+        }
+
+        try
+        {
+            var pending = _services.Orders.GetForHubPush(_accountId);
+            if (pending.Count == 0)
+            {
+                return;
+            }
+
+            var marked = await PushPendingToHubAsync(
+                _accountId,
+                pending,
+                push,
+                sns => _services.Orders.MarkHubSynced(_accountId, sns, DateTime.UtcNow),
+                HubPushBatchSize,
+                ct).ConfigureAwait(false);
+
+            if (marked > 0)
+            {
+                log($"Hub: đã đẩy {marked}/{pending.Count} đơn lên hub.");
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Hủy chủ động (dừng phiên) — thôi.
+        }
+        catch (Exception ex)
+        {
+            // Lỗi đẩy hub KHÔNG phá lượt sync (đã ghi DB) — chỉ log; đơn CHƯA đánh dấu → lượt sau đẩy lại.
+            log("Hub: lỗi — " + ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// LÕI THUẦN (không đụng trình duyệt/DB trực tiếp → test được) của việc đẩy đơn lên hub: chia
+    /// <paramref name="pending"/> thành các LÔ ≤ <paramref name="batchSize"/> rồi đẩy TUẦN TỰ qua
+    /// <paramref name="push"/> (đúng chữ ký hook <see cref="AppServices.PushOrdersToHub"/>). Mỗi lô trả
+    /// <c>true</c> → gọi <paramref name="markSynced"/> cho đúng các mã đơn của lô (đánh dấu đã đẩy, chống đẩy
+    /// trùng lượt sau); trả <c>false</c> → DỪNG các lô còn lại (giữ đơn CHƯA đánh dấu để lượt sync sau đẩy lại —
+    /// thà đẩy lặp, hub idempotent, còn hơn mất đơn). <paramref name="push"/> null (hook chưa rót) hoặc
+    /// <paramref name="pending"/> rỗng → không làm gì, trả 0. Trả về SỐ đơn đã đánh dấu thành công.
+    /// <paramref name="ct"/> hủy → <see cref="OperationCanceledException"/> cho XUYÊN (caller phân biệt hủy chủ động).
+    /// </summary>
+    public static async Task<int> PushPendingToHubAsync(
+        long accountId,
+        IReadOnlyList<SyncedOrder> pending,
+        Func<long, IReadOnlyList<SyncedOrder>, CancellationToken, Task<bool>>? push,
+        Action<IReadOnlyList<string>> markSynced,
+        int batchSize,
+        CancellationToken ct)
+    {
+        if (push is null || pending is null || pending.Count == 0)
+        {
+            return 0;
+        }
+
+        var marked = 0;
+        for (var i = 0; i < pending.Count; i += batchSize)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            var count = Math.Min(batchSize, pending.Count - i);
+            var batch = new List<SyncedOrder>(count);
+            for (var j = 0; j < count; j++)
+            {
+                batch.Add(pending[i + j]);
+            }
+
+            var ok = await push(accountId, batch, ct).ConfigureAwait(false);
+            if (!ok)
+            {
+                break; // hub offline / hook trả false → dừng các lô sau, lượt sync sau tự đẩy lại
+            }
+
+            var sns = new List<string>(batch.Count);
+            foreach (var o in batch)
+            {
+                sns.Add(o.OrderSn);
+            }
+            markSynced(sns);
+            marked += batch.Count;
+        }
+        return marked;
     }
 
     /// <summary>

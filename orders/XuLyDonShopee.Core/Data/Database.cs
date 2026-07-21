@@ -107,6 +107,7 @@ CREATE TABLE IF NOT EXISTS orders (
     gsheet_file_url    TEXT,
     gsheet_da_huy      INTEGER,
     gsheet_da_co_van_don INTEGER,
+    hub_synced_at      TEXT,
     total_price        INTEGER,
     total_price_text   TEXT,
     final_amount       INTEGER,
@@ -147,6 +148,11 @@ CREATE TABLE IF NOT EXISTS orders (
         EnsureColumn(conn, "orders", "gsheet_file_url", "TEXT");
         EnsureColumn(conn, "orders", "gsheet_da_huy", "INTEGER");
         EnsureColumn(conn, "orders", "gsheet_da_co_van_don", "INTEGER");
+
+        // Cờ chống đẩy TRÙNG lên HUB đơn hàng (module Đơn hàng đẩy đơn lên hub sau mỗi lượt Sync):
+        // hub_synced_at = thời điểm đơn ĐÃ được hub nhận OK (NULL = chưa đẩy, còn trong hàng đợi ngầm → lượt
+        // sync sau tự đẩy bù khi hub sống lại). Thêm cho DB CŨ.
+        EnsureColumn(conn, "orders", "hub_synced_at", "TEXT");
     }
 
     /// <summary>

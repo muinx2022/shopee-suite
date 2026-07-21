@@ -310,6 +310,96 @@ public class OrdersRepositoryTests
         Assert.Equal("0", ReadString(db, "SN1", "gsheet_da_co_van_don"));
     }
 
+    // ===================== Đẩy Hub đơn hàng: GetForHubPush / MarkHubSynced =====================
+
+    [Fact]
+    public void GetForHubPush_DonMoi_CoMat_MapDayDuField()
+    {
+        using var temp = new TempDatabase();
+        var repo = new OrdersRepository(temp.Open());
+
+        repo.UpsertMany(1, new[] { Sample("SN1"), Sample("SN2") }, DateTime.UtcNow);
+
+        var pending = repo.GetForHubPush(1);
+
+        Assert.Equal(new[] { "SN1", "SN2" }, pending.Select(o => o.OrderSn)); // đơn mới đều CHỜ đẩy hub, đúng thứ tự id
+
+        // Dựng lại SyncedOrder đầy đủ từ cột bảng (mirror để client map 1-1 sang DTO hub).
+        var o = pending.First(p => p.OrderSn == "SN1");
+        Assert.Equal("237900524283161", o.ShopeeOrderId);
+        Assert.Equal("quynhsuugiacshoppi", o.BuyerUsername);
+        Assert.Equal(1, o.ItemCount);
+        Assert.Equal("Giày", o.ItemSummary);
+        Assert.Equal(166500, o.TotalPrice);
+        Assert.Equal("₫166.500", o.TotalPriceText);
+        Assert.Equal(160000, o.FinalAmount);
+        Assert.Equal("₫160.000", o.FinalAmountText);
+        Assert.Equal("Đã hủy", o.Status);
+        Assert.Equal("SPX Express", o.Carrier);
+        Assert.Equal("SPXVN068067521447", o.TrackingNumber);
+        Assert.Equal("Hủy đơn hàng vì hành vi giao dịch bất thường.", o.CancelReason);
+    }
+
+    [Fact]
+    public void MarkHubSynced_DanhDau_BienMatKhoiPending()
+    {
+        using var temp = new TempDatabase();
+        var repo = new OrdersRepository(temp.Open());
+        repo.UpsertMany(1, new[] { Sample("SN1"), Sample("SN2"), Sample("SN3") }, DateTime.UtcNow);
+
+        // Đánh dấu SN1 + SN2 đã đẩy hub → chỉ SN3 còn CHỜ.
+        repo.MarkHubSynced(1, new[] { "SN1", "SN2" }, DateTime.UtcNow);
+
+        var pending = repo.GetForHubPush(1);
+        Assert.Equal(new[] { "SN3" }, pending.Select(o => o.OrderSn));
+    }
+
+    [Fact]
+    public void MarkHubSynced_TatCa_PendingRong()
+    {
+        using var temp = new TempDatabase();
+        var repo = new OrdersRepository(temp.Open());
+        repo.UpsertMany(1, new[] { Sample("SN1"), Sample("SN2") }, DateTime.UtcNow);
+
+        repo.MarkHubSynced(1, new[] { "SN1", "SN2" }, DateTime.UtcNow);
+
+        Assert.Empty(repo.GetForHubPush(1));
+    }
+
+    [Fact]
+    public void MarkHubSynced_HaiLan_GiuMocDau()
+    {
+        using var temp = new TempDatabase();
+        var db = temp.Open();
+        var repo = new OrdersRepository(db);
+        repo.UpsertMany(1, new[] { Sample("SN1") }, DateTime.UtcNow);
+
+        var t1 = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        repo.MarkHubSynced(1, new[] { "SN1" }, t1);
+        var mark1 = ReadString(db, "SN1", "hub_synced_at");
+        Assert.NotNull(mark1);
+
+        // Đánh dấu LẦN 2 với mốc KHÁC → COALESCE giữ mốc lần đầu, KHÔNG đè.
+        var t2 = new DateTime(2026, 2, 2, 0, 0, 0, DateTimeKind.Utc);
+        repo.MarkHubSynced(1, new[] { "SN1" }, t2);
+        Assert.Equal(mark1, ReadString(db, "SN1", "hub_synced_at"));
+    }
+
+    [Fact]
+    public void GetForHubPush_MarkHubSynced_KhongLanTaiKhoanKhac()
+    {
+        using var temp = new TempDatabase();
+        var repo = new OrdersRepository(temp.Open());
+        repo.UpsertMany(1, new[] { Sample("SN1") }, DateTime.UtcNow);
+        repo.UpsertMany(2, new[] { Sample("SN1") }, DateTime.UtcNow); // cùng mã đơn, tài khoản KHÁC
+
+        // Đánh dấu SN1 của tài khoản 1 → KHÔNG ảnh hưởng SN1 của tài khoản 2.
+        repo.MarkHubSynced(1, new[] { "SN1" }, DateTime.UtcNow);
+
+        Assert.Empty(repo.GetForHubPush(1));                              // tài khoản 1 đã đẩy
+        Assert.Equal(new[] { "SN1" }, repo.GetForHubPush(2).Select(o => o.OrderSn)); // tài khoản 2 vẫn chờ
+    }
+
     // ===================== Query / AllStatuses (màn xem — plan 2) =====================
 
     /// <summary>Tạo nhanh một đơn với vài trường phục vụ test lọc.</summary>

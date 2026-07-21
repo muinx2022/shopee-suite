@@ -218,6 +218,82 @@ public class OrdersRepository
         cmd.ExecuteNonQuery();
     }
 
+    /// <summary>
+    /// Các đơn ỨNG VIÊN đẩy lên HUB đơn hàng: đơn của tài khoản CHƯA từng đẩy hub thành công
+    /// (<c>hub_synced_at IS NULL</c>) — dựng lại <see cref="SyncedOrder"/> đầy đủ từ các cột bảng để client map
+    /// 1-1 sang DTO hub (mẫu <see cref="GetForGsheetPush"/>). NULL = còn trong hàng đợi ngầm → hub offline thì
+    /// lượt sync sau tự đẩy bù. Sắp theo id tăng (đơn cũ trước) để đẩy đúng thứ tự xuất hiện.
+    /// </summary>
+    public IReadOnlyList<SyncedOrder> GetForHubPush(long accountId)
+    {
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = @"SELECT order_sn, shopee_order_id, buyer_username, items_json, item_count, item_summary, sku,
+       total_price, total_price_text, final_amount, final_amount_text, payment_method,
+       status, status_description, cancel_reason, channel, carrier, tracking_number
+    FROM orders
+    WHERE account_id = $a AND hub_synced_at IS NULL
+    ORDER BY id;";
+        cmd.Parameters.AddWithValue("$a", accountId);
+
+        var list = new List<SyncedOrder>();
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            list.Add(new SyncedOrder
+            {
+                OrderSn = reader.GetString(0),
+                ShopeeOrderId = reader.IsDBNull(1) ? null : reader.GetString(1),
+                BuyerUsername = reader.IsDBNull(2) ? null : reader.GetString(2),
+                ItemsJson = reader.IsDBNull(3) ? "[]" : reader.GetString(3),
+                ItemCount = reader.IsDBNull(4) ? 0 : reader.GetInt32(4),
+                ItemSummary = reader.IsDBNull(5) ? null : reader.GetString(5),
+                Sku = reader.IsDBNull(6) ? null : reader.GetString(6),
+                TotalPrice = reader.IsDBNull(7) ? null : reader.GetInt64(7),
+                TotalPriceText = reader.IsDBNull(8) ? null : reader.GetString(8),
+                FinalAmount = reader.IsDBNull(9) ? null : reader.GetInt64(9),
+                FinalAmountText = reader.IsDBNull(10) ? null : reader.GetString(10),
+                PaymentMethod = reader.IsDBNull(11) ? null : reader.GetString(11),
+                Status = reader.IsDBNull(12) ? null : reader.GetString(12),
+                StatusDescription = reader.IsDBNull(13) ? null : reader.GetString(13),
+                CancelReason = reader.IsDBNull(14) ? null : reader.GetString(14),
+                Channel = reader.IsDBNull(15) ? null : reader.GetString(15),
+                Carrier = reader.IsDBNull(16) ? null : reader.GetString(16),
+                TrackingNumber = reader.IsDBNull(17) ? null : reader.GetString(17),
+            });
+        }
+        return list;
+    }
+
+    /// <summary>
+    /// Đánh dấu các đơn ĐÃ được hub nhận OK (chống đẩy trùng lượt sync sau). <c>hub_synced_at</c> dùng
+    /// <c>COALESCE(cũ, $at)</c> — GIỮ thời điểm đẩy LẦN ĐẦU, không đè khi gọi lại. Khóa theo
+    /// <c>(account_id, order_sn)</c>; đơn không có mã (rỗng) bị bỏ qua. Cập nhật nhiều đơn trong một transaction.
+    /// </summary>
+    public void MarkHubSynced(long accountId, IEnumerable<string> orderSns, DateTime atUtc)
+    {
+        var atStr = DbSerialization.FormatDate(atUtc);
+        using var conn = _db.OpenConnection();
+        using var tx = conn.BeginTransaction();
+        foreach (var sn in orderSns)
+        {
+            if (string.IsNullOrWhiteSpace(sn))
+            {
+                continue;
+            }
+            using var cmd = conn.CreateCommand();
+            cmd.Transaction = tx;
+            cmd.CommandText = @"UPDATE orders SET
+    hub_synced_at = COALESCE(hub_synced_at, $at)
+    WHERE account_id = $a AND order_sn = $sn;";
+            cmd.Parameters.AddWithValue("$at", atStr);
+            cmd.Parameters.AddWithValue("$a", accountId);
+            cmd.Parameters.AddWithValue("$sn", sn);
+            cmd.ExecuteNonQuery();
+        }
+        tx.Commit();
+    }
+
     /// <summary>Số đơn đã lưu của một tài khoản (dùng cho màn xem — plan 2).</summary>
     public int CountByAccount(long accountId)
     {
