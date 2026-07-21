@@ -8,6 +8,7 @@ using Shopee.Core.Infrastructure;
 using Shopee.Modules.UpdateProduct;
 using Shopee.Suite.Infrastructure;
 using Shopee.Suite.Services;
+using XuLyDonShopee.Core.Models;   // Account (module Đơn hàng) — sync shop → tạo sẵn dòng tài khoản
 
 namespace Shopee.Suite.Modules.BigSeller;
 
@@ -21,7 +22,7 @@ public sealed partial class BigSellerViewModel : ModuleViewModelBase
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasSelection))]
-    [NotifyCanExecuteChangedFor(nameof(DeleteCommand), nameof(LoginCommand), nameof(AddShopCommand), nameof(CleanMediasCommand))]
+    [NotifyCanExecuteChangedFor(nameof(DeleteCommand), nameof(LoginCommand), nameof(AddShopCommand), nameof(CleanMediasCommand), nameof(SyncShopsToOrdersCommand))]
     private BigSellerAccountItemViewModel? _selected;
 
     [ObservableProperty]
@@ -185,6 +186,54 @@ public sealed partial class BigSellerViewModel : ModuleViewModelBase
         Selected.RemoveShop(SelectedShop);
         SelectedShop = Selected.Shops.FirstOrDefault();
         SaveStore("Đã xóa shop.", "Không lưu được thay đổi danh sách shop.");
+    }
+
+    /// <summary>Sync danh sách shop của tài khoản BigSeller đang chọn sang module Đơn hàng: tạo sẵn dòng tài
+    /// khoản (Email = tên shop) để đỡ nhập tay. MỘT CHIỀU, chỉ Insert bản mới — dedupe theo Email (trim, không
+    /// phân biệt hoa/thường) với CẢ DB đơn hàng LẪN trong chính lô; không đụng/không sửa dòng đã có. Account tạo
+    /// ra có Password rỗng (mở phiên lần đầu login tay, app tự bắt cookie) + Note ghi nguồn.</summary>
+    [RelayCommand(CanExecute = nameof(HasSelection))]
+    private void SyncShopsToOrders()
+    {
+        var sel = Selected;
+        if (sel is null) return;
+        try
+        {
+            // Module Đơn hàng có thể init hỏng (khóa DB…) → Services null. Báo nhẹ, không crash.
+            var svc = OrdersModuleHost.Services;
+            if (svc is null)
+            {
+                Status = "Module Đơn hàng chưa sẵn sàng — chưa sync được shop.";
+                return;
+            }
+
+            // DB đơn hàng KHÔNG có UNIQUE(Email) → đường sync PHẢI tự dedupe. HashSet gom email đã có (trim,
+            // OrdinalIgnoreCase); Add trả false = đã có trong DB HOẶC trùng trong chính lô → đếm skip.
+            var existing = new HashSet<string>(
+                svc.Accounts.GetAll()
+                   .Select(a => a.Email.Trim())
+                   .Where(e => e.Length > 0),
+                StringComparer.OrdinalIgnoreCase);
+
+            var note = $"Sync từ BigSeller ({sel.DisplayName})";
+            int added = 0, skipped = 0;
+            foreach (var shop in sel.Model.Shops)
+            {
+                var name = shop.Name.Trim();
+                if (name.Length == 0) continue;                     // shop chưa đặt tên → bỏ
+                if (!existing.Add(name)) { skipped++; continue; }   // đã có trong DB / trùng trong lô
+                // Password rỗng: repo Insert nhận "" hợp lệ; mở phiên lần đầu login tay, app tự lưu cookie.
+                svc.Accounts.Insert(new Account { Email = name, Password = "", Note = note });
+                added++;
+            }
+
+            Status = $"Đã thêm {added} shop sang Đơn hàng, bỏ qua {skipped} đã có/trùng. " +
+                     "Bổ sung mật khẩu hoặc đăng nhập tay lần đầu ở tab Đơn hàng.";
+        }
+        catch (Exception ex)
+        {
+            Status = "✘ Lỗi sync shop sang Đơn hàng: " + ex.Message;
+        }
     }
 
     // ── Đăng nhập BigSeller (lấy cookie chung) ──────────────────────────────────

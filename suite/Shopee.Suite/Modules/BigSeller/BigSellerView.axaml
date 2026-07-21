@@ -176,6 +176,9 @@
                                     <Button Content="+ Thêm shop" Command="{Binding #Root.DataContext.AddShopCommand}" />
                                     <Button Content="− Xóa shop" Margin="8,0,0,0"
                                             Command="{Binding #Root.DataContext.RemoveShopCommand}" />
+                                    <Button Content="⇄ Sync shop → Đơn hàng" Margin="8,0,0,0"
+                                            Command="{Binding #Root.DataContext.SyncShopsToOrdersCommand}"
+                                            ToolTip.Tip="Tạo sẵn dòng tài khoản bên module Đơn hàng cho từng shop của tài khoản BigSeller đang chọn (Email = tên shop) để đỡ nhập tay. MỘT CHIỀU, chỉ thêm bản mới — bỏ qua tên đã có/trùng, không sửa dữ liệu sẵn có. Tài khoản tạo ra CHƯA có mật khẩu: mở phiên lần đầu đăng nhập tay ở tab Đơn hàng, app tự lưu cookie." />
                                 </StackPanel>
                             </Grid>
 

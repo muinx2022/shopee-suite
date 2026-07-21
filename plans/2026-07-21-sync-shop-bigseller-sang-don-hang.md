@@ -1,7 +1,7 @@
 # Plan: Sync shop từ tài khoản BigSeller sang module Đơn hàng
 
 - **Ngày:** 2026-07-21
-- **Trạng thái:** chờ thực thi (xếp lịch SAU khi merge nhánh ribbon — cùng vùng UI suite)
+- **Trạng thái:** hoàn thành (2026-07-21 — Fable nghiệm thu: build 0 lỗi + 767 test nguyên + soi diff, binding khớp idiom #Root.DataContext sẵn có; hành vi DB kiểm end-to-end trên DB thật bằng harness, dữ liệu test đã dọn sạch)
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-executor`)
 - **Nơi làm:** cây làm việc CHÍNH `D:\Projects\shopee-suite`, nhánh `feature/gop-don-hang`. KHÔNG đụng `main`.
 
@@ -85,4 +85,68 @@ shop trùng username cửa hàng (vd `shop9x.store`), và hub cũng key shop the
 
 ## Báo cáo thực thi (Opus điền sau khi xong)
 
-<chưa có>
+**Ngày thực thi:** 2026-07-21 · **Người thực thi:** Opus (`opus-executor`)
+
+### Đã hoàn thành
+
+1. `suite/Shopee.Suite/Modules/BigSeller/BigSellerViewModel.cs`
+   - Thêm `using XuLyDonShopee.Core.Models;` (để dùng type `Account`).
+   - Thêm `nameof(SyncShopsToOrdersCommand)` vào `[NotifyCanExecuteChangedFor(...)]` của field `_selected`
+     → nút tự bật/tắt theo việc có tài khoản đang chọn.
+   - Thêm command `SyncShopsToOrders` (`[RelayCommand(CanExecute = nameof(HasSelection))]`), đặt ngay sau
+     `RemoveShop`:
+     - null-check `OrdersModuleHost.Services` → set `Status = "Module Đơn hàng chưa sẵn sàng — chưa sync
+       được shop."` rồi return (không crash).
+     - `existing` = `HashSet<string>` gom `svc.Accounts.GetAll()` → `a.Email.Trim()` (lọc rỗng), comparer
+       `StringComparer.OrdinalIgnoreCase`.
+     - Duyệt `sel.Model.Shops`: `Name.Trim()` rỗng → bỏ (không tính skip); `existing.Add(name)` == false
+       (đã có trong DB HOẶC trùng trong lô) → `skipped++`; còn lại →
+       `svc.Accounts.Insert(new Account { Email = name, Password = "", Note = "Sync từ BigSeller (<DisplayName>)" })`,
+       `added++` (Status mặc định `ChuaKiemTra` do model tự đặt).
+     - Thông báo: `"Đã thêm X shop sang Đơn hàng, bỏ qua Y đã có/trùng. Bổ sung mật khẩu hoặc đăng nhập tay
+       lần đầu ở tab Đơn hàng."`.
+     - Bọc `try/catch (Exception ex)` → `Status = "✘ Lỗi sync shop sang Đơn hàng: " + ex.Message` (không ném).
+2. `suite/Shopee.Suite/Modules/BigSeller/BigSellerView.axaml`
+   - Thêm nút `⇄ Sync shop → Đơn hàng` vào header panel shops (StackPanel cạnh `+ Thêm shop` / `− Xóa shop`),
+     `Command="{Binding #Root.DataContext.SyncShopsToOrdersCommand}"` (Enable theo CanExecute = HasSelection),
+     `ToolTip.Tip` giải thích rõ hành vi một chiều + chuyện tài khoản tạo ra chưa có mật khẩu.
+
+### Kết quả kiểm chứng
+
+- **Build:** `dotnet build ShopeeSuite.sln -c Release` → **Build succeeded. 0 Warning(s), 0 Error(s)**
+  (ShopeeSuite.dll build ra bình thường).
+- **Test orders:** `dotnet test orders/XuLyDonShopee.Tests/XuLyDonShopee.Tests.csproj -c Release` →
+  **Passed! Failed: 0, Passed: 767, Skipped: 0** (baseline nguyên, không sửa gì orders).
+- **Kiểm hành vi trên DB THẬT** (`C:\Users\Ng Xuan Mui\AppData\Roaming\XuLyDonShopee\app.db`): vì driving GUI
+  Avalonia không tự động hóa được ổn định (WDAC + không có harness UI), đã kiểm bằng một console harness tạm
+  trong scratchpad (`.../scratchpad/synccheck`) gọi **đúng các type mà command dùng** (`Database` +
+  `AccountRepository` + `Account`) và **sao chép nguyên thuật toán dedupe** của `SyncShopsToOrders`, chạy trên
+  chính DB thật. Kết quả (tất cả PASS):
+  - Baseline: 3 tài khoản; không có sẵn tên test.
+  - Lô 1 (shops: `shop-test-a`, `  shop-test-b  `, `SHOP-TEST-A`, `   `): added=2, skipped=1 → chèn đúng
+    `shop-test-a` + `shop-test-b` (đã trim); `SHOP-TEST-A` bị bỏ qua (trùng-trong-lô, không phân biệt
+    hoa/thường); tên rỗng bị bỏ (không tính skip).
+  - Kiểm nội dung 2 dòng chèn: `Email` đúng (đã trim), `Password == ""`, `Note == "Sync từ BigSeller (Test
+    BigSeller acc)"`, `Status == ChuaKiemTra`.
+  - Lô 2 (sync lặp `shop-test-a`, `shop-test-b`): added=0, skipped=2 → dedupe với DB, không tạo trùng; tổng
+    đúng 2 dòng test (không nhân đôi).
+  - **Dọn sạch:** xóa 2 dòng test (Id 4, 5) qua `AccountRepository.Delete`; kiểm lại DB còn 3 tài khoản
+    (== baseline), **0 dòng test còn sót**. Harness nằm ngoài repo (scratchpad), không commit, không để lại
+    file trong repo.
+
+### Tiêu chí nghiệm thu (đối chiếu)
+
+- [x] Build sạch (0 warning/error), test orders nguyên (767 pass).
+- [x] Sync tạo đúng account (Email = tên shop đã trim, Password rỗng, Note nguồn), dedupe cả với DB lẫn trong
+      lô (OrdinalIgnoreCase); sync lặp không tạo trùng.
+- [x] Module Đơn hàng chưa sẵn sàng → thông báo nhẹ qua `Status`, return, không crash (null-check
+      `OrdersModuleHost.Services`).
+- [x] Dòng test đã dọn khỏi DB thật (còn 0 dòng sót, DB về đúng baseline 3 tài khoản).
+
+### Vướng mắc / lưu ý
+
+- Không driving được GUI thật (chỉ Insert/dedupe được kiểm qua repo thật + thuật toán sao chép nguyên). Phần
+  UI (nút + binding CanExecute) đã được compiler + build Release xác nhận về mặt cấu trúc; hành vi DB đầu-cuối
+  đã kiểm trên DB thật bằng đúng type repository mà command gọi.
+- Đã tuân thủ: KHÔNG commit; KHÔNG sửa file trong `orders/`, `server/`, `shared/`, `main` (chỉ đọc
+  `OrdersModuleHost.Services` để Insert); chỉ 2 file nguồn thay đổi (`git status` xác nhận).
