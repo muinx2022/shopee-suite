@@ -60,6 +60,17 @@ public class AppServices
     /// <summary>Phiên gọi sau khi UpsertMany đơn về DB THÀNH CÔNG để phát <see cref="OrdersChanged"/>.</summary>
     public void RaiseOrdersChanged() => OrdersChanged?.Invoke();
 
+    /// <summary>
+    /// Phát khi TẬP tài khoản (bảng <c>accounts</c>) vừa được thêm/đổi từ NGOÀI màn "Tài khoản" — vd sync shop
+    /// từ BigSeller Insert dòng tài khoản mới. Màn "Tài khoản" đang mở nghe để tự <c>Reload()</c> danh sách, thấy
+    /// dòng mới NGAY mà không phải đổi màn. Y như <see cref="OrdersChanged"/>: CỐ Ý có thể bắn từ THREAD NỀN →
+    /// người nghe (AccountsViewModel) PHẢI marshal về UI thread trước khi đụng ObservableCollection.
+    /// </summary>
+    public event Action? AccountsChanged;
+
+    /// <summary>Bên ngoài (vd sync shop BigSeller) gọi sau khi Insert tài khoản THÀNH CÔNG để phát <see cref="AccountsChanged"/>.</summary>
+    public void RaiseAccountsChanged() => AccountsChanged?.Invoke();
+
     public AppServices(string? dbPath = null)
     {
         Database = new Database(dbPath);

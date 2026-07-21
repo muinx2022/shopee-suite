@@ -20,7 +20,7 @@ using OrdersMainViewModel = XuLyDonShopee.App.ViewModels.MainViewModel;
 namespace Shopee.Suite.ViewModels;
 
 /// <summary>
-/// ViewModel gốc của shell: dải RIBBON kiểu Word/Excel gồm 4 tab (Workspace · Cấu hình BigSeller · Đơn hàng ·
+/// ViewModel gốc của shell: dải RIBBON kiểu Word/Excel gồm 4 tab (Workspace · Cấu hình BigSeller · Shopee ·
 /// Cài đặt). Mọi module ViewModel được khởi tạo MỘT LẦN và giữ sống suốt vòng đời app; mỗi tab NHỚ màn đang
 /// chọn riêng nên quay lại tab thấy đúng màn cũ. Toàn bộ nút hành động trên ribbon chỉ bind command CÓ SẴN
 /// của các ViewModel — không thêm logic nghiệp vụ mới ở đây.
@@ -136,7 +136,7 @@ public sealed partial class ShellViewModel : ObservableObject
         });
         _bigSellerTab = bigSellerTab;
 
-        // ── Tab 3: Đơn hàng (4 màn con LÊN ribbon; chỉ dựng khi module khởi tạo được) ──
+        // ── Tab 3: Shopee (đơn hàng — 4 màn con LÊN ribbon; chỉ dựng khi module khởi tạo được) ──
         RibbonTab? ordersTab = null;
         if (ordersVm is not null)
         {
@@ -146,7 +146,7 @@ public sealed partial class ShellViewModel : ObservableObject
             var oAuto = new RibbonScreenItem("Chạy tự động", AppIcons.PlayCircle, ordersVm, 2, "Vòng chạy tự động");
             var oProxy = new RibbonScreenItem("Proxy", AppIcons.SwapHoriz, ordersVm, 3, "Kho proxy KiotProxy");
 
-            ordersTab = new RibbonTab("Đơn hàng", new List<RibbonGroup>
+            ordersTab = new RibbonTab("Shopee", new List<RibbonGroup>
             {
                 new RibbonGroup("Màn hình", new object[] { oAccounts, oOrders, oAuto, oProxy }),
                 new RibbonGroup("Hành động", new object[]

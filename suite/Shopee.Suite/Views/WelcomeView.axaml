@@ -6,7 +6,7 @@
             <!-- Hero -->
             <StackPanel Grid.Row="0" Orientation="Horizontal">
                 <Border Width="56" Height="56" CornerRadius="15" Background="{DynamicResource BrandBadgeBrush}"
-                        BoxShadow="0 3 10 0 #330A6BD8">
+                        BoxShadow="0 3 10 0 #33E0421D">
                     <TextBlock Text="S" FontSize="30" FontWeight="Bold" Foreground="White"
                                HorizontalAlignment="Center" VerticalAlignment="Center" />
                 </Border>

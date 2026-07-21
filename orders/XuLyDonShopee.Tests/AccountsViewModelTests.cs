@@ -683,4 +683,50 @@ public class AccountsViewModelTests
         Assert.True(vm.XoaProfileTaoLai); // VM đọc lại đúng trạng thái đã lưu
     }
 
+    // ===== Sync shop BigSeller: nguồn NGOÀI màn Insert tài khoản RỒI RaiseAccountsChanged → danh sách VM =====
+    // (thấy dòng mới NGAY không cần đổi màn). Gọi trên thread test = UI thread giả lập (CheckAccess()==true) →
+    // handler Reload() đồng bộ, đúng như lệnh BigSeller chạy trên UI thread.
+    [Fact]
+    public void RaiseAccountsChanged_ThemTaiKhoanNgoaiMan_DanhSachVmCoDongMoi()
+    {
+        using var temp = new TempDatabase();
+        var services = new AppServices(temp.Path);
+        services.Accounts.Insert(new Account { Email = "shop-cu@mail.com", Password = "p" });
+
+        var vm = new AccountsViewModel(services);
+        Assert.Single(vm.Accounts); // ban đầu chỉ có shop cũ
+
+        // Mô phỏng SyncShopsToOrders: Insert dòng mới qua repo SAU khi VM đã dựng, rồi phát sự kiện.
+        services.Accounts.Insert(new Account { Email = "shop-moi", Password = "" });
+        services.RaiseAccountsChanged();
+
+        // Màn Tài khoản tự nạp lại → thấy dòng mới ngay.
+        Assert.Equal(2, vm.Accounts.Count);
+        Assert.Contains(vm.Accounts, r => r.Email == "shop-moi");
+    }
+
+    // ===== RaiseAccountsChanged GIỮ lựa chọn/form đang sửa dở (Reload chọn lại theo _editingId) =====
+    [Fact]
+    public void RaiseAccountsChanged_GiuLuaChonVaSuaDo()
+    {
+        using var temp = new TempDatabase();
+        var services = new AppServices(temp.Path);
+        services.Accounts.Insert(new Account { Email = "keep@mail.com", Password = "orig" });
+
+        var vm = new AccountsViewModel(services);
+        vm.SelectedRow = vm.Accounts.First(a => a.Email == "keep@mail.com");
+        vm.EditPassword = "changed"; // sửa dở, chưa lưu
+
+        // Nguồn ngoài thêm dòng mới rồi phát sự kiện → danh sách nạp lại.
+        services.Accounts.Insert(new Account { Email = "shop-moi", Password = "" });
+        services.RaiseAccountsChanged();
+
+        Assert.Equal(2, vm.Accounts.Count);
+        Assert.Contains(vm.Accounts, r => r.Email == "shop-moi");
+        // Sửa dở KHÔNG bị nạp đè, vẫn đang chọn đúng tài khoản.
+        Assert.Equal("changed", vm.EditPassword);
+        Assert.NotNull(vm.SelectedRow);
+        Assert.Equal("keep@mail.com", vm.SelectedRow!.Email);
+    }
+
 }

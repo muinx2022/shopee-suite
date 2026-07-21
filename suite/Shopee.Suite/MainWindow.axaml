@@ -19,7 +19,7 @@
                         Command="{Binding GoHomeCommand}" ToolTip.Tip="Về màn hình chính">
                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Spacing="11">
                         <Border Width="34" Height="34" CornerRadius="10" Background="{DynamicResource BrandBadgeBrush}"
-                                BoxShadow="0 2 6 0 #400A6BD8">
+                                BoxShadow="0 2 6 0 #40E0421D">
                             <TextBlock Text="S" FontSize="18" FontWeight="Bold" Foreground="White"
                                        HorizontalAlignment="Center" VerticalAlignment="Center" />
                         </Border>
@@ -97,11 +97,15 @@
                                                 </StackPanel>
                                             </Button>
                                         </DataTemplate>
-                                        <!-- TOGGLE (checkbox) -->
+                                        <!-- TOGGLE (checkbox): bọc Border cao 58 để hàng nút + nhãn nhóm KHỚP các
+                                             nút ribbon bên cạnh; checkbox căn giữa trong Border (cao tự nhiên ~32
+                                             → ô vuông + nhãn thẳng hàng, xem style CheckBox.ribbonToggle). -->
                                         <DataTemplate DataType="vm:RibbonToggleItem">
-                                            <CheckBox Classes="ribbonToggle" IsChecked="{Binding IsChecked}"
-                                                      Content="{Binding Title}" ToolTip.Tip="{Binding ToolTip}"
-                                                      VerticalAlignment="Center" Margin="6,0" />
+                                            <Border MinHeight="58" Margin="6,0">
+                                                <CheckBox Classes="ribbonToggle" IsChecked="{Binding IsChecked}"
+                                                          Content="{Binding Title}" ToolTip.Tip="{Binding ToolTip}"
+                                                          VerticalAlignment="Center" />
+                                            </Border>
                                         </DataTemplate>
                                     </ItemsControl.DataTemplates>
                                 </ItemsControl>

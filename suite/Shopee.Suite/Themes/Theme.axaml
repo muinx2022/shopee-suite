@@ -4,9 +4,10 @@
 
     <Styles.Resources>
         <!-- ══════════ COLOR / BRUSH TOKENS ══════════ -->
-        <SolidColorBrush x:Key="AccentBrush" Color="#0078D7" />
-        <SolidColorBrush x:Key="AccentHoverBrush" Color="#106EBE" />
-        <SolidColorBrush x:Key="AccentPressedBrush" Color="#005A9E" />
+        <!-- Accent = CAM Shopee #EE4D2D (đồng nhất toàn suite với module Đơn hàng). Hover/pressed là cam đậm dần. -->
+        <SolidColorBrush x:Key="AccentBrush" Color="#EE4D2D" />
+        <SolidColorBrush x:Key="AccentHoverBrush" Color="#D8431F" />
+        <SolidColorBrush x:Key="AccentPressedBrush" Color="#C23A1A" />
         <SolidColorBrush x:Key="SuccessBrush" Color="#00783C" />
         <SolidColorBrush x:Key="SuccessHoverBrush" Color="#06632F" />
         <SolidColorBrush x:Key="DangerBrush" Color="#C8463C" />
@@ -33,14 +34,14 @@
         </LinearGradientBrush>
         <SolidColorBrush x:Key="NavBarBorderBrush" Color="#0F1219" />
         <SolidColorBrush x:Key="NavDividerBrush" Color="#333B4E" />
-        <!-- Huy hiệu "S" + tab đang chọn: cùng dải accent gradient → nhận diện thương hiệu nhất quán. -->
+        <!-- Huy hiệu "S" + tab đang chọn: cùng dải accent gradient CAM Shopee → nhận diện thương hiệu nhất quán. -->
         <LinearGradientBrush x:Key="BrandBadgeBrush" StartPoint="0%,0%" EndPoint="0%,100%">
-            <GradientStop Offset="0" Color="#2A93F0" />
-            <GradientStop Offset="1" Color="#0A6BD8" />
+            <GradientStop Offset="0" Color="#FF6E4E" />
+            <GradientStop Offset="1" Color="#E0421D" />
         </LinearGradientBrush>
         <LinearGradientBrush x:Key="NavActiveBrush" StartPoint="0%,0%" EndPoint="0%,100%">
-            <GradientStop Offset="0" Color="#2A93F0" />
-            <GradientStop Offset="1" Color="#0A6BD8" />
+            <GradientStop Offset="0" Color="#FF6E4E" />
+            <GradientStop Offset="1" Color="#E0421D" />
         </LinearGradientBrush>
         <SolidColorBrush x:Key="NavItemHoverBrush" Color="#2C3346" />
         <SolidColorBrush x:Key="NavTextBrush" Color="#9BA3B5" />
@@ -60,10 +61,10 @@
         <FontFamily x:Key="EmojiFont">Segoe UI Emoji, Noto Color Emoji, sans-serif</FontFamily>
 
         <!-- ══════════ RESKIN FLUENTTHEME → look phẳng/gọn/pro như bản WPF ══════════ -->
-        <!-- Accent xanh của app (tab đang chọn, viền focus, highlight…). -->
-        <Color x:Key="SystemAccentColor">#0078D7</Color>
-        <Color x:Key="SystemAccentColorLight1">#1C86E0</Color>
-        <Color x:Key="SystemAccentColorDark1">#106EBE</Color>
+        <!-- Accent CAM Shopee của app (tab đang chọn, viền focus, highlight…). Light1/Dark1 là cam sáng/đậm hơn. -->
+        <Color x:Key="SystemAccentColor">#EE4D2D</Color>
+        <Color x:Key="SystemAccentColorLight1">#FF6B4A</Color>
+        <Color x:Key="SystemAccentColorDark1">#D8431F</Color>
         <!-- Bo góc chung cho control Fluent (TextBox/ComboBox/…) — Fluent mặc định hơi vuông. -->
         <CornerRadius x:Key="ControlCornerRadius">6</CornerRadius>
         <!-- Tab: Fluent mặc định font header RẤT to (~24) → thu về gọn. (Chỉ override FontSize — các key khác
@@ -77,11 +78,11 @@
         <!-- TextBox/ComboBox: Fluent mặc định focus = gạch chân accent 2px (0,0,0,2) trông thô & "nhảy".
              → viền accent 1px ĐỀU quanh ô. Hover chỉ đậm viền xám nhẹ (không nhảy sang accent chói). -->
         <Thickness x:Key="TextControlBorderThemeThicknessFocused">1</Thickness>
-        <SolidColorBrush x:Key="TextControlBorderBrushFocused" Color="#0078D7" />
+        <SolidColorBrush x:Key="TextControlBorderBrushFocused" Color="#EE4D2D" />
         <SolidColorBrush x:Key="TextControlBorderBrushPointerOver" Color="#AEB3BD" />
         <!-- ComboBox focus: viền accent (khớp TextBox) cho cả focus chuột lẫn bàn phím. HighlightBackground
              (lớp trên) chỉ hiện khi focus bàn phím → đổi luôn brush của nó sang accent. -->
-        <SolidColorBrush x:Key="ComboBoxBackgroundBorderBrushFocused" Color="#0078D7" />
+        <SolidColorBrush x:Key="ComboBoxBackgroundBorderBrushFocused" Color="#EE4D2D" />
 
         <!-- Tab trong module (TabControl): chữ tab CHƯA chọn — xám đậm-vừa RÕ (không nhợt như Fluent mặc định). -->
         <SolidColorBrush x:Key="TabUnselectedBrush" Color="#565C66" />
@@ -90,10 +91,10 @@
         <SolidColorBrush x:Key="DataGridCellFocusVisualPrimaryBrush" Color="Transparent" />
         <SolidColorBrush x:Key="DataGridCellFocusVisualSecondaryBrush" Color="Transparent" />
         <!-- Dòng đang chọn: Fluent tô accent ~60% (hơi gắt) → nền accent NHẠT, chữ giữ đen dễ đọc. -->
-        <SolidColorBrush x:Key="DataGridRowSelectedBackgroundBrush" Color="#0078D7" />
-        <SolidColorBrush x:Key="DataGridRowSelectedHoveredBackgroundBrush" Color="#0078D7" />
-        <SolidColorBrush x:Key="DataGridRowSelectedUnfocusedBackgroundBrush" Color="#0078D7" />
-        <SolidColorBrush x:Key="DataGridRowSelectedHoveredUnfocusedBackgroundBrush" Color="#0078D7" />
+        <SolidColorBrush x:Key="DataGridRowSelectedBackgroundBrush" Color="#EE4D2D" />
+        <SolidColorBrush x:Key="DataGridRowSelectedHoveredBackgroundBrush" Color="#EE4D2D" />
+        <SolidColorBrush x:Key="DataGridRowSelectedUnfocusedBackgroundBrush" Color="#EE4D2D" />
+        <SolidColorBrush x:Key="DataGridRowSelectedHoveredUnfocusedBackgroundBrush" Color="#EE4D2D" />
         <sys:Double x:Key="DataGridRowSelectedBackgroundOpacity">0.14</sys:Double>
         <sys:Double x:Key="DataGridRowSelectedHoveredBackgroundOpacity">0.20</sys:Double>
         <sys:Double x:Key="DataGridRowSelectedUnfocusedBackgroundOpacity">0.11</sys:Double>
@@ -188,7 +189,7 @@
         <Setter Property="HorizontalContentAlignment" Value="Stretch" />
     </Style>
     <Style Selector="Button.card:pointerover /template/ Border#PART_bd">
-        <Setter Property="Background" Value="#F4F9FF" />
+        <Setter Property="Background" Value="#FFF4F1" />
         <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
     </Style>
 
@@ -402,10 +403,14 @@
         <Setter Property="Foreground" Value="{DynamicResource TextOnAccentBrush}" />
     </Style>
 
-    <!-- Toggle (checkbox) trên ribbon — canh giữa dọc, chữ gọn. -->
+    <!-- Toggle (checkbox) trên ribbon — ô vuông + nhãn THẲNG HÀNG. Trước đây ép MinHeight=58 để khớp chiều cao
+         nút ribbon, NHƯNG template Fluent để ô vuông trong wrapper top-align cao ~32 → ô vuông nằm TRÊN, chữ
+         (VerticalContentAlignment=Center) nằm GIỮA 58 → lệch. Nay để checkbox cao TỰ NHIÊN (~32): wrapper ô
+         vuông lấp đúng chiều cao control nên ô vuông + chữ (đều center) THẲNG HÀNG. Chiều cao 58 để nhãn nhóm
+         khớp các nút ribbon được đặt ở Border BỌC trong MainWindow.axaml (checkbox căn giữa trong Border đó). -->
     <Style Selector="CheckBox.ribbonToggle">
         <Setter Property="FontSize" Value="12" />
-        <Setter Property="MinHeight" Value="58" />
+        <Setter Property="VerticalAlignment" Value="Center" />
         <Setter Property="VerticalContentAlignment" Value="Center" />
     </Style>
 </Styles>

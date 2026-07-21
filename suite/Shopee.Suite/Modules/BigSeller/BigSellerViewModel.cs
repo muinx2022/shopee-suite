@@ -227,6 +227,10 @@ public sealed partial class BigSellerViewModel : ModuleViewModelBase
                 added++;
             }
 
+            // Có dòng mới → báo màn "Tài khoản" (đơn hàng) đang mở tự nạp lại để thấy shop NGAY, không phải đổi
+            // màn. Lệnh này chạy trên UI thread nên handler bên kia Reload() đồng bộ (CheckAccess()==true).
+            if (added > 0) svc.RaiseAccountsChanged();
+
             Status = $"Đã thêm {added} shop sang Đơn hàng, bỏ qua {skipped} đã có/trùng. " +
                      "Bổ sung mật khẩu hoặc đăng nhập tay lần đầu ở tab Đơn hàng.";
         }

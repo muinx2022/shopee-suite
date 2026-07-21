@@ -44,6 +44,11 @@ public partial class AccountsViewModel : ViewModelBase
         // Dispatcher.UIThread.Post) → handler ĐỒNG BỘ, KHÔNG lock/await (rebuild là vòng for thuần).
         _services.Log.Entries.CollectionChanged += OnLogEntriesChanged;
 
+        // Có nguồn NGOÀI màn này thêm tài khoản (sync shop từ BigSeller Insert dòng mới) → nghe để tự nạp lại
+        // danh sách, thấy shop mới ngay không cần đổi màn. Sự kiện có thể đến từ thread nền → marshal về UI
+        // thread (RunOnUi) trước khi đụng ObservableCollection.
+        _services.AccountsChanged += OnAccountsChanged;
+
         // Nạp cờ "Xóa profile và tạo lại" từ Settings (bền qua restart). Setter tự LƯU nên chặn ghi ngược
         // trong lúc nạp bằng _loadingSettings.
         _loadingSettings = true;
@@ -871,6 +876,13 @@ public partial class AccountsViewModel : ViewModelBase
         SyncAllRows();
         UpdateSelectedSessionStatus();
     });
+
+    /// <summary>
+    /// TẬP tài khoản đổi từ NGOÀI màn này (vd sync shop BigSeller Insert dòng mới) → marshal về UI thread rồi
+    /// <see cref="Reload"/> để danh sách đón dòng mới ngay. <see cref="Reload"/> đã GIỮ lựa chọn/form/tick hiện
+    /// tại (chọn lại theo <c>_editingId</c>/SelectedRow, khôi phục tick theo Id) nên ngữ nghĩa không đổi.
+    /// </summary>
+    private void OnAccountsChanged() => RunOnUi(Reload);
 
     /// <summary>
     /// Đồng bộ trạng thái phiên vào mọi dòng đang hiển thị. LUÔN chạy trên UI thread (gọi từ
