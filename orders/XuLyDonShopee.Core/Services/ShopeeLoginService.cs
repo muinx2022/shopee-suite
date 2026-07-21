@@ -3479,6 +3479,26 @@ public class ShopeeLoginService
                     }
                     L($"Sync trang {pages}: {pageOrders.Count} đơn.");
 
+                    // Chẩn đoán (chỉ trang 1): các trạng thái đọc được + HTML rút gọn cột trạng thái card đầu —
+                    // để soi & tinh chỉnh selector nếu Shopee đổi cấu trúc (trạng thái đọc rỗng/sai).
+                    if (pages == 1)
+                    {
+                        var statuses = string.Join(", ", pageOrders
+                            .Select(o => string.IsNullOrWhiteSpace(o.Status) ? "(trống)" : o.Status)
+                            .Distinct()
+                            .Take(12));
+                        L($"Trạng thái đọc được (trang 1): {statuses}");
+                        try
+                        {
+                            var statusHtml = await page.EvaluateAsync<string>(
+                                @"() => { const c = document.querySelector(""a[data-testid='order-item']""); if (!c) return '(không thấy card)';"
+                                + " const col = c.querySelector('.status-info-col') || c; return (col.outerHTML || '').replace(/\\s+/g,' ').slice(0, 700); }")
+                                .ConfigureAwait(false);
+                            L("HTML cột trạng thái (card đầu): " + statusHtml);
+                        }
+                        catch { /* chẩn đoán best-effort — bỏ qua nếu lỗi */ }
+                    }
+
                     // 2b) Lấy "Số tiền cuối cùng" cho các đơn của TRANG NÀY: đơn KHÁC "Đã hủy" VÀ chưa có
                     //     final_amount (DB lần trước qua ordersWithFinalAmount, hoặc đã lấy ở trang trước trong
                     //     lượt này qua FinalAmount != null). Mở CHI TIẾT trên tab MỚI → đọc → đóng. CHẬM (mỗi
@@ -3605,8 +3625,28 @@ public class ShopeeLoginService
             const payEl = card.querySelector('.payment-method');
             const payment = payEl ? norm(payEl.textContent) : '';
 
-            const statusEl = card.querySelector('.status-info-col .status');
-            const status = statusEl ? norm(statusEl.textContent) : '';
+            // Trạng thái: LẤY THEO TEXT THẬT của cột (đã giao / đã hủy / chuẩn bị hàng / chờ lấy hàng...), KHÔNG
+            // cố định 1 trạng thái. Ưu tiên .status; rỗng thì thử phần tử có class chứa 'status' (bỏ mô tả & cột
+            // bao); cuối cùng lấy phần tử con ĐẦU TIÊN có text. Bỏ text của .status-description để không dính mô tả.
+            const statusColEl = card.querySelector('.status-info-col');
+            let status = '';
+            if (statusColEl) {
+                let stEl = statusColEl.querySelector('.status');
+                if (!stEl) {
+                    for (const c of statusColEl.querySelectorAll('[class*=status]')) {
+                        const cls = (typeof c.className === 'string') ? c.className : '';
+                        if (cls.indexOf('status-description') >= 0 || cls.indexOf('status-info-col') >= 0) continue;
+                        if (norm(c.textContent)) { stEl = c; break; }
+                    }
+                }
+                status = stEl ? norm(stEl.textContent) : '';
+                if (!status) {
+                    for (const ch of statusColEl.children) {
+                        const t = norm(ch.textContent);
+                        if (t) { status = t; break; }
+                    }
+                }
+            }
 
             const sdescEl = card.querySelector('.status-description');
             const statusDesc = sdescEl ? norm(sdescEl.textContent) : '';
