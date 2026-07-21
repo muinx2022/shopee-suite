@@ -1154,12 +1154,28 @@ public class ShopeeLoginService
             L("Bấm link xác nhận trong mail...");
             var before = _browser.Contexts.SelectMany(c => c.Pages).ToList();
 
-            var vp = mailPage.ViewportSize;
-            double mx = vp is not null ? vp.Width / 2.0 : 640;
-            double my = vp is not null ? vp.Height / 2.0 : 360;
-            // Click MÙ theo tọa độ (link trong iframe → hit-test elementFromPoint lệch hệ tọa độ; thân mail
-            // đơn giản, không submenu/flyout đè nên click thẳng an toàn).
-            await HumanMoveAndClickAsync(mailPage, confirmEl, mx, my, rng, ct).ConfigureAwait(false);
+            // Cuộn link vào tầm nhìn TRƯỚC (link "TẠI ĐÂY" có thể nằm cuối mail, ngoài màn hình → click tọa độ
+            // sẽ trượt), rồi ƯU TIÊN click ĐÚNG phần tử link bằng Playwright: nó tự hit-test theo đúng frame của
+            // element (không lệch hệ tọa độ như elementFromPoint ở main frame) → bấm trúng đúng chữ "TẠI ĐÂY".
+            try { await confirmEl.ScrollIntoViewIfNeededAsync().ConfigureAwait(false); } catch { /* bỏ qua */ }
+
+            bool clicked = false;
+            try
+            {
+                await confirmEl.ClickAsync(new ElementHandleClickOptions { Timeout = 5000 }).ConfigureAwait(false);
+                clicked = true;
+            }
+            catch (OperationCanceledException) { throw; }
+            catch { /* bị che / actionability timeout → lùi về click theo tọa độ ở dưới */ }
+
+            if (!clicked)
+            {
+                // Fallback: di chuột kiểu người tới tâm bounding box của ĐÚNG link rồi click tọa độ.
+                var vp = mailPage.ViewportSize;
+                double mx = vp is not null ? vp.Width / 2.0 : 640;
+                double my = vp is not null ? vp.Height / 2.0 : 360;
+                await HumanMoveAndClickAsync(mailPage, confirmEl, mx, my, rng, ct).ConfigureAwait(false);
+            }
 
             // Link thường mở TAB MỚI → bắt tab (poll ≤10s).
             IPage? confirmTab = null;
