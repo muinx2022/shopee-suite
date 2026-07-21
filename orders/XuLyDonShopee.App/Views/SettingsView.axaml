@@ -7,6 +7,15 @@
              x:Class="XuLyDonShopee.App.Views.SettingsView"
              x:DataType="vm:SettingsViewModel">
 
+    <!-- Tài nguyên (màu + converter) của module — TỰ CHỨA để mỗi view độc lập với Application của suite. -->
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceInclude Source="avares://XuLyDonShopee.App/Styles/ModuleResources.axaml" />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </UserControl.Resources>
+
     <!-- Bố cục 2 cột: tiêu đề full width; hàng dưới chia đều 2 cột -
          TRÁI = Tự động hóa; PHẢI = Google Sheet + Thông báo (xếp dọc).
          ScrollViewer chỉ cuộn dọc khi cửa sổ thật sự thấp. -->

@@ -16,7 +16,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.3.2" />
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
     <PackageReference Include="Avalonia" Version="11.3.0" />
     <PackageReference Include="Avalonia.Desktop" Version="11.3.0" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.0" />
@@ -33,6 +33,8 @@
     <ProjectReference Include="..\Shopee.Module.MultiBrave\Shopee.Module.MultiBrave.csproj" />
     <ProjectReference Include="..\Shopee.Module.Search\Shopee.Module.Search.csproj" />
     <ProjectReference Include="..\Shopee.Module.UpdateProduct\Shopee.Module.UpdateProduct.csproj" />
+    <!-- Module "Xử lý đơn Shopee" (phase 1b): app đơn hàng nay là thư viện, shell nạp MainViewModel qua OrdersModuleHost. -->
+    <ProjectReference Include="..\..\orders\XuLyDonShopee.App\XuLyDonShopee.App.csproj" />
   </ItemGroup>
 
   <!-- ════ Gói kèm extension vào output để app tự chứa (chạy máy khác không cần repo) ════ -->

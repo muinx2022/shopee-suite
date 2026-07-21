@@ -9,6 +9,15 @@
              x:CompileBindings="False"
              x:DataType="vm:AutoRunViewModel">
 
+    <!-- Tài nguyên (màu + converter) của module — TỰ CHỨA để mỗi view độc lập với Application của suite. -->
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceInclude Source="avares://XuLyDonShopee.App/Styles/ModuleResources.axaml" />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </UserControl.Resources>
+
     <!-- Bố cục 2 cột CHIA ĐỀU 3:2 — form cấu hình + điều khiển (TRÁI, GIÃN hết cột 3*) | panel nhật ký TOÀN BỘ
          hoạt động autorun (PHẢI, 2*). Form stretch theo cột (không neo trái/không trần) nên KHÔNG hở giữa. -->
     <Grid ColumnDefinitions="3*,2*">

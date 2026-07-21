@@ -1,0 +1,22 @@
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:conv="using:XuLyDonShopee.App.Converters">
+
+    <!-- ═══ Tài nguyên DÙNG CHUNG của module đơn hàng (màu Colors.axaml + 6 converter) ═══
+         Khi app còn độc lập, bộ này nằm ở App.axaml cấp Application nên mọi view thấy được. Nay app là
+         module của Shopee.Suite: ViewLocator DỰNG mỗi view ĐỘC LẬP (new AccountsView()...) rồi mới gắn vào
+         cây, nên các StaticResource resolve EAGER lúc parse (trong <UserControl.Styles> cục bộ hoặc làm
+         Converter={StaticResource ...} của Binding) CHỈ thấy phạm vi: chính view + Application của suite —
+         KHÔNG thấy MainView.Resources. Để mỗi view tự đủ tài nguyên (và KHÔNG đổ màu cam của orders vào
+         Application suite gây lẫn với AccentBrush xanh của suite), mỗi view merge file này vào Resources riêng. -->
+    <ResourceDictionary.MergedDictionaries>
+        <ResourceInclude Source="avares://XuLyDonShopee.App/Styles/Colors.axaml" />
+    </ResourceDictionary.MergedDictionaries>
+
+    <conv:VietnameseEnumConverter x:Key="VnEnum" />
+    <conv:StatusColorConverter x:Key="StatusColor" />
+    <conv:DateTimeDisplayConverter x:Key="DateDisplay" />
+    <conv:InitialConverter x:Key="Initial" />
+    <conv:StatusPillConverter x:Key="StatusPill" />
+    <conv:OrderStatusPillConverter x:Key="OrderStatusPill" />
+</ResourceDictionary>

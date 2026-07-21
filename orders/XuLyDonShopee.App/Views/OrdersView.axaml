@@ -8,6 +8,17 @@
              x:CompileBindings="False"
              x:DataType="vm:OrdersViewModel">
 
+    <!-- Tài nguyên (màu + converter) của module — mỗi view TỰ CHỨA vì ViewLocator dựng view độc lập trước khi
+         gắn cây; StaticResource trong Style cục bộ / Converter của Binding resolve EAGER lúc parse nên phải thấy
+         ngay ở scope view (không tràn vào Application suite). Đặt TRƯỚC Styles để Style cục bộ tìm được màu. -->
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceInclude Source="avares://XuLyDonShopee.App/Styles/ModuleResources.axaml" />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </UserControl.Resources>
+
     <!-- Nút dạng link (cột "Phiếu"): nền trong suốt, chữ cam, gạch chân khi rê chuột -->
     <UserControl.Styles>
         <Style Selector="Button.linky">

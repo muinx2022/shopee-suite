@@ -1,25 +1,38 @@
-<Window xmlns="https://github.com/avaloniaui"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:vm="using:XuLyDonShopee.App.ViewModels"
-        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
-        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-        mc:Ignorable="d" d:DesignWidth="1480" d:DesignHeight="860"
-        x:Class="XuLyDonShopee.App.Views.MainWindow"
-        x:DataType="vm:MainViewModel"
-        Width="1480" Height="860"
-        MinWidth="1200" MinHeight="640"
-        FontFamily="{StaticResource UiFont}"
-        Icon="/Assets/avalonia-logo.ico"
-        Title="Xử lý đơn Shopee">
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:XuLyDonShopee.App.ViewModels"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="1480" d:DesignHeight="860"
+             x:Class="XuLyDonShopee.App.Views.MainView"
+             x:DataType="vm:MainViewModel"
+             FontFamily="{StaticResource UiFont}">
 
-    <Window.Background>
-        <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
-            <GradientStop Offset="0" Color="#F7F8FA" />
-            <GradientStop Offset="1" Color="#F0F2F5" />
-        </LinearGradientBrush>
-    </Window.Background>
+    <!-- ═══ Cô lập tài nguyên/style của module vào ĐÚNG subtree này (không đổ vào Application của suite) ═══
+         Trước đây (app độc lập) Colors.axaml + 6 converter + Controls.axaml nằm ở App.axaml cấp Application.
+         Nay app là module của Shopee.Suite: khai báo tại UserControl để orange/converter/class của đơn hàng
+         KHÔNG đè lên (và không bị đè bởi) Theme.axaml của suite — 2 bên trùng key AccentBrush/SuccessBrush/… -->
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceInclude Source="avares://XuLyDonShopee.App/Styles/ModuleResources.axaml" />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </UserControl.Resources>
+
+    <UserControl.Styles>
+        <StyleInclude Source="avares://XuLyDonShopee.App/Styles/Controls.axaml" />
+    </UserControl.Styles>
 
     <DockPanel>
+
+        <!-- Nền gradient (trước là Window.Background) chuyển xuống DockPanel gốc của UserControl. -->
+        <DockPanel.Background>
+            <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
+                <GradientStop Offset="0" Color="#F7F8FA" />
+                <GradientStop Offset="1" Color="#F0F2F5" />
+            </LinearGradientBrush>
+        </DockPanel.Background>
 
         <!-- ===== Thanh MENU NGANG (trên) ===== -->
         <Border DockPanel.Dock="Top" Classes="topbar">
@@ -74,4 +87,4 @@
         <!-- ===== Nội dung (full width) ===== -->
         <ContentControl Content="{Binding CurrentViewModel}" />
     </DockPanel>
-</Window>
+</UserControl>

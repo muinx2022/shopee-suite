@@ -12,6 +12,7 @@
              xmlns:fleet="using:Shopee.Suite.Modules.Fleet"
              xmlns:settings="using:Shopee.Suite.Modules.Settings"
              xmlns:conv="using:Shopee.Suite.Infrastructure"
+             xmlns:ordersRoot="using:XuLyDonShopee.App"
              RequestedThemeVariant="Light">
 
     <Application.Resources>
@@ -39,5 +40,10 @@
         <DataTemplate DataType="ca:CheckAccountViewModel"><ca:CheckAccountView /></DataTemplate>
         <DataTemplate DataType="fleet:FleetViewModel"><fleet:FleetView /></DataTemplate>
         <DataTemplate DataType="settings:SettingsViewModel"><settings:SettingsView /></DataTemplate>
+
+        <!-- Module "Xử lý đơn Shopee" (phase 1b): ViewLocator reflection của app đơn hàng — Match CHỈ nhận
+             XuLyDonShopee.App.ViewModels.ViewModelBase nên KHÔNG hijack VM của suite; các DataTemplate tường
+             minh ở trên vẫn thắng cho VM suite. Resolve MainViewModel → Views.MainView (UserControl). -->
+        <ordersRoot:ViewLocator />
     </Application.DataTemplates>
 </Application>

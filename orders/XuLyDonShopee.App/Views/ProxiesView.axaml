@@ -8,6 +8,16 @@
              x:CompileBindings="False"
              x:DataType="vm:ProxiesViewModel">
 
+    <!-- Tài nguyên (màu + converter) của module — TỰ CHỨA vì ViewLocator dựng view độc lập; các Converter=
+         {StaticResource VnEnum/DateDisplay} trong Binding resolve EAGER lúc parse nên phải thấy ngay ở scope view. -->
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceInclude Source="avares://XuLyDonShopee.App/Styles/ModuleResources.axaml" />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </UserControl.Resources>
+
     <DockPanel Margin="24,24,32,24">
 
         <!-- Tiêu đề -->

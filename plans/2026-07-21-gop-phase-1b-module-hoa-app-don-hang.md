@@ -1,7 +1,7 @@
 # Plan: Gộp phase 1b — module hóa app đơn hàng vào shell Shopee.Suite
 
 - **Ngày:** 2026-07-21
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành (2026-07-21 — Fable nghiệm thu: tự build 0 lỗi 0 warning + 720/720 test + smoke run app sống 10s; diff đúng phạm vi; sai lệch "mỗi view tự chứa ModuleResources" hợp lý và đã kiểm chứng. Còn 2 việc chờ người dùng: liếc màu nút .accent trong tab Đơn hàng + chạy thật login/sync với Playwright 1.60 trước khi merge main)
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-executor`)
 - **Nhánh:** `feature/gop-don-hang` (đã checkout sẵn trên cây chính — KHÔNG đụng `main`)
 
@@ -162,4 +162,47 @@ view — GIỮ NGUYÊN trong csproj của orders (thuộc tính theo project, kh
 
 ## Báo cáo thực thi (Opus điền sau khi xong)
 
-<chưa có>
+**Ngày thực thi:** 2026-07-21 · **Kết quả:** build 0 lỗi/0 warning · 720/720 test · app chạy được (module render, không crash).
+
+### A. Module hóa `orders/XuLyDonShopee.App`
+- `XuLyDonShopee.App.csproj`: bỏ `OutputType=WinExe` (thành Library), bỏ `ApplicationManifest` + `BuiltInComInteropSupport`; nâng Avalonia 11.2.8 → **11.3.0** (5 gói); giữ `AvaloniaUseCompiledBindingsByDefault=true` và ghi chú "không R2R". (WindowFocus.cs dùng P/Invoke `DllImport`, KHÔNG phải COM interop → bỏ cờ COM an toàn.)
+- Xóa: `Program.cs`, `App.axaml`, `App.axaml.cs`, `app.manifest`. Giữ `ViewLocator.cs`. App root giờ chỉ còn `ViewLocator.cs`.
+- `Views/MainWindow.axaml(.cs)` → **`Views/MainView.axaml(.cs)`** (`Window`→`UserControl`, class `MainView`). Bỏ Title/Icon/Width/Height/WindowStartupLocation; chuyển gradient `Window.Background` xuống `DockPanel.Background`. Giữ `x:DataType`, topbar/statusBar/`ContentControl`.
+- Cô lập style: `MainView.Resources` merge tài nguyên module; `MainView.Styles` include `Controls.axaml`; `FontFamily="{StaticResource UiFont}"` trên UserControl. KHÔNG thêm gì vào Application của suite.
+
+### B. Đồng bộ version
+- `XuLyDonShopee.Core.csproj`: Playwright 1.49.0 → **1.60.0**.
+- `Shopee.Suite.csproj`: CommunityToolkit.Mvvm 8.3.2 → **8.4.2**; thêm `ProjectReference` → `orders/XuLyDonShopee.App`.
+
+### C. Cắm vào shell
+- `Infrastructure/OrdersModuleHost.cs` (mới): `Services` + `TryCreate()` (dựng `AppServices`+`MainViewModel`, lỗi → log Trace, trả null, suite vẫn boot) + `StopAsync()` (AutoRun.StopAsync → Sessions.StopAllAsync, có cờ `_stopped` chống gọi đúp; 2 lệnh dừng vốn idempotent).
+- `Infrastructure/AppIcons.cs`: thêm hằng `Receipt` (Material `receipt_long` 24×24).
+- `ViewModels/ShellViewModel.cs`: ctor gọi `OrdersModuleHost.TryCreate()`, chèn `ModuleItem("Xử lý đơn Shopee", AppIcons.Receipt, …, "Đơn hàng")` NGAY TRƯỚC "Cài đặt"; nối `await OrdersModuleHost.StopAsync()` vào cuối `UpdateService.PrepareShutdownAsync`.
+- `App.axaml`: thêm `xmlns:ordersRoot="using:XuLyDonShopee.App"` + `<ordersRoot:ViewLocator/>` cuối `Application.DataTemplates`.
+- `App.axaml.cs`: `DialogService.MainWindow = desktop.MainWindow;` sau khi tạo MainWindow; trong `ShutdownRequested` thêm `OrdersModuleHost.StopAsync().GetAwaiter().GetResult();` (block, đặt TRƯỚC `MultiBraveRuntime.Cleanup()`).
+
+### D. Kiểm chứng (đã chạy thật)
+1. `dotnet build ShopeeSuite.sln -c Release` → **Build succeeded, 0 Warning(s), 0 Error(s)**. KHÔNG có NU1605/NU1608 (version đồng bộ sạch, không downgrade ngầm).
+2. `dotnet test orders/XuLyDonShopee.Tests -c Release` → **Passed! Failed: 0, Passed: 720**. (WDAC không chặn test lần này.)
+3. Chạy thật `ShopeeSuite.exe` (2 lượt): (a) mặc định Welcome — app sống >12s, cửa sổ "Shopee Suite" mở, `OrdersModuleHost.TryCreate()` mở SQLite `%APPDATA%\XuLyDonShopee\app.db` + migration KHÔNG làm sập app (crash log chỉ có 1 notice lành tính của StartupJanitor). (b) tạm đặt module Đơn hàng làm mục chọn mặc định (đã HOÀN NGUYÊN sau khi test) — app sống >14s, MainView + AccountsView render dưới môi trường suite THẬT (Button ControlTheme thật, font thật), **KHÔNG có crash log nào**.
+   - WDAC/ISG KHÔNG chặn chạy lần này (exe build lặp hash được ISG allow).
+
+### ⚠️ Sai lệch so với plan (quan trọng — cần Fable nghiệm thu)
+Plan (mục A4 + rủi ro) chỉ lường lỗi **màu nút**, và giả định đặt tài nguyên ở `MainView.Resources` là đủ cô lập. **Thực tế không đủ**: đã kiểm chứng bằng harness Avalonia headless (dùng chính assembly orders) rằng `ViewLocator` DỰNG mỗi child view ĐỘC LẬP (`new AccountsView()`…) rồi mới gắn cây, nên các `StaticResource` resolve **EAGER lúc parse** (nằm trong `<UserControl.Styles>` cục bộ, hoặc làm `Converter={StaticResource …}` của Binding) CHỈ thấy phạm vi `view + Application(suite)` — KHÔNG thấy `MainView.Resources`. Hệ quả nếu làm đúng nguyên văn plan: **`AccountsView`/`OrdersView`/`ProxiesView` ném `KeyNotFoundException` (Static resource 'Text5A'/'AccentHoverBrush'/'VnEnum' not found) → bấm tab tương ứng là crash.** (Các `StaticResource` dùng trực tiếp làm giá trị thuộc tính thì DEFER đến attach-time nên `AutoRunView`/`SettingsView` không lỗi.)
+
+**Cách xử lý đã áp dụng** (giữ đúng ý đồ plan là cô lập, KHÔNG đổ tài nguyên orders vào Application suite):
+- Thêm `orders/XuLyDonShopee.App/Styles/ModuleResources.axaml` (mới) = ResourceDictionary gộp `Colors.axaml` + 6 converter.
+- Mỗi view (`MainView` + 5 child: Accounts/Orders/AutoRun/Proxies/Settings) merge `ModuleResources.axaml` vào `<UserControl.Resources>` RIÊNG (đặt TRƯỚC `<UserControl.Styles>` ở view có style cục bộ). Mỗi view TỰ ĐỦ tài nguyên → eager & deferred đều resolve từ scope view.
+- 2 dialog (ConfirmDialog/ImportProxyDialog): đã kiểm không dùng StaticResource/Classes → không đụng.
+
+**Kiểm chứng cách xử lý** (harness `resprobe`, headless, assembly orders thật):
+- TEST 1: cả 5 child view `new …()` standalone KHÔNG ném.
+- TEST 2: mọi view `FindResource("AccentBrush")` = **#FFEE4D2D (CAM)**, che màu xanh `#FF0078D7` đặt ở Application (giả lập suite); `TextInk`=#FF1C1C1C, `AccentHoverBrush`=#FFE0431F (đều giá trị orders). → Style KHÔNG lẫn 2 chiều: orders vẫn cam, suite vẫn xanh (vì orders không đặt ở Application).
+
+Đây là **thêm 6 file/sửa 5 view ngoài danh sách file plan liệt kê** — sai lệch có chủ đích, đã verify, để module chạy được đúng mục tiêu plan.
+
+### Ghi chú hiện trạng / lưu ý cho người dùng
+- **Nút `.accent` (và các class dùng `/template/ ContentPresenter#PART_ContentPresenter`)**: phân tích + chạy thật cho thấy **vẫn ăn màu cam** — template Button toàn cục của suite (`Theme.axaml`) đặt tên ContentPresenter đúng `PART_ContentPresenter` nên selector của orders khớp; giá trị `AccentBrush` trong Controls.axaml resolve = cam (Controls.axaml parse dưới scope MainView). AccountsView (có nút accent) render khi chạy thật, không crash. **Chưa soi pixel** (headless không rasterize được font Inter để chụp) → đề nghị người dùng liếc mắt xác nhận màu nút + hover khi mở tab Đơn hàng; nếu lệch, thêm setter cấp control trong Controls.axaml làm fallback (KHÔNG sửa Theme.axaml suite).
+- **Nghiệm thu runtime cuối** (mở Brave + login + sync đơn thật, Playwright 1.49→1.60) do NGƯỜI DÙNG làm sau khi merge — phase này chỉ build/test/app-mở-được.
+- **SQLite chung file**: khi chạy suite hợp nhất, KHÔNG chạy app `Xu-ly-don-shopee` cũ song song (tranh khóa `%APPDATA%\XuLyDonShopee\app.db`).
+- Không đụng `server/`, không đụng `main`, KHÔNG commit (chờ Fable nghiệm thu).

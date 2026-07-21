@@ -1,10 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <OutputType>WinExe</OutputType>
+    <!-- Thư viện module (phase 1b): trước là WinExe độc lập, nay build thành DLL để shell Shopee.Suite nạp.
+         Bỏ ApplicationManifest/app.manifest (chỉ dùng cho exe) và BuiltInComInteropSupport (không có COM interop;
+         WindowFocus dùng P/Invoke DllImport, không cần cờ này). -->
     <TargetFramework>net8.0</TargetFramework>
     <Nullable>enable</Nullable>
-    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
-    <ApplicationManifest>app.manifest</ApplicationManifest>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
     <!-- KHÔNG bật PublishReadyToRun: R2R crossgen recompile mọi DLL ngay trên máy → sinh hash lạ →
          Avalonia.Desktop.dll mất uy tín ISG cloud của bản NuGet gốc → WDAC (UMCI Enforced) chặn 0x800711C7.
@@ -17,11 +17,11 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Avalonia" Version="11.2.8" />
-    <PackageReference Include="Avalonia.Desktop" Version="11.2.8" />
-    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.2.8" />
-    <PackageReference Include="Avalonia.Fonts.Inter" Version="11.2.8" />
-    <PackageReference Include="Avalonia.Controls.DataGrid" Version="11.2.8" />
+    <PackageReference Include="Avalonia" Version="11.3.0" />
+    <PackageReference Include="Avalonia.Desktop" Version="11.3.0" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.0" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="11.3.0" />
+    <PackageReference Include="Avalonia.Controls.DataGrid" Version="11.3.0" />
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
   </ItemGroup>
 

@@ -60,6 +60,8 @@ public sealed partial class ShellViewModel : ObservableObject
             if (scrape.StopCommand.CanExecute(null)) scrape.StopCommand.Execute(null);
             if (search.StopCommand.CanExecute(null)) search.StopCommand.Execute(null);
             await worker.PrepareForShutdownAsync(TimeSpan.FromSeconds(40));
+            // Module đơn hàng: dừng vòng "Chạy tự động" + kill hết phiên Brave trước khi Velopack restart (vẫn trong trần 45s).
+            await OrdersModuleHost.StopAsync();
         };
         // Lệnh update từ Hub (operator bấm trên bảng) → cùng đường dừng-êm + restart như nút tay, qua
         // RemoteUpdateService (tự dedup theo mốc lệnh + chống vòng lặp restart khi apply hỏng).
@@ -86,6 +88,17 @@ public sealed partial class ShellViewModel : ObservableObject
             new ModuleItem("Cài đặt", AppIcons.Settings, "Hiệu năng · đồng bộ Hub · cập nhật",
                 settings, "Cài đặt"),
         ];
+
+        // Module "Xử lý đơn Shopee" (phase 1b): mở SQLite riêng của app đơn hàng qua OrdersModuleHost. Nếu init
+        // hỏng (đĩa/khóa DB) thì TryCreate trả null → suite vẫn chạy, chỉ thiếu module này. Chèn NGAY TRƯỚC "Cài đặt".
+        var ordersVm = OrdersModuleHost.TryCreate();
+        if (ordersVm is not null)
+        {
+            var ordersModule = new ModuleItem("Xử lý đơn Shopee", AppIcons.Receipt,
+                "Tài khoản shop · theo dõi & xử lý đơn · in phiếu", ordersVm, "Đơn hàng");
+            var settingsModule = Modules.First(m => ReferenceEquals(m.ViewModel, settings));
+            Modules.Insert(Modules.IndexOf(settingsModule), ordersModule);
+        }
 
         // Workspace bấm "Đăng nhập / cấu hình" → nhảy sidebar sang tab BigSeller (không làm trùng 2 nơi).
         workspace.RequestNavigate = target =>

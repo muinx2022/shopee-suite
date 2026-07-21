@@ -9,6 +9,17 @@
              x:Class="XuLyDonShopee.App.Views.AccountsView"
              x:DataType="vm:AccountsViewModel">
 
+    <!-- Tài nguyên (màu + converter) của module — mỗi view TỰ CHỨA vì ViewLocator dựng view độc lập trước khi
+         gắn cây; StaticResource trong Style cục bộ / Converter của Binding resolve EAGER lúc parse nên phải thấy
+         ngay ở scope view (không tràn vào Application suite). Đặt TRƯỚC Styles để Style cục bộ tìm được màu. -->
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceInclude Source="avares://XuLyDonShopee.App/Styles/ModuleResources.axaml" />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </UserControl.Resources>
+
     <!-- Style CỤC BỘ cho màn này (không đụng style chung → không ảnh hưởng màn khác). -->
     <UserControl.Styles>
 

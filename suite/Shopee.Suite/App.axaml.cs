@@ -3,6 +3,7 @@ using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using Shopee.Modules.MultiBrave;
+using Shopee.Suite.Infrastructure;
 using Shopee.Suite.Services;
 using Shopee.Suite.ViewModels;
 
@@ -62,10 +63,14 @@ public partial class App : Application
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
             desktop.MainWindow = new MainWindow { DataContext = new ShellViewModel() };
+            // Module đơn hàng dùng cửa sổ shell làm owner cho hộp thoại/StoragePicker (ConfirmDialog, chọn thư mục…).
+            XuLyDonShopee.App.Services.DialogService.MainWindow = desktop.MainWindow;
             desktop.ShutdownRequested += (_, _) =>
             {
                 // Flush ghi đĩa hoãn (PersistDebounce) để không mất sửa BigSeller cuối nếu đóng nhanh.
                 try { Shopee.Core.BigSeller.BigSellerStore.Shared.Save(); } catch { }
+                // Module đơn hàng: dừng vòng "Chạy tự động" + kill hết phiên Brave (block như app gốc, tránh Brave mồ côi).
+                try { OrdersModuleHost.StopAsync().GetAwaiter().GetResult(); } catch { }
                 try { MultiBraveRuntime.Cleanup(); } catch { }
             };
         }
