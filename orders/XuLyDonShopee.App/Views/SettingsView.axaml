@@ -1,0 +1,200 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:vm="using:XuLyDonShopee.App.ViewModels"
+             mc:Ignorable="d" d:DesignWidth="1084" d:DesignHeight="820"
+             x:Class="XuLyDonShopee.App.Views.SettingsView"
+             x:DataType="vm:SettingsViewModel">
+
+    <!-- Bố cục 2 cột: tiêu đề full width; hàng dưới chia đều 2 cột -
+         TRÁI = Tự động hóa; PHẢI = Google Sheet + Thông báo (xếp dọc).
+         ScrollViewer chỉ cuộn dọc khi cửa sổ thật sự thấp. -->
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <DockPanel LastChildFill="True">
+
+            <!-- Hàng tiêu đề (full width) -->
+            <StackPanel DockPanel.Dock="Top" Margin="24,24,24,0">
+                <TextBlock Text="Cài đặt" FontSize="19" FontWeight="Bold" LetterSpacing="-0.3"
+                           Foreground="{StaticResource TextInk}" />
+                <TextBlock Text="Tùy chỉnh nơi lưu hóa đơn, chu kỳ theo dõi đơn và đồng bộ Google Sheet" FontSize="12"
+                           Foreground="{StaticResource TextMuted}" Margin="0,2,0,0" />
+            </StackPanel>
+
+            <!-- Hàng nội dung: 2 cột chia đều, khe giữa 24px (12 + 12) -->
+            <Grid ColumnDefinitions="*,*">
+
+                <!-- ===== CỘT TRÁI: TỰ ĐỘNG HÓA ===== -->
+                <StackPanel Grid.Column="0" Margin="24,16,12,24">
+                    <TextBlock Classes="section" Text="TỰ ĐỘNG HÓA" Margin="0,0,0,12" />
+                    <Border Classes="card" Padding="24,22" Margin="0,0,0,24">
+                        <StackPanel Spacing="18">
+
+                            <!-- Thư mục lưu hóa đơn (thật) -->
+                            <StackPanel>
+                                <TextBlock Classes="fieldLabel" Text="Thư mục lưu hóa đơn" />
+                                <Grid ColumnDefinitions="*,8,Auto">
+                                    <Border Grid.Column="0" Classes="field" Height="38">
+                                        <Grid>
+                                            <TextBlock Text="{Binding InvoiceFolder}"
+                                                       FontFamily="{StaticResource MonoFont}" FontSize="13"
+                                                       Foreground="{StaticResource Text5A}"
+                                                       TextTrimming="CharacterEllipsis"
+                                                       VerticalAlignment="Center" Margin="12,0" />
+                                            <Border Classes="underline" />
+                                        </Grid>
+                                    </Border>
+                                    <Button Grid.Column="2" Classes="secondary" Content="Chọn…"
+                                            Command="{Binding ChooseInvoiceFolderCommand}" />
+                                </Grid>
+                                <TextBlock TextWrapping="Wrap" FontSize="11.5" Margin="0,6,0,0"
+                                           Foreground="{StaticResource TextMuted}"
+                                           Text="Phiếu giao (PDF) khi Xử lý đơn được lưu vào đây; link &quot;In phiếu&quot; ở màn Đơn hàng cũng mở từ đây. Bỏ trống ⇒ dùng thư mục mặc định cạnh dữ liệu app." />
+                            </StackPanel>
+
+                            <!-- Chu kỳ theo dõi đơn (thật) -->
+                            <StackPanel>
+                                <TextBlock Classes="fieldLabel" Text="Chu kỳ theo dõi đơn (phút)" />
+                                <NumericUpDown Classes="field" Value="{Binding OrderIntervalMinutes}" Minimum="1" Maximum="1440" Increment="1"
+                                               FormatString="0" Width="180" HorizontalAlignment="Left" />
+                                <TextBlock TextWrapping="Wrap" FontSize="11.5" Margin="0,6,0,0"
+                                           Foreground="{StaticResource TextMuted}"
+                                           Text="Số phút giữa các lần tự đọc số &quot;Chờ Lấy Hàng&quot;. Áp dụng cho các phiên mở SAU khi lưu." />
+                            </StackPanel>
+
+                            <!-- Lưu chu kỳ -->
+                            <StackPanel Orientation="Horizontal" Spacing="12">
+                                <Button Classes="accent" Content="Lưu"
+                                        Command="{Binding SaveIntervalCommand}" />
+                                <TextBlock Text="{Binding SavedMessage}" Foreground="{StaticResource SuccessBrush}" VerticalAlignment="Center"
+                                           IsVisible="{Binding SavedMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- ===== TRÌNH DUYỆT ===== -->
+                    <TextBlock Classes="section" Text="TRÌNH DUYỆT" Margin="0,0,0,12" />
+                    <Border Classes="card" Padding="24,22">
+                        <StackPanel Spacing="14">
+
+                            <!-- Chọn trình duyệt -->
+                            <StackPanel>
+                                <TextBlock Classes="fieldLabel" Text="Trình duyệt mở phiên" />
+                                <ComboBox Classes="field" Width="260" HorizontalAlignment="Left"
+                                          ItemsSource="{Binding BrowserOptions}"
+                                          SelectedItem="{Binding SelectedBrowser}">
+                                    <ComboBox.ItemTemplate>
+                                        <DataTemplate x:DataType="vm:BrowserChoiceOption">
+                                            <TextBlock Text="{Binding Label}" />
+                                        </DataTemplate>
+                                    </ComboBox.ItemTemplate>
+                                </ComboBox>
+                            </StackPanel>
+
+                            <!-- Trình duyệt THỰC sẽ dùng -->
+                            <TextBlock TextWrapping="Wrap" FontSize="11.5"
+                                       Foreground="{StaticResource TextMuted}"
+                                       Text="{Binding DetectedBrowserText, StringFormat='Đang dùng: {0}'}" />
+
+                            <!-- Ghi chú -->
+                            <TextBlock TextWrapping="Wrap" FontSize="11.5"
+                                       Foreground="{StaticResource TextMuted}"
+                                       Text="Chrome thường ít bị Shopee bắt captcha hơn Brave (Brave bật sẵn chống-fingerprint dễ bị nhận diện). Mỗi tài khoản vẫn mở hồ sơ riêng, không đụng trình duyệt cá nhân của bạn. Áp cho các phiên mở SAU khi lưu." />
+
+                            <!-- Lưu (thông báo RIÊNG của card Trình duyệt) -->
+                            <StackPanel Orientation="Horizontal" Spacing="12">
+                                <Button Classes="accent" Content="Lưu"
+                                        Command="{Binding SaveBrowserCommand}" />
+                                <TextBlock Text="{Binding BrowserSavedMessage}" Foreground="{StaticResource SuccessBrush}" VerticalAlignment="Center"
+                                           TextWrapping="Wrap"
+                                           IsVisible="{Binding BrowserSavedMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+
+                <!-- ===== CỘT PHẢI: ĐỒNG BỘ GOOGLE SHEET + THÔNG BÁO ===== -->
+                <StackPanel Grid.Column="1" Margin="12,16,24,24">
+
+                    <!-- ===== ĐỒNG BỘ GOOGLE SHEET ===== -->
+                    <TextBlock Classes="section" Text="ĐỒNG BỘ GOOGLE SHEET" Margin="0,0,0,12" />
+                    <Border Classes="card" Padding="24,22" Margin="0,0,0,24">
+                        <StackPanel Spacing="18">
+
+                            <!-- Link Web App Google Sheet -->
+                            <StackPanel>
+                                <TextBlock Classes="fieldLabel" Text="Link Web App Google Sheet" />
+                                <Border Classes="field" Height="38">
+                                    <Grid>
+                                        <TextBox Classes="bare" Margin="12,0"
+                                                 Text="{Binding GsheetWebAppUrl}"
+                                                 Watermark="https://script.google.com/macros/s/…/exec" />
+                                        <Border Classes="underline" />
+                                    </Grid>
+                                </Border>
+                            </StackPanel>
+
+                            <!-- Tab (sheet) ghi vào -->
+                            <StackPanel>
+                                <TextBlock Classes="fieldLabel" Text="Tab ghi vào" />
+                                <Border Classes="field" Height="38" Width="220" HorizontalAlignment="Left">
+                                    <Grid>
+                                        <TextBox Classes="bare" Margin="12,0"
+                                                 Text="{Binding GsheetTabName}"
+                                                 Watermark="tháng 4" />
+                                        <Border Classes="underline" />
+                                    </Grid>
+                                </Border>
+                                <TextBlock TextWrapping="Wrap" FontSize="11.5" Margin="0,6,0,0"
+                                           Foreground="{StaticResource TextMuted}"
+                                           Text="Sau mỗi lần Sync đơn hàng, app tự ghi đơn + link phiếu vào Google Sheet (tab đặt ở ô Tab ghi vào; để trống = tháng 4). Cách lấy link: docs/gsheet-huong-dan-cai-dat.md" />
+                            </StackPanel>
+
+                            <!-- Lưu link (thông báo RIÊNG của card GSheet) -->
+                            <StackPanel Orientation="Horizontal" Spacing="12">
+                                <Button Classes="accent" Content="Lưu"
+                                        Command="{Binding SaveGsheetUrlCommand}" />
+                                <TextBlock Text="{Binding GsheetSavedMessage}" Foreground="{StaticResource SuccessBrush}" VerticalAlignment="Center"
+                                           TextWrapping="Wrap"
+                                           IsVisible="{Binding GsheetSavedMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- ===== THÔNG BÁO ĐƠN MỚI (SLACK / DISCORD / TELEGRAM) ===== -->
+                    <TextBlock Classes="section" Text="THÔNG BÁO ĐƠN MỚI (SLACK / DISCORD / TELEGRAM)" Margin="0,0,0,12" />
+                    <Border Classes="card" Padding="24,22">
+                        <StackPanel Spacing="18">
+
+                            <!-- Link webhook (Slack / Discord / Telegram) -->
+                            <StackPanel>
+                                <TextBlock Classes="fieldLabel" Text="Link webhook (Slack / Discord / Telegram)" />
+                                <Border Classes="field" Height="38">
+                                    <Grid>
+                                        <TextBox Classes="bare" Margin="12,0"
+                                                 Text="{Binding NotifyWebhookUrl}"
+                                                 Watermark="https://hooks.slack.com/services/… hoặc webhook Discord/Telegram" />
+                                        <Border Classes="underline" />
+                                    </Grid>
+                                </Border>
+                                <TextBlock TextWrapping="Wrap" FontSize="11.5" Margin="0,6,0,0"
+                                           Foreground="{StaticResource TextMuted}"
+                                           Text="Có đơn hàng MỚI sau mỗi lần Sync → gửi thông tin đơn vào kênh chat. Cách lấy link: docs/thong-bao-webhook-huong-dan.md" />
+                            </StackPanel>
+
+                            <!-- Lưu link (thông báo RIÊNG của card Thông báo) -->
+                            <StackPanel Orientation="Horizontal" Spacing="12">
+                                <Button Classes="accent" Content="Lưu"
+                                        Command="{Binding SaveNotifyUrlCommand}" />
+                                <TextBlock Text="{Binding NotifySavedMessage}" Foreground="{StaticResource SuccessBrush}" VerticalAlignment="Center"
+                                           TextWrapping="Wrap"
+                                           IsVisible="{Binding NotifySavedMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                </StackPanel>
+            </Grid>
+        </DockPanel>
+    </ScrollViewer>
+</UserControl>

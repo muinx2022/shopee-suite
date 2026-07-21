@@ -1,0 +1,413 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:vm="using:XuLyDonShopee.App.ViewModels"
+             xmlns:models="using:XuLyDonShopee.Core.Models"
+             xmlns:services="using:XuLyDonShopee.App.Services"
+             mc:Ignorable="d" d:DesignWidth="1084" d:DesignHeight="820"
+             x:Class="XuLyDonShopee.App.Views.AccountsView"
+             x:DataType="vm:AccountsViewModel">
+
+    <!-- Style CỤC BỘ cho màn này (không đụng style chung → không ảnh hưởng màn khác). -->
+    <UserControl.Styles>
+
+        <!-- Nút icon vuông của hàng thao tác nhóm (Chọn toàn bộ / Sync đã chọn / Dừng đã chọn / Dừng tất cả). -->
+        <Style Selector="Button.iconAction">
+            <Setter Property="Width" Value="34" />
+            <Setter Property="Height" Value="30" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="FontSize" Value="14" />
+            <Setter Property="Foreground" Value="{StaticResource Text5A}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="Cursor" Value="Hand" />
+        </Style>
+        <Style Selector="Button.iconAction /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="{StaticResource CardBg}" />
+            <Setter Property="BorderBrush" Value="{StaticResource Border012}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="6" />
+        </Style>
+        <Style Selector="Button.iconAction:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="#F5F5F5" />
+            <Setter Property="BorderBrush" Value="{StaticResource Border014}" />
+        </Style>
+        <Style Selector="Button.iconAction:pressed /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="#EFEFEF" />
+        </Style>
+        <!-- Biến thể nút hành động chính ("⇊ Sync đã chọn" — trọn gói): giọng accent cam. -->
+        <Style Selector="Button.iconAction.play">
+            <Setter Property="Foreground" Value="{StaticResource AccentBrush}" />
+        </Style>
+        <Style Selector="Button.iconAction.play /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="{StaticResource CardBg}" />
+            <Setter Property="BorderBrush" Value="{StaticResource AccentBorderSoft}" />
+        </Style>
+        <Style Selector="Button.iconAction.play:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="{StaticResource AccentSoft2}" />
+            <Setter Property="BorderBrush" Value="{StaticResource AccentBorderSoft}" />
+        </Style>
+
+        <!-- Danh sách tài khoản dạng lưới phẳng (bỏ card bo góc từng dòng). -->
+        <Style Selector="ListBox.acctFlat">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="0" />
+        </Style>
+        <Style Selector="ListBox.acctFlat ListBoxItem">
+            <Setter Property="Padding" Value="8,5" />
+            <Setter Property="Margin" Value="0" />
+            <Setter Property="MinHeight" Value="30" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="Cursor" Value="Hand" />
+        </Style>
+        <Style Selector="ListBox.acctFlat ListBoxItem /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="CornerRadius" Value="6" />
+        </Style>
+        <Style Selector="ListBox.acctFlat ListBoxItem:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="#0A000000" />
+        </Style>
+        <Style Selector="ListBox.acctFlat ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="{StaticResource NavActiveBg}" />
+        </Style>
+        <Style Selector="ListBox.acctFlat ListBoxItem:selected:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="{StaticResource NavActiveBg}" />
+        </Style>
+
+        <!-- Tên tài khoản trong lưới: thường xám đậm; khi phiên ĐANG MỞ (IsRunning) → xanh + SemiBold.
+             Đặt màu/đậm trong style (không inline) để class .running mới override được (inline = LocalValue thắng mọi style). -->
+        <Style Selector="TextBlock.acctName">
+            <Setter Property="Foreground" Value="{StaticResource Text232}" />
+            <Setter Property="FontWeight" Value="Medium" />
+        </Style>
+        <Style Selector="TextBlock.acctName.running">
+            <Setter Property="Foreground" Value="{StaticResource SuccessBrush}" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
+
+        <!-- (Style panel nhật ký đen: Button.logClear + ListBox.logDark nay ở Styles/Controls.axaml — dùng chung
+             với màn Chạy tự động.) -->
+
+        <!-- Hàng nút thao tác của FORM chi tiết: nút ICON + NHÃN CHỮ (vd "✓ Lưu"). Chỉ override KÍCH THƯỚC
+             (cao gọn 34; BỎ Width cố định để nút rộng theo nhãn; đệm ngang cho chữ thở), GIỮ nền/viền theo class
+             màu đi kèm (accent = nền cam, secondary = viền, accentOutline = viền cam) nên KHÔNG đụng ContentPresenter. -->
+        <Style Selector="Button.formIcon">
+            <Setter Property="Height" Value="34" />
+            <Setter Property="MinWidth" Value="0" />
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="Padding" Value="10,0" />
+            <Setter Property="FontSize" Value="13" />
+        </Style>
+
+    </UserControl.Styles>
+
+    <!-- Bố cục: 2 cột — danh sách (trái, cao hết màn) | chi tiết + nhật ký của tài khoản đang chọn (phải). -->
+    <Grid ColumnDefinitions="340,*">
+
+            <!-- ===== Cột trái: danh sách ===== -->
+            <Border Grid.Column="0"
+                    BorderBrush="{StaticResource Border06}"
+                    BorderThickness="0,0,1,0">
+                <DockPanel Margin="24,24,20,16">
+
+                    <TextBlock DockPanel.Dock="Top" Text="Danh sách tài khoản"
+                               FontSize="19" FontWeight="Bold" LetterSpacing="-0.3"
+                               Foreground="{StaticResource TextInk}"
+                               Margin="0,0,0,16" />
+
+                    <!-- Ô tìm kiếm -->
+                    <Border DockPanel.Dock="Top" Classes="field" Height="38" Margin="0,0,0,14">
+                        <Grid ColumnDefinitions="Auto,*">
+                            <TextBlock Grid.Column="0" Text="⌕" FontSize="14"
+                                       Foreground="{StaticResource Text9A}"
+                                       VerticalAlignment="Center" Margin="12,0,0,0" />
+                            <TextBox Grid.Column="1" Classes="bare" Margin="8,0,12,0"
+                                     Text="{Binding SearchText}"
+                                     Watermark="Tìm theo email / ghi chú…" />
+                            <Border Classes="underline" Grid.ColumnSpan="2" />
+                        </Grid>
+                    </Border>
+
+                    <!-- Hàng nút dưới -->
+                    <Grid DockPanel.Dock="Bottom" ColumnDefinitions="*,Auto" Margin="0,14,0,0">
+                        <Button Grid.Column="0" Classes="accent" Height="38"
+                                HorizontalAlignment="Stretch"
+                                Command="{Binding AddCommand}" Content="+ Thêm tài khoản" />
+                        <Button Grid.Column="1" Classes="iconDanger" Margin="8,0,0,0"
+                                Content="🗑" Command="{Binding DeleteCommand}"
+                                IsEnabled="{Binding SelectedRow, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                    </Grid>
+
+                    <!-- Hàng nút thao tác nhóm — dạng ICON, 2 NHÓM có ngăn cách:
+                         [✓ chọn]  |  [⇊ Sync trọn gói · ■ Dừng đã chọn · ✕ Dừng tất cả]. -->
+                    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="6"
+                                Margin="0,0,0,12">
+                        <!-- Nhóm chọn -->
+                        <Button Classes="iconAction" Content="✓"
+                                Command="{Binding SelectAllCommand}"
+                                ToolTip.Tip="Chọn / bỏ chọn toàn bộ" />
+                        <!-- Ngăn cách 2 nhóm (đường mảnh mờ). -->
+                        <Border Width="1" Margin="4,4" Background="{StaticResource Border012}" />
+                        <!-- Nhóm phiên: Sync đã chọn (TRỌN GÓI — hành động chính) · Dừng đã chọn · Dừng tất cả. -->
+                        <Button Classes="iconAction play" Content="⇊"
+                                Command="{Binding SyncSelectedCommand}"
+                                ToolTip.Tip="Sync đã chọn — chạy trọn gói cho các tài khoản đang tick: mở trang (nếu chưa mở) → kiểm tra → xử lý đơn nếu có → sync đơn hàng" />
+                        <Button Classes="iconAction" Content="■"
+                                Command="{Binding StopSelectedCommand}"
+                                ToolTip.Tip="Dừng đã chọn — dừng toàn bộ việc đang làm và đóng trang của các tài khoản đang tick" />
+                        <Button Classes="iconAction" Content="✕"
+                                Command="{Binding StopAllCommand}"
+                                ToolTip.Tip="Dừng tất cả — dừng mọi phiên đang chạy (đóng hết Brave)" />
+                    </StackPanel>
+
+                    <!-- Danh sách tài khoản: mỗi dòng "[ ] Tên shop" + (khi đang chạy) chấm xanh & số chờ lấy. -->
+                    <ListBox Classes="acctFlat"
+                             ItemsSource="{Binding Accounts}"
+                             SelectedItem="{Binding SelectedRow}"
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate x:DataType="vm:AccountRowViewModel">
+                                <Grid ColumnDefinitions="Auto,Auto,*,Auto"
+                                      Background="Transparent"
+                                      Tapped="OnAccountRowTapped">
+                                    <!-- CheckBox chỉ HIỂN THỊ trạng thái tick; bấm bất kỳ đâu trên dòng
+                                         (kể cả vùng checkbox) sẽ toggle tick + chọn dòng. IsHitTestVisible=False +
+                                         Mode=OneWay để checkbox không tự xử lý click (không toggle đúp, không nuốt chọn dòng). -->
+                                    <CheckBox Grid.Column="0" VerticalAlignment="Center" Margin="0,0,8,0"
+                                              IsHitTestVisible="False"
+                                              IsChecked="{Binding IsSelected, Mode=OneWay}" />
+                                    <!-- Mũi tên "đang mở cửa sổ" ngay TRƯỚC tên (ẩn khi không chạy → không chiếm chỗ). -->
+                                    <TextBlock Grid.Column="1" Text="►" FontSize="10" Foreground="{StaticResource SuccessBrush}"
+                                               VerticalAlignment="Center" Margin="0,0,4,0"
+                                               IsVisible="{Binding IsRunning}" />
+                                    <!-- Tên shop: thường Text232/Medium; khi phiên ĐANG MỞ → xanh + SemiBold (class .running).
+                                         Màu/đậm đặt ở style (không inline) để class .running override được. -->
+                                    <TextBlock Grid.Column="2" Classes="acctName" Text="{Binding Email}"
+                                               FontSize="13" VerticalAlignment="Center"
+                                               TextTrimming="CharacterEllipsis"
+                                               Classes.running="{Binding IsRunning}" />
+                                    <!-- Khối phải: (khi đang chạy) chấm xanh & "Chờ lấy: N". -->
+                                    <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="6"
+                                                VerticalAlignment="Center" Margin="8,0,0,0">
+                                        <Border Width="6" Height="6" CornerRadius="3"
+                                                VerticalAlignment="Center" Background="{StaticResource SuccessBrush}"
+                                                IsVisible="{Binding IsRunning}" />
+                                        <TextBlock Text="{Binding ToShipText}" FontSize="11" FontWeight="SemiBold"
+                                                   Foreground="{StaticResource InfoBrush}" VerticalAlignment="Center"
+                                                   IsVisible="{Binding ToShipText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                                    </StackPanel>
+                                </Grid>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </DockPanel>
+            </Border>
+
+            <!-- ===== Cột chi tiết: form GIÃN hết cột (dọc 1 cột) + nhật ký của tài khoản đang chọn bên PHẢI =====
+                 Chia đều 3:2 (form 3* | log 2*) — cùng ngữ pháp với màn Chạy tự động, không hở giữa. -->
+            <Grid Grid.Column="1" ColumnDefinitions="3*,2*">
+
+                <!-- Cột trái: placeholder + form chi tiết (chồng nhau trong cùng ô). -->
+                <Grid Grid.Column="0">
+
+                    <!-- Placeholder khi chưa chọn -->
+                    <TextBlock Text="Chọn một tài khoản hoặc bấm + Thêm tài khoản"
+                               Foreground="{StaticResource Text9A}" FontSize="14"
+                               HorizontalAlignment="Center" VerticalAlignment="Center"
+                               IsVisible="{Binding ShowPlaceholder}" />
+
+                    <!-- Khối chi tiết -->
+                    <ScrollViewer IsVisible="{Binding IsEditing}">
+                        <!-- Form GIÃN hết cột 3* (bỏ trần 760/neo trái): card nở hết bề ngang, bám sát panel nhật ký
+                             bên PHẢI → không còn khoảng chết ở giữa. Trần 760 cũ có vì hàng 7 nút cần ~750px một hàng;
+                             nay hàng nút CHỊU HẸP (padding gọn + WrapPanel rớt dòng) nên bỏ được trần. -->
+                        <StackPanel Margin="24,24,16,16">
+
+                        <!-- Header hàng (chỉ còn tiêu đề + subtitle; đã bỏ badge trạng thái tài khoản). -->
+                        <StackPanel Margin="0,0,0,16">
+                            <TextBlock Text="Chi tiết tài khoản" FontSize="19" FontWeight="Bold"
+                                       LetterSpacing="-0.3" Foreground="{StaticResource TextInk}" />
+                            <TextBlock Text="Thông tin đăng nhập và địa chỉ lấy hàng" FontSize="12"
+                                       Foreground="{StaticResource TextMuted}" Margin="0,2,0,0" />
+                        </StackPanel>
+
+                        <!-- Hàng nút thao tác PHIÊN: gom còn ĐÚNG 2 nút — Sync (TRỌN GÓI, hành động chính) + Dừng.
+                             WrapPanel canh phải nên khi cột HẸP nút TỰ RỚT DÒNG (không bao giờ bị cắt); WrapPanel
+                             không có Spacing → từng nút Margin trái 8 (thêm 4 dọc để các dòng khi rớt thở nhau,
+                             đối xứng nên không lệch dọc khi 1 hàng). Lưu/Hủy đã chuyển XUỐNG DƯỚI CÙNG form. -->
+                        <WrapPanel HorizontalAlignment="Right" Margin="0,0,0,16">
+                            <!-- Sync TRỌN GÓI: mở trang (nếu chưa) → kiểm tra → xử lý đơn nếu có → sync về máy + Google Sheet. -->
+                            <Button Classes="accent formIcon" Content="⇊ Sync" Margin="8,4,0,4"
+                                    Command="{Binding SyncFullCommand}"
+                                    IsEnabled="{Binding CanSyncOrders}"
+                                    ToolTip.Tip="Sync trọn gói — Mở trang bán hàng (nếu chưa mở), kiểm tra đơn mới, xử lý đơn nếu có, rồi sync đơn hàng về máy + Google Sheet" />
+                            <!-- Dừng: dừng toàn bộ việc đang làm của tài khoản này và đóng trang bán hàng (Brave). -->
+                            <Button Classes="secondary formIcon" Content="■ Dừng" Margin="8,4,0,4"
+                                    Command="{Binding StopCommand}"
+                                    IsEnabled="{Binding CanStopSeller}"
+                                    ToolTip.Tip="Dừng — Dừng toàn bộ việc đang làm của tài khoản này và đóng trang bán hàng (cửa sổ Brave)" />
+                        </WrapPanel>
+
+                        <!-- Thông báo trạng thái (Mở trang bán hàng / Xử lý đơn / theo dõi đơn) — ngay dưới hàng nút. -->
+                        <TextBlock Text="{Binding ErrorMessage}" Foreground="{StaticResource DangerBrush}"
+                                   TextWrapping="Wrap" Margin="0,0,0,16"
+                                   IsVisible="{Binding ErrorMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                        <TextBlock Text="{Binding BusyStatus}" Foreground="{StaticResource SuccessBrush}"
+                                   TextWrapping="Wrap" Margin="0,0,0,16"
+                                   IsVisible="{Binding BusyStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                        <!-- Trạng thái theo dõi đơn "Chờ Lấy Hàng" (30' reload/đọc). -->
+                        <TextBlock Text="{Binding OrderStatus}" Foreground="{StaticResource InfoBrush}"
+                                   TextWrapping="Wrap" Margin="0,0,0,16"
+                                   IsVisible="{Binding OrderStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+
+                        <!-- Card XẾP DỌC 1 CỘT (dồn field về TRÁI): Đăng nhập → Cookie → Proxy → Địa chỉ.
+                             Spacing=12 nên card cách đều theo dọc; phần bên PHẢI để dành cho panel nhật ký. -->
+                        <StackPanel Spacing="12">
+
+                                <!-- Card: Thông tin đăng nhập (Tên đăng nhập + Mật khẩu CÙNG 1 HÀNG). -->
+                                <Border Classes="card" Padding="20,16">
+                                    <StackPanel Spacing="12">
+                                        <TextBlock Classes="section" Text="THÔNG TIN ĐĂNG NHẬP" />
+
+                                        <Grid ColumnDefinitions="*,14,*">
+                                            <!-- Tên đăng nhập -->
+                                            <StackPanel Grid.Column="0">
+                                                <TextBlock Classes="fieldLabel" Text="Tên đăng nhập" />
+                                                <Border Classes="field" Height="38">
+                                                    <Grid>
+                                                        <TextBox Classes="bare" Margin="12,0"
+                                                                 Text="{Binding EditEmail}"
+                                                                 Watermark="Email hoặc tên đăng nhập" />
+                                                        <Border Classes="underline" />
+                                                    </Grid>
+                                                </Border>
+                                            </StackPanel>
+                                            <!-- Mật khẩu -->
+                                            <StackPanel Grid.Column="2">
+                                                <TextBlock Classes="fieldLabel" Text="Mật khẩu" />
+                                                <Border Classes="field" Height="38">
+                                                    <Grid ColumnDefinitions="*,Auto">
+                                                        <TextBox Grid.Column="0" Classes="bare" Margin="12,0,0,0"
+                                                                 Text="{Binding EditPassword}"
+                                                                 PasswordChar="●"
+                                                                 RevealPassword="{Binding ShowPassword}" />
+                                                        <Button Grid.Column="1" Classes="ghostIcon" Margin="4,0,5,0"
+                                                                Command="{Binding ToggleShowPasswordCommand}"
+                                                                ToolTip.Tip="Hiện/ẩn mật khẩu">
+                                                            <Panel>
+                                                                <TextBlock Text="👁" FontSize="14"
+                                                                           IsVisible="{Binding !ShowPassword}" />
+                                                                <TextBlock Text="🙈" FontSize="14"
+                                                                           IsVisible="{Binding ShowPassword}" />
+                                                            </Panel>
+                                                        </Button>
+                                                        <Border Classes="underline" Grid.ColumnSpan="2" />
+                                                    </Grid>
+                                                </Border>
+                                            </StackPanel>
+                                        </Grid>
+                                    </StackPanel>
+                                </Border>
+
+                                <!-- Cookie đăng nhập: CHỈ hiện trạng thái đã có / chưa có (bỏ ô hiển thị chuỗi
+                                     cookie thô để form gọn, không bị scroll). -->
+                                <Border Classes="card" Padding="20,14">
+                                    <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+                                        <TextBlock Classes="section" Text="COOKIE ĐĂNG NHẬP" VerticalAlignment="Center" />
+                                        <TextBlock Text="✓ Đã có cookie đăng nhập" FontSize="13" FontWeight="SemiBold"
+                                                   Foreground="{StaticResource SuccessBrush}" VerticalAlignment="Center"
+                                                   IsVisible="{Binding HasCookie}" />
+                                        <TextBlock Text="Chưa có — mở trang bán hàng để tự lưu"
+                                                   FontSize="13" Foreground="{StaticResource Text9A}"
+                                                   VerticalAlignment="Center" IsVisible="{Binding !HasCookie}" />
+                                    </StackPanel>
+                                </Border>
+
+                                <!-- (Card "PROXY — API key KiotProxy" đã bỏ: proxy nay tự chia từ pool KiotProxy
+                                     chung khi chạy, không gán cố định theo tài khoản nữa.) -->
+
+                                <!-- Card: Địa chỉ lấy hàng mặc định (dùng cho xử lý đơn sau này) -->
+                                <Border Classes="card" Padding="20,16">
+                                    <StackPanel Spacing="12">
+                                        <TextBlock Classes="section" Text="ĐỊA CHỈ LẤY HÀNG" />
+                                        <StackPanel>
+                                            <TextBlock Classes="fieldLabel" Text="Địa chỉ lấy hàng mặc định" />
+                                            <ComboBox Classes="field" HorizontalAlignment="Stretch"
+                                                      ItemsSource="{x:Static vm:AccountsViewModel.PickupAddressOptions}"
+                                                      SelectedItem="{Binding EditPickupAddress}" />
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Border>
+
+                        </StackPanel>
+
+                        <!-- Lưu / Hủy — DƯỚI CÙNG form (sau card Địa chỉ lấy hàng), căn TRÁI. Chuyển từ hàng nút
+                             trên xuống theo yêu cầu gom nút; class/Command/tooltip giữ nguyên. -->
+                        <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,16,0,0">
+                            <Button Classes="accent formIcon" Content="✓ Lưu"
+                                    Command="{Binding SaveCommand}"
+                                    ToolTip.Tip="Lưu thay đổi" />
+                            <Button Classes="secondary formIcon" Content="↶ Hủy"
+                                    Command="{Binding CancelCommand}"
+                                    ToolTip.Tip="Hủy" />
+                        </StackPanel>
+                    </StackPanel>
+                </ScrollViewer>
+                    </Grid>
+
+                <!-- ===== Cột PHẢI của cột chi tiết: nhật ký của TÀI KHOẢN đang chọn (nền đen) =====
+                     Đứng dọc bên phải field; margin khe trái + cách viền trên/phải/dưới; bo góc thành "thẻ" log. -->
+                <Border Grid.Column="1"
+                        Margin="8,24,16,16" CornerRadius="8" ClipToBounds="True"
+                        Background="#0F1113"
+                        BorderBrush="#2A2A2A" BorderThickness="1">
+            <DockPanel Margin="12,8,12,8">
+
+                <!-- Header: tiêu đề + nút Xóa (chỉ xóa hiển thị, không xóa file). -->
+                <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="0,0,0,6">
+                    <Grid Grid.Column="0" VerticalAlignment="Center">
+                        <!-- Chưa chọn tài khoản → tiêu đề chung; đã chọn → "Nhật ký — {tên tài khoản}". -->
+                        <TextBlock Text="Nhật ký hoạt động"
+                                   FontSize="12" FontWeight="SemiBold"
+                                   Foreground="#E8E8E8" VerticalAlignment="Center"
+                                   IsVisible="{Binding SelectedRow, Converter={x:Static ObjectConverters.IsNull}}" />
+                        <TextBlock Text="{Binding SelectedRow.Email, StringFormat='Nhật ký — {0}'}"
+                                   FontSize="12" FontWeight="SemiBold"
+                                   Foreground="#E8E8E8" VerticalAlignment="Center"
+                                   TextTrimming="CharacterEllipsis"
+                                   IsVisible="{Binding SelectedRow, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                    </Grid>
+                    <Button Grid.Column="1" Classes="logClear"
+                            Content="Xóa" Command="{Binding ClearLogCommand}"
+                            ToolTip.Tip="Xóa các dòng đang hiển thị của tài khoản này (không xóa file log trên đĩa)" />
+                </Grid>
+
+                <!-- Đường dẫn file log (mờ) để biết nhật ký được ghi ở đâu — 1 dòng. -->
+                <TextBlock DockPanel.Dock="Bottom" Text="{Binding LogPath}"
+                           FontSize="10" Foreground="#8A8A8A"
+                           TextTrimming="CharacterEllipsis" Margin="0,6,0,0" />
+
+                <!-- Danh sách dòng log: nền đen, chữ trắng, các dòng SÁT nhau; tự cuộn xuống cuối (code-behind). -->
+                <ListBox x:Name="LogList"
+                         Classes="logDark"
+                         ItemsSource="{Binding FilteredLogEntries}"
+                         Background="Transparent"
+                         ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate x:DataType="services:LogEntry">
+                            <TextBlock Text="{Binding Display}"
+                                       FontFamily="Consolas, Menlo, monospace" FontSize="11"
+                                       Foreground="#EDEDED"
+                                       TextWrapping="Wrap" Margin="0" />
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </DockPanel>
+                </Border>
+            </Grid>
+        </Grid>
+</UserControl>

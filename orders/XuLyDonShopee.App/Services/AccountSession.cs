@@ -1,0 +1,1409 @@
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
+using CommunityToolkit.Mvvm.ComponentModel;
+using XuLyDonShopee.App.ViewModels;
+using XuLyDonShopee.Core.Models;
+using XuLyDonShopee.Core.Services;
+
+namespace XuLyDonShopee.App.Services;
+
+/// <summary>
+/// Một phiên mở trang bán hàng CHẠY NỀN ĐỘC LẬP cho một tài khoản (mỗi tài khoản một Brave/profile/CDP
+/// port/proxy/theo-dõi-đơn riêng) — nhờ đó mở được nhiều shop song song. Kế thừa
+/// <see cref="ObservableObject"/> để trạng thái quan sát được.
+/// <para>
+/// Toàn bộ luồng <b>bê nguyên</b> từ <c>AccountsViewModel.OpenSellerAsync</c> cũ (chọn proxy → chuẩn bị
+/// trình duyệt → mở → tự đăng nhập kiểu người → vòng poll bắt cookie + theo dõi đơn theo chu kỳ cấu hình → bắt-cookie-chốt),
+/// CHỈ khác: <b>bỏ mọi hộp thoại modal</b> (15 phiên = 15 modal) → thay bằng trạng thái/log per-account; và
+/// việc cập nhật danh sách UI được <b>marshal về UI thread</b> ở ViewModel qua sự kiện (session chỉ ghi DB
+/// trên thread nền — SQLite an toàn — rồi phát <see cref="CookieSaved"/>).
+/// </para>
+/// </summary>
+public partial class AccountSession : ObservableObject, IAccountSession
+{
+    private readonly long _accountId;
+    private readonly AppServices _services;
+    private readonly ShopeeLoginService _loginService;
+    private readonly IProxyHealthChecker _healthChecker;
+
+    // Round-robin BỀN cho proxy thủ công được CHIA SẺ giữa các phiên (do manager giữ chỉ số) → nhiều tài
+    // khoản trải đều trên danh sách proxy thay vì cùng nhận proxy đầu tiên.
+    private readonly Func<IReadOnlyList<ProxyEntry>, ProxyEntry?> _nextManualProxy;
+
+    // Cấp/nhả API key KiotProxy từ POOL CHUNG do manager quản (ưu tiên key rảnh; "rảnh/bận" theo phiên đang
+    // chạy). Acquire MỘT LẦN khi chọn proxy (giữ key suốt đời phiên, kể cả relaunch đổi IP); Release ở finally
+    // NGOÀI cùng khi phiên đóng hẳn → key rảnh lại cho phiên khác. Do manager cấp qua factory (giống _nextManualProxy).
+    private readonly Func<long, string?> _acquireKiotKey;
+    private readonly Action<long> _releaseKiotKey;
+
+    private readonly object _lifecycleLock = new();
+    private CancellationTokenSource? _cts;
+    private Task? _runTask;
+    private volatile ILoginSession? _session;
+
+    // Bật trong lúc đang XỬ LÝ ĐƠN (điều hướng kiểu người). Khi bật, vòng RunAsync KHÔNG chạy nhịp đọc đơn
+    // (ReadToShipCountAsync có reload trang → sẽ phá thao tác điều hướng đang chạy giữa chừng).
+    private volatile bool _navigating;
+
+    // Cờ "SẴN SÀNG THAO TÁC" TƯỜNG MINH: chỉ true SAU khi (của lần mở/relaunch HIỆN TẠI) đã tự-đăng-nhập
+    // xong VÀ đọc được số "Chờ Lấy Hàng" lần đầu — điểm CHẮC CHẮN trang chủ đã đăng nhập & ổn định, luồng
+    // chuột tự-đăng-nhập đã xong. Nút Sync/Kiểm tra (AccountsViewModel) CHỜ cờ này rồi mới điều hướng để
+    // KHÔNG giẫm lên login. Đặt LẠI false ở đầu MỖI vòng mở/relaunch + khi phát hiện đổi proxy + khi
+    // Stopped/Error → kín mọi ca restart/relaunch/đang-login, KHÔNG bị "sẵn sàng ảo" do số đơn cũ còn sót
+    // (ToShipCount không reset khi relaunch). volatile: đọc từ UI thread trong lúc phiên chạy nền ghi.
+    private volatile bool _readyForActions;
+
+    // Proxy đang NƯỚNG vào Brave (đặt lúc launch qua --proxy-server) — watchdog kiểm cái này còn sống không.
+    private volatile ProxyEntry? _currentProxy;
+
+    // Client nguồn KiotProxy của phiên (null nếu phiên KHÔNG dùng KiotProxy: proxy thủ công / IP máy) →
+    // watchdog CHỈ chạy khi client này != null.
+    private volatile IKiotProxyClient? _kiotClient;
+
+    // Chờ trước lần kiểm lại (xác nhận proxy chết lần 2) để chống false-negative khi mạng chập chờn.
+    private const int ProxyRecheckDelayMs = 5000;
+
+    // Nhãn tài khoản gắn vào mỗi dòng log (phân biệt nguồn khi nhiều phiên chạy song song). Mặc định
+    // "TK {id}" để log phát TRƯỚC khi đọc được email (chọn proxy, chuẩn bị trình duyệt) vẫn có nhãn;
+    // RunAsync cập nhật thành email khi đã đọc tài khoản.
+    // volatile: đảm bảo thread khác (UI thread, thread sync) luôn thấy giá trị mới nhất khi nhiều phiên chạy song song.
+    private volatile string _logLabel;
+
+    public AccountSession(
+        long accountId,
+        AppServices services,
+        ShopeeLoginService loginService,
+        IProxyHealthChecker healthChecker,
+        Func<IReadOnlyList<ProxyEntry>, ProxyEntry?> nextManualProxy,
+        Func<long, string?> acquireKiotKey,
+        Action<long> releaseKiotKey)
+    {
+        _accountId = accountId;
+        _services = services;
+        _loginService = loginService;
+        _healthChecker = healthChecker;
+        _nextManualProxy = nextManualProxy;
+        _acquireKiotKey = acquireKiotKey;
+        _releaseKiotKey = releaseKiotKey;
+        _logLabel = $"TK {accountId}";
+    }
+
+    public long AccountId => _accountId;
+
+    [ObservableProperty]
+    private SessionState _state = SessionState.Stopped;
+
+    [ObservableProperty]
+    private string? _statusText;
+
+    [ObservableProperty]
+    private int? _toShipCount;
+
+    [ObservableProperty]
+    private string? _lastError;
+
+    // Bất kỳ thay đổi quan sát được nào → phát Changed để manager/VM cập nhật UI. Event Changed CỐ Ý bắn
+    // từ thread nền: manager dùng ConcurrentDictionary (thread-safe) và VM tự marshal về UI thread khi đụng
+    // ObservableCollection. Riêng PropertyChanged (cho binding trực tiếp) được marshal ở OnPropertyChanged.
+    partial void OnStateChanged(SessionState value) => Changed?.Invoke();
+    partial void OnStatusTextChanged(string? value) => Changed?.Invoke();
+    partial void OnToShipCountChanged(int? value) => Changed?.Invoke();
+    partial void OnLastErrorChanged(string? value) => Changed?.Invoke();
+
+    /// <summary>
+    /// Marshal thông báo <b>PropertyChanged</b> về UI thread. Phiên chạy nền (RunAsync) set
+    /// State/StatusText/ToShipCount trên thread nền; nếu UI (Plan B) bind TRỰC TIẾP vào phiên thì Avalonia
+    /// cập nhật binding phải trên UI thread — nếu bắn từ nền sẽ ném "Call from invalid thread". Chạy ngay
+    /// nếu đã ở UI thread; ngược lại <c>Dispatcher.UIThread.Post</c>.
+    /// </summary>
+    protected override void OnPropertyChanged(System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        var ui = Avalonia.Threading.Dispatcher.UIThread;
+        if (ui.CheckAccess())
+        {
+            base.OnPropertyChanged(e);
+        }
+        else
+        {
+            ui.Post(() => base.OnPropertyChanged(e));
+        }
+    }
+
+    public Process? BraveProcess => _session?.BraveProcess;
+
+    /// <summary>
+    /// True khi phiên đã "sẵn sàng thao tác" (của lần mở HIỆN TẠI đã đăng nhập xong + đọc số đơn lần đầu) —
+    /// VM chờ cờ này rồi mới chạy Sync/Kiểm tra để không giẫm luồng tự-đăng-nhập. Xem <see cref="_readyForActions"/>.
+    /// </summary>
+    public bool ReadyForActions => _readyForActions;
+
+    public event Action? Changed;
+    public event Action<long>? CookieSaved;
+
+    public Task StartAsync()
+    {
+        lock (_lifecycleLock)
+        {
+            // Idempotent: đang chuẩn bị / đang chạy → bỏ qua (không mở trùng cùng một tài khoản).
+            if (State is SessionState.Opening or SessionState.Running)
+            {
+                return Task.CompletedTask;
+            }
+
+            _cts = new CancellationTokenSource();
+            var ct = _cts.Token;
+            LastError = null;
+            _readyForActions = false; // phiên mới khởi động → CHƯA sẵn sàng (chờ login + đọc số lần đầu)
+            State = SessionState.Opening;
+            _runTask = Task.Run(() => RunAsync(ct));
+        }
+
+        return Task.CompletedTask;
+    }
+
+    public async Task StopAsync()
+    {
+        CancellationTokenSource? cts;
+        Task? run;
+        lock (_lifecycleLock)
+        {
+            cts = _cts;
+            run = _runTask;
+        }
+
+        // Phản hồi cho người dùng; GIỮ State=Running để nút "Mở" còn khóa tới khi Brave chết thật (Lỗi 2).
+        if (State is SessionState.Opening or SessionState.Running)
+        {
+            StatusText = "Đang dừng...";
+        }
+
+        try { cts?.Cancel(); } catch { /* bỏ qua */ }
+
+        if (run is not null)
+        {
+            // Chờ vòng lặp thoát & dispose (kill Brave) trong ~8s.
+            try { await Task.WhenAny(run, Task.Delay(TimeSpan.FromSeconds(8))).ConfigureAwait(false); }
+            catch { /* bỏ qua */ }
+        }
+
+        // Phòng hờ: nếu vì lý do gì Brave còn sống thì kill cả cây tiến trình (không để mồ côi giữ khóa hồ sơ).
+        try
+        {
+            var p = _session?.BraveProcess;
+            if (p is { HasExited: false })
+            {
+                p.Kill(entireProcessTree: true);
+            }
+        }
+        catch { /* bỏ qua */ }
+
+        State = SessionState.Stopped;
+    }
+
+    /// <summary>
+    /// Xử lý đơn: trong phiên đang chạy. <b>ĐẦU LUỒNG — cửa skip:</b> đọc TƯƠI (reload trang chủ) số
+    /// "Chờ Lấy Hàng"; nếu ĐỌC ĐƯỢC số VÀ == 0 (<see cref="ShouldSkipProcessing"/>) thì <b>BỎ QUA toàn bộ</b>
+    /// (KHÔNG vào Cài đặt vận chuyển, không đặt/đặt-lại địa chỉ), đặt <c>ToShipCount=0</c> + StatusText/log
+    /// "Không có đơn Chờ lấy hàng — bỏ qua xử lý" và trả <c>true</c> ("xong-không-có-việc", KHÔNG phải lỗi).
+    /// ĐỌC KHÔNG được (null: chưa đăng nhập / lỗi) → KHÔNG skip, làm tiếp như cũ (tránh bỏ sót đơn thật).
+    /// Cửa skip này áp cho CẢ nút "Xử lý đơn" thủ công LẪN "Chạy tự động" (AutoRunService gọi cùng hàm này).
+    /// <para>
+    /// Khi CÓ đơn (skip không kích hoạt): điều hướng KIỂU NGƯỜI tới "Cài Đặt Vận Chuyển" → tab "Địa Chỉ"
+    /// (bước 1), rồi <b>đặt địa chỉ lấy hàng</b> theo tỉnh mặc định của tài khoản
+    /// (<see cref="AccountsViewModel.DefaultPickupAddress"/> nếu chưa chọn) (bước 2), rồi <b>xử lý LẦN LƯỢT
+    /// MỌI đơn</b> cần "Chuẩn bị hàng" (bước 3): lặp <c>ProcessFirstOrderAsync</c> (arrange → CHỜ nút In phiếu
+    /// giao tới 5' → lưu phiếu → đóng modal) TỚI KHI hết đơn. ĐƠN LỖI thì ghi log + <b>BỎ QUA, chạy tiếp đơn
+    /// kế</b>; chỉ dừng khi lỗi 3 đơn LIÊN TIẾP (chống lặp vô hạn) hoặc chạm chốt chặn 200 đơn. Khi vòng kết
+    /// thúc TỰ NHIÊN (hết đơn / chạm chốt chặn), quay lại Cài đặt vận chuyển và <b>đặt lại địa chỉ lấy hàng
+    /// về MỘT ĐỊA CHỈ KHÁC</b> (bước 4, best-effort — chỉ ghi log/StatusText, KHÔNG đổi giá trị trả về; nếu
+    /// vòng dừng GIỮA CHỪNG vì 3 lỗi liên tiếp thì GIỮ NGUYÊN địa chỉ vì việc còn dở). Bật cờ
+    /// <see cref="_navigating"/> bao trùm cả 4 bước để vòng <see cref="RunAsync"/> KHÔNG reload đọc đơn
+    /// giữa chừng (phá thao tác). Graceful: phiên chưa chạy / bị hủy / lỗi → false, KHÔNG ném.
+    /// </para>
+    /// </summary>
+    public async Task<bool> ProcessOrdersAsync()
+    {
+        // Chụp phiên + token dưới lock (nuốt ObjectDisposedException nếu _cts đã dispose).
+        var s = _session;
+        CancellationToken tok;
+        try
+        {
+            lock (_lifecycleLock)
+            {
+                tok = _cts?.Token ?? default;
+            }
+        }
+        catch (ObjectDisposedException)
+        {
+            return false;
+        }
+
+        // _navigating: đang có lượt điều hướng chạy dở (bấm lặp) → bỏ qua, không chạy 2 luồng chuột chồng nhau.
+        if (s is null || State != SessionState.Running || _navigating)
+        {
+            return false;
+        }
+
+        _navigating = true;
+        try
+        {
+            // CỬA SKIP (đầu luồng, TRƯỚC khi vào Cài đặt vận chuyển): đọc TƯƠI số "Chờ Lấy Hàng" (reload
+            // trang chủ) để phản ánh đúng hiện trạng lúc bấm / lúc lô chạy — ToShipCount hiển thị có thể CŨ
+            // (bấm sau khi đơn đã hết, hoặc chưa tới nhịp đọc kế). CHỈ bỏ qua khi ĐỌC ĐƯỢC số VÀ == 0
+            // (ShouldSkipProcessing). Đọc KHÔNG được (null: chưa đăng nhập / lỗi) → KHÔNG skip, làm tiếp như
+            // cũ (tránh bỏ sót đơn thật). An toàn để await ở đây vì _navigating đang bật (loại trừ nhịp đọc
+            // đơn của RunAsync); finally cuối hàm vẫn nhả cờ.
+            StatusText = "Đang kiểm tra đơn Chờ lấy hàng...";
+            var toShip = await s.ReadToShipCountAsync(reload: true, tok).ConfigureAwait(false);
+            if (ShouldSkipProcessing(toShip))
+            {
+                ToShipCount = 0; // đồng bộ UI: đã xác nhận không còn đơn Chờ lấy hàng
+                StatusText = "Không có đơn Chờ lấy hàng — bỏ qua xử lý.";
+                _services.Log.Append(_logLabel, "Không có đơn Chờ lấy hàng — bỏ qua xử lý.");
+                return true; // "xong, không có việc" (KHÔNG phải lỗi) — KHÔNG vào Cài đặt vận chuyển.
+            }
+
+            // Bước 1: mở Cài đặt vận chuyển → tab Địa Chỉ. Kết quả phân biệt bước hỏng để báo StatusText đúng.
+            StatusText = "Đang mở Cài đặt vận chuyển → Địa Chỉ (kiểu người)...";
+            var nav = await s.OpenShippingAddressSettingsAsync(tok).ConfigureAwait(false);
+            if (nav != ShippingNavResult.Ok)
+            {
+                StatusText = nav switch
+                {
+                    ShippingNavResult.PageNotOpened =>
+                        "Không mở được trang Cài đặt vận chuyển (click không ăn / trang không chuyển) — thao tác tay trong cửa sổ Brave.",
+                    ShippingNavResult.AddressTabNotFound =>
+                        "Đã mở Cài đặt vận chuyển nhưng không thấy tab \"Địa Chỉ\" — Shopee có thể đã đổi giao diện, thao tác tay trong Brave.",
+                    _ => "Không mở được Cài đặt vận chuyển — thao tác tay trong cửa sổ Brave.",
+                };
+                return false;
+            }
+
+            // Bước 2: đặt địa chỉ lấy hàng theo tỉnh mặc định của tài khoản (null/rỗng → mặc định app).
+            var acc = _services.Accounts.GetById(_accountId);
+            var province = string.IsNullOrWhiteSpace(acc?.PickupAddress)
+                ? AccountsViewModel.DefaultPickupAddress
+                : acc!.PickupAddress!;
+
+            StatusText = $"Đang chọn địa chỉ lấy hàng ({province})...";
+            var pick = await s.SetPickupAddressAsync(province, tok).ConfigureAwait(false);
+            StatusText = pick switch
+            {
+                SetPickupResult.Ok => $"Đã đặt địa chỉ lấy hàng: {province}.",
+                SetPickupResult.AddressNotFound =>
+                    $"Không thấy địa chỉ ở {province} trong danh sách — kiểm tra tay trong cửa sổ Brave.",
+                SetPickupResult.EditModalNotOpened =>
+                    $"Mở được danh sách nhưng không sửa được địa chỉ ({province}) — shop có thể bị khóa sửa, kiểm tra tay.",
+                SetPickupResult.CheckboxNotFound =>
+                    $"Mở được ô Sửa địa chỉ nhưng không thấy mục \"Đặt làm địa chỉ lấy hàng\" — kiểm tra tay trong Brave.",
+                SetPickupResult.CheckboxClickFailed =>
+                    $"Không tick được \"Đặt làm địa chỉ lấy hàng\" ({province}) — kiểm tra tay trong cửa sổ Brave.",
+                SetPickupResult.SaveFailed =>
+                    $"Đã tick nhưng chưa Lưu được địa chỉ lấy hàng ({province}) — kiểm tra tay trong cửa sổ Brave.",
+                _ => $"Không đặt được địa chỉ lấy hàng ({province}) — kiểm tra tay trong cửa sổ Brave.",
+            };
+            if (pick != SetPickupResult.Ok)
+            {
+                // KHÔNG dừng cả luồng: Shopee có thể CHẶN đổi địa chỉ lấy hàng khi shop có đơn "Chờ lấy
+                // hàng" (đã arrange, chờ bưu cục) → bước đặt địa chỉ thất bại KHÔNG được chặn việc xử lý đơn.
+                // Địa chỉ giữ nguyên hiện tại; vẫn chạy tiếp vòng xử lý đơn bên dưới.
+                _services.Log.Append(_logLabel,
+                    $"Không đặt được địa chỉ lấy hàng ({province}) — có thể do có đơn Chờ lấy hàng khóa đổi địa chỉ; vẫn tiếp tục xử lý đơn.");
+            }
+
+            // Bước 3: xử lý LẦN LƯỢT MỌI đơn — lặp ProcessFirstOrderAsync (mỗi vòng: điều hướng "Tất cả" →
+            // quét đơn đầu có "Chuẩn bị hàng" → arrange → In phiếu → đóng modal) TỚI KHI hết đơn (NoOrder).
+            // Đơn đã arrange MẤT nút "Chuẩn bị hàng" nên vòng tự dừng khi mọi đơn xử lý xong. ĐƠN LỖI thì GHI
+            // LOG + BỎ QUA + chạy tiếp đơn kế (KHÔNG dừng cả vòng) — chỉ dừng khi LỖI 3 ĐƠN LIÊN TIẾP (chống
+            // lặp vô hạn). Mọi bước ghi log qua ActivityLog (panel + file) để smoke live thấy rõ.
+            var log = (Action<string>)(m => _services.Log.Append(_logLabel, m));
+
+            // Thư mục lưu phiếu: đọc MỘT LẦN từ Cài đặt (config hoặc mặc định cạnh app.db) — chụp vào biến,
+            // KHÔNG đọc lại giữa vòng/await. NGUỒN DUY NHẤT, khớp link "In phiếu" ở màn Đơn hàng. Tạo sẵn
+            // best-effort (SaveSlipAsync cũng tự tạo + cảnh báo nếu vẫn lỗi).
+            var invoiceDir = _services.Settings.GetInvoiceFolder();
+            try { Directory.CreateDirectory(invoiceDir); } catch { /* SaveSlipAsync sẽ thử lại + cảnh báo */ }
+
+            const int MaxOrders = 200;              // chốt chặn an toàn (tránh lặp vô hạn nếu 1 đơn kẹt ở "Chuẩn bị hàng")
+            var loopRng = new Random();
+            int done = 0;                            // số đơn xử lý THÀNH CÔNG
+            int failCount = 0;                       // số đơn BỎ QUA vì lỗi
+            int consecutiveFails = 0;                // số đơn lỗi LIÊN TIẾP (reset khi có 1 đơn Ok)
+            bool stoppedByConsecutiveFails = false;
+            ArrangeShipmentResult last = ArrangeShipmentResult.NoOrder;
+            while (done < MaxOrders)
+            {
+                StatusText = $"Đang xử lý đơn thứ {done + failCount + 1}...";
+                last = await s.ProcessFirstOrderAsync(invoiceDir, log, tok).ConfigureAwait(false);
+
+                // Quyết định vòng lặp (hàm thuần, test được): Ok → reset chuỗi lỗi; NoOrder → dừng (hết đơn);
+                // lỗi khác → tăng chuỗi lỗi, dừng khi đạt 3 liên tiếp.
+                var (stop, nextConsecutive) = NextLoopDecision(last, consecutiveFails);
+                consecutiveFails = nextConsecutive;
+
+                if (last == ArrangeShipmentResult.Ok)
+                {
+                    done++;
+                }
+                else if (last != ArrangeShipmentResult.NoOrder)
+                {
+                    // Đơn lỗi: ghi log + bỏ qua, chạy tiếp đơn kế.
+                    failCount++;
+                    log($"Bỏ qua đơn lỗi ({DescribeFailedStep(last)}) — tiếp tục đơn kế.");
+                }
+
+                if (stop)
+                {
+                    stoppedByConsecutiveFails = last != ArrangeShipmentResult.NoOrder;
+                    break;
+                }
+
+                // Dừng ngẫu nhiên kiểu người giữa các đơn.
+                try { await Task.Delay(loopRng.Next(1500, 3500), tok).ConfigureAwait(false); }
+                catch (OperationCanceledException) { throw; }
+            }
+
+            // Tổng kết cuối vòng: ghi CẢ StatusText LẪN ActivityLog (StatusText không vào file log → mất dấu vết).
+            // Thứ tự nhánh QUAN TRỌNG: nhánh "đạt chốt chặn" (last == Ok) phải đứng TRƯỚC nhánh "failCount > 0"
+            // — vì chạm chốt chặn nghĩa là CÒN đơn chưa xử lý, không được để câu "bỏ qua Y đơn lỗi" nuốt mất
+            // thông tin đó làm người dùng tưởng đã hết đơn.
+            string summary;
+            if (stoppedByConsecutiveFails)
+            {
+                summary = $"Dừng vì lỗi 3 đơn liên tiếp ({DescribeFailedStep(last)}). Đã xử lý {done} đơn, bỏ qua {failCount} đơn lỗi.";
+            }
+            else if (last == ArrangeShipmentResult.Ok)
+            {
+                // Chạm chốt chặn MaxOrders (còn đơn chưa xử lý) — nêu RÕ để không tưởng đã hết đơn.
+                summary = failCount > 0
+                    ? $"Đã xử lý {done} đơn (đạt chốt chặn {MaxOrders}), bỏ qua {failCount} đơn lỗi."
+                    : $"Đã xử lý {done} đơn (đạt chốt chặn {MaxOrders}).";
+            }
+            else if (failCount > 0)
+            {
+                summary = $"Đã xử lý {done} đơn, bỏ qua {failCount} đơn lỗi.";
+            }
+            else
+            {
+                // Còn lại: NoOrder (hết đơn), failCount == 0 — giữ câu cũ.
+                summary = done > 0
+                    ? $"Đã xử lý xong {done} đơn. Không còn đơn nào cần xử lý."
+                    : "Không có đơn nào cần xử lý.";
+            }
+            StatusText = summary;
+            log(summary);
+
+            // Bước 4: sau khi vòng xử lý kết thúc TỰ NHIÊN (hết đơn NoOrder / chạm chốt chặn Ok), quay lại Cài
+            // đặt vận chuyển và đặt địa chỉ lấy hàng về MỘT ĐỊA CHỈ KHÁC — KHÔNG giữ nguyên địa chỉ app đã đặt
+            // để xử lý. Best-effort: mọi kết cục CHỈ ghi log + StatusText (ghép SAU summary cho khỏi mất tổng
+            // kết), KHÔNG đổi giá trị return. Nếu vòng dừng GIỮA CHỪNG vì 3 lỗi liên tiếp → GIỮ NGUYÊN địa chỉ
+            // (việc còn dở, người dùng sẽ chạy lại). OCE ném xuyên để catch ngoài cùng dừng sạch.
+            if (last is ArrangeShipmentResult.NoOrder or ArrangeShipmentResult.Ok)
+            {
+                try
+                {
+                    StatusText = "Đang đặt lại địa chỉ lấy hàng (địa chỉ khác)...";
+                    log("Quay lại Cài đặt vận chuyển để đặt địa chỉ lấy hàng về địa chỉ khác...");
+                    var nav2 = await s.OpenShippingAddressSettingsAsync(tok).ConfigureAwait(false);
+                    if (nav2 != ShippingNavResult.Ok)
+                    {
+                        StatusText = summary + " Không mở lại được Cài đặt vận chuyển — giữ nguyên địa chỉ lấy hàng.";
+                        log("Không mở lại được Cài đặt vận chuyển — giữ nguyên địa chỉ lấy hàng.");
+                    }
+                    else
+                    {
+                        var other = await s.SetPickupAddressToOtherAsync(tok).ConfigureAwait(false);
+                        string msg = other switch
+                        {
+                            SetPickupResult.Ok => "Đã đặt địa chỉ lấy hàng về địa chỉ khác.",
+                            SetPickupResult.AddressNotFound =>
+                                "Shop không có địa chỉ nào khác — giữ nguyên địa chỉ lấy hàng.",
+                            _ =>
+                                $"Chưa đặt lại được địa chỉ lấy hàng ({DescribeSetPickupStep(other)}) — Shopee có thể khóa đổi địa chỉ khi có đơn Chờ lấy hàng; kiểm tra tay nếu cần.",
+                        };
+                        StatusText = summary + " " + msg;
+                        log(msg);
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    throw; // hủy chủ động → để catch OCE ngoài cùng dừng sạch
+                }
+                catch (Exception ex)
+                {
+                    // Best-effort: lỗi bất ngờ khi đặt lại địa chỉ KHÔNG được phá kết quả vòng xử lý.
+                    // Trả StatusText về câu tổng kết (kẻo kẹt ở "Đang đặt lại địa chỉ...").
+                    StatusText = summary + " (Lỗi khi đặt lại địa chỉ lấy hàng — xem nhật ký.)";
+                    log($"Lỗi khi đặt lại địa chỉ lấy hàng (bỏ qua): {ex.Message}");
+                }
+            }
+            else
+            {
+                log("Giữ nguyên địa chỉ lấy hàng (vòng dừng giữa chừng).");
+            }
+
+            return last is ArrangeShipmentResult.NoOrder or ArrangeShipmentResult.Ok || done > 0;
+        }
+        catch (OperationCanceledException)
+        {
+            // Bị dừng chủ động trong lúc điều hướng — không phải lỗi.
+            return false;
+        }
+        finally
+        {
+            _navigating = false;
+        }
+    }
+
+    /// <summary>
+    /// Quyết định vòng lặp xử lý đơn theo kết quả xử lý MỘT đơn (thuần, KHÔNG side-effect → test được):
+    /// <list type="bullet">
+    /// <item><see cref="ArrangeShipmentResult.Ok"/> → KHÔNG dừng, reset chuỗi lỗi liên tiếp về 0.</item>
+    /// <item><see cref="ArrangeShipmentResult.NoOrder"/> → DỪNG (hết đơn), giữ nguyên chuỗi lỗi.</item>
+    /// <item>Lỗi khác → tăng chuỗi lỗi liên tiếp; DỪNG khi đạt <paramref name="maxConsecutiveFails"/>.</item>
+    /// </list>
+    /// Guard 3-liên-tiếp cần vì đơn fail TRƯỚC arrange (PrepareNotFound/ShipModalNotOpened/ConfirmFailed/
+    /// Failed) vẫn còn nút "Chuẩn bị hàng" → vòng sau chọn LẠI chính đơn đó; 3 lần không tiến triển = có vấn
+    /// đề hệ thống, dừng để người xem. (Đơn fail SAU arrange — PrintFailed/DetailModalNotOpened — mất nút
+    /// "Chuẩn bị hàng" nên vòng sau tự sang đơn kế, không lặp.)
+    /// </summary>
+    public static (bool stop, int consecutive) NextLoopDecision(
+        ArrangeShipmentResult last, int consecutiveFails, int maxConsecutiveFails = 3)
+    {
+        if (last == ArrangeShipmentResult.Ok)
+        {
+            return (false, 0);                       // 1 đơn Ok → reset chuỗi lỗi
+        }
+        if (last == ArrangeShipmentResult.NoOrder)
+        {
+            return (true, consecutiveFails);         // hết đơn → dừng
+        }
+        int next = consecutiveFails + 1;
+        return (next >= maxConsecutiveFails, next);  // lỗi → tăng chuỗi; đủ 3 liên tiếp thì dừng
+    }
+
+    /// <summary>
+    /// Quyết định BỎ QUA xử lý đơn theo số "Chờ Lấy Hàng" ĐỌC ĐƯỢC (thuần, KHÔNG side-effect → test được).
+    /// Dùng ở ĐẦU <see cref="ProcessOrdersAsync"/>: CHỈ bỏ qua khi đọc ĐƯỢC số VÀ số == 0 (chắc chắn không
+    /// còn đơn "Chờ Lấy Hàng" → không cần vào Cài đặt vận chuyển). Đọc KHÔNG được
+    /// (<paramref name="toShipCount"/> == null: chưa đăng nhập / đọc lỗi) → KHÔNG bỏ qua (làm tiếp như cũ,
+    /// tránh bỏ sót đơn thật). Số &gt; 0 → KHÔNG bỏ qua (có đơn cần xử lý).
+    /// </summary>
+    public static bool ShouldSkipProcessing(int? toShipCount) => toShipCount is 0;
+
+    /// <summary>Mô tả NGẮN bước lỗi của một đơn (dùng cho log "Bỏ qua đơn lỗi (...)" và câu dừng 3-liên-tiếp).</summary>
+    private static string DescribeFailedStep(ArrangeShipmentResult r) => r switch
+    {
+        ArrangeShipmentResult.OrdersPageNotOpened  => "không mở được danh sách đơn",
+        ArrangeShipmentResult.PrepareNotFound      => "không bấm được Chuẩn bị hàng",
+        ArrangeShipmentResult.ShipModalNotOpened   => "không mở được ô Giao Đơn Hàng",
+        ArrangeShipmentResult.ConfirmFailed        => "không Xác nhận được",
+        ArrangeShipmentResult.DetailModalNotOpened => "không mở được Thông Tin Chi Tiết",
+        ArrangeShipmentResult.PrintFailed          => "không In phiếu giao được",
+        _ => "lỗi không xác định",
+    };
+
+    /// <summary>Mô tả NGẮN bước hỏng khi đặt LẠI địa chỉ lấy hàng về địa chỉ khác (bước 4, cho log/StatusText).</summary>
+    private static string DescribeSetPickupStep(SetPickupResult r) => r switch
+    {
+        SetPickupResult.EditModalNotOpened  => "không mở được ô Sửa địa chỉ",
+        SetPickupResult.CheckboxNotFound    => "không thấy mục Đặt làm địa chỉ lấy hàng",
+        SetPickupResult.CheckboxClickFailed => "không tick được",
+        SetPickupResult.SaveFailed          => "không Lưu được",
+        _ => "lỗi không xác định",
+    };
+
+    /// <summary>
+    /// Kiểm tra đơn NGAY (thủ công): trong phiên đang chạy, về trang chủ Seller (Goto như người gõ URL —
+    /// KHÔNG click máy) rồi đọc lại số "Chờ Lấy Hàng" ngay, cập nhật <see cref="ToShipCount"/> — không đợi
+    /// chu kỳ theo dõi (cấu hình). Bật cờ <see cref="_navigating"/> để vòng <see cref="RunAsync"/> KHÔNG reload đọc
+    /// đơn giữa chừng và để loại trừ với <see cref="ProcessOrdersAsync"/> (hai thao tác không chạy chồng nhau
+    /// trên cùng trang). Graceful: phiên chưa chạy / đang bận / bị hủy / không đọc được → false, KHÔNG ném.
+    /// KHÔNG đổi <see cref="ToShipCount"/> khi không đọc được (giữ số cũ).
+    /// </summary>
+    public async Task<bool> CheckOrdersAsync()
+    {
+        // Chụp phiên + token dưới lock (nuốt ObjectDisposedException nếu _cts đã dispose).
+        var s = _session;
+        CancellationToken tok;
+        try
+        {
+            lock (_lifecycleLock)
+            {
+                tok = _cts?.Token ?? default;
+            }
+        }
+        catch (ObjectDisposedException)
+        {
+            return false;
+        }
+
+        // _navigating: đang có lượt điều hướng chạy dở (bấm lặp / xử lý đơn) → bỏ qua, không chạy chồng nhau.
+        if (s is null || State != SessionState.Running || _navigating)
+        {
+            return false;
+        }
+
+        _navigating = true;
+        StatusText = "Đang về trang chủ để kiểm tra đơn...";
+        try
+        {
+            // Về trang chủ (Goto) + đọc lại số ngay (reload:false vì trang vừa load) — gộp trong Core.
+            var count = await s.GoHomeAndReadToShipCountAsync(tok).ConfigureAwait(false);
+            if (count is int n)
+            {
+                ToShipCount = n; // VM tự định dạng dòng hiển thị theo số này
+                StatusText = $"Đã kiểm tra: Chờ Lấy Hàng = {n}.";
+                return true;
+            }
+
+            // Bị hủy giữa chừng (người dùng bấm Dừng): Core nuốt OperationCanceledException và trả null —
+            // KHÔNG đè thông báo "Đang dừng..." bằng câu báo lỗi gây hiểu lầm.
+            if (tok.IsCancellationRequested)
+            {
+                return false;
+            }
+
+            // Không đọc được → GIỮ nguyên số cũ (KHÔNG đổi ToShipCount).
+            StatusText = "Không đọc được số đơn — có thể chưa đăng nhập xong, kiểm tra cửa sổ Brave.";
+            return false;
+        }
+        catch (OperationCanceledException)
+        {
+            // Bị dừng chủ động trong lúc điều hướng — không phải lỗi.
+            return false;
+        }
+        finally
+        {
+            _navigating = false;
+        }
+    }
+
+    /// <summary>
+    /// Sync Đơn hàng: trong phiên đang chạy, vào Quản lý đơn hàng → tab "Tất cả", duyệt MỌI trang danh sách
+    /// (Core best-effort — không ném trừ hủy) thu thập thông tin đơn rồi <b>UPSERT về DB</b> (bảng orders,
+    /// theo khóa <c>(account_id, order_sn)</c>). Bật cờ <see cref="_navigating"/> suốt lượt để loại trừ với
+    /// Xử lý đơn / Kiểm tra / nhịp theo dõi (cấu hình) (không hai luồng chuột trên cùng trang). Ghi log tiến trình
+    /// từng trang + tổng kết (thêm mới / cập nhật). Graceful: phiên chưa chạy / đang bận / bị hủy / lỗi →
+    /// false + StatusText/log, KHÔNG ném. finally reset <see cref="_navigating"/>.
+    /// <para>
+    /// <b>"Nút Sync bao gồm cả nút Kiểm tra"</b> (người dùng chốt): trước khi tổng kết (vẫn trong cửa sổ
+    /// <see cref="_navigating"/>), VỀ TRANG CHỦ đọc số "Chờ Lấy Hàng" tươi (<c>GoHomeAndReadToShipCountAsync</c>
+    /// — y hệt nút Kiểm tra; ô số nằm Ở TRANG CHỦ, sau sync trình duyệt đang ở trang danh sách đơn nên đọc tại
+    /// chỗ sẽ không thấy) và cập nhật <see cref="ToShipCount"/> — để nút "Xử lý đơn" (phụ thuộc số này) đúng
+    /// trạng thái ngay, không phải chờ nhịp đọc định kỳ (có thể xa tới ~10'). Best-effort: đọc lỗi/không được
+    /// KHÔNG phá kết quả sync.
+    /// </para>
+    /// <para>
+    /// Đẩy đơn lên Google Sheet (<see cref="PushOrdersToGsheetAsync"/>) được kích hoạt SAU tổng kết và chạy
+    /// <b>NỀN</b> qua <see cref="StartGsheetPushInBackground"/> (KHÔNG await trong cửa sổ <see cref="_navigating"/>):
+    /// push chỉ đụng DB + file + HTTP, KHÔNG đụng trình duyệt nên chạy song song được với nhịp đọc "Chờ Lấy
+    /// Hàng" của <see cref="RunAsync"/> — nhờ đó nút "Xử lý đơn" (phụ thuộc ToShipCount) không bị xám lâu chờ
+    /// upload phiếu xong.
+    /// </para>
+    /// </summary>
+    public async Task<bool> SyncOrdersAsync()
+    {
+        // Chụp phiên + token dưới lock (nuốt ObjectDisposedException nếu _cts đã dispose).
+        var s = _session;
+        CancellationToken tok;
+        try
+        {
+            lock (_lifecycleLock)
+            {
+                tok = _cts?.Token ?? default;
+            }
+        }
+        catch (ObjectDisposedException)
+        {
+            return false;
+        }
+
+        // _navigating: đang có lượt điều hướng chạy dở (bấm lặp / xử lý đơn / kiểm tra) → bỏ qua, không chồng nhau.
+        if (s is null || State != SessionState.Running || _navigating)
+        {
+            return false;
+        }
+
+        _navigating = true;
+        StatusText = "Đang sync đơn hàng (tab Tất cả)...";
+        var log = (Action<string>)(m => _services.Log.Append(_logLabel, m));
+        try
+        {
+            // Tập đơn ĐÃ có "Số tiền cuối cùng" trong DB → Core bỏ qua mở lại chi tiết cho các đơn này (tối ưu:
+            // lần đầu lâu, các lần sau nhanh). Đọc từ DB trước mỗi lượt sync để đón số đã lấy ở lượt trước.
+            var alreadyHaveFinal = _services.Orders.GetOrderSnsWithFinalAmount(_accountId);
+
+            // Core thu thập (best-effort có log tiến trình từng trang), trả DTO — KHÔNG đụng DB.
+            var result = await s.SyncAllOrdersAsync(log, alreadyHaveFinal, tok).ConfigureAwait(false);
+
+            // Lưu về DB (thread nền — SQLite an toàn): upsert theo (account_id, order_sn). insertedOrders =
+            // các đơn VỪA thêm mới (đơn cập nhật KHÔNG có) → dùng để báo "đơn mới" qua Slack/Discord/Telegram.
+            var (inserted, updated, insertedOrders) = _services.Orders.UpsertMany(_accountId, result.Orders, DateTime.UtcNow);
+
+            // Vừa ghi đơn vào DB → phát tín hiệu để màn "Đơn hàng" đang mở TỰ nạp lại (OrdersViewModel nghe
+            // rồi marshal về UI thread). CHỈ thêm 1 lời gọi này, KHÔNG đụng luồng xử lý đơn / cửa-skip.
+            _services.RaiseOrdersChanged();
+
+            // "Nút Sync bao gồm cả nút Kiểm tra" (người dùng chốt 2026-07-20): kết thúc mỗi lượt sync bằng SỐ
+            // TƯƠI "Chờ Lấy Hàng" — VỀ TRANG CHỦ đọc y hệt nút Kiểm tra (GoHomeAndReadToShipCountAsync): ô số
+            // nằm Ở TRANG CHỦ, sau sync trình duyệt đang ở trang danh sách đơn nên ReadToShipCountAsync tại chỗ
+            // sẽ không thấy. Phiên mở sẵn lâu có nextOrderCheck xa tới ~10' → trước đây sync xong ToShipCount
+            // vẫn là số CŨ, hiển thị "Chờ lấy: N" và quyết định xử-lý-hay-không của Sync trọn gói sai theo;
+            // giờ sync nào cũng kết bằng số tươi (phiên cũng đậu lại ở trang chủ như sau Kiểm tra).
+            // Đọc ở đây vẫn TRONG cửa sổ _navigating (thao tác trình duyệt độc quyền). Best-effort: lỗi đọc số
+            // KHÔNG phá kết quả sync (OCE cho xuyên để dừng sạch).
+            int? toShip = null;
+            try
+            {
+                toShip = await s.GoHomeAndReadToShipCountAsync(tok).ConfigureAwait(false);
+                if (toShip is int n)
+                {
+                    ToShipCount = n; // VM/danh sách tài khoản cập nhật "Chờ lấy: N" ngay
+                    log($"Chờ Lấy Hàng: {n} đơn.");
+                }
+                else
+                {
+                    log("Không đọc được số Chờ Lấy Hàng sau sync (có thể chưa đăng nhập xong) — bỏ qua.");
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                throw; // hủy chủ động → catch ngoài xử như hủy
+            }
+            catch (Exception ex)
+            {
+                log("Không đọc được số Chờ Lấy Hàng sau sync (bỏ qua): " + ex.Message);
+            }
+
+            var summary = $"Sync xong: {result.Orders.Count} đơn / {result.Pages} trang — thêm {inserted} mới, cập nhật {updated}."
+                + (result.ReachedPageCap ? " (chạm chốt chặn 20 trang)" : string.Empty)
+                + (toShip is int t ? $" — Chờ Lấy Hàng: {t}" : string.Empty);
+            StatusText = summary;
+            log(summary);
+
+            // Đẩy GSheet chạy NỀN (KHÔNG await trong cửa sổ _navigating): push chỉ đụng DB + file + HTTP, KHÔNG
+            // đụng trình duyệt → không cần giữ _navigating. Nếu await ở đây thì upload phiếu (mạng, có thể nhiều
+            // phút) kéo dài khóa _navigating, hoãn nhịp RunAsync đọc "Chờ Lấy Hàng" → số hiển thị/quyết định
+            // của Sync trọn gói treo số cũ rất lâu sau Sync. Chạy nền để nhịp đọc số chạy ngay.
+            StartGsheetPushInBackground(log, tok);
+
+            // Báo "đơn MỚI" (Slack/Discord/Telegram) — CHỈ khi lượt này có đơn INSERT. Chạy NỀN fire-and-forget
+            // (y pattern GSheet): thông báo chỉ đụng HTTP nên không cần giữ _navigating, không kéo dài lượt sync;
+            // lỗi mạng chỉ log, KHÔNG phá sync. Tin nhắn mang dữ liệu ĐÃ sync (kể cả mã vận đơn nếu có sau bước
+            // chuẩn bị hàng — sync là bước cuối của "Sync trọn gói").
+            if (insertedOrders.Count > 0)
+            {
+                StartNotifyInBackground(insertedOrders, log, tok);
+            }
+            return true;
+        }
+        catch (OperationCanceledException)
+        {
+            // Bị dừng chủ động trong lúc sync — không phải lỗi.
+            return false;
+        }
+        catch (Exception ex)
+        {
+            // Lỗi bất ngờ (vd ghi DB) → log + StatusText, KHÔNG ném (không phá phiên).
+            StatusText = "Sync đơn hàng gặp lỗi — xem nhật ký.";
+            log("Lỗi khi sync đơn hàng: " + ex.Message);
+            return false;
+        }
+        finally
+        {
+            _navigating = false;
+        }
+    }
+
+    /// <summary>
+    /// Sync TRỌN GÓI (nút Sync mới của màn Tài khoản): kiểm tra đơn mới → nếu có thì xử lý đơn →
+    /// sync đơn hàng. Caller (VM) đã lo mở phiên + chờ sẵn sàng qua RunOrAutoStartAsync. Mỗi bước con tự
+    /// quản <see cref="_navigating"/>; bước Kiểm tra bận/fail → dừng chuỗi; riêng Xử lý đơn lỗi giữa chừng
+    /// vẫn đi tiếp bước sync (log rõ), KHÔNG ném.
+    /// <para>
+    /// Thứ tự: <b>Kiểm tra → (nếu ToShipCount &gt; 0) Xử lý đơn → Sync</b>. Xử lý đơn LỖI giữa chừng KHÔNG
+    /// chặn việc sync (vẫn lưu đơn về máy). Ghép từ 3 method rời có sẵn
+    /// (<see cref="CheckOrdersAsync"/>/<see cref="ProcessOrdersAsync"/>/<see cref="SyncOrdersAsync"/>) —
+    /// KHÔNG tái dùng pipeline AutoRun vì AutoRun đi theo thứ tự Process→Sync→Check và có chính sách vòng
+    /// đời phiên riêng (bỏ qua phiên người dùng tự mở, tự đóng phiên sau lô).
+    /// </para>
+    /// </summary>
+    public async Task<bool> SyncFullAsync()
+    {
+        var log = (Action<string>)(m => _services.Log.Append(_logLabel, m));
+        log("Sync trọn gói: kiểm tra đơn mới → xử lý (nếu có) → sync đơn hàng.");
+
+        // Bước 1: kiểm tra đơn mới (về trang chủ đọc số "Chờ Lấy Hàng"). false = phiên bận / không đọc được → dừng chuỗi.
+        var ok = await CheckOrdersAsync().ConfigureAwait(false);
+        if (!ok)
+        {
+            log("Sync trọn gói: không kiểm tra được (phiên bận?) — dừng.");
+            return false;
+        }
+
+        // Bước 2: nếu có đơn Chờ Lấy Hàng thì XỬ LÝ trước khi sync. Xử lý lỗi giữa chừng KHÔNG được chặn
+        // việc lưu đơn về máy → vẫn đi tiếp sang bước sync (chỉ log rõ). ToShipCount đã được CheckOrdersAsync
+        // cập nhật số tươi ngay trước đó.
+        if (ToShipCount is > 0)
+        {
+            log($"Có {ToShipCount} đơn chờ — xử lý đơn trước khi sync.");
+            var processed = await ProcessOrdersAsync().ConfigureAwait(false);
+            if (!processed)
+            {
+                log("Xử lý đơn chưa trọn vẹn — vẫn sync đơn hàng.");
+            }
+        }
+        else
+        {
+            log("Không có đơn chờ — bỏ qua bước xử lý.");
+        }
+
+        // Bước 3: sync đơn hàng (bên trong đã tự về trang chủ đọc số + đẩy GSheet chạy nền).
+        return await SyncOrdersAsync().ConfigureAwait(false);
+    }
+
+    /// <summary>Giới hạn kích thước file phiếu đính kèm (5MB) — PDF phiếu giao thường ~100–300KB.</summary>
+    private const long MaxSlipBytes = 5 * 1024 * 1024;
+
+    /// <summary>Cờ CHỐNG CHỒNG lượt đẩy GSheet trên CÙNG phiên (0 = rảnh, 1 = đang đẩy). Bấm Sync liên tiếp
+    /// trong lúc lượt đẩy nền trước chưa xong → bỏ qua lượt đẩy mới (Interlocked, thread-safe).</summary>
+    private int _gsheetPushing;
+
+    /// <summary>
+    /// Kích hoạt đẩy GSheet CHẠY NỀN (fire-and-forget) sau khi Sync đã tổng kết. KHÔNG await trong luồng sync
+    /// (không giữ <see cref="_navigating"/>) vì push chỉ đụng DB + file + HTTP, không đụng trình duyệt → chạy
+    /// song song được với nhịp đọc "Chờ Lấy Hàng"/Xử lý đơn. Cờ <see cref="_gsheetPushing"/> chống 2 lượt đẩy
+    /// chồng nhau (bấm Sync liên tiếp): lượt trước còn chạy → bỏ qua, log 1 dòng (lượt sync sau tự đẩy phần
+    /// thiếu nhờ cờ DB). <paramref name="ct"/> là token phiên → dừng phiên thì lượt đẩy tự hủy.
+    /// <see cref="PushOrdersToGsheetAsync"/> đã tự nuốt mọi exception nên task nền KHÔNG bao giờ ném unobserved.
+    /// </summary>
+    private void StartGsheetPushInBackground(Action<string> log, CancellationToken ct)
+    {
+        if (Interlocked.CompareExchange(ref _gsheetPushing, 1, 0) != 0)
+        {
+            log("GSheet: lượt đẩy trước còn đang chạy — bỏ qua (lượt sync sau tự đẩy phần thiếu).");
+            return;
+        }
+
+        _ = Task.Run(async () =>
+        {
+            try { await PushOrdersToGsheetAsync(log, ct).ConfigureAwait(false); }
+            finally { Interlocked.Exchange(ref _gsheetPushing, 0); }
+        }, CancellationToken.None);
+    }
+
+    /// <summary>
+    /// Kích hoạt báo "đơn MỚI" (Slack/Discord/Telegram) CHẠY NỀN (fire-and-forget) sau khi Sync đã tổng kết —
+    /// y pattern <see cref="StartGsheetPushInBackground"/>. URL webhook chưa cấu hình → return im lặng (không
+    /// đổi hành vi cũ). Tên shop = <see cref="Account.Email"/> (tên đăng nhập người dùng nhập, như GSheet).
+    /// Dựng tin nhắn qua <see cref="OrderNotifyService.TaoTinNhanDonMoi"/> rồi gửi qua
+    /// <see cref="OrderNotifyService.SendAsync"/>; thành công → log 1 dòng. Mọi exception NUỐT + log (KHÔNG phá
+    /// sync — sync DB đã xong). <paramref name="ct"/> là token phiên → dừng phiên thì lượt gửi tự hủy.
+    /// </summary>
+    private void StartNotifyInBackground(IReadOnlyList<SyncedOrder> insertedOrders, Action<string> log, CancellationToken ct)
+    {
+        var url = _services.Settings.GetNotifyWebhookUrl();
+        if (string.IsNullOrWhiteSpace(url) || insertedOrders is null || insertedOrders.Count == 0)
+        {
+            return; // người dùng chưa dùng tính năng / không có đơn mới → im lặng
+        }
+
+        // Tên shop = tên đăng nhập tài khoản (như GSheet); fallback "TK {id}" nếu chưa đọc được email.
+        var tenShop = _services.Accounts.GetById(_accountId)?.Email;
+        if (string.IsNullOrWhiteSpace(tenShop))
+        {
+            tenShop = $"TK {_accountId}";
+        }
+        var luc = DateTime.Now;
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var text = OrderNotifyService.TaoTinNhanDonMoi(tenShop, insertedOrders, luc);
+                var ok = await _services.Notify.SendAsync(url, text, log, ct).ConfigureAwait(false);
+                if (ok)
+                {
+                    var kenh = OrderNotifyService.NhanDienKenh(url);
+                    log($"Notify: đã báo {insertedOrders.Count} đơn mới ({kenh}).");
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // Hủy chủ động (dừng phiên) — thôi.
+            }
+            catch (Exception ex)
+            {
+                // Lỗi báo đơn KHÔNG phá lượt sync (đã báo thành công) — chỉ ghi log.
+                log("Notify: lỗi — " + ex.Message);
+            }
+        }, CancellationToken.None);
+    }
+
+    /// <summary>
+    /// Đẩy các đơn của tài khoản này (kèm file phiếu PDF base64) lên Google Sheet qua Apps Script Web App.
+    /// Gọi CHẠY NỀN (qua <see cref="StartGsheetPushInBackground"/>) SAU khi Sync đã ghi đơn vào DB + tổng kết.
+    /// <b>Không bao giờ ném</b> (sync DB đã xong — lỗi GSheet chỉ ghi log): hủy chủ động → thôi; lỗi khác → log
+    /// "GSheet: lỗi — ...". URL chưa cấu hình → return im lặng (không đổi hành vi cũ). Chỉ đính kèm file khi
+    /// phiếu tồn tại + đúng magic <c>%PDF-</c> (đừng tin đuôi file) và đơn chưa có link. Đơn đã ghi sheet mà
+    /// không có file mới → bỏ qua (không đẩy trùng). Với mỗi kết quả Ok → đánh dấu
+    /// <see cref="OrdersRepository.MarkGsheetSynced"/> (cờ DB chống đẩy trùng lượt sau).
+    /// </summary>
+    private async Task PushOrdersToGsheetAsync(Action<string> log, CancellationToken ct)
+    {
+        try
+        {
+            var url = _services.Settings.GetGsheetWebAppUrl();
+            if (string.IsNullOrWhiteSpace(url))
+            {
+                return; // người dùng chưa dùng tính năng → im lặng, không đổi hành vi cũ
+            }
+
+            var pending = _services.Orders.GetForGsheetPush(_accountId);
+            if (pending.Count == 0)
+            {
+                log("GSheet: không có đơn mới cần ghi.");
+                return;
+            }
+
+            // Tên shop (cột E) = TÊN ĐĂNG NHẬP của tài khoản đang sync (Account.Email — người dùng nhập
+            // "sully", "cicily"… trong app). Không có fallback nào khác.
+            var tenShop = _services.Accounts.GetById(_accountId)?.Email;
+
+            var invoiceDir = _services.Settings.GetInvoiceFolder();
+            var ngay = DateTime.Now.ToString("dd/MM/yyyy");
+
+            var rows = new List<GsheetOrderRow>();
+            // Nhớ trạng thái hủy + đã-có-vận-đơn VỪA tính của từng đơn được gửi → dùng cho MarkGsheetSynced
+            // (ghi cờ gsheet_da_huy / gsheet_da_co_van_don).
+            var daHuyByMaDon = new Dictionary<string, bool>(StringComparer.Ordinal);
+            var coVanDonByMaDon = new Dictionary<string, bool>(StringComparer.Ordinal);
+            foreach (var p in pending)
+            {
+                var daHuy = ShopeeShippingNav.LaDonHuy(p.Status, p.StatusDescription, p.CancelReason);
+                var coVanDon = !string.IsNullOrWhiteSpace(p.TrackingNumber);
+
+                // BỎ QUA đơn HỦY mà CHƯA từng có vận đơn: đơn hủy trước khi vào pipeline giao không thuộc sổ
+                // theo dõi → không ghi (tránh spam dòng đỏ vô nghĩa). Đơn CHƯA hủy (đang chuẩn bị) vẫn ghi dù
+                // chưa có vận đơn (dòng TRẮNG), cột B tự điền khi vận đơn xuất hiện sau.
+                if (daHuy && !coVanDon)
+                {
+                    continue;
+                }
+
+                string? fileName = null;
+                string? fileBase64 = null;
+
+                // Chỉ đính kèm file khi đơn CHƯA có link (FileUrl trống) — tránh upload lại phiếu đã có.
+                if (string.IsNullOrEmpty(p.FileUrl))
+                {
+                    var safeName = ShopeeShippingNav.SanitizeFileName(p.OrderSn);
+                    var path = Path.Combine(invoiceDir, safeName + ".pdf");
+                    if (TryReadSlipBase64(path, log, out var b64))
+                    {
+                        fileName = safeName + ".pdf";
+                        fileBase64 = b64;
+                    }
+                }
+
+                // CHỌN GỬI khi thỏa ÍT NHẤT một điều kiện: (a) đơn mới với sheet; (b) có file phiếu để bổ sung
+                // link (fileBase64 chỉ set khi FileUrl null); (c) trạng thái hủy đổi so với lần đẩy trước (hoặc
+                // chưa từng đẩy) → sheet cần đổi màu; (d) vận đơn VỪA xuất hiện (đã ghi dòng lúc chưa có vận đơn,
+                // giờ có) → gửi lại để điền cột B. Không thỏa → bỏ qua (không đẩy trùng vô ích).
+                var coFileBoSung = fileBase64 is not null;
+                var huyDoi = p.GsheetDaHuy is null || daHuy != (p.GsheetDaHuy == 1);
+                var vanDonMoi = coVanDon && p.GsheetDaCoVanDon != 1;
+                if (!(!p.DaGhiSheet || coFileBoSung || huyDoi || vanDonMoi))
+                {
+                    continue;
+                }
+
+                daHuyByMaDon[p.OrderSn] = daHuy;
+                coVanDonByMaDon[p.OrderSn] = coVanDon;
+                rows.Add(new GsheetOrderRow(
+                    MaDon: p.OrderSn,
+                    MaVanDon: p.TrackingNumber,
+                    TenShop: tenShop,
+                    DoanhThu: p.TotalPrice,
+                    Ngay: ngay,
+                    Sku: p.Sku,
+                    FileName: fileName,
+                    FileBase64: fileBase64,
+                    DaHuy: daHuy));
+            }
+
+            if (rows.Count == 0)
+            {
+                log("GSheet: không có đơn mới cần ghi.");
+                return;
+            }
+
+            var tabName = _services.Settings.GetGsheetTabName();
+            var results = await _services.GsheetSync.PushAsync(url, tabName, rows, log, ct).ConfigureAwait(false);
+
+            int added = 0, updated = 0, withFile = 0, errors = 0;
+            string? firstError = null;
+            foreach (var r in results)
+            {
+                if (r.Ok)
+                {
+                    var daHuy = daHuyByMaDon.TryGetValue(r.MaDon, out var dh) && dh;
+                    var coVanDon = coVanDonByMaDon.TryGetValue(r.MaDon, out var cv) && cv;
+                    _services.Orders.MarkGsheetSynced(_accountId, r.MaDon, r.FileUrl, daHuy, coVanDon, DateTime.UtcNow);
+                    if (r.Added) { added++; } else { updated++; }
+                    if (!string.IsNullOrEmpty(r.FileUrl)) { withFile++; }
+                }
+                else
+                {
+                    errors++;
+                    firstError ??= $"{r.MaDon}: {r.Error}";
+                }
+            }
+
+            var summary = $"GSheet: thêm {added} dòng mới, bổ sung {updated}, kèm {withFile} file phiếu.";
+            if (errors > 0)
+            {
+                summary += $" Lỗi {errors} đơn (vd {firstError}).";
+            }
+            log(summary);
+        }
+        catch (OperationCanceledException)
+        {
+            // Hủy chủ động — thôi (sync DB đã xong; lượt sync sau tự đẩy lại nhờ cờ DB).
+        }
+        catch (Exception ex)
+        {
+            // Lỗi GSheet KHÔNG phá lượt sync (đã báo thành công) — chỉ ghi log.
+            log("GSheet: lỗi — " + ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Đọc file phiếu <paramref name="path"/> thành base64 nếu HỢP LỆ: tồn tại, ≤ 5MB, và 5 byte đầu là
+    /// <c>%PDF-</c> (kiểm magic — bài học cũ: đừng tin đuôi file, GET lại phiếu có thể ra HTML 200-OK). File
+    /// quá lớn → log 1 dòng + bỏ qua. Mọi lỗi đọc → false. Trả true + base64 khi hợp lệ.
+    /// </summary>
+    private static bool TryReadSlipBase64(string path, Action<string> log, out string? base64)
+    {
+        base64 = null;
+        try
+        {
+            if (!File.Exists(path))
+            {
+                return false;
+            }
+
+            var info = new FileInfo(path);
+            if (info.Length > MaxSlipBytes)
+            {
+                log($"GSheet: file phiếu quá lớn (>{MaxSlipBytes / (1024 * 1024)}MB), bỏ qua: {Path.GetFileName(path)}");
+                return false;
+            }
+
+            var bytes = File.ReadAllBytes(path);
+            if (bytes.Length < 5 || bytes[0] != (byte)'%' || bytes[1] != (byte)'P'
+                || bytes[2] != (byte)'D' || bytes[3] != (byte)'F' || bytes[4] != (byte)'-')
+            {
+                return false; // không phải PDF thật → không gửi rác
+            }
+
+            base64 = Convert.ToBase64String(bytes);
+            return true;
+        }
+        catch
+        {
+            return false; // lỗi đọc file → bỏ qua, không phá luồng
+        }
+    }
+
+    /// <summary>
+    /// Chọn proxy theo thứ tự ưu tiên và ĐỒNG THỜI set <see cref="_kiotClient"/> — client nguồn KiotProxy
+    /// của phiên để watchdog canh proxy:
+    /// (1) POOL KiotProxy CHUNG → cấp key RẢNH cho phiên (<see cref="_acquireKiotKey"/>); phiên GIỮ key này
+    ///     suốt đời (kể cả relaunch đổi IP), watchdog BẬT trên key đó,
+    /// (2) danh sách proxy thủ công → round-robin BỀN, chia sẻ giữa các phiên (watchdog TẮT: <c>_kiotClient=null</c>),
+    /// (3) IP máy (null → watchdog TẮT).
+    /// <para>
+    /// KHÔNG còn đọc <c>acc.ProxyKey</c> (cơ chế gán-cố-định cũ đã bỏ; giá trị cũ được migrate vào pool chung).
+    /// Acquire chỉ gọi ở đây (một lần khi mở phiên) — relaunch đổi IP KHÔNG gọi lại (giữ nguyên key). Nếu pool
+    /// rỗng → <see cref="_acquireKiotKey"/> trả null, rơi xuống proxy thủ công / IP máy.
+    /// </para>
+    /// </summary>
+    private async Task<ProxyEntry?> SelectProxyAsync(CancellationToken ct)
+    {
+        // (1) Pool KiotProxy chung: cấp key rảnh cho phiên (giữ suốt đời phiên). Watchdog BẬT.
+        var key = _acquireKiotKey(_accountId);
+        if (key is not null)
+        {
+            _kiotClient = new KiotProxyClient(new[] { key });
+            return await ProxySelector.SelectKiotProxyAsync(_kiotClient, _healthChecker, ct).ConfigureAwait(false);
+        }
+
+        // (2) Proxy thủ công → round-robin BỀN, chia sẻ giữa các phiên (watchdog TẮT).
+        var manual = _services.Proxies.GetAll();
+        if (manual.Count > 0)
+        {
+            _kiotClient = null;                                   // proxy thủ công → không canh
+            return _nextManualProxy(manual);                      // round-robin BỀN, KHÔNG kiểm
+        }
+
+        // (3) IP máy (null → watchdog TẮT).
+        _kiotClient = null;
+        return null;
+    }
+
+    /// <summary>
+    /// Luồng chạy nền của phiên. Bê nguyên logic từ <c>OpenSellerAsync</c>; thay modal bằng trạng thái;
+    /// tôn trọng <paramref name="ct"/> để dừng nhanh khi người dùng bấm Dừng / thoát app.
+    /// </summary>
+    private async Task RunAsync(CancellationToken ct)
+    {
+        try
+        {
+            // Đọc tài khoản theo Id (KHÔNG đọc form) — dùng cho cả chọn proxy lẫn tự đăng nhập.
+            var acc = _services.Accounts.GetById(_accountId);
+
+            // Gắn nhãn email cho log (thay mặc định "TK {id}") để dòng log dễ nhận nguồn.
+            if (!string.IsNullOrWhiteSpace(acc?.Email))
+            {
+                _logLabel = acc!.Email;
+            }
+
+            // Hồ sơ persistent riêng cho tài khoản này → mở lại vẫn còn đăng nhập.
+            var baseDir = Path.GetDirectoryName(_services.Database.Path) ?? ".";
+            var userDataDir = BrowserProfilePaths.ForAccount(baseDir, _accountId);
+            Directory.CreateDirectory(userDataDir);
+
+            // 1) Chọn proxy theo thứ tự ưu tiên (pool KiotProxy → thủ công → IP máy) + set _kiotClient để
+            //    watchdog canh. Acquire key từ pool xảy ra ở đây MỘT LẦN (giữ suốt đời phiên).
+            SetStatus(SessionState.Opening, "Đang kiểm tra proxy...");
+            _currentProxy = await SelectProxyAsync(ct).ConfigureAwait(false);
+
+            ct.ThrowIfCancellationRequested();
+
+            // Trình duyệt người dùng chọn ở Cài đặt — đọc TƯƠI khi phiên bắt đầu (đổi trong Cài đặt CHỈ áp cho
+            // phiên MỞ SAU khi lưu). Đặt ở scope bao cả vòng relaunch để mọi lần mở lại đều dùng cùng lựa chọn.
+            var browserChoice = _services.Settings.GetBrowserChoice();
+
+            // 2) Đảm bảo trình duyệt đã cài (tải lần đầu ~150MB) — chạy nền.
+            SetStatus(SessionState.Opening, "Đang chuẩn bị trình duyệt...");
+            var installCode = await Task.Run(() => _loginService.EnsureBrowserInstalled(browserChoice), ct).ConfigureAwait(false);
+            if (installCode != 0)
+            {
+                SetError("Không cài được trình duyệt. Kiểm tra mạng rồi thử lại.");
+                return;
+            }
+
+            // Random riêng cho nhịp watchdog: jitter 2–3' (kiểm proxy thường xuyên để proxy chết được phát hiện
+            // & đổi trong vài phút — tránh trang bán hàng chết tới ~10' rồi người dùng phải Dừng/mở lại tay).
+            var proxyRng = new Random();
+            bool firstOpen = true;
+            // Chốt chặn TUYỆT ĐỐI: cap an toàn 12h tính từ ĐẦU phiên, áp cho MỌI lần relaunch (KHÔNG reset mỗi
+            // lần mở lại). Tín hiệu kết thúc CHÍNH vẫn là "không còn cửa sổ nào".
+            var hardCap = DateTime.UtcNow.AddHours(12);
+
+            // Chu kỳ theo dõi đơn (phút): đọc MỘT LẦN từ Cài đặt khi phiên bắt đầu (chụp vào biến — KHÔNG đọc
+            // lại giữa await). Đổi trong Cài đặt CHỈ áp cho phiên MỞ SAU khi lưu (phiên đang chạy giữ số cũ,
+            // kể cả khi relaunch đổi proxy — đơn giản, chấp nhận). Đã kẹp [1,1440] trong config.
+            var orderIntervalMin = _services.Settings.GetOrderIntervalMinutes();
+
+            // ===== VÒNG RELAUNCH NGOÀI =====
+            // Mỗi vòng = một lần mở Brave (với _currentProxy hiện tại) + vòng poll bên trong. Khi proxy chết,
+            // watchdog đặt relaunchForProxy=true → thoát poll → dispose Brave → quay lại mở LẠI với proxy mới.
+            // State GIỮ Running/Opening xuyên suốt, KHÔNG rơi vào finally NGOÀI giữa chừng (nếu State thành
+            // Stopped, AccountSessionManager sẽ GỠ phiên khỏi dict).
+            while (!ct.IsCancellationRequested)
+            {
+                bool relaunchForProxy = false;
+                // ĐẦU MỖI vòng mở/relaunch: CHƯA sẵn sàng — phải đăng nhập lại + đọc số lần đầu mới bật lại
+                // (kín cả đường proxy-chết-relaunch: ToShipCount giữ số cũ nhưng cờ này về false).
+                _readyForActions = false;
+
+                // 3) Mở cửa sổ trình duyệt (profile persistent) tới trang bán hàng.
+                SetStatus(SessionState.Opening,
+                    firstOpen ? "Đang mở cửa sổ trình duyệt..." : "Đang mở lại trình duyệt với proxy mới...");
+                // Lần mở ĐẦU: lỗi → SetError + return ngay (giữ hành vi cũ). ĐƯỜNG RELAUNCH: settle + retry vì hồ
+                // sơ persistent vừa dispose có thể chưa nhả khóa hẳn (dù DisposeAsync đã WaitForExit). Phân biệt
+                // HỦY bằng ct.IsCancellationRequested (không bằng loại exception) vì OpenAsync bọc MỌI lỗi kể cả
+                // OperationCanceledException thành InvalidOperationException.
+                const int MaxReopenAttempts = 3;
+                ILoginSession? session = null;
+                for (int attempt = 1; session is null; attempt++)
+                {
+                    if (!firstOpen)
+                    {
+                        // Relaunch: chờ settle để khóa hồ sơ nhả nốt (biên an toàn thêm sau WaitForExit).
+                        try { await Task.Delay(proxyRng.Next(800, 1500), ct).ConfigureAwait(false); }
+                        catch (OperationCanceledException) { throw; }
+                    }
+                    try
+                    {
+                        session = await _loginService.OpenAsync(userDataDir, _currentProxy, browserChoice, ct).ConfigureAwait(false);
+                    }
+                    catch (Exception ex)
+                    {
+                        if (ct.IsCancellationRequested) throw new OperationCanceledException(ct); // Dừng → catch NGOÀI xử như HỦY
+                        if (firstOpen || attempt >= MaxReopenAttempts) { SetError(ex.Message); return; }
+                        SetStatus(SessionState.Opening, $"Mở lại trình duyệt chưa được (thử {attempt}/{MaxReopenAttempts})...");
+                        try { await Task.Delay(2000 * attempt, ct).ConfigureAwait(false); }
+                        catch (OperationCanceledException) { throw; }
+                    }
+                }
+
+                _session = session; // expose BraveProcess cho Plan B (focus cửa sổ)
+
+                try
+                {
+                    // 4) Tự đăng nhập KIỂU NGƯỜI bằng user/password của tài khoản này. Graceful: đã đăng nhập
+                    //    sẵn / không thấy ô → bỏ qua. (Relaunch khi đã login trong hồ sơ → thường no-op.)
+                    if (acc is not null && !string.IsNullOrEmpty(acc.Password))
+                    {
+                        SetStatus(SessionState.Running, "Đang tự đăng nhập (kiểu người)...");
+                        try { await session.TryHumanLoginAsync(acc.Email, acc.Password, ct).ConfigureAwait(false); }
+                        catch { /* không phá luồng — người dùng tự nhập tay nếu cần */ }
+                    }
+
+                    // Sau khi đăng nhập xong → trang chủ đã ổn định, BẬT sẵn sàng ngay để nút Sync/Kiểm tra hàng loạt
+                    // không phải đợi chu kỳ đọc đơn lần đầu (có thể tới 30 phút theo cấu hình).
+                    _readyForActions = true;
+
+                    // 5) Tự bắt & lưu cookie trong lúc cửa sổ mở; kết thúc khi người dùng đóng hết cửa sổ.
+                    SetStatus(SessionState.Running,
+                        $"Đã mở trình duyệt. Đăng nhập xong app sẽ tự theo dõi đơn mỗi {orderIntervalMin}'; đóng cửa sổ để dừng.");
+                    if (firstOpen)
+                    {
+                        ToShipCount = null; // reset CHỈ ở lần mở đầu; relaunch giữ số cũ (nhịp đọc đơn tự làm mới).
+                    }
+
+                    string? lastSaved = null;
+                    const int PollMs = 1000;
+                    const int OrderRetrySec = 30;
+                    var nextOrderCheck = DateTime.UtcNow;
+                    bool firstOrderCheck = true;
+                    // Cần 0 cửa sổ ở 2 vòng poll LIÊN TIẾP mới coi là đã đóng (tránh thoát nhầm lúc chuyển trang).
+                    int zeroPageStreak = 0;
+                    // Nhịp watchdog proxy: kiểm proxy đang gán còn sống không, jitter 2–3' (hồi nhanh khi proxy xoay).
+                    var nextProxyCheck = DateTime.UtcNow.AddSeconds(proxyRng.Next(120, 180));
+
+                    while (!session.IsClosed && DateTime.UtcNow < hardCap && !ct.IsCancellationRequested)
+                    {
+                        await Task.WhenAny(session.Closed, Task.Delay(PollMs, ct)).ConfigureAwait(false);
+
+                        if (ct.IsCancellationRequested)
+                        {
+                            break;
+                        }
+
+                        if (session.OpenPageCount == 0)
+                        {
+                            if (++zeroPageStreak >= 2)
+                            {
+                                break;
+                            }
+                        }
+                        else
+                        {
+                            zeroPageStreak = 0;
+                        }
+
+                        string json;
+                        try { json = await session.CaptureCookiesJsonAsync().ConfigureAwait(false); }
+                        catch { break; } // context đã đóng giữa chừng
+
+                        // CHỈ lưu khi đã có cookie ĐĂNG NHẬP Shopee (tránh đè cookie hợp lệ cũ bằng cookie theo dõi).
+                        if (!string.IsNullOrEmpty(json) && json != lastSaved && ShopeeLoginCookies.IsLoggedIn(json))
+                        {
+                            if (TrySaveCookie(json))
+                            {
+                                lastSaved = json;
+                            }
+                        }
+
+                        // Nhịp theo dõi đơn "Chờ Lấy Hàng": tới hạn thì reload + đọc số. Lần đầu KHÔNG reload.
+                        // Đang điều hướng xử lý đơn (_navigating) → BỎ QUA nhịp này (reload sẽ phá thao tác giữa chừng).
+                        if (!_navigating && DateTime.UtcNow >= nextOrderCheck)
+                        {
+                            // GIỮ cờ _navigating suốt lượt đọc (có thể kéo dài ~38s: reload 30s + poll 8s) để
+                            // loại trừ HAI CHIỀU với nút Kiểm tra / Xử lý đơn — không cho Goto/click tay chạy
+                            // chồng lên lượt reload đang bay trên cùng trang (hai bên cùng fail ảo).
+                            _navigating = true;
+                            int? count;
+                            try
+                            {
+                                count = await session.ReadToShipCountAsync(reload: !firstOrderCheck, ct).ConfigureAwait(false);
+                            }
+                            finally
+                            {
+                                _navigating = false;
+                            }
+
+                            if (count is int n)
+                            {
+                                firstOrderCheck = false;
+                                ToShipCount = n; // VM tự định dạng dòng hiển thị theo số này
+                                nextOrderCheck = DateTime.UtcNow.AddMinutes(orderIntervalMin); // đã đăng nhập → chu kỳ cấu hình
+                            }
+                            else
+                            {
+                                // Chưa đăng nhập / chưa đọc được → thử lại sớm, KHÔNG reload.
+                                nextOrderCheck = DateTime.UtcNow.AddSeconds(OrderRetrySec);
+                            }
+                        }
+
+                        // ===== NHỊP WATCHDOG PROXY (~10') =====
+                        // CHỈ với phiên nguồn KiotProxy (_kiotClient != null) và khi KHÔNG đang điều hướng
+                        // (loại trừ với đọc đơn / nút Kiểm tra / Xử lý đơn). Bật _navigating SUỐT lượt kiểm
+                        // (health-check tối đa ~8s×2 + 5s ⇒ ~21s) để không thao tác nào chạy chồng lên.
+                        if (_kiotClient is not null && !_navigating && DateTime.UtcNow >= nextProxyCheck)
+                        {
+                            _navigating = true;
+                            try
+                            {
+                                var replacement = await ProxyWatchdog.TryGetReplacementAsync(
+                                    _kiotClient, _healthChecker, _currentProxy, ProxyRecheckDelayMs, ct).ConfigureAwait(false);
+                                if (replacement is not null)
+                                {
+                                    _currentProxy = replacement;
+                                    relaunchForProxy = true;
+                                    // Sắp dispose + relaunch (State GIỮ Running suốt lúc đổi proxy) → tắt sẵn
+                                    // sàng NGAY để nút Sync/Kiểm tra không chạy vào phiên đang bị tháo dỡ.
+                                    _readyForActions = false;
+                                }
+                            }
+                            catch (OperationCanceledException)
+                            {
+                                throw; // Dừng chủ động → để catch NGOÀI xử như HỦY.
+                            }
+                            catch
+                            {
+                                /* watchdog lỗi (mạng/API) → bỏ qua, thử lại chu kỳ sau */
+                            }
+                            finally
+                            {
+                                _navigating = false;
+                            }
+
+                            nextProxyCheck = DateTime.UtcNow.AddSeconds(proxyRng.Next(120, 180));
+                            if (relaunchForProxy)
+                            {
+                                SetStatus(SessionState.Running, "Proxy cũ chết — đang đổi proxy, mở lại trình duyệt...");
+                                break; // thoát poll → dispose Brave → relaunch với proxy mới
+                            }
+                        }
+                    }
+
+                    // Lần bắt cookie CHỐT trước khi dispose (đăng nhập xong đóng cửa sổ ngay vẫn bắt kịp).
+                    try
+                    {
+                        var json = await session.CaptureCookiesJsonAsync().ConfigureAwait(false);
+                        if (!string.IsNullOrEmpty(json) && json != lastSaved && ShopeeLoginCookies.IsLoggedIn(json))
+                        {
+                            if (TrySaveCookie(json))
+                            {
+                                lastSaved = json;
+                            }
+                        }
+                    }
+                    catch { /* browser đã chết hẳn — bỏ qua */ }
+
+                    // Kết quả trung thực (KHÔNG khẳng định "chưa đăng nhập"). Relaunch đổi proxy → GIỮ status
+                    // "đang đổi proxy" (đã đặt ở trên), KHÔNG đè bằng câu tổng kết.
+                    if (!relaunchForProxy)
+                    {
+                        StatusText = lastSaved != null
+                            ? "Đã lưu cookie đăng nhập vào tài khoản."
+                            : "Chưa lưu được cookie. Nếu đã đăng nhập, phiên vẫn được giữ trong hồ sơ (lần sau mở lại vẫn còn).";
+                    }
+                }
+                finally
+                {
+                    // Dispose (kill Brave) sau MỖI vòng — dù kết thúc bình thường hay để relaunch với proxy mới.
+                    try { await session.DisposeAsync().ConfigureAwait(false); } catch { /* đã chết — bỏ qua */ }
+                    if (ReferenceEquals(_session, session))
+                    {
+                        _session = null;
+                    }
+                }
+
+                if (!relaunchForProxy)
+                {
+                    break; // kết thúc bình thường (đóng cửa sổ / hết giờ) → ra ngoài → finally NGOÀI → Stopped
+                }
+                firstOpen = false; // vòng sau: relaunch với _currentProxy mới
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Bị dừng chủ động (Dừng / thoát app) — không phải lỗi.
+        }
+        catch (Exception ex)
+        {
+            SetError(ex.Message);
+        }
+        finally
+        {
+            _session = null;
+            _readyForActions = false; // phiên kết thúc (Stopped/Error/hủy) → không còn sẵn sàng
+
+            // NHẢ KiotProxy key về pool — CHỈ ở finally NGOÀI cùng này (phiên đã đóng HẲN), KHÔNG giữa các
+            // lần relaunch: phiên giữ NGUYÊN key suốt đời (relaunch/đổi IP do watchdog dùng lại key cũ). Gọi
+            // đúng MỘT LẦN cho mỗi vòng đời RunAsync; an toàn cả khi phiên chưa cấp key nào (Release là no-op).
+            _releaseKiotKey(_accountId);
+
+            lock (_lifecycleLock)
+            {
+                // Kết thúc bình thường / bị hủy → Stopped; giữ nguyên Error để còn hiển thị lỗi.
+                if (State != SessionState.Error)
+                {
+                    State = SessionState.Stopped;
+                }
+            }
+        }
+    }
+
+    private void SetStatus(SessionState state, string text)
+    {
+        StatusText = text;
+        State = state;
+        _services.Log.Append(_logLabel, text);
+    }
+
+    private void SetError(string message)
+    {
+        _readyForActions = false; // lỗi → không còn sẵn sàng (nút Sync/Kiểm tra sẽ tự mở/khởi động lại phiên)
+        LastError = message;
+        StatusText = message;
+        State = SessionState.Error;
+        _services.Log.Append(_logLabel, "LỖI: " + message);
+    }
+
+    /// <summary>
+    /// Ghi cookie JSON vào ĐÚNG tài khoản của phiên (thread nền — SQLite an toàn) rồi phát
+    /// <see cref="CookieSaved"/> để VM làm mới danh sách trên UI thread. Trả true nếu đã ghi.
+    /// </summary>
+    private bool TrySaveCookie(string cookieJson)
+    {
+        if (CookieJson.Deserialize(cookieJson).Count == 0)
+        {
+            return false; // JSON không chứa cookie nào
+        }
+
+        var acc = _services.Accounts.GetById(_accountId);
+        if (acc is null)
+        {
+            return false; // tài khoản đã bị xóa
+        }
+
+        acc.Cookie = cookieJson;
+        _services.Accounts.Update(acc);
+
+        // VM nghe sự kiện này để dựng lại danh sách (instance trong Accounts có cookie mới) trên UI thread.
+        CookieSaved?.Invoke(_accountId);
+        return true;
+    }
+}

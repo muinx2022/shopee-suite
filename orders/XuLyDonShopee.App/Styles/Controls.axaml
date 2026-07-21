@@ -1,0 +1,572 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- =========================================================
+         1. NÚT ACCENT (cam)
+         ========================================================= -->
+    <Style Selector="Button.accent">
+        <Setter Property="Foreground" Value="White" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="FontSize" Value="13.5" />
+        <Setter Property="Height" Value="38" />
+        <Setter Property="Padding" Value="16,0" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="HorizontalContentAlignment" Value="Center" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="Cursor" Value="Hand" />
+    </Style>
+    <Style Selector="Button.accent /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="{StaticResource AccentBrush}" />
+        <Setter Property="CornerRadius" Value="6" />
+        <Setter Property="BoxShadow" Value="0 1 2 0 #66EE4D2D" />
+    </Style>
+    <Style Selector="Button.accent:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="{StaticResource AccentHoverBrush}" />
+    </Style>
+    <Style Selector="Button.accent:pressed /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="{StaticResource AccentHoverBrush}" />
+    </Style>
+    <Style Selector="Button.accent:pointerover">
+        <Setter Property="Foreground" Value="White" />
+    </Style>
+    <Style Selector="Button.accent:pressed">
+        <Setter Property="Foreground" Value="White" />
+    </Style>
+
+    <!-- =========================================================
+         2. NÚT PHỤ (trắng, viền mờ)
+         ========================================================= -->
+    <Style Selector="Button.secondary">
+        <Setter Property="Foreground" Value="{StaticResource TextSecondary}" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="FontSize" Value="13" />
+        <Setter Property="Height" Value="38" />
+        <Setter Property="Padding" Value="16,0" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="HorizontalContentAlignment" Value="Center" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="Cursor" Value="Hand" />
+    </Style>
+    <Style Selector="Button.secondary /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="{StaticResource CardBg}" />
+        <Setter Property="BorderBrush" Value="{StaticResource Border014}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="6" />
+    </Style>
+    <Style Selector="Button.secondary:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="#F5F5F5" />
+        <Setter Property="BorderBrush" Value="{StaticResource Border014}" />
+    </Style>
+    <Style Selector="Button.secondary:pressed /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="#EFEFEF" />
+        <Setter Property="BorderBrush" Value="{StaticResource Border014}" />
+    </Style>
+    <Style Selector="Button.secondary:pointerover">
+        <Setter Property="Foreground" Value="{StaticResource TextSecondary}" />
+    </Style>
+
+    <!-- =========================================================
+         3. NÚT VIỀN CAM (outline)
+         ========================================================= -->
+    <Style Selector="Button.accentOutline">
+        <Setter Property="Foreground" Value="{StaticResource AccentBrush}" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="FontSize" Value="13.5" />
+        <Setter Property="Height" Value="38" />
+        <Setter Property="Padding" Value="18,0" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="HorizontalContentAlignment" Value="Center" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="Cursor" Value="Hand" />
+    </Style>
+    <Style Selector="Button.accentOutline /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="{StaticResource CardBg}" />
+        <Setter Property="BorderBrush" Value="{StaticResource AccentBorderSoft}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="6" />
+    </Style>
+    <Style Selector="Button.accentOutline:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="{StaticResource AccentSoft2}" />
+        <Setter Property="BorderBrush" Value="{StaticResource AccentBorderSoft}" />
+    </Style>
+    <Style Selector="Button.accentOutline:pointerover">
+        <Setter Property="Foreground" Value="{StaticResource AccentBrush}" />
+    </Style>
+
+    <!-- =========================================================
+         4. NÚT XÓA VUÔNG (icon danger)
+         ========================================================= -->
+    <Style Selector="Button.iconDanger">
+        <Setter Property="Width" Value="38" />
+        <Setter Property="Height" Value="38" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="FontSize" Value="14" />
+        <Setter Property="Foreground" Value="#C0392B" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="HorizontalContentAlignment" Value="Center" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="Cursor" Value="Hand" />
+    </Style>
+    <Style Selector="Button.iconDanger /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="{StaticResource CardBg}" />
+        <Setter Property="BorderBrush" Value="{StaticResource Border012}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="6" />
+    </Style>
+    <Style Selector="Button.iconDanger:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="#FDECEA" />
+        <Setter Property="BorderBrush" Value="#F5B5AD" />
+    </Style>
+
+    <!-- =========================================================
+         5. NÚT GHOST NHỎ (con mắt mật khẩu)
+         ========================================================= -->
+    <Style Selector="Button.ghostIcon">
+        <Setter Property="Width" Value="28" />
+        <Setter Property="Height" Value="28" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="FontSize" Value="14" />
+        <Setter Property="Foreground" Value="{StaticResource Text7A}" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="HorizontalContentAlignment" Value="Center" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="Cursor" Value="Hand" />
+    </Style>
+    <Style Selector="Button.ghostIcon /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="CornerRadius" Value="5" />
+    </Style>
+    <Style Selector="Button.ghostIcon:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="#0D000000" />
+    </Style>
+
+    <!-- =========================================================
+         6. CARD
+         ========================================================= -->
+    <Style Selector="Border.card">
+        <Setter Property="Background" Value="{StaticResource CardBg}" />
+        <Setter Property="BorderBrush" Value="{StaticResource BorderSoft}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="10" />
+        <Setter Property="BoxShadow" Value="0 1 3 0 #0A000000" />
+    </Style>
+
+    <!-- =========================================================
+         7. SECTION LABEL (tiêu đề nhóm cam, chữ HOA)
+         ========================================================= -->
+    <Style Selector="TextBlock.section">
+        <Setter Property="FontSize" Value="11" />
+        <Setter Property="FontWeight" Value="Bold" />
+        <Setter Property="Foreground" Value="{StaticResource AccentBrush}" />
+        <Setter Property="LetterSpacing" Value="0.6" />
+    </Style>
+
+    <!-- =========================================================
+         8. FIELD LABEL
+         ========================================================= -->
+    <Style Selector="TextBlock.fieldLabel">
+        <Setter Property="FontSize" Value="12.5" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Foreground" Value="{StaticResource TextSecondary}" />
+        <Setter Property="Margin" Value="0,0,0,6" />
+    </Style>
+
+    <!-- =========================================================
+         9. FIELD INPUT (kiểu Fluent underline)
+         ========================================================= -->
+    <Style Selector="Border.field">
+        <Setter Property="Background" Value="{StaticResource InputBg}" />
+        <Setter Property="BorderBrush" Value="{StaticResource Border010}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="6" />
+        <Setter Property="MinHeight" Value="38" />
+        <Setter Property="ClipToBounds" Value="True" />
+    </Style>
+    <Style Selector="Border.underline">
+        <Setter Property="Height" Value="2" />
+        <Setter Property="VerticalAlignment" Value="Bottom" />
+        <Setter Property="Background" Value="{StaticResource UnderlineBrush}" />
+        <Setter Property="Margin" Value="1,0,1,0" />
+    </Style>
+    <Style Selector="Border.field:focus-within Border.underline">
+        <Setter Property="Background" Value="{StaticResource AccentBrush}" />
+    </Style>
+
+    <!-- TextBox trần (không viền/nền Fluent mặc định) -->
+    <Style Selector="TextBox.bare">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="MinHeight" Value="0" />
+        <Setter Property="FontSize" Value="13.5" />
+        <Setter Property="Foreground" Value="{StaticResource TextInk}" />
+        <Setter Property="VerticalAlignment" Value="Stretch" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="CaretBrush" Value="{StaticResource AccentBrush}" />
+    </Style>
+    <Style Selector="TextBox.bare /template/ Border#PART_BorderElement">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+    </Style>
+    <Style Selector="TextBox.bare:pointerover /template/ Border#PART_BorderElement">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+    </Style>
+    <Style Selector="TextBox.bare:focus /template/ Border#PART_BorderElement">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+    </Style>
+    <Style Selector="TextBox.bare /template/ TextBlock#PART_Watermark">
+        <Setter Property="Foreground" Value="{StaticResource PlaceholderBrush}" />
+    </Style>
+
+    <!-- =========================================================
+         10. COMBOBOX FIELD
+         ========================================================= -->
+    <Style Selector="ComboBox.field">
+        <Setter Property="Background" Value="{StaticResource InputBg}" />
+        <Setter Property="BorderBrush" Value="{StaticResource Border010}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="6" />
+        <Setter Property="MinHeight" Value="38" />
+        <Setter Property="FontSize" Value="13.5" />
+        <Setter Property="Foreground" Value="{StaticResource TextInk}" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="Padding" Value="12,0" />
+    </Style>
+
+    <!-- AUTOCOMPLETEBOX FIELD (ô "gõ để tìm" — dùng ở màn Đơn hàng lọc theo shop).
+         AutoCompleteBox bọc một TextBox nội bộ (PART_TextBox); style chrome của TextBox đó cho GIỐNG
+         ComboBox.field (nền InputBg, viền bo góc 6, cao 38, chữ 13.5) để thanh lọc đồng nhất. Dropdown
+         gợi ý dùng theme Fluent mặc định. -->
+    <Style Selector="AutoCompleteBox.field /template/ TextBox#PART_TextBox">
+        <Setter Property="Background" Value="{StaticResource InputBg}" />
+        <Setter Property="BorderBrush" Value="{StaticResource Border010}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="6" />
+        <Setter Property="MinHeight" Value="38" />
+        <Setter Property="FontSize" Value="13.5" />
+        <Setter Property="Foreground" Value="{StaticResource TextInk}" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="Padding" Value="12,0" />
+        <Setter Property="CaretBrush" Value="{StaticResource AccentBrush}" />
+    </Style>
+
+    <!-- NUMERICUPDOWN FIELD: đưa cao/viền/nền/bo góc về khớp Border.field & ComboBox.field.
+         Fluent NumericUpDown bọc một ButtonSpinner nhận Background/BorderBrush/BorderThickness/CornerRadius
+         qua TemplateBinding, TextBox con để trần — nên set thẳng các thuộc tính trên control là đủ để trông
+         như field thường (cao 38, viền Border010, bo góc 6). -->
+    <Style Selector="NumericUpDown.field">
+        <Setter Property="Background" Value="{StaticResource InputBg}" />
+        <Setter Property="BorderBrush" Value="{StaticResource Border010}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="6" />
+        <Setter Property="MinHeight" Value="38" />
+        <Setter Property="FontSize" Value="13.5" />
+        <Setter Property="Foreground" Value="{StaticResource TextInk}" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+    </Style>
+
+    <!-- =========================================================
+         11. NAV LISTBOX
+         ========================================================= -->
+    <Style Selector="ListBox.nav">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="Padding" Value="0" />
+    </Style>
+    <Style Selector="ListBox.nav ListBoxItem">
+        <Setter Property="Height" Value="40" />
+        <Setter Property="MinHeight" Value="40" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="Margin" Value="0,2" />
+        <Setter Property="CornerRadius" Value="6" />
+        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="Cursor" Value="Hand" />
+    </Style>
+    <Style Selector="ListBox.nav ListBoxItem /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="CornerRadius" Value="6" />
+    </Style>
+    <Style Selector="ListBox.nav ListBoxItem:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="#0A000000" />
+    </Style>
+    <Style Selector="ListBox.nav ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="{StaticResource NavActiveBg}" />
+    </Style>
+    <Style Selector="ListBox.nav ListBoxItem:selected:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="{StaticResource NavActiveBg}" />
+    </Style>
+    <Style Selector="ListBox.nav ListBoxItem:focus /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="Transparent" />
+    </Style>
+
+    <!-- Pill dọc + icon + label trong item -->
+    <Style Selector="Border.nav-pill">
+        <Setter Property="Width" Value="3" />
+        <Setter Property="Height" Value="0" />
+        <Setter Property="CornerRadius" Value="2" />
+        <Setter Property="HorizontalAlignment" Value="Left" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="Background" Value="{StaticResource AccentBrush}" />
+        <Setter Property="Transitions">
+            <Transitions>
+                <DoubleTransition Property="Height" Duration="0:0:0.15" />
+            </Transitions>
+        </Setter>
+    </Style>
+    <Style Selector="TextBlock.nav-icon">
+        <Setter Property="FontSize" Value="15" />
+        <Setter Property="Foreground" Value="#6A6A6A" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="TextAlignment" Value="Center" />
+        <Setter Property="Width" Value="20" />
+    </Style>
+    <Style Selector="TextBlock.nav-label">
+        <Setter Property="FontSize" Value="13.5" />
+        <Setter Property="FontWeight" Value="Medium" />
+        <Setter Property="Foreground" Value="#3A3A3A" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="ListBox.nav ListBoxItem:selected Border.nav-pill">
+        <Setter Property="Height" Value="18" />
+    </Style>
+    <Style Selector="ListBox.nav ListBoxItem:selected TextBlock.nav-icon">
+        <Setter Property="Foreground" Value="{StaticResource AccentBrush}" />
+    </Style>
+    <Style Selector="ListBox.nav ListBoxItem:selected TextBlock.nav-label">
+        <Setter Property="Foreground" Value="{StaticResource AccentTextBrush}" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+
+    <!-- =========================================================
+         11b. NAV NGANG (topbar) — tab icon+label nằm ngang trên thanh MENU trên.
+         Item là "pill" ngang: hover mờ, ĐANG CHỌN nền pill nhạt (NavActiveBg) + chữ/icon cam.
+         Dùng lại đúng brush của nav dọc (NavActiveBg / AccentBrush / AccentTextBrush) cho đồng bộ.
+         ========================================================= -->
+    <Style Selector="ListBox.navTop">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="Padding" Value="0" />
+    </Style>
+    <Style Selector="ListBox.navTop ListBoxItem">
+        <Setter Property="MinHeight" Value="36" />
+        <Setter Property="Padding" Value="14,8" />
+        <Setter Property="Margin" Value="2,0" />
+        <Setter Property="CornerRadius" Value="8" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="Cursor" Value="Hand" />
+    </Style>
+    <Style Selector="ListBox.navTop ListBoxItem /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="CornerRadius" Value="8" />
+    </Style>
+    <Style Selector="ListBox.navTop ListBoxItem:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="#0A000000" />
+    </Style>
+    <Style Selector="ListBox.navTop ListBoxItem:focus /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <Style Selector="ListBox.navTop ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="{StaticResource NavActiveBg}" />
+    </Style>
+    <Style Selector="ListBox.navTop ListBoxItem:selected:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="{StaticResource NavActiveBg}" />
+    </Style>
+    <Style Selector="ListBox.navTop ListBoxItem:selected:focus /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="{StaticResource NavActiveBg}" />
+    </Style>
+
+    <!-- Icon + nhãn trong item ngang -->
+    <Style Selector="TextBlock.nav-top-icon">
+        <Setter Property="FontSize" Value="15" />
+        <Setter Property="Foreground" Value="#6A6A6A" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="TextAlignment" Value="Center" />
+    </Style>
+    <Style Selector="TextBlock.nav-top-label">
+        <Setter Property="FontSize" Value="13.5" />
+        <Setter Property="FontWeight" Value="Medium" />
+        <Setter Property="Foreground" Value="#3A3A3A" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="ListBox.navTop ListBoxItem:selected TextBlock.nav-top-icon">
+        <Setter Property="Foreground" Value="{StaticResource AccentBrush}" />
+    </Style>
+    <Style Selector="ListBox.navTop ListBoxItem:selected TextBlock.nav-top-label">
+        <Setter Property="Foreground" Value="{StaticResource AccentTextBrush}" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+
+    <!-- =========================================================
+         11c. THANH TRÊN (topbar) + THANH TRẠNG THÁI (đáy) — nền mờ + viền mảnh.
+         ========================================================= -->
+    <Style Selector="Border.topbar">
+        <Setter Property="Background" Value="{StaticResource SidebarBg}" />
+        <Setter Property="BorderBrush" Value="{StaticResource Border05}" />
+        <Setter Property="BorderThickness" Value="0,0,0,1" />
+        <Setter Property="MinHeight" Value="52" />
+    </Style>
+    <Style Selector="Border.statusBar">
+        <Setter Property="Background" Value="{StaticResource SidebarBg}" />
+        <Setter Property="BorderBrush" Value="{StaticResource Border05}" />
+        <Setter Property="BorderThickness" Value="0,1,0,0" />
+        <Setter Property="MinHeight" Value="28" />
+    </Style>
+    <Style Selector="TextBlock.statusText">
+        <Setter Property="FontSize" Value="11.5" />
+        <Setter Property="Foreground" Value="{StaticResource TextMuted}" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="TextBlock.statusSep">
+        <Setter Property="FontSize" Value="11.5" />
+        <Setter Property="Foreground" Value="{StaticResource Text9A}" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+
+    <!-- =========================================================
+         12. THẺ TÀI KHOẢN (ListBox danh sách)
+         ========================================================= -->
+    <Style Selector="ListBox.acct">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="Padding" Value="0" />
+    </Style>
+    <Style Selector="ListBox.acct ListBoxItem">
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="Margin" Value="0,0,0,8" />
+        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        <Setter Property="Cursor" Value="Hand" />
+    </Style>
+    <Style Selector="ListBox.acct ListBoxItem /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <Style Selector="ListBox.acct ListBoxItem:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <Style Selector="ListBox.acct ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <Style Selector="ListBox.acct ListBoxItem:selected:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <Style Selector="ListBox.acct ListBoxItem:focus /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="Transparent" />
+    </Style>
+
+    <Style Selector="Border.acct-card">
+        <Setter Property="Padding" Value="11,12" />
+        <Setter Property="CornerRadius" Value="8" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderBrush" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="1" />
+    </Style>
+    <Style Selector="ListBox.acct ListBoxItem:pointerover Border.acct-card">
+        <Setter Property="Background" Value="#66FFFFFF" />
+    </Style>
+    <Style Selector="ListBox.acct ListBoxItem:selected Border.acct-card">
+        <Setter Property="Background" Value="{StaticResource CardBg}" />
+        <Setter Property="BorderBrush" Value="{StaticResource SelectedCardBorder}" />
+        <Setter Property="BoxShadow" Value="0 1 4 0 #1FEE4D2D" />
+    </Style>
+
+    <!-- =========================================================
+         13. TOGGLE SWITCH
+         ========================================================= -->
+    <Style Selector="ToggleButton.switch">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Template">
+            <ControlTemplate>
+                <Border Name="track" Width="42" Height="24" CornerRadius="12" Padding="2"
+                        Background="{StaticResource ToggleOffBrush}">
+                    <Border Name="knob" Width="20" Height="20" CornerRadius="10"
+                            Background="White" HorizontalAlignment="Left"
+                            VerticalAlignment="Center" BoxShadow="0 1 3 0 #4D000000" />
+                </Border>
+            </ControlTemplate>
+        </Setter>
+    </Style>
+    <Style Selector="ToggleButton.switch:checked /template/ Border#track">
+        <Setter Property="Background" Value="{StaticResource AccentBrush}" />
+    </Style>
+    <Style Selector="ToggleButton.switch:checked /template/ Border#knob">
+        <Setter Property="HorizontalAlignment" Value="Right" />
+    </Style>
+
+    <!-- =========================================================
+         14. DATAGRID (theme sáng cho màn Proxy)
+         ========================================================= -->
+    <Style Selector="DataGrid.proxy">
+        <Setter Property="Background" Value="{StaticResource CardBg}" />
+        <Setter Property="BorderBrush" Value="{StaticResource Border010}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="8" />
+        <Setter Property="GridLinesVisibility" Value="Horizontal" />
+        <Setter Property="HorizontalGridLinesBrush" Value="{StaticResource Border06}" />
+        <Setter Property="RowBackground" Value="Transparent" />
+    </Style>
+    <Style Selector="DataGrid.proxy DataGridColumnHeader">
+        <Setter Property="Background" Value="#F7F7F7" />
+        <Setter Property="Foreground" Value="{StaticResource TextSecondary}" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="FontSize" Value="12" />
+    </Style>
+    <Style Selector="DataGrid.proxy DataGridRow:selected /template/ Rectangle#BackgroundRectangle">
+        <Setter Property="Fill" Value="{StaticResource AccentSoft1}" />
+    </Style>
+
+    <!-- =========================================================
+         15. PANEL NHẬT KÝ ĐEN (log) — dùng chung cho màn Tài khoản & Chạy tự động
+         ========================================================= -->
+
+    <!-- Nút "Xóa" trên nền đen của panel nhật ký (tối màu cho hợp tông). -->
+    <Style Selector="Button.logClear">
+        <Setter Property="Height" Value="24" />
+        <Setter Property="Padding" Value="12,0" />
+        <Setter Property="FontSize" Value="11" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Foreground" Value="#D8D8D8" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="HorizontalContentAlignment" Value="Center" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="Cursor" Value="Hand" />
+    </Style>
+    <Style Selector="Button.logClear /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="#2A2A2A" />
+        <Setter Property="BorderBrush" Value="#3A3A3A" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="5" />
+    </Style>
+    <Style Selector="Button.logClear:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="#363636" />
+        <Setter Property="BorderBrush" Value="#4A4A4A" />
+    </Style>
+    <Style Selector="Button.logClear:pointerover">
+        <Setter Property="Foreground" Value="#FFFFFF" />
+    </Style>
+
+    <!-- Danh sách dòng log trên nền đen: bỏ đệm/khoảng cách mặc định ListBoxItem → dòng SÁT nhau,
+         hover/selected sáng nhẹ. -->
+    <Style Selector="ListBox.logDark ListBoxItem">
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="Margin" Value="0" />
+        <Setter Property="MinHeight" Value="0" />
+    </Style>
+    <Style Selector="ListBox.logDark ListBoxItem /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="MinHeight" Value="0" />
+        <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <Style Selector="ListBox.logDark ListBoxItem:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="#1AFFFFFF" />
+    </Style>
+    <Style Selector="ListBox.logDark ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="#22FFFFFF" />
+    </Style>
+
+</Styles>

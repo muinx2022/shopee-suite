@@ -1,0 +1,64 @@
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- ===== Accent (cam Shopee) ===== -->
+    <SolidColorBrush x:Key="AccentBrush" Color="#EE4D2D" />
+    <SolidColorBrush x:Key="AccentHoverBrush" Color="#E0431F" />
+    <SolidColorBrush x:Key="AccentTextBrush" Color="#C0341C" />
+    <SolidColorBrush x:Key="AccentSoft1" Color="#FFF2EE" />
+    <SolidColorBrush x:Key="AccentSoft2" Color="#FFF4F1" />
+    <SolidColorBrush x:Key="AccentBorderSoft" Color="#FFD0C4" />
+
+    <!-- ===== Cảnh báo / trạng thái ===== -->
+    <SolidColorBrush x:Key="WarnSoftBg" Color="#FFF4E5" />
+    <SolidColorBrush x:Key="WarnSoftBorder" Color="#FFD9A8" />
+    <SolidColorBrush x:Key="AmberBrush" Color="#F5A623" />
+    <SolidColorBrush x:Key="AmberTextBrush" Color="#B8720A" />
+    <SolidColorBrush x:Key="SuccessBrush" Color="#2E7D32" />
+    <SolidColorBrush x:Key="InfoBrush" Color="#1565C0" />
+    <SolidColorBrush x:Key="DangerBrush" Color="#C62828" />
+
+    <!-- ===== Bề mặt / nền ===== -->
+    <SolidColorBrush x:Key="CardBg" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="InputBg" Color="#FBFBFB" />
+    <SolidColorBrush x:Key="WindowTop" Color="#F7F8FA" />
+    <SolidColorBrush x:Key="WindowBottom" Color="#F0F2F5" />
+
+    <!-- ===== Chữ ===== -->
+    <SolidColorBrush x:Key="TextInk" Color="#1C1C1C" />
+    <SolidColorBrush x:Key="Text232" Color="#232323" />
+    <SolidColorBrush x:Key="Text252" Color="#252525" />
+    <SolidColorBrush x:Key="TextSecondary" Color="#4A4A4A" />
+    <SolidColorBrush x:Key="Text5A" Color="#5A5A5A" />
+    <SolidColorBrush x:Key="TextMuted" Color="#8A8A8A" />
+    <SolidColorBrush x:Key="Text9A" Color="#9A9A9A" />
+    <SolidColorBrush x:Key="PlaceholderBrush" Color="#A5A5A5" />
+    <SolidColorBrush x:Key="Text7A" Color="#7A7A7A" />
+
+    <!-- ===== Viền (đen với alpha) ===== -->
+    <SolidColorBrush x:Key="BorderSoft" Color="#12000000" />
+    <SolidColorBrush x:Key="Border06" Color="#0F000000" />
+    <SolidColorBrush x:Key="Border05" Color="#0D000000" />
+    <SolidColorBrush x:Key="Border010" Color="#1A000000" />
+    <SolidColorBrush x:Key="Border012" Color="#1F000000" />
+    <SolidColorBrush x:Key="Border014" Color="#24000000" />
+    <SolidColorBrush x:Key="UnderlineBrush" Color="#38000000" />
+
+    <!-- ===== Sidebar / nav ===== -->
+    <SolidColorBrush x:Key="SidebarBg" Color="#59FFFFFF" />
+    <SolidColorBrush x:Key="SidebarFooterBg" Color="#99FFFFFF" />
+    <SolidColorBrush x:Key="NavActiveBg" Color="#1AEE4D2D" />
+    <SolidColorBrush x:Key="SelectedCardBorder" Color="#59EE4D2D" />
+
+    <!-- ===== Toggle ===== -->
+    <SolidColorBrush x:Key="ToggleOffBrush" Color="#D4D4D4" />
+
+    <!-- ===== Khối code (cookie) ===== -->
+    <SolidColorBrush x:Key="CodeBg" Color="#1E2430" />
+    <SolidColorBrush x:Key="CodeText" Color="#CBD5E1" />
+
+    <!-- ===== Font ===== -->
+    <FontFamily x:Key="UiFont">Segoe UI Variable Text, Segoe UI, Inter</FontFamily>
+    <FontFamily x:Key="MonoFont">Cascadia Code, Consolas, JetBrains Mono, monospace</FontFamily>
+
+</ResourceDictionary>

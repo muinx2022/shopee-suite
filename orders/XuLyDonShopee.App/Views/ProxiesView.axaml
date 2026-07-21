@@ -1,0 +1,93 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:vm="using:XuLyDonShopee.App.ViewModels"
+             mc:Ignorable="d" d:DesignWidth="1084" d:DesignHeight="820"
+             x:Class="XuLyDonShopee.App.Views.ProxiesView"
+             x:CompileBindings="False"
+             x:DataType="vm:ProxiesViewModel">
+
+    <DockPanel Margin="24,24,32,24">
+
+        <!-- Tiêu đề -->
+        <StackPanel DockPanel.Dock="Top" Margin="0,0,0,16">
+            <TextBlock Text="Quản lý proxy" FontSize="19" FontWeight="Bold" LetterSpacing="-0.3"
+                       Foreground="{StaticResource TextInk}" />
+            <TextBlock Text="Danh sách proxy xoay &amp; API key KiotProxy" FontSize="12"
+                       Foreground="{StaticResource TextMuted}" Margin="0,2,0,0" />
+        </StackPanel>
+
+        <!-- Thanh công cụ -->
+        <Grid DockPanel.Dock="Top" ColumnDefinitions="Auto,Auto,Auto,*" Margin="0,0,0,12">
+            <Button Grid.Column="0" Classes="accent" Content="Nhập danh sách"
+                    Command="{Binding ImportCommand}" Margin="0,0,8,0" />
+            <Button Grid.Column="1" Classes="secondary" Content="Xóa dòng chọn"
+                    Command="{Binding DeleteSelectedCommand}" Margin="0,0,8,0" />
+            <Button Grid.Column="2" Classes="secondary" Content="Xóa tất cả"
+                    Command="{Binding DeleteAllCommand}" />
+            <TextBlock Grid.Column="3" Text="{Binding TotalText}"
+                       HorizontalAlignment="Right" VerticalAlignment="Center"
+                       Foreground="{StaticResource Text5A}" />
+        </Grid>
+
+        <!-- Card API key KiotProxy (dưới cùng) -->
+        <Border DockPanel.Dock="Bottom" Classes="card" Padding="24,22" Margin="0,16,0,0">
+            <StackPanel Spacing="12">
+                <TextBlock Classes="section" Text="API KEY KIOTPROXY" />
+                <Border Background="{StaticResource InputBg}" BorderBrush="{StaticResource Border010}"
+                        BorderThickness="1" CornerRadius="6" Padding="12,10">
+                    <TextBox Classes="bare" Text="{Binding Keys}"
+                             AcceptsReturn="True" TextWrapping="NoWrap" MinHeight="140"
+                             FontFamily="{StaticResource MonoFont}" FontSize="13"
+                             VerticalContentAlignment="Top"
+                             ScrollViewer.VerticalScrollBarVisibility="Auto"
+                             ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                             Watermark="Dán API key KiotProxy, mỗi dòng một key" />
+                </Border>
+                <TextBlock Foreground="{StaticResource TextMuted}" TextWrapping="Wrap" FontSize="12"
+                           Text="Mỗi dòng là một API key của KiotProxy (proxy xoay của Việt Nam). Khi chạy, app tự cấp cho mỗi phiên một key đang rảnh trong danh sách (hết key rảnh thì nhiều phiên dùng chung). Để trống nếu muốn dùng trực tiếp IP máy." />
+                <StackPanel Orientation="Horizontal" Spacing="12">
+                    <Button Classes="accent" Content="Lưu key"
+                            Command="{Binding SaveKeysCommand}" />
+                    <TextBlock Text="{Binding SavedKeysMessage}" Foreground="{StaticResource SuccessBrush}"
+                               VerticalAlignment="Center"
+                               IsVisible="{Binding SavedKeysMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                </StackPanel>
+            </StackPanel>
+        </Border>
+
+        <!-- Kết quả nhập -->
+        <Border DockPanel.Dock="Bottom" Background="{StaticResource WarnSoftBg}"
+                BorderBrush="{StaticResource WarnSoftBorder}" BorderThickness="1"
+                CornerRadius="6" Padding="12,10" Margin="0,12,0,0"
+                IsVisible="{Binding ImportResultMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+            <TextBlock Text="{Binding ImportResultMessage}" TextWrapping="Wrap"
+                       Foreground="{StaticResource AmberTextBrush}" FontSize="12.5" />
+        </Border>
+
+        <!-- Bảng proxy -->
+        <DataGrid Classes="proxy"
+                  ClipToBounds="True"
+                  ItemsSource="{Binding Proxies}"
+                  SelectedItem="{Binding SelectedProxy}"
+                  IsReadOnly="True"
+                  AutoGenerateColumns="False"
+                  CanUserResizeColumns="True">
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="Host" Binding="{Binding Host}" Width="2*" />
+                <DataGridTextColumn Header="Port" Binding="{Binding Port}" Width="80" />
+                <DataGridTextColumn Header="User" Binding="{Binding Username}" Width="1.5*" />
+                <DataGridTextColumn Header="Loại"
+                                    Binding="{Binding Type, Converter={StaticResource VnEnum}}"
+                                    Width="90" />
+                <DataGridTextColumn Header="Trạng thái"
+                                    Binding="{Binding Status, Converter={StaticResource VnEnum}}"
+                                    Width="120" />
+                <DataGridTextColumn Header="Ngày thêm"
+                                    Binding="{Binding CreatedAt, Converter={StaticResource DateDisplay}}"
+                                    Width="150" />
+            </DataGrid.Columns>
+        </DataGrid>
+    </DockPanel>
+</UserControl>

@@ -1,7 +1,7 @@
 # Plan: Gộp phase 1a — nhập 3 project đơn hàng vào ShopeeSuite.sln
 
 - **Ngày:** 2026-07-21
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành (2026-07-21 — Fable nghiệm thu: tự build 0 lỗi + 720/720 test xanh, sln chỉ thêm 23 dòng, repo nguồn không bị đụng)
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-executor`)
 
 ## 1. Bối cảnh & mục tiêu
@@ -81,4 +81,59 @@ tuyệt đối không dùng `git archive`/checkout, copy thẳng từ working tr
 
 ## Báo cáo thực thi (Opus điền sau khi xong)
 
-<chưa có>
+**Ngày thực thi:** 2026-07-21 · **Kết quả:** đạt toàn bộ tiêu chí nghiệm thu.
+
+### Đã hoàn thành
+
+1. **Copy 3 project (bước 1).** Robocopy từ working tree nguồn nguyên trạng (HEAD `86fa802`
+   + 3 file WIP Proxies), loại `bin`/`obj`:
+   - `d:\Projects\Xu-ly-don-shopee\src\XuLyDonShopee.Core` → `orders\XuLyDonShopee.Core`
+   - `d:\Projects\Xu-ly-don-shopee\src\XuLyDonShopee.App` → `orders\XuLyDonShopee.App`
+   - `d:\Projects\Xu-ly-don-shopee\src\XuLyDonShopee.Tests` → `orders\XuLyDonShopee.Tests`
+   - Lệnh: `robocopy <src> <dst> /E /XD bin obj` (mỗi project exit code 1 = copy thành công).
+   - Kết quả: `orders/` = 1.6M, 141 file source, `find` xác nhận KHÔNG có thư mục `bin`/`obj` nào lọt vào.
+
+2. **Kiểm tra tham chiếu tương đối (bước 2).** Đọc cả 3 csproj sau copy: App trỏ
+   `..\XuLyDonShopee.Core\XuLyDonShopee.Core.csproj`; Tests trỏ `..\XuLyDonShopee.Core\…` và
+   `..\XuLyDonShopee.App\…`; Core không có ProjectReference. Toàn bộ là tham chiếu anh em, cấu
+   trúc `src/` → `orders/` giữ nguyên nên resolve đúng. KHÔNG csproj nào trỏ ra ngoài cây
+   (`..\..\`). => Không cần sửa file nào.
+
+3. **Sửa `ShopeeSuite.sln` (bước 3).** Thêm solution folder `orders`
+   (`{6A33D9C6-A4C7-4D06-9C37-98349F3A11D9}`, type folder) + 3 project (GUID mới sinh bằng
+   `[guid]::NewGuid()`):
+   - Core `{1E21C536-A41B-4F0E-BBB7-E4A5C3F8571C}`
+   - App `{037C15A4-E501-4C7E-B313-C90F1353D847}`
+   - Tests `{A181BEDF-A1B7-4CE8-BD85-09C427A28615}`
+   Đã thêm đủ khai báo Project, 4 dòng ProjectConfigurationPlatforms (Debug/Release Any CPU,
+   ActiveCfg + Build.0) cho mỗi project, và 3 dòng NestedProjects trỏ 3 project về folder
+   `orders`. Dùng đúng tab thụt lề như các project sẵn có. `dotnet sln list` xác nhận đủ 9
+   project (6 suite + 3 orders).
+
+### Kết quả kiểm chứng
+
+- **Build:** `dotnet build ShopeeSuite.sln -c Release` → `Build succeeded. 0 Warning(s), 0 Error(s)`
+  (~12,7s). Cả 9 project build ra DLL, gồm Core/App/Tests đơn hàng. Không phát sinh warning mới
+  ở project suite cũ.
+- **Test:** `dotnet test orders/XuLyDonShopee.Tests/XuLyDonShopee.Tests.csproj -c Release` →
+  `Passed! - Failed: 0, Passed: 720, Skipped: 0, Total: 720` (~2s). KHÔNG dính WDAC/ISG
+  `0x800711C7` lần chạy này.
+- **Vệ sinh git repo này:** `git status --short` = `M ShopeeSuite.sln` + `?? orders/`. Liệt kê
+  đầy đủ (`--untracked-files=all`): 141 file source dưới `orders/`, KHÔNG file `bin`/`obj` nào;
+  `git check-ignore` xác nhận `orders/**/bin` và `orders/**/obj` đã bị `.gitignore` gốc
+  (pattern `[Bb]in/`, `[Oo]bj/`) bao phủ — KHÔNG cần bổ sung `.gitignore`. File plan `plans/**`
+  đã được commit sẵn nên không hiện trong status (đúng như tiêu chí "đã có sẵn").
+- **Repo nguồn không đổi:** `git -C d:\Projects\Xu-ly-don-shopee status --short` TRƯỚC và SAU
+  y hệt nhau (`M` ProxiesViewModel.cs / ProxiesView.axaml / ProxiesViewModelTests.cs + `??`
+  plans/2026-07-21-go-buoc-distribute-khi-luu-key-proxy.md), HEAD vẫn `86fa802`. Chỉ ĐỌC repo
+  nguồn, không ghi gì.
+
+### Vướng mắc / bỏ dở
+
+Không có. Toàn bộ 5 tiêu chí nghiệm thu đạt. Chưa commit (theo plan, Fable nghiệm thu rồi commit).
+
+### Đề xuất
+
+- `XuLyDonShopee.App` vẫn là `WinExe` thứ 2 trong sln (đúng như plan đã lường trước cho phase
+  1a); phase 1b sẽ chuyển thành Library — không xử lý ở đây.
+- Trường `Trạng thái` ở đầu plan đang để `đang làm` cho Fable cập nhật khi nghiệm thu.

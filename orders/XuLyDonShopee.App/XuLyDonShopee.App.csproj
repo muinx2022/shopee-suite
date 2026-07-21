@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <!-- KHÔNG bật PublishReadyToRun: R2R crossgen recompile mọi DLL ngay trên máy → sinh hash lạ →
+         Avalonia.Desktop.dll mất uy tín ISG cloud của bản NuGet gốc → WDAC (UMCI Enforced) chặn 0x800711C7.
+         Publish IL-thuần giữ nguyên hash gốc các DLL NuGet (ISG biết là an toàn) nên chạy được.
+         Đã đo thực nghiệm back-to-back 2026-07-14: IL chạy 3/3, R2R chặn 6/6 trên cùng máy. -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <AvaloniaResource Include="Assets\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="11.2.8" />
+    <PackageReference Include="Avalonia.Desktop" Version="11.2.8" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.2.8" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="11.2.8" />
+    <PackageReference Include="Avalonia.Controls.DataGrid" Version="11.2.8" />
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\XuLyDonShopee.Core\XuLyDonShopee.Core.csproj" />
+  </ItemGroup>
+</Project>

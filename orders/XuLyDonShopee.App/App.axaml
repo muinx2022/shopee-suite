@@ -1,0 +1,32 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="XuLyDonShopee.App.App"
+             xmlns:local="using:XuLyDonShopee.App"
+             xmlns:conv="using:XuLyDonShopee.App.Converters"
+             RequestedThemeVariant="Light">
+
+    <Application.DataTemplates>
+        <local:ViewLocator />
+    </Application.DataTemplates>
+
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceInclude Source="avares://XuLyDonShopee.App/Styles/Colors.axaml" />
+            </ResourceDictionary.MergedDictionaries>
+
+            <conv:VietnameseEnumConverter x:Key="VnEnum" />
+            <conv:StatusColorConverter x:Key="StatusColor" />
+            <conv:DateTimeDisplayConverter x:Key="DateDisplay" />
+            <conv:InitialConverter x:Key="Initial" />
+            <conv:StatusPillConverter x:Key="StatusPill" />
+            <conv:OrderStatusPillConverter x:Key="OrderStatusPill" />
+        </ResourceDictionary>
+    </Application.Resources>
+
+    <Application.Styles>
+        <FluentTheme />
+        <StyleInclude Source="avares://Avalonia.Controls.DataGrid/Themes/Fluent.xaml" />
+        <StyleInclude Source="avares://XuLyDonShopee.App/Styles/Controls.axaml" />
+    </Application.Styles>
+</Application>
