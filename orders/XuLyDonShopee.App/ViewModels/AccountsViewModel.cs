@@ -22,6 +22,9 @@ public partial class AccountsViewModel : ViewModelBase
     private List<Account> _all = new();
     private bool _isRefreshing;
 
+    /// <summary>Đang NẠP giá trị cờ từ Settings lúc khởi tạo → chặn setter ghi ngược lại DB (tránh write thừa).</summary>
+    private bool _loadingSettings;
+
     /// <summary>Tập Id các tài khoản đang tick — nguồn BỀN để khôi phục tick khi danh sách dựng lại (search/
     /// Save/đổi tab/phiên lưu cookie), kể cả dòng đang bị ẩn do lọc. Không dùng để chạy/dừng nhóm (hai lệnh
     /// đó đọc trực tiếp <see cref="Accounts"/> đang hiển thị).</summary>
@@ -40,6 +43,12 @@ public partial class AccountsViewModel : ViewModelBase
         // tài khoản đang chọn. Sự kiện LUÔN nổ trên UI thread (ActivityLog.Append mutate Entries qua uiPost =
         // Dispatcher.UIThread.Post) → handler ĐỒNG BỘ, KHÔNG lock/await (rebuild là vòng for thuần).
         _services.Log.Entries.CollectionChanged += OnLogEntriesChanged;
+
+        // Nạp cờ "Xóa profile và tạo lại" từ Settings (bền qua restart). Setter tự LƯU nên chặn ghi ngược
+        // trong lúc nạp bằng _loadingSettings.
+        _loadingSettings = true;
+        XoaProfileTaoLai = _services.Settings.GetSyncFreshProfile();
+        _loadingSettings = false;
 
         Reload();
     }
@@ -93,6 +102,22 @@ public partial class AccountsViewModel : ViewModelBase
 
     [ObservableProperty]
     private string _searchText = string.Empty;
+
+    /// <summary>Cờ TOÀN CỤC "Xóa profile và tạo lại" (bền qua <see cref="SettingsRepository"/>): BẬT ⇒ mỗi phiên
+    /// mở mới xóa hồ sơ trình duyệt của tài khoản rồi tạo lại sạch (phải đăng nhập lại). Setter LƯU NGAY vào
+    /// Settings (trừ lúc đang nạp giá trị ban đầu).</summary>
+    [ObservableProperty]
+    private bool _xoaProfileTaoLai;
+
+    partial void OnXoaProfileTaoLaiChanged(bool value)
+    {
+        if (_loadingSettings)
+        {
+            return; // đang nạp từ Settings lúc khởi tạo — không ghi ngược
+        }
+
+        _services.Settings.SetSyncFreshProfile(value);
+    }
 
     /// <summary>Dòng đang chọn trong danh sách (bọc <see cref="Account"/>). Chỗ nào cần bản ghi gốc thì đọc
     /// <c>SelectedRow?.Account</c>.</summary>

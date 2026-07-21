@@ -652,4 +652,35 @@ public class AccountsViewModelTests
         Assert.True(b.IsSelected);
     }
 
+    // ===== Cờ "Xóa profile và tạo lại": mặc định TẮT; đổi → LƯU NGAY vào Settings =====
+    [Fact]
+    public void XoaProfileTaoLai_MacDinhTat_DoiThiLuuNgay()
+    {
+        using var temp = new TempDatabase();
+        var services = new AppServices(temp.Path);
+
+        var vm = new AccountsViewModel(services);
+        Assert.False(vm.XoaProfileTaoLai);                 // mặc định TẮT
+        Assert.False(services.Settings.GetSyncFreshProfile());
+
+        vm.XoaProfileTaoLai = true;                        // bật → lưu ngay
+        Assert.True(services.Settings.GetSyncFreshProfile());
+
+        vm.XoaProfileTaoLai = false;                       // tắt → lưu ngay
+        Assert.False(services.Settings.GetSyncFreshProfile());
+    }
+
+    // ===== Cờ "Xóa profile và tạo lại": bền qua khởi tạo lại VM (đọc từ Settings) =====
+    [Fact]
+    public void XoaProfileTaoLai_NapTuSettings_KhiKhoiTaoVm()
+    {
+        using var temp = new TempDatabase();
+        var services = new AppServices(temp.Path);
+        services.Settings.SetSyncFreshProfile(true); // đã bật từ trước (mô phỏng phiên trước)
+
+        var vm = new AccountsViewModel(services);
+
+        Assert.True(vm.XoaProfileTaoLai); // VM đọc lại đúng trạng thái đã lưu
+    }
+
 }
