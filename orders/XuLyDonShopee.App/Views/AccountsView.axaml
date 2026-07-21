@@ -175,14 +175,8 @@
                                 ToolTip.Tip="Dừng tất cả — dừng mọi phiên đang chạy (đóng hết Brave)" />
                     </StackPanel>
 
-                    <!-- Tùy chọn TOÀN CỤC "Xóa profile và tạo lại": bật thì mỗi phiên mở mới sẽ xóa hồ sơ trình
-                         duyệt của tài khoản rồi tạo lại sạch (phải đăng nhập lại). Trạng thái LƯU vào Settings
-                         (bền qua restart). Đặt ngay dưới cụm nút Sync để người dùng bật/tắt trước khi chạy. -->
-                    <CheckBox DockPanel.Dock="Top" Margin="0,0,0,12"
-                              IsChecked="{Binding XoaProfileTaoLai}"
-                              Content="Xóa profile và tạo lại"
-                              FontSize="12"
-                              ToolTip.Tip="Phiên mở mới sẽ xóa hồ sơ trình duyệt của tài khoản rồi tạo lại — phải đăng nhập lại. Áp cho mọi phiên mở mới (Mở / Sync / Sync trọn gói); relaunch đổi proxy giữa phiên không xóa." />
+                    <!-- (Tùy chọn "Xóa profile và tạo lại" đã CHUYỂN lên dải Ribbon — tab Đơn hàng, nhóm "Tùy chọn";
+                         vẫn bind cùng property AccountsViewModel.XoaProfileTaoLai nên persist như cũ.) -->
 
                     <!-- Danh sách tài khoản: mỗi dòng "[ ] Tên shop" + (khi đang chạy) chấm xanh & số chờ lấy. -->
                     <ListBox Classes="acctFlat"

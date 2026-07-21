@@ -1,0 +1,40 @@
+<UserControl
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    x:Class="Shopee.Suite.Modules.Settings.UnifiedSettingsView">
+
+    <!-- Màn Cài đặt GỘP: một ScrollViewer, hai section. Mỗi section nhúng thẳng view cài đặt con (view tự chứa
+         resource/style của nó) qua ContentControl → DataTemplate/ViewLocator dựng đúng view. Section "Đơn hàng"
+         ẩn khi module đơn hàng không khởi tạo được. -->
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <StackPanel>
+
+            <!-- ══════════ SECTION: Shopee Suite ══════════ -->
+            <Border Background="{DynamicResource SubtleBrush}"
+                    BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1"
+                    Padding="28,14">
+                <StackPanel>
+                    <TextBlock Text="SHOPEE SUITE" FontSize="12" FontWeight="Bold"
+                               Foreground="{DynamicResource TextSecondaryBrush}" />
+                    <TextBlock Text="Hiệu năng · đồng bộ Hub · phiên bản &amp; cập nhật"
+                               Classes="caption" Margin="0,2,0,0" />
+                </StackPanel>
+            </Border>
+            <ContentControl Content="{Binding Suite}" />
+
+            <!-- ══════════ SECTION: Đơn hàng (ẩn khi module không chạy) ══════════ -->
+            <Border Background="{DynamicResource SubtleBrush}"
+                    BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1"
+                    Padding="28,14" IsVisible="{Binding HasOrders}">
+                <StackPanel>
+                    <TextBlock Text="ĐƠN HÀNG" FontSize="12" FontWeight="Bold"
+                               Foreground="{DynamicResource TextSecondaryBrush}" />
+                    <TextBlock Text="Trình duyệt · thư mục phiếu · chu kỳ theo dõi · Google Sheet · webhook"
+                               Classes="caption" Margin="0,2,0,0" />
+                </StackPanel>
+            </Border>
+            <ContentControl Content="{Binding Orders}" IsVisible="{Binding HasOrders}" />
+
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

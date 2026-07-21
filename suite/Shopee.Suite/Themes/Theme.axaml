@@ -364,4 +364,48 @@
     <Style Selector="Button.brand:pressed /template/ Border#PART_bd">
         <Setter Property="Background" Value="{DynamicResource SidebarHeaderBrush}" />
     </Style>
+
+    <!-- ══════════ RIBBON (dải nút kiểu Office) — nút to icon/glyph trên, nhãn dưới ══════════ -->
+    <!-- Nút ribbon dựng trên template Button toàn cục (Border#PART_bd): nền trong suốt, hover nền xám nhạt,
+         active (màn đang mở) tô accent + chữ/icon trắng. Class .ribbon để không đụng các nút thường. -->
+    <Style Selector="Button.ribbon">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderBrush" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="6" />
+        <Setter Property="Padding" Value="8,6" />
+        <Setter Property="MinWidth" Value="62" />
+        <Setter Property="MinHeight" Value="58" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="HorizontalContentAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Button.ribbon TextBlock">
+        <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+    </Style>
+    <Style Selector="Button.ribbon PathIcon">
+        <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+    </Style>
+    <Style Selector="Button.ribbon:pointerover /template/ Border#PART_bd">
+        <Setter Property="Background" Value="{DynamicResource SubtleBrush}" />
+    </Style>
+    <!-- Active (màn đang mở): nền accent gradient + chữ/icon trắng. -->
+    <Style Selector="Button.ribbon.active /template/ Border#PART_bd">
+        <Setter Property="Background" Value="{DynamicResource NavActiveBrush}" />
+    </Style>
+    <Style Selector="Button.ribbon.active:pointerover /template/ Border#PART_bd">
+        <Setter Property="Background" Value="{DynamicResource NavActiveBrush}" />
+    </Style>
+    <Style Selector="Button.ribbon.active TextBlock">
+        <Setter Property="Foreground" Value="{DynamicResource TextOnAccentBrush}" />
+    </Style>
+    <Style Selector="Button.ribbon.active PathIcon">
+        <Setter Property="Foreground" Value="{DynamicResource TextOnAccentBrush}" />
+    </Style>
+
+    <!-- Toggle (checkbox) trên ribbon — canh giữa dọc, chữ gọn. -->
+    <Style Selector="CheckBox.ribbonToggle">
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="MinHeight" Value="58" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+    </Style>
 </Styles>

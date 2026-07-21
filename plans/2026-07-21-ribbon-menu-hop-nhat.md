@@ -1,7 +1,7 @@
 # Plan: Đại tu menu Shopee Suite thành Ribbon kiểu Word/Excel mới + gộp 2 màn Cài đặt
 
 - **Ngày:** 2026-07-21
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành (2026-07-21 — Fable nghiệm thu: build 0 lỗi 0 warning + 754/754 test + mở app chụp màn hình 4 tab bằng UIAutomation, ribbon/nhóm/nút active/status bar/Cài đặt gộp 2 section đều đúng thiết kế)
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-executor`)
 - **Nơi làm:** worktree `D:\Projects\shopee-suite-wt-fresh-profile`, nhánh `task/ribbon-menu`
   (nối tiếp nhánh checkbox — đã có ProfileJanitor/checkbox trong cây). TUYỆT ĐỐI không đọc/ghi
@@ -139,4 +139,77 @@ Hiện trạng liên quan (khảo sát sẵn):
 
 ## Báo cáo thực thi (Opus điền sau khi xong)
 
-<chưa có>
+**Ngày thực thi:** 2026-07-21 · **Kết quả:** build sạch, 754/754 test pass, app chạy ổn định (WDAC KHÔNG chặn).
+
+### File đã tạo/sửa
+- **MỚI** `suite/Shopee.Suite/ViewModels/RibbonModels.cs`: `RibbonTab`, `RibbonGroup`, `RibbonScreenItem`
+  (điều hướng — có `ScreenVm`, `NavIndex`, `IsActive`, `ActivateCommand`), `RibbonActionItem` (bind ICommand +
+  `Glyph`), `RibbonToggleItem` (bind bool 2 chiều qua get/set delegate + nghe PropertyChanged VM nguồn).
+- **SỬA** `suite/Shopee.Suite/ViewModels/ShellViewModel.cs`: bỏ `Modules`/`Selected`/`Current`/`_welcome`,
+  thay bằng `Tabs` (4 RibbonTab) + `SelectedTab` + `CurrentScreen` (nhớ màn theo tab qua
+  `Dictionary<RibbonTab,object> _screenByTab`). GIỮ NGUYÊN toàn bộ khởi tạo VM/worker/dispatcher/
+  `UpdateService.PrepareShutdownAsync`/`HttpCoordinationHub.UpdateRequested`. Thêm `ActivateScreen`,
+  `StopWorkspaceJobsCommand` (chỉ gọi lệnh dừng sẵn có), `GoHomeCommand` → tab Workspace. `RequestNavigate`
+  của Workspace → chọn tab "Cấu hình BigSeller".
+- **SỬA** `suite/Shopee.Suite/MainWindow.axaml`: 3 hàng (tab strip tối 58px · dải ribbon sáng `Auto` · content).
+  Tab strip = ListBox `topnav` bind `Tabs`/`SelectedTab`. Ribbon = ItemsControl `SelectedTab.Groups`; mỗi nhóm
+  = hàng nút (ItemsControl `Items` với 3 DataTemplate theo kiểu) + nhãn nhóm đáy + divider dọc.
+- **SỬA** `suite/Shopee.Suite/Themes/Theme.axaml`: thêm style `Button.ribbon` (nút to icon/glyph trên + nhãn dưới,
+  hover xám nhạt, `.active` tô `NavActiveBrush` gradient + chữ/icon trắng — token sẵn có, không màu mới) và
+  `CheckBox.ribbonToggle`.
+- **SỬA** `suite/Shopee.Suite/Infrastructure/AppIcons.cs`: thêm 2 icon vector `PlayCircle` (Chạy tự động),
+  `SwapHoriz` (Proxy) cho 2 màn con đơn hàng chưa có icon.
+- **SỬA** `suite/Shopee.Suite/ViewModels/WelcomeViewModel.cs`: chuyển DORMANT (ctor không tham số, `Tiles` rỗng,
+  `Open` no-op) vì `ShellViewModel.Modules/Selected` đã bỏ. File + DataTemplate GIỮ NGUYÊN (chưa xóa).
+- **MỚI** `suite/Shopee.Suite/Modules/Settings/UnifiedSettingsViewModel.cs`: VM mỏng giữ `Suite` (VM suite) +
+  `Orders` (VM đơn hàng, null nếu module hỏng) + `HasOrders`.
+- **MỚI** `suite/Shopee.Suite/Modules/Settings/UnifiedSettingsView.axaml`(+`.axaml.cs`): 1 ScrollViewer, 2 section
+  header ("SHOPEE SUITE" / "ĐƠN HÀNG") + `ContentControl` nhúng từng view con; section Đơn hàng ẩn theo `HasOrders`.
+- **SỬA** `suite/Shopee.Suite/App.axaml`: thêm DataTemplate `UnifiedSettingsViewModel → UnifiedSettingsView`.
+- **SỬA** `orders/.../ViewModels/MainViewModel.cs`: expose `AccountsVm/OrdersVm/AutoRunVm/ProxiesVm/SettingsVm`
+  (read-only); `NavItems` 5→4 (bỏ "Cài đặt"); bỏ `case 4` trong `OnSelectedNavIndexChanged` (SettingsVm vẫn sống,
+  tự Reload trong ctor).
+- **SỬA** `orders/.../Views/MainView.axaml`: BỎ topbar (title + ListBox `navTop`); GIỮ statusBar đáy + ContentControl.
+- **SỬA** `orders/.../Views/AccountsView.axaml`: GỠ checkbox "Xóa profile và tạo lại" (đã lên ribbon, cùng property).
+
+### Cấu trúc tab / nhóm / nút cuối cùng
+- **Workspace**: nhóm *Màn hình* [Workspace · Dữ liệu · Search · Tài khoản & Proxy · Trạng thái] · nhóm *Hành động*
+  [Dừng jobs → `StopWorkspaceJobsCommand` (gọi `update.StopAllSingle` + `scrape.StopCommand` + `search.StopCommand`)].
+- **Cấu hình BigSeller**: nhóm *Màn hình* [Cấu hình BigSeller] · nhóm *Hành động*
+  [Đăng nhập tất cả → `BigSellerViewModel.LoginAllCommand` · Dừng → `StopLoginCommand`].
+- **Đơn hàng** (ẩn nếu `OrdersModuleHost.TryCreate()` null): nhóm *Màn hình* [Tài khoản · Đơn hàng · Chạy tự động ·
+  Proxy] — mỗi nút set `MainViewModel.SelectedNavIndex` 0-3 (giữ `Reload()` như switch cũ) · nhóm *Hành động*
+  [Chọn tất cả → `AccountsViewModel.SelectAllCommand` · Sync đã chọn → `SyncSelectedCommand` · Dừng đã chọn →
+  `StopSelectedCommand` · Dừng tất cả → `StopAllCommand`] · nhóm *Tùy chọn* [checkbox Xóa profile và tạo lại →
+  `RibbonToggleItem` bind `AccountsViewModel.XoaProfileTaoLai`].
+- **Cài đặt**: nhóm *Màn hình* [Cài đặt → UnifiedSettingsViewModel] · nhóm *Hành động*
+  [Cập nhật & khởi động lại → suite `SettingsViewModel.ApplyUpdateCommand` (Enable theo `UpdateReady`)].
+
+### Command đã hoist (tên thật, đều CÓ SẴN — không viết logic mới)
+`BigSellerViewModel.LoginAllCommand`, `BigSellerViewModel.StopLoginCommand`,
+orders `AccountsViewModel.SelectAllCommand / SyncSelectedCommand / StopSelectedCommand / StopAllCommand`,
+orders `AccountsViewModel.XoaProfileTaoLai` (property bool), suite `SettingsViewModel.ApplyUpdateCommand`.
+Riêng "Dừng jobs" = `StopWorkspaceJobsCommand` MỚI trong ShellViewModel nhưng CHỈ gọi lại các lệnh dừng sẵn có
+(đúng như plan cho phép, không có logic nghiệp vụ mới).
+
+### Kiểm chứng (lệnh + kết quả thật)
+- `dotnet build ShopeeSuite.sln -c Release` → **Build succeeded, 0 Warning, 0 Error**.
+- `dotnet build suite/Shopee.Suite/Shopee.Suite.csproj -c Release --no-incremental` → **0 Warning, 0 Error**
+  (rebuild sạch, xác nhận mọi tham chiếu command/VM con hợp lệ; assembly xuất `ShopeeSuite.dll`).
+- `dotnet test orders/XuLyDonShopee.Tests/XuLyDonShopee.Tests.csproj -c Release` → **Passed 754 / Failed 0 /
+  Skipped 0** (đúng baseline; KHÔNG phải sửa test nào — grep xác nhận test không tham chiếu NavItems/SelectedNavIndex).
+- Chạy app: `ShopeeSuite.exe` chạy nền 14s, **process sống liên tục, không crash, stderr trống, WDAC KHÔNG chặn**
+  → shell + tab strip + dải ribbon + tab Workspace mặc định (có cả nhóm điều hướng lẫn nhóm hành động) dựng &
+  render không lỗi chí mạng. `LogToTrace()` đẩy cảnh báo binding sang `System.Diagnostics.Trace` nên không hiện ở
+  stdout; không có ngoại lệ nào làm sập app.
+
+### Khác plan / lưu ý
+- Icon 2 màn con đơn hàng (Chạy tự động/Proxy) chưa có trong AppIcons → thêm `PlayCircle`/`SwapHoriz` (plan cho phép
+  chạm AppIcons trong Shopee.Suite).
+- Tab **Cài đặt** cũng có 1 nút *Màn hình* "Cài đặt" (giống BigSeller 1 nút) để cơ chế `CurrentScreen`/nhớ-màn đồng
+  nhất mọi tab — không phá yêu cầu, chỉ thêm nút điều hướng 1 màn.
+- Điều hướng 4 màn đơn hàng đi qua `MainViewModel.SelectedNavIndex` (đúng khuyến nghị plan) nên GIỮ `Reload()`;
+  `CurrentScreen` của tab Đơn hàng luôn là `MainViewModel` (MainView tự đổi ContentControl bên trong).
+- Hạn chế nghiệm thu: phiên chạy headless không chụp được từng tab bằng mắt (đã đóng cửa sổ sau kiểm tra liveness).
+  Bảo chứng gián tiếp: XAML compiled sạch, mọi VM đích của `CurrentScreen` đều có DataTemplate/ViewLocator khớp,
+  tên command đã đối chiếu mã nguồn. Đề xuất người dùng liếc tay 1 lượt 4 tab để xác nhận thị giác.
