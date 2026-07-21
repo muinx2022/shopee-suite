@@ -781,6 +781,10 @@ public class ShopeeLoginService
             new(@"xác nhận|xac nhan|verify|confirm|đúng là tôi|dung la toi|yes,?\s*it'?s me|tại đây|tại đấy|tai day|nhấn vào đây|bấm vào đây|nhan vao day|bam vao day|click here|\bhere\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
         private static readonly Regex SignInRegex =
             new(@"sign\s*in|đăng nhập|dang nhap", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        // Thông báo Shopee đã XÁC NHẬN đăng nhập thành công (trên tab mở ra sau khi bấm "TẠI ĐÂY") — chờ dấu
+        // hiệu này rồi mới đóng tab, kẻo đóng sớm khi Shopee CHƯA kịp ghi nhận xác nhận.
+        private static readonly Regex ConfirmSuccessRegex =
+            new(@"thành công|thanh cong|đã xác nhận|da xac nhan|xác nhận đăng nhập|xac nhan dang nhap|verified|confirmed|success", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         public async Task<ShopeePageState> DetectPageStateAsync(CancellationToken ct = default)
         {
@@ -1207,13 +1211,35 @@ public class ShopeeLoginService
 
             if (confirmTab is not null)
             {
-                L("Đã mở tab xác nhận — chờ tải xong rồi đóng.");
+                L("Đã mở tab xác nhận — CHỜ Shopee báo xác nhận thành công rồi mới đóng...");
                 try
                 {
-                    await confirmTab.WaitForLoadStateAsync(LoadState.NetworkIdle,
-                        new PageWaitForLoadStateOptions { Timeout = 10000 }).ConfigureAwait(false);
+                    await confirmTab.WaitForLoadStateAsync(LoadState.DOMContentLoaded,
+                        new PageWaitForLoadStateOptions { Timeout = 15000 }).ConfigureAwait(false);
                 }
-                catch { /* networkidle không tới trong 10s — vẫn đóng */ }
+                catch { /* vẫn poll text thành công ở dưới */ }
+
+                // ĐỪNG đóng sớm: poll tới khi trang xác nhận hiện thông báo THÀNH CÔNG (tối đa 45s) — Shopee cần
+                // vài giây để ghi nhận xác nhận; đóng trước lúc đó thì xác nhận KHÔNG ăn.
+                var okDeadline = DateTime.UtcNow.AddSeconds(45);
+                var confirmed = false;
+                while (DateTime.UtcNow < okDeadline)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    string body;
+                    try { body = await confirmTab.EvaluateAsync<string>("() => document.body ? (document.body.innerText || '') : ''").ConfigureAwait(false); }
+                    catch { body = string.Empty; }
+                    if (!string.IsNullOrWhiteSpace(body) && ConfirmSuccessRegex.IsMatch(body))
+                    {
+                        confirmed = true;
+                        break;
+                    }
+                    await Task.Delay(1500, ct).ConfigureAwait(false);
+                }
+
+                L(confirmed
+                    ? "Shopee đã xác nhận thành công — đóng tab xác nhận."
+                    : "Chờ 45s chưa thấy thông báo xác nhận — vẫn đóng tab xác nhận (kiểm tra tay nếu cần).");
                 try { await confirmTab.CloseAsync().ConfigureAwait(false); } catch { /* bỏ qua */ }
             }
             else
