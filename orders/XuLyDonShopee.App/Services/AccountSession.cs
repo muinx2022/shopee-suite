@@ -1087,6 +1087,26 @@ public partial class AccountSession : ObservableObject, IAccountSession
             // OpenAsync dùng để launch nên hồ sơ + exe luôn khớp.
             var browserKind = BrowserLocator.ResolveBrowserKind(browserChoice);
             var userDataDir = BrowserProfilePaths.ForAccount(baseDir, _accountId, browserKind);
+
+            // Cờ TOÀN CỤC "Xóa profile và tạo lại" (Cài đặt) BẬT → xóa hồ sơ hiện có của (tài khoản × trình
+            // duyệt) rồi tạo lại sạch NGAY khi phiên BẮT ĐẦU (ở đây, TRƯỚC vòng relaunch) — nên đăng nhập lại
+            // từ đầu (cookie DB vẫn được luồng login dùng). Chỉ xóa 1 LẦN lúc phiên mở mới; relaunch đổi proxy
+            // KHÔNG chạy lại đoạn này nên hồ sơ vừa tạo được giữ. Xóa thất bại (hồ sơ bị khóa) → degrade êm:
+            // ProfileJanitor đã retry + trả false, ta chỉ log cảnh báo rồi CHẠY TIẾP với hồ sơ cũ (không chặn sync).
+            if (_services.Settings.GetSyncFreshProfile())
+            {
+                var log = (Action<string>)(m => _services.Log.Append(_logLabel, m));
+                if (ProfileJanitor.TryResetDirectory(userDataDir, log))
+                {
+                    _services.Log.Append(_logLabel, $"Đã xóa và tạo lại hồ sơ trình duyệt: {userDataDir}");
+                }
+                else
+                {
+                    _services.Log.Append(_logLabel,
+                        $"CẢNH BÁO: không xóa được hồ sơ trình duyệt — chạy tiếp với hồ sơ cũ ({userDataDir}).");
+                }
+            }
+
             Directory.CreateDirectory(userDataDir);
 
             // 1) Chọn proxy theo thứ tự ưu tiên (pool KiotProxy → thủ công → IP máy) + set _kiotClient để

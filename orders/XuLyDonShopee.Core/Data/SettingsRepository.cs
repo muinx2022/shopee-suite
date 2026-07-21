@@ -48,6 +48,10 @@ public class SettingsRepository
     /// <summary>Key: trình duyệt người dùng chọn để mở phiên (thiếu/lạ → <see cref="BrowserChoice.Auto"/>).</summary>
     private const string BrowserChoiceKey = "browser_choice";
 
+    /// <summary>Key: cờ "Xóa profile và tạo lại" khi mở phiên mới (thiếu/lạ → false = TẮT). BẬT ⇒ mỗi phiên
+    /// mở mới xóa thư mục hồ sơ trình duyệt của tài khoản rồi tạo lại sạch (phải đăng nhập lại).</summary>
+    private const string SyncFreshProfileKey = "sync_fresh_profile";
+
     private readonly Database _db;
 
     public SettingsRepository(Database db) => _db = db;
@@ -152,6 +156,22 @@ public class SettingsRepository
 
     /// <summary>Lưu lựa chọn trình duyệt (chuẩn hóa qua <see cref="BrowserChoices.ToStorage"/>).</summary>
     public void SetBrowserChoice(BrowserChoice choice) => Set(BrowserChoiceKey, BrowserChoices.ToStorage(choice));
+
+    /// <summary>Cờ "Xóa profile và tạo lại" khi mở phiên mới: nhận "true"/"1" (bất kể hoa/thường) ⇒ true;
+    /// thiếu/rỗng/lạ ⇒ false (mặc định TẮT — hành vi cũ không đổi).</summary>
+    public bool GetSyncFreshProfile()
+    {
+        var v = Get(SyncFreshProfileKey)?.Trim();
+        if (string.IsNullOrEmpty(v))
+        {
+            return false;
+        }
+
+        return bool.TryParse(v, out var b) ? b : v == "1";
+    }
+
+    /// <summary>Lưu cờ "Xóa profile và tạo lại" ("true"/"false").</summary>
+    public void SetSyncFreshProfile(bool value) => Set(SyncFreshProfileKey, value ? "true" : "false");
 
     /// <summary>Lấy giá trị theo key, trả null nếu chưa có.</summary>
     public string? Get(string key)

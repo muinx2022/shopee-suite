@@ -85,4 +85,44 @@ public class SettingsRepositoryTests
             Assert.Equal(BrowserChoice.Edge, repo2.GetBrowserChoice());
         }
     }
+
+    [Fact]
+    public void GetSyncFreshProfile_ChuaDat_TraFalse()
+    {
+        using var temp = new TempDatabase();
+        var repo = new SettingsRepository(temp.Open());
+
+        Assert.False(repo.GetSyncFreshProfile());
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void SetVaGetSyncFreshProfile_Roundtrip(bool value)
+    {
+        using var temp = new TempDatabase();
+        var repo = new SettingsRepository(temp.Open());
+
+        repo.SetSyncFreshProfile(value);
+
+        Assert.Equal(value, repo.GetSyncFreshProfile());
+    }
+
+    [Fact]
+    public void SyncFreshProfile_ConNguyen_SauKhiMoLaiDatabase()
+    {
+        using var temp = new TempDatabase();
+
+        // Phiên 1: bật cờ.
+        {
+            var repo1 = new SettingsRepository(temp.Open());
+            repo1.SetSyncFreshProfile(true);
+        }
+
+        // Phiên 2: mở lại, cờ còn nguyên.
+        {
+            var repo2 = new SettingsRepository(temp.Open());
+            Assert.True(repo2.GetSyncFreshProfile());
+        }
+    }
 }
