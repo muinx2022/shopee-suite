@@ -850,9 +850,10 @@ public class ShopeeLoginService
                 return false;
             }
 
-            // Cap tổng ~4 phút (linh hoạt): timeout NỘI BỘ khác HỦY của người dùng — phân biệt ở khối catch dưới.
+            // Cap tổng ~8 phút (linh hoạt): mail xác thực Shopee thường ĐẾN MUỘN sau loạt mail cảnh báo → cần
+            // chờ đủ lâu. Timeout NỘI BỘ khác HỦY của người dùng — phân biệt ở khối catch dưới.
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            timeoutCts.CancelAfter(TimeSpan.FromMinutes(4));
+            timeoutCts.CancelAfter(TimeSpan.FromMinutes(8));
             var vct = timeoutCts.Token;
 
             var rng = new Random();
@@ -951,7 +952,7 @@ public class ShopeeLoginService
             catch (OperationCanceledException) when (!ct.IsCancellationRequested)
             {
                 // Timeout nội bộ (cap 4') — KHÔNG phải người dùng Dừng → degrade êm, KHÔNG ném (kẻo phá phiên).
-                L("Xác minh qua email quá 4 phút — bỏ qua (kiểm tra tay).");
+                L("Xác minh qua email quá 8 phút — bỏ qua (kiểm tra tay).");
                 return false;
             }
             catch (OperationCanceledException)
@@ -1068,55 +1069,63 @@ public class ShopeeLoginService
         }
 
         /// <summary>
-        /// Trong hộp thư Outlook: ưu tiên tab "Khác"/"Other", tìm mail Shopee MỚI NHẤT (dòng đầu khớp
-        /// "shopee"), mở mail rồi click link/nút xác nhận (bắt tab mới nếu link mở tab, đóng lại). Không thấy →
-        /// thử tab "Ưu tiên"/"Focused"; vẫn không → reload chờ 10s, tối đa 3 vòng. Trả <c>true</c> khi đã click
-        /// được link xác nhận.
+        /// Trong hộp thư Outlook: ưu tiên tab "Khác"/"Other" (không có mail Shopee thì thử "Ưu tiên"/"Focused"),
+        /// DUYỆT NHIỀU mail Shopee (không chỉ mail mới nhất) — mở lần lượt, mail nào có link xác nhận ("TẠI ĐÂY")
+        /// thì click. Vì Shopee gửi lẫn nhiều mail CẢNH BÁO đăng nhập, mail xác thực có thể KHÔNG phải mail mới
+        /// nhất và thường ĐẾN MUỘN → lặp reload + chờ tới hết deadline (~6'). Trả <c>true</c> khi đã click link.
         /// </summary>
         private async Task<bool> OpenShopeeMailAndConfirmAsync(
             IPage mailPage, IPage sellerPage, Action<string>? log, Random rng, CancellationToken ct)
         {
             void L(string m) => log?.Invoke(m);
+            const int MaxMailsPerRound = 8; // mỗi vòng duyệt tối đa 8 mail Shopee đầu (tìm cái có link xác nhận)
+            var deadline = DateTime.UtcNow.AddMinutes(6); // chờ mail xác thực tới (đến sau loạt mail cảnh báo)
 
             // Chờ danh sách mail render lần đầu.
             await Task.Delay(rng.Next(2000, 4000), ct).ConfigureAwait(false);
 
-            for (var round = 0; round < 3; round++)
+            var round = 0;
+            while (DateTime.UtcNow < deadline)
             {
                 ct.ThrowIfCancellationRequested();
+                round++;
 
-                // Ưu tiên tab "Khác"/"Other" TRƯỚC.
+                // Ưu tiên tab "Khác"/"Other"; không có mail Shopee ở đó → thử "Ưu tiên"/"Focused".
                 await TryClickPivotAsync(mailPage, OtherPivotRegex, "Khác", log, rng, ct).ConfigureAwait(false);
                 await Task.Delay(rng.Next(800, 1500), ct).ConfigureAwait(false);
-
-                var mailRow = await FindShopeeMailRowAsync(mailPage, ct).ConfigureAwait(false);
-                if (mailRow is null)
+                var rows = await FindAllShopeeMailRowsAsync(mailPage, MaxMailsPerRound, ct).ConfigureAwait(false);
+                if (rows.Count == 0)
                 {
-                    // Không thấy trong "Khác" → thử "Ưu tiên"/"Focused".
                     await TryClickPivotAsync(mailPage, FocusedPivotRegex, "Ưu tiên", log, rng, ct).ConfigureAwait(false);
                     await Task.Delay(rng.Next(800, 1500), ct).ConfigureAwait(false);
-                    mailRow = await FindShopeeMailRowAsync(mailPage, ct).ConfigureAwait(false);
+                    rows = await FindAllShopeeMailRowsAsync(mailPage, MaxMailsPerRound, ct).ConfigureAwait(false);
                 }
 
-                if (mailRow is not null)
+                if (rows.Count > 0)
                 {
-                    L("Mở mail Shopee mới nhất...");
+                    L($"Thấy {rows.Count} mail Shopee — mở lần lượt tìm mail có link xác nhận (bỏ qua mail cảnh báo)...");
                     var vp = mailPage.ViewportSize;
                     double mx = vp is not null ? vp.Width / 2.0 : 640;
                     double my = vp is not null ? vp.Height / 2.0 : 360;
-                    await HumanMoveAndClickAsync(mailPage, mailRow, mx, my, rng, ct).ConfigureAwait(false);
-                    await Task.Delay(rng.Next(1500, 3000), ct).ConfigureAwait(false);
 
-                    if (await ClickConfirmLinkInMailAsync(mailPage, sellerPage, log, rng, ct).ConfigureAwait(false))
+                    for (var i = 0; i < rows.Count; i++)
                     {
-                        return true;
-                    }
+                        ct.ThrowIfCancellationRequested();
+                        // Mở mail thứ i (dòng có thể detached nếu list vẽ lại → bỏ qua, vòng sau query lại).
+                        try { (mx, my) = await HumanMoveAndClickAsync(mailPage, rows[i], mx, my, rng, ct).ConfigureAwait(false); }
+                        catch { continue; }
+                        await Task.Delay(rng.Next(1200, 2500), ct).ConfigureAwait(false);
 
-                    L("Đã mở mail nhưng chưa thấy link xác nhận — thử lại.");
+                        if (await ClickConfirmLinkInMailAsync(mailPage, sellerPage, log, rng, ct).ConfigureAwait(false))
+                        {
+                            return true;
+                        }
+                        L($"Mail Shopee #{i + 1} không có link xác nhận (mail cảnh báo?) — thử mail kế.");
+                    }
                 }
 
-                // Chưa thấy mail / chưa thấy link → reload + chờ mail tới (có thể muộn).
-                L($"Chưa thấy mail Shopee (vòng {round + 1}/3) — tải lại hộp thư, chờ mail tới...");
+                // Chưa mail nào có link → mail xác thực có thể CHƯA tới → reload, chờ rồi thử lại.
+                L($"Vòng {round}: chưa thấy mail xác nhận — tải lại hộp thư, chờ mail tới...");
                 try
                 {
                     await mailPage.ReloadAsync(new PageReloadOptions
@@ -1126,9 +1135,10 @@ public class ShopeeLoginService
                     }).ConfigureAwait(false);
                 }
                 catch { /* nuốt lỗi reload */ }
-                await Task.Delay(10000, ct).ConfigureAwait(false);
+                await Task.Delay(rng.Next(10000, 15000), ct).ConfigureAwait(false);
             }
 
+            L("Hết thời gian chờ mail xác nhận Shopee — bỏ qua (kiểm tra tay).");
             return false;
         }
 
@@ -1239,12 +1249,56 @@ public class ShopeeLoginService
             catch { /* best-effort — bỏ qua */ }
         }
 
-        /// <summary>Tìm dòng mail Shopee MỚI NHẤT (dòng đầu tiên khớp "shopee" theo thứ tự DOM = trên cùng =
-        /// mới nhất) trong danh sách message của Outlook. Dò nhiều selector cấu trúc; không thấy → null.</summary>
-        private static async Task<IElementHandle?> FindShopeeMailRowAsync(IPage page, CancellationToken ct)
-            => await FindVisibleByTextAsync(
-                page, new[] { "div[role='option']", "div[role='listitem']", "div[role='row']", "[data-convid]" },
-                ShopeeSenderRegex, ct, 6000).ConfigureAwait(false);
+        /// <summary>Danh sách các dòng mail Shopee ĐANG HIỂN THỊ (khớp "shopee") theo thứ tự DOM (trên cùng =
+        /// mới nhất), tối đa <paramref name="maxRows"/>. Trả NHIỀU dòng để caller DUYỆT vì mail xác thực (có link
+        /// "TẠI ĐÂY") thường KHÔNG phải mail mới nhất (lẫn mail cảnh báo đăng nhập). Dùng selector đầu tiên cho
+        /// ra kết quả (không trộn nhiều selector để tránh trùng dòng); khử trùng theo text dòng.</summary>
+        private static async Task<List<IElementHandle>> FindAllShopeeMailRowsAsync(IPage page, int maxRows, CancellationToken ct)
+        {
+            foreach (var sel in new[] { "div[role='option']", "div[role='listitem']", "div[role='row']", "[data-convid]" })
+            {
+                IReadOnlyList<IElementHandle> els;
+                try { els = await page.QuerySelectorAllAsync(sel).ConfigureAwait(false); }
+                catch { continue; }
+
+                var result = new List<IElementHandle>();
+                var seen = new HashSet<string>();
+                foreach (var el in els)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    try
+                    {
+                        if (!await IsElementVisibleByClientRectsAsync(el).ConfigureAwait(false))
+                        {
+                            continue;
+                        }
+
+                        var txt = await el.InnerTextAsync().ConfigureAwait(false);
+                        if (string.IsNullOrWhiteSpace(txt) || !ShopeeSenderRegex.IsMatch(txt))
+                        {
+                            continue;
+                        }
+
+                        if (seen.Add(txt.Trim()))
+                        {
+                            result.Add(el);
+                            if (result.Count >= maxRows)
+                            {
+                                return result;
+                            }
+                        }
+                    }
+                    catch { /* detached / lỗi đọc — bỏ qua dòng này */ }
+                }
+
+                if (result.Count > 0)
+                {
+                    return result; // selector này đã cho danh sách mail Shopee — dừng, không trộn selector khác
+                }
+            }
+
+            return new List<IElementHandle>();
+        }
 
         // ===================== Helper dò phần tử theo hiển thị (getClientRects) + text =====================
 
