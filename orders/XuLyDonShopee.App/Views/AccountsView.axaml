@@ -150,7 +150,8 @@
                                 Command="{Binding AddCommand}" Content="+ Thêm tài khoản" />
                         <Button Grid.Column="1" Classes="iconDanger" Margin="8,0,0,0"
                                 Content="🗑" Command="{Binding DeleteCommand}"
-                                IsEnabled="{Binding SelectedRow, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                                IsEnabled="{Binding CanDelete}"
+                                ToolTip.Tip="Xóa các tài khoản đang tick — không tick dòng nào thì xóa tài khoản đang chọn. Hỏi xác nhận trước khi xóa." />
                     </Grid>
 
                     <!-- Hàng nút thao tác nhóm — dạng ICON, 2 NHÓM có ngăn cách:

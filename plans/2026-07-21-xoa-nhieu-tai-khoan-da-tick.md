@@ -1,7 +1,7 @@
 # Plan: Xóa nhiều tài khoản đã tick ở màn Tài khoản (module Đơn hàng)
 
 - **Ngày:** 2026-07-21
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-dev`)
 
 ## 1. Bối cảnh & mục tiêu
@@ -80,4 +80,34 @@ Quyết định đã chốt:
 
 ## Báo cáo thực thi (Opus điền sau khi xong)
 
-<chưa có>
+> **Nghiệm thu (Fable):** đạt. Bổ sung thêm sau review: untick các dòng vừa xóa trước `Reload()` trong `DeleteAsync` — chặn vòng đồng bộ đầu của `RefreshList` nạp lại id đã xóa vào `_selectedIds` (id SQLite cấp lại → tài khoản mới thêm tự dưng tick sẵn). Build + 769 test xanh sau khi bổ sung.
+
+**Ngày:** 2026-07-21 · **Người thực thi:** Opus
+
+### File đã sửa
+
+1. `orders/XuLyDonShopee.App/ViewModels/AccountsViewModel.cs`
+   - Thêm property `public bool CanDelete => SelectedRow is not null || Accounts.Any(r => r.IsSelected);` (kèm doc-comment), đặt ngay sau `CanSyncOrders`.
+   - `OnSelectedRowChanged`: thêm `OnPropertyChanged(nameof(CanDelete));` đặt TRƯỚC guard `_isRefreshing` (cạnh `RebuildFilteredLog()`).
+   - `SelectAll()`: thêm `OnPropertyChanged(nameof(CanDelete));` ở cuối.
+   - `ToggleRowTick`: đổi từ expression-body sang block, thêm `OnPropertyChanged(nameof(CanDelete));`.
+   - `Reload()`: thêm `OnPropertyChanged(nameof(CanDelete));` sau `RefreshList(selectId)`.
+   - Viết lại `DeleteAsync()`: chụp `targets = Accounts.Where(r => r.IsSelected).Select(r => (r.Id, r.Email)).ToList()` trước await; rỗng + có `SelectedRow` → fallback `[(SelectedRow.Id, SelectedRow.Email)]`; vẫn rỗng → return. Confirm 1 câu (1 tài khoản giữ nguyên câu cũ; N>1 ghi số lượng + tối đa 5 email, thừa thì "… và {N-5} tài khoản khác", + "Thao tác này không thể hoàn tác."). OK → foreach target: `Sessions.Stop(id)` → `Accounts.Delete(id)` → `_selectedIds.Remove(id)`. Reset form nguyên khối cũ + `Reload()`. Thêm doc-comment mô tả ngữ nghĩa mới.
+
+2. `orders/XuLyDonShopee.App/Views/AccountsView.axaml`
+   - Nút 🗑: đổi `IsEnabled` từ `{Binding SelectedRow, Converter=...IsNotNull}` sang `{Binding CanDelete}`; thêm `ToolTip.Tip="Xóa các tài khoản đang tick — không tick dòng nào thì xóa tài khoản đang chọn. Hỏi xác nhận trước khi xóa."`.
+
+### Kết quả build/test
+
+- `dotnet build orders/XuLyDonShopee.App` → **Build succeeded, 0 Warning, 0 Error**.
+- `dotnet test orders/XuLyDonShopee.Tests` → **Passed! Failed: 0, Passed: 769, Skipped: 0, Total: 769**.
+- `dotnet build suite/Shopee.Suite` → **Build succeeded, 0 Warning, 0 Error**.
+
+### Tiêu chí nghiệm thu — trạng thái
+
+- [x] Build 3 project xanh, test pass toàn bộ (769/769). — kiểm bằng lệnh ở trên.
+- [~] Các tiêu chí về hành vi UI (nút sáng khi tick, dialog ghi đúng số lượng/tên, xóa hết tick, form về placeholder, hành vi 1 dòng cũ, disabled khi không tick/không chọn, Cancel không xóa, phiên được Stop) — **không có test tự động, chỉ kiểm được bằng chạy tay**. Logic đã cài đúng theo plan; chưa chạy app thực để mắt thấy.
+
+### Điểm cần phiên chính soi lại (lệch nhẹ so với ý ngầm của plan, KHÔNG lệch chữ)
+
+- `_selectedIds.Remove(id)` trong vòng foreach (đúng theo plan) bị `ApplyFilter` (gọi từ `Reload`) **thêm lại**: khi `Reload` chạy, các dòng đã-xóa-và-đang-tick VẪN còn trong `Accounts` với `IsSelected=true` (vòng reset form không untick chúng), nên vòng đồng bộ đầu `ApplyFilter` re-add id đó vào `_selectedIds` trước khi Clear. Hệ quả: id đã xóa còn sót lại trong `_selectedIds` như "rác chết". **Vô hại về mặt tính năng**: account đã xóa không còn trong `_all` nên không dựng thành row → không hiện lại tick, danh sách sạch, tiêu chí nghiệm thu "tất cả tài khoản tick biến mất" vẫn đạt. Rủi ro lý thuyết duy nhất: nếu SQLite tái dùng đúng rowid đó cho một account MỚI (INTEGER PRIMARY KEY không AUTOINCREMENT có thể cấp lại max+1 khi bản ghi max bị xóa), account mới sẽ hiện tick sẵn. Muốn triệt để thì phải untick các row đã xóa trước `Reload` (ngoài phạm vi câu chữ plan) — để phiên chính quyết có cần không.

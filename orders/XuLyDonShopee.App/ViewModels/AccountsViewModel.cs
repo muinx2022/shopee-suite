@@ -203,6 +203,12 @@ public partial class AccountsViewModel : ViewModelBase
     /// </summary>
     public bool CanSyncOrders => IsEditing && !IsNew && _editingId is not null;
 
+    /// <summary>Nguồn SÁNG/TẮT của nút 🗑: bật khi đang bôi đậm một dòng (<see cref="SelectedRow"/> — xóa dòng
+    /// đó, hành vi cũ) HOẶC có ≥1 dòng đang hiển thị được tick (xóa hàng loạt theo tick). Notify lại tại mọi
+    /// điểm tick/lựa chọn đổi (<see cref="ToggleRowTick"/>, <see cref="SelectAll"/>, <see cref="Reload"/>,
+    /// <see cref="OnSelectedRowChanged"/>) để nút cập nhật kịp.</summary>
+    public bool CanDelete => SelectedRow is not null || Accounts.Any(r => r.IsSelected);
+
     /// <summary>Id của tài khoản đang được nạp trong form (null = form trống / tạo mới).</summary>
     private long? _editingId;
 
@@ -243,6 +249,10 @@ public partial class AccountsViewModel : ViewModelBase
         // log luôn khớp SelectedRow ở mọi đường (kể cả khi RefreshList set lại lựa chọn dưới cờ refresh);
         // rebuild chỉ đụng FilteredLogEntries, đồng bộ trên UI thread, không reentrancy.
         RebuildFilteredLog();
+
+        // Bôi đậm dòng đổi → nút 🗑 có thể đổi sáng/tắt. Đặt TRƯỚC guard _isRefreshing (giống RebuildFilteredLog)
+        // để bám đúng cả đường refresh set lại lựa chọn dưới cờ.
+        OnPropertyChanged(nameof(CanDelete));
 
         if (_isRefreshing)
         {
@@ -357,6 +367,7 @@ public partial class AccountsViewModel : ViewModelBase
         var selectId = _editingId ?? SelectedRow?.Id;
         _all = _services.Accounts.GetAll();
         RefreshList(selectId);
+        OnPropertyChanged(nameof(CanDelete));
     }
 
     /// <summary>
@@ -435,6 +446,8 @@ public partial class AccountsViewModel : ViewModelBase
         {
             row.IsSelected = target;
         }
+
+        OnPropertyChanged(nameof(CanDelete));
     }
 
     /// <summary>
@@ -442,7 +455,11 @@ public partial class AccountsViewModel : ViewModelBase
     /// dòng này, các dòng khác không đụng. KHÔNG đụng <see cref="SelectedRow"/> — việc chọn dòng (đổ Chi tiết
     /// + log) do <c>ListBox.SelectedItem</c> tự lo; tách bạch để reselect/Reload programmatic KHÔNG toggle tick.
     /// </summary>
-    public void ToggleRowTick(AccountRowViewModel row) => row.IsSelected = !row.IsSelected;
+    public void ToggleRowTick(AccountRowViewModel row)
+    {
+        row.IsSelected = !row.IsSelected;
+        OnPropertyChanged(nameof(CanDelete));
+    }
 
     /// <summary>"Dừng đã chọn" — dừng phiên của mọi tài khoản đang tick (Stop tự no-op nếu không có phiên).</summary>
     [RelayCommand]
@@ -577,24 +594,68 @@ public partial class AccountsViewModel : ViewModelBase
         }
     }
 
+    /// <summary>
+    /// Xóa tài khoản — ƯU TIÊN TICK: có ≥1 dòng ĐANG HIỂN THỊ được tick → xóa TẤT CẢ dòng tick đó (một lần xác
+    /// nhận, ghi số lượng + tối đa 5 email đầu); không tick dòng nào → fallback xóa dòng đang bôi đậm
+    /// (<see cref="SelectedRow"/>) như cũ. Chỉ xét tick trên <see cref="Accounts"/> (sau lọc) — nhất quán với
+    /// "Sync đã chọn"/"Dừng đã chọn"; tick bền của dòng đang bị ẩn do tìm kiếm KHÔNG bị xóa. Trước khi xóa mỗi
+    /// tài khoản gọi <c>Sessions.Stop</c> (no-op nếu không có phiên) để không mồ côi cửa sổ Brave, và gỡ id khỏi
+    /// tập tick bền <see cref="_selectedIds"/>.
+    /// </summary>
     [RelayCommand]
     private async Task DeleteAsync()
     {
-        if (SelectedRow is null)
+        // Chụp (Id, Email) target TRƯỚC mọi await — không giữ tham chiếu row qua await (bài học sẵn trong file).
+        var targets = Accounts.Where(r => r.IsSelected).Select(r => (r.Id, r.Email)).ToList();
+        if (targets.Count == 0 && SelectedRow is not null)
+        {
+            targets = new List<(long Id, string Email)> { (SelectedRow.Id, SelectedRow.Email) };
+        }
+
+        if (targets.Count == 0)
         {
             return;
         }
 
-        var target = SelectedRow.Account;
-        var ok = await DialogService.ConfirmAsync(
-            "Xóa tài khoản",
-            $"Bạn có chắc muốn xóa tài khoản \"{target.Email}\"? Thao tác này không thể hoàn tác.");
+        string message;
+        if (targets.Count == 1)
+        {
+            message = $"Bạn có chắc muốn xóa tài khoản \"{targets[0].Email}\"? Thao tác này không thể hoàn tác.";
+        }
+        else
+        {
+            var emails = string.Join("\n", targets.Take(5).Select(t => t.Email));
+            if (targets.Count > 5)
+            {
+                emails += $"\n… và {targets.Count - 5} tài khoản khác";
+            }
+
+            message = $"Bạn có chắc muốn xóa {targets.Count} tài khoản đã tick?\n{emails}\n" +
+                      "Thao tác này không thể hoàn tác.";
+        }
+
+        var ok = await DialogService.ConfirmAsync("Xóa tài khoản", message);
         if (!ok)
         {
             return;
         }
 
-        _services.Accounts.Delete(target.Id);
+        foreach (var target in targets)
+        {
+            _services.Sessions.Stop(target.Id); // no-op an toàn nếu tài khoản không có phiên — tránh Brave mồ côi.
+            _services.Accounts.Delete(target.Id);
+            _selectedIds.Remove(target.Id);
+        }
+
+        // Untick các dòng vừa xóa còn trong danh sách hiển thị CŨ (tra lại theo Id — không giữ ref row qua await):
+        // vòng đồng bộ đầu của RefreshList đọc tick từ rows cũ, không untick thì id đã xóa bị NẠP LẠI vào
+        // _selectedIds → SQLite cấp lại id cho tài khoản thêm sau ⇒ tài khoản mới tự dưng tick sẵn.
+        var deletedIds = targets.Select(t => t.Id).ToHashSet();
+        foreach (var row in Accounts.Where(r => deletedIds.Contains(r.Id)))
+        {
+            row.IsSelected = false;
+        }
+
         IsNew = false;
         _isRefreshing = true;
         SelectedRow = null;
