@@ -1,7 +1,7 @@
 # Plan: Gộp phase 2a — project chung Shopee.Proxy.Kiot + chuyển module đơn hàng sang dùng
 
 - **Ngày:** 2026-07-21
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành (2026-07-21 — Fable nghiệm thu: tự build 0 lỗi 0 warning + 732/732 test, 720 test cũ nguyên vẹn không sửa, suite/ không bị đụng)
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-executor`)
 - **Nơi làm:** cây làm việc CHÍNH `D:\Projects\shopee-suite`, nhánh `feature/gop-don-hang`.
   KHÔNG đụng `main`. Có một agent khác đang làm trong worktree riêng (`../shopee-suite-wt-profile`)
@@ -124,4 +124,82 @@ adapter — cần người dùng nghiệm thu runtime (MultiBrave/Search/CheckAc
 
 ## Báo cáo thực thi (Opus điền sau khi xong)
 
-<chưa có>
+**Ngày thực thi:** 2026-07-21 · **Kết quả:** hoàn thành, build 0 lỗi/0 warning, test 732/732 pass.
+
+### 1. Project chung `shared/Shopee.Proxy.Kiot` (net8.0, ImplicitUsings + Nullable enable, KHÔNG package/ProjectReference ngoài)
+
+5 file nguồn:
+- `KiotProxyInfo.cs` — record thông tin proxy đã bóc: `Host, HttpPort, Socks5Port, Http, Socks5,
+  RealIpAddress, NextRequestAtMs, ExpirationAtMs` + `IReadOnlyDictionary<string,object?> Raw`
+  (giữ NGUYÊN toàn bộ `data` cho fingerprint phase 2b).
+- `KiotApiResult.cs` — record `(bool Success, string? Message, KiotProxyInfo? Data, int? HttpStatus)`.
+- `KiotApiParser.cs` — static, THUẦN, KHÔNG ném:
+  - `KiotApiResult ParseBody(string? json, int? httpStatus = null)` — bóc JSON: đọc
+    `success/message/status`, `data.{host,httpPort,socks5Port,http,socks5,realIpAddress,
+    nextRequestAt,expirationAt}` (các field khác của `data` như ttl/ttc tự vào `Raw`).
+    `Success=false` khi body rỗng / JSON hỏng / `success==false` / `status=="FAIL"`.
+  - `string ExtractError(string? json)` — ghép `message` + `error` bằng `" | "`, fallback JSON thô /
+    `"Loi khong xac dinh."` (giữ để phase 2b dựng lại chuỗi lỗi suite/MultiBrave).
+- `KiotApiClient.cs` — client instance, KHÔNG ném:
+  - `KiotApiClient(HttpClient http, string? baseUrl = null)` — inject được cả hai; `baseUrl` rỗng →
+    `DefaultBaseUrl = "https://api.kiotproxy.com"`; consts `DefaultBaseUrl`, `DefaultRegion="random"`.
+  - `Task<KiotApiResult> GetNewAsync(string key, string? region, CancellationToken ct = default)` —
+    `/proxies/new?key=&region=` (region rỗng → random).
+  - `Task<KiotApiResult> GetCurrentAsync(string key, CancellationToken ct = default)` —
+    `/proxies/current?key=`, KHÔNG gửi region.
+  - Non-2xx → `Success=false, Message=ExtractError(body), HttpStatus`, `Data=null`. Lỗi mạng/timeout/
+    hủy (catch Exception) → `Success=false, Message=ex.Message, HttpStatus=null` (KHÔNG ném — khớp
+    hành vi nuốt-lỗi cũ của orders).
+
+### 2. Đưa vào `ShopeeSuite.sln`
+Thêm solution folder `shared` `{02C9FA95-B128-4EB2-99DF-0AB93DC0503E}` + project
+`Shopee.Proxy.Kiot` `{107C2467-7650-4F8F-84BA-D0298C3207B4}` (đủ Debug/Release ActiveCfg+Build.0 +
+NestedProjects trỏ vào folder shared). `orders/XuLyDonShopee.Core.csproj` thêm ProjectReference
+`..\..\shared\Shopee.Proxy.Kiot\Shopee.Proxy.Kiot.csproj` (một chiều orders→shared). Tests nhận
+shared qua transitive (không sửa csproj Tests).
+
+### 3. Adapter `orders/.../KiotProxyClient.cs` — bề mặt public GIỮ NGUYÊN
+- **Giữ nguyên:** class/namespace `XuLyDonShopee.Core.Services.KiotProxyClient : IKiotProxyClient`;
+  consts `DefaultBaseUrl`/`DefaultRegion` (nay trỏ vào const của `KiotApiClient`); chữ ký ctor
+  `(IEnumerable<string> apiKeys, string region, string baseUrl, HttpClient? httpClient)` — httpClient
+  + baseUrl chuyển tiếp xuống `KiotApiClient`; `KeyCount`; `GetNewProxyAsync`/`GetCurrentProxyAsync`;
+  static `ParseResponse(string?)` và `ParseProxyIfAlive(string?, long)`; `SelectAcrossKeysAsync`
+  xoay key; hành vi `/current` (kiểm hết hạn) vs `/new`.
+- **Thay đổi (ruột):** phần gọi HTTP + `JsonDocument.Parse` chuyển hết sang `KiotApiClient`/
+  `KiotApiParser`. `FetchAsync` gọi `_api.GetNewAsync/GetCurrentAsync`. Việc GIỮ TRONG ADAPTER:
+  map `data` thô → `ProxyEntry` qua danh sách field ứng viên `http, proxyHttp, proxy, proxyAddress,
+  address, socks5, proxySocks5, https` + `ProxyParser.Parse` (nay đọc từ `KiotProxyInfo.Raw` thay vì
+  JSON), và kiểm hết hạn (`ExpirationAtMs <= now → null`, đọc từ `KiotProxyInfo.ExpirationAtMs`).
+  `ParseResponse`/`ParseProxyIfAlive` nay ủy quyền parse cho `KiotApiParser.ParseBody` rồi map/kiểm
+  hết hạn tại chỗ. Bỏ `using System.Text.Json`, thêm `using Shopee.Proxy.Kiot`.
+- **Hành vi giữ từng li:** `!IsSuccessStatusCode`/lỗi → `Success=false` → null im lặng; `success==false`
+  / `status=="FAIL"` → null; pool key rỗng → null KHÔNG gọi HTTP (chặn trong `SelectAcrossKeysAsync`).
+
+### 4. Test mới `orders/XuLyDonShopee.Tests/KiotApiClientTests.cs` (12 test, StubHandler + ThrowingHandler)
+Phủ: parse đủ field + giữ Raw; thiếu field→null; success=false→Message; status=FAIL→không success;
+JSON hỏng→Success=false không ném; body rỗng→false; `/new` có region; region rỗng→random; `/current`
+không có region; HTTP 500→Success=false+HttpStatus 500+Data null; lỗi mạng→Success=false không ném,
+HttpStatus null; `/current` mang expiration + Raw.
+
+### 5. Kết quả kiểm chứng (lệnh đã chạy thật)
+- `dotnet build ShopeeSuite.sln -c Release` → **Build succeeded, 0 Warning, 0 Error** (10/10 project,
+  gồm `Shopee.Proxy.Kiot.dll`). KHÔNG dính WDAC 0x800711C7 lần này.
+- `dotnet test orders/XuLyDonShopee.Tests/... -c Release --no-build` →
+  **Passed! Failed: 0, Passed: 732, Total: 732**. Baseline cũ 720 → 732 = 720 CŨ nguyên vẹn + 12 MỚI.
+- `git status --short`: chỉ `M ShopeeSuite.sln`, `M orders/.../Services/KiotProxyClient.cs`,
+  `M orders/.../XuLyDonShopee.Core.csproj`, `?? orders/.../Tests/KiotApiClientTests.cs`, `?? shared/`
+  (+ file plan này sẽ M sau khi ghi báo cáo). KHÔNG file nào dưới `suite/`. bin/obj của shared đã bị
+  gitignore (chỉ 5 file nguồn được add).
+- Grep xác nhận `orders/.../KiotProxyClient.cs` KHÔNG còn `JsonDocument`/`GetAsync`/`_http`/
+  `ReadAsStringAsync`/`System.Text.Json` (đã ủy quyền shared).
+
+### 6. Không sửa test cũ nào
+KHÔNG động vào `KiotProxyClientTests.cs` hay bất kỳ test cũ nào — không kích hoạt ngoại lệ ở mục 2
+của plan. Adapter tự khớp toàn bộ 11 test cũ của `KiotProxyClientTests` (stub HttpClient + baseUrl
+hoạt động nguyên vẹn qua đường chuyển tiếp xuống `KiotApiClient`).
+
+### 7. Lưu ý / khác biệt hành-vi nhỏ (đã cân nhắc, không ảnh hưởng test/thực tế)
+`Raw` chỉ chứa nội dung nhánh `data` (khi có), nên adapter dò field ứng viên trong `data` — bản cũ dò
+ROOT trước rồi mới tới `data`. API KiotProxy luôn nhét proxy dưới `data` và mọi test đều nhét dưới
+`data`, nên khác biệt này là edge lý thuyết (root VÀ data cùng có field proxy) không xảy ra thực tế;
+giữ `Raw=data` là chủ đích để phase 2b dựng fingerprint không lẫn `success/status/message`.

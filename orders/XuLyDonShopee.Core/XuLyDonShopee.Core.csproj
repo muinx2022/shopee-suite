@@ -12,6 +12,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Lớp HTTP client + parser KiotProxy dùng chung (một chiều: orders -> shared). -->
+    <ProjectReference Include="..\..\shared\Shopee.Proxy.Kiot\Shopee.Proxy.Kiot.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- Cho phép project test truy cập thành viên internal (vd BrowserLocator.FindFirstExisting). -->
     <InternalsVisibleTo Include="XuLyDonShopee.Tests" />
   </ItemGroup>

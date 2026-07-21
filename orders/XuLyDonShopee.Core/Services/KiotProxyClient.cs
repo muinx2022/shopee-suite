@@ -1,4 +1,4 @@
-using System.Text.Json;
+using Shopee.Proxy.Kiot;
 using XuLyDonShopee.Core.Models;
 
 namespace XuLyDonShopee.Core.Services;
@@ -7,19 +7,27 @@ namespace XuLyDonShopee.Core.Services;
 /// Gọi API KiotProxy (kiotproxy.com) lấy proxy theo API key. Hỗ trợ NHIỀU key:
 /// xoay vòng qua các key; key tới lượt bị lỗi thì thử key kế tiếp. Mọi lỗi
 /// (mạng/timeout/JSON/key hỏng) đều nuốt và trả null để tầng gọi dùng IP máy.
-/// Tài liệu: GET /api/v1/proxies/new?key=&amp;region= → data.http = "ip:port".
+/// Phần gọi HTTP + bóc JSON đã ủy quyền cho <see cref="KiotApiClient"/> (project chung
+/// <c>Shopee.Proxy.Kiot</c>); lớp này là adapter: xoay key, map ra <see cref="ProxyEntry"/>
+/// và kiểm hết hạn của <c>/current</c>.
 /// </summary>
 public class KiotProxyClient : IKiotProxyClient
 {
     /// <summary>Base URL mặc định của KiotProxy.</summary>
-    public const string DefaultBaseUrl = "https://api.kiotproxy.com";
+    public const string DefaultBaseUrl = KiotApiClient.DefaultBaseUrl;
 
     /// <summary>Vùng mặc định (random = toàn hệ thống).</summary>
-    public const string DefaultRegion = "random";
+    public const string DefaultRegion = KiotApiClient.DefaultRegion;
+
+    // Tên các trường trong "data" có thể chứa chuỗi "host:port" (ưu tiên http theo tài liệu).
+    private static readonly string[] CandidateKeys =
+    {
+        "http", "proxyHttp", "proxy", "proxyAddress", "address",
+        "socks5", "proxySocks5", "https"
+    };
 
     private readonly object _lock = new();
-    private readonly HttpClient _http;
-    private readonly string _baseUrl;
+    private readonly KiotApiClient _api;
     private readonly string _region;
     private readonly List<string> _keys;
     private int _index;
@@ -33,8 +41,7 @@ public class KiotProxyClient : IKiotProxyClient
     {
         _keys = KiotProxyKeyParser.Parse(apiKeys is null ? null : string.Join("\n", apiKeys));
         _region = string.IsNullOrWhiteSpace(region) ? DefaultRegion : region.Trim();
-        _baseUrl = (baseUrl ?? DefaultBaseUrl).TrimEnd('/');
-        _http = httpClient ?? new HttpClient();
+        _api = new KiotApiClient(httpClient ?? new HttpClient(), baseUrl ?? DefaultBaseUrl);
     }
 
     /// <summary>Số key hợp lệ hiện có.</summary>
@@ -86,28 +93,26 @@ public class KiotProxyClient : IKiotProxyClient
 
     private async Task<ProxyEntry?> FetchAsync(string key, string path, bool withRegion, CancellationToken ct)
     {
-        try
+        // Gọi client chung (client này KHÔNG ném; lỗi mạng/HTTP/JSON → Success=false).
+        var result = withRegion
+            ? await _api.GetNewAsync(key, _region, ct).ConfigureAwait(false)
+            : await _api.GetCurrentAsync(key, ct).ConfigureAwait(false);
+
+        var proxy = MapToProxyEntry(result);
+        if (proxy is null)
         {
-            var url = $"{_baseUrl}/api/v1/proxies/{path}?key={Uri.EscapeDataString(key)}";
-            if (withRegion)
-            {
-                url += $"&region={Uri.EscapeDataString(_region)}";
-            }
-            using var response = await _http.GetAsync(url, ct).ConfigureAwait(false);
-            if (!response.IsSuccessStatusCode)
-            {
-                return null;
-            }
-            var body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-            // /current: chỉ nhận proxy còn hạn. /new: proxy vừa cấp coi như còn hạn.
-            return path == "current"
-                ? ParseProxyIfAlive(body, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds())
-                : ParseResponse(body);
+            return null; // lỗi / success=false / FAIL / không có proxy → key kế tiếp / IP máy
         }
-        catch
+
+        // /current: chỉ nhận proxy còn hạn (expirationAt > now). /new: proxy vừa cấp coi như còn hạn.
+        if (path == "current" &&
+            result.Data is { ExpirationAtMs: { } expMs } &&
+            expMs <= DateTimeOffset.UtcNow.ToUnixTimeMilliseconds())
         {
-            return null; // nuốt lỗi → key kế tiếp / IP máy
+            return null; // đã hết hạn
         }
+
+        return proxy;
     }
 
     /// <summary>
@@ -117,35 +122,17 @@ public class KiotProxyClient : IKiotProxyClient
     /// </summary>
     public static ProxyEntry? ParseProxyIfAlive(string? json, long nowUnixMs)
     {
-        var proxy = ParseResponse(json);
+        var result = KiotApiParser.ParseBody(json);
+        var proxy = MapToProxyEntry(result);
         if (proxy is null)
         {
             return null;
         }
 
-        try
+        // Không đọc được expirationAt → coi như còn hạn (đã có proxy hợp lệ).
+        if (result.Data is { ExpirationAtMs: { } expMs } && expMs <= nowUnixMs)
         {
-            using var doc = JsonDocument.Parse(json!);
-            var root = doc.RootElement;
-
-            var dataEl = root;
-            if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty("data", out var data))
-            {
-                dataEl = data;
-            }
-
-            if (dataEl.ValueKind == JsonValueKind.Object &&
-                dataEl.TryGetProperty("expirationAt", out var exp) &&
-                exp.ValueKind == JsonValueKind.Number &&
-                exp.TryGetInt64(out var expMs) &&
-                expMs <= nowUnixMs)
-            {
-                return null; // đã hết hạn
-            }
-        }
-        catch
-        {
-            // Không đọc được expirationAt → coi như còn hạn (đã có proxy hợp lệ từ ParseResponse).
+            return null; // đã hết hạn
         }
 
         return proxy;
@@ -156,73 +143,38 @@ public class KiotProxyClient : IKiotProxyClient
     /// success=false hoặc status="FAIL" → null. Lỗi parse → null.
     /// </summary>
     public static ProxyEntry? ParseResponse(string? json)
+        => MapToProxyEntry(KiotApiParser.ParseBody(json));
+
+    /// <summary>
+    /// Map kết quả API chung sang <see cref="ProxyEntry"/>: thất bại/không có data → null;
+    /// dò các trường ứng viên trong <c>data</c> thô để lấy chuỗi "host:port", rồi
+    /// <see cref="ProxyParser.Parse"/>.
+    /// </summary>
+    private static ProxyEntry? MapToProxyEntry(KiotApiResult result)
     {
-        if (string.IsNullOrWhiteSpace(json))
+        if (!result.Success || result.Data is null)
         {
             return null;
         }
 
-        // Các tên trường có thể chứa chuỗi "host:port" (ưu tiên http theo tài liệu).
-        string[] candidateKeys =
-        {
-            "http", "proxyHttp", "proxy", "proxyAddress", "address",
-            "socks5", "proxySocks5", "https"
-        };
-
-        try
-        {
-            using var doc = JsonDocument.Parse(json);
-            var root = doc.RootElement;
-
-            if (root.ValueKind == JsonValueKind.Object)
-            {
-                // Thất bại rõ ràng theo tài liệu → null (HTTP status có thể vẫn 200).
-                if (root.TryGetProperty("success", out var ok) && ok.ValueKind == JsonValueKind.False)
-                {
-                    return null;
-                }
-                if (root.TryGetProperty("status", out var st) && st.ValueKind == JsonValueKind.String &&
-                    string.Equals(st.GetString(), "FAIL", StringComparison.OrdinalIgnoreCase))
-                {
-                    return null;
-                }
-            }
-
-            var value = FindProxyString(root, candidateKeys);
-            if (value is null && root.ValueKind == JsonValueKind.Object &&
-                root.TryGetProperty("data", out var data))
-            {
-                value = FindProxyString(data, candidateKeys);
-            }
-            if (value is null)
-            {
-                return null;
-            }
-
-            var parsed = ProxyParser.Parse(value);
-            return parsed.Valid.Count > 0 ? parsed.Valid[0] : null;
-        }
-        catch
+        var value = FindProxyString(result.Data.Raw, CandidateKeys);
+        if (value is null)
         {
             return null;
         }
+
+        var parsed = ProxyParser.Parse(value);
+        return parsed.Valid.Count > 0 ? parsed.Valid[0] : null;
     }
 
-    private static string? FindProxyString(JsonElement element, string[] keys)
+    private static string? FindProxyString(IReadOnlyDictionary<string, object?> raw, string[] keys)
     {
-        if (element.ValueKind != JsonValueKind.Object)
-        {
-            return null;
-        }
         foreach (var key in keys)
         {
-            if (element.TryGetProperty(key, out var prop) && prop.ValueKind == JsonValueKind.String)
+            if (raw.TryGetValue(key, out var v) && v is string s &&
+                !string.IsNullOrWhiteSpace(s) && s.Contains(':'))
             {
-                var s = prop.GetString();
-                if (!string.IsNullOrWhiteSpace(s) && s!.Contains(':'))
-                {
-                    return s;
-                }
+                return s;
             }
         }
         return null;
