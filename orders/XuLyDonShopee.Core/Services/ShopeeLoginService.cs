@@ -775,8 +775,10 @@ public class ShopeeLoginService
             new(@"^\s*(other|khác|khac)\s*$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
         private static readonly Regex FocusedPivotRegex =
             new(@"^\s*(focused|ưu tiên|uu tien)\s*$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        // Text CỦA LINK xác nhận trong mail Shopee — link thường CHỈ bọc "TẠI ĐÂY" (không phải cả câu "xác nhận
+        // tại đây") nên phải bắt riêng "tại đây"/"here"; "here" có \b để không dính "there"/"where".
         private static readonly Regex ConfirmLinkRegex =
-            new(@"xác nhận|xac nhan|verify|confirm|đúng là tôi|dung la toi|yes,?\s*it'?s me", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+            new(@"xác nhận|xac nhan|verify|confirm|đúng là tôi|dung la toi|yes,?\s*it'?s me|tại đây|tại đấy|tai day|nhấn vào đây|bấm vào đây|nhan vao day|bam vao day|click here|\bhere\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
         private static readonly Regex SignInRegex =
             new(@"sign\s*in|đăng nhập|dang nhap", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
