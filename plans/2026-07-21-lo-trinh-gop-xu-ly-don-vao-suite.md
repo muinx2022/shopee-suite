@@ -41,6 +41,10 @@ KHÔNG ép chung một kho tài khoản; chỉ hợp nhất hạ tầng bên dư
 
 Nguyên tắc xuyên suốt: mỗi phase là một đơn vị bàn giao trọn vẹn, build + test xanh, commit xong mới sang phase sau. Không đổi hành vi nghiệp vụ trong phase hạ tầng.
 
+**Quy tắc nhánh (người dùng chốt 2026-07-21):** toàn bộ việc gộp làm trên nhánh
+`feature/gop-don-hang`, KHÔNG commit thẳng vào `main`; chỉ merge về `main` khi người dùng
+duyệt (dự kiến sau khi phase 1b nghiệm thu chạy thật đạt).
+
 ## Rủi ro chung
 
 - **Bump Playwright 1.49→1.60 (phase 1b)**: hành vi CDP/stealth nhạy version — phải chạy thật luồng đăng nhập + sync đơn trước khi chốt.
