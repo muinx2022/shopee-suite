@@ -760,6 +760,9 @@ public class ShopeeLoginService
             { "#idA_PWD_SwitchToPassword", "a", "[role='button']", "button", "span" };
         private static readonly string[] MsKmsiYesSelectors =
             { "#acceptButton", "#idSIButton9", "button[type='submit']" };
+        // Nút "Đăng nhập"/"Sign in" ở trang landing (khi chưa nhảy thẳng vào form nhập email).
+        private static readonly string[] MsSignInSelectors =
+            { "a[data-task='signin']", "a[href*='login.live.com']", "a[href*='login.microsoftonline']", "a[href*='login']", "a", "button", "[role='button']" };
 
         // --- Regex đa ngôn ngữ (vi/en), KHÔNG bám text EN cứng ---
         private static readonly Regex VerifyEmailOptionRegex =
@@ -774,6 +777,8 @@ public class ShopeeLoginService
             new(@"^\s*(focused|ưu tiên|uu tien)\s*$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
         private static readonly Regex ConfirmLinkRegex =
             new(@"xác nhận|xac nhan|verify|confirm|đúng là tôi|dung la toi|yes,?\s*it'?s me", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        private static readonly Regex SignInRegex =
+            new(@"sign\s*in|đăng nhập|dang nhap", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         public async Task<ShopeePageState> DetectPageStateAsync(CancellationToken ct = default)
         {
@@ -875,12 +880,12 @@ public class ShopeeLoginService
                 // Chờ trang đổi (thường sang màn "đã gửi link xác minh, kiểm tra email").
                 await Task.Delay(rng.Next(2000, 5000), vct).ConfigureAwait(false);
 
-                // BƯỚC 2: mở tab Hotmail + đăng nhập.
+                // BƯỚC 2: mở tab mới vào THẲNG trang đăng nhập Microsoft rồi đăng nhập.
                 mailPage = await _context.NewPageAsync().ConfigureAwait(false);
-                L("Mở hộp thư Hotmail/Outlook để lấy mail xác minh...");
+                L("Mở trang đăng nhập Microsoft để lấy mail xác minh...");
                 try
                 {
-                    await mailPage.GotoAsync("https://outlook.live.com/mail/0/", new PageGotoOptions
+                    await mailPage.GotoAsync("https://login.microsoftonline.com/", new PageGotoOptions
                     {
                         WaitUntil = WaitUntilState.DOMContentLoaded,
                         Timeout = 60000
@@ -893,6 +898,19 @@ public class ShopeeLoginService
                     L("Không đăng nhập được hộp thư Hotmail/Outlook — bỏ qua verify.");
                     return false;
                 }
+
+                // Đăng nhập ở trang login xong → điều hướng vào HỘP THƯ Outlook để đọc mail (login.microsoftonline.com
+                // hạ cánh ở portal, không phải hộp thư). Nếu session đã có sẵn thì vào thẳng.
+                L("Vào hộp thư Outlook...");
+                try
+                {
+                    await mailPage.GotoAsync("https://outlook.live.com/mail/0/", new PageGotoOptions
+                    {
+                        WaitUntil = WaitUntilState.DOMContentLoaded,
+                        Timeout = 60000
+                    }).ConfigureAwait(false);
+                }
+                catch { /* nuốt lỗi điều hướng — bước dưới poll selector tự lo */ }
 
                 // BƯỚC 3+4: tìm mail Shopee mới nhất + mở + click link xác nhận.
                 if (!await OpenShopeeMailAndConfirmAsync(mailPage, page, log, rng, vct).ConfigureAwait(false))
@@ -967,8 +985,22 @@ public class ShopeeLoginService
             double mx = vp is not null ? vp.Width / 2.0 : 640;
             double my = vp is not null ? vp.Height / 2.0 : 360;
 
-            // 1) Username (chờ tối đa 15s — trang Microsoft có thể redirect vài nhịp).
-            var userField = await FindFirstVisibleByRectsAsync(mailPage, MsUserSelectors, 15000, ct).ConfigureAwait(false);
+            // 0) Có thể mở ra trang landing (chưa vào form nhập email) → bấm "Đăng nhập"/"Sign in" trước.
+            //    Thử tìm ô email nhanh (6s); không thấy mà có nút Đăng nhập thì bấm rồi tìm lại.
+            var userField = await FindFirstVisibleByRectsAsync(mailPage, MsUserSelectors, 6000, ct).ConfigureAwait(false);
+            if (userField is null)
+            {
+                var signIn = await FindVisibleByTextAsync(mailPage, MsSignInSelectors, SignInRegex, ct, 4000).ConfigureAwait(false);
+                if (signIn is not null)
+                {
+                    L("Chưa vào form đăng nhập — bấm 'Đăng nhập'...");
+                    (mx, my, _) = await TryHumanClickVisibleAsync(mailPage, signIn, mx, my, rng, ct).ConfigureAwait(false);
+                    await Task.Delay(rng.Next(1500, 3500), ct).ConfigureAwait(false);
+                }
+                userField = await FindFirstVisibleByRectsAsync(mailPage, MsUserSelectors, 15000, ct).ConfigureAwait(false);
+            }
+
+            // 1) Username (đã tìm ở bước 0; điền nếu thấy).
             if (userField is not null)
             {
                 L("Nhập email đăng nhập hộp thư...");
