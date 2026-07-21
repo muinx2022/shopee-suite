@@ -1447,6 +1447,25 @@ public class ShopeeLoginService
         {
             (mx, my) = await HumanMoveAndClickAsync(page, el, mx, my, rng, ct).ConfigureAwait(false);
 
+            // Ô có thể ĐÃ CÓ SẴN text (trình duyệt autofill / thông tin đã lưu sau khi bấm Save) → gõ đè sẽ NỐI
+            // vào text cũ. Xóa SẠCH ô trước khi gõ lại: ưu tiên FillAsync("") (clear chuẩn của Playwright); lỗi
+            // thì clear bằng phím (đã click nên focus đang ở ô → Ctrl+A chọn hết text TRONG ô rồi Delete).
+            try
+            {
+                await el.FillAsync("").ConfigureAwait(false);
+            }
+            catch
+            {
+                try
+                {
+                    await page.Keyboard.PressAsync("Control+A").ConfigureAwait(false);
+                    await Task.Delay(rng.Next(40, 100), ct).ConfigureAwait(false);
+                    await page.Keyboard.PressAsync("Delete").ConfigureAwait(false);
+                }
+                catch { /* bỏ qua — vẫn thử gõ ở dưới */ }
+            }
+            await Task.Delay(rng.Next(60, 160), ct).ConfigureAwait(false);
+
             foreach (var ch in text)
             {
                 ct.ThrowIfCancellationRequested();
