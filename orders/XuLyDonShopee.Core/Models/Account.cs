@@ -28,6 +28,13 @@ public class Account
     /// <summary>Địa chỉ lấy hàng mặc định (tỉnh/thành, chọn từ danh sách cố định trên form). Null = chưa chọn → app coi như Thanh Hóa.</summary>
     public string? PickupAddress { get; set; }
 
+    /// <summary>Hộp thư Hotmail/Outlook nhận mail xác minh của Shopee (tùy chọn). Có → khi Shopee bắt verify
+    /// đăng nhập, phiên tự mở hộp thư này để lấy mail xác nhận.</summary>
+    public string VerifyEmail { get; set; } = "";
+
+    /// <summary>Mật khẩu hộp thư Hotmail/Outlook xác minh (tùy chọn). Lưu dạng thường (đồng mức với Password).</summary>
+    public string VerifyEmailPassword { get; set; } = "";
+
     /// <summary>Trạng thái tài khoản.</summary>
     public AccountStatus Status { get; set; } = AccountStatus.ChuaKiemTra;
 

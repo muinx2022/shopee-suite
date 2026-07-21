@@ -342,6 +342,57 @@
                                     </StackPanel>
                                 </Border>
 
+                                <!-- Card: Email xác minh (hộp thư Hotmail/Outlook nhận mail verify của Shopee).
+                                     Layout giống card "THÔNG TIN ĐĂNG NHẬP": 2 cột Email xác minh | Mật khẩu email
+                                     (password có nút 👁 riêng bind ShowVerifyEmailPassword). Cả 2 ô tùy chọn. -->
+                                <Border Classes="card" Padding="20,16">
+                                    <StackPanel Spacing="12">
+                                        <TextBlock Classes="section" Text="EMAIL XÁC MINH" />
+
+                                        <Grid ColumnDefinitions="*,14,*">
+                                            <!-- Email xác minh -->
+                                            <StackPanel Grid.Column="0">
+                                                <TextBlock Classes="fieldLabel" Text="Email xác minh" />
+                                                <Border Classes="field" Height="38">
+                                                    <Grid>
+                                                        <TextBox Classes="bare" Margin="12,0"
+                                                                 Text="{Binding EditVerifyEmail}"
+                                                                 Watermark="hộp thư Hotmail/Outlook" />
+                                                        <Border Classes="underline" />
+                                                    </Grid>
+                                                </Border>
+                                            </StackPanel>
+                                            <!-- Mật khẩu email -->
+                                            <StackPanel Grid.Column="2">
+                                                <TextBlock Classes="fieldLabel" Text="Mật khẩu email" />
+                                                <Border Classes="field" Height="38">
+                                                    <Grid ColumnDefinitions="*,Auto">
+                                                        <TextBox Grid.Column="0" Classes="bare" Margin="12,0,0,0"
+                                                                 Text="{Binding EditVerifyEmailPassword}"
+                                                                 PasswordChar="●"
+                                                                 RevealPassword="{Binding ShowVerifyEmailPassword}" />
+                                                        <Button Grid.Column="1" Classes="ghostIcon" Margin="4,0,5,0"
+                                                                Command="{Binding ToggleShowVerifyEmailPasswordCommand}"
+                                                                ToolTip.Tip="Hiện/ẩn mật khẩu email">
+                                                            <Panel>
+                                                                <TextBlock Text="👁" FontSize="14"
+                                                                           IsVisible="{Binding !ShowVerifyEmailPassword}" />
+                                                                <TextBlock Text="🙈" FontSize="14"
+                                                                           IsVisible="{Binding ShowVerifyEmailPassword}" />
+                                                            </Panel>
+                                                        </Button>
+                                                        <Border Classes="underline" Grid.ColumnSpan="2" />
+                                                    </Grid>
+                                                </Border>
+                                            </StackPanel>
+                                        </Grid>
+
+                                        <TextBlock Foreground="{StaticResource TextMuted}" FontSize="11"
+                                                   TextWrapping="Wrap"
+                                                   Text="Hộp thư Hotmail/Outlook nhận mail xác minh khi Shopee yêu cầu verify đăng nhập." />
+                                    </StackPanel>
+                                </Border>
+
                                 <!-- (Card "PROXY — API key KiotProxy" đã bỏ: proxy nay tự chia từ pool KiotProxy
                                      chung khi chạy, không gán cố định theo tài khoản nữa.) -->
 

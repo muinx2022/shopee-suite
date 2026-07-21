@@ -72,6 +72,8 @@ CREATE TABLE IF NOT EXISTS accounts (
     Note       TEXT,
     ProxyKey   TEXT,
     PickupAddress TEXT,
+    VerifyEmail TEXT,
+    VerifyEmailPassword TEXT,
     Status     TEXT NOT NULL,
     CreatedAt  TEXT NOT NULL,
     UpdatedAt  TEXT NOT NULL
@@ -130,6 +132,10 @@ CREATE TABLE IF NOT EXISTS orders (
         // thêm cột mới bằng ALTER TABLE ADD COLUMN (không phá dữ liệu người dùng đang có).
         EnsureColumn(conn, "accounts", "ProxyKey", "TEXT");
         EnsureColumn(conn, "accounts", "PickupAddress", "TEXT");
+
+        // Hộp thư Hotmail/Outlook nhận mail xác minh Shopee + mật khẩu hộp thư — thêm cho DB CŨ (chưa có 2 cột).
+        EnsureColumn(conn, "accounts", "VerifyEmail", "TEXT");
+        EnsureColumn(conn, "accounts", "VerifyEmailPassword", "TEXT");
 
         // "Số tiền cuối cùng" lấy từ trang chi tiết đơn (cột "Ước tính" ở màn Đơn hàng) — thêm cho DB CŨ đã
         // có bảng orders (kiểm cột tồn tại trước khi ALTER, không phá dữ liệu sẵn có).

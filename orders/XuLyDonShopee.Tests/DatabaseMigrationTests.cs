@@ -169,6 +169,8 @@ CREATE TABLE orders (
         Assert.Null(ex);
         Assert.True(HasColumn(temp.Path, "accounts", "ProxyKey"));
         Assert.True(HasColumn(temp.Path, "accounts", "PickupAddress"));
+        Assert.True(HasColumn(temp.Path, "accounts", "VerifyEmail"));
+        Assert.True(HasColumn(temp.Path, "accounts", "VerifyEmailPassword"));
     }
 
     [Fact]
@@ -211,6 +213,55 @@ CREATE TABLE orders (
         repo.Update(acc);
 
         Assert.Equal("Hà Nội", repo.GetById(acc.Id)!.PickupAddress);
+    }
+
+    // ===================== Migration 2 cột VerifyEmail / VerifyEmailPassword cho bảng accounts =====================
+
+    [Fact]
+    public void KhoiTao_DbCu_ThieuVerifyEmail_DuocThemCot_KhongMatDuLieu()
+    {
+        using var temp = new TempDatabase();
+        CreateOldSchemaWithRow(temp.Path, "old@x.com");
+
+        // Trước migration: schema cũ chưa có 2 cột email xác minh.
+        Assert.False(HasColumn(temp.Path, "accounts", "VerifyEmail"));
+        Assert.False(HasColumn(temp.Path, "accounts", "VerifyEmailPassword"));
+
+        // Khởi tạo Database mới trỏ cùng file → Initialize() chạy migration.
+        _ = new Database(temp.Path);
+
+        // Sau migration: đã có 2 cột.
+        Assert.True(HasColumn(temp.Path, "accounts", "VerifyEmail"));
+        Assert.True(HasColumn(temp.Path, "accounts", "VerifyEmailPassword"));
+
+        // Dữ liệu cũ CÒN NGUYÊN; email xác minh mặc định "" (Map null → "").
+        var repo = new AccountRepository(new Database(temp.Path));
+        var all = repo.GetAll();
+        Assert.Single(all);
+        var acc = all[0];
+        Assert.Equal("old@x.com", acc.Email);
+        Assert.Equal("cookie-cu", acc.Cookie);
+        Assert.Equal(AccountStatus.HoatDong, acc.Status);
+        Assert.Equal("", acc.VerifyEmail);
+        Assert.Equal("", acc.VerifyEmailPassword);
+    }
+
+    [Fact]
+    public void KhoiTao_DbCu_SauMigration_GhiDocVerifyEmailBinhThuong()
+    {
+        using var temp = new TempDatabase();
+        CreateOldSchemaWithRow(temp.Path, "old@x.com");
+
+        var repo = new AccountRepository(new Database(temp.Path)); // migration chạy tại đây
+        var acc = repo.GetAll()[0];
+
+        acc.VerifyEmail = "verify@hotmail.com";
+        acc.VerifyEmailPassword = "mkemail";
+        repo.Update(acc);
+
+        var reloaded = repo.GetById(acc.Id)!;
+        Assert.Equal("verify@hotmail.com", reloaded.VerifyEmail);
+        Assert.Equal("mkemail", reloaded.VerifyEmailPassword);
     }
 
     // ===================== Migration cột final_amount cho bảng orders =====================

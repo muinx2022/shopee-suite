@@ -1,7 +1,7 @@
 # Plan: Tự động login Shopee + verify qua email Hotmail + xử lý captcha (module Đơn hàng)
 
 - **Ngày:** 2026-07-21
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành (code + test; luồng verify/captcha thật chưa chạy tay — chờ chạy thử với tài khoản thật)
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-dev`)
 
 ## 1. Bối cảnh & mục tiêu
@@ -148,4 +148,45 @@ Sửa đoạn sau `OpenAsync` (~1306) trong vòng relaunch:
 
 ## Báo cáo thực thi (Opus điền sau khi xong)
 
-<chưa có>
+**Trạng thái:** đã code xong 5 bước + build 3 project xanh + 774 test pass. Chưa chạy tay với tài khoản thật (cần môi trường có Shopee/Hotmail thật — xem mục "kiểm bằng chạy tay").
+
+### File đã sửa/tạo
+
+**Bước 1 — DB + model + repo + form + test**
+- `orders/XuLyDonShopee.Core/Models/Account.cs` — thêm 2 property `VerifyEmail` / `VerifyEmailPassword` (kiểu `string`, mặc định `""`, có doc-comment).
+- `orders/XuLyDonShopee.Core/Data/Database.cs` — thêm 2 cột vào CREATE TABLE accounts + 2 `EnsureColumn(conn,"accounts","VerifyEmail"/"VerifyEmailPassword","TEXT")`.
+- `orders/XuLyDonShopee.Core/Data/AccountRepository.cs` — cập nhật 5 chỗ: SELECT (GetAll + GetById), INSERT, UPDATE, BindWritableFields (bind `a.VerifyEmail ?? ""`), Map (chỉ số dịch: VerifyEmail=8, VerifyEmailPassword=9, Status=10, CreatedAt=11, UpdatedAt=12; null → `""`).
+- `orders/XuLyDonShopee.App/ViewModels/AccountsViewModel.cs` — thêm `[ObservableProperty] _editVerifyEmail`, `_editVerifyEmailPassword`, `_showVerifyEmailPassword` + `ToggleShowVerifyEmailPasswordCommand`; gán ở LoadIntoForm, reset ở ClearForm, đọc ở Save cả 2 nhánh (new + existing). Không validate (cho phép trống).
+- `orders/XuLyDonShopee.App/Views/AccountsView.axaml` — thêm card "EMAIL XÁC MINH" ngay dưới card "COOKIE ĐĂNG NHẬP": 2 cột Email xác minh | Mật khẩu email (password có nút 👁 bind `ShowVerifyEmailPassword`) + dòng chú thích TextMuted.
+- `orders/XuLyDonShopee.Tests/DatabaseMigrationTests.cs` — thêm 2 test migration (`KhoiTao_DbCu_ThieuVerifyEmail_DuocThemCot_KhongMatDuLieu`, `KhoiTao_DbCu_SauMigration_GhiDocVerifyEmailBinhThuong`) + bổ sung assert 2 cột mới vào test idempotent.
+- `orders/XuLyDonShopee.Tests/AccountRepositoryTests.cs` — thêm 3 test roundtrip (`Insert_CoVerifyEmail_...`, `Insert_KhongCoVerifyEmail_TraVeRong`, `Update_ThayDoiVerifyEmail_LuuDung_KhongLanChiSoCot`).
+
+**Bước 2 — phát hiện trạng thái trang**
+- `orders/XuLyDonShopee.Core/Services/ShopeePageState.cs` — MỚI: enum `ShopeePageState { LoggedIn, LoginForm, Verify, Captcha, Unknown }`.
+- `orders/XuLyDonShopee.Core/Services/ShopeeLoginService.cs` — thêm `DetectPageStateAsync` + `TryVerifyByEmailAsync` vào `ILoginSession`; cài `DetectPageStateAsync` trong `LoginSession` (URL captcha→Captcha; URL `/verify`→Verify; ô login hiển thị qua `getClientRects`→LoginForm; alert text otp/xác minh→Verify; cookie phiên→LoggedIn; còn lại Unknown; catch-all→Unknown không bao giờ ném).
+
+**Bước 3 — verify qua email Hotmail** (cùng file `ShopeeLoginService.cs`)
+- `TryVerifyByEmailAsync` + các helper riêng-tư: `LoginHotmailAsync`, `OpenShopeeMailAndConfirmAsync`, `ClickConfirmLinkInMailAsync`, `TryClickPivotAsync`, `FindShopeeMailRowAsync`, `IsAnyVisibleByClientRectsAsync`, `IsElementVisibleByClientRectsAsync`, `IsSelectorVisibleAsync`, `ReadAlertTextAsync`, `FindFirstVisibleByRectsAsync`, `FindVisibleByTextAsync`, `FindVisibleByTextInFramesAsync`; các mảng selector Microsoft/Outlook + regex vi/en. Cap tổng 4' bằng linked CTS (timeout nội bộ ≠ hủy người dùng — phân biệt ở catch); LUÔN đóng tab Hotmail (finally) + đóng tab xác nhận; KHÔNG log giá trị mật khẩu.
+
+**Bước 4 — điều phối** `orders/XuLyDonShopee.App/Services/AccountSession.cs`
+- Thêm `captchaResets`/`MaxCaptchaResets=2` (ngoài vòng relaunch) + `relaunchForCaptcha` (trong vòng). Thay khối `TryHumanLoginAsync` đơn lẻ bằng chuỗi: poll `DetectPageStateAsync` ~12s → LoginForm thì `TryHumanLoginAsync` + chờ 8s + detect lại → Verify thì `TryVerifyByEmailAsync` (nếu có cấu hình; thất bại/thiếu → log + giữ phiên) → Captcha thì `relaunchForCaptcha=true` (nếu còn lượt). Poll loop có thêm điều kiện `!relaunchForCaptcha`; sau finally (đã dispose = Brave chết) mới `ProfileJanitor.TryResetDirectory` + `continue` mở lại. `_readyForActions=true` ở MỌI nhánh trừ captcha-relaunch.
+
+### Kết quả build/test (nguyên văn)
+
+- `dotnet build orders/XuLyDonShopee.Core` → `Build succeeded. 0 Warning(s) 0 Error(s)`
+- `dotnet build orders/XuLyDonShopee.App` → `Build succeeded. 0 Warning(s) 0 Error(s)`
+- `dotnet test orders/XuLyDonShopee.Tests` → `Passed! - Failed: 0, Passed: 774, Skipped: 0, Total: 774`
+- `dotnet build suite/Shopee.Suite` → `Build succeeded. 0 Warning(s) 0 Error(s)`
+
+### Tiêu chí CHỈ kiểm được bằng chạy tay (chưa chạy)
+
+- Luồng end-to-end verify: trang verify Shopee → click "verify by email" → tab Hotmail login → tab "Khác" → mail Shopee → click xác nhận → về seller LoggedIn. **Chưa chạy tay** (cần tài khoản Shopee bị verify + hộp thư Hotmail thật). Selector Shopee-verify / Outlook viết dò linh hoạt nhiều selector + regex vi/en + timeout ngắn bỏ qua được + log DOM (title/url) khi không khớp để tinh chỉnh — nhưng câu chữ/DOM thật của trang verify seller Shopee và layout Outlook hiện tại CHƯA xác nhận, cần chạy thật soi log để tinh chỉnh selector nếu trượt.
+- Captcha thật: logic đã review (đóng browser qua DisposeAsync = kill Brave + WaitForExit TRƯỚC khi TryResetDirectory; đếm 2 lần; hết lượt giữ cửa sổ). Chưa ép được captcha thật để chạy tay.
+
+### Điểm tự chốt thêm ngoài plan (cần phiên chính soi)
+
+1. **DetectPageStateAsync có thêm tín hiệu phụ alert-text cho Verify** (otp/mã xác/xác minh) đặt SAU bước kiểm login-form — để không nhận nhầm alert "sai mật khẩu" trên form login thành Verify. Plan chỉ nêu URL `/verify`; mình thêm alert-text theo đúng "chép logic từ ShopeeAccountChecker" cho chắc.
+2. **Poll DetectPageStateAsync ~12s ở đầu điều phối** (thay vì detect 1 lần) — chống race SPA chưa render form login → nếu detect 1 lần trả Unknown thì sẽ KHÔNG auto-login (regression so với hôm nay, vì code cũ `TryHumanLoginAsync` tự poll ô login 5s). Poll tới khi state ≠ Unknown hoặc hết 12s. Hồ sơ đã login → trả LoggedIn ngay, không đợi.
+3. **Cap 4' bằng linked CTS trong TryVerifyByEmailAsync**: timeout nội bộ ném OCE nhưng được lọc `when (!ct.IsCancellationRequested)` → degrade `return false` (KHÔNG ném lên làm dừng oan cả phiên); chỉ OCE do người dùng Dừng mới ném xuyên.
+4. **Click link xác nhận trong mail dùng click MÙ (không hit-test)** vì link thường nằm trong iframe reading-pane của Outlook → `document.elementFromPoint` lệch hệ tọa độ giữa main-frame và iframe khiến hit-test luôn fail; thân mail đơn giản (không submenu/flyout đè) nên click thẳng an toàn. Dò link qua `FindVisibleByTextInFramesAsync` (quét mọi frame).
+5. **Regex "verify by email" = chỉ từ `email`** (case-insensitive) theo plan; ưu tiên selector cấu trúc (button/a/[role=button]) trước div → giảm khớp nhầm container mô tả. Nếu trang verify seller Shopee dùng câu chữ khác (vd chỉ "Liên kết Email") vẫn khớp; nếu không có từ "email" (khó xảy ra) sẽ trượt và log DOM.

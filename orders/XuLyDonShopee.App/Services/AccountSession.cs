@@ -1263,6 +1263,10 @@ public partial class AccountSession : ObservableObject, IAccountSession
             // & đổi trong vài phút — tránh trang bán hàng chết tới ~10' rồi người dùng phải Dừng/mở lại tay).
             var proxyRng = new Random();
             bool firstOpen = true;
+            // Captcha-retry: đếm số lần đã đóng phiên + xóa hồ sơ + mở lại vì gặp captcha (tối đa 2 → tổng 3
+            // lượt thử). Đặt NGOÀI vòng relaunch để đếm qua các lần mở lại.
+            int captchaResets = 0;
+            const int MaxCaptchaResets = 2;
             // Chốt chặn TUYỆT ĐỐI: cap an toàn 12h tính từ ĐẦU phiên, áp cho MỌI lần relaunch (KHÔNG reset mỗi
             // lần mở lại). Tín hiệu kết thúc CHÍNH vẫn là "không còn cửa sổ nào".
             var hardCap = DateTime.UtcNow.AddHours(12);
@@ -1280,6 +1284,8 @@ public partial class AccountSession : ObservableObject, IAccountSession
             while (!ct.IsCancellationRequested)
             {
                 bool relaunchForProxy = false;
+                // Gặp captcha ở lần mở này → sau khi dispose sẽ xóa hồ sơ + mở lại (đếm bởi captchaResets).
+                bool relaunchForCaptcha = false;
                 // ĐẦU MỖI vòng mở/relaunch: CHƯA sẵn sàng — phải đăng nhập lại + đọc số lần đầu mới bật lại
                 // (kín cả đường proxy-chết-relaunch: ToShipCount giữ số cũ nhưng cờ này về false).
                 _readyForActions = false;
@@ -1319,22 +1325,101 @@ public partial class AccountSession : ObservableObject, IAccountSession
 
                 try
                 {
-                    // 4) Tự đăng nhập KIỂU NGƯỜI bằng user/password của tài khoản này. Graceful: đã đăng nhập
-                    //    sẵn / không thấy ô → bỏ qua. (Relaunch khi đã login trong hồ sơ → thường no-op.)
-                    if (acc is not null && !string.IsNullOrEmpty(acc.Password))
+                    // 4) ĐIỀU PHỐI đăng nhập: phát hiện trạng thái trang → tự login (form) / xác minh qua email
+                    //    (verify) / né captcha (đóng+xóa hồ sơ+mở lại). Áp cho MỌI đường mở phiên (Sync, Sync đã
+                    //    chọn, Chạy tự động). MỌI nhánh degrade PHẢI bật _readyForActions (kẻo WaitForSessionReady
+                    //    treo 5'); riêng nhánh captcha-relaunch KHÔNG bật (phiên sắp tháo dỡ + mở lại).
+                    if (acc is not null)
                     {
-                        SetStatus(SessionState.Running, "Đang tự đăng nhập (kiểu người)...");
-                        try { await session.TryHumanLoginAsync(acc.Email, acc.Password, ct).ConfigureAwait(false); }
-                        catch { /* không phá luồng — người dùng tự nhập tay nếu cần */ }
+                        var loginLog = (Action<string>)(m => _services.Log.Append(_logLabel, m));
+
+                        // Chờ trạng thái trang rõ ràng (SPA có thể còn render) — poll tối đa ~12s; Unknown quá lâu
+                        // → đi tiếp như hôm nay. Hồ sơ đã đăng nhập → DetectPageStateAsync trả LoggedIn ngay (không đợi).
+                        var state = ShopeePageState.Unknown;
+                        var detectDeadline = DateTime.UtcNow.AddSeconds(12);
+                        do
+                        {
+                            state = await session.DetectPageStateAsync(ct).ConfigureAwait(false);
+                            if (state != ShopeePageState.Unknown) break;
+                            await Task.Delay(700, ct).ConfigureAwait(false);
+                        }
+                        while (DateTime.UtcNow < detectDeadline);
+
+                        // a) Form đăng nhập → tự điền user/pass (KIỂU NGƯỜI) rồi chờ trang đổi, phát hiện lại.
+                        if (state == ShopeePageState.LoginForm && !string.IsNullOrEmpty(acc.Password))
+                        {
+                            SetStatus(SessionState.Running, "Đang tự đăng nhập (kiểu người)...");
+                            try { await session.TryHumanLoginAsync(acc.Email, acc.Password, ct).ConfigureAwait(false); }
+                            catch (OperationCanceledException) { throw; }
+                            catch { /* không phá luồng — người dùng tự nhập tay nếu cần */ }
+
+                            await Task.Delay(8000, ct).ConfigureAwait(false); // chờ sau bấm đăng nhập
+                            state = await session.DetectPageStateAsync(ct).ConfigureAwait(false);
+                        }
+
+                        // b) Trang verify → tự xác minh qua email Hotmail (nếu có cấu hình); thiếu cấu hình/thất
+                        //    bại → GIỮ phiên như hôm nay (người dùng verify tay), vẫn bật sẵn sàng ở dưới.
+                        if (state == ShopeePageState.Verify)
+                        {
+                            if (!string.IsNullOrWhiteSpace(acc.VerifyEmail) && !string.IsNullOrWhiteSpace(acc.VerifyEmailPassword))
+                            {
+                                SetStatus(SessionState.Running, "Shopee yêu cầu xác minh — đang tự xác minh qua email...");
+                                bool verified;
+                                try { verified = await session.TryVerifyByEmailAsync(acc.VerifyEmail, acc.VerifyEmailPassword, loginLog, ct).ConfigureAwait(false); }
+                                catch (OperationCanceledException) { throw; }
+                                catch { verified = false; }
+
+                                if (verified)
+                                {
+                                    state = await session.DetectPageStateAsync(ct).ConfigureAwait(false);
+                                }
+                                else
+                                {
+                                    _services.Log.Append(_logLabel,
+                                        "Không tự xác minh qua email được — GIỮ cửa sổ để bạn xác minh tay.");
+                                }
+                            }
+                            else
+                            {
+                                _services.Log.Append(_logLabel,
+                                    "Shopee yêu cầu xác minh nhưng chưa cấu hình Email xác minh cho tài khoản — " +
+                                    "hãy xác minh tay hoặc thêm Email xác minh ở màn Tài khoản.");
+                            }
+                        }
+
+                        // c) Trang captcha → đóng phiên, xóa hồ sơ, mở lại (tối đa MaxCaptchaResets lần).
+                        if (state == ShopeePageState.Captcha)
+                        {
+                            if (captchaResets < MaxCaptchaResets)
+                            {
+                                captchaResets++;
+                                _services.Log.Append(_logLabel,
+                                    $"Gặp captcha — đóng phiên, xóa hồ sơ trình duyệt, thử lại (lần {captchaResets}/{MaxCaptchaResets}).");
+                                SetStatus(SessionState.Running, $"Gặp captcha — đổi hồ sơ, mở lại (lần {captchaResets}/{MaxCaptchaResets})...");
+                                relaunchForCaptcha = true;
+                            }
+                            else
+                            {
+                                _services.Log.Append(_logLabel,
+                                    $"Captcha lặp lại sau {MaxCaptchaResets} lần xóa hồ sơ — GIỮ cửa sổ để bạn xử lý tay.");
+                            }
+                        }
                     }
 
-                    // Sau khi đăng nhập xong → trang chủ đã ổn định, BẬT sẵn sàng ngay để nút Sync/Kiểm tra hàng loạt
-                    // không phải đợi chu kỳ đọc đơn lần đầu (có thể tới 30 phút theo cấu hình).
-                    _readyForActions = true;
+                    // Sau điều phối: nhánh KHÔNG relaunch-captcha → BẬT sẵn sàng ngay (kể cả degrade verify/
+                    // captcha-hết-lượt) để nút Sync/Kiểm tra hàng loạt không đợi chu kỳ đọc đơn lần đầu; nhánh
+                    // captcha-relaunch → KHÔNG bật, rơi xuống finally dispose rồi reset hồ sơ + mở lại.
+                    if (!relaunchForCaptcha)
+                    {
+                        _readyForActions = true;
+                    }
 
                     // 5) Tự bắt & lưu cookie trong lúc cửa sổ mở; kết thúc khi người dùng đóng hết cửa sổ.
-                    SetStatus(SessionState.Running,
-                        $"Đã mở trình duyệt. Đăng nhập xong app sẽ tự theo dõi đơn mỗi {orderIntervalMin}'; đóng cửa sổ để dừng.");
+                    if (!relaunchForCaptcha)
+                    {
+                        SetStatus(SessionState.Running,
+                            $"Đã mở trình duyệt. Đăng nhập xong app sẽ tự theo dõi đơn mỗi {orderIntervalMin}'; đóng cửa sổ để dừng.");
+                    }
                     if (firstOpen)
                     {
                         ToShipCount = null; // reset CHỈ ở lần mở đầu; relaunch giữ số cũ (nhịp đọc đơn tự làm mới).
@@ -1350,7 +1435,9 @@ public partial class AccountSession : ObservableObject, IAccountSession
                     // Nhịp watchdog proxy: kiểm proxy đang gán còn sống không, jitter 2–3' (hồi nhanh khi proxy xoay).
                     var nextProxyCheck = DateTime.UtcNow.AddSeconds(proxyRng.Next(120, 180));
 
-                    while (!session.IsClosed && DateTime.UtcNow < hardCap && !ct.IsCancellationRequested)
+                    // relaunchForCaptcha → BỎ QUA vòng poll (điều kiện false ngay ở entry): xuống finally dispose,
+                    // rồi reset hồ sơ + mở lại ở dưới.
+                    while (!relaunchForCaptcha && !session.IsClosed && DateTime.UtcNow < hardCap && !ct.IsCancellationRequested)
                     {
                         await Task.WhenAny(session.Closed, Task.Delay(PollMs, ct)).ConfigureAwait(false);
 
@@ -1471,9 +1558,9 @@ public partial class AccountSession : ObservableObject, IAccountSession
                     }
                     catch { /* browser đã chết hẳn — bỏ qua */ }
 
-                    // Kết quả trung thực (KHÔNG khẳng định "chưa đăng nhập"). Relaunch đổi proxy → GIỮ status
-                    // "đang đổi proxy" (đã đặt ở trên), KHÔNG đè bằng câu tổng kết.
-                    if (!relaunchForProxy)
+                    // Kết quả trung thực (KHÔNG khẳng định "chưa đăng nhập"). Relaunch đổi proxy / né captcha →
+                    // GIỮ status đã đặt ở trên, KHÔNG đè bằng câu tổng kết.
+                    if (!relaunchForProxy && !relaunchForCaptcha)
                     {
                         StatusText = lastSaved != null
                             ? "Đã lưu cookie đăng nhập vào tài khoản."
@@ -1488,6 +1575,17 @@ public partial class AccountSession : ObservableObject, IAccountSession
                     {
                         _session = null;
                     }
+                }
+
+                // Gặp captcha → phiên ĐÃ dispose ở finally (Brave chết + WaitForExit) → an toàn xóa hồ sơ, rồi
+                // mở lại từ đầu (chuỗi detect/login lại chạy lại). Xóa thất bại (khóa) → degrade êm: janitor đã
+                // retry + log, vẫn mở lại với hồ sơ cũ (không chặn — nhưng thường captcha lại).
+                if (relaunchForCaptcha)
+                {
+                    var log = (Action<string>)(m => _services.Log.Append(_logLabel, m));
+                    ProfileJanitor.TryResetDirectory(userDataDir, log);
+                    firstOpen = false; // vòng sau coi như relaunch (settle + retry mở như đường proxy)
+                    continue;
                 }
 
                 if (!relaunchForProxy)

@@ -158,6 +158,14 @@ public partial class AccountsViewModel : ViewModelBase
     [ObservableProperty]
     private string _editPickupAddress = DefaultPickupAddress;
 
+    /// <summary>Email xác minh (hộp thư Hotmail/Outlook nhận mail xác minh Shopee — để trống = không dùng).</summary>
+    [ObservableProperty]
+    private string _editVerifyEmail = string.Empty;
+
+    /// <summary>Mật khẩu hộp thư email xác minh (để trống = không dùng).</summary>
+    [ObservableProperty]
+    private string _editVerifyEmailPassword = string.Empty;
+
     [ObservableProperty]
     private AccountStatus _editStatus = AccountStatus.ChuaKiemTra;
 
@@ -172,6 +180,10 @@ public partial class AccountsViewModel : ViewModelBase
 
     [ObservableProperty]
     private bool _showPassword;
+
+    /// <summary>Hiện/ẩn mật khẩu email xác minh (nút 👁 riêng của card "EMAIL XÁC MINH").</summary>
+    [ObservableProperty]
+    private bool _showVerifyEmailPassword;
 
     /// <summary>Dòng hướng dẫn/trạng thái hiển thị (đổ từ phiên của tài khoản đang chọn; null = ẩn).</summary>
     [ObservableProperty]
@@ -523,6 +535,8 @@ public partial class AccountsViewModel : ViewModelBase
                 Note = NullIfEmpty(EditNote),
                 ProxyKey = NullIfEmpty(EditProxyKey),
                 PickupAddress = EditPickupAddress,
+                VerifyEmail = EditVerifyEmail?.Trim() ?? "",
+                VerifyEmailPassword = EditVerifyEmailPassword ?? "",
                 Status = EditStatus
             };
             _services.Accounts.Insert(account);
@@ -545,6 +559,8 @@ public partial class AccountsViewModel : ViewModelBase
             existing.Note = NullIfEmpty(EditNote);
             existing.ProxyKey = NullIfEmpty(EditProxyKey);
             existing.PickupAddress = EditPickupAddress;
+            existing.VerifyEmail = EditVerifyEmail?.Trim() ?? "";
+            existing.VerifyEmailPassword = EditVerifyEmailPassword ?? "";
             existing.Status = EditStatus;
             _services.Accounts.Update(existing);
             account = existing;
@@ -667,6 +683,9 @@ public partial class AccountsViewModel : ViewModelBase
 
     [RelayCommand]
     private void ToggleShowPassword() => ShowPassword = !ShowPassword;
+
+    [RelayCommand]
+    private void ToggleShowVerifyEmailPassword() => ShowVerifyEmailPassword = !ShowVerifyEmailPassword;
 
     /// <summary>Dừng phiên của tài khoản đang chọn (đóng &amp; kill Brave của phiên đó, không ảnh hưởng phiên khác).</summary>
     [RelayCommand]
@@ -1118,11 +1137,14 @@ public partial class AccountsViewModel : ViewModelBase
         EditPickupAddress = PickupAddressOptions.Contains(a.PickupAddress ?? "")
             ? a.PickupAddress!
             : DefaultPickupAddress;
+        EditVerifyEmail = a.VerifyEmail ?? string.Empty;
+        EditVerifyEmailPassword = a.VerifyEmailPassword ?? string.Empty;
         EditStatus = a.Status;
         CreatedAtText = FormatDate(a.CreatedAt);
         UpdatedAtText = FormatDate(a.UpdatedAt);
         ErrorMessage = null;
         ShowPassword = false;
+        ShowVerifyEmailPassword = false;
         UpdateSelectedSessionStatus();
     }
 
@@ -1136,11 +1158,14 @@ public partial class AccountsViewModel : ViewModelBase
         EditNote = string.Empty;
         EditProxyKey = string.Empty;
         EditPickupAddress = DefaultPickupAddress;
+        EditVerifyEmail = string.Empty;
+        EditVerifyEmailPassword = string.Empty;
         EditStatus = AccountStatus.ChuaKiemTra;
         CreatedAtText = null;
         UpdatedAtText = null;
         ErrorMessage = null;
         ShowPassword = false;
+        ShowVerifyEmailPassword = false;
         UpdateSelectedSessionStatus();
     }
 

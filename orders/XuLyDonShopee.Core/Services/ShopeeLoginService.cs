@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Microsoft.Playwright;
 using XuLyDonShopee.Core.Models;
 
@@ -44,6 +45,32 @@ public interface ILoginSession : IAsyncDisposable
     /// </para>
     /// </summary>
     Task<bool> TryHumanLoginAsync(string user, string password, CancellationToken ct = default);
+
+    /// <summary>
+    /// <b>Phát hiện trạng thái trang bán hàng</b> sau khi mở seller URL: đã đăng nhập / form đăng nhập /
+    /// trang verify / trang captcha / không rõ. Ưu tiên theo URL (captcha, <c>/verify</c>), rồi ô đăng nhập
+    /// hiển thị (kiểm <c>getClientRects</c>), rồi cookie phiên. Dùng để điều phối auto-login → verify →
+    /// captcha-retry ở tầng App.
+    /// <para><b>Graceful — không bao giờ ném:</b> không có trang / lỗi bất kỳ → <see cref="ShopeePageState.Unknown"/>.</para>
+    /// </summary>
+    Task<ShopeePageState> DetectPageStateAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// <b>Xác minh đăng nhập qua email Hotmail/Outlook</b> khi Shopee bắt verify: (1) trên trang verify
+    /// Shopee click lựa chọn "verify qua email"; (2) mở TAB MỚI đăng nhập hộp thư Hotmail/Outlook
+    /// (username → "Use your password" → password → "Stay signed in?" Yes) — mọi bước dò nhiều selector,
+    /// timeout ngắn bỏ qua được, KHÔNG fail cứng; (3) vào hộp thư, ưu tiên tab "Khác"/"Other", tìm mail
+    /// Shopee MỚI NHẤT, mở mail rồi click link/nút xác nhận (bắt tab mới nếu link mở tab), đóng tab;
+    /// (4) quay lại tab seller, chờ trạng thái về <see cref="ShopeePageState.LoggedIn"/>.
+    /// <para>
+    /// <b>Graceful — không bao giờ ném (trừ hủy):</b> thiếu cấu hình / không tìm được lựa chọn / login mail
+    /// lỗi / không thấy mail / hết thời gian → <c>false</c> (caller giữ phiên cho người dùng verify tay).
+    /// Trả <c>true</c> khi seller đã về LoggedIn sau khi click xác nhận. LUÔN đóng các tab đã mở (finally),
+    /// KHÔNG log giá trị mật khẩu. Mọi bước ghi qua <paramref name="log"/> để theo dõi trên panel nhật ký.
+    /// </para>
+    /// </summary>
+    Task<bool> TryVerifyByEmailAsync(
+        string verifyEmail, string verifyEmailPassword, Action<string>? log = null, CancellationToken ct = default);
 
     /// <summary>
     /// Đọc số đơn <b>"Chờ Lấy Hàng"</b> trong to-do box của trang bán hàng (Seller Centre).
@@ -709,6 +736,640 @@ public class ShopeeLoginService
                 // Bất kỳ lỗi nào → bỏ qua, để người dùng tự thao tác (KHÔNG phá luồng).
                 return false;
             }
+        }
+
+        // ===================== Phát hiện trạng thái trang + verify qua email Hotmail =====================
+
+        // Selector ô đăng nhập Shopee dùng để NHẬN DIỆN "đang ở form login" (CỤ THỂ, không dùng input[type=text]
+        // chung — trang bán hàng đã đăng nhập có ô tìm kiếm sẽ nhận nhầm). Kiểm hiển thị bằng getClientRects.
+        private static readonly string[] LoginFormDetectSelectors =
+        {
+            "input[name='loginKey']",
+            "input[name='password']",
+            "input[type='password']",
+        };
+
+        // --- Selector đăng nhập Microsoft/Outlook (đổi thường xuyên → luôn nhiều fallback, timeout ngắn bỏ qua được) ---
+        private static readonly string[] MsUserSelectors =
+            { "input[type='email']", "input[name='loginfmt']", "#i0116" };
+        private static readonly string[] MsPasswordSelectors =
+            { "input[name='passwd']", "input[type='password']", "#i0118" };
+        private static readonly string[] MsSubmitSelectors =
+            { "#idSIButton9", "input[type='submit']", "button[type='submit']" };
+        private static readonly string[] MsUsePasswordSelectors =
+            { "#idA_PWD_SwitchToPassword", "a", "[role='button']", "button", "span" };
+        private static readonly string[] MsKmsiYesSelectors =
+            { "#acceptButton", "#idSIButton9", "button[type='submit']" };
+
+        // --- Regex đa ngôn ngữ (vi/en), KHÔNG bám text EN cứng ---
+        private static readonly Regex VerifyEmailOptionRegex =
+            new("email", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        private static readonly Regex UsePasswordRegex =
+            new(@"use.*password|dùng mật khẩu|sử dụng mật khẩu|mật khẩu|mat khau", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        private static readonly Regex ShopeeSenderRegex =
+            new("shopee", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        private static readonly Regex OtherPivotRegex =
+            new(@"^\s*(other|khác|khac)\s*$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        private static readonly Regex FocusedPivotRegex =
+            new(@"^\s*(focused|ưu tiên|uu tien)\s*$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        private static readonly Regex ConfirmLinkRegex =
+            new(@"xác nhận|xac nhan|verify|confirm|đúng là tôi|dung la toi|yes,?\s*it'?s me", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+        public async Task<ShopeePageState> DetectPageStateAsync(CancellationToken ct = default)
+        {
+            try
+            {
+                var page = _context.Pages.Count > 0 ? _context.Pages[0] : null;
+                if (page is null)
+                {
+                    return ShopeePageState.Unknown;
+                }
+
+                // 1) URL trước: cookie phiên có thể CÒN mà vẫn bị bắt verify/captcha (chép logic từ
+                //    ShopeeAccountChecker.WaitOutcomeAsync, điều chỉnh cho seller site).
+                var url = (page.Url ?? string.Empty).ToLowerInvariant();
+                if (url.Contains("captcha"))
+                {
+                    return ShopeePageState.Captcha;
+                }
+                if (url.Contains("/verify"))
+                {
+                    return ShopeePageState.Verify;
+                }
+
+                // 2) Form đăng nhập: ô user/pass HIỂN THỊ (kiểm getClientRects — KHÔNG offsetParent).
+                if (await IsAnyVisibleByClientRectsAsync(page, LoginFormDetectSelectors, ct).ConfigureAwait(false))
+                {
+                    return ShopeePageState.LoginForm;
+                }
+
+                // 3) Không ở form login mà có alert xác minh (otp/mã xác/xác minh) → Verify (tín hiệu phụ).
+                var alert = (await ReadAlertTextAsync(page).ConfigureAwait(false)).ToLowerInvariant();
+                if (alert.Contains("otp") || alert.Contains("mã xác") || alert.Contains("ma xac")
+                    || alert.Contains("xác minh") || alert.Contains("xac minh"))
+                {
+                    return ShopeePageState.Verify;
+                }
+
+                // 4) Cookie phiên đăng nhập → LoggedIn; còn lại Unknown.
+                if (ShopeeLoginCookies.IsLoggedIn(await CaptureCookiesJsonAsync().ConfigureAwait(false)))
+                {
+                    return ShopeePageState.LoggedIn;
+                }
+
+                return ShopeePageState.Unknown;
+            }
+            catch
+            {
+                // Không bao giờ ném (kể cả hủy) — trả Unknown, caller đọc ct riêng để dừng.
+                return ShopeePageState.Unknown;
+            }
+        }
+
+        public async Task<bool> TryVerifyByEmailAsync(
+            string verifyEmail, string verifyEmailPassword, Action<string>? log = null, CancellationToken ct = default)
+        {
+            void L(string m) => log?.Invoke(m);
+
+            if (string.IsNullOrWhiteSpace(verifyEmail) || string.IsNullOrWhiteSpace(verifyEmailPassword))
+            {
+                L("Chưa cấu hình Email xác minh cho tài khoản — bỏ qua verify tự động (verify tay).");
+                return false;
+            }
+
+            var page = _context.Pages.Count > 0 ? _context.Pages[0] : null;
+            if (page is null)
+            {
+                return false;
+            }
+
+            // Cap tổng ~4 phút (linh hoạt): timeout NỘI BỘ khác HỦY của người dùng — phân biệt ở khối catch dưới.
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeoutCts.CancelAfter(TimeSpan.FromMinutes(4));
+            var vct = timeoutCts.Token;
+
+            var rng = new Random();
+            IPage? mailPage = null;
+            try
+            {
+                // BƯỚC 1: trên trang verify Shopee, click lựa chọn "xác minh qua email".
+                var emailOption = await FindVisibleByTextAsync(
+                    page, new[] { "button", "a", "[role='button']", "label", "li", "div[class*='item']", "div[class*='option']" },
+                    VerifyEmailOptionRegex, vct, 8000).ConfigureAwait(false);
+                if (emailOption is null)
+                {
+                    // Log DOM đoạn quyết định để lần sau tinh chỉnh nhanh (title/url).
+                    string diag;
+                    try { diag = $"title=[{await page.TitleAsync().ConfigureAwait(false)}], url={page.Url}"; }
+                    catch { diag = $"url={page.Url}"; }
+                    L("Không tìm thấy lựa chọn 'xác minh qua email' trên trang verify — bỏ qua. " + diag);
+                    return false;
+                }
+
+                L("Chọn phương thức xác minh qua email...");
+                var vp = page.ViewportSize;
+                double mx = vp is not null ? vp.Width / 2.0 : 640;
+                double my = vp is not null ? vp.Height / 2.0 : 360;
+                (mx, my, _) = await TryHumanClickVisibleAsync(page, emailOption, mx, my, rng, vct).ConfigureAwait(false);
+
+                // Chờ trang đổi (thường sang màn "đã gửi link xác minh, kiểm tra email").
+                await Task.Delay(rng.Next(2000, 5000), vct).ConfigureAwait(false);
+
+                // BƯỚC 2: mở tab Hotmail + đăng nhập.
+                mailPage = await _context.NewPageAsync().ConfigureAwait(false);
+                L("Mở hộp thư Hotmail/Outlook để lấy mail xác minh...");
+                try
+                {
+                    await mailPage.GotoAsync("https://outlook.live.com/mail/0/", new PageGotoOptions
+                    {
+                        WaitUntil = WaitUntilState.DOMContentLoaded,
+                        Timeout = 60000
+                    }).ConfigureAwait(false);
+                }
+                catch { /* nuốt lỗi điều hướng — các bước dưới poll selector tự lo */ }
+
+                if (!await LoginHotmailAsync(mailPage, verifyEmail, verifyEmailPassword, log, rng, vct).ConfigureAwait(false))
+                {
+                    L("Không đăng nhập được hộp thư Hotmail/Outlook — bỏ qua verify.");
+                    return false;
+                }
+
+                // BƯỚC 3+4: tìm mail Shopee mới nhất + mở + click link xác nhận.
+                if (!await OpenShopeeMailAndConfirmAsync(mailPage, page, log, rng, vct).ConfigureAwait(false))
+                {
+                    L("Không tìm/không mở được mail xác minh Shopee — bỏ qua.");
+                    return false;
+                }
+
+                // BƯỚC 5: quay lại tab seller, reload, chờ LoggedIn tối đa 90s.
+                L("Đã click xác nhận trong mail — quay lại trang bán hàng, chờ đăng nhập...");
+                try
+                {
+                    await page.ReloadAsync(new PageReloadOptions
+                    {
+                        WaitUntil = WaitUntilState.DOMContentLoaded,
+                        Timeout = 30000
+                    }).ConfigureAwait(false);
+                }
+                catch { /* nuốt lỗi reload — vẫn poll trạng thái */ }
+
+                var deadline = DateTime.UtcNow.AddSeconds(90);
+                while (DateTime.UtcNow < deadline)
+                {
+                    vct.ThrowIfCancellationRequested();
+                    if (await DetectPageStateAsync(vct).ConfigureAwait(false) == ShopeePageState.LoggedIn)
+                    {
+                        L("Xác minh qua email xong — đã đăng nhập.");
+                        return true;
+                    }
+                    await Task.Delay(3000, vct).ConfigureAwait(false);
+                }
+
+                L("Chờ 90s sau xác nhận mà chưa thấy đăng nhập — bỏ qua (kiểm tra tay).");
+                return false;
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                // Timeout nội bộ (cap 4') — KHÔNG phải người dùng Dừng → degrade êm, KHÔNG ném (kẻo phá phiên).
+                L("Xác minh qua email quá 4 phút — bỏ qua (kiểm tra tay).");
+                return false;
+            }
+            catch (OperationCanceledException)
+            {
+                throw; // người dùng Dừng / thoát app → để caller xử như HỦY.
+            }
+            catch (Exception ex)
+            {
+                L("Lỗi khi xác minh qua email: " + ex.Message);
+                return false;
+            }
+            finally
+            {
+                // LUÔN đóng tab Hotmail đã mở (dù lỗi) — không để tab treo.
+                if (mailPage is not null)
+                {
+                    try { await mailPage.CloseAsync().ConfigureAwait(false); } catch { /* bỏ qua */ }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Đăng nhập hộp thư Hotmail/Outlook trên <paramref name="mailPage"/>: username → (nếu hiện) "Use your
+        /// password"/"Sử dụng mật khẩu" → password → "Stay signed in?" Yes. MỖI bước "chờ có selector thì làm,
+        /// timeout ngắn thì bỏ qua sang bước sau" (đã đăng nhập sẵn từ profile → mọi bước tự skip). KHÔNG log
+        /// giá trị mật khẩu. Trả <c>false</c> khi phát hiện lỗi đăng nhập (sai user/pass qua error box).
+        /// </summary>
+        private static async Task<bool> LoginHotmailAsync(
+            IPage mailPage, string email, string password, Action<string>? log, Random rng, CancellationToken ct)
+        {
+            void L(string m) => log?.Invoke(m);
+            var vp = mailPage.ViewportSize;
+            double mx = vp is not null ? vp.Width / 2.0 : 640;
+            double my = vp is not null ? vp.Height / 2.0 : 360;
+
+            // 1) Username (chờ tối đa 15s — trang Microsoft có thể redirect vài nhịp).
+            var userField = await FindFirstVisibleByRectsAsync(mailPage, MsUserSelectors, 15000, ct).ConfigureAwait(false);
+            if (userField is not null)
+            {
+                L("Nhập email đăng nhập hộp thư...");
+                (mx, my) = await HumanFillAsync(mailPage, userField, email, mx, my, rng, ct).ConfigureAwait(false);
+                var next = await FindFirstVisibleByRectsAsync(mailPage, MsSubmitSelectors, 3000, ct).ConfigureAwait(false);
+                if (next is not null)
+                {
+                    (mx, my) = await HumanMoveAndClickAsync(mailPage, next, mx, my, rng, ct).ConfigureAwait(false);
+                }
+                await Task.Delay(rng.Next(1500, 3000), ct).ConfigureAwait(false);
+
+                if (await IsSelectorVisibleAsync(mailPage, "#usernameError").ConfigureAwait(false))
+                {
+                    L("Email hộp thư không hợp lệ (Microsoft báo lỗi tài khoản).");
+                    return false;
+                }
+            }
+
+            // 2) "Use your password" / "Sử dụng mật khẩu" — CHỈ khi ô mật khẩu CHƯA hiện (màn passwordless).
+            var passField = await FindFirstVisibleByRectsAsync(mailPage, MsPasswordSelectors, 2500, ct).ConfigureAwait(false);
+            if (passField is null)
+            {
+                var usePwd = await FindVisibleByTextAsync(mailPage, MsUsePasswordSelectors, UsePasswordRegex, ct, 4000).ConfigureAwait(false);
+                if (usePwd is not null)
+                {
+                    L("Chọn 'Dùng mật khẩu'...");
+                    (mx, my, _) = await TryHumanClickVisibleAsync(mailPage, usePwd, mx, my, rng, ct).ConfigureAwait(false);
+                    await Task.Delay(rng.Next(1000, 2500), ct).ConfigureAwait(false);
+                }
+                passField = await FindFirstVisibleByRectsAsync(mailPage, MsPasswordSelectors, 8000, ct).ConfigureAwait(false);
+            }
+
+            // 3) Password (KHÔNG log giá trị).
+            if (passField is not null)
+            {
+                L("Nhập mật khẩu hộp thư...");
+                (mx, my) = await HumanFillAsync(mailPage, passField, password, mx, my, rng, ct).ConfigureAwait(false);
+                var signIn = await FindFirstVisibleByRectsAsync(mailPage, MsSubmitSelectors, 3000, ct).ConfigureAwait(false);
+                if (signIn is not null)
+                {
+                    (mx, my) = await HumanMoveAndClickAsync(mailPage, signIn, mx, my, rng, ct).ConfigureAwait(false);
+                }
+                await Task.Delay(rng.Next(2000, 4000), ct).ConfigureAwait(false);
+
+                if (await IsSelectorVisibleAsync(mailPage, "#passwordError").ConfigureAwait(false))
+                {
+                    L("Sai mật khẩu hộp thư (Microsoft báo lỗi).");
+                    return false;
+                }
+            }
+
+            // 4) "Stay signed in?" (KMSI) → bấm Yes (giữ đăng nhập trong profile).
+            await Task.Delay(rng.Next(1000, 2500), ct).ConfigureAwait(false);
+            var kmsi = await FindFirstVisibleByRectsAsync(mailPage, MsKmsiYesSelectors, 4000, ct).ConfigureAwait(false);
+            if (kmsi is not null)
+            {
+                L("Bấm 'Có' để giữ đăng nhập hộp thư...");
+                (mx, my) = await HumanMoveAndClickAsync(mailPage, kmsi, mx, my, rng, ct).ConfigureAwait(false);
+                await Task.Delay(rng.Next(1500, 3000), ct).ConfigureAwait(false);
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// Trong hộp thư Outlook: ưu tiên tab "Khác"/"Other", tìm mail Shopee MỚI NHẤT (dòng đầu khớp
+        /// "shopee"), mở mail rồi click link/nút xác nhận (bắt tab mới nếu link mở tab, đóng lại). Không thấy →
+        /// thử tab "Ưu tiên"/"Focused"; vẫn không → reload chờ 10s, tối đa 3 vòng. Trả <c>true</c> khi đã click
+        /// được link xác nhận.
+        /// </summary>
+        private async Task<bool> OpenShopeeMailAndConfirmAsync(
+            IPage mailPage, IPage sellerPage, Action<string>? log, Random rng, CancellationToken ct)
+        {
+            void L(string m) => log?.Invoke(m);
+
+            // Chờ danh sách mail render lần đầu.
+            await Task.Delay(rng.Next(2000, 4000), ct).ConfigureAwait(false);
+
+            for (var round = 0; round < 3; round++)
+            {
+                ct.ThrowIfCancellationRequested();
+
+                // Ưu tiên tab "Khác"/"Other" TRƯỚC.
+                await TryClickPivotAsync(mailPage, OtherPivotRegex, "Khác", log, rng, ct).ConfigureAwait(false);
+                await Task.Delay(rng.Next(800, 1500), ct).ConfigureAwait(false);
+
+                var mailRow = await FindShopeeMailRowAsync(mailPage, ct).ConfigureAwait(false);
+                if (mailRow is null)
+                {
+                    // Không thấy trong "Khác" → thử "Ưu tiên"/"Focused".
+                    await TryClickPivotAsync(mailPage, FocusedPivotRegex, "Ưu tiên", log, rng, ct).ConfigureAwait(false);
+                    await Task.Delay(rng.Next(800, 1500), ct).ConfigureAwait(false);
+                    mailRow = await FindShopeeMailRowAsync(mailPage, ct).ConfigureAwait(false);
+                }
+
+                if (mailRow is not null)
+                {
+                    L("Mở mail Shopee mới nhất...");
+                    var vp = mailPage.ViewportSize;
+                    double mx = vp is not null ? vp.Width / 2.0 : 640;
+                    double my = vp is not null ? vp.Height / 2.0 : 360;
+                    await HumanMoveAndClickAsync(mailPage, mailRow, mx, my, rng, ct).ConfigureAwait(false);
+                    await Task.Delay(rng.Next(1500, 3000), ct).ConfigureAwait(false);
+
+                    if (await ClickConfirmLinkInMailAsync(mailPage, sellerPage, log, rng, ct).ConfigureAwait(false))
+                    {
+                        return true;
+                    }
+
+                    L("Đã mở mail nhưng chưa thấy link xác nhận — thử lại.");
+                }
+
+                // Chưa thấy mail / chưa thấy link → reload + chờ mail tới (có thể muộn).
+                L($"Chưa thấy mail Shopee (vòng {round + 1}/3) — tải lại hộp thư, chờ mail tới...");
+                try
+                {
+                    await mailPage.ReloadAsync(new PageReloadOptions
+                    {
+                        WaitUntil = WaitUntilState.DOMContentLoaded,
+                        Timeout = 30000
+                    }).ConfigureAwait(false);
+                }
+                catch { /* nuốt lỗi reload */ }
+                await Task.Delay(10000, ct).ConfigureAwait(false);
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Trong reading-pane của mail đang mở (thường nằm trong iframe), dò link/nút xác nhận (text vi/en
+        /// khớp <see cref="ConfirmLinkRegex"/>) rồi click kiểu người. Link thường mở TAB MỚI (target _blank) →
+        /// bắt tab mới bằng snapshot trước/sau (như pattern bắt tab phiếu), chờ tải rồi ĐÓNG tab đó. Trả
+        /// <c>true</c> khi đã click được.
+        /// </summary>
+        private async Task<bool> ClickConfirmLinkInMailAsync(
+            IPage mailPage, IPage sellerPage, Action<string>? log, Random rng, CancellationToken ct)
+        {
+            void L(string m) => log?.Invoke(m);
+
+            // Dò trong MỌI frame (thân mail HTML hay nằm trong iframe reading-pane).
+            var confirmEl = await FindVisibleByTextInFramesAsync(
+                mailPage, new[] { "a", "button", "[role='button']" }, ConfirmLinkRegex, ct, 6000).ConfigureAwait(false);
+            if (confirmEl is null)
+            {
+                return false;
+            }
+
+            L("Bấm link xác nhận trong mail...");
+            var before = _browser.Contexts.SelectMany(c => c.Pages).ToList();
+
+            var vp = mailPage.ViewportSize;
+            double mx = vp is not null ? vp.Width / 2.0 : 640;
+            double my = vp is not null ? vp.Height / 2.0 : 360;
+            // Click MÙ theo tọa độ (link trong iframe → hit-test elementFromPoint lệch hệ tọa độ; thân mail
+            // đơn giản, không submenu/flyout đè nên click thẳng an toàn).
+            await HumanMoveAndClickAsync(mailPage, confirmEl, mx, my, rng, ct).ConfigureAwait(false);
+
+            // Link thường mở TAB MỚI → bắt tab (poll ≤10s).
+            IPage? confirmTab = null;
+            var deadline = DateTime.UtcNow.AddSeconds(10);
+            while (confirmTab is null && DateTime.UtcNow < deadline)
+            {
+                ct.ThrowIfCancellationRequested();
+                try
+                {
+                    confirmTab = _browser.Contexts.SelectMany(c => c.Pages)
+                        .FirstOrDefault(p => p != mailPage && p != sellerPage && !before.Contains(p));
+                }
+                catch { /* context ngắt — thử vòng sau */ }
+                if (confirmTab is null)
+                {
+                    await Task.Delay(400, ct).ConfigureAwait(false);
+                }
+            }
+
+            if (confirmTab is not null)
+            {
+                L("Đã mở tab xác nhận — chờ tải xong rồi đóng.");
+                try
+                {
+                    await confirmTab.WaitForLoadStateAsync(LoadState.NetworkIdle,
+                        new PageWaitForLoadStateOptions { Timeout = 10000 }).ConfigureAwait(false);
+                }
+                catch { /* networkidle không tới trong 10s — vẫn đóng */ }
+                try { await confirmTab.CloseAsync().ConfigureAwait(false); } catch { /* bỏ qua */ }
+            }
+            else
+            {
+                // Link mở CÙNG tab (hoặc AJAX) → chờ một nhịp rồi thôi.
+                await Task.Delay(rng.Next(2000, 4000), ct).ConfigureAwait(false);
+            }
+
+            return true;
+        }
+
+        /// <summary>Click tab/pivot (Outlook "Khác"/"Other" hoặc "Ưu tiên"/"Focused") nếu tìm thấy — best-effort,
+        /// không thấy thì bỏ qua (một số hộp thư không chia Focused/Other).</summary>
+        private static async Task TryClickPivotAsync(
+            IPage page, Regex regex, string label, Action<string>? log, Random rng, CancellationToken ct)
+        {
+            var pivot = await FindVisibleByTextAsync(
+                page, new[] { "button", "[role='tab']", "[role='menuitemradio']", "div[role='heading']", "span" },
+                regex, ct, 2500).ConfigureAwait(false);
+            if (pivot is null)
+            {
+                return;
+            }
+
+            try
+            {
+                var vp = page.ViewportSize;
+                double mx = vp is not null ? vp.Width / 2.0 : 640;
+                double my = vp is not null ? vp.Height / 2.0 : 360;
+                await HumanMoveAndClickAsync(page, pivot, mx, my, rng, ct).ConfigureAwait(false);
+                log?.Invoke($"Đã mở mục '{label}' trong hộp thư.");
+            }
+            catch { /* best-effort — bỏ qua */ }
+        }
+
+        /// <summary>Tìm dòng mail Shopee MỚI NHẤT (dòng đầu tiên khớp "shopee" theo thứ tự DOM = trên cùng =
+        /// mới nhất) trong danh sách message của Outlook. Dò nhiều selector cấu trúc; không thấy → null.</summary>
+        private static async Task<IElementHandle?> FindShopeeMailRowAsync(IPage page, CancellationToken ct)
+            => await FindVisibleByTextAsync(
+                page, new[] { "div[role='option']", "div[role='listitem']", "div[role='row']", "[data-convid]" },
+                ShopeeSenderRegex, ct, 6000).ConfigureAwait(false);
+
+        // ===================== Helper dò phần tử theo hiển thị (getClientRects) + text =====================
+
+        /// <summary>True nếu có ÍT NHẤT một phần tử khớp một trong <paramref name="selectors"/> đang HIỂN THỊ
+        /// (kiểm bằng <c>getClientRects</c> có kích thước &gt; 0 — KHÔNG dùng offsetParent). Một lượt quét,
+        /// không poll (caller tự lặp nếu cần).</summary>
+        private static async Task<bool> IsAnyVisibleByClientRectsAsync(IPage page, string[] selectors, CancellationToken ct)
+        {
+            foreach (var sel in selectors)
+            {
+                ct.ThrowIfCancellationRequested();
+                try
+                {
+                    var visible = await page.EvaluateAsync<bool>(
+                        @"(sel) => { for (const el of document.querySelectorAll(sel)) { const rs = el.getClientRects();"
+                        + " for (const r of rs) { if (r.width > 0 && r.height > 0) return true; } } return false; }",
+                        sel).ConfigureAwait(false);
+                    if (visible)
+                    {
+                        return true;
+                    }
+                }
+                catch { /* selector không dùng được trên trang này — thử selector kế */ }
+            }
+
+            return false;
+        }
+
+        /// <summary>True nếu <paramref name="el"/> đang HIỂN THỊ (getClientRects có kích thước &gt; 0). Dùng cho
+        /// element handle đơn (kể cả trong iframe — eval chạy trong document của frame đó).</summary>
+        private static async Task<bool> IsElementVisibleByClientRectsAsync(IElementHandle el)
+        {
+            try
+            {
+                return await el.EvaluateAsync<bool>(
+                    "(node) => { const rs = node.getClientRects(); for (const r of rs) { if (r.width > 0 && r.height > 0) return true; } return false; }")
+                    .ConfigureAwait(false);
+            }
+            catch { return false; }
+        }
+
+        /// <summary>True nếu <paramref name="selector"/> có phần tử ĐANG HIỂN THỊ (dùng cho error box Microsoft).</summary>
+        private static async Task<bool> IsSelectorVisibleAsync(IPage page, string selector)
+        {
+            try
+            {
+                var el = await page.QuerySelectorAsync(selector).ConfigureAwait(false);
+                return el is not null && await IsElementVisibleByClientRectsAsync(el).ConfigureAwait(false);
+            }
+            catch { return false; }
+        }
+
+        /// <summary>Đọc text các <c>div[role='alert']</c> của trang (nối bằng " | "). Lỗi → chuỗi rỗng.</summary>
+        private static async Task<string> ReadAlertTextAsync(IPage page)
+        {
+            try
+            {
+                return await page.EvaluateAsync<string>(
+                    "() => Array.from(document.querySelectorAll(\"div[role='alert']\")).map(a => a.innerText || '').join(' | ')")
+                    .ConfigureAwait(false);
+            }
+            catch { return string.Empty; }
+        }
+
+        /// <summary>Dò phần tử ĐẦU TIÊN đang HIỂN THỊ (getClientRects) khớp một trong <paramref name="selectors"/>,
+        /// poll tới hết <paramref name="timeoutMs"/>. Giống <see cref="FindFirstVisibleAsync"/> nhưng kiểm hiển
+        /// thị bằng getClientRects (không offsetParent) — dùng cho form Microsoft/Outlook.</summary>
+        private static async Task<IElementHandle?> FindFirstVisibleByRectsAsync(
+            IPage page, string[] selectors, int timeoutMs, CancellationToken ct)
+        {
+            var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
+            do
+            {
+                ct.ThrowIfCancellationRequested();
+                foreach (var sel in selectors)
+                {
+                    try
+                    {
+                        var el = await page.QuerySelectorAsync(sel).ConfigureAwait(false);
+                        if (el is not null && await IsElementVisibleByClientRectsAsync(el).ConfigureAwait(false))
+                        {
+                            return el;
+                        }
+                    }
+                    catch { /* selector không dùng được — thử selector kế */ }
+                }
+                await Task.Delay(200, ct).ConfigureAwait(false);
+            }
+            while (DateTime.UtcNow < deadline);
+
+            return null;
+        }
+
+        /// <summary>Dò phần tử ĐẦU TIÊN đang HIỂN THỊ khớp selector VÀ có innerText khớp <paramref name="textRegex"/>
+        /// (vi/en), poll tới hết <paramref name="timeoutMs"/>. Duyệt theo thứ tự selector (ưu tiên phần tử
+        /// clickable trước). Chỉ quét frame chính.</summary>
+        private static async Task<IElementHandle?> FindVisibleByTextAsync(
+            IPage page, string[] selectors, Regex textRegex, CancellationToken ct, int timeoutMs)
+        {
+            var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
+            do
+            {
+                ct.ThrowIfCancellationRequested();
+                foreach (var sel in selectors)
+                {
+                    IReadOnlyList<IElementHandle> els;
+                    try { els = await page.QuerySelectorAllAsync(sel).ConfigureAwait(false); }
+                    catch { continue; }
+
+                    foreach (var el in els)
+                    {
+                        try
+                        {
+                            if (!await IsElementVisibleByClientRectsAsync(el).ConfigureAwait(false))
+                            {
+                                continue;
+                            }
+
+                            var txt = await el.InnerTextAsync().ConfigureAwait(false);
+                            if (!string.IsNullOrWhiteSpace(txt) && textRegex.IsMatch(txt))
+                            {
+                                return el;
+                            }
+                        }
+                        catch { /* detached / lỗi đọc — bỏ qua phần tử này */ }
+                    }
+                }
+                await Task.Delay(300, ct).ConfigureAwait(false);
+            }
+            while (DateTime.UtcNow < deadline);
+
+            return null;
+        }
+
+        /// <summary>Như <see cref="FindVisibleByTextAsync"/> nhưng quét MỌI frame của trang (thân mail HTML của
+        /// Outlook thường nằm trong iframe reading-pane).</summary>
+        private static async Task<IElementHandle?> FindVisibleByTextInFramesAsync(
+            IPage page, string[] selectors, Regex textRegex, CancellationToken ct, int timeoutMs)
+        {
+            var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
+            do
+            {
+                ct.ThrowIfCancellationRequested();
+                foreach (var frame in page.Frames)
+                {
+                    foreach (var sel in selectors)
+                    {
+                        IReadOnlyList<IElementHandle> els;
+                        try { els = await frame.QuerySelectorAllAsync(sel).ConfigureAwait(false); }
+                        catch { continue; }
+
+                        foreach (var el in els)
+                        {
+                            try
+                            {
+                                if (!await IsElementVisibleByClientRectsAsync(el).ConfigureAwait(false))
+                                {
+                                    continue;
+                                }
+
+                                var txt = await el.InnerTextAsync().ConfigureAwait(false);
+                                if (!string.IsNullOrWhiteSpace(txt) && textRegex.IsMatch(txt))
+                                {
+                                    return el;
+                                }
+                            }
+                            catch { /* detached — bỏ qua */ }
+                        }
+                    }
+                }
+                await Task.Delay(300, ct).ConfigureAwait(false);
+            }
+            while (DateTime.UtcNow < deadline);
+
+            return null;
         }
 
         /// <summary>

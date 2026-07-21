@@ -17,7 +17,7 @@ public class AccountRepository
         var list = new List<Account>();
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = @"SELECT Id, Email, Password, Phone, Cookie, Note, ProxyKey, PickupAddress, Status, CreatedAt, UpdatedAt
+        cmd.CommandText = @"SELECT Id, Email, Password, Phone, Cookie, Note, ProxyKey, PickupAddress, VerifyEmail, VerifyEmailPassword, Status, CreatedAt, UpdatedAt
                             FROM accounts ORDER BY Id;";
         using var reader = cmd.ExecuteReader();
         while (reader.Read())
@@ -31,7 +31,7 @@ public class AccountRepository
     {
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = @"SELECT Id, Email, Password, Phone, Cookie, Note, ProxyKey, PickupAddress, Status, CreatedAt, UpdatedAt
+        cmd.CommandText = @"SELECT Id, Email, Password, Phone, Cookie, Note, ProxyKey, PickupAddress, VerifyEmail, VerifyEmailPassword, Status, CreatedAt, UpdatedAt
                             FROM accounts WHERE Id = $id;";
         cmd.Parameters.AddWithValue("$id", id);
         using var reader = cmd.ExecuteReader();
@@ -47,8 +47,8 @@ public class AccountRepository
 
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = @"INSERT INTO accounts (Email, Password, Phone, Cookie, Note, ProxyKey, PickupAddress, Status, CreatedAt, UpdatedAt)
-                            VALUES ($email, $password, $phone, $cookie, $note, $proxyKey, $pickupAddress, $status, $createdAt, $updatedAt);
+        cmd.CommandText = @"INSERT INTO accounts (Email, Password, Phone, Cookie, Note, ProxyKey, PickupAddress, VerifyEmail, VerifyEmailPassword, Status, CreatedAt, UpdatedAt)
+                            VALUES ($email, $password, $phone, $cookie, $note, $proxyKey, $pickupAddress, $verifyEmail, $verifyEmailPassword, $status, $createdAt, $updatedAt);
                             SELECT last_insert_rowid();";
         BindWritableFields(cmd, account);
         cmd.Parameters.AddWithValue("$createdAt", DbSerialization.FormatDate(account.CreatedAt));
@@ -69,6 +69,7 @@ public class AccountRepository
         cmd.CommandText = @"UPDATE accounts
                             SET Email = $email, Password = $password, Phone = $phone, Cookie = $cookie,
                                 Note = $note, ProxyKey = $proxyKey, PickupAddress = $pickupAddress,
+                                VerifyEmail = $verifyEmail, VerifyEmailPassword = $verifyEmailPassword,
                                 Status = $status, UpdatedAt = $updatedAt
                             WHERE Id = $id;";
         BindWritableFields(cmd, account);
@@ -95,6 +96,8 @@ public class AccountRepository
         cmd.Parameters.AddWithValue("$note", (object?)a.Note ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$proxyKey", (object?)a.ProxyKey ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$pickupAddress", (object?)a.PickupAddress ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$verifyEmail", a.VerifyEmail ?? "");
+        cmd.Parameters.AddWithValue("$verifyEmailPassword", a.VerifyEmailPassword ?? "");
         cmd.Parameters.AddWithValue("$status", a.Status.ToString());
     }
 
@@ -108,8 +111,10 @@ public class AccountRepository
         Note = r.IsDBNull(5) ? null : r.GetString(5),
         ProxyKey = r.IsDBNull(6) ? null : r.GetString(6),
         PickupAddress = r.IsDBNull(7) ? null : r.GetString(7),
-        Status = DbSerialization.ParseEnum<AccountStatus>(r.GetString(8)),
-        CreatedAt = DbSerialization.ParseDate(r.GetString(9)),
-        UpdatedAt = DbSerialization.ParseDate(r.GetString(10))
+        VerifyEmail = r.IsDBNull(8) ? "" : r.GetString(8),
+        VerifyEmailPassword = r.IsDBNull(9) ? "" : r.GetString(9),
+        Status = DbSerialization.ParseEnum<AccountStatus>(r.GetString(10)),
+        CreatedAt = DbSerialization.ParseDate(r.GetString(11)),
+        UpdatedAt = DbSerialization.ParseDate(r.GetString(12))
     };
 }

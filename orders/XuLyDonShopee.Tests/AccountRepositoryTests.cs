@@ -196,6 +196,72 @@ public class AccountRepositoryTests
     }
 
     [Fact]
+    public void Insert_CoVerifyEmail_RoiGetById_TraVeDayDu()
+    {
+        using var temp = new TempDatabase();
+        var repo = new AccountRepository(temp.Open());
+
+        var account = new Account
+        {
+            Email = "v@x.com",
+            Password = "1",
+            VerifyEmail = "verify@hotmail.com",
+            VerifyEmailPassword = "mkemail"
+        };
+        var id = repo.Insert(account);
+
+        var loaded = repo.GetById(id)!;
+        Assert.Equal("verify@hotmail.com", loaded.VerifyEmail);
+        Assert.Equal("mkemail", loaded.VerifyEmailPassword);
+    }
+
+    [Fact]
+    public void Insert_KhongCoVerifyEmail_TraVeRong()
+    {
+        using var temp = new TempDatabase();
+        var repo = new AccountRepository(temp.Open());
+
+        var id = repo.Insert(new Account { Email = "vb@x.com", Password = "1" });
+
+        var loaded = repo.GetById(id)!;
+        Assert.Equal("", loaded.VerifyEmail);
+        Assert.Equal("", loaded.VerifyEmailPassword);
+    }
+
+    [Fact]
+    public void Update_ThayDoiVerifyEmail_LuuDung_KhongLanChiSoCot()
+    {
+        using var temp = new TempDatabase();
+        var repo = new AccountRepository(temp.Open());
+
+        // Đặt các cột TEXT lân cận KHÁC nhau để bắt lệch SELECT/Map (ProxyKey, PickupAddress, VerifyEmail...).
+        var account = new Account
+        {
+            Email = "vc@x.com",
+            Password = "pw",
+            ProxyKey = "KIOT-9",
+            PickupAddress = "Hà Nội",
+            VerifyEmail = "one@hotmail.com",
+            VerifyEmailPassword = "pw1",
+            Status = AccountStatus.BiKhoa
+        };
+        repo.Insert(account);
+
+        // Đổi giá trị email xác minh → đọc lại đúng; các cột lân cận KHÔNG bị lệch chỉ số.
+        account.VerifyEmail = "two@outlook.com";
+        account.VerifyEmailPassword = "pw2";
+        repo.Update(account);
+
+        var reloaded = repo.GetById(account.Id)!;
+        Assert.Equal("two@outlook.com", reloaded.VerifyEmail);
+        Assert.Equal("pw2", reloaded.VerifyEmailPassword);
+        Assert.Equal("KIOT-9", reloaded.ProxyKey);
+        Assert.Equal("Hà Nội", reloaded.PickupAddress);
+        Assert.Equal(AccountStatus.BiKhoa, reloaded.Status);
+        Assert.Equal("vc@x.com", reloaded.Email);
+    }
+
+    [Fact]
     public void Delete_XoaKhoiDb()
     {
         using var temp = new TempDatabase();
