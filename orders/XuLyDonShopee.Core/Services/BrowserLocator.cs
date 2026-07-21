@@ -102,6 +102,55 @@ public static class BrowserLocator
             _ => findChrome() ?? findEdge() ?? findBrave() // Auto
         };
 
+    /// <summary>
+    /// Phân giải lựa chọn trình duyệt thành "loại" ngắn (slug an toàn cho tên thư mục) của trình duyệt
+    /// THỰC sẽ được mở: <c>"chrome"</c>, <c>"edge"</c>, <c>"brave"</c>, hoặc <c>"chromium"</c>
+    /// (khi không có file thực thi thật phù hợp → caller dùng Chromium đóng gói của Playwright).
+    /// Dùng để tách hồ sơ persistent theo từng trình duyệt (mỗi trình duyệt một fingerprint riêng).
+    /// Lấy exe từ CÙNG nguồn <see cref="ResolveExecutable"/> mà caller dùng để launch nên slug luôn
+    /// KHỚP trình duyệt thật được mở.
+    /// </summary>
+    public static string ResolveBrowserKind(BrowserChoice choice)
+        => ClassifyExe(
+               ResolveExecutable(choice),
+               FindChromeExecutable(),
+               FindEdgeExecutable(),
+               FindBraveExecutable());
+
+    /// <summary>
+    /// Lõi thuần phân loại một đường dẫn exe thành slug loại trình duyệt bằng cách so KHỚP với đường dẫn
+    /// Chrome/Edge/Brave đã dò được (tiêm vào nên test được độc lập máy thật). So khớp không phân biệt
+    /// hoa/thường (đường dẫn Windows). Trả <c>"chromium"</c> khi <paramref name="exePath"/> rỗng hoặc
+    /// không khớp trình duyệt nào (nghĩa là caller sẽ dùng Chromium đóng gói).
+    /// </summary>
+    internal static string ClassifyExe(string? exePath, string? chromePath, string? edgePath, string? bravePath)
+    {
+        if (string.IsNullOrWhiteSpace(exePath))
+        {
+            return "chromium";
+        }
+
+        if (!string.IsNullOrWhiteSpace(chromePath)
+            && string.Equals(exePath, chromePath, StringComparison.OrdinalIgnoreCase))
+        {
+            return "chrome";
+        }
+
+        if (!string.IsNullOrWhiteSpace(edgePath)
+            && string.Equals(exePath, edgePath, StringComparison.OrdinalIgnoreCase))
+        {
+            return "edge";
+        }
+
+        if (!string.IsNullOrWhiteSpace(bravePath)
+            && string.Equals(exePath, bravePath, StringComparison.OrdinalIgnoreCase))
+        {
+            return "brave";
+        }
+
+        return "chromium";
+    }
+
     /// <summary>Dựng danh sách đường dẫn ứng viên của Brave theo HĐH.</summary>
     private static IEnumerable<string> BuildBraveCandidates()
     {

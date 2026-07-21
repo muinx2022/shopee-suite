@@ -164,4 +164,64 @@ public class BrowserLocatorTests
 
         Assert.Null(result);
     }
+
+    // ===== ClassifyExe: phân loại exe path thành slug loại trình duyệt (thuần, path giả) =====
+
+    [Fact]
+    public void ClassifyExe_KhopChrome_TraChrome()
+    {
+        var result = BrowserLocator.ClassifyExe("chrome.exe", "chrome.exe", "edge.exe", "brave.exe");
+
+        Assert.Equal("chrome", result);
+    }
+
+    [Fact]
+    public void ClassifyExe_KhopEdge_TraEdge()
+    {
+        var result = BrowserLocator.ClassifyExe("edge.exe", "chrome.exe", "edge.exe", "brave.exe");
+
+        Assert.Equal("edge", result);
+    }
+
+    [Fact]
+    public void ClassifyExe_KhopBrave_TraBrave()
+    {
+        var result = BrowserLocator.ClassifyExe("brave.exe", "chrome.exe", "edge.exe", "brave.exe");
+
+        Assert.Equal("brave", result);
+    }
+
+    [Fact]
+    public void ClassifyExe_ExeNull_TraChromium()
+    {
+        var result = BrowserLocator.ClassifyExe(null, "chrome.exe", "edge.exe", "brave.exe");
+
+        Assert.Equal("chromium", result);
+    }
+
+    [Fact]
+    public void ClassifyExe_KhongKhopCaiNao_TraChromium()
+    {
+        var result = BrowserLocator.ClassifyExe("chromium.exe", "chrome.exe", "edge.exe", "brave.exe");
+
+        Assert.Equal("chromium", result);
+    }
+
+    [Fact]
+    public void ClassifyExe_ChiCaiBrave_TraBrave()
+    {
+        // Chrome/Edge chưa cài (null) — chỉ Brave có; exe khớp Brave.
+        var result = BrowserLocator.ClassifyExe("brave.exe", null, null, "brave.exe");
+
+        Assert.Equal("brave", result);
+    }
+
+    [Fact]
+    public void ClassifyExe_KhongPhanBietHoaThuong()
+    {
+        // Đường dẫn Windows không phân biệt hoa/thường → so khớp OrdinalIgnoreCase.
+        var result = BrowserLocator.ClassifyExe("CHROME.EXE", "chrome.exe", "edge.exe", "brave.exe");
+
+        Assert.Equal("chrome", result);
+    }
 }

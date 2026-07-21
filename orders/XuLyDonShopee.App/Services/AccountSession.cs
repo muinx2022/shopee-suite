@@ -1076,7 +1076,17 @@ public partial class AccountSession : ObservableObject, IAccountSession
 
             // Hồ sơ persistent riêng cho tài khoản này → mở lại vẫn còn đăng nhập.
             var baseDir = Path.GetDirectoryName(_services.Database.Path) ?? ".";
-            var userDataDir = BrowserProfilePaths.ForAccount(baseDir, _accountId);
+
+            // Trình duyệt người dùng chọn ở Cài đặt — đọc TƯƠI khi phiên bắt đầu (đổi trong Cài đặt CHỈ áp cho
+            // phiên MỞ SAU khi lưu). Đọc TRƯỚC khi tính hồ sơ + đặt ở scope bao cả vòng relaunch để mọi lần
+            // mở lại (kể cả relaunch đổi proxy) đều dùng CÙNG trình duyệt + CÙNG hồ sơ.
+            var browserChoice = _services.Settings.GetBrowserChoice();
+
+            // Hồ sơ RIÊNG theo (tài khoản × trình duyệt THỰC được mở): đổi trình duyệt = phiên sạch, phải
+            // login lại bằng đúng fingerprint trình duyệt đó. Kind lấy từ cùng nguồn ResolveExecutable mà
+            // OpenAsync dùng để launch nên hồ sơ + exe luôn khớp.
+            var browserKind = BrowserLocator.ResolveBrowserKind(browserChoice);
+            var userDataDir = BrowserProfilePaths.ForAccount(baseDir, _accountId, browserKind);
             Directory.CreateDirectory(userDataDir);
 
             // 1) Chọn proxy theo thứ tự ưu tiên (pool KiotProxy → thủ công → IP máy) + set _kiotClient để
@@ -1085,10 +1095,6 @@ public partial class AccountSession : ObservableObject, IAccountSession
             _currentProxy = await SelectProxyAsync(ct).ConfigureAwait(false);
 
             ct.ThrowIfCancellationRequested();
-
-            // Trình duyệt người dùng chọn ở Cài đặt — đọc TƯƠI khi phiên bắt đầu (đổi trong Cài đặt CHỈ áp cho
-            // phiên MỞ SAU khi lưu). Đặt ở scope bao cả vòng relaunch để mọi lần mở lại đều dùng cùng lựa chọn.
-            var browserChoice = _services.Settings.GetBrowserChoice();
 
             // 2) Đảm bảo trình duyệt đã cài (tải lần đầu ~150MB) — chạy nền.
             SetStatus(SessionState.Opening, "Đang chuẩn bị trình duyệt...");
