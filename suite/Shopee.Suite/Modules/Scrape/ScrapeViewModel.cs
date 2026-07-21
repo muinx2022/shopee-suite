@@ -221,8 +221,8 @@ public sealed partial class ScrapeViewModel : ModuleViewModelBase
 
     // KHO ĐÓNG KHUNG cho 1 job BigSeller: nhận MỘT khung tk Shopee CỐ ĐỊNH (cấp lúc start, đã gỡ khỏi kho
     // chung nên các job RỜI nhau), CHỈ xoay vòng TRONG khung → BigSeller chỉ thấy ngần ấy thiết bị ổn định,
-    // tái dùng profile bền (import 1 lần) → KHÔNG churn → không bị đá phiên. Captcha → LOẠI khỏi khung,
-    // KHÔNG bù tk mới; hết tk trong khung → BorrowAsync trả null → worker dừng → "hết tk → dừng job".
+    // tái dùng profile bền (import 1 lần) → KHÔNG churn → không bị đá phiên. Captcha → LOẠI khỏi khung NGAY
+    // (bỏ grace) + bù tk thay thế; hết tk dư → BorrowAsync trả null → worker dừng → "hết tk → dừng job".
     private sealed class SessionAccountPool : IScrapeAccountPool
     {
         private readonly string _sheet;
@@ -232,7 +232,6 @@ public sealed partial class ScrapeViewModel : ModuleViewModelBase
         private readonly HashSet<string> _dropped = new(StringComparer.Ordinal);   // captcha → loại khỏi khung
         private readonly Dictionary<string, DateTimeOffset> _cooldown = new(StringComparer.Ordinal);
         private readonly Dictionary<string, int> _fail = new(StringComparer.Ordinal);
-        private readonly Dictionary<string, int> _captcha = new(StringComparer.Ordinal);   // số lần captcha (2 → loại)
         private long _lru;
         private const int ShortCdSec = 15, LongCdSec = 90, SetAsideAfter = 2;
 
@@ -346,30 +345,10 @@ public sealed partial class ScrapeViewModel : ModuleViewModelBase
             return new AccountCooldown(secs, setAside);
         }
 
-        public bool CaptchaGrace(ScrapeAccountSpec spec)
-        {
-            // Captcha → CHỜ 3' (giải tay) rồi mới loại. Lần đầu: cho nghỉ 3' (vẫn trong khung) → thử lại
-            // sau, kịp giải tay. Còn captcha lần nữa → LOẠI khỏi khung (trả true) + đánh dấu lỗi. Không bù tk.
-            lock (_lock)
-            {
-                var n = _captcha[spec.Id] = _captcha.GetValueOrDefault(spec.Id) + 1;
-                _borrowed.Remove(spec.Id);
-                if (n >= 2)
-                {
-                    _dropped.Add(spec.Id);
-                    _cooldown.Remove(spec.Id);
-                    ShopeeAccountUsage.Shared.MarkReleased(spec.Id);
-                    return true;
-                }
-                _cooldown[spec.Id] = DateTimeOffset.UtcNow.AddMinutes(3);   // chờ 3' rồi thử lại (giải tay)
-            }
-            ShopeeAccountUsage.Shared.MarkReleased(spec.Id);
-            return false;
-        }
-
         public void Quarantine(ScrapeAccountSpec spec)
         {
-            // Captcha → LOẠI tk khỏi khung (KHÔNG bù tk mới). Hết tk → BorrowAsync null → dừng job.
+            // Captcha → LOẠI tk khỏi khung NGAY (bỏ grace). Khung thiếu → BorrowAsync tự bù tk thay thế
+            // (TryTopUpAsync); hết tk dư → hết hẳn → BorrowAsync null → dừng job. Việc xóa profile do handler ngoài lo.
             lock (_lock)
             {
                 _dropped.Add(spec.Id);
@@ -738,13 +717,29 @@ public sealed partial class ScrapeViewModel : ModuleViewModelBase
         });
         runner.AccountErrored += (id, label, reason, captchaUrl) => OnUi(() =>
         {
+            // Lỗi NON-CAPTCHA (giữ nguyên): quarantine tk qua khu "Tài khoản bị lỗi" + đánh dấu bền + báo Hub.
+            // (Captcha KHÔNG đi đường này nữa — xem AccountCaptchaDropped.)
             AccountErrorReporter.Report(ErroredAccounts, id, label, reason, "Scrape", captchaUrl);
             var text = $"⚠ Tk lỗi: {label} — {reason}";
             LogLines.Add(text);
             AccountLogs.Get(account.Id, bigSellerName).Add(text);
-            // Cột "Tình trạng" → "⚠ Captcha" cho tk vừa dính captcha/lỗi trong lượt chạy này.
+            // Cột "Tình trạng" → "⚠ Captcha" cho tk vừa dính lỗi trong lượt chạy này.
             ShopeeAccountUsage.Shared.MarkCaptcha(id);
         });
+        runner.AccountCaptchaDropped += (id, label) =>
+        {
+            // Captcha khi scrape: tk đã bị LOẠI khỏi khung (đổi tk khác). KHÔNG đánh dấu tk lỗi (không
+            // AccountErrorReporter/Disabled/lưới lỗi/MarkCaptcha/báo Hub) — tk vẫn ở pool, dùng lại với profile
+            // mới. XÓA cả profile Brave scrape lẫn nguồn cookie → lần chạy sau ép login mới hoàn toàn.
+            OnUi(() =>
+            {
+                var text = $"🚫 [{bigSellerName}] Tk Shopee \"{label}\" dính captcha → loại khỏi khung, xóa profile (login mới lần sau), đổi tk khác chạy tiếp.";
+                LogLines.Add(text);
+                AccountLogs.Get(account.Id, bigSellerName).Add(text);
+            });
+            // Xóa profile trên luồng nền (best-effort, không chặn UI, tự nuốt lỗi) — Brave của chunk đã StopAsync.
+            _ = Task.Run(() => DeleteAccountProfilesBestEffort(id, label, account.Id, bigSellerName));
+        };
         runner.BigSellerNeedLogin += reason => OnUi(() =>
         {
             // Tk BigSeller mất phiên ("log in first") → job tk này đã bị dừng. Báo rõ để user đăng nhập lại.
@@ -752,6 +747,32 @@ public sealed partial class ScrapeViewModel : ModuleViewModelBase
             LogLines.Add(text);
             AccountLogs.Get(account.Id, bigSellerName).Add(text);
         });
+    }
+
+    /// <summary>Xóa CẢ 2 profile của tk Shopee vừa dính captcha → lần chạy sau ép login MỚI hoàn toàn:
+    ///  • <c>persistent-data/profiles/{Id}</c> — profile Brave scrape (đã import phiên login sang);
+    ///  • <c>shared/profiles/{Id}</c> — nguồn cookie đã lưu (bỏ để buộc nhập lại tk, không nạp phiên cũ).
+    /// Best-effort qua <see cref="BraveCachePolicy.DeleteDirBestEffort"/> (gỡ read-only + retry, KHÔNG ném) →
+    /// còn khóa thì StartupJanitor dọn nốt lần mở sau, không chặn vòng scrape. Chạy trên luồng nền; log về UI
+    /// qua <see cref="LogAcc"/> (tự marshal). accountId = tk Shopee cần xóa; bsId/bsName = job BigSeller để ghi log.</summary>
+    private void DeleteAccountProfilesBestEffort(string accountId, string label, string bsId, string bsName)
+    {
+        if (string.IsNullOrWhiteSpace(accountId)) return;
+        try
+        {
+            var braveProfile = Path.Combine(SuitePaths.ModuleDir("persistent-data"), "profiles", accountId);
+            var cookieProfile = Path.Combine(SuitePaths.ModuleDir("shared"), "profiles", accountId);
+            var freed = BraveCachePolicy.DeleteDirBestEffort(braveProfile)
+                      + BraveCachePolicy.DeleteDirBestEffort(cookieProfile);
+            var leftover = Directory.Exists(braveProfile) || Directory.Exists(cookieProfile);
+            LogAcc(bsId, bsName, leftover
+                ? $"⚠ [{bsName}] Xóa profile tk \"{label}\" chưa sạch (còn khóa?) — giải phóng ~{freed / 1024 / 1024} MB; StartupJanitor dọn nốt lần mở sau."
+                : $"🗑 [{bsName}] Đã xóa profile tk \"{label}\" (Brave scrape + nguồn cookie), ~{freed / 1024 / 1024} MB — lần chạy sau login mới.");
+        }
+        catch (Exception ex)
+        {
+            LogAcc(bsId, bsName, $"⚠ [{bsName}] Lỗi xóa profile tk \"{label}\": {ex.Message}");
+        }
     }
 
     /// <summary>Tiền-kiểm điều kiện scrape 1 đích (kho tk Shopee, Brave, cấu hình) — KHÔNG mở dialog.

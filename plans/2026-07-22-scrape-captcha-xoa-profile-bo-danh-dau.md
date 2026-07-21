@@ -1,7 +1,7 @@
 # Plan: Scrape captcha — xóa profile tk dính captcha + bỏ đánh dấu tk lỗi captcha
 
 - **Ngày:** 2026-07-22
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-executor`)
 
 ## 1. Bối cảnh & mục tiêu
@@ -86,6 +86,17 @@ Trong màn **Workspace** (logic ở `ScrapeViewModel`, module Shopee Scrape), kh
 
 ---
 
-## Báo cáo thực thi (Opus điền sau khi xong)
+## Báo cáo thực thi
 
-<chờ thực thi>
+Hoàn tất, build `dotnet build ShopeeSuite.sln` (và `Shopee.Suite.csproj`) **0 warning / 0 error**. Fable đã review diff thật + xác minh đường dẫn xóa profile.
+
+**Thay đổi:**
+- `ScrapeRunner.cs`: bỏ `CaptchaGrace` (grace 2 lần) khỏi interface; thêm event `AccountCaptchaDropped(id, label)` (KHÁC `AccountErrored`: không đánh dấu lỗi). Nhánh captcha trong `AutoWorkerAsync` giờ: `pool.Quarantine(spec)` (loại ngay lần đầu) → `AccountCaptchaDropped` → status "🚫 Captcha" → log. Patch (`AddPatch`) giữ nguyên bên dưới.
+- `ScrapeViewModel.cs`: bỏ field `_captcha` + method `CaptchaGrace`. Handler `AccountErrored` **giữ nguyên** cho lỗi non-captcha. Thêm handler `AccountCaptchaDropped` → log + `DeleteAccountProfilesBestEffort` (luồng nền). Helper xóa **cả** `persistent-data/profiles/{Id}` lẫn `shared/profiles/{Id}` qua `BraveCachePolicy.DeleteDirBestEffort`, log MB, degrade êm nếu còn khóa.
+
+**Xác minh của Fable (đọc code):**
+- Đường xóa khớp nơi tạo: `AppSession.ResolvePersistentDataPath()` == `SuitePaths.ModuleDir("persistent-data")`; `BuildConfig` gán `Id = spec.Id` + `EnsureProfileRelativePath()` → `profiles/{account.Id}`; `SharedProfileDir` == helper. Cả 2 profile xóa đúng chỗ.
+- Non-captcha: đường `AccountErrored → AccountErrorReporter` giữ nguyên; module Search + lưới `ErroredAccounts` không đụng.
+- `shared/profiles` KHÔNG bị Hub sync (executor rà `BackupService`/`HubConfigSync`/`StartupJanitor` — chỉ cache cục bộ).
+
+**Còn lại:** chưa chạy end-to-end trên app thật (cần 1 tk thật dính captcha) — để user quan sát log "🗑 Đã xóa profile…" + tk đổi khi test thực tế.

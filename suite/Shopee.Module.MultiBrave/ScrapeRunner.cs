@@ -22,10 +22,8 @@ public interface IScrapeAccountPool
     void Release(ScrapeAccountSpec spec);
     /// <summary>Lỗi proxy/tạm → cho tk nghỉ rồi tự quay lại kho. Trả (giây nghỉ, có "để dành" không) để log.</summary>
     AccountCooldown Cooldown(ScrapeAccountSpec spec);
-    /// <summary>Captcha → CHỜ 3' (giải tay) rồi mới loại: lần đầu cho nghỉ 3' (vẫn trong khung, thử lại sau);
-    /// còn captcha lần nữa → trả true = LOẠI khỏi khung (đánh dấu lỗi). KHÔNG bù tk mới.</summary>
-    bool CaptchaGrace(ScrapeAccountSpec spec);
-    /// <summary>Captcha → loại tk khỏi kho lượt này (xử lý sau).</summary>
+    /// <summary>Captcha → LOẠI tk khỏi khung NGAY (bỏ grace 2 lần): khung thiếu → BorrowAsync tự bù tk thay
+    /// thế, phần dòng dở VÁ bằng tk khác. Việc xóa profile + log do handler ngoài lo; KHÔNG đánh dấu tk lỗi.</summary>
     void Quarantine(ScrapeAccountSpec spec);
 }
 
@@ -57,6 +55,10 @@ public sealed class ScrapeRunner
     /// <summary>(accountId, tên account, lý do, urlCaptcha?) — tk dính captcha/proxy lỗi, bị loại khỏi vòng
     /// xoay. urlCaptcha = trang lúc dính captcha (để "Kiểm tra tk lỗi" mở đúng trang đó), null nếu không có.</summary>
     public event Action<string, string, string, string?>? AccountErrored;
+    /// <summary>(accountId, label) — tk Shopee dính captcha khi scrape: đã LOẠI khỏi khung (đổi tk khác) và
+    /// CẦN xóa profile để lần chạy sau ép login mới. KHÁC <see cref="AccountErrored"/>: KHÔNG đánh dấu tk lỗi
+    /// (không Disabled, không vào lưới lỗi, không báo Hub). Handler ngoài lo xóa profile + log.</summary>
+    public event Action<string, string>? AccountCaptchaDropped;
     /// <summary>(from, to) — khoảng dòng vừa cào XONG (để lưu tiến độ resume). Báo theo từng chunk.</summary>
     public event Action<int, int>? RowsCompleted;
     /// <summary>(lý do) — tk BigSeller mất phiên ("log in first"). Toàn bộ job tk này bị dừng; cần đăng nhập lại BigSeller.</summary>
@@ -269,19 +271,13 @@ public sealed class ScrapeRunner
                     {
                         if (res.IsCaptcha)
                         {
-                            // Captcha → CHỜ 3' (giải tay) rồi mới loại. Lần đầu: giữ trong khung, nghỉ 3', thử
-                            // lại; còn captcha lần nữa → LOẠI khỏi khung + đánh dấu lỗi (KHÔNG bù tk mới).
-                            if (pool.CaptchaGrace(spec))
-                            {
-                                AccountErrored?.Invoke(spec.Id, spec.Label, res.Reason, res.CaptchaUrl);
-                                InstanceStatus?.Invoke(key, "🚫 Captcha");
-                                InstanceLog?.Invoke(key, $"🚫 {spec.Label}: vẫn captcha sau khi chờ 3' → LOẠI khỏi khung.");
-                            }
-                            else
-                            {
-                                InstanceStatus?.Invoke(key, "🚫 Captcha (chờ 3')");
-                                InstanceLog?.Invoke(key, $"🚫 {spec.Label}: captcha → giữ trong khung, CHỜ 3' (giải tay) rồi thử lại; còn captcha sẽ loại.");
-                            }
+                            // Captcha → LOẠI tk khỏi khung NGAY lần đầu (bỏ grace 2 lần). Khung thiếu → bù tk
+                            // thay thế; phần dòng dở VÁ bằng tk khác (logic dưới). Báo lên UI để XÓA profile
+                            // (ép login mới lần chạy sau); KHÔNG đánh dấu tk lỗi (không Disabled/lưới lỗi/Hub).
+                            pool.Quarantine(spec);
+                            AccountCaptchaDropped?.Invoke(spec.Id, spec.Label);
+                            InstanceStatus?.Invoke(key, "🚫 Captcha");
+                            InstanceLog?.Invoke(key, $"🚫 {spec.Label}: captcha → LOẠI khỏi khung + xóa profile (login mới lần sau), đổi tk khác.");
                         }
                         else
                         {
