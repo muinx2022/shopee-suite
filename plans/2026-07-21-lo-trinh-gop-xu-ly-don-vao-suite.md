@@ -58,4 +58,6 @@ duyệt (dự kiến sau khi phase 1b nghiệm thu chạy thật đạt).
 - 2026-07-21: chốt lộ trình; giao phase 1a (`plans/2026-07-21-gop-phase-1a-nhap-projects-don-hang-vao-sln.md`).
 - 2026-07-21: **phase 1a hoàn thành** — 3 project vào sln dưới `orders/`, build 0 lỗi, 720/720 test xanh (nguồn copy: working tree repo cũ tại `86fa802` + WIP Proxies). Từ thời điểm này thay đổi mới bên repo cũ phải port tay sang suite.
 - 2026-07-21: giao phase 1b (`plans/2026-07-21-gop-phase-1b-module-hoa-app-don-hang.md`).
+- 2026-07-21: **phase 2a hoàn thành** (`23fad0b`) — `shared/Shopee.Proxy.Kiot` + orders adapter, 732 test. Phase 2b (suite → client chung) CHƯA làm, cần nghiệm thu runtime scrape/check của người dùng.
+- 2026-07-21: merge việc ngoài lộ trình "hồ sơ trình duyệt riêng theo từng browser" (`2e0d755`, plan `2026-07-21-ho-so-rieng-theo-trinh-duyet.md`) — tổng 742 test trên nhánh.
 - 2026-07-21: **phase 1b hoàn thành** — app hợp nhất 1 exe, module "Xử lý đơn Shopee" trong shell suite, version đồng bộ (Avalonia 11.3.0 / Mvvm 8.4.2 / Playwright 1.60), style cô lập theo từng view (chuẩn mới: mỗi view orders tự chứa `Styles/ModuleResources.axaml`). Chờ người dùng nghiệm thu runtime thật (login + sync đơn) rồi mới merge `main` và sang phase 2.
