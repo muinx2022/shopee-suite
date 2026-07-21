@@ -22,4 +22,6 @@ public static class SettingKeys
     public const string AdminIter = "admin.iter";
     public const string DispatcherEnabled = "dispatcher.enabled";
     public const string DispatcherAuto = "dispatcher.auto";
+    /// <summary>Webhook báo "đơn mới": nhiều dòng, MỖI DÒNG 1 URL (Slack/Discord/Telegram tự nhận diện). Trống = tắt.</summary>
+    public const string NotifyWebhooks = "notify.webhooks";
 }

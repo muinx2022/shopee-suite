@@ -1,0 +1,121 @@
+@page "/orders"
+@attribute [Authorize(Policy = "Web")]
+@inject HubDatabase Db
+
+<p class="hint m-hide">Đơn hàng client đẩy lên hub qua <code>POST /api/orders/push</code>. Lọc theo shop / trạng thái / tìm kiếm (mã đơn, người mua, tên SP, SKU) + phân trang.</p>
+
+<div class="bar">
+    <label>Shop
+        <select @bind="_shopId" @bind:after="OnFilterChanged">
+            <option value="0">— tất cả —</option>
+            @foreach (var s in _shops)
+            {
+                <option value="@s.Id">@s.Name</option>
+            }
+        </select>
+    </label>
+    <label>Trạng thái
+        <select @bind="_status" @bind:after="OnFilterChanged">
+            <option value="">— tất cả —</option>
+            @foreach (var st in _statuses)
+            {
+                <option value="@st">@st</option>
+            }
+        </select>
+    </label>
+    <label>Tìm
+        <input @bind="_search" @bind:event="oninput" @bind:after="OnFilterChanged" placeholder="mã đơn / người mua / SP / SKU" style="width:240px" />
+    </label>
+    <span class="stat">@_total đơn</span>
+</div>
+
+<div class="tablewrap">
+<table class="grid sm">
+    <thead><tr>
+        <th>Mã đơn</th><th>Shop</th><th>Người mua</th><th>Sản phẩm</th><th class="m-hide">SKU</th>
+        <th>Tổng tiền</th><th class="m-hide">Cuối cùng</th><th>Trạng thái</th><th class="m-hide">Vận chuyển</th><th class="m-hide">Sync</th>
+    </tr></thead>
+    <tbody>
+    @foreach (var o in _orders)
+    {
+        <tr>
+            <td class="mono">@o.OrderSn</td>
+            <td>@ShopName(o.ShopId)</td>
+            <td>@(o.BuyerUsername ?? "—")</td>
+            <td title="@o.ItemSummary">@Trim(o.ItemSummary)@(o.ItemCount > 1 ? $" (+{o.ItemCount - 1})" : "")</td>
+            <td class="m-hide">@(o.Sku ?? "—")</td>
+            <td>@(o.TotalPriceText ?? (o.TotalPrice?.ToString("N0") ?? "—"))</td>
+            <td class="m-hide">@(o.FinalAmountText ?? (o.FinalAmount?.ToString("N0") ?? "—"))</td>
+            <td><span class="pill @StatusCss(o.Status)">@(o.Status ?? "—")</span></td>
+            <td class="m-hide">@(string.IsNullOrEmpty(o.Carrier) ? (o.Channel ?? "—") : o.Carrier)@(string.IsNullOrEmpty(o.TrackingNumber) ? "" : $" · {o.TrackingNumber}")</td>
+            <td class="m-hide">@(o.SyncedAt == default ? "" : o.SyncedAt.LocalDateTime.ToString("MM-dd HH:mm"))</td>
+        </tr>
+    }
+    @if (_orders.Count == 0)
+    {
+        <tr><td colspan="10" class="empty">Không có đơn nào khớp bộ lọc.</td></tr>
+    }
+    </tbody>
+</table>
+</div>
+
+@if (_totalPages > 1)
+{
+    <div class="bar">
+        <button class="btn sm" disabled="@(_page <= 1)" @onclick="() => GoPage(_page - 1)">‹ Trước</button>
+        <span class="stat">Trang @_page / @_totalPages</span>
+        <button class="btn sm" disabled="@(_page >= _totalPages)" @onclick="() => GoPage(_page + 1)">Sau ›</button>
+    </div>
+}
+
+@code {
+    private const int PageSize = 50;
+
+    private List<Shop> _shops = new();
+    private List<string> _statuses = new();
+    private List<OrderRecord> _orders = new();
+    private Dictionary<long, string> _shopNames = new();
+
+    private long _shopId;      // 0 = tất cả
+    private string _status = "";
+    private string _search = "";
+    private int _page = 1;
+    private int _total;
+    private int _totalPages = 1;
+
+    protected override void OnInitialized()
+    {
+        _shops = Db.ListShops();
+        _shopNames = _shops.ToDictionary(s => s.Id, s => s.Name);
+        _statuses = Db.DistinctOrderStatuses();
+        Load();
+    }
+
+    private void OnFilterChanged() { _page = 1; Load(); }
+
+    private void GoPage(int p) { _page = Math.Clamp(p, 1, _totalPages); Load(); }
+
+    private void Load()
+    {
+        long? shopFilter = _shopId > 0 ? _shopId : null;
+        var status = string.IsNullOrWhiteSpace(_status) ? null : _status;
+        var q = string.IsNullOrWhiteSpace(_search) ? null : _search;
+        _total = Db.CountOrders(shopFilter, status, q);
+        _totalPages = Math.Max(1, (int)Math.Ceiling(_total / (double)PageSize));
+        if (_page > _totalPages) _page = _totalPages;
+        _orders = Db.QueryOrders(shopFilter, status, q, PageSize, (_page - 1) * PageSize);
+    }
+
+    private string ShopName(long id) => _shopNames.GetValueOrDefault(id, id.ToString());
+
+    private static string Trim(string? s) =>
+        string.IsNullOrEmpty(s) ? "—" : s.Length > 48 ? s[..48] + "…" : s;
+
+    private static string StatusCss(string? status) => status switch
+    {
+        null or "" => "idle",
+        var s when s.Contains("hủy", StringComparison.OrdinalIgnoreCase) => "fail",
+        var s when s.Contains("hoàn thành", StringComparison.OrdinalIgnoreCase) || s.Contains("giao") => "done",
+        _ => "queued",
+    };
+}

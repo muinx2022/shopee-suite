@@ -17,6 +17,10 @@
         </div>
 
         <div class="side-scroll">
+            <div class="navsec">Đơn hàng</div>
+            <NavLink class="nav" href="/shops"><span class="nav-ic">@HubIcons.Svg("shop")</span><span>Shop</span></NavLink>
+            <NavLink class="nav" href="/orders"><span class="nav-ic">@HubIcons.Svg("orders")</span><span>Đơn hàng</span></NavLink>
+
             <div class="navsec">Điều khiển</div>
             <NavLink class="nav" href="/" Match="NavLinkMatch.All"><span class="nav-ic">@HubIcons.Svg("fleet")</span><span>Fleet</span></NavLink>
             <NavLink class="nav" href="/machines"><span class="nav-ic">@HubIcons.Svg("machines")</span><span>Máy client</span></NavLink>
@@ -93,6 +97,8 @@
         _pageTitle = p switch
         {
             "" => "Fleet",
+            "shops" => "Shop",
+            "orders" => "Đơn hàng",
             "machines" => "Máy client",
             "search" => "Search đa máy",
             "data" => "Dữ liệu sản phẩm",

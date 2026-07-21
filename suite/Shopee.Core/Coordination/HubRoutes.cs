@@ -79,6 +79,11 @@ public static class HubRoutes
     /// acc/shop; hub gộp KHÔNG XÓA (kẻo lượt pull mirror-xoá acc client vừa thêm).</summary>
     public const string BigSellerUpsert = "/bigseller/upsert";
 
+    // ── Nghiệp vụ đơn hàng ── (prefix /api BẮT BUỘC: tránh AmbiguousMatchException với trang Blazor /shops, /orders)
+    public const string Shops = "/api/shops";
+    public const string Orders = "/api/orders";
+    public const string OrdersPush = "/api/orders/push";
+
     // ── File-sync ──
     public const string Manifest = "/manifest";
 

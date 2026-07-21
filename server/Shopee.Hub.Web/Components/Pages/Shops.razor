@@ -1,0 +1,114 @@
+@page "/shops"
+@attribute [Authorize(Policy = "Web")]
+@inject HubDatabase Db
+@inject IJSRuntime JS
+
+<p class="hint m-hide">Danh bạ shop hub TỰ ĐĂNG KÝ khi client push đơn (khoá theo tài khoản đăng nhập shop).
+   Client không cần biết id trên hub — đẩy đơn kèm <code>ShopUsername</code> qua <code>POST /api/orders/push</code>,
+   hub tự tạo shop. Ở đây sửa được tên/ghi chú hoặc xoá shop (xoá kèm mọi đơn của shop).</p>
+
+<div class="bar">
+    <span class="stat">@_shops.Count shop</span>
+    <span class="action">@_status</span>
+</div>
+
+@if (_edit is not null)
+{
+    <div class="editcard" style="max-width:720px">
+        <h2>Sửa shop</h2>
+        <label>Tên shop <span style="color:#ef4444">*</span></label>
+        <input @bind="_edit.Name" placeholder="vd Shop A" style="width:100%" />
+        <label style="margin-top:10px">Tài khoản đăng nhập</label>
+        <input value="@(string.IsNullOrEmpty(_edit.Username) ? "—" : _edit.Username)" readonly style="width:100%;opacity:.7" />
+        <label style="margin-top:10px">Ghi chú</label>
+        <input @bind="_edit.Note" style="width:100%" />
+        <div class="bar">
+            <button class="btn primary" @onclick="Save">💾 Lưu</button>
+            <button class="btn" @onclick="() => _edit = null">Huỷ</button>
+            <span class="action">@_editStatus</span>
+        </div>
+    </div>
+}
+
+<div class="tablewrap">
+<table class="grid sm">
+    <thead><tr><th>Tên</th><th>Tài khoản</th><th class="m-hide">Ghi chú</th><th>Đơn</th><th></th></tr></thead>
+    <tbody>
+    @foreach (var s in _shops)
+    {
+        <tr>
+            <td><b>@s.Name</b></td>
+            <td>@(string.IsNullOrEmpty(s.Username) ? "—" : s.Username)</td>
+            <td class="m-hide">@s.Note</td>
+            <td>@_orderCounts.GetValueOrDefault(s.Id)</td>
+            <td>
+                <button class="btn sm" @onclick="() => Edit(s)">✎ Sửa</button>
+                <button class="btn danger sm" @onclick="() => Delete(s)">🗑 Xoá</button>
+            </td>
+        </tr>
+    }
+    @if (_shops.Count == 0)
+    {
+        <tr><td colspan="5" class="empty">Chưa có shop nào — client chưa push đơn lần nào.</td></tr>
+    }
+    </tbody>
+</table>
+</div>
+
+@code {
+    private List<Shop> _shops = new();
+    private Dictionary<long, int> _orderCounts = new();
+    private ShopEdit? _edit;
+    private string _status = "";
+    private string _editStatus = "";
+
+    protected override void OnInitialized() => Reload();
+
+    private void Reload()
+    {
+        _shops = Db.ListShops();
+        _orderCounts = _shops.ToDictionary(s => s.Id, s => Db.CountOrders(s.Id, null, null));
+    }
+
+    // Nạp ĐỦ trường vào ShopEdit (kể cả username/password/cookie/proxy) để UpsertShop KHÔNG xoá mất giá trị
+    // hiện có khi ta chỉ hiện Tên + Ghi chú trên form.
+    private void Edit(Shop s) => _edit = new ShopEdit
+    {
+        Id = s.Id, Name = s.Name, Username = s.Username, Password = s.Password,
+        Cookie = s.Cookie, ProxyKey = s.ProxyKey, Note = s.Note,
+    };
+
+    private void Save()
+    {
+        if (_edit is null) return;
+        if (string.IsNullOrWhiteSpace(_edit.Name)) { _editStatus = "⚠ Tên shop không được trống."; return; }
+        Db.UpsertShop(new Shop
+        {
+            Id = _edit.Id, Name = _edit.Name.Trim(), Username = _edit.Username, Password = _edit.Password,
+            Cookie = _edit.Cookie, ProxyKey = _edit.ProxyKey, Note = _edit.Note,
+        });
+        _status = $"✔ Đã lưu shop \"{_edit.Name}\".";
+        _edit = null;
+        Reload();
+    }
+
+    private async Task Delete(Shop s)
+    {
+        var n = _orderCounts.GetValueOrDefault(s.Id);
+        if (!await JS.InvokeAsync<bool>("confirm", $"Xoá shop \"{s.Name}\"?{(n > 0 ? $" Kèm {n} đơn của shop này." : "")}")) return;
+        Db.DeleteShop(s.Id);
+        _status = $"🗑 Đã xoá shop \"{s.Name}\".";
+        Reload();
+    }
+
+    private sealed class ShopEdit
+    {
+        public long Id { get; set; }
+        public string Name { get; set; } = "";
+        public string? Username { get; set; }
+        public string? Password { get; set; }
+        public string? Cookie { get; set; }
+        public string? ProxyKey { get; set; }
+        public string? Note { get; set; }
+    }
+}

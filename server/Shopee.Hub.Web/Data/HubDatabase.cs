@@ -106,7 +106,9 @@ public sealed partial class HubDatabase : IDisposable
     }
 
     // ── Schema ────────────────────────────────────────────────────────────────
-    private void EnsureSchema() => ExecRaw(@"
+    private void EnsureSchema()
+    {
+        ExecRaw(@"
 CREATE TABLE IF NOT EXISTS leases(
   key TEXT PRIMARY KEY, bigseller_id TEXT, shop_id TEXT, sheet TEXT, op TEXT,
   machine_id TEXT, hostname TEXT, acquired_at TEXT, heartbeat_at TEXT, status TEXT);
@@ -142,6 +144,11 @@ CREATE TABLE IF NOT EXISTS settings(
   key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE IF NOT EXISTS revoked_machines(
   machine_id TEXT PRIMARY KEY, revoked_at TEXT);");
+
+        // Bảng nghiệp vụ đơn hàng (partial ở HubDatabase.Shops.cs / HubDatabase.Orders.cs).
+        EnsureShopsSchema();
+        EnsureOrdersSchema();
+    }
 
     // ── Settings (key/value; thay hub-server.json: admin PBKDF2, api token, cờ điều phối…) ──
     public string? GetSetting(string key)

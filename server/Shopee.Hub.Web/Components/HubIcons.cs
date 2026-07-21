@@ -28,6 +28,8 @@ public static class HubIcons
 
         // KPI Stats (từ Stats.KpiIcons)
         ["shop"] = "<path d='M3 9l1.5-5h15L21 9'/><path d='M4 9v10a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1V9'/><path d='M9 20v-6h6v6'/>",
+        // Đơn hàng (sidebar nghiệp vụ đơn)
+        ["orders"] = "<path d='M6 2h9l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z'/><path d='M14 2v6h6M8 13h8M8 17h6'/>",
         ["scrape"] = "<polygon points='6 3 20 12 6 21 6 3'/>",
         ["import"] = "<path d='M12 3v13'/><path d='m7 11 5 5 5-5'/><path d='M5 21h14'/>",
         ["update"] = "<path d='M21 12a9 9 0 1 1-2.6-6.4L21 8'/><path d='M21 3v5h-5'/>",

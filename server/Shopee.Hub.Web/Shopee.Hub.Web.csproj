@@ -26,6 +26,11 @@
     <Compile Include="..\..\suite\Shopee.Core\Coordination\HubDefaults.cs" Link="Shared\Coordination\HubDefaults.cs" />
     <Compile Include="..\..\suite\Shopee.Core\Coordination\HubRoutes.cs" Link="Shared\Coordination\HubRoutes.cs" />
     <Compile Include="..\..\suite\Shopee.Core\Coordination\ProductDtos.cs" Link="Shared\Coordination\ProductDtos.cs" />
+    <Compile Include="..\..\suite\Shopee.Core\Coordination\OrderDtos.cs" Link="Shared\Coordination\OrderDtos.cs" />
+    <!-- Báo "đơn mới" về Slack/Discord/Telegram: helper thuần BCL + POCO đơn — LINK từ module đơn Shopee,
+         KHÔNG sửa 2 file gốc (OrderNotifyService cần type SyncedOrder nên link cả hai). -->
+    <Compile Include="..\..\orders\XuLyDonShopee.Core\Services\OrderNotifyService.cs" Link="Shared\Notify\OrderNotifyService.cs" />
+    <Compile Include="..\..\orders\XuLyDonShopee.Core\Models\SyncedOrder.cs" Link="Shared\Notify\SyncedOrder.cs" />
     <!-- Cổng thao tác kho + exception + LÕI lưới dùng chung — ProductDbDataOps (hub) hiện thực IProductDataOps;
          ProductGridEngine là lõi lưới cho trang /data + tab 📋 Dữ liệu của Fleet. KHÔNG link HubApiProductDataOps:
          adapter-client cần HubClient (chưa link vào hub). -->

@@ -1,6 +1,7 @@
 @page "/settings"
 @attribute [Authorize(Policy = "Web")]
 @using Shopee.Hub.Web.Auth
+@using XuLyDonShopee.Core.Services
 @inject HubDatabase Db
 @inject AdminAccountService Admin
 @inject IJSRuntime JS
@@ -26,6 +27,20 @@
     </div>
 </div>
 
+<h2>Báo đơn mới — webhook Slack / Discord / Telegram</h2>
+<div class="editcard" style="max-width:720px">
+    <p class="hint m-hide">Khi client push đơn <b>MỚI</b>, hub bắn tin về các webhook dưới đây — <b>mỗi dòng 1 URL</b>.
+       Nhận diện kênh theo URL: <code>hooks.slack.com/...</code> (Slack), <code>discord.com/api/webhooks/...</code>
+       (Discord), <code>api.telegram.org/bot&lt;token&gt;/sendMessage?chat_id=&lt;id&gt;</code> (Telegram). Để trống = tắt.</p>
+    <label>Danh sách webhook (mỗi dòng 1 URL)</label>
+    <textarea @bind="_webhooks" rows="4" style="width:100%;font-family:monospace;font-size:12px"
+              placeholder="https://hooks.slack.com/services/..."></textarea>
+    <div class="bar">
+        <button class="btn primary" @onclick="SaveWebhooks">💾 Lưu webhook</button>
+        <span class="action">@_webhookStatus</span>
+    </div>
+</div>
+
 <h2>Đổi mật khẩu admin (đăng nhập web)</h2>
 <div class="editcard" style="max-width:720px">
     <label>Mật khẩu mới (≥ 6 ký tự)</label>
@@ -43,8 +58,14 @@
     private string _copyStatus = "";
     private string _newPass = "";
     private string _passStatus = "";
+    private string _webhooks = "";
+    private string _webhookStatus = "";
 
-    protected override void OnInitialized() => _token = Db.GetSetting(SettingKeys.ApiToken) ?? "";
+    protected override void OnInitialized()
+    {
+        _token = Db.GetSetting(SettingKeys.ApiToken) ?? "";
+        _webhooks = Db.GetSetting(SettingKeys.NotifyWebhooks) ?? "";
+    }
 
     private void GenToken() =>
         _newToken = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(24));
@@ -71,5 +92,26 @@
         Admin.SetAdmin(Admin.Username ?? "admin", _newPass);
         _newPass = "";
         _passStatus = "✔ Đã đổi mật khẩu admin (lần đăng nhập sau dùng mật khẩu mới).";
+    }
+
+    private void SaveWebhooks()
+    {
+        // Validate TỪNG dòng không rỗng bằng OrderNotifyService.KiemTraUrl (nguồn sự thật nhận diện kênh);
+        // dòng đầu tiên sai → báo lỗi + KHÔNG lưu (tránh ghi URL hỏng).
+        var lines = (_webhooks ?? "").Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
+        for (int i = 0; i < lines.Length; i++)
+        {
+            var line = lines[i].Trim();
+            if (line.Length == 0) continue;
+            var err = OrderNotifyService.KiemTraUrl(line);
+            if (err is not null) { _webhookStatus = $"⚠ Dòng {i + 1}: {err}"; return; }
+        }
+        // Chuẩn hoá: trim + bỏ dòng trống trước khi lưu.
+        var normalized = string.Join('\n', lines.Select(l => l.Trim()).Where(l => l.Length > 0));
+        Db.SetSetting(SettingKeys.NotifyWebhooks, normalized);
+        _webhooks = normalized;
+        _webhookStatus = normalized.Length == 0
+            ? "✔ Đã lưu (không có webhook — tính năng báo đơn mới đang TẮT)."
+            : "✔ Đã lưu webhook — hiệu lực ngay cho lượt push kế tiếp.";
     }
 }

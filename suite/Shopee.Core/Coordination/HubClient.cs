@@ -276,6 +276,15 @@ public sealed class HubClient
         return await r.Content.ReadFromJsonAsync<BigSellerUpsertResult>(ct);
     }
 
+    // ── Đơn hàng: client đẩy lô đơn đã sync của 1 shop lên hub (hub tự đăng ký shop theo username) ──
+    // Dùng _bulkHttp (timeout dài): lô đơn 1 lượt sync có thể lớn (nhiều KB JSON qua tunnel).
+    public async Task<OrdersPushResult?> PushOrdersAsync(OrdersPushRequest req, CancellationToken ct = default)
+    {
+        var r = await _bulkHttp.PostAsJsonAsync(HubRoutes.OrdersPush, req, ct);
+        r.EnsureSuccessStatusCode();
+        return await r.Content.ReadFromJsonAsync<OrdersPushResult>(ct);
+    }
+
     // ── File-sync ──
     public async Task<List<FileManifestEntry>> ManifestAsync(CancellationToken ct = default)
         => await _http.GetFromJsonAsync<List<FileManifestEntry>>(HubRoutes.Manifest, ct) ?? [];

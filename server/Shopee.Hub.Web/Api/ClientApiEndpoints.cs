@@ -4,6 +4,8 @@ using Shopee.Core.Coordination;
 using Shopee.Hub;
 using Shopee.Hub.Web.Auth;
 using Shopee.Hub.Web.Services;
+using XuLyDonShopee.Core.Models;
+using XuLyDonShopee.Core.Services;
 
 namespace Shopee.Hub.Web.Api;
 
@@ -123,6 +125,39 @@ public static class ClientApiEndpoints
             return Results.Json(cfg.UpsertBigSellerAccounts(r));
         });
 
+        // ── Nghiệp vụ đơn hàng ──
+        // GET /api/shops → danh sách shop (hub tự đăng ký theo username khi client push).
+        api.MapGet(HubRoutes.Shops, () => Results.Json(db.ListShops()));
+
+        // POST /api/orders/push → hub tự đăng ký shop theo username rồi upsert lô đơn + ghi log; có đơn MỚI
+        // (Added>0) → bắn tin về webhook cấu hình (fire-and-forget, KHÔNG chặn response).
+        api.MapPost(HubRoutes.OrdersPush, (OrdersPushRequest? r, HttpRequest req, ILoggerFactory lf) =>
+        {
+            if (r is null || string.IsNullOrWhiteSpace(r.ShopUsername) || r.Orders is null) return Results.BadRequest();
+            var username = r.ShopUsername.Trim();
+            var shopId = db.GetOrCreateShopByUsername(username, r.ShopName);
+            var res = db.UpsertOrders(shopId, r.Orders);
+            var mid = req.Headers["X-Machine-Id"].ToString();
+            db.AppendLog(new AppendLogRequest(mid, "", "info",
+                $"orders/push shop={username} (id {shopId}): +{res.Added} mới, {res.Updated} cập nhật (tổng gửi {r.Orders.Count})"));
+            if (res.Added > 0 && res.InsertedItems.Count > 0)
+            {
+                var shopName = string.IsNullOrWhiteSpace(r.ShopName) ? username : r.ShopName!.Trim();
+                FireNotifyNewOrders(db, lf.CreateLogger("OrderNotify"), shopName, res.InsertedItems);
+            }
+            return Results.Json(new OrdersPushResult(res.Added, res.Updated));
+        });
+
+        // GET /api/orders?shopId=&status=&q=&page=&pageSize= → xem đơn (admin lẫn client).
+        api.MapGet(HubRoutes.Orders, (long? shopId, string? status, string? q, int? page, int? pageSize) =>
+        {
+            var ps = Math.Clamp(pageSize ?? 50, 1, 500);
+            var p = Math.Max(1, page ?? 1);
+            var total = db.CountOrders(shopId, status, q);
+            var items = db.QueryOrders(shopId, status, q, ps, (p - 1) * ps);
+            return Results.Json(new { items, total, page = p, pageSize = ps });
+        });
+
         // ── MỚI: xem/đổi trạng thái điều phối (web UI + có thể client đọc) ──
         api.MapGet("/dispatcher", (DispatcherService d) => Results.Json(new { enabled = d.Enabled, auto = d.AutoMode }));
         api.MapPost("/dispatcher", (DispatcherStateRequest? r, DispatcherService d) =>
@@ -132,6 +167,56 @@ public static class ClientApiEndpoints
             return Results.Ok();
         });
     }
+
+    /// <summary>Fire-and-forget báo "đơn mới" tới TỪNG webhook cấu hình (mỗi dòng 1 URL). TUYỆT ĐỐI không chặn
+    /// response push: dựng tin nhắn xong thì <see cref="Task.Run(Action)"/> gửi ở nền, nuốt mọi lỗi vào
+    /// <see cref="ILogger.LogWarning(string, object?[])"/>. Chưa cấu hình webhook → bỏ qua im lặng.</summary>
+    private static void FireNotifyNewOrders(HubDatabase db, ILogger logger, string shopName, IReadOnlyList<OrderPushItem> inserted)
+    {
+        var raw = db.GetSetting(SettingKeys.NotifyWebhooks);
+        if (string.IsNullOrWhiteSpace(raw)) return; // chưa cấu hình → không notify
+
+        var urls = raw.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                      .Where(u => u.Length > 0).ToList();
+        if (urls.Count == 0 || inserted.Count == 0) return;
+
+        var donMoi = inserted.Select(ToSyncedOrder).ToList();
+        var text = OrderNotifyService.TaoTinNhanDonMoi(shopName, donMoi, DateTime.Now);
+        var svc = new OrderNotifyService();
+        _ = Task.Run(async () =>
+        {
+            foreach (var url in urls)
+            {
+                // SendAsync tự thêm tiền tố "Notify: " vào từng dòng log → KHÔNG prefix lại (tránh "Notify: Notify:").
+                try { await svc.SendAsync(url, text, m => logger.LogWarning("{Message}", m), CancellationToken.None); }
+                catch (Exception ex) { logger.LogWarning(ex, "Notify: lỗi gửi tới webhook."); }
+            }
+        });
+    }
+
+    /// <summary>Map <see cref="OrderPushItem"/> (DTO client) → <see cref="SyncedOrder"/> (type
+    /// <see cref="OrderNotifyService"/> dùng dựng tin nhắn). Hai type mirror nhau field-by-field.</summary>
+    private static SyncedOrder ToSyncedOrder(OrderPushItem o) => new()
+    {
+        OrderSn = o.OrderSn,
+        ShopeeOrderId = o.ShopeeOrderId,
+        BuyerUsername = o.BuyerUsername,
+        ItemsJson = o.ItemsJson,
+        ItemCount = o.ItemCount,
+        ItemSummary = o.ItemSummary,
+        Sku = o.Sku,
+        TotalPrice = o.TotalPrice,
+        TotalPriceText = o.TotalPriceText,
+        FinalAmount = o.FinalAmount,
+        FinalAmountText = o.FinalAmountText,
+        PaymentMethod = o.PaymentMethod,
+        Status = o.Status,
+        StatusDescription = o.StatusDescription,
+        CancelReason = o.CancelReason,
+        Channel = o.Channel,
+        Carrier = o.Carrier,
+        TrackingNumber = o.TrackingNumber,
+    };
 }
 
 /// <summary>Body cho /accounts/remove.</summary>
