@@ -5,6 +5,20 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Hiệu năng. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.4.0 — 2026-07-22
+
+- **Gộp 2 app vào cùng 1 app**: app xử lý Đơn hàng Shopee nay được tích hợp thẳng vào Shopee Suite
+  thành **module Đơn hàng** — không còn chạy 2 app riêng. Từ mốc này, sửa lỗi/chỉnh nhỏ đi theo 1.4.x,
+  thêm tính năng mới sẽ lên 1.5+.
+- **Module Đơn hàng**: đồng bộ đơn Shopee; đẩy đơn mới lên hub sau mỗi lần sync; hub thêm domain
+  Đơn hàng và thông báo "đơn mới" về Slack / Discord / Telegram.
+- **Auto-login Shopee + xác nhận qua email**: tự đăng nhập, mở hộp thư Hotmail/Outlook, tìm mail xác
+  nhận của Shopee và bấm link "Tại đây", né captcha bằng cách đổi hồ sơ trình duyệt.
+- **Hồ sơ trình duyệt riêng theo từng browser** (mỗi tài khoản × mỗi browser) để tránh lẫn phiên.
+- **Ribbon menu 4 tab kiểu Office** + gộp 2 màn Cài đặt vào một chỗ.
+- Quản lý tài khoản module Đơn hàng: xóa nhiều tài khoản đã tick bằng nút thùng rác; nới rộng combobox
+  cỡ trang cho khỏi bị mũi tên dropdown che số.
+
 ## v1.3.6 — 2026-07-13
 
 - **Hub ra lệnh cập nhật app cho toàn fleet**: trang Máy client trên hub có nút ⬆ Cập nhật (từng máy /
