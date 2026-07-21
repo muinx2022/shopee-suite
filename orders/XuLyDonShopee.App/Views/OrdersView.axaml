@@ -131,7 +131,9 @@
                 <Button Classes="secondary" Height="30" Padding="10,4" Content="Sau ›"
                         Command="{Binding NextPageCommand}"
                         ToolTip.Tip="Trang sau" />
-                <ComboBox Classes="field" Width="70" MinHeight="30" VerticalAlignment="Center"
+                <!-- Width 96: style field padding 12 hai bên + cột mũi tên dropdown ~30px của template Fluent,
+                     hẹp hơn thì "100"/"200" bị mũi tên che mất số cuối (trông như "10"). -->
+                <ComboBox Classes="field" Width="96" MinHeight="30" VerticalAlignment="Center"
                           ItemsSource="{Binding PageSizeOptions}"
                           SelectedItem="{Binding PageSize}"
                           ToolTip.Tip="Số đơn mỗi trang" />
