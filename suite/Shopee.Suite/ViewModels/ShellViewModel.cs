@@ -1,4 +1,7 @@
+using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Linq;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Shopee.Suite.Infrastructure;
@@ -12,105 +15,233 @@ using Shopee.Suite.Modules.Settings;
 using Shopee.Suite.Modules.UpdateProduct;
 using Shopee.Suite.Modules.Workspace;
 using Shopee.Suite.Services;
+using OrdersMainViewModel = XuLyDonShopee.App.ViewModels.MainViewModel;
 
 namespace Shopee.Suite.ViewModels;
 
 /// <summary>
-/// ViewModel gốc của shell: danh sách module trên sidebar + module đang hiển thị. Mọi module
-/// ViewModel được khởi tạo một lần và giữ sống suốt vòng đời app, nên phiên đang chạy của một
-/// module không bị mất khi người dùng chuyển sang module khác rồi quay lại.
+/// ViewModel gốc của shell: dải RIBBON kiểu Word/Excel gồm 4 tab (Workspace · Cấu hình BigSeller · Đơn hàng ·
+/// Cài đặt). Mọi module ViewModel được khởi tạo MỘT LẦN và giữ sống suốt vòng đời app; mỗi tab NHỚ màn đang
+/// chọn riêng nên quay lại tab thấy đúng màn cũ. Toàn bộ nút hành động trên ribbon chỉ bind command CÓ SẴN
+/// của các ViewModel — không thêm logic nghiệp vụ mới ở đây.
 /// </summary>
 public sealed partial class ShellViewModel : ObservableObject
 {
-    public ObservableCollection<ModuleItem> Modules { get; }
+    // Giữ tham chiếu các VM có lệnh dừng job của Workspace để nút "Dừng jobs" trên ribbon gọi lại lệnh SẴN CÓ.
+    private readonly ScrapeViewModel _scrape;
+    private readonly UpdateProductViewModel _update;
+    private readonly SearchViewModel _search;
 
-    [ObservableProperty] private ModuleItem? _selected;
+    /// <summary>4 tab trên dải ribbon.</summary>
+    public ObservableCollection<RibbonTab> Tabs { get; } = new();
 
-    private readonly WelcomeViewModel _welcome;
+    [ObservableProperty] private RibbonTab? _selectedTab;
 
-    /// <summary>ViewModel đang hiển thị: module được chọn, hoặc màn hình Welcome khi chưa chọn gì.</summary>
-    public object Current => Selected?.ViewModel ?? _welcome;
+    /// <summary>Màn đang chọn RIÊNG cho từng tab (quay lại tab thấy đúng màn cũ).</summary>
+    private readonly Dictionary<RibbonTab, object> _screenByTab = new();
+
+    private RibbonTab? _workspaceTab;
+    private RibbonTab? _bigSellerTab;
+    private RibbonScreenItem? _workspaceHomeScreen;
+
+    /// <summary>ViewModel màn đang hiển thị của tab đang chọn (nội dung ContentControl chính).</summary>
+    public object? CurrentScreen =>
+        SelectedTab is not null && _screenByTab.TryGetValue(SelectedTab, out var vm) ? vm : null;
+
+    partial void OnSelectedTabChanged(RibbonTab? value) => OnPropertyChanged(nameof(CurrentScreen));
 
     public ShellViewModel()
     {
-        // Tạo các ViewModel MỘT LẦN — màn gộp v1.1 (Workspace) DÙNG CHUNG đúng 3 VM BigSeller/Scrape/Update
-        // với 3 màn cũ → state luôn đồng bộ, không xung đột (vẫn giữ 3 màn cũ để đối chiếu/dự phòng).
+        // ══════════ Tạo các ViewModel MỘT LẦN — giữ NGUYÊN như bản cũ ══════════
+        // Màn gộp Workspace DÙNG CHUNG đúng 3 VM BigSeller/Scrape/Update với 3 màn cũ → state luôn đồng bộ.
         var bigSeller = new BigSellerViewModel();
         var scrape = new ScrapeViewModel();
         var update = new UpdateProductViewModel();
         var search = new SearchViewModel();
         var workspace = new WorkspaceViewModel(bigSeller, scrape, update);
+        _scrape = scrape; _update = update; _search = search;
 
-        // Màn "Dữ liệu sản phẩm" (kho Hub) — thao tác trang /data của hub qua HTTP. Ctor không I/O (nạp ở EnsureLoaded).
+        // Màn "Dữ liệu sản phẩm" (kho Hub) — ctor không I/O (nạp ở EnsureLoaded).
         var data = new DataViewModel();
+        var accounts = new AccountsViewModel();
 
         // Giao việc đa máy: worker (client tự chạy việc Hub giao) + dispatcher (máy Hub tự đẩy việc).
-        // Cả hai tự "ngủ" khi máy chưa có vai trò / chưa bật điều phối → không đổi hành vi 1 máy.
         var worker = new AssignmentWorker(scrape, update, search);
-        // Dispatcher (tự đẩy việc) CHỈ chạy timer trên máy Hub — máy client khỏi chạy vô ích.
+        var fleet = new FleetViewModel(worker);
+        // Dispatcher (tự đẩy việc) CHỈ chạy timer trên máy Hub.
         if (Shopee.Core.Coordination.HubServerConfigStore.Shared.Current.Enabled) HubDispatcher.Shared.Start();
 
-        // Nút "Cập nhật & khởi động lại" (Cài đặt) DỪNG ÊM trước khi Velopack restart: (1) dừng các job CHẠY TAY
-        // qua đúng đường cancel → runner ghi ledger 'stopped' + nhả lease NGAY; (2) trả việc HUB-GIAO đang chạy về
-        // hàng chờ hub rồi đợi dừng hẳn. Không làm vậy thì Velopack kill giữa chừng → khoá acc treo tới hub sweep 5'.
         var settings = new SettingsViewModel();
+
+        // Module đơn hàng (phase 1b): mở SQLite riêng qua OrdersModuleHost. Init hỏng → TryCreate null → suite vẫn
+        // chạy, chỉ ẩn tab Đơn hàng + section Đơn hàng trong Cài đặt.
+        var ordersVm = OrdersModuleHost.TryCreate();
+
+        // Màn Cài đặt GỘP: 1 màn 2 section (Shopee Suite + Đơn hàng). Section Đơn hàng ẩn khi module đơn hàng null.
+        var unifiedSettings = new UnifiedSettingsViewModel(settings, ordersVm?.SettingsVm);
+
+        // ══════════ DỪNG ÊM trước khi Velopack restart — giữ NGUYÊN ══════════
         UpdateService.PrepareShutdownAsync = async () =>
         {
             update.StopAllSingle();   // không có job thì tự bỏ qua
             if (scrape.StopCommand.CanExecute(null)) scrape.StopCommand.Execute(null);
             if (search.StopCommand.CanExecute(null)) search.StopCommand.Execute(null);
             await worker.PrepareForShutdownAsync(TimeSpan.FromSeconds(40));
-            // Module đơn hàng: dừng vòng "Chạy tự động" + kill hết phiên Brave trước khi Velopack restart (vẫn trong trần 45s).
+            // Module đơn hàng: dừng vòng "Chạy tự động" + kill hết phiên Brave trước khi restart.
             await OrdersModuleHost.StopAsync();
         };
-        // Lệnh update từ Hub (operator bấm trên bảng) → cùng đường dừng-êm + restart như nút tay, qua
-        // RemoteUpdateService (tự dedup theo mốc lệnh + chống vòng lặp restart khi apply hỏng).
+        // Lệnh update từ Hub → cùng đường dừng-êm + restart như nút tay.
         Shopee.Core.Coordination.HttpCoordinationHub.UpdateRequested =
             (hub, requestedAt) => RemoteUpdateService.Shared.OnCommand(hub, requestedAt);
 
-        // Scrape + Update đã GỘP vào "BigSeller Workspace" → ẩn khỏi sidebar (vẫn dùng chung scrape/update
-        // bên dưới; view cũ giữ nguyên để đảo lại nếu cần).
-        // navTitle (tham số cuối) = nhãn NGẮN cho tab trên top bar; Title (đầy đủ) vẫn dùng cho thẻ Welcome.
-        Modules =
-        [
-            new ModuleItem("BigSeller Workspace", AppIcons.Dashboard, "Scrape · Import · Update theo từng shop",
-                workspace, "Workspace"),
-            new ModuleItem("Dữ liệu sản phẩm", AppIcons.Inventory, "Kho sản phẩm trên Hub — lọc · thêm/sửa · đã bán · SKU · xoá",
-                data, "Dữ liệu"),
-            new ModuleItem("Cấu hình BigSeller", AppIcons.Database, "Tài khoản · workbook · cookie · shop · proxy",
-                bigSeller, "Cấu hình"),
-            new ModuleItem("Shopee Search", AppIcons.Search, "Thống kê tìm kiếm sản phẩm",
-                search, "Search"),
-            new ModuleItem("Tài khoản & Proxy", AppIcons.People, "Kho tài khoản Shopee dùng chung · Check tài khoản",
-                new AccountsViewModel(), "Tài khoản"),
-            new ModuleItem("Trạng thái & Giao việc", AppIcons.Servers, "Theo dõi máy + Hub giao việc cho từng máy (đa máy)",
-                new FleetViewModel(worker), "Trạng thái"),
-            new ModuleItem("Cài đặt", AppIcons.Settings, "Hiệu năng · đồng bộ Hub · cập nhật",
-                settings, "Cài đặt"),
-        ];
+        // ══════════ Dựng 4 tab ribbon ══════════
 
-        // Module "Xử lý đơn Shopee" (phase 1b): mở SQLite riêng của app đơn hàng qua OrdersModuleHost. Nếu init
-        // hỏng (đĩa/khóa DB) thì TryCreate trả null → suite vẫn chạy, chỉ thiếu module này. Chèn NGAY TRƯỚC "Cài đặt".
-        var ordersVm = OrdersModuleHost.TryCreate();
+        // ── Tab 1: Workspace (gom toàn bộ 5 màn suite cũ) ──
+        var wsWorkspace = new RibbonScreenItem("Workspace", AppIcons.Dashboard, workspace,
+            toolTip: "BigSeller Workspace — Scrape · Import · Update theo từng shop");
+        var wsData = new RibbonScreenItem("Dữ liệu", AppIcons.Inventory, data,
+            toolTip: "Kho sản phẩm trên Hub — lọc · thêm/sửa · đã bán · SKU · xoá");
+        var wsSearch = new RibbonScreenItem("Search", AppIcons.Search, search,
+            toolTip: "Thống kê tìm kiếm sản phẩm");
+        var wsAccounts = new RibbonScreenItem("Tài khoản & Proxy", AppIcons.People, accounts,
+            toolTip: "Kho tài khoản Shopee dùng chung · Check tài khoản");
+        var wsFleet = new RibbonScreenItem("Trạng thái", AppIcons.Servers, fleet,
+            toolTip: "Theo dõi máy + Hub giao việc cho từng máy (đa máy)");
+        _workspaceHomeScreen = wsWorkspace;
+
+        var workspaceTab = new RibbonTab("Workspace", new List<RibbonGroup>
+        {
+            new RibbonGroup("Màn hình", new object[] { wsWorkspace, wsData, wsSearch, wsAccounts, wsFleet }),
+            new RibbonGroup("Hành động", new object[]
+            {
+                new RibbonActionItem("Dừng jobs", "■", StopWorkspaceJobsCommand,
+                    "Dừng các việc đang chạy (Scrape · Update · Search)"),
+            }),
+        });
+        _workspaceTab = workspaceTab;
+
+        // ── Tab 2: Cấu hình BigSeller ──
+        var bsScreen = new RibbonScreenItem("Cấu hình BigSeller", AppIcons.Database, bigSeller,
+            toolTip: "Tài khoản · workbook · cookie · shop · proxy");
+        var bigSellerTab = new RibbonTab("Cấu hình BigSeller", new List<RibbonGroup>
+        {
+            new RibbonGroup("Màn hình", new object[] { bsScreen }),
+            new RibbonGroup("Hành động", new object[]
+            {
+                new RibbonActionItem("Đăng nhập tất cả", "▶", bigSeller.LoginAllCommand,
+                    "Tự đăng nhập headless mọi tài khoản đủ Email + Mật khẩu rồi lưu cookie"),
+                new RibbonActionItem("Dừng", "■", bigSeller.StopLoginCommand,
+                    "Dừng tiến trình đăng nhập tất cả"),
+            }),
+        });
+        _bigSellerTab = bigSellerTab;
+
+        // ── Tab 3: Đơn hàng (4 màn con LÊN ribbon; chỉ dựng khi module khởi tạo được) ──
+        RibbonTab? ordersTab = null;
         if (ordersVm is not null)
         {
-            var ordersModule = new ModuleItem("Xử lý đơn Shopee", AppIcons.Receipt,
-                "Tài khoản shop · theo dõi & xử lý đơn · in phiếu", ordersVm, "Đơn hàng");
-            var settingsModule = Modules.First(m => ReferenceEquals(m.ViewModel, settings));
-            Modules.Insert(Modules.IndexOf(settingsModule), ordersModule);
+            var acc = ordersVm.AccountsVm;
+            var oAccounts = new RibbonScreenItem("Tài khoản", AppIcons.People, ordersVm, 0, "Tài khoản shop");
+            var oOrders = new RibbonScreenItem("Đơn hàng", AppIcons.Receipt, ordersVm, 1, "Theo dõi & xử lý đơn · in phiếu");
+            var oAuto = new RibbonScreenItem("Chạy tự động", AppIcons.PlayCircle, ordersVm, 2, "Vòng chạy tự động");
+            var oProxy = new RibbonScreenItem("Proxy", AppIcons.SwapHoriz, ordersVm, 3, "Kho proxy KiotProxy");
+
+            ordersTab = new RibbonTab("Đơn hàng", new List<RibbonGroup>
+            {
+                new RibbonGroup("Màn hình", new object[] { oAccounts, oOrders, oAuto, oProxy }),
+                new RibbonGroup("Hành động", new object[]
+                {
+                    new RibbonActionItem("Chọn tất cả", "✓", acc.SelectAllCommand,
+                        "Chọn / bỏ chọn toàn bộ tài khoản đang hiển thị"),
+                    new RibbonActionItem("Sync đã chọn", "⇊", acc.SyncSelectedCommand,
+                        "Chạy trọn gói cho các tài khoản đang tick: mở trang → kiểm tra → xử lý đơn nếu có → sync"),
+                    new RibbonActionItem("Dừng đã chọn", "■", acc.StopSelectedCommand,
+                        "Dừng toàn bộ việc đang làm của các tài khoản đang tick"),
+                    new RibbonActionItem("Dừng tất cả", "✕", acc.StopAllCommand,
+                        "Dừng mọi phiên đang chạy (đóng hết Brave)"),
+                }),
+                new RibbonGroup("Tùy chọn", new object[]
+                {
+                    new RibbonToggleItem("Xóa profile và tạo lại", acc, nameof(acc.XoaProfileTaoLai),
+                        () => acc.XoaProfileTaoLai, v => acc.XoaProfileTaoLai = v,
+                        "Phiên mở mới sẽ xóa hồ sơ trình duyệt của tài khoản rồi tạo lại — phải đăng nhập lại. Áp cho mọi phiên mở mới."),
+                }),
+            });
         }
 
-        // Workspace bấm "Đăng nhập / cấu hình" → nhảy sidebar sang tab BigSeller (không làm trùng 2 nơi).
-        workspace.RequestNavigate = target =>
-            Selected = Modules.FirstOrDefault(m => ReferenceEquals(m.ViewModel, target));
+        // ── Tab 4: Cài đặt (gộp 2 màn cài đặt) ──
+        var setScreen = new RibbonScreenItem("Cài đặt", AppIcons.Settings, unifiedSettings,
+            toolTip: "Cấu hình Shopee Suite + Đơn hàng");
+        var settingsTab = new RibbonTab("Cài đặt", new List<RibbonGroup>
+        {
+            new RibbonGroup("Màn hình", new object[] { setScreen }),
+            new RibbonGroup("Hành động", new object[]
+            {
+                new RibbonActionItem("Cập nhật & khởi động lại", "⬆", settings.ApplyUpdateCommand,
+                    "Áp dụng bản đã tải + mở lại app (chỉ khả dụng khi đã tải xong bản mới)"),
+            }),
+        });
 
-        _welcome = new WelcomeViewModel(this);
-        _selected = null; // mặc định: màn hình Welcome, không focus module nào
+        Tabs.Add(workspaceTab);
+        Tabs.Add(bigSellerTab);
+        if (ordersTab is not null) Tabs.Add(ordersTab);
+        Tabs.Add(settingsTab);
+
+        // Ráp lệnh điều hướng + trạng thái active cho mọi nút màn (post-wire vì cần tham chiếu tab đã dựng xong).
+        foreach (var tab in Tabs)
+            foreach (var scr in tab.Groups.SelectMany(g => g.Items).OfType<RibbonScreenItem>())
+            {
+                scr.OwnerTab = tab;
+                var s = scr;
+                s.ActivateCommand = new RelayCommand(() => ActivateScreen(s));
+            }
+
+        // Mặc định mỗi tab mở màn ĐẦU TIÊN (được nhớ riêng cho từng tab).
+        foreach (var tab in Tabs)
+        {
+            var first = tab.Groups.SelectMany(g => g.Items).OfType<RibbonScreenItem>().FirstOrDefault();
+            if (first is not null) { _screenByTab[tab] = first.ScreenVm; first.IsActive = true; }
+        }
+
+        // Workspace bấm "Đăng nhập / cấu hình" → nhảy sang tab "Cấu hình BigSeller" (target luôn là bigSeller VM).
+        workspace.RequestNavigate = _ => { SelectedTab = _bigSellerTab; };
+
+        // Mặc định mở tab Workspace (màn BigSeller Workspace).
+        SelectedTab = workspaceTab;
     }
 
-    partial void OnSelectedChanged(ModuleItem? value) => OnPropertyChanged(nameof(Current));
+    /// <summary>Chuyển màn đang hiển thị cho tab chứa nút. Với module đơn hàng: set SelectedNavIndex để giữ
+    /// hành vi Reload() từng màn con như switch cũ; các màn suite: đổi thẳng ScreenVm. Tô active đúng nút.</summary>
+    private void ActivateScreen(RibbonScreenItem item)
+    {
+        var tab = item.OwnerTab;
+        if (tab is null) return;
 
-    /// <summary>Bấm logo/brand trên top bar → bỏ chọn module, quay về màn hình Welcome.</summary>
+        if (item.NavIndex >= 0 && item.ScreenVm is OrdersMainViewModel orders)
+            orders.SelectedNavIndex = item.NavIndex;   // Reload() + đổi CurrentViewModel bên trong MainView
+
+        _screenByTab[tab] = item.ScreenVm;
+        foreach (var s in tab.Groups.SelectMany(g => g.Items).OfType<RibbonScreenItem>())
+            s.IsActive = ReferenceEquals(s, item);
+
+        if (ReferenceEquals(tab, SelectedTab)) OnPropertyChanged(nameof(CurrentScreen));
+    }
+
+    /// <summary>Nút "Dừng jobs" (ribbon Workspace): CHỈ gọi các lệnh dừng SẴN CÓ (như trong PrepareShutdownAsync),
+    /// không thêm logic mới.</summary>
     [RelayCommand]
-    private void GoHome() => Selected = null;
+    private void StopWorkspaceJobs()
+    {
+        _update.StopAllSingle();
+        if (_scrape.StopCommand.CanExecute(null)) _scrape.StopCommand.Execute(null);
+        if (_search.StopCommand.CanExecute(null)) _search.StopCommand.Execute(null);
+    }
+
+    /// <summary>Bấm logo/brand → về tab Workspace (màn BigSeller Workspace).</summary>
+    [RelayCommand]
+    private void GoHome()
+    {
+        SelectedTab = _workspaceTab;
+        if (_workspaceHomeScreen is not null) ActivateScreen(_workspaceHomeScreen);
+    }
 }

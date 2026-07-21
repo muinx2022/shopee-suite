@@ -34,41 +34,8 @@
             </LinearGradientBrush>
         </DockPanel.Background>
 
-        <!-- ===== Thanh MENU NGANG (trên) ===== -->
-        <Border DockPanel.Dock="Top" Classes="topbar">
-            <Grid ColumnDefinitions="Auto,*">
-
-                <!-- Tiêu đề app -->
-                <TextBlock Grid.Column="0"
-                           Text="Xử lý đơn Shopee"
-                           FontSize="15" FontWeight="Bold"
-                           Foreground="{StaticResource TextInk}"
-                           VerticalAlignment="Center"
-                           Margin="16,0,24,0" />
-
-                <!-- Menu ngang: icon + nhãn nằm cạnh nhau, tab đang chọn nổi bật -->
-                <ListBox Grid.Column="1"
-                         Classes="navTop"
-                         VerticalAlignment="Center"
-                         ItemsSource="{Binding NavItems}"
-                         SelectedIndex="{Binding SelectedNavIndex}">
-                    <ListBox.ItemsPanel>
-                        <ItemsPanelTemplate>
-                            <StackPanel Orientation="Horizontal" />
-                        </ItemsPanelTemplate>
-                    </ListBox.ItemsPanel>
-                    <ListBox.ItemTemplate>
-                        <DataTemplate x:DataType="vm:NavItem">
-                            <StackPanel Orientation="Horizontal" Spacing="8"
-                                        VerticalAlignment="Center">
-                                <TextBlock Classes="nav-top-icon" Text="{Binding Icon}" />
-                                <TextBlock Classes="nav-top-label" Text="{Binding Label}" />
-                            </StackPanel>
-                        </DataTemplate>
-                    </ListBox.ItemTemplate>
-                </ListBox>
-            </Grid>
-        </Border>
+        <!-- (Thanh MENU NGANG cũ đã bỏ: 4 màn con nay điều hướng từ dải Ribbon của shell suite qua
+             MainViewModel.SelectedNavIndex; màn Cài đặt dời sang tab Cài đặt chung.) -->
 
         <!-- ===== Thanh TRẠNG THÁI (đáy) ===== -->
         <Border DockPanel.Dock="Bottom" Classes="statusBar">

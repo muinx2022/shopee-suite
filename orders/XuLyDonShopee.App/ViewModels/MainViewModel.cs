@@ -37,14 +37,26 @@ public partial class MainViewModel : ViewModelBase
         RefreshStatus();
     }
 
-    /// <summary>Các mục trên sidebar.</summary>
+    // ── 4 màn con + màn Cài đặt (read-only) để shell suite ráp lên dải Ribbon. Màn Cài đặt của đơn hàng
+    //    KHÔNG còn trong NavItems (đã dời sang tab Cài đặt chung), nhưng VM vẫn sống để tab đó dùng. ──
+    /// <summary>Màn "Tài khoản" (module đơn hàng).</summary>
+    public AccountsViewModel AccountsVm => _accountsVm;
+    /// <summary>Màn "Đơn hàng".</summary>
+    public OrdersViewModel OrdersVm => _ordersVm;
+    /// <summary>Màn "Chạy tự động".</summary>
+    public AutoRunViewModel AutoRunVm => _autoRunVm;
+    /// <summary>Màn "Proxy".</summary>
+    public ProxiesViewModel ProxiesVm => _proxiesVm;
+    /// <summary>Màn "Cài đặt" của đơn hàng — nhúng vào màn Cài đặt GỘP của suite.</summary>
+    public SettingsViewModel SettingsVm => _settingsVm;
+
+    /// <summary>Các màn con của module đơn hàng (đã LÊN dải Ribbon; bỏ "Cài đặt" — dời sang tab Cài đặt chung).</summary>
     public ObservableCollection<NavItem> NavItems { get; } = new()
     {
         new NavItem("Tài khoản", "◵"),
         new NavItem("Đơn hàng", "▤"),
         new NavItem("Chạy tự động", "▶"),
-        new NavItem("Proxy", "⇄"),
-        new NavItem("Cài đặt", "⚙")
+        new NavItem("Proxy", "⇄")
     };
 
     [ObservableProperty]
@@ -95,10 +107,6 @@ public partial class MainViewModel : ViewModelBase
             case 3:
                 _proxiesVm.Reload();
                 CurrentViewModel = _proxiesVm;
-                break;
-            case 4:
-                _settingsVm.Reload();
-                CurrentViewModel = _settingsVm;
                 break;
         }
 

@@ -1,18 +1,20 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Shopee.Suite.ViewModels"
         x:Class="Shopee.Suite.MainWindow"
         Title="Shopee Suite" Width="1500" Height="940" MinWidth="1080" MinHeight="680"
         WindowStartupLocation="CenterScreen"
         Background="{DynamicResource WindowBackgroundBrush}"
         FontFamily="{DynamicResource UiFont}">
 
-    <Grid RowDefinitions="58,*">
-        <!-- ══════════ TOP APP BAR ══════════ -->
+    <Grid RowDefinitions="58,Auto,*">
+
+        <!-- ══════════ Row 0: TAB STRIP (nền tối, kiểu Office) ══════════ -->
         <Border Grid.Row="0" ZIndex="1" Background="{DynamicResource NavBarBrush}"
                 BorderBrush="{DynamicResource NavBarBorderBrush}" BorderThickness="0,0,0,1"
                 BoxShadow="0 2 12 0 #33000000">
             <Grid ColumnDefinitions="Auto,Auto,*">
-                <!-- Brand — bấm để quay về màn hình Welcome -->
+                <!-- Brand — bấm để về tab Workspace -->
                 <Button Grid.Column="0" Classes="brand" VerticalAlignment="Stretch"
                         Command="{Binding GoHomeCommand}" ToolTip.Tip="Về màn hình chính">
                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Spacing="11">
@@ -30,9 +32,9 @@
                 <Rectangle Grid.Column="1" Width="1" Margin="6,15" VerticalAlignment="Stretch"
                            Fill="{DynamicResource NavDividerBrush}" />
 
-                <!-- Tab module (ngang, cuộn ngang nếu tràn) -->
+                <!-- Tab ribbon (ngang) -->
                 <ListBox Grid.Column="2" Classes="topnav" VerticalAlignment="Center" Margin="8,0"
-                         ItemsSource="{Binding Modules}" SelectedItem="{Binding Selected}"
+                         ItemsSource="{Binding Tabs}" SelectedItem="{Binding SelectedTab}"
                          ScrollViewer.HorizontalScrollBarVisibility="Auto"
                          ScrollViewer.VerticalScrollBarVisibility="Disabled">
                     <ListBox.ItemsPanel>
@@ -41,20 +43,81 @@
                         </ItemsPanelTemplate>
                     </ListBox.ItemsPanel>
                     <ListBox.ItemTemplate>
-                        <DataTemplate>
-                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Spacing="9"
-                                        ToolTip.Tip="{Binding Subtitle}">
-                                <PathIcon Data="{Binding Icon}" Width="18" Height="18" VerticalAlignment="Center" />
-                                <TextBlock Text="{Binding NavTitle}" FontSize="13" FontWeight="SemiBold"
-                                           VerticalAlignment="Center" />
-                            </StackPanel>
+                        <DataTemplate DataType="vm:RibbonTab">
+                            <TextBlock Text="{Binding Title}" FontSize="13" FontWeight="SemiBold"
+                                       VerticalAlignment="Center" />
                         </DataTemplate>
                     </ListBox.ItemTemplate>
                 </ListBox>
             </Grid>
         </Border>
 
-        <!-- ══════════ CONTENT ══════════ -->
-        <ContentControl Grid.Row="1" Content="{Binding Current}" />
+        <!-- ══════════ Row 1: DẢI RIBBON (nền sáng, nhóm + nhãn đáy) ══════════ -->
+        <Border Grid.Row="1" Background="{DynamicResource CardBackgroundBrush}"
+                BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1">
+            <ItemsControl ItemsSource="{Binding SelectedTab.Groups}" Margin="12,6">
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <StackPanel Orientation="Horizontal" />
+                    </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate DataType="vm:RibbonGroup">
+                        <StackPanel Orientation="Horizontal">
+                            <!-- Nhóm: hàng nút (trên) + nhãn nhóm (đáy) -->
+                            <StackPanel Margin="6,0">
+                                <ItemsControl ItemsSource="{Binding Items}" HorizontalAlignment="Center">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <StackPanel Orientation="Horizontal" Spacing="2" />
+                                        </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.DataTemplates>
+                                        <!-- Nút ĐIỀU HƯỚNG MÀN (icon to trên, nhãn dưới; active tô accent) -->
+                                        <DataTemplate DataType="vm:RibbonScreenItem">
+                                            <Button Classes="ribbon" Classes.active="{Binding IsActive}"
+                                                    Command="{Binding ActivateCommand}" ToolTip.Tip="{Binding ToolTip}">
+                                                <StackPanel>
+                                                    <PathIcon Data="{Binding Icon}" Width="22" Height="22"
+                                                              HorizontalAlignment="Center" />
+                                                    <TextBlock Text="{Binding Title}" FontSize="11"
+                                                               HorizontalAlignment="Center" Margin="0,4,0,0" />
+                                                </StackPanel>
+                                            </Button>
+                                        </DataTemplate>
+                                        <!-- Nút HÀNH ĐỘNG (glyph to trên, nhãn dưới) -->
+                                        <DataTemplate DataType="vm:RibbonActionItem">
+                                            <Button Classes="ribbon" Command="{Binding Command}"
+                                                    ToolTip.Tip="{Binding ToolTip}">
+                                                <StackPanel>
+                                                    <TextBlock Text="{Binding Glyph}" FontSize="18"
+                                                               HorizontalAlignment="Center" />
+                                                    <TextBlock Text="{Binding Title}" FontSize="11"
+                                                               HorizontalAlignment="Center" Margin="0,4,0,0" />
+                                                </StackPanel>
+                                            </Button>
+                                        </DataTemplate>
+                                        <!-- TOGGLE (checkbox) -->
+                                        <DataTemplate DataType="vm:RibbonToggleItem">
+                                            <CheckBox Classes="ribbonToggle" IsChecked="{Binding IsChecked}"
+                                                      Content="{Binding Title}" ToolTip.Tip="{Binding ToolTip}"
+                                                      VerticalAlignment="Center" Margin="6,0" />
+                                        </DataTemplate>
+                                    </ItemsControl.DataTemplates>
+                                </ItemsControl>
+                                <TextBlock Text="{Binding Title}" FontSize="10.5" HorizontalAlignment="Center"
+                                           Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,3,0,0" />
+                            </StackPanel>
+                            <!-- Divider dọc giữa các nhóm -->
+                            <Rectangle Width="1" Margin="4,6" VerticalAlignment="Stretch"
+                                       Fill="{DynamicResource BorderBrush}" />
+                        </StackPanel>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </Border>
+
+        <!-- ══════════ Row 2: NỘI DUNG màn đang chọn ══════════ -->
+        <ContentControl Grid.Row="2" Content="{Binding CurrentScreen}" />
     </Grid>
 </Window>

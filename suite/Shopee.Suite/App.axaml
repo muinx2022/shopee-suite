@@ -40,6 +40,8 @@
         <DataTemplate DataType="ca:CheckAccountViewModel"><ca:CheckAccountView /></DataTemplate>
         <DataTemplate DataType="fleet:FleetViewModel"><fleet:FleetView /></DataTemplate>
         <DataTemplate DataType="settings:SettingsViewModel"><settings:SettingsView /></DataTemplate>
+        <!-- Màn Cài đặt GỘP (suite + đơn hàng) — nhúng 2 view con qua ContentControl bên trong. -->
+        <DataTemplate DataType="settings:UnifiedSettingsViewModel"><settings:UnifiedSettingsView /></DataTemplate>
 
         <!-- Module "Xử lý đơn Shopee" (phase 1b): ViewLocator reflection của app đơn hàng — Match CHỈ nhận
              XuLyDonShopee.App.ViewModels.ViewModelBase nên KHÔNG hijack VM của suite; các DataTemplate tường

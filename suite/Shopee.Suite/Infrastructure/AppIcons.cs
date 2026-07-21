@@ -47,6 +47,14 @@ public static class AppIcons
         "3h12c1.66 0 3-1.34 3-3V2l-1.5 1.5zM19 19c0 .55-.45 1-1 1s-1-.45-1-1v-3H8V5h11v14zM9 7h6v2H9V7zm7 " +
         "0h2v2h-2V7zm-7 3h6v2H9v-2zm7 0h2v2h-2v-2z";
 
+    /// <summary>Nút play trong vòng tròn — màn "Chạy tự động" (module đơn hàng).</summary>
+    public const string PlayCircle =
+        "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z";
+
+    /// <summary>Hai mũi tên đổi chiều — màn "Proxy" (module đơn hàng).</summary>
+    public const string SwapHoriz =
+        "M6.99 11L3 15l3.99 4v-3H14v-2H6.99v-3zM21 9l-3.99-4v3H10v2h7.01v3L21 9z";
+
     /// <summary>Bánh răng — Cài đặt.</summary>
     public const string Settings =
         "M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 " +
