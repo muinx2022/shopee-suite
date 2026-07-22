@@ -1076,11 +1076,27 @@ public class ShopeeLoginService
             }
             finally
             {
-                // LUÔN đóng tab Hotmail đã mở (dù lỗi) — không để tab treo.
-                if (mailPage is not null)
+                // LUÔN đóng MỌI tab Microsoft/Outlook đã mở trong lượt xác minh — gồm mailPage LẪN tab phát sinh
+                // từ chuỗi redirect OAuth (login.live/office/m365 có thể mở thêm tab) → nếu chỉ đóng mailPage thì
+                // tab kia TREO lại. Trừ tab bán hàng Shopee (page). Best-effort, không để tab treo.
+                try
                 {
-                    try { await mailPage.CloseAsync().ConfigureAwait(false); } catch { /* bỏ qua */ }
+                    var toClose = _browser.Contexts.SelectMany(c => c.Pages)
+                        .Where(p => p != page && (p == mailPage ||
+                            (!string.IsNullOrEmpty(p.Url) && (
+                                p.Url.Contains("outlook", StringComparison.OrdinalIgnoreCase)
+                                || p.Url.Contains("live.com", StringComparison.OrdinalIgnoreCase)
+                                || p.Url.Contains("microsoftonline", StringComparison.OrdinalIgnoreCase)
+                                || p.Url.Contains("office.com", StringComparison.OrdinalIgnoreCase)
+                                || p.Url.Contains("m365", StringComparison.OrdinalIgnoreCase)
+                                || p.Url.Contains("microsoft.com", StringComparison.OrdinalIgnoreCase)))))
+                        .ToList();
+                    foreach (var p in toClose)
+                    {
+                        try { await p.CloseAsync().ConfigureAwait(false); } catch { /* bỏ qua */ }
+                    }
                 }
+                catch { /* context ngắt — bỏ qua */ }
             }
         }
 
