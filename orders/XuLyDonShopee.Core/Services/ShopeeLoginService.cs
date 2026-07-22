@@ -1151,8 +1151,9 @@ public class ShopeeLoginService
                     break;
                 }
 
-                // "Sử dụng mật khẩu" (màn chọn cách) HOẶC tile "Nhập mật khẩu" (màn 'các cách khác') — cùng khớp "mật khẩu".
-                var usePwd = await FindVisibleByTextInFramesAsync(mailPage, MsUsePasswordSelectors, UsePasswordRegex, ct, 1200).ConfigureAwait(false);
+                // "Sử dụng mật khẩu" (màn chọn cách) HOẶC tile "Nhập mật khẩu" (màn 'các cách khác') — khớp KHÔNG
+                // dấu để tránh lỗi NFC/NFD (text MS dạng tổ hợp dấu).
+                var usePwd = await FindByNormalizedTextInFramesAsync(mailPage, MsUsePasswordSelectors, new[] { "mat khau", "password" }, ct, 1200).ConfigureAwait(false);
                 if (usePwd is not null)
                 {
                     L("Chọn 'Dùng mật khẩu' / 'Nhập mật khẩu'...");
@@ -1162,8 +1163,9 @@ public class ShopeeLoginService
                 }
 
                 // Form mới "Xác minh email của bạn" (Fluent, passwordless): "Các cách khác để đăng nhập" → (vòng sau
-                // thấy tile "Nhập mật khẩu"). Quét mọi frame. Click 1 lần rồi để vòng sau lo tile mật khẩu.
-                var otherWays = await FindVisibleByTextInFramesAsync(mailPage, MsOtherWaysSelectors, OtherWaysRegex, ct, 1200).ConfigureAwait(false);
+                // thấy tile "Nhập mật khẩu"). Quét mọi frame + khớp KHÔNG dấu (tránh lỗi NFC/NFD). Click 1 lần rồi
+                // để vòng sau lo tile mật khẩu.
+                var otherWays = await FindByNormalizedTextInFramesAsync(mailPage, MsOtherWaysSelectors, new[] { "cach khac de dang nhap", "other ways to sign in" }, ct, 1200).ConfigureAwait(false);
                 if (otherWays is not null)
                 {
                     L("Form 'Xác minh email' — bấm 'Các cách khác để đăng nhập'...");
@@ -1720,6 +1722,52 @@ public class ShopeeLoginService
                             }
                         }
                         catch { /* detached / lỗi đọc — bỏ qua phần tử này */ }
+                    }
+                }
+                await Task.Delay(300, ct).ConfigureAwait(false);
+            }
+            while (DateTime.UtcNow < deadline);
+
+            return null;
+        }
+
+        /// <summary>Như <see cref="FindVisibleByTextInFramesAsync"/> nhưng so khớp KHÔNG PHÂN BIỆT DẤU: chuẩn hóa
+        /// InnerText qua <see cref="NormalizeForMatch"/> (FormD + bỏ dấu + đ→d + lower) rồi kiểm CHỨA một trong
+        /// <paramref name="normalizedNeedles"/> (phải ĐÃ ở dạng không dấu, chữ thường). TRỊ lỗi: text tiếng Việt
+        /// trên trang MS ở dạng tổ hợp dấu (NFD) khác literal regex dựng sẵn (NFC) → Regex.IsMatch trượt dù mắt
+        /// thấy giống. VD "Các cách khác để đăng nhập" NFD KHÔNG khớp regex "cách khác..." NFC.</summary>
+        private static async Task<IElementHandle?> FindByNormalizedTextInFramesAsync(
+            IPage page, string[] selectors, string[] normalizedNeedles, CancellationToken ct, int timeoutMs)
+        {
+            var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
+            do
+            {
+                ct.ThrowIfCancellationRequested();
+                foreach (var frame in page.Frames)
+                {
+                    foreach (var sel in selectors)
+                    {
+                        IReadOnlyList<IElementHandle> els;
+                        try { els = await frame.QuerySelectorAllAsync(sel).ConfigureAwait(false); }
+                        catch { continue; }
+
+                        foreach (var el in els)
+                        {
+                            try
+                            {
+                                if (!await IsElementVisibleByClientRectsAsync(el).ConfigureAwait(false))
+                                {
+                                    continue;
+                                }
+
+                                var txt = NormalizeForMatch(await el.InnerTextAsync().ConfigureAwait(false));
+                                if (txt.Length > 0 && Array.Exists(normalizedNeedles, n => txt.Contains(n, StringComparison.Ordinal)))
+                                {
+                                    return el;
+                                }
+                            }
+                            catch { /* detached — bỏ qua */ }
+                        }
                     }
                 }
                 await Task.Delay(300, ct).ConfigureAwait(false);
