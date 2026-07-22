@@ -1281,9 +1281,18 @@ public class ShopeeLoginService
                     for (var i = 0; i < rows.Count; i++)
                     {
                         ct.ThrowIfCancellationRequested();
-                        // Mở mail thứ i (dòng có thể detached nếu list vẽ lại → bỏ qua, vòng sau query lại).
-                        try { (mx, my) = await HumanMoveAndClickAsync(mailPage, rows[i], mx, my, rng, ct).ConfigureAwait(false); }
+                        // Mở mail thứ i bằng click CÓ HIT-TEST: Outlook load quảng cáo async, danh sách hay xê
+                        // dịch — nếu đúng lúc click mà quảng cáo chèn vào chỗ dòng mail thì elementFromPoint KHÔNG
+                        // còn là dòng mail → KHÔNG click (Clicked=false) → bỏ qua, vòng sau query lại (tránh click
+                        // nhầm quảng cáo). Dòng cũng có thể detached khi list vẽ lại → catch → bỏ qua.
+                        bool clickedRow;
+                        try { (mx, my, clickedRow) = await HumanMoveAndClickVerifiedAsync(mailPage, rows[i], mx, my, rng, ct).ConfigureAwait(false); }
                         catch { continue; }
+                        if (!clickedRow)
+                        {
+                            L($"Mail Shopee #{i + 1}: danh sách đang xê dịch (quảng cáo?) — chưa click được, thử lại vòng sau.");
+                            continue;
+                        }
                         await Task.Delay(rng.Next(1200, 2500), ct).ConfigureAwait(false);
 
                         var outcome = await ClickConfirmLinkInMailAsync(mailPage, sellerPage, log, rng, ct).ConfigureAwait(false);
