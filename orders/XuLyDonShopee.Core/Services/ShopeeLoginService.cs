@@ -1265,7 +1265,8 @@ public class ShopeeLoginService
             await Task.Delay(rng.Next(2000, 4000), ct).ConfigureAwait(false);
 
             var round = 0;
-            var noMailStreak = 0; // số vòng LIÊN TIẾP không thấy mail nào — đủ 3 thì bấm "Gửi lại" trên trang Shopee
+            var noMailStreak = 0; // số vòng LIÊN TIẾP không có mail MỚI để thử — đủ 3 thì bấm "Gửi lại" trên trang Shopee
+            var expiredKeys = new HashSet<string>(StringComparer.Ordinal); // text dòng mail đã thử mà link HẾT HẠN → không mở lại
             while (DateTime.UtcNow < deadline)
             {
                 ct.ThrowIfCancellationRequested();
@@ -1301,9 +1302,9 @@ public class ShopeeLoginService
                     rows = await FindAllShopeeMailRowsAsync(mailPage, MaxMailsPerRound, ct).ConfigureAwait(false);
                 }
 
+                var triedNewMail = false; // vòng này có mở được mail CHƯA-hết-hạn nào để thử không?
                 if (rows.Count > 0)
                 {
-                    noMailStreak = 0; // thấy mail → reset chuỗi "không thấy mail"
                     L($"Thấy {rows.Count} mail Shopee (mới nhất trước) — mở lần lượt tìm link xác nhận 'TẠI ĐÂY'...");
                     var vp = mailPage.ViewportSize;
                     double mx = vp is not null ? vp.Width / 2.0 : 640;
@@ -1312,10 +1313,20 @@ public class ShopeeLoginService
                     for (var i = 0; i < rows.Count; i++)
                     {
                         ct.ThrowIfCancellationRequested();
-                        // Mở mail thứ i bằng click CÓ HIT-TEST: Outlook load quảng cáo async, danh sách hay xê
-                        // dịch — nếu đúng lúc click mà quảng cáo chèn vào chỗ dòng mail thì elementFromPoint KHÔNG
-                        // còn là dòng mail → KHÔNG click (Clicked=false) → bỏ qua, vòng sau query lại (tránh click
-                        // nhầm quảng cáo). Dòng cũng có thể detached khi list vẽ lại → catch → bỏ qua.
+
+                        // Nhận dạng mail theo TEXT dòng (người gửi + tiêu đề + ngày). Mail đã thử mà link HẾT HẠN
+                        // thì GHI NHỚ và KHÔNG mở lại — tránh đọc-đi-đọc-lại cùng 1 mail hết hạn vô tận.
+                        string key;
+                        try { key = ((await rows[i].InnerTextAsync().ConfigureAwait(false)) ?? string.Empty).Trim(); }
+                        catch { continue; }
+                        if (key.Length > 0 && expiredKeys.Contains(key))
+                        {
+                            continue;
+                        }
+
+                        // Mở mail thứ i bằng click CÓ HIT-TEST: Outlook load quảng cáo async, danh sách hay xê dịch —
+                        // nếu đúng lúc click mà quảng cáo chèn vào chỗ dòng mail thì elementFromPoint KHÔNG còn là dòng
+                        // mail → KHÔNG click (Clicked=false) → bỏ qua. Dòng cũng có thể detached khi list vẽ lại.
                         bool clickedRow;
                         try { (mx, my, clickedRow) = await HumanMoveAndClickVerifiedAsync(mailPage, rows[i], mx, my, rng, ct).ConfigureAwait(false); }
                         catch { continue; }
@@ -1326,6 +1337,7 @@ public class ShopeeLoginService
                         }
                         await Task.Delay(rng.Next(1200, 2500), ct).ConfigureAwait(false);
 
+                        triedNewMail = true;
                         var outcome = await ClickConfirmLinkInMailAsync(mailPage, sellerPage, log, rng, ct).ConfigureAwait(false);
                         if (outcome == ConfirmOutcome.Confirmed)
                         {
@@ -1333,20 +1345,27 @@ public class ShopeeLoginService
                         }
                         if (outcome == ConfirmOutcome.Expired)
                         {
-                            // Link mail này đã hết hạn → các mail CŨ HƠN bên dưới còn dễ hết hạn hơn. Thoát vòng
-                            // duyệt để về nhánh reload + chờ 10-15s của vòng while ngoài, rồi tìm mail MỚI HƠN.
-                            L($"Mail Shopee #{i + 1}: link hết hạn → tải lại hộp thư, chờ mail MỚI HƠN.");
-                            break;
+                            // Link HẾT HẠN → GHI NHỚ mail này (không mở lại), thử mail KẾ trong danh sách. Khi mọi
+                            // mail đều đã thử-và-hết-hạn → vòng sau rơi vào nhánh 'không có mail mới' → bấm 'Gửi lại'.
+                            if (key.Length > 0) expiredKeys.Add(key);
+                            L($"Mail Shopee #{i + 1}: link hết hạn → bỏ qua mail này (không mở lại), thử mail khác.");
+                            continue;
                         }
                         L($"Mail Shopee #{i + 1} không có link xác nhận — thử mail kế.");
                     }
                 }
+
+                if (triedNewMail)
+                {
+                    noMailStreak = 0; // vòng này có thử mail MỚI → reset chuỗi
+                }
                 else
                 {
-                    // Vòng này KHÔNG thấy mail nào → đếm chuỗi. Sau 3 vòng LIÊN TIẾP không thấy → quay lại trang
-                    // xác minh Shopee bấm "Gửi lại" (sellerPage vẫn mở song song), chờ ~1' cho Shopee gửi lại mail.
+                    // KHÔNG có mail xác nhận MỚI để thử (hộp thư rỗng HOẶC mọi mail đều đã thử-và-hết-hạn) → đếm.
+                    // Sau 3 vòng LIÊN TIẾP → QUAY LẠI trang xác minh Shopee bấm "Gửi lại" (sellerPage vẫn mở), chờ ~1'
+                    // cho Shopee gửi mail MỚI (link tươi) rồi kiểm lại.
                     noMailStreak++;
-                    L($"Vòng {round}: chưa thấy mail xác nhận — tải lại hộp thư, chờ mail tới...");
+                    L($"Vòng {round}: không có mail xác nhận MỚI (mail cũ đã hết hạn?) — tải lại, chờ mail mới...");
                     if (noMailStreak >= 3 && DateTime.UtcNow < deadline)
                     {
                         noMailStreak = 0;
