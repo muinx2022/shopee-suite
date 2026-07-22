@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Globalization;
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.Playwright;
@@ -242,6 +244,24 @@ public class ShopeeLoginService
 {
     /// <summary>URL trang bán hàng (Shopee Seller Centre).</summary>
     public const string SellerUrl = "https://banhang.shopee.vn/";
+
+    // ===== Forwarder cho test (luồng verify-email) =====
+    // Logic khớp text thực nằm trong nested class LoginSession (nơi giữ các Regex + luồng verify-email). Phơi
+    // lại ở cấp class ngoài (internal — InternalsVisibleTo cho XuLyDonShopee.Tests) để unit-test được các hàm
+    // thuần này mà không cần dựng cả phiên trình duyệt.
+
+    /// <summary>Chuẩn hóa text để so khớp bền (bỏ dấu tiếng Việt kể cả đ→d, gộp space, hạ chữ thường).</summary>
+    internal static string NormalizeForMatch(string? s) => LoginSession.NormalizeForMatch(s);
+
+    /// <summary>True nếu dòng mail là "Cảnh báo bảo mật Tài khoản Shopee" (người gửi shopee + tiêu đề chứa
+    /// "cảnh báo bảo mật"); loại mail trả hàng/khác của Shopee.</summary>
+    internal static bool IsSecurityWarningMailRow(string? rowText) => LoginSession.IsSecurityWarningMailRow(rowText);
+
+    /// <summary>True nếu text khớp link xác nhận cần bấm (vd "TẠI ĐÂY") — KHÔNG còn khớp "here"/"click here".</summary>
+    internal static bool MatchesConfirmLink(string? text) => LoginSession.MatchesConfirmLink(text);
+
+    /// <summary>True nếu text là trang báo link đã hết hạn/hết hiệu lực.</summary>
+    internal static bool MatchesConfirmExpired(string? text) => LoginSession.MatchesConfirmExpired(text);
 
     /// <summary>
     /// Đảm bảo có sẵn trình duyệt để mở cho <paramref name="browserChoice"/>. Nếu phân giải được một
@@ -791,16 +811,80 @@ public class ShopeeLoginService
             new(@"^\s*(other|khác|khac)\s*$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
         private static readonly Regex FocusedPivotRegex =
             new(@"^\s*(focused|ưu tiên|uu tien)\s*$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-        // Text CỦA LINK xác nhận trong mail Shopee — link thường CHỈ bọc "TẠI ĐÂY" (không phải cả câu "xác nhận
-        // tại đây") nên phải bắt riêng "tại đây"/"here"; "here" có \b để không dính "there"/"where".
+        // Text CỦA LINK xác nhận trong mail "Cảnh báo bảo mật" của Shopee — link thường CHỈ bọc "TẠI ĐÂY" (không
+        // phải cả câu "xác nhận tại đây") nên phải bắt riêng "tại đây". CỐ Ý BỎ "here"/"click here": chữ "here"
+        // dính cả link trong mail TRẢ HÀNG của Shopee → click nhầm; mail đã được lọc đúng "Cảnh báo bảo mật" nên
+        // chỉ cần khớp các cụm xác nhận tiếng Việt an toàn.
         private static readonly Regex ConfirmLinkRegex =
-            new(@"xác nhận|xac nhan|verify|confirm|đúng là tôi|dung la toi|yes,?\s*it'?s me|tại đây|tại đấy|tai day|nhấn vào đây|bấm vào đây|nhan vao day|bam vao day|click here|\bhere\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+            new(@"xác nhận|xac nhan|verify|confirm|đúng là tôi|dung la toi|yes,?\s*it'?s me|tại đây|tại đấy|tai day|nhấn vào đây|bấm vào đây|nhan vao day|bam vao day", RegexOptions.IgnoreCase | RegexOptions.Compiled);
         private static readonly Regex SignInRegex =
             new(@"sign\s*in|đăng nhập|dang nhap", RegexOptions.IgnoreCase | RegexOptions.Compiled);
         // Thông báo Shopee đã XÁC NHẬN đăng nhập thành công (trên tab mở ra sau khi bấm "TẠI ĐÂY") — chờ dấu
         // hiệu này rồi mới đóng tab, kẻo đóng sớm khi Shopee CHƯA kịp ghi nhận xác nhận.
         private static readonly Regex ConfirmSuccessRegex =
             new(@"thành công|thanh cong|đã xác nhận|da xac nhan|xác nhận đăng nhập|xac nhan dang nhap|verified|confirmed|success", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        // Trang mở ra sau khi bấm "TẠI ĐÂY" báo link đã HẾT HẠN/HẾT HIỆU LỰC (Shopee gửi nhiều mail "Cảnh báo
+        // bảo mật" khi thử lại nhiều lần → link mail cũ hết hạn). Gặp trang này thì KHÔNG coi là xác nhận thành
+        // công — phải quay lại chờ mail MỚI HƠN. Liệt kê cả dạng có dấu lẫn không dấu (khớp IgnoreCase).
+        private static readonly Regex ConfirmExpiredRegex =
+            new(@"hết hiệu lực|het hieu luc|hết hạn|het han|đã hết|da het|expired|no longer valid", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+        // Kết quả click link xác nhận trong một mail: không có link / đã xác nhận / link hết hạn (cần chờ mail mới).
+        private enum ConfirmOutcome { NoLink, Confirmed, Expired }
+
+        /// <summary>Chuẩn hóa text để so khớp bền: bỏ dấu tiếng Việt (kể cả đ→d), gộp mọi cụm khoảng trắng về một
+        /// dấu cách, trim, hạ chữ thường. Dùng cho lọc tiêu đề "Cảnh báo bảo mật" (so <c>Contains</c> không dấu).</summary>
+        internal static string NormalizeForMatch(string? s)
+        {
+            if (string.IsNullOrWhiteSpace(s))
+            {
+                return string.Empty;
+            }
+
+            var collapsed = string.Join(' ', s.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+            var decomposed = collapsed.Normalize(NormalizationForm.FormD);
+            var sb = new StringBuilder(decomposed.Length);
+            foreach (var ch in decomposed)
+            {
+                // Bỏ dấu thanh/dấu phụ (combining marks); đ/Đ không tách được bằng FormD → thay thủ công bên dưới.
+                if (CharUnicodeInfo.GetUnicodeCategory(ch) == UnicodeCategory.NonSpacingMark)
+                {
+                    continue;
+                }
+
+                switch (ch)
+                {
+                    case 'đ': sb.Append('d'); break;
+                    case 'Đ': sb.Append('D'); break;
+                    default: sb.Append(ch); break;
+                }
+            }
+
+            return sb.ToString().Normalize(NormalizationForm.FormC).ToLowerInvariant();
+        }
+
+        /// <summary>True nếu text của một dòng mail (InnerText: người gửi + tiêu đề + preview) là mail
+        /// <b>"Cảnh báo bảo mật Tài khoản Shopee"</b> — người gửi khớp "shopee" VÀ nội dung (chuẩn hóa không dấu)
+        /// CHỨA "canh bao bao mat". Loại mail trả hàng/khuyến mãi/khác của Shopee.</summary>
+        internal static bool IsSecurityWarningMailRow(string? rowText)
+        {
+            if (string.IsNullOrWhiteSpace(rowText) || !ShopeeSenderRegex.IsMatch(rowText))
+            {
+                return false;
+            }
+
+            return NormalizeForMatch(rowText).Contains("canh bao bao mat", StringComparison.Ordinal);
+        }
+
+        /// <summary>True nếu <paramref name="text"/> khớp <see cref="ConfirmLinkRegex"/> (text của link cần bấm,
+        /// vd "TẠI ĐÂY"). Phơi ra để test — KHÔNG còn khớp "here"/"click here".</summary>
+        internal static bool MatchesConfirmLink(string? text)
+            => !string.IsNullOrEmpty(text) && ConfirmLinkRegex.IsMatch(text);
+
+        /// <summary>True nếu <paramref name="text"/> khớp <see cref="ConfirmExpiredRegex"/> (trang báo link đã hết
+        /// hạn/hết hiệu lực). Phơi ra để test.</summary>
+        internal static bool MatchesConfirmExpired(string? text)
+            => !string.IsNullOrEmpty(text) && ConfirmExpiredRegex.IsMatch(text);
 
         public async Task<ShopeePageState> DetectPageStateAsync(CancellationToken ct = default)
         {
@@ -1130,9 +1214,10 @@ public class ShopeeLoginService
 
         /// <summary>
         /// Trong hộp thư Outlook: ưu tiên tab "Ưu tiên"/"Focused" (không có mail Shopee thì thử "Khác"/"Other"),
-        /// DUYỆT NHIỀU mail Shopee (không chỉ mail mới nhất) — mở lần lượt, mail nào có link xác nhận ("TẠI ĐÂY")
-        /// thì click. Vì Shopee gửi lẫn nhiều mail CẢNH BÁO đăng nhập, mail xác thực có thể KHÔNG phải mail mới
-        /// nhất và thường ĐẾN MUỘN → lặp reload + chờ tới hết deadline (~6'). Trả <c>true</c> khi đã click link.
+        /// DUYỆT các mail <b>"Cảnh báo bảo mật"</b> của Shopee theo thứ tự MỚI NHẤT trước — mở lần lượt, mail nào
+        /// có link xác nhận ("TẠI ĐÂY") thì click. Shopee gửi nhiều mail cảnh báo bảo mật khi thử lại nhiều lần;
+        /// nếu link mở ra báo HẾT HẠN thì bỏ, tải lại hộp thư + chờ để tìm mail mới hơn. Lặp reload + chờ tới hết
+        /// deadline (~6'). Trả <c>true</c> khi đã click được link (đã xác nhận).
         /// </summary>
         private async Task<bool> OpenShopeeMailAndConfirmAsync(
             IPage mailPage, IPage sellerPage, Action<string>? log, Random rng, CancellationToken ct)
@@ -1163,7 +1248,7 @@ public class ShopeeLoginService
 
                 if (rows.Count > 0)
                 {
-                    L($"Thấy {rows.Count} mail Shopee — mở lần lượt tìm mail có link xác nhận (bỏ qua mail cảnh báo)...");
+                    L($"Thấy {rows.Count} mail 'Cảnh báo bảo mật' Shopee (mới nhất trước) — mở lần lượt tìm link xác nhận 'TẠI ĐÂY'...");
                     var vp = mailPage.ViewportSize;
                     double mx = vp is not null ? vp.Width / 2.0 : 640;
                     double my = vp is not null ? vp.Height / 2.0 : 360;
@@ -1176,11 +1261,19 @@ public class ShopeeLoginService
                         catch { continue; }
                         await Task.Delay(rng.Next(1200, 2500), ct).ConfigureAwait(false);
 
-                        if (await ClickConfirmLinkInMailAsync(mailPage, sellerPage, log, rng, ct).ConfigureAwait(false))
+                        var outcome = await ClickConfirmLinkInMailAsync(mailPage, sellerPage, log, rng, ct).ConfigureAwait(false);
+                        if (outcome == ConfirmOutcome.Confirmed)
                         {
                             return true;
                         }
-                        L($"Mail Shopee #{i + 1} không có link xác nhận (mail cảnh báo?) — thử mail kế.");
+                        if (outcome == ConfirmOutcome.Expired)
+                        {
+                            // Link mail này đã hết hạn → các mail CŨ HƠN bên dưới còn dễ hết hạn hơn. Thoát vòng
+                            // duyệt để về nhánh reload + chờ 10-15s của vòng while ngoài, rồi tìm mail MỚI HƠN.
+                            L($"Mail Shopee #{i + 1}: link hết hạn → tải lại hộp thư, chờ mail MỚI HƠN.");
+                            break;
+                        }
+                        L($"Mail Shopee #{i + 1} không có link xác nhận — thử mail kế.");
                     }
                 }
 
@@ -1205,10 +1298,13 @@ public class ShopeeLoginService
         /// <summary>
         /// Trong reading-pane của mail đang mở (thường nằm trong iframe), dò link/nút xác nhận (text vi/en
         /// khớp <see cref="ConfirmLinkRegex"/>) rồi click kiểu người. Link thường mở TAB MỚI (target _blank) →
-        /// bắt tab mới bằng snapshot trước/sau (như pattern bắt tab phiếu), chờ tải rồi ĐÓNG tab đó. Trả
-        /// <c>true</c> khi đã click được.
+        /// bắt tab mới bằng snapshot trước/sau (như pattern bắt tab phiếu), chờ tải rồi ĐÓNG tab đó. Trả:
+        /// <see cref="ConfirmOutcome.NoLink"/> nếu mail không có link xác nhận; <see cref="ConfirmOutcome.Expired"/>
+        /// nếu trang mở ra báo link đã hết hạn/hết hiệu lực (đã đóng tab, caller cần chờ mail MỚI HƠN);
+        /// <see cref="ConfirmOutcome.Confirmed"/> nếu Shopee báo thành công HOẶC không rõ kết quả (giữ hành vi lạc
+        /// quan cũ để không hồi quy ca xác nhận thật nhưng trang thiếu text thành công).
         /// </summary>
-        private async Task<bool> ClickConfirmLinkInMailAsync(
+        private async Task<ConfirmOutcome> ClickConfirmLinkInMailAsync(
             IPage mailPage, IPage sellerPage, Action<string>? log, Random rng, CancellationToken ct)
         {
             void L(string m) => log?.Invoke(m);
@@ -1218,7 +1314,7 @@ public class ShopeeLoginService
                 mailPage, new[] { "a", "button", "[role='button']" }, ConfirmLinkRegex, ct, 6000).ConfigureAwait(false);
             if (confirmEl is null)
             {
-                return false;
+                return ConfirmOutcome.NoLink;
             }
 
             L("Bấm link xác nhận trong mail...");
@@ -1276,27 +1372,45 @@ public class ShopeeLoginService
                 catch { /* vẫn poll text thành công ở dưới */ }
 
                 // ĐỪNG đóng sớm: poll tới khi trang xác nhận hiện thông báo THÀNH CÔNG (tối đa 45s) — Shopee cần
-                // vài giây để ghi nhận xác nhận; đóng trước lúc đó thì xác nhận KHÔNG ăn.
+                // vài giây để ghi nhận xác nhận; đóng trước lúc đó thì xác nhận KHÔNG ăn. Song song: nếu trang báo
+                // link HẾT HẠN/HẾT HIỆU LỰC (mail cũ) → thoát sớm, coi là Expired để caller chờ mail mới hơn.
                 var okDeadline = DateTime.UtcNow.AddSeconds(45);
                 var confirmed = false;
+                var expired = false;
                 while (DateTime.UtcNow < okDeadline)
                 {
                     ct.ThrowIfCancellationRequested();
                     string body;
                     try { body = await confirmTab.EvaluateAsync<string>("() => document.body ? (document.body.innerText || '') : ''").ConfigureAwait(false); }
                     catch { body = string.Empty; }
-                    if (!string.IsNullOrWhiteSpace(body) && ConfirmSuccessRegex.IsMatch(body))
+                    if (!string.IsNullOrWhiteSpace(body))
                     {
-                        confirmed = true;
-                        break;
+                        // Ưu tiên bắt "hết hạn" TRƯỚC: trang lỗi hết hạn không được coi nhầm là thành công.
+                        if (ConfirmExpiredRegex.IsMatch(body))
+                        {
+                            expired = true;
+                            break;
+                        }
+                        if (ConfirmSuccessRegex.IsMatch(body))
+                        {
+                            confirmed = true;
+                            break;
+                        }
                     }
                     await Task.Delay(1500, ct).ConfigureAwait(false);
                 }
 
-                L(confirmed
-                    ? "Shopee đã xác nhận thành công — đóng tab xác nhận."
-                    : "Chờ 45s chưa thấy thông báo xác nhận — vẫn đóng tab xác nhận (kiểm tra tay nếu cần).");
+                L(expired
+                    ? "Link xác nhận đã HẾT HẠN — đóng tab, sẽ chờ mail MỚI HƠN."
+                    : confirmed
+                        ? "Shopee đã xác nhận thành công — đóng tab xác nhận."
+                        : "Chờ 45s chưa thấy thông báo xác nhận — vẫn đóng tab xác nhận (kiểm tra tay nếu cần).");
                 try { await confirmTab.CloseAsync().ConfigureAwait(false); } catch { /* bỏ qua */ }
+
+                if (expired)
+                {
+                    return ConfirmOutcome.Expired;
+                }
             }
             else
             {
@@ -1304,7 +1418,7 @@ public class ShopeeLoginService
                 await Task.Delay(rng.Next(2000, 4000), ct).ConfigureAwait(false);
             }
 
-            return true;
+            return ConfirmOutcome.Confirmed;
         }
 
         /// <summary>Click tab/pivot (Outlook "Khác"/"Other" hoặc "Ưu tiên"/"Focused") nếu tìm thấy — best-effort,
@@ -1331,10 +1445,12 @@ public class ShopeeLoginService
             catch { /* best-effort — bỏ qua */ }
         }
 
-        /// <summary>Danh sách các dòng mail Shopee ĐANG HIỂN THỊ (khớp "shopee") theo thứ tự DOM (trên cùng =
-        /// mới nhất), tối đa <paramref name="maxRows"/>. Trả NHIỀU dòng để caller DUYỆT vì mail xác thực (có link
-        /// "TẠI ĐÂY") thường KHÔNG phải mail mới nhất (lẫn mail cảnh báo đăng nhập). Dùng selector đầu tiên cho
-        /// ra kết quả (không trộn nhiều selector để tránh trùng dòng); khử trùng theo text dòng.</summary>
+        /// <summary>Danh sách các dòng mail <b>"Cảnh báo bảo mật" của Shopee</b> ĐANG HIỂN THỊ (người gửi khớp
+        /// "shopee" VÀ tiêu đề chứa "cảnh báo bảo mật" — xem <see cref="IsSecurityWarningMailRow"/>) theo thứ tự
+        /// DOM (trên cùng = MỚI NHẤT), tối đa <paramref name="maxRows"/>. Trả NHIỀU dòng để caller DUYỆT vì
+        /// Shopee gửi nhiều mail cảnh báo bảo mật khi thử lại nhiều lần; mail mới nhất (đầu danh sách) được ưu
+        /// tiên. Dùng selector đầu tiên cho ra kết quả (không trộn nhiều selector để tránh trùng dòng); khử trùng
+        /// theo text dòng.</summary>
         private static async Task<List<IElementHandle>> FindAllShopeeMailRowsAsync(IPage page, int maxRows, CancellationToken ct)
         {
             foreach (var sel in new[] { "div[role='option']", "div[role='listitem']", "div[role='row']", "[data-convid]" })
@@ -1356,7 +1472,9 @@ public class ShopeeLoginService
                         }
 
                         var txt = await el.InnerTextAsync().ConfigureAwait(false);
-                        if (string.IsNullOrWhiteSpace(txt) || !ShopeeSenderRegex.IsMatch(txt))
+                        // CHỈ giữ mail "Cảnh báo bảo mật Tài khoản Shopee" (người gửi shopee + tiêu đề chứa "cảnh
+                        // báo bảo mật") — loại mail trả hàng/khuyến mãi khác của Shopee.
+                        if (!IsSecurityWarningMailRow(txt))
                         {
                             continue;
                         }

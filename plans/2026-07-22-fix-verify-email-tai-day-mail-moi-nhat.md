@@ -1,7 +1,7 @@
 # Plan: Fix verify-email — lọc mail "Cảnh báo bảo mật", chỉ click "TẠI ĐÂY", ưu tiên mail mới nhất, xử lý link hết hạn
 
 - **Ngày:** 2026-07-22
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-executor`)
 
 ## 1. Bối cảnh & mục tiêu
@@ -67,6 +67,14 @@ Luồng auto-login Shopee có bước xác nhận qua email (mở hộp thư Hot
 
 ---
 
-## Báo cáo thực thi (Opus điền sau khi xong)
+## Báo cáo thực thi
 
-<chờ thực thi>
+Hoàn tất, Fable review diff thật: `dotnet build ShopeeSuite.sln -c Debug` **0/0**, `dotnet test orders/XuLyDonShopee.Tests` **843 pass** (27 test mới). Sửa `ShopeeLoginService.cs` + thêm `ShopeeLoginVerifyEmailTests.cs`.
+
+- **Lọc tiêu đề:** `IsSecurityWarningMailRow` = sender "shopee" AND `NormalizeForMatch(row).Contains("canh bao bao mat")`; thay bộ lọc chỉ-theo-sender trong `FindAllShopeeMailRowsAsync`. Loại mail trả hàng/khác.
+- **Bỏ "here":** `ConfirmLinkRegex` bỏ `|click here|\bhere\b`, giữ "tại đây" + cụm xác nhận VN.
+- **Expired:** thêm `ConfirmExpiredRegex`; poll kiểm Expired TRƯỚC Success.
+- **Enum + retry:** `ConfirmOutcome{NoLink,Confirmed,Expired}`; Expired→đóng tab+`break`→reload+chờ mail mới hơn; Confirmed→xong; unknown/timeout→Confirmed (giữ hành vi lạc quan cũ, không hồi quy).
+- Forwarder `internal static` (ShopeeLoginService→LoginSession) + InternalsVisibleTo để unit-test hàm thuần.
+
+**Chưa chắc khi test thật:** (1) lọc tiêu đề dựa trên InnerText cả dòng — nếu Outlook ẩn tiêu đề trong preview có thể lọc hụt (log "thấy 0 mail" thì cần đọc selector tiêu đề riêng); (2) khi Expired dùng `break` bỏ mail cũ hơn trong danh sách hiện tại, đợi vòng reload kế mới thấy mail mới hơn.
