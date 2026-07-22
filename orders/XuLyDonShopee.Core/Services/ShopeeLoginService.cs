@@ -1248,7 +1248,7 @@ public class ShopeeLoginService
 
                 if (rows.Count > 0)
                 {
-                    L($"Thấy {rows.Count} mail 'Cảnh báo bảo mật' Shopee (mới nhất trước) — mở lần lượt tìm link xác nhận 'TẠI ĐÂY'...");
+                    L($"Thấy {rows.Count} mail Shopee (mới nhất trước) — mở lần lượt tìm link xác nhận 'TẠI ĐÂY'...");
                     var vp = mailPage.ViewportSize;
                     double mx = vp is not null ? vp.Width / 2.0 : 640;
                     double my = vp is not null ? vp.Height / 2.0 : 360;
@@ -1459,8 +1459,10 @@ public class ShopeeLoginService
                 try { els = await page.QuerySelectorAllAsync(sel).ConfigureAwait(false); }
                 catch { continue; }
 
-                var result = new List<IElementHandle>();
-                var seen = new HashSet<string>();
+                var security = new List<IElementHandle>();  // mail "Cảnh báo bảo mật" — ƯU TIÊN
+                var anyShopee = new List<IElementHandle>();  // mọi mail Shopee — DỰ PHÒNG khi Outlook không hiện tiêu đề
+                var seenSec = new HashSet<string>();
+                var seenAny = new HashSet<string>();
                 foreach (var el in els)
                 {
                     ct.ThrowIfCancellationRequested();
@@ -1472,28 +1474,36 @@ public class ShopeeLoginService
                         }
 
                         var txt = await el.InnerTextAsync().ConfigureAwait(false);
-                        // CHỈ giữ mail "Cảnh báo bảo mật Tài khoản Shopee" (người gửi shopee + tiêu đề chứa "cảnh
-                        // báo bảo mật") — loại mail trả hàng/khuyến mãi khác của Shopee.
-                        if (!IsSecurityWarningMailRow(txt))
+                        if (string.IsNullOrWhiteSpace(txt) || !ShopeeSenderRegex.IsMatch(txt))
                         {
-                            continue;
+                            continue; // không phải mail Shopee
                         }
 
-                        if (seen.Add(txt.Trim()))
+                        var key = txt.Trim();
+                        if (seenAny.Add(key))
                         {
-                            result.Add(el);
-                            if (result.Count >= maxRows)
+                            anyShopee.Add(el);
+                        }
+                        // ƯU TIÊN mail "Cảnh báo bảo mật" NẾU đọc được tiêu đề trong dòng. Outlook nhiều khi rút
+                        // gọn dòng không hiện tiêu đề → security rỗng → DỰ PHÒNG duyệt mọi mail Shopee (vẫn an
+                        // toàn vì chỉ click "TẠI ĐÂY" — regex đã bỏ "here" nên không dính mail trả hàng).
+                        if (IsSecurityWarningMailRow(txt) && seenSec.Add(key))
+                        {
+                            security.Add(el);
+                            if (security.Count >= maxRows)
                             {
-                                return result;
+                                return security;
                             }
                         }
                     }
                     catch { /* detached / lỗi đọc — bỏ qua dòng này */ }
                 }
 
-                if (result.Count > 0)
+                var chosen = security.Count > 0 ? security : anyShopee;
+                if (chosen.Count > 0)
                 {
-                    return result; // selector này đã cho danh sách mail Shopee — dừng, không trộn selector khác
+                    // selector này đã cho danh sách mail Shopee — dừng, không trộn selector khác
+                    return chosen.Count > maxRows ? chosen.GetRange(0, maxRows) : chosen;
                 }
             }
 
