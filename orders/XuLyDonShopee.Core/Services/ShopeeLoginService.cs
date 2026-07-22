@@ -1133,51 +1133,53 @@ public class ShopeeLoginService
                 }
             }
 
-            // 2) "Use your password" / "Sử dụng mật khẩu" — CHỈ khi ô mật khẩu CHƯA hiện (màn passwordless).
-            var passField = await FindFirstVisibleByRectsAsync(mailPage, MsPasswordSelectors, 2500, ct).ConfigureAwait(false);
-            if (passField is null)
+            // 2) Đưa về Ô MẬT KHẨU. Microsoft redirect nhiều bước (login.microsoftonline → login.live oauth) +
+            //    form Fluent "Xác minh email" render CHẬM/MUỘN hơn cửa sổ tìm → nếu tìm 1 lần rồi thôi hay bị trượt.
+            //    POLL tới ~45s, mỗi vòng: (a) thấy ô mật khẩu → xong; (b) thấy "Dùng mật khẩu"/"Nhập mật khẩu"
+            //    (tile trên màn 'các cách khác') → click; (c) thấy "Các cách khác để đăng nhập" (form passwordless)
+            //    → click (vòng sau sẽ thấy tile "Nhập mật khẩu"). Chịu được redirect/render trễ + đi qua nhiều bước.
+            IElementHandle? passField = null;
+            var passDeadline = DateTime.UtcNow.AddSeconds(45);
+            var clickedOtherWays = false;
+            while (DateTime.UtcNow < passDeadline)
             {
-                var usePwd = await FindVisibleByTextAsync(mailPage, MsUsePasswordSelectors, UsePasswordRegex, ct, 4000).ConfigureAwait(false);
+                ct.ThrowIfCancellationRequested();
+
+                passField = await FindFirstVisibleByRectsAsync(mailPage, MsPasswordSelectors, 1500, ct).ConfigureAwait(false);
+                if (passField is not null)
+                {
+                    break;
+                }
+
+                // "Sử dụng mật khẩu" (màn chọn cách) HOẶC tile "Nhập mật khẩu" (màn 'các cách khác') — cùng khớp "mật khẩu".
+                var usePwd = await FindVisibleByTextInFramesAsync(mailPage, MsUsePasswordSelectors, UsePasswordRegex, ct, 1200).ConfigureAwait(false);
                 if (usePwd is not null)
                 {
-                    L("Chọn 'Dùng mật khẩu'...");
+                    L("Chọn 'Dùng mật khẩu' / 'Nhập mật khẩu'...");
                     (mx, my, _) = await TryHumanClickVisibleAsync(mailPage, usePwd, mx, my, rng, ct).ConfigureAwait(false);
-                    await Task.Delay(rng.Next(1000, 2500), ct).ConfigureAwait(false);
+                    await Task.Delay(rng.Next(1200, 2200), ct).ConfigureAwait(false);
+                    continue;
                 }
-                else
-                {
-                    // Form mới "Xác minh email của bạn" (Fluent UI): không có link "Sử dụng mật khẩu". Đi đường vòng:
-                    // "Các cách khác để đăng nhập" → chọn tile "Mật khẩu" → ô pass hiện ra (SPA, KHÔNG navigation).
-                    // Form Fluent render CHẬM → nới cửa sổ tìm "Các cách khác" lên 20s (trước 4s hay đóng trước
-                    // khi form hiện → bỏ sót → không đăng nhập được). Quét MỌI FRAME phòng trường hợp trang login
-                    // bị bọc trong iframe (dù DOM thấy form ở frame chính — cho chắc).
-                    var otherWays = await FindVisibleByTextInFramesAsync(mailPage, MsOtherWaysSelectors, OtherWaysRegex, ct, 20000).ConfigureAwait(false);
-                    if (otherWays is not null)
-                    {
-                        L("Form 'Xác minh email' mới của Microsoft — bấm 'Các cách khác để đăng nhập'...");
-                        (mx, my, _) = await TryHumanClickVisibleAsync(mailPage, otherWays, mx, my, rng, ct).ConfigureAwait(false);
-                        await Task.Delay(rng.Next(1200, 2500), ct).ConfigureAwait(false);
 
-                        // Màn danh sách cách đăng nhập: chọn "Mật khẩu"/"Nhập mật khẩu" (regex khớp "mật khẩu"). Nới
-                        // 12s, quét mọi frame.
-                        var pwdOption = await FindVisibleByTextInFramesAsync(mailPage, MsPasswordOptionSelectors, UsePasswordRegex, ct, 12000).ConfigureAwait(false);
-                        if (pwdOption is not null)
-                        {
-                            L("Chọn phương thức 'Mật khẩu'...");
-                            (mx, my, _) = await TryHumanClickVisibleAsync(mailPage, pwdOption, mx, my, rng, ct).ConfigureAwait(false);
-                            await Task.Delay(rng.Next(1000, 2500), ct).ConfigureAwait(false);
-                        }
-                        else
-                        {
-                            L($"Không thấy phương thức 'Mật khẩu' trên màn 'các cách đăng nhập' (URL: {mailPage.Url}) — chờ ô mật khẩu như cũ.");
-                        }
-                    }
-                    else
-                    {
-                        L($"Chưa thấy link 'Các cách khác để đăng nhập' sau 20s (form MS chưa render / khác cấu trúc? URL: {mailPage.Url}).");
-                    }
+                // Form mới "Xác minh email của bạn" (Fluent, passwordless): "Các cách khác để đăng nhập" → (vòng sau
+                // thấy tile "Nhập mật khẩu"). Quét mọi frame. Click 1 lần rồi để vòng sau lo tile mật khẩu.
+                var otherWays = await FindVisibleByTextInFramesAsync(mailPage, MsOtherWaysSelectors, OtherWaysRegex, ct, 1200).ConfigureAwait(false);
+                if (otherWays is not null)
+                {
+                    L("Form 'Xác minh email' — bấm 'Các cách khác để đăng nhập'...");
+                    (mx, my, _) = await TryHumanClickVisibleAsync(mailPage, otherWays, mx, my, rng, ct).ConfigureAwait(false);
+                    clickedOtherWays = true;
+                    await Task.Delay(rng.Next(1200, 2200), ct).ConfigureAwait(false);
+                    continue;
                 }
-                passField = await FindFirstVisibleByRectsAsync(mailPage, MsPasswordSelectors, 8000, ct).ConfigureAwait(false);
+
+                // Chưa thấy gì (đang redirect / form chưa render) → chờ rồi thử lại.
+                await Task.Delay(rng.Next(1200, 2000), ct).ConfigureAwait(false);
+            }
+
+            if (passField is null)
+            {
+                L($"Không đưa được về ô mật khẩu sau 45s ({(clickedOtherWays ? "đã bấm 'Các cách khác' nhưng không thấy tile Mật khẩu" : "không thấy 'Các cách khác'/ô mật khẩu")}; URL: {mailPage.Url}) — bỏ qua, verify tay.");
             }
 
             // 3) Password (KHÔNG log giá trị).
