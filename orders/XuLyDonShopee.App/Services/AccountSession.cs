@@ -1457,7 +1457,7 @@ public partial class AccountSession : ObservableObject, IAccountSession
                             {
                                 SetStatus(SessionState.Running, "Shopee yêu cầu xác minh — đang tự xác minh qua email...");
                                 bool verified;
-                                try { verified = await session.TryVerifyByEmailAsync(acc.VerifyEmail, acc.VerifyEmailPassword, loginLog, ct).ConfigureAwait(false); }
+                                try { verified = await session.TryVerifyByEmailAsync(acc.VerifyEmail, acc.VerifyEmailPassword, _services.Settings.GetAutoConfirmEmail(), loginLog, ct).ConfigureAwait(false); }
                                 catch (OperationCanceledException) { throw; }
                                 catch { verified = false; }
 

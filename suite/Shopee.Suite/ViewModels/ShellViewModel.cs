@@ -164,6 +164,9 @@ public sealed partial class ShellViewModel : ObservableObject
                 new RibbonToggleItem("Xóa profile và tạo lại", acc, nameof(acc.XoaProfileTaoLai),
                     () => acc.XoaProfileTaoLai, v => acc.XoaProfileTaoLai = v,
                     "Phiên mở mới sẽ xóa hồ sơ trình duyệt của tài khoản rồi tạo lại — phải đăng nhập lại. Áp cho mọi phiên mở mới."),
+                new RibbonToggleItem("Tự động xác nhận", acc, nameof(acc.TuDongXacNhan),
+                    () => acc.TuDongXacNhan, v => acc.TuDongXacNhan = v,
+                    "BẬT: khi Shopee bắt xác minh qua email, app tự tìm mail + bấm link 'TẠI ĐÂY' + chờ đăng nhập. TẮT: chỉ đăng nhập hộp thư rồi dừng cho bạn tự bấm."),
             });
 
             ordersTab = new RibbonTab("Shopee", new List<RibbonGroup>

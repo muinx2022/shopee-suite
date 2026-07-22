@@ -53,6 +53,7 @@ public partial class AccountsViewModel : ViewModelBase
         // trong lúc nạp bằng _loadingSettings.
         _loadingSettings = true;
         XoaProfileTaoLai = _services.Settings.GetSyncFreshProfile();
+        TuDongXacNhan = _services.Settings.GetAutoConfirmEmail();
         _loadingSettings = false;
 
         Reload();
@@ -122,6 +123,22 @@ public partial class AccountsViewModel : ViewModelBase
         }
 
         _services.Settings.SetSyncFreshProfile(value);
+    }
+
+    /// <summary>Cờ TOÀN CỤC "Tự động xác nhận" (bền qua <see cref="SettingsRepository"/>): BẬT ⇒ khi Shopee bắt
+    /// verify qua email, app tự tìm mail + bấm link "TẠI ĐÂY" + chờ đăng nhập; TẮT ⇒ chỉ đăng nhập hộp thư rồi
+    /// DỪNG cho user tự bấm. Setter LƯU NGAY (trừ lúc đang nạp).</summary>
+    [ObservableProperty]
+    private bool _tuDongXacNhan;
+
+    partial void OnTuDongXacNhanChanged(bool value)
+    {
+        if (_loadingSettings)
+        {
+            return;
+        }
+
+        _services.Settings.SetAutoConfirmEmail(value);
     }
 
     /// <summary>Dòng đang chọn trong danh sách (bọc <see cref="Account"/>). Chỗ nào cần bản ghi gốc thì đọc

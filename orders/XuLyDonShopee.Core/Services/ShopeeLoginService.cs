@@ -72,7 +72,7 @@ public interface ILoginSession : IAsyncDisposable
     /// </para>
     /// </summary>
     Task<bool> TryVerifyByEmailAsync(
-        string verifyEmail, string verifyEmailPassword, Action<string>? log = null, CancellationToken ct = default);
+        string verifyEmail, string verifyEmailPassword, bool autoConfirm, Action<string>? log = null, CancellationToken ct = default);
 
     /// <summary>
     /// Đọc số đơn <b>"Chờ Lấy Hàng"</b> trong to-do box của trang bán hàng (Seller Centre).
@@ -944,7 +944,7 @@ public class ShopeeLoginService
         }
 
         public async Task<bool> TryVerifyByEmailAsync(
-            string verifyEmail, string verifyEmailPassword, Action<string>? log = null, CancellationToken ct = default)
+            string verifyEmail, string verifyEmailPassword, bool autoConfirm, Action<string>? log = null, CancellationToken ct = default)
         {
             void L(string m) => log?.Invoke(m);
 
@@ -1026,14 +1026,13 @@ public class ShopeeLoginService
                 }
                 catch { /* nuốt lỗi điều hướng — bước dưới poll selector tự lo */ }
 
-                // === CỜ tạm TẮT tự-xác-minh mail (yêu cầu user): đăng nhập email XONG thì DỪNG, GIỮ hộp thư Outlook
-                //     mở để user TỰ bấm link "TẠI ĐÂY" duyệt. Đổi autoConfirmMail = true để BẬT LẠI đoạn tự-xác-minh
-                //     bên dưới (đã GIỮ NGUYÊN: tìm mail → click "TẠI ĐÂY" → chờ seller đăng nhập). ===
-                var autoConfirmMail = false;
-                if (!autoConfirmMail)
+                // Cờ "Tự động xác nhận" (checkbox ribbon → autoConfirm): TẮT ⇒ đăng nhập email XONG thì DỪNG, GIỮ
+                // hộp thư Outlook mở để user TỰ bấm link "TẠI ĐÂY". BẬT ⇒ chạy tiếp đoạn tự-xác-minh bên dưới
+                // (tìm mail → click "TẠI ĐÂY" → chờ seller đăng nhập).
+                if (!autoConfirm)
                 {
                     keepMailOpenForManual = true; // GIỮ tab Outlook cho user (finally không đóng)
-                    L("Đã đăng nhập email thành công — DỪNG (tự xác minh đang TẮT). Giữ hộp thư mở để bạn tự bấm link 'TẠI ĐÂY' duyệt.");
+                    L("Đã đăng nhập email thành công — DỪNG ('Tự động xác nhận' đang TẮT). Giữ hộp thư mở để bạn tự bấm link 'TẠI ĐÂY' duyệt.");
                     return false;
                 }
 

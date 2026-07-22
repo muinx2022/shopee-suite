@@ -52,6 +52,10 @@ public class SettingsRepository
     /// mở mới xóa thư mục hồ sơ trình duyệt của tài khoản rồi tạo lại sạch (phải đăng nhập lại).</summary>
     private const string SyncFreshProfileKey = "sync_fresh_profile";
 
+    /// <summary>Key: cờ "Tự động xác nhận" khi Shopee bắt verify qua email (thiếu/lạ → false = TẮT). BẬT ⇒ app tự
+    /// tìm mail Shopee + bấm link "TẠI ĐÂY" + chờ đăng nhập; TẮT ⇒ chỉ đăng nhập hộp thư rồi DỪNG cho user tay.</summary>
+    private const string AutoConfirmEmailKey = "auto_confirm_email";
+
     private readonly Database _db;
 
     public SettingsRepository(Database db) => _db = db;
@@ -172,6 +176,22 @@ public class SettingsRepository
 
     /// <summary>Lưu cờ "Xóa profile và tạo lại" ("true"/"false").</summary>
     public void SetSyncFreshProfile(bool value) => Set(SyncFreshProfileKey, value ? "true" : "false");
+
+    /// <summary>Cờ "Tự động xác nhận" khi verify email: "true"/"1" ⇒ true; thiếu/rỗng/lạ ⇒ false (mặc định TẮT —
+    /// app chỉ đăng nhập hộp thư rồi dừng cho user tự bấm link).</summary>
+    public bool GetAutoConfirmEmail()
+    {
+        var v = Get(AutoConfirmEmailKey)?.Trim();
+        if (string.IsNullOrEmpty(v))
+        {
+            return false;
+        }
+
+        return bool.TryParse(v, out var b) ? b : v == "1";
+    }
+
+    /// <summary>Lưu cờ "Tự động xác nhận" ("true"/"false").</summary>
+    public void SetAutoConfirmEmail(bool value) => Set(AutoConfirmEmailKey, value ? "true" : "false");
 
     /// <summary>Lấy giá trị theo key, trả null nếu chưa có.</summary>
     public string? Get(string key)
