@@ -1266,7 +1266,7 @@ public class ShopeeLoginService
 
             var round = 0;
             var noMailStreak = 0; // số vòng LIÊN TIẾP không có mail MỚI để thử — đủ 3 thì bấm "Gửi lại" trên trang Shopee
-            var expiredKeys = new HashSet<string>(StringComparer.Ordinal); // text dòng mail đã thử mà link HẾT HẠN → không mở lại
+            var triedKeys = new HashSet<string>(StringComparer.Ordinal); // text dòng mail đã thử KHÔNG thành (hết hạn / không có link "TẠI ĐÂY") → không mở lại; XÓA khi bấm 'Gửi lại'
             while (DateTime.UtcNow < deadline)
             {
                 ct.ThrowIfCancellationRequested();
@@ -1319,7 +1319,7 @@ public class ShopeeLoginService
                         string key;
                         try { key = ((await rows[i].InnerTextAsync().ConfigureAwait(false)) ?? string.Empty).Trim(); }
                         catch { continue; }
-                        if (key.Length > 0 && expiredKeys.Contains(key))
+                        if (key.Length > 0 && triedKeys.Contains(key))
                         {
                             continue;
                         }
@@ -1347,11 +1347,15 @@ public class ShopeeLoginService
                         {
                             // Link HẾT HẠN → GHI NHỚ mail này (không mở lại), thử mail KẾ trong danh sách. Khi mọi
                             // mail đều đã thử-và-hết-hạn → vòng sau rơi vào nhánh 'không có mail mới' → bấm 'Gửi lại'.
-                            if (key.Length > 0) expiredKeys.Add(key);
+                            if (key.Length > 0) triedKeys.Add(key);
                             L($"Mail Shopee #{i + 1}: link hết hạn → bỏ qua mail này (không mở lại), thử mail khác.");
                             continue;
                         }
-                        L($"Mail Shopee #{i + 1} không có link xác nhận — thử mail kế.");
+                        // Mail KHÔNG có link "TẠI ĐÂY" (vd mail vận đơn/thông báo khác của Shopee) → cũng GHI NHỚ
+                        // để KHÔNG mở lại mỗi vòng (kẻo cứ mở #1 → NoLink → coi là 'đã thử mail mới' → reset chuỗi
+                        // → không bao giờ đủ 3 vòng để bấm 'Gửi lại').
+                        if (key.Length > 0) triedKeys.Add(key);
+                        L($"Mail Shopee #{i + 1} không có link xác nhận — bỏ qua, thử mail kế.");
                     }
                 }
 
@@ -1372,6 +1376,7 @@ public class ShopeeLoginService
                         if (await TryResendVerifyEmailAsync(sellerPage, log, rng, ct).ConfigureAwait(false))
                         {
                             L("Đã bấm 'Gửi lại' trên trang xác minh Shopee — chờ ~1' mail mới về rồi kiểm hộp thư lại...");
+                            triedKeys.Clear(); // sắp có mail MỚI (link tươi) → quên danh sách đã-thử để quét lại từ đầu
                             await Task.Delay(60000, ct).ConfigureAwait(false);
                         }
                         try { await mailPage.BringToFrontAsync().ConfigureAwait(false); } catch { /* bỏ qua */ }
