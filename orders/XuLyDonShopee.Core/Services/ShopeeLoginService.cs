@@ -828,6 +828,10 @@ public class ShopeeLoginService
         // công — phải quay lại chờ mail MỚI HƠN. Liệt kê cả dạng có dấu lẫn không dấu (khớp IgnoreCase).
         private static readonly Regex ConfirmExpiredRegex =
             new(@"hết hiệu lực|het hieu luc|hết hạn|het han|đã hết|da het|expired|no longer valid", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        // Nút "Gửi lại" trên trang xác minh Shopee (sellerPage) — bấm để Shopee GỬI LẠI mail xác thực khi chờ
+        // mãi không thấy mail. Khớp text nút (InnerText "Gửi lại").
+        private static readonly Regex ResendVerifyRegex =
+            new(@"^\s*(gửi lại|gui lai|resend)\s*$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         // Kết quả click link xác nhận trong một mail: không có link / đã xác nhận / link hết hạn (cần chờ mail mới).
         private enum ConfirmOutcome { NoLink, Confirmed, Expired }
@@ -1230,6 +1234,7 @@ public class ShopeeLoginService
             await Task.Delay(rng.Next(2000, 4000), ct).ConfigureAwait(false);
 
             var round = 0;
+            var noMailStreak = 0; // số vòng LIÊN TIẾP không thấy mail nào — đủ 3 thì bấm "Gửi lại" trên trang Shopee
             while (DateTime.UtcNow < deadline)
             {
                 ct.ThrowIfCancellationRequested();
@@ -1248,6 +1253,7 @@ public class ShopeeLoginService
 
                 if (rows.Count > 0)
                 {
+                    noMailStreak = 0; // thấy mail → reset chuỗi "không thấy mail"
                     L($"Thấy {rows.Count} mail Shopee (mới nhất trước) — mở lần lượt tìm link xác nhận 'TẠI ĐÂY'...");
                     var vp = mailPage.ViewportSize;
                     double mx = vp is not null ? vp.Width / 2.0 : 640;
@@ -1276,9 +1282,25 @@ public class ShopeeLoginService
                         L($"Mail Shopee #{i + 1} không có link xác nhận — thử mail kế.");
                     }
                 }
+                else
+                {
+                    // Vòng này KHÔNG thấy mail nào → đếm chuỗi. Sau 3 vòng LIÊN TIẾP không thấy → quay lại trang
+                    // xác minh Shopee bấm "Gửi lại" (sellerPage vẫn mở song song), chờ ~1' cho Shopee gửi lại mail.
+                    noMailStreak++;
+                    L($"Vòng {round}: chưa thấy mail xác nhận — tải lại hộp thư, chờ mail tới...");
+                    if (noMailStreak >= 3 && DateTime.UtcNow < deadline)
+                    {
+                        noMailStreak = 0;
+                        if (await TryResendVerifyEmailAsync(sellerPage, log, rng, ct).ConfigureAwait(false))
+                        {
+                            L("Đã bấm 'Gửi lại' trên trang xác minh Shopee — chờ ~1' mail mới về rồi kiểm hộp thư lại...");
+                            await Task.Delay(60000, ct).ConfigureAwait(false);
+                        }
+                        try { await mailPage.BringToFrontAsync().ConfigureAwait(false); } catch { /* bỏ qua */ }
+                    }
+                }
 
-                // Chưa mail nào có link → mail xác thực có thể CHƯA tới → reload, chờ rồi thử lại.
-                L($"Vòng {round}: chưa thấy mail xác nhận — tải lại hộp thư, chờ mail tới...");
+                // Reload hộp thư rồi thử vòng kế (chờ mail tới / mail mới hơn).
                 try
                 {
                     await mailPage.ReloadAsync(new PageReloadOptions
@@ -1293,6 +1315,31 @@ public class ShopeeLoginService
 
             L("Hết thời gian chờ mail xác nhận Shopee — bỏ qua (kiểm tra tay).");
             return false;
+        }
+
+        /// <summary>Quay lại trang xác minh Shopee (<paramref name="sellerPage"/>) và bấm nút "Gửi lại" để Shopee
+        /// GỬI LẠI mail xác thực (khi chờ mãi không thấy mail). Đưa tab lên trước để nút hiển thị (getClientRects),
+        /// tìm nút theo <see cref="ResendVerifyRegex"/> trong button/a/[role=button] rồi click kiểu người. Trả
+        /// <c>true</c> nếu đã bấm được nút.</summary>
+        private static async Task<bool> TryResendVerifyEmailAsync(IPage sellerPage, Action<string>? log, Random rng, CancellationToken ct)
+        {
+            void L(string m) => log?.Invoke(m);
+            try { await sellerPage.BringToFrontAsync().ConfigureAwait(false); } catch { /* bỏ qua */ }
+            await Task.Delay(rng.Next(600, 1400), ct).ConfigureAwait(false);
+
+            var btn = await FindVisibleByTextAsync(
+                sellerPage, new[] { "button", "a", "[role='button']" }, ResendVerifyRegex, ct, 6000).ConfigureAwait(false);
+            if (btn is null)
+            {
+                L("Không thấy nút 'Gửi lại' trên trang xác minh Shopee — bỏ qua lần gửi lại này.");
+                return false;
+            }
+
+            var vp = sellerPage.ViewportSize;
+            double mx = vp is not null ? vp.Width / 2.0 : 640;
+            double my = vp is not null ? vp.Height / 2.0 : 360;
+            var (_, _, clicked) = await TryHumanClickVisibleAsync(sellerPage, btn, mx, my, rng, ct).ConfigureAwait(false);
+            return clicked;
         }
 
         /// <summary>
