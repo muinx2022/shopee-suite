@@ -807,10 +807,12 @@ public class ShopeeLoginService
             new(@"^\s*(yes|có|co)\s*$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
         private static readonly Regex ShopeeSenderRegex =
             new("shopee", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        // Tab "Khác"/"Ưu tiên" của hộp thư Outlook — UI đổi theo NGÔN NGỮ tài khoản (vi/en/es/pt/fr...). Thêm
+        // đa ngôn ngữ; các từ thêm đều KHÔNG dấu (Otros/Prioritarios...) nên khớp chắc, không dính lỗi NFC/NFD.
         private static readonly Regex OtherPivotRegex =
-            new(@"^\s*(other|khác|khac)\s*$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+            new(@"^\s*(other|otros|outros|autres|khác|khac)\s*$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
         private static readonly Regex FocusedPivotRegex =
-            new(@"^\s*(focused|ưu tiên|uu tien)\s*$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+            new(@"^\s*(focused|prioritarios|prioritaire|prioritaires|ưu tiên|uu tien)\s*$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
         // Text CỦA LINK xác nhận trong mail "Cảnh báo bảo mật" của Shopee — link thường CHỈ bọc "TẠI ĐÂY" (không
         // phải cả câu "xác nhận tại đây") nên phải bắt riêng "tại đây". CỐ Ý BỎ "here"/"click here": chữ "here"
         // dính cả link trong mail TRẢ HÀNG của Shopee → click nhầm; mail đã được lọc đúng "Cảnh báo bảo mật" nên
@@ -1153,7 +1155,7 @@ public class ShopeeLoginService
 
                 // "Sử dụng mật khẩu" (màn chọn cách) HOẶC tile "Nhập mật khẩu" (màn 'các cách khác') — khớp KHÔNG
                 // dấu để tránh lỗi NFC/NFD (text MS dạng tổ hợp dấu).
-                var usePwd = await FindByNormalizedTextInFramesAsync(mailPage, MsUsePasswordSelectors, new[] { "mat khau", "password" }, ct, 1200).ConfigureAwait(false);
+                var usePwd = await FindByNormalizedTextInFramesAsync(mailPage, MsUsePasswordSelectors, new[] { "mat khau", "password", "contrasena" }, ct, 1200).ConfigureAwait(false);
                 if (usePwd is not null)
                 {
                     L("Chọn 'Dùng mật khẩu' / 'Nhập mật khẩu'...");
@@ -1165,7 +1167,7 @@ public class ShopeeLoginService
                 // Form mới "Xác minh email của bạn" (Fluent, passwordless): "Các cách khác để đăng nhập" → (vòng sau
                 // thấy tile "Nhập mật khẩu"). Quét mọi frame + khớp KHÔNG dấu (tránh lỗi NFC/NFD). Click 1 lần rồi
                 // để vòng sau lo tile mật khẩu.
-                var otherWays = await FindByNormalizedTextInFramesAsync(mailPage, MsOtherWaysSelectors, new[] { "cach khac de dang nhap", "other ways to sign in" }, ct, 1200).ConfigureAwait(false);
+                var otherWays = await FindByNormalizedTextInFramesAsync(mailPage, MsOtherWaysSelectors, new[] { "cach khac de dang nhap", "other ways to sign in", "otras formas de iniciar sesion" }, ct, 1200).ConfigureAwait(false);
                 if (otherWays is not null)
                 {
                     L("Form 'Xác minh email' — bấm 'Các cách khác để đăng nhập'...");
