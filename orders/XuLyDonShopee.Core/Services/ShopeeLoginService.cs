@@ -968,6 +968,7 @@ public class ShopeeLoginService
 
             var rng = new Random();
             IPage? mailPage = null;
+            var keepMailOpenForManual = false; // true = đã đăng nhập email + DỪNG cho user test tay → finally KHÔNG đóng tab Outlook
             try
             {
                 // BƯỚC 1: trên trang verify Shopee, click lựa chọn "xác minh qua email".
@@ -1025,6 +1026,17 @@ public class ShopeeLoginService
                 }
                 catch { /* nuốt lỗi điều hướng — bước dưới poll selector tự lo */ }
 
+                // === CỜ tạm TẮT tự-xác-minh mail (yêu cầu user): đăng nhập email XONG thì DỪNG, GIỮ hộp thư Outlook
+                //     mở để user TỰ bấm link "TẠI ĐÂY" duyệt. Đổi autoConfirmMail = true để BẬT LẠI đoạn tự-xác-minh
+                //     bên dưới (đã GIỮ NGUYÊN: tìm mail → click "TẠI ĐÂY" → chờ seller đăng nhập). ===
+                var autoConfirmMail = false;
+                if (!autoConfirmMail)
+                {
+                    keepMailOpenForManual = true; // GIỮ tab Outlook cho user (finally không đóng)
+                    L("Đã đăng nhập email thành công — DỪNG (tự xác minh đang TẮT). Giữ hộp thư mở để bạn tự bấm link 'TẠI ĐÂY' duyệt.");
+                    return false;
+                }
+
                 // BƯỚC 3+4: tìm mail Shopee mới nhất + mở + click link xác nhận.
                 if (!await OpenShopeeMailAndConfirmAsync(mailPage, page, log, rng, vct).ConfigureAwait(false))
                 {
@@ -1076,13 +1088,13 @@ public class ShopeeLoginService
             }
             finally
             {
-                // LUÔN đóng MỌI tab Microsoft/Outlook đã mở trong lượt xác minh — gồm mailPage LẪN tab phát sinh
-                // từ chuỗi redirect OAuth (login.live/office/m365 có thể mở thêm tab) → nếu chỉ đóng mailPage thì
-                // tab kia TREO lại. Trừ tab bán hàng Shopee (page). Best-effort, không để tab treo.
+                // Đóng MỌI tab Microsoft/Outlook đã mở trong lượt xác minh (mailPage + tab redirect OAuth) trừ tab
+                // bán hàng Shopee. NGOẠI TRỪ khi đã đăng nhập email + DỪNG cho user test tay
+                // (keepMailOpenForManual) → GIỮ tab Outlook mở để user tự thao tác. Best-effort, không để tab treo.
                 try
                 {
                     var toClose = _browser.Contexts.SelectMany(c => c.Pages)
-                        .Where(p => p != page && (p == mailPage ||
+                        .Where(p => !keepMailOpenForManual && p != page && (p == mailPage ||
                             (!string.IsNullOrEmpty(p.Url) && (
                                 p.Url.Contains("outlook", StringComparison.OrdinalIgnoreCase)
                                 || p.Url.Contains("live.com", StringComparison.OrdinalIgnoreCase)
