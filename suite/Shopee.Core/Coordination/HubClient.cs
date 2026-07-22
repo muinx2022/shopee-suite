@@ -212,6 +212,16 @@ public sealed class HubClient
         return (await r.Content.ReadFromJsonAsync<ProductCountResponse>(ct))?.Count ?? 0;
     }
 
+    /// <summary>+1 "Đã bán" theo SKU khớp tuyệt đối (mọi shop) trên kho hub. Trả true = hub nhận OK (2xx);
+    /// EnsureSuccessStatusCode ném khi lỗi → caller (wire ở OrdersModuleHost) bắt và trả false để lượt sync sau
+    /// thử lại (đơn CHƯA đánh cờ sold_counted_at).</summary>
+    public async Task<bool> MarkProductsSoldBySkuAsync(IReadOnlyList<string> skus, CancellationToken ct = default)
+    {
+        var r = await _bulkHttp.PostAsJsonAsync(HubRoutes.ProductsMarkSoldBySku, new ProductMarkSoldBySkuRequest(skus), ct);
+        r.EnsureSuccessStatusCode();
+        return true;
+    }
+
     public async Task<int> ResetProductsSoldAsync(List<ProductRowKey> keys, CancellationToken ct = default)
     {
         var r = await _bulkHttp.PostAsJsonAsync(HubRoutes.ProductsResetSold, new ProductKeysRequest(keys), ct);

@@ -1,6 +1,7 @@
 using System.Text;
 using Microsoft.Data.Sqlite;
 using XuLyDonShopee.Core.Models;
+using XuLyDonShopee.Core.Services;
 
 namespace XuLyDonShopee.Core.Data;
 
@@ -26,6 +27,23 @@ public sealed record GsheetPendingOrder(
     string? FileUrl,
     long? GsheetDaHuy,
     long? GsheetDaCoVanDon);
+
+/// <summary>
+/// Kết quả phát hiện đơn CHUYỂN sang "đã giao" giữa 2 lần sync (<see cref="OrdersRepository.DetectNewlyDelivered"/>),
+/// dùng để +1 "Đã bán" theo SKU trên kho hub. Tách 3 nhóm để caller xử đúng thứ tự idempotent:
+/// <list type="bullet">
+/// <item><see cref="SkusToIncrement"/>: các SKU cần +1 lên hub (mỗi đơn chuyển-sang-đã-giao CÓ SKU đóng góp 1 phần
+/// tử; đơn trùng SKU → SKU lặp → +N). Đơn không SKU KHÔNG nằm đây.</item>
+/// <item><see cref="PendingMarkOrderSns"/>: các <c>order_sn</c> ứng với <see cref="SkusToIncrement"/> — chỉ đánh cờ
+/// <c>sold_counted_at</c> SAU KHI hub +1 OK (kẻo hub lỗi thì mất đếm).</item>
+/// <item><see cref="ImmediateMarkOrderSns"/>: các <c>order_sn</c> đánh cờ NGAY (KHÔNG +1) — gồm đơn grandfather
+/// (đã-giao-sẵn: mới toanh đã delivered / đơn cũ status đã delivered) VÀ đơn chuyển-sang-đã-giao nhưng KHÔNG có SKU.</item>
+/// </list>
+/// </summary>
+public sealed record SoldTransitionResult(
+    IReadOnlyList<string> SkusToIncrement,
+    IReadOnlyList<string> PendingMarkOrderSns,
+    IReadOnlyList<string> ImmediateMarkOrderSns);
 
 /// <summary>
 /// Lưu/đọc đơn hàng đã sync trong bảng <c>orders</c>. Khóa nghiệp vụ là cặp
@@ -285,6 +303,123 @@ public class OrdersRepository
             cmd.Transaction = tx;
             cmd.CommandText = @"UPDATE orders SET
     hub_synced_at = COALESCE(hub_synced_at, $at)
+    WHERE account_id = $a AND order_sn = $sn;";
+            cmd.Parameters.AddWithValue("$at", atStr);
+            cmd.Parameters.AddWithValue("$a", accountId);
+            cmd.Parameters.AddWithValue("$sn", sn);
+            cmd.ExecuteNonQuery();
+        }
+        tx.Commit();
+    }
+
+    /// <summary>
+    /// Phát hiện đơn CHUYỂN sang "đã giao" (để +1 "Đã bán" theo SKU trên hub), <b>KHÔNG đếm bù</b> (no backfill).
+    /// <b>PHẢI gọi TRƯỚC <see cref="UpsertMany"/></b> của cùng lượt sync — đọc trạng thái CŨ trong DB (cột
+    /// <c>status</c>) trước khi UpsertMany ghi đè; chạy tuần tự cùng thread nên tương đương "cùng transaction"
+    /// (mỗi tài khoản một phiên, không có ghi đồng thời). Với mỗi đơn scan có <see cref="ShopeeShippingNav.LaDaGiaoDaBan"/>:
+    /// <list type="bullet">
+    /// <item>Đã tồn tại trong DB + <c>sold_counted_at</c> ĐÃ set → bỏ qua (đã đếm, idempotent).</item>
+    /// <item>Đã tồn tại + cờ NULL + status CŨ KHÔNG delivered → <b>chuyển sang đã-giao</b>: có SKU → gom SKU vào
+    /// <see cref="SoldTransitionResult.SkusToIncrement"/> + mã đơn vào <see cref="SoldTransitionResult.PendingMarkOrderSns"/>
+    /// (đánh cờ SAU hub +1 OK); không SKU → chỉ đánh cờ NGAY (ImmediateMark, không +1 được).</item>
+    /// <item>Đã tồn tại + cờ NULL + status CŨ ĐÃ delivered (đơn cũ có từ trước tính năng) → <b>grandfather</b>:
+    /// ImmediateMark, KHÔNG +1.</item>
+    /// <item>MỚI toanh (chưa có trong DB) + đã delivered ngay → <b>grandfather</b>: ImmediateMark, KHÔNG +1.</item>
+    /// </list>
+    /// Đơn không có mã / trùng mã trong lô → bỏ qua (không thể làm khóa / tránh xử lý trùng).
+    /// </summary>
+    public SoldTransitionResult DetectNewlyDelivered(long accountId, IEnumerable<SyncedOrder> scanned)
+    {
+        // Trạng thái + cờ đếm HIỆN TẠI trong DB (trước upsert) cho account này: order_sn → (status cũ, đã-đếm-chưa).
+        var existing = new Dictionary<string, (string? Status, bool Counted)>(StringComparer.Ordinal);
+        using (var conn = _db.OpenConnection())
+        using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = "SELECT order_sn, status, sold_counted_at FROM orders WHERE account_id = $a;";
+            cmd.Parameters.AddWithValue("$a", accountId);
+            using var reader = cmd.ExecuteReader();
+            while (reader.Read())
+            {
+                var sn = reader.GetString(0);
+                var status = reader.IsDBNull(1) ? null : reader.GetString(1);
+                var counted = !reader.IsDBNull(2);
+                existing[sn] = (status, counted);
+            }
+        }
+
+        var skus = new List<string>();
+        var pendingMark = new List<string>();
+        var immediateMark = new List<string>();
+        var seen = new HashSet<string>(StringComparer.Ordinal); // 1 mã đơn xử 1 lần dù lô có trùng
+
+        foreach (var o in scanned)
+        {
+            if (string.IsNullOrWhiteSpace(o.OrderSn) || !seen.Add(o.OrderSn))
+            {
+                continue;
+            }
+            if (!ShopeeShippingNav.LaDaGiaoDaBan(o.Status))
+            {
+                continue; // trạng thái MỚI không delivered → không phải "đã bán"
+            }
+
+            if (existing.TryGetValue(o.OrderSn, out var e))
+            {
+                if (e.Counted)
+                {
+                    continue; // đã đếm rồi (cờ set) → bỏ qua
+                }
+                if (ShopeeShippingNav.LaDaGiaoDaBan(e.Status))
+                {
+                    // status CŨ đã delivered (đơn cũ từ trước tính năng) → grandfather, KHÔNG +1.
+                    immediateMark.Add(o.OrderSn);
+                }
+                else
+                {
+                    // Chuyển chưa-giao → đã-giao. Có SKU → +1 (đánh cờ sau hub OK); không SKU → đánh cờ ngay.
+                    var sku = o.Sku?.Trim();
+                    if (!string.IsNullOrEmpty(sku))
+                    {
+                        skus.Add(sku);
+                        pendingMark.Add(o.OrderSn);
+                    }
+                    else
+                    {
+                        immediateMark.Add(o.OrderSn);
+                    }
+                }
+            }
+            else
+            {
+                // Đơn mới toanh, đã delivered ngay lần đầu thấy → grandfather, KHÔNG +1.
+                immediateMark.Add(o.OrderSn);
+            }
+        }
+
+        return new SoldTransitionResult(skus, pendingMark, immediateMark);
+    }
+
+    /// <summary>
+    /// Đánh dấu các đơn ĐÃ được tính "Đã bán" (chống đếm trùng lượt sync sau). <c>sold_counted_at</c> dùng
+    /// <c>COALESCE(cũ, $at)</c> — GIỮ thời điểm đếm LẦN ĐẦU, không đè. Khóa theo <c>(account_id, order_sn)</c>;
+    /// đơn không có mã (rỗng) bị bỏ qua. Cập nhật nhiều đơn trong một transaction (mẫu <see cref="MarkHubSynced"/>).
+    /// Dùng cho CẢ grandfather (đánh ngay) LẪN đơn +1 (đánh SAU khi hub +1 OK).
+    /// </summary>
+    public void MarkSoldCounted(long accountId, IEnumerable<string> orderSns, DateTime atUtc)
+    {
+        var atStr = DbSerialization.FormatDate(atUtc);
+        using var conn = _db.OpenConnection();
+        using var tx = conn.BeginTransaction();
+        foreach (var sn in orderSns)
+        {
+            if (string.IsNullOrWhiteSpace(sn))
+            {
+                continue;
+            }
+            using var cmd = conn.CreateCommand();
+            cmd.Transaction = tx;
+            cmd.CommandText = @"UPDATE orders SET
+    sold_counted_at = COALESCE(sold_counted_at, $at)
     WHERE account_id = $a AND order_sn = $sn;";
             cmd.Parameters.AddWithValue("$at", atStr);
             cmd.Parameters.AddWithValue("$a", accountId);

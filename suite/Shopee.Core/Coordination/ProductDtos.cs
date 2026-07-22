@@ -93,6 +93,10 @@ public sealed record ProductKeysRequest(List<ProductRowKey> Keys);
 /// <summary>Số dòng đã xử lý (đánh dấu bán / cấp lại SKU / xoá).</summary>
 public sealed record ProductCountResponse(int Count);
 
+/// <summary>+1 "Đã bán" theo SKU khớp TUYỆT ĐỐI (mọi shop). Mỗi phần tử = 1 đơn "đã giao" (+1 cho mọi dòng khớp);
+/// đơn TRÙNG SKU → SKU lặp trong danh sách → +N tổng. Đơn không có SKU (null/blank) đã bị loại phía client.</summary>
+public sealed record ProductMarkSoldBySkuRequest(IReadOnlyList<string> Skus);
+
 /// <summary>Sửa 1 dòng theo khoá vị trí — Data = ĐỦ 17 ô.</summary>
 public sealed record ProductUpdateRowRequest(string Acct, string Sheet, int RowNo, ProductRowData Data);
 /// <summary><see cref="Ok"/>=false = không tìm thấy dòng (ví dụ đã bị xoá).</summary>

@@ -168,6 +168,15 @@ public static class ProductApiEndpoints
             return Results.Json(new ProductCountResponse(await pdb.MarkSoldAsync(keys, ct)));
         });
 
+        // ── Ghi: +1 "đã bán" theo SKU khớp tuyệt đối (mọi shop) — module Đơn hàng gọi khi đơn chuyển sang đã-giao ──
+        api.MapPost(HubRoutes.ProductsMarkSoldBySku, async (ProductMarkSoldBySkuRequest? r, IServiceProvider sp, CancellationToken ct) =>
+        {
+            var pdb = sp.GetService<ProductDb>();
+            if (pdb is null || !pdb.IsReady) return PgNotReady();
+            if (r is null) return Results.BadRequest();
+            return Results.Json(new ProductCountResponse(await pdb.MarkSoldBySkuAsync(r.Skus ?? [], ct)));
+        });
+
         // ── Ghi: đặt "đã bán" về 0 (xoá lịch sử bán) cho các khoá vị trí ──
         api.MapPost(HubRoutes.ProductsResetSold, async (ProductKeysRequest? r, IServiceProvider sp, CancellationToken ct) =>
         {

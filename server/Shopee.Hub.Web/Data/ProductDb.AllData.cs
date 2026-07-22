@@ -112,6 +112,36 @@ ON CONFLICT (account_id, sheet, row_no) DO UPDATE SET
         return n;
     }
 
+    /// <summary>+1 "đã bán" cho MỌI dòng có <c>btrim(sku)</c> KHỚP TUYỆT ĐỐI (KHÔNG ILIKE) — LIÊN-SHOP (mọi
+    /// account_id/sheet; chưa phân shop). Mỗi phần tử trong <paramref name="skus"/> = 1 đơn "đã giao" nên +1 cho
+    /// từng dòng khớp (đơn TRÙNG SKU → SKU lặp trong danh sách → +N tổng, đúng "+1 mỗi đơn"). SKU blank → bỏ qua.
+    /// Mỗi khoá vị trí: chưa có bản ghi product_sold → chèn sold_count=1 + first/last_sold_at=now; đã có → sold_count+1
+    /// + last_sold_at=now (GIỮ first_sold_at). 1 transaction. Trả TỔNG số dòng product_sold đã +1 (log/telemetry;
+    /// SKU không khớp dòng nào → +0, KHÔNG lỗi). Sau này scope per-shop = thêm điều kiện (account_id, sheet).</summary>
+    public async Task<int> MarkSoldBySkuAsync(IReadOnlyList<string> skus, CancellationToken ct)
+    {
+        if (skus is null || skus.Count == 0) return 0;
+        const string sql = @"
+INSERT INTO product_sold (account_id, sheet, row_no, sold_count, first_sold_at, last_sold_at)
+SELECT account_id, sheet, row_no, 1, now(), now() FROM product_rows WHERE btrim(sku) = $1
+ON CONFLICT (account_id, sheet, row_no) DO UPDATE SET
+  sold_count = product_sold.sold_count + 1,
+  last_sold_at = now();";
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        await using var tx = await conn.BeginTransactionAsync(ct);
+        var affected = 0;
+        foreach (var raw in skus)
+        {
+            var sku = (raw ?? "").Trim();
+            if (sku.Length == 0) continue;                 // đơn không có SKU → bỏ qua (không +1)
+            await using var cmd = new NpgsqlCommand(sql, conn, tx);
+            cmd.Parameters.AddWithValue(sku);
+            affected += await cmd.ExecuteNonQueryAsync(ct);
+        }
+        await tx.CommitAsync(ct);
+        return affected;
+    }
+
     /// <summary>Đặt "đã bán" về 0 cho các khoá vị trí (1 transaction) — gộp theo (acct, sheet) rồi
     /// <c>DELETE FROM product_sold WHERE … row_no = ANY(…)</c> (như nhánh product_sold của <see cref="DeleteRowsByKeysAsync"/>,
     /// nhưng GIỮ product_rows). Xoá bản ghi = xoá cả lịch sử first/last_sold_at → lưới đọc COALESCE(sold_count,0)=0.

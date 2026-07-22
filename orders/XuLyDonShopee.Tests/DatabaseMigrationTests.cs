@@ -370,4 +370,26 @@ CREATE TABLE orders (
         repo.MarkHubSynced(11, new[] { "SNHUB" }, DateTime.UtcNow);
         Assert.Empty(repo.GetForHubPush(11));
     }
+
+    // ==== Migration cột sold_counted_at cho bảng orders (+1 "Đã bán" theo SKU) ====
+
+    [Fact]
+    public void KhoiTao_DbCu_Orders_ThieuSoldCountedAt_DuocThemCot_KhongMatDuLieu()
+    {
+        using var temp = new TempDatabase();
+        CreateOldOrdersSchemaWithRow(temp.Path, accountId: 13, orderSn: "SNSOLD");
+
+        // Trước migration: schema orders cũ chưa có cột sold_counted_at.
+        Assert.False(HasColumn(temp.Path, "orders", "sold_counted_at"));
+
+        // Khởi tạo Database mới trỏ cùng file → Initialize() chạy migration ALTER TABLE.
+        _ = new Database(temp.Path);
+
+        // Sau migration: đã có cột; đơn cũ CÒN NGUYÊN.
+        Assert.True(HasColumn(temp.Path, "orders", "sold_counted_at"));
+
+        var repo = new OrdersRepository(new Database(temp.Path));
+        var row = Assert.Single(repo.Query(accountId: 13));
+        Assert.Equal("SNSOLD", row.OrderSn);
+    }
 }

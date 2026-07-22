@@ -3442,7 +3442,9 @@ public class ShopeeLoginService
 
         // Chốt chặn an toàn số trang quét mỗi lượt sync (tránh lặp vô hạn nếu selector "trang sau" đoán sai
         // hoặc điều kiện dừng không kích hoạt). Chạm cap → dừng + cờ ReachedPageCap.
-        private const int MaxSyncPages = 20;
+        // 2026-07-22: hạ 20 → 10 theo yêu cầu (giảm tải mỗi lượt sync; vẫn đọc tab "Tất cả"). Đơn ở trang >10 sẽ
+        // không còn được cập nhật trạng thái mỗi lượt (vẫn nằm trong DB từ trước) — chấp nhận tạm.
+        private const int MaxSyncPages = 10;
 
         public async Task<SyncOrdersResult> SyncAllOrdersAsync(
             Action<string>? log = null,

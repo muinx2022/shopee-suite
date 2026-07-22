@@ -345,6 +345,23 @@ public static class ShopeeShippingNav
         return ChuaTuHuy(status);
     }
 
+    /// <summary>
+    /// True nếu đơn ở trạng thái <b>ĐÃ GIAO</b> tính "Đã bán" (+1 SKU khi đơn chuyển sang trạng thái này). Tiêu chí:
+    /// <paramref name="status"/> sau chuẩn hoá (<see cref="NormalizeUiText"/>: trim + gộp khoảng trắng + lower) KHỚP
+    /// TUYỆT ĐỐI một trong {"đã giao", "hoàn thành", "giao hàng thành công"}.
+    /// <para>
+    /// <b>CỐ Ý dùng khớp tuyệt đối (KHÔNG Contains)</b> để LOẠI các trạng thái "giao dở/không thành công":
+    /// "Đã giao cho ĐVVC" / "Đã giao cho đơn vị vận chuyển" (mới bàn giao ĐVVC, khách CHƯA nhận) và "Giao hàng
+    /// không thành công" đều KHÔNG khớp (chúng CHỨA "đã giao"/"giao hàng" nhưng không BẰNG các chuỗi trên). "Đã hủy"
+    /// → false. Null/rỗng → false.
+    /// </para>
+    /// </summary>
+    public static bool LaDaGiaoDaBan(string? status)
+    {
+        var s = NormalizeUiText(status);
+        return s == "đã giao" || s == "hoàn thành" || s == "giao hàng thành công";
+    }
+
     /// <summary>True nếu chuỗi (hạ chữ thường) chứa "hủy"/"huỷ" (2 biến thể dấu) hoặc "cancel".</summary>
     private static bool ChuaTuHuy(string? s)
     {

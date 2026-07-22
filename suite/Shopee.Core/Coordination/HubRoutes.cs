@@ -67,6 +67,8 @@ public static class HubRoutes
     // ── Trang "📦 Dữ liệu" (mọi shop) — client desktop thao tác qua các route này ──
     public const string ProductsAllData = "/products/all-data";
     public const string ProductsMarkSold = "/products/mark-sold";
+    /// <summary>+1 "Đã bán" theo SKU khớp tuyệt đối (mọi shop) — module Đơn hàng gọi khi đơn chuyển sang đã-giao.</summary>
+    public const string ProductsMarkSoldBySku = "/products/mark-sold-by-sku";
     public const string ProductsResetSold = "/products/reset-sold";
     public const string ProductsRegenSkus = "/products/regen-skus";
     public const string ProductsDeleteRows = "/products/rows/delete";

@@ -449,6 +449,36 @@ public class ShopeeShippingNavTests
         Assert.Equal(expected, ShopeeShippingNav.LaDonHuy(status, desc, cancelReason));
     }
 
+    // ===== LaDaGiaoDaBan: KHỚP TUYỆT ĐỐI {"đã giao","hoàn thành","giao hàng thành công"} — +1 "Đã bán" theo SKU.
+    //        CỐ Ý loại các trạng thái "giao dở/không thành công" (CHỨA "đã giao"/"giao hàng" nhưng KHÔNG bằng). =====
+    [Theory]
+    // Ba trạng thái tính "đã bán" — mọi hoa/thường/space thừa/xuống dòng.
+    [InlineData("Đã giao", true)]
+    [InlineData("đã giao", true)]
+    [InlineData("  ĐÃ GIAO  ", true)]
+    [InlineData("Đã  giao\n", true)]
+    [InlineData("Hoàn thành", true)]
+    [InlineData("HOÀN THÀNH", true)]
+    [InlineData("  hoàn thành ", true)]
+    [InlineData("Giao hàng thành công", true)]
+    [InlineData("giao hàng thành công", true)]
+    [InlineData("GIAO HÀNG\tTHÀNH CÔNG", true)]
+    // Các chuỗi BIÊN phải KHÔNG khớp (chứa nhưng không bằng) — đây là điểm mấu chốt.
+    [InlineData("Đã giao cho ĐVVC", false)]
+    [InlineData("Đã giao cho đơn vị vận chuyển", false)]
+    [InlineData("Giao hàng không thành công", false)]
+    // Trạng thái khác.
+    [InlineData("Đã hủy", false)]
+    [InlineData("Đang giao", false)]
+    [InlineData("Chờ lấy hàng", false)]
+    [InlineData("Chờ xác nhận", false)]
+    [InlineData("", false)]
+    [InlineData(null, false)]
+    public void LaDaGiaoDaBan_KhopTuyetDoi(string? status, bool expected)
+    {
+        Assert.Equal(expected, ShopeeShippingNav.LaDaGiaoDaBan(status));
+    }
+
     // ===== IsAllTabText: tab "Tất cả" trên thanh tab danh sách đơn (khớp tuyệt đối "tất cả") =====
     [Theory]
     [InlineData("Tất cả", true)]

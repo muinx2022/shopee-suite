@@ -38,6 +38,16 @@ public class AppServices
     /// </summary>
     public Func<long, IReadOnlyList<SyncedOrder>, CancellationToken, Task<bool>>? PushOrdersToHub { get; set; }
 
+    /// <summary>
+    /// HOOK +1 "Đã bán" theo SKU (khớp TUYỆT ĐỐI, MỌI shop) trên kho sản phẩm HUB (Postgres), do shell suite RÓT
+    /// (module Đơn hàng KHÔNG tham chiếu <c>Shopee.Core</c> nên không tự biết hub). Tham số: danh sách SKU — mỗi đơn
+    /// vừa CHUYỂN sang "đã giao" đóng góp 1 SKU đại diện (đơn trùng SKU → +N); <c>ct</c>. Trả <c>true</c> = hub +1 OK
+    /// → phiên đánh cờ <c>sold_counted_at</c> cho các đơn tương ứng. Mặc định <c>null</c> = TẮT (app Đơn hàng chạy
+    /// độc lập / hub chưa cấu hình → không +1, đơn giữ CHƯA đánh cờ để lượt sync sau thử lại). Phiên gọi CHẠY NỀN
+    /// sau mỗi lượt Sync (<see cref="AccountSession"/>).
+    /// </summary>
+    public Func<IReadOnlyList<string>, CancellationToken, Task<bool>>? IncrementSoldBySku { get; set; }
+
     /// <summary>Nhật ký hoạt động của app (panel UI + ghi file cạnh database). Các phiên nạp log qua đây.</summary>
     public ActivityLog Log { get; }
 

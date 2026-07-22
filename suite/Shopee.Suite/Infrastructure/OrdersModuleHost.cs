@@ -37,6 +37,7 @@ public static class OrdersModuleHost
         {
             Services = new AppServices();
             WireHubPush(Services);
+            WireIncrementSoldBySku(Services);
             return new MainViewModel(Services);
         }
         catch (Exception ex)
@@ -87,6 +88,39 @@ public static class OrdersModuleHost
             {
                 // Gồm cả timeout tunnel (TaskCanceledException khi ct CHƯA hủy) → coi như hub lỗi, thử lại lượt sau.
                 Trace.WriteLine("[OrdersModuleHost] Đẩy đơn lên hub lỗi: " + ex.Message);
+                return false;
+            }
+        };
+    }
+
+    /// <summary>
+    /// RÓT hook +1 "Đã bán" theo SKU vào bộ dịch vụ module Đơn hàng (mẫu <see cref="WireHubPush"/>). Hook được phiên
+    /// gọi CHẠY NỀN sau mỗi Sync với danh sách SKU các đơn VỪA chuyển sang đã-giao: hub chưa kết nối → trả false
+    /// (đơn giữ CHƯA đánh cờ, thử lại lượt sau); ngược lại gọi <c>MarkProductsSoldBySkuAsync</c> (+1 mọi dòng khớp
+    /// SKU tuyệt đối, mọi shop), 2xx = true. Nuốt mọi lỗi (log <c>Trace</c>) trả false — trừ hủy CHỦ ĐỘNG (ct) cho
+    /// xuyên để phiên xử như dừng.
+    /// </summary>
+    private static void WireIncrementSoldBySku(AppServices services)
+    {
+        services.IncrementSoldBySku = async (skus, ct) =>
+        {
+            try
+            {
+                // Hub chưa kết nối (chưa cấu hình / offline) → KHÔNG đánh cờ đơn, để lượt sync sau +1 lại.
+                if (!CoordinationRuntime.Active || CoordinationRuntime.Client is null)
+                {
+                    return false;
+                }
+                return await CoordinationRuntime.Client.MarkProductsSoldBySkuAsync(skus, ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw; // hủy CHỦ ĐỘNG (dừng phiên) → cho xuyên để AccountSession xử như hủy
+            }
+            catch (Exception ex)
+            {
+                // Gồm cả timeout tunnel (TaskCanceledException khi ct CHƯA hủy) → coi như hub lỗi, thử lại lượt sau.
+                Trace.WriteLine("[OrdersModuleHost] +1 Đã bán theo SKU lên hub lỗi: " + ex.Message);
                 return false;
             }
         };

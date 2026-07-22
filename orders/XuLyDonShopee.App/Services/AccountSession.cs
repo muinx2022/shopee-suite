@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -641,9 +642,23 @@ public partial class AccountSession : ObservableObject, IAccountSession
             // Core thu thập (best-effort có log tiến trình từng trang), trả DTO — KHÔNG đụng DB.
             var result = await s.SyncAllOrdersAsync(log, alreadyHaveFinal, tok).ConfigureAwait(false);
 
+            // "Đã bán" theo SKU: phát hiện đơn CHUYỂN sang đã-giao TRƯỚC khi UpsertMany ghi đè cột status (đọc
+            // trạng thái CŨ trong DB). Chạy tuần tự trước upsert nên tương đương "cùng transaction" — không có ghi
+            // đồng thời (mỗi tài khoản một phiên, đang trong cửa sổ _navigating). No-backfill: đơn đã-giao-sẵn →
+            // grandfather (đánh cờ, KHÔNG +1). Kết quả dùng ngay dưới đây.
+            var soldDetect = _services.Orders.DetectNewlyDelivered(_accountId, result.Orders);
+
             // Lưu về DB (thread nền — SQLite an toàn): upsert theo (account_id, order_sn). insertedOrders =
             // các đơn VỪA thêm mới (đơn cập nhật KHÔNG có) → dùng để báo "đơn mới" qua Slack/Discord/Telegram.
             var (inserted, updated, insertedOrders) = _services.Orders.UpsertMany(_accountId, result.Orders, DateTime.UtcNow);
+
+            // Đánh cờ NGAY (SAU upsert để dòng mới toanh đã tồn tại) cho nhóm KHÔNG cần +1: đơn grandfather
+            // (đã-giao-sẵn) + đơn chuyển-sang-đã-giao nhưng không có SKU. Nhóm CÓ SKU (+1) chỉ đánh cờ SAU khi hub
+            // +1 OK (StartSoldCountInBackground) để hub lỗi thì lượt sau thử lại.
+            if (soldDetect.ImmediateMarkOrderSns.Count > 0)
+            {
+                _services.Orders.MarkSoldCounted(_accountId, soldDetect.ImmediateMarkOrderSns, DateTime.UtcNow);
+            }
 
             // Vừa ghi đơn vào DB → phát tín hiệu để màn "Đơn hàng" đang mở TỰ nạp lại (OrdersViewModel nghe
             // rồi marshal về UI thread). CHỈ thêm 1 lời gọi này, KHÔNG đụng luồng xử lý đơn / cửa-skip.
@@ -681,7 +696,7 @@ public partial class AccountSession : ObservableObject, IAccountSession
             }
 
             var summary = $"Sync xong: {result.Orders.Count} đơn / {result.Pages} trang — thêm {inserted} mới, cập nhật {updated}."
-                + (result.ReachedPageCap ? " (chạm chốt chặn 20 trang)" : string.Empty)
+                + (result.ReachedPageCap ? " (chạm chốt chặn 10 trang)" : string.Empty)
                 + (toShip is int t ? $" — Chờ Lấy Hàng: {t}" : string.Empty);
             StatusText = summary;
             log(summary);
@@ -697,6 +712,11 @@ public partial class AccountSession : ObservableObject, IAccountSession
             // các lượt trước đẩy hụt (hub offline). Hook chưa được rót (app Đơn hàng chạy độc lập / hub tắt) →
             // tự return im lặng bên trong.
             StartHubPushInBackground(log, tok);
+
+            // +1 "Đã bán" theo SKU lên HUB chạy NỀN (y pattern hub-push): các đơn VỪA chuyển sang đã-giao trong lượt
+            // này (soldDetect). Chỉ đánh cờ sold_counted_at cho các đơn CÓ SKU SAU khi hub +1 OK. Không có SKU nào
+            // cần +1 → tự return bên trong. Hook chưa rót → im lặng (đơn giữ CHƯA đánh cờ, lượt sau thử lại).
+            StartSoldCountInBackground(soldDetect.SkusToIncrement, soldDetect.PendingMarkOrderSns, log, tok);
 
             // Báo "đơn MỚI" (Slack/Discord/Telegram) — CHỈ khi lượt này có đơn INSERT. Chạy NỀN fire-and-forget
             // (y pattern GSheet): thông báo chỉ đụng HTTP nên không cần giữ _navigating, không kéo dài lượt sync;
@@ -830,6 +850,78 @@ public partial class AccountSession : ObservableObject, IAccountSession
             try { await PushOrdersToHubAsync(log, ct).ConfigureAwait(false); }
             finally { Interlocked.Exchange(ref _hubPushing, 0); }
         }, CancellationToken.None);
+    }
+
+    /// <summary>Cờ CHỐNG CHỒNG lượt +1 "Đã bán" theo SKU trên CÙNG phiên (0 = rảnh, 1 = đang +1) — y <see cref="_hubPushing"/>.</summary>
+    private int _soldCounting;
+
+    /// <summary>
+    /// Kích hoạt +1 "Đã bán" theo SKU lên HUB CHẠY NỀN (fire-and-forget) sau khi Sync đã tổng kết — y pattern
+    /// <see cref="StartHubPushInBackground"/>. <paramref name="skus"/> = SKU các đơn VỪA chuyển sang đã-giao trong
+    /// lượt này (có SKU); <paramref name="orderSns"/> = mã đơn tương ứng để đánh cờ SAU khi hub +1 OK. Không có SKU
+    /// nào → return ngay (không chiếm cờ). Cờ <see cref="_soldCounting"/> (Interlocked) chống 2 lượt chồng nhau.
+    /// <paramref name="ct"/> là token phiên → dừng phiên thì lượt +1 tự hủy. <see cref="IncrementSoldBySkuAsync"/>
+    /// tự nuốt mọi exception nên task nền KHÔNG bao giờ ném unobserved.
+    /// </summary>
+    private void StartSoldCountInBackground(
+        IReadOnlyList<string> skus, IReadOnlyList<string> orderSns, Action<string> log, CancellationToken ct)
+    {
+        if (skus is null || skus.Count == 0)
+        {
+            return; // không có đơn chuyển-sang-đã-giao có SKU → không +1 (grandfather đã đánh cờ ở luồng chính)
+        }
+        if (Interlocked.CompareExchange(ref _soldCounting, 1, 0) != 0)
+        {
+            log("Đã bán: lượt +1 trước còn đang chạy — bỏ qua (lượt sync sau tự đếm phần thiếu).");
+            return;
+        }
+
+        _ = Task.Run(async () =>
+        {
+            try { await IncrementSoldBySkuAsync(skus, orderSns, log, ct).ConfigureAwait(false); }
+            finally { Interlocked.Exchange(ref _soldCounting, 0); }
+        }, CancellationToken.None);
+    }
+
+    /// <summary>
+    /// +1 "Đã bán" theo SKU lên HUB qua hook <see cref="AppServices.IncrementSoldBySku"/> (do shell suite rót), rồi
+    /// CHỈ đánh cờ <c>sold_counted_at</c> cho <paramref name="orderSns"/> khi hub +1 OK (ưu tiên KHÔNG mất đếm nếu
+    /// hub lỗi). <b>Không bao giờ ném</b>: hủy CHỦ ĐỘNG → thôi; lỗi khác → log. Hook null (app Đơn hàng chạy độc
+    /// lập / hub chưa cấu hình) → return im lặng (đơn CHƯA đánh cờ → lượt sync sau thử lại).
+    /// </summary>
+    private async Task IncrementSoldBySkuAsync(
+        IReadOnlyList<string> skus, IReadOnlyList<string> orderSns, Action<string> log, CancellationToken ct)
+    {
+        var inc = _services.IncrementSoldBySku;
+        if (inc is null)
+        {
+            return; // hub tắt / app Đơn hàng chạy độc lập → im lặng, KHÔNG đánh cờ (lượt sau thử lại)
+        }
+
+        try
+        {
+            var ok = await inc(skus, ct).ConfigureAwait(false);
+            if (ok)
+            {
+                // Hub +1 OK → đánh cờ để không +1 lại lượt sau. (Rủi ro hiếm: +1 xong mà đánh cờ lỗi/crash →
+                // lượt sau đếm lại 1 lần — chấp nhận, ưu tiên không mất đếm.)
+                _services.Orders.MarkSoldCounted(_accountId, orderSns, DateTime.UtcNow);
+                var preview = string.Join(", ", skus.Take(20));
+                log($"+{skus.Count} Đã bán theo SKU: {preview}{(skus.Count > 20 ? " …" : string.Empty)}");
+            }
+            else
+            {
+                log("Đã bán: hub chưa nhận (+1 hoãn) — lượt sync sau thử lại.");
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Hủy chủ động (dừng phiên) — thôi; đơn CHƯA đánh cờ, lượt sau thử lại.
+        }
+        catch (Exception ex)
+        {
+            log("Đã bán: lỗi — " + ex.Message);
+        }
     }
 
     /// <summary>
