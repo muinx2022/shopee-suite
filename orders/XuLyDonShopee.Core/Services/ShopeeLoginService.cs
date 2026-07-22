@@ -1221,27 +1221,30 @@ public class ShopeeLoginService
                 }
             }
 
-            // 4) "Stay signed in?" (KMSI) → bấm Yes (giữ đăng nhập trong profile).
-            //    (a) Ưu tiên tìm theo ID (nút "Yes" cũ là <input value="Yes">, không có innerText).
-            //    (b) Không thấy → nút submit generic CHỈ được click khi text khớp ^(yes|có|co)$. RÀNG BUỘC: không dùng
-            //        "button[type='submit']" trần trong selector list — trên form "Xác minh email" nó là nút "Gửi mã".
+            // 4) "Duy trì đăng nhập?" (KMSI) → bấm "Có" (giữ đăng nhập trong profile). Form Fluent MỚI: nút "Có"
+            //    KHÔNG có #acceptButton/#idSIButton9 mà là [data-testid='primaryButton'] — nhưng NHIỀU form khác
+            //    cũng có primaryButton (vd "Gửi mã"/"Đăng nhập") nên CHỈ bấm nó khi CHẮC đang ở form KMSI, nhận
+            //    diện qua testid ỔN ĐỊNH (kmsiVideo/kmsiImage — không phụ thuộc ngôn ngữ). Bản Outlook cũ:
+            //    #acceptButton/#idSIButton9. Poll ~8s vì KMSI render sau submit password (có thể trễ).
             await Task.Delay(rng.Next(1000, 2500), ct).ConfigureAwait(false);
-            var kmsi = await FindFirstVisibleByRectsAsync(mailPage, MsKmsiYesSelectors, 4000, ct).ConfigureAwait(false);
-            if (kmsi is not null)
+            var kmsiDeadline = DateTime.UtcNow.AddSeconds(8);
+            while (DateTime.UtcNow < kmsiDeadline)
             {
-                L("Bấm 'Có' để giữ đăng nhập hộp thư...");
-                (mx, my) = await HumanMoveAndClickAsync(mailPage, kmsi, mx, my, rng, ct).ConfigureAwait(false);
-                await Task.Delay(rng.Next(1500, 3000), ct).ConfigureAwait(false);
-            }
-            else
-            {
-                var kmsiYes = await FindVisibleByTextAsync(mailPage, new[] { "button[type='submit']", "button" }, KmsiYesRegex, ct, 2500).ConfigureAwait(false);
-                if (kmsiYes is not null)
+                ct.ThrowIfCancellationRequested();
+                var onKmsi = await IsAnyVisibleByClientRectsAsync(
+                    mailPage, new[] { "[data-testid='kmsiVideo']", "[data-testid='kmsiImage']" }, ct).ConfigureAwait(false);
+                var kmsiSelectors = onKmsi
+                    ? new[] { "[data-testid='primaryButton']", "#acceptButton", "#idSIButton9" }
+                    : MsKmsiYesSelectors;
+                var kmsi = await FindFirstVisibleByRectsAsync(mailPage, kmsiSelectors, 1000, ct).ConfigureAwait(false);
+                if (kmsi is not null)
                 {
                     L("Bấm 'Có' để giữ đăng nhập hộp thư...");
-                    (mx, my, _) = await TryHumanClickVisibleAsync(mailPage, kmsiYes, mx, my, rng, ct).ConfigureAwait(false);
+                    (mx, my) = await HumanMoveAndClickAsync(mailPage, kmsi, mx, my, rng, ct).ConfigureAwait(false);
                     await Task.Delay(rng.Next(1500, 3000), ct).ConfigureAwait(false);
+                    break;
                 }
+                await Task.Delay(rng.Next(500, 900), ct).ConfigureAwait(false);
             }
 
             return true;
