@@ -1275,12 +1275,12 @@ public class ShopeeLoginService
                 }
 
                 // Ưu tiên tab "Ưu tiên"/"Focused"; không có mail Shopee ở đó → thử "Khác"/"Other".
-                await TryClickPivotAsync(mailPage, FocusedPivotRegex, "Ưu tiên", log, rng, ct).ConfigureAwait(false);
+                await TryClickPivotAsync(mailPage, "focused", FocusedPivotRegex, "Ưu tiên", log, rng, ct).ConfigureAwait(false);
                 await Task.Delay(rng.Next(800, 1500), ct).ConfigureAwait(false);
                 var rows = await FindAllShopeeMailRowsAsync(mailPage, MaxMailsPerRound, ct).ConfigureAwait(false);
                 if (rows.Count == 0)
                 {
-                    await TryClickPivotAsync(mailPage, OtherPivotRegex, "Khác", log, rng, ct).ConfigureAwait(false);
+                    await TryClickPivotAsync(mailPage, "other", OtherPivotRegex, "Khác", log, rng, ct).ConfigureAwait(false);
                     await Task.Delay(rng.Next(800, 1500), ct).ConfigureAwait(false);
                     rows = await FindAllShopeeMailRowsAsync(mailPage, MaxMailsPerRound, ct).ConfigureAwait(false);
                 }
@@ -1514,11 +1514,19 @@ public class ShopeeLoginService
         /// <summary>Click tab/pivot (Outlook "Khác"/"Other" hoặc "Ưu tiên"/"Focused") nếu tìm thấy — best-effort,
         /// không thấy thì bỏ qua (một số hộp thư không chia Focused/Other).</summary>
         private static async Task TryClickPivotAsync(
-            IPage page, Regex regex, string label, Action<string>? log, Random rng, CancellationToken ct)
+            IPage page, string pivotValue, Regex regex, string label, Action<string>? log, Random rng, CancellationToken ct)
         {
-            var pivot = await FindVisibleByTextAsync(
-                page, new[] { "button", "[role='tab']", "[role='menuitemradio']", "div[role='heading']", "span" },
-                regex, ct, 2500).ConfigureAwait(false);
+            // ƯU TIÊN chọn theo thuộc tính `value` (focused/other) của tab Outlook (Fluent fui-Tab) — KHÔNG phụ
+            // thuộc NGÔN NGỮ UI (vi/en/es/fr...): <button role="tab" value="focused">Prioritarios</button>. Dự
+            // phòng: khớp text đa ngôn ngữ (regex) cho bản Outlook cũ/khác không có thuộc tính value.
+            var pivot = await FindFirstVisibleByRectsAsync(
+                page, new[] { $"button[role='tab'][value='{pivotValue}']", $"[role='tab'][value='{pivotValue}']" }, 2500, ct).ConfigureAwait(false);
+            if (pivot is null)
+            {
+                pivot = await FindVisibleByTextAsync(
+                    page, new[] { "button", "[role='tab']", "[role='menuitemradio']", "div[role='heading']", "span" },
+                    regex, ct, 2500).ConfigureAwait(false);
+            }
             if (pivot is null)
             {
                 return;
