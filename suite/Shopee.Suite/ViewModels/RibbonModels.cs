@@ -30,7 +30,7 @@ public sealed class RibbonTab
 }
 
 /// <summary>Một nhóm trên dải ribbon: khung có nhãn ở đáy + các nút bên trong, ngăn cách nhau bằng divider dọc.</summary>
-public sealed class RibbonGroup
+public sealed partial class RibbonGroup : ObservableObject
 {
     public RibbonGroup(string title, IReadOnlyList<object> items)
     {
@@ -42,6 +42,14 @@ public sealed class RibbonGroup
 
     /// <summary>Các item trong nhóm (RibbonScreenItem | RibbonActionItem | RibbonToggleItem).</summary>
     public IReadOnlyList<object> Items { get; }
+
+    /// <summary>
+    /// Bật/tắt CẢ NHÓM: container nhóm bind <c>IsEnabled</c> vào đây (xem MainWindow.axaml). <c>false</c> →
+    /// Avalonia làm mờ (disable) mọi item con, KHÔNG ẩn. <c>true</c> (mặc định) → item con theo trạng thái
+    /// riêng của chúng (nút hành động vẫn tự disable theo CanExecute của command). Dùng để khóa nhóm
+    /// "Hành động"/"Tùy chọn" của tab Shopee khi KHÔNG ở màn "Tài khoản".
+    /// </summary>
+    [ObservableProperty] private bool _isEnabled = true;
 }
 
 /// <summary>

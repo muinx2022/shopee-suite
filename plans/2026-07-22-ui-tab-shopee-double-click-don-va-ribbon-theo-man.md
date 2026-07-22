@@ -1,7 +1,7 @@
 # Plan: UI tab Shopee — double-click đơn (info + đổi trạng thái) & ribbon "Hành động" theo màn
 
 - **Ngày:** 2026-07-22
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-executor`)
 
 ## 1. Bối cảnh & mục tiêu
@@ -87,6 +87,14 @@ Hai chỉnh sửa UI trên **tab "Shopee"** của app Shopee Suite (module đơn
 
 ---
 
-## Báo cáo thực thi (Opus điền sau khi xong)
+## Báo cáo thực thi
 
-<chờ thực thi>
+Hoàn tất, build `dotnet build ShopeeSuite.sln` **0/0** + `dotnet test orders/XuLyDonShopee.Tests` **774 pass**. Fable review diff thật.
+
+**Việc A:** `OnCellPointerPressed` (OrdersView.axaml.cs) double-click → `EditOrderStatusAsync` mở `OrderDetailDialog` (mới) hiện 9 thông tin + ComboBox trạng thái (nguồn `AllStatuses()`), Lưu → `OrdersRepository.UpdateStatus(accountId, orderSn, status)` (chỉ cột status, local-only, có comment) + `Reload()`. Bỏ copy clipboard + toast (gỡ Popup + các hàm toast; giữ `CellTextExtractor` vì còn test). `OrderRowViewModel` lộ `AccountId`.
+
+**Việc B:** gate ở MỨC NHÓM: `RibbonGroup` thành `ObservableObject` + `[ObservableProperty] IsEnabled=true`; `MainWindow.axaml` bind `IsEnabled` ở StackPanel nội dung nhóm; `ShellViewModel` tách `oActionGroup`/`oOptionGroup`, `SyncOrdersActionGroups()` = `SelectedNavIndex==0`, gọi lúc dựng + nghe `PropertyChanged`. Làm mờ (disable) không ẩn; ở màn Tài khoản các nút vẫn theo CanExecute riêng.
+
+**Fable xác minh (đọc diff + build):** gate nhóm dùng `IsEffectivelyEnabled` = AND theo cây → không đè CanExecute; binding `RibbonGroup.IsEnabled` (ObservableObject) cập nhật đúng; subscription `SelectedNavIndex` dùng singleton nên không rò.
+
+**Còn lại:** chưa chạy UI thật — user nên bấm thử 1 lượt xác nhận nút vẫn theo CanExecute ở màn Tài khoản + hộp thoại double-click hiện đúng.

@@ -1,6 +1,8 @@
+using System.Collections.Generic;
 using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Platform.Storage;
+using XuLyDonShopee.App.ViewModels;
 using XuLyDonShopee.App.Views;
 
 namespace XuLyDonShopee.App.Services;
@@ -75,6 +77,21 @@ public static class DialogService
         }
 
         return folder.TryGetLocalPath() ?? folder.Name;
+    }
+
+    /// <summary>
+    /// Hộp thoại thông tin đơn + đổi trạng thái. <paramref name="statuses"/> = các trạng thái đã sync về
+    /// (chuỗi tự do). Trả về trạng thái người dùng chọn khi bấm "Lưu", hoặc null nếu Hủy / chưa gán cửa sổ.
+    /// </summary>
+    public static async Task<string?> EditOrderAsync(OrderRowViewModel row, IReadOnlyList<string> statuses)
+    {
+        if (MainWindow is null)
+        {
+            return null;
+        }
+
+        var dialog = new OrderDetailDialog(row, statuses);
+        return await dialog.ShowDialog<string?>(MainWindow);
     }
 
     /// <summary>Hộp thoại dán danh sách proxy. Trả về văn bản đã dán, hoặc null nếu Hủy.</summary>

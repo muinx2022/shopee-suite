@@ -64,8 +64,10 @@
                 <ItemsControl.ItemTemplate>
                     <DataTemplate DataType="vm:RibbonGroup">
                         <StackPanel Orientation="Horizontal">
-                            <!-- Nhóm: hàng nút (trên) + nhãn nhóm (đáy) -->
-                            <StackPanel Margin="6,0">
+                            <!-- Nhóm: hàng nút (trên) + nhãn nhóm (đáy). IsEnabled theo nhóm: nhóm bị khóa
+                                 (vd "Hành động"/"Tùy chọn" tab Shopee khi không ở màn Tài khoản) → làm mờ CẢ
+                                 cụm; nhóm bật → item con theo trạng thái riêng (CanExecute của command). -->
+                            <StackPanel Margin="6,0" IsEnabled="{Binding IsEnabled}">
                                 <ItemsControl ItemsSource="{Binding Items}" HorizontalAlignment="Center">
                                     <ItemsControl.ItemsPanel>
                                         <ItemsPanelTemplate>

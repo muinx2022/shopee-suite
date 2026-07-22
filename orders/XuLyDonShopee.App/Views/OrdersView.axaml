@@ -142,8 +142,7 @@
             </StackPanel>
         </Grid>
 
-        <!-- Bảng đơn (đọc-chỉ). Bọc trong Grid 1 ô để chèn Popup "Đã copy" overlay (Popup không chiếm layout). -->
-        <Grid>
+        <!-- Bảng đơn (đọc-chỉ). Double-click 1 dòng → hộp thoại thông tin đơn + đổi trạng thái (code-behind). -->
         <DataGrid x:Name="OrdersGrid"
                   Classes="proxy"
                   ClipToBounds="True"
@@ -195,17 +194,5 @@
                 <DataGridTextColumn Header="Sync lúc" Binding="{Binding SyncedAtDisplay}" Width="140" />
             </DataGrid.Columns>
         </DataGrid>
-
-        <!-- Toast nhỏ "Đã copy text …": Popup neo vào ô vừa double-click, mở/ẩn (~1.2s) từ code-behind.
-             Không dùng ToolTip mặc định (chỉ hiện khi hover). Nội dung do CopyToastText đặt lúc chạy. -->
-        <Popup x:Name="CopyToastPopup" Placement="Top" VerticalOffset="-4"
-               IsLightDismissEnabled="False" WindowManagerAddShadowHint="False">
-            <Border Background="#F022272E" CornerRadius="6" Padding="10,6"
-                    BoxShadow="0 2 10 0 #40000000">
-                <TextBlock x:Name="CopyToastText" Foreground="White" FontSize="12"
-                           TextWrapping="NoWrap" />
-            </Border>
-        </Popup>
-        </Grid>
     </DockPanel>
 </UserControl>

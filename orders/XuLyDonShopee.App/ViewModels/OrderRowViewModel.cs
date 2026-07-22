@@ -40,6 +40,9 @@ public sealed partial class OrderRowViewModel
     /// <summary>Nhãn tài khoản (email) — do ViewModel map từ account_id.</summary>
     public string AccountLabel { get; }
 
+    /// <summary>Id tài khoản sở hữu đơn — để hộp thoại đổi trạng thái khóa đúng <c>(account_id, order_sn)</c>.</summary>
+    public long AccountId => _row.AccountId;
+
     public string OrderSn => _row.OrderSn;
     public string Buyer => _row.BuyerUsername ?? string.Empty;
 

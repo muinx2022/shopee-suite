@@ -361,6 +361,28 @@ public partial class OrdersViewModel : ViewModelBase
         }
     }
 
+    /// <summary>
+    /// Double-click 1 dòng đơn (từ code-behind màn Đơn hàng) → mở hộp thoại thông tin cơ bản + đổi trạng thái.
+    /// Nguồn cho ComboBox = các trạng thái ĐÃ SYNC về (<see cref="OrdersRepository.AllStatuses"/>, chuỗi tự do —
+    /// KHÔNG enum). Người dùng chọn trạng thái KHÁC hiện tại rồi bấm "Lưu" → ghi cột <c>status</c> qua
+    /// <see cref="OrdersRepository.UpdateStatus"/> rồi <see cref="Reload"/> để lưới hiện ngay. Hủy hoặc chọn
+    /// trùng trạng thái cũ → không đổi gì.
+    /// LƯU Ý: đây là SỬA TẠM (local-only) — KHÔNG đụng logic sync/gsheet/hub; lần sync sau lấy trạng thái thật
+    /// từ Shopee sẽ ghi đè giá trị vừa đổi.
+    /// </summary>
+    public async Task EditOrderStatusAsync(OrderRowViewModel row)
+    {
+        var statuses = _services.Orders.AllStatuses();
+        var newStatus = await DialogService.EditOrderAsync(row, statuses);
+        if (string.IsNullOrEmpty(newStatus) || newStatus == row.Status)
+        {
+            return; // Hủy / chưa chọn / chọn trùng trạng thái cũ → không ghi gì
+        }
+
+        _services.Orders.UpdateStatus(row.AccountId, row.OrderSn, newStatus);
+        Reload(); // đón trạng thái mới vào lưới (giữ nguyên bộ lọc/trang hiện tại)
+    }
+
     /// <summary>Nút "Làm mới": nạp lại toàn bộ từ DB (đón tài khoản/trạng thái/đơn mới sau khi sync) + áp bộ lọc.</summary>
     [RelayCommand]
     private void Refresh()

@@ -461,6 +461,23 @@ public class OrdersRepository
         return list;
     }
 
+    /// <summary>
+    /// SỬA TẠM (local-only) trạng thái MỘT đơn: CHỈ ghi cột <c>status</c> theo khóa nghiệp vụ
+    /// <c>(account_id, order_sn)</c> — KHÔNG đụng cột khác, KHÔNG đụng logic sync/gsheet/hub. Dùng cho thao
+    /// tác đổi trạng thái thủ công ở màn "Đơn hàng" (double-click). LƯU Ý: đây là sửa CỤC BỘ, lần sync sau
+    /// lấy trạng thái thật từ Shopee sẽ GHI ĐÈ giá trị này — CỐ Ý không thêm cờ giữ-vững.
+    /// </summary>
+    public void UpdateStatus(long accountId, string orderSn, string status)
+    {
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "UPDATE orders SET status = $status WHERE account_id = $account AND order_sn = $sn;";
+        cmd.Parameters.AddWithValue("$status", status);
+        cmd.Parameters.AddWithValue("$account", accountId);
+        cmd.Parameters.AddWithValue("$sn", orderSn);
+        cmd.ExecuteNonQuery();
+    }
+
     /// <summary>Escape các ký tự đại diện của LIKE để tìm theo nghĩa đen (đi kèm <c>ESCAPE '\'</c>).</summary>
     private static string EscapeLike(string term)
         => term.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_");

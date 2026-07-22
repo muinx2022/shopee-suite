@@ -1,0 +1,62 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="XuLyDonShopee.App.Views.OrderDetailDialog"
+        Width="480" SizeToContent="Height"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner"
+        Title="Thông tin đơn hàng">
+    <Window.Styles>
+        <!-- Nhãn cột trái (xám nhạt) -->
+        <Style Selector="TextBlock.lbl">
+            <Setter Property="Foreground" Value="#757575" />
+            <Setter Property="VerticalAlignment" Value="Top" />
+        </Style>
+    </Window.Styles>
+
+    <StackPanel Margin="20" Spacing="16">
+        <TextBlock Text="Thông tin đơn hàng" FontSize="16" FontWeight="SemiBold" />
+
+        <!-- Thông tin cơ bản (chỉ đọc): nhãn : giá trị -->
+        <Grid ColumnDefinitions="120,*" RowSpacing="9" ColumnSpacing="10"
+              RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
+            <TextBlock Grid.Row="0" Grid.Column="0" Classes="lbl" Text="Mã đơn" />
+            <TextBlock Grid.Row="0" Grid.Column="1" x:Name="OrderSnText" TextWrapping="Wrap" FontWeight="SemiBold" />
+
+            <TextBlock Grid.Row="1" Grid.Column="0" Classes="lbl" Text="Người mua" />
+            <TextBlock Grid.Row="1" Grid.Column="1" x:Name="BuyerText" TextWrapping="Wrap" />
+
+            <TextBlock Grid.Row="2" Grid.Column="0" Classes="lbl" Text="Sản phẩm" />
+            <TextBlock Grid.Row="2" Grid.Column="1" x:Name="ProductText" TextWrapping="Wrap" />
+
+            <TextBlock Grid.Row="3" Grid.Column="0" Classes="lbl" Text="Tổng tiền" />
+            <TextBlock Grid.Row="3" Grid.Column="1" x:Name="TotalText" TextWrapping="Wrap" />
+
+            <TextBlock Grid.Row="4" Grid.Column="0" Classes="lbl" Text="Thanh toán" />
+            <TextBlock Grid.Row="4" Grid.Column="1" x:Name="PaymentText" TextWrapping="Wrap" />
+
+            <TextBlock Grid.Row="5" Grid.Column="0" Classes="lbl" Text="Trạng thái" />
+            <TextBlock Grid.Row="5" Grid.Column="1" x:Name="StatusText" TextWrapping="Wrap" />
+
+            <TextBlock Grid.Row="6" Grid.Column="0" Classes="lbl" Text="ĐVVC" />
+            <TextBlock Grid.Row="6" Grid.Column="1" x:Name="CarrierText" TextWrapping="Wrap" />
+
+            <TextBlock Grid.Row="7" Grid.Column="0" Classes="lbl" Text="Mã vận đơn" />
+            <TextBlock Grid.Row="7" Grid.Column="1" x:Name="TrackingText" TextWrapping="Wrap" />
+
+            <TextBlock Grid.Row="8" Grid.Column="0" Classes="lbl" Text="Ngày sync" />
+            <TextBlock Grid.Row="8" Grid.Column="1" x:Name="SyncedAtText" TextWrapping="Wrap" />
+        </Grid>
+
+        <!-- Đổi trạng thái: nguồn = các trạng thái ĐÃ SYNC về (chuỗi tự do, không enum).
+             LƯU Ý: sửa CỤC BỘ (local-only), lần sync sau lấy trạng thái thật sẽ ghi đè. -->
+        <StackPanel Spacing="6">
+            <TextBlock Text="Đổi trạng thái" FontWeight="SemiBold" />
+            <ComboBox x:Name="StatusCombo" HorizontalAlignment="Stretch" MinHeight="34" />
+        </StackPanel>
+
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+            <Button Content="Lưu" Click="OnSave" Background="#1976D2" Foreground="White" />
+            <Button Content="Hủy" Click="OnCancel" />
+        </StackPanel>
+    </StackPanel>
+</Window>

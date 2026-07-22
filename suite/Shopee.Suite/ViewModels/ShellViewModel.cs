@@ -146,27 +146,48 @@ public sealed partial class ShellViewModel : ObservableObject
             var oAuto = new RibbonScreenItem("Chạy tự động", AppIcons.PlayCircle, ordersVm, 2, "Vòng chạy tự động");
             var oProxy = new RibbonScreenItem("Proxy", AppIcons.SwapHoriz, ordersVm, 3, "Kho proxy KiotProxy");
 
+            // Nhóm "Hành động" + "Tùy chọn" CHỈ có nghĩa ở màn "Tài khoản" (thao tác trên danh sách tài khoản).
+            // Giữ tham chiếu để bật/tắt CẢ NHÓM theo màn đang chọn (làm mờ, không ẩn) — xem đoạn nối bên dưới.
+            var oActionGroup = new RibbonGroup("Hành động", new object[]
+            {
+                new RibbonActionItem("Chọn tất cả", "✓", acc.SelectAllCommand,
+                    "Chọn / bỏ chọn toàn bộ tài khoản đang hiển thị"),
+                new RibbonActionItem("Sync đã chọn", "⇊", acc.SyncSelectedCommand,
+                    "Chạy trọn gói cho các tài khoản đang tick: mở trang → kiểm tra → xử lý đơn nếu có → sync"),
+                new RibbonActionItem("Dừng đã chọn", "■", acc.StopSelectedCommand,
+                    "Dừng toàn bộ việc đang làm của các tài khoản đang tick"),
+                new RibbonActionItem("Dừng tất cả", "✕", acc.StopAllCommand,
+                    "Dừng mọi phiên đang chạy (đóng hết Brave)"),
+            });
+            var oOptionGroup = new RibbonGroup("Tùy chọn", new object[]
+            {
+                new RibbonToggleItem("Xóa profile và tạo lại", acc, nameof(acc.XoaProfileTaoLai),
+                    () => acc.XoaProfileTaoLai, v => acc.XoaProfileTaoLai = v,
+                    "Phiên mở mới sẽ xóa hồ sơ trình duyệt của tài khoản rồi tạo lại — phải đăng nhập lại. Áp cho mọi phiên mở mới."),
+            });
+
             ordersTab = new RibbonTab("Shopee", new List<RibbonGroup>
             {
                 new RibbonGroup("Màn hình", new object[] { oAccounts, oOrders, oAuto, oProxy }),
-                new RibbonGroup("Hành động", new object[]
-                {
-                    new RibbonActionItem("Chọn tất cả", "✓", acc.SelectAllCommand,
-                        "Chọn / bỏ chọn toàn bộ tài khoản đang hiển thị"),
-                    new RibbonActionItem("Sync đã chọn", "⇊", acc.SyncSelectedCommand,
-                        "Chạy trọn gói cho các tài khoản đang tick: mở trang → kiểm tra → xử lý đơn nếu có → sync"),
-                    new RibbonActionItem("Dừng đã chọn", "■", acc.StopSelectedCommand,
-                        "Dừng toàn bộ việc đang làm của các tài khoản đang tick"),
-                    new RibbonActionItem("Dừng tất cả", "✕", acc.StopAllCommand,
-                        "Dừng mọi phiên đang chạy (đóng hết Brave)"),
-                }),
-                new RibbonGroup("Tùy chọn", new object[]
-                {
-                    new RibbonToggleItem("Xóa profile và tạo lại", acc, nameof(acc.XoaProfileTaoLai),
-                        () => acc.XoaProfileTaoLai, v => acc.XoaProfileTaoLai = v,
-                        "Phiên mở mới sẽ xóa hồ sơ trình duyệt của tài khoản rồi tạo lại — phải đăng nhập lại. Áp cho mọi phiên mở mới."),
-                }),
+                oActionGroup,
+                oOptionGroup,
             });
+
+            // Nối bật/tắt 2 nhóm với màn đang chọn: CHỈ màn "Tài khoản" (SelectedNavIndex==0) → bật; các màn
+            // Đơn hàng/Chạy tự động/Proxy → làm mờ CẢ NHÓM (disable, KHÔNG ẩn). Gate ở mức NHÓM để ở màn Tài
+            // khoản các nút vẫn theo CanExecute riêng của command, không bị đè.
+            var ordersMain = ordersVm; // capture non-null cho closure
+            void SyncOrdersActionGroups()
+            {
+                var onAccounts = ordersMain.SelectedNavIndex == 0;
+                oActionGroup.IsEnabled = onAccounts;
+                oOptionGroup.IsEnabled = onAccounts;
+            }
+            SyncOrdersActionGroups();
+            ordersMain.PropertyChanged += (_, e) =>
+            {
+                if (e.PropertyName == nameof(ordersMain.SelectedNavIndex)) SyncOrdersActionGroups();
+            };
         }
 
         // ── Tab 4: Cài đặt (gộp 2 màn cài đặt) ──
