@@ -1148,17 +1148,19 @@ public class ShopeeLoginService
                 {
                     // Form mới "Xác minh email của bạn" (Fluent UI): không có link "Sử dụng mật khẩu". Đi đường vòng:
                     // "Các cách khác để đăng nhập" → chọn tile "Mật khẩu" → ô pass hiện ra (SPA, KHÔNG navigation).
-                    // Form Fluent render CHẬM (kèm iframe fingerprint) → nới cửa sổ tìm "Các cách khác" lên 20s
-                    // (trước 4s hay đóng trước khi form hiện → bỏ sót → không đăng nhập được).
-                    var otherWays = await FindVisibleByTextAsync(mailPage, MsOtherWaysSelectors, OtherWaysRegex, ct, 20000).ConfigureAwait(false);
+                    // Form Fluent render CHẬM → nới cửa sổ tìm "Các cách khác" lên 20s (trước 4s hay đóng trước
+                    // khi form hiện → bỏ sót → không đăng nhập được). Quét MỌI FRAME phòng trường hợp trang login
+                    // bị bọc trong iframe (dù DOM thấy form ở frame chính — cho chắc).
+                    var otherWays = await FindVisibleByTextInFramesAsync(mailPage, MsOtherWaysSelectors, OtherWaysRegex, ct, 20000).ConfigureAwait(false);
                     if (otherWays is not null)
                     {
                         L("Form 'Xác minh email' mới của Microsoft — bấm 'Các cách khác để đăng nhập'...");
                         (mx, my, _) = await TryHumanClickVisibleAsync(mailPage, otherWays, mx, my, rng, ct).ConfigureAwait(false);
                         await Task.Delay(rng.Next(1200, 2500), ct).ConfigureAwait(false);
 
-                        // Màn danh sách cách đăng nhập: chọn "Mật khẩu"/"Nhập mật khẩu" (regex khớp "mật khẩu"). Nới 12s.
-                        var pwdOption = await FindVisibleByTextAsync(mailPage, MsPasswordOptionSelectors, UsePasswordRegex, ct, 12000).ConfigureAwait(false);
+                        // Màn danh sách cách đăng nhập: chọn "Mật khẩu"/"Nhập mật khẩu" (regex khớp "mật khẩu"). Nới
+                        // 12s, quét mọi frame.
+                        var pwdOption = await FindVisibleByTextInFramesAsync(mailPage, MsPasswordOptionSelectors, UsePasswordRegex, ct, 12000).ConfigureAwait(false);
                         if (pwdOption is not null)
                         {
                             L("Chọn phương thức 'Mật khẩu'...");
