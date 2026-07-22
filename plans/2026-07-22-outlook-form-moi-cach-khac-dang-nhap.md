@@ -1,7 +1,7 @@
 # Plan: Outlook login — xử lý form mới "Xác minh email của bạn" + check hộp thư Ưu tiên trước
 
 - **Ngày:** 2026-07-22
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành (code + build + test; hành vi thật chờ người dùng chạy tay xác nhận)
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-executor`)
 
 ## 1. Bối cảnh & mục tiêu
@@ -84,4 +84,7 @@ Tất cả trong `orders/XuLyDonShopee.Core/Services/ShopeeLoginService.cs`.
 
 ## Báo cáo thực thi (Opus điền sau khi xong)
 
-<chưa có>
+- Sửa duy nhất `orders/XuLyDonShopee.Core/Services/ShopeeLoginService.cs` (+61/−5), đủ 3 hạng mục A/B/C đúng plan. Khác plan 1 điểm nhỏ: selectors tile "Mật khẩu" tách thành hằng `MsPasswordOptionSelectors` (thay vì mảng inline) cho nhất quán file — không đổi hành vi.
+- Build `orders/` 0 warning 0 error; `dotnet test` 774/774 xanh (Fable chạy lại xác nhận).
+- Nghiệm thu diff (Fable): nhánh mới chỉ chạy khi không thấy ô pass lẫn link "Sử dụng mật khẩu"; `MsKmsiYesSelectors` chỉ còn 2 id, submit generic phải khớp `^(yes|có|co)$`; pivot "Ưu tiên" trước "Khác" sau.
+- Còn chờ: chạy tay với tài khoản thật (DOM màn "các cách đăng nhập" sau click chưa soi thật — nếu kẹt, log đã ghi URL + bước để chẩn đoán).

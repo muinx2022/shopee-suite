@@ -758,8 +758,18 @@ public class ShopeeLoginService
             { "#idSIButton9", "input[type='submit']", "button[type='submit']" };
         private static readonly string[] MsUsePasswordSelectors =
             { "#idA_PWD_SwitchToPassword", "a", "[role='button']", "button", "span" };
+        // Link "Các cách khác để đăng nhập" trên form mới "Xác minh email của bạn" (Fluent UI):
+        // span[role='button'] class fui-Link trong span[data-testid='viewFooter'].
+        private static readonly string[] MsOtherWaysSelectors =
+            { "span[role='button']", "[role='button']", "a", "button" };
+        // Lựa chọn "Mật khẩu"/"Password" trên màn danh sách cách đăng nhập (sau khi bấm "Các cách khác"):
+        // clickable trước — thứ tự selector là thứ tự ưu tiên (button/role trước div/span to).
+        private static readonly string[] MsPasswordOptionSelectors =
+            { "button", "[role='button']", "[role='radio']", "[role='listitem']", "[role='link']", "div[data-testid]", "span" };
+        // KMSI ("Stay signed in?") chỉ dùng ID: UI cũ là <input value="Yes"> KHÔNG có innerText → không match theo text.
+        // KHÔNG dùng "button[type='submit']" trần: trên form mới "Xác minh email" nút submit chính là "Gửi mã" → click nhầm.
         private static readonly string[] MsKmsiYesSelectors =
-            { "#acceptButton", "#idSIButton9", "button[type='submit']" };
+            { "#acceptButton", "#idSIButton9" };
         // Nút "Đăng nhập"/"Sign in" ở trang landing (khi chưa nhảy thẳng vào form nhập email).
         private static readonly string[] MsSignInSelectors =
             { "a[data-task='signin']", "a[href*='login.live.com']", "a[href*='login.microsoftonline']", "a[href*='login']", "a", "button", "[role='button']" };
@@ -769,6 +779,12 @@ public class ShopeeLoginService
             new("email", RegexOptions.IgnoreCase | RegexOptions.Compiled);
         private static readonly Regex UsePasswordRegex =
             new(@"use.*password|dùng mật khẩu|sử dụng mật khẩu|mật khẩu|mat khau", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        // Link "Các cách khác để đăng nhập" (footer form "Xác minh email của bạn" mới của Microsoft).
+        private static readonly Regex OtherWaysRegex =
+            new(@"cách khác để đăng nhập|cach khac de dang nhap|other ways to sign in", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        // Nút "Có"/"Yes" ở màn KMSI mới (Fluent) — nút submit generic CHỈ được click khi text khớp đúng đây.
+        private static readonly Regex KmsiYesRegex =
+            new(@"^\s*(yes|có|co)\s*$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
         private static readonly Regex ShopeeSenderRegex =
             new("shopee", RegexOptions.IgnoreCase | RegexOptions.Compiled);
         private static readonly Regex OtherPivotRegex =
@@ -983,6 +999,9 @@ public class ShopeeLoginService
         /// password"/"Sử dụng mật khẩu" → password → "Stay signed in?" Yes. MỖI bước "chờ có selector thì làm,
         /// timeout ngắn thì bỏ qua sang bước sau" (đã đăng nhập sẵn từ profile → mọi bước tự skip). KHÔNG log
         /// giá trị mật khẩu. Trả <c>false</c> khi phát hiện lỗi đăng nhập (sai user/pass qua error box).
+        /// <para>Bước 2 xử lý CẢ form mới "Xác minh email của bạn" (Fluent UI, không còn link "Sử dụng mật khẩu"):
+        /// khi không thấy ô mật khẩu lẫn link "Sử dụng mật khẩu", bấm "Các cách khác để đăng nhập" rồi chọn tile
+        /// "Mật khẩu" để hiện ô nhập pass. Không thấy thì thất bại mềm (log URL, KHÔNG ném) cho verify tay.</para>
         /// </summary>
         private static async Task<bool> LoginHotmailAsync(
             IPage mailPage, string email, string password, Action<string>? log, Random rng, CancellationToken ct)
@@ -1037,6 +1056,30 @@ public class ShopeeLoginService
                     (mx, my, _) = await TryHumanClickVisibleAsync(mailPage, usePwd, mx, my, rng, ct).ConfigureAwait(false);
                     await Task.Delay(rng.Next(1000, 2500), ct).ConfigureAwait(false);
                 }
+                else
+                {
+                    // Form mới "Xác minh email của bạn" (Fluent UI): không có link "Sử dụng mật khẩu". Đi đường vòng:
+                    // "Các cách khác để đăng nhập" → chọn tile "Mật khẩu" → ô pass hiện ra (SPA, KHÔNG navigation).
+                    var otherWays = await FindVisibleByTextAsync(mailPage, MsOtherWaysSelectors, OtherWaysRegex, ct, 4000).ConfigureAwait(false);
+                    if (otherWays is not null)
+                    {
+                        L("Form 'Xác minh email' mới của Microsoft — bấm 'Các cách khác để đăng nhập'...");
+                        (mx, my, _) = await TryHumanClickVisibleAsync(mailPage, otherWays, mx, my, rng, ct).ConfigureAwait(false);
+                        await Task.Delay(rng.Next(1200, 2500), ct).ConfigureAwait(false);
+
+                        var pwdOption = await FindVisibleByTextAsync(mailPage, MsPasswordOptionSelectors, UsePasswordRegex, ct, 8000).ConfigureAwait(false);
+                        if (pwdOption is not null)
+                        {
+                            L("Chọn phương thức 'Mật khẩu'...");
+                            (mx, my, _) = await TryHumanClickVisibleAsync(mailPage, pwdOption, mx, my, rng, ct).ConfigureAwait(false);
+                            await Task.Delay(rng.Next(1000, 2500), ct).ConfigureAwait(false);
+                        }
+                        else
+                        {
+                            L($"Không thấy phương thức 'Mật khẩu' trên màn 'các cách đăng nhập' (URL: {mailPage.Url}) — chờ ô mật khẩu như cũ.");
+                        }
+                    }
+                }
                 passField = await FindFirstVisibleByRectsAsync(mailPage, MsPasswordSelectors, 8000, ct).ConfigureAwait(false);
             }
 
@@ -1060,6 +1103,9 @@ public class ShopeeLoginService
             }
 
             // 4) "Stay signed in?" (KMSI) → bấm Yes (giữ đăng nhập trong profile).
+            //    (a) Ưu tiên tìm theo ID (nút "Yes" cũ là <input value="Yes">, không có innerText).
+            //    (b) Không thấy → nút submit generic CHỈ được click khi text khớp ^(yes|có|co)$. RÀNG BUỘC: không dùng
+            //        "button[type='submit']" trần trong selector list — trên form "Xác minh email" nó là nút "Gửi mã".
             await Task.Delay(rng.Next(1000, 2500), ct).ConfigureAwait(false);
             var kmsi = await FindFirstVisibleByRectsAsync(mailPage, MsKmsiYesSelectors, 4000, ct).ConfigureAwait(false);
             if (kmsi is not null)
@@ -1068,12 +1114,22 @@ public class ShopeeLoginService
                 (mx, my) = await HumanMoveAndClickAsync(mailPage, kmsi, mx, my, rng, ct).ConfigureAwait(false);
                 await Task.Delay(rng.Next(1500, 3000), ct).ConfigureAwait(false);
             }
+            else
+            {
+                var kmsiYes = await FindVisibleByTextAsync(mailPage, new[] { "button[type='submit']", "button" }, KmsiYesRegex, ct, 2500).ConfigureAwait(false);
+                if (kmsiYes is not null)
+                {
+                    L("Bấm 'Có' để giữ đăng nhập hộp thư...");
+                    (mx, my, _) = await TryHumanClickVisibleAsync(mailPage, kmsiYes, mx, my, rng, ct).ConfigureAwait(false);
+                    await Task.Delay(rng.Next(1500, 3000), ct).ConfigureAwait(false);
+                }
+            }
 
             return true;
         }
 
         /// <summary>
-        /// Trong hộp thư Outlook: ưu tiên tab "Khác"/"Other" (không có mail Shopee thì thử "Ưu tiên"/"Focused"),
+        /// Trong hộp thư Outlook: ưu tiên tab "Ưu tiên"/"Focused" (không có mail Shopee thì thử "Khác"/"Other"),
         /// DUYỆT NHIỀU mail Shopee (không chỉ mail mới nhất) — mở lần lượt, mail nào có link xác nhận ("TẠI ĐÂY")
         /// thì click. Vì Shopee gửi lẫn nhiều mail CẢNH BÁO đăng nhập, mail xác thực có thể KHÔNG phải mail mới
         /// nhất và thường ĐẾN MUỘN → lặp reload + chờ tới hết deadline (~6'). Trả <c>true</c> khi đã click link.
@@ -1094,13 +1150,13 @@ public class ShopeeLoginService
                 ct.ThrowIfCancellationRequested();
                 round++;
 
-                // Ưu tiên tab "Khác"/"Other"; không có mail Shopee ở đó → thử "Ưu tiên"/"Focused".
-                await TryClickPivotAsync(mailPage, OtherPivotRegex, "Khác", log, rng, ct).ConfigureAwait(false);
+                // Ưu tiên tab "Ưu tiên"/"Focused"; không có mail Shopee ở đó → thử "Khác"/"Other".
+                await TryClickPivotAsync(mailPage, FocusedPivotRegex, "Ưu tiên", log, rng, ct).ConfigureAwait(false);
                 await Task.Delay(rng.Next(800, 1500), ct).ConfigureAwait(false);
                 var rows = await FindAllShopeeMailRowsAsync(mailPage, MaxMailsPerRound, ct).ConfigureAwait(false);
                 if (rows.Count == 0)
                 {
-                    await TryClickPivotAsync(mailPage, FocusedPivotRegex, "Ưu tiên", log, rng, ct).ConfigureAwait(false);
+                    await TryClickPivotAsync(mailPage, OtherPivotRegex, "Khác", log, rng, ct).ConfigureAwait(false);
                     await Task.Delay(rng.Next(800, 1500), ct).ConfigureAwait(false);
                     rows = await FindAllShopeeMailRowsAsync(mailPage, MaxMailsPerRound, ct).ConfigureAwait(false);
                 }
