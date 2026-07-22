@@ -1240,6 +1240,25 @@ public class ShopeeLoginService
                 ct.ThrowIfCancellationRequested();
                 round++;
 
+                // Sau đăng nhập, Microsoft đôi khi điều hướng KHỎI Outlook sang trang home M365
+                // (m365.cloud.microsoft) → nếu quét mail ở đó sẽ không bao giờ thấy. Lạc khỏi outlook → quay lại
+                // hộp thư trước khi quét.
+                var mailUrl = mailPage.Url ?? string.Empty;
+                if (!mailUrl.Contains("outlook", StringComparison.OrdinalIgnoreCase))
+                {
+                    L("Không ở Outlook (m365?) — điều hướng lại hộp thư...");
+                    try
+                    {
+                        await mailPage.GotoAsync("https://outlook.live.com/mail/0/", new PageGotoOptions
+                        {
+                            WaitUntil = WaitUntilState.DOMContentLoaded,
+                            Timeout = 60000
+                        }).ConfigureAwait(false);
+                    }
+                    catch { /* nuốt lỗi điều hướng — bước dưới poll selector tự lo */ }
+                    await Task.Delay(rng.Next(1500, 3000), ct).ConfigureAwait(false);
+                }
+
                 // Ưu tiên tab "Ưu tiên"/"Focused"; không có mail Shopee ở đó → thử "Khác"/"Other".
                 await TryClickPivotAsync(mailPage, FocusedPivotRegex, "Ưu tiên", log, rng, ct).ConfigureAwait(false);
                 await Task.Delay(rng.Next(800, 1500), ct).ConfigureAwait(false);
