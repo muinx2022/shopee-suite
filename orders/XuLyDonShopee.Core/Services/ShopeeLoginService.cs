@@ -1148,14 +1148,17 @@ public class ShopeeLoginService
                 {
                     // Form mới "Xác minh email của bạn" (Fluent UI): không có link "Sử dụng mật khẩu". Đi đường vòng:
                     // "Các cách khác để đăng nhập" → chọn tile "Mật khẩu" → ô pass hiện ra (SPA, KHÔNG navigation).
-                    var otherWays = await FindVisibleByTextAsync(mailPage, MsOtherWaysSelectors, OtherWaysRegex, ct, 4000).ConfigureAwait(false);
+                    // Form Fluent render CHẬM (kèm iframe fingerprint) → nới cửa sổ tìm "Các cách khác" lên 20s
+                    // (trước 4s hay đóng trước khi form hiện → bỏ sót → không đăng nhập được).
+                    var otherWays = await FindVisibleByTextAsync(mailPage, MsOtherWaysSelectors, OtherWaysRegex, ct, 20000).ConfigureAwait(false);
                     if (otherWays is not null)
                     {
                         L("Form 'Xác minh email' mới của Microsoft — bấm 'Các cách khác để đăng nhập'...");
                         (mx, my, _) = await TryHumanClickVisibleAsync(mailPage, otherWays, mx, my, rng, ct).ConfigureAwait(false);
                         await Task.Delay(rng.Next(1200, 2500), ct).ConfigureAwait(false);
 
-                        var pwdOption = await FindVisibleByTextAsync(mailPage, MsPasswordOptionSelectors, UsePasswordRegex, ct, 8000).ConfigureAwait(false);
+                        // Màn danh sách cách đăng nhập: chọn "Mật khẩu"/"Nhập mật khẩu" (regex khớp "mật khẩu"). Nới 12s.
+                        var pwdOption = await FindVisibleByTextAsync(mailPage, MsPasswordOptionSelectors, UsePasswordRegex, ct, 12000).ConfigureAwait(false);
                         if (pwdOption is not null)
                         {
                             L("Chọn phương thức 'Mật khẩu'...");
@@ -1166,6 +1169,10 @@ public class ShopeeLoginService
                         {
                             L($"Không thấy phương thức 'Mật khẩu' trên màn 'các cách đăng nhập' (URL: {mailPage.Url}) — chờ ô mật khẩu như cũ.");
                         }
+                    }
+                    else
+                    {
+                        L($"Chưa thấy link 'Các cách khác để đăng nhập' sau 20s (form MS chưa render / khác cấu trúc? URL: {mailPage.Url}).");
                     }
                 }
                 passField = await FindFirstVisibleByRectsAsync(mailPage, MsPasswordSelectors, 8000, ct).ConfigureAwait(false);
@@ -3760,14 +3767,14 @@ public class ShopeeLoginService
                         catch { /* chẩn đoán best-effort — bỏ qua nếu lỗi */ }
                     }
 
-                    // 2b) Lấy "Số tiền cuối cùng" cho các đơn của TRANG NÀY: đơn KHÁC "Đã hủy" VÀ chưa có
-                    //     final_amount (DB lần trước qua ordersWithFinalAmount, hoặc đã lấy ở trang trước trong
-                    //     lượt này qua FinalAmount != null). Mở CHI TIẾT trên tab MỚI → đọc → đóng. CHẬM (mỗi
-                    //     đơn 1 tab) nên chỉ làm cho đơn thật sự cần. Gán vào object trong collected qua bySn.
+                    // 2b) Lấy "Số tiền cuối cùng" cho các đơn của TRANG NÀY: CHỈ đơn "Chuẩn bị giao hàng"/"Chờ lấy
+                    //     hàng" (đang cần chuẩn bị) VÀ chưa có final_amount (DB lần trước qua ordersWithFinalAmount,
+                    //     hoặc đã lấy ở trang trước qua FinalAmount != null). Mở CHI TIẾT trên tab MỚI → đọc → đóng.
+                    //     CHẬM (mỗi đơn 1 tab) nên chỉ làm cho đơn THẬT SỰ cần (bỏ đơn đã giao/đang giao/đã hủy...).
                     var needFinal = pageOrders
                         .Select(o => bySn.TryGetValue(o.OrderSn, out var c) ? c : null)
                         .Where(c => c is not null
-                                    && !IsCancelledStatus(c!.Status)
+                                    && IsPrepareToShipStatus(c!.Status)
                                     && c.FinalAmount is null
                                     && !(ordersWithFinalAmount?.Contains(c.OrderSn) ?? false))
                         .Select(c => c!)
@@ -4066,6 +4073,20 @@ public class ShopeeLoginService
 
             var normalized = string.Join(' ', status.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
             return string.Equals(normalized, "Đã hủy", StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>True nếu trạng thái đơn là "Chuẩn bị (giao) hàng"/"Chờ lấy hàng" (đơn đang cần chuẩn bị/giao).
+        /// CHỈ các đơn này mới mở CHI TIẾT lấy "Số tiền cuối cùng" — bỏ đơn Đã giao/Đang giao/Đã hủy/Hoàn thành...
+        /// (chuẩn hóa khoảng trắng + hạ chữ thường, so CHỨA để chịu được biến thể "Chuẩn bị hàng"/"Chuẩn bị giao hàng").</summary>
+        private static bool IsPrepareToShipStatus(string? status)
+        {
+            if (string.IsNullOrWhiteSpace(status))
+            {
+                return false;
+            }
+
+            var s = string.Join(' ', status.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)).ToLowerInvariant();
+            return s.Contains("chuẩn bị") || s.Contains("chờ lấy hàng");
         }
 
         /// <summary>
