@@ -6,9 +6,10 @@ using OrdersSettingsViewModel = XuLyDonShopee.App.ViewModels.SettingsViewModel;
 
 namespace Shopee.Suite.Modules.Settings;
 
-/// <summary>Một lựa chọn "Chế độ ứng dụng" cho ComboBox: giá trị <see cref="AppMode"/> + nhãn tiếng Việt
-/// (ComboBox hiển thị nhãn qua <see cref="ToString"/>).</summary>
-public sealed record AppModeOption(AppMode Mode, string Label)
+/// <summary>Một lựa chọn "Chế độ ứng dụng" cho ComboBox: giá trị <see cref="AppMode"/> + nhãn tiếng Việt đầy
+/// đủ (<paramref name="Label"/>, ComboBox hiển thị qua <see cref="ToString"/>) + nhãn ngắn
+/// (<paramref name="ShortLabel"/>) dùng đặt tên shortcut.</summary>
+public sealed record AppModeOption(AppMode Mode, string Label, string ShortLabel)
 {
     public override string ToString() => Label;
 }
@@ -28,9 +29,9 @@ public sealed partial class UnifiedSettingsViewModel : ObservableObject
 
         Modes = new[]
         {
-            new AppModeOption(AppMode.Full, "Đầy đủ — Workspace + Cấu hình BigSeller + Shopee"),
-            new AppModeOption(AppMode.Workspace, "Chỉ Workspace — Workspace + Cấu hình BigSeller"),
-            new AppModeOption(AppMode.Shopee, "Chỉ Shopee — đơn hàng"),
+            new AppModeOption(AppMode.Full, "Đầy đủ — Workspace + Cấu hình BigSeller + Shopee", "Đầy đủ"),
+            new AppModeOption(AppMode.Workspace, "Chỉ Workspace — Workspace + Cấu hình BigSeller", "Workspace"),
+            new AppModeOption(AppMode.Shopee, "Chỉ Shopee — đơn hàng", "Shopee"),
         };
         var current = AppModeStore.Shared.Current;
         _selectedMode = Array.Find(Modes, o => o.Mode == current) ?? Modes[0];
@@ -54,6 +55,11 @@ public sealed partial class UnifiedSettingsViewModel : ObservableObject
     /// <summary>Danh sách chế độ cho ComboBox (giá trị enum + nhãn tiếng Việt).</summary>
     public AppModeOption[] Modes { get; }
 
+    /// <summary>true khi chế độ bị KHOÁ bởi tham số <c>--mode</c> (chạy từ shortcut). View dùng để ẩn nút
+    /// "Lưu &amp; khởi động lại" (restart giữ <c>--mode</c> nên đổi mode ở đây vô nghĩa) + hiện chú thích.
+    /// Vẫn cho chọn chế độ khác trong ComboBox để TẠO shortcut cho chế độ đó.</summary>
+    public bool ModeLockedByArg => AppModeStore.Shared.ModeLockedByArg;
+
     /// <summary>Chế độ đang chọn trong ComboBox (CHƯA lưu tới khi bấm "Lưu &amp; khởi động lại").</summary>
     [ObservableProperty] private AppModeOption _selectedMode;
 
@@ -76,5 +82,27 @@ public sealed partial class UnifiedSettingsViewModel : ObservableObject
 
         AppModeStore.Shared.Save(target);
         AppRestart.Restart();
+    }
+
+    /// <summary>Tạo shortcut ngoài Desktop mở thẳng chế độ đang chọn qua <c>--mode</c> — để chạy song song với
+    /// chế độ khác trên cùng bản cài, DÙNG CHUNG tài khoản/dữ liệu hiện có (không tách kho). Trỏ
+    /// <see cref="Environment.ProcessPath"/> (ổn định qua auto-update Velopack). Chỉ Windows; nền khác báo lỗi.</summary>
+    [RelayCommand]
+    private async Task CreateShortcutForMode()
+    {
+        var mode = SelectedMode.Mode;
+        var exe = Environment.ProcessPath;
+        if (string.IsNullOrEmpty(exe))
+        {
+            await Dialogs.InfoAsync("Không xác định được đường dẫn app để tạo shortcut.", "Tạo shortcut", DialogIcon.Error);
+            return;
+        }
+
+        var args = $"--mode {mode}";
+        var name = $"Shopee Suite ({SelectedMode.ShortLabel})";
+        var (ok, message) = ShortcutCreator.CreateDesktopShortcut(name, exe, args, iconPath: null);
+        await Dialogs.InfoAsync(
+            ok ? $"Đã tạo shortcut:\n{message}" : message,
+            "Tạo shortcut", ok ? DialogIcon.Info : DialogIcon.Error);
     }
 }

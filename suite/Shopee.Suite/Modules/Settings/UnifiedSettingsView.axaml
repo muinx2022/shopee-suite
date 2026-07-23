@@ -20,15 +20,31 @@
                                Classes="caption" Margin="0,2,0,0" />
                 </StackPanel>
             </Border>
-            <StackPanel Margin="28,14" HorizontalAlignment="Left">
+            <StackPanel Margin="28,14" HorizontalAlignment="Left" Spacing="10">
                 <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
                     <TextBlock Text="Chế độ:" VerticalAlignment="Center" Classes="caption" />
                     <ComboBox MinWidth="380" VerticalAlignment="Center"
                               ItemsSource="{Binding Modes}"
                               SelectedItem="{Binding SelectedMode, Mode=TwoWay}" />
+                    <!-- Ẩn khi chế độ bị khoá bởi shortcut (mode truyền qua dòng lệnh): restart giữ nguyên tham số nên đổi mode ở đây vô nghĩa. -->
                     <Button Classes="primary" Content="Lưu &amp; khởi động lại"
+                            IsVisible="{Binding !ModeLockedByArg}"
                             Command="{Binding SaveModeAndRestartCommand}"
                             ToolTip.Tip="Lưu chế độ đã chọn rồi mở lại app để áp dụng" />
+                </StackPanel>
+
+                <!-- Chế độ đang khoá bởi shortcut: báo đổi ở đây không có tác dụng (chỉ để tạo shortcut khác). -->
+                <TextBlock Text="Chế độ đang khoá bởi shortcut (--mode). Chọn chế độ khác ở đây chỉ để tạo shortcut cho nó."
+                           Classes="caption" TextWrapping="Wrap" MaxWidth="520"
+                           IsVisible="{Binding ModeLockedByArg}" />
+
+                <!-- Nút tạo shortcut desktop khoá một chế độ qua dòng lệnh: chạy song song với chế độ khác, dùng chung tài khoản/dữ liệu. -->
+                <StackPanel Spacing="4">
+                    <Button Content="Tạo shortcut cho chế độ này"
+                            Command="{Binding CreateShortcutForModeCommand}"
+                            ToolTip.Tip="Tạo file .lnk ngoài desktop mở thẳng chế độ đang chọn (--mode)" />
+                    <TextBlock Text="Tạo shortcut ngoài desktop mở thẳng chế độ đang chọn (chạy song song với chế độ khác, dùng chung dữ liệu)."
+                               Classes="caption" TextWrapping="Wrap" MaxWidth="520" />
                 </StackPanel>
             </StackPanel>
 

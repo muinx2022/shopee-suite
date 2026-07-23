@@ -45,6 +45,19 @@ public partial class App : Application
                 Shopee.Core.Browser.BraveFleet.StartMaintenance();
             }
             catch (Exception ex) { TryLog("BraveFleet.Init", ex); }
+
+            // Điều phối phía CLIENT (khoá việc, account-lease, nhận việc Hub giao). Chưa cấu hình → NoOp. CHỈ chế
+            // độ có Workspace: khi bản Shopee chạy song song (shortcut --mode Shopee) nó KHÔNG được tranh danh
+            // tính máy (machine.json) + file lease trên Hub với bản Workspace — module đơn hàng có đường đẩy Hub
+            // RIÊNG. Auto-update vẫn chạy mọi chế độ (dưới), chỉ điều phối fleet suite là gate theo Workspace.
+            try { Shopee.Core.Coordination.CoordinationRuntime.InitFromConfig(); }
+            catch (Exception ex) { TryLog("Coordination.Init", ex); }
+
+            // Cho TryPublish (đẩy ledger nền) HẾT CÂM: lỗi POST ledger giờ báo lên tab Log Hub (throttle 1 dòng/60s
+            // ở HttpCoordinationHub) → nếu Thống kê thiếu dòng vì mạng/hub, ta THẤY thay vì đoán mò. Gán 1 lần lúc
+            // boot. Chỉ phục vụ coordination + đẩy BigSeller (workspace) nên gate cùng CoordinationRuntime.
+            try { Shopee.Core.Coordination.HttpCoordinationHub.DiagLog = Shopee.Core.Coordination.HubLog.Warn; }
+            catch (Exception ex) { TryLog("Coordination.DiagLog", ex); }
         }
 
         try
@@ -53,15 +66,6 @@ public partial class App : Application
             Shopee.Core.Infrastructure.StartupJanitor.RunInBackground();
         }
         catch (Exception ex) { TryLog("StartupJanitor.Init", ex); }
-
-        // Điều phối phía CLIENT (khoá việc, account-lease, nhận việc Hub giao). Chưa cấu hình → NoOp.
-        try { Shopee.Core.Coordination.CoordinationRuntime.InitFromConfig(); }
-        catch (Exception ex) { TryLog("Coordination.Init", ex); }
-
-        // Cho TryPublish (đẩy ledger nền) HẾT CÂM: lỗi POST ledger giờ báo lên tab Log Hub (throttle 1 dòng/60s
-        // ở HttpCoordinationHub) → nếu Thống kê thiếu dòng vì mạng/hub, ta THẤY thay vì đoán mò. Gán 1 lần lúc boot.
-        try { Shopee.Core.Coordination.HttpCoordinationHub.DiagLog = Shopee.Core.Coordination.HubLog.Warn; }
-        catch (Exception ex) { TryLog("Coordination.DiagLog", ex); }
 
         // Tự cập nhật (Velopack): kiểm tra + TẢI nền bản mới. KHÔNG tự khởi động lại — chỉ báo sẵn để
         // người dùng bấm cập nhật khi rảnh (khỏi cắt job). No-op nếu chạy từ dev/bin (chưa cài qua Velopack).

@@ -1,7 +1,7 @@
 # Plan: `--mode` khoá chế độ per-shortcut + nút "Tạo shortcut cho chế độ này"
 
 - **Ngày:** 2026-07-23
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành (build 0/0; 911 test)
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-dev`)
 - **Nhánh:** `feature/gop-don-hang` (cây chính)
 
@@ -130,4 +130,53 @@ vẫn nhận).
 
 ## Báo cáo thực thi (Opus điền sau khi xong)
 
-<chưa có>
+**Ngày:** 2026-07-23 · **Người thực thi:** Opus · **Kết quả:** hoàn thành cả 5 bước.
+
+### File đã sửa/tạo
+- `suite/Shopee.Core/Infrastructure/AppModeStore.cs` (sửa): thêm `internal static AppMode? ParseModeArg(string[])`
+  (nhận `--mode X` và `--mode=X`, ignoreCase + `Enum.IsDefined`; không tìm thấy/không hợp lệ → null), `private
+  static AppMode? ModeArg()` (bọc try/catch quanh `Environment.GetCommandLineArgs()`), đổi ctor thành block:
+  sau `Load()` nếu có arg thì `Current = arg` (ARG THẮNG file) + đặt `public bool ModeLockedByArg`. Cập nhật
+  doc `Current` + `Save` nói rõ arg thắng file.
+- `suite/Shopee.Suite/App.axaml.cs` (sửa): chuyển `CoordinationRuntime.InitFromConfig()` +
+  `HttpCoordinationHub.DiagLog = HubLog.Warn` VÀO trong `if (showWorkspace)` (cùng khối MultiBrave/BraveFleet).
+  `StartupJanitor` + `UpdateService.CheckAsync` (auto-update) GIỮ chạy mọi chế độ. Crash handlers +
+  ShutdownRequested không đổi.
+- `suite/Shopee.Suite/Services/AppRestart.cs` (sửa): relaunch KÈM lại mọi arg gốc
+  (`Environment.GetCommandLineArgs().Skip(1)` → `psi.ArgumentList`) để `--mode` sống qua restart. Giữ nguyên
+  Shutdown()/Environment.Exit + try/catch.
+- `suite/Shopee.Suite/Services/ShortcutCreator.cs` (TẠO): `CreateDesktopShortcut(name, targetExe, args,
+  iconPath?)` → `(bool ok, string message)`. Windows: tạo `.lnk` trên Desktop qua COM `WScript.Shell` bằng
+  `dynamic` (set TargetPath/Arguments/WorkingDirectory=thư mục exe/IconLocation=exe,0/Save). Nền khác →
+  `(false, "Chỉ hỗ trợ tạo shortcut trên Windows.")`. Try/catch → `(false, lỗi)`, KHÔNG ném. COM tách vào
+  method `[SupportedOSPlatform("windows")]` gọi sau guard `OperatingSystem.IsWindows()` (né CA1416).
+- `suite/Shopee.Suite/Modules/Settings/UnifiedSettingsViewModel.cs` (sửa): thêm field `ShortLabel` vào record
+  `AppModeOption` (Full="Đầy đủ", Workspace="Workspace", Shopee="Shopee"); thêm
+  `public bool ModeLockedByArg => AppModeStore.Shared.ModeLockedByArg;`; thêm `[RelayCommand]
+  CreateShortcutForMode()` (dựng `--mode <Mode>` + tên `Shopee Suite (<ShortLabel>)`, trỏ
+  `Environment.ProcessPath`, gọi ShortcutCreator, báo qua `Dialogs.InfoAsync`). Không pre-seed app-mode.json.
+- `suite/Shopee.Suite/Modules/Settings/UnifiedSettingsView.axaml` (sửa): NGAY DƯỚI hàng selector thêm nút "Tạo
+  shortcut cho chế độ này" (+ caption); bọc nút "Lưu & khởi động lại" bằng `IsVisible="{Binding
+  !ModeLockedByArg}"`; thêm dòng chú thích hiện khi `ModeLockedByArg`.
+
+### Build & test
+- `dotnet build ShopeeSuite.sln`: **Build succeeded — 0 Warning, 0 Error.**
+- `dotnet test orders/XuLyDonShopee.Tests`: **Passed! Failed 0, Passed 911, Skipped 0.**
+- Parser `ParseModeArg`: KHÔNG có suite test project (chỉ có `orders/XuLyDonShopee.Tests`) nên theo plan bỏ
+  unit test tại chỗ; ĐÃ kiểm chứng bằng scratch console sao chép nguyên logic — đúng cả 10 ca: 4 ca plan
+  (`--mode Shopee`→Shopee, `--mode=Workspace`→Workspace, `--mode xxx`→null, `[]`→null) + 6 ca biên
+  (`--mode=full` ignoreCase→Full; có exe ở args[0]→Shopee; `--mode` thiếu giá trị→null không văng; `--mode=`
+  rỗng→null; `--mode 5` số ngoài dải→null; arg khác đứng trước→vẫn bắt được).
+
+### Điểm lệch/lưu ý cho phiên chính soi
+- `dynamic` (WScript.Shell) build sạch không cần thêm PackageReference `Microsoft.CSharp` (có sẵn trong shared
+  framework net8.0) → không phải dùng nhánh reflection `InvokeMember` mà Rủi ro nêu.
+- Cơ chế tạo `.lnk`: COM `WScript.Shell` (`Type.GetTypeFromProgID("WScript.Shell")` +
+  `Activator.CreateInstance` + `dynamic`), KHÔNG dùng thư viện ngoài. COM object để GC dọn (không
+  `Marshal.ReleaseComObject`) — nút bấm thưa nên chấp nhận, tránh thêm phụ thuộc/CA1416.
+- XML comment không được chứa `--`: đã tránh chuỗi `--mode` trong COMMENT của axaml (đổi lời), NHƯNG giữ
+  `(--mode)` trong giá trị `Text=""` (attribute value hợp lệ, người dùng vẫn thấy đúng tên cờ).
+- `HttpCoordinationHub.DiagLog` gate cùng CoordinationRuntime: điểm dùng còn lại (`HubBigSellerUpsert` +
+  `TryPublish`) đều là đường workspace/BigSeller và đều `?.Invoke` null-safe → chế độ Shopee để null vô hại.
+- Chưa chạy app thật để mở 2 shortcut song song (môi trường agent không có GUI/Brave) — logic đã đúng theo
+  code + build/test xanh; đề nghị phiên chính chạy tay khi deploy để xác nhận trải nghiệm end-to-end.
