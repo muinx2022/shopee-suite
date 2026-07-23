@@ -49,7 +49,8 @@ public partial class SettingsViewModel : ViewModelBase
     [ObservableProperty]
     private string _gsheetWebAppUrl = string.Empty;
 
-    /// <summary>Tên tab (sheet) đích để ghi đơn (để trống → mặc định "tháng 4").</summary>
+    /// <summary>Tên tab (sheet) đích để ghi đơn — OVERRIDE: có giá trị = ghi cố định tab đó; để trống = TỰ ĐỘNG
+    /// theo tháng ("Tháng MM-yyyy"). Trống thì form GIỮ trống (không tự điền "tháng 4" như trước).</summary>
     [ObservableProperty]
     private string _gsheetTabName = string.Empty;
 
@@ -148,7 +149,7 @@ public partial class SettingsViewModel : ViewModelBase
     /// Nút "Lưu" cấu hình Google Sheet: validate URL — cho phép TRỐNG (tắt đồng bộ) hoặc URL bắt đầu bằng
     /// <c>https://script.google.com/</c> (URL Web App Apps Script). URL khác dạng → báo lỗi qua
     /// <see cref="GsheetSavedMessage"/>, KHÔNG lưu. Hợp lệ → lưu CẢ URL lẫn tên tab đích (tab để trống → lưu
-    /// trống, Get sẽ trả mặc định "tháng 4"). Thông báo hiện ở RIÊNG card GSheet (dọn <see cref="SavedMessage"/>
+    /// trống, Get trả "" = tự động theo tháng). Thông báo hiện ở RIÊNG card GSheet (dọn <see cref="SavedMessage"/>
     /// của card kia). Lưu xong phản ánh lại giá trị đã chuẩn hóa lên form.
     /// </summary>
     [RelayCommand]
@@ -165,9 +166,9 @@ public partial class SettingsViewModel : ViewModelBase
         }
 
         _services.Settings.SetGsheetWebAppUrl(url);
-        _services.Settings.SetGsheetTabName(GsheetTabName);          // trống → Get trả mặc định "tháng 4"
+        _services.Settings.SetGsheetTabName(GsheetTabName);          // trống → Get trả "" = tự động theo tháng
         GsheetWebAppUrl = _services.Settings.GetGsheetWebAppUrl() ?? string.Empty; // phản ánh bản đã chuẩn hóa
-        GsheetTabName = _services.Settings.GetGsheetTabName();       // phản ánh (trống → "tháng 4")
+        GsheetTabName = _services.Settings.GetGsheetTabName();       // phản ánh (trống → GIỮ trống)
         GsheetSavedMessage = "Đã lưu cấu hình Google Sheet.";
         SavedMessage = null; // dọn thông báo các card kia
         NotifySavedMessage = null;

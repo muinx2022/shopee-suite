@@ -87,6 +87,39 @@ public class SettingsRepositoryTests
     }
 
     [Fact]
+    public void GetGsheetTabName_ChuaDat_TraChuoiRong()
+    {
+        using var temp = new TempDatabase();
+        var repo = new SettingsRepository(temp.Open());
+
+        // Trống = tự động theo tháng (caller tự resolve) → KHÔNG còn trả "tháng 4".
+        Assert.Equal(string.Empty, repo.GetGsheetTabName());
+    }
+
+    [Fact]
+    public void SetVaGetGsheetTabName_CoGiaTri_TraLaiDaTrim()
+    {
+        using var temp = new TempDatabase();
+        var repo = new SettingsRepository(temp.Open());
+
+        repo.SetGsheetTabName("  Tab Cua Toi  ");
+
+        Assert.Equal("Tab Cua Toi", repo.GetGsheetTabName());
+    }
+
+    [Fact]
+    public void SetGsheetTabName_ChuoiTrang_XoaKey_TraChuoiRong()
+    {
+        using var temp = new TempDatabase();
+        var repo = new SettingsRepository(temp.Open());
+
+        repo.SetGsheetTabName("Tab X");
+        repo.SetGsheetTabName("   ");    // toàn khoảng trắng → xóa key
+
+        Assert.Equal(string.Empty, repo.GetGsheetTabName());
+    }
+
+    [Fact]
     public void GetSyncFreshProfile_ChuaDat_TraFalse()
     {
         using var temp = new TempDatabase();

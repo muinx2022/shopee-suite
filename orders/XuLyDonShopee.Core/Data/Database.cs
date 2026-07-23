@@ -110,6 +110,7 @@ CREATE TABLE IF NOT EXISTS orders (
     gsheet_file_url    TEXT,
     gsheet_da_huy      INTEGER,
     gsheet_da_co_van_don INTEGER,
+    gsheet_tab         TEXT,
     hub_synced_at      TEXT,
     hub_slip_synced_at TEXT,
     sold_counted_at    TEXT,
@@ -163,6 +164,17 @@ CREATE TABLE IF NOT EXISTS orders (
         EnsureColumn(conn, "orders", "gsheet_da_huy", "INTEGER");
         EnsureColumn(conn, "orders", "gsheet_da_co_van_don", "INTEGER");
 
+        // Tab (sheet) đã ghi LẦN ĐẦU của đơn: từ bản "tab theo tháng" trở đi, tab đích tự tính "Tháng MM-yyyy"
+        // (hoặc override ở Cài đặt). Nhớ tab lần đầu để đơn cũ CẬP NHẬT lại (bổ sung vận đơn/phiếu/đổi màu hủy)
+        // vẫn về ĐÚNG tab đã ghi — không nhân đôi dòng khi sang tháng mới. Thêm cho DB CŨ.
+        EnsureColumn(conn, "orders", "gsheet_tab", "TEXT");
+
+        // Backfill MỘT LẦN cho đơn ĐÃ ghi sheet TRƯỚC bản này (gsheet_synced_at NOT NULL) nhưng chưa có gsheet_tab:
+        // chúng nằm ở tab tên trong setting cũ (mặc định LEGACY "tháng 4"). Nhớ lại kẻo lần đẩy cập nhật sau nhân
+        // đôi dòng ở tab tháng mới. NULLIF(TRIM(...),'') coi setting chuỗi-trắng như chưa đặt → mặc định "tháng 4".
+        // Idempotent tự nhiên: chỉ chạm dòng gsheet_tab CÒN NULL (chạy lại lần 2 không đổi gì).
+        BackfillGsheetTab(conn);
+
         // Cờ chống đẩy TRÙNG lên HUB đơn hàng (module Đơn hàng đẩy đơn lên hub sau mỗi lượt Sync):
         // hub_synced_at = thời điểm đơn ĐÃ được hub nhận OK (NULL = chưa đẩy, còn trong hàng đợi ngầm → lượt
         // sync sau tự đẩy bù khi hub sống lại). Thêm cho DB CŨ.
@@ -210,5 +222,21 @@ CREATE TABLE IF NOT EXISTS orders (
         using var alter = conn.CreateCommand();
         alter.CommandText = $"ALTER TABLE {table} ADD COLUMN {column} {columnType};";
         alter.ExecuteNonQuery();
+    }
+
+    /// <summary>
+    /// Backfill cột <c>orders.gsheet_tab</c> cho đơn ĐÃ ghi sheet trước bản "tab theo tháng": tab đích của
+    /// chúng là tên tab CŨ trong setting <c>gsheet_tab_name</c> (chuỗi-trắng/thiếu → mặc định LEGACY
+    /// <see cref="SettingsRepository.DefaultGsheetTabName"/> "tháng 4"). Chỉ chạm đơn có
+    /// <c>gsheet_synced_at NOT NULL</c> và <c>gsheet_tab IS NULL</c> ⇒ idempotent (lần 2 không đổi; đơn chưa
+    /// đẩy giữ NULL). <c>NULLIF(TRIM(...),'')</c> để setting toàn khoảng trắng không thành tab sai.
+    /// </summary>
+    private static void BackfillGsheetTab(SqliteConnection conn)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = @"UPDATE orders SET gsheet_tab = COALESCE(
+    NULLIF(TRIM((SELECT value FROM settings WHERE key = 'gsheet_tab_name')), ''), 'tháng 4')
+WHERE gsheet_synced_at IS NOT NULL AND gsheet_tab IS NULL;";
+        cmd.ExecuteNonQuery();
     }
 }

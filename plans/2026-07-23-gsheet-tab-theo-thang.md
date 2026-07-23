@@ -1,7 +1,7 @@
 # Plan: GSheet ghi vào tab "Tháng mm-yyyy" tự động theo tháng
 
 - **Ngày:** 2026-07-23
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-executor`)
 
 ## 1. Bối cảnh & mục tiêu
@@ -146,4 +146,60 @@ public static class GsheetTabName
 
 ## Báo cáo thực thi (Opus điền sau khi xong)
 
-<chưa có>
+**Ngày:** 2026-07-23 · **Kết quả:** hoàn thành đủ 6 bước, build 0 lỗi, 919/919 test xanh.
+
+### Đã hoàn thành theo từng bước
+
+- **Bước 1 — Helper tên tab:** tạo `orders/XuLyDonShopee.Core/Services/GsheetTabName.cs` với
+  `ForMonth(DateTime)`. Lệch nhỏ so với code mẫu trong plan: dùng
+  `date.ToString("MM-yyyy", CultureInfo.InvariantCulture)` thay cho `$"Tháng {date:MM-yyyy}"` — bản mẫu
+  dùng CurrentCulture sẽ RA SAI trên máy locale lịch Phật (th-TH → năm 2569) / lịch Hồi + chữ số Ả-Rập
+  (ar-SA), trong khi tiêu chí Bước 6 đòi "culture-độc-lập". InvariantCulture cho kết quả ASCII cố định,
+  không đổi hành vi trên máy vi-VN/en-US.
+- **Bước 2 — SettingsRepository:** `GetGsheetTabName()` giờ trả `""` khi trống (thay vì "tháng 4"); giữ
+  const `DefaultGsheetTabName = "tháng 4"` (đổi doc comment sang vai trò legacy chỉ dùng cho backfill);
+  `SetGsheetTabName` giữ nguyên. File: `orders/XuLyDonShopee.Core/Data/SettingsRepository.cs`.
+- **Bước 3 — Cột DB + backfill:** `Database.cs` thêm `gsheet_tab TEXT` vào CREATE TABLE orders +
+  `EnsureColumn(..., "gsheet_tab", "TEXT")` cạnh nhóm gsheet + hàm mới `BackfillGsheetTab(conn)` chạy
+  ngay sau EnsureColumn (UPDATE với `COALESCE(NULLIF(TRIM((SELECT ...)),''),'tháng 4')`, WHERE
+  `gsheet_synced_at IS NOT NULL AND gsheet_tab IS NULL` → idempotent). `OrdersRepository.cs`:
+  `GsheetPendingOrder` thêm field `string? GsheetTab` (cuối record); `GetForGsheetPush` SELECT thêm
+  `gsheet_tab` (index 14) + map; `MarkGsheetSynced` thêm tham số `string tab` (đặt trước `at`), ghi
+  `gsheet_tab = COALESCE(gsheet_tab, $tab)`.
+- **Bước 4 — AccountSession.PushOrdersToGsheetAsync:** đọc `DateTime.Now` MỘT lần (`now`) dùng cho cả
+  `ngay` + `autoTab`; tính `overrideTab`/`autoTab`/`defaultTab`; gộp rows vào
+  `Dictionary<string,List<GsheetOrderRow>>` theo tab (per đơn: `p.GsheetTab ?? defaultTab`); đẩy lần
+  lượt từng nhóm bằng `PushAsync(url, tabName, nhom.Value, ...)`, `MarkGsheetSynced` truyền `tabName`
+  của nhóm. Đếm added/updated/withFile/errors gộp một dòng log tổng. Nhóm ném lỗi → catch log + DỪNG
+  nhóm sau (đơn nhóm sau giữ chưa settled); OCE ném xuyên như cũ.
+- **Bước 5 — UI Cài đặt:** `SettingsView.axaml` watermark ô Tab đổi `"tháng 4"` →
+  `"để trống = tự động Tháng MM-yyyy"`; text mô tả dưới card viết lại (để trống = tự ghi tab
+  "Tháng MM-yyyy" theo tháng, script tự tạo; điền tên = ghi cố định). `SettingsViewModel.cs` cập nhật
+  doc comment field + 2 comment trong `SaveGsheetUrl` (trống = tự động, form GIỮ trống).
+- **Bước 6 — Test:** mới `GsheetTabNameTests.cs` (3 test: tháng 1 có số 0, tháng 12, culture th-TH/ar-SA
+  vẫn "Tháng 07-2026"); thêm 3 test `GetGsheetTabName`/`SetGsheetTabName` trong `SettingsRepositoryTests`
+  (trống→"", có giá trị→trim, whitespace→xóa); cập nhật 4 caller `MarkGsheetSynced` cũ + assertion
+  GsheetTab map + first-wins trong `OrdersRepositoryTests`; thêm 4 test backfill trong
+  `DatabaseMigrationTests` (theo setting đã trim, không setting→"tháng 4", setting toàn trắng→"tháng 4",
+  idempotent+first-wins, đơn chưa đẩy giữ NULL). Sửa thêm `AccountSessionCleanupTests.Make` (thêm
+  `GsheetTab: null`) vì nó khởi tạo `GsheetPendingOrder` positionally.
+
+### Kết quả kiểm chứng
+
+- `dotnet build XuLyDonShopee.Tests.csproj` (kéo Core + App): **Build succeeded, 0 Warning, 0 Error**.
+- `dotnet test XuLyDonShopee.Tests --no-build`: **Passed 919, Failed 0, Skipped 0**.
+- Chạy lọc riêng nhóm test mới/đổi: **Passed 11, Failed 0** (3 GsheetTabName + 3 SettingsRepository +
+  1 MarkGsheetSynced first-wins + 4 backfill migration).
+
+### Vướng mắc / bỏ dở
+
+- Không có. Tuân thủ mục "Không làm" (không đụng Apps Script, không đổi hợp đồng JSON `{"tab":…,"orders":…}`,
+  không đụng luồng hub / dọn đơn kết thúc). Không đụng `ShopeeLoginService.cs` hay phần đăng nhập của
+  `AccountSession.cs`.
+
+### Đề xuất
+
+- Cân nhắc bổ sung vào doc `docs/gsheet-huong-dan-cai-dat.md` một dòng nhắc người dùng cập nhật Apps
+  Script để TỰ TẠO sheet "Tháng MM-yyyy" khi chưa có (ngoài phạm vi plan này, nhưng là điều kiện để tab
+  tự động hoạt động — nếu chưa cập nhật, đơn tháng mới sẽ báo lỗi "Không tìm thấy tab", giữ chưa-settled
+  và đẩy lại mỗi lượt như mục Rủi ro đã nêu).
