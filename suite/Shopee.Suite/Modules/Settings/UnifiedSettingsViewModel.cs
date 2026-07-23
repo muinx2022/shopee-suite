@@ -34,6 +34,7 @@ public sealed partial class UnifiedSettingsViewModel : ObservableObject
         };
         var current = AppModeStore.Shared.Current;
         _selectedMode = Array.Find(Modes, o => o.Mode == current) ?? Modes[0];
+        ShowsWorkspaceSettings = AppModeStore.ShowsWorkspace(current);
     }
 
     /// <summary>Cài đặt Shopee Suite (hiệu năng · đồng bộ Hub · phiên bản/cập nhật).</summary>
@@ -44,6 +45,11 @@ public sealed partial class UnifiedSettingsViewModel : ObservableObject
 
     /// <summary>true khi có module đơn hàng → hiện section "Đơn hàng".</summary>
     public bool HasOrders => Orders is not null;
+
+    /// <summary>true khi chế độ hiện tại (Full|Workspace) hiện nhóm Workspace → gate section "WORKSPACE"
+    /// (Hiệu năng · đồng bộ Hub) ở màn Cài đặt gộp. Đọc 1 lần trong ctor: chế độ không đổi giữa vòng đời
+    /// (đổi chế độ = restart). Section "Phiên bản &amp; cập nhật" KHÔNG bị gate — dùng chung mọi chế độ.</summary>
+    public bool ShowsWorkspaceSettings { get; }
 
     /// <summary>Danh sách chế độ cho ComboBox (giá trị enum + nhãn tiếng Việt).</summary>
     public AppModeOption[] Modes { get; }

@@ -1,7 +1,7 @@
 # Plan: Màn Cài đặt hiển thị theo chế độ + tách phần Update dùng chung
 
 - **Ngày:** 2026-07-23
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành (build suite 0/0; 911 test)
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-dev`)
 - **Nhánh:** `feature/che-do-settings` (worktree `d:\Projects\shopee-suite-wt-chedo2`)
 
@@ -97,4 +97,54 @@ Update + Đơn hàng (không Workspace).
 
 ## Báo cáo thực thi (Opus điền sau khi xong)
 
-<chưa có>
+**Ngày thực thi:** 2026-07-23 · **Người thực thi:** Opus (`opus-dev`)
+
+### File đã sửa (3)
+
+1. `suite/Shopee.Suite/Modules/Settings/UnifiedSettingsViewModel.cs`
+   - Thêm `public bool ShowsWorkspaceSettings { get; }` (read-only auto-property, kèm XML doc).
+   - Gán trong ctor: `ShowsWorkspaceSettings = AppModeStore.ShowsWorkspace(current);` (tái dùng biến `current`
+     đã đọc từ `AppModeStore.Shared.Current`). Không đổi gì khác.
+
+2. `suite/Shopee.Suite/Modules/Settings/UnifiedSettingsView.axaml`
+   - Thêm section MỚI "PHIÊN BẢN & CẬP NHẬT" (header Border + card Update) giữa section "Chế độ ứng dụng" và
+     section Workspace — LUÔN hiện (không gate). Card Update chép từ `SettingsView.axaml`, MỌI bind đổi sang
+     `Suite.*` (8 bind: `Suite.AppVersionText`, `Suite.UpdateStatus` ×2 gồm cả trong `IsVisible` converter,
+     `Suite.UpdateSupported`, `Suite.CheckUpdateCommand`, `Suite.UpdateReady`, `Suite.ApplyUpdateCommand`,
+     `Suite.UpdateNotSupported`). Card bọc `Margin="28,14" HorizontalAlignment="Left" MaxWidth="520"` để căn lề
+     đồng nhất với section selector + để text `TextWrapping="Wrap"` xuống dòng đẹp (xem "Điểm lệch").
+   - Đổi header cũ "SHOPEE SUITE" → "WORKSPACE", caption "Hiệu năng · đồng bộ Hub · phiên bản & cập nhật" →
+     "Hiệu năng · đồng bộ Hub". Bọc CẢ header Border LẪN `ContentControl {Binding Suite}` bằng
+     `IsVisible="{Binding ShowsWorkspaceSettings}"`.
+   - Section "Đơn hàng" giữ nguyên gate `HasOrders`.
+
+3. `suite/Shopee.Suite/Modules/Settings/SettingsView.axaml`
+   - Bỏ nguyên card "Phiên bản & cập nhật" (Border Classes="card" + comment "── Phiên bản + tự cập nhật
+     (Velopack) ──") khỏi cột phải tab "Hiệu năng". Cột phải còn card "Máy của bạn" (giữ nguyên, kể cả
+     `Margin="0,0,0,14"`).
+   - Cập nhật comment mô tả cột phải cho khớp (bỏ "+ phiên bản/cập nhật", ghi chú card đã tách sang
+     UnifiedSettingsView).
+   - KHÔNG đụng `SettingsViewModel.cs` — mọi property/command Update giữ nguyên (đã verify còn public: bind
+     `Suite.*` resolve được).
+
+### Kết quả build/test
+
+- `dotnet build suite/Shopee.Suite/Shopee.Suite.csproj`: **Build succeeded — 0 Warning, 0 Error.**
+- `dotnet test orders/XuLyDonShopee.Tests`: **Passed! — Failed: 0, Passed: 911, Skipped: 0, Total: 911.**
+- Rà XAML (grep): 8/8 bind card Update trong UnifiedSettingsView đều prefix `Suite.`; SettingsView không còn
+  bind Update nào; converter `StringToBool` xác nhận cấp app (`App.axaml` trong `<Application.Resources>`),
+  `MonoFont` ở `Themes/Theme.axaml` (include app-level) → cả hai resolve ở UnifiedSettingsView.
+
+### Điểm lệch so với spec / cần phiên chính soi
+
+- **Card Update thêm `Margin="28,14" HorizontalAlignment="Left" MaxWidth="520"`** (plan chỉ nói "chép NGUYÊN
+  card"). Lý do: card gốc nằm trong Grid cột phải của SettingsView (tự có lề + bề rộng cột); đặt trần vào
+  StackPanel của ScrollViewer sẽ dính mép trái x=0 và stretch full-width, lệch hẳn mọi section khác (đều
+  padding 28) và làm dòng `TextWrapping="Wrap"` không có mốc để wrap. Margin/Align/MaxWidth chọn để đồng nhất
+  với section "Chế độ ứng dụng" (`Margin="28,14" HorizontalAlignment="Left"`). KHÔNG đổi binding/logic.
+- **Sửa 1 comment trong SettingsView** (mô tả cột phải) cho khớp việc vừa bỏ card — nằm ngay tại điểm sửa,
+  không phải "chỗ khác".
+- `Margin="0,0,0,14"` của card "Máy của bạn" giữ nguyên theo plan ("giữ nguyên phần còn lại") → còn 14px
+  khoảng trắng thừa dưới đáy cột (vô hại). Nếu muốn sạch tuyệt đối có thể bỏ, nhưng plan dặn không đụng.
+- Chưa chạy app thật để mắt thấy 3 chế độ (worktree, không release) — logic hiển thị đã verify qua đọc XAML +
+  cờ `ShowsWorkspaceSettings`; đề nghị phiên chính xác nhận trực quan khi nghiệm thu nếu cần.
