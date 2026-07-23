@@ -9,6 +9,29 @@
     <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
         <StackPanel>
 
+            <!-- ══════════ SECTION: Chế độ ứng dụng (LUÔN hiện ở mọi chế độ) ══════════ -->
+            <Border Background="{DynamicResource SubtleBrush}"
+                    BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1"
+                    Padding="28,14">
+                <StackPanel>
+                    <TextBlock Text="CHẾ ĐỘ ỨNG DỤNG" FontSize="12" FontWeight="Bold"
+                               Foreground="{DynamicResource TextSecondaryBrush}" />
+                    <TextBlock Text="Chọn nhóm chức năng hiển thị cho gọn. Đổi chế độ sẽ khởi động lại app; cập nhật vẫn tải bản đầy đủ."
+                               Classes="caption" Margin="0,2,0,0" />
+                </StackPanel>
+            </Border>
+            <StackPanel Margin="28,14" HorizontalAlignment="Left">
+                <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                    <TextBlock Text="Chế độ:" VerticalAlignment="Center" Classes="caption" />
+                    <ComboBox MinWidth="380" VerticalAlignment="Center"
+                              ItemsSource="{Binding Modes}"
+                              SelectedItem="{Binding SelectedMode, Mode=TwoWay}" />
+                    <Button Classes="primary" Content="Lưu &amp; khởi động lại"
+                            Command="{Binding SaveModeAndRestartCommand}"
+                            ToolTip.Tip="Lưu chế độ đã chọn rồi mở lại app để áp dụng" />
+                </StackPanel>
+            </StackPanel>
+
             <!-- ══════════ SECTION: Shopee Suite ══════════ -->
             <Border Background="{DynamicResource SubtleBrush}"
                     BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1"

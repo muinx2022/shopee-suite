@@ -1,7 +1,7 @@
 # Plan: Chế độ ứng dụng (Full / Workspace / Shopee) — gọn app theo cấu hình
 
 - **Ngày:** 2026-07-23
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành (build suite sạch; 919 test orders xanh)
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-executor`)
 - **Nhánh:** `feature/che-do-app` (worktree `d:\Projects\shopee-suite-wt-chedo`)
 
@@ -157,4 +157,59 @@ GIỮ LUÔN CHẠY (mọi chế độ): lưới bắt lỗi (UiThread/AppDomain/
 
 ## Báo cáo thực thi (Opus điền sau khi xong)
 
-<chưa có>
+**Trạng thái: HOÀN THÀNH** — build sạch 0/0, 919 test orders xanh. Thực thi đủ Bước 1–6.
+
+### File đã tạo/sửa
+
+Tạo mới:
+- `suite/Shopee.Core/Infrastructure/AppModeStore.cs` — enum `AppMode { Full, Workspace, Shopee }`; singleton
+  `AppModeStore.Shared` (Lazy) lưu JSON `{ "mode": "Full" }` tại `SuitePaths.RootFile("app-mode.json")`
+  (= `%AppData%\ShopeeSuite\app-mode.json`); `Load()`/`Save(AppMode)` nguyên tử (tmp→move) + `Current`;
+  thiếu/hỏng/không hợp lệ → `Full` (dùng `Enum.TryParse` + `Enum.IsDefined` để loại số ngoài dải như "5").
+  Kèm 2 helper thuần tĩnh `ShowsWorkspace`/`ShowsShopee`. Thuần I/O, không phụ thuộc Avalonia.
+- `suite/Shopee.Suite/Services/AppRestart.cs` — `static void Restart()`: relaunch exe hiện hành qua
+  `Environment.ProcessPath` (`Process.Start(... UseShellExecute = true)`), rồi đóng êm qua
+  `Application.Current.ApplicationLifetime as IClassicDesktopStyleApplicationLifetime` → `Shutdown()` (fallback
+  `Environment.Exit(0)`). Bọc try/catch: relaunch hỏng → `Dialogs.Notify` + GIỮ app (không đóng).
+
+Sửa:
+- `suite/Shopee.Suite/ViewModels/ShellViewModel.cs` — đọc `mode/ws/sp` đầu ctor; bọc TOÀN BỘ khối VM workspace
+  (`bigSeller/scrape/update/search/workspace/data/accounts/worker/fleet` + `HubDispatcher.Start()` + dựng
+  `workspaceTab`/`bigSellerTab` + `workspace.RequestNavigate`) trong `if (ws)`; `ordersVm = sp ? TryCreate() : null`;
+  3 field `_scrape/_update/_search` → nullable; `PrepareShutdownAsync` guard null từng biến; `Tabs.Add` theo cờ;
+  `SelectedTab = ordersTab ?? workspaceTab ?? settingsTab` (không null); `GoHome()` guard `_workspaceTab is null`;
+  `StopWorkspaceJobs()` guard null; tab Cài đặt LUÔN thêm.
+- `suite/Shopee.Suite/App.axaml.cs` — đọc `appMode/showWorkspace` sau lưới bắt lỗi; bọc `MultiBraveRuntime.Initialize()`
+  + `UpdateProductRuntime.Initialize()` + khối `BraveFleet` trong `if (showWorkspace)`; `MultiBraveRuntime.Cleanup()`
+  trong ShutdownRequested chỉ chạy khi `showWorkspace`. GIỮ LUÔN CHẠY mọi chế độ: lưới bắt lỗi, `StartupJanitor`,
+  `CoordinationRuntime.InitFromConfig`, `HttpCoordinationHub.DiagLog`, `UpdateService.Shared.CheckAsync()` (auto-update),
+  `BigSellerStore.Save()` + `OrdersModuleHost.StopAsync()` khi thoát.
+- `suite/Shopee.Suite/Modules/Settings/UnifiedSettingsViewModel.cs` — chuyển sang `partial ObservableObject`; thêm
+  record `AppModeOption(AppMode, Label)` (ToString=Label); `Modes` (3 option nhãn tiếng Việt), `[ObservableProperty]
+  AppModeOption SelectedMode` (init = Current); `[RelayCommand] SaveModeAndRestart()`: không đổi → `InfoAsync`; đổi →
+  `ConfirmAsync` → `AppModeStore.Save` → `AppRestart.Restart()`. Giữ `Suite/Orders/HasOrders`.
+- `suite/Shopee.Suite/Modules/Settings/UnifiedSettingsView.axaml` — thêm section "CHẾ ĐỘ ỨNG DỤNG" TRÊN CÙNG (luôn
+  hiện): ComboBox (`ItemsSource=Modes`, `SelectedItem=SelectedMode` TwoWay) + nút "Lưu & khởi động lại"
+  (`SaveModeAndRestartCommand`) + chú thích "Đổi chế độ sẽ khởi động lại app; cập nhật vẫn tải bản đầy đủ." Đặt trước
+  2 section Suite/Đơn hàng.
+
+### Kết quả kiểm chứng (đã chạy thật)
+- `dotnet build ShopeeSuite.sln` → **Build succeeded. 0 Warning(s), 0 Error(s)** (cả build thường lẫn `-t:Rebuild`).
+- `dotnet test orders/XuLyDonShopee.Tests` → **Passed! Failed: 0, Passed: 919, Skipped: 0**.
+- Tự rà logic 3 chế độ:
+  - Full = 4 tab (Workspace + Cấu hình BigSeller + Shopee + Cài đặt), mặc định mở tab Shopee.
+  - Workspace = Workspace + Cấu hình BigSeller + Cài đặt: CÓ dựng khối VM workspace, KHÔNG dựng ordersVm (ẩn Shopee).
+  - Shopee = Shopee + Cài đặt: KHÔNG dựng khối VM workspace, KHÔNG start HubDispatcher/worker; App.axaml KHÔNG init
+    MultiBrave/UpdateProduct/BraveFleet.
+  `SelectedTab` không null ở mọi chế độ. `OrdersModuleHost.StopAsync()` no-op khi `Services==null` (chế độ Workspace
+  không gọi TryCreate) → không NRE lúc đóng.
+
+### Vướng mắc/bỏ dở
+- Không có. Toàn bộ hạng mục plan đã làm.
+
+### Ghi chú hành vi (đúng ý plan, nêu để nghiệm thu)
+- Chế độ Shopee KHÔNG dựng `AssignmentWorker` nên máy đó KHÔNG nhận việc workspace (scrape/update/search) Hub giao —
+  đúng chủ đích "Shopee = chỉ đơn hàng". Việc đẩy đơn/phiếu lên Hub của module đơn hàng vẫn chạy vì đi qua
+  `CoordinationRuntime` (luôn init ở mọi chế độ), độc lập với AssignmentWorker.
+- `AppRestart.Restart()` chạy từ dev/bin sẽ relaunch đúng exe đang chạy (chấp nhận theo plan); dưới Velopack
+  `Environment.ProcessPath` trỏ đúng exe stub.

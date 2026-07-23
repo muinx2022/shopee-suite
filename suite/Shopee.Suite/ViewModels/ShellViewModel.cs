@@ -4,6 +4,7 @@ using System.Collections.ObjectModel;
 using System.Linq;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Shopee.Core.Infrastructure;
 using Shopee.Suite.Infrastructure;
 using Shopee.Suite.Modules.Accounts;
 using Shopee.Suite.Modules.BigSeller;
@@ -20,19 +21,22 @@ using OrdersMainViewModel = XuLyDonShopee.App.ViewModels.MainViewModel;
 namespace Shopee.Suite.ViewModels;
 
 /// <summary>
-/// ViewModel gốc của shell: dải RIBBON kiểu Word/Excel gồm 4 tab (Workspace · Cấu hình BigSeller · Shopee ·
-/// Cài đặt). Mọi module ViewModel được khởi tạo MỘT LẦN và giữ sống suốt vòng đời app; mỗi tab NHỚ màn đang
-/// chọn riêng nên quay lại tab thấy đúng màn cũ. Toàn bộ nút hành động trên ribbon chỉ bind command CÓ SẴN
-/// của các ViewModel — không thêm logic nghiệp vụ mới ở đây.
+/// ViewModel gốc của shell: dải RIBBON kiểu Word/Excel gồm tối đa 4 tab (Workspace · Cấu hình BigSeller ·
+/// Shopee · Cài đặt). Tập tab hiển thị tuỳ "Chế độ ứng dụng" (<see cref="AppMode"/>): Full = tất cả;
+/// Workspace = Workspace + Cấu hình BigSeller; Shopee = chỉ đơn hàng; tab Cài đặt LUÔN có. Mọi module
+/// ViewModel được khởi tạo MỘT LẦN và giữ sống suốt vòng đời app; mỗi tab NHỚ màn đang chọn riêng nên quay
+/// lại tab thấy đúng màn cũ. Toàn bộ nút hành động trên ribbon chỉ bind command CÓ SẴN của các ViewModel —
+/// không thêm logic nghiệp vụ mới ở đây.
 /// </summary>
 public sealed partial class ShellViewModel : ObservableObject
 {
     // Giữ tham chiếu các VM có lệnh dừng job của Workspace để nút "Dừng jobs" trên ribbon gọi lại lệnh SẴN CÓ.
-    private readonly ScrapeViewModel _scrape;
-    private readonly UpdateProductViewModel _update;
-    private readonly SearchViewModel _search;
+    // Nullable: chế độ KHÔNG có Workspace (vd Shopee) không dựng khối workspace → 3 field này null.
+    private readonly ScrapeViewModel? _scrape;
+    private readonly UpdateProductViewModel? _update;
+    private readonly SearchViewModel? _search;
 
-    /// <summary>4 tab trên dải ribbon.</summary>
+    /// <summary>Các tab trên dải ribbon (tập phụ thuộc chế độ ứng dụng).</summary>
     public ObservableCollection<RibbonTab> Tabs { get; } = new();
 
     [ObservableProperty] private RibbonTab? _selectedTab;
@@ -52,89 +56,108 @@ public sealed partial class ShellViewModel : ObservableObject
 
     public ShellViewModel()
     {
-        // ══════════ Tạo các ViewModel MỘT LẦN — giữ NGUYÊN như bản cũ ══════════
-        // Màn gộp Workspace DÙNG CHUNG đúng 3 VM BigSeller/Scrape/Update với 3 màn cũ → state luôn đồng bộ.
-        var bigSeller = new BigSellerViewModel();
-        var scrape = new ScrapeViewModel();
-        var update = new UpdateProductViewModel();
-        var search = new SearchViewModel();
-        var workspace = new WorkspaceViewModel(bigSeller, scrape, update);
+        // ══════════ Chế độ ứng dụng: chỉ dựng NHÓM module cần thiết cho gọn ══════════
+        // Đọc 1 lần (đổi chế độ = restart nên không đổi giữa vòng đời). ws = có nhóm Workspace (gồm Cấu hình
+        // BigSeller); sp = có module Shopee (đơn hàng). Tab Cài đặt LUÔN có.
+        var mode = AppModeStore.Shared.Current;
+        bool ws = AppModeStore.ShowsWorkspace(mode);
+        bool sp = AppModeStore.ShowsShopee(mode);
+
+        // Khối VM Workspace — CHỈ dựng khi chế độ có Workspace (gọn RAM + không chạy nền thừa). Biến nào còn
+        // được tham chiếu BÊN NGOÀI block (field dừng-êm / closure PrepareShutdown) mới cần để nullable.
+        ScrapeViewModel? scrape = null;
+        UpdateProductViewModel? update = null;
+        SearchViewModel? search = null;
+        AssignmentWorker? worker = null;
+        RibbonTab? workspaceTab = null;
+        RibbonTab? bigSellerTab = null;
+
+        if (ws)
+        {
+            // Màn gộp Workspace DÙNG CHUNG đúng 3 VM BigSeller/Scrape/Update với 3 màn cũ → state luôn đồng bộ.
+            var bigSeller = new BigSellerViewModel();
+            scrape = new ScrapeViewModel();
+            update = new UpdateProductViewModel();
+            search = new SearchViewModel();
+            var workspace = new WorkspaceViewModel(bigSeller, scrape, update);
+
+            // Màn "Dữ liệu sản phẩm" (kho Hub) — ctor không I/O (nạp ở EnsureLoaded).
+            var data = new DataViewModel();
+            var accounts = new AccountsViewModel();
+
+            // Giao việc đa máy: worker (client tự chạy việc Hub giao) + dispatcher (máy Hub tự đẩy việc).
+            worker = new AssignmentWorker(scrape, update, search);
+            var fleet = new FleetViewModel(worker);
+            // Dispatcher (tự đẩy việc) CHỈ chạy timer trên máy Hub (và chỉ chế độ có Workspace).
+            if (Shopee.Core.Coordination.HubServerConfigStore.Shared.Current.Enabled) HubDispatcher.Shared.Start();
+
+            // ── Tab 1: Workspace (gom toàn bộ 5 màn suite cũ) ──
+            var wsWorkspace = new RibbonScreenItem("Workspace", AppIcons.Dashboard, workspace,
+                toolTip: "BigSeller Workspace — Scrape · Import · Update theo từng shop");
+            var wsData = new RibbonScreenItem("Dữ liệu", AppIcons.Inventory, data,
+                toolTip: "Kho sản phẩm trên Hub — lọc · thêm/sửa · đã bán · SKU · xoá");
+            var wsSearch = new RibbonScreenItem("Search", AppIcons.Search, search,
+                toolTip: "Thống kê tìm kiếm sản phẩm");
+            var wsAccounts = new RibbonScreenItem("Tài khoản & Proxy", AppIcons.People, accounts,
+                toolTip: "Kho tài khoản Shopee dùng chung · Check tài khoản");
+            var wsFleet = new RibbonScreenItem("Trạng thái", AppIcons.Servers, fleet,
+                toolTip: "Theo dõi máy + Hub giao việc cho từng máy (đa máy)");
+            _workspaceHomeScreen = wsWorkspace;
+
+            workspaceTab = new RibbonTab("Workspace", new List<RibbonGroup>
+            {
+                new RibbonGroup("Màn hình", new object[] { wsWorkspace, wsData, wsSearch, wsAccounts, wsFleet }),
+                new RibbonGroup("Hành động", new object[]
+                {
+                    new RibbonActionItem("Dừng jobs", "■", StopWorkspaceJobsCommand,
+                        "Dừng các việc đang chạy (Scrape · Update · Search)"),
+                }),
+            });
+            _workspaceTab = workspaceTab;
+
+            // ── Tab 2: Cấu hình BigSeller ──
+            var bsScreen = new RibbonScreenItem("Cấu hình BigSeller", AppIcons.Database, bigSeller,
+                toolTip: "Tài khoản · workbook · cookie · shop · proxy");
+            bigSellerTab = new RibbonTab("Cấu hình BigSeller", new List<RibbonGroup>
+            {
+                new RibbonGroup("Màn hình", new object[] { bsScreen }),
+                new RibbonGroup("Hành động", new object[]
+                {
+                    new RibbonActionItem("Đăng nhập tất cả", "▶", bigSeller.LoginAllCommand,
+                        "Tự đăng nhập headless mọi tài khoản đủ Email + Mật khẩu rồi lưu cookie"),
+                    new RibbonActionItem("Dừng", "■", bigSeller.StopLoginCommand,
+                        "Dừng tiến trình đăng nhập tất cả"),
+                }),
+            });
+            _bigSellerTab = bigSellerTab;
+
+            // Workspace bấm "Đăng nhập / cấu hình" → nhảy sang tab "Cấu hình BigSeller" (target luôn là bigSeller VM).
+            workspace.RequestNavigate = _ => { SelectedTab = _bigSellerTab; };
+        }
         _scrape = scrape; _update = update; _search = search;
-
-        // Màn "Dữ liệu sản phẩm" (kho Hub) — ctor không I/O (nạp ở EnsureLoaded).
-        var data = new DataViewModel();
-        var accounts = new AccountsViewModel();
-
-        // Giao việc đa máy: worker (client tự chạy việc Hub giao) + dispatcher (máy Hub tự đẩy việc).
-        var worker = new AssignmentWorker(scrape, update, search);
-        var fleet = new FleetViewModel(worker);
-        // Dispatcher (tự đẩy việc) CHỈ chạy timer trên máy Hub.
-        if (Shopee.Core.Coordination.HubServerConfigStore.Shared.Current.Enabled) HubDispatcher.Shared.Start();
 
         var settings = new SettingsViewModel();
 
-        // Module đơn hàng (phase 1b): mở SQLite riêng qua OrdersModuleHost. Init hỏng → TryCreate null → suite vẫn
-        // chạy, chỉ ẩn tab Đơn hàng + section Đơn hàng trong Cài đặt.
-        var ordersVm = OrdersModuleHost.TryCreate();
+        // Module đơn hàng (phase 1b): CHỈ dựng khi chế độ có Shopee. Mở SQLite riêng qua OrdersModuleHost. Init
+        // hỏng → TryCreate null → suite vẫn chạy, chỉ ẩn tab Đơn hàng + section Đơn hàng trong Cài đặt.
+        var ordersVm = sp ? OrdersModuleHost.TryCreate() : null;
 
-        // Màn Cài đặt GỘP: 1 màn 2 section (Shopee Suite + Đơn hàng). Section Đơn hàng ẩn khi module đơn hàng null.
+        // Màn Cài đặt GỘP: 1 màn (Chế độ ứng dụng + Shopee Suite + Đơn hàng). Section Đơn hàng ẩn khi ordersVm null.
         var unifiedSettings = new UnifiedSettingsViewModel(settings, ordersVm?.SettingsVm);
 
-        // ══════════ DỪNG ÊM trước khi Velopack restart — giữ NGUYÊN ══════════
+        // ══════════ DỪNG ÊM trước khi Velopack restart — guard null cho chế độ thu gọn ══════════
         UpdateService.PrepareShutdownAsync = async () =>
         {
-            update.StopAllSingle();   // không có job thì tự bỏ qua
-            if (scrape.StopCommand.CanExecute(null)) scrape.StopCommand.Execute(null);
-            if (search.StopCommand.CanExecute(null)) search.StopCommand.Execute(null);
-            await worker.PrepareForShutdownAsync(TimeSpan.FromSeconds(40));
+            update?.StopAllSingle();   // chưa dựng / không có job → tự bỏ qua
+            if (scrape is not null && scrape.StopCommand.CanExecute(null)) scrape.StopCommand.Execute(null);
+            if (search is not null && search.StopCommand.CanExecute(null)) search.StopCommand.Execute(null);
+            if (worker is not null) await worker.PrepareForShutdownAsync(TimeSpan.FromSeconds(40));
             // Module đơn hàng: dừng vòng "Chạy tự động" + kill hết phiên Brave trước khi restart.
             await OrdersModuleHost.StopAsync();
         };
         // Lệnh update từ Hub → cùng đường dừng-êm + restart như nút tay.
         Shopee.Core.Coordination.HttpCoordinationHub.UpdateRequested =
             (hub, requestedAt) => RemoteUpdateService.Shared.OnCommand(hub, requestedAt);
-
-        // ══════════ Dựng 4 tab ribbon ══════════
-
-        // ── Tab 1: Workspace (gom toàn bộ 5 màn suite cũ) ──
-        var wsWorkspace = new RibbonScreenItem("Workspace", AppIcons.Dashboard, workspace,
-            toolTip: "BigSeller Workspace — Scrape · Import · Update theo từng shop");
-        var wsData = new RibbonScreenItem("Dữ liệu", AppIcons.Inventory, data,
-            toolTip: "Kho sản phẩm trên Hub — lọc · thêm/sửa · đã bán · SKU · xoá");
-        var wsSearch = new RibbonScreenItem("Search", AppIcons.Search, search,
-            toolTip: "Thống kê tìm kiếm sản phẩm");
-        var wsAccounts = new RibbonScreenItem("Tài khoản & Proxy", AppIcons.People, accounts,
-            toolTip: "Kho tài khoản Shopee dùng chung · Check tài khoản");
-        var wsFleet = new RibbonScreenItem("Trạng thái", AppIcons.Servers, fleet,
-            toolTip: "Theo dõi máy + Hub giao việc cho từng máy (đa máy)");
-        _workspaceHomeScreen = wsWorkspace;
-
-        var workspaceTab = new RibbonTab("Workspace", new List<RibbonGroup>
-        {
-            new RibbonGroup("Màn hình", new object[] { wsWorkspace, wsData, wsSearch, wsAccounts, wsFleet }),
-            new RibbonGroup("Hành động", new object[]
-            {
-                new RibbonActionItem("Dừng jobs", "■", StopWorkspaceJobsCommand,
-                    "Dừng các việc đang chạy (Scrape · Update · Search)"),
-            }),
-        });
-        _workspaceTab = workspaceTab;
-
-        // ── Tab 2: Cấu hình BigSeller ──
-        var bsScreen = new RibbonScreenItem("Cấu hình BigSeller", AppIcons.Database, bigSeller,
-            toolTip: "Tài khoản · workbook · cookie · shop · proxy");
-        var bigSellerTab = new RibbonTab("Cấu hình BigSeller", new List<RibbonGroup>
-        {
-            new RibbonGroup("Màn hình", new object[] { bsScreen }),
-            new RibbonGroup("Hành động", new object[]
-            {
-                new RibbonActionItem("Đăng nhập tất cả", "▶", bigSeller.LoginAllCommand,
-                    "Tự đăng nhập headless mọi tài khoản đủ Email + Mật khẩu rồi lưu cookie"),
-                new RibbonActionItem("Dừng", "■", bigSeller.StopLoginCommand,
-                    "Dừng tiến trình đăng nhập tất cả"),
-            }),
-        });
-        _bigSellerTab = bigSellerTab;
 
         // ── Tab 3: Shopee (đơn hàng — 4 màn con LÊN ribbon; chỉ dựng khi module khởi tạo được) ──
         RibbonTab? ordersTab = null;
@@ -193,9 +216,9 @@ public sealed partial class ShellViewModel : ObservableObject
             };
         }
 
-        // ── Tab 4: Cài đặt (gộp 2 màn cài đặt) ──
+        // ── Tab 4: Cài đặt (gộp 2 màn cài đặt) — LUÔN có ở mọi chế độ ──
         var setScreen = new RibbonScreenItem("Cài đặt", AppIcons.Settings, unifiedSettings,
-            toolTip: "Cấu hình Shopee Suite + Đơn hàng");
+            toolTip: "Chế độ ứng dụng · cấu hình Shopee Suite + Đơn hàng");
         var settingsTab = new RibbonTab("Cài đặt", new List<RibbonGroup>
         {
             new RibbonGroup("Màn hình", new object[] { setScreen }),
@@ -206,8 +229,9 @@ public sealed partial class ShellViewModel : ObservableObject
             }),
         });
 
-        Tabs.Add(workspaceTab);
-        Tabs.Add(bigSellerTab);
+        // Thứ tự tab: Workspace → Cấu hình BigSeller → Shopee → Cài đặt (chỉ thêm cái đã dựng theo chế độ).
+        if (workspaceTab is not null) Tabs.Add(workspaceTab);
+        if (bigSellerTab is not null) Tabs.Add(bigSellerTab);
         if (ordersTab is not null) Tabs.Add(ordersTab);
         Tabs.Add(settingsTab);
 
@@ -227,12 +251,8 @@ public sealed partial class ShellViewModel : ObservableObject
             if (first is not null) { _screenByTab[tab] = first.ScreenVm; first.IsActive = true; }
         }
 
-        // Workspace bấm "Đăng nhập / cấu hình" → nhảy sang tab "Cấu hình BigSeller" (target luôn là bigSeller VM).
-        workspace.RequestNavigate = _ => { SelectedTab = _bigSellerTab; };
-
-        // Mặc định mở tab Shopee (module đơn hàng) — màn con đầu tiên (Tài khoản). Module đơn hàng không
-        // dựng được (ordersTab null) → về Workspace như cũ.
-        SelectedTab = ordersTab ?? workspaceTab;
+        // Mặc định mở tab Shopee → Workspace → (Cài đặt nếu chỉ còn nó). Không để null ở bất kỳ chế độ nào.
+        SelectedTab = ordersTab ?? workspaceTab ?? settingsTab;
     }
 
     /// <summary>Chuyển màn đang hiển thị cho tab chứa nút. Với module đơn hàng: set SelectedNavIndex để giữ
@@ -253,19 +273,21 @@ public sealed partial class ShellViewModel : ObservableObject
     }
 
     /// <summary>Nút "Dừng jobs" (ribbon Workspace): CHỈ gọi các lệnh dừng SẴN CÓ (như trong PrepareShutdownAsync),
-    /// không thêm logic mới.</summary>
+    /// không thêm logic mới. Guard null: chế độ không có Workspace thì nút này không tồn tại nhưng vẫn an toàn.</summary>
     [RelayCommand]
     private void StopWorkspaceJobs()
     {
-        _update.StopAllSingle();
-        if (_scrape.StopCommand.CanExecute(null)) _scrape.StopCommand.Execute(null);
-        if (_search.StopCommand.CanExecute(null)) _search.StopCommand.Execute(null);
+        _update?.StopAllSingle();
+        if (_scrape is not null && _scrape.StopCommand.CanExecute(null)) _scrape.StopCommand.Execute(null);
+        if (_search is not null && _search.StopCommand.CanExecute(null)) _search.StopCommand.Execute(null);
     }
 
-    /// <summary>Bấm logo/brand → về tab Workspace (màn BigSeller Workspace).</summary>
+    /// <summary>Bấm logo/brand → về tab Workspace (màn BigSeller Workspace). Chế độ không có Workspace
+    /// (vd Shopee) → không điều hướng để khỏi set SelectedTab về null.</summary>
     [RelayCommand]
     private void GoHome()
     {
+        if (_workspaceTab is null) return;
         SelectedTab = _workspaceTab;
         if (_workspaceHomeScreen is not null) ActivateScreen(_workspaceHomeScreen);
     }

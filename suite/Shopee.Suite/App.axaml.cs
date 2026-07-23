@@ -23,21 +23,29 @@ public partial class App : Application
         AppDomain.CurrentDomain.UnhandledException += (_, args) => TryLog("AppDomain", args.ExceptionObject as Exception);
         TaskScheduler.UnobservedTaskException += (_, args) => { TryLog("UnobservedTask", args.Exception); args.SetObserved(); };
 
-        // ── Khởi tạo engine (nguyên như bản WPF; mỗi hook đã try/catch nên boot được cả khi 1 phần lỗi) ──
-        try { MultiBraveRuntime.Initialize(); } catch (Exception ex) { TryLog("MultiBraveRuntime.Init", ex); }
-        try { Shopee.Modules.UpdateProduct.UpdateProductRuntime.Initialize(); } catch (Exception ex) { TryLog("UpdateProductRuntime.Init", ex); }
+        // Chế độ ứng dụng: chỉ init engine WORKSPACE (Brave/scrape/update) khi chế độ có Workspace. Đọc 1 lần
+        // (đổi chế độ = restart nên không đổi giữa vòng đời). Auto-update + điều phối vẫn chạy MỌI chế độ (dưới).
+        var appMode = Shopee.Core.Infrastructure.AppModeStore.Shared.Current;
+        bool showWorkspace = Shopee.Core.Infrastructure.AppModeStore.ShowsWorkspace(appMode);
 
-        try
+        // ── Khởi tạo engine workspace (CHỈ chế độ có Workspace; mỗi hook đã try/catch nên boot được cả khi 1 phần lỗi) ──
+        if (showWorkspace)
         {
-            var perf = Shopee.Core.Infrastructure.PerformanceSettingsStore.Shared.Current;
-            Shopee.Core.Browser.BraveFleet.MaxConcurrentWindows =
-                Shopee.Core.Browser.BraveFleet.WindowsForBudget(perf.UsableCpuCores, perf.UsableRamGb);
-            Shopee.Core.Browser.BraveFleet.ConfigureJobLimits();
-            var swept = Shopee.Core.Browser.BraveFleet.StartupSweep();
-            if (swept > 0) TryLog("BraveFleet.StartupSweep", new Exception($"Đã dọn {swept} Brave mồ côi lúc khởi động."));
-            Shopee.Core.Browser.BraveFleet.StartMaintenance();
+            try { MultiBraveRuntime.Initialize(); } catch (Exception ex) { TryLog("MultiBraveRuntime.Init", ex); }
+            try { Shopee.Modules.UpdateProduct.UpdateProductRuntime.Initialize(); } catch (Exception ex) { TryLog("UpdateProductRuntime.Init", ex); }
+
+            try
+            {
+                var perf = Shopee.Core.Infrastructure.PerformanceSettingsStore.Shared.Current;
+                Shopee.Core.Browser.BraveFleet.MaxConcurrentWindows =
+                    Shopee.Core.Browser.BraveFleet.WindowsForBudget(perf.UsableCpuCores, perf.UsableRamGb);
+                Shopee.Core.Browser.BraveFleet.ConfigureJobLimits();
+                var swept = Shopee.Core.Browser.BraveFleet.StartupSweep();
+                if (swept > 0) TryLog("BraveFleet.StartupSweep", new Exception($"Đã dọn {swept} Brave mồ côi lúc khởi động."));
+                Shopee.Core.Browser.BraveFleet.StartMaintenance();
+            }
+            catch (Exception ex) { TryLog("BraveFleet.Init", ex); }
         }
-        catch (Exception ex) { TryLog("BraveFleet.Init", ex); }
 
         try
         {
@@ -71,7 +79,8 @@ public partial class App : Application
                 try { Shopee.Core.BigSeller.BigSellerStore.Shared.Save(); } catch { }
                 // Module đơn hàng: dừng vòng "Chạy tự động" + kill hết phiên Brave (block như app gốc, tránh Brave mồ côi).
                 try { OrdersModuleHost.StopAsync().GetAwaiter().GetResult(); } catch { }
-                try { MultiBraveRuntime.Cleanup(); } catch { }
+                // Chỉ cleanup MultiBrave khi đã init (chế độ có Workspace) — chế độ Shopee không đụng engine này.
+                if (showWorkspace) { try { MultiBraveRuntime.Cleanup(); } catch { } }
             };
         }
 
