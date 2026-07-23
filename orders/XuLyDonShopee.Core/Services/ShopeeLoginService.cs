@@ -476,8 +476,12 @@ public class ShopeeLoginService
             try { if (File.Exists(portFile)) File.Delete(portFile); } catch { /* bỏ qua */ }
 
             // Launch Brave/Chromium với cổng 0 (Chromium tự chọn cổng trống, ghi vào DevToolsActivePort).
+            // POC né anti-bot: nạp extension "shopee-orders-test" (nếu tìm thấy) để thao tác Seller Centre bằng
+            // extension thay Playwright lái trang. Không thấy → null → không nạp (giữ hành vi cũ).
+            var extPath = BraveLaunchArgs.ResolveOrdersExtension();
+
             var psi = new ProcessStartInfo(exePath) { UseShellExecute = false };
-            foreach (var arg in BraveLaunchArgs.BuildBraveArgs(userDataDir, 0, proxy))
+            foreach (var arg in BraveLaunchArgs.BuildBraveArgs(userDataDir, 0, proxy, extPath))
             {
                 psi.ArgumentList.Add(arg);
             }

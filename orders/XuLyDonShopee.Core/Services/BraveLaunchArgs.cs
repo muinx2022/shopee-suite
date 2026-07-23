@@ -39,8 +39,17 @@ public static class BraveLaunchArgs
     /// (đọc lại cổng thật từ file <c>DevToolsActivePort</c>).</param>
     /// <param name="proxy">Proxy đã chọn; <c>null</c> = đi IP máy. User/pass KHÔNG nhét vào chuỗi
     /// <c>--proxy-server</c> (Chromium không hỗ trợ) — xác thực xử lý qua CDP ở tầng trên.</param>
-    public static IReadOnlyList<string> BuildBraveArgs(string userDataDir, int remoteDebuggingPort, ProxyEntry? proxy)
+    public static IReadOnlyList<string> BuildBraveArgs(
+        string userDataDir, int remoteDebuggingPort, ProxyEntry? proxy, string? extensionPath = null)
     {
+        // Có extension → thêm DisableLoadExtensionCommandLineSwitch để Chrome/Brave 137+ CHO PHÉP --load-extension
+        // (từ 137 mặc định chặn cờ này; khớp cách module Search làm). Không có ext → giữ danh sách cũ.
+        var disableFeatures = "Translate,CalculateNativeWinOcclusion,IntensiveWakeUpThrottling";
+        if (!string.IsNullOrEmpty(extensionPath))
+        {
+            disableFeatures += ",DisableLoadExtensionCommandLineSwitch";
+        }
+
         var args = new List<string>
         {
             $"--remote-debugging-port={remoteDebuggingPort}",
@@ -58,7 +67,7 @@ public static class BraveLaunchArgs
             // Tắt các tính năng gây bóp/che tài nguyên: Translate (popup dịch), CalculateNativeWinOcclusion
             // (Brave coi cửa sổ bị che → giảm hoạt động), IntensiveWakeUpThrottling (bóp timer tab nền).
             // KHÔNG còn AutomationControlled ở đây — không ép webdriver=false nữa (khớp shopee-suite).
-            "--disable-features=Translate,CalculateNativeWinOcclusion,IntensiveWakeUpThrottling",
+            $"--disable-features={disableFeatures}",
             // Locale tiếng Việt đặt bằng cờ trình duyệt (KHÔNG hook navigator.languages bằng JS —
             // hook JS tự tạo dấu hiệu lộ bot).
             "--lang=vi-VN",
@@ -67,6 +76,13 @@ public static class BraveLaunchArgs
             "--disable-popup-blocking",
         };
 
+        // Nạp extension (POC né anti-bot: thao tác Seller Centre bằng extension thay Playwright). Đường dẫn
+        // do tầng gọi phân giải (thư mục extension đã giải nén). Không có → không nạp (giữ hành vi cũ).
+        if (!string.IsNullOrEmpty(extensionPath))
+        {
+            args.Add($"--load-extension={extensionPath}");
+        }
+
         if (proxy is not null)
         {
             // Proxy đặt qua --proxy-server (http:// hoặc socks5:// theo Type). KHÔNG kèm user:pass.
@@ -74,5 +90,27 @@ public static class BraveLaunchArgs
         }
 
         return args;
+    }
+
+    /// <summary>
+    /// Phân giải thư mục extension "shopee-orders-test" (POC): tìm <c>extensions/shopee-orders-test</c> cạnh
+    /// exe (bản cài) rồi đi ngược lên vài cấp tìm ở gốc repo (khi chạy từ bin dev). Không thấy → <c>null</c>
+    /// (không nạp extension). Trả về đường dẫn tuyệt đối nếu thư mục tồn tại (có manifest.json).
+    /// </summary>
+    public static string? ResolveOrdersExtension()
+    {
+        try
+        {
+            for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
+            {
+                var cand = Path.Combine(dir.FullName, "extensions", "shopee-orders-test");
+                if (File.Exists(Path.Combine(cand, "manifest.json")))
+                {
+                    return cand;
+                }
+            }
+        }
+        catch { /* bỏ qua — không nạp extension */ }
+        return null;
     }
 }
