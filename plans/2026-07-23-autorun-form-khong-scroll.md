@@ -44,4 +44,28 @@ Sửa `orders/XuLyDonShopee.App/Views/AutoRunView.axaml`, cột trái (trong Scr
 
 ## Báo cáo thực thi
 
-(Opus điền sau khi xong.)
+**Người thực thi:** Opus (`opus-executor`) — worktree `agent-ae72b53b0bcd57a3f`.
+
+### Ghi chú khởi động
+- Worktree ban đầu bị tạo từ commit sai (85895f3, trước khi có module Đơn hàng) nên KHÔNG có `plans/` lẫn `orders/`. Đã `git reset --hard feature/gop-don-hang` (đưa nhánh worktree về commit 0677390 — nơi có plan + file đích) để lấy đúng nền mã. Thao tác này chỉ di chuyển con trỏ nhánh của worktree, không đụng cây chính.
+
+### Đã hoàn thành (chỉ sửa `orders/XuLyDonShopee.App/Views/AutoRunView.axaml`)
+1. **2 ô số về 1 hàng:** "Số tài khoản mỗi lô" + "Nghỉ giữa các lô" nay nằm trong `Grid ColumnDefinitions="*,*" ColumnSpacing="20"`. Bỏ `Width="180"`/`HorizontalAlignment="Left"` của 2 NumericUpDown cho stretch theo cột. Dòng chú "Càng nhiều..." vẫn ở cell trái (FontSize 11.5, thêm `TextWrapping="Wrap"`).
+2. **2 toggle về 1 hàng:** "Tự Sync đơn hàng" + "Tự Xử lý đơn" nay nằm trong `Grid ColumnDefinitions="*,*" ColumnSpacing="20"`, mỗi cell là `Grid ColumnDefinitions="*,Auto"` (mô tả + switch). Đã BỎ `Border` kẻ vạch trên (`Border05` / `BorderThickness="0,1,0,0"`) của toggle Sync. Thêm `TextWrapping="Wrap"` cho mô tả 2 cell.
+3. **Ghi chú "Kiểm tra ... LUÔN tự chạy":** bỏ khung `Border` (InputBg/Border010) → còn 1 `TextBlock` (FontSize 11.5, `TextMuted`, Wrap) ngay dưới hàng toggle.
+4. **Nén khoảng cách:** root StackPanel `24,24,16,40` → `24,16,16,16`; subtitle `...,0,16` → `...,0,10`; 2 heading section `0,0,0,12` → `0,0,0,8`; card Cấu hình `Padding 24,22`/`Margin 0,0,0,24` → `20,16`/`0,0,0,14`, StackPanel trong card `Spacing 18` → `12`; card Điều khiển `Padding 24,22` → `20,16`, StackPanel `Spacing 16` → `12`.
+5. **Card Điều khiển:** giữ nút 44px, khối TRẠNG THÁI giữ nguyên nội dung, `Padding 14,12` → `12,10`.
+6. **Comment bố cục đầu file:** bổ sung mô tả card CẤU HÌNH nay là 2 hàng × 2 cột.
+
+### Kết quả kiểm chứng
+- `dotnet build orders/XuLyDonShopee.App -c Debug` → **Build succeeded, 0 Warning, 0 Error**.
+- So sánh binding trước/sau (`git show HEAD:... | grep 'Binding ...'` vs bản mới): **15 binding trùng khớp tuyệt đối** — không mất/đổi binding nào (BatchSize, GapMinutes, DoSync, DoProcess, CanEditConfig, SaveConfigCommand, SavedMessage×2, ToggleButtonText, ToggleCommand, StatusText, LogEntries, LogPath, ClearLogCommand, Display).
+- `ScrollViewer Grid.Column="0"` **vẫn còn** (grep = 1) → lưới an toàn khi cửa sổ quá thấp được giữ.
+- Panel nhật ký cột phải (`AutoRunLogList`, "Nhật ký hoạt động", `logDark`, Border `Grid.Column="1"`) **không xuất hiện trong diff** → không đổi.
+- `git diff --stat`: 1 file, 50 insertions / 46 deletions — toàn bộ nằm ở cột trái.
+
+### Vướng mắc/bỏ dở
+- Không có. Nghiệm thu hình thức bằng đọc XAML + build (không có test UI); ước tính chiều cao mới ~560–600px như plan — cần user xem mắt thường để xác nhận hết cuộn ở cửa sổ thật.
+
+### Đề xuất
+- Nhắc Fable: nhánh worktree này đã được reset về `feature/gop-don-hang` (0677390) để có nền đúng — khi commit trong worktree và merge, đối chiếu lại base cho khớp.
