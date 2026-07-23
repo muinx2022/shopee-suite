@@ -33,7 +33,8 @@ public class AccountSessionCleanupTests
             GsheetDaCoVanDon: null,
             DaDemDaBan: daDemDaBan,
             DaDayHub: daDayHub,
-            DaDayPhieuHub: daDayPhieuHub);
+            DaDayPhieuHub: daDayPhieuHub,
+            GsheetTab: null);
 
     [Fact]
     public void Terminal_Settled_KhongSku_HubTat_Xoa()

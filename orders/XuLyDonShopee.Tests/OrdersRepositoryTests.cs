@@ -245,7 +245,7 @@ public class OrdersRepositoryTests
             choLay,                      // KHÔNG tracking → vẫn phải trả (superset)
         }, DateTime.UtcNow);
 
-        repo.MarkGsheetSynced(1, "SYNCED_FULL", "https://drive/aaa", false, coVanDon: true, DateTime.UtcNow);
+        repo.MarkGsheetSynced(1, "SYNCED_FULL", "https://drive/aaa", false, coVanDon: true, tab: "Tháng 07-2026", DateTime.UtcNow);
 
         var pending = repo.GetForGsheetPush(1);
         var sns = pending.Select(p => p.OrderSn).ToList();
@@ -261,11 +261,13 @@ public class OrdersRepositoryTests
         Assert.Equal("https://drive/aaa", full.FileUrl);
         Assert.Equal(0, full.GsheetDaHuy);          // daHuy=false → 0
         Assert.Equal(1, full.GsheetDaCoVanDon);     // coVanDon=true → 1
+        Assert.Equal("Tháng 07-2026", full.GsheetTab); // tab đã nhớ được map
 
         var fresh = pending.First(p => p.OrderSn == "HASTRACK");
         Assert.False(fresh.DaGhiSheet);
         Assert.Null(fresh.GsheetDaHuy);             // chưa đẩy → null
         Assert.Null(fresh.GsheetDaCoVanDon);        // chưa đẩy → null
+        Assert.Null(fresh.GsheetTab);               // chưa đẩy → chưa nhớ tab
         Assert.Equal("SPXVN068067521447", fresh.TrackingNumber);
 
         var choLayRow = pending.First(p => p.OrderSn == "CHOLAY");
@@ -285,29 +287,32 @@ public class OrdersRepositoryTests
         var repo = new OrdersRepository(db);
         repo.UpsertMany(1, new[] { Sample("SN1") }, DateTime.UtcNow);
 
-        // Lần 1: đã ghi, CHƯA có file, daHuy=false, coVanDon=false → cả 2 cờ = 0.
+        // Lần 1: đã ghi, CHƯA có file, daHuy=false, coVanDon=false → cả 2 cờ = 0; tab lần đầu = "Tháng 06-2026".
         var t1 = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
-        repo.MarkGsheetSynced(1, "SN1", null, false, coVanDon: false, t1);
+        repo.MarkGsheetSynced(1, "SN1", null, false, coVanDon: false, tab: "Tháng 06-2026", t1);
         var synced1 = ReadString(db, "SN1", "gsheet_synced_at");
         Assert.NotNull(synced1);
         Assert.Null(ReadString(db, "SN1", "gsheet_file_url"));
         Assert.Equal("0", ReadString(db, "SN1", "gsheet_da_huy"));
         Assert.Equal("0", ReadString(db, "SN1", "gsheet_da_co_van_don"));
+        Assert.Equal("Tháng 06-2026", ReadString(db, "SN1", "gsheet_tab"));
 
         // Lần 2: bổ sung fileUrl + daHuy=true + coVanDon=true, thời điểm KHÁC → synced_at GIỮ, file_url điền,
-        // cả 2 cờ GHI ĐÈ = 1.
+        // cả 2 cờ GHI ĐÈ = 1. Truyền tab KHÁC → gsheet_tab GIỮ tab lần đầu (COALESCE).
         var t2 = new DateTime(2026, 2, 2, 0, 0, 0, DateTimeKind.Utc);
-        repo.MarkGsheetSynced(1, "SN1", "https://drive/aaa", true, coVanDon: true, t2);
+        repo.MarkGsheetSynced(1, "SN1", "https://drive/aaa", true, coVanDon: true, tab: "Tháng 08-2026", t2);
         Assert.Equal(synced1, ReadString(db, "SN1", "gsheet_synced_at"));            // KHÔNG đổi
         Assert.Equal("https://drive/aaa", ReadString(db, "SN1", "gsheet_file_url"));
         Assert.Equal("1", ReadString(db, "SN1", "gsheet_da_huy"));
         Assert.Equal("1", ReadString(db, "SN1", "gsheet_da_co_van_don"));
+        Assert.Equal("Tháng 06-2026", ReadString(db, "SN1", "gsheet_tab"));         // GIỮ tab lần đầu, KHÔNG đè
 
         // Lần 3: fileUrl null → KHÔNG xóa link; daHuy=false + coVanDon=false → cả 2 cờ về 0 (ghi đè luôn).
-        repo.MarkGsheetSynced(1, "SN1", null, false, coVanDon: false, t2);
+        repo.MarkGsheetSynced(1, "SN1", null, false, coVanDon: false, tab: "Tháng 09-2026", t2);
         Assert.Equal("https://drive/aaa", ReadString(db, "SN1", "gsheet_file_url"));
         Assert.Equal("0", ReadString(db, "SN1", "gsheet_da_huy"));
         Assert.Equal("0", ReadString(db, "SN1", "gsheet_da_co_van_don"));
+        Assert.Equal("Tháng 06-2026", ReadString(db, "SN1", "gsheet_tab"));         // vẫn GIỮ tab lần đầu
     }
 
     [Fact]

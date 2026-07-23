@@ -461,4 +461,170 @@ CREATE TABLE orders (
         var row = Assert.Single(repo.Query(accountId: 13));
         Assert.Equal("SNSOLD", row.OrderSn);
     }
+
+    // ==== Migration + BACKFILL cột gsheet_tab cho bảng orders (nhớ tab đã ghi để không nhân đôi dòng khi sang tháng) ====
+
+    /// <summary>
+    /// Dựng schema orders CÓ nhóm cột gsheet (gsheet_synced_at…) NHƯNG chưa có gsheet_tab, kèm bảng settings;
+    /// ghi 1 đơn ĐÃ ghi sheet (order_sn "SYNCED", gsheet_synced_at NOT NULL) + 1 đơn CHƯA ghi ("UNSYNCED",
+    /// gsheet_synced_at NULL). <paramref name="tabSetting"/> != null → ghi setting <c>gsheet_tab_name</c>.
+    /// </summary>
+    private static void CreateOrdersSchemaBeforeGsheetTab(string path, long accountId, string? tabSetting)
+    {
+        var cs = new SqliteConnectionStringBuilder { DataSource = path }.ToString();
+        using var conn = new SqliteConnection(cs);
+        conn.Open();
+
+        using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = @"
+CREATE TABLE settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT
+);
+CREATE TABLE orders (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id         INTEGER NOT NULL,
+    order_sn           TEXT NOT NULL,
+    shopee_order_id    TEXT,
+    buyer_username     TEXT,
+    items_json         TEXT,
+    item_count         INTEGER,
+    item_summary       TEXT,
+    sku                TEXT,
+    gsheet_synced_at   TEXT,
+    gsheet_file_url    TEXT,
+    gsheet_da_huy      INTEGER,
+    gsheet_da_co_van_don INTEGER,
+    hub_synced_at      TEXT,
+    hub_slip_synced_at TEXT,
+    sold_counted_at    TEXT,
+    total_price        INTEGER,
+    total_price_text   TEXT,
+    final_amount       INTEGER,
+    final_amount_text  TEXT,
+    payment_method     TEXT,
+    status             TEXT,
+    status_description TEXT,
+    cancel_reason      TEXT,
+    channel            TEXT,
+    carrier            TEXT,
+    tracking_number    TEXT,
+    synced_at          TEXT,
+    created_at         TEXT,
+    updated_at         TEXT,
+    UNIQUE(account_id, order_sn)
+);";
+            cmd.ExecuteNonQuery();
+        }
+
+        // Đơn ĐÃ ghi sheet (gsheet_synced_at NOT NULL) → backfill sẽ nhớ tab.
+        using (var ins = conn.CreateCommand())
+        {
+            ins.CommandText = @"INSERT INTO orders
+    (account_id, order_sn, gsheet_synced_at, status, synced_at, created_at, updated_at)
+    VALUES ($acc, 'SYNCED', '2026-06-01T00:00:00.0000000', 'Chờ lấy hàng',
+            '2026-06-01T00:00:00.0000000', '2026-06-01T00:00:00.0000000', '2026-06-01T00:00:00.0000000');";
+            ins.Parameters.AddWithValue("$acc", accountId);
+            ins.ExecuteNonQuery();
+        }
+
+        // Đơn CHƯA ghi sheet (gsheet_synced_at NULL) → backfill KHÔNG chạm → gsheet_tab giữ NULL.
+        using (var ins = conn.CreateCommand())
+        {
+            ins.CommandText = @"INSERT INTO orders
+    (account_id, order_sn, status, synced_at, created_at, updated_at)
+    VALUES ($acc, 'UNSYNCED', 'Chờ lấy hàng',
+            '2026-06-01T00:00:00.0000000', '2026-06-01T00:00:00.0000000', '2026-06-01T00:00:00.0000000');";
+            ins.Parameters.AddWithValue("$acc", accountId);
+            ins.ExecuteNonQuery();
+        }
+
+        if (tabSetting is not null)
+        {
+            using var s = conn.CreateCommand();
+            s.CommandText = "INSERT INTO settings (key, value) VALUES ('gsheet_tab_name', $v);";
+            s.Parameters.AddWithValue("$v", tabSetting);
+            s.ExecuteNonQuery();
+        }
+    }
+
+    /// <summary>Đọc giá trị một cột của đơn theo order_sn (null nếu NULL/không có).</summary>
+    private static string? ReadOrderColumn(string path, string orderSn, string column)
+    {
+        var cs = new SqliteConnectionStringBuilder { DataSource = path }.ToString();
+        using var conn = new SqliteConnection(cs);
+        conn.Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = $"SELECT {column} FROM orders WHERE order_sn = $sn;";
+        cmd.Parameters.AddWithValue("$sn", orderSn);
+        var res = cmd.ExecuteScalar();
+        return res is null || res == DBNull.Value ? null : res.ToString();
+    }
+
+    [Fact]
+    public void KhoiTao_DbCu_Orders_ThieuGsheetTab_DuocThemCot_BackfillTheoSetting_TrimKhoangTrang()
+    {
+        using var temp = new TempDatabase();
+        CreateOrdersSchemaBeforeGsheetTab(temp.Path, accountId: 31, tabSetting: "  Tab Thang 6  ");
+
+        // Trước migration: schema orders cũ chưa có cột gsheet_tab.
+        Assert.False(HasColumn(temp.Path, "orders", "gsheet_tab"));
+
+        // Khởi tạo Database mới trỏ cùng file → Initialize() chạy migration ALTER TABLE + backfill.
+        _ = new Database(temp.Path);
+
+        // Sau migration: đã có cột gsheet_tab.
+        Assert.True(HasColumn(temp.Path, "orders", "gsheet_tab"));
+
+        // Đơn ĐÃ ghi sheet → gsheet_tab = tên setting đã TRIM (khoảng trắng bị bỏ).
+        Assert.Equal("Tab Thang 6", ReadOrderColumn(temp.Path, "SYNCED", "gsheet_tab"));
+
+        // Đơn CHƯA ghi sheet → gsheet_tab giữ NULL (không backfill).
+        Assert.Null(ReadOrderColumn(temp.Path, "UNSYNCED", "gsheet_tab"));
+    }
+
+    [Fact]
+    public void KhoiTao_DbCu_Orders_ThieuGsheetTab_KhongSetting_BackfillMacDinhThang4()
+    {
+        using var temp = new TempDatabase();
+        CreateOrdersSchemaBeforeGsheetTab(temp.Path, accountId: 32, tabSetting: null);
+
+        _ = new Database(temp.Path);
+
+        // Không có setting gsheet_tab_name → backfill dùng mặc định LEGACY "tháng 4".
+        Assert.Equal("tháng 4", ReadOrderColumn(temp.Path, "SYNCED", "gsheet_tab"));
+        Assert.Null(ReadOrderColumn(temp.Path, "UNSYNCED", "gsheet_tab"));
+    }
+
+    [Fact]
+    public void KhoiTao_DbCu_Orders_SettingToanKhoangTrang_BackfillMacDinhThang4()
+    {
+        using var temp = new TempDatabase();
+        CreateOrdersSchemaBeforeGsheetTab(temp.Path, accountId: 34, tabSetting: "    ");
+
+        _ = new Database(temp.Path);
+
+        // Setting toàn khoảng trắng → NULLIF(TRIM(...),'') coi như chưa đặt → mặc định "tháng 4".
+        Assert.Equal("tháng 4", ReadOrderColumn(temp.Path, "SYNCED", "gsheet_tab"));
+    }
+
+    [Fact]
+    public void KhoiTao_DbCu_Orders_BackfillGsheetTab_Idempotent_FirstWins()
+    {
+        using var temp = new TempDatabase();
+        CreateOrdersSchemaBeforeGsheetTab(temp.Path, accountId: 33, tabSetting: "Tab Ban Dau");
+
+        // Lần 1: backfill nhớ "Tab Ban Dau".
+        var db = new Database(temp.Path);
+        Assert.Equal("Tab Ban Dau", ReadOrderColumn(temp.Path, "SYNCED", "gsheet_tab"));
+
+        // Đổi setting rồi khởi tạo lại → backfill KHÔNG chạm đơn đã có gsheet_tab (WHERE gsheet_tab IS NULL) →
+        // giữ tab lần đầu, KHÔNG đổi theo setting mới (idempotent + first-write-wins).
+        new SettingsRepository(db).SetGsheetTabName("Tab Moi");
+        _ = new Database(temp.Path); // migration + backfill lần 2
+
+        Assert.Equal("Tab Ban Dau", ReadOrderColumn(temp.Path, "SYNCED", "gsheet_tab"));
+        Assert.Null(ReadOrderColumn(temp.Path, "UNSYNCED", "gsheet_tab"));
+    }
 }

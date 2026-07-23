@@ -36,10 +36,13 @@ public class SettingsRepository
     /// <summary>Key: URL Web App Google Apps Script (kết thúc <c>/exec</c>) để đẩy đơn lên Google Sheet.</summary>
     private const string GsheetWebAppUrlKey = "gsheet_webapp_url";
 
-    /// <summary>Key: tên tab (sheet) đích để ghi đơn (thiếu/trống → mặc định <c>"tháng 4"</c>).</summary>
+    /// <summary>Key: tên tab (sheet) đích để ghi đơn — dùng làm OVERRIDE: có giá trị = ghi cố định vào tab đó;
+    /// trống/thiếu = TỰ ĐỘNG theo tháng ("Tháng MM-yyyy", caller tự resolve qua <see cref="GsheetTabName"/>).</summary>
     private const string GsheetTabNameKey = "gsheet_tab_name";
 
-    /// <summary>Tên tab đích mặc định khi người dùng chưa đặt.</summary>
+    /// <summary>Tên tab mặc định LEGACY — CHỈ còn dùng cho backfill migration cột <c>orders.gsheet_tab</c>
+    /// (đơn ĐÃ ghi sheet trước bản "tab theo tháng" nằm ở tab tên setting cũ, mặc định "tháng 4"). KHÔNG còn
+    /// là giá trị trả về của <see cref="GetGsheetTabName"/> nữa (trống giờ trả chuỗi rỗng).</summary>
     public const string DefaultGsheetTabName = "tháng 4";
 
     /// <summary>Key: URL webhook báo "đơn mới" (Slack / Discord / Telegram) — trống → tắt tính năng.</summary>
@@ -127,14 +130,15 @@ public class SettingsRepository
         Set(GsheetWebAppUrlKey, string.IsNullOrEmpty(v) ? null : v);
     }
 
-    /// <summary>Tên tab đích ghi đơn (đã trim); thiếu/trống → mặc định <see cref="DefaultGsheetTabName"/> ("tháng 4").</summary>
+    /// <summary>Tên tab đích ghi đơn — OVERRIDE do người dùng đặt (đã trim); thiếu/trống → <c>""</c> (chuỗi
+    /// rỗng) = TỰ ĐỘNG theo tháng. Caller tự resolve chuỗi rỗng thành <see cref="GsheetTabName.ForMonth"/>.</summary>
     public string GetGsheetTabName()
     {
         var v = Get(GsheetTabNameKey)?.Trim();
-        return string.IsNullOrEmpty(v) ? DefaultGsheetTabName : v;
+        return string.IsNullOrEmpty(v) ? string.Empty : v;
     }
 
-    /// <summary>Lưu tên tab đích (trim); null/trống → xóa key (⇒ Get trả mặc định "tháng 4").</summary>
+    /// <summary>Lưu tên tab đích override (trim); null/trống → xóa key (⇒ Get trả "" = tự động theo tháng).</summary>
     public void SetGsheetTabName(string? name)
     {
         var v = name?.Trim();

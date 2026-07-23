@@ -19,6 +19,8 @@ namespace XuLyDonShopee.Core.Data;
 /// được DỌN đơn kết thúc khỏi DB chưa (giữ lại đến khi mọi nghĩa vụ hoàn tất — xem <c>AccountSession.NenXoaDonKetThuc</c>).
 /// <see cref="DaDayPhieuHub"/> = đã đẩy FILE PHIẾU lên hub (<c>hub_slip_synced_at IS NOT NULL</c>) — dùng để GIỮ
 /// đơn kết thúc khi còn phiếu local hợp lệ CHƯA đẩy hub (hub đang bật).
+/// <see cref="GsheetTab"/> = tab (sheet) đã ghi LẦN ĐẦU của đơn (<c>gsheet_tab</c>; null = chưa ghi/chưa nhớ) —
+/// đơn đẩy LẠI phải về đúng tab này (không nhân đôi dòng khi tab đổi theo tháng).
 /// </summary>
 public sealed record GsheetPendingOrder(
     string OrderSn,
@@ -34,7 +36,8 @@ public sealed record GsheetPendingOrder(
     long? GsheetDaCoVanDon,
     bool DaDemDaBan,
     bool DaDayHub,
-    bool DaDayPhieuHub);
+    bool DaDayPhieuHub,
+    string? GsheetTab);
 
 /// <summary>
 /// Kết quả phát hiện đơn CHUYỂN sang "đã giao" giữa 2 lần sync (<see cref="OrdersRepository.DetectNewlyDelivered"/>),
@@ -277,7 +280,7 @@ public class OrdersRepository
         cmd.CommandText = @"SELECT order_sn, tracking_number, sku, total_price,
        status, status_description, cancel_reason,
        gsheet_synced_at, gsheet_file_url, gsheet_da_huy, gsheet_da_co_van_don,
-       sold_counted_at, hub_synced_at, hub_slip_synced_at
+       sold_counted_at, hub_synced_at, hub_slip_synced_at, gsheet_tab
     FROM orders
     WHERE account_id = $a
     ORDER BY id;";
@@ -301,7 +304,8 @@ public class OrdersRepository
                 GsheetDaCoVanDon: reader.IsDBNull(10) ? null : reader.GetInt64(10),
                 DaDemDaBan: !reader.IsDBNull(11),
                 DaDayHub: !reader.IsDBNull(12),
-                DaDayPhieuHub: !reader.IsDBNull(13)));
+                DaDayPhieuHub: !reader.IsDBNull(13),
+                GsheetTab: reader.IsDBNull(14) ? null : reader.GetString(14)));
         }
         return list;
     }
@@ -312,9 +316,11 @@ public class OrdersRepository
     /// <c>COALESCE($url, cũ)</c> — <paramref name="fileUrl"/> null KHÔNG xóa link đã có (chỉ điền khi có link
     /// mới). <c>gsheet_da_huy</c> = <paramref name="daHuy"/> và <c>gsheet_da_co_van_don</c> =
     /// <paramref name="coVanDon"/> GHI ĐÈ LUÔN (là trạng thái VỪA đẩy — để lần sau phát hiện đổi trạng thái hủy /
-    /// vận đơn vừa xuất hiện). Khóa theo <c>(account_id, order_sn)</c>.
+    /// vận đơn vừa xuất hiện). <c>gsheet_tab</c> dùng <c>COALESCE(cũ, $tab)</c> — GIỮ tab đã ghi LẦN ĐẦU, KHÔNG
+    /// đổi khi đẩy lại (đơn cập nhật luôn về đúng tab cũ dù tháng/override hiện tại đã khác). Khóa theo
+    /// <c>(account_id, order_sn)</c>.
     /// </summary>
-    public void MarkGsheetSynced(long accountId, string orderSn, string? fileUrl, bool daHuy, bool coVanDon, DateTime at)
+    public void MarkGsheetSynced(long accountId, string orderSn, string? fileUrl, bool daHuy, bool coVanDon, string tab, DateTime at)
     {
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
@@ -322,12 +328,14 @@ public class OrdersRepository
     gsheet_synced_at = COALESCE(gsheet_synced_at, $at),
     gsheet_file_url = COALESCE($url, gsheet_file_url),
     gsheet_da_huy = $daHuy,
-    gsheet_da_co_van_don = $co
+    gsheet_da_co_van_don = $co,
+    gsheet_tab = COALESCE(gsheet_tab, $tab)
     WHERE account_id = $a AND order_sn = $sn;";
         cmd.Parameters.AddWithValue("$at", DbSerialization.FormatDate(at));
         cmd.Parameters.AddWithValue("$url", (object?)fileUrl ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$daHuy", daHuy ? 1 : 0);
         cmd.Parameters.AddWithValue("$co", coVanDon ? 1 : 0);
+        cmd.Parameters.AddWithValue("$tab", tab);
         cmd.Parameters.AddWithValue("$a", accountId);
         cmd.Parameters.AddWithValue("$sn", orderSn);
         cmd.ExecuteNonQuery();

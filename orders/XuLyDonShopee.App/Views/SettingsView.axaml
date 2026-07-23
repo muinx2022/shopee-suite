@@ -150,13 +150,13 @@
                                     <Grid>
                                         <TextBox Classes="bare" Margin="12,0"
                                                  Text="{Binding GsheetTabName}"
-                                                 Watermark="tháng 4" />
+                                                 Watermark="để trống = tự động Tháng MM-yyyy" />
                                         <Border Classes="underline" />
                                     </Grid>
                                 </Border>
                                 <TextBlock TextWrapping="Wrap" FontSize="11.5" Margin="0,6,0,0"
                                            Foreground="{StaticResource TextMuted}"
-                                           Text="Sau mỗi lần Sync đơn hàng, app tự ghi đơn + link phiếu vào Google Sheet (tab đặt ở ô Tab ghi vào; để trống = tháng 4). Cách lấy link: docs/gsheet-huong-dan-cai-dat.md" />
+                                           Text="Sau mỗi lần Sync đơn hàng, app tự ghi đơn + link phiếu vào Google Sheet. Để trống = tự ghi vào tab &quot;Tháng MM-yyyy&quot; theo tháng hiện tại (script tự tạo tab); điền tên = ghi cố định vào tab đó. Cách lấy link: docs/gsheet-huong-dan-cai-dat.md" />
                             </StackPanel>
 
                             <!-- Lưu link (thông báo RIÊNG của card GSheet) -->

@@ -1416,9 +1416,20 @@ public partial class AccountSession : ObservableObject, IAccountSession
                 var tenShop = _services.Accounts.GetById(_accountId)?.Email;
 
                 var invoiceDir = _services.Settings.GetInvoiceFolder();
-                var ngay = DateTime.Now.ToString("dd/MM/yyyy");
+                // Đọc thời điểm MỘT LẦN cho cả lượt (ngày ghi cột + tab tự động theo tháng) — lượt vắt qua nửa
+                // đêm cuối tháng vẫn nhất quán một tab.
+                var now = DateTime.Now;
+                var ngay = now.ToString("dd/MM/yyyy");
 
-                var rows = new List<GsheetOrderRow>();
+                // Tab đích của đơn MỚI: override ở Cài đặt (có giá trị) hoặc tự động "Tháng MM-yyyy" (override trống).
+                // Đơn ĐÃ nhớ tab (p.GsheetTab) LUÔN về đúng tab cũ, bất kể override/tháng hiện tại.
+                var overrideTab = _services.Settings.GetGsheetTabName();     // "" = tự động
+                var autoTab = GsheetTabName.ForMonth(now);
+                var defaultTab = string.IsNullOrEmpty(overrideTab) ? autoTab : overrideTab;
+
+                // Gộp rows theo tab đích (PushAsync nhận MỘT tab/lượt). Thứ tự đơn trong mỗi nhóm giữ nguyên
+                // (List theo thứ tự duyệt pending). Thường 1–2 nhóm (tab tháng hiện tại + tab đã nhớ của đơn cũ).
+                var rowsByTab = new Dictionary<string, List<GsheetOrderRow>>(StringComparer.Ordinal);
                 // Nhớ trạng thái hủy + đã-có-vận-đơn VỪA tính của từng đơn được gửi → dùng cho MarkGsheetSynced
                 // (ghi cờ gsheet_da_huy / gsheet_da_co_van_don).
                 var daHuyByMaDon = new Dictionary<string, bool>(StringComparer.Ordinal);
@@ -1467,7 +1478,15 @@ public partial class AccountSession : ObservableObject, IAccountSession
 
                     daHuyByMaDon[p.OrderSn] = daHuy;
                     coVanDonByMaDon[p.OrderSn] = coVanDon;
-                    rows.Add(new GsheetOrderRow(
+
+                    // Tab đích: tab đã nhớ của đơn (đẩy lại về đúng chỗ cũ) hoặc tab mặc định cho đơn mới.
+                    var tab = string.IsNullOrEmpty(p.GsheetTab) ? defaultTab : p.GsheetTab;
+                    if (!rowsByTab.TryGetValue(tab, out var tabRows))
+                    {
+                        tabRows = new List<GsheetOrderRow>();
+                        rowsByTab[tab] = tabRows;
+                    }
+                    tabRows.Add(new GsheetOrderRow(
                         MaDon: p.OrderSn,
                         MaVanDon: p.TrackingNumber,
                         TenShop: tenShop,
@@ -1479,36 +1498,41 @@ public partial class AccountSession : ObservableObject, IAccountSession
                         DaHuy: daHuy));
                 }
 
-                if (rows.Count == 0)
+                if (rowsByTab.Count == 0)
                 {
                     log("GSheet: không có đơn mới cần ghi.");
                 }
                 else
                 {
-                    // PushAsync có thể ném (lỗi mạng/lô) → đơn ĐỊNH-GỬI (trong rows) coi CHƯA settled → GIỮ lại,
-                    // lượt sync sau tự đẩy lại. Đơn settled-by-design ở trên VẪN được dọn. OCE (hủy) cho xuyên.
+                    // PushAsync có thể ném (lỗi mạng/lô) → đơn ĐỊNH-GỬI (trong rowsByTab) coi CHƯA settled → GIỮ
+                    // lại, lượt sync sau tự đẩy lại. Đơn settled-by-design ở trên VẪN được dọn. OCE (hủy) cho xuyên.
+                    // Đẩy LẦN LƯỢT từng tab (thường 1–2). Một nhóm ném lỗi → catch dưới log + DỪNG các nhóm sau
+                    // (mạng đang hỏng); đơn các nhóm đã gửi trước đó vẫn settled, các nhóm sau giữ chưa settled.
                     try
                     {
-                        var tabName = _services.Settings.GetGsheetTabName();
-                        var results = await _services.GsheetSync.PushAsync(url, tabName, rows, log, ct).ConfigureAwait(false);
-
                         int added = 0, updated = 0, withFile = 0, errors = 0;
                         string? firstError = null;
-                        foreach (var r in results)
+                        foreach (var nhom in rowsByTab)
                         {
-                            if (r.Ok)
+                            var tabName = nhom.Key;
+                            var results = await _services.GsheetSync.PushAsync(url, tabName, nhom.Value, log, ct).ConfigureAwait(false);
+
+                            foreach (var r in results)
                             {
-                                var daHuy = daHuyByMaDon.TryGetValue(r.MaDon, out var dh) && dh;
-                                var coVanDon = coVanDonByMaDon.TryGetValue(r.MaDon, out var cv) && cv;
-                                _services.Orders.MarkGsheetSynced(_accountId, r.MaDon, r.FileUrl, daHuy, coVanDon, DateTime.UtcNow);
-                                settled.Add(r.MaDon); // gửi thành công → settled (đủ điều kiện dọn nếu kết thúc)
-                                if (r.Added) { added++; } else { updated++; }
-                                if (!string.IsNullOrEmpty(r.FileUrl)) { withFile++; }
-                            }
-                            else
-                            {
-                                errors++;
-                                firstError ??= $"{r.MaDon}: {r.Error}";
+                                if (r.Ok)
+                                {
+                                    var daHuy = daHuyByMaDon.TryGetValue(r.MaDon, out var dh) && dh;
+                                    var coVanDon = coVanDonByMaDon.TryGetValue(r.MaDon, out var cv) && cv;
+                                    _services.Orders.MarkGsheetSynced(_accountId, r.MaDon, r.FileUrl, daHuy, coVanDon, tabName, DateTime.UtcNow);
+                                    settled.Add(r.MaDon); // gửi thành công → settled (đủ điều kiện dọn nếu kết thúc)
+                                    if (r.Added) { added++; } else { updated++; }
+                                    if (!string.IsNullOrEmpty(r.FileUrl)) { withFile++; }
+                                }
+                                else
+                                {
+                                    errors++;
+                                    firstError ??= $"{r.MaDon}: {r.Error}";
+                                }
                             }
                         }
 
