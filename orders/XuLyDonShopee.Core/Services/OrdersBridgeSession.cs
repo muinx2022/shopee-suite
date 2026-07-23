@@ -111,7 +111,40 @@ public sealed class OrdersBridgeSession : IDisposable
                 "Không tìm thấy thư mục extension 'shopee-orders' (cạnh app hoặc trong repo). " +
                 "Cầu nối cần extension này để nối WebSocket + bắn trusted input.");
 
+        // Kill MỌI trình duyệt đang giữ hồ sơ này TRƯỚC khi mở bản sạch: Chrome/Brave "single-instance" → nếu còn
+        // một tiến trình cũ (mồ côi từ lần chạy trước / trình duyệt điều khiển vừa đóng chưa thoát hẳn) trên cùng
+        // --user-data-dir thì lần mở mới CHỈ nhồi tab vào tiến trình cũ (giữ EXTENSION CŨ trong RAM) → cầu nối nạp
+        // nhầm bản cũ. Dọn để bản sạch luôn nạp extension MỚI từ đĩa.
+        KillBrowsersOnProfile(_userDataDir);
+
         Process = PocCleanLauncher.Open(_userDataDir, _browserChoice, startUrl, extPath);
+    }
+
+    /// <summary>Kill mọi tiến trình trình duyệt (brave/chrome/msedge) có <paramref name="userDataDir"/> trong dòng
+    /// lệnh — chống "single-instance handoff" khiến bản sạch nạp nhầm extension cũ. Windows-only (dùng CIM), best-effort.</summary>
+    private static void KillBrowsersOnProfile(string userDataDir)
+    {
+        if (!OperatingSystem.IsWindows() || string.IsNullOrWhiteSpace(userDataDir))
+        {
+            return;
+        }
+        try
+        {
+            var safe = userDataDir.Replace("'", "''");
+            var cmd =
+                "Get-CimInstance Win32_Process | Where-Object { " +
+                "($_.Name -in 'brave.exe','chrome.exe','msedge.exe') -and $_.CommandLine -like '*" + safe + "*' } | " +
+                "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }";
+            var psi = new System.Diagnostics.ProcessStartInfo("powershell",
+                "-NoProfile -NonInteractive -Command \"" + cmd + "\"")
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            };
+            using var p = System.Diagnostics.Process.Start(psi);
+            p?.WaitForExit(6000);
+        }
+        catch { /* best-effort — không chặn launch nếu dọn lỗi */ }
     }
 
     // ── GĐ1: user đã đăng nhập tay tới /portal/shop → chạy lát cắt ──────────────────────────────────────
