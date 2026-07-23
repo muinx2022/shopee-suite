@@ -771,6 +771,11 @@ public partial class AccountSession : ObservableObject, IAccountSession
             // tự return im lặng bên trong.
             StartHubPushInBackground(log, tok);
 
+            // Đẩy FILE PHIẾU lên HUB chạy NỀN (y pattern hub-push): các đơn ĐÃ lên hub, có vận đơn, CHƯA đẩy phiếu
+            // + có file phiếu local hợp lệ → đẩy lô ≤5. Chạy SAU StartHubPushInBackground (phiếu chỉ đẩy được cho
+            // đơn đã lên hub). Hook chưa rót (app độc lập / hub tắt) → tự return im lặng bên trong.
+            StartHubSlipPushInBackground(log, tok);
+
             // +1 "Đã bán" theo SKU lên HUB chạy NỀN (y pattern hub-push): các đơn VỪA chuyển sang đã-giao trong lượt
             // này (soldDetect). Chỉ đánh cờ sold_counted_at cho các đơn CÓ SKU SAU khi hub +1 OK. Không có SKU nào
             // cần +1 → tự return bên trong. Hook chưa rót → im lặng (đơn giữ CHƯA đánh cờ, lượt sau thử lại).
@@ -1149,6 +1154,111 @@ public partial class AccountSession : ObservableObject, IAccountSession
         return marked;
     }
 
+    /// <summary>Kích thước LÔ tối đa mỗi lần đẩy PHIẾU lên hub — lô ≤5 PDF ~1,5MB qua tunnel (trần hub 5MB/phiếu).</summary>
+    public const int HubSlipPushBatchSize = 5;
+
+    /// <summary>Cờ CHỐNG CHỒNG lượt đẩy PHIẾU hub trên CÙNG phiên (0 = rảnh, 1 = đang đẩy) — y <see cref="_hubPushing"/>.</summary>
+    private int _hubSlipPushing;
+
+    /// <summary>
+    /// Kích hoạt đẩy FILE PHIẾU lên HUB CHẠY NỀN (fire-and-forget) sau khi Sync đã tổng kết — y pattern
+    /// <see cref="StartHubPushInBackground"/>. Cờ <see cref="_hubSlipPushing"/> (Interlocked) chống 2 lượt đẩy chồng
+    /// nhau: lượt trước còn chạy → bỏ qua, log 1 dòng (lượt sync sau tự đẩy phần thiếu nhờ cờ DB
+    /// <c>hub_slip_synced_at</c>). <paramref name="ct"/> là token phiên → dừng phiên thì lượt đẩy tự hủy.
+    /// <see cref="PushSlipsToHubAsync"/> tự nuốt mọi exception nên task nền KHÔNG bao giờ ném unobserved.
+    /// </summary>
+    private void StartHubSlipPushInBackground(Action<string> log, CancellationToken ct)
+    {
+        if (Interlocked.CompareExchange(ref _hubSlipPushing, 1, 0) != 0)
+        {
+            log("Hub phiếu: lượt đẩy trước còn đang chạy — bỏ qua (lượt sync sau tự đẩy phần thiếu).");
+            return;
+        }
+
+        _ = Task.Run(async () =>
+        {
+            try { await PushSlipsToHubAsync(log, ct).ConfigureAwait(false); }
+            finally { Interlocked.Exchange(ref _hubSlipPushing, 0); }
+        }, CancellationToken.None);
+    }
+
+    /// <summary>
+    /// Đẩy FILE PHIẾU của các đơn ĐÃ lên hub nhưng CHƯA đẩy phiếu (<see cref="OrdersRepository.GetForHubSlipPush"/>)
+    /// lên HUB qua hook <see cref="AppServices.PushOrderSlipsToHub"/> (do shell suite rót). Với từng đơn: đọc file
+    /// <c>&lt;invoiceDir&gt;/&lt;SanitizeFileName(sn)&gt;.pdf</c> qua kiểm magic sẵn có (<see cref="TryReadSlipBase64"/>) —
+    /// file THIẾU/hỏng → bỏ qua im lặng (khi file có, lượt sau tự đẩy). Chia lô ≤ <see cref="HubSlipPushBatchSize"/>,
+    /// gọi hook; danh sách <c>order_sn</c> hub báo ĐÃ LƯU → <see cref="OrdersRepository.MarkHubSlipSynced"/> đúng các
+    /// đơn đó; hook trả null (hub lỗi cả lô) → DỪNG các lô sau (lượt sau thử lại). Log 1 dòng khi đẩy được ≥1 phiếu.
+    /// <b>Không bao giờ ném</b>: hủy CHỦ ĐỘNG → thôi; lỗi khác → log. Hook null / không có đơn chờ → return im lặng.
+    /// </summary>
+    private async Task PushSlipsToHubAsync(Action<string> log, CancellationToken ct)
+    {
+        var push = _services.PushOrderSlipsToHub;
+        if (push is null)
+        {
+            return; // hub tắt / app Đơn hàng chạy độc lập → im lặng, không đụng DB
+        }
+
+        try
+        {
+            var pending = _services.Orders.GetForHubSlipPush(_accountId);
+            if (pending.Count == 0)
+            {
+                return;
+            }
+
+            // Đọc file phiếu local hợp lệ (tồn tại + ≤5MB + magic %PDF-) → (order_sn, base64). File thiếu → bỏ qua.
+            var invoiceDir = _services.Settings.GetInvoiceFolder();
+            var ready = new List<(string OrderSn, string FileBase64)>();
+            foreach (var (sn, _) in pending)
+            {
+                var path = Path.Combine(invoiceDir, ShopeeShippingNav.SanitizeFileName(sn) + ".pdf");
+                if (TryReadSlipBase64(path, log, out var b64) && b64 is not null)
+                {
+                    ready.Add((sn, b64));
+                }
+            }
+            if (ready.Count == 0)
+            {
+                return; // chưa có file phiếu local nào hợp lệ → lượt sau (khi tải-lại-phiếu xong) tự đẩy
+            }
+
+            var pushed = 0;
+            for (var i = 0; i < ready.Count; i += HubSlipPushBatchSize)
+            {
+                ct.ThrowIfCancellationRequested();
+
+                var count = Math.Min(HubSlipPushBatchSize, ready.Count - i);
+                var batch = ready.GetRange(i, count);
+
+                var saved = await push(_accountId, batch, ct).ConfigureAwait(false);
+                if (saved is null)
+                {
+                    break; // hub lỗi cả lô (offline / route chưa có) → dừng, lượt sync sau tự đẩy lại
+                }
+                if (saved.Count > 0)
+                {
+                    _services.Orders.MarkHubSlipSynced(_accountId, saved, DateTime.UtcNow);
+                    pushed += saved.Count;
+                }
+            }
+
+            if (pushed > 0)
+            {
+                log($"Hub phiếu: đã đẩy {pushed} file.");
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Hủy chủ động (dừng phiên) — thôi.
+        }
+        catch (Exception ex)
+        {
+            // Lỗi đẩy phiếu KHÔNG phá lượt sync (đã ghi DB) — chỉ log; đơn CHƯA đánh dấu → lượt sau đẩy lại.
+            log("Hub phiếu: lỗi — " + ex.Message);
+        }
+    }
+
     /// <summary>
     /// Kích hoạt báo "đơn MỚI" (Slack/Discord/Telegram) CHẠY NỀN (fire-and-forget) sau khi Sync đã tổng kết —
     /// y pattern <see cref="StartGsheetPushInBackground"/>. URL webhook chưa cấu hình → return im lặng (không
@@ -1365,6 +1475,8 @@ public partial class AccountSession : ObservableObject, IAccountSession
             }
 
             // ===== DỌN đơn KẾT THÚC (Đã giao / Đã hủy) đã hoàn tất mọi nghĩa vụ khỏi app =====
+            // Thư mục phiếu để kiểm "còn phiếu local chưa đẩy hub" (giữ đơn tới khi phiếu lên hub). Đọc 1 lần.
+            var slipDir = _services.Settings.GetInvoiceFolder();
             var deletable = new List<string>();
             var terminalChuaXong = 0;
             foreach (var p in pending)
@@ -1375,7 +1487,10 @@ public partial class AccountSession : ObservableObject, IAccountSession
                 {
                     continue; // đơn trung gian (Chuẩn bị hàng / Đang giao / Chờ xác nhận…) → GIỮ, theo dõi tiếp
                 }
-                if (NenXoaDonKetThuc(p, settled.Contains(p.OrderSn), hubHookActive))
+                // Còn phiếu local HỢP LỆ chưa đẩy hub (hub bật) → GIỮ đơn để lượt sau đẩy phiếu xong mới dọn.
+                var coPhieuLocalChuaDayHub = hubHookActive && !p.DaDayPhieuHub
+                    && SlipFileIsValidPdf(Path.Combine(slipDir, ShopeeShippingNav.SanitizeFileName(p.OrderSn) + ".pdf"));
+                if (NenXoaDonKetThuc(p, settled.Contains(p.OrderSn), hubHookActive, coPhieuLocalChuaDayHub))
                 {
                     deletable.Add(p.OrderSn);
                 }
@@ -1416,17 +1531,22 @@ public partial class AccountSession : ObservableObject, IAccountSession
     /// (xóa sớm là mất đếm); VÀ</item>
     /// <item>KHÔNG (hub bật + chưa đẩy hub) — hub đang nhận đơn mà đơn chưa <c>hub_synced_at</c> thì GIỮ, kẻo
     /// hub mất đơn.</item>
+    /// <item>KHÔNG <paramref name="coPhieuLocalChuaDayHub"/> — còn file phiếu local HỢP LỆ chưa đẩy lên hub (hub
+    /// đang bật) thì GIỮ, đợi phiếu lên hub xong (đẩy xong lượt sau mới dọn).</item>
     /// </list>
     /// Đơn trung gian (chưa kết thúc) hoặc chưa settled → false (GIỮ). Nghi ngờ thì GIỮ — đơn thừa vô hại.
+    /// <paramref name="coPhieuLocalChuaDayHub"/> do caller tính: hub bật + <c>!p.DaDayPhieuHub</c> + file phiếu
+    /// local hợp lệ tồn tại. File local KHÔNG tồn tại → false (không giữ vì phiếu, như cũ).
     /// </summary>
-    internal static bool NenXoaDonKetThuc(GsheetPendingOrder p, bool gsheetSettled, bool hubHookActive)
+    internal static bool NenXoaDonKetThuc(GsheetPendingOrder p, bool gsheetSettled, bool hubHookActive, bool coPhieuLocalChuaDayHub)
     {
         var terminal = ShopeeShippingNav.LaDonHuy(p.Status, p.StatusDescription, p.CancelReason)
             || ShopeeShippingNav.LaDaGiaoDaBan(p.Status);
         return terminal
             && gsheetSettled
             && (!ShopeeShippingNav.LaDaGiaoDaBan(p.Status) || string.IsNullOrWhiteSpace(p.Sku) || p.DaDemDaBan)
-            && (!hubHookActive || p.DaDayHub);
+            && (!hubHookActive || p.DaDayHub)
+            && !coPhieuLocalChuaDayHub;
     }
 
     /// <summary>

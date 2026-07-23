@@ -48,6 +48,16 @@ public class AppServices
     /// </summary>
     public Func<IReadOnlyList<string>, CancellationToken, Task<bool>>? IncrementSoldBySku { get; set; }
 
+    /// <summary>
+    /// HOOK đẩy một LÔ file phiếu PDF (base64) của một tài khoản lên HUB đơn hàng, do shell suite RÓT (module Đơn
+    /// hàng KHÔNG tham chiếu <c>Shopee.Core</c> nên không tự biết hub). Tham số: <c>accountId</c>, lô
+    /// <c>(OrderSn, FileBase64)</c> (≤5), <c>ct</c>. Trả DANH SÁCH <c>order_sn</c> hub ĐÃ LƯU thành công (đơn
+    /// <c>missing</c>/lỗi KHÔNG có mặt) → phiên đánh cờ <c>hub_slip_synced_at</c> đúng các đơn đó; trả <c>null</c> =
+    /// hub lỗi CẢ LÔ (offline / route chưa có) → không mark, lượt sync sau thử lại. Mặc định <c>null</c> = TẮT (app
+    /// Đơn hàng chạy độc lập / hub chưa cấu hình). Phiên gọi CHẠY NỀN sau mỗi lượt Sync (<see cref="AccountSession"/>).
+    /// </summary>
+    public Func<long, IReadOnlyList<(string OrderSn, string FileBase64)>, CancellationToken, Task<IReadOnlyList<string>?>>? PushOrderSlipsToHub { get; set; }
+
     /// <summary>Nhật ký hoạt động của app (panel UI + ghi file cạnh database). Các phiên nạp log qua đây.</summary>
     public ActivityLog Log { get; }
 

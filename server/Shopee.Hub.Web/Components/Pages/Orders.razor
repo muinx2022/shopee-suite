@@ -33,7 +33,7 @@
 <table class="grid sm">
     <thead><tr>
         <th>Mã đơn</th><th>Shop</th><th>Người mua</th><th>Sản phẩm</th><th class="m-hide">SKU</th>
-        <th>Tổng tiền</th><th class="m-hide">Cuối cùng</th><th>Trạng thái</th><th class="m-hide">Vận chuyển</th><th class="m-hide">Sync</th>
+        <th>Tổng tiền</th><th class="m-hide">Cuối cùng</th><th>Trạng thái</th><th class="m-hide">Vận chuyển</th><th class="m-hide">Phiếu</th><th class="m-hide">Sync</th>
     </tr></thead>
     <tbody>
     @foreach (var o in _orders)
@@ -48,12 +48,18 @@
             <td class="m-hide">@(o.FinalAmountText ?? (o.FinalAmount?.ToString("N0") ?? "—"))</td>
             <td><span class="pill @StatusCss(o.Status)">@(o.Status ?? "—")</span></td>
             <td class="m-hide">@(string.IsNullOrEmpty(o.Carrier) ? (o.Channel ?? "—") : o.Carrier)@(string.IsNullOrEmpty(o.TrackingNumber) ? "" : $" · {o.TrackingNumber}")</td>
+            <td class="m-hide">
+                @if (o.SlipAt is not null)
+                {
+                    <a class="linkbtn" href="@($"/slips/{o.ShopId}/{o.OrderSn}")" target="_blank" rel="noopener" title="Mở phiếu PDF (tab mới)">📄 Phiếu</a>
+                }
+            </td>
             <td class="m-hide">@(o.SyncedAt == default ? "" : o.SyncedAt.LocalDateTime.ToString("MM-dd HH:mm"))</td>
         </tr>
     }
     @if (_orders.Count == 0)
     {
-        <tr><td colspan="10" class="empty">Không có đơn nào khớp bộ lọc.</td></tr>
+        <tr><td colspan="11" class="empty">Không có đơn nào khớp bộ lọc.</td></tr>
     }
     </tbody>
 </table>

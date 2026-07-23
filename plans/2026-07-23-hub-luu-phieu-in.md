@@ -1,7 +1,7 @@
 # Plan: Hub lưu file phiếu in (client đẩy PDF lên, xem/tải trên trang Đơn hàng của hub)
 
 - **Ngày:** 2026-07-23
-- **Trạng thái:** đang làm
+- **Trạng thái:** đã thực thi (chờ nghiệm thu)
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-executor`)
 
 ## 1. Bối cảnh & mục tiêu
@@ -79,4 +79,48 @@ Hiện trạng liên quan (đã khảo sát):
 
 ## Báo cáo thực thi
 
-(Opus điền sau khi xong.)
+**Ngày thực thi:** 2026-07-23 · **Người thực thi:** Opus (`opus-executor`)
+
+### Đã hoàn thành (theo từng bước plan)
+
+**Server — `server/Shopee.Hub.Web`:**
+
+1. **Schema `slip_at`** (`Data/HubDatabase.Orders.cs`): thêm cột `slip_at TEXT` vào `EnsureOrdersSchema` (CREATE TABLE cho DB mới); `OrderRecord.SlipAt` (`DateTimeOffset?`); `QueryOrders` SELECT thêm `slip_at` (index 20); `ReadOrderRow` đọc index 20. Migration cho DB CŨ ở `Data/HubDatabase.cs` `MigrateSchema` — `AddColumnIfMissing("orders", "slip_at", "TEXT")`.
+2. **Lưu file + helper** (`Data/HubDatabase.Orders.cs`): thêm `OrderExists(shopId, orderSn)`, `SetOrderSlipAt(shopId, orderSn, at)` (đè, trả số dòng), và `public static string? SanitizeSlipFileName(orderSn)` — CHỈ giữ `[A-Za-z0-9_-]` (ASCII), rỗng → null (chống traversal, dùng CHUNG cho POST và GET). File lưu tại `<DataDir>/slips/<shopId>/<sanitize(orderSn)>.pdf`.
+3. **POST `/api/orders/slip`** (`Api/ClientApiEndpoints.cs`): body `OrdersSlipPushRequest`; resolve shop qua `GetOrCreateShopByUsername` (như push); mỗi slip: sanitize → `OrderExists` sai → `missing`; base64 hỏng / `>5MB` (`MaxSlipBytes`) / không `%PDF-` (`LooksPdf`) → `errors`; hợp lệ → ghi file + `SetOrderSlipAt` → `saved++`. Ghi 1 dòng `AppendLog` như push. Trả `OrdersSlipPushResult(saved, missing, errors)`.
+4. **GET `/slips/{shopId:long}/{orderSn}`** (`Program.cs`, ngay sau `/exports`): `RequireAuthorization("Web")` (cookie admin, y pattern /exports); sanitize orderSn → `Results.File(path, "application/pdf")`; thiếu → 404; sanitize null → 400.
+5. **Cột "Phiếu"** (`Components/Pages/Orders.razor`): thêm `<th class="m-hide">Phiếu</th>` + ô có link `<a class="linkbtn" href="/slips/{ShopId}/{OrderSn}" target="_blank">📄 Phiếu</a>` khi `SlipAt is not null`, ô trống khi chưa có; `colspan` 10 → 11.
+
+**Client — `suite/Shopee.Core` + glue suite:**
+
+6. `Coordination/HubRoutes.cs`: `OrdersSlip = "/api/orders/slip"`. `Coordination/OrderDtos.cs`: `SlipPushItem`, `OrdersSlipPushRequest`, `SlipPushError`, `OrdersSlipPushResult` (dùng CHUNG server + client).
+7. `Coordination/HubClient.cs`: `PushOrderSlipsAsync(req, ct)` qua `_bulkHttp` (mẫu `PushOrdersAsync`).
+8. `suite/Shopee.Suite/Infrastructure/OrdersModuleHost.cs`: `WireHubSlipPush` rót `services.PushOrderSlipsToHub` (mẫu `WireHubPush`); trả danh sách `order_sn` ĐÃ LƯU = lô − `Missing` − `Errors`; hub lỗi cả lô → null.
+
+**Client — module `orders/`:**
+
+9. `Core/Data/Database.cs`: cột `hub_slip_synced_at TEXT` (CREATE TABLE mới + `EnsureColumn` cho DB cũ, mẫu `hub_synced_at`).
+10. `Core/Data/OrdersRepository.cs`: `GetForHubSlipPush(accountId)` (`hub_synced_at IS NOT NULL AND hub_slip_synced_at IS NULL AND tracking_number` khác rỗng → `(OrderSn, TrackingNumber)`); `MarkHubSlipSynced(accountId, sns, at)` (COALESCE giữ mốc đầu); `GetForGsheetPush` SELECT thêm `hub_slip_synced_at`; `GsheetPendingOrder` thêm `bool DaDayPhieuHub`.
+11. `App/Services/AppServices.cs`: hook `PushOrderSlipsToHub` (nullable). `App/Services/AccountSession.cs`: `StartHubSlipPushInBackground` + `PushSlipsToHubAsync` (đọc file qua `TryReadSlipBase64`, chia lô ≤5 = `HubSlipPushBatchSize`, mark theo saved trả về, log "Hub phiếu: đã đẩy x file." khi x>0), gọi NGAY SAU `StartHubPushInBackground` trong `SyncOrdersAsync`.
+12. **Vòng đời** (`AccountSession.cs`): `NenXoaDonKetThuc` thêm tham số `bool coPhieuLocalChuaDayHub` (true → GIỮ); caller trong `PushOrdersToGsheetAsync` tính `= hubHookActive && !p.DaDayPhieuHub && SlipFileIsValidPdf(<slipDir>/<sanitize(sn)>.pdf)`.
+
+**Test:**
+
+13. `AccountSessionCleanupTests` (cập nhật `Make` + 4 tham số + 3 case mới: `CoPhieuLocalChuaDayHub_Giu`, `HubBat_DaDayHub_CoPhieuLocalChuaDayPhieu_Giu`, `HubBat_DaDayHub_DaDayPhieu_Xoa`); `DatabaseMigrationTests` (+1 case migration `hub_slip_synced_at`); `OrdersRepositoryTests` (+4 case: `GetForHubSlipPush`, `MarkHubSlipSynced` x2, `GetForGsheetPush_MapDaDayPhieuHub`). Không có test project cho server → theo plan, bỏ qua test server.
+
+### Kết quả kiểm chứng
+
+- `dotnet build ShopeeSuite.sln` → **Build succeeded, 0 Warning, 0 Error**.
+- `dotnet build server/Shopee.Hub.Web` (ngoài sln) → **Build succeeded, 0 Warning, 0 Error**.
+- `dotnet test orders/XuLyDonShopee.Tests` → **Passed! Failed: 0, Passed: 896, Skipped: 0** (888 cũ + 8 mới).
+
+### Quyết định tự chọn (trong khuôn khổ plan)
+
+- `OrdersSlipPushResult.Saved` để dạng **số đếm** (như plan viết `saved` không ngoặc), client suy ra tập đã lưu = lô − `Missing` − `Errors` (deterministic vì server phân loại mọi item). `SlipPushError` mã lỗi tiếng-Việt-không-dấu ngắn (`base64-loi`, `khong-phai-pdf`, `file-qua-lon`, `ten-don-khong-hop-le`, `ghi-file-loi`).
+- Cột "Phiếu" xếp vào **nhóm phụ `m-hide`** (ẩn trên mobile) theo gợi ý plan.
+- Thứ tự kiểm trong endpoint: sanitize → `OrderExists` (missing) → decode/size/pdf (errors) → ghi file — ưu tiên `missing` như plan liệt kê.
+- Tên file server = `SanitizeSlipFileName(order_sn)` (ASCII `[A-Za-z0-9_-]`); order_sn Shopee là chữ-số nên khớp tên client lưu; POST và GET dùng chung hàm nên luôn ánh xạ đúng.
+
+### Vướng mắc / bỏ dở
+
+Không có. Toàn bộ hạng mục plan đã triển khai, build + test xanh. Chưa commit, chưa deploy (theo yêu cầu — Fable nghiệm thu, commit, deploy sau; thứ tự deploy: hub TRƯỚC, client SAU).

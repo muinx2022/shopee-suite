@@ -27,6 +27,8 @@ public sealed class OrderRecord
     public string? Carrier { get; init; }
     public string? TrackingNumber { get; init; }
     public DateTimeOffset SyncedAt { get; init; }
+    /// <summary>Thời điểm hub NHẬN file phiếu PDF của đơn (POST /api/orders/slip). NULL = chưa có phiếu trên hub.</summary>
+    public DateTimeOffset? SlipAt { get; init; }
 }
 
 /// <summary>Kết quả upsert lô đơn: số thêm mới + số cập nhật + DANH SÁCH đơn VỪA THÊM MỚI (cho notify "đơn
@@ -48,7 +50,7 @@ CREATE TABLE IF NOT EXISTS orders(
   final_amount INTEGER, final_amount_text TEXT,
   payment_method TEXT, status TEXT, status_description TEXT, cancel_reason TEXT,
   channel TEXT, carrier TEXT, tracking_number TEXT,
-  synced_at TEXT);
+  synced_at TEXT, slip_at TEXT);
 CREATE UNIQUE INDEX IF NOT EXISTS ux_orders_shop_sn ON orders(shop_id, order_sn);
 CREATE INDEX IF NOT EXISTS ix_orders_shop ON orders(shop_id);
 CREATE INDEX IF NOT EXISTS ix_orders_status ON orders(status);");
@@ -126,7 +128,7 @@ ON CONFLICT(shop_id,order_sn) DO UPDATE SET
             using var c = _conn.CreateCommand();
             c.CommandText = "SELECT id,shop_id,order_sn,shopee_order_id,buyer_username,item_count,item_summary,sku,"
                 + "total_price,total_price_text,final_amount,final_amount_text,payment_method,status,status_description,"
-                + "cancel_reason,channel,carrier,tracking_number,synced_at FROM orders"
+                + "cancel_reason,channel,carrier,tracking_number,synced_at,slip_at FROM orders"
                 + WhereClause(c, shopId, status, search)
                 + " ORDER BY synced_at DESC, id DESC LIMIT $lim OFFSET $off";
             c.Parameters.AddWithValue("$lim", Math.Clamp(limit, 1, 1000));
@@ -205,5 +207,48 @@ ON CONFLICT(shop_id,order_sn) DO UPDATE SET
         Carrier = rd.IsDBNull(17) ? null : rd.GetString(17),
         TrackingNumber = rd.IsDBNull(18) ? null : rd.GetString(18),
         SyncedAt = D(rd, 19),
+        SlipAt = rd.IsDBNull(20) ? null : D(rd, 20),
     };
+
+    /// <summary>True nếu đã có đơn (shop_id + order_sn) trong bảng — dùng cho POST /api/orders/slip: đơn CHƯA có
+    /// trên hub → báo per-item <c>missing</c> (client thử lại lượt sau, sau khi orders/push xong).</summary>
+    public bool OrderExists(long shopId, string orderSn)
+    {
+        lock (_gate)
+        {
+            using var c = _conn.CreateCommand();
+            c.CommandText = "SELECT 1 FROM orders WHERE shop_id=$s AND order_sn=$sn";
+            c.Parameters.AddWithValue("$s", shopId);
+            c.Parameters.AddWithValue("$sn", orderSn);
+            return c.ExecuteScalar() is not null;
+        }
+    }
+
+    /// <summary>Đặt <c>slip_at</c> cho đơn (shop_id + order_sn) = thời điểm hub nhận phiếu — bản mới thắng (đè
+    /// luôn). Trả về SỐ dòng cập nhật (0 = đơn không tồn tại). Gọi sau khi đã ghi file phiếu ra đĩa.</summary>
+    public int SetOrderSlipAt(long shopId, string orderSn, DateTimeOffset at)
+    {
+        lock (_gate)
+        {
+            using var c = _conn.CreateCommand();
+            c.CommandText = "UPDATE orders SET slip_at=$at WHERE shop_id=$s AND order_sn=$sn";
+            c.Parameters.AddWithValue("$at", Iso(at));
+            c.Parameters.AddWithValue("$s", shopId);
+            c.Parameters.AddWithValue("$sn", orderSn);
+            return c.ExecuteNonQuery();
+        }
+    }
+
+    /// <summary>Chuẩn hoá <c>order_sn</c> thành tên file phiếu AN TOÀN: CHỈ giữ <c>[A-Za-z0-9_-]</c> (ASCII), bỏ
+    /// mọi ký tự khác → chống path-traversal (không <c>/ \ . ..</c> lọt vào tên file). Rỗng sau lọc → <c>null</c>
+    /// (từ chối). Dùng CHUNG cho POST (lưu) và GET /slips (phục vụ) để cùng một order_sn ánh xạ đúng một file.</summary>
+    public static string? SanitizeSlipFileName(string? orderSn)
+    {
+        if (string.IsNullOrWhiteSpace(orderSn)) return null;
+        var sb = new System.Text.StringBuilder(orderSn.Length);
+        foreach (var ch in orderSn.Trim())
+            if (ch is (>= 'A' and <= 'Z') or (>= 'a' and <= 'z') or (>= '0' and <= '9') or '-' or '_')
+                sb.Append(ch);
+        return sb.Length == 0 ? null : sb.ToString();
+    }
 }

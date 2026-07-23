@@ -148,6 +148,52 @@ public static class ClientApiEndpoints
             return Results.Json(new OrdersPushResult(res.Added, res.Updated));
         });
 
+        // POST /api/orders/slip → hub lưu file phiếu PDF cho các đơn ĐÃ có trên hub. Lô ≤5 (client tự chia).
+        // Mỗi phiếu: đơn CHƯA có trên hub → missing (client thử lại lượt sau, sau khi orders/push xong); base64
+        // hỏng / không phải PDF (%PDF-) / >5MB → errors; hợp lệ → ghi <DataDir>/slips/<shopId>/<sn>.pdf (đè, bản
+        // mới thắng) + set slip_at. KHÔNG đụng hợp đồng orders/push.
+        api.MapPost(HubRoutes.OrdersSlip, (OrdersSlipPushRequest? r, HttpRequest req, HubOptions opts) =>
+        {
+            if (r is null || string.IsNullOrWhiteSpace(r.ShopUsername) || r.Slips is null) return Results.BadRequest();
+            var username = r.ShopUsername.Trim();
+            var shopId = db.GetOrCreateShopByUsername(username, r.ShopName);
+
+            var saved = 0;
+            var missing = new List<string>();
+            var errors = new List<SlipPushError>();
+            foreach (var s in r.Slips)
+            {
+                if (s is null || string.IsNullOrWhiteSpace(s.OrderSn)) continue;
+                var sn = s.OrderSn.Trim();
+                var safe = HubDatabase.SanitizeSlipFileName(sn);
+                if (safe is null) { errors.Add(new SlipPushError(sn, "ten-don-khong-hop-le")); continue; }
+
+                // Đơn PHẢI đã có trên hub (orders/push chạy trước) — chưa có → missing, KHÔNG ghi file.
+                if (!db.OrderExists(shopId, sn)) { missing.Add(sn); continue; }
+
+                byte[] bytes;
+                try { bytes = Convert.FromBase64String(s.FileBase64 ?? ""); }
+                catch { errors.Add(new SlipPushError(sn, "base64-loi")); continue; }
+                if (bytes.LongLength > MaxSlipBytes) { errors.Add(new SlipPushError(sn, "file-qua-lon")); continue; }
+                if (!LooksPdf(bytes)) { errors.Add(new SlipPushError(sn, "khong-phai-pdf")); continue; }
+
+                try
+                {
+                    var dir = Path.Combine(opts.DataDir, "slips", shopId.ToString());
+                    Directory.CreateDirectory(dir);
+                    File.WriteAllBytes(Path.Combine(dir, safe + ".pdf"), bytes);
+                    db.SetOrderSlipAt(shopId, sn, DateTimeOffset.UtcNow);
+                    saved++;
+                }
+                catch (Exception ex) { errors.Add(new SlipPushError(sn, "ghi-file-loi: " + ex.Message)); }
+            }
+
+            var mid = req.Headers["X-Machine-Id"].ToString();
+            db.AppendLog(new AppendLogRequest(mid, "", "info",
+                $"orders/slip shop={username} (id {shopId}): {saved} lưu, {missing.Count} thiếu đơn, {errors.Count} lỗi (tổng gửi {r.Slips.Count})"));
+            return Results.Json(new OrdersSlipPushResult(saved, missing, errors));
+        });
+
         // GET /api/orders?shopId=&status=&q=&page=&pageSize= → xem đơn (admin lẫn client).
         api.MapGet(HubRoutes.Orders, (long? shopId, string? status, string? q, int? page, int? pageSize) =>
         {
@@ -167,6 +213,15 @@ public static class ClientApiEndpoints
             return Results.Ok();
         });
     }
+
+    /// <summary>Trần kích thước một file phiếu hub nhận qua POST /api/orders/slip (khớp trần client đọc phiếu).</summary>
+    private const long MaxSlipBytes = 5 * 1024 * 1024;
+
+    /// <summary>True nếu 5 byte đầu là magic <c>%PDF-</c> — nhận đúng PDF thật, tránh lưu HTML/redirect (GET lại
+    /// phiếu có thể ra HTML 200-OK) làm rác.</summary>
+    private static bool LooksPdf(ReadOnlySpan<byte> b)
+        => b.Length >= 5 && b[0] == (byte)'%' && b[1] == (byte)'P'
+           && b[2] == (byte)'D' && b[3] == (byte)'F' && b[4] == (byte)'-';
 
     /// <summary>Fire-and-forget báo "đơn mới" tới TỪNG webhook cấu hình (mỗi dòng 1 URL). TUYỆT ĐỐI không chặn
     /// response push: dựng tin nhắn xong thì <see cref="Task.Run(Action)"/> gửi ở nền, nuốt mọi lỗi vào

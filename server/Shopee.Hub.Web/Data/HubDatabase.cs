@@ -69,6 +69,8 @@ public sealed partial class HubDatabase : IDisposable
         if (AddColumnIfMissing("ledger", "machines_json", "TEXT DEFAULT ''"))
             ExecRaw("UPDATE ledger SET machines_json = '[\"' || last_machine_id || '\"]' " +
                     "WHERE (machines_json IS NULL OR machines_json = '') AND last_machine_id IS NOT NULL AND last_machine_id <> '';");
+        // Thời điểm hub NHẬN file phiếu PDF của đơn (POST /api/orders/slip). NULL = chưa có phiếu trên hub.
+        AddColumnIfMissing("orders", "slip_at", "TEXT");
     }
 
     /// <summary>Thêm cột nếu thiếu; trả true nếu VỪA thêm (để chạy backfill 1 lần).</summary>

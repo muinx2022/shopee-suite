@@ -487,6 +487,78 @@ public class OrdersRepositoryTests
         Assert.Equal(new[] { "SN1" }, repo.GetForHubPush(2).Select(o => o.OrderSn)); // tài khoản 2 vẫn chờ
     }
 
+    // ===================== Đẩy PHIẾU lên Hub: GetForHubSlipPush / MarkHubSlipSynced =====================
+
+    [Fact]
+    public void GetForHubSlipPush_ChiDon_DaLenHub_CoVanDon_ChuaDayPhieu()
+    {
+        using var temp = new TempDatabase();
+        var repo = new OrdersRepository(temp.Open());
+
+        // SN1/SN2: Sample() → CÓ vận đơn; NOTRACK: Make() → KHÔNG vận đơn.
+        repo.UpsertMany(1, new[] { Sample("SN1"), Sample("SN2"), Make("NOTRACK", status: "Chờ lấy hàng") }, DateTime.UtcNow);
+
+        // Chưa đơn nào lên hub → hàng đợi đẩy phiếu RỖNG (điều kiện hub_synced_at IS NOT NULL).
+        Assert.Empty(repo.GetForHubSlipPush(1));
+
+        // SN1 + NOTRACK lên hub; SN2 CHƯA lên hub.
+        repo.MarkHubSynced(1, new[] { "SN1", "NOTRACK" }, DateTime.UtcNow);
+
+        // Chỉ SN1 đủ điều kiện: đã lên hub + có vận đơn + chưa đẩy phiếu. NOTRACK loại (không vận đơn), SN2 loại (chưa lên hub).
+        var pending = repo.GetForHubSlipPush(1);
+        Assert.Equal(new[] { "SN1" }, pending.Select(p => p.OrderSn));
+        Assert.Equal("SPXVN068067521447", pending[0].TrackingNumber);
+    }
+
+    [Fact]
+    public void MarkHubSlipSynced_DanhDau_BienMatKhoiPending()
+    {
+        using var temp = new TempDatabase();
+        var repo = new OrdersRepository(temp.Open());
+        repo.UpsertMany(1, new[] { Sample("SN1"), Sample("SN2") }, DateTime.UtcNow);
+        repo.MarkHubSynced(1, new[] { "SN1", "SN2" }, DateTime.UtcNow); // cả 2 lên hub
+
+        Assert.Equal(new[] { "SN1", "SN2" }, repo.GetForHubSlipPush(1).Select(p => p.OrderSn));
+
+        // Đánh dấu SN1 đã đẩy phiếu → chỉ SN2 còn chờ đẩy phiếu.
+        repo.MarkHubSlipSynced(1, new[] { "SN1" }, DateTime.UtcNow);
+        Assert.Equal(new[] { "SN2" }, repo.GetForHubSlipPush(1).Select(p => p.OrderSn));
+    }
+
+    [Fact]
+    public void MarkHubSlipSynced_HaiLan_GiuMocDau()
+    {
+        using var temp = new TempDatabase();
+        var db = temp.Open();
+        var repo = new OrdersRepository(db);
+        repo.UpsertMany(1, new[] { Sample("SN1") }, DateTime.UtcNow);
+
+        var t1 = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        repo.MarkHubSlipSynced(1, new[] { "SN1" }, t1);
+        var mark1 = ReadString(db, "SN1", "hub_slip_synced_at");
+        Assert.NotNull(mark1);
+
+        // Đánh dấu LẦN 2 với mốc KHÁC → COALESCE giữ mốc lần đầu, KHÔNG đè.
+        var t2 = new DateTime(2026, 2, 2, 0, 0, 0, DateTimeKind.Utc);
+        repo.MarkHubSlipSynced(1, new[] { "SN1" }, t2);
+        Assert.Equal(mark1, ReadString(db, "SN1", "hub_slip_synced_at"));
+    }
+
+    [Fact]
+    public void GetForGsheetPush_MapDaDayPhieuHub_TheoCotNull()
+    {
+        using var temp = new TempDatabase();
+        var repo = new OrdersRepository(temp.Open());
+        repo.UpsertMany(1, new[] { Sample("A_NONE"), Sample("B_SLIP") }, DateTime.UtcNow);
+
+        // B_SLIP: đánh cờ hub_slip_synced_at; A_NONE: không.
+        repo.MarkHubSlipSynced(1, new[] { "B_SLIP" }, DateTime.UtcNow);
+
+        var pending = repo.GetForGsheetPush(1);
+        Assert.False(pending.First(p => p.OrderSn == "A_NONE").DaDayPhieuHub);
+        Assert.True(pending.First(p => p.OrderSn == "B_SLIP").DaDayPhieuHub);
+    }
+
     // ===================== Query / AllStatuses (màn xem — plan 2) =====================
 
     /// <summary>Tạo nhanh một đơn với vài trường phục vụ test lọc.</summary>

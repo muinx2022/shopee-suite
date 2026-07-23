@@ -371,6 +371,31 @@ CREATE TABLE orders (
         Assert.Empty(repo.GetForHubPush(11));
     }
 
+    // ==== Migration cột hub_slip_synced_at cho bảng orders (đẩy FILE PHIẾU lên hub) ====
+
+    [Fact]
+    public void KhoiTao_DbCu_Orders_ThieuHubSlipSyncedAt_DuocThemCot_KhongMatDuLieu()
+    {
+        using var temp = new TempDatabase();
+        CreateOldOrdersSchemaWithRow(temp.Path, accountId: 21, orderSn: "SNSLIP");
+
+        // Trước migration: schema orders cũ chưa có cột hub_slip_synced_at.
+        Assert.False(HasColumn(temp.Path, "orders", "hub_slip_synced_at"));
+
+        // Khởi tạo Database mới trỏ cùng file → Initialize() chạy migration ALTER TABLE.
+        _ = new Database(temp.Path);
+
+        // Sau migration: đã có cột; đơn cũ CÒN NGUYÊN.
+        Assert.True(HasColumn(temp.Path, "orders", "hub_slip_synced_at"));
+
+        var repo = new OrdersRepository(new Database(temp.Path));
+        var row = Assert.Single(repo.Query(accountId: 21));
+        Assert.Equal("SNSLIP", row.OrderSn);
+
+        // Đơn cũ chưa lên hub + không vận đơn → KHÔNG lọt hàng đợi đẩy phiếu; GetForHubSlipPush chỉ cần KHÔNG ném.
+        Assert.Empty(repo.GetForHubSlipPush(21));
+    }
+
     // ==== Migration cột sold_counted_at cho bảng orders (+1 "Đã bán" theo SKU) ====
 
     [Fact]

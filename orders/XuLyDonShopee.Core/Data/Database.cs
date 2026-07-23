@@ -110,6 +110,7 @@ CREATE TABLE IF NOT EXISTS orders (
     gsheet_da_huy      INTEGER,
     gsheet_da_co_van_don INTEGER,
     hub_synced_at      TEXT,
+    hub_slip_synced_at TEXT,
     sold_counted_at    TEXT,
     total_price        INTEGER,
     total_price_text   TEXT,
@@ -160,6 +161,11 @@ CREATE TABLE IF NOT EXISTS orders (
         // hub_synced_at = thời điểm đơn ĐÃ được hub nhận OK (NULL = chưa đẩy, còn trong hàng đợi ngầm → lượt
         // sync sau tự đẩy bù khi hub sống lại). Thêm cho DB CŨ.
         EnsureColumn(conn, "orders", "hub_synced_at", "TEXT");
+
+        // Cờ chống đẩy TRÙNG FILE PHIẾU lên HUB (module Đơn hàng đẩy phiếu PDF sau khi đơn đã lên hub):
+        // hub_slip_synced_at = thời điểm phiếu của đơn ĐÃ được hub lưu OK (NULL = chưa đẩy phiếu → lượt sync sau
+        // tự đẩy khi có file phiếu local hợp lệ). Thêm cho DB CŨ.
+        EnsureColumn(conn, "orders", "hub_slip_synced_at", "TEXT");
 
         // Cờ chống ĐẾM TRÙNG "Đã bán" theo SKU trên kho hub: sold_counted_at = thời điểm đơn ĐÃ được tính +1
         // (hoặc grandfather = đơn đã-giao-sẵn được đánh dấu KHÔNG +1). NULL = chưa xử lý đếm. Đơn CHUYỂN từ

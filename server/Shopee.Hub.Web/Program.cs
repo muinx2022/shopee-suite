@@ -208,6 +208,16 @@ app.MapGet("/exports/{name}", (string name, HubOptions opts) =>
         : Results.NotFound();
 }).RequireAuthorization("Web");
 
+// ── Phục vụ file phiếu PDF cho ADMIN qua trình duyệt (khoá cookie, y pattern /exports) ──
+app.MapGet("/slips/{shopId:long}/{orderSn}", (long shopId, string orderSn, HubOptions opts) =>
+{
+    // Sanitize order_sn thành tên file an toàn (chỉ [A-Za-z0-9_-]) — chống traversal; khớp tên POST đã lưu.
+    var safe = HubDatabase.SanitizeSlipFileName(orderSn);
+    if (safe is null) return Results.BadRequest();
+    var path = Path.Combine(opts.DataDir, "slips", shopId.ToString(), safe + ".pdf");
+    return File.Exists(path) ? Results.File(path, "application/pdf") : Results.NotFound();
+}).RequireAuthorization("Web");
+
 // ── Chẩn đoán Chromium/Playwright (admin) — verify hạ tầng login BigSeller trên VM ──
 app.MapGet("/admin/chromium-test", async (BigSellerLoginService svc) =>
     Results.Text(await svc.DiagnoseAsync())).RequireAuthorization("Web");

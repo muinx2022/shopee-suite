@@ -85,6 +85,8 @@ public static class HubRoutes
     public const string Shops = "/api/shops";
     public const string Orders = "/api/orders";
     public const string OrdersPush = "/api/orders/push";
+    /// <summary>Client đẩy file phiếu PDF (base64, lô ≤5) của các đơn ĐÃ lên hub → hub lưu đĩa + đặt slip_at.</summary>
+    public const string OrdersSlip = "/api/orders/slip";
 
     // ── File-sync ──
     public const string Manifest = "/manifest";

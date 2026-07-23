@@ -38,6 +38,7 @@ public static class OrdersModuleHost
             Services = new AppServices();
             WireHubPush(Services);
             WireIncrementSoldBySku(Services);
+            WireHubSlipPush(Services);
             return new MainViewModel(Services);
         }
         catch (Exception ex)
@@ -122,6 +123,67 @@ public static class OrdersModuleHost
                 // Gồm cả timeout tunnel (TaskCanceledException khi ct CHƯA hủy) → coi như hub lỗi, thử lại lượt sau.
                 Trace.WriteLine("[OrdersModuleHost] +1 Đã bán theo SKU lên hub lỗi: " + ex.Message);
                 return false;
+            }
+        };
+    }
+
+    /// <summary>
+    /// RÓT hook đẩy FILE PHIẾU lên hub vào bộ dịch vụ module Đơn hàng (mẫu <see cref="WireHubPush"/>). Hook được
+    /// phiên gọi CHẠY NỀN sau <c>StartHubPushInBackground</c>: hub chưa kết nối → trả null (không mark, thử lại lượt
+    /// sau); ngược lại map lô <c>(OrderSn, FileBase64)</c> sang DTO hub rồi POST. TRẢ VỀ danh sách <c>order_sn</c>
+    /// hub ĐÃ LƯU = (lô gửi) − <c>missing</c> − <c>errors</c> (client mark đúng đơn). null = hub lỗi cả lô (hub cũ
+    /// 404 / offline / timeout) → phiên KHÔNG mark, lượt sau đẩy lại. Nuốt mọi lỗi (log <c>Trace</c>) trả null —
+    /// trừ hủy CHỦ ĐỘNG (ct) cho xuyên để phiên xử như dừng.
+    /// </summary>
+    private static void WireHubSlipPush(AppServices services)
+    {
+        services.PushOrderSlipsToHub = async (accountId, slips, ct) =>
+        {
+            try
+            {
+                // Hub chưa kết nối (chưa cấu hình / offline) → KHÔNG mark, để lượt sync sau đẩy lại.
+                if (!CoordinationRuntime.Active || CoordinationRuntime.Client is null)
+                {
+                    return null;
+                }
+
+                var acc = services.Accounts.GetById(accountId);
+                var shopUsername = ResolveShopUsername(acc, accountId);
+
+                var req = new OrdersSlipPushRequest
+                {
+                    ShopUsername = shopUsername,
+                    ShopName = shopUsername,
+                    Slips = slips.Select(s => new SlipPushItem { OrderSn = s.OrderSn, FileBase64 = s.FileBase64 }).ToList(),
+                };
+
+                var res = await CoordinationRuntime.Client.PushOrderSlipsAsync(req, ct).ConfigureAwait(false);
+                if (res is null)
+                {
+                    return null; // hub lỗi cả lô → không mark, lượt sau thử lại
+                }
+
+                // ĐÃ LƯU = lô gửi − missing − errors. Đơn missing (chưa lên hub) / lỗi (base64/PDF) KHÔNG mark.
+                var notSaved = new HashSet<string>(StringComparer.Ordinal);
+                if (res.Missing is not null)
+                {
+                    foreach (var m in res.Missing) notSaved.Add(m);
+                }
+                if (res.Errors is not null)
+                {
+                    foreach (var e in res.Errors) notSaved.Add(e.OrderSn);
+                }
+                return slips.Where(s => !notSaved.Contains(s.OrderSn)).Select(s => s.OrderSn).ToList();
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw; // hủy CHỦ ĐỘNG (dừng phiên) → cho xuyên để AccountSession xử như hủy
+            }
+            catch (Exception ex)
+            {
+                // Gồm cả hub cũ 404 (EnsureSuccessStatusCode ném) + timeout tunnel → coi như hub lỗi, thử lại lượt sau.
+                Trace.WriteLine("[OrdersModuleHost] Đẩy phiếu lên hub lỗi: " + ex.Message);
+                return null;
             }
         };
     }

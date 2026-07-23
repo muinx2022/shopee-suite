@@ -45,3 +45,35 @@ public sealed class OrdersPushRequest
 
 /// <summary>Kết quả upsert đơn: số đơn vừa thêm mới + số đơn cập nhật.</summary>
 public sealed record OrdersPushResult(int Added, int Updated);
+
+/// <summary>Một file phiếu PDF của một đơn client đẩy lên hub (POST /api/orders/slip). Class + property settable
+/// để JSON bind khoan dung.</summary>
+public sealed class SlipPushItem
+{
+    /// <summary>Mã đơn hàng — phải KHỚP đơn đã tồn tại trên hub (shop_id+order_sn).</summary>
+    public string OrderSn { get; set; } = string.Empty;
+    /// <summary>Nội dung file phiếu PDF mã hoá base64 (hub kiểm magic %PDF- + trần 5MB trước khi lưu).</summary>
+    public string FileBase64 { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Body POST /api/orders/slip: client đẩy MỘT LÔ (≤5) file phiếu của MỘT shop lên hub. Hub tự đăng ký/khớp
+/// shop theo <see cref="ShopUsername"/> (như /api/orders/push). Mỗi phiếu: đơn phải đã có trên hub, nếu chưa →
+/// hub báo per-item <c>missing</c>; base64/PDF/kích thước sai → per-item <c>errors</c>.
+/// </summary>
+public sealed class OrdersSlipPushRequest
+{
+    /// <summary>Tài khoản đăng nhập shop (username/email/SĐT) — KHÓA khớp shop trên hub (như /api/orders/push).</summary>
+    public string ShopUsername { get; set; } = string.Empty;
+    /// <summary>Tên hiển thị shop (tùy chọn).</summary>
+    public string? ShopName { get; set; }
+    public List<SlipPushItem> Slips { get; set; } = [];
+}
+
+/// <summary>Một phiếu bị lỗi khi lưu (base64 hỏng / không phải PDF / quá lớn / tên đơn không hợp lệ).</summary>
+public sealed record SlipPushError(string OrderSn, string Error);
+
+/// <summary>Kết quả lưu lô phiếu trên hub: <see cref="Saved"/> = số phiếu đã lưu; <see cref="Missing"/> = mã đơn
+/// CHƯA có trên hub (client thử lại lượt sau); <see cref="Errors"/> = phiếu lỗi. Client suy ra tập ĐÃ LƯU =
+/// (lô gửi) − Missing − Errors để đánh dấu đúng đơn.</summary>
+public sealed record OrdersSlipPushResult(int Saved, List<string> Missing, List<SlipPushError> Errors);

@@ -295,6 +295,16 @@ public sealed class HubClient
         return await r.Content.ReadFromJsonAsync<OrdersPushResult>(ct);
     }
 
+    // ── Phiếu in: client đẩy LÔ file phiếu PDF (base64, ≤5) của các đơn ĐÃ lên hub → hub lưu đĩa + set slip_at.
+    // Dùng _bulkHttp (timeout dài): lô ≤5 PDF ~1,5MB qua tunnel. Hub CŨ (chưa có route) → 404 →
+    // EnsureSuccessStatusCode ném → hook OrdersModuleHost bắt trả null → không mark, thử lại lượt sau (an toàn).
+    public async Task<OrdersSlipPushResult?> PushOrderSlipsAsync(OrdersSlipPushRequest req, CancellationToken ct = default)
+    {
+        var r = await _bulkHttp.PostAsJsonAsync(HubRoutes.OrdersSlip, req, ct);
+        r.EnsureSuccessStatusCode();
+        return await r.Content.ReadFromJsonAsync<OrdersSlipPushResult>(ct);
+    }
+
     // ── File-sync ──
     public async Task<List<FileManifestEntry>> ManifestAsync(CancellationToken ct = default)
         => await _http.GetFromJsonAsync<List<FileManifestEntry>>(HubRoutes.Manifest, ct) ?? [];

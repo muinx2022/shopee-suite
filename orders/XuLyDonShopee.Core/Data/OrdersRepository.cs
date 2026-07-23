@@ -17,6 +17,8 @@ namespace XuLyDonShopee.Core.Data;
 /// <see cref="DaDemDaBan"/> = đã đếm "Đã bán" (<c>sold_counted_at IS NOT NULL</c>) và
 /// <see cref="DaDayHub"/> = đã đẩy lên hub đơn hàng (<c>hub_synced_at IS NOT NULL</c>) — dùng để QUYẾT ĐỊNH có
 /// được DỌN đơn kết thúc khỏi DB chưa (giữ lại đến khi mọi nghĩa vụ hoàn tất — xem <c>AccountSession.NenXoaDonKetThuc</c>).
+/// <see cref="DaDayPhieuHub"/> = đã đẩy FILE PHIẾU lên hub (<c>hub_slip_synced_at IS NOT NULL</c>) — dùng để GIỮ
+/// đơn kết thúc khi còn phiếu local hợp lệ CHƯA đẩy hub (hub đang bật).
 /// </summary>
 public sealed record GsheetPendingOrder(
     string OrderSn,
@@ -31,7 +33,8 @@ public sealed record GsheetPendingOrder(
     long? GsheetDaHuy,
     long? GsheetDaCoVanDon,
     bool DaDemDaBan,
-    bool DaDayHub);
+    bool DaDayHub,
+    bool DaDayPhieuHub);
 
 /// <summary>
 /// Kết quả phát hiện đơn CHUYỂN sang "đã giao" giữa 2 lần sync (<see cref="OrdersRepository.DetectNewlyDelivered"/>),
@@ -274,7 +277,7 @@ public class OrdersRepository
         cmd.CommandText = @"SELECT order_sn, tracking_number, sku, total_price,
        status, status_description, cancel_reason,
        gsheet_synced_at, gsheet_file_url, gsheet_da_huy, gsheet_da_co_van_don,
-       sold_counted_at, hub_synced_at
+       sold_counted_at, hub_synced_at, hub_slip_synced_at
     FROM orders
     WHERE account_id = $a
     ORDER BY id;";
@@ -297,7 +300,8 @@ public class OrdersRepository
                 GsheetDaHuy: reader.IsDBNull(9) ? null : reader.GetInt64(9),
                 GsheetDaCoVanDon: reader.IsDBNull(10) ? null : reader.GetInt64(10),
                 DaDemDaBan: !reader.IsDBNull(11),
-                DaDayHub: !reader.IsDBNull(12)));
+                DaDayHub: !reader.IsDBNull(12),
+                DaDayPhieuHub: !reader.IsDBNull(13)));
         }
         return list;
     }
@@ -396,6 +400,67 @@ public class OrdersRepository
             cmd.Transaction = tx;
             cmd.CommandText = @"UPDATE orders SET
     hub_synced_at = COALESCE(hub_synced_at, $at)
+    WHERE account_id = $a AND order_sn = $sn;";
+            cmd.Parameters.AddWithValue("$at", atStr);
+            cmd.Parameters.AddWithValue("$a", accountId);
+            cmd.Parameters.AddWithValue("$sn", sn);
+            cmd.ExecuteNonQuery();
+        }
+        tx.Commit();
+    }
+
+    /// <summary>
+    /// Các đơn ỨNG VIÊN đẩy FILE PHIẾU lên HUB: đơn ĐÃ lên hub (<c>hub_synced_at IS NOT NULL</c>) NHƯNG CHƯA đẩy
+    /// phiếu (<c>hub_slip_synced_at IS NULL</c>) VÀ đã có mã vận đơn (<c>tracking_number</c> khác rỗng → phiếu đáng
+    /// lẽ đã tạo). Trả <c>(OrderSn, TrackingNumber)</c>; việc CÓ file phiếu local hợp lệ hay không do App kiểm sau
+    /// (đọc đĩa + magic %PDF-). Sắp theo id tăng (đơn cũ trước). NULL cột → còn trong hàng đợi → lượt sync sau đẩy bù.
+    /// </summary>
+    public IReadOnlyList<(string OrderSn, string TrackingNumber)> GetForHubSlipPush(long accountId)
+    {
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = @"SELECT order_sn, tracking_number
+    FROM orders
+    WHERE account_id = $a
+      AND hub_synced_at IS NOT NULL
+      AND hub_slip_synced_at IS NULL
+      AND tracking_number IS NOT NULL AND TRIM(tracking_number) <> ''
+    ORDER BY id;";
+        cmd.Parameters.AddWithValue("$a", accountId);
+
+        var list = new List<(string, string)>();
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            if (reader.IsDBNull(0) || reader.IsDBNull(1))
+            {
+                continue;
+            }
+            list.Add((reader.GetString(0), reader.GetString(1)));
+        }
+        return list;
+    }
+
+    /// <summary>
+    /// Đánh dấu các đơn ĐÃ được hub lưu FILE PHIẾU OK (chống đẩy trùng lượt sync sau). <c>hub_slip_synced_at</c>
+    /// dùng <c>COALESCE(cũ, $at)</c> — GIỮ thời điểm đẩy LẦN ĐẦU, không đè. Khóa theo <c>(account_id, order_sn)</c>;
+    /// đơn không có mã (rỗng) bị bỏ qua. Cập nhật nhiều đơn trong một transaction (mẫu <see cref="MarkHubSynced"/>).
+    /// </summary>
+    public void MarkHubSlipSynced(long accountId, IEnumerable<string> orderSns, DateTime atUtc)
+    {
+        var atStr = DbSerialization.FormatDate(atUtc);
+        using var conn = _db.OpenConnection();
+        using var tx = conn.BeginTransaction();
+        foreach (var sn in orderSns)
+        {
+            if (string.IsNullOrWhiteSpace(sn))
+            {
+                continue;
+            }
+            using var cmd = conn.CreateCommand();
+            cmd.Transaction = tx;
+            cmd.CommandText = @"UPDATE orders SET
+    hub_slip_synced_at = COALESCE(hub_slip_synced_at, $at)
     WHERE account_id = $a AND order_sn = $sn;";
             cmd.Parameters.AddWithValue("$at", atStr);
             cmd.Parameters.AddWithValue("$a", accountId);
