@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "Shopee Orders Bridge",
+  "version": "0.1",
+  "description": "Cau noi C#<->Seller Centre qua WebSocket + trusted input (chrome.debugger) de ne anti-bot. GD1: readShopList / openShopDetail / readToShip.",
+  "permissions": ["debugger", "tabs", "scripting", "storage"],
+  "host_permissions": ["https://banhang.shopee.vn/*"],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    {
+      "matches": ["https://banhang.shopee.vn/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

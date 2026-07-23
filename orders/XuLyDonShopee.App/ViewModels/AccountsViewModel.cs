@@ -805,17 +805,28 @@ public partial class AccountsViewModel : ViewModelBase
         UpdateSelectedSessionStatus();
     }
 
-    /// <summary>Tiến trình trình duyệt POC "mở sạch" (không CDP) đang mở cho tài khoản đang chọn; null = không có.</summary>
+    /// <summary>Tiến trình trình duyệt SẠCH (không CDP) đang mở cho tài khoản đang chọn; null = không có.</summary>
     private System.Diagnostics.Process? _pocProcess;
 
+    /// <summary>Phiên cầu nối GĐ1 đang chạy (WebSocket ↔ extension) cho tài khoản đang chọn; null = không có.</summary>
+    private OrdersBridgeSession? _bridgeSession;
+
+    /// <summary>Nguồn huỷ cho lát cắt cầu nối đang chạy (■ Dừng → cancel).</summary>
+    private System.Threading.CancellationTokenSource? _bridgeCts;
+
+    /// <summary>Đang chạy lát cắt cầu nối → chặn bấm lại (tránh mở trùng phiên/khoá hồ sơ chung).</summary>
+    private bool _bridgeRunning;
+
     /// <summary>
-    /// "🧪 Mở sạch (POC)" — mở trình duyệt SẠCH (KHÔNG Playwright/CDP, KHÔNG remote-debugging-port, KHÔNG proxy)
-    /// với ĐÚNG hồ sơ persistent của tài khoản đang xem (cùng thư mục phiên production dùng → đã đăng nhập nếu có
-    /// phiên) → /portal/shop. Để kiểm chứng GĐ0: bấm nút TRUSTED của extension xem "Chi tiết" có dính captcha không.
+    /// "🧪 Chạy thử (bridge)" — GĐ1 CẦU NỐI extension↔C#: mở trình duyệt SẠCH (KHÔNG Playwright/CDP, KHÔNG
+    /// remote-debugging-port, KHÔNG proxy) với ĐÚNG hồ sơ persistent của tài khoản đang xem → /portal/shop kèm
+    /// hash <c>#_od_ws=&lt;port&gt;</c>; extension nối WebSocket rồi thực thi lát cắt: đọc danh sách shop → mở
+    /// "Chi tiết" shop đầu bằng trusted click (kỳ vọng KHÔNG captcha) → đọc số "Chờ Lấy Hàng". Kết quả đổ ra
+    /// panel log của tài khoản. User phải ĐÃ đăng nhập tay tới /portal/shop trong hồ sơ này.
     /// Gate như CanRun (đang xem 1 acc đã lưu). Phiên production của acc đang chạy → từ chối (đụng khoá hồ sơ chung).
     /// </summary>
     [RelayCommand]
-    private void MoSachPoc()
+    private async Task ChayThuBridge()
     {
         if (_editingId is not long accountId)
         {
@@ -824,18 +835,26 @@ public partial class AccountsViewModel : ViewModelBase
 
         var email = _services.Accounts.GetById(accountId)?.Email ?? EditEmail;
 
-        // Đang có phiên production (Playwright) trên hồ sơ này → không mở POC (Chromium chỉ cho 1 tiến trình/hồ sơ).
+        // Lát cắt cũ còn chạy → không mở chồng (một phiên/lần test ở GĐ1).
+        if (_bridgeRunning)
+        {
+            _services.Log.Append(email, "Đang chạy thử (bridge) rồi — đợi xong hoặc bấm ■ Dừng.");
+            return;
+        }
+
+        // Đang có phiên production (Playwright) trên hồ sơ này → không mở (Chromium chỉ cho 1 tiến trình/hồ sơ).
         if (_services.Sessions.IsRunning(accountId))
         {
-            const string msg = "Đang có phiên chạy — bấm ■ Dừng trước khi Mở sạch (POC).";
+            const string msg = "Đang có phiên chạy — bấm ■ Dừng trước khi Chạy thử (bridge).";
             _services.Log.Append(email, msg);
             BusyStatus = msg;
             return;
         }
 
+        _bridgeRunning = true;
         try
         {
-            TryKillPoc(); // đóng cửa sổ POC cũ (nếu còn) trước khi mở mới — tránh khoá hồ sơ
+            TryKillPoc(); // đóng cửa sổ/phiên cũ (nếu còn) trước khi mở mới — tránh khoá hồ sơ
 
             // Công thức hồ sơ Y HỆT AccountSession: baseDir = thư mục Database.Path; kind theo browserChoice ở Cài đặt.
             var baseDir = System.IO.Path.GetDirectoryName(_services.Database.Path) ?? ".";
@@ -843,21 +862,75 @@ public partial class AccountsViewModel : ViewModelBase
             var browserKind = BrowserLocator.ResolveBrowserKind(browserChoice);
             var userDataDir = BrowserProfilePaths.ForAccount(baseDir, accountId, browserKind);
 
-            _pocProcess = PocCleanLauncher.Open(userDataDir, browserChoice, ShopeeLoginService.ShopListUrl);
+            _bridgeCts = new System.Threading.CancellationTokenSource();
+            var session = new OrdersBridgeSession(userDataDir, browserChoice, m => _services.Log.Append(email, m));
+            _bridgeSession = session;
+
             _services.Log.Append(email,
-                "Mở sạch (POC): trình duyệt KHÔNG CDP + hồ sơ của tài khoản này → /portal/shop. Dùng nút TRUSTED của extension để test 'Chi tiết'.");
-            BusyStatus = "Đã mở POC (sạch, không CDP) cho tài khoản này.";
+                "Chạy thử (bridge): mở trình duyệt sạch + nối cầu extension. Đảm bảo đã đăng nhập tay tới /portal/shop.");
+            BusyStatus = "Đang chạy thử (bridge)...";
+
+            OrdersBridgeSliceResult result;
+            try
+            {
+                result = await session.RunSliceAsync(_bridgeCts.Token);
+            }
+            finally
+            {
+                _pocProcess = session.Process; // để TryKillPoc / ■ Dừng đóng được cửa sổ
+            }
+
+            if (result.Captcha)
+            {
+                var m = "Chạy thử (bridge): PHÁT HIỆN captcha/verify khi mở Chi tiết — kiến trúc CHƯA né được, cần soi lại.";
+                _services.Log.Append(email, m);
+                BusyStatus = m;
+            }
+            else if (result.Error is not null)
+            {
+                _services.Log.Append(email, "Chạy thử (bridge) chưa xong: " + result.Error);
+                BusyStatus = "Chạy thử (bridge): " + result.Error;
+            }
+            else
+            {
+                var line =
+                    $"Chạy thử (bridge) OK: {result.Shops.Count} shop; shop đầu id={result.FirstShopId}; " +
+                    $"Chờ Lấy Hàng={result.ToShipCount?.ToString() ?? "?"} — KHÔNG captcha.";
+                _services.Log.Append(email, line);
+                BusyStatus = line;
+            }
+        }
+        catch (System.OperationCanceledException)
+        {
+            _services.Log.Append(email, "Đã hủy chạy thử (bridge).");
+            BusyStatus = "Đã hủy chạy thử (bridge).";
         }
         catch (System.Exception ex)
         {
-            _services.Log.Append(email, "Lỗi mở POC: " + ex.Message);
-            BusyStatus = "Lỗi mở POC: " + ex.Message;
+            _services.Log.Append(email, "Lỗi chạy thử (bridge): " + ex.Message);
+            BusyStatus = "Lỗi chạy thử (bridge): " + ex.Message;
+        }
+        finally
+        {
+            _bridgeRunning = false;
+            try { _bridgeSession?.Dispose(); } catch { /* bỏ qua */ }
+            _bridgeSession = null;
+            try { _bridgeCts?.Dispose(); } catch { /* bỏ qua */ }
+            _bridgeCts = null;
         }
     }
 
-    /// <summary>Kill tiến trình trình duyệt POC đang mở (nếu có) — giải phóng khoá hồ sơ dùng chung với phiên production.</summary>
+    /// <summary>Kill tiến trình trình duyệt sạch + huỷ lát cắt cầu nối đang mở (nếu có) — giải phóng khoá hồ sơ
+    /// dùng chung với phiên production.</summary>
     private void TryKillPoc()
     {
+        try { _bridgeCts?.Cancel(); } catch { /* bỏ qua */ }
+
+        // Trong lúc lát cắt đang chạy, tiến trình nằm ở _bridgeSession.Process (_pocProcess chỉ set sau khi xong).
+        var bridgeProc = _bridgeSession?.Process;
+        try { if (bridgeProc is { HasExited: false }) bridgeProc.Kill(entireProcessTree: true); }
+        catch { /* bỏ qua */ }
+
         try { if (_pocProcess is { HasExited: false }) _pocProcess.Kill(entireProcessTree: true); }
         catch { /* bỏ qua */ }
         _pocProcess = null;

@@ -128,13 +128,25 @@ public static class BraveLaunchArgs
     /// exe (bản cài) rồi đi ngược lên vài cấp tìm ở gốc repo (khi chạy từ bin dev). Không thấy → <c>null</c>
     /// (không nạp extension). Trả về đường dẫn tuyệt đối nếu thư mục tồn tại (có manifest.json).
     /// </summary>
-    public static string? ResolveOrdersExtension()
+    public static string? ResolveOrdersExtension() => ResolveExtensionByName("shopee-orders-test");
+
+    /// <summary>
+    /// Phân giải thư mục extension "shopee-orders" (bản GĐ1 — cầu nối WebSocket + trusted click). Cùng cách
+    /// tìm như <see cref="ResolveOrdersExtension"/> (đi từ thư mục exe ngược lên tìm <c>extensions/shopee-orders</c>
+    /// có manifest.json). Không thấy → <c>null</c>. Tách riêng khỏi bản POC <c>shopee-orders-test</c> để không đụng
+    /// bản tham chiếu.
+    /// </summary>
+    public static string? ResolveOrdersBridgeExtension() => ResolveExtensionByName("shopee-orders");
+
+    /// <summary>Đi từ thư mục exe ngược lên các cấp cha, trả về đường dẫn tuyệt đối thư mục
+    /// <c>extensions/&lt;name&gt;</c> đầu tiên có <c>manifest.json</c>; không thấy → <c>null</c>.</summary>
+    private static string? ResolveExtensionByName(string name)
     {
         try
         {
             for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
             {
-                var cand = Path.Combine(dir.FullName, "extensions", "shopee-orders-test");
+                var cand = Path.Combine(dir.FullName, "extensions", name);
                 if (File.Exists(Path.Combine(cand, "manifest.json")))
                 {
                     return cand;

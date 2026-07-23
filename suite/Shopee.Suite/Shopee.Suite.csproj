@@ -44,13 +44,16 @@
   <ItemGroup>
     <BraveExtFiles Include="$(RepoRoot)\extensions\shopee-scrape\**\*" />
     <EdgeExtFiles Include="$(RepoRoot)\extensions\shopee-search\**\*" />
+    <OrdersExtFiles Include="$(RepoRoot)\extensions\shopee-orders\**\*" />
   </ItemGroup>
   <Target Name="BundleSuiteAssets" AfterTargets="Build">
     <Copy SourceFiles="@(BraveExtFiles)" DestinationFiles="@(BraveExtFiles->'$(OutDir)extensions\shopee-scrape\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
     <Copy SourceFiles="@(EdgeExtFiles)" DestinationFiles="@(EdgeExtFiles->'$(OutDir)extensions\shopee-search\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(OrdersExtFiles)" DestinationFiles="@(OrdersExtFiles->'$(OutDir)extensions\shopee-orders\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
   </Target>
   <Target Name="BundleSuiteAssetsPublish" AfterTargets="Publish">
     <Copy SourceFiles="@(BraveExtFiles)" DestinationFiles="@(BraveExtFiles->'$(PublishDir)extensions\shopee-scrape\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
     <Copy SourceFiles="@(EdgeExtFiles)" DestinationFiles="@(EdgeExtFiles->'$(PublishDir)extensions\shopee-search\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(OrdersExtFiles)" DestinationFiles="@(OrdersExtFiles->'$(PublishDir)extensions\shopee-orders\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
   </Target>
 </Project>

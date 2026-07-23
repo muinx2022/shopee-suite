@@ -328,11 +328,11 @@
                                     Command="{Binding StopCommand}"
                                     IsEnabled="{Binding CanStopSeller}"
                                     ToolTip.Tip="Dừng — Dừng toàn bộ việc đang làm của tài khoản này và đóng trang bán hàng (cửa sổ Brave)" />
-                            <!-- Mở sạch (POC GĐ0): mở trình duyệt KHÔNG CDP với hồ sơ acc này để kiểm chứng né captcha ở nút "Chi tiết". -->
-                            <Button Classes="secondary formIcon" Content="🧪 Mở sạch" Margin="8,4,0,4"
-                                    Command="{Binding MoSachPocCommand}"
+                            <!-- Chạy thử (bridge) GĐ1: mở trình duyệt SẠCH (không CDP) + nối cầu WebSocket↔extension, chạy lát cắt readShopList→openShopDetail→readToShip để kiểm chứng né captcha. -->
+                            <Button Classes="secondary formIcon" Content="🧪 Chạy thử (bridge)" Margin="8,4,0,4"
+                                    Command="{Binding ChayThuBridgeCommand}"
                                     IsEnabled="{Binding CanRun}"
-                                    ToolTip.Tip="Mở sạch (POC) — mở trình duyệt KHÔNG điều khiển qua CDP/Playwright với đúng hồ sơ đã đăng nhập của tài khoản này (vào /portal/shop). Dùng nút TRUSTED của extension để test bấm 'Chi tiết' có dính captcha không. Dừng phiên đang chạy trước khi bấm." />
+                                    ToolTip.Tip="Chạy thử (bridge) — mở trình duyệt KHÔNG điều khiển qua CDP/Playwright với đúng hồ sơ đã đăng nhập của tài khoản này, extension nối WebSocket rồi tự đọc danh sách shop → mở 'Chi tiết' shop đầu bằng trusted click → đọc số 'Chờ Lấy Hàng'. Kết quả đổ ra panel log. Hãy đăng nhập tay tới /portal/shop và dừng phiên đang chạy trước khi bấm." />
                         </WrapPanel>
 
                         <!-- Thông báo trạng thái (Mở trang bán hàng / Xử lý đơn / theo dõi đơn) — ngay dưới hàng nút. -->
