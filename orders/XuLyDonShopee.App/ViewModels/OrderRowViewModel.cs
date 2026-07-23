@@ -1,6 +1,7 @@
 using System;
 using System.Globalization;
 using System.IO;
+using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.Input;
 using XuLyDonShopee.App.Services;
 using XuLyDonShopee.Core.Models;
@@ -29,12 +30,19 @@ public sealed partial class OrderRowViewModel
     /// <summary>Callback báo trạng thái ra màn (OrdersViewModel gán vào StatusMessage). Null → im lặng.</summary>
     private readonly Action<string>? _notify;
 
-    public OrderRowViewModel(OrderRow row, string accountLabel, string invoiceDir, Action<string>? notify = null)
+    /// <summary>Callback tải lại phiếu cho dòng này (OrdersViewModel nối tới phiên của tài khoản). Null → nút
+    /// "Tải phiếu" không làm gì (dòng dựng cho CSV/in hàng loạt không cần).</summary>
+    private readonly Func<OrderRowViewModel, Task>? _redownloadSlip;
+
+    public OrderRowViewModel(
+        OrderRow row, string accountLabel, string invoiceDir,
+        Action<string>? notify = null, Func<OrderRowViewModel, Task>? redownloadSlip = null)
     {
         _row = row;
         AccountLabel = accountLabel;
         _invoiceDir = invoiceDir;
         _notify = notify;
+        _redownloadSlip = redownloadSlip;
     }
 
     /// <summary>Nhãn tài khoản (email) — do ViewModel map từ account_id.</summary>
@@ -126,6 +134,35 @@ public sealed partial class OrderRowViewModel
         {
             _notify?.Invoke($"Không in được phiếu {SlipPath} (máy chưa có app PDF mặc định hỗ trợ lệnh in?).");
         }
+    }
+
+    /// <summary>
+    /// Đã có file PDF phiếu HỢP LỆ (tồn tại + magic <c>%PDF-</c>) chưa — tính lúc nạp dòng (đọc 5 byte đầu qua
+    /// <see cref="AccountSession.SlipFileIsValidPdf"/>). Dùng để hiện/ẩn nút "Tải phiếu": thiếu file → hiện.
+    /// </summary>
+    public bool HasSlipFile => AccountSession.SlipFileIsValidPdf(SlipPath);
+
+    /// <summary>
+    /// Hiện nút "Tải phiếu" khi đơn ĐÃ có mã vận đơn (arrange xong, phiếu đáng lẽ phải có) NHƯNG file phiếu
+    /// đang thiếu/không hợp lệ (<see cref="HasSlipFile"/> = false). Đơn chưa xử lý (chưa có vận đơn) → không hiện.
+    /// </summary>
+    public bool ShowRedownloadSlip => !string.IsNullOrWhiteSpace(Tracking) && !HasSlipFile;
+
+    /// <summary>
+    /// Nút "Tải phiếu": nhờ OrdersViewModel (đã nối tới phiên của tài khoản) tải lại file phiếu cho đơn này.
+    /// Phiên không chạy / bận → OrdersViewModel báo hướng dẫn qua StatusMessage (xem callback). Chạy NỀN (async
+    /// command) — không treo UI. Callback null (dòng CSV/in hàng loạt) → báo nhẹ, không làm gì.
+    /// </summary>
+    [RelayCommand]
+    private async Task RedownloadSlipAsync()
+    {
+        if (_redownloadSlip is null)
+        {
+            _notify?.Invoke("Chức năng tải phiếu chưa sẵn sàng ở ngữ cảnh này.");
+            return;
+        }
+
+        await _redownloadSlip(this);
     }
 
     /// <summary>Chuẩn hóa trạng thái để so khớp từ khóa: bỏ hoa/thường + gộp khoảng trắng thừa (giống

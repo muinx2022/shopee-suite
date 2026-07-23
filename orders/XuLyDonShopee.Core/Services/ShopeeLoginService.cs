@@ -225,6 +225,29 @@ public interface ILoginSession : IAsyncDisposable
         Action<string>? log = null,
         IReadOnlySet<string>? ordersWithFinalAmount = null,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// <b>Tải LẠI file phiếu giao cho các đơn ĐÃ arrange nhưng THIẾU file PDF:</b> về trang danh sách đơn,
+    /// chuyển tab <b>"Tất cả"</b>, duyệt các trang (chốt chặn số trang như sync); với từng mã trong
+    /// <paramref name="orderSns"/> còn thiếu, định vị card theo mã (như bước lấy "Số tiền cuối cùng"), bấm
+    /// <b>"In phiếu giao"</b> (ưu tiên nút ngay trong card của đơn đã arrange; fallback mở CHI TIẾT đơn rồi
+    /// bấm) → bắt TAB PHIẾU (awbprint) → lưu PDF (<see cref="SaveSlipAsync"/>) về <paramref name="downloadDir"/>
+    /// với tên <c>&lt;mã đơn&gt;.pdf</c> → đóng tab phiếu. KHÔNG arrange lại (đơn đã arrange — chỉ IN LẠI).
+    /// <para>
+    /// <b>Best-effort per-đơn:</b> 1 đơn lỗi (không thấy card / nút in không bấm được / lưu fail) → log rõ +
+    /// sang đơn khác, KHÔNG ném. Sau khi lưu, KIỂM lại file (tồn tại + magic <c>%PDF-</c>) rồi mới đếm thành
+    /// công. <see cref="OperationCanceledException"/> ném XUYÊN để caller dừng sạch. Trả về SỐ phiếu lưu lại
+    /// thành công.
+    /// </para>
+    /// </summary>
+    /// <param name="orderSns">Danh sách mã đơn cần tải lại phiếu (thường ≤ 5/lượt do App chốt chặn).</param>
+    /// <param name="downloadDir">Thư mục lưu file phiếu (được tạo nếu chưa có).</param>
+    /// <param name="log">Callback ghi log từng bước (null → bỏ qua).</param>
+    Task<int> RedownloadSlipsAsync(
+        IReadOnlyList<string> orderSns,
+        string downloadDir,
+        Action<string>? log = null,
+        CancellationToken ct = default);
 }
 
 /// <summary>
@@ -3969,6 +3992,342 @@ public class ShopeeLoginService
                 L("Sync đơn gặp lỗi bất ngờ: " + ex.Message + " — trả về những đơn đã gom được.");
                 return new SyncOrdersResult(collected, pages, reachedCap);
             }
+        }
+
+        // ===== Tải LẠI phiếu giao cho đơn ĐÃ arrange nhưng thiếu file PDF (best-effort, kiểu người) =====
+
+        public async Task<int> RedownloadSlipsAsync(
+            IReadOnlyList<string> orderSns, string downloadDir, Action<string>? log = null, CancellationToken ct = default)
+        {
+            void L(string m) => log?.Invoke(m);
+
+            var saved = 0;
+            if (orderSns is null || orderSns.Count == 0)
+            {
+                return 0;
+            }
+
+            // Các mã còn cần tìm (đơn tìm thấy card sẽ bị GỠ dù lưu thành công hay không — đã thử, best-effort).
+            var remaining = new HashSet<string>(orderSns.Where(s => !string.IsNullOrWhiteSpace(s)), StringComparer.Ordinal);
+            if (remaining.Count == 0)
+            {
+                return 0;
+            }
+
+            try
+            {
+                var page = _context.Pages.Count > 0 ? _context.Pages[0] : null;
+                if (page is null)
+                {
+                    L("Không có trang trình duyệt nào đang mở — bỏ tải lại phiếu.");
+                    return 0;
+                }
+
+                var rng = new Random();
+                var vp = page.ViewportSize;
+                double vw = vp is not null ? vp.Width : 1280;
+                double vh = vp is not null ? vp.Height : 720;
+                double mx = rng.NextDouble() * vw;
+                double my = rng.NextDouble() * vh;
+
+                await Task.Delay(rng.Next(800, 2500), ct).ConfigureAwait(false);
+                L($"Tải lại phiếu cho {remaining.Count} đơn thiếu file...");
+
+                // 1) Về danh sách đơn (/portal/sale/order) — reuse cách của SyncAllOrdersAsync/ProcessFirstOrderAsync.
+                if (ShopeeShippingNav.IsAllOrdersHref(page.Url))
+                {
+                    try
+                    {
+                        await page.GotoAsync(AllOrdersUrl, new PageGotoOptions
+                        {
+                            WaitUntil = WaitUntilState.DOMContentLoaded,
+                            Timeout = 30000
+                        }).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException) { throw; }
+                    catch { /* nuốt lỗi điều hướng — kiểm page.Url ngay dưới */ }
+                }
+                else
+                {
+                    (mx, my) = await GoToAllOrdersAsync(page, mx, my, rng, ct).ConfigureAwait(false);
+                }
+                if (!ShopeeShippingNav.IsAllOrdersHref(page.Url))
+                {
+                    L("Không mở được trang danh sách đơn — bỏ tải lại phiếu.");
+                    return saved;
+                }
+
+                // 1b) Tab "Tất cả" (đơn Chuẩn bị hàng chắc chắn nằm trong Tất cả).
+                (mx, my) = await EnsureOrderListTabAsync(
+                    page, "l1-tab-all", ShopeeShippingNav.IsAllTabText, "Tất cả", mx, my, rng, L, ct).ConfigureAwait(false);
+                await Task.Delay(rng.Next(800, 2500), ct).ConfigureAwait(false);
+
+                // 2) VÒNG QUÉT TRANG (reuse chốt chặn + phân trang phòng thủ của sync).
+                var pages = 0;
+                while (remaining.Count > 0)
+                {
+                    ct.ThrowIfCancellationRequested();
+
+                    await WaitOrderListReadyAsync(page, 15000, ct).ConfigureAwait(false);
+                    pages++;
+
+                    // Duyệt các mã còn thiếu — snapshot remaining (RedownloadOneSlipAsync có thể gỡ khỏi remaining).
+                    foreach (var sn in remaining.ToList())
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        bool located, ok;
+                        (mx, my, located, ok) = await RedownloadOneSlipAsync(page, sn, downloadDir, mx, my, rng, L, ct)
+                            .ConfigureAwait(false);
+                        if (located)
+                        {
+                            remaining.Remove(sn); // đã thử đơn này (dù lưu được hay không) — không tìm lại ở trang khác
+                            if (ok)
+                            {
+                                saved++;
+                            }
+                        }
+                    }
+
+                    if (remaining.Count == 0)
+                    {
+                        break; // đã xử lý hết mã cần tải
+                    }
+
+                    // Sang trang sau (reuse signature + FindNextPageButton + WaitListChanged + cap).
+                    var signatureBefore = await ReadListSignatureAsync(page, ct).ConfigureAwait(false);
+                    var nextBtn = await FindNextPageButtonAsync(page, ct).ConfigureAwait(false);
+                    if (nextBtn is null)
+                    {
+                        L($"Không còn trang sau — dừng tải lại phiếu (còn {remaining.Count} đơn chưa thấy card).");
+                        break;
+                    }
+                    if (pages >= MaxSyncPages)
+                    {
+                        L($"Đã quét {pages} trang — chạm chốt chặn {MaxSyncPages} trang, dừng tải lại phiếu (còn {remaining.Count} đơn chưa thấy card).");
+                        break;
+                    }
+
+                    bool clicked;
+                    (mx, my, clicked) = await TryHumanClickVisibleAsync(page, nextBtn, mx, my, rng, ct).ConfigureAwait(false);
+                    if (!clicked)
+                    {
+                        L("Không bấm được nút trang sau — dừng tải lại phiếu.");
+                        break;
+                    }
+                    var changed = await WaitListChangedAsync(page, signatureBefore, 10000, ct).ConfigureAwait(false);
+                    if (!changed)
+                    {
+                        L("Danh sách không đổi sau khi bấm trang sau — coi như hết trang, dừng tải lại phiếu.");
+                        break;
+                    }
+                    await Task.Delay(rng.Next(1500, 3500), ct).ConfigureAwait(false);
+                }
+
+                if (remaining.Count > 0)
+                {
+                    L($"Còn {remaining.Count} đơn không tìm thấy card (đơn quá cũ / ngoài phạm vi quét) — bỏ qua.");
+                }
+                L($"Tải lại phiếu xong: lưu được {saved}/{orderSns.Count} phiếu.");
+                return saved;
+            }
+            catch (OperationCanceledException)
+            {
+                throw; // dừng chủ động → ném để caller dừng sạch
+            }
+            catch (Exception ex)
+            {
+                L("Tải lại phiếu gặp lỗi bất ngờ: " + ex.Message);
+                return saved;
+            }
+        }
+
+        /// <summary>
+        /// Tải lại phiếu cho MỘT đơn (mã <paramref name="orderSn"/>) trên TRANG DANH SÁCH hiện tại: định vị card
+        /// (<see cref="FindOrderCardBySnAsync"/>); không thấy → trả <c>Located=false</c> (caller tìm ở trang khác).
+        /// Thấy → thử bấm "In phiếu giao" (Path 1: nút ngay trong card đơn đã arrange; Path 2: mở CHI TIẾT đơn
+        /// rồi tìm nút) → bắt tab phiếu (awbprint) → <see cref="SaveSlipAsync"/> → kiểm file (<see cref="LooksPdf"/>).
+        /// Best-effort: mọi lỗi (trừ hủy) chỉ log; trả <c>(mx, my, Located, Saved)</c>.
+        /// </summary>
+        private async Task<(double X, double Y, bool Located, bool Saved)> RedownloadOneSlipAsync(
+            IPage page, string orderSn, string downloadDir, double mx, double my, Random rng, Action<string> L, CancellationToken ct)
+        {
+            IElementHandle? card;
+            try { card = await FindOrderCardBySnAsync(page, orderSn, ct).ConfigureAwait(false); }
+            catch (OperationCanceledException) { throw; }
+            catch { card = null; }
+            if (card is null)
+            {
+                return (mx, my, false, false); // không có trên trang này — chưa "located"
+            }
+
+            L($"Tải lại phiếu đơn {orderSn}: định vị card OK, tìm nút In phiếu giao...");
+
+            IPage? detailTab = null;
+            IPage? slipTab = null;
+            try
+            {
+                var before = _browser.Contexts.SelectMany(c => c.Pages).ToList();
+
+                // Path 1: nút "In phiếu giao" NGAY trong card (đơn đã arrange thường có sẵn nút này).
+                var printBtn = await FindPrintButtonInCardAsync(card).ConfigureAwait(false);
+                if (printBtn is not null)
+                {
+                    bool clicked;
+                    (mx, my, clicked) = await TryHumanClickVisibleAsync(page, printBtn, mx, my, rng, ct).ConfigureAwait(false);
+                    if (clicked)
+                    {
+                        L($"Đã bấm In phiếu giao (trong card) đơn {orderSn}, chờ tab phiếu...");
+                        slipTab = await WaitNewPageAsync(before, 15, ct).ConfigureAwait(false);
+                    }
+                }
+
+                // Path 2 (fallback): mở CHI TIẾT đơn (tab mới) rồi tìm nút "In phiếu giao" trên tab đó.
+                if (slipTab is null)
+                {
+                    var detailBtn = await FindViewDetailButtonInCardAsync(card).ConfigureAwait(false);
+                    if (detailBtn is not null)
+                    {
+                        bool clicked;
+                        (mx, my, clicked) = await TryHumanClickVisibleAsync(page, detailBtn, mx, my, rng, ct).ConfigureAwait(false);
+                        if (clicked)
+                        {
+                            detailTab = await WaitNewPageAsync(before, 8, ct).ConfigureAwait(false);
+                        }
+                    }
+
+                    if (detailTab is not null)
+                    {
+                        try
+                        {
+                            await detailTab.WaitForLoadStateAsync(LoadState.DOMContentLoaded,
+                                new PageWaitForLoadStateOptions { Timeout = 15000 }).ConfigureAwait(false);
+                        }
+                        catch (OperationCanceledException) { throw; }
+                        catch { /* chi tiết có thể vẫn đang tải — vẫn thử tìm nút */ }
+
+                        var before2 = _browser.Contexts.SelectMany(c => c.Pages).ToList();
+                        var btn2 = await WaitPrintButtonClickableAsync(
+                            detailTab, ShopeeShippingNav.IsPrintSlipButtonText, 10000, ct).ConfigureAwait(false);
+                        if (btn2 is not null)
+                        {
+                            var dvp = detailTab.ViewportSize;
+                            double dmx = rng.NextDouble() * (dvp is not null ? dvp.Width : 1280);
+                            double dmy = rng.NextDouble() * (dvp is not null ? dvp.Height : 720);
+                            await HumanMoveAndClickAsync(detailTab, btn2, dmx, dmy, rng, ct).ConfigureAwait(false);
+                            L($"Đã bấm In phiếu giao (chi tiết) đơn {orderSn}, chờ tab phiếu...");
+                            slipTab = await WaitNewPageAsync(before2, 15, ct).ConfigureAwait(false);
+                        }
+                        else
+                        {
+                            L($"Không thấy nút In phiếu giao ở chi tiết đơn {orderSn}.");
+                        }
+                    }
+                }
+
+                var savedOk = false;
+                if (slipTab is not null)
+                {
+                    // Chờ tab điều hướng tới awbprint (có thể khởi đầu about:blank) — reuse như ProcessFirstOrderAsync.
+                    var urlDeadline = DateTime.UtcNow.AddSeconds(10);
+                    while (!SafeUrlHasAwbprint(slipTab) && DateTime.UtcNow < urlDeadline)
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        await Task.Delay(300, ct).ConfigureAwait(false);
+                    }
+
+                    // Lưu phiếu (SaveSlipAsync tự đóng tab phiếu). KIỂM lại file sau khi lưu.
+                    await SaveSlipAsync(slipTab, downloadDir, orderSn, L, ct).ConfigureAwait(false);
+                    savedOk = SlipFileLooksReal(downloadDir, orderSn);
+                    L(savedOk
+                        ? $"Tải lại phiếu đơn {orderSn}: OK (file PDF hợp lệ)."
+                        : $"Tải lại phiếu đơn {orderSn}: CHƯA có file PDF hợp lệ — kiểm tra tay.");
+                }
+                else
+                {
+                    L($"Không mở được tab phiếu cho đơn {orderSn} — bỏ qua.");
+                }
+
+                return (mx, my, true, savedOk);
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                L($"Lỗi khi tải lại phiếu đơn {orderSn}: {ex.Message}");
+                return (mx, my, true, false); // đã located — không tìm lại
+            }
+            finally
+            {
+                // Đóng tab chi tiết (nếu Path 2 mở) — tuyệt đối không đụng tab danh sách gốc.
+                if (detailTab is not null)
+                {
+                    try { await detailTab.CloseAsync().ConfigureAwait(false); } catch { /* bỏ qua */ }
+                }
+                // Best-effort đóng modal "Thông Tin Chi Tiết" nếu vô tình mở (no-op nếu không có).
+                await CloseDetailModalAsync(page, rng, L, ct).ConfigureAwait(false);
+                await Task.Delay(rng.Next(400, 1200), ct).ConfigureAwait(false);
+            }
+        }
+
+        /// <summary>Tìm nút "In phiếu giao" NGAY TRONG card đơn (đơn đã arrange): ưu tiên
+        /// <c>button[data-testid='print-button']</c>, fallback button khớp <see cref="ShopeeShippingNav.IsPrintSlipButtonText"/>;
+        /// chỉ nhận nút có bounding box. Không thấy → <c>null</c>. Reuse selector của luồng In phiếu (không tự chế mới).</summary>
+        private static async Task<IElementHandle?> FindPrintButtonInCardAsync(IElementHandle card)
+        {
+            try
+            {
+                var byId = await card.QuerySelectorAsync("button[data-testid='print-button']").ConfigureAwait(false);
+                if (byId is not null && await HasBoundingBoxAsync(byId).ConfigureAwait(false))
+                {
+                    return byId;
+                }
+
+                var byText = await FindButtonByTextAsync(card, ShopeeShippingNav.IsPrintSlipButtonText).ConfigureAwait(false);
+                if (byText is not null && await HasBoundingBoxAsync(byText).ConfigureAwait(false))
+                {
+                    return byText;
+                }
+            }
+            catch { /* card DOM lạ — bỏ qua */ }
+            return null;
+        }
+
+        /// <summary>Poll ≤ <paramref name="seconds"/>s một trang MỚI (Page nào không nằm trong <paramref name="before"/>) —
+        /// tab phiếu / tab chi tiết mở MUỘN. Quét MỌI context (tab có thể mở ở cửa sổ khác). Không thấy → <c>null</c>.</summary>
+        private async Task<IPage?> WaitNewPageAsync(IReadOnlyCollection<IPage> before, int seconds, CancellationToken ct)
+        {
+            var deadline = DateTime.UtcNow.AddSeconds(seconds);
+            IPage? found = null;
+            while (found is null && DateTime.UtcNow < deadline)
+            {
+                ct.ThrowIfCancellationRequested();
+                try { found = _browser.Contexts.SelectMany(c => c.Pages).FirstOrDefault(p => !before.Contains(p)); }
+                catch { /* context ngắt — thử vòng sau */ }
+                if (found is null)
+                {
+                    await Task.Delay(300, ct).ConfigureAwait(false);
+                }
+            }
+            return found;
+        }
+
+        /// <summary>True nếu file phiếu <c>&lt;downloadDir&gt;/&lt;SanitizeFileName(orderSn)&gt;.pdf</c> tồn tại và
+        /// 4 byte đầu là magic <c>%PDF</c> (<see cref="LooksPdf"/>). Đọc TỐI ĐA 8 byte đầu — dùng đếm thành công
+        /// sau <see cref="SaveSlipAsync"/>. Mọi lỗi IO → <c>false</c>.</summary>
+        private static bool SlipFileLooksReal(string downloadDir, string orderSn)
+        {
+            try
+            {
+                var path = Path.Combine(downloadDir, ShopeeShippingNav.SanitizeFileName(orderSn) + ".pdf");
+                if (!File.Exists(path))
+                {
+                    return false;
+                }
+                using var fs = File.OpenRead(path);
+                var head = new byte[8];
+                var n = fs.Read(head, 0, head.Length);
+                return LooksPdf(n >= 8 ? head : head[..Math.Max(0, n)]);
+            }
+            catch { return false; }
         }
 
         // JS CHỈ-ĐỌC quét MỌI card đơn của trang hiện tại theo bảng selector do người dùng cung cấp. Bọc từng

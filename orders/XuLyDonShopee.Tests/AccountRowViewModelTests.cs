@@ -49,6 +49,8 @@ public class AccountRowViewModelTests
 
         public Task<bool> SyncOrdersAsync() => Task.FromResult(false);
 
+        public Task<bool> RedownloadSlipAsync(string orderSn) => Task.FromResult(false);
+
         public Task<bool> SyncFullAsync() => Task.FromResult(false);
     }
 

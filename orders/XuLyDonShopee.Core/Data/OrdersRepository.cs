@@ -201,6 +201,34 @@ public class OrdersRepository
     }
 
     /// <summary>
+    /// MỌI đơn của một tài khoản kèm <c>status</c> + <c>tracking_number</c> — để App lọc "đơn thiếu phiếu"
+    /// (Chuẩn bị hàng + có vận đơn + file phiếu mất) rồi tải lại. Trả tuple gọn (KHÔNG cần cả hàng như
+    /// <see cref="GetForGsheetPush"/>). Sắp theo id tăng (đơn cũ trước). Đơn không có mã đã không tồn tại trong DB.
+    /// </summary>
+    public IReadOnlyList<(string OrderSn, string? Status, string? TrackingNumber)> GetOrdersForSlipCheck(long accountId)
+    {
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT order_sn, status, tracking_number FROM orders WHERE account_id = $a ORDER BY id;";
+        cmd.Parameters.AddWithValue("$a", accountId);
+
+        var list = new List<(string, string?, string?)>();
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            if (reader.IsDBNull(0))
+            {
+                continue;
+            }
+            list.Add((
+                reader.GetString(0),
+                reader.IsDBNull(1) ? null : reader.GetString(1),
+                reader.IsDBNull(2) ? null : reader.GetString(2)));
+        }
+        return list;
+    }
+
+    /// <summary>
     /// XÓA các đơn (theo <c>(account_id, order_sn)</c>) khỏi bảng <c>orders</c> trong MỘT transaction. Dùng để
     /// DỌN đơn KẾT THÚC (Đã giao / Đã hủy) khỏi app SAU khi mọi nghĩa vụ hoàn tất (GSheet đã ghi + "Đã bán" đã
     /// đếm + hub đã nhận). Trả về SỐ dòng thực xóa. Danh sách rỗng/null → trả 0 và KHÔNG mở connection. Đơn không

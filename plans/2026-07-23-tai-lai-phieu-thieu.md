@@ -82,4 +82,58 @@ File phiếu PDF chỉ được lưu MỘT lần trong bước Xử lý đơn (b
 
 ## Báo cáo thực thi
 
-(Opus điền sau khi xong.)
+**Trạng thái: hoàn thành (chờ nghiệm thu). Build 0 lỗi/0 cảnh báo; 888 test xanh (873 cũ + 15 mới).**
+
+### Core — `orders/XuLyDonShopee.Core/Services/ShopeeLoginService.cs`
+- Thêm `ILoginSession.RedownloadSlipsAsync(orderSns, downloadDir, log, ct)` → trả SỐ phiếu lưu thành công.
+- Cài đặt `RedownloadSlipsAsync`: về danh sách đơn (reuse `GotoAsync`/`GoToAllOrdersAsync`) → tab "Tất cả"
+  (`EnsureOrderListTabAsync` + `l1-tab-all`) → vòng quét trang (reuse `WaitOrderListReadyAsync`,
+  `ReadListSignatureAsync`, `FindNextPageButtonAsync`, `WaitListChangedAsync`, chốt chặn `MaxSyncPages`).
+  Mỗi mã còn thiếu gọi `RedownloadOneSlipAsync`; tìm thấy card → gỡ khỏi remaining (dù lưu được hay không).
+- `RedownloadOneSlipAsync` (private): định vị card (`FindOrderCardBySnAsync`, reuse của FetchFinalAmounts) →
+  **Path 1** bấm "In phiếu giao" ngay trong card (`FindPrintButtonInCardAsync` reuse testid `print-button` +
+  `IsPrintSlipButtonText`) → **Path 2 fallback** mở chi tiết đơn (`FindViewDetailButtonInCardAsync`) rồi tìm nút
+  bằng `WaitPrintButtonClickableAsync` → bắt tab phiếu (`WaitNewPageAsync` + `SafeUrlHasAwbprint`) →
+  `SaveSlipAsync` (tự đóng tab phiếu) → kiểm magic `%PDF-` (`SlipFileLooksReal` reuse `LooksPdf`) → đóng tab chi
+  tiết + `CloseDetailModalAsync`. Best-effort per-đơn, log rõ, OCE ném xuyên.
+- **KHÔNG sửa `ProcessFirstOrderAsync`** (diff luồng Xử lý đơn = 0) — chỉ reuse các hàm leaf.
+- Helper mới: `FindPrintButtonInCardAsync`, `WaitNewPageAsync`, `SlipFileLooksReal`.
+
+### App — `orders/XuLyDonShopee.App/Services/AccountSession.cs`
+- Thêm PURE `internal static ThieuPhieu(status, trackingNumber, pdfPath)` + `internal static SlipFileIsValidPdf(path)`
+  (đọc 5 byte đầu, kiểm magic) + `BytesLookPdf`. Refactor nhẹ `TryReadSlipBase64` dùng lại `BytesLookPdf` (giữ
+  nguyên hành vi + trần dung lượng).
+- `SyncOrdersAsync`: sau upsert + `RaiseOrdersChanged` (trong `_navigating`), tính đơn thiếu phiếu từ DB
+  (`GetOrdersForSlipCheck` + `ThieuPhieu`), chốt ≤5 đơn/lượt (log "còn X đơn chờ lượt sau"), gọi
+  `RedownloadSlipsAsync`, log "Tải lại phiếu: xong x/y", lưu ≥1 → `RaiseOrdersChanged`. Best-effort, OCE ném xuyên.
+- Thêm public `RedownloadSlipAsync(orderSn)` (bọc `_navigating`, gọi `RedownloadSlipsAsync` 1 phần tử, cập nhật
+  StatusText/log, xong `RaiseOrdersChanged`).
+
+### App — khác
+- `orders/XuLyDonShopee.App/Services/IAccountSession.cs`: thêm `RedownloadSlipAsync(string)`.
+- `orders/XuLyDonShopee.Core/Data/OrdersRepository.cs`: thêm `GetOrdersForSlipCheck(accountId)` (order_sn +
+  status + tracking_number).
+- `orders/XuLyDonShopee.App/ViewModels/OrderRowViewModel.cs`: thêm `HasSlipFile`, `ShowRedownloadSlip`,
+  `RedownloadSlipCommand` + callback `Func<OrderRowViewModel,Task>` (ctor optional param).
+- `orders/XuLyDonShopee.App/ViewModels/OrdersViewModel.cs`: `Apply` truyền callback `RedownloadSlipForRowAsync`
+  (chỉ cho dòng lưới); resolver tìm phiên qua `_services.Sessions.Get`, phiên không chạy → hướng dẫn, chạy nền.
+- `orders/XuLyDonShopee.App/Views/OrdersView.axaml`: cột "Phiếu" thành StackPanel dọc, thêm link "Tải phiếu"
+  (`ShowRedownloadSlip` + `RedownloadSlipCommand`), style `linky` sẵn có; cột 90→96.
+- Cập nhật 2 stub test IAccountSession (`AccountSessionManagerTests`, `AccountRowViewModelTests`).
+
+### Test mới — `orders/XuLyDonShopee.Tests/SlipRedownloadTests.cs` (15 test)
+- `SlipFileIsValidPdf` (pdf thật / rác / thiếu file); `ThieuPhieu` ma trận đầy đủ; `GetOrdersForSlipCheck`.
+
+### Kiểm chứng
+- `dotnet build ShopeeSuite.sln`: **Build succeeded, 0 Warning, 0 Error**.
+- `dotnet test orders/XuLyDonShopee.Tests`: **Passed 888 / Failed 0**.
+
+### Quyết định tự chọn / lưu ý cho nghiệm thu
+- **Cơ chế mở "In phiếu giao" cho đơn đã arrange**: plan nói "mở modal chi tiết (đúng cách Xử lý đơn mở)" nhưng
+  trong code hiện có, modal "Thông Tin Chi Tiết" CHỈ xuất hiện qua luồng arrange (không có helper mở lại cho đơn
+  đã arrange). Đã hiện thực best-effort 2 đường: (1) nút "In phiếu giao" ngay trong card; (2) mở tab chi tiết
+  (`Xem chi tiết`) rồi tìm nút. Cả hai reuse selector sẵn có, có log chẩn đoán khi không thấy nút. **DOM CHƯA
+  soi live** — cần chạy thật để xác nhận đường nào đúng (rủi ro đã ghi ở mục 5 của plan).
+- Nguồn dữ liệu auto: dùng `GetOrdersForSlipCheck` (query DB) thay vì `toUpsert` — bền hơn (retry cả đơn không
+  đổi ở lượt trước), khớp nhu cầu nút bấm tay.
+- `HasSlipFile` đọc 5 byte/dòng lúc nạp lưới (chấp nhận IO nhẹ theo yêu cầu plan).

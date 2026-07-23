@@ -245,7 +245,8 @@ public partial class OrdersViewModel : ViewModelBase
         {
             var label = labels.TryGetValue(row.AccountId, out var email) ? email : $"(TK #{row.AccountId})";
             // notify: link "In phiếu" của dòng báo trạng thái (thiếu file / lỗi mở) ra StatusMessage của màn.
-            Rows.Add(new OrderRowViewModel(row, label, invoiceDir, msg => StatusMessage = msg));
+            // redownloadSlip: nút "Tải phiếu" nhờ phiên của tài khoản tải lại file phiếu thiếu (nếu phiên chạy).
+            Rows.Add(new OrderRowViewModel(row, label, invoiceDir, msg => StatusMessage = msg, RedownloadSlipForRowAsync));
         }
 
         OnPropertyChanged(nameof(TotalText));
@@ -381,6 +382,39 @@ public partial class OrdersViewModel : ViewModelBase
 
         _services.Orders.UpdateStatus(row.AccountId, row.OrderSn, newStatus);
         Reload(); // đón trạng thái mới vào lưới (giữ nguyên bộ lọc/trang hiện tại)
+    }
+
+    /// <summary>
+    /// Nút "Tải phiếu" trên một dòng đơn thiếu file: tìm phiên ĐANG chạy của tài khoản (qua
+    /// <see cref="AccountSessionManager"/>) rồi nhờ nó tải lại phiếu. Phiên KHÔNG chạy → hướng dẫn mở phiên;
+    /// phiên đang bận điều hướng → <see cref="AccountSession.RedownloadSlipAsync"/> trả false (báo thử lại sau).
+    /// Chạy NỀN (async) — không block UI. Lưu được → phiên tự phát OrdersChanged nên lưới tự nạp lại (cột Phiếu
+    /// đổi). Mọi lỗi → báo qua <see cref="StatusMessage"/>, KHÔNG crash.
+    /// </summary>
+    private async Task RedownloadSlipForRowAsync(OrderRowViewModel row)
+    {
+        var session = _services.Sessions.Get(row.AccountId);
+        if (session is null || session.State != SessionState.Running)
+        {
+            StatusMessage = "Mở phiên tài khoản này trước (màn Tài khoản) rồi bấm Tải phiếu.";
+            return;
+        }
+
+        StatusMessage = $"Đang tải lại phiếu đơn {row.OrderSn}...";
+        bool ok;
+        try
+        {
+            ok = await session.RedownloadSlipAsync(row.OrderSn);
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Tải phiếu đơn {row.OrderSn} lỗi: {ex.Message}";
+            return;
+        }
+
+        StatusMessage = ok
+            ? $"Đã tải lại phiếu đơn {row.OrderSn}."
+            : $"Chưa tải được phiếu đơn {row.OrderSn} (tài khoản đang bận thao tác khác hoặc không thấy đơn — thử lại sau, xem nhật ký).";
     }
 
     /// <summary>Nút "Làm mới": nạp lại toàn bộ từ DB (đón tài khoản/trạng thái/đơn mới sau khi sync) + áp bộ lọc.</summary>

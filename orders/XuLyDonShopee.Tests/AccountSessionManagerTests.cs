@@ -55,6 +55,8 @@ public class AccountSessionManagerTests
 
         public Task<bool> SyncOrdersAsync() => Task.FromResult(false);
 
+        public Task<bool> RedownloadSlipAsync(string orderSn) => Task.FromResult(false);
+
         public Task<bool> SyncFullAsync() => Task.FromResult(false);
 
         /// <summary>Mô phỏng phiên phát lại sự kiện Changed (vd event Stopped TRỄ) mà không đổi State.</summary>

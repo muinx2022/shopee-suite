@@ -153,15 +153,23 @@
             <DataGrid.Columns>
                 <DataGridTextColumn Header="Tài khoản" Binding="{Binding AccountLabel}" Width="1.3*" />
                 <DataGridTextColumn Header="Mã đơn" Binding="{Binding OrderSn}" Width="130" />
-                <DataGridTemplateColumn Header="Phiếu" Width="90">
+                <DataGridTemplateColumn Header="Phiếu" Width="96">
                     <DataGridTemplateColumn.CellTemplate>
                         <DataTemplate>
-                            <!-- Ẩn cho đơn "Đã hủy" (CanPrintSlip=false): đơn hủy chưa qua xử lý nên không có phiếu. -->
-                            <Button Classes="linky" Command="{Binding PrintSlipCommand}"
-                                    IsVisible="{Binding CanPrintSlip}"
-                                    ToolTip.Tip="Gửi phiếu PDF của đơn này tới máy in mặc định">
-                                <TextBlock Text="In phiếu" />
-                            </Button>
+                            <StackPanel Orientation="Vertical" Spacing="2" VerticalAlignment="Center">
+                                <!-- Ẩn cho đơn "Đã hủy" (CanPrintSlip=false): đơn hủy chưa qua xử lý nên không có phiếu. -->
+                                <Button Classes="linky" Command="{Binding PrintSlipCommand}"
+                                        IsVisible="{Binding CanPrintSlip}"
+                                        ToolTip.Tip="Gửi phiếu PDF của đơn này tới máy in mặc định">
+                                    <TextBlock Text="In phiếu" />
+                                </Button>
+                                <!-- Chỉ hiện khi đơn có vận đơn nhưng THIẾU file phiếu → tải lại (cần phiên tài khoản đang chạy). -->
+                                <Button Classes="linky" Command="{Binding RedownloadSlipCommand}"
+                                        IsVisible="{Binding ShowRedownloadSlip}"
+                                        ToolTip.Tip="Tải lại file phiếu bị thiếu (mở phiên tài khoản trước)">
+                                    <TextBlock Text="Tải phiếu" />
+                                </Button>
+                            </StackPanel>
                         </DataTemplate>
                     </DataGridTemplateColumn.CellTemplate>
                 </DataGridTemplateColumn>

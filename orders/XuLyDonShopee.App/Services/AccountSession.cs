@@ -683,6 +683,43 @@ public partial class AccountSession : ObservableObject, IAccountSession
             // rồi marshal về UI thread). CHỈ thêm 1 lời gọi này, KHÔNG đụng luồng xử lý đơn / cửa-skip.
             _services.RaiseOrdersChanged();
 
+            // Tải LẠI phiếu THIẾU (đơn Chuẩn bị hàng + có vận đơn nhưng file phiếu mất/không phải PDF): vẫn TRONG
+            // cửa sổ _navigating (thao tác trình duyệt độc quyền, không hai luồng chuột). Best-effort: chốt chặn ≤5
+            // đơn/lượt (tránh kéo dài sync — còn thiếu thì lượt sau làm tiếp); mọi lỗi CHỈ log, KHÔNG phá kết quả
+            // sync. OCE ném xuyên (dừng chủ động). Lưu được ≥1 phiếu → phát OrdersChanged (cột Phiếu cập nhật).
+            try
+            {
+                var invoiceDir = _services.Settings.GetInvoiceFolder();
+                var thieu = _services.Orders.GetOrdersForSlipCheck(_accountId)
+                    .Where(o => ThieuPhieu(o.Status, o.TrackingNumber,
+                        Path.Combine(invoiceDir, ShopeeShippingNav.SanitizeFileName(o.OrderSn) + ".pdf")))
+                    .Select(o => o.OrderSn)
+                    .ToList();
+                if (thieu.Count > 0)
+                {
+                    var batch = thieu.Take(5).ToList();
+                    if (thieu.Count > batch.Count)
+                    {
+                        log($"Có {thieu.Count} đơn thiếu phiếu — tải lại {batch.Count} đơn lượt này, còn {thieu.Count - batch.Count} đơn chờ lượt sau.");
+                    }
+                    StatusText = $"Đang tải lại {batch.Count} phiếu thiếu...";
+                    var re = await s.RedownloadSlipsAsync(batch, invoiceDir, log, tok).ConfigureAwait(false);
+                    log($"Tải lại phiếu: xong {re}/{batch.Count}.");
+                    if (re > 0)
+                    {
+                        _services.RaiseOrdersChanged();
+                    }
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                throw; // hủy chủ động → catch ngoài xử như hủy
+            }
+            catch (Exception ex)
+            {
+                log("Tải lại phiếu thiếu gặp lỗi (bỏ qua): " + ex.Message);
+            }
+
             // "Nút Sync bao gồm cả nút Kiểm tra" (người dùng chốt 2026-07-20): kết thúc mỗi lượt sync bằng SỐ
             // TƯƠI "Chờ Lấy Hàng" — VỀ TRANG CHỦ đọc y hệt nút Kiểm tra (GoHomeAndReadToShipCountAsync): ô số
             // nằm Ở TRANG CHỦ, sau sync trình duyệt đang ở trang danh sách đơn nên ReadToShipCountAsync tại chỗ
@@ -759,6 +796,74 @@ public partial class AccountSession : ObservableObject, IAccountSession
             // Lỗi bất ngờ (vd ghi DB) → log + StatusText, KHÔNG ném (không phá phiên).
             StatusText = "Sync đơn hàng gặp lỗi — xem nhật ký.";
             log("Lỗi khi sync đơn hàng: " + ex.Message);
+            return false;
+        }
+        finally
+        {
+            _navigating = false;
+        }
+    }
+
+    /// <summary>
+    /// <b>Tải LẠI phiếu MỘT đơn (nút "Tải phiếu" màn Đơn hàng):</b> trong phiên ĐANG chạy, gọi
+    /// <see cref="ILoginSession.RedownloadSlipsAsync"/> cho một mã đơn (về danh sách "Tất cả", định vị card,
+    /// bấm In phiếu giao, lưu PDF). Bọc cờ <see cref="_navigating"/> y hệt các lượt điều hướng khác (loại trừ
+    /// với sync / xử lý đơn / kiểm tra — không hai luồng chuột trên cùng trang). Graceful: phiên chưa chạy /
+    /// đang bận / bị hủy / lỗi → <c>false</c> + StatusText/log, KHÔNG ném. Lưu được → phát
+    /// <see cref="AppServices.RaiseOrdersChanged"/> (cột Phiếu cập nhật). finally reset <see cref="_navigating"/>.
+    /// </summary>
+    public async Task<bool> RedownloadSlipAsync(string orderSn)
+    {
+        if (string.IsNullOrWhiteSpace(orderSn))
+        {
+            return false;
+        }
+
+        var s = _session;
+        CancellationToken tok;
+        try
+        {
+            lock (_lifecycleLock)
+            {
+                tok = _cts?.Token ?? default;
+            }
+        }
+        catch (ObjectDisposedException)
+        {
+            return false;
+        }
+
+        // _navigating: đang có lượt điều hướng chạy dở → bỏ qua, không chồng nhau.
+        if (s is null || State != SessionState.Running || _navigating)
+        {
+            return false;
+        }
+
+        _navigating = true;
+        StatusText = $"Đang tải lại phiếu đơn {orderSn}...";
+        var log = (Action<string>)(m => _services.Log.Append(_logLabel, m));
+        try
+        {
+            var invoiceDir = _services.Settings.GetInvoiceFolder();
+            var re = await s.RedownloadSlipsAsync(new[] { orderSn }, invoiceDir, log, tok).ConfigureAwait(false);
+            if (re > 0)
+            {
+                StatusText = $"Đã tải lại phiếu đơn {orderSn}.";
+                _services.RaiseOrdersChanged();
+                return true;
+            }
+
+            StatusText = $"Chưa tải được phiếu đơn {orderSn} — xem nhật ký.";
+            return false;
+        }
+        catch (OperationCanceledException)
+        {
+            return false; // dừng chủ động
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"Tải lại phiếu đơn {orderSn} gặp lỗi — xem nhật ký.";
+            log("Lỗi khi tải lại phiếu: " + ex.Message);
             return false;
         }
         finally
@@ -1347,8 +1452,7 @@ public partial class AccountSession : ObservableObject, IAccountSession
             }
 
             var bytes = File.ReadAllBytes(path);
-            if (bytes.Length < 5 || bytes[0] != (byte)'%' || bytes[1] != (byte)'P'
-                || bytes[2] != (byte)'D' || bytes[3] != (byte)'F' || bytes[4] != (byte)'-')
+            if (!BytesLookPdf(bytes))
             {
                 return false; // không phải PDF thật → không gửi rác
             }
@@ -1361,6 +1465,51 @@ public partial class AccountSession : ObservableObject, IAccountSession
             return false; // lỗi đọc file → bỏ qua, không phá luồng
         }
     }
+
+    /// <summary>True nếu 5 byte đầu là magic <c>%PDF-</c> — nhận đúng file PDF thật, tránh coi HTML/redirect
+    /// (GET lại phiếu có thể ra HTML 200-OK) là phiếu. Dùng chung cho <see cref="TryReadSlipBase64"/> và
+    /// <see cref="SlipFileIsValidPdf"/>.</summary>
+    private static bool BytesLookPdf(ReadOnlySpan<byte> b)
+        => b.Length >= 5 && b[0] == (byte)'%' && b[1] == (byte)'P'
+           && b[2] == (byte)'D' && b[3] == (byte)'F' && b[4] == (byte)'-';
+
+    /// <summary>
+    /// True nếu file phiếu <paramref name="path"/> TỒN TẠI và là PDF thật (5 byte đầu <c>%PDF-</c>). Đọc TỐI ĐA
+    /// 5 byte đầu (nhẹ, gọi được cho mỗi dòng lưới) — KHÔNG áp trần dung lượng (chỉ kiểm tồn tại + magic, đúng
+    /// định nghĩa "có phiếu"). Mọi lỗi IO → <c>false</c>. Dùng cho <see cref="ThieuPhieu"/> (tự động khi sync) và
+    /// <c>OrderRowViewModel.HasSlipFile</c> (nút "Tải phiếu").
+    /// </summary>
+    internal static bool SlipFileIsValidPdf(string path)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+            {
+                return false;
+            }
+
+            using var fs = File.OpenRead(path);
+            Span<byte> head = stackalloc byte[5];
+            var n = fs.Read(head);
+            return BytesLookPdf(head[..Math.Max(0, n)]);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// PURE — True khi đơn <b>THIẾU PHIẾU</b> (cần tải lại): trạng thái là "Chuẩn bị hàng"
+    /// (<see cref="ShopeeShippingNav.LaChuanBiHang"/>) VÀ ĐÃ có mã vận đơn (<paramref name="trackingNumber"/>
+    /// khác rỗng — tức arrange đã xong, phiếu đáng lẽ phải có) VÀ file <paramref name="pdfPath"/> KHÔNG tồn tại
+    /// hoặc KHÔNG phải PDF thật (<see cref="SlipFileIsValidPdf"/>). Đơn CHƯA có vận đơn KHÔNG tính (phiếu sẽ
+    /// được tạo ở bước Xử lý đơn). Dùng chung cho luồng tự-động-khi-sync và hiển thị nút "Tải phiếu".
+    /// </summary>
+    internal static bool ThieuPhieu(string? status, string? trackingNumber, string pdfPath)
+        => ShopeeShippingNav.LaChuanBiHang(status)
+           && !string.IsNullOrWhiteSpace(trackingNumber)
+           && !SlipFileIsValidPdf(pdfPath);
 
     /// <summary>
     /// Chọn proxy theo thứ tự ưu tiên và ĐỒNG THỜI set <see cref="_kiotClient"/> — client nguồn KiotProxy

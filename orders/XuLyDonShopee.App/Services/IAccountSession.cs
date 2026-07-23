@@ -94,6 +94,14 @@ public interface IAccountSession
     Task<bool> SyncOrdersAsync();
 
     /// <summary>
+    /// <b>Tải LẠI phiếu MỘT đơn</b> (nút "Tải phiếu" màn Đơn hàng): trong phiên ĐANG chạy, về danh sách "Tất
+    /// cả", định vị card theo mã, bấm "In phiếu giao" và lưu lại file PDF. Trả <c>false</c> nếu phiên chưa
+    /// chạy / đang bận điều hướng / không tải được (graceful, KHÔNG ném). Loại trừ lẫn nhau với Sync / Xử lý
+    /// đơn / Kiểm tra qua cờ điều hướng bao trùm.
+    /// </summary>
+    Task<bool> RedownloadSlipAsync(string orderSn);
+
+    /// <summary>
     /// <b>Sync TRỌN GÓI</b> (nút Sync màn Tài khoản): trong phiên ĐANG chạy, chạy chuỗi <b>Kiểm tra đơn mới
     /// → (nếu có đơn Chờ Lấy Hàng) Xử lý đơn → Sync đơn hàng</b>. Ghép từ ba bước con
     /// (<see cref="CheckOrdersAsync"/>/<see cref="ProcessOrdersAsync"/>/<see cref="SyncOrdersAsync"/>); xử lý
