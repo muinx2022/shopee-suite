@@ -1,7 +1,7 @@
 # Plan: Khôi phục cầu SSO "Tài khoản của tôi → Kênh Người bán" trước vòng lặp shop
 
 - **Ngày:** 2026-07-23
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành (911 test; build sạch)
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-dev`)
 - **Nhánh:** `feature/gop-don-hang` (cây chính)
 
@@ -94,4 +94,57 @@ thêm field mới. Giữ `try/catch` OCE (timeout nội bộ → false; hủy ng
 
 ## Báo cáo thực thi (Opus điền sau khi xong)
 
-<chưa có>
+**Ngày:** 2026-07-23 · **Người thực thi:** Opus
+
+### File đã sửa
+
+- `orders/XuLyDonShopee.Core/Services/ShopeeLoginService.cs` — 6 chỗ:
+  1. **Thêm local static `UrlIsBanhang`** ở đầu `TryLoginSubaccountAsync` (cạnh `DiagAsync`) — hàm này
+     KHÔNG có sẵn trong method hiện tại (xem điểm lệch dưới), lấy nguyên văn từ `d4e6916`. Là **local
+     function**, không phải field mới.
+  2. **Chèn cầu SSO (Bước 6 phần click → 7 → 8)** vào cuối `TryLoginSubaccountAsync`, ngay sau đoạn đóng
+     tab mail (đã có) và THAY cho `return true` cũ. Nguyên văn từ `d4e6916`:
+     - Bước 6: `FindVisibleByTextAsync(...MyAccountNavRegex...10000)` → null thì log `title/url` + `return
+       false`; thấy thì `TryHumanClickVisibleAsync` (click "Tài khoản của tôi") + delay 1.5–3s.
+     - Bước 7: `FindVisibleByTextAsync(...SellerChannelRegex...)` → null thì log + `return false`; hứng tab
+       mới qua `_context.Page +=`, click "Kênh Người bán", vòng 90s chờ `UrlIsBanhang` (cùng-tab qua
+       `page.Url`, hoặc tab-mới qua `popped`/quét `_context.Pages`). Không thấy → log các tab + `return
+       false`.
+     - Bước 8: tab-mới → `WaitForLoadStateAsync(DOMContentLoaded,15s)` best-effort + đóng tab subaccount
+       (retry ≤3) để `Pages[0]=banhang` (cảnh báo nếu không đóng được / không về Pages[0]). Cuối cùng
+       `L("Đã vào Kênh Người bán."); return true;`.
+     - GIỮ lại dòng `L("Đã đăng nhập Nền tảng tài khoản phụ.")` làm mốc tiến trình (plan cho phép giữ cả 2
+       dòng log).
+  3. Sửa **comment cuối method** (stale: "KHÔNG đóng tab subaccount ở finally — giữ tab gốc") → phản ánh
+     Bước 8 đóng tab subaccount CÓ CHỦ ĐÍCH (nguyên văn `d4e6916`).
+  4. **Doc interface `TryLoginSubaccountAsync`** (`ILoginSession`): bỏ "KHÔNG còn click ... mở thẳng
+     /portal/shop" → mô tả bắc cầu SSO sang Seller Centre (lập cookie seller) + chuẩn hóa `Pages[0]=banhang`;
+     `true` nghĩa là đã bắc cầu SSO (Pages[0] là banhang.shopee.vn). Impl KHÔNG có doc comment nên không sửa.
+  5. **Comment field `SellerChannelRegex`**: bỏ "KHÔNG DÙNG trong luồng mới ... — GIỮ để test cũ còn xanh"
+     → "Dùng ở bước bắc cầu SSO cuối TryLoginSubaccountAsync".
+  6. **Doc forwarder `MatchesSellerChannelEntry`** (cấp `ShopeeLoginService`): bỏ "KHÔNG DÙNG trong luồng
+     mới ... — GIỮ để test cũ còn xanh" → "dùng ở bước bắc cầu SSO cuối TryLoginSubaccountAsync".
+
+**KHÔNG đụng:** `RunAsync`/vòng lặp shop, `ReadShopListAsync`, `OpenShopDetailAsync`, `CloseShopTabAsync`,
+`WorkPage()`, các catch-block (giữ nguyên thông điệp lỗi cũ), module/suite khác. Không thêm field mới.
+
+### Kết quả build / test
+
+| Bước | Kết quả |
+|---|---|
+| `dotnet build XuLyDonShopee.Core` | Build succeeded — 0 Warning, 0 Error |
+| `dotnet build XuLyDonShopee.App` | Build succeeded — 0 Warning, 0 Error |
+| `dotnet build XuLyDonShopee.Tests` | Build succeeded — 0 Warning, 0 Error |
+| `dotnet build suite/Shopee.Suite` | Build succeeded — 0 Warning, 0 Error |
+| `dotnet test XuLyDonShopee.Tests` | Passed! Failed: 0, Passed: **911**, Skipped: 0 |
+
+### Điểm lệch so với plan
+
+- **`UrlIsBanhang` KHÔNG "đã có sẵn"** như plan/note ghi. Grep toàn file xác nhận nó không tồn tại ở đâu
+  trong `ShopeeLoginService.cs` hiện tại — trong `d4e6916` nó là **local static function** ở đầu
+  `TryEnterSellerViaSubaccountAsync`. Đã khôi phục lại đúng dạng local static function (nguyên văn) ở đầu
+  `TryLoginSubaccountAsync`, KHÔNG thêm field. Đây là phần bắt buộc để code Bước 7/8 biên dịch được, và
+  đúng tinh thần "lấy nguyên văn từ d4e6916".
+- Không dùng `<see cref="RunAsync"/>` trong doc (RunAsync ở lớp `AccountSession` khác, cref có thể không
+  resolve → cảnh báo CS1574); viết "caller (RunAsync)" dạng text thường để giữ **0 warning**.
+- Ngoài ra không có điểm lệch. Chưa commit (chờ phiên chính nghiệm thu + publish).
