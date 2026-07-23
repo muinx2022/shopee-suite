@@ -360,6 +360,13 @@ public class ShopeeLoginService
     /// <see cref="ShopListItem"/> — forwarder để unit-test hàm thuần mà không cần dựng phiên trình duyệt.</summary>
     internal static IReadOnlyList<ShopListItem> ParseShopListJson(string? json) => LoginSession.ParseShopListJson(json);
 
+    /// <summary>Forwarder tái dùng luồng đăng nhập hộp thư Hotmail/Outlook (mở tab mới trong <paramref name="context"/>,
+    /// đăng nhập Microsoft, vào hộp thư) — dùng cho <c>OrdersMailboxSession</c> (trình duyệt Playwright RIÊNG cho mail,
+    /// tách khỏi trình duyệt Shopee sạch). Trả về tab mail đã mở + cờ đã đăng nhập.</summary>
+    internal static Task<(IPage? MailPage, bool LoggedIn)> OpenMailboxSignedInAsync(
+        IBrowserContext context, string email, string password, Action<string>? log, Random rng, CancellationToken ct)
+        => LoginSession.OpenMailboxSignedInAsync(context, email, password, log, rng, ct);
+
     /// <summary>
     /// Đảm bảo có sẵn trình duyệt để mở cho <paramref name="browserChoice"/>. Nếu phân giải được một
     /// trình duyệt thật đã cài trên máy (Chrome/Edge/Brave tùy lựa chọn) thì trả về ngay (0) mà
@@ -1205,7 +1212,7 @@ public class ShopeeLoginService
                         try
                         {
                             bool mailLoggedIn;
-                            (mailPage, mailLoggedIn) = await OpenMailboxSignedInAsync(verifyEmail!, verifyEmailPassword!, log, rng, sct).ConfigureAwait(false);
+                            (mailPage, mailLoggedIn) = await OpenMailboxSignedInAsync(_context, verifyEmail!, verifyEmailPassword!, log, rng, sct).ConfigureAwait(false);
                             L(mailLoggedIn
                                 ? "Đã mở hộp thư ở tab bên — lấy mã rồi nhập vào trang Shopee."
                                 : "Chưa đăng nhập được hộp thư tự động — GIỮ tab mail mở để bạn tự đăng nhập, lấy mã rồi nhập vào trang Shopee.");
@@ -1440,7 +1447,7 @@ public class ShopeeLoginService
                 // BƯỚC 2: mở tab mới đăng nhập hộp thư Hotmail/Outlook rồi vào hộp thư (helper dùng chung với luồng
                 //    subaccount). Login lỗi → bỏ qua verify như cũ (finally đóng tab mail vì keepMailOpenForManual=false).
                 bool mailLoggedIn;
-                (mailPage, mailLoggedIn) = await OpenMailboxSignedInAsync(verifyEmail, verifyEmailPassword, log, rng, vct).ConfigureAwait(false);
+                (mailPage, mailLoggedIn) = await OpenMailboxSignedInAsync(_context, verifyEmail, verifyEmailPassword, log, rng, vct).ConfigureAwait(false);
                 if (!mailLoggedIn)
                 {
                     L("Không đăng nhập được hộp thư Hotmail/Outlook — bỏ qua verify.");
@@ -1540,12 +1547,12 @@ public class ShopeeLoginService
         /// KHÔNG ném (trừ hủy). KHÔNG log giá trị mật khẩu. Dùng chung cho luồng verify (tự bấm link) và luồng
         /// subaccount (chỉ mở cho người dùng tự lấy mã).
         /// </summary>
-        private async Task<(IPage? MailPage, bool LoggedIn)> OpenMailboxSignedInAsync(
-            string email, string password, Action<string>? log, Random rng, CancellationToken ct)
+        internal static async Task<(IPage? MailPage, bool LoggedIn)> OpenMailboxSignedInAsync(
+            IBrowserContext context, string email, string password, Action<string>? log, Random rng, CancellationToken ct)
         {
             void L(string m) => log?.Invoke(m);
 
-            var mailPage = await _context.NewPageAsync().ConfigureAwait(false);
+            var mailPage = await context.NewPageAsync().ConfigureAwait(false);
             L("Mở trang đăng nhập Microsoft để lấy mail...");
             try
             {

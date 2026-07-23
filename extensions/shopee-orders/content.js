@@ -1,7 +1,8 @@
-// Content script (ISOLATED): nhiệm vụ DUY NHẤT ở GĐ1 là đọc cổng WebSocket mà C# nhúng vào hash URL
-// (#_od_ws=<port>) của trang /portal/shop lần đầu, rồi chuyển cho background để nối cầu. Mọi thao tác DOM
-// khác (đọc bảng shop, đọc to-do box, bắn trusted click) do background làm qua chrome.scripting/chrome.debugger.
-// Trang không có hash (vd tab shop chi tiết) → không gửi gì (background giữ cổng đã biết).
+// Content script (ISOLATED, run_at document_start): nhiệm vụ DUY NHẤT là đọc cổng WebSocket mà C# nhúng vào
+// hash URL (#_od_ws=<port>) của trang đầu (subaccount.shopee.com ở GĐ2, hoặc /portal/shop ở GĐ1) rồi chuyển
+// cho background để nối cầu. Đọc SỚM (document_start) để không rụng cổng khi Shopee redirect. Trang không có
+// hash (tab đã redirect / tab shop) → không gửi gì; background giữ cổng đã biết (đã lưu chrome.storage.session).
+// Mọi thao tác DOM khác do background làm qua chrome.scripting / chrome.debugger.
 (function () {
   try {
     const m = location.hash.match(/_od_ws=(\d+)/);

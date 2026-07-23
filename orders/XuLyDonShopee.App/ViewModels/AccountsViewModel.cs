@@ -818,11 +818,12 @@ public partial class AccountsViewModel : ViewModelBase
     private bool _bridgeRunning;
 
     /// <summary>
-    /// "🧪 Chạy thử (bridge)" — GĐ1 CẦU NỐI extension↔C#: mở trình duyệt SẠCH (KHÔNG Playwright/CDP, KHÔNG
-    /// remote-debugging-port, KHÔNG proxy) với ĐÚNG hồ sơ persistent của tài khoản đang xem → /portal/shop kèm
-    /// hash <c>#_od_ws=&lt;port&gt;</c>; extension nối WebSocket rồi thực thi lát cắt: đọc danh sách shop → mở
-    /// "Chi tiết" shop đầu bằng trusted click (kỳ vọng KHÔNG captcha) → đọc số "Chờ Lấy Hàng". Kết quả đổ ra
-    /// panel log của tài khoản. User phải ĐÃ đăng nhập tay tới /portal/shop trong hồ sơ này.
+    /// "🧪 Chạy thử (đăng nhập + shop)" — GĐ2 CẦU NỐI extension↔C#: mở trình duyệt SẠCH (KHÔNG Playwright/CDP,
+    /// KHÔNG remote-debugging-port, KHÔNG proxy) với ĐÚNG hồ sơ persistent của tài khoản đang xem → mở
+    /// <c>subaccount.shopee.com</c> kèm hash <c>#_od_ws=&lt;port&gt;</c>; extension nối WebSocket rồi: tự điền form
+    /// đăng nhập subaccount → CHỜ user nhập mã (mở hộp thư Playwright riêng cho user tự đọc mã) → SSO sang
+    /// "Kênh Người bán" → <c>/portal/shop</c> → chạy lát cắt: đọc shop → mở "Chi tiết" shop đầu bằng trusted click
+    /// (kỳ vọng KHÔNG captcha) → đọc số "Chờ Lấy Hàng". Kết quả đổ ra panel log.
     /// Gate như CanRun (đang xem 1 acc đã lưu). Phiên production của acc đang chạy → từ chối (đụng khoá hồ sơ chung).
     /// </summary>
     [RelayCommand]
@@ -833,9 +834,10 @@ public partial class AccountsViewModel : ViewModelBase
             return;
         }
 
-        var email = _services.Accounts.GetById(accountId)?.Email ?? EditEmail;
+        var acc = _services.Accounts.GetById(accountId);
+        var email = acc?.Email ?? EditEmail;
 
-        // Lát cắt cũ còn chạy → không mở chồng (một phiên/lần test ở GĐ1).
+        // Lát cắt cũ còn chạy → không mở chồng (một phiên/lần test).
         if (_bridgeRunning)
         {
             _services.Log.Append(email, "Đang chạy thử (bridge) rồi — đợi xong hoặc bấm ■ Dừng.");
@@ -861,19 +863,29 @@ public partial class AccountsViewModel : ViewModelBase
             var browserChoice = _services.Settings.GetBrowserChoice();
             var browserKind = BrowserLocator.ResolveBrowserKind(browserChoice);
             var userDataDir = BrowserProfilePaths.ForAccount(baseDir, accountId, browserKind);
+            // Hồ sơ RIÊNG cho trình duyệt hộp thư (Playwright riêng) — tách khỏi hồ sơ Shopee.
+            var mailUserDataDir = System.IO.Path.Combine(baseDir, "mail-profiles",
+                accountId.ToString(System.Globalization.CultureInfo.InvariantCulture) + "-" + browserKind);
 
             _bridgeCts = new System.Threading.CancellationTokenSource();
             var session = new OrdersBridgeSession(userDataDir, browserChoice, m => _services.Log.Append(email, m));
             _bridgeSession = session;
 
             _services.Log.Append(email,
-                "Chạy thử (bridge): mở trình duyệt sạch + nối cầu extension. Đảm bảo đã đăng nhập tay tới /portal/shop.");
-            BusyStatus = "Đang chạy thử (bridge)...";
+                "Chạy thử (đăng nhập + shop): mở trình duyệt sạch → tự đăng nhập subaccount → chờ bạn nhập mã → vào Seller Centre → đọc shop.");
+            BusyStatus = "Đang chạy thử (đăng nhập + shop)...";
+
+            var login = new OrdersLoginParams(
+                acc?.Email ?? EditEmail,
+                acc?.Password ?? string.Empty,
+                acc?.VerifyEmail,
+                acc?.VerifyEmailPassword,
+                mailUserDataDir);
 
             OrdersBridgeSliceResult result;
             try
             {
-                result = await session.RunSliceAsync(_bridgeCts.Token);
+                result = await session.RunLoginThenSliceAsync(login, _bridgeCts.Token);
             }
             finally
             {
@@ -882,7 +894,7 @@ public partial class AccountsViewModel : ViewModelBase
 
             if (result.Captcha)
             {
-                var m = "Chạy thử (bridge): PHÁT HIỆN captcha/verify khi mở Chi tiết — kiến trúc CHƯA né được, cần soi lại.";
+                var m = "Chạy thử (bridge): PHÁT HIỆN captcha/verify — kiến trúc CHƯA né được, cần soi lại.";
                 _services.Log.Append(email, m);
                 BusyStatus = m;
             }
