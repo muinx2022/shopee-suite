@@ -75,22 +75,53 @@ public interface ILoginSession : IAsyncDisposable
         string verifyEmail, string verifyEmailPassword, bool autoConfirm, Action<string>? log = null, CancellationToken ct = default);
 
     /// <summary>
-    /// <b>Vào Seller Centre QUA Nền tảng tài khoản phụ</b> (<see cref="ShopeeLoginService.SubaccountUrl"/>): nếu đang ở
+    /// <b>Đăng nhập Nền tảng tài khoản phụ</b> (<see cref="ShopeeLoginService.SubaccountUrl"/>): nếu đang ở
     /// form đăng nhập subaccount thì tự điền tài khoản (<paramref name="user"/>) + mật khẩu (<paramref name="password"/>)
     /// kiểu người rồi bấm "Đăng nhập"; khi Shopee đòi mã thì <b>mở hộp thư</b> (<paramref name="verifyEmail"/> /
     /// <paramref name="verifyEmailPassword"/>) cho người dùng TỰ lấy mã (KHÔNG tự verify, KHÔNG tự bấm gì trong mail),
-    /// đưa cửa sổ về trang Shopee; chờ người dùng nhập code (tối đa 15') tới khi nav "Tài khoản của tôi" hiện; rồi click
-    /// "Tài khoản của tôi" → "Kênh Người bán" để sang Seller Centre, chuẩn hóa tab seller thành <c>Pages[0]</c>.
+    /// đưa cửa sổ về trang Shopee; chờ người dùng nhập code (tối đa 15') tới khi nav "Tài khoản của tôi" hiện thì
+    /// DỪNG ở đó (ĐÃ đăng nhập subaccount). KHÔNG còn click "Tài khoản của tôi" → "Kênh Người bán": mô hình MỚI mở
+    /// thẳng danh sách shop <c>/portal/shop</c> rồi lặp qua từng shop (xem <see cref="ReadShopListAsync"/> /
+    /// <see cref="OpenShopDetailAsync"/>).
     /// <para>
     /// <b>Graceful — không bao giờ ném (trừ hủy người dùng):</b> mọi thất bại (không thấy ô/nút, hết giờ, lỗi) →
-    /// <c>false</c> (caller GIỮ cửa sổ cho người dùng thao tác tay). Trả <c>true</c> khi đã đứng ở Seller Centre
-    /// (banhang.shopee.vn) và tab seller là <c>Pages[0]</c>. KHÔNG log giá trị mật khẩu; mọi nhánh selector trượt đều
+    /// <c>false</c> (caller GIỮ cửa sổ cho người dùng thao tác tay). Trả <c>true</c> khi đã đăng nhập Nền tảng tài
+    /// khoản phụ (nav "Tài khoản của tôi" hiển thị). KHÔNG log giá trị mật khẩu; mọi nhánh selector trượt đều
     /// log <c>title=…, url=…</c>.
     /// </para>
     /// </summary>
-    Task<bool> TryEnterSellerViaSubaccountAsync(
+    Task<bool> TryLoginSubaccountAsync(
         string user, string password, string? verifyEmail, string? verifyEmailPassword,
         Action<string>? log = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// <b>Đọc danh sách shop</b> của tài khoản subaccount: điều hướng tab gốc (<c>Pages[0]</c>) tới
+    /// <see cref="ShopeeLoginService.ShopListUrl"/>, chờ bảng shop render rồi quét mỗi dòng thành
+    /// <see cref="ShopListItem"/> (mã shop = <c>data-row-key</c>, tên shop, tên đăng nhập). Đặt lại "trang làm việc"
+    /// về <c>Pages[0]</c> trước khi đọc.
+    /// <para>
+    /// <b>Graceful — không bao giờ ném (trừ hủy):</b> không đọc được bảng / trang bounce về login / lỗi bất kỳ →
+    /// danh sách RỖNG (+ log <c>title=…, url=…</c>).
+    /// </para>
+    /// </summary>
+    Task<IReadOnlyList<ShopListItem>> ReadShopListAsync(Action<string>? log = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// <b>Mở trang chi tiết một shop</b>: định vị dòng bảng theo <see cref="ShopListItem.ShopId"/>, bấm nút "Chi tiết"
+    /// KIỂU NGƯỜI; hứng TAB MỚI (hoặc điều hướng cùng tab), đặt tab đó làm "trang làm việc" hiện tại để các hàm flow
+    /// đơn chạy trên đúng shop này.
+    /// <para>
+    /// <b>Graceful — không bao giờ ném (trừ hủy):</b> không thấy nút / không mở được → <c>false</c> (+ log
+    /// <c>title=…, url=…</c>). Trả <c>true</c> khi đã mở được tab shop.
+    /// </para>
+    /// </summary>
+    Task<bool> OpenShopDetailAsync(ShopListItem shop, Action<string>? log = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// <b>Đóng tab shop</b> đang mở (nếu là tab riêng khác <c>Pages[0]</c>) rồi quay lại tab danh sách shop; xóa
+    /// "trang làm việc" hiện tại. Best-effort — không ném (trừ hủy).
+    /// </summary>
+    Task CloseShopTabAsync(CancellationToken ct = default);
 
     /// <summary>
     /// Đọc số đơn <b>"Chờ Lấy Hàng"</b> trong to-do box của trang bán hàng (Seller Centre).
@@ -293,8 +324,11 @@ public class ShopeeLoginService
     /// <summary>URL trang bán hàng (Shopee Seller Centre).</summary>
     public const string SellerUrl = "https://banhang.shopee.vn/";
 
-    /// <summary>URL Nền tảng tài khoản phụ — điểm vào đăng nhập mới (từ đây bấm "Kênh Người bán" để sang Seller Centre).</summary>
+    /// <summary>URL Nền tảng tài khoản phụ — điểm vào đăng nhập mới (một tài khoản có nhiều shop).</summary>
     public const string SubaccountUrl = "https://subaccount.shopee.com/";
+
+    /// <summary>URL bảng danh sách shop của Nền tảng tài khoản phụ — sau khi đăng nhập, mở thẳng đây để lặp qua từng shop.</summary>
+    public const string ShopListUrl = "https://banhang.shopee.vn/portal/shop";
 
     // ===== Forwarder cho test (luồng verify-email) =====
     // Logic khớp text thực nằm trong nested class LoginSession (nơi giữ các Regex + luồng verify-email). Phơi
@@ -317,8 +351,13 @@ public class ShopeeLoginService
     /// <summary>True nếu text là nav "Tài khoản của tôi" trên Nền tảng tài khoản phụ (tín hiệu ĐÃ đăng nhập).</summary>
     internal static bool MatchesMyAccountNav(string? text) => LoginSession.MatchesMyAccountNav(text);
 
-    /// <summary>True nếu text là entry "Kênh Người bán" (mở sang Seller Centre) trên Nền tảng tài khoản phụ.</summary>
+    /// <summary>True nếu text là entry "Kênh Người bán" (mở sang Seller Centre) trên Nền tảng tài khoản phụ.
+    /// KHÔNG DÙNG trong luồng mới (1 subaccount = nhiều shop, mở thẳng /portal/shop) — GIỮ để test cũ còn xanh.</summary>
     internal static bool MatchesSellerChannelEntry(string? text) => LoginSession.MatchesSellerChannelEntry(text);
+
+    /// <summary>Chuyển JSON mảng <c>{rowKey,name,login}</c> (đọc từ bảng <c>/portal/shop</c>) thành danh sách
+    /// <see cref="ShopListItem"/> — forwarder để unit-test hàm thuần mà không cần dựng phiên trình duyệt.</summary>
+    internal static IReadOnlyList<ShopListItem> ParseShopListJson(string? json) => LoginSession.ParseShopListJson(json);
 
     /// <summary>
     /// Đảm bảo có sẵn trình duyệt để mở cho <paramref name="browserChoice"/>. Nếu phân giải được một
@@ -694,6 +733,11 @@ public class ShopeeLoginService
         private readonly IBrowserContext _context;
         private readonly Process _process;
 
+        // "TRANG LÀM VIỆC" hiện tại của các hàm flow đơn (mô hình nhiều-shop): tab của shop đang được mở qua
+        // OpenShopDetailAsync. null → dùng Pages[0] (tab gốc / danh sách shop). Các hàm flow đọc qua WorkPage()
+        // để chạy trên ĐÚNG tab shop thay vì cứng Pages[0]. volatile: RunAsync (thread nền) đặt, hàm flow đọc.
+        private volatile IPage? _workPage;
+
         // Hoàn tất khi cửa sổ đóng (tiến trình Brave thoát / CDP ngắt). RunContinuationsAsynchronously
         // để không chạy tiếp phần chờ ngay trong callback sự kiện của Playwright/Process.
         private readonly TaskCompletionSource _closedTcs =
@@ -735,6 +779,22 @@ public class ShopeeLoginService
             }
         }
 
+        /// <summary>Đặt "trang làm việc" hiện tại (tab shop) cho các hàm flow đơn. null → về Pages[0].</summary>
+        internal void SetWorkPage(IPage? p) => _workPage = p;
+
+        /// <summary>"Trang làm việc" hiện tại của các hàm flow đơn: <see cref="_workPage"/> (tab shop) nếu đã đặt,
+        /// ngược lại Pages[0] (tab gốc). null nếu không còn tab nào.</summary>
+        private IPage? WorkPage()
+        {
+            var wp = _workPage;
+            if (wp is not null && !wp.IsClosed)
+            {
+                return wp;
+            }
+            try { return _context.Pages.Count > 0 ? _context.Pages[0] : null; }
+            catch { return null; }
+        }
+
         // Selector ô đăng nhập Shopee (thử theo thứ tự; selector Shopee CÓ THỂ ĐỔI → luôn có fallback,
         // không thấy gì thì bỏ qua để người dùng tự nhập tay).
         private static readonly string[] UserSelectors =
@@ -774,6 +834,7 @@ public class ShopeeLoginService
         // NormalizeForMatch trong matcher/test, và trang render ascii). KHÔNG bám text EN cứng — có nhánh vi + en.
         private static readonly Regex MyAccountNavRegex =
             new(@"tài khoản của tôi|tai khoan cua toi|my account", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        // KHÔNG DÙNG trong luồng mới (mở thẳng /portal/shop, không click "Kênh Người bán") — GIỮ để test cũ còn xanh.
         private static readonly Regex SellerChannelRegex =
             new(@"kênh người bán|kenh nguoi ban|seller\s*cent(re|er)|seller\s*channel", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
@@ -1031,15 +1092,11 @@ public class ShopeeLoginService
             }
         }
 
-        public async Task<bool> TryEnterSellerViaSubaccountAsync(
+        public async Task<bool> TryLoginSubaccountAsync(
             string user, string password, string? verifyEmail, string? verifyEmailPassword,
             Action<string>? log = null, CancellationToken ct = default)
         {
             void L(string m) => log?.Invoke(m);
-
-            // URL của một trang có phải Seller Centre (banhang.shopee.vn) không.
-            static bool UrlIsBanhang(string? u) =>
-                !string.IsNullOrEmpty(u) && u.Contains("banhang.shopee.vn", StringComparison.OrdinalIgnoreCase);
 
             async Task<string> DiagAsync(IPage p)
             {
@@ -1184,125 +1241,22 @@ public class ShopeeLoginService
                     return false;
                 }
 
-                // ── Bước 6: đóng tab mail (best-effort, chỉ tab mình mở) rồi click "Tài khoản của tôi".
+                // ── Bước 6 (MỚI): đã đăng nhập Nền tảng tài khoản phụ → đóng tab mail (best-effort, chỉ tab mình mở)
+                //    rồi DỪNG ở đây. KHÔNG còn click "Tài khoản của tôi" → "Kênh Người bán": caller (RunAsync) sẽ mở
+                //    thẳng /portal/shop và lặp qua từng shop (ReadShopListAsync / OpenShopDetailAsync).
                 if (mailPage is not null)
                 {
                     try { await mailPage.CloseAsync().ConfigureAwait(false); } catch { /* bỏ qua */ }
                     mailPage = null;
                 }
 
-                var myAccountNav = await FindVisibleByTextAsync(page, accountNavSelectors, MyAccountNavRegex, sct, 10000).ConfigureAwait(false);
-                if (myAccountNav is null)
-                {
-                    L("Không thấy 'Tài khoản của tôi' — GIỮ cửa sổ để bạn thao tác tay. " + await DiagAsync(page).ConfigureAwait(false));
-                    return false;
-                }
-                (mx, my, _) = await TryHumanClickVisibleAsync(page, myAccountNav, mx, my, rng, sct).ConfigureAwait(false);
-                await Task.Delay(rng.Next(1500, 3001), sct).ConfigureAwait(false);
-
-                // ── Bước 7: click "Kênh Người bán" → chờ Seller Centre (tab MỚI HOẶC cùng tab). Hứng tab mới bằng
-                //    event _context.Page TRƯỚC khi click (không bỏ lỡ popup nhanh); song song vẫn quét _context.Pages.
-                var sellerEntry = await FindVisibleByTextAsync(
-                    page, new[] { "span.entry-text", ".entry", "span", "div", "[role='button']", "a" },
-                    SellerChannelRegex, sct, 10000).ConfigureAwait(false);
-                if (sellerEntry is null)
-                {
-                    L("Không thấy entry 'Kênh Người bán' — GIỮ cửa sổ để bạn thao tác tay. " + await DiagAsync(page).ConfigureAwait(false));
-                    return false;
-                }
-
-                IPage? popped = null;
-                void OnNewPage(object? _, IPage p) => popped ??= p;
-                _context.Page += OnNewPage;
-
-                IPage sellerPage = page;
-                bool sellerInNewTab = false;
-                try
-                {
-                    (mx, my, _) = await TryHumanClickVisibleAsync(page, sellerEntry, mx, my, rng, sct).ConfigureAwait(false);
-                    L("Đã bấm 'Kênh Người bán' — chờ Seller Centre mở...");
-
-                    var sellerDeadline = DateTime.UtcNow.AddSeconds(90);
-                    while (DateTime.UtcNow < sellerDeadline)
-                    {
-                        sct.ThrowIfCancellationRequested();
-
-                        // (a) chính page điều hướng sang banhang (cùng tab).
-                        if (UrlIsBanhang(page.Url))
-                        {
-                            sellerPage = page;
-                            sellerInNewTab = false;
-                            break;
-                        }
-
-                        // (b) tab mới (bắt qua event hoặc quét Pages) đã có URL banhang.
-                        var candidate = (popped is not null && UrlIsBanhang(popped.Url))
-                            ? popped
-                            : _context.Pages.FirstOrDefault(p => p != page && UrlIsBanhang(p.Url));
-                        if (candidate is not null)
-                        {
-                            sellerPage = candidate;
-                            sellerInNewTab = true;
-                            break;
-                        }
-
-                        await Task.Delay(500, sct).ConfigureAwait(false);
-                    }
-                }
-                finally
-                {
-                    _context.Page -= OnNewPage;
-                }
-
-                if (!UrlIsBanhang(sellerPage.Url))
-                {
-                    var tabs = new List<string>();
-                    foreach (var p in _context.Pages)
-                    {
-                        tabs.Add(await DiagAsync(p).ConfigureAwait(false));
-                    }
-                    L("Bấm 'Kênh Người bán' xong chờ 90s chưa thấy Seller Centre — GIỮ cửa sổ để bạn thao tác tay. Các tab: " + string.Join(" ; ", tabs));
-                    return false;
-                }
-
-                // Tab seller mới mở → chờ DOMContentLoaded best-effort (đừng để bước sau đọc trang trắng).
-                if (sellerInNewTab)
-                {
-                    try
-                    {
-                        await sellerPage.WaitForLoadStateAsync(LoadState.DOMContentLoaded,
-                            new PageWaitForLoadStateOptions { Timeout = 15000 }).ConfigureAwait(false);
-                    }
-                    catch { /* bỏ qua — trang vẫn dùng được, bước sau tự poll */ }
-                }
-
-                // ── Bước 8: chuẩn hóa tab — nếu seller là TAB MỚI → đóng tab subaccount để seller thành Pages[0].
-                if (sellerInNewTab)
-                {
-                    for (int attempt = 0; attempt < 3 && !page.IsClosed; attempt++)
-                    {
-                        try { await page.CloseAsync().ConfigureAwait(false); } catch { /* bỏ qua — thử lại */ }
-                        if (page.IsClosed) break;
-                        await Task.Delay(400, sct).ConfigureAwait(false);
-                    }
-
-                    if (!page.IsClosed)
-                    {
-                        L("Cảnh báo: tab subaccount chưa đóng được — theo dõi đơn có thể đọc nhầm tab (Pages[0] không phải Seller Centre).");
-                    }
-                    else if (_context.Pages.Count == 0 || _context.Pages[0] != sellerPage)
-                    {
-                        L("Cảnh báo: sau khi đóng subaccount, Seller Centre chưa ở Pages[0] — theo dõi đơn có thể đọc nhầm tab.");
-                    }
-                }
-
-                L("Đã vào Kênh Người bán.");
+                L("Đã đăng nhập Nền tảng tài khoản phụ.");
                 return true;
             }
             catch (OperationCanceledException) when (!ct.IsCancellationRequested)
             {
                 // Timeout NỘI BỘ (cap 20') — KHÔNG phải người dùng Dừng → degrade êm, KHÔNG ném.
-                L("Vào Nền tảng tài khoản phụ quá thời gian — GIỮ cửa sổ để bạn thao tác tay.");
+                L("Đăng nhập Nền tảng tài khoản phụ quá thời gian — GIỮ cửa sổ để bạn thao tác tay.");
                 return false;
             }
             catch (OperationCanceledException)
@@ -1311,11 +1265,11 @@ public class ShopeeLoginService
             }
             catch (Exception ex)
             {
-                L("Lỗi khi vào Kênh Người bán qua subaccount: " + ex.Message + " — GIỮ cửa sổ để bạn thao tác tay.");
+                L("Lỗi khi đăng nhập Nền tảng tài khoản phụ: " + ex.Message + " — GIỮ cửa sổ để bạn thao tác tay.");
                 return false;
             }
-            // KHÔNG đóng tab seller/subaccount ở finally — việc đóng tab subaccount làm CÓ CHỦ ĐÍCH ở bước 8; tab mail
-            // đóng ở bước 6 (đường thành công) hoặc GIỮ mở ở đường lỗi cho người dùng tự lấy mã.
+            // KHÔNG đóng tab subaccount ở finally — giữ tab gốc (Pages[0]) để mở /portal/shop. Tab mail đóng ở
+            // Bước 6 (đường thành công) hoặc GIỮ mở ở đường lỗi cho người dùng tự lấy mã.
         }
 
         public async Task<bool> TryVerifyByEmailAsync(
@@ -2507,6 +2461,314 @@ public class ShopeeLoginService
             return CookieJson.Serialize(list);
         }
 
+        // ===================== Danh sách shop (/portal/shop) — mô hình 1 subaccount = nhiều shop =====================
+
+        // Regex nhận entry nút mở shop ("Chi tiết"): chuẩn hóa không dấu rồi khớp. GIỮ nhiều biến thể (vi + en).
+        private static readonly Regex ShopDetailRegex =
+            new(@"chi tiet|detail", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+        // JS CHỈ-ĐỌC quét bảng shop: mỗi dòng tr[data-row-key] → {rowKey, name, login}. Bọc từng dòng trong try để
+        // một dòng lạ KHÔNG phá cả bảng. Trả JSON.stringify(mảng). Tên đăng nhập = span trong ô td thứ 2 (fallback
+        // text của td thứ 2). Selector dùng class-contains để bền khi Shopee thêm hậu tố hash vào tên class.
+        private const string ScanShopListJs = @"() => {
+    const norm = s => (s || '').replace(/\s+/g, ' ').trim();
+    const rows = document.querySelectorAll(""tr[data-row-key]"");
+    const out = [];
+    for (const row of rows) {
+        try {
+            const rowKey = row.getAttribute('data-row-key') || '';
+            const nameEl = row.querySelector(""span[class*='shop-name-text']"");
+            const name = nameEl ? norm(nameEl.textContent) : '';
+            let login = '';
+            const tds = row.querySelectorAll('td');
+            if (tds.length >= 2) {
+                const span = tds[1].querySelector('span');
+                login = norm(span ? span.textContent : tds[1].textContent);
+            }
+            out.push({ rowKey: rowKey, name: name, login: login });
+        } catch (e) { /* dòng lạ — bỏ qua */ }
+    }
+    return JSON.stringify(out);
+}";
+
+        // Deserialize không phân biệt hoa/thường: khóa JSON rowKey/name/login khớp thuộc tính record.
+        private static readonly JsonSerializerOptions ShopRowJsonOpts = new() { PropertyNameCaseInsensitive = true };
+
+        private sealed record RawShopRow(string? RowKey, string? Name, string? Login);
+
+        /// <summary>
+        /// HÀM THUẦN (test được): chuyển JSON mảng <c>{rowKey,name,login}</c> (do <see cref="ScanShopListJs"/> đọc từ
+        /// DOM) thành <see cref="ShopListItem"/>. Trim mọi trường; BỎ dòng không có <c>rowKey</c> (không định vị được
+        /// để mở). Dòng thiếu login vẫn nhận (LoginName rỗng). JSON rỗng/hỏng → danh sách rỗng.
+        /// </summary>
+        internal static IReadOnlyList<ShopListItem> ParseShopListJson(string? json)
+        {
+            if (string.IsNullOrWhiteSpace(json))
+            {
+                return Array.Empty<ShopListItem>();
+            }
+
+            List<RawShopRow>? raw;
+            try { raw = JsonSerializer.Deserialize<List<RawShopRow>>(json, ShopRowJsonOpts); }
+            catch { return Array.Empty<ShopListItem>(); }
+
+            if (raw is null)
+            {
+                return Array.Empty<ShopListItem>();
+            }
+
+            var list = new List<ShopListItem>();
+            foreach (var r in raw)
+            {
+                var id = (r.RowKey ?? string.Empty).Trim();
+                if (id.Length == 0)
+                {
+                    continue; // không có mã shop → không định vị được dòng để mở → bỏ
+                }
+                list.Add(new ShopListItem(id, (r.Name ?? string.Empty).Trim(), (r.Login ?? string.Empty).Trim()));
+            }
+            return list;
+        }
+
+        /// <summary>Chuỗi chẩn đoán 1 trang (title + url) — nuốt lỗi. Không log dữ liệu nhạy cảm.</summary>
+        private static async Task<string> PageDiagAsync(IPage p)
+        {
+            try { return $"title=[{await p.TitleAsync().ConfigureAwait(false)}], url={p.Url}"; }
+            catch { return $"url={p.Url}"; }
+        }
+
+        /// <summary>True nếu URL là chính trang danh sách shop (<c>/portal/shop</c>, bỏ query/hash/dấu / cuối). Trang
+        /// chi tiết shop có path khác (hoặc sâu hơn) → false = "đã điều hướng khỏi danh sách".</summary>
+        private static bool UrlIsShopList(string? u)
+        {
+            if (string.IsNullOrEmpty(u))
+            {
+                return false;
+            }
+            var s = u.Split('?')[0].Split('#')[0].TrimEnd('/');
+            return s.EndsWith("/portal/shop", StringComparison.OrdinalIgnoreCase);
+        }
+
+        public async Task<IReadOnlyList<ShopListItem>> ReadShopListAsync(Action<string>? log = null, CancellationToken ct = default)
+        {
+            void L(string m) => log?.Invoke(m);
+            try
+            {
+                // Đọc danh sách trên TAB GỐC (Pages[0]) — đặt lại trang làm việc để mọi thứ về Pages[0].
+                SetWorkPage(null);
+                var page = _context.Pages.Count > 0 ? _context.Pages[0] : null;
+                if (page is null)
+                {
+                    return Array.Empty<ShopListItem>();
+                }
+
+                // Goto bảng shop (nuốt lỗi điều hướng — vẫn thử đọc DOM hiện có).
+                try
+                {
+                    await page.GotoAsync(ShopListUrl, new PageGotoOptions
+                    {
+                        WaitUntil = WaitUntilState.DOMContentLoaded,
+                        Timeout = 30000
+                    }).ConfigureAwait(false);
+                }
+                catch { /* nuốt lỗi điều hướng (timeout/context ngắt) — vẫn thử đọc bảng */ }
+
+                // Chờ bảng render: poll tr[data-row-key] tối đa ~20s.
+                var deadline = DateTime.UtcNow.AddSeconds(20);
+                bool hasRows = false;
+                while (DateTime.UtcNow < deadline)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    try
+                    {
+                        hasRows = await page.EvaluateAsync<bool>(
+                            "() => document.querySelector(\"tr[data-row-key]\") !== null").ConfigureAwait(false);
+                    }
+                    catch { hasRows = false; }
+                    if (hasRows)
+                    {
+                        break;
+                    }
+                    await Task.Delay(500, ct).ConfigureAwait(false);
+                }
+
+                if (!hasRows)
+                {
+                    L("Không thấy bảng shop sau 20s (trang có thể bounce về login). " + await PageDiagAsync(page).ConfigureAwait(false));
+                    return Array.Empty<ShopListItem>();
+                }
+
+                string json;
+                try { json = await page.EvaluateAsync<string>(ScanShopListJs).ConfigureAwait(false); }
+                catch (Exception ex)
+                {
+                    L("Lỗi đọc bảng shop: " + ex.Message);
+                    return Array.Empty<ShopListItem>();
+                }
+
+                var shops = ParseShopListJson(json);
+                L($"Đọc được {shops.Count} shop.");
+                return shops;
+            }
+            catch (OperationCanceledException)
+            {
+                throw; // hủy chủ động → caller xử như HỦY
+            }
+            catch
+            {
+                return Array.Empty<ShopListItem>(); // không bao giờ ném (trừ hủy)
+            }
+        }
+
+        public async Task<bool> OpenShopDetailAsync(ShopListItem shop, Action<string>? log = null, CancellationToken ct = default)
+        {
+            void L(string m) => log?.Invoke(m);
+            try
+            {
+                var page = _context.Pages.Count > 0 ? _context.Pages[0] : null; // tab danh sách shop
+                if (page is null)
+                {
+                    return false;
+                }
+
+                var rng = new Random();
+                var vp = page.ViewportSize;
+                double mx = vp is not null ? vp.Width / 2.0 : 640;
+                double my = vp is not null ? vp.Height / 2.0 : 360;
+
+                // Định vị nút "Chi tiết" TRONG dòng của shop (re-query TƯƠI — bảng React re-render). Khớp text
+                // KHÔNG DẤU ("chi tiet") để bền với NFC/NFD; ưu tiên button link của eds-react, fallback button/a.
+                var safeId = shop.ShopId.Replace("'", string.Empty);
+                var rowSel = $"tr[data-row-key='{safeId}']";
+                var detailSelectors = new[]
+                {
+                    $"{rowSel} button.eds-react-button--link",
+                    $"{rowSel} button",
+                    $"{rowSel} a",
+                };
+                var detailBtn = await FindByNormalizedTextInFramesAsync(
+                    page, detailSelectors, new[] { "chi tiet", "detail" }, ct, 8000).ConfigureAwait(false);
+                if (detailBtn is null)
+                {
+                    L($"Không thấy nút 'Chi tiết' của shop {shop.ShopId}. " + await PageDiagAsync(page).ConfigureAwait(false));
+                    return false;
+                }
+
+                // Hứng TAB MỚI: bắt event _context.Page TRƯỚC click + quét _context.Pages sau click. Nếu mở CÙNG tab
+                // (page điều hướng khỏi /portal/shop) → coi tab làm việc là chính page.
+                var before = _context.Pages.ToList();
+                IPage? popped = null;
+                void OnNewPage(object? _, IPage p) => popped ??= p;
+                _context.Page += OnNewPage;
+
+                IPage? shopTab = null;
+                try
+                {
+                    (mx, my, _) = await TryHumanClickVisibleAsync(page, detailBtn, mx, my, rng, ct).ConfigureAwait(false);
+                    L($"Đã bấm 'Chi tiết' shop {(string.IsNullOrWhiteSpace(shop.LoginName) ? shop.ShopId : shop.LoginName)} — chờ tab shop mở...");
+
+                    var deadline = DateTime.UtcNow.AddSeconds(30);
+                    while (DateTime.UtcNow < deadline)
+                    {
+                        ct.ThrowIfCancellationRequested();
+
+                        // (a) tab MỚI (event hoặc quét Pages).
+                        var candidate = popped ?? _context.Pages.FirstOrDefault(p => !before.Contains(p));
+                        if (candidate is not null)
+                        {
+                            shopTab = candidate;
+                            break;
+                        }
+
+                        // (b) CÙNG tab: page đã điều hướng khỏi trang danh sách.
+                        if (!UrlIsShopList(page.Url))
+                        {
+                            shopTab = page;
+                            break;
+                        }
+
+                        await Task.Delay(400, ct).ConfigureAwait(false);
+                    }
+                }
+                finally
+                {
+                    _context.Page -= OnNewPage;
+                }
+
+                if (shopTab is null)
+                {
+                    L($"Bấm 'Chi tiết' shop {shop.ShopId} xong chờ 30s chưa thấy tab shop. " + await PageDiagAsync(page).ConfigureAwait(false));
+                    return false;
+                }
+
+                SetWorkPage(shopTab);
+
+                // Chờ DOMContentLoaded best-effort (đừng để hàm flow đọc trang trắng).
+                try
+                {
+                    await shopTab.WaitForLoadStateAsync(LoadState.DOMContentLoaded,
+                        new PageWaitForLoadStateOptions { Timeout = 15000 }).ConfigureAwait(false);
+                }
+                catch { /* trang vẫn dùng được — hàm flow tự poll */ }
+
+                try { await shopTab.BringToFrontAsync().ConfigureAwait(false); } catch { /* bỏ qua */ }
+                return true;
+            }
+            catch (OperationCanceledException)
+            {
+                throw; // hủy chủ động → caller xử như HỦY
+            }
+            catch (Exception ex)
+            {
+                L($"Lỗi khi mở shop {shop.ShopId}: " + ex.Message);
+                return false;
+            }
+        }
+
+        public async Task CloseShopTabAsync(CancellationToken ct = default)
+        {
+            try
+            {
+                var wp = _workPage;
+                var root = _context.Pages.Count > 0 ? _context.Pages[0] : null;
+
+                // Tab shop là TAB RIÊNG (khác Pages[0]) → đóng (best-effort, retry ≤3). CÙNG-tab (wp == Pages[0]) →
+                // KHÔNG đóng (ReadShopListAsync sẽ Goto lại /portal/shop để về danh sách).
+                if (wp is not null && !ReferenceEquals(wp, root) && !wp.IsClosed)
+                {
+                    for (int attempt = 0; attempt < 3 && !wp.IsClosed; attempt++)
+                    {
+                        try { await wp.CloseAsync().ConfigureAwait(false); } catch { /* thử lại */ }
+                        if (wp.IsClosed)
+                        {
+                            break;
+                        }
+                        await Task.Delay(300, ct).ConfigureAwait(false);
+                    }
+                }
+
+                SetWorkPage(null);
+
+                // Quay lại tab danh sách shop (best-effort).
+                try
+                {
+                    if (root is not null && !root.IsClosed)
+                    {
+                        await root.BringToFrontAsync().ConfigureAwait(false);
+                    }
+                }
+                catch { /* bỏ qua */ }
+            }
+            catch (OperationCanceledException)
+            {
+                throw; // hủy chủ động → caller xử như HỦY
+            }
+            catch
+            {
+                SetWorkPage(null); // đảm bảo không giữ tham chiếu tab đã đóng
+            }
+        }
+
         // Selector to-do box của Seller Centre (thử theo thứ tự; Shopee CÓ THỂ ĐỔI → luôn có fallback,
         // không thấy thì trả null, KHÔNG ném, KHÔNG phá phiên).
         //   - Chính: duyệt các .to-do-box-item tìm cái có .item-desc == "Chờ Lấy Hàng" → đọc .item-title.
@@ -2522,7 +2784,7 @@ public class ShopeeLoginService
         {
             try
             {
-                var page = _context.Pages.Count > 0 ? _context.Pages[0] : null;
+                var page = WorkPage(); // tab shop hiện tại (mô hình nhiều-shop) — KHÔNG cứng Pages[0]
                 if (page is null)
                 {
                     return null;
@@ -2580,7 +2842,7 @@ public class ShopeeLoginService
                     return null;
                 }
 
-                var page = _context.Pages.Count > 0 ? _context.Pages[0] : null;
+                var page = WorkPage(); // tab shop hiện tại (mô hình nhiều-shop) — KHÔNG cứng Pages[0]
                 if (page is null)
                 {
                     return null;
@@ -2692,7 +2954,7 @@ public class ShopeeLoginService
         {
             try
             {
-                var page = _context.Pages.Count > 0 ? _context.Pages[0] : null;
+                var page = WorkPage(); // tab shop hiện tại (mô hình nhiều-shop) — KHÔNG cứng Pages[0]
                 if (page is null)
                 {
                     return ShippingNavResult.Failed;
@@ -3091,7 +3353,7 @@ public class ShopeeLoginService
         {
             try
             {
-                var page = _context.Pages.Count > 0 ? _context.Pages[0] : null;
+                var page = WorkPage(); // tab shop hiện tại (mô hình nhiều-shop) — KHÔNG cứng Pages[0]
                 if (page is null)
                 {
                     return SetPickupResult.Failed;
@@ -3261,7 +3523,7 @@ public class ShopeeLoginService
         {
             try
             {
-                var page = _context.Pages.Count > 0 ? _context.Pages[0] : null;
+                var page = WorkPage(); // tab shop hiện tại (mô hình nhiều-shop) — KHÔNG cứng Pages[0]
                 if (page is null)
                 {
                     return SetPickupResult.Failed;
@@ -3907,7 +4169,7 @@ public class ShopeeLoginService
             void L(string m) => log?.Invoke(m);
             try
             {
-                var page = _context.Pages.Count > 0 ? _context.Pages[0] : null;
+                var page = WorkPage(); // tab shop hiện tại (mô hình nhiều-shop) — KHÔNG cứng Pages[0]
                 if (page is null)
                 {
                     return ArrangeShipmentResult.Failed;
@@ -4188,7 +4450,7 @@ public class ShopeeLoginService
 
             try
             {
-                var page = _context.Pages.Count > 0 ? _context.Pages[0] : null;
+                var page = WorkPage(); // tab shop hiện tại (mô hình nhiều-shop) — KHÔNG cứng Pages[0]
                 if (page is null)
                 {
                     // Nói rõ lý do — kẻo tầng App tổng kết "Sync xong: 0 đơn / 0 trang" gây hiểu nhầm hết đơn.
@@ -4385,7 +4647,7 @@ public class ShopeeLoginService
 
             try
             {
-                var page = _context.Pages.Count > 0 ? _context.Pages[0] : null;
+                var page = WorkPage(); // tab shop hiện tại (mô hình nhiều-shop) — KHÔNG cứng Pages[0]
                 if (page is null)
                 {
                     L("Không có trang trình duyệt nào đang mở — bỏ tải lại phiếu.");

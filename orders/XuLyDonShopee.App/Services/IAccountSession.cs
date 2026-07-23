@@ -51,6 +51,10 @@ public interface IAccountSession
     /// </summary>
     bool ReadyForActions { get; }
 
+    /// <summary>True khi vòng lặp shop (mô hình 1 subaccount = nhiều shop) đang chạy — VM dùng để BỎ QUA thao tác
+    /// tay (Sync/Kiểm tra) tránh giẫm luồng đang lặp qua các shop.</summary>
+    bool IsShopLoopRunning { get; }
+
     /// <summary>Thông điệp lỗi gần nhất (có khi <see cref="State"/> == <see cref="SessionState.Error"/>).</summary>
     string? LastError { get; }
 

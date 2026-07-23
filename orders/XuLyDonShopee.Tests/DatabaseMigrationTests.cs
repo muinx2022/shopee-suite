@@ -627,4 +627,31 @@ CREATE TABLE orders (
         Assert.Equal("Tab Ban Dau", ReadOrderColumn(temp.Path, "SYNCED", "gsheet_tab"));
         Assert.Null(ReadOrderColumn(temp.Path, "UNSYNCED", "gsheet_tab"));
     }
+
+    // ==== Migration cột shop_id cho bảng orders (mô hình 1 subaccount = nhiều shop) ====
+
+    [Fact]
+    public void KhoiTao_DbCu_Orders_ThieuShopId_DuocThemCot_KhongMatDuLieu_GetForGsheetPushKhongNem()
+    {
+        using var temp = new TempDatabase();
+        CreateOldOrdersSchemaWithRow(temp.Path, accountId: 41, orderSn: "SNSHOP");
+
+        // Trước migration: schema orders cũ chưa có cột shop_id.
+        Assert.False(HasColumn(temp.Path, "orders", "shop_id"));
+
+        // Khởi tạo Database mới trỏ cùng file → Initialize() chạy migration ALTER TABLE.
+        _ = new Database(temp.Path);
+
+        // Sau migration: đã có cột; đơn cũ CÒN NGUYÊN; shop_id mặc định NULL (không backfill).
+        Assert.True(HasColumn(temp.Path, "orders", "shop_id"));
+        Assert.Null(ReadOrderColumn(temp.Path, "SNSHOP", "shop_id"));
+
+        var repo = new OrdersRepository(new Database(temp.Path));
+        var row = Assert.Single(repo.Query(accountId: 41));
+        Assert.Equal("SNSHOP", row.OrderSn);
+
+        // Đơn cũ shop_id NULL: lọc theo shop → KHÔNG lọt; không lọc → vẫn trả (cả 2 nhánh KHÔNG ném).
+        Assert.Empty(repo.GetForGsheetPush(41, "SHOP_A"));
+        Assert.Single(repo.GetForGsheetPush(41));
+    }
 }

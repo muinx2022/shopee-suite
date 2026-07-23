@@ -75,6 +75,17 @@ public partial class AccountSession : ObservableObject, IAccountSession
     // volatile: đảm bảo thread khác (UI thread, thread sync) luôn thấy giá trị mới nhất khi nhiều phiên chạy song song.
     private volatile string _logLabel;
 
+    // ===== Mô hình 1 subaccount = nhiều shop =====
+    // Shop ĐANG xử lý trong vòng lặp shop (đặt trước khi chạy flow của shop, XÓA sau ở finally). SyncOrdersAsync
+    // gắn shop_id này vào đơn khi upsert; PushOrdersToGsheetAsync lọc đơn theo shop + lấy Tên Shop = tên đăng nhập.
+    // volatile: RunAsync (thread nền) đặt, lượt đẩy GSheet nền đọc (nhưng đã CHỤP giá trị lúc kích hoạt để tránh đua).
+    private volatile string? _currentShopId;
+    private volatile string? _currentShopLogin;
+
+    // TRUE khi vòng lặp shop của RunAsync đang chạy → nút thủ công (VM) bỏ qua để KHÔNG giẫm luồng. Đặt lại false
+    // ở finally của vòng lặp. volatile: UI thread đọc trong lúc phiên chạy nền ghi.
+    private volatile bool _shopLoopRunning;
+
     public AccountSession(
         long accountId,
         AppServices services,
@@ -142,6 +153,10 @@ public partial class AccountSession : ObservableObject, IAccountSession
     /// VM chờ cờ này rồi mới chạy Sync/Kiểm tra để không giẫm luồng tự-đăng-nhập. Xem <see cref="_readyForActions"/>.
     /// </summary>
     public bool ReadyForActions => _readyForActions;
+
+    /// <summary>True khi vòng lặp shop (mô hình 1 subaccount = nhiều shop) đang chạy — VM dùng để BỎ QUA thao tác
+    /// tay (Sync/Kiểm tra) tránh giẫm luồng. Xem <see cref="_shopLoopRunning"/>.</summary>
+    public bool IsShopLoopRunning => _shopLoopRunning;
 
     public event Action? Changed;
     public event Action<long>? CookieSaved;
@@ -726,7 +741,7 @@ public partial class AccountSession : ObservableObject, IAccountSession
 
             // Lưu về DB (thread nền — SQLite an toàn): upsert theo (account_id, order_sn). insertedOrders =
             // các đơn VỪA thêm mới (đơn cập nhật KHÔNG có) → dùng để báo "đơn mới" qua Slack/Discord/Telegram.
-            var (inserted, updated, insertedOrders) = _services.Orders.UpsertMany(_accountId, toUpsert, DateTime.UtcNow);
+            var (inserted, updated, insertedOrders) = _services.Orders.UpsertMany(_accountId, toUpsert, DateTime.UtcNow, _currentShopId);
 
             // Đánh cờ NGAY (SAU upsert để dòng mới toanh đã tồn tại) cho nhóm KHÔNG cần +1: đơn grandfather
             // (đã-giao-sẵn) + đơn chuyển-sang-đã-giao nhưng không có SKU. Nhóm CÓ SKU (+1) chỉ đánh cờ SAU khi hub
@@ -981,6 +996,22 @@ public partial class AccountSession : ObservableObject, IAccountSession
         return await SyncOrdersAsync().ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Flow đơn cho MỘT shop trong vòng lặp shop (mô hình 1 subaccount = nhiều shop): BÊ THÂN
+    /// <see cref="SyncFullAsync"/> — Kiểm tra → (nếu ToShipCount &gt; 0) Xử lý đơn → Sync. Các hàm con chạy trên
+    /// "trang làm việc" (tab shop đang mở qua <c>OpenShopDetailAsync</c>) và TỰ quản <see cref="_navigating"/>.
+    /// Đơn được gắn <see cref="_currentShopId"/> khi upsert; đẩy GSheet lấy Tên Shop = <see cref="_currentShopLogin"/>.
+    /// </summary>
+    private Task<bool> ChayFlowMotShopAsync() => SyncFullAsync();
+
+    /// <summary>
+    /// Chờ tối đa <paramref name="ms"/> mili-giây nhưng THỨC NGAY khi phiên đóng cửa sổ (<see cref="ILoginSession.Closed"/>)
+    /// hoặc bị hủy (<paramref name="ct"/>). ct-aware: bấm Dừng thoát ngay, KHÔNG đợi hết delay (caller kiểm
+    /// <c>ct</c>/<c>IsClosed</c> sau khi trả về). Dùng cho delay 3–5' giữa các shop + chờ 1' khi không đọc được shop.
+    /// </summary>
+    private static Task InterruptibleDelayAsync(ILoginSession session, int ms, CancellationToken ct)
+        => Task.WhenAny(session.Closed, Task.Delay(ms, ct));
+
     /// <summary>Giới hạn kích thước file phiếu đính kèm (5MB) — PDF phiếu giao thường ~100–300KB.</summary>
     private const long MaxSlipBytes = 5 * 1024 * 1024;
 
@@ -1004,9 +1035,14 @@ public partial class AccountSession : ObservableObject, IAccountSession
             return;
         }
 
+        // CHỤP shop hiện tại NGAY (mô hình nhiều-shop): task nền chạy sau khi vòng lặp đã XÓA _currentShopId/Login
+        // → phải truyền giá trị đã chụp, KHÔNG đọc field trong task. Null (chưa vào loop) → đẩy như cũ theo account.
+        var shopId = _currentShopId;
+        var shopLogin = _currentShopLogin;
+
         _ = Task.Run(async () =>
         {
-            try { await PushOrdersToGsheetAsync(log, ct).ConfigureAwait(false); }
+            try { await PushOrdersToGsheetAsync(shopId, shopLogin, log, ct).ConfigureAwait(false); }
             finally { Interlocked.Exchange(ref _gsheetPushing, 0); }
         }, CancellationToken.None);
     }
@@ -1381,12 +1417,13 @@ public partial class AccountSession : ObservableObject, IAccountSession
     /// tự đẩy + dọn tiếp. Xóa xong phát <see cref="AppServices.RaiseOrdersChanged"/> để lưới Đơn hàng vẽ lại.
     /// </para>
     /// </summary>
-    private async Task PushOrdersToGsheetAsync(Action<string> log, CancellationToken ct)
+    private async Task PushOrdersToGsheetAsync(string? shopId, string? shopLogin, Action<string> log, CancellationToken ct)
     {
         try
         {
-            // Đọc pending TRƯỚC nhánh check URL — cần cho bước DỌN kể cả khi người dùng không dùng GSheet.
-            var pending = _services.Orders.GetForGsheetPush(_accountId);
+            // Đọc pending TRƯỚC nhánh check URL — cần cho bước DỌN kể cả khi người dùng không dùng GSheet. Mô hình
+            // nhiều-shop: lọc theo shopId (chỉ đơn của shop hiện tại) — null (chưa vào loop) → mọi đơn của account.
+            var pending = _services.Orders.GetForGsheetPush(_accountId, shopId);
             if (pending.Count == 0)
             {
                 return; // không có đơn nào → không ghi, không dọn
@@ -1411,9 +1448,12 @@ public partial class AccountSession : ObservableObject, IAccountSession
             }
             else
             {
-                // Tên shop (cột E) = TÊN ĐĂNG NHẬP của tài khoản đang sync (Account.Email — người dùng nhập
-                // "sully", "cicily"… trong app). Không có fallback nào khác.
-                var tenShop = _services.Accounts.GetById(_accountId)?.Email;
+                // Tên shop (cột E) = TÊN ĐĂNG NHẬP của SHOP hiện tại (mô hình nhiều-shop: vd "alina99.store"), lấy từ
+                // bảng /portal/shop khi vào loop. Fallback về Account.Email khi CHƯA vào loop (shopLogin null/rỗng —
+                // giữ hành vi cũ cho các đường không qua vòng lặp shop).
+                var tenShop = string.IsNullOrWhiteSpace(shopLogin)
+                    ? _services.Accounts.GetById(_accountId)?.Email
+                    : shopLogin;
 
                 var invoiceDir = _services.Settings.GetInvoiceFolder();
                 // Đọc thời điểm MỘT LẦN cho cả lượt (ngày ghi cột + tab tự động theo tháng) — lượt vắt qua nửa
@@ -1882,28 +1922,27 @@ public partial class AccountSession : ObservableObject, IAccountSession
 
                 try
                 {
-                    // 4) ĐIỀU PHỐI đăng nhập QUA NỀN TẢNG TÀI KHOẢN PHỤ: phiên mở thẳng subaccount.shopee.com →
-                    //    TryEnterSellerViaSubaccountAsync tự điền form subaccount, mở hộp thư cho người dùng tự lấy mã,
-                    //    chờ nhập code, rồi click "Tài khoản của tôi" → "Kênh Người bán" để sang Seller Centre (Pages[0]).
-                    //    entered=true → chạy TIẾP state machine cũ trên trang banhang (login/verify/captcha) làm LƯỚI AN
-                    //    TOÀN nếu banhang còn đòi thêm; entered=false → BỎ QUA state machine (nó viết cho trang banhang,
-                    //    chạy trên trang subaccount sẽ điền sai chỗ), GIỮ cửa sổ cho người dùng thao tác tay. MỌI nhánh
-                    //    degrade PHẢI bật _readyForActions (kẻo WaitForSessionReady treo 5'); riêng nhánh captcha-relaunch
-                    //    KHÔNG bật (phiên sắp tháo dỡ + mở lại).
+                    // 4) ĐIỀU PHỐI đăng nhập QUA NỀN TẢNG TÀI KHOẢN PHỤ (mô hình 1 subaccount = nhiều shop): phiên mở
+                    //    thẳng subaccount.shopee.com → TryLoginSubaccountAsync tự điền form subaccount, mở hộp thư cho
+                    //    người dùng tự lấy mã, chờ nhập code tới khi ĐÃ ĐĂNG NHẬP subaccount (KHÔNG còn click "Kênh Người
+                    //    bán"). entered=true → sau điều phối chạy VÒNG LẶP SHOP (đọc /portal/shop → từng shop mở tab →
+                    //    Check/Process/Sync → đóng tab → delay 3–5' → lặp lại). entered=false → GIỮ cửa sổ cho người dùng
+                    //    thao tác tay (poll giữ cửa sổ, KHÔNG chạy loop). MỌI nhánh degrade PHẢI bật _readyForActions
+                    //    (kẻo WaitForSessionReady treo 5'); riêng nhánh captcha-relaunch KHÔNG bật (phiên sắp tháo dỡ + mở lại).
+                    // Logger dùng chung cho điều phối + vòng lặp shop (đọc _logLabel tại call-time → đổi nhãn theo shop).
+                    var loginLog = (Action<string>)(m => _services.Log.Append(_logLabel, m));
+                    bool entered = false;
                     if (acc is not null)
                     {
-                        var loginLog = (Action<string>)(m => _services.Log.Append(_logLabel, m));
-
-                        SetStatus(SessionState.Running, "Đang vào Nền tảng tài khoản phụ (subaccount)...");
-                        bool entered;
-                        try { entered = await session.TryEnterSellerViaSubaccountAsync(acc.Email, acc.Password, acc.VerifyEmail, acc.VerifyEmailPassword, loginLog, ct).ConfigureAwait(false); }
+                        SetStatus(SessionState.Running, "Đang đăng nhập Nền tảng tài khoản phụ (subaccount)...");
+                        try { entered = await session.TryLoginSubaccountAsync(acc.Email, acc.Password, acc.VerifyEmail, acc.VerifyEmailPassword, loginLog, ct).ConfigureAwait(false); }
                         catch (OperationCanceledException) { throw; }
                         catch { entered = false; }
 
                         if (!entered)
                         {
                             _services.Log.Append(_logLabel,
-                                "Không tự vào được Kênh Người bán — GIỮ cửa sổ để bạn thao tác tay.");
+                                "Không tự đăng nhập được Nền tảng tài khoản phụ — GIỮ cửa sổ để bạn thao tác tay.");
                         }
                         else
                         {
@@ -2002,130 +2041,264 @@ public partial class AccountSession : ObservableObject, IAccountSession
                     }
 
                     string? lastSaved = null;
-                    const int PollMs = 1000;
-                    const int OrderRetrySec = 30;
-                    var nextOrderCheck = DateTime.UtcNow;
-                    bool firstOrderCheck = true;
-                    // Cần 0 cửa sổ ở 2 vòng poll LIÊN TIẾP mới coi là đã đóng (tránh thoát nhầm lúc chuyển trang).
+                    // Cần 0 cửa sổ ở 2 vòng LIÊN TIẾP mới coi là đã đóng (tránh thoát nhầm lúc chuyển tab).
                     int zeroPageStreak = 0;
                     // Nhịp watchdog proxy: kiểm proxy đang gán còn sống không, jitter 2–3' (hồi nhanh khi proxy xoay).
                     var nextProxyCheck = DateTime.UtcNow.AddSeconds(proxyRng.Next(120, 180));
 
-                    // relaunchForCaptcha → BỎ QUA vòng poll (điều kiện false ngay ở entry): xuống finally dispose,
-                    // rồi reset hồ sơ + mở lại ở dưới.
-                    while (!relaunchForCaptcha && !session.IsClosed && DateTime.UtcNow < hardCap && !ct.IsCancellationRequested)
+                    if (!relaunchForCaptcha && entered)
                     {
-                        await Task.WhenAny(session.Closed, Task.Delay(PollMs, ct)).ConfigureAwait(false);
-
-                        if (ct.IsCancellationRequested)
+                        // ===== VÒNG LẶP SHOP (mô hình 1 subaccount = nhiều shop) =====
+                        // Đọc /portal/shop → mỗi shop: mở tab "Chi tiết" → Check/Process/Sync (chạy trên tab shop qua
+                        // WorkPage) → đóng tab → delay ngẫu nhiên 3–5' → shop kế; hết danh sách lặp lại từ đầu tới khi
+                        // Dừng/đóng cửa sổ. Tôn trọng ct/IsClosed/OpenPageCount==0 hai vòng/hardCap; watchdog proxy đầu
+                        // mỗi vòng ngoài (proxy chết → relaunchForProxy → break ra dispose + relaunch, đăng nhập lại).
+                        var shopRng = new Random();
+                        _shopLoopRunning = true;
+                        try
                         {
-                            break;
+                            while (!relaunchForProxy && !session.IsClosed && DateTime.UtcNow < hardCap && !ct.IsCancellationRequested)
+                            {
+                                // Watchdog proxy đầu vòng ngoài (chỉ phiên KiotProxy). Proxy chết → đổi + break relaunch.
+                                if (_kiotClient is not null && DateTime.UtcNow >= nextProxyCheck)
+                                {
+                                    _navigating = true;
+                                    try
+                                    {
+                                        var replacement = await ProxyWatchdog.TryGetReplacementAsync(
+                                            _kiotClient, _healthChecker, _currentProxy, ProxyRecheckDelayMs, ct).ConfigureAwait(false);
+                                        if (replacement is not null)
+                                        {
+                                            _currentProxy = replacement;
+                                            relaunchForProxy = true;
+                                            _readyForActions = false;
+                                        }
+                                    }
+                                    catch (OperationCanceledException) { throw; }
+                                    catch { /* watchdog lỗi (mạng/API) → bỏ qua, thử lại chu kỳ sau */ }
+                                    finally { _navigating = false; }
+
+                                    nextProxyCheck = DateTime.UtcNow.AddSeconds(proxyRng.Next(120, 180));
+                                    if (relaunchForProxy)
+                                    {
+                                        SetStatus(SessionState.Running, "Proxy cũ chết — đang đổi proxy, mở lại trình duyệt...");
+                                        break; // thoát loop → dispose Brave → relaunch với proxy mới
+                                    }
+                                }
+
+                                // Đọc danh sách shop (Goto /portal/shop trên Pages[0], tự SetWorkPage(null)).
+                                IReadOnlyList<ShopListItem> shops;
+                                try { shops = await session.ReadShopListAsync(loginLog, ct).ConfigureAwait(false); }
+                                catch (OperationCanceledException) { throw; }
+                                catch { shops = Array.Empty<ShopListItem>(); }
+
+                                // Lưu cookie 1 lần/đầu vòng (đã về trang danh sách — đã đăng nhập). CHỈ lưu khi có cookie
+                                // ĐĂNG NHẬP Shopee (tránh đè cookie hợp lệ cũ bằng cookie theo dõi).
+                                try
+                                {
+                                    var json = await session.CaptureCookiesJsonAsync().ConfigureAwait(false);
+                                    if (!string.IsNullOrEmpty(json) && json != lastSaved && ShopeeLoginCookies.IsLoggedIn(json) && TrySaveCookie(json))
+                                    {
+                                        lastSaved = json;
+                                    }
+                                }
+                                catch { /* context đã đóng giữa chừng — bỏ qua */ }
+
+                                if (shops.Count == 0)
+                                {
+                                    _services.Log.Append(_logLabel, "Không đọc được danh sách shop — thử lại sau 1'.");
+                                    await InterruptibleDelayAsync(session, 60_000, ct).ConfigureAwait(false);
+                                    continue;
+                                }
+
+                                foreach (var shop in shops)
+                                {
+                                    if (ct.IsCancellationRequested || session.IsClosed) break;
+                                    if (session.OpenPageCount == 0) { if (++zeroPageStreak >= 2) break; }
+                                    else zeroPageStreak = 0;
+
+                                    var shopLabel = string.IsNullOrWhiteSpace(shop.LoginName) ? shop.ShopName : shop.LoginName;
+                                    _logLabel = string.IsNullOrWhiteSpace(shopLabel) ? (acc?.Email ?? _logLabel) : shopLabel;
+                                    _currentShopId = shop.ShopId;
+                                    _currentShopLogin = shopLabel;
+                                    SetStatus(SessionState.Running, $"Đang xử lý shop {shopLabel}...");
+                                    try
+                                    {
+                                        bool opened;
+                                        _navigating = true;
+                                        try { opened = await session.OpenShopDetailAsync(shop, loginLog, ct).ConfigureAwait(false); }
+                                        finally { _navigating = false; }
+
+                                        if (opened)
+                                        {
+                                            // Flow 1 shop = thân SyncFullAsync (Check → Process nếu ToShip>0 → Sync). Các hàm
+                                            // con chạy trên WorkPage() (tab shop) và TỰ quản _navigating → KHÔNG giữ
+                                            // _navigating quanh cả cụm (kẻo các hàm con bail vì _navigating).
+                                            await ChayFlowMotShopAsync().ConfigureAwait(false);
+                                        }
+                                        else
+                                        {
+                                            _services.Log.Append(_logLabel, $"Không mở được shop {shopLabel} — bỏ qua lượt này.");
+                                        }
+
+                                        _navigating = true;
+                                        try { await session.CloseShopTabAsync(ct).ConfigureAwait(false); }
+                                        finally { _navigating = false; }
+                                    }
+                                    catch (OperationCanceledException) { throw; }
+                                    catch (Exception ex)
+                                    {
+                                        _services.Log.Append(_logLabel, "Lỗi khi xử lý shop: " + ex.Message);
+                                        try { _navigating = true; await session.CloseShopTabAsync(ct).ConfigureAwait(false); }
+                                        catch (OperationCanceledException) { throw; }
+                                        catch { /* best-effort đóng tab */ }
+                                        finally { _navigating = false; }
+                                    }
+                                    finally
+                                    {
+                                        _currentShopId = null;
+                                        _currentShopLogin = null;
+                                        _logLabel = acc?.Email ?? _logLabel; // trả nhãn về email tài khoản giữa các shop
+                                    }
+
+                                    if (ct.IsCancellationRequested || session.IsClosed) break;
+
+                                    // Delay ngẫu nhiên 3–5' giữa các shop (kể cả trước khi lặp lại từ đầu). ct-aware +
+                                    // THỨC NGAY khi đóng cửa sổ (session.Closed).
+                                    await InterruptibleDelayAsync(session, shopRng.Next(180_000, 300_001), ct).ConfigureAwait(false);
+                                }
+                            }
                         }
-
-                        if (session.OpenPageCount == 0)
+                        finally
                         {
-                            if (++zeroPageStreak >= 2)
+                            _shopLoopRunning = false;
+                            _currentShopId = null;
+                            _currentShopLogin = null;
+                            _logLabel = acc?.Email ?? _logLabel;
+                        }
+                    }
+                    else
+                    {
+                        // ===== POLL GIỮ CỬA SỔ (chưa đăng nhập subaccount / degrade). relaunchForCaptcha → while false
+                        //       ngay ở entry → bỏ qua, xuống finally dispose + reset hồ sơ + mở lại ở dưới. =====
+                        const int PollMs = 1000;
+                        const int OrderRetrySec = 30;
+                        var nextOrderCheck = DateTime.UtcNow;
+                        bool firstOrderCheck = true;
+                        while (!relaunchForCaptcha && !session.IsClosed && DateTime.UtcNow < hardCap && !ct.IsCancellationRequested)
+                        {
+                            await Task.WhenAny(session.Closed, Task.Delay(PollMs, ct)).ConfigureAwait(false);
+
+                            if (ct.IsCancellationRequested)
                             {
                                 break;
                             }
-                        }
-                        else
-                        {
-                            zeroPageStreak = 0;
-                        }
 
-                        string json;
-                        try { json = await session.CaptureCookiesJsonAsync().ConfigureAwait(false); }
-                        catch { break; } // context đã đóng giữa chừng
-
-                        // CHỈ lưu khi đã có cookie ĐĂNG NHẬP Shopee (tránh đè cookie hợp lệ cũ bằng cookie theo dõi).
-                        if (!string.IsNullOrEmpty(json) && json != lastSaved && ShopeeLoginCookies.IsLoggedIn(json))
-                        {
-                            if (TrySaveCookie(json))
+                            if (session.OpenPageCount == 0)
                             {
-                                lastSaved = json;
-                            }
-                        }
-
-                        // Nhịp theo dõi đơn "Chờ Lấy Hàng": tới hạn thì reload + đọc số. Lần đầu KHÔNG reload.
-                        // Đang điều hướng xử lý đơn (_navigating) → BỎ QUA nhịp này (reload sẽ phá thao tác giữa chừng).
-                        if (!_navigating && DateTime.UtcNow >= nextOrderCheck)
-                        {
-                            // GIỮ cờ _navigating suốt lượt đọc (có thể kéo dài ~38s: reload 30s + poll 8s) để
-                            // loại trừ HAI CHIỀU với nút Kiểm tra / Xử lý đơn — không cho Goto/click tay chạy
-                            // chồng lên lượt reload đang bay trên cùng trang (hai bên cùng fail ảo).
-                            _navigating = true;
-                            int? count;
-                            try
-                            {
-                                count = await session.ReadToShipCountAsync(reload: !firstOrderCheck, ct).ConfigureAwait(false);
-                            }
-                            finally
-                            {
-                                _navigating = false;
-                            }
-
-                            if (count is int n)
-                            {
-                                // Điểm ĐĂNG NHẬP-OK ĐẦU TIÊN của lần mở này: đọc được số "Chờ Lấy Hàng" ⇒ đang
-                                // ở trang chủ đã đăng nhập. Nếu tài khoản còn mang cờ "TK chưa xác nhận" (vd
-                                // người dùng vừa xác minh tay xong) thì GỠ để nhãn đỏ tự lành.
-                                if (firstOrderCheck)
+                                if (++zeroPageStreak >= 2)
                                 {
-                                    TryClearVerifyFailedAfterLogin();
+                                    break;
                                 }
-                                firstOrderCheck = false;
-                                ToShipCount = n; // VM tự định dạng dòng hiển thị theo số này
-                                nextOrderCheck = DateTime.UtcNow.AddMinutes(orderIntervalMin); // đã đăng nhập → chu kỳ cấu hình
                             }
                             else
                             {
-                                // Chưa đăng nhập / chưa đọc được → thử lại sớm, KHÔNG reload.
-                                nextOrderCheck = DateTime.UtcNow.AddSeconds(OrderRetrySec);
+                                zeroPageStreak = 0;
                             }
-                        }
 
-                        // ===== NHỊP WATCHDOG PROXY (~10') =====
-                        // CHỈ với phiên nguồn KiotProxy (_kiotClient != null) và khi KHÔNG đang điều hướng
-                        // (loại trừ với đọc đơn / nút Kiểm tra / Xử lý đơn). Bật _navigating SUỐT lượt kiểm
-                        // (health-check tối đa ~8s×2 + 5s ⇒ ~21s) để không thao tác nào chạy chồng lên.
-                        if (_kiotClient is not null && !_navigating && DateTime.UtcNow >= nextProxyCheck)
-                        {
-                            _navigating = true;
-                            try
+                            string json;
+                            try { json = await session.CaptureCookiesJsonAsync().ConfigureAwait(false); }
+                            catch { break; } // context đã đóng giữa chừng
+
+                            // CHỈ lưu khi đã có cookie ĐĂNG NHẬP Shopee (tránh đè cookie hợp lệ cũ bằng cookie theo dõi).
+                            if (!string.IsNullOrEmpty(json) && json != lastSaved && ShopeeLoginCookies.IsLoggedIn(json))
                             {
-                                var replacement = await ProxyWatchdog.TryGetReplacementAsync(
-                                    _kiotClient, _healthChecker, _currentProxy, ProxyRecheckDelayMs, ct).ConfigureAwait(false);
-                                if (replacement is not null)
+                                if (TrySaveCookie(json))
                                 {
-                                    _currentProxy = replacement;
-                                    relaunchForProxy = true;
-                                    // Sắp dispose + relaunch (State GIỮ Running suốt lúc đổi proxy) → tắt sẵn
-                                    // sàng NGAY để nút Sync/Kiểm tra không chạy vào phiên đang bị tháo dỡ.
-                                    _readyForActions = false;
+                                    lastSaved = json;
                                 }
                             }
-                            catch (OperationCanceledException)
+
+                            // Nhịp theo dõi đơn "Chờ Lấy Hàng": tới hạn thì reload + đọc số. Lần đầu KHÔNG reload.
+                            // Đang điều hướng xử lý đơn (_navigating) → BỎ QUA nhịp này (reload sẽ phá thao tác giữa chừng).
+                            if (!_navigating && DateTime.UtcNow >= nextOrderCheck)
                             {
-                                throw; // Dừng chủ động → để catch NGOÀI xử như HỦY.
-                            }
-                            catch
-                            {
-                                /* watchdog lỗi (mạng/API) → bỏ qua, thử lại chu kỳ sau */
-                            }
-                            finally
-                            {
-                                _navigating = false;
+                                // GIỮ cờ _navigating suốt lượt đọc (có thể kéo dài ~38s: reload 30s + poll 8s) để
+                                // loại trừ HAI CHIỀU với nút Kiểm tra / Xử lý đơn — không cho Goto/click tay chạy
+                                // chồng lên lượt reload đang bay trên cùng trang (hai bên cùng fail ảo).
+                                _navigating = true;
+                                int? count;
+                                try
+                                {
+                                    count = await session.ReadToShipCountAsync(reload: !firstOrderCheck, ct).ConfigureAwait(false);
+                                }
+                                finally
+                                {
+                                    _navigating = false;
+                                }
+
+                                if (count is int n)
+                                {
+                                    // Điểm ĐĂNG NHẬP-OK ĐẦU TIÊN của lần mở này: đọc được số "Chờ Lấy Hàng" ⇒ đang
+                                    // ở trang chủ đã đăng nhập. Nếu tài khoản còn mang cờ "TK chưa xác nhận" (vd
+                                    // người dùng vừa xác minh tay xong) thì GỠ để nhãn đỏ tự lành.
+                                    if (firstOrderCheck)
+                                    {
+                                        TryClearVerifyFailedAfterLogin();
+                                    }
+                                    firstOrderCheck = false;
+                                    ToShipCount = n; // VM tự định dạng dòng hiển thị theo số này
+                                    nextOrderCheck = DateTime.UtcNow.AddMinutes(orderIntervalMin); // đã đăng nhập → chu kỳ cấu hình
+                                }
+                                else
+                                {
+                                    // Chưa đăng nhập / chưa đọc được → thử lại sớm, KHÔNG reload.
+                                    nextOrderCheck = DateTime.UtcNow.AddSeconds(OrderRetrySec);
+                                }
                             }
 
-                            nextProxyCheck = DateTime.UtcNow.AddSeconds(proxyRng.Next(120, 180));
-                            if (relaunchForProxy)
+                            // ===== NHỊP WATCHDOG PROXY (~10') =====
+                            // CHỈ với phiên nguồn KiotProxy (_kiotClient != null) và khi KHÔNG đang điều hướng
+                            // (loại trừ với đọc đơn / nút Kiểm tra / Xử lý đơn). Bật _navigating SUỐT lượt kiểm
+                            // (health-check tối đa ~8s×2 + 5s ⇒ ~21s) để không thao tác nào chạy chồng lên.
+                            if (_kiotClient is not null && !_navigating && DateTime.UtcNow >= nextProxyCheck)
                             {
-                                SetStatus(SessionState.Running, "Proxy cũ chết — đang đổi proxy, mở lại trình duyệt...");
-                                break; // thoát poll → dispose Brave → relaunch với proxy mới
+                                _navigating = true;
+                                try
+                                {
+                                    var replacement = await ProxyWatchdog.TryGetReplacementAsync(
+                                        _kiotClient, _healthChecker, _currentProxy, ProxyRecheckDelayMs, ct).ConfigureAwait(false);
+                                    if (replacement is not null)
+                                    {
+                                        _currentProxy = replacement;
+                                        relaunchForProxy = true;
+                                        // Sắp dispose + relaunch (State GIỮ Running suốt lúc đổi proxy) → tắt sẵn
+                                        // sàng NGAY để nút Sync/Kiểm tra không chạy vào phiên đang bị tháo dỡ.
+                                        _readyForActions = false;
+                                    }
+                                }
+                                catch (OperationCanceledException)
+                                {
+                                    throw; // Dừng chủ động → để catch NGOÀI xử như HỦY.
+                                }
+                                catch
+                                {
+                                    /* watchdog lỗi (mạng/API) → bỏ qua, thử lại chu kỳ sau */
+                                }
+                                finally
+                                {
+                                    _navigating = false;
+                                }
+
+                                nextProxyCheck = DateTime.UtcNow.AddSeconds(proxyRng.Next(120, 180));
+                                if (relaunchForProxy)
+                                {
+                                    SetStatus(SessionState.Running, "Proxy cũ chết — đang đổi proxy, mở lại trình duyệt...");
+                                    break; // thoát poll → dispose Brave → relaunch với proxy mới
+                                }
                             }
                         }
-                    }
+                    } // hết nhánh else (poll giữ cửa sổ)
 
                     // Lần bắt cookie CHỐT trước khi dispose (đăng nhập xong đóng cửa sổ ngay vẫn bắt kịp).
                     try

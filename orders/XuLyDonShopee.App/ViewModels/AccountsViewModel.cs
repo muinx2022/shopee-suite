@@ -904,6 +904,15 @@ public partial class AccountsViewModel : ViewModelBase
         // cũ. Dùng cờ ReadyForActions (KHÔNG chỉ State==Running): phiên đang "Đang tự đăng nhập..." vẫn là
         // Running nhưng cờ chưa bật → KHÔNG chạy ngay, rơi xuống luồng auto-start để CHỜ sẵn sàng (chống Lỗi 2).
         var existing = _services.Sessions.Get(accountId);
+
+        // Guard NHẸ (mô hình 1 subaccount = nhiều shop): phiên đang chạy VÒNG LẶP SHOP tự động → BỎ QUA thao tác
+        // tay để không giẫm luồng (loop đang lặp qua các shop, mở/đóng tab liên tục). Chỉ log 1 dòng rồi thôi.
+        if (existing is { IsShopLoopRunning: true })
+        {
+            _services.Log.Append(email, $"Đang chạy vòng lặp shop — bỏ qua thao tác {actionName} tay lần này.");
+            return;
+        }
+
         if (existing is { ReadyForActions: true })
         {
             await action(existing);

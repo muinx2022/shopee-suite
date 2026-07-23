@@ -77,7 +77,7 @@ public class OrdersRepository
     /// Discord/Telegram) đúng những đơn vừa xuất hiện.
     /// </summary>
     public (int Inserted, int Updated, IReadOnlyList<SyncedOrder> InsertedOrders) UpsertMany(
-        long accountId, IEnumerable<SyncedOrder> orders, DateTime syncedAt)
+        long accountId, IEnumerable<SyncedOrder> orders, DateTime syncedAt, string? shopId = null)
     {
         var syncedAtStr = DbSerialization.FormatDate(syncedAt);
         var inserted = 0;
@@ -114,14 +114,15 @@ public class OrdersRepository
                 using var ins = conn.CreateCommand();
                 ins.Transaction = tx;
                 ins.CommandText = @"INSERT INTO orders
-    (account_id, order_sn, shopee_order_id, buyer_username, items_json, item_count, item_summary, sku,
+    (account_id, shop_id, order_sn, shopee_order_id, buyer_username, items_json, item_count, item_summary, sku,
      total_price, total_price_text, final_amount, final_amount_text, payment_method, status, status_description, cancel_reason,
      channel, carrier, tracking_number, synced_at, created_at, updated_at)
     VALUES
-    ($account, $sn, $shopeeId, $buyer, $items, $itemCount, $itemSummary, $sku,
+    ($account, $shopId, $sn, $shopeeId, $buyer, $items, $itemCount, $itemSummary, $sku,
      $totalPrice, $totalText, $finalAmount, $finalText, $payment, $status, $statusDesc, $cancelReason,
      $channel, $carrier, $tracking, $synced, $synced, $synced);";
                 ins.Parameters.AddWithValue("$account", accountId);
+                ins.Parameters.AddWithValue("$shopId", (object?)shopId ?? DBNull.Value);
                 ins.Parameters.AddWithValue("$sn", o.OrderSn);
                 BindData(ins, o);
                 ins.Parameters.AddWithValue("$synced", syncedAtStr);
@@ -136,7 +137,10 @@ public class OrdersRepository
                 // final_amount/final_amount_text dùng COALESCE($moi, cot_cu): lần sync này KHÔNG lấy được (mở
                 // chi tiết bị bỏ qua / đơn "Đã hủy" / lỗi) thì $finalAmount là NULL → GIỮ số đã lấy ở lần trước,
                 // KHÔNG ghi đè NULL làm mất dữ liệu. Lần sau lấy được → cập nhật đè bình thường.
+                // shop_id dùng COALESCE($shopId, shop_id): lượt này không truyền shop (null) thì GIỮ shop đã gắn,
+                // KHÔNG xóa. Đơn thuộc đúng MỘT shop nên gắn lại cùng giá trị là vô hại.
                 upd.CommandText = @"UPDATE orders SET
+    shop_id = COALESCE($shopId, shop_id),
     shopee_order_id = $shopeeId, buyer_username = $buyer, items_json = $items, item_count = $itemCount,
     item_summary = $itemSummary, sku = $sku,
     total_price = $totalPrice, total_price_text = $totalText,
@@ -146,6 +150,7 @@ public class OrdersRepository
     channel = $channel, carrier = $carrier, tracking_number = $tracking,
     synced_at = $synced, updated_at = $synced
     WHERE id = $id;";
+                upd.Parameters.AddWithValue("$shopId", (object?)shopId ?? DBNull.Value);
                 BindData(upd, o);
                 upd.Parameters.AddWithValue("$synced", syncedAtStr);
                 upd.Parameters.AddWithValue("$id", existingId.Value);
@@ -273,18 +278,25 @@ public class OrdersRepository
     /// <c>AccountSession</c> quyết bằng C# đơn nào cần gửi (mới / thiếu link phiếu / trạng thái hủy đổi / vận
     /// đơn vừa xuất hiện) và đơn nào bỏ qua (hủy mà chưa từng có vận đơn). Sắp theo id tăng (đơn cũ trước).
     /// </summary>
-    public IReadOnlyList<GsheetPendingOrder> GetForGsheetPush(long accountId)
+    public IReadOnlyList<GsheetPendingOrder> GetForGsheetPush(long accountId, string? shopId = null)
     {
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
+        // Lọc theo shop khi có shopId (mô hình nhiều-shop: chỉ đẩy đơn CỦA shop hiện tại, TenShop lấy theo shop đó
+        // — không đẩy nhầm tên shop). shopId null → hành vi CŨ (mọi đơn của account).
+        var shopFilter = string.IsNullOrEmpty(shopId) ? string.Empty : " AND shop_id = $shopId";
         cmd.CommandText = @"SELECT order_sn, tracking_number, sku, total_price,
        status, status_description, cancel_reason,
        gsheet_synced_at, gsheet_file_url, gsheet_da_huy, gsheet_da_co_van_don,
        sold_counted_at, hub_synced_at, hub_slip_synced_at, gsheet_tab
     FROM orders
-    WHERE account_id = $a
+    WHERE account_id = $a" + shopFilter + @"
     ORDER BY id;";
         cmd.Parameters.AddWithValue("$a", accountId);
+        if (!string.IsNullOrEmpty(shopId))
+        {
+            cmd.Parameters.AddWithValue("$shopId", shopId);
+        }
 
         var list = new List<GsheetPendingOrder>();
         using var reader = cmd.ExecuteReader();

@@ -23,6 +23,7 @@ public class AccountSessionManagerTests
         public string? StatusText => null;
         public int? ToShipCount => null;
         public bool ReadyForActions { get; set; } // stub cho phép set khi cần (mặc định false)
+        public bool IsShopLoopRunning { get; set; } // stub cho phép set khi cần (mặc định false)
         public string? LastError => null;
         public Process? BraveProcess => null;
 

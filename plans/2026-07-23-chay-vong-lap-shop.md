@@ -1,7 +1,7 @@
 # Plan: "Chạy" — vòng lặp qua nhiều shop trong một tài khoản subaccount
 
 - **Ngày:** 2026-07-23
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành (code + 954 test; CHƯA chạy thật DOM /portal/shop)
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-executor`)
 - **Nhánh:** `feature/dang-nhap-subaccount` (worktree `d:\Projects\shopee-suite-wt-subaccount`)
 
@@ -220,4 +220,106 @@ thôi (tránh giẫm luồng). Không bắt buộc phức tạp — ưu tiên kh
 
 ## Báo cáo thực thi (Opus điền sau khi xong)
 
-<chưa có>
+**Ngày thực thi:** 2026-07-23 · **Kết quả build/test:** 3 project orders build 0 error / 0 warning;
+`dotnet test orders/XuLyDonShopee.Tests` = **954 passed / 0 failed** (baseline trước khi sửa: 939 → +15 test mới).
+
+### Đã hoàn thành theo từng bước
+
+**Bước 1 — Đuôi đăng nhập (`ShopeeLoginService.cs`)**
+- Đổi tên `TryEnterSellerViaSubaccountAsync` → `TryLoginSubaccountAsync` (interface `ILoginSession` + impl + caller
+  `AccountSession.RunAsync` + doc comment). Giữ nguyên tham số.
+- BỎ Bước 6 (click "Tài khoản của tôi") + Bước 7 (click "Kênh Người bán") + Bước 8 (chuẩn hóa tab). Method giờ:
+  điền form → mở hộp thư → chờ nav "Tài khoản của tôi" hiển thị → đóng tab mail → trả `true`. Cập nhật message
+  các nhánh catch. Xóa local `UrlIsBanhang` (không còn dùng).
+- Giữ `OpenMailboxSignedInAsync`, `MatchesMyAccountNav`. Giữ `SellerChannelRegex` + `MatchesSellerChannelEntry`
+  (đánh dấu doc "KHÔNG DÙNG trong luồng mới") để test cũ `SubaccountNavMatchTests` còn xanh.
+
+**Bước 2 — Trang làm việc động (`ShopeeLoginService.cs`)**
+- Thêm `private volatile IPage? _workPage;` + `internal void SetWorkPage(IPage?)` + `private IPage? WorkPage()`
+  (trả `_workPage` nếu còn mở, ngược lại `Pages[0]`).
+- Đổi **8** flow method từ `_context.Pages[0]` → `WorkPage()`: `GoHomeAndReadToShipCountAsync`,
+  `ReadToShipCountAsync`, `OpenShippingAddressSettingsAsync`, `SetPickupAddressAsync`,
+  `SetPickupAddressToOtherAsync`, `ProcessFirstOrderAsync`, `SyncAllOrdersAsync`, `RedownloadSlipsAsync`.
+  GIỮ `Pages[0]` ở 4 method login/detect (`TryHumanLoginAsync`, `DetectPageStateAsync`,
+  `TryLoginSubaccountAsync`, `TryVerifyByEmailAsync`). (Lưu ý: thực tế có 12 chỗ `var page = Pages[0]`, không phải
+  11 như plan ước; phân bổ 8 flow / 4 login-detect — `TryVerifyByEmailAsync` là chỗ login/detect thứ 4, giữ Pages[0].)
+
+**Bước 3 — Primitive shop (`ShopListItem.cs` mới + `ShopeeLoginService.cs`)**
+- File mới `orders/XuLyDonShopee.Core/Services/ShopListItem.cs` (record `ShopListItem(ShopId, ShopName, LoginName)`).
+- Hằng `ShopListUrl = "https://banhang.shopee.vn/portal/shop"`.
+- `ReadShopListAsync(log, ct)`: `SetWorkPage(null)` → Goto `/portal/shop` trên Pages[0] (nuốt lỗi) → poll
+  `tr[data-row-key]` ≤20s → JS quét mảng `{rowKey,name,login}` → hàm thuần `ParseShopListJson`. Rỗng khi trượt +
+  log `title/url`.
+- `OpenShopDetailAsync(shop, log, ct)`: định vị `tr[data-row-key='<id>'] button.eds-react-button--link` khớp
+  "chi tiet"/"detail" (qua `FindByNormalizedTextInFramesAsync`) → click kiểu người → hứng tab mới (event
+  `_context.Page` + quét Pages, ≤30s) HOẶC cùng-tab (URL rời `/portal/shop`) → `SetWorkPage(tab)` → chờ
+  DOMContentLoaded + BringToFront. Log `title/url` khi trượt.
+- `CloseShopTabAsync(ct)`: đóng tab shop nếu là tab riêng (retry ≤3), `SetWorkPage(null)`, BringToFront Pages[0].
+- Hàm thuần `internal static ParseShopListJson(json)` + forwarder cấp `ShopeeLoginService` để test. Graceful,
+  KHÔNG ném trừ hủy.
+- **Lệch plan (đã cân nhắc):** interface 3 primitive có thêm tham số `Action<string>? log = null` (plan ghi chỉ
+  `ct`) để thực hiện yêu cầu "log title/url khi trượt" của chính Bước 3 — đồng bộ với `ProcessFirstOrderAsync`/
+  `SyncAllOrdersAsync`.
+
+**Bước 4 — shop_id vào đơn & GSheet (`Database.cs`, `OrdersRepository.cs`, `AccountSession.cs`)**
+- `Database.cs`: thêm `shop_id TEXT` vào CREATE TABLE orders + `EnsureColumn(conn,"orders","shop_id","TEXT")`
+  (không backfill).
+- `OrdersRepository.UpsertMany(..., string? shopId = null)`: INSERT gắn `shop_id`; UPDATE
+  `shop_id = COALESCE($shopId, shop_id)` (không truyền → giữ).
+- `OrdersRepository.GetForGsheetPush(accountId, string? shopId = null)`: có shopId → `AND shop_id = $shopId`;
+  null → hành vi cũ (mọi đơn account). `MarkGsheetSynced` giữ nguyên (khóa account+order_sn).
+- `AccountSession`: thêm field `_currentShopId`/`_currentShopLogin`; `SyncOrdersAsync` truyền `_currentShopId` vào
+  `UpsertMany`; `StartGsheetPushInBackground` **chụp** shopId/shopLogin (tránh đua với field bị xóa ở finally) →
+  `PushOrdersToGsheetAsync(shopId, shopLogin, log, ct)` gọi `GetForGsheetPush(accountId, shopId)` và
+  **TenShop = shopLogin** (fallback `Account.Email` khi shopLogin rỗng/chưa vào loop). Phần gộp theo tab giữ nguyên.
+
+**Bước 5 — Vòng lặp shop trong `RunAsync` (`AccountSession.cs`)**
+- Hoist `bool entered` + `loginLog` ra ngoài `if (acc is not null)`; đổi call sang `TryLoginSubaccountAsync`; cập
+  nhật comment điều phối.
+- Thay đoạn poll "nhịp đọc đơn" bằng nhánh `if (!relaunchForCaptcha && entered) { VÒNG LẶP SHOP } else { POLL GIỮ
+  CỬA SỔ }`. Vòng lặp: watchdog proxy đầu vòng ngoài (proxy chết → `relaunchForProxy` → break relaunch) → đọc
+  shop list → lưu cookie 1 lần/đầu vòng → rỗng thì log + delay 60s (ct-aware) + continue → foreach shop: set
+  `_logLabel`/`_currentShopId`/`_currentShopLogin`, `_navigating` bọc riêng `OpenShopDetailAsync` &
+  `CloseShopTabAsync`, giữa hai đó gọi `ChayFlowMotShopAsync()` (= `SyncFullAsync`, các hàm con tự quản
+  `_navigating`), finally clear shop-context, delay ngẫu nhiên 180_000..300_000ms (ct-aware + thức khi đóng cửa sổ
+  qua `InterruptibleDelayAsync`). Tôn trọng `session.IsClosed`, `OpenPageCount==0` hai vòng, `ct`, `hardCap`.
+  Nhánh `else` (degrade / chưa đăng nhập được) giữ NGUYÊN poll cũ (đọc số + watchdog).
+- Thêm `ChayFlowMotShopAsync()` (=`SyncFullAsync`) + `InterruptibleDelayAsync(session, ms, ct)`.
+- **Quyết định thiết kế:** KHÔNG giữ `_navigating` quanh cả cụm shop (như pseudocode) vì `ChayFlowMotShopAsync`
+  gọi `CheckOrders/Process/Sync` — các hàm này bail khi `_navigating`. Thay vào đó `_navigating` chỉ bọc thao tác
+  tab (mở/đóng); guard giẫm-luồng do cờ mới `_shopLoopRunning` đảm nhiệm (Bước 6).
+
+**Bước 6 — Guard nút thủ công (`AccountSession.cs` + `IAccountSession.cs` + `AccountsViewModel.cs`)**
+- Thêm `_shopLoopRunning` (đặt true/false ở vòng lặp shop) + property `IsShopLoopRunning` (interface + impl).
+- `AccountsViewModel.RunOrAutoStartAsync` (đường của nút "Sync"/"Sync đã chọn"): nếu phiên
+  `IsShopLoopRunning` → log "Đang chạy vòng lặp shop — bỏ qua thao tác … tay lần này." rồi thôi.
+- **Lệch plan (đã cân nhắc):** guard đặt ở tầng VM (`RunOrAutoStartAsync`) thay vì trong các session-method, vì
+  chính vòng lặp shop gọi lại `SyncFullAsync`→`CheckOrders/…`; guard trong session-method sẽ chặn cả lời gọi nội
+  bộ của loop. Đặt ở VM chặn đúng "nút thủ công" mà không phá loop. (AutoRunService KHÔNG đụng — thuộc phạm vi plan
+  autorun kế tiếp.)
+
+**Bước 7 — Test (`orders/XuLyDonShopee.Tests`)**
+- `ShopListParseTests.cs` (mới, 10 case): 3 dòng DOM mẫu → 3 item đúng; thiếu login → LoginName rỗng; thiếu rowKey
+  → bỏ; trim; rỗng/JSON hỏng/null → list rỗng không ném.
+- `OrdersRepositoryTests` (+4): UpsertMany gắn shop_id + COALESCE giữ; không truyền → NULL; GetForGsheetPush lọc
+  theo shop + null trả tất cả + bỏ đơn shop_id NULL khi lọc.
+- `DatabaseMigrationTests` (+1): DB cũ thiếu shop_id → migration thêm cột, đơn cũ nguyên, shop_id NULL,
+  GetForGsheetPush(shopId)/không-shopId không ném.
+
+### Kết quả kiểm chứng (lệnh đã chạy)
+- `dotnet build orders/XuLyDonShopee.Core` → Build succeeded, 0 warning/0 error.
+- `dotnet build orders/XuLyDonShopee.App` → Build succeeded, 0 warning/0 error.
+- `dotnet test orders/XuLyDonShopee.Tests` → **Passed! Failed: 0, Passed: 954, Skipped: 0** (baseline đầu phiên: 939).
+- Kiểm tham chiếu chéo: không project nào ngoài `orders/` implement `IAccountSession` → thêm member interface an toàn;
+  `suite/Shopee.Suite` chỉ CONSUME `XuLyDonShopee.App` (không vỡ). KHÔNG build suite/server (ngoài phạm vi plan).
+
+### Phần CHƯA verify được bằng chạy thật (rủi ro đã ghi trong plan)
+- Selector DOM `/portal/shop` + luồng "Chi tiết" mở tab mới/cùng tab CHƯA soi bằng chạy thật (chỉ có HTML bảng
+  người dùng dán). Đã viết nhiều fallback + log `title/url` khi trượt; xử cả hai ca tab-mới/cùng-tab. Cần một lần
+  chạy thật để tinh chỉnh selector nút "Chi tiết" + xác nhận URL trang chi tiết shop.
+- Toàn bộ vòng lặp shop (đọc list → mở/đóng tab → delay → lặp) chỉ kiểm qua build + đọc logic, CHƯA chạy trình
+  duyệt thật.
+
+### Không làm (đúng phạm vi plan)
+- KHÔNG đổi tên nút "Sync"→"Chạy", KHÔNG gỡ màn "Chạy tự động" (thuộc plan `nut-chay-bo-autorun`).
+- KHÔNG đụng Apps Script / hợp đồng JSON GSheet; KHÔNG làm địa chỉ lấy hàng theo shop (dùng chung).

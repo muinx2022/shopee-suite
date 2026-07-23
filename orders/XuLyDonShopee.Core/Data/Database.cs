@@ -99,6 +99,7 @@ CREATE TABLE IF NOT EXISTS settings (
 CREATE TABLE IF NOT EXISTS orders (
     id                 INTEGER PRIMARY KEY AUTOINCREMENT,
     account_id         INTEGER NOT NULL,
+    shop_id            TEXT,
     order_sn           TEXT NOT NULL,
     shopee_order_id    TEXT,
     buyer_username     TEXT,
@@ -189,6 +190,11 @@ CREATE TABLE IF NOT EXISTS orders (
         // (hoặc grandfather = đơn đã-giao-sẵn được đánh dấu KHÔNG +1). NULL = chưa xử lý đếm. Đơn CHUYỂN từ
         // chưa-giao → đã-giao mới +1; set cờ SAU khi hub +1 OK (kẻo mất đếm nếu hub lỗi). Thêm cho DB CŨ.
         EnsureColumn(conn, "orders", "sold_counted_at", "TEXT");
+
+        // Mã shop (mô hình 1 tài khoản subaccount = nhiều shop): gắn shop_id vào mỗi đơn để lọc theo shop khi đẩy
+        // GSheet (cột Tên Shop = tên đăng nhập shop) — KHÔNG đẩy nhầm đơn shop này với tên shop kia. Đơn CŨ shop_id
+        // NULL (vẫn đẩy như trước theo account khi lọc shopId=null). KHÔNG backfill. Thêm cho DB CŨ.
+        EnsureColumn(conn, "orders", "shop_id", "TEXT");
     }
 
     /// <summary>

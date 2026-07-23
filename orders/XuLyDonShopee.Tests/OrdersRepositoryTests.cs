@@ -799,6 +799,71 @@ public class OrdersRepositoryTests
         Assert.Equal(4, repo.Count(accountIds: new long[] { 1, 2, 3 }));
     }
 
+    // ===================== shop_id (mô hình 1 subaccount = nhiều shop) =====================
+
+    [Fact]
+    public void UpsertMany_GanShopId_LuuVaoCotShopId_UpsertLaiKhongTruyen_GiuShopId()
+    {
+        using var temp = new TempDatabase();
+        var db = temp.Open();
+        var repo = new OrdersRepository(db);
+
+        repo.UpsertMany(1, new[] { Sample("SN1") }, DateTime.UtcNow, shopId: "SHOP_A");
+        Assert.Equal("SHOP_A", ReadString(db, "SN1", "shop_id"));
+
+        // Upsert lại KHÔNG truyền shopId (null) → COALESCE GIỮ shop_id cũ, KHÔNG xóa.
+        repo.UpsertMany(1, new[] { Sample("SN1") }, DateTime.UtcNow);
+        Assert.Equal("SHOP_A", ReadString(db, "SN1", "shop_id"));
+    }
+
+    [Fact]
+    public void UpsertMany_KhongTruyenShopId_ShopIdNull()
+    {
+        using var temp = new TempDatabase();
+        var db = temp.Open();
+        var repo = new OrdersRepository(db);
+
+        repo.UpsertMany(1, new[] { Sample("SN1") }, DateTime.UtcNow);
+        Assert.Null(ReadString(db, "SN1", "shop_id"));
+    }
+
+    [Fact]
+    public void GetForGsheetPush_LocTheoShop_ChiTraDonCuaShop_NullTraTatCa()
+    {
+        using var temp = new TempDatabase();
+        var repo = new OrdersRepository(temp.Open());
+
+        // Cùng account 1, 2 shop khác nhau (mã đơn gắn shop tương ứng).
+        repo.UpsertMany(1, new[] { Sample("A1"), Sample("A2") }, DateTime.UtcNow, shopId: "SHOP_A");
+        repo.UpsertMany(1, new[] { Sample("B1") }, DateTime.UtcNow, shopId: "SHOP_B");
+
+        Assert.Equal(new[] { "A1", "A2" }, repo.GetForGsheetPush(1, "SHOP_A").Select(p => p.OrderSn));
+        Assert.Equal(new[] { "B1" }, repo.GetForGsheetPush(1, "SHOP_B").Select(p => p.OrderSn));
+
+        // shopId null → MỌI đơn của account (hành vi cũ, giữ tương thích).
+        Assert.Equal(new[] { "A1", "A2", "B1" }, repo.GetForGsheetPush(1).Select(p => p.OrderSn));
+
+        // Shop không có đơn → rỗng (KHÔNG ném).
+        Assert.Empty(repo.GetForGsheetPush(1, "SHOP_X"));
+    }
+
+    [Fact]
+    public void GetForGsheetPush_LocShop_BoDonShopIdNull()
+    {
+        using var temp = new TempDatabase();
+        var repo = new OrdersRepository(temp.Open());
+
+        // Đơn CŨ (shop_id NULL — vd đơn trước bản này) + đơn shop mới.
+        repo.UpsertMany(1, new[] { Sample("OLD") }, DateTime.UtcNow);                   // shop_id NULL
+        repo.UpsertMany(1, new[] { Sample("NEW") }, DateTime.UtcNow, shopId: "SHOP_A");
+
+        // Lọc theo shop → chỉ đơn shop đó (đơn shop_id NULL KHÔNG lọt → không đẩy nhầm tên shop).
+        Assert.Equal(new[] { "NEW" }, repo.GetForGsheetPush(1, "SHOP_A").Select(p => p.OrderSn));
+
+        // Không lọc → cả 2 (hành vi cũ theo account).
+        Assert.Equal(2, repo.GetForGsheetPush(1).Count);
+    }
+
     /// <summary>Đọc 1 cột (dạng chuỗi) của đơn theo order_sn — kiểm chứng trực tiếp trên DB.</summary>
     private static string? ReadString(Database db, string orderSn, string column)
     {

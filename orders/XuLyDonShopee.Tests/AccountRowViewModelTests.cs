@@ -29,6 +29,7 @@ public class AccountRowViewModelTests
         public string? StatusText => null;
         public int? ToShipCount { get; }
         public bool ReadyForActions => false; // không dùng trong test SyncFromSession
+        public bool IsShopLoopRunning => false; // không dùng trong test SyncFromSession
         public string? LastError => null;
         public Process? BraveProcess => null;
 
