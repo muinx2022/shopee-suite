@@ -131,9 +131,13 @@ public sealed class OrdersBridgeSession : IDisposable
         try
         {
             var safe = userDataDir.Replace("'", "''");
+            // Kill nếu (a) đúng hồ sơ này, HOẶC (b) BẤT KỲ trình duyệt nào đang nạp extension 'shopee-orders'
+            // (kể cả trên hồ sơ khác / mồ côi từ lần trước) — vì cầu nối dùng CỔNG CỐ ĐỊNH, 2 SW cùng nối 47821 sẽ
+            // giẫm nhau: SW không có tab banhang lại nhận lệnh → "không thấy tab". Chỉ diệt trình duyệt của app.
             var cmd =
                 "Get-CimInstance Win32_Process | Where-Object { " +
-                "($_.Name -in 'brave.exe','chrome.exe','msedge.exe') -and $_.CommandLine -like '*" + safe + "*' } | " +
+                "($_.Name -in 'brave.exe','chrome.exe','msedge.exe') -and " +
+                "($_.CommandLine -like '*" + safe + "*' -or $_.CommandLine -like '*shopee-orders*') } | " +
                 "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }";
             var psi = new System.Diagnostics.ProcessStartInfo("powershell",
                 "-NoProfile -NonInteractive -Command \"" + cmd + "\"")

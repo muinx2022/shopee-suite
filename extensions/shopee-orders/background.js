@@ -260,7 +260,7 @@ async function handleCommand(cmd) {
 
 // Đọc danh sách shop.
 async function doReadShopList() {
-  if (!(await ensureListTab(BANHANG_HOSTS))) { send({ action: "error", message: "chưa thấy tab /portal/shop" }); return; }
+  if (!(await ensureListTab(BANHANG_HOSTS))) { send({ action: "error", message: "chưa thấy tab /portal/shop — SW thấy các tab: [" + lastTabUrls.join(" | ") + "]" }); return; }
   const json = await execInTab(listTabId, pageScanShopList, []);
   send({ action: "pageData", kind: "shopList", data: json });
 }
@@ -281,7 +281,7 @@ async function doReadToShip() {
 
 // GĐ1: mở "Chi tiết" shop đầu bằng trusted click, theo tab shop mới.
 async function openShopDetail(shopId) {
-  if (!(await ensureListTab(BANHANG_HOSTS))) { send({ action: "error", message: "chưa thấy tab /portal/shop" }); return; }
+  if (!(await ensureListTab(BANHANG_HOSTS))) { send({ action: "error", message: "chưa thấy tab /portal/shop — SW thấy các tab: [" + lastTabUrls.join(" | ") + "]" }); return; }
 
   const before = (await chrome.tabs.query({ url: "https://banhang.shopee.vn/*" })).map((t) => t.id);
 
