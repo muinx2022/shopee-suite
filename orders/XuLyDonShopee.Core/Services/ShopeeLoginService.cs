@@ -186,13 +186,19 @@ public interface ILoginSession : IAsyncDisposable
     Task<ArrangeShipmentResult> ProcessFirstOrderAsync(string downloadDir, Action<string>? log = null, CancellationToken ct = default);
 
     /// <summary>
-    /// <b>Sync đơn hàng — thu thập MỌI đơn ở tab "Tất cả":</b> điều hướng về trang danh sách đơn
-    /// (<c>/portal/sale/order</c>), chuyển sang tab <b>"Tất cả"</b>, rồi <b>duyệt TOÀN BỘ các trang</b> danh
-    /// sách (có chốt chặn an toàn 20 trang), quét thông tin mỗi đơn (mã đơn, người mua, sản phẩm, tổng tiền,
-    /// trạng thái, lý do hủy, kênh/ĐVVC, mã vận đơn) bằng JS <b>CHỈ ĐỌC</b>, khử trùng lặp theo mã đơn, trả
-    /// về danh sách. <b>KHÔNG đụng DB</b> (Core chỉ thu thập &amp; trả DTO; tầng App lưu). Điều hướng/chuyển
+    /// <b>Sync đơn hàng — thu thập đơn ở tab "Chờ lấy hàng":</b> điều hướng về trang danh sách đơn
+    /// (<c>/portal/sale/order</c>), chuyển sang tab <b>"Chờ lấy hàng"</b>, rồi <b>duyệt TOÀN BỘ các trang</b>
+    /// danh sách (có chốt chặn an toàn 10 trang), quét thông tin mỗi đơn (mã đơn, người mua, sản phẩm, tổng
+    /// tiền, trạng thái, lý do hủy, kênh/ĐVVC, mã vận đơn) bằng JS <b>CHỈ ĐỌC</b>, khử trùng lặp theo mã đơn,
+    /// trả về danh sách. <b>KHÔNG đụng DB</b> (Core chỉ thu thập &amp; trả DTO; tầng App lưu). Điều hướng/chuyển
     /// tab bằng thao tác kiểu người CÓ HIT-TEST; phân trang code PHÒNG THỦ (nhiều selector nút "trang sau" +
     /// điều kiện danh sách phải ĐỔI sau khi bấm) + log chẩn đoán pager nếu không thấy nút.
+    /// <para>
+    /// <b>2026-07-23 — chỉ quét tab "Chờ lấy hàng"</b> (trước đây quét tab "Tất cả"): đơn NGOÀI trạng thái này
+    /// (đã giao / đã hủy / đang giao...) KHÔNG còn được cập nhật trạng thái mỗi lượt sync — dữ liệu cũ vẫn nằm
+    /// trong DB từ các lượt trước. Hệ quả: nhánh "Đã bán" theo SKU (phát hiện đơn chuyển sang đã-giao) và cờ
+    /// tô đỏ đơn hủy trên GSheet thực tế bất hoạt (giữ code để dễ bật lại).
+    /// </para>
     /// <para>
     /// <b>Lấy thêm "Số tiền cuối cùng":</b> sau khi quét xong MỖI TRANG, với từng đơn KHÁC "Đã hủy" và CHƯA có
     /// trong <paramref name="ordersWithFinalAmount"/>, MỞ trang chi tiết (ưu tiên click nút "Xem chi tiết" kiểu
@@ -3764,12 +3770,13 @@ public class ShopeeLoginService
             }
         }
 
-        // ===== Sync đơn: duyệt tab "Tất cả" mọi trang, thu thập thông tin đơn (Core CHỈ trả DTO) =====
+        // ===== Sync đơn: duyệt tab "Chờ lấy hàng" mọi trang, thu thập thông tin đơn (Core CHỈ trả DTO) =====
 
         // Chốt chặn an toàn số trang quét mỗi lượt sync (tránh lặp vô hạn nếu selector "trang sau" đoán sai
         // hoặc điều kiện dừng không kích hoạt). Chạm cap → dừng + cờ ReachedPageCap.
-        // 2026-07-22: hạ 20 → 10 theo yêu cầu (giảm tải mỗi lượt sync; vẫn đọc tab "Tất cả"). Đơn ở trang >10 sẽ
-        // không còn được cập nhật trạng thái mỗi lượt (vẫn nằm trong DB từ trước) — chấp nhận tạm.
+        // 2026-07-22: hạ 20 → 10 theo yêu cầu (giảm tải mỗi lượt sync). 2026-07-23: chỉ đọc tab "Chờ lấy hàng"
+        // (bỏ tab "Tất cả"). Đơn ở trang >10 sẽ không còn được cập nhật trạng thái mỗi lượt (vẫn nằm trong DB
+        // từ trước) — chấp nhận tạm.
         private const int MaxSyncPages = 10;
 
         public async Task<SyncOrdersResult> SyncAllOrdersAsync(
@@ -3810,7 +3817,7 @@ public class ShopeeLoginService
 
                 // 1) Về danh sách đơn (/portal/sale/order). ĐÃ ở đó → reload SẠCH (GotoAsync, như bước 1
                 //    ProcessFirstOrderAsync); URL khác → GoToAllOrdersAsync (click menu kiểu người).
-                L("Về danh sách đơn (Tất cả) để sync...");
+                L("Về danh sách đơn (Chờ lấy hàng) để sync...");
                 if (ShopeeShippingNav.IsAllOrdersHref(page.Url))
                 {
                     try
@@ -3834,9 +3841,8 @@ public class ShopeeLoginService
                     return new SyncOrdersResult(collected, 0, false);
                 }
 
-                // 1b) Chuyển sang tab "Tất cả" (best-effort: không đổi được thì quét tab hiện tại).
-                (mx, my) = await EnsureOrderListTabAsync(
-                    page, "l1-tab-all", ShopeeShippingNav.IsAllTabText, "Tất cả", mx, my, rng, L, ct).ConfigureAwait(false);
+                // 1b) Chuyển sang tab "Chờ lấy hàng" (best-effort: không đổi được thì quét tab hiện tại).
+                (mx, my) = await EnsureToShipTabAsync(page, mx, my, rng, L, ct).ConfigureAwait(false);
 
                 // Dừng "đọc trang" + chờ danh sách render.
                 await Task.Delay(rng.Next(800, 2500), ct).ConfigureAwait(false);

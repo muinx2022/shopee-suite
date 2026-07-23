@@ -230,8 +230,9 @@ public sealed partial class ShellViewModel : ObservableObject
         // Workspace bấm "Đăng nhập / cấu hình" → nhảy sang tab "Cấu hình BigSeller" (target luôn là bigSeller VM).
         workspace.RequestNavigate = _ => { SelectedTab = _bigSellerTab; };
 
-        // Mặc định mở tab Workspace (màn BigSeller Workspace).
-        SelectedTab = workspaceTab;
+        // Mặc định mở tab Shopee (module đơn hàng) — màn con đầu tiên (Tài khoản). Module đơn hàng không
+        // dựng được (ordersTab null) → về Workspace như cũ.
+        SelectedTab = ordersTab ?? workspaceTab;
     }
 
     /// <summary>Chuyển màn đang hiển thị cho tab chứa nút. Với module đơn hàng: set SelectedNavIndex để giữ

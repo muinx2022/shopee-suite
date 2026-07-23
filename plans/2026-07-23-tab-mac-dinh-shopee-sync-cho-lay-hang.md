@@ -75,4 +75,46 @@ Hai chỉnh sửa theo yêu cầu người dùng (nhánh `feature/gop-don-hang`)
 
 ## Báo cáo thực thi
 
-(Opus điền sau khi xong.)
+**Ngày:** 2026-07-23 · **Người thực thi:** Opus (`opus-executor`)
+
+### File đã sửa
+
+1. `suite/Shopee.Suite/ViewModels/ShellViewModel.cs` (Việc A)
+   - Dòng cuối constructor: `SelectedTab = workspaceTab;` → `SelectedTab = ordersTab ?? workspaceTab;`. Sửa comment: mặc định mở tab Shopee (đơn hàng); module đơn hàng không dựng được (`ordersTab` null) → về Workspace. `ordersTab` là `RibbonTab? = null`, chỉ dựng khi `ordersVm is not null` (dòng 140-194) → fallback đúng.
+   - Không đụng `GoHome`/logo (vẫn về Workspace — không có thay đổi nào ở đó).
+
+2. `orders/XuLyDonShopee.Core/Services/ShopeeLoginService.cs` (Việc B)
+   - Call site tab (nguyên `l1-tab-all`): thay bằng `EnsureToShipTabAsync(page, mx, my, rng, L, ct)` — tái dùng helper sẵn có (testid `l1-tab-toship`, `IsToShipTabText`, nhãn "Chờ lấy hàng"). Comment "1b) Chuyển sang tab..." đổi "Tất cả" → "Chờ lấy hàng".
+   - Log: `"Về danh sách đơn (Tất cả) để sync..."` → `"... (Chờ lấy hàng) để sync..."`.
+   - Comment vùng `MaxSyncPages`: "duyệt tab Tất cả mọi trang" → "Chờ lấy hàng"; ghi chú 2026-07-23 chỉ đọc tab "Chờ lấy hàng" (bỏ "Tất cả").
+   - Doc comment interface `SyncAllOrdersAsync`: đổi mô tả sang tab "Chờ lấy hàng", cập nhật số trang 20→10, thêm 1 `<para>` ghi hệ quả (đơn ngoài tab này không còn cập nhật trạng thái; nhánh "Đã bán"/tô đỏ GSheet bất hoạt, giữ code).
+   - GIỮ NGUYÊN dòng 3538 `"Về danh sách đơn (Tất cả)..."` — thuộc luồng Xử lý đơn (`ProcessFirstOrderAsync`), đã tự click sang "Chờ lấy hàng" qua `EnsureToShipTabAsync` sẵn, không thuộc phạm vi.
+   - Helper `IsAllTabText` + `EnsureOrderListTabAsync` giữ nguyên (dùng chung).
+
+3. `orders/XuLyDonShopee.App/Services/AccountSession.cs` (Việc B)
+   - StatusText: `"Đang sync đơn hàng (tab Tất cả)..."` → `"... (tab Chờ lấy hàng)..."`.
+   - Doc comment `SyncOrdersAsync`: "tab Tất cả" → "tab Chờ lấy hàng".
+   - Thêm comment cạnh `DetectNewlyDelivered`: từ 2026-07-23 sync chỉ quét tab "Chờ lấy hàng" nên nhánh phát-hiện-đã-giao bất hoạt (trả rỗng, không lỗi); giữ code để dễ bật lại.
+
+### Kết quả kiểm chứng
+
+- `dotnet build ShopeeSuite.sln -c Debug`: **Build succeeded — 0 Warning, 0 Error** (10 project).
+- `dotnet test orders/XuLyDonShopee.Tests -c Debug --no-build`: **Passed! Failed: 0, Passed: 843, Skipped: 0** (hiện có 843 test, nhiều hơn con số 774 ghi trong plan).
+- Không có test nào assert chuỗi StatusText/log/tab cũ ("tab Tất cả"/"(Tất cả)" trong luồng sync) → không phải sửa test. Test `IsAllTabText_KhopChuanHoa` giữ nguyên và vẫn xanh.
+
+### Đối chiếu tiêu chí nghiệm thu
+
+- [x] Build + toàn bộ test xanh.
+- [x] Tab mặc định = Shopee (`ordersTab ?? workspaceTab`), fallback Workspace khi module null (đọc code xác nhận).
+- [x] `SyncAllOrdersAsync` gọi `EnsureToShipTabAsync` (testid `l1-tab-toship`); luồng sync không còn tham chiếu `l1-tab-all`/`IsAllTabText`; helper + test của `IsAllTabText` còn nguyên.
+- [x] Log/StatusText nói "Chờ lấy hàng" trong luồng sync.
+- [x] Không đụng GSheet/hub/notify/sold-count/Xử lý đơn/AutoRun/`MaxSyncPages`(=10)/`ScanOrdersJs`.
+
+### Hệ quả đã ghi nhận (giữ nguyên code, KHÔNG sửa)
+
+- "Đã bán" theo SKU (`DetectNewlyDelivered`): sync không còn thấy đơn đã giao → tính năng +1 bất hoạt (im lặng, không lỗi).
+- GSheet tô đỏ đơn hủy (`LaDonHuy`/`huyDoi`): đơn hủy rời tab "Chờ lấy hàng" → status DB không cập nhật → hết tô đỏ tự động.
+
+### Vướng mắc / bỏ dở
+
+Không. Toàn bộ hạng mục plan đã hoàn thành. (Không commit — theo yêu cầu, Fable commit sau nghiệm thu.)

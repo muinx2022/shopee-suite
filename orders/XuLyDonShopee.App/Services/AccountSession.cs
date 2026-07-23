@@ -585,8 +585,8 @@ public partial class AccountSession : ObservableObject, IAccountSession
     }
 
     /// <summary>
-    /// Sync Đơn hàng: trong phiên đang chạy, vào Quản lý đơn hàng → tab "Tất cả", duyệt MỌI trang danh sách
-    /// (Core best-effort — không ném trừ hủy) thu thập thông tin đơn rồi <b>UPSERT về DB</b> (bảng orders,
+    /// Sync Đơn hàng: trong phiên đang chạy, vào Quản lý đơn hàng → tab "Chờ lấy hàng", duyệt MỌI trang danh
+    /// sách (Core best-effort — không ném trừ hủy) thu thập thông tin đơn rồi <b>UPSERT về DB</b> (bảng orders,
     /// theo khóa <c>(account_id, order_sn)</c>). Bật cờ <see cref="_navigating"/> suốt lượt để loại trừ với
     /// Xử lý đơn / Kiểm tra / nhịp theo dõi (cấu hình) (không hai luồng chuột trên cùng trang). Ghi log tiến trình
     /// từng trang + tổng kết (thêm mới / cập nhật). Graceful: phiên chưa chạy / đang bận / bị hủy / lỗi →
@@ -631,7 +631,7 @@ public partial class AccountSession : ObservableObject, IAccountSession
         }
 
         _navigating = true;
-        StatusText = "Đang sync đơn hàng (tab Tất cả)...";
+        StatusText = "Đang sync đơn hàng (tab Chờ lấy hàng)...";
         var log = (Action<string>)(m => _services.Log.Append(_logLabel, m));
         try
         {
@@ -646,6 +646,8 @@ public partial class AccountSession : ObservableObject, IAccountSession
             // trạng thái CŨ trong DB). Chạy tuần tự trước upsert nên tương đương "cùng transaction" — không có ghi
             // đồng thời (mỗi tài khoản một phiên, đang trong cửa sổ _navigating). No-backfill: đơn đã-giao-sẵn →
             // grandfather (đánh cờ, KHÔNG +1). Kết quả dùng ngay dưới đây.
+            // 2026-07-23: sync chỉ quét tab "Chờ lấy hàng" nên result.Orders không còn chứa đơn đã-giao →
+            // nhánh này thực tế BẤT HOẠT (trả rỗng, không lỗi). GIỮ code để dễ bật lại nếu sync quét thêm tab.
             var soldDetect = _services.Orders.DetectNewlyDelivered(_accountId, result.Orders);
 
             // Lưu về DB (thread nền — SQLite an toàn): upsert theo (account_id, order_sn). insertedOrders =
