@@ -310,6 +310,93 @@ public class OrdersRepositoryTests
         Assert.Equal("0", ReadString(db, "SN1", "gsheet_da_co_van_don"));
     }
 
+    [Fact]
+    public void GetForGsheetPush_MapCoDaDemDaBan_VaDaDayHub_TheoCotNull()
+    {
+        using var temp = new TempDatabase();
+        var repo = new OrdersRepository(temp.Open());
+
+        repo.UpsertMany(1, new[] { Sample("A_NONE"), Sample("B_SOLD"), Sample("C_HUB"), Sample("D_BOTH") }, DateTime.UtcNow);
+
+        // B_SOLD: chỉ đánh cờ sold_counted_at; C_HUB: chỉ hub_synced_at; D_BOTH: cả hai; A_NONE: không cờ.
+        repo.MarkSoldCounted(1, new[] { "B_SOLD", "D_BOTH" }, DateTime.UtcNow);
+        repo.MarkHubSynced(1, new[] { "C_HUB", "D_BOTH" }, DateTime.UtcNow);
+
+        var pending = repo.GetForGsheetPush(1);
+
+        var none = pending.First(p => p.OrderSn == "A_NONE");
+        Assert.False(none.DaDemDaBan);
+        Assert.False(none.DaDayHub);
+
+        var sold = pending.First(p => p.OrderSn == "B_SOLD");
+        Assert.True(sold.DaDemDaBan);
+        Assert.False(sold.DaDayHub);
+
+        var hub = pending.First(p => p.OrderSn == "C_HUB");
+        Assert.False(hub.DaDemDaBan);
+        Assert.True(hub.DaDayHub);
+
+        var both = pending.First(p => p.OrderSn == "D_BOTH");
+        Assert.True(both.DaDemDaBan);
+        Assert.True(both.DaDayHub);
+    }
+
+    // ===================== Vòng đời đơn: GetOrderSns / DeleteOrders =====================
+
+    [Fact]
+    public void GetOrderSns_TraDungMaDon_DungTaiKhoan()
+    {
+        using var temp = new TempDatabase();
+        var repo = new OrdersRepository(temp.Open());
+        repo.UpsertMany(1, new[] { Make("SN1"), Make("SN2") }, DateTime.UtcNow);
+        repo.UpsertMany(2, new[] { Make("SN3") }, DateTime.UtcNow);
+
+        var sns = repo.GetOrderSns(1);
+        Assert.Equal(2, sns.Count);
+        Assert.Contains("SN1", sns);
+        Assert.Contains("SN2", sns);
+        Assert.DoesNotContain("SN3", sns);   // đơn của tài khoản khác
+
+        Assert.Empty(repo.GetOrderSns(999));  // tài khoản không có đơn
+    }
+
+    [Fact]
+    public void DeleteOrders_XoaDungDon_DungTaiKhoan_TraSoDong()
+    {
+        using var temp = new TempDatabase();
+        var repo = new OrdersRepository(temp.Open());
+        repo.UpsertMany(1, new[] { Make("SN1"), Make("SN2"), Make("SN3") }, DateTime.UtcNow);
+        repo.UpsertMany(2, new[] { Make("SN1") }, DateTime.UtcNow); // cùng mã SN1 nhưng tài khoản KHÁC
+
+        var deleted = repo.DeleteOrders(1, new[] { "SN1", "SN2" });
+
+        Assert.Equal(2, deleted);
+        Assert.Equal(new[] { "SN3" }, repo.GetOrderSns(1).OrderBy(x => x)); // còn lại SN3
+        Assert.Contains("SN1", repo.GetOrderSns(2));                        // tài khoản 2 KHÔNG bị đụng
+    }
+
+    [Fact]
+    public void DeleteOrders_DanhSachRong_Tra0()
+    {
+        using var temp = new TempDatabase();
+        var repo = new OrdersRepository(temp.Open());
+        repo.UpsertMany(1, new[] { Make("SN1") }, DateTime.UtcNow);
+
+        Assert.Equal(0, repo.DeleteOrders(1, Array.Empty<string>()));
+        Assert.Equal(1, repo.CountByAccount(1)); // không xóa gì
+    }
+
+    [Fact]
+    public void DeleteOrders_MaKhongTonTai_Tra0_KhongDungDonKhac()
+    {
+        using var temp = new TempDatabase();
+        var repo = new OrdersRepository(temp.Open());
+        repo.UpsertMany(1, new[] { Make("SN1") }, DateTime.UtcNow);
+
+        Assert.Equal(0, repo.DeleteOrders(1, new[] { "KHONGCO" }));
+        Assert.Equal(1, repo.CountByAccount(1));
+    }
+
     // ===================== Đẩy Hub đơn hàng: GetForHubPush / MarkHubSynced =====================
 
     [Fact]

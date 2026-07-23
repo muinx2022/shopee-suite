@@ -479,6 +479,26 @@ public class ShopeeShippingNavTests
         Assert.Equal(expected, ShopeeShippingNav.LaDaGiaoDaBan(status));
     }
 
+    // ===== LaChuanBiHang: "chứa" chuẩn bị / chờ lấy hàng (đơn MỚI chỉ được lưu khi ở trạng thái này) =====
+    [Theory]
+    [InlineData("Chuẩn bị hàng", true)]
+    [InlineData("chuẩn bị hàng", true)]
+    [InlineData("Chuẩn bị giao hàng", true)]
+    [InlineData("chuẩn  bị  giao  hàng", true)]     // nhiều khoảng trắng → gộp vẫn khớp
+    [InlineData("Chờ lấy hàng", true)]
+    [InlineData("  CHỜ LẤY HÀNG \n", true)]
+    // Không phải Chuẩn bị hàng → false.
+    [InlineData("Đã giao", false)]
+    [InlineData("Đang giao", false)]
+    [InlineData("Chờ xác nhận", false)]
+    [InlineData("Đã hủy", false)]
+    [InlineData("", false)]
+    [InlineData(null, false)]
+    public void LaChuanBiHang_ChuaChuanBiHoacChoLayHang(string? status, bool expected)
+    {
+        Assert.Equal(expected, ShopeeShippingNav.LaChuanBiHang(status));
+    }
+
     // ===== IsAllTabText: tab "Tất cả" trên thanh tab danh sách đơn (khớp tuyệt đối "tất cả") =====
     [Theory]
     [InlineData("Tất cả", true)]

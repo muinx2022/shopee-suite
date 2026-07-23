@@ -362,6 +362,20 @@ public static class ShopeeShippingNav
         return s == "đã giao" || s == "hoàn thành" || s == "giao hàng thành công";
     }
 
+    /// <summary>
+    /// True nếu trạng thái đơn là "Chuẩn bị (giao) hàng" / "Chờ lấy hàng" (đơn đang cần chuẩn bị/giao). Chuẩn
+    /// hóa qua <see cref="NormalizeUiText"/> (trim + gộp khoảng trắng + lower) rồi so CHỨA "chuẩn bị" hoặc
+    /// "chờ lấy hàng" — chịu được biến thể "Chuẩn bị hàng" / "Chuẩn bị giao hàng" / nhiều khoảng trắng.
+    /// Null/rỗng → false. Dùng để: (a) lọc đơn MỚI được LƯU khi sync (đơn mới chỉ nhận khi Chuẩn bị hàng);
+    /// (b) chọn đơn cần mở CHI TIẾT lấy "Số tiền cuối cùng".
+    /// </summary>
+    public static bool LaChuanBiHang(string? status)
+    {
+        var s = NormalizeUiText(status);
+        return s.Contains("chuẩn bị", System.StringComparison.Ordinal)
+            || s.Contains("chờ lấy hàng", System.StringComparison.Ordinal);
+    }
+
     /// <summary>True nếu chuỗi (hạ chữ thường) chứa "hủy"/"huỷ" (2 biến thể dấu) hoặc "cancel".</summary>
     private static bool ChuaTuHuy(string? s)
     {

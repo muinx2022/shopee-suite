@@ -14,6 +14,9 @@ namespace XuLyDonShopee.Core.Data;
 /// trạng thái hủy thay đổi; <see cref="GsheetDaCoVanDon"/> = lần đẩy gần nhất có gửi mã vận đơn chưa (0/1;
 /// null nếu chưa đẩy) — để tự điền cột B khi vận đơn xuất hiện sau. <see cref="Status"/>/
 /// <see cref="StatusDescription"/>/<see cref="CancelReason"/> dùng phân loại hủy (<c>ShopeeShippingNav.LaDonHuy</c>).
+/// <see cref="DaDemDaBan"/> = đã đếm "Đã bán" (<c>sold_counted_at IS NOT NULL</c>) và
+/// <see cref="DaDayHub"/> = đã đẩy lên hub đơn hàng (<c>hub_synced_at IS NOT NULL</c>) — dùng để QUYẾT ĐỊNH có
+/// được DỌN đơn kết thúc khỏi DB chưa (giữ lại đến khi mọi nghĩa vụ hoàn tất — xem <c>AccountSession.NenXoaDonKetThuc</c>).
 /// </summary>
 public sealed record GsheetPendingOrder(
     string OrderSn,
@@ -26,7 +29,9 @@ public sealed record GsheetPendingOrder(
     bool DaGhiSheet,
     string? FileUrl,
     long? GsheetDaHuy,
-    long? GsheetDaCoVanDon);
+    long? GsheetDaCoVanDon,
+    bool DaDemDaBan,
+    bool DaDayHub);
 
 /// <summary>
 /// Kết quả phát hiện đơn CHUYỂN sang "đã giao" giữa 2 lần sync (<see cref="OrdersRepository.DetectNewlyDelivered"/>),
@@ -172,6 +177,63 @@ public class OrdersRepository
     }
 
     /// <summary>
+    /// Tập <c>order_sn</c> HIỆN CÓ trong DB của một tài khoản. App dùng để lọc INSERT lúc sync: đơn ĐÃ theo dõi
+    /// (mã đã nằm trong tập này) luôn được cập nhật, đơn MỚI chỉ nhận khi ở trạng thái Chuẩn bị hàng. So khớp mã
+    /// đơn theo <see cref="StringComparer.Ordinal"/>.
+    /// </summary>
+    public IReadOnlySet<string> GetOrderSns(long accountId)
+    {
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT order_sn FROM orders WHERE account_id = $account;";
+        cmd.Parameters.AddWithValue("$account", accountId);
+
+        var set = new HashSet<string>(StringComparer.Ordinal);
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            if (!reader.IsDBNull(0))
+            {
+                set.Add(reader.GetString(0));
+            }
+        }
+        return set;
+    }
+
+    /// <summary>
+    /// XÓA các đơn (theo <c>(account_id, order_sn)</c>) khỏi bảng <c>orders</c> trong MỘT transaction. Dùng để
+    /// DỌN đơn KẾT THÚC (Đã giao / Đã hủy) khỏi app SAU khi mọi nghĩa vụ hoàn tất (GSheet đã ghi + "Đã bán" đã
+    /// đếm + hub đã nhận). Trả về SỐ dòng thực xóa. Danh sách rỗng/null → trả 0 và KHÔNG mở connection. Đơn không
+    /// có mã (rỗng) bị bỏ qua.
+    /// </summary>
+    public int DeleteOrders(long accountId, IReadOnlyCollection<string> orderSns)
+    {
+        if (orderSns is null || orderSns.Count == 0)
+        {
+            return 0;
+        }
+
+        using var conn = _db.OpenConnection();
+        using var tx = conn.BeginTransaction();
+        var deleted = 0;
+        foreach (var sn in orderSns)
+        {
+            if (string.IsNullOrWhiteSpace(sn))
+            {
+                continue;
+            }
+            using var cmd = conn.CreateCommand();
+            cmd.Transaction = tx;
+            cmd.CommandText = "DELETE FROM orders WHERE account_id = $a AND order_sn = $sn;";
+            cmd.Parameters.AddWithValue("$a", accountId);
+            cmd.Parameters.AddWithValue("$sn", sn);
+            deleted += cmd.ExecuteNonQuery();
+        }
+        tx.Commit();
+        return deleted;
+    }
+
+    /// <summary>
     /// SUPERSET các đơn ỨNG VIÊN đẩy lên Google Sheet: <b>MỌI đơn của tài khoản</b> (KHÔNG lọc mã vận đơn nữa —
     /// đơn "Chờ lấy hàng" chưa có vận đơn vẫn cần ghi dòng TRẮNG), KÈM các cột trạng thái + cờ gsheet để
     /// <c>AccountSession</c> quyết bằng C# đơn nào cần gửi (mới / thiếu link phiếu / trạng thái hủy đổi / vận
@@ -183,7 +245,8 @@ public class OrdersRepository
         using var cmd = conn.CreateCommand();
         cmd.CommandText = @"SELECT order_sn, tracking_number, sku, total_price,
        status, status_description, cancel_reason,
-       gsheet_synced_at, gsheet_file_url, gsheet_da_huy, gsheet_da_co_van_don
+       gsheet_synced_at, gsheet_file_url, gsheet_da_huy, gsheet_da_co_van_don,
+       sold_counted_at, hub_synced_at
     FROM orders
     WHERE account_id = $a
     ORDER BY id;";
@@ -204,7 +267,9 @@ public class OrdersRepository
                 DaGhiSheet: !reader.IsDBNull(7),
                 FileUrl: reader.IsDBNull(8) ? null : reader.GetString(8),
                 GsheetDaHuy: reader.IsDBNull(9) ? null : reader.GetInt64(9),
-                GsheetDaCoVanDon: reader.IsDBNull(10) ? null : reader.GetInt64(10)));
+                GsheetDaCoVanDon: reader.IsDBNull(10) ? null : reader.GetInt64(10),
+                DaDemDaBan: !reader.IsDBNull(11),
+                DaDayHub: !reader.IsDBNull(12)));
         }
         return list;
     }

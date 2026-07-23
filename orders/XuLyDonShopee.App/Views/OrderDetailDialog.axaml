@@ -20,31 +20,31 @@
         <Grid ColumnDefinitions="120,*" RowSpacing="9" ColumnSpacing="10"
               RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
             <TextBlock Grid.Row="0" Grid.Column="0" Classes="lbl" Text="Mã đơn" />
-            <TextBlock Grid.Row="0" Grid.Column="1" x:Name="OrderSnText" TextWrapping="Wrap" FontWeight="SemiBold" />
+            <SelectableTextBlock Grid.Row="0" Grid.Column="1" x:Name="OrderSnText" TextWrapping="Wrap" FontWeight="SemiBold" />
 
             <TextBlock Grid.Row="1" Grid.Column="0" Classes="lbl" Text="Người mua" />
-            <TextBlock Grid.Row="1" Grid.Column="1" x:Name="BuyerText" TextWrapping="Wrap" />
+            <SelectableTextBlock Grid.Row="1" Grid.Column="1" x:Name="BuyerText" TextWrapping="Wrap" />
 
             <TextBlock Grid.Row="2" Grid.Column="0" Classes="lbl" Text="Sản phẩm" />
-            <TextBlock Grid.Row="2" Grid.Column="1" x:Name="ProductText" TextWrapping="Wrap" />
+            <SelectableTextBlock Grid.Row="2" Grid.Column="1" x:Name="ProductText" TextWrapping="Wrap" />
 
             <TextBlock Grid.Row="3" Grid.Column="0" Classes="lbl" Text="Tổng tiền" />
-            <TextBlock Grid.Row="3" Grid.Column="1" x:Name="TotalText" TextWrapping="Wrap" />
+            <SelectableTextBlock Grid.Row="3" Grid.Column="1" x:Name="TotalText" TextWrapping="Wrap" />
 
             <TextBlock Grid.Row="4" Grid.Column="0" Classes="lbl" Text="Thanh toán" />
-            <TextBlock Grid.Row="4" Grid.Column="1" x:Name="PaymentText" TextWrapping="Wrap" />
+            <SelectableTextBlock Grid.Row="4" Grid.Column="1" x:Name="PaymentText" TextWrapping="Wrap" />
 
             <TextBlock Grid.Row="5" Grid.Column="0" Classes="lbl" Text="Trạng thái" />
-            <TextBlock Grid.Row="5" Grid.Column="1" x:Name="StatusText" TextWrapping="Wrap" />
+            <SelectableTextBlock Grid.Row="5" Grid.Column="1" x:Name="StatusText" TextWrapping="Wrap" />
 
             <TextBlock Grid.Row="6" Grid.Column="0" Classes="lbl" Text="ĐVVC" />
-            <TextBlock Grid.Row="6" Grid.Column="1" x:Name="CarrierText" TextWrapping="Wrap" />
+            <SelectableTextBlock Grid.Row="6" Grid.Column="1" x:Name="CarrierText" TextWrapping="Wrap" />
 
             <TextBlock Grid.Row="7" Grid.Column="0" Classes="lbl" Text="Mã vận đơn" />
-            <TextBlock Grid.Row="7" Grid.Column="1" x:Name="TrackingText" TextWrapping="Wrap" />
+            <SelectableTextBlock Grid.Row="7" Grid.Column="1" x:Name="TrackingText" TextWrapping="Wrap" />
 
             <TextBlock Grid.Row="8" Grid.Column="0" Classes="lbl" Text="Ngày sync" />
-            <TextBlock Grid.Row="8" Grid.Column="1" x:Name="SyncedAtText" TextWrapping="Wrap" />
+            <SelectableTextBlock Grid.Row="8" Grid.Column="1" x:Name="SyncedAtText" TextWrapping="Wrap" />
         </Grid>
 
         <!-- Đổi trạng thái: nguồn = các trạng thái ĐÃ SYNC về (chuỗi tự do, không enum).

@@ -28,4 +28,9 @@
   <ItemGroup>
     <ProjectReference Include="..\XuLyDonShopee.Core\XuLyDonShopee.Core.csproj" />
   </ItemGroup>
+
+  <ItemGroup>
+    <!-- Cho phép test unit các hàm PURE internal (vd AccountSession.NenXoaDonKetThuc) — mẫu như Core. -->
+    <InternalsVisibleTo Include="XuLyDonShopee.Tests" />
+  </ItemGroup>
 </Project>

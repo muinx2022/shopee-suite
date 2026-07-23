@@ -7,6 +7,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using XuLyDonShopee.App.ViewModels;
+using XuLyDonShopee.Core.Data;
 using XuLyDonShopee.Core.Models;
 using XuLyDonShopee.Core.Services;
 
@@ -585,12 +586,18 @@ public partial class AccountSession : ObservableObject, IAccountSession
     }
 
     /// <summary>
-    /// Sync Đơn hàng: trong phiên đang chạy, vào Quản lý đơn hàng → tab "Chờ lấy hàng", duyệt MỌI trang danh
-    /// sách (Core best-effort — không ném trừ hủy) thu thập thông tin đơn rồi <b>UPSERT về DB</b> (bảng orders,
+    /// Sync Đơn hàng: trong phiên đang chạy, vào Quản lý đơn hàng → tab "Tất cả", duyệt MỌI trang danh sách
+    /// (Core best-effort — không ném trừ hủy) thu thập thông tin đơn rồi <b>UPSERT về DB</b> (bảng orders,
     /// theo khóa <c>(account_id, order_sn)</c>). Bật cờ <see cref="_navigating"/> suốt lượt để loại trừ với
     /// Xử lý đơn / Kiểm tra / nhịp theo dõi (cấu hình) (không hai luồng chuột trên cùng trang). Ghi log tiến trình
     /// từng trang + tổng kết (thêm mới / cập nhật). Graceful: phiên chưa chạy / đang bận / bị hủy / lỗi →
     /// false + StatusText/log, KHÔNG ném. finally reset <see cref="_navigating"/>.
+    /// <para>
+    /// <b>Vòng đời đơn (app chỉ giữ đơn Chuẩn bị hàng):</b> quét tab "Tất cả" để DÒ trạng thái theo mã đơn nhưng
+    /// chỉ LƯU đơn MỚI khi đang ở Chuẩn bị hàng (<see cref="ShopeeShippingNav.LaChuanBiHang"/>); đơn ĐÃ theo dõi
+    /// luôn cập nhật đến trạng thái cuối. Đơn KẾT THÚC (Đã giao / Đã hủy) được DỌN khỏi DB trong
+    /// <see cref="PushOrdersToGsheetAsync"/> sau khi GSheet + "Đã bán" + hub đã xong.
+    /// </para>
     /// <para>
     /// <b>"Nút Sync bao gồm cả nút Kiểm tra"</b> (người dùng chốt): trước khi tổng kết (vẫn trong cửa sổ
     /// <see cref="_navigating"/>), VỀ TRANG CHỦ đọc số "Chờ Lấy Hàng" tươi (<c>GoHomeAndReadToShipCountAsync</c>
@@ -631,7 +638,7 @@ public partial class AccountSession : ObservableObject, IAccountSession
         }
 
         _navigating = true;
-        StatusText = "Đang sync đơn hàng (tab Chờ lấy hàng)...";
+        StatusText = "Đang sync đơn hàng (tab Tất cả)...";
         var log = (Action<string>)(m => _services.Log.Append(_logLabel, m));
         try
         {
@@ -642,17 +649,27 @@ public partial class AccountSession : ObservableObject, IAccountSession
             // Core thu thập (best-effort có log tiến trình từng trang), trả DTO — KHÔNG đụng DB.
             var result = await s.SyncAllOrdersAsync(log, alreadyHaveFinal, tok).ConfigureAwait(false);
 
+            // Lọc đơn được LƯU (chính sách "app chỉ giữ đơn Chuẩn bị hàng"): đơn ĐÃ theo dõi (mã đã có trong DB)
+            // LUÔN cập nhật — kể cả khi đã sang Đã giao/Đã hủy (cần cho GSheet + "Đã bán" + dọn vòng đời); đơn MỚI
+            // (chưa có trong DB) chỉ nhận khi đang ở Chuẩn bị hàng. Đơn mới KHÁC (Chờ xác nhận / Đang giao / Đã
+            // giao…) bị BỎ QUA — sẽ tự vào ở lượt sau khi thành Chuẩn bị hàng.
+            // QUAN TRỌNG: filter này ĐỒNG THỜI chặn đơn ĐÃ-BỊ-DỌN (xóa ở PushOrdersToGsheetAsync) được insert lại
+            // ở lượt quét sau — nó xuất hiện lại trong tab "Tất cả" với trạng thái KẾT THÚC (không phải Chuẩn bị
+            // hàng) nên không lọt qua → KHÔNG lặp vô hạn ghi-xóa.
+            var existing = _services.Orders.GetOrderSns(_accountId);
+            var toUpsert = result.Orders
+                .Where(o => existing.Contains(o.OrderSn) || ShopeeShippingNav.LaChuanBiHang(o.Status))
+                .ToList();
+
             // "Đã bán" theo SKU: phát hiện đơn CHUYỂN sang đã-giao TRƯỚC khi UpsertMany ghi đè cột status (đọc
             // trạng thái CŨ trong DB). Chạy tuần tự trước upsert nên tương đương "cùng transaction" — không có ghi
             // đồng thời (mỗi tài khoản một phiên, đang trong cửa sổ _navigating). No-backfill: đơn đã-giao-sẵn →
-            // grandfather (đánh cờ, KHÔNG +1). Kết quả dùng ngay dưới đây.
-            // 2026-07-23: sync chỉ quét tab "Chờ lấy hàng" nên result.Orders không còn chứa đơn đã-giao →
-            // nhánh này thực tế BẤT HOẠT (trả rỗng, không lỗi). GIỮ code để dễ bật lại nếu sync quét thêm tab.
-            var soldDetect = _services.Orders.DetectNewlyDelivered(_accountId, result.Orders);
+            // grandfather (đánh cờ, KHÔNG +1). Chỉ xét đơn ĐƯỢC LƯU (toUpsert) — đơn mới ngoài theo dõi không tính.
+            var soldDetect = _services.Orders.DetectNewlyDelivered(_accountId, toUpsert);
 
             // Lưu về DB (thread nền — SQLite an toàn): upsert theo (account_id, order_sn). insertedOrders =
             // các đơn VỪA thêm mới (đơn cập nhật KHÔNG có) → dùng để báo "đơn mới" qua Slack/Discord/Telegram.
-            var (inserted, updated, insertedOrders) = _services.Orders.UpsertMany(_accountId, result.Orders, DateTime.UtcNow);
+            var (inserted, updated, insertedOrders) = _services.Orders.UpsertMany(_accountId, toUpsert, DateTime.UtcNow);
 
             // Đánh cờ NGAY (SAU upsert để dòng mới toanh đã tồn tại) cho nhóm KHÔNG cần +1: đơn grandfather
             // (đã-giao-sẵn) + đơn chuyển-sang-đã-giao nhưng không có SKU. Nhóm CÓ SKU (+1) chỉ đánh cờ SAU khi hub
@@ -697,7 +714,9 @@ public partial class AccountSession : ObservableObject, IAccountSession
                 log("Không đọc được số Chờ Lấy Hàng sau sync (bỏ qua): " + ex.Message);
             }
 
+            var boQua = result.Orders.Count - toUpsert.Count; // đơn quét thấy nhưng KHÔNG lưu (mới, ngoài Chuẩn bị hàng)
             var summary = $"Sync xong: {result.Orders.Count} đơn / {result.Pages} trang — thêm {inserted} mới, cập nhật {updated}."
+                + (boQua > 0 ? $" — bỏ qua {boQua} đơn ngoài theo dõi" : string.Empty)
                 + (result.ReachedPageCap ? " (chạm chốt chặn 10 trang)" : string.Empty)
                 + (toShip is int t ? $" — Chờ Lấy Hàng: {t}" : string.Empty);
             StatusText = summary;
@@ -1074,141 +1093,235 @@ public partial class AccountSession : ObservableObject, IAccountSession
     }
 
     /// <summary>
-    /// Đẩy các đơn của tài khoản này (kèm file phiếu PDF base64) lên Google Sheet qua Apps Script Web App.
-    /// Gọi CHẠY NỀN (qua <see cref="StartGsheetPushInBackground"/>) SAU khi Sync đã ghi đơn vào DB + tổng kết.
-    /// <b>Không bao giờ ném</b> (sync DB đã xong — lỗi GSheet chỉ ghi log): hủy chủ động → thôi; lỗi khác → log
-    /// "GSheet: lỗi — ...". URL chưa cấu hình → return im lặng (không đổi hành vi cũ). Chỉ đính kèm file khi
-    /// phiếu tồn tại + đúng magic <c>%PDF-</c> (đừng tin đuôi file) và đơn chưa có link. Đơn đã ghi sheet mà
-    /// không có file mới → bỏ qua (không đẩy trùng). Với mỗi kết quả Ok → đánh dấu
-    /// <see cref="OrdersRepository.MarkGsheetSynced"/> (cờ DB chống đẩy trùng lượt sau).
+    /// Đẩy các đơn của tài khoản này (kèm file phiếu PDF base64) lên Google Sheet qua Apps Script Web App, RỒI
+    /// DỌN đơn KẾT THÚC (Đã giao / Đã hủy) khỏi app (chính sách "app chỉ giữ đơn Chuẩn bị hàng"). Gọi CHẠY NỀN
+    /// (qua <see cref="StartGsheetPushInBackground"/>) SAU khi Sync đã ghi đơn vào DB + tổng kết.
+    /// <b>Không bao giờ ném</b> (sync DB đã xong — lỗi GSheet chỉ ghi log): hủy chủ động → thôi; lỗi khác → log.
+    /// <para>
+    /// <b>URL chưa cấu hình</b> KHÔNG return sớm nữa: người dùng không dùng sheet thì coi như MỌI đơn đã "settled
+    /// GSheet" nhưng vẫn phải DỌN đơn kết thúc. Chỉ đính kèm file khi phiếu tồn tại + đúng magic <c>%PDF-</c> và
+    /// đơn chưa có link. Đơn đã ghi sheet mà không có gì mới → bỏ qua (không đẩy trùng) và coi là settled.
+    /// </para>
+    /// <para>
+    /// <b>DỌN vòng đời:</b> đơn kết thúc chỉ bị XÓA khi (a) đã settled GSheet, (b) nếu Đã giao có SKU thì "Đã bán"
+    /// đã đếm (<c>sold_counted_at</c>), (c) nếu hub bật thì đã đẩy hub (<c>hub_synced_at</c>) — xem
+    /// <see cref="NenXoaDonKetThuc"/>. Nghi ngờ thì GIỮ (đơn thừa vô hại, đơn mất là mất dữ liệu); lượt sync sau
+    /// tự đẩy + dọn tiếp. Xóa xong phát <see cref="AppServices.RaiseOrdersChanged"/> để lưới Đơn hàng vẽ lại.
+    /// </para>
     /// </summary>
     private async Task PushOrdersToGsheetAsync(Action<string> log, CancellationToken ct)
     {
         try
         {
-            var url = _services.Settings.GetGsheetWebAppUrl();
-            if (string.IsNullOrWhiteSpace(url))
-            {
-                return; // người dùng chưa dùng tính năng → im lặng, không đổi hành vi cũ
-            }
-
+            // Đọc pending TRƯỚC nhánh check URL — cần cho bước DỌN kể cả khi người dùng không dùng GSheet.
             var pending = _services.Orders.GetForGsheetPush(_accountId);
             if (pending.Count == 0)
             {
-                log("GSheet: không có đơn mới cần ghi.");
-                return;
+                return; // không có đơn nào → không ghi, không dọn
             }
 
-            // Tên shop (cột E) = TÊN ĐĂNG NHẬP của tài khoản đang sync (Account.Email — người dùng nhập
-            // "sully", "cicily"… trong app). Không có fallback nào khác.
-            var tenShop = _services.Accounts.GetById(_accountId)?.Email;
+            var url = _services.Settings.GetGsheetWebAppUrl();
+            // Hub đơn hàng đang bật? (hook đã rót — CÙNG điều kiện PushOrdersToHubAsync dùng để quyết đẩy hub.)
+            var hubHookActive = _services.PushOrdersToHub is not null;
 
-            var invoiceDir = _services.Settings.GetInvoiceFolder();
-            var ngay = DateTime.Now.ToString("dd/MM/yyyy");
+            // Cờ per-đơn: đơn đã "settled" với GSheet = đã ghi xong / không cần ghi / hủy-chưa-vận-đơn / URL trống.
+            // Chỉ đơn settled mới đủ điều kiện dọn. Mã đơn so khớp Ordinal.
+            var settled = new HashSet<string>(StringComparer.Ordinal);
 
-            var rows = new List<GsheetOrderRow>();
-            // Nhớ trạng thái hủy + đã-có-vận-đơn VỪA tính của từng đơn được gửi → dùng cho MarkGsheetSynced
-            // (ghi cờ gsheet_da_huy / gsheet_da_co_van_don).
-            var daHuyByMaDon = new Dictionary<string, bool>(StringComparer.Ordinal);
-            var coVanDonByMaDon = new Dictionary<string, bool>(StringComparer.Ordinal);
-            foreach (var p in pending)
+            if (string.IsNullOrWhiteSpace(url))
             {
-                var daHuy = ShopeeShippingNav.LaDonHuy(p.Status, p.StatusDescription, p.CancelReason);
-                var coVanDon = !string.IsNullOrWhiteSpace(p.TrackingNumber);
-
-                // BỎ QUA đơn HỦY mà CHƯA từng có vận đơn: đơn hủy trước khi vào pipeline giao không thuộc sổ
-                // theo dõi → không ghi (tránh spam dòng đỏ vô nghĩa). Đơn CHƯA hủy (đang chuẩn bị) vẫn ghi dù
-                // chưa có vận đơn (dòng TRẮNG), cột B tự điền khi vận đơn xuất hiện sau.
-                if (daHuy && !coVanDon)
+                // Người dùng chưa dùng GSheet → coi MỌI đơn đã settled (không có nghĩa vụ ghi sheet); KHÔNG return,
+                // vẫn xuống bước dọn đơn kết thúc.
+                foreach (var p in pending)
                 {
-                    continue;
+                    settled.Add(p.OrderSn);
                 }
+            }
+            else
+            {
+                // Tên shop (cột E) = TÊN ĐĂNG NHẬP của tài khoản đang sync (Account.Email — người dùng nhập
+                // "sully", "cicily"… trong app). Không có fallback nào khác.
+                var tenShop = _services.Accounts.GetById(_accountId)?.Email;
 
-                string? fileName = null;
-                string? fileBase64 = null;
+                var invoiceDir = _services.Settings.GetInvoiceFolder();
+                var ngay = DateTime.Now.ToString("dd/MM/yyyy");
 
-                // Chỉ đính kèm file khi đơn CHƯA có link (FileUrl trống) — tránh upload lại phiếu đã có.
-                if (string.IsNullOrEmpty(p.FileUrl))
+                var rows = new List<GsheetOrderRow>();
+                // Nhớ trạng thái hủy + đã-có-vận-đơn VỪA tính của từng đơn được gửi → dùng cho MarkGsheetSynced
+                // (ghi cờ gsheet_da_huy / gsheet_da_co_van_don).
+                var daHuyByMaDon = new Dictionary<string, bool>(StringComparer.Ordinal);
+                var coVanDonByMaDon = new Dictionary<string, bool>(StringComparer.Ordinal);
+                foreach (var p in pending)
                 {
-                    var safeName = ShopeeShippingNav.SanitizeFileName(p.OrderSn);
-                    var path = Path.Combine(invoiceDir, safeName + ".pdf");
-                    if (TryReadSlipBase64(path, log, out var b64))
+                    var daHuy = ShopeeShippingNav.LaDonHuy(p.Status, p.StatusDescription, p.CancelReason);
+                    var coVanDon = !string.IsNullOrWhiteSpace(p.TrackingNumber);
+
+                    // BỎ QUA đơn HỦY mà CHƯA từng có vận đơn: đơn hủy trước khi vào pipeline giao không thuộc sổ
+                    // theo dõi → không ghi (tránh spam dòng đỏ vô nghĩa). By design → coi là settled (được dọn).
+                    // Đơn CHƯA hủy (đang chuẩn bị) vẫn ghi dù chưa có vận đơn (dòng TRẮNG), cột B tự điền sau.
+                    if (daHuy && !coVanDon)
                     {
-                        fileName = safeName + ".pdf";
-                        fileBase64 = b64;
+                        settled.Add(p.OrderSn);
+                        continue;
                     }
+
+                    string? fileName = null;
+                    string? fileBase64 = null;
+
+                    // Chỉ đính kèm file khi đơn CHƯA có link (FileUrl trống) — tránh upload lại phiếu đã có.
+                    if (string.IsNullOrEmpty(p.FileUrl))
+                    {
+                        var safeName = ShopeeShippingNav.SanitizeFileName(p.OrderSn);
+                        var path = Path.Combine(invoiceDir, safeName + ".pdf");
+                        if (TryReadSlipBase64(path, log, out var b64))
+                        {
+                            fileName = safeName + ".pdf";
+                            fileBase64 = b64;
+                        }
+                    }
+
+                    // CHỌN GỬI khi thỏa ÍT NHẤT một điều kiện: (a) đơn mới với sheet; (b) có file phiếu để bổ sung
+                    // link (fileBase64 chỉ set khi FileUrl null); (c) trạng thái hủy đổi so với lần đẩy trước (hoặc
+                    // chưa từng đẩy) → sheet cần đổi màu; (d) vận đơn VỪA xuất hiện (đã ghi dòng lúc chưa có vận đơn,
+                    // giờ có) → gửi lại để điền cột B. Không thỏa → bỏ qua (đã ghi đủ, không đẩy trùng) → settled.
+                    var coFileBoSung = fileBase64 is not null;
+                    var huyDoi = p.GsheetDaHuy is null || daHuy != (p.GsheetDaHuy == 1);
+                    var vanDonMoi = coVanDon && p.GsheetDaCoVanDon != 1;
+                    if (!(!p.DaGhiSheet || coFileBoSung || huyDoi || vanDonMoi))
+                    {
+                        settled.Add(p.OrderSn);
+                        continue;
+                    }
+
+                    daHuyByMaDon[p.OrderSn] = daHuy;
+                    coVanDonByMaDon[p.OrderSn] = coVanDon;
+                    rows.Add(new GsheetOrderRow(
+                        MaDon: p.OrderSn,
+                        MaVanDon: p.TrackingNumber,
+                        TenShop: tenShop,
+                        DoanhThu: p.TotalPrice,
+                        Ngay: ngay,
+                        Sku: p.Sku,
+                        FileName: fileName,
+                        FileBase64: fileBase64,
+                        DaHuy: daHuy));
                 }
 
-                // CHỌN GỬI khi thỏa ÍT NHẤT một điều kiện: (a) đơn mới với sheet; (b) có file phiếu để bổ sung
-                // link (fileBase64 chỉ set khi FileUrl null); (c) trạng thái hủy đổi so với lần đẩy trước (hoặc
-                // chưa từng đẩy) → sheet cần đổi màu; (d) vận đơn VỪA xuất hiện (đã ghi dòng lúc chưa có vận đơn,
-                // giờ có) → gửi lại để điền cột B. Không thỏa → bỏ qua (không đẩy trùng vô ích).
-                var coFileBoSung = fileBase64 is not null;
-                var huyDoi = p.GsheetDaHuy is null || daHuy != (p.GsheetDaHuy == 1);
-                var vanDonMoi = coVanDon && p.GsheetDaCoVanDon != 1;
-                if (!(!p.DaGhiSheet || coFileBoSung || huyDoi || vanDonMoi))
+                if (rows.Count == 0)
                 {
-                    continue;
-                }
-
-                daHuyByMaDon[p.OrderSn] = daHuy;
-                coVanDonByMaDon[p.OrderSn] = coVanDon;
-                rows.Add(new GsheetOrderRow(
-                    MaDon: p.OrderSn,
-                    MaVanDon: p.TrackingNumber,
-                    TenShop: tenShop,
-                    DoanhThu: p.TotalPrice,
-                    Ngay: ngay,
-                    Sku: p.Sku,
-                    FileName: fileName,
-                    FileBase64: fileBase64,
-                    DaHuy: daHuy));
-            }
-
-            if (rows.Count == 0)
-            {
-                log("GSheet: không có đơn mới cần ghi.");
-                return;
-            }
-
-            var tabName = _services.Settings.GetGsheetTabName();
-            var results = await _services.GsheetSync.PushAsync(url, tabName, rows, log, ct).ConfigureAwait(false);
-
-            int added = 0, updated = 0, withFile = 0, errors = 0;
-            string? firstError = null;
-            foreach (var r in results)
-            {
-                if (r.Ok)
-                {
-                    var daHuy = daHuyByMaDon.TryGetValue(r.MaDon, out var dh) && dh;
-                    var coVanDon = coVanDonByMaDon.TryGetValue(r.MaDon, out var cv) && cv;
-                    _services.Orders.MarkGsheetSynced(_accountId, r.MaDon, r.FileUrl, daHuy, coVanDon, DateTime.UtcNow);
-                    if (r.Added) { added++; } else { updated++; }
-                    if (!string.IsNullOrEmpty(r.FileUrl)) { withFile++; }
+                    log("GSheet: không có đơn mới cần ghi.");
                 }
                 else
                 {
-                    errors++;
-                    firstError ??= $"{r.MaDon}: {r.Error}";
+                    // PushAsync có thể ném (lỗi mạng/lô) → đơn ĐỊNH-GỬI (trong rows) coi CHƯA settled → GIỮ lại,
+                    // lượt sync sau tự đẩy lại. Đơn settled-by-design ở trên VẪN được dọn. OCE (hủy) cho xuyên.
+                    try
+                    {
+                        var tabName = _services.Settings.GetGsheetTabName();
+                        var results = await _services.GsheetSync.PushAsync(url, tabName, rows, log, ct).ConfigureAwait(false);
+
+                        int added = 0, updated = 0, withFile = 0, errors = 0;
+                        string? firstError = null;
+                        foreach (var r in results)
+                        {
+                            if (r.Ok)
+                            {
+                                var daHuy = daHuyByMaDon.TryGetValue(r.MaDon, out var dh) && dh;
+                                var coVanDon = coVanDonByMaDon.TryGetValue(r.MaDon, out var cv) && cv;
+                                _services.Orders.MarkGsheetSynced(_accountId, r.MaDon, r.FileUrl, daHuy, coVanDon, DateTime.UtcNow);
+                                settled.Add(r.MaDon); // gửi thành công → settled (đủ điều kiện dọn nếu kết thúc)
+                                if (r.Added) { added++; } else { updated++; }
+                                if (!string.IsNullOrEmpty(r.FileUrl)) { withFile++; }
+                            }
+                            else
+                            {
+                                errors++;
+                                firstError ??= $"{r.MaDon}: {r.Error}";
+                            }
+                        }
+
+                        var summary = $"GSheet: thêm {added} dòng mới, bổ sung {updated}, kèm {withFile} file phiếu.";
+                        if (errors > 0)
+                        {
+                            summary += $" Lỗi {errors} đơn (vd {firstError}).";
+                        }
+                        log(summary);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        throw; // hủy chủ động → bỏ qua cả bước dọn (lượt sau làm lại)
+                    }
+                    catch (Exception ex)
+                    {
+                        // Lỗi đẩy GSheet (mạng/lô) → đơn định-gửi giữ CHƯA settled; vẫn xuống dọn đơn settled-by-design.
+                        log("GSheet: lỗi — " + ex.Message);
+                    }
                 }
             }
 
-            var summary = $"GSheet: thêm {added} dòng mới, bổ sung {updated}, kèm {withFile} file phiếu.";
-            if (errors > 0)
+            // ===== DỌN đơn KẾT THÚC (Đã giao / Đã hủy) đã hoàn tất mọi nghĩa vụ khỏi app =====
+            var deletable = new List<string>();
+            var terminalChuaXong = 0;
+            foreach (var p in pending)
             {
-                summary += $" Lỗi {errors} đơn (vd {firstError}).";
+                var terminal = ShopeeShippingNav.LaDonHuy(p.Status, p.StatusDescription, p.CancelReason)
+                    || ShopeeShippingNav.LaDaGiaoDaBan(p.Status);
+                if (!terminal)
+                {
+                    continue; // đơn trung gian (Chuẩn bị hàng / Đang giao / Chờ xác nhận…) → GIỮ, theo dõi tiếp
+                }
+                if (NenXoaDonKetThuc(p, settled.Contains(p.OrderSn), hubHookActive))
+                {
+                    deletable.Add(p.OrderSn);
+                }
+                else
+                {
+                    terminalChuaXong++;
+                }
             }
-            log(summary);
+
+            if (deletable.Count > 0)
+            {
+                var n = _services.Orders.DeleteOrders(_accountId, deletable);
+                _services.RaiseOrdersChanged(); // lưới Đơn hàng đang mở tự vẽ lại
+                log($"Dọn: đã lưu sheet & xóa {n} đơn kết thúc (Đã giao/Đã hủy) khỏi app.");
+            }
+            if (terminalChuaXong > 0)
+            {
+                log($"Dọn: {terminalChuaXong} đơn kết thúc chờ lượt sau (GSheet/hub/đếm chưa xong).");
+            }
         }
         catch (OperationCanceledException)
         {
-            // Hủy chủ động — thôi (sync DB đã xong; lượt sync sau tự đẩy lại nhờ cờ DB).
+            // Hủy chủ động — thôi (sync DB đã xong; lượt sync sau tự đẩy + dọn lại nhờ cờ DB).
         }
         catch (Exception ex)
         {
-            // Lỗi GSheet KHÔNG phá lượt sync (đã báo thành công) — chỉ ghi log.
+            // Lỗi bất ngờ KHÔNG phá lượt sync (đã báo thành công) — chỉ ghi log.
             log("GSheet: lỗi — " + ex.Message);
         }
+    }
+
+    /// <summary>
+    /// HÀM THUẦN (test được) quyết định một đơn KẾT THÚC có được XÓA khỏi app chưa. Trả true khi:
+    /// <list type="bullet">
+    /// <item>đơn KẾT THÚC — <c>LaDonHuy</c> (Đã hủy) hoặc <c>LaDaGiaoDaBan</c> (Đã giao); VÀ</item>
+    /// <item><paramref name="gsheetSettled"/> — đã ghi sheet xong / không cần ghi / URL trống; VÀ</item>
+    /// <item>KHÔNG (Đã giao + có SKU + chưa đếm "Đã bán") — nghĩa là đếm sold còn NULL thì GIỮ để lượt sau +1
+    /// (xóa sớm là mất đếm); VÀ</item>
+    /// <item>KHÔNG (hub bật + chưa đẩy hub) — hub đang nhận đơn mà đơn chưa <c>hub_synced_at</c> thì GIỮ, kẻo
+    /// hub mất đơn.</item>
+    /// </list>
+    /// Đơn trung gian (chưa kết thúc) hoặc chưa settled → false (GIỮ). Nghi ngờ thì GIỮ — đơn thừa vô hại.
+    /// </summary>
+    internal static bool NenXoaDonKetThuc(GsheetPendingOrder p, bool gsheetSettled, bool hubHookActive)
+    {
+        var terminal = ShopeeShippingNav.LaDonHuy(p.Status, p.StatusDescription, p.CancelReason)
+            || ShopeeShippingNav.LaDaGiaoDaBan(p.Status);
+        return terminal
+            && gsheetSettled
+            && (!ShopeeShippingNav.LaDaGiaoDaBan(p.Status) || string.IsNullOrWhiteSpace(p.Sku) || p.DaDemDaBan)
+            && (!hubHookActive || p.DaDayHub);
     }
 
     /// <summary>
