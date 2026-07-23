@@ -1,5 +1,3 @@
-using System.Net;
-using System.Net.Sockets;
 using System.Text.Json;
 using XuLyDonShopee.Core.Models;
 
@@ -26,9 +24,8 @@ public sealed record OrdersBridgeSliceResult(
 /// <param name="Pass">Mật khẩu subaccount (= <c>acc.Password</c>).</param>
 /// <param name="VerifyEmail">Hotmail/Outlook để đọc mã xác thực (có thể rỗng → không mở hộp thư).</param>
 /// <param name="VerifyEmailPassword">Mật khẩu hộp thư.</param>
-/// <param name="MailUserDataDir">Hồ sơ persistent RIÊNG cho trình duyệt hộp thư (tách khỏi hồ sơ Shopee).</param>
 public sealed record OrdersLoginParams(
-    string User, string Pass, string? VerifyEmail, string? VerifyEmailPassword, string MailUserDataDir);
+    string User, string Pass, string? VerifyEmail, string? VerifyEmailPassword);
 
 /// <summary>
 /// Vòng đời MỘT phiên cầu nối: cấp cổng loopback trống → chạy <see cref="OrdersWebSocketServer"/> →
@@ -36,8 +33,8 @@ public sealed record OrdersLoginParams(
 /// <c>startUrl</c> có hash <c>#_od_ws=&lt;port&gt;</c> để extension đọc cổng → chờ extension báo <c>ready</c>.
 /// <list type="bullet">
 /// <item><see cref="RunSliceAsync"/> (GĐ1): mở thẳng <c>/portal/shop</c> (user đã đăng nhập tay) → chạy lát cắt.</item>
-/// <item><see cref="RunLoginThenSliceAsync"/> (GĐ2): mở <c>subaccount.shopee.com</c> → extension tự điền form
-/// đăng nhập → chờ user nhập mã (mở hộp thư Playwright riêng cho user đọc) → SSO sang Seller Centre → lát cắt.</item>
+/// <item><see cref="RunLoginThenSliceAsync"/> (GĐ2 pivot): đăng nhập bằng trình duyệt điều khiển Playwright
+/// (tái dùng luồng production) → đóng → mở lại bằng trình duyệt sạch + extension → lát cắt Seller Centre.</item>
 /// </list>
 /// Parse dữ liệu qua các hàm THUẦN sẵn có (<see cref="ShopeeLoginService.ParseShopListJson"/>,
 /// <see cref="ShopeeDashboard.ParseToShipCount"/>).
@@ -58,8 +55,6 @@ public sealed class OrdersBridgeSession : IDisposable
     // Cờ hoàn tất từng chặng — tạo mới mỗi lần chạy; RunContinuationsAsynchronously để continuation KHÔNG chạy
     // trên thread nhận WebSocket (tránh nghẽn vòng nhận / deadlock).
     private TaskCompletionSource<bool> _readyTcs = NewTcs<bool>();
-    private TaskCompletionSource<string> _loginStatusTcs = NewTcs<string>();   // GĐ2: loggedIn/needCode/pending
-    private TaskCompletionSource<bool> _atSellerTcs = NewTcs<bool>();          // GĐ2: đã vào Seller Centre
     private TaskCompletionSource<string?> _shopListTcs = NewTcs<string?>();
     private TaskCompletionSource<string> _detailTcs = NewTcs<string>();        // "ok" | "captcha"
     private TaskCompletionSource<string?> _toShipTcs = NewTcs<string?>();
@@ -84,25 +79,33 @@ public sealed class OrdersBridgeSession : IDisposable
     private void ResetTcs()
     {
         _readyTcs = NewTcs<bool>();
-        _loginStatusTcs = NewTcs<string>();
-        _atSellerTcs = NewTcs<bool>();
         _shopListTcs = NewTcs<string?>();
         _detailTcs = NewTcs<string>();
         _toShipTcs = NewTcs<string?>();
         _captchaSeen = false;
     }
 
+    /// <summary>Cổng cầu nối CỐ ĐỊNH — extension dùng cổng này khi hash <c>#_od_ws</c> bị rụng lúc Shopee redirect
+    /// trang đăng nhập (khớp <c>DEFAULT_PORT</c> trong extension). Một phiên/lần test nên cố định là đủ.</summary>
+    private const int BridgePort = 47821;
+
     // ── Khởi động cầu + mở trình duyệt sạch tại startUrl (kèm hash cổng WS) ─────────────────────────────
     private void StartBridgeAndLaunch(string baseUrl)
     {
-        var wsPort = AllocateFreePort();
-        _ws = new OrdersWebSocketServer(wsPort);
+        // Bind cổng cố định; phiên trước vừa đóng có thể chưa nhả hẳn → retry vài nhịp.
+        OrdersWebSocketServer? ws = null;
+        for (var attempt = 0; attempt < 5 && ws is null; attempt++)
+        {
+            try { var s = new OrdersWebSocketServer(BridgePort); s.Start(); ws = s; }
+            catch when (attempt < 4) { System.Threading.Thread.Sleep(400); }
+        }
+        _ws = ws ?? throw new InvalidOperationException(
+            $"Không mở được cổng cầu nối {BridgePort} (đang bận? đóng phiên cũ rồi thử lại).");
         _ws.MessageReceived += OnMessage;
-        _ws.Start();
-        L($"Cầu nối: WebSocket lắng nghe ws://localhost:{wsPort} — mở trình duyệt sạch...");
+        L($"Cầu nối: WebSocket lắng nghe ws://localhost:{BridgePort} — mở trình duyệt sạch...");
 
-        // Extension đọc cổng từ hash của URL đầu tiên (content.js đọc sớm + lưu chrome.storage.session).
-        var startUrl = $"{baseUrl}#_od_ws={wsPort}";
+        // Vẫn nhúng hash (extension đọc nếu còn) nhưng KHÔNG phụ thuộc: mất hash → extension dùng cổng cố định.
+        var startUrl = $"{baseUrl}#_od_ws={BridgePort}";
         var extPath = BraveLaunchArgs.ResolveOrdersBridgeExtension()
             ?? throw new InvalidOperationException(
                 "Không tìm thấy thư mục extension 'shopee-orders' (cạnh app hoặc trong repo). " +
@@ -140,106 +143,49 @@ public sealed class OrdersBridgeSession : IDisposable
         }
     }
 
-    // ── GĐ2: đăng nhập subaccount qua extension → SSO Seller Centre → lát cắt ───────────────────────────
+    // ── GĐ2 (pivot): đăng nhập bằng Playwright (an toàn — subaccount + /portal/shop KHÔNG bị captcha) → đóng
+    //    → mở lại bằng trình duyệt SẠCH + extension để đọc Seller Centre (chỉ "Chi tiết" mới dính captcha). ──────
     /// <summary>
-    /// GĐ2: mở <c>subaccount.shopee.com</c> → extension điền form đăng nhập → chờ user nhập mã (mở hộp thư
-    /// Playwright riêng để user đọc) → SSO "Tài khoản của tôi" → "Kênh Người bán" → <c>/portal/shop</c> → lát cắt.
-    /// KHÔNG tự nhập mã hộ (mã là thao tác tay). Ngoại lệ bọc thành Error; hủy ném ra ngoài.
+    /// GĐ2: đăng nhập Nền tảng tài khoản phụ bằng <b>trình duyệt điều khiển Playwright/CDP CŨ</b> (tái dùng NGUYÊN
+    /// <see cref="ShopeeLoginService.OpenAsync"/> + <c>TryLoginSubaccountAsync</c> — tự điền form, mở hộp thư cho user
+    /// đọc mã, chờ mã, SSO tới Seller Centre). Đăng nhập xong thì ĐÓNG trình duyệt điều khiển (nhả khoá hồ sơ), rồi
+    /// mở lại bằng <b>trình duyệt SẠCH + extension</b> qua <see cref="RunSliceAsync"/> (hồ sơ đã đăng nhập nên vào
+    /// thẳng <c>/portal/shop</c>) → đọc shop → "Chi tiết" (trusted click, né captcha) → "Chờ Lấy Hàng".
+    /// KHÔNG tự nhập mã hộ (mã là thao tác tay). Hủy giữa chừng → đóng cả trình duyệt điều khiển (finally) lẫn sạch.
     /// </summary>
     public async Task<OrdersBridgeSliceResult> RunLoginThenSliceAsync(OrdersLoginParams login, CancellationToken ct = default)
     {
-        ResetTcs();
-        StartBridgeAndLaunch(ShopeeLoginService.SubaccountUrl);
-
-        OrdersMailboxSession? mail = null;
-        Task<bool>? mailTask = null;
+        // 1) Đăng nhập bằng trình duyệt điều khiển (Playwright). Bọc try/finally để user Dừng giữa chừng (ct hủy →
+        //    TryLoginSubaccountAsync ném OperationCanceledException) thì trình duyệt điều khiển VẪN được đóng (không mồ côi).
+        var entered = false;
+        ILoginSession? session = null;
         try
         {
-            L("Chờ extension nối cầu (ready) — tối đa 45s...");
-            await _readyTcs.Task.WaitAsync(TimeSpan.FromSeconds(45), ct).ConfigureAwait(false);
-            L("Extension đã nối cầu — điền form đăng nhập Nền tảng tài khoản phụ...");
-
-            await _ws!.SendAsync(new { action = "login", user = login.User, pass = login.Pass }).ConfigureAwait(false);
-
-            // Poll trạng thái đăng nhập; mở hộp thư khi Shopee đòi mã (hoặc sau ~8s) để user sẵn sàng đọc code.
-            var hasVerifyMail = !string.IsNullOrWhiteSpace(login.VerifyEmail)
-                                && !string.IsNullOrWhiteSpace(login.VerifyEmailPassword);
-            var loginStart = DateTime.UtcNow;
-            var deadline = DateTime.UtcNow.AddMinutes(15); // chờ user gõ mã là phần lâu nhất
-            var loggedIn = false;
-            var mailOpened = false;
-
-            while (DateTime.UtcNow < deadline)
-            {
-                ct.ThrowIfCancellationRequested();
-
-                _loginStatusTcs = NewTcs<string>();
-                await _ws.SendAsync(new { action = "checkLogin" }).ConfigureAwait(false);
-                string state;
-                try { state = await _loginStatusTcs.Task.WaitAsync(TimeSpan.FromSeconds(15), ct).ConfigureAwait(false); }
-                catch (TimeoutException) { state = "pending"; }
-
-                if (state == "loggedIn") { loggedIn = true; break; }
-
-                var elapsed = DateTime.UtcNow - loginStart;
-                if (!mailOpened && hasVerifyMail && (state == "needCode" || elapsed > TimeSpan.FromSeconds(8)))
-                {
-                    L(state == "needCode"
-                        ? "Shopee đòi mã xác thực — mở hộp thư để bạn tự đọc mã..."
-                        : "Mở sẵn hộp thư để bạn đọc mã nếu Shopee yêu cầu...");
-                    mail = new OrdersMailboxSession(login.MailUserDataDir, _browserChoice, _log);
-                    mailTask = mail.OpenForManualCodeAsync(login.VerifyEmail!, login.VerifyEmailPassword!, ct);
-                    mailOpened = true;
-                }
-
-                await Task.Delay(3000, ct).ConfigureAwait(false);
-            }
-
-            if (!loggedIn)
-            {
-                return Fail("Chờ 15' chưa đăng nhập được Nền tảng tài khoản phụ (nhập mã chưa xong?).");
-            }
-
-            // SSO sang Seller Centre.
-            L("Đã đăng nhập subaccount — chuyển sang Kênh Người bán (Seller Centre)...");
-            _atSellerTcs = NewTcs<bool>();
-            await _ws.SendAsync(new { action = "gotoSellerCentre" }).ConfigureAwait(false);
-            var atSeller = await _atSellerTcs.Task.WaitAsync(TimeSpan.FromSeconds(120), ct).ConfigureAwait(false);
-            if (_captchaSeen)
-            {
-                L("PHÁT HIỆN captcha/verify khi vào Seller Centre — cần soi lại.");
-                return new OrdersBridgeSliceResult(Array.Empty<ShopListItem>(), null, null, true,
-                    "Rơi vào trang verify/captcha khi vào Seller Centre.");
-            }
-            if (!atSeller)
-            {
-                return Fail("Không mở được Kênh Người bán / /portal/shop sau đăng nhập.");
-            }
-
-            L("Đã vào Seller Centre — đọc danh sách shop...");
-            return await RunSliceCoreAsync(ct).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) { throw; }
-        catch (TimeoutException)
-        {
-            L("Cầu nối: hết thời gian chờ phản hồi từ extension.");
-            return Fail("Hết thời gian chờ phản hồi từ extension khi đăng nhập.");
-        }
-        catch (Exception ex)
-        {
-            L("Cầu nối lỗi: " + ex.Message);
-            return Fail(ex.Message);
+            L("Đăng nhập Nền tảng tài khoản phụ bằng trình duyệt điều khiển (Playwright)...");
+            var svc = new ShopeeLoginService();
+            session = await svc.OpenAsync(_userDataDir, null /* proxy */, _browserChoice, ct).ConfigureAwait(false);
+            entered = await session.TryLoginSubaccountAsync(
+                login.User, login.Pass, login.VerifyEmail, login.VerifyEmailPassword, _log, ct).ConfigureAwait(false);
         }
         finally
         {
-            // Đóng trình duyệt hộp thư (user đã đọc mã xong trước khi loggedIn). Best-effort.
-            if (mail is not null)
+            if (session is not null)
             {
-                try { if (mailTask is not null) await Task.WhenAny(mailTask, Task.Delay(1000)).ConfigureAwait(false); }
-                catch { /* bỏ qua */ }
-                await mail.DisposeAsync().ConfigureAwait(false);
+                try { await session.DisposeAsync().ConfigureAwait(false); } catch { /* bỏ qua */ }
             }
         }
+
+        if (!entered)
+        {
+            return Fail("Đăng nhập subaccount chưa xong (nhập mã?). Bấm lại để thử tiếp.");
+        }
+
+        // 2) Settle ngắn cho chắc nhả khoá file hồ sơ (Brave vừa kill) trước khi mở lại bằng trình duyệt sạch.
+        await Task.Delay(800, ct).ConfigureAwait(false);
+
+        // 3) Mở lại bằng trình duyệt SẠCH + extension tại /portal/shop (đã đăng nhập nhờ hồ sơ) → lát cắt.
+        L("Đăng nhập xong — mở lại bằng trình duyệt sạch + extension để đọc Seller Centre...");
+        return await RunSliceAsync(ct).ConfigureAwait(false);
     }
 
     // Lát cắt dùng chung (GĐ1 + đuôi GĐ2): readShopList → openShopDetail(shop đầu) → readToShip.
@@ -298,17 +244,6 @@ public sealed class OrdersBridgeSession : IDisposable
                     _readyTcs.TrySetResult(true);
                     break;
 
-                case "loginStatus":
-                {
-                    var state = root.TryGetProperty("state", out var s) ? (s.GetString() ?? "pending") : "pending";
-                    _loginStatusTcs.TrySetResult(state);
-                    break;
-                }
-
-                case "atSellerCentre":
-                    _atSellerTcs.TrySetResult(true);
-                    break;
-
                 case "shopOpened":
                     _detailTcs.TrySetResult("ok");
                     break;
@@ -341,9 +276,7 @@ public sealed class OrdersBridgeSession : IDisposable
                 case "captcha":
                 {
                     _captchaSeen = true;
-                    // Có thể xảy ra khi mở Chi tiết HOẶC khi vào Seller Centre → hoàn tất cả hai chặng đang chờ.
                     _detailTcs.TrySetResult("captcha");
-                    _atSellerTcs.TrySetResult(false);
                     break;
                 }
 
@@ -354,8 +287,6 @@ public sealed class OrdersBridgeSession : IDisposable
                     var ex = new InvalidOperationException("Extension báo lỗi: " + m);
                     // Fault mọi chặng đang chờ để phiên thoát sớm thay vì đợi timeout.
                     _readyTcs.TrySetException(ex);
-                    _loginStatusTcs.TrySetException(ex);
-                    _atSellerTcs.TrySetException(ex);
                     _shopListTcs.TrySetException(ex);
                     _detailTcs.TrySetException(ex);
                     _toShipTcs.TrySetException(ex);
@@ -378,21 +309,6 @@ public sealed class OrdersBridgeSession : IDisposable
             return null;
         }
         return d.ValueKind == JsonValueKind.String ? d.GetString() : d.GetRawText();
-    }
-
-    /// <summary>Chọn một cổng loopback trống bằng cách bind port 0 rồi nhả (một phiên/lần test là đủ).</summary>
-    private static int AllocateFreePort()
-    {
-        var l = new TcpListener(IPAddress.Loopback, 0);
-        l.Start();
-        try
-        {
-            return ((IPEndPoint)l.LocalEndpoint).Port;
-        }
-        finally
-        {
-            l.Stop();
-        }
     }
 
     public void Dispose()

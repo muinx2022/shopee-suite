@@ -1,16 +1,16 @@
-// Service worker — CẦU NỐI extension↔C# cho module Đơn hàng (GĐ1 + GĐ2).
+// Service worker — CẦU NỐI extension↔C# cho module Đơn hàng (Seller Centre slice).
 //
-// Kênh lệnh/dữ liệu: WebSocket tới ws://localhost:<port> (C# chạy OrdersWebSocketServer). Cổng lấy từ hash
-// #_od_ws=<port> mà C# nhúng vào URL trang đầu (subaccount.shopee.com ở GĐ2 / /portal/shop ở GĐ1); content.js
-// đọc rồi gửi sang đây ('hello'). Kênh input "thật": chrome.debugger (Input.dispatchMouseEvent / dispatchKeyEvent)
-// — trusted click + trusted type, đã chứng minh né captcha ở GĐ0. KHÔNG mở --remote-debugging-port.
+// PIVOT GĐ2: ĐĂNG NHẬP subaccount + SSO nay do C# làm bằng Playwright/CDP (subaccount + /portal/shop KHÔNG bị
+// captcha nên an toàn). Extension chỉ còn lo phần Seller Centre né captcha: đọc danh sách shop → mở "Chi tiết"
+// bằng TRUSTED CLICK (chrome.debugger) → đọc "Chờ Lấy Hàng". Trình duyệt sạch mở thẳng /portal/shop (đã đăng
+// nhập nhờ hồ sơ). KHÔNG mở --remote-debugging-port.
+//
+// Kênh lệnh/dữ liệu: WebSocket tới ws://localhost:<port> (C# chạy OrdersWebSocketServer). Cổng: hash #_od_ws=<port>
+// nếu còn, không thì DEFAULT_PORT cố định; content.js gửi 'wake'/'hello' đánh thức SW + nối cầu.
 //
 // Protocol:
-//   C#  -> ext:  GĐ1: {action:"readShopList"} | {action:"openShopDetail", shopId} | {action:"readToShip"}
-//                GĐ2: {action:"login", user, pass} | {action:"checkLogin"} | {action:"gotoSellerCentre"}
+//   C#  -> ext:  {action:"readShopList"} | {action:"openShopDetail", shopId} | {action:"readToShip"}
 //   ext -> C#:   {action:"ready"}
-//                {action:"loginStatus", state:"loggedIn"|"needCode"|"pending"}   (đáp checkLogin)
-//                {action:"atSellerCentre"}                                        (gotoSellerCentre xong)
 //                {action:"shopOpened"}                                            (openShopDetail xong)
 //                {action:"pageData", kind:"shopList", data:<json-array-string>}
 //                {action:"pageData", kind:"toShip",   data:<raw-item-title-string>}
@@ -18,10 +18,13 @@
 //                {action:"captcha",  message}                                     (rơi vào trang /verify)
 //                {action:"error",    message}
 
+const DEFAULT_PORT = 47821; // PHẢI khớp OrdersBridgeSession.BridgePort phía C# (khi hash rụng).
+
 let ws = null;
-let wsPort = null;
+let wsPort = DEFAULT_PORT;
 let listTabId = null; // tab đang thao tác (subaccount → sau SSO là tab banhang /portal/shop)
 let shopTabId = null; // tab shop mở ra sau khi bấm "Chi tiết"
+let reconnectTimer = null;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -35,17 +38,23 @@ function send(obj) {
   }
 }
 
+function scheduleReconnect() {
+  if (reconnectTimer) return;
+  reconnectTimer = setTimeout(() => { reconnectTimer = null; connect(); }, 1200);
+}
+
 function connect() {
-  if (!wsPort) return;
   if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
+  const port = wsPort || DEFAULT_PORT;
   try {
-    ws = new WebSocket("ws://localhost:" + wsPort);
+    ws = new WebSocket("ws://localhost:" + port);
   } catch (e) {
+    scheduleReconnect();
     return;
   }
   ws.onopen = () => send({ action: "ready" });
-  ws.onclose = () => { ws = null; };
-  ws.onerror = () => { /* onclose sẽ dọn */ };
+  ws.onclose = () => { ws = null; scheduleReconnect(); }; // C# chưa lên / rớt → thử lại (browser bị kill thì SW chết theo).
+  ws.onerror = () => { /* onclose sẽ dọn + hẹn lại */ };
   ws.onmessage = (ev) => {
     let cmd;
     try { cmd = JSON.parse(ev.data); } catch (e) { return; }
@@ -53,26 +62,26 @@ function connect() {
   };
 }
 
-// content.js gửi cổng ws (kèm tabId của trang đầu = tab thao tác ban đầu).
+// content.js gửi 'wake' (mọi trang khớp) hoặc 'hello' → đánh thức SW + nối cầu. Không còn phụ thuộc hash sống sót:
+// mất hash thì content.js gửi DEFAULT_PORT. listTabId gán tab đầu tiên khớp; ensureListTab(BANHANG_HOSTS) tự
+// phân giải lại tab /portal/shop khi chạy lát cắt (login đã do C#/Playwright lo, extension chỉ ở Seller Centre).
 chrome.runtime.onMessage.addListener((msg, sender) => {
-  if (msg && msg.type === "hello" && msg.wsPort) {
-    wsPort = msg.wsPort;
-    if (sender.tab && sender.tab.id != null) listTabId = sender.tab.id;
+  if (msg && (msg.type === "wake" || msg.type === "hello")) {
+    if (msg.wsPort) wsPort = msg.wsPort;
+    if (listTabId == null && sender.tab && sender.tab.id != null) listTabId = sender.tab.id;
     try { chrome.storage.session.set({ wsPort, listTabId }); } catch (e) {}
     connect();
   }
 });
 
-// Service worker khởi động lại (MV3 có thể ngủ) → nạp lại cổng đã lưu rồi nối lại.
+// Service worker khởi động lại (MV3 có thể ngủ) → nạp cổng đã lưu (hoặc mặc định) rồi nối lại.
 try {
   chrome.storage.session.get(["wsPort", "listTabId"], (v) => {
-    if (v && v.wsPort) {
-      wsPort = v.wsPort;
-      if (v.listTabId != null) listTabId = v.listTabId;
-      connect();
-    }
+    if (v && v.wsPort) wsPort = v.wsPort;
+    if (v && v.listTabId != null) listTabId = v.listTabId;
+    connect();
   });
-} catch (e) {}
+} catch (e) { connect(); }
 
 // ---- Hàm chạy trong trang (world MAIN) ------------------------------------
 // (Port từ ScanShopListJs / OpenShopDetailAsync / FindToShipTitleAsync / SubUserSelectors... phía C#.)
@@ -147,103 +156,29 @@ function pageReadToShip() {
   return null;
 }
 
-// Đọc toạ độ TÂM ô user/pass + nút "Đăng nhập" của form subaccount (đúng SubUserSelectors/SubPassSelectors/
-// SubSubmitSelectors + SignInRegex phía C#). KHÔNG cuộn (form gọn, mọi phần tử đã hiển thị) — tránh lệch toạ độ.
-function pageLocateLoginForm() {
-  function firstVisible(sels) {
-    for (const sel of sels) {
-      const els = document.querySelectorAll(sel);
-      for (const el of els) {
-        const r = el.getBoundingClientRect();
-        if (r.width > 0 && r.height > 0) return el;
-      }
-    }
-    return null;
-  }
-  function center(el) {
-    if (!el) return null;
-    const r = el.getBoundingClientRect();
-    return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
-  }
-  const userEl = firstVisible([".login-card input[type='text']", "input[placeholder*='Tên đăng nhập']", "input[placeholder*='SĐT']", "input[type='text']"]);
-  const passEl = firstVisible([".login-card input[type='password']", "input[type='password']"]);
-  let submitEl = null;
-  const cands = document.querySelectorAll(".login-card button.shopee-button--primary, button.shopee-button--primary, button, [role='button']");
-  const re = /sign\s*in|đăng nhập|dang nhap/i;
-  for (const b of cands) {
-    const t = (b.textContent || "").replace(/\s+/g, " ").trim();
-    if (re.test(t)) {
-      const r = b.getBoundingClientRect();
-      if (r.width > 0 && r.height > 0) { submitEl = b; break; }
-    }
-  }
-  return { user: center(userEl), pass: center(passEl), submit: center(submitEl) };
-}
+let lastTabUrls = []; // chẩn đoán: các URL tab lần query gần nhất (đưa vào thông báo lỗi khi không thấy tab).
 
-// Trạng thái đăng nhập subaccount: 'loggedIn' (nav "Tài khoản của tôi") / 'needCode' (trang/ô nhập mã) / 'pending'.
-function pageLoginStatus() {
-  function na(s) {
-    const nf = (s || "").replace(/\s+/g, " ").trim().toLowerCase().normalize("NFD");
-    let out = "";
-    for (const ch of nf) {
-      const c = ch.charCodeAt(0);
-      if (c >= 0x300 && c <= 0x36f) continue; // bỏ dấu thanh (combining marks)
-      out += ch === "đ" ? "d" : ch;
-    }
-    return out;
-  }
-  const myRe = /tai khoan cua toi|my account/;
-  const els = document.querySelectorAll("li, a, div, span, [role='menuitem']");
-  for (const el of els) {
-    const t = na(el.textContent);
-    if (t && myRe.test(t)) {
-      const r = el.getBoundingClientRect();
-      if (r.width > 0 && r.height > 0) return "loggedIn";
-    }
-  }
-  const url = (location.href || "").toLowerCase();
-  if (url.indexOf("verify") >= 0 || url.indexOf("/otp") >= 0) return "needCode";
-  const inputs = document.querySelectorAll("input");
-  const codeRe = /ma xac|verification code|nhap ma|otp|ma xac minh|ma xac thuc|enter code/;
-  for (const inp of inputs) {
-    const ph = na((inp.getAttribute("placeholder") || "") + " " + (inp.getAttribute("aria-label") || ""));
-    if (ph && codeRe.test(ph)) {
-      const r = inp.getBoundingClientRect();
-      if (r.width > 0 && r.height > 0) return "needCode";
-    }
-  }
-  return "pending";
-}
+// Phân giải "tab thao tác" một cách CHẮC CHẮN: nếu listTabId còn sống VÀ khớp host cần → giữ; ngược lại query
+// TẤT CẢ tab rồi khớp theo CHUỖI URL (bỏ match-pattern cho khỏi vướng quyền), lấy tab MỚI NHẤT khớp. null nếu
+// không thấy (kèm lastTabUrls để báo chẩn đoán).
+async function ensureListTab(preferSubstrings) {
+  const subs = preferSubstrings || ["subaccount.shopee.com", "accounts.shopee.vn", "banhang.shopee.vn"];
+  const matches = (url) => url && subs.some((s) => url.indexOf(s) >= 0);
 
-// Tìm phần tử khớp text (chuẩn hoá KHÔNG dấu) trong danh sách selector → toạ độ TÂM (đã cuộn vào giữa). null nếu không thấy.
-function pageLocateByText(selectors, reSrc) {
-  function na(s) {
-    const nf = (s || "").replace(/\s+/g, " ").trim().toLowerCase().normalize("NFD");
-    let out = "";
-    for (const ch of nf) {
-      const c = ch.charCodeAt(0);
-      if (c >= 0x300 && c <= 0x36f) continue; // bỏ dấu thanh (combining marks)
-      out += ch === "đ" ? "d" : ch;
-    }
-    return out;
+  if (listTabId != null) {
+    try { const t = await chrome.tabs.get(listTabId); if (t && matches(t.url)) return listTabId; } catch (e) {}
+    listTabId = null;
   }
-  const re = new RegExp(reSrc);
-  for (const sel of selectors) {
-    const els = document.querySelectorAll(sel);
-    for (const el of els) {
-      const t = na(el.textContent);
-      if (t && re.test(t)) {
-        const r0 = el.getBoundingClientRect();
-        if (r0.width > 0 && r0.height > 0) {
-          try { el.scrollIntoView({ block: "center" }); } catch (e) {}
-          const r = el.getBoundingClientRect();
-          return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
-        }
-      }
-    }
+  const all = await chrome.tabs.query({});
+  lastTabUrls = all.map((t) => t.url || t.pendingUrl || "").filter(Boolean);
+  for (const s of subs) {
+    const hit = all.filter((t) => (t.url || t.pendingUrl || "").indexOf(s) >= 0);
+    if (hit.length) { listTabId = hit[hit.length - 1].id; return listTabId; }
   }
   return null;
 }
+
+const BANHANG_HOSTS = ["banhang.shopee.vn"];
 
 // Chạy một hàm trong trang (world MAIN), trả result[0].result.
 async function execInTab(tabId, func, args) {
@@ -306,42 +241,7 @@ async function dbgClick(target, x, y) {
   await dbgSend(target, "Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", buttons: 0, clickCount: 1 });
 }
 
-// code/vk cho ký tự ASCII (port KeyInfo của CdpInputController).
-function keyInfo(ch) {
-  const c = ch.charCodeAt(0);
-  if (ch >= "0" && ch <= "9") return { code: "Digit" + ch, vk: c };
-  if (ch >= "a" && ch <= "z") return { code: "Key" + ch.toUpperCase(), vk: ch.toUpperCase().charCodeAt(0) };
-  if (ch >= "A" && ch <= "Z") return { code: "Key" + ch, vk: c };
-  if (ch === " ") return { code: "Space", vk: 32 };
-  return { code: "", vk: 0 };
-}
-
-// Gõ trusted (port TypeAsync): ASCII in-được → keyDown/keyUp từng ký tự; có unicode → insertText cả chuỗi.
-async function dbgType(target, text) {
-  if (!text) return;
-  let isAscii = true;
-  for (const ch of text) { const c = ch.charCodeAt(0); if (c < 0x20 || c > 0x7e) { isAscii = false; break; } }
-  if (!isAscii) {
-    await sleep(150);
-    await dbgSend(target, "Input.insertText", { text });
-    return;
-  }
-  for (const ch of text) {
-    const ki = keyInfo(ch);
-    await dbgSend(target, "Input.dispatchKeyEvent", { type: "keyDown", text: ch, key: ch, code: ki.code, windowsVirtualKeyCode: ki.vk });
-    await dbgSend(target, "Input.dispatchKeyEvent", { type: "keyUp", key: ch, code: ki.code, windowsVirtualKeyCode: ki.vk });
-    await sleep(50 + Math.floor(Math.random() * 70));
-  }
-}
-
-// Enter: keyDown kèm text "\r" (renderer cần keypress để submit form) + keyUp (port PressKeyAsync).
-async function dbgEnter(target) {
-  await dbgSend(target, "Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, text: "\r" });
-  await sleep(50);
-  await dbgSend(target, "Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
-}
-
-// Cú click trusted self-contained (tự attach/detach) — dùng cho openShopDetail + SSO click.
+// Cú click trusted self-contained (tự attach/detach) — dùng cho openShopDetail.
 async function trustedClick(tabId, x, y) {
   await withDebugger(tabId, async (target) => { await dbgClick(target, x, y); });
 }
@@ -352,101 +252,15 @@ async function handleCommand(cmd) {
   if (!cmd || !cmd.action) return;
 
   switch (cmd.action) {
-    case "login":            await doLogin(cmd); return;
-    case "checkLogin":       await doCheckLogin(); return;
-    case "gotoSellerCentre": await gotoSellerCentre(); return;
     case "readShopList":     await doReadShopList(); return;
     case "openShopDetail":   await openShopDetail(String(cmd.shopId || "").replace(/'/g, "")); return;
     case "readToShip":       await doReadToShip(); return;
   }
 }
 
-// GĐ2: điền form đăng nhập subaccount + submit (trusted).
-async function doLogin(cmd) {
-  if (listTabId == null) { send({ action: "error", message: "chưa biết tab subaccount" }); return; }
-  const loc = await execInTab(listTabId, pageLocateLoginForm, []);
-  if (!loc || !loc.user || !loc.pass) {
-    send({ action: "error", message: "không thấy ô đăng nhập subaccount" });
-    return;
-  }
-  await withDebugger(listTabId, async (target) => {
-    await dbgClick(target, loc.user.x, loc.user.y);
-    await sleep(150);
-    await dbgType(target, String(cmd.user || ""));
-    await sleep(200);
-    await dbgClick(target, loc.pass.x, loc.pass.y);
-    await sleep(150);
-    await dbgType(target, String(cmd.pass || ""));
-    await sleep(200);
-    if (loc.submit) { await dbgClick(target, loc.submit.x, loc.submit.y); }
-    else { await dbgEnter(target); }
-  });
-  send({ action: "progress", message: "đã điền + gửi form đăng nhập subaccount" });
-}
-
-// GĐ2: một lần đọc trạng thái đăng nhập (C# poll lặp lại).
-async function doCheckLogin() {
-  if (listTabId == null) { send({ action: "loginStatus", state: "pending" }); return; }
-  let st = "pending";
-  try { st = (await execInTab(listTabId, pageLoginStatus, [])) || "pending"; } catch (e) { st = "pending"; }
-  send({ action: "loginStatus", state: st });
-}
-
-// GĐ2: SSO "Tài khoản của tôi" → "Kênh Người bán" → tab banhang → /portal/shop (port TryLoginSubaccountAsync 6-8).
-async function gotoSellerCentre() {
-  if (listTabId == null) { send({ action: "error", message: "chưa biết tab subaccount" }); return; }
-
-  const acc = await execInTab(listTabId, pageLocateByText, [["li", "a", "div", "span", "[role='menuitem']"], "tai khoan cua toi|my account"]);
-  if (!acc) { send({ action: "error", message: "không thấy 'Tài khoản của tôi'" }); return; }
-  await trustedClick(listTabId, acc.x, acc.y);
-  await sleep(2200);
-
-  const before = (await chrome.tabs.query({ url: "https://banhang.shopee.vn/*" })).map((t) => t.id);
-
-  const seller = await execInTab(listTabId, pageLocateByText, [["span.entry-text", ".entry", "span", "div", "[role='button']", "a"], "kenh nguoi ban|seller\\s*cent(re|er)|seller\\s*channel"]);
-  if (!seller) { send({ action: "error", message: "không thấy 'Kênh Người bán'" }); return; }
-  await trustedClick(listTabId, seller.x, seller.y);
-
-  // Chờ tab banhang: (a) tab MỚI, hoặc (b) tab subaccount tự điều hướng sang banhang.
-  const deadline = Date.now() + 90000;
-  let found = null;
-  const subTabId = listTabId;
-  while (Date.now() < deadline) {
-    const tabs = await chrome.tabs.query({ url: "https://banhang.shopee.vn/*" });
-    const cand = tabs.find((t) => before.indexOf(t.id) === -1);
-    if (cand) { found = cand; break; }
-    try {
-      const lt = await chrome.tabs.get(subTabId);
-      if (lt && lt.url && lt.url.indexOf("banhang.shopee.vn") >= 0) { found = lt; break; }
-    } catch (e) {}
-    await sleep(600);
-  }
-  if (!found) { send({ action: "error", message: "bấm 'Kênh Người bán' xong chờ 90s chưa thấy Seller Centre" }); return; }
-
-  // Chuyển "tab thao tác" sang banhang; đóng tab subaccount nếu là tab riêng.
-  listTabId = found.id;
-  shopTabId = null;
-  if (subTabId !== listTabId) { try { await chrome.tabs.remove(subTabId); } catch (e) {} }
-
-  await waitTabComplete(listTabId, 15000);
-  let url = "";
-  try { url = (await chrome.tabs.get(listTabId)).url || ""; } catch (e) {}
-  if (/\/verify/i.test(url)) { send({ action: "captcha", message: url }); return; }
-
-  // Về bảng shop (/portal/shop) để lệnh readShopList đọc được tr[data-row-key].
-  if (url.indexOf("/portal/shop") < 0) {
-    try { await chrome.tabs.update(listTabId, { url: "https://banhang.shopee.vn/portal/shop" }); } catch (e) {}
-    await waitTabComplete(listTabId, 20000);
-    try { url = (await chrome.tabs.get(listTabId)).url || ""; } catch (e) {}
-    if (/\/verify/i.test(url)) { send({ action: "captcha", message: url }); return; }
-  }
-
-  send({ action: "atSellerCentre" });
-}
-
-// GĐ1: đọc danh sách shop.
+// Đọc danh sách shop.
 async function doReadShopList() {
-  if (listTabId == null) { send({ action: "error", message: "chưa biết tab /portal/shop" }); return; }
+  if (!(await ensureListTab(BANHANG_HOSTS))) { send({ action: "error", message: "chưa thấy tab /portal/shop" }); return; }
   const json = await execInTab(listTabId, pageScanShopList, []);
   send({ action: "pageData", kind: "shopList", data: json });
 }
@@ -467,7 +281,7 @@ async function doReadToShip() {
 
 // GĐ1: mở "Chi tiết" shop đầu bằng trusted click, theo tab shop mới.
 async function openShopDetail(shopId) {
-  if (listTabId == null) { send({ action: "error", message: "chưa biết tab /portal/shop" }); return; }
+  if (!(await ensureListTab(BANHANG_HOSTS))) { send({ action: "error", message: "chưa thấy tab /portal/shop" }); return; }
 
   const before = (await chrome.tabs.query({ url: "https://banhang.shopee.vn/*" })).map((t) => t.id);
 

@@ -6,14 +6,16 @@
   "permissions": ["debugger", "tabs", "scripting", "storage"],
   "host_permissions": [
     "https://banhang.shopee.vn/*",
-    "https://subaccount.shopee.com/*"
+    "https://subaccount.shopee.com/*",
+    "https://accounts.shopee.vn/*"
   ],
   "background": { "service_worker": "background.js" },
   "content_scripts": [
     {
       "matches": [
         "https://banhang.shopee.vn/*",
-        "https://subaccount.shopee.com/*"
+        "https://subaccount.shopee.com/*",
+        "https://accounts.shopee.vn/*"
       ],
       "js": ["content.js"],
       "run_at": "document_start"

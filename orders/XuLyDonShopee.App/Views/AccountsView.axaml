@@ -326,13 +326,13 @@
                             <!-- Dừng: dừng toàn bộ việc đang làm của tài khoản này và đóng trang bán hàng (Brave). -->
                             <Button Classes="secondary formIcon" Content="■ Dừng" Margin="8,4,0,4"
                                     Command="{Binding StopCommand}"
-                                    IsEnabled="{Binding CanStopSeller}"
-                                    ToolTip.Tip="Dừng — Dừng toàn bộ việc đang làm của tài khoản này và đóng trang bán hàng (cửa sổ Brave)" />
-                            <!-- Chạy thử (bridge) GĐ2: mở trình duyệt SẠCH (không CDP) + nối cầu WebSocket↔extension, tự đăng nhập subaccount → chờ nhập mã → SSO Seller Centre → lát cắt readShopList→openShopDetail→readToShip. -->
+                                    IsEnabled="{Binding CanStop}"
+                                    ToolTip.Tip="Dừng — Dừng toàn bộ việc đang làm của tài khoản này (kể cả 'Chạy thử') và đóng trình duyệt" />
+                            <!-- Chạy thử (bridge) GĐ2 pivot: đăng nhập bằng Playwright (an toàn) → đóng → mở lại trình duyệt SẠCH + extension để đọc Seller Centre (lát cắt readShopList→openShopDetail→readToShip). -->
                             <Button Classes="secondary formIcon" Content="🧪 Chạy thử (đăng nhập + shop)" Margin="8,4,0,4"
                                     Command="{Binding ChayThuBridgeCommand}"
                                     IsEnabled="{Binding CanRun}"
-                                    ToolTip.Tip="Chạy thử (đăng nhập + shop) — mở trình duyệt KHÔNG điều khiển qua CDP/Playwright với hồ sơ của tài khoản này, extension tự điền form đăng nhập subaccount, mở hộp thư (trình duyệt riêng) để bạn tự đọc mã và gõ vào cửa sổ Shopee, rồi tự SSO vào Kênh Người bán → đọc danh sách shop → mở 'Chi tiết' shop đầu bằng trusted click → đọc số 'Chờ Lấy Hàng'. Kết quả đổ ra panel log. Dừng phiên đang chạy trước khi bấm." />
+                                    ToolTip.Tip="Chạy thử (đăng nhập + shop) — đăng nhập Nền tảng tài khoản phụ bằng trình duyệt điều khiển (Playwright): tự điền form + mở hộp thư cho bạn tự đọc mã + tự vào Kênh Người bán; xong thì đóng và mở lại bằng trình duyệt SẠCH + extension để đọc danh sách shop → mở 'Chi tiết' shop đầu bằng trusted click (né captcha) → đọc số 'Chờ Lấy Hàng'. Kết quả đổ ra panel log. Dừng phiên đang chạy trước khi bấm." />
                         </WrapPanel>
 
                         <!-- Thông báo trạng thái (Mở trang bán hàng / Xử lý đơn / theo dõi đơn) — ngay dưới hàng nút. -->

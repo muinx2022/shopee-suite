@@ -296,12 +296,14 @@ public partial class AccountsViewModel : ViewModelBase
     {
         OnPropertyChanged(nameof(ShowPlaceholder));
         OnPropertyChanged(nameof(CanStopSeller));
+        OnPropertyChanged(nameof(CanStop));
         OnPropertyChanged(nameof(CanRun));
     }
 
     partial void OnIsNewChanged(bool value)
     {
         OnPropertyChanged(nameof(CanStopSeller));
+        OnPropertyChanged(nameof(CanStop));
         OnPropertyChanged(nameof(CanRun));
     }
 
@@ -760,18 +762,28 @@ public partial class AccountsViewModel : ViewModelBase
     [RelayCommand]
     private void ToggleShowVerifyEmailPassword() => ShowVerifyEmailPassword = !ShowVerifyEmailPassword;
 
-    /// <summary>Dừng phiên của tài khoản đang chọn (đóng &amp; kill Brave của phiên đó, không ảnh hưởng phiên khác).</summary>
+    /// <summary>Dừng phiên của tài khoản đang chọn (đóng &amp; kill Brave của phiên đó, không ảnh hưởng phiên khác).
+    /// Chạy được CẢ khi chỉ có phiên "chạy thử bridge" (không có phiên production): vẫn hủy + đóng trình duyệt.</summary>
     [RelayCommand]
     private void Stop()
     {
-        if (_editingId is null)
+        var wasBridge = _bridgeRunning;
+
+        // Hủy lát cắt bridge (cancel _bridgeCts → đóng cả trình duyệt điều khiển Playwright lẫn trình duyệt sạch)
+        // + đóng cửa sổ POC. Chạy KỂ CẢ khi _editingId null (chỉ có bridge, chưa mở phiên production nào).
+        TryKillPoc();
+
+        if (_editingId is long accountId)
         {
-            return;
+            _services.Sessions.Stop(accountId);
+            UpdateSelectedSessionStatus();
         }
 
-        TryKillPoc(); // "■ Dừng" cũng đóng cửa sổ POC "mở sạch" của acc này (đỡ giữ khoá hồ sơ chung).
-        _services.Sessions.Stop(_editingId.Value);
-        UpdateSelectedSessionStatus();
+        if (wasBridge)
+        {
+            var email = (_editingId is long id ? _services.Accounts.GetById(id)?.Email : null) ?? EditEmail;
+            _services.Log.Append(email, "Đã dừng chạy thử + đóng trình duyệt.");
+        }
     }
 
     /// <summary>
@@ -854,6 +866,7 @@ public partial class AccountsViewModel : ViewModelBase
         }
 
         _bridgeRunning = true;
+        OnPropertyChanged(nameof(CanStop)); // bật nút ■ Dừng trong lúc chạy thử bridge
         try
         {
             TryKillPoc(); // đóng cửa sổ/phiên cũ (nếu còn) trước khi mở mới — tránh khoá hồ sơ
@@ -863,24 +876,20 @@ public partial class AccountsViewModel : ViewModelBase
             var browserChoice = _services.Settings.GetBrowserChoice();
             var browserKind = BrowserLocator.ResolveBrowserKind(browserChoice);
             var userDataDir = BrowserProfilePaths.ForAccount(baseDir, accountId, browserKind);
-            // Hồ sơ RIÊNG cho trình duyệt hộp thư (Playwright riêng) — tách khỏi hồ sơ Shopee.
-            var mailUserDataDir = System.IO.Path.Combine(baseDir, "mail-profiles",
-                accountId.ToString(System.Globalization.CultureInfo.InvariantCulture) + "-" + browserKind);
 
             _bridgeCts = new System.Threading.CancellationTokenSource();
             var session = new OrdersBridgeSession(userDataDir, browserChoice, m => _services.Log.Append(email, m));
             _bridgeSession = session;
 
             _services.Log.Append(email,
-                "Chạy thử (đăng nhập + shop): mở trình duyệt sạch → tự đăng nhập subaccount → chờ bạn nhập mã → vào Seller Centre → đọc shop.");
+                "Chạy thử (đăng nhập + shop): đăng nhập subaccount bằng trình duyệt điều khiển → chờ bạn nhập mã → đóng → mở lại sạch + extension → đọc shop.");
             BusyStatus = "Đang chạy thử (đăng nhập + shop)...";
 
             var login = new OrdersLoginParams(
                 acc?.Email ?? EditEmail,
                 acc?.Password ?? string.Empty,
                 acc?.VerifyEmail,
-                acc?.VerifyEmailPassword,
-                mailUserDataDir);
+                acc?.VerifyEmailPassword);
 
             OrdersBridgeSliceResult result;
             try
@@ -925,12 +934,16 @@ public partial class AccountsViewModel : ViewModelBase
         finally
         {
             _bridgeRunning = false;
+            OnPropertyChanged(nameof(CanStop)); // tắt lại nút ■ Dừng nếu không còn phiên nào
             try { _bridgeSession?.Dispose(); } catch { /* bỏ qua */ }
             _bridgeSession = null;
             try { _bridgeCts?.Dispose(); } catch { /* bỏ qua */ }
             _bridgeCts = null;
         }
     }
+
+    /// <summary>Nút "■ Dừng" bật khi có phiên production đang chạy HOẶC đang chạy thử bridge (để hủy được cả hai).</summary>
+    public bool CanStop => CanStopSeller || _bridgeRunning;
 
     /// <summary>Kill tiến trình trình duyệt sạch + huỷ lát cắt cầu nối đang mở (nếu có) — giải phóng khoá hồ sơ
     /// dùng chung với phiên production.</summary>
@@ -1209,6 +1222,7 @@ public partial class AccountsViewModel : ViewModelBase
         OrderStatus = FormatOrderStatus(session?.ToShipCount);
 
         OnPropertyChanged(nameof(CanStopSeller));
+        OnPropertyChanged(nameof(CanStop));
         OnPropertyChanged(nameof(CanRun));
     }
 
