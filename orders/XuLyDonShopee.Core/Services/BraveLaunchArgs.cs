@@ -93,6 +93,37 @@ public static class BraveLaunchArgs
     }
 
     /// <summary>
+    /// Dựng args cho đường POC "mở sạch": KHÔNG --remote-debugging-port (không mở endpoint CDP), KHÔNG proxy,
+    /// CÓ --load-extension + start URL ở cuối. Mục tiêu: trình duyệt giống hệt bản mở tay (không có kênh CDP để
+    /// anti-bot soi / để Playwright attach), extension tự điều hướng + tự bắn trusted click qua chrome.debugger.
+    /// </summary>
+    public static IReadOnlyList<string> BuildCleanPocArgs(string userDataDir, string extensionPath, string startUrl)
+    {
+        // POC LUÔN nạp extension → luôn kèm DisableLoadExtensionCommandLineSwitch (Chrome/Brave 137+ mặc định
+        // chặn --load-extension; khớp cách module Search + BuildBraveArgs làm). KHÁC BuildBraveArgs: bỏ hẳn
+        // --remote-debugging-port (không mở endpoint CDP) và bỏ nhánh proxy; thêm startUrl positional ở cuối.
+        return new List<string>
+        {
+            $"--user-data-dir={userDataDir}",
+            "--profile-directory=Default",
+            "--new-window",
+            "--no-first-run",
+            "--no-default-browser-check",
+            "--hide-crash-restore-bubble",
+            // Chống Brave bóp tài nguyên khi cửa sổ bị che/chạy nền (giữ renderer + timer chạy đều).
+            "--disable-background-timer-throttling",
+            "--disable-backgrounding-occluded-windows",
+            "--disable-renderer-backgrounding",
+            "--disable-features=Translate,CalculateNativeWinOcclusion,IntensiveWakeUpThrottling,DisableLoadExtensionCommandLineSwitch",
+            "--lang=vi-VN",
+            "--disable-popup-blocking",
+            $"--load-extension={extensionPath}",
+            // startUrl positional cuối cùng — mở URL kiểu người dùng (KHÔNG phải CDP navigation).
+            startUrl,
+        };
+    }
+
+    /// <summary>
     /// Phân giải thư mục extension "shopee-orders-test" (POC): tìm <c>extensions/shopee-orders-test</c> cạnh
     /// exe (bản cài) rồi đi ngược lên vài cấp tìm ở gốc repo (khi chạy từ bin dev). Không thấy → <c>null</c>
     /// (không nạp extension). Trả về đường dẫn tuyệt đối nếu thư mục tồn tại (có manifest.json).

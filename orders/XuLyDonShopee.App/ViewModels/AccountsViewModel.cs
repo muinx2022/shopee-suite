@@ -769,6 +769,7 @@ public partial class AccountsViewModel : ViewModelBase
             return;
         }
 
+        TryKillPoc(); // "■ Dừng" cũng đóng cửa sổ POC "mở sạch" của acc này (đỡ giữ khoá hồ sơ chung).
         _services.Sessions.Stop(_editingId.Value);
         UpdateSelectedSessionStatus();
     }
@@ -798,9 +799,68 @@ public partial class AccountsViewModel : ViewModelBase
             return;
         }
 
+        TryKillPoc(); // đóng cửa sổ POC "mở sạch" (nếu còn) trước khi phiên production launch — tránh khoá hồ sơ chung.
         _services.Log.Append(email, "Chạy: mở phiên — đăng nhập rồi tự lặp qua các shop...");
         _services.Sessions.Start(accountId); // mở phiên; vòng lặp shop tự chạy trong RunAsync
         UpdateSelectedSessionStatus();
+    }
+
+    /// <summary>Tiến trình trình duyệt POC "mở sạch" (không CDP) đang mở cho tài khoản đang chọn; null = không có.</summary>
+    private System.Diagnostics.Process? _pocProcess;
+
+    /// <summary>
+    /// "🧪 Mở sạch (POC)" — mở trình duyệt SẠCH (KHÔNG Playwright/CDP, KHÔNG remote-debugging-port, KHÔNG proxy)
+    /// với ĐÚNG hồ sơ persistent của tài khoản đang xem (cùng thư mục phiên production dùng → đã đăng nhập nếu có
+    /// phiên) → /portal/shop. Để kiểm chứng GĐ0: bấm nút TRUSTED của extension xem "Chi tiết" có dính captcha không.
+    /// Gate như CanRun (đang xem 1 acc đã lưu). Phiên production của acc đang chạy → từ chối (đụng khoá hồ sơ chung).
+    /// </summary>
+    [RelayCommand]
+    private void MoSachPoc()
+    {
+        if (_editingId is not long accountId)
+        {
+            return;
+        }
+
+        var email = _services.Accounts.GetById(accountId)?.Email ?? EditEmail;
+
+        // Đang có phiên production (Playwright) trên hồ sơ này → không mở POC (Chromium chỉ cho 1 tiến trình/hồ sơ).
+        if (_services.Sessions.IsRunning(accountId))
+        {
+            const string msg = "Đang có phiên chạy — bấm ■ Dừng trước khi Mở sạch (POC).";
+            _services.Log.Append(email, msg);
+            BusyStatus = msg;
+            return;
+        }
+
+        try
+        {
+            TryKillPoc(); // đóng cửa sổ POC cũ (nếu còn) trước khi mở mới — tránh khoá hồ sơ
+
+            // Công thức hồ sơ Y HỆT AccountSession: baseDir = thư mục Database.Path; kind theo browserChoice ở Cài đặt.
+            var baseDir = System.IO.Path.GetDirectoryName(_services.Database.Path) ?? ".";
+            var browserChoice = _services.Settings.GetBrowserChoice();
+            var browserKind = BrowserLocator.ResolveBrowserKind(browserChoice);
+            var userDataDir = BrowserProfilePaths.ForAccount(baseDir, accountId, browserKind);
+
+            _pocProcess = PocCleanLauncher.Open(userDataDir, browserChoice, ShopeeLoginService.ShopListUrl);
+            _services.Log.Append(email,
+                "Mở sạch (POC): trình duyệt KHÔNG CDP + hồ sơ của tài khoản này → /portal/shop. Dùng nút TRUSTED của extension để test 'Chi tiết'.");
+            BusyStatus = "Đã mở POC (sạch, không CDP) cho tài khoản này.";
+        }
+        catch (System.Exception ex)
+        {
+            _services.Log.Append(email, "Lỗi mở POC: " + ex.Message);
+            BusyStatus = "Lỗi mở POC: " + ex.Message;
+        }
+    }
+
+    /// <summary>Kill tiến trình trình duyệt POC đang mở (nếu có) — giải phóng khoá hồ sơ dùng chung với phiên production.</summary>
+    private void TryKillPoc()
+    {
+        try { if (_pocProcess is { HasExited: false }) _pocProcess.Kill(entireProcessTree: true); }
+        catch { /* bỏ qua */ }
+        _pocProcess = null;
     }
 
     /// <summary>Nhãn nguồn log cho các thông báo cấp-BATCH (không thuộc một shop cụ thể) — ghi file &amp; phân

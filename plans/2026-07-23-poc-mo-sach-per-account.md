@@ -1,7 +1,7 @@
 # Plan: Chuyển nút POC "Mở sạch" sang PER-ACCOUNT (cạnh nút Chạy), mở đúng hồ sơ acc
 
 - **Ngày:** 2026-07-23
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành — **GĐ0 ĐẠT (verified 2026-07-23):** bấm "🧪 Mở sạch" mở trình duyệt sạch + nút TRUSTED của extension → "Chi tiết" KHÔNG còn dính captcha. Xác nhận gốc rễ là Playwright/CDP lái trang, không phải cú click.
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-dev`)
 - **Nối tiếp:** `plans/2026-07-23-poc-mo-sach-khong-cdp.md` (Core đã xong: `BuildCleanPocArgs` + `PocCleanLauncher` GIỮ NGUYÊN, tái dùng)
 

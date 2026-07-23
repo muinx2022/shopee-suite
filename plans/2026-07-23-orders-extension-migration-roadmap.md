@@ -93,4 +93,6 @@ port toàn bộ. Nếu extension mở shop vẫn dính captcha → DỪNG, tính
 
 ## Nhật ký giai đoạn
 
-- GĐ0: (chưa bắt đầu)
+- **GĐ0: ĐẠT (2026-07-23).** Xác định gốc rễ captcha = `ShopeeLoginService.OpenAsync` nối Playwright `ConnectOverCDPAsync` + `page.GotoAsync` (lái trang qua CDP) — Shopee soi ra ở cửa Seller Centre. Dựng đường mở SẠCH (`BraveLaunchArgs.BuildCleanPocArgs` + `PocCleanLauncher`: Process.Start, KHÔNG remote-debugging-port/ConnectOverCDP/proxy) + nút "🧪 Mở sạch" per-account (cạnh "▶ Chạy", mở đúng hồ sơ acc). Chạy thật: extension tự điều hướng + trusted click qua `chrome.debugger` → **bấm "Chi tiết" KHÔNG còn captcha**. Plan: `2026-07-23-poc-mo-sach-khong-cdp.md` + `2026-07-23-poc-mo-sach-per-account.md`.
+  - **Phát hiện quan trọng cho GĐ1:** POC né captcha CHỈ bằng extension + `chrome.debugger` (bắn Input trusted), KHÔNG cần C# WebSocketServer/CdpInputController như Search. Có thể GĐ1 nhẹ hơn roadmap ban đầu (extension-only, C# chỉ launch + nhận kết quả) — cân nhắc lại kiến trúc trước khi port.
+- GĐ1+: (chưa bắt đầu)

@@ -1,7 +1,7 @@
 # Plan: Nút POC "Mở sạch (không CDP-navigation)" để kiểm chứng GĐ0 né captcha
 
 - **Ngày:** 2026-07-23
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành — Core (`BuildCleanPocArgs` + `PocCleanLauncher`) GIỮ; phần UI (nút ở Cài đặt) đã DỜI sang per-account theo `plans/2026-07-23-poc-mo-sach-per-account.md`. GĐ0 ĐẠT.
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-dev`)
 
 ## 1. Bối cảnh & mục tiêu
