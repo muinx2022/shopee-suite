@@ -76,7 +76,8 @@ CREATE TABLE IF NOT EXISTS accounts (
     VerifyEmailPassword TEXT,
     Status     TEXT NOT NULL,
     CreatedAt  TEXT NOT NULL,
-    UpdatedAt  TEXT NOT NULL
+    UpdatedAt  TEXT NOT NULL,
+    verify_failed_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS proxies (
@@ -138,6 +139,11 @@ CREATE TABLE IF NOT EXISTS orders (
         // Hộp thư Hotmail/Outlook nhận mail xác minh Shopee + mật khẩu hộp thư — thêm cho DB CŨ (chưa có 2 cột).
         EnsureColumn(conn, "accounts", "VerifyEmail", "TEXT");
         EnsureColumn(conn, "accounts", "VerifyEmailPassword", "TEXT");
+
+        // Cờ "TK chưa xác nhận": thời điểm (UTC ISO-8601) lần cuối autorun phát hiện phiên còn kẹt ở trang
+        // verify/login/captcha khi kết thúc lượt (NULL = bình thường). Bền qua restart để danh sách TK lỗi còn
+        // đó hôm sau; tự gỡ khi phiên đăng nhập được. Thêm cho DB CŨ.
+        EnsureColumn(conn, "accounts", "verify_failed_at", "TEXT");
 
         // "Số tiền cuối cùng" lấy từ trang chi tiết đơn (cột "Ước tính" ở màn Đơn hàng) — thêm cho DB CŨ đã
         // có bảng orders (kiểm cột tồn tại trước khi ALTER, không phá dữ liệu sẵn có).

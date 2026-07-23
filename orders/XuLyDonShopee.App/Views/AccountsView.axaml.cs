@@ -1,6 +1,7 @@
 using System.Collections.Specialized;
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Interactivity;
 using Avalonia.Threading;
 using XuLyDonShopee.App.ViewModels;
 
@@ -51,6 +52,22 @@ public partial class AccountsView : UserControl
         {
             vm.ToggleRowTick(row);
         }
+    }
+
+    /// <summary>
+    /// Bấm nút "Truy cập TK" trên một dòng TK chưa xác nhận → chọn tài khoản đó + tự mở phiên trình duyệt để
+    /// xác minh tay (VM lo). <c>e.Handled = true</c> để click KHÔNG bubble thành Tapped trên Grid dòng (khỏi
+    /// vô tình toggle tick). Lấy row từ DataContext của nút (thừa kế từ dòng).
+    /// </summary>
+    private void OnTruyCapTkClick(object? sender, RoutedEventArgs e)
+    {
+        if ((sender as Control)?.DataContext is AccountRowViewModel row
+            && DataContext is AccountsViewModel vm)
+        {
+            vm.TruyCapTk(row);
+        }
+
+        e.Handled = true;
     }
 
     /// <summary>

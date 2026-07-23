@@ -141,6 +141,58 @@ public partial class AccountsViewModel : ViewModelBase
         _services.Settings.SetAutoConfirmEmail(value);
     }
 
+    /// <summary>Bộ lọc "Chỉ hiện TK chưa xác nhận" đang bật — lọc client-side trên danh sách rows.</summary>
+    [ObservableProperty]
+    private bool _showOnlyUnverified;
+
+    partial void OnShowOnlyUnverifiedChanged(bool value)
+    {
+        OnPropertyChanged(nameof(UnverifiedButtonText));
+        RefreshList(_editingId ?? SelectedRow?.Id);
+    }
+
+    /// <summary>Số tài khoản đang mang cờ "TK chưa xác nhận" (đếm trên toàn bộ _all, không phụ thuộc lọc/tìm kiếm).</summary>
+    public int UnverifiedCount => _all.Count(a => a.VerifyFailedAt is not null);
+
+    /// <summary>Hiện nút lọc khi có ≥1 TK chưa xác nhận HOẶC đang bật lọc (để còn nút "Hiện tất cả" thoát ra
+    /// kể cả khi số vừa về 0).</summary>
+    public bool IsUnverifiedFilterVisible => UnverifiedCount > 0 || ShowOnlyUnverified;
+
+    /// <summary>Nhãn nút lọc: đang lọc → "Hiện tất cả"; ngược lại → "Những TK chưa xác nhận (N)".</summary>
+    public string UnverifiedButtonText => ShowOnlyUnverified
+        ? "Hiện tất cả"
+        : $"Những TK chưa xác nhận ({UnverifiedCount})";
+
+    /// <summary>Bật/tắt bộ lọc "TK chưa xác nhận" (nút ở đầu danh sách).</summary>
+    [RelayCommand]
+    private void ToggleShowUnverified() => ShowOnlyUnverified = !ShowOnlyUnverified;
+
+    /// <summary>
+    /// "Truy cập TK" (nút trên dòng TK chưa xác nhận): CHỌN tài khoản đó (đổ Chi tiết + nhật ký) rồi TỰ MỞ phiên
+    /// trình duyệt để người dùng xác minh tay trên cửa sổ Brave. Phiên đang chạy sẵn → chỉ chọn + báo (KHÔNG mở
+    /// trùng). Mở phiên bằng ĐÚNG đường sẵn có <see cref="AccountSessionManager.Start"/> (idempotent) — không chế
+    /// đường mở mới. Gọi từ code-behind (giống <see cref="ToggleRowTick"/>).
+    /// </summary>
+    public void TruyCapTk(AccountRowViewModel row)
+    {
+        // Chọn dòng: OnSelectedRowChanged tự nạp form + đưa cửa sổ Brave (nếu có) ra trước.
+        SelectedRow = row;
+
+        var id = row.Id;
+        var email = row.Email;
+        if (_services.Sessions.IsRunning(id))
+        {
+            const string msg = "Phiên đang mở — xác minh trên cửa sổ Brave của tài khoản này.";
+            _services.Log.Append(email, msg);
+            BusyStatus = msg;
+            return;
+        }
+
+        _services.Log.Append(email, "Truy cập TK: mở trang bán hàng để xác minh tay...");
+        _services.Sessions.Start(id);
+        UpdateSelectedSessionStatus();
+    }
+
     /// <summary>Dòng đang chọn trong danh sách (bọc <see cref="Account"/>). Chỗ nào cần bản ghi gốc thì đọc
     /// <c>SelectedRow?.Account</c>.</summary>
     [ObservableProperty]
@@ -397,6 +449,10 @@ public partial class AccountsViewModel : ViewModelBase
         _all = _services.Accounts.GetAll();
         RefreshList(selectId);
         OnPropertyChanged(nameof(CanDelete));
+        // Cờ "TK chưa xác nhận" có thể đổi từ ngoài màn (autorun đánh dấu / phiên gỡ) → làm mới đếm + nút lọc.
+        OnPropertyChanged(nameof(UnverifiedCount));
+        OnPropertyChanged(nameof(IsUnverifiedFilterVisible));
+        OnPropertyChanged(nameof(UnverifiedButtonText));
     }
 
     /// <summary>
@@ -429,7 +485,8 @@ public partial class AccountsViewModel : ViewModelBase
         }
 
         Accounts.Clear();
-        foreach (var account in _all.Where(a => PassesFilter(a, SearchText)))
+        foreach (var account in _all.Where(a => PassesFilter(a, SearchText)
+                                                && (!ShowOnlyUnverified || a.VerifyFailedAt is not null)))
         {
             // Dựng row VM bọc bản ghi; khôi phục tick theo Id; đồng bộ trạng thái phiên (chấm chạy / "Chờ lấy: N").
             var row = new AccountRowViewModel(account) { IsSelected = _selectedIds.Contains(account.Id) };

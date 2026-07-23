@@ -171,6 +171,7 @@ CREATE TABLE orders (
         Assert.True(HasColumn(temp.Path, "accounts", "PickupAddress"));
         Assert.True(HasColumn(temp.Path, "accounts", "VerifyEmail"));
         Assert.True(HasColumn(temp.Path, "accounts", "VerifyEmailPassword"));
+        Assert.True(HasColumn(temp.Path, "accounts", "verify_failed_at"));
     }
 
     [Fact]
@@ -262,6 +263,49 @@ CREATE TABLE orders (
         var reloaded = repo.GetById(acc.Id)!;
         Assert.Equal("verify@hotmail.com", reloaded.VerifyEmail);
         Assert.Equal("mkemail", reloaded.VerifyEmailPassword);
+    }
+
+    // ===================== Migration cột verify_failed_at cho bảng accounts =====================
+
+    [Fact]
+    public void KhoiTao_DbCu_ThieuVerifyFailedAt_DuocThemCot_KhongMatDuLieu()
+    {
+        using var temp = new TempDatabase();
+        CreateOldSchemaWithRow(temp.Path, "old@x.com");
+
+        // Trước migration: schema cũ chưa có cột verify_failed_at.
+        Assert.False(HasColumn(temp.Path, "accounts", "verify_failed_at"));
+
+        // Khởi tạo Database mới trỏ cùng file → Initialize() chạy migration.
+        _ = new Database(temp.Path);
+
+        // Sau migration: đã có cột.
+        Assert.True(HasColumn(temp.Path, "accounts", "verify_failed_at"));
+
+        // Dữ liệu cũ CÒN NGUYÊN; cờ mặc định null (không đánh dấu).
+        var repo = new AccountRepository(new Database(temp.Path));
+        var acc = Assert.Single(repo.GetAll());
+        Assert.Equal("old@x.com", acc.Email);
+        Assert.Equal("cookie-cu", acc.Cookie);
+        Assert.Equal(AccountStatus.HoatDong, acc.Status);
+        Assert.Null(acc.VerifyFailedAt);
+    }
+
+    [Fact]
+    public void KhoiTao_DbCu_SauMigration_MarkVerifyFailedBinhThuong()
+    {
+        using var temp = new TempDatabase();
+        CreateOldSchemaWithRow(temp.Path, "old@x.com");
+
+        var repo = new AccountRepository(new Database(temp.Path)); // migration chạy tại đây
+        var acc = repo.GetAll()[0];
+
+        var at = new DateTime(2026, 7, 23, 10, 0, 0, DateTimeKind.Utc);
+        repo.MarkVerifyFailed(acc.Id, at);
+
+        var reloaded = repo.GetById(acc.Id)!;
+        Assert.NotNull(reloaded.VerifyFailedAt);
+        Assert.Equal(at, reloaded.VerifyFailedAt);
     }
 
     // ===================== Migration cột final_amount cho bảng orders =====================

@@ -207,6 +207,63 @@ public partial class AccountSession : ObservableObject, IAccountSession
     }
 
     /// <summary>
+    /// Đọc trạng thái trang hiện tại (read-only) của phiên đang chạy — dùng cuối lượt autorun để phát hiện
+    /// "TK chưa xác nhận". Chụp phiên + token; phiên null / chưa Running / đang <see cref="_navigating"/> → trả
+    /// null (không kết luận khi đang giữa thao tác). KHÔNG bật <see cref="_navigating"/> (DetectPageStateAsync
+    /// chỉ evaluate JS đọc, không đụng chuột nên không phá thao tác nào). Mọi lỗi → null (best-effort).
+    /// </summary>
+    public async Task<ShopeePageState?> ProbePageStateAsync()
+    {
+        var s = _session;
+        CancellationToken tok;
+        try
+        {
+            lock (_lifecycleLock)
+            {
+                tok = _cts?.Token ?? default;
+            }
+        }
+        catch (ObjectDisposedException)
+        {
+            return null;
+        }
+
+        // Đang navigating (đọc đơn / xử lý đơn / kiểm proxy) → không kết luận (trang đang chuyển giữa chừng).
+        if (s is null || State != SessionState.Running || _navigating)
+        {
+            return null;
+        }
+
+        try
+        {
+            return await s.DetectPageStateAsync(tok).ConfigureAwait(false);
+        }
+        catch
+        {
+            return null; // DetectPageStateAsync vốn không ném, nhưng phòng hờ vẫn nuốt.
+        }
+    }
+
+    /// <summary>
+    /// Gỡ cờ "TK chưa xác nhận" cho tài khoản này khi phiên vừa đăng nhập được (đọc số "Chờ Lấy Hàng" lần
+    /// đầu). Chỉ log + phát <see cref="AppServices.RaiseAccountsChanged"/> khi THỰC SỰ có cờ được gỡ
+    /// (<see cref="AccountRepository.ClearVerifyFailed"/> trả &gt;0) để không làm mới UI thừa mỗi lần mở phiên.
+    /// Best-effort: mọi lỗi bị nuốt (KHÔNG phá luồng theo dõi đơn).
+    /// </summary>
+    private void TryClearVerifyFailedAfterLogin()
+    {
+        try
+        {
+            if (_services.Accounts.ClearVerifyFailed(_accountId) > 0)
+            {
+                _services.Log.Append(_logLabel, "Đã xác minh được — gỡ nhãn TK chưa xác nhận.");
+                _services.RaiseAccountsChanged();
+            }
+        }
+        catch { /* best-effort — không phá luồng */ }
+    }
+
+    /// <summary>
     /// Xử lý đơn: trong phiên đang chạy. <b>ĐẦU LUỒNG — cửa skip:</b> đọc TƯƠI (reload trang chủ) số
     /// "Chờ Lấy Hàng"; nếu ĐỌC ĐƯỢC số VÀ == 0 (<see cref="ShouldSkipProcessing"/>) thì <b>BỎ QUA toàn bộ</b>
     /// (KHÔNG vào Cài đặt vận chuyển, không đặt/đặt-lại địa chỉ), đặt <c>ToShipCount=0</c> + StatusText/log
@@ -1967,6 +2024,13 @@ public partial class AccountSession : ObservableObject, IAccountSession
 
                             if (count is int n)
                             {
+                                // Điểm ĐĂNG NHẬP-OK ĐẦU TIÊN của lần mở này: đọc được số "Chờ Lấy Hàng" ⇒ đang
+                                // ở trang chủ đã đăng nhập. Nếu tài khoản còn mang cờ "TK chưa xác nhận" (vd
+                                // người dùng vừa xác minh tay xong) thì GỠ để nhãn đỏ tự lành.
+                                if (firstOrderCheck)
+                                {
+                                    TryClearVerifyFailedAfterLogin();
+                                }
                                 firstOrderCheck = false;
                                 ToShipCount = n; // VM tự định dạng dòng hiển thị theo số này
                                 nextOrderCheck = DateTime.UtcNow.AddMinutes(orderIntervalMin); // đã đăng nhập → chu kỳ cấu hình

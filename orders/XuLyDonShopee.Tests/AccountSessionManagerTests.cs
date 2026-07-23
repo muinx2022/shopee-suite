@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Linq;
 using System.Threading.Tasks;
 using XuLyDonShopee.App.Services;
+using XuLyDonShopee.Core.Services;
 
 namespace XuLyDonShopee.Tests;
 
@@ -58,6 +59,8 @@ public class AccountSessionManagerTests
         public Task<bool> RedownloadSlipAsync(string orderSn) => Task.FromResult(false);
 
         public Task<bool> SyncFullAsync() => Task.FromResult(false);
+
+        public Task<ShopeePageState?> ProbePageStateAsync() => Task.FromResult<ShopeePageState?>(null);
 
         /// <summary>Mô phỏng phiên phát lại sự kiện Changed (vd event Stopped TRỄ) mà không đổi State.</summary>
         public void RaiseChanged() => Changed?.Invoke();

@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using XuLyDonShopee.App.Services;
 using XuLyDonShopee.App.ViewModels;
 using XuLyDonShopee.Core.Models;
+using XuLyDonShopee.Core.Services;
 
 namespace XuLyDonShopee.Tests;
 
@@ -52,6 +53,8 @@ public class AccountRowViewModelTests
         public Task<bool> RedownloadSlipAsync(string orderSn) => Task.FromResult(false);
 
         public Task<bool> SyncFullAsync() => Task.FromResult(false);
+
+        public Task<ShopeePageState?> ProbePageStateAsync() => Task.FromResult<ShopeePageState?>(null);
     }
 
     private static AccountRowViewModel NewRow()

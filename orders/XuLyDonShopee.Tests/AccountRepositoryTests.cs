@@ -261,6 +261,111 @@ public class AccountRepositoryTests
         Assert.Equal("vc@x.com", reloaded.Email);
     }
 
+    // ===================== Cờ "TK chưa xác nhận" (verify_failed_at) =====================
+
+    [Fact]
+    public void Insert_MacDinh_VerifyFailedAt_Null()
+    {
+        using var temp = new TempDatabase();
+        var repo = new AccountRepository(temp.Open());
+
+        var id = repo.Insert(new Account { Email = "vf@x.com", Password = "1" });
+
+        Assert.Null(repo.GetById(id)!.VerifyFailedAt);
+    }
+
+    [Fact]
+    public void MarkVerifyFailed_GhiThoiDiem_DocLaiDung()
+    {
+        using var temp = new TempDatabase();
+        var repo = new AccountRepository(temp.Open());
+
+        var account = new Account { Email = "vf1@x.com", Password = "1" };
+        repo.Insert(account);
+
+        var at = new DateTime(2026, 7, 23, 8, 30, 0, DateTimeKind.Utc);
+        repo.MarkVerifyFailed(account.Id, at);
+
+        Assert.Equal(at, repo.GetById(account.Id)!.VerifyFailedAt);
+    }
+
+    [Fact]
+    public void MarkVerifyFailed_KhongDungCotKhac()
+    {
+        using var temp = new TempDatabase();
+        var repo = new AccountRepository(temp.Open());
+
+        var account = new Account
+        {
+            Email = "vf2@x.com",
+            Password = "pw",
+            Cookie = "ck",
+            ProxyKey = "K-VF",
+            PickupAddress = "Hà Nội",
+            VerifyEmail = "v@hotmail.com",
+            Status = AccountStatus.HoatDong
+        };
+        repo.Insert(account);
+
+        repo.MarkVerifyFailed(account.Id, DateTime.UtcNow);
+
+        // Đánh cờ chỉ đụng verify_failed_at — các trường khác GIỮ NGUYÊN.
+        var reloaded = repo.GetById(account.Id)!;
+        Assert.NotNull(reloaded.VerifyFailedAt);
+        Assert.Equal("ck", reloaded.Cookie);
+        Assert.Equal("K-VF", reloaded.ProxyKey);
+        Assert.Equal("Hà Nội", reloaded.PickupAddress);
+        Assert.Equal("v@hotmail.com", reloaded.VerifyEmail);
+        Assert.Equal(AccountStatus.HoatDong, reloaded.Status);
+        Assert.Equal("vf2@x.com", reloaded.Email);
+    }
+
+    [Fact]
+    public void ClearVerifyFailed_DangCoCo_GoVeNull_TraVe1()
+    {
+        using var temp = new TempDatabase();
+        var repo = new AccountRepository(temp.Open());
+
+        var account = new Account { Email = "vf3@x.com", Password = "1" };
+        repo.Insert(account);
+        repo.MarkVerifyFailed(account.Id, DateTime.UtcNow);
+
+        // Có cờ → gỡ trả về 1 (thực sự đổi); đọc lại null.
+        Assert.Equal(1, repo.ClearVerifyFailed(account.Id));
+        Assert.Null(repo.GetById(account.Id)!.VerifyFailedAt);
+
+        // Không còn cờ → gỡ lần nữa trả về 0 (không đổi).
+        Assert.Equal(0, repo.ClearVerifyFailed(account.Id));
+    }
+
+    [Fact]
+    public void ClearVerifyFailed_KhongCoCo_TraVe0()
+    {
+        using var temp = new TempDatabase();
+        var repo = new AccountRepository(temp.Open());
+
+        var id = repo.Insert(new Account { Email = "vf4@x.com", Password = "1" });
+
+        Assert.Equal(0, repo.ClearVerifyFailed(id));
+    }
+
+    [Fact]
+    public void Update_KhongLamMatCo_VerifyFailedAt()
+    {
+        using var temp = new TempDatabase();
+        var repo = new AccountRepository(temp.Open());
+
+        var account = new Account { Email = "vf5@x.com", Password = "1" };
+        repo.Insert(account);
+        repo.MarkVerifyFailed(account.Id, DateTime.UtcNow);
+
+        // Sửa form (Update) KHÔNG được clobber cờ — Update bỏ qua cột verify_failed_at.
+        account.Note = "đã sửa ghi chú";
+        repo.Update(account);
+
+        Assert.NotNull(repo.GetById(account.Id)!.VerifyFailedAt);
+    }
+
     [Fact]
     public void Delete_XoaKhoiDb()
     {

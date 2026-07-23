@@ -17,7 +17,7 @@ public class AccountRepository
         var list = new List<Account>();
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = @"SELECT Id, Email, Password, Phone, Cookie, Note, ProxyKey, PickupAddress, VerifyEmail, VerifyEmailPassword, Status, CreatedAt, UpdatedAt
+        cmd.CommandText = @"SELECT Id, Email, Password, Phone, Cookie, Note, ProxyKey, PickupAddress, VerifyEmail, VerifyEmailPassword, Status, CreatedAt, UpdatedAt, verify_failed_at
                             FROM accounts ORDER BY Id;";
         using var reader = cmd.ExecuteReader();
         while (reader.Read())
@@ -31,7 +31,7 @@ public class AccountRepository
     {
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = @"SELECT Id, Email, Password, Phone, Cookie, Note, ProxyKey, PickupAddress, VerifyEmail, VerifyEmailPassword, Status, CreatedAt, UpdatedAt
+        cmd.CommandText = @"SELECT Id, Email, Password, Phone, Cookie, Note, ProxyKey, PickupAddress, VerifyEmail, VerifyEmailPassword, Status, CreatedAt, UpdatedAt, verify_failed_at
                             FROM accounts WHERE Id = $id;";
         cmd.Parameters.AddWithValue("$id", id);
         using var reader = cmd.ExecuteReader();
@@ -87,6 +87,35 @@ public class AccountRepository
         cmd.ExecuteNonQuery();
     }
 
+    /// <summary>
+    /// Đánh dấu tài khoản "chưa xác nhận được": ghi <c>verify_failed_at = <paramref name="at"/></c> (UTC).
+    /// UPDATE gọn CHỈ cột này theo id — KHÔNG đụng các trường khác (form CRUD dùng <see cref="Update"/> riêng,
+    /// không quản cột này). Gọi cuối lượt autorun khi phiên còn kẹt ở trang verify/login/captcha.
+    /// </summary>
+    public void MarkVerifyFailed(long id, DateTime at)
+    {
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "UPDATE accounts SET verify_failed_at = $at WHERE Id = $id;";
+        cmd.Parameters.AddWithValue("$at", DbSerialization.FormatDate(at));
+        cmd.Parameters.AddWithValue("$id", id);
+        cmd.ExecuteNonQuery();
+    }
+
+    /// <summary>
+    /// Gỡ cờ "chưa xác nhận được" (đặt <c>verify_failed_at = NULL</c>) — gọi khi phiên đăng nhập được (autorun
+    /// thấy LoggedIn / phiên đọc được số đơn lần đầu). Điều kiện <c>verify_failed_at IS NOT NULL</c> để trả về
+    /// số dòng THỰC SỰ đổi (&gt;0 = vừa gỡ một cờ đang bật) — caller dựa vào đó quyết định có làm mới UI hay không.
+    /// </summary>
+    public int ClearVerifyFailed(long id)
+    {
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "UPDATE accounts SET verify_failed_at = NULL WHERE Id = $id AND verify_failed_at IS NOT NULL;";
+        cmd.Parameters.AddWithValue("$id", id);
+        return cmd.ExecuteNonQuery();
+    }
+
     private static void BindWritableFields(SqliteCommand cmd, Account a)
     {
         cmd.Parameters.AddWithValue("$email", a.Email);
@@ -115,6 +144,7 @@ public class AccountRepository
         VerifyEmailPassword = r.IsDBNull(9) ? "" : r.GetString(9),
         Status = DbSerialization.ParseEnum<AccountStatus>(r.GetString(10)),
         CreatedAt = DbSerialization.ParseDate(r.GetString(11)),
-        UpdatedAt = DbSerialization.ParseDate(r.GetString(12))
+        UpdatedAt = DbSerialization.ParseDate(r.GetString(12)),
+        VerifyFailedAt = r.IsDBNull(13) ? null : DbSerialization.ParseDate(r.GetString(13))
     };
 }

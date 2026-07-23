@@ -33,6 +33,13 @@ public partial class AccountRowViewModel : ObservableObject
     /// <summary>Trạng thái tài khoản — cho chấm màu status cũ.</summary>
     public AccountStatus Status => Account.Status;
 
+    /// <summary>
+    /// True khi tài khoản đang mang cờ "TK chưa xác nhận" (<see cref="Account.VerifyFailedAt"/> != null) — dùng
+    /// bật nhãn đỏ + nút "Truy cập TK" trên dòng. Getter thuần: danh sách được DỰNG LẠI mỗi lần cờ đổi
+    /// (RaiseAccountsChanged → Reload) nên row luôn bọc <see cref="Account"/> mới, không cần thông báo riêng.
+    /// </summary>
+    public bool IsVerifyFailed => Account.VerifyFailedAt is not null;
+
     /// <summary>Tick chọn nhiều (dùng cho "Chọn toàn bộ" / "Chạy đã chọn" / "Dừng đã chọn").</summary>
     [ObservableProperty]
     private bool _isSelected;

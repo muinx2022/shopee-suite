@@ -77,4 +77,53 @@ Hạ tầng sẵn có (đã khảo sát):
 
 ## Báo cáo thực thi
 
-(Opus điền sau khi xong.)
+**Người thực thi:** Opus · **Ngày:** 2026-07-23 · **Kết quả:** build + 909 test xanh.
+
+### Đã làm theo từng hạng mục plan
+
+**DB + model**
+- `orders/XuLyDonShopee.Core/Data/Database.cs`: thêm cột `verify_failed_at TEXT` vào `CREATE TABLE accounts` (DB mới) + `EnsureColumn(conn, "accounts", "verify_failed_at", "TEXT")` (migration DB cũ, idempotent).
+- `orders/XuLyDonShopee.Core/Models/Account.cs`: thêm `public DateTime? VerifyFailedAt { get; set; }` (null = bình thường).
+- `orders/XuLyDonShopee.Core/Data/AccountRepository.cs`:
+  - Thêm `verify_failed_at` vào SELECT của `GetAll`/`GetById` + Map (index 13, IsDBNull → null).
+  - `MarkVerifyFailed(long id, DateTime at)`: `UPDATE ... SET verify_failed_at=$at WHERE Id=$id`.
+  - `ClearVerifyFailed(long id)`: `UPDATE ... SET verify_failed_at=NULL WHERE Id=$id AND verify_failed_at IS NOT NULL` → trả số dòng thực đổi (>0 = vừa gỡ cờ đang bật).
+  - **Insert/Update KHÔNG đụng cột này** (form CRUD sửa tài khoản không clobber cờ) — có test kiểm chứng.
+
+**Phát hiện cuối lô autorun**
+- `orders/XuLyDonShopee.App/Services/IAccountSession.cs`: thêm `Task<ShopeePageState?> ProbePageStateAsync()` (+ `using XuLyDonShopee.Core.Services`).
+- `orders/XuLyDonShopee.App/Services/AccountSession.cs`:
+  - `ProbePageStateAsync()`: read-only qua `_session.DetectPageStateAsync`; phiên null/chưa Running/`_navigating` đang bật → trả null; KHÔNG chiếm `_navigating`; mọi lỗi → null.
+  - `TryClearVerifyFailedAfterLogin()` gọi tại điểm **đọc số "Chờ Lấy Hàng" lần đầu** trong `RunAsync` (`if (firstOrderCheck)`), chỉ log + `RaiseAccountsChanged` khi thực sự gỡ được cờ.
+- `orders/XuLyDonShopee.App/Services/AutoRunService.cs`:
+  - `RunBatchAsync`: TRƯỚC vòng `Sessions.Stop(id)` gọi `ProbeUnverifiedBeforeCloseAsync(mine)` (bọc try/catch bao trùm — lỗi KHÔNG chặn đóng phiên).
+  - `ProbeUnverifiedBeforeCloseAsync`: per-acc try/catch; Verify/LoginForm/Captcha → `MarkVerifyFailed` + log per-acc `"KHÔNG tự xác minh được — phiên vẫn ở trang {…} khi kết thúc lượt. Đánh dấu: TK chưa xác nhận."`; LoggedIn → `ClearVerifyFailed`; Unknown/null → không đổi. Cuối lô: log tổng `"Lô này có {n} TK chưa xác nhận: {emails}"` + `RaiseAccountsChanged` một lần khi có thay đổi.
+  - `public static bool LaTrangThaiChuaXacNhan(ShopeePageState)` (hàm pure) + `MoTaTrang` (mô tả trang cho log).
+
+**UI màn Tài khoản**
+- `orders/XuLyDonShopee.App/ViewModels/AccountRowViewModel.cs`: `public bool IsVerifyFailed => Account.VerifyFailedAt is not null` (row dựng lại mỗi lần reload nên không cần notify riêng).
+- `orders/XuLyDonShopee.App/ViewModels/AccountsViewModel.cs`: `ShowOnlyUnverified` (ObservableProperty) + `UnverifiedCount` + `IsUnverifiedFilterVisible` + `UnverifiedButtonText` + lệnh `ToggleShowUnverified`; `ApplyFilter` lọc thêm theo cờ; `Reload` notify lại các property đếm; phương thức `TruyCapTk(row)` = chọn acc (đổ chi tiết + log) + tự mở phiên qua `Sessions.Start` (idempotent), phiên đang chạy thì chỉ chọn + báo.
+- `orders/XuLyDonShopee.App/Views/AccountsView.axaml`: style `visitTk` + `unverifiedFilter`; nút lọc "Những TK chưa xác nhận (N)"/"Hiện tất cả" ở đầu danh sách (ẩn khi N=0 và không đang lọc); badge đỏ "TK chưa xác nhận" + nút "Truy cập TK" trong template dòng (hiện khi `IsVerifyFailed`).
+- `orders/XuLyDonShopee.App/Views/AccountsView.axaml.cs`: handler `OnTruyCapTkClick` (gọi `vm.TruyCapTk(row)`, `e.Handled=true` để không toggle tick) + `using Avalonia.Interactivity`.
+
+**Test**
+- `DatabaseMigrationTests.cs`: migration `verify_failed_at` (thêm cột, không mất dữ liệu, mặc định null) + Mark sau migration; bổ sung assert cột vào test idempotent.
+- `AccountRepositoryTests.cs`: 6 test Mark/Clear (ghi/đọc, không đụng cột khác, Clear trả 1/0 đúng, Update không clobber cờ, Insert mặc định null).
+- `AutoRunUnverifiedTests.cs` (mới): 5 case cho `LaTrangThaiChuaXacNhan`.
+- Cập nhật 2 stub `IAccountSession` (AccountSessionManagerTests, AccountRowViewModelTests) thêm `ProbePageStateAsync`.
+
+### Kết quả kiểm chứng (lệnh đã chạy)
+- `dotnet build orders/XuLyDonShopee.App/XuLyDonShopee.App.csproj` → **Build succeeded, 0 Warning, 0 Error**.
+- `dotnet build ShopeeSuite.sln` → **Build succeeded, 0 Warning, 0 Error**.
+- `dotnet test orders/XuLyDonShopee.Tests` → **Passed! Failed 0, Passed 909, Skipped 0** (896 cũ + 13 mới).
+
+### Quyết định tự chọn (ngoài chi tiết plan)
+- **Điểm gỡ cờ trong RunAsync**: chọn điểm "đọc số Chờ Lấy Hàng LẦN ĐẦU" (`firstOrderCheck`) — đây là tín hiệu đăng-nhập-OK chắc chắn nhất; KHÔNG dùng `_readyForActions=true` vì cờ đó vẫn bật ở nhánh degrade (verify/captcha thất bại) nên sẽ gỡ oan.
+- **ClearVerifyFailed trả `int`** (số dòng thực đổi, điều kiện `IS NOT NULL`) để caller chỉ log/`RaiseAccountsChanged` khi thật sự có cờ được gỡ → tránh làm mới UI thừa mỗi lần mở phiên.
+- **Nút "Truy cập TK" hiện khi `IsVerifyFailed`** (không phụ thuộc chế độ lọc) — bám theo phương án chính của plan, chỉ dùng binding cấp-row (không cần cross-context binding với ShowOnlyUnverified). Đánh đổi: dòng TK-lỗi hơi chật ngang (email bị cắt bớt do badge+nút chiếm cột phải), chấp nhận vì trạng thái này ngoại lệ/tạm thời và ít tài khoản lỗi cùng lúc.
+- **Nút lọc hiển thị khi `UnverifiedCount>0 || ShowOnlyUnverified`** (rộng hơn "chỉ khi N>0" của plan) để khi đang lọc mà số về 0 vẫn còn nút "Hiện tất cả" thoát ra, tránh kẹt ở danh sách rỗng.
+- **RaiseAccountsChanged để cập nhật nhãn/bộ lọc**: tái dùng cơ chế sẵn có (`AccountsChanged → OnAccountsChanged → RunOnUi(Reload)`), phát 1 lần/lô khi có thay đổi cờ.
+
+### Vướng mắc / chưa kiểm chứng bằng tay
+- Luồng probe cuối lô + mở phiên "Truy cập TK" là code đụng Brave/Playwright thật nên KHÔNG chạy end-to-end trong môi trường này (đúng như quy ước dự án: luồng browser kiểm ở smoke test tay). Đã phủ bằng hàm pure + repo + migration test. Cần smoke tay: (1) chạy tự động với 1 acc verify-fail → cuối lô có badge đỏ + log; (2) verify tay xong → lượt sau nhãn tự gỡ; (3) nút "Truy cập TK" mở đúng cửa sổ Brave.
+- Chưa release client (Velopack) — theo plan không yêu cầu; để Fable quyết định.

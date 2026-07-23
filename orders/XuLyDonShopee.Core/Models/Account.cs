@@ -38,6 +38,15 @@ public class Account
     /// <summary>Trạng thái tài khoản.</summary>
     public AccountStatus Status { get; set; } = AccountStatus.ChuaKiemTra;
 
+    /// <summary>
+    /// Thời điểm (UTC) lần cuối "Chạy tự động" phát hiện phiên KHÔNG tự xác minh được (còn kẹt ở trang
+    /// verify/login/captcha khi kết thúc lượt). <c>null</c> = bình thường. Cờ BỀN (lưu DB) để danh sách
+    /// "TK chưa xác nhận" còn đó qua restart; tự gỡ (về null) khi phiên đăng nhập được. Do
+    /// <see cref="Data.AccountRepository.MarkVerifyFailed"/>/<see cref="Data.AccountRepository.ClearVerifyFailed"/>
+    /// quản — form CRUD KHÔNG đụng tới (Insert/Update bỏ qua cột này).
+    /// </summary>
+    public DateTime? VerifyFailedAt { get; set; }
+
     /// <summary>Thời điểm tạo (UTC).</summary>
     public DateTime CreatedAt { get; set; }
 

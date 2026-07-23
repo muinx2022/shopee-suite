@@ -4,7 +4,9 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using XuLyDonShopee.Core.Data;
 using XuLyDonShopee.Core.Models;
+using XuLyDonShopee.Core.Services;
 
 namespace XuLyDonShopee.App.Services;
 
@@ -213,16 +215,124 @@ public sealed class AutoRunService
         var runs = batch.Select(acc => RunAccountAsync(acc.Id, acc.Email, cfg, ct));
         await Task.WhenAll(runs).ConfigureAwait(false);
 
-        // Đóng phiên do MÌNH mở trong lô này (đọc từ _openedByMe — phiên người dùng tự mở không có trong đó).
-        var mine = batch.Select(b => b.Id).Where(id => _openedByMe.ContainsKey(id)).ToList();
-        foreach (var id in mine)
+        // Phiên do MÌNH mở trong lô này (đọc từ _openedByMe — phiên người dùng tự mở không có trong đó).
+        var mine = batch.Where(b => _openedByMe.ContainsKey(b.Id)).ToList();
+
+        // PHÁT HIỆN "TK chưa xác nhận" TRƯỚC khi đóng: soi trang hiện tại của từng phiên do mình mở; còn kẹt
+        // ở verify/login/captcha → đánh dấu; đã đăng nhập (LoggedIn) → gỡ cờ. Best-effort, KHÔNG chặn đóng phiên
+        // (bọc try/catch bao trùm: mọi lỗi bất ngờ vẫn để vòng đóng phiên bên dưới chạy).
+        try
+        {
+            await ProbeUnverifiedBeforeCloseAsync(mine).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _services.Log.Append(LogSource, $"Phát hiện TK chưa xác nhận gặp lỗi (bỏ qua): {ex.Message}");
+        }
+
+        // Đóng phiên do MÌNH mở.
+        foreach (var (id, _) in mine)
         {
             _services.Sessions.Stop(id);
             _openedByMe.TryRemove(id, out _);
         }
 
-        await WaitSessionsClosedAsync(mine, ct).ConfigureAwait(false);
+        await WaitSessionsClosedAsync(mine.Select(m => m.Id).ToList(), ct).ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// Cuối lô, TRƯỚC khi đóng các phiên do autorun mở: soi trạng thái trang hiện tại của từng phiên
+    /// (<see cref="IAccountSession.ProbePageStateAsync"/> — read-only). Kết quả:
+    /// <list type="bullet">
+    /// <item>Verify / LoginForm / Captcha (<see cref="LaTrangThaiChuaXacNhan"/>) → đánh dấu
+    /// <see cref="AccountRepository.MarkVerifyFailed"/> + log per-acc rõ.</item>
+    /// <item>LoggedIn → <see cref="AccountRepository.ClearVerifyFailed"/> (phiên tốt thì gỡ nhãn cũ nếu có).</item>
+    /// <item>Unknown / null (không kết luận được / đang navigating) → KHÔNG đổi cờ.</item>
+    /// </list>
+    /// Toàn khối best-effort try/catch per-acc: lỗi probe KHÔNG chặn việc đóng phiên. Có bất kỳ thay đổi cờ nào
+    /// → phát <see cref="AppServices.RaiseAccountsChanged"/> một lần để màn Tài khoản làm mới nhãn/bộ lọc. Kèm
+    /// một dòng log tổng cấp scheduler liệt kê các TK vừa bị đánh dấu trong lô.
+    /// </summary>
+    private async Task ProbeUnverifiedBeforeCloseAsync(IReadOnlyList<(long Id, string Email)> sessions)
+    {
+        if (sessions.Count == 0)
+        {
+            return;
+        }
+
+        var newlyFailed = new List<string>();
+        var anyChanged = false;
+
+        foreach (var (id, email) in sessions)
+        {
+            try
+            {
+                var session = _services.Sessions.Get(id);
+                if (session is null)
+                {
+                    continue;
+                }
+
+                var state = await session.ProbePageStateAsync().ConfigureAwait(false);
+                if (state is null)
+                {
+                    continue; // đang navigating / lỗi / phiên đã đóng → không kết luận
+                }
+
+                if (LaTrangThaiChuaXacNhan(state.Value))
+                {
+                    _services.Accounts.MarkVerifyFailed(id, DateTime.UtcNow);
+                    newlyFailed.Add(email);
+                    anyChanged = true;
+                    _services.Log.Append(email,
+                        $"KHÔNG tự xác minh được — phiên vẫn ở trang {MoTaTrang(state.Value)} khi kết thúc lượt. Đánh dấu: TK chưa xác nhận.");
+                }
+                else if (state.Value == ShopeePageState.LoggedIn)
+                {
+                    // Phiên tốt → gỡ nhãn cũ nếu có (ClearVerifyFailed trả >0 khi thực sự gỡ một cờ đang bật).
+                    if (_services.Accounts.ClearVerifyFailed(id) > 0)
+                    {
+                        anyChanged = true;
+                    }
+                }
+                // Unknown → KHÔNG đổi cờ (không kết luận bừa).
+            }
+            catch
+            {
+                // Lỗi probe/ghi DB của MỘT tài khoản KHÔNG chặn việc đóng phiên hay các tài khoản khác.
+            }
+        }
+
+        if (newlyFailed.Count > 0)
+        {
+            _services.Log.Append(LogSource,
+                $"Lô này có {newlyFailed.Count} TK chưa xác nhận: {string.Join(", ", newlyFailed)}");
+        }
+
+        if (anyChanged)
+        {
+            _services.RaiseAccountsChanged(); // màn Tài khoản làm mới nhãn đỏ + bộ lọc
+        }
+    }
+
+    /// <summary>
+    /// Phân loại trạng thái trang cuối lượt thành "TK chưa xác nhận được" (hàm THUẦN, test được): phiên còn kẹt
+    /// ở <see cref="ShopeePageState.Verify"/> / <see cref="ShopeePageState.LoginForm"/> /
+    /// <see cref="ShopeePageState.Captcha"/> = chưa đăng nhập được → <c>true</c>.
+    /// <see cref="ShopeePageState.LoggedIn"/> / <see cref="ShopeePageState.Unknown"/> → <c>false</c> (không
+    /// kết luận bừa: Unknown = trang trắng/đang load).
+    /// </summary>
+    public static bool LaTrangThaiChuaXacNhan(ShopeePageState state)
+        => state is ShopeePageState.Verify or ShopeePageState.LoginForm or ShopeePageState.Captcha;
+
+    /// <summary>Mô tả NGẮN trang chặn để ghi vào log per-acc.</summary>
+    private static string MoTaTrang(ShopeePageState state) => state switch
+    {
+        ShopeePageState.Verify => "xác minh (verify)",
+        ShopeePageState.LoginForm => "đăng nhập (login)",
+        ShopeePageState.Captcha => "captcha",
+        _ => state.ToString(),
+    };
 
     /// <summary>
     /// Một tài khoản trong lô. CHỈ xử lý phiên do CHÍNH autorun mở: nếu tài khoản ĐANG có phiên (người dùng tự

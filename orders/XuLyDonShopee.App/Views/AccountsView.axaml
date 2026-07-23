@@ -114,6 +114,50 @@
             <Setter Property="FontSize" Value="13" />
         </Style>
 
+        <!-- Nút "Truy cập TK" trên dòng TK chưa xác nhận: nhỏ, giọng đỏ (nền hồng nhạt + viền đỏ mờ). -->
+        <Style Selector="Button.visitTk">
+            <Setter Property="Height" Value="22" />
+            <Setter Property="MinWidth" Value="0" />
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="Padding" Value="8,0" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Foreground" Value="{StaticResource DangerBrush}" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+        <Style Selector="Button.visitTk /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="#FDECEA" />
+            <Setter Property="BorderBrush" Value="#F1B0A8" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="5" />
+        </Style>
+        <Style Selector="Button.visitTk:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="#FBDCD6" />
+        </Style>
+
+        <!-- Nút lọc "Những TK chưa xác nhận (N)" ở đầu danh sách: link-style đỏ, canh trái, viền mờ. -->
+        <Style Selector="Button.unverifiedFilter">
+            <Setter Property="Height" Value="30" />
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="Padding" Value="10,0" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Foreground" Value="{StaticResource DangerBrush}" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="HorizontalContentAlignment" Value="Left" />
+            <Setter Property="Cursor" Value="Hand" />
+        </Style>
+        <Style Selector="Button.unverifiedFilter /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="#FDECEA" />
+            <Setter Property="BorderBrush" Value="#F1B0A8" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="6" />
+        </Style>
+        <Style Selector="Button.unverifiedFilter:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="#FBDCD6" />
+        </Style>
+
     </UserControl.Styles>
 
     <!-- Bố cục: 2 cột — danh sách (trái, cao hết màn) | chi tiết + nhật ký của tài khoản đang chọn (phải). -->
@@ -179,6 +223,13 @@
                     <!-- (Tùy chọn "Xóa profile và tạo lại" đã CHUYỂN lên dải Ribbon — tab Đơn hàng, nhóm "Tùy chọn";
                          vẫn bind cùng property AccountsViewModel.XoaProfileTaoLai nên persist như cũ.) -->
 
+                    <!-- Nút lọc "Những TK chưa xác nhận (N)" (ẩn khi N=0 và không đang lọc); đang lọc → "Hiện tất cả". -->
+                    <Button DockPanel.Dock="Top" Classes="unverifiedFilter" Margin="0,0,0,12"
+                            Content="{Binding UnverifiedButtonText}"
+                            Command="{Binding ToggleShowUnverifiedCommand}"
+                            IsVisible="{Binding IsUnverifiedFilterVisible}"
+                            ToolTip.Tip="Lọc danh sách chỉ còn các tài khoản không tự xác minh được (cuối lượt chạy tự động vẫn kẹt ở trang verify/login/captcha)" />
+
                     <!-- Danh sách tài khoản: mỗi dòng "[ ] Tên shop" + (khi đang chạy) chấm xanh & số chờ lấy. -->
                     <ListBox Classes="acctFlat"
                              ItemsSource="{Binding Accounts}"
@@ -205,9 +256,21 @@
                                                FontSize="13" VerticalAlignment="Center"
                                                TextTrimming="CharacterEllipsis"
                                                Classes.running="{Binding IsRunning}" />
-                                    <!-- Khối phải: (khi đang chạy) chấm xanh & "Chờ lấy: N". -->
+                                    <!-- Khối phải: nhãn đỏ "TK chưa xác nhận" + nút "Truy cập TK" (khi cờ bật);
+                                         (khi đang chạy) chấm xanh & "Chờ lấy: N". -->
                                     <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="6"
                                                 VerticalAlignment="Center" Margin="8,0,0,0">
+                                        <!-- Nhãn đỏ: đỏ nền hồng nhạt, chữ đậm — không phá layout dòng. -->
+                                        <Border IsVisible="{Binding IsVerifyFailed}" VerticalAlignment="Center"
+                                                Background="#FDECEA" BorderBrush="#F5C6C0" BorderThickness="1"
+                                                CornerRadius="4" Padding="6,1">
+                                            <TextBlock Text="TK chưa xác nhận" FontSize="10" FontWeight="SemiBold"
+                                                       Foreground="{StaticResource DangerBrush}" VerticalAlignment="Center" />
+                                        </Border>
+                                        <!-- Nút "Truy cập TK": chọn acc + tự mở phiên để xác minh tay (code-behind). -->
+                                        <Button IsVisible="{Binding IsVerifyFailed}" Classes="visitTk"
+                                                Content="Truy cập TK" Click="OnTruyCapTkClick"
+                                                ToolTip.Tip="Mở trang bán hàng của tài khoản này để xác minh tay trên cửa sổ Brave" />
                                         <Border Width="6" Height="6" CornerRadius="3"
                                                 VerticalAlignment="Center" Background="{StaticResource SuccessBrush}"
                                                 IsVisible="{Binding IsRunning}" />
