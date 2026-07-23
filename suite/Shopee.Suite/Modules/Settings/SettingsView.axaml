@@ -56,38 +56,12 @@
                             </StackPanel>
                         </Border>
 
-                        <!-- Cột phải: máy của bạn + phiên bản/cập nhật -->
+                        <!-- Cột phải: máy của bạn (card "Phiên bản & cập nhật" đã tách sang UnifiedSettingsView — dùng chung mọi chế độ) -->
                         <StackPanel Grid.Column="2" VerticalAlignment="Top">
                             <Border Classes="card" Padding="18" Margin="0,0,0,14">
                                 <StackPanel>
                                     <TextBlock Text="Máy của bạn" Classes="h2" Margin="0,0,0,8" />
                                     <TextBlock Text="{Binding MachineInfo}" FontSize="14.5" FontWeight="SemiBold" />
-                                </StackPanel>
-                            </Border>
-
-                            <!-- ── Phiên bản + tự cập nhật (Velopack) ── -->
-                            <Border Classes="card" Padding="18">
-                                <StackPanel>
-                                    <TextBlock Text="Phiên bản &amp; cập nhật" Classes="h2" Margin="0,0,0,8" />
-                                    <TextBlock Text="{Binding AppVersionText}" FontSize="14.5" FontWeight="SemiBold" FontFamily="{DynamicResource MonoFont}" />
-
-                                    <TextBlock Text="{Binding UpdateStatus}" Margin="0,10,0,0" TextWrapping="Wrap"
-                                               Foreground="{DynamicResource TextSecondaryBrush}"
-                                               IsVisible="{Binding UpdateStatus, Converter={StaticResource StringToBool}}" />
-
-                                    <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
-                                        <Button Content="🔄  Kiểm tra bản mới" MinWidth="160"
-                                                IsVisible="{Binding UpdateSupported}"
-                                                Command="{Binding CheckUpdateCommand}" />
-                                        <Button Classes="success" Content="⬆  Cập nhật &amp; khởi động lại" MinWidth="200" Margin="10,0,0,0"
-                                                IsVisible="{Binding UpdateReady}"
-                                                Command="{Binding ApplyUpdateCommand}"
-                                                ToolTip.Tip="Đóng app + áp dụng bản đã tải + mở lại. Làm khi KHÔNG có job đang chạy." />
-                                    </StackPanel>
-
-                                    <TextBlock Classes="caption" TextWrapping="Wrap" Margin="0,10,0,0"
-                                               IsVisible="{Binding UpdateNotSupported}"
-                                               Text="ℹ Tự cập nhật chỉ hoạt động khi app được cài qua bộ cài Velopack (Setup.exe trên Windows / AppImage trên Linux). Bản chạy trực tiếp từ thư mục build không tự cập nhật." />
                                 </StackPanel>
                             </Border>
                         </StackPanel>
