@@ -1,7 +1,7 @@
 # Plan: `--data-dir` — chạy nhiều instance song song (kiểu Chrome --user-data-dir)
 
 - **Ngày:** 2026-07-23
-- **Trạng thái:** đang làm
+- **Trạng thái:** dừng (thay bằng cơ chế --mode, xem plan che-do-shortcut)
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-dev`)
 - **Nhánh:** `feature/gop-don-hang` (cây chính)
 
@@ -123,4 +123,58 @@ Giữ phần Shutdown()/Environment.Exit + try/catch như hiện có.
 
 ## Báo cáo thực thi (Opus điền sau khi xong)
 
-<chưa có>
+**Trạng thái:** hoàn thành (chờ Fable nghiệm thu). Build sạch + test xanh.
+
+### File đã sửa/tạo
+
+1. `suite/Shopee.Core/Infrastructure/SuitePaths.cs` (sửa)
+   - `ResolveAppDataBase()`: chèn nhánh ưu tiên 1 `--data-dir` LÊN ĐẦU (bọc try/catch riêng: path hỏng → tụt
+     xuống thử `data-dir.txt`/`%AppData%`). Thứ tự mới: `--data-dir` → `data-dir.txt` → `%AppData%`. Nhánh
+     `data-dir.txt`/`%AppData%` cũ giữ NGUYÊN.
+   - Thêm `private static string? DataDirArg()` (đọc `Environment.GetCommandLineArgs()`, try/catch → null) và
+     `internal static string? ParseDataDirArg(string[] args)` (hàm thuần).
+   - Cập nhật XML-doc `Root` + `ResolveAppDataBase` nêu thứ tự ưu tiên mới.
+
+2. `orders/XuLyDonShopee.Core/Data/Database.cs` (sửa)
+   - `DefaultPath()`: gốc = `DataDirArg()` nếu có (rooted → dùng thẳng; tương đối → ghép theo
+     `AppContext.BaseDirectory`), ngược lại `%AppData%`; rồi ghép `\XuLyDonShopee\app.db`. Dùng
+     `System.IO.Path.*` fully-qualified (class có property `Path` che tên).
+   - Thêm `DataDirArg()` + `ParseDataDirArg(string[])` — CHÉP y hệt bản SuitePaths (orders không ref
+     Shopee.Core), có comment chéo "ĐỒNG BỘ hai bản".
+
+3. `suite/Shopee.Suite/Services/AppRestart.cs` (sửa)
+   - `Restart()`: relaunch qua `ProcessStartInfo` + `foreach (a in Environment.GetCommandLineArgs().Skip(1))
+     psi.ArgumentList.Add(a)` → forward nguyên args (gồm `--data-dir`). Giữ nguyên check exe rỗng, Shutdown()/
+     Environment.Exit, try/catch. Cập nhật XML-doc class.
+
+4. `orders/XuLyDonShopee.Tests/DataDirArgParserTests.cs` (tạo)
+   - 6 test cho `Database.ParseDataDirArg`: `--data-dir C:\x` và `--data-dir=C:\x` → `C:\x`; không có →
+     null; trim; giá trị rỗng/thiếu/`=` rỗng → null; đường dẫn tương đối giữ nguyên.
+
+### Kết quả build/test
+
+- `dotnet build ShopeeSuite.sln --no-incremental`: **Build succeeded — 0 Warning(s), 0 Error(s)**.
+- `dotnet test orders/XuLyDonShopee.Tests`: **Passed! Failed: 0, Passed: 917, Skipped: 0** (911 nền + 6 mới).
+
+### Đối chiếu tiêu chí nghiệm thu
+
+- [x] Build sạch; test xanh.
+- [x] `--data-dir X`: `SuitePaths.Root = X\ShopeeSuite`; orders `app.db = X\XuLyDonShopee\app.db`. Không có
+  `--data-dir` → parser trả null → cả 2 gốc chạy đúng nhánh CŨ (`%AppData%` / `data-dir.txt`), hành vi y hệt.
+- [x] `AppRestart.Restart()` forward `--data-dir` (và mọi args khác).
+- [x] KHÔNG thêm khoá single-instance.
+
+### Điểm cần Fable soi lại / điểm lệch nhỏ so với spec
+
+- **Hai bản parser cố ý tách hàm thuần ở CẢ hai file** (`ParseDataDirArg`), không chỉ orders như gợi ý bước 1
+  (plan để bản SuitePaths inline). Lý do: để 2 bản giống nhau từng dòng, dễ soi "khớp hành vi" (rủi ro #1). Cả
+  hai `internal static` + logic identical. `SuitePaths.ParseDataDirArg` không có test (suite không có project
+  test) nhưng được `DataDirArg()` gọi nên KHÔNG phải internal chết → không cảnh báo.
+- **Nhánh `--data-dir` trong SuitePaths bọc try/catch riêng** (ngoài snippet plan): nếu `--data-dir` chứa path
+  không hợp lệ (ký tự cấm) khiến `Path.GetFullPath` ném, sẽ tụt xuống thử `data-dir.txt`/`%AppData%` thay vì
+  crash — bám triết lý "nguồn lỗi → thử nguồn kế" sẵn có của hàm. Không đổi hành vi đường hạnh phúc.
+- **Bất đối xứng có chủ đích** (đã đúng plan): SuitePaths gọi `Path.GetFullPath` (chuẩn hoá tuyệt đối), orders
+  chỉ `Combine` — theo đúng 2 snippet bước 2 vs bước 3. PARSER thì identical; chỉ khác phần ghép tên thư mục
+  app-data (`ShopeeSuite` vs `XuLyDonShopee\app.db`) đúng như thiết kế.
+- **Chưa chạy thực tế 2 instance song song** (cần shortcut + pre-seed `app-mode.json` — là bước SETUP của Fable
+  sau deploy, ngoài phạm vi code). Đã kiểm chứng bằng build + unit test parser; logic path resolve đọc bằng mắt.
