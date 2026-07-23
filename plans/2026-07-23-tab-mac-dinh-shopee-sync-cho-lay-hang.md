@@ -1,7 +1,7 @@
 # Plan: Tab mặc định = Shopee + Sync đơn CHỈ tab "Chờ lấy hàng"
 
 - **Ngày:** 2026-07-23
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành (LƯU Ý: phần "sync chỉ tab Chờ lấy hàng" bị thay bởi plan 2026-07-23-modal-copy-va-vong-doi-don-tat-ca — người dùng đổi hướng ngay sau đó)
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-executor`)
 
 ## 1. Bối cảnh & mục tiêu
