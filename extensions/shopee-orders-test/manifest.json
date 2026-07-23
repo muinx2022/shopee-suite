@@ -1,8 +1,11 @@
 {
   "manifest_version": 3,
   "name": "Shopee Orders - Test mo shop",
-  "version": "0.1",
-  "description": "POC kiem chung: mo shop tu /portal/shop bang extension trong trinh duyet thuong, xem co ne captcha khong.",
+  "version": "0.2",
+  "description": "POC: mo shop bang TRUSTED click (chrome.debugger Input) de test ne captcha. Co ca nut synthetic de so sanh.",
+  "permissions": ["debugger", "tabs"],
+  "host_permissions": ["https://banhang.shopee.vn/*"],
+  "background": { "service_worker": "background.js" },
   "content_scripts": [
     {
       "matches": ["https://banhang.shopee.vn/*"],
