@@ -261,7 +261,16 @@ async function handleCommand(cmd) {
 // Đọc danh sách shop.
 async function doReadShopList() {
   if (!(await ensureListTab(BANHANG_HOSTS))) { send({ action: "error", message: "chưa thấy tab /portal/shop — SW thấy các tab: [" + lastTabUrls.join(" | ") + "]" }); return; }
-  const json = await execInTab(listTabId, pageScanShopList, []);
+  // Poll chờ bảng shop render (tr[data-row-key]) — production chờ tới ~20s; ở đây 15s. Đọc một phát dễ trúng lúc
+  // bảng CHƯA render → 0 shop.
+  const deadline = Date.now() + 15000;
+  let json = "[]";
+  while (Date.now() < deadline) {
+    try { json = (await execInTab(listTabId, pageScanShopList, [])) || "[]"; } catch (e) { json = "[]"; }
+    let n = 0; try { n = JSON.parse(json).length; } catch (e) {}
+    if (n > 0) break;
+    await sleep(500);
+  }
   send({ action: "pageData", kind: "shopList", data: json });
 }
 

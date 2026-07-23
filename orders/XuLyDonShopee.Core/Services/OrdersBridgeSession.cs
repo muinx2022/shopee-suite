@@ -106,18 +106,50 @@ public sealed class OrdersBridgeSession : IDisposable
 
         // Vẫn nhúng hash (extension đọc nếu còn) nhưng KHÔNG phụ thuộc: mất hash → extension dùng cổng cố định.
         var startUrl = $"{baseUrl}#_od_ws={BridgePort}";
-        var extPath = BraveLaunchArgs.ResolveOrdersBridgeExtension()
+        var srcExt = BraveLaunchArgs.ResolveOrdersBridgeExtension()
             ?? throw new InvalidOperationException(
                 "Không tìm thấy thư mục extension 'shopee-orders' (cạnh app hoặc trong repo). " +
                 "Cầu nối cần extension này để nối WebSocket + bắn trusted input.");
 
-        // Kill MỌI trình duyệt đang giữ hồ sơ này TRƯỚC khi mở bản sạch: Chrome/Brave "single-instance" → nếu còn
-        // một tiến trình cũ (mồ côi từ lần chạy trước / trình duyệt điều khiển vừa đóng chưa thoát hẳn) trên cùng
-        // --user-data-dir thì lần mở mới CHỈ nhồi tab vào tiến trình cũ (giữ EXTENSION CŨ trong RAM) → cầu nối nạp
-        // nhầm bản cũ. Dọn để bản sạch luôn nạp extension MỚI từ đĩa.
+        // CHÉP extension ra thư mục MỚI (GUID) mỗi lần chạy rồi nạp bản chép. Vì sao: Brave/Chrome CACHE service
+        // worker (MV3) theo extension ID (= hash đường dẫn) trong hồ sơ persistent — nạp lại CÙNG đường dẫn vẫn có
+        // thể chạy SW CŨ dù file đã đổi (đã kiểm chứng: reload ext tay mới ăn code mới). Đường dẫn MỚI ⇒ ID mới ⇒ SW
+        // mới tinh, luôn đúng code. Tên thư mục vẫn chứa 'shopee-orders' để KillBrowsersOnProfile nhận diện.
+        var extPath = PrepareFreshExtensionCopy(srcExt);
+
+        // Kill MỌI trình duyệt của cầu nối (theo hồ sơ HOẶC đang nạp 'shopee-orders') TRƯỚC khi mở bản sạch: chống
+        // "single-instance handoff" + orphan cùng nối cổng cố định 47821 cướp lệnh.
         KillBrowsersOnProfile(_userDataDir);
 
         Process = PocCleanLauncher.Open(_userDataDir, _browserChoice, startUrl, extPath);
+    }
+
+    /// <summary>Chép thư mục extension <paramref name="srcDir"/> ra một thư mục MỚI (GUID) dưới temp và trả về
+    /// đường dẫn bản chép. Mục đích: đường dẫn mới ⇒ Brave cấp extension ID mới ⇒ service worker MV3 mới tinh (không
+    /// dính SW cache của hồ sơ persistent). Dọn các bản chép cũ trước (best-effort) để không tích tụ. Chỉ chép file
+    /// top-level (manifest.json/background.js/content.js — extension không có thư mục con).</summary>
+    private static string PrepareFreshExtensionCopy(string srcDir)
+    {
+        var baseDir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "shopee-orders-bridge");
+        try
+        {
+            if (System.IO.Directory.Exists(baseDir))
+            {
+                foreach (var d in System.IO.Directory.GetDirectories(baseDir))
+                {
+                    try { System.IO.Directory.Delete(d, true); } catch { /* bản đang bị 1 Brave khác giữ — bỏ qua */ }
+                }
+            }
+        }
+        catch { /* bỏ qua */ }
+
+        var dest = System.IO.Path.Combine(baseDir, "shopee-orders-" + System.Guid.NewGuid().ToString("N"));
+        System.IO.Directory.CreateDirectory(dest);
+        foreach (var f in System.IO.Directory.GetFiles(srcDir))
+        {
+            System.IO.File.Copy(f, System.IO.Path.Combine(dest, System.IO.Path.GetFileName(f)), true);
+        }
+        return dest;
     }
 
     /// <summary>Kill mọi tiến trình trình duyệt (brave/chrome/msedge) có <paramref name="userDataDir"/> trong dòng
