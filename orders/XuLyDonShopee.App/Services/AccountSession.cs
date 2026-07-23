@@ -1858,83 +1858,102 @@ public partial class AccountSession : ObservableObject, IAccountSession
 
                 try
                 {
-                    // 4) ĐIỀU PHỐI đăng nhập: phát hiện trạng thái trang → tự login (form) / xác minh qua email
-                    //    (verify) / né captcha (đóng+xóa hồ sơ+mở lại). Áp cho MỌI đường mở phiên (Sync, Sync đã
-                    //    chọn, Chạy tự động). MỌI nhánh degrade PHẢI bật _readyForActions (kẻo WaitForSessionReady
-                    //    treo 5'); riêng nhánh captcha-relaunch KHÔNG bật (phiên sắp tháo dỡ + mở lại).
+                    // 4) ĐIỀU PHỐI đăng nhập QUA NỀN TẢNG TÀI KHOẢN PHỤ: phiên mở thẳng subaccount.shopee.com →
+                    //    TryEnterSellerViaSubaccountAsync tự điền form subaccount, mở hộp thư cho người dùng tự lấy mã,
+                    //    chờ nhập code, rồi click "Tài khoản của tôi" → "Kênh Người bán" để sang Seller Centre (Pages[0]).
+                    //    entered=true → chạy TIẾP state machine cũ trên trang banhang (login/verify/captcha) làm LƯỚI AN
+                    //    TOÀN nếu banhang còn đòi thêm; entered=false → BỎ QUA state machine (nó viết cho trang banhang,
+                    //    chạy trên trang subaccount sẽ điền sai chỗ), GIỮ cửa sổ cho người dùng thao tác tay. MỌI nhánh
+                    //    degrade PHẢI bật _readyForActions (kẻo WaitForSessionReady treo 5'); riêng nhánh captcha-relaunch
+                    //    KHÔNG bật (phiên sắp tháo dỡ + mở lại).
                     if (acc is not null)
                     {
                         var loginLog = (Action<string>)(m => _services.Log.Append(_logLabel, m));
 
-                        // Chờ trạng thái trang rõ ràng (SPA có thể còn render) — poll tối đa ~12s; Unknown quá lâu
-                        // → đi tiếp như hôm nay. Hồ sơ đã đăng nhập → DetectPageStateAsync trả LoggedIn ngay (không đợi).
-                        var state = ShopeePageState.Unknown;
-                        var detectDeadline = DateTime.UtcNow.AddSeconds(12);
-                        do
+                        SetStatus(SessionState.Running, "Đang vào Nền tảng tài khoản phụ (subaccount)...");
+                        bool entered;
+                        try { entered = await session.TryEnterSellerViaSubaccountAsync(acc.Email, acc.Password, acc.VerifyEmail, acc.VerifyEmailPassword, loginLog, ct).ConfigureAwait(false); }
+                        catch (OperationCanceledException) { throw; }
+                        catch { entered = false; }
+
+                        if (!entered)
                         {
-                            state = await session.DetectPageStateAsync(ct).ConfigureAwait(false);
-                            if (state != ShopeePageState.Unknown) break;
-                            await Task.Delay(700, ct).ConfigureAwait(false);
+                            _services.Log.Append(_logLabel,
+                                "Không tự vào được Kênh Người bán — GIỮ cửa sổ để bạn thao tác tay.");
                         }
-                        while (DateTime.UtcNow < detectDeadline);
-
-                        // a) Form đăng nhập → tự điền user/pass (KIỂU NGƯỜI) rồi chờ trang đổi, phát hiện lại.
-                        if (state == ShopeePageState.LoginForm && !string.IsNullOrEmpty(acc.Password))
+                        else
                         {
-                            SetStatus(SessionState.Running, "Đang tự đăng nhập (kiểu người)...");
-                            try { await session.TryHumanLoginAsync(acc.Email, acc.Password, ct).ConfigureAwait(false); }
-                            catch (OperationCanceledException) { throw; }
-                            catch { /* không phá luồng — người dùng tự nhập tay nếu cần */ }
-
-                            await Task.Delay(8000, ct).ConfigureAwait(false); // chờ sau bấm đăng nhập
-                            state = await session.DetectPageStateAsync(ct).ConfigureAwait(false);
-                        }
-
-                        // b) Trang verify → tự xác minh qua email Hotmail (nếu có cấu hình); thiếu cấu hình/thất
-                        //    bại → GIỮ phiên như hôm nay (người dùng verify tay), vẫn bật sẵn sàng ở dưới.
-                        if (state == ShopeePageState.Verify)
-                        {
-                            if (!string.IsNullOrWhiteSpace(acc.VerifyEmail) && !string.IsNullOrWhiteSpace(acc.VerifyEmailPassword))
+                            // Đã vào Seller Centre (banhang.shopee.vn ở Pages[0]) → state machine cũ chạy làm lưới an toàn.
+                            // Chờ trạng thái trang rõ ràng (SPA có thể còn render) — poll tối đa ~12s; Unknown quá lâu
+                            // → đi tiếp như hôm nay. Hồ sơ đã đăng nhập → DetectPageStateAsync trả LoggedIn ngay (không đợi).
+                            var state = ShopeePageState.Unknown;
+                            var detectDeadline = DateTime.UtcNow.AddSeconds(12);
+                            do
                             {
-                                SetStatus(SessionState.Running, "Shopee yêu cầu xác minh — đang tự xác minh qua email...");
-                                bool verified;
-                                try { verified = await session.TryVerifyByEmailAsync(acc.VerifyEmail, acc.VerifyEmailPassword, _services.Settings.GetAutoConfirmEmail(), loginLog, ct).ConfigureAwait(false); }
-                                catch (OperationCanceledException) { throw; }
-                                catch { verified = false; }
+                                state = await session.DetectPageStateAsync(ct).ConfigureAwait(false);
+                                if (state != ShopeePageState.Unknown) break;
+                                await Task.Delay(700, ct).ConfigureAwait(false);
+                            }
+                            while (DateTime.UtcNow < detectDeadline);
 
-                                if (verified)
+                            // a) Form đăng nhập → tự điền user/pass (KIỂU NGƯỜI) rồi chờ trang đổi, phát hiện lại.
+                            if (state == ShopeePageState.LoginForm && !string.IsNullOrEmpty(acc.Password))
+                            {
+                                SetStatus(SessionState.Running, "Đang tự đăng nhập (kiểu người)...");
+                                try { await session.TryHumanLoginAsync(acc.Email, acc.Password, ct).ConfigureAwait(false); }
+                                catch (OperationCanceledException) { throw; }
+                                catch { /* không phá luồng — người dùng tự nhập tay nếu cần */ }
+
+                                await Task.Delay(8000, ct).ConfigureAwait(false); // chờ sau bấm đăng nhập
+                                state = await session.DetectPageStateAsync(ct).ConfigureAwait(false);
+                            }
+
+                            // b) Trang verify → tự xác minh qua email Hotmail (nếu có cấu hình); thiếu cấu hình/thất
+                            //    bại → GIỮ phiên như hôm nay (người dùng verify tay), vẫn bật sẵn sàng ở dưới.
+                            if (state == ShopeePageState.Verify)
+                            {
+                                if (!string.IsNullOrWhiteSpace(acc.VerifyEmail) && !string.IsNullOrWhiteSpace(acc.VerifyEmailPassword))
                                 {
-                                    state = await session.DetectPageStateAsync(ct).ConfigureAwait(false);
+                                    SetStatus(SessionState.Running, "Shopee yêu cầu xác minh — đang tự xác minh qua email...");
+                                    bool verified;
+                                    try { verified = await session.TryVerifyByEmailAsync(acc.VerifyEmail, acc.VerifyEmailPassword, _services.Settings.GetAutoConfirmEmail(), loginLog, ct).ConfigureAwait(false); }
+                                    catch (OperationCanceledException) { throw; }
+                                    catch { verified = false; }
+
+                                    if (verified)
+                                    {
+                                        state = await session.DetectPageStateAsync(ct).ConfigureAwait(false);
+                                    }
+                                    else
+                                    {
+                                        _services.Log.Append(_logLabel,
+                                            "Không tự xác minh qua email được — GIỮ cửa sổ để bạn xác minh tay.");
+                                    }
                                 }
                                 else
                                 {
                                     _services.Log.Append(_logLabel,
-                                        "Không tự xác minh qua email được — GIỮ cửa sổ để bạn xác minh tay.");
+                                        "Shopee yêu cầu xác minh nhưng chưa cấu hình Email xác minh cho tài khoản — " +
+                                        "hãy xác minh tay hoặc thêm Email xác minh ở màn Tài khoản.");
                                 }
                             }
-                            else
-                            {
-                                _services.Log.Append(_logLabel,
-                                    "Shopee yêu cầu xác minh nhưng chưa cấu hình Email xác minh cho tài khoản — " +
-                                    "hãy xác minh tay hoặc thêm Email xác minh ở màn Tài khoản.");
-                            }
-                        }
 
-                        // c) Trang captcha → đóng phiên, xóa hồ sơ, mở lại (tối đa MaxCaptchaResets lần).
-                        if (state == ShopeePageState.Captcha)
-                        {
-                            if (captchaResets < MaxCaptchaResets)
+                            // c) Trang captcha → đóng phiên, xóa hồ sơ, mở lại (tối đa MaxCaptchaResets lần).
+                            if (state == ShopeePageState.Captcha)
                             {
-                                captchaResets++;
-                                _services.Log.Append(_logLabel,
-                                    $"Gặp captcha — đóng phiên, xóa hồ sơ trình duyệt, thử lại (lần {captchaResets}/{MaxCaptchaResets}).");
-                                SetStatus(SessionState.Running, $"Gặp captcha — đổi hồ sơ, mở lại (lần {captchaResets}/{MaxCaptchaResets})...");
-                                relaunchForCaptcha = true;
-                            }
-                            else
-                            {
-                                _services.Log.Append(_logLabel,
-                                    $"Captcha lặp lại sau {MaxCaptchaResets} lần xóa hồ sơ — GIỮ cửa sổ để bạn xử lý tay.");
+                                if (captchaResets < MaxCaptchaResets)
+                                {
+                                    captchaResets++;
+                                    _services.Log.Append(_logLabel,
+                                        $"Gặp captcha — đóng phiên, xóa hồ sơ trình duyệt, thử lại (lần {captchaResets}/{MaxCaptchaResets}).");
+                                    SetStatus(SessionState.Running, $"Gặp captcha — đổi hồ sơ, mở lại (lần {captchaResets}/{MaxCaptchaResets})...");
+                                    relaunchForCaptcha = true;
+                                }
+                                else
+                                {
+                                    _services.Log.Append(_logLabel,
+                                        $"Captcha lặp lại sau {MaxCaptchaResets} lần xóa hồ sơ — GIỮ cửa sổ để bạn xử lý tay.");
+                                }
                             }
                         }
                     }

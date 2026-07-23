@@ -233,4 +233,40 @@ Chạy: `dotnet build` 3 project orders + `dotnet test orders/XuLyDonShopee.Test
 
 ## Báo cáo thực thi (Opus điền sau khi xong)
 
-<chưa có>
+**Trạng thái:** Đã triển khai đủ 5 bước. Build 3 project orders sạch (0 error, 0 warning mới); `dotnet test` xanh 929/929.
+
+### Đã làm
+
+**Bước 1 — `orders/XuLyDonShopee.Core/Services/ShopeeLoginService.cs`:**
+- Thêm hằng `public const string SubaccountUrl = "https://subaccount.shopee.com/";` cạnh `SellerUrl`.
+- `OpenAsync`: đổi `page.GotoAsync(SellerUrl, …)` → `GotoAsync(SubaccountUrl, …)` (giữ nguyên nuốt lỗi điều hướng).
+- Thêm 2 forwarder ở class ngoài: `MatchesMyAccountNav`, `MatchesSellerChannelEntry` (gọi xuống `LoginSession`).
+
+**Bước 2 — interface `ILoginSession`:** thêm `TryEnterSellerViaSubaccountAsync(user, password, verifyEmail, verifyEmailPassword, log, ct)` kèm doc comment (Graceful, không ném trừ hủy; true khi seller là Pages[0]).
+
+**Bước 3 — `LoginSession`:**
+- Selector mới: `SubUserSelectors`, `SubPassSelectors`, `SubSubmitSelectors` (nhiều fallback, không bám text EN cứng, không dò `button[type='submit']`).
+- Regex mới: `MyAccountNavRegex`, `SellerChannelRegex` (chứa cả dạng có dấu + không dấu + en).
+- Matcher `internal static bool MatchesMyAccountNav/MatchesSellerChannelEntry`: chuẩn hóa qua `NormalizeForMatch` rồi khớp regex (trị được NFC/NFD, chữ HOA, space thừa).
+- Method `TryEnterSellerViaSubaccountAsync`: đủ 9 bước — linked CTS cap 20'; dò trạng thái đầu (pass visible = form / nav "Tài khoản của tôi" visible = đã đăng nhập, KHÔNG dùng `ShopeeLoginCookies.IsLoggedIn`); điền form kiểu người + bấm "Đăng nhập" (khớp `SignInRegex`); mở hộp thư cho người dùng tự lấy mã (KHÔNG tự verify, KHÔNG bấm trong mail) + `BringToFrontAsync` về trang Shopee; chờ code poll 3s tối đa 15'; đóng tab mail + click "Tài khoản của tôi" → "Kênh Người bán"; chờ 90s banhang (tab mới HOẶC cùng tab); chuẩn hóa tab (đóng subaccount, retry 3 lần, cảnh báo nếu fail); catch OCE phân biệt hủy người dùng/timeout nội bộ; không log mật khẩu; mọi nhánh trượt log `title=…, url=…`.
+- Helper `OpenMailboxSignedInAsync(email, pass, log, rng, ct)` tách từ BƯỚC 2 của `TryVerifyByEmailAsync`; `TryVerifyByEmailAsync` refactor gọi lại helper (hành vi cũ giữ nguyên: login mail fail → return false, finally đóng tab mail).
+
+**Bước 4 — `orders/XuLyDonShopee.App/Services/AccountSession.cs` (`RunAsync`, khối bước 4):**
+- Cập nhật comment mô tả luồng mới (subaccount → nav → seller → state machine cũ làm lưới an toàn).
+- Gọi `TryEnterSellerViaSubaccountAsync` TRƯỚC (SetStatus "Đang vào Nền tảng tài khoản phụ (subaccount)..."), catch OCE rethrow / catch khác → `entered=false`.
+- `entered=true` → chạy TIẾP toàn bộ state machine cũ (poll detect → LoginForm/Verify/Captcha) — nay soi banhang ở Pages[0].
+- `entered=false` → log "Không tự vào được Kênh Người bán — GIỮ cửa sổ để bạn thao tác tay." và BỎ QUA state machine (bọc trong `if (entered) { … }`). Nhánh `_readyForActions = true` vẫn bật (relaunchForCaptcha=false).
+
+**Bước 5 — `orders/XuLyDonShopee.Tests/SubaccountNavMatchTests.cs` (file mới):** 20 case — `MatchesMyAccountNav` (đúng: "Tài khoản của tôi", space/newline thừa, không dấu, HOA, "My Account"; sai: "Phân bổ chat", "Tài khoản", ""/null); `MatchesSellerChannelEntry` (đúng: "Kênh Người bán", "Kênh Người bán\n", không dấu, HOA, "Seller Centre", "Seller Center"; sai: "Kênh", "Hiệu quả hoạt động CSKH", ""/null).
+
+### Kết quả kiểm chứng
+- `dotnet build` Core / App / Tests: đều `Build succeeded. 0 Warning(s) 0 Error(s)`.
+- `dotnet test XuLyDonShopee.Tests`: `Passed! Failed: 0, Passed: 929, Skipped: 0` (worktree có 929 test; test cũ không đỏ). Riêng filter `SubaccountNavMatchTests`: 20/20 passed.
+
+### Điểm lệch plan (nhỏ, có lý do)
+- **Chọn matcher dùng `NormalizeForMatch`** (một trong hai cách plan cho phép) thay vì khớp regex trực tiếp trên text thô — để trị NFC/NFD + chữ HOA; đã test cả hai dạng có/không dấu như plan yêu cầu.
+- **Bước 7 hứng tab mới:** dùng CẢ hai cơ chế plan liệt kê — event handler `_context.Page` (bắt popup ngay khi mở, kể cả nhanh) VÀ quét `_context.Pages` trong vòng 90s (bắt cả tab SSO trung gian rồi mới ra banhang, và trường hợp điều hướng cùng tab). KHÔNG dùng `_context.WaitForPageAsync` để tránh `TimeoutException` không quan sát khi "Kênh Người bán" điều hướng cùng tab. Vẫn thỏa điều kiện plan: chờ 90s cho tab-mới-banhang HOẶC page-điều-hướng-banhang.
+- **`FindVisibleByTextAsync` (khớp text thô)** dùng đúng theo plan cho nav/entry. Lưu ý rủi ro NFD như plan đã ghi (nếu chạy thật kẹt thì đọc log title/url tinh chỉnh) — regex đã kèm nhánh không dấu để đỡ.
+
+### Chưa kiểm chứng được (ngoài phạm vi test tự động)
+- Selector/DOM thật của trang subaccount + trang nhập code CHƯA soi bằng phiên trình duyệt thật (đúng như plan ghi "DOM trang nhập code chưa soi"). Logic chỉ verify qua unit test hàm thuần + build. Cần chạy thật để chốt selector form/nút/nav/entry.

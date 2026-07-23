@@ -75,6 +75,24 @@ public interface ILoginSession : IAsyncDisposable
         string verifyEmail, string verifyEmailPassword, bool autoConfirm, Action<string>? log = null, CancellationToken ct = default);
 
     /// <summary>
+    /// <b>Vào Seller Centre QUA Nền tảng tài khoản phụ</b> (<see cref="ShopeeLoginService.SubaccountUrl"/>): nếu đang ở
+    /// form đăng nhập subaccount thì tự điền tài khoản (<paramref name="user"/>) + mật khẩu (<paramref name="password"/>)
+    /// kiểu người rồi bấm "Đăng nhập"; khi Shopee đòi mã thì <b>mở hộp thư</b> (<paramref name="verifyEmail"/> /
+    /// <paramref name="verifyEmailPassword"/>) cho người dùng TỰ lấy mã (KHÔNG tự verify, KHÔNG tự bấm gì trong mail),
+    /// đưa cửa sổ về trang Shopee; chờ người dùng nhập code (tối đa 15') tới khi nav "Tài khoản của tôi" hiện; rồi click
+    /// "Tài khoản của tôi" → "Kênh Người bán" để sang Seller Centre, chuẩn hóa tab seller thành <c>Pages[0]</c>.
+    /// <para>
+    /// <b>Graceful — không bao giờ ném (trừ hủy người dùng):</b> mọi thất bại (không thấy ô/nút, hết giờ, lỗi) →
+    /// <c>false</c> (caller GIỮ cửa sổ cho người dùng thao tác tay). Trả <c>true</c> khi đã đứng ở Seller Centre
+    /// (banhang.shopee.vn) và tab seller là <c>Pages[0]</c>. KHÔNG log giá trị mật khẩu; mọi nhánh selector trượt đều
+    /// log <c>title=…, url=…</c>.
+    /// </para>
+    /// </summary>
+    Task<bool> TryEnterSellerViaSubaccountAsync(
+        string user, string password, string? verifyEmail, string? verifyEmailPassword,
+        Action<string>? log = null, CancellationToken ct = default);
+
+    /// <summary>
     /// Đọc số đơn <b>"Chờ Lấy Hàng"</b> trong to-do box của trang bán hàng (Seller Centre).
     /// <para>
     /// <b>Gate:</b> chỉ đọc khi đã đăng nhập (to-do box chỉ có sau đăng nhập) — chưa đăng nhập → trả
@@ -275,6 +293,9 @@ public class ShopeeLoginService
     /// <summary>URL trang bán hàng (Shopee Seller Centre).</summary>
     public const string SellerUrl = "https://banhang.shopee.vn/";
 
+    /// <summary>URL Nền tảng tài khoản phụ — điểm vào đăng nhập mới (từ đây bấm "Kênh Người bán" để sang Seller Centre).</summary>
+    public const string SubaccountUrl = "https://subaccount.shopee.com/";
+
     // ===== Forwarder cho test (luồng verify-email) =====
     // Logic khớp text thực nằm trong nested class LoginSession (nơi giữ các Regex + luồng verify-email). Phơi
     // lại ở cấp class ngoài (internal — InternalsVisibleTo cho XuLyDonShopee.Tests) để unit-test được các hàm
@@ -292,6 +313,12 @@ public class ShopeeLoginService
 
     /// <summary>True nếu text là trang báo link đã hết hạn/hết hiệu lực.</summary>
     internal static bool MatchesConfirmExpired(string? text) => LoginSession.MatchesConfirmExpired(text);
+
+    /// <summary>True nếu text là nav "Tài khoản của tôi" trên Nền tảng tài khoản phụ (tín hiệu ĐÃ đăng nhập).</summary>
+    internal static bool MatchesMyAccountNav(string? text) => LoginSession.MatchesMyAccountNav(text);
+
+    /// <summary>True nếu text là entry "Kênh Người bán" (mở sang Seller Centre) trên Nền tảng tài khoản phụ.</summary>
+    internal static bool MatchesSellerChannelEntry(string? text) => LoginSession.MatchesSellerChannelEntry(text);
 
     /// <summary>
     /// Đảm bảo có sẵn trình duyệt để mở cho <paramref name="browserChoice"/>. Nếu phân giải được một
@@ -448,7 +475,7 @@ public class ShopeeLoginService
 
             try
             {
-                await page.GotoAsync(SellerUrl, new PageGotoOptions
+                await page.GotoAsync(SubaccountUrl, new PageGotoOptions
                 {
                     Timeout = 60000,
                     WaitUntil = WaitUntilState.DOMContentLoaded
@@ -731,6 +758,25 @@ public class ShopeeLoginService
             "button:has-text('ĐĂNG NHẬP')",
         };
 
+        // ===================== Nền tảng tài khoản phụ (subaccount.shopee.com) =====================
+        // Form login subaccount là Vue SPA: input KHÔNG có name → dò trong .login-card trước, rồi placeholder,
+        // rồi type (fallback rộng nhất cuối). Nút "Đăng nhập" là <button type="button"> (KHÔNG phải submit) chứa
+        // <span>Đăng nhập</span> → tuyệt đối không dò button[type='submit']; khớp text bằng SignInRegex có sẵn.
+        private static readonly string[] SubUserSelectors =
+            { ".login-card input[type='text']", "input[placeholder*='Tên đăng nhập']", "input[placeholder*='SĐT']", "input[type='text']" };
+        private static readonly string[] SubPassSelectors =
+            { ".login-card input[type='password']", "input[type='password']" };
+        private static readonly string[] SubSubmitSelectors =
+            { ".login-card button.shopee-button--primary", "button.shopee-button--primary", "button", "[role='button']" };
+
+        // Nav trái "Tài khoản của tôi" (tín hiệu ĐÃ đăng nhập) + entry "Kênh Người bán" (mở Seller Centre). Mỗi regex
+        // chứa CẢ dạng có dấu (khớp InnerText thô NFC qua FindVisibleByTextAsync) LẪN dạng không dấu (khớp text đã qua
+        // NormalizeForMatch trong matcher/test, và trang render ascii). KHÔNG bám text EN cứng — có nhánh vi + en.
+        private static readonly Regex MyAccountNavRegex =
+            new(@"tài khoản của tôi|tai khoan cua toi|my account", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        private static readonly Regex SellerChannelRegex =
+            new(@"kênh người bán|kenh nguoi ban|seller\s*cent(re|er)|seller\s*channel", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
         public async Task<bool> TryHumanLoginAsync(string user, string password, CancellationToken ct = default)
         {
             try
@@ -922,6 +968,18 @@ public class ShopeeLoginService
         internal static bool MatchesConfirmExpired(string? text)
             => !string.IsNullOrEmpty(text) && ConfirmExpiredRegex.IsMatch(text);
 
+        /// <summary>True nếu <paramref name="text"/> là nav "Tài khoản của tôi" trên Nền tảng tài khoản phụ: CHUẨN HÓA
+        /// không dấu (<see cref="NormalizeForMatch"/> — trị cả NFC/NFD, chữ HOA) rồi khớp <see cref="MyAccountNavRegex"/>.
+        /// KHÔNG khớp "Phân bổ chat" / "Tài khoản" đơn lẻ. Phơi ra để test.</summary>
+        internal static bool MatchesMyAccountNav(string? text)
+            => MyAccountNavRegex.IsMatch(NormalizeForMatch(text));
+
+        /// <summary>True nếu <paramref name="text"/> là entry "Kênh Người bán"/"Seller Centre": CHUẨN HÓA không dấu
+        /// (<see cref="NormalizeForMatch"/>) rồi khớp <see cref="SellerChannelRegex"/>. KHÔNG khớp "Kênh" đơn lẻ.
+        /// Phơi ra để test.</summary>
+        internal static bool MatchesSellerChannelEntry(string? text)
+            => SellerChannelRegex.IsMatch(NormalizeForMatch(text));
+
         public async Task<ShopeePageState> DetectPageStateAsync(CancellationToken ct = default)
         {
             try
@@ -971,6 +1029,293 @@ public class ShopeeLoginService
                 // Không bao giờ ném (kể cả hủy) — trả Unknown, caller đọc ct riêng để dừng.
                 return ShopeePageState.Unknown;
             }
+        }
+
+        public async Task<bool> TryEnterSellerViaSubaccountAsync(
+            string user, string password, string? verifyEmail, string? verifyEmailPassword,
+            Action<string>? log = null, CancellationToken ct = default)
+        {
+            void L(string m) => log?.Invoke(m);
+
+            // URL của một trang có phải Seller Centre (banhang.shopee.vn) không.
+            static bool UrlIsBanhang(string? u) =>
+                !string.IsNullOrEmpty(u) && u.Contains("banhang.shopee.vn", StringComparison.OrdinalIgnoreCase);
+
+            async Task<string> DiagAsync(IPage p)
+            {
+                try { return $"title=[{await p.TitleAsync().ConfigureAwait(false)}], url={p.Url}"; }
+                catch { return $"url={p.Url}"; }
+            }
+
+            var page = _context.Pages.Count > 0 ? _context.Pages[0] : null;
+            if (page is null)
+            {
+                return false;
+            }
+
+            // Cap NỘI BỘ 20': chờ NGƯỜI dùng gõ code là phần lâu nhất. Timeout nội bộ ≠ HỦY của người dùng —
+            // phân biệt ở khối catch dưới.
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeoutCts.CancelAfter(TimeSpan.FromMinutes(20));
+            var sct = timeoutCts.Token;
+
+            // Selector nhóm cho nav "Tài khoản của tôi" (tín hiệu đã đăng nhập) — dùng lại ở nhiều bước.
+            var accountNavSelectors = new[] { "li", "a", "div", "span", "[role='menuitem']" };
+
+            var rng = new Random();
+            IPage? mailPage = null;
+            try
+            {
+                var vp = page.ViewportSize;
+                double mx = vp is not null ? vp.Width / 2.0 : 640;
+                double my = vp is not null ? vp.Height / 2.0 : 360;
+
+                // ── Bước 2: dò trạng thái đầu (SPA còn render) — poll tối đa ~15s. KHÔNG dùng
+                //    ShopeeLoginCookies.IsLoggedIn (cookie SPC_* của shopee.vn KHÔNG nói gì về phiên subaccount).
+                bool onLoginForm = false;
+                bool loggedIn = false;
+                var detectDeadline = DateTime.UtcNow.AddSeconds(15);
+                while (DateTime.UtcNow < detectDeadline)
+                {
+                    sct.ThrowIfCancellationRequested();
+
+                    // "Đang ở form login" = ô mật khẩu subaccount HIỂN THỊ (getClientRects).
+                    if (await IsAnyVisibleByClientRectsAsync(page, SubPassSelectors, sct).ConfigureAwait(false))
+                    {
+                        onLoginForm = true;
+                        break;
+                    }
+
+                    // "Đã đăng nhập" = phần tử khớp nav "Tài khoản của tôi" HIỂN THỊ.
+                    if (await FindVisibleByTextAsync(page, accountNavSelectors, MyAccountNavRegex, sct, 1000).ConfigureAwait(false) is not null)
+                    {
+                        loggedIn = true;
+                        break;
+                    }
+
+                    await Task.Delay(500, sct).ConfigureAwait(false);
+                }
+
+                if (!onLoginForm && !loggedIn)
+                {
+                    L("Chưa rõ trạng thái trang subaccount sau 15s — thử tiếp nhánh 'đã đăng nhập'. " + await DiagAsync(page).ConfigureAwait(false));
+                }
+
+                // ── Bước 3: ở form login → tự điền tài khoản + mật khẩu rồi bấm "Đăng nhập".
+                if (onLoginForm)
+                {
+                    if (string.IsNullOrEmpty(password))
+                    {
+                        L("Tài khoản chưa có mật khẩu — đăng nhập tay.");
+                        return false;
+                    }
+
+                    L("Đang điền form đăng nhập Nền tảng tài khoản phụ...");
+                    // Re-query handle TƯƠI ngay trước khi điền (Vue re-render — không giữ handle qua các bước chờ).
+                    var userInput = await FindFirstVisibleByRectsAsync(page, SubUserSelectors, 8000, sct).ConfigureAwait(false);
+                    var passInput = await FindFirstVisibleByRectsAsync(page, SubPassSelectors, 4000, sct).ConfigureAwait(false);
+                    if (userInput is null || passInput is null)
+                    {
+                        L("Không thấy ô đăng nhập subaccount — đăng nhập tay. " + await DiagAsync(page).ConfigureAwait(false));
+                        return false;
+                    }
+
+                    (mx, my) = await HumanFillAsync(page, userInput, user, mx, my, rng, sct).ConfigureAwait(false);
+                    (mx, my) = await HumanFillAsync(page, passInput, password, mx, my, rng, sct).ConfigureAwait(false);
+
+                    // Nút "Đăng nhập" là <button type="button"> chứa <span>Đăng nhập</span> — khớp text bằng SignInRegex.
+                    var submit = await FindVisibleByTextAsync(page, SubSubmitSelectors, SignInRegex, sct, 5000).ConfigureAwait(false);
+                    if (submit is null)
+                    {
+                        L("Không thấy nút 'Đăng nhập' subaccount — đăng nhập tay. " + await DiagAsync(page).ConfigureAwait(false));
+                        return false;
+                    }
+                    (mx, my, _) = await TryHumanClickVisibleAsync(page, submit, mx, my, rng, sct).ConfigureAwait(false);
+                    L("Đã bấm Đăng nhập — chờ Shopee đòi mã xác thực...");
+
+                    // ── Bước 4: mở hộp thư cho NGƯỜI DÙNG tự lấy mã (KHÔNG tự verify, KHÔNG tự bấm gì trong mail).
+                    if (!string.IsNullOrWhiteSpace(verifyEmail) && !string.IsNullOrWhiteSpace(verifyEmailPassword))
+                    {
+                        try
+                        {
+                            bool mailLoggedIn;
+                            (mailPage, mailLoggedIn) = await OpenMailboxSignedInAsync(verifyEmail!, verifyEmailPassword!, log, rng, sct).ConfigureAwait(false);
+                            L(mailLoggedIn
+                                ? "Đã mở hộp thư ở tab bên — lấy mã rồi nhập vào trang Shopee."
+                                : "Chưa đăng nhập được hộp thư tự động — GIỮ tab mail mở để bạn tự đăng nhập, lấy mã rồi nhập vào trang Shopee.");
+                        }
+                        catch (OperationCanceledException) { throw; }
+                        catch (Exception ex)
+                        {
+                            L("Lỗi khi mở hộp thư: " + ex.Message + " — bạn tự lấy mã và nhập vào trang Shopee.");
+                        }
+
+                        // Đưa cửa sổ về trang Shopee cho người dùng gõ code (best-effort).
+                        try { await page.BringToFrontAsync().ConfigureAwait(false); } catch { /* bỏ qua */ }
+                    }
+                    else
+                    {
+                        L("Chưa cấu hình Email xác minh — bạn tự lấy mã và nhập vào trang Shopee.");
+                    }
+                }
+
+                // ── Bước 5: chờ NGƯỜI DÙNG nhập code — poll mỗi 3s, tối đa 15'. Thoát khi nav "Tài khoản của tôi"
+                //    HIỂN THỊ (đã về trang tài khoản). KHÔNG tự bấm gì trong mail, KHÔNG reload (kẻo xóa ô code).
+                bool reached = loggedIn; // đã đăng nhập sẵn từ đầu (hồ sơ bền) → khỏi chờ
+                if (!reached)
+                {
+                    L("Chờ đăng nhập xong (bạn nhập mã nếu Shopee yêu cầu)...");
+                    var waitDeadline = DateTime.UtcNow.AddMinutes(15);
+                    while (DateTime.UtcNow < waitDeadline)
+                    {
+                        sct.ThrowIfCancellationRequested();
+                        if (await FindVisibleByTextAsync(page, accountNavSelectors, MyAccountNavRegex, sct, 1000).ConfigureAwait(false) is not null)
+                        {
+                            reached = true;
+                            break;
+                        }
+                        await Task.Delay(3000, sct).ConfigureAwait(false);
+                    }
+                }
+
+                if (!reached)
+                {
+                    L("Chờ 15' chưa thấy đăng nhập vào Nền tảng tài khoản phụ — GIỮ cửa sổ để bạn thao tác tay. " + await DiagAsync(page).ConfigureAwait(false));
+                    return false;
+                }
+
+                // ── Bước 6: đóng tab mail (best-effort, chỉ tab mình mở) rồi click "Tài khoản của tôi".
+                if (mailPage is not null)
+                {
+                    try { await mailPage.CloseAsync().ConfigureAwait(false); } catch { /* bỏ qua */ }
+                    mailPage = null;
+                }
+
+                var myAccountNav = await FindVisibleByTextAsync(page, accountNavSelectors, MyAccountNavRegex, sct, 10000).ConfigureAwait(false);
+                if (myAccountNav is null)
+                {
+                    L("Không thấy 'Tài khoản của tôi' — GIỮ cửa sổ để bạn thao tác tay. " + await DiagAsync(page).ConfigureAwait(false));
+                    return false;
+                }
+                (mx, my, _) = await TryHumanClickVisibleAsync(page, myAccountNav, mx, my, rng, sct).ConfigureAwait(false);
+                await Task.Delay(rng.Next(1500, 3001), sct).ConfigureAwait(false);
+
+                // ── Bước 7: click "Kênh Người bán" → chờ Seller Centre (tab MỚI HOẶC cùng tab). Hứng tab mới bằng
+                //    event _context.Page TRƯỚC khi click (không bỏ lỡ popup nhanh); song song vẫn quét _context.Pages.
+                var sellerEntry = await FindVisibleByTextAsync(
+                    page, new[] { "span.entry-text", ".entry", "span", "div", "[role='button']", "a" },
+                    SellerChannelRegex, sct, 10000).ConfigureAwait(false);
+                if (sellerEntry is null)
+                {
+                    L("Không thấy entry 'Kênh Người bán' — GIỮ cửa sổ để bạn thao tác tay. " + await DiagAsync(page).ConfigureAwait(false));
+                    return false;
+                }
+
+                IPage? popped = null;
+                void OnNewPage(object? _, IPage p) => popped ??= p;
+                _context.Page += OnNewPage;
+
+                IPage sellerPage = page;
+                bool sellerInNewTab = false;
+                try
+                {
+                    (mx, my, _) = await TryHumanClickVisibleAsync(page, sellerEntry, mx, my, rng, sct).ConfigureAwait(false);
+                    L("Đã bấm 'Kênh Người bán' — chờ Seller Centre mở...");
+
+                    var sellerDeadline = DateTime.UtcNow.AddSeconds(90);
+                    while (DateTime.UtcNow < sellerDeadline)
+                    {
+                        sct.ThrowIfCancellationRequested();
+
+                        // (a) chính page điều hướng sang banhang (cùng tab).
+                        if (UrlIsBanhang(page.Url))
+                        {
+                            sellerPage = page;
+                            sellerInNewTab = false;
+                            break;
+                        }
+
+                        // (b) tab mới (bắt qua event hoặc quét Pages) đã có URL banhang.
+                        var candidate = (popped is not null && UrlIsBanhang(popped.Url))
+                            ? popped
+                            : _context.Pages.FirstOrDefault(p => p != page && UrlIsBanhang(p.Url));
+                        if (candidate is not null)
+                        {
+                            sellerPage = candidate;
+                            sellerInNewTab = true;
+                            break;
+                        }
+
+                        await Task.Delay(500, sct).ConfigureAwait(false);
+                    }
+                }
+                finally
+                {
+                    _context.Page -= OnNewPage;
+                }
+
+                if (!UrlIsBanhang(sellerPage.Url))
+                {
+                    var tabs = new List<string>();
+                    foreach (var p in _context.Pages)
+                    {
+                        tabs.Add(await DiagAsync(p).ConfigureAwait(false));
+                    }
+                    L("Bấm 'Kênh Người bán' xong chờ 90s chưa thấy Seller Centre — GIỮ cửa sổ để bạn thao tác tay. Các tab: " + string.Join(" ; ", tabs));
+                    return false;
+                }
+
+                // Tab seller mới mở → chờ DOMContentLoaded best-effort (đừng để bước sau đọc trang trắng).
+                if (sellerInNewTab)
+                {
+                    try
+                    {
+                        await sellerPage.WaitForLoadStateAsync(LoadState.DOMContentLoaded,
+                            new PageWaitForLoadStateOptions { Timeout = 15000 }).ConfigureAwait(false);
+                    }
+                    catch { /* bỏ qua — trang vẫn dùng được, bước sau tự poll */ }
+                }
+
+                // ── Bước 8: chuẩn hóa tab — nếu seller là TAB MỚI → đóng tab subaccount để seller thành Pages[0].
+                if (sellerInNewTab)
+                {
+                    for (int attempt = 0; attempt < 3 && !page.IsClosed; attempt++)
+                    {
+                        try { await page.CloseAsync().ConfigureAwait(false); } catch { /* bỏ qua — thử lại */ }
+                        if (page.IsClosed) break;
+                        await Task.Delay(400, sct).ConfigureAwait(false);
+                    }
+
+                    if (!page.IsClosed)
+                    {
+                        L("Cảnh báo: tab subaccount chưa đóng được — theo dõi đơn có thể đọc nhầm tab (Pages[0] không phải Seller Centre).");
+                    }
+                    else if (_context.Pages.Count == 0 || _context.Pages[0] != sellerPage)
+                    {
+                        L("Cảnh báo: sau khi đóng subaccount, Seller Centre chưa ở Pages[0] — theo dõi đơn có thể đọc nhầm tab.");
+                    }
+                }
+
+                L("Đã vào Kênh Người bán.");
+                return true;
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                // Timeout NỘI BỘ (cap 20') — KHÔNG phải người dùng Dừng → degrade êm, KHÔNG ném.
+                L("Vào Nền tảng tài khoản phụ quá thời gian — GIỮ cửa sổ để bạn thao tác tay.");
+                return false;
+            }
+            catch (OperationCanceledException)
+            {
+                throw; // người dùng Dừng / thoát app → để caller xử như HỦY.
+            }
+            catch (Exception ex)
+            {
+                L("Lỗi khi vào Kênh Người bán qua subaccount: " + ex.Message + " — GIỮ cửa sổ để bạn thao tác tay.");
+                return false;
+            }
+            // KHÔNG đóng tab seller/subaccount ở finally — việc đóng tab subaccount làm CÓ CHỦ ĐÍCH ở bước 8; tab mail
+            // đóng ở bước 6 (đường thành công) hoặc GIỮ mở ở đường lỗi cho người dùng tự lấy mã.
         }
 
         public async Task<bool> TryVerifyByEmailAsync(
@@ -1024,37 +1369,15 @@ public class ShopeeLoginService
                 // Chờ trang đổi (thường sang màn "đã gửi link xác minh, kiểm tra email").
                 await Task.Delay(rng.Next(2000, 5000), vct).ConfigureAwait(false);
 
-                // BƯỚC 2: mở tab mới vào THẲNG trang đăng nhập Microsoft rồi đăng nhập.
-                mailPage = await _context.NewPageAsync().ConfigureAwait(false);
-                L("Mở trang đăng nhập Microsoft để lấy mail xác minh...");
-                try
-                {
-                    await mailPage.GotoAsync("https://login.microsoftonline.com/", new PageGotoOptions
-                    {
-                        WaitUntil = WaitUntilState.DOMContentLoaded,
-                        Timeout = 60000
-                    }).ConfigureAwait(false);
-                }
-                catch { /* nuốt lỗi điều hướng — các bước dưới poll selector tự lo */ }
-
-                if (!await LoginHotmailAsync(mailPage, verifyEmail, verifyEmailPassword, log, rng, vct).ConfigureAwait(false))
+                // BƯỚC 2: mở tab mới đăng nhập hộp thư Hotmail/Outlook rồi vào hộp thư (helper dùng chung với luồng
+                //    subaccount). Login lỗi → bỏ qua verify như cũ (finally đóng tab mail vì keepMailOpenForManual=false).
+                bool mailLoggedIn;
+                (mailPage, mailLoggedIn) = await OpenMailboxSignedInAsync(verifyEmail, verifyEmailPassword, log, rng, vct).ConfigureAwait(false);
+                if (!mailLoggedIn)
                 {
                     L("Không đăng nhập được hộp thư Hotmail/Outlook — bỏ qua verify.");
                     return false;
                 }
-
-                // Đăng nhập ở trang login xong → điều hướng vào HỘP THƯ Outlook để đọc mail (login.microsoftonline.com
-                // hạ cánh ở portal, không phải hộp thư). Nếu session đã có sẵn thì vào thẳng.
-                L("Vào hộp thư Outlook...");
-                try
-                {
-                    await mailPage.GotoAsync("https://outlook.live.com/mail/0/", new PageGotoOptions
-                    {
-                        WaitUntil = WaitUntilState.DOMContentLoaded,
-                        Timeout = 60000
-                    }).ConfigureAwait(false);
-                }
-                catch { /* nuốt lỗi điều hướng — bước dưới poll selector tự lo */ }
 
                 // Cờ "Tự động xác nhận" (checkbox ribbon → autoConfirm): TẮT ⇒ đăng nhập email XONG thì DỪNG, GIỮ
                 // hộp thư Outlook mở để user TỰ bấm link "TẠI ĐÂY". BẬT ⇒ chạy tiếp đoạn tự-xác-minh bên dưới
@@ -1066,8 +1389,9 @@ public class ShopeeLoginService
                     return false;
                 }
 
-                // BƯỚC 3+4: tìm mail Shopee mới nhất + mở + click link xác nhận.
-                if (!await OpenShopeeMailAndConfirmAsync(mailPage, page, log, rng, vct).ConfigureAwait(false))
+                // BƯỚC 3+4: tìm mail Shopee mới nhất + mở + click link xác nhận. (mailPage chắc chắn non-null vì
+                //           mailLoggedIn=true ⇒ OpenMailboxSignedInAsync đã tạo tab qua NewPageAsync.)
+                if (!await OpenShopeeMailAndConfirmAsync(mailPage!, page, log, rng, vct).ConfigureAwait(false))
                 {
                     L("Không tìm/không mở được mail xác minh Shopee — bỏ qua.");
                     return false;
@@ -1139,6 +1463,51 @@ public class ShopeeLoginService
                 }
                 catch { /* context ngắt — bỏ qua */ }
             }
+        }
+
+        /// <summary>
+        /// Mở TAB MỚI rồi ĐĂNG NHẬP hộp thư Hotmail/Outlook: <c>NewPage</c> → Goto trang đăng nhập Microsoft (nuốt lỗi
+        /// điều hướng) → <see cref="LoginHotmailAsync"/>; đăng nhập được thì Goto vào hộp thư Outlook (nuốt lỗi). Trả về
+        /// tab mail ĐÃ mở (kể cả khi login thất bại — caller quyết đóng hay giữ) và cờ <c>LoggedIn</c>. Best-effort —
+        /// KHÔNG ném (trừ hủy). KHÔNG log giá trị mật khẩu. Dùng chung cho luồng verify (tự bấm link) và luồng
+        /// subaccount (chỉ mở cho người dùng tự lấy mã).
+        /// </summary>
+        private async Task<(IPage? MailPage, bool LoggedIn)> OpenMailboxSignedInAsync(
+            string email, string password, Action<string>? log, Random rng, CancellationToken ct)
+        {
+            void L(string m) => log?.Invoke(m);
+
+            var mailPage = await _context.NewPageAsync().ConfigureAwait(false);
+            L("Mở trang đăng nhập Microsoft để lấy mail...");
+            try
+            {
+                await mailPage.GotoAsync("https://login.microsoftonline.com/", new PageGotoOptions
+                {
+                    WaitUntil = WaitUntilState.DOMContentLoaded,
+                    Timeout = 60000
+                }).ConfigureAwait(false);
+            }
+            catch { /* nuốt lỗi điều hướng — các bước dưới poll selector tự lo */ }
+
+            if (!await LoginHotmailAsync(mailPage, email, password, log, rng, ct).ConfigureAwait(false))
+            {
+                return (mailPage, false);
+            }
+
+            // Đăng nhập ở trang login xong → điều hướng vào HỘP THƯ Outlook để đọc mail (login.microsoftonline.com
+            // hạ cánh ở portal, không phải hộp thư). Nếu session đã có sẵn thì vào thẳng.
+            L("Vào hộp thư Outlook...");
+            try
+            {
+                await mailPage.GotoAsync("https://outlook.live.com/mail/0/", new PageGotoOptions
+                {
+                    WaitUntil = WaitUntilState.DOMContentLoaded,
+                    Timeout = 60000
+                }).ConfigureAwait(false);
+            }
+            catch { /* nuốt lỗi điều hướng — bước dưới poll selector tự lo */ }
+
+            return (mailPage, true);
         }
 
         /// <summary>
