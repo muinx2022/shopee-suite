@@ -222,44 +222,6 @@ public partial class AccountSession : ObservableObject, IAccountSession
     }
 
     /// <summary>
-    /// Đọc trạng thái trang hiện tại (read-only) của phiên đang chạy — dùng cuối lượt autorun để phát hiện
-    /// "TK chưa xác nhận". Chụp phiên + token; phiên null / chưa Running / đang <see cref="_navigating"/> → trả
-    /// null (không kết luận khi đang giữa thao tác). KHÔNG bật <see cref="_navigating"/> (DetectPageStateAsync
-    /// chỉ evaluate JS đọc, không đụng chuột nên không phá thao tác nào). Mọi lỗi → null (best-effort).
-    /// </summary>
-    public async Task<ShopeePageState?> ProbePageStateAsync()
-    {
-        var s = _session;
-        CancellationToken tok;
-        try
-        {
-            lock (_lifecycleLock)
-            {
-                tok = _cts?.Token ?? default;
-            }
-        }
-        catch (ObjectDisposedException)
-        {
-            return null;
-        }
-
-        // Đang navigating (đọc đơn / xử lý đơn / kiểm proxy) → không kết luận (trang đang chuyển giữa chừng).
-        if (s is null || State != SessionState.Running || _navigating)
-        {
-            return null;
-        }
-
-        try
-        {
-            return await s.DetectPageStateAsync(tok).ConfigureAwait(false);
-        }
-        catch
-        {
-            return null; // DetectPageStateAsync vốn không ném, nhưng phòng hờ vẫn nuốt.
-        }
-    }
-
-    /// <summary>
     /// Gỡ cờ "TK chưa xác nhận" cho tài khoản này khi phiên vừa đăng nhập được (đọc số "Chờ Lấy Hàng" lần
     /// đầu). Chỉ log + phát <see cref="AppServices.RaiseAccountsChanged"/> khi THỰC SỰ có cờ được gỡ
     /// (<see cref="AccountRepository.ClearVerifyFailed"/> trả &gt;0) để không làm mới UI thừa mỗi lần mở phiên.
@@ -284,7 +246,7 @@ public partial class AccountSession : ObservableObject, IAccountSession
     /// (KHÔNG vào Cài đặt vận chuyển, không đặt/đặt-lại địa chỉ), đặt <c>ToShipCount=0</c> + StatusText/log
     /// "Không có đơn Chờ lấy hàng — bỏ qua xử lý" và trả <c>true</c> ("xong-không-có-việc", KHÔNG phải lỗi).
     /// ĐỌC KHÔNG được (null: chưa đăng nhập / lỗi) → KHÔNG skip, làm tiếp như cũ (tránh bỏ sót đơn thật).
-    /// Cửa skip này áp cho CẢ nút "Xử lý đơn" thủ công LẪN "Chạy tự động" (AutoRunService gọi cùng hàm này).
+    /// Cửa skip này áp cho nút "Xử lý đơn" (thủ công) LẪN vòng lặp shop (đều gọi cùng hàm này).
     /// <para>
     /// Khi CÓ đơn (skip không kích hoạt): điều hướng KIỂU NGƯỜI tới "Cài Đặt Vận Chuyển" → tab "Địa Chỉ"
     /// (bước 1), rồi <b>đặt địa chỉ lấy hàng</b> theo tỉnh mặc định của tài khoản
@@ -950,16 +912,15 @@ public partial class AccountSession : ObservableObject, IAccountSession
     }
 
     /// <summary>
-    /// Sync TRỌN GÓI (nút Sync mới của màn Tài khoản): kiểm tra đơn mới → nếu có thì xử lý đơn →
-    /// sync đơn hàng. Caller (VM) đã lo mở phiên + chờ sẵn sàng qua RunOrAutoStartAsync. Mỗi bước con tự
-    /// quản <see cref="_navigating"/>; bước Kiểm tra bận/fail → dừng chuỗi; riêng Xử lý đơn lỗi giữa chừng
-    /// vẫn đi tiếp bước sync (log rõ), KHÔNG ném.
+    /// Sync TRỌN GÓI (một bước của vòng lặp shop — <c>ChayFlowMotShopAsync</c>): kiểm tra đơn mới → nếu có thì
+    /// xử lý đơn → sync đơn hàng. Vòng lặp shop (RunAsync) đã lo mở phiên + đăng nhập trước khi gọi. Mỗi bước
+    /// con tự quản <see cref="_navigating"/>; bước Kiểm tra bận/fail → dừng chuỗi; riêng Xử lý đơn lỗi giữa
+    /// chừng vẫn đi tiếp bước sync (log rõ), KHÔNG ném.
     /// <para>
     /// Thứ tự: <b>Kiểm tra → (nếu ToShipCount &gt; 0) Xử lý đơn → Sync</b>. Xử lý đơn LỖI giữa chừng KHÔNG
     /// chặn việc sync (vẫn lưu đơn về máy). Ghép từ 3 method rời có sẵn
-    /// (<see cref="CheckOrdersAsync"/>/<see cref="ProcessOrdersAsync"/>/<see cref="SyncOrdersAsync"/>) —
-    /// KHÔNG tái dùng pipeline AutoRun vì AutoRun đi theo thứ tự Process→Sync→Check và có chính sách vòng
-    /// đời phiên riêng (bỏ qua phiên người dùng tự mở, tự đóng phiên sau lô).
+    /// (<see cref="CheckOrdersAsync"/>/<see cref="ProcessOrdersAsync"/>/<see cref="SyncOrdersAsync"/>) theo đúng
+    /// thứ tự Kiểm tra → Xử lý → Sync.
     /// </para>
     /// </summary>
     public async Task<bool> SyncFullAsync()

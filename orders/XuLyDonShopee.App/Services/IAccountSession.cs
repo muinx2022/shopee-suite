@@ -67,15 +67,6 @@ public interface IAccountSession
     /// <summary>Phát khi vừa lưu cookie vào DB cho tài khoản (id) — VM nghe để làm mới danh sách trên UI thread.</summary>
     event Action<long>? CookieSaved;
 
-    /// <summary>
-    /// <b>Đọc trạng thái trang hiện tại (read-only)</b> của phiên ĐANG chạy qua
-    /// <see cref="ILoginSession.DetectPageStateAsync"/> — chỉ evaluate JS đọc, KHÔNG chuột/điều hướng. Dùng
-    /// cuối lượt autorun để phát hiện "TK chưa xác nhận" (phiên còn kẹt ở Verify/LoginForm/Captcha) TRƯỚC khi
-    /// đóng phiên. Graceful: phiên null / chưa Running / lỗi → <c>null</c>. KHÔNG chiếm cờ <c>_navigating</c>
-    /// (chỉ đọc), nhưng nếu đang navigating thì trả <c>null</c> (đang giữa thao tác — không kết luận).
-    /// </summary>
-    Task<ShopeePageState?> ProbePageStateAsync();
-
     /// <summary>Bắt đầu phiên. Nếu đang chuẩn bị/đang chạy thì bỏ qua (idempotent — không mở trùng).</summary>
     Task StartAsync();
 

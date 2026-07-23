@@ -14,17 +14,16 @@ namespace Shopee.Suite.Infrastructure;
 /// <summary>
 /// Glue tĩnh cắm module "Xử lý đơn Shopee" (app đơn hàng đã module hóa — phase 1b) vào shell suite.
 /// <see cref="TryCreate"/> mở SQLite + migration của app đơn hàng và dựng <see cref="MainViewModel"/>;
-/// <see cref="StopAsync"/> dừng vòng chạy tự động rồi kill hết phiên Brave khi thoát app.
+/// <see cref="StopAsync"/> kill hết phiên Brave khi thoát app.
 /// Giữ tối thiểu để nếu init hỏng thì suite vẫn chạy (chỉ thiếu module đơn hàng).
 /// </summary>
 public static class OrdersModuleHost
 {
-    /// <summary>Bộ dịch vụ của app đơn hàng (DB + repository + phiên + scheduler). null nếu chưa/không khởi tạo được.</summary>
+    /// <summary>Bộ dịch vụ của app đơn hàng (DB + repository + phiên). null nếu chưa/không khởi tạo được.</summary>
     public static AppServices? Services { get; private set; }
 
-    // Chống dừng đúp: ShutdownRequested và UpdateService.PrepareShutdownAsync đều gọi StopAsync. Hai lệnh
-    // dừng bên dưới vốn idempotent (AutoRun.StopAsync no-op khi chưa chạy; StopAllAsync thao tác list rỗng),
-    // cờ này chỉ để khỏi lặp công vô ích.
+    // Chống dừng đúp: ShutdownRequested và UpdateService.PrepareShutdownAsync đều gọi StopAsync. Lệnh dừng
+    // bên dưới vốn idempotent (StopAllAsync thao tác list rỗng), cờ này chỉ để khỏi lặp công vô ích.
     private static bool _stopped;
 
     /// <summary>
@@ -232,15 +231,14 @@ public static class OrdersModuleHost
     };
 
     /// <summary>
-    /// Thoát app: dừng vòng "Chạy tự động" TRƯỚC (không mở thêm phiên mới) rồi dừng TẤT CẢ phiên (kill hết Brave,
-    /// tránh tiến trình mồ côi giữ khóa hồ sơ) — đúng thứ tự như app gốc. No-op khi module không khởi tạo được.
+    /// Thoát app: dừng TẤT CẢ phiên (kill hết Brave, tránh tiến trình mồ côi giữ khóa hồ sơ). No-op khi module
+    /// không khởi tạo được.
     /// </summary>
     public static async Task StopAsync()
     {
         var svc = Services;
         if (svc is null || _stopped) return;
         _stopped = true;
-        try { await svc.AutoRun.StopAsync(); } catch { /* bỏ qua khi thoát */ }
         try { await svc.Sessions.StopAllAsync(); } catch { /* bỏ qua khi thoát */ }
     }
 }

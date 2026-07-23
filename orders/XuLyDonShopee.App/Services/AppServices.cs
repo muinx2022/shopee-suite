@@ -65,10 +65,6 @@ public class AppServices
     /// App shutdown gọi <see cref="AccountSessionManager.StopAllAsync"/> để kill hết Brave.</summary>
     public AccountSessionManager Sessions { get; }
 
-    /// <summary>Bộ "Chạy tự động theo lô" (vòng chạy nền lặp liên tục). App shutdown gọi
-    /// <see cref="AutoRunService.StopAsync"/> để dừng vòng trước khi kill các phiên.</summary>
-    public AutoRunService AutoRun { get; }
-
     /// <summary>
     /// Phát khi kho đơn (bảng <c>orders</c>) vừa được ghi thêm/cập nhật — phiên sync gọi
     /// <see cref="RaiseOrdersChanged"/> ngay sau <c>OrdersRepository.UpsertMany</c> để màn "Đơn hàng" đang mở
@@ -111,7 +107,5 @@ public class AppServices
         Log = new ActivityLog(logDir);
         // Tạo sau các repository vì factory phiên đọc Accounts/Proxies/Settings khi chạy.
         Sessions = new AccountSessionManager(this);
-        // Scheduler đọc Accounts/Settings/Sessions/Log khi chạy → tạo sau các dịch vụ trên.
-        AutoRun = new AutoRunService(this);
     }
 }

@@ -1,7 +1,7 @@
 # Plan: Đổi nút "Sync" → "Chạy" + XÓA hẳn màn "Chạy tự động"
 
 - **Ngày:** 2026-07-23
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành (911 test xanh; suite build sạch)
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-executor`)
 - **Nhánh:** `feature/dang-nhap-subaccount` (worktree `d:\Projects\shopee-suite-wt-subaccount`)
 
@@ -132,4 +132,54 @@ lặp qua các shop** (RunAsync tự chạy vòng lặp shop). Nên:
 
 ## Báo cáo thực thi (Opus điền sau khi xong)
 
-<chưa có>
+**Trạng thái: HOÀN THÀNH** (2026-07-23). Build 0/0, test 911 pass / 0 fail / 0 skip (= 954 baseline − 43 test AutoRun đã xóa).
+
+### Bước 1 — Xóa AutoRun
+- Đã xóa 11 file: `AutoRunService.cs`, `AutoRunBatcher.cs`, `AutoRunPlan.cs`, `AutoRunViewModel.cs`,
+  `AutoRunView.axaml` + `.axaml.cs`, `Core/Models/AutoRunSettings.cs`, và 4 test
+  (`AutoRunBatcherTests`, `AutoRunPlanTests`, `AutoRunSettingsTests`, `AutoRunUnverifiedTests`).
+- `MainViewModel.cs`: gỡ field/property/khởi tạo AutoRunVm + NavItem "Chạy tự động"; dồn index nav
+  (case 3 Proxy → case 2); còn 3 mục Tài khoản=0 / Đơn hàng=1 / Proxy=2.
+- `AppServices.cs`: gỡ property `AutoRun` + khởi tạo `AutoRunService`.
+- `ShellViewModel.cs`: gỡ `oAuto`; đổi index `oProxy` 3→2 (khớp MainViewModel); nhóm "Màn hình" còn
+  `{ oAccounts, oOrders, oProxy }`; sửa comment shutdown + gate nhóm.
+- Dead-code probe: gỡ `ProbePageStateAsync` khỏi `IAccountSession.cs` + impl trong `AccountSession.cs`;
+  bỏ stub `ProbePageStateAsync` ở 2 test (`AccountRowViewModelTests`, `AccountSessionManagerTests`).
+- GIỮ `TryClearVerifyFailedAfterLogin`, `MarkVerifyFailed`/`ClearVerifyFailed`/`verify_failed_at` + badge UI.
+- **Ngoài danh sách plan (bắt buộc để build):** `OrdersModuleHost.StopAsync()` gọi `svc.AutoRun.StopAsync()`
+  → đã gỡ + dọn comment; `SettingsRepository.cs` có `GetAutoRunSettings`/`SetAutoRunSettings` + 4 const key
+  dùng model `AutoRunSettings` (đã xóa) → đã gỡ; comment cref `AutoRunSettings` trong `AppGeneralSettings.cs`
+  + 2 comment "AutoRun" trong `AccountSession.cs` → đã dọn (grep `AutoRun` trong `orders/` = 0).
+
+### Bước 2 — Đổi Sync → Chạy
+- `AccountsViewModel.cs`: thêm command `Run` (nút form) = `Sessions.Start(accountId)` idempotent + guard
+  `IsShopLoopRunning` → log "Đang chạy rồi."; đổi `SyncSelectedAsync` → `RunSelected` (mỗi tick
+  `Sessions.Start`, cùng guard). KHÔNG gọi `SyncFullAsync` thủ công. Đổi gate `CanSyncOrders` → `CanRun`.
+  GIỮ `RunOrAutoStartAsync` + `WaitForSessionReadyAsync` + `SessionReadyResult` + `IsSessionReadyForActions`
+  + `_autoStartingIds` (plan yêu cầu giữ). XÓA `RunSelectedBatchAsync` + `_syncSelectedRunning` (thân đường
+  SyncSelected cũ, không thuộc RunOrAutoStartAsync).
+- `AccountsView.axaml`: nút form `⇊ Sync`→`▶ Chạy` (RunCommand, IsEnabled CanRun, tooltip mới); nút panel
+  trái `⇊`/SyncSelectedCommand → `▶`/RunSelectedCommand ("Chạy đã chọn").
+- `ShellViewModel.cs`: ribbon "Sync đã chọn"/⇊/SyncSelectedCommand → "Chạy đã chọn"/▶/RunSelectedCommand.
+- GIỮ engine `SyncFullAsync`/`ChayFlowMotShopAsync` (vòng lặp shop gọi).
+
+### Bước 3 — Test
+- Xóa 4 file test AutoRun (43 test-case). Cập nhật `AccountsViewModelTests`: `vm.CanSyncOrders`→`vm.CanRun`
+  (3 chỗ); test `SyncSelected_KhongTick_KhongMoPhien` → `RunSelected_KhongTick_KhongMoPhien`
+  (`RunSelectedCommand.Execute`, giữ assert `Sessions.Active` rỗng). Stub `IsShopLoopRunning` đã có sẵn.
+
+### Kiểm chứng
+- `dotnet build orders/XuLyDonShopee.App` → Build succeeded, 0 Warning, 0 Error.
+- `dotnet build suite/Shopee.Suite` → Build succeeded, 0 Warning, 0 Error (verify ShellViewModel + OrdersModuleHost).
+- `dotnet test orders/XuLyDonShopee.Tests` → Passed! Failed: 0, Passed: 911, Skipped: 0, Total: 911.
+- `git grep AutoRun -- orders/ suite/` (trừ plans) = rỗng.
+
+### Điểm lệch plan (đề xuất Fable lưu ý)
+1. Plan không liệt kê `OrdersModuleHost.cs` + `SettingsRepository.cs` nhưng cả hai tham chiếu AutoRun/AutoRunSettings
+   → bắt buộc sửa để build. Đã xử lý.
+2. Plan bảo GIỮ `RunOrAutoStartAsync` "cho nút thủ công khác (Kiểm tra/Xử lý đơn) nếu còn". Khảo sát thực tế:
+   `OrdersViewModel` KHÔNG có nút nào dùng nó (nó private của `AccountsViewModel`). Sau rewire, nhóm
+   `RunOrAutoStartAsync` + `WaitForSessionReadyAsync` + `SessionReadyResult` + `_autoStartingIds` trở thành
+   dead-code (không caller). Đã GIỮ theo mệnh lệnh plan; build xanh, không warning. Đề xuất dọn ở đợt sau nếu
+   xác nhận không dùng cho nút tay tương lai.
+3. `CanSyncOrders` → chọn phương án đổi tên `CanRun` (plan cho phép "hoặc giữ tên").

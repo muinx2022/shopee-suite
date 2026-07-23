@@ -78,7 +78,7 @@ public sealed partial class RibbonScreenItem : ObservableObject
     /// <summary>ViewModel màn cần hiển thị khi bấm nút này (với đơn hàng: luôn là MainViewModel).</summary>
     public object ScreenVm { get; }
 
-    /// <summary>Với module đơn hàng: index màn con (0-3) để set <c>MainViewModel.SelectedNavIndex</c>; -1 = không dùng.</summary>
+    /// <summary>Với module đơn hàng: index màn con (0-2) để set <c>MainViewModel.SelectedNavIndex</c>; -1 = không dùng.</summary>
     public int NavIndex { get; }
 
     /// <summary>Tab chứa nút (Shell gán sau khi dựng xong cây tab).</summary>

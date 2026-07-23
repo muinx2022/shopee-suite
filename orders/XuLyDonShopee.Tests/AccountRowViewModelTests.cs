@@ -54,8 +54,6 @@ public class AccountRowViewModelTests
         public Task<bool> RedownloadSlipAsync(string orderSn) => Task.FromResult(false);
 
         public Task<bool> SyncFullAsync() => Task.FromResult(false);
-
-        public Task<ShopeePageState?> ProbePageStateAsync() => Task.FromResult<ShopeePageState?>(null);
     }
 
     private static AccountRowViewModel NewRow()

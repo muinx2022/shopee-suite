@@ -510,13 +510,13 @@ public class AccountsViewModelTests
 
         var vm = new AccountsViewModel(services);
         // Chưa chọn gì → nút Sync tắt (chưa có tài khoản để thao tác).
-        Assert.False(vm.CanSyncOrders);
+        Assert.False(vm.CanRun);
 
         vm.SelectedRow = vm.Accounts.First();
 
         // Đang xem tài khoản đã lưu, KHÔNG mở phiên nào → nút Sync VẪN bật (bấm sẽ tự mở phiên).
         Assert.False(services.Sessions.IsRunning(vm.Accounts.First().Id));
-        Assert.True(vm.CanSyncOrders);
+        Assert.True(vm.CanRun);
     }
 
     // ===== Tài khoản MỚI chưa lưu (IsNew) → 2 nút tắt =====
@@ -529,7 +529,7 @@ public class AccountsViewModelTests
         var vm = new AccountsViewModel(services);
         vm.AddCommand.Execute(null); // form tạo mới (IsNew = true), chưa có Id
 
-        Assert.False(vm.CanSyncOrders);
+        Assert.False(vm.CanRun);
     }
 
     // ===== Sau khi LƯU tài khoản mới → có Id, hết IsNew → 2 nút bật =====
@@ -541,7 +541,7 @@ public class AccountsViewModelTests
 
         var vm = new AccountsViewModel(services);
         vm.AddCommand.Execute(null);
-        Assert.False(vm.CanSyncOrders); // đang tạo mới → tắt
+        Assert.False(vm.CanRun); // đang tạo mới → tắt
 
         vm.EditEmail = "new@mail.com";
         vm.EditPassword = "123";
@@ -549,7 +549,7 @@ public class AccountsViewModelTests
 
         // Đã lưu (có Id, IsNew=false, vẫn đang xem) → bật.
         Assert.False(vm.IsNew);
-        Assert.True(vm.CanSyncOrders);
+        Assert.True(vm.CanRun);
     }
 
     // ===== Bỏ chọn (SelectedRow=null) → 2 nút tắt lại =====
@@ -562,11 +562,11 @@ public class AccountsViewModelTests
 
         var vm = new AccountsViewModel(services);
         vm.SelectedRow = vm.Accounts.First();
-        Assert.True(vm.CanSyncOrders);
+        Assert.True(vm.CanRun);
 
         vm.SelectedRow = null; // rời khỏi tài khoản (không ở chế độ tạo mới)
 
-        Assert.False(vm.CanSyncOrders);
+        Assert.False(vm.CanRun);
     }
 
     // ===== Nút Sync/Kiểm tra phát PropertyChanged khi đổi chọn (để binding IsEnabled cập nhật) =====
@@ -583,7 +583,7 @@ public class AccountsViewModelTests
 
         vm.SelectedRow = vm.Accounts.First();
 
-        Assert.Contains(nameof(vm.CanSyncOrders), raised);
+        Assert.Contains(nameof(vm.CanRun), raised);
     }
 
     // ===== Hàm thuần quyết định "phiên sẵn sàng thao tác" theo CỜ TƯỜNG MINH ReadyForActions =====
@@ -601,16 +601,16 @@ public class AccountsViewModelTests
     }
 
     // ===== HÀNG LOẠT: không tick tài khoản nào → command thoát ngay, KHÔNG mở phiên nào =====
-    // (đường "chụp danh sách rỗng → thôi" của RunSelectedBatchAsync; không cần Brave.)
+    // (đường "chụp danh sách rỗng → thôi" của RunSelected; không cần Brave.)
     [Fact]
-    public async Task SyncSelected_KhongTick_KhongMoPhien()
+    public void RunSelected_KhongTick_KhongMoPhien()
     {
         using var temp = new TempDatabase();
         var services = new AppServices(temp.Path);
         services.Accounts.Insert(new Account { Email = "a@mail.com", Password = "p" });
 
         var vm = new AccountsViewModel(services);
-        await vm.SyncSelectedCommand.ExecuteAsync(null);
+        vm.RunSelectedCommand.Execute(null);
 
         Assert.Empty(services.Sessions.Active);
     }

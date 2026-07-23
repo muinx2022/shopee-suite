@@ -10,7 +10,7 @@ namespace XuLyDonShopee.Core.Models;
 /// <item><see cref="OrderIntervalMinutes"/> — số phút giữa các lần tự đọc số "Chờ Lấy Hàng" (kẹp [1,1440]).</item>
 /// </list>
 /// Bất biến (record) + các hàm thuần <see cref="Parse"/>/<see cref="Normalize"/> để đọc/ghi bảng
-/// <c>settings</c> và test được không cần DB (mẫu <see cref="AutoRunSettings"/>).
+/// <c>settings</c> và test được không cần DB.
 /// </summary>
 public sealed record AppGeneralSettings(string InvoiceFolder, int OrderIntervalMinutes)
 {

@@ -61,8 +61,6 @@ public class AccountSessionManagerTests
 
         public Task<bool> SyncFullAsync() => Task.FromResult(false);
 
-        public Task<ShopeePageState?> ProbePageStateAsync() => Task.FromResult<ShopeePageState?>(null);
-
         /// <summary>Mô phỏng phiên phát lại sự kiện Changed (vd event Stopped TRỄ) mà không đổi State.</summary>
         public void RaiseChanged() => Changed?.Invoke();
 

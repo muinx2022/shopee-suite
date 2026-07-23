@@ -278,11 +278,10 @@ public partial class AccountsViewModel : ViewModelBase
     public bool CanStopSeller => _editingId is not null && _services.Sessions.IsRunning(_editingId ?? -1);
 
     /// <summary>
-    /// Cho nút "Sync" (TRỌN GÓI) khi đang xem/sửa một tài khoản ĐÃ LƯU (có Id) — KHÔNG phụ thuộc phiên đang
-    /// chạy. Bấm khi phiên CHƯA mở → tự mở trang bán hàng, CHỜ sẵn sàng rồi mới chạy chuỗi trọn gói (kiểm
-    /// tra → xử lý nếu có đơn → sync); phiên đã chạy → chạy ngay. Tài khoản mới chưa lưu (IsNew) → tắt nút.
+    /// Cho nút "Chạy" khi đang xem/sửa một tài khoản ĐÃ LƯU (có Id) — KHÔNG phụ thuộc phiên đang chạy. Bấm =
+    /// MỞ PHIÊN (đăng nhập subaccount rồi tự lặp qua các shop). Tài khoản mới chưa lưu (IsNew) → tắt nút.
     /// </summary>
-    public bool CanSyncOrders => IsEditing && !IsNew && _editingId is not null;
+    public bool CanRun => IsEditing && !IsNew && _editingId is not null;
 
     /// <summary>Nguồn SÁNG/TẮT của nút 🗑: bật khi đang bôi đậm một dòng (<see cref="SelectedRow"/> — xóa dòng
     /// đó, hành vi cũ) HOẶC có ≥1 dòng đang hiển thị được tick (xóa hàng loạt theo tick). Notify lại tại mọi
@@ -297,13 +296,13 @@ public partial class AccountsViewModel : ViewModelBase
     {
         OnPropertyChanged(nameof(ShowPlaceholder));
         OnPropertyChanged(nameof(CanStopSeller));
-        OnPropertyChanged(nameof(CanSyncOrders));
+        OnPropertyChanged(nameof(CanRun));
     }
 
     partial void OnIsNewChanged(bool value)
     {
         OnPropertyChanged(nameof(CanStopSeller));
-        OnPropertyChanged(nameof(CanSyncOrders));
+        OnPropertyChanged(nameof(CanRun));
     }
 
     partial void OnEditCookieChanged(string value)
@@ -775,73 +774,50 @@ public partial class AccountsViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// "Sync" (TRỌN GÓI) — nút hành động chính màn Tài khoản: mở trang bán hàng (nếu chưa mở), kiểm tra đơn
-    /// mới, xử lý đơn nếu có, rồi sync đơn hàng về máy + Google Sheet. Nút LUÔN bật khi đang xem tài khoản đã
-    /// lưu: phiên đã chạy → chạy chuỗi ngay (đường cũ); phiên CHƯA mở → tự mở trang bán hàng, CHỜ sẵn sàng rồi
-    /// mới chạy (xem <see cref="RunOrAutoStartAsync"/>). Tiến trình/kết quả từng bước hiển thị tự nhiên qua
-    /// StatusText của phiên (đổ về <see cref="BusyStatus"/>).
+    /// "Chạy" — nút hành động chính màn Tài khoản (mô hình 1 subaccount = nhiều shop): MỞ PHIÊN cho tài khoản
+    /// đang xem (khởi động Brave → đăng nhập subaccount → tự lặp qua các shop). Idempotent qua
+    /// <see cref="AccountSessionManager.Start"/> (đang chạy thì thôi, không mở trùng). Vòng lặp shop tự chạy
+    /// trong RunAsync sau đăng nhập nên KHÔNG gọi <c>SyncFullAsync</c> thủ công (tránh giẫm vòng lặp). Phiên
+    /// đang chạy vòng lặp shop → chỉ log rồi thôi.
     /// </summary>
     [RelayCommand]
-    private Task SyncFull()
+    private void Run()
     {
-        // Chụp accountId + email TRƯỚC mọi await (mẫu nút đơn cũ) — bám theo tài khoản đang mở trên form.
+        // Chụp accountId + email — bám theo tài khoản đang mở trên form.
         if (_editingId is not long accountId)
         {
-            return Task.CompletedTask;
+            return;
         }
 
         var email = _services.Accounts.GetById(accountId)?.Email ?? EditEmail;
-        return RunOrAutoStartAsync(accountId, email, "sync trọn gói", s => s.SyncFullAsync());
+
+        // Phiên đang chạy vòng lặp shop → không mở lại (Start vốn idempotent, nhưng báo cho rõ rồi thôi).
+        if (_services.Sessions.Get(accountId) is { IsShopLoopRunning: true })
+        {
+            _services.Log.Append(email, "Đang chạy rồi.");
+            return;
+        }
+
+        _services.Log.Append(email, "Chạy: mở phiên — đăng nhập rồi tự lặp qua các shop...");
+        _services.Sessions.Start(accountId); // mở phiên; vòng lặp shop tự chạy trong RunAsync
+        UpdateSelectedSessionStatus();
     }
 
     /// <summary>Nhãn nguồn log cho các thông báo cấp-BATCH (không thuộc một shop cụ thể) — ghi file &amp; phân
     /// biệt với log per-account (per-account dùng email của shop).</summary>
     private const string BatchLogSource = "Hàng loạt";
 
-    /// <summary>Đang có một lượt "Sync đã chọn" (hàng loạt) chạy — guard chống bấm đúp cấp batch.</summary>
-    private bool _syncSelectedRunning;
-
     /// <summary>
-    /// "Sync đã chọn" (HÀNG LOẠT, TRỌN GÓI) — với MỌI tài khoản đang tick: phiên đã chạy → chạy chuỗi trọn
-    /// gói ngay; phiên chưa mở → tự mở trang bán hàng, chờ sẵn sàng rồi chạy (dùng chung
-    /// <see cref="RunOrAutoStartAsync"/> per-account với action <see cref="IAccountSession.SyncFullAsync"/> =
-    /// kiểm tra → xử lý đơn nếu có → sync). Các tài khoản chạy SONG SONG, độc lập lỗi; guard
-    /// <see cref="_syncSelectedRunning"/> chặn bấm đúp cả loạt.
+    /// "Chạy đã chọn" (HÀNG LOẠT) — với MỌI tài khoản đang tick: MỞ PHIÊN (<see cref="AccountSessionManager.Start"/>,
+    /// idempotent). Mỗi phiên tự đăng nhập subaccount rồi lặp qua các shop của nó (RunAsync) nên KHÔNG chạy hành
+    /// động thủ công (Sync/Kiểm tra) — vòng lặp shop tự làm. Chụp danh sách (id, email) các dòng tick MỘT LẦN —
+    /// KHÔNG giữ tham chiếu <see cref="AccountRowViewModel"/>. Rỗng → log "Chưa tick tài khoản nào." rồi thôi;
+    /// phiên đang chạy vòng lặp shop → bỏ qua (log "Đang chạy rồi.").
     /// </summary>
     [RelayCommand]
-    private async Task SyncSelectedAsync()
+    private void RunSelected()
     {
-        if (_syncSelectedRunning)
-        {
-            return;
-        }
-
-        _syncSelectedRunning = true;
-        try
-        {
-            await RunSelectedBatchAsync("sync trọn gói", s => s.SyncFullAsync());
-        }
-        finally
-        {
-            _syncSelectedRunning = false;
-        }
-    }
-
-    /// <summary>
-    /// Chạy <paramref name="action"/> HÀNG LOẠT cho MỌI tài khoản đang tick, dùng chung luồng per-account
-    /// <see cref="RunOrAutoStartAsync"/> (tự mở phiên nếu chưa mở → chờ sẵn sàng → hành động).
-    /// <para>
-    /// Chụp danh sách <c>(accountId, email)</c> các dòng tick MỘT LẦN — TRƯỚC mọi await (bài học
-    /// <c>viewmodel-mutable-field-after-await</c>): KHÔNG giữ tham chiếu <see cref="AccountRowViewModel"/> qua
-    /// await, chỉ dùng cặp đã chụp. Rỗng → log "Chưa tick tài khoản nào." rồi thôi. Các tài khoản chạy SONG
-    /// SONG (<see cref="Task.WhenAll(IEnumerable{Task})"/>); MỖI lượt tự bọc try/catch + log lỗi theo email của
-    /// shop đó → một shop lỗi/timeout KHÔNG phá các shop khác (OCE khi app đóng cũng thoát sạch). Xong hết →
-    /// log tổng kết. Guard bấm-đúp per-account tái dùng <see cref="_autoStartingIds"/> trong RunOrAutoStartAsync.
-    /// </para>
-    /// </summary>
-    private async Task RunSelectedBatchAsync(string actionName, Func<IAccountSession, Task<bool>> action)
-    {
-        // Chụp (accountId, email) của các dòng ĐANG tick MỘT LẦN, trước mọi await.
+        // Chụp (id, email) của các dòng ĐANG tick MỘT LẦN.
         var targets = Accounts
             .Where(r => r.IsSelected)
             .Select(r => (Id: r.Id, Email: r.Email))
@@ -853,23 +829,20 @@ public partial class AccountsViewModel : ViewModelBase
             return;
         }
 
-        // Mỗi tài khoản một lượt per-account ĐỘC LẬP LỖI, chạy song song.
-        var runs = targets.Select(async target =>
+        foreach (var target in targets)
         {
-            try
+            // Phiên đang chạy vòng lặp shop → không mở lại (Start idempotent, nhưng báo cho rõ).
+            if (_services.Sessions.Get(target.Id) is { IsShopLoopRunning: true })
             {
-                await RunOrAutoStartAsync(target.Id, target.Email, actionName, action);
+                _services.Log.Append(target.Email, "Đang chạy rồi.");
+                continue;
             }
-            catch (Exception ex)
-            {
-                // Một shop lỗi/timeout KHÔNG phá các shop khác — nuốt + log theo email của shop đó.
-                _services.Log.Append(target.Email, $"Lỗi khi {actionName}: {ex.Message}");
-            }
-        });
 
-        await Task.WhenAll(runs);
+            _services.Sessions.Start(target.Id); // mở phiên; vòng lặp shop tự chạy trong RunAsync
+        }
 
-        _services.Log.Append(BatchLogSource, $"Đã {actionName} xong {targets.Count} tài khoản đã chọn.");
+        UpdateSelectedSessionStatus();
+        _services.Log.Append(BatchLogSource, $"Đã mở phiên chạy cho {targets.Count} tài khoản đã chọn.");
     }
 
     /// <summary>
@@ -881,8 +854,8 @@ public partial class AccountsViewModel : ViewModelBase
     private readonly HashSet<long> _autoStartingIds = new();
 
     /// <summary>
-    /// Luồng per-account dùng chung cho nút "Sync" (trọn gói) VÀ lệnh HÀNG LOẠT
-    /// (<see cref="SyncSelectedAsync"/> gọi cho từng tài khoản đã tick):
+    /// Luồng per-account "mở phiên nếu chưa → chờ sẵn sàng → chạy hành động thủ công" — GIỮ cho các nút thao
+    /// tác TAY (vd Kiểm tra / Xử lý đơn) dùng lại (hiện chưa nút nào nối vào — nút "Chạy" chỉ mở phiên):
     /// phiên ĐANG chạy → chạy <paramref name="action"/> ngay (đường cũ, giữ nguyên hành vi); phiên CHƯA mở →
     /// tự "Mở trang bán hàng" (qua manager, chạy nền) rồi CHỜ phiên "sẵn sàng thao tác" (đăng nhập xong + đọc
     /// số đơn lần đầu — xem <see cref="IsSessionReadyForActions"/>) tối đa 5 phút mới chạy hành động.
@@ -1091,7 +1064,7 @@ public partial class AccountsViewModel : ViewModelBase
         OrderStatus = FormatOrderStatus(session?.ToShipCount);
 
         OnPropertyChanged(nameof(CanStopSeller));
-        OnPropertyChanged(nameof(CanSyncOrders));
+        OnPropertyChanged(nameof(CanRun));
     }
 
     /// <summary>Định dạng dòng theo dõi đơn "Chờ Lấy Hàng" từ số đọc được (null = ẩn).</summary>

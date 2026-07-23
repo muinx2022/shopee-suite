@@ -10,14 +10,13 @@ namespace XuLyDonShopee.App.ViewModels;
 public record NavItem(string Label, string Icon);
 
 /// <summary>
-/// ViewModel cửa sổ chính: điều hướng giữa các màn hình Tài khoản / Đơn hàng / Chạy tự động / Proxy / Cài đặt.
+/// ViewModel cửa sổ chính: điều hướng giữa các màn hình Tài khoản / Đơn hàng / Proxy / Cài đặt.
 /// </summary>
 public partial class MainViewModel : ViewModelBase
 {
     private readonly AppServices _services;
     private readonly AccountsViewModel _accountsVm;
     private readonly OrdersViewModel _ordersVm;
-    private readonly AutoRunViewModel _autoRunVm;
     private readonly ProxiesViewModel _proxiesVm;
     private readonly SettingsViewModel _settingsVm;
 
@@ -26,7 +25,6 @@ public partial class MainViewModel : ViewModelBase
         _services = services;
         _accountsVm = new AccountsViewModel(services);
         _ordersVm = new OrdersViewModel(services);
-        _autoRunVm = new AutoRunViewModel(services);
         _proxiesVm = new ProxiesViewModel(services);
         _settingsVm = new SettingsViewModel(services);
         _currentViewModel = _accountsVm;
@@ -43,8 +41,6 @@ public partial class MainViewModel : ViewModelBase
     public AccountsViewModel AccountsVm => _accountsVm;
     /// <summary>Màn "Đơn hàng".</summary>
     public OrdersViewModel OrdersVm => _ordersVm;
-    /// <summary>Màn "Chạy tự động".</summary>
-    public AutoRunViewModel AutoRunVm => _autoRunVm;
     /// <summary>Màn "Proxy".</summary>
     public ProxiesViewModel ProxiesVm => _proxiesVm;
     /// <summary>Màn "Cài đặt" của đơn hàng — nhúng vào màn Cài đặt GỘP của suite.</summary>
@@ -55,7 +51,6 @@ public partial class MainViewModel : ViewModelBase
     {
         new NavItem("Tài khoản", "◵"),
         new NavItem("Đơn hàng", "▤"),
-        new NavItem("Chạy tự động", "▶"),
         new NavItem("Proxy", "⇄")
     };
 
@@ -101,10 +96,6 @@ public partial class MainViewModel : ViewModelBase
                 CurrentViewModel = _ordersVm;
                 break;
             case 2:
-                _autoRunVm.Reload();
-                CurrentViewModel = _autoRunVm;
-                break;
-            case 3:
                 _proxiesVm.Reload();
                 CurrentViewModel = _proxiesVm;
                 break;

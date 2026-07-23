@@ -87,7 +87,7 @@ public sealed partial class ShellViewModel : ObservableObject
             if (scrape.StopCommand.CanExecute(null)) scrape.StopCommand.Execute(null);
             if (search.StopCommand.CanExecute(null)) search.StopCommand.Execute(null);
             await worker.PrepareForShutdownAsync(TimeSpan.FromSeconds(40));
-            // Module đơn hàng: dừng vòng "Chạy tự động" + kill hết phiên Brave trước khi restart.
+            // Module đơn hàng: kill hết phiên Brave trước khi restart.
             await OrdersModuleHost.StopAsync();
         };
         // Lệnh update từ Hub → cùng đường dừng-êm + restart như nút tay.
@@ -143,8 +143,7 @@ public sealed partial class ShellViewModel : ObservableObject
             var acc = ordersVm.AccountsVm;
             var oAccounts = new RibbonScreenItem("Tài khoản", AppIcons.People, ordersVm, 0, "Tài khoản shop");
             var oOrders = new RibbonScreenItem("Đơn hàng", AppIcons.Receipt, ordersVm, 1, "Theo dõi & xử lý đơn · in phiếu");
-            var oAuto = new RibbonScreenItem("Chạy tự động", AppIcons.PlayCircle, ordersVm, 2, "Vòng chạy tự động");
-            var oProxy = new RibbonScreenItem("Proxy", AppIcons.SwapHoriz, ordersVm, 3, "Kho proxy KiotProxy");
+            var oProxy = new RibbonScreenItem("Proxy", AppIcons.SwapHoriz, ordersVm, 2, "Kho proxy KiotProxy");
 
             // Nhóm "Hành động" + "Tùy chọn" CHỈ có nghĩa ở màn "Tài khoản" (thao tác trên danh sách tài khoản).
             // Giữ tham chiếu để bật/tắt CẢ NHÓM theo màn đang chọn (làm mờ, không ẩn) — xem đoạn nối bên dưới.
@@ -152,8 +151,8 @@ public sealed partial class ShellViewModel : ObservableObject
             {
                 new RibbonActionItem("Chọn tất cả", "✓", acc.SelectAllCommand,
                     "Chọn / bỏ chọn toàn bộ tài khoản đang hiển thị"),
-                new RibbonActionItem("Sync đã chọn", "⇊", acc.SyncSelectedCommand,
-                    "Chạy trọn gói cho các tài khoản đang tick: mở trang → kiểm tra → xử lý đơn nếu có → sync"),
+                new RibbonActionItem("Chạy đã chọn", "▶", acc.RunSelectedCommand,
+                    "Mở + đăng nhập + tự lặp shop cho các tài khoản đang tick"),
                 new RibbonActionItem("Dừng đã chọn", "■", acc.StopSelectedCommand,
                     "Dừng toàn bộ việc đang làm của các tài khoản đang tick"),
                 new RibbonActionItem("Dừng tất cả", "✕", acc.StopAllCommand,
@@ -171,13 +170,13 @@ public sealed partial class ShellViewModel : ObservableObject
 
             ordersTab = new RibbonTab("Shopee", new List<RibbonGroup>
             {
-                new RibbonGroup("Màn hình", new object[] { oAccounts, oOrders, oAuto, oProxy }),
+                new RibbonGroup("Màn hình", new object[] { oAccounts, oOrders, oProxy }),
                 oActionGroup,
                 oOptionGroup,
             });
 
             // Nối bật/tắt 2 nhóm với màn đang chọn: CHỈ màn "Tài khoản" (SelectedNavIndex==0) → bật; các màn
-            // Đơn hàng/Chạy tự động/Proxy → làm mờ CẢ NHÓM (disable, KHÔNG ẩn). Gate ở mức NHÓM để ở màn Tài
+            // Đơn hàng/Proxy → làm mờ CẢ NHÓM (disable, KHÔNG ẩn). Gate ở mức NHÓM để ở màn Tài
             // khoản các nút vẫn theo CanExecute riêng của command, không bị đè.
             var ordersMain = ordersVm; // capture non-null cho closure
             void SyncOrdersActionGroups()

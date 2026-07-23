@@ -199,7 +199,7 @@
                     </Grid>
 
                     <!-- Hàng nút thao tác nhóm — dạng ICON, 2 NHÓM có ngăn cách:
-                         [✓ chọn]  |  [⇊ Sync trọn gói · ■ Dừng đã chọn · ✕ Dừng tất cả]. -->
+                         [✓ chọn]  |  [▶ Chạy đã chọn · ■ Dừng đã chọn · ✕ Dừng tất cả]. -->
                     <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="6"
                                 Margin="0,0,0,12">
                         <!-- Nhóm chọn -->
@@ -208,10 +208,10 @@
                                 ToolTip.Tip="Chọn / bỏ chọn toàn bộ" />
                         <!-- Ngăn cách 2 nhóm (đường mảnh mờ). -->
                         <Border Width="1" Margin="4,4" Background="{StaticResource Border012}" />
-                        <!-- Nhóm phiên: Sync đã chọn (TRỌN GÓI — hành động chính) · Dừng đã chọn · Dừng tất cả. -->
-                        <Button Classes="iconAction play" Content="⇊"
-                                Command="{Binding SyncSelectedCommand}"
-                                ToolTip.Tip="Sync đã chọn — chạy trọn gói cho các tài khoản đang tick: mở trang (nếu chưa mở) → kiểm tra → xử lý đơn nếu có → sync đơn hàng" />
+                        <!-- Nhóm phiên: Chạy đã chọn (MỞ PHIÊN — hành động chính) · Dừng đã chọn · Dừng tất cả. -->
+                        <Button Classes="iconAction play" Content="▶"
+                                Command="{Binding RunSelectedCommand}"
+                                ToolTip.Tip="Chạy đã chọn — mở phiên cho các tài khoản đang tick: đăng nhập tài khoản phụ rồi tự lặp qua các shop" />
                         <Button Classes="iconAction" Content="■"
                                 Command="{Binding StopSelectedCommand}"
                                 ToolTip.Tip="Dừng đã chọn — dừng toàn bộ việc đang làm và đóng trang của các tài khoản đang tick" />
@@ -313,16 +313,16 @@
                                        Foreground="{StaticResource TextMuted}" Margin="0,2,0,0" />
                         </StackPanel>
 
-                        <!-- Hàng nút thao tác PHIÊN: gom còn ĐÚNG 2 nút — Sync (TRỌN GÓI, hành động chính) + Dừng.
+                        <!-- Hàng nút thao tác PHIÊN: gom còn ĐÚNG 2 nút — Chạy (MỞ PHIÊN, hành động chính) + Dừng.
                              WrapPanel canh phải nên khi cột HẸP nút TỰ RỚT DÒNG (không bao giờ bị cắt); WrapPanel
                              không có Spacing → từng nút Margin trái 8 (thêm 4 dọc để các dòng khi rớt thở nhau,
                              đối xứng nên không lệch dọc khi 1 hàng). Lưu/Hủy đã chuyển XUỐNG DƯỚI CÙNG form. -->
                         <WrapPanel HorizontalAlignment="Right" Margin="0,0,0,16">
-                            <!-- Sync TRỌN GÓI: mở trang (nếu chưa) → kiểm tra → xử lý đơn nếu có → sync về máy + Google Sheet. -->
-                            <Button Classes="accent formIcon" Content="⇊ Sync" Margin="8,4,0,4"
-                                    Command="{Binding SyncFullCommand}"
-                                    IsEnabled="{Binding CanSyncOrders}"
-                                    ToolTip.Tip="Sync trọn gói — Mở trang bán hàng (nếu chưa mở), kiểm tra đơn mới, xử lý đơn nếu có, rồi sync đơn hàng về máy + Google Sheet" />
+                            <!-- Chạy: mở phiên → đăng nhập tài khoản phụ → tự lặp qua các shop (kiểm tra → chuẩn bị hàng → sync về máy + Google Sheet). -->
+                            <Button Classes="accent formIcon" Content="▶ Chạy" Margin="8,4,0,4"
+                                    Command="{Binding RunCommand}"
+                                    IsEnabled="{Binding CanRun}"
+                                    ToolTip.Tip="Chạy — Mở trang, đăng nhập Nền tảng tài khoản phụ rồi tự lặp qua các shop (kiểm tra → chuẩn bị hàng → sync về máy + Google Sheet), nghỉ 3–5' giữa các shop, lặp tới khi Dừng" />
                             <!-- Dừng: dừng toàn bộ việc đang làm của tài khoản này và đóng trang bán hàng (Brave). -->
                             <Button Classes="secondary formIcon" Content="■ Dừng" Margin="8,4,0,4"
                                     Command="{Binding StopCommand}"

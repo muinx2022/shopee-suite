@@ -15,18 +15,6 @@ public class SettingsRepository
     /// Có giá trị "1" ⇒ đã migrate, KHÔNG chạy lại (idempotent). Xem <see cref="ProxyKeyPoolMigration"/>.</summary>
     public const string ProxyKeyMigratedV1 = "proxykey_migrated_v1";
 
-    /// <summary>Key: số tài khoản mỗi lô của bộ "Chạy tự động".</summary>
-    public const string AutoRunBatchSize = "autorun_batch_size";
-
-    /// <summary>Key: số phút nghỉ giữa các lô của bộ "Chạy tự động".</summary>
-    public const string AutoRunGapMinutes = "autorun_gap_minutes";
-
-    /// <summary>Key: có tự Sync đơn hàng trong mỗi lượt "Chạy tự động" hay không.</summary>
-    public const string AutoRunDoSync = "autorun_do_sync";
-
-    /// <summary>Key: có tự Xử lý đơn (arrange + in phiếu) trong mỗi lượt "Chạy tự động" hay không.</summary>
-    public const string AutoRunDoProcess = "autorun_do_process";
-
     /// <summary>Key: thư mục lưu phiếu/hóa đơn người dùng chọn (rỗng/thiếu → mặc định cạnh app.db).</summary>
     private const string InvoiceFolderKey = "invoice_folder";
 
@@ -69,23 +57,6 @@ public class SettingsRepository
     /// <summary>Lưu danh sách API key KiotProxy (chuẩn hóa rồi ghép mỗi dòng một key).</summary>
     public void SetKiotProxyKeys(IEnumerable<string> keys)
         => Set(KiotProxyApiKeys, KiotProxyKeyParser.Join(keys));
-
-    /// <summary>Đọc cấu hình "Chạy tự động" từ các khóa rời (thiếu/hỏng → mặc định an toàn, đã chuẩn hóa).</summary>
-    public AutoRunSettings GetAutoRunSettings() => AutoRunSettings.Parse(
-        Get(AutoRunBatchSize),
-        Get(AutoRunGapMinutes),
-        Get(AutoRunDoSync),
-        Get(AutoRunDoProcess));
-
-    /// <summary>Ghi cấu hình "Chạy tự động" ra các khóa rời (chuẩn hóa trước khi ghi).</summary>
-    public void SetAutoRunSettings(AutoRunSettings settings)
-    {
-        var s = AutoRunSettings.Normalize(settings.BatchSize, settings.GapMinutes, settings.DoSync, settings.DoProcess);
-        Set(AutoRunBatchSize, AutoRunSettings.IntToStorage(s.BatchSize));
-        Set(AutoRunGapMinutes, AutoRunSettings.IntToStorage(s.GapMinutes));
-        Set(AutoRunDoSync, AutoRunSettings.BoolToStorage(s.DoSync));
-        Set(AutoRunDoProcess, AutoRunSettings.BoolToStorage(s.DoProcess));
-    }
 
     /// <summary>
     /// Thư mục lưu phiếu/hóa đơn THỰC DÙNG: giá trị người dùng đã chọn (đã trim) nếu có, ngược lại mặc định
