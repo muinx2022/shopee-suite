@@ -1367,8 +1367,14 @@ async function doPrepareNextOrder() {
   if (!hasDetail) { send({ action: "error", message: "không mở được modal Thông Tin Chi Tiết (đơn " + orderCode + ")" }); return; }
   await sleep(1000);
 
-  // CHẨN ĐOÁN (tạm): dump nội dung modal Thông Tin Chi Tiết để soi mã vận đơn nằm đâu (bắt tại chỗ, khỏi chờ sync sau).
-  try { const dtk = await execInTab(tabId, pageDumpModalTracking, ["^thong tin chi tiet$"]); send({ action: "progress", message: "DUMP-CHITIET(" + orderCode + "): " + dtk }); } catch (e) {}
+  // ===== TẠM (CHẨN ĐOÁN mã vận đơn) — KHÔNG tự bấm "In phiếu giao": giữ modal "Thông Tin Chi Tiết" MỞ để user
+  //       tự F12 inspect ô mã vận đơn (mã hiện sau vài giây khi Shopee tạo xong). Nhả debugger cho sạch. Giữ ~4'
+  //       rồi trả noOrder để flow đi tiếp (revert địa chỉ + đóng tab). BỎ khối này sau khi lấy được selector. =====
+  send({ action: "progress", message: "CHẨN ĐOÁN: modal Thông Tin Chi Tiết ĐANG MỞ (đơn " + orderCode + "). KHÔNG tự in phiếu — bạn F12 → inspect ô mã vận đơn (đợi 'Mã vận đơn đang được tạo' đổi thành mã thật). Giữ ~4 phút." });
+  try { releaseDbg(); } catch (e) {}
+  await sleep(240000);
+  send({ action: "noOrder" });
+  return;
 
   // "In phiếu giao" → bắt tab phiếu (window.open → awbprint). Bấm lặp tới khi có tab (Shopee tạo vận đơn có thể muộn, ~2').
   send({ action: "progress", message: "modal Chi Tiết mở — tìm + bấm 'In phiếu giao'..." });
