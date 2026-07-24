@@ -51,9 +51,11 @@ public static class OrdersModuleHost
     /// <summary>
     /// RÓT hook đẩy đơn lên hub vào bộ dịch vụ module Đơn hàng (module không tham chiếu <c>Shopee.Core</c> nên
     /// KHÔNG tự biết hub — shell suite thấy cả hai làm cầu nối). Hook được phiên gọi CHẠY NỀN sau mỗi Sync:
-    /// hub chưa kết nối → trả false (đơn giữ CHƯA đánh dấu, thử lại lượt sau); ngược lại map lô đơn sang DTO hub
-    /// rồi POST, non-null = OK. Nuốt mọi lỗi (log <c>Trace</c>) trả false — trừ hủy CHỦ ĐỘNG (ct) cho xuyên để
-    /// phiên xử như dừng. Shop trên hub khóa theo <see cref="OrdersPushRequest.ShopUsername"/> = tên đăng nhập tài khoản.
+    /// hub chưa kết nối → trả false (đơn giữ CHƯA đánh dấu, thử lại lượt sau); ngược lại NHÓM lô đơn theo SHOP
+    /// (mỗi shop 1 request) rồi POST, trả true CHỈ khi MỌI nhóm OK (nhóm nào null → false, cả lô đẩy lại lượt sau).
+    /// Nuốt mọi lỗi (log <c>Trace</c>) trả false — trừ hủy CHỦ ĐỘNG (ct) cho xuyên để phiên xử như dừng. Shop trên
+    /// hub khóa theo <see cref="OrdersPushRequest.ShopUsername"/> = <c>shop_login</c> của đơn (đơn cũ thiếu shop_login
+    /// → fallback tên đăng nhập subaccount qua <see cref="ResolveShopUsername"/>).
     /// </summary>
     private static void WireHubPush(AppServices services)
     {
@@ -68,17 +70,28 @@ public static class OrdersModuleHost
                 }
 
                 var acc = services.Accounts.GetById(accountId);
-                var shopUsername = ResolveShopUsername(acc, accountId);
 
-                var req = new OrdersPushRequest
+                // NHÓM theo shop (mô hình subaccount → nhiều shop): mỗi shop 1 request để hub keyed đúng shop_id,
+                // KHÔNG dồn mọi shop vào 1 "shop" subaccount. Đơn thiếu shop_login (đơn cũ) → fallback username subaccount.
+                var allOk = true;
+                foreach (var group in orders.GroupBy(o =>
+                    string.IsNullOrWhiteSpace(o.ShopLogin) ? ResolveShopUsername(acc, accountId) : o.ShopLogin.Trim()))
                 {
-                    ShopUsername = shopUsername,
-                    ShopName = shopUsername,
-                    Orders = orders.Select(ToPushItem).ToList(),
-                };
+                    var shopUsername = group.Key;
+                    var req = new OrdersPushRequest
+                    {
+                        ShopUsername = shopUsername,
+                        ShopName = shopUsername,
+                        Orders = group.Select(ToPushItem).ToList(),
+                    };
 
-                var res = await CoordinationRuntime.Client.PushOrdersAsync(req, ct).ConfigureAwait(false);
-                return res is not null; // hub nhận OK (non-null) → phiên đánh dấu hub_synced_at
+                    var res = await CoordinationRuntime.Client.PushOrdersAsync(req, ct).ConfigureAwait(false);
+                    if (res is null)
+                    {
+                        allOk = false; // nhóm này hub KHÔNG nhận → cả lô CHƯA đánh dấu (phiên mark theo lô), lượt sau đẩy lại
+                    }
+                }
+                return allOk; // MỌI nhóm OK → phiên đánh dấu hub_synced_at
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -129,10 +142,11 @@ public static class OrdersModuleHost
     /// <summary>
     /// RÓT hook đẩy FILE PHIẾU lên hub vào bộ dịch vụ module Đơn hàng (mẫu <see cref="WireHubPush"/>). Hook được
     /// phiên gọi CHẠY NỀN sau <c>StartHubPushInBackground</c>: hub chưa kết nối → trả null (không mark, thử lại lượt
-    /// sau); ngược lại map lô <c>(OrderSn, FileBase64)</c> sang DTO hub rồi POST. TRẢ VỀ danh sách <c>order_sn</c>
-    /// hub ĐÃ LƯU = (lô gửi) − <c>missing</c> − <c>errors</c> (client mark đúng đơn). null = hub lỗi cả lô (hub cũ
-    /// 404 / offline / timeout) → phiên KHÔNG mark, lượt sau đẩy lại. Nuốt mọi lỗi (log <c>Trace</c>) trả null —
-    /// trừ hủy CHỦ ĐỘNG (ct) cho xuyên để phiên xử như dừng.
+    /// sau); ngược lại NHÓM lô <c>(OrderSn, FileBase64)</c> theo SHOP (tra <c>shop_login</c> từng đơn, mỗi shop 1
+    /// request) rồi POST. TRẢ VỀ danh sách <c>order_sn</c> hub ĐÃ LƯU = HỢP các nhóm (mỗi nhóm: lô gửi − <c>missing</c>
+    /// − <c>errors</c>); nhóm nào null (hub lỗi nhóm đó) → đơn nhóm ấy KHÔNG mark, lượt sau đẩy lại. Toàn bộ lỗi/hub
+    /// chưa kết nối → null (hub cũ 404 / offline / timeout) → phiên KHÔNG mark. Nuốt mọi lỗi (log <c>Trace</c>) trả
+    /// null — trừ hủy CHỦ ĐỘNG (ct) cho xuyên để phiên xử như dừng.
     /// </summary>
     private static void WireHubSlipPush(AppServices services)
     {
@@ -147,32 +161,49 @@ public static class OrdersModuleHost
                 }
 
                 var acc = services.Accounts.GetById(accountId);
-                var shopUsername = ResolveShopUsername(acc, accountId);
 
-                var req = new OrdersSlipPushRequest
-                {
-                    ShopUsername = shopUsername,
-                    ShopName = shopUsername,
-                    Slips = slips.Select(s => new SlipPushItem { OrderSn = s.OrderSn, FileBase64 = s.FileBase64 }).ToList(),
-                };
+                // Phiếu chỉ mang OrderSn → tra shop_login từng đơn để NHÓM theo SHOP (mỗi shop 1 request), khớp shop
+                // trên hub như /orders/push. Đơn thiếu shop_login (đơn cũ) → fallback username subaccount.
+                var map = services.Orders.GetShopLoginsByOrderSns(accountId, slips.Select(s => s.OrderSn));
 
-                var res = await CoordinationRuntime.Client.PushOrderSlipsAsync(req, ct).ConfigureAwait(false);
-                if (res is null)
+                // ĐÃ LƯU = HỢP các nhóm (mỗi nhóm: lô gửi − missing − errors). Nhóm trả null (hub lỗi nhóm đó) → không
+                // mark nhóm đó, lượt sau đẩy lại. Đơn missing (chưa lên hub) / lỗi (base64/PDF) KHÔNG mark.
+                var saved = new List<string>();
+                var groups = slips.GroupBy(s =>
                 {
-                    return null; // hub lỗi cả lô → không mark, lượt sau thử lại
-                }
+                    var shopLogin = map.TryGetValue(s.OrderSn, out var sl) ? sl : null;
+                    return string.IsNullOrWhiteSpace(shopLogin) ? ResolveShopUsername(acc, accountId) : shopLogin.Trim();
+                });
 
-                // ĐÃ LƯU = lô gửi − missing − errors. Đơn missing (chưa lên hub) / lỗi (base64/PDF) KHÔNG mark.
-                var notSaved = new HashSet<string>(StringComparer.Ordinal);
-                if (res.Missing is not null)
+                foreach (var group in groups)
                 {
-                    foreach (var m in res.Missing) notSaved.Add(m);
+                    var shopUsername = group.Key;
+                    var batch = group.ToList();
+                    var req = new OrdersSlipPushRequest
+                    {
+                        ShopUsername = shopUsername,
+                        ShopName = shopUsername,
+                        Slips = batch.Select(s => new SlipPushItem { OrderSn = s.OrderSn, FileBase64 = s.FileBase64 }).ToList(),
+                    };
+
+                    var res = await CoordinationRuntime.Client.PushOrderSlipsAsync(req, ct).ConfigureAwait(false);
+                    if (res is null)
+                    {
+                        continue; // hub lỗi NHÓM này → không mark, lượt sau thử lại
+                    }
+
+                    var notSaved = new HashSet<string>(StringComparer.Ordinal);
+                    if (res.Missing is not null)
+                    {
+                        foreach (var m in res.Missing) notSaved.Add(m);
+                    }
+                    if (res.Errors is not null)
+                    {
+                        foreach (var e in res.Errors) notSaved.Add(e.OrderSn);
+                    }
+                    saved.AddRange(batch.Where(s => !notSaved.Contains(s.OrderSn)).Select(s => s.OrderSn));
                 }
-                if (res.Errors is not null)
-                {
-                    foreach (var e in res.Errors) notSaved.Add(e.OrderSn);
-                }
-                return slips.Where(s => !notSaved.Contains(s.OrderSn)).Select(s => s.OrderSn).ToList();
+                return saved;
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {

@@ -368,7 +368,7 @@ public class OrdersRepository
         using var cmd = conn.CreateCommand();
         cmd.CommandText = @"SELECT order_sn, shopee_order_id, buyer_username, items_json, item_count, item_summary, sku,
        total_price, total_price_text, final_amount, final_amount_text, payment_method,
-       status, status_description, cancel_reason, channel, carrier, tracking_number
+       status, status_description, cancel_reason, channel, carrier, tracking_number, shop_login
     FROM orders
     WHERE account_id = $a AND hub_synced_at IS NULL
     ORDER BY id;";
@@ -398,9 +398,55 @@ public class OrdersRepository
                 Channel = reader.IsDBNull(15) ? null : reader.GetString(15),
                 Carrier = reader.IsDBNull(16) ? null : reader.GetString(16),
                 TrackingNumber = reader.IsDBNull(17) ? null : reader.GetString(17),
+                ShopLogin = reader.IsDBNull(18) ? null : reader.GetString(18),
             });
         }
         return list;
+    }
+
+    /// <summary>
+    /// Map <c>order_sn → shop_login</c> cho các đơn (theo mã) của MỘT tài khoản — dùng khi đẩy FILE PHIẾU lên hub
+    /// NHÓM theo shop (lô phiếu chỉ mang <c>OrderSn</c> nên phải tra <c>shop_login</c> từ bảng). Đơn có <c>shop_login</c>
+    /// NULL → giá trị <c>null</c> trong map (caller fallback về username subaccount); đơn không tồn tại → KHÔNG có
+    /// trong map. Tham số hóa <c>IN (...)</c> từng mã; danh sách rỗng/null → dict RỖNG (không chạm DB — <c>IN ()</c>
+    /// là lỗi cú pháp SQLite). So khớp mã đơn theo <see cref="StringComparer.Ordinal"/>.
+    /// </summary>
+    public IReadOnlyDictionary<string, string?> GetShopLoginsByOrderSns(long accountId, IEnumerable<string> orderSns)
+    {
+        var sns = orderSns is null
+            ? new List<string>()
+            : orderSns.Where(s => !string.IsNullOrWhiteSpace(s)).ToList();
+
+        var map = new Dictionary<string, string?>(StringComparer.Ordinal);
+        if (sns.Count == 0)
+        {
+            return map; // IN () lỗi cú pháp → trả rỗng, không chạm DB
+        }
+
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        var names = new List<string>(sns.Count);
+        for (var i = 0; i < sns.Count; i++)
+        {
+            var name = "$sn" + i;
+            names.Add(name);
+            cmd.Parameters.AddWithValue(name, sns[i]);
+        }
+        cmd.Parameters.AddWithValue("$a", accountId);
+        cmd.CommandText =
+            "SELECT order_sn, shop_login FROM orders WHERE account_id = $a AND order_sn IN ("
+            + string.Join(",", names) + ");";
+
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            if (reader.IsDBNull(0))
+            {
+                continue;
+            }
+            map[reader.GetString(0)] = reader.IsDBNull(1) ? null : reader.GetString(1);
+        }
+        return map;
     }
 
     /// <summary>

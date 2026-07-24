@@ -492,6 +492,62 @@ public class OrdersRepositoryTests
         Assert.Equal(new[] { "SN1" }, repo.GetForHubPush(2).Select(o => o.OrderSn)); // tài khoản 2 vẫn chờ
     }
 
+    [Fact]
+    public void GetForHubPush_MangShopLogin_NullChoDonCu()
+    {
+        using var temp = new TempDatabase();
+        var repo = new OrdersRepository(temp.Open());
+
+        // SN1: có shop_login (đẩy hub nhóm theo shop); OLD: đơn cũ (shop_login NULL → fallback subaccount).
+        repo.UpsertMany(1, new[] { Sample("SN1") }, DateTime.UtcNow, shopId: "1001", shopLogin: "alina99.store");
+        repo.UpsertMany(1, new[] { Sample("OLD") }, DateTime.UtcNow);
+
+        var pending = repo.GetForHubPush(1);
+        Assert.Equal("alina99.store", pending.First(p => p.OrderSn == "SN1").ShopLogin);
+        Assert.Null(pending.First(p => p.OrderSn == "OLD").ShopLogin);
+    }
+
+    // ===================== Tra shop_login theo mã đơn (đẩy PHIẾU nhóm theo shop) =====================
+
+    [Fact]
+    public void GetShopLoginsByOrderSns_TraMap_NullChoDonCu_BoDonKhongCoMa()
+    {
+        using var temp = new TempDatabase();
+        var repo = new OrdersRepository(temp.Open());
+        repo.UpsertMany(1, new[] { Sample("SN1") }, DateTime.UtcNow, shopLogin: "alina99.store");
+        repo.UpsertMany(1, new[] { Sample("SN2") }, DateTime.UtcNow, shopLogin: "shop9x.store");
+        repo.UpsertMany(1, new[] { Sample("OLD") }, DateTime.UtcNow); // shop_login NULL (đơn cũ)
+
+        var map = repo.GetShopLoginsByOrderSns(1, new[] { "SN1", "SN2", "OLD", "GHOST" });
+
+        Assert.Equal("alina99.store", map["SN1"]);
+        Assert.Equal("shop9x.store", map["SN2"]);
+        Assert.Null(map["OLD"]);                 // đơn cũ → null trong map (caller fallback subaccount)
+        Assert.False(map.ContainsKey("GHOST"));  // đơn không tồn tại → KHÔNG có trong map
+    }
+
+    [Fact]
+    public void GetShopLoginsByOrderSns_Rong_TraDictRong()
+    {
+        using var temp = new TempDatabase();
+        var repo = new OrdersRepository(temp.Open());
+        repo.UpsertMany(1, new[] { Sample("SN1") }, DateTime.UtcNow, shopLogin: "alina99.store");
+
+        Assert.Empty(repo.GetShopLoginsByOrderSns(1, Array.Empty<string>()));
+    }
+
+    [Fact]
+    public void GetShopLoginsByOrderSns_KhongLanTaiKhoanKhac()
+    {
+        using var temp = new TempDatabase();
+        var repo = new OrdersRepository(temp.Open());
+        repo.UpsertMany(1, new[] { Sample("SN1") }, DateTime.UtcNow, shopLogin: "alina99.store");
+        repo.UpsertMany(2, new[] { Sample("SN1") }, DateTime.UtcNow, shopLogin: "shop9x.store"); // cùng mã, account KHÁC
+
+        var map = repo.GetShopLoginsByOrderSns(1, new[] { "SN1" });
+        Assert.Equal("alina99.store", Assert.Single(map).Value); // chỉ account 1
+    }
+
     // ===================== Đẩy PHIẾU lên Hub: GetForHubSlipPush / MarkHubSlipSynced =====================
 
     [Fact]

@@ -1,7 +1,7 @@
 # Plan: Đẩy đơn + phiếu lên Hub THEO SHOP (không theo subaccount)
 
 - **Ngày:** 2026-07-24
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành code + build 0 lỗi + 929 test (4 mới); chờ deploy + Fable xóa đơn hub + verify thật
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-dev`)
 - **Nền:** Mô hình subaccount → nhiều shop. Hub lưu đơn keyed theo `shop_id` (hub tự cấp từ `ShopUsername`). Client đẩy hiện dùng `ResolveShopUsername(acc)` = **email subaccount** → MỌI shop dồn vào 1 "shop" hub → "sync lên hub chưa được / sai shop".
 
