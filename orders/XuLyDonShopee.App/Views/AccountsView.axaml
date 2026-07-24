@@ -537,7 +537,8 @@
                          ScrollViewer.HorizontalScrollBarVisibility="Disabled">
                     <ListBox.ItemTemplate>
                         <DataTemplate x:DataType="services:LogEntry">
-                            <TextBlock Text="{Binding Display}"
+                            <!-- SelectableTextBlock: cho bôi đen + Ctrl+C chọn từng dòng trực tiếp (ngoài nút Copy chép cả log). -->
+                            <SelectableTextBlock Text="{Binding Display}"
                                        FontFamily="Consolas, Menlo, monospace" FontSize="11"
                                        Foreground="#EDEDED"
                                        TextWrapping="Wrap" Margin="0" />

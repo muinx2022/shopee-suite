@@ -80,23 +80,25 @@ public partial class AccountsView : UserControl
     /// ra ngoài (log nằm trong ListBox từng dòng nên bôi đen không được). Clipboard lấy qua TopLevel. Nuốt lỗi.</summary>
     private async void CopyLog_Click(object? sender, RoutedEventArgs e)
     {
+        if (DataContext is not AccountsViewModel vm)
+        {
+            return;
+        }
         try
         {
-            if (DataContext is not AccountsViewModel vm)
-            {
-                return;
-            }
-
             var text = string.Join("\n", vm.FilteredLogEntries.Select(x => x.Display));
             var clip = TopLevel.GetTopLevel(this)?.Clipboard;
-            if (clip is not null)
+            if (clip is null)
             {
-                await clip.SetTextAsync(text);
+                vm.BusyStatus = "Copy log: không lấy được clipboard.";
+                return;
             }
+            await clip.SetTextAsync(text);
+            vm.BusyStatus = $"Đã copy {vm.FilteredLogEntries.Count} dòng log vào clipboard.";
         }
-        catch
+        catch (System.Exception ex)
         {
-            // Bỏ qua: clipboard không sẵn / panel chưa dựng.
+            vm.BusyStatus = "Copy log lỗi: " + ex.Message;
         }
     }
 
