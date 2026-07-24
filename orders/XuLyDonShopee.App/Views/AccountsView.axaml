@@ -515,9 +515,13 @@
                                    TextTrimming="CharacterEllipsis"
                                    IsVisible="{Binding SelectedRow, Converter={x:Static ObjectConverters.IsNotNull}}" />
                     </Grid>
-                    <Button Grid.Column="1" Classes="logClear"
-                            Content="Xóa" Command="{Binding ClearLogCommand}"
-                            ToolTip.Tip="Xóa các dòng đang hiển thị của tài khoản này (không xóa file log trên đĩa)" />
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6">
+                        <Button Classes="logClear" Content="Copy" Click="CopyLog_Click"
+                                ToolTip.Tip="Chép toàn bộ nhật ký đang hiển thị vào clipboard (để dán ra ngoài)" />
+                        <Button Classes="logClear"
+                                Content="Xóa" Command="{Binding ClearLogCommand}"
+                                ToolTip.Tip="Xóa các dòng đang hiển thị của tài khoản này (không xóa file log trên đĩa)" />
+                    </StackPanel>
                 </Grid>
 
                 <!-- Đường dẫn file log (mờ) để biết nhật ký được ghi ở đâu — 1 dòng. -->

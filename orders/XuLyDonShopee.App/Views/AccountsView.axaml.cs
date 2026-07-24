@@ -1,4 +1,5 @@
 using System.Collections.Specialized;
+using System.Linq;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
@@ -75,6 +76,30 @@ public partial class AccountsView : UserControl
     /// thread cho chắc (FilteredLogEntries chỉ mutate trên UI thread nhưng vẫn phòng hờ). Nuốt mọi lỗi (panel
     /// có thể chưa gắn xong).
     /// </summary>
+    /// <summary>Nút "Copy": chép toàn bộ nhật ký đang hiển thị (FilteredLogEntries → Display) vào clipboard để dán
+    /// ra ngoài (log nằm trong ListBox từng dòng nên bôi đen không được). Clipboard lấy qua TopLevel. Nuốt lỗi.</summary>
+    private async void CopyLog_Click(object? sender, RoutedEventArgs e)
+    {
+        try
+        {
+            if (DataContext is not AccountsViewModel vm)
+            {
+                return;
+            }
+
+            var text = string.Join("\n", vm.FilteredLogEntries.Select(x => x.Display));
+            var clip = TopLevel.GetTopLevel(this)?.Clipboard;
+            if (clip is not null)
+            {
+                await clip.SetTextAsync(text);
+            }
+        }
+        catch
+        {
+            // Bỏ qua: clipboard không sẵn / panel chưa dựng.
+        }
+    }
+
     private void OnLogEntriesChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
         if (e.Action != NotifyCollectionChangedAction.Add)
