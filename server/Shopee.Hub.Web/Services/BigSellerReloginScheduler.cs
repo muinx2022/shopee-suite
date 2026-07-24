@@ -75,7 +75,7 @@ public sealed class BigSellerReloginScheduler : BackgroundService
 
         var ageStr = pickAt == DateTimeOffset.MinValue ? "chưa có cookie file" : $"{(now - pickAt).TotalDays:F1} ngày tuổi";
         _log.LogInformation("relogin định kỳ: {Email} (cookie {Age})…", pick.Email, ageStr);
-        if (!_login.Start(pick.Id, pick.Email, pick.Password))
+        if (!_login.Start(pick.Id, pick.Email, pick.Password, pick.EmailPassword))
         {
             _log.LogInformation("relogin: {Email} — có phiên khác đang chạy, để tick sau.", pick.Email);
             return;   // không đánh dấu _lastAttempt (chỉ bận nhất thời)

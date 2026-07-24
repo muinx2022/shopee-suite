@@ -50,6 +50,8 @@
     <Compile Include="..\..\suite\Shopee.Core\Ai\NameRewriteEngine.cs" Link="Shared\Ai\NameRewriteEngine.cs" />
     <Compile Include="..\..\suite\Shopee.Core\BigSeller\BigSellerCaptchaSolver.cs" Link="Shared\BigSeller\BigSellerCaptchaSolver.cs" />
     <Compile Include="..\..\suite\Shopee.Core\BigSeller\BigSellerLoginForm.cs" Link="Shared\BigSeller\BigSellerLoginForm.cs" />
+    <!-- Reader tự mở Hotmail/Outlook đọc mã verify 6 số BigSeller (hub tự giải OTP thay vì chờ admin gõ tay). -->
+    <Compile Include="..\..\suite\Shopee.Core\BigSeller\HotmailOtpReader.cs" Link="Shared\BigSeller\HotmailOtpReader.cs" />
     <Compile Include="..\..\suite\Shopee.Module.Search\Engine\ProductResult.cs" Link="Shared\Search\ProductResult.cs" />
     <Compile Include="..\..\suite\Shopee.Module.Search\Engine\ExcelExporter.cs" Link="Shared\Search\ExcelExporter.cs" />
     <!-- Cắt tên SP giữ SKU ở đuôi (TruncateProductNamePreservingSku) — REUSE để vá đuôi name_rewritten khi đổi SKU

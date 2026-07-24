@@ -61,8 +61,9 @@ public sealed class BigSellerLoginService : IAsyncDisposable
         get { lock (_gate) return _sessions.Values.Any(s => s.State.Status is "running" or "needsOtp"); }
     }
 
-    /// <summary>Bắt đầu login cho 1 acc (fire-and-forget). Trả false nếu đang chạy.</summary>
-    public bool Start(string acctId, string email, string password)
+    /// <summary>Bắt đầu login cho 1 acc (fire-and-forget). Trả false nếu đang chạy. <paramref name="emailPassword"/>
+    /// (mật khẩu hòm thư Hotmail/Outlook của acc) để hub TỰ đọc mã verify — rỗng thì fallback chờ admin gõ tay.</summary>
+    public bool Start(string acctId, string email, string password, string emailPassword)
     {
         lock (_gate)
         {
@@ -70,7 +71,7 @@ public sealed class BigSellerLoginService : IAsyncDisposable
             var s = new Session();
             s.State.Status = "running";
             _sessions[acctId] = s;
-            _ = Task.Run(() => RunAsync(acctId, email, password, s));
+            _ = Task.Run(() => RunAsync(acctId, email, password, emailPassword, s));
             return true;
         }
     }
@@ -114,7 +115,7 @@ public sealed class BigSellerLoginService : IAsyncDisposable
         finally { _initLock.Release(); }
     }
 
-    private async Task RunAsync(string acctId, string email, string password, Session s)
+    private async Task RunAsync(string acctId, string email, string password, string emailPassword, Session s)
     {
         var ct = s.Cts.Token;
         IBrowserContext? ctx = null;
@@ -137,7 +138,7 @@ public sealed class BigSellerLoginService : IAsyncDisposable
 
             // RunFormLoginAsync tự điều hướng tới trang login + phát hiện "đã đăng nhập sẵn" (url không chứa
             // "login" → Success ngay, khỏi captcha) → FillLoginLoop trả true → xuống CaptureAndSave như cũ.
-            var ok = await FillLoginLoopAsync(page, email, password, ai, s, ct);
+            var ok = await FillLoginLoopAsync(page, email, password, emailPassword, ai, s, ct);
             if (!ok) return;   // FillLoginLoop tự set trạng thái (needsOtp→success, hoặc failed)
 
             await CaptureAndSaveAsync(acctId, ctx, s);
@@ -213,18 +214,20 @@ public sealed class BigSellerLoginService : IAsyncDisposable
     /// <summary>Vòng điền form + captcha — nay ủy cho lõi chung <see cref="BigSellerLoginForm.RunFormLoginAsync"/>.
     /// Rẽ nhánh trang "security" (thiết bị mới) đưa về <see cref="HandleOtpAsync"/> (dừng chờ admin nhập OTP).
     /// Trả true nếu vào được (caller bắt cookie); false nếu đã Fail.</summary>
-    private async Task<bool> FillLoginLoopAsync(IPage page, string email, string password, AiConfig ai, Session s, CancellationToken ct)
+    private async Task<bool> FillLoginLoopAsync(IPage page, string email, string password, string emailPassword, AiConfig ai, Session s, CancellationToken ct)
     {
         var outcome = await BigSellerLoginForm.RunFormLoginAsync(
             page, email, password, ai, msg => Say(s, msg), ct,
-            maxAttempts: 5, onSecurityChallenge: (p, c) => HandleOtpAsync(p, s, c));
+            maxAttempts: 5, onSecurityChallenge: (p, c) => HandleOtpAsync(p, s, email, emailPassword, c));
         if (outcome == BigSellerLoginOutcome.Success) return true;
         Fail(s);
         return false;
     }
 
-    /// <summary>Trang security đòi mã email: dump gợi ý DOM ra log, chờ admin nhập OTP (5'), điền + submit, kiểm tra vào được.</summary>
-    private async Task<bool> HandleOtpAsync(IPage page, Session s, CancellationToken ct)
+    /// <summary>Trang security đòi mã email: bấm "Send Code" → THỬ tự mở Hotmail đọc mã (nếu có mật khẩu email) →
+    /// ra mã thì tự điền + submit; KHÔNG tự đọc được thì FALLBACK về đường cũ (dump DOM, chờ admin gõ tay 10',
+    /// điền + submit). Cả 2 nhánh dùng chung <see cref="SubmitCodeAsync"/>.</summary>
+    private async Task<bool> HandleOtpAsync(IPage page, Session s, string email, string emailPassword, CancellationToken ct)
     {
         // Trang "Account Verification": 6 ô mã (.el-input__inner maxlength=1) + Cloudflare Turnstile + nút
         // Send Code→Confirm + countdown gửi-lại. Bước 1: bấm "Send Code" (nếu còn) để gửi mã 6 số về EMAIL acc.
@@ -235,6 +238,24 @@ public sealed class BigSellerLoginService : IAsyncDisposable
             await Task.Delay(1500, ct);
         }
 
+        // NHÁNH TỰ ĐỌC (THÊM, không thay thế): có mật khẩu email → thử hub tự mở Hotmail đọc mã trước khi phiền admin.
+        if (!string.IsNullOrWhiteSpace(emailPassword))
+        {
+            Say(s, "Thử tự mở Hotmail đọc mã…");
+            string? auto = null;
+            try { auto = await HotmailOtpReader.TryReadCodeAsync(page.Context, email, emailPassword, m => Say(s, m), ct); }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex) { Say(s, "• Tự đọc mã lỗi: " + ex.Message); }
+            if (!string.IsNullOrWhiteSpace(auto))
+            {
+                var autoDigits = new string(auto.Where(char.IsLetterOrDigit).ToArray());
+                Say(s, "✔ Tự đọc được mã từ hộp thư — điền tự động (không cần admin gõ tay).");
+                return await SubmitCodeAsync(page, s, autoDigits, ct);
+            }
+            Say(s, "• Không tự đọc được mã → chờ admin nhập tay.");
+        }
+
+        // FALLBACK (BẤT BIẾN — giữ nguyên đường cũ): chờ admin gõ tay.
         lock (_gate) s.State.Status = "needsOtp";
         Say(s, "⚠ Mã 6 số đã gửi tới EMAIL của tài khoản. Mở email lấy mã, nhập vào đây rồi bấm 'Gửi mã'. (Nhập từ từ được — trang không hết hạn nhanh.)");
         await DumpDomAsync(page, s, "DOM (trang OTP)");
@@ -248,6 +269,13 @@ public sealed class BigSellerLoginService : IAsyncDisposable
 
         lock (_gate) s.State.Status = "running";
         var digits = new string(otp.Where(char.IsLetterOrDigit).ToArray());
+        return await SubmitCodeAsync(page, s, digits, ct);
+    }
+
+    /// <summary>Điền mã <paramref name="digits"/> vào 6 ô + chờ Cloudflare Turnstile/nút Confirm bật + click Confirm
+    /// + kiểm URL đã qua. Dùng chung cho cả nhánh tự-đọc và nhánh admin-gõ-tay. True nếu đã qua trang security.</summary>
+    private async Task<bool> SubmitCodeAsync(IPage page, Session s, string digits, CancellationToken ct)
+    {
         Say(s, $"Đang điền mã '{digits}'…");
         try
         {

@@ -1,7 +1,7 @@
 # Plan: Hub tự mở Hotmail đọc mã verify khi đăng nhập BigSeller
 
 - **Ngày:** 2026-07-24
-- **Trạng thái:** chờ (làm sau khi Plan A `hub-field-matkhau-email-bigseller` nghiệm thu xong)
+- **Trạng thái:** hoàn thành (code xong, build xanh; CHỜ user test thật trên VM)
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-dev`)
 
 ## 1. Bối cảnh & mục tiêu
@@ -113,6 +113,15 @@ Yêu cầu triển khai:
 
 ---
 
-## Báo cáo thực thi (Opus điền sau khi xong)
+## Báo cáo thực thi
 
-<chưa có>
+**Đã làm (Opus + Fable review):**
+- TẠO `suite/Shopee.Core/BigSeller/HotmailOtpReader.cs`: `TryReadCodeAsync(ctx, email, emailPassword, log, ct)` → port đăng nhập Outlook (giữ nhánh landing/Fluent "Xác minh email"/KMSI, bỏ human-move dùng locator thẳng) + viết mới phần đọc mã 6 số (regex `\b\d{6}\b`, KHÔNG click link). Không ném (trừ hủy), gate domain outlook/hotmail/live/msn, không log mật khẩu, đóng tab trong finally.
+- SỬA `BigSellerLoginService.cs`: chuyền `email`+`emailPassword` xuyên `Start→RunAsync→FillLoginLoopAsync→HandleOtpAsync`; nhánh tự-đọc THÊM trước fallback admin-gõ-tay (không thay thế); tách `SubmitCodeAsync` dùng chung 2 nhánh.
+- SỬA `AccountConfigPanel.razor` (`StartLogin` truyền `_acct.EmailPassword`).
+- Điểm lệch ngoài plan (đều hợp lý, đã review): (1) thêm `<Compile Include HotmailOtpReader.cs>` vào `Shopee.Hub.Web.csproj` — Hub.Web link file nguồn Core chứ không ProjectReference; (2) `BigSellerReloginScheduler.cs` là caller thứ 2 của `Start` → truyền `pick.EmailPassword` (relogin định kỳ unattended cũng tự đọc mã — GIỮ, vì tốt hơn treo chờ admin 10').
+- Fable chỉnh thêm (siết false-positive): nhánh đọc-danh-sách trong `ReadBigSellerCodeAsync` chỉ trích mã khi trang chứa "bigseller" (tránh điền mã sai từ số 6 chữ số của mail khác).
+
+**Nghiệm thu:** Fable đọc diff thật + đọc toàn bộ file mới; `dotnet build server/Shopee.Hub.Web` (--no-incremental) XANH 0/0.
+
+**CÒN LẠI — cần user test thật trên VM** (rủi ro cao nhất, đúng cảnh báo mục 5): selector đăng nhập Microsoft/Outlook + DOM hộp thư + parse mã BigSeller CHƯA soi thực tế. Khi test: dùng 1 acc BigSeller có email Hotmail thật + nhập `EmailPassword` ở form hub → bấm "Đăng nhập trên hub"; nếu hỏng, xem log phiên (reader log URL + trạng thái từng bước) để chỉnh selector. Riêng Cloudflare Turnstile ở Chromium headless vẫn có thể chặn nút Confirm (ngoài phạm vi — cần Xvfb).

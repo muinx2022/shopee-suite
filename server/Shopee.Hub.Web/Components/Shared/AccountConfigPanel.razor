@@ -132,7 +132,7 @@ else
     {
         if (string.IsNullOrWhiteSpace(a.Email) || string.IsNullOrWhiteSpace(a.Password))
         { _status = "⚠ Cần Email + Mật khẩu cho acc trước khi login."; return; }
-        Login.Start(a.Id, a.Email.Trim(), a.Password);
+        Login.Start(a.Id, a.Email.Trim(), a.Password, a.EmailPassword);
     }
 
     private void SubmitOtp(string acctId)
