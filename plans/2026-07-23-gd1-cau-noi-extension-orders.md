@@ -1,7 +1,7 @@
 # Plan GĐ1: Cầu nối extension↔C# cho Đơn hàng + lát cắt kiểm chứng (chưa port business logic)
 
 - **Ngày:** 2026-07-23
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành — **ĐẠT, verified end-to-end 2026-07-24** (cùng GĐ2 pivot): bản sạch + extension đọc 3 shop → tự bấm Chi tiết vào shop KHÔNG captcha → đọc Chờ Lấy Hàng. Xem Nhật ký roadmap cho các "tường" đã vượt (cổng cố định, KillBrowsersOnProfile, PrepareFreshExtensionCopy chống SW-cache, poll shop).
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-dev`)
 - **Thuộc:** roadmap `plans/2026-07-23-orders-extension-migration-roadmap.md` (GĐ0 ĐẠT). Nối tiếp POC `2026-07-23-poc-mo-sach-*.md`.
 
