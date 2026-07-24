@@ -367,7 +367,8 @@ function pageModalHasTitle(reSrc) {
   for (const box of document.querySelectorAll(".eds-modal__box")) {
     const r = box.getBoundingClientRect();
     if (!(r.width > 0 && r.height > 0)) continue;
-    const title = box.querySelector(".title");
+    // Tiêu đề modal CHUẨN là .eds-modal__title (KHÔNG phải .title — .title đầu tiên thường là order-sn/logo).
+    const title = box.querySelector(".eds-modal__title") || box.querySelector(".title");
     if (title && re.test(_na(title.textContent))) return true;
   }
   return false;
@@ -380,7 +381,7 @@ function pageLocateInModal(titleReSrc, selectors, textReSrc) {
   for (const box of document.querySelectorAll(".eds-modal__box")) {
     const r = box.getBoundingClientRect();
     if (!(r.width > 0 && r.height > 0)) continue;
-    const title = box.querySelector(".title");
+    const title = box.querySelector(".eds-modal__title") || box.querySelector(".title");
     if (!title || !tre.test(_na(title.textContent))) continue;
     for (const sel of selectors) {
       let els;
@@ -474,24 +475,50 @@ function pageFindAddressEdit(province) {
   return null;
 }
 
-// Checkbox "Đặt làm địa chỉ lấy hàng" trong modal "Sửa Địa chỉ" → {x,y,checked}. null nếu không thấy.
-function pageCheckboxState() {
+// Checkbox ĐẦU TIÊN cần tick trong modal "Sửa Địa chỉ" (đã cuộn vào giữa) → {x,y}; null nếu không còn.
+// BỎ QUA: đã tick, DISABLED (vd "lấy hàng" đang là địa chỉ hiện tại — không đổi được), và (nếu skipReturn) "trả hàng".
+// User: set địa chỉ LẤY HÀNG → tick cả 3; set VỀ địa chỉ khác → skipReturn=true (chỉ mặc định + lấy hàng, giữ trả hàng ở địa chỉ mặc định).
+function pageFirstUncheckedBox(skipReturn) {
   for (const box of document.querySelectorAll(".eds-modal__box")) {
     const r = box.getBoundingClientRect();
     if (!(r.width > 0 && r.height > 0)) continue;
-    const title = box.querySelector(".title");
+    const title = box.querySelector(".eds-modal__title") || box.querySelector(".title");
     if (!title || _na(title.textContent) !== "sua dia chi") continue;
     for (const lbl of box.querySelectorAll("label.eds-checkbox")) {
-      if (_na(lbl.textContent) === "dat lam dia chi lay hang") {
-        const inp = lbl.querySelector("input.eds-checkbox__input");
-        const checked = inp ? inp.checked === true : false;
-        const b0 = lbl.getBoundingClientRect();
-        if (!(b0.width > 0 && b0.height > 0)) continue;
-        try { lbl.scrollIntoView({ block: "center" }); } catch (e) {}
-        const b = lbl.getBoundingClientRect();
-        return { x: Math.round(b.left + b.width / 2), y: Math.round(b.top + b.height / 2), checked: checked };
-      }
+      const cls = typeof lbl.className === "string" ? lbl.className : "";
+      if (cls.indexOf("disabled") >= 0) continue; // disabled → không tick được (thường là đã set)
+      const inp = lbl.querySelector("input.eds-checkbox__input");
+      if (inp && (inp.checked === true || inp.disabled === true)) continue;
+      if (skipReturn && _na(lbl.textContent).indexOf("tra hang") >= 0) continue; // giữ trả hàng ở địa chỉ mặc định
+      const b0 = lbl.getBoundingClientRect();
+      if (!(b0.width > 0 && b0.height > 0)) continue;
+      try { lbl.scrollIntoView({ block: "center" }); } catch (e) {}
+      const b = lbl.getBoundingClientRect();
+      return { x: Math.round(b.left + b.width / 2), y: Math.round(b.top + b.height / 2) };
     }
+    return null; // modal Sửa Địa chỉ đã thấy nhưng không còn checkbox cần tick
+  }
+  return null;
+}
+
+// Đếm checkbox trong modal "Sửa Địa chỉ" → {total, done}. done = số checkbox đã tick HOẶC disabled (đã set). null nếu chưa mở.
+function pageCheckboxCount() {
+  for (const box of document.querySelectorAll(".eds-modal__box")) {
+    const r = box.getBoundingClientRect();
+    if (!(r.width > 0 && r.height > 0)) continue;
+    const title = box.querySelector(".eds-modal__title") || box.querySelector(".title");
+    if (!title || _na(title.textContent) !== "sua dia chi") continue;
+    let total = 0, done = 0;
+    for (const lbl of box.querySelectorAll("label.eds-checkbox")) {
+      const b = lbl.getBoundingClientRect();
+      if (!(b.width > 0 && b.height > 0)) continue;
+      total++;
+      const cls = typeof lbl.className === "string" ? lbl.className : "";
+      const inp = lbl.querySelector("input.eds-checkbox__input");
+      const disabled = cls.indexOf("disabled") >= 0 || (inp && inp.disabled === true);
+      if ((inp && inp.checked === true) || disabled) done++;
+    }
+    return { total: total, done: done };
   }
   return null;
 }
@@ -977,8 +1004,12 @@ async function doSetPickupAddress(province) {
     await sleep(500);
   }
   if (!info || !info.found) { send({ action: "progress", message: "không thấy địa chỉ khớp tỉnh " + province + " — bỏ đặt địa chỉ lấy hàng." }); send({ action: "pickupDone", ok: false }); return; }
-  if (info.hasTag) { send({ action: "progress", message: "địa chỉ " + province + " đã là địa chỉ lấy hàng." }); send({ action: "pickupDone", ok: true }); return; }
-  if (!info.hasEdit) { send({ action: "progress", message: "không thấy nút Sửa của địa chỉ " + province + "." }); send({ action: "pickupDone", ok: false }); return; }
+  // KHÔNG return sớm khi đã là pickup: vẫn mở Sửa để đảm bảo đủ 3 dấu tick (mặc định + lấy hàng + trả hàng).
+  if (!info.hasEdit) {
+    send({ action: "progress", message: info.hasTag ? ("địa chỉ " + province + " đã là địa chỉ lấy hàng (không có nút Sửa).") : ("không thấy nút Sửa của địa chỉ " + province + ".") });
+    send({ action: "pickupDone", ok: info.hasTag });
+    return;
+  }
 
   await trustedClick(tabId, info.x, info.y);
 
@@ -989,12 +1020,18 @@ async function doSetPickupAddress(province) {
   if (!hasModal) { send({ action: "progress", message: "không mở được modal Sửa Địa chỉ." }); send({ action: "pickupDone", ok: false }); return; }
   await sleep(800);
 
-  // Tick checkbox "Đặt làm địa chỉ lấy hàng" nếu chưa (≤3 lần).
-  let cb = await execInTab(tabId, pageCheckboxState, []);
-  if (!cb) { send({ action: "progress", message: "không thấy checkbox địa chỉ lấy hàng." }); send({ action: "pickupDone", ok: false }); return; }
-  let tries = 0;
-  while (cb && !cb.checked && tries < 3) { tries++; await trustedClick(tabId, cb.x, cb.y); await sleep(600); cb = await execInTab(tabId, pageCheckboxState, []); }
-  if (!cb || !cb.checked) { send({ action: "progress", message: "không tick được checkbox địa chỉ lấy hàng." }); send({ action: "pickupDone", ok: false }); return; }
+  // Tick TẤT CẢ checkbox cần (mặc định + lấy hàng + trả hàng) — bỏ qua cái đã tick / disabled. Lặp lấy-cái-đầu-chưa-tick → click.
+  let cbGuard = 0;
+  while (cbGuard < 8) {
+    cbGuard++;
+    const un = await execInTab(tabId, pageFirstUncheckedBox, [false]);
+    if (!un) break;
+    await trustedClick(tabId, un.x, un.y);
+    await sleep(500);
+  }
+  const cnt = await execInTab(tabId, pageCheckboxCount, []);
+  if (!cnt || cnt.total === 0) { send({ action: "progress", message: "không thấy checkbox trong modal Sửa Địa chỉ." }); send({ action: "pickupDone", ok: false }); return; }
+  send({ action: "progress", message: "đã đảm bảo " + cnt.done + "/" + cnt.total + " checkbox địa chỉ có dấu tick." });
 
   // Lưu.
   const save = await execInTab(tabId, pageLocateInModal, ["^sua dia chi$", [".eds-modal__footer button", "button", "[role='button']"], "^luu$"]);
