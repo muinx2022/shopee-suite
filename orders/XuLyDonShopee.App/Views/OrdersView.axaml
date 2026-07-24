@@ -151,7 +151,7 @@
                   AutoGenerateColumns="False"
                   CanUserResizeColumns="True">
             <DataGrid.Columns>
-                <DataGridTextColumn Header="Shop" Binding="{Binding ShopLabel}" Width="1.3*" />
+                <DataGridTextColumn Header="Shop" Binding="{Binding ShopLabel}" Width="1.7*" MinWidth="120" />
                 <DataGridTextColumn Header="Mã đơn" Binding="{Binding OrderSn}" Width="130" />
                 <DataGridTemplateColumn Header="Phiếu" Width="96">
                     <DataGridTemplateColumn.CellTemplate>
