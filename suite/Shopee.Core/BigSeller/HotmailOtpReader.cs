@@ -17,10 +17,11 @@ namespace Shopee.Core.BigSeller;
 /// </summary>
 public static class HotmailOtpReader
 {
-    // Chỉ tự đọc khi email thuộc các domain Microsoft (so đuôi sau '@', không phân biệt hoa/thường). Email khác
-    // (gmail, tên miền riêng…) → trả null ngay để fallback gõ tay.
-    private static readonly string[] AllowedMailDomains =
-        { "outlook.com", "hotmail.com", "live.com", "live.vn", "msn.com" };
+    // "Họ" domain Microsoft/Outlook. Chỉ email thuộc các họ này (đúng bằng tên họ HOẶC có tiền tố "họ.") mới TỰ mở
+    // page đọc mã — khớp cả đuôi quốc gia (hotmail.fr, outlook.com.vn, live.co.uk…). Email KHÁC (gmail, yahoo, tên
+    // miền riêng…) → trả null ngay, KHÔNG mở page, để caller hiển thị ô nhập mã tay như thường.
+    private static readonly string[] MsDomainFamilies =
+        { "hotmail", "outlook", "live", "msn", "windowslive", "passport" };
 
     // --- Selector đăng nhập Microsoft/Outlook (đổi thường xuyên → luôn nhiều fallback, timeout ngắn bỏ qua được).
     //     PORT từ ShopeeLoginService (MsUserSelectors…MsSignInSelectors). ---
@@ -122,13 +123,19 @@ public static class HotmailOtpReader
         }
     }
 
-    /// <summary>True nếu đuôi sau '@' của <paramref name="email"/> thuộc <see cref="AllowedMailDomains"/> (IgnoreCase).</summary>
+    /// <summary>True nếu đuôi sau '@' của <paramref name="email"/> thuộc họ domain Microsoft/Outlook
+    /// (<see cref="MsDomainFamilies"/>) — khớp cả đuôi quốc gia (hotmail.fr, outlook.com.vn, live.co.uk…). Mail khác
+    /// (gmail, yahoo, tên miền riêng) → false: KHÔNG tự mở page, hiển thị ô nhập mã tay như thường.</summary>
     private static bool IsSupportedMailDomain(string email)
     {
         var at = email.LastIndexOf('@');
         if (at < 0 || at == email.Length - 1) return false;
         var domain = email[(at + 1)..].Trim().ToLowerInvariant();
-        return AllowedMailDomains.Contains(domain, StringComparer.Ordinal);
+        if (domain.Length == 0) return false;
+        foreach (var fam in MsDomainFamilies)
+            if (domain == fam || domain.StartsWith(fam + ".", StringComparison.Ordinal))
+                return true;
+        return false;
     }
 
     /// <summary>Đăng nhập hộp thư Microsoft: username → (form Fluent "Xác minh email" → "Các cách khác" → tile
