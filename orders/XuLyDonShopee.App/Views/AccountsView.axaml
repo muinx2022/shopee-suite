@@ -23,6 +23,26 @@
     <!-- Style CỤC BỘ cho màn này (không đụng style chung → không ảnh hưởng màn khác). -->
     <UserControl.Styles>
 
+        <!-- Log TextBox: ÉP nền trong suốt + viền ẩn ở MỌI trạng thái (normal/hover/focus) để không đổi sang trắng;
+             bôi đen dùng màu xanh tối (không trắng lóa). Override cả Border template PART_BorderElement. -->
+        <Style Selector="TextBox#LogBox">
+            <Setter Property="SelectionBrush" Value="#37507A" />
+            <Setter Property="SelectionForegroundBrush" Value="#FFFFFF" />
+            <Setter Property="CaretBrush" Value="#EDEDED" />
+        </Style>
+        <Style Selector="TextBox#LogBox /template/ Border#PART_BorderElement">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+        </Style>
+        <Style Selector="TextBox#LogBox:pointerover /template/ Border#PART_BorderElement">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+        </Style>
+        <Style Selector="TextBox#LogBox:focus /template/ Border#PART_BorderElement">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+        </Style>
+
         <!-- Nút icon vuông của hàng thao tác nhóm (Chọn toàn bộ / Sync đã chọn / Dừng đã chọn / Dừng tất cả). -->
         <Style Selector="Button.iconAction">
             <Setter Property="Width" Value="34" />
