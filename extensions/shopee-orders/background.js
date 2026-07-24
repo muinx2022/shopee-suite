@@ -1137,7 +1137,9 @@ async function doPrepareNextOrder() {
   await sleep(1000);
 
   // "In phiếu giao" → bắt tab phiếu (window.open → awbprint). Bấm lặp tới khi có tab (Shopee tạo vận đơn có thể muộn, ~2').
+  send({ action: "progress", message: "modal Chi Tiết mở — tìm + bấm 'In phiếu giao'..." });
   let slipTab = null;
+  let printTries = 0;
   const printDeadline = Date.now() + 120000;
   while (!slipTab && Date.now() < printDeadline) {
     const tabs = await chrome.tabs.query({});
@@ -1145,7 +1147,13 @@ async function doPrepareNextOrder() {
     if (cand) { slipTab = cand; break; }
     await ensureDbg(tabId);
     const pbtn = await execInTab(tabId, pagePrintButton, []);
-    if (pbtn) { await trustedClick(tabId, pbtn.x, pbtn.y); }
+    printTries++;
+    if (pbtn) {
+      await trustedClick(tabId, pbtn.x, pbtn.y);
+      if (printTries <= 2) send({ action: "progress", message: "đã bấm 'In phiếu giao' tại (" + pbtn.x + "," + pbtn.y + ") — chờ tab phiếu..." });
+    } else {
+      if (printTries <= 2) send({ action: "progress", message: "CHƯA thấy nút 'In phiếu giao' (data-testid=print-button) — thử lại..." });
+    }
     const wt = Date.now() + 8000;
     while (!slipTab && Date.now() < wt) {
       const tt = await chrome.tabs.query({});
@@ -1155,7 +1163,8 @@ async function doPrepareNextOrder() {
     }
     if (!slipTab) await sleep(800);
   }
-  if (!slipTab) { send({ action: "error", message: "không mở được tab phiếu giao (đơn " + orderCode + ")" }); return; }
+  if (!slipTab) { send({ action: "error", message: "không mở được tab phiếu giao sau " + printTries + " lần bấm (đơn " + orderCode + ")" }); return; }
+  send({ action: "progress", message: "đã bắt được tab phiếu (sau " + printTries + " lần bấm)." });
 
   // Chờ tab phiếu điều hướng tới awbprint.
   const slipId = slipTab.id;
