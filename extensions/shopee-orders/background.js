@@ -397,6 +397,26 @@ function pageModalHasTitle(reSrc) {
   return false;
 }
 
+// CHẨN ĐOÁN: dump text + các phần tử nghi chứa mã vận đơn của modal khớp titleReSrc (tìm mã vận đơn lúc prepare).
+function pageDumpModalTracking(titleReSrc) {
+  const tre = new RegExp(titleReSrc);
+  const norm = (s) => (s || "").replace(/\s+/g, " ").trim();
+  for (const box of document.querySelectorAll(".eds-modal__box")) {
+    const r = box.getBoundingClientRect();
+    if (!(r.width > 0 && r.height > 0)) continue;
+    const title = box.querySelector(".eds-modal__title") || box.querySelector(".title");
+    if (!(title && tre.test(_na(title.textContent)))) continue;
+    // Các phần tử có class chứa 'tracking'/'waybill' hoặc text có SPX / mã ngắn near "vận đơn".
+    const hints = [];
+    for (const el of box.querySelectorAll("[class*=tracking],[class*=waybill],[class*=awb],[class*=logistic]")) {
+      const t = norm(el.textContent);
+      if (t) hints.push((typeof el.className === "string" ? el.className : "") + " => " + t.slice(0, 60));
+    }
+    return "TEXT[" + norm(box.innerText).slice(0, 900) + "] || HINTS[" + hints.slice(0, 8).join(" ~ ") + "]";
+  }
+  return "(khong thay modal " + titleReSrc + ")";
+}
+
 // Trong modal có .title khớp titleReSrc, tìm phần tử (theo selectors) có text khớp textReSrc → {x,y,selected}.
 function pageLocateInModal(titleReSrc, selectors, textReSrc) {
   const tre = new RegExp(titleReSrc);
@@ -1346,6 +1366,9 @@ async function doPrepareNextOrder() {
   while (Date.now() < dl2) { hasDetail = await execInTab(tabId, pageModalHasTitle, ["^thong tin chi tiet$"]); if (hasDetail) break; await sleep(500); }
   if (!hasDetail) { send({ action: "error", message: "không mở được modal Thông Tin Chi Tiết (đơn " + orderCode + ")" }); return; }
   await sleep(1000);
+
+  // CHẨN ĐOÁN (tạm): dump nội dung modal Thông Tin Chi Tiết để soi mã vận đơn nằm đâu (bắt tại chỗ, khỏi chờ sync sau).
+  try { const dtk = await execInTab(tabId, pageDumpModalTracking, ["^thong tin chi tiet$"]); send({ action: "progress", message: "DUMP-CHITIET(" + orderCode + "): " + dtk }); } catch (e) {}
 
   // "In phiếu giao" → bắt tab phiếu (window.open → awbprint). Bấm lặp tới khi có tab (Shopee tạo vận đơn có thể muộn, ~2').
   send({ action: "progress", message: "modal Chi Tiết mở — tìm + bấm 'In phiếu giao'..." });
