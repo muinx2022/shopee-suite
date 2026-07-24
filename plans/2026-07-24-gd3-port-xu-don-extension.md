@@ -1,7 +1,7 @@
 # Plan GĐ3: Port đọc + xử đơn 1 shop sang extension (trên nền cầu nối GĐ1+GĐ2 đã đạt)
 
 - **Ngày:** 2026-07-24
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành — **VERIFIED THẬT 2026-07-24 (1 shop end-to-end, KHÔNG captcha):** đọc đơn → đặt địa chỉ (3 checkbox) → Chuẩn bị hàng → in phiếu → **lưu PDF OK** → hết đơn → set địa chỉ về địa chỉ khác. Bẫy đã vượt: helper `_na` world:MAIN (inject qua execInTab), tiêu đề modal `.eds-modal__title`, lưu phiếu = extension fetch blob trong tab awbprint (cookie) → base64, giữ debugger attach xuyên suốt, nút In phiếu scope trong modal (né link order list), sticky-shop (SSO qua /account). GĐ4 kế tiếp: vòng lặp mọi shop + sync + thay nút Chạy cũ.
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-dev`)
 - **Nền:** GĐ1+GĐ2 ĐẠT (login Playwright → clean+extension đọc shop + Chi tiết KHÔNG captcha). Xem roadmap.
 
