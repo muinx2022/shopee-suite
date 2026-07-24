@@ -70,6 +70,7 @@ public sealed class OrdersBridgeSession : IDisposable
     private TaskCompletionSource<string?> _toShipTcs = NewTcs<string?>();
     private TaskCompletionSource<string?> _ordersTcs = NewTcs<string?>();      // GĐ3: JSON mảng đơn
     private TaskCompletionSource<bool> _pickupTcs = NewTcs<bool>();            // GĐ3: đặt địa chỉ lấy hàng xong
+    private TaskCompletionSource<bool> _pickupOtherTcs = NewTcs<bool>();       // GĐ3: set địa chỉ VỀ địa chỉ khác xong
     private TaskCompletionSource<PrepareResult?> _prepareTcs = NewTcs<PrepareResult?>(); // GĐ3: 1 đơn (null=hết)
 
     private bool _captchaSeen;
@@ -103,6 +104,7 @@ public sealed class OrdersBridgeSession : IDisposable
         _toShipTcs = NewTcs<string?>();
         _ordersTcs = NewTcs<string?>();
         _pickupTcs = NewTcs<bool>();
+        _pickupOtherTcs = NewTcs<bool>();
         _prepareTcs = NewTcs<PrepareResult?>();
         _captchaSeen = false;
     }
@@ -451,6 +453,13 @@ public sealed class OrdersBridgeSession : IDisposable
                 L($"Đã chuẩn bị đơn {prep.OrderCode} — {(saved ? "lưu phiếu OK" : "CHƯA lưu được phiếu (kiểm tra tay)")}.");
             }
             L($"Xử đơn xong: {slips} phiếu đã lưu.");
+
+            // Hết đơn → set địa chỉ lấy hàng VỀ ĐỊA CHỈ KHÁC (giữ tag "trả hàng" ở địa chỉ mặc định) — hoàn tất 1 flow shop.
+            L("Set địa chỉ lấy hàng về địa chỉ khác (hoàn tất flow shop)...");
+            _pickupOtherTcs = NewTcs<bool>();
+            await _ws.SendAsync(new { action = "setPickupAddressToOther" }).ConfigureAwait(false);
+            try { await _pickupOtherTcs.Task.WaitAsync(TimeSpan.FromSeconds(60), ct).ConfigureAwait(false); }
+            catch (TimeoutException) { L("Set địa chỉ khác: quá hạn — bỏ qua."); }
         }
 
         return (orders.Count, slips);
@@ -536,6 +545,13 @@ public sealed class OrdersBridgeSession : IDisposable
                     break;
                 }
 
+                case "pickupOtherDone":
+                {
+                    var ok = root.TryGetProperty("ok", out var o) && o.ValueKind == JsonValueKind.True;
+                    _pickupOtherTcs.TrySetResult(ok);
+                    break;
+                }
+
                 case "orderPrepared":
                 {
                     var code = root.TryGetProperty("orderCode", out var oc) ? (oc.GetString() ?? string.Empty) : string.Empty;
@@ -567,6 +583,7 @@ public sealed class OrdersBridgeSession : IDisposable
                     _detailTcs.TrySetResult("captcha");
                     _ordersTcs.TrySetResult(null);
                     _pickupTcs.TrySetResult(false);
+                    _pickupOtherTcs.TrySetResult(false);
                     _prepareTcs.TrySetResult(null);
                     break;
                 }
@@ -584,6 +601,7 @@ public sealed class OrdersBridgeSession : IDisposable
                     _toShipTcs.TrySetException(ex);
                     _ordersTcs.TrySetException(ex);
                     _pickupTcs.TrySetException(ex);
+                    _pickupOtherTcs.TrySetException(ex);
                     _prepareTcs.TrySetException(ex);
                     break;
                 }

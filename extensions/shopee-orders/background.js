@@ -495,6 +495,30 @@ function pageFindAddressEdit(province) {
   return null;
 }
 
+// Địa chỉ ĐẦU TIÊN KHÔNG mang tag "Địa chỉ lấy hàng" (để "set về địa chỉ khác") → {found,hasEdit,x,y (nút Sửa)}.
+function pageFindOtherAddressEdit() {
+  const items = document.querySelectorAll(".address-list .address-item-container");
+  for (const it of items) {
+    let hasTag = false;
+    for (const tag of it.querySelectorAll(".address-label")) {
+      if (_na(tag.textContent) === "dia chi lay hang") { hasTag = true; break; }
+    }
+    if (hasTag) continue; // đang là địa chỉ lấy hàng → tìm địa chỉ KHÁC
+    let edit = null;
+    for (const b of it.querySelectorAll("button, [role='button'], a")) {
+      if (_na(b.textContent) === "sua") {
+        const r = b.getBoundingClientRect();
+        if (r.width > 0 && r.height > 0) { edit = b; break; }
+      }
+    }
+    if (!edit) continue;
+    try { edit.scrollIntoView({ block: "center" }); } catch (e) {}
+    const r = edit.getBoundingClientRect();
+    return { found: true, hasEdit: true, x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+  }
+  return { found: false, hasEdit: false, x: 0, y: 0 };
+}
+
 // Checkbox ĐẦU TIÊN cần tick trong modal "Sửa Địa chỉ" (đã cuộn vào giữa) → {x,y}; null nếu không còn.
 // BỎ QUA: đã tick, DISABLED (vd "lấy hàng" đang là địa chỉ hiện tại — không đổi được), và (nếu skipReturn) "trả hàng".
 // User: set địa chỉ LẤY HÀNG → tick cả 3; set VỀ địa chỉ khác → skipReturn=true (chỉ mặc định + lấy hàng, giữ trả hàng ở địa chỉ mặc định).
@@ -749,6 +773,7 @@ async function handleCommand(cmd) {
     case "readToShip":       await doReadToShip(); return;
     case "syncOrders":       await doSyncOrders(); return;
     case "setPickupAddress": await doSetPickupAddress(String(cmd.province || "")); return;
+    case "setPickupAddressToOther": await doSetPickupAddressToOther(); return;
     case "prepareNextOrder": await doPrepareNextOrder(); return;
   }
 }
@@ -1084,6 +1109,76 @@ async function doSetPickupAddress(province) {
 
   send({ action: "progress", message: "đã đặt địa chỉ lấy hàng = " + province + "." });
   send({ action: "pickupDone", ok: true });
+}
+
+// Set địa chỉ lấy hàng VỀ ĐỊA CHỈ KHÁC (sau khi xử hết đơn) — port SetPickupAddressToOtherAsync. Tick CHỈ 2
+// (mặc định + lấy hàng, skipReturn=true → GIỮ tag "trả hàng" ở địa chỉ mặc định). → {action:"pickupOtherDone", ok}.
+async function doSetPickupAddressToOther() {
+  const tabId = orderTabId();
+  if (tabId == null) { send({ action: "error", message: "chưa có tab shop để set địa chỉ khác" }); return; }
+
+  try { await chrome.tabs.update(tabId, { url: SHIPPING_SETTINGS_URL }); } catch (e) {}
+  await waitTabComplete(tabId, 20000);
+  let url = "";
+  try { url = (await chrome.tabs.get(tabId)).url || ""; } catch (e) {}
+  if (/\/verify/i.test(url)) { send({ action: "captcha", message: url }); return; }
+
+  await sleep(1000);
+  // Tab "Địa Chỉ".
+  let addrTab = null;
+  const dl0 = Date.now() + 10000;
+  while (Date.now() < dl0) {
+    addrTab = await execInTab(tabId, pageLocateByText, [[".eds-tabs__nav-tab", "[role='tab']", "div", "span", "a"], "dia chi"]);
+    if (addrTab) break;
+    await sleep(500);
+  }
+  if (addrTab) { await trustedClick(tabId, addrTab.x, addrTab.y); await sleep(1200); }
+
+  // Địa chỉ KHÁC (không mang tag "lấy hàng").
+  let info = null;
+  const dl = Date.now() + 15000;
+  while (Date.now() < dl) {
+    info = await execInTab(tabId, pageFindOtherAddressEdit, []);
+    if (info && info.found) break;
+    await sleep(500);
+  }
+  if (!info || !info.found || !info.hasEdit) {
+    send({ action: "progress", message: "không thấy địa chỉ khác (không mang tag lấy hàng) — bỏ qua set về địa chỉ khác." });
+    send({ action: "pickupOtherDone", ok: false });
+    return;
+  }
+
+  await trustedClick(tabId, info.x, info.y);
+
+  // Modal "Sửa Địa chỉ".
+  let hasModal = false;
+  const dlm = Date.now() + 10000;
+  while (Date.now() < dlm) { hasModal = await execInTab(tabId, pageModalHasTitle, ["^sua dia chi$"]); if (hasModal) break; await sleep(400); }
+  if (!hasModal) { send({ action: "progress", message: "không mở được modal Sửa Địa chỉ (set khác)." }); send({ action: "pickupOtherDone", ok: false }); return; }
+  await sleep(800);
+
+  // Tick 2 (mặc định + lấy hàng) — skipReturn=true: GIỮ "trả hàng" ở địa chỉ mặc định.
+  let cbGuard = 0;
+  while (cbGuard < 8) {
+    cbGuard++;
+    const un = await execInTab(tabId, pageFirstUncheckedBox, [true]);
+    if (!un) break;
+    await trustedClick(tabId, un.x, un.y);
+    await sleep(500);
+  }
+
+  // Lưu.
+  const save = await execInTab(tabId, pageLocateInModal, ["^sua dia chi$", [".eds-modal__footer button", "button", "[role='button']"], "^luu$"]);
+  if (!save) { send({ action: "progress", message: "không thấy nút Lưu (set khác)." }); send({ action: "pickupOtherDone", ok: false }); return; }
+  await trustedClick(tabId, save.x, save.y);
+  await sleep(1200);
+
+  // "Đồng ý" (nếu hiện).
+  const confirm = await execInTab(tabId, pageLocateByText, [[".eds-modal__footer button", "button", "[role='button']"], "^dong y$"]);
+  if (confirm) { await trustedClick(tabId, confirm.x, confirm.y); await sleep(1000); }
+
+  send({ action: "progress", message: "đã set địa chỉ lấy hàng VỀ địa chỉ khác (giữ trả hàng ở địa chỉ mặc định)." });
+  send({ action: "pickupOtherDone", ok: true });
 }
 
 // Phần B: xử ĐƠN ĐẦU cần "Chuẩn bị hàng" (port ProcessFirstOrderAsync). → {action:"orderPrepared",...} hoặc {action:"noOrder"}.
