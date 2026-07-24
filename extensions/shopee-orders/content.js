@@ -12,20 +12,4 @@
   } catch (e) { /* bỏ qua */ }
 
   try { chrome.runtime.sendMessage({ type: "wake", wsPort: port, href: location.href }); } catch (e) {}
-
-  // Badge chẩn đoán (tạm thời trong lúc kiểm chứng cầu nối) — xác nhận content.js CHẠY + host + cổng đang dùng.
-  try {
-    const draw = () => {
-      if (!document.body || document.getElementById("__od_badge")) return;
-      const b = document.createElement("div");
-      b.id = "__od_badge";
-      b.textContent = "OD bridge · port=" + port + " · " + location.host;
-      b.style.cssText =
-        "position:fixed;left:8px;bottom:8px;z-index:2147483647;background:#ee4d2d;color:#fff;" +
-        "font:12px/1.4 Arial,sans-serif;padding:4px 9px;border-radius:6px;opacity:.9;pointer-events:none";
-      document.body.appendChild(b);
-    };
-    draw();
-    new MutationObserver(draw).observe(document.documentElement, { childList: true, subtree: true });
-  } catch (e) { /* bỏ qua */ }
 })();
