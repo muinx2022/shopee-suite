@@ -314,29 +314,11 @@
                                        Foreground="{StaticResource TextMuted}" Margin="0,2,0,0" />
                         </StackPanel>
 
-                        <!-- Hàng nút thao tác PHIÊN: gom còn ĐÚNG 2 nút — Chạy (MỞ PHIÊN, hành động chính) + Dừng.
-                             WrapPanel canh phải nên khi cột HẸP nút TỰ RỚT DÒNG (không bao giờ bị cắt); WrapPanel
-                             không có Spacing → từng nút Margin trái 8 (thêm 4 dọc để các dòng khi rớt thở nhau,
-                             đối xứng nên không lệch dọc khi 1 hàng). Lưu/Hủy đã chuyển XUỐNG DƯỚI CÙNG form. -->
-                        <WrapPanel HorizontalAlignment="Right" Margin="0,0,0,16">
-                            <!-- Chạy: mở phiên → đăng nhập tài khoản phụ → tự lặp qua các shop (kiểm tra → chuẩn bị hàng → sync về máy + Google Sheet). -->
-                            <Button Classes="accent formIcon" Content="▶ Chạy" Margin="8,4,0,4"
-                                    Command="{Binding RunCommand}"
-                                    IsEnabled="{Binding CanRun}"
-                                    ToolTip.Tip="Chạy — Mở trang, đăng nhập Nền tảng tài khoản phụ rồi tự lặp qua các shop (kiểm tra → chuẩn bị hàng → sync về máy + Google Sheet), nghỉ 3–5' giữa các shop, lặp tới khi Dừng" />
-                            <!-- Dừng: dừng toàn bộ việc đang làm của tài khoản này và đóng trang bán hàng (Brave). -->
-                            <Button Classes="secondary formIcon" Content="■ Dừng" Margin="8,4,0,4"
-                                    Command="{Binding StopCommand}"
-                                    IsEnabled="{Binding CanStop}"
-                                    ToolTip.Tip="Dừng — Dừng toàn bộ việc đang làm của tài khoản này (kể cả 'Chạy thử') và đóng trình duyệt" />
-                            <!-- Chạy thử (bridge) GĐ2 pivot: đăng nhập bằng Playwright (an toàn) → đóng → mở lại trình duyệt SẠCH + extension để đọc Seller Centre (lát cắt readShopList→openShopDetail→readToShip). -->
-                            <Button Classes="secondary formIcon" Content="🧪 Chạy thử (đăng nhập + shop)" Margin="8,4,0,4"
-                                    Command="{Binding ChayThuBridgeCommand}"
-                                    IsEnabled="{Binding CanRun}"
-                                    ToolTip.Tip="Chạy thử (đăng nhập + shop) — đăng nhập Nền tảng tài khoản phụ bằng trình duyệt điều khiển (Playwright): tự điền form + mở hộp thư cho bạn tự đọc mã + tự vào Kênh Người bán; xong thì đóng và mở lại bằng trình duyệt SẠCH + extension để đọc danh sách shop → mở 'Chi tiết' shop đầu bằng trusted click (né captcha) → đọc số 'Chờ Lấy Hàng'. Kết quả đổ ra panel log. Dừng phiên đang chạy trước khi bấm." />
-                        </WrapPanel>
+                        <!-- (Hàng nút thao tác PHIÊN ▶ Chạy / ■ Dừng / 🧪 Chạy thử đã BỎ — mọi thao tác chạy/dừng
+                             qua nhóm "Hành động" trên Ribbon; command RunCommand/StopCommand/ChayThuBridgeCommand
+                             vẫn còn trong ViewModel, giữ để có thể đưa lên Ribbon nếu cần.) -->
 
-                        <!-- Thông báo trạng thái (Mở trang bán hàng / Xử lý đơn / theo dõi đơn) — ngay dưới hàng nút. -->
+                        <!-- Thông báo trạng thái (Mở trang bán hàng / Xử lý đơn / theo dõi đơn). -->
                         <TextBlock Text="{Binding ErrorMessage}" Foreground="{StaticResource DangerBrush}"
                                    TextWrapping="Wrap" Margin="0,0,0,16"
                                    IsVisible="{Binding ErrorMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
