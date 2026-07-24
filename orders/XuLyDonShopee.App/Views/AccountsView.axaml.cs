@@ -113,10 +113,11 @@ public partial class AccountsView : UserControl
         {
             try
             {
-                var list = this.FindControl<ListBox>("LogList");
-                if (list?.ItemCount > 0)
+                // Log nay là TextBox chỉ-đọc: đặt con trỏ về CUỐI → cuộn xuống dòng mới nhất.
+                var box = this.FindControl<TextBox>("LogBox");
+                if (box is not null)
                 {
-                    list.ScrollIntoView(list.ItemCount - 1);
+                    box.CaretIndex = box.Text?.Length ?? 0;
                 }
             }
             catch

@@ -529,22 +529,16 @@
                            FontSize="10" Foreground="#8A8A8A"
                            TextTrimming="CharacterEllipsis" Margin="0,6,0,0" />
 
-                <!-- Danh sách dòng log: nền đen, chữ trắng, các dòng SÁT nhau; tự cuộn xuống cuối (code-behind). -->
-                <ListBox x:Name="LogList"
-                         Classes="logDark"
-                         ItemsSource="{Binding FilteredLogEntries}"
-                         Background="Transparent"
-                         ScrollViewer.HorizontalScrollBarVisibility="Disabled">
-                    <ListBox.ItemTemplate>
-                        <DataTemplate x:DataType="services:LogEntry">
-                            <!-- SelectableTextBlock: cho bôi đen + Ctrl+C chọn từng dòng trực tiếp (ngoài nút Copy chép cả log). -->
-                            <SelectableTextBlock Text="{Binding Display}"
-                                       FontFamily="Consolas, Menlo, monospace" FontSize="11"
-                                       Foreground="#EDEDED"
-                                       TextWrapping="Wrap" Margin="0" />
-                        </DataTemplate>
-                    </ListBox.ItemTemplate>
-                </ListBox>
+                <!-- Log = TextBox CHỈ-ĐỌC (cả log là 1 khối text) → Ctrl+A chọn HẾT + Ctrl+C / chuột phải Copy được
+                     (ListBox trước đó chỉ chọn được 1 dòng). Tự cuộn xuống cuối ở code-behind. -->
+                <TextBox x:Name="LogBox"
+                         Text="{Binding LogText, Mode=OneWay}"
+                         IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap"
+                         FontFamily="Consolas, Menlo, monospace" FontSize="11"
+                         Foreground="#EDEDED" Background="Transparent"
+                         BorderThickness="0" Padding="2"
+                         ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                         ScrollViewer.VerticalScrollBarVisibility="Auto" />
             </DockPanel>
                 </Border>
             </Grid>

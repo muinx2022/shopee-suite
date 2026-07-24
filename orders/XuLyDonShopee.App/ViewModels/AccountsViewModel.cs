@@ -44,6 +44,9 @@ public partial class AccountsViewModel : ViewModelBase
         // Dispatcher.UIThread.Post) → handler ĐỒNG BỘ, KHÔNG lock/await (rebuild là vòng for thuần).
         _services.Log.Entries.CollectionChanged += OnLogEntriesChanged;
 
+        // Panel log dùng TextBox chỉ-đọc bind LogText → cập nhật chuỗi mỗi khi FilteredLogEntries đổi (để copy được).
+        FilteredLogEntries.CollectionChanged += (_, _) => OnPropertyChanged(nameof(LogText));
+
         // Có nguồn NGOÀI màn này thêm tài khoản (sync shop từ BigSeller Insert dòng mới) → nghe để tự nạp lại
         // danh sách, thấy shop mới ngay không cần đổi màn. Sự kiện có thể đến từ thread nền → marshal về UI
         // thread (RunOnUi) trước khi đụng ObservableCollection.
@@ -71,6 +74,11 @@ public partial class AccountsViewModel : ViewModelBase
     /// hiển thị của panel log ở cột chi tiết. Rỗng khi chưa chọn tài khoản. Cập nhật ĐỒNG BỘ trên UI thread qua
     /// <see cref="OnLogEntriesChanged"/> (append dòng mới khớp) và <see cref="RebuildFilteredLog"/> (dựng lại).</summary>
     public ObservableCollection<LogEntry> FilteredLogEntries { get; } = new();
+
+    /// <summary>Toàn bộ nhật ký đang hiển thị dưới dạng MỘT chuỗi (mỗi dòng một Display) — để panel log dùng TextBox
+    /// chỉ-đọc (bôi đen + Ctrl+C / chuột phải Copy được, khác ListBox không chọn text được). Cập nhật mỗi khi
+    /// <see cref="FilteredLogEntries"/> đổi (đăng ký ở ctor).</summary>
+    public string LogText => string.Join("\n", FilteredLogEntries.Select(e => e.Display));
 
     /// <summary>Đường dẫn file log hôm nay (hiển thị mờ dưới panel để biết file log ở đâu).</summary>
     public string LogPath => _services.Log.CurrentLogPath;
