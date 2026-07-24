@@ -59,6 +59,13 @@ public partial class App : Application
             try { Shopee.Core.Coordination.HttpCoordinationHub.DiagLog = Shopee.Core.Coordination.HubLog.Warn; }
             catch (Exception ex) { TryLog("Coordination.DiagLog", ex); }
         }
+        else if (Shopee.Core.Infrastructure.AppModeStore.ShowsShopee(appMode))
+        {
+            // Chế độ Shopee (chỉ đơn hàng): dựng CHỈ client Hub để ĐẨY ĐƠN/PHIẾU lên Hub — KHÔNG poller/heartbeat,
+            // KHÔNG đăng ký máy/lease (tránh tranh danh tính máy với bản Workspace). Không có client → đơn không lên Hub.
+            try { Shopee.Core.Coordination.CoordinationRuntime.InitClientOnlyFromConfig(); }
+            catch (Exception ex) { TryLog("Coordination.InitClientOnly", ex); }
+        }
 
         try
         {

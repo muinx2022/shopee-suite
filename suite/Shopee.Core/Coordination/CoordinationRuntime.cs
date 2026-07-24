@@ -46,6 +46,33 @@ public static class CoordinationRuntime
     }
 
     /// <summary>
+    /// Khởi tạo CHỈ <see cref="Client"/> (đẩy đơn/phiếu/+1-đã-bán lên Hub) mà KHÔNG dựng
+    /// <see cref="HttpCoordinationHub"/> — nên KHÔNG có poller/heartbeat, KHÔNG đăng ký máy (machine.json) hay
+    /// giành lease. Dùng cho chế độ <b>Shopee</b> (chỉ module đơn hàng): cần đẩy đơn lên Hub nhưng KHÔNG tham gia
+    /// fleet điều phối (tránh tranh danh tính máy + lease với bản Workspace chạy song song). <see cref="Hub"/> giữ
+    /// null → mọi tính năng fleet (chỉ dựng ở chế độ Workspace) không đụng tới. Chưa cấu hình → để NoOp.
+    /// </summary>
+    public static void InitClientOnlyFromConfig()
+    {
+        HubClientConfig clientCfg;
+        var srv = HubServerConfigStore.Shared.Current;
+        if (srv.Enabled && !string.IsNullOrWhiteSpace(srv.ApiToken))
+        {
+            clientCfg = new HubClientConfig { Enabled = true, BaseUrl = $"http://localhost:{srv.Port}", ApiToken = srv.ApiToken };
+        }
+        else
+        {
+            clientCfg = HubClientConfigStore.Shared.Current;
+        }
+        if (!clientCfg.IsConfigured) return;
+
+        var machine = MachineIdentity.Shared;
+        Client = new HubClient(clientCfg, machine.MachineId);
+        ConfigSync = new HubConfigSync(Client);
+        // KHÔNG dựng HttpCoordinationHub → không heartbeat/không đăng ký máy. Hub giữ null.
+    }
+
+    /// <summary>
     /// Áp dụng lại cấu hình client→Hub NGAY (sau khi người dùng lưu ở Cài đặt) mà KHÔNG cần khởi động lại app.
     /// Gỡ kết nối cũ rồi dựng lại từ config hiện tại. Trả về true nếu đã có client (đã cấu hình hợp lệ).
     /// Các điểm dùng (AssignmentWorker/Scrape/Update/Fleet) đều đọc <see cref="Hub"/>/<see cref="Client"/>
