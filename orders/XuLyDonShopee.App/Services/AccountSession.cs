@@ -197,9 +197,12 @@ public partial class AccountSession : ObservableObject, IAccountSession
         }
 
         // Phản hồi cho người dùng; GIỮ State=Running để nút "Mở" còn khóa tới khi Brave chết thật (Lỗi 2).
-        if (State is SessionState.Opening or SessionState.Running)
+        // Ghi LOG ngay khi bấm Dừng (kể cả lúc đang NGHỈ giữa chu kỳ, Brave đã đóng) để panel nhật ký có phản hồi.
+        var wasActive = State is SessionState.Opening or SessionState.Running;
+        if (wasActive)
         {
             StatusText = "Đang dừng...";
+            _services.Log.Append(_logLabel, "Đang dừng phiên (hủy vòng lặp + đóng trình duyệt)...");
         }
 
         try { cts?.Cancel(); } catch { /* bỏ qua */ }
@@ -235,6 +238,10 @@ public partial class AccountSession : ObservableObject, IAccountSession
         catch { /* bỏ qua */ }
 
         State = SessionState.Stopped;
+        if (wasActive)
+        {
+            _services.Log.Append(_logLabel, "Đã dừng phiên.");
+        }
     }
 
     /// <summary>
