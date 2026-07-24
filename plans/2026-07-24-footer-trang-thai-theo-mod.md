@@ -1,7 +1,7 @@
 # Plan: Thanh trạng thái (footer) theo chế độ — Shopee + Workspace, Full hiện cả 2
 
 - **Ngày:** 2026-07-24
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành code + build 0 lỗi + 925 test; Fable thêm 2 chỉnh (gate đoạn Shopee theo ordersVm!=null; "máy online" lọc heartbeat <180s); chờ deploy + verify
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-dev`)
 - **Nền:** Shell `MainWindow` có 3 row (tab / ribbon / nội dung), KHÔNG có footer chung. Thanh trạng thái hiện nằm TRONG orders `MainView` (đáy DockPanel) → chỉ hiện khi tab Shopee active. User muốn Workspace cũng có thanh, và **mod Full hiện CẢ 2 phần cùng lúc**.
 

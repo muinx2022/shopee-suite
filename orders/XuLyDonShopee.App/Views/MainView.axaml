@@ -37,19 +37,8 @@
         <!-- (Thanh MENU NGANG cũ đã bỏ: 4 màn con nay điều hướng từ dải Ribbon của shell suite qua
              MainViewModel.SelectedNavIndex; màn Cài đặt dời sang tab Cài đặt chung.) -->
 
-        <!-- ===== Thanh TRẠNG THÁI (đáy) ===== -->
-        <Border DockPanel.Dock="Bottom" Classes="statusBar">
-            <StackPanel Orientation="Horizontal" Spacing="14" Margin="16,0"
-                        VerticalAlignment="Center">
-                <TextBlock Classes="statusText" Text="{Binding StatusAccountsText}" />
-                <TextBlock Classes="statusSep" Text="·" />
-                <TextBlock Classes="statusText" Text="{Binding StatusOrdersText}" />
-                <TextBlock Classes="statusSep" Text="·" />
-                <TextBlock Classes="statusText" Text="{Binding StatusProxiesText}" />
-                <TextBlock Classes="statusSep" Text="·" />
-                <TextBlock Classes="statusText" Text="{Binding StatusBrowserText}" />
-            </StackPanel>
-        </Border>
+        <!-- (Thanh TRẠNG THÁI đáy đã dời lên FOOTER cấp shell — MainWindow.axaml. Counter Status*Text của
+             MainViewModel vẫn giữ; footer shell bind qua ShellViewModel.ShopeeStatusVm.) -->
 
         <!-- ===== Nội dung (full width) ===== -->
         <ContentControl Content="{Binding CurrentViewModel}" />

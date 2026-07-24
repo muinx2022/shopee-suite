@@ -7,7 +7,7 @@
         Background="{DynamicResource WindowBackgroundBrush}"
         FontFamily="{DynamicResource UiFont}">
 
-    <Grid RowDefinitions="58,Auto,*">
+    <Grid RowDefinitions="58,Auto,*,Auto">
 
         <!-- ══════════ Row 0: TAB STRIP (nền tối, kiểu Office) ══════════ -->
         <Border Grid.Row="0" ZIndex="1" Background="{DynamicResource NavBarBrush}"
@@ -125,5 +125,56 @@
 
         <!-- ══════════ Row 2: NỘI DUNG màn đang chọn ══════════ -->
         <ContentControl Grid.Row="2" Content="{Binding CurrentScreen}" />
+
+        <!-- ══════════ Row 3: FOOTER trạng thái (theo chế độ; Full = cả 2 đoạn + vạch ngăn) ══════════
+             Style bằng tài nguyên SUITE (Theme.axaml) — KHÔNG dùng class statusBar/statusText của orders. -->
+        <Border Grid.Row="3" Background="{DynamicResource CardBackgroundBrush}"
+                BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0"
+                MinHeight="30" Padding="16,0">
+            <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+
+                <!-- Đoạn Shopee: tái dùng counter của MainViewModel đơn hàng (Status*Text) -->
+                <StackPanel Orientation="Horizontal" Spacing="14" VerticalAlignment="Center"
+                            IsVisible="{Binding ShowShopeeStatus}">
+                    <TextBlock Text="{Binding ShopeeStatusVm.StatusAccountsText}" FontSize="12"
+                               Foreground="{DynamicResource TextSecondaryBrush}" VerticalAlignment="Center" />
+                    <TextBlock Text="·" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" VerticalAlignment="Center" />
+                    <TextBlock Text="{Binding ShopeeStatusVm.StatusOrdersText}" FontSize="12"
+                               Foreground="{DynamicResource TextSecondaryBrush}" VerticalAlignment="Center" />
+                    <TextBlock Text="·" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" VerticalAlignment="Center" />
+                    <TextBlock Text="{Binding ShopeeStatusVm.StatusProxiesText}" FontSize="12"
+                               Foreground="{DynamicResource TextSecondaryBrush}" VerticalAlignment="Center" />
+                    <TextBlock Text="·" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" VerticalAlignment="Center" />
+                    <TextBlock Text="{Binding ShopeeStatusVm.StatusBrowserText}" FontSize="12"
+                               Foreground="{DynamicResource TextSecondaryBrush}" VerticalAlignment="Center" />
+                </StackPanel>
+
+                <!-- Vạch ngăn 2 đoạn — chỉ hiện ở chế độ Full (cả 2 đoạn) -->
+                <Rectangle Width="1" Margin="4,6" VerticalAlignment="Stretch"
+                           Fill="{DynamicResource BorderBrush}" IsVisible="{Binding ShowStatusSeparator}" />
+
+                <!-- Đoạn Workspace: 6 counter từ các kho dùng chung -->
+                <StackPanel Orientation="Horizontal" Spacing="14" VerticalAlignment="Center"
+                            IsVisible="{Binding ShowWorkspaceStatus}">
+                    <TextBlock Text="{Binding WorkspaceStatus.BigSellerText}" FontSize="12"
+                               Foreground="{DynamicResource TextSecondaryBrush}" VerticalAlignment="Center" />
+                    <TextBlock Text="·" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" VerticalAlignment="Center" />
+                    <TextBlock Text="{Binding WorkspaceStatus.ShopText}" FontSize="12"
+                               Foreground="{DynamicResource TextSecondaryBrush}" VerticalAlignment="Center" />
+                    <TextBlock Text="·" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" VerticalAlignment="Center" />
+                    <TextBlock Text="{Binding WorkspaceStatus.ShopeeAccountText}" FontSize="12"
+                               Foreground="{DynamicResource TextSecondaryBrush}" VerticalAlignment="Center" />
+                    <TextBlock Text="·" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" VerticalAlignment="Center" />
+                    <TextBlock Text="{Binding WorkspaceStatus.ProxyText}" FontSize="12"
+                               Foreground="{DynamicResource TextSecondaryBrush}" VerticalAlignment="Center" />
+                    <TextBlock Text="·" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" VerticalAlignment="Center" />
+                    <TextBlock Text="{Binding WorkspaceStatus.MachineText}" FontSize="12"
+                               Foreground="{DynamicResource TextSecondaryBrush}" VerticalAlignment="Center" />
+                    <TextBlock Text="·" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" VerticalAlignment="Center" />
+                    <TextBlock Text="{Binding WorkspaceStatus.BrowserText}" FontSize="12"
+                               Foreground="{DynamicResource TextSecondaryBrush}" VerticalAlignment="Center" />
+                </StackPanel>
+            </StackPanel>
+        </Border>
     </Grid>
 </Window>

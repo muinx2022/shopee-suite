@@ -52,7 +52,24 @@ public sealed partial class ShellViewModel : ObservableObject
     public object? CurrentScreen =>
         SelectedTab is not null && _screenByTab.TryGetValue(SelectedTab, out var vm) ? vm : null;
 
-    partial void OnSelectedTabChanged(RibbonTab? value) => OnPropertyChanged(nameof(CurrentScreen));
+    partial void OnSelectedTabChanged(RibbonTab? value)
+    {
+        OnPropertyChanged(nameof(CurrentScreen));
+        // Catch-all làm mới footer Workspace khi quay lại tab (rẻ) — bù cho counter không có event Changed (vd máy online).
+        WorkspaceStatus?.Refresh();
+    }
+
+    // ══════════ Footer trạng thái (cấp shell): 2 đoạn Shopee + Workspace theo chế độ ══════════
+    /// <summary>Hiện đoạn Shopee của footer (chế độ có module đơn hàng).</summary>
+    public bool ShowShopeeStatus { get; }
+    /// <summary>Hiện đoạn Workspace của footer (chế độ có nhóm Workspace).</summary>
+    public bool ShowWorkspaceStatus { get; }
+    /// <summary>Vạch ngăn giữa 2 đoạn — chỉ khi cả 2 cùng hiện (chế độ Full).</summary>
+    public bool ShowStatusSeparator => ShowShopeeStatus && ShowWorkspaceStatus;
+    /// <summary>Counter đoạn Shopee = MainViewModel đơn hàng (Status*Text). null nếu không có Shopee.</summary>
+    public OrdersMainViewModel? ShopeeStatusVm { get; }
+    /// <summary>Counter đoạn Workspace (6 số từ các kho dùng chung). null nếu không có Workspace.</summary>
+    public WorkspaceStatusViewModel? WorkspaceStatus { get; }
 
     public ShellViewModel()
     {
@@ -62,6 +79,9 @@ public sealed partial class ShellViewModel : ObservableObject
         var mode = AppModeStore.Shared.Current;
         bool ws = AppModeStore.ShowsWorkspace(mode);
         bool sp = AppModeStore.ShowsShopee(mode);
+        ShowWorkspaceStatus = ws;
+        // ShowShopeeStatus set SAU khi biết ordersVm (gate theo module dựng ĐƯỢC, không chỉ theo chế độ) — tránh
+        // đoạn Shopee RỖNG + vạch ngăn thừa nếu OrdersModuleHost.TryCreate() fail ở chế độ Shopee/Full.
 
         // Khối VM Workspace — CHỈ dựng khi chế độ có Workspace (gọn RAM + không chạy nền thừa). Biến nào còn
         // được tham chiếu BÊN NGOÀI block (field dừng-êm / closure PrepareShutdown) mới cần để nullable.
@@ -84,6 +104,9 @@ public sealed partial class ShellViewModel : ObservableObject
             // Màn "Dữ liệu sản phẩm" (kho Hub) — ctor không I/O (nạp ở EnsureLoaded).
             var data = new DataViewModel();
             var accounts = new AccountsViewModel();
+
+            // Footer trạng thái đoạn Workspace (6 counter đọc từ các kho dùng chung). Dựng cùng nhóm Workspace.
+            WorkspaceStatus = new WorkspaceStatusViewModel();
 
             // Giao việc đa máy: worker (client tự chạy việc Hub giao) + dispatcher (máy Hub tự đẩy việc).
             worker = new AssignmentWorker(scrape, update, search);
@@ -141,6 +164,8 @@ public sealed partial class ShellViewModel : ObservableObject
         // Module đơn hàng (phase 1b): CHỈ dựng khi chế độ có Shopee. Mở SQLite riêng qua OrdersModuleHost. Init
         // hỏng → TryCreate null → suite vẫn chạy, chỉ ẩn tab Đơn hàng + section Đơn hàng trong Cài đặt.
         var ordersVm = sp ? OrdersModuleHost.TryCreate() : null;
+        ShopeeStatusVm = ordersVm;   // footer đoạn Shopee bind qua VM này (Status*Text đã tính ở ctor MainViewModel)
+        ShowShopeeStatus = ordersVm is not null;   // module dựng được mới hiện đoạn Shopee (tránh đoạn rỗng + vạch ngăn thừa)
 
         // Màn Cài đặt GỘP: 1 màn (Chế độ ứng dụng + Shopee Suite + Đơn hàng). Section Đơn hàng ẩn khi ordersVm null.
         var unifiedSettings = new UnifiedSettingsViewModel(settings, ordersVm?.SettingsVm);
