@@ -83,7 +83,7 @@
     private Dictionary<long, string> _shopNames = new();
 
     private long _shopId;      // 0 = tất cả
-    private string _status = "";
+    private string _status = "Chờ lấy hàng";   // MẶC ĐỊNH lọc đơn đang cần xử lý (đổi được sang "— tất cả —")
     private string _search = "";
     private int _page = 1;
     private int _total;
@@ -94,6 +94,9 @@
         _shops = Db.ListShops();
         _shopNames = _shops.ToDictionary(s => s.Id, s => s.Name);
         _statuses = Db.DistinctOrderStatuses();
+        // Đảm bảo option "Chờ lấy hàng" LUÔN có trong dropdown (kể cả khi hiện chưa có đơn nào trạng thái đó) —
+        // vì đây là filter MẶC ĐỊNH, cần hiện đúng lựa chọn đang chọn.
+        if (!_statuses.Contains("Chờ lấy hàng")) _statuses.Insert(0, "Chờ lấy hàng");
         Load();
     }
 
