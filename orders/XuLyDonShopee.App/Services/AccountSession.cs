@@ -1809,7 +1809,8 @@ public partial class AccountSession : ObservableObject, IAccountSession
 
             while (!ct.IsCancellationRequested && DateTime.UtcNow < hardCap)
             {
-                var bridge = new OrdersBridgeSession(userDataDir, browserChoice, log, invoiceDir, province, syncCallback);
+                var bridge = new OrdersBridgeSession(userDataDir, browserChoice, log, invoiceDir, province, syncCallback,
+                    finalDoneSns: () => _services.Orders.GetOrderSnsWithFinalAmount(_accountId));
                 _bridge = bridge;
                 OrdersBridgeRunResult result;
                 try

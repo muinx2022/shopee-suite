@@ -264,6 +264,29 @@ function pageOrderCount() {
   return document.querySelectorAll("a[data-testid='order-item']").length;
 }
 
+// Đọc text "Số tiền cuối cùng" trên TRANG CHI TIẾT đơn — port NGUYÊN FinalAmountJs (ShopeeLoginService.cs). Tự chứa
+// world MAIN: ưu tiên card [type='FinalAmount'] > .amount; fallback tìm phần tử text ĐÚNG "Số tiền cuối cùng" rồi lần
+// ≤4 cấp cha tìm .amount (tránh vơ nhầm .amount đầu trang). Trả chuỗi text (rỗng nếu chưa thấy).
+function pageReadFinalAmount() {
+  const norm = (s) => (s || "").replace(/\s+/g, " ").trim();
+  const card = document.querySelector("[type='FinalAmount']");
+  if (card) {
+    const amt = card.querySelector(".amount");
+    if (amt) return norm(amt.textContent);
+  }
+  const nodes = document.querySelectorAll("div, span, p");
+  for (const t of nodes) {
+    if (norm(t.textContent) === "Số tiền cuối cùng") {
+      let p = t.parentElement;
+      for (let up = 0; up < 4 && p; up++, p = p.parentElement) {
+        const amt = p.querySelector(".amount");
+        if (amt) return norm(amt.textContent);
+      }
+    }
+  }
+  return "";
+}
+
 // Ký hiệu danh sách hiện tại: "<số card>|<mã đơn card đầu>" — phát hiện trang ĐỔI sau khi bấm trang sau.
 function pageListSignature() {
   const cards = document.querySelectorAll("a[data-testid='order-item']");
@@ -616,6 +639,7 @@ const BANHANG_HOSTS = ["banhang.shopee.vn"];
 const SUBACCOUNT_HOSTS = ["subaccount.shopee.com", "accounts.shopee.vn"];
 const SHOP_LIST_URL = "https://banhang.shopee.vn/portal/shop";
 const ORDERS_URL = "https://banhang.shopee.vn/portal/sale/order";
+const ORDER_DETAIL_PREFIX = "https://banhang.shopee.vn/portal/sale/order/"; // + shopeeOrderId → trang chi tiết (đọc "Số tiền cuối cùng").
 const SHIPPING_SETTINGS_URL = "https://banhang.shopee.vn/portal/all-settings/shipping";
 const MAX_ORDER_PAGES = 10; // chốt chặn số trang quét (khớp MaxSyncPages phía C#).
 
@@ -778,6 +802,7 @@ async function handleCommand(cmd) {
     case "openShopDetail":   await openShopDetail(String(cmd.shopId || "").replace(/'/g, "")); return;
     case "readToShip":       await doReadToShip(); return;
     case "syncOrders":       await doSyncOrders(); return;
+    case "syncOrderFinals":  await doSyncOrderFinals(cmd.orders || []); return;
     case "setPickupAddress": await doSetPickupAddress(String(cmd.province || "")); return;
     case "setPickupAddressToOther": await doSetPickupAddressToOther(); return;
     case "prepareNextOrder": await doPrepareNextOrder(); return;
@@ -1078,6 +1103,54 @@ async function doSyncOrders() {
   }
 
   send({ action: "pageData", kind: "orders", data: JSON.stringify(all) });
+}
+
+// Lấy "Số tiền cuối cùng" (cột Ước tính) cho các đơn ĐANG chuẩn bị CHƯA có final (port FetchFinalAmountsForPageAsync
+// của Playwright): với mỗi đơn {orderSn, shopeeOrderId} → mở tab CHI TIẾT (active:false) → đọc [type='FinalAmount']
+// .amount → trả text. Best-effort per-đơn (1 đơn lỗi/timeout → finalText rỗng, KHÔNG phá lượt); LUÔN đóng tab chi tiết;
+// dò /verify → gom cờ captcha + dừng lượt. Chốt chặn 30 đơn/lượt. KHÔNG đổi active sang tab chi tiết (giữ tab thao tác).
+// Trả {action:"pageData", kind:"finals", data:<json mảng {orderSn, finalText}>}.
+async function doSyncOrderFinals(orders) {
+  const MAX_FINALS = 30;
+  let list = Array.isArray(orders) ? orders : [];
+  if (list.length > MAX_FINALS) {
+    send({ action: "progress", message: "syncOrderFinals: " + list.length + " đơn → cắt còn " + MAX_FINALS + "/lượt." });
+    list = list.slice(0, MAX_FINALS);
+  }
+  const out = [];
+  for (const o of list) {
+    const orderSn = o && o.orderSn ? String(o.orderSn) : "";
+    const shopeeOrderId = o && o.shopeeOrderId ? String(o.shopeeOrderId).replace(/[^0-9]/g, "") : "";
+    if (!orderSn || !shopeeOrderId) continue;
+    let tabId = null;
+    let finalText = "";
+    try {
+      const t = await chrome.tabs.create({ url: ORDER_DETAIL_PREFIX + shopeeOrderId, active: false });
+      tabId = t.id;
+      await waitTabComplete(tabId, 20000);
+      let url = "";
+      try { url = (await chrome.tabs.get(tabId)).url || ""; } catch (e) {}
+      if (/\/verify/i.test(url)) {
+        try { await chrome.tabs.remove(tabId); } catch (e) {}
+        tabId = null;
+        send({ action: "captcha", message: url });
+        return;
+      }
+      // POLL ≤15s (500ms) tới khi .amount khác rỗng.
+      const dl = Date.now() + 15000;
+      while (Date.now() < dl) {
+        try { finalText = (await execInTab(tabId, pageReadFinalAmount, [])) || ""; } catch (e) { finalText = ""; }
+        if (finalText) break;
+        await sleep(500);
+      }
+    } catch (e) {
+      finalText = ""; // 1 đơn lỗi → bỏ, tiếp đơn kế
+    } finally {
+      if (tabId != null) { try { await chrome.tabs.remove(tabId); } catch (e) {} } // LUÔN đóng tab chi tiết
+    }
+    out.push({ orderSn: orderSn, finalText: finalText });
+  }
+  send({ action: "pageData", kind: "finals", data: JSON.stringify(out) });
 }
 
 // Phần B: đặt địa chỉ lấy hàng = province (port OpenShippingAddressSettingsAsync/SetPickupAddressAsync). → {action:"pickupDone", ok}.

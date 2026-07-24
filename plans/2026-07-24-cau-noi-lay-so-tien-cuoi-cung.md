@@ -1,7 +1,7 @@
 # Plan: Cầu nối lấy "Số tiền cuối cùng" (cột Ước tính) qua mở chi tiết đơn
 
 - **Ngày:** 2026-07-24
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành code + build 0 lỗi + 925 test + node OK; chờ deploy + verify thật (captcha khi mở chi tiết + selector FinalAmount trên DOM thật)
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-dev`)
 - **Nền:** Nút "▶ Chạy" chạy qua cầu nối extension. Sync chỉ quét LIST đơn ("Tất cả") → có buyer/status/total/carrier/**tracking** (list card có `.tracking-number`), NHƯNG **KHÔNG có "Số tiền cuối cùng"** (cột Ước tính) vì field này CHỈ có ở **trang chi tiết đơn**.
 

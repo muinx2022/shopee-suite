@@ -67,6 +67,10 @@ public sealed class OrdersBridgeSession : IDisposable
     private readonly string _province;
     // GĐ4: callback do App rót — gọi sau khi đọc xong đơn MỖI shop để App lưu DB/GSheet/hub (Core không ref App).
     private readonly Func<string, string, IReadOnlyList<SyncedOrder>, CancellationToken, Task>? _syncCallback;
+    // App rót tập order_sn ĐÃ có "Số tiền cuối cùng" trong DB → bỏ qua, không mở lại chi tiết mỗi chu kỳ. null → không lọc.
+    private readonly Func<IReadOnlySet<string>>? _finalDoneSns;
+    // Tập rỗng dùng khi _finalDoneSns null (tránh cấp phát mỗi shop).
+    private static readonly IReadOnlySet<string> EmptyFinalSet = new HashSet<string>();
     // GĐ4: khoảng nghỉ ngẫu nhiên giữa các shop (ms) — kiểu người, tránh dồn dập.
     private readonly Random _rng = new();
 
@@ -83,6 +87,7 @@ public sealed class OrdersBridgeSession : IDisposable
     private TaskCompletionSource<string> _detailTcs = NewTcs<string>();        // "ok" | "captcha"
     private TaskCompletionSource<string?> _toShipTcs = NewTcs<string?>();
     private TaskCompletionSource<string?> _ordersTcs = NewTcs<string?>();      // GĐ3: JSON mảng đơn
+    private TaskCompletionSource<string?> _finalsTcs = NewTcs<string?>();      // GĐ4: JSON mảng {orderSn, finalText} (Số tiền cuối cùng)
     private TaskCompletionSource<bool> _pickupTcs = NewTcs<bool>();            // GĐ3: đặt địa chỉ lấy hàng xong
     private TaskCompletionSource<bool> _pickupOtherTcs = NewTcs<bool>();       // GĐ3: set địa chỉ VỀ địa chỉ khác xong
     private TaskCompletionSource<PrepareResult?> _prepareTcs = NewTcs<PrepareResult?>(); // GĐ3: 1 đơn (null=hết)
@@ -96,9 +101,12 @@ public sealed class OrdersBridgeSession : IDisposable
     /// <param name="invoiceDir">GĐ3 Phần B: thư mục lưu phiếu giao PDF; null/rỗng → chỉ đọc đơn, không tải phiếu.</param>
     /// <param name="province">GĐ3 Phần B: tỉnh của địa chỉ lấy hàng cần đặt (mặc định "Thanh Hóa").</param>
     /// <param name="syncCallback">GĐ4: gọi SAU khi đọc xong đơn mỗi shop — App lưu DB/GSheet/hub, kèm tên shop. null → chỉ log.</param>
+    /// <param name="finalDoneSns">GĐ4: tập <c>order_sn</c> ĐÃ có "Số tiền cuối cùng" trong DB (App rót) — đơn nằm trong
+    /// tập này KHÔNG mở lại chi tiết. null → không lọc (mở chi tiết cho MỌI đơn pending chưa có final).</param>
     public OrdersBridgeSession(string userDataDir, BrowserChoice browserChoice, Action<string>? log = null,
         string? invoiceDir = null, string? province = null,
-        Func<string, string, IReadOnlyList<SyncedOrder>, CancellationToken, Task>? syncCallback = null)
+        Func<string, string, IReadOnlyList<SyncedOrder>, CancellationToken, Task>? syncCallback = null,
+        Func<IReadOnlySet<string>>? finalDoneSns = null)
     {
         _userDataDir = userDataDir;
         _browserChoice = browserChoice;
@@ -106,6 +114,7 @@ public sealed class OrdersBridgeSession : IDisposable
         _invoiceDir = invoiceDir;
         _province = string.IsNullOrWhiteSpace(province) ? "Thanh Hóa" : province;
         _syncCallback = syncCallback;
+        _finalDoneSns = finalDoneSns;
     }
 
     private static TaskCompletionSource<T> NewTcs<T>() =>
@@ -121,6 +130,7 @@ public sealed class OrdersBridgeSession : IDisposable
         _detailTcs = NewTcs<string>();
         _toShipTcs = NewTcs<string?>();
         _ordersTcs = NewTcs<string?>();
+        _finalsTcs = NewTcs<string?>();
         _pickupTcs = NewTcs<bool>();
         _pickupOtherTcs = NewTcs<bool>();
         _prepareTcs = NewTcs<PrepareResult?>();
@@ -551,6 +561,42 @@ public sealed class OrdersBridgeSession : IDisposable
         var orders = ShopeeLoginService.ParseOrdersJson(ordersJson);
         L($"Đọc được {orders.Count} đơn (Tất cả).");
 
+        // Lấy "Số tiền cuối cùng" (cột Ước tính) cho đơn ĐANG chuẩn bị CHƯA có final: mở CHI TIẾT từng đơn (extension) →
+        // đọc [type='FinalAmount'] .amount → MERGE vào DTO TRƯỚC callback persist (một lần upsert). finalDoneSns = tập
+        // order_sn ĐÃ có final trong DB (App rót) → bỏ, không mở lại mỗi chu kỳ. Best-effort: lỗi/timeout/captcha → vẫn lưu phần đã có.
+        var done = _finalDoneSns?.Invoke() ?? EmptyFinalSet;
+        var needFinal = orders.Where(o =>
+            ShopeeShippingNav.LaChuanBiHang(o.Status)
+            && o.FinalAmount is null
+            && !string.IsNullOrWhiteSpace(o.ShopeeOrderId)
+            && !done.Contains(o.OrderSn)).ToList();
+        if (needFinal.Count > 0)
+        {
+            try
+            {
+                _finalsTcs = NewTcs<string?>();
+                await _ws.SendAsync(new
+                {
+                    action = "syncOrderFinals",
+                    orders = needFinal.Select(o => new { orderSn = o.OrderSn, shopeeOrderId = o.ShopeeOrderId }),
+                }).ConfigureAwait(false);
+                // Đủ thời gian mở tuần tự nhiều tab chi tiết (20s/đơn), trần cứng 300s.
+                var timeout = TimeSpan.FromSeconds(Math.Min(300, 20 + 20 * needFinal.Count));
+                var finalsJson = await _finalsTcs.Task.WaitAsync(timeout, ct).ConfigureAwait(false);
+                if (_captchaSeen)
+                {
+                    L("PHÁT HIỆN captcha khi mở chi tiết lấy Số tiền cuối cùng — bỏ bước final (vẫn lưu phần đã có).");
+                }
+                else
+                {
+                    var got = MergeFinalAmounts(orders, finalsJson);
+                    L($"Lấy Số tiền cuối cùng: {got}/{needFinal.Count} đơn.");
+                }
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex) { L("Lấy Số tiền cuối cùng lỗi: " + ex.Message + " — vẫn lưu phần đã có."); }
+        }
+
         // GĐ4: App lưu DB/GSheet/hub cho shop này (callback do App rót; null ở đường "Chạy thử" → chỉ đọc, không lưu).
         if (_syncCallback is not null)
         {
@@ -611,6 +657,48 @@ public sealed class OrdersBridgeSession : IDisposable
         }
 
         return (orders.Count, slips);
+    }
+
+    /// <summary>Parse JSON mảng <c>{orderSn, finalText}</c> (extension trả) → map <c>orderSn→finalText</c> → gán
+    /// <see cref="SyncedOrder.FinalAmount"/> (<see cref="ShopeeShippingNav.ParseVndAmount"/>) + <see cref="SyncedOrder.FinalAmountText"/>
+    /// cho đơn khớp trong <paramref name="orders"/> (CHỈ khi finalText khác rỗng). Trả số đơn đã gán. Best-effort (JSON lỗi → 0).</summary>
+    private static int MergeFinalAmounts(IReadOnlyList<SyncedOrder> orders, string? finalsJson)
+    {
+        if (string.IsNullOrWhiteSpace(finalsJson))
+        {
+            return 0;
+        }
+
+        var map = new Dictionary<string, string>(StringComparer.Ordinal);
+        try
+        {
+            using var doc = JsonDocument.Parse(finalsJson);
+            if (doc.RootElement.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var el in doc.RootElement.EnumerateArray())
+                {
+                    var sn = el.TryGetProperty("orderSn", out var s) && s.ValueKind == JsonValueKind.String ? s.GetString() : null;
+                    var ft = el.TryGetProperty("finalText", out var f) && f.ValueKind == JsonValueKind.String ? f.GetString() : null;
+                    if (!string.IsNullOrWhiteSpace(sn) && !string.IsNullOrWhiteSpace(ft))
+                    {
+                        map[sn!] = ft!;
+                    }
+                }
+            }
+        }
+        catch { return 0; }
+
+        var got = 0;
+        foreach (var order in orders)
+        {
+            if (map.TryGetValue(order.OrderSn, out var finalText) && !string.IsNullOrWhiteSpace(finalText))
+            {
+                order.FinalAmount = ShopeeShippingNav.ParseVndAmount(finalText);
+                order.FinalAmountText = finalText;
+                got++;
+            }
+        }
+        return got;
     }
 
     /// <summary>Ghi phiếu giao PDF từ <paramref name="slipBase64"/> (extension đã fetch NGAY TRONG tab awbprint —
@@ -683,6 +771,10 @@ public sealed class OrdersBridgeSession : IDisposable
                     {
                         _ordersTcs.TrySetResult(data);
                     }
+                    else if (kind == "finals")
+                    {
+                        _finalsTcs.TrySetResult(data);
+                    }
                     break;
                 }
 
@@ -737,6 +829,7 @@ public sealed class OrdersBridgeSession : IDisposable
                     _atSellerTcs.TrySetResult(false);
                     _detailTcs.TrySetResult("captcha");
                     _ordersTcs.TrySetResult(null);
+                    _finalsTcs.TrySetResult(null);
                     _pickupTcs.TrySetResult(false);
                     _pickupOtherTcs.TrySetResult(false);
                     _prepareTcs.TrySetResult(null);
@@ -756,6 +849,7 @@ public sealed class OrdersBridgeSession : IDisposable
                     _detailTcs.TrySetException(ex);
                     _toShipTcs.TrySetException(ex);
                     _ordersTcs.TrySetException(ex);
+                    _finalsTcs.TrySetException(ex);
                     _pickupTcs.TrySetException(ex);
                     _pickupOtherTcs.TrySetException(ex);
                     _prepareTcs.TrySetException(ex);
