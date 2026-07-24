@@ -401,7 +401,8 @@ function pageLocateInModal(titleReSrc, selectors, textReSrc) {
   return null;
 }
 
-// Nút "In phiếu giao": ưu tiên button[data-testid='print-button'], fallback button text "in phieu giao". → {x,y}.
+// Nút "In phiếu giao" TRONG MODAL "Thông Tin Chi Tiết" (KHÔNG lấy nút "In phiếu giao" ở DÒNG order list phía sau —
+// bug cũ: vớ nhầm link cột Thao tác bên phải). Ưu tiên button[data-testid='print-button'], fallback text. → {x,y}.
 function pagePrintButton() {
   const pick = (el) => {
     if (!el) return null;
@@ -411,12 +412,17 @@ function pagePrintButton() {
     const r = el.getBoundingClientRect();
     return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
   };
-  const byId = pick(document.querySelector("button[data-testid='print-button']"));
-  if (byId) return byId;
-  for (const btn of document.querySelectorAll("button")) {
-    if (_na(btn.textContent) === "in phieu giao") {
-      const p = pick(btn);
-      if (p) return p;
+  // CHỈ tìm trong modal đang hiển thị (.eds-modal__box) — nút In phiếu của modal Chi Tiết, không phải của order list.
+  for (const box of document.querySelectorAll(".eds-modal__box")) {
+    const rb = box.getBoundingClientRect();
+    if (!(rb.width > 0 && rb.height > 0)) continue;
+    const byId = pick(box.querySelector("button[data-testid='print-button']"));
+    if (byId) return byId;
+    for (const btn of box.querySelectorAll("button")) {
+      if (_na(btn.textContent) === "in phieu giao") {
+        const p = pick(btn);
+        if (p) return p;
+      }
     }
   }
   return null;
