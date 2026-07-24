@@ -950,14 +950,26 @@ async function doReadToShip() {
 async function openShopDetail(shopId) {
   if (!(await ensureListTab(BANHANG_HOSTS))) { send({ action: "error", message: "chưa thấy tab /portal/shop — SW thấy các tab: [" + lastTabUrls.join(" | ") + "]" }); return; }
 
-  const before = (await chrome.tabs.query({ url: "https://banhang.shopee.vn/*" })).map((t) => t.id);
+  // Sau thời gian NGHỈ giữa shop (3–5'), picker có thể đã drift: sticky-redirect về trang đơn của shop trước,
+  // tự refresh, hoặc bảng chưa render lại. ĐẢM BẢO về /portal/shop + bảng shop có dòng TRƯỚC khi tìm dòng shopId.
+  const pk = await ensureShopPicker(listTabId);
+  if (pk === "verify") { send({ action: "captcha", message: "rơi trang verify khi mở lại picker shop" }); return; }
 
-  const scrolled = await execInTab(listTabId, pageScrollDetailIntoView, [shopId]);
+  // POLL chờ ĐÚNG dòng shopId render (KHÔNG đọc 1 phát — dòng có thể chưa render / picker vừa nav lại sau nghỉ).
+  let scrolled = false;
+  const rowDeadline = Date.now() + 15000;
+  while (Date.now() < rowDeadline) {
+    scrolled = await execInTab(listTabId, pageScrollDetailIntoView, [shopId]);
+    if (scrolled) break;
+    await sleep(500);
+  }
   if (!scrolled) { send({ action: "error", message: "không thấy nút Chi tiết của shop " + shopId }); return; }
   await sleep(350);
   const c = await execInTab(listTabId, pageLocateDetailRect, [shopId]);
   if (!c) { send({ action: "error", message: "không đọc được toạ độ nút Chi tiết" }); return; }
 
+  // Chụp tập tab banhang NGAY trước khi click (sau ensureShopPicker) để phát hiện tab shop MỚI mở.
+  const before = (await chrome.tabs.query({ url: "https://banhang.shopee.vn/*" })).map((t) => t.id);
   await trustedClick(listTabId, c.x, c.y);
 
   const deadline = Date.now() + 30000;
