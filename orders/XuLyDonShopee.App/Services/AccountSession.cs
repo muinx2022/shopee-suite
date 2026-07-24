@@ -1794,8 +1794,14 @@ public partial class AccountSession : ObservableObject, IAccountSession
             var login = new OrdersLoginParams(acc.Email, acc.Password, acc.VerifyEmail, acc.VerifyEmailPassword);
 
             // Callback lưu DB/GSheet/hub cho MỖI shop (thao tác thuần DTO — dùng chung với đường Playwright).
-            Func<string, IReadOnlyList<SyncedOrder>, CancellationToken, Task> syncCallback =
-                (shopId, orders, c) => PersistSyncedOrdersAsync(shopId, orders, log, c);
+            Func<string, string, IReadOnlyList<SyncedOrder>, CancellationToken, Task> syncCallback =
+                (shopId, shopLogin, orders, c) =>
+                {
+                    // Rót shop-context để GSheet lấy đúng Tên Shop + cleanup/GSheet scope theo shop (giống vòng Playwright).
+                    _currentShopId = shopId;
+                    _currentShopLogin = string.IsNullOrWhiteSpace(shopLogin) ? null : shopLogin;
+                    return PersistSyncedOrdersAsync(shopId, orders, log, c);
+                };
 
             var hardCap = DateTime.UtcNow.AddHours(12);
             SetStatus(SessionState.Running, "Đang chạy (cầu nối extension) — đăng nhập + duyệt mọi shop...");

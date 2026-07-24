@@ -66,7 +66,7 @@ public sealed class OrdersBridgeSession : IDisposable
     private readonly string? _invoiceDir;
     private readonly string _province;
     // GĐ4: callback do App rót — gọi sau khi đọc xong đơn MỖI shop để App lưu DB/GSheet/hub (Core không ref App).
-    private readonly Func<string, IReadOnlyList<SyncedOrder>, CancellationToken, Task>? _syncCallback;
+    private readonly Func<string, string, IReadOnlyList<SyncedOrder>, CancellationToken, Task>? _syncCallback;
     // GĐ4: khoảng nghỉ ngẫu nhiên giữa các shop (ms) — kiểu người, tránh dồn dập.
     private readonly Random _rng = new();
 
@@ -95,10 +95,10 @@ public sealed class OrdersBridgeSession : IDisposable
 
     /// <param name="invoiceDir">GĐ3 Phần B: thư mục lưu phiếu giao PDF; null/rỗng → chỉ đọc đơn, không tải phiếu.</param>
     /// <param name="province">GĐ3 Phần B: tỉnh của địa chỉ lấy hàng cần đặt (mặc định "Thanh Hóa").</param>
-    /// <param name="syncCallback">GĐ4: gọi SAU khi đọc xong đơn mỗi shop — App lưu DB/GSheet/hub. null → chỉ log.</param>
+    /// <param name="syncCallback">GĐ4: gọi SAU khi đọc xong đơn mỗi shop — App lưu DB/GSheet/hub, kèm tên shop. null → chỉ log.</param>
     public OrdersBridgeSession(string userDataDir, BrowserChoice browserChoice, Action<string>? log = null,
         string? invoiceDir = null, string? province = null,
-        Func<string, IReadOnlyList<SyncedOrder>, CancellationToken, Task>? syncCallback = null)
+        Func<string, string, IReadOnlyList<SyncedOrder>, CancellationToken, Task>? syncCallback = null)
     {
         _userDataDir = userDataDir;
         _browserChoice = browserChoice;
@@ -448,7 +448,9 @@ public sealed class OrdersBridgeSession : IDisposable
                 L($"[Shop {i + 1}] Chờ Lấy Hàng: {(toShip?.ToString() ?? "?")}.");
 
                 // Đọc đơn (Phần A) + callback lưu DB + xử đơn (Phần B) + revert địa chỉ.
-                var (orders, slips) = await RunShopOrdersAsync(shop.ShopId, toShip ?? 0, ct).ConfigureAwait(false);
+                // Nhãn shop cho cột Tên Shop (GSheet): LoginName, fallback ShopName (KHÁC shopName ở trên fallback ShopId).
+                var shopLogin = string.IsNullOrWhiteSpace(shop.LoginName) ? shop.ShopName : shop.LoginName;
+                var (orders, slips) = await RunShopOrdersAsync(shop.ShopId, shopLogin, toShip ?? 0, ct).ConfigureAwait(false);
                 if (_captchaSeen)
                 {
                     return new OrdersBridgeRunResult(shopCount, shopsDone, totalOrders + orders, totalSlips + slips, true, "Rơi vào captcha khi đọc/xử đơn.");
@@ -522,7 +524,9 @@ public sealed class OrdersBridgeSession : IDisposable
         L($"Số 'Chờ Lấy Hàng' đọc được: {(toShip?.ToString() ?? "null")} (raw='{raw}').");
 
         // 4) GĐ3: đọc đơn (Phần A) + nếu ToShip>0 thì xử đơn (Phần B).
-        var (ordersCount, slipsSaved) = await RunShopOrdersAsync(firstShopId, toShip ?? 0, ct).ConfigureAwait(false);
+        // Nhãn shop cho khớp chữ ký (callback null ở "Chạy thử" nên không dùng, nhưng phải truyền). shops[0] an toàn (đã guard rỗng ở trên).
+        var firstShopLogin = string.IsNullOrWhiteSpace(shops[0].LoginName) ? shops[0].ShopName : shops[0].LoginName;
+        var (ordersCount, slipsSaved) = await RunShopOrdersAsync(firstShopId, firstShopLogin, toShip ?? 0, ct).ConfigureAwait(false);
         if (_captchaSeen)
         {
             return new OrdersBridgeSliceResult(shops, firstShopId, toShip, true,
@@ -533,7 +537,7 @@ public sealed class OrdersBridgeSession : IDisposable
     }
 
     // ── GĐ3: đọc đơn (Phần A) + xử đơn (Phần B) trên tab shop đang mở ───────────────────────────────────
-    private async Task<(int Orders, int Slips)> RunShopOrdersAsync(string shopId, int toShip, CancellationToken ct)
+    private async Task<(int Orders, int Slips)> RunShopOrdersAsync(string shopId, string shopLogin, int toShip, CancellationToken ct)
     {
         // Phần A — đọc đơn tab "Tất cả" (test được ngay, kể cả shop 0 đơn chờ).
         _ordersTcs = NewTcs<string?>();
@@ -550,7 +554,7 @@ public sealed class OrdersBridgeSession : IDisposable
         // GĐ4: App lưu DB/GSheet/hub cho shop này (callback do App rót; null ở đường "Chạy thử" → chỉ đọc, không lưu).
         if (_syncCallback is not null)
         {
-            try { await _syncCallback(shopId, orders, ct).ConfigureAwait(false); }
+            try { await _syncCallback(shopId, shopLogin, orders, ct).ConfigureAwait(false); }
             catch (OperationCanceledException) { throw; }
             catch (Exception ex) { L("Lưu đơn (DB/GSheet/hub) lỗi: " + ex.Message); }
         }
