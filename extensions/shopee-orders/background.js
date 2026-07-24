@@ -156,6 +156,328 @@ function pageReadToShip() {
   return null;
 }
 
+// ===== GĐ3 — page-func đọc + xử đơn (port ScanOrdersJs / ShopeeShippingNav; tự chứa world MAIN) =====
+
+// Chuẩn hoá text KHÔNG dấu (mirror ShopeeShippingNav.NormalizeUiText + bỏ dấu) — helper tái dùng trong nhiều page-func.
+function _na(s) {
+  const nf = (s || "").replace(/\s+/g, " ").trim().toLowerCase().normalize("NFD");
+  let out = "";
+  for (const ch of nf) {
+    const c = ch.charCodeAt(0);
+    if (c >= 0x300 && c <= 0x36f) continue; // bỏ dấu thanh (combining marks)
+    out += ch === "đ" ? "d" : ch;
+  }
+  return out;
+}
+
+// Quét MỌI card đơn của trang hiện tại → JSON.stringify(mảng đơn). Port NGUYÊN ScanOrdersJs (ShopeeLoginService.cs).
+function pageScanOrders() {
+  const norm = (s) => (s || "").replace(/\s+/g, " ").trim();
+  const cards = document.querySelectorAll("a[data-testid='order-item']");
+  const out = [];
+  for (const card of cards) {
+    try {
+      const snEl = card.querySelector(".order-sn");
+      const snRaw = snEl ? norm(snEl.textContent) : "";
+      const snTokens = snRaw.split(" ");
+      const orderSn = snTokens.length ? snTokens[snTokens.length - 1] : "";
+
+      let shopeeOrderId = "";
+      const href = card.getAttribute("href") || "";
+      const hm = href.match(/\/portal\/sale\/order\/(\d+)/);
+      if (hm) shopeeOrderId = hm[1];
+
+      const buyerEl = card.querySelector(".buyer-username");
+      const buyer = buyerEl ? norm(buyerEl.textContent) : "";
+
+      const items = [];
+      for (const it of card.querySelectorAll(".item")) {
+        try {
+          const nameEl = it.querySelector(".item-name");
+          const descEl = it.querySelector(".item-description");
+          const amtEl = it.querySelector(".item-amount");
+          const imgEl = it.querySelector(".item-image");
+          const name = nameEl ? norm(nameEl.textContent) : "";
+          let variation = descEl ? norm(descEl.textContent) : "";
+          variation = variation.replace(/^Variation\s*:?\s*/i, "").trim();
+          let amount = amtEl ? norm(amtEl.textContent) : "";
+          amount = amount.replace(/^[x×]\s*/i, "").trim();
+          let image = "";
+          if (imgEl) image = imgEl.getAttribute("src") || imgEl.getAttribute("data-src") || "";
+          items.push({ name, variation, amount, image });
+        } catch (e) { /* item lạ — bỏ qua */ }
+      }
+
+      const totalEl = card.querySelector(".total-price");
+      const totalText = totalEl ? norm(totalEl.textContent) : "";
+      const payEl = card.querySelector(".payment-method");
+      const payment = payEl ? norm(payEl.textContent) : "";
+
+      const statusColEl = card.querySelector(".status-info-col");
+      let status = "";
+      if (statusColEl) {
+        let stEl = statusColEl.querySelector(".status");
+        if (!stEl) {
+          for (const c of statusColEl.querySelectorAll("[class*=status]")) {
+            const cls = typeof c.className === "string" ? c.className : "";
+            if (cls.indexOf("status-description") >= 0 || cls.indexOf("status-info-col") >= 0) continue;
+            if (norm(c.textContent)) { stEl = c; break; }
+          }
+        }
+        status = stEl ? norm(stEl.textContent) : "";
+        if (!status) {
+          for (const ch of statusColEl.children) {
+            const t = norm(ch.textContent);
+            if (t) { status = t; break; }
+          }
+        }
+      }
+
+      const sdescEl = card.querySelector(".status-description");
+      const statusDesc = sdescEl ? norm(sdescEl.textContent) : "";
+
+      let cancelReason = "";
+      const statusCol = card.querySelector(".status-info-col") || card;
+      for (const pop of statusCol.querySelectorAll(".eds-popover__content")) {
+        const raw = pop.textContent || "";
+        if (raw.indexOf("Lý do hủy") >= 0) {
+          cancelReason = norm(raw).replace(/^.*?Lý do hủy\s*:?\s*/, "").trim();
+          break;
+        }
+      }
+
+      const channelEl = card.querySelector(".maksed-channel-name");
+      const channel = channelEl ? norm(channelEl.textContent) : "";
+      const carrierEl = card.querySelector(".fulfilment-channel-name");
+      const carrier = carrierEl ? norm(carrierEl.textContent) : "";
+      const trackEl = card.querySelector(".tracking-number");
+      const tracking = trackEl ? norm(trackEl.textContent) : "";
+
+      out.push({ orderSn, shopeeOrderId, buyer, items, totalText, payment, status, statusDesc, cancelReason, channel, carrier, tracking });
+    } catch (e) { /* card lạ — bỏ qua, không phá cả trang */ }
+  }
+  return JSON.stringify(out);
+}
+
+// Số card đơn hiện có (để chờ danh sách render/ổn định).
+function pageOrderCount() {
+  return document.querySelectorAll("a[data-testid='order-item']").length;
+}
+
+// Ký hiệu danh sách hiện tại: "<số card>|<mã đơn card đầu>" — phát hiện trang ĐỔI sau khi bấm trang sau.
+function pageListSignature() {
+  const cards = document.querySelectorAll("a[data-testid='order-item']");
+  let first = "";
+  if (cards.length) {
+    const sn = cards[0].querySelector(".order-sn");
+    first = sn ? (sn.textContent || "").replace(/\s+/g, " ").trim() : "";
+  }
+  return cards.length + "|" + first;
+}
+
+// Nút "trang sau" còn DÙNG ĐƯỢC (có box, không disabled) → toạ độ; port FindNextPageButtonAsync + IsUsableNextButtonAsync.
+function pageFindNextPage() {
+  const sels = [
+    ".eds-pager button.eds-pager__button-next",
+    "li.eds-pager__next button",
+    "button[class*='next']",
+    "[class*='pager'] button:last-of-type",
+  ];
+  for (const sel of sels) {
+    let els;
+    try { els = document.querySelectorAll(sel); } catch (e) { continue; }
+    for (const el of els) {
+      const r0 = el.getBoundingClientRect();
+      if (!(r0.width > 0 && r0.height > 0)) continue;
+      if (el.disabled) continue;
+      if (el.getAttribute("aria-disabled") === "true") continue;
+      const cls = (el.getAttribute("class") || "").toLowerCase();
+      if (cls.split(/\s+/).some((c) => c.indexOf("disabled") >= 0)) continue;
+      try { el.scrollIntoView({ block: "center" }); } catch (e) {}
+      const r = el.getBoundingClientRect();
+      return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+    }
+  }
+  return null;
+}
+
+// Tìm phần tử khớp text (chuẩn hoá KHÔNG dấu) trong danh sách selector → toạ độ TÂM (đã cuộn vào giữa). null nếu không thấy.
+function pageLocateByText(selectors, reSrc) {
+  const re = new RegExp(reSrc);
+  for (const sel of selectors) {
+    let els;
+    try { els = document.querySelectorAll(sel); } catch (e) { continue; }
+    for (const el of els) {
+      const t = _na(el.textContent);
+      if (t && re.test(t)) {
+        const r0 = el.getBoundingClientRect();
+        if (r0.width > 0 && r0.height > 0) {
+          try { el.scrollIntoView({ block: "center" }); } catch (e) {}
+          const r = el.getBoundingClientRect();
+          return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+        }
+      }
+    }
+  }
+  return null;
+}
+
+// Đơn ĐẦU có nút "Chuẩn bị hàng" (IsPrepareOrderButtonText) → {x,y,orderCode}. null nếu không còn.
+function pageFindPrepareOrder() {
+  const cards = document.querySelectorAll("a[data-testid='order-item']");
+  for (const card of cards) {
+    for (const b of card.querySelectorAll("button, [role='button'], a")) {
+      if (_na(b.textContent) === "chuan bi hang") {
+        const r0 = b.getBoundingClientRect();
+        if (!(r0.width > 0 && r0.height > 0)) continue;
+        const snEl = card.querySelector(".order-sn");
+        const snRaw = snEl ? (snEl.textContent || "").replace(/\s+/g, " ").trim() : "";
+        const toks = snRaw.split(" ");
+        const orderCode = toks.length ? toks[toks.length - 1] : "";
+        try { b.scrollIntoView({ block: "center" }); } catch (e) {}
+        const r = b.getBoundingClientRect();
+        return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2), orderCode: orderCode };
+      }
+    }
+  }
+  return null;
+}
+
+// True nếu có modal (.eds-modal__box) hiển thị với .title khớp reSrc (chuẩn hoá không dấu).
+function pageModalHasTitle(reSrc) {
+  const re = new RegExp(reSrc);
+  for (const box of document.querySelectorAll(".eds-modal__box")) {
+    const r = box.getBoundingClientRect();
+    if (!(r.width > 0 && r.height > 0)) continue;
+    const title = box.querySelector(".title");
+    if (title && re.test(_na(title.textContent))) return true;
+  }
+  return false;
+}
+
+// Trong modal có .title khớp titleReSrc, tìm phần tử (theo selectors) có text khớp textReSrc → {x,y,selected}.
+function pageLocateInModal(titleReSrc, selectors, textReSrc) {
+  const tre = new RegExp(titleReSrc);
+  const re = new RegExp(textReSrc);
+  for (const box of document.querySelectorAll(".eds-modal__box")) {
+    const r = box.getBoundingClientRect();
+    if (!(r.width > 0 && r.height > 0)) continue;
+    const title = box.querySelector(".title");
+    if (!title || !tre.test(_na(title.textContent))) continue;
+    for (const sel of selectors) {
+      let els;
+      try { els = box.querySelectorAll(sel); } catch (e) { continue; }
+      for (const el of els) {
+        if (re.test(_na(el.textContent))) {
+          const b0 = el.getBoundingClientRect();
+          if (!(b0.width > 0 && b0.height > 0)) continue;
+          try { el.scrollIntoView({ block: "center" }); } catch (e) {}
+          const b = el.getBoundingClientRect();
+          const cls = typeof el.className === "string" ? el.className.toLowerCase() : "";
+          return { x: Math.round(b.left + b.width / 2), y: Math.round(b.top + b.height / 2), selected: cls.indexOf("selected") >= 0 };
+        }
+      }
+    }
+  }
+  return null;
+}
+
+// Nút "In phiếu giao": ưu tiên button[data-testid='print-button'], fallback button text "in phieu giao". → {x,y}.
+function pagePrintButton() {
+  const pick = (el) => {
+    if (!el) return null;
+    const r0 = el.getBoundingClientRect();
+    if (!(r0.width > 0 && r0.height > 0)) return null;
+    try { el.scrollIntoView({ block: "center" }); } catch (e) {}
+    const r = el.getBoundingClientRect();
+    return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+  };
+  const byId = pick(document.querySelector("button[data-testid='print-button']"));
+  if (byId) return byId;
+  for (const btn of document.querySelectorAll("button")) {
+    if (_na(btn.textContent) === "in phieu giao") {
+      const p = pick(btn);
+      if (p) return p;
+    }
+  }
+  return null;
+}
+
+// Rút tên lõi tỉnh từ chuỗi tỉnh (mirror ShopeeShippingNav.ProvinceCoreName trên text đã bỏ dấu).
+function _provCore(p) {
+  let s = _na(p);
+  const prefixes = ["thanh pho ", "tinh ", "tp.", "tp "];
+  for (const pre of prefixes) {
+    if (s.indexOf(pre) === 0) { s = s.substring(pre.length).trim(); break; }
+  }
+  return s;
+}
+
+// Địa chỉ (.address-list .address-item-container) khớp tỉnh → {found,hasTag,hasEdit,x,y (của nút "Sửa")}. null nếu không có.
+function pageFindAddressEdit(province) {
+  const core = _provCore(province);
+  if (!core) return null;
+  const items = document.querySelectorAll(".address-list .address-item-container");
+  for (const it of items) {
+    let detail = "";
+    for (const grid of it.querySelectorAll("div.grid")) {
+      const label = grid.querySelector("span.label");
+      if (label && _na(label.textContent) === "dia chi") {
+        const d = grid.querySelector(".detail");
+        if (d) detail = d.textContent || "";
+        break;
+      }
+    }
+    let last = "";
+    for (const line of detail.split("\n")) { if (line.trim()) last = line; }
+    const target = _na(last || detail);
+    if (!target || target.indexOf(core) < 0) continue;
+
+    let hasTag = false;
+    for (const tag of it.querySelectorAll(".address-label")) {
+      if (_na(tag.textContent) === "dia chi lay hang") { hasTag = true; break; }
+    }
+    let edit = null;
+    for (const b of it.querySelectorAll("button, [role='button'], a")) {
+      if (_na(b.textContent) === "sua") {
+        const r = b.getBoundingClientRect();
+        if (r.width > 0 && r.height > 0) { edit = b; break; }
+      }
+    }
+    let ex = 0, ey = 0;
+    if (edit) {
+      try { edit.scrollIntoView({ block: "center" }); } catch (e) {}
+      const r = edit.getBoundingClientRect();
+      ex = Math.round(r.left + r.width / 2);
+      ey = Math.round(r.top + r.height / 2);
+    }
+    return { found: true, hasTag: hasTag, hasEdit: !!edit, x: ex, y: ey };
+  }
+  return null;
+}
+
+// Checkbox "Đặt làm địa chỉ lấy hàng" trong modal "Sửa Địa chỉ" → {x,y,checked}. null nếu không thấy.
+function pageCheckboxState() {
+  for (const box of document.querySelectorAll(".eds-modal__box")) {
+    const r = box.getBoundingClientRect();
+    if (!(r.width > 0 && r.height > 0)) continue;
+    const title = box.querySelector(".title");
+    if (!title || _na(title.textContent) !== "sua dia chi") continue;
+    for (const lbl of box.querySelectorAll("label.eds-checkbox")) {
+      if (_na(lbl.textContent) === "dat lam dia chi lay hang") {
+        const inp = lbl.querySelector("input.eds-checkbox__input");
+        const checked = inp ? inp.checked === true : false;
+        const b0 = lbl.getBoundingClientRect();
+        if (!(b0.width > 0 && b0.height > 0)) continue;
+        try { lbl.scrollIntoView({ block: "center" }); } catch (e) {}
+        const b = lbl.getBoundingClientRect();
+        return { x: Math.round(b.left + b.width / 2), y: Math.round(b.top + b.height / 2), checked: checked };
+      }
+    }
+  }
+  return null;
+}
+
 let lastTabUrls = []; // chẩn đoán: các URL tab lần query gần nhất (đưa vào thông báo lỗi khi không thấy tab).
 
 // Phân giải "tab thao tác" một cách CHẮC CHẮN: nếu listTabId còn sống VÀ khớp host cần → giữ; ngược lại query
@@ -179,6 +501,9 @@ async function ensureListTab(preferSubstrings) {
 }
 
 const BANHANG_HOSTS = ["banhang.shopee.vn"];
+const ORDERS_URL = "https://banhang.shopee.vn/portal/sale/order";
+const SHIPPING_SETTINGS_URL = "https://banhang.shopee.vn/portal/all-settings/shipping";
+const MAX_ORDER_PAGES = 10; // chốt chặn số trang quét (khớp MaxSyncPages phía C#).
 
 // Chạy một hàm trong trang (world MAIN), trả result[0].result.
 async function execInTab(tabId, func, args) {
@@ -241,7 +566,42 @@ async function dbgClick(target, x, y) {
   await dbgSend(target, "Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", buttons: 0, clickCount: 1 });
 }
 
-// Cú click trusted self-contained (tự attach/detach) — dùng cho openShopDetail.
+// code/vk cho ký tự ASCII (port KeyInfo của CdpInputController) — cho gõ địa chỉ ở GĐ3 (nếu cần).
+function keyInfo(ch) {
+  const c = ch.charCodeAt(0);
+  if (ch >= "0" && ch <= "9") return { code: "Digit" + ch, vk: c };
+  if (ch >= "a" && ch <= "z") return { code: "Key" + ch.toUpperCase(), vk: ch.toUpperCase().charCodeAt(0) };
+  if (ch >= "A" && ch <= "Z") return { code: "Key" + ch, vk: c };
+  if (ch === " ") return { code: "Space", vk: 32 };
+  return { code: "", vk: 0 };
+}
+
+// Gõ trusted (port TypeAsync): ASCII in-được → keyDown/keyUp từng ký tự; có unicode → insertText cả chuỗi.
+async function dbgType(target, text) {
+  if (!text) return;
+  let isAscii = true;
+  for (const ch of text) { const c = ch.charCodeAt(0); if (c < 0x20 || c > 0x7e) { isAscii = false; break; } }
+  if (!isAscii) {
+    await sleep(150);
+    await dbgSend(target, "Input.insertText", { text });
+    return;
+  }
+  for (const ch of text) {
+    const ki = keyInfo(ch);
+    await dbgSend(target, "Input.dispatchKeyEvent", { type: "keyDown", text: ch, key: ch, code: ki.code, windowsVirtualKeyCode: ki.vk });
+    await dbgSend(target, "Input.dispatchKeyEvent", { type: "keyUp", key: ch, code: ki.code, windowsVirtualKeyCode: ki.vk });
+    await sleep(50 + Math.floor(Math.random() * 70));
+  }
+}
+
+// Enter: keyDown kèm text "\r" (renderer cần keypress để submit form) + keyUp (port PressKeyAsync).
+async function dbgEnter(target) {
+  await dbgSend(target, "Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, text: "\r" });
+  await sleep(50);
+  await dbgSend(target, "Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+}
+
+// Cú click trusted self-contained (tự attach/detach) — dùng cho openShopDetail + các bước xử đơn GĐ3.
 async function trustedClick(tabId, x, y) {
   await withDebugger(tabId, async (target) => { await dbgClick(target, x, y); });
 }
@@ -255,6 +615,9 @@ async function handleCommand(cmd) {
     case "readShopList":     await doReadShopList(); return;
     case "openShopDetail":   await openShopDetail(String(cmd.shopId || "").replace(/'/g, "")); return;
     case "readToShip":       await doReadToShip(); return;
+    case "syncOrders":       await doSyncOrders(); return;
+    case "setPickupAddress": await doSetPickupAddress(String(cmd.province || "")); return;
+    case "prepareNextOrder": await doPrepareNextOrder(); return;
   }
 }
 
@@ -330,4 +693,227 @@ async function openShopDetail(shopId) {
 
   if (/\/verify/i.test(url)) { send({ action: "captcha", message: url }); return; }
   send({ action: "shopOpened" });
+}
+
+// ===== GĐ3 — lệnh đọc + xử đơn (chạy trên tab shop = shopTabId) =====
+
+function orderTabId() {
+  return shopTabId != null ? shopTabId : listTabId;
+}
+
+// Chờ số card đơn ỔN ĐỊNH (đứng yên 2 lượt nếu >0, hoặc 3 lượt nếu 0 = shop rỗng) hoặc hết giờ.
+async function waitOrdersStable(tabId, timeoutMs) {
+  const dl = Date.now() + timeoutMs;
+  let last = -1, stable = 0;
+  while (Date.now() < dl) {
+    let c = 0;
+    try { c = (await execInTab(tabId, pageOrderCount, [])) || 0; } catch (e) { c = 0; }
+    if (c === last) { stable++; if (stable >= 2 && c > 0) return; if (stable >= 3) return; }
+    else { stable = 0; last = c; }
+    await sleep(500);
+  }
+}
+
+// Chờ danh sách ĐỔI so với ký hiệu 'before' (port WaitListChangedAsync): bỏ trạng thái đang tải ("0|...").
+async function waitOrdersChanged(tabId, before, timeoutMs) {
+  const dl = Date.now() + timeoutMs;
+  while (Date.now() < dl) {
+    await sleep(300);
+    let now = "";
+    try { now = (await execInTab(tabId, pageListSignature, [])) || ""; } catch (e) {}
+    if (now.indexOf("0|") === 0) continue;
+    if (now && now !== before) return true;
+  }
+  return false;
+}
+
+// Phần A: đọc đơn tab "Tất cả" (phân trang). Trả {action:"pageData", kind:"orders", data:<json gộp>}.
+async function doSyncOrders() {
+  const tabId = orderTabId();
+  if (tabId == null) { send({ action: "error", message: "chưa có tab shop để đọc đơn" }); return; }
+
+  try { await chrome.tabs.update(tabId, { url: ORDERS_URL }); } catch (e) {}
+  await waitTabComplete(tabId, 20000);
+  let url = "";
+  try { url = (await chrome.tabs.get(tabId)).url || ""; } catch (e) {}
+  if (/\/verify/i.test(url)) { send({ action: "captcha", message: url }); return; }
+
+  await waitOrdersStable(tabId, 15000);
+
+  // Sang tab "Tất cả" (best-effort: không thấy thì quét tab hiện tại).
+  const allTab = await execInTab(tabId, pageLocateByText, [["[role='tab']", ".eds-tabs__nav-tab", "a", "div", "span"], "^tat ca$"]);
+  if (allTab) { await trustedClick(tabId, allTab.x, allTab.y); await sleep(1200); await waitOrdersStable(tabId, 10000); }
+
+  const all = [];
+  const seen = {};
+  let pageNo = 0;
+  while (pageNo < MAX_ORDER_PAGES) {
+    pageNo++;
+    await waitOrdersStable(tabId, 15000);
+    let json = "[]";
+    try { json = (await execInTab(tabId, pageScanOrders, [])) || "[]"; } catch (e) { json = "[]"; }
+    let arr = [];
+    try { arr = JSON.parse(json) || []; } catch (e) { arr = []; }
+    for (const o of arr) {
+      const sn = o && o.orderSn ? o.orderSn : "";
+      if (sn && !seen[sn]) { seen[sn] = 1; all.push(o); }
+    }
+
+    let sigBefore = "";
+    try { sigBefore = (await execInTab(tabId, pageListSignature, [])) || ""; } catch (e) {}
+    const next = await execInTab(tabId, pageFindNextPage, []);
+    if (!next) break;
+    if (pageNo >= MAX_ORDER_PAGES) break;
+    await trustedClick(tabId, next.x, next.y);
+    const changed = await waitOrdersChanged(tabId, sigBefore, 10000);
+    if (!changed) break;
+    await sleep(1000);
+  }
+
+  send({ action: "pageData", kind: "orders", data: JSON.stringify(all) });
+}
+
+// Phần B: đặt địa chỉ lấy hàng = province (port OpenShippingAddressSettingsAsync/SetPickupAddressAsync). → {action:"pickupDone", ok}.
+async function doSetPickupAddress(province) {
+  const tabId = orderTabId();
+  if (tabId == null) { send({ action: "error", message: "chưa có tab shop để đặt địa chỉ" }); return; }
+
+  try { await chrome.tabs.update(tabId, { url: SHIPPING_SETTINGS_URL }); } catch (e) {}
+  await waitTabComplete(tabId, 20000);
+  let url = "";
+  try { url = (await chrome.tabs.get(tabId)).url || ""; } catch (e) {}
+  if (/\/verify/i.test(url)) { send({ action: "captcha", message: url }); return; }
+
+  await sleep(1000);
+  // Tab "Địa Chỉ".
+  let addrTab = null;
+  const dl0 = Date.now() + 10000;
+  while (Date.now() < dl0) {
+    addrTab = await execInTab(tabId, pageLocateByText, [[".eds-tabs__nav-tab", "[role='tab']", "div", "span", "a"], "dia chi"]);
+    if (addrTab) break;
+    await sleep(500);
+  }
+  if (addrTab) { await trustedClick(tabId, addrTab.x, addrTab.y); await sleep(1200); }
+
+  // Địa chỉ khớp tỉnh.
+  let info = null;
+  const dl = Date.now() + 15000;
+  while (Date.now() < dl) {
+    info = await execInTab(tabId, pageFindAddressEdit, [province]);
+    if (info && info.found) break;
+    await sleep(500);
+  }
+  if (!info || !info.found) { send({ action: "progress", message: "không thấy địa chỉ khớp tỉnh " + province + " — bỏ đặt địa chỉ lấy hàng." }); send({ action: "pickupDone", ok: false }); return; }
+  if (info.hasTag) { send({ action: "progress", message: "địa chỉ " + province + " đã là địa chỉ lấy hàng." }); send({ action: "pickupDone", ok: true }); return; }
+  if (!info.hasEdit) { send({ action: "progress", message: "không thấy nút Sửa của địa chỉ " + province + "." }); send({ action: "pickupDone", ok: false }); return; }
+
+  await trustedClick(tabId, info.x, info.y);
+
+  // Modal "Sửa Địa chỉ".
+  let hasModal = false;
+  const dlm = Date.now() + 10000;
+  while (Date.now() < dlm) { hasModal = await execInTab(tabId, pageModalHasTitle, ["^sua dia chi$"]); if (hasModal) break; await sleep(400); }
+  if (!hasModal) { send({ action: "progress", message: "không mở được modal Sửa Địa chỉ." }); send({ action: "pickupDone", ok: false }); return; }
+  await sleep(800);
+
+  // Tick checkbox "Đặt làm địa chỉ lấy hàng" nếu chưa (≤3 lần).
+  let cb = await execInTab(tabId, pageCheckboxState, []);
+  if (!cb) { send({ action: "progress", message: "không thấy checkbox địa chỉ lấy hàng." }); send({ action: "pickupDone", ok: false }); return; }
+  let tries = 0;
+  while (cb && !cb.checked && tries < 3) { tries++; await trustedClick(tabId, cb.x, cb.y); await sleep(600); cb = await execInTab(tabId, pageCheckboxState, []); }
+  if (!cb || !cb.checked) { send({ action: "progress", message: "không tick được checkbox địa chỉ lấy hàng." }); send({ action: "pickupDone", ok: false }); return; }
+
+  // Lưu.
+  const save = await execInTab(tabId, pageLocateInModal, ["^sua dia chi$", [".eds-modal__footer button", "button", "[role='button']"], "^luu$"]);
+  if (!save) { send({ action: "progress", message: "không thấy nút Lưu." }); send({ action: "pickupDone", ok: false }); return; }
+  await trustedClick(tabId, save.x, save.y);
+  await sleep(1200);
+
+  // Hộp xác nhận "Đồng ý" (không phải lúc nào cũng hiện).
+  const confirm = await execInTab(tabId, pageLocateByText, [[".eds-modal__footer button", "button", "[role='button']"], "^dong y$"]);
+  if (confirm) { await trustedClick(tabId, confirm.x, confirm.y); await sleep(1000); }
+
+  send({ action: "progress", message: "đã đặt địa chỉ lấy hàng = " + province + "." });
+  send({ action: "pickupDone", ok: true });
+}
+
+// Phần B: xử ĐƠN ĐẦU cần "Chuẩn bị hàng" (port ProcessFirstOrderAsync). → {action:"orderPrepared",...} hoặc {action:"noOrder"}.
+async function doPrepareNextOrder() {
+  const tabId = orderTabId();
+  if (tabId == null) { send({ action: "error", message: "chưa có tab shop để xử đơn" }); return; }
+
+  try { await chrome.tabs.update(tabId, { url: ORDERS_URL }); } catch (e) {}
+  await waitTabComplete(tabId, 20000);
+  let url = "";
+  try { url = (await chrome.tabs.get(tabId)).url || ""; } catch (e) {}
+  if (/\/verify/i.test(url)) { send({ action: "captcha", message: url }); return; }
+
+  await waitOrdersStable(tabId, 15000);
+  // Tab "Chờ lấy hàng".
+  const toShipTab = await execInTab(tabId, pageLocateByText, [["[role='tab']", ".eds-tabs__nav-tab", "a", "div", "span"], "^cho lay hang"]);
+  if (toShipTab) { await trustedClick(tabId, toShipTab.x, toShipTab.y); await sleep(1200); await waitOrdersStable(tabId, 10000); }
+
+  // Đơn đầu có "Chuẩn bị hàng".
+  let prep = null;
+  const dl = Date.now() + 12000;
+  while (Date.now() < dl) { prep = await execInTab(tabId, pageFindPrepareOrder, []); if (prep) break; await sleep(500); }
+  if (!prep) { send({ action: "noOrder" }); return; }
+  const orderCode = prep.orderCode || "";
+
+  const beforeTabs = (await chrome.tabs.query({ url: "https://banhang.shopee.vn/*" })).map((t) => t.id);
+  await trustedClick(tabId, prep.x, prep.y);
+
+  // Modal "Giao Đơn Hàng".
+  let hasShip = false;
+  const dl1 = Date.now() + 10000;
+  while (Date.now() < dl1) { hasShip = await execInTab(tabId, pageModalHasTitle, ["^giao don hang$"]); if (hasShip) break; await sleep(400); }
+  if (!hasShip) { send({ action: "error", message: "không mở được modal Giao Đơn Hàng (đơn " + orderCode + ")" }); return; }
+  await sleep(1000);
+
+  // Chọn "tự mang hàng tới Bưu cục" (nếu chưa selected).
+  const drop = await execInTab(tabId, pageLocateInModal, ["^giao don hang$", ["div", "label", "[role='radio']", "span"], "tu mang hang toi buu cuc"]);
+  if (drop && !drop.selected) { await trustedClick(tabId, drop.x, drop.y); await sleep(600); }
+
+  // "Xác nhận".
+  const conf = await execInTab(tabId, pageLocateInModal, ["^giao don hang$", [".eds-modal__footer button", "button", "[role='button']"], "^xac nhan$"]);
+  if (!conf) { send({ action: "error", message: "không thấy nút Xác nhận (đơn " + orderCode + ")" }); return; }
+  await trustedClick(tabId, conf.x, conf.y);
+
+  // Modal "Thông Tin Chi Tiết".
+  let hasDetail = false;
+  const dl2 = Date.now() + 15000;
+  while (Date.now() < dl2) { hasDetail = await execInTab(tabId, pageModalHasTitle, ["^thong tin chi tiet$"]); if (hasDetail) break; await sleep(500); }
+  if (!hasDetail) { send({ action: "error", message: "không mở được modal Thông Tin Chi Tiết (đơn " + orderCode + ")" }); return; }
+  await sleep(1000);
+
+  // "In phiếu giao" → bắt tab phiếu (window.open → awbprint). Bấm lặp tới khi có tab (Shopee tạo vận đơn có thể muộn, ~2').
+  let slipTab = null;
+  const printDeadline = Date.now() + 120000;
+  while (!slipTab && Date.now() < printDeadline) {
+    const tabs = await chrome.tabs.query({ url: "https://banhang.shopee.vn/*" });
+    const cand = tabs.find((t) => beforeTabs.indexOf(t.id) === -1);
+    if (cand) { slipTab = cand; break; }
+    const pbtn = await execInTab(tabId, pagePrintButton, []);
+    if (pbtn) { await trustedClick(tabId, pbtn.x, pbtn.y); }
+    const wt = Date.now() + 8000;
+    while (!slipTab && Date.now() < wt) {
+      const tt = await chrome.tabs.query({ url: "https://banhang.shopee.vn/*" });
+      const cc = tt.find((t) => beforeTabs.indexOf(t.id) === -1);
+      if (cc) { slipTab = cc; break; }
+      await sleep(400);
+    }
+    if (!slipTab) await sleep(800);
+  }
+  if (!slipTab) { send({ action: "error", message: "không mở được tab phiếu giao (đơn " + orderCode + ")" }); return; }
+
+  // Chờ tab phiếu điều hướng tới awbprint.
+  const slipId = slipTab.id;
+  let slipUrl = slipTab.url || "";
+  const ud = Date.now() + 10000;
+  while (Date.now() < ud) {
+    try { const t = await chrome.tabs.get(slipId); slipUrl = t.url || slipUrl; if (slipUrl.indexOf("awbprint") >= 0) break; } catch (e) { break; }
+    await sleep(300);
+  }
+
+  send({ action: "orderPrepared", orderCode: orderCode, slipTabUrl: slipUrl });
 }

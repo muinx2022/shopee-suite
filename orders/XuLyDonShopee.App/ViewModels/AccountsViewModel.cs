@@ -877,8 +877,13 @@ public partial class AccountsViewModel : ViewModelBase
             var browserKind = BrowserLocator.ResolveBrowserKind(browserChoice);
             var userDataDir = BrowserProfilePaths.ForAccount(baseDir, accountId, browserKind);
 
+            // GĐ3: thư mục lưu phiếu (Cài đặt) + tỉnh địa chỉ lấy hàng (theo account, mặc định trong session).
+            var invoiceDir = _services.Settings.GetInvoiceFolder();
+            var province = acc?.PickupAddress;
+
             _bridgeCts = new System.Threading.CancellationTokenSource();
-            var session = new OrdersBridgeSession(userDataDir, browserChoice, m => _services.Log.Append(email, m));
+            var session = new OrdersBridgeSession(userDataDir, browserChoice,
+                m => _services.Log.Append(email, m), invoiceDir, province);
             _bridgeSession = session;
 
             _services.Log.Append(email,
@@ -916,7 +921,9 @@ public partial class AccountsViewModel : ViewModelBase
             {
                 var line =
                     $"Chạy thử (bridge) OK: {result.Shops.Count} shop; shop đầu id={result.FirstShopId}; " +
-                    $"Chờ Lấy Hàng={result.ToShipCount?.ToString() ?? "?"} — KHÔNG captcha.";
+                    $"Chờ Lấy Hàng={result.ToShipCount?.ToString() ?? "?"}; đọc {result.OrdersCount} đơn" +
+                    (result.SlipsSaved > 0 ? $"; lưu {result.SlipsSaved} phiếu" : string.Empty) +
+                    " — KHÔNG captcha.";
                 _services.Log.Append(email, line);
                 BusyStatus = line;
             }

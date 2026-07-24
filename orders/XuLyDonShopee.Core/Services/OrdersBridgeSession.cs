@@ -12,12 +12,16 @@ namespace XuLyDonShopee.Core.Services;
 /// <param name="ToShipCount">Số "Chờ Lấy Hàng" đọc được ở shop đầu (null nếu không đọc được).</param>
 /// <param name="Captcha">True nếu extension báo rơi vào trang verify/captcha.</param>
 /// <param name="Error">Thông báo lỗi (null nếu chạy trọn lát cắt không lỗi).</param>
+/// <param name="OrdersCount">GĐ3: số đơn đọc được từ tab "Tất cả" (0 nếu không đọc).</param>
+/// <param name="SlipsSaved">GĐ3: số phiếu giao PDF đã lưu (Phần B; 0 nếu không xử đơn).</param>
 public sealed record OrdersBridgeSliceResult(
     IReadOnlyList<ShopListItem> Shops,
     string? FirstShopId,
     int? ToShipCount,
     bool Captcha,
-    string? Error);
+    string? Error,
+    int OrdersCount = 0,
+    int SlipsSaved = 0);
 
 /// <summary>Tham số đăng nhập cho <see cref="OrdersBridgeSession.RunLoginThenSliceAsync"/> (GĐ2).</summary>
 /// <param name="User">Tên đăng nhập subaccount (= <c>acc.Email</c> ở luồng production).</param>
@@ -49,8 +53,13 @@ public sealed class OrdersBridgeSession : IDisposable
     private readonly string _userDataDir;
     private readonly BrowserChoice _browserChoice;
     private readonly Action<string>? _log;
+    private readonly string? _invoiceDir;
+    private readonly string _province;
 
     private OrdersWebSocketServer? _ws;
+
+    /// <summary>GĐ3: kết quả extension "chuẩn bị hàng" 1 đơn (mã đơn + URL tab phiếu). null qua TCS = hết đơn.</summary>
+    private sealed record PrepareResult(string OrderCode, string SlipTabUrl);
 
     // Cờ hoàn tất từng chặng — tạo mới mỗi lần chạy; RunContinuationsAsynchronously để continuation KHÔNG chạy
     // trên thread nhận WebSocket (tránh nghẽn vòng nhận / deadlock).
@@ -58,17 +67,25 @@ public sealed class OrdersBridgeSession : IDisposable
     private TaskCompletionSource<string?> _shopListTcs = NewTcs<string?>();
     private TaskCompletionSource<string> _detailTcs = NewTcs<string>();        // "ok" | "captcha"
     private TaskCompletionSource<string?> _toShipTcs = NewTcs<string?>();
+    private TaskCompletionSource<string?> _ordersTcs = NewTcs<string?>();      // GĐ3: JSON mảng đơn
+    private TaskCompletionSource<bool> _pickupTcs = NewTcs<bool>();            // GĐ3: đặt địa chỉ lấy hàng xong
+    private TaskCompletionSource<PrepareResult?> _prepareTcs = NewTcs<PrepareResult?>(); // GĐ3: 1 đơn (null=hết)
 
     private bool _captchaSeen;
 
     /// <summary>Tiến trình trình duyệt sạch đã mở (để tầng UI theo dõi/kill). Set ngay sau khi launch.</summary>
     public System.Diagnostics.Process? Process { get; private set; }
 
-    public OrdersBridgeSession(string userDataDir, BrowserChoice browserChoice, Action<string>? log = null)
+    /// <param name="invoiceDir">GĐ3 Phần B: thư mục lưu phiếu giao PDF; null/rỗng → chỉ đọc đơn, không tải phiếu.</param>
+    /// <param name="province">GĐ3 Phần B: tỉnh của địa chỉ lấy hàng cần đặt (mặc định "Thanh Hóa").</param>
+    public OrdersBridgeSession(string userDataDir, BrowserChoice browserChoice, Action<string>? log = null,
+        string? invoiceDir = null, string? province = null)
     {
         _userDataDir = userDataDir;
         _browserChoice = browserChoice;
         _log = log;
+        _invoiceDir = invoiceDir;
+        _province = string.IsNullOrWhiteSpace(province) ? "Thanh Hóa" : province;
     }
 
     private static TaskCompletionSource<T> NewTcs<T>() =>
@@ -82,6 +99,9 @@ public sealed class OrdersBridgeSession : IDisposable
         _shopListTcs = NewTcs<string?>();
         _detailTcs = NewTcs<string>();
         _toShipTcs = NewTcs<string?>();
+        _ordersTcs = NewTcs<string?>();
+        _pickupTcs = NewTcs<bool>();
+        _prepareTcs = NewTcs<PrepareResult?>();
         _captchaSeen = false;
     }
 
@@ -290,7 +310,102 @@ public sealed class OrdersBridgeSession : IDisposable
         var toShip = ShopeeDashboard.ParseToShipCount(raw);
         L($"Số 'Chờ Lấy Hàng' đọc được: {(toShip?.ToString() ?? "null")} (raw='{raw}').");
 
-        return new OrdersBridgeSliceResult(shops, firstShopId, toShip, false, null);
+        // 4) GĐ3: đọc đơn (Phần A) + nếu ToShip>0 thì xử đơn (Phần B).
+        var (ordersCount, slipsSaved) = await RunShopOrdersAsync(toShip ?? 0, ct).ConfigureAwait(false);
+        if (_captchaSeen)
+        {
+            return new OrdersBridgeSliceResult(shops, firstShopId, toShip, true,
+                "Rơi vào trang verify/captcha khi đọc/xử đơn.", ordersCount, slipsSaved);
+        }
+
+        return new OrdersBridgeSliceResult(shops, firstShopId, toShip, false, null, ordersCount, slipsSaved);
+    }
+
+    // ── GĐ3: đọc đơn (Phần A) + xử đơn (Phần B) trên tab shop đang mở ───────────────────────────────────
+    private async Task<(int Orders, int Slips)> RunShopOrdersAsync(int toShip, CancellationToken ct)
+    {
+        // Phần A — đọc đơn tab "Tất cả" (test được ngay, kể cả shop 0 đơn chờ).
+        _ordersTcs = NewTcs<string?>();
+        await _ws!.SendAsync(new { action = "syncOrders" }).ConfigureAwait(false);
+        var ordersJson = await _ordersTcs.Task.WaitAsync(TimeSpan.FromSeconds(120), ct).ConfigureAwait(false);
+        if (_captchaSeen)
+        {
+            L("PHÁT HIỆN captcha khi đọc đơn.");
+            return (0, 0);
+        }
+        var orders = ShopeeLoginService.ParseOrdersJson(ordersJson);
+        L($"Đọc được {orders.Count} đơn (Tất cả).");
+
+        // Phần B — chỉ khi có đơn Chờ Lấy Hàng VÀ có thư mục lưu phiếu.
+        var slips = 0;
+        if (toShip > 0 && !string.IsNullOrWhiteSpace(_invoiceDir))
+        {
+            L($"Có {toShip} đơn Chờ Lấy Hàng — đặt địa chỉ lấy hàng ({_province}) rồi xử từng đơn...");
+            _pickupTcs = NewTcs<bool>();
+            await _ws.SendAsync(new { action = "setPickupAddress", province = _province }).ConfigureAwait(false);
+            var pickupOk = await _pickupTcs.Task.WaitAsync(TimeSpan.FromSeconds(90), ct).ConfigureAwait(false);
+            if (_captchaSeen)
+            {
+                L("PHÁT HIỆN captcha khi đặt địa chỉ lấy hàng.");
+                return (orders.Count, 0);
+            }
+            if (!pickupOk)
+            {
+                L("Không đặt được địa chỉ lấy hàng — vẫn thử xử đơn (phiếu có thể sai địa chỉ).");
+            }
+
+            // Lặp Chuẩn bị hàng tới khi hết đơn / chốt chặn 50 đơn / captcha.
+            var guard = 0;
+            while (guard++ < 50)
+            {
+                ct.ThrowIfCancellationRequested();
+                _prepareTcs = NewTcs<PrepareResult?>();
+                await _ws.SendAsync(new { action = "prepareNextOrder", invoiceDir = _invoiceDir }).ConfigureAwait(false);
+                var prep = await _prepareTcs.Task.WaitAsync(TimeSpan.FromSeconds(180), ct).ConfigureAwait(false);
+                if (_captchaSeen)
+                {
+                    L("PHÁT HIỆN captcha khi xử đơn — dừng.");
+                    break;
+                }
+                if (prep is null)
+                {
+                    L("Hết đơn cần Chuẩn bị hàng.");
+                    break;
+                }
+
+                var saved = await TrySaveSlipAsync(prep.SlipTabUrl, prep.OrderCode, _invoiceDir!, ct).ConfigureAwait(false);
+                if (saved) slips++;
+                L($"Đã chuẩn bị đơn {prep.OrderCode} — {(saved ? "lưu phiếu OK" : "CHƯA lưu được phiếu (kiểm tra tay)")}.");
+            }
+            L($"Xử đơn xong: {slips} phiếu đã lưu.");
+        }
+
+        return (orders.Count, slips);
+    }
+
+    /// <summary>Tải phiếu giao PDF từ <paramref name="slipUrl"/> (tab awbprint) qua HttpClient, kiểm magic
+    /// <c>%PDF-</c> rồi lưu <c>&lt;dir&gt;/&lt;SanitizeFileName(orderCode)&gt;.pdf</c>. Best-effort — mọi lỗi → false.</summary>
+    private static async Task<bool> TrySaveSlipAsync(string? slipUrl, string orderCode, string dir, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(slipUrl))
+        {
+            return false;
+        }
+        try
+        {
+            System.IO.Directory.CreateDirectory(dir);
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+            var bytes = await http.GetByteArrayAsync(slipUrl, ct).ConfigureAwait(false);
+            // Magic %PDF (0x25 0x50 0x44 0x46) — tránh lưu HTML/redirect đăng nhập thành .pdf rác.
+            if (bytes.Length < 4 || bytes[0] != 0x25 || bytes[1] != 0x50 || bytes[2] != 0x44 || bytes[3] != 0x46)
+            {
+                return false;
+            }
+            var name = ShopeeShippingNav.SanitizeFileName(orderCode) + ".pdf";
+            await System.IO.File.WriteAllBytesAsync(System.IO.Path.Combine(dir, name), bytes, ct).ConfigureAwait(false);
+            return true;
+        }
+        catch { return false; }
     }
 
     private OrdersBridgeSliceResult Fail(string message) =>
@@ -329,8 +444,31 @@ public sealed class OrdersBridgeSession : IDisposable
                     {
                         _toShipTcs.TrySetResult(data);
                     }
+                    else if (kind == "orders")
+                    {
+                        _ordersTcs.TrySetResult(data);
+                    }
                     break;
                 }
+
+                case "pickupDone":
+                {
+                    var ok = root.TryGetProperty("ok", out var o) && o.ValueKind == JsonValueKind.True;
+                    _pickupTcs.TrySetResult(ok);
+                    break;
+                }
+
+                case "orderPrepared":
+                {
+                    var code = root.TryGetProperty("orderCode", out var oc) ? (oc.GetString() ?? string.Empty) : string.Empty;
+                    var slip = root.TryGetProperty("slipTabUrl", out var su) ? (su.GetString() ?? string.Empty) : string.Empty;
+                    _prepareTcs.TrySetResult(new PrepareResult(code, slip));
+                    break;
+                }
+
+                case "noOrder":
+                    _prepareTcs.TrySetResult(null);
+                    break;
 
                 case "progress":
                 {
@@ -345,7 +483,11 @@ public sealed class OrdersBridgeSession : IDisposable
                 case "captcha":
                 {
                     _captchaSeen = true;
+                    // Hoàn tất mọi chặng ĐANG chờ (bất kể pha nào) để C# thoát nhanh + kiểm _captchaSeen.
                     _detailTcs.TrySetResult("captcha");
+                    _ordersTcs.TrySetResult(null);
+                    _pickupTcs.TrySetResult(false);
+                    _prepareTcs.TrySetResult(null);
                     break;
                 }
 
@@ -359,6 +501,9 @@ public sealed class OrdersBridgeSession : IDisposable
                     _shopListTcs.TrySetException(ex);
                     _detailTcs.TrySetException(ex);
                     _toShipTcs.TrySetException(ex);
+                    _ordersTcs.TrySetException(ex);
+                    _pickupTcs.TrySetException(ex);
+                    _prepareTcs.TrySetException(ex);
                     break;
                 }
             }

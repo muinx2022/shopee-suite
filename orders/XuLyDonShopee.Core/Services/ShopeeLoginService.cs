@@ -360,6 +360,11 @@ public class ShopeeLoginService
     /// <see cref="ShopListItem"/> — forwarder để unit-test hàm thuần mà không cần dựng phiên trình duyệt.</summary>
     internal static IReadOnlyList<ShopListItem> ParseShopListJson(string? json) => LoginSession.ParseShopListJson(json);
 
+    /// <summary>Chuyển JSON mảng đơn (do <c>pageScanOrders</c>/<c>ScanOrdersJs</c> đọc từ DOM) thành danh sách
+    /// <see cref="SyncedOrder"/> — forwarder tái dùng hàm thuần <c>LoginSession.ParseOrdersJson</c> cho cầu nối
+    /// extension (<c>OrdersBridgeSession</c>), không viết lại logic parse.</summary>
+    internal static List<SyncedOrder> ParseOrdersJson(string? json) => LoginSession.ParseOrdersJson(json);
+
     /// <summary>Forwarder tái dùng luồng đăng nhập hộp thư Hotmail/Outlook (mở tab mới trong <paramref name="context"/>,
     /// đăng nhập Microsoft, vào hộp thư) — dùng cho <c>OrdersMailboxSession</c> (trình duyệt Playwright RIÊNG cho mail,
     /// tách khỏi trình duyệt Shopee sạch). Trả về tab mail đã mở + cờ đã đăng nhập.</summary>
@@ -5187,7 +5192,7 @@ public class ShopeeLoginService
         /// từng phần tử trong try (phần tử lạ không phá cả danh sách); đơn KHÔNG có mã (orderSn rỗng) bị BỎ.
         /// Tổng tiền parse qua <see cref="ShopeeShippingNav.ParseVndAmount"/> (bỏ mọi ký tự không phải số).
         /// </summary>
-        private static List<SyncedOrder> ParseOrdersJson(string? json)
+        internal static List<SyncedOrder> ParseOrdersJson(string? json)
         {
             var result = new List<SyncedOrder>();
             if (string.IsNullOrWhiteSpace(json))
