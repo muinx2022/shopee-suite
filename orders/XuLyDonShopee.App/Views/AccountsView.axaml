@@ -218,27 +218,8 @@
                                 ToolTip.Tip="Xóa các tài khoản đang tick — không tick dòng nào thì xóa tài khoản đang chọn. Hỏi xác nhận trước khi xóa." />
                     </Grid>
 
-                    <!-- Hàng nút thao tác nhóm — dạng ICON, 2 NHÓM có ngăn cách:
-                         [✓ chọn]  |  [▶ Chạy đã chọn · ■ Dừng đã chọn · ✕ Dừng tất cả]. -->
-                    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="6"
-                                Margin="0,0,0,12">
-                        <!-- Nhóm chọn -->
-                        <Button Classes="iconAction" Content="✓"
-                                Command="{Binding SelectAllCommand}"
-                                ToolTip.Tip="Chọn / bỏ chọn toàn bộ" />
-                        <!-- Ngăn cách 2 nhóm (đường mảnh mờ). -->
-                        <Border Width="1" Margin="4,4" Background="{StaticResource Border012}" />
-                        <!-- Nhóm phiên: Chạy đã chọn (MỞ PHIÊN — hành động chính) · Dừng đã chọn · Dừng tất cả. -->
-                        <Button Classes="iconAction play" Content="▶"
-                                Command="{Binding RunSelectedCommand}"
-                                ToolTip.Tip="Chạy đã chọn — mở phiên cho các tài khoản đang tick: đăng nhập tài khoản phụ rồi tự lặp qua các shop" />
-                        <Button Classes="iconAction" Content="■"
-                                Command="{Binding StopSelectedCommand}"
-                                ToolTip.Tip="Dừng đã chọn — dừng toàn bộ việc đang làm và đóng trang của các tài khoản đang tick" />
-                        <Button Classes="iconAction" Content="✕"
-                                Command="{Binding StopAllCommand}"
-                                ToolTip.Tip="Dừng tất cả — dừng mọi phiên đang chạy (đóng hết Brave)" />
-                    </StackPanel>
+                    <!-- (Hàng nút thao tác nhóm ✓/▶/■/✕ đã BỎ — trùng nhóm "Hành động" trên Ribbon;
+                         các command SelectAll/RunSelected/StopSelected/StopAll vẫn dùng ở Ribbon.) -->
 
                     <!-- (Tùy chọn "Xóa profile và tạo lại" đã CHUYỂN lên dải Ribbon — tab Đơn hàng, nhóm "Tùy chọn";
                          vẫn bind cùng property AccountsViewModel.XoaProfileTaoLai nên persist như cũ.) -->
