@@ -478,6 +478,23 @@ function pageCheckboxState() {
   return null;
 }
 
+// Số dòng shop trong picker (tr[data-row-key]) — chờ trang chọn shop render sau SSO.
+function pageShopRowCount() {
+  return document.querySelectorAll("tr[data-row-key]").length;
+}
+
+// True nếu đang ở FORM ĐĂNG NHẬP subaccount: có ô mật khẩu HIỂN THỊ (SubPassSelectors). Bản sạch KHÔNG tự login.
+function pageIsLoginForm() {
+  const sels = [".login-card input[type='password']", "input[type='password']"];
+  for (const sel of sels) {
+    for (const el of document.querySelectorAll(sel)) {
+      const r = el.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) return true;
+    }
+  }
+  return false;
+}
+
 let lastTabUrls = []; // chẩn đoán: các URL tab lần query gần nhất (đưa vào thông báo lỗi khi không thấy tab).
 
 // Phân giải "tab thao tác" một cách CHẮC CHẮN: nếu listTabId còn sống VÀ khớp host cần → giữ; ngược lại query
@@ -501,6 +518,8 @@ async function ensureListTab(preferSubstrings) {
 }
 
 const BANHANG_HOSTS = ["banhang.shopee.vn"];
+const SUBACCOUNT_HOSTS = ["subaccount.shopee.com", "accounts.shopee.vn"];
+const SHOP_LIST_URL = "https://banhang.shopee.vn/portal/shop";
 const ORDERS_URL = "https://banhang.shopee.vn/portal/sale/order";
 const SHIPPING_SETTINGS_URL = "https://banhang.shopee.vn/portal/all-settings/shipping";
 const MAX_ORDER_PAGES = 10; // chốt chặn số trang quét (khớp MaxSyncPages phía C#).
@@ -612,6 +631,7 @@ async function handleCommand(cmd) {
   if (!cmd || !cmd.action) return;
 
   switch (cmd.action) {
+    case "gotoSellerCentre": await gotoSellerCentre(); return;
     case "readShopList":     await doReadShopList(); return;
     case "openShopDetail":   await openShopDetail(String(cmd.shopId || "").replace(/'/g, "")); return;
     case "readToShip":       await doReadToShip(); return;
@@ -619,6 +639,100 @@ async function handleCommand(cmd) {
     case "setPickupAddress": await doSetPickupAddress(String(cmd.province || "")); return;
     case "prepareNextOrder": await doPrepareNextOrder(); return;
   }
+}
+
+// SSO từ trang tài khoản subaccount (/account, đã đăng nhập nhờ cookie) → "Kênh Người bán" → tab banhang →
+// trang CHỌN SHOP (/portal/shop, picker tất-cả-shop — né sticky-shop server-side khi mở thẳng /portal/shop).
+async function gotoSellerCentre() {
+  if (!(await ensureListTab(SUBACCOUNT_HOSTS))) {
+    send({ action: "error", message: "chưa thấy tab subaccount/account để mở Kênh Người bán — SW thấy: [" + lastTabUrls.join(" | ") + "]" });
+    return;
+  }
+
+  // Trang /account có thể ra FORM LOGIN nếu cookie hết hạn — bản sạch KHÔNG tự điền (đã bỏ khi pivot GĐ2).
+  let isLogin = false;
+  try { isLogin = await execInTab(listTabId, pageIsLoginForm, []); } catch (e) {}
+  if (isLogin) {
+    send({ action: "error", message: "bản sạch gặp trang đăng nhập subaccount (cookie hết hạn) — cần đăng nhập lại" });
+    return;
+  }
+
+  // Trên /account (đã đăng nhập) → click THẲNG "Kênh Người bán"; chưa thấy → thử "Tài khoản của tôi" trước rồi thử lại.
+  const sellerSel = ["span.entry-text", ".entry", "span", "div", "[role='button']", "a"];
+  const sellerRe = "kenh nguoi ban|seller\\s*cent(re|er)|seller\\s*channel";
+  let seller = await execInTab(listTabId, pageLocateByText, [sellerSel, sellerRe]);
+  if (!seller) {
+    const acc = await execInTab(listTabId, pageLocateByText, [["li", "a", "div", "span", "[role='menuitem']"], "tai khoan cua toi|my account"]);
+    if (acc) { await trustedClick(listTabId, acc.x, acc.y); await sleep(2200); }
+    seller = await execInTab(listTabId, pageLocateByText, [sellerSel, sellerRe]);
+  }
+  if (!seller) { send({ action: "error", message: "không thấy 'Kênh Người bán' trên trang tài khoản subaccount" }); return; }
+
+  const before = (await chrome.tabs.query({ url: "https://banhang.shopee.vn/*" })).map((t) => t.id);
+  const subTabId = listTabId;
+  await trustedClick(listTabId, seller.x, seller.y);
+
+  // Theo tab banhang MỚI hoặc tab subaccount tự điều hướng sang banhang.
+  const deadline = Date.now() + 90000;
+  let found = null;
+  while (Date.now() < deadline) {
+    const tabs = await chrome.tabs.query({ url: "https://banhang.shopee.vn/*" });
+    const cand = tabs.find((t) => before.indexOf(t.id) === -1);
+    if (cand) { found = cand; break; }
+    try {
+      const lt = await chrome.tabs.get(subTabId);
+      if (lt && lt.url && lt.url.indexOf("banhang.shopee.vn") >= 0) { found = lt; break; }
+    } catch (e) {}
+    await sleep(600);
+  }
+  if (!found) { send({ action: "error", message: "bấm 'Kênh Người bán' xong chờ 90s chưa thấy Seller Centre" }); return; }
+
+  listTabId = found.id;
+  shopTabId = null;
+  await waitTabComplete(listTabId, 15000);
+  let url = "";
+  try { url = (await chrome.tabs.get(listTabId)).url || ""; } catch (e) {}
+  if (/\/verify/i.test(url)) { send({ action: "captcha", message: url }); return; }
+
+  // Đảm bảo VỀ ĐƯỢC picker /portal/shop (poll tr[data-row-key]); có thể vẫn bị sticky-redirect → điều hướng lại 1 lần.
+  const st = await ensureShopPicker(listTabId);
+  if (st === "verify") {
+    let u = "";
+    try { u = (await chrome.tabs.get(listTabId)).url || ""; } catch (e) {}
+    send({ action: "captcha", message: u });
+    return;
+  }
+  if (st !== "ok") {
+    send({ action: "error", message: "không về được trang chọn shop (/portal/shop) — có thể vẫn dính shop cũ (sticky) hoặc bảng chưa render" });
+    return;
+  }
+
+  // Picker OK → đóng tab subaccount (nếu là tab riêng) rồi báo sẵn sàng.
+  if (subTabId !== listTabId) { try { await chrome.tabs.remove(subTabId); } catch (e) {} }
+  send({ action: "atSellerCentre" });
+}
+
+// Về/chờ trang chọn shop: poll tr[data-row-key] tới ~30s; nếu chưa ở /portal/shop thì điều hướng lại MỘT lần.
+// Trả "ok" (thấy bảng shop) | "verify" (rơi trang xác minh) | "stuck" (hết giờ, có thể vẫn dính shop cũ).
+async function ensureShopPicker(tabId) {
+  const overall = Date.now() + 30000;
+  let navigated = false;
+  while (Date.now() < overall) {
+    let u = "";
+    try { u = (await chrome.tabs.get(tabId)).url || ""; } catch (e) {}
+    if (/\/verify/i.test(u)) return "verify";
+    let n = 0;
+    try { n = (await execInTab(tabId, pageShopRowCount, [])) || 0; } catch (e) { n = 0; }
+    if (n > 0) return "ok";
+    if (u.indexOf("/portal/shop") < 0 && !navigated) {
+      navigated = true;
+      try { await chrome.tabs.update(tabId, { url: SHOP_LIST_URL }); } catch (e) {}
+      await waitTabComplete(tabId, 20000);
+      continue;
+    }
+    await sleep(700);
+  }
+  return "stuck";
 }
 
 // Đọc danh sách shop.

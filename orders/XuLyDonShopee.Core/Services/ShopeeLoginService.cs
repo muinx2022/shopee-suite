@@ -328,6 +328,11 @@ public class ShopeeLoginService
     /// <summary>URL Nền tảng tài khoản phụ — điểm vào đăng nhập mới (một tài khoản có nhiều shop).</summary>
     public const string SubaccountUrl = "https://subaccount.shopee.com/";
 
+    /// <summary>Trang "Tài khoản" của Nền tảng tài khoản phụ — điểm vào của BẢN SẠCH (cầu nối): có cookie hồ sơ →
+    /// hiện trang tài khoản (có "Kênh Người bán"); hết cookie → ra form đăng nhập. Dùng để SSO lại về trang chọn
+    /// shop (né sticky-shop server-side khi mở thẳng /portal/shop).</summary>
+    public const string SubaccountAccountUrl = "https://subaccount.shopee.com/account";
+
     /// <summary>URL bảng danh sách shop của Nền tảng tài khoản phụ — sau khi đăng nhập, mở thẳng đây để lặp qua từng shop.</summary>
     public const string ShopListUrl = "https://banhang.shopee.vn/portal/shop";
 

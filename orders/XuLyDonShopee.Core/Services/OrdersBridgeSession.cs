@@ -64,6 +64,7 @@ public sealed class OrdersBridgeSession : IDisposable
     // Cờ hoàn tất từng chặng — tạo mới mỗi lần chạy; RunContinuationsAsynchronously để continuation KHÔNG chạy
     // trên thread nhận WebSocket (tránh nghẽn vòng nhận / deadlock).
     private TaskCompletionSource<bool> _readyTcs = NewTcs<bool>();
+    private TaskCompletionSource<bool> _atSellerTcs = NewTcs<bool>();          // bản sạch: SSO về trang chọn shop
     private TaskCompletionSource<string?> _shopListTcs = NewTcs<string?>();
     private TaskCompletionSource<string> _detailTcs = NewTcs<string>();        // "ok" | "captcha"
     private TaskCompletionSource<string?> _toShipTcs = NewTcs<string?>();
@@ -96,6 +97,7 @@ public sealed class OrdersBridgeSession : IDisposable
     private void ResetTcs()
     {
         _readyTcs = NewTcs<bool>();
+        _atSellerTcs = NewTcs<bool>();
         _shopListTcs = NewTcs<string?>();
         _detailTcs = NewTcs<string>();
         _toShipTcs = NewTcs<string?>();
@@ -306,9 +308,46 @@ public sealed class OrdersBridgeSession : IDisposable
         // 2) Settle ngắn cho chắc nhả khoá file hồ sơ (Brave vừa kill) trước khi mở lại bằng trình duyệt sạch.
         await Task.Delay(800, ct).ConfigureAwait(false);
 
-        // 3) Mở lại bằng trình duyệt SẠCH + extension tại /portal/shop (đã đăng nhập nhờ hồ sơ) → lát cắt.
-        L("Đăng nhập xong — mở lại bằng trình duyệt sạch + extension để đọc Seller Centre...");
-        return await RunSliceAsync(ct).ConfigureAwait(false);
+        // 3) Mở lại bằng trình duyệt SẠCH + extension tại trang TÀI KHOẢN subaccount (/account, đã đăng nhập nhờ
+        //    cookie hồ sơ) → extension SSO "Kênh Người bán" → về trang CHỌN SHOP (/portal/shop, picker). KHÔNG mở
+        //    thẳng /portal/shop vì Shopee sticky-redirect vào shop mở lần trước (server-side) → không tới picker.
+        L("Đăng nhập xong — mở lại bằng trình duyệt sạch + extension (subaccount /account → SSO → trang chọn shop)...");
+        ResetTcs();
+        StartBridgeAndLaunch(ShopeeLoginService.SubaccountAccountUrl);
+        try
+        {
+            L("Chờ extension nối cầu (ready) — tối đa 45s...");
+            await _readyTcs.Task.WaitAsync(TimeSpan.FromSeconds(45), ct).ConfigureAwait(false);
+            L("Extension đã nối cầu — SSO 'Kênh Người bán' để về trang chọn shop...");
+
+            _atSellerTcs = NewTcs<bool>();
+            await _ws!.SendAsync(new { action = "gotoSellerCentre" }).ConfigureAwait(false);
+            var atSeller = await _atSellerTcs.Task.WaitAsync(TimeSpan.FromSeconds(120), ct).ConfigureAwait(false);
+            if (_captchaSeen)
+            {
+                L("PHÁT HIỆN captcha/verify khi vào Seller Centre.");
+                return new OrdersBridgeSliceResult(Array.Empty<ShopListItem>(), null, null, true,
+                    "Rơi vào trang verify/captcha khi vào Seller Centre.");
+            }
+            if (!atSeller)
+            {
+                return Fail("Không về được trang chọn shop (/portal/shop) sau SSO — có thể sticky shop cũ / cookie hết hạn.");
+            }
+
+            L("Đã về trang chọn shop — đọc shop...");
+            return await RunSliceCoreAsync(ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (TimeoutException)
+        {
+            L("Cầu nối: hết thời gian chờ phản hồi từ extension (SSO Seller Centre).");
+            return Fail("Hết thời gian chờ phản hồi từ extension khi SSO Seller Centre.");
+        }
+        catch (Exception ex)
+        {
+            L("Cầu nối lỗi: " + ex.Message);
+            return Fail(ex.Message);
+        }
     }
 
     // Lát cắt dùng chung (GĐ1 + đuôi GĐ2): readShopList → openShopDetail(shop đầu) → readToShip.
@@ -462,6 +501,10 @@ public sealed class OrdersBridgeSession : IDisposable
                     _readyTcs.TrySetResult(true);
                     break;
 
+                case "atSellerCentre":
+                    _atSellerTcs.TrySetResult(true);
+                    break;
+
                 case "shopOpened":
                     _detailTcs.TrySetResult("ok");
                     break;
@@ -518,6 +561,7 @@ public sealed class OrdersBridgeSession : IDisposable
                 {
                     _captchaSeen = true;
                     // Hoàn tất mọi chặng ĐANG chờ (bất kể pha nào) để C# thoát nhanh + kiểm _captchaSeen.
+                    _atSellerTcs.TrySetResult(false);
                     _detailTcs.TrySetResult("captcha");
                     _ordersTcs.TrySetResult(null);
                     _pickupTcs.TrySetResult(false);
@@ -532,6 +576,7 @@ public sealed class OrdersBridgeSession : IDisposable
                     var ex = new InvalidOperationException("Extension báo lỗi: " + m);
                     // Fault mọi chặng đang chờ để phiên thoát sớm thay vì đợi timeout.
                     _readyTcs.TrySetException(ex);
+                    _atSellerTcs.TrySetException(ex);
                     _shopListTcs.TrySetException(ex);
                     _detailTcs.TrySetException(ex);
                     _toShipTcs.TrySetException(ex);
