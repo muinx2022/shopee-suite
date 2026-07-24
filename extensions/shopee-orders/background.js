@@ -422,6 +422,26 @@ function pagePrintButton() {
   return null;
 }
 
+// Tải PDF phiếu NGAY TRONG TRANG awbprint (có cookie + same-origin cho blob) → base64. Port e0/e1 của SaveSlipAsync:
+// PDF nhúng trong iframe/embed/object dạng blob: (gốc, ưu tiên) hoặc http(s). Tự chứa (world MAIN, async). "" nếu chưa có.
+async function pageFetchSlipBase64() {
+  const srcs = [];
+  for (const e of document.querySelectorAll("iframe")) { if (e.src) srcs.push(e.src); }
+  for (const e of document.querySelectorAll("embed")) { if (e.src) srcs.push(e.src); }
+  for (const e of document.querySelectorAll("object")) { if (e.data) srcs.push(e.data); }
+  let url = srcs.find((s) => s.indexOf("blob:") === 0) || srcs.find((s) => s.indexOf("http") === 0) || "";
+  if (!url) return "";
+  const h = url.indexOf("#"); if (h >= 0) url = url.substring(0, h); // bỏ #toolbar=0...
+  try {
+    const resp = await fetch(url);
+    const buf = await resp.arrayBuffer();
+    const bytes = new Uint8Array(buf);
+    let bin = ""; const chunk = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunk) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+    return btoa(bin);
+  } catch (e) { return ""; }
+}
+
 // Rút tên lõi tỉnh từ chuỗi tỉnh (mirror ShopeeShippingNav.ProvinceCoreName trên text đã bỏ dấu).
 function _provCore(p) {
   let s = _na(p);
@@ -1146,5 +1166,18 @@ async function doPrepareNextOrder() {
     await sleep(300);
   }
 
-  send({ action: "orderPrepared", orderCode: orderCode, slipTabUrl: slipUrl });
+  // Tải PDF phiếu NGAY TRONG TAB PHIẾU (có cookie, same-origin blob) → base64. Poll ~25s để khung nhúng PDF kịp render.
+  await waitTabComplete(slipId, 15000);
+  let slipB64 = "";
+  const fd = Date.now() + 25000;
+  while (Date.now() < fd) {
+    try { slipB64 = (await execInTab(slipId, pageFetchSlipBase64, [])) || ""; } catch (e) { slipB64 = ""; }
+    if (slipB64) break;
+    await sleep(800);
+  }
+
+  // Đóng tab phiếu sau khi lấy xong (user yêu cầu: lưu xong thì close tab phiếu).
+  try { await chrome.tabs.remove(slipId); } catch (e) {}
+
+  send({ action: "orderPrepared", orderCode: orderCode, slipTabUrl: slipUrl, slipBase64: slipB64 });
 }

@@ -59,7 +59,7 @@ public sealed class OrdersBridgeSession : IDisposable
     private OrdersWebSocketServer? _ws;
 
     /// <summary>GĐ3: kết quả extension "chuẩn bị hàng" 1 đơn (mã đơn + URL tab phiếu). null qua TCS = hết đơn.</summary>
-    private sealed record PrepareResult(string OrderCode, string SlipTabUrl);
+    private sealed record PrepareResult(string OrderCode, string SlipTabUrl, string SlipBase64);
 
     // Cờ hoàn tất từng chặng — tạo mới mỗi lần chạy; RunContinuationsAsynchronously để continuation KHÔNG chạy
     // trên thread nhận WebSocket (tránh nghẽn vòng nhận / deadlock).
@@ -446,7 +446,7 @@ public sealed class OrdersBridgeSession : IDisposable
                     break;
                 }
 
-                var saved = await TrySaveSlipAsync(prep.SlipTabUrl, prep.OrderCode, _invoiceDir!, ct).ConfigureAwait(false);
+                var saved = TrySaveSlip(prep.SlipBase64, prep.OrderCode, _invoiceDir!);
                 if (saved) slips++;
                 L($"Đã chuẩn bị đơn {prep.OrderCode} — {(saved ? "lưu phiếu OK" : "CHƯA lưu được phiếu (kiểm tra tay)")}.");
             }
@@ -456,26 +456,27 @@ public sealed class OrdersBridgeSession : IDisposable
         return (orders.Count, slips);
     }
 
-    /// <summary>Tải phiếu giao PDF từ <paramref name="slipUrl"/> (tab awbprint) qua HttpClient, kiểm magic
-    /// <c>%PDF-</c> rồi lưu <c>&lt;dir&gt;/&lt;SanitizeFileName(orderCode)&gt;.pdf</c>. Best-effort — mọi lỗi → false.</summary>
-    private static async Task<bool> TrySaveSlipAsync(string? slipUrl, string orderCode, string dir, CancellationToken ct)
+    /// <summary>Ghi phiếu giao PDF từ <paramref name="slipBase64"/> (extension đã fetch NGAY TRONG tab awbprint —
+    /// có cookie, same-origin blob — nên KHÔNG dùng HttpClient GET vô cookie như bản cũ). Kiểm magic <c>%PDF</c> rồi
+    /// lưu <c>&lt;dir&gt;/&lt;SanitizeFileName(orderCode)&gt;.pdf</c>. Best-effort — mọi lỗi/không phải PDF → false.</summary>
+    private static bool TrySaveSlip(string? slipBase64, string orderCode, string dir)
     {
-        if (string.IsNullOrWhiteSpace(slipUrl))
+        if (string.IsNullOrWhiteSpace(slipBase64))
         {
             return false;
         }
         try
         {
-            System.IO.Directory.CreateDirectory(dir);
-            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
-            var bytes = await http.GetByteArrayAsync(slipUrl, ct).ConfigureAwait(false);
-            // Magic %PDF (0x25 0x50 0x44 0x46) — tránh lưu HTML/redirect đăng nhập thành .pdf rác.
+            byte[] bytes;
+            try { bytes = Convert.FromBase64String(slipBase64); } catch { return false; }
+            // Magic %PDF (0x25 0x50 0x44 0x46) — tránh lưu HTML/rác thành .pdf.
             if (bytes.Length < 4 || bytes[0] != 0x25 || bytes[1] != 0x50 || bytes[2] != 0x44 || bytes[3] != 0x46)
             {
                 return false;
             }
+            System.IO.Directory.CreateDirectory(dir);
             var name = ShopeeShippingNav.SanitizeFileName(orderCode) + ".pdf";
-            await System.IO.File.WriteAllBytesAsync(System.IO.Path.Combine(dir, name), bytes, ct).ConfigureAwait(false);
+            System.IO.File.WriteAllBytes(System.IO.Path.Combine(dir, name), bytes);
             return true;
         }
         catch { return false; }
@@ -539,7 +540,8 @@ public sealed class OrdersBridgeSession : IDisposable
                 {
                     var code = root.TryGetProperty("orderCode", out var oc) ? (oc.GetString() ?? string.Empty) : string.Empty;
                     var slip = root.TryGetProperty("slipTabUrl", out var su) ? (su.GetString() ?? string.Empty) : string.Empty;
-                    _prepareTcs.TrySetResult(new PrepareResult(code, slip));
+                    var b64 = root.TryGetProperty("slipBase64", out var sb) ? (sb.GetString() ?? string.Empty) : string.Empty;
+                    _prepareTcs.TrySetResult(new PrepareResult(code, slip, b64));
                     break;
                 }
 
