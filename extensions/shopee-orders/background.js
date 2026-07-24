@@ -693,9 +693,28 @@ async function dbgEnter(target) {
   await dbgSend(target, "Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
 }
 
-// Cú click trusted self-contained (tự attach/detach) — dùng cho openShopDetail + các bước xử đơn GĐ3.
+// Giữ chrome.debugger ATTACH XUYÊN SUỐT một lệnh (KHÔNG attach/detach từng cú) — vì: (1) banner "đang gỡ lỗi"
+// hết nhấp nháy; (2) mọi toạ độ (execInTab) + cú click ở CÙNG trạng thái banner → click không trượt. Gọi
+// ensureDbg(tab) đầu mỗi lệnh nhiều-click (trước khi đọc toạ độ), releaseDbg() ở cuối.
+let _dbgTab = null;
+async function ensureDbg(tabId) {
+  if (_dbgTab === tabId) return;
+  if (_dbgTab != null) { try { await dbgDetach({ tabId: _dbgTab }); } catch (e) {} _dbgTab = null; }
+  try { await dbgAttach({ tabId }); } catch (e) { /* có thể đã attach sẵn — coi như ok */ }
+  _dbgTab = tabId;
+}
+async function releaseDbg() {
+  if (_dbgTab == null) return;
+  const t = _dbgTab; _dbgTab = null;
+  try { await sleep(300); await dbgDetach({ tabId: t }); } catch (e) {}
+}
+// Debugger tự detach (điều hướng trang / user bấm "Huỷ" trên banner) → reset để cú click sau tự attach lại.
+try { chrome.debugger.onDetach.addListener((source) => { if (_dbgTab != null && source && source.tabId === _dbgTab) _dbgTab = null; }); } catch (e) {}
+
+// Cú click trusted — dùng debugger đã attach (ensureDbg trước đó), KHÔNG detach sau mỗi cú.
 async function trustedClick(tabId, x, y) {
-  await withDebugger(tabId, async (target) => { await dbgClick(target, x, y); });
+  await ensureDbg(tabId);
+  await dbgClick({ tabId }, x, y);
 }
 
 // ---- Xử lý lệnh từ C# -----------------------------------------------------
@@ -1059,6 +1078,7 @@ async function doPrepareNextOrder() {
   if (/\/verify/i.test(url)) { send({ action: "captcha", message: url }); return; }
 
   await waitOrdersStable(tabId, 15000);
+  await ensureDbg(tabId); // attach TRƯỚC khi đọc toạ độ → banner đứng yên, toạ độ + click cùng trạng thái (click không trượt).
   // Tab "Chờ lấy hàng".
   const toShipTab = await execInTab(tabId, pageLocateByText, [["[role='tab']", ".eds-tabs__nav-tab", "a", "div", "span"], "^cho lay hang"]);
   if (toShipTab) { await trustedClick(tabId, toShipTab.x, toShipTab.y); await sleep(1200); await waitOrdersStable(tabId, 10000); }
@@ -1070,7 +1090,7 @@ async function doPrepareNextOrder() {
   if (!prep) { send({ action: "noOrder" }); return; }
   const orderCode = prep.orderCode || "";
 
-  const beforeTabs = (await chrome.tabs.query({ url: "https://banhang.shopee.vn/*" })).map((t) => t.id);
+  const beforeTabs = (await chrome.tabs.query({})).map((t) => t.id); // mọi tab (tab phiếu awbprint có thể khác domain).
   await trustedClick(tabId, prep.x, prep.y);
 
   // Modal "Giao Đơn Hàng".
@@ -1100,15 +1120,16 @@ async function doPrepareNextOrder() {
   let slipTab = null;
   const printDeadline = Date.now() + 120000;
   while (!slipTab && Date.now() < printDeadline) {
-    const tabs = await chrome.tabs.query({ url: "https://banhang.shopee.vn/*" });
-    const cand = tabs.find((t) => beforeTabs.indexOf(t.id) === -1);
+    const tabs = await chrome.tabs.query({});
+    const cand = tabs.find((t) => beforeTabs.indexOf(t.id) === -1 && t.id !== tabId);
     if (cand) { slipTab = cand; break; }
+    await ensureDbg(tabId);
     const pbtn = await execInTab(tabId, pagePrintButton, []);
     if (pbtn) { await trustedClick(tabId, pbtn.x, pbtn.y); }
     const wt = Date.now() + 8000;
     while (!slipTab && Date.now() < wt) {
-      const tt = await chrome.tabs.query({ url: "https://banhang.shopee.vn/*" });
-      const cc = tt.find((t) => beforeTabs.indexOf(t.id) === -1);
+      const tt = await chrome.tabs.query({});
+      const cc = tt.find((t) => beforeTabs.indexOf(t.id) === -1 && t.id !== tabId);
       if (cc) { slipTab = cc; break; }
       await sleep(400);
     }
