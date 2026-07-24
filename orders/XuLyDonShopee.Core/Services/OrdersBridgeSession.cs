@@ -31,6 +31,16 @@ public sealed record OrdersBridgeSliceResult(
 public sealed record OrdersLoginParams(
     string User, string Pass, string? VerifyEmail, string? VerifyEmailPassword);
 
+/// <summary>GĐ4: kết quả một VÒNG qua MỌI shop (<see cref="OrdersBridgeSession.RunAllShopsAsync"/>).</summary>
+/// <param name="ShopCount">Số shop đọc được từ picker.</param>
+/// <param name="ShopsDone">Số shop đã xử trọn trong vòng này.</param>
+/// <param name="TotalOrders">Tổng số đơn đọc được (cộng qua các shop).</param>
+/// <param name="TotalSlips">Tổng số phiếu PDF đã lưu.</param>
+/// <param name="Captcha">True nếu dừng vòng vì captcha/verify.</param>
+/// <param name="Error">Thông báo lỗi (null nếu vòng chạy trọn không lỗi).</param>
+public sealed record OrdersBridgeRunResult(
+    int ShopCount, int ShopsDone, int TotalOrders, int TotalSlips, bool Captcha, string? Error);
+
 /// <summary>
 /// Vòng đời MỘT phiên cầu nối: cấp cổng loopback trống → chạy <see cref="OrdersWebSocketServer"/> →
 /// mở trình duyệt SẠCH (không CDP, không remote-debugging-port) qua <see cref="PocCleanLauncher"/> với
@@ -55,6 +65,10 @@ public sealed class OrdersBridgeSession : IDisposable
     private readonly Action<string>? _log;
     private readonly string? _invoiceDir;
     private readonly string _province;
+    // GĐ4: callback do App rót — gọi sau khi đọc xong đơn MỖI shop để App lưu DB/GSheet/hub (Core không ref App).
+    private readonly Func<string, IReadOnlyList<SyncedOrder>, CancellationToken, Task>? _syncCallback;
+    // GĐ4: khoảng nghỉ ngẫu nhiên giữa các shop (ms) — kiểu người, tránh dồn dập.
+    private readonly Random _rng = new();
 
     private OrdersWebSocketServer? _ws;
 
@@ -72,6 +86,7 @@ public sealed class OrdersBridgeSession : IDisposable
     private TaskCompletionSource<bool> _pickupTcs = NewTcs<bool>();            // GĐ3: đặt địa chỉ lấy hàng xong
     private TaskCompletionSource<bool> _pickupOtherTcs = NewTcs<bool>();       // GĐ3: set địa chỉ VỀ địa chỉ khác xong
     private TaskCompletionSource<PrepareResult?> _prepareTcs = NewTcs<PrepareResult?>(); // GĐ3: 1 đơn (null=hết)
+    private TaskCompletionSource<bool> _closeShopTcs = NewTcs<bool>();         // GĐ4: đóng tab shop, về picker xong
 
     private bool _captchaSeen;
 
@@ -80,14 +95,17 @@ public sealed class OrdersBridgeSession : IDisposable
 
     /// <param name="invoiceDir">GĐ3 Phần B: thư mục lưu phiếu giao PDF; null/rỗng → chỉ đọc đơn, không tải phiếu.</param>
     /// <param name="province">GĐ3 Phần B: tỉnh của địa chỉ lấy hàng cần đặt (mặc định "Thanh Hóa").</param>
+    /// <param name="syncCallback">GĐ4: gọi SAU khi đọc xong đơn mỗi shop — App lưu DB/GSheet/hub. null → chỉ log.</param>
     public OrdersBridgeSession(string userDataDir, BrowserChoice browserChoice, Action<string>? log = null,
-        string? invoiceDir = null, string? province = null)
+        string? invoiceDir = null, string? province = null,
+        Func<string, IReadOnlyList<SyncedOrder>, CancellationToken, Task>? syncCallback = null)
     {
         _userDataDir = userDataDir;
         _browserChoice = browserChoice;
         _log = log;
         _invoiceDir = invoiceDir;
         _province = string.IsNullOrWhiteSpace(province) ? "Thanh Hóa" : province;
+        _syncCallback = syncCallback;
     }
 
     private static TaskCompletionSource<T> NewTcs<T>() =>
@@ -106,6 +124,7 @@ public sealed class OrdersBridgeSession : IDisposable
         _pickupTcs = NewTcs<bool>();
         _pickupOtherTcs = NewTcs<bool>();
         _prepareTcs = NewTcs<PrepareResult?>();
+        _closeShopTcs = NewTcs<bool>();
         _captchaSeen = false;
     }
 
@@ -282,8 +301,44 @@ public sealed class OrdersBridgeSession : IDisposable
     /// </summary>
     public async Task<OrdersBridgeSliceResult> RunLoginThenSliceAsync(OrdersLoginParams login, CancellationToken ct = default)
     {
-        // 1) Đăng nhập bằng trình duyệt điều khiển (Playwright). Bọc try/finally để user Dừng giữa chừng (ct hủy →
-        //    TryLoginSubaccountAsync ném OperationCanceledException) thì trình duyệt điều khiển VẪN được đóng (không mồ côi).
+        try
+        {
+            var err = await LoginAndReachPickerAsync(login, ct).ConfigureAwait(false);
+            if (_captchaSeen)
+            {
+                return new OrdersBridgeSliceResult(Array.Empty<ShopListItem>(), null, null, true,
+                    "Rơi vào trang verify/captcha khi vào Seller Centre.");
+            }
+            if (err is not null)
+            {
+                return Fail(err);
+            }
+
+            L("Đã về trang chọn shop — đọc shop...");
+            return await RunSliceCoreAsync(ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (TimeoutException)
+        {
+            L("Cầu nối: hết thời gian chờ phản hồi từ extension.");
+            return Fail("Hết thời gian chờ phản hồi từ extension.");
+        }
+        catch (Exception ex)
+        {
+            L("Cầu nối lỗi: " + ex.Message);
+            return Fail(ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Đăng nhập Playwright + SSO qua bản sạch để về TRANG CHỌN SHOP (picker /portal/shop). Trả <c>null</c> nếu
+    /// đã về picker (kiểm <see cref="_captchaSeen"/> để phân biệt captcha — cũng trả null nhưng cờ bật); trả CHUỖI
+    /// LỖI nếu login/SSO thất bại. Dùng chung cho <see cref="RunLoginThenSliceAsync"/> (một shop) và
+    /// <see cref="RunAllShopsAsync"/> (mọi shop). Trình duyệt điều khiển login LUÔN được đóng (finally).
+    /// </summary>
+    private async Task<string?> LoginAndReachPickerAsync(OrdersLoginParams login, CancellationToken ct)
+    {
+        // 1) Đăng nhập bằng trình duyệt điều khiển (Playwright). try/finally: user Dừng giữa chừng vẫn đóng trình duyệt.
         var entered = false;
         ILoginSession? session = null;
         try
@@ -304,51 +359,132 @@ public sealed class OrdersBridgeSession : IDisposable
 
         if (!entered)
         {
-            return Fail("Đăng nhập subaccount chưa xong (nhập mã?). Bấm lại để thử tiếp.");
+            return "Đăng nhập subaccount chưa xong (nhập mã?). Bấm lại để thử tiếp.";
         }
 
         // 2) Settle ngắn cho chắc nhả khoá file hồ sơ (Brave vừa kill) trước khi mở lại bằng trình duyệt sạch.
         await Task.Delay(800, ct).ConfigureAwait(false);
 
-        // 3) Mở lại bằng trình duyệt SẠCH + extension tại trang TÀI KHOẢN subaccount (/account, đã đăng nhập nhờ
-        //    cookie hồ sơ) → extension SSO "Kênh Người bán" → về trang CHỌN SHOP (/portal/shop, picker). KHÔNG mở
-        //    thẳng /portal/shop vì Shopee sticky-redirect vào shop mở lần trước (server-side) → không tới picker.
+        // 3) Mở lại bằng trình duyệt SẠCH + extension tại /account → extension SSO "Kênh Người bán" → picker.
+        //    KHÔNG mở thẳng /portal/shop vì Shopee sticky-redirect vào shop mở lần trước (server-side).
         L("Đăng nhập xong — mở lại bằng trình duyệt sạch + extension (subaccount /account → SSO → trang chọn shop)...");
         ResetTcs();
         StartBridgeAndLaunch(ShopeeLoginService.SubaccountAccountUrl);
+        L("Chờ extension nối cầu (ready) — tối đa 45s...");
+        await _readyTcs.Task.WaitAsync(TimeSpan.FromSeconds(45), ct).ConfigureAwait(false);
+        L("Extension đã nối cầu — SSO 'Kênh Người bán' để về trang chọn shop...");
+
+        _atSellerTcs = NewTcs<bool>();
+        await _ws!.SendAsync(new { action = "gotoSellerCentre" }).ConfigureAwait(false);
+        var atSeller = await _atSellerTcs.Task.WaitAsync(TimeSpan.FromSeconds(120), ct).ConfigureAwait(false);
+        if (_captchaSeen)
+        {
+            L("PHÁT HIỆN captcha/verify khi vào Seller Centre.");
+            return null; // caller kiểm _captchaSeen
+        }
+        if (!atSeller)
+        {
+            return "Không về được trang chọn shop (/portal/shop) sau SSO — có thể sticky shop cũ / cookie hết hạn.";
+        }
+        return null; // đã về picker, không captcha
+    }
+
+    // ── GĐ4: MỘT VÒNG qua MỌI shop: login → SSO → readShopList → từng shop (detail → toShip → syncOrders +
+    //    callback lưu DB → nếu ToShip>0 xử đơn + revert địa chỉ) → đóng tab shop → nghỉ → shop kế. ─────────────
+    /// <summary>
+    /// GĐ4: đăng nhập + SSO về picker rồi LẶP QUA MỌI shop trong danh sách. Mỗi shop: mở Chi tiết → đọc "Chờ Lấy
+    /// Hàng" → đọc đơn (tab Tất cả) → GỌI <c>syncCallback</c> (App lưu DB/GSheet/hub) → nếu ToShip&gt;0 thì đặt địa
+    /// chỉ lấy hàng + Chuẩn bị hàng từng đơn + in phiếu + revert địa chỉ → đóng tab shop (về picker) → nghỉ 3-5' →
+    /// shop kế. Captcha giữa chừng → dừng vòng (Captcha=true). Dùng cho nút "▶ Chạy" (production, chạy liên tục).
+    /// </summary>
+    public async Task<OrdersBridgeRunResult> RunAllShopsAsync(OrdersLoginParams login, CancellationToken ct = default)
+    {
+        int shopCount = 0, shopsDone = 0, totalOrders = 0, totalSlips = 0;
         try
         {
-            L("Chờ extension nối cầu (ready) — tối đa 45s...");
-            await _readyTcs.Task.WaitAsync(TimeSpan.FromSeconds(45), ct).ConfigureAwait(false);
-            L("Extension đã nối cầu — SSO 'Kênh Người bán' để về trang chọn shop...");
-
-            _atSellerTcs = NewTcs<bool>();
-            await _ws!.SendAsync(new { action = "gotoSellerCentre" }).ConfigureAwait(false);
-            var atSeller = await _atSellerTcs.Task.WaitAsync(TimeSpan.FromSeconds(120), ct).ConfigureAwait(false);
+            var err = await LoginAndReachPickerAsync(login, ct).ConfigureAwait(false);
             if (_captchaSeen)
             {
-                L("PHÁT HIỆN captcha/verify khi vào Seller Centre.");
-                return new OrdersBridgeSliceResult(Array.Empty<ShopListItem>(), null, null, true,
-                    "Rơi vào trang verify/captcha khi vào Seller Centre.");
+                return new OrdersBridgeRunResult(0, 0, 0, 0, true, "Rơi vào trang verify/captcha khi vào Seller Centre.");
             }
-            if (!atSeller)
+            if (err is not null)
             {
-                return Fail("Không về được trang chọn shop (/portal/shop) sau SSO — có thể sticky shop cũ / cookie hết hạn.");
+                return new OrdersBridgeRunResult(0, 0, 0, 0, false, err);
             }
 
-            L("Đã về trang chọn shop — đọc shop...");
-            return await RunSliceCoreAsync(ct).ConfigureAwait(false);
+            // Đọc danh sách shop (picker).
+            _shopListTcs = NewTcs<string?>();
+            await _ws!.SendAsync(new { action = "readShopList" }).ConfigureAwait(false);
+            var json = await _shopListTcs.Task.WaitAsync(TimeSpan.FromSeconds(30), ct).ConfigureAwait(false);
+            var shops = ShopeeLoginService.ParseShopListJson(json);
+            shopCount = shops.Count;
+            L($"Đọc được {shops.Count} shop — bắt đầu lặp qua từng shop.");
+            if (shops.Count == 0)
+            {
+                return new OrdersBridgeRunResult(0, 0, 0, 0, false, "Không đọc được shop nào (đã tới /portal/shop chưa?).");
+            }
+
+            for (int i = 0; i < shops.Count; i++)
+            {
+                ct.ThrowIfCancellationRequested();
+                var shop = shops[i];
+                var shopName = string.IsNullOrWhiteSpace(shop.LoginName) ? shop.ShopId : shop.LoginName;
+                L($"[Shop {i + 1}/{shops.Count}] {shopName} — mở Chi tiết...");
+
+                // Mở Chi tiết shop (trusted click).
+                _detailTcs = NewTcs<string>();
+                await _ws.SendAsync(new { action = "openShopDetail", shopId = shop.ShopId }).ConfigureAwait(false);
+                var d = await _detailTcs.Task.WaitAsync(TimeSpan.FromSeconds(45), ct).ConfigureAwait(false);
+                if (_captchaSeen || d == "captcha")
+                {
+                    return new OrdersBridgeRunResult(shopCount, shopsDone, totalOrders, totalSlips, true, "Rơi vào captcha khi mở Chi tiết.");
+                }
+
+                // Đọc "Chờ Lấy Hàng".
+                _toShipTcs = NewTcs<string?>();
+                await _ws.SendAsync(new { action = "readToShip" }).ConfigureAwait(false);
+                var raw = await _toShipTcs.Task.WaitAsync(TimeSpan.FromSeconds(30), ct).ConfigureAwait(false);
+                var toShip = ShopeeDashboard.ParseToShipCount(raw);
+                L($"[Shop {i + 1}] Chờ Lấy Hàng: {(toShip?.ToString() ?? "?")}.");
+
+                // Đọc đơn (Phần A) + callback lưu DB + xử đơn (Phần B) + revert địa chỉ.
+                var (orders, slips) = await RunShopOrdersAsync(shop.ShopId, toShip ?? 0, ct).ConfigureAwait(false);
+                if (_captchaSeen)
+                {
+                    return new OrdersBridgeRunResult(shopCount, shopsDone, totalOrders + orders, totalSlips + slips, true, "Rơi vào captcha khi đọc/xử đơn.");
+                }
+                totalOrders += orders;
+                totalSlips += slips;
+                shopsDone++;
+
+                // Đóng tab shop → về picker /portal/shop (listTabId picker giữ nguyên; extension đóng shopTabId).
+                _closeShopTcs = NewTcs<bool>();
+                await _ws.SendAsync(new { action = "closeShopTab" }).ConfigureAwait(false);
+                try { await _closeShopTcs.Task.WaitAsync(TimeSpan.FromSeconds(30), ct).ConfigureAwait(false); }
+                catch (TimeoutException) { L("closeShopTab quá hạn — vẫn tiếp shop kế."); }
+
+                // Nghỉ kiểu người 3-5' giữa các shop (trừ shop cuối).
+                if (i < shops.Count - 1)
+                {
+                    var restMs = _rng.Next(180_000, 300_001);
+                    L($"Nghỉ ~{restMs / 60000}' trước shop kế...");
+                    await Task.Delay(restMs, ct).ConfigureAwait(false);
+                }
+            }
+
+            L($"Xong 1 vòng: {shopsDone}/{shopCount} shop, {totalOrders} đơn, {totalSlips} phiếu.");
+            return new OrdersBridgeRunResult(shopCount, shopsDone, totalOrders, totalSlips, false, null);
         }
         catch (OperationCanceledException) { throw; }
         catch (TimeoutException)
         {
-            L("Cầu nối: hết thời gian chờ phản hồi từ extension (SSO Seller Centre).");
-            return Fail("Hết thời gian chờ phản hồi từ extension khi SSO Seller Centre.");
+            L("Cầu nối: hết thời gian chờ phản hồi từ extension.");
+            return new OrdersBridgeRunResult(shopCount, shopsDone, totalOrders, totalSlips, false, "Hết thời gian chờ phản hồi từ extension.");
         }
         catch (Exception ex)
         {
             L("Cầu nối lỗi: " + ex.Message);
-            return Fail(ex.Message);
+            return new OrdersBridgeRunResult(shopCount, shopsDone, totalOrders, totalSlips, false, ex.Message);
         }
     }
 
@@ -386,7 +522,7 @@ public sealed class OrdersBridgeSession : IDisposable
         L($"Số 'Chờ Lấy Hàng' đọc được: {(toShip?.ToString() ?? "null")} (raw='{raw}').");
 
         // 4) GĐ3: đọc đơn (Phần A) + nếu ToShip>0 thì xử đơn (Phần B).
-        var (ordersCount, slipsSaved) = await RunShopOrdersAsync(toShip ?? 0, ct).ConfigureAwait(false);
+        var (ordersCount, slipsSaved) = await RunShopOrdersAsync(firstShopId, toShip ?? 0, ct).ConfigureAwait(false);
         if (_captchaSeen)
         {
             return new OrdersBridgeSliceResult(shops, firstShopId, toShip, true,
@@ -397,7 +533,7 @@ public sealed class OrdersBridgeSession : IDisposable
     }
 
     // ── GĐ3: đọc đơn (Phần A) + xử đơn (Phần B) trên tab shop đang mở ───────────────────────────────────
-    private async Task<(int Orders, int Slips)> RunShopOrdersAsync(int toShip, CancellationToken ct)
+    private async Task<(int Orders, int Slips)> RunShopOrdersAsync(string shopId, int toShip, CancellationToken ct)
     {
         // Phần A — đọc đơn tab "Tất cả" (test được ngay, kể cả shop 0 đơn chờ).
         _ordersTcs = NewTcs<string?>();
@@ -410,6 +546,14 @@ public sealed class OrdersBridgeSession : IDisposable
         }
         var orders = ShopeeLoginService.ParseOrdersJson(ordersJson);
         L($"Đọc được {orders.Count} đơn (Tất cả).");
+
+        // GĐ4: App lưu DB/GSheet/hub cho shop này (callback do App rót; null ở đường "Chạy thử" → chỉ đọc, không lưu).
+        if (_syncCallback is not null)
+        {
+            try { await _syncCallback(shopId, orders, ct).ConfigureAwait(false); }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex) { L("Lưu đơn (DB/GSheet/hub) lỗi: " + ex.Message); }
+        }
 
         // Phần B — chỉ khi có đơn Chờ Lấy Hàng VÀ có thư mục lưu phiếu.
         var slips = 0;
@@ -565,6 +709,13 @@ public sealed class OrdersBridgeSession : IDisposable
                     _prepareTcs.TrySetResult(null);
                     break;
 
+                case "shopTabClosed":
+                {
+                    var ok = root.TryGetProperty("ok", out var o) && o.ValueKind == JsonValueKind.True;
+                    _closeShopTcs.TrySetResult(ok);
+                    break;
+                }
+
                 case "progress":
                 {
                     var m = root.TryGetProperty("message", out var mm) ? mm.GetString() : null;
@@ -585,6 +736,7 @@ public sealed class OrdersBridgeSession : IDisposable
                     _pickupTcs.TrySetResult(false);
                     _pickupOtherTcs.TrySetResult(false);
                     _prepareTcs.TrySetResult(null);
+                    _closeShopTcs.TrySetResult(false);
                     break;
                 }
 
@@ -603,6 +755,7 @@ public sealed class OrdersBridgeSession : IDisposable
                     _pickupTcs.TrySetException(ex);
                     _pickupOtherTcs.TrySetException(ex);
                     _prepareTcs.TrySetException(ex);
+                    _closeShopTcs.TrySetException(ex);
                     break;
                 }
             }

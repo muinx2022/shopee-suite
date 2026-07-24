@@ -46,6 +46,8 @@ public partial class AccountSession : ObservableObject, IAccountSession
     private CancellationTokenSource? _cts;
     private Task? _runTask;
     private volatile ILoginSession? _session;
+    // GĐ4: phiên cầu nối đang chạy (nút "▶ Chạy" dùng đường cầu nối extension). Giữ để Dừng kill trình duyệt sạch.
+    private volatile OrdersBridgeSession? _bridge;
 
     // Bật trong lúc đang XỬ LÝ ĐƠN (điều hướng kiểu người). Khi bật, vòng RunAsync KHÔNG chạy nhịp đọc đơn
     // (ReadToShipCountAsync có reload trang → sẽ phá thao tác điều hướng đang chạy giữa chừng).
@@ -176,7 +178,9 @@ public partial class AccountSession : ObservableObject, IAccountSession
             LastError = null;
             _readyForActions = false; // phiên mới khởi động → CHƯA sẵn sàng (chờ login + đọc số lần đầu)
             State = SessionState.Opening;
-            _runTask = Task.Run(() => RunAsync(ct));
+            // GĐ4: nút "▶ Chạy" nay dùng ĐƯỜNG CẦU NỐI (login Playwright → clean+extension → mọi shop → sync DB →
+            // nghỉ interval → lặp). Luồng Playwright cũ (RunAsync) GIỮ làm đường lui nhưng KHÔNG còn được gọi từ đây.
+            _runTask = Task.Run(() => RunBridgeContinuousAsync(ct));
         }
 
         return Task.CompletedTask;
@@ -214,6 +218,18 @@ public partial class AccountSession : ObservableObject, IAccountSession
             if (p is { HasExited: false })
             {
                 p.Kill(entireProcessTree: true);
+            }
+        }
+        catch { /* bỏ qua */ }
+
+        // GĐ4: đường cầu nối — kill trình duyệt SẠCH (extension) nếu còn (trình duyệt điều khiển login tự đóng trong
+        // RunAllShopsAsync). ct.Cancel() ở trên đã hủy vòng; đây là chốt chặn đóng cửa sổ sạch + giải phóng cổng.
+        try
+        {
+            var bp = _bridge?.Process;
+            if (bp is { HasExited: false })
+            {
+                bp.Kill(entireProcessTree: true);
             }
         }
         catch { /* bỏ qua */ }
@@ -683,39 +699,10 @@ public partial class AccountSession : ObservableObject, IAccountSession
             // Core thu thập (best-effort có log tiến trình từng trang), trả DTO — KHÔNG đụng DB.
             var result = await s.SyncAllOrdersAsync(log, alreadyHaveFinal, tok).ConfigureAwait(false);
 
-            // Lọc đơn được LƯU (chính sách "app chỉ giữ đơn Chuẩn bị hàng"): đơn ĐÃ theo dõi (mã đã có trong DB)
-            // LUÔN cập nhật — kể cả khi đã sang Đã giao/Đã hủy (cần cho GSheet + "Đã bán" + dọn vòng đời); đơn MỚI
-            // (chưa có trong DB) chỉ nhận khi đang ở Chuẩn bị hàng. Đơn mới KHÁC (Chờ xác nhận / Đang giao / Đã
-            // giao…) bị BỎ QUA — sẽ tự vào ở lượt sau khi thành Chuẩn bị hàng.
-            // QUAN TRỌNG: filter này ĐỒNG THỜI chặn đơn ĐÃ-BỊ-DỌN (xóa ở PushOrdersToGsheetAsync) được insert lại
-            // ở lượt quét sau — nó xuất hiện lại trong tab "Tất cả" với trạng thái KẾT THÚC (không phải Chuẩn bị
-            // hàng) nên không lọt qua → KHÔNG lặp vô hạn ghi-xóa.
-            var existing = _services.Orders.GetOrderSns(_accountId);
-            var toUpsert = result.Orders
-                .Where(o => existing.Contains(o.OrderSn) || ShopeeShippingNav.LaChuanBiHang(o.Status))
-                .ToList();
-
-            // "Đã bán" theo SKU: phát hiện đơn CHUYỂN sang đã-giao TRƯỚC khi UpsertMany ghi đè cột status (đọc
-            // trạng thái CŨ trong DB). Chạy tuần tự trước upsert nên tương đương "cùng transaction" — không có ghi
-            // đồng thời (mỗi tài khoản một phiên, đang trong cửa sổ _navigating). No-backfill: đơn đã-giao-sẵn →
-            // grandfather (đánh cờ, KHÔNG +1). Chỉ xét đơn ĐƯỢC LƯU (toUpsert) — đơn mới ngoài theo dõi không tính.
-            var soldDetect = _services.Orders.DetectNewlyDelivered(_accountId, toUpsert);
-
-            // Lưu về DB (thread nền — SQLite an toàn): upsert theo (account_id, order_sn). insertedOrders =
-            // các đơn VỪA thêm mới (đơn cập nhật KHÔNG có) → dùng để báo "đơn mới" qua Slack/Discord/Telegram.
-            var (inserted, updated, insertedOrders) = _services.Orders.UpsertMany(_accountId, toUpsert, DateTime.UtcNow, _currentShopId);
-
-            // Đánh cờ NGAY (SAU upsert để dòng mới toanh đã tồn tại) cho nhóm KHÔNG cần +1: đơn grandfather
-            // (đã-giao-sẵn) + đơn chuyển-sang-đã-giao nhưng không có SKU. Nhóm CÓ SKU (+1) chỉ đánh cờ SAU khi hub
-            // +1 OK (StartSoldCountInBackground) để hub lỗi thì lượt sau thử lại.
-            if (soldDetect.ImmediateMarkOrderSns.Count > 0)
-            {
-                _services.Orders.MarkSoldCounted(_accountId, soldDetect.ImmediateMarkOrderSns, DateTime.UtcNow);
-            }
-
-            // Vừa ghi đơn vào DB → phát tín hiệu để màn "Đơn hàng" đang mở TỰ nạp lại (OrdersViewModel nghe
-            // rồi marshal về UI thread). CHỈ thêm 1 lời gọi này, KHÔNG đụng luồng xử lý đơn / cửa-skip.
-            _services.RaiseOrdersChanged();
+            // GĐ4: phần LƯU (lọc "chỉ giữ đơn Chuẩn bị hàng"/đã-theo-dõi → detect Đã bán → upsert → mark → phát
+            // OrdersChanged → đẩy GSheet/hub/notify NỀN) đã TÁCH sang PersistSyncedOrdersAsync — thao tác thuần trên
+            // DTO (KHÔNG Playwright) nên callback CẦU NỐI (extension đọc đơn) dùng CHUNG. shopId = shop đang xử.
+            var persist = await PersistSyncedOrdersAsync(_currentShopId, result.Orders, log, tok).ConfigureAwait(false);
 
             // Tải LẠI phiếu THIẾU (đơn Chuẩn bị hàng + có vận đơn nhưng file phiếu mất/không phải PDF): vẫn TRONG
             // cửa sổ _navigating (thao tác trình duyệt độc quyền, không hai luồng chuột). Best-effort: chốt chặn ≤5
@@ -785,44 +772,14 @@ public partial class AccountSession : ObservableObject, IAccountSession
                 log("Không đọc được số Chờ Lấy Hàng sau sync (bỏ qua): " + ex.Message);
             }
 
-            var boQua = result.Orders.Count - toUpsert.Count; // đơn quét thấy nhưng KHÔNG lưu (mới, ngoài Chuẩn bị hàng)
-            var summary = $"Sync xong: {result.Orders.Count} đơn / {result.Pages} trang — thêm {inserted} mới, cập nhật {updated}."
-                + (boQua > 0 ? $" — bỏ qua {boQua} đơn ngoài theo dõi" : string.Empty)
+            // Đơn quét thấy nhưng KHÔNG lưu (mới, ngoài Chuẩn bị hàng) + các đẩy nền (GSheet/hub/notify) đã làm
+            // TRONG PersistSyncedOrdersAsync (dùng chung với callback cầu nối).
+            var summary = $"Sync xong: {result.Orders.Count} đơn / {result.Pages} trang — thêm {persist.Inserted} mới, cập nhật {persist.Updated}."
+                + (persist.BoQua > 0 ? $" — bỏ qua {persist.BoQua} đơn ngoài theo dõi" : string.Empty)
                 + (result.ReachedPageCap ? " (chạm chốt chặn 10 trang)" : string.Empty)
                 + (toShip is int t ? $" — Chờ Lấy Hàng: {t}" : string.Empty);
             StatusText = summary;
             log(summary);
-
-            // Đẩy GSheet chạy NỀN (KHÔNG await trong cửa sổ _navigating): push chỉ đụng DB + file + HTTP, KHÔNG
-            // đụng trình duyệt → không cần giữ _navigating. Nếu await ở đây thì upload phiếu (mạng, có thể nhiều
-            // phút) kéo dài khóa _navigating, hoãn nhịp RunAsync đọc "Chờ Lấy Hàng" → số hiển thị/quyết định
-            // của Sync trọn gói treo số cũ rất lâu sau Sync. Chạy nền để nhịp đọc số chạy ngay.
-            StartGsheetPushInBackground(log, tok);
-
-            // Đẩy đơn lên HUB đơn hàng chạy NỀN (y pattern GSheet: chỉ đụng DB + HTTP, không đụng trình duyệt).
-            // KHÔNG điều kiện insertedOrders: kể cả lượt này không có đơn MỚI vẫn thử đẩy để BÙ backlog những đơn
-            // các lượt trước đẩy hụt (hub offline). Hook chưa được rót (app Đơn hàng chạy độc lập / hub tắt) →
-            // tự return im lặng bên trong.
-            StartHubPushInBackground(log, tok);
-
-            // Đẩy FILE PHIẾU lên HUB chạy NỀN (y pattern hub-push): các đơn ĐÃ lên hub, có vận đơn, CHƯA đẩy phiếu
-            // + có file phiếu local hợp lệ → đẩy lô ≤5. Chạy SAU StartHubPushInBackground (phiếu chỉ đẩy được cho
-            // đơn đã lên hub). Hook chưa rót (app độc lập / hub tắt) → tự return im lặng bên trong.
-            StartHubSlipPushInBackground(log, tok);
-
-            // +1 "Đã bán" theo SKU lên HUB chạy NỀN (y pattern hub-push): các đơn VỪA chuyển sang đã-giao trong lượt
-            // này (soldDetect). Chỉ đánh cờ sold_counted_at cho các đơn CÓ SKU SAU khi hub +1 OK. Không có SKU nào
-            // cần +1 → tự return bên trong. Hook chưa rót → im lặng (đơn giữ CHƯA đánh cờ, lượt sau thử lại).
-            StartSoldCountInBackground(soldDetect.SkusToIncrement, soldDetect.PendingMarkOrderSns, log, tok);
-
-            // Báo "đơn MỚI" (Slack/Discord/Telegram) — CHỈ khi lượt này có đơn INSERT. Chạy NỀN fire-and-forget
-            // (y pattern GSheet): thông báo chỉ đụng HTTP nên không cần giữ _navigating, không kéo dài lượt sync;
-            // lỗi mạng chỉ log, KHÔNG phá sync. Tin nhắn mang dữ liệu ĐÃ sync (kể cả mã vận đơn nếu có sau bước
-            // chuẩn bị hàng — sync là bước cuối của "Sync trọn gói").
-            if (insertedOrders.Count > 0)
-            {
-                StartNotifyInBackground(insertedOrders, log, tok);
-            }
             return true;
         }
         catch (OperationCanceledException)
@@ -841,6 +798,55 @@ public partial class AccountSession : ObservableObject, IAccountSession
         {
             _navigating = false;
         }
+    }
+
+    /// <summary>Kết quả một lượt <see cref="PersistSyncedOrdersAsync"/> — số đơn thêm mới / cập nhật / bỏ qua (ngoài theo dõi).</summary>
+    public readonly record struct PersistOrdersResult(int Inserted, int Updated, int BoQua);
+
+    /// <summary>
+    /// <b>Phần LƯU của một lượt sync</b> — tách khỏi <see cref="SyncOrdersAsync"/> (Playwright) để DÙNG CHUNG cho
+    /// callback CẦU NỐI (extension đọc đơn, GĐ4). Thao tác THUẦN trên DTO <paramref name="orders"/> + DB/GSheet/hub,
+    /// KHÔNG đụng trình duyệt: lọc "chỉ giữ đơn Chuẩn bị hàng"/đã-theo-dõi → detect "Đã bán" (đọc status CŨ trước
+    /// upsert) → <see cref="OrderRepository.UpsertMany"/> gắn <paramref name="shopId"/> → đánh cờ sold ngay cho
+    /// nhóm không +1 → phát <see cref="AppServices.RaiseOrdersChanged"/> → đẩy GSheet/hub/hub-slip/sold/notify chạy
+    /// NỀN (fire-and-forget; hook chưa rót → im lặng bên trong). Trả về số đơn thêm/cập nhật/bỏ qua để caller tổng kết.
+    /// </summary>
+    public Task<PersistOrdersResult> PersistSyncedOrdersAsync(
+        string? shopId, IReadOnlyList<SyncedOrder> orders, Action<string> log, CancellationToken tok)
+    {
+        // Lọc đơn được LƯU: đơn ĐÃ theo dõi (mã đã có trong DB) LUÔN cập nhật; đơn MỚI chỉ nhận khi Chuẩn bị hàng.
+        // (Filter này ĐỒNG THỜI chặn đơn đã-bị-dọn được insert lại → không lặp ghi-xóa.)
+        var existing = _services.Orders.GetOrderSns(_accountId);
+        var toUpsert = orders
+            .Where(o => existing.Contains(o.OrderSn) || ShopeeShippingNav.LaChuanBiHang(o.Status))
+            .ToList();
+
+        // "Đã bán" theo SKU: đọc trạng thái CŨ TRƯỚC khi UpsertMany ghi đè (tuần tự nên tương đương cùng transaction).
+        var soldDetect = _services.Orders.DetectNewlyDelivered(_accountId, toUpsert);
+
+        // Upsert theo (account_id, order_sn), gắn shopId của lượt này. insertedOrders = đơn VỪA thêm mới (để notify).
+        var (inserted, updated, insertedOrders) = _services.Orders.UpsertMany(_accountId, toUpsert, DateTime.UtcNow, shopId);
+
+        // Đánh cờ NGAY cho nhóm KHÔNG cần +1 (grandfather + đã-giao-không-SKU). Nhóm CÓ SKU đánh cờ SAU khi hub +1 OK.
+        if (soldDetect.ImmediateMarkOrderSns.Count > 0)
+        {
+            _services.Orders.MarkSoldCounted(_accountId, soldDetect.ImmediateMarkOrderSns, DateTime.UtcNow);
+        }
+
+        // Vừa ghi đơn → phát tín hiệu để màn "Đơn hàng" đang mở tự nạp lại.
+        _services.RaiseOrdersChanged();
+
+        // Đẩy GSheet/hub/hub-slip/sold/notify chạy NỀN (chỉ đụng DB + file + HTTP, KHÔNG trình duyệt).
+        StartGsheetPushInBackground(log, tok);
+        StartHubPushInBackground(log, tok);
+        StartHubSlipPushInBackground(log, tok);
+        StartSoldCountInBackground(soldDetect.SkusToIncrement, soldDetect.PendingMarkOrderSns, log, tok);
+        if (insertedOrders.Count > 0)
+        {
+            StartNotifyInBackground(insertedOrders, log, tok);
+        }
+
+        return Task.FromResult(new PersistOrdersResult(inserted, updated, orders.Count - toUpsert.Count));
     }
 
     /// <summary>
@@ -1747,6 +1753,115 @@ public partial class AccountSession : ObservableObject, IAccountSession
         // (3) IP máy (null → watchdog TẮT).
         _kiotClient = null;
         return null;
+    }
+
+    /// <summary>
+    /// <b>GĐ4 — Luồng chạy nền của nút "▶ Chạy" (đường CẦU NỐI extension, chạy LIÊN TỤC).</b> Mỗi chu kỳ:
+    /// <see cref="OrdersBridgeSession.RunAllShopsAsync"/> (login Playwright → đóng → clean+extension → SSO picker →
+    /// LẶP mọi shop: đọc đơn → callback <see cref="PersistSyncedOrdersAsync"/> lưu DB/GSheet/hub → nếu có đơn chờ
+    /// thì Chuẩn bị hàng + in phiếu + revert địa chỉ → đóng tab shop) → nghỉ <c>GetOrderIntervalMinutes()</c> → lặp.
+    /// Dừng (ct hủy) đóng cả trình duyệt điều khiển (finally trong bridge) lẫn trình duyệt sạch (Stop kill _bridge.Process).
+    /// Cap cứng 12h. KHÔNG dùng proxy (bridge mở sạch, không CDP) — khác luồng Playwright <see cref="RunAsync"/> (đường lui).
+    /// </summary>
+    private async Task RunBridgeContinuousAsync(CancellationToken ct)
+    {
+        var acc = _services.Accounts.GetById(_accountId);
+        if (!string.IsNullOrWhiteSpace(acc?.Email))
+        {
+            _logLabel = acc!.Email;
+        }
+        var log = (Action<string>)(m => _services.Log.Append(_logLabel, m));
+
+        if (acc is null)
+        {
+            SetError("Không đọc được tài khoản (đã bị xóa?).");
+            return;
+        }
+
+        try
+        {
+            var baseDir = Path.GetDirectoryName(_services.Database.Path) ?? ".";
+            var browserChoice = _services.Settings.GetBrowserChoice();
+            var browserKind = BrowserLocator.ResolveBrowserKind(browserChoice);
+            var userDataDir = BrowserProfilePaths.ForAccount(baseDir, _accountId, browserKind);
+            Directory.CreateDirectory(userDataDir);
+
+            var invoiceDir = _services.Settings.GetInvoiceFolder();
+            var province = string.IsNullOrWhiteSpace(acc.PickupAddress)
+                ? AccountsViewModel.DefaultPickupAddress
+                : acc.PickupAddress!;
+            var intervalMin = Math.Max(1, _services.Settings.GetOrderIntervalMinutes());
+            var login = new OrdersLoginParams(acc.Email, acc.Password, acc.VerifyEmail, acc.VerifyEmailPassword);
+
+            // Callback lưu DB/GSheet/hub cho MỖI shop (thao tác thuần DTO — dùng chung với đường Playwright).
+            Func<string, IReadOnlyList<SyncedOrder>, CancellationToken, Task> syncCallback =
+                (shopId, orders, c) => PersistSyncedOrdersAsync(shopId, orders, log, c);
+
+            var hardCap = DateTime.UtcNow.AddHours(12);
+            SetStatus(SessionState.Running, "Đang chạy (cầu nối extension) — đăng nhập + duyệt mọi shop...");
+
+            while (!ct.IsCancellationRequested && DateTime.UtcNow < hardCap)
+            {
+                var bridge = new OrdersBridgeSession(userDataDir, browserChoice, log, invoiceDir, province, syncCallback);
+                _bridge = bridge;
+                OrdersBridgeRunResult result;
+                try
+                {
+                    result = await bridge.RunAllShopsAsync(login, ct).ConfigureAwait(false);
+                }
+                finally
+                {
+                    // Đóng cửa sổ sạch của vòng này + giải phóng cổng cầu nối (vòng sau mở phiên mới).
+                    try { var p = bridge.Process; if (p is { HasExited: false }) p.Kill(entireProcessTree: true); } catch { /* bỏ qua */ }
+                    try { bridge.Dispose(); } catch { /* bỏ qua */ }
+                    _bridge = null;
+                }
+
+                _readyForActions = true; // đã chạy xong ít nhất 1 vòng → nút phụ thuộc phiên mở
+
+                if (result.Captcha)
+                {
+                    log("Gặp captcha/verify — dừng vòng này, sẽ thử lại sau khi nghỉ.");
+                }
+                else if (result.Error is not null)
+                {
+                    log("Vòng cầu nối chưa trọn: " + result.Error);
+                }
+                else
+                {
+                    SetStatus(SessionState.Running,
+                        $"Vòng xong: {result.ShopsDone}/{result.ShopCount} shop, {result.TotalOrders} đơn, {result.TotalSlips} phiếu — nghỉ {intervalMin}'.");
+                }
+
+                // Nghỉ interval trước chu kỳ kế (hủy giữa chừng → thoát vòng).
+                try { await Task.Delay(TimeSpan.FromMinutes(intervalMin), ct).ConfigureAwait(false); }
+                catch (OperationCanceledException) { break; }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Dừng chủ động — không phải lỗi.
+        }
+        catch (Exception ex)
+        {
+            SetError(ex.Message);
+        }
+        finally
+        {
+            _readyForActions = false;
+            // Chốt chặn: kill trình duyệt sạch nếu còn (vòng bị ngắt giữa chừng), giải phóng cổng.
+            try { var p = _bridge?.Process; if (p is { HasExited: false }) p.Kill(entireProcessTree: true); } catch { /* bỏ qua */ }
+            try { _bridge?.Dispose(); } catch { /* bỏ qua */ }
+            _bridge = null;
+
+            lock (_lifecycleLock)
+            {
+                if (State != SessionState.Error)
+                {
+                    State = SessionState.Stopped;
+                }
+            }
+        }
     }
 
     /// <summary>

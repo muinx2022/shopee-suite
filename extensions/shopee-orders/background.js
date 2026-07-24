@@ -781,7 +781,32 @@ async function handleCommand(cmd) {
     case "setPickupAddress": await doSetPickupAddress(String(cmd.province || "")); return;
     case "setPickupAddressToOther": await doSetPickupAddressToOther(); return;
     case "prepareNextOrder": await doPrepareNextOrder(); return;
+    case "closeShopTab":     await doCloseShopTab(); return;
   }
+}
+
+// GĐ4: đóng tab shop hiện tại rồi VỀ picker /portal/shop (giữa các shop). Shop thường mở ở TAB RIÊNG (shopTabId
+// khác listTabId) → chỉ đóng tab đó, picker (listTabId) còn nguyên. Nếu shop mở CÙNG tab picker → điều hướng
+// listTabId về /portal/shop. Cuối cùng poll tr[data-row-key] để chắc chắn picker sẵn sàng cho shop kế.
+async function doCloseShopTab() {
+  if (shopTabId != null && shopTabId !== listTabId) {
+    try { await chrome.tabs.remove(shopTabId); } catch (e) {}
+    shopTabId = null;
+  } else if (listTabId != null) {
+    // Shop mở cùng tab picker (hoặc không rõ) → đưa picker về /portal/shop.
+    try { await chrome.tabs.update(listTabId, { url: SHOP_LIST_URL }); } catch (e) {}
+    await waitTabComplete(listTabId, 20000);
+    shopTabId = null;
+  }
+  if (listTabId == null) { send({ action: "shopTabClosed", ok: false }); return; }
+  const st = await ensureShopPicker(listTabId); // "ok" | "verify" | "stuck"
+  if (st === "verify") {
+    let u = "";
+    try { u = (await chrome.tabs.get(listTabId)).url || ""; } catch (e) {}
+    send({ action: "captcha", message: u });
+    return;
+  }
+  send({ action: "shopTabClosed", ok: st === "ok" });
 }
 
 // SSO từ trang tài khoản subaccount (/account, đã đăng nhập nhờ cookie) → "Kênh Người bán" → tab banhang →
