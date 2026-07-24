@@ -397,24 +397,25 @@ function pageModalHasTitle(reSrc) {
   return false;
 }
 
-// CHẨN ĐOÁN: dump text + các phần tử nghi chứa mã vận đơn của modal khớp titleReSrc (tìm mã vận đơn lúc prepare).
-function pageDumpModalTracking(titleReSrc) {
-  const tre = new RegExp(titleReSrc);
-  const norm = (s) => (s || "").replace(/\s+/g, " ").trim();
+// Đọc MÃ VẬN ĐƠN trong modal "Thông Tin Chi Tiết" (ô data-testid=shipping-detail-tracking-number, class .tracking-number).
+// Chuẩn hoá BỎ HẾT khoảng trắng ("SPX VN0 626 215 188 57" → "SPXVN062621518857"). Chưa tạo xong ("...đang được tạo")
+// hoặc không phải code (còn ký tự tiếng Việt / <6 ký tự) → "" (chưa sẵn sàng).
+function pageReadModalTracking() {
   for (const box of document.querySelectorAll(".eds-modal__box")) {
     const r = box.getBoundingClientRect();
     if (!(r.width > 0 && r.height > 0)) continue;
     const title = box.querySelector(".eds-modal__title") || box.querySelector(".title");
-    if (!(title && tre.test(_na(title.textContent)))) continue;
-    // Các phần tử có class chứa 'tracking'/'waybill' hoặc text có SPX / mã ngắn near "vận đơn".
-    const hints = [];
-    for (const el of box.querySelectorAll("[class*=tracking],[class*=waybill],[class*=awb],[class*=logistic]")) {
-      const t = norm(el.textContent);
-      if (t) hints.push((typeof el.className === "string" ? el.className : "") + " => " + t.slice(0, 60));
-    }
-    return "TEXT[" + norm(box.innerText).slice(0, 900) + "] || HINTS[" + hints.slice(0, 8).join(" ~ ") + "]";
+    if (!(title && /thong tin chi tiet/.test(_na(title.textContent)))) continue;
+    const el = box.querySelector("[data-testid='shipping-detail-tracking-number']")
+            || box.querySelector(".pickup-tn-and-short-code .tracking-number");
+    if (!el) return "";
+    const raw = (el.textContent || "").trim();
+    if (!raw || /đang được tạo|đang tạo|creating|generat/i.test(raw)) return ""; // Shopee chưa tạo xong vận đơn
+    const compact = raw.replace(/\s+/g, "");
+    if (compact.length < 6 || /[^A-Za-z0-9]/.test(compact)) return ""; // không giống code → bỏ
+    return compact;
   }
-  return "(khong thay modal " + titleReSrc + ")";
+  return "";
 }
 
 // Trong modal có .title khớp titleReSrc, tìm phần tử (theo selectors) có text khớp textReSrc → {x,y,selected}.
@@ -1367,14 +1368,17 @@ async function doPrepareNextOrder() {
   if (!hasDetail) { send({ action: "error", message: "không mở được modal Thông Tin Chi Tiết (đơn " + orderCode + ")" }); return; }
   await sleep(1000);
 
-  // ===== TẠM (CHẨN ĐOÁN mã vận đơn) — KHÔNG tự bấm "In phiếu giao": giữ modal "Thông Tin Chi Tiết" MỞ để user
-  //       tự F12 inspect ô mã vận đơn (mã hiện sau vài giây khi Shopee tạo xong). Nhả debugger cho sạch. Giữ ~4'
-  //       rồi trả noOrder để flow đi tiếp (revert địa chỉ + đóng tab). BỎ khối này sau khi lấy được selector. =====
-  send({ action: "progress", message: "CHẨN ĐOÁN: modal Thông Tin Chi Tiết ĐANG MỞ (đơn " + orderCode + "). KHÔNG tự in phiếu — bạn F12 → inspect ô mã vận đơn (đợi 'Mã vận đơn đang được tạo' đổi thành mã thật). Giữ ~4 phút." });
-  try { releaseDbg(); } catch (e) {}
-  await sleep(240000);
-  send({ action: "noOrder" });
-  return;
+  // Đọc MÃ VẬN ĐƠN NGAY tại modal "Thông Tin Chi Tiết" (Shopee tạo vận đơn sau vài giây: "...đang được tạo" → mã thật).
+  // Poll tới khi có mã (tối đa 90s; modal vẫn mở — cũng là lúc chờ Shopee tạo vận đơn để nút In phiếu hoạt động). Không
+  // lấy được → để rỗng (list sẽ bù chu kỳ sau). Bắt tại đây = app + GSheet + hub có mã NGAY, khỏi chờ chu kỳ sync kế.
+  let tracking = "";
+  { const trd = Date.now() + 90000;
+    while (Date.now() < trd) {
+      try { tracking = (await execInTab(tabId, pageReadModalTracking, [])) || ""; } catch (e) { tracking = ""; }
+      if (tracking) break;
+      await sleep(1000);
+    } }
+  if (tracking) send({ action: "progress", message: "Mã vận đơn (đơn " + orderCode + "): " + tracking });
 
   // "In phiếu giao" → bắt tab phiếu (window.open → awbprint). Bấm lặp tới khi có tab (Shopee tạo vận đơn có thể muộn, ~2').
   send({ action: "progress", message: "modal Chi Tiết mở — tìm + bấm 'In phiếu giao'..." });
@@ -1428,5 +1432,5 @@ async function doPrepareNextOrder() {
   // Đóng tab phiếu sau khi lấy xong (user yêu cầu: lưu xong thì close tab phiếu).
   try { await chrome.tabs.remove(slipId); } catch (e) {}
 
-  send({ action: "orderPrepared", orderCode: orderCode, slipTabUrl: slipUrl, slipBase64: slipB64 });
+  send({ action: "orderPrepared", orderCode: orderCode, slipTabUrl: slipUrl, slipBase64: slipB64, tracking: tracking });
 }

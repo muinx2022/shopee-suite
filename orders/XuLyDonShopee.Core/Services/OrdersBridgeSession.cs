@@ -77,7 +77,7 @@ public sealed class OrdersBridgeSession : IDisposable
     private OrdersWebSocketServer? _ws;
 
     /// <summary>GĐ3: kết quả extension "chuẩn bị hàng" 1 đơn (mã đơn + URL tab phiếu). null qua TCS = hết đơn.</summary>
-    private sealed record PrepareResult(string OrderCode, string SlipTabUrl, string SlipBase64);
+    private sealed record PrepareResult(string OrderCode, string SlipTabUrl, string SlipBase64, string? Tracking);
 
     // Cờ hoàn tất từng chặng — tạo mới mỗi lần chạy; RunContinuationsAsynchronously để continuation KHÔNG chạy
     // trên thread nhận WebSocket (tránh nghẽn vòng nhận / deadlock).
@@ -623,14 +623,17 @@ public sealed class OrdersBridgeSession : IDisposable
                 L("Không đặt được địa chỉ lấy hàng — vẫn thử xử đơn (phiếu có thể sai địa chỉ).");
             }
 
-            // Lặp Chuẩn bị hàng tới khi hết đơn / chốt chặn 50 đơn / captcha.
+            // Lặp Chuẩn bị hàng tới khi hết đơn / chốt chặn 50 đơn / captcha. Mã vận đơn bắt NGAY tại modal
+            // "Thông Tin Chi Tiết" (extension đọc trước khi in phiếu) → gom theo mã đơn để cập nhật DB same-cycle.
+            var capturedTracking = new Dictionary<string, string>(StringComparer.Ordinal);
             var guard = 0;
             while (guard++ < 50)
             {
                 ct.ThrowIfCancellationRequested();
                 _prepareTcs = NewTcs<PrepareResult?>();
                 await _ws.SendAsync(new { action = "prepareNextOrder", invoiceDir = _invoiceDir }).ConfigureAwait(false);
-                var prep = await _prepareTcs.Task.WaitAsync(TimeSpan.FromSeconds(180), ct).ConfigureAwait(false);
+                // 300s: extension chờ Shopee tạo vận đơn (≤90s) TRƯỚC khi in, rồi chờ tab phiếu (≤120s) — nới hạn cho đủ.
+                var prep = await _prepareTcs.Task.WaitAsync(TimeSpan.FromSeconds(300), ct).ConfigureAwait(false);
                 if (_captchaSeen)
                 {
                     L("PHÁT HIỆN captcha khi xử đơn — dừng.");
@@ -644,9 +647,36 @@ public sealed class OrdersBridgeSession : IDisposable
 
                 var saved = TrySaveSlip(prep.SlipBase64, prep.OrderCode, _invoiceDir!);
                 if (saved) slips++;
-                L($"Đã chuẩn bị đơn {prep.OrderCode} — {(saved ? "lưu phiếu OK" : "CHƯA lưu được phiếu (kiểm tra tay)")}.");
+                if (!string.IsNullOrWhiteSpace(prep.Tracking) && !string.IsNullOrWhiteSpace(prep.OrderCode))
+                {
+                    capturedTracking[prep.OrderCode] = prep.Tracking!;
+                }
+                L($"Đã chuẩn bị đơn {prep.OrderCode} — {(saved ? "lưu phiếu OK" : "CHƯA lưu được phiếu (kiểm tra tay)")}"
+                  + (string.IsNullOrWhiteSpace(prep.Tracking) ? "" : $", mã vận đơn {prep.Tracking}") + ".");
             }
             L($"Xử đơn xong: {slips} phiếu đã lưu.");
+
+            // Mã vận đơn bắt được NGAY lúc chuẩn bị hàng → cập nhật DTO + LƯU LẠI (DB tracking + GSheet "vận đơn mới" +
+            // hub) SAME-CYCLE, khỏi chờ chu kỳ sync sau. Best-effort (lỗi không phá flow revert địa chỉ bên dưới).
+            if (capturedTracking.Count > 0 && _syncCallback is not null)
+            {
+                var updated = 0;
+                foreach (var o in orders)
+                {
+                    if (capturedTracking.TryGetValue(o.OrderSn, out var tn) && !string.IsNullOrWhiteSpace(tn))
+                    {
+                        o.TrackingNumber = tn;
+                        updated++;
+                    }
+                }
+                if (updated > 0)
+                {
+                    L($"Cập nhật {updated} mã vận đơn (lúc chuẩn bị hàng) → lưu lại + đẩy GSheet/hub.");
+                    try { await _syncCallback(shopId, shopLogin, orders, ct).ConfigureAwait(false); }
+                    catch (OperationCanceledException) { throw; }
+                    catch (Exception ex) { L("Lưu lại mã vận đơn lỗi: " + ex.Message); }
+                }
+            }
 
             // Hết đơn → set địa chỉ lấy hàng VỀ ĐỊA CHỈ KHÁC (giữ tag "trả hàng" ở địa chỉ mặc định) — hoàn tất 1 flow shop.
             L("Set địa chỉ lấy hàng về địa chỉ khác (hoàn tất flow shop)...");
@@ -797,7 +827,8 @@ public sealed class OrdersBridgeSession : IDisposable
                     var code = root.TryGetProperty("orderCode", out var oc) ? (oc.GetString() ?? string.Empty) : string.Empty;
                     var slip = root.TryGetProperty("slipTabUrl", out var su) ? (su.GetString() ?? string.Empty) : string.Empty;
                     var b64 = root.TryGetProperty("slipBase64", out var sb) ? (sb.GetString() ?? string.Empty) : string.Empty;
-                    _prepareTcs.TrySetResult(new PrepareResult(code, slip, b64));
+                    var trk = root.TryGetProperty("tracking", out var tk) ? tk.GetString() : null;
+                    _prepareTcs.TrySetResult(new PrepareResult(code, slip, b64, trk));
                     break;
                 }
 
