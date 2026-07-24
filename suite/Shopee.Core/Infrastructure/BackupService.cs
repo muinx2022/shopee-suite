@@ -124,6 +124,7 @@ public static class BackupService
                     // đến lúc Hub giao việc AssignmentWorker resolve object live (vẫn 1) → chạy 1 lane.
                     existing.Shops = MergeShopsKeepInstance(existing.Shops, a.Shops);
                     existing.Label = a.Label; existing.Email = a.Email; existing.Password = a.Password;
+                    existing.EmailPassword = a.EmailPassword;
                     existing.KiotProxyKey = a.KiotProxyKey; existing.Region = a.Region; existing.ProxyType = a.ProxyType;
                     existing.DataSource = a.DataSource;   // field CHUNG (excel/hub): Hub là nguồn sự thật cho chế độ kho
                     changed = true;
@@ -163,7 +164,7 @@ public static class BackupService
     /// vào chữ ký thì set worker trên client làm lệch chữ ký → pull sau đó lấy bản Hub đè ngược mất giá trị.</summary>
     private static string SharedSignature(BigSellerAccount a) => JsonSerializer.Serialize(new
     {
-        a.Label, a.Email, a.Password, a.KiotProxyKey, a.Region, a.ProxyType, a.DataSource,
+        a.Label, a.Email, a.Password, a.EmailPassword, a.KiotProxyKey, a.Region, a.ProxyType, a.DataSource,
         Shops = a.Shops.Select(s => new
         {
             s.Id, s.Name, s.ShopeeDataSheet, s.ColumnMap, s.BigSellerCrawlUrl, s.BigSellerImportFromClaimedTab,

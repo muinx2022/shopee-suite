@@ -214,6 +214,7 @@ public sealed class FileStoreConfigService
     {
         Id = a.Id,
         Label = a.Label, Email = a.Email, Password = a.Password,
+        EmailPassword = a.EmailPassword,
         KiotProxyKey = a.KiotProxyKey, Region = a.Region, ProxyType = a.ProxyType,
         DataSource = a.DataSource,
         Shops = a.Shops.Select(FreshShopFromClient).ToList(),
@@ -237,6 +238,7 @@ public sealed class FileStoreConfigService
         if (existing.Label != incoming.Label) { existing.Label = incoming.Label; changed = true; }
         if (existing.Email != incoming.Email) { existing.Email = incoming.Email; changed = true; }
         if (existing.Password != incoming.Password) { existing.Password = incoming.Password; changed = true; }
+        if (existing.EmailPassword != incoming.EmailPassword) { existing.EmailPassword = incoming.EmailPassword; changed = true; }
         if (existing.KiotProxyKey != incoming.KiotProxyKey) { existing.KiotProxyKey = incoming.KiotProxyKey; changed = true; }
         if (existing.Region != incoming.Region) { existing.Region = incoming.Region; changed = true; }
         if (existing.ProxyType != incoming.ProxyType) { existing.ProxyType = incoming.ProxyType; changed = true; }

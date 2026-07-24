@@ -1,7 +1,7 @@
 # Plan: Thêm field "Mật khẩu email" vào tài khoản BigSeller (model + sync + UI hub)
 
 - **Ngày:** 2026-07-24
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-dev`)
 
 ## 1. Bối cảnh & mục tiêu

@@ -13,6 +13,10 @@ public sealed class BigSellerAccount
     /// <summary>Mật khẩu BigSeller (plain) — cho auto-login TỰ mint token mỗi máy (Phase 2, user chọn lưu text
     /// không mã hoá). Field DÙNG CHUNG: sync qua Hub như Email → client login được mà khỏi nhập tay từng máy.</summary>
     public string Password { get; set; } = "";
+    /// <summary>Mật khẩu HÒM MAIL (Hotmail/Outlook) của địa chỉ <see cref="Email"/> — để hub TỰ đăng nhập email
+    /// đọc mã xác thực 6 số khi BigSeller đòi OTP (thiết bị mới). Plain text như Password. Field DÙNG CHUNG:
+    /// sync qua Hub như Email/Password. Trống = không tự đọc mã, phải nhập tay.</summary>
+    public string EmailPassword { get; set; } = "";
 
     /// <summary>Đường dẫn file Excel chứa dữ liệu các shop (mỗi shop 1 sheet).</summary>
     public string WorkbookPath { get; set; } = "";
