@@ -844,10 +844,11 @@ public partial class AccountSession : ObservableObject, IAccountSession
         // Vừa ghi đơn → phát tín hiệu để màn "Đơn hàng" đang mở tự nạp lại.
         _services.RaiseOrdersChanged();
 
-        // Đẩy GSheet/hub/hub-slip/sold/notify chạy NỀN (chỉ đụng DB + file + HTTP, KHÔNG trình duyệt).
+        // Đẩy GSheet/hub/sold/notify chạy NỀN (chỉ đụng DB + file + HTTP, KHÔNG trình duyệt).
+        // Hub: đẩy ĐƠN rồi mới đẩy PHIẾU (StartHubPushInBackground tự nối phiếu SAU khi đơn lên hub — xem lý do ở đó,
+        // tránh đua với reset hub_synced_at khi mã vận đơn vừa xuất hiện).
         StartGsheetPushInBackground(log, tok);
         StartHubPushInBackground(log, tok);
-        StartHubSlipPushInBackground(log, tok);
         StartSoldCountInBackground(soldDetect.SkusToIncrement, soldDetect.PendingMarkOrderSns, log, tok);
         if (insertedOrders.Count > 0)
         {
@@ -1048,6 +1049,11 @@ public partial class AccountSession : ObservableObject, IAccountSession
         {
             try { await PushOrdersToHubAsync(log, ct).ConfigureAwait(false); }
             finally { Interlocked.Exchange(ref _hubPushing, 0); }
+            // PHIẾU đẩy SAU khi ĐƠN đã lên hub (hub_synced_at set) — KHÔNG chạy song song với đẩy đơn: khi mã vận đơn
+            // vừa xuất hiện, UpsertMany RESET hub_synced_at về NULL để re-push đơn; nếu đẩy phiếu song song, nó đọc
+            // GetForHubSlipPush (đòi đơn ĐÃ hub-synced) TRÚNG lúc hub_synced_at đang NULL → bỏ sót phiếu. Tuần tự thì
+            // tới lượt phiếu, đơn đã re-push xong (hub_synced_at set lại) → phiếu khớp đơn trên hub.
+            StartHubSlipPushInBackground(log, ct);
         }, CancellationToken.None);
     }
 
