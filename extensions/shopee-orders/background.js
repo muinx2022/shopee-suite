@@ -322,6 +322,24 @@ function pageLocateByText(selectors, reSrc) {
   return null;
 }
 
+// Chẩn đoán: liệt kê text các phần tử bấm được (visible, ≤40 ký tự) — để soi nhãn thật khi không khớp. Tự chứa.
+function pageDumpClickables() {
+  const norm = (s) => (s || "").replace(/\s+/g, " ").trim();
+  const out = [];
+  const seen = new Set();
+  const els = document.querySelectorAll("a, button, [role='button'], [role='menuitem'], span.entry-text, .entry, li, .nav-item");
+  for (const el of els) {
+    const r = el.getBoundingClientRect();
+    if (r.width <= 0 || r.height <= 0) continue;
+    const t = norm(el.textContent);
+    if (!t || t.length > 40 || seen.has(t)) continue;
+    seen.add(t);
+    out.push(t);
+    if (out.length >= 40) break;
+  }
+  return JSON.stringify(out);
+}
+
 // Đơn ĐẦU có nút "Chuẩn bị hàng" (IsPrepareOrderButtonText) → {x,y,orderCode}. null nếu không còn.
 function pageFindPrepareOrder() {
   const cards = document.querySelectorAll("a[data-testid='order-item']");
@@ -525,7 +543,35 @@ const SHIPPING_SETTINGS_URL = "https://banhang.shopee.vn/portal/all-settings/shi
 const MAX_ORDER_PAGES = 10; // chốt chặn số trang quét (khớp MaxSyncPages phía C#).
 
 // Chạy một hàm trong trang (world MAIN), trả result[0].result.
+// Cài helper _na/_provCore lên window của TRANG (world MAIN) — vì page-func chạy executeScript được serialize
+// ĐỘC LẬP (không kèm helper ngoài), nên các hàm gọi bare `_na(...)`/`_provCore(...)` sẽ resolve về global window.*.
+// PHẢI gọi TRƯỚC mỗi page-func dùng helper (idempotent, rẻ).
+function pageInstallHelpers() {
+  window._na = function (s) {
+    const nf = (s || "").replace(/\s+/g, " ").trim().toLowerCase().normalize("NFD");
+    let out = "";
+    for (const ch of nf) {
+      const c = ch.charCodeAt(0);
+      if (c >= 0x300 && c <= 0x36f) continue;
+      out += ch === "đ" ? "d" : ch;
+    }
+    return out;
+  };
+  window._provCore = function (p) {
+    let s = window._na(p);
+    const prefixes = ["thanh pho ", "tinh ", "tp.", "tp "];
+    for (const pre of prefixes) {
+      if (s.indexOf(pre) === 0) { s = s.substring(pre.length).trim(); break; }
+    }
+    return s;
+  };
+}
+
 async function execInTab(tabId, func, args) {
+  // Đảm bảo _na/_provCore có trên window trước khi chạy page-func (page-func gọi bare → global).
+  try {
+    await chrome.scripting.executeScript({ target: { tabId }, world: "MAIN", func: pageInstallHelpers });
+  } catch (e) { /* bỏ qua — nếu func không dùng helper thì cũng không sao */ }
   const res = await chrome.scripting.executeScript({
     target: { tabId },
     world: "MAIN",
@@ -657,16 +703,29 @@ async function gotoSellerCentre() {
     return;
   }
 
-  // Trên /account (đã đăng nhập) → click THẲNG "Kênh Người bán"; chưa thấy → thử "Tài khoản của tôi" trước rồi thử lại.
-  const sellerSel = ["span.entry-text", ".entry", "span", "div", "[role='button']", "a"];
-  const sellerRe = "kenh nguoi ban|seller\\s*cent(re|er)|seller\\s*channel";
-  let seller = await execInTab(listTabId, pageLocateByText, [sellerSel, sellerRe]);
-  if (!seller) {
-    const acc = await execInTab(listTabId, pageLocateByText, [["li", "a", "div", "span", "[role='menuitem']"], "tai khoan cua toi|my account"]);
-    if (acc) { await trustedClick(listTabId, acc.x, acc.y); await sleep(2200); }
-    seller = await execInTab(listTabId, pageLocateByText, [sellerSel, sellerRe]);
+  // Trên /account (đã đăng nhập) → tìm "Kênh Người bán". POLL ~10s (SPA render trễ); mỗi vòng thử thêm click
+  // "Tài khoản của tôi" (có thể là menu xổ ra chứa entry). Không thấy → DUMP các mục bấm được để biết nhãn thật.
+  const sellerSel = ["span.entry-text", ".entry", "a", "span", "div", "[role='button']", "[role='menuitem']", "li"];
+  const sellerRe = "kenh nguoi ban|seller\\s*cent(re|er)|seller\\s*channel|nguoi ban";
+  let seller = null;
+  let triedAcc = false;
+  const sdl = Date.now() + 10000;
+  while (Date.now() < sdl) {
+    try { seller = await execInTab(listTabId, pageLocateByText, [sellerSel, sellerRe]); } catch (e) { seller = null; }
+    if (seller) break;
+    if (!triedAcc) {
+      const acc = await execInTab(listTabId, pageLocateByText, [["li", "a", "div", "span", "[role='menuitem']"], "tai khoan cua toi|my account"]);
+      if (acc) { await trustedClick(listTabId, acc.x, acc.y); await sleep(1500); }
+      triedAcc = true;
+    }
+    await sleep(600);
   }
-  if (!seller) { send({ action: "error", message: "không thấy 'Kênh Người bán' trên trang tài khoản subaccount" }); return; }
+  if (!seller) {
+    let dump = "[]"; try { dump = await execInTab(listTabId, pageDumpClickables, []); } catch (e) {}
+    let u = ""; try { u = (await chrome.tabs.get(listTabId)).url || ""; } catch (e) {}
+    send({ action: "error", message: "không thấy 'Kênh Người bán' trên " + u + " — các mục bấm được: " + dump });
+    return;
+  }
 
   const before = (await chrome.tabs.query({ url: "https://banhang.shopee.vn/*" })).map((t) => t.id);
   const subTabId = listTabId;
