@@ -23,7 +23,7 @@ public class OrderCsvExporterTests
 
         var firstLine = csv.Split("\r\n")[0];
         Assert.Equal(
-            "Tài khoản,Mã đơn,Người mua,Sản phẩm,Tổng tiền,Ước tính,Thanh toán,Trạng thái,Mô tả/Lý do hủy,ĐVVC,Mã vận đơn,Sync lúc",
+            "Shop,Mã đơn,Người mua,Sản phẩm,Tổng tiền,Ước tính,Thanh toán,Trạng thái,Mô tả/Lý do hủy,ĐVVC,Mã vận đơn,Sync lúc",
             firstLine);
         Assert.Equal(12, OrderCsvExporter.Headers.Length);
     }

@@ -12,8 +12,8 @@ namespace XuLyDonShopee.Tests;
 
 /// <summary>
 /// Test OrdersViewModel chạy headless (ObservableObject + repository trên DB tạm, không dựng cửa sổ):
-/// nạp/map nhãn tài khoản, dựng chuỗi hiển thị (sản phẩm "(+n)", tổng tiền ₫), lọc theo tài
-/// khoản/trạng thái/tìm kiếm, và map dòng đang hiển thị sang CSV.
+/// nạp/map nhãn SHOP (shop_login), dựng chuỗi hiển thị (sản phẩm "(+n)", tổng tiền ₫), lọc theo
+/// shop/trạng thái/tìm kiếm, và map dòng đang hiển thị sang CSV.
 /// </summary>
 public class OrdersViewModelTests
 {
@@ -21,12 +21,11 @@ public class OrdersViewModelTests
         => services.Accounts.Insert(new Account { Email = email, Password = "p" });
 
     [Fact]
-    public void Reload_HienThiTatCaDon_MapNhanTaiKhoan_VaDinhDangHienThi()
+    public void Reload_HienThiTatCaDon_MapNhanShop_VaDinhDangHienThi()
     {
         using var temp = new TempDatabase();
         var services = new AppServices(temp.Path);
-        var accId = SeedAccount(services, "shopA@mail.com");
-        services.Orders.UpsertMany(accId, new[]
+        services.Orders.UpsertMany(1, new[]
         {
             new SyncedOrder
             {
@@ -34,16 +33,27 @@ public class OrdersViewModelTests
                 TotalPrice = 166500, BuyerUsername = "buyer1",
                 CancelReason = "Giao dịch bất thường", Carrier = "SPX", TrackingNumber = "SPX1",
             }
-        }, DateTime.UtcNow);
+        }, DateTime.UtcNow, shopLogin: "alina99.store");
 
         var vm = new OrdersViewModel(services);
 
         var row = Assert.Single(vm.Rows);
-        Assert.Equal("shopA@mail.com", row.AccountLabel);
+        Assert.Equal("alina99.store", row.ShopLabel);     // nhãn cột "Shop" = shop_login (KHÔNG phải email account)
         Assert.Equal("Giày (+2)", row.Product);           // item_count 3 → +2 sản phẩm còn lại
         Assert.Equal("₫166.500", row.Total);              // định dạng nhóm nghìn bằng dấu chấm
         Assert.Equal("Giao dịch bất thường", row.Note);   // ưu tiên lý do hủy
         Assert.Equal("Đang hiển thị: 1/1 đơn", vm.TotalText); // trang hiện tại / tổng khớp lọc
+    }
+
+    [Fact]
+    public void Reload_DonKhongCoShopLogin_HienNhanFallback()
+    {
+        using var temp = new TempDatabase();
+        var services = new AppServices(temp.Path);
+        services.Orders.UpsertMany(1, new[] { new SyncedOrder { OrderSn = "SN1" } }, DateTime.UtcNow); // shop_login NULL
+
+        var vm = new OrdersViewModel(services);
+        Assert.Equal("(shop ?)", Assert.Single(vm.Rows).ShopLabel); // đơn cũ chưa gắn shop → nhãn fallback
     }
 
     [Fact]
@@ -62,24 +72,23 @@ public class OrdersViewModelTests
     }
 
     [Fact]
-    public void LocTheoTaiKhoan_ChiHienDonCuaTaiKhoanDo()
+    public void LocTheoShop_ChiHienDonCuaShopDo()
     {
         using var temp = new TempDatabase();
         var services = new AppServices(temp.Path);
-        var a1 = SeedAccount(services, "a1@mail.com");
-        var a2 = SeedAccount(services, "a2@mail.com");
-        services.Orders.UpsertMany(a1, new[] { new SyncedOrder { OrderSn = "A1" } }, DateTime.UtcNow);
-        services.Orders.UpsertMany(a2, new[]
+        // Cùng 1 account nhưng 2 shop khác nhau → chứng minh lọc theo SHOP, không theo account.
+        services.Orders.UpsertMany(1, new[] { new SyncedOrder { OrderSn = "A1" } }, DateTime.UtcNow, shopLogin: "shopA.store");
+        services.Orders.UpsertMany(1, new[]
         {
             new SyncedOrder { OrderSn = "B1" }, new SyncedOrder { OrderSn = "B2" }
-        }, DateTime.UtcNow);
+        }, DateTime.UtcNow, shopLogin: "shopB.store");
 
         var vm = new OrdersViewModel(services);
         Assert.Equal(3, vm.Rows.Count);
 
-        vm.SelectedAccount = vm.AccountOptions.First(o => o.Id == a2);
+        vm.SelectedAccount = vm.AccountOptions.First(o => o.Label == "shopB.store");
         Assert.Equal(2, vm.Rows.Count);
-        Assert.All(vm.Rows, r => Assert.Equal("a2@mail.com", r.AccountLabel));
+        Assert.All(vm.Rows, r => Assert.Equal("shopB.store", r.ShopLabel));
     }
 
     [Fact]
@@ -113,20 +122,19 @@ public class OrdersViewModelTests
     }
 
     [Fact]
-    public void Reload_GiuLuaChonTaiKhoan_KhiConTonTai()
+    public void Reload_GiuLuaChonShop_KhiConTonTai()
     {
         using var temp = new TempDatabase();
         var services = new AppServices(temp.Path);
-        var a1 = SeedAccount(services, "a1@mail.com");
-        var a2 = SeedAccount(services, "a2@mail.com");
-        services.Orders.UpsertMany(a2, new[] { new SyncedOrder { OrderSn = "B1" } }, DateTime.UtcNow);
+        services.Orders.UpsertMany(1, new[] { new SyncedOrder { OrderSn = "A1" } }, DateTime.UtcNow, shopLogin: "shopA.store");
+        services.Orders.UpsertMany(2, new[] { new SyncedOrder { OrderSn = "B1" } }, DateTime.UtcNow, shopLogin: "shopB.store");
 
         var vm = new OrdersViewModel(services);
-        vm.SelectedAccount = vm.AccountOptions.First(o => o.Id == a2);
+        vm.SelectedAccount = vm.AccountOptions.First(o => o.Label == "shopB.store");
 
         vm.RefreshCommand.Execute(null); // như bấm "Làm mới"
 
-        Assert.Equal(a2, vm.SelectedAccount!.Id); // vẫn giữ tài khoản đã chọn
+        Assert.Equal("shopB.store", vm.SelectedAccount!.Label); // vẫn giữ shop đã chọn
         Assert.Equal("B1", Assert.Single(vm.Rows).OrderSn);
     }
 
@@ -135,11 +143,10 @@ public class OrdersViewModelTests
     {
         using var temp = new TempDatabase();
         var services = new AppServices(temp.Path);
-        var a1 = SeedAccount(services, "a1@mail.com");
-        services.Orders.UpsertMany(a1, new[]
+        services.Orders.UpsertMany(1, new[]
         {
             new SyncedOrder { OrderSn = "SN1", ItemSummary = "Giày", ItemCount = 1, TotalPrice = 100000 }
-        }, DateTime.UtcNow);
+        }, DateTime.UtcNow, shopLogin: "alina99.store");
 
         var vm = new OrdersViewModel(services);
         var bytes = OrderCsvExporter.BuildCsvWithBom(vm.Rows.Select(r => r.ToExportRow()));
@@ -147,48 +154,44 @@ public class OrdersViewModelTests
         Assert.Equal(0xEF, bytes[0]);
         var text = Encoding.UTF8.GetString(bytes, 3, bytes.Length - 3);
         Assert.Contains("SN1", text);
-        Assert.Contains("a1@mail.com", text);
+        Assert.Contains("alina99.store", text);   // cột đầu = nhãn shop
         Assert.Contains("₫100.000", text);
     }
 
     [Fact]
-    public void ComboBoxTrangThai_TheoTaiKhoanDangLoc()
+    public void ComboBoxTrangThai_TheoShopDangLoc()
     {
         using var temp = new TempDatabase();
         var services = new AppServices(temp.Path);
-        var a1 = SeedAccount(services, "a1@mail.com");
-        var a2 = SeedAccount(services, "a2@mail.com");
-        services.Orders.UpsertMany(a1, new[] { new SyncedOrder { OrderSn = "A1", Status = "Đã hủy" } }, DateTime.UtcNow);
-        services.Orders.UpsertMany(a2, new[] { new SyncedOrder { OrderSn = "B1", Status = "Chờ lấy hàng" } }, DateTime.UtcNow);
+        services.Orders.UpsertMany(1, new[] { new SyncedOrder { OrderSn = "A1", Status = "Đã hủy" } }, DateTime.UtcNow, shopLogin: "shopA.store");
+        services.Orders.UpsertMany(2, new[] { new SyncedOrder { OrderSn = "B1", Status = "Chờ lấy hàng" } }, DateTime.UtcNow, shopLogin: "shopB.store");
 
         var vm = new OrdersViewModel(services);
-        // "Tất cả tài khoản" → thấy cả 2 trạng thái (sắp xếp: 'C' trước 'Đ').
+        // "Tất cả shop" → thấy cả 2 trạng thái (sắp xếp: 'C' trước 'Đ').
         Assert.Equal(new[] { OrdersViewModel.AllStatusesLabel, "Chờ lấy hàng", "Đã hủy" }, vm.StatusOptions);
 
-        vm.SelectedAccount = vm.AccountOptions.First(o => o.Id == a1);
+        vm.SelectedAccount = vm.AccountOptions.First(o => o.Label == "shopA.store");
         Assert.Equal(new[] { OrdersViewModel.AllStatusesLabel, "Đã hủy" }, vm.StatusOptions);
 
-        vm.SelectedAccount = vm.AccountOptions.First(o => o.Id == a2);
+        vm.SelectedAccount = vm.AccountOptions.First(o => o.Label == "shopB.store");
         Assert.Equal(new[] { OrdersViewModel.AllStatusesLabel, "Chờ lấy hàng" }, vm.StatusOptions);
     }
 
     [Fact]
-    public void DoiTaiKhoan_TrangThaiCuKhongCon_VeTatCa_VaHienDungBang()
+    public void DoiShop_TrangThaiCuKhongCon_VeTatCa_VaHienDungBang()
     {
         using var temp = new TempDatabase();
         var services = new AppServices(temp.Path);
-        var a1 = SeedAccount(services, "a1@mail.com");
-        var a2 = SeedAccount(services, "a2@mail.com");
-        services.Orders.UpsertMany(a1, new[] { new SyncedOrder { OrderSn = "A1", Status = "Đã hủy" } }, DateTime.UtcNow);
-        services.Orders.UpsertMany(a2, new[] { new SyncedOrder { OrderSn = "B1", Status = "Chờ lấy hàng" } }, DateTime.UtcNow);
+        services.Orders.UpsertMany(1, new[] { new SyncedOrder { OrderSn = "A1", Status = "Đã hủy" } }, DateTime.UtcNow, shopLogin: "shopA.store");
+        services.Orders.UpsertMany(2, new[] { new SyncedOrder { OrderSn = "B1", Status = "Chờ lấy hàng" } }, DateTime.UtcNow, shopLogin: "shopB.store");
 
         var vm = new OrdersViewModel(services);
-        vm.SelectedAccount = vm.AccountOptions.First(o => o.Id == a1);
+        vm.SelectedAccount = vm.AccountOptions.First(o => o.Label == "shopA.store");
         vm.SelectedStatus = "Đã hủy";
         Assert.Equal("A1", Assert.Single(vm.Rows).OrderSn);
 
-        // Đổi sang a2 (không có trạng thái "Đã hủy") → về "Tất cả", bảng hiện đơn của a2 (không rỗng).
-        vm.SelectedAccount = vm.AccountOptions.First(o => o.Id == a2);
+        // Đổi sang shopB (không có trạng thái "Đã hủy") → về "Tất cả", bảng hiện đơn của shopB (không rỗng).
+        vm.SelectedAccount = vm.AccountOptions.First(o => o.Label == "shopB.store");
         Assert.Equal(OrdersViewModel.AllStatusesLabel, vm.SelectedStatus);
         Assert.Equal("B1", Assert.Single(vm.Rows).OrderSn);
     }
@@ -321,26 +324,23 @@ public class OrdersViewModelTests
         Assert.Equal("Không có đơn Chờ lấy hàng nào trong danh sách để in.", vm.StatusMessage);
     }
 
-    // ===== Lọc shop THEO CHỮ ĐANG GÕ: nguồn sự thật là AccountFilterText (gõ dở lọc hợp CHỨA, trống = tất cả) =====
+    // ===== Lọc shop THEO CHỮ ĐANG GÕ: nguồn sự thật là AccountFilterText (gõ dở LIKE %text%, trống = tất cả) =====
 
     [Fact]
-    public void GoDo_KhopNhieuShop_LocHopChuaTrongBoNho()
+    public void GoDo_KhopNhieuShop_LIKE_TrenShopLogin()
     {
         using var temp = new TempDatabase();
         var services = new AppServices(temp.Path);
-        var mex1 = SeedAccount(services, "mexico1.store");
-        var mex2 = SeedAccount(services, "mexstyle@mail.com");
-        var other = SeedAccount(services, "alpha@mail.com");
-        services.Orders.UpsertMany(mex1, new[] { new SyncedOrder { OrderSn = "M1" } }, DateTime.UtcNow);
-        services.Orders.UpsertMany(mex2, new[] { new SyncedOrder { OrderSn = "M2" } }, DateTime.UtcNow);
-        services.Orders.UpsertMany(other, new[] { new SyncedOrder { OrderSn = "O1" } }, DateTime.UtcNow);
+        services.Orders.UpsertMany(1, new[] { new SyncedOrder { OrderSn = "M1" } }, DateTime.UtcNow, shopLogin: "mexico1.store");
+        services.Orders.UpsertMany(2, new[] { new SyncedOrder { OrderSn = "M2" } }, DateTime.UtcNow, shopLogin: "mexstyle.store");
+        services.Orders.UpsertMany(3, new[] { new SyncedOrder { OrderSn = "O1" } }, DateTime.UtcNow, shopLogin: "alpha.store");
 
         var vm = new OrdersViewModel(services);
         Assert.Equal(3, vm.Rows.Count);
 
-        vm.AccountFilterText = "mex"; // gõ dở → 2 shop có Email chứa "mex"
+        vm.AccountFilterText = "mex"; // gõ dở → LIKE %mex% → 2 shop có tên chứa "mex"
         Assert.Equal(2, vm.Rows.Count);
-        Assert.All(vm.Rows, r => Assert.Contains("mex", r.AccountLabel));
+        Assert.All(vm.Rows, r => Assert.Contains("mex", r.ShopLabel));
         Assert.Equal("Đang hiển thị: 2/2 đơn", vm.TotalText);
     }
 
@@ -349,10 +349,8 @@ public class OrdersViewModelTests
     {
         using var temp = new TempDatabase();
         var services = new AppServices(temp.Path);
-        var a1 = SeedAccount(services, "mexico1.store");
-        var a2 = SeedAccount(services, "alpha@mail.com");
-        services.Orders.UpsertMany(a1, new[] { new SyncedOrder { OrderSn = "M1" } }, DateTime.UtcNow);
-        services.Orders.UpsertMany(a2, new[] { new SyncedOrder { OrderSn = "O1" } }, DateTime.UtcNow);
+        services.Orders.UpsertMany(1, new[] { new SyncedOrder { OrderSn = "M1" } }, DateTime.UtcNow, shopLogin: "mexico1.store");
+        services.Orders.UpsertMany(2, new[] { new SyncedOrder { OrderSn = "O1" } }, DateTime.UtcNow, shopLogin: "alpha.store");
 
         var vm = new OrdersViewModel(services);
 
@@ -366,12 +364,9 @@ public class OrdersViewModelTests
     {
         using var temp = new TempDatabase();
         var services = new AppServices(temp.Path);
-        var mex1 = SeedAccount(services, "mexico1.store");
-        var mex2 = SeedAccount(services, "mexstyle@mail.com");
-        var other = SeedAccount(services, "alpha@mail.com");
-        services.Orders.UpsertMany(mex1, new[] { new SyncedOrder { OrderSn = "M1" } }, DateTime.UtcNow);
-        services.Orders.UpsertMany(mex2, new[] { new SyncedOrder { OrderSn = "M2" } }, DateTime.UtcNow);
-        services.Orders.UpsertMany(other, new[] { new SyncedOrder { OrderSn = "O1" } }, DateTime.UtcNow);
+        services.Orders.UpsertMany(1, new[] { new SyncedOrder { OrderSn = "M1" } }, DateTime.UtcNow, shopLogin: "mexico1.store");
+        services.Orders.UpsertMany(2, new[] { new SyncedOrder { OrderSn = "M2" } }, DateTime.UtcNow, shopLogin: "mexstyle.store");
+        services.Orders.UpsertMany(3, new[] { new SyncedOrder { OrderSn = "O1" } }, DateTime.UtcNow, shopLogin: "alpha.store");
 
         var vm = new OrdersViewModel(services);
         vm.AccountFilterText = "mex";
@@ -379,7 +374,7 @@ public class OrdersViewModelTests
 
         vm.AccountFilterText = ""; // xóa trắng → về tất cả
         Assert.Equal(3, vm.Rows.Count);
-        Assert.Null(vm.SelectedAccount!.Id); // sentinel "Tất cả tài khoản"
+        Assert.Equal(OrdersViewModel.AllShopsLabel, vm.SelectedAccount!.Label); // sentinel "Tất cả shop"
     }
 
     [Fact]
@@ -387,16 +382,14 @@ public class OrdersViewModelTests
     {
         using var temp = new TempDatabase();
         var services = new AppServices(temp.Path);
-        var mex1 = SeedAccount(services, "mexico1.store");
-        var other = SeedAccount(services, "alpha@mail.com");
-        services.Orders.UpsertMany(mex1, new[] { new SyncedOrder { OrderSn = "M1", Status = "Chờ lấy hàng" } }, DateTime.UtcNow);
-        services.Orders.UpsertMany(other, new[] { new SyncedOrder { OrderSn = "O1", Status = "Đã hủy" } }, DateTime.UtcNow);
+        services.Orders.UpsertMany(1, new[] { new SyncedOrder { OrderSn = "M1", Status = "Chờ lấy hàng" } }, DateTime.UtcNow, shopLogin: "mexico1.store");
+        services.Orders.UpsertMany(2, new[] { new SyncedOrder { OrderSn = "O1", Status = "Đã hủy" } }, DateTime.UtcNow, shopLogin: "alpha.store");
 
         var vm = new OrdersViewModel(services);
         vm.AccountFilterText = "MEXICO1.STORE"; // khớp ĐÚNG nhãn (khác hoa/thường) → như chọn gợi ý
 
-        Assert.Equal("M1", Assert.Single(vm.Rows).OrderSn);
-        Assert.Equal(mex1, vm.SelectedAccount!.Id);
+        Assert.Equal("M1", Assert.Single(vm.Rows).OrderSn); // khớp chính xác dùng nhãn shop đã lưu → không lệch hoa/thường
+        Assert.Equal("mexico1.store", vm.SelectedAccount!.Label);
         // StatusOptions nạp THEO shop đó (chỉ trạng thái của shop mex, không có "Đã hủy" của shop khác).
         Assert.Equal(new[] { OrdersViewModel.AllStatusesLabel, "Chờ lấy hàng" }, vm.StatusOptions);
     }
@@ -406,12 +399,9 @@ public class OrdersViewModelTests
     {
         using var temp = new TempDatabase();
         var services = new AppServices(temp.Path);
-        var mex1 = SeedAccount(services, "mexico1.store");
-        var mex2 = SeedAccount(services, "mexstyle@mail.com");
-        var other = SeedAccount(services, "alpha@mail.com");
-        services.Orders.UpsertMany(mex1, new[] { new SyncedOrder { OrderSn = "M1" } }, DateTime.UtcNow);
-        services.Orders.UpsertMany(mex2, new[] { new SyncedOrder { OrderSn = "M2" } }, DateTime.UtcNow);
-        services.Orders.UpsertMany(other, new[] { new SyncedOrder { OrderSn = "O1" } }, DateTime.UtcNow);
+        services.Orders.UpsertMany(1, new[] { new SyncedOrder { OrderSn = "M1" } }, DateTime.UtcNow, shopLogin: "mexico1.store");
+        services.Orders.UpsertMany(2, new[] { new SyncedOrder { OrderSn = "M2" } }, DateTime.UtcNow, shopLogin: "mexstyle.store");
+        services.Orders.UpsertMany(3, new[] { new SyncedOrder { OrderSn = "O1" } }, DateTime.UtcNow, shopLogin: "alpha.store");
 
         var vm = new OrdersViewModel(services);
         vm.AccountFilterText = "mex";
@@ -420,7 +410,7 @@ public class OrdersViewModelTests
         vm.ClearAccountFilterCommand.Execute(null);
         Assert.Equal(string.Empty, vm.AccountFilterText);
         Assert.Equal(3, vm.Rows.Count);
-        Assert.Null(vm.SelectedAccount!.Id);
+        Assert.Equal(OrdersViewModel.AllShopsLabel, vm.SelectedAccount!.Label);
     }
 
     [Fact]
@@ -428,17 +418,15 @@ public class OrdersViewModelTests
     {
         using var temp = new TempDatabase();
         var services = new AppServices(temp.Path);
-        var mex1 = SeedAccount(services, "mexico1.store");
-        var other = SeedAccount(services, "alpha@mail.com");
-        services.Orders.UpsertMany(mex1, new[] { new SyncedOrder { OrderSn = "M1" } }, DateTime.UtcNow);
-        services.Orders.UpsertMany(other, new[] { new SyncedOrder { OrderSn = "O1" } }, DateTime.UtcNow);
+        services.Orders.UpsertMany(1, new[] { new SyncedOrder { OrderSn = "M1" } }, DateTime.UtcNow, shopLogin: "mexico1.store");
+        services.Orders.UpsertMany(2, new[] { new SyncedOrder { OrderSn = "O1" } }, DateTime.UtcNow, shopLogin: "alpha.store");
 
         var vm = new OrdersViewModel(services);
         vm.AccountFilterText = "mex";
         Assert.Equal("M1", Assert.Single(vm.Rows).OrderSn);
 
         // Giả lập sync thêm đơn mới cho shop mex rồi bấm "Làm mới".
-        services.Orders.UpsertMany(mex1, new[] { new SyncedOrder { OrderSn = "M2" } }, DateTime.UtcNow);
+        services.Orders.UpsertMany(1, new[] { new SyncedOrder { OrderSn = "M2" } }, DateTime.UtcNow, shopLogin: "mexico1.store");
         vm.RefreshCommand.Execute(null);
 
         Assert.Equal("mex", vm.AccountFilterText);        // text đang gõ dở KHÔNG bị auto-refresh phá
@@ -574,16 +562,13 @@ public class OrdersViewModelTests
     {
         using var temp = new TempDatabase();
         var services = new AppServices(temp.Path);
-        var mex1 = SeedAccount(services, "mexico1.store");
-        var mex2 = SeedAccount(services, "mexstyle@mail.com");
-        var other = SeedAccount(services, "alpha@mail.com");
-        services.Orders.UpsertMany(mex1, Enumerable.Range(1, 3).Select(i => new SyncedOrder { OrderSn = "M1_" + i }).ToArray(), DateTime.UtcNow);
-        services.Orders.UpsertMany(mex2, Enumerable.Range(1, 2).Select(i => new SyncedOrder { OrderSn = "M2_" + i }).ToArray(), DateTime.UtcNow);
-        services.Orders.UpsertMany(other, Enumerable.Range(1, 4).Select(i => new SyncedOrder { OrderSn = "O_" + i }).ToArray(), DateTime.UtcNow);
+        services.Orders.UpsertMany(1, Enumerable.Range(1, 3).Select(i => new SyncedOrder { OrderSn = "M1_" + i }).ToArray(), DateTime.UtcNow, shopLogin: "mexico1.store");
+        services.Orders.UpsertMany(2, Enumerable.Range(1, 2).Select(i => new SyncedOrder { OrderSn = "M2_" + i }).ToArray(), DateTime.UtcNow, shopLogin: "mexstyle.store");
+        services.Orders.UpsertMany(3, Enumerable.Range(1, 4).Select(i => new SyncedOrder { OrderSn = "O_" + i }).ToArray(), DateTime.UtcNow, shopLogin: "alpha.store");
 
         var vm = new OrdersViewModel(services);
         vm.PageSize = 2;
-        vm.AccountFilterText = "mex"; // gõ dở → HỢP mex1 + mex2 = 5 đơn (lọc account_id IN (...) phía SQL)
+        vm.AccountFilterText = "mex"; // gõ dở → LIKE %mex% khớp mexico1 + mexstyle = 5 đơn (lọc shop_login phía SQL)
 
         Assert.Equal(5, vm.TotalCount);   // tổng khớp lọc — KHÔNG phải 9 (không lẫn shop "other")
         Assert.Equal(3, vm.TotalPages);   // 5 / 2 = 3 trang

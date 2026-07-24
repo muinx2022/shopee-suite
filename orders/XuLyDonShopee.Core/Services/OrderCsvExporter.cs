@@ -32,7 +32,7 @@ public static class OrderCsvExporter
     /// <summary>Tiêu đề các cột (trùng thứ tự cột bảng và các trường của <see cref="OrderExportRow"/>).</summary>
     public static readonly string[] Headers =
     {
-        "Tài khoản", "Mã đơn", "Người mua", "Sản phẩm", "Tổng tiền", "Ước tính",
+        "Shop", "Mã đơn", "Người mua", "Sản phẩm", "Tổng tiền", "Ước tính",
         "Thanh toán", "Trạng thái", "Mô tả/Lý do hủy", "ĐVVC", "Mã vận đơn", "Sync lúc"
     };
 

@@ -864,6 +864,122 @@ public class OrdersRepositoryTests
         Assert.Equal(2, repo.GetForGsheetPush(1).Count);
     }
 
+    // ===================== shop_login (tên shop cho màn Đơn hàng: hiển thị + lọc) =====================
+
+    [Fact]
+    public void UpsertMany_GanShopLogin_LuuVaoCot_UpsertLaiKhongTruyen_GiuShopLogin()
+    {
+        using var temp = new TempDatabase();
+        var db = temp.Open();
+        var repo = new OrdersRepository(db);
+
+        repo.UpsertMany(1, new[] { Sample("SN1") }, DateTime.UtcNow, shopId: "1001", shopLogin: "alina99.store");
+        Assert.Equal("alina99.store", ReadString(db, "SN1", "shop_login"));
+
+        // Upsert lại KHÔNG truyền shopLogin (null) → COALESCE GIỮ shop_login cũ, KHÔNG xóa.
+        repo.UpsertMany(1, new[] { Sample("SN1") }, DateTime.UtcNow);
+        Assert.Equal("alina99.store", ReadString(db, "SN1", "shop_login"));
+    }
+
+    [Fact]
+    public void UpsertMany_KhongTruyenShopLogin_ShopLoginNull()
+    {
+        using var temp = new TempDatabase();
+        var db = temp.Open();
+        var repo = new OrdersRepository(db);
+
+        repo.UpsertMany(1, new[] { Sample("SN1") }, DateTime.UtcNow);
+        Assert.Null(ReadString(db, "SN1", "shop_login"));
+    }
+
+    [Fact]
+    public void Query_MapShopLogin()
+    {
+        using var temp = new TempDatabase();
+        var repo = new OrdersRepository(temp.Open());
+        repo.UpsertMany(1, new[] { Make("SN1") }, DateTime.UtcNow, shopLogin: "shop9x.store");
+
+        var row = Assert.Single(repo.Query());
+        Assert.Equal("shop9x.store", row.ShopLogin);
+    }
+
+    [Fact]
+    public void Query_Count_LocTheoShopLogin_Exact_KhopChinhXac()
+    {
+        using var temp = new TempDatabase();
+        var repo = new OrdersRepository(temp.Open());
+        // 2 shop khác nhau (cùng account để chứng minh lọc theo shop, KHÔNG theo account).
+        repo.UpsertMany(1, new[] { Make("A1"), Make("A2") }, DateTime.UtcNow, shopLogin: "alina99.store");
+        repo.UpsertMany(1, new[] { Make("B1") }, DateTime.UtcNow, shopLogin: "alina99.store.vip"); // chứa chuỗi con
+
+        var exact = repo.Query(shopLogin: "alina99.store", shopExact: true);
+        Assert.Equal(new[] { "A1", "A2" }, exact.Select(r => r.OrderSn).OrderBy(s => s));  // KHÔNG dính "alina99.store.vip"
+        Assert.Equal(2, repo.Count(shopLogin: "alina99.store", shopExact: true));
+
+        // shopLogin null → mọi đơn (không lọc shop).
+        Assert.Equal(3, repo.Query(shopLogin: null).Count);
+        Assert.Equal(3, repo.Count());
+    }
+
+    [Fact]
+    public void Query_Count_LocTheoShopLogin_Like_GoDo()
+    {
+        using var temp = new TempDatabase();
+        var repo = new OrdersRepository(temp.Open());
+        repo.UpsertMany(1, new[] { Make("M1") }, DateTime.UtcNow, shopLogin: "mexico1.store");
+        repo.UpsertMany(2, new[] { Make("M2") }, DateTime.UtcNow, shopLogin: "mexstyle.store");
+        repo.UpsertMany(3, new[] { Make("O1") }, DateTime.UtcNow, shopLogin: "alpha.store");
+
+        // Gõ dở "mex" (shopExact=false) → LIKE %mex% → 2 shop chứa "mex", KHÔNG dính "alpha.store".
+        var like = repo.Query(shopLogin: "mex", shopExact: false);
+        Assert.Equal(new[] { "M1", "M2" }, like.Select(r => r.OrderSn).OrderBy(s => s));
+        Assert.Equal(2, repo.Count(shopLogin: "mex", shopExact: false));
+
+        // Không khớp shop nào → 0 dòng (KHÔNG ném).
+        Assert.Empty(repo.Query(shopLogin: "zzz", shopExact: false));
+        Assert.Equal(0, repo.Count(shopLogin: "zzz", shopExact: false));
+    }
+
+    [Fact]
+    public void Query_LocShop_BoDonShopLoginNull()
+    {
+        using var temp = new TempDatabase();
+        var repo = new OrdersRepository(temp.Open());
+        repo.UpsertMany(1, new[] { Make("OLD") }, DateTime.UtcNow);                          // shop_login NULL (đơn cũ)
+        repo.UpsertMany(1, new[] { Make("NEW") }, DateTime.UtcNow, shopLogin: "alina99.store");
+
+        // Lọc theo shop → chỉ đơn shop đó (đơn shop_login NULL KHÔNG lọt).
+        Assert.Equal(new[] { "NEW" }, repo.Query(shopLogin: "alina99.store", shopExact: true).Select(r => r.OrderSn));
+        // Không lọc → cả 2.
+        Assert.Equal(2, repo.Query().Count);
+    }
+
+    [Fact]
+    public void AllShopLogins_Distinct_SapXep_BoNullVaRong()
+    {
+        using var temp = new TempDatabase();
+        var repo = new OrdersRepository(temp.Open());
+        repo.UpsertMany(1, new[] { Make("A") }, DateTime.UtcNow, shopLogin: "shop9x.store");
+        repo.UpsertMany(1, new[] { Make("B") }, DateTime.UtcNow, shopLogin: "alina99.store");
+        repo.UpsertMany(2, new[] { Make("C") }, DateTime.UtcNow, shopLogin: "shop9x.store"); // trùng → gộp
+        repo.UpsertMany(2, new[] { Make("D") }, DateTime.UtcNow);                            // NULL → bỏ
+        repo.UpsertMany(2, new[] { Make("E") }, DateTime.UtcNow, shopLogin: "   ");          // rỗng/khoảng trắng → bỏ
+
+        Assert.Equal(new[] { "alina99.store", "shop9x.store" }, repo.AllShopLogins());
+    }
+
+    [Fact]
+    public void AllStatuses_LocTheoShopLogin()
+    {
+        using var temp = new TempDatabase();
+        var repo = new OrdersRepository(temp.Open());
+        repo.UpsertMany(1, new[] { Make("A", status: "Đã hủy") }, DateTime.UtcNow, shopLogin: "alina99.store");
+        repo.UpsertMany(1, new[] { Make("B", status: "Chờ lấy hàng") }, DateTime.UtcNow, shopLogin: "shop9x.store");
+
+        Assert.Equal(new[] { "Đã hủy" }, repo.AllStatuses(shopLogin: "alina99.store"));
+        Assert.Equal(new[] { "Chờ lấy hàng" }, repo.AllStatuses(shopLogin: "shop9x.store"));
+    }
+
     /// <summary>Đọc 1 cột (dạng chuỗi) của đơn theo order_sn — kiểm chứng trực tiếp trên DB.</summary>
     private static string? ReadString(Database db, string orderSn, string column)
     {

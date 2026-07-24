@@ -11,17 +11,29 @@ using XuLyDonShopee.Core.Services;
 
 namespace XuLyDonShopee.App.ViewModels;
 
-/// <summary>Một lựa chọn ở ComboBox lọc theo tài khoản. <see cref="Id"/> null = "Tất cả tài khoản".</summary>
+/// <summary>
+/// Một lựa chọn ở ComboBox lọc theo SHOP. Nhãn <see cref="Label"/> = tên đăng nhập shop (hoặc sentinel
+/// "Tất cả shop"). <see cref="Id"/> luôn null (giữ lại chỉ để bớt churn XAML — shop không có id số; phân biệt
+/// sentinel bằng <see cref="OrdersViewModel.IsAllShops"/> theo nhãn, KHÔNG theo Id).
+/// </summary>
 public sealed record AccountFilterOption(long? Id, string Label);
 
 /// <summary>
-/// Màn "Đơn hàng" (ĐỌC-CHỈ): lọc theo tài khoản / trạng thái / tìm kiếm, hiển thị bảng đơn đã sync và
+/// Màn "Đơn hàng" (ĐỌC-CHỈ): lọc theo shop / trạng thái / tìm kiếm, hiển thị bảng đơn đã sync và
 /// xuất các dòng đang lọc ra CSV (UTF-8 BOM). Không sửa/xóa đơn ở đây.
 /// </summary>
 public partial class OrdersViewModel : ViewModelBase
 {
     /// <summary>Sentinel cho mục "tất cả" ở ComboBox trạng thái.</summary>
     public const string AllStatusesLabel = "Tất cả trạng thái";
+
+    /// <summary>Sentinel cho mục "tất cả shop" ở ComboBox lọc shop (nhãn nhận diện sentinel — xem <see cref="IsAllShops"/>).</summary>
+    public const string AllShopsLabel = "Tất cả shop";
+
+    /// <summary>Option có phải sentinel "Tất cả shop" không (null hoặc nhãn = <see cref="AllShopsLabel"/>). Vì mọi
+    /// option đều có Id null nên phân biệt theo NHÃN, không theo Id.</summary>
+    internal static bool IsAllShops(AccountFilterOption? option)
+        => option is null || option.Label == AllShopsLabel;
 
     /// <summary>Chờ nhỏ giữa hai lệnh in liên tiếp (tránh dội máy in / mở ồ ạt cửa sổ app PDF).</summary>
     private const int PrintDispatchDelayMs = 700;
@@ -58,7 +70,7 @@ public partial class OrdersViewModel : ViewModelBase
         }
     }
 
-    /// <summary>Lựa chọn của ComboBox tài khoản: "Tất cả" + từng tài khoản.</summary>
+    /// <summary>Lựa chọn của ComboBox lọc shop: "Tất cả shop" + từng tên shop (từ <c>AllShopLogins</c>).</summary>
     public ObservableCollection<AccountFilterOption> AccountOptions { get; } = new();
 
     /// <summary>Lựa chọn của ComboBox trạng thái: <see cref="AllStatusesLabel"/> + các trạng thái có thật.</summary>
@@ -71,11 +83,11 @@ public partial class OrdersViewModel : ViewModelBase
     private AccountFilterOption? _selectedAccount;
 
     /// <summary>
-    /// NGUỒN SỰ THẬT của bộ lọc tài khoản: chuỗi text trong ô "Gõ tên shop". Lọc SỐNG theo từng ký tự
+    /// NGUỒN SỰ THẬT của bộ lọc shop: chuỗi text trong ô "Gõ tên shop". Lọc SỐNG theo từng ký tự
     /// (xem <see cref="OnAccountFilterTextChanged"/> + <see cref="Apply"/>):
-    ///  · trống → tất cả shop;
-    ///  · khớp ĐÚNG nhãn 1 shop (trim, không phân biệt hoa/thường) → đúng shop đó (như chọn gợi ý);
-    ///  · gõ dở (vd "mex") → lọc HỢP mọi shop có Email CHỨA text (lọc trong bộ nhớ).
+    ///  · trống → tất cả shop (shopLogin=null);
+    ///  · khớp ĐÚNG nhãn 1 shop (trim, không phân biệt hoa/thường) → đúng shop đó, khớp CHÍNH XÁC (như chọn gợi ý);
+    ///  · gõ dở (vd "mex") → LIKE <c>%text%</c> trên cột <c>shop_login</c> (lọc phía SQL).
     /// <see cref="SelectedAccount"/> được đồng bộ theo text để dùng lại cho tên file CSV.
     /// </summary>
     [ObservableProperty]
@@ -123,7 +135,7 @@ public partial class OrdersViewModel : ViewModelBase
     public string PageInfoText => $"Trang {CurrentPage}/{TotalPages}";
 
     /// <summary>
-    /// Nạp lại từ DB: danh sách tài khoản + trạng thái cho bộ lọc (giữ lựa chọn cũ nếu còn), rồi truy vấn
+    /// Nạp lại từ DB: danh sách shop + trạng thái cho bộ lọc (giữ lựa chọn cũ nếu còn), rồi truy vấn
     /// theo bộ lọc hiện tại. Gọi khi mở màn hoặc bấm "Làm mới" (sau khi vừa sync thêm đơn).
     /// </summary>
     public void Reload()
@@ -136,35 +148,35 @@ public partial class OrdersViewModel : ViewModelBase
         var prevStatus = SelectedStatus;
 
         AccountOptions.Clear();
-        AccountOptions.Add(new AccountFilterOption(null, "Tất cả tài khoản"));
-        foreach (var a in _services.Accounts.GetAll())
+        AccountOptions.Add(new AccountFilterOption(null, AllShopsLabel));
+        foreach (var s in _services.Orders.AllShopLogins())
         {
-            AccountOptions.Add(new AccountFilterOption(a.Id, a.Email));
+            AccountOptions.Add(new AccountFilterOption(null, s));
         }
-        // Đồng bộ SelectedAccount theo text: khớp đúng nhãn 1 shop → shop đó; trống/gõ dở → sentinel "tất cả".
+        // Đồng bộ SelectedAccount theo text: khớp đúng nhãn 1 shop → shop đó; trống/gõ dở → sentinel "tất cả shop".
         SelectedAccount = prevText.Length == 0
             ? AccountOptions[0]
             : AccountOptions.FirstOrDefault(o =>
                   string.Equals(o.Label.Trim(), prevText, StringComparison.OrdinalIgnoreCase)) ?? AccountOptions[0];
 
-        // Trạng thái CHỈ của tài khoản đang lọc → không chọn phải trạng thái không có đơn nào của TK đó.
-        // (Gõ dở → SelectedAccount là sentinel → trạng thái của MỌI tài khoản; chấp nhận đơn giản.)
-        ReloadStatuses(SelectedAccount?.Id, prevStatus);
+        // Trạng thái CHỈ của shop đang lọc → không chọn phải trạng thái không có đơn nào của shop đó.
+        // (Gõ dở → SelectedAccount là sentinel → trạng thái của MỌI shop; chấp nhận đơn giản.)
+        ReloadStatuses(IsAllShops(SelectedAccount) ? null : SelectedAccount!.Label, prevStatus);
 
         _suppressApply = false;
         Apply();
     }
 
     /// <summary>
-    /// Dựng lại danh sách trạng thái cho ComboBox theo tài khoản đang lọc (<paramref name="accountId"/>
-    /// null = mọi tài khoản). Giữ <paramref name="preferredStatus"/> nếu còn hợp lệ, không thì về
+    /// Dựng lại danh sách trạng thái cho ComboBox theo shop đang lọc (<paramref name="shopLogin"/>
+    /// null = mọi shop). Giữ <paramref name="preferredStatus"/> nếu còn hợp lệ, không thì về
     /// <see cref="AllStatusesLabel"/>. Người gọi tự quản lý cờ <see cref="_suppressApply"/>.
     /// </summary>
-    private void ReloadStatuses(long? accountId, string? preferredStatus)
+    private void ReloadStatuses(string? shopLogin, string? preferredStatus)
     {
         StatusOptions.Clear();
         StatusOptions.Add(AllStatusesLabel);
-        foreach (var s in _services.Orders.AllStatuses(accountId))
+        foreach (var s in _services.Orders.AllStatuses(shopLogin: shopLogin))
         {
             StatusOptions.Add(s);
         }
@@ -174,15 +186,16 @@ public partial class OrdersViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Suy bộ lọc HIỆN TẠI (tài khoản/trạng thái/tìm kiếm) từ text nguồn-sự-thật — dùng CHUNG cho
+    /// Suy bộ lọc HIỆN TẠI (shop/trạng thái/tìm kiếm) từ text nguồn-sự-thật — dùng CHUNG cho
     /// <see cref="Apply"/> (1 trang), Xuất CSV và In nhiều đơn (MỌI trang) nên phạm vi luôn khớp nhau.
-    /// Phạm vi tài khoản quyết định TỪ text:
-    ///  · trống              → mọi tài khoản (accountId null);
-    ///  · khớp ĐÚNG nhãn option → đúng shop đó (sentinel Id null = tất cả);
-    ///  · gõ dở             → HỢP các shop có Email CHỨA text (accountIds; RỖNG ⇒ không shop nào ⇒ 0 đơn).
-    /// Repo lọc <c>accountIds</c> bằng <c>account_id IN (...)</c> phía SQL nên phân trang không thiếu dòng.
+    /// Phạm vi shop quyết định TỪ text:
+    ///  · trống               → mọi shop (shopLogin null);
+    ///  · khớp ĐÚNG nhãn 1 shop → shop đó, khớp CHÍNH XÁC (shopExact=true; dùng nhãn shop, không dùng text gõ
+    ///    để không lệch hoa/thường so với giá trị đã lưu);
+    ///  · gõ dở              → LIKE <c>%text%</c> trên cột <c>shop_login</c> (shopExact=false; không khớp thì 0 đơn).
+    /// Repo lọc <c>shop_login</c> phía SQL nên phân trang không thiếu dòng.
     /// </summary>
-    private (long? accountId, string? status, string? search, IReadOnlyCollection<long>? accountIds) CurrentFilter()
+    private (string? shopLogin, bool shopExact, string? status, string? search) CurrentFilter()
     {
         var text = (AccountFilterText ?? string.Empty).Trim();
         var status = string.IsNullOrEmpty(SelectedStatus) || SelectedStatus == AllStatusesLabel
@@ -190,37 +203,39 @@ public partial class OrdersViewModel : ViewModelBase
             : SelectedStatus;
         var search = string.IsNullOrWhiteSpace(SearchText) ? null : SearchText;
 
-        long? queryAccountId = null;
-        IReadOnlyCollection<long>? accountIds = null; // != null ⇒ chế độ gõ dở (HỢP các shop CHỨA text)
+        string? shopLogin = null;
+        bool shopExact = false;
         if (text.Length > 0)
         {
             var exact = AccountOptions.FirstOrDefault(o =>
-                string.Equals(o.Label.Trim(), text, StringComparison.OrdinalIgnoreCase));
+                !IsAllShops(o) && string.Equals(o.Label.Trim(), text, StringComparison.OrdinalIgnoreCase));
             if (exact is not null)
             {
-                queryAccountId = exact.Id; // sentinel → null = tất cả
+                shopLogin = exact.Label; // nhãn shop đã lưu (khớp chính xác, không lệch hoa/thường)
+                shopExact = true;
             }
             else
             {
-                accountIds = _services.Accounts.GetAll()
-                    .Where(a => a.Email.Contains(text, StringComparison.OrdinalIgnoreCase))
-                    .Select(a => a.Id)
-                    .ToList();
+                shopLogin = text; // gõ dở → LIKE %text%
+                shopExact = false;
             }
         }
 
-        return (queryAccountId, status, search, accountIds);
+        return (shopLogin, shopExact, status, search);
     }
 
+    /// <summary>Nhãn cột "Shop" của một dòng: tên shop (<c>shop_login</c>), hoặc "(shop ?)" cho đơn cũ chưa gắn shop.</summary>
+    private static string ShopLabelOf(Core.Models.OrderRow row)
+        => string.IsNullOrWhiteSpace(row.ShopLogin) ? "(shop ?)" : row.ShopLogin!;
+
     /// <summary>
-    /// Chạy truy vấn theo bộ lọc hiện tại và đổ TRANG HIỆN TẠI vào bảng (map account_id → nhãn tài khoản).
+    /// Chạy truy vấn theo bộ lọc hiện tại và đổ TRANG HIỆN TẠI vào bảng (nhãn dòng = tên shop từ shop_login).
     /// Gọi <c>Count</c> trước để có <see cref="TotalCount"/>, clamp <see cref="CurrentPage"/> vào
     /// <c>[1, TotalPages]</c> (sync auto-refresh có thể giảm số trang) rồi <c>Query</c> với LIMIT/OFFSET.
     /// </summary>
     private void Apply()
     {
-        var (queryAccountId, status, search, accountIds) = CurrentFilter();
-        var labels = _services.Accounts.GetAll().ToDictionary(a => a.Id, a => a.Email);
+        var (shopLogin, shopExact, status, search) = CurrentFilter();
 
         // Thư mục hóa đơn: đọc MỘT LẦN khi nạp danh sách (config hoặc mặc định cạnh app.db) rồi truyền vào mỗi
         // dòng → link "In phiếu" (SlipPath) trỏ CÙNG chỗ nơi xử lý đơn LƯU phiếu. Đổi thư mục ở Cài đặt → bấm
@@ -228,7 +243,7 @@ public partial class OrdersViewModel : ViewModelBase
         var invoiceDir = _services.Settings.GetInvoiceFolder();
 
         // Tổng khớp bộ lọc (mọi trang) → số trang. Clamp trang hiện tại; KHÔNG kéo về 1 giữa chừng (auto-refresh).
-        TotalCount = _services.Orders.Count(queryAccountId, status, search, accountIds);
+        TotalCount = _services.Orders.Count(status: status, searchText: search, shopLogin: shopLogin, shopExact: shopExact);
         if (CurrentPage > TotalPages)
         {
             CurrentPage = TotalPages;
@@ -241,9 +256,10 @@ public partial class OrdersViewModel : ViewModelBase
         var offset = (CurrentPage - 1) * PageSize;
 
         Rows.Clear();
-        foreach (var row in _services.Orders.Query(queryAccountId, status, search, accountIds, PageSize, offset))
+        foreach (var row in _services.Orders.Query(status: status, searchText: search,
+                     limit: PageSize, offset: offset, shopLogin: shopLogin, shopExact: shopExact))
         {
-            var label = labels.TryGetValue(row.AccountId, out var email) ? email : $"(TK #{row.AccountId})";
+            var label = ShopLabelOf(row);
             // notify: link "In phiếu" của dòng báo trạng thái (thiếu file / lỗi mở) ra StatusMessage của màn.
             // redownloadSlip: nút "Tải phiếu" nhờ phiên của tài khoản tải lại file phiếu thiếu (nếu phiên chạy).
             Rows.Add(new OrderRowViewModel(row, label, invoiceDir, msg => StatusMessage = msg, RedownloadSlipForRowAsync));
@@ -298,9 +314,9 @@ public partial class OrdersViewModel : ViewModelBase
         }
 
         _suppressApply = true;
-        AccountFilterText = value?.Id is null ? string.Empty : value.Label;
-        ReloadStatuses(value?.Id, SelectedStatus);
-        CurrentPage = 1; // đổi bộ lọc tài khoản → về trang 1
+        AccountFilterText = IsAllShops(value) ? string.Empty : value!.Label;
+        ReloadStatuses(IsAllShops(value) ? null : value!.Label, SelectedStatus);
+        CurrentPage = 1; // đổi bộ lọc shop → về trang 1
         _suppressApply = false;
 
         Apply();
@@ -320,15 +336,15 @@ public partial class OrdersViewModel : ViewModelBase
 
         var text = (value ?? string.Empty).Trim();
         var option = text.Length == 0
-            ? AccountOptions[0] // sentinel "Tất cả tài khoản"
+            ? AccountOptions[0] // sentinel "Tất cả shop"
             : AccountOptions.FirstOrDefault(o =>
                   string.Equals(o.Label.Trim(), text, StringComparison.OrdinalIgnoreCase)) ?? AccountOptions[0];
 
         _suppressApply = true;
         SelectedAccount = option;
-        // Khớp đúng 1 shop → trạng thái của shop đó; trống/gõ dở (option sentinel) → trạng thái mọi tài khoản.
-        ReloadStatuses(option.Id, SelectedStatus);
-        CurrentPage = 1; // đổi bộ lọc tài khoản → về trang 1
+        // Khớp đúng 1 shop → trạng thái của shop đó; trống/gõ dở (option sentinel) → trạng thái mọi shop.
+        ReloadStatuses(IsAllShops(option) ? null : option.Label, SelectedStatus);
+        CurrentPage = 1; // đổi bộ lọc shop → về trang 1
         _suppressApply = false;
 
         Apply();
@@ -425,7 +441,7 @@ public partial class OrdersViewModel : ViewModelBase
         Reload();
     }
 
-    /// <summary>Nút "✕" trong ô lọc shop: xóa trắng text → về "tất cả tài khoản" (qua OnAccountFilterTextChanged).</summary>
+    /// <summary>Nút "✕" trong ô lọc shop: xóa trắng text → về "Tất cả shop" (qua OnAccountFilterTextChanged).</summary>
     [RelayCommand]
     private void ClearAccountFilter()
     {
@@ -439,17 +455,12 @@ public partial class OrdersViewModel : ViewModelBase
     [RelayCommand]
     private async Task ExportCsvAsync()
     {
-        var (queryAccountId, status, search, accountIds) = CurrentFilter();
-        var labels = _services.Accounts.GetAll().ToDictionary(a => a.Id, a => a.Email);
+        var (shopLogin, shopExact, status, search) = CurrentFilter();
         var invoiceDir = _services.Settings.GetInvoiceFolder();
 
         // KHÔNG dùng Rows (chỉ 1 trang) — truy vấn lại toàn bộ đơn khớp bộ lọc rồi map như Apply (giữ nguyên format CSV).
-        var exportRows = _services.Orders.Query(queryAccountId, status, search, accountIds)
-            .Select(row =>
-            {
-                var label = labels.TryGetValue(row.AccountId, out var email) ? email : $"(TK #{row.AccountId})";
-                return new OrderRowViewModel(row, label, invoiceDir);
-            })
+        var exportRows = _services.Orders.Query(status: status, searchText: search, shopLogin: shopLogin, shopExact: shopExact)
+            .Select(row => new OrderRowViewModel(row, ShopLabelOf(row), invoiceDir))
             .ToList();
 
         if (exportRows.Count == 0)
@@ -491,7 +502,7 @@ public partial class OrdersViewModel : ViewModelBase
 
     /// <summary>
     /// Nút "In nhiều đơn": lấy MỌI đơn "Chờ lấy hàng" (<see cref="OrderRowViewModel.IsPendingPickup"/>) khớp
-    /// bộ lọc tài khoản/trạng thái/tìm kiếm trên TẤT CẢ các trang (truy vấn KHÔNG phân trang, KHÔNG dùng
+    /// bộ lọc shop/trạng thái/tìm kiếm trên TẤT CẢ các trang (truy vấn KHÔNG phân trang, KHÔNG dùng
     /// <see cref="Rows"/> — chỉ 1 trang) và gửi file PDF phiếu (<see cref="OrderRowViewModel.SlipPath"/>) tới
     /// máy in mặc định qua <see cref="PdfPrinter.TryPrint"/>. Thiếu file (đơn chưa xử lý / phiếu chưa tải) →
     /// đếm "thiếu file", KHÔNG in. Có chờ nhỏ giữa các lệnh in để tránh dội máy in. Báo tổng kết ra
@@ -500,11 +511,11 @@ public partial class OrdersViewModel : ViewModelBase
     [RelayCommand]
     private async Task PrintPendingSlipsAsync()
     {
-        var (queryAccountId, status, search, accountIds) = CurrentFilter();
+        var (shopLogin, shopExact, status, search) = CurrentFilter();
         var invoiceDir = _services.Settings.GetInvoiceFolder();
 
-        // Chụp danh sách đơn Chờ lấy hàng khớp bộ lọc trên MỌI trang NGAY lúc bấm (nhãn TK không cần cho SlipPath).
-        var pending = _services.Orders.Query(queryAccountId, status, search, accountIds)
+        // Chụp danh sách đơn Chờ lấy hàng khớp bộ lọc trên MỌI trang NGAY lúc bấm (nhãn shop không cần cho SlipPath).
+        var pending = _services.Orders.Query(status: status, searchText: search, shopLogin: shopLogin, shopExact: shopExact)
             .Select(row => new OrderRowViewModel(row, string.Empty, invoiceDir))
             .Where(r => r.IsPendingPickup)
             .ToList();
@@ -545,11 +556,11 @@ public partial class OrdersViewModel : ViewModelBase
         _services.Log.Append("Đơn hàng", message);
     }
 
-    /// <summary>Tên file gợi ý: <c>don-hang-{email|tatca}-{yyyyMMdd-HHmm}.csv</c> (email đã bỏ ký tự cấm).</summary>
+    /// <summary>Tên file gợi ý: <c>don-hang-{shop|tatca}-{yyyyMMdd-HHmm}.csv</c> (tên shop đã bỏ ký tự cấm).</summary>
     private string SuggestFileName()
     {
         var acc = SelectedAccount;
-        var who = acc is null || acc.Id is null ? "tatca" : Sanitize(acc.Label);
+        var who = IsAllShops(acc) ? "tatca" : Sanitize(acc!.Label);
         var stamp = DateTime.Now.ToString("yyyyMMdd-HHmm");
         return $"don-hang-{who}-{stamp}.csv";
     }

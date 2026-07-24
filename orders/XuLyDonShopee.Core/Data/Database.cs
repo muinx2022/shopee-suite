@@ -195,6 +195,11 @@ CREATE TABLE IF NOT EXISTS orders (
         // GSheet (cột Tên Shop = tên đăng nhập shop) — KHÔNG đẩy nhầm đơn shop này với tên shop kia. Đơn CŨ shop_id
         // NULL (vẫn đẩy như trước theo account khi lọc shopId=null). KHÔNG backfill. Thêm cho DB CŨ.
         EnsureColumn(conn, "orders", "shop_id", "TEXT");
+
+        // Tên đăng nhập shop (vd "alina99.store") để HIỂN THỊ/LỌC màn Đơn hàng — khác shop_id (SỐ). Sync gắn từ
+        // `_currentShopLogin` (callback cầu nối set trước khi lưu); đơn cũ NULL (fallback "(shop ?)" khi hiển thị).
+        // KHÔNG backfill. Thêm cho DB CŨ.
+        EnsureColumn(conn, "orders", "shop_login", "TEXT");
     }
 
     /// <summary>

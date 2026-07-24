@@ -10,7 +10,7 @@ using XuLyDonShopee.Core.Services;
 namespace XuLyDonShopee.App.ViewModels;
 
 /// <summary>
-/// Một dòng hiển thị (ĐỌC-CHỈ) trên bảng màn "Đơn hàng": bọc <see cref="OrderRow"/> + nhãn tài khoản,
+/// Một dòng hiển thị (ĐỌC-CHỈ) trên bảng màn "Đơn hàng": bọc <see cref="OrderRow"/> + nhãn shop,
 /// tính sẵn các chuỗi hiển thị (sản phẩm "(+n)", tổng tiền định dạng ₫, giờ sync giờ địa phương) để
 /// DataGrid bind thẳng và để dựng dòng CSV. Không cần INotifyPropertyChanged: mỗi lần lọc, các dòng
 /// được TẠO LẠI thay vì sửa tại chỗ. <c>partial</c> để <see cref="PrintSlipCommand"/> được sinh từ
@@ -35,18 +35,18 @@ public sealed partial class OrderRowViewModel
     private readonly Func<OrderRowViewModel, Task>? _redownloadSlip;
 
     public OrderRowViewModel(
-        OrderRow row, string accountLabel, string invoiceDir,
+        OrderRow row, string shopLabel, string invoiceDir,
         Action<string>? notify = null, Func<OrderRowViewModel, Task>? redownloadSlip = null)
     {
         _row = row;
-        AccountLabel = accountLabel;
+        ShopLabel = shopLabel;
         _invoiceDir = invoiceDir;
         _notify = notify;
         _redownloadSlip = redownloadSlip;
     }
 
-    /// <summary>Nhãn tài khoản (email) — do ViewModel map từ account_id.</summary>
-    public string AccountLabel { get; }
+    /// <summary>Nhãn shop (tên đăng nhập shop, vd "alina99.store") — do ViewModel lấy từ <c>shop_login</c>.</summary>
+    public string ShopLabel { get; }
 
     /// <summary>Id tài khoản sở hữu đơn — để hộp thoại đổi trạng thái khóa đúng <c>(account_id, order_sn)</c>.</summary>
     public long AccountId => _row.AccountId;
@@ -98,7 +98,7 @@ public sealed partial class OrderRowViewModel
 
     /// <summary>Chuyển sang dòng xuất CSV (đúng thứ tự cột như bảng — "Ước tính" ngay sau "Tổng tiền").</summary>
     public OrderExportRow ToExportRow() => new(
-        AccountLabel, OrderSn, Buyer, Product, Total, Estimate, Payment, Status, Note, Carrier, Tracking, SyncedAtDisplay);
+        ShopLabel, OrderSn, Buyer, Product, Total, Estimate, Payment, Status, Note, Carrier, Tracking, SyncedAtDisplay);
 
     /// <summary>
     /// Đường dẫn file PDF phiếu giao đã tải lúc xử lý đơn: <c>{thư mục hóa đơn cấu hình}\{sanitize(order_sn)}.pdf</c>.

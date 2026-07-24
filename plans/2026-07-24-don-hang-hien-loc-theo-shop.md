@@ -1,7 +1,7 @@
 # Plan: Màn Đơn hàng hiển thị + lọc theo SHOP (thay vì subaccount)
 
 - **Ngày:** 2026-07-24
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành code + build 0 lỗi + 925 test xanh (thêm ~9 test); CHỜ deploy (app đang chạy flow — deploy khi user cho phép) + verify thật
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-dev`)
 - **Nền:** Mô hình subaccount → nhiều shop. Đơn THUỘC VỀ shop, nhưng màn Đơn hàng đang hiển thị + lọc theo **email subaccount** (di sản 1-account-1-shop). GSheet đã đúng (đẩy tên shop qua `_currentShopLogin`). DB vừa purge (0 đơn).
 

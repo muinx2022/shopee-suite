@@ -824,8 +824,9 @@ public partial class AccountSession : ObservableObject, IAccountSession
         // "Đã bán" theo SKU: đọc trạng thái CŨ TRƯỚC khi UpsertMany ghi đè (tuần tự nên tương đương cùng transaction).
         var soldDetect = _services.Orders.DetectNewlyDelivered(_accountId, toUpsert);
 
-        // Upsert theo (account_id, order_sn), gắn shopId của lượt này. insertedOrders = đơn VỪA thêm mới (để notify).
-        var (inserted, updated, insertedOrders) = _services.Orders.UpsertMany(_accountId, toUpsert, DateTime.UtcNow, shopId);
+        // Upsert theo (account_id, order_sn), gắn shopId + shopLogin (tên shop, cho cột "Shop" màn Đơn hàng) của lượt
+        // này. insertedOrders = đơn VỪA thêm mới (để notify).
+        var (inserted, updated, insertedOrders) = _services.Orders.UpsertMany(_accountId, toUpsert, DateTime.UtcNow, shopId, _currentShopLogin);
 
         // Đánh cờ NGAY cho nhóm KHÔNG cần +1 (grandfather + đã-giao-không-SKU). Nhóm CÓ SKU đánh cờ SAU khi hub +1 OK.
         if (soldDetect.ImmediateMarkOrderSns.Count > 0)

@@ -14,6 +14,9 @@ public sealed class OrderRow
     /// <summary>Id tài khoản sở hữu đơn (map ra nhãn tài khoản ở tầng App).</summary>
     public long AccountId { get; init; }
 
+    /// <summary>Tên đăng nhập shop của đơn (vd "alina99.store") — nhãn cột "Shop" + lọc màn Đơn hàng. Null cho đơn cũ.</summary>
+    public string? ShopLogin { get; init; }
+
     /// <summary>Mã đơn hàng.</summary>
     public string OrderSn { get; init; } = string.Empty;
 

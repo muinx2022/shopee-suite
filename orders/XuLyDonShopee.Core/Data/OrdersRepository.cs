@@ -77,7 +77,7 @@ public class OrdersRepository
     /// Discord/Telegram) đúng những đơn vừa xuất hiện.
     /// </summary>
     public (int Inserted, int Updated, IReadOnlyList<SyncedOrder> InsertedOrders) UpsertMany(
-        long accountId, IEnumerable<SyncedOrder> orders, DateTime syncedAt, string? shopId = null)
+        long accountId, IEnumerable<SyncedOrder> orders, DateTime syncedAt, string? shopId = null, string? shopLogin = null)
     {
         var syncedAtStr = DbSerialization.FormatDate(syncedAt);
         var inserted = 0;
@@ -114,15 +114,16 @@ public class OrdersRepository
                 using var ins = conn.CreateCommand();
                 ins.Transaction = tx;
                 ins.CommandText = @"INSERT INTO orders
-    (account_id, shop_id, order_sn, shopee_order_id, buyer_username, items_json, item_count, item_summary, sku,
+    (account_id, shop_id, shop_login, order_sn, shopee_order_id, buyer_username, items_json, item_count, item_summary, sku,
      total_price, total_price_text, final_amount, final_amount_text, payment_method, status, status_description, cancel_reason,
      channel, carrier, tracking_number, synced_at, created_at, updated_at)
     VALUES
-    ($account, $shopId, $sn, $shopeeId, $buyer, $items, $itemCount, $itemSummary, $sku,
+    ($account, $shopId, $shopLogin, $sn, $shopeeId, $buyer, $items, $itemCount, $itemSummary, $sku,
      $totalPrice, $totalText, $finalAmount, $finalText, $payment, $status, $statusDesc, $cancelReason,
      $channel, $carrier, $tracking, $synced, $synced, $synced);";
                 ins.Parameters.AddWithValue("$account", accountId);
                 ins.Parameters.AddWithValue("$shopId", (object?)shopId ?? DBNull.Value);
+                ins.Parameters.AddWithValue("$shopLogin", (object?)shopLogin ?? DBNull.Value);
                 ins.Parameters.AddWithValue("$sn", o.OrderSn);
                 BindData(ins, o);
                 ins.Parameters.AddWithValue("$synced", syncedAtStr);
@@ -138,9 +139,10 @@ public class OrdersRepository
                 // chi tiết bị bỏ qua / đơn "Đã hủy" / lỗi) thì $finalAmount là NULL → GIỮ số đã lấy ở lần trước,
                 // KHÔNG ghi đè NULL làm mất dữ liệu. Lần sau lấy được → cập nhật đè bình thường.
                 // shop_id dùng COALESCE($shopId, shop_id): lượt này không truyền shop (null) thì GIỮ shop đã gắn,
-                // KHÔNG xóa. Đơn thuộc đúng MỘT shop nên gắn lại cùng giá trị là vô hại.
+                // KHÔNG xóa. Đơn thuộc đúng MỘT shop nên gắn lại cùng giá trị là vô hại. shop_login mirror y hệt.
                 upd.CommandText = @"UPDATE orders SET
     shop_id = COALESCE($shopId, shop_id),
+    shop_login = COALESCE($shopLogin, shop_login),
     shopee_order_id = $shopeeId, buyer_username = $buyer, items_json = $items, item_count = $itemCount,
     item_summary = $itemSummary, sku = $sku,
     total_price = $totalPrice, total_price_text = $totalText,
@@ -151,6 +153,7 @@ public class OrdersRepository
     synced_at = $synced, updated_at = $synced
     WHERE id = $id;";
                 upd.Parameters.AddWithValue("$shopId", (object?)shopId ?? DBNull.Value);
+                upd.Parameters.AddWithValue("$shopLogin", (object?)shopLogin ?? DBNull.Value);
                 BindData(upd, o);
                 upd.Parameters.AddWithValue("$synced", syncedAtStr);
                 upd.Parameters.AddWithValue("$id", existingId.Value);
@@ -632,21 +635,25 @@ public class OrdersRepository
     /// cả hai thì <paramref name="accountIds"/> được ưu tiên.</item>
     /// <item><paramref name="limit"/>/<paramref name="offset"/>: phân trang (<c>LIMIT $limit OFFSET $offset</c>,
     /// offset null → 0). Bỏ trống <paramref name="limit"/> → trả TẤT CẢ (mọi caller/test cũ giữ nguyên hành vi).</item>
+    /// <item><paramref name="shopLogin"/>/<paramref name="shopExact"/>: lọc theo TÊN shop (cột <c>shop_login</c>) —
+    /// dùng cho màn Đơn hàng (đường CỘNG THÊM, độc lập với lọc account). <paramref name="shopExact"/> true → khớp
+    /// CHÍNH XÁC (<c>= $shop</c>, như chọn gợi ý); false → LIKE <c>%từ%</c> (gõ dở). Bỏ trống → không lọc shop.</item>
     /// </list>
     /// Sắp xếp đơn sync mới nhất lên đầu.
     /// </summary>
     public List<OrderRow> Query(long? accountId = null, string? status = null, string? searchText = null,
-        IReadOnlyCollection<long>? accountIds = null, int? limit = null, int? offset = null)
+        IReadOnlyCollection<long>? accountIds = null, int? limit = null, int? offset = null,
+        string? shopLogin = null, bool shopExact = false)
     {
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
 
         var sql = new StringBuilder(@"SELECT id, account_id, order_sn, buyer_username, item_count, item_summary, sku,
     total_price, total_price_text, final_amount, final_amount_text, payment_method, status, status_description, cancel_reason,
-    channel, carrier, tracking_number, synced_at
+    channel, carrier, tracking_number, synced_at, shop_login
     FROM orders WHERE 1 = 1");
 
-        if (!AppendFilter(cmd, sql, accountId, status, searchText, accountIds))
+        if (!AppendFilter(cmd, sql, accountId, status, searchText, accountIds, shopLogin, shopExact))
         {
             return new List<OrderRow>(); // accountIds rỗng → không tài khoản nào khớp
         }
@@ -677,13 +684,13 @@ public class OrdersRepository
     /// "Đơn hàng". Xem <see cref="Query"/> về ý nghĩa từng tham số; <paramref name="accountIds"/> rỗng → 0.
     /// </summary>
     public int Count(long? accountId = null, string? status = null, string? searchText = null,
-        IReadOnlyCollection<long>? accountIds = null)
+        IReadOnlyCollection<long>? accountIds = null, string? shopLogin = null, bool shopExact = false)
     {
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
 
         var sql = new StringBuilder("SELECT COUNT(*) FROM orders WHERE 1 = 1");
-        if (!AppendFilter(cmd, sql, accountId, status, searchText, accountIds))
+        if (!AppendFilter(cmd, sql, accountId, status, searchText, accountIds, shopLogin, shopExact))
         {
             return 0; // accountIds rỗng → không tài khoản nào khớp
         }
@@ -698,9 +705,13 @@ public class OrdersRepository
     /// trạng thái/tìm kiếm. Trả về <c>false</c> khi tập <paramref name="accountIds"/> RỖNG (không tài khoản
     /// nào) — caller phải short-circuit trả kết quả rỗng, KHÔNG query (<c>IN ()</c> là lỗi cú pháp SQLite).
     /// <paramref name="accountIds"/> (nếu khác null) được ưu tiên hơn <paramref name="accountId"/>.
+    /// <paramref name="shopLogin"/>/<paramref name="shopExact"/> lọc theo cột <c>shop_login</c> (CỘNG THÊM, độc lập
+    /// với lọc account): exact → <c>= $shop</c>; else → LIKE <c>%từ%</c>. LIKE không khớp thì tự 0 dòng (không cần
+    /// short-circuit). Bỏ trống → không lọc shop.
     /// </summary>
     private static bool AppendFilter(SqliteCommand cmd, StringBuilder sql,
-        long? accountId, string? status, string? searchText, IReadOnlyCollection<long>? accountIds)
+        long? accountId, string? status, string? searchText, IReadOnlyCollection<long>? accountIds,
+        string? shopLogin, bool shopExact)
     {
         if (accountIds is not null)
         {
@@ -740,14 +751,29 @@ public class OrdersRepository
             cmd.Parameters.AddWithValue("$q", "%" + EscapeLike(searchText.Trim()) + "%");
         }
 
+        if (!string.IsNullOrWhiteSpace(shopLogin))
+        {
+            if (shopExact)
+            {
+                sql.Append(" AND shop_login = $shop");
+                cmd.Parameters.AddWithValue("$shop", shopLogin.Trim());
+            }
+            else
+            {
+                sql.Append(@" AND shop_login LIKE $shopLike ESCAPE '\'");
+                cmd.Parameters.AddWithValue("$shopLike", "%" + EscapeLike(shopLogin.Trim()) + "%");
+            }
+        }
+
         return true;
     }
 
     /// <summary>
     /// Danh sách trạng thái PHÂN BIỆT (khác null/rỗng) đang có trong bảng — nạp ComboBox lọc. Có thể giới
-    /// hạn theo <paramref name="accountId"/>. Sắp xếp tăng dần.
+    /// hạn theo <paramref name="accountId"/> (đường cũ) HOẶC <paramref name="shopLogin"/> (khớp CHÍNH XÁC cột
+    /// <c>shop_login</c> — dùng cho màn Đơn hàng lọc theo shop). Sắp xếp tăng dần.
     /// </summary>
-    public List<string> AllStatuses(long? accountId = null)
+    public List<string> AllStatuses(long? accountId = null, string? shopLogin = null)
     {
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
@@ -759,8 +785,36 @@ public class OrdersRepository
             sql.Append(" AND account_id = $account");
             cmd.Parameters.AddWithValue("$account", accountId.Value);
         }
+        if (!string.IsNullOrWhiteSpace(shopLogin))
+        {
+            sql.Append(" AND shop_login = $shop");
+            cmd.Parameters.AddWithValue("$shop", shopLogin.Trim());
+        }
         sql.Append(" ORDER BY status;");
         cmd.CommandText = sql.ToString();
+
+        var list = new List<string>();
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            if (!reader.IsDBNull(0))
+            {
+                list.Add(reader.GetString(0));
+            }
+        }
+        return list;
+    }
+
+    /// <summary>
+    /// Danh sách TÊN shop (cột <c>shop_login</c>) PHÂN BIỆT (khác null/rỗng) đang có trong bảng — nguồn cho
+    /// ComboBox lọc shop ở màn Đơn hàng. Sắp xếp tăng dần.
+    /// </summary>
+    public List<string> AllShopLogins()
+    {
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText =
+            "SELECT DISTINCT shop_login FROM orders WHERE shop_login IS NOT NULL AND TRIM(shop_login) <> '' ORDER BY shop_login;";
 
         var list = new List<string>();
         using var reader = cmd.ExecuteReader();
@@ -817,6 +871,7 @@ public class OrdersRepository
         Carrier = r.IsDBNull(16) ? null : r.GetString(16),
         TrackingNumber = r.IsDBNull(17) ? null : r.GetString(17),
         SyncedAt = r.IsDBNull(18) ? default : DbSerialization.ParseDate(r.GetString(18)),
+        ShopLogin = r.IsDBNull(19) ? null : r.GetString(19),
     };
 
     /// <summary>Gắn các cột DỮ LIỆU (không gồm account_id/order_sn/khóa/thời gian) vào lệnh. Null → DBNull.</summary>
