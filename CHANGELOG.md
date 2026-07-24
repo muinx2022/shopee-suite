@@ -5,6 +5,23 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Hiệu năng. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.5.0 — 2026-07-25
+
+- **Đơn hàng chạy qua CẦU NỐI EXTENSION (né captcha):** thay Playwright/CDP bằng cầu nối trình duyệt sạch +
+  extension (chrome.debugger cho click TRUSTED) ở Seller Centre → hết dính captcha "Lỗi tải" khi bấm Chi tiết.
+  Nút "▶ Chạy" chạy LIÊN TỤC qua mọi shop: đăng nhập subaccount → duyệt từng shop → đọc đơn → chuẩn bị hàng →
+  in phiếu → đặt/hoàn địa chỉ; nghỉ giữa shop; lặp chu kỳ.
+- **Mô hình subaccount → NHIỀU SHOP:** đơn thuộc về SHOP (không phải subaccount). Màn Đơn hàng hiển thị + lọc
+  theo tên shop; đẩy DB/GSheet/hub keyed theo từng shop (mỗi shop riêng biệt).
+- **Cột "Ước tính" (Số tiền cuối cùng)** đọc từ trang chi tiết đơn, và **mã vận đơn bắt NGAY lúc chuẩn bị hàng**
+  (đọc ở modal trước khi in phiếu) → app + Google Sheet + hub có đủ ngay trong lượt, khỏi chờ chu kỳ sau.
+- **Thanh trạng thái (footer) theo CHẾ ĐỘ ứng dụng:** Shopee (tài khoản · đơn · proxy · trình duyệt) và Workspace
+  (tài khoản BigSeller · shop · acc Shopee · proxy · máy online · trình duyệt); chế độ Full hiện cả 2 phần.
+- **Hub:** nhận đơn/phiếu/mã vận đơn đúng từng shop (đẩy lại khi mã vận đơn xuất hiện; phiếu đẩy sau khi đơn đã
+  lên hub); trang /orders mặc định lọc "Chờ lấy hàng"; hiển thị ngày giờ theo múi giờ Việt Nam.
+- **Chỉnh UI/nhỏ:** log rõ khi bấm Dừng (kể cả lúc nghỉ giữa chu kỳ); cột Shop rộng hơn; gộp các nút hành động
+  về Ribbon (bỏ nút trùng ở danh sách + chi tiết tài khoản).
+
 ## v1.4.0 — 2026-07-22
 
 - **Gộp 2 app vào cùng 1 app**: app xử lý Đơn hàng Shopee nay được tích hợp thẳng vào Shopee Suite
