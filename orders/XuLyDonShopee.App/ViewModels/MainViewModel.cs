@@ -17,7 +17,6 @@ public partial class MainViewModel : ViewModelBase
     private readonly AppServices _services;
     private readonly AccountsViewModel _accountsVm;
     private readonly OrdersViewModel _ordersVm;
-    private readonly ProxiesViewModel _proxiesVm;
     private readonly SettingsViewModel _settingsVm;
 
     public MainViewModel(AppServices services)
@@ -25,7 +24,6 @@ public partial class MainViewModel : ViewModelBase
         _services = services;
         _accountsVm = new AccountsViewModel(services);
         _ordersVm = new OrdersViewModel(services);
-        _proxiesVm = new ProxiesViewModel(services);
         _settingsVm = new SettingsViewModel(services);
         _currentViewModel = _accountsVm;
 
@@ -41,8 +39,6 @@ public partial class MainViewModel : ViewModelBase
     public AccountsViewModel AccountsVm => _accountsVm;
     /// <summary>Màn "Đơn hàng".</summary>
     public OrdersViewModel OrdersVm => _ordersVm;
-    /// <summary>Màn "Proxy".</summary>
-    public ProxiesViewModel ProxiesVm => _proxiesVm;
     /// <summary>Màn "Cài đặt" của đơn hàng — nhúng vào màn Cài đặt GỘP của suite.</summary>
     public SettingsViewModel SettingsVm => _settingsVm;
 
@@ -50,8 +46,7 @@ public partial class MainViewModel : ViewModelBase
     public ObservableCollection<NavItem> NavItems { get; } = new()
     {
         new NavItem("Tài khoản", "◵"),
-        new NavItem("Đơn hàng", "▤"),
-        new NavItem("Proxy", "⇄")
+        new NavItem("Đơn hàng", "▤")
     };
 
     [ObservableProperty]
@@ -94,10 +89,6 @@ public partial class MainViewModel : ViewModelBase
             case 1:
                 _ordersVm.Reload();
                 CurrentViewModel = _ordersVm;
-                break;
-            case 2:
-                _proxiesVm.Reload();
-                CurrentViewModel = _proxiesVm;
                 break;
         }
 

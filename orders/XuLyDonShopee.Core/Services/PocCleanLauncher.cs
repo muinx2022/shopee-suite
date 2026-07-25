@@ -10,21 +10,19 @@ namespace XuLyDonShopee.Core.Services;
 /// </summary>
 public static class PocCleanLauncher
 {
-    /// <param name="extensionPath">Đường dẫn thư mục extension muốn nạp. <c>null</c> → tự phân giải bản POC
-    /// <c>shopee-orders-test</c> (giữ hành vi cũ của nút "Mở sạch"). Cầu nối GĐ1 truyền thẳng thư mục
+    /// <param name="extensionPath">Đường dẫn thư mục extension muốn nạp (BẮT BUỘC). Cầu nối truyền thẳng thư mục
     /// <c>shopee-orders</c> đã phân giải qua <see cref="BraveLaunchArgs.ResolveOrdersBridgeExtension"/>.</param>
     public static System.Diagnostics.Process Open(
-        string userDataDir, BrowserChoice browserChoice, string startUrl, string? extensionPath = null)
+        string userDataDir, BrowserChoice browserChoice, string startUrl, string extensionPath)
     {
         var exe = BrowserLocator.ResolveExecutable(browserChoice)
             ?? throw new InvalidOperationException(
-                "POC 'Mở sạch' cần Brave/Chrome/Edge thật đã cài trên máy (không dùng Chromium đóng gói). " +
+                "Cầu nối cần Brave/Chrome/Edge thật đã cài trên máy (không dùng Chromium đóng gói). " +
                 "Hãy cài một trình duyệt và chọn ở Cài đặt → Trình duyệt.");
 
-        var extPath = extensionPath ?? BraveLaunchArgs.ResolveOrdersExtension()
+        var extPath = extensionPath
             ?? throw new InvalidOperationException(
-                "Không tìm thấy thư mục extension 'shopee-orders-test' (cạnh app hoặc trong repo). " +
-                "POC cần extension này để tự điều hướng + bắn trusted click.");
+                "PocCleanLauncher.Open cần extensionPath (thư mục extension 'shopee-orders' đã phân giải).");
 
         System.IO.Directory.CreateDirectory(userDataDir);
 

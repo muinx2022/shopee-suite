@@ -94,44 +94,10 @@ public interface IAccountSession
     Task StopAsync();
 
     /// <summary>
-    /// <b>Bước đầu xử lý đơn:</b> trong phiên ĐANG chạy, điều hướng <b>kiểu người</b> tới "Cài Đặt Vận
-    /// Chuyển" rồi bấm tab "Địa Chỉ". Trả <c>false</c> nếu phiên chưa chạy / lỗi / không mở được (graceful,
-    /// không ném). Trong lúc chạy sẽ chặn nhịp đọc đơn (reload) để không phá thao tác điều hướng giữa chừng.
-    /// </summary>
-    Task<bool> ProcessOrdersAsync();
-
-    /// <summary>
-    /// <b>Kiểm tra đơn NGAY (thủ công):</b> trong phiên ĐANG chạy, điều hướng cửa sổ về trang chủ Seller
-    /// (có khoảng dừng "kiểu người" trước/sau) rồi đọc số "Chờ Lấy Hàng" tại chỗ, cập nhật
-    /// <see cref="ToShipCount"/> — bản thủ công của nhịp theo dõi 30'. Trả <c>false</c> nếu phiên chưa
-    /// chạy / đang bận điều hướng / không đọc được số (graceful, KHÔNG ném). Dùng cờ điều hướng bao trùm
-    /// để nhịp 30' không reload chồng lên giữa chừng.
-    /// </summary>
-    Task<bool> CheckOrdersAsync();
-
-    /// <summary>
-    /// <b>Sync Đơn hàng:</b> trong phiên ĐANG chạy, vào Quản lý đơn hàng → tab "Tất cả", duyệt MỌI trang danh
-    /// sách (chốt chặn an toàn) thu thập thông tin đơn rồi <b>upsert về DB</b> (bảng <c>orders</c>), ghi log
-    /// tiến trình + tổng kết (thêm mới / cập nhật). Trả <c>false</c> nếu phiên chưa chạy / đang bận điều hướng
-    /// (graceful, KHÔNG ném). Loại trừ lẫn nhau với Xử lý đơn / Kiểm tra qua cờ điều hướng bao trùm (không hai
-    /// luồng chuột trên cùng trang).
-    /// </summary>
-    Task<bool> SyncOrdersAsync();
-
-    /// <summary>
     /// <b>Tải LẠI phiếu MỘT đơn</b> (nút "Tải phiếu" màn Đơn hàng): trong phiên ĐANG chạy, về danh sách "Tất
     /// cả", định vị card theo mã, bấm "In phiếu giao" và lưu lại file PDF. Trả <c>false</c> nếu phiên chưa
     /// chạy / đang bận điều hướng / không tải được (graceful, KHÔNG ném). Loại trừ lẫn nhau với Sync / Xử lý
     /// đơn / Kiểm tra qua cờ điều hướng bao trùm.
     /// </summary>
     Task<bool> RedownloadSlipAsync(string orderSn);
-
-    /// <summary>
-    /// <b>Sync TRỌN GÓI</b> (nút Sync màn Tài khoản): trong phiên ĐANG chạy, chạy chuỗi <b>Kiểm tra đơn mới
-    /// → (nếu có đơn Chờ Lấy Hàng) Xử lý đơn → Sync đơn hàng</b>. Ghép từ ba bước con
-    /// (<see cref="CheckOrdersAsync"/>/<see cref="ProcessOrdersAsync"/>/<see cref="SyncOrdersAsync"/>); xử lý
-    /// đơn lỗi giữa chừng KHÔNG chặn bước sync. Trả về kết quả bước Sync (graceful — KHÔNG ném; bước Kiểm tra
-    /// báo bận/không đọc được → dừng chuỗi, trả <c>false</c>).
-    /// </summary>
-    Task<bool> SyncFullAsync();
 }

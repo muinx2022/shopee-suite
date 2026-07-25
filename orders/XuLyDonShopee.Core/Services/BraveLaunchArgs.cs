@@ -124,17 +124,8 @@ public static class BraveLaunchArgs
     }
 
     /// <summary>
-    /// Phân giải thư mục extension "shopee-orders-test" (POC): tìm <c>extensions/shopee-orders-test</c> cạnh
-    /// exe (bản cài) rồi đi ngược lên vài cấp tìm ở gốc repo (khi chạy từ bin dev). Không thấy → <c>null</c>
-    /// (không nạp extension). Trả về đường dẫn tuyệt đối nếu thư mục tồn tại (có manifest.json).
-    /// </summary>
-    public static string? ResolveOrdersExtension() => ResolveExtensionByName("shopee-orders-test");
-
-    /// <summary>
-    /// Phân giải thư mục extension "shopee-orders" (bản GĐ1 — cầu nối WebSocket + trusted click). Cùng cách
-    /// tìm như <see cref="ResolveOrdersExtension"/> (đi từ thư mục exe ngược lên tìm <c>extensions/shopee-orders</c>
-    /// có manifest.json). Không thấy → <c>null</c>. Tách riêng khỏi bản POC <c>shopee-orders-test</c> để không đụng
-    /// bản tham chiếu.
+    /// Phân giải thư mục extension "shopee-orders" (cầu nối WebSocket + trusted click): đi từ thư mục exe
+    /// ngược lên tìm <c>extensions/shopee-orders</c> có <c>manifest.json</c>. Không thấy → <c>null</c>.
     /// </summary>
     public static string? ResolveOrdersBridgeExtension() => ResolveExtensionByName("shopee-orders");
 

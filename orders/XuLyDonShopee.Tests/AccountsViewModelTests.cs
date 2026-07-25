@@ -82,34 +82,6 @@ public class AccountsViewModelTests
         Assert.Empty(services.Accounts.GetAll());
     }
 
-    // ===== Lỗi A: proxy thủ công phải round-robin BỀN qua các lần mở (không reset về [0]) =====
-    [Fact]
-    public void NextManualProxy_XoayVongBenQuaCacLanGoi()
-    {
-        using var temp = new TempDatabase();
-        var services = new AppServices(temp.Path);
-        var vm = new AccountsViewModel(services);
-
-        var manual = new List<ProxyEntry>
-        {
-            new() { Host = "P0", Port = 8080 },
-            new() { Host = "P1", Port = 8080 },
-            new() { Host = "P2", Port = 8080 },
-        };
-
-        var hosts = new List<string?>();
-        for (var i = 0; i < 4; i++)
-        {
-            hosts.Add(vm.NextManualProxy(manual)?.Host);
-        }
-
-        // 4 lần gọi trên list 3 proxy → P0,P1,P2,P0 (chỉ số bền, không reset về 0 mỗi lần).
-        Assert.Equal(new[] { "P0", "P1", "P2", "P0" }, hosts);
-
-        // List rỗng → null.
-        Assert.Null(vm.NextManualProxy(new List<ProxyEntry>()));
-    }
-
     // ===== Lỗi 2: làm mới danh sách khi đang sửa dở không được mất thay đổi chưa lưu =====
     // Trigger thật trong app là gõ ô tìm kiếm (ListBox tự đẩy SelectedItem về null khi ItemsSource
     // bị Clear). Cơ chế lỗi gốc — "thao tác chọn lại tài khoản làm nạp đè form" — được tái hiện ở

@@ -46,7 +46,6 @@ public sealed record OrdersBridgeRunResult(
 /// mở trình duyệt SẠCH (không CDP, không remote-debugging-port) qua <see cref="PocCleanLauncher"/> với
 /// <c>startUrl</c> có hash <c>#_od_ws=&lt;port&gt;</c> để extension đọc cổng → chờ extension báo <c>ready</c>.
 /// <list type="bullet">
-/// <item><see cref="RunSliceAsync"/> (GĐ1): mở thẳng <c>/portal/shop</c> (user đã đăng nhập tay) → chạy lát cắt.</item>
 /// <item><see cref="RunLoginThenSliceAsync"/> (GĐ2 pivot): đăng nhập bằng trình duyệt điều khiển Playwright
 /// (tái dùng luồng production) → đóng → mở lại bằng trình duyệt sạch + extension → lát cắt Seller Centre.</item>
 /// </list>
@@ -300,42 +299,13 @@ public sealed class OrdersBridgeSession : IDisposable
         catch { /* bỏ qua */ }
     }
 
-    // ── GĐ1: user đã đăng nhập tay tới /portal/shop → chạy lát cắt ──────────────────────────────────────
-    /// <summary>
-    /// Chạy lát cắt kiểm chứng GĐ1 (mở thẳng <c>/portal/shop</c>). Ngoại lệ không mong đợi được bọc thành
-    /// <see cref="OrdersBridgeSliceResult.Error"/>; riêng <see cref="OperationCanceledException"/> ném ra ngoài.
-    /// </summary>
-    public async Task<OrdersBridgeSliceResult> RunSliceAsync(CancellationToken ct = default)
-    {
-        ResetTcs();
-        StartBridgeAndLaunch(ShopeeLoginService.ShopListUrl);
-        try
-        {
-            L("Chờ extension nối cầu (ready) — tối đa 45s...");
-            await _waiter.AwaitAsync(_readyTcs, TimeSpan.FromSeconds(45), ct).ConfigureAwait(false);
-            L("Extension đã nối cầu.");
-            return await RunSliceCoreAsync(ct).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) { throw; }
-        catch (TimeoutException)
-        {
-            L("Cầu nối: hết thời gian chờ phản hồi từ extension.");
-            return Fail("Hết thời gian chờ phản hồi từ extension (extension chưa nối / trang chưa sẵn sàng).");
-        }
-        catch (Exception ex)
-        {
-            L("Cầu nối lỗi: " + ex.Message);
-            return Fail(ex.Message);
-        }
-    }
-
     // ── GĐ2 (pivot): đăng nhập bằng Playwright (an toàn — subaccount + /portal/shop KHÔNG bị captcha) → đóng
     //    → mở lại bằng trình duyệt SẠCH + extension để đọc Seller Centre (chỉ "Chi tiết" mới dính captcha). ──────
     /// <summary>
     /// GĐ2: đăng nhập Nền tảng tài khoản phụ bằng <b>trình duyệt điều khiển Playwright/CDP CŨ</b> (tái dùng NGUYÊN
     /// <see cref="ShopeeLoginService.OpenAsync"/> + <c>TryLoginSubaccountAsync</c> — tự điền form, mở hộp thư cho user
     /// đọc mã, chờ mã, SSO tới Seller Centre). Đăng nhập xong thì ĐÓNG trình duyệt điều khiển (nhả khoá hồ sơ), rồi
-    /// mở lại bằng <b>trình duyệt SẠCH + extension</b> qua <see cref="RunSliceAsync"/> (hồ sơ đã đăng nhập nên vào
+    /// mở lại bằng <b>trình duyệt SẠCH + extension</b> qua <see cref="RunSliceCoreAsync"/> (hồ sơ đã đăng nhập nên vào
     /// thẳng <c>/portal/shop</c>) → đọc shop → "Chi tiết" (trusted click, né captcha) → "Chờ Lấy Hàng".
     /// KHÔNG tự nhập mã hộ (mã là thao tác tay). Hủy giữa chừng → đóng cả trình duyệt điều khiển (finally) lẫn sạch.
     /// </summary>
@@ -715,7 +685,7 @@ public sealed class OrdersBridgeSession : IDisposable
             {
                 ct.ThrowIfCancellationRequested();
                 _prepareTcs = NewTcs<PrepareResult?>();
-                await _ws.SendAsync(new { action = "prepareNextOrder", invoiceDir = _invoiceDir }).ConfigureAwait(false);
+                await _ws.SendAsync(new { action = "prepareNextOrder" }).ConfigureAwait(false);
                 // 300s: extension chờ Shopee tạo vận đơn (≤90s) TRƯỚC khi in, rồi chờ tab phiếu (≤120s) — nới hạn cho đủ.
                 var prep = await _waiter.AwaitAsync(_prepareTcs, TimeSpan.FromSeconds(300), ct).ConfigureAwait(false);
                 if (_captchaSeen)

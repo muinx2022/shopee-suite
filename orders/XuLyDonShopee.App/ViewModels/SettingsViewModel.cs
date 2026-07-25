@@ -24,8 +24,7 @@ public sealed record BrowserChoiceOption(BrowserChoice Value, string Label);
 /// </list>
 /// Ba card (Tự động hóa / Đồng bộ Google Sheet / Thông báo đơn mới) có ô thông báo RIÊNG
 /// (<see cref="SavedMessage"/> / <see cref="GsheetSavedMessage"/> / <see cref="NotifySavedMessage"/>): lưu
-/// card nào thì chỉ hiện thông báo ở card đó, clear hai card kia. Quản lý API key KiotProxy đã chuyển sang
-/// màn Proxy (<see cref="ProxiesViewModel"/>).
+/// card nào thì chỉ hiện thông báo ở card đó, clear hai card kia.
 /// </summary>
 public partial class SettingsViewModel : ViewModelBase
 {

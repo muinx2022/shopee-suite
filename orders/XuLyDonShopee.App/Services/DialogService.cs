@@ -94,18 +94,6 @@ public static class DialogService
         return await dialog.ShowDialog<string?>(MainWindow);
     }
 
-    /// <summary>Hộp thoại dán danh sách proxy. Trả về văn bản đã dán, hoặc null nếu Hủy.</summary>
-    public static async Task<string?> ImportProxyAsync()
-    {
-        if (MainWindow is null)
-        {
-            return null;
-        }
-
-        var dialog = new ImportProxyDialog();
-        return await dialog.ShowDialog<string?>(MainWindow);
-    }
-
     /// <summary>
     /// Mở SaveFileDialog (StorageProvider của cửa sổ chính) cho người dùng chọn nơi lưu, rồi GHI
     /// <paramref name="content"/> (đã gồm BOM) ra file đó. Trả về đường dẫn đã lưu, hoặc null nếu chưa

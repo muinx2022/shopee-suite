@@ -1019,119 +1019,6 @@ public partial class AccountsViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Các tài khoản đang trong một lượt "tự mở phiên rồi chạy hành động" (Sync/Kiểm tra) — GUARD chống bấm
-    /// đúp: khi một lượt còn đang chờ phiên sẵn sàng, mọi lượt bấm mới CHO CÙNG tài khoản (bất kỳ nút nào
-    /// trong hai nút) bị bỏ qua nhẹ nhàng. Chỉ đụng trên UI thread (RelayCommand chạy trên UI thread và luồng
-    /// KHÔNG dùng ConfigureAwait(false) nên mọi continuation ở lại UI thread) → HashSet thường là đủ.
-    /// </summary>
-    private readonly HashSet<long> _autoStartingIds = new();
-
-    /// <summary>
-    /// Luồng per-account "mở phiên nếu chưa → chờ sẵn sàng → chạy hành động thủ công" — GIỮ cho các nút thao
-    /// tác TAY (vd Kiểm tra / Xử lý đơn) dùng lại (hiện chưa nút nào nối vào — nút "Chạy" chỉ mở phiên):
-    /// phiên ĐANG chạy → chạy <paramref name="action"/> ngay (đường cũ, giữ nguyên hành vi); phiên CHƯA mở →
-    /// tự "Mở trang bán hàng" (qua manager, chạy nền) rồi CHỜ phiên "sẵn sàng thao tác" (đăng nhập xong + đọc
-    /// số đơn lần đầu — xem <see cref="IsSessionReadyForActions"/>) tối đa 5 phút mới chạy hành động.
-    /// <para>
-    /// <paramref name="accountId"/> + <paramref name="email"/> do NGƯỜI GỌI chụp TRƯỚC mọi await (bài học
-    /// <c>viewmodel-mutable-field-after-await</c>) — nút đơn chụp từ <c>_editingId</c>, nút hàng loạt chụp từng
-    /// dòng tick. Toàn bộ luồng bám theo TÀI KHOẢN ĐÓ (session theo accountId), KHÔNG đọc lại
-    /// SelectedRow/_editingId để quyết định. So <c>_editingId == accountId</c> về sau CHỈ để quyết có cập nhật ô
-    /// hiển thị chung (BusyStatus) hay không (người dùng có thể đã chuyển chọn sang tài khoản khác). KHÔNG dùng
-    /// ConfigureAwait(false) để mọi continuation ở lại UI thread → set BusyStatus + đụng guard HashSet an toàn.
-    /// </para>
-    /// </summary>
-    private async Task RunOrAutoStartAsync(
-        long accountId, string email, string actionName, Func<IAccountSession, Task<bool>> action)
-    {
-        // accountId + email đã do NGƯỜI GỌI chụp trước mọi await — hàm này KHÔNG đọc _editingId để lấy chúng.
-
-        // Phiên đã SẴN SÀNG (đăng nhập xong + đọc số lần đầu của lần mở hiện tại) → chạy hành động ngay như
-        // cũ. Dùng cờ ReadyForActions (KHÔNG chỉ State==Running): phiên đang "Đang tự đăng nhập..." vẫn là
-        // Running nhưng cờ chưa bật → KHÔNG chạy ngay, rơi xuống luồng auto-start để CHỜ sẵn sàng (chống Lỗi 2).
-        var existing = _services.Sessions.Get(accountId);
-
-        // Guard NHẸ (mô hình 1 subaccount = nhiều shop): phiên đang chạy VÒNG LẶP SHOP tự động → BỎ QUA thao tác
-        // tay để không giẫm luồng (loop đang lặp qua các shop, mở/đóng tab liên tục). Chỉ log 1 dòng rồi thôi.
-        if (existing is { IsShopLoopRunning: true })
-        {
-            _services.Log.Append(email, $"Đang chạy vòng lặp shop — bỏ qua thao tác {actionName} tay lần này.");
-            return;
-        }
-
-        if (existing is { ReadyForActions: true })
-        {
-            await action(existing);
-            return;
-        }
-
-        // Phiên chưa sẵn sàng (null/Stopped/Error/Opening/đang-login) → tự mở (idempotent) rồi chờ sẵn sàng.
-        // Guard chống bấm đúp: đã có lượt auto-start cho tài khoản này đang chờ → bỏ qua nhẹ nhàng NHƯNG để
-        // lại DẤU VẾT log (kẻo bấm lượt 2 giữa lúc đang chờ mở phiên bị nuốt âm thầm → tưởng đã chạy).
-        if (!_autoStartingIds.Add(accountId))
-        {
-            _services.Log.Append(email,
-                $"Đang chờ mở phiên cho tài khoản này — bỏ qua lượt {actionName} lần này (thử lại sau khi phiên sẵn sàng).");
-            return;
-        }
-
-        try
-        {
-            _services.Log.Append(email, $"Phiên chưa mở — đang mở trang bán hàng trước khi {actionName}...");
-
-            // Mở phiên qua manager (chạy nền; idempotent nếu đang Opening) — đúng đường "Mở trang bán hàng".
-            var session = _services.Sessions.Start(accountId);
-            UpdateSelectedSessionStatus(); // cập nhật nút/hiển thị ngay
-
-            // Chờ phiên sẵn sàng (đăng nhập xong + đọc số đơn lần đầu), tối đa 5 phút.
-            var ready = await WaitForSessionReadyAsync(session, TimeSpan.FromMinutes(5));
-            switch (ready)
-            {
-                case SessionReadyResult.Ready:
-                    await action(session);
-                    break;
-
-                case SessionReadyResult.Ended:
-                    // Phiên chuyển Stopped/Error giữa chừng — báo lý do rõ (LastError nếu có, không thì StatusText).
-                    var endMsg = $"Không mở được phiên — {session.LastError ?? session.StatusText ?? "phiên đã dừng"}";
-                    _services.Log.Append(email, endMsg);
-                    if (_editingId == accountId)
-                    {
-                        BusyStatus = endMsg;
-                    }
-                    break;
-
-                case SessionReadyResult.Timeout:
-                    const string timeoutMsg =
-                        "Phiên chưa sẵn sàng sau 5 phút (có thể cần đăng nhập tay) — thử lại sau.";
-                    _services.Log.Append(email, timeoutMsg);
-                    if (_editingId == accountId)
-                    {
-                        BusyStatus = timeoutMsg;
-                    }
-                    break;
-            }
-        }
-        finally
-        {
-            _autoStartingIds.Remove(accountId);
-        }
-    }
-
-    /// <summary>Kết quả chờ phiên "sẵn sàng thao tác" (xem <see cref="WaitForSessionReadyAsync"/>).</summary>
-    private enum SessionReadyResult
-    {
-        /// <summary>Phiên đã sẵn sàng (đăng nhập xong + đọc được số đơn lần đầu).</summary>
-        Ready,
-
-        /// <summary>Phiên kết thúc giữa chừng (Stopped/Error) — không mở được.</summary>
-        Ended,
-
-        /// <summary>Quá thời hạn chờ mà vẫn chưa sẵn sàng (có thể cần đăng nhập tay).</summary>
-        Timeout
-    }
-
-    /// <summary>
     /// Phiên "SẴN SÀNG THAO TÁC" theo CỜ TƯỜNG MINH <see cref="IAccountSession.ReadyForActions"/> của phiên.
     /// <b>Căn cứ:</b> cờ đó chỉ bật <c>true</c> tại đúng điểm sau khi luồng tự-đăng-nhập (<c>TryHumanLoginAsync</c>,
     /// đã await xong) hoàn tất VÀ đọc được số "Chờ Lấy Hàng" lần đầu của lần mở hiện tại — và được ĐẶT LẠI
@@ -1141,39 +1028,6 @@ public partial class AccountsViewModel : ViewModelBase
     /// </summary>
     public static bool IsSessionReadyForActions(SessionState state, bool readyForActions)
         => state == SessionState.Running && readyForActions;
-
-    /// <summary>
-    /// Chờ tới khi <paramref name="session"/> "sẵn sàng thao tác" (<see cref="IsSessionReadyForActions"/>),
-    /// poll mỗi <paramref name="pollMs"/> ms, tối đa <paramref name="timeout"/>. Phiên chuyển Stopped/Error
-    /// giữa chừng → trả <see cref="SessionReadyResult.Ended"/> NGAY (không chờ hết giờ). CHỈ dựa vào tham số
-    /// <paramref name="session"/> (đã chụp trước await) — KHÔNG đọc SelectedRow/_editingId. KHÔNG dùng
-    /// ConfigureAwait(false) để giữ continuation trên UI thread cho phần gọi cập nhật BusyStatus an toàn.
-    /// </summary>
-    private static async Task<SessionReadyResult> WaitForSessionReadyAsync(
-        IAccountSession session, TimeSpan timeout, int pollMs = 1000)
-    {
-        var deadline = DateTime.UtcNow + timeout;
-        while (true)
-        {
-            var state = session.State;
-            if (state is SessionState.Stopped or SessionState.Error)
-            {
-                return SessionReadyResult.Ended;
-            }
-
-            if (IsSessionReadyForActions(state, session.ReadyForActions))
-            {
-                return SessionReadyResult.Ready;
-            }
-
-            if (DateTime.UtcNow >= deadline)
-            {
-                return SessionReadyResult.Timeout;
-            }
-
-            await Task.Delay(pollMs);
-        }
-    }
 
     /// <summary>
     /// Xử lý sự kiện đổi trạng thái của các phiên (có thể đến từ thread nền) — marshal về UI thread rồi
@@ -1286,13 +1140,6 @@ public partial class AccountsViewModel : ViewModelBase
             UpdatedAtText = FormatDate(fresh.UpdatedAt);
         }
     }
-
-    /// <summary>
-    /// Chọn proxy thủ công kế tiếp theo round-robin BỀN. Nay dùng chung chỉ số của
-    /// <see cref="AccountSessionManager"/> (một nguồn duy nhất, chia sẻ giữa các phiên song song).
-    /// </summary>
-    public ProxyEntry? NextManualProxy(IReadOnlyList<ProxyEntry> manual)
-        => _services.Sessions.NextManualProxy(manual);
 
     /// <summary>Kết quả của thao tác lưu cookie đã bắt được vào tài khoản.</summary>
     public enum SaveCookieResult

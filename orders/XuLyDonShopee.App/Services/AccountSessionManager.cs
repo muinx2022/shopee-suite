@@ -38,42 +38,22 @@ public class AccountSessionManager
     private bool AnyOccupyingSlot()
         => _sessions.Values.Any(x => OccupiesSlot(x.State));
 
-    // Round-robin BỀN cho proxy thủ công, CHIA SẺ cho tất cả phiên (nhiều tài khoản trải đều trên danh
-    // sách proxy). Giữ qua các lần mở (không reset), thread-safe.
-    private int _manualProxyIndex;
-    private readonly object _manualLock = new();
-
-    // ===== Bộ cấp phát KiotProxy key theo POOL (rải key rảnh cho phiên đang chạy) =====
-    // accountId → key phiên đó ĐANG GIỮ. "Rảnh/bận" tính theo phiên đang chạy (runtime), KHÔNG lưu DB:
-    // acquire khi phiên chọn proxy, release khi phiên đóng hẳn. Thread-safe qua _keyLock (acquire/release
-    // bị gọi từ nhiều thread phiên nền). Đọc pool TƯƠI mỗi lần acquire qua _kiotPool.
-    private readonly object _keyLock = new();
-    private readonly Dictionary<long, string> _accountKey = new();
-    private readonly Func<IReadOnlyList<string>> _kiotPool;
-
     /// <summary>Phát khi bất kỳ phiên nào đổi trạng thái — VM/UI nghe để cập nhật (marshal về UI thread).</summary>
     public event Action? Changed;
 
     /// <summary>Chuyển tiếp sự kiện "đã lưu cookie" của các phiên (kèm accountId) cho VM làm mới danh sách.</summary>
     public event Action<long>? CookieSaved;
 
-    /// <summary>Ctor thật: tạo <see cref="AccountSession"/> dùng chung <see cref="ShopeeLoginService"/> +
-    /// <see cref="ProxyHealthChecker"/> và round-robin proxy thủ công chia sẻ của manager.</summary>
+    /// <summary>Ctor thật: tạo <see cref="AccountSession"/> chạy qua cầu nối extension (không dùng proxy).</summary>
     public AccountSessionManager(AppServices services)
     {
-        var loginService = new ShopeeLoginService();
-        IProxyHealthChecker healthChecker = new ProxyHealthChecker();
-        // Pool KiotProxy đọc TƯƠI từ Cài đặt mỗi lần acquire (user đổi pool ở màn Proxy → phiên mở SAU thấy).
-        _kiotPool = () => services.Settings.GetKiotProxyKeys();
-        _factory = id => new AccountSession(
-            id, services, loginService, healthChecker, NextManualProxy, AcquireKiotKey, ReleaseKiotKey);
+        _factory = id => new AccountSession(id, services);
     }
 
-    /// <summary>Ctor test: cho phép thay factory phiên bằng stub và (tùy chọn) cấp nguồn pool KiotProxy.</summary>
-    public AccountSessionManager(Func<long, IAccountSession> sessionFactory, Func<IReadOnlyList<string>>? kiotPool = null)
+    /// <summary>Ctor test: cho phép thay factory phiên bằng stub.</summary>
+    public AccountSessionManager(Func<long, IAccountSession> sessionFactory)
     {
         _factory = sessionFactory;
-        _kiotPool = kiotPool ?? (() => Array.Empty<string>());
     }
 
     /// <summary>
@@ -231,80 +211,5 @@ public class AccountSessionManager
         }
 
         Changed?.Invoke();
-    }
-
-    /// <summary>Chọn proxy thủ công kế tiếp theo round-robin BỀN, chia sẻ giữa các phiên (thread-safe).</summary>
-    public ProxyEntry? NextManualProxy(IReadOnlyList<ProxyEntry> manual)
-    {
-        if (manual.Count == 0)
-        {
-            return null;
-        }
-
-        lock (_manualLock)
-        {
-            var p = manual[_manualProxyIndex % manual.Count];
-            _manualProxyIndex++;
-            return p;
-        }
-    }
-
-    /// <summary>
-    /// Cấp một API key KiotProxy từ pool CHUNG cho phiên của <paramref name="accountId"/> — ưu tiên key
-    /// RẢNH nhất (ít phiên đang giữ nhất; còn key chưa ai giữ thì chia đều trước). Pool rỗng → <c>null</c>
-    /// (phiên fallback proxy thủ công / IP máy). Thread-safe (lock): acquire/release bị gọi từ nhiều thread
-    /// phiên nền. Đọc pool TƯƠI mỗi lần gọi.
-    /// <para>
-    /// Idempotent theo phiên: account đã giữ một key CÒN trong pool → trả lại ĐÚNG key đó (relaunch gọi lại
-    /// KHÔNG đổi key). Thực tế mỗi phiên acquire một lần khi chọn proxy; nhánh này chỉ để phòng gọi lại.
-    /// </para>
-    /// </summary>
-    public string? AcquireKiotKey(long accountId)
-    {
-        lock (_keyLock)
-        {
-            var pool = _kiotPool();
-            if (pool is null || pool.Count == 0)
-            {
-                return null;
-            }
-
-            // Đã giữ key và key CÒN trong pool → giữ nguyên (không re-acquire giữa các lần relaunch).
-            if (_accountKey.TryGetValue(accountId, out var held) && pool.Contains(held))
-            {
-                return held;
-            }
-
-            // usage = số phiên KHÁC đang giữ mỗi key (loại chính accountId — nó có thể đang giữ key đã rời pool).
-            var usage = new Dictionary<string, int>(StringComparer.Ordinal);
-            foreach (var kv in _accountKey)
-            {
-                if (kv.Key == accountId)
-                {
-                    continue;
-                }
-                usage[kv.Value] = usage.TryGetValue(kv.Value, out var c) ? c + 1 : 1;
-            }
-
-            var key = KiotKeyPool.PickLeastUsed(pool, usage);
-            if (key is null)
-            {
-                return null;
-            }
-            _accountKey[accountId] = key;
-            return key;
-        }
-    }
-
-    /// <summary>
-    /// NHẢ key mà phiên của <paramref name="accountId"/> đang giữ về pool (gọi khi phiên đóng HẲN). Không có
-    /// gì để nhả → no-op. Thread-safe (lock). Sau khi nhả, key được coi là RẢNH cho lần acquire kế.
-    /// </summary>
-    public void ReleaseKiotKey(long accountId)
-    {
-        lock (_keyLock)
-        {
-            _accountKey.Remove(accountId);
-        }
     }
 }
