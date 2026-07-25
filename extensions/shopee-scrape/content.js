@@ -4,6 +4,10 @@
   }
   window.__shopee27052026ScrapeClickerInjected = true;
 
+  // Token do background đặt vào page NGAY TRƯỚC lần inject này. Chụp lại lúc IIFE khởi động để mỗi
+  // lượt run gắn đúng token của nó; background chỉ resolve waiter có token khớp.
+  const resultToken = window.__shopeeScrapeResultToken;
+
   const MAX_FIND_MS = 30_000;     // chờ nút scrape xuất hiện
   // Chờ kết quả THEO TRẠNG THÁI BigSeller, KHÔNG đặt giờ cứng: còn "scraping" thì chờ tới khi xong;
   // chỉ "failed"/"ok" mới làm tiếp. Bỏ chờ DUY NHẤT khi BigSeller im lặng (không còn báo đang crawl,
@@ -155,7 +159,7 @@
 
   const notify = async (detail) => {
     try {
-      await chrome.runtime.sendMessage({ type: "SCRAPE_RESULT", detail });
+      await chrome.runtime.sendMessage({ type: "SCRAPE_RESULT", detail, token: resultToken });
     } catch (_) {}
   };
 
