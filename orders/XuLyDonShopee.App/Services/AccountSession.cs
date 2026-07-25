@@ -1188,7 +1188,11 @@ public partial class AccountSession : ObservableObject, IAccountSession
             while (!ct.IsCancellationRequested && DateTime.UtcNow < hardCap)
             {
                 var bridge = new OrdersBridgeSession(userDataDir, browserChoice, log, invoiceDir, province, syncCallback,
-                    finalDoneSns: () => _services.Orders.GetOrderSnsWithFinalAmount(_accountId));
+                    finalDoneSns: () => _services.Orders.GetOrderSnsWithFinalAmount(_accountId),
+                    // Tab "Kết quả": lưu danh sách shop + tăng đếm mỗi đơn arrange theo (tài khoản, shop, ngày yyyy-MM-dd giờ địa phương).
+                    onShopListRead: shops => _services.Results.UpsertShops(_accountId, shops),
+                    onOrderPrepared: shopLogin => _services.Results.IncrementPrepared(
+                        _accountId, shopLogin, DateTime.Now.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture)));
                 _bridge = bridge;
                 OrdersBridgeRunResult result;
                 try

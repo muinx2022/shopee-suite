@@ -130,6 +130,22 @@ CREATE TABLE IF NOT EXISTS orders (
     created_at         TEXT,
     updated_at         TEXT,
     UNIQUE(account_id, order_sn)
+);
+
+CREATE TABLE IF NOT EXISTS account_shops (
+    account_id INTEGER NOT NULL,
+    shop_login TEXT NOT NULL,
+    shop_name  TEXT,
+    updated_at TEXT NOT NULL,
+    UNIQUE(account_id, shop_login)
+);
+
+CREATE TABLE IF NOT EXISTS prepare_daily (
+    account_id INTEGER NOT NULL,
+    shop_login TEXT NOT NULL,
+    day        TEXT NOT NULL,          -- yyyy-MM-dd (giờ địa phương)
+    count      INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(account_id, shop_login, day)
 );";
         cmd.ExecuteNonQuery();
 

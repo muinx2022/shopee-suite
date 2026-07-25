@@ -178,6 +178,28 @@
             <Setter Property="Background" Value="#FBDCD6" />
         </Style>
 
+        <!-- TabControl chi tiết (Thông tin tài khoản | Kết quả): module chưa có TabControl nào → tự style phẳng gọn
+             (font nhỏ, đệm gọn, chữ mờ; tab đang chọn → chữ accent). Khớp theme phẳng của app. -->
+        <Style Selector="TabControl.detailTabs">
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+        <Style Selector="TabControl.detailTabs TabItem">
+            <Setter Property="FontSize" Value="13.5" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Foreground" Value="{StaticResource Text9A}" />
+            <Setter Property="Padding" Value="12,6" />
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="Margin" Value="0,0,4,0" />
+            <Setter Property="Cursor" Value="Hand" />
+        </Style>
+        <Style Selector="TabControl.detailTabs TabItem:selected">
+            <Setter Property="Foreground" Value="{StaticResource AccentBrush}" />
+        </Style>
+        <Style Selector="TabControl.detailTabs TabItem:pointerover">
+            <Setter Property="Foreground" Value="{StaticResource Text232}" />
+        </Style>
+
     </UserControl.Styles>
 
     <!-- Bố cục: 2 cột — danh sách (trái, cao hết màn) | chi tiết + nhật ký của tài khoản đang chọn (phải). -->
@@ -299,8 +321,11 @@
                                HorizontalAlignment="Center" VerticalAlignment="Center"
                                IsVisible="{Binding ShowPlaceholder}" />
 
-                    <!-- Khối chi tiết -->
-                    <ScrollViewer IsVisible="{Binding IsEditing}">
+                    <!-- Khối chi tiết: 2 tab — "Thông tin tài khoản" (form cũ nguyên vẹn) | "Kết quả" (chuẩn bị hàng
+                         theo shop/ngày). TabControl mang IsVisible=IsEditing; placeholder nằm NGOÀI (chồng cùng ô Grid). -->
+                    <TabControl Classes="detailTabs" IsVisible="{Binding IsEditing}">
+                        <TabItem Header="Thông tin tài khoản">
+                    <ScrollViewer>
                         <!-- Form GIÃN hết cột 3* (bỏ trần 760/neo trái): card nở hết bề ngang, bám sát panel nhật ký
                              bên PHẢI → không còn khoảng chết ở giữa. Trần 760 cũ có vì hàng 7 nút cần ~750px một hàng;
                              nay hàng nút CHỊU HẸP (padding gọn + WrapPanel rớt dòng) nên bỏ được trần. -->
@@ -474,6 +499,40 @@
                         </StackPanel>
                     </StackPanel>
                 </ScrollViewer>
+                        </TabItem>
+
+                        <!-- Tab 2: Kết quả — DatePicker chọn ngày (mặc định hôm nay) + lưới Shop | Chuẩn bị hàng.
+                             x:CompileBindings=False cho cả tab: DatePicker (SelectedDate DateTimeOffset? ↔ ResultDate
+                             không-null: xóa trắng lịch KHÔNG ghi đè) + cột DataGrid bind theo ShopPrepareRow của mỗi dòng. -->
+                        <TabItem Header="Kết quả">
+                            <DockPanel Margin="24,18,16,16" x:CompileBindings="False">
+                                <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="10"
+                                            Margin="0,0,0,14" VerticalAlignment="Center">
+                                    <TextBlock Text="Ngày:" FontSize="13" FontWeight="SemiBold"
+                                               Foreground="{StaticResource TextMuted}" VerticalAlignment="Center" />
+                                    <DatePicker SelectedDate="{Binding ResultDate}" />
+                                </StackPanel>
+                                <!-- Lưới 2 cột: Shop (mọi shop của tài khoản) | Chuẩn bị hàng (số đơn arrange trong ngày). -->
+                                <DataGrid Classes="proxy" ClipToBounds="True"
+                                          ItemsSource="{Binding ResultRows}"
+                                          IsReadOnly="True" AutoGenerateColumns="False"
+                                          CanUserResizeColumns="True">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="Shop" Binding="{Binding ShopName}" Width="*" MinWidth="140" />
+                                        <DataGridTemplateColumn Header="Chuẩn bị hàng" Width="Auto">
+                                            <DataGridTemplateColumn.CellTemplate>
+                                                <DataTemplate>
+                                                    <TextBlock Text="{Binding PreparedCount}" HorizontalAlignment="Right"
+                                                               VerticalAlignment="Center" Margin="0,0,14,0"
+                                                               FontWeight="SemiBold" MinWidth="90" />
+                                                </DataTemplate>
+                                            </DataGridTemplateColumn.CellTemplate>
+                                        </DataGridTemplateColumn>
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                            </DockPanel>
+                        </TabItem>
+                    </TabControl>
                     </Grid>
 
                 <!-- ===== Cột PHẢI của cột chi tiết: nhật ký của TÀI KHOẢN đang chọn (nền đen) =====
