@@ -22,7 +22,7 @@
                         <TextBlock Text="Check Acc" Margin="7,0,0,0" VerticalAlignment="Center" />
                     </StackPanel>
                 </Button>
-                <Border Background="{DynamicResource SubtleBrush}" CornerRadius="14" Padding="14,6">
+                <Border Background="{DynamicResource SubtleBrush}" CornerRadius="4" Padding="14,6">
                     <TextBlock Text="{Binding Status}" FontSize="12.5" Foreground="{DynamicResource TextSecondaryBrush}" />
                 </Border>
             </StackPanel>

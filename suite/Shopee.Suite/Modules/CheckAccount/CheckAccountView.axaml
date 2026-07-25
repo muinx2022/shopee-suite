@@ -14,7 +14,7 @@
                            Text="Kiểm tra hàng loạt tài khoản qua Edge + proxy, giữ profile khi đăng nhập thành công." />
             </StackPanel>
             <Border HorizontalAlignment="Right" VerticalAlignment="Center"
-                    Background="{DynamicResource SubtleBrush}" CornerRadius="14" Padding="14,6">
+                    Background="{DynamicResource SubtleBrush}" CornerRadius="4" Padding="14,6">
                 <TextBlock Text="{Binding Status}" FontSize="12.5" Foreground="{DynamicResource TextSecondaryBrush}" />
             </Border>
         </Grid>
@@ -74,7 +74,7 @@
                     </Grid>
 
                     <!-- Log -->
-                    <Border Grid.Row="4" CornerRadius="8" ClipToBounds="True"
+                    <Border Grid.Row="4" CornerRadius="6" ClipToBounds="True"
                             Background="{DynamicResource LogBackgroundBrush}">
                         <TextBox x:Name="LogBox" Classes="log" b:LogText.Source="{Binding LogLines}" />
                     </Border>

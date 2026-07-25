@@ -5,21 +5,21 @@
         Title="Shopee Suite" Width="1500" Height="940" MinWidth="1080" MinHeight="680"
         WindowStartupLocation="CenterScreen"
         Background="{DynamicResource WindowBackgroundBrush}"
-        FontFamily="{DynamicResource UiFont}">
+        FontFamily="{DynamicResource UiFont}"
+        UseLayoutRounding="True"
+        RenderOptions.TextRenderingMode="Antialias">
 
     <Grid RowDefinitions="58,Auto,*,Auto">
 
         <!-- ══════════ Row 0: TAB STRIP (nền tối, kiểu Office) ══════════ -->
         <Border Grid.Row="0" ZIndex="1" Background="{DynamicResource NavBarBrush}"
-                BorderBrush="{DynamicResource NavBarBorderBrush}" BorderThickness="0,0,0,1"
-                BoxShadow="0 2 12 0 #33000000">
+                BorderBrush="{DynamicResource NavBarBorderBrush}" BorderThickness="0,0,0,1">
             <Grid ColumnDefinitions="Auto,Auto,*">
                 <!-- Brand — bấm để về tab Workspace -->
                 <Button Grid.Column="0" Classes="brand" VerticalAlignment="Stretch"
                         Command="{Binding GoHomeCommand}" ToolTip.Tip="Về màn hình chính">
                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Spacing="11">
-                        <Border Width="34" Height="34" CornerRadius="10" Background="{DynamicResource BrandBadgeBrush}"
-                                BoxShadow="0 2 6 0 #40E0421D">
+                        <Border Width="34" Height="34" CornerRadius="6" Background="{DynamicResource BrandBadgeBrush}">
                             <TextBlock Text="S" FontSize="18" FontWeight="Bold" Foreground="White"
                                        HorizontalAlignment="Center" VerticalAlignment="Center" />
                         </Border>

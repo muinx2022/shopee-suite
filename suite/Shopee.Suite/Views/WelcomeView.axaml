@@ -5,8 +5,7 @@
         <Grid Margin="40,36" RowDefinitions="Auto,Auto,*">
             <!-- Hero -->
             <StackPanel Grid.Row="0" Orientation="Horizontal">
-                <Border Width="56" Height="56" CornerRadius="15" Background="{DynamicResource BrandBadgeBrush}"
-                        BoxShadow="0 3 10 0 #33E0421D">
+                <Border Width="56" Height="56" CornerRadius="6" Background="{DynamicResource BrandBadgeBrush}">
                     <TextBlock Text="S" FontSize="30" FontWeight="Bold" Foreground="White"
                                HorizontalAlignment="Center" VerticalAlignment="Center" />
                 </Border>
@@ -33,7 +32,7 @@
                                 Command="{Binding $parent[ItemsControl].DataContext.OpenCommand}"
                                 CommandParameter="{Binding}">
                             <StackPanel Orientation="Horizontal">
-                                <Border Width="44" Height="44" CornerRadius="11" Background="{DynamicResource SubtleBrush}"
+                                <Border Width="44" Height="44" CornerRadius="6" Background="{DynamicResource SubtleBrush}"
                                         VerticalAlignment="Top">
                                     <PathIcon Data="{Binding Icon}" Width="23" Height="23"
                                               Foreground="{DynamicResource AccentBrush}"

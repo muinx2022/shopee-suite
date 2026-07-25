@@ -20,7 +20,7 @@
             <!-- ════════════ TAB 1: THEO DÕI ════════════ -->
             <TabItem Header="Theo dõi">
                 <Grid Margin="0,12,0,0" RowDefinitions="Auto,*">
-                    <Border Grid.Row="0" Background="{DynamicResource SubtleBrush}" CornerRadius="8" Padding="12,8" Margin="0,0,0,12">
+                    <Border Grid.Row="0" Background="{DynamicResource SubtleBrush}" CornerRadius="6" Padding="12,8" Margin="0,0,0,12">
                         <StackPanel>
                             <TextBlock Text="{Binding Machines}" FontWeight="SemiBold" TextWrapping="Wrap" />
                             <TextBlock Text="{Binding Status}" Classes="caption" Margin="0,4,0,8" />
@@ -50,7 +50,7 @@
 
                     <!-- ───── Bản CLIENT: việc của máy này ───── -->
                     <Grid IsVisible="{Binding IsClientPanel}" RowDefinitions="Auto,*,Auto,Auto">
-                        <Border Grid.Row="0" Background="{DynamicResource SubtleBrush}" CornerRadius="8" Padding="12,10" Margin="0,0,0,10">
+                        <Border Grid.Row="0" Background="{DynamicResource SubtleBrush}" CornerRadius="6" Padding="12,10" Margin="0,0,0,10">
                             <Grid>
                                 <StackPanel VerticalAlignment="Center">
                                     <TextBlock Text="{Binding ReceiveStateText}" FontWeight="SemiBold" FontSize="13.5" />
@@ -100,7 +100,7 @@
                                     <ItemsControl ItemsSource="{Binding InterruptedJobs}">
                                         <ItemsControl.ItemTemplate>
                                             <DataTemplate>
-                                                <Border Background="{DynamicResource SubtleBrush}" CornerRadius="6" Padding="12,8" Margin="0,0,0,6">
+                                                <Border Background="{DynamicResource SubtleBrush}" CornerRadius="4" Padding="12,8" Margin="0,0,0,6">
                                                     <Grid ColumnDefinitions="*,Auto">
                                                         <StackPanel VerticalAlignment="Center">
                                                             <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextWrapping="Wrap" />

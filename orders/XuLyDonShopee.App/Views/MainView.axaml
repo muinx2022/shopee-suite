@@ -6,7 +6,8 @@
              mc:Ignorable="d" d:DesignWidth="1480" d:DesignHeight="860"
              x:Class="XuLyDonShopee.App.Views.MainView"
              x:DataType="vm:MainViewModel"
-             FontFamily="{StaticResource UiFont}">
+             FontFamily="{StaticResource UiFont}"
+             RenderOptions.TextRenderingMode="Antialias">
 
     <!-- ═══ Cô lập tài nguyên/style của module vào ĐÚNG subtree này (không đổ vào Application của suite) ═══
          Trước đây (app độc lập) Colors.axaml + 6 converter + Controls.axaml nằm ở App.axaml cấp Application.
@@ -26,12 +27,9 @@
 
     <DockPanel>
 
-        <!-- Nền gradient (trước là Window.Background) chuyển xuống DockPanel gốc của UserControl. -->
+        <!-- Nền phẳng (trước là Window.Background gradient) chuyển xuống DockPanel gốc của UserControl. -->
         <DockPanel.Background>
-            <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
-                <GradientStop Offset="0" Color="#F7F8FA" />
-                <GradientStop Offset="1" Color="#F0F2F5" />
-            </LinearGradientBrush>
+            <SolidColorBrush Color="#F3F3F3" />
         </DockPanel.Background>
 
         <!-- (Thanh MENU NGANG cũ đã bỏ: 4 màn con nay điều hướng từ dải Ribbon của shell suite qua

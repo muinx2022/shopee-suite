@@ -59,7 +59,7 @@
             <Setter Property="Background" Value="{StaticResource CardBg}" />
             <Setter Property="BorderBrush" Value="{StaticResource Border012}" />
             <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="CornerRadius" Value="4" />
         </Style>
         <Style Selector="Button.iconAction:pointerover /template/ ContentPresenter#PART_ContentPresenter">
             <Setter Property="Background" Value="#F5F5F5" />
@@ -97,7 +97,7 @@
         </Style>
         <Style Selector="ListBox.acctFlat ListBoxItem /template/ ContentPresenter#PART_ContentPresenter">
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="CornerRadius" Value="4" />
         </Style>
         <Style Selector="ListBox.acctFlat ListBoxItem:pointerover /template/ ContentPresenter#PART_ContentPresenter">
             <Setter Property="Background" Value="#0A000000" />
@@ -150,7 +150,7 @@
             <Setter Property="Background" Value="#FDECEA" />
             <Setter Property="BorderBrush" Value="#F1B0A8" />
             <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="CornerRadius" Value="5" />
+            <Setter Property="CornerRadius" Value="4" />
         </Style>
         <Style Selector="Button.visitTk:pointerover /template/ ContentPresenter#PART_ContentPresenter">
             <Setter Property="Background" Value="#FBDCD6" />
@@ -172,7 +172,7 @@
             <Setter Property="Background" Value="#FDECEA" />
             <Setter Property="BorderBrush" Value="#F1B0A8" />
             <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="CornerRadius" Value="4" />
         </Style>
         <Style Selector="Button.unverifiedFilter:pointerover /template/ ContentPresenter#PART_ContentPresenter">
             <Setter Property="Background" Value="#FBDCD6" />
@@ -479,7 +479,7 @@
                 <!-- ===== Cột PHẢI của cột chi tiết: nhật ký của TÀI KHOẢN đang chọn (nền đen) =====
                      Đứng dọc bên phải field; margin khe trái + cách viền trên/phải/dưới; bo góc thành "thẻ" log. -->
                 <Border Grid.Column="1"
-                        Margin="8,24,16,16" CornerRadius="8" ClipToBounds="True"
+                        Margin="8,24,16,16" CornerRadius="6" ClipToBounds="True"
                         Background="#0F1113"
                         BorderBrush="#2A2A2A" BorderThickness="1">
             <DockPanel Margin="12,8,12,8">

@@ -14,7 +14,7 @@
                            Classes="caption" Margin="0,3,0,0" />
             </StackPanel>
             <Border HorizontalAlignment="Right" VerticalAlignment="Center"
-                    Background="{DynamicResource SubtleBrush}" CornerRadius="14" Padding="14,6">
+                    Background="{DynamicResource SubtleBrush}" CornerRadius="4" Padding="14,6">
                 <TextBlock Text="{Binding Status}" FontSize="12.5" Foreground="{DynamicResource TextSecondaryBrush}" />
             </Border>
         </Grid>
@@ -45,7 +45,7 @@
                                     </TextBlock>
                                 </Grid>
 
-                                <Border Background="{DynamicResource SubtleBrush}" CornerRadius="6" Padding="12,8" Margin="0,14,0,0">
+                                <Border Background="{DynamicResource SubtleBrush}" CornerRadius="4" Padding="12,8" Margin="0,14,0,0">
                                     <TextBlock Text="{Binding ComputedMaxInfo}" FontSize="14" FontWeight="SemiBold" />
                                 </Border>
 

@@ -21,8 +21,8 @@
     <!-- ===== Bề mặt / nền ===== -->
     <SolidColorBrush x:Key="CardBg" Color="#FFFFFF" />
     <SolidColorBrush x:Key="InputBg" Color="#FBFBFB" />
-    <SolidColorBrush x:Key="WindowTop" Color="#F7F8FA" />
-    <SolidColorBrush x:Key="WindowBottom" Color="#F0F2F5" />
+    <SolidColorBrush x:Key="WindowTop" Color="#F3F3F3" />
+    <SolidColorBrush x:Key="WindowBottom" Color="#F3F3F3" />
 
     <!-- ===== Chữ ===== -->
     <SolidColorBrush x:Key="TextInk" Color="#1C1C1C" />
@@ -30,8 +30,8 @@
     <SolidColorBrush x:Key="Text252" Color="#252525" />
     <SolidColorBrush x:Key="TextSecondary" Color="#4A4A4A" />
     <SolidColorBrush x:Key="Text5A" Color="#5A5A5A" />
-    <SolidColorBrush x:Key="TextMuted" Color="#8A8A8A" />
-    <SolidColorBrush x:Key="Text9A" Color="#9A9A9A" />
+    <SolidColorBrush x:Key="TextMuted" Color="#6E6E6E" />
+    <SolidColorBrush x:Key="Text9A" Color="#7A7A7A" />
     <SolidColorBrush x:Key="PlaceholderBrush" Color="#A5A5A5" />
     <SolidColorBrush x:Key="Text7A" Color="#7A7A7A" />
 

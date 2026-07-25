@@ -184,7 +184,7 @@
                 <DataGridTemplateColumn Header="Trạng thái" Width="140">
                     <DataGridTemplateColumn.CellTemplate>
                         <DataTemplate>
-                            <Border CornerRadius="10" Padding="10,3"
+                            <Border CornerRadius="4" Padding="10,3"
                                     HorizontalAlignment="Left" VerticalAlignment="Center"
                                     BorderThickness="1"
                                     Background="{Binding Status, Converter={StaticResource OrderStatusPill}, ConverterParameter=bg}"
