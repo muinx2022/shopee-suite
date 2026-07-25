@@ -68,8 +68,12 @@ public sealed partial class HubDatabase
         {
             var now = Iso(DateTimeOffset.UtcNow);
             int canceled, dismissed;
+            // Bọc 4 lệnh rời (huỷ assignment · bỏ gián đoạn · nhả leases + account_leases) trong 1 transaction:
+            // crash giữa chừng KHÔNG để trạng thái nửa vời (vd huỷ việc xong nhưng chưa nhả khoá acc → acc kẹt).
+            using var tx = _conn.BeginTransaction();
             using (var c = _conn.CreateCommand())
             {
+                c.Transaction = tx;
                 c.CommandText = "UPDATE assignments SET status='canceled', updated_at=$ua WHERE status IN ('queued','running') AND (claimed_by=$m OR target_machine_id=$m)";
                 c.Parameters.AddWithValue("$ua", now);
                 c.Parameters.AddWithValue("$m", machineId);
@@ -81,6 +85,7 @@ public sealed partial class HubDatabase
             // ở máy khác. Chỉ set cờ dismissed, giữ nguyên updated_at.
             using (var c = _conn.CreateCommand())
             {
+                c.Transaction = tx;
                 c.CommandText = "UPDATE assignments SET dismissed=1 WHERE status IN ('failed','canceled') AND dismissed=0 AND (claimed_by=$m OR target_machine_id=$m)";
                 c.Parameters.AddWithValue("$m", machineId);
                 dismissed = c.ExecuteNonQuery();
@@ -88,10 +93,12 @@ public sealed partial class HubDatabase
             foreach (var tbl in new[] { "leases", "account_leases" })
                 using (var c = _conn.CreateCommand())
                 {
+                    c.Transaction = tx;
                     c.CommandText = $"DELETE FROM {tbl} WHERE machine_id=$m";
                     c.Parameters.AddWithValue("$m", machineId);
                     c.ExecuteNonQuery();
                 }
+            tx.Commit();
             return (canceled, dismissed);
         }
     }

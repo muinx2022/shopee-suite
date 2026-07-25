@@ -324,10 +324,11 @@
                             @if (rw is not null)
                             {
                                 <div class="action" style="margin-top:10px">@RewriteStatusLine(rw)</div>
-                                @if (rw.Log.Count > 0)
+                                var rwLog = rw.LogSnapshot();   // bản sao an toàn-thread (worker mutate list gốc song song)
+                                @if (rwLog.Count > 0)
                                 {
                                     <div style="margin-top:8px; max-height:150px; overflow:auto; font-family:var(--mono); font-size:11.5px; line-height:1.5; color:var(--body); overflow-wrap:anywhere">
-                                        @foreach (var line in rw.Log)
+                                        @foreach (var line in rwLog)
                                         {
                                             <div>@line</div>
                                         }

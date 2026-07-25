@@ -99,14 +99,6 @@ public sealed class FleetStateService : IHostedService, IDisposable
         return new("· chờ", "idle", 0);
     }
 
-    public static PresenceState Presence(DateTimeOffset at)
-    {
-        var s = (DateTimeOffset.Now - at).TotalSeconds;
-        if (s < 45) return new("🟢", "online · " + Ago(at), true);
-        if (s < 180) return new("🟡", Ago(at), true);
-        return new("⚪", "offline · " + Ago(at), false);
-    }
-
     /// <summary>Trạng thái máy cho bảng fleet — 3 mức có nghĩa (thay hiển thị version):
     /// ⚪ offline (mất nhịp ≥180s) · 🟢 online (đang chạy việc: có lease/assignment running) · 🟡 idle (nối nhưng rảnh).</summary>
     public static PresenceState Status(FleetSnapshot f, MachinePresence m)

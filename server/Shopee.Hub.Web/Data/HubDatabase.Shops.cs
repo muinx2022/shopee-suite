@@ -42,18 +42,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_shops_username ON shops(username);");
         }
     }
 
-    public Shop? GetShop(long id)
-    {
-        lock (_gate)
-        {
-            using var c = _conn.CreateCommand();
-            c.CommandText = "SELECT id,name,username,password,cookie,proxy_key,note,created_at,updated_at FROM shops WHERE id=$id";
-            c.Parameters.AddWithValue("$id", id);
-            using var rd = c.ExecuteReader();
-            return rd.Read() ? ReadShopRow(rd) : null;
-        }
-    }
-
     /// <summary>Tìm shop theo username; chưa có → TẠO shop mới (name = <paramref name="name"/> hoặc chính
     /// username nếu trống). Trả id shop. Dùng ở đường push đơn để client khỏi biết id trên hub.</summary>
     public long GetOrCreateShopByUsername(string username, string? name)
@@ -122,21 +110,30 @@ WHERE id=$id;";
         }
     }
 
-    /// <summary>Xoá 1 shop + mọi đơn của nó. Trả true nếu có hàng bị xoá.</summary>
+    /// <summary>Xoá 1 shop + mọi đơn của nó. Trả true nếu có hàng bị xoá. Bọc transaction: crash giữa 2 lệnh
+    /// (xoá orders → xoá shops) KHÔNG để lại shop mồ côi đã mất đơn (hoặc ngược lại).</summary>
     public bool DeleteShop(long id)
     {
         lock (_gate)
         {
+            using var tx = _conn.BeginTransaction();
             using (var d = _conn.CreateCommand())
             {
+                d.Transaction = tx;
                 d.CommandText = "DELETE FROM orders WHERE shop_id=$id";
                 d.Parameters.AddWithValue("$id", id);
                 d.ExecuteNonQuery();
             }
-            using var c = _conn.CreateCommand();
-            c.CommandText = "DELETE FROM shops WHERE id=$id";
-            c.Parameters.AddWithValue("$id", id);
-            return c.ExecuteNonQuery() > 0;
+            bool removed;
+            using (var c = _conn.CreateCommand())
+            {
+                c.Transaction = tx;
+                c.CommandText = "DELETE FROM shops WHERE id=$id";
+                c.Parameters.AddWithValue("$id", id);
+                removed = c.ExecuteNonQuery() > 0;
+            }
+            tx.Commit();
+            return removed;
         }
     }
 
