@@ -1,7 +1,7 @@
 # Plan: Chi tiết tài khoản (Đơn hàng) — thêm tab "Kết quả" (chuẩn bị hàng theo shop/ngày)
 
 - **Ngày:** 2026-07-26
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-dev`, worktree)
 
 ## 1. Bối cảnh & mục tiêu
@@ -148,4 +148,7 @@ CREATE TABLE IF NOT EXISTS prepare_daily (
 
 ## Báo cáo thực thi (Opus điền sau khi xong)
 
-<chưa thực thi>
+Hoàn thành trong worktree, merge về main (d704a2a). Build 0 error, 908 test xanh (10 test ResultsRepository mới).
+8 file (2 mới: ResultsRepository.cs + test). Khóa shop = LoginName fallback ShopName (khớp nhãn callback đếm).
+LoadResults chạy khi đổi SelectedRow/ResultDate (không live lúc đang arrange — đổi ngày/chọn lại để cập nhật).
+Cần soi mắt: style tab phẳng + hiển thị DataGrid/DatePicker (build sạch nhưng chưa chạy app thật).
