@@ -150,18 +150,20 @@
                 <TextBlock DockPanel.Dock="Top" Text="Tài khoản BigSeller (bấm 1 dòng để xem shop + thao tác)"
                            Classes="caption" Margin="0,0,0,8" TextWrapping="Wrap" />
                 <Border Classes="card" ClipToBounds="True">
-                    <ListBox ItemsSource="{Binding Accounts}" SelectedItem="{Binding SelectedAccount}"
+                    <ListBox Classes="acctList" ItemsSource="{Binding Accounts}" SelectedItem="{Binding SelectedAccount}"
                              BorderThickness="0" Background="Transparent">
                         <ListBox.ItemTemplate>
                             <DataTemplate>
-                                <StackPanel Margin="2,6">
-                                    <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" FontSize="13" TextTrimming="CharacterEllipsis" />
-                                    <StackPanel Orientation="Horizontal" Margin="0,1,0,0">
-                                        <TextBlock Text="{Binding CookieStatus}" FontSize="10.5" Foreground="{DynamicResource TextSecondaryBrush}" />
-                                        <TextBlock Text="  ·  " FontSize="10.5" Foreground="{DynamicResource TextSecondaryBrush}" />
-                                        <TextBlock Text="{Binding ScrapeSummary}" FontSize="10.5" Foreground="{DynamicResource TextSecondaryBrush}" />
+                                <Border Classes="acctCard">
+                                    <StackPanel>
+                                        <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" FontSize="13" TextTrimming="CharacterEllipsis" />
+                                        <StackPanel Orientation="Horizontal" Margin="0,1,0,0">
+                                            <TextBlock Text="{Binding CookieStatus}" FontSize="10.5" Foreground="{DynamicResource TextSecondaryBrush}" />
+                                            <TextBlock Text="  ·  " FontSize="10.5" Foreground="{DynamicResource TextSecondaryBrush}" />
+                                            <TextBlock Text="{Binding ScrapeSummary}" FontSize="10.5" Foreground="{DynamicResource TextSecondaryBrush}" />
+                                        </StackPanel>
                                     </StackPanel>
-                                </StackPanel>
+                                </Border>
                             </DataTemplate>
                         </ListBox.ItemTemplate>
                     </ListBox>
@@ -218,36 +220,10 @@
                                     <!-- Lưới SHOP pipeline — lấp đầy chiều cao còn lại -->
                                     <Border Grid.Row="0" Classes="card" ClipToBounds="True">
                                         <DataGrid x:Name="ShopGrid" ItemsSource="{Binding Shops}" IsReadOnly="True"
-                                                  BorderThickness="0" SelectionChanged="ShopGrid_SelectionChanged" RowHeight="44"
+                                                  BorderThickness="0" SelectionChanged="ShopGrid_SelectionChanged" RowHeight="36"
                                                   AutoGenerateColumns="False" ScrollViewer.VerticalScrollBarVisibility="Auto">
                                             <DataGrid.Columns>
                                                 <DataGridTextColumn Header="Shop" Binding="{Binding Name}" Width="1.1*" />
-                                                <DataGridTemplateColumn Header="Tiến độ" Width="1.9*">
-                                                    <DataGridTemplateColumn.CellTemplate>
-                                                        <DataTemplate>
-                                                            <!-- 4 op × Xong/Đang chạy/Chưa xong (màu), xếp 2×2 cho gọn. -->
-                                                            <ItemsControl ItemsSource="{Binding ProgressRows}" VerticalAlignment="Center" Margin="2,3">
-                                                                <ItemsControl.ItemsPanel>
-                                                                    <ItemsPanelTemplate>
-                                                                        <UniformGrid Columns="2" />
-                                                                    </ItemsPanelTemplate>
-                                                                </ItemsControl.ItemsPanel>
-                                                                <ItemsControl.ItemTemplate>
-                                                                    <DataTemplate>
-                                                                        <StackPanel Orientation="Horizontal" Margin="0,1,12,1">
-                                                                            <TextBlock Text="{Binding Op}" FontSize="10.5"
-                                                                                       Foreground="{DynamicResource TextSecondaryBrush}" />
-                                                                            <TextBlock Text=": " FontSize="10.5"
-                                                                                       Foreground="{DynamicResource TextSecondaryBrush}" />
-                                                                            <TextBlock Text="{Binding Status}" FontSize="10.5" FontWeight="SemiBold"
-                                                                                       Foreground="{Binding Brush}" />
-                                                                        </StackPanel>
-                                                                    </DataTemplate>
-                                                                </ItemsControl.ItemTemplate>
-                                                            </ItemsControl>
-                                                        </DataTemplate>
-                                                    </DataGridTemplateColumn.CellTemplate>
-                                                </DataGridTemplateColumn>
                                                 <!-- Mỗi op 1 cột, 1 nút toggle: bấm chạy ↔ bấm lại dừng (■). -->
                                                 <DataGridTemplateColumn Header="Scrape" Width="90">
                                                     <DataGridTemplateColumn.CellTemplate>

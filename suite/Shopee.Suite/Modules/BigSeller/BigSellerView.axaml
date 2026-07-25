@@ -44,15 +44,17 @@
                 </StackPanel>
 
                 <Border Classes="card" ClipToBounds="True">
-                    <ListBox ItemsSource="{Binding Items}" SelectedItem="{Binding Selected}"
+                    <ListBox Classes="acctList" ItemsSource="{Binding Items}" SelectedItem="{Binding Selected}"
                              BorderThickness="0" Background="Transparent">
                         <ListBox.ItemTemplate>
                             <DataTemplate>
-                                <StackPanel Margin="6,7">
-                                    <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" FontSize="13.5" />
-                                    <TextBlock Text="{Binding CookieStatus}" FontSize="11"
-                                               Foreground="{DynamicResource TextSecondaryBrush}" />
-                                </StackPanel>
+                                <Border Classes="acctCard">
+                                    <StackPanel>
+                                        <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" FontSize="13.5" />
+                                        <TextBlock Text="{Binding CookieStatus}" FontSize="11"
+                                                   Foreground="{DynamicResource TextSecondaryBrush}" />
+                                    </StackPanel>
+                                </Border>
                             </DataTemplate>
                         </ListBox.ItemTemplate>
                     </ListBox>
