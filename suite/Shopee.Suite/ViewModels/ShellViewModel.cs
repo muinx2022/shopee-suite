@@ -189,7 +189,7 @@ public sealed partial class ShellViewModel : ObservableObject
             var acc = ordersVm.AccountsVm;
             var oAccounts = new RibbonScreenItem("Tài khoản", AppIcons.People, ordersVm, 0, "Tài khoản shop");
             var oOrders = new RibbonScreenItem("Đơn hàng", AppIcons.Receipt, ordersVm, 1, "Theo dõi & xử lý đơn · in phiếu");
-            var oProxy = new RibbonScreenItem("Proxy", AppIcons.SwapHoriz, ordersVm, 2, "Kho proxy KiotProxy");
+            // (Bỏ nút "Proxy" khỏi ribbon Shopee theo yêu cầu — màn proxy index 2 không còn điều hướng tới từ ribbon.)
 
             // Nhóm "Hành động" + "Tùy chọn" CHỈ có nghĩa ở màn "Tài khoản" (thao tác trên danh sách tài khoản).
             // Giữ tham chiếu để bật/tắt CẢ NHÓM theo màn đang chọn (làm mờ, không ẩn) — xem đoạn nối bên dưới.
@@ -213,7 +213,7 @@ public sealed partial class ShellViewModel : ObservableObject
 
             ordersTab = new RibbonTab("Shopee", new List<RibbonGroup>
             {
-                new RibbonGroup("Màn hình", new object[] { oAccounts, oOrders, oProxy }),
+                new RibbonGroup("Màn hình", new object[] { oAccounts, oOrders }),
                 oActionGroup,
                 oOptionGroup,
             });
