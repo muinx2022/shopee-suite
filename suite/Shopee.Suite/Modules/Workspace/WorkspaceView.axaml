@@ -79,7 +79,7 @@
                         </TextBlock>
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8" VerticalAlignment="Center">
-                        <Button Classes="primary" Content="▶ Tiếp tục tất cả"
+                        <Button Classes="success" Content="▶ Tiếp tục tất cả"
                                 Command="{Binding ResumePendingWorkCommand}" ToolTip.Tip="{Binding ResumeTooltip}" />
                         <Button Classes="danger" Content="✕ Hủy bỏ"
                                 Command="{Binding DiscardPendingWorkCommand}"
