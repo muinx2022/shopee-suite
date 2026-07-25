@@ -366,6 +366,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         OnPropertyChanged(nameof(ResumeButtonText));
         OnPropertyChanged(nameof(ResumeTooltip));
         ResumePendingWorkCommand.NotifyCanExecuteChanged();
+        DiscardPendingWorkCommand.NotifyCanExecuteChanged();
     }
 
     /// <summary>Nút "⏯ Tiếp tục việc dở (N)": chạy lại TẤT CẢ mục còn dở qua đúng entry-point silent (fire-and-
@@ -391,6 +392,26 @@ public sealed partial class WorkspaceViewModel : ObservableObject
                     _ = Update.RunUpdateSingleAsync(item.Acct.UpdateTarget, silent: true);
                     break;
             }
+        }
+        RecomputeResumePending();
+    }
+
+    /// <summary>Nút "Hủy": bỏ TẤT CẢ việc chạy-tay còn dở khỏi hàng chờ — xoá tiến độ dở ở 2 store để
+    /// RecomputeResumePending không còn nhặt (status hết running/stopped). KHÔNG xoá dữ liệu SP đã lưu.</summary>
+    [RelayCommand(CanExecute = nameof(HasResumePending))]
+    private async Task DiscardPendingWork()
+    {
+        var n = _resumePending.Count;
+        if (!await Dialogs.ConfirmAsync(
+                $"Hủy {n} việc còn dở? Các việc này sẽ KHÔNG tự chạy tiếp nữa (tiến độ dở bị xoá; dữ liệu sản phẩm đã lưu vẫn còn).",
+                "Hủy việc dở", DialogIcon.Warning))
+            return;
+        foreach (var item in _resumePending.ToList())   // ToList: Clear bắn Changed → recompute làm rỗng _resumePending
+        {
+            var acc = item.Acct.Account.Id;
+            var sheet = item.Shop.ShopeeDataSheet ?? "";
+            if (item.Op == "scrape") ScrapeProgressStore.Shared.Clear(acc, sheet);
+            else                     OpProgressStore.Shared.Clear(acc, sheet, item.Op);
         }
         RecomputeResumePending();
     }

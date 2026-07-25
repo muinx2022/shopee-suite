@@ -61,26 +61,49 @@
             </Border>
         </Grid>
 
-        <!-- ════ Thanh trên: hướng dẫn + Dừng tất cả ════ -->
-        <Border Grid.Row="1" Classes="card" Padding="12,10" Margin="0,0,0,12">
-            <Grid>
-                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                    <Button Content="↻ Tải lại" Command="{Binding ReloadCommand}" />
-                    <TextBlock Text="Bấm 1 tài khoản → chạy theo từng shop (▶ scrape · ⬆ import · ✎ update · 🏷 tên SP). Nút xanh ■ = đang chạy (bấm để dừng) · huy hiệu ✓ trên góc nút = đã xong."
-                               Classes="caption" Margin="14,0,0,0" VerticalAlignment="Center" TextWrapping="Wrap" />
-                </StackPanel>
-                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                    <!-- Chỉ hiện khi có việc chạy-tay còn dở (mở lại app / bị dừng). Bấm = chạy tiếp TẤT CẢ. -->
-                    <Button Classes="primary" Content="{Binding ResumeButtonText}" Margin="0,0,8,0"
-                            IsVisible="{Binding HasResumePending}"
-                            Command="{Binding ResumePendingWorkCommand}"
-                            ToolTip.Tip="{Binding ResumeTooltip}" />
-                    <!-- Không có việc nào chạy → nút mờ, không bấm được (CanExecute = AnyRunning). -->
-                    <Button Classes="danger" Content="■ Dừng tất cả" Command="{Binding StopAllCommand}"
-                            ToolTip.Tip="Dừng toàn bộ scrape + update đang chạy. (Dừng riêng 1 tk: bấm ■ trên shop đang chạy.)" />
-                </StackPanel>
-            </Grid>
-        </Border>
+        <!-- ════ Thanh trên: banner việc dở (khi có) + hàng hướng dẫn / Dừng tất cả ════ -->
+        <StackPanel Grid.Row="1">
+
+            <!-- Banner việc dở: chỉ hiện khi HasResumePending — nêu rõ SỐ việc + 2 nút Tiếp tục / Hủy. -->
+            <Border Classes="card" Padding="14,10" Margin="0,0,0,12"
+                    Background="#FDEEE9" BorderBrush="{DynamicResource AccentBrush}"
+                    IsVisible="{Binding HasResumePending}">
+                <Grid>
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Spacing="10">
+                        <TextBlock Text="⏸" Classes="emoji" FontSize="16" VerticalAlignment="Center" />
+                        <TextBlock VerticalAlignment="Center" TextWrapping="Wrap"
+                                   Foreground="{DynamicResource TextPrimaryBrush}">
+                            <Run Text="Có" />
+                            <Run Text="{Binding ResumePendingCount}" FontWeight="Bold" />
+                            <Run Text="việc đang dở dang từ lần trước." />
+                        </TextBlock>
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8" VerticalAlignment="Center">
+                        <Button Classes="primary" Content="▶ Tiếp tục tất cả"
+                                Command="{Binding ResumePendingWorkCommand}" ToolTip.Tip="{Binding ResumeTooltip}" />
+                        <Button Classes="danger" Content="✕ Hủy bỏ"
+                                Command="{Binding DiscardPendingWorkCommand}"
+                                ToolTip.Tip="Bỏ các việc dở khỏi hàng chờ (không tự chạy tiếp nữa)." />
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <!-- Hàng hướng dẫn + Dừng tất cả -->
+            <Border Classes="card" Padding="12,10" Margin="0,0,0,12">
+                <Grid>
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <Button Content="↻ Tải lại" Command="{Binding ReloadCommand}" />
+                        <TextBlock Text="Bấm 1 tài khoản → chạy theo từng shop (▶ scrape · ⬆ import · ✎ update · 🏷 tên SP). Nút xanh ■ = đang chạy (bấm để dừng) · huy hiệu ✓ trên góc nút = đã xong."
+                                   Classes="caption" Margin="14,0,0,0" VerticalAlignment="Center" TextWrapping="Wrap" />
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                        <!-- Không có việc nào chạy → nút mờ, không bấm được (CanExecute = AnyRunning). -->
+                        <Button Classes="danger" Content="■ Dừng tất cả" Command="{Binding StopAllCommand}"
+                                ToolTip.Tip="Dừng toàn bộ scrape + update đang chạy. (Dừng riêng 1 tk: bấm ■ trên shop đang chạy.)" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+        </StackPanel>
 
         <!-- ════ Main: trái = danh sách tk (luôn hiện) · phải = TabControl (Shop/cấu hình + 2 tab log) ════ -->
         <Grid Grid.Row="2" ColumnDefinitions="300,14,*">
