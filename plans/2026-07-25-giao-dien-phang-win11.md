@@ -1,7 +1,7 @@
 # Plan: Làm lại giao diện app desktop theo kiểu phẳng Windows 11
 
 - **Ngày:** 2026-07-25
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-dev`)
 
 ## 1. Bối cảnh & mục tiêu
@@ -162,4 +162,6 @@ Quy tắc chuẩn hóa: **chip/badge/pill nhỏ, icon-box, ô nhập → 4; th�
 
 ## Báo cáo thực thi (Opus điền sau khi xong)
 
-<chưa thực thi>
+Hoàn thành 16 file (11 suite + 5 orders). Build 0 error, 899 test xanh, font Segoe verified.
+Fable chỉnh thêm khi nghiệm thu: ribbon-active đổi sang kiểu Win 11 nhẹ (nền cam nhạt + gạch chân
+accent + chữ/icon cam, thay khối cam kín); huy hiệu ✓ doneBadge trả về hình tròn (6.5). Đã commit 4eea103.

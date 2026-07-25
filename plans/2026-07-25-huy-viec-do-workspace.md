@@ -1,7 +1,7 @@
 # Plan: Khu "việc dở" — nêu rõ số việc + cho chọn Tiếp tục / Hủy
 
 - **Ngày:** 2026-07-25
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-dev`)
 
 ## 1. Bối cảnh & mục tiêu
@@ -121,4 +121,5 @@ private async Task DiscardPendingWork()
 
 ## Báo cáo thực thi (Opus điền sau khi xong)
 
-<chưa thực thi>
+Hoàn thành đúng plan, chỉ 2 file (WorkspaceViewModel.cs + WorkspaceView.axaml). Build 0 error,
+899 test xanh. `ResumeButtonText` giữ lại (vô hại, không còn bind). Đã commit 1fb84ac.
