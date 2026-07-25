@@ -5,6 +5,24 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Hiệu năng. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.5.1 — 2026-07-25
+
+Đợt sửa lỗi + dọn dẹp lớn sau tổng review toàn app (không thêm tính năng mới).
+
+- **Đơn hàng:** nút "Tải phiếu" hoạt động trở lại (tải lại phiếu qua cầu nối extension — chỉ tải được đơn thuộc
+  shop mà phiên đang mở); chạy nhiều tài khoản giờ XẾP HÀNG tự động ("Chờ đến lượt") thay vì giết trình duyệt
+  của nhau + tranh cổng cầu nối; mất kết nối extension báo lỗi NGAY thay vì chờ timeout 30-300s với thông điệp
+  sai; bấm Dừng hiển thị "Đang dừng…" và chỉ cho chạy lại khi phiên cũ tháo dỡ xong; gỡ màn Proxy (đường cầu
+  nối không dùng proxy).
+- **Workspace/BigSeller:** máy bấm "Ngắt kết nối" không còn âm thầm heartbeat lên hub; đồng bộ cookie từ hub ghi
+  file NGUYÊN TỬ (hết nguy cơ cookie hỏng lan đa máy); vá lỗi hiếm có thể làm sập app từ vòng giám sát trình
+  duyệt; chặn được ca 2 vòng cào chạy đè nhau trên cùng hồ sơ; vòng nhận việc hub có log lỗi (hết "máy không
+  nhận việc" câm lặng).
+- **Extension Search/Scrape:** hết ca run tự khởi động lại khi WebSocket chập chờn; kết quả scrape gắn mã lượt —
+  hết báo đúng/sai NHẦM DÒNG khi thử lại; nút "Bán chạy" chọn theo chữ trên nút (đổi thứ tự nút không còn bấm nhầm).
+- **Dọn ~7.800 dòng code chết** (di sản Playwright cũ của Đơn hàng, hub nhúng cũ của desktop, extension POC) —
+  app nhẹ và dễ bảo trì hơn, không đổi hành vi.
+
 ## v1.5.0 — 2026-07-25
 
 - **Đơn hàng chạy qua CẦU NỐI EXTENSION (né captcha):** thay Playwright/CDP bằng cầu nối trình duyệt sạch +
