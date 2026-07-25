@@ -41,14 +41,9 @@ public sealed partial class UpdateProductViewModel : ModuleViewModelBase
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsIdle))]
-    [NotifyCanExecuteChangedFor(nameof(RunImportCommand), nameof(RunUpdateCommand), nameof(RunNameRewriteCommand), nameof(StopCommand))]
     private bool _isRunning;
 
     public bool IsIdle => !IsRunning;
-
-    private CancellationTokenSource? _cts;
-    private readonly object _runnersLock = new();
-    private readonly List<UpdateProductRunner> _runners = [];
 
     private bool _uiLoaded;
 
@@ -127,44 +122,11 @@ public sealed partial class UpdateProductViewModel : ModuleViewModelBase
     }
 
     [RelayCommand]
-    private void SelectAllTargets() { foreach (var t in RunTargets) t.IsSelected = true; }
-
-    [RelayCommand]
-    private void UnselectAllTargets() { foreach (var t in RunTargets) t.IsSelected = false; }
-
-    [RelayCommand]
     private async Task BrowseImageAsync()
     {
         var path = await FilePicker.OpenFileAsync("Chọn ảnh", "Ảnh|*.jpg;*.jpeg;*.png;*.webp|Tất cả|*.*");
         if (path is not null) ImagePath = path;
     }
-
-    [RelayCommand]
-    private async Task BrowseVideoFolderAsync()
-    {
-        var dir = await FilePicker.PickFolderAsync("Chọn thư mục video");
-        if (dir is not null) VideoFolder = dir;
-    }
-
-    /// <summary>Mở dialog map field ↔ cột Excel cho shop của 1 đích chạy (mỗi shop dữ liệu có thể khác).</summary>
-    [RelayCommand]
-    private async Task OpenMapAsync(UpdateRunTargetViewModel? target)
-    {
-        var shop = target?.SelectedShop;
-        if (shop is null) { Warn("Chọn shop trước khi map dữ liệu."); return; }
-        await WindowHost.ShowDialogAsync(new ColumnMapWindow(shop));
-    }
-
-    [RelayCommand(CanExecute = nameof(IsIdle))]
-    private Task RunImport() => RunWorkflowAsync("Import to store", (r, ctx, ct) => r.RunImportAsync(ctx, ct));
-
-    [RelayCommand(CanExecute = nameof(IsIdle))]
-    private Task RunUpdate() => RunWorkflowAsync("Update product", (r, ctx, ct) => r.RunUpdateAsync(ctx, ct), pullSharedImage: true);
-
-    // Name-rewrite chỉ đọc workbook + OpenAI, KHÔNG mở BigSeller → không cần kiểm tra đăng nhập.
-    [RelayCommand(CanExecute = nameof(IsIdle))]
-    private Task RunNameRewrite() => RunWorkflowAsync("Update tên SP", (r, ctx, ct) => r.RunNameRewriteAsync(ctx, ct),
-        requiresBigSellerLogin: false);
 
     // ── v1.1 (màn gộp): chạy RIÊNG từng tk BigSeller, CHẠY SONG SONG được — mỗi tk 1 token + runner RIÊNG,
     //    ĐỘC LẬP với đường batch của màn cũ (không đụng _cts/_runners/IsRunning). Dùng cho nút inline theo shop. ──
@@ -270,7 +232,7 @@ public sealed partial class UpdateProductViewModel : ModuleViewModelBase
             await action(runner, ctx, job.Cts.Token).ConfigureAwait(false);
             // Engine có thể thoát ÊM khi bị hủy (OuterLoop check IsCancellationRequested ở đầu vòng; supervisor
             // đa-lane CỐ Ý nuốt OCE để lane nghỉ hưu) → "không exception" KHÔNG có nghĩa là xong. Bị hủy mà báo
-            // "completed" → ledger hiện ✓ xong oan + HubDispatcher tưởng op xong, nhảy op kế, bỏ sót SP.
+            // "completed" → ledger hiện ✓ xong oan + hub tưởng op xong, nhảy op kế, bỏ sót SP.
             if (job.Cts.Token.IsCancellationRequested)
             {
                 LogA($"{prefix} ■ đã dừng (hủy giữa chừng).");
@@ -336,73 +298,9 @@ public sealed partial class UpdateProductViewModel : ModuleViewModelBase
         try { job.Runner?.Stop(); } catch { }
     }
 
-    private async Task RunWorkflowAsync(
-        string name, Func<UpdateProductRunner, UpdateProductContext, CancellationToken, Task> action,
-        bool requiresBigSellerLogin = true, IReadOnlyList<UpdateRunTargetViewModel>? only = null, bool pullSharedImage = false)
-    {
-        // only != null (v1.1): chạy RIÊNG tk được chỉ định. Bảo vệ chặn chạy chồng (đường command đã có
-        // CanExecute=IsIdle; guard này thêm an toàn cho đường gọi single).
-        if (IsRunning) { Warn("Đang chạy — hãy Dừng trước khi chạy lượt mới."); return; }
-        var picked = (only ?? RunTargets.Where(t => t.IsSelected)).ToList();
-        if (picked.Count == 0) { Warn("Chưa tick chọn tài khoản BigSeller nào để chạy."); return; }
-
-        var ai = await HubAiConfig.GetAsync(CancellationToken.None).ConfigureAwait(false);
-
-        // CHỈ Update: đảm bảo ảnh MỘT LẦN trước khi build/chạy song song (ảnh local riêng hoặc kéo ảnh chung Hub về
-        // khu workbook + trỏ ô chọn ảnh). Chưa có CTS ở đây nên dùng None — pull nhanh, best-effort, timeout _bulkHttp.
-        var img = pullSharedImage ? await EnsureUpdateImageAsync(CancellationToken.None).ConfigureAwait(false) : ImagePath;
-
-        // BigSeller BẮT BUỘC có ảnh để update SP → thiếu ảnh = update fail. Cả local lẫn Hub đều KHÔNG có (offline /
-        // chưa upload) → CHẶN sớm + báo rõ, khỏi chạy rồi lỗi từng SP.
-        if (pullSharedImage && (string.IsNullOrWhiteSpace(img) || !File.Exists(img)))
-        {
-            Warn("Chưa có ảnh Update — BigSeller cần ảnh để cập nhật SP.\n" +
-                 "→ Upload ảnh chung trên Hub (trang Files) HOẶC chọn ảnh local ở ô \"Ảnh Update (máy này)\".");
-            return;
-        }
-
-        // Validate từng đích; tk lỗi (chưa cookie/sheet/workbook) bị bỏ qua, không chặn các tk khác.
-        var jobs = new List<(BigSellerAccount Account, UpdateProductContext Ctx)>();
-        var problems = new List<string>();
-        foreach (var t in picked)
-        {
-            if (!ValidateUpdateTarget(t, requiresBigSellerLogin, out var problem)) { problems.Add(problem); continue; }
-            jobs.Add((t.Account, BuildContext(t, ai, imageOverride: pullSharedImage ? img : null)));
-        }
-
-        if (jobs.Count == 0) { Warn($"Không có tài khoản hợp lệ để chạy {name}.\n" + string.Join("\n", problems)); return; }
-
-        IsRunning = true;
-        _cts = new CancellationTokenSource();
-        LogLines.Clear();
-        Log($"▶ {name} — chạy SONG SONG {jobs.Count} tài khoản.");
-        foreach (var p in problems) Log($"  ⚠ Bỏ qua {p}.");
-
-        try
-        {
-            var ct = _cts.Token;
-            var tasks = jobs.Select(j => Task.Run(() => RunOneAsync(name, action, j.Account, j.Ctx, ct), ct)).ToList();
-            await Task.WhenAll(tasks);
-            Status = ct.IsCancellationRequested ? "Đã dừng." : $"Hoàn tất: {name} ({jobs.Count} tài khoản).";
-            Log($"── {Status} ──");
-        }
-        catch (Exception ex)
-        {
-            if (_cts?.IsCancellationRequested == true) { Status = "Đã dừng."; Log("── Đã dừng. ──"); }
-            else Warn($"Lỗi {name}: " + ex.Message);
-        }
-        finally
-        {
-            lock (_runnersLock) _runners.Clear();
-            // KHÔNG Dispose _cts: tác vụ async sót có thể còn dùng token → bỏ tham chiếu cho GC dọn.
-            _cts = null;
-            IsRunning = false;
-        }
-    }
-
     // Validate 1 đích update (shop/sheet/workbook/cookie). true = hợp lệ; false → problem = thông điệp lỗi
-    // KHÔNG có dấu chấm cuối (caller tự thêm). Dùng CHUNG cho đường single (RunOneWorkflowAsync) lẫn batch
-    // (RunWorkflowAsync) → một nguồn sự thật cho "đích nào chạy được".
+    // KHÔNG có dấu chấm cuối (caller tự thêm). Dùng CHUNG cho mọi đường chạy single per-shop (RunOneWorkflowAsync
+    // + CanDispatchUpdate) → một nguồn sự thật cho "đích nào chạy được".
     private static bool ValidateUpdateTarget(UpdateRunTargetViewModel t, bool requiresBigSellerLogin, out string problem)
     {
         var a = t.Account; var s = t.SelectedShop;
@@ -473,36 +371,6 @@ public sealed partial class UpdateProductViewModel : ModuleViewModelBase
             s.ColumnMap.LinkColumn, s.ColumnMap.PriceColumn, s.ColumnMap.SkuColumn,
             s.ColumnMap.ItemIdColumn, s.ColumnMap.ProductNameColumn, s.ColumnMap.RewrittenNameColumn,
             a.Password, a.UsesHubData);   // hub-mode: đọc/ghi kho Hub (Postgres) thay vì workbook Excel local
-    }
-
-    private async Task RunOneAsync(
-        string name, Func<UpdateProductRunner, UpdateProductContext, CancellationToken, Task> action,
-        BigSellerAccount account, UpdateProductContext ctx, CancellationToken ct)
-    {
-        var prefix = $"[{account.DisplayName}]";
-        void LogA(string m) => LogAcc(account.Id, account.DisplayName, m);
-        // Mỗi lượt chạy hiện log TƯƠI của acc → xoá phần XEM buffer riêng (file vẫn giữ đầy đủ).
-        OnUi(() => AccountLogs.Get(account.Id, account.DisplayName).Clear());
-        var runner = new UpdateProductRunner();
-        runner.Log += m => LogA($"{prefix} {m}");
-        lock (_runnersLock) _runners.Add(runner);
-        try
-        {
-            await action(runner, ctx, ct).ConfigureAwait(false);
-            LogA($"{prefix} ✔ xong {name}.");
-        }
-        catch (OperationCanceledException) { LogA($"{prefix} ■ đã dừng."); }
-        catch (Exception ex) { LogA($"{prefix} ✖ lỗi: {ex.Message}"); }
-        finally { lock (_runnersLock) _runners.Remove(runner); }
-    }
-
-    [RelayCommand(CanExecute = nameof(IsRunning))]
-    private void Stop()
-    {
-        _cts?.Cancel();
-        lock (_runnersLock)
-            foreach (var r in _runners) { try { r.Stop(); } catch { } }
-        Status = "Đang dừng…";
     }
 
 }

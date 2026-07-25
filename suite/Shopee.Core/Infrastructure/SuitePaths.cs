@@ -53,28 +53,7 @@ public static class SuitePaths
     /// <summary>Thư mục cache các file dùng chung tải từ Hub về máy này (workbook, cookie…).</summary>
     public static string HubCacheDir => ModuleDir("hub-cache");
 
-    /// <summary>Đường dẫn cục bộ của một file "hub-relative" (đã tải từ Hub về <see cref="HubCacheDir"/>).</summary>
-    public static string ResolveHubRelative(string relative) =>
-        Path.Combine(HubCacheDir, relative.Replace('/', Path.DirectorySeparatorChar));
-
     /// <summary>%AppData%\ShopeeStatApp — dữ liệu của app shopee-stat cũ (đích copy account).</summary>
     public static string ShopeeStatDataDir { get; } = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ShopeeStatApp");
-
-    /// <summary>
-    /// Repo root chứa cả <c>shopee-stat</c> lẫn <c>open-multi-brave-v31</c> — để biết nơi đăng ký
-    /// account + copy profile sang các app cũ. Đi ngược từ thư mục chạy lên tới khi thấy cả hai.
-    /// </summary>
-    public static string RepoRoot { get; } = ResolveRepoRoot();
-
-    private static string ResolveRepoRoot()
-    {
-        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
-        {
-            if (Directory.Exists(Path.Combine(dir.FullName, "shopee-stat")) &&
-                Directory.Exists(Path.Combine(dir.FullName, "open-multi-brave-v31")))
-                return dir.FullName;
-        }
-        return AppContext.BaseDirectory;
-    }
 }

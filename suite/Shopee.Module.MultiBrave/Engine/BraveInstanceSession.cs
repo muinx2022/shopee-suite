@@ -499,16 +499,6 @@ internal sealed class BraveInstanceSession : IDisposable
                 }
                 Log("Đã dừng chạy.");
             }
-            catch (ApiNotRunningException ex)
-            {
-                if (_config is not null)
-                {
-                    _config.RunnerRunning = false;
-                    _config.RunnerPhase = "paused";
-                    _config.LastRunnerMessage = "API dữ liệu chưa chạy (port 8012).";
-                }
-                Log($"Lỗi runner: {ex.Message}");
-            }
             catch (Exception ex)
             {
                 if (_config is not null)

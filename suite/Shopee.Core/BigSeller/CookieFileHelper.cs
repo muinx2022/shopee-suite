@@ -29,42 +29,4 @@ public static class CookieFileHelper
         if (cookiesEl.ValueKind != JsonValueKind.Array)
             throw new InvalidOperationException("File cookie không hợp lệ.");
     }
-
-    public static bool TryWriteCookieFile(
-        string cookieFile,
-        IReadOnlyCollection<Dictionary<string, object?>> cookies,
-        Action<string>? log = null)
-    {
-        var tmp = $"{cookieFile}.{Environment.ProcessId}-{Guid.NewGuid():N}.tmp";
-        try
-        {
-            var dir = Path.GetDirectoryName(Path.GetFullPath(cookieFile));
-            if (!string.IsNullOrWhiteSpace(dir))
-                Directory.CreateDirectory(dir);
-
-            var json = JsonSerializer.Serialize(
-                new { exportedAt = DateTimeOffset.Now, cookies },
-                new JsonSerializerOptions { WriteIndented = true });
-            File.WriteAllText(tmp, json);
-
-            for (var attempt = 0; ; attempt++)
-            {
-                try
-                {
-                    File.Move(tmp, cookieFile, overwrite: true);
-                    return true;
-                }
-                catch (IOException) when (attempt < 4)
-                {
-                    Thread.Sleep(150);
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            try { File.Delete(tmp); } catch { }
-            log?.Invoke($"Cookie: khong luu duoc cookie ra file: {ex.Message}");
-            return false;
-        }
-    }
 }

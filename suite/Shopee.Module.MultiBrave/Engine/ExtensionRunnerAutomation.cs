@@ -1131,7 +1131,6 @@ internal static class ExtensionRunnerAutomation
         int maxAttempts = 15,
         TimeSpan? receiveTimeoutOverride = null)
     {
-        var payloadExpr = PayloadExpression(payloadJson);
         var evalResult = await EvaluateExtensionRawAsync(
             cdpPort,
             extensionId,
@@ -1567,12 +1566,8 @@ internal static class ExtensionRunnerAutomation
     private static async Task<string?> ResolveExtensionIdAsync(
         int cdpPort,
         DirectoryInfo profileRoot,
-        CancellationToken ct,
-        bool allowProfileFallback = true)
+        CancellationToken ct)
     {
-        if (!allowProfileFallback)
-            return null;
-
         // D�ng l?i ID d� x�c th?c t? EnsureRunnerExtensionReadyAsync (nh?t qu�n + tr�nh re-probe)
         if (_resolvedExtensionByPort.TryGetValue(cdpPort, out var cached))
             return cached;

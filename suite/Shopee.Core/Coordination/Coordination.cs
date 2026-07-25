@@ -17,24 +17,11 @@ public sealed class NoOpCoordinationHub : ICoordinationHub
     public IReadOnlyList<LeaseRecord> ActiveLeases() => [];
 }
 
-/// <summary>Đồng bộ TẮT: không làm gì.</summary>
-public sealed class NoOpHubSync : IHubSync
-{
-    public static readonly NoOpHubSync Instance = new();
-    private NoOpHubSync() { }
-
-    public bool Enabled => false;
-    public void Start() { }
-    public void Stop() { }
-    public Task PullNowAsync(CancellationToken ct) => Task.CompletedTask;
-}
-
 /// <summary>
 /// Bộ định vị dịch vụ điều phối toàn app. Mặc định NoOp (hub tắt → không đổi hành vi). Khi người
-/// dùng bật Hub, App khởi tạo và gán <see cref="Hub"/>/<see cref="Sync"/> bằng impl HTTP.
+/// dùng bật Hub, App khởi tạo và gán <see cref="Hub"/> bằng impl HTTP.
 /// </summary>
 public static class Coordination
 {
     public static ICoordinationHub Hub { get; set; } = NoOpCoordinationHub.Instance;
-    public static IHubSync Sync { get; set; } = NoOpHubSync.Instance;
 }

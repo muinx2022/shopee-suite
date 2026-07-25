@@ -25,8 +25,6 @@ public sealed class BrowserLauncher
     public int CdpPort => _cdpPort;
     public BrowserKind Kind => _kind;
 
-    public string? DetectExePath() => Detect(_kind);
-
     /// <summary>Thư mục "User Data" mẫu của trình duyệt (phải có Default) — dùng làm nguồn copy
     /// extension-state khi tạo profile mới. null nếu chưa từng mở trình duyệt.</summary>
     public static string? DetectUserData(BrowserKind kind) =>

@@ -30,7 +30,8 @@ public sealed partial class ScrapeViewModel : ModuleViewModelBase
     public ObservableCollection<ErroredAccountRow> ErroredAccounts { get; } = [];
 
     [ObservableProperty] private string _videoDir = @"D:\videos";
-    [ObservableProperty] private int _poolCount;
+    // Số acc Shopee đang bật (kho xoay vòng) — chỉ dùng nội bộ cho dòng Status, KHÔNG bind ra UI.
+    private int _poolCount;
 
     /// <summary>Tk BigSeller đang click để xem/sửa config chi tiết (panel phải).</summary>
     [ObservableProperty]
@@ -42,7 +43,7 @@ public sealed partial class ScrapeViewModel : ModuleViewModelBase
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsIdle))]
-    [NotifyCanExecuteChangedFor(nameof(RunCommand), nameof(ResumeCommand), nameof(StopCommand))]
+    [NotifyCanExecuteChangedFor(nameof(StopCommand))]
     private bool _isBusy;
 
     public bool IsIdle => !IsBusy;
@@ -96,23 +97,9 @@ public sealed partial class ScrapeViewModel : ModuleViewModelBase
     {
         // Dựng lại ScrapeTargets từ kho BigSeller + giữ lựa chọn panel-chi-tiết (thuần UI) theo Id — projection lo.
         _targets.Rebuild();
-        PoolCount = AccountStore.Shared.Accounts.Count(a => !a.Disabled);
-        Status = $"{ScrapeTargets.Count} BigSeller · {PoolCount} acc Shopee (tự xoay vòng).";
+        _poolCount = AccountStore.Shared.Accounts.Count(a => !a.Disabled);
+        Status = $"{ScrapeTargets.Count} BigSeller · {_poolCount} acc Shopee (tự xoay vòng).";
     }
-
-    [RelayCommand]
-    private void SelectAllTargets() { foreach (var t in ScrapeTargets) t.IsSelected = true; }
-
-    [RelayCommand]
-    private void UnselectAllTargets() { foreach (var t in ScrapeTargets) t.IsSelected = false; }
-
-    /// <summary>Chạy = RESET: xoá tiến độ đã lưu, chạy lại từ "Từ dòng".</summary>
-    [RelayCommand(CanExecute = nameof(IsIdle))]
-    private Task Run() => StartAsync(resume: false);
-
-    /// <summary>Tiếp tục = RESUME: chỉ chạy các dòng CÒN THIẾU theo tiến độ đã lưu.</summary>
-    [RelayCommand(CanExecute = nameof(IsIdle))]
-    private Task Resume() => StartAsync(resume: true);
 
     /// <summary>v1.1 (màn gộp BigSeller): chạy/tiếp tục RIÊNG 1 tk BigSeller mà KHÔNG đụng tick của tk khác.
     /// Rảnh → mở phiên mới chỉ gồm tk này; đang chạy → thêm job tk này (resume) vào phiên hiện tại.
@@ -166,7 +153,7 @@ public sealed partial class ScrapeViewModel : ModuleViewModelBase
 
         // Kho tk Shopee = TẤT CẢ tk đang bật, DÙNG CHUNG cho mọi job BigSeller. Không pin tk vào BigSeller
         // nào nữa: mỗi khối mượn 1 tk nghỉ lâu nhất rồi trả về kho → các BigSeller chia sẻ + tk luân phiên nghỉ.
-        var session = new RunSession { SourceUserData = sourceUserData, Resume = resume };
+        var session = new RunSession { SourceUserData = sourceUserData };
         session.Available.AddRange(pool);
         // Seed bộ đếm vòng-LRU = mốc cao nhất đã lưu → cấp phát tiếp vòng, không nện lại tk đầu sau restart.
         session.LruTick = AccountStore.Shared.Accounts.Select(a => a.LastUsedTick).DefaultIfEmpty(0).Max();
@@ -616,30 +603,6 @@ public sealed partial class ScrapeViewModel : ModuleViewModelBase
         // (tk Shopee đang mượn dở được worker trả về kho khi RunChunk bị huỷ.)
     }
 
-    /// <summary>Click checkbox khi ĐANG run: hỏi xác nhận rồi chạy/dừng RIÊNG tk đó. Gọi từ code-behind.</summary>
-    public async Task ToggleAccountDuringRun(ScrapeTargetViewModel target)
-    {
-        var s = _session;
-        if (s is null) return;
-        var running = s.Jobs.Contains(target.Account.Id);
-
-        if (running)
-        {
-            if (!await Dialogs.ConfirmAsync($"Xác nhận HỦY chạy \"{target.DisplayName}\"?\nCác tài khoản khác vẫn chạy bình thường.",
-                    "Hủy chạy tài khoản"))
-                return;
-            await StopOneAccount(target);
-            target.IsSelected = false;
-        }
-        else
-        {
-            if (!await Dialogs.ConfirmAsync($"Xác nhận CHẠY \"{target.DisplayName}\" (tiếp tục phần dòng còn thiếu)?",
-                    "Chạy tài khoản"))
-                return;
-            if (StartOneAccount(target)) target.IsSelected = true;
-        }
-    }
-
     /// <summary>Click 1 dòng tiến trình → đưa cửa sổ Brave của process đó lên trước toàn bộ.
     /// Key lưới = "{seq}:P{slot}" → tìm job theo seq → runner.BringInstanceToFront("P{slot}").</summary>
     public void BringInstanceToFront(ScrapeInstanceViewModel inst)
@@ -795,7 +758,6 @@ public sealed partial class ScrapeViewModel : ModuleViewModelBase
         // Sổ job theo tk (key = BigSeller Account.Id). Tự lo lock + dedup + chốt (Finalizing cũ = _sealed nội bộ).
         public readonly PerAccountJobRegistry<JobHandle> Jobs = new();
         public int JobSeq;          // tăng dần — namespace key lưới UI (thay jobIndex cũ)
-        public bool Resume;         // chế độ phiên
         public long LruTick;        // bộ đếm vòng-LRU cấp phát tk Shopee (seed cho ClaimFrame)
 
         // ── Cấp KHUNG tk Shopee cho 1 job BigSeller (đóng khung): lấy (và GỠ khỏi kho chung) tối đa n tk —

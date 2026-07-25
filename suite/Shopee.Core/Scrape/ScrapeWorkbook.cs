@@ -17,19 +17,6 @@ public sealed record ScrapeLinkResult(
 /// </summary>
 public static class ScrapeWorkbook
 {
-    public static List<string> ListSheets(string workbookPath)
-    {
-        var names = new List<string>();
-        if (!File.Exists(workbookPath)) return names;
-        try
-        {
-            using var wb = Open(workbookPath);
-            foreach (var ws in wb.Worksheets) names.Add(ws.Name);
-        }
-        catch { }
-        return names;
-    }
-
     /// <summary>Tổng số dòng dữ liệu (sau header) của sheet — chỉ đếm dòng CÓ THẬT (bỏ header + bỏ
     /// dòng trống bị Excel lược), khớp <c>len(data_rows)</c> của API Python cũ.</summary>
     public static int TotalDataRows(string workbookPath, string sheet)
