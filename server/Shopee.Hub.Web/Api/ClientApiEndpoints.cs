@@ -13,7 +13,7 @@ namespace Shopee.Hub.Web.Api;
 /// API cho CLIENT (bản WPF/Avalonia). Port NGUYÊN bảng route Map() của suite\Shopee.Hub\HubServer.cs — GIỮ
 /// đường dẫn + hình dạng JSON (camelCase, minimal-API defaults) để client cũ kết nối y hệt, khỏi sửa gì.
 /// Khác biệt: mỗi route yêu cầu policy "Client" (scheme X-Api-Token) thay vì middleware token thủ công;
-/// /health mở. THÊM: /accounts/append, /accounts/remove, /dispatcher; cờ AllowClientConfigPush chặn client
+/// /health mở. THÊM: /accounts/append, /accounts/remove; cờ AllowClientConfigPush chặn client
 /// đè config/*.json sau cutover.
 /// </summary>
 public static class ClientApiEndpoints
@@ -103,14 +103,16 @@ public static class ClientApiEndpoints
         api.MapPost(HubRoutes.AccountsErroredClear, (ClearAccountErrorRequest? r) => { if (r is null) return Results.BadRequest(); db.ClearAccountError(r.AccountId); return Results.Ok(); });
 
         // ── MỚI: client đẩy acc Shopee OK mới check lên (web-hub là nguồn sự thật; client hết push accounts.json) ──
-        api.MapPost("/accounts/append", (List<ShopeeAccount>? r, FileStoreConfigService cfg) =>
+        api.MapPost("/accounts/append", (List<ShopeeAccount>? r, FileStoreConfigService cfg, HttpContext ctx, ILoggerFactory lf) =>
         {
+            LogLegacyHit(lf, ctx, "/accounts/append");
             if (r is null) return Results.BadRequest();
             var added = cfg.AppendShopeeAccounts(r);
             return Results.Json(new { added });
         });
-        api.MapPost("/accounts/remove", (AccountRemoveRequest? r, FileStoreConfigService cfg) =>
+        api.MapPost("/accounts/remove", (AccountRemoveRequest? r, FileStoreConfigService cfg, HttpContext ctx, ILoggerFactory lf) =>
         {
+            LogLegacyHit(lf, ctx, "/accounts/remove");
             if (r is null || string.IsNullOrWhiteSpace(r.Id)) return Results.BadRequest();
             return Results.Json(new { removed = cfg.RemoveShopeeAccount(r.Id) });
         });
@@ -127,7 +129,11 @@ public static class ClientApiEndpoints
 
         // ── Nghiệp vụ đơn hàng ──
         // GET /api/shops → danh sách shop (hub tự đăng ký theo username khi client push).
-        api.MapGet(HubRoutes.Shops, () => Results.Json(db.ListShops()));
+        api.MapGet(HubRoutes.Shops, (HttpContext ctx, ILoggerFactory lf) =>
+        {
+            LogLegacyHit(lf, ctx, HubRoutes.Shops);
+            return Results.Json(db.ListShops());
+        });
 
         // POST /api/orders/push → hub tự đăng ký shop theo username rồi upsert lô đơn + ghi log; có đơn MỚI
         // (Added>0) → bắn tin về webhook cấu hình (fire-and-forget, KHÔNG chặn response).
@@ -195,24 +201,22 @@ public static class ClientApiEndpoints
         });
 
         // GET /api/orders?shopId=&status=&q=&page=&pageSize= → xem đơn (admin lẫn client).
-        api.MapGet(HubRoutes.Orders, (long? shopId, string? status, string? q, int? page, int? pageSize) =>
+        api.MapGet(HubRoutes.Orders, (long? shopId, string? status, string? q, int? page, int? pageSize, HttpContext ctx, ILoggerFactory lf) =>
         {
+            LogLegacyHit(lf, ctx, HubRoutes.Orders);
             var ps = Math.Clamp(pageSize ?? 50, 1, 500);
             var p = Math.Max(1, page ?? 1);
             var total = db.CountOrders(shopId, status, q);
             var items = db.QueryOrders(shopId, status, q, ps, (p - 1) * ps);
             return Results.Json(new { items, total, page = p, pageSize = ps });
         });
-
-        // ── MỚI: xem/đổi trạng thái điều phối (web UI + có thể client đọc) ──
-        api.MapGet("/dispatcher", (DispatcherService d) => Results.Json(new { enabled = d.Enabled, auto = d.AutoMode }));
-        api.MapPost("/dispatcher", (DispatcherStateRequest? r, DispatcherService d) =>
-        {
-            if (r is null) return Results.BadRequest();
-            d.Enabled = r.Enabled; d.AutoMode = r.Auto;
-            return Results.Ok();
-        });
     }
+
+    /// <summary>Ghi cảnh báo mỗi lần trúng 1 endpoint LEGACY (repo không còn ai gọi, nhưng client CŨ ngoài fleet có
+    /// thể còn) — thu bằng chứng để đợt sau xoá hẳn nếu log im. IP thực đọc qua <see cref="LoginRateLimit.IpOf"/>
+    /// (CF-Connecting-IP → RemoteIpAddress).</summary>
+    private static void LogLegacyHit(ILoggerFactory lf, HttpContext ctx, string path) =>
+        lf.CreateLogger("LegacyApi").LogWarning("legacy endpoint hit: {Path} from {Ip}", path, LoginRateLimit.IpOf(ctx));
 
     /// <summary>Trần kích thước một file phiếu hub nhận qua POST /api/orders/slip (khớp trần client đọc phiếu).</summary>
     private const long MaxSlipBytes = 5 * 1024 * 1024;
@@ -276,5 +280,3 @@ public static class ClientApiEndpoints
 
 /// <summary>Body cho /accounts/remove.</summary>
 public sealed record AccountRemoveRequest(string Id);
-/// <summary>Body cho POST /dispatcher.</summary>
-public sealed record DispatcherStateRequest(bool Enabled, bool Auto);

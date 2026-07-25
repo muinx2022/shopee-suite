@@ -112,36 +112,6 @@ public static class ProductApiEndpoints
             return Results.Json(new ProductResetStoreResponse(await pdb.ResetStoreProgressAsync(r.Acct, r.Sheet, r.Op ?? "", ct)));
         });
 
-        // ── Import: body = bytes xlsx (đọc Request.Body như PUT /files, KHÔNG [FromBody]) ──
-        api.MapPost(HubRoutes.ProductsImportXlsx, async (string? acct, string? mode, string? file,
-            int? linkCol, int? priceCol, int? skuCol, int? itemCol, int? nameCol, int? rewrittenCol,
-            HttpRequest req, IServiceProvider sp, CancellationToken ct) =>
-        {
-            var pdb = sp.GetService<ProductDb>();
-            if (pdb is null || !pdb.IsReady) return PgNotReady();
-            if (string.IsNullOrEmpty(acct)) return Results.BadRequest();
-
-            using var ms = new MemoryStream();
-            await req.Body.CopyToAsync(ms, ct);
-            var bytes = ms.ToArray();
-
-            var ov = new ProductXlsxCodec.ColumnOverrides(
-                linkCol ?? 1, priceCol ?? 3, skuCol ?? 4, itemCol ?? 5, nameCol ?? 6, rewrittenCol ?? 7);
-            var by = req.Headers["X-Machine-Id"].ToString();
-            var res = await pdb.ImportXlsxAsync(acct, mode ?? "replace", file, bytes, ov, by, ct);
-            return Results.Json(res);
-        });
-
-        // ── Export: file xlsx dựng lại từ kho (worksheet đặt tên = TÊN SHOP, hết lộ GUID ngăn dữ liệu) ──
-        api.MapGet(HubRoutes.ProductsExportXlsx, async (string? acct, string? sheet, IServiceProvider sp, CancellationToken ct) =>
-        {
-            var pdb = sp.GetService<ProductDb>();
-            if (pdb is null || !pdb.IsReady) return PgNotReady();
-            if (string.IsNullOrEmpty(acct)) return Results.BadRequest();
-            var (bytes, fileName) = await pdb.ExportXlsxAsync(acct, sheet, ct, ShopTitles(sp, acct));
-            return Results.File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fileName);
-        });
-
         // ══ Trang "📦 Dữ liệu" (mọi shop) — client desktop thao tác qua HTTP như Blazor gọi in-process ══
 
         // ── Đọc: đếm + 1 trang khớp lọc (Limit kẹp [1..500], Offset ≥ 0) trong 1 round-trip ──
@@ -244,18 +214,5 @@ public static class ProductApiEndpoints
             var exists = await pdb.ExistsSkuInShopAsync(acct ?? "", sheet ?? "", s, excludeRowNo ?? -1, ct);
             return Results.Json(new ProductSkuExistsResponse(exists));
         });
-    }
-
-    /// <summary>Ánh xạ ShopeeDataSheet (khoá ngăn) → TÊN SHOP cho 1 acc, để export đặt tên worksheet. Đọc config
-    /// dùng-chung qua <see cref="FileStoreConfigService"/>; acc không có/không cấu hình → null (export giữ khoá ngăn).</summary>
-    private static IReadOnlyDictionary<string, string>? ShopTitles(IServiceProvider sp, string acct)
-    {
-        var a = sp.GetService<FileStoreConfigService>()?.BigSellerAccounts().FirstOrDefault(x => x.Id == acct);
-        if (a is null) return null;
-        var map = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (var s in a.Shops)
-            if (!string.IsNullOrWhiteSpace(s.ShopeeDataSheet))
-                map[s.ShopeeDataSheet] = s.Name;
-        return map;
     }
 }

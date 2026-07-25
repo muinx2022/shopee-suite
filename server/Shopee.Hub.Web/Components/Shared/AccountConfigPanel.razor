@@ -37,9 +37,13 @@ else
                 <button class="btn primary sm" @onclick="() => SubmitOtp(_acct.Id)">Gửi mã</button>
             }
         </div>
-        @if (Login.GetState(_acct.Id) is { } lg && lg.Log.Count > 0 && (lg.Status is "running" or "needsOtp" or "failed"))
+        @if (Login.GetState(_acct.Id) is { } lg && lg.Status is "running" or "needsOtp" or "failed")
         {
-            <div class="loginlog">@string.Join("\n", lg.Log.TakeLast(6))</div>
+            var lgLog = lg.LogSnapshot();   // bản sao an toàn-thread (phiên login mutate list gốc song song)
+            if (lgLog.Count > 0)
+            {
+                <div class="loginlog">@string.Join("\n", lgLog.TakeLast(6))</div>
+            }
         }
 
         @* Lưới quản lý shop NGAY trong panel acc (CRUD): sửa tên inline (bấm 💾 Lưu dưới để ghi), ⚙ mở cấu hình

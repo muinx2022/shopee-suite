@@ -1,5 +1,6 @@
 @page "/orders"
 @attribute [Authorize(Policy = "Web")]
+@implements IDisposable
 @inject HubDatabase Db
 
 <p class="hint m-hide">Đơn hàng client đẩy lên hub qua <code>POST /api/orders/push</code>. Lọc theo shop / trạng thái / tìm kiếm (mã đơn, người mua, tên SP, SKU) + phân trang.</p>
@@ -24,7 +25,7 @@
         </select>
     </label>
     <label>Tìm
-        <input @bind="_search" @bind:event="oninput" @bind:after="OnFilterChanged" placeholder="mã đơn / người mua / SP / SKU" style="width:240px" />
+        <input @bind="_search" @bind:event="oninput" @bind:after="OnSearchDebounced" placeholder="mã đơn / người mua / SP / SKU" style="width:240px" />
     </label>
     <span class="stat">@_total đơn</span>
 </div>
@@ -101,6 +102,23 @@
     }
 
     private void OnFilterChanged() { _page = 1; Load(); }
+
+    // Ô TÌM gõ liên tục (oninput) từng chạy CountOrders+QueryOrders (LIKE %…% không index) dưới lock(_gate) toàn cục
+    // của HubDatabase MỖI phím → nghẽn heartbeat/lease cả fleet. Debounce 300ms: huỷ timer cũ mỗi keystroke, chỉ query
+    // KHI ngừng gõ. Callback bắn từ threadpool → InvokeAsync đưa về sync-context của circuit trước khi đụng state/DB.
+    private System.Threading.Timer? _searchTimer;
+    private void OnSearchDebounced()
+    {
+        _searchTimer?.Dispose();
+        _searchTimer = new System.Threading.Timer(_ => _ = InvokeAsync(() =>
+        {
+            _page = 1;
+            Load();
+            StateHasChanged();
+        }), null, 300, System.Threading.Timeout.Infinite);
+    }
+
+    public void Dispose() => _searchTimer?.Dispose();   // huỷ timer đang chờ khi rời trang (khỏi rò timer + callback trên circuit đã đóng)
 
     private void GoPage(int p) { _page = Math.Clamp(p, 1, _totalPages); Load(); }
 

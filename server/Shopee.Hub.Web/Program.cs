@@ -66,7 +66,7 @@ builder.Services.AddSingleton<FleetStateService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<FleetStateService>());
 // SheetMapService: đọc + cache cấu trúc dòng kho sản phẩm (Postgres) cho "bản đồ dòng" trang Thống kê.
 builder.Services.AddSingleton<SheetMapService>();
-// DispatcherService: BackgroundService + được inject (endpoint /dispatcher, trang Fleet) → 1 singleton.
+// DispatcherService: BackgroundService + được inject (trang Fleet) → 1 singleton.
 builder.Services.AddSingleton<DispatcherService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<DispatcherService>());
 builder.Services.AddHostedService<MaintenanceService>();
@@ -107,12 +107,15 @@ builder.Services.AddAuthorization(o =>
 builder.Services.AddCascadingAuthenticationState();
 
 // Cloudflared chạy cùng máy (loopback) → tin proxy để lấy IP thực (rate-limit login) + scheme.
+// CHỈ tin proxy loopback (127.0.0.0/8): Clear() cả KnownNetworks/KnownProxies khiến MỌI nguồn spoof được
+// X-Forwarded-For (giả IP để né rate-limit login). cloudflared chạy cùng máy nên loopback là đủ.
 builder.Services.Configure<ForwardedHeadersOptions>(o =>
 {
     o.ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor
                          | Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto;
     o.KnownNetworks.Clear();
     o.KnownProxies.Clear();
+    o.KnownNetworks.Add(new Microsoft.AspNetCore.HttpOverrides.IPNetwork(System.Net.IPAddress.Loopback, 8));
 });
 
 builder.Services.AddRazorComponents().AddInteractiveServerComponents();

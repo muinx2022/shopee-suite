@@ -10,8 +10,15 @@ public sealed class LoginState
 {
     public string Status { get; set; } = "idle";   // idle | running | needsOtp | success | failed
     public bool NeedsOtp => Status == "needsOtp";
-    public List<string> Log { get; } = new();
     public string Message { get; set; } = "";
+
+    // Log: RunAsync mutate qua AppendLog dưới _logGate RIÊNG; UI (AccountConfigPanel) đọc qua LogSnapshot() —
+    // KHÔNG cho TakeLast/enumerate thẳng list gốc (Say Add giữa lúc render → "Collection was modified").
+    private readonly object _logGate = new();
+    private List<string> Log { get; } = new();
+    internal void AppendLog(string line) { lock (_logGate) { Log.Add(line); if (Log.Count > 200) Log.RemoveAt(0); } }
+    /// <summary>Bản sao an toàn-thread của log để UI render (không đụng list gốc đang bị worker mutate).</summary>
+    public List<string> LogSnapshot() { lock (_logGate) return Log.ToList(); }
 }
 
 /// <summary>
@@ -92,7 +99,8 @@ public sealed class BigSellerLoginService : IAsyncDisposable
 
     private void Say(Session s, string msg)
     {
-        lock (_gate) { s.State.Log.Add($"{DateTimeOffset.Now:HH:mm:ss} {msg}"); if (s.State.Log.Count > 200) s.State.Log.RemoveAt(0); s.State.Message = msg; }
+        lock (_gate) s.State.Message = msg;
+        s.State.AppendLog($"{DateTimeOffset.Now:HH:mm:ss} {msg}");   // tự khoá _logGate riêng của State
         _log.LogInformation("bs-login: {Msg}", msg);
     }
 

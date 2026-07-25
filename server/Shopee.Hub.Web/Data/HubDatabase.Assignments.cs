@@ -7,6 +7,11 @@ namespace Shopee.Hub;
 public sealed partial class HubDatabase
 {
     // ── Vai trò máy + Giao việc (Hub đẩy việc cho client) ────────────────────────
+    /// <summary>Cờ lỗi mà SweepStaleLocked GHI cho việc 'running' hết nhịp — và ĐỐI CHIẾU bằng equality khi hồi sinh
+    /// (SweepStaleLocked bước 2) + resume-mine (ResumeMachineWork). GIÁ TRỊ tuyệt đối KHÔNG ĐỔI: DB production đang
+    /// chứa các dòng mang đúng chuỗi này; đổi wording là logic hồi sinh/resume bỏ sót dòng cũ (gãy âm thầm).</summary>
+    private const string StaleSweepError = "hết nhịp (máy nhận có thể đã thoát)";
+
     public TimeSpan StaleMachine { get; init; } = TimeSpan.FromSeconds(45);
     /// <summary>Việc 'running' quá lâu không có nhịp (worker báo "running" mỗi ~10s) ⇒ coi như máy nhận đã
     /// thoát → đánh 'failed' để nhả khoá single-session cho tài khoản đó. Khoá lease (5') là lưới cuối.</summary>
@@ -30,8 +35,9 @@ public sealed partial class HubDatabase
         // (1) 'running' hết nhịp → 'failed', TRỪ KHI lease còn sống (máy vẫn chạy thật).
         using (var c = _conn.CreateCommand())
         {
-            c.CommandText = "UPDATE assignments SET status='failed', last_error='hết nhịp (máy nhận có thể đã thoát)', updated_at=$ua "
+            c.CommandText = "UPDATE assignments SET status='failed', last_error=$err, updated_at=$ua "
                 + "WHERE status='running' AND updated_at < $cut AND NOT " + leaseAlive;
+            c.Parameters.AddWithValue("$err", StaleSweepError);
             c.Parameters.AddWithValue("$ua", Iso(now));
             c.Parameters.AddWithValue("$cut", cut);
             c.ExecuteNonQuery();
@@ -43,9 +49,10 @@ public sealed partial class HubDatabase
         using (var c = _conn.CreateCommand())
         {
             c.CommandText = "UPDATE assignments SET status='running', last_error='', updated_at=$ua "
-                + "WHERE status='failed' AND last_error='hết nhịp (máy nhận có thể đã thoát)' AND " + leaseAlive;
+                + "WHERE status='failed' AND last_error=$err AND " + leaseAlive;
             c.Parameters.AddWithValue("$ua", Iso(now));
             c.Parameters.AddWithValue("$cut", cut);
+            c.Parameters.AddWithValue("$err", StaleSweepError);
             c.ExecuteNonQuery();
         }
     }
@@ -466,8 +473,9 @@ VALUES($id,$b,$s,$sh,$o,$t,$p,'queued','','','',$ca,$ua,$sr,$er,$pl,$pr,$fs,$rl)
             using (var c = _conn.CreateCommand())
             {
                 // dismissed=0: bản operator đã Reset máy thì KHÔNG hồi (họ chủ động xoá, không phải máy chết oan).
-                c.CommandText = "SELECT * FROM assignments WHERE claimed_by=$m AND status='failed' AND last_error='hết nhịp (máy nhận có thể đã thoát)' AND dismissed=0";
+                c.CommandText = "SELECT * FROM assignments WHERE claimed_by=$m AND status='failed' AND last_error=$err AND dismissed=0";
                 c.Parameters.AddWithValue("$m", machineId);
+                c.Parameters.AddWithValue("$err", StaleSweepError);
                 using var rd = c.ExecuteReader();
                 while (rd.Read()) revive.Add(ReadAssignmentRow(rd));
             }

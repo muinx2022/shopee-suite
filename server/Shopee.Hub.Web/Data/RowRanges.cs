@@ -3,7 +3,8 @@ namespace Shopee.Core.Scrape;
 // COPY (không link) từ suite\Shopee.Core\Scrape\ScrapeProgressStore.cs — tách RowRange + RowRangeMath ra
 // khỏi ScrapeProgressStore (store bám SuitePaths = windows). Giữ namespace Shopee.Core.Scrape để các file
 // LINK (HubDtos/ICoordinationHub dùng RowRange) và HubDatabase (ledger merge) resolve nguyên vẹn.
-// NGUỒN SỰ THẬT vẫn ở suite\; nếu logic đổi bên đó, đồng bộ tay sang đây (chỉ 2 kiểu thuần toán học này).
+// Bản SERVER chỉ giữ Merge/Normalize — thứ HubDatabase (ledger merge) cần; MaxRow/Complement (bản suite dùng
+// cho scrape) đã lược bỏ vì server không gọi. NGUỒN SỰ THẬT vẫn ở suite\; nếu logic đổi bên đó, đồng bộ tay sang đây.
 
 /// <summary>Một khoảng dòng [From..To] (đã bao gồm 2 đầu).</summary>
 public sealed class RowRange
@@ -12,12 +13,9 @@ public sealed class RowRange
     public int To { get; set; }
 }
 
-/// <summary>Toán khoảng dòng: gộp (merge) + lấy phần bù (complement) trong một đoạn [start..total].</summary>
+/// <summary>Toán khoảng dòng: gộp (merge) + chuẩn hoá (normalize) danh sách khoảng (không chồng/liền nhau).</summary>
 public static class RowRangeMath
 {
-    public static int MaxRow(IReadOnlyList<RowRange> ranges) =>
-        ranges.Count == 0 ? 0 : ranges.Max(r => r.To);
-
     /// <summary>Gộp thêm [from..to] vào danh sách, trả về danh sách đã gộp + sắp xếp (không chồng/ liền nhau).</summary>
     public static List<RowRange> Merge(IEnumerable<RowRange> existing, int from, int to)
     {
@@ -38,25 +36,5 @@ public static class RowRangeMath
                 result.Add(new RowRange { From = from, To = to });
         }
         return result;
-    }
-
-    /// <summary>Phần bù: các khoảng trong [start..total] KHÔNG nằm trong <paramref name="completed"/>.</summary>
-    public static List<(int from, int to)> Complement(IReadOnlyList<RowRange> completed, int start, int total)
-    {
-        var gaps = new List<(int, int)>();
-        if (total < start) return gaps;
-
-        var sorted = completed.Where(r => r.To >= r.From).OrderBy(r => r.From).ToList();
-        var cursor = start;
-        foreach (var r in sorted)
-        {
-            if (r.To < start) continue;
-            var lo = Math.Max(r.From, start);
-            if (lo > cursor) gaps.Add((cursor, Math.Min(lo - 1, total)));
-            cursor = Math.Max(cursor, Math.Min(r.To, total) + 1);
-            if (cursor > total) break;
-        }
-        if (cursor <= total) gaps.Add((cursor, total));
-        return gaps;
     }
 }
