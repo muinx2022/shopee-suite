@@ -1,7 +1,7 @@
 # Plan: "Việc dở" tôn trọng Hub-hủy (Task 0) + liệt kê chi tiết (Task 1)
 
 - **Ngày:** 2026-07-26
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-dev`)
 
 ## 1. Bối cảnh & mục tiêu
@@ -110,4 +110,9 @@ Tiếp nối tính năng banner "việc dở" ở Workspace (plan 2026-07-25-huy
 
 ## Báo cáo thực thi (Opus điền sau khi xong)
 
-<chưa thực thi>
+Hoàn thành đúng plan, 2 file (WorkspaceViewModel.cs + WorkspaceView.axaml). Build 0 error, 899 test xanh.
+Quyết định thiết kế: `HubCanceled` gọi SAU `HubManages` → chỉ Clear tiến độ khi Hub BỎ HẲN (dismissed/rớt
+Interrupted); bản canceled-còn-Interrupted giữ tiến độ cho đường resume Hub (không phá resume). Trigger fleet
+= `Coordination.Hub.Changed` (12s). Chống đệ quy = gom-clear-sau + cờ `_recomputing`. Giới hạn: import/update
+KHÔNG có giờ-chạy-cuối (OpProgressStore.Snapshot không expose LastRunAt; giữ phạm vi chỉ Modules/Workspace) —
+tiến độ vẫn hiện "đã xong N SP".

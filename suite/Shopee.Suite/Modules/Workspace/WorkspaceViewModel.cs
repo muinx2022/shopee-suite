@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Globalization;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Shopee.Core.BigSeller;
@@ -96,9 +97,22 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         // Rebuild() phía trên đã gọi RecomputeResumePending().
         ScrapeProgressStore.Shared.Changed += OnProgressStoresChanged;
         OpProgressStore.Shared.Changed += OnProgressStoresChanged;
+
+        // Hub hủy/bỏ-hẳn 1 việc → client phải BỎ khỏi "việc dở" + Clear tiến độ local. Fleet cập nhật theo nhịp
+        // poll 12s của Hub (bắn Changed) → hook cùng event fleet như WorkspaceAccountViewModel để RecomputeResume-
+        // Pending chạy lại kịp thời (không phải đợi 2 store đổi). VM này sống suốt vòng đời app → KHÔNG cần gỡ handler.
+        Coordination.Hub.Changed += OnFleetChanged;
     }
 
-    private void OnProgressStoresChanged() => UiThread.Post(RecomputeResumePending);
+    private void OnFleetChanged() => UiThread.Post(RecomputeResumePending);
+
+    private void OnProgressStoresChanged()
+    {
+        // _recomputing = true khi RecomputeResumePending đang Clear tiến độ Hub-hủy: Clear bắn Changed → vào đây,
+        // mà UiThread.Post chạy ĐỒNG BỘ khi đang ở UI thread → sẽ tái nhập RecomputeResumePending. Bỏ qua để tránh đệ quy.
+        if (_recomputing) return;
+        UiThread.Post(RecomputeResumePending);
+    }
 
     private void OnStoreChanged()
     {
@@ -296,6 +310,14 @@ public sealed partial class WorkspaceViewModel : ObservableObject
 
     private readonly List<ResumeItem> _resumePending = [];
 
+    /// <summary>Danh sách chi tiết từng việc dở để banner LIỆT KÊ (op · tk · shop · tiến độ · giờ chạy cuối).
+    /// Dựng lại song song <see cref="_resumePending"/> mỗi lần <see cref="RecomputeResumePending"/>.</summary>
+    public ObservableCollection<ResumePendingRow> ResumeRows { get; } = [];
+
+    /// <summary>Đang trong vòng Clear tiến độ Hub-hủy của RecomputeResumePending → chặn Changed tái nhập hàm
+    /// (xem <see cref="OnProgressStoresChanged"/>).</summary>
+    private bool _recomputing;
+
     /// <summary>Số việc chạy-tay còn dở mà máy này tiếp tục được (đã loại việc hub quản + việc đang chạy thật).</summary>
     public int ResumePendingCount => _resumePending.Count;
     public bool HasResumePending => _resumePending.Count > 0;
@@ -312,6 +334,16 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         "scrape" => "Scrape", "import" => "Import", "update" => "Update", _ => op,
     };
 
+    /// <summary>Tiến độ scrape thành chữ: "đã cào {tới}/{tổng} dòng" (Tổng=0 chưa biết → "đã cào tới dòng {tới}").</summary>
+    private static string ScrapeProgressText(ScrapeProgress p) =>
+        p.TotalRowsAtLastRun > 0
+            ? $"đã cào {p.LastRowReached}/{p.TotalRowsAtLastRun} dòng"
+            : $"đã cào tới dòng {p.LastRowReached}";
+
+    /// <summary>Giờ chạy cuối dạng ngắn "HH:mm dd/MM"; null → "".</summary>
+    private static string FormatLastRun(DateTimeOffset? at) =>
+        at is { } t ? t.ToLocalTime().ToString("HH:mm dd/MM", CultureInfo.InvariantCulture) : "";
+
     /// <summary>true nếu Hub ĐANG quản việc (acc,shop,op) này: assignment còn SỐNG (queued|running — hub sắp/đang
     /// chạy) hoặc nằm trong danh sách gián đoạn (có nút ▶ resume riêng trên Fleet) → KHÔNG mời tiếp-tục-tay để
     /// tránh chạy đôi. Bản đã KẾT THÚC (done/failed/canceled còn trong snapshot 2h) KHÔNG tính — việc hub đã xong/
@@ -327,12 +359,37 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         return fleet.Assignments.Any(a => Match(a) && a.Status is "queued" or "running") || fleet.Interrupted.Any(Match);
     }
 
+    /// <summary>true nếu Hub đã HỦY HẲN việc (acc,shop,op): trong <c>fleet.Assignments</c> có bản khớp
+    /// <c>Status=="canceled"</c> HOẶC <c>Dismissed</c>, và KHÔNG còn bản nào khớp đang <c>queued</c>/<c>running</c>
+    /// (không phải vừa giao lại). Gọi SAU <see cref="HubManages"/>: bản canceled CHƯA bị bỏ-hẳn vẫn nằm trong
+    /// <c>fleet.Interrupted</c> ⇒ HubManages đã bắt trước → tiến độ local được GIỮ cho đường resume của Hub; tới đây
+    /// chỉ còn bản Hub đã bỏ hẳn (dismissed / rớt khỏi Interrupted) → client tự xoá. Offline (fleet null/cũ, CHƯA
+    /// từng thấy canceled) → false → KHÔNG xoá nhầm (chỉ xoá khi THẤY RÕ Hub đã hủy).</summary>
+    private static bool HubCanceled(string accId, string shopId, string op)
+    {
+        var fleet = CoordinationRuntime.Hub?.CurrentFleet;
+        if (fleet is null) return false;
+        bool Match(Assignment a) =>
+            string.Equals(a.BigsellerId, accId, StringComparison.Ordinal) &&
+            string.Equals(a.ShopId, shopId, StringComparison.Ordinal) &&
+            string.Equals(a.Op, op, StringComparison.Ordinal);
+        var matches = fleet.Assignments.Where(Match).ToList();
+        if (matches.Count == 0) return false;
+        if (matches.Any(a => a.Status is "queued" or "running")) return false;   // vừa giao lại → chưa hủy hẳn
+        return matches.Any(a => a.Status == "canceled" || a.Dismissed);
+    }
+
     /// <summary>Đếm lại các việc chạy-tay còn dở: scrape (ScrapeProgressStore) + import/update (OpProgressStore)
     /// có status ∈ {running (kẹt do crash), stopped (dừng dở)}, map về acc/shop hiện có, loại việc hub quản +
     /// việc đang chạy thật lúc này. Gọi trên UI thread (đọc Accounts + set observable).</summary>
     private void RecomputeResumePending()
     {
         _resumePending.Clear();
+        var rows = new List<ResumePendingRow>();
+        // Gom các mục Hub ĐÃ HỦY để Clear SAU vòng quét (tránh sửa store giữa iterator; guard _recomputing chặn
+        // Changed do Clear bắn tái nhập hàm này — xem OnProgressStoresChanged).
+        var clearScrape = new List<(string acc, string sheet)>();
+        var clearOp = new List<(string acc, string sheet, string op)>();
 
         // Scrape: mỗi (acc, sheet) có tiến độ running/stopped → ứng viên tiếp tục dòng còn thiếu.
         foreach (var p in ScrapeProgressStore.Shared.All())
@@ -342,9 +399,16 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             var shop = acct?.Account.Shops.FirstOrDefault(s =>
                 string.Equals(s.ShopeeDataSheet ?? "", p.Sheet ?? "", StringComparison.OrdinalIgnoreCase));
             if (acct is null || shop is null) continue;                               // acc/shop đã xoá → bỏ
-            if (HubManages(p.AccountId, shop.Id, "scrape")) continue;                 // hub quản → bỏ
+            if (HubManages(p.AccountId, shop.Id, "scrape")) continue;                 // hub đang/sắp xử / để dành resume → bỏ (GIỮ tiến độ)
+            if (HubCanceled(p.AccountId, shop.Id, "scrape"))                          // hub đã hủy hẳn → xoá tiến độ + bỏ
+            {
+                clearScrape.Add((p.AccountId, p.Sheet ?? ""));
+                continue;
+            }
             if (acct.ScrapeTarget.IsShopRunning?.Invoke(shop) ?? false) continue;     // đang scrape thật → bỏ
             _resumePending.Add(new ResumeItem("scrape", acct, shop));
+            rows.Add(new ResumePendingRow(OpLabel("scrape"), acct.DisplayName, shop.DisplayName,
+                ScrapeProgressText(p), FormatLastRun(p.LastRunAt)));
         }
 
         // Import/Update: tiến độ per-SP running/stopped → ứng viên.
@@ -357,9 +421,20 @@ public sealed partial class WorkspaceViewModel : ObservableObject
                 string.Equals(s.ShopeeDataSheet ?? "", sheet ?? "", StringComparison.OrdinalIgnoreCase));
             if (acct is null || shop is null) continue;
             if (HubManages(accId, shop.Id, op)) continue;
+            if (HubCanceled(accId, shop.Id, op))
+            {
+                clearOp.Add((accId, sheet ?? "", op));
+                continue;
+            }
             if (Update.IsUpdateRunning(accId)) continue;   // acc đang chạy 1 workflow update thật → bỏ
             _resumePending.Add(new ResumeItem(op, acct, shop));
+            var doneCount = OpProgressStore.Shared.GetDone(accId, sheet ?? "", op).Count;
+            rows.Add(new ResumePendingRow(OpLabel(op), acct.DisplayName, shop.DisplayName,
+                $"đã xong {doneCount} SP", ""));
         }
+
+        ResumeRows.Clear();
+        foreach (var r in rows) ResumeRows.Add(r);
 
         OnPropertyChanged(nameof(ResumePendingCount));
         OnPropertyChanged(nameof(HasResumePending));
@@ -367,6 +442,20 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         OnPropertyChanged(nameof(ResumeTooltip));
         ResumePendingWorkCommand.NotifyCanExecuteChanged();
         DiscardPendingWorkCommand.NotifyCanExecuteChanged();
+
+        // Clear tiến độ local các việc Hub đã hủy — SAU khi đã dựng danh sách + raise (các mục này đã bị loại khỏi
+        // _resumePending/rows ở trên nên Clear không đổi kết quả, chỉ dọn để lần sau khỏi trồi lên). _recomputing
+        // chặn vòng Changed→tái nhập.
+        if (clearScrape.Count > 0 || clearOp.Count > 0)
+        {
+            _recomputing = true;
+            try
+            {
+                foreach (var (acc, sheet) in clearScrape) ScrapeProgressStore.Shared.Clear(acc, sheet);
+                foreach (var (acc, sheet, op) in clearOp) OpProgressStore.Shared.Clear(acc, sheet, op);
+            }
+            finally { _recomputing = false; }
+        }
     }
 
     /// <summary>Nút "⏯ Tiếp tục việc dở (N)": chạy lại TẤT CẢ mục còn dở qua đúng entry-point silent (fire-and-
@@ -416,3 +505,9 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         RecomputeResumePending();
     }
 }
+
+/// <summary>1 dòng hiển thị việc chạy-tay còn dở trong banner Workspace: nhãn op + tài khoản + shop + tiến độ
+/// (scrape: dòng đã cào; import/update: số SP đã xong) + giờ chạy cuối. Chỉ để HIỂN THỊ — dựng lại mỗi lần
+/// RecomputeResumePending; logic Tiếp tục/Hủy vẫn theo ResumeItem (giữ tham chiếu acc/shop để phóng đúng việc).</summary>
+public sealed record ResumePendingRow(
+    string OpLabel, string AccountName, string ShopName, string ProgressText, string LastRunText);
