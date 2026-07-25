@@ -101,8 +101,9 @@ public sealed class HubConfigSync
                 // login/refresh gần hơn; nhận bản Hub khi local thiếu / hết hạn / CŨ HƠN (BigSeller xoay
                 // token → bản cũ chết dần; giữ khư khư bản cũ = kẹt "login first" phải đăng nhập tay mãi).
                 if (LocalCookieShouldWin(localPath, bytes)) continue;
-                await File.WriteAllBytesAsync(localPath, bytes, ct);
-                cookies++;
+                // Ghi NGUYÊN TỬ (tmp unique → Move retry) — bất biến "mọi nơi ghi cookie phải atomic" (torn-read
+                // từng làm hỏng cookie lan đa máy). File.WriteAllBytesAsync KHÔNG atomic → dùng cơ chế của engine.
+                if (BigSellerCookieEngine.TryWriteCookieFileBytes(localPath, bytes)) cookies++;
             }
             catch (Exception ex) when (ex is not OperationCanceledException) { }
         }
@@ -267,8 +268,8 @@ public sealed class HubConfigSync
                     continue;   // y hệt bản kho → khỏi tải
                 var bytes = await _client.DownloadAsync(m.Name, ct);
                 if (bytes is null || LocalCookieShouldWin(localPath, bytes)) continue;
-                await File.WriteAllBytesAsync(localPath, bytes, ct);
-                n++;
+                // Ghi nguyên tử qua engine (xem PullAccountsAsync) — không ghi trực tiếp gây torn-read cookie.
+                if (BigSellerCookieEngine.TryWriteCookieFileBytes(localPath, bytes)) n++;
             }
             catch (Exception ex) when (ex is not OperationCanceledException) { }
         }

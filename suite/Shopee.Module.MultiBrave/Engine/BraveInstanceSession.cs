@@ -53,7 +53,10 @@ internal sealed class BraveInstanceSession : IDisposable
     private readonly System.Timers.Timer _monitorTimer;
     private readonly System.Timers.Timer _progressTimer;
 
-    private bool _runnerLoopRequested;
+    // 0/1: có 1 vòng runner đã được GIÀNH quyền chạy (claim ở ResumeContinueAsync) chưa. Là int để guard bằng
+    // Interlocked.CompareExchange (nguyên tử) — trước đây guard đọc _runnerLoopActive vốn chỉ bật SÂU trong
+    // Task.Run sau nhiều await, nên 2 lời gọi sát nhau (user bấm + watchdog) đều lọt = 2 vòng cùng profile.
+    private int _runnerLoopRequested;
     // Đang trong khe cancel→relaunch→resume runner (watchdog/proxy mở lại profile rồi chạy tiếp). Lúc này
     // _runnerLoopActive/_runnerLoopRequested tạm = false nên scheduler tưởng profile rảnh → mở thêm profile
     // = VƯỢT MAX. Cờ này giữ profile vẫn "đang làm việc" (IsRunnerLoopPending) suốt khe đó.
@@ -109,7 +112,7 @@ internal sealed class BraveInstanceSession : IDisposable
     public bool IsRunning => _running;
     public bool IsBusy => _busy;
     public bool IsRunnerLoopActive => _runnerLoopActive;
-    public bool IsRunnerLoopPending => _runnerLoopActive || _runnerLoopRequested || _runnerResuming;
+    public bool IsRunnerLoopPending => _runnerLoopActive || _runnerLoopRequested != 0 || _runnerResuming;
     /// <summary>Đang relaunch+resume runner (cancel→mở lại profile→chạy tiếp) — KHÔNG coi là kết thúc thật.</summary>
     public bool IsRunnerResuming => _runnerResuming;
     public string StatusText => _statusText;
@@ -128,8 +131,17 @@ internal sealed class BraveInstanceSession : IDisposable
         _monitorTimer = new System.Timers.Timer { Interval = 30_000, AutoReset = true };
         _monitorTimer.Elapsed += async (_, _) =>
         {
-            await CheckRunnerStallAndRecoverAsync();
-            await CheckProxyAndRestartIfNeededAsync();
+            // async-void (Elapsed) → exception lọt khỏi đây = unhandled = SẬP process. Bọc toàn thân, nuốt +
+            // log qua _log (vd lỗi IO khi ghi log/CDP đứt trong recover). Lượt timer sau tự chạy lại.
+            try
+            {
+                await CheckRunnerStallAndRecoverAsync();
+                await CheckProxyAndRestartIfNeededAsync();
+            }
+            catch (Exception ex)
+            {
+                try { _log($"Lỗi giám sát instance (bỏ qua, chờ lượt sau): {ex.Message}"); } catch { }
+            }
         };
         _progressTimer = new System.Timers.Timer { Interval = 20_000, AutoReset = true };
         _progressTimer.Elapsed += (_, _) =>
@@ -319,7 +331,10 @@ internal sealed class BraveInstanceSession : IDisposable
         if (_config is null)
             throw new InvalidOperationException("Chưa chọn cấu hình instance.");
 
-        if (_runnerLoopActive)
+        // GUARD NGUYÊN TỬ: giành quyền chạy vòng runner. CompareExchange đóng khe mà guard cũ (đọc
+        // _runnerLoopActive — cờ chỉ bật sâu trong Task.Run sau nhiều await) để hở → 2 lời gọi sát nhau
+        // (user bấm + watchdog) đều lọt = 2 vòng cùng profile. Chỉ đúng 1 lời gọi giành được (0→1).
+        if (Interlocked.CompareExchange(ref _runnerLoopRequested, 1, 0) != 0)
         {
             Log("Runner đang chạy trên launcher.");
             return Task.CompletedTask;
@@ -328,19 +343,23 @@ internal sealed class BraveInstanceSession : IDisposable
         // Huỷ vòng cũ (nếu còn) rồi tạo CTS mới. Mỗi vòng dùng token CỤC BỘ (loopToken) và TỰ
         // Dispose CTS của mình ở finally — tránh: (a) rò CTS/đăng-ký-linked qua mỗi lần resume,
         // (b) task cũ đọc nhầm token mới khi field bị thay (trước đây body đọc thẳng field CTS).
-        try { _runnerLoopCts?.Cancel(); } catch (ObjectDisposedException) { }
-        var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        // Bọc try/catch để NHẢ cờ đã giành nếu dựng CTS ném (kẻo kẹt cờ = không bao giờ chạy lại được).
+        CancellationTokenSource cts;
+        try
+        {
+            try { _runnerLoopCts?.Cancel(); } catch (ObjectDisposedException) { }
+            cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        }
+        catch { Interlocked.Exchange(ref _runnerLoopRequested, 0); throw; }
         _runnerLoopCts = cts;
         var loopToken = cts.Token;
 
-        // Đặt ĐỒNG BỘ trước khi Task.Run để không có khe IsRunnerLoopPending=false (scheduler dựa vào đó
-        // để giữ trần Max). Khe này đóng luôn cả cờ resume sau khi đã bắt đầu chạy lại.
-        _runnerLoopRequested = true;
+        // Cờ resume đóng ở đây (đã giành _runnerLoopRequested nguyên tử ở guard trên, ĐỒNG BỘ trước Task.Run
+        // nên không có khe IsRunnerLoopPending=false để scheduler mở thêm profile vượt Max).
         _runnerResuming = false;
 
         _runnerLoopTask = Task.Run(async () =>
         {
-            _runnerLoopRequested = true;
             // Cổng warmup: giữ trong lúc chờ SW cold-start, thả khi SW lên (onAfter) / lỗi (catch) / kết
             // thúc (finally). Khai báo NGOÀI try để finally truy cập được → không rò permit (tránh deadlock).
             var warmupHeld = false;
@@ -524,10 +543,10 @@ internal sealed class BraveInstanceSession : IDisposable
                 ReleaseWarmup();   // an toàn: thả cổng warmup nếu còn giữ (đường cancel / lỗi khác)
                 _runnerLoopActive = false;
                 ExtensionProgressSynced?.Invoke();
-                if (_runnerLoopRequested && _config is not null)
+                if (_runnerLoopRequested != 0 && _config is not null)
                 {
                     RunnerLoopEnded?.Invoke(_config.Id);
-                    _runnerLoopRequested = false;
+                    Interlocked.Exchange(ref _runnerLoopRequested, 0);
                 }
                 // Vòng này sở hữu CTS của chính nó: gỡ field (nếu vẫn trỏ tới nó) rồi Dispose.
                 // Dispose lặp lại (vd Dispose()/Stop của session) là vô hại; gỡ field trước khi Dispose
@@ -542,7 +561,7 @@ internal sealed class BraveInstanceSession : IDisposable
 
     public async Task StopRunnerAsync(CancellationToken cancellationToken = default)
     {
-        if (!_runnerLoopActive && !_runnerLoopRequested && _runnerLoopTask is null)
+        if (!_runnerLoopActive && _runnerLoopRequested == 0 && _runnerLoopTask is null)
         {
             Log("Runner chưa chạy — không có gì để dừng.");
             return;
@@ -595,7 +614,7 @@ internal sealed class BraveInstanceSession : IDisposable
 
     public async Task StopRunningWorkAsync(CancellationToken cancellationToken = default)
     {
-        if (_runnerLoopActive || _runnerLoopRequested || _runnerLoopTask is { IsCompleted: false })
+        if (_runnerLoopActive || _runnerLoopRequested != 0 || _runnerLoopTask is { IsCompleted: false })
             await StopRunnerAsync(cancellationToken).ConfigureAwait(false);
 
         if (_running)
@@ -769,7 +788,7 @@ internal sealed class BraveInstanceSession : IDisposable
 
     private bool ShouldStopExtensionRunnerBeforeExit()
     {
-        if (_runnerLoopActive || _runnerLoopRequested)
+        if (_runnerLoopActive || _runnerLoopRequested != 0)
             return true;
 
         return _config is not null &&

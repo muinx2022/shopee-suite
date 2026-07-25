@@ -1,5 +1,6 @@
 using Shopee.Core.Accounts;
 using Shopee.Core.Coordination;
+using Shopee.Core.Infrastructure;
 
 namespace Shopee.Suite.Infrastructure;
 
@@ -127,7 +128,7 @@ public sealed class AccountLeaseScope : IAsyncDisposable
         _heartbeat = new System.Threading.Timer(_ =>
         {
             List<string> snap; lock (_lock) snap = _hubLeased.ToList();
-            if (snap.Count > 0) { try { _ = _hub!.HeartbeatAccountsAsync(snap); } catch { } }
+            if (snap.Count > 0) TaskExt.FireAndForget(_hub!.HeartbeatAccountsAsync(snap), "heartbeat account-lease");
         }, null, TimeSpan.FromSeconds(60), TimeSpan.FromSeconds(60));
     }
 

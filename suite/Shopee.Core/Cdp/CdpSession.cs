@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using Shopee.Core.Infrastructure;
 
 namespace Shopee.Core.Cdp;
 
@@ -70,7 +71,6 @@ public sealed class CdpSession : IAsyncDisposable
     public static async Task<string> WaitForBrowserWsUrlAsync(
         int cdpPort, CancellationToken ct = default, int timeoutMs = 20_000)
     {
-        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
         var deadline = Environment.TickCount64 + timeoutMs;
 
         while (Environment.TickCount64 < deadline)
@@ -78,7 +78,7 @@ public sealed class CdpSession : IAsyncDisposable
             ct.ThrowIfCancellationRequested();
             try
             {
-                var json = await http.GetStringAsync($"http://127.0.0.1:{cdpPort}/json/version", ct);
+                var json = await GetDirectStringAsync($"http://127.0.0.1:{cdpPort}/json/version", ct);
                 using var doc = JsonDocument.Parse(json);
                 if (doc.RootElement.TryGetProperty("webSocketDebuggerUrl", out var u))
                 {
@@ -100,8 +100,7 @@ public sealed class CdpSession : IAsyncDisposable
     {
         try
         {
-            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
-            var json = await http.GetStringAsync($"http://127.0.0.1:{cdpPort}/json/version", ct);
+            var json = await GetDirectStringAsync($"http://127.0.0.1:{cdpPort}/json/version", ct);
             return !string.IsNullOrWhiteSpace(json);
         }
         catch { return false; }
@@ -111,7 +110,6 @@ public sealed class CdpSession : IAsyncDisposable
         int cdpPort, CancellationToken ct = default, int timeoutMs = 20_000,
         Func<string, bool>? urlPredicate = null)
     {
-        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
         var deadline = Environment.TickCount64 + timeoutMs;
 
         while (Environment.TickCount64 < deadline)
@@ -121,7 +119,7 @@ public sealed class CdpSession : IAsyncDisposable
             {
                 // 127.0.0.1 (KHÔNG dùng "localhost") — Brave/Chromium chỉ nghe CDP trên IPv4
                 // 127.0.0.1; "localhost" trên Windows phân giải ::1 (IPv6) trước → timeout/đứt.
-                var json = await http.GetStringAsync($"http://127.0.0.1:{cdpPort}/json", ct);
+                var json = await GetDirectStringAsync($"http://127.0.0.1:{cdpPort}/json", ct);
                 using var doc = JsonDocument.Parse(json);
                 foreach (var target in doc.RootElement.EnumerateArray())
                 {
@@ -146,6 +144,17 @@ public sealed class CdpSession : IAsyncDisposable
         }
 
         throw new TimeoutException($"CDP on port {cdpPort} did not respond within {timeoutMs / 1000}s.");
+    }
+
+    /// <summary>GET chuỗi qua HttpClient CHIA SẺ (<see cref="AppServices.DirectHttp"/>, no-proxy) thay vì
+    /// <c>new HttpClient</c> mỗi lần gọi — 3 điểm poll CDP (/json, /json/version) bị gọi lặp mỗi 3s suốt phiên
+    /// login (BigSellerLoginRunner) → churn client làm cạn socket/TIME_WAIT. Timeout 3s per-call qua CTS linked
+    /// (KHÔNG đụng Timeout 15s của client chung). Semantics lỗi giữ nguyên: timeout → OperationCanceledException.</summary>
+    private static async Task<string> GetDirectStringAsync(string url, CancellationToken ct)
+    {
+        using var to = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, to.Token);
+        return await AppServices.DirectHttp.GetStringAsync(url, linked.Token).ConfigureAwait(false);
     }
 
     private async Task ConnectAsync(string wsUrl, CancellationToken ct)
@@ -186,7 +195,9 @@ public sealed class CdpSession : IAsyncDisposable
 
         using var timeout = new CancellationTokenSource(timeoutMs);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, timeout.Token);
-        linked.Token.Register(() => tcs.TrySetCanceled());
+        // Timeout/huỷ → GỠ entry khỏi _pending rồi mới huỷ tcs. Trước đây chỉ TrySetCanceled mà KHÔNG remove →
+        // với session sống lâu (PortCdpHub) khi Brave lặng thinh, _pending rò dictionary (mỗi lệnh treo 1 entry mãi).
+        linked.Token.Register(() => { _pending.TryRemove(id, out _); tcs.TrySetCanceled(); });
 
         return await tcs.Task;
     }

@@ -9,7 +9,7 @@ namespace Shopee.Core.Coordination;
 /// Client HTTP gọi tới Hub (qua Cloudflare Tunnel). Gửi sẵn header X-Api-Token + X-Machine-Id.
 /// Timeout ngắn để phát hiện offline nhanh; lỗi mạng → ném exception cho lớp trên xử lý (chặn việc).
 /// </summary>
-public sealed class HubClient
+public sealed class HubClient : IDisposable
 {
     private readonly HttpClient _http;
     /// <summary>Client riêng cho endpoint TẢI/ĐẨY dữ liệu KHỐI LỚN (kho gộp Search) — timeout dài, vì 8s của
@@ -343,4 +343,12 @@ public sealed class HubClient
     /// <summary>Encode từng đoạn tên (giữ '/') để URL an toàn với tên có dấu cách/ký tự lạ.</summary>
     private static string EncodePath(string name) =>
         string.Join('/', name.Replace('\\', '/').Split('/').Select(Uri.EscapeDataString));
+
+    /// <summary>Giải phóng 2 HttpClient nội bộ (mỗi client là instance RIÊNG, không chia sẻ) — gọi khi
+    /// <see cref="CoordinationRuntime.Reconnect"/> tráo sang cấu hình mới, tránh rò handler/socket.</summary>
+    public void Dispose()
+    {
+        _http.Dispose();
+        _bulkHttp.Dispose();
+    }
 }
