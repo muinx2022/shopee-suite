@@ -80,10 +80,18 @@ public static class CoordinationRuntime
     /// </summary>
     public static bool Reconnect()
     {
+        // Giữ tham chiếu bản CŨ để DISPOSE sau khi tráo singleton: HttpCoordinationHub có Timer _poller 12s;
+        // chỉ gán = null thì instance cũ sống mãi (heartbeat tiếp sau khi ngắt; đổi URL/token → 2 poller song
+        // song). HubClient cũng giữ 2 HttpClient → dispose để giải phóng. Dispose SAU khi đã trỏ singleton về
+        // bản mới: lệnh đang bay trên client cũ (nếu có) chỉ ném ObjectDisposedException, đã bọc try/catch ở nơi gọi.
+        var oldHub = Hub;
+        var oldClient = Client;
         Client = null;
         Hub = null;
         ConfigSync = null;
         Coordination.Hub = NoOpCoordinationHub.Instance;   // về trạng thái "tắt" trước khi dựng lại
+        oldHub?.Dispose();     // dừng poller 12s của instance cũ
+        oldClient?.Dispose();  // giải phóng 2 HttpClient của client cũ
         InitFromConfig();
         return Active;
     }

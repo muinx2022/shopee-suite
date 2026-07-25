@@ -215,10 +215,20 @@ public static class BigSellerCookieEngine
             JsonSerializer.Serialize(new { exportedAt = DateTimeOffset.Now, cookies }, FileJsonOpts),
             log);
 
+    /// <summary>Ghi BYTES THÔ ra file cookie theo cùng cơ chế nguyên tử (tmp unique → Move retry) — dùng khi
+    /// đồng bộ cookie từ Hub (kéo về byte[] rồi ghi đè). Trả false + log nếu lỗi, KHÔNG ném. Mọi nơi ghi file
+    /// cookie PHẢI đi qua đây (hoặc <see cref="TryWriteCookieFile"/>).</summary>
+    public static bool TryWriteCookieFileBytes(string cookieFile, byte[] bytes, Action<string>? log = null)
+        => WriteAtomicBytes(cookieFile, bytes, log);
+
     // Ghi NGUYÊN TỬ: tmp unique (tránh race đa-instance) → File.Move(overwrite) có retry. File cookie này
     // được Hub sync + các importer đọc đồng thời; ghi trực tiếp (WriteAllText/Bytes) sinh torn-read → cookie
     // hỏng lan ra đa máy. Mọi nơi ghi file cookie PHẢI đi qua đây.
+    // Bản string chuyển sang UTF-8 KHÔNG BOM (đúng như File.WriteAllText mặc định trước đây) rồi ghi qua lõi bytes.
     private static bool WriteAtomic(string cookieFile, string json, Action<string>? log)
+        => WriteAtomicBytes(cookieFile, Encoding.UTF8.GetBytes(json), log);
+
+    private static bool WriteAtomicBytes(string cookieFile, byte[] bytes, Action<string>? log)
     {
         var tmp = $"{cookieFile}.{Environment.ProcessId}-{Guid.NewGuid():N}.tmp";
         try
@@ -227,7 +237,7 @@ public static class BigSellerCookieEngine
             if (!string.IsNullOrWhiteSpace(dir))
                 Directory.CreateDirectory(dir);
 
-            File.WriteAllText(tmp, json);
+            File.WriteAllBytes(tmp, bytes);
 
             for (var attempt = 0; ; attempt++)
             {

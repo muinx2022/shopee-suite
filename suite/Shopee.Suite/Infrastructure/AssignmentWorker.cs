@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Text.Json;
 using Shopee.Core.BigSeller;
 using Shopee.Core.Coordination;
+using Shopee.Core.Infrastructure;
 using Shopee.Suite.Modules.Scrape;
 using Shopee.Suite.Modules.Search;
 using Shopee.Suite.Modules.UpdateProduct;
@@ -24,7 +25,10 @@ public sealed class AssignmentWorker : IDisposable
     private readonly SearchViewModel _search;
     private readonly UiThread.UiTimer _timer;            // claim/launch/reconcile (UI thread)
     private readonly System.Threading.Timer _heartbeat;  // nhịp 'running' (luồng NỀN, không bị UI làm nghẽn)
-    private readonly Dictionary<string, InFlight> _inflight = new(StringComparer.Ordinal);
+    // ConcurrentDictionary (KHÔNG Dictionary thường): hầu hết truy cập ở Tick (UI thread) nhưng
+    // PrepareForShutdownAsync chạy trên THREAD-POOL (RemoteUpdateService.OnCommand → Task.Run) cũng đọc/xoá
+    // → Dictionary thường race với Tick = ném/hỏng state. Mọi enumerate ở đây dùng .Values (snapshot) nên an toàn.
+    private readonly ConcurrentDictionary<string, InFlight> _inflight = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, byte> _liveIds = new(StringComparer.Ordinal);
     // Số lần đã claim-nhưng-chưa-chạy-được của 1 việc (theo id, sống qua các lần re-queue) → thử lại có mức trần.
     private readonly ConcurrentDictionary<string, int> _launchAttempts = new(StringComparer.Ordinal);
@@ -34,6 +38,9 @@ public sealed class AssignmentWorker : IDisposable
     // Đang chuẩn bị TẮT máy để cập nhật app → Tick NGỪNG nhận việc mới VÀ NGỪNG reconcile (khỏi kết luận
     // 'failed' oan cho việc mình vừa chủ động 'requeue' + dừng trong PrepareForShutdownAsync).
     private bool _shuttingDown;
+    // Throttle log lỗi vòng Tick (10s): lỗi thường LẶP mỗi nhịp (mất net/hub lỗi) → không throttle thì ngập log.
+    // 1 dòng / 60s, so mốc bằng Environment.TickCount64 (mẫu DiagLog trong HttpCoordinationHub).
+    private long _lastTickErrTick;
 
     private const int MaxConcurrent = 4;
     private const int GraceTicks = 6;   // ~60s: chưa thấy chạy trong ngần này coi như không khởi động được
@@ -95,7 +102,7 @@ public sealed class AssignmentWorker : IDisposable
             HubLog.Info($"⏸ Trả về hàng chờ hub: {Describe(f.A)} — cập nhật app");
             _liveIds.TryRemove(f.A.Id, out _);
             _launchAttempts.TryRemove(f.A.Id, out _);
-            _inflight.Remove(f.A.Id);
+            _inflight.TryRemove(f.A.Id, out _);
         }
         // Đợi runner dừng HẲN. StopLocal enqueue lên UI thread nên KHÔNG .Wait()/.Result (kẹt UI) — poll
         // IsRunningLocally mỗi ~500ms tới khi hết việc chạy hoặc quá hạn (job kẹt thì hub sweep + resume-mine lo,
@@ -117,7 +124,17 @@ public sealed class AssignmentWorker : IDisposable
     {
         if (_ticking) return;
         _ticking = true;
-        try { await TickAsync(); } catch { } finally { _ticking = false; }
+        try { await TickAsync(); }
+        catch (Exception ex)
+        {
+            // TRƯỚC ĐÂY nuốt IM LẶNG → lỗi trong vòng nhận việc (claim/reconcile) không ai thấy. Giờ log qua Hub,
+            // THROTTLE 1 dòng/60s (CAS) để lỗi lặp mỗi 10s không ngập tab Log.
+            var now = Environment.TickCount64;
+            var prev = Interlocked.Read(ref _lastTickErrTick);
+            if (now - prev >= 60_000 && Interlocked.CompareExchange(ref _lastTickErrTick, now, prev) == prev)
+                HubLog.Warn($"⚠ Vòng nhận việc (Tick) lỗi: {ex.Message}");
+        }
+        finally { _ticking = false; }
     }
 
     private async Task TickAsync()
@@ -209,7 +226,7 @@ public sealed class AssignmentWorker : IDisposable
         // hàng đợi thử lại vài nhịp, quá trần mới 'failed' (kèm lý do) — xem RequeueOrFailAsync.
         if (!CanLaunch(a, out var problem))
         {
-            _inflight.Remove(a.Id);
+            _inflight.TryRemove(a.Id, out _);
             await RequeueOrFailAsync(hub, a, problem);
             return;
         }
@@ -224,7 +241,7 @@ public sealed class AssignmentWorker : IDisposable
         UiThread.Enqueue(() =>
         {
             if (LaunchCore(a, grant)) { _liveIds[a.Id] = 1; _launchAttempts.TryRemove(a.Id, out _); HubLog.Info($"▶ Nhận {Describe(a)}"); }   // đã chạy → xoá bộ đếm thử lại
-            else { _inflight.Remove(a.Id); _ = RequeueOrFailAsync(hub, a, "không khởi động được trên máy này"); }
+            else { _inflight.TryRemove(a.Id, out _); _ = RequeueOrFailAsync(hub, a, "không khởi động được trên máy này"); }
         });
     }
 
@@ -356,7 +373,7 @@ public sealed class AssignmentWorker : IDisposable
                 HubLog.Warn($"✖ Huỷ {Describe(f.A)}");
                 _liveIds.TryRemove(f.A.Id, out _);
                 _launchAttempts.TryRemove(f.A.Id, out _);
-                _inflight.Remove(f.A.Id);
+                _inflight.TryRemove(f.A.Id, out _);
             }
         }
 
@@ -389,7 +406,7 @@ public sealed class AssignmentWorker : IDisposable
                 await hub.ReportAssignmentAsync(f.A.Id, searchOk ? "done" : "failed", searchErr);
                 if (searchOk) HubLog.Ok($"✔ Xong {Describe(f.A)}"); else HubLog.Warn($"■ {Describe(f.A)} — {searchErr}");
                 _liveIds.TryRemove(f.A.Id, out _);
-                _inflight.Remove(f.A.Id);
+                _inflight.TryRemove(f.A.Id, out _);
                 continue;
             }
             var status = await hub.FetchLedgerStatusAsync(f.A.CoordId);
@@ -399,11 +416,11 @@ public sealed class AssignmentWorker : IDisposable
             if (ok) HubLog.Ok($"✔ Xong {Describe(f.A)}");
             else HubLog.Warn($"■ {Describe(f.A)} — {(f.SeenRunning ? (status ?? "dừng dở") : "không khởi động được")}");
 
-            if (AutoSyncHandoff && f.A.Op == "scrape" && ok)
-            { try { _ = CoordinationRuntime.ConfigSync?.PushAsync(); } catch { } }
+            if (AutoSyncHandoff && f.A.Op == "scrape" && ok && CoordinationRuntime.ConfigSync is { } cs)
+                TaskExt.FireAndForget(cs.PushAsync(), "đẩy cấu hình/cookie sau scrape (hand-off)");
 
             _liveIds.TryRemove(f.A.Id, out _);
-            _inflight.Remove(f.A.Id);
+            _inflight.TryRemove(f.A.Id, out _);
         }
     }
 

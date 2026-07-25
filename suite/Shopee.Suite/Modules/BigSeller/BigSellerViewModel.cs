@@ -309,6 +309,8 @@ public sealed partial class BigSellerViewModel : ModuleViewModelBase
                 catch (Exception ex) { Log("✘ Đẩy lên Hub lỗi (sẽ tự đẩy lại ở chu kỳ auto): " + ex.Message); }
             }
         }
+        catch (OperationCanceledException) { Status = "■ Đã dừng đăng nhập BigSeller."; Log(Status); }
+        catch (Exception ex) { Status = "✘ Lỗi đăng nhập BigSeller: " + ex.Message; Log(Status); }
         finally
         {
             IsLoggingIn = false;

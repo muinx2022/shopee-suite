@@ -425,7 +425,9 @@ public sealed partial class ScrapeViewModel : ModuleViewModelBase
                 // đã xong phần user vừa muốn cào lại từ đầu → BỎ SÓT dòng ("fold-poisoning"). Xoá luôn ledger hub
                 // op scrape của shop này (status "idle" = server xoá bản ghi ledger + tiến độ dòng). Fire-and-forget,
                 // có try/catch: offline/lỗi → thôi (local đã clear là đủ để chạy lại từ đầu).
-                if (accHub is not null) { try { _ = accHub.SetLedgerStatusAsync(coordKey, "idle"); } catch { } }
+                if (accHub is not null)
+                    TaskExt.FireAndForget(accHub.SetLedgerStatusAsync(coordKey, "idle"),
+                        $"xoá ledger hub (idle) khi Reset · {account.DisplayName}/{sheet}");
             }
             // HAND-OFF XUYÊN MÁY: trước khi tính phần CÒN THIẾU, kéo ledger TƯƠI của shop này từ Hub → fold vào
             // tiến độ local. Nhờ đó máy TIẾP QUẢN (khi máy trước rớt net giữa chừng) chỉ scrape đúng phần còn
