@@ -1,7 +1,7 @@
-# Plan: Đợt 1 — Sửa bug hành vi app Đơn hàng (orders/)
+﻿# Plan: Đợt 1 — Sửa bug hành vi app Đơn hàng (orders/)
 
 - **Ngày:** 2026-07-25
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-executor`)
 - **Plan cha:** `plans/2026-07-25-ke-hoach-refactor-toan-app.md` (mục 1B)
 

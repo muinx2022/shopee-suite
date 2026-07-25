@@ -1,7 +1,7 @@
-# Plan: Đợt 1+2 — Extensions shopee-search + shopee-scrape: sửa bug + dọn code chết
+﻿# Plan: Đợt 1+2 — Extensions shopee-search + shopee-scrape: sửa bug + dọn code chết
 
 - **Ngày:** 2026-07-25
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-executor`)
 - **Plan cha:** `plans/2026-07-25-ke-hoach-refactor-toan-app.md` (mục 1C + 2F)
 
