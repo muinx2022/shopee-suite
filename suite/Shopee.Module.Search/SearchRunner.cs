@@ -147,7 +147,6 @@ public sealed class SearchRunner
         if (updates.Count > 0)
         {
             _store.SetShopProductCategories(updates);
-            _store.UpsertCategories(updates.Select(u => u.Item3).Distinct());
             _store.PruneUnusedCategories();
         }
         return updates.Count;

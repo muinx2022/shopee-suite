@@ -108,11 +108,9 @@ public sealed partial class ShellViewModel : ObservableObject
             // Footer trạng thái đoạn Workspace (6 counter đọc từ các kho dùng chung). Dựng cùng nhóm Workspace.
             WorkspaceStatus = new WorkspaceStatusViewModel();
 
-            // Giao việc đa máy: worker (client tự chạy việc Hub giao) + dispatcher (máy Hub tự đẩy việc).
+            // Giao việc đa máy: worker (client tự chạy việc Hub giao).
             worker = new AssignmentWorker(scrape, update, search);
             var fleet = new FleetViewModel(worker);
-            // Dispatcher (tự đẩy việc) CHỈ chạy timer trên máy Hub (và chỉ chế độ có Workspace).
-            if (Shopee.Core.Coordination.HubServerConfigStore.Shared.Current.Enabled) HubDispatcher.Shared.Start();
 
             // ── Tab 1: Workspace (gom toàn bộ 5 màn suite cũ) ──
             var wsWorkspace = new RibbonScreenItem("Workspace", AppIcons.Dashboard, workspace,

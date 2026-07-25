@@ -76,33 +76,6 @@ public sealed class WorkLedgerRecord
     public DateTimeOffset UpdatedAt { get; set; }
 }
 
-/// <summary>Kho khoá phân tán (backend swappable: HTTP-Hub hôm nay, cloud-DB sau này).</summary>
-public interface ILeaseStore
-{
-    Task<LeaseAttempt> AcquireAsync(CoordKey key, bool force, CancellationToken ct);
-    /// <summary>Nhả khoá mồ côi do CHÍNH máy này giữ (gọi lúc khởi động sau crash).</summary>
-    Task ReclaimOwnAsync(CancellationToken ct);
-    IReadOnlyList<LeaseRecord> SnapshotActive();
-}
-
-/// <summary>Kho sổ hoàn thành; có thể fold ngược vào tiến độ scrape để resume xuyên máy.</summary>
-public interface ILedgerStore
-{
-    void Publish(WorkLedgerRecord record);
-    WorkLedgerRecord? Find(CoordKey key);
-    IReadOnlyList<WorkLedgerRecord> All();
-    void SyncIntoProgress();
-}
-
-/// <summary>Dịch vụ đồng bộ cấu hình + file dùng chung với Hub.</summary>
-public interface IHubSync
-{
-    bool Enabled { get; }
-    void Start();
-    void Stop();
-    Task PullNowAsync(CancellationToken ct);
-}
-
 /// <summary>
 /// Mặt tiền (facade) các điểm chạy (Scrape/Update/Workspace) gọi tới — gói khoá + sổ + trạng thái.
 /// Khi hub tắt, mọi AcquireAsync trả Off()=cấp luôn để app chạy single-machine y như cũ.

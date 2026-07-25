@@ -21,7 +21,6 @@ internal static class AppSession
     public static string RootDirectory { get; private set; } = "";
     public static int PortOffset { get; private set; }
     public static int ApiPort { get; private set; }
-    public static string ApiBase => $"http://127.0.0.1:{ApiPort}";
 
     public static void Initialize()
     {

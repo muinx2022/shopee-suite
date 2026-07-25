@@ -69,9 +69,6 @@ public static class BraveFleet
     /// <summary>Tổng RAM vật lý của máy (GB, làm tròn) — để hiển thị.</summary>
     public static int TotalRamGb => (int)Math.Round(TotalPhysicalBytes() / (1024.0 * 1024 * 1024));
 
-    /// <summary>Trần TỰ ĐỘNG (khi người dùng chưa đặt ngân sách): nửa số nhân + toàn bộ RAM.</summary>
-    public static int AutoMaxWindows => WindowsForBudget(0, 0);
-
     /// <summary>Tính trần cửa sổ từ "ngân sách" người dùng cho phép: <paramref name="usableCpu"/> nhân CPU
     /// (mỗi cửa sổ ~1 nhân) và <paramref name="usableRamGb"/> GB RAM (mỗi cửa sổ ~2GB). Giá trị 0 = MẶC ĐỊNH
     /// (CPU: nửa số nhân để máy còn mượt; RAM: toàn bộ). Đo thực 25/06: máy 12 nhân chạy ~6 cửa sổ thì mượt,

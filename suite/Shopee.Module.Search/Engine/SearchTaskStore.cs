@@ -491,40 +491,6 @@ public sealed class SearchTaskStore
         UpsertCategories(products.Select(p => p.Category));
     }
 
-    /// <summary>Reads stored products for a shop (for re-export).</summary>
-    public List<ProductResult> GetShopProducts(long shopId)
-    {
-        lock (_sync)
-        {
-            using var con = Open();
-            using var cmd = con.CreateCommand();
-            cmd.CommandText = "SELECT * FROM shop_products WHERE shop_id=$shopId ORDER BY id";
-            Add(cmd, "$shopId", shopId);
-            using var reader = cmd.ExecuteReader();
-            var products = new List<ProductResult>();
-            while (reader.Read())
-            {
-                products.Add(new ProductResult
-                {
-                    ItemId = reader.GetInt64(reader.GetOrdinal("item_id")),
-                    ShopId = reader.GetInt64(reader.GetOrdinal("shop_id")),
-                    Name = GetString(reader, "name"),
-                    PriceVnd = GetDecimal(reader, "price_vnd"),
-                    PriceOriginalVnd = GetDecimal(reader, "original_price_vnd"),
-                    MonthlySold = GetInt(reader, "monthly_sold"),
-                    Rating = GetDouble(reader, "rating"),
-                    LikedCount = GetInt(reader, "liked_count"),
-                    CommentCount = GetInt(reader, "comment_count"),
-                    ShopLocation = GetString(reader, "shop_location"),
-                    ImageUrl = GetString(reader, "image_url"),
-                    Category = GetString(reader, "category"),
-                    ShopName = GetString(reader, "shop_name"),
-                });
-            }
-            return products;
-        }
-    }
-
     /// <summary>
     /// All file-mode (shop-from-link) products across EVERY shop ever scanned, de-duplicated by
     /// itemId (shopId may repeat, itemId is unique). Keeps the most-recently-scanned row per itemId.

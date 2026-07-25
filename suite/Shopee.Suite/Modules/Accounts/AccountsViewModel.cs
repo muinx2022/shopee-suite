@@ -79,7 +79,6 @@ public sealed partial class AccountsViewModel : ObservableObject
         AccountStore.Shared.Changed += () => UiThread.Post(Reload);
         // Cột "Tình trạng" cập nhật khi Scrape/Search bắt đầu/kết thúc/mượn/nhả tk — chỉ refresh cột, không reload cả list.
         ShopeeAccountUsage.Shared.Changed += () => UiThread.Post(RefreshUsageColumn);
-        StartReportsPolling();   // chỉ Hub: định kỳ nạp "acc client báo lỗi"
     }
 
     private void RefreshUsageColumn()
@@ -160,157 +159,6 @@ public sealed partial class AccountsViewModel : ObservableObject
 
     private bool CanReenable() => Selected?.Model.Disabled == true;
 
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsCheckIdle))]
-    [NotifyCanExecuteChangedFor(nameof(CheckErroredCommand))]
-    private bool _isChecking;
-
-    // Delay ngẫu nhiên giữa các lần check (giả lập người dùng, tránh login dồn dập → bớt bị chặn).
-    private readonly Random _rng = new();
-
-    public bool IsCheckIdle => !IsChecking;
-
-    private bool CanCheckErrored() => IsCheckIdle;
-
-    /// <summary>
-    /// FLOW TỰ ĐỘNG DỌN TK LỖI: duyệt LẦN LƯỢT mọi tài khoản đang bị lỗi/captcha (Disabled), chạy
-    /// auto-login Shopee (mở Brave + set cookie SPC_F + điền form human). Vào được trang chủ (có cookie
-    /// phiên) → bỏ cờ lỗi, đưa về kho. KHÔNG vào được (sai mật khẩu / captcha / lỗi kỹ thuật — bất kỳ
-    /// lý do gì) → XÓA HẲN tài khoản. Dùng chung engine với mục "Check Shopee Account".
-    /// </summary>
-    [RelayCommand(CanExecute = nameof(CanCheckErrored))]
-    private async Task CheckErrored()
-    {
-        var targets = AccountStore.Shared.Accounts.Where(a => a.Disabled).ToList();
-        if (targets.Count == 0)
-        {
-            await Dialogs.InfoAsync("Không có tài khoản lỗi/captcha nào để kiểm tra.", "Kiểm tra tk lỗi");
-            return;
-        }
-
-        if (!await Dialogs.ConfirmAsync(
-                $"Kiểm tra lần lượt {targets.Count} tài khoản lỗi/captcha:\n\n" +
-                "• Tk CÓ link captcha đã lưu → TỰ ĐĂNG NHẬP trước (nếu chưa có phiên) rồi MỞ ĐÚNG trang đó để bạn GIẢI TAY; giải xong → về kho, chưa giải → GIỮ lại.\n" +
-                "• Tk KHÔNG có link → tự đăng nhập: vào được → về kho; KHÔNG vào được → XÓA HẲN.\n\n" +
-                "Thao tác xóa KHÔNG hoàn tác được. Tiếp tục?",
-                "Kiểm tra & dọn tk lỗi", DialogIcon.Warning))
-            return;
-
-        IsChecking = true;
-        var okNames = new List<string>();
-        var failNames = new List<string>();
-        var keptNames = new List<string>();   // tk captcha mở URL nhưng chưa giải → GIỮ lại (không xoá)
-        try
-        {
-            for (var i = 0; i < targets.Count; i++)
-            {
-                var a = targets[i];
-                var name = a.DisplayName;
-                Status = $"[{i + 1}/{targets.Count}] Đang đăng nhập \"{name}\"… (✓ {okNames.Count} · ✗ {failNames.Count})";
-
-                var hasCaptchaUrl = !string.IsNullOrWhiteSpace(a.CaptchaUrl);
-                var success = false;
-                try
-                {
-                    var proxy = await ResolveProxyAsync(a);
-                    var profileDir = Path.Combine(SuitePaths.ModuleDir("shared"), "profiles", a.Id);
-                    Directory.CreateDirectory(profileDir);
-                    var checker = new ShopeeAccountChecker();
-                    if (hasCaptchaUrl)
-                    {
-                        // CÓ url captcha đã lưu → TỰ ĐĂNG NHẬP trước (nếu chưa có phiên) rồi MỞ ĐÚNG trang đó
-                        // cho user GIẢI TAY. Giữ trình duyệt ~1 phút để giải; giải xong (đăng nhập được) thì
-                        // đóng sớm rồi sang tk kế.
-                        Status = $"[{i + 1}/{targets.Count}] Tự đăng nhập rồi mở trang captcha \"{name}\" — giải tay (~1 phút)…  (✓ {okNames.Count} · ✗ {failNames.Count})";
-                        var result = await checker.LoginThenManualSolveAsync(a.ShopeeAccountLogin, a.CaptchaUrl!, proxy, profileDir, 60_000, CancellationToken.None);
-                        success = result.Outcome == CheckOutcome.Success;
-                    }
-                    else if (!string.IsNullOrWhiteSpace(a.ShopeeAccountLogin))
-                    {
-                        // FALLBACK (chưa lưu url captcha): luồng login TỰ ĐỘNG như cũ. Giữ trình duyệt 10–15s.
-                        var holdMs = _rng.Next(10_000, 15_001);
-                        var result = await checker.CheckAsync(a.ShopeeAccountLogin, proxy, profileDir, holdMs, CancellationToken.None);
-                        success = result.Outcome == CheckOutcome.Success;   // chỉ vào được home mới tính OK
-                    }
-                }
-                catch { success = false; }
-
-                string verdict;
-                if (success)
-                {
-                    var previousCaptchaUrl = a.CaptchaUrl;
-                    a.Disabled = false;
-                    a.LastError = null;                 // → đưa về kho
-                    a.CaptchaUrl = null;                // đã giải xong → xoá url captcha đã lưu
-                    if (AccountStore.Shared.Save())     // Changed → Reload → list refresh NGAY (acc rời danh sách lỗi)
-                    {
-                        okNames.Add(name);
-                        verdict = "✓ OK → về kho";
-                    }
-                    else
-                    {
-                        a.Disabled = true;
-                        a.LastError = "Vẫn đang đánh dấu lỗi/captcha do lưu thất bại.";
-                        a.CaptchaUrl = previousCaptchaUrl;
-                        verdict = "⚠ lưu thất bại → giữ nguyên trạng thái lỗi";
-                    }
-                }
-                else if (hasCaptchaUrl)
-                {
-                    // Tk có url captcha nhưng CHƯA giải → GIỮ lại (KHÔNG xoá) để thử lại sau.
-                    keptNames.Add(name);
-                    verdict = "⏳ chưa giải captcha → giữ lại";
-                }
-                else
-                {
-                    AccountStore.Shared.Remove(a.Id);   // Remove tự Save → Changed → Reload → list refresh NGAY (xóa khỏi list)
-                    failNames.Add(name);
-                    verdict = "✗ không vào được → ĐÃ XÓA";
-                }
-
-                // Hiện RÕ kết quả của acc vừa xong (✓/✗) — trình duyệt đã đóng, nghỉ vài giây rồi check tiếp.
-                if (i < targets.Count - 1)
-                {
-                    var gapMs = _rng.Next(3_000, 6_000);
-                    Status = $"[{i + 1}/{targets.Count}] \"{name}\": {verdict} · nghỉ {gapMs / 1000}s rồi tiếp…  (✓ {okNames.Count} · ✗ {failNames.Count})";
-                    await Task.Delay(gapMs);
-                }
-                else
-                {
-                    Status = $"[{i + 1}/{targets.Count}] \"{name}\": {verdict}  (✓ {okNames.Count} · ✗ {failNames.Count})";
-                }
-            }
-
-            // Đã áp dụng từng acc trong vòng lặp (Save/Remove → list refresh ngay).
-            Status = $"Xong: {okNames.Count} OK → kho · {keptNames.Count} giữ (chưa giải captcha) · {failNames.Count} đã xóa · còn {AccountStore.Shared.Accounts.Count} tk.";
-
-            // Bảng tổng kết: liệt kê RÕ acc nào về kho, acc nào đã xóa (cắt bớt nếu quá dài).
-            static string Section(string title, List<string> names)
-            {
-                if (names.Count == 0) return "";
-                var show = names.Take(40).ToList();
-                var more = names.Count - show.Count;
-                var body = string.Join("\n  • ", show) + (more > 0 ? $"\n  • … và {more} tk nữa" : "");
-                return $"\n\n{title} ({names.Count}):\n  • {body}";
-            }
-            await Dialogs.InfoAsync(
-                $"Hoàn tất kiểm tra {targets.Count} tài khoản." +
-                Section("✓ OK → về kho", okNames) +
-                Section("⏳ Giữ lại (chưa giải captcha)", keptNames) +
-                Section("✗ Đã xóa (không vào được)", failNames),
-                "Kết quả dọn tk lỗi");
-        }
-        catch (Exception ex)
-        {
-            Dialogs.Notify("Lỗi khi dọn tk: " + ex.Message, "Kiểm tra tk lỗi", DialogIcon.Warning);
-            Status = "Đã dừng do lỗi — chưa áp dụng xóa.";
-        }
-        finally
-        {
-            IsChecking = false;
-        }
-    }
-
     private static async Task<string?> ResolveProxyAsync(ShopeeAccount a)
     {
         if (!string.IsNullOrWhiteSpace(a.ManualProxy))
@@ -333,8 +181,6 @@ public sealed partial class AccountsViewModel : ObservableObject
     public bool IsReadOnlyMode => CoordinationRuntime.Active && !HubServerConfigStore.Shared.Current.Enabled;
     /// <summary>Hub hoặc standalone → full quản lý (thêm/xóa/import/sửa/xóa acc lỗi).</summary>
     public bool IsFullEditMode => !IsReadOnlyMode;
-    /// <summary>Máy này là Hub → hiện panel "Acc client báo lỗi".</summary>
-    public bool IsHubMode => HubServerConfigStore.Shared.Current.Enabled;
 
     // ── Xử lý captcha THỦ CÔNG (double-click mở Brave bằng ĐÚNG profile acc, giải rồi đóng) ──
     private BrowserLauncher? _checkLauncher;
@@ -440,62 +286,6 @@ public sealed partial class AccountsViewModel : ObservableObject
         AccountStore.Shared.Remove(id);
         _ = CoordinationRuntime.Hub?.ClearErroredAccountAsync(id);
         Status = $"Đã xóa \"{name}\" khỏi kho.";
-    }
-
-    // ── Panel "Acc client báo lỗi" (CHỈ Hub): client báo captcha/failed về đây, operator quyết ──
-    public ObservableCollection<ClientErrorRow> ClientErrorReports { get; } = [];
-    private UiThread.UiTimer? _reportTimer;
-
-    private void StartReportsPolling()
-    {
-        if (!IsHubMode) return;
-        _ = RefreshReports();
-        _reportTimer = UiThread.Interval(TimeSpan.FromSeconds(15), () => _ = RefreshReports());
-        _reportTimer.Start();
-    }
-
-    [RelayCommand]
-    private async Task RefreshReports()
-    {
-        var hub = CoordinationRuntime.Hub;
-        if (hub is null) return;
-        List<AccountError> errs;
-        try { errs = await hub.ErroredAccountsAsync(); } catch { return; }
-        ClientErrorReports.Clear();
-        foreach (var e in errs.OrderByDescending(x => x.ReportedAt))
-        {
-            var acc = AccountStore.Shared.Accounts.FirstOrDefault(a => a.Id == e.AccountId);
-            if (acc is null) { _ = hub.ClearErroredAccountAsync(e.AccountId); continue; }   // acc đã bị xóa → gỡ báo mồ côi
-            ClientErrorReports.Add(new ClientErrorRow
-            {
-                AccountId = e.AccountId,
-                AccountName = acc.DisplayName,
-                Machine = string.IsNullOrWhiteSpace(e.Hostname) ? e.MachineId : e.Hostname,
-                StatusText = e.Status == "failed" ? "✗ Không sửa được" : "⚠ Đang captcha",
-                Reason = e.Reason,
-                When = e.ReportedAt == default ? "" : e.ReportedAt.ToLocalTime().ToString("dd/MM HH:mm"),
-            });
-        }
-    }
-
-    /// <summary>Hub xóa acc client báo lỗi khỏi kho (mirror gỡ mọi máy) + gỡ báo.</summary>
-    [RelayCommand]
-    private void DeleteReportedAccount(ClientErrorRow? row)
-    {
-        if (row is null) return;
-        AccountStore.Shared.Remove(row.AccountId);
-        _ = CoordinationRuntime.Hub?.ClearErroredAccountAsync(row.AccountId);
-        ClientErrorReports.Remove(row);
-        Status = $"Đã xóa acc \"{row.AccountName}\" (client báo lỗi) khỏi kho.";
-    }
-
-    /// <summary>Hub bỏ qua báo (giữ acc; vd để máy khác thử).</summary>
-    [RelayCommand]
-    private void DismissReport(ClientErrorRow? row)
-    {
-        if (row is null) return;
-        _ = CoordinationRuntime.Hub?.ClearErroredAccountAsync(row.AccountId);
-        ClientErrorReports.Remove(row);
     }
 
     // ── Đồng bộ acc + proxy từ Hub (chỉ hiện khi máy này là client của một Hub) ──
@@ -671,15 +461,4 @@ public sealed partial class AccountsViewModel : ObservableObject
     private static List<string> SplitLines(string text) => (text ?? "")
         .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
         .Select(l => l.Trim()).Where(l => l.Length > 0).ToList();
-}
-
-/// <summary>1 dòng trong panel "Acc client báo lỗi" trên Hub (acc client báo captcha/không-sửa-được).</summary>
-public sealed class ClientErrorRow
-{
-    public string AccountId { get; init; } = "";
-    public string AccountName { get; init; } = "";
-    public string Machine { get; init; } = "";
-    public string StatusText { get; init; } = "";
-    public string Reason { get; init; } = "";
-    public string When { get; init; } = "";
 }

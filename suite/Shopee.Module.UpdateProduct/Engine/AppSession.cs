@@ -14,12 +14,10 @@ internal static class AppSession
     public static string BaseDirectory { get; } = AppContext.BaseDirectory;
     public static string ProjectSourceDirectory { get; } =
         Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", ".."));
-    public static string RepoRootDirectory { get; } = FindRepoRoot();
     public static string SessionId { get; private set; } = "";
     public static string RootDirectory { get; private set; } = "";
     public static int PortOffset { get; private set; }
     public static int ApiPort { get; private set; }
-    public static string ApiBase => $"http://127.0.0.1:{ApiPort}";
 
     public static void Initialize()
     {
@@ -153,19 +151,5 @@ internal static class AppSession
         all[0] = root;
         Array.Copy(parts, 0, all, 1, parts.Length);
         return Path.Combine(all);
-    }
-
-    private static string FindRepoRoot()
-    {
-        var dir = new DirectoryInfo(ProjectSourceDirectory);
-        while (dir is not null)
-        {
-            // Mốc repo root = file solution (ổn định, không phụ thuộc Python đã bỏ).
-            if (File.Exists(Path.Combine(dir.FullName, "ShopeeSuite.sln")))
-                return dir.FullName;
-            dir = dir.Parent;
-        }
-
-        return Path.GetFullPath(Path.Combine(ProjectSourceDirectory, ".."));
     }
 }
