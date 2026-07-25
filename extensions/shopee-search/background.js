@@ -1,10 +1,10 @@
 ﻿// â”€â”€ Config â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const DEFAULT_WS_PORT = 9111;
-const DELAY_MS        = 3000;
 
 // â”€â”€ State â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 let ws          = null;
 let wsPort      = DEFAULT_WS_PORT;
+let reconnectTimer = null;
 let searchTabId = null;
 let initialTabId= null;
 let searchState = null;
@@ -15,13 +15,24 @@ chrome.alarms.onAlarm.addListener(() => chrome.storage.local.get('_'));
 
 // â”€â”€ WebSocket â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function connectWs(port) {
-  wsPort = port || DEFAULT_WS_PORT;
+  const targetPort = port || DEFAULT_WS_PORT;
+  // We're (re)connecting now → cancel any pending reconnect timer so a stale timer
+  // can't fire later and replace the socket we're about to open.
+  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+  // Guard: a live socket to the SAME lane port already exists → nothing to do.
+  // Without this, a tab reload (onUpdated) or a late reconnect timer would create a
+  // second socket, whose onopen re-sends 'ready' → C# re-sends 'start' → a running
+  // search is stopped + restarted. Port-change still replaces (below), because a
+  // genuinely different targetPort skips this guard.
+  if (ws && targetPort === wsPort &&
+      (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
+  wsPort = targetPort;
   // Persist this lane's port so a service-worker restart (MV3 kills the SW after ~30s)
   // can restore it instead of resetting to DEFAULT_WS_PORT (9111) and hanging.
   try { chrome.storage.local.set({ _wsPort: wsPort }); } catch (_) {}
   if (ws) {
-    // Intentional replacement: detach onclose first so the old socket's close
-    // handler doesn't schedule a duplicate reconnect 3s later.
+    // Intentional replacement (port changed): detach onclose first so the old socket's
+    // close handler doesn't schedule a duplicate reconnect 3s later.
     const old = ws;
     old.onclose = null;
     old.onerror = null;
@@ -31,7 +42,19 @@ function connectWs(port) {
   ws = sock;
   sock.onopen  = () => { if (ws !== sock) return; console.log('[SS] WS connected'); send({ action: 'ready' }); };
   sock.onmessage = evt => { if (ws !== sock) return; try { handleMessage(JSON.parse(evt.data)); } catch (_) {} };
-  sock.onclose = () => { if (ws !== sock) return; ws = null; setTimeout(() => connectWs(wsPort), 3000); };
+  sock.onclose = () => {
+    if (ws !== sock) return;
+    ws = null;
+    // Reject every in-flight CDP gesture so its caller falls through to the synthetic
+    // fallback immediately, instead of each one hanging the full 30s cdpGesture timeout.
+    _gestPending.forEach(entry => {
+      try { clearTimeout(entry.timer); } catch (_) {}
+      try { entry.reject(new Error('ws closed')); } catch (_) {}
+    });
+    _gestPending.clear();
+    if (reconnectTimer) clearTimeout(reconnectTimer);
+    reconnectTimer = setTimeout(() => { reconnectTimer = null; connectWs(wsPort); }, 3000);
+  };
   sock.onerror = () => {};
 }
 function send(obj) {
@@ -97,28 +120,13 @@ function handleMessage(msg) {
       else startSearch(msg);
       break;
     case 'stop':   stopSearch();     break;
-    case 'pause':  if (searchState) searchState.paused = true;  break;
-    case 'resume': if (searchState) searchState.paused = false; break;
-  }
-}
-
-// Block at a safe point while paused, without killing the run. Returns when resumed,
-// or immediately if the run was stopped/errored/replaced meanwhile.
-async function waitWhilePaused(state) {
-  if (!state.paused) return;
-  log('Đã tạm dừng. Chờ tiếp tục...');
-  while (state.paused && state === searchState && !state.stopped && !state.networkErrorDetected) {
-    await sleep(400);
-  }
-  if (state === searchState && !state.stopped && !state.networkErrorDetected) {
-    log('Tiếp tục chạy.');
   }
 }
 
 // â”€â”€ Search â€” type keyword + Enter, collect DOM data â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async function startSearch(msg) {
   stopSearch();
-  const { keyword, filters } = msg;
+  const { keyword } = msg;
   const resumeCategoryIndex = Math.max(1, Number(msg.resumeCategoryIndex || 1));
   // Page to resume at WITHIN the resumed category (account swap continues here, not page 1).
   const resumePage = Math.max(1, Number(msg.resumePage || 1));
@@ -128,8 +136,8 @@ async function startSearch(msg) {
   // await below re-checks it so a stale/zombie run exits instead of fighting
   // a newer one over the same tab.
   const state = {
-    keyword, filters, resumeCategoryIndex,
-    stopped: false, paused: false, networkErrorDetected: false, captchaDetected: false,
+    keyword, resumeCategoryIndex,
+    stopped: false, networkErrorDetected: false, captchaDetected: false,
   };
   searchState = state;
   const dead = () => state !== searchState || state.stopped || state.networkErrorDetected;
@@ -237,7 +245,6 @@ async function startSearch(msg) {
   }
 
   for (let i = startCategoryIndex - 1; i < categories.length; i++) {
-    await waitWhilePaused(state);
     if (dead()) return;
     const category = categories[i];
     log(`Category ${i + 1}/${categories.length}: ${category.name}`);
@@ -295,8 +302,8 @@ async function startShopFromLink(msg) {
   stopSearch();
   const link = msg.link || '';
   const state = {
-    keyword: link, link, filters: msg.filters, resumeCategoryIndex: 1,
-    stopped: false, paused: false, networkErrorDetected: false, captchaDetected: false,
+    keyword: link, link, resumeCategoryIndex: 1,
+    stopped: false, networkErrorDetected: false, captchaDetected: false,
     mode: 'shopFromLink',
   };
   searchState = state;
@@ -327,7 +334,7 @@ async function startShopFromLink(msg) {
   // kế — KHÔNG networkError (sẽ đổi account + mở lại đúng link đó vô hạn → "máy mở đi mở lại").
   if (await isProductNotFoundPage()) { send({ action: 'error', message: 'Sản phẩm không tồn tại — bỏ qua link.' }); return; }
 
-  await waitWhilePaused(state); if (dead()) return;
+  if (dead()) return;
   log('Tìm và bấm "Xem shop"...');
   const okShop = await clickViewShop();
   if (dead()) return;
@@ -352,9 +359,9 @@ async function startShopFromLink(msg) {
   if (await isVerifyPage()) { state.captchaDetected = true; send({ action: 'captcha' }); return; }
 
   const shopName = await readShopName();
-  if (shopName) { state.shopName = shopName; send({ action: 'shopInfo', name: shopName }); }
+  if (shopName) { state.shopName = shopName; }
 
-  await waitWhilePaused(state); if (dead()) return;
+  if (dead()) return;
   log('Bấm "Tất cả sản phẩm"...');
   const okAll = await clickAllProducts();
   if (dead()) return;
@@ -363,7 +370,7 @@ async function startShopFromLink(msg) {
   await sleep(2500 + Math.random() * 1500);
   if (dead()) return;
 
-  await waitWhilePaused(state); if (dead()) return;
+  if (dead()) return;
   log('Sắp xếp theo "Bán chạy"...');
   await clickTopSalesShop();
   if (dead()) return;
@@ -388,8 +395,8 @@ async function startCategoryFromLink(msg) {
   const link = msg.link || '';
   const region = (msg.region || '').trim();
   const state = {
-    keyword: link, link, region, filters: msg.filters, resumeCategoryIndex: 1,
-    stopped: false, paused: false, networkErrorDetected: false, captchaDetected: false,
+    keyword: link, link, region, resumeCategoryIndex: 1,
+    stopped: false, networkErrorDetected: false, captchaDetected: false,
     mode: 'categoryFromLink',
   };
   searchState = state;
@@ -453,7 +460,7 @@ async function startCategoryFromLink(msg) {
     log('Không thấy danh mục con — cào thẳng trang danh mục.');
     await applyLocationFilter(state, region); if (dead()) return;
     if (await isVerifyPage()) { state.captchaDetected = true; send({ action: 'captcha' }); return; }
-    await waitWhilePaused(state); if (dead()) return;
+    if (dead()) return;
     log('Sắp xếp "Bán chạy"...');
     await prepareBestSelling(); if (dead()) return;
     await waitForTabLoad(searchTabId);
@@ -467,7 +474,7 @@ async function startCategoryFromLink(msg) {
 
   log(`Tìm thấy ${subs.length} danh mục con — lần lượt cào từng cái.`);
   for (let i = 0; i < subs.length; i++) {
-    await waitWhilePaused(state); if (dead()) return;
+    if (dead()) return;
     const sub = subs[i];
     log(`Danh mục con ${i + 1}/${subs.length}: ${sub.name}`);
     // CLICK danh mục con trong rail (SPA → giữ bộ lọc), KHÔNG nav URL trực tiếp.
@@ -488,7 +495,7 @@ async function startCategoryFromLink(msg) {
     if (await isVerifyPage()) { state.captchaDetected = true; send({ action: 'captcha' }); return; }
 
     // Sắp "Bán chạy" rồi cào.
-    await waitWhilePaused(state); if (dead()) return;
+    if (dead()) return;
     log('Sắp xếp "Bán chạy"...');
     await prepareBestSelling(); if (dead()) return;
     await waitForTabLoad(searchTabId);
@@ -788,15 +795,19 @@ async function resolveTopSalesShopPoint() {
         if (!bar) return { ok: false };
         const norm = s => (s || '').replace(/\s+/g, ' ').trim().toLowerCase();
         const opts = Array.from(bar.querySelectorAll('.sort-by-options__option'));
+        // Text match first; positional index[2] only as a last-resort fallback.
+        let usedIndexFallback = false;
         let b = opts.find(x => /bán chạy|top sales/.test(norm(x.textContent)));
-        if (!b && opts.length >= 3) b = opts[2];
+        if (!b && opts.length >= 3) { b = opts[2]; usedIndexFallback = true; }
         if (!b) return { ok: false };
         b.scrollIntoView({ block: 'center' });
         const r = b.getBoundingClientRect();
-        return { ok: r.width > 0 && r.height > 0, already: b.getAttribute('aria-pressed') === 'true', x: r.left + r.width / 2, y: r.top + r.height / 2, dpr: window.devicePixelRatio };
+        return { ok: r.width > 0 && r.height > 0, usedIndexFallback, already: b.getAttribute('aria-pressed') === 'true', x: r.left + r.width / 2, y: r.top + r.height / 2, dpr: window.devicePixelRatio };
       },
     });
-    return res?.result ?? { ok: false };
+    const out = res?.result ?? { ok: false };
+    if (out.usedIndexFallback) log('Nút "Bán chạy" (shop): không khớp text, dùng fallback vị trí thứ 3.');
+    return out;
   } catch (e) { log('resolveTopSalesShopPoint error: ' + e.message); return { ok: false }; }
 }
 
@@ -929,24 +940,6 @@ async function isNetworkErrorPage() {
     return res?.result === true;
   } catch (_) {
     return false;
-  }
-}
-
-async function getPageHtml() {
-  try {
-    const [res] = await chrome.scripting.executeScript({
-      target: { tabId: searchTabId },
-      world: 'MAIN',
-      func: () => ({
-        title: document.title,
-        url: location.href,
-        html: document.documentElement.outerHTML,
-      }),
-    });
-    return res?.result ?? null;
-  } catch (e) {
-    log('getPageHtml error: ' + e.message);
-    return null;
   }
 }
 
@@ -1264,7 +1257,6 @@ async function crawlPagesForCurrentState(state, keyword, categoryName, categoryI
   if (totalPages > 0) log(`${categoryName ? 'Category ' + categoryName + ': ' : ''}phát hiện ${totalPages} trang, sẽ quét tối đa ${pageCap}.`);
 
   for (let pageNo = startPage; pageNo <= pageCap; pageNo++) {
-    await waitWhilePaused(state);
     if (dead()) return;
     const prefix = categoryName ? `Category ${categoryIndex}/${categoryTotal} "${categoryName}", page ${pageNo}/${pageCap}` : `Page ${pageNo}/${pageCap}`;
     if (await isVerifyPage()) {
@@ -1691,24 +1683,39 @@ async function resolveBestSellingPoint() {
     const [res] = await chrome.scripting.executeScript({
       target: { tabId: searchTabId }, world: 'MAIN',
       func: () => {
-        const sortGroup = document.querySelector('.shopee-sort-by-options__option-group');
-        const sortButtons = sortGroup ? Array.from(sortGroup.querySelectorAll('button')) : [];
-        let btn = sortButtons.length >= 3 ? sortButtons[2] : null;
+        const rx = /top\s*sales|best\s*selling|b[aá]n\s*ch/i;
+        const sortGroup = document.querySelector('.shopee-sort-by-options__option-group')
+          || document.querySelector('.shopee-sort-by-options');
+        // 3-tier priority (avoid clicking a look-alike button elsewhere on the page):
+        //  1) text match SCOPED to the sort bar container;
+        //  2) text match page-wide (only if no container / no in-bar match);
+        //  3) positional index[2] in the sort group as a last resort (+ flag/log).
+        let usedIndexFallback = false;
+        let btn = sortGroup
+          ? Array.from(sortGroup.querySelectorAll('button')).find(b => rx.test((b.textContent || '').trim()))
+          : null;
         if (!btn) {
           btn = Array.from(document.querySelectorAll('.shopee-sort-by-options button, button'))
-            .find(b => /top\s*sales|best\s*selling|b[aá]n\s*ch/i.test((b.textContent || '').trim()));
+            .find(b => rx.test((b.textContent || '').trim()));
+        }
+        if (!btn) {
+          const sortButtons = sortGroup ? Array.from(sortGroup.querySelectorAll('button')) : [];
+          if (sortButtons.length >= 3) { btn = sortButtons[2]; usedIndexFallback = true; }
         }
         if (!btn) return { ok: false };
         btn.scrollIntoView({ block: 'center' });
         const r = btn.getBoundingClientRect();
         return {
           ok: r.width > 0 && r.height > 0,
+          usedIndexFallback,
           alreadyPressed: btn.getAttribute('aria-pressed') === 'true',
           x: r.left + (0.3 + Math.random() * 0.4) * r.width, y: r.top + (0.3 + Math.random() * 0.4) * r.height, dpr: window.devicePixelRatio,
         };
       },
     });
-    return res?.result ?? { ok: false };
+    const out = res?.result ?? { ok: false };
+    if (out.usedIndexFallback) log('Nút "Bán chạy": không khớp text, dùng fallback vị trí thứ 3.');
+    return out;
   } catch (e) { log('resolveBestSellingPoint error: ' + e.message); return { ok: false }; }
 }
 
@@ -1855,13 +1862,22 @@ async function prepareBestSellingSynthetic() {
         await wheel(rand(260, 520));
         await sleep(rand(700, 1400));
 
+        let bestSellingIndexFallback = false;
         function findBestSellingButton() {
-          const sortGroup = document.querySelector('.shopee-sort-by-options__option-group');
+          const rx = /top\s*sales|best\s*selling|b[aá]n\s*ch/i;
+          const sortGroup = document.querySelector('.shopee-sort-by-options__option-group')
+            || document.querySelector('.shopee-sort-by-options');
+          // 3-tier: (1) text scoped to sort bar; (2) text page-wide; (3) index[2] in sort group.
+          const inBar = sortGroup
+            ? Array.from(sortGroup.querySelectorAll('button')).find(b => rx.test((b.textContent || '').trim()))
+            : null;
+          if (inBar) return inBar;
+          const byText = Array.from(document.querySelectorAll('.shopee-sort-by-options button, button'))
+            .find(b => rx.test((b.textContent || '').trim()));
+          if (byText) return byText;
           const sortButtons = sortGroup ? Array.from(sortGroup.querySelectorAll('button')) : [];
-          if (sortButtons.length >= 3) return sortButtons[2];
-
-          return Array.from(document.querySelectorAll('.shopee-sort-by-options button, button'))
-            .find(b => /top\s*sales|best\s*selling|b[aá]n\s*ch/i.test((b.textContent || '').trim()));
+          if (sortButtons.length >= 3) { bestSellingIndexFallback = true; return sortButtons[2]; }
+          return null;
         }
 
         const bestSellingButton = findBestSellingButton();
@@ -1911,10 +1927,12 @@ async function prepareBestSellingSynthetic() {
           }
         } catch (_) {}
 
-        return { clickedBestSelling, setPrice: false, firstScrollSteps, fallbackNavigate };
+        return { clickedBestSelling, setPrice: false, firstScrollSteps, fallbackNavigate, bestSellingIndexFallback };
       },
     });
-    return res?.result ?? null;
+    const out = res?.result ?? null;
+    if (out && out.bestSellingIndexFallback) log('Nút "Bán chạy" (synthetic): không khớp text, dùng fallback vị trí thứ 3.');
+    return out;
   } catch (e) {
     log('prepareBestSelling error: ' + e.message);
     return null;
@@ -2375,9 +2393,8 @@ let sessionPace = 0.8 + Math.random() * 0.7;
 const rand    = (min, max) => min + Math.random() * (max - min);
 const randInt = (min, max) => Math.floor(min + Math.random() * (max - min + 1));
 const clamp   = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
-// Quãng chờ hành vi: nhân sessionPace (KHÔNG dùng cho timeout hệ thống — dùng rawSleep cho cái đó).
+// Quãng chờ hành vi: nhân sessionPace (KHÔNG dùng cho timeout hệ thống).
 const sleep = ms => new Promise(r => setTimeout(r, Math.round(ms * sessionPace)));
-const rawSleep = ms => new Promise(r => setTimeout(r, ms));
 
 async function waitForTabLoad(tabId, timeoutMs = 15000) {
   return new Promise(resolve => {

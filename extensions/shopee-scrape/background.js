@@ -12,12 +12,16 @@ const TAB_LOAD_TIMEOUT_MS = 30_000;
 // đặt giờ cứng). Waiter background CHỈ là chốt chặn rất rộng để không cắt content.js giữa chừng (cắt
 // sớm → tưởng fail → reload + click lại). Để 9' (> watchdog 8' — watchdog mới là cơ chế xử lý kẹt thật).
 const SCRAPE_WAIT_TIMEOUT_MS = 540_000;
-const CAPTCHA_WAIT_TIMEOUT_MS = 10 * 60_000;
-const CAPTCHA_CHECK_INTERVAL_MS = 2_000;
 const MAX_SCRAPE_RETRIES = 1;
 
 let scrapeWaiters = [];
+let scrapeTokenSeq = 0;
 let abortRequested = false;
+
+// Token duy nhất cho mỗi lượt chờ kết quả scrape. Content script echo lại token này trong
+// SCRAPE_RESULT; background chỉ resolve waiter có token khớp → kết quả cũ (đến muộn sau khi đã
+// re-inject) không còn resolve nhầm waiter mới.
+const nextScrapeToken = (rowNumber) => `${Number(rowNumber) || 0}-${++scrapeTokenSeq}`;
 
 const readState = async () => {
   const data = await chrome.storage.local.get("runnerState");
@@ -92,17 +96,6 @@ const persistCompletedRow = async (rowNumber) => {
   try {
     await writeState({ lastCompletedRow: row, currentRow: row });
   } catch (_) {}
-};
-
-const isInjectableUrl = (url) => {
-  if (typeof url !== "string" || !url.trim()) return false;
-  const trimmed = url.trim().toLowerCase();
-  return (
-    trimmed.startsWith("http://") ||
-    trimmed.startsWith("https://") ||
-    trimmed.startsWith("file://") ||
-    trimmed.startsWith("ftp://")
-  );
 };
 
 const normalizeLink = (value) => {
@@ -278,9 +271,16 @@ const rearmScrapeClicker = async (tabId) => {
   }).catch(() => {});
 };
 
-const injectScrapeClicker = async (tabId) => {
+const injectScrapeClicker = async (tabId, token) => {
   if (!(await getTabSafe(tabId))) return false;
   try {
+    // Đặt token vào page (world ISOLATED, cùng world với content.js file-inject) TRƯỚC khi chèn
+    // clicker, để content.js đọc và echo lại trong SCRAPE_RESULT.
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      func: (t) => { window.__shopeeScrapeResultToken = t; },
+      args: [token ?? null],
+    });
     await chrome.scripting.executeScript({ target: { tabId }, files: [SCRAPE_SCRIPT] });
     return true;
   } catch (_) {
@@ -307,9 +307,9 @@ const rejectAllScrapeWaiters = (message) => {
   }
 };
 
-const waitForScrapeResult = async (timeoutMs = SCRAPE_WAIT_TIMEOUT_MS) => {
+const waitForScrapeResult = async (token, timeoutMs = SCRAPE_WAIT_TIMEOUT_MS) => {
   return new Promise((resolve) => {
-    const waiter = { resolve: null };
+    const waiter = { token, resolve: null };
     const timeout = setTimeout(() => {
       const index = scrapeWaiters.indexOf(waiter);
       if (index >= 0) scrapeWaiters.splice(index, 1);
@@ -668,17 +668,19 @@ globalThis.__launcherExecuteScrapeStep = async (payload) => {
       };
     }
 
-    let scrapeWaiterPromise = waitForScrapeResult();
+    let scrapeToken = nextScrapeToken(rowNumber);
+    let scrapeWaiterPromise = waitForScrapeResult(scrapeToken);
     // Re-arm CHỈ ở lần chèn đầu của mỗi bước, để ca resume sau captcha (document không reload) vẫn click.
     // Các lần re-inject sau (retry/post-captcha/beforeNext) tự reset guard riêng nên không cần ở đây —
     // tránh gỡ guard vô tội vạ gây click-trùng → reload lặp.
     await rearmScrapeClicker(tabId);
-    const injected = await injectScrapeClicker(tabId);
+    const injected = await injectScrapeClicker(tabId, scrapeToken);
     if (!injected) {
       captchaWait = await waitForCaptchaToClear(tabId, { instanceName, rowNumber, sku });
       if (captchaWait.ok) {
-        scrapeWaiterPromise = waitForScrapeResult();
-        const reinjected = await injectScrapeClicker(tabId);
+        scrapeToken = nextScrapeToken(rowNumber);
+        scrapeWaiterPromise = waitForScrapeResult(scrapeToken);
+        const reinjected = await injectScrapeClicker(tabId, scrapeToken);
         if (reinjected) {
           const retryResult = await scrapeWaiterPromise;
           if (retryResult?.ok) {
@@ -726,12 +728,13 @@ globalThis.__launcherExecuteScrapeStep = async (payload) => {
           pageUrl: await getCurrentTabUrl(tabId, link),
         };
       }
-      scrapeWaiterPromise = waitForScrapeResult();
+      scrapeToken = nextScrapeToken(rowNumber);
+      scrapeWaiterPromise = waitForScrapeResult(scrapeToken);
       await chrome.scripting.executeScript({
         target: { tabId },
         func: () => { window.__shopee27052026ScrapeClickerInjected = false; },
       }).catch(() => {});
-      await injectScrapeClicker(tabId);
+      await injectScrapeClicker(tabId, scrapeToken);
       scrapeResult = await scrapeWaiterPromise;
     }
 
@@ -760,18 +763,20 @@ globalThis.__launcherExecuteScrapeStep = async (payload) => {
         target: { tabId },
         func: () => { window.__shopee27052026ScrapeClickerInjected = false; },
       }).catch(() => {});
-      scrapeWaiterPromise = waitForScrapeResult();
-      await injectScrapeClicker(tabId);
+      scrapeToken = nextScrapeToken(rowNumber);
+      scrapeWaiterPromise = waitForScrapeResult(scrapeToken);
+      await injectScrapeClicker(tabId, scrapeToken);
       scrapeResult = await scrapeWaiterPromise;
       if (!scrapeResult?.ok) {
         const retryCaptcha = await waitForCaptchaToClear(tabId, { instanceName, rowNumber, sku });
         if (retryCaptcha.ok && retryCaptcha.waited) {
-          scrapeWaiterPromise = waitForScrapeResult();
+          scrapeToken = nextScrapeToken(rowNumber);
+          scrapeWaiterPromise = waitForScrapeResult(scrapeToken);
           await chrome.scripting.executeScript({
             target: { tabId },
             func: () => { window.__shopee27052026ScrapeClickerInjected = false; },
           }).catch(() => {});
-          await injectScrapeClicker(tabId);
+          await injectScrapeClicker(tabId, scrapeToken);
           scrapeResult = await scrapeWaiterPromise;
         } else if (!retryCaptcha.ok) {
           return {
@@ -964,9 +969,15 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (!message || message.type !== "SCRAPE_RESULT") return undefined;
 
-  const waiter = scrapeWaiters.shift();
-  if (waiter) {
+  // Chỉ resolve waiter có token khớp. Kết quả token lạ (dòng cũ đến muộn sau khi đã re-inject) bị bỏ
+  // để không resolve nhầm waiter đang chờ của lượt mới.
+  const token = message.token;
+  const index = scrapeWaiters.findIndex((w) => w.token === token);
+  if (index >= 0) {
+    const waiter = scrapeWaiters.splice(index, 1)[0];
     waiter.resolve(message.detail || { ok: false, message: "Không có kết quả scrape." });
+  } else {
+    console.log("[scrape] SCRAPE_RESULT token lạ, bỏ qua:", token);
   }
   sendResponse({ ok: true });
   return false;
