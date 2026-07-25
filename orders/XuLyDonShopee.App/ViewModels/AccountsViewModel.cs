@@ -270,6 +270,16 @@ public partial class AccountsViewModel : ViewModelBase
     [ObservableProperty]
     private string? _orderStatus;
 
+    /// <summary>Tab "Kết quả": NGÀY đang lọc (mặc định hôm nay). Đổi ngày → <see cref="LoadResults"/> nạp lại số
+    /// chuẩn bị hàng của ngày đó. DatePicker trả <c>DateTimeOffset?</c> — dùng kiểu KHÔNG null nên xóa trắng lịch
+    /// KHÔNG ghi được về đây (giữ giá trị cũ).</summary>
+    [ObservableProperty]
+    private DateTimeOffset _resultDate = DateTimeOffset.Now;
+
+    /// <summary>Tab "Kết quả": các dòng Shop | số Chuẩn bị hàng của NGÀY đang lọc — MỌI shop của tài khoản (kể cả
+    /// shop 0 đơn). Dựng lại trong <see cref="LoadResults"/> khi đổi tài khoản chọn / đổi ngày.</summary>
+    public ObservableCollection<ShopPrepareRow> ResultRows { get; } = new();
+
     /// <summary>Panel phải hiện chữ mờ khi không ở chế độ xem/sửa.</summary>
     public bool ShowPlaceholder => !IsEditing;
 
@@ -367,6 +377,49 @@ public partial class AccountsViewModel : ViewModelBase
         {
             IsEditing = false;
             ClearForm();
+        }
+
+        // Tab "Kết quả": nạp lưới Shop|Chuẩn bị hàng theo tài khoản vừa chọn (bỏ chọn → clear). Đặt SAU khi
+        // form/_editingId đã đồng bộ (dùng SelectedRow.Id).
+        LoadResults();
+    }
+
+    /// <summary>Đổi NGÀY lọc ở tab "Kết quả" → nạp lại số chuẩn bị hàng của ngày mới.</summary>
+    partial void OnResultDateChanged(DateTimeOffset value) => LoadResults();
+
+    /// <summary>
+    /// Dựng lại <see cref="ResultRows"/> cho tab "Kết quả": MỌI shop của tài khoản đang chọn (từ
+    /// <c>account_shops</c>) LEFT JOIN số đơn chuẩn bị hàng của <see cref="ResultDate"/> (từ <c>prepare_daily</c>) —
+    /// shop không có đơn trong ngày → 0. Shop CÓ đơn trong ngày nhưng CHƯA có trong danh sách shop (lỡ đọc shop-list)
+    /// → vẫn thêm để không sót. Chưa chọn tài khoản → lưới rỗng. Chạy trên UI thread (gọi từ setter/OnSelectedRowChanged).
+    /// </summary>
+    private void LoadResults()
+    {
+        ResultRows.Clear();
+        if (SelectedRow?.Id is not long accountId)
+        {
+            return;
+        }
+
+        var day = ResultDate.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+        var shops = _services.Results.GetShops(accountId);
+        var counts = _services.Results.GetPreparedByDay(accountId, day);
+
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var (shopLogin, shopName) in shops)
+        {
+            seen.Add(shopLogin);
+            var name = string.IsNullOrWhiteSpace(shopName) ? shopLogin : shopName;
+            ResultRows.Add(new ShopPrepareRow(name, counts.GetValueOrDefault(shopLogin, 0)));
+        }
+
+        // Shop có đơn nhưng chưa nằm trong account_shops → UNION thêm (nhãn = chính shop_login) để không sót đếm.
+        foreach (var kv in counts)
+        {
+            if (!seen.Contains(kv.Key))
+            {
+                ResultRows.Add(new ShopPrepareRow(kv.Key, kv.Value));
+            }
         }
     }
 
@@ -1252,3 +1305,6 @@ public partial class AccountsViewModel : ViewModelBase
     private static string FormatDate(DateTime utc)
         => utc == default ? string.Empty : utc.ToLocalTime().ToString("dd/MM/yyyy HH:mm");
 }
+
+/// <summary>Một dòng lưới tab "Kết quả": tên Shop (hiển thị) + số đơn đã Chuẩn bị hàng của ngày đang lọc.</summary>
+public sealed record ShopPrepareRow(string ShopName, int PreparedCount);

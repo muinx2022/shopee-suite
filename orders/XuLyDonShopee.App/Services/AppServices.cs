@@ -23,6 +23,10 @@ public class AppServices
     /// <summary>Kho đơn hàng đã sync (bảng <c>orders</c>) — phiên ghi qua đây khi Sync Đơn hàng.</summary>
     public OrdersRepository Orders { get; }
 
+    /// <summary>Kho "Kết quả chuẩn bị hàng" theo shop/ngày (bảng <c>account_shops</c> + <c>prepare_daily</c>) —
+    /// phiên cầu nối ghi qua callback (lưu shop + tăng đếm mỗi đơn arrange); tab "Kết quả" đọc để hiển thị.</summary>
+    public ResultsRepository Results { get; }
+
     /// <summary>Đẩy đơn (kèm file phiếu) lên Google Sheet qua Apps Script Web App — phiên gọi sau mỗi lượt Sync.</summary>
     public GoogleSheetSyncService GsheetSync { get; }
 
@@ -94,6 +98,7 @@ public class AppServices
         Proxies = new ProxyRepository(Database);
         Settings = new SettingsRepository(Database);
         Orders = new OrdersRepository(Database);
+        Results = new ResultsRepository(Database);
 
         // Migration MỘT LẦN (idempotent qua cờ settings): gộp ProxyKey cố định của tài khoản (cơ chế cũ) vào
         // pool KiotProxy CHUNG để không mất key sẵn có khi chuyển sang cấp phát key theo pool lúc chạy.
