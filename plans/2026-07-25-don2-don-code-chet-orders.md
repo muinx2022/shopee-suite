@@ -1,7 +1,7 @@
-# Plan: Đợt 2 — Dọn code chết app Đơn hàng (orders/) + gỡ proxy + gỡ POC
+﻿# Plan: Đợt 2 — Dọn code chết app Đơn hàng (orders/) + gỡ proxy + gỡ POC
 
 - **Ngày:** 2026-07-25
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-executor`)
 - **Plan cha:** `plans/2026-07-25-ke-hoach-refactor-toan-app.md` (mục 2A)
 - **Điều kiện tiên quyết:** plan `2026-07-25-don1-sua-bug-orders.md` đã nghiệm thu + commit (nút Tải phiếu đã đi qua bridge — không còn phụ thuộc `_session`).

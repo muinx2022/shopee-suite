@@ -1,7 +1,7 @@
-# Plan: Đợt 2 — Dọn code chết Suite desktop (shell + Core + modules)
+﻿# Plan: Đợt 2 — Dọn code chết Suite desktop (shell + Core + modules)
 
 - **Ngày:** 2026-07-25
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-executor`)
 - **Plan cha:** `plans/2026-07-25-ke-hoach-refactor-toan-app.md` (mục 2B + 2C + 2D)
 - **Điều kiện tiên quyết:** plan `2026-07-25-don1-sua-bug-core-suite.md` đã nghiệm thu + commit.
