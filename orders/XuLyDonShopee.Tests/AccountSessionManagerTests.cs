@@ -51,6 +51,17 @@ public class AccountSessionManagerTests
             return Task.CompletedTask;
         }
 
+        public void MarkQueued()
+        {
+            // Giống AccountSession: đang hoạt động (Opening/Running/Stopping) → không hạ về hàng đợi.
+            if (State is SessionState.Opening or SessionState.Running or SessionState.Stopping)
+            {
+                return;
+            }
+            State = SessionState.Queued;
+            Changed?.Invoke();
+        }
+
         public Task<bool> ProcessOrdersAsync() => Task.FromResult(false);
 
         public Task<bool> CheckOrdersAsync() => Task.FromResult(false);
@@ -161,6 +172,104 @@ public class AccountSessionManagerTests
         // B KHÔNG bị xóa nhầm.
         Assert.Same(b, mgr.Get(5));
         Assert.True(mgr.IsRunning(5));
+    }
+
+    // ===================== Hàng đợi 1-phiên-cầu-nối-một-lúc (Lỗi 2) =====================
+
+    [Fact]
+    public void Start_MotAccount_ChayNgay_KhongDoiHanhVi()
+    {
+        var mgr = new AccountSessionManager(id => new StubSession(id));
+
+        var s = (StubSession)mgr.Start(1);
+
+        Assert.Equal(SessionState.Running, s.State);
+        Assert.Equal(1, s.StartCalls);         // chạy ngay khi chỉ 1 account (không đổi hành vi cũ)
+    }
+
+    [Fact]
+    public void Start_PhienThu2_KhiPhien1DangChay_VaoHangCho_KhongLaunch()
+    {
+        var mgr = new AccountSessionManager(id => new StubSession(id));
+
+        var s1 = (StubSession)mgr.Start(1);
+        var s2 = (StubSession)mgr.Start(2);
+
+        Assert.Equal(SessionState.Running, s1.State);
+        Assert.Equal(1, s1.StartCalls);
+        Assert.Equal(SessionState.Queued, s2.State); // "Chờ đến lượt"
+        Assert.Equal(0, s2.StartCalls);              // CHƯA mở trình duyệt (không bind cổng 47821 lần 2)
+    }
+
+    [Fact]
+    public void Phien1DungHan_TuStartPhienKeTrongHang()
+    {
+        var mgr = new AccountSessionManager(id => new StubSession(id));
+
+        var s1 = (StubSession)mgr.Start(1);
+        var s2 = (StubSession)mgr.Start(2); // queued
+        Assert.Equal(0, s2.StartCalls);
+
+        mgr.Stop(1); // s1 → Stopped → OnSessionChanged: slot trống → dequeue s2 → StartAsync
+
+        Assert.Equal(1, s2.StartCalls);
+        Assert.Equal(SessionState.Running, s2.State);
+    }
+
+    [Fact]
+    public void HangDoi_FIFO_TheoThuTuBam()
+    {
+        var mgr = new AccountSessionManager(id => new StubSession(id));
+
+        var s1 = (StubSession)mgr.Start(1); // chạy
+        var s2 = (StubSession)mgr.Start(2); // hàng: [2]
+        var s3 = (StubSession)mgr.Start(3); // hàng: [2,3]
+        Assert.Equal(SessionState.Queued, s2.State);
+        Assert.Equal(SessionState.Queued, s3.State);
+
+        mgr.Stop(1);
+        Assert.Equal(SessionState.Running, s2.State); // 2 chạy trước (vào hàng trước)
+        Assert.Equal(SessionState.Queued, s3.State);
+        Assert.Equal(0, s3.StartCalls);
+
+        mgr.Stop(2);
+        Assert.Equal(SessionState.Running, s3.State); // rồi tới 3
+    }
+
+    [Fact]
+    public void Stop_AccountDangXepHang_RutKhoiHang_KhongBaoGioLaunch()
+    {
+        var mgr = new AccountSessionManager(id => new StubSession(id));
+
+        var s1 = (StubSession)mgr.Start(1); // chạy
+        var s2 = (StubSession)mgr.Start(2); // queued
+        Assert.Equal(SessionState.Queued, s2.State);
+
+        mgr.Stop(2); // rút 2 khỏi hàng (chưa từng launch)
+
+        Assert.Equal(0, s2.StartCalls);
+        Assert.Equal(SessionState.Stopped, s2.State);
+        Assert.Null(mgr.Get(2)); // đã gỡ khỏi dict (OnSessionChanged thấy Stopped)
+
+        // s1 dừng → không còn ai trong hàng để start.
+        mgr.Stop(1);
+        Assert.Empty(mgr.Active);
+    }
+
+    [Fact]
+    public void Start_LapLaiAccountDangCho_KhongNhanDoiHang()
+    {
+        var mgr = new AccountSessionManager(id => new StubSession(id));
+
+        mgr.Start(1);                        // chạy
+        var s2 = (StubSession)mgr.Start(2);  // queued
+        mgr.Start(2);                        // bấm lại — vẫn queued, không nhân đôi
+        Assert.Equal(SessionState.Queued, s2.State);
+        Assert.Equal(0, s2.StartCalls);
+
+        mgr.Stop(1);
+        // Chỉ start MỘT lần (hàng không nhân đôi id 2).
+        Assert.Equal(1, s2.StartCalls);
     }
 
     // ===================== Bộ cấp phát KiotProxy key theo POOL (Acquire/Release) =====================

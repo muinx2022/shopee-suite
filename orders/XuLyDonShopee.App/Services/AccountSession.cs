@@ -167,8 +167,9 @@ public partial class AccountSession : ObservableObject, IAccountSession
     {
         lock (_lifecycleLock)
         {
-            // Idempotent: đang chuẩn bị / đang chạy → bỏ qua (không mở trùng cùng một tài khoản).
-            if (State is SessionState.Opening or SessionState.Running)
+            // Idempotent: đang chuẩn bị / đang chạy / ĐANG DỪNG (vòng nền cũ chưa tháo dỡ xong) → bỏ qua để KHÔNG
+            // mở phiên MỚI cùng hồ sơ + cổng 47821 khi phiên cũ còn sống (Lỗi 5). Chỉ Queued/Stopped/Error mới launch.
+            if (State is SessionState.Opening or SessionState.Running or SessionState.Stopping)
             {
                 return Task.CompletedTask;
             }
@@ -186,19 +187,46 @@ public partial class AccountSession : ObservableObject, IAccountSession
         return Task.CompletedTask;
     }
 
+    /// <summary>
+    /// Đánh dấu phiên đang <see cref="SessionState.Queued"/> (CHỜ TỚI LƯỢT — do <see cref="AccountSessionManager"/>
+    /// gọi khi Start lúc đã có phiên khác chiếm cầu nối). KHÔNG mở trình duyệt; chỉ đổi trạng thái + StatusText hiển
+    /// thị. Bỏ qua nếu đang chuẩn bị/đang chạy/đang dừng (không hạ cấp một phiên đang hoạt động về hàng đợi).
+    /// </summary>
+    public void MarkQueued()
+    {
+        lock (_lifecycleLock)
+        {
+            if (State is SessionState.Opening or SessionState.Running or SessionState.Stopping)
+            {
+                return; // đang hoạt động → không hạ về hàng đợi
+            }
+            StatusText = "Chờ đến lượt (đã có tài khoản khác đang chạy)...";
+            State = SessionState.Queued;
+        }
+    }
+
     public async Task StopAsync()
     {
         CancellationTokenSource? cts;
         Task? run;
         lock (_lifecycleLock)
         {
+            // Phiên đang CHỜ TỚI LƯỢT (chưa mở trình duyệt) → chỉ hạ về Stopped, không có gì để tháo dỡ.
+            // (Manager tự rút khỏi hàng đợi; OnSessionChanged gỡ khỏi dict khi thấy Stopped.)
+            if (State == SessionState.Queued)
+            {
+                StatusText = null;
+                State = SessionState.Stopped;
+                return;
+            }
+
             cts = _cts;
             run = _runTask;
         }
 
-        // Phản hồi cho người dùng; GIỮ State=Running để nút "Mở" còn khóa tới khi Brave chết thật (Lỗi 2).
+        // Phản hồi cho người dùng; GIỮ State (Running/Opening) để nút "Mở" còn khóa tới khi vòng nền dừng thật (Lỗi 2).
         // Ghi LOG ngay khi bấm Dừng (kể cả lúc đang NGHỈ giữa chu kỳ, Brave đã đóng) để panel nhật ký có phản hồi.
-        var wasActive = State is SessionState.Opening or SessionState.Running;
+        var wasActive = State is SessionState.Opening or SessionState.Running or SessionState.Stopping;
         if (wasActive)
         {
             StatusText = "Đang dừng...";
@@ -207,14 +235,18 @@ public partial class AccountSession : ObservableObject, IAccountSession
 
         try { cts?.Cancel(); } catch { /* bỏ qua */ }
 
-        if (run is not null)
+        // Kill trình duyệt NGAY (trước khi chờ) để vòng nền unblock nhanh, không đợi hết 8s:
+        // - trình duyệt SẠCH cầu nối (đường "▶ Chạy" GĐ4);
+        // - Brave điều khiển (Playwright, đường lui) nếu còn.
+        try
         {
-            // Chờ vòng lặp thoát & dispose (kill Brave) trong ~8s.
-            try { await Task.WhenAny(run, Task.Delay(TimeSpan.FromSeconds(8))).ConfigureAwait(false); }
-            catch { /* bỏ qua */ }
+            var bp = _bridge?.Process;
+            if (bp is { HasExited: false })
+            {
+                bp.Kill(entireProcessTree: true);
+            }
         }
-
-        // Phòng hờ: nếu vì lý do gì Brave còn sống thì kill cả cây tiến trình (không để mồ côi giữ khóa hồ sơ).
+        catch { /* bỏ qua */ }
         try
         {
             var p = _session?.BraveProcess;
@@ -225,19 +257,33 @@ public partial class AccountSession : ObservableObject, IAccountSession
         }
         catch { /* bỏ qua */ }
 
-        // GĐ4: đường cầu nối — kill trình duyệt SẠCH (extension) nếu còn (trình duyệt điều khiển login tự đóng trong
-        // RunAllShopsAsync). ct.Cancel() ở trên đã hủy vòng; đây là chốt chặn đóng cửa sổ sạch + giải phóng cổng.
-        try
+        if (run is not null)
         {
-            var bp = _bridge?.Process;
-            if (bp is { HasExited: false })
+            // Chờ vòng nền thoát & dispose trong ~8s. KHÔNG ép Stopped sau đó (Lỗi 5): nếu vòng CHƯA xong (bước
+            // login Playwright có thể sống quá 8s) mà ép Stopped thì OnSessionChanged gỡ phiên khỏi dict → user
+            // bấm Chạy lại tạo phiên MỚI cùng hồ sơ + cùng cổng 47821 trong khi phiên cũ còn tháo dỡ → Error.
+            Task done;
+            try { done = await Task.WhenAny(run, Task.Delay(TimeSpan.FromSeconds(8))).ConfigureAwait(false); }
+            catch { done = run; /* WhenAny không ném; phòng hờ */ }
+
+            if (!ReferenceEquals(done, run))
             {
-                bp.Kill(entireProcessTree: true);
+                // Quá 8s mà vòng nền CHƯA hoàn tất → giữ trạng thái "Đang dừng…" (Stopping): nút Chạy còn khóa,
+                // manager giữ phiên trong dict + KHÔNG start phiên kế cho tới khi vòng nền tự đặt Stopped (finally
+                // của RunBridgeContinuousAsync). ct đã hủy + trình duyệt đã kill nên vòng sẽ tự kết thúc.
+                lock (_lifecycleLock)
+                {
+                    if (State is not (SessionState.Stopped or SessionState.Error))
+                    {
+                        StatusText = "Đang dừng… (đang tháo dỡ trình duyệt/đăng nhập — sẽ xong sau giây lát)";
+                        State = SessionState.Stopping;
+                    }
+                }
+                return; // CHƯA dừng hẳn — không log "Đã dừng phiên."
             }
         }
-        catch { /* bỏ qua */ }
 
-        State = SessionState.Stopped;
+        // Vòng nền đã hoàn tất (finally của nó đã đặt Stopped/Error). Chỉ log tổng kết.
         if (wasActive)
         {
             _services.Log.Append(_logLabel, "Đã dừng phiên.");
@@ -859,12 +905,18 @@ public partial class AccountSession : ObservableObject, IAccountSession
     }
 
     /// <summary>
-    /// <b>Tải LẠI phiếu MỘT đơn (nút "Tải phiếu" màn Đơn hàng):</b> trong phiên ĐANG chạy, gọi
-    /// <see cref="ILoginSession.RedownloadSlipsAsync"/> cho một mã đơn (về danh sách "Tất cả", định vị card,
-    /// bấm In phiếu giao, lưu PDF). Bọc cờ <see cref="_navigating"/> y hệt các lượt điều hướng khác (loại trừ
-    /// với sync / xử lý đơn / kiểm tra — không hai luồng chuột trên cùng trang). Graceful: phiên chưa chạy /
-    /// đang bận / bị hủy / lỗi → <c>false</c> + StatusText/log, KHÔNG ném. Lưu được → phát
-    /// <see cref="AppServices.RaiseOrdersChanged"/> (cột Phiếu cập nhật). finally reset <see cref="_navigating"/>.
+    /// <b>Tải LẠI phiếu MỘT đơn (nút "Tải phiếu" màn Đơn hàng):</b> ĐỊNH TUYẾN qua PHIÊN CẦU NỐI extension đang
+    /// chạy (nút "▶ Chạy" nay dùng đường cầu nối — <see cref="RunBridgeContinuousAsync"/> giữ tham chiếu
+    /// <see cref="_bridge"/>) rồi gọi <see cref="OrdersBridgeSession.RedownloadSlipAsync"/> (extension về danh
+    /// sách "Tất cả", định vị card theo mã, bấm In phiếu giao, tải PDF, C# lưu file). Lưu được → phát
+    /// <see cref="AppServices.RaiseOrdersChanged"/> (cột Phiếu hết đỏ). Graceful — KHÔNG ném:
+    /// <list type="bullet">
+    /// <item>Phiên chưa chạy (không có cầu nối) → <c>false</c> + báo "Hãy bấm Chạy tài khoản rồi mới tải lại phiếu".</item>
+    /// <item>Extension chưa/không còn kết nối (<see cref="InvalidOperationException"/> từ SendAsync) → <c>false</c> +
+    /// báo "extension chưa kết nối" (fail-fast, KHÔNG chờ timeout).</item>
+    /// <item>Không thấy đơn trong shop đang mở / hủy / lỗi khác → <c>false</c> + StatusText/log.</item>
+    /// </list>
+    /// Ràng buộc mô hình cầu nối (user đã chốt): chỉ tải lại được phiếu của đơn thuộc SHOP mà phiên đang mở tab.
     /// </summary>
     public async Task<bool> RedownloadSlipAsync(string orderSn)
     {
@@ -873,12 +925,14 @@ public partial class AccountSession : ObservableObject, IAccountSession
             return false;
         }
 
-        var s = _session;
+        // Chụp phiên cầu nối + token dưới lock.
+        OrdersBridgeSession? bridge;
         CancellationToken tok;
         try
         {
             lock (_lifecycleLock)
             {
+                bridge = _bridge;
                 tok = _cts?.Token ?? default;
             }
         }
@@ -887,20 +941,22 @@ public partial class AccountSession : ObservableObject, IAccountSession
             return false;
         }
 
-        // _navigating: đang có lượt điều hướng chạy dở → bỏ qua, không chồng nhau.
-        if (s is null || State != SessionState.Running || _navigating)
+        // Phiên chưa chạy (không có cầu nối đang mở) → hướng dẫn bấm Chạy trước (thay thông báo "đang bận" cũ SAI:
+        // đường Playwright chết nên _session luôn null → luôn báo bận). State phải Running (cầu nối đã lên).
+        if (bridge is null || State != SessionState.Running)
         {
+            StatusText = "Hãy bấm Chạy tài khoản rồi mới tải lại phiếu.";
+            _services.Log.Append(_logLabel,
+                $"Tải lại phiếu đơn {orderSn}: phiên chưa chạy — hãy bấm Chạy tài khoản trước.");
             return false;
         }
 
-        _navigating = true;
         StatusText = $"Đang tải lại phiếu đơn {orderSn}...";
         var log = (Action<string>)(m => _services.Log.Append(_logLabel, m));
         try
         {
-            var invoiceDir = _services.Settings.GetInvoiceFolder();
-            var re = await s.RedownloadSlipsAsync(new[] { orderSn }, invoiceDir, log, tok).ConfigureAwait(false);
-            if (re > 0)
+            var ok = await bridge.RedownloadSlipAsync(orderSn, tok).ConfigureAwait(false);
+            if (ok)
             {
                 StatusText = $"Đã tải lại phiếu đơn {orderSn}.";
                 _services.RaiseOrdersChanged();
@@ -914,15 +970,18 @@ public partial class AccountSession : ObservableObject, IAccountSession
         {
             return false; // dừng chủ động
         }
+        catch (InvalidOperationException ex)
+        {
+            // Extension chưa/không còn kết nối (SendAsync fail-fast) hoặc cầu nối chưa khởi động.
+            StatusText = $"Tải lại phiếu đơn {orderSn}: extension chưa kết nối — thử lại sau khi phiên ổn định.";
+            log("Tải lại phiếu (cầu nối) lỗi: " + ex.Message);
+            return false;
+        }
         catch (Exception ex)
         {
             StatusText = $"Tải lại phiếu đơn {orderSn} gặp lỗi — xem nhật ký.";
             log("Lỗi khi tải lại phiếu: " + ex.Message);
             return false;
-        }
-        finally
-        {
-            _navigating = false;
         }
     }
 

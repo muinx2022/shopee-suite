@@ -18,7 +18,20 @@ public enum SessionState
     Running,
 
     /// <summary>Kết thúc do lỗi (xem <see cref="IAccountSession.LastError"/>).</summary>
-    Error
+    Error,
+
+    /// <summary>
+    /// Đã bấm Chạy nhưng đang CHỜ TỚI LƯỢT: chỉ 1 phiên cầu nối được chạy đồng thời (cổng bridge 47821 cố định +
+    /// tránh kill chéo trình duyệt) → phiên này xếp hàng FIFO, TỰ chạy khi phiên trước dừng hẳn. Chưa mở trình duyệt.
+    /// </summary>
+    Queued,
+
+    /// <summary>
+    /// Đang DỪNG nhưng vòng nền CHƯA tháo dỡ xong (login Playwright có thể sống quá 8s). Nút Chạy còn bị khoá tới
+    /// khi phiên về <see cref="Stopped"/> THẬT SỰ (vòng nền tự đặt) — tránh mở phiên MỚI cùng hồ sơ/cổng khi phiên
+    /// cũ chưa nhả. Xem <c>AccountSession.StopAsync</c>.
+    /// </summary>
+    Stopping
 }
 
 /// <summary>
@@ -69,6 +82,13 @@ public interface IAccountSession
 
     /// <summary>Bắt đầu phiên. Nếu đang chuẩn bị/đang chạy thì bỏ qua (idempotent — không mở trùng).</summary>
     Task StartAsync();
+
+    /// <summary>
+    /// Đánh dấu phiên đang <see cref="SessionState.Queued"/> (CHỜ TỚI LƯỢT) — do
+    /// <see cref="AccountSessionManager"/> gọi khi Start lúc đã có phiên khác chạy. KHÔNG mở trình duyệt; chỉ đổi
+    /// trạng thái hiển thị. Phiên đang chuẩn bị/đang chạy/đang dừng → bỏ qua (không hạ cấp).
+    /// </summary>
+    void MarkQueued();
 
     /// <summary>Dừng phiên: hủy vòng lặp, đóng &amp; kill cây tiến trình Brave, đưa về <see cref="SessionState.Stopped"/>.</summary>
     Task StopAsync();

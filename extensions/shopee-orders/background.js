@@ -10,10 +10,12 @@
 //
 // Protocol:
 //   C#  -> ext:  {action:"readShopList"} | {action:"openShopDetail", shopId} | {action:"readToShip"}
+//                {action:"redownloadSlip", orderSn}                               (tải lại phiếu 1 đơn)
 //   ext -> C#:   {action:"ready"}
 //                {action:"shopOpened"}                                            (openShopDetail xong)
 //                {action:"pageData", kind:"shopList", data:<json-array-string>}
 //                {action:"pageData", kind:"toShip",   data:<raw-item-title-string>}
+//                {action:"slipRedownloaded", orderSn, slipBase64}                 (base64 "" = không lấy được)
 //                {action:"progress", message}                                     (chỉ để log)
 //                {action:"captcha",  message}                                     (rơi vào trang /verify)
 //                {action:"error",    message}
@@ -382,6 +384,32 @@ function pageFindPrepareOrder() {
     }
   }
   return null;
+}
+
+// Định vị nút "In phiếu giao" NGAY trong card của đơn có mã = orderSn (đơn đã Chuẩn bị hàng thường có sẵn nút này).
+// → {found, hasPrint, x, y}. found=false nghĩa card không ở trang này (caller tìm trang khác). found=true & hasPrint=false
+// nghĩa thấy card nhưng chưa có nút In phiếu (chưa chuẩn bị hàng). Tự chứa world MAIN (dùng _na global qua execInTab).
+function pageFindPrintInCardBySn(orderSn) {
+  const norm = (s) => (s || "").replace(/\s+/g, " ").trim();
+  const cards = document.querySelectorAll("a[data-testid='order-item']");
+  for (const card of cards) {
+    const snEl = card.querySelector(".order-sn");
+    const snRaw = snEl ? norm(snEl.textContent) : "";
+    const toks = snRaw.split(" ");
+    const sn = toks.length ? toks[toks.length - 1] : "";
+    if (sn !== orderSn) continue;
+    for (const b of card.querySelectorAll("button, [role='button'], a")) {
+      if (_na(b.textContent) === "in phieu giao") {
+        const r0 = b.getBoundingClientRect();
+        if (!(r0.width > 0 && r0.height > 0)) continue;
+        try { b.scrollIntoView({ block: "center" }); } catch (e) {}
+        const r = b.getBoundingClientRect();
+        return { found: true, hasPrint: true, x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+      }
+    }
+    return { found: true, hasPrint: false, x: 0, y: 0 }; // thấy card nhưng không có nút In phiếu
+  }
+  return { found: false, hasPrint: false, x: 0, y: 0 }; // card không ở trang này
 }
 
 // True nếu có modal (.eds-modal__box) hiển thị với .title khớp reSrc (chuẩn hoá không dấu).
@@ -827,6 +855,7 @@ async function handleCommand(cmd) {
     case "setPickupAddress": await doSetPickupAddress(String(cmd.province || "")); return;
     case "setPickupAddressToOther": await doSetPickupAddressToOther(); return;
     case "prepareNextOrder": await doPrepareNextOrder(); return;
+    case "redownloadSlip":   await doRedownloadSlip(String(cmd.orderSn || "")); return;
     case "closeShopTab":     await doCloseShopTab(); return;
   }
 }
@@ -1433,4 +1462,98 @@ async function doPrepareNextOrder() {
   try { await chrome.tabs.remove(slipId); } catch (e) {}
 
   send({ action: "orderPrepared", orderCode: orderCode, slipTabUrl: slipUrl, slipBase64: slipB64, tracking: tracking });
+}
+
+// Tải LẠI phiếu MỘT đơn (nút "Tải phiếu" màn Đơn hàng): về danh sách "Tất cả" của shop đang mở → duyệt trang tìm
+// card mã = orderSn → bấm "In phiếu giao" NGAY trong card → bắt tab awbprint → tải PDF base64 → trả về C#.
+// KHÔNG arrange lại (đơn đã Chuẩn bị hàng). LUÔN trả {action:"slipRedownloaded", orderSn, slipBase64}: base64 rỗng =
+// không thấy đơn / chưa có nút In phiếu / không lấy được (C# coi là thất bại). /verify → gửi captcha rồi thôi.
+async function doRedownloadSlip(orderSn) {
+  const tabId = orderTabId();
+  if (tabId == null || !orderSn) { send({ action: "slipRedownloaded", orderSn: orderSn, slipBase64: "" }); return; }
+
+  try { await chrome.tabs.update(tabId, { url: ORDERS_URL }); } catch (e) {}
+  await waitTabComplete(tabId, 20000);
+  let url = "";
+  try { url = (await chrome.tabs.get(tabId)).url || ""; } catch (e) {}
+  if (/\/verify/i.test(url)) { send({ action: "captcha", message: url }); return; }
+
+  await waitOrdersStable(tabId, 15000);
+  await ensureDbg(tabId); // attach TRƯỚC khi đọc toạ độ + click (banner đứng yên → click không trượt).
+
+  // Sang tab "Tất cả" (đơn Chuẩn bị hàng chắc chắn nằm trong "Tất cả").
+  const allTab = await execInTab(tabId, pageLocateByText, [["[role='tab']", ".eds-tabs__nav-tab", "a", "div", "span"], "^tat ca$"]);
+  if (allTab) { await trustedClick(tabId, allTab.x, allTab.y); await sleep(1200); await waitOrdersStable(tabId, 10000); }
+
+  // Duyệt trang tìm card orderSn (có nút In phiếu).
+  let loc = { found: false, hasPrint: false };
+  let pageNo = 0;
+  while (pageNo < MAX_ORDER_PAGES) {
+    pageNo++;
+    await waitOrdersStable(tabId, 15000);
+    await ensureDbg(tabId);
+    try { loc = (await execInTab(tabId, pageFindPrintInCardBySn, [orderSn])) || { found: false, hasPrint: false }; } catch (e) { loc = { found: false, hasPrint: false }; }
+    if (loc && loc.found) break;
+
+    // Sang trang sau (reuse signature + FindNextPage + waitOrdersChanged như doSyncOrders).
+    let sigBefore = "";
+    try { sigBefore = (await execInTab(tabId, pageListSignature, [])) || ""; } catch (e) {}
+    const next = await execInTab(tabId, pageFindNextPage, []);
+    if (!next) break;
+    if (pageNo >= MAX_ORDER_PAGES) break;
+    await trustedClick(tabId, next.x, next.y);
+    const changed = await waitOrdersChanged(tabId, sigBefore, 10000);
+    if (!changed) break;
+    await sleep(1000);
+  }
+
+  if (!loc || !loc.found) {
+    send({ action: "progress", message: "Tải lại phiếu: không thấy đơn " + orderSn + " trong danh sách (shop khác / quá cũ)." });
+    send({ action: "slipRedownloaded", orderSn: orderSn, slipBase64: "" });
+    return;
+  }
+  if (!loc.hasPrint) {
+    send({ action: "progress", message: "Tải lại phiếu: đơn " + orderSn + " chưa có nút In phiếu (chưa chuẩn bị hàng?)." });
+    send({ action: "slipRedownloaded", orderSn: orderSn, slipBase64: "" });
+    return;
+  }
+
+  // Bấm "In phiếu giao" → bắt tab phiếu (awbprint).
+  const beforeTabs = (await chrome.tabs.query({})).map((t) => t.id);
+  await ensureDbg(tabId);
+  await trustedClick(tabId, loc.x, loc.y);
+
+  let slipTab = null;
+  const printDeadline = Date.now() + 30000;
+  while (!slipTab && Date.now() < printDeadline) {
+    const tabs = await chrome.tabs.query({});
+    const cand = tabs.find((t) => beforeTabs.indexOf(t.id) === -1 && t.id !== tabId);
+    if (cand) { slipTab = cand; break; }
+    await sleep(400);
+  }
+  if (!slipTab) {
+    send({ action: "progress", message: "Tải lại phiếu: không mở được tab phiếu (đơn " + orderSn + ")." });
+    send({ action: "slipRedownloaded", orderSn: orderSn, slipBase64: "" });
+    return;
+  }
+
+  // Chờ tab phiếu tới awbprint rồi tải PDF NGAY TRONG TAB (có cookie, same-origin blob) → base64.
+  const slipId = slipTab.id;
+  let slipUrl = slipTab.url || "";
+  const ud = Date.now() + 10000;
+  while (Date.now() < ud) {
+    try { const t = await chrome.tabs.get(slipId); slipUrl = t.url || slipUrl; if (slipUrl.indexOf("awbprint") >= 0) break; } catch (e) { break; }
+    await sleep(300);
+  }
+  await waitTabComplete(slipId, 15000);
+  let slipB64 = "";
+  const fd = Date.now() + 25000;
+  while (Date.now() < fd) {
+    try { slipB64 = (await execInTab(slipId, pageFetchSlipBase64, [])) || ""; } catch (e) { slipB64 = ""; }
+    if (slipB64) break;
+    await sleep(800);
+  }
+  try { await chrome.tabs.remove(slipId); } catch (e) {}
+
+  send({ action: "slipRedownloaded", orderSn: orderSn, slipBase64: slipB64 });
 }

@@ -45,6 +45,8 @@ public class AccountRowViewModelTests
 
         public Task StopAsync() => Task.CompletedTask;
 
+        public void MarkQueued() { /* không dùng trong test SyncFromSession */ }
+
         public Task<bool> ProcessOrdersAsync() => Task.FromResult(false);
 
         public Task<bool> CheckOrdersAsync() => Task.FromResult(false);

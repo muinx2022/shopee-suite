@@ -31,6 +31,13 @@ public sealed class OrdersWebSocketServer : IDisposable
 
     public bool IsConnected => _socket?.State == WebSocketState.Open;
 
+    // Tùy chọn serialize DÙNG CHUNG (trước đây khởi tạo MỚI mỗi lần SendAsync — phí + rác GC theo tần suất lệnh).
+    private static readonly JsonSerializerOptions SendOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+    };
+
     public OrdersWebSocketServer(int port) => _port = port;
 
     public void Start()
@@ -109,16 +116,23 @@ public sealed class OrdersWebSocketServer : IDisposable
         Disconnected?.Invoke();
     }
 
+    /// <summary>
+    /// Gửi <paramref name="message"/> (serialize JSON camelCase) cho extension đang nối. FAIL-FAST:
+    /// socket CHƯA nối / đã rớt (<c>State != Open</c>) → ném <see cref="InvalidOperationException"/> NGAY thay vì
+    /// return im lặng — nhờ đó caller phân biệt "extension chưa kết nối" (fail tức thì) với "extension kẹt"
+    /// (TimeoutException khi chờ phản hồi). Trước đây return âm thầm → caller ngồi chờ TCS 30–300s rồi nhận
+    /// TimeoutException sai hướng.
+    /// </summary>
     public async Task SendAsync(object message)
     {
         var ws = _socket;
-        if (ws?.State != WebSocketState.Open) return;
-
-        var json = JsonSerializer.Serialize(message, new JsonSerializerOptions
+        if (ws?.State != WebSocketState.Open)
         {
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-        });
+            throw new InvalidOperationException(
+                "Cầu nối Đơn hàng: extension chưa kết nối (WebSocket chưa mở) — không gửi được lệnh.");
+        }
+
+        var json = JsonSerializer.Serialize(message, SendOptions);
         var bytes = Encoding.UTF8.GetBytes(json);
 
         await _sendLock.WaitAsync();

@@ -92,8 +92,37 @@ public sealed class OrdersBridgeSession : IDisposable
     private TaskCompletionSource<bool> _pickupOtherTcs = NewTcs<bool>();       // GĐ3: set địa chỉ VỀ địa chỉ khác xong
     private TaskCompletionSource<PrepareResult?> _prepareTcs = NewTcs<PrepareResult?>(); // GĐ3: 1 đơn (null=hết)
     private TaskCompletionSource<bool> _closeShopTcs = NewTcs<bool>();         // GĐ4: đóng tab shop, về picker xong
+    private TaskCompletionSource<string?> _redownloadTcs = NewTcs<string?>();  // Tải lại phiếu 1 đơn (base64; ""/null=không lấy được)
+
+    // Chặng đang chờ (để extension báo "error" CHỈ fault đúng chặng đó — xem StageWaiter). Xem OnMessage case "error".
+    private readonly StageWaiter _waiter = new();
 
     private bool _captchaSeen;
+
+    /// <summary>
+    /// Nhớ chặng TCS ĐANG được await để khi extension báo <c>error</c> ta CHỈ fault đúng chặng đó — không fault
+    /// hàng loạt TCS không ai await (11 chặng → 10 exception mồ côi → <c>UnobservedTaskException</c>). Các chặng
+    /// không được await được để NGUYÊN (pending → GC lặng, KHÔNG raise unobserved) rồi <see cref="ResetTcs"/> thay mới.
+    /// <para>Tách thành lớp riêng (internal) để test được cơ chế mà không cần mở trình duyệt.</para>
+    /// </summary>
+    internal sealed class StageWaiter
+    {
+        private volatile Action<Exception>? _faultCurrent;
+
+        /// <summary>Await <paramref name="tcs"/> (kèm timeout + ct) đồng thời ĐĂNG KÝ nó là "chặng hiện tại":
+        /// <see cref="FaultCurrent"/> sẽ fault ĐÚNG tcs này. Khôi phục chặng trước ở finally (các flow tuần tự nên
+        /// thường là null giữa hai chặng).</summary>
+        public async Task<T> AwaitAsync<T>(TaskCompletionSource<T> tcs, TimeSpan timeout, CancellationToken ct)
+        {
+            var prev = _faultCurrent;
+            _faultCurrent = ex => tcs.TrySetException(ex);
+            try { return await tcs.Task.WaitAsync(timeout, ct).ConfigureAwait(false); }
+            finally { _faultCurrent = prev; }
+        }
+
+        /// <summary>Fault CHỈ chặng đang chờ (nếu có). Không có ai chờ → no-op (không tạo task mồ côi).</summary>
+        public void FaultCurrent(Exception ex) => _faultCurrent?.Invoke(ex);
+    }
 
     /// <summary>Tiến trình trình duyệt sạch đã mở (để tầng UI theo dõi/kill). Set ngay sau khi launch.</summary>
     public System.Diagnostics.Process? Process { get; private set; }
@@ -135,6 +164,7 @@ public sealed class OrdersBridgeSession : IDisposable
         _pickupOtherTcs = NewTcs<bool>();
         _prepareTcs = NewTcs<PrepareResult?>();
         _closeShopTcs = NewTcs<bool>();
+        _redownloadTcs = NewTcs<string?>();
         _captchaSeen = false;
     }
 
@@ -282,7 +312,7 @@ public sealed class OrdersBridgeSession : IDisposable
         try
         {
             L("Chờ extension nối cầu (ready) — tối đa 45s...");
-            await _readyTcs.Task.WaitAsync(TimeSpan.FromSeconds(45), ct).ConfigureAwait(false);
+            await _waiter.AwaitAsync(_readyTcs, TimeSpan.FromSeconds(45), ct).ConfigureAwait(false);
             L("Extension đã nối cầu.");
             return await RunSliceCoreAsync(ct).ConfigureAwait(false);
         }
@@ -381,12 +411,12 @@ public sealed class OrdersBridgeSession : IDisposable
         ResetTcs();
         StartBridgeAndLaunch(ShopeeLoginService.SubaccountAccountUrl);
         L("Chờ extension nối cầu (ready) — tối đa 45s...");
-        await _readyTcs.Task.WaitAsync(TimeSpan.FromSeconds(45), ct).ConfigureAwait(false);
+        await _waiter.AwaitAsync(_readyTcs, TimeSpan.FromSeconds(45), ct).ConfigureAwait(false);
         L("Extension đã nối cầu — SSO 'Kênh Người bán' để về trang chọn shop...");
 
         _atSellerTcs = NewTcs<bool>();
         await _ws!.SendAsync(new { action = "gotoSellerCentre" }).ConfigureAwait(false);
-        var atSeller = await _atSellerTcs.Task.WaitAsync(TimeSpan.FromSeconds(120), ct).ConfigureAwait(false);
+        var atSeller = await _waiter.AwaitAsync(_atSellerTcs, TimeSpan.FromSeconds(120), ct).ConfigureAwait(false);
         if (_captchaSeen)
         {
             L("PHÁT HIỆN captcha/verify khi vào Seller Centre.");
@@ -425,7 +455,7 @@ public sealed class OrdersBridgeSession : IDisposable
             // Đọc danh sách shop (picker).
             _shopListTcs = NewTcs<string?>();
             await _ws!.SendAsync(new { action = "readShopList" }).ConfigureAwait(false);
-            var json = await _shopListTcs.Task.WaitAsync(TimeSpan.FromSeconds(30), ct).ConfigureAwait(false);
+            var json = await _waiter.AwaitAsync(_shopListTcs, TimeSpan.FromSeconds(30), ct).ConfigureAwait(false);
             var shops = ShopeeLoginService.ParseShopListJson(json);
             shopCount = shops.Count;
             L($"Đọc được {shops.Count} shop — bắt đầu lặp qua từng shop.");
@@ -444,7 +474,7 @@ public sealed class OrdersBridgeSession : IDisposable
                 // Mở Chi tiết shop (trusted click).
                 _detailTcs = NewTcs<string>();
                 await _ws.SendAsync(new { action = "openShopDetail", shopId = shop.ShopId }).ConfigureAwait(false);
-                var d = await _detailTcs.Task.WaitAsync(TimeSpan.FromSeconds(45), ct).ConfigureAwait(false);
+                var d = await _waiter.AwaitAsync(_detailTcs, TimeSpan.FromSeconds(45), ct).ConfigureAwait(false);
                 if (_captchaSeen || d == "captcha")
                 {
                     return new OrdersBridgeRunResult(shopCount, shopsDone, totalOrders, totalSlips, true, "Rơi vào captcha khi mở Chi tiết.");
@@ -453,7 +483,7 @@ public sealed class OrdersBridgeSession : IDisposable
                 // Đọc "Chờ Lấy Hàng".
                 _toShipTcs = NewTcs<string?>();
                 await _ws.SendAsync(new { action = "readToShip" }).ConfigureAwait(false);
-                var raw = await _toShipTcs.Task.WaitAsync(TimeSpan.FromSeconds(30), ct).ConfigureAwait(false);
+                var raw = await _waiter.AwaitAsync(_toShipTcs, TimeSpan.FromSeconds(30), ct).ConfigureAwait(false);
                 var toShip = ShopeeDashboard.ParseToShipCount(raw);
                 L($"[Shop {i + 1}] Chờ Lấy Hàng: {(toShip?.ToString() ?? "?")}.");
 
@@ -472,7 +502,7 @@ public sealed class OrdersBridgeSession : IDisposable
                 // Đóng tab shop → về picker /portal/shop (listTabId picker giữ nguyên; extension đóng shopTabId).
                 _closeShopTcs = NewTcs<bool>();
                 await _ws.SendAsync(new { action = "closeShopTab" }).ConfigureAwait(false);
-                try { await _closeShopTcs.Task.WaitAsync(TimeSpan.FromSeconds(30), ct).ConfigureAwait(false); }
+                try { await _waiter.AwaitAsync(_closeShopTcs, TimeSpan.FromSeconds(30), ct).ConfigureAwait(false); }
                 catch (TimeoutException) { L("closeShopTab quá hạn — vẫn tiếp shop kế."); }
 
                 // Nghỉ kiểu người 3-5' giữa các shop (trừ shop cuối).
@@ -500,12 +530,66 @@ public sealed class OrdersBridgeSession : IDisposable
         }
     }
 
+    /// <summary>
+    /// <b>Tải LẠI phiếu MỘT đơn qua cầu nối extension</b> (nút "Tải phiếu" màn Đơn hàng). Gửi action
+    /// <c>redownloadSlip</c> (extension về danh sách "Tất cả" → định vị card theo <paramref name="orderSn"/> →
+    /// bấm "In phiếu giao" → tải PDF trong tab awbprint → trả base64) rồi LƯU PDF vào <see cref="_invoiceDir"/>
+    /// đúng khuôn <see cref="TrySaveSlip"/> (tên file <c>SanitizeFileName(orderSn).pdf</c> — khớp chỗ
+    /// <c>TryReadSlipBase64</c>/<c>ThieuPhieu</c> đọc, để cột "thiếu phiếu" tự hết đỏ). Trả <c>true</c> khi lưu
+    /// được PDF hợp lệ. Ràng buộc mô hình cầu nối: phiên đang mở tab của shop nào thì tải lại được đơn của shop
+    /// đó (extension quét danh sách trên tab đang mở) — đơn của shop khác/quá cũ → extension trả base64 rỗng → false.
+    /// <para>
+    /// FAIL-FAST: <see cref="OrdersWebSocketServer.SendAsync"/> ném <see cref="InvalidOperationException"/> khi
+    /// extension chưa/không còn kết nối → NÉM ra ngoài cho caller (App) báo đúng "extension chưa kết nối", KHÔNG
+    /// ngồi chờ timeout. Hủy chủ động (<paramref name="ct"/>) ném <see cref="OperationCanceledException"/>.
+    /// </para>
+    /// </summary>
+    public async Task<bool> RedownloadSlipAsync(string orderSn, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(orderSn))
+        {
+            return false;
+        }
+        if (_ws is null)
+        {
+            throw new InvalidOperationException("Cầu nối chưa khởi động (chưa mở phiên cầu nối) — không tải lại được phiếu.");
+        }
+        if (string.IsNullOrWhiteSpace(_invoiceDir))
+        {
+            L("Chưa cấu hình thư mục lưu phiếu — bỏ tải lại phiếu.");
+            return false;
+        }
+
+        _redownloadTcs = NewTcs<string?>();
+        L($"Tải lại phiếu đơn {orderSn} qua cầu nối extension...");
+        await _ws.SendAsync(new { action = "redownloadSlip", orderSn }).ConfigureAwait(false); // ném nếu extension chưa kết nối
+
+        // 180s: extension có thể phải duyệt vài trang danh sách + chờ tab phiếu (~30s) + tải PDF (~25s).
+        var b64 = await _waiter.AwaitAsync(_redownloadTcs, TimeSpan.FromSeconds(180), ct).ConfigureAwait(false);
+        if (_captchaSeen)
+        {
+            L($"Gặp captcha khi tải lại phiếu đơn {orderSn} — dừng.");
+            return false;
+        }
+        if (string.IsNullOrWhiteSpace(b64))
+        {
+            L($"Không nhận được phiếu đơn {orderSn} (không thấy đơn trong shop đang mở / chưa có nút In phiếu).");
+            return false;
+        }
+
+        var ok = TrySaveSlip(b64, orderSn, _invoiceDir!);
+        L(ok
+            ? $"Đã lưu phiếu đơn {orderSn}."
+            : $"Nhận được dữ liệu phiếu nhưng KHÔNG phải PDF hợp lệ (đơn {orderSn}).");
+        return ok;
+    }
+
     // Lát cắt dùng chung (GĐ1 + đuôi GĐ2): readShopList → openShopDetail(shop đầu) → readToShip.
     private async Task<OrdersBridgeSliceResult> RunSliceCoreAsync(CancellationToken ct)
     {
         // 1) Đọc danh sách shop.
         await _ws!.SendAsync(new { action = "readShopList" }).ConfigureAwait(false);
-        var shopListJson = await _shopListTcs.Task.WaitAsync(TimeSpan.FromSeconds(30), ct).ConfigureAwait(false);
+        var shopListJson = await _waiter.AwaitAsync(_shopListTcs, TimeSpan.FromSeconds(30), ct).ConfigureAwait(false);
         var shops = ShopeeLoginService.ParseShopListJson(shopListJson);
         L($"Đọc được {shops.Count} shop từ /portal/shop.");
         if (shops.Count == 0)
@@ -518,7 +602,7 @@ public sealed class OrdersBridgeSession : IDisposable
         var firstShopId = shops[0].ShopId;
         L($"Mở 'Chi tiết' shop đầu (id={firstShopId}) bằng trusted click...");
         await _ws.SendAsync(new { action = "openShopDetail", shopId = firstShopId }).ConfigureAwait(false);
-        var detail = await _detailTcs.Task.WaitAsync(TimeSpan.FromSeconds(45), ct).ConfigureAwait(false);
+        var detail = await _waiter.AwaitAsync(_detailTcs, TimeSpan.FromSeconds(45), ct).ConfigureAwait(false);
         if (detail == "captcha" || _captchaSeen)
         {
             L("PHÁT HIỆN captcha/verify khi mở Chi tiết — cần soi lại.");
@@ -529,7 +613,7 @@ public sealed class OrdersBridgeSession : IDisposable
 
         // 3) Đọc số "Chờ Lấy Hàng".
         await _ws.SendAsync(new { action = "readToShip" }).ConfigureAwait(false);
-        var raw = await _toShipTcs.Task.WaitAsync(TimeSpan.FromSeconds(30), ct).ConfigureAwait(false);
+        var raw = await _waiter.AwaitAsync(_toShipTcs, TimeSpan.FromSeconds(30), ct).ConfigureAwait(false);
         var toShip = ShopeeDashboard.ParseToShipCount(raw);
         L($"Số 'Chờ Lấy Hàng' đọc được: {(toShip?.ToString() ?? "null")} (raw='{raw}').");
 
@@ -552,7 +636,7 @@ public sealed class OrdersBridgeSession : IDisposable
         // Phần A — đọc đơn tab "Tất cả" (test được ngay, kể cả shop 0 đơn chờ).
         _ordersTcs = NewTcs<string?>();
         await _ws!.SendAsync(new { action = "syncOrders" }).ConfigureAwait(false);
-        var ordersJson = await _ordersTcs.Task.WaitAsync(TimeSpan.FromSeconds(120), ct).ConfigureAwait(false);
+        var ordersJson = await _waiter.AwaitAsync(_ordersTcs, TimeSpan.FromSeconds(120), ct).ConfigureAwait(false);
         if (_captchaSeen)
         {
             L("PHÁT HIỆN captcha khi đọc đơn.");
@@ -582,7 +666,7 @@ public sealed class OrdersBridgeSession : IDisposable
                 }).ConfigureAwait(false);
                 // Đủ thời gian mở tuần tự nhiều tab chi tiết (20s/đơn), trần cứng 300s.
                 var timeout = TimeSpan.FromSeconds(Math.Min(300, 20 + 20 * needFinal.Count));
-                var finalsJson = await _finalsTcs.Task.WaitAsync(timeout, ct).ConfigureAwait(false);
+                var finalsJson = await _waiter.AwaitAsync(_finalsTcs, timeout, ct).ConfigureAwait(false);
                 if (_captchaSeen)
                 {
                     L("PHÁT HIỆN captcha khi mở chi tiết lấy Số tiền cuối cùng — bỏ bước final (vẫn lưu phần đã có).");
@@ -612,7 +696,7 @@ public sealed class OrdersBridgeSession : IDisposable
             L($"Có {toShip} đơn Chờ Lấy Hàng — đặt địa chỉ lấy hàng ({_province}) rồi xử từng đơn...");
             _pickupTcs = NewTcs<bool>();
             await _ws.SendAsync(new { action = "setPickupAddress", province = _province }).ConfigureAwait(false);
-            var pickupOk = await _pickupTcs.Task.WaitAsync(TimeSpan.FromSeconds(90), ct).ConfigureAwait(false);
+            var pickupOk = await _waiter.AwaitAsync(_pickupTcs, TimeSpan.FromSeconds(90), ct).ConfigureAwait(false);
             if (_captchaSeen)
             {
                 L("PHÁT HIỆN captcha khi đặt địa chỉ lấy hàng.");
@@ -633,7 +717,7 @@ public sealed class OrdersBridgeSession : IDisposable
                 _prepareTcs = NewTcs<PrepareResult?>();
                 await _ws.SendAsync(new { action = "prepareNextOrder", invoiceDir = _invoiceDir }).ConfigureAwait(false);
                 // 300s: extension chờ Shopee tạo vận đơn (≤90s) TRƯỚC khi in, rồi chờ tab phiếu (≤120s) — nới hạn cho đủ.
-                var prep = await _prepareTcs.Task.WaitAsync(TimeSpan.FromSeconds(300), ct).ConfigureAwait(false);
+                var prep = await _waiter.AwaitAsync(_prepareTcs, TimeSpan.FromSeconds(300), ct).ConfigureAwait(false);
                 if (_captchaSeen)
                 {
                     L("PHÁT HIỆN captcha khi xử đơn — dừng.");
@@ -682,7 +766,7 @@ public sealed class OrdersBridgeSession : IDisposable
             L("Set địa chỉ lấy hàng về địa chỉ khác (hoàn tất flow shop)...");
             _pickupOtherTcs = NewTcs<bool>();
             await _ws.SendAsync(new { action = "setPickupAddressToOther" }).ConfigureAwait(false);
-            try { await _pickupOtherTcs.Task.WaitAsync(TimeSpan.FromSeconds(60), ct).ConfigureAwait(false); }
+            try { await _waiter.AwaitAsync(_pickupOtherTcs, TimeSpan.FromSeconds(60), ct).ConfigureAwait(false); }
             catch (TimeoutException) { L("Set địa chỉ khác: quá hạn — bỏ qua."); }
         }
 
@@ -843,6 +927,14 @@ public sealed class OrdersBridgeSession : IDisposable
                     break;
                 }
 
+                case "slipRedownloaded":
+                {
+                    // base64 phiếu ("" khi không thấy đơn / chưa có nút In phiếu). Rút chuỗi ra ngay (không giữ doc).
+                    var b64 = root.TryGetProperty("slipBase64", out var sb) ? sb.GetString() : null;
+                    _redownloadTcs.TrySetResult(b64);
+                    break;
+                }
+
                 case "progress":
                 {
                     var m = root.TryGetProperty("message", out var mm) ? mm.GetString() : null;
@@ -865,6 +957,7 @@ public sealed class OrdersBridgeSession : IDisposable
                     _pickupOtherTcs.TrySetResult(false);
                     _prepareTcs.TrySetResult(null);
                     _closeShopTcs.TrySetResult(false);
+                    _redownloadTcs.TrySetResult(null);
                     break;
                 }
 
@@ -873,18 +966,10 @@ public sealed class OrdersBridgeSession : IDisposable
                     var m = root.TryGetProperty("message", out var mm) ? mm.GetString() : "lỗi extension";
                     L("extension LỖI: " + m);
                     var ex = new InvalidOperationException("Extension báo lỗi: " + m);
-                    // Fault mọi chặng đang chờ để phiên thoát sớm thay vì đợi timeout.
-                    _readyTcs.TrySetException(ex);
-                    _atSellerTcs.TrySetException(ex);
-                    _shopListTcs.TrySetException(ex);
-                    _detailTcs.TrySetException(ex);
-                    _toShipTcs.TrySetException(ex);
-                    _ordersTcs.TrySetException(ex);
-                    _finalsTcs.TrySetException(ex);
-                    _pickupTcs.TrySetException(ex);
-                    _pickupOtherTcs.TrySetException(ex);
-                    _prepareTcs.TrySetException(ex);
-                    _closeShopTcs.TrySetException(ex);
+                    // CHỈ fault chặng ĐANG được await (StageWaiter) để phiên thoát sớm — KHÔNG fault hàng loạt TCS
+                    // không ai await (trước đây fault cả 11 → 10 exception mồ côi → UnobservedTaskException). Các chặng
+                    // không await được để NGUYÊN (pending → ResetTcs thay mới ở vòng sau; task pending KHÔNG raise unobserved).
+                    _waiter.FaultCurrent(ex);
                     break;
                 }
             }
