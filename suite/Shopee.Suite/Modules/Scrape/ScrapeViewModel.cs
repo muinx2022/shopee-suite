@@ -444,8 +444,17 @@ public sealed partial class ScrapeViewModel : ModuleViewModelBase
             // RỜI nhau. Resume giữ NGUYÊN khung cũ (đọc id đã lưu) để KHÔNG phơi tk MỚI lên BigSeller; Reset
             // cấp khung mới. Engine chỉ xoay vòng TRONG khung → BigSeller chỉ thấy ngần ấy thiết bị ổn định.
             var frameSize = Math.Max(1, frameSizeOverride ?? target.FrameSize);
+            // AFFINITY tk↔máy: hỏi Hub tk nào "nhà" ở máy này (mine → ưu tiên, tái dùng profile trusted) và tk
+            // nào đang thuộc máy KHÁC còn online (blocked → nhường, khỏi tranh trust). Chỉ khi có Hub; offline/
+            // lỗi → rỗng → dựng khung như cũ. Lấy TRƯỚC ClaimFrame để đưa vào thứ tự ưu tiên.
+            HashSet<string> mineIds = new(StringComparer.Ordinal), blockedIds = new(StringComparer.Ordinal);
+            if (accHub is not null)
+                (mineIds, blockedIds) = await accHub.GetAccountAffinityAsync().ConfigureAwait(false);
             IReadOnlyList<string>? preferIds = resume ? ScrapeProgressStore.Shared.GetFrame(account.Id, sheet) : null;
-            var frame = s.ClaimFrame(frameSize, preferIds);
+            var frame = s.ClaimFrame(frameSize, preferIds, mineIds, blockedIds);
+            // Affinity thu hẹp khung (nhường tk máy khác còn online) → log rõ để user hiểu vì sao ít cửa sổ hơn.
+            if (blockedIds.Count > 0 && frame.Count < frameSize)
+                LogA($"[{account.DisplayName}] {blockedIds.Count} tk đang thuộc máy khác (còn online) → nhường, dùng tk của máy này/mồ côi; khung còn {frame.Count}/{frameSize}.");
             var frameIds = frame.Select(a => a.Id).ToList();
             // Gói account-lease: GIỮ giữ-chỗ cục bộ CẢ khung (ClaimFrame đã TryReserve) tới lúc Dispose nhả — kể cả
             // khi job dừng giữa chừng / Hub loại bớt tk (KHÔNG thu hẹp khung để tránh rò tk khỏi kho chung). Tạo
@@ -464,6 +473,11 @@ public sealed partial class ScrapeViewModel : ModuleViewModelBase
                 }
                 if (frame.Count == 0) { LogA($"[{account.DisplayName}] mọi tk trong khung đang được máy khác dùng — bỏ qua."); return; }
             }
+            // AFFINITY: ghi "nhà" = máy này cho khung CUỐI (các tk máy này thực sự giữ, đã qua lease-grant) → lần
+            // sau máy này ưu tiên chúng + máy khác tránh khi máy này còn online. Chỉ ghi tk đã lease-grant ⇒ không
+            // ghi đè nhầm tk máy khác đang giữ. Best-effort (SetAccountHomeAsync tự nuốt lỗi).
+            if (accHub is not null && frame.Count > 0)
+                await accHub.SetAccountHomeAsync(frame.Select(a => a.Id)).ConfigureAwait(false);
             ScrapeProgressStore.Shared.SaveFrame(account.Id, sheet, frame.Select(a => a.Id));   // lưu khung để resume giữ nguyên
             var procs = Math.Max(1, Math.Min(maxProc, frame.Count));
             // Mỗi tk BigSeller (job) 1 màu nền → các process CÙNG tk BigSeller cùng màu, dễ nhìn khi chạy nhiều tk.
@@ -766,24 +780,41 @@ public sealed partial class ScrapeViewModel : ModuleViewModelBase
         // ưu tiên id đã lưu (resume giữ khung cũ), rồi bù bằng tk nghỉ lâu nhất. Khung các job RỜI nhau
         // (mỗi tk chỉ thuộc 1 khung) → mỗi tk BigSeller chỉ phơi ngần ấy thiết bị. Mỗi tk Shopee có
         // profile bền RIÊNG nên tái dùng trong khung = import BigSeller 1 lần rồi giữ token sống. ──
-        public List<ShopeeAccount> ClaimFrame(int n, IReadOnlyList<string>? preferIds)
+        // AFFINITY: mineIds = tk "nhà" ở máy NÀY (đã có profile trusted) → ưu tiên sau preferIds; blockedIds =
+        // tk đang thuộc máy KHÁC còn online → LOẠI khỏi MỌI vòng (nhường, khỏi tranh trust). Rỗng cả hai khi
+        // không có Hub → thứ tự về đúng hành vi cũ (preferIds → ngẫu nhiên).
+        public List<ShopeeAccount> ClaimFrame(int n, IReadOnlyList<string>? preferIds,
+            IReadOnlyCollection<string> mineIds, IReadOnlyCollection<string> blockedIds)
         {
             lock (AllocLock)
             {
                 var frame = new List<ShopeeAccount>();
                 // CHỈ lấy tk GIÀNH ĐƯỢC quyền (TryReserve) → KHÔNG đụng tk module khác (Search) đang giữ →
                 // 2 module không bao giờ mở cùng 1 tk Shopee. Khung được NHẢ khi job kết thúc (RunOneJobAsync finally).
+                // (a) preferIds (resume — giữ khung cũ), LOẠI blocked.
                 if (preferIds is not null)
                     foreach (var id in preferIds)
                     {
                         // Né tk module khác đang giữ lease Hub trên máy này (IsHubLeased) — khỏi cướp lease chéo-module.
-                        var a = Available.FirstOrDefault(x => x.Id == id && !x.Disabled && !ShopeeAccountUsage.Shared.IsHubLeased(x.Id));
+                        var a = Available.FirstOrDefault(x => x.Id == id && !x.Disabled
+                            && !blockedIds.Contains(x.Id) && !ShopeeAccountUsage.Shared.IsHubLeased(x.Id));
                         if (a is not null && ShopeeAccountUsage.Shared.TryReserve(a.Id)) { frame.Add(a); Available.Remove(a); }
                     }
-                // Lấp đủ số: chọn NGẪU NHIÊN trong kho (tk còn bật + chưa module khác giữ chỗ/giữ lease Hub) cho đủ n.
+                // (b) mineIds (tk máy này đã "nhà" → tái dùng profile trusted), LOẠI blocked; chỉ lấp khi chưa đủ n.
+                if (frame.Count < n)
+                    foreach (var id in mineIds)
+                    {
+                        if (frame.Count >= n) break;
+                        var a = Available.FirstOrDefault(x => x.Id == id && !x.Disabled
+                            && !blockedIds.Contains(x.Id) && !ShopeeAccountUsage.Shared.IsHubLeased(x.Id));
+                        if (a is not null && ShopeeAccountUsage.Shared.TryReserve(a.Id)) { frame.Add(a); Available.Remove(a); }
+                    }
+                // (c) Lấp đủ số: chọn NGẪU NHIÊN trong kho (tk còn bật + chưa module khác giữ chỗ/giữ lease Hub +
+                //     KHÔNG thuộc máy khác) cho đủ n — đây là tk mồ côi / nhà-offline.
                 while (frame.Count < n)
                 {
                     var candidates = Available.Where(x => !x.Disabled
+                        && !blockedIds.Contains(x.Id)
                         && !ShopeeAccountUsage.Shared.IsReserved(x.Id)
                         && !ShopeeAccountUsage.Shared.IsHubLeased(x.Id)).ToList();
                     if (candidates.Count == 0) break;

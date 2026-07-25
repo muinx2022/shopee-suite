@@ -67,6 +67,11 @@ public sealed class HubClient : IDisposable
     public Task ReleaseAccountsAsync(AccountReleaseRequest req, CancellationToken ct = default) => PostAsync(HubRoutes.AccountsRelease, req, ct);
     public Task HeartbeatAccountsAsync(AccountReleaseRequest req, CancellationToken ct = default) => PostAsync(HubRoutes.AccountsHeartbeat, req, ct);
 
+    // ── Affinity tk↔máy (Scrape): ghi "nhà" + đọc home + cờ binding ──
+    public Task SetAccountHomeAsync(SetAccountHomeRequest req, CancellationToken ct = default) => PostAsync(HubRoutes.AccountsHome, req, ct);
+    public async Task<List<AccountHomeItem>> GetAccountHomesAsync(CancellationToken ct = default)
+        => await _http.GetFromJsonAsync<List<AccountHomeItem>>(HubRoutes.AccountsHome, ct) ?? [];
+
     // ── Sổ hoàn thành ──
     public Task PublishLedgerAsync(WorkLedgerRecord rec, CancellationToken ct = default) => PostAsync(HubRoutes.Ledger, rec, ct);
     public Task SetLedgerStatusAsync(SetLedgerStatusRequest req, CancellationToken ct = default) => PostAsync(HubRoutes.LedgerSet, req, ct);

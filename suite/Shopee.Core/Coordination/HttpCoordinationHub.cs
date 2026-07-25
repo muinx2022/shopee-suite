@@ -226,6 +226,36 @@ public sealed class HttpCoordinationHub : ICoordinationHub, IDisposable
         try { await _client.ReleaseAccountsAsync(new AccountReleaseRequest(list, _machineId)); } catch { }
     }
 
+    // ── Affinity tk↔máy (Scrape): ghi "nhà" máy này + đọc affinity (mine/blocked). Là lớp CỐ VẤN chọn khung;
+    //    khoá loại trừ thật vẫn là account-lease (ReserveAccountsAsync). Offline/lỗi → nuốt → degrade như cũ. ──
+    /// <summary>Ghi "nhà" = máy này cho <paramref name="ids"/> (chỉ tk ĐÃ qua lease-grant → không ghi đè nhầm tk
+    /// máy khác đang giữ). Best-effort: offline/lỗi → nuốt (lượt sau bù).</summary>
+    public async Task SetAccountHomeAsync(IEnumerable<string> ids)
+    {
+        var list = ids.Distinct(StringComparer.Ordinal).ToList();
+        if (list.Count == 0) return;
+        try { await _client.SetAccountHomeAsync(new SetAccountHomeRequest(list, _machineId, Host)); } catch { }
+    }
+
+    /// <summary>Trả (tk homed về máy NÀY = mine → ưu tiên tái dùng profile trusted; tk homed máy KHÁC còn
+    /// binding = blocked → nhường). Rỗng nếu offline/lỗi → không mine/blocked → hành vi dựng khung như cũ.</summary>
+    public async Task<(HashSet<string> Mine, HashSet<string> Blocked)> GetAccountAffinityAsync()
+    {
+        var mine = new HashSet<string>(StringComparer.Ordinal);
+        var blocked = new HashSet<string>(StringComparer.Ordinal);
+        try
+        {
+            var homes = await _client.GetAccountHomesAsync();
+            foreach (var h in homes)
+            {
+                if (string.Equals(h.MachineId, _machineId, StringComparison.Ordinal)) mine.Add(h.AccountId);
+                else if (h.Binding) blocked.Add(h.AccountId);
+            }
+        }
+        catch { }   // Hub lỗi → degrade: không mine/blocked → hành vi như cũ
+        return (mine, blocked);
+    }
+
     public async Task HeartbeatAccountsAsync(IEnumerable<string> ids)
     {
         var list = ids.Distinct(StringComparer.Ordinal).ToList();

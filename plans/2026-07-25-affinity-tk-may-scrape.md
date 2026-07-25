@@ -1,7 +1,7 @@
 # Plan: Affinity tài khoản↔máy cho Scrape (giữ trusted-device, hết lặp profile đa máy)
 
 - **Ngày:** 2026-07-25
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-executor`)
 
 ## 1. Bối cảnh & mục tiêu
@@ -181,6 +181,16 @@ Trong `suite/Shopee.Suite/Modules/Scrape/ScrapeViewModel.cs`, hàm `RunOneJobAsy
 
 ---
 
-## Báo cáo thực thi (Opus điền sau khi xong)
+## Báo cáo thực thi
 
-<chưa thực thi>
+Hoàn tất 5 bước. Opus triển khai, Fable review diff thật + build lại độc lập nghiệm thu.
+
+**File tạo/sửa (9):** `HubDatabase.cs` (property `HomeTakeoverAfter`=45' + bảng `account_home` trong EnsureSchema), `HubDatabase.AccountHome.cs` (MỚI: `SetAccountHome` upsert + `AccountHomes` tính `Binding` theo `machines.last_seen`), `HubDatabase.Machines.cs` (dọn `account_home` trong `ResetMachineWork` + `DeleteMachineLocked`), `ClientApiEndpoints.cs` (POST/GET `/accounts/home`), `HubRoutes.cs` + `HubDtos.cs` + `HubClient.cs` (route + DTO + client method), `HttpCoordinationHub.cs` (`SetAccountHomeAsync` + `GetAccountAffinityAsync` → (Mine,Blocked), nuốt lỗi), `ScrapeViewModel.cs` (fetch affinity TRƯỚC ClaimFrame; `ClaimFrame(n,preferIds,mineIds,blockedIds)` loại blocked + ưu tiên preferIds→mineIds→ngẫu nhiên; ghi home SAU ReserveHubAsync; log khi thu hẹp khung).
+
+**Nghiệm thu (Fable):** `dotnet build ShopeeSuite.sln` → 0 warning/0 error (build lại độc lập). `dotnet test orders/XuLyDonShopee.Tests` → 899 pass, không hồi quy. Review diff: logic binding/upsert/dọn-máy/ClaimFrame đúng; degrade êm khi offline/không-Hub.
+
+**Lệch plan (chấp nhận):**
+1. KHÔNG thêm vào `ICoordinationHub` — `accHub` là concrete `HttpCoordinationHub?`, toàn bộ mẫu `AccountsReserve` cũng chỉ nằm trên concrete; thêm interface sẽ lệch mẫu + buộc NoOp implement thừa. Đúng tinh thần "bám mẫu AccountsReserve".
+2. Không có Hub test project (chỉ orders tests) → build xanh + rà logic tay (đúng plan mục 5).
+
+**Còn ngỏ (ghi chú, chưa làm — đúng phạm vi):** đường bù tk (`AccountReplenisher.TryAcquireSpareAsync`) CHƯA loại `blocked`; module **Search** chưa theo affinity. Dữ liệu `account_home` đã module-agnostic, mở plan sau nếu cần.

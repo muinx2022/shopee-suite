@@ -26,6 +26,12 @@ public sealed partial class HubDatabase : IDisposable
     public TimeSpan StaleLease { get; init; } = TimeSpan.FromMinutes(5);
     public TimeSpan StaleAccount { get; init; } = TimeSpan.FromMinutes(5);
 
+    /// <summary>Máy "nhà" (home) của tk Shopee offline quá ngưỡng này → home hết ràng buộc, tk cho máy khác
+    /// tiếp quản (dựng trust lại 1 lần rồi dính máy mới). Điểm đánh đổi throughput↔trust — chỉnh TẠI ĐÂY,
+    /// KHÔNG hardcode rải rác. Ràng buộc dựa vào nhịp sống của MÁY nhà (machines.last_seen), không cần
+    /// heartbeat riêng cho từng tk.</summary>
+    public TimeSpan HomeTakeoverAfter { get; init; } = TimeSpan.FromMinutes(45);
+
     /// <summary>Bật khoá xuyên-máy theo TÀI KHOẢN BigSeller ở <see cref="AcquireLease"/>: máy KHÁC đang giữ
     /// lease tươi của cùng bigseller_id (op bất kỳ) → từ chối cấp (Blocked). Chống 2 máy cùng dùng 1 acc
     /// BigSeller (cookie xoay theo IP — 2 máy cùng phiên là bay cookie). Client cũ xử lý Blocked(...) sẵn nên bật an toàn.</summary>
@@ -116,6 +122,8 @@ CREATE TABLE IF NOT EXISTS leases(
   machine_id TEXT, hostname TEXT, acquired_at TEXT, heartbeat_at TEXT, status TEXT);
 CREATE TABLE IF NOT EXISTS account_leases(
   account_id TEXT PRIMARY KEY, machine_id TEXT, hostname TEXT, heartbeat_at TEXT);
+CREATE TABLE IF NOT EXISTS account_home(
+  account_id TEXT PRIMARY KEY, machine_id TEXT NOT NULL, hostname TEXT, updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS ledger(
   key TEXT PRIMARY KEY, bigseller_id TEXT, shop_id TEXT, sheet TEXT, op TEXT,
   completed_json TEXT, last_row INTEGER, status TEXT,

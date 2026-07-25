@@ -90,7 +90,9 @@ public sealed partial class HubDatabase
                 c.Parameters.AddWithValue("$m", machineId);
                 dismissed = c.ExecuteNonQuery();
             }
-            foreach (var tbl in new[] { "leases", "account_leases" })
+            // account_home vào chung: reset máy = nhả "nhà" của máy đó NGAY → tk mồ côi, máy khác tiếp quản
+            // liền (không chờ ngưỡng HomeTakeoverAfter). Vẫn trong transaction.
+            foreach (var tbl in new[] { "leases", "account_leases", "account_home" })
                 using (var c = _conn.CreateCommand())
                 {
                     c.Transaction = tx;
@@ -215,7 +217,8 @@ WHERE machine_id=$m;";
     private void DeleteMachineLocked(string machineId)
     {
         using var c = _conn.CreateCommand();
-        c.CommandText = "DELETE FROM machines WHERE machine_id=$m; DELETE FROM machine_roles WHERE machine_id=$m;";
+        // Kèm account_home: máy chủ động "Ngắt kết nối" → nhả "nhà" của nó luôn (tk cho máy khác tiếp quản).
+        c.CommandText = "DELETE FROM machines WHERE machine_id=$m; DELETE FROM machine_roles WHERE machine_id=$m; DELETE FROM account_home WHERE machine_id=$m;";
         c.Parameters.AddWithValue("$m", machineId);
         c.ExecuteNonQuery();
     }

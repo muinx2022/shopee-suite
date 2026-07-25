@@ -63,6 +63,15 @@ public static class ClientApiEndpoints
         api.MapPost(HubRoutes.AccountsRelease, (AccountReleaseRequest? r) => { if (r?.AccountIds is null) return Results.BadRequest(); db.ReleaseAccounts(r); return Results.Ok(); });
         api.MapPost(HubRoutes.AccountsHeartbeat, (AccountReleaseRequest? r) => { if (r?.AccountIds is null) return Results.BadRequest(); db.HeartbeatAccounts(r); return Results.Ok(); });
 
+        // ── Affinity tk↔máy (Scrape): ghi "nhà" (POST) + đọc home + cờ binding (GET) ──
+        api.MapPost(HubRoutes.AccountsHome, (SetAccountHomeRequest? r) =>
+        {
+            if (r?.AccountIds is null) return Results.BadRequest();
+            db.SetAccountHome(r);
+            return Results.Ok();
+        });
+        api.MapGet(HubRoutes.AccountsHome, () => Results.Json(db.AccountHomes()));
+
         // ── Sổ hoàn thành ──
         api.MapPost(HubRoutes.Ledger, (WorkLedgerRecord? r) => { if (r is null) return Results.BadRequest(); db.PublishLedger(r); return Results.Ok(); });
         api.MapPost(HubRoutes.LedgerSet, (SetLedgerStatusRequest? r) => { if (r is null) return Results.BadRequest(); db.SetLedgerStatus(r.Key, r.BigsellerId, r.ShopId, r.Sheet, r.Op, r.Status); return Results.Ok(); });

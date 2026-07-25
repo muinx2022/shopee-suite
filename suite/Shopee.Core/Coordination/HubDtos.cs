@@ -215,6 +215,12 @@ public sealed record AccountReserveResponse(List<string> Granted, List<string> B
 
 public sealed record AccountReleaseRequest(List<string> AccountIds, string MachineId);
 
+/// <summary>Client ghi "nhà" (home machine) = máy này cho các tk đã được lease cấp (affinity tk↔máy, Scrape).</summary>
+public sealed record SetAccountHomeRequest(List<string> AccountIds, string MachineId, string Hostname);
+/// <summary>Một dòng "nhà" tk: tk <see cref="AccountId"/> thuộc máy <see cref="MachineId"/>. <see cref="Binding"/>
+/// = máy nhà CÒN online (last_seen trong ngưỡng HomeTakeoverAfter) ⇒ máy khác phải tránh; false = tk tự do.</summary>
+public sealed record AccountHomeItem(string AccountId, string MachineId, string Hostname, bool Binding);
+
 public sealed record MachineHeartbeatRequest(string MachineId, string Hostname, string? AppVersion, int MaxBrave = 0);
 /// <summary>Phản hồi heartbeat: kênh Hub đẩy lệnh xuống client. <see cref="UpdateRequestedAt"/> null/rỗng = không có
 /// lệnh; có giá trị = chuỗi ISO lúc operator ra lệnh update, client dùng làm ID dedup (chỉ update 1 lần/lệnh).

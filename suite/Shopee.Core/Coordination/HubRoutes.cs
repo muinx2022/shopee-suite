@@ -28,6 +28,8 @@ public static class HubRoutes
     public const string AccountsHeartbeat = "/accounts/heartbeat";
     public const string AccountsErrored = "/accounts/errored";
     public const string AccountsErroredClear = "/accounts/errored/clear";
+    /// <summary>Affinity tk↔máy (Scrape): POST ghi "nhà" máy này cho các tk; GET đọc danh sách home + cờ binding.</summary>
+    public const string AccountsHome = "/accounts/home";
 
     // ── Sổ hoàn thành (ledger) ──
     public const string Ledger = "/ledger";
