@@ -46,9 +46,10 @@
         <SolidColorBrush x:Key="TextOnAccentBrush" Color="#FFFFFF" />
 
         <!-- ══════════ FONTS ══════════ -->
-        <!-- Ưu tiên Segoe UI Variable (Win11-native, sắc nét, khớp module Đơn hàng); Linux fallback Inter nhúng
-             (phủ tiếng Việt, giống hệt Win/Ubuntu). Mono cho log/list; Emoji cho icon chuỗi. -->
-        <FontFamily x:Key="UiFont">Segoe UI Variable Text, Segoe UI, avares://Avalonia.Fonts.Inter/Assets#Inter</FontFamily>
+        <!-- Inter nhúng (phủ tiếng Việt, giống hệt Win/Ubuntu, render ỔN ĐỊNH). Mono cho log/list; Emoji cho icon chuỗi.
+             (Đã thử composite "Segoe UI Variable Text, Segoe UI, avares…Inter" cho sắc hơn — nhưng trộn tên hệ thống
+             với font nhúng qua URI làm render bị VỠ trên máy user → quay lại Inter nhúng đơn thuần.) -->
+        <FontFamily x:Key="UiFont">avares://Avalonia.Fonts.Inter/Assets#Inter</FontFamily>
         <FontFamily x:Key="MonoFont">Consolas, Cascadia Mono, DejaVu Sans Mono, Liberation Mono, monospace</FontFamily>
         <FontFamily x:Key="EmojiFont">Segoe UI Emoji, Noto Color Emoji, sans-serif</FontFamily>
 
