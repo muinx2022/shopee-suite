@@ -140,6 +140,25 @@ public sealed partial class WorkspaceShopViewModel : ObservableObject
     public bool UpdateDone => !UpdateRunning && IsOpDone(CoordOp.Update);
     public bool RewriteDone => !RewriteRunning && IsOpDone(CoordOp.Rewrite);
 
+    // ── Cột "Tiến độ": liệt kê RÕ từng op (Xong / Đang chạy / Chưa xong) kèm màu. Đọc *Done/*Running (đều từ
+    //    ledger Hub) nên đồng nhất mọi máy, không phải trạng thái local. ──
+    private static readonly IBrush DoneBrush = new SolidColorBrush(Color.Parse("#1EA055"));    // Xong = xanh
+    private static readonly IBrush RunningBrush = new SolidColorBrush(Color.Parse("#EE4D2D")); // Đang chạy = cam
+    private static readonly IBrush PendingBrush = new SolidColorBrush(Color.Parse("#9AA0AA")); // Chưa xong = xám
+
+    private static string OpStatusText(bool running, bool done) => running ? "Đang chạy" : done ? "Xong" : "Chưa xong";
+    private static IBrush OpStatusBrush(bool running, bool done) => running ? RunningBrush : done ? DoneBrush : PendingBrush;
+
+    /// <summary>4 op (Scrape/Import/Update/Tên SP) × trạng thái + màu — cho cột "Tiến độ" của lưới shop hiển thị
+    /// rõ từng bước thay vì chỉ mỗi trạng thái scrape.</summary>
+    public IReadOnlyList<ShopOpProgress> ProgressRows =>
+    [
+        new("Scrape", OpStatusText(ScrapeRunning, ScrapeDone), OpStatusBrush(ScrapeRunning, ScrapeDone)),
+        new("Import", OpStatusText(ImportRunning, ImportDone), OpStatusBrush(ImportRunning, ImportDone)),
+        new("Update", OpStatusText(UpdateRunning, UpdateDone), OpStatusBrush(UpdateRunning, UpdateDone)),
+        new("Tên SP", OpStatusText(RewriteRunning, RewriteDone), OpStatusBrush(RewriteRunning, RewriteDone)),
+    ];
+
     /// <summary>true khi shop này đang chạy 1 workflow update TRÊN MÁY NÀY (giữ cho chỗ khác nếu còn dùng).</summary>
     public bool IsUpdatingAnyLocal => IsImporting || IsUpdatingShop || IsRewriting;
 
@@ -154,6 +173,7 @@ public sealed partial class WorkspaceShopViewModel : ObservableObject
             nameof(ScrapeToggleTip), nameof(ImportToggleTip), nameof(UpdateToggleTip), nameof(RewriteToggleTip),
             nameof(CanScrape), nameof(CanStartUpdate), nameof(IsUpdatingAnyLocal),
             nameof(ScrapeDone), nameof(ImportDone), nameof(UpdateDone), nameof(RewriteDone),
+            nameof(ProgressRows),
         }) OnPropertyChanged(n);
     }
 
@@ -186,3 +206,7 @@ public sealed partial class WorkspaceShopViewModel : ObservableObject
         RefreshFleet();
     }
 }
+
+/// <summary>1 dòng trạng thái op trong cột "Tiến độ" của lưới shop: tên op + trạng thái (Xong/Đang chạy/Chưa
+/// xong) + màu chữ tương ứng.</summary>
+public sealed record ShopOpProgress(string Op, string Status, IBrush Brush);

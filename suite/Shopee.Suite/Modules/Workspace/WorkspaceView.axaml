@@ -218,19 +218,33 @@
                                     <!-- Lưới SHOP pipeline — lấp đầy chiều cao còn lại -->
                                     <Border Grid.Row="0" Classes="card" ClipToBounds="True">
                                         <DataGrid x:Name="ShopGrid" ItemsSource="{Binding Shops}" IsReadOnly="True"
-                                                  BorderThickness="0" SelectionChanged="ShopGrid_SelectionChanged" RowHeight="36"
+                                                  BorderThickness="0" SelectionChanged="ShopGrid_SelectionChanged" RowHeight="44"
                                                   AutoGenerateColumns="False" ScrollViewer.VerticalScrollBarVisibility="Auto">
                                             <DataGrid.Columns>
                                                 <DataGridTextColumn Header="Shop" Binding="{Binding Name}" Width="1.1*" />
-                                                <DataGridTextColumn Header="Sheet" Binding="{Binding Sheet}" Width="1.1*" />
-                                                <DataGridTemplateColumn Header="Tiến độ" Width="1.2*">
+                                                <DataGridTemplateColumn Header="Tiến độ" Width="1.9*">
                                                     <DataGridTemplateColumn.CellTemplate>
                                                         <DataTemplate>
-                                                            <Border CornerRadius="4" Padding="9,3" HorizontalAlignment="Left"
-                                                                    Background="{Binding ScrapeBackground}" ToolTip.Tip="{Binding ScrapeTooltip}">
-                                                                <TextBlock Text="{Binding ScrapeStatusText}" FontSize="11.5" FontWeight="SemiBold"
-                                                                           Foreground="{Binding ScrapeForeground}" />
-                                                            </Border>
+                                                            <!-- 4 op × Xong/Đang chạy/Chưa xong (màu), xếp 2×2 cho gọn. -->
+                                                            <ItemsControl ItemsSource="{Binding ProgressRows}" VerticalAlignment="Center" Margin="2,3">
+                                                                <ItemsControl.ItemsPanel>
+                                                                    <ItemsPanelTemplate>
+                                                                        <UniformGrid Columns="2" />
+                                                                    </ItemsPanelTemplate>
+                                                                </ItemsControl.ItemsPanel>
+                                                                <ItemsControl.ItemTemplate>
+                                                                    <DataTemplate>
+                                                                        <StackPanel Orientation="Horizontal" Margin="0,1,12,1">
+                                                                            <TextBlock Text="{Binding Op}" FontSize="10.5"
+                                                                                       Foreground="{DynamicResource TextSecondaryBrush}" />
+                                                                            <TextBlock Text=": " FontSize="10.5"
+                                                                                       Foreground="{DynamicResource TextSecondaryBrush}" />
+                                                                            <TextBlock Text="{Binding Status}" FontSize="10.5" FontWeight="SemiBold"
+                                                                                       Foreground="{Binding Brush}" />
+                                                                        </StackPanel>
+                                                                    </DataTemplate>
+                                                                </ItemsControl.ItemTemplate>
+                                                            </ItemsControl>
                                                         </DataTemplate>
                                                     </DataGridTemplateColumn.CellTemplate>
                                                 </DataGridTemplateColumn>
