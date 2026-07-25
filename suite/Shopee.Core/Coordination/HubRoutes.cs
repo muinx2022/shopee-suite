@@ -58,8 +58,6 @@ public static class HubRoutes
     public const string ProductsRewritePending = "/products/rewrite-pending";
     public const string ProductsRewritten = "/products/rewritten";
     public const string ProductsAppend = "/products/rows/append";
-    public const string ProductsImportXlsx = "/products/import-xlsx";
-    public const string ProductsExportXlsx = "/products/export-xlsx";
     // ── RESUME per-SP (tiến độ Import/Update bền xuyên kill) ──
     public const string ProductsMarkImported = "/products/mark-imported";
     public const string ProductsMarkUpdated = "/products/mark-updated";
