@@ -30,6 +30,12 @@ public partial class AccountsViewModel : ViewModelBase
     /// đó đọc trực tiếp <see cref="Accounts"/> đang hiển thị).</summary>
     private readonly HashSet<long> _selectedIds = new();
 
+    /// <summary>Tab "Kết quả" (cột tiến độ): shop mà phiên của TỪNG tài khoản đang/vừa check — nhãn shop + có
+    /// đang check hay không. Nhớ theo tài khoản (không phải một ô duy nhất) để chuyển qua lại giữa nhiều tài
+    /// khoản đang chạy vẫn thấy đúng chấm của tài khoản đang mở. Chỉ ghi/đọc trên UI thread (xem
+    /// <see cref="OnShopCheckChanged"/> đã marshal qua <see cref="RunOnUi"/>) nên không cần khóa.</summary>
+    private readonly Dictionary<long, (string ShopLabel, bool IsChecking)> _shopCheck = new();
+
     public AccountsViewModel(AppServices services)
     {
         _services = services;
@@ -55,6 +61,10 @@ public partial class AccountsViewModel : ViewModelBase
         // Vừa chuẩn bị xong 1 đơn → số ở tab "Kết quả" của tài khoản đó vừa tăng trong CSDL. Nghe để nạp lại
         // NGAY (chỉ khi đúng tài khoản đang mở), thay vì bắt người dùng đổi tài khoản/đổi ngày mới thấy số mới.
         _services.PrepareCountChanged += OnPrepareCountChanged;
+
+        // Phiên vào/ra một shop → cột tiến độ của tab "Kết quả" chuyển chấm + bật/tắt vòng quay. Cũng từ thread
+        // nền của phiên → marshal về UI thread (RunOnUi) trước khi đụng ResultRows.
+        _services.ShopCheckChanged += OnShopCheckChanged;
 
         // Nạp cờ "Xóa profile và tạo lại" từ Settings (bền qua restart). Setter tự LƯU nên chặn ghi ngược
         // trong lúc nạp bằng _loadingSettings.
@@ -414,7 +424,7 @@ public partial class AccountsViewModel : ViewModelBase
         {
             seen.Add(shopLogin);
             var name = string.IsNullOrWhiteSpace(shopName) ? shopLogin : shopName;
-            ResultRows.Add(new ShopPrepareRow(name, counts.GetValueOrDefault(shopLogin, 0)));
+            ResultRows.Add(new ShopPrepareRow(name, shopLogin, counts.GetValueOrDefault(shopLogin, 0)));
         }
 
         // Shop có đơn nhưng chưa nằm trong account_shops → UNION thêm (nhãn = chính shop_login) để không sót đếm.
@@ -422,9 +432,51 @@ public partial class AccountsViewModel : ViewModelBase
         {
             if (!seen.Contains(kv.Key))
             {
-                ResultRows.Add(new ShopPrepareRow(kv.Key, kv.Value));
+                ResultRows.Add(new ShopPrepareRow(kv.Key, kv.Key, kv.Value));
             }
         }
+
+        // Dòng vừa dựng lại là dòng MỚI (cờ tiến độ về mặc định) → áp lại chấm/vòng quay. Bắt buộc: hàm này chạy
+        // sau MỖI đơn chuẩn bị xong (PrepareCountChanged), thiếu bước này là chấm nhấp nháy/biến mất khi đang chạy.
+        ApplyShopCheckFlags();
+    }
+
+    /// <summary>
+    /// Áp cờ cột tiến độ (<see cref="ShopPrepareRow.IsCurrent"/>/<see cref="ShopPrepareRow.IsChecking"/>) lên các
+    /// dòng đang hiển thị theo shop mà phiên của TÀI KHOẢN ĐANG MỞ đang/vừa check. Không có tài khoản đang mở /
+    /// tài khoản đó chưa chạy shop nào → xóa sạch cờ. Chạy trên UI thread.
+    /// </summary>
+    private void ApplyShopCheckFlags()
+    {
+        (string ShopLabel, bool IsChecking) state = default;
+        var hasState = SelectedRow?.Id is long accountId && _shopCheck.TryGetValue(accountId, out state);
+
+        foreach (var row in ResultRows)
+        {
+            var current = hasState && MatchesShopLabel(row, state.ShopLabel);
+            row.IsCurrent = current;
+            row.IsChecking = current && state.IsChecking;
+        }
+    }
+
+    /// <summary>
+    /// Dòng lưới có ứng với nhãn shop <paramref name="label"/> phiên báo về không. Nhãn phiên gửi là KHÓA shop
+    /// (<c>LoginName</c>, rỗng thì <c>ShopName</c>) nên khớp <see cref="ShopPrepareRow.ShopLogin"/> là chính; vẫn
+    /// nhận cả <see cref="ShopPrepareRow.ShopName"/> phòng dữ liệu cũ lưu lệch. So sánh bỏ khoảng trắng thừa +
+    /// KHÔNG phân biệt hoa/thường (nhãn từ phiên và tên trong <c>account_shops</c> có thể lệch hoa/thường).
+    /// </summary>
+    private static bool MatchesShopLabel(ShopPrepareRow row, string? label)
+    {
+        if (string.IsNullOrWhiteSpace(label))
+        {
+            return false;
+        }
+
+        return Same(row.ShopLogin, label) || Same(row.ShopName, label);
+
+        static bool Same(string? a, string? b)
+            => !string.IsNullOrWhiteSpace(a)
+               && string.Equals(a.Trim(), b!.Trim(), StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -1125,6 +1177,43 @@ public partial class AccountsViewModel : ViewModelBase
     });
 
     /// <summary>
+    /// Phiên vừa BẮT ĐẦU (<paramref name="checking"/> = true) hoặc XONG (false) việc check shop
+    /// <paramref name="shopLabel"/> của tài khoản <paramref name="accountId"/> → cập nhật cột tiến độ tab "Kết quả".
+    /// <list type="bullet">
+    /// <item>bắt đầu → nhớ shop mới ⇒ chấm CHUYỂN sang shop đó ngay + bật vòng quay;</item>
+    /// <item>xong → GIỮ nguyên nhãn shop, chỉ tắt vòng quay ⇒ chấm Ở LẠI shop vừa xong tới khi shop kế bắt đầu.</item>
+    /// </list>
+    /// Nhớ cho MỌI tài khoản nhưng chỉ vẽ lại lưới khi đúng tài khoản đang mở. Sự kiện đến từ THREAD NỀN của
+    /// phiên → marshal về UI thread trước khi đụng <c>ResultRows</c>.
+    /// </summary>
+    private void OnShopCheckChanged(long accountId, string shopLabel, bool checking) => RunOnUi(() =>
+    {
+        if (string.IsNullOrWhiteSpace(shopLabel))
+        {
+            return;
+        }
+
+        if (checking)
+        {
+            _shopCheck[accountId] = (shopLabel, true);
+        }
+        else if (_shopCheck.TryGetValue(accountId, out var prev))
+        {
+            // Xong shop: GIỮ nhãn đang nhớ (chấm ở lại), chỉ hạ cờ đang-check.
+            _shopCheck[accountId] = (prev.ShopLabel, false);
+        }
+        else
+        {
+            _shopCheck[accountId] = (shopLabel, false);
+        }
+
+        if (SelectedRow?.Id == accountId)
+        {
+            ApplyShopCheckFlags();
+        }
+    });
+
+    /// <summary>
     /// Đồng bộ trạng thái phiên vào mọi dòng đang hiển thị. LUÔN chạy trên UI thread (gọi từ
     /// <see cref="RunOnUi"/>) — chỉ đọc <see cref="Accounts"/> và set thuộc tính row, KHÔNG cấu trúc lại
     /// ObservableCollection từ thread nền.
@@ -1330,5 +1419,48 @@ public partial class AccountsViewModel : ViewModelBase
         => utc == default ? string.Empty : utc.ToLocalTime().ToString("dd/MM/yyyy HH:mm");
 }
 
-/// <summary>Một dòng lưới tab "Kết quả": tên Shop (hiển thị) + số đơn đã Chuẩn bị hàng của ngày đang lọc.</summary>
-public sealed record ShopPrepareRow(string ShopName, int PreparedCount);
+/// <summary>
+/// Một dòng lưới tab "Kết quả": tên Shop (hiển thị) + số đơn đã Chuẩn bị hàng của ngày đang lọc + cột tiến độ
+/// (chấm tròn shop phiên đang chạy tới / vòng quay khi đang check shop đó).
+/// <para>
+/// Là LỚP quan sát được (không còn <c>record</c> bất biến) vì các cờ tiến độ đổi TẠI CHỖ trong lúc chạy — dựng
+/// lại dòng mỗi lần đổi cờ sẽ làm lưới nháy. Kéo theo: hết value-equality, so sánh dòng là so THAM CHIẾU.
+/// </para>
+/// </summary>
+public sealed partial class ShopPrepareRow : ObservableObject
+{
+    /// <param name="shopName">Tên hiển thị ở cột "Shop" (<c>account_shops.shop_name</c>, thiếu thì chính login).</param>
+    /// <param name="shopLogin">KHÓA shop (<c>account_shops.shop_login</c> = khóa <c>prepare_daily</c>) — dùng để khớp
+    /// nhãn shop mà phiên báo về; KHÁC <paramref name="shopName"/> khi shop có tên hiển thị riêng.</param>
+    /// <param name="preparedCount">Số đơn đã Chuẩn bị hàng trong ngày đang lọc.</param>
+    public ShopPrepareRow(string shopName, string shopLogin, int preparedCount)
+    {
+        ShopName = shopName;
+        ShopLogin = shopLogin;
+        PreparedCount = preparedCount;
+    }
+
+    /// <summary>Tên shop hiển thị ở cột "Shop" (không đổi trong đời dòng).</summary>
+    public string ShopName { get; }
+
+    /// <summary>Khóa shop dùng khớp với nhãn phiên báo về (không đổi trong đời dòng).</summary>
+    public string ShopLogin { get; }
+
+    /// <summary>Số đơn đã Chuẩn bị hàng của ngày đang lọc.</summary>
+    [ObservableProperty]
+    private int _preparedCount;
+
+    /// <summary>Shop mà phiên đang chạy đã check TỚI (chấm tròn). Giữ nguyên sau khi check xong shop đó, chỉ
+    /// chuyển khi shop kế BẮT ĐẦU.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowDot))]
+    private bool _isCurrent;
+
+    /// <summary>Đang check chính shop này (vòng quay + chữ "đang kiểm tra…" thay cho số).</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowDot))]
+    private bool _isChecking;
+
+    /// <summary>Hiện CHẤM tròn: là shop đang tới NHƯNG không còn quay (đang quay thì vòng quay thế chỗ chấm).</summary>
+    public bool ShowDot => IsCurrent && !IsChecking;
+}

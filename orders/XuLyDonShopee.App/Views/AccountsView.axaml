@@ -120,6 +120,22 @@
             <Setter Property="FontWeight" Value="SemiBold" />
         </Style>
 
+        <!-- Vòng quay của cột tiến độ tab "Kết quả" (shop ĐANG được check): icon "làm mới" xoay liên tục 0→360°.
+             Chỉ gắn cho icon đang hiện (IsVisible=False thì không có gì để chạy) nên lúc rảnh không tốn CPU.
+             Khuôn Style.Animations lấy theo chấm nhấp nháy của thanh trạng thái bên suite (Ellipse.statusDot). -->
+        <Style Selector="PathIcon.spin">
+            <Style.Animations>
+                <Animation Duration="0:0:1" IterationCount="Infinite">
+                    <KeyFrame Cue="0%">
+                        <Setter Property="RotateTransform.Angle" Value="0" />
+                    </KeyFrame>
+                    <KeyFrame Cue="100%">
+                        <Setter Property="RotateTransform.Angle" Value="360" />
+                    </KeyFrame>
+                </Animation>
+            </Style.Animations>
+        </Style>
+
         <!-- (Style panel nhật ký đen: Button.logClear + ListBox.logDark nay ở Styles/Controls.axaml — dùng chung
              với màn Chạy tự động.) -->
 
@@ -593,19 +609,50 @@
                                                Foreground="{StaticResource TextMuted}" VerticalAlignment="Center" />
                                     <DatePicker SelectedDate="{Binding ResultDate}" />
                                 </StackPanel>
-                                <!-- Lưới 2 cột: Shop (mọi shop của tài khoản) | Chuẩn bị hàng (số đơn arrange trong ngày). -->
+                                <!-- Lưới 3 cột: tiến độ (chấm/vòng quay) | Shop (mọi shop của tài khoản) |
+                                     Chuẩn bị hàng (số đơn arrange trong ngày). -->
                                 <DataGrid Classes="proxy" ClipToBounds="True"
                                           ItemsSource="{Binding ResultRows}"
                                           IsReadOnly="True" AutoGenerateColumns="False"
                                           CanUserResizeColumns="True">
                                     <DataGrid.Columns>
+                                        <!-- Cột tiến độ — HẸP, không tiêu đề: chấm xanh = shop phiên đã check TỚI
+                                             (ở lại đó sau khi xong, chỉ chuyển khi shop kế bắt đầu); đang check shop
+                                             nào thì shop đó thay chấm bằng vòng quay cam. -->
+                                        <DataGridTemplateColumn Header="" Width="40" CanUserResize="False">
+                                            <DataGridTemplateColumn.CellTemplate>
+                                                <DataTemplate>
+                                                    <Panel VerticalAlignment="Center" HorizontalAlignment="Center"
+                                                           Width="18" Height="18">
+                                                        <Ellipse Width="8" Height="8"
+                                                                 Fill="{StaticResource SuccessBrush}"
+                                                                 VerticalAlignment="Center" HorizontalAlignment="Center"
+                                                                 IsVisible="{Binding ShowDot}" />
+                                                        <PathIcon Classes="spin" Data="{DynamicResource IconRefresh}"
+                                                                  Width="14" Height="14"
+                                                                  Foreground="{StaticResource AccentBrush}"
+                                                                  VerticalAlignment="Center" HorizontalAlignment="Center"
+                                                                  IsVisible="{Binding IsChecking}" />
+                                                    </Panel>
+                                                </DataTemplate>
+                                            </DataGridTemplateColumn.CellTemplate>
+                                        </DataGridTemplateColumn>
                                         <DataGridTextColumn Header="Shop" Binding="{Binding ShopName}" Width="*" MinWidth="140" />
+                                        <!-- Đang check shop này → chữ "đang kiểm tra…" THAY cho số; check xong thì số
+                                             (đã cập nhật theo từng đơn) hiện lại. -->
                                         <DataGridTemplateColumn Header="Chuẩn bị hàng" Width="Auto">
                                             <DataGridTemplateColumn.CellTemplate>
                                                 <DataTemplate>
-                                                    <TextBlock Text="{Binding PreparedCount}" HorizontalAlignment="Right"
-                                                               VerticalAlignment="Center" Margin="0,0,14,0"
-                                                               FontWeight="SemiBold" MinWidth="90" />
+                                                    <Panel MinWidth="90" Margin="0,0,14,0">
+                                                        <TextBlock Text="{Binding PreparedCount}" HorizontalAlignment="Right"
+                                                                   VerticalAlignment="Center"
+                                                                   FontWeight="SemiBold"
+                                                                   IsVisible="{Binding !IsChecking}" />
+                                                        <TextBlock Text="đang kiểm tra…" HorizontalAlignment="Right"
+                                                                   VerticalAlignment="Center"
+                                                                   FontSize="11" Foreground="{StaticResource TextMuted}"
+                                                                   IsVisible="{Binding IsChecking}" />
+                                                    </Panel>
                                                 </DataTemplate>
                                             </DataGridTemplateColumn.CellTemplate>
                                         </DataGridTemplateColumn>

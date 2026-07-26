@@ -805,7 +805,10 @@ public partial class AccountSession : ObservableObject, IAccountSession
                         // Báo tab "Kết quả" đang mở tự nạp lại → số nhảy NGAY sau mỗi đơn, không phải đợi
                         // đổi tài khoản / đổi ngày mới thấy.
                         _services.RaisePrepareCountChanged(_accountId);
-                    });
+                    },
+                    // Cột tiến độ tab "Kết quả": chấm tròn + vòng quay chạy theo shop mà vòng này đang check tới.
+                    onShopCheckStarted: shopLabel => _services.RaiseShopCheckChanged(_accountId, shopLabel, checking: true),
+                    onShopCheckFinished: shopLabel => _services.RaiseShopCheckChanged(_accountId, shopLabel, checking: false));
                 _bridge = bridge;
                 OrdersBridgeRunResult result;
                 try

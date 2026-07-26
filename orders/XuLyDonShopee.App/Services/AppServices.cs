@@ -144,6 +144,18 @@ public class AppServices
     /// <summary>Phiên gọi ngay sau <c>ResultsRepository.IncrementPrepared</c> để tab "Kết quả" tự cập nhật.</summary>
     public void RaisePrepareCountChanged(long accountId) => PrepareCountChanged?.Invoke(accountId);
 
+    /// <summary>
+    /// Phát khi phiên BẮT ĐẦU / XONG việc check một shop — cột tiến độ của tab "Kết quả" dùng để chuyển chấm tròn
+    /// sang shop đang chạy tới và bật/tắt vòng quay. Tham số: id tài khoản + <b>nhãn shop</b> (ĐÚNG khóa
+    /// <c>prepare_daily</c>: <c>LoginName</c>, rỗng thì <c>ShopName</c>) + đang-check hay không. Y như
+    /// <see cref="OrdersChanged"/>: CỐ Ý bắn từ THREAD NỀN của phiên → người nghe PHẢI marshal về UI thread.
+    /// </summary>
+    public event Action<long, string, bool>? ShopCheckChanged;
+
+    /// <summary>Phiên gọi khi vào/ra một shop để tab "Kết quả" vẽ chấm + vòng quay đúng shop.</summary>
+    public void RaiseShopCheckChanged(long accountId, string shopLabel, bool checking)
+        => ShopCheckChanged?.Invoke(accountId, shopLabel, checking);
+
     /// <summary>Bên ngoài (vd sync shop BigSeller) gọi sau khi Insert tài khoản THÀNH CÔNG để phát <see cref="AccountsChanged"/>.</summary>
     public void RaiseAccountsChanged() => AccountsChanged?.Invoke();
 
