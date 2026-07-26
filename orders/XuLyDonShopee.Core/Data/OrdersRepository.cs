@@ -12,7 +12,10 @@ namespace XuLyDonShopee.Core.Data;
 /// từng được ghi dòng); <see cref="FileUrl"/> = <c>gsheet_file_url</c> đã lưu (null nếu chưa upload phiếu);
 /// <see cref="GsheetDaHuy"/> = trạng thái hủy ĐÃ ĐẨY lần trước (0/1; null nếu chưa đẩy) — để phát hiện
 /// trạng thái hủy thay đổi; <see cref="GsheetDaCoVanDon"/> = lần đẩy gần nhất có gửi mã vận đơn chưa (0/1;
-/// null nếu chưa đẩy) — để tự điền cột B khi vận đơn xuất hiện sau. <see cref="Status"/>/
+/// null nếu chưa đẩy) — để tự điền cột B khi vận đơn xuất hiện sau; <see cref="FinalAmount"/> =
+/// "Số tiền cuối cùng" (<c>final_amount</c>, cột "Ước tính") — SỐ TIỀN đẩy lên sheet (null = chưa mở trang chi
+/// tiết) và <see cref="GsheetDaCoUocTinh"/> = lần đẩy gần nhất có gửi kèm số ước tính chưa (0/1; null nếu chưa
+/// đẩy) — để tự đẩy lại ghi đè đúng số khi ước tính xuất hiện sau. <see cref="Status"/>/
 /// <see cref="StatusDescription"/>/<see cref="CancelReason"/> dùng phân loại hủy (<c>ShopeeShippingNav.LaDonHuy</c>).
 /// <see cref="DaDemDaBan"/> = đã đếm "Đã bán" (<c>sold_counted_at IS NOT NULL</c>) và
 /// <see cref="DaDayHub"/> = đã đẩy lên hub đơn hàng (<c>hub_synced_at IS NOT NULL</c>) — dùng để QUYẾT ĐỊNH có
@@ -27,6 +30,7 @@ public sealed record GsheetPendingOrder(
     string? TrackingNumber,
     string? Sku,
     long? TotalPrice,
+    long? FinalAmount,
     string? Status,
     string? StatusDescription,
     string? CancelReason,
@@ -34,6 +38,7 @@ public sealed record GsheetPendingOrder(
     string? FileUrl,
     long? GsheetDaHuy,
     long? GsheetDaCoVanDon,
+    long? GsheetDaCoUocTinh,
     bool DaDemDaBan,
     bool DaDayHub,
     bool DaDayPhieuHub,
@@ -296,9 +301,9 @@ public class OrdersRepository
         // Lọc theo shop khi có shopId (mô hình nhiều-shop: chỉ đẩy đơn CỦA shop hiện tại, TenShop lấy theo shop đó
         // — không đẩy nhầm tên shop). shopId null → hành vi CŨ (mọi đơn của account).
         var shopFilter = string.IsNullOrEmpty(shopId) ? string.Empty : " AND shop_id = $shopId";
-        cmd.CommandText = @"SELECT order_sn, tracking_number, sku, total_price,
+        cmd.CommandText = @"SELECT order_sn, tracking_number, sku, total_price, final_amount,
        status, status_description, cancel_reason,
-       gsheet_synced_at, gsheet_file_url, gsheet_da_huy, gsheet_da_co_van_don,
+       gsheet_synced_at, gsheet_file_url, gsheet_da_huy, gsheet_da_co_van_don, gsheet_da_co_uoc_tinh,
        sold_counted_at, hub_synced_at, hub_slip_synced_at, gsheet_tab
     FROM orders
     WHERE account_id = $a" + shopFilter + @"
@@ -318,17 +323,19 @@ public class OrdersRepository
                 TrackingNumber: reader.IsDBNull(1) ? null : reader.GetString(1),
                 Sku: reader.IsDBNull(2) ? null : reader.GetString(2),
                 TotalPrice: reader.IsDBNull(3) ? null : reader.GetInt64(3),
-                Status: reader.IsDBNull(4) ? null : reader.GetString(4),
-                StatusDescription: reader.IsDBNull(5) ? null : reader.GetString(5),
-                CancelReason: reader.IsDBNull(6) ? null : reader.GetString(6),
-                DaGhiSheet: !reader.IsDBNull(7),
-                FileUrl: reader.IsDBNull(8) ? null : reader.GetString(8),
-                GsheetDaHuy: reader.IsDBNull(9) ? null : reader.GetInt64(9),
-                GsheetDaCoVanDon: reader.IsDBNull(10) ? null : reader.GetInt64(10),
-                DaDemDaBan: !reader.IsDBNull(11),
-                DaDayHub: !reader.IsDBNull(12),
-                DaDayPhieuHub: !reader.IsDBNull(13),
-                GsheetTab: reader.IsDBNull(14) ? null : reader.GetString(14)));
+                FinalAmount: reader.IsDBNull(4) ? null : reader.GetInt64(4),
+                Status: reader.IsDBNull(5) ? null : reader.GetString(5),
+                StatusDescription: reader.IsDBNull(6) ? null : reader.GetString(6),
+                CancelReason: reader.IsDBNull(7) ? null : reader.GetString(7),
+                DaGhiSheet: !reader.IsDBNull(8),
+                FileUrl: reader.IsDBNull(9) ? null : reader.GetString(9),
+                GsheetDaHuy: reader.IsDBNull(10) ? null : reader.GetInt64(10),
+                GsheetDaCoVanDon: reader.IsDBNull(11) ? null : reader.GetInt64(11),
+                GsheetDaCoUocTinh: reader.IsDBNull(12) ? null : reader.GetInt64(12),
+                DaDemDaBan: !reader.IsDBNull(13),
+                DaDayHub: !reader.IsDBNull(14),
+                DaDayPhieuHub: !reader.IsDBNull(15),
+                GsheetTab: reader.IsDBNull(16) ? null : reader.GetString(16)));
         }
         return list;
     }
@@ -337,13 +344,14 @@ public class OrdersRepository
     /// Đánh dấu một đơn ĐÃ ghi lên Google Sheet. <c>gsheet_synced_at</c> dùng <c>COALESCE(cũ, $at)</c> —
     /// GIỮ thời điểm ghi LẦN ĐẦU, không đè khi gọi lại để bổ sung file. <c>gsheet_file_url</c> dùng
     /// <c>COALESCE($url, cũ)</c> — <paramref name="fileUrl"/> null KHÔNG xóa link đã có (chỉ điền khi có link
-    /// mới). <c>gsheet_da_huy</c> = <paramref name="daHuy"/> và <c>gsheet_da_co_van_don</c> =
-    /// <paramref name="coVanDon"/> GHI ĐÈ LUÔN (là trạng thái VỪA đẩy — để lần sau phát hiện đổi trạng thái hủy /
-    /// vận đơn vừa xuất hiện). <c>gsheet_tab</c> dùng <c>COALESCE(cũ, $tab)</c> — GIỮ tab đã ghi LẦN ĐẦU, KHÔNG
+    /// mới). <c>gsheet_da_huy</c> = <paramref name="daHuy"/>, <c>gsheet_da_co_van_don</c> =
+    /// <paramref name="coVanDon"/> và <c>gsheet_da_co_uoc_tinh</c> = <paramref name="coUocTinh"/> GHI ĐÈ LUÔN
+    /// (là trạng thái VỪA đẩy — để lần sau phát hiện đổi trạng thái hủy / vận đơn hoặc số ước tính vừa xuất
+    /// hiện). <c>gsheet_tab</c> dùng <c>COALESCE(cũ, $tab)</c> — GIỮ tab đã ghi LẦN ĐẦU, KHÔNG
     /// đổi khi đẩy lại (đơn cập nhật luôn về đúng tab cũ dù tháng/override hiện tại đã khác). Khóa theo
     /// <c>(account_id, order_sn)</c>.
     /// </summary>
-    public void MarkGsheetSynced(long accountId, string orderSn, string? fileUrl, bool daHuy, bool coVanDon, string tab, DateTime at)
+    public void MarkGsheetSynced(long accountId, string orderSn, string? fileUrl, bool daHuy, bool coVanDon, bool coUocTinh, string tab, DateTime at)
     {
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
@@ -352,12 +360,14 @@ public class OrdersRepository
     gsheet_file_url = COALESCE($url, gsheet_file_url),
     gsheet_da_huy = $daHuy,
     gsheet_da_co_van_don = $co,
+    gsheet_da_co_uoc_tinh = $coUt,
     gsheet_tab = COALESCE(gsheet_tab, $tab)
     WHERE account_id = $a AND order_sn = $sn;";
         cmd.Parameters.AddWithValue("$at", DbSerialization.FormatDate(at));
         cmd.Parameters.AddWithValue("$url", (object?)fileUrl ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$daHuy", daHuy ? 1 : 0);
         cmd.Parameters.AddWithValue("$co", coVanDon ? 1 : 0);
+        cmd.Parameters.AddWithValue("$coUt", coUocTinh ? 1 : 0);
         cmd.Parameters.AddWithValue("$tab", tab);
         cmd.Parameters.AddWithValue("$a", accountId);
         cmd.Parameters.AddWithValue("$sn", orderSn);

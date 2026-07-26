@@ -385,6 +385,34 @@ CREATE TABLE orders (
         Assert.Single(pending); // đơn cũ SNGS vẫn trả dù không có vận đơn
     }
 
+    // ==== Migration cột gsheet_da_co_uoc_tinh cho bảng orders (đẩy lại sheet khi số "Ước tính" xuất hiện sau) ====
+
+    [Fact]
+    public void KhoiTao_DbCu_Orders_ThieuGsheetDaCoUocTinh_DuocThemCot_KhongMatDuLieu_DonCuDuDieuKienDayLai()
+    {
+        using var temp = new TempDatabase();
+        CreateOldOrdersSchemaWithRow(temp.Path, accountId: 51, orderSn: "SNUT");
+
+        // Trước migration: schema orders cũ chưa có cột gsheet_da_co_uoc_tinh.
+        Assert.False(HasColumn(temp.Path, "orders", "gsheet_da_co_uoc_tinh"));
+
+        // Khởi tạo Database mới trỏ cùng file → Initialize() chạy migration ALTER TABLE.
+        _ = new Database(temp.Path);
+
+        // Sau migration: đã có cột; đơn cũ CÒN NGUYÊN; cột mặc định NULL (không backfill).
+        Assert.True(HasColumn(temp.Path, "orders", "gsheet_da_co_uoc_tinh"));
+        Assert.Null(ReadOrderColumn(temp.Path, "SNUT", "gsheet_da_co_uoc_tinh"));
+
+        var repo = new OrdersRepository(new Database(temp.Path));
+        var row = Assert.Single(repo.Query(accountId: 51));
+        Assert.Equal("SNUT", row.OrderSn);
+        Assert.Equal(166500, row.TotalPrice);
+
+        // Đơn cũ có cờ NULL (!= 1) → khi ước tính xuất hiện sẽ được đẩy LẠI một lần để điền đúng số tiền.
+        var p = Assert.Single(repo.GetForGsheetPush(51));
+        Assert.Null(p.GsheetDaCoUocTinh);
+    }
+
     // ==== Migration cột hub_synced_at cho bảng orders (đẩy đơn lên hub) ====
 
     [Fact]

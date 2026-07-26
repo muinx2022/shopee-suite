@@ -870,10 +870,11 @@ public partial class AccountSession : ObservableObject, IAccountSession
                 // Gộp rows theo tab đích (PushAsync nhận MỘT tab/lượt). Thứ tự đơn trong mỗi nhóm giữ nguyên
                 // (List theo thứ tự duyệt pending). Thường 1–2 nhóm (tab tháng hiện tại + tab đã nhớ của đơn cũ).
                 var rowsByTab = new Dictionary<string, List<GsheetOrderRow>>(StringComparer.Ordinal);
-                // Nhớ trạng thái hủy + đã-có-vận-đơn VỪA tính của từng đơn được gửi → dùng cho MarkGsheetSynced
-                // (ghi cờ gsheet_da_huy / gsheet_da_co_van_don).
+                // Nhớ trạng thái hủy + đã-có-vận-đơn + đã-có-ước-tính VỪA tính của từng đơn được gửi → dùng cho
+                // MarkGsheetSynced (ghi cờ gsheet_da_huy / gsheet_da_co_van_don / gsheet_da_co_uoc_tinh).
                 var daHuyByMaDon = new Dictionary<string, bool>(StringComparer.Ordinal);
                 var coVanDonByMaDon = new Dictionary<string, bool>(StringComparer.Ordinal);
+                var coUocTinhByMaDon = new Dictionary<string, bool>(StringComparer.Ordinal);
                 foreach (var p in pending)
                 {
                     var daHuy = ShopeeShippingNav.LaDonHuy(p.Status, p.StatusDescription, p.CancelReason);
@@ -906,11 +907,15 @@ public partial class AccountSession : ObservableObject, IAccountSession
                     // CHỌN GỬI khi thỏa ÍT NHẤT một điều kiện: (a) đơn mới với sheet; (b) có file phiếu để bổ sung
                     // link (fileBase64 chỉ set khi FileUrl null); (c) trạng thái hủy đổi so với lần đẩy trước (hoặc
                     // chưa từng đẩy) → sheet cần đổi màu; (d) vận đơn VỪA xuất hiện (đã ghi dòng lúc chưa có vận đơn,
-                    // giờ có) → gửi lại để điền cột B. Không thỏa → bỏ qua (đã ghi đủ, không đẩy trùng) → settled.
+                    // giờ có) → gửi lại để điền cột B; (e) số ước tính VỪA xuất hiện (đã ghi dòng lúc chưa mở trang
+                    // chi tiết nên ô tiền còn TRỐNG, giờ có ước tính) → gửi lại để điền cột tiền.
+                    // Không thỏa → bỏ qua (đã ghi đủ, không đẩy trùng) → settled.
                     var coFileBoSung = fileBase64 is not null;
                     var huyDoi = p.GsheetDaHuy is null || daHuy != (p.GsheetDaHuy == 1);
                     var vanDonMoi = coVanDon && p.GsheetDaCoVanDon != 1;
-                    if (!(!p.DaGhiSheet || coFileBoSung || huyDoi || vanDonMoi))
+                    var coUocTinh = p.FinalAmount is not null;
+                    var uocTinhMoi = coUocTinh && p.GsheetDaCoUocTinh != 1;
+                    if (!(!p.DaGhiSheet || coFileBoSung || huyDoi || vanDonMoi || uocTinhMoi))
                     {
                         settled.Add(p.OrderSn);
                         continue;
@@ -918,6 +923,7 @@ public partial class AccountSession : ObservableObject, IAccountSession
 
                     daHuyByMaDon[p.OrderSn] = daHuy;
                     coVanDonByMaDon[p.OrderSn] = coVanDon;
+                    coUocTinhByMaDon[p.OrderSn] = coUocTinh;
 
                     // Tab đích: tab đã nhớ của đơn (đẩy lại về đúng chỗ cũ) hoặc tab mặc định cho đơn mới.
                     var tab = string.IsNullOrEmpty(p.GsheetTab) ? defaultTab : p.GsheetTab;
@@ -930,7 +936,9 @@ public partial class AccountSession : ObservableObject, IAccountSession
                         MaDon: p.OrderSn,
                         MaVanDon: p.TrackingNumber,
                         TenShop: tenShop,
-                        DoanhThu: p.TotalPrice,
+                        // Tiền bán = "Ước tính" (số tiền cuối cùng đọc ở trang chi tiết); chưa có thì để TRỐNG
+                        // (đơn hủy → tổng tiền, vì đơn hủy không bao giờ có ước tính) — xem GsheetMoney.Chon.
+                        DoanhThu: GsheetMoney.Chon(p.FinalAmount, p.TotalPrice, daHuy),
                         Ngay: ngay,
                         Sku: p.Sku,
                         FileName: fileName,
@@ -963,7 +971,8 @@ public partial class AccountSession : ObservableObject, IAccountSession
                                 {
                                     var daHuy = daHuyByMaDon.TryGetValue(r.MaDon, out var dh) && dh;
                                     var coVanDon = coVanDonByMaDon.TryGetValue(r.MaDon, out var cv) && cv;
-                                    _services.Orders.MarkGsheetSynced(_accountId, r.MaDon, r.FileUrl, daHuy, coVanDon, tabName, DateTime.UtcNow);
+                                    var coUocTinh = coUocTinhByMaDon.TryGetValue(r.MaDon, out var cu) && cu;
+                                    _services.Orders.MarkGsheetSynced(_accountId, r.MaDon, r.FileUrl, daHuy, coVanDon, coUocTinh, tabName, DateTime.UtcNow);
                                     settled.Add(r.MaDon); // gửi thành công → settled (đủ điều kiện dọn nếu kết thúc)
                                     if (r.Added) { added++; } else { updated++; }
                                     if (!string.IsNullOrEmpty(r.FileUrl)) { withFile++; }

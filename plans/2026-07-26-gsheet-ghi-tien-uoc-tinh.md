@@ -1,7 +1,7 @@
 # Plan: GSheet ghi tiền bán = "Ước tính" (số tiền cuối cùng) thay vì Tổng tiền
 
 - **Ngày:** 2026-07-26
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành (ngữ nghĩa Bước 3 ĐÃ ĐỔI khi thực thi — xem báo cáo)
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-dev`) — CÂY CHÍNH
 
 ## 1. Bối cảnh & mục tiêu
@@ -88,4 +88,22 @@ NULL = chưa từng đẩy. Dùng để đẩy lại điền số khi ước tí
 
 ## Báo cáo thực thi (Opus điền sau khi xong)
 
-<chưa thực thi>
+Hoàn thành. Build 0 error, **951 test xanh** (+7 test mới).
+
+**ĐỔI NGỮ NGHĨA so với plan (Fable quyết khi review — plan gốc SAI, đừng theo mục 3 Bước 3 nữa):**
+Plan ghi "chưa có ước tính → tạm ghi tổng tiền rồi ghi đè sau". Executor cảnh báo hợp đồng Apps Script có thể là
+**"chỉ ghi ô đang TRỐNG"** (`GoogleSheetSyncService.cs:9-14, :185-186`) — nếu đúng vậy thì ghi tạm tổng tiền sẽ
+**chiếm chỗ ô tiền vĩnh viễn**, số ước tính không đè được ⇒ hỏng đúng mục tiêu. Code Apps Script nằm trên tài
+khoản Google của user, KHÔNG kiểm chứng được.
+
+⇒ Chọn phương án đúng dưới **CẢ HAI** cách hiểu, gom vào hàm thuần `GsheetMoney.Chon(finalAmount, totalPrice, daHuy)`:
+- có ước tính → ghi ước tính;
+- chưa có + đơn THƯỜNG → **null ⇒ field bị bỏ khỏi JSON ⇒ ô tiền để TRỐNG**, lượt sau ước tính về sẽ điền
+  (test sẵn có `TaoJsonBody_...BoFieldNullKhac` xác nhận null bị bỏ, script không chạm ô);
+- chưa có + đơn HỦY → tổng tiền (đơn hủy không bao giờ có ước tính nên không sợ chiếm chỗ; giữ hành vi cũ).
+
+Đánh đổi: đơn thường chưa lấy được ước tính sẽ **trống ô tiền ~1 lượt sync**. Thực tế log cho thấy ước tính
+thường lấy ngay trong cùng lượt trước khi đẩy sheet nên hiếm khi trống.
+
+Cơ chế đẩy lại: cột `gsheet_da_co_uoc_tinh` + điều kiện `uocTinhMoi` (khuôn y `gsheet_da_co_van_don`/`vanDonMoi`).
+Đơn cũ có cột NULL → đẩy lại ĐÚNG MỘT LẦN để điền số (máy này đếm được: 1 dòng).

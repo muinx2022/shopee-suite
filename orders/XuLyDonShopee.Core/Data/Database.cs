@@ -111,6 +111,7 @@ CREATE TABLE IF NOT EXISTS orders (
     gsheet_file_url    TEXT,
     gsheet_da_huy      INTEGER,
     gsheet_da_co_van_don INTEGER,
+    gsheet_da_co_uoc_tinh INTEGER,
     gsheet_tab         TEXT,
     hub_synced_at      TEXT,
     hub_slip_synced_at TEXT,
@@ -174,12 +175,14 @@ CREATE TABLE IF NOT EXISTS prepare_daily (
         // Cờ chống đẩy TRÙNG lên Google Sheet: gsheet_synced_at = thời điểm đã ghi đơn lên sheet;
         // gsheet_file_url = link file phiếu đã upload (cột C); gsheet_da_huy = trạng thái hủy ĐÃ ĐẨY lần
         // trước (0/1; NULL = chưa đẩy) để đổi màu khi trạng thái hủy thay đổi; gsheet_da_co_van_don = lần đẩy
-        // gần nhất có gửi mã vận đơn chưa (0/1; NULL = chưa đẩy) để tự điền cột B khi vận đơn xuất hiện sau.
-        // Thêm cho DB CŨ.
+        // gần nhất có gửi mã vận đơn chưa (0/1; NULL = chưa đẩy) để tự điền cột B khi vận đơn xuất hiện sau;
+        // gsheet_da_co_uoc_tinh = lần đẩy sheet gần nhất ĐÃ gửi kèm số ước tính (final_amount) chưa (0/1;
+        // NULL = chưa từng đẩy) để tự đẩy lại điền ĐÚNG số tiền khi ước tính xuất hiện sau. Thêm cho DB CŨ.
         EnsureColumn(conn, "orders", "gsheet_synced_at", "TEXT");
         EnsureColumn(conn, "orders", "gsheet_file_url", "TEXT");
         EnsureColumn(conn, "orders", "gsheet_da_huy", "INTEGER");
         EnsureColumn(conn, "orders", "gsheet_da_co_van_don", "INTEGER");
+        EnsureColumn(conn, "orders", "gsheet_da_co_uoc_tinh", "INTEGER");
 
         // Tab (sheet) đã ghi LẦN ĐẦU của đơn: từ bản "tab theo tháng" trở đi, tab đích tự tính "Tháng MM-yyyy"
         // (hoặc override ở Cài đặt). Nhớ tab lần đầu để đơn cũ CẬP NHẬT lại (bổ sung vận đơn/phiếu/đổi màu hủy)
