@@ -8,8 +8,9 @@
     <StackPanel Margin="20" Spacing="18">
         <TextBlock x:Name="MessageText" TextWrapping="Wrap" FontSize="14" />
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
-            <Button x:Name="OkButton" Content="Đồng ý" Click="OnOk"
-                    Background="#1976D2" Foreground="White" />
+            <!-- Nút chính: dáng mặc định của theme, KHÔNG tô nền (luật nút 2026-07-26); class .primary chỉ để
+                 icon (nếu có) lên màu cam. Trước đây hard-code nền xanh dương #1976D2 — lạc lõng giữa app cam. -->
+            <Button x:Name="OkButton" Classes="primary" Content="Đồng ý" Click="OnOk" />
             <Button x:Name="CancelButton" Content="Hủy" Click="OnCancel" />
         </StackPanel>
     </StackPanel>

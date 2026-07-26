@@ -28,6 +28,10 @@
         <SolidColorBrush x:Key="RowHoverBrush" Color="#FFFAF8" />
         <SolidColorBrush x:Key="SurfaceHoverBrush" Color="#F6F3F0" />
         <SolidColorBrush x:Key="InputHoverBorderBrush" Color="#CFC8C2" />
+        <!-- Phản hồi rê chuột / bấm của NÚT — cố ý RẤT nhẹ: nút không bao giờ được "tô nền" (luật nút mới),
+             hover chỉ để biết con trỏ đang ở đâu. Viền đậm lên dùng InputHoverBorderBrush ở trên. -->
+        <SolidColorBrush x:Key="ButtonHoverBrush" Color="#FAF8F6" />
+        <SolidColorBrush x:Key="ButtonPressedBrush" Color="#F2EFEC" />
 
         <!-- Thương hiệu dạng "tint": chữ cam đậm trên nền sáng + 2 nấc nền/viền cam nhạt (nút phụ tông cam,
              dòng đang chọn, nút ribbon hover/active). -->
@@ -127,8 +131,9 @@
         <sys:Double x:Key="DataGridRowSelectedUnfocusedBackgroundOpacity">0.11</sys:Double>
         <sys:Double x:Key="DataGridRowSelectedHoveredUnfocusedBackgroundOpacity">0.17</sys:Double>
 
-        <!-- Button PHẲNG bo góc (thay template Fluent) = NÚT PHỤ của spec: nền trắng, viền ấm #E2DDD8, cao 30,
-             chữ 12 màu body, hover nền be nhạt. Các variant (primary/success/danger) đè màu ở phần class bên dưới. -->
+        <!-- Button PHẲNG bo góc (thay template Fluent) = DÁNG DUY NHẤT của MỌI nút trong app: nền trắng,
+             viền ấm #E2DDD8 LUÔN THẤY RÕ, cao 30, bo 5, chữ 12 màu body. Các class (primary/success/danger/
+             destructive) KHÔNG đổi dáng — chỉ đổi MÀU ICON (xem phần BUTTON variants bên dưới). -->
         <ControlTheme x:Key="{x:Type Button}" TargetType="Button">
             <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
             <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
@@ -156,11 +161,10 @@
                 </ControlTemplate>
             </Setter>
             <Style Selector="^:pointerover /template/ Border#PART_bd">
-                <Setter Property="Background" Value="{DynamicResource SurfaceHoverBrush}" />
+                <Setter Property="Background" Value="{DynamicResource ButtonHoverBrush}" />
             </Style>
             <Style Selector="^:pressed /template/ Border#PART_bd">
-                <Setter Property="Background" Value="{DynamicResource SurfaceHoverBrush}" />
-                <Setter Property="Opacity" Value="0.9" />
+                <Setter Property="Background" Value="{DynamicResource ButtonPressedBrush}" />
             </Style>
             <Style Selector="^:disabled">
                 <Setter Property="Opacity" Value="0.45" />
@@ -196,46 +200,58 @@
         <Setter Property="FontFamily" Value="{DynamicResource EmojiFont}" />
     </Style>
 
-    <!-- ══════════ BUTTON variants (class) ══════════ -->
-    <!-- .primary = NÚT CHÍNH của spec: nền CAM ĐẶC + chữ trắng (không còn outline), hover cam đậm hơn. -->
-    <Style Selector="Button.primary">
-        <Setter Property="Background" Value="{DynamicResource AccentBrush}" />
-        <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
-        <Setter Property="Foreground" Value="{DynamicResource TextOnAccentBrush}" />
-        <Setter Property="FontWeight" Value="SemiBold" />
+    <!-- ══════════ BUTTON — MỘT DÁNG DUY NHẤT, MÀU NGỮ NGHĨA CHỈ Ở ICON ══════════ -->
+    <!-- Luật nút (người dùng chốt 2026-07-26, GHI ĐÈ spec handoff "primary = nền cam đặc"):
+         "không dùng bg cho button, chỉ dùng icon màu, button dùng mặc định".
+         → Mọi nút chung một dáng (nền trắng · viền #E2DDD8 luôn thấy rõ · bo 5 · cao 30 · chữ #423C38);
+           class chỉ còn nhiệm vụ ĐẶT MÀU ICON. Ngoại lệ duy nhất: nút .ribbon (người dùng đã duyệt).
+         → KHÔNG thêm setter Background/Foreground vào các class dưới đây; nút mất viền là SAI luật. -->
+
+    <!-- Rê chuột / bấm: viền đậm lên 1 nấc (đặt ở CẤP CONTROL để TemplateBinding chảy xuống Border#PART_bd —
+         nếu set thẳng lên Border#PART_bd sẽ chặn TemplateBinding và nút .ribbon mất viền tint cam của nó). -->
+    <Style Selector="Button:pointerover">
+        <Setter Property="BorderBrush" Value="{DynamicResource InputHoverBorderBrush}" />
     </Style>
-    <Style Selector="Button.primary:pointerover /template/ Border#PART_bd">
-        <Setter Property="Background" Value="{DynamicResource AccentHoverBrush}" />
-        <Setter Property="BorderBrush" Value="{DynamicResource AccentHoverBrush}" />
-    </Style>
-    <Style Selector="Button.primary:pressed /template/ Border#PART_bd">
-        <Setter Property="Background" Value="{DynamicResource AccentPressedBrush}" />
-        <Setter Property="BorderBrush" Value="{DynamicResource AccentPressedBrush}" />
-        <Setter Property="Opacity" Value="1" />
+    <Style Selector="Button:pressed">
+        <Setter Property="BorderBrush" Value="{DynamicResource InputHoverBorderBrush}" />
     </Style>
 
-    <!-- .success = outline xanh trên nền thẻ, hover nền xanh rất nhạt (spec không có nút chính màu xanh). -->
-    <Style Selector="Button.success">
+    <!-- Icon trong nút: cỡ 16 (vừa với nút cao 30), mặc định XÁM trung tính. Khai TRƯỚC các class màu bên
+         dưới để class thắng (Avalonia: rule khai báo SAU thắng khi cùng độ đặc hiệu). Chỗ dùng KHÔNG đặt
+         Foreground tại chỗ — để class quyết, nút đổi vai trò thì icon đổi màu theo. -->
+    <Style Selector="Button PathIcon">
+        <Setter Property="Width" Value="16" />
+        <Setter Property="Height" Value="16" />
+        <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+    </Style>
+
+    <!-- .primary = HÀNH ĐỘNG CHÍNH của màn → icon CAM (chữ vẫn màu thường). -->
+    <Style Selector="Button.primary PathIcon">
+        <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+    </Style>
+
+    <!-- .success = xác nhận / hoàn tất → icon XANH. -->
+    <Style Selector="Button.success PathIcon">
         <Setter Property="Foreground" Value="{DynamicResource SuccessBrush}" />
-        <Setter Property="BorderBrush" Value="{DynamicResource SuccessBrush}" />
-        <Setter Property="FontWeight" Value="SemiBold" />
-    </Style>
-    <Style Selector="Button.success:pointerover /template/ Border#PART_bd">
-        <Setter Property="Background" Value="{DynamicResource SuccessBgBrush}" />
     </Style>
 
-    <!-- .danger = kiểu nút "Dừng tất cả" của spec: nền cam nhạt, viền cam nhạt, chữ cam đậm; hover đậm 1 nấc. -->
-    <Style Selector="Button.danger">
-        <Setter Property="Background" Value="{DynamicResource BrandTintBrush}" />
-        <Setter Property="BorderBrush" Value="{DynamicResource BrandTintBorderStrongBrush}" />
-        <Setter Property="Foreground" Value="{DynamicResource BrandTextBrush}" />
-        <Setter Property="FontWeight" Value="SemiBold" />
+    <!-- .danger = nguy hiểm (Dừng · Hủy bỏ) và .destructive = XÓA THẬT (xóa dữ liệu/tài khoản) → icon ĐỎ.
+         Hai tên cùng một biểu hiện: giữ .danger vì nhiều view đang dùng, .destructive là tên chuẩn cho 4b/4c. -->
+    <Style Selector="Button.danger PathIcon">
+        <Setter Property="Foreground" Value="{DynamicResource DangerBrush}" />
     </Style>
-    <Style Selector="Button.danger:pointerover /template/ Border#PART_bd">
-        <Setter Property="Background" Value="{DynamicResource BrandTintStrongBrush}" />
+    <Style Selector="Button.destructive PathIcon">
+        <Setter Property="Foreground" Value="{DynamicResource DangerBrush}" />
     </Style>
-    <Style Selector="Button.danger:pressed /template/ Border#PART_bd">
-        <Setter Property="Background" Value="{DynamicResource BrandTintStrongBrush}" />
+
+    <!-- .iconOnly = nút vuông chỉ có icon (bỏ chọn, mở thư mục, xóa dòng…): 30×30, bo 4 theo spec nút nhỏ.
+         Vẫn giữ nguyên nền trắng + viền của dáng chung — KHÔNG phải nút "ghost" không viền. -->
+    <Style Selector="Button.iconOnly">
+        <Setter Property="Width" Value="30" />
+        <Setter Property="Height" Value="30" />
+        <Setter Property="MinHeight" Value="30" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="CornerRadius" Value="4" />
     </Style>
 
     <!-- Thẻ bấm được (màn Welcome): bo 8 như thẻ, canh trái, hover nền cam rất nhạt + viền accent. -->
@@ -525,16 +541,18 @@
         <Setter Property="VerticalContentAlignment" Value="Center" />
         <Setter Property="HorizontalContentAlignment" Value="Center" />
     </Style>
-    <!-- Nhãn nút = chữ thân 11.5; glyph/icon = CAM cỡ 21 (khai SAU nhãn để thắng setter chung). -->
+    <!-- Nhãn nút = chữ thân 11.5; glyph/icon = ĐEN ẤM cỡ 21 (khai SAU nhãn để thắng setter chung).
+         Người dùng chốt: icon ribbon để ĐEN như trước, CHỈ khi active mới chuyển sang cam — hover KHÔNG
+         đổi màu icon (hover chỉ đổi nền tint + viền). -->
     <Style Selector="Button.ribbon TextBlock">
         <Setter Property="Foreground" Value="{DynamicResource TextBodyBrush}" />
     </Style>
     <Style Selector="Button.ribbon TextBlock.glyph">
         <Setter Property="FontSize" Value="21" />
-        <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
     </Style>
     <Style Selector="Button.ribbon PathIcon">
-        <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
     </Style>
     <!-- Hover theo spec: nền cam RẤT nhạt + viền cam nhạt. -->
     <Style Selector="Button.ribbon:pointerover">
@@ -554,7 +572,12 @@
     <Style Selector="Button.ribbon.active:pointerover /template/ Border#PART_bd">
         <Setter Property="Background" Value="{DynamicResource BrandTintStrongBrush}" />
     </Style>
+    <!-- Active: nhãn + glyph chuỗi CAM (rule TextBlock này phủ cả .glyph vì khai sau) … -->
     <Style Selector="Button.ribbon.active TextBlock">
+        <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+    </Style>
+    <!-- … và icon vector (nút điều hướng màn) cũng CAM. -->
+    <Style Selector="Button.ribbon.active PathIcon">
         <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
     </Style>
 

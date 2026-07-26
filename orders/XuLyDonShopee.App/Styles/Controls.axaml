@@ -2,123 +2,77 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
     <!-- =========================================================
-         1. NÚT ACCENT (cam)
+         1. HỆ NÚT — MỘT DÁNG DUY NHẤT, MÀU NGỮ NGHĨA CHỈ Ở ICON
+         =========================================================
+         Luật nút (người dùng chốt 2026-07-26, ghi đè spec handoff): "không dùng bg cho button, chỉ dùng icon
+         màu, button dùng mặc định; chỗ thì có border chỗ thì không — thống nhất button dùng mặc định".
+
+         DÁNG CHUNG không khai lại ở đây: lấy thẳng ControlTheme Button của suite (suite/Themes/Theme.axaml,
+         nạp ở cấp Application nên áp cho cả module này) — nền trắng · viền #E2DDD8 LUÔN THẤY RÕ · bo 5 ·
+         cao 30 · chữ #423C38 · hover nền #FAF8F6 + viền #CFC8C2 · pressed nền #F2EFEC.
+         ⇒ Các class dưới đây KHÔNG còn setter nền/viền/chữ nào; chỉ còn KÍCH THƯỚC riêng và MÀU ICON.
+
+         Vì sao phải khai lại các class của suite (.primary/.success/.danger…) tại đây: file này include ở cấp
+         UserControl nên style của nó THẮNG theme suite trong phạm vi module — nếu chỉ khai "Button PathIcon"
+         (xám) thì nó sẽ đè luôn rule màu icon của suite. Khai đủ bộ để 2 module cùng một từ vựng class.
+
+         Ngoại lệ có chủ ý (KHÔNG áp luật này): .ghostIcon (nút con mắt NẰM TRONG ô nhập, mục 5) và
+         .logClear (nút trên panel nhật ký NỀN ĐEN, mục 15).
          ========================================================= -->
-    <Style Selector="Button.accent">
-        <Setter Property="Foreground" Value="White" />
-        <Setter Property="FontWeight" Value="SemiBold" />
-        <Setter Property="FontSize" Value="13.5" />
-        <Setter Property="Height" Value="38" />
-        <Setter Property="Padding" Value="16,0" />
-        <Setter Property="BorderThickness" Value="0" />
-        <Setter Property="HorizontalContentAlignment" Value="Center" />
-        <Setter Property="VerticalContentAlignment" Value="Center" />
-        <Setter Property="Cursor" Value="Hand" />
-    </Style>
-    <Style Selector="Button.accent /template/ ContentPresenter#PART_ContentPresenter">
-        <Setter Property="Background" Value="{StaticResource AccentBrush}" />
-        <Setter Property="CornerRadius" Value="4" />
-    </Style>
-    <Style Selector="Button.accent:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-        <Setter Property="Background" Value="{StaticResource AccentHoverBrush}" />
-    </Style>
-    <Style Selector="Button.accent:pressed /template/ ContentPresenter#PART_ContentPresenter">
-        <Setter Property="Background" Value="{StaticResource AccentHoverBrush}" />
-    </Style>
-    <Style Selector="Button.accent:pointerover">
-        <Setter Property="Foreground" Value="White" />
-    </Style>
-    <Style Selector="Button.accent:pressed">
-        <Setter Property="Foreground" Value="White" />
+
+    <!-- Icon trong nút: cỡ 16, mặc định xám trung tính. Khai TRƯỚC các class màu để class thắng
+         (Avalonia: cùng độ đặc hiệu thì rule khai báo SAU thắng). -->
+    <Style Selector="Button PathIcon">
+        <Setter Property="Width" Value="16" />
+        <Setter Property="Height" Value="16" />
+        <Setter Property="Foreground" Value="{StaticResource TextMuted}" />
     </Style>
 
-    <!-- =========================================================
-         2. NÚT PHỤ (trắng, viền mờ)
-         ========================================================= -->
-    <Style Selector="Button.secondary">
-        <Setter Property="Foreground" Value="{StaticResource TextSecondary}" />
-        <Setter Property="FontWeight" Value="SemiBold" />
-        <Setter Property="FontSize" Value="13" />
-        <Setter Property="Height" Value="38" />
-        <Setter Property="Padding" Value="16,0" />
-        <Setter Property="BorderThickness" Value="1" />
-        <Setter Property="HorizontalContentAlignment" Value="Center" />
-        <Setter Property="VerticalContentAlignment" Value="Center" />
-        <Setter Property="Cursor" Value="Hand" />
-    </Style>
-    <Style Selector="Button.secondary /template/ ContentPresenter#PART_ContentPresenter">
-        <Setter Property="Background" Value="{StaticResource CardBg}" />
-        <Setter Property="BorderBrush" Value="{StaticResource Border014}" />
-        <Setter Property="BorderThickness" Value="1" />
-        <Setter Property="CornerRadius" Value="4" />
-    </Style>
-    <Style Selector="Button.secondary:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-        <Setter Property="Background" Value="#F5F5F5" />
-        <Setter Property="BorderBrush" Value="{StaticResource Border014}" />
-    </Style>
-    <Style Selector="Button.secondary:pressed /template/ ContentPresenter#PART_ContentPresenter">
-        <Setter Property="Background" Value="#EFEFEF" />
-        <Setter Property="BorderBrush" Value="{StaticResource Border014}" />
-    </Style>
-    <Style Selector="Button.secondary:pointerover">
-        <Setter Property="Foreground" Value="{StaticResource TextSecondary}" />
-    </Style>
-
-    <!-- =========================================================
-         3. NÚT VIỀN CAM (outline)
-         ========================================================= -->
-    <Style Selector="Button.accentOutline">
+    <!-- Hành động CHÍNH → icon CAM. .accent (tên của module này), .accentOutline (nay gộp cùng dáng mặc định,
+         không còn viền cam riêng) và .primary (tên của suite) cùng một biểu hiện. -->
+    <Style Selector="Button.accent PathIcon">
         <Setter Property="Foreground" Value="{StaticResource AccentBrush}" />
-        <Setter Property="FontWeight" Value="SemiBold" />
-        <Setter Property="FontSize" Value="13.5" />
-        <Setter Property="Height" Value="38" />
-        <Setter Property="Padding" Value="18,0" />
-        <Setter Property="BorderThickness" Value="1" />
-        <Setter Property="HorizontalContentAlignment" Value="Center" />
-        <Setter Property="VerticalContentAlignment" Value="Center" />
-        <Setter Property="Cursor" Value="Hand" />
     </Style>
-    <Style Selector="Button.accentOutline /template/ ContentPresenter#PART_ContentPresenter">
-        <Setter Property="Background" Value="{StaticResource CardBg}" />
-        <Setter Property="BorderBrush" Value="{StaticResource AccentBorderSoft}" />
-        <Setter Property="BorderThickness" Value="1" />
-        <Setter Property="CornerRadius" Value="4" />
+    <Style Selector="Button.accentOutline PathIcon">
+        <Setter Property="Foreground" Value="{StaticResource AccentBrush}" />
     </Style>
-    <Style Selector="Button.accentOutline:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-        <Setter Property="Background" Value="{StaticResource AccentSoft2}" />
-        <Setter Property="BorderBrush" Value="{StaticResource AccentBorderSoft}" />
-    </Style>
-    <Style Selector="Button.accentOutline:pointerover">
+    <Style Selector="Button.primary PathIcon">
         <Setter Property="Foreground" Value="{StaticResource AccentBrush}" />
     </Style>
 
-    <!-- =========================================================
-         4. NÚT XÓA VUÔNG (icon danger)
-         ========================================================= -->
-    <Style Selector="Button.iconDanger">
-        <Setter Property="Width" Value="38" />
-        <Setter Property="Height" Value="38" />
+    <!-- .secondary = ĐÚNG dáng mặc định, icon xám → không cần setter nào. Giữ tên vì nhiều view đang dùng. -->
+
+    <!-- Thành công / xác nhận → icon XANH. -->
+    <Style Selector="Button.success PathIcon">
+        <Setter Property="Foreground" Value="{StaticResource SuccessBrush}" />
+    </Style>
+
+    <!-- Nguy hiểm / XÓA THẬT → icon ĐỎ. .iconDanger là tên cũ của module, .destructive là tên chuẩn khớp
+         suite, .danger là tên của suite — cả ba trỏ cùng một biểu hiện để GĐ4c chuyển view dần sang
+         .destructive. Bỏ hẳn hex đỏ lẻ #C0392B, dùng token DangerBrush (#C22B1E). -->
+    <Style Selector="Button.iconDanger PathIcon">
+        <Setter Property="Foreground" Value="{StaticResource DangerBrush}" />
+    </Style>
+    <Style Selector="Button.destructive PathIcon">
+        <Setter Property="Foreground" Value="{StaticResource DangerBrush}" />
+    </Style>
+    <Style Selector="Button.danger PathIcon">
+        <Setter Property="Foreground" Value="{StaticResource DangerBrush}" />
+    </Style>
+
+    <!-- Nút VUÔNG chỉ có icon: 30×30, bo 4 (spec nút nhỏ) — vẫn giữ nền trắng + viền của dáng chung.
+         .iconOnly = tên chuẩn khớp suite; .iconDanger giữ luôn kích thước này vì view đang dùng nó cho
+         nút xóa vuông (4c đổi thành Classes="destructive iconOnly"). -->
+    <Style Selector="Button.iconOnly, Button.iconDanger">
+        <Setter Property="Width" Value="30" />
+        <Setter Property="Height" Value="30" />
+        <Setter Property="MinHeight" Value="30" />
         <Setter Property="Padding" Value="0" />
-        <Setter Property="FontSize" Value="14" />
-        <Setter Property="Foreground" Value="#C0392B" />
-        <Setter Property="BorderThickness" Value="1" />
-        <Setter Property="HorizontalContentAlignment" Value="Center" />
-        <Setter Property="VerticalContentAlignment" Value="Center" />
-        <Setter Property="Cursor" Value="Hand" />
-    </Style>
-    <Style Selector="Button.iconDanger /template/ ContentPresenter#PART_ContentPresenter">
-        <Setter Property="Background" Value="{StaticResource CardBg}" />
-        <Setter Property="BorderBrush" Value="{StaticResource Border012}" />
-        <Setter Property="BorderThickness" Value="1" />
         <Setter Property="CornerRadius" Value="4" />
-    </Style>
-    <Style Selector="Button.iconDanger:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-        <Setter Property="Background" Value="#FDECEA" />
-        <Setter Property="BorderBrush" Value="#F5B5AD" />
     </Style>
 
     <!-- =========================================================
-         5. NÚT GHOST NHỎ (con mắt mật khẩu)
+         5. NÚT GHOST NHỎ (con mắt mật khẩu) — NGOẠI LỆ: nằm TRONG ô nhập nên không có viền riêng
          ========================================================= -->
     <Style Selector="Button.ghostIcon">
         <Setter Property="Width" Value="28" />
@@ -481,9 +435,10 @@
             <ControlTemplate>
                 <Border Name="track" Width="42" Height="24" CornerRadius="12" Padding="2"
                         Background="{StaticResource ToggleOffBrush}">
+                    <!-- Núm: PHẲNG (bỏ BoxShadow) theo hướng UI phẳng Win 11 — nền track đủ tương phản. -->
                     <Border Name="knob" Width="20" Height="20" CornerRadius="10"
                             Background="White" HorizontalAlignment="Left"
-                            VerticalAlignment="Center" BoxShadow="0 1 3 0 #4D000000" />
+                            VerticalAlignment="Center" />
                 </Border>
             </ControlTemplate>
         </Setter>

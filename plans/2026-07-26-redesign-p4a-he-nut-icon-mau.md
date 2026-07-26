@@ -74,6 +74,35 @@ Mỗi hành động **đúng một** icon. Đây là hợp đồng cho 4b/4c dù
 `Database`, `Search`, `People`, `Servers`, `Inventory`, `Receipt`, `PlayCircle`, `SwapHoriz`, `Settings`).
 Giữ nguyên 10 icon cũ (ribbon đang dùng), CHỈ THÊM.
 
+## 3b. ⚠️ HỆ NÚT — CHỈ THỊ MỚI CỦA NGƯỜI DÙNG (GHI ĐÈ spec handoff)
+
+Người dùng chốt (2026-07-26, sau khi xem bản redesign): *"không dùng bg cho button, chỉ dùng icon màu, button
+dùng default; chỗ thì có border chỗ thì không (hoặc border cùng nền không nhìn thấy) — thống nhất button dùng
+mặc định, chỉ cần thêm icon nếu cần thiết"*.
+
+⇒ **BỎ toàn bộ nút tô nền.** Handoff spec ghi "primary = nền cam đặc" — **KHÔNG theo nữa**, ý người dùng thắng.
+
+**Luật nút DUY NHẤT toàn app:**
+1. **Một kiểu dáng cho mọi nút:** nền `CardBackgroundBrush` (trắng), **viền `#E2DDD8` LUÔN THẤY RÕ**, radius 5,
+   cao 30, chữ `TextBodyBrush` (#423C38). Không có nút nào "viền trùng nền" hay mất viền.
+2. **Màu ngữ nghĩa CHỈ nằm ở ICON** (chữ giữ màu thường):
+   - Hành động chính → icon **cam** `AccentBrush`
+   - Xóa / nguy hiểm → icon **đỏ** `DangerBrush`
+   - Thành công / xác nhận → icon **xanh** `SuccessBrush`
+   - Trung tính → icon xám `TextSecondaryBrush`
+3. **Hover:** viền đậm hơn + nền rất nhẹ `#FAF8F6` (cần phản hồi khi rê chuột — đây KHÔNG phải "nút tô nền").
+   **Pressed:** nền `#F2EFEC`. **Disabled:** mờ như hiện tại.
+4. **Bỏ các class tô nền:** suite `.primary`/`.danger`/`.success` và orders `.accent` → tất cả về DÁNG MẶC ĐỊNH,
+   chỉ khác màu icon. Giữ TÊN class (view đang dùng) nhưng đổi định nghĩa thành "đặt màu icon", để 4b/4c không
+   phải sửa hàng loạt ngay.
+5. **Ngoại lệ giữ nguyên (KHÔNG áp luật này):**
+   - **Nút ribbon** — người dùng đã duyệt ("phần ribbon thì rất ổn rồi"): giữ nền trong suốt + tint cam khi
+     hover/đang mở.
+   - **Huy hiệu ✓ xanh** góc nút op (chỉ báo trạng thái, không phải nút).
+6. **Nút op ở Workspace** (4 nút Scrape/Import/Update/Tên SP) hiện tô NỀN CAM khi đang chạy — theo luật mới đổi
+   thành: **icon cam + viền cam**, nền giữ trắng. Vẫn nhận ra ngay "đang chạy" mà không tô nền.
+   → Việc sửa nút op thuộc GĐ4b (file `Modules/Workspace/`), KHÔNG làm ở 4a.
+
 ## 4. Bảng token màu CHUẨN (một nguồn, 2 module giống hệt)
 
 Kéo `orders/Colors.axaml` về đúng giá trị handoff (suite đã đúng từ GĐ1):

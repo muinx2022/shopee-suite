@@ -1,57 +1,71 @@
 <ResourceDictionary xmlns="https://github.com/avaloniaui"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
+    <!-- ═══════════════════════════════════════════════════════════════════════════════════════
+         Palette module Đơn hàng — GIÁ TRỊ khớp 1:1 với suite (Themes/Theme.axaml, bộ design handoff).
+         TÊN KEY giữ nguyên như cũ (rất nhiều view của module đang bind) — chỉ đổi GIÁ TRỊ để 2 module
+         hết lệch tông (trước: xám LẠNH #F3F3F3/#1C1C1C + viền đen-alpha; nay: ẤM #F7F5F3/#2C2724 + viền hex ấm).
+         Đối chiếu tên ↔ token suite ghi ngay ở từng dòng để GĐ4c dọn/gộp về sau.
+         ═══════════════════════════════════════════════════════════════════════════════════════ -->
+
     <!-- ===== Accent (cam Shopee) ===== -->
     <SolidColorBrush x:Key="AccentBrush" Color="#EE4D2D" />
-    <SolidColorBrush x:Key="AccentHoverBrush" Color="#E0431F" />
-    <SolidColorBrush x:Key="AccentTextBrush" Color="#C0341C" />
-    <SolidColorBrush x:Key="AccentSoft1" Color="#FFF2EE" />
-    <SolidColorBrush x:Key="AccentSoft2" Color="#FFF4F1" />
-    <SolidColorBrush x:Key="AccentBorderSoft" Color="#FFD0C4" />
+    <SolidColorBrush x:Key="AccentHoverBrush" Color="#D8401F" />
+    <SolidColorBrush x:Key="AccentTextBrush" Color="#C93B1D" />
+    <!-- 2 nấc nền cam nhạt = BrandTint / BrandTintStrong của suite. -->
+    <SolidColorBrush x:Key="AccentSoft1" Color="#FFF3EF" />
+    <SolidColorBrush x:Key="AccentSoft2" Color="#FFE8E1" />
+    <SolidColorBrush x:Key="AccentBorderSoft" Color="#FBD6CA" />
 
     <!-- ===== Cảnh báo / trạng thái ===== -->
-    <SolidColorBrush x:Key="WarnSoftBg" Color="#FFF4E5" />
-    <SolidColorBrush x:Key="WarnSoftBorder" Color="#FFD9A8" />
-    <SolidColorBrush x:Key="AmberBrush" Color="#F5A623" />
-    <SolidColorBrush x:Key="AmberTextBrush" Color="#B8720A" />
-    <SolidColorBrush x:Key="SuccessBrush" Color="#2E7D32" />
-    <SolidColorBrush x:Key="InfoBrush" Color="#1565C0" />
-    <SolidColorBrush x:Key="DangerBrush" Color="#C62828" />
+    <SolidColorBrush x:Key="WarnSoftBg" Color="#FFF6E6" />
+    <SolidColorBrush x:Key="WarnSoftBorder" Color="#F0DFC0" />
+    <!-- AmberBrush/AmberTextBrush = chữ cảnh báo (Warning fg #B06F06). -->
+    <SolidColorBrush x:Key="AmberBrush" Color="#B06F06" />
+    <SolidColorBrush x:Key="AmberTextBrush" Color="#B06F06" />
+    <SolidColorBrush x:Key="SuccessBrush" Color="#1F8A4C" />
+    <SolidColorBrush x:Key="InfoBrush" Color="#2B5FC4" />
+    <SolidColorBrush x:Key="DangerBrush" Color="#C22B1E" />
 
     <!-- ===== Bề mặt / nền ===== -->
     <SolidColorBrush x:Key="CardBg" Color="#FFFFFF" />
-    <SolidColorBrush x:Key="InputBg" Color="#FBFBFB" />
-    <SolidColorBrush x:Key="WindowTop" Color="#F3F3F3" />
-    <SolidColorBrush x:Key="WindowBottom" Color="#F3F3F3" />
+    <SolidColorBrush x:Key="InputBg" Color="#FBFAF9" />
+    <SolidColorBrush x:Key="SubtleBg" Color="#FBFAF9" />
+    <SolidColorBrush x:Key="WindowTop" Color="#F7F5F3" />
+    <SolidColorBrush x:Key="WindowBottom" Color="#F7F5F3" />
+    <!-- Phản hồi rê chuột / bấm của NÚT (khớp ButtonHover/ButtonPressed của suite). -->
+    <SolidColorBrush x:Key="ButtonHoverBg" Color="#FAF8F6" />
+    <SolidColorBrush x:Key="ButtonPressedBg" Color="#F2EFEC" />
 
-    <!-- ===== Chữ ===== -->
-    <SolidColorBrush x:Key="TextInk" Color="#1C1C1C" />
-    <SolidColorBrush x:Key="Text232" Color="#232323" />
-    <SolidColorBrush x:Key="Text252" Color="#252525" />
-    <SolidColorBrush x:Key="TextSecondary" Color="#4A4A4A" />
-    <SolidColorBrush x:Key="Text5A" Color="#5A5A5A" />
-    <SolidColorBrush x:Key="TextMuted" Color="#6E6E6E" />
-    <SolidColorBrush x:Key="Text9A" Color="#7A7A7A" />
-    <SolidColorBrush x:Key="PlaceholderBrush" Color="#A5A5A5" />
-    <SolidColorBrush x:Key="Text7A" Color="#7A7A7A" />
+    <!-- ===== Chữ (4 nấc của suite: primary · body · secondary · muted) ===== -->
+    <SolidColorBrush x:Key="TextInk" Color="#2C2724" />
+    <SolidColorBrush x:Key="Text232" Color="#2C2724" />
+    <SolidColorBrush x:Key="Text252" Color="#2C2724" />
+    <SolidColorBrush x:Key="TextSecondary" Color="#423C38" />
+    <SolidColorBrush x:Key="Text5A" Color="#7D756F" />
+    <SolidColorBrush x:Key="TextMuted" Color="#7D756F" />
+    <SolidColorBrush x:Key="Text9A" Color="#A8A09B" />
+    <SolidColorBrush x:Key="PlaceholderBrush" Color="#A8A09B" />
+    <SolidColorBrush x:Key="Text7A" Color="#A8A09B" />
 
-    <!-- ===== Viền (đen với alpha) ===== -->
-    <SolidColorBrush x:Key="BorderSoft" Color="#12000000" />
-    <SolidColorBrush x:Key="Border06" Color="#0F000000" />
-    <SolidColorBrush x:Key="Border05" Color="#0D000000" />
-    <SolidColorBrush x:Key="Border010" Color="#1A000000" />
-    <SolidColorBrush x:Key="Border012" Color="#1F000000" />
-    <SolidColorBrush x:Key="Border014" Color="#24000000" />
-    <SolidColorBrush x:Key="UnderlineBrush" Color="#38000000" />
+    <!-- ===== Viền (trước là đen + alpha → nay hex ẤM theo 3 nấc của suite) ===== -->
+    <SolidColorBrush x:Key="BorderSoft" Color="#EBE7E3" />
+    <SolidColorBrush x:Key="Border06" Color="#F4F1EE" />
+    <SolidColorBrush x:Key="Border05" Color="#F0EDEA" />
+    <SolidColorBrush x:Key="Border010" Color="#E2DDD8" />
+    <SolidColorBrush x:Key="Border012" Color="#E2DDD8" />
+    <SolidColorBrush x:Key="Border014" Color="#E2DDD8" />
+    <SolidColorBrush x:Key="BorderHover" Color="#CFC8C2" />
+    <SolidColorBrush x:Key="UnderlineBrush" Color="#CFC8C2" />
 
     <!-- ===== Sidebar / nav ===== -->
-    <SolidColorBrush x:Key="SidebarBg" Color="#59FFFFFF" />
-    <SolidColorBrush x:Key="SidebarFooterBg" Color="#99FFFFFF" />
-    <SolidColorBrush x:Key="NavActiveBg" Color="#1AEE4D2D" />
-    <SolidColorBrush x:Key="SelectedCardBorder" Color="#59EE4D2D" />
+    <SolidColorBrush x:Key="SidebarBg" Color="#FBFAF9" />
+    <SolidColorBrush x:Key="SidebarFooterBg" Color="#FBFAF9" />
+    <SolidColorBrush x:Key="NavActiveBg" Color="#FFF3EF" />
+    <SolidColorBrush x:Key="SelectedCardBorder" Color="#F6C6BB" />
 
     <!-- ===== Toggle ===== -->
-    <SolidColorBrush x:Key="ToggleOffBrush" Color="#D4D4D4" />
+    <SolidColorBrush x:Key="ToggleOffBrush" Color="#D3CCC7" />
 
     <!-- ===== Khối code (cookie) ===== -->
     <SolidColorBrush x:Key="CodeBg" Color="#1E2430" />

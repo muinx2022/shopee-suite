@@ -55,7 +55,9 @@
         </StackPanel>
 
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
-            <Button Content="Lưu" Click="OnSave" Background="#1976D2" Foreground="White" />
+            <!-- Nút chính: dáng mặc định của theme, KHÔNG tô nền (luật nút 2026-07-26). Trước đây hard-code
+                 nền xanh dương #1976D2 — lạc lõng giữa app cam. -->
+            <Button Classes="primary" Content="Lưu" Click="OnSave" />
             <Button Content="Hủy" Click="OnCancel" />
         </StackPanel>
     </StackPanel>

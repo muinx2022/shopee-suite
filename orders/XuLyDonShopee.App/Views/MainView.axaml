@@ -25,12 +25,10 @@
         <StyleInclude Source="avares://XuLyDonShopee.App/Styles/Controls.axaml" />
     </UserControl.Styles>
 
-    <DockPanel>
-
-        <!-- Nền phẳng (trước là Window.Background gradient) chuyển xuống DockPanel gốc của UserControl. -->
-        <DockPanel.Background>
-            <SolidColorBrush Color="#F3F3F3" />
-        </DockPanel.Background>
+    <!-- Nền phẳng (trước là Window.Background gradient) chuyển xuống DockPanel gốc của UserControl.
+         Dùng TOKEN (không hard-code) để module Đơn hàng cùng tông ẤM với suite — trước đây ghi cứng
+         #F3F3F3 (xám LẠNH) nên 2 module lệch tông dù token màu đã sửa đúng. -->
+    <DockPanel Background="{StaticResource WindowTop}">
 
         <!-- (Thanh MENU NGANG cũ đã bỏ: 4 màn con nay điều hướng từ dải Ribbon của shell suite qua
              MainViewModel.SelectedNavIndex; màn Cài đặt dời sang tab Cài đặt chung.) -->
