@@ -218,11 +218,20 @@
 
     <!-- Icon trong nút: cỡ 16 (vừa với nút cao 30), mặc định XÁM trung tính. Khai TRƯỚC các class màu bên
          dưới để class thắng (Avalonia: rule khai báo SAU thắng khi cùng độ đặc hiệu). Chỗ dùng KHÔNG đặt
-         Foreground tại chỗ — để class quyết, nút đổi vai trò thì icon đổi màu theo. -->
+         Foreground tại chỗ — để class quyết, nút đổi vai trò thì icon đổi màu theo.
+         Path data lấy từ `orders/XuLyDonShopee.App/Styles/Icons.axaml` (nguồn DUY NHẤT, dùng chung 2 module):
+         <PathIcon Data="{DynamicResource IconSave}" />. -->
     <Style Selector="Button PathIcon">
         <Setter Property="Width" Value="16" />
         <Setter Property="Height" Value="16" />
+        <Setter Property="VerticalAlignment" Value="Center" />
         <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+    </Style>
+    <!-- Nút dạng "icon + nhãn" (StackPanel ngang): chữ canh giữa dọc cho thẳng hàng với icon — khai ở đây để
+         không phải lặp VerticalAlignment ở hàng chục chỗ dùng. Nút ribbon dùng StackPanel DỌC nên setter này
+         là vô hại (StackPanel dọc cấp cho con đúng chiều cao mong muốn). -->
+    <Style Selector="Button StackPanel > TextBlock">
+        <Setter Property="VerticalAlignment" Value="Center" />
     </Style>
 
     <!-- .primary = HÀNH ĐỘNG CHÍNH của màn → icon CAM (chữ vẫn màu thường). -->

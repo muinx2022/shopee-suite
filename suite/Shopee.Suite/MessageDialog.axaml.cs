@@ -1,5 +1,7 @@
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Media;
 using Shopee.Suite.Services;
 
 namespace Shopee.Suite;
@@ -28,14 +30,15 @@ public partial class MessageDialog : Window
         };
         if (IconText.Text.Length == 0) IconText.IsVisible = false;
 
+        // Icon nút theo bảng ánh xạ chung (Icons.axaml): đồng ý → IconCheck, hủy/đóng → IconClose.
         if (confirm)
         {
-            AddButton("Không", result: false, primary: false);
-            AddButton("Có", result: true, primary: true);
+            AddButton("Không", "IconClose", result: false, primary: false);
+            AddButton("Có", "IconCheck", result: true, primary: true);
         }
         else
         {
-            AddButton("OK", result: false, primary: true);
+            AddButton("OK", "IconCheck", result: false, primary: true);
         }
 
         // Enter = đóng với true nếu là confirm (nút Có), Esc = đóng với false.
@@ -46,15 +49,34 @@ public partial class MessageDialog : Window
         };
     }
 
-    private void AddButton(string content, bool result, bool primary)
+    /// <summary>
+    /// Nút của hộp thoại dựng bằng code (không có XAML) nhưng vẫn phải theo DÁNG CHUNG của app: icon vector
+    /// bên trái + nhãn chữ, màu ngữ nghĩa do class quyết (theme chỉ tô màu ICON). Geometry lấy từ bộ icon dùng
+    /// chung ở <c>Icons.axaml</c> qua Application.Resources — KHÔNG chép path data vào đây.
+    /// </summary>
+    private void AddButton(string content, string iconKey, bool result, bool primary)
     {
         var b = new Button
         {
-            Content = content,
             MinWidth = 92,
             HorizontalContentAlignment = Avalonia.Layout.HorizontalAlignment.Center,
         };
         if (primary) b.Classes.Add("primary");
+
+        var label = new TextBlock { Text = content, VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center };
+        if (Application.Current?.TryFindResource(iconKey, out var res) == true && res is Geometry geometry)
+        {
+            var row = new StackPanel { Orientation = Avalonia.Layout.Orientation.Horizontal, Spacing = 7 };
+            row.Children.Add(new PathIcon { Data = geometry });
+            row.Children.Add(label);
+            b.Content = row;
+        }
+        else
+        {
+            // Không tìm thấy icon (không nên xảy ra) → vẫn hiện nhãn, đừng để nút trống trơn.
+            b.Content = label;
+        }
+
         b.Click += (_, _) => Close(result);
         Buttons.Children.Add(b);
     }

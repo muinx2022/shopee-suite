@@ -27,10 +27,15 @@
                               ItemsSource="{Binding Modes}"
                               SelectedItem="{Binding SelectedMode, Mode=TwoWay}" />
                     <!-- Ẩn khi chế độ bị khoá bởi shortcut (mode truyền qua dòng lệnh): restart giữ nguyên tham số nên đổi mode ở đây vô nghĩa. -->
-                    <Button Classes="primary" Content="Lưu &amp; khởi động lại"
+                    <Button Classes="primary"
                             IsVisible="{Binding !ModeLockedByArg}"
                             Command="{Binding SaveModeAndRestartCommand}"
-                            ToolTip.Tip="Lưu chế độ đã chọn rồi mở lại app để áp dụng" />
+                            ToolTip.Tip="Lưu chế độ đã chọn rồi mở lại app để áp dụng">
+                        <StackPanel Orientation="Horizontal" Spacing="7">
+                            <PathIcon Data="{DynamicResource IconSave}" />
+                            <TextBlock Text="Lưu &amp; khởi động lại" />
+                        </StackPanel>
+                    </Button>
                 </StackPanel>
 
                 <!-- Chế độ đang khoá bởi shortcut: báo đổi ở đây không có tác dụng (chỉ để tạo shortcut khác). -->
@@ -40,9 +45,14 @@
 
                 <!-- Nút tạo shortcut desktop khoá một chế độ qua dòng lệnh: chạy song song với chế độ khác, dùng chung tài khoản/dữ liệu. -->
                 <StackPanel Spacing="4">
-                    <Button Content="Tạo shortcut cho chế độ này"
+                    <Button HorizontalAlignment="Left"
                             Command="{Binding CreateShortcutForModeCommand}"
-                            ToolTip.Tip="Tạo file .lnk ngoài desktop mở thẳng chế độ đang chọn (--mode)" />
+                            ToolTip.Tip="Tạo file .lnk ngoài desktop mở thẳng chế độ đang chọn (--mode)">
+                        <StackPanel Orientation="Horizontal" Spacing="7">
+                            <PathIcon Data="{DynamicResource IconAdd}" />
+                            <TextBlock Text="Tạo shortcut cho chế độ này" />
+                        </StackPanel>
+                    </Button>
                     <TextBlock Text="Tạo shortcut ngoài desktop mở thẳng chế độ đang chọn (chạy song song với chế độ khác, dùng chung dữ liệu)."
                                Classes="caption" TextWrapping="Wrap" MaxWidth="520" />
                 </StackPanel>
@@ -72,13 +82,23 @@
                                IsVisible="{Binding Suite.UpdateStatus, Converter={StaticResource StringToBool}}" />
 
                     <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
-                        <Button Content="🔄  Kiểm tra bản mới" MinWidth="160"
+                        <Button MinWidth="160"
                                 IsVisible="{Binding Suite.UpdateSupported}"
-                                Command="{Binding Suite.CheckUpdateCommand}" />
-                        <Button Classes="success" Content="⬆  Cập nhật &amp; khởi động lại" MinWidth="200" Margin="10,0,0,0"
+                                Command="{Binding Suite.CheckUpdateCommand}">
+                            <StackPanel Orientation="Horizontal" Spacing="7">
+                                <PathIcon Data="{DynamicResource IconUpgrade}" />
+                                <TextBlock Text="Kiểm tra bản mới" />
+                            </StackPanel>
+                        </Button>
+                        <Button Classes="success" MinWidth="200" Margin="10,0,0,0"
                                 IsVisible="{Binding Suite.UpdateReady}"
                                 Command="{Binding Suite.ApplyUpdateCommand}"
-                                ToolTip.Tip="Đóng app + áp dụng bản đã tải + mở lại. Làm khi KHÔNG có job đang chạy." />
+                                ToolTip.Tip="Đóng app + áp dụng bản đã tải + mở lại. Làm khi KHÔNG có job đang chạy.">
+                            <StackPanel Orientation="Horizontal" Spacing="7">
+                                <PathIcon Data="{DynamicResource IconUpgrade}" />
+                                <TextBlock Text="Cập nhật &amp; khởi động lại" />
+                            </StackPanel>
+                        </Button>
                     </StackPanel>
 
                     <TextBlock Classes="caption" TextWrapping="Wrap" Margin="0,10,0,0"

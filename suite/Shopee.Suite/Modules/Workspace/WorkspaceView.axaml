@@ -13,7 +13,7 @@
         <!-- Header: nền phụ ấm, viền đáy mảnh, padding theo spec 18/14/18/12. -->
         <Style Selector="Border.pageHead">
             <Setter Property="Background" Value="{DynamicResource SubtleBrush}" />
-            <Setter Property="BorderBrush" Value="#EAE6E2" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderLightBrush}" />
             <Setter Property="BorderThickness" Value="0,0,0,1" />
             <Setter Property="Padding" Value="18,14,18,12" />
         </Style>
@@ -33,7 +33,7 @@
             <Setter Property="Margin" Value="0,0,0,2" />
             <Setter Property="CornerRadius" Value="6" />
             <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
-            <Setter Property="BorderBrush" Value="#EFEBE7" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderLightBrush}" />
             <Setter Property="BorderThickness" Value="1" />
         </Style>
         <Style Selector="ListBox.wsAcctList ListBoxItem:pointerover Border.wsAcct">
@@ -66,54 +66,108 @@
             <Setter Property="Foreground" Value="{DynamicResource WarningBrush}" />
         </Style>
 
-        <!-- ══════════ Sub-tabs: chữ 12.5/600, tab chọn = gạch chân 2px CAM thụt 10px ══════════ -->
+        <!-- ══════════ Sub-tabs — SEGMENTED CONTROL kiểu Windows 11 ══════════ -->
+        <!-- Cả cụm tab nằm trong MỘT khay bo tròn nền xám ấm; ô ĐANG CHỌN nổi lên nền TRẮNG + viền mảnh + chữ
+             đen đậm, ô còn lại chìm chữ xám. Bên phải khay là tên tài khoản BigSeller đang chọn (mờ).
+             KHUÔN DÙNG CHUNG với màn tương đương của module Đơn hàng (orders/Views/AccountsView.axaml,
+             TabControl.detailTabs) — sửa một bên thì sửa cả bên kia cho 2 màn không lệch nhau.
+             Phải THAY TEMPLATE vì khay nền bao quanh dải tab không dựng được bằng setter rời. -->
         <Style Selector="TabControl.subtabs">
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="Padding" Value="0" />
+            <!-- Các ô nằm NGANG (mặc định Fluent là WrapPanel). -->
+            <Setter Property="ItemsPanel">
+                <ItemsPanelTemplate>
+                    <StackPanel Orientation="Horizontal" />
+                </ItemsPanelTemplate>
+            </Setter>
+            <Setter Property="Template">
+                <ControlTemplate>
+                    <DockPanel>
+                        <!-- Lề PHẢI 210 (không phải 18 như bên Đơn hàng): nút "Dừng việc shop này" của màn này
+                             là lớp ĐÈ ở góc trên-phải (nằm ngoài TabControl) → chừa chỗ cho nó khỏi che tên tk. -->
+                        <Grid DockPanel.Dock="Top" ColumnDefinitions="Auto,*" Margin="18,12,210,10">
+                            <!-- KHAY segmented: nền xám ấm #F2EFEC (tông khay của bộ design — suite đặt tên token
+                                 này là NeutralBadgeBg), bo 10, đệm 4 để ô đang chọn nổi hẳn lên trên nền khay. -->
+                            <Border Grid.Column="0" Background="{DynamicResource NeutralBadgeBgBrush}"
+                                    CornerRadius="10" Padding="4">
+                                <ItemsPresenter Name="PART_ItemsPresenter"
+                                                ItemsPanel="{TemplateBinding ItemsPanel}" />
+                            </Border>
+                            <!-- Tên tài khoản BigSeller đang chọn — view truyền vào qua Tag. -->
+                            <TextBlock Grid.Column="1" Text="{TemplateBinding Tag}"
+                                       HorizontalAlignment="Right" VerticalAlignment="Center"
+                                       Margin="12,0,0,0" FontSize="12"
+                                       Foreground="{DynamicResource TextMutedBrush}"
+                                       TextTrimming="CharacterEllipsis" />
+                        </Grid>
+                        <!-- Padding vùng nội dung giữ như trước (spec 18/14/18/18) — nội dung các tab dựa vào nó. -->
+                        <ContentPresenter Name="PART_SelectedContentHost" Margin="18,4,18,18"
+                                          Content="{TemplateBinding SelectedContent}"
+                                          ContentTemplate="{TemplateBinding SelectedContentTemplate}" />
+                    </DockPanel>
+                </ControlTemplate>
+            </Setter>
         </Style>
-        <!-- Dải tab thụt 18px hai bên, cách đỉnh 10px (spec padding 10 18 0). -->
-        <Style Selector="TabControl.subtabs /template/ ItemsPresenter#PART_ItemsPresenter">
-            <Setter Property="Margin" Value="18,10,18,0" />
-        </Style>
-        <!-- Vạch 1px chạy hết bề ngang dưới dải tab + padding vùng nội dung (spec 14 18 18). -->
-        <Style Selector="TabControl.subtabs /template/ ContentPresenter#PART_SelectedContentHost">
-            <Setter Property="BorderBrush" Value="#EAE6E2" />
-            <Setter Property="BorderThickness" Value="0,1,0,0" />
-            <Setter Property="Padding" Value="18,14,18,18" />
-        </Style>
-        <!-- Padding CHỈ ngang + chiều cao cố định: gạch chân (PART_SelectedPipe) nằm TRONG phần padding của
-             khung tab, có padding dưới là gạch bị đẩy lơ lửng lên. Chiều cao lo bằng MinHeight, chữ canh giữa. -->
         <Style Selector="TabControl.subtabs TabItem">
             <Setter Property="FontSize" Value="12.5" />
-            <Setter Property="Padding" Value="13,0" />
-            <Setter Property="MinHeight" Value="32" />
-            <Setter Property="Height" Value="32" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+            <Setter Property="Padding" Value="14,0" />
+            <Setter Property="MinHeight" Value="30" />
+            <Setter Property="Height" Value="30" />
             <Setter Property="Margin" Value="0" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
             <Setter Property="Cursor" Value="Hand" />
         </Style>
-        <!-- Nền tab luôn TRONG SUỐT (Fluent tô nền tab chọn/hover → lệch tông dải #F7F5F3). -->
+        <!-- Ô thường: chìm vào khay. Ô ĐANG CHỌN: nổi lên nền trắng + viền mảnh (không tô cam — theo luật mới
+             màu chỉ để đánh dấu, không tô mảng lớn). -->
         <Style Selector="TabControl.subtabs TabItem /template/ Border#PART_LayoutRoot">
             <Setter Property="Background" Value="Transparent" />
+            <Setter Property="CornerRadius" Value="7" />
+            <Setter Property="Margin" Value="0" />
         </Style>
         <Style Selector="TabControl.subtabs TabItem:pointerover /template/ Border#PART_LayoutRoot">
-            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Background" Value="#66FFFFFF" />
         </Style>
         <Style Selector="TabControl.subtabs TabItem:selected /template/ Border#PART_LayoutRoot">
-            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
         </Style>
         <Style Selector="TabControl.subtabs TabItem:selected:pointerover /template/ Border#PART_LayoutRoot">
-            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
         </Style>
-        <!-- Gạch chân tab đang chọn: 2px cam, thụt 10px mỗi bên, dính đáy (Fluent mặc định bo tròn + lệch). -->
+        <!-- Segmented control KHÔNG dùng gạch chỉ báo — ẩn hẳn pipe mặc định của Fluent. -->
         <Style Selector="TabControl.subtabs TabItem /template/ Border#PART_SelectedPipe">
-            <Setter Property="Background" Value="{DynamicResource AccentBrush}" />
-            <Setter Property="CornerRadius" Value="0" />
-            <Setter Property="Height" Value="2" />
-            <Setter Property="Width" Value="NaN" />
-            <Setter Property="Margin" Value="10,0,10,0" />
-            <Setter Property="HorizontalAlignment" Value="Stretch" />
-            <Setter Property="VerticalAlignment" Value="Bottom" />
+            <Setter Property="IsVisible" Value="False" />
+        </Style>
+        <Style Selector="TabControl.subtabs TabItem:selected">
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+            <Setter Property="FontWeight" Value="Bold" />
+        </Style>
+        <Style Selector="TabControl.subtabs TabItem:pointerover">
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+        </Style>
+
+        <!-- Huy hiệu SỐ trong ô segmented: ô đang chọn → nền cam nhạt chữ cam; ô chìm → nền xám chữ xám.
+             CHỈ gắn ở tab có số THẬT để hiện (màn này: số shop của tài khoản đang chọn). -->
+        <Style Selector="Border.tabBadge">
+            <Setter Property="Background" Value="{DynamicResource BorderLightestBrush}" />
+            <Setter Property="CornerRadius" Value="9" />
+            <Setter Property="Padding" Value="7,1" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+        <Style Selector="Border.tabBadge TextBlock">
+            <Setter Property="FontSize" Value="10.5" />
+            <Setter Property="FontWeight" Value="Bold" />
+            <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+        </Style>
+        <Style Selector="TabControl.subtabs TabItem:selected Border.tabBadge">
+            <Setter Property="Background" Value="{DynamicResource BrandTintBrush}" />
+        </Style>
+        <Style Selector="TabControl.subtabs TabItem:selected Border.tabBadge TextBlock">
+            <Setter Property="Foreground" Value="{DynamicResource BrandTextBrush}" />
         </Style>
 
         <!-- ══════════ BẢNG SHOP ══════════ -->
@@ -128,7 +182,7 @@
             <Setter Property="FontSize" Value="10.5" />
             <Setter Property="FontWeight" Value="Bold" />
             <Setter Property="LetterSpacing" Value="0.4" />
-            <Setter Property="Foreground" Value="#857D77" />
+            <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
         </Style>
         <!-- Ô KHÔNG padding: cột SHOP tự thụt 14px bằng Margin, 4 cột op canh giữa tuyệt đối. -->
         <Style Selector="DataGrid.shopGrid DataGridCell">
@@ -136,7 +190,9 @@
             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
         </Style>
 
-        <!-- Nút op trên dòng shop — 40×30, 3 trạng thái: trắng (chờ) · NỀN CAM (đang chạy) · huy hiệu ✓ (xong). -->
+        <!-- Nút op trên dòng shop — 40×30, 3 trạng thái: icon xám (chờ) · ICON + VIỀN CAM (đang chạy) ·
+             huy hiệu ✓ (xong). Theo LUẬT NÚT MỚI: nền LUÔN trắng, không nút nào tô nền — "đang chạy" nhận ra
+             bằng icon cam + viền cam. -->
         <Style Selector="Button.wsAction">
             <Setter Property="Width" Value="40" />
             <Setter Property="MinWidth" Value="40" />
@@ -144,12 +200,14 @@
             <Setter Property="MinHeight" Value="30" />
             <Setter Property="Padding" Value="0" />
             <Setter Property="CornerRadius" Value="5" />
-            <Setter Property="FontSize" Value="13" />
             <Setter Property="HorizontalContentAlignment" Value="Center" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
             <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
             <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
-            <Setter Property="Foreground" Value="#55504C" />
+        </Style>
+        <Style Selector="Button.wsAction PathIcon">
+            <Setter Property="Width" Value="17" />
+            <Setter Property="Height" Value="17" />
         </Style>
         <!-- Hover: chỉ đổi VIỀN sang cam nhạt, nền giữ trắng (theme mặc định tô nền be → mất nét sạch của bảng). -->
         <Style Selector="Button.wsAction:pointerover">
@@ -158,20 +216,21 @@
         <Style Selector="Button.wsAction:pointerover /template/ Border#PART_bd">
             <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
         </Style>
-        <!-- ĐANG CHẠY = nền + viền cam đặc, glyph trắng (bấm lại để dừng — tooltip nói rõ). -->
+        <!-- ĐANG CHẠY = ICON CAM + VIỀN CAM, nền vẫn TRẮNG (bấm lại để dừng — tooltip nói rõ). -->
         <Style Selector="Button.wsAction.running">
-            <Setter Property="Background" Value="{DynamicResource AccentBrush}" />
             <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
-            <Setter Property="Foreground" Value="{DynamicResource TextOnAccentBrush}" />
+        </Style>
+        <Style Selector="Button.wsAction.running PathIcon">
+            <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
         </Style>
         <Style Selector="Button.wsAction.running:pointerover">
             <Setter Property="BorderBrush" Value="{DynamicResource AccentHoverBrush}" />
         </Style>
         <Style Selector="Button.wsAction.running:pointerover /template/ Border#PART_bd">
-            <Setter Property="Background" Value="{DynamicResource AccentHoverBrush}" />
+            <Setter Property="Background" Value="{DynamicResource BrandTintBrush}" />
         </Style>
         <Style Selector="Button.wsAction.running:pressed /template/ Border#PART_bd">
-            <Setter Property="Background" Value="{DynamicResource AccentPressedBrush}" />
+            <Setter Property="Background" Value="{DynamicResource BrandTintStrongBrush}" />
             <Setter Property="Opacity" Value="1" />
         </Style>
         <!-- Badge ✓ xanh 14px đè góc trên-phải nút = op đã xong (Hub ghi nhận). -->
@@ -219,16 +278,21 @@
                 <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                     <TextBlock Text="{Binding Status}" FontSize="11.5" Margin="0,0,4,0" VerticalAlignment="Center"
                                Foreground="{DynamicResource TextMutedBrush}" />
-                    <Button Command="{Binding ReloadCommand}"
+                    <Button Classes="primary" Command="{Binding ReloadCommand}"
                             ToolTip.Tip="Đọc lại danh sách tài khoản · shop · tiến độ từ kho.">
                         <StackPanel Orientation="Horizontal" Spacing="7">
-                            <TextBlock Text="⟳" Foreground="{DynamicResource AccentBrush}" />
+                            <PathIcon Data="{DynamicResource IconRefresh}" />
                             <TextBlock Text="Tải lại" />
                         </StackPanel>
                     </Button>
                     <!-- Không có việc nào chạy → nút mờ, không bấm được (CanExecute = AnyRunning). -->
-                    <Button Classes="danger" Content="■ Dừng tất cả" Command="{Binding StopAllCommand}"
-                            ToolTip.Tip="Dừng toàn bộ scrape + update đang chạy. (Dừng riêng 1 tk: bấm nút cam trên shop đang chạy.)" />
+                    <Button Classes="danger" Command="{Binding StopAllCommand}"
+                            ToolTip.Tip="Dừng toàn bộ scrape + update đang chạy. (Dừng riêng 1 tk: bấm nút viền cam trên shop đang chạy.)">
+                        <StackPanel Orientation="Horizontal" Spacing="7">
+                            <PathIcon Data="{DynamicResource IconStop}" />
+                            <TextBlock Text="Dừng tất cả" />
+                        </StackPanel>
+                    </Button>
                 </StackPanel>
             </Grid>
         </Border>
@@ -236,11 +300,12 @@
         <!-- ════ Row 1: Hint strip — MỘT dòng, tràn thì cắt bằng … ════ -->
         <Border Grid.Row="1" Classes="hintStrip">
             <Grid ColumnDefinitions="Auto,*">
-                <TextBlock Grid.Column="0" Text="ℹ" Foreground="#B0A8A3" Margin="0,0,10,0" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="0" Text="ℹ" Foreground="{DynamicResource TextMutedBrush}"
+                           Margin="0,0,10,0" VerticalAlignment="Center" />
                 <TextBlock Grid.Column="1" VerticalAlignment="Center" FontSize="11.5"
                            Foreground="{DynamicResource TextSecondaryBrush}"
                            TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"
-                           Text="Bấm 1 tài khoản → chạy theo từng shop (▶ scrape · ⇧ import · ✎ update · ● tên SP). Nút nền cam = đang chạy, bấm lại để dừng · dấu ✓ góc nút = đã xong." />
+                           Text="Bấm 1 tài khoản → chạy theo từng shop (4 nút: scrape · import · update · tên SP). Nút icon cam + viền cam = đang chạy, bấm lại để dừng · dấu ✓ góc nút = đã xong." />
             </Grid>
         </Border>
 
@@ -255,7 +320,8 @@
                 <StackPanel Grid.Column="0" VerticalAlignment="Center">
                     <!-- Tiêu đề: đếm số việc -->
                     <StackPanel Orientation="Horizontal" Spacing="10">
-                        <TextBlock Text="⏸" Classes="emoji" FontSize="16" VerticalAlignment="Center" />
+                        <PathIcon Data="{DynamicResource IconPause}" Width="16" Height="16"
+                                  Foreground="{DynamicResource BrandTextBrush}" VerticalAlignment="Center" />
                         <TextBlock VerticalAlignment="Center" TextWrapping="Wrap"
                                    Foreground="{DynamicResource TextPrimaryBrush}">
                             <Run Text="Có" />
@@ -298,11 +364,21 @@
                 </StackPanel>
                 <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8"
                             VerticalAlignment="Top" Margin="12,0,0,0">
-                    <Button Classes="success" Content="▶ Tiếp tục tất cả"
-                            Command="{Binding ResumePendingWorkCommand}" ToolTip.Tip="{Binding ResumeTooltip}" />
-                    <Button Classes="danger" Content="✕ Hủy bỏ"
+                    <Button Classes="success"
+                            Command="{Binding ResumePendingWorkCommand}" ToolTip.Tip="{Binding ResumeTooltip}">
+                        <StackPanel Orientation="Horizontal" Spacing="7">
+                            <PathIcon Data="{DynamicResource IconResume}" />
+                            <TextBlock Text="Tiếp tục tất cả" />
+                        </StackPanel>
+                    </Button>
+                    <Button Classes="danger"
                             Command="{Binding DiscardPendingWorkCommand}"
-                            ToolTip.Tip="Bỏ các việc dở khỏi hàng chờ (không tự chạy tiếp nữa)." />
+                            ToolTip.Tip="Bỏ các việc dở khỏi hàng chờ (không tự chạy tiếp nữa).">
+                        <StackPanel Orientation="Horizontal" Spacing="7">
+                            <PathIcon Data="{DynamicResource IconClose}" />
+                            <TextBlock Text="Hủy bỏ" />
+                        </StackPanel>
+                    </Button>
                 </StackPanel>
             </Grid>
         </Border>
@@ -312,12 +388,12 @@
 
             <!-- ─── LEFT: account list ─── -->
             <Border Grid.Column="0" Background="{DynamicResource SubtleBrush}"
-                    BorderBrush="#EAE6E2" BorderThickness="0,0,1,0">
+                    BorderBrush="{DynamicResource BorderLightBrush}" BorderThickness="0,0,1,0">
                 <DockPanel>
                     <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="6" Margin="14,12,14,8">
                         <TextBlock Text="TÀI KHOẢN BIGSELLER" FontSize="10.5" FontWeight="Bold" LetterSpacing="0.7"
                                    VerticalAlignment="Bottom" Foreground="{DynamicResource TextMutedBrush}" />
-                        <TextBlock FontSize="11" VerticalAlignment="Bottom" Foreground="#B5AEA9">
+                        <TextBlock FontSize="11" VerticalAlignment="Bottom" Foreground="{DynamicResource TextMutedBrush}">
                             <Run Text="{Binding Accounts.Count}" /><Run Text=" tài khoản" />
                         </TextBlock>
                     </StackPanel>
@@ -340,7 +416,7 @@
                                             <TextBlock Classes="acctCookie" Classes.warn="{Binding !HasCookie}"
                                                        Text="{Binding CookieShort}" />
                                             <TextBlock Text="·" FontSize="11" Foreground="{DynamicResource IdleDotBrush}" />
-                                            <TextBlock Text="{Binding ScrapeSummary}" FontSize="11" Foreground="#857D77"
+                                            <TextBlock Text="{Binding ScrapeSummary}" FontSize="11" Foreground="{DynamicResource TextSecondaryBrush}"
                                                        TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
                                         </StackPanel>
                                     </StackPanel>
@@ -353,10 +429,22 @@
 
             <!-- ─── RIGHT: sub-tabs + nút "Dừng việc shop này" đè góc trên-phải, thẳng hàng dải tab ─── -->
             <Grid Grid.Column="1">
-            <TabControl Classes="subtabs">
+            <!-- Tag = tên tài khoản BigSeller đang chọn → template segmented control hiện ở mép phải khay tab. -->
+            <TabControl Classes="subtabs" Tag="{Binding SelectedAccount.DisplayName}">
 
                 <!-- ══════════ TAB 1: Shop & cấu hình ══════════ -->
-                <TabItem Header="Shop &amp; cấu hình">
+                <TabItem>
+                    <!-- Huy hiệu = SỐ SHOP của tài khoản đang chọn (số THẬT; ẩn khi chưa chọn acc / acc 0 shop).
+                         Các tab còn lại KHÔNG gắn huy hiệu vì không có số thật để hiện. -->
+                    <TabItem.Header>
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <TextBlock Text="Shop &amp; cấu hình" VerticalAlignment="Center" />
+                            <Border Classes="tabBadge"
+                                    IsVisible="{Binding SelectedAccount.Shops.Count, Converter={StaticResource CountToBool}, FallbackValue=False}">
+                                <TextBlock Text="{Binding SelectedAccount.Shops.Count}" />
+                            </Border>
+                        </StackPanel>
+                    </TabItem.Header>
                     <Grid>
                         <TextBlock Text="Chọn 1 tài khoản BigSeller bên trái để xem shop + thao tác."
                                    Classes="caption" VerticalAlignment="Top"
@@ -379,16 +467,21 @@
                                             </Border>
                                         </StackPanel>
                                         <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
-                                            <Button Command="{Binding #Root.DataContext.Scrape.ShowStatsCommand}"
+                                            <Button Classes="primary" Command="{Binding #Root.DataContext.Scrape.ShowStatsCommand}"
                                                     ToolTip.Tip="Tiến độ theo sheet · nhả tay tk bị kẹt · xoá tiến độ scrape">
                                                 <StackPanel Orientation="Horizontal" Spacing="7">
-                                                    <TextBlock Text="▤" Foreground="{DynamicResource AccentBrush}" />
+                                                    <PathIcon Data="{DynamicResource IconChart}" />
                                                     <TextBlock Text="Thống kê" />
                                                 </StackPanel>
                                             </Button>
-                                            <Button Classes="primary" Content="Đăng nhập / cấu hình ↗"
+                                            <Button Classes="primary"
                                                     Command="{Binding #Root.DataContext.GoToBigSellerConfigCommand}"
-                                                    ToolTip.Tip="Mở tab BigSeller để đăng nhập lấy cookie / sửa workbook · cookie · shop · proxy của tài khoản này." />
+                                                    ToolTip.Tip="Mở tab BigSeller để đăng nhập lấy cookie / sửa workbook · cookie · shop · proxy của tài khoản này.">
+                                                <StackPanel Orientation="Horizontal" Spacing="7">
+                                                    <PathIcon Data="{DynamicResource IconOpenExternal}" />
+                                                    <TextBlock Text="Đăng nhập / cấu hình" />
+                                                </StackPanel>
+                                            </Button>
                                         </StackPanel>
                                     </Grid>
                                     <!-- Hàng Workbook chỉ excel-mode; hub-mode ẨN (kho SP ở Hub, không dùng workbook Excel). -->
@@ -398,7 +491,7 @@
                                                  Text="{Binding WorkbookPath, Mode=OneWay}" />
                                     </StackPanel>
                                     <TextBlock Text="Mỗi shop = 1 sheet — bấm nút trên dòng shop để chạy đúng shop đó."
-                                               FontSize="11.5" Foreground="#857D77" Margin="0,8,0,12" TextWrapping="NoWrap" />
+                                               FontSize="11.5" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,8,0,12" TextWrapping="NoWrap" />
                                 </StackPanel>
 
                                 <!-- Vùng dưới header: lưới shop LẤP ĐẦY (cuộn nội bộ khi nhiều shop), cụm cấu hình
@@ -407,7 +500,7 @@
 
                                     <!-- Lưới SHOP pipeline — lấp đầy chiều cao còn lại. KHÔNG có cột Tiến độ:
                                          trạng thái từng op nằm ngay trên nút (nền cam = đang chạy, ✓ = xong). -->
-                                    <Border Grid.Row="0" BorderBrush="#EEEAE6" BorderThickness="1" CornerRadius="7" ClipToBounds="True">
+                                    <Border Grid.Row="0" BorderBrush="{DynamicResource BorderLightBrush}" BorderThickness="1" CornerRadius="7" ClipToBounds="True">
                                         <DataGrid x:Name="ShopGrid" Classes="shopGrid" ItemsSource="{Binding Shops}" IsReadOnly="True"
                                                   BorderThickness="0" SelectionChanged="ShopGrid_SelectionChanged" RowHeight="44"
                                                   AutoGenerateColumns="False" ScrollViewer.VerticalScrollBarVisibility="Auto">
@@ -434,11 +527,12 @@
                                                         <DataTemplate>
                                                             <Grid HorizontalAlignment="Center">
                                                                 <Button Classes="wsAction" Classes.running="{Binding ScrapeRunning}"
-                                                                        Content="{Binding ScrapeToggleContent}"
                                                                         ToolTip.Tip="{Binding ScrapeToggleTip}"
                                                                         IsEnabled="{Binding ScrapeToggleEnabled}"
                                                                         Command="{Binding $parent[UserControl].DataContext.ScrapeToggleCommand}"
-                                                                        CommandParameter="{Binding}" />
+                                                                        CommandParameter="{Binding}">
+                                                                    <PathIcon Data="{DynamicResource IconPlay}" />
+                                                                </Button>
                                                                 <Border Classes="doneBadge" ToolTip.Tip="Scrape đã xong (Hub)"
                                                                         IsVisible="{Binding ScrapeDone}">
                                                                     <TextBlock Text="✓" Foreground="White" FontSize="9"
@@ -456,16 +550,19 @@
                                                         <DataTemplate>
                                                             <Grid HorizontalAlignment="Center">
                                                                 <Button Classes="wsAction" Classes.running="{Binding ImportRunning}"
-                                                                        Content="{Binding ImportToggleContent}"
                                                                         ToolTip.Tip="{Binding ImportToggleTip}"
                                                                         IsEnabled="{Binding ImportToggleEnabled}"
                                                                         Command="{Binding $parent[UserControl].DataContext.ImportToggleCommand}"
                                                                         CommandParameter="{Binding}">
+                                                                    <PathIcon Data="{DynamicResource IconImport}" />
                                                                     <!-- Chuột phải → xoá tiến độ resume import (2 bước xác nhận, khỏi dialog).
                                                                          ContextMenu kế thừa DataContext = shop → bind thẳng command trên WorkspaceShopViewModel. -->
                                                                     <Button.ContextMenu>
                                                                         <ContextMenu>
-                                                                            <MenuItem Header="↺ Xoá tiến độ import (chạy lại từ đầu)…">
+                                                                            <MenuItem Header="Xoá tiến độ import (chạy lại từ đầu)…">
+                                                                                <MenuItem.Icon>
+                                                                                    <PathIcon Data="{DynamicResource IconRefresh}" Width="14" Height="14" />
+                                                                                </MenuItem.Icon>
                                                                                 <MenuItem Header="Xác nhận: xoá tiến độ import"
                                                                                           Command="{Binding ResetImportProgressCommand}" />
                                                                             </MenuItem>
@@ -489,15 +586,18 @@
                                                         <DataTemplate>
                                                             <Grid HorizontalAlignment="Center">
                                                                 <Button Classes="wsAction" Classes.running="{Binding UpdateRunning}"
-                                                                        Content="{Binding UpdateToggleContent}"
                                                                         ToolTip.Tip="{Binding UpdateToggleTip}"
                                                                         IsEnabled="{Binding UpdateToggleEnabled}"
                                                                         Command="{Binding $parent[UserControl].DataContext.UpdateToggleCommand}"
                                                                         CommandParameter="{Binding}">
+                                                                    <PathIcon Data="{DynamicResource IconEdit}" />
                                                                     <!-- Chuột phải → xoá tiến độ resume update (2 bước xác nhận, khỏi dialog). -->
                                                                     <Button.ContextMenu>
                                                                         <ContextMenu>
-                                                                            <MenuItem Header="↺ Xoá tiến độ update (chạy lại từ đầu)…">
+                                                                            <MenuItem Header="Xoá tiến độ update (chạy lại từ đầu)…">
+                                                                                <MenuItem.Icon>
+                                                                                    <PathIcon Data="{DynamicResource IconRefresh}" Width="14" Height="14" />
+                                                                                </MenuItem.Icon>
                                                                                 <MenuItem Header="Xác nhận: xoá tiến độ update"
                                                                                           Command="{Binding ResetUpdateProgressCommand}" />
                                                                             </MenuItem>
@@ -521,11 +621,12 @@
                                                         <DataTemplate>
                                                             <Grid HorizontalAlignment="Center">
                                                                 <Button Classes="wsAction" Classes.running="{Binding RewriteRunning}"
-                                                                        Content="{Binding RewriteToggleContent}"
                                                                         ToolTip.Tip="{Binding RewriteToggleTip}"
                                                                         IsEnabled="{Binding RewriteToggleEnabled}"
                                                                         Command="{Binding $parent[UserControl].DataContext.RewriteToggleCommand}"
-                                                                        CommandParameter="{Binding}" />
+                                                                        CommandParameter="{Binding}">
+                                                                    <PathIcon Data="{DynamicResource IconSparkle}" />
+                                                                </Button>
                                                                 <Border Classes="doneBadge" ToolTip.Tip="Tên SP đã xong (Hub)"
                                                                         IsVisible="{Binding RewriteDone}">
                                                                     <TextBlock Text="✓" Foreground="White" FontSize="9"
@@ -542,7 +643,7 @@
                                     <!-- Cấu hình chạy — chiều cao tự nhiên, KHÔNG cuộn. Ô số dàn theo bề ngang
                                          (WrapPanel: hết chỗ thì xuống dòng), ô đường dẫn chia đôi bề ngang. -->
                                     <StackPanel Grid.Row="1" Margin="0,18,0,0">
-                                        <TextBlock FontSize="11" FontWeight="Bold" LetterSpacing="0.5" Foreground="#857D77">
+                                        <TextBlock FontSize="11" FontWeight="Bold" LetterSpacing="0.5" Foreground="{DynamicResource TextSecondaryBrush}">
                                             <Run Text="CẤU HÌNH CHẠY" />
                                             <Run Text="· tài khoản này · máy này" FontWeight="Normal"
                                                  Foreground="{DynamicResource TextMutedBrush}" />
@@ -580,8 +681,11 @@
                                                 <Grid ColumnDefinitions="*,6,Auto">
                                                     <TextBox Grid.Column="0" Classes="mono" FontSize="12"
                                                              Text="{Binding #Root.DataContext.Update.ImagePath}" />
-                                                    <Button Grid.Column="2" Content="…" Width="34" Padding="0"
-                                                            Command="{Binding #Root.DataContext.Update.BrowseImageCommand}" />
+                                                    <Button Grid.Column="2" Width="34" Padding="0"
+                                                            ToolTip.Tip="Chọn thư mục ảnh Update"
+                                                            Command="{Binding #Root.DataContext.Update.BrowseImageCommand}">
+                                                        <PathIcon Data="{DynamicResource IconFolder}" />
+                                                    </Button>
                                                 </Grid>
                                             </StackPanel>
                                             <StackPanel Grid.Column="2">
@@ -589,8 +693,11 @@
                                                 <Grid ColumnDefinitions="*,6,Auto">
                                                     <TextBox Grid.Column="0" Classes="mono" FontSize="12"
                                                              Text="{Binding #Root.DataContext.VideoDir}" />
-                                                    <Button Grid.Column="2" Content="…" Width="34" Padding="0"
-                                                            Command="{Binding #Root.DataContext.BrowseVideoDirCommand}" />
+                                                    <Button Grid.Column="2" Width="34" Padding="0"
+                                                            ToolTip.Tip="Chọn thư mục video"
+                                                            Command="{Binding #Root.DataContext.BrowseVideoDirCommand}">
+                                                        <PathIcon Data="{DynamicResource IconFolder}" />
+                                                    </Button>
                                                 </Grid>
                                             </StackPanel>
                                         </Grid>
@@ -740,12 +847,22 @@
                                     <Run Text="Nhật ký Scrape — " /><Run Text="{Binding #Root.DataContext.SelectedAccount.DisplayName}" /><Run Text=" (500 dòng cuối · riêng acc này)" />
                                 </TextBlock>
                                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                                    <Button Padding="8,2" FontSize="11.5" Content="📂 Log acc này" Margin="0,0,6,0"
+                                    <Button Padding="8,2" FontSize="11.5" Margin="0,0,6,0"
                                             Command="{Binding #Root.DataContext.OpenScrapeAccLogCommand}"
-                                            ToolTip.Tip="Mở file log RIÊNG của tài khoản đang chọn (chỉ dòng scrape của acc này)." />
-                                    <Button Padding="8,2" FontSize="11.5" Content="📂 Log gộp"
+                                            ToolTip.Tip="Mở file log RIÊNG của tài khoản đang chọn (chỉ dòng scrape của acc này).">
+                                        <StackPanel Orientation="Horizontal" Spacing="6">
+                                            <PathIcon Data="{DynamicResource IconFolder}" Width="14" Height="14" />
+                                            <TextBlock Text="Log acc này" />
+                                        </StackPanel>
+                                    </Button>
+                                    <Button Padding="8,2" FontSize="11.5"
                                             Command="{Binding OpenLogFileCommand}"
-                                            ToolTip.Tip="Mở file log GỘP mọi acc trộn chung (file cũ logs\workspace-scrape.log)." />
+                                            ToolTip.Tip="Mở file log GỘP mọi acc trộn chung (file cũ logs\workspace-scrape.log).">
+                                        <StackPanel Orientation="Horizontal" Spacing="6">
+                                            <PathIcon Data="{DynamicResource IconFolder}" Width="14" Height="14" />
+                                            <TextBlock Text="Log gộp" />
+                                        </StackPanel>
+                                    </Button>
                                 </StackPanel>
                             </Grid>
                             <Border CornerRadius="6" ClipToBounds="True" Background="{DynamicResource LogBackgroundBrush}">
@@ -764,12 +881,22 @@
                                 <Run Text="Nhật ký Update — " /><Run Text="{Binding #Root.DataContext.SelectedAccount.DisplayName}" /><Run Text=" (500 dòng cuối · riêng acc này)" />
                             </TextBlock>
                             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                                <Button Padding="8,2" FontSize="11.5" Content="📂 Log acc này" Margin="0,0,6,0"
+                                <Button Padding="8,2" FontSize="11.5" Margin="0,0,6,0"
                                         Command="{Binding #Root.DataContext.OpenUpdateAccLogCommand}"
-                                        ToolTip.Tip="Mở file log RIÊNG của tài khoản đang chọn (chỉ dòng import/update/tên SP của acc này)." />
-                                <Button Padding="8,2" FontSize="11.5" Content="📂 Log gộp"
+                                        ToolTip.Tip="Mở file log RIÊNG của tài khoản đang chọn (chỉ dòng import/update/tên SP của acc này).">
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                        <PathIcon Data="{DynamicResource IconFolder}" Width="14" Height="14" />
+                                        <TextBlock Text="Log acc này" />
+                                    </StackPanel>
+                                </Button>
+                                <Button Padding="8,2" FontSize="11.5"
                                         Command="{Binding OpenLogFileCommand}"
-                                        ToolTip.Tip="Mở file log GỘP mọi acc trộn chung (file cũ logs\workspace-update.log)." />
+                                        ToolTip.Tip="Mở file log GỘP mọi acc trộn chung (file cũ logs\workspace-update.log).">
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                        <PathIcon Data="{DynamicResource IconFolder}" Width="14" Height="14" />
+                                        <TextBlock Text="Log gộp" />
+                                    </StackPanel>
+                                </Button>
                             </StackPanel>
                         </Grid>
                         <Border CornerRadius="6" ClipToBounds="True" Background="{DynamicResource LogBackgroundBrush}">
@@ -781,11 +908,16 @@
 
                 <!-- Nút Dừng: DataContext của Grid này = WorkspaceViewModel (không cần #Root). FallbackValue=False
                      → acc null / không chạy gì thì ẨN HẲN. Tab bên trái, nút bên phải nên không đè lên tab. -->
-                <Button Classes="danger" Content="■ Dừng việc shop này"
-                        HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,7,18,0"
+                <Button Classes="danger"
+                        HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,12,18,0"
                         IsVisible="{Binding SelectedAccount.HasRunningWork, FallbackValue=False}"
                         Command="{Binding StopSelectedWorkCommand}"
-                        ToolTip.Tip="Dừng scrape / import / update / tên SP đang chạy của tài khoản đang chọn (shop đang chạy). Tài khoản khác chạy tiếp." />
+                        ToolTip.Tip="Dừng scrape / import / update / tên SP đang chạy của tài khoản đang chọn (shop đang chạy). Tài khoản khác chạy tiếp.">
+                    <StackPanel Orientation="Horizontal" Spacing="7">
+                        <PathIcon Data="{DynamicResource IconStop}" />
+                        <TextBlock Text="Dừng việc shop này" />
+                    </StackPanel>
+                </Button>
             </Grid>
         </Grid>
     </Grid>

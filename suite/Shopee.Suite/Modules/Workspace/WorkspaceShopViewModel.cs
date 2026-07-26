@@ -95,18 +95,14 @@ public sealed partial class WorkspaceShopViewModel : ObservableObject
         }
     }
 
-    // Đang chạy (máy này HOẶC máy khác) — XAML dựa vào đây tô nút xanh (viền + nền nhạt + icon ■).
+    // Đang chạy (máy này HOẶC máy khác) — XAML dựa vào đây để đổi nút sang ICON CAM + VIỀN CAM (nền giữ trắng
+    // theo luật nút mới; bấm lại để dừng — tooltip nói rõ).
+    // Icon nút cố định theo OP (đặt thẳng trong WorkspaceView.axaml: IconPlay/IconImport/IconEdit/IconSparkle),
+    // GIỮ NGUYÊN cả khi đang chạy — đổi icon lúc chạy làm nút "nhảy" hình.
     public bool ScrapeRunning => OpState(CoordOp.Scrape, IsScraping).running;
     public bool ImportRunning => OpState(CoordOp.Import, IsImporting).running;
     public bool UpdateRunning => OpState(CoordOp.Update, IsUpdatingShop).running;
     public bool RewriteRunning => OpState(CoordOp.Rewrite, IsRewriting).running;
-
-    // Icon nút = ICON CỦA OP, GIỮ NGUYÊN cả khi đang chạy: theo bộ design, "đang chạy" đã thể hiện bằng NỀN CAM
-    // của nút (bấm lại để dừng — tooltip nói rõ), nên không đổi glyph sang ■ nữa (đổi glyph làm nút "nhảy" chữ).
-    public string ScrapeToggleContent => "▶";
-    public string ImportToggleContent => "⇧";
-    public string UpdateToggleContent => "✎";
-    public string RewriteToggleContent => "●";
 
     // Bật nút khi: MÁY NÀY đang chạy op đó (để dừng) HOẶC được phép bắt đầu (theo quy tắc khoá).
     public bool ScrapeToggleEnabled => IsScraping || CanScrape;
@@ -150,7 +146,6 @@ public sealed partial class WorkspaceShopViewModel : ObservableObject
         foreach (var n in new[]
         {
             nameof(ScrapeRunning), nameof(ImportRunning), nameof(UpdateRunning), nameof(RewriteRunning),
-            nameof(ScrapeToggleContent), nameof(ImportToggleContent), nameof(UpdateToggleContent), nameof(RewriteToggleContent),
             nameof(ScrapeToggleEnabled), nameof(ImportToggleEnabled), nameof(UpdateToggleEnabled), nameof(RewriteToggleEnabled),
             nameof(ScrapeToggleTip), nameof(ImportToggleTip), nameof(UpdateToggleTip), nameof(RewriteToggleTip),
             nameof(CanScrape), nameof(CanStartUpdate), nameof(IsUpdatingAnyLocal),

@@ -51,8 +51,13 @@
 
                                 <TextBlock Classes="caption" TextWrapping="Wrap" Margin="0,12,0,0"
                                            Text="Đặt THẤP hơn để chừa CPU/RAM cho việc khác (máy mượt); CAO hơn = cào nhanh hơn nhưng máy dễ ì. Mặc định = nửa số nhân + toàn bộ RAM. Có hiệu lực đầy đủ từ lượt chạy kế tiếp." />
-                                <Button Classes="primary" Content="💾  Lưu" MinWidth="110"
-                                        HorizontalAlignment="Left" Margin="0,14,0,0" Command="{Binding SavePerformanceCommand}" />
+                                <Button Classes="primary" MinWidth="110"
+                                        HorizontalAlignment="Left" Margin="0,14,0,0" Command="{Binding SavePerformanceCommand}">
+                                    <StackPanel Orientation="Horizontal" Spacing="7">
+                                        <PathIcon Data="{DynamicResource IconSave}" />
+                                        <TextBlock Text="Lưu" />
+                                    </StackPanel>
+                                </Button>
                             </StackPanel>
                         </Border>
 
@@ -85,7 +90,12 @@
                                 <Grid ColumnDefinitions="*,Auto">
                                     <TextBox Grid.Column="0" VerticalContentAlignment="Center"
                                              Text="{Binding MachineDisplayName}" />
-                                    <Button Grid.Column="1" Content="💾 Lưu tên" Margin="8,0,0,0" Command="{Binding SaveMachineNameCommand}" />
+                                    <Button Grid.Column="1" Margin="8,0,0,0" Command="{Binding SaveMachineNameCommand}">
+                                        <StackPanel Orientation="Horizontal" Spacing="7">
+                                            <PathIcon Data="{DynamicResource IconSave}" />
+                                            <TextBlock Text="Lưu tên" />
+                                        </StackPanel>
+                                    </Button>
                                 </Grid>
                             </StackPanel>
                         </Border>
@@ -111,21 +121,38 @@
                                            Text="Bấm &quot;Kiểm tra&quot; để thử URL/token trước; &quot;Kết nối ngay&quot; lưu + áp dụng liền (khỏi khởi động lại)." />
 
                                 <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
-                                    <Button Classes="primary" Content="{Binding ConnectToggleText}" MinWidth="150"
+                                    <Button Classes="primary" MinWidth="150"
                                             Command="{Binding ConnectToggleCommand}"
-                                            ToolTip.Tip="Chưa nối → kết nối; đang nối → ngắt. Áp dụng ngay, không cần khởi động lại." />
-                                    <Button Content="⚡  Kiểm tra" Margin="10,0,0,0" Command="{Binding TestHubClientCommand}"
+                                            ToolTip.Tip="Chưa nối → kết nối; đang nối → ngắt. Áp dụng ngay, không cần khởi động lại.">
+                                        <StackPanel Orientation="Horizontal" Spacing="7">
+                                            <PathIcon Data="{DynamicResource IconSync}" />
+                                            <TextBlock Text="{Binding ConnectToggleText}" />
+                                        </StackPanel>
+                                    </Button>
+                                    <!-- "Kiểm tra" = ping thử, không có mục riêng trong bảng ánh xạ → để CHỮ THUẦN
+                                         (luật nút: icon chỉ thêm khi cần thiết) thay vì bịa icon mới. -->
+                                    <Button Content="Kiểm tra" Margin="10,0,0,0" Command="{Binding TestHubClientCommand}"
                                             ToolTip.Tip="Ping thử Hub bằng URL/token đang nhập để biết có nối được không." />
-                                    <Button Content="💾  Chỉ lưu" Margin="10,0,0,0" Command="{Binding SaveHubClientCommand}"
-                                            ToolTip.Tip="Lưu cấu hình, áp dụng ở lần khởi động app kế tiếp." />
+                                    <Button Margin="10,0,0,0" Command="{Binding SaveHubClientCommand}"
+                                            ToolTip.Tip="Lưu cấu hình, áp dụng ở lần khởi động app kế tiếp.">
+                                        <StackPanel Orientation="Horizontal" Spacing="7">
+                                            <PathIcon Data="{DynamicResource IconSave}" />
+                                            <TextBlock Text="Chỉ lưu" />
+                                        </StackPanel>
+                                    </Button>
                                 </StackPanel>
 
                                 <TextBlock Text="{Binding HubClientStatus}" Margin="0,10,0,0" FontWeight="SemiBold" TextWrapping="Wrap"
                                            IsVisible="{Binding HubClientStatus, Converter={StaticResource StringToBool}}" />
 
-                                <Button Content="⬆  Đẩy cấu hình lên Hub" HorizontalAlignment="Left" Margin="0,12,0,0"
+                                <Button HorizontalAlignment="Left" Margin="0,12,0,0"
                                         Command="{Binding PushConfigToHubCommand}"
-                                        ToolTip.Tip="Đẩy accounts/bigseller/cookie hiện tại lên Hub làm nguồn cho các máy khác kéo về." />
+                                        ToolTip.Tip="Đẩy accounts/bigseller/cookie hiện tại lên Hub làm nguồn cho các máy khác kéo về.">
+                                    <StackPanel Orientation="Horizontal" Spacing="7">
+                                        <PathIcon Data="{DynamicResource IconExport}" />
+                                        <TextBlock Text="Đẩy cấu hình lên Hub" />
+                                    </StackPanel>
+                                </Button>
                             </StackPanel>
                         </Border>
 

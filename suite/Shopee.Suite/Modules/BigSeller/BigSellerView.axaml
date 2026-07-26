@@ -25,22 +25,45 @@
             <!-- LEFT: account list -->
             <DockPanel Grid.Column="0">
                 <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,10">
-                    <Button Classes="success" Content="+ Thêm" MinWidth="78"
-                            Command="{Binding AddCommand}" />
-                    <Button Classes="danger" Content="− Xóa" MinWidth="72"
-                            Margin="8,0,0,0" Command="{Binding DeleteCommand}" />
-                    <Button Content="💾 Lưu" Margin="8,0,0,0" Command="{Binding SaveCommand}" />
+                    <Button Classes="success" MinWidth="78" Command="{Binding AddCommand}">
+                        <StackPanel Orientation="Horizontal" Spacing="7">
+                            <PathIcon Data="{DynamicResource IconAdd}" />
+                            <TextBlock Text="Thêm" />
+                        </StackPanel>
+                    </Button>
+                    <Button Classes="destructive" MinWidth="72" Margin="8,0,0,0" Command="{Binding DeleteCommand}">
+                        <StackPanel Orientation="Horizontal" Spacing="7">
+                            <PathIcon Data="{DynamicResource IconDelete}" />
+                            <TextBlock Text="Xóa" />
+                        </StackPanel>
+                    </Button>
+                    <Button Margin="8,0,0,0" Command="{Binding SaveCommand}">
+                        <StackPanel Orientation="Horizontal" Spacing="7">
+                            <PathIcon Data="{DynamicResource IconSave}" />
+                            <TextBlock Text="Lưu" />
+                        </StackPanel>
+                    </Button>
                 </StackPanel>
 
                 <!-- Tự đăng nhập TẤT CẢ tk (headless, không hiện cửa sổ) rồi lưu cookie — dưới list. -->
                 <StackPanel DockPanel.Dock="Bottom" Margin="0,10,0,0">
-                    <Button Classes="primary" Content="🔐  Đăng nhập tất cả (headless)"
+                    <Button Classes="primary"
                             HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
                             Command="{Binding LoginAllCommand}"
-                            ToolTip.Tip="Tự đăng nhập HEADLESS mọi tk có đủ Email + Mật khẩu rồi lưu cookie cho client. Cần API key OpenAI (trang Cấu hình AI trên Hub) để giải captcha; tk đòi mã email sẽ được báo để đăng nhập tay 1 lần." />
-                    <Button Classes="danger" Content="■ Dừng" Margin="0,6,0,0"
+                            ToolTip.Tip="Tự đăng nhập HEADLESS mọi tk có đủ Email + Mật khẩu rồi lưu cookie cho client. Cần API key OpenAI (trang Cấu hình AI trên Hub) để giải captcha; tk đòi mã email sẽ được báo để đăng nhập tay 1 lần.">
+                        <StackPanel Orientation="Horizontal" Spacing="7">
+                            <PathIcon Data="{DynamicResource IconLogin}" />
+                            <TextBlock Text="Đăng nhập tất cả (headless)" />
+                        </StackPanel>
+                    </Button>
+                    <Button Classes="danger" Margin="0,6,0,0"
                             HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
-                            IsVisible="{Binding IsLoggingIn}" Command="{Binding StopLoginCommand}" />
+                            IsVisible="{Binding IsLoggingIn}" Command="{Binding StopLoginCommand}">
+                        <StackPanel Orientation="Horizontal" Spacing="7">
+                            <PathIcon Data="{DynamicResource IconStop}" />
+                            <TextBlock Text="Dừng" />
+                        </StackPanel>
+                    </Button>
                 </StackPanel>
 
                 <Border Classes="card" ClipToBounds="True">
@@ -101,16 +124,24 @@
                                 <TextBlock Text="Mật khẩu BigSeller (để tự đăng nhập)" Classes="caption" />
                                 <TextBox PasswordChar="●" Text="{Binding Password, Mode=TwoWay}" Margin="0,3,0,10" />
 
-                                <!-- Cả cụm Workbook (label + ô path + chọn file + ↻ Sheet) CHỈ cho excel-mode; hub-mode
+                                <!-- Cả cụm Workbook (label + ô path + chọn file + Tải lại Sheet) CHỈ cho excel-mode; hub-mode
                                      ẨN sạch (kho dữ liệu ở Hub, không có khái niệm workbook/sheet) → chỉ còn DataSourceLabel. -->
                                 <TextBlock Text="Workbook (Excel)" Classes="caption" IsVisible="{Binding CanPickWorkbook}" />
                                 <Grid Margin="0,3,0,3" ColumnDefinitions="*,Auto,Auto" IsVisible="{Binding CanPickWorkbook}">
                                     <TextBox Grid.Column="0" Text="{Binding WorkbookPath}" IsReadOnly="True"
                                              Classes="mono" />
-                                    <Button Grid.Column="1" Content="…" Width="40" Margin="8,0,0,0"
-                                            Command="{Binding #Root.DataContext.BrowseWorkbookCommand}" />
-                                    <Button Grid.Column="2" Content="↻ Sheet" Margin="8,0,0,0"
-                                            Command="{Binding #Root.DataContext.RefreshSheetsCommand}" />
+                                    <Button Grid.Column="1" Width="40" Margin="8,0,0,0" Padding="0"
+                                            ToolTip.Tip="Chọn file workbook"
+                                            Command="{Binding #Root.DataContext.BrowseWorkbookCommand}">
+                                        <PathIcon Data="{DynamicResource IconFolder}" />
+                                    </Button>
+                                    <Button Grid.Column="2" Margin="8,0,0,0"
+                                            Command="{Binding #Root.DataContext.RefreshSheetsCommand}">
+                                        <StackPanel Orientation="Horizontal" Spacing="7">
+                                            <PathIcon Data="{DynamicResource IconRefresh}" />
+                                            <TextBlock Text="Sheet" />
+                                        </StackPanel>
+                                    </Button>
                                 </Grid>
                                 <!-- Excel-mode (chuyển tiếp): workbook giờ là FILE LOCAL, không còn sync qua Hub. -->
                                 <TextBlock Text="{Binding WorkbookSyncHint}" IsVisible="{Binding CanPickWorkbook}"
@@ -124,8 +155,11 @@
                                 <Grid Margin="0,3,0,8" ColumnDefinitions="*,Auto">
                                     <TextBox Grid.Column="0" Text="{Binding CookieFile}" IsReadOnly="True"
                                              Classes="mono" />
-                                    <Button Grid.Column="1" Content="…" Width="40" Margin="8,0,0,0"
-                                            Command="{Binding #Root.DataContext.BrowseCookieCommand}" />
+                                    <Button Grid.Column="1" Width="40" Margin="8,0,0,0" Padding="0"
+                                            ToolTip.Tip="Chọn file cookie"
+                                            Command="{Binding #Root.DataContext.BrowseCookieCommand}">
+                                        <PathIcon Data="{DynamicResource IconFolder}" />
+                                    </Button>
                                 </Grid>
                                 <TextBlock Text="{Binding CookieStatus}" FontSize="12.5" Margin="0,0,0,10"
                                            Foreground="{DynamicResource TextSecondaryBrush}" />
@@ -148,21 +182,41 @@
                                            Foreground="{DynamicResource TextSecondaryBrush}" />
 
                                 <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
-                                    <Button Classes="primary" Content="Mở Profile Bigseller" MinWidth="150"
-                                            Command="{Binding #Root.DataContext.LoginCommand}" />
-                                    <Button Classes="danger" Content="Đóng" MinWidth="80" Margin="10,0,0,0"
-                                            Command="{Binding #Root.DataContext.StopLoginCommand}" />
+                                    <Button Classes="primary" MinWidth="150"
+                                            Command="{Binding #Root.DataContext.LoginCommand}">
+                                        <StackPanel Orientation="Horizontal" Spacing="7">
+                                            <PathIcon Data="{DynamicResource IconLogin}" />
+                                            <TextBlock Text="Mở Profile Bigseller" />
+                                        </StackPanel>
+                                    </Button>
+                                    <Button Classes="danger" MinWidth="80" Margin="10,0,0,0"
+                                            Command="{Binding #Root.DataContext.StopLoginCommand}">
+                                        <StackPanel Orientation="Horizontal" Spacing="7">
+                                            <PathIcon Data="{DynamicResource IconClose}" />
+                                            <TextBlock Text="Đóng" />
+                                        </StackPanel>
+                                    </Button>
                                 </StackPanel>
                                 <TextBlock Classes="caption" Margin="0,0,0,8" TextWrapping="Wrap"
                                            Text="Có proxy → đăng nhập qua proxy đó; không → IP máy. Cookie tự lưu." />
 
                                 <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
-                                    <Button Content="🗑 Xóa Medias" MinWidth="150"
+                                    <Button Classes="destructive" MinWidth="150"
                                             Command="{Binding #Root.DataContext.CleanMediasCommand}"
-                                            ToolTip.Tip="Xóa TOÀN BỘ media trong thư viện ảnh (Material Center) BigSeller của tk này — luồng dọn media của Update sản phẩm. Mở Brave riêng bằng cookie tk, dọn xong tự đóng." />
-                                    <Button Classes="danger" Content="■ Dừng" MinWidth="80" Margin="10,0,0,0"
+                                            ToolTip.Tip="Xóa TOÀN BỘ media trong thư viện ảnh (Material Center) BigSeller của tk này — luồng dọn media của Update sản phẩm. Mở Brave riêng bằng cookie tk, dọn xong tự đóng.">
+                                        <StackPanel Orientation="Horizontal" Spacing="7">
+                                            <PathIcon Data="{DynamicResource IconDelete}" />
+                                            <TextBlock Text="Xóa Medias" />
+                                        </StackPanel>
+                                    </Button>
+                                    <Button Classes="danger" MinWidth="80" Margin="10,0,0,0"
                                             IsVisible="{Binding #Root.DataContext.IsCleaningMedia}"
-                                            Command="{Binding #Root.DataContext.StopCleanMediasCommand}" />
+                                            Command="{Binding #Root.DataContext.StopCleanMediasCommand}">
+                                        <StackPanel Orientation="Horizontal" Spacing="7">
+                                            <PathIcon Data="{DynamicResource IconStop}" />
+                                            <TextBlock Text="Dừng" />
+                                        </StackPanel>
+                                    </Button>
                                 </StackPanel>
                                 <TextBlock Classes="caption" Margin="0,0,0,8" TextWrapping="Wrap"
                                            Text="Xóa Medias: dọn sạch thư viện ảnh khi kho đầy (BigSeller chặn upload ảnh lúc update)." />
@@ -175,9 +229,19 @@
                             <Grid Grid.Row="0" Margin="0,0,0,8">
                                 <TextBlock Text="Shops (mỗi shop 1 sheet)" Classes="h2" VerticalAlignment="Center" />
                                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                                    <Button Content="+ Thêm shop" Command="{Binding #Root.DataContext.AddShopCommand}" />
-                                    <Button Content="− Xóa shop" Margin="8,0,0,0"
-                                            Command="{Binding #Root.DataContext.RemoveShopCommand}" />
+                                    <Button Classes="success" Command="{Binding #Root.DataContext.AddShopCommand}">
+                                        <StackPanel Orientation="Horizontal" Spacing="7">
+                                            <PathIcon Data="{DynamicResource IconAdd}" />
+                                            <TextBlock Text="Thêm shop" />
+                                        </StackPanel>
+                                    </Button>
+                                    <Button Classes="destructive" Margin="8,0,0,0"
+                                            Command="{Binding #Root.DataContext.RemoveShopCommand}">
+                                        <StackPanel Orientation="Horizontal" Spacing="7">
+                                            <PathIcon Data="{DynamicResource IconDelete}" />
+                                            <TextBlock Text="Xóa shop" />
+                                        </StackPanel>
+                                    </Button>
                                     <!-- (Đã bỏ nút "⇄ Sync shop → Đơn hàng": module Đơn hàng nay đăng nhập
                                          SUBACCOUNT rồi tự đọc danh sách shop từ /portal/shop, không cần tạo sẵn
                                          mỗi shop một dòng tài khoản nữa.) -->

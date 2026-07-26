@@ -20,9 +20,14 @@
                                 <TextBlock Text="{Binding FrameText}" TextWrapping="Wrap" Margin="0,4,0,0"
                                            Foreground="{DynamicResource TextSecondaryBrush}" FontSize="12" />
                                 <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
-                                    <Button Classes="danger" Content="Xoá tiến độ" MinWidth="110"
+                                    <Button Classes="destructive" MinWidth="110"
                                             Command="{Binding $parent[Window].DataContext.ClearProgressCommand}"
-                                            CommandParameter="{Binding}" />
+                                            CommandParameter="{Binding}">
+                                        <StackPanel Orientation="Horizontal" Spacing="7">
+                                            <PathIcon Data="{DynamicResource IconDelete}" />
+                                            <TextBlock Text="Xoá tiến độ" />
+                                        </StackPanel>
+                                    </Button>
                                 </StackPanel>
                             </StackPanel>
                         </Border>
@@ -32,8 +37,18 @@
         </ScrollViewer>
 
         <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="10" Margin="0,16,0,0">
-            <Button Content="Làm mới" MinWidth="90" Command="{Binding RefreshCommand}" />
-            <Button Classes="primary" Content="Đóng" MinWidth="90" Click="OnClose" />
+            <Button MinWidth="90" Command="{Binding RefreshCommand}">
+                <StackPanel Orientation="Horizontal" Spacing="7">
+                    <PathIcon Data="{DynamicResource IconRefresh}" />
+                    <TextBlock Text="Làm mới" />
+                </StackPanel>
+            </Button>
+            <Button Classes="primary" MinWidth="90" Click="OnClose">
+                <StackPanel Orientation="Horizontal" Spacing="7">
+                    <PathIcon Data="{DynamicResource IconClose}" />
+                    <TextBlock Text="Đóng" />
+                </StackPanel>
+            </Button>
         </StackPanel>
     </Grid>
 </Window>

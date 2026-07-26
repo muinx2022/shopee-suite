@@ -53,12 +53,24 @@
                     <!-- Button row -->
                     <Grid Grid.Row="3" Margin="0,14,0,12">
                         <StackPanel Orientation="Horizontal">
-                            <Button Classes="success" Content="▶  Chạy"
-                                    MinWidth="120" Command="{Binding RunCommand}" />
-                            <Button Classes="danger" Content="■  Dừng"
-                                    MinWidth="100" Margin="10,0,0,0" Command="{Binding StopCommand}" />
-                            <Button Content="📁  Thư mục profile" Margin="10,0,0,0"
-                                    Command="{Binding OpenProfilesCommand}" />
+                            <Button Classes="success" MinWidth="120" Command="{Binding RunCommand}">
+                                <StackPanel Orientation="Horizontal" Spacing="7">
+                                    <PathIcon Data="{DynamicResource IconPlay}" />
+                                    <TextBlock Text="Chạy" />
+                                </StackPanel>
+                            </Button>
+                            <Button Classes="danger" MinWidth="100" Margin="10,0,0,0" Command="{Binding StopCommand}">
+                                <StackPanel Orientation="Horizontal" Spacing="7">
+                                    <PathIcon Data="{DynamicResource IconStop}" />
+                                    <TextBlock Text="Dừng" />
+                                </StackPanel>
+                            </Button>
+                            <Button Margin="10,0,0,0" Command="{Binding OpenProfilesCommand}">
+                                <StackPanel Orientation="Horizontal" Spacing="7">
+                                    <PathIcon Data="{DynamicResource IconFolder}" />
+                                    <TextBlock Text="Thư mục profile" />
+                                </StackPanel>
+                            </Button>
                         </StackPanel>
                         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
                             <TextBlock Text="Số luồng" VerticalAlignment="Center" Margin="0,0,8,0"
@@ -89,10 +101,24 @@
                         <StackPanel Orientation="Horizontal">
                             <CheckBox Content="Chọn tất cả" VerticalAlignment="Center" Margin="2,0,14,0"
                                       IsChecked="{Binding SelectAll}" />
-                            <Button Content="↻  Tải lại" Command="{Binding ReloadOkCommand}" />
-                            <Button Classes="primary" Content="→  Lưu vào kho chung"
-                                    Margin="10,0,0,0" Command="{Binding SaveToSharedCommand}" />
-                            <Button Content="📂  Mở file" Margin="10,0,0,0" Command="{Binding OpenOkFileCommand}" />
+                            <Button Command="{Binding ReloadOkCommand}">
+                                <StackPanel Orientation="Horizontal" Spacing="7">
+                                    <PathIcon Data="{DynamicResource IconRefresh}" />
+                                    <TextBlock Text="Tải lại" />
+                                </StackPanel>
+                            </Button>
+                            <Button Classes="primary" Margin="10,0,0,0" Command="{Binding SaveToSharedCommand}">
+                                <StackPanel Orientation="Horizontal" Spacing="7">
+                                    <PathIcon Data="{DynamicResource IconSave}" />
+                                    <TextBlock Text="Lưu vào kho chung" />
+                                </StackPanel>
+                            </Button>
+                            <Button Margin="10,0,0,0" Command="{Binding OpenOkFileCommand}">
+                                <StackPanel Orientation="Horizontal" Spacing="7">
+                                    <PathIcon Data="{DynamicResource IconFolder}" />
+                                    <TextBlock Text="Mở file" />
+                                </StackPanel>
+                            </Button>
                         </StackPanel>
                         <TextBlock Text="{Binding OkStatus}" HorizontalAlignment="Right" VerticalAlignment="Center"
                                    Foreground="{DynamicResource AccentBrush}" FontSize="12.5" />

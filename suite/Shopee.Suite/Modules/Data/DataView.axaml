@@ -30,7 +30,7 @@
 
         <!-- ════ Banner suy giảm (chưa cấu hình Hub / Postgres chưa sẵn sàng) ════ -->
         <Border Grid.Row="1" Classes="card" Padding="12,8" Margin="0,0,0,10" IsVisible="{Binding IsDegraded}"
-                Background="#FFF7E6" BorderBrush="{DynamicResource WarningBrush}">
+                Background="{DynamicResource WarningBgBrush}" BorderBrush="{DynamicResource WarningBrush}">
             <TextBlock Text="{Binding DegradedMessage}" Foreground="{DynamicResource WarningBrush}" TextWrapping="Wrap" />
         </Border>
 
@@ -62,40 +62,80 @@
                               IsChecked="{Binding SoldOnly}" IsEnabled="{Binding CanInteract}" />
                     <CheckBox Content="SKU trùng trong shop" Margin="0,0,8,6" VerticalAlignment="Center"
                               IsChecked="{Binding DupSkuOnly}" IsEnabled="{Binding CanInteract}" />
-                    <Button Classes="primary" Content="🔍 Lọc" Margin="0,0,8,6" Command="{Binding FilterCommand}" IsEnabled="{Binding CanInteract}" />
-                    <Button Content="✖ Xóa lọc" Margin="0,0,8,6" Command="{Binding ClearFilterCommand}" IsEnabled="{Binding CanInteract}"
-                            ToolTip.Tip="Xoá mọi điều kiện lọc, hiện lại toàn bộ" />
+                    <Button Classes="primary" Margin="0,0,8,6" Command="{Binding FilterCommand}" IsEnabled="{Binding CanInteract}">
+                        <StackPanel Orientation="Horizontal" Spacing="7">
+                            <PathIcon Data="{DynamicResource IconFilter}" />
+                            <TextBlock Text="Lọc" />
+                        </StackPanel>
+                    </Button>
+                    <Button Margin="0,0,8,6" Command="{Binding ClearFilterCommand}" IsEnabled="{Binding CanInteract}"
+                            ToolTip.Tip="Xoá mọi điều kiện lọc, hiện lại toàn bộ">
+                        <StackPanel Orientation="Horizontal" Spacing="7">
+                            <PathIcon Data="{DynamicResource IconClose}" />
+                            <TextBlock Text="Xóa lọc" />
+                        </StackPanel>
+                    </Button>
                 </WrapPanel>
                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                    <Button Content="➕ Thêm dòng" Command="{Binding AddRowCommand}" IsEnabled="{Binding CanInteract}"
-                            ToolTip.Tip="Thêm 1 dòng dữ liệu vào 1 shop (chọn trong form)" />
-                    <Button Content="⟳ Tải lại" Margin="8,0,0,0" Command="{Binding RefreshCommand}" IsEnabled="{Binding CanInteract}" />
+                    <Button Command="{Binding AddRowCommand}" IsEnabled="{Binding CanInteract}"
+                            ToolTip.Tip="Thêm 1 dòng dữ liệu vào 1 shop (chọn trong form)">
+                        <StackPanel Orientation="Horizontal" Spacing="7">
+                            <PathIcon Data="{DynamicResource IconAdd}" />
+                            <TextBlock Text="Thêm dòng" />
+                        </StackPanel>
+                    </Button>
+                    <Button Margin="8,0,0,0" Command="{Binding RefreshCommand}" IsEnabled="{Binding CanInteract}">
+                        <StackPanel Orientation="Horizontal" Spacing="7">
+                            <PathIcon Data="{DynamicResource IconRefresh}" />
+                            <TextBlock Text="Tải lại" />
+                        </StackPanel>
+                    </Button>
                 </StackPanel>
             </Grid>
         </Border>
 
         <!-- ════ Bar HÀNH ĐỘNG (căn phải) — phân trang chuyển XUỐNG DƯỚI lưới để 2 cụm khỏi che nhau khi hẹp ════ -->
         <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,0,10">
-            <Button Content="☑ Chọn tất cả" Command="{Binding SelectAllPageCommand}"
-                    IsEnabled="{Binding CanInteract}" ToolTip.Tip="Chọn tất cả dòng của trang này" />
+            <Button Command="{Binding SelectAllPageCommand}"
+                    IsEnabled="{Binding CanInteract}" ToolTip.Tip="Chọn tất cả dòng của trang này">
+                <StackPanel Orientation="Horizontal" Spacing="7">
+                    <PathIcon Data="{DynamicResource IconCheckAll}" />
+                    <TextBlock Text="Chọn tất cả" />
+                </StackPanel>
+            </Button>
 
             <StackPanel Orientation="Horizontal" VerticalAlignment="Center" IsVisible="{Binding HasSelection}">
                 <Button Margin="8,0,0,0" Command="{Binding ClearSelectionCommand}" IsEnabled="{Binding CanInteract}">
-                    <TextBlock><Run Text="✖ Bỏ chọn (" /><Run Text="{Binding SelectedCount}" /><Run Text=")" /></TextBlock>
+                    <StackPanel Orientation="Horizontal" Spacing="7">
+                        <PathIcon Data="{DynamicResource IconUncheck}" />
+                        <TextBlock><Run Text="Bỏ chọn (" /><Run Text="{Binding SelectedCount}" /><Run Text=")" /></TextBlock>
+                    </StackPanel>
                 </Button>
                 <Button Classes="success" Margin="8,0,0,0" Command="{Binding MarkSoldCommand}" IsEnabled="{Binding CanInteract}">
-                    <TextBlock><Run Text="✔ Đã bán (" /><Run Text="{Binding SelectedCount}" /><Run Text=")" /></TextBlock>
+                    <StackPanel Orientation="Horizontal" Spacing="7">
+                        <PathIcon Data="{DynamicResource IconCheck}" />
+                        <TextBlock><Run Text="Đã bán (" /><Run Text="{Binding SelectedCount}" /><Run Text=")" /></TextBlock>
+                    </StackPanel>
                 </Button>
                 <Button Margin="8,0,0,0" Command="{Binding ResetSoldCommand}" IsEnabled="{Binding CanInteract}"
                         ToolTip.Tip="Xoá lịch sử đã bán của các dòng chọn (sold về 0)">
-                    <TextBlock><Run Text="↺ Đã bán = 0 (" /><Run Text="{Binding SelectedCount}" /><Run Text=")" /></TextBlock>
+                    <StackPanel Orientation="Horizontal" Spacing="7">
+                        <PathIcon Data="{DynamicResource IconRefresh}" />
+                        <TextBlock><Run Text="Đã bán = 0 (" /><Run Text="{Binding SelectedCount}" /><Run Text=")" /></TextBlock>
+                    </StackPanel>
                 </Button>
                 <Button Margin="8,0,0,0" Command="{Binding RegenSkusCommand}" IsEnabled="{Binding CanInteract}"
                         ToolTip.Tip="Cấp SKU B##### mới cho các dòng chọn (vá đuôi tên nếu có tên-sửa)">
-                    <TextBlock><Run Text="🆕 Sinh SKU mới (" /><Run Text="{Binding SelectedCount}" /><Run Text=")" /></TextBlock>
+                    <StackPanel Orientation="Horizontal" Spacing="7">
+                        <PathIcon Data="{DynamicResource IconSparkle}" />
+                        <TextBlock><Run Text="Sinh SKU mới (" /><Run Text="{Binding SelectedCount}" /><Run Text=")" /></TextBlock>
+                    </StackPanel>
                 </Button>
-                <Button Classes="danger" Margin="8,0,0,0" Command="{Binding DeleteSelectedCommand}" IsEnabled="{Binding CanInteract}">
-                    <TextBlock><Run Text="🗑 Xóa nhiều (" /><Run Text="{Binding SelectedCount}" /><Run Text=")" /></TextBlock>
+                <Button Classes="destructive" Margin="8,0,0,0" Command="{Binding DeleteSelectedCommand}" IsEnabled="{Binding CanInteract}">
+                    <StackPanel Orientation="Horizontal" Spacing="7">
+                        <PathIcon Data="{DynamicResource IconDelete}" />
+                        <TextBlock><Run Text="Xóa nhiều (" /><Run Text="{Binding SelectedCount}" /><Run Text=")" /></TextBlock>
+                    </StackPanel>
                 </Button>
             </StackPanel>
         </StackPanel>
@@ -113,8 +153,10 @@
                     <DataGridTemplateColumn Width="44">
                         <DataGridTemplateColumn.CellTemplate>
                             <DataTemplate>
-                                <Button Content="✏" Width="28" Height="26" Padding="0" HorizontalAlignment="Center" ToolTip.Tip="Sửa dòng"
-                                        Command="{Binding $parent[UserControl].DataContext.EditRowCommand}" CommandParameter="{Binding}" />
+                                <Button Width="28" Height="26" MinHeight="26" Padding="0" HorizontalAlignment="Center" ToolTip.Tip="Sửa dòng"
+                                        Command="{Binding $parent[UserControl].DataContext.EditRowCommand}" CommandParameter="{Binding}">
+                                    <PathIcon Data="{DynamicResource IconEdit}" Width="14" Height="14" />
+                                </Button>
                             </DataTemplate>
                         </DataGridTemplateColumn.CellTemplate>
                     </DataGridTemplateColumn>

@@ -11,6 +11,8 @@
          Application suite gây lẫn với AccentBrush xanh của suite), mỗi view merge file này vào Resources riêng. -->
     <ResourceDictionary.MergedDictionaries>
         <ResourceInclude Source="avares://XuLyDonShopee.App/Styles/Colors.axaml" />
+        <!-- Bộ icon hành động DÙNG CHUNG với suite (suite merge cùng file này qua avares:// trong App.axaml). -->
+        <ResourceInclude Source="avares://XuLyDonShopee.App/Styles/Icons.axaml" />
     </ResourceDictionary.MergedDictionaries>
 
     <conv:VietnameseEnumConverter x:Key="VnEnum" />

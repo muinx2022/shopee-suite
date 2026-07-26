@@ -17,8 +17,18 @@
         <TextBox Grid.Row="2" x:Name="KeysBox" Classes="mono" AcceptsReturn="True" />
 
         <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="10" Margin="0,16,0,0">
-            <Button Content="Hủy" MinWidth="90" Click="OnCancel" />
-            <Button Classes="primary" Content="Import" MinWidth="110" Click="OnOk" />
+            <Button MinWidth="90" Click="OnCancel">
+                <StackPanel Orientation="Horizontal" Spacing="7">
+                    <PathIcon Data="{DynamicResource IconClose}" />
+                    <TextBlock Text="Hủy" />
+                </StackPanel>
+            </Button>
+            <Button Classes="primary" MinWidth="110" Click="OnOk">
+                <StackPanel Orientation="Horizontal" Spacing="7">
+                    <PathIcon Data="{DynamicResource IconImport}" />
+                    <TextBlock Text="Import" />
+                </StackPanel>
+            </Button>
         </StackPanel>
     </Grid>
 </Window>

@@ -12,7 +12,12 @@
                            Classes="caption" Margin="0,3,0,0" />
             </StackPanel>
             <Button HorizontalAlignment="Right" VerticalAlignment="Center" MinWidth="110"
-                    Content="⟳  Làm mới" Command="{Binding RefreshCommand}" />
+                    Command="{Binding RefreshCommand}">
+                <StackPanel Orientation="Horizontal" Spacing="7">
+                    <PathIcon Data="{DynamicResource IconRefresh}" />
+                    <TextBlock Text="Làm mới" />
+                </StackPanel>
+            </Button>
         </Grid>
 
         <TabControl Grid.Row="1" Background="Transparent" BorderThickness="0">
@@ -88,9 +93,14 @@
                             <StackPanel>
                                 <Grid>
                                     <TextBlock Text="{Binding InterruptedHeader}" FontWeight="SemiBold" FontSize="13.5" VerticalAlignment="Center" />
-                                    <Button HorizontalAlignment="Right" VerticalAlignment="Center" MinWidth="150"
-                                            Content="▶  Tiếp tục tất cả" Command="{Binding ResumeAllJobsCommand}"
-                                            ToolTip.Tip="Đưa TẤT CẢ việc gián đoạn về hàng chờ hub để chạy tiếp." />
+                                    <Button Classes="success" HorizontalAlignment="Right" VerticalAlignment="Center" MinWidth="150"
+                                            Command="{Binding ResumeAllJobsCommand}"
+                                            ToolTip.Tip="Đưa TẤT CẢ việc gián đoạn về hàng chờ hub để chạy tiếp.">
+                                        <StackPanel Orientation="Horizontal" Spacing="7">
+                                            <PathIcon Data="{DynamicResource IconResume}" />
+                                            <TextBlock Text="Tiếp tục tất cả" />
+                                        </StackPanel>
+                                    </Button>
                                 </Grid>
                                 <TextBlock Classes="caption" TextWrapping="Wrap" Margin="0,4,0,0"
                                            Text="Việc bị dừng/lỗi giữa chừng (chưa xong). Bấm Tiếp tục → hub giao lại, máy phù hợp tự chạy nốt phần còn thiếu." />
@@ -106,10 +116,15 @@
                                                             <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextWrapping="Wrap" />
                                                             <TextBlock Text="{Binding Detail}" Classes="caption" Margin="0,2,0,0" TextWrapping="Wrap" />
                                                         </StackPanel>
-                                                        <Button Grid.Column="1" VerticalAlignment="Center" Margin="12,0,0,0" MinWidth="110"
-                                                                Content="▶  Tiếp tục"
+                                                        <Button Grid.Column="1" Classes="success" VerticalAlignment="Center"
+                                                                Margin="12,0,0,0" MinWidth="110"
                                                                 Command="{Binding $parent[ItemsControl].DataContext.ResumeJobCommand}"
-                                                                CommandParameter="{Binding}" />
+                                                                CommandParameter="{Binding}">
+                                                            <StackPanel Orientation="Horizontal" Spacing="7">
+                                                                <PathIcon Data="{DynamicResource IconResume}" />
+                                                                <TextBlock Text="Tiếp tục" />
+                                                            </StackPanel>
+                                                        </Button>
                                                     </Grid>
                                                 </Border>
                                             </DataTemplate>
@@ -153,8 +168,12 @@
             <TabItem Header="Log">
                 <Grid Margin="0,10,0,0" RowDefinitions="Auto,*">
                     <DockPanel Grid.Row="0" Margin="0,0,0,8">
-                        <Button DockPanel.Dock="Right" Content="🗑  Xoá log" Command="{Binding ClearLogsCommand}"
-                                Classes="danger" />
+                        <Button DockPanel.Dock="Right" Classes="destructive" Command="{Binding ClearLogsCommand}">
+                            <StackPanel Orientation="Horizontal" Spacing="7">
+                                <PathIcon Data="{DynamicResource IconDelete}" />
+                                <TextBlock Text="Xoá log" />
+                            </StackPanel>
+                        </Button>
                         <TextBlock VerticalAlignment="Center" Classes="caption"
                                    Text="Nhật ký từ tất cả các máy (client gửi về Hub) — mới nhất ở trên." />
                     </DockPanel>

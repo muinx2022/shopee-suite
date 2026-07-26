@@ -20,9 +20,19 @@
         <!-- Chân: nhập-đủ-17-cột + Huỷ/Lưu -->
         <Grid DockPanel.Dock="Bottom" Margin="0,14,0,0" ColumnDefinitions="Auto,*,Auto,Auto">
             <CheckBox Grid.Column="0" Content="Nhập đủ 17 cột" IsChecked="{Binding ShowAll}" VerticalAlignment="Center" />
-            <Button Grid.Column="2" Content="Huỷ" MinWidth="90" Click="OnCancel" IsEnabled="{Binding CanSave}" />
-            <Button Grid.Column="3" Classes="primary" Content="✔ Lưu" MinWidth="110" Margin="10,0,0,0"
-                    Click="OnSave" IsEnabled="{Binding CanSave}" />
+            <Button Grid.Column="2" MinWidth="90" Click="OnCancel" IsEnabled="{Binding CanSave}">
+                <StackPanel Orientation="Horizontal" Spacing="7">
+                    <PathIcon Data="{DynamicResource IconClose}" />
+                    <TextBlock Text="Huỷ" />
+                </StackPanel>
+            </Button>
+            <Button Grid.Column="3" Classes="primary" MinWidth="110" Margin="10,0,0,0"
+                    Click="OnSave" IsEnabled="{Binding CanSave}">
+                <StackPanel Orientation="Horizontal" Spacing="7">
+                    <PathIcon Data="{DynamicResource IconSave}" />
+                    <TextBlock Text="Lưu" />
+                </StackPanel>
+            </Button>
         </Grid>
 
         <!-- Dòng lỗi trong window -->

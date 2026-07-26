@@ -16,8 +16,19 @@
              RequestedThemeVariant="Light">
 
     <Application.Resources>
-        <conv:CountToBoolConverter x:Key="CountToBool" />
-        <conv:StringToBoolConverter x:Key="StringToBool" />
+        <ResourceDictionary>
+            <!-- Bộ icon HÀNH ĐỘNG dùng chung 2 module — nguồn DUY NHẤT nằm ở project tầng dưới
+                 (suite tham chiếu XuLyDonShopee.App nên avares:// này hợp lệ; chiều ngược lại KHÔNG có,
+                 nên bộ icon phải nằm bên orders để module Đơn hàng cũng với tới được).
+                 Merge ở cấp Application để mọi view/window của suite thấy được (view suite do ViewLocator
+                 dựng độc lập rồi mới gắn vào cây → chỉ thấy phạm vi chính nó + Application). -->
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceInclude Source="avares://XuLyDonShopee.App/Styles/Icons.axaml" />
+            </ResourceDictionary.MergedDictionaries>
+
+            <conv:CountToBoolConverter x:Key="CountToBool" />
+            <conv:StringToBoolConverter x:Key="StringToBool" />
+        </ResourceDictionary>
     </Application.Resources>
 
     <Application.Styles>

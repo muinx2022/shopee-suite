@@ -31,8 +31,16 @@
                             <TextBlock Text="File link category (.txt: mỗi dòng 1 link)" Classes="caption" />
                             <Grid Margin="0,4,0,12" ColumnDefinitions="*,Auto,Auto">
                                 <TextBox Grid.Column="0" Text="{Binding FilesDisplay}" IsReadOnly="True" FontSize="11.5" VerticalContentAlignment="Center" />
-                                <Button Grid.Column="1" Content="📂  Chọn file" Margin="8,0,0,0" Command="{Binding ChooseFilesCommand}" />
-                                <Button Grid.Column="2" Content="🗑" Width="38" Margin="6,0,0,0" Command="{Binding ClearFilesCommand}" ToolTip.Tip="Bỏ file" />
+                                <Button Grid.Column="1" Margin="8,0,0,0" Command="{Binding ChooseFilesCommand}">
+                                    <StackPanel Orientation="Horizontal" Spacing="7">
+                                        <PathIcon Data="{DynamicResource IconFolder}" />
+                                        <TextBlock Text="Chọn file" />
+                                    </StackPanel>
+                                </Button>
+                                <Button Grid.Column="2" Classes="destructive" Width="38" Padding="0" Margin="6,0,0,0"
+                                        Command="{Binding ClearFilesCommand}" ToolTip.Tip="Bỏ file">
+                                    <PathIcon Data="{DynamicResource IconDelete}" />
+                                </Button>
                             </Grid>
 
                             <!-- Dòng 2: Bộ lọc Khu vực (Nơi Bán) + Lane + nút chạy -->
@@ -46,12 +54,29 @@
                                     <TextBox Width="48" Text="{Binding LaneCount}" VerticalAlignment="Center" />
                                 </StackPanel>
                                 <StackPanel Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Bottom">
-                                    <Button Content="↻" Width="36" Command="{Binding ReloadCommand}" />
-                                    <Button Classes="success" Content="▶  Tìm kiếm" MinWidth="110" Margin="8,0,0,0" Command="{Binding RunCommand}"
-                                            ToolTip.Tip="Chạy mới — mỗi link tạo lượt mới từ danh mục đầu." />
-                                    <Button Content="⏯ Tiếp tục" MinWidth="96" Margin="8,0,0,0" Command="{Binding ResumeCommand}"
-                                            ToolTip.Tip="Resume các link chưa kết thúc ĐÚNG từ danh mục/trang đã dừng (giữ SP đã cào)." />
-                                    <Button Classes="danger" Content="■  Dừng" MinWidth="80" Margin="8,0,0,0" Command="{Binding StopCommand}" />
+                                    <Button Width="36" Padding="0" Command="{Binding ReloadCommand}" ToolTip.Tip="Nạp lại danh sách link">
+                                        <PathIcon Data="{DynamicResource IconRefresh}" />
+                                    </Button>
+                                    <Button Classes="success" MinWidth="110" Margin="8,0,0,0" Command="{Binding RunCommand}"
+                                            ToolTip.Tip="Chạy mới — mỗi link tạo lượt mới từ danh mục đầu.">
+                                        <StackPanel Orientation="Horizontal" Spacing="7">
+                                            <PathIcon Data="{DynamicResource IconPlay}" />
+                                            <TextBlock Text="Tìm kiếm" />
+                                        </StackPanel>
+                                    </Button>
+                                    <Button MinWidth="96" Margin="8,0,0,0" Command="{Binding ResumeCommand}"
+                                            ToolTip.Tip="Resume các link chưa kết thúc ĐÚNG từ danh mục/trang đã dừng (giữ SP đã cào).">
+                                        <StackPanel Orientation="Horizontal" Spacing="7">
+                                            <PathIcon Data="{DynamicResource IconResume}" />
+                                            <TextBlock Text="Tiếp tục" />
+                                        </StackPanel>
+                                    </Button>
+                                    <Button Classes="danger" MinWidth="80" Margin="8,0,0,0" Command="{Binding StopCommand}">
+                                        <StackPanel Orientation="Horizontal" Spacing="7">
+                                            <PathIcon Data="{DynamicResource IconStop}" />
+                                            <TextBlock Text="Dừng" />
+                                        </StackPanel>
+                                    </Button>
                                 </StackPanel>
                             </Grid>
                         </StackPanel>
@@ -64,10 +89,25 @@
                                 <Run Text="Link đã nạp — tick chọn để search (" /><Run Text="{Binding LoadedLinks.Count, Mode=OneWay}" /><Run Text=")" />
                             </TextBlock>
                             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                                <Button Content="✔ Chọn tất cả" Command="{Binding SelectAllLinksCommand}" />
-                                <Button Content="✖ Bỏ chọn" Margin="8,0,0,0" Command="{Binding UnselectAllLinksCommand}" />
-                                <Button Classes="danger" Content="🗑 Xóa link đã chọn" Margin="8,0,0,0"
-                                        Command="{Binding RemoveSelectedLinksCommand}" ToolTip.Tip="Xóa các link đang tick khỏi danh sách." />
+                                <Button Command="{Binding SelectAllLinksCommand}">
+                                    <StackPanel Orientation="Horizontal" Spacing="7">
+                                        <PathIcon Data="{DynamicResource IconCheckAll}" />
+                                        <TextBlock Text="Chọn tất cả" />
+                                    </StackPanel>
+                                </Button>
+                                <Button Margin="8,0,0,0" Command="{Binding UnselectAllLinksCommand}">
+                                    <StackPanel Orientation="Horizontal" Spacing="7">
+                                        <PathIcon Data="{DynamicResource IconUncheck}" />
+                                        <TextBlock Text="Bỏ chọn" />
+                                    </StackPanel>
+                                </Button>
+                                <Button Classes="destructive" Margin="8,0,0,0"
+                                        Command="{Binding RemoveSelectedLinksCommand}" ToolTip.Tip="Xóa các link đang tick khỏi danh sách.">
+                                    <StackPanel Orientation="Horizontal" Spacing="7">
+                                        <PathIcon Data="{DynamicResource IconDelete}" />
+                                        <TextBlock Text="Xóa link đã chọn" />
+                                    </StackPanel>
+                                </Button>
                             </StackPanel>
                         </Grid>
                         <Border Classes="card" ClipToBounds="True">
@@ -114,9 +154,12 @@
                             <DataTemplate>
                                 <StackPanel Orientation="Horizontal">
                                     <TextBlock Text="{Binding Header}" VerticalAlignment="Center" />
-                                    <Button Content="✕" ToolTip.Tip="Đóng tab (dừng link nếu đang chạy)" Margin="6,0,0,0" Padding="4,0" FontSize="11" MinWidth="0" Height="20"
+                                    <Button ToolTip.Tip="Đóng tab (dừng link nếu đang chạy)" Margin="6,0,0,0" Padding="3,0" MinWidth="0"
+                                            Height="20" MinHeight="20"
                                             Command="{Binding $parent[UserControl].DataContext.CloseLinkTabCommand}"
-                                            CommandParameter="{Binding}" />
+                                            CommandParameter="{Binding}">
+                                        <PathIcon Data="{DynamicResource IconClose}" Width="11" Height="11" />
+                                    </Button>
                                 </StackPanel>
                             </DataTemplate>
                         </TabControl.ItemTemplate>
@@ -193,8 +236,18 @@
                                 <TextBlock Text="Thư mục lưu file Excel" Classes="h2" Margin="0,0,0,12" />
                                 <Grid ColumnDefinitions="*,Auto,Auto">
                                     <TextBox Grid.Column="0" Classes="mono" Text="{Binding OutputDir}" FontSize="11.5" VerticalContentAlignment="Center" />
-                                    <Button Grid.Column="1" Content="📂  Chọn thư mục" Margin="8,0,0,0" Command="{Binding BrowseOutputDirCommand}" />
-                                    <Button Grid.Column="2" Content="↗  Mở" Width="64" Margin="8,0,0,0" Command="{Binding OpenOutputCommand}" />
+                                    <Button Grid.Column="1" Margin="8,0,0,0" Command="{Binding BrowseOutputDirCommand}">
+                                        <StackPanel Orientation="Horizontal" Spacing="7">
+                                            <PathIcon Data="{DynamicResource IconFolder}" />
+                                            <TextBlock Text="Chọn thư mục" />
+                                        </StackPanel>
+                                    </Button>
+                                    <Button Grid.Column="2" Width="76" Margin="8,0,0,0" Command="{Binding OpenOutputCommand}">
+                                        <StackPanel Orientation="Horizontal" Spacing="7">
+                                            <PathIcon Data="{DynamicResource IconOpenExternal}" />
+                                            <TextBlock Text="Mở" />
+                                        </StackPanel>
+                                    </Button>
                                 </Grid>
                             </StackPanel>
                         </Border>
@@ -203,8 +256,18 @@
                             <StackPanel>
                                 <TextBlock Text="Xuất Excel" Classes="h2" Margin="0,0,0,12" />
                                 <StackPanel Orientation="Horizontal">
-                                    <Button Classes="primary" Content="📦  Xuất tất cả (đã quét)" MinWidth="190" Command="{Binding ExportAllCommand}" />
-                                    <Button Classes="danger" Content="🗑  Xóa dữ liệu đã quét" MinWidth="190" Margin="8,0,0,0" Command="{Binding ClearDataCommand}" />
+                                    <Button Classes="primary" MinWidth="190" Command="{Binding ExportAllCommand}">
+                                        <StackPanel Orientation="Horizontal" Spacing="7">
+                                            <PathIcon Data="{DynamicResource IconExport}" />
+                                            <TextBlock Text="Xuất tất cả (đã quét)" />
+                                        </StackPanel>
+                                    </Button>
+                                    <Button Classes="destructive" MinWidth="190" Margin="8,0,0,0" Command="{Binding ClearDataCommand}">
+                                        <StackPanel Orientation="Horizontal" Spacing="7">
+                                            <PathIcon Data="{DynamicResource IconDelete}" />
+                                            <TextBlock Text="Xóa dữ liệu đã quét" />
+                                        </StackPanel>
+                                    </Button>
                                 </StackPanel>
                                 <TextBlock Text="Mỗi link sau khi crawl xong tự xuất 1 file Excel ở thư mục con “categories”."
                                            Classes="caption" Margin="0,8,0,0" />
@@ -225,13 +288,38 @@
                             </TextBlock>
                             <Grid ColumnDefinitions="*,Auto">
                                 <TextBox Grid.Column="0" Classes="mono" Text="{Binding CategoryDocxPath}" FontSize="11.5" VerticalContentAlignment="Center" />
-                                <Button Grid.Column="1" Content="📂  Chọn file danh mục" Margin="8,0,0,0" Command="{Binding BrowseDocxCommand}" />
+                                <Button Grid.Column="1" Margin="8,0,0,0" Command="{Binding BrowseDocxCommand}">
+                                    <StackPanel Orientation="Horizontal" Spacing="7">
+                                        <PathIcon Data="{DynamicResource IconFolder}" />
+                                        <TextBlock Text="Chọn file danh mục" />
+                                    </StackPanel>
+                                </Button>
                             </Grid>
                             <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
-                                <Button Classes="primary" Content="🤖  Cập nhật danh mục CSDL (AI)" MinWidth="210" Command="{Binding UpdateCategoriesAiCommand}" />
-                                <Button Content="📄  Gán danh mục cho file Excel (AI)" MinWidth="220" Margin="8,0,0,0" Command="{Binding UpdateCategoriesExcelCommand}" />
-                                <Button Content="↻  Làm mới" MinWidth="96" Margin="8,0,0,0" Command="{Binding RefreshCategoryGridCommand}" />
-                                <Button Classes="danger" Content="■  Dừng" MinWidth="80" Margin="8,0,0,0" Command="{Binding StopAiCommand}" />
+                                <Button Classes="primary" MinWidth="210" Command="{Binding UpdateCategoriesAiCommand}">
+                                    <StackPanel Orientation="Horizontal" Spacing="7">
+                                        <PathIcon Data="{DynamicResource IconSparkle}" />
+                                        <TextBlock Text="Cập nhật danh mục CSDL (AI)" />
+                                    </StackPanel>
+                                </Button>
+                                <Button MinWidth="220" Margin="8,0,0,0" Command="{Binding UpdateCategoriesExcelCommand}">
+                                    <StackPanel Orientation="Horizontal" Spacing="7">
+                                        <PathIcon Data="{DynamicResource IconSparkle}" />
+                                        <TextBlock Text="Gán danh mục cho file Excel (AI)" />
+                                    </StackPanel>
+                                </Button>
+                                <Button MinWidth="96" Margin="8,0,0,0" Command="{Binding RefreshCategoryGridCommand}">
+                                    <StackPanel Orientation="Horizontal" Spacing="7">
+                                        <PathIcon Data="{DynamicResource IconRefresh}" />
+                                        <TextBlock Text="Làm mới" />
+                                    </StackPanel>
+                                </Button>
+                                <Button Classes="danger" MinWidth="80" Margin="8,0,0,0" Command="{Binding StopAiCommand}">
+                                    <StackPanel Orientation="Horizontal" Spacing="7">
+                                        <PathIcon Data="{DynamicResource IconStop}" />
+                                        <TextBlock Text="Dừng" />
+                                    </StackPanel>
+                                </Button>
                                 <TextBlock Text="{Binding AiProgress}" VerticalAlignment="Center" Margin="14,0,0,0" FontSize="12.5" Foreground="{DynamicResource TextSecondaryBrush}" />
                             </StackPanel>
                         </StackPanel>
