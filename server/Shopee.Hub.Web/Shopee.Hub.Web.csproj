@@ -27,6 +27,8 @@
     <Compile Include="..\..\suite\Shopee.Core\Coordination\HubRoutes.cs" Link="Shared\Coordination\HubRoutes.cs" />
     <Compile Include="..\..\suite\Shopee.Core\Coordination\ProductDtos.cs" Link="Shared\Coordination\ProductDtos.cs" />
     <Compile Include="..\..\suite\Shopee.Core\Coordination\OrderDtos.cs" Link="Shared\Coordination\OrderDtos.cs" />
+    <!-- DTO ĐỌC đơn về client (GET /api/orders + /api/shops) — màn "Đơn toàn hệ thống" đọc THẲNG từ hub. -->
+    <Compile Include="..\..\suite\Shopee.Core\Coordination\HubOrderDtos.cs" Link="Shared\Coordination\HubOrderDtos.cs" />
     <!-- Cấu hình dùng chung của module Đơn hàng (khối GSheet) — hub là nguồn sự thật, client kéo/đẩy qua /orders-config. -->
     <Compile Include="..\..\suite\Shopee.Core\Coordination\OrdersSharedConfig.cs" Link="Shared\Coordination\OrdersSharedConfig.cs" />
     <!-- Báo "đơn mới" về Slack/Discord/Telegram: helper thuần BCL + POCO đơn — LINK từ module đơn Shopee,

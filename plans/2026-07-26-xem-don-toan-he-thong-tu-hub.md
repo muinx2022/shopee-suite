@@ -113,4 +113,23 @@ Lỗi mạng/hub cũ (404) → trả `null` (nghĩa "không lấy được"), KH
 
 ## Báo cáo thực thi (Opus điền sau khi xong)
 
-<chưa thực thi>
+**Đã làm đủ 6 bước. KHÔNG commit, KHÔNG deploy hub.**
+
+Tạo mới: `suite/Shopee.Core/Coordination/HubOrderDtos.cs` · `orders/XuLyDonShopee.App/Services/HubOrdersContracts.cs` ·
+`orders/XuLyDonShopee.App/ViewModels/HubOrdersViewModel.cs` + `HubOrderRowViewModel.cs` ·
+`orders/XuLyDonShopee.App/Views/HubOrdersView.axaml(.cs)` · `orders/XuLyDonShopee.Tests/HubOrdersViewModelTests.cs` (13 test).
+Sửa: hub csproj (LINK DTO) · `ClientApiEndpoints.cs` · `HubClient.cs` · `AppServices.cs` · `OrdersModuleHost.cs` ·
+`MainViewModel.cs` (nav index 2) · `ShellViewModel.cs` (nút ribbon `AppIcons.Servers`).
+
+Kiểm chứng: build solution + hub 0 error; `dotnet test` 1000/1000 xanh; hub CỤC BỘ (port 18099, data dir tạm) đẩy 3 đơn
+2 shop rồi đọc lại qua `HubClient` thật → **0 cột rỗng** ở CẢ HAI hop map (`OrderRecord→HubOrderItem`,
+`HubOrderItem→HubOrderView`); lọc shopId/status/q + phân trang chạy đúng phía hub; hub chết → `null`; log hub **0 dòng**
+"legacy endpoint hit" cho `/api/orders` + `/api/shops` (đối chứng `/accounts/append` vẫn ghi). Harness Avalonia dựng
+THẬT màn mới: 10 cột đúng, 2 PathIcon đều có Data, 5 ca trạng thái hiện đúng chữ khác nhau.
+
+**Lệch plan (cần Fable soi):** (1) bỏ luôn `LogLegacyHit` ở `GET /api/shops` — plan chỉ yêu cầu bỏ ở `/api/orders`,
+nhưng client nay gọi `/api/shops` mỗi lượt mở màn nên giữ lại sẽ spam cảnh báo sai y hệt lý do của `/api/orders`;
+(2) `/api/shops` nay trả `HubShopItem` (3 field) thay vì `Shop` đầy đủ → **cắt** password/cookie/proxy_key khỏi dây
+(repo không còn consumer nào khác của route này); (3) thêm ca thứ 4 "lọc không ra" tách khỏi "Hub có 0 đơn";
+(4) ô lọc trạng thái lấy từ hợp (trạng thái thấy trong trang Hub vừa nhận ∪ `orders.status` local) vì Hub chưa có
+route liệt kê trạng thái — plan không nêu, đã tránh thêm route mới.

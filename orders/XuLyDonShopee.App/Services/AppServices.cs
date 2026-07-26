@@ -89,6 +89,24 @@ public class AppServices
     /// </summary>
     public Func<string, string, CancellationToken, Task<bool>>? PushGsheetConfigToHub { get; set; }
 
+    /// <summary>
+    /// HOOK ĐỌC một TRANG đơn của MỌI shop/MỌI máy từ HUB (màn "Đơn toàn hệ thống"), do shell suite RÓT (module
+    /// Đơn hàng KHÔNG tham chiếu <c>Shopee.Core</c> nên không tự biết hub). LỌC + PHÂN TRANG chạy PHÍA HUB —
+    /// tham số <see cref="HubOrdersQuery"/> đi thẳng thành query string. Trả <c>null</c> = KHÔNG lấy được (hub
+    /// offline / timeout / hub cũ chưa có route) → màn báo "Hub không phản hồi", KHÁC hẳn kết quả 0 đơn. Mặc định
+    /// <c>null</c> = TẮT (app Đơn hàng chạy độc lập / hub chưa cấu hình) → màn báo "chưa kết nối Hub".
+    /// <para><b>CHỈ ĐỌC.</b> Đơn lấy về CHỈ để hiển thị — KHÔNG ghi vào bảng <c>orders</c> của máy này.</para>
+    /// </summary>
+    public Func<HubOrdersQuery, CancellationToken, Task<HubOrdersResult?>>? QueryHubOrders { get; set; }
+
+    /// <summary>
+    /// HOOK đọc danh sách shop trên HUB (id SỐ + tên hiển thị) để màn "Đơn toàn hệ thống" đổi <c>shopId</c> của
+    /// đơn sang TÊN shop và dựng ô lọc shop, do shell suite RÓT. Nạp MỘT LẦN mỗi lượt làm mới rồi tra trong bộ
+    /// nhớ — KHÔNG gọi mỗi dòng. Trả <c>null</c> = không lấy được (màn vẫn hiện đơn, cột Shop lùi về "shop #id").
+    /// Mặc định <c>null</c> = TẮT (app chạy độc lập / hub chưa cấu hình).
+    /// </summary>
+    public Func<CancellationToken, Task<IReadOnlyList<(long Id, string Name)>?>>? ListHubShops { get; set; }
+
     /// <summary>Nhật ký hoạt động của app (panel UI + ghi file cạnh database). Các phiên nạp log qua đây.</summary>
     public ActivityLog Log { get; }
 

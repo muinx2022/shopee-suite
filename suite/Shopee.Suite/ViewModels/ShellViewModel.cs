@@ -212,6 +212,10 @@ public sealed partial class ShellViewModel : ObservableObject
             var acc = ordersVm.AccountsVm;
             var oAccounts = new RibbonScreenItem("Tài khoản", AppIcons.People, ordersVm, 0, "Tài khoản shop");
             var oOrders = new RibbonScreenItem("Đơn hàng", AppIcons.Receipt, ordersVm, 1, "Theo dõi & xử lý đơn · in phiếu");
+            // Màn CHỈ ĐỌC đơn của MỌI máy (đọc thẳng Hub). Icon "dàn máy chủ" = ý ĐA MÁY/toàn hệ thống —
+            // KHÔNG dùng lại Receipt (đã là "Đơn hàng" của máy này, đứng cạnh nhau sẽ không phân biệt được).
+            var oHubOrders = new RibbonScreenItem("Đơn toàn hệ thống", AppIcons.Servers, ordersVm, 2,
+                "Xem đơn của MỌI máy trên Hub (chỉ đọc — không xử lý ở đây)");
             // (Bỏ nút "Proxy" khỏi ribbon Shopee theo yêu cầu — màn proxy index 2 không còn điều hướng tới từ ribbon.)
 
             // Nhóm "Hành động" + "Tùy chọn" CHỈ có nghĩa ở màn "Tài khoản" (thao tác trên danh sách tài khoản).
@@ -236,7 +240,7 @@ public sealed partial class ShellViewModel : ObservableObject
 
             ordersTab = new RibbonTab("Shopee", new List<RibbonGroup>
             {
-                new RibbonGroup("Màn hình", new object[] { oAccounts, oOrders }),
+                new RibbonGroup("Màn hình", new object[] { oAccounts, oOrders, oHubOrders }),
                 oActionGroup,
                 oOptionGroup,
             });

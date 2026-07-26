@@ -149,12 +149,12 @@ public static class ClientApiEndpoints
         });
 
         // ── Nghiệp vụ đơn hàng ──
-        // GET /api/shops → danh sách shop (hub tự đăng ký theo username khi client push).
-        api.MapGet(HubRoutes.Shops, (HttpContext ctx, ILoggerFactory lf) =>
-        {
-            LogLegacyHit(lf, ctx, HubRoutes.Shops);
-            return Results.Json(db.ListShops());
-        });
+        // GET /api/shops → danh sách shop (hub tự đăng ký theo username khi client push). Client desktop gọi để
+        // đổi shopId (SỐ) của đơn sang TÊN shop ở màn "Đơn toàn hệ thống" → đây là endpoint client CHÍNH THỨC,
+        // KHÔNG còn LogLegacyHit (mỗi lượt mở màn sẽ ghi 1 dòng cảnh báo sai lệch). Map TƯỜNG MINH sang
+        // HubShopItem: vừa khoá hợp đồng với client, vừa CẮT password/cookie/proxy của bản Shop đầy đủ.
+        api.MapGet(HubRoutes.Shops, () =>
+            Results.Json(db.ListShops().Select(ToHubShopItem).ToList()));
 
         // POST /api/orders/push → hub tự đăng ký shop theo username rồi upsert lô đơn + ghi log; có đơn MỚI
         // (Added>0) → bắn tin về webhook cấu hình (fire-and-forget, KHÔNG chặn response).
@@ -221,17 +221,61 @@ public static class ClientApiEndpoints
             return Results.Json(new OrdersSlipPushResult(saved, missing, errors));
         });
 
-        // GET /api/orders?shopId=&status=&q=&page=&pageSize= → xem đơn (admin lẫn client).
-        api.MapGet(HubRoutes.Orders, (long? shopId, string? status, string? q, int? page, int? pageSize, HttpContext ctx, ILoggerFactory lf) =>
+        // GET /api/orders?shopId=&status=&q=&page=&pageSize= → xem đơn (admin lẫn client). Màn "Đơn toàn hệ thống"
+        // của client desktop đọc THẲNG qua đây (KHÔNG chép đơn về CSDL máy) → endpoint client CHÍNH THỨC, KHÔNG
+        // còn LogLegacyHit. LỌC + PHÂN TRANG chạy Ở ĐÂY (client không tải hết về rồi lọc).
+        api.MapGet(HubRoutes.Orders, (long? shopId, string? status, string? q, int? page, int? pageSize) =>
         {
-            LogLegacyHit(lf, ctx, HubRoutes.Orders);
             var ps = Math.Clamp(pageSize ?? 50, 1, 500);
             var p = Math.Max(1, page ?? 1);
             var total = db.CountOrders(shopId, status, q);
             var items = db.QueryOrders(shopId, status, q, ps, (p - 1) * ps);
-            return Results.Json(new { items, total, page = p, pageSize = ps });
+            return Results.Json(new HubOrdersPage
+            {
+                Items = items.Select(ToHubOrderItem).ToList(),
+                Total = total,
+                Page = p,
+                PageSize = ps,
+            });
         });
     }
+
+    /// <summary>Map <see cref="OrderRecord"/> (kiểu nội bộ hub) → <see cref="HubOrderItem"/> (DTO dùng chung với
+    /// client). Map TAY từng field — KHÔNG serialize thẳng <c>OrderRecord</c> — để đổi tên field bên hub làm gãy
+    /// build ngay, thay vì âm thầm trả cột rỗng cho client.</summary>
+    private static HubOrderItem ToHubOrderItem(OrderRecord o) => new()
+    {
+        Id = o.Id,
+        ShopId = o.ShopId,
+        OrderSn = o.OrderSn,
+        ShopeeOrderId = o.ShopeeOrderId,
+        BuyerUsername = o.BuyerUsername,
+        ItemCount = o.ItemCount,
+        ItemSummary = o.ItemSummary,
+        Sku = o.Sku,
+        TotalPrice = o.TotalPrice,
+        TotalPriceText = o.TotalPriceText,
+        FinalAmount = o.FinalAmount,
+        FinalAmountText = o.FinalAmountText,
+        PaymentMethod = o.PaymentMethod,
+        Status = o.Status,
+        StatusDescription = o.StatusDescription,
+        CancelReason = o.CancelReason,
+        Channel = o.Channel,
+        Carrier = o.Carrier,
+        TrackingNumber = o.TrackingNumber,
+        SyncedAt = o.SyncedAt,
+        SlipAt = o.SlipAt,
+    };
+
+    /// <summary>Map <see cref="Shop"/> (kiểu nội bộ hub) → <see cref="HubShopItem"/> (DTO dùng chung). CỐ Ý chỉ
+    /// lấy 3 field hiển thị — password/cookie/proxy_key KHÔNG đi qua dây.</summary>
+    private static HubShopItem ToHubShopItem(Shop s) => new()
+    {
+        Id = s.Id,
+        Name = s.Name,
+        Username = s.Username,
+    };
 
     /// <summary>Ghi cảnh báo mỗi lần trúng 1 endpoint LEGACY (repo không còn ai gọi, nhưng client CŨ ngoài fleet có
     /// thể còn) — thu bằng chứng để đợt sau xoá hẳn nếu log im. IP thực đọc qua <see cref="LoginRateLimit.IpOf"/>

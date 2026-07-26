@@ -1,0 +1,69 @@
+namespace Shopee.Core.Coordination;
+
+/// <summary>
+/// Một đơn ĐỌC VỀ từ hub (GET /api/orders). MIRROR <c>OrderRecord</c> của hub
+/// (server/Shopee.Hub.Web/Data/HubDatabase.Orders.cs) — hub map TƯỜNG MINH sang kiểu này, KHÔNG serialize
+/// thẳng <c>OrderRecord</c>, để đổi tên field bên hub là gãy build chứ không âm thầm làm rỗng cột bên client.
+/// Class (không record) + property settable để JSON bind khoan dung (field thiếu → giá trị mặc định).
+/// <para><b>CHỈ ĐỂ XEM.</b> Đơn ở đây thuộc shop của MÁY KHÁC nên KHÔNG có <c>account_id</c> local — tuyệt đối
+/// không ghi vào bảng <c>orders</c> của máy này (sẽ bị đẩy ngược lên hub, ghi trùng dòng Google Sheet, bị vòng
+/// dọn "đơn kết thúc" xoá).</para>
+/// </summary>
+public sealed class HubOrderItem
+{
+    /// <summary>Id dòng trên hub (khoá chính bảng <c>orders</c> của hub) — chỉ để phân biệt dòng khi hiển thị.</summary>
+    public long Id { get; set; }
+
+    /// <summary>Id SỐ của shop trên hub — tra tên qua GET /api/shops (<see cref="HubShopItem"/>).</summary>
+    public long ShopId { get; set; }
+
+    public string OrderSn { get; set; } = string.Empty;
+    public string? ShopeeOrderId { get; set; }
+    public string? BuyerUsername { get; set; }
+    public int ItemCount { get; set; }
+    public string? ItemSummary { get; set; }
+    public string? Sku { get; set; }
+    public long? TotalPrice { get; set; }
+    public string? TotalPriceText { get; set; }
+    public long? FinalAmount { get; set; }
+    public string? FinalAmountText { get; set; }
+    public string? PaymentMethod { get; set; }
+    public string? Status { get; set; }
+    public string? StatusDescription { get; set; }
+    public string? CancelReason { get; set; }
+    public string? Channel { get; set; }
+    public string? Carrier { get; set; }
+    public string? TrackingNumber { get; set; }
+
+    /// <summary>Thời điểm client đẩy đơn này lên hub (UTC).</summary>
+    public DateTimeOffset SyncedAt { get; set; }
+
+    /// <summary>Thời điểm hub NHẬN file phiếu PDF của đơn. NULL = chưa có phiếu trên hub.</summary>
+    public DateTimeOffset? SlipAt { get; set; }
+}
+
+/// <summary>
+/// MỘT TRANG kết quả GET /api/orders — lọc + phân trang chạy PHÍA HUB (tham số <c>shopId/status/q/page/pageSize</c>),
+/// client KHÔNG tải hết về rồi lọc. <see cref="Total"/> = tổng đơn khớp bộ lọc trên MỌI trang (mẫu số phân trang).
+/// </summary>
+public sealed class HubOrdersPage
+{
+    public List<HubOrderItem> Items { get; set; } = [];
+    public int Total { get; set; }
+    public int Page { get; set; }
+    public int PageSize { get; set; }
+}
+
+/// <summary>
+/// Một shop hub theo dõi (GET /api/shops) — RÚT GỌN từ <c>Shop</c> của hub: chỉ 3 field cần để đổi
+/// <see cref="HubOrderItem.ShopId"/> (số) sang tên hiển thị. CỐ Ý bỏ password/cookie/proxy của bản hub —
+/// client xem đơn không cần và không nên nhận.
+/// </summary>
+public sealed class HubShopItem
+{
+    public long Id { get; set; }
+    /// <summary>Tên hiển thị shop (hub đặt = username khi tự đăng ký lúc client push đơn).</summary>
+    public string Name { get; set; } = string.Empty;
+    /// <summary>Tài khoản đăng nhập shop — KHÓA tự đăng ký shop trên hub.</summary>
+    public string? Username { get; set; }
+}
