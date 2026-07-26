@@ -1,7 +1,7 @@
 # Plan: Redesign GĐ2 — App shell (tab strip · ribbon · status bar) theo handoff
 
 - **Ngày:** 2026-07-26
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-dev`) — CÂY CHÍNH
 
 ## 1. Bối cảnh & mục tiêu
@@ -110,4 +110,11 @@ grep trước khi xoá; các key `Sidebar*` có thể còn ai dùng, KHÔNG xoá
 
 ## Báo cáo thực thi (Opus điền sau khi xong)
 
-<chưa thực thi>
+Hoàn thành (MainWindow + Theme + ShellViewModel). Build 0 error, 912 test xanh. Kiểm chứng bằng harness render
+ảnh thật ở 1500/1100px + test phím tắt bằng phím thật của OS.
+Cách làm: gạch chân tab dựng TRONG ItemTemplate (Grid `*,3` + Border 3px theo `$parent[ListBoxItem].IsSelected`)
+— không đụng template ListBoxItem; chấm nháy = Style.Animations 2.4s SineEaseInOut; quy tắc co = Container Query
+(Avalonia 11.3) + DockPanel khai nhóm phải trước nên version luôn giữ chỗ.
+Lệch spec: giữ chrome native Windows (app-mark gộp vào dải tab); bỏ viền trên ribbon (trùng viền đáy tab strip);
+nút ribbon cho giãn tới 112px vì nhãn tiếng Việt dài; chưa rút gọn nhãn "Trình duyệt: …" (chuỗi ở file orders)
+nên ẩn hẳn khi hẹp; "N job" đếm theo cờ bool nên scrape/search tính 1 luồng.

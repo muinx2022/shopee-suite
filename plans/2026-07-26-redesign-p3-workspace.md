@@ -1,7 +1,7 @@
 # Plan: Redesign GĐ3 — Màn BigSeller Workspace theo handoff
 
 - **Ngày:** 2026-07-26
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-dev`) — **WORKTREE**
 
 ## 1. Bối cảnh & mục tiêu
@@ -129,4 +129,9 @@ Grid 3 hàng — Row0 header (title + description + chip Status bên phải), Ro
 
 ## Báo cáo thực thi (Opus điền sau khi xong)
 
-<chưa thực thi>
+Hoàn thành trong worktree, merge về main. Build 0 error, 912 test xanh. 3 file: WorkspaceView.axaml (dựng lại,
+style cục bộ) + WorkspaceAccountViewModel (thêm `HasCookie`/`CookieShort`) + WorkspaceShopViewModel (glyph op).
+Quyết định: nút op GIỮ NGUYÊN glyph khi đang chạy (nền cam đã là tín hiệu; đổi sang ■ làm nút "nhảy" chữ).
+Lệch spec: glyph Tên SP dùng `●` (U+2B24 không có trong Inter → tofu); cột op rộng 68 thay 58 (DataGrid không có
+gap); dùng WrapPanel thay lưới auto-fit; bảng vẫn là DataGrid (giữ ShopGrid + handler).
+Cần soi bằng mắt: vị trí gạch chân sub-tab, huy hiệu ✓ có bị cắt góc không, WrapPanel khi cửa sổ hẹp.

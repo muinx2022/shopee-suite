@@ -1,7 +1,7 @@
 # Plan: Redesign GĐ1 — Hệ design (tokens + component core) theo handoff
 
 - **Ngày:** 2026-07-26
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-dev`)
 
 ## 1. Bối cảnh & mục tiêu
@@ -101,4 +101,9 @@ TextBox/DataGrid/Card/tab. Module Đơn hàng có bộ riêng `orders/XuLyDonSho
 
 ## Báo cáo thực thi (Opus điền sau khi xong)
 
-<chưa thực thi>
+Hoàn thành, chỉ sửa `Theme.axaml`. Build 0 error, 910 test xanh. Đổi ~18 token sang palette ấm + thêm 22 token
+phụ (brand tint, status bg, border light/lightest, row hover, text body/muted). `.primary` outline → FILLED
+nền cam; `.danger` kiểu "Dừng tất cả"; input cao 30 ép template-part (Fluent không đọc token của ta);
+card radius 8; DataGrid header muted + row hover; thêm `Border.pill` + 5 biến thể.
+Lệch spec: header bảng chữ HOA phải viết hoa ở view (Avalonia không có TextTransform) — GĐ3 làm; giữ font Inter.
+Tồn: `.danger` đang dùng chung cho cả nút xoá thật → GĐ4 tách class `.destructive` (đỏ #C22B1E).
