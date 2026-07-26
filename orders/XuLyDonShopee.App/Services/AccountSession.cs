@@ -52,7 +52,7 @@ public partial class AccountSession : ObservableObject, IAccountSession
 
     // ===== Mô hình 1 subaccount = nhiều shop =====
     // Shop ĐANG xử lý trong vòng lặp shop (đặt trước khi chạy flow của shop, XÓA sau ở finally). SyncOrdersAsync
-    // gắn shop_id này vào đơn khi upsert; PushOrdersToGsheetAsync lọc đơn theo shop + lấy Tên Shop = tên đăng nhập.
+    // gắn shop_id này vào đơn khi upsert; HubOutbox.PushOrdersToGsheetAsync lọc đơn theo shop + lấy Tên Shop = tên đăng nhập.
     // volatile: RunAsync (thread nền) đặt, lượt đẩy GSheet nền đọc (nhưng đã CHỤP giá trị lúc kích hoạt để tránh đua).
     private volatile string? _currentShopId;
     private volatile string? _currentShopLogin;
@@ -60,6 +60,19 @@ public partial class AccountSession : ObservableObject, IAccountSession
     // Cờ chống spam log "chưa cấu hình GSheet": phiên chạy cả buổi, mỗi shop một lượt đẩy sheet → chỉ báo 1 dòng
     // cho cả phiên là đủ để người dùng thấy máy đang KHÔNG ghi sheet. volatile: lượt đẩy chạy trên thread nền.
     private volatile bool _daBaoThieuGsheetUrl;
+
+    /// <summary>Cờ "được phép báo THIẾU URL Web App lần này" truyền cho
+    /// <see cref="HubOutbox.PushOrdersToGsheetAsync"/>: trả true ĐÚNG một lần cho mỗi phiên (xem
+    /// <see cref="_daBaoThieuGsheetUrl"/>), các lần sau false.</summary>
+    private bool NenBaoThieuGsheetUrl()
+    {
+        if (_daBaoThieuGsheetUrl)
+        {
+            return false;
+        }
+        _daBaoThieuGsheetUrl = true;
+        return true;
+    }
 
     public AccountSession(
         long accountId,
@@ -396,21 +409,18 @@ public partial class AccountSession : ObservableObject, IAccountSession
     /// <summary>Giới hạn kích thước file phiếu đính kèm (5MB) — PDF phiếu giao thường ~100–300KB.</summary>
     private const long MaxSlipBytes = 5 * 1024 * 1024;
 
-    /// <summary>Cờ CHỐNG CHỒNG lượt đẩy GSheet trên CÙNG phiên (0 = rảnh, 1 = đang đẩy). Bấm Sync liên tiếp
-    /// trong lúc lượt đẩy nền trước chưa xong → bỏ qua lượt đẩy mới (Interlocked, thread-safe).</summary>
-    private int _gsheetPushing;
-
     /// <summary>
     /// Kích hoạt đẩy GSheet CHẠY NỀN (fire-and-forget) sau khi Sync đã tổng kết. KHÔNG await trong luồng sync
     /// vì push chỉ đụng DB + file + HTTP, không đụng trình duyệt → chạy
-    /// song song được với nhịp đọc "Chờ Lấy Hàng"/Xử lý đơn. Cờ <see cref="_gsheetPushing"/> chống 2 lượt đẩy
-    /// chồng nhau (bấm Sync liên tiếp): lượt trước còn chạy → bỏ qua, log 1 dòng (lượt sync sau tự đẩy phần
-    /// thiếu nhờ cờ DB). <paramref name="ct"/> là token phiên → dừng phiên thì lượt đẩy tự hủy.
-    /// <see cref="PushOrdersToGsheetAsync"/> đã tự nuốt mọi exception nên task nền KHÔNG bao giờ ném unobserved.
+    /// song song được với nhịp đọc "Chờ Lấy Hàng"/Xử lý đơn. <see cref="PushGate"/> (chốt TOÀN TIẾN TRÌNH) chống
+    /// 2 lượt đẩy chồng nhau — cả khi lượt kia do <see cref="HubOutboxWorker"/> kích hoạt: lượt trước còn chạy →
+    /// bỏ qua, log 1 dòng (lượt sau tự đẩy phần thiếu nhờ cờ DB). <paramref name="ct"/> là token phiên → dừng
+    /// phiên thì lượt đẩy tự hủy (worker sẽ nhặt lại phần còn tồn).
+    /// <see cref="HubOutbox.PushOrdersToGsheetAsync"/> đã tự nuốt mọi exception nên task nền KHÔNG bao giờ ném unobserved.
     /// </summary>
     private void StartGsheetPushInBackground(Action<string> log, CancellationToken ct)
     {
-        if (Interlocked.CompareExchange(ref _gsheetPushing, 1, 0) != 0)
+        if (!PushGate.TryEnter(_accountId, PushKind.Gsheet))
         {
             log("GSheet: lượt đẩy trước còn đang chạy — bỏ qua (lượt sync sau tự đẩy phần thiếu).");
             return;
@@ -423,8 +433,13 @@ public partial class AccountSession : ObservableObject, IAccountSession
 
         _ = Task.Run(async () =>
         {
-            try { await PushOrdersToGsheetAsync(shopId, shopLogin, log, ct).ConfigureAwait(false); }
-            finally { Interlocked.Exchange(ref _gsheetPushing, 0); }
+            try
+            {
+                await HubOutbox.PushOrdersToGsheetAsync(
+                    _accountId, _services, shopId, shopLogin,
+                    NenBaoThieuGsheetUrl, imLangKhiKhongCoDonMoi: false, log, ct).ConfigureAwait(false);
+            }
+            finally { PushGate.Exit(_accountId, PushKind.Gsheet); }
         }, CancellationToken.None);
     }
 
@@ -432,19 +447,17 @@ public partial class AccountSession : ObservableObject, IAccountSession
     /// <c>_bulkHttp</c> phía hub-client đủ rộng cho một lô.</summary>
     public const int HubPushBatchSize = 200;
 
-    /// <summary>Cờ CHỐNG CHỒNG lượt đẩy hub trên CÙNG phiên (0 = rảnh, 1 = đang đẩy) — y <see cref="_gsheetPushing"/>.</summary>
-    private int _hubPushing;
-
     /// <summary>
     /// Kích hoạt đẩy đơn lên HUB đơn hàng CHẠY NỀN (fire-and-forget) sau khi Sync đã tổng kết — y pattern
-    /// <see cref="StartGsheetPushInBackground"/>. Cờ <see cref="_hubPushing"/> (Interlocked) chống 2 lượt đẩy
-    /// chồng nhau: lượt trước còn chạy → bỏ qua, log 1 dòng (lượt sync sau tự đẩy phần thiếu nhờ cờ DB
-    /// <c>hub_synced_at</c>). <paramref name="ct"/> là token phiên → dừng phiên thì lượt đẩy tự hủy.
-    /// <see cref="PushOrdersToHubAsync"/> tự nuốt mọi exception nên task nền KHÔNG bao giờ ném unobserved.
+    /// <see cref="StartGsheetPushInBackground"/>. <see cref="PushGate"/> (chốt TOÀN TIẾN TRÌNH) chống 2 lượt đẩy
+    /// chồng nhau — cả khi lượt kia do <see cref="HubOutboxWorker"/> kích hoạt: lượt trước còn chạy → bỏ qua, log
+    /// 1 dòng (lượt sau tự đẩy phần thiếu nhờ cờ DB <c>hub_synced_at</c>). <paramref name="ct"/> là token phiên →
+    /// dừng phiên thì lượt đẩy tự hủy (worker sẽ nhặt lại phần còn tồn).
+    /// <see cref="HubOutbox.PushOrdersToHubAsync"/> tự nuốt mọi exception nên task nền KHÔNG bao giờ ném unobserved.
     /// </summary>
     private void StartHubPushInBackground(Action<string> log, CancellationToken ct)
     {
-        if (Interlocked.CompareExchange(ref _hubPushing, 1, 0) != 0)
+        if (!PushGate.TryEnter(_accountId, PushKind.Hub))
         {
             log("Hub: lượt đẩy trước còn đang chạy — bỏ qua (lượt sync sau tự đẩy phần thiếu).");
             return;
@@ -452,8 +465,8 @@ public partial class AccountSession : ObservableObject, IAccountSession
 
         _ = Task.Run(async () =>
         {
-            try { await PushOrdersToHubAsync(log, ct).ConfigureAwait(false); }
-            finally { Interlocked.Exchange(ref _hubPushing, 0); }
+            try { await HubOutbox.PushOrdersToHubAsync(_accountId, _services, log, ct).ConfigureAwait(false); }
+            finally { PushGate.Exit(_accountId, PushKind.Hub); }
             // PHIẾU đẩy SAU khi ĐƠN đã lên hub (hub_synced_at set) — KHÔNG chạy song song với đẩy đơn: khi mã vận đơn
             // vừa xuất hiện, UpsertMany RESET hub_synced_at về NULL để re-push đơn; nếu đẩy phiếu song song, nó đọc
             // GetForHubSlipPush (đòi đơn ĐÃ hub-synced) TRÚNG lúc hub_synced_at đang NULL → bỏ sót phiếu. Tuần tự thì
@@ -462,16 +475,14 @@ public partial class AccountSession : ObservableObject, IAccountSession
         }, CancellationToken.None);
     }
 
-    /// <summary>Cờ CHỐNG CHỒNG lượt +1 "Đã bán" theo SKU trên CÙNG phiên (0 = rảnh, 1 = đang +1) — y <see cref="_hubPushing"/>.</summary>
-    private int _soldCounting;
-
     /// <summary>
     /// Kích hoạt +1 "Đã bán" theo SKU lên HUB CHẠY NỀN (fire-and-forget) sau khi Sync đã tổng kết — y pattern
     /// <see cref="StartHubPushInBackground"/>. <paramref name="skus"/> = SKU các đơn VỪA chuyển sang đã-giao trong
     /// lượt này (có SKU); <paramref name="orderSns"/> = mã đơn tương ứng để đánh cờ SAU khi hub +1 OK. Không có SKU
-    /// nào → return ngay (không chiếm cờ). Cờ <see cref="_soldCounting"/> (Interlocked) chống 2 lượt chồng nhau.
-    /// <paramref name="ct"/> là token phiên → dừng phiên thì lượt +1 tự hủy. <see cref="IncrementSoldBySkuAsync"/>
-    /// tự nuốt mọi exception nên task nền KHÔNG bao giờ ném unobserved.
+    /// nào → return ngay (không chiếm chỗ ở gate). <see cref="PushGate"/> (chốt TOÀN TIẾN TRÌNH) chống 2 lượt chồng
+    /// nhau — ĐẶC BIỆT quan trọng với loại này: phiên và <see cref="HubOutboxWorker"/> cùng +1 một đơn = <b>+2</b>
+    /// sai số liệu kho. <paramref name="ct"/> là token phiên → dừng phiên thì lượt +1 tự hủy (worker đếm bù sau).
+    /// <see cref="HubOutbox.IncrementSoldBySkuAsync"/> tự nuốt mọi exception nên task nền KHÔNG bao giờ ném unobserved.
     /// </summary>
     private void StartSoldCountInBackground(
         IReadOnlyList<string> skus, IReadOnlyList<string> orderSns, Action<string> log, CancellationToken ct)
@@ -480,7 +491,7 @@ public partial class AccountSession : ObservableObject, IAccountSession
         {
             return; // không có đơn chuyển-sang-đã-giao có SKU → không +1 (grandfather đã đánh cờ ở luồng chính)
         }
-        if (Interlocked.CompareExchange(ref _soldCounting, 1, 0) != 0)
+        if (!PushGate.TryEnter(_accountId, PushKind.SoldCount))
         {
             log("Đã bán: lượt +1 trước còn đang chạy — bỏ qua (lượt sync sau tự đếm phần thiếu).");
             return;
@@ -488,103 +499,9 @@ public partial class AccountSession : ObservableObject, IAccountSession
 
         _ = Task.Run(async () =>
         {
-            try { await IncrementSoldBySkuAsync(skus, orderSns, log, ct).ConfigureAwait(false); }
-            finally { Interlocked.Exchange(ref _soldCounting, 0); }
+            try { await HubOutbox.IncrementSoldBySkuAsync(_accountId, _services, skus, orderSns, log, ct).ConfigureAwait(false); }
+            finally { PushGate.Exit(_accountId, PushKind.SoldCount); }
         }, CancellationToken.None);
-    }
-
-    /// <summary>
-    /// +1 "Đã bán" theo SKU lên HUB qua hook <see cref="AppServices.IncrementSoldBySku"/> (do shell suite rót), rồi
-    /// CHỈ đánh cờ <c>sold_counted_at</c> cho <paramref name="orderSns"/> khi hub +1 OK (ưu tiên KHÔNG mất đếm nếu
-    /// hub lỗi). <b>Không bao giờ ném</b>: hủy CHỦ ĐỘNG → thôi; lỗi khác → log. Hook null (app Đơn hàng chạy độc
-    /// lập / hub chưa cấu hình) → return im lặng (đơn CHƯA đánh cờ → lượt sync sau thử lại).
-    /// </summary>
-    private async Task IncrementSoldBySkuAsync(
-        IReadOnlyList<string> skus, IReadOnlyList<string> orderSns, Action<string> log, CancellationToken ct)
-    {
-        var inc = _services.IncrementSoldBySku;
-        if (inc is null)
-        {
-            return; // hub tắt / app Đơn hàng chạy độc lập → im lặng, KHÔNG đánh cờ (lượt sau thử lại)
-        }
-
-        try
-        {
-            var ok = await inc(skus, ct).ConfigureAwait(false);
-            if (ok)
-            {
-                // Hub +1 OK → đánh cờ để không +1 lại lượt sau. (Rủi ro hiếm: +1 xong mà đánh cờ lỗi/crash →
-                // lượt sau đếm lại 1 lần — chấp nhận, ưu tiên không mất đếm.)
-                _services.Orders.MarkSoldCounted(_accountId, orderSns, DateTime.UtcNow);
-                var preview = string.Join(", ", skus.Take(20));
-                log($"+{skus.Count} Đã bán theo SKU: {preview}{(skus.Count > 20 ? " …" : string.Empty)}");
-            }
-            else
-            {
-                log("Đã bán: hub chưa nhận (+1 hoãn) — lượt sync sau thử lại.");
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            // Hủy chủ động (dừng phiên) — thôi; đơn CHƯA đánh cờ, lượt sau thử lại.
-        }
-        catch (Exception ex)
-        {
-            log("Đã bán: lỗi — " + ex.Message);
-        }
-    }
-
-    /// <summary>
-    /// Đẩy các đơn CHƯA đẩy hub của tài khoản này lên HUB đơn hàng qua hook <see cref="AppServices.PushOrdersToHub"/>
-    /// (do shell suite rót). <b>Không bao giờ ném</b> (sync DB đã xong — lỗi hub chỉ ghi log): hủy CHỦ ĐỘNG → thôi;
-    /// lỗi khác → log "Hub: lỗi — ...". Hook null (app Đơn hàng chạy độc lập / hub chưa cấu hình) → return im lặng
-    /// (không đổi hành vi cũ, KHÔNG đụng DB). Không có đơn chờ → return. Logic chia lô + đánh dấu tách sang hàm thuần
-    /// <see cref="PushPendingToHubAsync"/> (test được, không đụng trình duyệt).
-    /// </summary>
-    private async Task PushOrdersToHubAsync(Action<string> log, CancellationToken ct)
-    {
-        var push = _services.PushOrdersToHub;
-        if (push is null)
-        {
-            return; // hub tắt / app Đơn hàng chạy độc lập → im lặng, không đụng DB
-        }
-
-        try
-        {
-            var pending = _services.Orders.GetForHubPush(_accountId);
-            if (pending.Count == 0)
-            {
-                return;
-            }
-
-            var marked = await PushPendingToHubAsync(
-                _accountId,
-                pending,
-                push,
-                sns => _services.Orders.MarkHubSynced(_accountId, sns, DateTime.UtcNow),
-                HubPushBatchSize,
-                ct).ConfigureAwait(false);
-
-            if (marked > 0)
-            {
-                log($"Hub: đã đẩy {marked}/{pending.Count} đơn lên hub.");
-            }
-            else
-            {
-                // KHÔNG im lặng: hook trả false ngay lô đầu (hub offline/lỗi) trước đây không để lại dấu vết nào
-                // → máy chạy cả buổi mà không đơn nào lên hub vẫn trông như bình thường.
-                log($"Hub: đẩy 0/{pending.Count} đơn — hub không phản hồi, sẽ thử lại lượt sau.");
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            // Hủy chủ động (dừng phiên) — thôi.
-        }
-        catch (Exception ex)
-        {
-            // Lỗi đẩy hub KHÔNG phá lượt sync (đã ghi DB) — chỉ log; đơn CHƯA đánh dấu → lượt sau đẩy lại.
-            log("Hub: lỗi — " + ex.Message);
-        }
     }
 
     /// <summary>
@@ -642,19 +559,17 @@ public partial class AccountSession : ObservableObject, IAccountSession
     /// <summary>Kích thước LÔ tối đa mỗi lần đẩy PHIẾU lên hub — lô ≤5 PDF ~1,5MB qua tunnel (trần hub 5MB/phiếu).</summary>
     public const int HubSlipPushBatchSize = 5;
 
-    /// <summary>Cờ CHỐNG CHỒNG lượt đẩy PHIẾU hub trên CÙNG phiên (0 = rảnh, 1 = đang đẩy) — y <see cref="_hubPushing"/>.</summary>
-    private int _hubSlipPushing;
-
     /// <summary>
     /// Kích hoạt đẩy FILE PHIẾU lên HUB CHẠY NỀN (fire-and-forget) sau khi Sync đã tổng kết — y pattern
-    /// <see cref="StartHubPushInBackground"/>. Cờ <see cref="_hubSlipPushing"/> (Interlocked) chống 2 lượt đẩy chồng
-    /// nhau: lượt trước còn chạy → bỏ qua, log 1 dòng (lượt sync sau tự đẩy phần thiếu nhờ cờ DB
-    /// <c>hub_slip_synced_at</c>). <paramref name="ct"/> là token phiên → dừng phiên thì lượt đẩy tự hủy.
-    /// <see cref="PushSlipsToHubAsync"/> tự nuốt mọi exception nên task nền KHÔNG bao giờ ném unobserved.
+    /// <see cref="StartHubPushInBackground"/>. <see cref="PushGate"/> (chốt TOÀN TIẾN TRÌNH) chống 2 lượt đẩy chồng
+    /// nhau — cả khi lượt kia do <see cref="HubOutboxWorker"/> kích hoạt: lượt trước còn chạy → bỏ qua, log 1 dòng
+    /// (lượt sau tự đẩy phần thiếu nhờ cờ DB <c>hub_slip_synced_at</c>). <paramref name="ct"/> là token phiên →
+    /// dừng phiên thì lượt đẩy tự hủy (worker sẽ nhặt lại phần còn tồn).
+    /// <see cref="HubOutbox.PushSlipsToHubAsync"/> tự nuốt mọi exception nên task nền KHÔNG bao giờ ném unobserved.
     /// </summary>
     private void StartHubSlipPushInBackground(Action<string> log, CancellationToken ct)
     {
-        if (Interlocked.CompareExchange(ref _hubSlipPushing, 1, 0) != 0)
+        if (!PushGate.TryEnter(_accountId, PushKind.HubSlip))
         {
             log("Hub phiếu: lượt đẩy trước còn đang chạy — bỏ qua (lượt sync sau tự đẩy phần thiếu).");
             return;
@@ -662,86 +577,9 @@ public partial class AccountSession : ObservableObject, IAccountSession
 
         _ = Task.Run(async () =>
         {
-            try { await PushSlipsToHubAsync(log, ct).ConfigureAwait(false); }
-            finally { Interlocked.Exchange(ref _hubSlipPushing, 0); }
+            try { await HubOutbox.PushSlipsToHubAsync(_accountId, _services, log, ct).ConfigureAwait(false); }
+            finally { PushGate.Exit(_accountId, PushKind.HubSlip); }
         }, CancellationToken.None);
-    }
-
-    /// <summary>
-    /// Đẩy FILE PHIẾU của các đơn ĐÃ lên hub nhưng CHƯA đẩy phiếu (<see cref="OrdersRepository.GetForHubSlipPush"/>)
-    /// lên HUB qua hook <see cref="AppServices.PushOrderSlipsToHub"/> (do shell suite rót). Với từng đơn: đọc file
-    /// <c>&lt;invoiceDir&gt;/&lt;SanitizeFileName(sn)&gt;.pdf</c> qua kiểm magic sẵn có (<see cref="TryReadSlipBase64"/>) —
-    /// file THIẾU/hỏng → bỏ qua im lặng (khi file có, lượt sau tự đẩy). Chia lô ≤ <see cref="HubSlipPushBatchSize"/>,
-    /// gọi hook; danh sách <c>order_sn</c> hub báo ĐÃ LƯU → <see cref="OrdersRepository.MarkHubSlipSynced"/> đúng các
-    /// đơn đó; hook trả null (hub lỗi cả lô) → DỪNG các lô sau (lượt sau thử lại). Log 1 dòng khi đẩy được ≥1 phiếu.
-    /// <b>Không bao giờ ném</b>: hủy CHỦ ĐỘNG → thôi; lỗi khác → log. Hook null / không có đơn chờ → return im lặng.
-    /// </summary>
-    private async Task PushSlipsToHubAsync(Action<string> log, CancellationToken ct)
-    {
-        var push = _services.PushOrderSlipsToHub;
-        if (push is null)
-        {
-            return; // hub tắt / app Đơn hàng chạy độc lập → im lặng, không đụng DB
-        }
-
-        try
-        {
-            var pending = _services.Orders.GetForHubSlipPush(_accountId);
-            if (pending.Count == 0)
-            {
-                return;
-            }
-
-            // Đọc file phiếu local hợp lệ (tồn tại + ≤5MB + magic %PDF-) → (order_sn, base64). File thiếu → bỏ qua.
-            var invoiceDir = _services.Settings.GetInvoiceFolder();
-            var ready = new List<(string OrderSn, string FileBase64)>();
-            foreach (var (sn, _) in pending)
-            {
-                var path = Path.Combine(invoiceDir, ShopeeShippingNav.SanitizeFileName(sn) + ".pdf");
-                if (TryReadSlipBase64(path, log, out var b64) && b64 is not null)
-                {
-                    ready.Add((sn, b64));
-                }
-            }
-            if (ready.Count == 0)
-            {
-                return; // chưa có file phiếu local nào hợp lệ → lượt sau (khi tải-lại-phiếu xong) tự đẩy
-            }
-
-            var pushed = 0;
-            for (var i = 0; i < ready.Count; i += HubSlipPushBatchSize)
-            {
-                ct.ThrowIfCancellationRequested();
-
-                var count = Math.Min(HubSlipPushBatchSize, ready.Count - i);
-                var batch = ready.GetRange(i, count);
-
-                var saved = await push(_accountId, batch, ct).ConfigureAwait(false);
-                if (saved is null)
-                {
-                    break; // hub lỗi cả lô (offline / route chưa có) → dừng, lượt sync sau tự đẩy lại
-                }
-                if (saved.Count > 0)
-                {
-                    _services.Orders.MarkHubSlipSynced(_accountId, saved, DateTime.UtcNow);
-                    pushed += saved.Count;
-                }
-            }
-
-            if (pushed > 0)
-            {
-                log($"Hub phiếu: đã đẩy {pushed} file.");
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            // Hủy chủ động (dừng phiên) — thôi.
-        }
-        catch (Exception ex)
-        {
-            // Lỗi đẩy phiếu KHÔNG phá lượt sync (đã ghi DB) — chỉ log; đơn CHƯA đánh dấu → lượt sau đẩy lại.
-            log("Hub phiếu: lỗi — " + ex.Message);
-        }
     }
 
     /// <summary>
@@ -793,266 +631,6 @@ public partial class AccountSession : ObservableObject, IAccountSession
     }
 
     /// <summary>
-    /// Đẩy các đơn của tài khoản này (kèm file phiếu PDF base64) lên Google Sheet qua Apps Script Web App, RỒI
-    /// DỌN đơn KẾT THÚC (Đã giao / Đã hủy) khỏi app (chính sách "app chỉ giữ đơn Chuẩn bị hàng"). Gọi CHẠY NỀN
-    /// (qua <see cref="StartGsheetPushInBackground"/>) SAU khi Sync đã ghi đơn vào DB + tổng kết.
-    /// <b>Không bao giờ ném</b> (sync DB đã xong — lỗi GSheet chỉ ghi log): hủy chủ động → thôi; lỗi khác → log.
-    /// <para>
-    /// <b>URL chưa cấu hình</b> KHÔNG return sớm nữa: người dùng không dùng sheet thì coi như MỌI đơn đã "settled
-    /// GSheet" nhưng vẫn phải DỌN đơn kết thúc. Chỉ đính kèm file khi phiếu tồn tại + đúng magic <c>%PDF-</c> và
-    /// đơn chưa có link. Đơn đã ghi sheet mà không có gì mới → bỏ qua (không đẩy trùng) và coi là settled.
-    /// </para>
-    /// <para>
-    /// <b>DỌN vòng đời:</b> đơn kết thúc chỉ bị XÓA khi (a) đã settled GSheet, (b) nếu Đã giao có SKU thì "Đã bán"
-    /// đã đếm (<c>sold_counted_at</c>), (c) nếu hub bật thì đã đẩy hub (<c>hub_synced_at</c>) — xem
-    /// <see cref="NenXoaDonKetThuc"/>. Nghi ngờ thì GIỮ (đơn thừa vô hại, đơn mất là mất dữ liệu); lượt sync sau
-    /// tự đẩy + dọn tiếp. Xóa xong phát <see cref="AppServices.RaiseOrdersChanged"/> để lưới Đơn hàng vẽ lại.
-    /// </para>
-    /// </summary>
-    private async Task PushOrdersToGsheetAsync(string? shopId, string? shopLogin, Action<string> log, CancellationToken ct)
-    {
-        try
-        {
-            // Đọc pending TRƯỚC nhánh check URL — cần cho bước DỌN kể cả khi người dùng không dùng GSheet. Mô hình
-            // nhiều-shop: lọc theo shopId (chỉ đơn của shop hiện tại) — null (chưa vào loop) → mọi đơn của account.
-            var pending = _services.Orders.GetForGsheetPush(_accountId, shopId);
-            if (pending.Count == 0)
-            {
-                return; // không có đơn nào → không ghi, không dọn
-            }
-
-            var url = _services.Settings.GetGsheetWebAppUrl();
-            // Hub đơn hàng đang bật? (hook đã rót — CÙNG điều kiện PushOrdersToHubAsync dùng để quyết đẩy hub.)
-            var hubHookActive = _services.PushOrdersToHub is not null;
-
-            // Cờ per-đơn: đơn đã "settled" với GSheet = đã ghi xong / không cần ghi / hủy-chưa-vận-đơn / URL trống.
-            // Chỉ đơn settled mới đủ điều kiện dọn. Mã đơn so khớp Ordinal.
-            var settled = new HashSet<string>(StringComparer.Ordinal);
-
-            if (string.IsNullOrWhiteSpace(url))
-            {
-                // KHÔNG im lặng: máy chưa điền URL Web App thì cả buổi không ghi được dòng nào mà không ai hay
-                // (sự cố thật). Chỉ log MỘT lần mỗi phiên — mỗi shop một dòng sẽ rất ồn.
-                if (!_daBaoThieuGsheetUrl)
-                {
-                    _daBaoThieuGsheetUrl = true;
-                    log($"GSheet: chưa cấu hình Web App URL — bỏ qua ghi sheet ({pending.Count} đơn chờ). Điền ở Cài đặt hoặc trên Hub.");
-                }
-
-                // Người dùng chưa dùng GSheet → coi MỌI đơn đã settled (không có nghĩa vụ ghi sheet); KHÔNG return,
-                // vẫn xuống bước dọn đơn kết thúc.
-                foreach (var p in pending)
-                {
-                    settled.Add(p.OrderSn);
-                }
-            }
-            else
-            {
-                // Tên shop (cột E) = TÊN ĐĂNG NHẬP của SHOP hiện tại (mô hình nhiều-shop: vd "alina99.store"), lấy từ
-                // bảng /portal/shop khi vào loop. Fallback về Account.Email khi CHƯA vào loop (shopLogin null/rỗng —
-                // giữ hành vi cũ cho các đường không qua vòng lặp shop).
-                var tenShop = string.IsNullOrWhiteSpace(shopLogin)
-                    ? _services.Accounts.GetById(_accountId)?.Email
-                    : shopLogin;
-
-                var invoiceDir = _services.Settings.GetInvoiceFolder();
-                // Đọc thời điểm MỘT LẦN cho cả lượt (ngày ghi cột + tab tự động theo tháng) — lượt vắt qua nửa
-                // đêm cuối tháng vẫn nhất quán một tab.
-                var now = DateTime.Now;
-                var ngay = now.ToString("dd/MM/yyyy");
-
-                // Tab đích của đơn MỚI: override ở Cài đặt (có giá trị) hoặc tự động "Tháng MM-yyyy" (override trống).
-                // Đơn ĐÃ nhớ tab (p.GsheetTab) LUÔN về đúng tab cũ, bất kể override/tháng hiện tại.
-                var overrideTab = _services.Settings.GetGsheetTabName();     // "" = tự động
-                var autoTab = GsheetTabName.ForMonth(now);
-                var defaultTab = string.IsNullOrEmpty(overrideTab) ? autoTab : overrideTab;
-
-                // Gộp rows theo tab đích (PushAsync nhận MỘT tab/lượt). Thứ tự đơn trong mỗi nhóm giữ nguyên
-                // (List theo thứ tự duyệt pending). Thường 1–2 nhóm (tab tháng hiện tại + tab đã nhớ của đơn cũ).
-                var rowsByTab = new Dictionary<string, List<GsheetOrderRow>>(StringComparer.Ordinal);
-                // Nhớ trạng thái hủy + đã-có-vận-đơn + đã-có-ước-tính VỪA tính của từng đơn được gửi → dùng cho
-                // MarkGsheetSynced (ghi cờ gsheet_da_huy / gsheet_da_co_van_don / gsheet_da_co_uoc_tinh).
-                var daHuyByMaDon = new Dictionary<string, bool>(StringComparer.Ordinal);
-                var coVanDonByMaDon = new Dictionary<string, bool>(StringComparer.Ordinal);
-                var coUocTinhByMaDon = new Dictionary<string, bool>(StringComparer.Ordinal);
-                foreach (var p in pending)
-                {
-                    var daHuy = ShopeeShippingNav.LaDonHuy(p.Status, p.StatusDescription, p.CancelReason);
-                    var coVanDon = !string.IsNullOrWhiteSpace(p.TrackingNumber);
-
-                    // BỎ QUA đơn HỦY mà CHƯA từng có vận đơn: đơn hủy trước khi vào pipeline giao không thuộc sổ
-                    // theo dõi → không ghi (tránh spam dòng đỏ vô nghĩa). By design → coi là settled (được dọn).
-                    // Đơn CHƯA hủy (đang chuẩn bị) vẫn ghi dù chưa có vận đơn (dòng TRẮNG), cột B tự điền sau.
-                    if (daHuy && !coVanDon)
-                    {
-                        settled.Add(p.OrderSn);
-                        continue;
-                    }
-
-                    string? fileName = null;
-                    string? fileBase64 = null;
-
-                    // Chỉ đính kèm file khi đơn CHƯA có link (FileUrl trống) — tránh upload lại phiếu đã có.
-                    if (string.IsNullOrEmpty(p.FileUrl))
-                    {
-                        var safeName = ShopeeShippingNav.SanitizeFileName(p.OrderSn);
-                        var path = Path.Combine(invoiceDir, safeName + ".pdf");
-                        if (TryReadSlipBase64(path, log, out var b64))
-                        {
-                            fileName = safeName + ".pdf";
-                            fileBase64 = b64;
-                        }
-                    }
-
-                    // CHỌN GỬI khi thỏa ÍT NHẤT một điều kiện: (a) đơn mới với sheet; (b) có file phiếu để bổ sung
-                    // link (fileBase64 chỉ set khi FileUrl null); (c) trạng thái hủy đổi so với lần đẩy trước (hoặc
-                    // chưa từng đẩy) → sheet cần đổi màu; (d) vận đơn VỪA xuất hiện (đã ghi dòng lúc chưa có vận đơn,
-                    // giờ có) → gửi lại để điền cột B; (e) số ước tính VỪA xuất hiện (đã ghi dòng lúc chưa mở trang
-                    // chi tiết nên ô tiền còn TRỐNG, giờ có ước tính) → gửi lại để điền cột tiền.
-                    // Không thỏa → bỏ qua (đã ghi đủ, không đẩy trùng) → settled.
-                    var coFileBoSung = fileBase64 is not null;
-                    var huyDoi = p.GsheetDaHuy is null || daHuy != (p.GsheetDaHuy == 1);
-                    var vanDonMoi = coVanDon && p.GsheetDaCoVanDon != 1;
-                    var coUocTinh = p.FinalAmount is not null;
-                    var uocTinhMoi = coUocTinh && p.GsheetDaCoUocTinh != 1;
-                    if (!(!p.DaGhiSheet || coFileBoSung || huyDoi || vanDonMoi || uocTinhMoi))
-                    {
-                        settled.Add(p.OrderSn);
-                        continue;
-                    }
-
-                    daHuyByMaDon[p.OrderSn] = daHuy;
-                    coVanDonByMaDon[p.OrderSn] = coVanDon;
-                    coUocTinhByMaDon[p.OrderSn] = coUocTinh;
-
-                    // Tab đích: tab đã nhớ của đơn (đẩy lại về đúng chỗ cũ) hoặc tab mặc định cho đơn mới.
-                    var tab = string.IsNullOrEmpty(p.GsheetTab) ? defaultTab : p.GsheetTab;
-                    if (!rowsByTab.TryGetValue(tab, out var tabRows))
-                    {
-                        tabRows = new List<GsheetOrderRow>();
-                        rowsByTab[tab] = tabRows;
-                    }
-                    tabRows.Add(new GsheetOrderRow(
-                        MaDon: p.OrderSn,
-                        MaVanDon: p.TrackingNumber,
-                        TenShop: tenShop,
-                        // Tiền bán = "Ước tính" (số tiền cuối cùng đọc ở trang chi tiết); chưa có thì để TRỐNG
-                        // (đơn hủy → tổng tiền, vì đơn hủy không bao giờ có ước tính) — xem GsheetMoney.Chon.
-                        DoanhThu: GsheetMoney.Chon(p.FinalAmount, p.TotalPrice, daHuy),
-                        Ngay: ngay,
-                        Sku: p.Sku,
-                        FileName: fileName,
-                        FileBase64: fileBase64,
-                        DaHuy: daHuy));
-                }
-
-                if (rowsByTab.Count == 0)
-                {
-                    log("GSheet: không có đơn mới cần ghi.");
-                }
-                else
-                {
-                    // PushAsync có thể ném (lỗi mạng/lô) → đơn ĐỊNH-GỬI (trong rowsByTab) coi CHƯA settled → GIỮ
-                    // lại, lượt sync sau tự đẩy lại. Đơn settled-by-design ở trên VẪN được dọn. OCE (hủy) cho xuyên.
-                    // Đẩy LẦN LƯỢT từng tab (thường 1–2). Một nhóm ném lỗi → catch dưới log + DỪNG các nhóm sau
-                    // (mạng đang hỏng); đơn các nhóm đã gửi trước đó vẫn settled, các nhóm sau giữ chưa settled.
-                    try
-                    {
-                        int added = 0, updated = 0, withFile = 0, errors = 0;
-                        string? firstError = null;
-                        foreach (var nhom in rowsByTab)
-                        {
-                            var tabName = nhom.Key;
-                            var results = await _services.GsheetSync.PushAsync(url, tabName, nhom.Value, log, ct).ConfigureAwait(false);
-
-                            foreach (var r in results)
-                            {
-                                if (r.Ok)
-                                {
-                                    var daHuy = daHuyByMaDon.TryGetValue(r.MaDon, out var dh) && dh;
-                                    var coVanDon = coVanDonByMaDon.TryGetValue(r.MaDon, out var cv) && cv;
-                                    var coUocTinh = coUocTinhByMaDon.TryGetValue(r.MaDon, out var cu) && cu;
-                                    _services.Orders.MarkGsheetSynced(_accountId, r.MaDon, r.FileUrl, daHuy, coVanDon, coUocTinh, tabName, DateTime.UtcNow);
-                                    settled.Add(r.MaDon); // gửi thành công → settled (đủ điều kiện dọn nếu kết thúc)
-                                    if (r.Added) { added++; } else { updated++; }
-                                    if (!string.IsNullOrEmpty(r.FileUrl)) { withFile++; }
-                                }
-                                else
-                                {
-                                    errors++;
-                                    firstError ??= $"{r.MaDon}: {r.Error}";
-                                }
-                            }
-                        }
-
-                        var summary = $"GSheet: thêm {added} dòng mới, bổ sung {updated}, kèm {withFile} file phiếu.";
-                        if (errors > 0)
-                        {
-                            summary += $" Lỗi {errors} đơn (vd {firstError}).";
-                        }
-                        log(summary);
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        throw; // hủy chủ động → bỏ qua cả bước dọn (lượt sau làm lại)
-                    }
-                    catch (Exception ex)
-                    {
-                        // Lỗi đẩy GSheet (mạng/lô) → đơn định-gửi giữ CHƯA settled; vẫn xuống dọn đơn settled-by-design.
-                        log("GSheet: lỗi — " + ex.Message);
-                    }
-                }
-            }
-
-            // ===== DỌN đơn KẾT THÚC (Đã giao / Đã hủy) đã hoàn tất mọi nghĩa vụ khỏi app =====
-            // Thư mục phiếu để kiểm "còn phiếu local chưa đẩy hub" (giữ đơn tới khi phiếu lên hub). Đọc 1 lần.
-            var slipDir = _services.Settings.GetInvoiceFolder();
-            var deletable = new List<string>();
-            var terminalChuaXong = 0;
-            foreach (var p in pending)
-            {
-                var terminal = ShopeeShippingNav.LaDonHuy(p.Status, p.StatusDescription, p.CancelReason)
-                    || ShopeeShippingNav.LaDaGiaoDaBan(p.Status);
-                if (!terminal)
-                {
-                    continue; // đơn trung gian (Chuẩn bị hàng / Đang giao / Chờ xác nhận…) → GIỮ, theo dõi tiếp
-                }
-                // Còn phiếu local HỢP LỆ chưa đẩy hub (hub bật) → GIỮ đơn để lượt sau đẩy phiếu xong mới dọn.
-                var coPhieuLocalChuaDayHub = hubHookActive && !p.DaDayPhieuHub
-                    && SlipFileIsValidPdf(Path.Combine(slipDir, ShopeeShippingNav.SanitizeFileName(p.OrderSn) + ".pdf"));
-                if (NenXoaDonKetThuc(p, settled.Contains(p.OrderSn), hubHookActive, coPhieuLocalChuaDayHub))
-                {
-                    deletable.Add(p.OrderSn);
-                }
-                else
-                {
-                    terminalChuaXong++;
-                }
-            }
-
-            if (deletable.Count > 0)
-            {
-                var n = _services.Orders.DeleteOrders(_accountId, deletable);
-                _services.RaiseOrdersChanged(); // lưới Đơn hàng đang mở tự vẽ lại
-                log($"Dọn: đã lưu sheet & xóa {n} đơn kết thúc (Đã giao/Đã hủy) khỏi app.");
-            }
-            if (terminalChuaXong > 0)
-            {
-                log($"Dọn: {terminalChuaXong} đơn kết thúc chờ lượt sau (GSheet/hub/đếm chưa xong).");
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            // Hủy chủ động — thôi (sync DB đã xong; lượt sync sau tự đẩy + dọn lại nhờ cờ DB).
-        }
-        catch (Exception ex)
-        {
-            // Lỗi bất ngờ KHÔNG phá lượt sync (đã báo thành công) — chỉ ghi log.
-            log("GSheet: lỗi — " + ex.Message);
-        }
-    }
-
-    /// <summary>
     /// HÀM THUẦN (test được) quyết định một đơn KẾT THÚC có được XÓA khỏi app chưa. Trả true khi:
     /// <list type="bullet">
     /// <item>đơn KẾT THÚC — <c>LaDonHuy</c> (Đã hủy) hoặc <c>LaDaGiaoDaBan</c> (Đã giao); VÀ</item>
@@ -1083,8 +661,10 @@ public partial class AccountSession : ObservableObject, IAccountSession
     /// Đọc file phiếu <paramref name="path"/> thành base64 nếu HỢP LỆ: tồn tại, ≤ 5MB, và 5 byte đầu là
     /// <c>%PDF-</c> (kiểm magic — bài học cũ: đừng tin đuôi file, GET lại phiếu có thể ra HTML 200-OK). File
     /// quá lớn → log 1 dòng + bỏ qua. Mọi lỗi đọc → false. Trả true + base64 khi hợp lệ.
+    /// <para><c>internal</c> (không private) vì các thân đẩy đã dời sang <see cref="HubOutbox"/> — vẫn cùng
+    /// assembly, không lộ ra ngoài module.</para>
     /// </summary>
-    private static bool TryReadSlipBase64(string path, Action<string> log, out string? base64)
+    internal static bool TryReadSlipBase64(string path, Action<string> log, out string? base64)
     {
         base64 = null;
         try

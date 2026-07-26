@@ -212,6 +212,17 @@
                     </StackPanel>
                 </Border>
 
+                <!-- Vòng chờ đẩy (đơn/phiếu/dòng sheet/đếm Đã bán còn tồn) — CHỈ hiện khi còn tồn > 0 -->
+                <StackPanel DockPanel.Dock="Left" Orientation="Horizontal"
+                            IsVisible="{Binding ShowShopeeStatus}">
+                    <StackPanel Orientation="Horizontal" IsVisible="{Binding ShopeeStatusVm.HasOutboxPending}">
+                        <Rectangle Classes="statusSep" />
+                        <Border Classes="statusSeg" ToolTip.Tip="{Binding ShopeeStatusVm.OutboxPendingTooltip}">
+                            <TextBlock Text="{Binding ShopeeStatusVm.OutboxPendingText}" />
+                        </Border>
+                    </StackPanel>
+                </StackPanel>
+
                 <!-- Cụm đếm chính (Workspace): tk BigSeller · shop -->
                 <StackPanel DockPanel.Dock="Left" Orientation="Horizontal"
                             IsVisible="{Binding ShowWorkspaceStatus}">

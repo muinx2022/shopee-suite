@@ -1,7 +1,7 @@
 # Plan: Vòng chờ đẩy (outbox) — luồng đẩy độc lập cho Hub · GSheet · Đã bán
 
 - **Ngày:** 2026-07-26
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành (chưa xác nhận bằng mắt trên app thật)
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-dev`) — CÂY CHÍNH
 
 ## 1. Bối cảnh & mục tiêu
@@ -133,4 +133,31 @@ Tạo `orders/XuLyDonShopee.App/Services/HubOutboxWorker.cs`:
 
 ## Báo cáo thực thi (Opus điền sau khi xong)
 
-<chưa thực thi>
+Hoàn thành. Build 0 error, **987 test xanh** (951 → 987, +36), **KHÔNG sửa test cũ nào** (bằng chứng Bước 1 là
+refactor cơ học đúng nghĩa).
+
+Tạo: `PushGate.cs` (khoá toàn tiến trình theo `(accountId, kind)` bằng `ConcurrentDictionary.TryAdd`),
+`HubOutbox.cs` (4 thân đẩy static + `LocHangDoiDemDaBan`), `HubOutboxWorker.cs`. Sửa: `AccountSession` (bỏ 4 cờ
+instance → dùng gate), `OrdersRepository` (+`GetForSoldCountRetry` + 3 hàm `Count*`), `AppServices`/`MainViewModel`
+(số tồn + event), `OrdersModuleHost` (dựng+Start+Dispose worker), `MainWindow.axaml` (đúng 1 đoạn `⏳ Chờ đẩy`).
+
+**Executor phát hiện thêm 1 khe hở đua mà plan chưa lường:** giữa `UpsertMany` (đã ghi trạng thái đã-giao) và
+`MarkSoldCounted(ImmediateMark)` (đánh cờ grandfather) có vài mili-giây mà đơn grandfather trông y hệt "đã giao,
+chưa đếm" → worker sẽ +1 NHẦM. Gate không che được vì đoạn đó không nằm trong lượt đẩy nào. Đã đóng bằng chốt
+thời gian: `GetForSoldCountRetry(accountId, updatedBeforeUtc)` — worker chỉ xét đơn đã "ổn định" > 1 phút.
+
+Chu kỳ: lượt đầu sau khi mở app **15s** (không phải 0 — chạy đúng t=0 lúc cầu nối hub chưa lên sẽ fail rồi nhảy
+backoff, người dùng phải chờ ~17′); khỏe 2′; 1 lỗi → 5′; ≥2 lỗi → 10′ (trần); thành công → về 2′. Lượt "không có
+gì để đẩy" không tính backoff. Log chỉ ghi khi số tồn/kết quả ĐỔI (không spam).
+
+Lệch plan đáng chú ý khác: 4 hàm trả `KetQuaDay` (worker cần biết đích có nhận để tính backoff); badge chỉ đếm
+loại CÓ ĐÍCH thật (máy chạy độc lập không treo `⏳` vĩnh viễn); `CountForGsheetPush` là ước lượng (đơn hủy chưa
+có vận đơn vẫn nằm trong số) — chỉ dùng để quyết có chạy lượt sheet + hiển thị, không dùng làm nguồn đẩy.
+
+**CHƯA kiểm chứng bằng chạy app thật — có lý do chính đáng:** `PushGate` chỉ chốt TRONG một tiến trình; user
+đang chạy instance thật trên cùng `%APPDATA%\XuLyDonShopee\app.db`, mở instance thứ 2 sẽ có 2 worker cùng đẩy
+một DB = đúng ca +2 đếm "Đã bán" trên DỮ LIỆU THẬT. Thay bằng 7 test chạy worker end-to-end trên DB tạm + hook
+giả. **Còn phải xác nhận bằng mắt:** badge `⏳ Chờ đẩy` hiện/ẩn đúng.
+
+⚠️ **Hạn chế kiến trúc cần nhớ:** khoá là per-process. Nếu sau này chạy 2 instance app trên cùng một máy/cùng DB
+thì cơ chế này KHÔNG bảo vệ được — cần khoá theo file/mutex hệ thống.

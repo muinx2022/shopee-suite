@@ -30,7 +30,10 @@ public partial class MainViewModel : ViewModelBase
         // Kho đơn đổi (phiên sync ghi xong, CÓ THỂ từ thread nền) → cập nhật số đơn ở thanh trạng thái.
         // Marshal về UI thread vì các property bind chỉ được đụng trên UI thread. VM sống suốt vòng đời app.
         _services.OrdersChanged += () => Dispatcher.UIThread.Post(RefreshStatus);
+        // Vòng chờ đẩy quét xong một lượt (thread nền của worker) → cập nhật đoạn "⏳ Chờ đẩy".
+        _services.PendingOutboxChanged += () => Dispatcher.UIThread.Post(RefreshOutboxPending);
         RefreshStatus();
+        RefreshOutboxPending();
     }
 
     // ── 4 màn con + màn Cài đặt (read-only) để shell suite ráp lên dải Ribbon. Màn Cài đặt của đơn hàng
@@ -68,6 +71,30 @@ public partial class MainViewModel : ViewModelBase
 
     [ObservableProperty]
     private string _statusBrowserText = "";
+
+    // ===== Đoạn "⏳ Chờ đẩy" của thanh trạng thái (vòng chờ đẩy — HubOutboxWorker) =====
+
+    /// <summary>Còn hàng tồn chờ đẩy? Thanh trạng thái CHỈ hiện đoạn "⏳ Chờ đẩy" khi true.</summary>
+    [ObservableProperty]
+    private bool _hasOutboxPending;
+
+    [ObservableProperty]
+    private string _outboxPendingText = "";
+
+    /// <summary>Tooltip tách theo từng loại đích (đơn / phiếu / dòng sheet / lượt đếm).</summary>
+    [ObservableProperty]
+    private string _outboxPendingTooltip = "";
+
+    /// <summary>Đọc lại số tồn của vòng chờ đẩy. Gọi ở ctor và mỗi khi worker quét xong một lượt.</summary>
+    public void RefreshOutboxPending()
+    {
+        var p = _services.PendingOutbox;
+        HasOutboxPending = p.Tong > 0;
+        OutboxPendingText = $"⏳ Chờ đẩy: {p.Tong}";
+        OutboxPendingTooltip =
+            $"Hàng còn chờ đẩy: {p.Orders} đơn lên Hub · {p.Slips} phiếu · {p.SheetRows} dòng Google Sheet · "
+            + $"{p.SoldCounts} lượt đếm Đã bán.\nTự đẩy lại mỗi 2 phút khi kết nối được.";
+    }
 
     /// <summary>Đọc lại 4 số liệu cho thanh trạng thái đáy. Gọi ở ctor, khi đổi màn, và sau khi kho đơn đổi.</summary>
     public void RefreshStatus()

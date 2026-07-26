@@ -645,6 +645,106 @@ public class OrdersRepository
     }
 
     /// <summary>
+    /// <b>HÀNG ĐỢI ĐẾM "Đã bán"</b> (đường THỬ LẠI, độc lập với <see cref="DetectNewlyDelivered"/>): các đơn của
+    /// tài khoản CHƯA đếm (<c>sold_counted_at IS NULL</c>) và CÓ SKU (khác rỗng). Sắp theo id tăng (đơn cũ trước).
+    /// <para>
+    /// <b>Vì sao cần:</b> <see cref="DetectNewlyDelivered"/> phát hiện đơn đã-giao bằng cách so trạng thái QUÉT với
+    /// trạng thái ĐÃ LƯU. Nếu hub lỗi lúc +1 thì cờ <c>sold_counted_at</c> vẫn NULL <b>nhưng DB đã lưu trạng thái
+    /// đã-giao</b> (UpsertMany chạy trước đó) → lượt sync sau KHÔNG còn thấy "chuyển trạng thái" nữa → <b>mất đếm
+    /// vĩnh viễn</b>. Hàng đợi theo DB này là đường đếm bù.
+    /// </para>
+    /// Trả <c>(OrderSn, Sku, Status, StatusDescription, CancelReason)</c> — việc lọc "đã giao"
+    /// (<c>ShopeeShippingNav.LaDaGiaoDaBan</c>) và loại đơn hủy (<c>LaDonHuy</c>) do CALLER làm bằng C# (SQL không
+    /// biết các luật này).
+    /// <para>
+    /// <paramref name="updatedBeforeUtc"/> (tùy chọn): chỉ lấy đơn có <c>updated_at</c> ≤ mốc này — chốt chống ĐẾM
+    /// ĐÔI với luồng phiên. Luồng phiên chạy <c>UpsertMany</c> (ghi trạng thái đã-giao) rồi mới
+    /// <see cref="MarkSoldCounted"/> cho nhóm grandfather ngay sau đó; đọc hàng đợi TRÚNG khe hở vài mili-giây giữa
+    /// hai bước sẽ thấy đơn grandfather như "chưa đếm" và +1 NHẦM. Người gọi nền (vòng chờ) truyền mốc lùi lại vài
+    /// chục giây để chỉ nhặt đơn đã NGUỘI. Null = không lọc theo thời gian (dùng cho test / đường đồng bộ).
+    /// </para>
+    /// </summary>
+    public IReadOnlyList<(string OrderSn, string Sku, string? Status, string? StatusDescription, string? CancelReason)>
+        GetForSoldCountRetry(long accountId, DateTime? updatedBeforeUtc = null)
+    {
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        // updated_at lưu dạng ISO-8601 round-trip ("o") theo giờ UTC → so sánh CHUỖI là so đúng thứ tự thời gian.
+        var ageFilter = updatedBeforeUtc is null ? string.Empty : " AND updated_at IS NOT NULL AND updated_at <= $before";
+        cmd.CommandText = @"SELECT order_sn, sku, status, status_description, cancel_reason
+    FROM orders
+    WHERE account_id = $a
+      AND sold_counted_at IS NULL
+      AND sku IS NOT NULL AND TRIM(sku) <> ''" + ageFilter + @"
+    ORDER BY id;";
+        cmd.Parameters.AddWithValue("$a", accountId);
+        if (updatedBeforeUtc is not null)
+        {
+            cmd.Parameters.AddWithValue("$before", DbSerialization.FormatDate(updatedBeforeUtc.Value));
+        }
+
+        var list = new List<(string, string, string?, string?, string?)>();
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            if (reader.IsDBNull(0) || reader.IsDBNull(1))
+            {
+                continue;
+            }
+            list.Add((
+                reader.GetString(0),
+                reader.GetString(1),
+                reader.IsDBNull(2) ? null : reader.GetString(2),
+                reader.IsDBNull(3) ? null : reader.GetString(3),
+                reader.IsDBNull(4) ? null : reader.GetString(4)));
+        }
+        return list;
+    }
+
+    /// <summary>
+    /// SỐ đơn còn CHỜ đẩy lên hub (<c>hub_synced_at IS NULL</c>) — đếm bằng SQL <c>COUNT</c> cho vòng chờ đẩy (chạy
+    /// định kỳ trên MỌI tài khoản nên phải nhẹ, không nạp cả danh sách như <see cref="GetForHubPush"/>).
+    /// </summary>
+    public int CountForHubPush(long accountId)
+    {
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT COUNT(*) FROM orders WHERE account_id = $a AND hub_synced_at IS NULL;";
+        cmd.Parameters.AddWithValue("$a", accountId);
+        return Convert.ToInt32(cmd.ExecuteScalar());
+    }
+
+    /// <summary>SỐ đơn còn CHỜ đẩy FILE PHIẾU lên hub — cùng mệnh đề WHERE với <see cref="GetForHubSlipPush"/>
+    /// (đã lên hub + chưa đẩy phiếu + có mã vận đơn). Đếm bằng SQL cho vòng chờ đẩy.</summary>
+    public int CountForHubSlipPush(long accountId)
+    {
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = @"SELECT COUNT(*) FROM orders
+    WHERE account_id = $a
+      AND hub_synced_at IS NOT NULL
+      AND hub_slip_synced_at IS NULL
+      AND tracking_number IS NOT NULL AND TRIM(tracking_number) <> '';";
+        cmd.Parameters.AddWithValue("$a", accountId);
+        return Convert.ToInt32(cmd.ExecuteScalar());
+    }
+
+    /// <summary>
+    /// SỐ đơn CHƯA từng ghi được dòng Google Sheet (<c>gsheet_synced_at IS NULL</c>) — dấu hiệu "còn hàng chờ ghi
+    /// sheet" cho vòng chờ đẩy. Đây là ƯỚC LƯỢNG (việc chọn đơn nào GỬI do C# quyết — xem
+    /// <c>HubOutbox.PushOrdersToGsheetAsync</c>): đơn hủy-chưa-có-vận-đơn không bao giờ được ghi nên vẫn nằm trong
+    /// số này tới khi bị dọn. Chỉ dùng để quyết "có cần chạy lượt đẩy sheet không" + hiển thị, KHÔNG dùng làm nguồn đẩy.
+    /// </summary>
+    public int CountForGsheetPush(long accountId)
+    {
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT COUNT(*) FROM orders WHERE account_id = $a AND gsheet_synced_at IS NULL;";
+        cmd.Parameters.AddWithValue("$a", accountId);
+        return Convert.ToInt32(cmd.ExecuteScalar());
+    }
+
+    /// <summary>
     /// Đánh dấu các đơn ĐÃ được tính "Đã bán" (chống đếm trùng lượt sync sau). <c>sold_counted_at</c> dùng
     /// <c>COALESCE(cũ, $at)</c> — GIỮ thời điểm đếm LẦN ĐẦU, không đè. Khóa theo <c>(account_id, order_sn)</c>;
     /// đơn không có mã (rỗng) bị bỏ qua. Cập nhật nhiều đơn trong một transaction (mẫu <see cref="MarkHubSynced"/>).

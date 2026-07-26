@@ -27,6 +27,10 @@ public static class OrdersModuleHost
     // bên dưới vốn idempotent (StopAllAsync thao tác list rỗng), cờ này chỉ để khỏi lặp công vô ích.
     private static bool _stopped;
 
+    /// <summary>VÒNG CHỜ ĐẨY chạy theo vòng đời APP (không theo phiên) — đẩy bù hàng tồn lên Hub/GSheet/đếm
+    /// "Đã bán" mỗi ~2 phút. Giữ tham chiếu static để Dispose khi thoát (và để GC không gom).</summary>
+    private static HubOutboxWorker? _outboxWorker;
+
     /// <summary>
     /// Khởi tạo bộ dịch vụ đơn hàng (ctor <see cref="AppServices"/> mở SQLite <c>%APPDATA%\XuLyDonShopee\app.db</c>
     /// + chạy migration) và dựng ViewModel gốc của module. Lỗi (đĩa/khóa DB…) → ghi log, trả null để suite vẫn boot.
@@ -40,7 +44,12 @@ public static class OrdersModuleHost
             WireIncrementSoldBySku(Services);
             WireHubSlipPush(Services);
             WireGsheetConfig(Services);
-            return new MainViewModel(Services);
+            var vm = new MainViewModel(Services);
+            // Vòng chờ đẩy: dựng SAU khi AppServices (DB + migration) và các hook hub đã sẵn sàng; tự hoãn ~15s
+            // rồi chạy lượt đầu (bắt đúng ý "khi client chạy, còn vòng chờ thì đẩy") và lặp mỗi ~2 phút.
+            _outboxWorker = new HubOutboxWorker(Services);
+            _outboxWorker.Start();
+            return vm;
         }
         catch (Exception ex)
         {
@@ -391,6 +400,7 @@ public static class OrdersModuleHost
         if (svc is null || _stopped) return;
         _stopped = true;
         try { _gsheetTimer?.Dispose(); } catch { /* bỏ qua khi thoát */ }   // dừng nhịp kéo cấu hình GSheet
+        try { _outboxWorker?.Dispose(); } catch { /* bỏ qua khi thoát */ }  // dừng vòng chờ đẩy
         try { await svc.Sessions.StopAllAsync(); } catch { /* bỏ qua khi thoát */ }
     }
 }

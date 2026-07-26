@@ -10,6 +10,23 @@ using XuLyDonShopee.Core.Services;
 namespace XuLyDonShopee.App.Services;
 
 /// <summary>
+/// SỐ HÀNG CÒN TỒN trong vòng chờ đẩy, tách theo 4 loại đích: <paramref name="Orders"/> đơn lên Hub ·
+/// <paramref name="Slips"/> file phiếu lên Hub · <paramref name="SheetRows"/> dòng Google Sheet ·
+/// <paramref name="SoldCounts"/> lượt +1 "Đã bán". <see cref="HubOutboxWorker"/> tính lại sau mỗi lượt; thanh
+/// trạng thái hiện <see cref="Tong"/> khi &gt; 0. Loại nào KHÔNG có đích (hook hub chưa rót / URL sheet trống)
+/// được đếm 0 để badge không kẹt số vĩnh viễn.
+/// </summary>
+public readonly record struct OutboxPending(int Orders = 0, int Slips = 0, int SheetRows = 0, int SoldCounts = 0)
+{
+    /// <summary>Tổng hàng còn chờ đẩy (cả 4 loại).</summary>
+    public int Tong => Orders + Slips + SheetRows + SoldCounts;
+
+    /// <summary>Cộng dồn số tồn của một tài khoản nữa vào tổng của cả lượt.</summary>
+    public OutboxPending Cong(OutboxPending khac)
+        => new(Orders + khac.Orders, Slips + khac.Slips, SheetRows + khac.SheetRows, SoldCounts + khac.SoldCounts);
+}
+
+/// <summary>
 /// Gom Database + các repository, khởi tạo một lần và truyền vào ViewModel.
 /// (Bước đầu không dùng DI container.)
 /// </summary>
@@ -100,6 +117,30 @@ public class AppServices
 
     /// <summary>Bên ngoài (vd sync shop BigSeller) gọi sau khi Insert tài khoản THÀNH CÔNG để phát <see cref="AccountsChanged"/>.</summary>
     public void RaiseAccountsChanged() => AccountsChanged?.Invoke();
+
+    /// <summary>
+    /// SỐ HÀNG CÒN TỒN của vòng chờ đẩy (gộp MỌI tài khoản) — <see cref="HubOutboxWorker"/> ghi sau mỗi lượt,
+    /// thanh trạng thái đọc để hiện "⏳ Chờ đẩy: N". Mặc định 0 (chưa có lượt nào chạy → không hiện gì).
+    /// </summary>
+    public OutboxPending PendingOutbox { get; private set; }
+
+    /// <summary>
+    /// Phát khi <see cref="PendingOutbox"/> ĐỔI. Y như <see cref="OrdersChanged"/>: CỐ Ý bắn từ THREAD NỀN của
+    /// worker → người nghe PHẢI marshal về UI thread trước khi đụng property bind.
+    /// </summary>
+    public event Action? PendingOutboxChanged;
+
+    /// <summary>Worker gọi sau mỗi lượt quét. Không đổi so với lần trước → KHÔNG phát sự kiện (khỏi làm mới UI thừa
+    /// mỗi 2 phút).</summary>
+    public void SetPendingOutbox(OutboxPending value)
+    {
+        if (value.Equals(PendingOutbox))
+        {
+            return;
+        }
+        PendingOutbox = value;
+        PendingOutboxChanged?.Invoke();
+    }
 
     public AppServices(string? dbPath = null)
     {
