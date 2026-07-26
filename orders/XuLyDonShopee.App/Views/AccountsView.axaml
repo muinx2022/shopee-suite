@@ -180,24 +180,64 @@
 
         <!-- TabControl chi tiết (Thông tin tài khoản | Kết quả): module chưa có TabControl nào → tự style phẳng gọn
              (font nhỏ, đệm gọn, chữ mờ; tab đang chọn → chữ accent). Khớp theme phẳng của app. -->
+        <!-- Sub-tab (Thông tin tài khoản | Kết quả) — CÙNG kiểu với sub-tab màn Workspace: gạch chân 2px CAM,
+             không nền, không viền pill. Bản trước chỉ đổi màu chữ mà KHÔNG đụng template Fluent nên vẫn còn nền
+             pill + gạch chỉ báo mặc định → trông thô và lệch hẳn phần còn lại của app. -->
         <Style Selector="TabControl.detailTabs">
             <Setter Property="Padding" Value="0" />
             <Setter Property="Background" Value="Transparent" />
         </Style>
+        <!-- Dải tab thụt bằng lề trái của form (24) cho thẳng hàng với nội dung bên dưới. -->
+        <Style Selector="TabControl.detailTabs /template/ ItemsPresenter#PART_ItemsPresenter">
+            <Setter Property="Margin" Value="24,10,16,0" />
+        </Style>
+        <!-- Vạch 1px chạy hết bề ngang dưới dải tab. KHÔNG đặt Padding ở đây: nội dung mỗi tab đã có lề riêng. -->
+        <Style Selector="TabControl.detailTabs /template/ ContentPresenter#PART_SelectedContentHost">
+            <Setter Property="BorderBrush" Value="{StaticResource Border06}" />
+            <Setter Property="BorderThickness" Value="0,1,0,0" />
+            <Setter Property="Padding" Value="0" />
+        </Style>
+        <!-- Padding CHỈ ngang + chiều cao cố định: gạch chân (PART_SelectedPipe) nằm TRONG phần padding của khung
+             tab — có padding dưới là gạch bị đẩy lơ lửng. -->
         <Style Selector="TabControl.detailTabs TabItem">
-            <Setter Property="FontSize" Value="13.5" />
+            <Setter Property="FontSize" Value="12.5" />
             <Setter Property="FontWeight" Value="SemiBold" />
-            <Setter Property="Foreground" Value="{StaticResource Text9A}" />
-            <Setter Property="Padding" Value="12,6" />
-            <Setter Property="MinHeight" Value="0" />
-            <Setter Property="Margin" Value="0,0,4,0" />
+            <Setter Property="Foreground" Value="{StaticResource TextMuted}" />
+            <Setter Property="Padding" Value="13,0" />
+            <Setter Property="MinHeight" Value="32" />
+            <Setter Property="Height" Value="32" />
+            <Setter Property="Margin" Value="0" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
             <Setter Property="Cursor" Value="Hand" />
+        </Style>
+        <!-- Nền tab LUÔN trong suốt (Fluent tô nền tab chọn/hover → ra khối pill xám). -->
+        <Style Selector="TabControl.detailTabs TabItem /template/ Border#PART_LayoutRoot">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+        <Style Selector="TabControl.detailTabs TabItem:pointerover /template/ Border#PART_LayoutRoot">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+        <Style Selector="TabControl.detailTabs TabItem:selected /template/ Border#PART_LayoutRoot">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+        <Style Selector="TabControl.detailTabs TabItem:selected:pointerover /template/ Border#PART_LayoutRoot">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+        <!-- Gạch chân tab đang chọn: 2px cam, thụt 10px mỗi bên, dính đáy (Fluent mặc định bo tròn + lệch). -->
+        <Style Selector="TabControl.detailTabs TabItem /template/ Border#PART_SelectedPipe">
+            <Setter Property="Background" Value="{StaticResource AccentBrush}" />
+            <Setter Property="CornerRadius" Value="0" />
+            <Setter Property="Height" Value="2" />
+            <Setter Property="Width" Value="NaN" />
+            <Setter Property="Margin" Value="10,0,10,0" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="VerticalAlignment" Value="Bottom" />
         </Style>
         <Style Selector="TabControl.detailTabs TabItem:selected">
             <Setter Property="Foreground" Value="{StaticResource AccentBrush}" />
         </Style>
         <Style Selector="TabControl.detailTabs TabItem:pointerover">
-            <Setter Property="Foreground" Value="{StaticResource Text232}" />
+            <Setter Property="Foreground" Value="{StaticResource TextInk}" />
         </Style>
 
     </UserControl.Styles>
