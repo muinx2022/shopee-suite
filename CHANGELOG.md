@@ -5,6 +5,15 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Hiệu năng. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.6.1 — 2026-07-26
+
+- **Đơn toàn hệ thống (mới):** thêm màn xem đơn của **mọi máy** trong tab Shopee — lọc theo shop / trạng thái /
+  tìm kiếm và phân trang, tất cả chạy ở phía Hub. Màn này **chỉ để xem**: đơn đọc thẳng từ Hub, **không chép về
+  máy**, nên không ảnh hưởng gì tới đơn và các luồng xử lý của máy này. Hub chết hay chưa kết nối đều có thông
+  báo riêng, không phải lưới trống câm.
+- **Tab "Kết quả":** số chuẩn bị hàng nay **tự cập nhật ngay sau mỗi đơn** — trước đây phải đổi tài khoản hoặc
+  đổi ngày mới thấy số mới (số vẫn được ghi đúng, chỉ là màn không đọc lại).
+
 ## v1.6.0 — 2026-07-26
 
 Thiết kế lại toàn bộ giao diện theo bộ design mới, cộng một số tính năng và sửa lỗi mất dữ liệu âm thầm.
