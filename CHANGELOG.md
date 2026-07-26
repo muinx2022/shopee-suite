@@ -5,6 +5,15 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Hiệu năng. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.6.4 — 2026-07-26
+
+- **Thứ tự shop theo đúng subaccount:** lưới tab "Kết quả" trước đây sắp shop theo bảng chữ cái, khác thứ tự
+  người dùng thấy trên trang subaccount của Shopee. Nay app lưu lại vị trí shop đọc được từ `/portal/shop` và
+  hiện y hệt thứ tự đó. (Shop đã lưu từ bản cũ tạm xếp cuối cho tới lượt chạy kế — chạy một lượt là đúng vị trí.)
+- **Dấu tick shop đã kiểm tra:** cột tiến độ giờ mỗi dòng một biểu tượng — **vòng quay** khi đang kiểm tra shop
+  đó, **dấu tick xanh** khi đã kiểm tra xong trong lượt chạy, để trống khi chưa tới. Nhìn lưới là biết lượt chạy
+  đã đi qua những shop nào. Tick sống theo lượt chạy, tự xoá khi phiên đọc lại danh sách shop. Thay cho chấm tròn.
+
 ## v1.6.3 — 2026-07-26
 
 - **Sửa lỗi Hub kẹt trạng thái đơn:** đơn đã đẩy lên Hub một lần thì mọi thay đổi trạng thái sau đó
