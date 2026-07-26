@@ -55,6 +55,22 @@ public sealed class HubOrdersPage
 }
 
 /// <summary>
+/// Một dòng kết quả GET /prepare-stats: số đơn ĐÃ "chuẩn bị hàng" của MỘT shop trong ngày hỏi. Hub đếm THẲNG từ
+/// bảng <c>orders</c> (khoá <c>shop_id+order_sn</c>) nên mỗi đơn chỉ tính một lần dù bao nhiêu máy cùng chạy — đây
+/// là con số CHUNG toàn hệ thống, khác bộ đếm cục bộ <c>prepare_daily</c> của từng máy. Class (không record) +
+/// property settable để JSON bind khoan dung.
+/// </summary>
+public sealed class PrepareStatItem
+{
+    /// <summary>Tài khoản đăng nhập shop (<c>shops.username</c> trên hub) — CHÍNH là <c>shop_login</c> client dùng
+    /// làm khoá khi đẩy đơn, nên client tra thẳng vào lưới tab "Kết quả" không cần dịch tên.</summary>
+    public string ShopUsername { get; set; } = string.Empty;
+
+    /// <summary>Số đơn của shop này đã chuẩn bị hàng trong ngày hỏi.</summary>
+    public int Count { get; set; }
+}
+
+/// <summary>
 /// Một shop hub theo dõi (GET /api/shops) — RÚT GỌN từ <c>Shop</c> của hub: chỉ 3 field cần để đổi
 /// <see cref="HubOrderItem.ShopId"/> (số) sang tên hiển thị. CỐ Ý bỏ password/cookie/proxy của bản hub —
 /// client xem đơn không cần và không nên nhận.

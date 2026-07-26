@@ -238,6 +238,21 @@ public static class ClientApiEndpoints
                 PageSize = ps,
             });
         });
+
+        // GET /prepare-stats?day=yyyy-MM-dd → số đơn ĐÃ "chuẩn bị hàng" theo shop trong ĐÚNG một ngày. Hub đếm
+        // THẲNG từ bảng orders (mỗi đơn 1 dòng) nên là con số CHUNG toàn hệ thống — nhiều máy cùng chạy không cộng
+        // trùng. day thiếu/sai định dạng → 400; ngày không có đơn nào → list RỖNG (KHÔNG 404): client phân biệt
+        // "hub bảo 0 đơn" (list) với "không hỏi được hub" (null → giữ số cục bộ).
+        api.MapGet(HubRoutes.PrepareStats, (string? day) =>
+        {
+            if (string.IsNullOrWhiteSpace(day) || !DateOnly.TryParseExact(day, "yyyy-MM-dd", out _))
+            {
+                return Results.BadRequest();
+            }
+            return Results.Json(db.PrepareStatsByDay(day)
+                .Select(s => new PrepareStatItem { ShopUsername = s.ShopUsername, Count = s.Count })
+                .ToList());
+        });
     }
 
     /// <summary>Map <see cref="OrderRecord"/> (kiểu nội bộ hub) → <see cref="HubOrderItem"/> (DTO dùng chung với

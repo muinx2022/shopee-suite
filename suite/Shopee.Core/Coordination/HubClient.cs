@@ -334,6 +334,21 @@ public sealed class HubClient : IDisposable
         catch { return null; }
     }
 
+    /// <summary>Số đơn ĐÃ "chuẩn bị hàng" theo shop trong ĐÚNG một ngày (<paramref name="day"/> = <c>yyyy-MM-dd</c>
+    /// giờ địa phương của máy chuẩn bị đơn) — nguồn cho cột "Chuẩn bị hàng" tab "Kết quả". Trả list RỖNG = hub bảo
+    /// ngày đó chưa shop nào có đơn; trả null = KHÔNG lấy được (offline / timeout / hub CŨ chưa có route) → caller
+    /// GIỮ số cục bộ. Dùng _http (control-plane 8s) như các truy vấn UI khác, KHÔNG _bulkHttp.</summary>
+    public async Task<IReadOnlyList<PrepareStatItem>?> GetPrepareStatsAsync(string day, CancellationToken ct = default)
+    {
+        try
+        {
+            return await _http.GetFromJsonAsync<List<PrepareStatItem>>(
+                $"{HubRoutes.PrepareStats}?day={Uri.EscapeDataString(day)}", ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; } // huỷ CHỦ ĐỘNG → cho xuyên
+        catch { return null; }
+    }
+
     /// <summary>Danh sách shop trên hub — để đổi <c>shopId</c> (SỐ) của đơn sang TÊN shop. Nạp MỘT LẦN rồi tra
     /// trong bộ nhớ, KHÔNG gọi mỗi dòng. Trả null = không lấy được.</summary>
     public async Task<IReadOnlyList<HubShopItem>?> ListShopsAsync(CancellationToken ct = default)

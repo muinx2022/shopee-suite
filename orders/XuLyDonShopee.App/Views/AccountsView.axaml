@@ -608,6 +608,16 @@
                                     <TextBlock Text="Ngày:" FontSize="13" FontWeight="SemiBold"
                                                Foreground="{StaticResource TextMuted}" VerticalAlignment="Center" />
                                     <DatePicker SelectedDate="{Binding ResultDate}" />
+                                    <!-- Số đang hiện là số CHUNG toàn hệ thống (hub đếm từ bảng đơn) hay chỉ số của
+                                         riêng máy này (chưa hỏi được hub) — 2 dòng loại trừ nhau theo DangDungSoHub. -->
+                                    <TextBlock Text="Số toàn hệ thống (Hub)"
+                                               FontSize="11" Foreground="{StaticResource TextMuted}"
+                                               VerticalAlignment="Center"
+                                               IsVisible="{Binding DangDungSoHub}" />
+                                    <TextBlock Text="Chưa gộp được từ Hub"
+                                               FontSize="11" Foreground="{StaticResource TextMuted}"
+                                               VerticalAlignment="Center"
+                                               IsVisible="{Binding !DangDungSoHub}" />
                                 </StackPanel>
                                 <!-- Lưới 3 cột: tiến độ (tick/vòng quay) | Shop (mọi shop của tài khoản) |
                                      Chuẩn bị hàng (số đơn arrange trong ngày). -->

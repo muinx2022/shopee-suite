@@ -93,6 +93,9 @@ public static class HubRoutes
     public const string OrdersPush = "/api/orders/push";
     /// <summary>Client đẩy file phiếu PDF (base64, lô ≤5) của các đơn ĐÃ lên hub → hub lưu đĩa + đặt slip_at.</summary>
     public const string OrdersSlip = "/api/orders/slip";
+    /// <summary>GET <c>?day=yyyy-MM-dd</c> → số đơn ĐÃ "chuẩn bị hàng" theo shop trong ngày đó, hub đếm THẲNG từ
+    /// bảng đơn (mỗi đơn 1 dòng) nên là số CHUNG toàn hệ thống, không cộng trùng dù nhiều máy cùng chạy.</summary>
+    public const string PrepareStats = "/prepare-stats";
 
     // ── File-sync ──
     public const string Manifest = "/manifest";

@@ -77,6 +77,14 @@ public sealed partial class HubDatabase : IDisposable
                     "WHERE (machines_json IS NULL OR machines_json = '') AND last_machine_id IS NOT NULL AND last_machine_id <> '';");
         // Thời điểm hub NHẬN file phiếu PDF của đơn (POST /api/orders/slip). NULL = chưa có phiếu trên hub.
         AddColumnIfMissing("orders", "slip_at", "TEXT");
+        // "Chuẩn bị hàng": prepared_at = ISO UTC lúc máy client arrange xong đơn; prepared_day = yyyy-MM-dd theo
+        // GIỜ ĐỊA PHƯƠNG của máy đó (client tính SẴN — hub không biết múi giờ máy nào). Index phục vụ
+        // GET /prepare-stats (đếm theo shop/ngày). CREATE INDEX phải nằm ở ĐÂY, SAU khi cột chắc chắn có: đặt
+        // trong EnsureOrdersSchema thì DB CŨ (bảng orders đã tồn tại, CREATE TABLE IF NOT EXISTS không thêm cột)
+        // sẽ chạy CREATE INDEX trước ALTER → lỗi "no such column".
+        AddColumnIfMissing("orders", "prepared_at", "TEXT");
+        AddColumnIfMissing("orders", "prepared_day", "TEXT");
+        ExecRaw("CREATE INDEX IF NOT EXISTS ix_orders_prepared_day ON orders(prepared_day);");
     }
 
     /// <summary>Thêm cột nếu thiếu; trả true nếu VỪA thêm (để chạy backfill 1 lần).</summary>

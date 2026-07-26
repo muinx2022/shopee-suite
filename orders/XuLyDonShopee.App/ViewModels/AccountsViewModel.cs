@@ -305,6 +305,36 @@ public partial class AccountsViewModel : ViewModelBase
     /// shop 0 đơn). Dựng lại trong <see cref="LoadResults"/> khi đổi tài khoản chọn / đổi ngày.</summary>
     public ObservableCollection<ShopPrepareRow> ResultRows { get; } = new();
 
+    /// <summary>Tab "Kết quả": số đang hiện là số CHUNG TOÀN HỆ THỐNG lấy từ Hub (true) hay số CỤC BỘ của riêng máy
+    /// này (false — chưa hỏi được Hub / bản chạy không có Hub). Ghi chú cạnh ô lọc ngày bám cờ này để người dùng
+    /// biết mình đang xem con số nào. Bật ở <see cref="RefreshHubCountsAsync"/> khi hub trả lời được; hạ ở
+    /// <see cref="ApplyHubCounts"/> khi không còn số hub nào áp được cho bối cảnh đang xem.</summary>
+    [ObservableProperty]
+    private bool _dangDungSoHub;
+
+    /// <summary>Lượt hỏi Hub gần nhất của <see cref="RefreshHubCountsAsync"/> — lượt mới HỦY lượt cũ (khỏi tốn
+    /// request cho ngày/tài khoản người dùng đã rời).</summary>
+    private System.Threading.CancellationTokenSource? _hubCountsCts;
+
+    /// <summary>Số thứ tự lượt hỏi Hub (chỉ đụng trên UI thread). Kết quả về mang số CŨ thì bỏ — chống lượt chậm
+    /// ghi đè kết quả của lượt mới hơn.</summary>
+    private int _hubCountsSeq;
+
+    /// <summary>
+    /// Số HUB lấy được ở lượt gần nhất (map <c>shop_login → số đơn</c>, khóa KHÔNG phân biệt hoa/thường) kèm bối
+    /// cảnh của nó (<see cref="_hubCountsAccountId"/> + <see cref="_hubCountsDay"/>). null = chưa lấy được lần nào.
+    /// <para><b>Vì sao phải nhớ:</b> <see cref="LoadResults"/> chạy lại sau MỖI đơn arrange xong
+    /// (<see cref="OnPrepareCountChanged"/>) và dựng dòng bằng số CỤC BỘ. Không áp lại map này thì máy chạy SAU
+    /// (cục bộ = 0, hub = 2) sẽ thấy số tụt về 0 giữa lượt rồi mới về 2 lúc xong shop — đúng triệu chứng cần sửa.</para>
+    /// </summary>
+    private IReadOnlyDictionary<string, int>? _hubCounts;
+
+    /// <summary>Tài khoản mà <see cref="_hubCounts"/> thuộc về (chỉ áp khi trùng tài khoản đang mở).</summary>
+    private long _hubCountsAccountId;
+
+    /// <summary>Ngày (<c>yyyy-MM-dd</c>) mà <see cref="_hubCounts"/> thuộc về (chỉ áp khi trùng ngày đang lọc).</summary>
+    private string? _hubCountsDay;
+
     /// <summary>Panel phải hiện chữ mờ khi không ở chế độ xem/sửa.</summary>
     public bool ShowPlaceholder => !IsEditing;
 
@@ -405,12 +435,17 @@ public partial class AccountsViewModel : ViewModelBase
         }
 
         // Tab "Kết quả": nạp lưới Shop|Chuẩn bị hàng theo tài khoản vừa chọn (bỏ chọn → clear). Đặt SAU khi
-        // form/_editingId đã đồng bộ (dùng SelectedRow.Id).
+        // form/_editingId đã đồng bộ (dùng SelectedRow.Id). Lưới hiện NGAY bằng số cục bộ, rồi hỏi hub đè số chung.
         LoadResults();
+        _ = RefreshHubCountsAsync();
     }
 
-    /// <summary>Đổi NGÀY lọc ở tab "Kết quả" → nạp lại số chuẩn bị hàng của ngày mới.</summary>
-    partial void OnResultDateChanged(DateTimeOffset value) => LoadResults();
+    /// <summary>Đổi NGÀY lọc ở tab "Kết quả" → nạp lại số chuẩn bị hàng của ngày mới (cục bộ trước, hub sau).</summary>
+    partial void OnResultDateChanged(DateTimeOffset value)
+    {
+        LoadResults();
+        _ = RefreshHubCountsAsync();
+    }
 
     /// <summary>
     /// Dựng lại <see cref="ResultRows"/> cho tab "Kết quả": MỌI shop của tài khoản đang chọn (từ
@@ -420,13 +455,17 @@ public partial class AccountsViewModel : ViewModelBase
     /// </summary>
     private void LoadResults()
     {
+        // Bối cảnh vừa đổi (chọn tài khoản khác / đổi ngày lọc) → QUÊN số hub của bối cảnh cũ, kẻo áp nhầm.
+        ClearHubCountsIfContextChanged();
+
         ResultRows.Clear();
         if (SelectedRow?.Id is not long accountId)
         {
+            DangDungSoHub = false;
             return;
         }
 
-        var day = ResultDate.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+        var day = ResultDayKey;
         var shops = _services.Results.GetShops(accountId);
         var counts = _services.Results.GetPreparedByDay(accountId, day);
 
@@ -450,6 +489,156 @@ public partial class AccountsViewModel : ViewModelBase
         // Dòng vừa dựng lại là dòng MỚI (cờ tiến độ về mặc định) → áp lại tick/vòng quay. Bắt buộc: hàm này chạy
         // sau MỖI đơn chuẩn bị xong (PrepareCountChanged), thiếu bước này là tick nhấp nháy/biến mất khi đang chạy.
         ApplyShopCheckFlags();
+
+        // Số vừa dựng ở trên là số CỤC BỘ → áp ĐÈ lại số HUB đã lấy được (nếu còn đúng bối cảnh). Bắt buộc vì
+        // cùng lý do với ApplyShopCheckFlags: hàm này chạy sau MỖI đơn, thiếu bước này là số nhảy về số của máy.
+        ApplyHubCounts();
+    }
+
+    /// <summary>Ngày đang lọc ở tab "Kết quả" dưới dạng KHÓA <c>yyyy-MM-dd</c> — dùng chung cho <c>prepare_daily</c>,
+    /// câu hỏi gửi hub và bộ nhớ <see cref="_hubCountsDay"/> (một chỗ định dạng, không lệch nhau).</summary>
+    private string ResultDayKey
+        => ResultDate.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// Áp map hub đã nhớ (<see cref="_hubCounts"/>) lên <see cref="ResultRows"/> khi nó còn ĐÚNG tài khoản đang mở
+    /// + ĐÚNG ngày đang lọc: shop KHÔNG có trong map → <b>0</b> (hub là nguồn sự thật, không phải "không biết").
+    /// Giữ nguyên <see cref="DangDungSoHub"/> ở nhánh áp được (cờ do <see cref="RefreshHubCountsAsync"/> quyết);
+    /// không có map / lệch bối cảnh → để nguyên số cục bộ và hạ cờ. Chạy trên UI thread.
+    /// </summary>
+    private void ApplyHubCounts()
+    {
+        if (_hubCounts is not { } map
+            || SelectedRow?.Id != _hubCountsAccountId
+            || !string.Equals(_hubCountsDay, ResultDayKey, StringComparison.Ordinal))
+        {
+            DangDungSoHub = false;
+            return;
+        }
+
+        foreach (var row in ResultRows)
+        {
+            row.PreparedCount = map.TryGetValue(row.ShopLogin.Trim(), out var soDon) ? soDon : 0;
+        }
+    }
+
+    /// <summary>Quên map hub đã nhớ khi bối cảnh KHÔNG còn khớp (đổi tài khoản / đổi ngày lọc / bỏ chọn). Chỉ dọn
+    /// khi thật sự lệch — chọn lại ĐÚNG tài khoản đang xem thì giữ map, khỏi nháy về số cục bộ rồi mới về số hub.</summary>
+    private void ClearHubCountsIfContextChanged()
+    {
+        if (_hubCounts is null)
+        {
+            return;
+        }
+        if (SelectedRow?.Id != _hubCountsAccountId
+            || !string.Equals(_hubCountsDay, ResultDayKey, StringComparison.Ordinal))
+        {
+            _hubCounts = null;
+            _hubCountsAccountId = 0;
+            _hubCountsDay = null;
+        }
+    }
+
+    /// <summary>
+    /// Hỏi HUB số đơn "chuẩn bị hàng" CHUNG TOÀN HỆ THỐNG của ngày đang lọc rồi đổ vào lưới — hub đếm từ bảng đơn
+    /// nên máy A chạy trước, máy B chạy sau vẫn thấy CÙNG một con số.
+    /// <list type="bullet">
+    /// <item>Có kết quả → NHỚ map (<see cref="_hubCounts"/>) rồi gán lại <see cref="ShopPrepareRow.PreparedCount"/>;
+    /// shop KHÔNG có trong map → <b>0</b> (hub là nguồn sự thật, không phải "không biết").
+    /// <see cref="DangDungSoHub"/> = true.</item>
+    /// <item>Trả <c>null</c> (chưa kết nối / hub lỗi / hook chưa rót) → KHÔNG đụng lưới, chỉ hạ
+    /// <see cref="DangDungSoHub"/>. Map đã nhớ được GIỮ (xem chú thích trong thân hàm).</item>
+    /// </list>
+    /// Gọi ở ĐÚNG 4 mốc (chọn tài khoản · đổi ngày lọc · phiên đọc xong danh sách shop · xong MỘT shop) — KHÔNG
+    /// gọi theo từng đơn (<see cref="OnPrepareCountChanged"/>) kẻo spam hub. Chạy nền; kết quả marshal về UI thread
+    /// và chỉ áp khi vẫn là lượt MỚI NHẤT (xem <see cref="_hubCountsSeq"/>) và bối cảnh chưa đổi.
+    /// </summary>
+    public async Task RefreshHubCountsAsync()
+    {
+        if (_services.QueryPrepareStats is not { } hook)
+        {
+            return; // bản chạy KHÔNG có hub (hook chưa rót) → giữ nguyên hành vi cũ, số của máy
+        }
+        if (SelectedRow?.Id is not long accountId)
+        {
+            return; // chưa chọn tài khoản → lưới rỗng, khỏi phiền hub
+        }
+
+        var day = ResultDayKey;
+
+        // Lượt MỚI hủy lượt CŨ + tăng số thứ tự. Cả hai chỉ đụng ở đây (trước await) nên vẫn trên UI thread.
+        var cts = new System.Threading.CancellationTokenSource();
+        var truoc = _hubCountsCts;
+        _hubCountsCts = cts;
+        if (truoc is not null)
+        {
+            try { truoc.Cancel(); } catch { /* lượt cũ đã xong/đã dispose */ }
+            truoc.Dispose();
+        }
+        var seq = ++_hubCountsSeq;
+
+        IReadOnlyDictionary<string, int>? map;
+        try
+        {
+            map = await hook(day, cts.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            return; // lượt sau đã đè lượt này → bỏ hẳn, KHÔNG đụng lưới
+        }
+        catch
+        {
+            map = null; // hub lỗi ngoài dự kiến → coi như "không hỏi được", giữ số cục bộ
+        }
+
+        RunOnUi(() =>
+        {
+            if (seq != _hubCountsSeq)
+            {
+                return; // đã có lượt mới hơn → không để kết quả cũ ghi đè kết quả mới
+            }
+            if (SelectedRow?.Id != accountId || !string.Equals(ResultDayKey, day, StringComparison.Ordinal))
+            {
+                return; // người dùng đã đổi tài khoản / đổi ngày trong lúc chờ → kết quả không còn đúng lưới
+            }
+
+            if (map is null)
+            {
+                // KHÔNG hỏi được hub → giữ số đang hiện + ghi chú cho người dùng biết. CỐ Ý không xoá
+                // _hubCounts: hub chớp tắt giữa lượt mà quên số đã lấy thì lượt LoadResults kế lại kéo lưới
+                // về số cục bộ (0 trên máy chạy sau) — đúng cái đang phải sửa.
+                DangDungSoHub = false;
+                return;
+            }
+
+            // Nhớ lại để LoadResults (chạy sau MỖI đơn) áp đè lên số cục bộ, khỏi nhảy số giữa lượt.
+            // Khóa chuẩn hóa KHÔNG phân biệt hoa/thường ngay tại đây — không tin comparer của bên gọi.
+            _hubCounts = ChuanHoaKhoaShop(map);
+            _hubCountsAccountId = accountId;
+            _hubCountsDay = day;
+            DangDungSoHub = true;
+            ApplyHubCounts();
+        });
+    }
+
+    /// <summary>
+    /// Dựng lại map hub thành từ điển khóa <see cref="StringComparer.OrdinalIgnoreCase"/> (khóa đã Trim). Nhãn shop
+    /// giữa <c>account_shops</c> của máy và <c>shops.username</c> trên hub có thể lệch HOA/thường; tra theo
+    /// <see cref="StringComparer.Ordinal"/> sẽ ra 0 một cách LẶNG (không lỗi, không log) — loại sai khó phát hiện
+    /// nhất. Cùng quy tắc so khớp với <see cref="MatchesShopLabel"/>. Khóa trùng nhau khi bỏ hoa/thường → bản sau
+    /// thắng (dùng indexer, KHÔNG ném như <c>ToDictionary</c>).
+    /// </summary>
+    private static Dictionary<string, int> ChuanHoaKhoaShop(IReadOnlyDictionary<string, int> map)
+    {
+        var chuan = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var kv in map)
+        {
+            if (!string.IsNullOrWhiteSpace(kv.Key))
+            {
+                chuan[kv.Key.Trim()] = kv.Value;
+            }
+        }
+        return chuan;
     }
 
     /// <summary>
@@ -1217,6 +1406,7 @@ public partial class AccountsViewModel : ViewModelBase
         if (SelectedRow is not null && SelectedRow.Id == accountId)
         {
             LoadResults();
+            _ = RefreshHubCountsAsync(); // lượt chạy mới bắt đầu → xin số chung mới nhất từ hub
         }
     });
 
@@ -1279,6 +1469,12 @@ public partial class AccountsViewModel : ViewModelBase
         if (SelectedRow?.Id == accountId)
         {
             ApplyShopCheckFlags();
+            if (!checking)
+            {
+                // XONG một shop = đúng nhịp người dùng mong đợi thấy số mới → hỏi hub một lần. KHÔNG hỏi lúc
+                // BẮT ĐẦU (số chưa đổi) và tuyệt đối không hỏi theo từng đơn (spam hub).
+                _ = RefreshHubCountsAsync();
+            }
         }
     });
 

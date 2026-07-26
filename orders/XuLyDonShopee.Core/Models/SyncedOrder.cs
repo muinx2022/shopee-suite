@@ -64,6 +64,12 @@ public sealed class SyncedOrder
     /// <summary>Mã vận đơn (<c>.tracking-number</c>) — nhiều đơn chưa có. Có thể null.</summary>
     public string? TrackingNumber { get; set; }
 
+    /// <summary>Thời điểm (UTC) đơn này ĐÃ được "chuẩn bị hàng" (arrange xong) — nguồn để hub đếm số đơn chuẩn bị
+    /// hàng chung cho cả fleet. null = chưa/không biết (đơn arrange TRƯỚC bản này). KHÔNG phải cột dữ liệu quét
+    /// DOM: repo cấp lại từ cột <c>prepared_at</c> khi đọc hàng đợi đẩy hub
+    /// (<see cref="XuLyDonShopee.Core.Data.OrdersRepository.GetForHubPush"/>).</summary>
+    public DateTime? PreparedAt { get; set; }
+
     /// <summary>Tên đăng nhập shop của đơn (vd "alina99.store") — để đẩy lên hub NHÓM theo shop; null cho đơn cũ
     /// (trước khi có shop_login). KHÔNG phải cột dữ liệu quét DOM: repo cấp lại từ cột <c>shop_login</c> khi đọc
     /// hàng đợi đẩy hub (<see cref="XuLyDonShopee.Core.Data.OrdersRepository.GetForHubPush"/>).</summary>

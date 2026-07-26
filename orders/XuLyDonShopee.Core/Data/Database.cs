@@ -221,6 +221,11 @@ CREATE TABLE IF NOT EXISTS prepare_daily (
         // KHÔNG backfill. Thêm cho DB CŨ.
         EnsureColumn(conn, "orders", "shop_login", "TEXT");
 
+        // Thời điểm ĐÃ "chuẩn bị hàng" xong đơn (ISO-8601 UTC; NULL = chưa/không biết — đơn arrange TRƯỚC bản này).
+        // Ghi LẦN ĐẦU thôi (COALESCE ở MarkPrepared) rồi đẩy lên hub để hub đếm số đơn chuẩn bị hàng chung cho cả
+        // fleet (đếm từ bảng đơn, không cộng bộ đếm rời của từng máy). Thêm cho DB CŨ.
+        EnsureColumn(conn, "orders", "prepared_at", "TEXT");
+
         // Vị trí shop trong danh sách của subaccount: ghi theo ĐÚNG thứ tự trang /portal/shop trả về (0, 1, 2…)
         // để tab "Kết quả" hiện shop cùng thứ tự người dùng thấy trên Shopee. NULL = dữ liệu CŨ chưa biết thứ tự
         // (chưa đọc lại shop-list lần nào) → xếp cuối theo tên. Thêm cho DB CŨ.

@@ -1,7 +1,7 @@
 # Plan: số đơn "chuẩn bị hàng" chung toàn hệ thống (Hub đếm từ bảng đơn)
 
 - **Ngày:** 2026-07-27
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-dev`)
 
 ## 1. Bối cảnh & mục tiêu

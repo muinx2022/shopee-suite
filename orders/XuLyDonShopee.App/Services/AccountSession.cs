@@ -804,10 +804,18 @@ public partial class AccountSession : ObservableObject, IAccountSession
                         // rỗng của lần nạp đầu (mở app + chọn tài khoản TRƯỚC khi phiên đọc được shop).
                         _services.RaiseShopListChanged(_accountId);
                     },
-                    onOrderPrepared: shopLogin =>
+                    onOrderPrepared: (shopLogin, orderSn) =>
                     {
+                        // Đếm CỤC BỘ (dự phòng khi mất hub) — giữ nguyên như cũ.
                         _services.Results.IncrementPrepared(
                             _accountId, shopLogin, DateTime.Now.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture));
+                        // Đếm CHUNG toàn hệ thống: đánh dấu CHÍNH ĐƠN đó đã chuẩn bị hàng lúc nào → lượt đẩy hub kế
+                        // mang lên, hub đếm từ bảng đơn (mỗi đơn đúng 1 dòng) nên nhiều máy cùng chạy vẫn ra số thật.
+                        // Mã đơn rỗng (extension không trả được) → bỏ qua, vẫn +1 đếm cục bộ như cũ.
+                        if (!string.IsNullOrWhiteSpace(orderSn))
+                        {
+                            _services.Orders.MarkPrepared(_accountId, orderSn, DateTime.UtcNow);
+                        }
                         // Báo tab "Kết quả" đang mở tự nạp lại → số nhảy NGAY sau mỗi đơn, không phải đợi
                         // đổi tài khoản / đổi ngày mới thấy.
                         _services.RaisePrepareCountChanged(_accountId);

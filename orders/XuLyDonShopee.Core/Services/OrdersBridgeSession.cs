@@ -68,10 +68,11 @@ public sealed class OrdersBridgeSession : IDisposable
     private readonly Func<string, string, IReadOnlyList<SyncedOrder>, CancellationToken, Task>? _syncCallback;
     // Tab "Kết quả": callback do App rót (Core không ref App/DB) — CHỈ THÊM lời gọi, không đổi luồng. Null-safe.
     //  · _onShopListRead: gọi ngay sau khi parse xong danh sách shop → App lưu account_shops (mọi shop, kể cả 0 đơn).
-    //  · _onOrderPrepared: gọi mỗi khi chuẩn bị xong 1 đơn (mỗi prep = 1 đơn arrange) → App +1 prepare_daily theo shop/ngày.
+    //  · _onOrderPrepared: gọi mỗi khi chuẩn bị xong 1 đơn (mỗi prep = 1 đơn arrange), kèm (nhãn shop, MÃ ĐƠN) →
+    //    App +1 prepare_daily theo shop/ngày VÀ đánh dấu chính đơn đó "đã chuẩn bị hàng lúc nào" (nguồn đếm chung trên hub).
     //  · _onShopCheckStarted/_onShopCheckFinished: cột tiến độ — bắt đầu/xong MỘT shop (nhãn shop = khóa prepare_daily).
     private readonly Action<IReadOnlyList<ShopListItem>>? _onShopListRead;
-    private readonly Action<string>? _onOrderPrepared;
+    private readonly Action<string, string>? _onOrderPrepared;
     private readonly Action<string>? _onShopCheckStarted;
     private readonly Action<string>? _onShopCheckFinished;
     // App rót tập order_sn ĐÃ có "Số tiền cuối cùng" trong DB → bỏ qua, không mở lại chi tiết mỗi chu kỳ. null → không lọc.
@@ -140,7 +141,8 @@ public sealed class OrdersBridgeSession : IDisposable
     /// <param name="finalDoneSns">GĐ4: tập <c>order_sn</c> ĐÃ có "Số tiền cuối cùng" trong DB (App rót) — đơn nằm trong
     /// tập này KHÔNG mở lại chi tiết. null → không lọc (mở chi tiết cho MỌI đơn pending chưa có final).</param>
     /// <param name="onShopListRead">Tab "Kết quả": gọi ngay sau khi parse xong danh sách shop → App lưu account_shops. null → bỏ qua.</param>
-    /// <param name="onOrderPrepared">Tab "Kết quả": gọi mỗi khi chuẩn bị xong 1 đơn (tham số = nhãn shop) → App +1 đếm ngày. null → bỏ qua.</param>
+    /// <param name="onOrderPrepared">Tab "Kết quả": gọi mỗi khi chuẩn bị xong 1 đơn (tham số = nhãn shop, MÃ ĐƠN
+    /// <c>order_sn</c>) → App +1 đếm ngày + đánh dấu đơn đó đã chuẩn bị hàng (để đẩy lên hub). null → bỏ qua.</param>
     /// <param name="onShopCheckStarted">Tab "Kết quả" (cột tiến độ): gọi NGAY khi bắt đầu xử một shop (tham số = nhãn
     /// shop, ĐÚNG khóa <c>prepare_daily</c>) → App chuyển chấm sang shop đó + bật vòng quay. null → bỏ qua.</param>
     /// <param name="onShopCheckFinished">Tab "Kết quả" (cột tiến độ): gọi khi XONG shop đó — kể cả shop lỗi/captcha/bỏ
@@ -150,7 +152,7 @@ public sealed class OrdersBridgeSession : IDisposable
         Func<string, string, IReadOnlyList<SyncedOrder>, CancellationToken, Task>? syncCallback = null,
         Func<IReadOnlySet<string>>? finalDoneSns = null,
         Action<IReadOnlyList<ShopListItem>>? onShopListRead = null,
-        Action<string>? onOrderPrepared = null,
+        Action<string, string>? onOrderPrepared = null,
         Action<string>? onShopCheckStarted = null,
         Action<string>? onShopCheckFinished = null)
     {
@@ -746,9 +748,11 @@ public sealed class OrdersBridgeSession : IDisposable
                     break;
                 }
 
-                // Tab "Kết quả": mỗi prep = 1 đơn arrange xong → App +1 đếm theo (shop, ngày). Đếm theo ĐƠN (không theo
-                // phiếu) nên đặt TRƯỚC TrySaveSlip: phiếu lưu lỗi vẫn tính đã chuẩn bị. Null-safe, không đổi luồng.
-                _onOrderPrepared?.Invoke(shopLogin);
+                // Tab "Kết quả": mỗi prep = 1 đơn arrange xong → App +1 đếm theo (shop, ngày) VÀ đánh dấu ĐÚNG đơn
+                // (prep.OrderCode = order_sn — cùng khóa đang dùng cho capturedTracking/tên file phiếu) đã chuẩn bị
+                // hàng, để hub đếm chung. Đếm theo ĐƠN (không theo phiếu) nên đặt TRƯỚC TrySaveSlip: phiếu lưu lỗi
+                // vẫn tính đã chuẩn bị. Null-safe, không đổi luồng.
+                _onOrderPrepared?.Invoke(shopLogin, prep.OrderCode);
 
                 var saved = TrySaveSlip(prep.SlipBase64, prep.OrderCode, _invoiceDir!);
                 if (saved) slips++;

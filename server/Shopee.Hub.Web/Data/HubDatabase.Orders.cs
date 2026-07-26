@@ -35,6 +35,10 @@ public sealed class OrderRecord
 /// mới"). InsertedItems chỉ dùng nội bộ hub (không đi qua dây — endpoint chỉ trả <see cref="OrdersPushResult"/>).</summary>
 public sealed record UpsertOrdersResult(int Added, int Updated, List<OrderPushItem> InsertedItems);
 
+/// <summary>Một dòng thống kê "chuẩn bị hàng" theo shop trong MỘT ngày (<see cref="HubDatabase.PrepareStatsByDay"/>)
+/// — kiểu NỘI BỘ hub, endpoint map tường minh sang <c>PrepareStatItem</c> (DTO dùng chung với client).</summary>
+public sealed record PrepareStatRow(string ShopUsername, int Count);
+
 /// <summary>Phần HubDatabase: nghiệp vụ ĐƠN HÀNG — bảng <c>orders</c> (UNIQUE shop_id+order_sn) + upsert/query/count.</summary>
 public sealed partial class HubDatabase
 {
@@ -50,7 +54,8 @@ CREATE TABLE IF NOT EXISTS orders(
   final_amount INTEGER, final_amount_text TEXT,
   payment_method TEXT, status TEXT, status_description TEXT, cancel_reason TEXT,
   channel TEXT, carrier TEXT, tracking_number TEXT,
-  synced_at TEXT, slip_at TEXT);
+  synced_at TEXT, slip_at TEXT,
+  prepared_at TEXT, prepared_day TEXT);
 CREATE UNIQUE INDEX IF NOT EXISTS ux_orders_shop_sn ON orders(shop_id, order_sn);
 CREATE INDEX IF NOT EXISTS ix_orders_shop ON orders(shop_id);
 CREATE INDEX IF NOT EXISTS ix_orders_status ON orders(status);");
@@ -84,11 +89,13 @@ CREATE INDEX IF NOT EXISTS ix_orders_status ON orders(status);");
                 // client đẩy lại vì trạng thái đổi sang "Đã hủy") có thể KHÔNG còn kèm số tiền cuối cùng / mã vận
                 // đơn — giữ giá trị hub ĐANG CÓ thay vì xoá về NULL. Các cột còn lại (nhất là status /
                 // status_description / cancel_reason) GHI ĐÈ thẳng: đó chính là dữ liệu cần cập nhật.
+                // prepared_at / prepared_day cũng COALESCE: đơn đẩy lại không kèm thì GIỮ, và MÁY KHÁC đẩy lại
+                // KHÔNG ghi đè ngày của máy đã thực sự chuẩn bị đơn (nguồn đếm /prepare-stats).
                 c.CommandText = @"
 INSERT INTO orders(shop_id,order_sn,shopee_order_id,buyer_username,items_json,item_count,item_summary,sku,
   total_price,total_price_text,final_amount,final_amount_text,payment_method,status,status_description,
-  cancel_reason,channel,carrier,tracking_number,synced_at)
-VALUES($s,$sn,$soi,$bu,$ij,$ic,$is,$sku,$tp,$tpt,$fa,$fat,$pm,$st,$sd,$cr,$ch,$ca,$tn,$sa)
+  cancel_reason,channel,carrier,tracking_number,synced_at,prepared_at,prepared_day)
+VALUES($s,$sn,$soi,$bu,$ij,$ic,$is,$sku,$tp,$tpt,$fa,$fat,$pm,$st,$sd,$cr,$ch,$ca,$tn,$sa,$pa,$pd)
 ON CONFLICT(shop_id,order_sn) DO UPDATE SET
   shopee_order_id=$soi, buyer_username=$bu, items_json=$ij, item_count=$ic, item_summary=$is, sku=$sku,
   total_price=$tp, total_price_text=$tpt,
@@ -96,6 +103,7 @@ ON CONFLICT(shop_id,order_sn) DO UPDATE SET
   payment_method=$pm,
   status=$st, status_description=$sd, cancel_reason=$cr, channel=$ch, carrier=$ca,
   tracking_number=COALESCE($tn,tracking_number),
+  prepared_at=COALESCE($pa,prepared_at), prepared_day=COALESCE($pd,prepared_day),
   synced_at=$sa;";
                 c.Parameters.AddWithValue("$s", shopId);
                 c.Parameters.AddWithValue("$sn", o.OrderSn);
@@ -117,6 +125,8 @@ ON CONFLICT(shop_id,order_sn) DO UPDATE SET
                 c.Parameters.AddWithValue("$ca", (object?)o.Carrier ?? DBNull.Value);
                 c.Parameters.AddWithValue("$tn", (object?)o.TrackingNumber ?? DBNull.Value);
                 c.Parameters.AddWithValue("$sa", now);
+                c.Parameters.AddWithValue("$pa", (object?)o.PreparedAt ?? DBNull.Value);
+                c.Parameters.AddWithValue("$pd", (object?)o.PreparedDay ?? DBNull.Value);
                 c.ExecuteNonQuery();
                 if (exists) updated++;
                 else { added++; inserted.Add(o); }
@@ -154,6 +164,31 @@ ON CONFLICT(shop_id,order_sn) DO UPDATE SET
             using var c = _conn.CreateCommand();
             c.CommandText = "SELECT COUNT(*) FROM orders" + WhereClause(c, shopId, status, search);
             return Convert.ToInt32(c.ExecuteScalar());
+        }
+    }
+
+    /// <summary>
+    /// Số đơn ĐÃ "chuẩn bị hàng" theo TỪNG shop trong ĐÚNG một ngày (<paramref name="day"/> = <c>yyyy-MM-dd</c>
+    /// giờ địa phương của máy chuẩn bị đơn — client tính sẵn vào <c>prepared_day</c>). Đếm THẲNG từ bảng
+    /// <c>orders</c> (khoá <c>shop_id+order_sn</c>) nên mỗi đơn chỉ được tính MỘT lần dù bao nhiêu máy cùng chạy.
+    /// Shop chưa có <c>username</c> (không định danh được với client) → bỏ. Ngày không có đơn nào → list RỖNG.
+    /// </summary>
+    public List<PrepareStatRow> PrepareStatsByDay(string day)
+    {
+        lock (_gate)
+        {
+            var list = new List<PrepareStatRow>();
+            using var c = _conn.CreateCommand();
+            c.CommandText = "SELECT s.username, COUNT(*) FROM orders o JOIN shops s ON s.id = o.shop_id "
+                + "WHERE o.prepared_day = $d GROUP BY s.username";
+            c.Parameters.AddWithValue("$d", day);
+            using var rd = c.ExecuteReader();
+            while (rd.Read())
+            {
+                if (rd.IsDBNull(0)) continue;
+                list.Add(new PrepareStatRow(rd.GetString(0), rd.GetInt32(1)));
+            }
+            return list;
         }
     }
 

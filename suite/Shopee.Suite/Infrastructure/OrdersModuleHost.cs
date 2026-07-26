@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -45,6 +46,7 @@ public static class OrdersModuleHost
             WireHubSlipPush(Services);
             WireGsheetConfig(Services);
             WireHubOrdersRead(Services);
+            WirePrepareStatsRead(Services);
             var vm = new MainViewModel(Services);
             // Vòng chờ đẩy: dựng SAU khi AppServices (DB + migration) và các hook hub đã sẵn sàng; tự hoãn ~15s
             // rồi chạy lượt đầu (bắt đúng ý "khi client chạy, còn vòng chờ thì đẩy") và lặp mỗi ~2 phút.
@@ -297,6 +299,58 @@ public static class OrdersModuleHost
         };
     }
 
+    /// <summary>
+    /// RÓT hook đọc SỐ ĐƠN "chuẩn bị hàng" chung toàn hệ thống (tab "Kết quả" của màn Tài khoản) — mẫu
+    /// <see cref="WireHubOrdersRead"/>. Hub trả list <c>(shopUsername, count)</c> → đổi thành map
+    /// <c>shop_login → count</c> (hub khoá shop theo ĐÚNG <c>shop_login</c> client đẩy lên nên tra thẳng được).
+    /// <para><b>BẪY null vs rỗng:</b> hub chưa kết nối / lỗi / hub CŨ chưa có route → trả <c>null</c> = "không hỏi
+    /// được" (màn GIỮ số cục bộ). TUYỆT ĐỐI không trả map rỗng ở các ca này — rỗng nghĩa là "hub bảo 0 đơn" và sẽ
+    /// làm lưới về 0 mỗi lần rớt mạng.</para>
+    /// Nuốt mọi lỗi (log <c>Trace</c>) trả null — trừ hủy CHỦ ĐỘNG (ct: người dùng đổi ngày/đổi tài khoản liên tục)
+    /// cho xuyên để màn bỏ lượt cũ.
+    /// </summary>
+    private static void WirePrepareStatsRead(AppServices services)
+    {
+        services.QueryPrepareStats = async (day, ct) =>
+        {
+            try
+            {
+                if (!CoordinationRuntime.Active || CoordinationRuntime.Client is null)
+                {
+                    return null; // hub chưa kết nối → "không hỏi được", KHÔNG phải "0 đơn"
+                }
+
+                var stats = await CoordinationRuntime.Client.GetPrepareStatsAsync(day, ct).ConfigureAwait(false);
+                if (stats is null)
+                {
+                    return null; // hub không phản hồi / hub cũ chưa có route
+                }
+
+                // Khoá map = shop_login, so khớp KHÔNG phân biệt hoa/thường: nhãn shop giữa account_shops của máy
+                // và shops.username trên hub có thể lệch HOA/thường → tra Ordinal sẽ ra 0 một cách LẶNG. Indexer
+                // chứ không ToDictionary để hub trả dòng trùng khoá cũng không ném.
+                var map = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+                foreach (var s in stats)
+                {
+                    if (!string.IsNullOrWhiteSpace(s.ShopUsername))
+                    {
+                        map[s.ShopUsername.Trim()] = s.Count;
+                    }
+                }
+                return map;
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw; // hủy CHỦ ĐỘNG (lượt sau đè lượt trước) → cho xuyên để màn bỏ lượt cũ
+            }
+            catch (Exception ex)
+            {
+                Trace.WriteLine("[OrdersModuleHost] Đọc số chuẩn bị hàng từ hub lỗi: " + ex.Message);
+                return null;
+            }
+        };
+    }
+
     /// <summary>Map một <see cref="HubOrderItem"/> (DTO hub) sang <see cref="HubOrderView"/> (kiểu của module Đơn
     /// hàng) — map TAY từng field như <see cref="ToPushItem"/> ở chiều ngược lại, để đổi tên field một bên là gãy
     /// build chứ không âm thầm làm rỗng cột trên lưới.</summary>
@@ -459,7 +513,10 @@ public static class OrdersModuleHost
     }
 
     /// <summary>Map một <see cref="SyncedOrder"/> (module Đơn hàng) sang <see cref="OrderPushItem"/> (DTO hub) —
-    /// mirror field-by-field để client đẩy 1-1, khỏi lệch field.</summary>
+    /// mirror field-by-field để client đẩy 1-1, khỏi lệch field.
+    /// <para><see cref="OrderPushItem.PreparedDay"/> tính TẠI ĐÂY (giờ ĐỊA PHƯƠNG của máy đã chuẩn bị đơn) chứ
+    /// không để hub suy từ <see cref="OrderPushItem.PreparedAt"/> — hub không biết múi giờ của máy nào.
+    /// <c>PreparedAt</c> NULL → cả hai NULL (đơn arrange trước bản này; hub giữ nguyên giá trị đang có).</para></summary>
     private static OrderPushItem ToPushItem(SyncedOrder o) => new()
     {
         OrderSn = o.OrderSn,
@@ -480,6 +537,8 @@ public static class OrdersModuleHost
         Channel = o.Channel,
         Carrier = o.Carrier,
         TrackingNumber = o.TrackingNumber,
+        PreparedAt = o.PreparedAt?.ToString("o", CultureInfo.InvariantCulture),
+        PreparedDay = o.PreparedAt?.ToLocalTime().ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
     };
 
     /// <summary>

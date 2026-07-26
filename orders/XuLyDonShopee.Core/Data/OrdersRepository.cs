@@ -387,6 +387,32 @@ public class OrdersRepository
     }
 
     /// <summary>
+    /// Đánh dấu một đơn ĐÃ "chuẩn bị hàng" xong (arrange) lúc <paramref name="atUtc"/> — phiên cầu nối gọi ngay
+    /// sau mỗi đơn. <c>prepared_at</c> dùng <c>COALESCE(prepared_at, $at)</c>: chỉ ghi LẦN ĐẦU, arrange lại /
+    /// chạy lại KHÔNG dời thời điểm sang hôm khác (hub nhóm đếm theo NGÀY). <c>hub_synced_at</c> RESET về NULL để
+    /// lượt đẩy hub kế mang <c>prepared_at</c> lên (hub chỉ lấy đơn <c>hub_synced_at IS NULL</c>). Khóa theo
+    /// <c>(account_id, order_sn)</c>; mã đơn rỗng → bỏ qua, mã đơn không có trong DB → 0 dòng đổi (KHÔNG ném).
+    /// </summary>
+    public void MarkPrepared(long accountId, string orderSn, DateTime atUtc)
+    {
+        if (string.IsNullOrWhiteSpace(orderSn))
+        {
+            return;
+        }
+
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = @"UPDATE orders SET
+    prepared_at = COALESCE(prepared_at, $at),
+    hub_synced_at = NULL
+    WHERE account_id = $a AND order_sn = $sn;";
+        cmd.Parameters.AddWithValue("$at", DbSerialization.FormatDate(atUtc));
+        cmd.Parameters.AddWithValue("$a", accountId);
+        cmd.Parameters.AddWithValue("$sn", orderSn);
+        cmd.ExecuteNonQuery();
+    }
+
+    /// <summary>
     /// Các đơn ỨNG VIÊN đẩy lên HUB đơn hàng: đơn của tài khoản CHƯA từng đẩy hub thành công
     /// (<c>hub_synced_at IS NULL</c>) — dựng lại <see cref="SyncedOrder"/> đầy đủ từ các cột bảng để client map
     /// 1-1 sang DTO hub (mẫu <see cref="GetForGsheetPush"/>). NULL = còn trong hàng đợi ngầm → hub offline thì
@@ -398,7 +424,7 @@ public class OrdersRepository
         using var cmd = conn.CreateCommand();
         cmd.CommandText = @"SELECT order_sn, shopee_order_id, buyer_username, items_json, item_count, item_summary, sku,
        total_price, total_price_text, final_amount, final_amount_text, payment_method,
-       status, status_description, cancel_reason, channel, carrier, tracking_number, shop_login
+       status, status_description, cancel_reason, channel, carrier, tracking_number, shop_login, prepared_at
     FROM orders
     WHERE account_id = $a AND hub_synced_at IS NULL
     ORDER BY id;";
@@ -429,6 +455,7 @@ public class OrdersRepository
                 Carrier = reader.IsDBNull(16) ? null : reader.GetString(16),
                 TrackingNumber = reader.IsDBNull(17) ? null : reader.GetString(17),
                 ShopLogin = reader.IsDBNull(18) ? null : reader.GetString(18),
+                PreparedAt = reader.IsDBNull(19) ? null : DbSerialization.ParseDate(reader.GetString(19)),
             });
         }
         return list;

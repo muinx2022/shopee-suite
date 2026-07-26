@@ -27,6 +27,16 @@ public sealed class OrderPushItem
     public string? Channel { get; set; }
     public string? Carrier { get; set; }
     public string? TrackingNumber { get; set; }
+
+    /// <summary>Thời điểm máy client "chuẩn bị hàng" xong đơn này — ISO-8601 UTC. NULL = chưa/không biết (đơn
+    /// arrange TRƯỚC bản này). Hub GIỮ giá trị đang có khi đơn đẩy lại không kèm (COALESCE) — bên rỗng không đè
+    /// bên có, và máy khác đẩy lại KHÔNG ghi đè mốc của máy đã chuẩn bị.</summary>
+    public string? PreparedAt { get; set; }
+
+    /// <summary>Ngày <c>yyyy-MM-dd</c> theo GIỜ ĐỊA PHƯƠNG của máy đã chuẩn bị đơn — KHÓA NHÓM để hub đếm số đơn
+    /// "chuẩn bị hàng" theo shop/ngày (GET /prepare-stats). Client tính SẴN nên hub KHÔNG cần biết múi giờ (mọi
+    /// máy ở VN nhưng vẫn không hard-code offset ở hub). NULL đi cùng <see cref="PreparedAt"/> NULL.</summary>
+    public string? PreparedDay { get; set; }
 }
 
 /// <summary>

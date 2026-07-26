@@ -107,6 +107,18 @@ public class AppServices
     /// </summary>
     public Func<CancellationToken, Task<IReadOnlyList<(long Id, string Name)>?>>? ListHubShops { get; set; }
 
+    /// <summary>
+    /// HOOK đọc SỐ ĐƠN "chuẩn bị hàng" CHUNG TOÀN HỆ THỐNG theo shop trong MỘT ngày (tab "Kết quả"), do shell
+    /// suite RÓT (module Đơn hàng KHÔNG tham chiếu <c>Shopee.Core</c> nên không tự biết hub). Tham số: <c>day</c>
+    /// (<c>yyyy-MM-dd</c> giờ địa phương), <c>ct</c>; trả map <c>shop_login → số đơn</c>. Hub đếm THẲNG từ bảng đơn
+    /// nên nhiều máy cùng chạy vẫn ra con số thật (không cộng trùng bộ đếm rời của từng máy). Khóa map so khớp
+    /// KHÔNG phân biệt hoa/thường — bên NHẬN tự chuẩn hóa, không phụ thuộc comparer bên rót hook.
+    /// <para><b>null KHÁC map rỗng:</b> <c>null</c> = KHÔNG hỏi được hub (chưa cấu hình / offline / hub cũ chưa có
+    /// route) → màn GIỮ số cục bộ + ghi chú; map RỖNG = hub bảo ngày đó chưa shop nào có đơn (số 0 là số THẬT).
+    /// Mặc định <c>null</c> = TẮT (app Đơn hàng chạy độc lập) → hành vi y như trước, số của máy.</para>
+    /// </summary>
+    public Func<string, CancellationToken, Task<IReadOnlyDictionary<string, int>?>>? QueryPrepareStats { get; set; }
+
     /// <summary>Nhật ký hoạt động của app (panel UI + ghi file cạnh database). Các phiên nạp log qua đây.</summary>
     public ActivityLog Log { get; }
 
