@@ -102,7 +102,7 @@
                                                 <Button Classes="ribbon" Classes.active="{Binding IsActive}"
                                                         Command="{Binding ActivateCommand}" ToolTip.Tip="{Binding ToolTip}">
                                                     <StackPanel VerticalAlignment="Center" Spacing="6">
-                                                        <PathIcon Data="{Binding Icon}" Width="20" Height="20"
+                                                        <PathIcon Data="{Binding Icon}" Width="18" Height="18"
                                                                   HorizontalAlignment="Center" />
                                                         <TextBlock Text="{Binding Title}" FontSize="11.5"
                                                                    TextWrapping="Wrap" TextAlignment="Center"
@@ -118,7 +118,7 @@
                                                         <!-- Icon VECTOR (không còn glyph chữ) — cùng bộ với nút
                                                              trong các form, để "Dừng" ở ribbon và "Dừng" ở form
                                                              là MỘT icon. Cỡ 21 khớp icon điều hướng bên cạnh. -->
-                                                        <PathIcon Data="{Binding Icon}" Width="21" Height="21"
+                                                        <PathIcon Data="{Binding Icon}" Width="18" Height="18"
                                                                   HorizontalAlignment="Center" />
                                                         <TextBlock Text="{Binding Title}" FontSize="11.5"
                                                                    TextWrapping="Wrap" TextAlignment="Center"

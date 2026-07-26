@@ -221,9 +221,11 @@
          Foreground tại chỗ — để class quyết, nút đổi vai trò thì icon đổi màu theo.
          Path data lấy từ `orders/XuLyDonShopee.App/Styles/Icons.axaml` (nguồn DUY NHẤT, dùng chung 2 module):
          <PathIcon Data="{DynamicResource IconSave}" />. -->
+    <!-- Cỡ icon trong nút: 14 (KHÔNG phải 16). 16 nhìn to và thô so với chữ nhãn 12 — icon là phụ trợ cho nhãn,
+         không được lấn át. Đổi ở ĐÂY là đổi toàn app (cả module Đơn hàng, vì theme ở cấp Application). -->
     <Style Selector="Button PathIcon">
-        <Setter Property="Width" Value="16" />
-        <Setter Property="Height" Value="16" />
+        <Setter Property="Width" Value="14" />
+        <Setter Property="Height" Value="14" />
         <Setter Property="VerticalAlignment" Value="Center" />
         <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
     </Style>

@@ -206,8 +206,8 @@
             <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
         </Style>
         <Style Selector="Button.wsAction PathIcon">
-            <Setter Property="Width" Value="17" />
-            <Setter Property="Height" Value="17" />
+            <Setter Property="Width" Value="15" />
+            <Setter Property="Height" Value="15" />
         </Style>
         <!-- Hover: chỉ đổi VIỀN sang cam nhạt, nền giữ trắng (theme mặc định tô nền be → mất nét sạch của bảng). -->
         <Style Selector="Button.wsAction:pointerover">
