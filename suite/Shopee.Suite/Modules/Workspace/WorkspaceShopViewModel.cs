@@ -101,11 +101,12 @@ public sealed partial class WorkspaceShopViewModel : ObservableObject
     public bool UpdateRunning => OpState(CoordOp.Update, IsUpdatingShop).running;
     public bool RewriteRunning => OpState(CoordOp.Rewrite, IsRewriting).running;
 
-    // Icon nút: ■ khi đang chạy (gợi ý bấm để dừng), ngược lại icon op.
-    public string ScrapeToggleContent => ScrapeRunning ? "■" : "▶";
-    public string ImportToggleContent => ImportRunning ? "■" : "⬆";
-    public string UpdateToggleContent => UpdateRunning ? "■" : "✎";
-    public string RewriteToggleContent => RewriteRunning ? "■" : "🏷";
+    // Icon nút = ICON CỦA OP, GIỮ NGUYÊN cả khi đang chạy: theo bộ design, "đang chạy" đã thể hiện bằng NỀN CAM
+    // của nút (bấm lại để dừng — tooltip nói rõ), nên không đổi glyph sang ■ nữa (đổi glyph làm nút "nhảy" chữ).
+    public string ScrapeToggleContent => "▶";
+    public string ImportToggleContent => "⇧";
+    public string UpdateToggleContent => "✎";
+    public string RewriteToggleContent => "●";
 
     // Bật nút khi: MÁY NÀY đang chạy op đó (để dừng) HOẶC được phép bắt đầu (theo quy tắc khoá).
     public bool ScrapeToggleEnabled => IsScraping || CanScrape;
