@@ -9,31 +9,35 @@
         UseLayoutRounding="True"
         RenderOptions.TextRenderingMode="Antialias">
 
-    <Grid RowDefinitions="58,Auto,*,Auto">
+    <!-- Phím tắt chuyển tab — KHỚP chữ gợi ý "Ctrl + 1…4 để chuyển tab" ở cuối dải tab. "D1".."D4" là phím số
+         hàng trên (tên trong enum Key). Tham số là chỉ số tab; tab không tồn tại ở chế độ hiện tại → bỏ qua. -->
+    <Window.KeyBindings>
+        <KeyBinding Gesture="Ctrl+D1" Command="{Binding SelectTabAtCommand}" CommandParameter="0" />
+        <KeyBinding Gesture="Ctrl+D2" Command="{Binding SelectTabAtCommand}" CommandParameter="1" />
+        <KeyBinding Gesture="Ctrl+D3" Command="{Binding SelectTabAtCommand}" CommandParameter="2" />
+        <KeyBinding Gesture="Ctrl+D4" Command="{Binding SelectTabAtCommand}" CommandParameter="3" />
+    </Window.KeyBindings>
 
-        <!-- ══════════ Row 0: TAB STRIP (nền tối, kiểu Office) ══════════ -->
-        <Border Grid.Row="0" ZIndex="1" Background="{DynamicResource NavBarBrush}"
-                BorderBrush="{DynamicResource NavBarBorderBrush}" BorderThickness="0,0,0,1">
-            <Grid ColumnDefinitions="Auto,Auto,*">
-                <!-- Brand — bấm để về tab Workspace -->
-                <Button Grid.Column="0" Classes="brand" VerticalAlignment="Stretch"
+    <Grid RowDefinitions="Auto,Auto,*,Auto">
+
+        <!-- ══════════ Row 0: DẢI TAB (nền TRẮNG, tab canh đáy + gạch cam 3px) ══════════
+             Khung cửa sổ vẫn là chrome NATIVE của Windows (không ExtendClientArea) → app-mark + tên app được
+             gộp vào ĐẦU dải tab thay vì title bar riêng như mockup (giảm 1 tầng chrome, giữ kéo-thả/snap). -->
+        <Border Grid.Row="0" ZIndex="1" Background="{DynamicResource CardBackgroundBrush}"
+                BorderBrush="{DynamicResource TabStripBorderBrush}" BorderThickness="0,0,0,1">
+            <Grid ColumnDefinitions="Auto,*,Auto" Margin="6,0">
+                <!-- App mark (ô vuông cam bo 5) + tên app — bấm để về màn hình chính (Workspace) -->
+                <Button Grid.Column="0" Classes="brand" VerticalAlignment="Center"
                         Command="{Binding GoHomeCommand}" ToolTip.Tip="Về màn hình chính">
-                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Spacing="11">
-                        <Border Width="34" Height="34" CornerRadius="6" Background="{DynamicResource BrandBadgeBrush}">
-                            <TextBlock Text="S" FontSize="18" FontWeight="Bold" Foreground="White"
-                                       HorizontalAlignment="Center" VerticalAlignment="Center" />
-                        </Border>
-                        <TextBlock Text="Shopee Suite" FontSize="15.5" FontWeight="SemiBold" Foreground="White"
-                                   VerticalAlignment="Center" />
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Spacing="9">
+                        <Border Width="20" Height="20" CornerRadius="5" Background="{DynamicResource AccentBrush}" />
+                        <TextBlock Text="Shopee Suite" FontSize="12.5" FontWeight="SemiBold"
+                                   Foreground="{DynamicResource TextPrimaryBrush}" VerticalAlignment="Center" />
                     </StackPanel>
                 </Button>
 
-                <!-- Vạch ngăn brand ↔ tab -->
-                <Rectangle Grid.Column="1" Width="1" Margin="6,15" VerticalAlignment="Stretch"
-                           Fill="{DynamicResource NavDividerBrush}" />
-
-                <!-- Tab ribbon (ngang) -->
-                <ListBox Grid.Column="2" Classes="topnav" VerticalAlignment="Center" Margin="8,0"
+                <!-- Tab (canh ĐÁY dải; chỉ báo active = gạch cam 3px dựng trong ItemTemplate) -->
+                <ListBox Grid.Column="1" Classes="topnav" VerticalAlignment="Bottom" Margin="6,0,0,0"
                          ItemsSource="{Binding Tabs}" SelectedItem="{Binding SelectedTab}"
                          ScrollViewer.HorizontalScrollBarVisibility="Auto"
                          ScrollViewer.VerticalScrollBarVisibility="Disabled">
@@ -44,137 +48,213 @@
                     </ListBox.ItemsPanel>
                     <ListBox.ItemTemplate>
                         <DataTemplate DataType="vm:RibbonTab">
-                            <TextBlock Text="{Binding Title}" FontSize="13" FontWeight="SemiBold"
-                                       VerticalAlignment="Center" />
+                            <!-- Padding của tab nằm TRONG template (ListBoxItem để Padding=0) → gạch chỉ báo
+                                 thụt đúng 12px mỗi bên như spec, không bị cộng thêm padding của item. -->
+                            <Grid RowDefinitions="*,3">
+                                <TextBlock Grid.Row="0" Text="{Binding Title}" FontSize="13" FontWeight="SemiBold"
+                                           Margin="16,9,16,8" VerticalAlignment="Center" />
+                                <Border Grid.Row="1" Height="3" Margin="12,0" CornerRadius="2,2,0,0"
+                                        Background="{DynamicResource AccentBrush}"
+                                        IsVisible="{Binding $parent[ListBoxItem].IsSelected}" />
+                            </Grid>
                         </DataTemplate>
                     </ListBox.ItemTemplate>
                 </ListBox>
+
+                <!-- Gợi ý phím tắt (khớp Window.KeyBindings ở trên) -->
+                <TextBlock Grid.Column="2" Text="Ctrl + 1…4 để chuyển tab" FontSize="11.5"
+                           Foreground="{DynamicResource TextMutedBrush}"
+                           VerticalAlignment="Bottom" Margin="12,0,6,13" />
             </Grid>
         </Border>
 
-        <!-- ══════════ Row 1: DẢI RIBBON (nền sáng, nhóm + nhãn đáy) ══════════ -->
+        <!-- ══════════ Row 1: DẢI RIBBON (nền trắng, cao ≥112, nhóm + caption đáy) ══════════ -->
         <Border Grid.Row="1" Background="{DynamicResource CardBackgroundBrush}"
-                BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1">
-            <ItemsControl ItemsSource="{Binding SelectedTab.Groups}" Margin="12,6">
-                <ItemsControl.ItemsPanel>
-                    <ItemsPanelTemplate>
-                        <StackPanel Orientation="Horizontal" />
-                    </ItemsPanelTemplate>
-                </ItemsControl.ItemsPanel>
-                <ItemsControl.ItemTemplate>
-                    <DataTemplate DataType="vm:RibbonGroup">
-                        <StackPanel Orientation="Horizontal">
-                            <!-- Nhóm: hàng nút (trên) + nhãn nhóm (đáy). IsEnabled theo nhóm: nhóm bị khóa
-                                 (vd "Hành động"/"Tùy chọn" tab Shopee khi không ở màn Tài khoản) → làm mờ CẢ
-                                 cụm; nhóm bật → item con theo trạng thái riêng (CanExecute của command). -->
-                            <StackPanel Margin="6,0" IsEnabled="{Binding IsEnabled}">
-                                <ItemsControl ItemsSource="{Binding Items}" HorizontalAlignment="Center">
-                                    <ItemsControl.ItemsPanel>
-                                        <ItemsPanelTemplate>
-                                            <StackPanel Orientation="Horizontal" Spacing="2" />
-                                        </ItemsPanelTemplate>
-                                    </ItemsControl.ItemsPanel>
-                                    <ItemsControl.DataTemplates>
-                                        <!-- Nút ĐIỀU HƯỚNG MÀN (icon to trên, nhãn dưới; active tô accent) -->
-                                        <DataTemplate DataType="vm:RibbonScreenItem">
-                                            <Button Classes="ribbon" Classes.active="{Binding IsActive}"
-                                                    Command="{Binding ActivateCommand}" ToolTip.Tip="{Binding ToolTip}">
-                                                <StackPanel>
-                                                    <PathIcon Data="{Binding Icon}" Width="22" Height="22"
-                                                              HorizontalAlignment="Center" />
-                                                    <TextBlock Text="{Binding Title}" FontSize="11"
-                                                               HorizontalAlignment="Center" Margin="0,4,0,0" />
-                                                </StackPanel>
-                                            </Button>
-                                        </DataTemplate>
-                                        <!-- Nút HÀNH ĐỘNG (glyph to trên, nhãn dưới) -->
-                                        <DataTemplate DataType="vm:RibbonActionItem">
-                                            <Button Classes="ribbon" Command="{Binding Command}"
-                                                    ToolTip.Tip="{Binding ToolTip}">
-                                                <StackPanel>
-                                                    <TextBlock Text="{Binding Glyph}" FontSize="18"
-                                                               HorizontalAlignment="Center" />
-                                                    <TextBlock Text="{Binding Title}" FontSize="11"
-                                                               HorizontalAlignment="Center" Margin="0,4,0,0" />
-                                                </StackPanel>
-                                            </Button>
-                                        </DataTemplate>
-                                        <!-- TOGGLE (checkbox): bọc Border cao 58 để hàng nút + nhãn nhóm KHỚP các
-                                             nút ribbon bên cạnh; checkbox căn giữa trong Border (cao tự nhiên ~32
-                                             → ô vuông + nhãn thẳng hàng, xem style CheckBox.ribbonToggle). -->
-                                        <DataTemplate DataType="vm:RibbonToggleItem">
-                                            <Border MinHeight="58" Margin="6,0">
-                                                <CheckBox Classes="ribbonToggle" IsChecked="{Binding IsChecked}"
-                                                          Content="{Binding Title}" ToolTip.Tip="{Binding ToolTip}"
-                                                          VerticalAlignment="Center" />
-                                            </Border>
-                                        </DataTemplate>
-                                    </ItemsControl.DataTemplates>
-                                </ItemsControl>
-                                <TextBlock Text="{Binding Title}" FontSize="10.5" HorizontalAlignment="Center"
-                                           Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,3,0,0" />
+                BorderBrush="{DynamicResource BorderStrongBrush}" BorderThickness="0,0,0,1"
+                MinHeight="112">
+            <!-- Hẹp → cuộn NGANG (không co/cắt nút) -->
+            <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+                <ItemsControl ItemsSource="{Binding SelectedTab.Groups}" Margin="6,8,6,6">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <StackPanel Orientation="Horizontal" />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate DataType="vm:RibbonGroup">
+                            <StackPanel Orientation="Horizontal">
+                                <!-- Nhóm: hàng nút (chiếm hết chiều cao) + caption ở ĐÁY. IsEnabled theo nhóm:
+                                     nhóm bị khóa (vd "Hành động"/"Tùy chọn" tab Shopee khi không ở màn Tài khoản)
+                                     → làm mờ CẢ cụm; nhóm bật → item con theo trạng thái riêng (CanExecute). -->
+                                <DockPanel Margin="12,0" IsEnabled="{Binding IsEnabled}">
+                                    <TextBlock DockPanel.Dock="Bottom" Text="{Binding Title}" FontSize="10.5"
+                                               HorizontalAlignment="Center" Margin="0,5,0,0"
+                                               Foreground="{DynamicResource TextMutedBrush}" />
+                                    <ItemsControl ItemsSource="{Binding Items}" HorizontalAlignment="Center">
+                                        <ItemsControl.ItemsPanel>
+                                            <ItemsPanelTemplate>
+                                                <StackPanel Orientation="Horizontal" Spacing="4" />
+                                            </ItemsPanelTemplate>
+                                        </ItemsControl.ItemsPanel>
+                                        <ItemsControl.DataTemplates>
+                                            <!-- Nút ĐIỀU HƯỚNG MÀN (icon cam trên, nhãn dưới; active giữ tint cam) -->
+                                            <DataTemplate DataType="vm:RibbonScreenItem">
+                                                <Button Classes="ribbon" Classes.active="{Binding IsActive}"
+                                                        Command="{Binding ActivateCommand}" ToolTip.Tip="{Binding ToolTip}">
+                                                    <StackPanel VerticalAlignment="Center" Spacing="6">
+                                                        <PathIcon Data="{Binding Icon}" Width="20" Height="20"
+                                                                  HorizontalAlignment="Center" />
+                                                        <TextBlock Text="{Binding Title}" FontSize="11.5"
+                                                                   TextWrapping="Wrap" TextAlignment="Center"
+                                                                   HorizontalAlignment="Center" />
+                                                    </StackPanel>
+                                                </Button>
+                                            </DataTemplate>
+                                            <!-- Nút HÀNH ĐỘNG (glyph cam trên, nhãn dưới) -->
+                                            <DataTemplate DataType="vm:RibbonActionItem">
+                                                <Button Classes="ribbon" Command="{Binding Command}"
+                                                        ToolTip.Tip="{Binding ToolTip}">
+                                                    <StackPanel VerticalAlignment="Center" Spacing="6">
+                                                        <TextBlock Classes="glyph" Text="{Binding Glyph}"
+                                                                   HorizontalAlignment="Center" />
+                                                        <TextBlock Text="{Binding Title}" FontSize="11.5"
+                                                                   TextWrapping="Wrap" TextAlignment="Center"
+                                                                   HorizontalAlignment="Center" />
+                                                    </StackPanel>
+                                                </Button>
+                                            </DataTemplate>
+                                            <!-- TOGGLE (checkbox): căn GIỮA chiều cao hàng nút cho cân với nút lớn. -->
+                                            <DataTemplate DataType="vm:RibbonToggleItem">
+                                                <Border Margin="6,0" VerticalAlignment="Center">
+                                                    <CheckBox Classes="ribbonToggle" IsChecked="{Binding IsChecked}"
+                                                              Content="{Binding Title}" ToolTip.Tip="{Binding ToolTip}"
+                                                              VerticalAlignment="Center" />
+                                                </Border>
+                                            </DataTemplate>
+                                        </ItemsControl.DataTemplates>
+                                    </ItemsControl>
+                                </DockPanel>
+                                <!-- Vạch dọc ngăn nhóm (thụt 2px trên / 6px dưới) -->
+                                <Rectangle Width="1" Margin="0,2,0,6" VerticalAlignment="Stretch"
+                                           Fill="{DynamicResource RibbonDividerBrush}" />
                             </StackPanel>
-                            <!-- Divider dọc giữa các nhóm -->
-                            <Rectangle Width="1" Margin="4,6" VerticalAlignment="Stretch"
-                                       Fill="{DynamicResource BorderBrush}" />
-                        </StackPanel>
-                    </DataTemplate>
-                </ItemsControl.ItemTemplate>
-            </ItemsControl>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
         </Border>
 
         <!-- ══════════ Row 2: NỘI DUNG màn đang chọn ══════════ -->
         <ContentControl Grid.Row="2" Content="{Binding CurrentScreen}" />
 
-        <!-- ══════════ Row 3: FOOTER trạng thái (theo chế độ; Full = cả 2 đoạn + vạch ngăn) ══════════
-             Style bằng tài nguyên SUITE (Theme.axaml) — KHÔNG dùng class statusBar/statusText của orders. -->
-        <Border Grid.Row="3" Background="{DynamicResource CardBackgroundBrush}"
-                BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0"
-                MinHeight="30" Padding="16,0">
-            <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+        <!-- ══════════ Row 3: THANH TRẠNG THÁI (cao 32, nền trung tính — KHÔNG cam) ══════════
+             Các đoạn cao hết thanh, hover sáng nhẹ, ngăn nhau bằng vạch 1×16. Style ở Theme.axaml
+             (Border.seg / Rectangle.sep / Ellipse.blink) — KHÔNG dùng class của module Đơn hàng. -->
+        <Border Grid.Row="3" Height="32" ClipToBounds="True"
+                Background="{DynamicResource StatusBarBrush}"
+                BorderBrush="{DynamicResource BorderStrongBrush}" BorderThickness="0,1,0,0"
+                Container.Name="statusbar" Container.Sizing="Width">
+            <Border.Styles>
+                <!-- QUY TẮC CO: thanh hẹp (< ~1240px) → ẩn các đoạn ưu tiên THẤP (.optional). Đoạn trạng thái
+                     job, cụm đếm chính và PHIÊN BẢN luôn hiện; thanh không bao giờ xuống dòng. -->
+                <ContainerQuery Name="statusbar" Query="max-width:1240">
+                    <Style Selector="StackPanel.statusOptional">
+                        <Setter Property="IsVisible" Value="False" />
+                    </Style>
+                </ContainerQuery>
+            </Border.Styles>
 
-                <!-- Đoạn Shopee: tái dùng counter của MainViewModel đơn hàng (Status*Text) -->
-                <StackPanel Orientation="Horizontal" Spacing="14" VerticalAlignment="Center"
-                            IsVisible="{Binding ShowShopeeStatus}">
-                    <TextBlock Text="{Binding ShopeeStatusVm.StatusAccountsText}" FontSize="12"
-                               Foreground="{DynamicResource TextSecondaryBrush}" VerticalAlignment="Center" />
-                    <TextBlock Text="·" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" VerticalAlignment="Center" />
-                    <TextBlock Text="{Binding ShopeeStatusVm.StatusOrdersText}" FontSize="12"
-                               Foreground="{DynamicResource TextSecondaryBrush}" VerticalAlignment="Center" />
-                    <TextBlock Text="·" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" VerticalAlignment="Center" />
-                    <TextBlock Text="{Binding ShopeeStatusVm.StatusProxiesText}" FontSize="12"
-                               Foreground="{DynamicResource TextSecondaryBrush}" VerticalAlignment="Center" />
-                    <TextBlock Text="·" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" VerticalAlignment="Center" />
-                    <TextBlock Text="{Binding ShopeeStatusVm.StatusBrowserText}" FontSize="12"
-                               Foreground="{DynamicResource TextSecondaryBrush}" VerticalAlignment="Center" />
+            <DockPanel LastChildFill="False">
+                <!-- ── NHÓM PHẢI — khai TRƯỚC nhóm trái: DockPanel chia chỗ theo thứ tự khai báo nên phiên bản
+                       + cụm phải luôn giữ được chỗ khi cửa sổ hẹp. Thứ tự khai báo = phải → trái. ── -->
+
+                <!-- Phiên bản app (đọc từ assembly = version.txt) — LUÔN hiện -->
+                <Border DockPanel.Dock="Right" Classes="statusSeg" ToolTip.Tip="Phiên bản Shopee Suite">
+                    <TextBlock Text="{Binding AppVersionText}" />
+                </Border>
+
+                <!-- Máy online (ưu tiên thấp) -->
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Classes="statusOptional">
+                    <StackPanel Orientation="Horizontal" IsVisible="{Binding ShowWorkspaceStatus}">
+                        <Rectangle Classes="statusSep" />
+                        <Border Classes="statusSeg">
+                            <TextBlock Text="{Binding WorkspaceStatus.MachineText}" />
+                        </Border>
+                    </StackPanel>
                 </StackPanel>
 
-                <!-- Vạch ngăn 2 đoạn — chỉ hiện ở chế độ Full (cả 2 đoạn) -->
-                <Rectangle Width="1" Margin="4,6" VerticalAlignment="Stretch"
-                           Fill="{DynamicResource BorderBrush}" IsVisible="{Binding ShowStatusSeparator}" />
+                <!-- Trình duyệt (ưu tiên thấp) — nguồn Workspace nếu có, không thì đoạn Shopee -->
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Classes="statusOptional">
+                    <StackPanel Orientation="Horizontal" IsVisible="{Binding ShowWorkspaceStatus}">
+                        <Rectangle Classes="statusSep" />
+                        <Border Classes="statusSeg">
+                            <TextBlock Text="{Binding WorkspaceStatus.BrowserText}" />
+                        </Border>
+                    </StackPanel>
+                </StackPanel>
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Classes="statusOptional">
+                    <StackPanel Orientation="Horizontal" IsVisible="{Binding ShowOrdersBrowserStatus}">
+                        <Rectangle Classes="statusSep" />
+                        <Border Classes="statusSeg">
+                            <TextBlock Text="{Binding ShopeeStatusVm.StatusBrowserText}" />
+                        </Border>
+                    </StackPanel>
+                </StackPanel>
 
-                <!-- Đoạn Workspace: 6 counter từ các kho dùng chung -->
-                <StackPanel Orientation="Horizontal" Spacing="14" VerticalAlignment="Center"
+                <!-- ── NHÓM TRÁI ── -->
+
+                <!-- Trạng thái job: chấm xanh NHẤP NHÁY (2.4s) + số việc đang chạy — LUÔN hiện -->
+                <Border DockPanel.Dock="Left" Classes="statusSeg">
+                    <StackPanel Orientation="Horizontal" Spacing="7">
+                        <Ellipse Classes="statusDot" Width="7" Height="7"
+                                 Fill="{DynamicResource SuccessDotBrush}" VerticalAlignment="Center" />
+                        <TextBlock Text="{Binding JobStatusText}" />
+                    </StackPanel>
+                </Border>
+
+                <!-- Cụm đếm chính (Workspace): tk BigSeller · shop -->
+                <StackPanel DockPanel.Dock="Left" Orientation="Horizontal"
                             IsVisible="{Binding ShowWorkspaceStatus}">
-                    <TextBlock Text="{Binding WorkspaceStatus.BigSellerText}" FontSize="12"
-                               Foreground="{DynamicResource TextSecondaryBrush}" VerticalAlignment="Center" />
-                    <TextBlock Text="·" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" VerticalAlignment="Center" />
-                    <TextBlock Text="{Binding WorkspaceStatus.ShopText}" FontSize="12"
-                               Foreground="{DynamicResource TextSecondaryBrush}" VerticalAlignment="Center" />
-                    <TextBlock Text="·" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" VerticalAlignment="Center" />
-                    <TextBlock Text="{Binding WorkspaceStatus.ShopeeAccountText}" FontSize="12"
-                               Foreground="{DynamicResource TextSecondaryBrush}" VerticalAlignment="Center" />
-                    <TextBlock Text="·" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" VerticalAlignment="Center" />
-                    <TextBlock Text="{Binding WorkspaceStatus.ProxyText}" FontSize="12"
-                               Foreground="{DynamicResource TextSecondaryBrush}" VerticalAlignment="Center" />
-                    <TextBlock Text="·" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" VerticalAlignment="Center" />
-                    <TextBlock Text="{Binding WorkspaceStatus.MachineText}" FontSize="12"
-                               Foreground="{DynamicResource TextSecondaryBrush}" VerticalAlignment="Center" />
-                    <TextBlock Text="·" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" VerticalAlignment="Center" />
-                    <TextBlock Text="{Binding WorkspaceStatus.BrowserText}" FontSize="12"
-                               Foreground="{DynamicResource TextSecondaryBrush}" VerticalAlignment="Center" />
+                    <Rectangle Classes="statusSep" />
+                    <Border Classes="statusSeg">
+                        <StackPanel Orientation="Horizontal" Spacing="7">
+                            <TextBlock Text="{Binding WorkspaceStatus.BigSellerText}" />
+                            <TextBlock Classes="dot" Text="·" />
+                            <TextBlock Text="{Binding WorkspaceStatus.ShopText}" />
+                        </StackPanel>
+                    </Border>
                 </StackPanel>
-            </StackPanel>
+
+                <!-- Cụm đếm phụ (Workspace): acc Shopee · proxy — ẩn khi hẹp -->
+                <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" Classes="statusOptional">
+                    <StackPanel Orientation="Horizontal" IsVisible="{Binding ShowWorkspaceStatus}">
+                        <Rectangle Classes="statusSep" />
+                        <Border Classes="statusSeg">
+                            <StackPanel Orientation="Horizontal" Spacing="7">
+                                <TextBlock Text="{Binding WorkspaceStatus.ShopeeAccountText}" />
+                                <TextBlock Classes="dot" Text="·" />
+                                <TextBlock Text="{Binding WorkspaceStatus.ProxyText}" />
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </StackPanel>
+
+                <!-- Cụm đếm đoạn Shopee (đơn hàng): tài khoản · đơn hàng · proxy — ẩn khi hẹp -->
+                <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" Classes="statusOptional">
+                    <StackPanel Orientation="Horizontal" IsVisible="{Binding ShowShopeeStatus}">
+                        <Rectangle Classes="statusSep" />
+                        <Border Classes="statusSeg">
+                            <StackPanel Orientation="Horizontal" Spacing="7">
+                                <TextBlock Text="{Binding ShopeeStatusVm.StatusAccountsText}" />
+                                <TextBlock Classes="dot" Text="·" />
+                                <TextBlock Text="{Binding ShopeeStatusVm.StatusOrdersText}" />
+                                <TextBlock Classes="dot" Text="·" />
+                                <TextBlock Text="{Binding ShopeeStatusVm.StatusProxiesText}" />
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </StackPanel>
+            </DockPanel>
         </Border>
     </Grid>
 </Window>

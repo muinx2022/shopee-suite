@@ -66,10 +66,20 @@ public sealed partial class ShellViewModel : ObservableObject
     public bool ShowWorkspaceStatus { get; }
     /// <summary>Vạch ngăn giữa 2 đoạn — chỉ khi cả 2 cùng hiện (chế độ Full).</summary>
     public bool ShowStatusSeparator => ShowShopeeStatus && ShowWorkspaceStatus;
+    /// <summary>Đoạn "Trình duyệt" của thanh trạng thái lấy từ module đơn hàng — CHỈ khi không có Workspace
+    /// (Workspace có counter trình duyệt riêng); tránh hiện 2 đoạn trình duyệt trùng nhau ở chế độ Full.</summary>
+    public bool ShowOrdersBrowserStatus => ShowShopeeStatus && !ShowWorkspaceStatus;
     /// <summary>Counter đoạn Shopee = MainViewModel đơn hàng (Status*Text). null nếu không có Shopee.</summary>
     public OrdersMainViewModel? ShopeeStatusVm { get; }
     /// <summary>Counter đoạn Workspace (6 số từ các kho dùng chung). null nếu không có Workspace.</summary>
     public WorkspaceStatusViewModel? WorkspaceStatus { get; }
+
+    /// <summary>Phiên bản app cho đoạn cuối thanh trạng thái ("v1.2.3") — đọc từ assembly (nướng lúc build
+    /// từ <c>version.txt</c>), KHÔNG ghi cứng.</summary>
+    public string AppVersionText => $"v{AppInfo.Version}";
+
+    /// <summary>Đoạn đầu thanh trạng thái: "Đang chạy · N job" / "Rảnh · không có job".</summary>
+    [ObservableProperty] private string _jobStatusText = "Rảnh · không có job";
 
     public ShellViewModel()
     {
@@ -156,6 +166,19 @@ public sealed partial class ShellViewModel : ObservableObject
             workspace.RequestNavigate = _ => { SelectedTab = _bigSellerTab; };
         }
         _scrape = scrape; _update = update; _search = search;
+
+        // ══════════ Đoạn "trạng thái job" của thanh trạng thái ══════════
+        // Đếm việc đang chạy từ các VM ĐÃ CÓ (không thêm nghiệp vụ): scrape · update batch · update inline
+        // theo shop · search. Các VM này sống suốt vòng đời app như shell nên KHÔNG cần gỡ handler (giống
+        // cách WorkspaceViewModel theo dõi AnyRunning).
+        if (scrape is not null) scrape.PropertyChanged += OnJobStateChanged;
+        if (update is not null)
+        {
+            update.PropertyChanged += OnJobStateChanged;
+            update.JobsChanged += () => UiThread.Post(RefreshJobStatus);
+        }
+        if (search is not null) search.PropertyChanged += OnJobStateChanged;
+        RefreshJobStatus();
 
         var settings = new SettingsViewModel();
 
@@ -289,6 +312,39 @@ public sealed partial class ShellViewModel : ObservableObject
             s.IsActive = ReferenceEquals(s, item);
 
         if (ReferenceEquals(tab, SelectedTab)) OnPropertyChanged(nameof(CurrentScreen));
+    }
+
+    /// <summary>Cờ chạy của 3 VM đổi → tính lại chuỗi trạng thái job. (SearchViewModel cũng dùng đúng tên
+    /// property "IsRunning" như UpdateProductViewModel nên 2 tên dưới đây phủ cả 3 VM.)</summary>
+    private void OnJobStateChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is nameof(ScrapeViewModel.IsBusy) or nameof(UpdateProductViewModel.IsRunning))
+            UiThread.Post(RefreshJobStatus);
+    }
+
+    /// <summary>Đếm việc ĐANG CHẠY từ dữ liệu sẵn có: scrape (1 phiên) · update batch (1 phiên) · update
+    /// inline theo shop (đếm theo tk BigSeller) · search (1 phiên). Chế độ không có Workspace → luôn 0.</summary>
+    private void RefreshJobStatus()
+    {
+        var n = 0;
+        if (_scrape is { IsBusy: true }) n++;
+        if (_update is not null)
+        {
+            if (_update.IsRunning) n++;
+            foreach (var acct in Shopee.Core.BigSeller.BigSellerStore.Shared.Accounts)
+                if (_update.IsUpdateRunning(acct.Id)) n++;
+        }
+        if (_search is { IsRunning: true }) n++;
+
+        JobStatusText = n > 0 ? $"Đang chạy · {n} job" : "Rảnh · không có job";
+    }
+
+    /// <summary>Ctrl+1…4: chọn tab theo chỉ số (0-based). Chỉ số ngoài tập tab của chế độ hiện tại → bỏ qua.</summary>
+    [RelayCommand]
+    private void SelectTabAt(string? index)
+    {
+        if (!int.TryParse(index, out var i) || i < 0 || i >= Tabs.Count) return;
+        SelectedTab = Tabs[i];
     }
 
     /// <summary>Nút "Dừng jobs" (ribbon Workspace): CHỈ gọi các lệnh dừng SẴN CÓ (như trong PrepareShutdownAsync),

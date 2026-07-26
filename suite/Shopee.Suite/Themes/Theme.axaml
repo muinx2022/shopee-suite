@@ -54,17 +54,19 @@
         <SolidColorBrush x:Key="SidebarTextBrush" Color="#C7CCD6" />
         <SolidColorBrush x:Key="SidebarMutedBrush" Color="#7E869B" />
 
-        <!-- ══════════ TOP APP BAR (nav) — tối phẳng Win 11 (1 màu đặc, không gradient/bóng) ══════════ -->
-        <!-- Nền bar: màu tối ĐẶC, phẳng. -->
-        <SolidColorBrush x:Key="NavBarBrush" Color="#1B1F2A" />
-        <SolidColorBrush x:Key="NavBarBorderBrush" Color="#0F1219" />
-        <SolidColorBrush x:Key="NavDividerBrush" Color="#333B4E" />
-        <!-- Huy hiệu "S" + tab đang chọn: cùng màu accent CAM Shopee ĐẶC → nhận diện thương hiệu nhất quán. -->
+        <!-- ══════════ SHELL: DẢI TAB · RIBBON · THANH TRẠNG THÁI (bộ handoff "Ribbon Window") ══════════ -->
+        <!-- Dải tab + ribbon nay nền TRẮNG (bỏ bar tối cũ): chỉ còn viền hairline + nền hover rất nhạt.
+             Tab đang chọn nhận diện bằng GẠCH CAM 3px ở đáy (dựng trong ItemTemplate), không tô chip. -->
+        <SolidColorBrush x:Key="TabStripBorderBrush" Color="#F0EDEA" />
+        <SolidColorBrush x:Key="TabHoverBrush" Color="#FAF8F6" />
+        <SolidColorBrush x:Key="RibbonDividerBrush" Color="#EFECEA" />
+        <!-- Huy hiệu thương hiệu (app-mark dải tab + màn Welcome): accent CAM Shopee ĐẶC. -->
         <SolidColorBrush x:Key="BrandBadgeBrush" Color="#EE4D2D" />
-        <SolidColorBrush x:Key="NavActiveBrush" Color="#EE4D2D" />
-        <SolidColorBrush x:Key="NavItemHoverBrush" Color="#2C3346" />
-        <SolidColorBrush x:Key="NavTextBrush" Color="#A7AFC0" />
-        <SolidColorBrush x:Key="NavTextHoverBrush" Color="#EAEDF3" />
+        <!-- Thanh trạng thái đáy: TRUNG TÍNH (cố ý không cam) — nền, hover đoạn, vạch ngăn 1×16, màu chữ. -->
+        <SolidColorBrush x:Key="StatusBarBrush" Color="#F2EFEC" />
+        <SolidColorBrush x:Key="StatusBarHoverBrush" Color="#E8E3DF" />
+        <SolidColorBrush x:Key="StatusBarDividerBrush" Color="#DCD6D1" />
+        <SolidColorBrush x:Key="StatusBarTextBrush" Color="#55504C" />
 
         <SolidColorBrush x:Key="LogBackgroundBrush" Color="#121212" />
         <SolidColorBrush x:Key="LogForegroundBrush" Color="#E8E8E8" />
@@ -451,104 +453,100 @@
         <Setter Property="TextElement.Foreground" Value="{DynamicResource AccentBrush}" />
     </Style>
 
-    <!-- ══════════ TOP NAV (ListBox.topnav) — tab module ngang trên app bar tối ══════════ -->
+    <!-- ══════════ DẢI TAB (ListBox.topnav) — tab module ngang trên nền TRẮNG ══════════ -->
+    <!-- Item KHÔNG có padding riêng (Padding=0): toàn bộ padding 16/9/11 + gạch chỉ báo 3px nằm trong
+         ItemTemplate (MainWindow.axaml) → gạch thụt đúng 12px mỗi bên, không cộng dồn padding của item. -->
     <Style Selector="ListBox.topnav">
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="BorderThickness" Value="0" />
-        <Setter Property="Padding" Value="4,0" />
+        <Setter Property="Padding" Value="0" />
     </Style>
     <Style Selector="ListBox.topnav ListBoxItem">
-        <Setter Property="Margin" Value="2,0" />
-        <Setter Property="Padding" Value="13,8" />
-        <Setter Property="CornerRadius" Value="4" />
+        <Setter Property="Margin" Value="1,0" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="CornerRadius" Value="5,5,0,0" />
         <Setter Property="Background" Value="Transparent" />
-        <Setter Property="Foreground" Value="{DynamicResource NavTextBrush}" />
-        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="VerticalContentAlignment" Value="Bottom" />
         <Setter Property="Cursor" Value="Hand" />
     </Style>
     <Style Selector="ListBox.topnav ListBoxItem:pointerover /template/ ContentPresenter">
-        <Setter Property="Background" Value="{DynamicResource NavItemHoverBrush}" />
-        <Setter Property="CornerRadius" Value="4" />
+        <Setter Property="Background" Value="{DynamicResource TabHoverBrush}" />
+        <Setter Property="CornerRadius" Value="5,5,0,0" />
     </Style>
-    <!-- Tab đang chọn: chip accent gradient (nổi khối, không phẳng thô) + chữ/icon trắng. -->
+    <!-- Tab đang chọn: KHÔNG tô chip — nhận diện bằng gạch cam 3px ở đáy (trong ItemTemplate) + chữ đậm màu. -->
     <Style Selector="ListBox.topnav ListBoxItem:selected /template/ ContentPresenter">
-        <Setter Property="Background" Value="{DynamicResource NavActiveBrush}" />
-        <Setter Property="CornerRadius" Value="4" />
+        <Setter Property="Background" Value="Transparent" />
     </Style>
     <Style Selector="ListBox.topnav ListBoxItem:selected:pointerover /template/ ContentPresenter">
-        <Setter Property="Background" Value="{DynamicResource NavActiveBrush}" />
+        <Setter Property="Background" Value="{DynamicResource TabHoverBrush}" />
     </Style>
 
-    <!-- Màu chữ + icon tab: xám dịu (thường) → sáng (hover) → trắng (đang chọn). Đặt TRỰC TIẾP lên
-         TextBlock/PathIcon con để thắng mọi setter mặc định của Fluent. Thứ tự khai báo: thường → hover
-         → selected (Avalonia ưu tiên rule khai báo SAU khi cùng độ đặc hiệu, nên selected luôn thắng). -->
+    <!-- Màu chữ tab: xám ấm (thường) → đen (hover) → đen (đang chọn). Đặt TRỰC TIẾP lên TextBlock con để
+         thắng mọi setter mặc định của Fluent. Thứ tự khai báo: thường → hover → selected (Avalonia ưu tiên
+         rule khai báo SAU khi cùng độ đặc hiệu, nên selected luôn thắng). -->
     <Style Selector="ListBox.topnav ListBoxItem TextBlock">
-        <Setter Property="Foreground" Value="{DynamicResource NavTextBrush}" />
-    </Style>
-    <Style Selector="ListBox.topnav ListBoxItem PathIcon">
-        <Setter Property="Foreground" Value="{DynamicResource NavTextBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
     </Style>
     <Style Selector="ListBox.topnav ListBoxItem:pointerover TextBlock">
-        <Setter Property="Foreground" Value="{DynamicResource NavTextHoverBrush}" />
-    </Style>
-    <Style Selector="ListBox.topnav ListBoxItem:pointerover PathIcon">
-        <Setter Property="Foreground" Value="{DynamicResource NavTextHoverBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
     </Style>
     <Style Selector="ListBox.topnav ListBoxItem:selected TextBlock">
-        <Setter Property="Foreground" Value="White" />
-    </Style>
-    <Style Selector="ListBox.topnav ListBoxItem:selected PathIcon">
-        <Setter Property="Foreground" Value="White" />
+        <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
     </Style>
 
-    <!-- Brand trên app bar tối: nút phẳng, nền trong suốt, hover tối nhẹ (dùng lại template Button toàn cục). -->
+    <!-- App-mark + tên app ở đầu dải tab: nút phẳng, nền trong suốt, hover be rất nhạt (template Button toàn cục). -->
     <Style Selector="Button.brand">
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="BorderBrush" Value="Transparent" />
         <Setter Property="BorderThickness" Value="0" />
-        <Setter Property="CornerRadius" Value="0" />
-        <Setter Property="Padding" Value="16,0" />
+        <Setter Property="CornerRadius" Value="5" />
+        <Setter Property="Padding" Value="6,0" />
     </Style>
     <Style Selector="Button.brand:pointerover /template/ Border#PART_bd">
-        <Setter Property="Background" Value="{DynamicResource SidebarHeaderBrush}" />
+        <Setter Property="Background" Value="{DynamicResource StatusBarBrush}" />
     </Style>
     <Style Selector="Button.brand:pressed /template/ Border#PART_bd">
-        <Setter Property="Background" Value="{DynamicResource SidebarHeaderBrush}" />
+        <Setter Property="Background" Value="{DynamicResource StatusBarHoverBrush}" />
     </Style>
 
-    <!-- ══════════ RIBBON (dải nút kiểu Office) — nút to icon/glyph trên, nhãn dưới ══════════ -->
-    <!-- Nút ribbon dựng trên template Button toàn cục (Border#PART_bd): nền trong suốt, hover nền xám nhạt,
-         active (màn đang mở) tô accent + chữ/icon trắng. Class .ribbon để không đụng các nút thường. -->
+    <!-- ══════════ RIBBON (dải nút kiểu Office) — nút LỚN: icon/glyph CAM trên, nhãn dưới ══════════ -->
+    <!-- Nút ribbon dựng trên template Button toàn cục (Border#PART_bd): nền trong suốt, viền trong suốt;
+         hover VÀ active đều là tint cam nhạt (nền #FFF3EF + viền #FBD6CA) theo spec. Class .ribbon để không
+         đụng các nút thường. Rộng 78 (nhãn dài được giãn tới 112 rồi mới xuống dòng, tối đa ~2 dòng). -->
     <Style Selector="Button.ribbon">
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="BorderBrush" Value="Transparent" />
         <Setter Property="BorderThickness" Value="1" />
-        <Setter Property="CornerRadius" Value="4" />
-        <Setter Property="Padding" Value="8,6" />
-        <Setter Property="MinWidth" Value="62" />
+        <Setter Property="CornerRadius" Value="5" />
+        <Setter Property="Padding" Value="2,6" />
+        <Setter Property="MinWidth" Value="78" />
+        <Setter Property="MaxWidth" Value="112" />
         <Setter Property="MinHeight" Value="58" />
         <Setter Property="VerticalContentAlignment" Value="Center" />
         <Setter Property="HorizontalContentAlignment" Value="Center" />
     </Style>
+    <!-- Nhãn nút = chữ thân 11.5; glyph/icon = CAM cỡ 21 (khai SAU nhãn để thắng setter chung). -->
     <Style Selector="Button.ribbon TextBlock">
-        <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource TextBodyBrush}" />
+    </Style>
+    <Style Selector="Button.ribbon TextBlock.glyph">
+        <Setter Property="FontSize" Value="21" />
+        <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
     </Style>
     <Style Selector="Button.ribbon PathIcon">
-        <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
     </Style>
-    <!-- Hover theo spec: nền cam RẤT nhạt + viền cam nhạt (SubtleBrush giờ gần trắng nên không còn thấy hover). -->
+    <!-- Hover theo spec: nền cam RẤT nhạt + viền cam nhạt. -->
     <Style Selector="Button.ribbon:pointerover">
         <Setter Property="BorderBrush" Value="{DynamicResource BrandTintBorderBrush}" />
     </Style>
     <Style Selector="Button.ribbon:pointerover /template/ Border#PART_bd">
         <Setter Property="Background" Value="{DynamicResource BrandTintBrush}" />
     </Style>
-    <!-- Active (màn đang mở) — kiểu Win 11 NHẸ: KHÔNG tô cam kín. Nền cam RẤT nhạt + gạch chân accent 2px
-         (đánh dấu mục đang chọn) + chữ/icon MÀU CAM. Border#PART_bd nhận BorderThickness/BorderBrush từ
-         control qua TemplateBinding nên đặt 2 setter đó ở cấp control. -->
+    <!-- Active (màn đang mở) = GIỮ NGUYÊN tint hover thường trực (nền #FFF3EF + viền #FBD6CA) + nhãn cam.
+         Border#PART_bd nhận BorderThickness/BorderBrush từ control qua TemplateBinding nên đặt ở cấp control. -->
     <Style Selector="Button.ribbon.active">
-        <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
-        <Setter Property="BorderThickness" Value="0,0,0,2" />
+        <Setter Property="BorderBrush" Value="{DynamicResource BrandTintBorderBrush}" />
     </Style>
     <Style Selector="Button.ribbon.active /template/ Border#PART_bd">
         <Setter Property="Background" Value="{DynamicResource BrandTintBrush}" />
@@ -559,8 +557,51 @@
     <Style Selector="Button.ribbon.active TextBlock">
         <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
     </Style>
-    <Style Selector="Button.ribbon.active PathIcon">
-        <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+
+    <!-- ══════════ THANH TRẠNG THÁI (đáy) — đoạn · vạch ngăn · chấm nhấp nháy ══════════ -->
+    <!-- Đoạn (segment): cao hết thanh, padding ngang 12, hover sáng nhẹ; chữ 11.5 KHÔNG xuống dòng. -->
+    <Style Selector="Border.statusSeg">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Padding" Value="12,0" />
+    </Style>
+    <Style Selector="Border.statusSeg:pointerover">
+        <Setter Property="Background" Value="{DynamicResource StatusBarHoverBrush}" />
+    </Style>
+    <Style Selector="Border.statusSeg StackPanel">
+        <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Border.statusSeg TextBlock">
+        <Setter Property="FontSize" Value="11.5" />
+        <Setter Property="Foreground" Value="{DynamicResource StatusBarTextBrush}" />
+        <Setter Property="TextWrapping" Value="NoWrap" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <!-- Dấu "·" ngăn các số trong CÙNG một đoạn (nhạt hơn chữ). -->
+    <Style Selector="Border.statusSeg TextBlock.dot">
+        <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
+    </Style>
+    <!-- Vạch ngăn giữa 2 đoạn: 1×16. -->
+    <Style Selector="Rectangle.statusSep">
+        <Setter Property="Width" Value="1" />
+        <Setter Property="Height" Value="16" />
+        <Setter Property="Fill" Value="{DynamicResource StatusBarDividerBrush}" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <!-- Chấm trạng thái NHẤP NHÁY: opacity 1 → 0.3 → 1, chu kỳ 2.4s, lặp vô hạn. -->
+    <Style Selector="Ellipse.statusDot">
+        <Style.Animations>
+            <Animation Duration="0:0:2.4" IterationCount="Infinite" Easing="SineEaseInOut">
+                <KeyFrame Cue="0%">
+                    <Setter Property="Opacity" Value="1.0" />
+                </KeyFrame>
+                <KeyFrame Cue="50%">
+                    <Setter Property="Opacity" Value="0.3" />
+                </KeyFrame>
+                <KeyFrame Cue="100%">
+                    <Setter Property="Opacity" Value="1.0" />
+                </KeyFrame>
+            </Animation>
+        </Style.Animations>
     </Style>
 
     <!-- Toggle (checkbox) trên ribbon — ô vuông + nhãn THẲNG HÀNG. Trước đây ép MinHeight=58 để khớp chiều cao
