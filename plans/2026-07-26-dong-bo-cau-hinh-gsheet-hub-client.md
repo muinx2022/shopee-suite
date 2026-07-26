@@ -1,7 +1,7 @@
 # Plan: Đồng bộ cấu hình GSheet (URL + Tab) giữa Hub và client + hết "hỏng im lặng"
 
 - **Ngày:** 2026-07-26
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành (CHƯA deploy hub)
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-dev`) — CÂY CHÍNH
 
 ## 1. Bối cảnh & mục tiêu
@@ -170,4 +170,18 @@ Trong `OrdersModuleHost`:
 
 ## Báo cáo thực thi (Opus điền sau khi xong)
 
-<chưa thực thi>
+Hoàn thành, commit 6752825. Build suite + hub-web 0 error, 944 test xanh (32 test mới).
+Kiểm chứng bằng hub THẬT (instance riêng, port tạm): hub rỗng không đè client; POST tab rỗng XOÁ được tab;
+POST url rỗng / trùng bản cũ → không bump version; file PascalCase không BOM.
+
+**Sửa thêm ngoài plan (Fable quyết khi review):** chiều ĐẨY cũng theo "khối GSheet là 1 đơn vị" — client có URL
+thì đẩy cả tab kể cả rỗng. Plan gốc chỉ nhận field non-empty → người dùng xoá ô Tab ở client sẽ bị hub đẩy
+tab cũ về (revert), không bao giờ xoá được override từ client. Luật gom vào `GsheetConfigSync.QuyetDinhNhanBanClient`
+(đối xứng `QuyetDinhApBanHub`), dùng chung cho cả 3 nơi.
+
+Lệch plan khác: (1) thêm Timer 60s bên cạnh event fleet — chế độ Shopee không dựng HttpCoordinationHub nên
+event `Changed` không bao giờ bắn; (2) hàm quyết định đặt ở `XuLyDonShopee.Core` (không phải Shopee.Core) để
+project test tham chiếu được.
+
+**CÒN LẠI:** deploy hub-web lên VM (`shopee-hub`) rồi phát hành client. Client mới + hub cũ → GET 404 → không
+đụng cấu hình local (an toàn, không bắt buộc thứ tự).
