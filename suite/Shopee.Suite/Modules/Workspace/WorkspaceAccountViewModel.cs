@@ -97,6 +97,11 @@ public sealed partial class WorkspaceAccountViewModel : ObservableObject
 
     public string DisplayName => Account.DisplayName;
     public string CookieStatus => Bs.CookieStatus;
+    /// <summary>Đã có cookie BigSeller chưa — chỉ để TÔ MÀU (pill xanh / vàng). Raise kèm CookieStatus.</summary>
+    public bool HasCookie => Account.HasCookie;
+    /// <summary>Bản NGẮN của <see cref="CookieStatus"/> cho thẻ tk cột trái (chỉ rộng 292px, phải đứng cùng
+    /// dòng với "x/y shop đã scrape").</summary>
+    public string CookieShort => Account.HasCookie ? "✓ cookie" : "⚠ chưa đăng nhập";
     public string WorkbookPath => Account.WorkbookPath;
     /// <summary>Hub-mode → ẨN hàng "Workbook" ở tab Shop &amp; cấu hình (kho SP ở Hub, không dùng workbook Excel).
     /// Excel-mode hiện như cũ. Cố định theo vòng đời VM (đổi chế độ trên Hub sẽ re-sync dựng lại VM).</summary>
@@ -120,6 +125,8 @@ public sealed partial class WorkspaceAccountViewModel : ObservableObject
         Bs.NotifyCookieChanged();
         foreach (var s in Shops) { s.RefreshStatus(); s.RefreshUpdateState(); }
         OnPropertyChanged(nameof(CookieStatus));
+        OnPropertyChanged(nameof(HasCookie));
+        OnPropertyChanged(nameof(CookieShort));
         OnPropertyChanged(nameof(ScrapeSummary));
         OnPropertyChanged(nameof(IsSelected));
     }
