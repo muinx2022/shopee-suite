@@ -5,6 +5,18 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Hiệu năng. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.6.5 — 2026-07-27
+
+- **Số "chuẩn bị hàng" chung toàn hệ thống:** trước đây mỗi máy tự đếm phần việc của chính nó, nên máy chạy trước
+  hiện 2 đơn còn máy chạy sau hiện 0 (Shopee đã hết đơn để chuẩn bị). Nay mỗi đơn được đóng dấu thời điểm chuẩn
+  bị rồi đẩy lên Hub; Hub đếm trên bảng đơn nên **mọi máy thấy cùng một con số**, không thể cộng trùng. Lưới cập
+  nhật sau mỗi shop xong. Mất Hub thì vẫn hiện số đang có kèm ghi chú "Chưa gộp được từ Hub".
+  *Đơn chuẩn bị TRƯỚC bản này không có dấu thời điểm nên không vào số Hub — số khớp dần từ đơn mới trở đi.*
+- **Khóa tài khoản chống hai máy tranh đơn:** nhiều máy chạy cùng một subaccount sẽ tranh đơn "chuẩn bị hàng" và
+  đăng nhập song song vào một tài khoản Shopee (dễ bị đá phiên, ăn captcha). Nay máy phải xin khóa từ Hub trước
+  khi mở trình duyệt; máy khác đang chạy thì bỏ qua tài khoản đó kèm báo **"Tài khoản đang chạy ở máy X"**. Khóa
+  tự hết hạn nếu máy tắt đột ngột, và mất Hub thì vẫn chạy bình thường.
+
 ## v1.6.4 — 2026-07-26
 
 - **Thứ tự shop theo đúng subaccount:** lưới tab "Kết quả" trước đây sắp shop theo bảng chữ cái, khác thứ tự
