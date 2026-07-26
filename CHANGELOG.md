@@ -5,6 +5,17 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Hiệu năng. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.6.3 — 2026-07-26
+
+- **Sửa lỗi Hub kẹt trạng thái đơn:** đơn đã đẩy lên Hub một lần thì mọi thay đổi trạng thái sau đó
+  ("Đã hủy", "Đã giao"…) **không bao giờ** lên tới Hub — Hub hiển thị mãi trạng thái lúc đẩy lần đầu. Nay trạng
+  thái đổi là đơn được đẩy lại. (Đơn kết thúc đã bị dọn khỏi máy từ trước không sửa lại được trên Hub.)
+- **Sửa lỗi GSheet không tô đỏ đơn hủy:** khi Shopee hủy đơn, danh sách không còn hiện mã vận đơn nên app xoá mã
+  đã lưu, khiến đơn rơi vào nhánh "bỏ qua đơn hủy chưa có vận đơn" — dòng cũ trên sheet nằm trắng vĩnh viễn. Nay
+  mã vận đơn đã có được giữ lại, và đơn hủy **đã có dòng trên sheet** luôn được gửi lại để tô đỏ.
+- **Chống mất dữ liệu trên Hub:** đơn đẩy lại mà không kèm số tiền cuối cùng / mã vận đơn thì Hub giữ giá trị
+  đang có thay vì xoá trắng.
+
 ## v1.6.2 — 2026-07-26
 
 - **Tab "Kết quả" — cột tiến độ:** thêm cột hẹp ở đầu lưới cho biết phiên đang chạy tới shop nào: shop **đang
