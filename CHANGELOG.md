@@ -5,6 +5,15 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Hiệu năng. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.6.2 — 2026-07-26
+
+- **Tab "Kết quả" — cột tiến độ:** thêm cột hẹp ở đầu lưới cho biết phiên đang chạy tới shop nào: shop **đang
+  kiểm tra** có vòng quay + chữ "đang kiểm tra…" thay cho số; kiểm xong thì số đơn hiện lại và **chấm xanh ở lại**
+  shop đó cho tới khi shop kế bắt đầu. Shop lỗi/captcha vẫn tắt vòng quay (không quay mãi).
+- **Sửa lỗi lưới shop trống:** mở app rồi chọn tài khoản **trước** khi phiên kịp đọc danh sách shop thì lưới
+  "Kết quả" đứng rỗng mãi (phải bấm sang tài khoản khác rồi bấm lại mới thấy). Nay đọc xong danh sách shop là
+  lưới hiện ngay.
+
 ## v1.6.1 — 2026-07-26
 
 - **Đơn toàn hệ thống (mới):** thêm màn xem đơn của **mọi máy** trong tab Shopee — lọc theo shop / trạng thái /
