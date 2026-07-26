@@ -57,6 +57,13 @@ public partial class AccountSession : ObservableObject, IAccountSession
     private volatile string? _currentShopId;
     private volatile string? _currentShopLogin;
 
+    // ===== Khóa chạy tài khoản XUYÊN MÁY (chống 2 máy cùng chạy 1 subaccount: tranh đơn "chuẩn bị hàng" +
+    // đăng nhập song song một tài khoản Shopee) =====
+    // 1 = vòng chạy này ĐANG giữ khóa → đường dọn dẹp PHẢI nhả. Interlocked (không phải bool) để nhả ĐÚNG MỘT
+    // lần dù nhiều lối ra cùng gọi tới. Nhả sót = tài khoản bị coi là "đang chạy ở máy X" tới khi lease hết hạn
+    // (~5') → máy khác không chạy được.
+    private int _dangGiuKhoa;
+
     // Cờ chống spam log "chưa cấu hình GSheet": phiên chạy cả buổi, mỗi shop một lượt đẩy sheet → chỉ báo 1 dòng
     // cho cả phiên là đủ để người dùng thấy máy đang KHÔNG ghi sheet. volatile: lượt đẩy chạy trên thread nền.
     private volatile bool _daBaoThieuGsheetUrl;
@@ -742,6 +749,69 @@ public partial class AccountSession : ObservableObject, IAccountSession
            && !SlipFileIsValidPdf(pdfPath);
 
     /// <summary>
+    /// PURE — câu báo khi tài khoản đang được MÁY KHÁC chạy: có tên máy thì nói TÊN (người dùng biết chỗ nào đang
+    /// chạy để tắt), hub không nói được là máy nào thì "máy khác". Dùng cho cả nhật ký lẫn dòng trạng thái phiên.
+    /// </summary>
+    internal static string CauBiTuChoiKhoa(string? holderMachine)
+        => string.IsNullOrWhiteSpace(holderMachine)
+            ? "Tài khoản đang chạy ở máy khác — bỏ qua lượt này."
+            : $"Tài khoản đang chạy ở máy {holderMachine} — bỏ qua lượt này.";
+
+    /// <summary>
+    /// XIN khóa chạy tài khoản (hook <see cref="AppServices.AcquireAccountLease"/>) — gọi TRƯỚC khi mở trình duyệt
+    /// và trước khi chuyển sang <see cref="SessionState.Running"/>. Trả <c>true</c> = được phép chạy:
+    /// <list type="bullet">
+    /// <item>hook chưa rót (app chạy độc lập / chưa có hub) → chạy như trước, không log gì thêm;</item>
+    /// <item>hook trả <c>Ok</c> → đánh cờ <see cref="_dangGiuKhoa"/> để đường dọn dẹp nhả khóa.</item>
+    /// </list>
+    /// Trả <c>false</c> = MÁY KHÁC đang chạy tài khoản này → phiên BỎ QUA lượt (không xếp hàng chờ, không thử lại),
+    /// ghi nhật ký + dòng trạng thái theo <see cref="CauBiTuChoiKhoa"/>.
+    /// </summary>
+    internal async Task<bool> XinKhoaChayAsync(string login, Action<string> log, CancellationToken ct)
+    {
+        var acquire = _services.AcquireAccountLease;
+        if (acquire is null)
+        {
+            return true; // không có hub → hành vi y như trước
+        }
+
+        var kq = await acquire(login, ct).ConfigureAwait(false);
+        if (!kq.Ok)
+        {
+            var msg = CauBiTuChoiKhoa(kq.HolderMachine);
+            StatusText = msg;
+            log(msg);
+            return false;
+        }
+
+        Interlocked.Exchange(ref _dangGiuKhoa, 1); // đã giữ → finally của vòng chạy PHẢI nhả
+        return true;
+    }
+
+    /// <summary>
+    /// NHẢ khóa chạy tài khoản (hook <see cref="AppServices.ReleaseAccountLease"/>) — gọi ở MỌI lối ra của vòng
+    /// chạy (xong / lỗi / hủy). ĐÚNG MỘT lần nhờ <see cref="_dangGiuKhoa"/>: chưa từng giành được (hook null / bị
+    /// từ chối) hoặc đã nhả rồi → không gọi hook. Nuốt mọi lỗi: nhả hỏng KHÔNG được phá đường dọn dẹp của phiên
+    /// (lease tự hết hạn ~5' phía hub).
+    /// </summary>
+    internal async Task NhaKhoaChayAsync(string login)
+    {
+        if (Interlocked.Exchange(ref _dangGiuKhoa, 0) != 1)
+        {
+            return; // chưa từng giành được / đã nhả
+        }
+
+        var release = _services.ReleaseAccountLease;
+        if (release is null)
+        {
+            return;
+        }
+
+        try { await release(login).ConfigureAwait(false); }
+        catch (Exception ex) { _services.Log.Append(_logLabel, "Nhả khóa tài khoản lỗi: " + ex.Message); }
+    }
+
+    /// <summary>
     /// <b>GĐ4 — Luồng chạy nền của nút "▶ Chạy" (đường CẦU NỐI extension, chạy LIÊN TỤC).</b> Mỗi chu kỳ:
     /// <see cref="OrdersBridgeSession.RunAllShopsAsync"/> (login Playwright → đóng → clean+extension → SSO picker →
     /// LẶP mọi shop: đọc đơn → callback <see cref="PersistSyncedOrdersAsync"/> lưu DB/GSheet/hub → nếu có đơn chờ
@@ -766,6 +836,14 @@ public partial class AccountSession : ObservableObject, IAccountSession
 
         try
         {
+            // KHÓA CHẠY XUYÊN MÁY: xin TRƯỚC khi đụng trình duyệt và trước khi chuyển sang Running. Máy khác đang
+            // chạy tài khoản này → bỏ qua lượt (không xếp hàng chờ) và kết thúc ÊM như người dùng bấm Dừng
+            // (finally đặt Stopped). Không có hub → XinKhoaChayAsync trả true (degrade như một máy).
+            if (!await XinKhoaChayAsync(acc.Email, log, ct).ConfigureAwait(false))
+            {
+                return;
+            }
+
             var baseDir = Path.GetDirectoryName(_services.Database.Path) ?? ".";
             var browserChoice = _services.Settings.GetBrowserChoice();
             var browserKind = BrowserLocator.ResolveBrowserKind(browserChoice);
@@ -873,6 +951,11 @@ public partial class AccountSession : ObservableObject, IAccountSession
             try { var p = _bridge?.Process; if (p is { HasExited: false }) p.Kill(entireProcessTree: true); } catch { /* bỏ qua */ }
             try { _bridge?.Dispose(); } catch { /* bỏ qua */ }
             _bridge = null;
+
+            // Nhả khóa chạy tài khoản trên MỌI lối ra (xong / lỗi / hủy) — đúng MỘT lần, và không nhả khi chưa
+            // từng giành được. Nhả TRƯỚC khi đặt Stopped: manager thấy Stopped là start ngay account kế trong hàng
+            // đợi, khóa phải trống trước lúc đó (bấm Dừng rồi Chạy lại cùng tài khoản cũng vậy).
+            await NhaKhoaChayAsync(acc.Email).ConfigureAwait(false);
 
             lock (_lifecycleLock)
             {

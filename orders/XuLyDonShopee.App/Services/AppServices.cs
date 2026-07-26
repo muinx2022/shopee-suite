@@ -27,6 +27,13 @@ public readonly record struct OutboxPending(int Orders = 0, int Slips = 0, int S
 }
 
 /// <summary>
+/// Kết quả xin KHÓA CHẠY một tài khoản (chống hai máy cùng chạy một subaccount). <paramref name="Ok"/> = false ⇒
+/// máy KHÁC đang chạy tài khoản này (phiên bỏ qua lượt, KHÔNG xếp hàng chờ); <paramref name="HolderMachine"/> =
+/// tên máy đang giữ (null khi hub không nói được là máy nào — vẫn là "máy khác").
+/// </summary>
+public sealed record OrdersLeaseResult(bool Ok, string? HolderMachine);
+
+/// <summary>
 /// Gom Database + các repository, khởi tạo một lần và truyền vào ViewModel.
 /// (Bước đầu không dùng DI container.)
 /// </summary>
@@ -118,6 +125,26 @@ public class AppServices
     /// Mặc định <c>null</c> = TẮT (app Đơn hàng chạy độc lập) → hành vi y như trước, số của máy.</para>
     /// </summary>
     public Func<string, CancellationToken, Task<IReadOnlyDictionary<string, int>?>>? QueryPrepareStats { get; set; }
+
+    /// <summary>
+    /// HOOK XIN KHÓA CHẠY một tài khoản trên HUB — chống hai máy cùng chạy MỘT subaccount (tranh đơn "chuẩn bị
+    /// hàng", đăng nhập song song một tài khoản Shopee → đá phiên/ăn captcha), do shell suite RÓT (module Đơn hàng
+    /// KHÔNG tham chiếu <c>Shopee.Core</c> nên không tự biết hub). Tham số: <b>login subaccount THÔ</b> (chưa thêm
+    /// tiền tố, chưa hạ chữ — quy ước khóa do phía suite lo, module không phải biết), <c>ct</c>.
+    /// <para><see cref="OrdersLeaseResult.Ok"/> = false ⇒ máy khác đang giữ → phiên KHÔNG mở trình duyệt, kết thúc
+    /// êm (bỏ qua lượt, KHÔNG xếp hàng chờ). Hub chưa cấu hình / offline / lỗi ⇒ trả <c>Ok = true</c> (degrade như
+    /// MỘT máy: mất hub thì cũng không phối hợp được với ai, chặn sẽ làm app vô dụng khi mất mạng).</para>
+    /// Mặc định <c>null</c> = TẮT (app Đơn hàng chạy độc lập / hub chưa cấu hình) → phiên chạy y như trước.
+    /// </summary>
+    public Func<string, CancellationToken, Task<OrdersLeaseResult>>? AcquireAccountLease { get; set; }
+
+    /// <summary>
+    /// HOOK NHẢ khóa chạy tài khoản — cặp với <see cref="AcquireAccountLease"/>, tham số cũng là <b>login
+    /// subaccount THÔ</b>. Phiên gọi ở MỌI lối ra (xong / lỗi / hủy) và ĐÚNG MỘT lần cho mỗi lần giành được.
+    /// Nhả sót là lỗi nặng: tài khoản bị coi là "đang chạy ở máy X" tới khi lease hết hạn (~5') → máy khác không
+    /// chạy được. Mặc định <c>null</c> = TẮT (app chạy độc lập / hub chưa cấu hình).
+    /// </summary>
+    public Func<string, Task>? ReleaseAccountLease { get; set; }
 
     /// <summary>Nhật ký hoạt động của app (panel UI + ghi file cạnh database). Các phiên nạp log qua đây.</summary>
     public ActivityLog Log { get; }

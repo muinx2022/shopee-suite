@@ -1,7 +1,7 @@
 # Plan: khóa tài khoản cho module Đơn hàng (chống hai máy cùng chạy một subaccount)
 
 - **Ngày:** 2026-07-27
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-dev`)
 
 ## 1. Bối cảnh & mục tiêu
