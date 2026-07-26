@@ -80,6 +80,10 @@ CREATE INDEX IF NOT EXISTS ix_orders_status ON orders(status);");
 
                 using var c = _conn.CreateCommand();
                 c.Transaction = tx;
+                // final_amount / final_amount_text / tracking_number dùng COALESCE($moi, cot_cu): đơn ĐẨY LẠI (vd
+                // client đẩy lại vì trạng thái đổi sang "Đã hủy") có thể KHÔNG còn kèm số tiền cuối cùng / mã vận
+                // đơn — giữ giá trị hub ĐANG CÓ thay vì xoá về NULL. Các cột còn lại (nhất là status /
+                // status_description / cancel_reason) GHI ĐÈ thẳng: đó chính là dữ liệu cần cập nhật.
                 c.CommandText = @"
 INSERT INTO orders(shop_id,order_sn,shopee_order_id,buyer_username,items_json,item_count,item_summary,sku,
   total_price,total_price_text,final_amount,final_amount_text,payment_method,status,status_description,
@@ -87,8 +91,11 @@ INSERT INTO orders(shop_id,order_sn,shopee_order_id,buyer_username,items_json,it
 VALUES($s,$sn,$soi,$bu,$ij,$ic,$is,$sku,$tp,$tpt,$fa,$fat,$pm,$st,$sd,$cr,$ch,$ca,$tn,$sa)
 ON CONFLICT(shop_id,order_sn) DO UPDATE SET
   shopee_order_id=$soi, buyer_username=$bu, items_json=$ij, item_count=$ic, item_summary=$is, sku=$sku,
-  total_price=$tp, total_price_text=$tpt, final_amount=$fa, final_amount_text=$fat, payment_method=$pm,
-  status=$st, status_description=$sd, cancel_reason=$cr, channel=$ch, carrier=$ca, tracking_number=$tn,
+  total_price=$tp, total_price_text=$tpt,
+  final_amount=COALESCE($fa,final_amount), final_amount_text=COALESCE($fat,final_amount_text),
+  payment_method=$pm,
+  status=$st, status_description=$sd, cancel_reason=$cr, channel=$ch, carrier=$ca,
+  tracking_number=COALESCE($tn,tracking_number),
   synced_at=$sa;";
                 c.Parameters.AddWithValue("$s", shopId);
                 c.Parameters.AddWithValue("$sn", o.OrderSn);

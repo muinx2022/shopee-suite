@@ -555,6 +555,89 @@ public class OrdersRepositoryTests
     }
 
     [Fact]
+    public void UpsertMany_TrangThaiDoi_ResetCoDayHub()
+    {
+        using var temp = new TempDatabase();
+        var repo = new OrdersRepository(temp.Open());
+
+        // Lượt 1: đơn "Chờ lấy hàng" đã lên hub (vận đơn + số tiền cuối cùng đã có sẵn để chắc chắn nhánh reset
+        // KHÔNG phải do hai điều kiện cũ).
+        var choLay = Sample("SN1");
+        choLay.Status = "Chờ lấy hàng";
+        repo.UpsertMany(1, new[] { choLay }, DateTime.UtcNow);
+        repo.MarkHubSynced(1, new[] { "SN1" }, DateTime.UtcNow);
+        Assert.Empty(repo.GetForHubPush(1));
+
+        // Lượt 2: Shopee hủy đơn → status đổi → PHẢI reset cờ, kẻo hub kẹt "Chờ lấy hàng" vĩnh viễn.
+        var daHuy = Sample("SN1");
+        daHuy.Status = "Đã hủy";
+        repo.UpsertMany(1, new[] { daHuy }, DateTime.UtcNow);
+
+        var pending = repo.GetForHubPush(1);
+        Assert.Equal(new[] { "SN1" }, pending.Select(o => o.OrderSn));
+        Assert.Equal("Đã hủy", pending[0].Status);
+    }
+
+    [Fact]
+    public void UpsertMany_ChiStatusDescriptionDoi_KhongResetCoDayHub()
+    {
+        using var temp = new TempDatabase();
+        var repo = new OrdersRepository(temp.Open());
+
+        repo.UpsertMany(1, new[] { Sample("SN1") }, DateTime.UtcNow);
+        repo.MarkHubSynced(1, new[] { "SN1" }, DateTime.UtcNow);
+
+        // status + cancel_reason Y HỆT, chỉ status_description đổi (mô tả hay dao động: đếm ngược, nhắc nhở…)
+        // → KHÔNG reset, kẻo đơn bị đẩy lại hub MỖI lượt sync.
+        var moTaKhac = Sample("SN1");
+        moTaKhac.StatusDescription = "Vui lòng giao hàng trước 23:59 hôm nay";
+        repo.UpsertMany(1, new[] { moTaKhac }, DateTime.UtcNow);
+
+        Assert.Empty(repo.GetForHubPush(1));
+    }
+
+    [Fact]
+    public void UpsertMany_LyDoHuyVuaCo_ResetCoDayHub()
+    {
+        using var temp = new TempDatabase();
+        var repo = new OrdersRepository(temp.Open());
+
+        // Lượt 1: đơn đã lên hub khi CHƯA có lý do hủy.
+        var chuaCoLyDo = Sample("SN1");
+        chuaCoLyDo.CancelReason = null;
+        repo.UpsertMany(1, new[] { chuaCoLyDo }, DateTime.UtcNow);
+        repo.MarkHubSynced(1, new[] { "SN1" }, DateTime.UtcNow);
+        Assert.Empty(repo.GetForHubPush(1));
+
+        // Lượt 2: đọc được lý do hủy (status không đổi) → vẫn PHẢI reset để hub nhận lý do.
+        repo.UpsertMany(1, new[] { Sample("SN1") }, DateTime.UtcNow);
+
+        var pending = repo.GetForHubPush(1);
+        Assert.Equal(new[] { "SN1" }, pending.Select(o => o.OrderSn));
+        Assert.Equal("Hủy đơn hàng vì hành vi giao dịch bất thường.", pending[0].CancelReason);
+    }
+
+    [Fact]
+    public void UpsertMany_VanDonKhongDocDuoc_GiuMaCu()
+    {
+        using var temp = new TempDatabase();
+        var db = temp.Open();
+        var repo = new OrdersRepository(db);
+
+        repo.UpsertMany(1, new[] { Sample("SN1") }, DateTime.UtcNow);
+
+        // Lượt sau KHÔNG đọc được vận đơn (đơn "Đã hủy" nên danh sách không hiện cột) → COALESCE GIỮ mã cũ.
+        // Mất vận đơn kéo theo đơn hủy rơi vào nhánh bỏ-qua của GSheet (không tô đỏ) và hub mất dữ liệu.
+        var matVanDon = Sample("SN1");
+        matVanDon.TrackingNumber = null;
+        matVanDon.TotalPrice = 200000; // trường khác vẫn cập nhật bình thường
+        repo.UpsertMany(1, new[] { matVanDon }, DateTime.UtcNow);
+
+        Assert.Equal("SPXVN068067521447", ReadString(db, "SN1", "tracking_number"));
+        Assert.Equal("200000", ReadString(db, "SN1", "total_price"));
+    }
+
+    [Fact]
     public void GetForHubPush_MarkHubSynced_KhongLanTaiKhoanKhac()
     {
         using var temp = new TempDatabase();

@@ -1,7 +1,7 @@
 # Plan: đồng bộ trạng thái kết thúc (Đã hủy / Đã giao) lên Hub và GSheet
 
 - **Ngày:** 2026-07-26
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-dev`)
 
 ## 1. Bối cảnh & mục tiêu
@@ -175,4 +175,19 @@ Thêm test (theo phong cách sẵn có trong `orders/XuLyDonShopee.Tests/`, tên
 
 ---
 
-## Báo cáo thực thi (Opus điền sau khi xong)
+## Báo cáo thực thi
+
+Đã làm đúng 6 bước. File sửa:
+
+- `orders/XuLyDonShopee.Core/Data/OrdersRepository.cs` — `UpsertMany`: thêm `status` + `cancel_reason` vào điều
+  kiện reset `hub_synced_at` (KHÔNG có `status_description`); `tracking_number = COALESCE($tracking, tracking_number)`.
+- `orders/XuLyDonShopee.App/Services/HubOutbox.cs` — nhánh bỏ qua thành `daHuy && !coVanDon && !p.DaGhiSheet`.
+- `server/Shopee.Hub.Web/Data/HubDatabase.Orders.cs` — `DO UPDATE` dùng `COALESCE` cho `final_amount`,
+  `final_amount_text`, `tracking_number`; các cột trạng thái vẫn ghi đè thẳng.
+- Test: 4 ca mới ở `OrdersRepositoryTests.cs` + file mới `HubOutboxGsheetHuyTests.cs` (2 ca, dựng Web App giả
+  trên loopback với cổng 0 nên không đụng cổng cố định).
+
+Nghiệm thu (Fable tự chạy): `dotnet build` cả `ShopeeSuite.sln` và `server/ShopeeHub.sln` → 0 error, 0 warning;
+`dotnet test` → **1014/1014 xanh** (trước: 1008). Diff khớp plan từng dòng.
+
+Hạn chế đã biết: đơn kết thúc bị dọn khỏi client từ trước không sửa được trên hub — không còn nguồn để đẩy lại.

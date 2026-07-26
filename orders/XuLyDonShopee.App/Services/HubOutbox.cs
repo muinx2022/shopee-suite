@@ -316,10 +316,13 @@ public static class HubOutbox
                     var daHuy = ShopeeShippingNav.LaDonHuy(p.Status, p.StatusDescription, p.CancelReason);
                     var coVanDon = !string.IsNullOrWhiteSpace(p.TrackingNumber);
 
-                    // BỎ QUA đơn HỦY mà CHƯA từng có vận đơn: đơn hủy trước khi vào pipeline giao không thuộc sổ
-                    // theo dõi → không ghi (tránh spam dòng đỏ vô nghĩa). By design → coi là settled (được dọn).
-                    // Đơn CHƯA hủy (đang chuẩn bị) vẫn ghi dù chưa có vận đơn (dòng TRẮNG), cột B tự điền sau.
-                    if (daHuy && !coVanDon)
+                    // BỎ QUA đơn HỦY mà CHƯA từng có vận đơn VÀ CHƯA từng ghi sheet: đơn hủy trước khi vào pipeline
+                    // giao không thuộc sổ theo dõi → không ghi (tránh spam dòng đỏ vô nghĩa). By design → coi là
+                    // settled (được dọn). Đơn CHƯA hủy (đang chuẩn bị) vẫn ghi dù chưa có vận đơn (dòng TRẮNG),
+                    // cột B tự điền sau. Đơn ĐÃ CÓ DÒNG trên sheet (DaGhiSheet) thì KHÔNG bỏ qua dù giờ mất vận đơn
+                    // (Shopee hủy → danh sách không còn hiện mã): phải đi tiếp xuống phần quyết định gửi để huyDoi
+                    // bật và Apps Script TÔ ĐỎ dòng cũ, kẻo dòng đó nằm trắng vĩnh viễn sau khi đơn bị dọn khỏi app.
+                    if (daHuy && !coVanDon && !p.DaGhiSheet)
                     {
                         settled.Add(p.OrderSn);
                         continue;
