@@ -5,6 +5,39 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Hiệu năng. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.6.0 — 2026-07-26
+
+Thiết kế lại toàn bộ giao diện theo bộ design mới, cộng một số tính năng và sửa lỗi mất dữ liệu âm thầm.
+
+- **Giao diện (đổi lớn):** toàn app chuyển sang tông ẤM (nền `#F7F5F3`, chữ `#2C2724`) thay tông xám lạnh.
+  Dải tab trên nền trắng, tab đang mở đánh dấu bằng gạch cam dưới đáy; ribbon icon đen, chuyển cam khi đang mở;
+  thanh trạng thái mới cao 32px có chấm báo job nhấp nháy, số phiên bản, và số việc **chờ đẩy**. Thêm phím tắt
+  **Ctrl + 1…4** chuyển tab.
+- **Nút — đồng nhất toàn app:** mọi nút giờ CÙNG một dáng (nền trắng, viền luôn thấy rõ, cao 30); màu chỉ nằm ở
+  ICON (chính = cam, xóa = đỏ, thành công = xanh). Thay toàn bộ emoji/ký tự (🗑 💾 ▶ ■ ↻ …) bằng **một bộ icon
+  vector dùng chung cho cả Workspace lẫn Đơn hàng** — mỗi hành động đúng một icon, hết cảnh "nút Lưu mỗi nơi một kiểu".
+- **Workspace:** dải đầu màn + dòng gợi ý gọn lại; danh sách tài khoản dạng thẻ có chấm trạng thái; các tab con
+  chuyển sang dạng *segmented* (khay xám, ô đang chọn nổi nền trắng). Bảng shop bỏ cột "Tiến độ" — 4 nút thao tác
+  tự kể trạng thái: trắng = chờ · **cam = đang chạy** · dấu ✓ xanh góc = đã xong.
+- **Việc dở:** banner giờ LIỆT KÊ rõ từng việc (thao tác · tài khoản · shop · tiến độ) thay vì chỉ đếm số; và khi
+  Hub đã hủy hẳn việc thì client tự bỏ, không giữ lại nữa.
+- **Vòng chờ đẩy (mới):** thêm luồng đẩy chạy nền độc lập cho Hub / Google Sheet / "Đã bán" — Hub sống lại lúc máy
+  đang nghỉ giữa 2 vòng là tự đẩy bù, không phải đợi shop kế tiếp; lượt đẩy bị hủy do dừng phiên cũng được nhặt lại.
+- **Sửa lỗi mất dữ liệu âm thầm:**
+  - Đếm "Đã bán" trước đây **mất vĩnh viễn** khi Hub lỗi (lượt sau không còn thấy đơn chuyển trạng thái) → nay có
+    hàng đợi riêng, đếm bù được.
+  - Cột "Cuối cùng" trên Hub bị trống vĩnh viễn với đơn lên Hub trước khi lấy được số tiền → nay tự đẩy lại; đơn cũ
+    đang hỏng được sửa một lần khi mở app.
+  - Máy chưa cấu hình Google Sheet trước đây bị **bỏ qua hoàn toàn im lặng** → nay có dòng log báo rõ; Hub đẩy
+    thất bại cũng không còn im lặng.
+- **Google Sheet:** cột tiền bán nay ghi số **"Ước tính"** (số tiền cuối cùng) thay vì tổng tiền niêm yết; đơn ghi
+  lúc chưa có ước tính sẽ được tự điền lại sau. Thêm **đồng bộ cấu hình GSheet giữa Hub và mọi máy** (link Web App
+  + tab): điền một lần trên Hub `/config/orders`, các máy tự nhận trong ~1 phút, không cần khởi động lại.
+- **Đơn hàng:** màn chi tiết tài khoản thêm tab **"Kết quả"** — lưới Shop | Chuẩn bị hàng, cộng dồn theo ngày, có
+  lịch chọn ngày.
+- **Dọn:** bỏ nút "Sync shop → Đơn hàng" (chạy subaccount nên module Đơn hàng tự đọc danh sách shop) và bỏ nút
+  Proxy khỏi ribbon Shopee.
+
 ## v1.5.1 — 2026-07-25
 
 Đợt sửa lỗi + dọn dẹp lớn sau tổng review toàn app (không thêm tính năng mới).
