@@ -62,6 +62,10 @@ public partial class AccountsViewModel : ViewModelBase
         // NGAY (chỉ khi đúng tài khoản đang mở), thay vì bắt người dùng đổi tài khoản/đổi ngày mới thấy số mới.
         _services.PrepareCountChanged += OnPrepareCountChanged;
 
+        // Phiên vừa đọc được danh sách shop → dựng lưới tab "Kết quả" NGAY. Không có cái này thì mở app + chọn
+        // tài khoản TRƯỚC khi phiên đọc shop sẽ thấy lưới TRỐNG mãi (chỉ hết khi bấm sang tk khác rồi bấm lại).
+        _services.ShopListChanged += OnShopListChanged;
+
         // Phiên vào/ra một shop → cột tiến độ của tab "Kết quả" chuyển chấm + bật/tắt vòng quay. Cũng từ thread
         // nền của phiên → marshal về UI thread (RunOnUi) trước khi đụng ResultRows.
         _services.ShopCheckChanged += OnShopCheckChanged;
@@ -1163,6 +1167,19 @@ public partial class AccountsViewModel : ViewModelBase
     /// <para>Chỉ nạp khi ngày đang lọc là HÔM NAY: số vừa cộng luôn thuộc hôm nay, người dùng đang xem ngày cũ
     /// thì lưới của họ không đổi — nạp lại chỉ tổ nháy màn.</para>
     /// </summary>
+    /// <summary>
+    /// Phiên vừa đọc được danh sách shop của một tài khoản → dựng lại lưới tab "Kết quả" nếu ĐÚNG tài khoản
+    /// đang mở. KHÔNG lọc theo ngày (khác <see cref="OnPrepareCountChanged"/>): danh sách shop không phụ thuộc
+    /// ngày, xem ngày cũ vẫn phải thấy đủ shop.
+    /// </summary>
+    private void OnShopListChanged(long accountId) => RunOnUi(() =>
+    {
+        if (SelectedRow is not null && SelectedRow.Id == accountId)
+        {
+            LoadResults();
+        }
+    });
+
     private void OnPrepareCountChanged(long accountId) => RunOnUi(() =>
     {
         if (SelectedRow is null || SelectedRow.Id != accountId)

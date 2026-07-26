@@ -145,6 +145,18 @@ public class AppServices
     public void RaisePrepareCountChanged(long accountId) => PrepareCountChanged?.Invoke(accountId);
 
     /// <summary>
+    /// Phát khi vừa ĐỌC ĐƯỢC danh sách shop của một tài khoản (ghi <c>account_shops</c>) — tab "Kết quả" nghe để
+    /// dựng lưới NGAY. Không có sự kiện này thì màn đang mở giữ nguyên kết quả nạp lần đầu: người dùng mở app
+    /// rồi chọn tài khoản TRƯỚC khi phiên kịp đọc shop sẽ thấy lưới TRỐNG mãi (chỉ hết khi bấm sang tài khoản
+    /// khác rồi bấm lại). Y như <see cref="OrdersChanged"/>: CỐ Ý bắn từ THREAD NỀN → người nghe PHẢI marshal
+    /// về UI thread.
+    /// </summary>
+    public event Action<long>? ShopListChanged;
+
+    /// <summary>Phiên gọi ngay sau <c>ResultsRepository.UpsertShops</c> để tab "Kết quả" dựng lưới shop.</summary>
+    public void RaiseShopListChanged(long accountId) => ShopListChanged?.Invoke(accountId);
+
+    /// <summary>
     /// Phát khi phiên BẮT ĐẦU / XONG việc check một shop — cột tiến độ của tab "Kết quả" dùng để chuyển chấm tròn
     /// sang shop đang chạy tới và bật/tắt vòng quay. Tham số: id tài khoản + <b>nhãn shop</b> (ĐÚNG khóa
     /// <c>prepare_daily</c>: <c>LoginName</c>, rỗng thì <c>ShopName</c>) + đang-check hay không. Y như

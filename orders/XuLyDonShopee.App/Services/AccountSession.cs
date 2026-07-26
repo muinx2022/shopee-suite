@@ -797,7 +797,13 @@ public partial class AccountSession : ObservableObject, IAccountSession
                 var bridge = new OrdersBridgeSession(userDataDir, browserChoice, log, invoiceDir, province, syncCallback,
                     finalDoneSns: () => _services.Orders.GetOrderSnsWithFinalAmount(_accountId),
                     // Tab "Kết quả": lưu danh sách shop + tăng đếm mỗi đơn arrange theo (tài khoản, shop, ngày yyyy-MM-dd giờ địa phương).
-                    onShopListRead: shops => _services.Results.UpsertShops(_accountId, shops),
+                    onShopListRead: shops =>
+                    {
+                        _services.Results.UpsertShops(_accountId, shops);
+                        // Báo tab "Kết quả" dựng lưới NGAY. Thiếu dòng này thì màn đang mở giữ nguyên kết quả
+                        // rỗng của lần nạp đầu (mở app + chọn tài khoản TRƯỚC khi phiên đọc được shop).
+                        _services.RaiseShopListChanged(_accountId);
+                    },
                     onOrderPrepared: shopLogin =>
                     {
                         _services.Results.IncrementPrepared(
