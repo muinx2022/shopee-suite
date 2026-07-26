@@ -24,11 +24,16 @@ public class ResultsRepository
     public ResultsRepository(Database db) => _db = db;
 
     /// <summary>
-    /// UPSERT danh sách shop của một tài khoản (thêm shop mới, cập nhật <c>shop_name</c> + <c>updated_at</c> cho
-    /// shop đã có). <c>shop_login</c> = <see cref="ShopListItem.LoginName"/> (fallback <see cref="ShopListItem.ShopName"/>
-    /// — CÙNG quy tắc với nhãn đếm ở <c>OrdersBridgeSession</c>); <c>shop_name</c> = ShopName (fallback login) để hiển
-    /// thị. Shop KHÔNG có cả login lẫn tên → bỏ (không định danh được). Ghi trong một transaction; danh sách rỗng →
-    /// không chạm DB.
+    /// UPSERT danh sách shop của một tài khoản (thêm shop mới, cập nhật <c>shop_name</c> + <c>sort_order</c> +
+    /// <c>updated_at</c> cho shop đã có). <c>shop_login</c> = <see cref="ShopListItem.LoginName"/> (fallback
+    /// <see cref="ShopListItem.ShopName"/> — CÙNG quy tắc với nhãn đếm ở <c>OrdersBridgeSession</c>);
+    /// <c>shop_name</c> = ShopName (fallback login) để hiển thị. Shop KHÔNG có cả login lẫn tên → bỏ (không định
+    /// danh được). Ghi trong một transaction; danh sách rỗng → không chạm DB.
+    /// <para>
+    /// <c>sort_order</c> = vị trí shop trong <paramref name="shops"/> (0, 1, 2…) — ĐÚNG thứ tự trang
+    /// <c>/portal/shop</c> của subaccount trả về, để <see cref="GetShops"/> hiện y hệt thứ tự người dùng thấy trên
+    /// Shopee. Ghi cả ở nhánh UPDATE: lượt đọc sau Shopee đổi thứ tự thì app đổi theo.
+    /// </para>
     /// </summary>
     public void UpsertShops(long accountId, IEnumerable<ShopListItem> shops)
     {
@@ -40,6 +45,9 @@ public class ResultsRepository
         var nowStr = DbSerialization.FormatDate(DateTime.UtcNow);
         using var conn = _db.OpenConnection();
         using var tx = conn.BeginTransaction();
+        // Vị trí shop trong danh sách nguồn — chỉ tăng cho shop THỰC SỰ ghi được (shop bị bỏ vì không định danh
+        // được KHÔNG chiếm số thứ tự, kẻo để lại lỗ hổng giữa dãy).
+        var sortOrder = 0;
         foreach (var shop in shops)
         {
             if (shop is null)
@@ -60,29 +68,34 @@ public class ResultsRepository
 
             using var cmd = conn.CreateCommand();
             cmd.Transaction = tx;
-            cmd.CommandText = @"INSERT INTO account_shops (account_id, shop_login, shop_name, updated_at)
-    VALUES ($a, $login, $name, $now)
-    ON CONFLICT(account_id, shop_login) DO UPDATE SET shop_name = $name, updated_at = $now;";
+            cmd.CommandText = @"INSERT INTO account_shops (account_id, shop_login, shop_name, sort_order, updated_at)
+    VALUES ($a, $login, $name, $sort, $now)
+    ON CONFLICT(account_id, shop_login) DO UPDATE SET shop_name = $name, sort_order = $sort, updated_at = $now;";
             cmd.Parameters.AddWithValue("$a", accountId);
             cmd.Parameters.AddWithValue("$login", login);
             cmd.Parameters.AddWithValue("$name", name);
+            cmd.Parameters.AddWithValue("$sort", sortOrder);
             cmd.Parameters.AddWithValue("$now", nowStr);
             cmd.ExecuteNonQuery();
+            sortOrder++;
         }
         tx.Commit();
     }
 
     /// <summary>
-    /// MỌI shop đã lưu của một tài khoản (<c>shop_login</c> + <c>shop_name</c>), sắp theo tên hiển thị. Dùng cho cột
+    /// MỌI shop đã lưu của một tài khoản (<c>shop_login</c> + <c>shop_name</c>), sắp theo ĐÚNG thứ tự trang
+    /// <c>/portal/shop</c> của subaccount (<c>sort_order</c> do <see cref="UpsertShops"/> ghi). Dùng cho cột
     /// Shop tab "Kết quả" (hiện cả shop 0 đơn trong ngày). Tài khoản chưa có shop nào → list rỗng.
     /// </summary>
     public IReadOnlyList<(string ShopLogin, string? ShopName)> GetShops(long accountId)
     {
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
+        // Shop ĐÃ biết thứ tự nguồn đứng trước theo đúng thứ tự đó; shop dữ liệu CŨ (sort_order NULL — chưa đọc lại
+        // shop-list lần nào) xuống cuối, xếp theo tên hiển thị như trước.
         cmd.CommandText = @"SELECT shop_login, shop_name FROM account_shops
     WHERE account_id = $a
-    ORDER BY COALESCE(shop_name, shop_login);";
+    ORDER BY CASE WHEN sort_order IS NULL THEN 1 ELSE 0 END, sort_order, COALESCE(shop_name, shop_login);";
         cmd.Parameters.AddWithValue("$a", accountId);
 
         var list = new List<(string, string?)>();

@@ -137,6 +137,7 @@ CREATE TABLE IF NOT EXISTS account_shops (
     account_id INTEGER NOT NULL,
     shop_login TEXT NOT NULL,
     shop_name  TEXT,
+    sort_order INTEGER,                -- vị trí shop theo ĐÚNG thứ tự trang /portal/shop (NULL = dữ liệu cũ)
     updated_at TEXT NOT NULL,
     UNIQUE(account_id, shop_login)
 );
@@ -219,6 +220,11 @@ CREATE TABLE IF NOT EXISTS prepare_daily (
         // `_currentShopLogin` (callback cầu nối set trước khi lưu); đơn cũ NULL (fallback "(shop ?)" khi hiển thị).
         // KHÔNG backfill. Thêm cho DB CŨ.
         EnsureColumn(conn, "orders", "shop_login", "TEXT");
+
+        // Vị trí shop trong danh sách của subaccount: ghi theo ĐÚNG thứ tự trang /portal/shop trả về (0, 1, 2…)
+        // để tab "Kết quả" hiện shop cùng thứ tự người dùng thấy trên Shopee. NULL = dữ liệu CŨ chưa biết thứ tự
+        // (chưa đọc lại shop-list lần nào) → xếp cuối theo tên. Thêm cho DB CŨ.
+        EnsureColumn(conn, "account_shops", "sort_order", "INTEGER");
 
         // Backfill MỘT LẦN: đơn ĐÃ lên hub TRƯỚC bản này có thể thiếu "Số tiền cuối cùng" trên hub — bản cũ chỉ
         // RESET hub_synced_at khi mã vận đơn vừa xuất hiện, KHÔNG reset khi final_amount vừa lấy được, nên đơn

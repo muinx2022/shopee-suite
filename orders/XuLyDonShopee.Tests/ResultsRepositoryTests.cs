@@ -1,3 +1,4 @@
+using Microsoft.Data.Sqlite;
 using XuLyDonShopee.Core.Data;
 using XuLyDonShopee.Core.Services;
 
@@ -5,8 +6,9 @@ namespace XuLyDonShopee.Tests;
 
 /// <summary>
 /// Test <see cref="ResultsRepository"/> (tab "Kết quả"): UpsertShops lưu/đọc danh sách shop (login làm khóa, tên để
-/// hiển thị, gọi lại cập nhật tên không trùng, login rỗng dùng ShopName làm khóa để khớp nhãn đếm); IncrementPrepared
-/// cộng dồn theo (tài khoản, shop, ngày); GetPreparedByDay tách theo ngày; mọi thứ tách theo tài khoản.
+/// hiển thị, gọi lại cập nhật tên không trùng, login rỗng dùng ShopName làm khóa để khớp nhãn đếm, GIỮ ĐÚNG thứ tự
+/// nguồn của trang <c>/portal/shop</c>); IncrementPrepared cộng dồn theo (tài khoản, shop, ngày); GetPreparedByDay
+/// tách theo ngày; mọi thứ tách theo tài khoản.
 /// </summary>
 public class ResultsRepositoryTests
 {
@@ -24,7 +26,7 @@ public class ResultsRepositoryTests
 
         var shops = repo.GetShops(1);
         Assert.Equal(2, shops.Count);
-        // Sắp theo tên hiển thị: "Alina Store1" trước "Shop 9X".
+        // Đúng thứ tự nguồn đã truyền vào.
         Assert.Equal("alina99.store", shops[0].ShopLogin);
         Assert.Equal("Alina Store1", shops[0].ShopName);
         Assert.Equal("shop9x.store", shops[1].ShopLogin);
@@ -73,6 +75,100 @@ public class ResultsRepositoryTests
 
         var only = Assert.Single(repo.GetShops(1));
         Assert.Equal("b.store", only.ShopLogin);
+    }
+
+    // ===================== Thứ tự shop = ĐÚNG thứ tự trang /portal/shop của subaccount =====================
+
+    /// <summary>Ghi thẳng SQL một dòng <c>account_shops</c> KIỂU CŨ (không có <c>sort_order</c> → NULL) — mô phỏng
+    /// dữ liệu lưu trước bản có cột thứ tự, chưa đọc lại shop-list lần nào.</summary>
+    private static void ChenShopCu(string path, long accountId, string login, string name)
+    {
+        var cs = new SqliteConnectionStringBuilder { DataSource = path }.ToString();
+        using var conn = new SqliteConnection(cs);
+        conn.Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = @"INSERT INTO account_shops (account_id, shop_login, shop_name, updated_at)
+    VALUES ($a, $login, $name, '2020-01-01T00:00:00.0000000');";
+        cmd.Parameters.AddWithValue("$a", accountId);
+        cmd.Parameters.AddWithValue("$login", login);
+        cmd.Parameters.AddWithValue("$name", name);
+        cmd.ExecuteNonQuery();
+    }
+
+    [Fact]
+    public void GetShops_GiuDungThuTuNguon_KhongSapTheoBangChuCai()
+    {
+        using var temp = new TempDatabase();
+        var repo = new ResultsRepository(temp.Open());
+
+        // Thứ tự Shopee trả về là C, A, B — app phải hiện Y HỆT, không sắp lại theo tên.
+        repo.UpsertShops(1, new[]
+        {
+            new ShopListItem("333", "Shop C", "c.store"),
+            new ShopListItem("111", "Shop A", "a.store"),
+            new ShopListItem("222", "Shop B", "b.store"),
+        });
+
+        Assert.Equal(new[] { "c.store", "a.store", "b.store" }, repo.GetShops(1).Select(s => s.ShopLogin));
+    }
+
+    [Fact]
+    public void UpsertShops_LuotSauDoiThuTu_GetShopsDoiTheo()
+    {
+        using var temp = new TempDatabase();
+        var repo = new ResultsRepository(temp.Open());
+
+        repo.UpsertShops(1, new[]
+        {
+            new ShopListItem("333", "Shop C", "c.store"),
+            new ShopListItem("111", "Shop A", "a.store"),
+            new ShopListItem("222", "Shop B", "b.store"),
+        });
+
+        // Lượt đọc sau Shopee đảo thứ tự → sort_order cập nhật ở nhánh DO UPDATE, app đổi theo.
+        repo.UpsertShops(1, new[]
+        {
+            new ShopListItem("222", "Shop B", "b.store"),
+            new ShopListItem("111", "Shop A", "a.store"),
+            new ShopListItem("333", "Shop C", "c.store"),
+        });
+
+        Assert.Equal(new[] { "b.store", "a.store", "c.store" }, repo.GetShops(1).Select(s => s.ShopLogin));
+    }
+
+    [Fact]
+    public void UpsertShops_ShopBiBoGiuaDanhSach_KhongLamLechThuTu()
+    {
+        using var temp = new TempDatabase();
+        var repo = new ResultsRepository(temp.Open());
+
+        repo.UpsertShops(1, new[]
+        {
+            new ShopListItem("111", "Shop A", "a.store"),
+            new ShopListItem("000", "", ""),              // không định danh → bỏ, KHÔNG chiếm số thứ tự
+            new ShopListItem("222", "Shop B", "b.store"),
+            new ShopListItem("333", "Shop C", "c.store"),
+        });
+
+        Assert.Equal(new[] { "a.store", "b.store", "c.store" }, repo.GetShops(1).Select(s => s.ShopLogin));
+    }
+
+    [Fact]
+    public void GetShops_DongCuChuaCoThuTu_XuongCuoiTheoTen()
+    {
+        using var temp = new TempDatabase();
+        var repo = new ResultsRepository(temp.Open()); // khởi tạo schema
+
+        // Dữ liệu CŨ: sort_order NULL (ghi trước bản có cột thứ tự).
+        ChenShopCu(temp.Path, 1, "yyy.store", "Shop Y cũ");
+        ChenShopCu(temp.Path, 1, "xxx.store", "Shop X cũ");
+
+        // Dòng MỚI đã biết thứ tự nguồn → đứng TRƯỚC, dù tên xếp sau theo bảng chữ cái.
+        repo.UpsertShops(1, new[] { new ShopListItem("999", "Shop Zulu", "zulu.store") });
+
+        Assert.Equal(
+            new[] { "zulu.store", "xxx.store", "yyy.store" }, // NULL xuống cuối, giữa chúng sắp theo tên
+            repo.GetShops(1).Select(s => s.ShopLogin));
     }
 
     [Fact]

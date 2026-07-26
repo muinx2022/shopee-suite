@@ -157,14 +157,14 @@ public class AppServices
     public void RaiseShopListChanged(long accountId) => ShopListChanged?.Invoke(accountId);
 
     /// <summary>
-    /// Phát khi phiên BẮT ĐẦU / XONG việc check một shop — cột tiến độ của tab "Kết quả" dùng để chuyển chấm tròn
-    /// sang shop đang chạy tới và bật/tắt vòng quay. Tham số: id tài khoản + <b>nhãn shop</b> (ĐÚNG khóa
+    /// Phát khi phiên BẮT ĐẦU / XONG việc check một shop — cột tiến độ của tab "Kết quả" dùng để chuyển vòng quay
+    /// sang shop đang chạy tới và đóng dấu tick cho shop vừa xong. Tham số: id tài khoản + <b>nhãn shop</b> (ĐÚNG khóa
     /// <c>prepare_daily</c>: <c>LoginName</c>, rỗng thì <c>ShopName</c>) + đang-check hay không. Y như
     /// <see cref="OrdersChanged"/>: CỐ Ý bắn từ THREAD NỀN của phiên → người nghe PHẢI marshal về UI thread.
     /// </summary>
     public event Action<long, string, bool>? ShopCheckChanged;
 
-    /// <summary>Phiên gọi khi vào/ra một shop để tab "Kết quả" vẽ chấm + vòng quay đúng shop.</summary>
+    /// <summary>Phiên gọi khi vào/ra một shop để tab "Kết quả" vẽ vòng quay + tick đúng shop.</summary>
     public void RaiseShopCheckChanged(long accountId, string shopLabel, bool checking)
         => ShopCheckChanged?.Invoke(accountId, shopLabel, checking);
 

@@ -609,25 +609,26 @@
                                                Foreground="{StaticResource TextMuted}" VerticalAlignment="Center" />
                                     <DatePicker SelectedDate="{Binding ResultDate}" />
                                 </StackPanel>
-                                <!-- Lưới 3 cột: tiến độ (chấm/vòng quay) | Shop (mọi shop của tài khoản) |
+                                <!-- Lưới 3 cột: tiến độ (tick/vòng quay) | Shop (mọi shop của tài khoản) |
                                      Chuẩn bị hàng (số đơn arrange trong ngày). -->
                                 <DataGrid Classes="proxy" ClipToBounds="True"
                                           ItemsSource="{Binding ResultRows}"
                                           IsReadOnly="True" AutoGenerateColumns="False"
                                           CanUserResizeColumns="True">
                                     <DataGrid.Columns>
-                                        <!-- Cột tiến độ — HẸP, không tiêu đề: chấm xanh = shop phiên đã check TỚI
-                                             (ở lại đó sau khi xong, chỉ chuyển khi shop kế bắt đầu); đang check shop
-                                             nào thì shop đó thay chấm bằng vòng quay cam. -->
+                                        <!-- Cột tiến độ — HẸP, không tiêu đề, MỘT biểu tượng mỗi dòng: vòng quay cam
+                                             = đang kiểm tra shop này; tick xanh = đã kiểm tra XONG shop này trong
+                                             lượt chạy (giữ tới hết lượt); chưa tới thì để trống. -->
                                         <DataGridTemplateColumn Header="" Width="40" CanUserResize="False">
                                             <DataGridTemplateColumn.CellTemplate>
                                                 <DataTemplate>
                                                     <Panel VerticalAlignment="Center" HorizontalAlignment="Center"
                                                            Width="18" Height="18">
-                                                        <Ellipse Width="8" Height="8"
-                                                                 Fill="{StaticResource SuccessBrush}"
-                                                                 VerticalAlignment="Center" HorizontalAlignment="Center"
-                                                                 IsVisible="{Binding ShowDot}" />
+                                                        <PathIcon Data="{DynamicResource IconCheck}"
+                                                                  Width="13" Height="13"
+                                                                  Foreground="{StaticResource SuccessBrush}"
+                                                                  VerticalAlignment="Center" HorizontalAlignment="Center"
+                                                                  IsVisible="{Binding ShowTick}" />
                                                         <PathIcon Classes="spin" Data="{DynamicResource IconRefresh}"
                                                                   Width="14" Height="14"
                                                                   Foreground="{StaticResource AccentBrush}"

@@ -8,7 +8,8 @@ using XuLyDonShopee.Core.Services;
 namespace XuLyDonShopee.Tests;
 
 /// <summary>
-/// Cột tiến độ của tab "Kết quả" (chấm tròn shop phiên đang chạy tới + vòng quay khi đang check shop đó).
+/// Cột tiến độ của tab "Kết quả" — MỖI dòng một biểu tượng: vòng quay khi đang check shop đó, dấu tick khi đã
+/// check XONG shop đó trong lượt chạy, để trống khi chưa tới.
 /// Sự kiện <c>AppServices.ShopCheckChanged</c> do phiên cầu nối bắn; test gọi thẳng
 /// <c>RaiseShopCheckChanged</c> nên không cần trình duyệt. Chạy trên thread test (CheckAccess()==true) →
 /// <c>RunOnUi</c> chạy đồng bộ, giống lúc phiên bắn về UI thread.
@@ -40,9 +41,9 @@ public class ShopCheckProgressTests
     private static ShopPrepareRow Row(AccountsViewModel vm, string login)
         => vm.ResultRows.Single(r => r.ShopLogin == login);
 
-    // ===== Bắt đầu check shop A → chấm + vòng quay ở A, B sạch cờ =====
+    // ===== Bắt đầu check shop A → vòng quay ở A (chưa tick), B sạch cờ =====
     [Fact]
-    public void BatDauCheckShopA_ChamVaVongQuayOA()
+    public void BatDauCheckShopA_VongQuayOA_ChuaTick()
     {
         using var temp = new TempDatabase();
         var (services, vm, accountId) = NewVmWith2Shops(temp);
@@ -50,18 +51,18 @@ public class ShopCheckProgressTests
         services.RaiseShopCheckChanged(accountId, LoginA, checking: true);
 
         var a = Row(vm, LoginA);
-        Assert.True(a.IsCurrent);
         Assert.True(a.IsChecking);
-        Assert.False(a.ShowDot); // đang quay thì vòng quay thế chỗ chấm
+        Assert.False(a.DaKiemTra);
+        Assert.False(a.ShowTick); // đang quay thì vòng quay thế chỗ tick
 
         var b = Row(vm, LoginB);
-        Assert.False(b.IsCurrent);
         Assert.False(b.IsChecking);
+        Assert.False(b.ShowTick);
     }
 
-    // ===== Xong shop A → vòng quay TẮT nhưng chấm VẪN Ở LẠI A =====
+    // ===== Xong shop A → vòng quay TẮT, A nhận dấu TICK =====
     [Fact]
-    public void XongShopA_TatVongQuay_ChamVanOLaiA()
+    public void XongShopA_TatVongQuay_AHienTick()
     {
         using var temp = new TempDatabase();
         var (services, vm, accountId) = NewVmWith2Shops(temp);
@@ -70,14 +71,17 @@ public class ShopCheckProgressTests
         services.RaiseShopCheckChanged(accountId, LoginA, checking: false);
 
         var a = Row(vm, LoginA);
-        Assert.True(a.IsCurrent);   // chấm ở lại shop vừa xong
         Assert.False(a.IsChecking); // hết quay
-        Assert.True(a.ShowDot);
+        Assert.True(a.DaKiemTra);
+        Assert.True(a.ShowTick);
+
+        var b = Row(vm, LoginB);
+        Assert.False(b.ShowTick); // B chưa tới → để trống
     }
 
-    // ===== Chỉ khi shop MỚI bắt đầu thì chấm mới chuyển sang shop đó =====
+    // ===== Shop kế bắt đầu → A GIỮ tick (đã kiểm tra), B quay =====
     [Fact]
-    public void BatDauShopB_ChamChuyenTuASangB()
+    public void BatDauShopB_AGiuTick_BQuay()
     {
         using var temp = new TempDatabase();
         var (services, vm, accountId) = NewVmWith2Shops(temp);
@@ -87,12 +91,28 @@ public class ShopCheckProgressTests
         services.RaiseShopCheckChanged(accountId, LoginB, checking: true);
 
         var a = Row(vm, LoginA);
-        Assert.False(a.IsCurrent); // A nhả chấm ĐÚNG lúc B bắt đầu
         Assert.False(a.IsChecking);
+        Assert.True(a.ShowTick); // tick Ở LẠI shop đã kiểm tra xong
 
         var b = Row(vm, LoginB);
-        Assert.True(b.IsCurrent);
         Assert.True(b.IsChecking);
+        Assert.False(b.ShowTick);
+    }
+
+    // ===== Cả 2 shop xong → CẢ HAI cùng có tick (biết đã kiểm tra hết) =====
+    [Fact]
+    public void XongCaHaiShop_CaHaiDeuCoTick()
+    {
+        using var temp = new TempDatabase();
+        var (services, vm, accountId) = NewVmWith2Shops(temp);
+
+        services.RaiseShopCheckChanged(accountId, LoginA, checking: true);
+        services.RaiseShopCheckChanged(accountId, LoginA, checking: false);
+        services.RaiseShopCheckChanged(accountId, LoginB, checking: true);
+        services.RaiseShopCheckChanged(accountId, LoginB, checking: false);
+
+        Assert.True(Row(vm, LoginA).ShowTick);
+        Assert.True(Row(vm, LoginB).ShowTick);
     }
 
     // ===== Sự kiện của TÀI KHOẢN KHÁC → lưới đang mở KHÔNG đổi gì =====
@@ -106,17 +126,19 @@ public class ShopCheckProgressTests
         Assert.NotEqual(accountId, otherId);
 
         services.RaiseShopCheckChanged(otherId, LoginA, checking: true);
+        services.RaiseShopCheckChanged(otherId, LoginA, checking: false);
 
         Assert.All(vm.ResultRows, r =>
         {
-            Assert.False(r.IsCurrent);
             Assert.False(r.IsChecking);
+            Assert.False(r.DaKiemTra);
+            Assert.False(r.ShowTick);
         });
     }
 
-    // ===== BẪY CHÍNH: số đơn cập nhật (LoadResults dựng lại dòng) KHÔNG được làm mất chấm/vòng quay =====
+    // ===== BẪY CHÍNH: số đơn cập nhật (LoadResults dựng lại dòng) KHÔNG được làm mất tick/vòng quay =====
     [Fact]
-    public void LoadResultsKhiSoDonCapNhat_KhongLamMatChamVaVongQuay()
+    public void LoadResultsKhiSoDonCapNhat_KhongLamMatTickVaVongQuay()
     {
         using var temp = new TempDatabase();
         var (services, vm, accountId) = NewVmWith2Shops(temp);
@@ -130,18 +152,17 @@ public class ShopCheckProgressTests
 
         var a = Row(vm, LoginA);
         Assert.Equal(1, a.PreparedCount); // số đã cập nhật
-        Assert.True(a.IsCurrent);         // ... mà cờ tiến độ VẪN còn
-        Assert.True(a.IsChecking);
+        Assert.True(a.IsChecking);        // ... mà cờ tiến độ VẪN còn
 
-        // Xong shop rồi vẫn tiếp tục có lượt nạp lại (đơn của shop kế) → chấm vẫn ở A.
+        // Xong shop rồi vẫn tiếp tục có lượt nạp lại (đơn của shop kế) → tick của A vẫn còn.
         services.RaiseShopCheckChanged(accountId, LoginA, checking: false);
         services.Results.IncrementPrepared(accountId, LoginA, today);
         services.RaisePrepareCountChanged(accountId);
 
         a = Row(vm, LoginA);
         Assert.Equal(2, a.PreparedCount);
-        Assert.True(a.IsCurrent);
         Assert.False(a.IsChecking);
+        Assert.True(a.ShowTick);
     }
 
     // ===== Nhãn phiên gửi là LOGIN, dòng lưới hiển thị TÊN shop khác login → vẫn phải khớp đúng dòng =====
@@ -154,10 +175,10 @@ public class ShopCheckProgressTests
 
         services.RaiseShopCheckChanged(accountId, LoginA, checking: true);
 
-        Assert.True(Row(vm, LoginA).IsCurrent);
+        Assert.True(Row(vm, LoginA).IsChecking);
     }
 
-    // ===== So khớp nhãn: bỏ khoảng trắng thừa + không phân biệt hoa/thường =====
+    // ===== So khớp nhãn: bỏ khoảng trắng thừa + không phân biệt hoa/thường (cả vòng quay LẪN tick) =====
     [Fact]
     public void NhanShopLechHoaThuongVaKhoangTrang_VanKhop()
     {
@@ -166,13 +187,18 @@ public class ShopCheckProgressTests
 
         services.RaiseShopCheckChanged(accountId, "  ALINA99.Store ", checking: true);
 
-        Assert.True(Row(vm, LoginA).IsCurrent);
-        Assert.False(Row(vm, LoginB).IsCurrent);
+        Assert.True(Row(vm, LoginA).IsChecking);
+        Assert.False(Row(vm, LoginB).IsChecking);
+
+        services.RaiseShopCheckChanged(accountId, "  ALINA99.Store ", checking: false);
+
+        Assert.True(Row(vm, LoginA).ShowTick); // tick khớp qua MatchesShopLabel, không so khóa thô
+        Assert.False(Row(vm, LoginB).ShowTick);
     }
 
-    // ===== Đổi sang tài khoản KHÁC (chưa chạy) → lưới của nó không dính chấm của tài khoản đang chạy =====
+    // ===== Đổi sang tài khoản KHÁC (chưa chạy) → lưới của nó không dính tick của tài khoản đang chạy =====
     [Fact]
-    public void DoiSangTaiKhoanKhac_KhongMangChamTheoSang()
+    public void DoiSangTaiKhoanKhac_KhongMangTickTheoSang()
     {
         using var temp = new TempDatabase();
         var (services, vm, accountId) = NewVmWith2Shops(temp);
@@ -182,13 +208,51 @@ public class ShopCheckProgressTests
         services.Results.UpsertShops(otherId, new[] { new ShopListItem("111", "Alina Store1", LoginA) });
 
         services.RaiseShopCheckChanged(accountId, LoginA, checking: true);
+        services.RaiseShopCheckChanged(accountId, LoginA, checking: false);
         vm.SelectedRow = vm.Accounts.Single(r => r.Id == otherId);
 
-        Assert.All(vm.ResultRows, r => Assert.False(r.IsCurrent));
+        Assert.All(vm.ResultRows, r => Assert.False(r.ShowTick));
 
-        // Quay lại tài khoản đang chạy → chấm/vòng quay của NÓ hiện lại.
+        // Quay lại tài khoản đang chạy → tick của NÓ hiện lại.
         vm.SelectedRow = vm.Accounts.Single(r => r.Id == accountId);
-        Assert.True(Row(vm, LoginA).IsCurrent);
-        Assert.True(Row(vm, LoginA).IsChecking);
+        Assert.True(Row(vm, LoginA).ShowTick);
+    }
+
+    // ===== Lượt chạy MỚI (phiên đọc lại danh sách shop) → xóa sạch tick của lượt trước =====
+    [Fact]
+    public void DocLaiDanhSachShop_LuotChayMoi_XoaSachTick()
+    {
+        using var temp = new TempDatabase();
+        var (services, vm, accountId) = NewVmWith2Shops(temp);
+
+        services.RaiseShopCheckChanged(accountId, LoginA, checking: true);
+        services.RaiseShopCheckChanged(accountId, LoginA, checking: false);
+        Assert.True(Row(vm, LoginA).ShowTick);
+
+        // Phiên đọc xong /portal/shop = bắt đầu lặp qua từng shop → lượt mới, tick về trắng.
+        services.RaiseShopListChanged(accountId);
+
+        Assert.All(vm.ResultRows, r =>
+        {
+            Assert.False(r.DaKiemTra);
+            Assert.False(r.ShowTick);
+        });
+    }
+
+    // ===== Quy tắc MỘT biểu tượng mỗi dòng: đang quay thì vòng quay thắng tick =====
+    [Theory]
+    [InlineData(true, false, true)]   // đã kiểm tra, hết quay → tick
+    [InlineData(true, true, false)]   // đã kiểm tra nhưng đang quay lại → vòng quay thắng
+    [InlineData(false, false, false)] // chưa tới → trống
+    [InlineData(false, true, false)]  // đang kiểm tra lần đầu → chỉ vòng quay
+    public void ShowTick_ChiKhiDaKiemTraVaKhongConQuay(bool daKiemTra, bool isChecking, bool mongDoi)
+    {
+        var row = new ShopPrepareRow("Alina Store1", LoginA, 0)
+        {
+            DaKiemTra = daKiemTra,
+            IsChecking = isChecking,
+        };
+
+        Assert.Equal(mongDoi, row.ShowTick);
     }
 }

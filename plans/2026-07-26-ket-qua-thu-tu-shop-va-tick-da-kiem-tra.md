@@ -1,7 +1,7 @@
 # Plan: tab "Kết quả" — thứ tự shop theo subaccount + dấu tick shop đã kiểm tra
 
 - **Ngày:** 2026-07-26
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-dev`)
 
 ## 1. Bối cảnh & mục tiêu
