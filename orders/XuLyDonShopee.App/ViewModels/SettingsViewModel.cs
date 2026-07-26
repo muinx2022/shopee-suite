@@ -145,20 +145,25 @@ public partial class SettingsViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Nút "Lưu" cấu hình Google Sheet: validate URL — cho phép TRỐNG (tắt đồng bộ) hoặc URL bắt đầu bằng
-    /// <c>https://script.google.com/</c> (URL Web App Apps Script). URL khác dạng → báo lỗi qua
-    /// <see cref="GsheetSavedMessage"/>, KHÔNG lưu. Hợp lệ → lưu CẢ URL lẫn tên tab đích (tab để trống → lưu
-    /// trống, Get trả "" = tự động theo tháng). Thông báo hiện ở RIÊNG card GSheet (dọn <see cref="SavedMessage"/>
-    /// của card kia). Lưu xong phản ánh lại giá trị đã chuẩn hóa lên form.
+    /// Nút "Lưu" cấu hình Google Sheet: validate URL qua <see cref="GsheetConfigSync.KiemTraUrl"/> — cho phép
+    /// TRỐNG (tắt đồng bộ) hoặc URL bắt đầu bằng <c>https://script.google.com/</c> (URL Web App Apps Script).
+    /// URL khác dạng → báo lỗi qua <see cref="GsheetSavedMessage"/>, KHÔNG lưu. Hợp lệ → lưu CẢ URL lẫn tên tab
+    /// đích (tab để trống → lưu trống, Get trả "" = tự động theo tháng). Thông báo hiện ở RIÊNG card GSheet (dọn
+    /// <see cref="SavedMessage"/> của card kia). Lưu xong phản ánh lại giá trị đã chuẩn hóa lên form.
+    /// <para>
+    /// LƯU XONG còn ĐẨY cấu hình lên Hub (hook <see cref="AppServices.PushGsheetConfigToHub"/>) để các máy khác
+    /// nhận về — chỉ khi URL KHÁC TRỐNG (máy chưa cấu hình không được xoá cấu hình của cả fleet). Gọi bất đồng bộ,
+    /// KHÔNG chặn UI; hook null (app chạy độc lập / hub chưa cấu hình) → y hành vi cũ, chỉ lưu local.
+    /// </para>
     /// </summary>
     [RelayCommand]
-    private void SaveGsheetUrl()
+    private async Task SaveGsheetUrlAsync()
     {
         var url = GsheetWebAppUrl?.Trim() ?? string.Empty;
-        if (url.Length > 0 &&
-            !url.StartsWith("https://script.google.com/", System.StringComparison.OrdinalIgnoreCase))
+        var loi = GsheetConfigSync.KiemTraUrl(url);
+        if (loi is not null)
         {
-            GsheetSavedMessage = "Link không hợp lệ — phải bắt đầu bằng https://script.google.com/";
+            GsheetSavedMessage = loi;
             SavedMessage = null; // dọn thông báo các card kia
             NotifySavedMessage = null;
             return;
@@ -171,6 +176,27 @@ public partial class SettingsViewModel : ViewModelBase
         GsheetSavedMessage = "Đã lưu cấu hình Google Sheet.";
         SavedMessage = null; // dọn thông báo các card kia
         NotifySavedMessage = null;
+
+        // CHỤP giá trị vào biến cục bộ TRƯỚC await (không đọc lại field mutable sau await).
+        var tab = GsheetTabName;
+        var push = _services.PushGsheetConfigToHub;
+        if (push is null)
+        {
+            return; // app Đơn hàng chạy ĐỘC LẬP / hub chưa cấu hình → y hành vi cũ (chỉ lưu local)
+        }
+        if (!GsheetConfigSync.NenDayLenHub(url))
+        {
+            // URL trống → KHÔNG đẩy (bảo vệ cấu hình của cả fleet), và nói rõ là Hub sẽ áp lại bản của nó.
+            GsheetSavedMessage = "Đã lưu (URL trống = tắt ghi sheet trên máy này; Hub có cấu hình thì máy sẽ tự nhận lại).";
+            return;
+        }
+
+        bool ok;
+        try { ok = await push(url, tab, System.Threading.CancellationToken.None); }
+        catch { ok = false; }   // lỗi mạng/hub → chỉ ảnh hưởng thông báo, bản local ĐÃ lưu
+        GsheetSavedMessage = ok
+            ? "Đã lưu + đồng bộ lên Hub (các máy khác nhận trong ~1 phút)."
+            : "Đã lưu (Hub chưa kết nối — sẽ dùng bản của Hub khi có).";
     }
 
     /// <summary>

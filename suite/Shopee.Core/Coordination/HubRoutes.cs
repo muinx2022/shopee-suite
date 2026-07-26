@@ -81,6 +81,12 @@ public static class HubRoutes
     /// acc/shop; hub gộp KHÔNG XÓA (kẻo lượt pull mirror-xoá acc client vừa thêm).</summary>
     public const string BigSellerUpsert = "/bigseller/upsert";
 
+    // ── Cấu hình DÙNG CHUNG của module Đơn hàng (khối GSheet) ──
+    /// <summary>GET = client kéo cấu hình GSheet dùng chung về; POST = client đẩy bản vừa sửa ở Cài đặt lên.
+    /// CỐ Ý đặt NGOÀI tiền tố <c>config/</c> (đường file) để không dính chặn <c>AllowClientConfigPush</c> —
+    /// đây là đường hợp lệ để client góp cấu hình, như <see cref="BigSellerUpsert"/>.</summary>
+    public const string OrdersConfig = "/orders-config";
+
     // ── Nghiệp vụ đơn hàng ── (prefix /api BẮT BUỘC: tránh AmbiguousMatchException với trang Blazor /shops, /orders)
     public const string Shops = "/api/shops";
     public const string Orders = "/api/orders";

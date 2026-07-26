@@ -136,6 +136,18 @@ public static class ClientApiEndpoints
             return Results.Json(cfg.UpsertBigSellerAccounts(r));
         });
 
+        // ── Cấu hình DÙNG CHUNG module Đơn hàng (khối GSheet) ──
+        // GET: client kéo về (rỗng = hub chưa cấu hình → client GIỮ NGUYÊN bản local, xem GsheetConfigSync).
+        // POST: client vừa sửa ở màn Cài đặt → gộp lên hub, CHỈ field khác trống (không xoá field kia).
+        // KHÔNG bị AllowClientConfigPush chặn (route riêng, ngoài tiền tố config/) — đây là đường hợp lệ để
+        // client góp cấu hình, như /bigseller/upsert.
+        api.MapGet(HubRoutes.OrdersConfig, (FileStoreConfigService cfg) => Results.Json(cfg.Orders()));
+        api.MapPost(HubRoutes.OrdersConfig, (OrdersSharedConfig? r, FileStoreConfigService cfg) =>
+        {
+            if (r is null) return Results.BadRequest();
+            return Results.Json(new { ok = cfg.MergeOrdersConfig(r) });
+        });
+
         // ── Nghiệp vụ đơn hàng ──
         // GET /api/shops → danh sách shop (hub tự đăng ký theo username khi client push).
         api.MapGet(HubRoutes.Shops, (HttpContext ctx, ILoggerFactory lf) =>

@@ -57,6 +57,10 @@ public partial class AccountSession : ObservableObject, IAccountSession
     private volatile string? _currentShopId;
     private volatile string? _currentShopLogin;
 
+    // Cờ chống spam log "chưa cấu hình GSheet": phiên chạy cả buổi, mỗi shop một lượt đẩy sheet → chỉ báo 1 dòng
+    // cho cả phiên là đủ để người dùng thấy máy đang KHÔNG ghi sheet. volatile: lượt đẩy chạy trên thread nền.
+    private volatile bool _daBaoThieuGsheetUrl;
+
     public AccountSession(
         long accountId,
         AppServices services)
@@ -565,6 +569,12 @@ public partial class AccountSession : ObservableObject, IAccountSession
             {
                 log($"Hub: đã đẩy {marked}/{pending.Count} đơn lên hub.");
             }
+            else
+            {
+                // KHÔNG im lặng: hook trả false ngay lô đầu (hub offline/lỗi) trước đây không để lại dấu vết nào
+                // → máy chạy cả buổi mà không đơn nào lên hub vẫn trông như bình thường.
+                log($"Hub: đẩy 0/{pending.Count} đơn — hub không phản hồi, sẽ thử lại lượt sau.");
+            }
         }
         catch (OperationCanceledException)
         {
@@ -821,6 +831,14 @@ public partial class AccountSession : ObservableObject, IAccountSession
 
             if (string.IsNullOrWhiteSpace(url))
             {
+                // KHÔNG im lặng: máy chưa điền URL Web App thì cả buổi không ghi được dòng nào mà không ai hay
+                // (sự cố thật). Chỉ log MỘT lần mỗi phiên — mỗi shop một dòng sẽ rất ồn.
+                if (!_daBaoThieuGsheetUrl)
+                {
+                    _daBaoThieuGsheetUrl = true;
+                    log($"GSheet: chưa cấu hình Web App URL — bỏ qua ghi sheet ({pending.Count} đơn chờ). Điền ở Cài đặt hoặc trên Hub.");
+                }
+
                 // Người dùng chưa dùng GSheet → coi MỌI đơn đã settled (không có nghĩa vụ ghi sheet); KHÔNG return,
                 // vẫn xuống bước dọn đơn kết thúc.
                 foreach (var p in pending)

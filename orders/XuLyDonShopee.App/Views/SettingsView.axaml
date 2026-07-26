@@ -157,6 +157,9 @@
                                 <TextBlock TextWrapping="Wrap" FontSize="11.5" Margin="0,6,0,0"
                                            Foreground="{StaticResource TextMuted}"
                                            Text="Sau mỗi lần Sync đơn hàng, app tự ghi đơn + link phiếu vào Google Sheet. Để trống = tự ghi vào tab &quot;Tháng MM-yyyy&quot; theo tháng hiện tại (script tự tạo tab); điền tên = ghi cố định vào tab đó. Cách lấy link: docs/gsheet-huong-dan-cai-dat.md" />
+                                <TextBlock TextWrapping="Wrap" FontSize="11.5" Margin="0,6,0,0"
+                                           Foreground="{StaticResource TextMuted}"
+                                           Text="Lưu ý: cấu hình này DÙNG CHUNG toàn hệ thống qua Hub — bấm Lưu là đẩy lên Hub và các máy khác nhận theo trong ~1 phút. Ngược lại, sửa trên Hub thì máy này cũng tự nhận (không cần khởi động lại)." />
                             </StackPanel>
 
                             <!-- Lưu link (thông báo RIÊNG của card GSheet) -->

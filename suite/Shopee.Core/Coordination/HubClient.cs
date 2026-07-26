@@ -291,6 +291,22 @@ public sealed class HubClient : IDisposable
         return await r.Content.ReadFromJsonAsync<BigSellerUpsertResult>(ct);
     }
 
+    // ── Cấu hình dùng chung module Đơn hàng (khối GSheet) ──
+    // Dùng _http (control-plane 8s): payload chỉ 2 chuỗi. GET trả null khi hub CŨ chưa có route (404 →
+    // GetFromJsonAsync ném) hoặc body rỗng → caller (HubOrdersConfig) nuốt lỗi và KHÔNG đụng cấu hình local.
+    public async Task<OrdersSharedConfig?> GetOrdersConfigAsync(CancellationToken ct = default)
+        => await _http.GetFromJsonAsync<OrdersSharedConfig>(HubRoutes.OrdersConfig, ct);
+
+    /// <summary>Đẩy cấu hình GSheet của máy này lên hub (hub CHỈ nhận field khác trống, KHÔNG xoá field kia).
+    /// Trả true = hub nhận OK (2xx); lỗi mạng/hub cũ 404 → EnsureSuccessStatusCode ném, caller (hook ở
+    /// OrdersModuleHost) bắt và trả false để màn Cài đặt báo "Hub chưa kết nối".</summary>
+    public async Task<bool> PostOrdersConfigAsync(OrdersSharedConfig cfg, CancellationToken ct = default)
+    {
+        var r = await _http.PostAsJsonAsync(HubRoutes.OrdersConfig, cfg, ct);
+        r.EnsureSuccessStatusCode();
+        return true;
+    }
+
     // ── Đơn hàng: client đẩy lô đơn đã sync của 1 shop lên hub (hub tự đăng ký shop theo username) ──
     // Dùng _bulkHttp (timeout dài): lô đơn 1 lượt sync có thể lớn (nhiều KB JSON qua tunnel).
     public async Task<OrdersPushResult?> PushOrdersAsync(OrdersPushRequest req, CancellationToken ct = default)

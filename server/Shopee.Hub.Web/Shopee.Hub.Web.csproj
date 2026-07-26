@@ -27,10 +27,15 @@
     <Compile Include="..\..\suite\Shopee.Core\Coordination\HubRoutes.cs" Link="Shared\Coordination\HubRoutes.cs" />
     <Compile Include="..\..\suite\Shopee.Core\Coordination\ProductDtos.cs" Link="Shared\Coordination\ProductDtos.cs" />
     <Compile Include="..\..\suite\Shopee.Core\Coordination\OrderDtos.cs" Link="Shared\Coordination\OrderDtos.cs" />
+    <!-- Cấu hình dùng chung của module Đơn hàng (khối GSheet) — hub là nguồn sự thật, client kéo/đẩy qua /orders-config. -->
+    <Compile Include="..\..\suite\Shopee.Core\Coordination\OrdersSharedConfig.cs" Link="Shared\Coordination\OrdersSharedConfig.cs" />
     <!-- Báo "đơn mới" về Slack/Discord/Telegram: helper thuần BCL + POCO đơn — LINK từ module đơn Shopee,
          KHÔNG sửa 2 file gốc (OrderNotifyService cần type SyncedOrder nên link cả hai). -->
     <Compile Include="..\..\orders\XuLyDonShopee.Core\Services\OrderNotifyService.cs" Link="Shared\Notify\OrderNotifyService.cs" />
     <Compile Include="..\..\orders\XuLyDonShopee.Core\Models\SyncedOrder.cs" Link="Shared\Notify\SyncedOrder.cs" />
+    <!-- Luật đồng bộ GSheet (validate URL + quyết định áp bản hub) — LINK để trang /config/orders validate
+         ĐÚNG CÙNG luật với client, khỏi hub nhận URL mà client từ chối. Thuần BCL. -->
+    <Compile Include="..\..\orders\XuLyDonShopee.Core\Services\GsheetConfigSync.cs" Link="Shared\Notify\GsheetConfigSync.cs" />
     <!-- Cổng thao tác kho + exception + LÕI lưới dùng chung — ProductDbDataOps (hub) hiện thực IProductDataOps;
          ProductGridEngine là lõi lưới cho trang /data + tab 📋 Dữ liệu của Fleet. KHÔNG link HubApiProductDataOps:
          adapter-client cần HubClient (chưa link vào hub). -->

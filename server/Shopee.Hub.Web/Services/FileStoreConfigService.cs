@@ -3,6 +3,7 @@ using Shopee.Core.Ai;
 using Shopee.Core.BigSeller;
 using Shopee.Core.Coordination;
 using Shopee.Hub;
+using XuLyDonShopee.Core.Services;
 
 namespace Shopee.Hub.Web.Services;
 
@@ -20,6 +21,9 @@ public sealed class FileStoreConfigService
     public const string AccountsFile = "config/accounts.json";
     public const string AiFile = "config/ai.json";
     public const string KiotProxiesFile = "config/kiot-proxies.json";
+    /// <summary>Cấu hình DÙNG CHUNG của module Đơn hàng (khối Google Sheet) — client kéo/đẩy qua route
+    /// <c>/orders-config</c> (KHÔNG qua PUT /files/config/* nên không dính chặn AllowClientConfigPush).</summary>
+    public const string OrdersFile = "config/orders.json";
 
     /// <summary>Ảnh mặc định DÙNG CHUNG cho luồng Update — 1 file cho cả hệ, client tự kéo về (không phải chọn tay).
     /// Tiền tố <c>images/</c> (KHÔNG phải config/) để né chặn AllowClientConfigPush + ngữ nghĩa JSON. Chữ THƯỜNG
@@ -65,6 +69,37 @@ public sealed class FileStoreConfigService
         if (bytes is null || bytes.Length == 0) return new AiConfig();
         try { return JsonSerializer.Deserialize<AiConfig>(NoBom(bytes), ReadOpts) ?? new AiConfig(); }
         catch { return new AiConfig(); }
+    }
+
+    public OrdersSharedConfig Orders()
+    {
+        var bytes = _db.ReadFile(OrdersFile);
+        if (bytes is null || bytes.Length == 0) return new OrdersSharedConfig();
+        try { return JsonSerializer.Deserialize<OrdersSharedConfig>(NoBom(bytes), ReadOpts) ?? new OrdersSharedConfig(); }
+        catch { return new OrdersSharedConfig(); }
+    }
+
+    /// <summary>Gộp cấu hình GSheet client đẩy lên (endpoint <c>POST /orders-config</c>) theo luật ĐỐI XỨNG với
+    /// chiều kéo — "khối GSheet là MỘT đơn vị" (<see cref="GsheetConfigSync.QuyetDinhNhanBanClient"/>): URL client
+    /// gửi lên RỖNG → KHÔNG ghi gì (máy chưa cấu hình không được xoá cấu hình của cả fleet); URL NON-EMPTY → ghi
+    /// CẢ url LẪN tab, kể cả tab rỗng (= "tự động theo tháng" — nhờ vậy xoá được override từ client). Không có gì
+    /// đổi thật → KHÔNG Save (khỏi bump version làm cả fleet re-pull). Thử lại tối đa 3 lần nếu dính
+    /// version-conflict (máy khác đẩy chen). Trả true = đã lưu / không cần lưu.</summary>
+    public bool MergeOrdersConfig(OrdersSharedConfig incoming)
+    {
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            var cur = Orders();
+            var quyet = GsheetConfigSync.QuyetDinhNhanBanClient(
+                incoming.GsheetWebAppUrl, incoming.GsheetTabName, cur.GsheetWebAppUrl, cur.GsheetTabName);
+            if (!quyet.Ap) return true;   // client rỗng (không đè) hoặc trùng bản đang có → không Save, không bump version
+
+            cur.GsheetWebAppUrl = quyet.Url;
+            cur.GsheetTabName = quyet.Tab;
+            if (Save(OrdersFile, cur, VersionOf(OrdersFile)).Ok) return true;
+            // version-conflict → vòng lặp đọc lại bản mới rồi gộp lại.
+        }
+        return false;
     }
 
     // ── Gộp acc Shopee từ client (endpoint /accounts/append & /accounts/remove) ──

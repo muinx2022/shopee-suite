@@ -1,0 +1,54 @@
+@page "/config/orders"
+@attribute [Authorize(Policy = "Web")]
+@using XuLyDonShopee.Core.Services
+@inject FileStoreConfigService Config
+
+<p class="hint m-hide">Cấu hình ghi Google Sheet DÙNG CHUNG cho mọi máy chạy module Đơn hàng. Máy client tự nhận trong ~1 phút, không cần khởi động lại.</p>
+
+<div class="editcard">
+    <div class="row">
+        <label>URL Web App Google Sheet
+            <input @bind="_cfg.GsheetWebAppUrl" placeholder="https://script.google.com/macros/s/…/exec" />
+        </label>
+        <label>Tab ghi vào (để trống = tự động)
+            <input @bind="_cfg.GsheetTabName" placeholder="Tháng MM-yyyy (tự động)" />
+        </label>
+    </div>
+    <p class="hint">
+        • Tab để trống = tự động ghi vào tab <code>Tháng MM-yyyy</code> theo tháng hiện tại; điền tên = ghi cố định vào tab đó.<br />
+        • Đổi tab CHỈ áp cho đơn CHƯA ghi sheet — đơn cũ vẫn về đúng tab đã ghi lần đầu.<br />
+        • Để trống URL = hub CHƯA cấu hình: các máy client GIỮ NGUYÊN cấu hình sẵn có của chúng (hub rỗng không xoá cấu hình của fleet).<br />
+        • Hai chiều: máy client lưu ở màn Cài đặt cũng đẩy lên đây (bản lưu SAU thắng) — kể cả khi họ xoá ô Tab để về tự động.
+    </p>
+</div>
+
+<div class="bar">
+    <button class="btn primary" @onclick="Save">💾 Lưu</button>
+    <span class="action">@_status</span>
+</div>
+
+@code {
+    private OrdersSharedConfig _cfg = new();
+    private int _version;
+    private string _status = "";
+
+    protected override void OnInitialized() => Load();
+
+    private void Load()
+    {
+        _cfg = Config.Orders();
+        _version = Config.VersionOf(FileStoreConfigService.OrdersFile);
+    }
+
+    /// <summary>Lưu bản đang sửa. Validate URL bằng ĐÚNG luật client dùng (GsheetConfigSync.KiemTraUrl —
+    /// file LINK chung) để hub không nhận URL mà client sẽ từ chối. Chuẩn hoá trim trước khi ghi.</summary>
+    private void Save()
+    {
+        var loi = GsheetConfigSync.KiemTraUrl(_cfg.GsheetWebAppUrl);
+        if (loi is not null) { _status = "✘ " + loi; return; }
+
+        _cfg.GsheetWebAppUrl = (_cfg.GsheetWebAppUrl ?? "").Trim();
+        _cfg.GsheetTabName = (_cfg.GsheetTabName ?? "").Trim();
+        _status = ConfigSave.Apply(Config, FileStoreConfigService.OrdersFile, _cfg, ref _version, Load);
+    }
+}
