@@ -37,7 +37,8 @@
                             <TextBlock Text="Xóa" />
                         </StackPanel>
                     </Button>
-                    <Button Margin="8,0,0,0" Command="{Binding SaveCommand}">
+                    <!-- .primary (icon CAM) — khớp nút "Lưu" bên module Đơn hàng và 6/10 nút Lưu khác của suite. -->
+                    <Button Classes="primary" Margin="8,0,0,0" Command="{Binding SaveCommand}">
                         <StackPanel Orientation="Horizontal" Spacing="7">
                             <PathIcon Data="{DynamicResource IconSave}" />
                             <TextBlock Text="Lưu" />

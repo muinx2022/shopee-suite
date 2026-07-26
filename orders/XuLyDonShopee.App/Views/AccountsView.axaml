@@ -123,59 +123,19 @@
         <!-- (Style panel nhật ký đen: Button.logClear + ListBox.logDark nay ở Styles/Controls.axaml — dùng chung
              với màn Chạy tự động.) -->
 
-        <!-- Hàng nút thao tác của FORM chi tiết: nút ICON + NHÃN CHỮ (vd "✓ Lưu"). Chỉ override KÍCH THƯỚC
-             (cao gọn 34; BỎ Width cố định để nút rộng theo nhãn; đệm ngang cho chữ thở), GIỮ nền/viền theo class
-             màu đi kèm (accent = nền cam, secondary = viền, accentOutline = viền cam) nên KHÔNG đụng ContentPresenter. -->
-        <Style Selector="Button.formIcon">
-            <Setter Property="Height" Value="34" />
-            <Setter Property="MinWidth" Value="0" />
-            <Setter Property="MinHeight" Value="0" />
-            <Setter Property="Padding" Value="10,0" />
-            <Setter Property="FontSize" Value="13" />
-        </Style>
+        <!-- (Style .formIcon đã BỎ: hàng nút Lưu/Hủy của form chi tiết nay dùng ĐÚNG dáng chung của theme —
+             cao 30, chữ 12 — nên không còn override kích thước riêng.) -->
 
-        <!-- Nút "Truy cập TK" trên dòng TK chưa xác nhận: nhỏ, giọng đỏ (nền hồng nhạt + viền đỏ mờ). -->
-        <Style Selector="Button.visitTk">
-            <Setter Property="Height" Value="22" />
-            <Setter Property="MinWidth" Value="0" />
-            <Setter Property="MinHeight" Value="0" />
-            <Setter Property="Padding" Value="8,0" />
-            <Setter Property="FontSize" Value="11" />
-            <Setter Property="FontWeight" Value="SemiBold" />
-            <Setter Property="Foreground" Value="{StaticResource DangerBrush}" />
-            <Setter Property="Cursor" Value="Hand" />
-            <Setter Property="VerticalAlignment" Value="Center" />
-        </Style>
-        <Style Selector="Button.visitTk /template/ ContentPresenter#PART_ContentPresenter">
-            <Setter Property="Background" Value="#FDECEA" />
-            <Setter Property="BorderBrush" Value="#F1B0A8" />
-            <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="CornerRadius" Value="4" />
-        </Style>
-        <Style Selector="Button.visitTk:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-            <Setter Property="Background" Value="#FBDCD6" />
-        </Style>
+        <!-- (Style .visitTk đã BỎ: nút "Truy cập TK" trong dòng danh sách nay là nút VUÔNG chỉ-icon dáng
+             chuẩn — Classes="primary iconOnly" — nên không còn kích thước/màu riêng.) -->
 
-        <!-- Nút lọc "Những TK chưa xác nhận (N)" ở đầu danh sách: link-style đỏ, canh trái, viền mờ. -->
+        <!-- Nút lọc "Những TK chưa xác nhận (N)" ở đầu danh sách: dáng chung (nền trắng + viền), chỉ giữ
+             canh TRÁI + kéo hết bề ngang cột; giọng đỏ nay nằm ở ICON (class .danger — cảnh báo, KHÔNG phải
+             .destructive vì nút này không xóa gì). -->
         <Style Selector="Button.unverifiedFilter">
-            <Setter Property="Height" Value="30" />
-            <Setter Property="MinHeight" Value="0" />
             <Setter Property="Padding" Value="10,0" />
-            <Setter Property="FontSize" Value="12" />
-            <Setter Property="FontWeight" Value="SemiBold" />
-            <Setter Property="Foreground" Value="{StaticResource DangerBrush}" />
             <Setter Property="HorizontalAlignment" Value="Stretch" />
             <Setter Property="HorizontalContentAlignment" Value="Left" />
-            <Setter Property="Cursor" Value="Hand" />
-        </Style>
-        <Style Selector="Button.unverifiedFilter /template/ ContentPresenter#PART_ContentPresenter">
-            <Setter Property="Background" Value="#FDECEA" />
-            <Setter Property="BorderBrush" Value="#F1B0A8" />
-            <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="CornerRadius" Value="4" />
-        </Style>
-        <Style Selector="Button.unverifiedFilter:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-            <Setter Property="Background" Value="#FBDCD6" />
         </Style>
 
         <!-- TabControl chi tiết (Thông tin tài khoản | Kết quả): module chưa có TabControl nào → tự style phẳng gọn
@@ -197,9 +157,11 @@
                 <ControlTemplate>
                     <DockPanel>
                         <Grid DockPanel.Dock="Top" ColumnDefinitions="Auto,*" Margin="24,14,16,12">
-                            <!-- KHAY segmented: nền xám ấm #F2EFEC (tông status-bar của bộ design), bo 10, đệm 4
-                                 để ô đang chọn nổi hẳn lên trên nền khay. -->
-                            <Border Grid.Column="0" Background="#F2EFEC" CornerRadius="10" Padding="4">
+                            <!-- KHAY segmented: nền xám ấm của bộ design (suite gọi token này là NeutralBadgeBg),
+                                 bo 10, đệm 4 để ô đang chọn nổi hẳn lên trên nền khay. Lấy THẲNG token của suite
+                                 như khuôn song sinh bên WorkspaceView để 2 màn không lệch màu. -->
+                            <Border Grid.Column="0" Background="{DynamicResource NeutralBadgeBgBrush}"
+                                    CornerRadius="10" Padding="4">
                                 <ItemsPresenter Name="PART_ItemsPresenter"
                                                 ItemsPanel="{TemplateBinding ItemsPanel}" />
                             </Border>
@@ -294,7 +256,7 @@
                                Margin="0,0,0,16" />
 
                     <!-- Ô tìm kiếm -->
-                    <Border DockPanel.Dock="Top" Classes="field" Height="38" Margin="0,0,0,14">
+                    <Border DockPanel.Dock="Top" Classes="field" Margin="0,0,0,14">
                         <Grid ColumnDefinitions="Auto,*">
                             <TextBlock Grid.Column="0" Text="⌕" FontSize="14"
                                        Foreground="{StaticResource Text9A}"
@@ -306,15 +268,23 @@
                         </Grid>
                     </Border>
 
-                    <!-- Hàng nút dưới -->
+                    <!-- Hàng nút dưới — cặp Thêm/Xóa cùng từ vựng với suite: Thêm = icon XANH (.success),
+                         Xóa = nút vuông icon ĐỎ (.destructive .iconOnly). -->
                     <Grid DockPanel.Dock="Bottom" ColumnDefinitions="*,Auto" Margin="0,14,0,0">
-                        <Button Grid.Column="0" Classes="accent" Height="38"
+                        <Button Grid.Column="0" Classes="success"
                                 HorizontalAlignment="Stretch"
-                                Command="{Binding AddCommand}" Content="+ Thêm tài khoản" />
-                        <Button Grid.Column="1" Classes="iconDanger" Margin="8,0,0,0"
-                                Content="🗑" Command="{Binding DeleteCommand}"
+                                Command="{Binding AddCommand}">
+                            <StackPanel Orientation="Horizontal" Spacing="7">
+                                <PathIcon Data="{DynamicResource IconAdd}" />
+                                <TextBlock Text="Thêm tài khoản" />
+                            </StackPanel>
+                        </Button>
+                        <Button Grid.Column="1" Classes="destructive iconOnly" Margin="8,0,0,0"
+                                Command="{Binding DeleteCommand}"
                                 IsEnabled="{Binding CanDelete}"
-                                ToolTip.Tip="Xóa các tài khoản đang tick — không tick dòng nào thì xóa tài khoản đang chọn. Hỏi xác nhận trước khi xóa." />
+                                ToolTip.Tip="Xóa các tài khoản đang tick — không tick dòng nào thì xóa tài khoản đang chọn. Hỏi xác nhận trước khi xóa.">
+                            <PathIcon Data="{DynamicResource IconDelete}" />
+                        </Button>
                     </Grid>
 
                     <!-- (Hàng nút thao tác nhóm ✓/▶/■/✕ đã BỎ — trùng nhóm "Hành động" trên Ribbon;
@@ -324,11 +294,15 @@
                          vẫn bind cùng property AccountsViewModel.XoaProfileTaoLai nên persist như cũ.) -->
 
                     <!-- Nút lọc "Những TK chưa xác nhận (N)" (ẩn khi N=0 và không đang lọc); đang lọc → "Hiện tất cả". -->
-                    <Button DockPanel.Dock="Top" Classes="unverifiedFilter" Margin="0,0,0,12"
-                            Content="{Binding UnverifiedButtonText}"
+                    <Button DockPanel.Dock="Top" Classes="unverifiedFilter danger" Margin="0,0,0,12"
                             Command="{Binding ToggleShowUnverifiedCommand}"
                             IsVisible="{Binding IsUnverifiedFilterVisible}"
-                            ToolTip.Tip="Lọc danh sách chỉ còn các tài khoản không tự xác minh được (cuối lượt chạy tự động vẫn kẹt ở trang verify/login/captcha)" />
+                            ToolTip.Tip="Lọc danh sách chỉ còn các tài khoản không tự xác minh được (cuối lượt chạy tự động vẫn kẹt ở trang verify/login/captcha)">
+                        <StackPanel Orientation="Horizontal" Spacing="7">
+                            <PathIcon Data="{DynamicResource IconFilter}" />
+                            <TextBlock Text="{Binding UnverifiedButtonText}" />
+                        </StackPanel>
+                    </Button>
 
                     <!-- Danh sách tài khoản: mỗi dòng "[ ] Tên shop" + (khi đang chạy) chấm xanh & số chờ lấy. -->
                     <ListBox Classes="acctFlat"
@@ -367,10 +341,16 @@
                                             <TextBlock Text="TK chưa xác nhận" FontSize="10" FontWeight="SemiBold"
                                                        Foreground="{StaticResource DangerBrush}" VerticalAlignment="Center" />
                                         </Border>
-                                        <!-- Nút "Truy cập TK": chọn acc + tự mở phiên để xác minh tay (code-behind). -->
-                                        <Button IsVisible="{Binding IsVerifyFailed}" Classes="visitTk"
-                                                Content="Truy cập TK" Click="OnTruyCapTkClick"
-                                                ToolTip.Tip="Mở trang bán hàng của tài khoản này để xác minh tay trên cửa sổ Brave" />
+                                        <!-- Nút "Truy cập TK": chọn acc + tự mở phiên để xác minh tay (code-behind).
+                                             CHỈ ICON (nút vuông 30 dáng chuẩn): dòng chỉ rộng ~280px mà đã có
+                                             nhãn đỏ "TK chưa xác nhận"; để thêm chữ thì tên shop bị bóp còn "…".
+                                             Nghĩa của nút nằm ở icon "mở liên kết ngoài" + tooltip. -->
+                                        <Button IsVisible="{Binding IsVerifyFailed}" Classes="primary iconOnly"
+                                                VerticalAlignment="Center"
+                                                Click="OnTruyCapTkClick"
+                                                ToolTip.Tip="Mở trang bán hàng của tài khoản này để xác minh tay trên cửa sổ Brave">
+                                            <PathIcon Data="{DynamicResource IconOpenExternal}" />
+                                        </Button>
                                         <Border Width="6" Height="6" CornerRadius="3"
                                                 VerticalAlignment="Center" Background="{StaticResource SuccessBrush}"
                                                 IsVisible="{Binding IsRunning}" />
@@ -450,7 +430,7 @@
                                             <!-- Tên đăng nhập -->
                                             <StackPanel Grid.Column="0">
                                                 <TextBlock Classes="fieldLabel" Text="Tên đăng nhập" />
-                                                <Border Classes="field" Height="38">
+                                                <Border Classes="field">
                                                     <Grid>
                                                         <TextBox Classes="bare" Margin="12,0"
                                                                  Text="{Binding EditEmail}"
@@ -462,7 +442,7 @@
                                             <!-- Mật khẩu -->
                                             <StackPanel Grid.Column="2">
                                                 <TextBlock Classes="fieldLabel" Text="Mật khẩu" />
-                                                <Border Classes="field" Height="38">
+                                                <Border Classes="field">
                                                     <Grid ColumnDefinitions="*,Auto">
                                                         <TextBox Grid.Column="0" Classes="bare" Margin="12,0,0,0"
                                                                  Text="{Binding EditPassword}"
@@ -472,10 +452,10 @@
                                                                 Command="{Binding ToggleShowPasswordCommand}"
                                                                 ToolTip.Tip="Hiện/ẩn mật khẩu">
                                                             <Panel>
-                                                                <TextBlock Text="👁" FontSize="14"
-                                                                           IsVisible="{Binding !ShowPassword}" />
-                                                                <TextBlock Text="🙈" FontSize="14"
-                                                                           IsVisible="{Binding ShowPassword}" />
+                                                                <PathIcon Data="{DynamicResource IconEye}"
+                                                                          IsVisible="{Binding !ShowPassword}" />
+                                                                <PathIcon Data="{DynamicResource IconEyeOff}"
+                                                                          IsVisible="{Binding ShowPassword}" />
                                                             </Panel>
                                                         </Button>
                                                         <Border Classes="underline" Grid.ColumnSpan="2" />
@@ -511,7 +491,7 @@
                                             <!-- Email xác minh -->
                                             <StackPanel Grid.Column="0">
                                                 <TextBlock Classes="fieldLabel" Text="Email xác minh" />
-                                                <Border Classes="field" Height="38">
+                                                <Border Classes="field">
                                                     <Grid>
                                                         <TextBox Classes="bare" Margin="12,0"
                                                                  Text="{Binding EditVerifyEmail}"
@@ -523,7 +503,7 @@
                                             <!-- Mật khẩu email -->
                                             <StackPanel Grid.Column="2">
                                                 <TextBlock Classes="fieldLabel" Text="Mật khẩu email" />
-                                                <Border Classes="field" Height="38">
+                                                <Border Classes="field">
                                                     <Grid ColumnDefinitions="*,Auto">
                                                         <TextBox Grid.Column="0" Classes="bare" Margin="12,0,0,0"
                                                                  Text="{Binding EditVerifyEmailPassword}"
@@ -533,10 +513,10 @@
                                                                 Command="{Binding ToggleShowVerifyEmailPasswordCommand}"
                                                                 ToolTip.Tip="Hiện/ẩn mật khẩu email">
                                                             <Panel>
-                                                                <TextBlock Text="👁" FontSize="14"
-                                                                           IsVisible="{Binding !ShowVerifyEmailPassword}" />
-                                                                <TextBlock Text="🙈" FontSize="14"
-                                                                           IsVisible="{Binding ShowVerifyEmailPassword}" />
+                                                                <PathIcon Data="{DynamicResource IconEye}"
+                                                                          IsVisible="{Binding !ShowVerifyEmailPassword}" />
+                                                                <PathIcon Data="{DynamicResource IconEyeOff}"
+                                                                          IsVisible="{Binding ShowVerifyEmailPassword}" />
                                                             </Panel>
                                                         </Button>
                                                         <Border Classes="underline" Grid.ColumnSpan="2" />
@@ -570,14 +550,24 @@
                         </StackPanel>
 
                         <!-- Lưu / Hủy — DƯỚI CÙNG form (sau card Địa chỉ lấy hàng), căn TRÁI. Chuyển từ hàng nút
-                             trên xuống theo yêu cầu gom nút; class/Command/tooltip giữ nguyên. -->
+                             trên xuống theo yêu cầu gom nút; Command/tooltip giữ nguyên. Lưu = icon CAM
+                             (.primary), Hủy = icon xám (không class) — cùng cặp với các form bên suite. -->
                         <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,16,0,0">
-                            <Button Classes="accent formIcon" Content="✓ Lưu"
+                            <Button Classes="primary"
                                     Command="{Binding SaveCommand}"
-                                    ToolTip.Tip="Lưu thay đổi" />
-                            <Button Classes="secondary formIcon" Content="↶ Hủy"
-                                    Command="{Binding CancelCommand}"
-                                    ToolTip.Tip="Hủy" />
+                                    ToolTip.Tip="Lưu thay đổi">
+                                <StackPanel Orientation="Horizontal" Spacing="7">
+                                    <PathIcon Data="{DynamicResource IconSave}" />
+                                    <TextBlock Text="Lưu" />
+                                </StackPanel>
+                            </Button>
+                            <Button Command="{Binding CancelCommand}"
+                                    ToolTip.Tip="Hủy">
+                                <StackPanel Orientation="Horizontal" Spacing="7">
+                                    <PathIcon Data="{DynamicResource IconClose}" />
+                                    <TextBlock Text="Hủy" />
+                                </StackPanel>
+                            </Button>
                         </StackPanel>
                     </StackPanel>
                 </ScrollViewer>

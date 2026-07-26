@@ -69,9 +69,9 @@
                   · gõ dở (vd "mex") → HỢP mọi shop có Email CHỨA text, lọc trong bộ nhớ (Enter không cần xử lý riêng —
                     bảng đã lọc sẵn). Không khớp shop nào → 0 dòng.
                  FilterMode=Contains + MinimumPrefixLength=1 chỉ điều khiển DROPDOWN gợi ý; ItemTemplate hiển thị Label.
-                 Nút ✕ overlay (hiện khi có chữ) xóa trắng → về tất cả. Inner TextBox chừa lề phải để chữ không đè nút. -->
+                 Nút xóa overlay (hiện khi có chữ) xóa trắng → về tất cả. Inner TextBox chừa lề phải để chữ không đè nút. -->
             <Grid Grid.Column="0">
-                <AutoCompleteBox Classes="field" Height="38" HorizontalAlignment="Stretch"
+                <AutoCompleteBox Classes="field" HorizontalAlignment="Stretch"
                                  ItemsSource="{Binding AccountOptions}"
                                  Text="{Binding AccountFilterText, Mode=TwoWay}"
                                  ValueMemberBinding="{Binding Label}"
@@ -84,19 +84,23 @@
                         </DataTemplate>
                     </AutoCompleteBox.ItemTemplate>
                 </AutoCompleteBox>
-                <Button Classes="ghostIcon" Width="24" Height="24" Content="✕"
+                <!-- Nút xóa lọc NẰM TRONG ô nhập → giữ dáng .ghostIcon (không viền, 24×24) như nút con mắt
+                     mật khẩu; chỉ đổi ký tự ✕ thành icon dùng chung IconClose. -->
+                <Button Classes="ghostIcon" Width="24" Height="24"
                         HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,6,0"
                         Command="{Binding ClearAccountFilterCommand}"
                         IsVisible="{Binding AccountFilterText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
-                        ToolTip.Tip="Xóa lọc shop — hiện tất cả" />
+                        ToolTip.Tip="Xóa lọc shop — hiện tất cả">
+                    <PathIcon Data="{DynamicResource IconClose}" />
+                </Button>
             </Grid>
 
-            <ComboBox Grid.Column="1" Classes="field" Height="38" HorizontalAlignment="Stretch"
+            <ComboBox Grid.Column="1" Classes="field" HorizontalAlignment="Stretch"
                       Margin="8,0,0,0"
                       ItemsSource="{Binding StatusOptions}"
                       SelectedItem="{Binding SelectedStatus}" />
 
-            <Border Grid.Column="2" Classes="field" Height="38" Margin="8,0,0,0">
+            <Border Grid.Column="2" Classes="field" Margin="8,0,0,0">
                 <Grid>
                     <TextBox Classes="bare" Margin="12,0" Text="{Binding SearchText}"
                              Watermark="Tìm mã đơn / người mua / sản phẩm" />
@@ -104,13 +108,27 @@
                 </Grid>
             </Border>
 
-            <Button Grid.Column="3" Classes="secondary" Height="38" Content="Làm mới"
-                    Margin="8,0,0,0" Command="{Binding RefreshCommand}" />
-            <Button Grid.Column="4" Classes="secondary" Height="38" Content="In nhiều đơn"
-                    Margin="8,0,0,0" Command="{Binding PrintPendingSlipsCommand}"
-                    ToolTip.Tip="In toàn bộ phiếu (PDF) của đơn Chờ lấy hàng trong danh sách đang lọc (mọi trang, không chỉ trang hiện tại)" />
-            <Button Grid.Column="5" Classes="accent" Height="38" Content="Xuất CSV"
-                    Margin="8,0,0,0" Command="{Binding ExportCsvCommand}" />
+            <Button Grid.Column="3" Margin="8,0,0,0" Command="{Binding RefreshCommand}">
+                <StackPanel Orientation="Horizontal" Spacing="7">
+                    <PathIcon Data="{DynamicResource IconRefresh}" />
+                    <TextBlock Text="Làm mới" />
+                </StackPanel>
+            </Button>
+            <!-- "In nhiều đơn" có icon MÁY IN riêng — "In" và "Xuất file" là hai hành động khác nhau nên
+                 KHÔNG dùng chung icon với "Xuất CSV". -->
+            <Button Grid.Column="4" Margin="8,0,0,0" Command="{Binding PrintPendingSlipsCommand}"
+                    ToolTip.Tip="In toàn bộ phiếu (PDF) của đơn Chờ lấy hàng trong danh sách đang lọc (mọi trang, không chỉ trang hiện tại)">
+                <StackPanel Orientation="Horizontal" Spacing="7">
+                    <PathIcon Data="{DynamicResource IconPrint}" />
+                    <TextBlock Text="In nhiều đơn" />
+                </StackPanel>
+            </Button>
+            <Button Grid.Column="5" Classes="primary" Margin="8,0,0,0" Command="{Binding ExportCsvCommand}">
+                <StackPanel Orientation="Horizontal" Spacing="7">
+                    <PathIcon Data="{DynamicResource IconExport}" />
+                    <TextBlock Text="Xuất CSV" />
+                </StackPanel>
+            </Button>
         </Grid>
 
         <!-- Dòng tổng số + thông báo xuất + phân trang (pager BÊN PHẢI) -->
@@ -118,7 +136,7 @@
             <TextBlock Grid.Column="0" Text="{Binding TotalText}" VerticalAlignment="Center"
                        Foreground="{StaticResource Text5A}" />
             <TextBlock Grid.Column="1" Text="{Binding StatusMessage}" HorizontalAlignment="Right"
-                       VerticalAlignment="Center" Margin="8,0" Foreground="#2E7D32" TextWrapping="NoWrap"
+                       VerticalAlignment="Center" Margin="8,0" Foreground="{StaticResource SuccessBrush}" TextWrapping="NoWrap"
                        IsVisible="{Binding StatusMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
 
             <!-- Pager: ‹ Trước · Trang x/y · Sau › · cỡ trang (50/100/200) -->

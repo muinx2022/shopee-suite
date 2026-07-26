@@ -6,9 +6,10 @@
         WindowStartupLocation="CenterOwner"
         Title="Thông tin đơn hàng">
     <Window.Styles>
-        <!-- Nhãn cột trái (xám nhạt) -->
+        <!-- Nhãn cột trái (xám nhạt) — dùng token chữ phụ của theme (xám ẤM) thay vì #757575 xám lạnh;
+             hộp thoại này không merge ModuleResources nên tra token qua DynamicResource của Application. -->
         <Style Selector="TextBlock.lbl">
-            <Setter Property="Foreground" Value="#757575" />
+            <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
             <Setter Property="VerticalAlignment" Value="Top" />
         </Style>
     </Window.Styles>
@@ -57,8 +58,18 @@
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
             <!-- Nút chính: dáng mặc định của theme, KHÔNG tô nền (luật nút 2026-07-26). Trước đây hard-code
                  nền xanh dương #1976D2 — lạc lõng giữa app cam. -->
-            <Button Classes="primary" Content="Lưu" Click="OnSave" />
-            <Button Content="Hủy" Click="OnCancel" />
+            <Button Classes="primary" Click="OnSave">
+                <StackPanel Orientation="Horizontal" Spacing="7">
+                    <PathIcon Data="{DynamicResource IconSave}" />
+                    <TextBlock Text="Lưu" />
+                </StackPanel>
+            </Button>
+            <Button Click="OnCancel">
+                <StackPanel Orientation="Horizontal" Spacing="7">
+                    <PathIcon Data="{DynamicResource IconClose}" />
+                    <TextBlock Text="Hủy" />
+                </StackPanel>
+            </Button>
         </StackPanel>
     </StackPanel>
 </Window>

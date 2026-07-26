@@ -8,10 +8,22 @@
     <StackPanel Margin="20" Spacing="18">
         <TextBlock x:Name="MessageText" TextWrapping="Wrap" FontSize="14" />
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
-            <!-- Nút chính: dáng mặc định của theme, KHÔNG tô nền (luật nút 2026-07-26); class .primary chỉ để
-                 icon (nếu có) lên màu cam. Trước đây hard-code nền xanh dương #1976D2 — lạc lõng giữa app cam. -->
-            <Button x:Name="OkButton" Classes="primary" Content="Đồng ý" Click="OnOk" />
-            <Button x:Name="CancelButton" Content="Hủy" Click="OnCancel" />
+            <!-- Nút chính: dáng mặc định của theme, KHÔNG tô nền (luật nút 2026-07-26); class .primary đưa
+                 icon lên màu cam. Trước đây hard-code nền xanh dương #1976D2 — lạc lõng giữa app cam.
+                 Chế độ chỉ-báo (infoOnly) đổi NHÃN qua OkText (code-behind) chứ không gán lại Content — gán
+                 chuỗi vào Content sẽ thổi bay cả icon. -->
+            <Button x:Name="OkButton" Classes="primary" Click="OnOk">
+                <StackPanel Orientation="Horizontal" Spacing="7">
+                    <PathIcon Data="{DynamicResource IconCheck}" />
+                    <TextBlock x:Name="OkText" Text="Đồng ý" />
+                </StackPanel>
+            </Button>
+            <Button x:Name="CancelButton" Click="OnCancel">
+                <StackPanel Orientation="Horizontal" Spacing="7">
+                    <PathIcon Data="{DynamicResource IconClose}" />
+                    <TextBlock Text="Hủy" />
+                </StackPanel>
+            </Button>
         </StackPanel>
     </StackPanel>
 </Window>

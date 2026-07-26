@@ -43,18 +43,22 @@
                             <StackPanel>
                                 <TextBlock Classes="fieldLabel" Text="Thư mục lưu hóa đơn" />
                                 <Grid ColumnDefinitions="*,8,Auto">
-                                    <Border Grid.Column="0" Classes="field" Height="38">
+                                    <Border Grid.Column="0" Classes="field">
                                         <Grid>
                                             <TextBlock Text="{Binding InvoiceFolder}"
-                                                       FontFamily="{StaticResource MonoFont}" FontSize="13"
+                                                       FontFamily="{StaticResource MonoFont}" FontSize="12.5"
                                                        Foreground="{StaticResource Text5A}"
                                                        TextTrimming="CharacterEllipsis"
                                                        VerticalAlignment="Center" Margin="12,0" />
                                             <Border Classes="underline" />
                                         </Grid>
                                     </Border>
-                                    <Button Grid.Column="2" Classes="secondary" Content="Chọn…"
-                                            Command="{Binding ChooseInvoiceFolderCommand}" />
+                                    <Button Grid.Column="2" Command="{Binding ChooseInvoiceFolderCommand}">
+                                        <StackPanel Orientation="Horizontal" Spacing="7">
+                                            <PathIcon Data="{DynamicResource IconFolder}" />
+                                            <TextBlock Text="Chọn…" />
+                                        </StackPanel>
+                                    </Button>
                                 </Grid>
                                 <TextBlock TextWrapping="Wrap" FontSize="11.5" Margin="0,6,0,0"
                                            Foreground="{StaticResource TextMuted}"
@@ -73,8 +77,12 @@
 
                             <!-- Lưu chu kỳ -->
                             <StackPanel Orientation="Horizontal" Spacing="12">
-                                <Button Classes="accent" Content="Lưu"
-                                        Command="{Binding SaveIntervalCommand}" />
+                                <Button Classes="primary" Command="{Binding SaveIntervalCommand}">
+                                    <StackPanel Orientation="Horizontal" Spacing="7">
+                                        <PathIcon Data="{DynamicResource IconSave}" />
+                                        <TextBlock Text="Lưu" />
+                                    </StackPanel>
+                                </Button>
                                 <TextBlock Text="{Binding SavedMessage}" Foreground="{StaticResource SuccessBrush}" VerticalAlignment="Center"
                                            IsVisible="{Binding SavedMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
                             </StackPanel>
@@ -112,8 +120,12 @@
 
                             <!-- Lưu (thông báo RIÊNG của card Trình duyệt) -->
                             <StackPanel Orientation="Horizontal" Spacing="12">
-                                <Button Classes="accent" Content="Lưu"
-                                        Command="{Binding SaveBrowserCommand}" />
+                                <Button Classes="primary" Command="{Binding SaveBrowserCommand}">
+                                    <StackPanel Orientation="Horizontal" Spacing="7">
+                                        <PathIcon Data="{DynamicResource IconSave}" />
+                                        <TextBlock Text="Lưu" />
+                                    </StackPanel>
+                                </Button>
                                 <TextBlock Text="{Binding BrowserSavedMessage}" Foreground="{StaticResource SuccessBrush}" VerticalAlignment="Center"
                                            TextWrapping="Wrap"
                                            IsVisible="{Binding BrowserSavedMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
@@ -133,7 +145,7 @@
                             <!-- Link Web App Google Sheet -->
                             <StackPanel>
                                 <TextBlock Classes="fieldLabel" Text="Link Web App Google Sheet" />
-                                <Border Classes="field" Height="38">
+                                <Border Classes="field">
                                     <Grid>
                                         <TextBox Classes="bare" Margin="12,0"
                                                  Text="{Binding GsheetWebAppUrl}"
@@ -146,7 +158,7 @@
                             <!-- Tab (sheet) ghi vào -->
                             <StackPanel>
                                 <TextBlock Classes="fieldLabel" Text="Tab ghi vào" />
-                                <Border Classes="field" Height="38" Width="220" HorizontalAlignment="Left">
+                                <Border Classes="field" Width="220" HorizontalAlignment="Left">
                                     <Grid>
                                         <TextBox Classes="bare" Margin="12,0"
                                                  Text="{Binding GsheetTabName}"
@@ -164,8 +176,12 @@
 
                             <!-- Lưu link (thông báo RIÊNG của card GSheet) -->
                             <StackPanel Orientation="Horizontal" Spacing="12">
-                                <Button Classes="accent" Content="Lưu"
-                                        Command="{Binding SaveGsheetUrlCommand}" />
+                                <Button Classes="primary" Command="{Binding SaveGsheetUrlCommand}">
+                                    <StackPanel Orientation="Horizontal" Spacing="7">
+                                        <PathIcon Data="{DynamicResource IconSave}" />
+                                        <TextBlock Text="Lưu" />
+                                    </StackPanel>
+                                </Button>
                                 <TextBlock Text="{Binding GsheetSavedMessage}" Foreground="{StaticResource SuccessBrush}" VerticalAlignment="Center"
                                            TextWrapping="Wrap"
                                            IsVisible="{Binding GsheetSavedMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
@@ -181,7 +197,7 @@
                             <!-- Link webhook (Slack / Discord / Telegram) -->
                             <StackPanel>
                                 <TextBlock Classes="fieldLabel" Text="Link webhook (Slack / Discord / Telegram)" />
-                                <Border Classes="field" Height="38">
+                                <Border Classes="field">
                                     <Grid>
                                         <TextBox Classes="bare" Margin="12,0"
                                                  Text="{Binding NotifyWebhookUrl}"
@@ -196,8 +212,12 @@
 
                             <!-- Lưu link (thông báo RIÊNG của card Thông báo) -->
                             <StackPanel Orientation="Horizontal" Spacing="12">
-                                <Button Classes="accent" Content="Lưu"
-                                        Command="{Binding SaveNotifyUrlCommand}" />
+                                <Button Classes="primary" Command="{Binding SaveNotifyUrlCommand}">
+                                    <StackPanel Orientation="Horizontal" Spacing="7">
+                                        <PathIcon Data="{DynamicResource IconSave}" />
+                                        <TextBlock Text="Lưu" />
+                                    </StackPanel>
+                                </Button>
                                 <TextBlock Text="{Binding NotifySavedMessage}" Foreground="{StaticResource SuccessBrush}" VerticalAlignment="Center"
                                            TextWrapping="Wrap"
                                            IsVisible="{Binding NotifySavedMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />

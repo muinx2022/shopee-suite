@@ -19,7 +19,8 @@ public partial class ConfirmDialog : Window
 
         if (infoOnly)
         {
-            OkButton.Content = "Đóng";
+            // Đổi NHÃN thôi (không gán lại Content — Content nay là icon + nhãn, gán chuỗi sẽ mất icon).
+            OkText.Text = "Đóng";
             CancelButton.IsVisible = false;
         }
     }
