@@ -216,6 +216,46 @@ CREATE TABLE IF NOT EXISTS prepare_daily (
         // `_currentShopLogin` (callback cầu nối set trước khi lưu); đơn cũ NULL (fallback "(shop ?)" khi hiển thị).
         // KHÔNG backfill. Thêm cho DB CŨ.
         EnsureColumn(conn, "orders", "shop_login", "TEXT");
+
+        // Backfill MỘT LẦN: đơn ĐÃ lên hub TRƯỚC bản này có thể thiếu "Số tiền cuối cùng" trên hub — bản cũ chỉ
+        // RESET hub_synced_at khi mã vận đơn vừa xuất hiện, KHÔNG reset khi final_amount vừa lấy được, nên đơn
+        // lên hub ở lượt sync đầu (chưa mở trang chi tiết) hiển thị "—" VĨNH VIỄN dù local đã có số. Đẩy lại các
+        // đơn ĐÃ có final_amount để hub cập nhật (UpsertOrders bên hub idempotent → chỉ ghi đè cùng dữ liệu).
+        BackfillHubFinalAmountOnce(conn);
+    }
+
+    /// <summary>Khoá "đã chạy" của <see cref="BackfillHubFinalAmountOnce"/> trong bảng <c>settings</c>.</summary>
+    private const string BackfillHubFinalAmountKey = "backfill_hub_final_amount_v1";
+
+    /// <summary>
+    /// Xoá cờ <c>hub_synced_at</c> của các đơn đã có <c>final_amount</c> để lượt đẩy hub kế đẩy LẠI (bổ sung
+    /// "Số tiền cuối cùng" cho đơn đã nằm trên hub mà thiếu số). CHẠY ĐÚNG MỘT LẦN — chốt bằng khoá trong bảng
+    /// <c>settings</c>; nếu chạy mỗi lần khởi động thì đơn sẽ bị đẩy lại vô hạn.
+    /// </summary>
+    private static void BackfillHubFinalAmountOnce(SqliteConnection conn)
+    {
+        using (var check = conn.CreateCommand())
+        {
+            check.CommandText = "SELECT 1 FROM settings WHERE key = $k;";
+            check.Parameters.AddWithValue("$k", BackfillHubFinalAmountKey);
+            if (check.ExecuteScalar() is not null)
+            {
+                return;
+            }
+        }
+
+        using (var upd = conn.CreateCommand())
+        {
+            upd.CommandText = @"UPDATE orders SET hub_synced_at = NULL
+WHERE final_amount IS NOT NULL AND hub_synced_at IS NOT NULL;";
+            upd.ExecuteNonQuery();
+        }
+
+        using var mark = conn.CreateCommand();
+        mark.CommandText = "INSERT INTO settings(key, value) VALUES($k, $v) ON CONFLICT(key) DO UPDATE SET value = $v;";
+        mark.Parameters.AddWithValue("$k", BackfillHubFinalAmountKey);
+        mark.Parameters.AddWithValue("$v", DateTime.UtcNow.ToString("O"));
+        mark.ExecuteNonQuery();
     }
 
     /// <summary>

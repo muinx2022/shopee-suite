@@ -140,10 +140,12 @@ public class OrdersRepository
                 // KHÔNG ghi đè NULL làm mất dữ liệu. Lần sau lấy được → cập nhật đè bình thường.
                 // shop_id dùng COALESCE($shopId, shop_id): lượt này không truyền shop (null) thì GIỮ shop đã gắn,
                 // KHÔNG xóa. Đơn thuộc đúng MỘT shop nên gắn lại cùng giá trị là vô hại. shop_login mirror y hệt.
-                // hub_synced_at: mã vận đơn VỪA xuất hiện (tracking_number CŨ NULL → $tracking MỚI có) → RESET về NULL
-                // để lượt đẩy hub kế đẩy LẠI đơn kèm mã (hub chỉ lấy đơn hub_synced_at IS NULL — KHÔNG có re-push
-                // "vận đơn mới" như GSheet; hub UpsertOrders idempotent nên đẩy lại chỉ cập nhật). Trong UPDATE của
-                // SQLite, cột ở vế phải SET là giá trị CŨ → so cũ-NULL với $tracking mới chuẩn.
+                // hub_synced_at: mã vận đơn HOẶC "Số tiền cuối cùng" VỪA xuất hiện (cột CŨ NULL → tham số MỚI có)
+                // → RESET về NULL để lượt đẩy hub kế đẩy LẠI đơn kèm dữ liệu mới (hub chỉ lấy đơn hub_synced_at IS
+                // NULL — KHÔNG có re-push "vận đơn mới" như GSheet; hub UpsertOrders idempotent nên đẩy lại chỉ cập
+                // nhật). Trong UPDATE của SQLite, cột ở vế phải SET là giá trị CŨ → so cũ-NULL với tham số mới chuẩn.
+                // final_amount PHẢI có nhánh riêng: đơn thường lên hub NGAY lượt sync đầu (chưa mở trang chi tiết →
+                // chưa có số tiền cuối cùng); lấy được ở lượt sau mà không reset cờ thì hub hiển thị "—" VĨNH VIỄN.
                 upd.CommandText = @"UPDATE orders SET
     shop_id = COALESCE($shopId, shop_id),
     shop_login = COALESCE($shopLogin, shop_login),
@@ -154,7 +156,8 @@ public class OrdersRepository
     final_amount_text = COALESCE($finalText, final_amount_text),
     payment_method = $payment, status = $status, status_description = $statusDesc, cancel_reason = $cancelReason,
     channel = $channel, carrier = $carrier, tracking_number = $tracking,
-    hub_synced_at = CASE WHEN tracking_number IS NULL AND $tracking IS NOT NULL THEN NULL ELSE hub_synced_at END,
+    hub_synced_at = CASE WHEN (tracking_number IS NULL AND $tracking IS NOT NULL)
+                           OR (final_amount IS NULL AND $finalAmount IS NOT NULL) THEN NULL ELSE hub_synced_at END,
     synced_at = $synced, updated_at = $synced
     WHERE id = $id;";
                 upd.Parameters.AddWithValue("$shopId", (object?)shopId ?? DBNull.Value);

@@ -478,6 +478,45 @@ public class OrdersRepositoryTests
     }
 
     [Fact]
+    public void UpsertMany_SoTienCuoiCungVuaCo_ResetCoDayHub()
+    {
+        using var temp = new TempDatabase();
+        var repo = new OrdersRepository(temp.Open());
+
+        // Lượt 1: đơn lên hub khi CHƯA có "Số tiền cuối cùng" (chưa mở trang chi tiết) — tracking đã có sẵn
+        // để chắc chắn nhánh reset KHÔNG phải do vận đơn.
+        var chuaCoTien = Sample("SN1");
+        chuaCoTien.FinalAmount = null;
+        chuaCoTien.FinalAmountText = null;
+        repo.UpsertMany(1, new[] { chuaCoTien }, DateTime.UtcNow);
+        repo.MarkHubSynced(1, new[] { "SN1" }, DateTime.UtcNow);
+        Assert.Empty(repo.GetForHubPush(1));
+
+        // Lượt 2: lấy được số tiền cuối cùng → PHẢI reset cờ để đẩy LẠI, kẻo hub hiển thị "—" vĩnh viễn.
+        repo.UpsertMany(1, new[] { Sample("SN1") }, DateTime.UtcNow);
+
+        var pending = repo.GetForHubPush(1);
+        Assert.Equal(new[] { "SN1" }, pending.Select(o => o.OrderSn));
+        Assert.Equal(160000, pending[0].FinalAmount);
+    }
+
+    [Fact]
+    public void UpsertMany_SoTienCuoiCungDaCo_KhongResetCoDayHub()
+    {
+        using var temp = new TempDatabase();
+        var repo = new OrdersRepository(temp.Open());
+
+        // Đơn ĐÃ có số tiền cuối cùng ngay từ đầu + đã đẩy hub.
+        repo.UpsertMany(1, new[] { Sample("SN1") }, DateTime.UtcNow);
+        repo.MarkHubSynced(1, new[] { "SN1" }, DateTime.UtcNow);
+
+        // Sync lại (vẫn số tiền đó) → KHÔNG được reset cờ, tránh đẩy lại vô hạn mỗi lượt sync.
+        repo.UpsertMany(1, new[] { Sample("SN1") }, DateTime.UtcNow);
+
+        Assert.Empty(repo.GetForHubPush(1));
+    }
+
+    [Fact]
     public void GetForHubPush_MarkHubSynced_KhongLanTaiKhoanKhac()
     {
         using var temp = new TempDatabase();

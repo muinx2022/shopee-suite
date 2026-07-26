@@ -654,4 +654,63 @@ CREATE TABLE orders (
         Assert.Empty(repo.GetForGsheetPush(41, "SHOP_A"));
         Assert.Single(repo.GetForGsheetPush(41));
     }
+
+    // ===== Backfill "Số tiền cuối cùng" lên hub: đơn ĐÃ lên hub trước bản fix phải được đẩy LẠI một lần =====
+
+    /// <summary>Xoá khoá đánh dấu backfill trong bảng <c>settings</c> → mô phỏng DB CŨ chưa từng chạy backfill.</summary>
+    private static void XoaKhoaBackfill(string path)
+    {
+        var cs = new SqliteConnectionStringBuilder { DataSource = path }.ToString();
+        using var conn = new SqliteConnection(cs);
+        conn.Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "DELETE FROM settings WHERE key = 'backfill_hub_final_amount_v1';";
+        cmd.ExecuteNonQuery();
+    }
+
+    private static SyncedOrder DonCoTienCuoiCung(string sn) => new()
+    {
+        OrderSn = sn,
+        ItemsJson = "[]",
+        TotalPrice = 200000,
+        FinalAmount = 180000,
+        FinalAmountText = "₫180.000",
+        TrackingNumber = "SPXVN1",
+    };
+
+    [Fact]
+    public void Backfill_DonDaLenHubCoTienCuoiCung_DuocDayLai()
+    {
+        using var temp = new TempDatabase();
+        var repo = new OrdersRepository(temp.Open());
+        repo.UpsertMany(7, new[] { DonCoTienCuoiCung("SNBF") }, DateTime.UtcNow);
+        repo.MarkHubSynced(7, new[] { "SNBF" }, DateTime.UtcNow);
+        Assert.Empty(repo.GetForHubPush(7));   // đã lên hub
+
+        // DB CŨ: chưa từng chạy backfill → mở lại app phải reset cờ để đẩy lại kèm số tiền.
+        XoaKhoaBackfill(temp.Path);
+        var repoSauKhiMoLai = new OrdersRepository(temp.Open());
+
+        var pending = repoSauKhiMoLai.GetForHubPush(7);
+        Assert.Equal(new[] { "SNBF" }, pending.Select(o => o.OrderSn));
+        Assert.Equal(180000, pending[0].FinalAmount);
+    }
+
+    [Fact]
+    public void Backfill_ChayDungMotLan_KhongDayLaiVoHan()
+    {
+        using var temp = new TempDatabase();
+        var repo = new OrdersRepository(temp.Open());
+        repo.UpsertMany(7, new[] { DonCoTienCuoiCung("SNBF") }, DateTime.UtcNow);
+
+        // Lần mở lại ĐẦU: backfill chạy (khoá vừa bị xoá) → đẩy lại; đánh dấu đã đẩy.
+        XoaKhoaBackfill(temp.Path);
+        var repo2 = new OrdersRepository(temp.Open());
+        Assert.Single(repo2.GetForHubPush(7));
+        repo2.MarkHubSynced(7, new[] { "SNBF" }, DateTime.UtcNow);
+
+        // Các lần mở lại SAU: khoá đã có → KHÔNG reset nữa (kẻo đẩy lại mỗi lần khởi động).
+        var repo3 = new OrdersRepository(temp.Open());
+        Assert.Empty(repo3.GetForHubPush(7));
+    }
 }
