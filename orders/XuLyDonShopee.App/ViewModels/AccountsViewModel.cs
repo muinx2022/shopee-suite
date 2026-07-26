@@ -52,6 +52,10 @@ public partial class AccountsViewModel : ViewModelBase
         // thread (RunOnUi) trước khi đụng ObservableCollection.
         _services.AccountsChanged += OnAccountsChanged;
 
+        // Vừa chuẩn bị xong 1 đơn → số ở tab "Kết quả" của tài khoản đó vừa tăng trong CSDL. Nghe để nạp lại
+        // NGAY (chỉ khi đúng tài khoản đang mở), thay vì bắt người dùng đổi tài khoản/đổi ngày mới thấy số mới.
+        _services.PrepareCountChanged += OnPrepareCountChanged;
+
         // Nạp cờ "Xóa profile và tạo lại" từ Settings (bền qua restart). Setter tự LƯU nên chặn ghi ngược
         // trong lúc nạp bằng _loadingSettings.
         _loadingSettings = true;
@@ -1099,6 +1103,26 @@ public partial class AccountsViewModel : ViewModelBase
     /// tại (chọn lại theo <c>_editingId</c>/SelectedRow, khôi phục tick theo Id) nên ngữ nghĩa không đổi.
     /// </summary>
     private void OnAccountsChanged() => RunOnUi(Reload);
+
+    /// <summary>
+    /// Số "chuẩn bị hàng" của một tài khoản vừa tăng → nạp lại lưới tab "Kết quả" nếu ĐÚNG tài khoản đang mở.
+    /// Tài khoản khác thì bỏ qua (đang chạy nhiều tk cùng lúc mà nạp hết là phí). Sự kiện đến từ THREAD NỀN của
+    /// phiên → marshal về UI thread trước khi đụng <c>ResultRows</c>.
+    /// <para>Chỉ nạp khi ngày đang lọc là HÔM NAY: số vừa cộng luôn thuộc hôm nay, người dùng đang xem ngày cũ
+    /// thì lưới của họ không đổi — nạp lại chỉ tổ nháy màn.</para>
+    /// </summary>
+    private void OnPrepareCountChanged(long accountId) => RunOnUi(() =>
+    {
+        if (SelectedRow is null || SelectedRow.Id != accountId)
+        {
+            return;
+        }
+        if (ResultDate.Date != DateTimeOffset.Now.Date)
+        {
+            return;
+        }
+        LoadResults();
+    });
 
     /// <summary>
     /// Đồng bộ trạng thái phiên vào mọi dòng đang hiển thị. LUÔN chạy trên UI thread (gọi từ

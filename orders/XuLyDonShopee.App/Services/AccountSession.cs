@@ -798,8 +798,14 @@ public partial class AccountSession : ObservableObject, IAccountSession
                     finalDoneSns: () => _services.Orders.GetOrderSnsWithFinalAmount(_accountId),
                     // Tab "Kết quả": lưu danh sách shop + tăng đếm mỗi đơn arrange theo (tài khoản, shop, ngày yyyy-MM-dd giờ địa phương).
                     onShopListRead: shops => _services.Results.UpsertShops(_accountId, shops),
-                    onOrderPrepared: shopLogin => _services.Results.IncrementPrepared(
-                        _accountId, shopLogin, DateTime.Now.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture)));
+                    onOrderPrepared: shopLogin =>
+                    {
+                        _services.Results.IncrementPrepared(
+                            _accountId, shopLogin, DateTime.Now.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture));
+                        // Báo tab "Kết quả" đang mở tự nạp lại → số nhảy NGAY sau mỗi đơn, không phải đợi
+                        // đổi tài khoản / đổi ngày mới thấy.
+                        _services.RaisePrepareCountChanged(_accountId);
+                    });
                 _bridge = bridge;
                 OrdersBridgeRunResult result;
                 try

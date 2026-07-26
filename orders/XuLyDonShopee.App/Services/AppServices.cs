@@ -133,6 +133,17 @@ public class AppServices
     /// </summary>
     public event Action? AccountsChanged;
 
+    /// <summary>
+    /// Phát khi vừa CHUẨN BỊ HÀNG xong một đơn (số đếm của tab "Kết quả" vừa tăng) — kèm id tài khoản để màn
+    /// "Tài khoản" chỉ nạp lại khi ĐÚNG tài khoản đang mở. Trước đây tab "Kết quả" chỉ đọc lại lúc đổi tài khoản
+    /// / đổi ngày, nên đang chạy thì số đứng im dù CSDL đã cộng ngay. Y như <see cref="OrdersChanged"/>: CỐ Ý bắn
+    /// từ THREAD NỀN của phiên → người nghe PHẢI marshal về UI thread.
+    /// </summary>
+    public event Action<long>? PrepareCountChanged;
+
+    /// <summary>Phiên gọi ngay sau <c>ResultsRepository.IncrementPrepared</c> để tab "Kết quả" tự cập nhật.</summary>
+    public void RaisePrepareCountChanged(long accountId) => PrepareCountChanged?.Invoke(accountId);
+
     /// <summary>Bên ngoài (vd sync shop BigSeller) gọi sau khi Insert tài khoản THÀNH CÔNG để phát <see cref="AccountsChanged"/>.</summary>
     public void RaiseAccountsChanged() => AccountsChanged?.Invoke();
 
