@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Windows.Input;
+using Avalonia;
 using Avalonia.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 
@@ -92,27 +93,47 @@ public sealed partial class RibbonScreenItem : ObservableObject
 }
 
 /// <summary>
-/// Nút HÀNH ĐỘNG trên ribbon (glyph to trên, nhãn dưới): bind thẳng một command CÓ SẴN của ViewModel.
+/// Nút HÀNH ĐỘNG trên ribbon (icon to trên, nhãn dưới): bind thẳng một command CÓ SẴN của ViewModel.
 /// Enable/Disable tự theo CanExecute của command (không chế fallback).
+/// <para>
+/// Icon nhận vào bằng KHÓA tài nguyên (<c>IconStop</c>, <c>IconPlay</c>… — bảng ánh xạ ở đầu
+/// <c>orders/XuLyDonShopee.App/Styles/Icons.axaml</c>) rồi tra sang <see cref="Geometry"/> NGAY lúc dựng.
+/// Phải tra ở C# vì XAML không lồng được <c>{DynamicResource {Binding …}}</c>; dựng ở đây an toàn vì
+/// ShellViewModel chỉ được tạo SAU khi App.axaml đã nạp xong Application.Resources.
+/// </para>
 /// </summary>
 public sealed class RibbonActionItem
 {
-    public RibbonActionItem(string title, string glyph, ICommand command, string? toolTip = null)
+    public RibbonActionItem(string title, string iconKey, ICommand command, string? toolTip = null)
     {
         Title = title;
-        Glyph = glyph;
+        Icon = LookupIcon(iconKey);
         Command = command;
         ToolTip = toolTip;
     }
 
     public string Title { get; }
 
-    /// <summary>Ký tự biểu tượng (glyph/emoji) hiển thị trên nút.</summary>
-    public string Glyph { get; }
+    /// <summary>Hình icon vector đã tra sẵn; null = không tìm thấy khóa (nút vẫn chạy, chỉ thiếu icon).</summary>
+    public Geometry? Icon { get; }
 
     public ICommand Command { get; }
 
     public string? ToolTip { get; }
+
+    /// <summary>Tra khóa tài nguyên → Geometry. Không tìm thấy thì trả null thay vì ném: thiếu icon không
+    /// đáng làm sập cả dải ribbon lúc khởi động.</summary>
+    private static Geometry? LookupIcon(string key)
+    {
+        var app = Application.Current;
+        if (app?.Resources.TryGetResource(key, app.ActualThemeVariant, out var res) == true && res is Geometry g)
+        {
+            return g;
+        }
+        // Tra hụt là lỗi IM LẶNG (nút vẫn bấm được, chỉ mất icon) → để lại dấu vết cho lần sau dò.
+        System.Diagnostics.Trace.WriteLine($"[Ribbon] Không tìm thấy icon '{key}' trong Application.Resources.");
+        return null;
+    }
 }
 
 /// <summary>

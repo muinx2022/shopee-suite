@@ -140,7 +140,7 @@ public sealed partial class ShellViewModel : ObservableObject
                 new RibbonGroup("Màn hình", new object[] { wsWorkspace, wsData, wsSearch, wsAccounts, wsFleet }),
                 new RibbonGroup("Hành động", new object[]
                 {
-                    new RibbonActionItem("Dừng jobs", "■", StopWorkspaceJobsCommand,
+                    new RibbonActionItem("Dừng jobs", "IconStop", StopWorkspaceJobsCommand,
                         "Dừng các việc đang chạy (Scrape · Update · Search)"),
                 }),
             });
@@ -154,9 +154,9 @@ public sealed partial class ShellViewModel : ObservableObject
                 new RibbonGroup("Màn hình", new object[] { bsScreen }),
                 new RibbonGroup("Hành động", new object[]
                 {
-                    new RibbonActionItem("Đăng nhập tất cả", "▶", bigSeller.LoginAllCommand,
+                    new RibbonActionItem("Đăng nhập tất cả", "IconLogin", bigSeller.LoginAllCommand,
                         "Tự đăng nhập headless mọi tài khoản đủ Email + Mật khẩu rồi lưu cookie"),
-                    new RibbonActionItem("Dừng", "■", bigSeller.StopLoginCommand,
+                    new RibbonActionItem("Dừng", "IconStop", bigSeller.StopLoginCommand,
                         "Dừng tiến trình đăng nhập tất cả"),
                 }),
             });
@@ -218,13 +218,13 @@ public sealed partial class ShellViewModel : ObservableObject
             // Giữ tham chiếu để bật/tắt CẢ NHÓM theo màn đang chọn (làm mờ, không ẩn) — xem đoạn nối bên dưới.
             var oActionGroup = new RibbonGroup("Hành động", new object[]
             {
-                new RibbonActionItem("Chọn tất cả", "✓", acc.SelectAllCommand,
+                new RibbonActionItem("Chọn tất cả", "IconCheckAll", acc.SelectAllCommand,
                     "Chọn / bỏ chọn toàn bộ tài khoản đang hiển thị"),
-                new RibbonActionItem("Chạy đã chọn", "▶", acc.RunSelectedCommand,
+                new RibbonActionItem("Chạy đã chọn", "IconPlay", acc.RunSelectedCommand,
                     "Mở + đăng nhập + tự lặp shop cho các tài khoản đang tick"),
-                new RibbonActionItem("Dừng đã chọn", "■", acc.StopSelectedCommand,
+                new RibbonActionItem("Dừng đã chọn", "IconStop", acc.StopSelectedCommand,
                     "Dừng toàn bộ việc đang làm của các tài khoản đang tick"),
-                new RibbonActionItem("Dừng tất cả", "✕", acc.StopAllCommand,
+                new RibbonActionItem("Dừng tất cả", "IconStop", acc.StopAllCommand,
                     "Dừng mọi phiên đang chạy (đóng hết Brave)"),
             });
             var oOptionGroup = new RibbonGroup("Tùy chọn", new object[]
@@ -266,7 +266,7 @@ public sealed partial class ShellViewModel : ObservableObject
             new RibbonGroup("Màn hình", new object[] { setScreen }),
             new RibbonGroup("Hành động", new object[]
             {
-                new RibbonActionItem("Cập nhật & khởi động lại", "⬆", settings.ApplyUpdateCommand,
+                new RibbonActionItem("Cập nhật & khởi động lại", "IconUpgrade", settings.ApplyUpdateCommand,
                     "Áp dụng bản đã tải + mở lại app (chỉ khả dụng khi đã tải xong bản mới)"),
             }),
         });

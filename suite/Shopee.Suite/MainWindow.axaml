@@ -115,8 +115,11 @@
                                                 <Button Classes="ribbon" Command="{Binding Command}"
                                                         ToolTip.Tip="{Binding ToolTip}">
                                                     <StackPanel VerticalAlignment="Center" Spacing="6">
-                                                        <TextBlock Classes="glyph" Text="{Binding Glyph}"
-                                                                   HorizontalAlignment="Center" />
+                                                        <!-- Icon VECTOR (không còn glyph chữ) — cùng bộ với nút
+                                                             trong các form, để "Dừng" ở ribbon và "Dừng" ở form
+                                                             là MỘT icon. Cỡ 21 khớp icon điều hướng bên cạnh. -->
+                                                        <PathIcon Data="{Binding Icon}" Width="21" Height="21"
+                                                                  HorizontalAlignment="Center" />
                                                         <TextBlock Text="{Binding Title}" FontSize="11.5"
                                                                    TextWrapping="Wrap" TextAlignment="Center"
                                                                    HorizontalAlignment="Center" />
