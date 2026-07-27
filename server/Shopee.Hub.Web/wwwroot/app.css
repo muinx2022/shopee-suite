@@ -461,10 +461,30 @@ html.dark .opbtn.run { color: var(--sidebar-ic-active); }
 /* Cụm nút mức tài khoản trên dòng nhóm ("▶ Scrape cả acc"…) */
 table.grid tr.acctrow .acctacts { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-left: 10px; }
 
+/* Thẻ KPI BẤM ĐƯỢC (chỉ thẻ có số > 0) + panel chi tiết xổ ngay dưới hàng KPI.
+   .kpi-btn kế thừa hết .kpi (nền/viền/flex) — ở đây chỉ gỡ mặc định của <button> và thêm trạng thái. */
+.kpi-btn { width: 100%; text-align: left; font-family: inherit; cursor: pointer; transition: border-color .13s, background .13s; }
+.kpi-btn:hover { border-color: var(--primary); }
+.kpi-btn.open { border-color: var(--primary); background: var(--primary-soft); box-shadow: inset 0 0 0 1px var(--primary); }
+.kpi-btn.open .kpi-label { color: var(--primary); font-weight: 600; }
+html.dark .kpi-btn.open .kpi-label { color: var(--sidebar-ic-active); }
+
+.kpipanel { padding: 0 18px 16px; margin: -8px 0 22px; background: var(--gray); border: 1px solid var(--stroke); border-left: 3px solid var(--primary); border-radius: var(--radius); }
+.kpipanel .subhead { margin: 14px 0 10px; }
+.kpipanel .bar { margin: 12px 0 0; }
+/* Lý do lỗi dài (cả câu tiếng Việt) — cho xuống dòng thay vì kéo bảng rộng mãi. min-width để cột không bị
+   bóp còn vài ký tự khi khung hẹp (mỗi lý do thành 5 dòng → hàng cao lêu nghêu). */
+.kpipanel .kpi-why { min-width: 190px; max-width: 340px; overflow-wrap: anywhere; }
+
 /* Màn hẹp: nút bấm-được-bằng-ngón-tay + panel bớt padding.
    Khối này PHẢI nằm SAU khối gốc ở trên: cùng độ đặc hiệu nên rule đứng sau mới thắng. */
 @media (max-width: 920px) {
     .opbtn { min-width: 100px; padding: 8px 11px; }
     .optspanel { padding: 0 13px 13px; }
     .optspanel .optsrow { gap: 10px 12px; }
+    /* Hàng KPI đã thành dải cuộn ngang (flex) ở khối responsive chung → bỏ width:100% của nút, kẻo thẻ
+       phình hết dải. Panel bớt padding; bảng bên trong vẫn cuộn ngang trong .tablewrap của chính nó. */
+    .kpi-btn { width: auto; }
+    .kpipanel { padding: 0 13px 13px; margin-top: 0; }
+    .kpipanel .kpi-why { min-width: 180px; max-width: 240px; }
 }

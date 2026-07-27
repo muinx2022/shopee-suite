@@ -12,24 +12,214 @@
 @inject NavigationManager Nav
 
 <div class="dispatch">
+@* Thẻ KPI có số > 0 = NÚT xổ bảng chi tiết ("đang chạy cái gì, ở đâu"); thẻ số 0 giữ nguyên <div> KHÔNG bấm
+   được (không có gì để xem — render nút rồi disable chỉ tổ mời bấm hụt). *@
 <div class="kpis">
-    <div class="kpi">
-        <div class="kpi-ic green">@HubIcons.Svg("machines", 22)</div>
-        <div><div class="kpi-val">@_kMachines</div><div class="kpi-label">Máy online</div></div>
-    </div>
-    <div class="kpi">
-        <div class="kpi-ic blue">@HubIcons.Svg("run", 22)</div>
-        <div><div class="kpi-val">@_kRunning</div><div class="kpi-label">Việc đang chạy</div></div>
-    </div>
-    <div class="kpi">
-        <div class="kpi-ic amber">@HubIcons.Svg("clock", 22)</div>
-        <div><div class="kpi-val">@_kQueued</div><div class="kpi-label">Việc chờ</div></div>
-    </div>
-    <div class="kpi">
-        <div class="kpi-ic red">@HubIcons.Svg("alert", 22)</div>
-        <div><div class="kpi-val">@_kInterrupted</div><div class="kpi-label">Việc gián đoạn</div></div>
-    </div>
+    @foreach (var c in KpiCards)
+    {
+        var n = KpiCount(c.Key);
+        if (n > 0)
+        {
+            var open = _kpi == c.Key;
+            <button class="kpi kpi-btn @(open ? "open" : "")" @key="c.Key"
+                    title="@(open ? $"Đang xem {n} {c.Label.ToLowerInvariant()} — bấm để đóng." : $"Xem chi tiết {n} {c.Label.ToLowerInvariant()}.")"
+                    @onclick="() => ToggleKpi(c.Key)">
+                <div class="kpi-ic @c.Tone">@HubIcons.Svg(c.Icon, 22)</div>
+                <div>
+                    <div class="kpi-val">@n</div>
+                    <div class="kpi-label">@c.Label@(open ? " ▾" : "")</div>
+                </div>
+            </button>
+        }
+        else
+        {
+            <div class="kpi" @key="c.Key">
+                <div class="kpi-ic @c.Tone">@HubIcons.Svg(c.Icon, 22)</div>
+                <div><div class="kpi-val">@n</div><div class="kpi-label">@c.Label</div></div>
+            </div>
+        }
+    }
 </div>
+
+@* Bảng chi tiết của thẻ đang mở — xổ NGAY DƯỚI hàng KPI, trên hàng tab (không modal: trang đã có .tablewrap
+   cuộn ngang, modal trên mobile thì bí). Mọi cột nói TÊN (shop/tài khoản/máy), không phô GUID. *@
+@if (_kpi.Length > 0)
+{
+    <div class="kpipanel">
+        <div class="subhead">@KpiPanelTitle()</div>
+
+        @if (_kpi == "machines")
+        {
+            <div class="tablewrap">
+            <table class="grid sm">
+                <thead><tr>
+                    <th>Máy</th><th>Chế độ</th><th>Suất</th><th class="m-hide">Quỹ Brave</th>
+                    <th>Số việc</th><th class="m-hide">Bản app</th><th>Nhịp cuối</th><th></th>
+                </tr></thead>
+                <tbody>
+                @foreach (var m in _onlineMachines)
+                {
+                    var orders = m.Kind == MachineSlots.Orders;
+                    var run = _used.GetValueOrDefault(m.MachineId);
+                    var cap = m.MaxBrave > 0 ? m.MaxBrave : DefaultBrave;
+                    <tr @key="m.MachineId">
+                        <td class="acct">@(string.IsNullOrWhiteSpace(m.Hostname) ? Short(m.MachineId) : m.Hostname)</td>
+                        <td>@(string.IsNullOrWhiteSpace(m.Mode) ? "—" : m.Mode)</td>
+                        <td>@(orders ? "Đơn hàng" : "Workspace")</td>
+                        @* Suất đơn hàng KHÔNG claim việc BigSeller → quỹ Brave ở đây vô nghĩa, hiện "—" thay vì số đánh lừa. *@
+                        <td class="m-hide" title="@(orders ? "Suất đơn hàng không nhận việc BigSeller." : "Khung Brave còn trống / trần máy tự báo.")">
+                            @(orders ? "—" : $"{Math.Max(0, cap - run)}/{cap}")
+                        </td>
+                        <td>@run</td>
+                        <td class="m-hide">@(string.IsNullOrWhiteSpace(m.AppVersion) ? "—" : m.AppVersion)</td>
+                        <td>@FleetStateService.Ago(m.LastSeen)</td>
+                        <td>
+                            @if (orders)
+                            {
+                                <span class="stat" title="Suất đơn hàng — không giao việc BigSeller vào đây được.">—</span>
+                            }
+                            else
+                            {
+                                <button class="btn sm" title="Chọn @m.Hostname làm máy nhận việc rồi đóng bảng này."
+                                        @onclick="() => PickMachine(m.MachineId)">→ Chọn máy này</button>
+                            }
+                        </td>
+                    </tr>
+                }
+                @if (_onlineMachines.Count == 0)
+                {
+                    <tr><td colspan="8" class="empty">Không còn máy nào online.</td></tr>
+                }
+                </tbody>
+            </table>
+            </div>
+        }
+        else if (_kpi == "running")
+        {
+            <div class="tablewrap">
+            <table class="grid sm">
+                <thead><tr>
+                    <th>Việc</th><th>Shop</th><th>Tài khoản</th><th>Máy</th><th>Chạy từ</th>
+                    <th class="m-hide">Dải dòng</th><th></th>
+                </tr></thead>
+                <tbody>
+                @foreach (var w in _running)
+                {
+                    <tr @key="w.Key">
+                        <td><span class="pill run">@OpLabel(w.Op)</span></td>
+                        <td class="shop">@w.ShopName</td>
+                        <td class="acct">@w.AcctName</td>
+                        <td>@w.Host</td>
+                        <td>@FleetStateService.Ago(w.Since)</td>
+                        <td class="m-hide">@w.Rows</td>
+                        <td>
+                            @if (w.Manual)
+                            {
+                                <span class="stat" title="Việc chạy TAY (không do hub giao) — hub không huỷ được; dừng bằng nút ■ trong app trên máy @w.Host.">chạy tay</span>
+                            }
+                            else
+                            {
+                                <button class="btn danger sm" @onclick="() => OnWorkCancel(w)"
+                                        title="Huỷ @OpLabel(w.Op) · @w.ShopName trên máy @w.Host (tham số giữ nguyên, ▶ Tiếp tục chạy lại được).">
+                                    @(_confirmWork == w.AsnId ? "Bấm lần nữa để huỷ" : "✖ Huỷ")
+                                </button>
+                            }
+                        </td>
+                    </tr>
+                }
+                @if (_running.Count == 0)
+                {
+                    <tr><td colspan="7" class="empty">Không còn việc nào đang chạy.</td></tr>
+                }
+                </tbody>
+            </table>
+            </div>
+        }
+        else if (_kpi == "queued")
+        {
+            <div class="tablewrap">
+            <table class="grid sm">
+                <thead><tr>
+                    <th>Việc</th><th>Shop</th><th>Tài khoản</th><th>Máy đích</th><th>Xếp lúc</th>
+                    <th class="m-hide">Dải dòng</th><th></th>
+                </tr></thead>
+                <tbody>
+                @foreach (var w in _queued)
+                {
+                    <tr @key="w.Key">
+                        <td><span class="pill queued">@OpLabel(w.Op)</span></td>
+                        <td class="shop">@w.ShopName</td>
+                        <td class="acct">@w.AcctName</td>
+                        <td title="@(w.Host == "—" ? "Việc chờ KHÔNG ghim máy nào — máy nào rảnh đúng vai trò sẽ nhận." : "")">@w.Host</td>
+                        <td>@FleetStateService.Ago(w.Since)</td>
+                        <td class="m-hide">@w.Rows</td>
+                        <td>
+                            <button class="btn danger sm" @onclick="() => OnWorkCancel(w)"
+                                    title="Huỷ @OpLabel(w.Op) · @w.ShopName (tham số giữ nguyên, ▶ Tiếp tục chạy lại được).">
+                                @(_confirmWork == w.AsnId ? "Bấm lần nữa để huỷ" : "✖ Huỷ")
+                            </button>
+                        </td>
+                    </tr>
+                }
+                @if (_queued.Count == 0)
+                {
+                    <tr><td colspan="7" class="empty">Không còn việc nào đang chờ.</td></tr>
+                }
+                </tbody>
+            </table>
+            </div>
+        }
+        else if (_kpi == "interrupted")
+        {
+            <div class="tablewrap">
+            <table class="grid sm">
+                <thead><tr>
+                    <th>Việc</th><th>Shop</th><th>Tài khoản</th><th>Máy cuối</th><th>Lý do</th><th>Lúc</th><th></th>
+                </tr></thead>
+                <tbody>
+                @foreach (var a in Snap.Interrupted)
+                {
+                    var shop = ShopLabel(a.ShopId);
+                    var acct = AcctLabel(a.BigsellerId);
+                    <tr @key="a.Id">
+                        <td><span class="pill warn">@OpLabel(a.Op)</span></td>
+                        <td class="shop" title="@shop.Title">@shop.Text</td>
+                        <td class="acct" title="@acct.Title">@acct.Text</td>
+                        <td>@IntMachine(a)</td>
+                        <td class="kpi-why">@IntReason(a)</td>
+                        <td>@FleetStateService.Ago(a.UpdatedAt)</td>
+                        <td>
+                            <button class="btn primary sm" @onclick="() => OnResume(a)"
+                                    title="Đưa @OpLabel(a.Op) · @shop.Text về hàng chờ để client chạy lại (giữ nguyên tham số).">▶ Tiếp tục</button>
+                        </td>
+                    </tr>
+                }
+                @if (Snap.Interrupted.Count == 0)
+                {
+                    <tr><td colspan="7" class="empty">Không còn việc gián đoạn nào.</td></tr>
+                }
+                </tbody>
+            </table>
+            </div>
+            @* HubDatabase CHỈ có DismissAllInterrupted() (bỏ HẾT) — không có API bỏ TỪNG việc → nút đặt ở CHÂN
+               panel và nói rõ là bỏ tất cả, đúng nút "✕ Bỏ … việc gián đoạn" của trang Fleet. Xác nhận 2 bước. *@
+            @if (Snap.Interrupted.Count > 0)
+            {
+                <div class="bar">
+                    <button class="btn sm" @onclick="OnDismissAll"
+                            title="Bỏ hẳn MỌI việc gián đoạn khỏi danh sách (hub chưa có đường bỏ từng việc) — không tiếp tục lại được từ đây; ledger/thống kê giữ nguyên.">
+                        @(_confirmDismiss ? $"Bấm lần nữa để BỎ HẲN cả {Snap.Interrupted.Count} việc" : $"✕ Bỏ cả {Snap.Interrupted.Count} việc gián đoạn")
+                    </button>
+                </div>
+            }
+        }
+
+        @if (!string.IsNullOrEmpty(_kpiMsg))
+        {
+            <div class="bar"><span class="action">@_kpiMsg</span></div>
+        }
+    </div>
+}
 
 <div class="tabs">
     <button class="@(_tab == "bs" ? "active" : "")" @onclick='() => SetTab("bs")'>🛒 BigSeller — theo shop</button>
@@ -229,6 +419,14 @@ else
     [
         ("todo", "Chưa xong"), ("run", "Đang chạy"), ("int", "Gián đoạn"), ("all", "Tất cả"),
     ];
+    /// <summary>4 thẻ KPI đầu trang, theo thứ tự hiện. <c>Key</c> cũng là giá trị của query <c>?kpi=</c>.</summary>
+    private static readonly (string Key, string Icon, string Tone, string Label)[] KpiCards =
+    [
+        ("machines", "machines", "green", "Máy online"),
+        ("running", "run", "blue", "Việc đang chạy"),
+        ("queued", "clock", "amber", "Việc chờ"),
+        ("interrupted", "alert", "red", "Việc gián đoạn"),
+    ];
     /// <summary>Trần Brave mặc định khi máy chưa báo <c>MaxBrave</c> (0 = CHƯA BÁO, không phải "không có quỹ").</summary>
     private const int DefaultBrave = 2;
     private const string WaitingStatus = "Chờ lấy hàng";
@@ -246,6 +444,13 @@ else
         string MachineId, string Hostname, bool Online, int Free, int Running, string Version, DateTimeOffset LastSeen,
         string Mode);
 
+    /// <summary>Một dòng bảng chi tiết KPI "đang chạy" / "đang chờ": việc gì · shop nào · máy nào · từ lúc nào.
+    /// <c>Manual</c> = việc chạy TAY trên app client (chỉ có lease, KHÔNG có assignment) → hub không huỷ được,
+    /// <c>AsnId</c> rỗng. Tên shop/tài khoản đã tra sẵn ở đây để markup khỏi đụng GUID.</summary>
+    private sealed record WorkItem(
+        string Key, string AsnId, string Op, string ShopName, string AcctName, string Host,
+        DateTimeOffset Since, string Rows, bool Manual);
+
     /// <summary>Trạng thái 1 nút hành động trên lưới. <c>Act</c> = việc nút làm khi bấm: "" = KHÔNG bấm được
     /// (render kèm thuộc tính <c>disabled</c>), "run" = tạo assignment, "cancel" = huỷ assignment đang mở.</summary>
     private sealed record OpBtn(string Label, string Act, string Css, string Title)
@@ -261,6 +466,20 @@ else
     private List<Row> _visible = new();
     private int _hiddenNoSheet;
     private int _kMachines, _kRunning, _kQueued, _kInterrupted;
+    // Tên tài khoản / shop theo GUID — dựng từ TOÀN BỘ config (kể cả shop chưa gán ngăn dữ liệu, tức không có
+    // trong _rows) vì Snap.Interrupted có thể trỏ tới shop như vậy. Id không tra được → Short() + title đầy đủ.
+    private Dictionary<string, string> _acctNames = new(StringComparer.Ordinal);
+    private Dictionary<string, string> _shopNames = new(StringComparer.Ordinal);
+
+    // ── Bảng chi tiết của thẻ KPI đang mở ──
+    // Dựng CÙNG một lượt quét với 3 số KPI (xem RecomputeKpis) → số trên thẻ LUÔN bằng số dòng bảng.
+    private List<WorkItem> _running = new(), _queued = new();
+    private List<MachinePresence> _onlineMachines = new();
+    private string _kpi = "";           // "" = đóng; còn lại là Key trong KpiCards (cũng nằm trong URL ?kpi=)
+    private string _kpiMsg = "";        // kết quả ngắn của hành động vừa bấm trong panel
+    private string _confirmWork = "";   // id assignment đang chờ bấm-lần-nữa để huỷ (rỗng = không có)
+    private bool _confirmDismiss;       // arm 2-bước nút "Bỏ cả N việc gián đoạn"
+    private int _kpiEmptyTicks;         // số nhịp fleet liên tiếp panel đang mở mà KPI = 0 (2 nhịp → tự đóng)
 
     // ── Bộ lọc (đều nằm trong URL) ──
     private string _tab = "bs";
@@ -277,6 +496,9 @@ else
 
     private List<MachineBudget> _budgets = new();
     private Dictionary<string, string> _holds = new(StringComparer.Ordinal);
+    /// <summary>Số việc hub-giao đang chạy/chờ gắn từng máy (khoá = machineId) — BuildBudgets tính 1 lần, cả
+    /// hàng thẻ chọn máy lẫn bảng "Máy online" đọc lại.</summary>
+    private Dictionary<string, int> _used = new(StringComparer.Ordinal);
 
     // ── Tab Đơn hàng (read-only) ──
     private List<AccountLease> _orderLeases = new();
@@ -298,6 +520,7 @@ else
     {
         if ((DateTimeOffset.UtcNow - _staticLoadedAt).TotalSeconds > 10) ReloadStatic();
         Rebuild();
+        SyncKpiPanel();   // CHỈ ở đây, KHÔNG trong Rebuild(): hàm này navigate được, mà Rebuild còn chạy lúc prerender
     }
 
     /// <summary>Đọc nguồn CHẬM (file config) — tối đa mỗi 10s, khỏi đọc mỗi nhịp 2s.</summary>
@@ -323,9 +546,13 @@ else
     {
         var rows = new List<Row>();
         var hidden = 0;
+        _acctNames = _accounts.GroupBy(a => a.Id, StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.First().DisplayName, StringComparer.Ordinal);
+        _shopNames = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var acct in _accounts)
         foreach (var shop in acct.Shops)
         {
+            _shopNames[shop.Id] = shop.DisplayName;
             if (string.IsNullOrWhiteSpace(shop.ShopeeDataSheet)) { hidden++; continue; }
             rows.Add(new Row
             {
@@ -399,6 +626,7 @@ else
             if (mid.Length == 0) continue;
             used[mid] = used.GetValueOrDefault(mid) + 1;
         }
+        _used = used;
         _budgets = Snap.Machines
             // CHỈ suất Workspace: suất đơn hàng KHÔNG claim việc BigSeller (hub cũng chặn cứng ở ClaimNext/
             // CreateAssignment) → hiện ra chỉ tổ giao nhầm rồi việc nằm chờ mãi.
@@ -450,20 +678,190 @@ else
         return map;
     }
 
+    /// <summary>Số 4 thẻ KPI + DÒNG của 4 bảng chi tiết, dựng trong CÙNG một lượt: mỗi số là <c>Count</c> của
+    /// đúng danh sách mà bảng đó vẽ ra, nên thẻ không bao giờ nói một đằng bảng một nẻo. Cụ thể "đang chạy" vẫn
+    /// quét theo Ô LƯỚI (giữ nguyên ý nghĩa số cũ) — mà ô lưới ⏳ có thể do LEASE (việc chạy TAY, không có
+    /// assignment) → những việc đó vẫn hiện trong bảng, đánh dấu <c>Manual</c> thay vì bị giấu đi.</summary>
     private void RecomputeKpis()
     {
-        _kMachines = Snap.Machines.Count(m => (DateTimeOffset.Now - m.LastSeen).TotalSeconds < 45);
-        int running = 0, queued = 0;
+        _onlineMachines = Snap.Machines
+            .Where(m => (DateTimeOffset.Now - m.LastSeen).TotalSeconds < 45)
+            .OrderBy(m => m.Kind == MachineSlots.Orders)   // suất workspace (giao việc được) lên trước
+            .ThenBy(m => m.Hostname, StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
+        _kMachines = _onlineMachines.Count;
+
+        var running = new List<WorkItem>();
+        var queued = new List<WorkItem>();
         foreach (var r in _rows)
         foreach (var op in DispatchOps)
         {
             var k = Cell(r, op).Kind;
-            if (k == 1) running++; else if (k == 2) queued++;
+            if (k == 1) running.Add(RunningItem(r, op));
+            else if (k == 2 && OpenAsn(r, op) is { Status: "queued" } asn) queued.Add(QueuedItem(r, op, asn));
         }
-        _kRunning = running;
-        _kQueued = queued;
+        _running = running;
+        _queued = queued;
+        _kRunning = running.Count;
+        _kQueued = queued.Count;
         _kInterrupted = Snap.Interrupted.Count;
+
+        // Dòng đang chờ bấm-lần-nữa mà đã rơi khỏi bảng (nhịp fleet 2s) → huỷ chờ, kẻo cú bấm thứ 2 trúng việc
+        // khác — đúng lỗi đã phải vá cho cụm nút "cả acc".
+        if (_confirmWork.Length > 0
+            && !running.Any(w => w.AsnId == _confirmWork) && !queued.Any(w => w.AsnId == _confirmWork))
+            _confirmWork = "";
+        if (_confirmDismiss && _kInterrupted == 0) _confirmDismiss = false;
     }
+
+    /// <summary>Dòng "đang chạy" của ô (shop, op). Nguồn thật của ô ⏳ theo đúng thứ tự OpCell xét: lease tươi
+    /// (chạy tay HOẶC hub-giao) trước, rồi assignment 'running'. Không có assignment ⇒ việc chạy TAY.</summary>
+    private WorkItem RunningItem(Row r, string op)
+    {
+        // CHỈ nhận lease còn nhịp: bảng leases không xoá khi client chết, nên bản CHẾT của lượt chạy hôm qua
+        // vẫn nằm đó — lấy AcquiredAt của nó thì "Chạy từ" báo "1 ngày trước" cho việc vừa khởi động.
+        // 120s = đúng ngưỡng FleetStateService dùng để quyết ô có còn ⏳ hay không.
+        var lease = Snap.Leases.FirstOrDefault(l => l.Key == LedgerKey(r, op)
+            && (DateTimeOffset.Now - l.HeartbeatAt).TotalSeconds < 120);
+        var asn = Snap.Assignments.FirstOrDefault(a =>
+            a.BigsellerId == r.AccountId && a.ShopId == r.ShopId && a.Op == op && a.Status == "running");
+        // "Chạy từ": lease.AcquiredAt là mốc bắt đầu THẬT; assignment.UpdatedAt bị nhịp 'running' đẩy liên tục
+        // nên vô dụng ở đây → cạn lease thì lấy CreatedAt (lúc xếp việc).
+        var since = lease is not null ? lease.AcquiredAt : asn?.CreatedAt ?? default;
+        var host = asn is not null
+            ? HostLabel(asn.ClaimedByMachineId, asn.ClaimedByHostname)
+            : HostLabel(lease?.MachineId ?? "", lease?.Hostname ?? "");
+        return new WorkItem(
+            LedgerKey(r, op), asn?.Id ?? "", op, r.ShopName, r.AccountName, host, since,
+            RowRange(asn?.StartRow ?? 0, asn?.EndRow ?? 0), Manual: asn is null);
+    }
+
+    private WorkItem QueuedItem(Row r, string op, Assignment asn) => new(
+        LedgerKey(r, op), asn.Id, op, r.ShopName, r.AccountName,
+        // Máy đích rỗng = việc chờ KHÔNG ghim máy nào (bản cũ / điều phối tự động theo vai trò).
+        string.IsNullOrEmpty(asn.TargetMachineId) ? "—" : HostLabel(asn.TargetMachineId, ""),
+        asn.CreatedAt, RowRange(asn.StartRow, asn.EndRow), Manual: false);
+
+    // ── Bảng chi tiết KPI: nhãn + hành động ───────────────────────────────────────
+    private int KpiCount(string key) => key switch
+    {
+        "machines" => _kMachines, "running" => _kRunning, "queued" => _kQueued,
+        "interrupted" => _kInterrupted, _ => 0,
+    };
+
+    private string KpiPanelTitle() => _kpi switch
+    {
+        "machines" => $"🖥 Máy online ({_kMachines})",
+        "running" => $"▶ Việc đang chạy ({_kRunning})",
+        "queued" => $"⏳ Việc chờ ({_kQueued})",
+        "interrupted" => $"⚠ Việc gián đoạn ({_kInterrupted})",
+        _ => "",
+    };
+
+    // Bấm lại đúng thẻ đang mở = đóng.
+    private void ToggleKpi(string key)
+    {
+        _kpi = _kpi == key ? "" : key;
+        _kpiMsg = "";
+        _confirmWork = "";
+        _confirmDismiss = false;
+        _kpiEmptyTicks = 0;
+        UpdateUrl();
+    }
+
+    /// <summary>Panel đang mở mà KPI về 0 (vừa huỷ hết): nhịp này còn hiện dòng "không còn việc nào" cho người
+    /// dùng biết chuyện gì vừa xảy ra, nhịp sau tự đóng — thẻ 0 không bấm được nên không tự đóng thì panel kẹt.</summary>
+    private void SyncKpiPanel()
+    {
+        if (_kpi.Length == 0 || KpiCount(_kpi) > 0) { _kpiEmptyTicks = 0; return; }
+        if (++_kpiEmptyTicks < 2) return;
+        _kpi = "";
+        _kpiMsg = "";
+        _kpiEmptyTicks = 0;
+        UpdateUrl();
+    }
+
+    /// <summary>"→ Chọn máy này" ở bảng Máy online: ĐẶT máy đang chọn (khác <see cref="SelectMachine"/> — hàm đó
+    /// bấm-lại-là-bỏ-chọn) rồi đóng panel để mắt về thẳng lưới shop bên dưới.</summary>
+    private void PickMachine(string machineId)
+    {
+        _selMachine = machineId;
+        _selHost = HostName(machineId);
+        _confirmAcct = "";
+        _result = "";
+        _machineMsg = "";
+        _kpi = "";
+        _kpiMsg = "";
+        _kpiEmptyTicks = 0;
+        UpdateUrl();
+    }
+
+    // Huỷ là thao tác một chiều → xác nhận 2 bước (bấm lần nữa), giống cụm nút "cả acc".
+    private void OnWorkCancel(WorkItem w)
+    {
+        if (w.Manual || w.AsnId.Length == 0) return;   // việc chạy tay: hub không có gì để huỷ
+        if (_confirmWork != w.AsnId) { _confirmWork = w.AsnId; _kpiMsg = ""; return; }
+        _confirmWork = "";
+        Db.CancelAssignment(w.AsnId);
+        _kpiMsg = $"✖ Đã huỷ {OpLabel(w.Op)} · {w.ShopName} (tham số giữ nguyên — ▶ Tiếp tục để chạy lại).";
+        FleetState.Refresh();
+    }
+
+    // Tiếp tục KHÔNG cần xác nhận: chỉ đưa việc về hàng chờ, không mất gì.
+    private void OnResume(Assignment a)
+    {
+        var shop = ShopLabel(a.ShopId).Text;
+        _kpiMsg = Db.ResumeAssignment(a.Id) is { } err
+            ? $"✘ {OpLabel(a.Op)} · {shop}: {err}"
+            : $"▶ Đã cho {OpLabel(a.Op)} · {shop} chạy lại (về hàng chờ).";
+        FleetState.Refresh();
+    }
+
+    // Hub chỉ có DismissAllInterrupted() (không có API bỏ TỪNG việc) → nút này bỏ HẾT, y nút cùng tên trên Fleet.
+    private void OnDismissAll()
+    {
+        if (!_confirmDismiss) { _confirmDismiss = true; _kpiMsg = ""; return; }
+        _confirmDismiss = false;
+        _kpiMsg = $"✕ Đã bỏ {Db.DismissAllInterrupted()} việc gián đoạn khỏi danh sách.";
+        FleetState.Refresh();
+    }
+
+    // Máy cuối của việc gián đoạn: hostname đã claim (failed), fallback máy đích (canceled lúc còn queued chỉ có target).
+    private string IntMachine(Assignment a) =>
+        !string.IsNullOrWhiteSpace(a.ClaimedByHostname) ? a.ClaimedByHostname
+        : (!string.IsNullOrEmpty(a.TargetMachineId) ? HostLabel(a.TargetMachineId, "") : "—");
+
+    private static string IntReason(Assignment a) =>
+        !string.IsNullOrWhiteSpace(a.LastError) ? a.LastError : (a.Status == "canceled" ? "đã huỷ" : "lỗi");
+
+    /// <summary>Tên máy đọc được: ưu tiên hostname máy đang báo nhịp, rồi hostname đóng dấu lúc claim; cạn cả hai
+    /// thì id rút gọn. KHÔNG bao giờ trả rỗng — cột Máy trống là dòng vô dụng với người vận hành.</summary>
+    private string HostLabel(string machineId, string storedHost)
+    {
+        if (machineId.Length > 0
+            && Snap.Machines.FirstOrDefault(x => x.MachineId == machineId) is { } m
+            && !string.IsNullOrWhiteSpace(m.Hostname)) return m.Hostname;
+        if (!string.IsNullOrWhiteSpace(storedHost)) return storedHost;
+        return machineId.Length > 0 ? Short(machineId) : "—";
+    }
+
+    /// <summary>Tên tài khoản / shop từ GUID cho bảng gián đoạn (nguồn <c>Snap.Interrupted</c> có thể trỏ tới
+    /// shop đã xoá khỏi cấu hình). Tra được → tên, Title rỗng; không tra được → id rút gọn + Title là id đầy đủ.</summary>
+    private (string Text, string Title) AcctLabel(string id) => NameLabel(_acctNames, id);
+    private (string Text, string Title) ShopLabel(string id) => NameLabel(_shopNames, id);
+
+    private static (string Text, string Title) NameLabel(Dictionary<string, string> map, string id)
+    {
+        if (id.Length == 0) return ("—", "");
+        return map.TryGetValue(id, out var name) ? (name, "") : (Short(id), "Không còn trong cấu hình · id " + id);
+    }
+
+    private static string Short(string id) => id.Length <= 12 ? id : id[..8] + "…";
+
+    /// <summary>Khoảng dòng hub đặt cho lượt chạy; 0 = dùng cấu hình của client (hiện "—", không phải "0–0").</summary>
+    private static string RowRange(int start, int end) => start <= 0 && end <= 0
+        ? "—"
+        : $"{(start > 0 ? start.ToString() : "đầu")}–{(end > 0 ? end.ToString() : "cuối")}";
 
     private void ReloadOrders()
     {
@@ -665,7 +1063,7 @@ else
         UpdateUrl();
     }
 
-    // ── View-state ↔ URL query (?tab=&f=&acct=&mach=&q=) — F5 / chia sẻ link giữ nguyên ──
+    // ── View-state ↔ URL query (?tab=&f=&acct=&mach=&q=&kpi=) — F5 / chia sẻ link giữ nguyên ──
     private bool _restored;      // cờ once: chỉ khôi phục lúc init, KHÔNG re-restore mỗi tick
     private bool _suppressUrl;   // chặn ghi URL trong lúc restore
 
@@ -679,6 +1077,7 @@ else
             ("acct", _fAcct),
             ("mach", _selMachine),
             ("q",    _fQuery.Trim()),
+            ("kpi",  _kpi),
         };
         var q = QueryHelpers.ParseQuery(new Uri(Nav.Uri).Query);
         string cur(string k) => q.TryGetValue(k, out var v) ? v.ToString() : "";
@@ -711,6 +1110,8 @@ else
                 _selHost = HostName(mach);
             }
             _fQuery = get("q");
+            var kpi = get("kpi");
+            if (KpiCards.Any(c => c.Key == kpi)) _kpi = kpi;
             Rebuild();
             if (_tab == "orders") ReloadOrders();
         }
