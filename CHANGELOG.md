@@ -5,6 +5,17 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Hiệu năng. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.6.7 — 2026-07-27
+
+- **Điều khiển Đơn hàng từ Hub:** trang Giao việc trên Hub có tab **Đơn hàng** làm việc theo đúng lối của tab
+  BigSeller — chọn máy, thấy danh sách **tài khoản Shopee của máy đó**, bấm **▶ Chạy** / **✖ Dừng** ngay trên dòng
+  tài khoản, khỏi phải ra tận máy. Shop con nằm dưới tài khoản của nó (bung ra xem đơn chờ + lần sync cuối), không
+  còn đổ phẳng mọi shop của mọi tài khoản vào một bảng.
+  *Để Hub thấy được, mỗi máy tự đẩy lên danh bạ tài khoản + shop + trạng thái phiên — **không đẩy mật khẩu, cookie
+  hay hòm thư xác minh**; Hub chỉ soi và ra lệnh, tài khoản vẫn nằm ở máy.*
+  Tài khoản đang chạy ở máy khác thì nút Chạy khoá lại kèm tên máy đang giữ (một tài khoản chỉ chạy một máy).
+  Hai nút *Đồng bộ một lượt* và *Đăng nhập lại* tạm khoá — bản client hiện chưa có điểm vào cho hai lệnh này.
+
 ## v1.6.6 — 2026-07-27
 
 - **Dừng hẳn khi key proxy hết hạn, thay vì âm thầm bỏ dòng:** trước đây key KiotProxy hết hạn thì mọi tài khoản
