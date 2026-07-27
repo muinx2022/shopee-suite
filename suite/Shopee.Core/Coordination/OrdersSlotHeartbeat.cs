@@ -25,6 +25,12 @@ public sealed class OrdersSlotHeartbeat : IUpdateAckSink, IDisposable
     /// <summary>Id suất này gửi lên Hub (<c>&lt;id-máy&gt;:orders</c>) — cũng là khoá dòng máy trên Hub.</summary>
     public string MachineId => _slotId;
 
+    /// <summary>Hook LỆNH Hub giao cho suất đơn hàng (▶ Chạy / ✖ Dừng một tài khoản) — suite gán lúc khởi động
+    /// (về <c>OrdersModuleHost</c>); bắn từ <see cref="BeatAsync"/> khi phản hồi heartbeat mang lệnh. Handler
+    /// TỰ dedup theo <see cref="OrdersCommandDto.Id"/>, TỰ ack và KHÔNG được block nhịp — y khuôn
+    /// <see cref="HttpCoordinationHub.UpdateRequested"/> (static vì nhịp chạy NỀN, không có context để bám).</summary>
+    public static Action<IReadOnlyList<OrdersCommandDto>>? CommandsReceived { get; set; }
+
     public OrdersSlotHeartbeat(HubClient client, string hostId)
     {
         _client = client;
@@ -49,6 +55,11 @@ public sealed class OrdersSlotHeartbeat : IUpdateAckSink, IDisposable
             var reqAt = resp?.UpdateRequestedAt;
             if (!string.IsNullOrEmpty(reqAt))
                 try { HttpCoordinationHub.UpdateRequested?.Invoke(this, reqAt); } catch { }
+            // Lệnh chạy/dừng tài khoản Đơn hàng: Hub đánh dấu 'sent' ngay khi trả về nên nhịp sau KHÔNG nhận lại —
+            // nhưng mạng chập chờn vẫn có thể làm lượt này lặp, handler phải tự dedup theo Id (xem CommandsReceived).
+            var cmds = resp?.OrdersCommands;
+            if (cmds is { Count: > 0 })
+                try { CommandsReceived?.Invoke(cmds); } catch { }
         }
         catch { /* offline: bỏ nhịp này, lượt sau bù */ }
     }

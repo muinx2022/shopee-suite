@@ -1196,6 +1196,33 @@ public class OrdersRepositoryTests
         Assert.Equal(new[] { "Chờ lấy hàng" }, repo.AllStatuses(shopLogin: "shop9x.store"));
     }
 
+    [Fact]
+    public void MaxSyncedAtByAccount_MoiTaiKhoan_LayLuotSyncMoiNhat()
+    {
+        using var temp = new TempDatabase();
+        var repo = new OrdersRepository(temp.Open());
+        var cu = new DateTime(2026, 7, 1, 10, 0, 0, DateTimeKind.Utc);
+        var moi = new DateTime(2026, 7, 20, 8, 30, 0, DateTimeKind.Utc);
+        repo.UpsertMany(1, new[] { Make("A") }, cu);
+        repo.UpsertMany(1, new[] { Make("B") }, moi);     // tài khoản 1: lấy mốc MỚI nhất
+        repo.UpsertMany(2, new[] { Make("C") }, cu);
+
+        var map = repo.MaxSyncedAtByAccount();
+
+        Assert.Equal(moi, map[1]);
+        Assert.Equal(cu, map[2]);
+        Assert.False(map.ContainsKey(3));                 // tài khoản chưa có đơn → KHÔNG có khóa
+    }
+
+    [Fact]
+    public void MaxSyncedAtByAccount_KhoDonRong_TraMapRong()
+    {
+        using var temp = new TempDatabase();
+        var repo = new OrdersRepository(temp.Open());
+
+        Assert.Empty(repo.MaxSyncedAtByAccount());
+    }
+
     /// <summary>Đọc 1 cột (dạng chuỗi) của đơn theo order_sn — kiểm chứng trực tiếp trên DB.</summary>
     private static string? ReadString(Database db, string orderSn, string column)
     {

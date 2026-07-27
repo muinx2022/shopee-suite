@@ -409,50 +409,111 @@
 }
 else
 {
-    <div class="warn">
-        ⚠ Giao việc cho Đơn hàng chưa bật — client hiện chỉ đẩy đơn lên hub, chưa nhận việc từ hub.
-        Đơn vị việc sẽ là <b>tài khoản Shopee</b>; phần giao việc làm ở đợt sau.
+    @* Trục MÁY → TÀI KHOẢN (y tab BigSeller, chỉ khác đơn vị việc). BẤT BIẾN BỐ CỤC: mọi nút hành động nằm ở
+       mức TÀI KHOẢN; shop chỉ để XEM, nằm DƯỚI tài khoản của nó và mặc định thu gọn. Lý do kỹ thuật: một phiên
+       = đăng nhập subaccount rồi lặp LẦN LƯỢT mọi shop của nó — client KHÔNG có chế độ "chỉ chạy shop X". *@
+    <div class="subhead">🖥 Chọn máy client (suất đơn hàng)</div>
+    <div class="mcards">
+        @foreach (var m in _oMachines)
+        {
+            @* Máy offline: disabled THẬT — lệnh gửi vào máy tắt sẽ nằm chờ rồi tự hỏng sau 5'. *@
+            <button class="mcard @(m.MachineId == _oMach ? "sel" : "")" disabled="@(!m.Online)"
+                    title="@OrdersMachineTitle(m)" @key="m.MachineId" @onclick="() => SelectOrdersMachine(m.MachineId)">
+                <span class="mc-host">@(m.Online ? "🟢" : "⚪") @m.Hostname</span>
+                <span class="mc-sub">@(m.Online ? $"{m.Accounts} tài khoản" : "offline · " + FleetStateService.Ago(m.LastSeen))</span>
+                <span class="mc-sub">@(m.Online ? $"{m.Running} đang chạy{(m.Version.Length > 0 ? " · " + m.Version : "")}" : "(không bấm được)")</span>
+            </button>
+        }
+        @if (_oMachines.Count == 0)
+        {
+            <span class="stat">Chưa máy client nào chạy chế độ Shopee/Full kết nối hub.</span>
+        }
     </div>
+    @if (!string.IsNullOrEmpty(_oMachineMsg))
+    {
+        <div class="warn">@_oMachineMsg</div>
+    }
 
-    <div class="subhead">▶ Tài khoản đang chạy (@_orderLeases.Count)</div>
+    @if (_oMach.Length == 0)
+    {
+        <div class="warn">Chọn một máy client ở trên để xem tài khoản Đơn hàng của máy đó.</div>
+    }
+
+    @if (!string.IsNullOrEmpty(_oResult))
+    {
+        <div class="bar"><span class="action">@_oResult</span></div>
+    }
+
     <div class="tablewrap">
     <table class="grid sm">
-        <thead><tr><th>Tài khoản (login)</th><th>Máy</th><th>Nhịp cuối</th></tr></thead>
+        <thead><tr>
+            <th>Tài khoản (login)</th><th>Shop</th><th>Trạng thái</th>
+            <th class="m-hide">Đơn chờ</th><th class="m-hide">Sync cuối</th><th>Hành động</th>
+        </tr></thead>
         <tbody>
-        @foreach (var l in _orderLeases)
+        @foreach (var a in _oAccounts)
         {
-            <tr>
-                <td class="acct">@OrdersLogin(l.AccountId)</td>
-                <td>@(string.IsNullOrWhiteSpace(l.Hostname) ? l.MachineId : l.Hostname)</td>
-                <td>@FleetStateService.Ago(l.HeartbeatAt)</td>
+            <tr @key="a.Login">
+                <td class="acct">@a.Login</td>
+                <td>
+                    @if (a.Shops.Count == 0)
+                    {
+                        <span class="stat" title="Máy chưa đọc được danh sách shop của tài khoản này (chưa chạy lần nào).">—</span>
+                    }
+                    else
+                    {
+                        <button class="linkbtn" @onclick="() => ToggleOrdersShops(a.Login)"
+                                title="@(_oOpen == a.Login ? "Thu gọn danh sách shop." : $"Xem {a.Shops.Count} shop của {a.Login} (chỉ để xem — chạy/dừng là ở mức tài khoản).")">
+                            @a.Shops.Count shop @(_oOpen == a.Login ? "▴" : "▾")
+                        </button>
+                    }
+                </td>
+                <td>
+                    <span class="pill @OrdersStateCss(a.SessionState)">@OrdersStateLabel(a.SessionState)</span>
+                    @if (a.VerifyFailed)
+                    {
+                        <span class="pill warn" title="Lượt chạy gần nhất không tự xác minh được — cần vào máy đó xác minh tay.">⚠ Cần xác minh</span>
+                    }
+                </td>
+                <td class="m-hide" title="Tổng đơn '@WaitingStatus' của mọi shop thuộc tài khoản này (hub đếm từ bảng đơn).">@OrdersWaiting(a).ToString("N0")</td>
+                <td class="m-hide">@(a.LastSyncAt is { } t ? FleetStateService.Ago(t) : "—")</td>
+                <td>
+                    @* Cụm nút mức TÀI KHOẢN — chỗ DUY NHẤT có hành động ở tab này. *@
+                    <span class="oacts">
+                        @{ var rb = OrdersRunBtn(a); }
+                        <button class="opbtn @rb.Css" disabled="@rb.Disabled" title="@rb.Title"
+                                @onclick="() => OnOrdersRunClick(a)">@rb.Label</button>
+                        @* 2 lệnh dưới CHƯA làm được ở đợt này: client không có điểm vào cấp service (một phiên là
+                           vòng liên tục login→mọi shop→sync), nhái lại logic phiên rủi ro hơn lợi ích. *@
+                        <button class="opbtn blocked" disabled
+                                title="Đồng bộ đơn một lượt — sẽ làm ở đợt sau (bản client hiện chưa có điểm vào cho lệnh này).">↻ Đồng bộ 1 lượt</button>
+                        <button class="opbtn blocked" disabled
+                                title="Đăng nhập lại / kiểm tra tài khoản — sẽ làm ở đợt sau (bản client hiện chưa có điểm vào cho lệnh này).">🔑 Đăng nhập lại</button>
+                    </span>
+                    @if (rb.Note.Length > 0)
+                    {
+                        <div class="opnote" title="@rb.Note">⚠ @rb.Note</div>
+                    }
+                </td>
             </tr>
+            @if (_oOpen == a.Login && a.Shops.Count > 0)
+            {
+                @* Shop CHỈ để xem: không nút nào ở đây (xem chú thích đầu tab). *@
+                <tr @key="@("shops|" + a.Login)">
+                    <td colspan="6" class="shoplist">
+                        @foreach (var s in a.Shops)
+                        {
+                            <span class="shopchip" title="Shop @s.Login của @a.Login — @OrdersWaitingOfShop(s).ToString("N0") đơn @WaitingStatus.ToLowerInvariant()">
+                                🛍 @s.Name <b>@OrdersWaitingOfShop(s).ToString("N0")</b>
+                            </span>
+                        }
+                    </td>
+                </tr>
+            }
         }
-        @if (_orderLeases.Count == 0)
+        @if (_oAccounts.Count == 0)
         {
-            <tr><td colspan="3" class="empty">Hiện không có tài khoản nào đang chạy.</td></tr>
-        }
-        </tbody>
-    </table>
-    </div>
-
-    <div class="subhead">🛍 Shop &amp; đơn chờ</div>
-    <div class="tablewrap">
-    <table class="grid sm">
-        <thead><tr><th>Shop</th><th>Đơn chờ lấy hàng</th><th>Đơn có phiếu</th><th>Sync cuối</th></tr></thead>
-        <tbody>
-        @foreach (var s in _shops)
-        {
-            var sum = _orderSums.GetValueOrDefault(s.Id);
-            <tr>
-                <td class="shop">@s.Name</td>
-                <td>@((sum?.Waiting ?? 0).ToString("N0"))</td>
-                <td>@((sum?.WithSlip ?? 0).ToString("N0"))</td>
-                <td>@(sum is null || sum.LastSynced == DateTimeOffset.MinValue ? "—" : FleetStateService.Ago(sum.LastSynced))</td>
-            </tr>
-        }
-        @if (_shops.Count == 0)
-        {
-            <tr><td colspan="4" class="empty">Chưa có shop nào tự đăng ký (client chưa đẩy đơn lên hub).</td></tr>
+            <tr><td colspan="6" class="empty">@OrdersEmptyText()</td></tr>
         }
         </tbody>
     </table>
@@ -491,6 +552,13 @@ else
     private sealed record MachineBudget(
         string MachineId, string Hostname, bool Online, int Free, int Running, string Version, DateTimeOffset LastSeen,
         string Mode);
+
+    /// <summary>Thẻ chọn máy ở tab Đơn hàng — CHỈ suất đơn hàng. <c>Accounts</c>/<c>Running</c> lấy từ GƯƠNG danh
+    /// bạ máy đó tự đẩy lên (0/0 = client bản cũ chưa biết đẩy gương). Không có quỹ Brave ở đây: suất đơn hàng
+    /// không claim việc BigSeller.</summary>
+    private sealed record OrdersMachineCard(
+        string MachineId, string Hostname, bool Online, string Version, DateTimeOffset LastSeen,
+        int Accounts, int Running);
 
     /// <summary>Một dòng bảng chi tiết KPI "đang chạy" / "đang chờ": việc gì · shop nào · máy nào · từ lúc nào.
     /// <c>Manual</c> = việc chạy TAY trên app client (chỉ có lease, KHÔNG có assignment) → hub không huỷ được,
@@ -554,11 +622,27 @@ else
     /// hàng thẻ chọn máy lẫn bảng "Máy online" đọc lại.</summary>
     private Dictionary<string, int> _used = new(StringComparer.Ordinal);
 
-    // ── Tab Đơn hàng (read-only) ──
-    private List<AccountLease> _orderLeases = new();
+    // ── Tab Đơn hàng (trục máy → tài khoản) ──
     private List<Shop> _shops = new();
     private Dictionary<long, ShopOrderSummary> _orderSums = new();
+    /// <summary>shop_login (= <c>shops.username</c>) → id shop trên hub. Client đẩy đơn theo ĐÚNG khoá này nên
+    /// gương tra ra được số đơn; so khớp KHÔNG phân biệt hoa/thường (nhãn shop giữa hai bên có thể lệch HOA/thường).</summary>
+    private Dictionary<string, long> _shopIdByLogin = new(StringComparer.OrdinalIgnoreCase);
     private DateTimeOffset _ordersLoadedAt;
+
+    /// <summary>Máy đang chọn ở tab Đơn hàng (nằm trong URL <c>?omach=</c>) + tên hiển thị của nó. Tách hẳn khỏi
+    /// <see cref="_selMachine"/> của tab BigSeller: hai tab chọn hai TẬP máy khác nhau (suất workspace vs suất đơn hàng).</summary>
+    private string _oMach = "", _oHost = "";
+    private string _oMachineMsg = "";     // "máy vừa offline — đã bỏ chọn"
+    private string _oResult = "";         // kết quả cú bấm gần nhất
+    private string _oOpen = "";           // login tài khoản đang bung danh sách shop ("" = thu gọn hết)
+    private List<OrdersMachineCard> _oMachines = new();
+    private List<OrdersMirrorAccount> _oAccounts = new();
+    private List<OrdersCommandRow> _oCmds = new();
+    private Dictionary<string, OrdersMirrorCount> _oCounts = new(StringComparer.Ordinal);
+    /// <summary>login (đã hạ chữ) → máy đang GIỮ khoá chạy tài khoản đó. Nguồn <c>Snap.AccountLeases</c> —
+    /// ĐÚNG bảng cho tab này (khoá "orders:&lt;login&gt;"), khác tab BigSeller (tab đó phải dùng <c>Snap.Leases</c>).</summary>
+    private Dictionary<string, string> _oHolders = new(StringComparer.Ordinal);
 
     protected override void OnInitialized()
     {
@@ -591,7 +675,12 @@ else
         BuildBudgets();
         ApplyFilter();
         RecomputeKpis();
-        if (_tab == "orders" && (DateTimeOffset.UtcNow - _ordersLoadedAt).TotalSeconds > 10) ReloadOrders();
+        if (_tab != "orders") return;
+        // Nguồn chậm (bảng shop + bảng đơn) 10s một lượt; gương + lệnh của máy đang chọn thì mỗi nhịp (nút phải
+        // bám ACK của client). Thứ tự BẮT BUỘC: gương trước, thẻ máy sau (thẻ máy đọc số đếm của gương).
+        if ((DateTimeOffset.UtcNow - _ordersLoadedAt).TotalSeconds > 10) ReloadOrders();
+        ReloadOrdersLive();
+        BuildOrdersMachines();
     }
 
     // Dòng bảng = MỌI shop trong config ĐÃ gán ngăn dữ liệu (shop chưa gán thì không giao việc được → chỉ đếm
@@ -933,25 +1022,207 @@ else
         ? "—"
         : $"{(start > 0 ? start.ToString() : "đầu")}–{(end > 0 ? end.ToString() : "cuối")}";
 
+    // ── Tab Đơn hàng: nguồn dữ liệu ───────────────────────────────────────────────
+    /// <summary>Nguồn CHẬM của tab Đơn hàng (quét cả bảng shop + bảng đơn) — tối đa mỗi 10s, khỏi chạy mỗi nhịp 2s.</summary>
     private void ReloadOrders()
     {
         try
         {
             _shops = Db.ListShops();
             _orderSums = Db.ShopOrderSummaries(WaitingStatus).ToDictionary(s => s.ShopId);
+            _shopIdByLogin = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+            foreach (var s in _shops)
+            {
+                // Indexer (không ToDictionary): hub có thể có 2 shop cùng username khác hoa/thường → khỏi ném.
+                if (!string.IsNullOrWhiteSpace(s.Username)) _shopIdByLogin[s.Username!.Trim()] = s.Id;
+            }
         }
         catch { /* khoá DB nhất thời → giữ bản cũ */ }
-        // Khoá acc của module Đơn hàng nằm CHUNG bảng account_leases, phân biệt bằng tiền tố "orders:".
-        _orderLeases = Snap.AccountLeases
-            .Where(l => l.AccountId.StartsWith(OrdersLeasePrefix, StringComparison.Ordinal))
-            .OrderBy(l => l.AccountId, StringComparer.OrdinalIgnoreCase)
-            .ToList();
         _ordersLoadedAt = DateTimeOffset.UtcNow;
     }
 
+    /// <summary>Nguồn NHANH của tab Đơn hàng (gương + lệnh của MÁY ĐANG CHỌN) — chạy mỗi nhịp fleet để nút bám
+    /// được ACK của client (⏳ → ✓) thay vì chờ 10s.</summary>
+    private void ReloadOrdersLive()
+    {
+        try
+        {
+            _oCounts = Db.OrdersMirrorCounts();
+            _oAccounts = _oMach.Length == 0 ? new List<OrdersMirrorAccount>() : Db.OrdersAccountsOf(_oMach);
+            _oCmds = _oMach.Length == 0 ? new List<OrdersCommandRow>() : Db.OrdersCommandsOf(_oMach);
+        }
+        catch { /* khoá DB nhất thời → giữ bản cũ */ }
+
+        // Khoá acc của module Đơn hàng nằm CHUNG bảng account_leases, phân biệt bằng tiền tố "orders:" và
+        // khoá là LOGIN đã hạ chữ (xem OrdersModuleHost.LeaseKey) — tra đúng như client ghi.
+        _oHolders = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var l in Snap.AccountLeases)
+        {
+            if (!l.AccountId.StartsWith(OrdersLeasePrefix, StringComparison.Ordinal)) continue;
+            var login = l.AccountId[OrdersLeasePrefix.Length..];
+            if (login.Length > 0 && l.MachineId.Length > 0) _oHolders[login] = l.MachineId;
+        }
+
+        // Tài khoản đang bung shop mà rơi khỏi danh sách (đổi máy / máy vừa bỏ tài khoản) → thu gọn.
+        if (_oOpen.Length > 0 && !_oAccounts.Any(a => a.Login == _oOpen)) _oOpen = "";
+    }
+
     private const string OrdersLeasePrefix = "orders:";
-    private static string OrdersLogin(string accountId) =>
-        accountId.StartsWith(OrdersLeasePrefix, StringComparison.Ordinal) ? accountId[OrdersLeasePrefix.Length..] : accountId;
+
+    /// <summary>Thẻ chọn máy tab Đơn hàng: CHỈ suất đơn hàng (<see cref="MachineSlots.Orders"/>) — suất workspace
+    /// không chạy module Đơn hàng nên hiện ra chỉ tổ ra lệnh vào chỗ không ai nghe. Kèm luật tự bỏ chọn khi máy
+    /// đang chọn offline/biến mất, y <see cref="BuildBudgets"/> của tab BigSeller.</summary>
+    private void BuildOrdersMachines()
+    {
+        _oMachines = Snap.Machines
+            .Where(m => m.Kind == MachineSlots.Orders)
+            .Select(m =>
+            {
+                var cnt = _oCounts.GetValueOrDefault(m.MachineId);
+                return new OrdersMachineCard(
+                    m.MachineId,
+                    string.IsNullOrWhiteSpace(m.Hostname) ? m.MachineId : m.Hostname,
+                    !FleetStateService.MachineOffline(Snap, m.MachineId),
+                    m.AppVersion ?? "", m.LastSeen,
+                    cnt?.Accounts ?? 0, cnt?.Running ?? 0);
+            })
+            .OrderByDescending(m => m.Online)
+            .ThenBy(m => m.Hostname, StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
+
+        if (_oMach.Length == 0) return;
+        var sel = _oMachines.FirstOrDefault(m => m.MachineId == _oMach);
+        if (sel is null) DropOrdersMachine($"Máy {_oHost} vừa rời fleet — đã bỏ chọn.");
+        else if (!sel.Online) DropOrdersMachine($"Máy {sel.Hostname} vừa offline — đã bỏ chọn.");
+        else _oHost = sel.Hostname;
+    }
+
+    private void DropOrdersMachine(string why)
+    {
+        _oMach = "";
+        _oOpen = "";
+        _oAccounts = new List<OrdersMirrorAccount>();
+        _oCmds = new List<OrdersCommandRow>();
+        _oMachineMsg = why;
+    }
+
+    // ── Tab Đơn hàng: nhãn + hành động ───────────────────────────────────────────
+    private string OrdersMachineTitle(OrdersMachineCard m)
+    {
+        if (!m.Online) return $"Máy {m.Hostname} đang offline ({FleetStateService.Ago(m.LastSeen)}) — không ra lệnh được.";
+        if (m.MachineId == _oMach) return $"Đang xem tài khoản của {m.Hostname} — bấm lần nữa để bỏ chọn.";
+        return m.Accounts == 0
+            ? $"Chọn {m.Hostname} (máy chưa đẩy danh bạ tài khoản lên hub — có thể là bản client cũ)."
+            : $"Xem {m.Accounts} tài khoản Đơn hàng của {m.Hostname}.";
+    }
+
+    private void SelectOrdersMachine(string machineId)
+    {
+        // Bấm lại đúng thẻ đang chọn = bỏ chọn (y tab BigSeller).
+        _oMach = _oMach == machineId ? "" : machineId;
+        _oHost = HostName(_oMach);
+        _oOpen = "";
+        _oResult = "";
+        _oMachineMsg = "";
+        ReloadOrdersLive();
+        UpdateUrl();
+    }
+
+    private void ToggleOrdersShops(string login)
+    {
+        _oOpen = _oOpen == login ? "" : login;
+        UpdateUrl();   // view-state vào URL: F5 / chia sẻ link giữ nguyên tài khoản đang bung shop
+    }
+
+    private static string OrdersStateCss(string state) => state switch
+    {
+        OrdersSessionStates.Running or OrdersSessionStates.Opening => "run",
+        OrdersSessionStates.Queued => "queued",
+        OrdersSessionStates.Stopping => "warn",
+        _ => "idle",
+    };
+
+    private static string OrdersStateLabel(string state) => state switch
+    {
+        OrdersSessionStates.Running => "▶ Đang chạy",
+        OrdersSessionStates.Opening => "▶ Đang mở",
+        OrdersSessionStates.Queued => "⏱ Chờ đến lượt",
+        OrdersSessionStates.Stopping => "■ Đang dừng",
+        _ => "— Dừng",
+    };
+
+    private static string OrdersActionLabel(string action) => action switch
+    {
+        OrdersCommandActions.Run => "▶ Chạy",
+        OrdersCommandActions.Stop => "✖ Dừng",
+        _ => action,
+    };
+
+    /// <summary>Số đơn đang chờ của MỘT shop trong gương — tra bảng đơn của hub theo <c>shop_login</c> (client đẩy
+    /// đơn theo ĐÚNG khoá này). Shop chưa có đơn nào trên hub → 0.</summary>
+    private int OrdersWaitingOfShop(OrdersMirrorShop s) =>
+        _shopIdByLogin.TryGetValue(s.Login, out var id) && _orderSums.TryGetValue(id, out var sum) ? sum.Waiting : 0;
+
+    private int OrdersWaiting(OrdersMirrorAccount a) => a.Shops.Sum(OrdersWaitingOfShop);
+
+    /// <summary>Lệnh của tài khoản này còn ĐANG BAY (chưa ack) — nút bám theo ack, KHÔNG lạc quan theo cú bấm.</summary>
+    private OrdersCommandRow? PendingOrdersCmd(string login) => _oCmds.FirstOrDefault(c =>
+        string.Equals(c.Login, login, StringComparison.OrdinalIgnoreCase)
+        && c.Status is OrdersCommandStatuses.Pending or OrdersCommandStatuses.Sent);
+
+    /// <summary>Lý do lệnh gần nhất của tài khoản này HỎNG — chỉ nói trong 3 phút rồi im (như ô lưới tab BigSeller),
+    /// đủ để người vận hành biết "bấm rồi mà không chạy" vì sao.</summary>
+    private string LastOrdersCmdError(string login)
+    {
+        var c = _oCmds.FirstOrDefault(x => string.Equals(x.Login, login, StringComparison.OrdinalIgnoreCase));
+        return c is { Status: OrdersCommandStatuses.Failed } && c.Error.Length > 0
+               && (DateTimeOffset.Now - (c.AckAt ?? c.CreatedAt)).TotalMinutes < 3
+            ? c.Error
+            : "";
+    }
+
+    /// <summary>Máy đang GIỮ khoá chạy tài khoản (1 tài khoản = 1 máy tại một thời điểm); null = tự do.</summary>
+    private string? OrdersHolder(string login) =>
+        _oHolders.TryGetValue(login.Trim().ToLowerInvariant(), out var m) ? m : null;
+
+    /// <summary>Nút hành động DUY NHẤT của một dòng tài khoản, xét theo THỨ TỰ: lệnh đang bay → đang chạy (Dừng)
+    /// → tài khoản đang bị máy KHÁC giữ (khoá) → còn lại (Chạy).</summary>
+    private OpBtn OrdersRunBtn(OrdersMirrorAccount a)
+    {
+        if (PendingOrdersCmd(a.Login) is { } p)
+            return new($"⏳ {OrdersActionLabel(p.Action)}…", "", "blocked",
+                $"Đã gửi lệnh {FleetStateService.Ago(p.CreatedAt)} — chờ máy {_oHost} xác nhận (tự bỏ sau 5' nếu máy không phản hồi).");
+
+        var note = LastOrdersCmdError(a.Login);
+        if (a.SessionState.Length > 0)
+            return new("✖ Dừng", "stop", "cancel",
+                $"Dừng phiên của {a.Login} trên máy {_oHost} (huỷ vòng lặp shop + đóng trình duyệt).", note);
+
+        if (OrdersHolder(a.Login) is { } holder && !string.Equals(holder, _oMach, StringComparison.Ordinal))
+            return new("▶ Chạy", "", "blocked",
+                $"Tài khoản {a.Login} đang chạy ở máy {HostName(holder)} — 1 tài khoản chỉ chạy 1 máy tại một thời điểm.", note);
+
+        return new("▶ Chạy", "run", "run",
+            $"Chạy {a.Login} trên máy {_oHost}: đăng nhập subaccount rồi lặp lần lượt {a.Shops.Count} shop.", note);
+    }
+
+    // Một click = MỘT lệnh (huỷ lại được bằng chính nút đó khi phiên đã chạy) — không xác nhận 2 bước.
+    private void OnOrdersRunClick(OrdersMirrorAccount a)
+    {
+        var b = OrdersRunBtn(a);
+        if (b.Disabled || _oMach.Length == 0) return;   // phòng thân: browser đã chặn bằng thuộc tính disabled
+
+        var action = b.Act == "stop" ? OrdersCommandActions.Stop : OrdersCommandActions.Run;
+        // Idempotent phía hub: bấm 2 lần (hoặc 2 tab) chỉ ra MỘT lệnh đang mở cho cùng (máy, tài khoản, hành động).
+        Db.CreateOrdersCommand(_oMach, a.Login, action);
+        _oResult = $"⏳ Đã gửi lệnh {OrdersActionLabel(action)} · {a.Login} → {_oHost} (chờ máy nhận ở nhịp 12s rồi xác nhận).";
+        ReloadOrdersLive();
+        FleetState.Refresh();
+    }
+
+    private string OrdersEmptyText() => _oMach.Length == 0
+        ? "Chưa chọn máy."
+        : $"Máy {_oHost} chưa đẩy danh bạ tài khoản Đơn hàng lên hub (bản client cũ, hoặc máy chưa có tài khoản nào).";
 
     // ── Nhóm hiển thị + nhãn ──────────────────────────────────────────────────────
     private List<RowGroup> VisibleGroups() => _visible
@@ -1210,11 +1481,11 @@ else
     {
         _tab = tab;
         _confirmAcct = ""; _confirmCancel = "";
-        if (_tab == "orders") ReloadOrders();
+        if (_tab == "orders") { ReloadOrders(); ReloadOrdersLive(); BuildOrdersMachines(); }
         UpdateUrl();
     }
 
-    // ── View-state ↔ URL query (?tab=&f=&acct=&mach=&q=&kpi=) — F5 / chia sẻ link giữ nguyên ──
+    // ── View-state ↔ URL query (?tab=&f=&acct=&mach=&omach=&q=&kpi=) — F5 / chia sẻ link giữ nguyên ──
     private bool _restored;      // cờ once: chỉ khôi phục lúc init, KHÔNG re-restore mỗi tick
     private bool _suppressUrl;   // chặn ghi URL trong lúc restore
 
@@ -1225,10 +1496,12 @@ else
         {
             ("tab",  _tab == "bs" ? "" : _tab),
             ("f",    _fState == "todo" ? "" : _fState),
-            ("acct", _fAcct),
-            ("mach", _selMachine),
-            ("q",    _fQuery.Trim()),
-            ("kpi",  _kpi),
+            ("acct",  _fAcct),
+            ("mach",  _selMachine),
+            ("omach", _oMach),
+            ("oacc",  _oOpen),
+            ("q",     _fQuery.Trim()),
+            ("kpi",   _kpi),
         };
         var q = QueryHelpers.ParseQuery(new Uri(Nav.Uri).Query);
         string cur(string k) => q.TryGetValue(k, out var v) ? v.ToString() : "";
@@ -1260,11 +1533,21 @@ else
                 _selMachine = mach;
                 _selHost = HostName(mach);
             }
+            // Máy của tab Đơn hàng: cùng luật với "mach" — biến mất / offline thì BỎ QUA (không chọn, không báo).
+            var omach = get("omach");
+            if (omach.Length > 0 && Snap.Machines.Any(m => m.MachineId == omach && m.Kind == MachineSlots.Orders)
+                && !FleetStateService.MachineOffline(Snap, omach))
+            {
+                _oMach = omach;
+                _oHost = HostName(omach);
+                // Tài khoản đang bung shop chỉ có nghĩa khi đã chọn được máy; Rebuild() bên dưới tự thu gọn
+                // nếu login trong URL không còn trong danh bạ của máy đó.
+                _oOpen = get("oacc");
+            }
             _fQuery = get("q");
             var kpi = get("kpi");
             if (KpiCards.Any(c => c.Key == kpi)) _kpi = kpi;
             Rebuild();
-            if (_tab == "orders") ReloadOrders();
         }
         finally { _suppressUrl = false; }
     }

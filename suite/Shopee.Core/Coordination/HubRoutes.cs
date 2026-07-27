@@ -93,6 +93,16 @@ public static class HubRoutes
     /// đây là đường hợp lệ để client góp cấu hình, như <see cref="BigSellerUpsert"/>.</summary>
     public const string OrdersConfig = "/orders-config";
 
+    // ── Gương danh bạ tài khoản Đơn hàng + lệnh hub → suất đơn hàng ──
+    /// <summary>Client đẩy GƯƠNG danh bạ tài khoản Đơn hàng của máy mình (login + shop con + trạng thái phiên;
+    /// KHÔNG mật khẩu, KHÔNG cookie). Hub thay TOÀN BỘ danh bạ của đúng máy đó. Như <see cref="BigSellerUpsert"/>,
+    /// CỐ Ý nằm ngoài tiền tố <c>config/</c> nên không dính chặn <c>AllowClientConfigPush</c>.</summary>
+    public const string OrdersAccounts = "/orders/accounts";
+
+    /// <summary>Client báo kết quả thực thi một lệnh hub giao (lệnh ĐI trong phản hồi heartbeat, không có route
+    /// riêng để lấy).</summary>
+    public const string OrdersCommandsAck = "/orders/commands/ack";
+
     // ── Nghiệp vụ đơn hàng ── (prefix /api BẮT BUỘC: tránh AmbiguousMatchException với trang Blazor /shops, /orders)
     public const string Shops = "/api/shops";
     public const string Orders = "/api/orders";

@@ -109,7 +109,9 @@ public sealed partial class HubDatabase
     /// <summary>Nhịp sống máy + kênh đẩy lệnh update xuống client. Đọc cờ update trước: nếu cờ đang bật MÀ máy đã
     /// báo app_version KHÁC lúc ra lệnh → coi như update xong, tự clear cờ + ghi ✓. Trả về cờ CÒN LẠI để client
     /// tự quyết update (null = không có lệnh). Upsert nhịp KHÔNG đụng 3 cột update (chỉ RequestUpdate/AckUpdate/
-    /// nhánh clear ở đây mới ghi).</summary>
+    /// nhánh clear ở đây mới ghi).
+    /// <para>Phản hồi CÕNG THÊM lệnh chạy/dừng tài khoản Đơn hàng của đúng máy này (bảng <c>orders_commands</c>,
+    /// khoá theo id SUẤT nên chỉ suất đơn hàng nhận được). Client cũ bỏ qua field lạ → an toàn.</para></summary>
     public MachineHeartbeatResponse MachineHeartbeat(MachineHeartbeatRequest r)
     {
         lock (_gate)
@@ -152,7 +154,11 @@ ON CONFLICT(machine_id) DO UPDATE SET hostname=$h, last_seen=$ls, app_version=$v
                 c.Parameters.AddWithValue("$hi", MachineSlots.NormalizeHostId(r.HostId, r.MachineId));
                 c.ExecuteNonQuery();
             }
-            return new MachineHeartbeatResponse { UpdateRequestedAt = requestedAt.Length == 0 ? null : requestedAt };
+            return new MachineHeartbeatResponse
+            {
+                UpdateRequestedAt = requestedAt.Length == 0 ? null : requestedAt,
+                OrdersCommands = TakeOrdersCommandsLocked(r.MachineId, DateTimeOffset.UtcNow),
+            };
         }
     }
 

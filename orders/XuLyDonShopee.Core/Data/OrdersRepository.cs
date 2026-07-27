@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using Microsoft.Data.Sqlite;
 using XuLyDonShopee.Core.Models;
@@ -811,6 +812,35 @@ public class OrdersRepository
             cmd.ExecuteNonQuery();
         }
         tx.Commit();
+    }
+
+    /// <summary>
+    /// Thời điểm sync gần nhất (<c>MAX(synced_at)</c>, giờ UTC) của TỪNG tài khoản — MỘT query cho cả bảng,
+    /// dùng cho gương danh bạ đẩy lên Hub (chạy định kỳ trên MỌI tài khoản nên không hỏi từng tài khoản một).
+    /// Tài khoản chưa có đơn nào → KHÔNG có khóa trong map (bên gọi hiểu là "chưa sync lần nào").
+    /// </summary>
+    public IReadOnlyDictionary<long, DateTime> MaxSyncedAtByAccount()
+    {
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT account_id, MAX(synced_at) FROM orders GROUP BY account_id;";
+
+        var map = new Dictionary<long, DateTime>();
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            if (reader.IsDBNull(0) || reader.IsDBNull(1))
+            {
+                continue;
+            }
+            // Dòng cũ có thể mang chuỗi ngày lạ (DB chép tay) → bỏ qua dòng đó thay vì ném cả lượt đẩy gương.
+            if (DateTime.TryParse(reader.GetString(1), CultureInfo.InvariantCulture,
+                    DateTimeStyles.RoundtripKind, out var at))
+            {
+                map[reader.GetInt64(0)] = at;
+            }
+        }
+        return map;
     }
 
     /// <summary>Số đơn đã lưu của một tài khoản (dùng cho màn xem — plan 2).</summary>

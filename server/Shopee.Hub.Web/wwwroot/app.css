@@ -470,6 +470,16 @@ html.dark .dispatch td.shop a { color: var(--sidebar-ic-active); }
 /* Cụm nút mức tài khoản trên dòng nhóm ("▶ Scrape cả acc"…) */
 table.grid tr.acctrow .acctacts { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-left: 10px; }
 
+/* Tab Đơn hàng: cụm nút mức TÀI KHOẢN (chỗ DUY NHẤT có hành động ở tab đó) nằm trong ô Hành động của dòng
+   thường — class RIÊNG, không đụng .acctacts của dòng nhóm bên tab BigSeller. */
+.oacts { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+/* Shop con của một tài khoản, bung ra ở dòng ngay dưới. CHỈ ĐỂ XEM — không có nút nào: một phiên đăng nhập
+   subaccount rồi chạy lần lượt MỌI shop của nó (client không có chế độ "chỉ chạy shop X"). Chip inline-flex nên
+   tự xuống dòng khi khung hẹp, không đẩy bảng cuộn ngang. */
+td.shoplist { background: var(--gray); }
+.shopchip { display: inline-flex; align-items: center; gap: 6px; margin: 2px 8px 2px 0; padding: 3px 10px; border: 1px solid var(--stroke); border-radius: 20px; background: var(--card); color: var(--body); font-size: 12px; }
+.shopchip b { color: var(--text); font-weight: 700; }
+
 /* Thẻ KPI BẤM ĐƯỢC (chỉ thẻ có số > 0) + panel chi tiết xổ ngay dưới hàng KPI.
    .kpi-btn kế thừa hết .kpi (nền/viền/flex) — ở đây chỉ gỡ mặc định của <button> và thêm trạng thái. */
 .kpi-btn { width: 100%; text-align: left; font-family: inherit; cursor: pointer; transition: border-color .13s, background .13s; }

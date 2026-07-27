@@ -239,12 +239,85 @@ public sealed record MachineHeartbeatRequest(
 public sealed class MachineHeartbeatResponse
 {
     public string? UpdateRequestedAt { get; set; }
+
+    /// <summary>Lệnh Hub giao cho SUẤT ĐƠN HÀNG này (▶ Chạy / ✖ Dừng một tài khoản). Rỗng = không có lệnh.
+    /// Field MỚI: client cũ bỏ qua field lạ khi parse → hub deploy trước, client release sau vẫn an toàn.</summary>
+    public List<OrdersCommandDto> OrdersCommands { get; set; } = [];
 }
 /// <summary>Client báo tiến trình/kết quả tự-update app về Hub. Status: "checking" | "restarting" | "already-latest"
 /// | "unsupported" | "failed: &lt;lý do&gt;" — Hub map thành dòng trạng thái + clear cờ khi terminal.</summary>
 public sealed record UpdateAckRequest(string MachineId, string Status);
 /// <summary>Client báo Hub "tôi rời đi" (bấm Ngắt kết nối) → Hub xoá khỏi danh sách máy ngay.</summary>
 public sealed record MachineLeaveRequest(string MachineId);
+
+// ── GƯƠNG danh bạ tài khoản Đơn hàng (client đẩy lên; Hub KHÔNG sở hữu) ───────
+// Tài khoản Đơn hàng (Email/Password/Cookie/ProxyKey/PickupAddress…) nằm trong CSDL cục bộ của TỪNG máy. Hub chỉ
+// giữ một BẢN GƯƠNG để trang điều phối biết "máy này có những tài khoản nào" mà ra lệnh — TUYỆT ĐỐI không nhận
+// mật khẩu / cookie / mật khẩu hòm thư (đó là lý do chọn mô hình gương thay vì đưa acc lên hub làm nguồn sự thật).
+
+/// <summary>Một shop con của tài khoản Đơn hàng trong gương. <see cref="Login"/> = <c>shop_login</c> phía client —
+/// CŨNG là <c>shops.username</c> trên hub (client đẩy đơn theo khoá này) nên hub tra được số đơn của shop;
+/// <see cref="Name"/> chỉ để hiển thị.</summary>
+public sealed record OrdersShopItem(string Login, string Name);
+
+/// <summary>Một tài khoản Đơn hàng trên MỘT máy (gương). KHOÁ là <see cref="Login"/> (email đăng nhập), KHÔNG
+/// phải Id cục bộ: mỗi máy tự tạo bản ghi tài khoản nên Id của CÙNG một tài khoản LỆCH giữa các máy.
+/// <see cref="SessionState"/> nhận giá trị trong <see cref="OrdersSessionStates"/>.</summary>
+public sealed record OrdersAccountItem(
+    string Login,
+    string SessionState,
+    List<OrdersShopItem> Shops,
+    bool VerifyFailed,
+    DateTimeOffset? LastSyncAt);
+
+/// <summary>Client đẩy TOÀN BỘ danh bạ tài khoản Đơn hàng của CHÍNH MÁY MÌNH lên hub. <see cref="MachineId"/> =
+/// id SUẤT ĐƠN HÀNG (<c>&lt;id-máy&gt;:orders</c>, xem <see cref="MachineSlots"/>). Hợp đồng: hub THAY TOÀN BỘ
+/// danh bạ của máy đó (client là nguồn sự thật cho danh sách của chính nó), KHÔNG đụng máy khác.</summary>
+public sealed record OrdersAccountsPushRequest(string MachineId, string Hostname, List<OrdersAccountItem> Accounts);
+
+/// <summary>Trạng thái phiên tài khoản Đơn hàng trong gương (chuỗi để DTO/JSON gọn, y khuôn
+/// <see cref="MachineRoles"/>). Rỗng = không có phiên / đã dừng / lỗi.</summary>
+public static class OrdersSessionStates
+{
+    public const string Idle = "";
+    public const string Queued = "queued";
+    public const string Opening = "opening";
+    public const string Running = "running";
+    public const string Stopping = "stopping";
+}
+
+// ── Lệnh Hub → SUẤT ĐƠN HÀNG (đi trong phản hồi heartbeat + ack) ──────────────
+
+/// <summary>Hành động hub ra lệnh cho một tài khoản Đơn hàng trên một máy.</summary>
+public static class OrdersCommandActions
+{
+    public const string Run = "run";
+    public const string Stop = "stop";
+    /// <summary>Đồng bộ đơn MỘT lượt. CHƯA hỗ trợ ở bản này (client không có điểm vào cấp service — phiên là một
+    /// vòng liên tục login→mọi shop→sync), client ack 'failed' nếu nhận được.</summary>
+    public const string SyncOnce = "sync-once";
+    /// <summary>Đăng nhập lại / kiểm tra tài khoản. CHƯA hỗ trợ ở bản này — xem <see cref="SyncOnce"/>.</summary>
+    public const string Relogin = "relogin";
+}
+
+/// <summary>Vòng đời một lệnh: hub tạo 'pending' → nhịp heartbeat lấy đi thành 'sent' → client ack 'done'/'failed'.
+/// 'sent' quá lâu không ack → hub tự quy về 'failed' (client không phản hồi), không kẹt vĩnh viễn.</summary>
+public static class OrdersCommandStatuses
+{
+    public const string Pending = "pending";
+    public const string Sent = "sent";
+    public const string Done = "done";
+    public const string Failed = "failed";
+}
+
+/// <summary>Một lệnh hub gửi xuống suất đơn hàng trong phản hồi heartbeat. <see cref="Id"/> là khoá DEDUP:
+/// nhịp có thể lặp khi mạng chập chờn, client PHẢI thực thi mỗi Id đúng một lần (chạy lại 'run' giữa chừng một
+/// phiên đang chạy là mở lại trình duyệt — hỏng thật).</summary>
+public sealed record OrdersCommandDto(string Id, string Login, string Action);
+
+/// <summary>Client báo kết quả thực thi một lệnh về hub. <see cref="Status"/> ∈
+/// <see cref="OrdersCommandStatuses.Done"/> | <see cref="OrdersCommandStatuses.Failed"/>.</summary>
+public sealed record OrdersCommandAckRequest(string Id, string Status, string? Error);
 
 public sealed record FilePutResponse(bool Ok, int Version, string? Conflict);
 

@@ -169,9 +169,11 @@ CREATE TABLE IF NOT EXISTS settings(
 CREATE TABLE IF NOT EXISTS revoked_machines(
   machine_id TEXT PRIMARY KEY, revoked_at TEXT);");
 
-        // Bảng nghiệp vụ đơn hàng (partial ở HubDatabase.Shops.cs / HubDatabase.Orders.cs).
+        // Bảng nghiệp vụ đơn hàng (partial ở HubDatabase.Shops.cs / HubDatabase.Orders.cs) + gương danh bạ tài
+        // khoản Đơn hàng và kênh lệnh hub→suất đơn hàng (partial ở HubDatabase.OrdersAccounts.cs).
         EnsureShopsSchema();
         EnsureOrdersSchema();
+        EnsureOrdersAccountsSchema();
     }
 
     // ── Settings (key/value; thay hub-server.json: admin PBKDF2, api token, cờ điều phối…) ──

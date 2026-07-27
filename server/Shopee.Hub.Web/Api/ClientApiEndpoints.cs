@@ -200,6 +200,24 @@ public static class ClientApiEndpoints
             return Results.Json(new { ok = cfg.MergeOrdersConfig(r) });
         });
 
+        // ── Gương danh bạ tài khoản Đơn hàng + ack lệnh hub giao ──
+        // POST /orders/accounts → máy đẩy TOÀN BỘ danh bạ tài khoản Đơn hàng của CHÍNH NÓ (login + shop con +
+        // trạng thái phiên). Hub thay trọn danh bạ của đúng machine_id đó, KHÔNG đụng máy khác. Payload CỐ Ý
+        // không có mật khẩu/cookie — hub chỉ làm gương, tài khoản vẫn thuộc máy.
+        api.MapPost(HubRoutes.OrdersAccounts, (OrdersAccountsPushRequest? r) =>
+        {
+            if (r is null || string.IsNullOrWhiteSpace(r.MachineId)) return Results.BadRequest();
+            return Results.Json(new { accounts = db.UpsertOrdersAccounts(r) });
+        });
+
+        // POST /orders/commands/ack → client báo kết quả lệnh hub giao (lệnh ĐI kèm phản hồi heartbeat).
+        api.MapPost(HubRoutes.OrdersCommandsAck, (OrdersCommandAckRequest? r) =>
+        {
+            if (r is null || string.IsNullOrWhiteSpace(r.Id)) return Results.BadRequest();
+            db.AckOrdersCommand(r.Id, r.Status, r.Error);
+            return Results.Ok();
+        });
+
         // ── Nghiệp vụ đơn hàng ──
         // GET /api/shops → danh sách shop (hub tự đăng ký theo username khi client push). Client desktop gọi để
         // đổi shopId (SỐ) của đơn sang TÊN shop ở màn "Đơn toàn hệ thống" → đây là endpoint client CHÍNH THỨC,

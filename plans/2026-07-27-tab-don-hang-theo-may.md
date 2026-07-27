@@ -1,7 +1,7 @@
 # Plan: Tab Đơn hàng ở /dispatch — chọn máy → list tài khoản → bấm action
 
 - **Ngày:** 2026-07-27
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành (hub deploy ngay · client chờ release kế)
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-dev`)
 
 ## 1. Bối cảnh & mục tiêu

@@ -326,6 +326,20 @@ public sealed class HubClient : IDisposable
         return true;
     }
 
+    // ── Gương danh bạ tài khoản Đơn hàng + ack lệnh hub giao ──
+    // Dùng _http (control-plane 8s): payload là danh sách login + shop của MỘT máy (vài KB), và nhịp đẩy chậm
+    // (3s gộp / 60s nền) nên không cần timeout dài. Hub CŨ chưa có route → 404 → EnsureSuccessStatusCode ném,
+    // caller (worker ở OrdersModuleHost) nuốt và thử lại lượt sau.
+
+    /// <summary>Đẩy GƯƠNG danh bạ tài khoản Đơn hàng của máy này lên hub (hub thay TOÀN BỘ danh bạ của máy đó).
+    /// KHÔNG mang mật khẩu/cookie — xem <see cref="OrdersAccountsPushRequest"/>.</summary>
+    public Task PushOrdersAccountsAsync(OrdersAccountsPushRequest req, CancellationToken ct = default)
+        => PostAsync(HubRoutes.OrdersAccounts, req, ct);
+
+    /// <summary>Báo kết quả thực thi một lệnh hub giao cho suất đơn hàng.</summary>
+    public Task AckOrdersCommandAsync(OrdersCommandAckRequest req, CancellationToken ct = default)
+        => PostAsync(HubRoutes.OrdersCommandsAck, req, ct);
+
     // ── Đơn hàng: client đẩy lô đơn đã sync của 1 shop lên hub (hub tự đăng ký shop theo username) ──
     // Dùng _bulkHttp (timeout dài): lô đơn 1 lượt sync có thể lớn (nhiều KB JSON qua tunnel).
     public async Task<OrdersPushResult?> PushOrdersAsync(OrdersPushRequest req, CancellationToken ct = default)
