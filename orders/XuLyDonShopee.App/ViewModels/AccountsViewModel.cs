@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
@@ -305,6 +305,24 @@ public partial class AccountsViewModel : ViewModelBase
     /// shop 0 đơn). Dựng lại trong <see cref="LoadResults"/> khi đổi tài khoản chọn / đổi ngày.</summary>
     public ObservableCollection<ShopPrepareRow> ResultRows { get; } = new();
 
+    /// <summary>TỔNG số đơn "Chuẩn bị hàng" của MỌI shop đang hiện ở tab Kết quả (ngày đang lọc). Bám ĐÚNG cột
+    /// trong lưới: hub áp số của nó vào từng dòng thì tổng này cũng là số hub — không tính riêng một đường khác,
+    /// kẻo tổng nói một đằng các dòng nói một nẻo.</summary>
+    [ObservableProperty]
+    private int _tongChuanBiHang;
+
+    /// <summary>Cộng lại tổng từ chính <see cref="ResultRows"/>. Gọi ở MỌI chỗ vừa dựng lại dòng hoặc vừa gán lại
+    /// <see cref="ShopPrepareRow.PreparedCount"/> — hai chỗ đó là toàn bộ đường số đi vào lưới.</summary>
+    private void CapNhatTongChuanBiHang()
+    {
+        var tong = 0;
+        foreach (var row in ResultRows)
+        {
+            tong += row.PreparedCount;
+        }
+        TongChuanBiHang = tong;
+    }
+
     /// <summary>Tab "Kết quả": số đang hiện là số CHUNG TOÀN HỆ THỐNG lấy từ Hub (true) hay số CỤC BỘ của riêng máy
     /// này (false — chưa hỏi được Hub / bản chạy không có Hub). Ghi chú cạnh ô lọc ngày bám cờ này để người dùng
     /// biết mình đang xem con số nào. Bật ở <see cref="RefreshHubCountsAsync"/> khi hub trả lời được; hạ ở
@@ -462,6 +480,7 @@ public partial class AccountsViewModel : ViewModelBase
         if (SelectedRow?.Id is not long accountId)
         {
             DangDungSoHub = false;
+            CapNhatTongChuanBiHang();   // lưới rỗng → tổng phải về 0, đừng giữ số của tài khoản vừa xem
             return;
         }
 
@@ -513,6 +532,7 @@ public partial class AccountsViewModel : ViewModelBase
             || !string.Equals(_hubCountsDay, ResultDayKey, StringComparison.Ordinal))
         {
             DangDungSoHub = false;
+            CapNhatTongChuanBiHang();   // giữ số cục bộ vừa dựng ở LoadResults → tổng phải khớp lại
             return;
         }
 
@@ -520,6 +540,7 @@ public partial class AccountsViewModel : ViewModelBase
         {
             row.PreparedCount = map.TryGetValue(row.ShopLogin.Trim(), out var soDon) ? soDon : 0;
         }
+        CapNhatTongChuanBiHang();
     }
 
     /// <summary>Quên map hub đã nhớ khi bối cảnh KHÔNG còn khớp (đổi tài khoản / đổi ngày lọc / bỏ chọn). Chỉ dọn

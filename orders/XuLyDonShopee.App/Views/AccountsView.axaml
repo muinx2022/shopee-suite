@@ -1,4 +1,4 @@
-<UserControl xmlns="https://github.com/avaloniaui"
+﻿<UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
@@ -619,6 +619,20 @@
                                                VerticalAlignment="Center"
                                                IsVisible="{Binding !DangDungSoHub}" />
                                 </StackPanel>
+                                <!-- Dòng TỔNG — nằm ngay trên lưới để liếc là thấy, khỏi cuộn hết danh sách shop.
+                                     Cộng đúng cột "Chuẩn bị hàng" của MỌI shop đang hiện (VM tự cộng lại mỗi lần
+                                     dựng dòng hoặc áp số hub) nên tổng không bao giờ lệch với các dòng bên dưới. -->
+                                <Border DockPanel.Dock="Top" Margin="0,0,0,10" Padding="12,7"
+                                        Background="{StaticResource CardBg}" BorderBrush="{StaticResource Border}" BorderThickness="1" CornerRadius="6">
+                                    <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                        <TextBlock Text="Tổng đã chuẩn bị hàng:" FontSize="13"
+                                                   Foreground="{StaticResource TextMuted}" VerticalAlignment="Center" />
+                                        <TextBlock Text="{Binding TongChuanBiHang}" FontSize="14" FontWeight="Bold"
+                                                   VerticalAlignment="Center" />
+                                        <TextBlock Text="đơn" FontSize="13"
+                                                   Foreground="{StaticResource TextMuted}" VerticalAlignment="Center" />
+                                    </StackPanel>
+                                </Border>
                                 <!-- Lưới 3 cột: tiến độ (tick/vòng quay) | Shop (mọi shop của tài khoản) |
                                      Chuẩn bị hàng (số đơn arrange trong ngày). -->
                                 <DataGrid Classes="proxy" ClipToBounds="True"
