@@ -35,6 +35,17 @@ sang máy chưa có acc đó. Lý do chọn: đăng nhập Shopee từ máy lạ
 **Nút cần có (người dùng chọn):** `▶ Chạy` / `✖ Dừng`, `↻ Đồng bộ đơn một lượt`, `🔑 Đăng nhập lại / kiểm tra tk`.
 KHÔNG làm nút "chạy cả máy".
 
+**BẤT BIẾN BỐ CỤC (người dùng nhấn mạnh 2 lần — đọc kỹ trước khi vẽ UI):**
+> *"Nút chạy là dành cho sub acc chứ không dành cho shop."*
+> *"Chọn máy, chọn acc sau đó list shop và có action chạy / dừng."*
+
+- Cấp bấm được: **MÁY → TÀI KHOẢN**. Mọi nút hành động nằm ở **dòng tài khoản**.
+- **Shop CHỈ để xem** (đơn chờ, sync cuối) — **KHÔNG có nút nào trên dòng shop**. Lý do kỹ thuật, không phải sở
+  thích: một phiên = đăng nhập subaccount rồi **lặp lần lượt mọi shop của nó** (`OrdersBridgeSession.RunAllShopsAsync`);
+  client KHÔNG có chế độ "chỉ chạy shop X".
+- **TUYỆT ĐỐI KHÔNG** đổ phẳng mọi shop của mọi tài khoản ra một bảng (5 subaccount × 10 shop = 50 dòng vô dụng —
+  đó đúng là bản đọc-tạm đang bị thay). Shop luôn nằm DƯỚI tài khoản của nó, mặc định thu gọn.
+
 ## 2. Phạm vi
 
 **Làm:**
