@@ -16,7 +16,7 @@ namespace XuLyDonShopee.App.ViewModels;
 /// <summary>
 /// Màn hình tài khoản: panel trái là danh sách + tìm kiếm, panel phải là form CRUD.
 /// </summary>
-public partial class AccountsViewModel : ViewModelBase
+public partial class AccountsViewModel : ViewModelBase, IDisposable
 {
     private readonly AppServices _services;
     private List<Account> _all = new();
@@ -85,6 +85,19 @@ public partial class AccountsViewModel : ViewModelBase
         _loadingSettings = false;
 
         Reload();
+
+        // Máy chạy vòng liên tục CẢ ĐÊM: không có nhịp này thì ô ngày tab "Kết quả" đứng mãi ở ngày mở app —
+        // qua nửa đêm số đóng băng ở hôm qua và đơn của ngày mới không hiện ra nữa. Callback chạy trên thread
+        // nền nên tự marshal về UI thread (xem NhipSangNgay).
+        _timerSangNgay = new System.Threading.Timer(_ => NhipSangNgay(), null, NhipDoSangNgay, NhipDoSangNgay);
+    }
+
+    /// <summary>Dọn đồng hồ dò sang ngày. VM sống suốt vòng đời app (dựng một lần trong <see cref="MainViewModel"/>)
+    /// nên điểm dọn là lúc THOÁT app — <c>OrdersModuleHost.StopAsync</c>, đúng chỗ đang dọn các timer nền khác
+    /// của module.</summary>
+    public void Dispose()
+    {
+        try { _timerSangNgay.Dispose(); } catch { /* bỏ qua khi thoát */ }
     }
 
     /// <summary>Danh sách tài khoản đang hiển thị (sau khi lọc). Mỗi phần tử là <see cref="AccountRowViewModel"/>
@@ -301,6 +314,19 @@ public partial class AccountsViewModel : ViewModelBase
     [ObservableProperty]
     private DateTimeOffset _resultDate = DateTimeOffset.Now;
 
+    /// <summary>Ngày mà ô lọc "Kết quả" coi là HÔM NAY ở lần dò gần nhất. Dùng để phân biệt "người dùng đang xem
+    /// hôm nay" (→ tự chuyển sang ngày mới lúc qua nửa đêm) với "người dùng chủ động chọn ngày cũ để xem lại"
+    /// (→ TUYỆT ĐỐI không giật ngày khỏi tay họ). Chỉ đụng trên UI thread (xem <see cref="KiemTraSangNgay"/>).</summary>
+    private DateTime _ngayCoiLaHomNay = DateTimeOffset.Now.Date;
+
+    /// <summary>Nhịp dò "đã sang ngày mới chưa" — 60s: đủ nhạy để số của ngày mới hiện gần như tức thì mà gần
+    /// như không tốn gì (chỉ so hai <c>DateTime</c>, không đụng DB/hub khi ngày chưa đổi).</summary>
+    private static readonly TimeSpan NhipDoSangNgay = TimeSpan.FromSeconds(60);
+
+    /// <summary>Đồng hồ dò sang ngày (chạy trên thread nền → callback marshal về UI thread). Dựng ở ctor, dọn ở
+    /// <see cref="Dispose"/> (shell gọi khi thoát app — <c>OrdersModuleHost.StopAsync</c>).</summary>
+    private readonly System.Threading.Timer _timerSangNgay;
+
     /// <summary>Tab "Kết quả": các dòng Shop | số Chuẩn bị hàng của NGÀY đang lọc — MỌI shop của tài khoản (kể cả
     /// shop 0 đơn). Dựng lại trong <see cref="LoadResults"/> khi đổi tài khoản chọn / đổi ngày.</summary>
     public ObservableCollection<ShopPrepareRow> ResultRows { get; } = new();
@@ -463,6 +489,80 @@ public partial class AccountsViewModel : ViewModelBase
     {
         LoadResults();
         _ = RefreshHubCountsAsync();
+    }
+
+    /// <summary>
+    /// Quy tắc TỰ kéo ô ngày tab "Kết quả" sang ngày mới — hàm THUẦN (không đụng state, test được; đừng test
+    /// bằng cách chờ timer). <paramref name="dangXem"/> = ngày ô lọc đang hiển thị, <paramref name="coiLaHomNay"/>
+    /// = ngày mà lần dò TRƯỚC coi là hôm nay, <paramref name="homNay"/> = ngày của đồng hồ máy lúc dò.
+    /// <list type="bullet">
+    /// <item>Ngày chưa sang (<c>homNay == coiLaHomNay</c>) → không làm gì.</item>
+    /// <item>Ngày đã sang và người dùng đang xem đúng "hôm nay (cũ)" → CHUYỂN sang <paramref name="homNay"/>.</item>
+    /// <item>Ngày đã sang nhưng người dùng đang mở một ngày CŨ để đối chiếu → KHÔNG chuyển (giật ngày khỏi tay
+    /// họ còn tệ hơn chính lỗi đang sửa). Mốc "coi là hôm nay" vẫn phải cập nhật ở bên gọi.</item>
+    /// </list>
+    /// Đồng hồ bị chỉnh LÙI (<c>homNay &lt; coiLaHomNay</c>) xử y hệt: đi theo đồng hồ máy, chuyển ĐÚNG MỘT lần
+    /// rồi thôi — bên gọi cập nhật mốc ngay nên lần dò kế đã bằng nhau, không có vòng đổi qua đổi lại.
+    /// </summary>
+    public static (bool Chuyen, DateTime NgayMoi) QuyetDinhSangNgay(
+        DateTime dangXem, DateTime coiLaHomNay, DateTime homNay)
+    {
+        var xem = dangXem.Date;
+        var moc = coiLaHomNay.Date;
+        var nay = homNay.Date;
+
+        var chuyen = nay != moc && xem == moc;
+        return (chuyen, chuyen ? nay : xem);
+    }
+
+    /// <summary>
+    /// Dò sang ngày rồi áp kết quả của <see cref="QuyetDinhSangNgay"/>: kéo <see cref="ResultDate"/> sang
+    /// <paramref name="homNay"/> khi người dùng đang xem "hôm nay", và LUÔN cập nhật mốc
+    /// <see cref="_ngayCoiLaHomNay"/> (kể cả nhánh không chuyển — không thì hôm sau lần dò kế lại hiểu nhầm ngày
+    /// người dùng chọn là "hôm nay").
+    /// <para>Trả <c>true</c> khi ĐÃ đổi <see cref="ResultDate"/> — bên gọi biết lưới vừa được nạp lại rồi (setter
+    /// kích <see cref="OnResultDateChanged"/> → <see cref="LoadResults"/> + <see cref="RefreshHubCountsAsync"/>)
+    /// nên KHÔNG gọi lại tay, kẻo nạp hai lần và tốn thừa một lượt hỏi hub qua tunnel.</para>
+    /// Nhận <paramref name="homNay"/> từ bên gọi (thay vì tự đọc đồng hồ) để test mô phỏng được lúc qua nửa đêm.
+    /// Chỉ chạy trên UI thread (mọi bên gọi đã marshal qua <see cref="RunOnUi"/>).
+    /// </summary>
+    internal bool KiemTraSangNgay(DateTime homNay)
+    {
+        var nay = homNay.Date;
+        if (nay == _ngayCoiLaHomNay)
+        {
+            return false; // chưa sang ngày → đường nóng, không đụng gì
+        }
+
+        var (chuyen, ngayMoi) = QuyetDinhSangNgay(ResultDate.Date, _ngayCoiLaHomNay, nay);
+
+        // Cập nhật mốc TRƯỚC khi gán ResultDate: setter chạy ĐỒNG BỘ (LoadResults + có thể kéo theo sự kiện
+        // khác), mọi đường chạy sau đó phải thấy mốc đã đúng ngày mới.
+        _ngayCoiLaHomNay = nay;
+
+        if (!chuyen)
+        {
+            return false; // người dùng đang mở ngày cũ để đối chiếu → KHÔNG giật ngày khỏi tay họ
+        }
+
+        // Gán mới KÍCH OnResultDateChanged (tự nạp lưới + hỏi hub) — cố ý không gọi LoadResults() ở đây.
+        ResultDate = new DateTimeOffset(ngayMoi, DateTimeOffset.Now.Offset);
+        return true;
+    }
+
+    /// <summary>Một nhịp của <see cref="_timerSangNgay"/> (THREAD NỀN) → marshal về UI thread rồi dò sang ngày.
+    /// Nuốt lỗi: ngoại lệ lọt ra khỏi callback <see cref="System.Threading.Timer"/> sẽ GIẾT tiến trình, mà nhịp
+    /// này chỉ là tiện ích (vd đang tắt app, không có dispatcher) — bỏ một nhịp thì nhịp sau dò lại.</summary>
+    private void NhipSangNgay()
+    {
+        try
+        {
+            RunOnUi(() => KiemTraSangNgay(DateTimeOffset.Now.Date));
+        }
+        catch
+        {
+            // bỏ nhịp này
+        }
     }
 
     /// <summary>
@@ -1407,13 +1507,6 @@ public partial class AccountsViewModel : ViewModelBase
     private void OnAccountsChanged() => RunOnUi(Reload);
 
     /// <summary>
-    /// Số "chuẩn bị hàng" của một tài khoản vừa tăng → nạp lại lưới tab "Kết quả" nếu ĐÚNG tài khoản đang mở.
-    /// Tài khoản khác thì bỏ qua (đang chạy nhiều tk cùng lúc mà nạp hết là phí). Sự kiện đến từ THREAD NỀN của
-    /// phiên → marshal về UI thread trước khi đụng <c>ResultRows</c>.
-    /// <para>Chỉ nạp khi ngày đang lọc là HÔM NAY: số vừa cộng luôn thuộc hôm nay, người dùng đang xem ngày cũ
-    /// thì lưới của họ không đổi — nạp lại chỉ tổ nháy màn.</para>
-    /// </summary>
-    /// <summary>
     /// Phiên vừa đọc được danh sách shop của một tài khoản → dựng lại lưới tab "Kết quả" nếu ĐÚNG tài khoản
     /// đang mở. KHÔNG lọc theo ngày (khác <see cref="OnPrepareCountChanged"/>): danh sách shop không phụ thuộc
     /// ngày, xem ngày cũ vẫn phải thấy đủ shop.
@@ -1431,8 +1524,23 @@ public partial class AccountsViewModel : ViewModelBase
         }
     });
 
+    /// <summary>
+    /// Số "chuẩn bị hàng" của một tài khoản vừa tăng → nạp lại lưới tab "Kết quả" nếu ĐÚNG tài khoản đang mở.
+    /// Tài khoản khác thì bỏ qua (đang chạy nhiều tk cùng lúc mà nạp hết là phí). Sự kiện đến từ THREAD NỀN của
+    /// phiên → marshal về UI thread trước khi đụng <c>ResultRows</c>.
+    /// <para>Dò sang ngày (<see cref="KiemTraSangNgay"/>) TRƯỚC mọi điều kiện: đơn vừa chuẩn bị luôn thuộc hôm
+    /// nay, nên máy chạy xuyên đêm thì chính đơn ĐẦU TIÊN của ngày mới đã kéo ô ngày sang — không phải chờ hết
+    /// một nhịp timer. Kéo được rồi thì thoát luôn: setter <see cref="ResultDate"/> đã nạp lưới + hỏi hub.</para>
+    /// <para>Còn lại vẫn chỉ nạp khi ngày đang lọc là HÔM NAY: người dùng chủ động mở ngày cũ thì lưới của họ
+    /// không đổi — nạp lại chỉ tổ nháy màn.</para>
+    /// </summary>
     private void OnPrepareCountChanged(long accountId) => RunOnUi(() =>
     {
+        if (KiemTraSangNgay(DateTimeOffset.Now.Date))
+        {
+            return; // ô ngày vừa sang ngày mới → OnResultDateChanged đã nạp lưới + hỏi hub, khỏi làm lại
+        }
+
         if (SelectedRow is null || SelectedRow.Id != accountId)
         {
             return;

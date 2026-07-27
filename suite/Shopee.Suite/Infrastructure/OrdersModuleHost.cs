@@ -32,6 +32,10 @@ public static class OrdersModuleHost
     /// "Đã bán" mỗi ~2 phút. Giữ tham chiếu static để Dispose khi thoát (và để GC không gom).</summary>
     private static HubOutboxWorker? _outboxWorker;
 
+    /// <summary>ViewModel gốc của module (shell giữ để hiển thị). Giữ thêm tham chiếu ở đây để dọn timer nền
+    /// của các màn con khi thoát app (xem <see cref="StopAsync"/>).</summary>
+    private static MainViewModel? _mainVm;
+
     /// <summary>
     /// Khởi tạo bộ dịch vụ đơn hàng (ctor <see cref="AppServices"/> mở SQLite <c>%APPDATA%\XuLyDonShopee\app.db</c>
     /// + chạy migration) và dựng ViewModel gốc của module. Lỗi (đĩa/khóa DB…) → ghi log, trả null để suite vẫn boot.
@@ -50,6 +54,7 @@ public static class OrdersModuleHost
             WireAccountLease(Services);
             WireOrdersMirror(Services);
             var vm = new MainViewModel(Services);
+            _mainVm = vm;
             // Vòng chờ đẩy: dựng SAU khi AppServices (DB + migration) và các hook hub đã sẵn sàng; tự hoãn ~15s
             // rồi chạy lượt đầu (bắt đúng ý "khi client chạy, còn vòng chờ thì đẩy") và lặp mỗi ~2 phút.
             _outboxWorker = new HubOutboxWorker(Services);
@@ -987,6 +992,7 @@ public static class OrdersModuleHost
         try { _gsheetTimer?.Dispose(); } catch { /* bỏ qua khi thoát */ }   // dừng nhịp kéo cấu hình GSheet
         try { _mirrorTimer?.Dispose(); } catch { /* bỏ qua khi thoát */ }   // dừng worker đẩy gương danh bạ
         try { _outboxWorker?.Dispose(); } catch { /* bỏ qua khi thoát */ }  // dừng vòng chờ đẩy
+        try { _mainVm?.AccountsVm.Dispose(); } catch { /* bỏ qua khi thoát */ } // dừng nhịp dò sang ngày mới
         try { await svc.Sessions.StopAllAsync(); } catch { /* bỏ qua khi thoát */ }
     }
 }

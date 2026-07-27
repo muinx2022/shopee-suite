@@ -1,7 +1,7 @@
 # Plan: Số "chuẩn bị hàng" tự sang ngày mới (client + kiểm chứng hub)
 
 - **Ngày:** 2026-07-28
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành (client chờ release 1.6.8)
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-dev`)
 
 ## 1. Bối cảnh — lỗi người dùng báo
