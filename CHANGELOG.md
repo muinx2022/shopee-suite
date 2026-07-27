@@ -1,9 +1,32 @@
-# Ghi chú phát hành (CHANGELOG)
+﻿# Ghi chú phát hành (CHANGELOG)
 
 App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cài qua
 `ShopeeSuite-win-Setup.exe` một lần, từ đó tự tải delta và cập nhật bằng nút
 "Cập nhật & khởi động lại" trong Settings → Hiệu năng. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
+
+## v1.6.6 — 2026-07-27
+
+- **Dừng hẳn khi key proxy hết hạn, thay vì âm thầm bỏ dòng:** trước đây key KiotProxy hết hạn thì mọi tài khoản
+  Shopee đều xin proxy hỏng như nhau, nhưng app coi đó là lỗi tạm — cho tài khoản nghỉ, đổi tài khoản khác, và sau
+  3 lần kẹt thì **bỏ qua dòng** rồi chạy tiếp. Kết quả: job chạy hết sheet, báo "xong", mà dữ liệu thủng lỗ chỗ (một
+  lượt thật đã bỏ trắng 17 dòng trong 6 phút). Nay gặp lỗi loại "key/tài khoản proxy chết", app **dừng cả job ngay**,
+  không bỏ dòng nào, và báo lên Hub kèm lý do đọc được — ô việc trên Hub thành ✕ Lỗi với dòng
+  *"key proxy hết hạn — gia hạn key rồi chạy lại"*. Lỗi proxy lẻ (rớt mạng, IP xấu) vẫn xử như cũ.
+- **Bị BigSeller đòi mã verify thì nhờ Hub đăng nhập hộ:** trước đây gặp màn hình verify là job chết tại chỗ, phải
+  ra tận máy đăng nhập tay. Nay client tự nhờ Hub đăng nhập lại tài khoản đó — Hub giải captcha và **tự đọc mã từ
+  hòm thư** — rồi cookie mới về máy và việc tự chạy tiếp. Trong lúc chờ, việc nằm ở hàng chờ chứ không bị báo hỏng.
+  Hub bí quá mới cần người nhập mã, ngay trên web.
+- **Import luôn chạy 1 cửa sổ:** import nhiều cửa sổ song song đụng nhau ở Material Center và tab "Đã nhận" của
+  BigSeller. Trước đây import mượn số cửa sổ của Update (mặc định 2) nên Hub giao import là máy mở 2 cửa sổ. Nay
+  import cố định 1 cửa sổ, tham số "Số process" trên Hub không ghi đè được. Việc import cũng chỉ chiếm 1 suất trong
+  quỹ cửa sổ, nên việc khác có thêm chỗ chạy.
+- **Máy chạy chế độ Shopee giờ hiện trên Hub:** trước đây bản chế độ Shopee (chỉ module Đơn hàng) không báo nhịp
+  nên Hub hoàn toàn không thấy nó — không biết máy còn sống hay không, và **lệnh cập nhật app từ Hub luôn bỏ sót
+  máy đó**. Nay mỗi máy có hai "suất": suất Workspace (việc BigSeller) và suất Đơn hàng; máy chạy chế độ Full chiếm
+  cả hai. Hub hiện rõ chế độ + suất của từng máy, và không cho giao nhầm việc BigSeller vào suất Đơn hàng.
+- **Tab "Kết quả" có dòng tổng:** hiện ngay trên lưới tổng số đơn đã chuẩn bị hàng của mọi shop trong ngày đang
+  lọc, khỏi phải cộng tay hay cuộn hết danh sách.
 
 ## v1.6.5 — 2026-07-27
 
