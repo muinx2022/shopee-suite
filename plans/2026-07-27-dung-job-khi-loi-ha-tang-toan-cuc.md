@@ -1,7 +1,7 @@
 # Plan: Dừng job khi lỗi hạ tầng TOÀN CỤC (key proxy hết hạn) thay vì bỏ qua dòng
 
 - **Ngày:** 2026-07-27
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành (chưa release client)
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-dev`)
 
 ## 1. Bối cảnh — sự cố thật vừa xảy ra
@@ -121,4 +121,36 @@ Không có key hết hạn thật để thử, nên bắt buộc dựng đườn
 
 ---
 
-## Báo cáo thực thi (Opus điền sau khi xong)
+## Báo cáo thực thi
+
+**Tạo:** `suite/Shopee.Core/Proxy/ProxyFailure.cs` (`IsFleetWideProxyFailure`),
+`suite/Shopee.Module.MultiBrave/ScrapeFailurePolicy.cs` (enum + `Decide` thuần, tách khỏi runner để test được),
+`orders/XuLyDonShopee.Tests/ProxyFleetWideFailureTests.cs` (30 ca).
+**Sửa:** `ScrapeRunner.cs` (event `JobFatal` + nhánh `StopJob`), `ScrapeViewModel.cs` (`_jobFatal` + `TakeJobFatal`),
+`AssignmentWorker.cs` (lấy lý do trong `ReconcileInflightAsync` → `failed`), `XuLyDonShopee.Tests.csproj`.
+
+**Nghiệm thu (Fable tự chạy):**
+- `dotnet build ShopeeSuite.sln` → 0 Warning, 0 Error. `dotnet test` → **1084/1084** (1054 + 30 mới).
+- Đọc `ProxyFailure.cs`: danh sách khớp hẹp đúng yêu cầu — mã lỗi tường minh (`KEY_EXPIRED`/`KEY_NOT_FOUND`) +
+  câu nguyên văn; luật yếu "hết hạn" **chỉ** khi câu lỗi có chữ `key`, và **loại trừ** `PROXY_NOT_FOUND_BY_KEY`
+  (proxy lẻ — vẫn cooldown được). Opus còn chạy mutation test: bỏ guard "phải có chữ key" → đúng 2 test âm tính đỏ.
+- Đọc `ScrapeRunner`: nhánh `StopJob` `pool.Release` (KHÔNG cooldown, không tính lần lỗi) → `RowsCompleted` phần đã
+  cào → **một** dòng log mức job (`Interlocked.CompareExchange` chống spam) → `jobCts.Cancel()` → `break` **trước**
+  khối stall/bỏ-qua-dòng ⇒ không dòng nào bị bỏ. Ba nhánh cũ (quarantine/cooldown/release) ánh xạ 1-1, hành vi cũ giữ.
+- Đọc `AssignmentWorker`: `ok = fatal is null && status == "completed"`, báo `failed` kèm lý do; KHÔNG đụng
+  `RequeueOrFailAsync` (không thành `requeue`).
+- `Dispatch.razor` / `app.css` / `App.razor` **không bị sửa** (đúng ràng buộc chạy song song).
+
+**Trả lời câu hỏi Opus để ngỏ — hub có hiện `last_error` trên ô không?** Fable đã soi `FleetStateService.OpCell`:
+ô chỉ hiện `✘ lỗi ({hostname})` và **chỉ trong 3 phút**, KHÔNG kèm `last_error`. Lý do vẫn tới tay người vận hành
+qua danh sách **Việc gián đoạn** (`IntReason` đọc `LastError`) và qua panel KPI mới (cột "Lý do"). Việc còn thiếu:
+đưa `last_error` vào `title` của ô — để đợt sau vì `Dispatch.razor` đang bị plan song song khoá.
+
+**Delta hành vi:** khi dừng vì lỗi toàn cục, runner KHÔNG in dòng "⚠ CÒN DÒNG CHƯA CHẠY" nữa (nhãn của dòng đó là
+"hết tk khả dụng / captcha" — sai ngữ cảnh). Tiến độ không mất: `ScrapeProgressStore` chỉ ghi phần đã xong nên
+▶ Tiếp tục sẽ chạy nốt sau khi gia hạn key.
+
+**Giới hạn đã biết:** lý do khoá theo `BigsellerId` — hub giao 2 shop CÙNG một tk BigSeller mà cả hai cùng kết luận
+một nhịp thì chỉ assignment lấy trước nhận được lý do đẹp, cái sau rơi về `"stopped"` như cũ.
+`AssignmentWorker`/`ScrapeViewModel` phụ thuộc Avalonia nên không unit-test được; phần đó chỉ nghiệm chứng bằng
+đọc code + build sạch.

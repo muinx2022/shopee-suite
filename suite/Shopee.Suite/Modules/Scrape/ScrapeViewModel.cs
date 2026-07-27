@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Collections.ObjectModel;
 using System.IO;
 using Avalonia.Media;
@@ -51,6 +52,10 @@ public sealed partial class ScrapeViewModel : ModuleViewModelBase
     // Phiên chạy hiện tại (sống khi IsBusy) — chứa pool tk Shopee dùng chung + registry job để
     // chạy/dừng RIÊNG từng tk giữa chừng. null = đang rảnh.
     private RunSession? _session;
+
+    // Lý do job bị DỪNG vì lỗi hạ tầng TOÀN CỤC (key proxy chết), theo tk BigSeller — xem TakeJobFatal.
+    // ConcurrentDictionary: ghi từ event runner (luồng nền), đọc từ vòng nhận việc của AssignmentWorker.
+    private readonly ConcurrentDictionary<string, string> _jobFatal = new(StringComparer.Ordinal);
 
     // Bảng màu nền NHẠT phân biệt process theo tk BigSeller (mỗi job 1 màu, xoay vòng) — chạy nhiều tk dễ nhìn.
     private static readonly IBrush[] JobPalette = BuildPalette();
@@ -352,6 +357,9 @@ public sealed partial class ScrapeViewModel : ModuleViewModelBase
     {
         var target = h.Target;
         var account = target.Account;
+        // Lượt chạy MỚI → xoá lý do "dừng vì lỗi hạ tầng" của lượt TRƯỚC (job chạy tay không ai lấy nên có thể
+        // còn đọng) → việc Hub-giao lần này không bị kết luận bằng lý do cũ.
+        _jobFatal.TryRemove(account.Id, out _);
         // Log gắn tk này → ghi vào CẢ buffer gộp lẫn buffer riêng của acc (tab log per-acc đợt sau bind vào).
         void LogA(string m) => LogAcc(account.Id, account.DisplayName, m);
         // Mỗi lượt chạy hiện log TƯƠI của acc → xoá phần XEM buffer riêng (file vẫn giữ đầy đủ).
@@ -719,6 +727,18 @@ public sealed partial class ScrapeViewModel : ModuleViewModelBase
             // Xóa profile trên luồng nền (best-effort, không chặn UI, tự nuốt lỗi) — Brave của chunk đã StopAsync.
             _ = Task.Run(() => DeleteAccountProfilesBestEffort(id, label, account.Id, bigSellerName));
         };
+        runner.JobFatal += reason =>
+        {
+            // LỖI HẠ TẦNG TOÀN CỤC (key proxy chết) → runner đã DỪNG job (không vá, KHÔNG bỏ dòng nào). Ghi lý do
+            // gọn để AssignmentWorker báo 'failed' lên Hub; việc chạy TAY thì chỉ có dòng log này.
+            _jobFatal[account.Id] = ScrapeFailurePolicy.FleetWideReason(reason);
+            OnUi(() =>
+            {
+                var text = $"⛔ [{bigSellerName}] DỪNG job: {reason} — mọi tk Shopee dùng CHUNG key proxy này nên đổi tk vô ích. Gia hạn key rồi Tiếp tục.";
+                LogLines.Add(text);
+                AccountLogs.Get(account.Id, bigSellerName).Add(text);
+            });
+        };
         runner.BigSellerNeedLogin += reason => OnUi(() =>
         {
             // Tk BigSeller mất phiên ("log in first") → job tk này đã bị dừng. Báo rõ để user đăng nhập lại.
@@ -753,6 +773,13 @@ public sealed partial class ScrapeViewModel : ModuleViewModelBase
             LogAcc(bsId, bsName, $"⚠ [{bsName}] Lỗi xóa profile tk \"{label}\": {ex.Message}");
         }
     }
+
+    /// <summary>LẤY-RỒI-XOÁ lý do job của tk BigSeller này bị DỪNG vì lỗi hạ tầng TOÀN CỤC (key proxy chết);
+    /// null = không có. Cho <c>AssignmentWorker</c> kết luận việc Hub-giao là 'failed' kèm lý do người-đọc-được
+    /// thay vì "stopped" trống nghĩa. Lấy-rồi-xoá (như <c>TakeAssignmentOutcome</c> của Search) để lý do chỉ
+    /// dùng cho ĐÚNG một lần kết luận.</summary>
+    public string? TakeJobFatal(string bigSellerAccountId) =>
+        _jobFatal.TryRemove(bigSellerAccountId, out var reason) ? reason : null;
 
     /// <summary>Tiền-kiểm điều kiện scrape 1 đích (kho tk Shopee, Brave, cấu hình) — KHÔNG mở dialog.
     /// Cho <c>AssignmentWorker</c> kiểm TRƯỚC khi chạy để khỏi modal + khỏi kẹt việc 'running'.</summary>

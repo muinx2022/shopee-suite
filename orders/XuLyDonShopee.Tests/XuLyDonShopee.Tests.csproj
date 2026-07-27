@@ -29,6 +29,10 @@
        Playwright/ClosedXML/WMI). MachineSlots là luật SUẤT LÀM VIỆC dùng chung hub↔client, thuần BCL. -->
   <ItemGroup>
     <Compile Include="..\..\suite\Shopee.Core\Coordination\MachineSlots.cs" Link="Shared\Coordination\MachineSlots.cs" />
+    <!-- Luật DỪNG JOB khi key proxy chết: 2 file thuần BCL (ProxyFailure + luật quyết định của ScrapeRunner).
+         Bắt nhầm lỗi proxy lẻ thành lỗi toàn cục sẽ giết oan job đang chạy → phải có test cả ca âm tính. -->
+    <Compile Include="..\..\suite\Shopee.Core\Proxy\ProxyFailure.cs" Link="Shared\Proxy\ProxyFailure.cs" />
+    <Compile Include="..\..\suite\Shopee.Module.MultiBrave\ScrapeFailurePolicy.cs" Link="Shared\Scrape\ScrapeFailurePolicy.cs" />
   </ItemGroup>
 
 </Project>

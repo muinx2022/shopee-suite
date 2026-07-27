@@ -409,12 +409,16 @@ public sealed class AssignmentWorker : IDisposable
                 _inflight.TryRemove(f.A.Id, out _);
                 continue;
             }
+            // Scrape dừng vì LỖI HẠ TẦNG TOÀN CỤC (key proxy chết): ledger chỉ thấy 'stopped' — vô nghĩa với người
+            // đọc. Lấy lý do runner để lại → 'failed' kèm lý do thật. KHÔNG 'requeue': key hết hạn thì thử lại 6
+            // lần cũng vô ích, chỉ tổ đốt thêm dòng.
+            var fatal = f.A.Op == "scrape" ? _scrape.TakeJobFatal(f.A.BigsellerId) : null;
             var status = await hub.FetchLedgerStatusAsync(f.A.CoordId);
-            var ok = status == "completed";
+            var ok = fatal is null && status == "completed";
             await hub.ReportAssignmentAsync(f.A.Id, ok ? "done" : "failed",
-                ok ? null : (f.SeenRunning ? (status ?? "dừng dở") : "không khởi động được (có thể bị chặn khoá)"));
+                ok ? null : fatal ?? (f.SeenRunning ? (status ?? "dừng dở") : "không khởi động được (có thể bị chặn khoá)"));
             if (ok) HubLog.Ok($"✔ Xong {Describe(f.A)}");
-            else HubLog.Warn($"■ {Describe(f.A)} — {(f.SeenRunning ? (status ?? "dừng dở") : "không khởi động được")}");
+            else HubLog.Warn($"■ {Describe(f.A)} — {fatal ?? (f.SeenRunning ? (status ?? "dừng dở") : "không khởi động được")}");
 
             if (AutoSyncHandoff && f.A.Op == "scrape" && ok && CoordinationRuntime.ConfigSync is { } cs)
                 TaskExt.FireAndForget(cs.PushAsync(), "đẩy cấu hình/cookie sau scrape (hand-off)");

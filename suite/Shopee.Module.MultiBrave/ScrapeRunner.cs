@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using OpenMultiBraveLauncherV3;
 using Shopee.Core.Browser;
+using Shopee.Core.Proxy;
 
 namespace Shopee.Modules.MultiBrave;
 
@@ -63,6 +64,10 @@ public sealed class ScrapeRunner
     public event Action<int, int>? RowsCompleted;
     /// <summary>(lý do) — tk BigSeller mất phiên ("log in first"). Toàn bộ job tk này bị dừng; cần đăng nhập lại BigSeller.</summary>
     public event Action<string>? BigSellerNeedLogin;
+    /// <summary>(lý do) — LỖI HẠ TẦNG TOÀN CỤC (key proxy chết): mọi tk Shopee đều hỏng như nhau nên job đã bị
+    /// DỪNG NGAY — không cooldown, không vá bằng tk khác, KHÔNG bỏ qua dòng nào. Job coi như kết thúc ở trạng
+    /// thái LỖI: handler ngoài lấy lý do này báo 'failed' lên Hub.</summary>
+    public event Action<string>? JobFatal;
 
     public ScrapeRunner(string workbookPath, string videoOutputDir, string? braveExe = null, string sourceUserData = "", string bigSellerAccountName = "",
         string bigSellerKiotKey = "", string bigSellerRegion = "random", string bigSellerProxyType = "http",
@@ -125,7 +130,8 @@ public sealed class ScrapeRunner
     //    GIỮA CHỪNG, phần còn lại thành việc VÁ (ưu tiên worker rảnh nhặt ngay), KHÔNG tính vào frontier.
     //    MỖI khối mượn 1 tk MỚI (nghỉ lâu nhất) từ KHO CHUNG `pool` rồi trả lại → xoay vòng toàn kho,
     //    cho tk nghỉ. Tk lỗi: CAPTCHA → pool.Quarantine (loại khỏi kho); PROXY/lỗi khác → pool.Cooldown
-    //    (nghỉ rồi tự quay lại) → khối dở vá bằng tk khác. workerCount = số cửa sổ Brave song song. ──
+    //    (nghỉ rồi tự quay lại) → khối dở vá bằng tk khác; lỗi HẠ TẦNG TOÀN CỤC (key proxy chết, mọi tk dùng
+    //    chung) → DỪNG cả job (JobFatal), không vá/không bỏ dòng. workerCount = số cửa sổ Brave song song. ──
     public async Task RunAutoAsync(
         IScrapeAccountPool pool, int workerCount, IReadOnlyList<(int from, int to)> segments,
         int rowsPerChunk, string? bigSellerCookieFile, CancellationToken ct)
@@ -140,10 +146,17 @@ public sealed class ScrapeRunner
         using var jobCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         // Đếm login-first LIÊN TIẾP toàn job (reset khi có chunk chạy được) — chỉ dừng job khi vượt ngưỡng.
         var needLoginStreak = new int[1];
+        // Lý do DỪNG JOB vì lỗi hạ tầng TOÀN CỤC (key proxy chết). Worker gặp trước ghi vào đây (một lần) rồi
+        // cancel jobCts để mọi worker khác dừng theo; sau khi tất cả dừng, runner báo ra ngoài qua JobFatal.
+        var jobFatal = new string?[1];
         var tasks = Enumerable.Range(1, workers)
-            .Select(slot => AutoWorkerAsync(slot, work, pool, bigSellerCookieFile, jobCts, needLoginStreak))
+            .Select(slot => AutoWorkerAsync(slot, work, pool, bigSellerCookieFile, jobCts, needLoginStreak, jobFatal))
             .ToArray();
         await Task.WhenAll(tasks);
+
+        // Lỗi TOÀN CỤC → job KẾT THÚC Ở TRẠNG THÁI LỖI. Không in thêm dòng "còn dòng chưa chạy" (đã dừng có
+        // chủ đích, dòng chưa chạy KHÔNG mất: Tiếp tục sẽ chạy nốt phần thiếu sau khi gia hạn key).
+        if (jobFatal[0] is { } fatal) { JobFatal?.Invoke(fatal); return; }
 
         // Run dừng mà vẫn còn dòng (vd mọi tk dính captcha) → báo RÕ toàn bộ đoạn chưa chạy để chạy lại.
         if (!ct.IsCancellationRequested)
@@ -181,7 +194,7 @@ public sealed class ScrapeRunner
 
     private async Task AutoWorkerAsync(
         int slot, WorkAllocator work, IScrapeAccountPool pool, string? cookieFile,
-        CancellationTokenSource jobCts, int[] needLoginStreak)
+        CancellationTokenSource jobCts, int[] needLoginStreak, string?[] jobFatal)
     {
         var ct = jobCts.Token;
         var key = "P" + slot;
@@ -265,28 +278,44 @@ public sealed class ScrapeRunner
                         continue;
                     }
 
-                    // Phân loại tk lỗi: CAPTCHA → loại khỏi kho (xử lý sau); PROXY/lỗi khác → cho nghỉ rồi
-                    // tự quay lại kho; không lỗi → trả về kho ngay (phần dở sẽ vá bằng tk khác đang rảnh).
-                    if (res.Errored)
+                    // Phân loại tk lỗi (luật thuần ScrapeFailurePolicy.Decide): CAPTCHA → loại khỏi kho (xử lý
+                    // sau); lỗi HẠ TẦNG TOÀN CỤC → dừng cả job; PROXY/lỗi khác → cho nghỉ rồi tự quay lại kho;
+                    // không lỗi → trả về kho ngay (phần dở sẽ vá bằng tk khác đang rảnh).
+                    var action = ScrapeFailurePolicy.Decide(res.Errored, res.IsCaptcha, res.Reason);
+                    if (action == ScrapeFailureAction.StopJob)
                     {
-                        if (res.IsCaptcha)
-                        {
-                            // Captcha → LOẠI tk khỏi khung NGAY lần đầu (bỏ grace 2 lần). Khung thiếu → bù tk
-                            // thay thế; phần dòng dở VÁ bằng tk khác (logic dưới). Báo lên UI để XÓA profile
-                            // (ép login mới lần chạy sau); KHÔNG đánh dấu tk lỗi (không Disabled/lưới lỗi/Hub).
-                            pool.Quarantine(spec);
-                            AccountCaptchaDropped?.Invoke(spec.Id, spec.Label);
-                            InstanceStatus?.Invoke(key, "🚫 Captcha");
-                            InstanceLog?.Invoke(key, $"🚫 {spec.Label}: captcha → LOẠI khỏi khung + xóa profile (login mới lần sau), đổi tk khác.");
-                        }
-                        else
-                        {
-                            // Lỗi khác (proxy/đứt/tạm) → cho tk nghỉ. Lần 1 nghỉ ngắn (15s); lỗi ≥2 lần liên
-                            // tiếp → nghỉ dài (90s) "để dành". Phần dở vá bằng tk khác đang rảnh (không chờ tk này).
-                            var cd = pool.Cooldown(spec);
-                            InstanceLog?.Invoke(key, $"⏸ {spec.Label}: {res.Reason} → cho tk nghỉ {cd.Seconds}s, vá phần dở bằng tk khác"
-                                + (cd.SetAside ? " (lỗi 2 lần — nghỉ dài 90s)." : "."));
-                        }
+                        // KEY PROXY CHẾT: cả kho tk Shopee dùng CHUNG một key nên cho tk nghỉ rồi vá bằng tk khác
+                        // đều hỏng y hệt — chính nhánh cooldown bên dưới (trước đây nuốt luôn ca này) đã bỏ qua
+                        // 17 dòng trong 6 phút mà job vẫn báo "đang chạy". Nhả tk NGUYÊN VẸN (không cooldown,
+                        // không tính lần lỗi), báo phần đã cào xong, KHÔNG bỏ dòng nào, rồi dừng CẢ job.
+                        pool.Release(spec);
+                        var doneFatal = res.LastCompletedRow;
+                        if (doneFatal >= from) RowsCompleted?.Invoke(from, Math.Min(doneFatal, to));
+                        // MỘT dòng log mức job (worker nào chạm trước thì ghi) — không spam mỗi tk một dòng.
+                        if (Interlocked.CompareExchange(ref jobFatal[0], res.Reason, null) is null)
+                            InstanceLog?.Invoke("Auto",
+                                "⛔ DỪNG JOB: key proxy hết hạn — mọi tk Shopee dùng chung key này. Gia hạn key rồi chạy lại. "
+                                + $"[{res.Reason}]");
+                        try { jobCts.Cancel(); } catch { }   // các khối P1/P2… đang chạy cũng dừng theo
+                        break;
+                    }
+                    if (action == ScrapeFailureAction.Quarantine)
+                    {
+                        // Captcha → LOẠI tk khỏi khung NGAY lần đầu (bỏ grace 2 lần). Khung thiếu → bù tk
+                        // thay thế; phần dòng dở VÁ bằng tk khác (logic dưới). Báo lên UI để XÓA profile
+                        // (ép login mới lần chạy sau); KHÔNG đánh dấu tk lỗi (không Disabled/lưới lỗi/Hub).
+                        pool.Quarantine(spec);
+                        AccountCaptchaDropped?.Invoke(spec.Id, spec.Label);
+                        InstanceStatus?.Invoke(key, "🚫 Captcha");
+                        InstanceLog?.Invoke(key, $"🚫 {spec.Label}: captcha → LOẠI khỏi khung + xóa profile (login mới lần sau), đổi tk khác.");
+                    }
+                    else if (action == ScrapeFailureAction.Cooldown)
+                    {
+                        // Lỗi khác (proxy/đứt/tạm) → cho tk nghỉ. Lần 1 nghỉ ngắn (15s); lỗi ≥2 lần liên
+                        // tiếp → nghỉ dài (90s) "để dành". Phần dở vá bằng tk khác đang rảnh (không chờ tk này).
+                        var cd = pool.Cooldown(spec);
+                        InstanceLog?.Invoke(key, $"⏸ {spec.Label}: {res.Reason} → cho tk nghỉ {cd.Seconds}s, vá phần dở bằng tk khác"
+                            + (cd.SetAside ? " (lỗi 2 lần — nghỉ dài 90s)." : "."));
                     }
                     else pool.Release(spec);
 
@@ -484,6 +513,9 @@ public sealed class ScrapeRunner
         if (string.Equals(phase, "needlogin", StringComparison.OrdinalIgnoreCase))
             return new ChunkResult(true, string.IsNullOrWhiteSpace(msg) ? "BigSeller mất đăng nhập — cần đăng nhập lại" : msg, 0, false, NeedLogin: true);
         if (captcha) return new ChunkResult(true, "Captcha/verify", 0, true, CaptchaUrl: cfg.CaptchaUrl);   // IsCaptcha=true → quarantine
+        // Lỗi HẠ TẦNG TOÀN CỤC (key proxy chết) → GIỮ NGUYÊN thông điệp gốc (KEY_EXPIRED…) thay vì gộp thành
+        // "Lỗi proxy" ở dòng dưới: AutoWorkerAsync cần chuỗi này để nhận ra ca dừng-job + báo lý do thật lên Hub.
+        if (ProxyFailure.IsFleetWideProxyFailure(msg)) return new ChunkResult(true, msg, 0, false);
         if (proxy) return new ChunkResult(true, "Lỗi proxy", 0, false);
         if (string.Equals(phase, "error", StringComparison.OrdinalIgnoreCase))
             return new ChunkResult(true, string.IsNullOrWhiteSpace(msg) ? "Lỗi" : msg, 0, false);
