@@ -1,4 +1,4 @@
-@page "/dispatch"
+﻿@page "/dispatch"
 @* Trang GIAO VIỆC hàng loạt, trục MÁY-first: chọn một máy client ở hàng thẻ đầu trang ("tôi đang đứng ở máy
    PC-01"), rồi bấm THẲNG nút hành động trên từng dòng shop — một click = một lệnh, không qua bước trung gian.
    Trang Fleet ("/") vẫn là chỗ xem SÂU 1 shop; trang này chỉ lo giao việc cho NHIỀU shop.
@@ -265,7 +265,18 @@
                 <label>Reload giây (chỉ Import/Update đọc) <input type="number" @bind="_optReload" style="width:70px" /></label>
                 <label><input type="checkbox" @bind="_optFromClaimed" /> Import từ tab "Đã nhận" (chỉ Import đọc)</label>
             </div>
-            <span class="stat">0 = dùng cấu hình của máy client.</span>
+            <div class="optsrow">
+                <span class="stat">0 = dùng cấu hình của máy client.</span>
+                <span class="grow"></span>
+                @* Huỷ theo MÁY: dọn sạch mọi việc hub-giao đang chạy/chờ của máy đang chọn — không phải bấm ✖ từng ô. *@
+                <button class="btn danger sm" disabled="@(MachineOpenCount == 0)"
+                        title="Huỷ MỌI việc hub-giao đang chạy/chờ trên máy @HostName(_selMachine). Việc chạy TAY không huỷ được từ hub."
+                        @onclick="CancelByMachine">
+                    @(_confirmCancel == "mach"
+                        ? $"Bấm lần nữa để huỷ {MachineOpenCount} việc trên {HostName(_selMachine)}"
+                        : $"✖ Huỷ mọi việc trên máy này ({MachineOpenCount})")
+                </button>
+            </div>
         </div>
     }
     else
@@ -331,6 +342,16 @@
                             <button class="opbtn @ab.Css" disabled="@ab.Disabled" title="@ab.Title"
                                     @onclick="() => OnAcctClick(g, op)">@ab.Label</button>
                         }
+                        @* Huỷ theo ACC: 1 acc chỉ chạy 1 máy nên huỷ ở đây là dọn sạch acc đó, không cần chọn đúng
+                           máy trước. Hiện cả khi acc đang do máy KHÁC giữ (đó chính là lúc cần huỷ nhất). *@
+                        @{ var accOpen = AcctOpenCount(g); }
+                        <button class="opbtn @(accOpen > 0 ? "cancel" : "blocked")" disabled="@(accOpen == 0)"
+                                title="Huỷ MỌI việc hub-giao đang chạy/chờ của tài khoản @g.AccountName (kể cả trên máy khác)."
+                                @onclick="() => CancelByAcct(g)">
+                            @(_confirmCancel == "acct|" + g.AccountId
+                                ? $"Bấm lần nữa để huỷ {accOpen} việc"
+                                : $"✖ Huỷ cả acc ({accOpen})")
+                        </button>
                     </span>
                 </td>
             </tr>
@@ -502,6 +523,9 @@ else
     private bool _optFromClaimed;
     private string _result = "";
     private string _confirmAcct = "";     // "accountId|op" đang chờ bấm-lần-nữa (rỗng = không có)
+    /// <summary>Nút HUỶ hàng loạt đang chờ bấm-lần-nữa: "mach" (theo máy) hoặc "acct|&lt;id&gt;" (theo tài khoản).
+    /// Rỗng = không có. Tách khỏi <see cref="_confirmAcct"/> để hai cụm không tranh nhau một biến.</summary>
+    private string _confirmCancel = "";
 
     private List<MachineBudget> _budgets = new();
     private Dictionary<string, string> _holds = new(StringComparer.Ordinal);
@@ -604,6 +628,9 @@ else
             var bar = _confirmAcct.LastIndexOf('|');
             if (bar <= 0 || !_visible.Any(r => r.AccountId == _confirmAcct[..bar])) _confirmAcct = "";
         }
+        // Cụm HUỶ-theo-acc đang chờ mà acc rơi khỏi bộ lọc → huỷ chờ (cú bấm thứ 2 sẽ trúng acc khác).
+        if (_confirmCancel.StartsWith("acct|", StringComparison.Ordinal)
+            && !_visible.Any(r => r.AccountId == _confirmCancel[5..])) _confirmCancel = "";
     }
 
     private bool MatchState(Row r) => _fState switch
@@ -667,6 +694,7 @@ else
     private void DropMachine(string why)
     {
         _selMachine = "";
+        _confirmCancel = "";
         _confirmAcct = "";
         _machineMsg = why;
     }
@@ -796,7 +824,7 @@ else
     {
         _selMachine = machineId;
         _selHost = HostName(machineId);
-        _confirmAcct = "";
+        _confirmAcct = ""; _confirmCancel = "";
         _result = "";
         _machineMsg = "";
         _kpi = "";
@@ -1001,6 +1029,54 @@ else
             : new($"▶ {OpLabel(op)}", "run", "run", $"Giao {OpLabel(op)} · {r.ShopName} cho {HostName(_selMachine)}.", note);
     }
 
+    // ── Huỷ HÀNG LOẠT theo máy / theo tài khoản ──────────────────────────────────
+    /// <summary>Việc hub-giao đang mở (queued/running) của máy đang chọn — đếm cả việc máy đã claim lẫn việc mới
+    /// ghim chưa claim. Việc chạy TAY không có assignment nên KHÔNG nằm ở đây (hub không huỷ được).</summary>
+    private int MachineOpenCount => _selMachine.Length == 0 ? 0 : OpenAssignmentsOfMachine().Count;
+
+    private List<Assignment> OpenAssignmentsOfMachine() => Snap.Assignments
+        .Where(a => a.Status is "queued" or "running"
+                    && (a.ClaimedByMachineId == _selMachine || a.TargetMachineId == _selMachine))
+        .ToList();
+
+    private int AcctOpenCount(RowGroup g) => Snap.Assignments
+        .Count(a => a.BigsellerId == g.AccountId && a.Status is "queued" or "running");
+
+    /// <summary>Huỷ 2 bước: bấm lần đầu chỉ ARM (đổi nhãn), lần hai mới huỷ thật. Chỉ MỘT nút ở trạng thái chờ
+    /// tại một thời điểm; đổi máy/lọc/tab đều huỷ trạng thái chờ (xem nơi gán <c>_confirmCancel = ""</c>).</summary>
+    private bool Arm(string key)
+    {
+        if (_confirmCancel == key) { _confirmCancel = ""; return true; }
+        _confirmCancel = key;
+        _confirmAcct = "";   // không để hai cụm cùng ở trạng thái chờ
+        _result = "";
+        return false;
+    }
+
+    private void CancelByMachine()
+    {
+        if (_selMachine.Length == 0) return;
+        var open = OpenAssignmentsOfMachine();
+        if (open.Count == 0) { _confirmCancel = ""; return; }
+        if (!Arm("mach")) return;
+
+        foreach (var a in open) Db.CancelAssignment(a.Id);
+        _result = $"✖ Đã huỷ {open.Count} việc trên máy {HostName(_selMachine)}";
+        FleetState.Refresh();   // 1 lần sau vòng lặp
+    }
+
+    private void CancelByAcct(RowGroup g)
+    {
+        var open = Snap.Assignments
+            .Where(a => a.BigsellerId == g.AccountId && a.Status is "queued" or "running").ToList();
+        if (open.Count == 0) { _confirmCancel = ""; return; }
+        if (!Arm("acct|" + g.AccountId)) return;
+
+        foreach (var a in open) Db.CancelAssignment(a.Id);
+        _result = $"✖ Đã huỷ {open.Count} việc của tài khoản {g.AccountName}";
+        FleetState.Refresh();
+    }
+
     // Một click = MỘT lệnh, KHÔNG xác nhận 2 bước (nhẹ tay, và huỷ lại được ngay bằng chính nút đó).
     private void OnOpClick(Row r, string op)
     {
@@ -1018,7 +1094,7 @@ else
         }
         else return;   // nút disable (phòng thân: browser đã chặn bằng thuộc tính disabled)
 
-        _confirmAcct = "";
+        _confirmAcct = ""; _confirmCancel = "";
         FleetState.Refresh();
     }
 
@@ -1073,13 +1149,13 @@ else
     }
 
     // ── Bộ lọc / tab ──────────────────────────────────────────────────────────────
-    private void OnFilterChanged() { _confirmAcct = ""; Rebuild(); UpdateUrl(); }
-    private void SetState(string key) { _fState = key; _confirmAcct = ""; Rebuild(); UpdateUrl(); }
+    private void OnFilterChanged() { _confirmAcct = ""; _confirmCancel = ""; Rebuild(); UpdateUrl(); }
+    private void SetState(string key) { _fState = key; _confirmAcct = ""; _confirmCancel = ""; Rebuild(); UpdateUrl(); }
 
     private void SetTab(string tab)
     {
         _tab = tab;
-        _confirmAcct = "";
+        _confirmAcct = ""; _confirmCancel = "";
         if (_tab == "orders") ReloadOrders();
         UpdateUrl();
     }

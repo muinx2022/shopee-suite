@@ -1,4 +1,4 @@
-/* ==================== Shopee Hub — TailAdmin-style (light content + dark sidebar) ==================== */
+﻿/* ==================== Shopee Hub — TailAdmin-style (light content + dark sidebar) ==================== */
 :root {
     color-scheme: light;
     --bg: #f1f5f9;            /* content background (slate-100) */
@@ -457,6 +457,8 @@ html.dark .mcard.sel .mc-host { color: var(--sidebar-ic-active); }
 .opbtn.run { background: var(--info-bg); color: var(--primary); }
 .opbtn.done { background: var(--success-bg); color: var(--success); }
 .opbtn.busy { background: var(--danger-bg); color: var(--danger); }
+/* Nút huỷ hàng loạt (theo máy / theo acc) — cùng tông đỏ nhạt với nút ✖ Huỷ của từng ô. */
+.opbtn.cancel { background: var(--danger-bg); color: var(--danger); }
 .opbtn.blocked { background: var(--gray); border-color: var(--stroke); color: var(--body); }
 html.dark .opbtn.run { color: var(--sidebar-ic-active); }
 
