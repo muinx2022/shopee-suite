@@ -38,6 +38,11 @@ dưới mắt hub. Full chiếm **cả hai suất** → hub thấy 2 client.
 KHÔNG được coi 2 suất là 2 máy độc lập rồi giao gấp đôi việc → heartbeat mang thêm `HostId` (id PC thật) để hub
 gộp quỹ theo PC.
 
+Người dùng đã làm rõ: **module Đơn hàng chỉ chạy ĐÚNG 1 cửa sổ Brave** (khớp cầu nối WS cổng cố định, 1 tài khoản
+một lúc). Nên chuyện tranh tài nguyên KHÔNG đáng lo, và **không cần** luật ưu tiên/chặn chéo. Ở đợt 2, quy tắc cho
+máy Full rút gọn còn đúng một dòng: **quỹ Brave của suất Workspace = `MaxBrave − 1`** (chừa 1 khung cho suất đơn
+hàng). Đợt 1 KHÔNG đụng tới phần tính quỹ.
+
 ## 2. Phạm vi
 
 **Làm (đợt 1 — nền tảng):**
@@ -52,7 +57,8 @@ gộp quỹ theo PC.
 - Hub chặn giao việc BigSeller cho suất đơn hàng (việc sẽ nằm `queued` mãi vì suất đó không claim).
 
 **Không làm (để đợt 2):**
-- `BusyBrave` (báo quỹ Brave thật) và luật ưu tiên đơn hàng trên máy Full.
+- Tính quỹ Brave cho máy Full (`MaxBrave − 1` chừa khung cho suất đơn hàng). KHÔNG làm luật ưu tiên/chặn chéo —
+  đơn hàng chỉ 1 cửa sổ Brave nên không đáng lo.
 - Backend giao việc cho module Đơn hàng (assignment `op='orders'`).
 - Phát hiện/xử lý xung đột khi hai bản cùng đòi một suất (chỉ ghi log ở đợt này).
 - KHÔNG deploy, KHÔNG release client (Fable làm sau khi nghiệm thu).
