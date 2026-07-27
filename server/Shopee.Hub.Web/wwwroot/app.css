@@ -418,11 +418,9 @@ table.grid tr.acctrow:hover td { background: var(--gray); }
 }
 
 /* ===== Trang Giao việc (/dispatch) ===== */
-/* Bảng phẳng mọi shop + thanh hành động hàng loạt ở đáy. Chỉ dùng token sẵn có (--card/--stroke/--primary/
-   --info-bg…) nên tự đúng ở cả nền tối; KHÔNG đụng khối CSS của Fleet. */
+/* Chọn MÁY trước (hàng thẻ) → bấm thẳng nút hành động trên từng dòng shop. Chỉ dùng token sẵn có
+   (--card/--stroke/--primary/--info-bg…) nên tự đúng ở cả nền tối; KHÔNG đụng khối CSS của Fleet. */
 .dispatch .bar label { display: flex; align-items: center; gap: 6px; color: var(--body); font-size: 13px; }
-/* Chừa chỗ cho thanh hành động fixed ở đáy (chỉ khi có dòng được tick) → không che mất dòng cuối bảng. */
-.dispatch.hasbulk { padding-bottom: 150px; }
 
 /* Chip lọc trạng thái */
 .chips { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
@@ -433,40 +431,40 @@ table.grid tr.acctrow:hover td { background: var(--gray); }
    bảng token (cùng màu icon nav đang active) cho chữ. */
 html.dark .chip.on { color: var(--sidebar-ic-active); }
 
-/* Ô op = nút mở menu (pill giữ nguyên hình dạng của lưới Fleet) */
-.opcell { display: block; width: 100%; text-align: left; padding: 0; border: 0; background: none; cursor: pointer; font: inherit; }
-.opcell:hover .pill { filter: brightness(.96); }
-tr.picked > td { background: var(--info-bg); }
-table.grid tbody tr.picked:hover > td { background: var(--info-bg); }
+/* Hàng thẻ chọn máy client — thẻ là <button>, máy offline mang thuộc tính disabled THẬT (không bấm được). */
+.mcards { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; margin: 4px 0 16px; }
+.mcard { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 12px 14px; text-align: left; border: 1px solid var(--stroke); border-radius: var(--radius); background: var(--card); box-shadow: var(--shadow); font-family: inherit; cursor: pointer; transition: border-color .13s, background .13s; }
+.mcard:hover:not(:disabled) { border-color: var(--primary); }
+.mcard.sel { border-color: var(--primary); background: var(--primary-soft); box-shadow: inset 0 0 0 1px var(--primary); }
+.mcard:disabled { opacity: .5; cursor: not-allowed; box-shadow: none; }
+.mc-host { font-weight: 700; font-size: 13.5px; color: var(--text); }
+.mc-sub { font-size: 12px; color: var(--body); }
+html.dark .mcard.sel .mc-host { color: var(--sidebar-ic-active); }
 
-/* Menu hành động của 1 ô: DÒNG PHỤ ngay dưới dòng shop (không position:absolute — .tablewrap có
-   overflow-x:auto nên popover tuyệt đối sẽ bị cắt mất). */
-table.grid tbody tr.opmenurow > td { background: var(--gray); border-bottom: 1px solid var(--stroke); }
-.opmenu { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
-.opmenu-head { font-weight: 700; color: var(--text); font-size: 12.5px; margin-right: 4px; }
-.opmenu-item { padding: 5px 11px; border: 1px solid var(--stroke); border-radius: var(--radius-sm); background: var(--card); color: var(--text); font-family: inherit; font-size: 12.5px; cursor: pointer; white-space: nowrap; }
-.opmenu-item:hover { background: var(--primary-soft); border-color: var(--primary); color: var(--primary); }
-.opmenu-none { color: var(--body); font-size: 12.5px; }
+/* Panel tham số của LƯỢT GIAO (chỉ hiện khi đã chọn máy) */
+.optspanel { padding: 0 18px 15px; margin-bottom: 16px; background: var(--gray); border: 1px solid var(--stroke); border-left: 3px solid var(--primary); border-radius: var(--radius); }
+.optspanel .subhead { margin: 14px 0 10px; }
+.optspanel .optsrow { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 18px; margin-bottom: 8px; }
+.optspanel label { display: flex; align-items: center; gap: 6px; color: var(--body); font-size: 13px; }
 
-/* Thanh hành động hàng loạt — bám đáy màn, chừa đúng bề ngang sidebar */
-.bulkbar { position: fixed; left: 250px; right: 0; bottom: 0; z-index: 30; padding: 12px 34px; background: var(--card); border-top: 1px solid var(--stroke); box-shadow: 0 -6px 22px rgba(16, 24, 40, .12); }
-html.dark .bulkbar { box-shadow: 0 -6px 22px rgba(0, 0, 0, .45); }
-.bulkbar .bulkrow { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
-.bulkbar .bulkrow.opts { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--stroke); }
-.bulkbar label { display: flex; align-items: center; gap: 6px; color: var(--body); font-size: 13px; }
-.bulkbar .preview { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 8px; font-size: 12.5px; color: var(--body); }
-.bulkbar .preview .skip { overflow-wrap: anywhere; min-width: 0; }
-/* Một máy trong kế hoạch: "PC-01 ← 3 shop" */
-.plan { display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 20px; font-size: 12px; font-weight: 600; background: var(--info-bg); color: var(--primary); white-space: nowrap; }
-html.dark .plan { color: var(--sidebar-ic-active); }
-.plan.none { background: var(--warning-bg); color: var(--warning); }
+/* Ô op = MỘT nút hành động. min/max-width cố định: nhãn đổi theo nhịp fleet 2s mà cột không nhảy
+   (title mang lời giải thích đầy đủ nên cắt bớt chữ vẫn không mất thông tin). */
+.opbtn { display: inline-block; min-width: 120px; max-width: 210px; padding: 5px 11px; border: 1px solid transparent; border-radius: 20px; background: var(--gray); color: var(--text); font-family: inherit; font-size: 12px; font-weight: 600; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; cursor: pointer; transition: filter .13s; }
+.opbtn:hover:not(:disabled) { filter: brightness(.95); }
+.opbtn:disabled { cursor: not-allowed; }
+.opbtn.run { background: var(--info-bg); color: var(--primary); }
+.opbtn.done { background: var(--success-bg); color: var(--success); }
+.opbtn.busy { background: var(--danger-bg); color: var(--danger); }
+.opbtn.blocked { background: var(--gray); border-color: var(--stroke); color: var(--body); }
+html.dark .opbtn.run { color: var(--sidebar-ic-active); }
 
-/* Màn hẹp: sidebar co còn icon-rail 64px (KHÔNG ẩn hẳn) → thanh hành động phải bám 64px, không phải 0.
+/* Cụm nút mức tài khoản trên dòng nhóm ("▶ Scrape cả acc"…) */
+table.grid tr.acctrow .acctacts { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-left: 10px; }
+
+/* Màn hẹp: nút bấm-được-bằng-ngón-tay + panel bớt padding.
    Khối này PHẢI nằm SAU khối gốc ở trên: cùng độ đặc hiệu nên rule đứng sau mới thắng. */
 @media (max-width: 920px) {
-    .bulkbar { left: 64px; padding: 10px 14px; }
-    .bulkbar .bulkrow { gap: 8px; }
-    /* Thanh cao hơn ở khung hẹp (control xuống dòng) → chừa thêm chỗ cho dòng cuối bảng. */
-    .dispatch.hasbulk { padding-bottom: 230px; }
-    .opmenu-item { padding: 8px 12px; }
+    .opbtn { min-width: 100px; padding: 8px 11px; }
+    .optspanel { padding: 0 13px 13px; }
+    .optspanel .optsrow { gap: 10px 12px; }
 }

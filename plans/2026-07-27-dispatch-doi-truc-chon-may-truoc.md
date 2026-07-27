@@ -1,7 +1,7 @@
 # Plan: Trang Giao việc đổi trục — chọn MÁY trước, bấm action thẳng trên dòng
 
 - **Ngày:** 2026-07-27
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-dev`)
 
 ## 1. Bối cảnh & mục tiêu
@@ -204,4 +204,24 @@ máy trong URL không còn tồn tại **hoặc đang offline** → bỏ qua, kh
 
 ---
 
-## Báo cáo thực thi (Opus điền sau khi xong)
+## Báo cáo thực thi
+
+**Sửa:** `Dispatch.razor` (viết lại nhánh BigSeller: +230 / −353), `wwwroot/app.css`, `App.razor` (v=29),
+`XuLyDonShopee.Tests.csproj`. **Xoá:** `Services/DispatchBalancer.cs`, `DispatchBalancerTests.cs`.
+`Fleet.razor` + tab Đơn hàng không đụng.
+
+**Nghiệm thu (Fable tự chạy):**
+- `dotnet build ShopeeSuite.sln` → 0 Warning, 0 Error.
+- `dotnet test orders/XuLyDonShopee.Tests` → **1044/1044** (đúng −12 do xoá test balancer).
+- `grep -rn DispatchBalancer server/ suite/ orders/` → **không còn kết quả** trong mã nguồn.
+- Đọc lại `Btn()` / `AcctBtn()` / `SelectMachine()` / `DropMachine()`: đúng bảng luật trong plan; nút disable dùng
+  thuộc tính `disabled` thật (`OpBtn.Disabled => Act.Length == 0`), mỗi trường hợp có `title` riêng.
+
+**Delta hành vi cần biết:** trang `/dispatch` KHÔNG còn đặt-tay ledger (✓ Đánh dấu xong / ↺ Reset) — hai mục đó chỉ
+sống trong menu ô của bản cũ, mà mô hình mới bỏ menu. Chức năng vẫn còn nguyên ở trang Fleet (combo `.cellset`).
+Cùng lý do, `_homes` + `Db.AccountHomes()` bị bỏ khỏi trang (chỉ balancer dùng).
+
+**Opus tự quyết ngoài plan (đã soi, chấp nhận):** `MachineBudget` khai lại thành record cục bộ trong Dispatch.razor
+(file gốc bị xoá) + thêm `Version`/`LastSeen` cho thẻ máy; bấm lại thẻ đang chọn = bỏ chọn; nút cả-acc disable thêm
+khi 0 dòng bấm được; assignment mở không ghim máy nào vẫn cho huỷ (kẻo ô kẹt disable vĩnh viễn); `.opbtn` thêm
+`max-width` + ellipsis, nội dung đầy đủ nằm trong `title`.
