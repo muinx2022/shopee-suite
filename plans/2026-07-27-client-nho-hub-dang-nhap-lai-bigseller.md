@@ -1,7 +1,7 @@
 # Plan: Client gặp verify BigSeller → nhờ HUB đăng nhập lại → kéo cookie về, không phải gõ mã ở client
 
 - **Ngày:** 2026-07-27
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành (hub chờ deploy · client chờ release)
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-dev`)
 
 ## 1. Bối cảnh & mục tiêu
@@ -142,3 +142,25 @@ Một singleton nhỏ, thuần logic + gọi `HubClient` (KHÔNG đụng UI):
 ---
 
 ## Báo cáo thực thi (Opus điền sau khi xong)
+
+**File sửa/tạo:** `HubRoutes.cs` (+`BigSellerRelogin`), `HubDtos.cs` (+2 record), `HubClient.cs` (+POST/GET),
+**`BigSellerReloginCoordinator.cs` (MỚI)**, `CoordinationRuntime.cs` (`Relogin` + dispose ở `Reconnect`),
+`ScrapeViewModel.cs:742`, `Shopee.Module.UpdateProduct/Engine/BigSellerAutoLogin.cs` (nhánh `NeedsOtp`),
+`AssignmentWorker.cs` (2 nhánh requeue), `ClientApiEndpoints.cs` (POST+GET), **`BigSellerReloginCoordinatorTests.cs`
+(MỚI, 13 test)** + link file vào `XuLyDonShopee.Tests.csproj`.
+
+**Kết quả:** `dotnet build ShopeeSuite.sln` + `dotnet build server/Shopee.Hub.Web` = 0 warning / 0 error;
+`dotnet test orders/XuLyDonShopee.Tests` = 1102 xanh (1089 cũ + 13 mới). Endpoint thử THẬT trên hub chạy local
+(port 8088, data dir tạm): acc không có → `failed` + lý do; acc thiếu mật khẩu → `failed`; acc thật → `Accepted=true`
++`running`, gọi lại ngay → `Accepted=false`+`running`; acc KHÁC lúc hub đang bận → `Accepted=false`+`idle`
+("chờ tới lượt"); GET không tham số → 400; không token → 401; `/manifest`, `/machines/heartbeat` (shape client CŨ),
+`/fleet` không đổi.
+
+**Quyết định ngoài chữ của plan (phiên chính soi lại):**
+1. `BigSellerLoginService` CHƯA có chặn toàn cục (chỉ chặn theo từng acc trong `Start`; `AnyActive` có sẵn nhưng chỉ
+   scheduler dùng). Đã thêm chặn **ở endpoint** (không đụng lõi login): `login.AnyActive` → trả
+   `Accepted=false, Status="idle"` để client xếp hàng, cùng luật với `BigSellerReloginScheduler`.
+2. Import/Update nối ở nhánh `AutoLoginOutcome.NeedsOtp` của `BigSellerAutoLogin` (module UpdateProduct) — đó là
+   điểm DUY NHẤT trên đường import/update phát hiện "BigSeller đòi mã verify"; `RunOneWorkflowAsync` chỉ có
+   tiền-kiểm `!a.HasCookie`, KHÔNG có tín hiệu mất phiên lúc chạy.
+3. Log tiến trình của coordinator đi lên `HubLog` (tab Log tập trung); ViewModel chỉ tự ghi dòng lúc gọi `Request`.

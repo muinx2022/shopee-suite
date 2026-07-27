@@ -145,6 +145,49 @@ public static class ClientApiEndpoints
             return Results.Json(cfg.UpsertBigSellerAccounts(r));
         });
 
+        // ── MỚI: client NHỜ hub đăng nhập lại 1 acc BigSeller (gặp verify code / mất phiên) ──
+        // Hub có sẵn cả bộ máy: Playwright headless + giải captcha AI + TỰ đọc mã OTP từ hòm thư + nạp lại
+        // device-trust; xong thì ghi TOÀN BỘ cookie vào kho cookies/{acctId}.json để client kéo về. Client chỉ gửi
+        // AccountId — mật khẩu acc/hòm thư KHÔNG đi qua dây.
+        // Accepted=false KHÔNG phải lỗi (client cứ chờ rồi hỏi lại): đã có phiên lo acc này, hoặc hub đang bận
+        // login acc khác. Acc không có / thiếu mật khẩu → Status="failed" + lý do (KHÔNG ném exception).
+        api.MapPost(HubRoutes.BigSellerRelogin, (BigSellerReloginRequest? r, BigSellerLoginService login, FileStoreConfigService cfg, HttpRequest req) =>
+        {
+            if (r is null || string.IsNullOrWhiteSpace(r.AccountId)) return Results.BadRequest();
+            var acctId = r.AccountId.Trim();
+
+            // Đã có phiên cho ĐÚNG acc này (admin/scheduler/máy khác vừa xin) → "đã có người lo", đừng dựng phiên 2.
+            if (login.GetState(acctId) is { Status: "running" or "needsOtp" } cur)
+                return Results.Json(new BigSellerReloginResponse(false, cur.Status, cur.Message));
+
+            var acct = cfg.BigSellerAccounts().FirstOrDefault(a => a.Id == acctId);
+            if (acct is null)
+                return Results.Json(new BigSellerReloginResponse(false, "failed", $"Hub không có acc BigSeller id '{acctId}' (acc chỉ nằm ở máy client?)."));
+            if (string.IsNullOrWhiteSpace(acct.Email) || string.IsNullOrWhiteSpace(acct.Password))
+                return Results.Json(new BigSellerReloginResponse(false, "failed", $"Acc {acct.DisplayName}: hub thiếu Email/Mật khẩu — điền ở trang cấu hình acc rồi thử lại."));
+
+            // KHÔNG quá 1 phiên login ĐỒNG THỜI toàn hub (tính cả phiên admin/scheduler — cùng luật với
+            // BigSellerReloginScheduler.TickAsync): nhiều máy mất phiên một lúc mà login song song thì BigSeller
+            // siết cả cụm. Client giữ acc trong danh sách chờ và xin lại nhịp sau → tự xếp hàng.
+            if (login.AnyActive)
+                return Results.Json(new BigSellerReloginResponse(false, "idle", "Hub đang đăng nhập một acc khác — chờ tới lượt."));
+
+            var started = login.Start(acctId, acct.Email.Trim(), acct.Password, acct.EmailPassword);
+            var machine = string.IsNullOrWhiteSpace(r.MachineId) ? req.Headers["X-Machine-Id"].ToString() : r.MachineId;
+            db.AppendLog(new AppendLogRequest(machine, "", "info",
+                $"bigseller/relogin: xin đăng nhập lại acc {acct.DisplayName} → {(started ? "hub đã bắt đầu" : "đã có phiên đang chạy")}"));
+            var st = login.GetState(acctId);
+            return Results.Json(new BigSellerReloginResponse(started, st?.Status ?? "idle", st?.Message ?? ""));
+        });
+
+        // GET ?accountId= → trạng thái phiên login (chưa có phiên → "idle"). Accepted luôn false (chỉ POST mới mở phiên).
+        api.MapGet(HubRoutes.BigSellerRelogin, (string? accountId, BigSellerLoginService login) =>
+        {
+            if (string.IsNullOrWhiteSpace(accountId)) return Results.BadRequest();
+            var st = login.GetState(accountId.Trim());
+            return Results.Json(new BigSellerReloginResponse(false, st?.Status ?? "idle", st?.Message ?? ""));
+        });
+
         // ── Cấu hình DÙNG CHUNG module Đơn hàng (khối GSheet) ──
         // GET: client kéo về (rỗng = hub chưa cấu hình → client GIỮ NGUYÊN bản local, xem GsheetConfigSync).
         // POST: client vừa sửa ở màn Cài đặt → gộp lên hub, CHỈ field khác trống (không xoá field kia).

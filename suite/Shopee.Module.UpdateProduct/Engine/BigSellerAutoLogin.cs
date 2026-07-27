@@ -1,6 +1,7 @@
 using Microsoft.Playwright;
 using Shopee.Core.Ai;
 using Shopee.Core.BigSeller;
+using Shopee.Core.Coordination;
 
 namespace UpdateProduct;
 
@@ -53,7 +54,15 @@ internal static class BigSellerAutoLogin
                 await BigSellerCookieEngine.TryExportProfileCookiesToFileAsync(debugPort, cookieFile!, log).ConfigureAwait(false);
         }
         else if (outcome == AutoLoginOutcome.NeedsOtp)
-            log?.Invoke("⚠ BigSeller đòi mã xác nhận email (thiết bị mới). Hãy đăng nhập TAY 1 lần trên máy này (Tài khoản → Open BigSeller → login → Save & close) để tạo device-trust; sau đó auto-login chạy được (không cần mã nữa).");
+        {
+            // Device-trust chết → BigSeller đòi mã email. NHỜ HUB đăng nhập lại (hub có mật khẩu + tự giải captcha
+            // + tự đọc mã từ hòm thư) → hub ghi TOÀN BỘ cookie gồm device-trust vào kho → máy này kéo về → lượt sau
+            // auto-login chỉ còn captcha, hết đòi mã. Chưa cấu hình Hub → null → giữ nguyên lời nhắc làm tay.
+            CoordinationRuntime.Relogin?.Request(accountId, "BigSeller đòi mã xác nhận email khi tự đăng nhập");
+            log?.Invoke(CoordinationRuntime.Relogin is null
+                ? "⚠ BigSeller đòi mã xác nhận email (thiết bị mới). Hãy đăng nhập TAY 1 lần trên máy này (Tài khoản → Open BigSeller → login → Save & close) để tạo device-trust; sau đó auto-login chạy được (không cần mã nữa)."
+                : "⚠ BigSeller đòi mã xác nhận email (thiết bị mới) — đã nhờ Hub đăng nhập lại (hub tự đọc mã); cookie device-trust mới sẽ tự về máy này, lượt sau khỏi cần mã.");
+        }
         else
             log?.Invoke("Auto-login thất bại lần này — thử dùng cookie file (có thể vẫn 'login first').");
     }

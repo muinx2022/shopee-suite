@@ -291,6 +291,25 @@ public sealed class HubClient : IDisposable
         return await r.Content.ReadFromJsonAsync<BigSellerUpsertResult>(ct);
     }
 
+    // ── Nhờ Hub đăng nhập lại 1 acc BigSeller (client gặp verify code / mất phiên) ──
+    // Dùng _http (control-plane 8s): payload chỉ 2 chuỗi, và POST chỉ KHỞI ĐỘNG phiên login (không chờ login xong).
+    // Hub CŨ chưa có route → 404 → EnsureSuccessStatusCode/GetFromJsonAsync ném; caller
+    // (BigSellerReloginCoordinator) nuốt thành null = "chưa hỏi được hub", thử lại nhịp sau.
+
+    /// <summary>Xin Hub bắt đầu đăng nhập lại acc này. Accepted=false KHÔNG phải lỗi (đã có phiên đang chạy /
+    /// hub đang bận acc khác) — cứ chờ rồi hỏi lại trạng thái.</summary>
+    public async Task<BigSellerReloginResponse?> RequestBigSellerReloginAsync(string accountId, CancellationToken ct = default)
+    {
+        var r = await _http.PostAsJsonAsync(HubRoutes.BigSellerRelogin, new BigSellerReloginRequest(accountId, _machineId), ct);
+        r.EnsureSuccessStatusCode();
+        return await r.Content.ReadFromJsonAsync<BigSellerReloginResponse>(ct);
+    }
+
+    /// <summary>Trạng thái phiên login của acc trên Hub (chưa có phiên → Status="idle").</summary>
+    public async Task<BigSellerReloginResponse?> GetBigSellerReloginAsync(string accountId, CancellationToken ct = default)
+        => await _http.GetFromJsonAsync<BigSellerReloginResponse>(
+            $"{HubRoutes.BigSellerRelogin}?accountId={Uri.EscapeDataString(accountId)}", ct);
+
     // ── Cấu hình dùng chung module Đơn hàng (khối GSheet) ──
     // Dùng _http (control-plane 8s): payload chỉ 2 chuỗi. GET trả null khi hub CŨ chưa có route (404 →
     // GetFromJsonAsync ném) hoặc body rỗng → caller (HubOrdersConfig) nuốt lỗi và KHÔNG đụng cấu hình local.

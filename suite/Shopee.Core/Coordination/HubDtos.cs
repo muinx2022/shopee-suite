@@ -251,3 +251,12 @@ public sealed record FilePutResponse(bool Ok, int Version, string? Conflict);
 /// <summary>Kết quả upsert acc BigSeller từ client lên hub (POST /bigseller/upsert): số acc mới thêm, số acc đã
 /// có được cập nhật (field chung hoặc shop), tổng số shop mới thêm. Hub KHÔNG bao giờ xoá acc/shop.</summary>
 public sealed record BigSellerUpsertResult(int Added, int Updated, int ShopsAdded);
+
+/// <summary>Client nhờ Hub đăng nhập lại 1 acc BigSeller (gặp verify/mất phiên). <see cref="MachineId"/> để Hub
+/// ghi log biết máy nào xin. CỐ Ý không có mật khẩu: credential nằm SẴN trên hub, đừng đẩy qua dây.</summary>
+public sealed record BigSellerReloginRequest(string AccountId, string MachineId);
+
+/// <summary>Trạng thái phiên login trên Hub. <see cref="Status"/> = idle|running|needsOtp|success|failed
+/// (nguyên văn LoginState.Status). <see cref="Accepted"/> = Hub vừa BẮT ĐẦU phiên mới cho lượt xin này
+/// (false = đã có phiên đang chạy → client cứ chờ phiên đó).</summary>
+public sealed record BigSellerReloginResponse(bool Accepted, string Status, string Message);

@@ -12,6 +12,10 @@ public static class CoordinationRuntime
     public static HttpCoordinationHub? Hub { get; private set; }
     public static HubConfigSync? ConfigSync { get; private set; }
 
+    /// <summary>Nhờ Hub đăng nhập lại acc BigSeller khi máy này gặp verify code / mất phiên (xem
+    /// <see cref="BigSellerReloginCoordinator"/>). null = chưa cấu hình Hub / chế độ không chạy việc BigSeller.</summary>
+    public static BigSellerReloginCoordinator? Relogin { get; private set; }
+
     /// <summary>Nhịp sống của SUẤT ĐƠN HÀNG (chế độ Shopee + nhánh đơn hàng của Full). null = chế độ này không
     /// chiếm suất đơn hàng / chưa cấu hình Hub.</summary>
     public static OrdersSlotHeartbeat? OrdersSlot { get; private set; }
@@ -49,9 +53,11 @@ public static class CoordinationRuntime
         var client = new HubClient(clientCfg, machine.MachineId);
         var hub = new HttpCoordinationHub(client, machine.MachineId);
 
+        var configSync = new HubConfigSync(client);
         Client = client;
-        ConfigSync = new HubConfigSync(client);
+        ConfigSync = configSync;
         Hub = hub;
+        Relogin = NewRelogin(client, configSync);
         Coordination.Hub = hub;                 // gán vào locator để các điểm chạy (scrape/update) dùng
         // Ledger→tiến độ local (resume xuyên máy) do poller tự fold ở lần Hub trả lời ĐẦU TIÊN — tránh race
         // lúc máy-Hub mới bật (server localhost chưa kịp nghe). Xem HttpCoordinationHub.PollAsync.
@@ -91,6 +97,26 @@ public static class CoordinationRuntime
         OrdersSlot = new OrdersSlotHeartbeat(client, MachineIdentity.Shared.MachineId);
     }
 
+    /// <summary>Dựng điều phối "nhờ Hub đăng nhập lại BigSeller" + bật vòng theo dõi. Dòng chữ tiến trình đi lên
+    /// tab Log tập trung (như <c>AssignmentWorker</c>) — người ngồi máy nào cũng đọc được lý do việc dừng.</summary>
+    private static BigSellerReloginCoordinator NewRelogin(HubClient client, HubConfigSync configSync)
+    {
+        var relogin = new BigSellerReloginCoordinator(
+            (acct, ct) => ToState(client.RequestBigSellerReloginAsync(acct, ct)),
+            (acct, ct) => ToState(client.GetBigSellerReloginAsync(acct, ct)),
+            async ct => await configSync.PullCookiesIfNewerAsync(ct));
+        relogin.Log = (_, line) => HubLog.Info(line);
+        relogin.Start();
+        return relogin;
+    }
+
+    /// <summary>DTO trên dây → kiểu thuần BCL của coordinator (null = không hỏi được hub).</summary>
+    private static async Task<HubReloginState?> ToState(Task<BigSellerReloginResponse?> call)
+    {
+        var r = await call.ConfigureAwait(false);
+        return r is null ? null : new HubReloginState(r.Accepted, r.Status ?? "", r.Message ?? "");
+    }
+
     /// <summary>Cấu hình client→Hub đang dùng: máy này là Hub → trỏ thẳng localhost (nhanh, khỏi vòng qua
     /// tunnel); ngược lại dùng cấu hình client đã lưu.</summary>
     private static HubClientConfig ResolveClientConfig()
@@ -116,13 +142,16 @@ public static class CoordinationRuntime
         var oldHub = Hub;
         var oldClient = Client;
         var oldOrders = OrdersSlot;   // suất đơn hàng cũng có Timer → phải dispose, kẻo 2 nhịp song song
+        var oldRelogin = Relogin;     // vòng theo dõi login lại cũng là Timer → dispose y hệt
         Client = null;
         Hub = null;
         ConfigSync = null;
         OrdersSlot = null;
+        Relogin = null;
         Coordination.Hub = NoOpCoordinationHub.Instance;   // về trạng thái "tắt" trước khi dựng lại
         oldHub?.Dispose();     // dừng poller 12s của instance cũ
         oldOrders?.Dispose();  // dừng nhịp suất đơn hàng của instance cũ
+        oldRelogin?.Dispose(); // dừng vòng theo dõi login lại của instance cũ
         oldClient?.Dispose();  // giải phóng 2 HttpClient của client cũ
         // Dựng lại theo ĐÚNG chế độ app (không mặc định InitFromConfig): chế độ Shopee mà dựng suất workspace là
         // máy đơn-hàng-thuần tự nhận việc BigSeller + tranh lease với bản Workspace chạy song song.

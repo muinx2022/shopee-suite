@@ -187,6 +187,14 @@ public sealed class AssignmentWorker : IDisposable
         foreach (var a in await hub.ClaimAssignmentsAsync(role, free))
         {
             if (_inflight.ContainsKey(a.Id)) continue;
+            // Tk BigSeller đang được HUB đăng nhập lại (mất phiên/đòi mã verify) → nhận về cũng chết ngay. TRẢ VỀ
+            // HÀNG ĐỢI, KHÔNG đếm số lần thử (khuôn "chờ quỹ Brave" ngay dưới): login mất vài phút, RequeueOrFail
+            // sẽ báo 'failed' oan sau 6 nhịp. Cookie mới về là nhịp sau claim lại chạy bình thường.
+            if (CoordinationRuntime.Relogin?.IsRelogging(a.BigsellerId) == true)
+            {
+                await hub.ReportAssignmentAsync(a.Id, "requeue", "BigSeller mất phiên — Hub đang đăng nhập lại");
+                continue;
+            }
             var need = RequiredBraves(a);
             // Cạn quỹ giữa lượt (việc trước vừa lấy hết) mà việc này CẦN Brave → TRẢ VỀ HÀNG ĐỢI, KHÔNG đếm số lần
             // thử: chờ quỹ là chuyện BÌNH THƯỜNG có thể lâu; RequeueOrFailAsync sẽ báo 'failed' oan sau 6 nhịp. Dùng
@@ -411,6 +419,16 @@ public sealed class AssignmentWorker : IDisposable
             var fatal = f.A.Op == "scrape" ? _scrape.TakeJobFatal(f.A.BigsellerId) : null;
             var status = await hub.FetchLedgerStatusAsync(f.A.CoordId);
             var ok = fatal is null && status == "completed";
+            // Chưa xong VÌ tk BigSeller mất phiên và Hub đang đăng nhập lại → lỗi TẠM THỜI: trả về hàng đợi
+            // ('requeue', KHÔNG 'failed' và KHÔNG đếm số lần thử) — cookie mới về là claim lại chạy tiếp.
+            if (!ok && CoordinationRuntime.Relogin?.IsRelogging(f.A.BigsellerId) == true)
+            {
+                await hub.ReportAssignmentAsync(f.A.Id, "requeue", "BigSeller mất phiên — Hub đang đăng nhập lại");
+                HubLog.Warn($"⏳ Trả về hàng chờ hub: {Describe(f.A)} — Hub đang đăng nhập lại BigSeller");
+                _liveIds.TryRemove(f.A.Id, out _);
+                _inflight.TryRemove(f.A.Id, out _);
+                continue;
+            }
             await hub.ReportAssignmentAsync(f.A.Id, ok ? "done" : "failed",
                 ok ? null : fatal ?? (f.SeenRunning ? (status ?? "dừng dở") : "không khởi động được (có thể bị chặn khoá)"));
             if (ok) HubLog.Ok($"✔ Xong {Describe(f.A)}");

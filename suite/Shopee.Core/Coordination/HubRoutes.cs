@@ -81,6 +81,12 @@ public static class HubRoutes
     /// acc/shop; hub gộp KHÔNG XÓA (kẻo lượt pull mirror-xoá acc client vừa thêm).</summary>
     public const string BigSellerUpsert = "/bigseller/upsert";
 
+    /// <summary>POST = client NHỜ hub đăng nhập lại 1 acc BigSeller (gặp verify code / mất phiên) — hub tự login
+    /// (captcha AI + tự đọc mã OTP từ hòm thư) rồi ghi cookie vào kho, client kéo về. GET <c>?accountId=</c> = đọc
+    /// trạng thái phiên login đó. Như <see cref="BigSellerUpsert"/>, CỐ Ý nằm ngoài tiền tố <c>config/</c> nên
+    /// không dính chặn <c>AllowClientConfigPush</c>. Mật khẩu KHÔNG đi qua dây — client chỉ gửi AccountId.</summary>
+    public const string BigSellerRelogin = "/bigseller/relogin";
+
     // ── Cấu hình DÙNG CHUNG của module Đơn hàng (khối GSheet) ──
     /// <summary>GET = client kéo cấu hình GSheet dùng chung về; POST = client đẩy bản vừa sửa ở Cài đặt lên.
     /// CỐ Ý đặt NGOÀI tiền tố <c>config/</c> (đường file) để không dính chặn <c>AllowClientConfigPush</c> —

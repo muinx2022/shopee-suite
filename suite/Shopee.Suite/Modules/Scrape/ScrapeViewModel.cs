@@ -739,13 +739,21 @@ public sealed partial class ScrapeViewModel : ModuleViewModelBase
                 AccountLogs.Get(account.Id, bigSellerName).Add(text);
             });
         };
-        runner.BigSellerNeedLogin += reason => OnUi(() =>
+        runner.BigSellerNeedLogin += reason =>
         {
-            // Tk BigSeller mất phiên ("log in first") → job tk này đã bị dừng. Báo rõ để user đăng nhập lại.
-            var text = $"⛔ [{bigSellerName}] BigSeller mất đăng nhập: {reason} — đã DỪNG job tk này. Hãy ĐĂNG NHẬP LẠI BigSeller rồi chạy lại.";
-            LogLines.Add(text);
-            AccountLogs.Get(account.Id, bigSellerName).Add(text);
-        });
+            // Tk BigSeller mất phiên ("log in first") → job tk này đã bị dừng. NHỜ HUB đăng nhập lại ngay (hub có
+            // mật khẩu + tự giải captcha + tự đọc mã verify từ hòm thư) rồi kéo cookie mới về — người dùng KHÔNG
+            // phải ra tận máy đăng nhập tay. Hub chưa cấu hình → coordinator null, giữ nguyên hành vi cũ (chỉ log).
+            CoordinationRuntime.Relogin?.Request(account.Id, reason);
+            OnUi(() =>
+            {
+                var text = CoordinationRuntime.Relogin is null
+                    ? $"⛔ [{bigSellerName}] BigSeller mất đăng nhập: {reason} — đã DỪNG job tk này. Hãy ĐĂNG NHẬP LẠI BigSeller rồi chạy lại."
+                    : $"⛔ [{bigSellerName}] BigSeller mất đăng nhập: {reason} — đã nhờ Hub đăng nhập lại, cookie mới sẽ tự về, việc sẽ chạy lại.";
+                LogLines.Add(text);
+                AccountLogs.Get(account.Id, bigSellerName).Add(text);
+            });
+        };
     }
 
     /// <summary>Xóa CẢ 2 profile của tk Shopee vừa dính captcha → lần chạy sau ép login MỚI hoàn toàn:
