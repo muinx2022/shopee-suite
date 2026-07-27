@@ -100,7 +100,8 @@
             <div class="tablewrap">
             <table class="grid sm">
                 <thead><tr>
-                    <th>Việc</th><th>Shop</th><th>Tài khoản</th><th>Máy</th><th>Chạy từ</th>
+                    <th>Việc</th><th>Shop</th><th>Tài khoản</th><th>Máy</th>
+                    <th title="Việc BigSeller: mốc BẮT ĐẦU chạy. Phiên Đơn hàng: nhịp gương gần nhất của máy — client không gửi mốc bắt đầu phiên.">Mốc thời gian</th>
                     <th class="m-hide">Dải dòng</th><th></th>
                 </tr></thead>
                 <tbody>
@@ -111,10 +112,18 @@
                         <td class="shop">@w.ShopName</td>
                         <td class="acct">@w.AcctName</td>
                         <td>@w.Host</td>
-                        <td>@FleetStateService.Ago(w.Since)</td>
+                        <td>@SinceText(w, running: true)</td>
                         <td class="m-hide">@w.Rows</td>
                         <td>
-                            @if (w.Manual)
+                            @* Phiên Đơn hàng không phải assignment → dừng bằng LỆNH xuống máy, không phải huỷ việc. *@
+                            @if (w.Op == OrdersOp)
+                            {
+                                <button class="btn danger sm" @onclick="() => OnOrdersStop(w)"
+                                        title="Dừng phiên Đơn hàng của @w.AcctName trên máy @w.Host (huỷ vòng lặp shop + đóng trình duyệt). Máy nhận lệnh ở nhịp 12s.">
+                                    @(_confirmWork == w.Key ? "Bấm lần nữa để dừng" : "✖ Dừng")
+                                </button>
+                            }
+                            else if (w.Manual)
                             {
                                 <span class="stat" title="Việc chạy TAY (không do hub giao) — hub không huỷ được; dừng bằng nút ■ trong app trên máy @w.Host.">chạy tay</span>
                             }
@@ -122,7 +131,7 @@
                             {
                                 <button class="btn danger sm" @onclick="() => OnWorkCancel(w)"
                                         title="Huỷ @OpLabel(w.Op) · @w.ShopName trên máy @w.Host (tham số giữ nguyên, ▶ Tiếp tục chạy lại được).">
-                                    @(_confirmWork == w.AsnId ? "Bấm lần nữa để huỷ" : "✖ Huỷ")
+                                    @(_confirmWork == w.Key ? "Bấm lần nữa để huỷ" : "✖ Huỷ")
                                 </button>
                             }
                         </td>
@@ -141,7 +150,8 @@
             <div class="tablewrap">
             <table class="grid sm">
                 <thead><tr>
-                    <th>Việc</th><th>Shop</th><th>Tài khoản</th><th>Máy đích</th><th>Xếp lúc</th>
+                    <th>Việc</th><th>Shop</th><th>Tài khoản</th><th>Máy đích</th>
+                    <th title="Việc BigSeller: lúc XẾP vào hàng chờ. Phiên Đơn hàng: nhịp gương gần nhất của máy — client không gửi mốc xếp hàng.">Mốc thời gian</th>
                     <th class="m-hide">Dải dòng</th><th></th>
                 </tr></thead>
                 <tbody>
@@ -152,13 +162,21 @@
                         <td class="shop">@w.ShopName</td>
                         <td class="acct">@w.AcctName</td>
                         <td title="@(w.Host == "—" ? "Việc chờ KHÔNG ghim máy nào — máy nào rảnh đúng vai trò sẽ nhận." : "")">@w.Host</td>
-                        <td>@FleetStateService.Ago(w.Since)</td>
+                        <td>@SinceText(w, running: false)</td>
                         <td class="m-hide">@w.Rows</td>
                         <td>
-                            <button class="btn danger sm" @onclick="() => OnWorkCancel(w)"
-                                    title="Huỷ @OpLabel(w.Op) · @w.ShopName (tham số giữ nguyên, ▶ Tiếp tục chạy lại được).">
-                                @(_confirmWork == w.AsnId ? "Bấm lần nữa để huỷ" : "✖ Huỷ")
-                            </button>
+                            @* Phiên Đơn hàng đang xếp hàng: client tự quyết lượt chạy, hub không chen ngang được. *@
+                            @if (w.Op == OrdersOp)
+                            {
+                                <span class="stat" title="Máy @w.Host tự xếp lượt cho @w.AcctName — hub không chen ngang được; muốn dừng thì đợi phiên vào chạy rồi bấm ✖ Dừng.">—</span>
+                            }
+                            else
+                            {
+                                <button class="btn danger sm" @onclick="() => OnWorkCancel(w)"
+                                        title="Huỷ @OpLabel(w.Op) · @w.ShopName (tham số giữ nguyên, ▶ Tiếp tục chạy lại được).">
+                                    @(_confirmWork == w.Key ? "Bấm lần nữa để huỷ" : "✖ Huỷ")
+                                </button>
+                            }
                         </td>
                     </tr>
                 }
@@ -525,6 +543,9 @@ else
 @code {
     // 3 op hub giao được cho client BigSeller (rewrite chạy trên hub → không có ở đây).
     private static readonly string[] DispatchOps = ["scrape", "import", "update"];
+    /// <summary>"Op" giả của dòng phiên ĐƠN HÀNG trong hai bảng chi tiết KPI — KHÔNG phải op giao việc được
+    /// (không nằm trong <see cref="DispatchOps"/>), chỉ để phân biệt loại dòng khi render và khi bấm nút.</summary>
+    private const string OrdersOp = "orders";
     private static readonly (string Key, string Label)[] StateChips =
     [
         ("todo", "Chưa xong"), ("run", "Đang chạy"), ("int", "Gián đoạn"), ("all", "Tất cả"),
@@ -563,10 +584,13 @@ else
 
     /// <summary>Một dòng bảng chi tiết KPI "đang chạy" / "đang chờ": việc gì · shop nào · máy nào · từ lúc nào.
     /// <c>Manual</c> = việc chạy TAY trên app client (chỉ có lease, KHÔNG có assignment) → hub không huỷ được,
-    /// <c>AsnId</c> rỗng. Tên shop/tài khoản đã tra sẵn ở đây để markup khỏi đụng GUID.</summary>
+    /// <c>AsnId</c> rỗng. Tên shop/tài khoản đã tra sẵn ở đây để markup khỏi đụng GUID.
+    /// <para>Dòng phiên ĐƠN HÀNG (<c>Op</c> = <see cref="OrdersOp"/>) cũng nằm chung hai bảng này nhưng không phải
+    /// assignment: <c>AsnId</c> rỗng và huỷ bằng LỆNH tới máy (xem <see cref="OnOrdersStop"/>) → cần
+    /// <c>MachineId</c>/<c>Login</c> làm đích lệnh. Hai field đó RỖNG với mọi dòng BigSeller.</para></summary>
     private sealed record WorkItem(
         string Key, string AsnId, string Op, string ShopName, string AcctName, string Host,
-        DateTimeOffset Since, string Rows, bool Manual);
+        DateTimeOffset Since, string Rows, bool Manual, string MachineId = "", string Login = "");
 
     /// <summary>Trạng thái 1 nút hành động trên lưới. <c>Act</c> = việc nút làm khi bấm: "" = KHÔNG bấm được
     /// (render kèm thuộc tính <c>disabled</c>), "run" = tạo assignment, "cancel" = huỷ assignment đang mở.</summary>
@@ -595,9 +619,14 @@ else
     // Dựng CÙNG một lượt quét với 3 số KPI (xem RecomputeKpis) → số trên thẻ LUÔN bằng số dòng bảng.
     private List<WorkItem> _running = new(), _queued = new();
     private List<MachinePresence> _onlineMachines = new();
+    /// <summary>Phiên module Đơn hàng của MỌI máy (gương client tự đẩy) — nguồn phần KPI đến từ Đơn hàng. Tách hẳn
+    /// khỏi <see cref="_oAccounts"/> của tab Đơn hàng: bảng kia chỉ nạp MÁY ĐANG CHỌN, mà KPI là số toàn hệ thống.</summary>
+    private List<OrdersRunningAccount> _ordersRunning = new();
     private string _kpi = "";           // "" = đóng; còn lại là Key trong KpiCards (cũng nằm trong URL ?kpi=)
     private string _kpiMsg = "";        // kết quả ngắn của hành động vừa bấm trong panel
-    private string _confirmWork = "";   // id assignment đang chờ bấm-lần-nữa để huỷ (rỗng = không có)
+    /// <summary>Key của DÒNG bảng chi tiết đang chờ bấm-lần-nữa (rỗng = không có). Khoá theo <c>Key</c> chứ KHÔNG
+    /// theo <c>AsnId</c>: dòng Đơn hàng không có assignment nên mọi dòng Đơn hàng sẽ cùng khớp <c>AsnId</c> rỗng.</summary>
+    private string _confirmWork = "";
     private bool _confirmDismiss;       // arm 2-bước nút "Bỏ cả N việc gián đoạn"
     private int _kpiEmptyTicks;         // số nhịp fleet liên tiếp panel đang mở mà KPI = 0 (2 nhịp → tự đóng)
 
@@ -675,6 +704,9 @@ else
         BuildRows();
         BuildBudgets();
         ApplyFilter();
+        // Phiên Đơn hàng nạp TRƯỚC RecomputeKpis (thẻ KPI đếm cả chúng) và NGOÀI nhánh _tab bên dưới: KPI là số
+        // toàn hệ thống, đứng ở tab BigSeller vẫn phải đúng.
+        ReloadOrdersRunning();
         RecomputeKpis();
         if (_tab != "orders") return;
         // Nguồn chậm (bảng shop + bảng đơn) 10s một lượt; gương + lệnh của máy đang chọn thì mỗi nhịp (nút phải
@@ -826,10 +858,21 @@ else
         return map;
     }
 
+    /// <summary>Gương phiên Đơn hàng toàn hệ thống — đọc mỗi nhịp (bảng nhỏ, một query) để thẻ KPI và bảng chi
+    /// tiết luôn dựng từ CÙNG một lượt quét. Khoá DB nhất thời → giữ bản cũ, y các đường đọc DB khác của trang.</summary>
+    private void ReloadOrdersRunning()
+    {
+        try { _ordersRunning = Db.OrdersRunningAccounts(); }
+        catch { /* khoá DB nhất thời → giữ bản cũ */ }
+    }
+
     /// <summary>Số 4 thẻ KPI + DÒNG của 4 bảng chi tiết, dựng trong CÙNG một lượt: mỗi số là <c>Count</c> của
     /// đúng danh sách mà bảng đó vẽ ra, nên thẻ không bao giờ nói một đằng bảng một nẻo. Cụ thể "đang chạy" vẫn
     /// quét theo Ô LƯỚI (giữ nguyên ý nghĩa số cũ) — mà ô lưới ⏳ có thể do LEASE (việc chạy TAY, không có
-    /// assignment) → những việc đó vẫn hiện trong bảng, đánh dấu <c>Manual</c> thay vì bị giấu đi.</summary>
+    /// assignment) → những việc đó vẫn hiện trong bảng, đánh dấu <c>Manual</c> thay vì bị giấu đi.
+    /// <para>Hai thẻ việc đếm CẢ phiên module Đơn hàng: phiên đó không nằm trong <see cref="_rows"/> (đơn vị là
+    /// TÀI KHOẢN, không phải shop) nên chỉ quét lưới thì thẻ báo 0 trong khi tab Đơn hàng hiện rõ máy đang chạy.
+    /// Hai thẻ còn lại giữ nguyên: "gián đoạn" là vòng đời của assignment BigSeller, phiên Đơn hàng không có.</para></summary>
     private void RecomputeKpis()
     {
         _onlineMachines = Snap.Machines
@@ -848,6 +891,29 @@ else
             if (k == 1) running.Add(RunningItem(r, op));
             else if (k == 2 && OpenAsn(r, op) is { Status: "queued" } asn) queued.Add(QueuedItem(r, op, asn));
         }
+
+        // Phiên Đơn hàng cộng THẲNG vào chính hai list trên (KHÔNG đếm riêng bằng một query COUNT) → số thẻ vẫn
+        // đúng bằng .Count của list mà bảng chi tiết vẽ ra.
+        foreach (var s in _ordersRunning)
+        {
+            // Máy im nhịp ≥3' → bỏ: gương đứng nguyên ở giá trị lần đẩy cuối, nên máy tắt giữa phiên sẽ để lại một
+            // dòng "đang chạy" vĩnh viễn. Cùng luật ô lưới BigSeller dùng cho assignment 'running' của máy offline.
+            if (FleetStateService.MachineOffline(Snap, s.MachineId)) continue;
+            switch (s.SessionState)
+            {
+                // opening/running/stopping đều CHIẾM chỗ thật: 'stopping' còn giữ slot cầu nối, chưa nhả máy.
+                case OrdersSessionStates.Opening:
+                case OrdersSessionStates.Running:
+                case OrdersSessionStates.Stopping:
+                    running.Add(OrdersItem(s));
+                    break;
+                case OrdersSessionStates.Queued:
+                    queued.Add(OrdersItem(s));
+                    break;
+                // Trạng thái lạ (client bản mới hơn hub) → không đếm: thà thiếu còn hơn xếp nhầm thẻ.
+            }
+        }
+
         _running = running;
         _queued = queued;
         _kRunning = running.Count;
@@ -855,9 +921,9 @@ else
         _kInterrupted = Snap.Interrupted.Count;
 
         // Dòng đang chờ bấm-lần-nữa mà đã rơi khỏi bảng (nhịp fleet 2s) → huỷ chờ, kẻo cú bấm thứ 2 trúng việc
-        // khác — đúng lỗi đã phải vá cho cụm nút "cả acc".
+        // khác — đúng lỗi đã phải vá cho cụm nút "cả acc". So theo Key, xem chú thích của _confirmWork.
         if (_confirmWork.Length > 0
-            && !running.Any(w => w.AsnId == _confirmWork) && !queued.Any(w => w.AsnId == _confirmWork))
+            && !running.Any(w => w.Key == _confirmWork) && !queued.Any(w => w.Key == _confirmWork))
             _confirmWork = "";
         if (_confirmDismiss && _kInterrupted == 0) _confirmDismiss = false;
         // Nút "Huỷ MỌI việc" đang chờ bấm-lần-nữa mà hệ thống vừa hết việc → huỷ chờ (nút cũng thành disabled).
@@ -885,6 +951,15 @@ else
             LedgerKey(r, op), asn?.Id ?? "", op, r.ShopName, r.AccountName, host, since,
             RowRange(asn?.StartRow ?? 0, asn?.EndRow ?? 0), Manual: asn is null);
     }
+
+    /// <summary>Dòng bảng chi tiết cho MỘT phiên Đơn hàng. Shop + dải dòng để "—": một phiên chạy CẢ tài khoản
+    /// (đăng nhập subaccount rồi lặp lần lượt mọi shop của nó) nên không thuộc shop nào và không có dải dòng.
+    /// <c>Since</c> = nhịp gương gần nhất, KHÔNG phải mốc bắt đầu phiên — gương không lưu mốc đó, nên cột thời
+    /// gian phải nói "cập nhật" (xem <see cref="SinceText"/>).</summary>
+    private WorkItem OrdersItem(OrdersRunningAccount s) => new(
+        $"orders|{s.MachineId}|{s.Login}", "", OrdersOp, "—", s.Login,
+        HostLabel(s.MachineId, s.Hostname), s.UpdatedAt, "—", Manual: false,
+        MachineId: s.MachineId, Login: s.Login);
 
     private WorkItem QueuedItem(Row r, string op, Assignment asn) => new(
         LedgerKey(r, op), asn.Id, op, r.ShopName, r.AccountName,
@@ -950,10 +1025,23 @@ else
     private void OnWorkCancel(WorkItem w)
     {
         if (w.Manual || w.AsnId.Length == 0) return;   // việc chạy tay: hub không có gì để huỷ
-        if (_confirmWork != w.AsnId) { _confirmWork = w.AsnId; _kpiMsg = ""; return; }
+        if (_confirmWork != w.Key) { _confirmWork = w.Key; _kpiMsg = ""; return; }
         _confirmWork = "";
         Db.CancelAssignment(w.AsnId);
         _kpiMsg = $"✖ Đã huỷ {OpLabel(w.Op)} · {w.ShopName} (tham số giữ nguyên — ▶ Tiếp tục để chạy lại).";
+        FleetState.Refresh();
+    }
+
+    /// <summary>✖ Dừng một phiên Đơn hàng ngay từ bảng chi tiết KPI. Đi ĐÚNG đường lệnh của tab Đơn hàng
+    /// (<see cref="HubDatabase.CreateOrdersCommand"/> — idempotent), không đẻ đường tạo lệnh thứ hai. Xác nhận 2
+    /// bước như nút Huỷ vì hub không dừng nửa chừng rồi hoàn lại được: client đóng trình duyệt là mất phiên.</summary>
+    private void OnOrdersStop(WorkItem w)
+    {
+        if (w.MachineId.Length == 0 || w.Login.Length == 0) return;   // phòng thân: dòng không phải phiên Đơn hàng
+        if (_confirmWork != w.Key) { _confirmWork = w.Key; _kpiMsg = ""; return; }
+        _confirmWork = "";
+        Db.CreateOrdersCommand(w.MachineId, w.Login, OrdersCommandActions.Stop);
+        _kpiMsg = $"⏳ Đã gửi lệnh ✖ Dừng · {w.Login} → {w.Host} (chờ máy nhận ở nhịp 12s rồi xác nhận).";
         FleetState.Refresh();
     }
 
@@ -1269,8 +1357,21 @@ else
 
     private static string OpLabel(string op) => op switch
     {
-        "scrape" => "Scrape", "import" => "Import", "update" => "Update", _ => op,
+        "scrape" => "Scrape", "import" => "Import", "update" => "Update",
+        // Không phải op giao việc — chỉ là nhãn loại dòng trong bảng chi tiết KPI (xem OrdersOp).
+        OrdersOp => "📦 Đơn hàng",
+        _ => op,
     };
+
+    /// <summary>Cột thời gian của hai bảng chi tiết KPI. Mốc mang Ý NGHĨA KHÁC NHAU theo loại dòng nên mỗi ô tự
+    /// nói ra: việc BigSeller có mốc bắt đầu THẬT ("chạy từ" / "xếp lúc"), còn dòng Đơn hàng chỉ có nhịp gương
+    /// gần nhất ("cập nhật") — gương không lưu mốc bắt đầu phiên, ghi "chạy từ" ở đó là nói sai.</summary>
+    private static string SinceText(WorkItem w, bool running)
+    {
+        var ago = FleetStateService.Ago(w.Since);
+        if (ago.Length == 0) return "—";
+        return w.Op == OrdersOp ? $"cập nhật {ago}" : $"{(running ? "chạy từ" : "xếp lúc")} {ago}";
+    }
 
     // ── Chọn máy ──────────────────────────────────────────────────────────────────
     private string MachineTitle(MachineBudget m)

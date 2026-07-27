@@ -15,6 +15,13 @@ public sealed record OrdersMirrorAccount(
 /// <summary>Số tài khoản / số tài khoản ĐANG CHẠY trong gương của một máy — cho thẻ chọn máy.</summary>
 public sealed record OrdersMirrorCount(int Accounts, int Running);
 
+/// <summary>Một tài khoản Đơn hàng ĐANG CHIẾM PHIÊN, trên MÁY NÀO — dòng nguồn cho KPI toàn hệ thống của trang
+/// Giao việc. <see cref="Hostname"/> lấy từ bảng <c>machines</c>, rỗng khi máy chưa từng báo nhịp (bên gọi tự lùi
+/// về id rút gọn). <see cref="UpdatedAt"/> = lúc máy đẩy gương gần nhất — KHÔNG phải mốc bắt đầu phiên (gương
+/// không lưu mốc đó), chỗ nào hiện ra phải nói đúng là "cập nhật lúc".</summary>
+public sealed record OrdersRunningAccount(
+    string MachineId, string Hostname, string Login, string SessionState, DateTimeOffset UpdatedAt);
+
 /// <summary>Một dòng lệnh hub giao cho suất đơn hàng (đọc ra để trang điều phối bám trạng thái ⏳/✓/✘).</summary>
 public sealed record OrdersCommandRow(
     string Id, string MachineId, string Login, string Action, string Status,
@@ -181,6 +188,28 @@ ON CONFLICT(machine_id,login,shop_login) DO UPDATE SET shop_name=$sn, sort_order
                 map[S(rd, 0)] = new OrdersMirrorCount(
                     rd.IsDBNull(1) ? 0 : rd.GetInt32(1), rd.IsDBNull(2) ? 0 : rd.GetInt32(2));
             return map;
+        }
+    }
+
+    /// <summary>Mọi tài khoản Đơn hàng ĐANG CÓ PHIÊN (<c>session_state</c> khác rỗng) của MỌI máy, trong MỘT lượt
+    /// quét — cho KPI toàn hệ thống của trang Giao việc (<see cref="OrdersAccountsOf"/> chỉ đọc được một máy).
+    /// LEFT JOIN <c>machines</c> để bảng chi tiết nói được "ở máy nào"; máy chưa đẩy gương (client bản cũ) đơn
+    /// giản là không có dòng nào ở đây.</summary>
+    public List<OrdersRunningAccount> OrdersRunningAccounts()
+    {
+        lock (_gate)
+        {
+            var list = new List<OrdersRunningAccount>();
+            using var c = _conn.CreateCommand();
+            c.CommandText = @"
+SELECT a.machine_id, COALESCE(m.hostname,''), a.login, a.session_state, a.updated_at
+FROM orders_accounts a LEFT JOIN machines m ON m.machine_id=a.machine_id
+WHERE a.session_state<>''
+ORDER BY m.hostname COLLATE NOCASE, a.login COLLATE NOCASE";
+            using var rd = c.ExecuteReader();
+            while (rd.Read())
+                list.Add(new OrdersRunningAccount(S(rd, 0), S(rd, 1), S(rd, 2), S(rd, 3), D(rd, 4)));
+            return list;
         }
     }
 
