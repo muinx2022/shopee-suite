@@ -344,6 +344,12 @@
                         <td>
                             <button class="opbtn @b.Css" disabled="@b.Disabled" title="@b.Title"
                                     @onclick="() => OnOpClick(r, op)">@b.Label</button>
+                            @* Lý do lượt trước hỏng — ô chỉ báo "✘ lỗi" đúng 3 phút rồi im, không có dòng này thì
+                               job "chạy tí rồi dừng" mà người vận hành không biết vì sao. Cắt bằng CSS, đủ chữ ở title. *@
+                            @if (b.Note.Length > 0)
+                            {
+                                <div class="opnote" title="@b.Note">⚠ @b.Note</div>
+                            }
                         </td>
                     }
                     <td class="m-hide">@(HoldHostOf(r.AccountId) ?? "—")</td>
@@ -453,7 +459,10 @@ else
 
     /// <summary>Trạng thái 1 nút hành động trên lưới. <c>Act</c> = việc nút làm khi bấm: "" = KHÔNG bấm được
     /// (render kèm thuộc tính <c>disabled</c>), "run" = tạo assignment, "cancel" = huỷ assignment đang mở.</summary>
-    private sealed record OpBtn(string Label, string Act, string Css, string Title)
+    /// <summary><see cref="Note"/> = LÝ DO lượt chạy TRƯỚC của ô này hỏng (rỗng = lượt trước không hỏng). Ô chỉ
+    /// hiện "✘ lỗi (máy)" trong 3 phút rồi rơi về "· chờ" (xem FleetStateService.OpCell) — không có dòng này thì
+    /// người vận hành thấy job "chạy tí rồi dừng, không rõ vì sao". Nguồn: Snap.Interrupted (giữ 7 ngày).</summary>
+    private sealed record OpBtn(string Label, string Act, string Css, string Title, string Note = "")
     {
         public bool Disabled => Act.Length == 0;
     }
@@ -834,6 +843,16 @@ else
     private static string IntReason(Assignment a) =>
         !string.IsNullOrWhiteSpace(a.LastError) ? a.LastError : (a.Status == "canceled" ? "đã huỷ" : "lỗi");
 
+    /// <summary>Lý do lượt chạy TRƯỚC của (shop, op) hỏng — rỗng khi lượt trước không hỏng, hoặc hỏng vì bị HUỶ
+    /// TAY (không phải sự cố, nói ra chỉ gây nhiễu). Nguồn Snap.Interrupted: đã lọc sẵn "bản mới nhất mỗi nhóm,
+    /// chưa bị Bỏ, không còn việc đang mở, ledger chưa completed" — đúng tập việc còn đáng nói lý do.</summary>
+    private string LastFailReason(Row r, string op)
+    {
+        var a = Snap.Interrupted.FirstOrDefault(x =>
+            x.BigsellerId == r.AccountId && x.ShopId == r.ShopId && x.Op == op);
+        return a is null || string.IsNullOrWhiteSpace(a.LastError) ? "" : a.LastError;
+    }
+
     /// <summary>Tên máy đọc được: ưu tiên hostname máy đang báo nhịp, rồi hostname đóng dấu lúc claim; cạn cả hai
     /// thì id rút gọn. KHÔNG bao giờ trả rỗng — cột Máy trống là dòng vô dụng với người vận hành.</summary>
     private string HostLabel(string machineId, string storedHost)
@@ -973,11 +992,13 @@ else
 
         if (_holds.TryGetValue(r.AccountId, out var holder) && !string.Equals(holder, _selMachine, StringComparison.Ordinal))
             return new(cell.Text, "", "blocked",
-                $"Acc {r.AccountName} đang do máy {HostName(holder)} giữ — 1 acc chỉ chạy 1 máy.");
+                $"Acc {r.AccountName} đang do máy {HostName(holder)} giữ — 1 acc chỉ chạy 1 máy.",
+                LastFailReason(r, op));
 
+        var note = LastFailReason(r, op);
         return cell.Text.StartsWith('✓')
-            ? new("↻ Chạy lại", "run", "done", $"Chạy lại {OpLabel(op)} · {r.ShopName} trên {HostName(_selMachine)}.")
-            : new($"▶ {OpLabel(op)}", "run", "run", $"Giao {OpLabel(op)} · {r.ShopName} cho {HostName(_selMachine)}.");
+            ? new("↻ Chạy lại", "run", "done", $"Chạy lại {OpLabel(op)} · {r.ShopName} trên {HostName(_selMachine)}.", note)
+            : new($"▶ {OpLabel(op)}", "run", "run", $"Giao {OpLabel(op)} · {r.ShopName} cho {HostName(_selMachine)}.", note);
     }
 
     // Một click = MỘT lệnh, KHÔNG xác nhận 2 bước (nhẹ tay, và huỷ lại được ngay bằng chính nút đó).

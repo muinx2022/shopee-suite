@@ -452,6 +452,8 @@ html.dark .mcard.sel .mc-host { color: var(--sidebar-ic-active); }
 .opbtn { display: inline-block; min-width: 120px; max-width: 210px; padding: 5px 11px; border: 1px solid transparent; border-radius: 20px; background: var(--gray); color: var(--text); font-family: inherit; font-size: 12px; font-weight: 600; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; cursor: pointer; transition: filter .13s; }
 .opbtn:hover:not(:disabled) { filter: brightness(.95); }
 .opbtn:disabled { cursor: not-allowed; }
+/* Lý do lượt chạy trước hỏng, nằm ngay dưới nút của ô đó. Cắt 1 dòng (đủ chữ ở title) để lưới không giãn cao. */
+.opnote { max-width: 210px; margin-top: 3px; font-size: 11px; font-weight: 600; line-height: 1.35; color: var(--danger); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .opbtn.run { background: var(--info-bg); color: var(--primary); }
 .opbtn.done { background: var(--success-bg); color: var(--success); }
 .opbtn.busy { background: var(--danger-bg); color: var(--danger); }
