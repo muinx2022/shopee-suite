@@ -70,6 +70,11 @@ public sealed partial class HubDatabase : IDisposable
         AddColumnIfMissing("machines", "update_requested_at", "TEXT DEFAULT ''");
         AddColumnIfMissing("machines", "update_requested_from", "TEXT DEFAULT ''");
         AddColumnIfMissing("machines", "update_status", "TEXT DEFAULT ''");
+        // SUẤT LÀM VIỆC (xem MachineSlots): chế độ app của máy + loại suất + id PC thật (gộp 2 suất cùng máy).
+        // Bản ghi CŨ để rỗng — đọc ra thì suy qua MachineSlots.Normalize* (client cũ chưa gửi 3 field này).
+        AddColumnIfMissing("machines", "mode", "TEXT DEFAULT ''");
+        AddColumnIfMissing("machines", "kind", "TEXT DEFAULT ''");
+        AddColumnIfMissing("machines", "host_id", "TEXT DEFAULT ''");
         // Tập máy đã tham gia mỗi việc (Thống kê). Backfill: khởi tạo = [last_machine_id] cho bản ghi cũ
         // (machine_id là hex GUID, an toàn để nối chuỗi JSON). Publish sau sẽ union thêm máy mới.
         if (AddColumnIfMissing("ledger", "machines_json", "TEXT DEFAULT ''"))
@@ -139,7 +144,8 @@ CREATE TABLE IF NOT EXISTS ledger(
   machines_json TEXT DEFAULT '');
 CREATE TABLE IF NOT EXISTS machines(
   machine_id TEXT PRIMARY KEY, hostname TEXT, last_seen TEXT, app_version TEXT, max_brave INTEGER DEFAULT 0,
-  update_requested_at TEXT DEFAULT '', update_requested_from TEXT DEFAULT '', update_status TEXT DEFAULT '');
+  update_requested_at TEXT DEFAULT '', update_requested_from TEXT DEFAULT '', update_status TEXT DEFAULT '',
+  mode TEXT DEFAULT '', kind TEXT DEFAULT '', host_id TEXT DEFAULT '');
 CREATE TABLE IF NOT EXISTS files(
   name TEXT PRIMARY KEY, version INTEGER, hash TEXT, size INTEGER, mtime TEXT,
   updated_by TEXT, updated_at TEXT);

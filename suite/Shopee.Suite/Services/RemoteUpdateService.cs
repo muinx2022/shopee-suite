@@ -12,6 +12,8 @@ namespace Shopee.Suite.Services;
 /// <summary>
 /// Xử lý lệnh UPDATE app do operator ra từ Hub. Kênh lệnh: phản hồi POST /machines/heartbeat mang
 /// <c>UpdateRequestedAt</c> (chuỗi ISO lúc ra lệnh) — dùng NGUYÊN VĂN làm ID dedup, mỗi lệnh xử đúng 1 lần.
+/// Dùng CHUNG cho MỌI SUẤT làm việc: tham số <c>hub</c> là <see cref="IUpdateAckSink"/> nên lệnh gửi tới
+/// suất workspace hay suất đơn hàng đều chạy đúng luồng này, ack quay về đúng <c>machine_id</c> của suất đó.
 /// Luồng lệnh mới: ack "checking" → CheckAsync (check + tải nền) → có bản mới thì ack "restarting" rồi dừng-êm +
 /// ApplyAndRestart; bản restart mang version mới, heartbeat kế báo lên Hub → Hub TỰ clear cờ. Không có bản mới →
 /// ack "already-latest"; chạy dev/bin (không cài Velopack) → ack "unsupported"; lỗi → ack "failed: …". Ack TERMINAL
@@ -47,7 +49,7 @@ public sealed class RemoteUpdateService
 
     /// <summary>Hub bắn lệnh update (từ PollAsync, NỀN — KHÔNG được block poll). Guard in-flight: đang xử lý thì
     /// bỏ lượt gọi này (poll 12s sau tự gọi lại nếu còn lệnh). Toàn bộ chạy trên Task nền.</summary>
-    public void OnCommand(HttpCoordinationHub hub, string requestedAt)
+    public void OnCommand(IUpdateAckSink hub, string requestedAt)
     {
         if (string.IsNullOrWhiteSpace(requestedAt)) return;
         if (Interlocked.Exchange(ref _inflight, 1) == 1) return;   // đang xử lý → bỏ, lượt poll sau bù
@@ -58,7 +60,7 @@ public sealed class RemoteUpdateService
         });
     }
 
-    private async Task HandleAsync(HttpCoordinationHub hub, string requestedAt)
+    private async Task HandleAsync(IUpdateAckSink hub, string requestedAt)
     {
         try
         {

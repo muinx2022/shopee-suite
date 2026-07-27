@@ -45,7 +45,7 @@
             @* Máy offline: thuộc tính disabled THẬT (không chỉ làm mờ) — việc giao vào máy tắt nằm chờ mãi. *@
             <button class="mcard @(m.MachineId == _selMachine ? "sel" : "")" disabled="@(!m.Online)"
                     title="@MachineTitle(m)" @key="m.MachineId" @onclick="() => SelectMachine(m.MachineId)">
-                <span class="mc-host">@(m.Online ? "🟢" : "⚪") @m.Hostname</span>
+                <span class="mc-host">@(m.Online ? "🟢" : "⚪") @m.Hostname@(m.Mode is "" or "Workspace" ? "" : " · " + m.Mode)</span>
                 <span class="mc-sub">@(m.Online ? $"còn {m.Free}/{m.Free + m.Running} brave" : "offline · " + FleetStateService.Ago(m.LastSeen))</span>
                 <span class="mc-sub">@(m.Online ? $"{m.Running} việc{(m.Version.Length > 0 ? " · " + m.Version : "")}" : "(không bấm được)")</span>
             </button>
@@ -242,7 +242,8 @@ else
     /// <summary>Quỹ chạy + hiện diện của 1 máy, dựng cho hàng thẻ chọn máy: <c>Free</c> = số khung Brave còn
     /// trống (trần máy tự báo trừ việc đang chạy/chờ), <c>Running</c> = số việc đang chạy/chờ.</summary>
     private sealed record MachineBudget(
-        string MachineId, string Hostname, bool Online, int Free, int Running, string Version, DateTimeOffset LastSeen);
+        string MachineId, string Hostname, bool Online, int Free, int Running, string Version, DateTimeOffset LastSeen,
+        string Mode);
 
     /// <summary>Trạng thái 1 nút hành động trên lưới. <c>Act</c> = việc nút làm khi bấm: "" = KHÔNG bấm được
     /// (render kèm thuộc tính <c>disabled</c>), "run" = tạo assignment, "cancel" = huỷ assignment đang mở.</summary>
@@ -391,6 +392,9 @@ else
             used[mid] = used.GetValueOrDefault(mid) + 1;
         }
         _budgets = Snap.Machines
+            // CHỈ suất Workspace: suất đơn hàng KHÔNG claim việc BigSeller (hub cũng chặn cứng ở ClaimNext/
+            // CreateAssignment) → hiện ra chỉ tổ giao nhầm rồi việc nằm chờ mãi.
+            .Where(m => m.Kind != MachineSlots.Orders)
             .Select(m =>
             {
                 var cap = m.MaxBrave > 0 ? m.MaxBrave : DefaultBrave;
@@ -400,7 +404,7 @@ else
                     string.IsNullOrWhiteSpace(m.Hostname) ? m.MachineId : m.Hostname,
                     !FleetStateService.MachineOffline(Snap, m.MachineId),
                     Math.Max(0, cap - run), run,
-                    m.AppVersion ?? "", m.LastSeen);
+                    m.AppVersion ?? "", m.LastSeen, m.Mode);
             })
             .OrderByDescending(m => m.Online)
             .ThenBy(m => m.Hostname, StringComparer.CurrentCultureIgnoreCase)

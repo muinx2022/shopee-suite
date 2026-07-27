@@ -25,4 +25,10 @@
     <ProjectReference Include="..\XuLyDonShopee.App\XuLyDonShopee.App.csproj" />
   </ItemGroup>
 
+  <!-- Nguồn dùng chung được LINK (khuôn của Shopee.Hub.Web.csproj) — KHÔNG tham chiếu cả Shopee.Core (kéo theo
+       Playwright/ClosedXML/WMI). MachineSlots là luật SUẤT LÀM VIỆC dùng chung hub↔client, thuần BCL. -->
+  <ItemGroup>
+    <Compile Include="..\..\suite\Shopee.Core\Coordination\MachineSlots.cs" Link="Shared\Coordination\MachineSlots.cs" />
+  </ItemGroup>
+
 </Project>

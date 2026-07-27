@@ -22,6 +22,8 @@
   <!-- ── Nguồn dùng chung được LINK (file gốc giữ nguyên trong suite\Shopee.Core & Shopee.Module.Search) ── -->
   <ItemGroup>
     <Compile Include="..\..\suite\Shopee.Core\Coordination\HubDtos.cs" Link="Shared\Coordination\HubDtos.cs" />
+    <!-- Suất làm việc (workspace / đơn hàng) + quy ước suy diễn cho client CŨ — hub & client PHẢI cùng một luật. -->
+    <Compile Include="..\..\suite\Shopee.Core\Coordination\MachineSlots.cs" Link="Shared\Coordination\MachineSlots.cs" />
     <Compile Include="..\..\suite\Shopee.Core\Coordination\ICoordinationHub.cs" Link="Shared\Coordination\ICoordinationHub.cs" />
     <Compile Include="..\..\suite\Shopee.Core\Coordination\HubDefaults.cs" Link="Shared\Coordination\HubDefaults.cs" />
     <Compile Include="..\..\suite\Shopee.Core\Coordination\HubRoutes.cs" Link="Shared\Coordination\HubRoutes.cs" />

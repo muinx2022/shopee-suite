@@ -86,7 +86,16 @@ public static class ClientApiEndpoints
 
         // ── Vai trò máy + giao việc ──
         api.MapPost(HubRoutes.Roles, (SetRoleRequest? r) => { if (r is null) return Results.BadRequest(); db.SetRole(r.MachineId, r.Role); return Results.Ok(); });
-        api.MapPost(HubRoutes.Assignments, (CreateAssignmentRequest? r) => r is null ? Results.BadRequest() : Results.Json(db.CreateAssignment(r)));
+        // Hub TỪ CHỐI giao việc BigSeller vào suất ĐƠN HÀNG → 400 kèm lý do (thay vì 200 với một việc kẹt
+        // 'queued' vĩnh viễn). Client hiện tại nuốt lỗi HTTP → vô hại; đường giao việc thật là UI web.
+        api.MapPost(HubRoutes.Assignments, (CreateAssignmentRequest? r) =>
+        {
+            if (r is null) return Results.BadRequest();
+            var a = db.CreateAssignment(r);
+            return a.Status == HubDatabase.RejectedStatus
+                ? Results.BadRequest(new { error = a.LastError })
+                : Results.Json(a);
+        });
         api.MapPost(HubRoutes.AssignmentsClaim, (ClaimAssignmentsRequest? r) => r is null ? Results.BadRequest() : Results.Json(db.ClaimNext(r.MachineId, r.Role, r.Max)));
         api.MapPost(HubRoutes.AssignmentsStatus, (AssignmentStatusRequest? r) => { if (r is null) return Results.BadRequest(); db.UpdateAssignmentStatus(r.Id, r.MachineId, r.Status, r.Error); return Results.Ok(); });
         api.MapPost(HubRoutes.AssignmentsCancel, (CancelAssignmentRequest? r) => { if (r is null) return Results.BadRequest(); db.CancelAssignment(r.Id); return Results.Ok(); });

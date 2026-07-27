@@ -57,11 +57,38 @@ public sealed partial class HubDatabase
         }
     }
 
-    /// <summary>Tạo việc; trùng (cùng bigseller+shop+op) đang chờ/chạy thì TRẢ LẠI việc cũ (idempotent).</summary>
+    /// <summary>Trạng thái Hub trả khi TỪ CHỐI tạo việc (không ghi DB) — lý do nằm ở <c>LastError</c>. Không dùng
+    /// 'failed' để khỏi lẫn với việc đã chạy rồi hỏng.</summary>
+    public const string RejectedStatus = "rejected";
+
+    /// <summary>Máy này là SUẤT ĐƠN HÀNG? Xét ĐUÔI id (<c>:orders</c>) HOẶC <c>machines.kind</c> — suất đó không
+    /// claim việc BigSeller nên giao vào đó là việc nằm 'queued' vĩnh viễn. Gọi TRONG lock.</summary>
+    private bool IsOrdersSlotLocked(string? machineId)
+    {
+        if (string.IsNullOrWhiteSpace(machineId)) return false;
+        if (MachineSlots.IsOrdersSlot(machineId)) return true;
+        using var c = _conn.CreateCommand();
+        c.CommandText = "SELECT kind FROM machines WHERE machine_id=$m";
+        c.Parameters.AddWithValue("$m", machineId);
+        return c.ExecuteScalar() as string == MachineSlots.Orders;
+    }
+
+    /// <summary>Tạo việc; trùng (cùng bigseller+shop+op) đang chờ/chạy thì TRẢ LẠI việc cũ (idempotent).
+    /// Ghim vào SUẤT ĐƠN HÀNG → TỪ CHỐI (<see cref="RejectedStatus"/> + lý do ở <c>LastError</c>).</summary>
     public Assignment CreateAssignment(CreateAssignmentRequest r)
     {
         lock (_gate)
         {
+            // CHẶN CỨNG: mọi op ở đây là việc BigSeller, suất đơn hàng KHÔNG claim assignment → giao vào đó là
+            // việc kẹt 'queued' vĩnh viễn mà không ai báo. Nói rõ lý do thay vì tạo rồi để nó nằm im.
+            if (IsOrdersSlotLocked(r.TargetMachineId))
+                return new Assignment
+                {
+                    BigsellerId = r.BigsellerId, ShopId = r.ShopId, Sheet = r.Sheet, Op = r.Op,
+                    TargetMachineId = r.TargetMachineId, Status = RejectedStatus,
+                    LastError = "máy đích là suất ĐƠN HÀNG — suất này không nhận việc BigSeller (chọn suất Workspace của máy đó)",
+                };
+
             // Op TỰ ĐỘNG (không ghim) đã 'completed' trong ledger → KHÔNG tạo lại (chống re-run do NextOp đọc
             // snapshot ledger trễ ở Hub). Ghim tay (Pinned) thì vẫn cho phép để operator chủ động chạy lại.
             if (!r.Pinned)
@@ -215,6 +242,9 @@ VALUES($id,$b,$s,$sh,$o,$t,$p,'queued','','','',$ca,$ua,$sr,$er,$pl,$pr,$fs,$rl)
         if (string.IsNullOrWhiteSpace(machineId) || max <= 0) return [];
         lock (_gate)
         {
+            // SUẤT ĐƠN HÀNG không làm việc BigSeller (client cũng không poll) — chặn ở đây là lưới cuối, phòng
+            // bản client lạ/gọi API tay: đừng để một suất đơn hàng ôm việc rồi không ai chạy.
+            if (IsOrdersSlotLocked(machineId)) return [];
             var now = DateTimeOffset.UtcNow;
             SweepStaleLocked(now);
             var host = HostnameOfLocked(machineId);

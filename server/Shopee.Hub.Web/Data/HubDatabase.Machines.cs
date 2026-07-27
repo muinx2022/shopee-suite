@@ -135,14 +135,21 @@ public sealed partial class HubDatabase
             using (var c = _conn.CreateCommand())
             {
                 c.CommandText = @"
-INSERT INTO machines(machine_id,hostname,last_seen,app_version,max_brave)
-VALUES($m,$h,$ls,$v,$mb)
-ON CONFLICT(machine_id) DO UPDATE SET hostname=$h, last_seen=$ls, app_version=$v, max_brave=$mb;";
+INSERT INTO machines(machine_id,hostname,last_seen,app_version,max_brave,mode,kind,host_id)
+VALUES($m,$h,$ls,$v,$mb,$mo,$k,$hi)
+ON CONFLICT(machine_id) DO UPDATE SET hostname=$h, last_seen=$ls, app_version=$v, max_brave=$mb,
+                                      mode=$mo, kind=$k, host_id=$hi;";
                 c.Parameters.AddWithValue("$m", r.MachineId);
                 c.Parameters.AddWithValue("$h", r.Hostname);
                 c.Parameters.AddWithValue("$ls", Iso(DateTimeOffset.UtcNow));
                 c.Parameters.AddWithValue("$v", (object?)r.AppVersion ?? DBNull.Value);
                 c.Parameters.AddWithValue("$mb", r.MaxBrave);
+                // TƯƠNG THÍCH NGƯỢC (hub deploy TRƯỚC, client release SAU): client cũ KHÔNG gửi Mode/Kind/HostId
+                // → suy ra ở đây (kind = workspace, host = chính machine_id, mode = Workspace). Ghi giá trị ĐÃ
+                // CHUẨN HOÁ xuống DB để mọi chỗ đọc sau đó khỏi phải đoán lại.
+                c.Parameters.AddWithValue("$mo", MachineSlots.NormalizeMode(r.Mode));
+                c.Parameters.AddWithValue("$k", MachineSlots.NormalizeKind(r.Kind, r.MachineId));
+                c.Parameters.AddWithValue("$hi", MachineSlots.NormalizeHostId(r.HostId, r.MachineId));
                 c.ExecuteNonQuery();
             }
             return new MachineHeartbeatResponse { UpdateRequestedAt = requestedAt.Length == 0 ? null : requestedAt };
@@ -194,18 +201,23 @@ WHERE machine_id=$m;";
         }
     }
 
-    /// <summary>TẤT CẢ máy đã từng kết nối — GIỮ cả máy offline (mất nhịp/đóng app) để theo dõi. Chỉ máy
-    /// chủ động bấm "Ngắt kết nối" (<see cref="RemoveMachine"/>) mới bị xoá khỏi danh sách.</summary>
+    /// <summary>TẤT CẢ máy (SUẤT làm việc) đã từng kết nối — GIỮ cả máy offline (mất nhịp/đóng app) để theo dõi.
+    /// Chỉ máy chủ động bấm "Ngắt kết nối" (<see cref="RemoveMachine"/>) mới bị xoá khỏi danh sách. Mode/Kind/
+    /// HostId đọc qua <c>MachineSlots.Normalize*</c> để dòng CŨ (ghi trước khi có 3 cột này, chưa heartbeat lại)
+    /// vẫn ra giá trị đúng nghĩa thay vì rỗng.</summary>
     public List<MachinePresence> AllMachines()
     {
         lock (_gate)
         {
             var list = new List<MachinePresence>();
             using var c = _conn.CreateCommand();
-            c.CommandText = "SELECT machine_id,hostname,last_seen,app_version,max_brave,update_status,update_requested_at FROM machines";
+            c.CommandText = "SELECT machine_id,hostname,last_seen,app_version,max_brave,update_status,update_requested_at,mode,kind,host_id FROM machines";
             using var rd = c.ExecuteReader();
             while (rd.Read())
-                list.Add(new MachinePresence { MachineId = S(rd, 0), Hostname = S(rd, 1), LastSeen = D(rd, 2), AppVersion = rd.IsDBNull(3) ? null : rd.GetString(3), MaxBrave = rd.IsDBNull(4) ? 0 : rd.GetInt32(4), UpdateStatus = S(rd, 5), UpdateRequestedAt = S(rd, 6) is { Length: > 0 } ua && DateTimeOffset.TryParse(ua, out var uat) ? uat : null });
+            {
+                var id = S(rd, 0);
+                list.Add(new MachinePresence { MachineId = id, Hostname = S(rd, 1), LastSeen = D(rd, 2), AppVersion = rd.IsDBNull(3) ? null : rd.GetString(3), MaxBrave = rd.IsDBNull(4) ? 0 : rd.GetInt32(4), UpdateStatus = S(rd, 5), UpdateRequestedAt = S(rd, 6) is { Length: > 0 } ua && DateTimeOffset.TryParse(ua, out var uat) ? uat : null, Mode = MachineSlots.NormalizeMode(S(rd, 7)), Kind = MachineSlots.NormalizeKind(S(rd, 8), id), HostId = MachineSlots.NormalizeHostId(S(rd, 9), id) });
+            }
             return list;
         }
     }

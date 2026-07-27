@@ -46,26 +46,20 @@ public partial class App : Application
             }
             catch (Exception ex) { TryLog("BraveFleet.Init", ex); }
 
-            // Điều phối phía CLIENT (khoá việc, account-lease, nhận việc Hub giao). Chưa cấu hình → NoOp. CHỈ chế
-            // độ có Workspace: khi bản Shopee chạy song song (shortcut --mode Shopee) nó KHÔNG được tranh danh
-            // tính máy (machine.json) + file lease trên Hub với bản Workspace — module đơn hàng có đường đẩy Hub
-            // RIÊNG. Auto-update vẫn chạy mọi chế độ (dưới), chỉ điều phối fleet suite là gate theo Workspace.
-            try { Shopee.Core.Coordination.CoordinationRuntime.InitFromConfig(); }
-            catch (Exception ex) { TryLog("Coordination.Init", ex); }
-
             // Cho TryPublish (đẩy ledger nền) HẾT CÂM: lỗi POST ledger giờ báo lên tab Log Hub (throttle 1 dòng/60s
             // ở HttpCoordinationHub) → nếu Thống kê thiếu dòng vì mạng/hub, ta THẤY thay vì đoán mò. Gán 1 lần lúc
-            // boot. Chỉ phục vụ coordination + đẩy BigSeller (workspace) nên gate cùng CoordinationRuntime.
+            // boot. Chỉ phục vụ coordination + đẩy BigSeller (workspace) nên gate cùng engine workspace.
             try { Shopee.Core.Coordination.HttpCoordinationHub.DiagLog = Shopee.Core.Coordination.HubLog.Warn; }
             catch (Exception ex) { TryLog("Coordination.DiagLog", ex); }
         }
-        else if (Shopee.Core.Infrastructure.AppModeStore.ShowsShopee(appMode))
-        {
-            // Chế độ Shopee (chỉ đơn hàng): dựng CHỈ client Hub để ĐẨY ĐƠN/PHIẾU lên Hub — KHÔNG poller/heartbeat,
-            // KHÔNG đăng ký máy/lease (tránh tranh danh tính máy với bản Workspace). Không có client → đơn không lên Hub.
-            try { Shopee.Core.Coordination.CoordinationRuntime.InitClientOnlyFromConfig(); }
-            catch (Exception ex) { TryLog("Coordination.InitClientOnly", ex); }
-        }
+
+        // Điều phối phía CLIENT theo SUẤT LÀM VIỆC (xem MachineSlots): chế độ có Workspace → suất workspace (khoá
+        // việc, account-lease, nhận việc Hub giao) mang ĐÚNG machine_id cũ; chế độ có Shopee → thêm suất
+        // "<id-máy>:orders" chỉ heartbeat (đăng ký máy + nhận lệnh update app), KHÔNG claim việc/lease BigSeller
+        // nên hai bản chạy song song trên một PC không tranh nhau. Chưa cấu hình Hub → NoOp (app chạy như cũ).
+        // ĐẶT SAU khối trên: heartbeat mang MaxBrave nên phải đợi BraveFleet cấu hình xong.
+        try { Shopee.Core.Coordination.CoordinationRuntime.InitForCurrentMode(); }
+        catch (Exception ex) { TryLog("Coordination.Init", ex); }
 
         try
         {

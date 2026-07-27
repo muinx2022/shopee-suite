@@ -1,7 +1,7 @@
 # Plan: Suất làm việc theo chế độ app (Workspace / Đơn hàng) — đợt 1: nền tảng
 
 - **Ngày:** 2026-07-27
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành (hub đã deploy; client CHƯA release)
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-dev`)
 
 ## 1. Bối cảnh & mục tiêu
@@ -198,4 +198,38 @@ Thêm test cho phần thuần logic (đặt ở `orders/XuLyDonShopee.Tests`, LI
 
 ---
 
-## Báo cáo thực thi (Opus điền sau khi xong)
+## Báo cáo thực thi
+
+**Tạo mới:** `Coordination/MachineSlots.cs` (nguồn sự thật duy nhất về suất + 3 hàm suy diễn tương thích ngược),
+`Coordination/IUpdateAckSink.cs`, `Coordination/OrdersSlotHeartbeat.cs`, `MachineSlotsTests.cs` (10 test).
+**Sửa:** `HubDtos.cs`, `HttpCoordinationHub.cs`, `CoordinationRuntime.cs` (`InitForCurrentMode`),
+`App.axaml.cs`, `RemoteUpdateService.cs`, `OrdersModuleHost.cs`, hub `HubDatabase.cs` / `.Machines.cs` /
+`.Assignments.cs`, `ClientApiEndpoints.cs`, `Machines.razor`, `Dispatch.razor`, 2 csproj.
+
+**Nghiệm thu (Fable tự chạy — chạy hub MỚI trên BẢN SAO DB PRODUCTION thật, không phải db giả lập):**
+- `dotnet build ShopeeSuite.sln` + `dotnet build server/Shopee.Hub.Web` → 0 Warning, 0 Error.
+  (Lưu ý: `ShopeeSuite.sln` **không chứa** Hub.Web — phải build riêng, `grep -c` trên sln = 0.)
+- `dotnet test orders/XuLyDonShopee.Tests` → **1054/1054** (1044 + 10 mới).
+- Chép `hub.db` production (3 máy thật, schema `machines` 8 cột) về scratch, chạy hub mới trỏ vào:
+  - **Migration:** thêm đúng 3 cột `mode/kind/host_id` → 11 cột; 3 dòng máy cũ nguyên vẹn; bảng `orders` không đổi.
+  - **Tương thích ngược:** POST heartbeat KHÔNG có `Mode/Kind/HostId` → `HTTP 200`, DB ghi
+    `mode=Workspace, kind=workspace, host_id=<chính machine_id>`, **machine_id giữ nguyên** (BẤT BIẾN đạt).
+  - **Suất đơn hàng:** POST heartbeat `kind=orders` → sinh dòng `<id>:orders` với `host_id` = id PC → hub gộp được.
+  - **Chặn cứng:** POST `/assignments` ghim vào suất `:orders` → `HTTP 400` +
+    `"máy đích là suất ĐƠN HÀNG — suất này không nhận việc BigSeller…"`, và **0 dòng ghi vào DB**.
+  - **Claim:** `/assignments/claim` từ suất `:orders` → `[]`.
+
+**Delta hành vi đã khai báo (Opus báo, Fable xác nhận trong code):**
+1. `account_leases` của khoá `orders:*` giờ mang `machine_id = <host>:orders`. Hệ quả tốt: app Workspace khởi động
+   lại KHÔNG còn nhả oan khoá acc mà module Đơn hàng đang giữ. Hệ quả cần biết: muốn reset khoá đơn hàng phải reset
+   ở **dòng suất Đơn hàng**, không phải dòng Workspace. Khoá mồ côi vẫn tự hết sau ~5'.
+2. Máy Full đếm thành **2 dòng** ở "Cập nhật tất cả" trên /machines — ra lệnh cho suất nào cũng chung một
+   `RemoteUpdateService` nên chỉ 1 lần restart; hub tự clear cờ cả 2 khi thấy version đổi.
+3. Revoke (🗑 Xoá & chặn) trên dòng suất Đơn hàng KHÔNG chặn được thật: auth xét `X-Machine-Id` = id PC. Muốn chặn
+   thì revoke dòng Workspace (chặn cả process). Đã ghi comment tại `OrdersSlotHeartbeat`.
+4. `Reconnect()` giờ dựng lại **theo chế độ** (trước luôn `InitFromConfig()` — bấm "Kết nối ngay" ở chế độ Shopee sẽ
+   dựng nhầm suất workspace). Đây là sửa regress, nằm ngoài chữ của plan.
+5. Màn Fleet của app desktop sẽ hiện thêm dòng suất đơn hàng (trùng hostname) — thuần hiển thị, chưa sửa.
+
+**Còn lại:** client CHƯA release. Tới khi release thì chế độ Shopee vẫn vô hình trên hub như cũ (hub mới đã sẵn sàng
+nhận, chỉ chờ client biết gửi).

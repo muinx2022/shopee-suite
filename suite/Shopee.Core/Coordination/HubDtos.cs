@@ -25,6 +25,12 @@ public sealed class MachinePresence
     public string UpdateStatus { get; set; } = "";
     /// <summary>Thời điểm operator ra lệnh update (còn hiệu lực). null = không có lệnh đang chờ.</summary>
     public DateTimeOffset? UpdateRequestedAt { get; set; }
+    /// <summary>Chế độ app của máy: "Full" | "Workspace" | "Shopee" (rỗng = client cũ chưa báo → Hub suy "Workspace").</summary>
+    public string Mode { get; set; } = "";
+    /// <summary>Loại SUẤT làm việc: <see cref="MachineSlots.Workspace"/> | <see cref="MachineSlots.Orders"/>.</summary>
+    public string Kind { get; set; } = "";
+    /// <summary>Id PC THẬT (gộp 2 suất của cùng một máy). Suất workspace: = <see cref="MachineId"/>.</summary>
+    public string HostId { get; set; } = "";
 }
 
 /// <summary>Mục manifest của một file dùng chung trên Hub.</summary>
@@ -221,7 +227,12 @@ public sealed record SetAccountHomeRequest(List<string> AccountIds, string Machi
 /// = máy nhà CÒN online (last_seen trong ngưỡng HomeTakeoverAfter) ⇒ máy khác phải tránh; false = tk tự do.</summary>
 public sealed record AccountHomeItem(string AccountId, string MachineId, string Hostname, bool Binding);
 
-public sealed record MachineHeartbeatRequest(string MachineId, string Hostname, string? AppVersion, int MaxBrave = 0);
+/// <summary>Nhịp sống 1 SUẤT làm việc. <paramref name="MachineId"/> = id SUẤT (suất workspace GIỮ NGUYÊN id máy,
+/// suất đơn hàng có hậu tố — xem <see cref="MachineSlots"/>). 3 field cuối có MẶC ĐỊNH RỖNG để client CŨ (không
+/// gửi) vẫn hợp lệ; Hub suy ra qua <c>MachineSlots.Normalize*</c>.</summary>
+public sealed record MachineHeartbeatRequest(
+    string MachineId, string Hostname, string? AppVersion, int MaxBrave = 0,
+    string Mode = "", string Kind = "", string HostId = "");
 /// <summary>Phản hồi heartbeat: kênh Hub đẩy lệnh xuống client. <see cref="UpdateRequestedAt"/> null/rỗng = không có
 /// lệnh; có giá trị = chuỗi ISO lúc operator ra lệnh update, client dùng làm ID dedup (chỉ update 1 lần/lệnh).
 /// Là class để sau này thêm lệnh khác chỉ cần thêm field (client cũ bỏ qua field lạ).</summary>

@@ -360,10 +360,13 @@ public static class OrdersModuleHost
     /// đoạn nghỉ 3–4' giữa hai shop) nên phải giữ nhịp, y <c>AccountLeaseScope.StartHeartbeat</c>.</summary>
     private static readonly TimeSpan LeaseHeartbeatEvery = TimeSpan.FromSeconds(60);
 
-    /// <summary>Danh tính máy này gắn vào request lease — đọc LIVE từ <see cref="MachineIdentity"/> y cách
-    /// <c>HttpCoordinationHub</c> dựng <see cref="AccountReserveRequest"/> (id máy + tên hiển thị, đổi tên trong
-    /// Cài đặt có hiệu lực ngay lượt gửi kế tiếp).</summary>
-    private static string LeaseMachineId => MachineIdentity.Shared.MachineId;
+    /// <summary>Danh tính gắn vào request lease = id SUẤT ĐƠN HÀNG (<c>&lt;id-máy&gt;:orders</c>, xem
+    /// <see cref="MachineSlots"/>) chứ không phải id PC: hub mới đăng ký mỗi loại suất một dòng máy, khoá tài
+    /// khoản đơn hàng phải quy về ĐÚNG suất đơn hàng để trang Máy client / điều phối tra ra máy đang giữ. Đọc
+    /// LIVE từ <see cref="MachineIdentity"/> y cách <c>HttpCoordinationHub</c> dựng
+    /// <see cref="AccountReserveRequest"/> (đổi tên trong Cài đặt có hiệu lực ngay lượt gửi kế tiếp).</summary>
+    private static string LeaseMachineId =>
+        MachineSlots.SlotId(MachineIdentity.Shared.MachineId, MachineSlots.Orders);
 
     /// <summary>Tên máy hiển thị gửi kèm lease — máy khác đọc được "ai đang giữ" (xem <see cref="TenMayDangGiuAsync"/>).</summary>
     private static string LeaseHostname => MachineIdentity.Shared.DisplayName;
@@ -397,12 +400,12 @@ public static class OrdersModuleHost
     /// <para><b>Mất hub ⇒ VẪN CHO CHẠY</b> (hub chưa cấu hình / offline / lỗi → <c>Ok = true</c>): không có hub thì
     /// cũng không phối hợp được với ai, chặn sẽ làm app vô dụng khi mất mạng (y cách Scrape/Search degrade).</para>
     /// <para>Cổng kiểm là <c>Client</c> — ĐÚNG cổng các hook đẩy đơn đang dùng, nên khóa chạy được ở CẢ chế độ
-    /// <b>Full/Workspace</b> lẫn chế độ <b>Shopee</b> (chế độ Shopee chỉ dựng <c>Client</c>, KHÔNG dựng
-    /// <c>HttpCoordinationHub</c> — mà máy chạy riêng module đơn hàng lại chính là máy cần khóa nhất). Ghi chú
-    /// "chế độ Shopee không tranh danh tính máy" ở <c>App.axaml.cs</c> nói về ĐĂNG KÝ MÁY / heartbeat fleet, không
-    /// cấm account-lease; khóa ở đây có tiền tố <c>orders:</c> nên không đụng khóa tài khoản của Scrape/Search, và
-    /// hai bản Full + Shopee trên CÙNG máy vật lý dùng chung <see cref="MachineIdentity"/> nên hub cấp lại cho
-    /// cùng <c>machine_id</c>, không tự chặn nhau.</para>
+    /// <b>Full/Workspace</b> lẫn chế độ <b>Shopee</b> (chế độ Shopee chỉ dựng <c>Client</c> + nhịp sống suất đơn
+    /// hàng, KHÔNG dựng <c>HttpCoordinationHub</c> — mà máy chạy riêng module đơn hàng lại chính là máy cần khóa
+    /// nhất). Khóa ở đây có tiền tố <c>orders:</c> nên không đụng khóa tài khoản của Scrape/Search; và hai bản
+    /// Full + Shopee trên CÙNG máy vật lý dùng chung <see cref="MachineIdentity"/> nên id SUẤT ĐƠN HÀNG
+    /// (<see cref="LeaseMachineId"/>) của chúng TRÙNG NHAU ⇒ hub cấp lại cho cùng <c>machine_id</c>, không tự
+    /// chặn nhau (giữ nguyên hành vi cũ — chỉ đổi id từ id PC sang id suất).</para>
     /// Bị từ chối → BỎ QUA lượt (không xếp hàng chờ), kèm tên máy đang giữ để người dùng biết chỗ nào đang chạy.
     /// </summary>
     private static void WireAccountLease(AppServices services)

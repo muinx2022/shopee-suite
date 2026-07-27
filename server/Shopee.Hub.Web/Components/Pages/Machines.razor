@@ -16,18 +16,28 @@
 
 <div class="tablewrap">
 <table class="grid sm stack-sm">
-    <thead><tr><th>Máy</th><th>Trạng thái</th><th>Phiên bản</th><th title="Trần cửa sổ Brave client tự báo (Settings → Hiệu năng)">Brave max</th><th>Việc đang giữ</th><th>Vai trò (auto)</th><th>Hành động</th></tr></thead>
+    <thead><tr><th>Máy</th><th title="Chế độ app máy đang chạy (Cài đặt → Chế độ ứng dụng)">Chế độ</th><th title="Suất làm việc: Workspace = việc BigSeller · Đơn hàng = việc Shopee. Máy chế độ Full chiếm CẢ HAI suất (2 dòng, cùng một PC).">Suất</th><th>Trạng thái</th><th>Phiên bản</th><th title="Trần cửa sổ Brave client tự báo (Settings → Hiệu năng)">Brave max</th><th>Việc đang giữ</th><th>Vai trò (auto)</th><th>Hành động</th></tr></thead>
     <tbody>
-    @foreach (var m in Snap.Machines.OrderByDescending(x => x.LastSeen))
+    @foreach (var m in SortedMachines())
     {
         var pres = FleetStateService.Status(Snap, m);
+        var orders = m.Kind == MachineSlots.Orders;
         var role = Snap.Roles.FirstOrDefault(r => r.MachineId == m.MachineId)?.Role ?? MachineRoles.Off;
         var held = Snap.Assignments.Count(a => a.Status is "running" or "queued" && (a.ClaimedByMachineId == m.MachineId || a.TargetMachineId == m.MachineId))
                    + Snap.Leases.Count(l => l.MachineId == m.MachineId);
         // Việc gián đoạn của MÁY NÀY: failed có claimed_by (máy đã claim); canceled lúc còn queued chỉ có target.
         var interrupted = Snap.Interrupted.Count(a => a.ClaimedByMachineId == m.MachineId || a.TargetMachineId == m.MachineId);
         <tr>
-            <td data-label="Máy"><b>@m.Hostname</b><div class="mono m-hide" style="font-size:11px;color:#64748b">@m.MachineId[..Math.Min(12, m.MachineId.Length)]</div></td>
+            <td data-label="Máy" style="@(orders ? "padding-left:22px" : "")">
+                <b>@(orders ? "↳ " : "")@m.Hostname</b>
+                @if (orders && SiblingHost(m) is { Length: > 0 } sib)
+                {
+                    <div style="font-size:11px;color:#64748b">↳ cùng máy với @sib</div>
+                }
+                <div class="mono m-hide" style="font-size:11px;color:#64748b">@m.MachineId[..Math.Min(12, m.MachineId.Length)]</div>
+            </td>
+            <td data-label="Chế độ">@m.Mode</td>
+            <td data-label="Suất">@(orders ? "Đơn hàng" : "Workspace")</td>
             <td data-label="Trạng thái">@pres.Dot @pres.Label</td>
             <td data-label="Phiên bản">
                 @(string.IsNullOrEmpty(m.AppVersion) ? "—" : $"v{m.AppVersion}")
@@ -69,7 +79,7 @@
     }
     @if (Snap.Machines.Count == 0)
     {
-        <tr><td colspan="7" class="empty">Chưa có máy nào kết nối.</td></tr>
+        <tr><td colspan="9" class="empty">Chưa có máy nào kết nối.</td></tr>
     }
     </tbody>
 </table>
@@ -99,6 +109,18 @@
 
     private int RunningCount => Snap.Assignments.Count(a => a.Status == "running");
     private int QueuedCount => Snap.Assignments.Count(a => a.Status == "queued");
+
+    // Hai SUẤT của cùng một PC (cùng HostId) phải nằm CẠNH NHAU: gom theo HostId, cụm nào có nhịp mới nhất thì
+    // lên trước (giữ đúng thói quen "máy vừa hoạt động ở trên" của bảng này), trong cụm thì Workspace rồi Đơn hàng.
+    private IEnumerable<MachinePresence> SortedMachines() => Snap.Machines
+        .GroupBy(m => m.HostId, StringComparer.Ordinal)
+        .OrderByDescending(g => g.Max(m => m.LastSeen))
+        .SelectMany(g => g.OrderBy(m => m.Kind == MachineSlots.Orders ? 1 : 0).ThenBy(m => m.MachineId, StringComparer.Ordinal));
+
+    /// <summary>Tên máy của SUẤT KIA trên cùng PC (để dòng suất đơn hàng nói "↳ cùng máy với …"). Rỗng = máy
+    /// chỉ chạy chế độ Shopee (không có suất workspace) → không có gì để đối chiếu.</summary>
+    private string SiblingHost(MachinePresence m) => Snap.Machines
+        .FirstOrDefault(x => x.HostId == m.HostId && x.MachineId != m.MachineId)?.Hostname ?? "";
 
     // Máy nên update = ĐANG ONLINE và (không biết bản mới nhất → mọi máy online; biết → chỉ máy khác bản mới nhất).
     private bool NeedsUpdate(MachinePresence m)

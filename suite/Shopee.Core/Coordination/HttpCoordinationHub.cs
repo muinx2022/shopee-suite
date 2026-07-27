@@ -7,8 +7,12 @@ namespace Shopee.Core.Coordination;
 /// tiến độ/hoàn thành lên ledger, giành/nhả account-lease, và poll /fleet định kỳ để cập nhật bảng.
 /// Offline (lỗi mạng) → AcquireAsync trả Blocked("mất kết nối hub") ⇒ điểm chạy CHẶN việc mới.
 /// </summary>
-public sealed class HttpCoordinationHub : ICoordinationHub, IDisposable
+public sealed class HttpCoordinationHub : ICoordinationHub, IUpdateAckSink, IDisposable
 {
+    /// <summary>Chu kỳ nhịp sống + poll /fleet của SUẤT WORKSPACE. Là con số CHUẨN cho mọi suất — suất đơn
+    /// hàng (<see cref="OrdersSlotHeartbeat"/>) dùng lại đúng hằng này, đừng đặt số riêng.</summary>
+    public static readonly TimeSpan PollEvery = TimeSpan.FromSeconds(12);
+
     private readonly HubClient _client;
     private readonly string _machineId;
     private readonly Timer _poller;
@@ -37,14 +41,21 @@ public sealed class HttpCoordinationHub : ICoordinationHub, IDisposable
     /// <summary>Hook lệnh UPDATE app do operator ra từ Hub. Suite gán lúc khởi động (về RemoteUpdateService);
     /// bắn từ <see cref="PollAsync"/> khi heartbeat mang lệnh — tham số 2 = chuỗi ISO lúc ra lệnh, handler dùng làm
     /// ID dedup (mỗi lệnh xử 1 lần). static (cùng lý do DiagLog: PollAsync chạy NỀN); handler TỰ dedup + TỰ lo
-    /// luồng, KHÔNG được block poll.</summary>
-    public static Action<HttpCoordinationHub, string>? UpdateRequested { get; set; }
+    /// luồng, KHÔNG được block poll.
+    /// <para>Tham số 1 là <see cref="IUpdateAckSink"/> chứ không phải hub cụ thể: SUẤT ĐƠN HÀNG
+    /// (<see cref="OrdersSlotHeartbeat"/>) bắn CHUNG hook này để dùng lại y bộ xử lý update, ack về đúng
+    /// <c>machine_id</c> của suất đã nhận lệnh.</para></summary>
+    public static Action<IUpdateAckSink, string>? UpdateRequested { get; set; }
+
+    /// <summary>Chế độ app hiện hành gửi kèm heartbeat ("Full" | "Workspace" | "Shopee") — Hub hiện ở trang Máy
+    /// client + gộp 2 suất của cùng PC. Đọc LIVE (đổi chế độ = restart nên thực tế không đổi giữa vòng đời).</summary>
+    private static string Mode => Infrastructure.AppModeStore.Shared.Current.ToString();
 
     public HttpCoordinationHub(HubClient client, string machineId)
     {
         _client = client;
         _machineId = machineId;
-        _poller = new Timer(_ => _ = PollAsync(), null, TimeSpan.Zero, TimeSpan.FromSeconds(12));
+        _poller = new Timer(_ => _ = PollAsync(), null, TimeSpan.Zero, PollEvery);
     }
 
     public void Dispose() => _poller.Dispose();
@@ -58,7 +69,7 @@ public sealed class HttpCoordinationHub : ICoordinationHub, IDisposable
     {
         try
         {
-            var resp = await _client.MachineHeartbeatAsync(new MachineHeartbeatRequest(_machineId, Host, Infrastructure.AppInfo.Version, Shopee.Core.Browser.BraveFleet.MaxConcurrentWindows));
+            var resp = await _client.MachineHeartbeatAsync(Beat());
             _fleet = await _client.FleetAsync();
             // CHỈ 1 lần, SAU khi Hub thật sự trả lời (tránh race lúc máy-Hub vừa khởi động: server localhost chưa
             // kịp lắng nghe). Poller 12s tự chạy ở tick thành công đầu tiên.
@@ -96,9 +107,15 @@ public sealed class HttpCoordinationHub : ICoordinationHub, IDisposable
     public async Task NotifyMachineNowAsync()
     {
         // Bỏ qua response ở đây: chỉ PollAsync là đường bắn lệnh update DUY NHẤT (dễ lần, khỏi 2 chỗ cùng bắn).
-        try { await _client.MachineHeartbeatAsync(new MachineHeartbeatRequest(_machineId, Host, Infrastructure.AppInfo.Version, Shopee.Core.Browser.BraveFleet.MaxConcurrentWindows)); }
+        try { await _client.MachineHeartbeatAsync(Beat()); }
         catch { }
     }
+
+    /// <summary>Gói nhịp sống của SUẤT WORKSPACE: id suất = ĐÚNG id máy (BẤT BIẾN — xem <see cref="MachineSlots"/>),
+    /// <c>HostId</c> = chính nó, kèm chế độ app để Hub gộp 2 suất cùng PC.</summary>
+    private MachineHeartbeatRequest Beat() => new(
+        _machineId, Host, Infrastructure.AppInfo.Version, Shopee.Core.Browser.BraveFleet.MaxConcurrentWindows,
+        Mode, MachineSlots.Workspace, _machineId);
 
     /// <summary>Ack tiến trình/kết quả tự-update app lên Hub. true = gửi được; false = offline/lỗi mạng (Hub GIỮ
     /// cờ lệnh → lượt poll sau lệnh lại về, handler dedup xử tiếp). Nuốt lỗi để không nổ ra nền.</summary>
