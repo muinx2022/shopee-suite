@@ -5,6 +5,13 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Hiệu năng. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.6.8 — 2026-07-28
+
+- **Số "chuẩn bị hàng" tự sang ngày mới:** máy chạy xuyên đêm (đúng cách module Đơn hàng vận hành — vòng lặp liên
+  tục) thì trước đây lúc 00:00 ô ngày ở tab **Kết quả** vẫn đứng ở hôm qua, số đóng băng, và **đơn chuẩn bị của ngày
+  mới không hiện ra nữa** cho tới khi đóng/mở lại app. Nay ô ngày tự chuyển sang ngày mới — ngay từ **đơn đầu tiên**
+  của ngày, không phải chờ. Đang mở một ngày cũ để xem lại thì app **không giật** ngày khỏi tay bạn.
+
 ## v1.6.7 — 2026-07-27
 
 - **Điều khiển Đơn hàng từ Hub:** trang Giao việc trên Hub có tab **Đơn hàng** làm việc theo đúng lối của tab
