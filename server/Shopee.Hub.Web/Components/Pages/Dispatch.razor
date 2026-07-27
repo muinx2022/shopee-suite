@@ -7,6 +7,7 @@
 @attribute [Authorize(Policy = "Web")]
 @using Microsoft.AspNetCore.WebUtilities
 @inherits FleetPageBase
+@inject DispatcherService Dispatcher
 @inject FileStoreConfigService Config
 @inject HubDatabase Db
 @inject NavigationManager Nav
@@ -202,7 +203,7 @@
             </table>
             </div>
             @* HubDatabase CHỈ có DismissAllInterrupted() (bỏ HẾT) — không có API bỏ TỪNG việc → nút đặt ở CHÂN
-               panel và nói rõ là bỏ tất cả, đúng nút "✕ Bỏ … việc gián đoạn" của trang Fleet. Xác nhận 2 bước. *@
+               panel và nói rõ là bỏ tất cả (khuôn nút "✕ Bỏ … việc gián đoạn" cũ của trang Fleet). Xác nhận 2 bước. *@
             @if (Snap.Interrupted.Count > 0)
             {
                 <div class="bar">
@@ -228,6 +229,22 @@
 
 @if (_tab == "bs")
 {
+    @* Hai công tắc của TOÀN HỆ THỐNG (chuyển từ trang Fleet sang) — KHÔNG thuộc máy đang chọn nên đặt ngay dưới
+       hàng tab, tách hẳn khỏi panel tham số của máy bên dưới. Kết quả hiện ở dòng @_result trên lưới. *@
+    <div class="bar">
+        <label class="toggle" title="Bật: cứ 10s hub tự tạo việc kế tiếp cho MỌI shop theo dây chuyền scrape → import → update. Tắt: chỉ chạy việc giao tay ở trang này.">
+            <input type="checkbox" checked="@Dispatcher.Enabled" @onchange="ToggleDispatch" />
+            Điều phối tự động (scrape→import→update)
+        </label>
+        <button class="btn danger sm" disabled="@(AllOpenCount == 0)"
+                title="Huỷ MỌI việc hub-giao đang chạy/chờ của TOÀN HỆ THỐNG — mọi máy, mọi tài khoản. (Nút '✖ Huỷ mọi việc trên máy này' bên dưới chỉ đụng máy đang chọn.) Tham số giữ nguyên, ▶ Tiếp tục chạy lại được."
+                @onclick="CancelAllWork">
+            @(_confirmCancel == "all"
+                ? $"Bấm lần nữa để huỷ {AllOpenCount} việc TOÀN HỆ THỐNG"
+                : $"✖ Huỷ MỌI việc ({AllOpenCount})")
+        </button>
+    </div>
+
     <div class="subhead">🖥 Chọn máy client</div>
     <div class="mcards">
         @foreach (var m in _budgets)
@@ -358,7 +375,11 @@
             @foreach (var r in g.Rows)
             {
                 <tr @key="r.Key">
-                    <td class="shop">@r.ShopName</td>
+                    @* Tên shop = lối sang trang BigSeller ("/") của đúng shop đó. Là <a> trong ô RIÊNG, không bọc
+                       cả dòng → cú bấm không lẫn sang nút hành động ở các ô bên cạnh. *@
+                    <td class="shop">
+                        <a href="@FleetLink(r)" title="Mở @r.ShopName ở trang BigSeller (tiến độ · đặt tay ledger · rewrite · dữ liệu).">@r.ShopName</a>
+                    </td>
                     @foreach (var op in DispatchOps)
                     {
                         var b = Btn(r, op);
@@ -749,6 +770,8 @@ else
             && !running.Any(w => w.AsnId == _confirmWork) && !queued.Any(w => w.AsnId == _confirmWork))
             _confirmWork = "";
         if (_confirmDismiss && _kInterrupted == 0) _confirmDismiss = false;
+        // Nút "Huỷ MỌI việc" đang chờ bấm-lần-nữa mà hệ thống vừa hết việc → huỷ chờ (nút cũng thành disabled).
+        if (_confirmCancel == "all" && AllOpenCount == 0) _confirmCancel = "";
     }
 
     /// <summary>Dòng "đang chạy" của ô (shop, op). Nguồn thật của ô ⏳ theo đúng thứ tự OpCell xét: lease tươi
@@ -936,6 +959,12 @@ else
         .Select(g => new RowGroup(g.Key, g.First().AccountName, g.ToList()))
         .ToList();
 
+    /// <summary>Link mở trang BigSeller ("/") đúng shop này. Tên tham số ĐÚNG như
+    /// <c>Fleet.RestoreSelectionFromUrl</c> đọc: <c>acc</c> = id tài khoản, <c>shop</c> = id shop (tab mặc định
+    /// là Hành động). CHÚ Ý: trang đó dùng <c>acc</c>, trang này dùng <c>acct</c> — khác nhau.</summary>
+    private static string FleetLink(Row r) =>
+        $"/?acc={Uri.EscapeDataString(r.AccountId)}&shop={Uri.EscapeDataString(r.ShopId)}";
+
     private string? HoldHostOf(string accountId) =>
         _holds.TryGetValue(accountId, out var m) ? HostName(m) : null;
 
@@ -962,7 +991,7 @@ else
 
     private string EmptyText() => _rows.Count == 0
         ? (_hiddenNoSheet > 0
-            ? $"Chưa shop nào gán ngăn dữ liệu ({_hiddenNoSheet} shop bị ẩn) — vào Fleet › ⚙ Cấu hình để gán."
+            ? $"Chưa shop nào gán ngăn dữ liệu ({_hiddenNoSheet} shop bị ẩn) — vào BigSeller › ⚙ Cấu hình để gán."
             : "Chưa có tài khoản BigSeller nào có shop.")
         : "Không dòng nào khớp bộ lọc.";
 
@@ -1029,7 +1058,18 @@ else
             : new($"▶ {OpLabel(op)}", "run", "run", $"Giao {OpLabel(op)} · {r.ShopName} cho {HostName(_selMachine)}.", note);
     }
 
-    // ── Huỷ HÀNG LOẠT theo máy / theo tài khoản ──────────────────────────────────
+    // ── Điều phối tự động (công tắc toàn hệ thống, lưu trong bảng settings) ──────
+    private void ToggleDispatch(ChangeEventArgs e)
+    {
+        Dispatcher.Enabled = e.Value is true;
+        FleetState.Refresh();
+    }
+
+    // ── Huỷ HÀNG LOẠT: toàn hệ thống / theo máy / theo tài khoản ─────────────────
+    /// <summary>Việc hub-giao đang mở (queued/running) của TOÀN HỆ THỐNG — số trên nút "✖ Huỷ MỌI việc". Khác
+    /// <see cref="MachineOpenCount"/> (chỉ máy đang chọn).</summary>
+    private int AllOpenCount => Snap.Assignments.Count(a => a.Status is "queued" or "running");
+
     /// <summary>Việc hub-giao đang mở (queued/running) của máy đang chọn — đếm cả việc máy đã claim lẫn việc mới
     /// ghim chưa claim. Việc chạy TAY không có assignment nên KHÔNG nằm ở đây (hub không huỷ được).</summary>
     private int MachineOpenCount => _selMachine.Length == 0 ? 0 : OpenAssignmentsOfMachine().Count;
@@ -1051,6 +1091,20 @@ else
         _confirmAcct = "";   // không để hai cụm cùng ở trạng thái chờ
         _result = "";
         return false;
+    }
+
+    /// <summary>Huỷ MỌI việc hub-giao đang chạy/chờ trên MỌI máy, MỌI tài khoản (chuyển từ trang Fleet sang).
+    /// Bản 'canceled' GIỮ NGUYÊN tham số → điều phối tự động không tạo lại (sticky-cancel); bấm ▶ Tiếp tục ở thẻ
+    /// KPI "Việc gián đoạn" để chạy lại đúng lượt cũ.</summary>
+    private void CancelAllWork()
+    {
+        var open = Snap.Assignments.Where(a => a.Status is "queued" or "running").ToList();
+        if (open.Count == 0) { _confirmCancel = ""; return; }
+        if (!Arm("all")) return;
+
+        foreach (var a in open) Db.CancelAssignment(a.Id);
+        _result = $"✖ Đã huỷ {open.Count} việc (toàn hệ thống) — tham số giữ nguyên, ▶ Tiếp tục để chạy lại.";
+        FleetState.Refresh();   // 1 lần sau vòng lặp
     }
 
     private void CancelByMachine()

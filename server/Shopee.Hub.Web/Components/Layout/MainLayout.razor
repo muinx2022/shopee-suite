@@ -12,7 +12,7 @@
             <div class="brand-logo">S</div>
             <div class="brand-text">
                 <div class="brand-name">Shopee Hub</div>
-                <div class="brand-sub">Fleet control</div>
+                <div class="brand-sub">Điều phối nhiều máy</div>
             </div>
         </div>
 
@@ -22,8 +22,10 @@
             <NavLink class="nav" href="/orders"><span class="nav-ic">@HubIcons.Svg("orders")</span><span>Đơn hàng</span></NavLink>
 
             <div class="navsec">Điều khiển</div>
-            <NavLink class="nav" href="/" Match="NavLinkMatch.All"><span class="nav-ic">@HubIcons.Svg("fleet")</span><span>Fleet</span></NavLink>
+            @* Giao việc ĐỨNG TRƯỚC: đó là trang điều khiển mở cả ngày; "/" giờ chỉ còn soi số liệu & sửa cấu hình
+               của tài khoản BigSeller → nhãn "BigSeller" (song song với "Acc Shopee & Proxy" bên dưới). *@
             <NavLink class="nav" href="/dispatch"><span class="nav-ic">@HubIcons.Svg("dispatch")</span><span>Giao việc</span></NavLink>
+            <NavLink class="nav" href="/" Match="NavLinkMatch.All"><span class="nav-ic">@HubIcons.Svg("fleet")</span><span>BigSeller</span></NavLink>
             <NavLink class="nav" href="/machines"><span class="nav-ic">@HubIcons.Svg("machines")</span><span>Máy client</span></NavLink>
             <NavLink class="nav" href="/search"><span class="nav-ic">@HubIcons.Svg("search")</span><span>Search</span></NavLink>
             <NavLink class="nav" href="/data"><span class="nav-ic">@HubIcons.Svg("data")</span><span>Dữ liệu</span></NavLink>
@@ -69,7 +71,7 @@
 
 @code {
     private int _online, _total;
-    private string _pageTitle = "Fleet";
+    private string _pageTitle = "BigSeller";
 
     protected override void OnInitialized()
     {
@@ -98,7 +100,7 @@
         p = p.TrimEnd('/');
         _pageTitle = p switch
         {
-            "" => "Fleet",
+            "" => "BigSeller",
             "shops" => "Shop",
             "orders" => "Đơn hàng",
             "dispatch" => "Giao việc",

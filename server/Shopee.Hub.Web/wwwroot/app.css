@@ -462,6 +462,11 @@ html.dark .mcard.sel .mc-host { color: var(--sidebar-ic-active); }
 .opbtn.blocked { background: var(--gray); border-color: var(--stroke); color: var(--body); }
 html.dark .opbtn.run { color: var(--sidebar-ic-active); }
 
+/* Tên shop trong lưới = link sang trang BigSeller ("/"). Nền tối: --primary (indigo ĐẬM) trên nền card gần
+   như chìm → dùng indigo SÁNG sẵn có, y như .chip.on / .opbtn.run đã phải làm. */
+.dispatch td.shop a { color: var(--primary); font-weight: 600; }
+html.dark .dispatch td.shop a { color: var(--sidebar-ic-active); }
+
 /* Cụm nút mức tài khoản trên dòng nhóm ("▶ Scrape cả acc"…) */
 table.grid tr.acctrow .acctacts { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-left: 10px; }
 

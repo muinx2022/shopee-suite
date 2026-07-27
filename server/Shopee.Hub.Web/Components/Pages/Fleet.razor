@@ -1,13 +1,13 @@
 @page "/"
 @* KHÔNG dùng @@page "/fleet": route đó thuộc API client (GET /fleet trả JSON). Trang này ở "/".
-   Trang vận hành DUY NHẤT — bố cục WORKSPACE master-detail: KPI + danh sách acc→shop bên TRÁI,
-   bên PHẢI 3 tab (Hành động / Thống kê / Cấu hình) cho mục đang chọn. *@
+   Trang SOI & SỬA (số liệu · đặt tay ledger · rewrite · cấu hình · dữ liệu) — bố cục WORKSPACE master-detail:
+   KPI + danh sách acc→shop bên TRÁI, bên PHẢI các tab cho mục đang chọn.
+   GIAO VIỆC (ghim/huỷ/tiếp tục/điều phối tự động) nằm hẳn ở trang 🎯 Giao việc (/dispatch). *@
 @attribute [Authorize(Policy = "Web")]
 @using Microsoft.AspNetCore.WebUtilities
 @using Microsoft.Extensions.DependencyInjection
 @inherits FleetPageBase
 @inject FileStoreConfigService Config
-@inject DispatcherService Dispatcher
 @inject HubDatabase Db
 @inject NavigationManager Nav
 @inject RewriteJobService Rewrite
@@ -33,50 +33,10 @@
     </div>
 </div>
 
+@* Trang này chỉ SOI & SỬA (số liệu · đặt tay ledger · rewrite · cấu hình · dữ liệu). Mọi lối GIAO VIỆC
+   (điều phối tự động, ghim/huỷ/tiếp tục việc) đã chuyển hẳn sang trang 🎯 Giao việc (/dispatch). *@
 <div class="bar">
     <span class="stat m-hide">@_summary</span>
-    <label class="toggle">
-        <input type="checkbox" checked="@Dispatcher.Enabled" @onchange="ToggleDispatch" />
-        Điều phối tự động (scrape→import→update)
-    </label>
-    @* Hành động hàng loạt (chuyển từ trang Máy sang): huỷ MỌI việc + tiếp tục MỌI việc gián đoạn. Cả hai xác nhận
-       2-bước (bấm-lần-nữa) theo pattern repo. Badge N gián đoạn cập nhật theo snapshot 2s. *@
-    @if (!_confirmCancelAll)
-    {
-        <button class="btn danger sm" title="Huỷ mọi việc hub-giao đang chạy/chờ. Việc đã hủy GIỮ NGUYÊN tham số — bấm ▶ Tiếp tục để chạy lại."
-                @onclick="() => _confirmCancelAll = true">✖ Huỷ MỌI việc</button>
-    }
-    else
-    {
-        <button class="btn danger sm" @onclick="CancelAllWork">Bấm lần nữa để huỷ @_openWorkCount việc đang chạy/chờ</button>
-        <button class="btn sm" @onclick="() => _confirmCancelAll = false">Huỷ</button>
-    }
-    @if (!_confirmResumeAll)
-    {
-        <button class="btn primary sm" disabled="@(_interruptedCount == 0)"
-                title="Đưa mọi việc gián đoạn (dừng/lỗi, chưa xong) về hàng chờ để client chạy lại (giữ tham số)."
-                @onclick="() => _confirmResumeAll = true">▶ Tiếp tục @_interruptedCount việc gián đoạn</button>
-    }
-    else
-    {
-        <button class="btn primary sm" @onclick="ResumeAllInterrupted">Bấm lần nữa để tiếp tục @_interruptedCount việc</button>
-        <button class="btn sm" @onclick="() => _confirmResumeAll = false">Huỷ</button>
-    }
-    @if (!_confirmDismissAll)
-    {
-        <button class="btn sm" disabled="@(_interruptedCount == 0)"
-                title="Bỏ hẳn mọi việc gián đoạn khỏi danh sách (kể cả việc không gắn máy nào) — không tiếp tục lại được từ đây; ledger/thống kê giữ nguyên."
-                @onclick="() => _confirmDismissAll = true">✕ Bỏ @_interruptedCount việc gián đoạn</button>
-    }
-    else
-    {
-        <button class="btn sm" @onclick="DismissAllInterrupted">Bấm lần nữa để BỎ HẲN @_interruptedCount việc — không tiếp tục lại được</button>
-        <button class="btn sm" @onclick="() => _confirmDismissAll = false">Huỷ</button>
-    }
-    @if (!string.IsNullOrEmpty(_barMsg))
-    {
-        <span class="action">@_barMsg</span>
-    }
 </div>
 
 <div class="workspace">
@@ -137,7 +97,6 @@
                         {
                             var cell = FleetStateService.OpCell(Snap, row.AccountId, row.ShopId, op);
                             var st = row.Ops.GetValueOrDefault(op);
-                            var resumeLed = ManualResumeLedger(row, op, cell);   // ≠ null = việc chạy-TAY dừng dở, tiếp-tục-được
                             <tr>
                                 <td>@OpLabel(op)</td>
                                 <td><span class="pill @cell.Css" title="@(st is null ? "" : $"{st.Machine} · {st.LastAgo}")">@cell.Text</span></td>
@@ -157,14 +116,6 @@
                                             <option value="stopped">■ Dừng</option>
                                         </select>
                                     }
-                                    @* Việc chạy TAY dừng dở (không assignment, không nằm trong Interrupted) → giao lại cho máy cũ.
-                                       Tham số 0 = client dùng cấu hình của nó; ghim để đúng máy đã có tiến độ. Không áp cho rewrite. *@
-                                    @if (resumeLed is not null)
-                                    {
-                                        <button class="btn primary sm" style="margin-top:4px"
-                                                title="Việc chạy tay dừng dở — giao lại cho máy cũ (client tự dùng cấu hình của nó)."
-                                                @onclick="() => ResumeManual(row, op, resumeLed)">▶ Tiếp tục trên máy @Machine(resumeLed)</button>
-                                    }
                                 </td>
                             </tr>
                         }
@@ -172,7 +123,7 @@
                 </table>
                 </div>
 
-                @* (b) Form ghim việc *@
+                @* (b) Giao việc đã chuyển hẳn sang trang /dispatch → chỉ còn LỐI SANG đó, lọc sẵn acc + shop. *@
                 @if (!row.InConfig)
                 {
                     <p class="hint">Shop không còn trong cấu hình — chỉ xem tiến độ.</p>
@@ -185,101 +136,9 @@
                 }
                 else
                 {
-                    <div class="pinpanel">
-                        <div class="pin">
-                            <div>Shop: <b>@row.ShopName</b></div>
-                            <label>Op
-                                <select @bind="_pinOp">
-                                    <option value="">-- Chọn Op --</option>
-                                    <option value="scrape">Scrape</option>
-                                    <option value="import">Import</option>
-                                    <option value="update">Update</option>
-                                </select>
-                            </label>
-                            <label>Máy
-                                <select @bind="_pinMachine">
-                                    <option value="">— chọn máy —</option>
-                                    @foreach (var m in _pinnableMachines)
-                                    {
-                                        var off = FleetStateService.MachineOffline(Snap, m.MachineId);
-                                        <option value="@m.MachineId" disabled="@off">@(off ? "⚪" : "🟢") @m.Hostname @(off ? "(offline)" : "")</option>
-                                    }
-                                </select>
-                            </label>
-                            <label>Từ dòng <input type="number" @bind="_pinStart" style="width:80px" /></label>
-                            <label>Đến dòng <input type="number" @bind="_pinEnd" style="width:80px" /></label>
-                            <label>Số process <input type="number" @bind="_pinProcs" style="width:70px" /></label>
-                            @if (_pinOp == "scrape")
-                            {
-                                <label>Số tk / khung <input type="number" @bind="_pinFrame" style="width:70px" /></label>
-                            }
-                            @if (_pinOp == "import" || _pinOp == "update")
-                            {
-                                <label>Reload (s) <input type="number" @bind="_pinReload" style="width:70px" /></label>
-                            }
-                            @if (_pinOp == "import")
-                            {
-                                <label><input type="checkbox" @bind="_pinFromClaimed" /> Import từ tab "Đã nhận"</label>
-                            }
-                        </div>
-                        <p class="hint">Tham số truyền cho client lượt này (0 = dùng cấu hình client). Thư mục video/ảnh luôn dùng của máy client.</p>
-                        @* Nút hành động ở hàng riêng, khỏi trôi lơ lửng theo flex-wrap của hàng field.
-                           CHỈ 1 trong 2 nút hiện tại 1 thời điểm: có việc (hoặc đang hủy dở) → nút Huỷ; rảnh → nút Ghim.
-                           Trạng thái chuyển tiếp bám THEO CLIENT thật (lease) chứ không lạc quan theo DB:
-                           • Ghim xong → "Đang giao việc…" (xanh) tới khi client nhận + chạy thật (lease xuất hiện).
-                           • Huỷ → nút Huỷ DISABLED + "Đang hủy…" (đỏ) tới khi client dừng hẳn (lease biến mất) → về nút Ghim. *@
-                        <div class="pin pinbtns">
-                            @if (_hasWork || _canceling)
-                            {
-                                <button class="btn danger" disabled="@_canceling" @onclick="CancelSelected">✖ Huỷ việc (hub giao)</button>
-                            }
-                            else
-                            {
-                                <button class="btn primary" disabled="@(string.IsNullOrEmpty(_pinMachine) || string.IsNullOrEmpty(_pinOp) || _pinBlocked)" @onclick="Pin">📌 Ghim việc</button>
-                            }
-                        </div>
-                        @if (_assigning)
-                        {
-                            <div class="busyline assigning"><span class="dot"></span> Đang giao việc @OpLabel(_activeAsn!.Op) cho máy <b>@AsnMachineName(_activeAsn!)</b>…</div>
-                        }
-                        else if (_canceling)
-                        {
-                            <div class="busyline canceling"><span class="dot"></span> Đang hủy — chờ máy <b>@(_shopLease?.Hostname ?? "client")</b> dừng hẳn…</div>
-                        }
-                        <div class="action">@_action</div>
-                        @if (_pinBlocked)
-                        {
-                            <div class="warn">⚠ Máy này KHÁC máy đang giữ acc (<b>@_accountOwnerWarn</b>) — 1 acc chỉ chạy 1 máy. Chọn <b>@_accountOwnerWarn</b>, hoặc vào 🖥️ Máy client → Reset máy đó trước.</div>
-                        }
-                        else if (_manualLease is not null)
-                        {
-                            <div class="hint" style="margin-top:4px">▶ Shop đang <b>chạy TAY</b> trên máy <b>@_manualLease.Hostname</b> — hub KHÔNG huỷ việc chạy tay; dừng bằng nút ■ trong app trên máy đó (client sẽ tự báo hub khi dừng). Việc do <b>hub giao</b> mới huỷ được ở đây.</div>
-                        }
-                        else if (_accountOwnerWarn is not null)
-                        {
-                            <div class="hint" style="margin-top:4px">ℹ Acc đang do máy <b>@_accountOwnerWarn</b> dùng — ghim thêm nên vào máy đó.</div>
-                        }
-
-                        @* ⏯ Việc gián đoạn của shop này (assignment hub-giao đã dừng/lỗi, chưa xong) — đặt NGAY DƯỚI
-                           nút Ghim/Huỷ để operator thấy cạnh nhau. Mỗi dòng: op · máy cuối · lý do · lúc + ▶ Tiếp tục. *@
-                        @if (_shopInterrupted is { Count: > 0 } ints)
-                        {
-                            <div style="margin-top:14px">
-                                <div class="subhead">⏯ Việc gián đoạn (@ints.Count)</div>
-                                @foreach (var a in ints)
-                                {
-                                    <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:6px">
-                                        <span class="pill warn">@OpLabel(a.Op)</span>
-                                        <span class="hint" style="margin:0; flex:1 1 auto; min-width:0; overflow-wrap:anywhere">máy <b>@IntMachine(a)</b> · @IntReason(a) · @a.UpdatedAt.LocalDateTime.ToString("dd/MM HH:mm")</span>
-                                        <button class="btn primary sm" @onclick="() => ResumeOne(a.Id)">▶ Tiếp tục</button>
-                                    </div>
-                                }
-                                @if (!string.IsNullOrEmpty(_resumeMsg))
-                                {
-                                    <div class="warn" style="margin-top:8px">@_resumeMsg</div>
-                                }
-                            </div>
-                        }
+                    <div class="bar">
+                        <a class="btn primary sm" href="@DispatchLink(row)"
+                           title="Sang trang Giao việc, lọc sẵn tài khoản + shop này — ở đó chọn máy rồi bấm thẳng việc.">🎯 Giao việc cho shop này</a>
                     </div>
                 }
 
@@ -475,6 +334,14 @@
                     </tbody>
                 </table>
                 </div>
+                @* Acc mồ côi (chỉ còn trong ledger) không giao việc được → không dựng lối sang. *@
+                @if (_accounts.Any(a => a.Id == _selAcctId))
+                {
+                    <div class="bar">
+                        <a class="btn primary sm" href="@DispatchLink(_selAcctId!)"
+                           title="Sang trang Giao việc, lọc sẵn tài khoản này — ở đó chọn máy rồi bấm việc cho từng shop (hoặc cả acc).">🎯 Giao việc cho tài khoản này</a>
+                    </div>
+                }
             }
             else
             {
@@ -524,16 +391,6 @@
     // _gridView nhận LÊN từ panel (OnViewChanged) để ghi vào URL. Cả hai clear khi đổi chọn (Select*/SetTab).
     private (string Q, int P, int Ps)? _gridInitial;
     private (string Q, int P, int Ps)? _gridView;
-
-    private string _pinOp = "";
-    private string _pinMachine = "";
-    private int _pinStart, _pinEnd;
-    // Tham số chạy Hub đặt cho lượt này (mặc định = default của BigSellerRunConfig; 0 = client tự dùng cấu hình).
-    private int _pinProcs = 2;
-    private int _pinFrame = 10;
-    private int _pinReload = 20;
-    private bool _pinFromClaimed;
-    private string _action = "";
 
     // Rewrite-tên-trên-hub (tab Hành động của shop hub-mode): số dòng chờ (cache theo shop), thông báo Start, và
     // theo dõi chuyển trạng thái để tự làm-mới số dòng chờ khi 1 lượt chạy xong.
@@ -781,9 +638,7 @@
         _selShopKey = (r.AccountId, r.ShopId);
         _selAcctId = r.AccountId;
         _selRow = r;
-        _action = "";
         _rwActionMsg = "";
-        _resumeMsg = "";
         // Shop kho-Hub → nạp trước số dòng chờ rewrite (không chặn render); ngược lại xoá cache.
         if (IsHubAcct(r.AccountId) && !string.IsNullOrEmpty(r.Sheet)) RefreshRewritePending(r.AccountId, r.Sheet);
         else { _rwPending = null; _rwPendingKey = null; }
@@ -842,7 +697,6 @@
         _selAcctId = accountId;
         _selShopKey = null;
         _selRow = null;
-        _action = "";
         if (_tab is "stats" or "data") _tab = "action";   // mức acc không có tab Thống kê/Dữ liệu (chỉ ở mức shop)
         ClearGridView();
         UpdateUrl();
@@ -999,66 +853,6 @@
         FleetState.Refresh();
     }
 
-    private void ToggleDispatch(ChangeEventArgs e)
-    {
-        Dispatcher.Enabled = e.Value is true;
-        FleetState.Refresh();
-    }
-
-    // ── Hành động hàng loạt trên thanh đầu trang ──────────────────────────────────
-    private bool _confirmCancelAll;    // arm 2-bước nút Huỷ MỌI việc
-    private bool _confirmResumeAll;    // arm 2-bước nút Tiếp tục mọi việc gián đoạn
-    private bool _confirmDismissAll;   // arm 2-bước nút Bỏ hẳn mọi việc gián đoạn
-    private string _barMsg = "";
-
-    private int _openWorkCount => Snap.Assignments.Count(a => a.Status is "running" or "queued");
-    private int _interruptedCount => Snap.Interrupted.Count;
-
-    // Huỷ mọi assignment hub-giao đang chạy/chờ (chuyển từ trang Máy sang). Bản 'canceled' GIỮ NGUYÊN tham số →
-    // sticky-cancel không tự tạo lại; operator bấm ▶ Tiếp tục để chạy lại đúng lượt cũ.
-    private void CancelAllWork()
-    {
-        _confirmCancelAll = false;
-        var n = 0;
-        foreach (var a in Snap.Assignments.Where(a => a.Status is "running" or "queued"))
-        { Db.CancelAssignment(a.Id); n++; }
-        _barMsg = $"✖ Đã huỷ {n} việc (chạy + chờ). Bấm ▶ Tiếp tục để chạy lại (tham số giữ nguyên).";
-        FleetState.Refresh();
-    }
-
-    // Tiếp tục TẤT CẢ việc gián đoạn: đưa từng bản về 'queued' (giữ tham số), gom message lỗi (nếu có).
-    private void ResumeAllInterrupted()
-    {
-        _confirmResumeAll = false;
-        var (ok, errs) = ResumeMany(Snap.Interrupted);
-        _barMsg = errs.Count == 0
-            ? $"▶ Đã cho {ok} việc gián đoạn chạy lại (về hàng chờ)."
-            : $"▶ Tiếp tục {ok} việc; {errs.Count} không được: {string.Join("; ", errs.Distinct())}";
-        FleetState.Refresh();
-    }
-
-    // Bỏ hẳn MỌI việc gián đoạn khỏi danh sách (dismissed=1) — kể cả việc không gắn máy nào. Không tiếp tục lại
-    // được từ đây; ledger/thống kê giữ nguyên; sticky-cancel giữ nguyên (status không đổi).
-    private void DismissAllInterrupted()
-    {
-        _confirmDismissAll = false;
-        var n = Db.DismissAllInterrupted();
-        _barMsg = $"✕ Đã bỏ {n} việc gián đoạn khỏi danh sách.";
-        FleetState.Refresh();
-    }
-
-    // Lặp ResumeAssignment cho một tập việc → (số OK, danh sách message lỗi tiếng Việt).
-    private (int Ok, List<string> Errors) ResumeMany(IEnumerable<Assignment> items)
-    {
-        var ok = 0; var errs = new List<string>();
-        foreach (var a in items)
-        {
-            var err = Db.ResumeAssignment(a.Id);
-            if (err is null) ok++; else errs.Add(err);
-        }
-        return (ok, errs);
-    }
-
     /// <summary>Mở bản đồ dòng của 1 việc trên shop đang chọn: chỉ dựng ctx → RowMapModal tự đọc sheet + tô dòng.</summary>
     private void OpenMap(string op)
     {
@@ -1074,122 +868,16 @@
             Snap.Ledger.FirstOrDefault(l => l.Key == $"{shop.AccountId}__{shop.ShopId}__{op}"));
     }
 
-    private void Pin()
-    {
-        if (_selRow is null || string.IsNullOrEmpty(_pinMachine) || string.IsNullOrEmpty(_pinOp)) return;
-        var payload = _pinOp == "import"
-            ? JsonSerializer.Serialize(new ImportJobPayload { FromClaimedTab = _pinFromClaimed })
-            : "";
-        // FrameSize chỉ scrape đọc, Reload chỉ import/update đọc → op khác truyền 0 để sạch dữ liệu. Processes áp mọi op.
-        Db.CreateAssignment(new CreateAssignmentRequest(
-            _selRow.AccountId, _selRow.ShopId, _selRow.Sheet, _pinOp, _pinMachine, true,
-            Math.Max(0, _pinStart), Math.Max(0, _pinEnd), payload,
-            Processes: Math.Max(0, _pinProcs),
-            FrameSize: _pinOp == "scrape" ? Math.Max(0, _pinFrame) : 0,
-            ReloadSeconds: _pinOp is "import" or "update" ? Math.Max(0, _pinReload) : 0));
-        var host = Snap.Machines.FirstOrDefault(m => m.MachineId == _pinMachine)?.Hostname ?? _pinMachine;
-        _action = FleetStateService.MachineOffline(Snap, _pinMachine)
-            ? $"⚠ Đã ghim {_pinOp} · {_selRow.ShopName} → {host} (máy đang TẮT — chờ tới khi mở app)."
-            : $"✔ Đã ghim {_pinOp} · {_selRow.ShopName} → {host}.";
-        FleetState.Refresh();
-    }
+    // ── Lối sang trang 🎯 Giao việc (/dispatch) ───────────────────────────────────
+    /// <summary>Link mở trang Giao việc đã lọc sẵn shop này. Tên tham số ĐÚNG như <c>Dispatch.RestoreFromUrl</c>
+    /// đọc: <c>acct</c> = id tài khoản, <c>q</c> = ô tìm (lọc ở mức tài khoản), <c>f</c> = chip trạng thái. Ép
+    /// <c>f=all</c> vì trang đó mặc định lọc "Chưa xong" — shop đã ✓ hết sẽ không hiện dòng nào.</summary>
+    private static string DispatchLink(ShopRow r) =>
+        $"/dispatch?acct={Uri.EscapeDataString(r.AccountId)}&q={Uri.EscapeDataString(r.ShopName)}&f=all";
 
-    private void CancelSelected()
-    {
-        if (_selRow is null) return;
-        var n = 0;
-        foreach (var a in Snap.Assignments.Where(a =>
-            a.BigsellerId == _selRow.AccountId && a.ShopId == _selRow.ShopId && a.Status is "queued" or "running"))
-        { Db.CancelAssignment(a.Id); n++; }
-        _action = $"✖ Đã huỷ {n} việc của shop {_selRow.ShopName}.";
-        FleetState.Refresh();
-    }
-
-    // ── Việc gián đoạn của shop đang chọn (khối ⏯ trong tab Hành động) ─────────────
-    private string _resumeMsg = "";   // message lỗi inline khi ▶ Tiếp tục 1 việc (rỗng = OK); clear khi đổi shop
-
-    // Assignment hub-giao gián đoạn (failed/canceled, chưa xong) của (acc,shop) đang chọn.
-    private List<Assignment> _shopInterrupted => _selRow is null ? new()
-        : Snap.Interrupted.Where(a => a.BigsellerId == _selRow.AccountId && a.ShopId == _selRow.ShopId).ToList();
-
-    // Máy cuối của việc gián đoạn: hostname đã claim (failed), fallback máy đích (canceled lúc còn queued chỉ có target).
-    private string IntMachine(Assignment a) =>
-        !string.IsNullOrWhiteSpace(a.ClaimedByHostname) ? a.ClaimedByHostname
-        : (!string.IsNullOrEmpty(a.TargetMachineId) ? HostName(a.TargetMachineId) : "—");
-
-    private static string IntReason(Assignment a) =>
-        !string.IsNullOrWhiteSpace(a.LastError) ? a.LastError : (a.Status == "canceled" ? "đã huỷ" : "lỗi");
-
-    private void ResumeOne(string id)
-    {
-        _resumeMsg = Db.ResumeAssignment(id) is { } err ? $"✘ {err}" : "";
-        FleetState.Refresh();
-    }
-
-    // ── Tiếp tục việc CHẠY TAY dừng dở (không assignment) → tạo assignment mới ghim máy cũ ─────────────
-    /// <summary>Trả ledger record nếu (shop,op) là việc chạy-TAY dừng dở tiếp-tục-được, ngược lại null. Điều kiện:
-    /// ô đang là "■ dừng dở"/"dừng dở (mất kết nối)" (kind 3, css warn — CHỈ do ledger, KHÔNG phải ✘ lỗi assignment),
-    /// KHÔNG có assignment mở (queued/running) và KHÔNG nằm trong Interrupted (để tránh trùng nút ▶ ở khối trên),
-    /// và ledger có LastMachineId để ghim lại. Không áp cho op=rewrite (rewrite hub-mode chạy bằng khối Rewrite).</summary>
-    private WorkLedgerRecord? ManualResumeLedger(ShopRow row, string op, OpCellState cell)
-    {
-        if (op == "rewrite" || !row.InConfig || string.IsNullOrEmpty(row.Sheet)) return null;
-        if (cell.Kind != 3 || cell.Css != "warn") return null;
-        if (Snap.Assignments.Any(a => a.BigsellerId == row.AccountId && a.ShopId == row.ShopId && a.Op == op && a.Status is "queued" or "running")) return null;
-        if (Snap.Interrupted.Any(a => a.BigsellerId == row.AccountId && a.ShopId == row.ShopId && a.Op == op)) return null;
-        var led = Snap.Ledger.FirstOrDefault(l => l.Key == $"{row.AccountId}__{row.ShopId}__{op}");
-        return led is not null && !string.IsNullOrEmpty(led.LastMachineId) ? led : null;
-    }
-
-    private void ResumeManual(ShopRow row, string op, WorkLedgerRecord led)
-    {
-        // Việc chạy tay KHÔNG có assignment → tạo mới, ghim vào máy cuối, tham số 0 = client dùng cấu hình của nó.
-        Db.CreateAssignment(new CreateAssignmentRequest(row.AccountId, row.ShopId, row.Sheet, op, led.LastMachineId, Pinned: true));
-        _action = $"▶ Đã tiếp tục {OpLabel(op)} · {row.ShopName} → máy {Machine(led)} (client dùng cấu hình của nó).";
-        FleetState.Refresh();
-    }
-
-    // Assignment hub-giao ĐANG HIỆU LỰC (queued/running) của shop đang chọn — nguồn cho nút Huỷ + "Đang giao việc…".
-    private Assignment? _activeAsn => _selRow is null ? null : Snap.Assignments.FirstOrDefault(a =>
-        a.BigsellerId == _selRow.AccountId && a.ShopId == _selRow.ShopId && a.Status is "queued" or "running");
-
-    // Shop đang chọn có việc HUB-GIAO (assignment) queued/running → hub huỷ được (khoá Ghim).
-    private bool _hasWork => _activeAsn is not null;
-
-    // Lease sống của shop = client THẬT SỰ đang chạy op trên máy (nguồn sự thật cho "đã chạy"/"đã dừng hẳn").
-    private LeaseRecord? _shopLease => _selRow is null ? null
-        : Snap.Leases.FirstOrDefault(l => l.BigsellerId == _selRow.AccountId && l.ShopId == _selRow.ShopId);
-
-    // Đã ghim nhưng client CHƯA thật sự chạy (chưa có lease — đang chờ máy claim + khởi động) → "Đang giao việc…" (xanh).
-    private bool _assigning => _activeAsn is not null && _shopLease is null;
-
-    // Đã bấm Huỷ (assignment vừa 'canceled') nhưng client CHƯA dừng hẳn (lease cùng op còn sống) → nút Huỷ
-    // DISABLED + "Đang hủy…" (đỏ); lease biến mất = hủy xong → về nút Ghim. Cửa sổ 15' tránh khớp nhầm bản
-    // 'canceled' cũ (còn trong list 2h) với lần chạy TAY sau đó.
-    private bool _canceling => _selRow is not null && _activeAsn is null && _shopLease is { } l
-        && Snap.Assignments.Any(a => a.BigsellerId == _selRow.AccountId && a.ShopId == _selRow.ShopId
-            && a.Status == "canceled" && a.Op == l.Op
-            && (DateTimeOffset.UtcNow - a.UpdatedAt) < TimeSpan.FromMinutes(15));
-
-    // Máy nhận việc để hiện ở "Đang giao việc…": đã claim thì tên máy claim, chưa thì máy được ghim.
-    private string AsnMachineName(Assignment a) =>
-        HostName(!string.IsNullOrEmpty(a.ClaimedByMachineId) ? a.ClaimedByMachineId : a.TargetMachineId ?? "");
-
-    // Shop đang chọn có LEASE nhưng KHÔNG có assignment hub-giao (và không phải đang-hủy-dở) = việc CHẠY TAY trên
-    // client. Hub không huỷ được (client tự dừng bằng nút ■ rồi nhả lease báo hub); chỉ hiện chú thích cho rõ.
-    private LeaseRecord? _manualLease => (_selRow is null || _hasWork || _canceling) ? null : _shopLease;
-
-    // Chủ sở hữu acc hiện tại (nếu có) — ràng buộc máy ghim được.
-    private string? _accountOwnerMachine => _selRow is null ? null : OwnerOf(_selRow.AccountId);
-    private string? _accountOwnerWarn => _accountOwnerMachine is { } mid
-        ? Snap.Machines.FirstOrDefault(m => m.MachineId == mid)?.Hostname ?? mid : null;
-
-    // Hiện MỌI máy trong dropdown; chỉ CHẶN (nút Ghim mờ + cảnh báo) khi chọn máy KHÁC máy đang giữ acc.
-    private IEnumerable<MachinePresence> _pinnableMachines => Snap.Machines;
-
-    /// <summary>Đang chọn máy KHÁC máy đang giữ acc → ghim sẽ bị khoá 1-acc-1-máy (việc nằm chờ mãi) → chặn.</summary>
-    private bool _pinBlocked => _accountOwnerMachine is { } o && !string.IsNullOrEmpty(_pinMachine)
-        && !string.Equals(_pinMachine, o, StringComparison.Ordinal);
+    /// <summary>Link mở trang Giao việc đã lọc sẵn 1 tài khoản (giữ chip mặc định "Chưa xong").</summary>
+    private static string DispatchLink(string accountId) =>
+        "/dispatch?acct=" + Uri.EscapeDataString(accountId);
 
     private string? OwnerOf(string bs)
     {

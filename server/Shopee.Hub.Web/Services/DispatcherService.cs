@@ -8,7 +8,7 @@ namespace Shopee.Hub.Web.Services;
 /// máy Hub WPF). Khi BẬT + chế độ tự-theo-vai-trò: mỗi 10s duyệt từng shop trong config/bigseller.json của
 /// chính Hub và tạo "việc kế tiếp" theo dây chuyền scrape → import → update (đọc trạng thái từ ledger DB) để
 /// client đúng vai trò nhận. Ràng buộc single-session + thứ tự pipeline được siết lần cuối ở ClaimNext.
-/// Bật/tắt lưu trong bảng settings (dispatcher.enabled / dispatcher.auto) — đổi từ trang /fleet.
+/// Bật/tắt lưu trong bảng settings (dispatcher.enabled / dispatcher.auto) — đổi từ trang /dispatch.
 /// </summary>
 public sealed class DispatcherService : BackgroundService
 {
