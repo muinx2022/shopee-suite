@@ -1,7 +1,7 @@
-# Plan: Import LUÔN chạy 1 lane — khoá cứng, không cho cấu hình
+﻿# Plan: Import LUÔN chạy 1 lane — khoá cứng, không cho cấu hình
 
 - **Ngày:** 2026-07-27
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành (client chờ release)
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-dev`)
 
 ## 1. Bối cảnh — lỗi người dùng báo
@@ -111,4 +111,38 @@ khuôn này) — KHÔNG nới thành `public`.
 
 ---
 
-## Báo cáo thực thi (Opus điền sau khi xong)
+## Báo cáo thực thi
+
+**Tạo:** `suite/Shopee.Core/Coordination/OpLanes.cs` (luật lane theo op, thuần BCL: `Import = 1`,
+`RequiredBraves(op, assignedProcesses, clientProcesses)`), `orders/XuLyDonShopee.Tests/OpLanesTests.cs` (5 test).
+**Sửa:** `UpdateProductViewModel.cs` (`lanes, lanes` → `OpLanes.Import, lanes`), `AssignmentWorker.cs` (uỷ quyền
+cho `OpLanes`), `UpdateProductRunner.cs` (thêm 1 dòng log ở nhánh 1 lane), `Dispatch.razor` (nhãn ô Số process),
+`XuLyDonShopee.Tests.csproj` (LINK `OpLanes.cs`).
+
+**Nghiệm thu (Fable tự chạy):**
+- `dotnet build ShopeeSuite.sln` + `dotnet build server/Shopee.Hub.Web` → 0 Warning, 0 Error.
+- `dotnet test` → **1089/1089** (1084 + 5 mới).
+- Đọc khai báo thật `UpdateProductContext` (`UpdateProductRunner.cs:8-19`): thứ tự là
+  `… ImportMaxProcess, UpdateMaxProcess, ListingReloadSeconds …` ⇒ `OpLanes.Import, lanes, reload` đặt ĐÚNG chỗ,
+  không hoán vị.
+- `grep "lanes, lanes"` → 0 kết quả.
+
+**Chỉnh chẩn đoán của plan (Opus đúng, Fable đã kiểm lại):** mục 1.3 của plan nói đường Workspace/hub "không đọc
+tới" `BigSellerImportMaxProcess` — chính xác hơn là **có đi qua nhưng chỉ như trạm trung chuyển trong RAM**:
+`UpdateProductRunner.BuildWorkflow` GHI `BigSellerImportMaxProcess = ctx.ImportMaxProcess` rồi
+`BigSellerContextFactory.Build` ĐỌC LẠI chính giá trị vừa ghi. `grep` xác nhận chỉ có **một** nơi tạo
+`UpdateProductSettingsFile` và **một** nơi gọi `Build`, đều trong `BuildWorkflow` ⇒ không có nguồn cấu hình thứ hai,
+khoá ở `BuildContext` là đủ.
+
+**Opus tự quyết ngoài plan (đã soi, chấp nhận):**
+1. Dùng hằng dùng chung `OpLanes.Import` thay `private const` trong ViewModel — nếu để private thì `AssignmentWorker`
+   không trỏ tới được, thành hai số 1 rời nhau (đúng loại drift plan cảnh báo) và cũng không test được.
+2. `RequiredBraves` không test được bằng `internal` + `InternalsVisibleTo` như plan giả định (test project là
+   `net8.0`, `Shopee.Suite` là `net8.0-windows`) → tách luật thuần ra `OpLanes` rồi LINK vào test.
+3. Thêm 1 dòng log ở nhánh 1 lane của `UpdateProductRunner` — không có nó thì tiêu chí "log báo import 1 lane"
+   không thể thoả, vì nhánh `n == 1` return sớm và không log gì. Dấu hiệu cần soi khi test thật:
+   **`▶ Import 1 lane (Import KHÔNG chạy song song).`**
+
+**Không chạy kiểm chứng thật — lý do đúng:** bản cài trên máy này là Velopack self-contained (`includedFrameworks`
++ `coreclr.dll`), robocopy build Debug framework-dependent đè vào là trộn hai flavor, dễ hỏng bản cài; và lúc đó
+fleet đang chạy thật (9 process Brave đang mở) — đóng app là bỏ ngang việc. Kiểm chứng thật để cùng lượt release.

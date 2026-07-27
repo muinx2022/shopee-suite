@@ -117,6 +117,9 @@ public sealed class UpdateProductRunner
         var n = Math.Clamp(ctx.ImportMaxProcess, 1, 10);
         if (n == 1)
         {
+            // Log cả ca 1 lane (nhánh nhiều lane đã có log riêng bên dưới) → soi được "import chạy mấy worker"
+            // ngay trên log/Hub, khỏi phải đếm cửa sổ Brave. Đường Workspace/hub LUÔN vào nhánh này (OpLanes.Import).
+            Log?.Invoke("▶ Import 1 lane (Import KHÔNG chạy song song).");
             await using var runner = new BigSellerImportToStoreRunner(wf, m => Log?.Invoke(m), _pause, 0, 1);
             runner.RowsDone += (f, t) => RowsCompleted?.Invoke(f, t);
             await runner.RunAsync(ct);

@@ -357,6 +357,7 @@ public sealed partial class UpdateProductViewModel : ModuleViewModelBase
         var sr = startRow is int x && x > 0 ? x : t.StartRow;
         var er = endRow is int y && y > 0 ? y : t.EndRow;
         // Số lane + reload: ưu tiên override (Hub giao việc, >0) → KHÔNG ghi đè cấu hình account; 0/null = dùng cấu hình.
+        // CHÚ Ý: `lanes` là lane của UPDATE (+ scrape) — Import KHÔNG dùng, xem OpLanes.Import bên dưới.
         var lanes = processes is int p && p > 0 ? p : t.UpdateWorkers;
         var reload = reloadSeconds is int r && r > 0 ? r : t.ListingReloadSeconds;
         // "Import từ tab Đã nhận": ưu tiên cờ Hub ghim vào việc (checkbox tab Giao việc); null = dùng cấu hình shop.
@@ -367,7 +368,9 @@ public sealed partial class UpdateProductViewModel : ModuleViewModelBase
             aiModel, "", ai.BatchSize, "",
             sr, er, imageOverride ?? ImagePath, VideoFolder,
             s.BigSellerCrawlUrl, fromClaimedTab,
-            lanes, lanes, reload, ai.OpenAiApiKey,   // Import & Update dùng CHUNG số lane (RunConfig.Processes); Hub giao có thể ghi đè
+            // Thứ tự: (ImportMaxProcess, UpdateMaxProcess, ListingReloadSeconds). Import KHOÁ CỨNG 1 lane
+            // (OpLanes.Import) — cấu hình account lẫn "Số process" Hub giao đều KHÔNG ghi đè; chỉ Update ăn `lanes`.
+            OpLanes.Import, lanes, reload, ai.OpenAiApiKey,
             s.ColumnMap.LinkColumn, s.ColumnMap.PriceColumn, s.ColumnMap.SkuColumn,
             s.ColumnMap.ItemIdColumn, s.ColumnMap.ProductNameColumn, s.ColumnMap.RewrittenNameColumn,
             a.Password, a.UsesHubData);   // hub-mode: đọc/ghi kho Hub (Postgres) thay vì workbook Excel local

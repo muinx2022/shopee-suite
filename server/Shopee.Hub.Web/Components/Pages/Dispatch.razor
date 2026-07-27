@@ -277,7 +277,7 @@
             <div class="optsrow">
                 <label>Từ dòng <input type="number" @bind="_optStart" style="width:80px" /></label>
                 <label>Đến dòng <input type="number" @bind="_optEnd" style="width:80px" /></label>
-                <label>Số process <input type="number" @bind="_optProcs" style="width:70px" /></label>
+                <label title="Import LUÔN chạy 1 lane — khoá cứng ở client, ô này KHÔNG ghi đè được.">Số process (chỉ Scrape/Update đọc — Import luôn 1 lane) <input type="number" @bind="_optProcs" style="width:70px" /></label>
                 <label>Số tk / khung (chỉ Scrape đọc) <input type="number" @bind="_optFrame" style="width:70px" /></label>
                 <label>Reload giây (chỉ Import/Update đọc) <input type="number" @bind="_optReload" style="width:70px" /></label>
                 <label><input type="checkbox" @bind="_optFromClaimed" /> Import từ tab "Đã nhận" (chỉ Import đọc)</label>

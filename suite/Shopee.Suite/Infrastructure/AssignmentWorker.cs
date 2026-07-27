@@ -207,17 +207,13 @@ public sealed class AssignmentWorker : IDisposable
         }
     }
 
-    /// <summary>Số cửa sổ Brave 1 việc CẦN để tính quỹ. rewrite/search KHÔNG mở trình duyệt → 0. scrape/import/update:
-    /// ưu tiên Processes Hub đặt cho lượt này, else cấu hình client (RunConfig.Processes, mặc định 2). Clamp theo trần
-    /// engine: update/import 1..10, scrape 1..64.</summary>
-    private static int RequiredBraves(Assignment a)
-    {
-        if (a.Op is "rewrite" or "search") return 0;
-        var n = a.Processes > 0
-            ? a.Processes
-            : (BigSellerStore.Shared.Accounts.FirstOrDefault(x => x.Id == a.BigsellerId)?.RunConfig?.Processes ?? 2);
-        return a.Op == "scrape" ? Math.Clamp(n, 1, 64) : Math.Clamp(n, 1, 10);
-    }
+    /// <summary>Số cửa sổ Brave 1 việc CẦN để tính quỹ — luật ở <see cref="OpLanes.RequiredBraves"/> (dùng chung với
+    /// chỗ chạy thật, xem UpdateProductViewModel.BuildContext). Ở đây chỉ tra cấu hình client của tài khoản
+    /// (RunConfig.Processes, mặc định 2) rồi giao cho luật quyết định. Import LUÔN 1 khung (OpLanes.Import).</summary>
+    private static int RequiredBraves(Assignment a) =>
+        OpLanes.RequiredBraves(a.Op, a.Processes,
+            BigSellerStore.Shared.Accounts.FirstOrDefault(x => x.Id == a.BigsellerId)?.RunConfig?.Processes
+                ?? OpLanes.DefaultProcesses);
 
     private async Task LaunchAsync(HttpCoordinationHub hub, Assignment a, int grant)
     {
