@@ -483,12 +483,13 @@ else
                         @{ var rb = OrdersRunBtn(a); }
                         <button class="opbtn @rb.Css" disabled="@rb.Disabled" title="@rb.Title"
                                 @onclick="() => OnOrdersRunClick(a)">@rb.Label</button>
-                        @* 2 lệnh dưới CHƯA làm được ở đợt này: client không có điểm vào cấp service (một phiên là
-                           vòng liên tục login→mọi shop→sync), nhái lại logic phiên rủi ro hơn lợi ích. *@
+                        @* KHÔNG có nút "Đăng nhập lại" ở đây — ranh giới người dùng chốt: với Đơn hàng/Shopee,
+                           HUB CHỈ NHÌN VÀ CHẠY, còn đăng nhập thế nào là việc của client tự lo. (Khác BigSeller:
+                           bên đó hub login hộ được vì hub giữ sẵn mật khẩu + hòm thư đọc mã.)
+                           "Đồng bộ 1 lượt" chưa làm được: client không có điểm vào cấp service (một phiên là vòng
+                           liên tục login→mọi shop→sync), nhái lại logic phiên rủi ro hơn lợi ích. *@
                         <button class="opbtn blocked" disabled
                                 title="Đồng bộ đơn một lượt — sẽ làm ở đợt sau (bản client hiện chưa có điểm vào cho lệnh này).">↻ Đồng bộ 1 lượt</button>
-                        <button class="opbtn blocked" disabled
-                                title="Đăng nhập lại / kiểm tra tài khoản — sẽ làm ở đợt sau (bản client hiện chưa có điểm vào cho lệnh này).">🔑 Đăng nhập lại</button>
                     </span>
                     @if (rb.Note.Length > 0)
                     {
