@@ -416,3 +416,57 @@ table.grid tr.acctrow:hover td { background: var(--gray); }
     /* Trang /data (100 dòng/trang tạo trang cuộn rất dài, sticky header chết): cap chiều cao để bảng tự cuộn trong khung. */
     .alldata .tablewrap { max-height: 70vh; max-height: 70dvh; }
 }
+
+/* ===== Trang Giao việc (/dispatch) ===== */
+/* Bảng phẳng mọi shop + thanh hành động hàng loạt ở đáy. Chỉ dùng token sẵn có (--card/--stroke/--primary/
+   --info-bg…) nên tự đúng ở cả nền tối; KHÔNG đụng khối CSS của Fleet. */
+.dispatch .bar label { display: flex; align-items: center; gap: 6px; color: var(--body); font-size: 13px; }
+/* Chừa chỗ cho thanh hành động fixed ở đáy (chỉ khi có dòng được tick) → không che mất dòng cuối bảng. */
+.dispatch.hasbulk { padding-bottom: 150px; }
+
+/* Chip lọc trạng thái */
+.chips { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.chip { padding: 5px 12px; border: 1px solid var(--stroke); border-radius: 999px; background: var(--card); color: var(--body); font-family: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; white-space: nowrap; transition: all .13s; }
+.chip:hover { background: var(--gray); color: var(--text); }
+.chip.on { background: var(--primary-soft); border-color: var(--primary); color: var(--primary); }
+/* Nền tối: --primary (indigo đậm) trên nền indigo mờ gần như chìm hẳn → dùng indigo SÁNG đã có sẵn trong
+   bảng token (cùng màu icon nav đang active) cho chữ. */
+html.dark .chip.on { color: var(--sidebar-ic-active); }
+
+/* Ô op = nút mở menu (pill giữ nguyên hình dạng của lưới Fleet) */
+.opcell { display: block; width: 100%; text-align: left; padding: 0; border: 0; background: none; cursor: pointer; font: inherit; }
+.opcell:hover .pill { filter: brightness(.96); }
+tr.picked > td { background: var(--info-bg); }
+table.grid tbody tr.picked:hover > td { background: var(--info-bg); }
+
+/* Menu hành động của 1 ô: DÒNG PHỤ ngay dưới dòng shop (không position:absolute — .tablewrap có
+   overflow-x:auto nên popover tuyệt đối sẽ bị cắt mất). */
+table.grid tbody tr.opmenurow > td { background: var(--gray); border-bottom: 1px solid var(--stroke); }
+.opmenu { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.opmenu-head { font-weight: 700; color: var(--text); font-size: 12.5px; margin-right: 4px; }
+.opmenu-item { padding: 5px 11px; border: 1px solid var(--stroke); border-radius: var(--radius-sm); background: var(--card); color: var(--text); font-family: inherit; font-size: 12.5px; cursor: pointer; white-space: nowrap; }
+.opmenu-item:hover { background: var(--primary-soft); border-color: var(--primary); color: var(--primary); }
+.opmenu-none { color: var(--body); font-size: 12.5px; }
+
+/* Thanh hành động hàng loạt — bám đáy màn, chừa đúng bề ngang sidebar */
+.bulkbar { position: fixed; left: 250px; right: 0; bottom: 0; z-index: 30; padding: 12px 34px; background: var(--card); border-top: 1px solid var(--stroke); box-shadow: 0 -6px 22px rgba(16, 24, 40, .12); }
+html.dark .bulkbar { box-shadow: 0 -6px 22px rgba(0, 0, 0, .45); }
+.bulkbar .bulkrow { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+.bulkbar .bulkrow.opts { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--stroke); }
+.bulkbar label { display: flex; align-items: center; gap: 6px; color: var(--body); font-size: 13px; }
+.bulkbar .preview { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 8px; font-size: 12.5px; color: var(--body); }
+.bulkbar .preview .skip { overflow-wrap: anywhere; min-width: 0; }
+/* Một máy trong kế hoạch: "PC-01 ← 3 shop" */
+.plan { display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 20px; font-size: 12px; font-weight: 600; background: var(--info-bg); color: var(--primary); white-space: nowrap; }
+html.dark .plan { color: var(--sidebar-ic-active); }
+.plan.none { background: var(--warning-bg); color: var(--warning); }
+
+/* Màn hẹp: sidebar co còn icon-rail 64px (KHÔNG ẩn hẳn) → thanh hành động phải bám 64px, không phải 0.
+   Khối này PHẢI nằm SAU khối gốc ở trên: cùng độ đặc hiệu nên rule đứng sau mới thắng. */
+@media (max-width: 920px) {
+    .bulkbar { left: 64px; padding: 10px 14px; }
+    .bulkbar .bulkrow { gap: 8px; }
+    /* Thanh cao hơn ở khung hẹp (control xuống dòng) → chừa thêm chỗ cho dòng cuối bảng. */
+    .dispatch.hasbulk { padding-bottom: 230px; }
+    .opmenu-item { padding: 8px 12px; }
+}

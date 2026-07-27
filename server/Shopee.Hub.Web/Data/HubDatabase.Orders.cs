@@ -39,6 +39,11 @@ public sealed record UpsertOrdersResult(int Added, int Updated, List<OrderPushIt
 /// — kiểu NỘI BỘ hub, endpoint map tường minh sang <c>PrepareStatItem</c> (DTO dùng chung với client).</summary>
 public sealed record PrepareStatRow(string ShopUsername, int Count);
 
+/// <summary>Tổng quan ĐƠN của 1 shop cho trang Giao việc (<see cref="HubDatabase.ShopOrderSummaries"/>): số đơn
+/// đang ở trạng thái chờ, số đơn ĐÃ có phiếu trên hub, lần client đẩy đơn gần nhất. Kiểu NỘI BỘ hub (chỉ trang
+/// Blazor dùng, không đi qua dây).</summary>
+public sealed record ShopOrderSummary(long ShopId, int Waiting, int WithSlip, DateTimeOffset LastSynced);
+
 /// <summary>Phần HubDatabase: nghiệp vụ ĐƠN HÀNG — bảng <c>orders</c> (UNIQUE shop_id+order_sn) + upsert/query/count.</summary>
 public sealed partial class HubDatabase
 {
@@ -188,6 +193,36 @@ ON CONFLICT(shop_id,order_sn) DO UPDATE SET
                 if (rd.IsDBNull(0)) continue;
                 list.Add(new PrepareStatRow(rd.GetString(0), rd.GetInt32(1)));
             }
+            return list;
+        }
+    }
+
+    /// <summary>
+    /// Gom số đơn theo TỪNG shop trong MỘT lượt quét bảng <c>orders</c> — trang Giao việc bám nhịp fleet nên
+    /// KHÔNG gọi <see cref="CountOrders"/> nhiều lần (mỗi lần một query dưới <c>lock(_gate)</c> toàn cục).
+    /// <paramref name="waitingStatus"/> = trạng thái coi là "đang chờ" (vd "Chờ lấy hàng"). Shop chưa có đơn nào
+    /// → KHÔNG có dòng (bên gọi tự hiển thị 0). Hàm ĐỌC thuần, không đụng hàm đếm sẵn có.
+    /// </summary>
+    public List<ShopOrderSummary> ShopOrderSummaries(string waitingStatus)
+    {
+        lock (_gate)
+        {
+            var list = new List<ShopOrderSummary>();
+            using var c = _conn.CreateCommand();
+            // MAX(synced_at) so sánh chuỗi ISO ("o") — mọi bản ghi đều do Iso(UtcNow) ghi nên cùng định dạng,
+            // thứ tự từ điển = thứ tự thời gian.
+            c.CommandText = "SELECT shop_id, "
+                + "SUM(CASE WHEN status=$w THEN 1 ELSE 0 END), "
+                + "SUM(CASE WHEN slip_at IS NOT NULL THEN 1 ELSE 0 END), "
+                + "MAX(synced_at) FROM orders GROUP BY shop_id";
+            c.Parameters.AddWithValue("$w", waitingStatus ?? "");
+            using var rd = c.ExecuteReader();
+            while (rd.Read())
+                list.Add(new ShopOrderSummary(
+                    rd.GetInt64(0),
+                    rd.IsDBNull(1) ? 0 : rd.GetInt32(1),
+                    rd.IsDBNull(2) ? 0 : rd.GetInt32(2),
+                    D(rd, 3)));
             return list;
         }
     }

@@ -1,0 +1,830 @@
+@page "/dispatch"
+@* Trang GIAO VIỆC hàng loạt: bảng phẳng mọi shop (lọc + tick nhiều dòng) + thanh hành động ở đáy có "⚖ Tự cân
+   tải" kèm xem trước. Trang Fleet ("/") vẫn là chỗ xem SÂU 1 shop — trang này chỉ lo giao việc cho NHIỀU shop.
+   Nguồn dữ liệu dùng lại nguyên của Fleet (FleetStateService.OpCell / Snap / HubDatabase) — CỐ Ý không chép
+   Rebuild() của Fleet: Fleet phải overlay ledger để hiện shop mồ côi, trang này chỉ cần shop trong config có sheet. *@
+@attribute [Authorize(Policy = "Web")]
+@using Microsoft.AspNetCore.WebUtilities
+@inherits FleetPageBase
+@inject FileStoreConfigService Config
+@inject HubDatabase Db
+@inject NavigationManager Nav
+
+<div class="dispatch @(ShowBulk ? "hasbulk" : "")">
+<div class="kpis">
+    <div class="kpi">
+        <div class="kpi-ic green">@HubIcons.Svg("machines", 22)</div>
+        <div><div class="kpi-val">@_kMachines</div><div class="kpi-label">Máy online</div></div>
+    </div>
+    <div class="kpi">
+        <div class="kpi-ic blue">@HubIcons.Svg("run", 22)</div>
+        <div><div class="kpi-val">@_kRunning</div><div class="kpi-label">Việc đang chạy</div></div>
+    </div>
+    <div class="kpi">
+        <div class="kpi-ic amber">@HubIcons.Svg("clock", 22)</div>
+        <div><div class="kpi-val">@_kQueued</div><div class="kpi-label">Việc chờ</div></div>
+    </div>
+    <div class="kpi">
+        <div class="kpi-ic red">@HubIcons.Svg("alert", 22)</div>
+        <div><div class="kpi-val">@_kInterrupted</div><div class="kpi-label">Việc gián đoạn</div></div>
+    </div>
+</div>
+
+<div class="tabs">
+    <button class="@(_tab == "bs" ? "active" : "")" @onclick='() => SetTab("bs")'>🛒 BigSeller — theo shop</button>
+    <button class="@(_tab == "orders" ? "active" : "")" @onclick='() => SetTab("orders")'>📦 Đơn hàng — theo tài khoản</button>
+</div>
+
+@if (_tab == "bs")
+{
+    <div class="bar">
+        <label>Tài khoản
+            <select @bind="_fAcct" @bind:after="OnFilterChanged">
+                <option value="">— tất cả —</option>
+                @foreach (var a in _accounts)
+                {
+                    <option value="@a.Id">@a.DisplayName</option>
+                }
+            </select>
+        </label>
+        <label>Máy
+            <select @bind="_fMachine" @bind:after="OnFilterChanged">
+                <option value="">— tất cả —</option>
+                @foreach (var m in _budgets)
+                {
+                    <option value="@m.MachineId">@(m.Online ? "🟢" : "⚪") @m.Hostname</option>
+                }
+            </select>
+        </label>
+        <span class="chips">
+            @foreach (var (key, label) in StateChips)
+            {
+                <button class="chip @(_fState == key ? "on" : "")" @onclick="() => SetState(key)">@label</button>
+            }
+        </span>
+        <label>Tìm
+            <input type="text" @bind="_fQuery" @bind:event="oninput" @bind:after="OnFilterChanged"
+                   placeholder="tên shop / tài khoản" style="width:200px" />
+        </label>
+        <span class="stat m-hide">@_visible.Count/@_rows.Count shop@(_hiddenNoSheet > 0 ? $" · ẩn {_hiddenNoSheet} shop chưa gán ngăn dữ liệu" : "")</span>
+    </div>
+
+    <div class="bar">
+        <span class="stat">Chọn nhanh:</span>
+        <button class="btn sm" @onclick='() => PickByOp("scrape")'>Mọi shop chưa scrape</button>
+        <button class="btn sm" @onclick='() => PickByOp("import")'>Chưa import</button>
+        <button class="btn sm" @onclick="PickInterrupted">Mọi việc gián đoạn</button>
+        <button class="btn sm" @onclick="ClearPick">Bỏ chọn hết</button>
+        @* Kết quả giao việc nằm NGOÀI thanh hành động: giao xong là bỏ tick → thanh đó biến mất theo. *@
+        @if (!string.IsNullOrEmpty(_result))
+        {
+            <span class="action">@_result</span>
+        }
+    </div>
+
+    <div class="tablewrap">
+    <table class="grid sm">
+        <thead><tr>
+            <th style="width:34px"><input type="checkbox" checked="@AllVisiblePicked" @onchange="ToggleAll"
+                                          title="Chọn / bỏ chọn mọi dòng đang hiện" /></th>
+            <th>Shop</th>
+            @foreach (var op in DispatchOps)
+            {
+                <th>@OpLabel(op)</th>
+            }
+            <th class="m-hide">Máy đang giữ</th>
+            <th class="m-hide">Cập nhật</th>
+        </tr></thead>
+        <tbody>
+        @foreach (var g in VisibleGroups())
+        {
+            <tr class="acctrow" @key="@("g|" + g.AccountId)">
+                <td colspan="7">
+                    @g.AccountName <span class="cnt">· @g.Rows.Count shop</span>
+                    @if (HoldHostOf(g.AccountId) is { } gh)
+                    {
+                        <span class="cnt">· đang do <b>@gh</b> giữ</span>
+                    }
+                </td>
+            </tr>
+            @foreach (var r in g.Rows)
+            {
+                <tr class="@(_picked.Contains(r.Key) ? "picked" : "")" @key="r.Key">
+                    <td><input type="checkbox" checked="@_picked.Contains(r.Key)" @onchange="e => TogglePick(r.Key, e)" /></td>
+                    <td class="shop">@r.ShopName</td>
+                    @foreach (var op in DispatchOps)
+                    {
+                        var cell = FleetStateService.OpCell(Snap, r.AccountId, r.ShopId, op);
+                        <td>
+                            <button class="opcell" title="Bấm để mở menu hành động" @onclick="() => ToggleMenu(r.Key, op)">
+                                <span class="pill @cell.Css">@cell.Text</span>
+                            </button>
+                        </td>
+                    }
+                    <td class="m-hide">@(HoldHostOf(r.AccountId) ?? "—")</td>
+                    <td class="m-hide">@LastUpdate(r)</td>
+                </tr>
+                @if (_menuKey is { } mk && mk.StartsWith(r.Key + "|", StringComparison.Ordinal))
+                {
+                    var mop = mk[(r.Key.Length + 1)..];
+                    var mcell = FleetStateService.OpCell(Snap, r.AccountId, r.ShopId, mop);
+                    <tr class="opmenurow" @key="@("m|" + r.Key)">
+                        <td colspan="7">
+                            <div class="opmenu">
+                                <span class="opmenu-head">@OpLabel(mop) · @r.ShopName</span>
+                                @foreach (var m in MachinesFor(r.AccountId))
+                                {
+                                    <button class="opmenu-item" @onclick="() => AssignOne(r, mop, m.MachineId)">▶ Giao cho @m.Hostname</button>
+                                }
+                                @if (!MachinesFor(r.AccountId).Any())
+                                {
+                                    <span class="opmenu-none">không có máy nào nhận được việc của acc này</span>
+                                }
+                                @* Ô đang chạy → ẩn 2 mục đặt-tay (khỏi đè ledger giữa chừng), y Fleet. *@
+                                @if (!mcell.Locked)
+                                {
+                                    <button class="opmenu-item" @onclick='() => SetLedger(r, mop, "completed")'>✓ Đánh dấu xong</button>
+                                    <button class="opmenu-item" @onclick='() => SetLedger(r, mop, "idle")'>↺ Reset về chưa chạy</button>
+                                }
+                                <button class="opmenu-item" @onclick="OpenLogs">📄 Xem log</button>
+                                <button class="opmenu-item" @onclick="CloseMenu">✕ Đóng</button>
+                            </div>
+                        </td>
+                    </tr>
+                }
+            }
+        }
+        @if (_visible.Count == 0)
+        {
+            <tr><td colspan="7" class="empty">@EmptyText()</td></tr>
+        }
+        </tbody>
+    </table>
+    </div>
+
+    @if (ShowBulk)
+    {
+        <div class="bulkbar">
+            <div class="bulkrow">
+                <span class="stat">Đã chọn <b>@_picked.Count</b> shop</span>
+                <label>Việc
+                    <select @bind="_bulkOp" @bind:after="OnBulkChanged">
+                        @foreach (var op in DispatchOps)
+                        {
+                            <option value="@op">@OpLabel(op)</option>
+                        }
+                    </select>
+                </label>
+                <label>Máy
+                    <select @bind="_bulkMachine" @bind:after="OnBulkChanged">
+                        <option value="">⚖ Tự cân tải</option>
+                        @foreach (var m in _budgets)
+                        {
+                            <option value="@m.MachineId" disabled="@(BlockReason(m) is not null)">@MachineOptionText(m)</option>
+                        }
+                    </select>
+                </label>
+                <button class="btn sm" @onclick="() => _showOpts = !_showOpts">⚙ Tuỳ chọn</button>
+                <span class="grow"></span>
+                <button class="btn sm" @onclick="ClearPick">Bỏ chọn</button>
+                @* Xác nhận 2 bước: đây là giao việc THẬT xuống fleet đang chạy. *@
+                @if (!_confirmAssign)
+                {
+                    <button class="btn primary" disabled="@(PreviewTotal == 0)" @onclick="() => _confirmAssign = true">📌 Giao việc</button>
+                }
+                else
+                {
+                    <button class="btn primary" @onclick="Assign">Bấm lần nữa để giao @PreviewTotal việc cho @_preview.ByMachine.Count máy</button>
+                    <button class="btn sm" @onclick="() => _confirmAssign = false">Huỷ</button>
+                }
+            </div>
+            @if (_showOpts)
+            {
+                <div class="bulkrow opts">
+                    <label>Từ dòng <input type="number" @bind="_optStart" style="width:80px" /></label>
+                    <label>Đến dòng <input type="number" @bind="_optEnd" style="width:80px" /></label>
+                    <label>Số process <input type="number" @bind="_optProcs" style="width:70px" /></label>
+                    @if (_bulkOp == "scrape")
+                    {
+                        <label>Số tk / khung <input type="number" @bind="_optFrame" style="width:70px" /></label>
+                    }
+                    @if (_bulkOp is "import" or "update")
+                    {
+                        <label>Reload (s) <input type="number" @bind="_optReload" style="width:70px" /></label>
+                    }
+                    @if (_bulkOp == "import")
+                    {
+                        <label><input type="checkbox" @bind="_optFromClaimed" /> Import từ tab "Đã nhận"</label>
+                    }
+                    <span class="stat">0 = dùng cấu hình của máy client.</span>
+                </div>
+            }
+            <div class="preview">
+                @if (_preview.ByMachine.Count == 0)
+                {
+                    <span class="plan none">chưa xếp được việc nào</span>
+                }
+                else
+                {
+                    @foreach (var kv in _preview.ByMachine)
+                    {
+                        <span class="plan">@HostName(kv.Key) ← @kv.Value.Count shop</span>
+                    }
+                }
+                @if (_preview.Skipped.Count > 0)
+                {
+                    <span class="skip">bỏ qua: @string.Join(" · ", _preview.Skipped)</span>
+                }
+            </div>
+        </div>
+    }
+}
+else
+{
+    <div class="warn">
+        ⚠ Giao việc cho Đơn hàng chưa bật — client hiện chỉ đẩy đơn lên hub, chưa nhận việc từ hub.
+        Đơn vị việc sẽ là <b>tài khoản Shopee</b>; phần giao việc làm ở đợt sau.
+    </div>
+
+    <div class="subhead">▶ Tài khoản đang chạy (@_orderLeases.Count)</div>
+    <div class="tablewrap">
+    <table class="grid sm">
+        <thead><tr><th>Tài khoản (login)</th><th>Máy</th><th>Nhịp cuối</th></tr></thead>
+        <tbody>
+        @foreach (var l in _orderLeases)
+        {
+            <tr>
+                <td class="acct">@OrdersLogin(l.AccountId)</td>
+                <td>@(string.IsNullOrWhiteSpace(l.Hostname) ? l.MachineId : l.Hostname)</td>
+                <td>@FleetStateService.Ago(l.HeartbeatAt)</td>
+            </tr>
+        }
+        @if (_orderLeases.Count == 0)
+        {
+            <tr><td colspan="3" class="empty">Hiện không có tài khoản nào đang chạy.</td></tr>
+        }
+        </tbody>
+    </table>
+    </div>
+
+    <div class="subhead">🛍 Shop &amp; đơn chờ</div>
+    <div class="tablewrap">
+    <table class="grid sm">
+        <thead><tr><th>Shop</th><th>Đơn chờ lấy hàng</th><th>Đơn có phiếu</th><th>Sync cuối</th></tr></thead>
+        <tbody>
+        @foreach (var s in _shops)
+        {
+            var sum = _orderSums.GetValueOrDefault(s.Id);
+            <tr>
+                <td class="shop">@s.Name</td>
+                <td>@((sum?.Waiting ?? 0).ToString("N0"))</td>
+                <td>@((sum?.WithSlip ?? 0).ToString("N0"))</td>
+                <td>@(sum is null || sum.LastSynced == DateTimeOffset.MinValue ? "—" : FleetStateService.Ago(sum.LastSynced))</td>
+            </tr>
+        }
+        @if (_shops.Count == 0)
+        {
+            <tr><td colspan="4" class="empty">Chưa có shop nào tự đăng ký (client chưa đẩy đơn lên hub).</td></tr>
+        }
+        </tbody>
+    </table>
+    </div>
+}
+</div>
+
+@code {
+    // 3 op hub giao được cho client BigSeller (rewrite chạy trên hub → không có ở đây).
+    private static readonly string[] DispatchOps = ["scrape", "import", "update"];
+    private static readonly (string Key, string Label)[] StateChips =
+    [
+        ("todo", "Chưa xong"), ("run", "Đang chạy"), ("int", "Gián đoạn"), ("all", "Tất cả"),
+    ];
+    /// <summary>Trần Brave mặc định khi máy chưa báo <c>MaxBrave</c> (0 = CHƯA BÁO, không phải "không có quỹ").</summary>
+    private const int DefaultBrave = 2;
+    private const string WaitingStatus = "Chờ lấy hàng";
+
+    private sealed class Row
+    {
+        public string AccountId = "", AccountName = "", ShopId = "", ShopName = "", Sheet = "", Key = "";
+    }
+
+    private sealed record RowGroup(string AccountId, string AccountName, List<Row> Rows);
+
+    // ── Nguồn (đọc lại chậm hơn nhịp fleet) ──
+    private List<BigSellerAccount> _accounts = new();
+    private Dictionary<string, string> _homes = new(StringComparer.Ordinal);
+    private DateTimeOffset _staticLoadedAt;
+
+    private List<Row> _rows = new();
+    private List<Row> _visible = new();
+    private int _hiddenNoSheet;
+    private int _kMachines, _kRunning, _kQueued, _kInterrupted;
+
+    // ── Bộ lọc (đều nằm trong URL) ──
+    private string _tab = "bs";
+    private string _fState = "todo";
+    private string _fAcct = "", _fMachine = "", _fQuery = "";
+
+    // ── Chọn nhiều + thanh hành động ──
+    private readonly HashSet<string> _picked = new(StringComparer.Ordinal);
+    private string _bulkOp = "scrape", _bulkMachine = "";
+    private bool _showOpts, _confirmAssign;
+    private int _optStart, _optEnd, _optProcs, _optFrame, _optReload;   // 0 = dùng cấu hình client
+    private bool _optFromClaimed;
+    private string _result = "";
+
+    private List<MachineBudget> _budgets = new();
+    private Dictionary<string, string> _holds = new(StringComparer.Ordinal);
+    private BalancePlan _preview = new(new Dictionary<string, List<DispatchTarget>>(StringComparer.Ordinal), new List<string>());
+
+    // Menu của 1 ô op: "acct__shop|op" (null = không mở). Mở menu → dừng nhịp vẽ 2s để menu khỏi nháy/đóng.
+    private string? _menuKey;
+
+    // ── Tab Đơn hàng (read-only) ──
+    private List<AccountLease> _orderLeases = new();
+    private List<Shop> _shops = new();
+    private Dictionary<long, ShopOrderSummary> _orderSums = new();
+    private DateTimeOffset _ordersLoadedAt;
+
+    private bool ShowBulk => _tab == "bs" && _picked.Count > 0;
+
+    protected override void OnInitialized()
+    {
+        base.OnInitialized();
+        ReloadStatic();
+        Rebuild();
+        // F5/deep-link: khôi phục bộ lọc SAU KHI _rows dựng xong. KHÔNG navigate ở đây (còn prerender →
+        // NavigateTo ném redirect); URL chỉ được ghi lại khi user thao tác sau đó.
+        RestoreFromUrl();
+    }
+
+    // Menu ô đang mở → bỏ qua nhịp fleet (Snap vẫn được cập nhật ở base) để menu không bị dựng lại/đóng mỗi 2s.
+    protected override bool ShouldTickRender() => _menuKey is null;
+
+    protected override void OnFleetTick()
+    {
+        if ((DateTimeOffset.UtcNow - _staticLoadedAt).TotalSeconds > 10) ReloadStatic();
+        Rebuild();
+    }
+
+    /// <summary>Đọc nguồn CHẬM (file config + bảng account_home) — tối đa mỗi 10s, khỏi đọc mỗi nhịp 2s.</summary>
+    private void ReloadStatic()
+    {
+        _accounts = Config.BigSellerAccounts();
+        // account_home = affinity tk↔máy (cố vấn chọn máy). Lỗi/khoá DB nhất thời → giữ bản cũ.
+        try
+        {
+            _homes = Db.AccountHomes()
+                .GroupBy(h => h.AccountId, StringComparer.Ordinal)
+                .ToDictionary(g => g.Key, g => g.First().MachineId, StringComparer.Ordinal);
+        }
+        catch { }
+        _staticLoadedAt = DateTimeOffset.UtcNow;
+    }
+
+    // Thứ tự BẮT BUỘC: quỹ/hold dựng TRƯỚC bộ lọc (bộ lọc Máy đọc _holds), xem trước dựng SAU bộ lọc
+    // (chỉ cân tải trên các dòng còn hiện + còn tick).
+    private void Rebuild()
+    {
+        BuildRows();
+        BuildBudgets();
+        ApplyFilter();
+        BuildPreview();
+        RecomputeKpis();
+        if (_tab == "orders" && (DateTimeOffset.UtcNow - _ordersLoadedAt).TotalSeconds > 10) ReloadOrders();
+    }
+
+    // Dòng bảng = MỌI shop trong config ĐÃ gán ngăn dữ liệu (shop chưa gán thì không giao việc được → chỉ đếm
+    // để nói ở dòng hint). KHÔNG overlay ledger như Fleet: shop mồ côi không giao việc được nữa.
+    private void BuildRows()
+    {
+        var rows = new List<Row>();
+        var hidden = 0;
+        foreach (var acct in _accounts)
+        foreach (var shop in acct.Shops)
+        {
+            if (string.IsNullOrWhiteSpace(shop.ShopeeDataSheet)) { hidden++; continue; }
+            rows.Add(new Row
+            {
+                AccountId = acct.Id,
+                AccountName = acct.DisplayName,
+                ShopId = shop.Id,
+                ShopName = shop.DisplayName,
+                Sheet = shop.ShopeeDataSheet!,
+                Key = acct.Id + "__" + shop.Id,
+            });
+        }
+        _hiddenNoSheet = hidden;
+        _rows = rows
+            .OrderBy(r => r.AccountName, StringComparer.CurrentCultureIgnoreCase)
+            .ThenBy(r => r.ShopName, StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
+    }
+
+    private void ApplyFilter()
+    {
+        var q = _fQuery.Trim();
+        _visible = _rows.Where(r =>
+            (_fAcct.Length == 0 || r.AccountId == _fAcct)
+            && (_fMachine.Length == 0 || MachinesOf(r).Contains(_fMachine))
+            && MatchState(r)
+            && (q.Length == 0
+                || r.ShopName.Contains(q, StringComparison.OrdinalIgnoreCase)
+                || r.AccountName.Contains(q, StringComparison.OrdinalIgnoreCase)))
+            .ToList();
+
+        // Tick SỐNG SÓT qua nhịp 2s: dòng còn hiện thì giữ nguyên, dòng rơi khỏi bộ lọc thì bỏ khỏi tick.
+        var keys = _visible.Select(r => r.Key).ToHashSet(StringComparer.Ordinal);
+        _picked.RemoveWhere(k => !keys.Contains(k));
+        if (_picked.Count == 0) { _confirmAssign = false; _showOpts = false; }
+        // Menu ô của dòng đã biến mất → đóng (khỏi kẹt ShouldTickRender = false mãi).
+        if (_menuKey is { } mk)
+        {
+            var bar = mk.LastIndexOf('|');
+            if (bar <= 0 || !keys.Contains(mk[..bar])) _menuKey = null;
+        }
+    }
+
+    private bool MatchState(Row r) => _fState switch
+    {
+        "run" => DispatchOps.Any(op => Cell(r, op).Kind == 1),
+        "int" => DispatchOps.Any(op => Cell(r, op).Kind == 3)
+                 || Snap.Interrupted.Any(a => a.BigsellerId == r.AccountId && a.ShopId == r.ShopId),
+        "all" => true,
+        _ => DispatchOps.Any(op => !Cell(r, op).Text.StartsWith('✓')),   // "todo": còn op chưa xong
+    };
+
+    private OpCellState Cell(Row r, string op) => FleetStateService.OpCell(Snap, r.AccountId, r.ShopId, op);
+
+    /// <summary>Các máy "dính" tới dòng này (dùng cho bộ lọc Máy): máy đang giữ acc + máy nhận/được ghim việc
+    /// đang chạy-chờ của shop.</summary>
+    private HashSet<string> MachinesOf(Row r)
+    {
+        var set = new HashSet<string>(StringComparer.Ordinal);
+        if (_holds.TryGetValue(r.AccountId, out var h) && h.Length > 0) set.Add(h);
+        foreach (var a in Snap.Assignments.Where(a =>
+            a.BigsellerId == r.AccountId && a.ShopId == r.ShopId && a.Status is "queued" or "running"))
+        {
+            if (!string.IsNullOrEmpty(a.ClaimedByMachineId)) set.Add(a.ClaimedByMachineId);
+            if (!string.IsNullOrEmpty(a.TargetMachineId)) set.Add(a.TargetMachineId!);
+        }
+        return set;
+    }
+
+    // Quỹ máy: trần Brave máy tự báo (0 = chưa báo → coi như DefaultBrave) trừ số việc đang chạy/chờ gắn máy đó.
+    private void BuildBudgets()
+    {
+        _holds = Holds();
+        var used = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var a in Snap.Assignments.Where(a => a.Status is "queued" or "running"))
+        {
+            var mid = !string.IsNullOrEmpty(a.ClaimedByMachineId) ? a.ClaimedByMachineId : a.TargetMachineId ?? "";
+            if (mid.Length == 0) continue;
+            used[mid] = used.GetValueOrDefault(mid) + 1;
+        }
+        _budgets = Snap.Machines
+            .Select(m =>
+            {
+                var cap = m.MaxBrave > 0 ? m.MaxBrave : DefaultBrave;
+                var run = used.GetValueOrDefault(m.MachineId);
+                return new MachineBudget(
+                    m.MachineId,
+                    string.IsNullOrWhiteSpace(m.Hostname) ? m.MachineId : m.Hostname,
+                    !FleetStateService.MachineOffline(Snap, m.MachineId),
+                    Math.Max(0, cap - run), run);
+            })
+            .OrderByDescending(m => m.Online)
+            .ThenBy(m => m.Hostname, StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
+
+        // Máy đang ghim biến mất khỏi fleet (bấm Ngắt kết nối / bị xoá) → về ⚖ tự cân tải, khỏi giao vào
+        // một machine_id hub không còn biết (việc sẽ nằm chờ mãi, không ai claim).
+        if (_bulkMachine.Length > 0 && _budgets.All(m => m.MachineId != _bulkMachine)) _bulkMachine = "";
+    }
+
+    /// <summary>Máy đang GIỮ từng acc BigSeller (khoá 1-acc-1-máy) — CÙNG luật hub dùng lúc client claim việc
+    /// (HubDatabase.AccountOwnersLocked): lease việc còn tươi, rồi tới assignment đang 'running'.
+    /// CHÚ Ý: KHÔNG dùng <c>Snap.AccountLeases</c> — bảng đó khoá acc SHOPEE (và khoá "orders:&lt;login&gt;" của
+    /// module Đơn hàng), khác hẳn không gian Id của acc BigSeller.</summary>
+    private Dictionary<string, string> Holds()
+    {
+        var map = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var l in Snap.Leases)
+            if (l.BigsellerId.Length > 0 && l.MachineId.Length > 0 && !map.ContainsKey(l.BigsellerId))
+                map[l.BigsellerId] = l.MachineId;
+        foreach (var a in Snap.Assignments.Where(a => a.Status == "running"))
+            if (a.BigsellerId.Length > 0 && a.ClaimedByMachineId.Length > 0 && !map.ContainsKey(a.BigsellerId))
+                map[a.BigsellerId] = a.ClaimedByMachineId;
+        return map;
+    }
+
+    private void RecomputeKpis()
+    {
+        _kMachines = Snap.Machines.Count(m => (DateTimeOffset.Now - m.LastSeen).TotalSeconds < 45);
+        int running = 0, queued = 0;
+        foreach (var r in _rows)
+        foreach (var op in DispatchOps)
+        {
+            var k = Cell(r, op).Kind;
+            if (k == 1) running++; else if (k == 2) queued++;
+        }
+        _kRunning = running;
+        _kQueued = queued;
+        _kInterrupted = Snap.Interrupted.Count;
+    }
+
+    private void ReloadOrders()
+    {
+        try
+        {
+            _shops = Db.ListShops();
+            _orderSums = Db.ShopOrderSummaries(WaitingStatus).ToDictionary(s => s.ShopId);
+        }
+        catch { /* khoá DB nhất thời → giữ bản cũ */ }
+        // Khoá acc của module Đơn hàng nằm CHUNG bảng account_leases, phân biệt bằng tiền tố "orders:".
+        _orderLeases = Snap.AccountLeases
+            .Where(l => l.AccountId.StartsWith(OrdersLeasePrefix, StringComparison.Ordinal))
+            .OrderBy(l => l.AccountId, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        _ordersLoadedAt = DateTimeOffset.UtcNow;
+    }
+
+    private const string OrdersLeasePrefix = "orders:";
+    private static string OrdersLogin(string accountId) =>
+        accountId.StartsWith(OrdersLeasePrefix, StringComparison.Ordinal) ? accountId[OrdersLeasePrefix.Length..] : accountId;
+
+    // ── Nhóm hiển thị + nhãn ──────────────────────────────────────────────────────
+    private List<RowGroup> VisibleGroups() => _visible
+        .GroupBy(r => r.AccountId, StringComparer.Ordinal)
+        .Select(g => new RowGroup(g.Key, g.First().AccountName, g.ToList()))
+        .ToList();
+
+    private string? HoldHostOf(string accountId) =>
+        _holds.TryGetValue(accountId, out var m) ? HostName(m) : null;
+
+    private string HostName(string machineId)
+    {
+        if (string.IsNullOrEmpty(machineId)) return "";
+        var m = Snap.Machines.FirstOrDefault(x => x.MachineId == machineId);
+        return m is not null && !string.IsNullOrWhiteSpace(m.Hostname) ? m.Hostname : machineId;
+    }
+
+    private string AcctName(string accountId) =>
+        _rows.FirstOrDefault(r => r.AccountId == accountId)?.AccountName
+        ?? _accounts.FirstOrDefault(a => a.Id == accountId)?.DisplayName
+        ?? accountId;
+
+    // Lần chạy gần nhất của shop (mọi op) — cột "Cập nhật".
+    private string LastUpdate(Row r)
+    {
+        DateTimeOffset last = default;
+        foreach (var op in DispatchOps)
+        {
+            var led = Snap.Ledger.FirstOrDefault(l => l.Key == $"{r.AccountId}__{r.ShopId}__{op}");
+            if (led is null) continue;
+            var at = led.LastRunAt ?? led.UpdatedAt;
+            if (at > last) last = at;
+        }
+        return last == default ? "—" : FleetStateService.Ago(last);
+    }
+
+    private string EmptyText() => _rows.Count == 0
+        ? (_hiddenNoSheet > 0
+            ? $"Chưa shop nào gán ngăn dữ liệu ({_hiddenNoSheet} shop bị ẩn) — vào Fleet › ⚙ Cấu hình để gán."
+            : "Chưa có tài khoản BigSeller nào có shop.")
+        : "Không dòng nào khớp bộ lọc.";
+
+    private static string OpLabel(string op) => op switch
+    {
+        "scrape" => "Scrape", "import" => "Import", "update" => "Update", _ => op,
+    };
+
+    // ── Chọn nhiều ────────────────────────────────────────────────────────────────
+    private bool AllVisiblePicked => _visible.Count > 0 && _visible.All(r => _picked.Contains(r.Key));
+
+    private void TogglePick(string key, ChangeEventArgs e)
+    {
+        if (e.Value is true) _picked.Add(key); else _picked.Remove(key);
+        AfterPickChanged();
+    }
+
+    private void ToggleAll(ChangeEventArgs e)
+    {
+        if (e.Value is true) foreach (var r in _visible) _picked.Add(r.Key);
+        else foreach (var r in _visible) _picked.Remove(r.Key);
+        AfterPickChanged();
+    }
+
+    // Chọn mọi dòng đang hiện CHƯA xong op này + set luôn Op của thanh hành động cho khớp.
+    private void PickByOp(string op)
+    {
+        _bulkOp = op;
+        _picked.Clear();
+        foreach (var r in _visible.Where(r => !Cell(r, op).Text.StartsWith('✓') && Cell(r, op).Kind != 1))
+            _picked.Add(r.Key);
+        AfterPickChanged();
+    }
+
+    private void PickInterrupted()
+    {
+        _picked.Clear();
+        foreach (var r in _visible.Where(r =>
+            DispatchOps.Any(op => Cell(r, op).Kind == 3)
+            || Snap.Interrupted.Any(a => a.BigsellerId == r.AccountId && a.ShopId == r.ShopId)))
+            _picked.Add(r.Key);
+        AfterPickChanged();
+    }
+
+    private void ClearPick() { _picked.Clear(); AfterPickChanged(); }
+
+    private void AfterPickChanged()
+    {
+        _confirmAssign = false;
+        _result = "";
+        BuildPreview();
+    }
+
+    // ── Bộ lọc / tab ──────────────────────────────────────────────────────────────
+    private void OnFilterChanged() { Rebuild(); UpdateUrl(); }
+    private void SetState(string key) { _fState = key; Rebuild(); UpdateUrl(); }
+
+    private void SetTab(string tab)
+    {
+        _tab = tab;
+        _menuKey = null;
+        if (_tab == "orders") ReloadOrders();
+        UpdateUrl();
+    }
+
+    private void OnBulkChanged() { _confirmAssign = false; BuildPreview(); }
+
+    // ── Menu hành động của 1 ô op ────────────────────────────────────────────────
+    private void ToggleMenu(string rowKey, string op)
+    {
+        var key = rowKey + "|" + op;
+        _menuKey = _menuKey == key ? null : key;
+    }
+
+    private void CloseMenu() => _menuKey = null;
+
+    private void OpenLogs() { _menuKey = null; Nav.NavigateTo("/logs-view"); }
+
+    /// <summary>Máy nhận được việc của acc này: acc đang bị giữ → CHỈ máy đó; ngược lại mọi máy online.</summary>
+    private IEnumerable<MachineBudget> MachinesFor(string accountId)
+    {
+        if (_holds.TryGetValue(accountId, out var owner))
+            return _budgets.Where(m => m.MachineId == owner);
+        return _budgets.Where(m => m.Online);
+    }
+
+    /// <summary>Giao 1 ô (shop + op) cho 1 máy — tham số 0 = client dùng cấu hình của nó (giống ▶ Tiếp tục của Fleet).</summary>
+    private void AssignOne(Row r, string op, string machineId)
+    {
+        _menuKey = null;
+        Db.CreateAssignment(new CreateAssignmentRequest(r.AccountId, r.ShopId, r.Sheet, op, machineId, Pinned: true));
+        var host = HostName(machineId);
+        _result = FleetStateService.MachineOffline(Snap, machineId)
+            ? $"⚠ Đã giao {OpLabel(op)} · {r.ShopName} → {host} (máy đang TẮT — chờ tới khi mở app)."
+            : $"✔ Đã giao {OpLabel(op)} · {r.ShopName} → {host}.";
+        FleetState.Refresh();
+    }
+
+    private void SetLedger(Row r, string op, string status)
+    {
+        _menuKey = null;
+        Db.SetLedgerStatus($"{r.AccountId}__{r.ShopId}__{op}", r.AccountId, r.ShopId, r.Sheet, op, status);
+        FleetState.Refresh();
+    }
+
+    // ── Cân tải + giao việc hàng loạt ────────────────────────────────────────────
+    private List<DispatchTarget> PickedTargets() => _visible
+        .Where(r => _picked.Contains(r.Key))
+        .Select(r => new DispatchTarget(r.AccountId, r.ShopId, r.Sheet, r.ShopName, r.AccountName))
+        .ToList();
+
+    private void BuildPreview() => _preview = BuildPlan();
+
+    /// <summary>Số việc sẽ tạo nếu bấm Giao việc bây giờ (mỗi shop-được-xếp = 1 assignment).</summary>
+    private int PreviewTotal => _preview.ByMachine.Sum(kv => kv.Value.Count);
+
+    /// <summary>Kế hoạch giao việc của tập đang tick: để trống máy = ⚖ tự cân tải; chọn máy cụ thể = dồn hết vào
+    /// máy đó, TRỪ nhóm acc đang bị máy khác giữ (giao vào sẽ nằm chờ mãi vì khoá 1-acc-1-máy).</summary>
+    private BalancePlan BuildPlan()
+    {
+        var targets = PickedTargets();
+        if (_bulkMachine.Length == 0)
+            return DispatchBalancer.Balance(targets, _budgets, _holds, _homes);
+
+        var byMachine = new Dictionary<string, List<DispatchTarget>>(StringComparer.Ordinal);
+        var skipped = new List<string>();
+        foreach (var g in targets.GroupBy(t => t.AccountId, StringComparer.Ordinal))
+        {
+            if (_holds.TryGetValue(g.Key, out var owner) && !string.Equals(owner, _bulkMachine, StringComparison.Ordinal))
+            {
+                skipped.Add($"{AcctName(g.Key)} ({g.Count()} shop): acc đang do máy {HostName(owner)} giữ");
+                continue;
+            }
+            if (!byMachine.TryGetValue(_bulkMachine, out var list)) byMachine[_bulkMachine] = list = new List<DispatchTarget>();
+            list.AddRange(g);
+        }
+        return new BalancePlan(byMachine, skipped);
+    }
+
+    /// <summary>Lý do option máy bị khoá (null = chọn được): offline · vi phạm 1-acc-1-máy với tập ĐANG chọn · hết quỹ.</summary>
+    private string? BlockReason(MachineBudget m)
+    {
+        if (!m.Online) return "máy offline";
+        foreach (var g in PickedTargets().GroupBy(t => t.AccountId, StringComparer.Ordinal))
+            if (_holds.TryGetValue(g.Key, out var owner) && !string.Equals(owner, m.MachineId, StringComparison.Ordinal))
+                return $"acc {AcctName(g.Key)} đang do {HostName(owner)} giữ";
+        return m.Free <= 0 ? "hết quỹ Brave" : null;
+    }
+
+    private string MachineOptionText(MachineBudget m)
+    {
+        var cap = m.Free + m.Running;
+        var text = $"{(m.Online ? "🟢" : "⚪")} {m.Hostname} · còn {m.Free}/{cap} brave · {m.Running} việc";
+        return BlockReason(m) is { } why ? $"{text} — {why}" : text;
+    }
+
+    private void Assign()
+    {
+        _confirmAssign = false;
+        var plan = BuildPlan();
+        var payload = _bulkOp == "import"
+            ? JsonSerializer.Serialize(new ImportJobPayload { FromClaimedTab = _optFromClaimed })
+            : "";
+        var n = 0;
+        var parts = new List<string>();
+        foreach (var kv in plan.ByMachine)
+        {
+            foreach (var t in kv.Value)
+            {
+                // FrameSize chỉ scrape đọc, Reload chỉ import/update đọc → op khác truyền 0 để sạch dữ liệu.
+                Db.CreateAssignment(new CreateAssignmentRequest(
+                    t.AccountId, t.ShopId, t.Sheet, _bulkOp, kv.Key, Pinned: true,
+                    Math.Max(0, _optStart), Math.Max(0, _optEnd), payload,
+                    Processes: Math.Max(0, _optProcs),
+                    FrameSize: _bulkOp == "scrape" ? Math.Max(0, _optFrame) : 0,
+                    ReloadSeconds: _bulkOp is "import" or "update" ? Math.Max(0, _optReload) : 0));
+                n++;
+            }
+            var off = FleetStateService.MachineOffline(Snap, kv.Key);
+            parts.Add($"{(off ? "⚠ " : "")}{HostName(kv.Key)} ← {kv.Value.Count}");
+        }
+
+        _result = n == 0
+            ? "✘ Không giao được việc nào — xem lý do ở dòng xem trước."
+            : $"✔ Đã giao {n} việc {OpLabel(_bulkOp)}: {string.Join(", ", parts)}";
+        if (plan.Skipped.Count > 0) _result += " · bỏ qua: " + string.Join("; ", plan.Skipped);
+        _picked.Clear();
+        BuildPreview();
+        FleetState.Refresh();   // 1 lần sau vòng lặp (KHÔNG gọi trong vòng lặp)
+    }
+
+    // ── View-state ↔ URL query (?tab=&f=&acct=&mac=&q=) — F5 / chia sẻ link giữ nguyên ──
+    private bool _restored;      // cờ once: chỉ khôi phục lúc init, KHÔNG re-restore mỗi tick
+    private bool _suppressUrl;   // chặn ghi URL trong lúc restore
+
+    private void UpdateUrl()
+    {
+        if (_suppressUrl) return;
+        var want = new (string K, string V)[]
+        {
+            ("tab",  _tab == "bs" ? "" : _tab),
+            ("f",    _fState == "todo" ? "" : _fState),
+            ("acct", _fAcct),
+            ("mac",  _fMachine),
+            ("q",    _fQuery.Trim()),
+        };
+        var q = QueryHelpers.ParseQuery(new Uri(Nav.Uri).Query);
+        string cur(string k) => q.TryGetValue(k, out var v) ? v.ToString() : "";
+        if (want.All(w => cur(w.K) == w.V)) return;   // query đã khớp → khỏi navigate
+
+        var query = string.Join("&", want.Where(w => w.V.Length > 0).Select(w => w.K + "=" + Uri.EscapeDataString(w.V)));
+        Nav.NavigateTo(query.Length == 0 ? "/dispatch" : "/dispatch?" + query, forceLoad: false, replace: true);
+    }
+
+    private void RestoreFromUrl()
+    {
+        if (_restored) return;
+        _restored = true;
+        var q = QueryHelpers.ParseQuery(new Uri(Nav.Uri).Query);
+        string get(string k) => q.TryGetValue(k, out var v) ? v.ToString() : "";
+        _suppressUrl = true;
+        try
+        {
+            _tab = get("tab") == "orders" ? "orders" : "bs";
+            var f = get("f");
+            if (StateChips.Any(c => c.Key == f)) _fState = f;
+            var acct = get("acct");
+            if (acct.Length > 0 && _accounts.Any(a => a.Id == acct)) _fAcct = acct;
+            var mac = get("mac");
+            if (mac.Length > 0 && Snap.Machines.Any(m => m.MachineId == mac)) _fMachine = mac;
+            _fQuery = get("q");
+            Rebuild();
+            if (_tab == "orders") ReloadOrders();
+        }
+        finally { _suppressUrl = false; }
+    }
+}

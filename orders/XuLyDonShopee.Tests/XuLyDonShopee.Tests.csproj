@@ -25,4 +25,11 @@
     <ProjectReference Include="..\XuLyDonShopee.App\XuLyDonShopee.App.csproj" />
   </ItemGroup>
 
+  <!-- Lõi cân tải của hub web (thuần BCL, không đụng Blazor/DB) được LINK vào đây — hub web là project
+       Microsoft.NET.Sdk.Web, tham chiếu cả project vào test sẽ kéo theo toàn bộ host ASP.NET. Cùng khuôn
+       "LINK file nguồn" mà Shopee.Hub.Web.csproj đang dùng: file gốc đổi tên/di chuyển → build gãy rõ ràng. -->
+  <ItemGroup>
+    <Compile Include="..\..\server\Shopee.Hub.Web\Services\DispatchBalancer.cs" Link="Hub\DispatchBalancer.cs" />
+  </ItemGroup>
+
 </Project>

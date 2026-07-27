@@ -1,7 +1,7 @@
 # Plan: Trang Giao việc (/dispatch) trên Hub web
 
 - **Ngày:** 2026-07-27
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-dev`)
 
 ## 1. Bối cảnh & mục tiêu
@@ -227,4 +227,31 @@ trước khi thêm project mới):
 
 ---
 
-## Báo cáo thực thi (Opus điền sau khi xong)
+## Báo cáo thực thi
+
+**File tạo mới:** `Services/DispatchBalancer.cs`, `Components/Pages/Dispatch.razor` (830 dòng),
+`orders/XuLyDonShopee.Tests/DispatchBalancerTests.cs` (12 test).
+**File sửa:** `Data/HubDatabase.Orders.cs` (thêm `ShopOrderSummary` + `ShopOrderSummaries`), `Layout/MainLayout.razor`,
+`HubIcons.cs`, `wwwroot/app.css`, `Components/App.razor` (v=28), `XuLyDonShopee.Tests.csproj` (LINK file balancer).
+`Fleet.razor` không bị sửa (đã kiểm bằng `git status`).
+
+**Nghiệm thu (Fable tự chạy, không dựa vào báo cáo):**
+- `dotnet build ShopeeSuite.sln` → Build succeeded, **0 Warning, 0 Error**.
+- `dotnet test orders/XuLyDonShopee.Tests` → **Passed! 1056/1056**.
+- Đọc lại toàn bộ `DispatchBalancer.cs` + `Dispatch.razor`: đúng luật đã mô tả trong plan.
+
+**3 chỗ plan SAI, Opus sửa đúng — đã kiểm chứng lại trong code:**
+1. **Nguồn `holds`.** Plan bảo lấy từ `Snap.AccountLeases` (lọc tiền tố `orders:`). SAI: bảng `account_leases` khoá
+   **acc Shopee** (và khoá `orders:<login>` của module Đơn hàng), khác hẳn không gian Id acc BigSeller. Luật đúng là
+   `Snap.Leases` + assignment `running` — chính là `HubDatabase.AccountOwnersLocked` (Assignments.cs:323) và
+   `Fleet.OwnerOf` (Fleet.razor:1194). Opus đã dùng đúng nguồn này.
+2. **Breakpoint mobile.** Plan ghi ≤900px sidebar ẩn → `left: 0`. SAI: repo co sidebar thành **icon-rail 64px** ở
+   **920px** (app.css:338-342). Opus dùng đúng 920px/64px.
+3. **Menu ô op.** Plan ngụ ý popover định vị tuyệt đối. Không khả thi: `.tablewrap` có `overflow-x: auto` sẽ cắt cụt
+   popover, mà plan lại cấm dùng JS định vị. Opus làm **dòng phụ ngay dưới dòng shop** — hợp lý hơn.
+
+**Điểm còn tồn (không chặn phát hành):** nhánh (b) `homes` của balancer gần như không bao giờ bắn — bảng
+`account_home` keyed theo acc **Shopee** (`ScrapeViewModel` đẩy `ShopeeAccount.Id`), không phải acc BigSeller. Code
+vẫn wire + có test, chờ quyết định: bỏ wiring hay làm bảng affinity riêng cho acc BigSeller.
+Hub chưa có project test riêng → test balancer đặt nhờ ở `orders/XuLyDonShopee.Tests` bằng cách LINK file nguồn
+(đúng khuôn `Shopee.Hub.Web.csproj` đang dùng). Cân nhắc lập `server/Shopee.Hub.Tests` ở đợt sau.
