@@ -101,7 +101,8 @@
         </span>
         <label>Tìm
             <input type="text" @bind="_fQuery" @bind:event="oninput" @bind:after="OnFilterChanged"
-                   placeholder="tên shop / tài khoản" style="width:200px" />
+                   placeholder="tên shop / tài khoản" title="Gõ tên shop → giữ cả tài khoản chứa shop đó cùng mọi shop của nó."
+                   style="width:200px" />
         </label>
         <span class="stat m-hide">@_visible.Count/@_rows.Count shop@(_hiddenNoSheet > 0 ? $" · ẩn {_hiddenNoSheet} shop chưa gán ngăn dữ liệu" : "")</span>
     </div>
@@ -346,12 +347,19 @@ else
     private void ApplyFilter()
     {
         var q = _fQuery.Trim();
+        // Ô TÌM lọc ở mức TÀI KHOẢN, không phải mức shop: gõ tên một shop (vd "delica") → giữ nguyên CẢ tài khoản
+        // chứa shop đó cùng MỌI shop của nó. Vì 1 acc chỉ chạy 1 máy tại 1 thời điểm — thấy thiếu shop cùng acc là
+        // dễ thao tác sai (nút "cả acc" cũng chỉ đúng nghĩa khi nhìn đủ shop của acc).
+        var hit = q.Length == 0 ? null : _rows
+            .Where(r => r.ShopName.Contains(q, StringComparison.OrdinalIgnoreCase)
+                     || r.AccountName.Contains(q, StringComparison.OrdinalIgnoreCase))
+            .Select(r => r.AccountId)
+            .ToHashSet(StringComparer.Ordinal);
+
         _visible = _rows.Where(r =>
             (_fAcct.Length == 0 || r.AccountId == _fAcct)
             && MatchState(r)
-            && (q.Length == 0
-                || r.ShopName.Contains(q, StringComparison.OrdinalIgnoreCase)
-                || r.AccountName.Contains(q, StringComparison.OrdinalIgnoreCase)))
+            && (hit is null || hit.Contains(r.AccountId)))
             .ToList();
 
         // Cụm nút cả-acc đang chờ bấm-lần-nữa mà acc rơi khỏi bộ lọc → huỷ chờ (kẻo bấm lần 2 trúng acc khác).
