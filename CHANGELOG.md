@@ -5,6 +5,27 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Hiệu năng. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.6.10 — 2026-07-28
+
+- **Check đơn trả hàng ở cuối mỗi shop:** sau khi xử xong đơn của một shop, app mở trang **Trả hàng/Hoàn tiền/Hủy**
+  của chính shop đó, đổi sắp xếp sang *"Ngày yêu cầu (Mới - Cũ)"* rồi đọc **mã yêu cầu trả hàng** ghép với **mã đơn
+  hàng**, đẩy lên cột **"Mã đơn trả hàng"** trên Google Sheet và lên Hub. App **nhớ số yêu cầu của lần check trước
+  theo từng shop**: số không đổi thì bỏ qua, tăng thêm bao nhiêu thì chỉ đọc bấy nhiêu dòng đầu — không quét lại cả
+  danh sách mỗi vòng. Bước này chạy cả khi shop không có đơn chờ lấy hàng, và lỗi/timeout/captcha ở đây **không** phá
+  phần chuẩn bị hàng đã xong, cũng không dừng vòng.
+- **Cột "Phân loại":** phân loại hàng (vd `Nâu Be,39`) nay hiện ở màn **Đơn hàng** trên app, trang **Đơn hàng** trên
+  Hub, và đẩy lên cột **Phân loại** của Google Sheet. Lấy từ dữ liệu đã quét sẵn ở trang danh sách nên **không** tốn
+  thêm lượt mở trang chi tiết; đuôi SKU lặp lại (`[A322 A322]`) được cắt bỏ vì SKU đã có cột riêng.
+- **Màn "Thống kê đơn hàng" mới** trong module Đơn hàng: chọn khoảng ngày rồi xem tổng đơn, cần xử lý, đã giao, đã
+  hủy, doanh thu ước tính (không tính đơn hủy), số sản phẩm, trung bình mỗi đơn, tỉ lệ có mã vận đơn / đủ số tiền
+  cuối, phân bổ trạng thái và lần đồng bộ gần nhất.
+
+> ⚠ **Cần làm một lần trên Google Sheet:** Apps Script cũ ghi theo **số cột cứng** nên từ khi cột *"Mã đơn trả hàng"*
+> được chèn vào, **mọi dòng thêm mới bị lệch một cột** mà không báo lỗi, và hai trường mới (`Phân loại`,
+> `Mã đơn trả hàng`) bị bỏ đi. Dán bản mới ở `orders/gsheet-apps-script/Code.gs` vào Apps Script rồi **Triển khai →
+> Phiên bản mới** (chỉ Lưu là chưa đủ). Bản mới tra cột **theo tên tiêu đề**, điền bù cả những ô còn trống của đơn cũ,
+> và báo về `canhBao` nếu không tìm thấy tiêu đề thay vì ghi bừa.
+
 ## v1.6.9 — 2026-07-28
 
 - **Không đặt được địa chỉ lấy hàng thì DỪNG, không in phiếu nữa:** trước đây khi app không mở được modal "Sửa Địa
