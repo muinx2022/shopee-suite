@@ -1,4 +1,4 @@
-# Plan: Bước check ĐƠN TRẢ HÀNG ở cuối flow mỗi shop
+﻿# Plan: Bước check ĐƠN TRẢ HÀNG ở cuối flow mỗi shop
 
 - **Ngày:** 2026-07-28
 - **Trạng thái:** đang làm
@@ -49,10 +49,23 @@ App hiện **chưa có gì** chạm tới trang này (`grep returnrefund` → 0 
 đang là `<!---->` (Vue chưa render — các dòng đó là **đơn hủy**, không phải yêu cầu trả hàng). Nên **chưa biết
 class/cấu trúc** của khối mã yêu cầu.
 
-Đang chờ người dùng gửi `outerHTML` của `.return-row-item-head` một dòng **có cả hai mã**
-(vd `260713QNHP2887` + `260722BTY3YHV8`).
+Người dùng đã gửi **hai** mẫu HTML (2 shop khác nhau, `7 Yêu cầu` và `36 Yêu cầu`); cả hai đều bị cắt ở 50k ký
+tự và MỌI dòng đọc được đều chỉ có *Mã đơn hàng* (`260723E428EY8X`, `260722BNQRM2GM`, `260721A41HFT22`) — chỗ mã
+yêu cầu vẫn là `<!---->`. ⇒ **Không lấy được class thật**, và không bắt người dùng dán lần ba.
 
-**Nếu tới lúc thực thi vẫn chưa có HTML đó**, dùng luật NHẬN DIỆN THEO NHÃN (không phụ thuộc class chưa biết):
+Cấu trúc đã biết chắc từ khối mã đơn:
+```html
+<div class="id order-id">
+  <span>Mã đơn hàng</span>
+  <span class="id-content">260722BNQRM2GM</span>
+  <div class="copy-button">…</div>
+</div>
+<!----><!---->        <!-- 2 khối v-if chưa render: 1 trong 2 là mã yêu cầu trả hàng -->
+```
+⇒ Khối mã yêu cầu là **anh em cùng cấp** trong `.return-row-item-head`, gần như chắc chắn cùng khuôn
+(`<span>nhãn</span><span class="id-content">giá trị</span>`) chỉ khác class phụ.
+
+**Dùng luật NHẬN DIỆN THEO NHÃN** (không phụ thuộc class chưa biết):
 - Trong `.return-row-item-head`, duyệt mọi phần tử con có chứa `.id-content`.
 - Với mỗi khối: lấy **nhãn** = phần text của khối TRỪ đi text của `.id-content`; lấy **giá trị** = text `.id-content`.
 - Phân loại theo nhãn, **bỏ dấu + hạ chữ** trước khi so (đề phòng UI đổi ngôn ngữ):
