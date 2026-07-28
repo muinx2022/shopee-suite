@@ -959,12 +959,17 @@ public class OrdersRepository
     /// <item><paramref name="shopLogin"/>/<paramref name="shopExact"/>: lọc theo TÊN shop (cột <c>shop_login</c>) —
     /// dùng cho màn Đơn hàng (đường CỘNG THÊM, độc lập với lọc account). <paramref name="shopExact"/> true → khớp
     /// CHÍNH XÁC (<c>= $shop</c>, như chọn gợi ý); false → LIKE <c>%từ%</c> (gõ dở). Bỏ trống → không lọc shop.</item>
+    /// <item><paramref name="createdFromUtc"/>/<paramref name="createdBeforeUtc"/>: lọc theo <c>orders.created_at</c>
+    /// (thời điểm đơn được ghi nhận LẦN ĐẦU trên máy), với biên <b>đóng-mở</b>
+    /// <c>created_at &gt;= createdFromUtc</c> và <c>created_at &lt; createdBeforeUtc</c>. Bỏ trống một đầu mút →
+    /// không chặn đầu đó.</item>
     /// </list>
     /// Sắp xếp đơn sync mới nhất lên đầu.
     /// </summary>
     public List<OrderRow> Query(long? accountId = null, string? status = null, string? searchText = null,
         IReadOnlyCollection<long>? accountIds = null, int? limit = null, int? offset = null,
-        string? shopLogin = null, bool shopExact = false)
+        string? shopLogin = null, bool shopExact = false, DateTime? createdFromUtc = null,
+        DateTime? createdBeforeUtc = null)
     {
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
@@ -975,7 +980,8 @@ public class OrdersRepository
     channel, carrier, tracking_number, synced_at, shop_login, items_json, return_request_code
     FROM orders WHERE 1 = 1");
 
-        if (!AppendFilter(cmd, sql, accountId, status, searchText, accountIds, shopLogin, shopExact))
+        if (!AppendFilter(cmd, sql, accountId, status, searchText, accountIds, shopLogin, shopExact,
+                createdFromUtc, createdBeforeUtc))
         {
             return new List<OrderRow>(); // accountIds rỗng → không tài khoản nào khớp
         }
@@ -1006,13 +1012,15 @@ public class OrdersRepository
     /// "Đơn hàng". Xem <see cref="Query"/> về ý nghĩa từng tham số; <paramref name="accountIds"/> rỗng → 0.
     /// </summary>
     public int Count(long? accountId = null, string? status = null, string? searchText = null,
-        IReadOnlyCollection<long>? accountIds = null, string? shopLogin = null, bool shopExact = false)
+        IReadOnlyCollection<long>? accountIds = null, string? shopLogin = null, bool shopExact = false,
+        DateTime? createdFromUtc = null, DateTime? createdBeforeUtc = null)
     {
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
 
         var sql = new StringBuilder("SELECT COUNT(*) FROM orders WHERE 1 = 1");
-        if (!AppendFilter(cmd, sql, accountId, status, searchText, accountIds, shopLogin, shopExact))
+        if (!AppendFilter(cmd, sql, accountId, status, searchText, accountIds, shopLogin, shopExact,
+                createdFromUtc, createdBeforeUtc))
         {
             return 0; // accountIds rỗng → không tài khoản nào khớp
         }
@@ -1029,11 +1037,12 @@ public class OrdersRepository
     /// <paramref name="accountIds"/> (nếu khác null) được ưu tiên hơn <paramref name="accountId"/>.
     /// <paramref name="shopLogin"/>/<paramref name="shopExact"/> lọc theo cột <c>shop_login</c> (CỘNG THÊM, độc lập
     /// với lọc account): exact → <c>= $shop</c>; else → LIKE <c>%từ%</c>. LIKE không khớp thì tự 0 dòng (không cần
-    /// short-circuit). Bỏ trống → không lọc shop.
+    /// short-circuit). Bỏ trống → không lọc shop. <paramref name="createdFromUtc"/>/<paramref name="createdBeforeUtc"/>
+    /// lọc theo <c>created_at</c> với biên <c>[from, before)</c> để caller tự dựng range ngày cục bộ rồi đổi sang UTC.
     /// </summary>
     private static bool AppendFilter(SqliteCommand cmd, StringBuilder sql,
         long? accountId, string? status, string? searchText, IReadOnlyCollection<long>? accountIds,
-        string? shopLogin, bool shopExact)
+        string? shopLogin, bool shopExact, DateTime? createdFromUtc, DateTime? createdBeforeUtc)
     {
         if (accountIds is not null)
         {
@@ -1085,6 +1094,18 @@ public class OrdersRepository
                 sql.Append(@" AND shop_login LIKE $shopLike ESCAPE '\'");
                 cmd.Parameters.AddWithValue("$shopLike", "%" + EscapeLike(shopLogin.Trim()) + "%");
             }
+        }
+
+        if (createdFromUtc is not null)
+        {
+            sql.Append(" AND created_at >= $createdFromUtc");
+            cmd.Parameters.AddWithValue("$createdFromUtc", DbSerialization.FormatDate(createdFromUtc.Value));
+        }
+
+        if (createdBeforeUtc is not null)
+        {
+            sql.Append(" AND created_at < $createdBeforeUtc");
+            cmd.Parameters.AddWithValue("$createdBeforeUtc", DbSerialization.FormatDate(createdBeforeUtc.Value));
         }
 
         return true;

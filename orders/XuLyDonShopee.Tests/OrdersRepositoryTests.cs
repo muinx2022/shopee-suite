@@ -920,6 +920,56 @@ public class OrdersRepositoryTests
     }
 
     [Fact]
+    public void Query_Count_LocTheoCreatedAt_BienDongMo_DungNgay()
+    {
+        using var temp = new TempDatabase();
+        var repo = new OrdersRepository(temp.Open());
+
+        repo.UpsertMany(1, new[] { Make("BEFORE") }, new DateTime(2026, 7, 9, 23, 59, 59, DateTimeKind.Utc));
+        repo.UpsertMany(1, new[] { Make("START") }, new DateTime(2026, 7, 10, 0, 0, 0, DateTimeKind.Utc));
+        repo.UpsertMany(1, new[] { Make("INSIDE") }, new DateTime(2026, 7, 10, 23, 59, 59, DateTimeKind.Utc));
+        repo.UpsertMany(1, new[] { Make("AFTER") }, new DateTime(2026, 7, 11, 0, 0, 0, DateTimeKind.Utc));
+
+        var fromUtc = new DateTime(2026, 7, 10, 0, 0, 0, DateTimeKind.Utc);
+        var beforeUtc = new DateTime(2026, 7, 11, 0, 0, 0, DateTimeKind.Utc);
+
+        var rows = repo.Query(createdFromUtc: fromUtc, createdBeforeUtc: beforeUtc);
+
+        Assert.Equal(new[] { "INSIDE", "START" }, rows.Select(r => r.OrderSn));
+        Assert.Equal(2, repo.Count(createdFromUtc: fromUtc, createdBeforeUtc: beforeUtc));
+    }
+
+    [Fact]
+    public void Query_Count_LocTheoCreatedAt_KetHopShop_VaBoTrongThiGiuHanhViCu()
+    {
+        using var temp = new TempDatabase();
+        var repo = new OrdersRepository(temp.Open());
+
+        var fromUtc = new DateTime(2026, 7, 10, 0, 0, 0, DateTimeKind.Utc);
+        var beforeUtc = new DateTime(2026, 7, 11, 0, 0, 0, DateTimeKind.Utc);
+
+        repo.UpsertMany(1, new[] { Make("A_IN") }, new DateTime(2026, 7, 10, 8, 0, 0, DateTimeKind.Utc), shopLogin: "shop-a");
+        repo.UpsertMany(1, new[] { Make("A_OUT") }, new DateTime(2026, 7, 12, 8, 0, 0, DateTimeKind.Utc), shopLogin: "shop-a");
+        repo.UpsertMany(1, new[] { Make("B_IN") }, new DateTime(2026, 7, 10, 9, 0, 0, DateTimeKind.Utc), shopLogin: "shop-b");
+
+        var filtered = repo.Query(
+            shopLogin: "shop-a",
+            shopExact: true,
+            createdFromUtc: fromUtc,
+            createdBeforeUtc: beforeUtc);
+
+        Assert.Equal(new[] { "A_IN" }, filtered.Select(r => r.OrderSn));
+        Assert.Equal(1, repo.Count(
+            shopLogin: "shop-a",
+            shopExact: true,
+            createdFromUtc: fromUtc,
+            createdBeforeUtc: beforeUtc));
+
+        Assert.Equal(3, repo.Query().Count);
+        Assert.Equal(3, repo.Count());
+    }
+
+    [Fact]
     public void AllStatuses_Distinct_SapXep_BoNull()
     {
         using var temp = new TempDatabase();

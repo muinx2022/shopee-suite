@@ -57,20 +57,28 @@
         </Style>
     </UserControl.Styles>
 
-    <Grid Margin="24,24,32,24">
-        <ScrollViewer IsVisible="{Binding HasData}" HorizontalScrollBarVisibility="Disabled">
-            <StackPanel Spacing="14">
-                <Grid ColumnDefinitions="*,240,Auto">
-                    <StackPanel Grid.Column="0">
-                        <TextBlock Text="Thống kê đơn hàng" FontSize="19" FontWeight="Bold"
-                                   Foreground="{StaticResource TextInk}" />
-                        <TextBlock Text="{Binding ScopeText}" FontSize="12" Foreground="{StaticResource TextMuted}"
-                                   Margin="0,2,0,0" />
-                    </StackPanel>
-                    <ComboBox Grid.Column="1" Classes="field" ItemsSource="{Binding ShopOptions}"
+    <Grid Margin="24,24,32,24" RowDefinitions="Auto,*" RowSpacing="14">
+        <Grid Grid.Row="0" ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto" RowSpacing="10">
+            <StackPanel Grid.Column="0">
+                <TextBlock Text="Thống kê đơn hàng" FontSize="19" FontWeight="Bold"
+                           Foreground="{StaticResource TextInk}" />
+                <TextBlock Text="{Binding ScopeText}" FontSize="12" Foreground="{StaticResource TextMuted}"
+                           Margin="0,2,0,0" />
+            </StackPanel>
+            <StackPanel Grid.Column="1" Spacing="8" HorizontalAlignment="Right">
+                <Grid ColumnDefinitions="Auto,170,Auto,170">
+                    <TextBlock Grid.Column="0" Text="Từ ngày" FontSize="12" FontWeight="SemiBold"
+                               Foreground="{StaticResource TextMuted}" VerticalAlignment="Center" Margin="0,0,8,0" />
+                    <DatePicker Grid.Column="1" SelectedDate="{Binding FromDate}" HorizontalAlignment="Stretch" />
+                    <TextBlock Grid.Column="2" Text="Đến ngày" FontSize="12" FontWeight="SemiBold"
+                               Foreground="{StaticResource TextMuted}" VerticalAlignment="Center" Margin="14,0,8,0" />
+                    <DatePicker Grid.Column="3" SelectedDate="{Binding ToDate}" HorizontalAlignment="Stretch" />
+                </Grid>
+                <Grid ColumnDefinitions="240,Auto">
+                    <ComboBox Grid.Column="0" Classes="field" ItemsSource="{Binding ShopOptions}"
                               SelectedItem="{Binding SelectedShop}" VerticalAlignment="Center"
                               ToolTip.Tip="Chọn phạm vi shop cần thống kê" />
-                    <Button Grid.Column="2" Classes="primary" Margin="8,0,0,0" VerticalAlignment="Center"
+                    <Button Grid.Column="1" Classes="primary" Margin="8,0,0,0" VerticalAlignment="Center"
                             Command="{Binding ReloadCommand}" ToolTip.Tip="Đọc lại số liệu từ kho đơn">
                         <StackPanel Orientation="Horizontal" Spacing="7">
                             <PathIcon Data="{DynamicResource IconRefresh}" />
@@ -78,102 +86,108 @@
                         </StackPanel>
                     </Button>
                 </Grid>
+            </StackPanel>
+        </Grid>
 
-                <!-- Chỉ số vận hành chính. Doanh thu bỏ đơn hủy, ưu tiên số tiền cuối cùng. -->
-                <UniformGrid Columns="5">
-                    <Border Classes="statCard">
-                        <StackPanel><TextBlock Classes="statLabel" Text="TỔNG ĐƠN" /><TextBlock Classes="statValue" Text="{Binding TotalOrdersText}" /></StackPanel>
+        <Grid Grid.Row="1">
+            <ScrollViewer IsVisible="{Binding HasData}" HorizontalScrollBarVisibility="Disabled">
+                <StackPanel Spacing="14">
+                    <!-- Chỉ số vận hành chính. Doanh thu bỏ đơn hủy, ưu tiên số tiền cuối cùng. -->
+                    <UniformGrid Columns="5">
+                        <Border Classes="statCard">
+                            <StackPanel><TextBlock Classes="statLabel" Text="TỔNG ĐƠN" /><TextBlock Classes="statValue" Text="{Binding TotalOrdersText}" /></StackPanel>
+                        </Border>
+                        <Border Classes="statCard">
+                            <StackPanel><TextBlock Classes="statLabel" Text="CẦN XỬ LÝ" /><TextBlock Classes="statValue" Foreground="{StaticResource AccentBrush}" Text="{Binding NeedsActionText}" /></StackPanel>
+                        </Border>
+                        <Border Classes="statCard">
+                            <StackPanel><TextBlock Classes="statLabel" Text="ĐÃ GIAO" /><TextBlock Classes="statValue" Foreground="{StaticResource SuccessBrush}" Text="{Binding DeliveredText}" /></StackPanel>
+                        </Border>
+                        <Border Classes="statCard">
+                            <StackPanel><TextBlock Classes="statLabel" Text="ĐÃ HỦY" /><TextBlock Classes="statValue" Foreground="{StaticResource DangerBrush}" Text="{Binding CancelledText}" /></StackPanel>
+                        </Border>
+                        <Border Classes="statCard" Margin="0">
+                            <StackPanel>
+                                <TextBlock Classes="statLabel" Text="DOANH THU ƯỚC TÍNH" />
+                                <TextBlock Classes="statValue" FontSize="20" Text="{Binding RevenueText}" />
+                                <TextBlock Text="Không tính đơn hủy" FontSize="10.5" Foreground="{StaticResource TextMuted}" />
+                            </StackPanel>
+                        </Border>
+                    </UniformGrid>
+
+                    <UniformGrid Columns="5">
+                        <Border Classes="statCard"><StackPanel><TextBlock Classes="statLabel" Text="SẢN PHẨM" /><TextBlock Classes="miniValue" Text="{Binding TotalItemsText}" /></StackPanel></Border>
+                        <Border Classes="statCard"><StackPanel><TextBlock Classes="statLabel" Text="TB / ĐƠN HIỆU LỰC" /><TextBlock Classes="miniValue" Text="{Binding AverageOrderText}" /></StackPanel></Border>
+                        <Border Classes="statCard"><StackPanel><TextBlock Classes="statLabel" Text="CÓ MÃ VẬN ĐƠN" /><TextBlock Classes="miniValue" Text="{Binding TrackingText}" /></StackPanel></Border>
+                        <Border Classes="statCard"><StackPanel><TextBlock Classes="statLabel" Text="ĐỦ SỐ TIỀN CUỐI" /><TextBlock Classes="miniValue" Text="{Binding EstimateCoverageText}" /></StackPanel></Border>
+                        <Border Classes="statCard" Margin="0"><StackPanel><TextBlock Classes="statLabel" Text="ĐỒNG BỘ GẦN NHẤT" /><TextBlock Classes="miniValue" FontSize="13" Text="{Binding LastSyncedText}" /></StackPanel></Border>
+                    </UniformGrid>
+
+                    <Grid ColumnDefinitions="1.05*,1.6*" RowDefinitions="Auto,250">
+                        <TextBlock Grid.Row="0" Grid.Column="0" Classes="section" Text="PHÂN BỔ TRẠNG THÁI" Margin="0,0,0,7" />
+                        <TextBlock Grid.Row="0" Grid.Column="1" Classes="section" Text="HIỆU QUẢ THEO SHOP" Margin="14,0,0,7" />
+                        <DataGrid Grid.Row="1" Grid.Column="0" Classes="statsGrid" ItemsSource="{Binding StatusRows}"
+                                  IsReadOnly="True" AutoGenerateColumns="False" CanUserResizeColumns="True">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Trạng thái" Binding="{Binding Label}" Width="*" MinWidth="110" />
+                                <DataGridTextColumn Header="Đơn" Binding="{Binding OrderCountText}" Width="65" />
+                                <DataGridTextColumn Header="Tỷ lệ" Binding="{Binding PercentageText}" Width="65" />
+                                <DataGridTextColumn Header="Ước tính" Binding="{Binding ValueText}" Width="110" />
+                            </DataGrid.Columns>
+                        </DataGrid>
+                        <DataGrid Grid.Row="1" Grid.Column="1" Margin="14,0,0,0" Classes="statsGrid" ItemsSource="{Binding ShopRows}"
+                                  IsReadOnly="True" AutoGenerateColumns="False" CanUserResizeColumns="True">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Shop" Binding="{Binding Shop}" Width="*" MinWidth="120" />
+                                <DataGridTextColumn Header="Đơn" Binding="{Binding OrderCount}" Width="60" />
+                                <DataGridTextColumn Header="SP" Binding="{Binding ItemCount}" Width="55" />
+                                <DataGridTextColumn Header="Doanh thu ƯT" Binding="{Binding RevenueText}" Width="115" />
+                                <DataGridTextColumn Header="TB/đơn" Binding="{Binding AverageText}" Width="105" />
+                                <DataGridTextColumn Header="Có vận đơn" Binding="{Binding TrackingRateText}" Width="85" />
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </Grid>
+
+                    <Grid ColumnDefinitions="1*,1*" RowDefinitions="Auto,220" Margin="0,2,0,0">
+                        <TextBlock Grid.Row="0" Grid.Column="0" Classes="section" Text="ĐƠN VỊ VẬN CHUYỂN" Margin="0,0,0,7" />
+                        <TextBlock Grid.Row="0" Grid.Column="1" Classes="section" Text="PHƯƠNG THỨC THANH TOÁN" Margin="14,0,0,7" />
+                        <DataGrid Grid.Row="1" Grid.Column="0" Classes="statsGrid" ItemsSource="{Binding CarrierRows}"
+                                  IsReadOnly="True" AutoGenerateColumns="False">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Đơn vị" Binding="{Binding Label}" Width="*" />
+                                <DataGridTextColumn Header="Số đơn" Binding="{Binding OrderCountText}" Width="85" />
+                                <DataGridTextColumn Header="Tỷ lệ" Binding="{Binding PercentageText}" Width="80" />
+                            </DataGrid.Columns>
+                        </DataGrid>
+                        <DataGrid Grid.Row="1" Grid.Column="1" Margin="14,0,0,0" Classes="statsGrid" ItemsSource="{Binding PaymentRows}"
+                                  IsReadOnly="True" AutoGenerateColumns="False">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Phương thức" Binding="{Binding Label}" Width="*" />
+                                <DataGridTextColumn Header="Số đơn" Binding="{Binding OrderCountText}" Width="85" />
+                                <DataGridTextColumn Header="Tỷ lệ" Binding="{Binding PercentageText}" Width="80" />
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </Grid>
+
+                    <Border Classes="statCard" Margin="0" Background="{StaticResource SubtleBg}">
+                        <TextBlock FontSize="11.5" Foreground="{StaticResource TextMuted}" TextWrapping="Wrap"
+                                   Text="Cách tính: mọi số liệu chỉ tính các đơn được ghi nhận lần đầu trên máy trong khoảng ngày đang chọn (theo created_at), không dùng thời điểm đồng bộ lại. Doanh thu ước tính không gồm đơn hủy; ưu tiên “Số tiền cuối cùng”, nếu chưa có thì dùng “Tổng tiền”. Đây là ảnh chụp kho đơn cục bộ, không phải báo cáo doanh thu quyết toán của Shopee." />
                     </Border>
-                    <Border Classes="statCard">
-                        <StackPanel><TextBlock Classes="statLabel" Text="CẦN XỬ LÝ" /><TextBlock Classes="statValue" Foreground="{StaticResource AccentBrush}" Text="{Binding NeedsActionText}" /></StackPanel>
-                    </Border>
-                    <Border Classes="statCard">
-                        <StackPanel><TextBlock Classes="statLabel" Text="ĐÃ GIAO" /><TextBlock Classes="statValue" Foreground="{StaticResource SuccessBrush}" Text="{Binding DeliveredText}" /></StackPanel>
-                    </Border>
-                    <Border Classes="statCard">
-                        <StackPanel><TextBlock Classes="statLabel" Text="ĐÃ HỦY" /><TextBlock Classes="statValue" Foreground="{StaticResource DangerBrush}" Text="{Binding CancelledText}" /></StackPanel>
-                    </Border>
-                    <Border Classes="statCard" Margin="0">
-                        <StackPanel>
-                            <TextBlock Classes="statLabel" Text="DOANH THU ƯỚC TÍNH" />
-                            <TextBlock Classes="statValue" FontSize="20" Text="{Binding RevenueText}" />
-                            <TextBlock Text="Không tính đơn hủy" FontSize="10.5" Foreground="{StaticResource TextMuted}" />
+                </StackPanel>
+            </ScrollViewer>
+
+            <Border Classes="statCard" Margin="0" IsVisible="{Binding !HasData}">
+                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="12">
+                    <TextBlock Text="{Binding EmptyMessage}" TextWrapping="Wrap" TextAlignment="Center"
+                               FontSize="13" Foreground="{StaticResource TextMuted}" MaxWidth="520" />
+                    <Button Classes="primary" HorizontalAlignment="Center" Command="{Binding ReloadCommand}">
+                        <StackPanel Orientation="Horizontal" Spacing="7">
+                            <PathIcon Data="{DynamicResource IconRefresh}" />
+                            <TextBlock Text="Làm mới" />
                         </StackPanel>
-                    </Border>
-                </UniformGrid>
-
-                <UniformGrid Columns="5">
-                    <Border Classes="statCard"><StackPanel><TextBlock Classes="statLabel" Text="SẢN PHẨM" /><TextBlock Classes="miniValue" Text="{Binding TotalItemsText}" /></StackPanel></Border>
-                    <Border Classes="statCard"><StackPanel><TextBlock Classes="statLabel" Text="TB / ĐƠN HIỆU LỰC" /><TextBlock Classes="miniValue" Text="{Binding AverageOrderText}" /></StackPanel></Border>
-                    <Border Classes="statCard"><StackPanel><TextBlock Classes="statLabel" Text="CÓ MÃ VẬN ĐƠN" /><TextBlock Classes="miniValue" Text="{Binding TrackingText}" /></StackPanel></Border>
-                    <Border Classes="statCard"><StackPanel><TextBlock Classes="statLabel" Text="ĐỦ SỐ TIỀN CUỐI" /><TextBlock Classes="miniValue" Text="{Binding EstimateCoverageText}" /></StackPanel></Border>
-                    <Border Classes="statCard" Margin="0"><StackPanel><TextBlock Classes="statLabel" Text="ĐỒNG BỘ GẦN NHẤT" /><TextBlock Classes="miniValue" FontSize="13" Text="{Binding LastSyncedText}" /></StackPanel></Border>
-                </UniformGrid>
-
-                <Grid ColumnDefinitions="1.05*,1.6*" RowDefinitions="Auto,250">
-                    <TextBlock Grid.Row="0" Grid.Column="0" Classes="section" Text="PHÂN BỔ TRẠNG THÁI" Margin="0,0,0,7" />
-                    <TextBlock Grid.Row="0" Grid.Column="1" Classes="section" Text="HIỆU QUẢ THEO SHOP" Margin="14,0,0,7" />
-                    <DataGrid Grid.Row="1" Grid.Column="0" Classes="statsGrid" ItemsSource="{Binding StatusRows}"
-                              IsReadOnly="True" AutoGenerateColumns="False" CanUserResizeColumns="True">
-                        <DataGrid.Columns>
-                            <DataGridTextColumn Header="Trạng thái" Binding="{Binding Label}" Width="*" MinWidth="110" />
-                            <DataGridTextColumn Header="Đơn" Binding="{Binding OrderCountText}" Width="65" />
-                            <DataGridTextColumn Header="Tỷ lệ" Binding="{Binding PercentageText}" Width="65" />
-                            <DataGridTextColumn Header="Ước tính" Binding="{Binding ValueText}" Width="110" />
-                        </DataGrid.Columns>
-                    </DataGrid>
-                    <DataGrid Grid.Row="1" Grid.Column="1" Margin="14,0,0,0" Classes="statsGrid" ItemsSource="{Binding ShopRows}"
-                              IsReadOnly="True" AutoGenerateColumns="False" CanUserResizeColumns="True">
-                        <DataGrid.Columns>
-                            <DataGridTextColumn Header="Shop" Binding="{Binding Shop}" Width="*" MinWidth="120" />
-                            <DataGridTextColumn Header="Đơn" Binding="{Binding OrderCount}" Width="60" />
-                            <DataGridTextColumn Header="SP" Binding="{Binding ItemCount}" Width="55" />
-                            <DataGridTextColumn Header="Doanh thu ƯT" Binding="{Binding RevenueText}" Width="115" />
-                            <DataGridTextColumn Header="TB/đơn" Binding="{Binding AverageText}" Width="105" />
-                            <DataGridTextColumn Header="Có vận đơn" Binding="{Binding TrackingRateText}" Width="85" />
-                        </DataGrid.Columns>
-                    </DataGrid>
-                </Grid>
-
-                <Grid ColumnDefinitions="1*,1*" RowDefinitions="Auto,220" Margin="0,2,0,0">
-                    <TextBlock Grid.Row="0" Grid.Column="0" Classes="section" Text="ĐƠN VỊ VẬN CHUYỂN" Margin="0,0,0,7" />
-                    <TextBlock Grid.Row="0" Grid.Column="1" Classes="section" Text="PHƯƠNG THỨC THANH TOÁN" Margin="14,0,0,7" />
-                    <DataGrid Grid.Row="1" Grid.Column="0" Classes="statsGrid" ItemsSource="{Binding CarrierRows}"
-                              IsReadOnly="True" AutoGenerateColumns="False">
-                        <DataGrid.Columns>
-                            <DataGridTextColumn Header="Đơn vị" Binding="{Binding Label}" Width="*" />
-                            <DataGridTextColumn Header="Số đơn" Binding="{Binding OrderCountText}" Width="85" />
-                            <DataGridTextColumn Header="Tỷ lệ" Binding="{Binding PercentageText}" Width="80" />
-                        </DataGrid.Columns>
-                    </DataGrid>
-                    <DataGrid Grid.Row="1" Grid.Column="1" Margin="14,0,0,0" Classes="statsGrid" ItemsSource="{Binding PaymentRows}"
-                              IsReadOnly="True" AutoGenerateColumns="False">
-                        <DataGrid.Columns>
-                            <DataGridTextColumn Header="Phương thức" Binding="{Binding Label}" Width="*" />
-                            <DataGridTextColumn Header="Số đơn" Binding="{Binding OrderCountText}" Width="85" />
-                            <DataGridTextColumn Header="Tỷ lệ" Binding="{Binding PercentageText}" Width="80" />
-                        </DataGrid.Columns>
-                    </DataGrid>
-                </Grid>
-
-                <Border Classes="statCard" Margin="0" Background="{StaticResource SubtleBg}">
-                    <TextBlock FontSize="11.5" Foreground="{StaticResource TextMuted}" TextWrapping="Wrap"
-                               Text="Cách tính: doanh thu ước tính không gồm đơn hủy; ưu tiên “Số tiền cuối cùng”, nếu chưa có thì dùng “Tổng tiền”. Đây là ảnh chụp các đơn còn lưu trên máy, không phải báo cáo doanh thu quyết toán của Shopee." />
-                </Border>
-            </StackPanel>
-        </ScrollViewer>
-
-        <Border Classes="statCard" Margin="0" IsVisible="{Binding !HasData}">
-            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="12">
-                <TextBlock Text="{Binding EmptyMessage}" TextWrapping="Wrap" TextAlignment="Center"
-                           FontSize="13" Foreground="{StaticResource TextMuted}" MaxWidth="520" />
-                <Button Classes="primary" HorizontalAlignment="Center" Command="{Binding ReloadCommand}">
-                    <StackPanel Orientation="Horizontal" Spacing="7">
-                        <PathIcon Data="{DynamicResource IconRefresh}" />
-                        <TextBlock Text="Làm mới" />
-                    </StackPanel>
-                </Button>
-            </StackPanel>
-        </Border>
+                    </Button>
+                </StackPanel>
+            </Border>
+        </Grid>
     </Grid>
 </UserControl>

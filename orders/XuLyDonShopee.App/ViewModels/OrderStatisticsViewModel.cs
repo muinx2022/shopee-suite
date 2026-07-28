@@ -35,6 +35,9 @@ public partial class OrderStatisticsViewModel : ViewModelBase
     {
         _services = services;
         _services.OrdersChanged += OnOrdersChanged;
+        var today = DateTimeOffset.Now;
+        _fromDate = new DateTimeOffset(today.Year, today.Month, 1, 0, 0, 0, today.Offset);
+        _toDate = today;
         Reload();
     }
 
@@ -45,6 +48,8 @@ public partial class OrderStatisticsViewModel : ViewModelBase
     public ObservableCollection<OrderStatisticBreakdown> PaymentRows { get; } = new();
 
     [ObservableProperty] private string? _selectedShop;
+    [ObservableProperty] private DateTimeOffset _fromDate;
+    [ObservableProperty] private DateTimeOffset _toDate;
     [ObservableProperty] private bool _hasData;
     [ObservableProperty] private string _emptyMessage = "Chưa có đơn hàng để thống kê.";
     [ObservableProperty] private string _scopeText = "Ảnh chụp kho đơn trên máy";
@@ -64,6 +69,9 @@ public partial class OrderStatisticsViewModel : ViewModelBase
         if (!_reloadingOptions)
             ApplyStatistics();
     }
+
+    partial void OnFromDateChanged(DateTimeOffset value) => ApplyStatistics();
+    partial void OnToDateChanged(DateTimeOffset value) => ApplyStatistics();
 
     private void OnOrdersChanged()
     {
@@ -89,14 +97,32 @@ public partial class OrderStatisticsViewModel : ViewModelBase
         var shop = string.IsNullOrWhiteSpace(SelectedShop) || SelectedShop == AllShopsLabel
             ? null
             : SelectedShop;
-        var rows = _services.Orders.Query(shopLogin: shop, shopExact: shop is not null);
+
+        if (!TryBuildCreatedRange(FromDate, ToDate, out var range, out var invalidMessage))
+        {
+            ResetStatistics();
+            HasData = false;
+            EmptyMessage = invalidMessage;
+            ScopeText = invalidMessage;
+            return;
+        }
+
+        var rows = _services.Orders.Query(
+            shopLogin: shop,
+            shopExact: shop is not null,
+            createdFromUtc: range.CreatedFromUtc,
+            createdBeforeUtc: range.CreatedBeforeUtc);
         HasData = rows.Count > 0;
-        EmptyMessage = shop is null
-            ? "Chưa có đơn hàng trên máy. Hãy chạy đồng bộ tài khoản Shopee trước."
-            : $"Shop {shop} chưa có đơn hàng trên máy.";
-        ScopeText = shop is null
-            ? $"Ảnh chụp {rows.Count:N0} đơn đang lưu trên máy"
-            : $"Ảnh chụp {rows.Count:N0} đơn của shop {shop}";
+        EmptyMessage = rows.Count > 0
+            ? string.Empty
+            : BuildEmptyMessage(shop, range.FromLocalDate, range.ToLocalDate);
+        ScopeText = BuildScopeText(rows.Count, shop, range.FromLocalDate, range.ToLocalDate);
+
+        if (rows.Count == 0)
+        {
+            ResetStatistics();
+            return;
+        }
 
         var cancelled = rows.Where(IsCancelled).ToList();
         var active = rows.Where(r => !IsCancelled(r)).ToList();
@@ -122,6 +148,63 @@ public partial class OrderStatisticsViewModel : ViewModelBase
         Replace(ShopRows, BuildShopRows(rows));
         Replace(CarrierRows, BuildBreakdown(rows, r => Clean(r.Carrier ?? r.Channel, "Chưa rõ"), false));
         Replace(PaymentRows, BuildBreakdown(rows, r => Clean(r.PaymentMethod, "Chưa rõ"), false));
+    }
+
+    private void ResetStatistics()
+    {
+        TotalOrdersText = "0";
+        TotalItemsText = "0";
+        NeedsActionText = "0";
+        DeliveredText = "0";
+        CancelledText = "0";
+        RevenueText = "₫0";
+        AverageOrderText = "₫0";
+        TrackingText = "0/0 đơn";
+        EstimateCoverageText = "0/0 đơn hiệu lực";
+        LastSyncedText = "Chưa đồng bộ";
+        Replace(StatusRows, Array.Empty<OrderStatisticBreakdown>());
+        Replace(ShopRows, Array.Empty<ShopStatisticRow>());
+        Replace(CarrierRows, Array.Empty<OrderStatisticBreakdown>());
+        Replace(PaymentRows, Array.Empty<OrderStatisticBreakdown>());
+    }
+
+    private static bool TryBuildCreatedRange(DateTimeOffset fromDate, DateTimeOffset toDate,
+        out CreatedRange range, out string invalidMessage)
+    {
+        var fromLocalDate = fromDate.Date;
+        var toLocalDate = toDate.Date;
+        if (fromLocalDate > toLocalDate)
+        {
+            range = default;
+            invalidMessage =
+                $"Khoảng ngày không hợp lệ: \"Từ ngày\" phải nhỏ hơn hoặc bằng \"Đến ngày\" ({FormatDate(fromLocalDate)} - {FormatDate(toLocalDate)}).";
+            return false;
+        }
+
+        var fromUtc = TimeZoneInfo.ConvertTimeToUtc(
+            DateTime.SpecifyKind(fromLocalDate, DateTimeKind.Unspecified), TimeZoneInfo.Local);
+        var toExclusiveUtc = TimeZoneInfo.ConvertTimeToUtc(
+            DateTime.SpecifyKind(toLocalDate.AddDays(1), DateTimeKind.Unspecified), TimeZoneInfo.Local);
+
+        range = new CreatedRange(fromLocalDate, toLocalDate, fromUtc, toExclusiveUtc);
+        invalidMessage = string.Empty;
+        return true;
+    }
+
+    private static string BuildScopeText(int count, string? shop, DateTime fromLocalDate, DateTime toLocalDate)
+    {
+        var period = $"từ {FormatDate(fromLocalDate)} đến {FormatDate(toLocalDate)}";
+        return shop is null
+            ? $"Đơn được ghi nhận lần đầu trên máy {period}: {Number(count)} đơn"
+            : $"Đơn của shop {shop} được ghi nhận lần đầu trên máy {period}: {Number(count)} đơn";
+    }
+
+    private static string BuildEmptyMessage(string? shop, DateTime fromLocalDate, DateTime toLocalDate)
+    {
+        var period = $"từ {FormatDate(fromLocalDate)} đến {FormatDate(toLocalDate)}";
+        return shop is null
+            ? $"Không có đơn nào được ghi nhận lần đầu trên máy {period}. Hãy đổi ngày hoặc chạy đồng bộ Shopee."
+            : $"Shop {shop} không có đơn nào được ghi nhận lần đầu trên máy {period}.";
     }
 
     private static IEnumerable<OrderStatisticBreakdown> BuildBreakdown(
@@ -160,6 +243,7 @@ public partial class OrderStatisticsViewModel : ViewModelBase
     private static bool IsCancelled(OrderRow row)
         => ShopeeShippingNav.LaDonHuy(row.Status, row.StatusDescription, row.CancelReason);
 
+    private static string FormatDate(DateTime value) => value.ToString("dd/MM/yyyy", VnCulture);
     private static long RevenueOf(OrderRow row) => Math.Max(0, row.FinalAmount ?? row.TotalPrice ?? 0);
     private static string Clean(string? value, string fallback) => string.IsNullOrWhiteSpace(value) ? fallback : value.Trim();
     private static string Number(long value) => value.ToString("N0", VnCulture);
@@ -170,4 +254,10 @@ public partial class OrderStatisticsViewModel : ViewModelBase
         target.Clear();
         foreach (var value in values) target.Add(value);
     }
+
+    private readonly record struct CreatedRange(
+        DateTime FromLocalDate,
+        DateTime ToLocalDate,
+        DateTime CreatedFromUtc,
+        DateTime CreatedBeforeUtc);
 }
