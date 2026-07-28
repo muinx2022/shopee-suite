@@ -371,6 +371,27 @@ public class OrderNotifyService
         return sb.ToString();
     }
 
+    /// <summary>
+    /// Dựng tin CẢNH BÁO "không đặt được địa chỉ lấy hàng" — vòng của tài khoản đã DỪNG, CHƯA in phiếu nào cho
+    /// shop này (xem <c>OrdersBridgeSession.QuyetDinhSauDatDiaChi</c>). Text THUẦN + emoji + xuống dòng như
+    /// <see cref="TaoTinNhanDonMoi"/> (render đẹp trên cả 3 kênh). Trả lời đủ 4 câu hỏi của người trực: <b>máy
+    /// nào · tài khoản/shop nào · lỗi gì · app đã làm gì</b> — và việc cần làm để chạy lại. Tham số rỗng/null →
+    /// in <c>?</c> (KHÔNG ném, KHÔNG in "null": tin cảnh báo thiếu một trường vẫn phải tới được người trực).
+    /// <para>Cố tình KHÁC hẳn tin captcha: hai nguyên nhân khác nhau, người trực xử khác nhau.</para>
+    /// </summary>
+    public static string TaoTinNhanLoiDiaChi(string tenTaiKhoan, string tenShop, string tinh, string tenMay, DateTime luc)
+    {
+        var sb = new StringBuilder();
+        sb.Append("⛔ KHÔNG ĐẶT ĐƯỢC ĐỊA CHỈ LẤY HÀNG — đã dừng vòng, chưa in phiếu nào.");
+        sb.Append($"\nMáy: {HoacDauHoi(tenMay)} · Tài khoản: {HoacDauHoi(tenTaiKhoan)} · Shop: {HoacDauHoi(tenShop)}");
+        sb.Append($"\nĐịa chỉ định đặt: {HoacDauHoi(tinh)} · Lúc: {luc.ToString("dd/MM/yyyy HH:mm", CultureInfo.InvariantCulture)}");
+        sb.Append("\nViệc cần làm: mở Shopee kiểm tra modal \"Sửa Địa chỉ\" của shop này rồi chạy lại.");
+        return sb.ToString();
+    }
+
+    /// <summary>Chuỗi đã trim; null/rỗng → <c>"?"</c> (giữ tin đọc được, không để lộ chỗ trống khó hiểu).</summary>
+    private static string HoacDauHoi(string? s) => string.IsNullOrWhiteSpace(s) ? "?" : s.Trim();
+
     /// <summary>Một dòng "• …" cho một đơn: ghép các phần KHÔNG rỗng bằng " — " (bỏ trường null, không in "null").</summary>
     private static string DongDon(SyncedOrder o)
     {

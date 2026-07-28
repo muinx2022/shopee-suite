@@ -38,8 +38,25 @@ public sealed record OrdersLoginParams(
 /// <param name="TotalSlips">Tổng số phiếu PDF đã lưu.</param>
 /// <param name="Captcha">True nếu dừng vòng vì captcha/verify.</param>
 /// <param name="Error">Thông báo lỗi (null nếu vòng chạy trọn không lỗi).</param>
+/// <param name="PickupAddressFailed">True nếu dừng vòng vì KHÔNG đặt được địa chỉ lấy hàng (chưa in phiếu nào
+/// cho shop đó) — caller cảnh báo ra kênh ngoài. KHÁC <paramref name="Captcha"/>: nguyên nhân khác, xử khác.</param>
+/// <param name="PickupFailedShop">Nhãn shop không đặt được địa chỉ (null nếu không dính lỗi này).</param>
 public sealed record OrdersBridgeRunResult(
-    int ShopCount, int ShopsDone, int TotalOrders, int TotalSlips, bool Captcha, string? Error);
+    int ShopCount, int ShopsDone, int TotalOrders, int TotalSlips, bool Captcha, string? Error,
+    bool PickupAddressFailed = false, string? PickupFailedShop = null);
+
+/// <summary>Quyết định sau bước "đặt địa chỉ lấy hàng" (xem <see cref="OrdersBridgeSession.QuyetDinhSauDatDiaChi"/>).</summary>
+internal enum SauDatDiaChi
+{
+    /// <summary>Đã đặt được địa chỉ → chạy tiếp vòng Chuẩn bị hàng (in phiếu).</summary>
+    XuDon,
+
+    /// <summary>Rơi vào captcha/verify → dừng shop này (hành vi cũ, không đổi).</summary>
+    DungViCaptcha,
+
+    /// <summary>KHÔNG đặt được địa chỉ lấy hàng → DỪNG, tuyệt đối không in phiếu (phiếu sẽ sai địa chỉ).</summary>
+    DungViDiaChi,
+}
 
 /// <summary>
 /// Vòng đời MỘT phiên cầu nối: cấp cổng loopback trống → chạy <see cref="OrdersWebSocketServer"/> →
@@ -106,6 +123,10 @@ public sealed class OrdersBridgeSession : IDisposable
     private readonly StageWaiter _waiter = new();
 
     private bool _captchaSeen;
+
+    // Nhãn shop KHÔNG đặt được địa chỉ lấy hàng (null = chưa dính). Cùng khuôn cờ với _captchaSeen: RunShopOrdersAsync
+    // đặt, vòng ngoài (RunAllShopsAsync/RunSliceCoreAsync) đọc để DỪNG và trả lý do — KHÔNG đẻ kênh sự kiện thứ hai.
+    private string? _pickupFailedShop;
 
     /// <summary>
     /// Nhớ chặng TCS ĐANG được await để khi extension báo <c>error</c> ta CHỈ fault đúng chặng đó — không fault
@@ -189,7 +210,24 @@ public sealed class OrdersBridgeSession : IDisposable
         _closeShopTcs = NewTcs<bool>();
         _redownloadTcs = NewTcs<string?>();
         _captchaSeen = false;
+        _pickupFailedShop = null;
     }
+
+    /// <summary>
+    /// HÀM THUẦN (test được, không cần trình duyệt) — quyết định làm gì sau khi extension trả lời bước
+    /// <c>setPickupAddress</c>:
+    /// <list type="bullet">
+    /// <item><paramref name="captchaSeen"/> → <see cref="SauDatDiaChi.DungViCaptcha"/> (ưu tiên: captcha nuốt luôn
+    /// <c>pickupOk=false</c>, thông điệp phải là captcha kẻo người trực xử nhầm).</item>
+    /// <item><paramref name="pickupOk"/> = false → <see cref="SauDatDiaChi.DungViDiaChi"/>: DỪNG, KHÔNG in phiếu.
+    /// Bài học 28/07: app biết chưa đặt được địa chỉ mà vẫn in phiếu + giao đơn ⇒ shipper tới sai chỗ lấy hàng.</item>
+    /// <item>còn lại → <see cref="SauDatDiaChi.XuDon"/>.</item>
+    /// </list>
+    /// </summary>
+    internal static SauDatDiaChi QuyetDinhSauDatDiaChi(bool pickupOk, bool captchaSeen)
+        => captchaSeen ? SauDatDiaChi.DungViCaptcha
+            : pickupOk ? SauDatDiaChi.XuDon
+            : SauDatDiaChi.DungViDiaChi;
 
     /// <summary>Cổng cầu nối CỐ ĐỊNH — extension dùng cổng này khi hash <c>#_od_ws</c> bị rụng lúc Shopee redirect
     /// trang đăng nhập (khớp <c>DEFAULT_PORT</c> trong extension). Một phiên/lần test nên cố định là đủ.</summary>
@@ -495,6 +533,15 @@ public sealed class OrdersBridgeSession : IDisposable
                     {
                         return new OrdersBridgeRunResult(shopCount, shopsDone, totalOrders + orders, totalSlips + slips, true, "Rơi vào captcha khi đọc/xử đơn.");
                     }
+                    if (_pickupFailedShop is not null)
+                    {
+                        // Không đặt được địa chỉ lấy hàng → BỎ LUÔN các shop còn lại: modal địa chỉ hỏng thường do
+                        // Shopee đổi giao diện / extension lỗi ⇒ shop sau cũng hỏng, chạy tiếp chỉ tổ in thêm phiếu sai.
+                        L($"⛔ Dừng cả vòng của tài khoản (bỏ {shops.Count - i - 1} shop còn lại) — sửa được địa chỉ rồi hãy chạy lại.");
+                        return new OrdersBridgeRunResult(shopCount, shopsDone, totalOrders + orders, totalSlips + slips, false,
+                            $"Không đặt được địa chỉ lấy hàng ({_province}) ở shop {_pickupFailedShop} — đã dừng vòng, chưa in phiếu nào cho shop này.",
+                            PickupAddressFailed: true, PickupFailedShop: _pickupFailedShop);
+                    }
                     totalOrders += orders;
                     totalSlips += slips;
                     shopsDone++;
@@ -639,6 +686,12 @@ public sealed class OrdersBridgeSession : IDisposable
                 return new OrdersBridgeSliceResult(shops, firstShopId, toShip, true,
                     "Rơi vào trang verify/captcha khi đọc/xử đơn.", ordersCount, slipsSaved);
             }
+            if (_pickupFailedShop is not null)
+            {
+                // "Chạy thử" cũng phải nói THẬT: dừng vì địa chỉ, đừng báo OK (người soi sẽ tưởng đã chạy trọn).
+                return new OrdersBridgeSliceResult(shops, firstShopId, toShip, false,
+                    $"Không đặt được địa chỉ lấy hàng ({_province}) — đã dừng, KHÔNG in phiếu.", ordersCount, slipsSaved);
+            }
 
             return new OrdersBridgeSliceResult(shops, firstShopId, toShip, false, null, ordersCount, slipsSaved);
         }
@@ -716,14 +769,24 @@ public sealed class OrdersBridgeSession : IDisposable
             _pickupTcs = NewTcs<bool>();
             await _ws.SendAsync(new { action = "setPickupAddress", province = _province }).ConfigureAwait(false);
             var pickupOk = await _waiter.AwaitAsync(_pickupTcs, TimeSpan.FromSeconds(90), ct).ConfigureAwait(false);
-            if (_captchaSeen)
+            var quyetDinh = QuyetDinhSauDatDiaChi(pickupOk, _captchaSeen);
+            if (quyetDinh == SauDatDiaChi.DungViCaptcha)
             {
                 L("PHÁT HIỆN captcha khi đặt địa chỉ lấy hàng.");
                 return (orders.Count, 0);
             }
-            if (!pickupOk)
+            if (quyetDinh == SauDatDiaChi.DungViDiaChi)
             {
-                L("Không đặt được địa chỉ lấy hàng — vẫn thử xử đơn (phiếu có thể sai địa chỉ).");
+                // KHÔNG chạy prepareNextOrder: in phiếu lúc này = phiếu sai địa chỉ lấy hàng, shipper tới sai chỗ
+                // và không ai biết. Thà không giao đơn còn hơn giao sai địa chỉ (người dùng đã chốt 28/07).
+                // KHÔNG revert (setPickupAddressToOther): mọi lối ok=false của extension đều CHƯA bấm "Lưu" trong
+                // modal Sửa Địa chỉ ⇒ địa chỉ lấy hàng của shop còn NGUYÊN như trước vòng này, không có gì để trả về;
+                // chạy revert lúc này chỉ là một lượt GHI nữa vào đúng màn hình đang hỏng.
+                // Nhãn shop có thể RỖNG (picker không đọc được tên) — vẫn phải là chuỗi KHÁC null, kẻo tín hiệu
+                // DỪNG (null = không lỗi) mất theo cái nhãn.
+                _pickupFailedShop = string.IsNullOrWhiteSpace(shopLogin) ? "(không rõ shop)" : shopLogin;
+                L($"⛔ Không đặt được địa chỉ lấy hàng ({_province}) — DỪNG vòng, KHÔNG in phiếu (tránh phiếu sai địa chỉ).");
+                return (orders.Count, 0);
             }
 
             // Lặp Chuẩn bị hàng tới khi hết đơn / chốt chặn 50 đơn / captcha. Mã vận đơn bắt NGAY tại modal

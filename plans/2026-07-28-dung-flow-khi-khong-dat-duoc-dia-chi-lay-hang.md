@@ -1,7 +1,7 @@
 # Plan: Không đặt được địa chỉ lấy hàng → DỪNG vòng + cảnh báo ra kênh ngoài
 
 - **Ngày:** 2026-07-28
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành (client chờ release 1.6.9)
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-dev`)
 
 ## 1. Bối cảnh — lỗi thật vừa quan sát được trên production

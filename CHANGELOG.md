@@ -5,6 +5,16 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Hiệu năng. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.6.9 — 2026-07-28
+
+- **Không đặt được địa chỉ lấy hàng thì DỪNG, không in phiếu nữa:** trước đây khi app không mở được modal "Sửa Địa
+  chỉ", nó tự ghi cảnh báo *"phiếu có thể sai địa chỉ"* rồi **vẫn in phiếu và giao đơn cho đơn vị vận chuyển** — kết
+  quả là shipper tới sai chỗ lấy hàng mà không ai biết cho tới lúc đó. Nay app **dừng cả vòng của tài khoản** ngay
+  tại chỗ (bỏ luôn các shop còn lại), **không in phiếu nào**, và **gửi cảnh báo ra Slack / Discord / Telegram** theo
+  webhook đã cấu hình ở Cài đặt — kèm máy, tài khoản, shop, địa chỉ định đặt và việc cần làm.
+  Chặn spam 1 tin/tài khoản/giờ; webhook chưa cấu hình hay mạng hỏng thì **vẫn dừng** (dừng không phụ thuộc gửi được
+  tin hay không). Vòng tự chạy lại theo chu kỳ thường lệ sau khi bạn sửa xong địa chỉ trên Shopee.
+
 ## v1.6.8 — 2026-07-28
 
 - **Số "chuẩn bị hàng" tự sang ngày mới:** máy chạy xuyên đêm (đúng cách module Đơn hàng vận hành — vòng lặp liên

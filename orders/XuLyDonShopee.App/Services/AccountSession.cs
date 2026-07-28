@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -637,6 +638,87 @@ public partial class AccountSession : ObservableObject, IAccountSession
         }, CancellationToken.None);
     }
 
+    /// <summary>Ngưỡng CHỐNG SPAM cảnh báo "không đặt được địa chỉ lấy hàng": tối đa 1 tin / tài khoản / 60 phút
+    /// (vòng chạy tự lặp lại sau ~30' — không chặn thì mỗi vòng một tin).</summary>
+    internal static readonly TimeSpan NguongCanhBaoDiaChi = TimeSpan.FromMinutes(60);
+
+    // Mốc gửi cảnh báo địa chỉ GẦN NHẤT theo TÀI KHOẢN. TĨNH: mỗi vòng dựng một phiên cầu nối mới nên mốc phải
+    // sống ngoài phiên (suốt lần chạy app này). Concurrent: nhiều tài khoản chạy song song trên cùng máy.
+    private static readonly ConcurrentDictionary<long, DateTime> _mocCanhBaoDiaChi = new();
+
+    /// <summary>HÀM THUẦN (test được): có nên GỬI cảnh báo lúc <paramref name="bayGio"/> không — chưa từng gửi
+    /// (<paramref name="mocGanNhat"/> null) hoặc đã qua <paramref name="nguong"/> kể từ lần gửi gần nhất.</summary>
+    internal static bool CoNenGuiCanhBao(DateTime? mocGanNhat, DateTime bayGio, TimeSpan nguong)
+        => mocGanNhat is null || bayGio - mocGanNhat.Value >= nguong;
+
+    /// <summary>
+    /// Cảnh báo ra kênh ngoài (Slack/Discord/Telegram) khi vòng đã DỪNG vì KHÔNG đặt được địa chỉ lấy hàng — y
+    /// pattern <see cref="StartNotifyInBackground"/>: fire-and-forget, nuốt mọi exception, KHÔNG nằm trên đường
+    /// quyết định dừng (vòng đã dừng trong <see cref="OrdersBridgeSession"/> trước khi hàm này được gọi; webhook
+    /// trống / mạng hỏng chỉ làm mất TIN, không làm app chạy tiếp).
+    /// <para>
+    /// Chống spam <see cref="NguongCanhBaoDiaChi"/> theo tài khoản — nhưng MỌI trường hợp không gửi đều GHI LOG:
+    /// im lặng hoàn toàn sẽ khiến người trực tưởng đã hết lỗi. Gửi hỏng → nhả mốc để vòng sau báo lại.
+    /// </para>
+    /// </summary>
+    private void StartCanhBaoDiaChiInBackground(string? tenShop, string tinh, Action<string> log, CancellationToken ct)
+    {
+        var bayGio = DateTime.Now;
+        DateTime? mocGanNhat = _mocCanhBaoDiaChi.TryGetValue(_accountId, out var m) ? m : null;
+        if (!CoNenGuiCanhBao(mocGanNhat, bayGio, NguongCanhBaoDiaChi))
+        {
+            log($"Cảnh báo địa chỉ: đã báo lúc {mocGanNhat!.Value:HH:mm}, không gửi lại trong {NguongCanhBaoDiaChi.TotalMinutes:0}' — lỗi VẪN còn, vòng vẫn dừng.");
+            return;
+        }
+
+        var url = _services.Settings.GetNotifyWebhookUrl();
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            log("Cảnh báo địa chỉ: chưa cấu hình webhook (Cài đặt → thông báo đơn mới) — không gửi được tin ra ngoài, vòng VẪN dừng.");
+            return;
+        }
+
+        // Đánh dấu mốc TRƯỚC khi gửi: hai vòng lỗi sát nhau không cùng bắn tin (task gửi chạy nền).
+        _mocCanhBaoDiaChi[_accountId] = bayGio;
+
+        // Tên tài khoản = tên đăng nhập subaccount (như GSheet/notify đơn mới); fallback "TK {id}".
+        var tenTaiKhoan = _services.Accounts.GetById(_accountId)?.Email;
+        if (string.IsNullOrWhiteSpace(tenTaiKhoan))
+        {
+            tenTaiKhoan = $"TK {_accountId}";
+        }
+        var tenMay = Environment.MachineName;
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var text = OrderNotifyService.TaoTinNhanLoiDiaChi(tenTaiKhoan, tenShop ?? string.Empty, tinh, tenMay, bayGio);
+                var ok = await _services.Notify.SendAsync(url, text, log, ct).ConfigureAwait(false);
+                if (ok)
+                {
+                    log($"Cảnh báo địa chỉ: đã báo ra {OrderNotifyService.NhanDienKenh(url)}.");
+                }
+                else
+                {
+                    // Gửi hỏng (mạng/HTTP lỗi — SendAsync đã log chi tiết) → NHẢ mốc của đúng lượt này để vòng sau
+                    // báo lại; để nguyên thì cảnh báo câm cả 60' trong khi không ai nhận được tin nào.
+                    _mocCanhBaoDiaChi.TryRemove(new KeyValuePair<long, DateTime>(_accountId, bayGio));
+                    log("Cảnh báo địa chỉ: gửi KHÔNG thành công — sẽ báo lại ở vòng sau (vòng này vẫn dừng).");
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // Hủy chủ động (dừng phiên) — thôi.
+            }
+            catch (Exception ex)
+            {
+                _mocCanhBaoDiaChi.TryRemove(new KeyValuePair<long, DateTime>(_accountId, bayGio));
+                log("Cảnh báo địa chỉ: lỗi — " + ex.Message);
+            }
+        }, CancellationToken.None);
+    }
+
     /// <summary>
     /// HÀM THUẦN (test được) quyết định một đơn KẾT THÚC có được XÓA khỏi app chưa. Trả true khi:
     /// <list type="bullet">
@@ -920,6 +1002,13 @@ public partial class AccountSession : ObservableObject, IAccountSession
                 if (result.Captcha)
                 {
                     log("Gặp captcha/verify — dừng vòng này, sẽ thử lại sau khi nghỉ.");
+                }
+                else if (result.PickupAddressFailed)
+                {
+                    // Vòng ĐÃ dừng trong bridge (không in phiếu nào cho shop lỗi, bỏ luôn shop còn lại). Ở đây chỉ
+                    // báo người trực — gửi được hay không KHÔNG ảnh hưởng việc dừng.
+                    log("⛔ " + result.Error + " Sửa địa chỉ trên Shopee rồi chạy lại — sẽ thử lại sau khi nghỉ.");
+                    StartCanhBaoDiaChiInBackground(result.PickupFailedShop, province, log, ct);
                 }
                 else if (result.Error is not null)
                 {
