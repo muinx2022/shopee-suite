@@ -11,7 +11,7 @@ namespace XuLyDonShopee.Tests;
 public class GoogleSheetSyncServiceTests
 {
     private static GsheetOrderRow Row(string maDon, bool daHuy = false) =>
-        new(maDon, null, null, null, null, null, null, null, daHuy);
+        new(maDon, null, null, null, null, null, null, null, null, daHuy);
 
     // ===== ChiaLo: chia lô tối đa 10 đơn, giữ đủ phần tử =====
     [Theory]
@@ -37,7 +37,7 @@ public class GoogleSheetSyncServiceTests
     {
         var rows = new[]
         {
-            new GsheetOrderRow("D1", "SPXVN1", "sully", 166500, "20/07/2026", "B02435", null, null, false),
+            new GsheetOrderRow("D1", "SPXVN1", "sully", 166500, "20/07/2026", "B02435", "Nâu Be,39", null, null, false),
         };
 
         var json = GoogleSheetSyncService.TaoJsonBody("tháng 4", rows);
@@ -50,6 +50,7 @@ public class GoogleSheetSyncServiceTests
         Assert.Contains("\"doanhThu\":166500", json);       // số — KHÔNG bọc nháy
         Assert.Contains("\"ngay\":\"20/07/2026\"", json);
         Assert.Contains("\"sku\":\"B02435\"", json);
+        Assert.Contains("\"phanLoai\":\"Nâu Be,39\"", json); // cột người dùng thêm NGAY SAU SKU
         Assert.Contains("\"daHuy\":false", json);           // LUÔN có mặt kể cả false
         Assert.DoesNotContain("fileName", json);            // null → bỏ
         Assert.DoesNotContain("fileBase64", json);          // null → bỏ
@@ -60,7 +61,7 @@ public class GoogleSheetSyncServiceTests
     {
         var rows = new[]
         {
-            new GsheetOrderRow("D9", null, null, null, null, null, null, null, true),
+            new GsheetOrderRow("D9", null, null, null, null, null, null, null, null, true),
         };
 
         var json = GoogleSheetSyncService.TaoJsonBody("tháng 4", rows);
@@ -73,7 +74,7 @@ public class GoogleSheetSyncServiceTests
     {
         var rows = new[]
         {
-            new GsheetOrderRow("D1", null, null, null, null, null, "D1.pdf", "QUJD", false),
+            new GsheetOrderRow("D1", null, null, null, null, null, null, "D1.pdf", "QUJD", false),
         };
 
         var json = GoogleSheetSyncService.TaoJsonBody("tháng 5", rows);
@@ -83,6 +84,7 @@ public class GoogleSheetSyncServiceTests
         Assert.Contains("\"fileBase64\":\"QUJD\"", json);
         Assert.DoesNotContain("maVanDon", json);   // null → bỏ
         Assert.DoesNotContain("doanhThu", json);   // null → bỏ
+        Assert.DoesNotContain("phanLoai", json);   // null → VẮNG hẳn, không phải chuỗi rỗng đè ô người dùng
     }
 
     // ===== DocKetQua: parse results, thiếu field → mặc định an toàn, {"error"} → ném, JSON rác → ném =====

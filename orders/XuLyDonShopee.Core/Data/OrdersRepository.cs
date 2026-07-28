@@ -25,11 +25,14 @@ namespace XuLyDonShopee.Core.Data;
 /// đơn kết thúc khi còn phiếu local hợp lệ CHƯA đẩy hub (hub đang bật).
 /// <see cref="GsheetTab"/> = tab (sheet) đã ghi LẦN ĐẦU của đơn (<c>gsheet_tab</c>; null = chưa ghi/chưa nhớ) —
 /// đơn đẩy LẠI phải về đúng tab này (không nhân đôi dòng khi tab đổi theo tháng).
+/// <see cref="ItemsJson"/> = mảng sản phẩm đã quét (<c>items_json</c>) — nguồn suy cột "Phân loại" gửi lên sheet
+/// (<c>XuLyDonShopee.Core.Services.PhanLoaiExtractor</c>); KHÔNG có cột "phân loại" riêng trong DB.
 /// </summary>
 public sealed record GsheetPendingOrder(
     string OrderSn,
     string? TrackingNumber,
     string? Sku,
+    string? ItemsJson,
     long? TotalPrice,
     long? FinalAmount,
     string? Status,
@@ -314,10 +317,11 @@ public class OrdersRepository
         // Lọc theo shop khi có shopId (mô hình nhiều-shop: chỉ đẩy đơn CỦA shop hiện tại, TenShop lấy theo shop đó
         // — không đẩy nhầm tên shop). shopId null → hành vi CŨ (mọi đơn của account).
         var shopFilter = string.IsNullOrEmpty(shopId) ? string.Empty : " AND shop_id = $shopId";
+        // items_json thêm ở CUỐI danh sách cột để KHÔNG lệch chỉ số reader.Get*(i) sẵn có.
         cmd.CommandText = @"SELECT order_sn, tracking_number, sku, total_price, final_amount,
        status, status_description, cancel_reason,
        gsheet_synced_at, gsheet_file_url, gsheet_da_huy, gsheet_da_co_van_don, gsheet_da_co_uoc_tinh,
-       sold_counted_at, hub_synced_at, hub_slip_synced_at, gsheet_tab
+       sold_counted_at, hub_synced_at, hub_slip_synced_at, gsheet_tab, items_json
     FROM orders
     WHERE account_id = $a" + shopFilter + @"
     ORDER BY id;";
@@ -335,6 +339,7 @@ public class OrdersRepository
                 OrderSn: reader.GetString(0),
                 TrackingNumber: reader.IsDBNull(1) ? null : reader.GetString(1),
                 Sku: reader.IsDBNull(2) ? null : reader.GetString(2),
+                ItemsJson: reader.IsDBNull(17) ? null : reader.GetString(17),
                 TotalPrice: reader.IsDBNull(3) ? null : reader.GetInt64(3),
                 FinalAmount: reader.IsDBNull(4) ? null : reader.GetInt64(4),
                 Status: reader.IsDBNull(5) ? null : reader.GetString(5),
@@ -881,9 +886,10 @@ public class OrdersRepository
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
 
+        // items_json thêm ở CUỐI danh sách cột để KHÔNG lệch chỉ số r.Get*(i) sẵn có trong MapRow.
         var sql = new StringBuilder(@"SELECT id, account_id, order_sn, buyer_username, item_count, item_summary, sku,
     total_price, total_price_text, final_amount, final_amount_text, payment_method, status, status_description, cancel_reason,
-    channel, carrier, tracking_number, synced_at, shop_login
+    channel, carrier, tracking_number, synced_at, shop_login, items_json
     FROM orders WHERE 1 = 1");
 
         if (!AppendFilter(cmd, sql, accountId, status, searchText, accountIds, shopLogin, shopExact))
@@ -1105,6 +1111,7 @@ public class OrdersRepository
         TrackingNumber = r.IsDBNull(17) ? null : r.GetString(17),
         SyncedAt = r.IsDBNull(18) ? default : DbSerialization.ParseDate(r.GetString(18)),
         ShopLogin = r.IsDBNull(19) ? null : r.GetString(19),
+        ItemsJson = r.IsDBNull(20) ? null : r.GetString(20),
     };
 
     /// <summary>Gắn các cột DỮ LIỆU (không gồm account_id/order_sn/khóa/thời gian) vào lệnh. Null → DBNull.</summary>

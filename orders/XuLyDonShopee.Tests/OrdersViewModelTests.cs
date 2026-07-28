@@ -277,6 +277,17 @@ public class OrdersViewModelTests
         Assert.Equal(expected, row.IsPendingPickup);
     }
 
+    // ===== Cột "Phân loại": dòng tính SẴN từ items_json (cắt đuôi SKU), items_json rỗng/null → chuỗi rỗng =====
+    [Theory]
+    [InlineData("[{\"variation\":\"Nâu Be,39 [A322 A322]\"}]", "Nâu Be,39")]
+    [InlineData("[]", "")]
+    [InlineData(null, "")]
+    public void PhanLoai_SuyTuItemsJson(string? itemsJson, string expected)
+    {
+        var row = new OrderRowViewModel(new OrderRow { OrderSn = "SN", ItemsJson = itemsJson }, "lbl", "dir");
+        Assert.Equal(expected, row.PhanLoai);
+    }
+
     // ===== B: "In nhiều đơn" — CHỈ tính đơn "Chờ lấy hàng" đang hiển thị; thiếu file phiếu → đếm "thiếu file", KHÔNG in =====
     [Fact]
     public async Task PrintPendingSlips_ChiDonChoLayHang_ThieuFile_BaoThieu_KhongNem()

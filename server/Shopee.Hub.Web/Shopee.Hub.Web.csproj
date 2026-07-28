@@ -40,6 +40,9 @@
     <!-- Luật đồng bộ GSheet (validate URL + quyết định áp bản hub) — LINK để trang /config/orders validate
          ĐÚNG CÙNG luật với client, khỏi hub nhận URL mà client từ chối. Thuần BCL. -->
     <Compile Include="..\..\orders\XuLyDonShopee.Core\Services\GsheetConfigSync.cs" Link="Shared\Notify\GsheetConfigSync.cs" />
+    <!-- Tách cột "Phân loại" từ items_json — LINK để trang /orders của hub hiện ĐÚNG CÙNG luật với màn Đơn hàng
+         của app và với payload Google Sheet (hai nơi tự tính riêng là lệch). Thuần BCL. -->
+    <Compile Include="..\..\orders\XuLyDonShopee.Core\Services\PhanLoaiExtractor.cs" Link="Shared\Notify\PhanLoaiExtractor.cs" />
     <!-- Cổng thao tác kho + exception + LÕI lưới dùng chung — ProductDbDataOps (hub) hiện thực IProductDataOps;
          ProductGridEngine là lõi lưới cho trang /data + tab 📋 Dữ liệu của Fleet. KHÔNG link HubApiProductDataOps:
          adapter-client cần HubClient (chưa link vào hub). -->

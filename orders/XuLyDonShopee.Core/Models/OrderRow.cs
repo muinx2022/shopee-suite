@@ -4,7 +4,8 @@ namespace XuLyDonShopee.Core.Models;
 /// Một dòng đơn hàng ĐỌC ra từ bảng <c>orders</c> để hiển thị ở màn "Đơn hàng" (plan 2). Khác
 /// <see cref="SyncedOrder"/> (DTO lúc thu thập): bản này mang thêm khóa DB <see cref="Id"/>,
 /// <see cref="AccountId"/> và mốc <see cref="SyncedAt"/> đã parse — đủ để render bảng và xuất CSV.
-/// CỐ Ý KHÔNG cầm <c>items_json</c>: màn xem dùng <see cref="ItemSummary"/>, không parse json từng dòng.
+/// Cột "Sản phẩm" vẫn dùng <see cref="ItemSummary"/> (không parse json); riêng <see cref="ItemsJson"/> được
+/// mang theo để suy cột "Phân loại" — parse MỘT LẦN lúc dựng dòng, xem <c>OrderRowViewModel.PhanLoai</c>.
 /// </summary>
 public sealed class OrderRow
 {
@@ -31,6 +32,10 @@ public sealed class OrderRow
 
     /// <summary>SKU sản phẩm (chuỗi alphanumeric liên tục cuối cùng của tên sản phẩm, vd "B02435"). Có thể null.</summary>
     public string? Sku { get; init; }
+
+    /// <summary>Mảng JSON các sản phẩm <c>{name, variation, amount, image}</c> — CHỈ dùng để suy cột
+    /// "Phân loại" (<c>XuLyDonShopee.Core.Services.PhanLoaiExtractor</c>). Có thể null (đơn cũ chưa có).</summary>
+    public string? ItemsJson { get; init; }
 
     /// <summary>Tổng tiền đã parse về số nguyên VND. Có thể null.</summary>
     public long? TotalPrice { get; init; }

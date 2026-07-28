@@ -194,6 +194,8 @@
                 <DataGridTextColumn Header="Người mua" Binding="{Binding Buyer}" Width="1.2*" />
                 <DataGridTextColumn Header="Sản phẩm" Binding="{Binding Product}" Width="2*" />
                 <DataGridTextColumn Header="SKU" Binding="{Binding Sku}" Width="80" />
+                <!-- Phân loại (vd "Nâu Be,39") suy từ items_json — rộng đủ đọc "Đen 9p-form chuẩn,37". -->
+                <DataGridTextColumn Header="Phân loại" Binding="{Binding PhanLoai}" Width="150" />
                 <DataGridTextColumn Header="Tổng tiền" Binding="{Binding Total}" Width="105" />
                 <DataGridTextColumn Header="Ước tính" Binding="{Binding Estimate}" Width="105" />
                 <DataGridTextColumn Header="Thanh toán" Binding="{Binding Payment}" Width="1.2*" />

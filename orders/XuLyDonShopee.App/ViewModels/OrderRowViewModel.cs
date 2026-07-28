@@ -43,6 +43,8 @@ public sealed partial class OrderRowViewModel
         _invoiceDir = invoiceDir;
         _notify = notify;
         _redownloadSlip = redownloadSlip;
+        // Parse items_json MỘT LẦN lúc dựng dòng — lưới vẽ lại liên tục, không parse json mỗi lần binding đọc.
+        PhanLoai = PhanLoaiExtractor.TuItemsJson(row.ItemsJson);
     }
 
     /// <summary>Nhãn shop (tên đăng nhập shop, vd "alina99.store") — do ViewModel lấy từ <c>shop_login</c>.</summary>
@@ -59,6 +61,10 @@ public sealed partial class OrderRowViewModel
 
     /// <summary>SKU sản phẩm (chuỗi alphanumeric liên tục cuối cùng của tên sản phẩm, vd "B02435").</summary>
     public string Sku => _row.Sku ?? string.Empty;
+
+    /// <summary>Cột "Phân loại" (vd "Nâu Be,39") — suy từ <c>items_json</c> qua
+    /// <see cref="PhanLoaiExtractor.TuItemsJson"/>, TÍNH SẴN trong constructor. Rỗng nếu đơn không có phân loại.</summary>
+    public string PhanLoai { get; }
 
     /// <summary>Tổng tiền: ưu tiên số đã parse (₫1.234.567), thiếu thì dùng nguyên văn.</summary>
     public string Total => BuildTotal(_row.TotalPrice, _row.TotalPriceText);

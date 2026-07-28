@@ -23,6 +23,7 @@ public class AccountSessionCleanupTests
             OrderSn: sn,
             TrackingNumber: null,
             Sku: sku,
+            ItemsJson: null,
             TotalPrice: null,
             FinalAmount: null,
             Status: status,

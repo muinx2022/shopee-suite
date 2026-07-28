@@ -380,6 +380,9 @@ public static class HubOutbox
                         DoanhThu: GsheetMoney.Chon(p.FinalAmount, p.TotalPrice, daHuy),
                         Ngay: ngay,
                         Sku: p.Sku,
+                        // Cột "Phân loại" (ngay sau SKU): suy từ items_json đã quét — rỗng thì gửi NULL để field
+                        // vắng khỏi JSON (hợp đồng "chỉ điền ô trống"), không đè chuỗi rỗng lên ô đã có.
+                        PhanLoai: PhanLoaiExtractor.TuItemsJson(p.ItemsJson) is { Length: > 0 } phanLoai ? phanLoai : null,
                         FileName: fileName,
                         FileBase64: fileBase64,
                         DaHuy: daHuy));

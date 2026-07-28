@@ -15,6 +15,9 @@ public sealed class OrderRecord
     public int ItemCount { get; init; }
     public string? ItemSummary { get; init; }
     public string? Sku { get; init; }
+    /// <summary>Mảng JSON các sản phẩm <c>{name, variation, amount, image}</c> client đẩy lên — nguồn suy cột
+    /// "Phân loại" của trang /orders (<c>PhanLoaiExtractor</c>); KHÔNG có cột "phân loại" riêng trong DB.</summary>
+    public string? ItemsJson { get; init; }
     public long? TotalPrice { get; init; }
     public string? TotalPriceText { get; init; }
     public long? FinalAmount { get; init; }
@@ -148,9 +151,10 @@ ON CONFLICT(shop_id,order_sn) DO UPDATE SET
         {
             var list = new List<OrderRecord>();
             using var c = _conn.CreateCommand();
+            // items_json thêm ở CUỐI danh sách cột để KHÔNG lệch chỉ số rd.Get*(i) sẵn có trong ReadOrderRow.
             c.CommandText = "SELECT id,shop_id,order_sn,shopee_order_id,buyer_username,item_count,item_summary,sku,"
                 + "total_price,total_price_text,final_amount,final_amount_text,payment_method,status,status_description,"
-                + "cancel_reason,channel,carrier,tracking_number,synced_at,slip_at FROM orders"
+                + "cancel_reason,channel,carrier,tracking_number,synced_at,slip_at,items_json FROM orders"
                 + WhereClause(c, shopId, status, search)
                 + " ORDER BY synced_at DESC, id DESC LIMIT $lim OFFSET $off";
             c.Parameters.AddWithValue("$lim", Math.Clamp(limit, 1, 1000));
@@ -285,6 +289,7 @@ ON CONFLICT(shop_id,order_sn) DO UPDATE SET
         TrackingNumber = rd.IsDBNull(18) ? null : rd.GetString(18),
         SyncedAt = D(rd, 19),
         SlipAt = rd.IsDBNull(20) ? null : D(rd, 20),
+        ItemsJson = rd.IsDBNull(21) ? null : rd.GetString(21),
     };
 
     /// <summary>True nếu đã có đơn (shop_id + order_sn) trong bảng — dùng cho POST /api/orders/slip: đơn CHƯA có

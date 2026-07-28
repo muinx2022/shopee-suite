@@ -263,6 +263,8 @@ public class OrdersRepositoryTests
         Assert.Equal(1, full.GsheetDaCoVanDon);     // coVanDon=true → 1
         Assert.Equal(1, full.GsheetDaCoUocTinh);    // coUocTinh=true → 1
         Assert.Equal("Tháng 07-2026", full.GsheetTab); // tab đã nhớ được map
+        // items_json (nguồn suy cột "Phân loại" gửi lên sheet) — cột thêm ở CUỐI SELECT, chỉ số phải khớp.
+        Assert.Equal(Sample("x").ItemsJson, full.ItemsJson);
 
         var fresh = pending.First(p => p.OrderSn == "HASTRACK");
         Assert.False(fresh.DaGhiSheet);
@@ -831,6 +833,8 @@ public class OrdersRepositoryTests
         Assert.Equal("SPX Express", row.Carrier);
         Assert.Equal("SPXVN068067521447", row.TrackingNumber);
         Assert.Equal(syncedAt, row.SyncedAt);
+        // items_json (nguồn suy cột "Phân loại" của lưới) — cột thêm ở CUỐI SELECT, chỉ số phải khớp.
+        Assert.Equal(Sample("x").ItemsJson, row.ItemsJson);
     }
 
     [Fact]

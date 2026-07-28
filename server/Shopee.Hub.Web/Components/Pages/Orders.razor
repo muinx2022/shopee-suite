@@ -1,6 +1,7 @@
 @page "/orders"
 @attribute [Authorize(Policy = "Web")]
 @implements IDisposable
+@using XuLyDonShopee.Core.Services
 @inject HubDatabase Db
 
 <p class="hint m-hide">Đơn hàng client đẩy lên hub qua <code>POST /api/orders/push</code>. Lọc theo shop / trạng thái / tìm kiếm (mã đơn, người mua, tên SP, SKU) + phân trang.</p>
@@ -33,18 +34,21 @@
 <div class="tablewrap">
 <table class="grid sm">
     <thead><tr>
-        <th>Mã đơn</th><th>Shop</th><th>Người mua</th><th>Sản phẩm</th><th class="m-hide">SKU</th>
+        <th>Mã đơn</th><th>Shop</th><th>Người mua</th><th>Sản phẩm</th><th class="m-hide">SKU</th><th class="m-hide">Phân loại</th>
         <th>Tổng tiền</th><th class="m-hide">Cuối cùng</th><th>Trạng thái</th><th class="m-hide">Vận chuyển</th><th class="m-hide">Phiếu</th><th class="m-hide">Sync</th>
     </tr></thead>
     <tbody>
     @foreach (var o in _orders)
     {
+        // Cột "Phân loại" suy từ items_json client đã đẩy lên (không có cột DB riêng) ⇒ đơn CŨ cũng hiện được.
+        var phanLoai = PhanLoaiExtractor.TuItemsJson(o.ItemsJson);
         <tr>
             <td class="mono">@o.OrderSn</td>
             <td>@ShopName(o.ShopId)</td>
             <td>@(o.BuyerUsername ?? "—")</td>
             <td title="@o.ItemSummary">@Trim(o.ItemSummary)@(o.ItemCount > 1 ? $" (+{o.ItemCount - 1})" : "")</td>
             <td class="m-hide">@(o.Sku ?? "—")</td>
+            <td class="m-hide" title="@phanLoai">@Trim(phanLoai)</td>
             <td>@(o.TotalPriceText ?? (o.TotalPrice?.ToString("N0") ?? "—"))</td>
             <td class="m-hide">@(o.FinalAmountText ?? (o.FinalAmount?.ToString("N0") ?? "—"))</td>
             <td><span class="pill @StatusCss(o.Status)">@(o.Status ?? "—")</span></td>
@@ -60,7 +64,7 @@
     }
     @if (_orders.Count == 0)
     {
-        <tr><td colspan="11" class="empty">Không có đơn nào khớp bộ lọc.</td></tr>
+        <tr><td colspan="12" class="empty">Không có đơn nào khớp bộ lọc.</td></tr>
     }
     </tbody>
 </table>
