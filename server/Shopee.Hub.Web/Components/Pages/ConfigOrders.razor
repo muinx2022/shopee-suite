@@ -13,9 +13,13 @@
         <label>Tab ghi vào (để trống = tự động)
             <input @bind="_cfg.GsheetTabName" placeholder="Tháng MM-yyyy (tự động)" />
         </label>
+        <label>Link Google Sheet 2 (để trống = không ghi file phụ)
+            <input @bind="_cfg.GsheetSheet2" placeholder="https://docs.google.com/spreadsheets/d/…" />
+        </label>
     </div>
     <p class="hint">
         • Tab để trống = tự động ghi vào tab <code>Tháng MM-yyyy</code> theo tháng hiện tại; điền tên = ghi cố định vào tab đó.<br />
+        • Google Sheet 2 = file PHỤ nhận thêm cột A–E (mã đơn, mã vận đơn, ảnh vận đơn, đơn trả hàng). Dán link bảng tính hoặc ID — KHÁC ô URL Web App ở trên.<br />
         • Đổi tab CHỈ áp cho đơn CHƯA ghi sheet — đơn cũ vẫn về đúng tab đã ghi lần đầu.<br />
         • Để trống URL = hub CHƯA cấu hình: các máy client GIỮ NGUYÊN cấu hình sẵn có của chúng (hub rỗng không xoá cấu hình của fleet).<br />
         • Hai chiều: máy client lưu ở màn Cài đặt cũng đẩy lên đây (bản lưu SAU thắng) — kể cả khi họ xoá ô Tab để về tự động.
@@ -40,15 +44,17 @@
         _version = Config.VersionOf(FileStoreConfigService.OrdersFile);
     }
 
-    /// <summary>Lưu bản đang sửa. Validate URL bằng ĐÚNG luật client dùng (GsheetConfigSync.KiemTraUrl —
-    /// file LINK chung) để hub không nhận URL mà client sẽ từ chối. Chuẩn hoá trim trước khi ghi.</summary>
+    /// <summary>Lưu bản đang sửa. Validate bằng ĐÚNG luật client dùng (file LINK chung) để hub không nhận giá trị
+    /// mà client sẽ từ chối: URL Web App qua GsheetConfigSync.KiemTraUrl, ô Google Sheet 2 qua KiemTraSheet2 —
+    /// validator RIÊNG vì đó là link bảng tính, không phải Web App. Chuẩn hoá trim trước khi ghi.</summary>
     private void Save()
     {
-        var loi = GsheetConfigSync.KiemTraUrl(_cfg.GsheetWebAppUrl);
+        var loi = GsheetConfigSync.KiemTraUrl(_cfg.GsheetWebAppUrl) ?? GsheetConfigSync.KiemTraSheet2(_cfg.GsheetSheet2);
         if (loi is not null) { _status = "✘ " + loi; return; }
 
         _cfg.GsheetWebAppUrl = (_cfg.GsheetWebAppUrl ?? "").Trim();
         _cfg.GsheetTabName = (_cfg.GsheetTabName ?? "").Trim();
+        _cfg.GsheetSheet2 = (_cfg.GsheetSheet2 ?? "").Trim();
         _status = ConfigSave.Apply(Config, FileStoreConfigService.OrdersFile, _cfg, ref _version, Load);
     }
 }

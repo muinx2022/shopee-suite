@@ -82,20 +82,23 @@ public sealed class FileStoreConfigService
     /// <summary>Gộp cấu hình GSheet client đẩy lên (endpoint <c>POST /orders-config</c>) theo luật ĐỐI XỨNG với
     /// chiều kéo — "khối GSheet là MỘT đơn vị" (<see cref="GsheetConfigSync.QuyetDinhNhanBanClient"/>): URL client
     /// gửi lên RỖNG → KHÔNG ghi gì (máy chưa cấu hình không được xoá cấu hình của cả fleet); URL NON-EMPTY → ghi
-    /// CẢ url LẪN tab, kể cả tab rỗng (= "tự động theo tháng" — nhờ vậy xoá được override từ client). Không có gì
-    /// đổi thật → KHÔNG Save (khỏi bump version làm cả fleet re-pull). Thử lại tối đa 3 lần nếu dính
-    /// version-conflict (máy khác đẩy chen). Trả true = đã lưu / không cần lưu.</summary>
+    /// CẢ url LẪN tab LẪN sheet2, kể cả khi tab/sheet2 rỗng (= "tự động theo tháng" / "không ghi file phụ" — nhờ
+    /// vậy xoá được override từ client). Không có gì đổi thật → KHÔNG Save (khỏi bump version làm cả fleet
+    /// re-pull). Thử lại tối đa 3 lần nếu dính version-conflict (máy khác đẩy chen). Trả true = đã lưu / không
+    /// cần lưu.</summary>
     public bool MergeOrdersConfig(OrdersSharedConfig incoming)
     {
         for (var attempt = 0; attempt < 3; attempt++)
         {
             var cur = Orders();
             var quyet = GsheetConfigSync.QuyetDinhNhanBanClient(
-                incoming.GsheetWebAppUrl, incoming.GsheetTabName, cur.GsheetWebAppUrl, cur.GsheetTabName);
+                incoming.GsheetWebAppUrl, incoming.GsheetTabName, incoming.GsheetSheet2,
+                cur.GsheetWebAppUrl, cur.GsheetTabName, cur.GsheetSheet2);
             if (!quyet.Ap) return true;   // client rỗng (không đè) hoặc trùng bản đang có → không Save, không bump version
 
             cur.GsheetWebAppUrl = quyet.Url;
             cur.GsheetTabName = quyet.Tab;
+            cur.GsheetSheet2 = quyet.Sheet2;
             if (Save(OrdersFile, cur, VersionOf(OrdersFile)).Ok) return true;
             // version-conflict → vòng lặp đọc lại bản mới rồi gộp lại.
         }

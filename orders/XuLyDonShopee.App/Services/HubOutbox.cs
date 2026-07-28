@@ -303,6 +303,10 @@ public static class HubOutbox
                 var autoTab = GsheetTabName.ForMonth(now);
                 var defaultTab = string.IsNullOrEmpty(overrideTab) ? autoTab : overrideTab;
 
+                // File PHỤ (Google Sheet thứ hai): gửi ID đã BÓC (script khỏi parse lại). Chưa cấu hình / link rác
+                // → "" = TẮT ghi file phụ; vẫn LUÔN gửi field để script phân biệt "tắt" với "client đời cũ".
+                var sheet2 = GsheetConfigSync.BocIdSheet(services.Settings.GetGsheetSheet2());
+
                 // Gộp rows theo tab đích (PushAsync nhận MỘT tab/lượt). Thứ tự đơn trong mỗi nhóm giữ nguyên
                 // (List theo thứ tự duyệt pending). Thường 1–2 nhóm (tab tháng hiện tại + tab đã nhớ của đơn cũ).
                 var rowsByTab = new Dictionary<string, List<GsheetOrderRow>>(StringComparer.Ordinal);
@@ -427,7 +431,7 @@ public static class HubOutbox
                         foreach (var nhom in rowsByTab)
                         {
                             var tabName = nhom.Key;
-                            var results = await services.GsheetSync.PushAsync(url, tabName, nhom.Value, log, ct).ConfigureAwait(false);
+                            var results = await services.GsheetSync.PushAsync(url, tabName, nhom.Value, log, ct, sheet2).ConfigureAwait(false);
 
                             foreach (var r in results)
                             {

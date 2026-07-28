@@ -91,6 +91,40 @@ public class GoogleSheetSyncServiceTests
         Assert.DoesNotContain("donTraHang", json); // null → VẮNG hẳn (cùng nếp "chỉ điền ô trống")
     }
 
+    // ===== sheet2 (file PHỤ): ở cấp BODY, LUÔN có mặt kể cả rỗng =====
+
+    [Fact]
+    public void TaoJsonBody_CoSheet2_GuiIdOCapBody()
+    {
+        var rows = new[] { Row("D1") };
+
+        var json = GoogleSheetSyncService.TaoJsonBody("tháng 4", rows, "1CK-mu-rtLw0QnGDZ2cuEIkRelEnZkNWuB7Ir_ZuRLhk");
+
+        Assert.Contains("\"sheet2\":\"1CK-mu-rtLw0QnGDZ2cuEIkRelEnZkNWuB7Ir_ZuRLhk\"", json);
+        // Thuộc tính của CẢ LÔ → nằm cạnh "tab", TRƯỚC mảng orders (không phải field của từng đơn).
+        Assert.True(json.IndexOf("\"sheet2\"", StringComparison.Ordinal) < json.IndexOf("\"orders\"", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(null)]
+    public void TaoJsonBody_Sheet2Trong_VanCoMatTrongBody(string? sheet2)
+    {
+        // BẪY #3: rỗng = "người dùng TẮT ghi file phụ", PHẢI khác với field VẮNG HẲN ("client đời cũ chưa biết
+        // field") — script lùi về hằng dự phòng khi field vắng. Vì vậy KHÔNG áp quy ước "bỏ field null" ở đây.
+        var json = GoogleSheetSyncService.TaoJsonBody("tháng 4", new[] { Row("D1") }, sheet2!);
+
+        Assert.Contains("\"sheet2\":\"\"", json);
+    }
+
+    [Fact]
+    public void TaoJsonBody_KhongTruyenSheet2_MacDinhRong_VanCoMat()
+    {
+        var json = GoogleSheetSyncService.TaoJsonBody("tháng 4", new[] { Row("D1") });
+
+        Assert.Contains("\"sheet2\":\"\"", json);
+    }
+
     // ===== DocKetQua: parse results, thiếu field → mặc định an toàn, {"error"} → ném, JSON rác → ném =====
     [Fact]
     public void DocKetQua_JsonChuan_ParseDayDu()

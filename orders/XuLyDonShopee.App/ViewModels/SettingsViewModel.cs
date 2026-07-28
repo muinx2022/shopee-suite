@@ -53,6 +53,11 @@ public partial class SettingsViewModel : ViewModelBase
     [ObservableProperty]
     private string _gsheetTabName = string.Empty;
 
+    /// <summary>Link (hoặc ID) bảng tính Google Sheet THỨ HAI — file phụ nhận thêm cột A–E; để trống = không ghi
+    /// file phụ. KHÁC <see cref="GsheetWebAppUrl"/>: đây là link docs.google.com/spreadsheets/…, không phải /exec.</summary>
+    [ObservableProperty]
+    private string _gsheetSheet2 = string.Empty;
+
     /// <summary>URL webhook báo "đơn mới" (Slack / Discord / Telegram) — để trống = tắt thông báo.</summary>
     [ObservableProperty]
     private string _notifyWebhookUrl = string.Empty;
@@ -94,6 +99,7 @@ public partial class SettingsViewModel : ViewModelBase
         OrderIntervalMinutes = _services.Settings.GetOrderIntervalMinutes();
         GsheetWebAppUrl = _services.Settings.GetGsheetWebAppUrl() ?? string.Empty;
         GsheetTabName = _services.Settings.GetGsheetTabName();
+        GsheetSheet2 = _services.Settings.GetGsheetSheet2() ?? string.Empty;
         NotifyWebhookUrl = _services.Settings.GetNotifyWebhookUrl() ?? string.Empty;
 
         var choice = _services.Settings.GetBrowserChoice();
@@ -146,9 +152,11 @@ public partial class SettingsViewModel : ViewModelBase
 
     /// <summary>
     /// Nút "Lưu" cấu hình Google Sheet: validate URL qua <see cref="GsheetConfigSync.KiemTraUrl"/> — cho phép
-    /// TRỐNG (tắt đồng bộ) hoặc URL bắt đầu bằng <c>https://script.google.com/</c> (URL Web App Apps Script).
-    /// URL khác dạng → báo lỗi qua <see cref="GsheetSavedMessage"/>, KHÔNG lưu. Hợp lệ → lưu CẢ URL lẫn tên tab
-    /// đích (tab để trống → lưu trống, Get trả "" = tự động theo tháng). Thông báo hiện ở RIÊNG card GSheet (dọn
+    /// TRỐNG (tắt đồng bộ) hoặc URL bắt đầu bằng <c>https://script.google.com/</c> (URL Web App Apps Script);
+    /// ô "Google Sheet 2" validate RIÊNG qua <see cref="GsheetConfigSync.KiemTraSheet2"/> (link bảng tính / ID —
+    /// KHÔNG dùng chung validator Web App, kẻo báo lỗi oan). Sai dạng → báo lỗi qua
+    /// <see cref="GsheetSavedMessage"/>, KHÔNG lưu. Hợp lệ → lưu CẢ BA field (tab/sheet2 để trống → lưu trống,
+    /// nghĩa là "tự động theo tháng" / "không ghi file phụ"). Thông báo hiện ở RIÊNG card GSheet (dọn
     /// <see cref="SavedMessage"/> của card kia). Lưu xong phản ánh lại giá trị đã chuẩn hóa lên form.
     /// <para>
     /// LƯU XONG còn ĐẨY cấu hình lên Hub (hook <see cref="AppServices.PushGsheetConfigToHub"/>) để các máy khác
@@ -160,7 +168,7 @@ public partial class SettingsViewModel : ViewModelBase
     private async Task SaveGsheetUrlAsync()
     {
         var url = GsheetWebAppUrl?.Trim() ?? string.Empty;
-        var loi = GsheetConfigSync.KiemTraUrl(url);
+        var loi = GsheetConfigSync.KiemTraUrl(url) ?? GsheetConfigSync.KiemTraSheet2(GsheetSheet2);
         if (loi is not null)
         {
             GsheetSavedMessage = loi;
@@ -171,14 +179,17 @@ public partial class SettingsViewModel : ViewModelBase
 
         _services.Settings.SetGsheetWebAppUrl(url);
         _services.Settings.SetGsheetTabName(GsheetTabName);          // trống → Get trả "" = tự động theo tháng
+        _services.Settings.SetGsheetSheet2(GsheetSheet2);            // trống → Get trả null = không ghi file phụ
         GsheetWebAppUrl = _services.Settings.GetGsheetWebAppUrl() ?? string.Empty; // phản ánh bản đã chuẩn hóa
         GsheetTabName = _services.Settings.GetGsheetTabName();       // phản ánh (trống → GIỮ trống)
+        GsheetSheet2 = _services.Settings.GetGsheetSheet2() ?? string.Empty;
         GsheetSavedMessage = "Đã lưu cấu hình Google Sheet.";
         SavedMessage = null; // dọn thông báo các card kia
         NotifySavedMessage = null;
 
         // CHỤP giá trị vào biến cục bộ TRƯỚC await (không đọc lại field mutable sau await).
         var tab = GsheetTabName;
+        var sheet2 = GsheetSheet2;
         var push = _services.PushGsheetConfigToHub;
         if (push is null)
         {
@@ -192,7 +203,7 @@ public partial class SettingsViewModel : ViewModelBase
         }
 
         bool ok;
-        try { ok = await push(url, tab, System.Threading.CancellationToken.None); }
+        try { ok = await push(url, tab, sheet2, System.Threading.CancellationToken.None); }
         catch { ok = false; }   // lỗi mạng/hub → chỉ ảnh hưởng thông báo, bản local ĐÃ lưu
         GsheetSavedMessage = ok
             ? "Đã lưu + đồng bộ lên Hub (các máy khác nhận trong ~1 phút)."

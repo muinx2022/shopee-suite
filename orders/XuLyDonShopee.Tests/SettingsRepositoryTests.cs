@@ -120,6 +120,38 @@ public class SettingsRepositoryTests
     }
 
     [Fact]
+    public void GetGsheetSheet2_ChuaDat_TraNull()
+    {
+        using var temp = new TempDatabase();
+        var repo = new SettingsRepository(temp.Open());
+
+        Assert.Null(repo.GetGsheetSheet2());   // chưa đặt = KHÔNG ghi file phụ
+    }
+
+    [Fact]
+    public void SetVaGetGsheetSheet2_CoGiaTri_TraLaiDaTrim()
+    {
+        using var temp = new TempDatabase();
+        var repo = new SettingsRepository(temp.Open());
+
+        repo.SetGsheetSheet2("  https://docs.google.com/spreadsheets/d/ABC  ");
+
+        Assert.Equal("https://docs.google.com/spreadsheets/d/ABC", repo.GetGsheetSheet2());
+    }
+
+    [Fact]
+    public void SetGsheetSheet2_ChuoiTrang_XoaKey_TraNull()
+    {
+        using var temp = new TempDatabase();
+        var repo = new SettingsRepository(temp.Open());
+
+        repo.SetGsheetSheet2("ABC");
+        repo.SetGsheetSheet2("   ");   // toàn khoảng trắng → xóa key (⇒ tắt ghi file phụ)
+
+        Assert.Null(repo.GetGsheetSheet2());
+    }
+
+    [Fact]
     public void GetSyncFreshProfile_ChuaDat_TraFalse()
     {
         using var temp = new TempDatabase();

@@ -28,6 +28,11 @@ public class SettingsRepository
     /// trống/thiếu = TỰ ĐỘNG theo tháng ("Tháng MM-yyyy", caller tự resolve qua <see cref="GsheetTabName"/>).</summary>
     private const string GsheetTabNameKey = "gsheet_tab_name";
 
+    /// <summary>Key: link (hoặc ID) bảng tính Google Sheet THỨ HAI — file phụ nhận thêm cột A–E. Trống/thiếu =
+    /// KHÔNG ghi file phụ. KHÁC <see cref="GsheetWebAppUrlKey"/>: đây là link docs.google.com/spreadsheets/…,
+    /// không phải Web App <c>/exec</c>.</summary>
+    private const string GsheetSheet2Key = "gsheet_sheet2";
+
     /// <summary>Tên tab mặc định LEGACY — CHỈ còn dùng cho backfill migration cột <c>orders.gsheet_tab</c>
     /// (đơn ĐÃ ghi sheet trước bản "tab theo tháng" nằm ở tab tên setting cũ, mặc định "tháng 4"). KHÔNG còn
     /// là giá trị trả về của <see cref="GetGsheetTabName"/> nữa (trống giờ trả chuỗi rỗng).</summary>
@@ -114,6 +119,21 @@ public class SettingsRepository
     {
         var v = name?.Trim();
         Set(GsheetTabNameKey, string.IsNullOrEmpty(v) ? null : v);
+    }
+
+    /// <summary>Link/ID bảng tính Google Sheet thứ hai đã lưu (đã trim); trống/chưa đặt → <c>null</c> (không ghi
+    /// file phụ). Caller bóc ID bằng <see cref="GsheetConfigSync.BocIdSheet"/> trước khi gửi lên Apps Script.</summary>
+    public string? GetGsheetSheet2()
+    {
+        var v = Get(GsheetSheet2Key)?.Trim();
+        return string.IsNullOrEmpty(v) ? null : v;
+    }
+
+    /// <summary>Lưu link/ID bảng tính Google Sheet thứ hai (trim); null/trống → xóa key (⇒ không ghi file phụ).</summary>
+    public void SetGsheetSheet2(string? s)
+    {
+        var v = s?.Trim();
+        Set(GsheetSheet2Key, string.IsNullOrEmpty(v) ? null : v);
     }
 
     /// <summary>URL webhook báo "đơn mới" đã lưu (đã trim); trống/chưa đặt → <c>null</c> (tắt thông báo).</summary>
