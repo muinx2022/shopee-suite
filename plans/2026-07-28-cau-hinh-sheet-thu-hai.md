@@ -1,7 +1,7 @@
 # Plan: Ô cấu hình "Google Sheet thứ hai" (hub + client), gửi kèm payload
 
 - **Ngày:** 2026-07-28
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành — đã gộp worktree về main, 1357 test xanh. Đã kiểm LIÊN THÔNG C# ↔ Apps Script: body do `TaoJsonBody` sinh thật nạp thẳng vào `doPost` thật → bật thì mở đúng ID 1 lần + ghi A/B/E vào tab tháng tự tạo, tắt thì không đụng file phụ. Chờ deploy hub + release client.
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-dev`) — **chạy trong worktree**
 
 ## 1. Bối cảnh
