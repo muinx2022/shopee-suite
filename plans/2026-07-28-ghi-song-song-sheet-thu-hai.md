@@ -1,7 +1,7 @@
 # Plan: Ghi song song sang Google Sheet thứ hai ("Quản Lý Đơn 2", cột A–E)
 
 - **Ngày:** 2026-07-28
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành — chờ người dùng dán đè Apps Script + Triển khai phiên bản mới. Ô cấu hình phía hub/client nằm ở plan `2026-07-28-cau-hinh-sheet-thu-hai.md`.
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-dev`)
 
 ## 1. Bối cảnh
