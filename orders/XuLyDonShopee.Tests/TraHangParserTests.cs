@@ -7,12 +7,17 @@ namespace XuLyDonShopee.Tests;
 /// <list type="bullet">
 /// <item><see cref="TraHangParser.QuyetDinhCheck"/> — 4 nhánh luật đếm (lần đầu / không đổi / giảm / tăng k).</item>
 /// <item><see cref="TraHangParser.ParseSoYeuCau"/> — "7 Yêu cầu" → 7, text lạ → null (KHÔNG ném).</item>
-/// <item><see cref="TraHangParser.TachMa"/> + <see cref="TraHangParser.GhepCap"/> — tách cặp mã theo NHÃN từ HTML
-/// mẫu: dòng CHỈ có mã đơn (đơn hủy — chỗ mã yêu cầu là <c>&lt;!----&gt;</c>) phải BỊ BỎ, dòng đủ hai mã ra đúng cặp.</item>
+/// <item><see cref="TraHangParser.TachMa"/> + <see cref="TraHangParser.GhepCap"/> — tách cặp mã từ HTML mẫu:
+/// dòng CHỈ có mã đơn (đơn hủy — chỗ mã yêu cầu là <c>&lt;!----&gt;</c>) phải BỊ BỎ, dòng đủ hai mã ra đúng cặp.</item>
 /// </list>
-/// HTML mẫu dựng theo đúng khuôn người dùng gửi (khối <c>&lt;div class="id order-id"&gt;</c> +
-/// <c>&lt;span class="id-content"&gt;</c>); class khối mã YÊU CẦU chưa xác nhận nên test dùng vài biến thể class
-/// khác nhau để chứng minh luật KHÔNG phụ thuộc class.
+/// Hai lớp HTML mẫu:
+/// <list type="bullet">
+/// <item>Mẫu DỰNG TAY (các <c>Khoi*</c> ngắn) — giữ nguyên từ đợt trước, khi class khối mã yêu cầu chưa xác nhận;
+/// vẫn hữu ích vì chứng minh luật vẫn chạy khi class đổi.</item>
+/// <item><b>HTML THẬT</b> của một dòng trả hàng đầy đủ (<see cref="HeadThat"/>) — nay đã xác nhận khối mã yêu cầu
+/// là <c>&lt;div class="id return-id"&gt;</c>, khối mã đơn là <c>&lt;div class="id order-id"&gt;</c>. Fixture này
+/// giữ cả tên người mua, avatar, 2 icon copy và <c>&lt;!----&gt;</c> cuối để test đúng cảnh thật.</item>
+/// </list>
 /// </summary>
 public class TraHangParserTests
 {
@@ -143,8 +148,11 @@ public class TraHangParserTests
     [InlineData("Request ID")]
     public void TachMa_NhanKhacNhau_VanNhanDienDuocMaYeuCau(string nhan)
     {
+        // cls: "id" (BỎ token "return-id") là CỐ Ý: từ khi có tầng CLASS, để class mặc định thì tầng 1 quyết
+        // xong ngay và test này không còn kiểm được luật NHÃN nữa — vẫn xanh nhưng rỗng nghĩa. Bỏ class riêng
+        // đi mới ép tụt xuống tầng nhãn, đúng ý định gốc của test.
         var html = "<div class=\"return-row-item-head\">"
-            + KhoiMaDon("260723E428EY8X") + KhoiMaYeuCau("R77", nhan: nhan) + "</div>";
+            + KhoiMaDon("260723E428EY8X") + KhoiMaYeuCau("R77", nhan: nhan, cls: "id") + "</div>";
 
         Assert.Equal("R77", TraHangParser.TachMa(html).MaYeuCau);
     }
@@ -230,6 +238,200 @@ public class TraHangParserTests
         var ma = TraHangParser.TachMa(html);
         Assert.Null(ma.MaDon);
         Assert.Null(ma.MaYeuCau);
+    }
+
+    // ===================== HTML THẬT của một dòng trả hàng (class đã ghim) =====================
+
+    /// <summary>Hash scoped-css của Vue trên mọi thẻ trong dòng — rác thuần, giữ để fixture giống trang thật.</summary>
+    private const string DataV = "data-v-3e8f5a12";
+
+    /// <summary>Path của icon copy (eds-icon) — HAI nút copy dùng CÙNG icon này. Giữ trong fixture vì đây chính
+    /// là thứ làm phình HTML (mỗi cái ~400 ký tự) và cũng để chứng minh luật không bị SVG làm nhiễu.</summary>
+    private const string PathIconCopy =
+        "M13 1H4.625C4.28 1 4 1.28 4 1.625v1.75c0 .345.28.625.625.625s.625-.28.625-.625V2.25H12.5v9.5h-1.125"
+        + "c-.345 0-.625.28-.625.625s.28.625.625.625H13c.345 0 .625-.28.625-.625V1.625C13.625 1.28 13.345 1 13 1z"
+        + "M11.375 4.5H3c-.345 0-.625.28-.625.625v9.25c0 .345.28.625.625.625h8.375c.345 0 .625-.28.625-.625v-9.25"
+        + "c0-.345-.28-.625-.625-.625zm-.625 9.25h-7.125V5.75h7.125v8z";
+
+    /// <summary>Một khối mã theo đúng khuôn trang thật: <c>&lt;span&gt;nhãn&lt;/span&gt;</c> +
+    /// <c>&lt;span class="id-content"&gt;giá trị&lt;/span&gt;</c> + nút copy (icon SVG).</summary>
+    private static string KhoiIdThat(string cls, string nhan, string ma) =>
+        $"<div {DataV} class=\"{cls}\"><span {DataV}>{nhan}</span>"
+        + $"<span {DataV} class=\"id-content\">{ma}</span>"
+        + $"<div {DataV} class=\"copy-button\"><i class=\"eds-icon icon-copy\">"
+        + $"<svg viewBox=\"0 0 16 16\" width=\"1em\" height=\"1em\" fill=\"none\">"
+        + $"<path d=\"{PathIconCopy}\" fill=\"currentColor\"></path></svg></i></div></div>";
+
+    /// <summary>
+    /// Khối <c>.return-row-item-head</c> của dòng trả hàng THẬT (dòng <c>/portal/sale/return/235778510235654</c>):
+    /// khối người mua (avatar + <c>.username</c>) → <c>id order-id</c> → <c>id return-id</c> → <c>&lt;!----&gt;</c>.
+    /// Các tham số để dựng biến thể: tên người mua (dữ liệu NGƯỜI DÙNG tự đặt — có thể chứa "return"/"request"),
+    /// class hai khối (mô phỏng Shopee đổi class), đảo thứ tự khối, và khối mã yêu cầu chưa render (đơn HỦY).
+    /// </summary>
+    private static string HeadThat(
+        string username = "ttd911",
+        string classDon = "id order-id",
+        string classYeuCau = "id return-id",
+        bool daoThuTu = false,
+        bool yeuCauChuaRender = false)
+    {
+        var khoiDon = KhoiIdThat(classDon, "Mã đơn hàng", "260619GSNQ36U7");
+        var khoiYeuCau = yeuCauChuaRender
+            ? "<!---->"
+            : KhoiIdThat(classYeuCau, "Mã yêu cầu trả hàng", "2606220PN1D6X06");
+
+        return $"<div {DataV} class=\"return-row-item-head\">"
+            + $"<div {DataV} class=\"user-view-item return-row-user\">"
+            + $"<img {DataV} class=\"avatar\" src=\"https://down-vn.img.susercontent.com/file/vn-11134233-7ras8_tn\">"
+            + $"<div {DataV} class=\"username text-overflow\">{username}</div></div>"
+            + (daoThuTu ? khoiYeuCau + khoiDon : khoiDon + khoiYeuCau)
+            + "<!----></div>";
+    }
+
+    [Fact]
+    public void TachMa_HtmlThatTrangTraHang_RaDungHaiMa()
+    {
+        var ma = TraHangParser.TachMa(HeadThat());
+
+        Assert.Equal("260619GSNQ36U7", ma.MaDon);
+        Assert.Equal("2606220PN1D6X06", ma.MaYeuCau);
+    }
+
+    /// <summary>
+    /// HTML <b>NGUYÊN VĂN</b> khối <c>.return-row-item-head</c> chép từ trang thật (dòng
+    /// <c>/portal/sale/return/235778510235654</c>, shop thật, 28/07/2026) — KHÔNG rút gọn, KHÔNG tái dựng:
+    /// giữ nguyên mọi <c>data-v-*</c>, thuộc tính <c>account="[object Object]"</c>, hai SVG icon copy đầy đủ,
+    /// và <c>&lt;!----&gt;</c> cuối khối. <see cref="HeadThat"/> ở trên là bản DỰNG ĐƯỢC THAM SỐ dùng cho các
+    /// biến thể (đổi tên người mua / đổi class / đảo thứ tự); còn hằng này là mỏ neo: nếu ai đó sửa luật mà
+    /// vẫn muốn test xanh thì phải xanh trên chính HTML Shopee trả về.
+    /// <para>Lưu ý cấu trúc thật SÂU HƠN bản dựng: tên người mua nằm trong
+    /// <c>.user-view-item &gt; .content &gt; .username</c> chứ không phải con trực tiếp.</para>
+    /// </summary>
+    private const string HeadNguyenVanTuTrangThat =
+        """
+        <div data-v-6a1b46c4="" data-v-6c0fe5b8="" class="return-row-item-head"><div data-v-2f869f9a="" data-v-6a1b46c4="" class="user-view-item linkable simple-nofollow user-header" account="[object Object]"
+        ><div data-v-2f869f9a="" data-v-2f869f9a-s="" class="avatar"><img data-v-2f869f9a="" data-v-2f869f9a-s="" class="image" src="https://cf.shopee.vn/file/a5c947f6ed4c79213467e202028ba3c5" width="100%" he
+        ight="100%"></div><div data-v-2f869f9a="" class="content"><div data-v-2f869f9a="" class="username text-overflow">ttd911</div></div><!----></div><div data-v-6a1b46c4="" class="id order-id"><span data-v
+        -6a1b46c4="">Mã đơn hàng</span><span data-v-6a1b46c4="" class="id-content">260619GSNQ36U7</span><div data-v-5c91486a="" data-v-6a1b46c4="" class="copy-button"><i data-v-ef5019c0="" data-v-5c91486a="" 
+        class="eds-icon copy-icon grey"><svg xmlns="http://www.w3.org/2000/svg"><path d="M13 1H4.625a.125.125 0 0 0-.125.125V2c0 .069.056.125.125.125h7.75v10.75c0 .069.056.125.125.125h.875a.125.125 0 0 0 .125
+        -.125V1.5A.5.5 0 0 0 13 1Zm-2 2H3a.5.5 0 0 0-.5.5v8.292c0 .133.053.26.147.353l2.708 2.708a.519.519 0 0 0 .115.086v.03h.066c.055.02.112.031.172.031H11a.5.5 0 0 0 .5-.5v-11A.5.5 0 0 0 11 3ZM5.469 13.378
+        l-1.346-1.347H5.47v1.347Zm4.906.497H6.469v-2.219a.625.625 0 0 0-.625-.625H3.625V4.125h6.75v9.75Z"></path></svg></i></div></div><div data-v-6a1b46c4="" class="id return-id"><span data-v-6a1b46c4="">Mã 
+        yêu cầu trả hàng</span><span data-v-6a1b46c4="" class="id-content">2606220PN1D6X06</span><div data-v-5c91486a="" data-v-6a1b46c4="" class="copy-button"><i data-v-ef5019c0="" data-v-5c91486a="" class="
+        eds-icon copy-icon grey"><svg xmlns="http://www.w3.org/2000/svg"><path d="M13 1H4.625a.125.125 0 0 0-.125.125V2c0 .069.056.125.125.125h7.75v10.75c0 .069.056.125.125.125h.875a.125.125 0 0 0 .125-.125V1
+        .5A.5.5 0 0 0 13 1Zm-2 2H3a.5.5 0 0 0-.5.5v8.292c0 .133.053.26.147.353l2.708 2.708a.519.519 0 0 0 .115.086v.03h.066c.055.02.112.031.172.031H11a.5.5 0 0 0 .5-.5v-11A.5.5 0 0 0 11 3ZM5.469 13.378l-1.346
+        -1.347H5.47v1.347Zm4.906.497H6.469v-2.219a.625.625 0 0 0-.625-.625H3.625V4.125h6.75v9.75Z"></path></svg></i></div></div><!----></div>
+        """;
+
+    [Fact]
+    public void TachMa_HtmlNguyenVanTuTrangThat_RaDungHaiMa()
+    {
+        var ma = TraHangParser.TachMa(HeadNguyenVanTuTrangThat);
+
+        Assert.Equal("260619GSNQ36U7", ma.MaDon);
+        Assert.Equal("2606220PN1D6X06", ma.MaYeuCau);
+    }
+
+    /// <summary>Trên HTML NGUYÊN VĂN, tên người mua độc vẫn KHÔNG kéo được mã đơn sang ô mã yêu cầu — cấu trúc
+    /// thật lồng sâu hơn bản dựng nên đây mới là ca chốt cho lỗi "username lọt vào nhãn".</summary>
+    [Theory]
+    [InlineData("returnking88")]
+    [InlineData("shop_request_vn")]
+    [InlineData("Shop yêu cầu 24h")]
+    public void TachMa_HtmlNguyenVan_TenNguoiMuaDoc_VanRaDungHaiMa(string username)
+    {
+        var html = HeadNguyenVanTuTrangThat.Replace(">ttd911<", $">{username}<", StringComparison.Ordinal);
+
+        var ma = TraHangParser.TachMa(html);
+
+        Assert.Equal("260619GSNQ36U7", ma.MaDon);
+        Assert.Equal("2606220PN1D6X06", ma.MaYeuCau);
+    }
+
+    /// <summary>Shopee bỏ token <c>order-id</c>/<c>return-id</c> → tụt xuống tầng NHÃN. Chạy trên HTML NGUYÊN
+    /// VĂN mới có ý nghĩa: cấu trúc thật lồng sâu (<c>.user-view-item &gt; .content &gt; .username</c>) nên đây
+    /// là chỗ dễ vỡ nhất của luật "chỉ lấy nhãn từ thẻ span gần nhất".</summary>
+    [Fact]
+    public void TachMa_HtmlNguyenVan_MatClassRieng_DuPhongNhanVanDung()
+    {
+        var html = HeadNguyenVanTuTrangThat
+            .Replace("class=\"id order-id\"", "class=\"id\"", StringComparison.Ordinal)
+            .Replace("class=\"id return-id\"", "class=\"id\"", StringComparison.Ordinal);
+
+        var ma = TraHangParser.TachMa(html);
+
+        Assert.Equal("260619GSNQ36U7", ma.MaDon);
+        Assert.Equal("2606220PN1D6X06", ma.MaYeuCau);
+    }
+
+    /// <summary>Cùng lúc MẤT class riêng VÀ tên người mua độc — tầng nhãn phải tự đứng vững, không được dựa vào
+    /// tầng class đã mất. Đây là ca gắt nhất: bản cũ sai ngay cả khi CÒN class.</summary>
+    [Fact]
+    public void TachMa_HtmlNguyenVan_MatClass_VaTenNguoiMuaDoc_VanDung()
+    {
+        var html = HeadNguyenVanTuTrangThat
+            .Replace("class=\"id order-id\"", "class=\"id\"", StringComparison.Ordinal)
+            .Replace("class=\"id return-id\"", "class=\"id\"", StringComparison.Ordinal)
+            .Replace(">ttd911<", ">returnking88<", StringComparison.Ordinal);
+
+        var ma = TraHangParser.TachMa(html);
+
+        Assert.Equal("260619GSNQ36U7", ma.MaDon);
+        Assert.Equal("2606220PN1D6X06", ma.MaYeuCau);
+    }
+
+    [Theory]
+    // Tên người mua là dữ liệu NGƯỜI DÙNG TỰ ĐẶT. Luật cũ lấy nhãn = "mọi text từ khối trước tới khối này" nên
+    // với khối ĐẦU nó nuốt luôn username → username chứa "return"/"request"/"yêu cầu" làm mã ĐƠN HÀNG bị gán
+    // thành mã yêu cầu trả hàng (ghi mã SAI lên Google Sheet). Đây là ca hồi quy cho lỗi đó.
+    [InlineData("ttd911")]
+    [InlineData("returnking88")]
+    [InlineData("shop_request_vn")]
+    [InlineData("yeucaushop")]
+    [InlineData("Shop yêu cầu 24h")]
+    public void TachMa_HtmlThat_UsernameDoc_VanRaDungHaiMa(string username)
+    {
+        var ma = TraHangParser.TachMa(HeadThat(username));
+
+        Assert.Equal("260619GSNQ36U7", ma.MaDon);
+        Assert.Equal("2606220PN1D6X06", ma.MaYeuCau);
+    }
+
+    [Fact]
+    public void TachMa_HtmlThat_DaoThuTuKhoi_ClassQuyetDinhChuKhongPhaiViTri()
+    {
+        var ma = TraHangParser.TachMa(HeadThat(daoThuTu: true));
+
+        Assert.Equal("260619GSNQ36U7", ma.MaDon);
+        Assert.Equal("2606220PN1D6X06", ma.MaYeuCau);
+    }
+
+    [Theory]
+    // Shopee bỏ class riêng của hai khối (chỉ còn "id") → rơi xuống tầng NHÃN; nhãn nay chỉ lấy <span> gần nhất
+    // nên username độc vẫn không lọt vào.
+    [InlineData("ttd911")]
+    [InlineData("returnking88")]
+    public void TachMa_HtmlThat_MatClassRieng_DuPhongNhanVanDung(string username)
+    {
+        var ma = TraHangParser.TachMa(HeadThat(username, classDon: "id", classYeuCau: "id"));
+
+        Assert.Equal("260619GSNQ36U7", ma.MaDon);
+        Assert.Equal("2606220PN1D6X06", ma.MaYeuCau);
+    }
+
+    [Fact]
+    public void TachMa_HtmlThat_DonHuy_KhoiReturnIdChuaRender_ThieuMaYeuCau()
+    {
+        var html = HeadThat(yeuCauChuaRender: true);
+
+        var ma = TraHangParser.TachMa(html);
+        Assert.Equal("260619GSNQ36U7", ma.MaDon);
+        Assert.Null(ma.MaYeuCau);
+
+        // Dòng như thế phải vào danh sách chẩn đoán, KÈM class dò được của từng khối (không chỉ nhãn).
+        var thieu = Assert.Single(TraHangParser.GhepCap(new[] { Dong(html) }).ThieuMaYeuCau);
+        Assert.Contains("260619GSNQ36U7", thieu);
+        Assert.Contains("class='id order-id'", thieu);
+        Assert.Contains("nhãn='Mã đơn hàng'", thieu);
     }
 
     // ===================== Ghép cặp cả lô =====================

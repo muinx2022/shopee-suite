@@ -702,8 +702,11 @@ function pageReturnRowCount() {
 }
 
 // Quét các dòng yêu cầu (trang ĐẦU, không phân trang) → JSON [{shopeeOrderId, headHtml}].
-// CỐ Ý KHÔNG phân loại mã ở đây: class khối "mã yêu cầu trả hàng" CHƯA xác nhận, nên luật nhận diện theo NHÃN
-// nằm ở C# (TraHangParser) — test được, và dòng nào trượt luật thì C# log NGUYÊN VĂN html để lộ class thật.
+// CỐ Ý KHÔNG phân loại mã ở đây: luật nhận diện (class order-id/return-id → nhãn → vị trí) nằm ở C#
+// (TraHangParser) — test được, và dòng nào trượt luật thì C# log NGUYÊN VĂN html để lộ cấu trúc thật.
+// shopeeOrderId THƯỜNG RỖNG: href dòng trả hàng là /portal/sale/return/<returnId> chứ không phải
+// /portal/sale/order/<id>. Không sao — C# ghép cặp chỉ bằng headHtml; đừng đổi regex sang bắt /return/(\d+)
+// rồi nhét return-id vào field tên "orderId" (sai ngữ nghĩa).
 function pageScanReturnRows(maxRows, maxHtml) {
   const rows = document.querySelectorAll(".return-table-content a.return-row-item");
   const out = [];
@@ -715,7 +718,16 @@ function pageScanReturnRows(maxRows, maxHtml) {
       const hm = href.match(/\/portal\/sale\/order\/(\d+)/);
       if (hm) shopeeOrderId = hm[1];
       const head = row.querySelector(".return-row-item-head");
-      let html = head ? head.outerHTML : row.outerHTML; // không có head → gửi cả dòng (vẫn tách được theo nhãn)
+      const src = head || row; // không có head → gửi cả dòng (C# vẫn tách được)
+      // Bỏ <img>/<svg> — avatar người mua có khi là data URI base64 (>1000 ký tự) và 2 icon copy mỗi cái ~450 ký
+      // tự path: chúng đẩy head chạm trần maxHtml và cắt mất khối return-id nằm CUỐI head, mất mã yêu cầu ÂM
+      // THẦM. Phải cloneNode TRƯỚC khi xoá: xoá trên DOM thật sẽ làm mất ảnh trên màn hình người dùng đang xem.
+      let html = "";
+      try {
+        const clone = src.cloneNode(true);
+        for (const rac of clone.querySelectorAll("img, svg")) rac.remove();
+        html = clone.outerHTML;
+      } catch (e) { html = src.outerHTML; } // clone lỗi (node lạ) → lùi về bản gốc, đừng phá cả lượt quét
       if (html.length > maxHtml) html = html.substring(0, maxHtml);
       out.push({ shopeeOrderId: shopeeOrderId, headHtml: html });
     } catch (e) { /* dòng lạ — bỏ qua, không phá cả lượt */ }

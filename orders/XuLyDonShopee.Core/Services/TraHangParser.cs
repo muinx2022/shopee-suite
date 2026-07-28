@@ -10,8 +10,14 @@ namespace XuLyDonShopee.Core.Services;
 public sealed record YeuCauTraHang(string MaDon, string MaYeuCau);
 
 /// <summary>Một dòng THÔ extension gửi về: id đơn Shopee lấy từ <c>href</c> + HTML của khối đầu dòng
-/// (<c>.return-row-item-head</c>). Extension CHỈ duyệt DOM, KHÔNG phân loại — luật nhận diện theo nhãn nằm ở
-/// C# (<see cref="TraHangParser.TachMa"/>) để test được và để log nguyên văn HTML khi luật trượt.</summary>
+/// (<c>.return-row-item-head</c>, đã bỏ <c>img</c>/<c>svg</c>). Extension CHỈ duyệt DOM, KHÔNG phân loại — luật
+/// nhận diện nằm ở C# (<see cref="TraHangParser.TachMa"/>) để test được và để log nguyên văn HTML khi luật trượt.
+/// <para>
+/// <b><see cref="ShopeeOrderId"/> thường RỖNG:</b> trên trang trả hàng, <c>href</c> của dòng là
+/// <c>/portal/sale/return/&lt;returnId&gt;</c> chứ KHÔNG phải <c>/portal/sale/order/&lt;id&gt;</c> nên regex ở
+/// extension không bắt được gì. Không sao — ghép cặp CHỈ dùng <see cref="HeadHtml"/>, field này thuần chẩn đoán.
+/// KHÔNG được đổi regex sang bắt <c>/return/(\d+)</c>: nhét return-id vào field tên "orderId" là sai ngữ nghĩa.
+/// </para></summary>
 public sealed record DongTraHang(string? ShopeeOrderId, string HeadHtml);
 
 /// <summary>Kết quả một lượt đọc trang trả hàng (đã parse JSON extension gửi). <see cref="SoYeuCau"/> null =
@@ -20,7 +26,7 @@ public sealed record DongTraHang(string? ShopeeOrderId, string HeadHtml);
 public sealed record KetQuaDocTraHang(int? SoYeuCau, bool SortApplied, IReadOnlyList<DongTraHang> Dong);
 
 /// <summary>Kết quả ghép cặp: <see cref="Cap"/> = dòng đủ hai mã; <see cref="ThieuMaYeuCau"/> = mô tả CHẨN ĐOÁN
-/// (mã đơn + các nhãn đọc được + HTML thô rút gọn) của dòng CÓ mã đơn mà KHÔNG có mã yêu cầu.</summary>
+/// (mã đơn + class/nhãn đọc được của từng khối + HTML thô rút gọn) của dòng CÓ mã đơn mà KHÔNG có mã yêu cầu.</summary>
 public sealed record KetQuaGhepTraHang(IReadOnlyList<YeuCauTraHang> Cap, IReadOnlyList<string> ThieuMaYeuCau);
 
 /// <summary>4 nhánh luật đếm số yêu cầu (xem <see cref="TraHangParser.QuyetDinhCheck"/>).</summary>
@@ -44,13 +50,15 @@ public readonly record struct QuyetDinhTraHang(LuatSoYeuCau Luat, int SoDongCanC
 
 /// <summary>
 /// Hàm THUẦN cho bước "check đơn trả hàng" (bước CUỐI của flow mỗi shop): parse JSON extension gửi về, tách
-/// cặp <c>(mã đơn, mã yêu cầu trả hàng)</c> theo NHÃN, và luật đếm số yêu cầu giữa hai lượt. Tách khỏi trình
-/// duyệt để test được — extension chỉ duyệt DOM rồi gửi HTML thô.
+/// cặp <c>(mã đơn, mã yêu cầu trả hàng)</c>, và luật đếm số yêu cầu giữa hai lượt. Tách khỏi trình duyệt để
+/// test được — extension chỉ duyệt DOM rồi gửi HTML thô.
 /// <para>
-/// <b>⚠ Class của khối "mã yêu cầu trả hàng" CHƯA XÁC NHẬN:</b> hai mẫu HTML người dùng gửi đều bị cắt và mọi
-/// dòng đọc được là đơn HỦY (chỗ mã yêu cầu là <c>&lt;!----&gt;</c>). Nên nhận diện theo NHÃN (text) chứ không
-/// theo class, và dòng có mã đơn mà KHÔNG có mã yêu cầu được gom vào <see cref="KetQuaGhepTraHang.ThieuMaYeuCau"/>
-/// KÈM HTML thô — lần chạy thật sẽ lộ ngay class/nhãn thật trong nhật ký nếu luật sai.
+/// <b>Class đã XÁC NHẬN trên HTML thật</b> (một dòng trả hàng đầy đủ, 2026-07-28): khối mã đơn là
+/// <c>&lt;div class="id order-id"&gt;</c>, khối mã yêu cầu là <c>&lt;div class="id return-id"&gt;</c>, cả hai
+/// dùng chung ô giá trị <c>&lt;span class="id-content"&gt;</c>. Nhận diện đi theo 3 tầng
+/// <b>class → nhãn → vị trí</b> (xem <see cref="TachMa"/>): giữ đủ cả 3 vì class vẫn có thể đổi tiếp. Dòng có
+/// mã đơn mà KHÔNG có mã yêu cầu được gom vào <see cref="KetQuaGhepTraHang.ThieuMaYeuCau"/> KÈM class/nhãn dò
+/// được + HTML thô — nhật ký lần chạy thật lộ ngay cấu trúc mới nếu cả 3 tầng đều trượt.
 /// </para>
 /// </summary>
 public static class TraHangParser
@@ -229,7 +237,7 @@ public static class TraHangParser
 
             if (string.IsNullOrEmpty(ma.MaYeuCau))
             {
-                thieu.Add(MoTaChanDoan(ma.MaDon!, ma.Nhan, d.HeadHtml));
+                thieu.Add(MoTaChanDoan(ma.MaDon!, ma.ClassKhoi, ma.Nhan, d.HeadHtml));
                 continue;
             }
             cap.Add(new YeuCauTraHang(ma.MaDon!, ma.MaYeuCau!));
@@ -238,39 +246,58 @@ public static class TraHangParser
         return new KetQuaGhepTraHang(cap, thieu);
     }
 
-    /// <summary>Mã tách được từ MỘT khối đầu dòng + các NHÃN đọc được (để chẩn đoán khi luật trượt).</summary>
-    internal sealed record MaTraHang(string? MaDon, string? MaYeuCau, IReadOnlyList<string> Nhan);
+    /// <summary>Mã tách được từ MỘT khối đầu dòng + CLASS thẻ bao và NHÃN của từng khối (để chẩn đoán khi luật
+    /// trượt). <see cref="ClassKhoi"/> và <see cref="Nhan"/> cùng độ dài, cùng thứ tự khối.</summary>
+    internal sealed record MaTraHang(
+        string? MaDon, string? MaYeuCau, IReadOnlyList<string> Nhan, IReadOnlyList<string> ClassKhoi);
+
+    /// <summary>Loại khối suy ra từ CLASS thẻ bao — <see cref="Khong"/> = class không nói gì (phải xét nhãn).</summary>
+    private enum LoaiKhoi
+    {
+        Khong,
+        Don,
+        YeuCau,
+    }
 
     /// <summary>
-    /// Tách <c>(mã đơn, mã yêu cầu)</c> từ HTML khối <c>.return-row-item-head</c> theo NHÃN (KHÔNG theo class —
-    /// class khối mã yêu cầu chưa xác nhận):
+    /// Tách <c>(mã đơn, mã yêu cầu)</c> từ HTML khối <c>.return-row-item-head</c>. Mỗi khối = một phần tử có
+    /// class chứa token <c>id-content</c>; GIÁ TRỊ = text ngay trong phần tử đó. Phân loại khối theo 3 tầng,
+    /// dừng ở tầng đầu tiên nói được:
     /// <list type="number">
-    /// <item>Tìm mọi phần tử có class chứa token <c>id-content</c>; GIÁ TRỊ = text ngay trong phần tử đó.</item>
-    /// <item>NHÃN của một khối = text (đã bóc thẻ) nằm GIỮA giá trị khối trước và thẻ mở của khối này — với
-    /// khuôn <c>&lt;span&gt;Mã đơn hàng&lt;/span&gt;&lt;span class="id-content"&gt;…&lt;/span&gt;</c> thì đó
-    /// đúng là nhãn.</item>
-    /// <item>Phân loại theo nhãn đã BỎ DẤU + hạ chữ: chứa <c>yeu cau</c>/<c>return</c>/<c>request</c> → mã yêu
-    /// cầu; chứa <c>ma don hang</c>/<c>order</c> → mã đơn. Xét nhánh YÊU CẦU TRƯỚC vì nhãn tiếng Anh của yêu
-    /// cầu có thể chứa cả chữ "order" (vd "Return order ID"), còn nhãn mã đơn không bao giờ chứa "yêu cầu".</item>
-    /// <item>Dự phòng CUỐI: đúng 2 khối mà KHÔNG nhãn nào khớp → khối 1 = mã đơn, khối 2 = mã yêu cầu. CỐ Ý
-    /// không dự phòng khi đã khớp được một nhãn: khối còn lại lúc đó có nhãn RÕ RÀNG không phải yêu cầu (vd
-    /// "Mã vận đơn") — đoán bừa sẽ ghi mã SAI lên Google Sheet, tệ hơn là bỏ trống.</item>
+    /// <item><b>CLASS thẻ bao</b> (ưu tiên cao nhất, đã xác nhận trên trang thật): thẻ mở gần nhất phía trước
+    /// khối có class chứa token <c>return-id</c> → mã yêu cầu, token <c>order-id</c> → mã đơn.</item>
+    /// <item><b>NHÃN</b> (dự phòng khi Shopee đổi class) = text của thẻ <c>&lt;span&gt;</c> MỞ gần nhất phía
+    /// trước khối — với khuôn <c>&lt;span&gt;Mã đơn hàng&lt;/span&gt;&lt;span class="id-content"&gt;…</c> thì
+    /// đó đúng là nhãn. CỐ Ý thu hẹp tới đúng một <c>&lt;span&gt;</c> chứ không lấy "mọi text từ khối trước":
+    /// khối ĐẦU nằm ngay sau <c>&lt;div class="username"&gt;</c> nên cách cũ nuốt luôn TÊN NGƯỜI MUA, mà tên đó
+    /// người dùng tự đặt — username kiểu "returnking88" sẽ khớp nhánh yêu cầu và gán mã ĐƠN HÀNG thành mã yêu
+    /// cầu, tức ghi mã SAI lên Google Sheet. Phân loại theo nhãn đã BỎ DẤU + hạ chữ: chứa
+    /// <c>yeu cau</c>/<c>return</c>/<c>request</c> → mã yêu cầu; chứa <c>ma don hang</c>/<c>order</c> → mã đơn.
+    /// Xét nhánh YÊU CẦU TRƯỚC vì nhãn tiếng Anh của yêu cầu có thể chứa cả chữ "order" (vd "Return order ID"),
+    /// còn nhãn mã đơn không bao giờ chứa "yêu cầu".</item>
+    /// <item><b>VỊ TRÍ</b> (dự phòng CUỐI): đúng 2 khối mà KHÔNG khối nào xác định được bằng class LẪN nhãn →
+    /// khối 1 = mã đơn, khối 2 = mã yêu cầu. CỐ Ý không dự phòng khi đã nhận ra được một khối: khối còn lại lúc
+    /// đó có class/nhãn RÕ RÀNG không phải yêu cầu (vd "Mã vận đơn") — đoán bừa sẽ ghi mã SAI lên Google Sheet,
+    /// tệ hơn là bỏ trống.</item>
     /// </list>
     /// </summary>
     internal static MaTraHang TachMa(string? headHtml)
     {
         var nhan = new List<string>();
+        var classKhoi = new List<string>();
         var giaTri = new List<string>();
+        var loai = new List<LoaiKhoi>();
         if (string.IsNullOrWhiteSpace(headHtml))
         {
-            return new MaTraHang(null, null, nhan);
+            return new MaTraHang(null, null, nhan, classKhoi);
         }
 
+        var cacThe = TheHtml.Matches(headHtml);
         var cuoiKhoiTruoc = 0;
-        foreach (Match m in TheHtml.Matches(headHtml))
+        for (var k = 0; k < cacThe.Count; k++)
         {
-            var the = m.Value;
-            if (the.StartsWith("</", StringComparison.Ordinal) || !ClassChuaToken(the, "id-content"))
+            var m = cacThe[k];
+            if (m.Value.StartsWith("</", StringComparison.Ordinal) || !ClassChuaToken(m.Value, "id-content"))
             {
                 continue;
             }
@@ -283,7 +310,10 @@ public static class TraHangParser
                 ketThuc = headHtml.Length;
             }
             var value = BocText(headHtml.Substring(batDau, ketThuc - batDau));
-            var nhanKhoi = BocText(headHtml.Substring(cuoiKhoiTruoc, m.Index - cuoiKhoiTruoc));
+            // Cả class thẻ bao lẫn nhãn đều chỉ dò trong khoảng [cuối khối trước → khối này): thẻ bao của khối
+            // này luôn MỞ SAU giá trị khối trước, nên chặn thế là đủ và không bao giờ mượn nhầm của khối trước.
+            var lop = ClassTheBao(cacThe, k, cuoiKhoiTruoc);
+            var nhanKhoi = NhanGanNhat(headHtml, cacThe, k, cuoiKhoiTruoc);
             // Dời mốc kể cả khi khối RỖNG (Vue chưa render): nếu không, nhãn của khối rỗng sẽ DÍNH vào nhãn khối
             // kế → phân loại sai (vd nhãn "Mã yêu cầu" của khối rỗng kéo theo giá trị "Mã vận đơn" của khối sau).
             cuoiKhoiTruoc = ketThuc;
@@ -293,12 +323,32 @@ public static class TraHangParser
             }
 
             nhan.Add(nhanKhoi);
+            classKhoi.Add(lop);
             giaTri.Add(value);
+            loai.Add(LoaiTheoClass(lop));
         }
 
+        // Tầng 1 — CLASS.
         string? maDon = null, maYeuCau = null;
         for (var i = 0; i < giaTri.Count; i++)
         {
+            if (maYeuCau is null && loai[i] == LoaiKhoi.YeuCau)
+            {
+                maYeuCau = giaTri[i];
+            }
+            else if (maDon is null && loai[i] == LoaiKhoi.Don)
+            {
+                maDon = giaTri[i];
+            }
+        }
+
+        // Tầng 2 — NHÃN, CHỈ cho khối mà class không nói gì (class đã nói thì class thắng, khỏi xét lại).
+        for (var i = 0; i < giaTri.Count; i++)
+        {
+            if (loai[i] != LoaiKhoi.Khong)
+            {
+                continue;
+            }
             var n = KhongDau(nhan[i]);
             if (maYeuCau is null && LaNhanYeuCau(n))
             {
@@ -310,15 +360,73 @@ public static class TraHangParser
             }
         }
 
-        // Dự phòng: đúng 2 khối, không nhãn nào khớp → theo VỊ TRÍ (mã đơn luôn đứng trước).
+        // Tầng 3 — dự phòng: đúng 2 khối, không khối nào nhận ra được → theo VỊ TRÍ (mã đơn luôn đứng trước).
         if (maDon is null && maYeuCau is null && giaTri.Count == 2)
         {
             maDon = giaTri[0];
             maYeuCau = giaTri[1];
         }
 
-        return new MaTraHang(maDon, maYeuCau, nhan);
+        return new MaTraHang(maDon, maYeuCau, nhan, classKhoi);
     }
+
+    /// <summary>Class của thẻ BAO khối: thẻ MỞ gần nhất phía trước khối <paramref name="viTriKhoi"/> (không lùi
+    /// quá mốc <paramref name="tu"/>) có class chứa token <c>return-id</c> hoặc <c>order-id</c>. Rỗng nếu không
+    /// có thẻ nào như thế — lúc đó việc phân loại rơi xuống tầng nhãn.
+    /// <para>CỐ Ý không ràng buộc tên thẻ phải là <c>div</c>: token class mới là dấu hiệu, Shopee đổi
+    /// <c>div</c> thành thẻ khác vẫn nhận ra được.</para></summary>
+    private static string ClassTheBao(MatchCollection cacThe, int viTriKhoi, int tu)
+    {
+        for (var j = viTriKhoi - 1; j >= 0 && cacThe[j].Index >= tu; j--)
+        {
+            var the = cacThe[j].Value;
+            if (the.StartsWith("</", StringComparison.Ordinal))
+            {
+                continue;
+            }
+            var cls = LayClass(the);
+            if (CoToken(cls, "return-id") || CoToken(cls, "order-id"))
+            {
+                return cls;
+            }
+        }
+        return string.Empty;
+    }
+
+    /// <summary>Loại khối theo class thẻ bao (xem <see cref="ClassTheBao"/>).</summary>
+    private static LoaiKhoi LoaiTheoClass(string cls)
+    {
+        if (CoToken(cls, "return-id"))
+        {
+            return LoaiKhoi.YeuCau;
+        }
+        return CoToken(cls, "order-id") ? LoaiKhoi.Don : LoaiKhoi.Khong;
+    }
+
+    /// <summary>NHÃN của khối: text từ thẻ <c>&lt;span&gt;</c> MỞ gần nhất phía trước khối
+    /// <paramref name="viTriKhoi"/> (không lùi quá mốc <paramref name="tu"/>) tới thẻ mở của khối. Rỗng nếu
+    /// không có <c>&lt;span&gt;</c> nào → coi như không khớp nhãn.</summary>
+    private static string NhanGanNhat(string headHtml, MatchCollection cacThe, int viTriKhoi, int tu)
+    {
+        var mocKhoi = cacThe[viTriKhoi].Index;
+        for (var j = viTriKhoi - 1; j >= 0 && cacThe[j].Index >= tu; j--)
+        {
+            var the = cacThe[j].Value;
+            if (!LaTheMoSpan(the))
+            {
+                continue;
+            }
+            var batDau = cacThe[j].Index + the.Length;
+            return batDau <= mocKhoi ? BocText(headHtml.Substring(batDau, mocKhoi - batDau)) : string.Empty;
+        }
+        return string.Empty;
+    }
+
+    /// <summary>Thẻ MỞ <c>&lt;span…&gt;</c> (không tính <c>&lt;/span&gt;</c>, không dính <c>&lt;spanx&gt;</c>).</summary>
+    private static bool LaTheMoSpan(string the)
+        => the.Length > 5
+           && the.StartsWith("<span", StringComparison.OrdinalIgnoreCase)
+           && (the[5] == '>' || the[5] == '/' || char.IsWhiteSpace(the[5]));
 
     /// <summary>Nhãn của khối MÃ YÊU CẦU TRẢ HÀNG (nhãn đã bỏ dấu + hạ chữ).</summary>
     private static bool LaNhanYeuCau(string nhanKhongDau)
@@ -333,14 +441,26 @@ public static class TraHangParser
 
     /// <summary>Thẻ mở <paramref name="the"/> có class chứa ĐÚNG token <paramref name="token"/> không (so theo
     /// token, không phải "chứa chuỗi" — <c>id-content-x</c> KHÔNG khớp <c>id-content</c>).</summary>
-    private static bool ClassChuaToken(string the, string token)
+    private static bool ClassChuaToken(string the, string token) => CoToken(LayClass(the), token);
+
+    /// <summary>Giá trị thuộc tính <c>class</c> của một thẻ mở (rỗng nếu thẻ không có class).</summary>
+    private static string LayClass(string the)
     {
         var m = ThuocTinhClass.Match(the);
         if (!m.Success)
         {
+            return string.Empty;
+        }
+        return m.Groups[1].Success ? m.Groups[1].Value : m.Groups[2].Value;
+    }
+
+    /// <summary>Chuỗi class <paramref name="cls"/> có ĐÚNG token <paramref name="token"/> không.</summary>
+    private static bool CoToken(string cls, string token)
+    {
+        if (cls.Length == 0)
+        {
             return false;
         }
-        var cls = m.Groups[1].Success ? m.Groups[1].Value : m.Groups[2].Value;
         foreach (var t in cls.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries))
         {
             if (string.Equals(t, token, StringComparison.OrdinalIgnoreCase))
@@ -380,13 +500,19 @@ public static class TraHangParser
         return sb.ToString().Normalize(NormalizationForm.FormC);
     }
 
-    /// <summary>Chuỗi CHẨN ĐOÁN cho dòng thiếu mã yêu cầu: mã đơn + nhãn đọc được + HTML thô (cắt bớt) — nhật ký
-    /// lần chạy thật nhìn vào đây là biết luật nhãn trượt ở đâu / class thật là gì.</summary>
-    private static string MoTaChanDoan(string maDon, IReadOnlyList<string> nhan, string headHtml)
+    /// <summary>Chuỗi CHẨN ĐOÁN cho dòng thiếu mã yêu cầu: mã đơn + CLASS/NHÃN dò được của từng khối + HTML thô
+    /// (cắt bớt) — nhật ký lần chạy thật nhìn vào đây là biết luật trượt ở tầng nào và cấu trúc thật là gì.</summary>
+    private static string MoTaChanDoan(
+        string maDon, IReadOnlyList<string> classKhoi, IReadOnlyList<string> nhan, string headHtml)
     {
         var html = headHtml.Length > TranHtmlChanDoan
             ? headHtml.Substring(0, TranHtmlChanDoan) + "…(cắt)"
             : headHtml;
-        return $"{maDon}: nhãn=[{string.Join(" | ", nhan)}] html={html}";
+        var khoi = new List<string>(nhan.Count);
+        for (var i = 0; i < nhan.Count; i++)
+        {
+            khoi.Add($"class='{(i < classKhoi.Count ? classKhoi[i] : string.Empty)}' nhãn='{nhan[i]}'");
+        }
+        return $"{maDon}: khối=[{string.Join(" | ", khoi)}] html={html}";
     }
 }
