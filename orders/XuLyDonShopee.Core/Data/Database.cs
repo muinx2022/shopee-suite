@@ -112,7 +112,9 @@ CREATE TABLE IF NOT EXISTS orders (
     gsheet_da_huy      INTEGER,
     gsheet_da_co_van_don INTEGER,
     gsheet_da_co_uoc_tinh INTEGER,
+    gsheet_da_co_don_tra_hang INTEGER,
     gsheet_tab         TEXT,
+    return_request_code TEXT,
     hub_synced_at      TEXT,
     hub_slip_synced_at TEXT,
     sold_counted_at    TEXT,
@@ -138,6 +140,7 @@ CREATE TABLE IF NOT EXISTS account_shops (
     shop_login TEXT NOT NULL,
     shop_name  TEXT,
     sort_order INTEGER,                -- vị trí shop theo ĐÚNG thứ tự trang /portal/shop (NULL = dữ liệu cũ)
+    return_count_last INTEGER,         -- số yêu cầu trả hàng lần check gần nhất (NULL = chưa từng check)
     updated_at TEXT NOT NULL,
     UNIQUE(account_id, shop_login)
 );
@@ -230,6 +233,17 @@ CREATE TABLE IF NOT EXISTS prepare_daily (
         // để tab "Kết quả" hiện shop cùng thứ tự người dùng thấy trên Shopee. NULL = dữ liệu CŨ chưa biết thứ tự
         // (chưa đọc lại shop-list lần nào) → xếp cuối theo tên. Thêm cho DB CŨ.
         EnsureColumn(conn, "account_shops", "sort_order", "INTEGER");
+
+        // MỐC "số yêu cầu trả hàng" của lần check gần nhất, nhớ THEO TỪNG SHOP (bước check đơn trả hàng ở CUỐI
+        // flow mỗi shop). NULL = shop chưa từng check → lượt đầu CHỈ ghi nhớ số, không đọc dòng nào. Thêm cho DB CŨ.
+        EnsureColumn(conn, "account_shops", "return_count_last", "INTEGER");
+
+        // MÃ YÊU CẦU TRẢ HÀNG khớp với đơn (đọc ở trang "Trả hàng/Hoàn tiền/Hủy" cuối flow shop) — đẩy lên cột
+        // "Đơn trả hàng" của Google Sheet + hub + màn Đơn hàng. NULL = đơn chưa có yêu cầu trả hàng nào.
+        // gsheet_da_co_don_tra_hang = lần đẩy sheet gần nhất ĐÃ gửi kèm mã này chưa (0/1; NULL = chưa) — mẫu y
+        // hệt gsheet_da_co_van_don, để mã xuất hiện SAU vẫn được đẩy lại điền vào ô. Thêm cho DB CŨ.
+        EnsureColumn(conn, "orders", "return_request_code", "TEXT");
+        EnsureColumn(conn, "orders", "gsheet_da_co_don_tra_hang", "INTEGER");
 
         // Backfill MỘT LẦN: đơn ĐÃ lên hub TRƯỚC bản này có thể thiếu "Số tiền cuối cùng" trên hub — bản cũ chỉ
         // RESET hub_synced_at khi mã vận đơn vừa xuất hiện, KHÔNG reset khi final_amount vừa lấy được, nên đơn

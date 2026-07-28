@@ -34,7 +34,7 @@
 <div class="tablewrap">
 <table class="grid sm">
     <thead><tr>
-        <th>Mã đơn</th><th>Shop</th><th>Người mua</th><th>Sản phẩm</th><th class="m-hide">SKU</th><th class="m-hide">Phân loại</th>
+        <th>Mã đơn</th><th>Shop</th><th>Người mua</th><th>Sản phẩm</th><th class="m-hide">SKU</th><th class="m-hide">Phân loại</th><th class="m-hide">Đơn trả hàng</th>
         <th>Tổng tiền</th><th class="m-hide">Cuối cùng</th><th>Trạng thái</th><th class="m-hide">Vận chuyển</th><th class="m-hide">Phiếu</th><th class="m-hide">Sync</th>
     </tr></thead>
     <tbody>
@@ -49,6 +49,7 @@
             <td title="@o.ItemSummary">@Trim(o.ItemSummary)@(o.ItemCount > 1 ? $" (+{o.ItemCount - 1})" : "")</td>
             <td class="m-hide">@(o.Sku ?? "—")</td>
             <td class="m-hide" title="@phanLoai">@Trim(phanLoai)</td>
+            <td class="mono m-hide">@(o.ReturnRequestCode ?? "—")</td>
             <td>@(o.TotalPriceText ?? (o.TotalPrice?.ToString("N0") ?? "—"))</td>
             <td class="m-hide">@(o.FinalAmountText ?? (o.FinalAmount?.ToString("N0") ?? "—"))</td>
             <td><span class="pill @StatusCss(o.Status)">@(o.Status ?? "—")</span></td>
@@ -64,7 +65,7 @@
     }
     @if (_orders.Count == 0)
     {
-        <tr><td colspan="12" class="empty">Không có đơn nào khớp bộ lọc.</td></tr>
+        <tr><td colspan="13" class="empty">Không có đơn nào khớp bộ lọc.</td></tr>
     }
     </tbody>
 </table>

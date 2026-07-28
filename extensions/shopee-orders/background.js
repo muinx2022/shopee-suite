@@ -11,10 +11,12 @@
 // Protocol:
 //   C#  -> ext:  {action:"readShopList"} | {action:"openShopDetail", shopId} | {action:"readToShip"}
 //                {action:"redownloadSlip", orderSn}                               (tải lại phiếu 1 đơn)
+//                {action:"readReturnRequests"}                                    (bước CUỐI: trang trả hàng)
 //   ext -> C#:   {action:"ready"}
 //                {action:"shopOpened"}                                            (openShopDetail xong)
 //                {action:"pageData", kind:"shopList", data:<json-array-string>}
 //                {action:"pageData", kind:"toShip",   data:<raw-item-title-string>}
+//                {action:"pageData", kind:"returns",  data:<json {soYeuCauText,sortApplied,list}>}
 //                {action:"slipRedownloaded", orderSn, slipBase64}                 (base64 "" = không lấy được)
 //                {action:"progress", message}                                     (chỉ để log)
 //                {action:"captcha",  message}                                     (rơi vào trang /verify)
@@ -645,6 +647,82 @@ function pageCheckboxCount() {
   return null;
 }
 
+// ===== Bước CUỐI flow shop — trang "Trả hàng/Hoàn tiền/Hủy" (/portal/sale/returnrefundcancel) =====
+
+// Toạ độ TÂM tab mở trang trả hàng. Dùng data-testid (ổn định) — ĐỪNG dò theo text.
+function pageLocateReturnTab() {
+  const el = document.querySelector("[data-testid='l1-tab-return_refund_cancel']");
+  if (!el) return null;
+  const r0 = el.getBoundingClientRect();
+  if (!(r0.width > 0 && r0.height > 0)) return null;
+  try { el.scrollIntoView({ block: "center" }); } catch (e) {}
+  const r = el.getBoundingClientRect();
+  return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+}
+
+// Text ô tổng ".return-list-summary-title" (vd "7 Yêu cầu"). "" nếu chưa render — C# lo parse ra SỐ.
+function pageReturnSummaryText() {
+  const el = document.querySelector(".return-list-summary-title");
+  return el ? (el.textContent || "").replace(/\s+/g, " ").trim() : "";
+}
+
+// Toạ độ nút mở dropdown sắp xếp (.sort-button). null nếu chưa có.
+function pageLocateSortButton() {
+  for (const el of document.querySelectorAll(".sort-button")) {
+    const r0 = el.getBoundingClientRect();
+    if (!(r0.width > 0 && r0.height > 0)) continue;
+    try { el.scrollIntoView({ block: "center" }); } catch (e) {}
+    const r = el.getBoundingClientRect();
+    return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+  }
+  return null;
+}
+
+// Mục sắp xếp khớp reSrc (text đã chuẩn hoá KHÔNG dấu) trong .eds-dropdown-menu đang mở → toạ độ. null nếu không thấy.
+function pageLocateSortOption(reSrc) {
+  const re = new RegExp(reSrc);
+  for (const menu of document.querySelectorAll(".eds-dropdown-menu")) {
+    const mr = menu.getBoundingClientRect();
+    if (!(mr.width > 0 && mr.height > 0)) continue;
+    for (const li of menu.querySelectorAll("li.eds-dropdown-item, li, [role='menuitem']")) {
+      if (!re.test(_na(li.textContent))) continue;
+      const r0 = li.getBoundingClientRect();
+      if (!(r0.width > 0 && r0.height > 0)) continue;
+      try { li.scrollIntoView({ block: "center" }); } catch (e) {}
+      const r = li.getBoundingClientRect();
+      return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+    }
+  }
+  return null;
+}
+
+// Số dòng yêu cầu đang render (chờ danh sách vẽ lại sau khi đổi sắp xếp).
+function pageReturnRowCount() {
+  return document.querySelectorAll(".return-table-content a.return-row-item").length;
+}
+
+// Quét các dòng yêu cầu (trang ĐẦU, không phân trang) → JSON [{shopeeOrderId, headHtml}].
+// CỐ Ý KHÔNG phân loại mã ở đây: class khối "mã yêu cầu trả hàng" CHƯA xác nhận, nên luật nhận diện theo NHÃN
+// nằm ở C# (TraHangParser) — test được, và dòng nào trượt luật thì C# log NGUYÊN VĂN html để lộ class thật.
+function pageScanReturnRows(maxRows, maxHtml) {
+  const rows = document.querySelectorAll(".return-table-content a.return-row-item");
+  const out = [];
+  for (const row of rows) {
+    if (out.length >= maxRows) break;
+    try {
+      let shopeeOrderId = "";
+      const href = row.getAttribute("href") || "";
+      const hm = href.match(/\/portal\/sale\/order\/(\d+)/);
+      if (hm) shopeeOrderId = hm[1];
+      const head = row.querySelector(".return-row-item-head");
+      let html = head ? head.outerHTML : row.outerHTML; // không có head → gửi cả dòng (vẫn tách được theo nhãn)
+      if (html.length > maxHtml) html = html.substring(0, maxHtml);
+      out.push({ shopeeOrderId: shopeeOrderId, headHtml: html });
+    } catch (e) { /* dòng lạ — bỏ qua, không phá cả lượt */ }
+  }
+  return JSON.stringify(out);
+}
+
 // Số dòng shop trong picker (tr[data-row-key]) — chờ trang chọn shop render sau SSO.
 function pageShopRowCount() {
   return document.querySelectorAll("tr[data-row-key]").length;
@@ -690,7 +768,13 @@ const SHOP_LIST_URL = "https://banhang.shopee.vn/portal/shop";
 const ORDERS_URL = "https://banhang.shopee.vn/portal/sale/order";
 const ORDER_DETAIL_PREFIX = "https://banhang.shopee.vn/portal/sale/order/"; // + shopeeOrderId → trang chi tiết (đọc "Số tiền cuối cùng").
 const SHIPPING_SETTINGS_URL = "https://banhang.shopee.vn/portal/all-settings/shipping";
+const RETURNS_URL = "https://banhang.shopee.vn/portal/sale/returnrefundcancel"; // trang "Trả hàng/Hoàn tiền/Hủy".
 const MAX_ORDER_PAGES = 10; // chốt chặn số trang quét (khớp MaxSyncPages phía C#).
+const MAX_RETURN_ROWS = 50;        // trần số dòng trả hàng đọc/lượt (chỉ trang ĐẦU, không phân trang).
+const MAX_RETURN_HEAD_HTML = 4000; // trần ký tự HTML mỗi dòng gửi về C# (giữ payload gọn).
+// Mục sắp xếp cần chọn, so trên text KHÔNG dấu (_na): "Ngày yêu cầu (Mới - Cũ)". Ràng buộc "moi - cu" để KHÔNG
+// dính nhầm mục ngược "Ngày yêu cầu (Cũ - Mới)".
+const SORT_NEWEST_RE = "ngay yeu cau.*moi\\s*[-–]\\s*cu";
 
 // Chạy một hàm trong trang (world MAIN), trả result[0].result.
 // Cài helper _na/_provCore lên window của TRANG (world MAIN) — vì page-func chạy executeScript được serialize
@@ -856,6 +940,7 @@ async function handleCommand(cmd) {
     case "setPickupAddressToOther": await doSetPickupAddressToOther(); return;
     case "prepareNextOrder": await doPrepareNextOrder(); return;
     case "redownloadSlip":   await doRedownloadSlip(String(cmd.orderSn || "")); return;
+    case "readReturnRequests": await doReadReturnRequests(); return;
     case "closeShopTab":     await doCloseShopTab(); return;
   }
 }
@@ -1556,4 +1641,97 @@ async function doRedownloadSlip(orderSn) {
   try { await chrome.tabs.remove(slipId); } catch (e) {}
 
   send({ action: "slipRedownloaded", orderSn: orderSn, slipBase64: slipB64 });
+}
+
+// Bước CUỐI flow shop (bước PHỤ): mở trang "Trả hàng/Hoàn tiền/Hủy" của shop đang mở → ĐỔI SẮP XẾP sang
+// "Ngày yêu cầu (Mới - Cũ)" (mặc định trang là "Ngày đến hạn" — không đổi thì luật "N dòng đầu" của C# bỏ sót
+// ÂM THẦM) → đọc text ô tổng + HTML đầu từng dòng → trả MỘT lượt {soYeuCauText, sortApplied, list}.
+// MỘT NHỊP: gửi cả số LẪN các dòng, C# tự cắt còn k dòng đầu — trang chỉ mở/đọc đúng một lần, không tốn thêm
+// vòng WS (đọc DOM thừa vài chục dòng rẻ hơn nhiều so với một lượt chờ-trả-lời nữa).
+// LUÔN gửi pageData (kể cả khi không đọc được gì) để C# không phải ngồi chờ hết timeout; /verify → captcha.
+async function doReadReturnRequests() {
+  const tabId = orderTabId();
+  if (tabId == null) { send({ action: "error", message: "chưa có tab shop để check đơn trả hàng" }); return; }
+
+  const traVe = (summary, sortApplied, list) => send({
+    action: "pageData",
+    kind: "returns",
+    data: JSON.stringify({ soYeuCauText: summary || "", sortApplied: !!sortApplied, list: list || [] }),
+  });
+
+  // 1) Mở trang trả hàng: ưu tiên BẤM TAB (trusted click, data-testid ổn định); không thấy tab → điều hướng thẳng.
+  await ensureDbg(tabId);
+  let tab = null;
+  const tdl = Date.now() + 8000;
+  while (Date.now() < tdl) {
+    try { tab = await execInTab(tabId, pageLocateReturnTab, []); } catch (e) { tab = null; }
+    if (tab) break;
+    await sleep(500);
+  }
+  if (tab) {
+    await trustedClick(tabId, tab.x, tab.y);
+  } else {
+    send({ action: "progress", message: "không thấy tab 'Trả hàng/Hoàn tiền/Hủy' — điều hướng thẳng tới trang." });
+    try { await chrome.tabs.update(tabId, { url: RETURNS_URL }); } catch (e) {}
+    await waitTabComplete(tabId, 20000);
+  }
+
+  // 2) Chờ ô tổng render (trần 20s). Rơi /verify → báo captcha rồi thôi (C# coi là bỏ bước, đi tiếp).
+  let summary = "";
+  const dl = Date.now() + 20000;
+  while (Date.now() < dl) {
+    let url = "";
+    try { url = (await chrome.tabs.get(tabId)).url || ""; } catch (e) {}
+    if (/\/verify/i.test(url)) { send({ action: "captcha", message: url }); return; }
+    try { summary = (await execInTab(tabId, pageReturnSummaryText, [])) || ""; } catch (e) { summary = ""; }
+    if (summary) break;
+    await sleep(600);
+  }
+  if (!summary) {
+    send({ action: "progress", message: "trang trả hàng chưa render ô tổng sau 20s — bỏ lượt check này." });
+    traVe("", false, []);
+    return;
+  }
+
+  // 3) Đổi sắp xếp. Không thấy nút/mục → VẪN đọc tiếp nhưng sortApplied=false để C# log cảnh báo.
+  let sortApplied = false;
+  try {
+    await ensureDbg(tabId);
+    const btn = await execInTab(tabId, pageLocateSortButton, []);
+    if (btn) {
+      await trustedClick(tabId, btn.x, btn.y);
+      await sleep(700);
+      let opt = null;
+      const odl = Date.now() + 5000;
+      while (Date.now() < odl) {
+        opt = await execInTab(tabId, pageLocateSortOption, [SORT_NEWEST_RE]);
+        if (opt) break;
+        await sleep(400);
+      }
+      if (opt) {
+        await trustedClick(tabId, opt.x, opt.y);
+        sortApplied = true;
+        await sleep(1500); // danh sách vẽ lại theo thứ tự mới
+      }
+    }
+  } catch (e) { /* đổi sắp xếp lỗi → đọc theo thứ tự đang có (sortApplied=false) */ }
+  if (!sortApplied) {
+    send({ action: "progress", message: "KHÔNG đổi được sắp xếp 'Ngày yêu cầu (Mới - Cũ)' — đọc theo thứ tự đang có." });
+  }
+
+  // 4) Đọc lại ô tổng (sau khi danh sách vẽ lại) + quét dòng.
+  try { summary = (await execInTab(tabId, pageReturnSummaryText, [])) || summary; } catch (e) {}
+  const rdl = Date.now() + 8000;
+  while (Date.now() < rdl) {
+    let n = 0;
+    try { n = (await execInTab(tabId, pageReturnRowCount, [])) || 0; } catch (e) { n = 0; }
+    if (n > 0) break;
+    await sleep(500);
+  }
+  let rows = "[]";
+  try { rows = (await execInTab(tabId, pageScanReturnRows, [MAX_RETURN_ROWS, MAX_RETURN_HEAD_HTML])) || "[]"; } catch (e) { rows = "[]"; }
+  let list = [];
+  try { list = JSON.parse(rows) || []; } catch (e) { list = []; }
+
+  traVe(summary, sortApplied, list);
 }

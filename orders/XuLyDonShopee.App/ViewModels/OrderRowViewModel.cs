@@ -66,6 +66,10 @@ public sealed partial class OrderRowViewModel
     /// <see cref="PhanLoaiExtractor.TuItemsJson"/>, TÍNH SẴN trong constructor. Rỗng nếu đơn không có phân loại.</summary>
     public string PhanLoai { get; }
 
+    /// <summary>Cột "Đơn trả hàng" = mã yêu cầu trả hàng khớp đơn (bước check cuối flow shop ghi vào DB). Rỗng nếu
+    /// đơn chưa có yêu cầu trả hàng nào.</summary>
+    public string DonTraHang => _row.ReturnRequestCode ?? string.Empty;
+
     /// <summary>Tổng tiền: ưu tiên số đã parse (₫1.234.567), thiếu thì dùng nguyên văn.</summary>
     public string Total => BuildTotal(_row.TotalPrice, _row.TotalPriceText);
 

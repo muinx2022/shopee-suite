@@ -982,7 +982,22 @@ public partial class AccountSession : ObservableObject, IAccountSession
                     },
                     // Cột tiến độ tab "Kết quả": chấm tròn + vòng quay chạy theo shop mà vòng này đang check tới.
                     onShopCheckStarted: shopLabel => _services.RaiseShopCheckChanged(_accountId, shopLabel, checking: true),
-                    onShopCheckFinished: shopLabel => _services.RaiseShopCheckChanged(_accountId, shopLabel, checking: false));
+                    onShopCheckFinished: shopLabel => _services.RaiseShopCheckChanged(_accountId, shopLabel, checking: false),
+                    // Bước CUỐI flow shop — check đơn trả hàng: mốc "số yêu cầu" nhớ THEO SHOP (account_shops), mã
+                    // yêu cầu ghi vào chính đơn (orders.return_request_code) rồi cờ DB lo đẩy GSheet/hub lượt kế.
+                    returnCountLast: shopLabel => _services.Results.GetReturnCount(_accountId, shopLabel),
+                    saveReturnCount: (shopLabel, so) => _services.Results.SetReturnCount(_accountId, shopLabel, so),
+                    saveReturnCodes: cap =>
+                    {
+                        var kq = _services.Orders.SetReturnRequestCodes(
+                            _accountId, cap.Select(c => (c.MaDon, c.MaYeuCau)));
+                        if (kq.DaGhi > 0)
+                        {
+                            _services.RaiseOrdersChanged(); // lưới Đơn hàng đang mở hiện cột "Đơn trả hàng" ngay
+                        }
+                        return $"{kq.DaGhi} đơn ghi mã mới, {kq.KhongDoi} đơn giữ nguyên, "
+                            + $"{kq.KhongCoDon} mã không khớp đơn nào trong app (đơn cũ đã dọn?).";
+                    });
                 _bridge = bridge;
                 OrdersBridgeRunResult result;
                 try

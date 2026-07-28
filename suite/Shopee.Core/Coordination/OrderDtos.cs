@@ -28,6 +28,11 @@ public sealed class OrderPushItem
     public string? Carrier { get; set; }
     public string? TrackingNumber { get; set; }
 
+    /// <summary>Mã yêu cầu trả hàng khớp đơn (cột "Đơn trả hàng"), client đọc ở trang "Trả hàng/Hoàn tiền/Hủy"
+    /// cuối flow shop. NULL = client chưa đọc được / đơn không có yêu cầu trả hàng — hub GIỮ giá trị đang có
+    /// (COALESCE), bên rỗng KHÔNG đè bên có.</summary>
+    public string? ReturnRequestCode { get; set; }
+
     /// <summary>Thời điểm máy client "chuẩn bị hàng" xong đơn này — ISO-8601 UTC. NULL = chưa/không biết (đơn
     /// arrange TRƯỚC bản này). Hub GIỮ giá trị đang có khi đơn đẩy lại không kèm (COALESCE) — bên rỗng không đè
     /// bên có, và máy khác đẩy lại KHÔNG ghi đè mốc của máy đã chuẩn bị.</summary>

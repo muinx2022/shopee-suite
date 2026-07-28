@@ -27,6 +27,9 @@ namespace XuLyDonShopee.Core.Data;
 /// đơn đẩy LẠI phải về đúng tab này (không nhân đôi dòng khi tab đổi theo tháng).
 /// <see cref="ItemsJson"/> = mảng sản phẩm đã quét (<c>items_json</c>) — nguồn suy cột "Phân loại" gửi lên sheet
 /// (<c>XuLyDonShopee.Core.Services.PhanLoaiExtractor</c>); KHÔNG có cột "phân loại" riêng trong DB.
+/// <see cref="ReturnRequestCode"/> = mã yêu cầu trả hàng khớp đơn (<c>return_request_code</c>; null = đơn chưa có
+/// yêu cầu trả hàng) và <see cref="GsheetDaCoDonTraHang"/> = lần đẩy gần nhất có gửi kèm mã đó chưa (0/1; null =
+/// chưa đẩy) — mẫu y hệt cặp vận đơn, để mã xuất hiện SAU vẫn được đẩy lại điền vào ô.
 /// </summary>
 public sealed record GsheetPendingOrder(
     string OrderSn,
@@ -46,7 +49,9 @@ public sealed record GsheetPendingOrder(
     bool DaDemDaBan,
     bool DaDayHub,
     bool DaDayPhieuHub,
-    string? GsheetTab);
+    string? GsheetTab,
+    string? ReturnRequestCode,
+    long? GsheetDaCoDonTraHang);
 
 /// <summary>
 /// Kết quả phát hiện đơn CHUYỂN sang "đã giao" giữa 2 lần sync (<see cref="OrdersRepository.DetectNewlyDelivered"/>),
@@ -317,11 +322,12 @@ public class OrdersRepository
         // Lọc theo shop khi có shopId (mô hình nhiều-shop: chỉ đẩy đơn CỦA shop hiện tại, TenShop lấy theo shop đó
         // — không đẩy nhầm tên shop). shopId null → hành vi CŨ (mọi đơn của account).
         var shopFilter = string.IsNullOrEmpty(shopId) ? string.Empty : " AND shop_id = $shopId";
-        // items_json thêm ở CUỐI danh sách cột để KHÔNG lệch chỉ số reader.Get*(i) sẵn có.
+        // items_json + cặp cột "đơn trả hàng" thêm ở CUỐI danh sách cột để KHÔNG lệch chỉ số reader.Get*(i) sẵn có.
         cmd.CommandText = @"SELECT order_sn, tracking_number, sku, total_price, final_amount,
        status, status_description, cancel_reason,
        gsheet_synced_at, gsheet_file_url, gsheet_da_huy, gsheet_da_co_van_don, gsheet_da_co_uoc_tinh,
-       sold_counted_at, hub_synced_at, hub_slip_synced_at, gsheet_tab, items_json
+       sold_counted_at, hub_synced_at, hub_slip_synced_at, gsheet_tab, items_json,
+       return_request_code, gsheet_da_co_don_tra_hang
     FROM orders
     WHERE account_id = $a" + shopFilter + @"
     ORDER BY id;";
@@ -353,7 +359,9 @@ public class OrdersRepository
                 DaDemDaBan: !reader.IsDBNull(13),
                 DaDayHub: !reader.IsDBNull(14),
                 DaDayPhieuHub: !reader.IsDBNull(15),
-                GsheetTab: reader.IsDBNull(16) ? null : reader.GetString(16)));
+                GsheetTab: reader.IsDBNull(16) ? null : reader.GetString(16),
+                ReturnRequestCode: reader.IsDBNull(18) ? null : reader.GetString(18),
+                GsheetDaCoDonTraHang: reader.IsDBNull(19) ? null : reader.GetInt64(19)));
         }
         return list;
     }
@@ -363,13 +371,14 @@ public class OrdersRepository
     /// GIỮ thời điểm ghi LẦN ĐẦU, không đè khi gọi lại để bổ sung file. <c>gsheet_file_url</c> dùng
     /// <c>COALESCE($url, cũ)</c> — <paramref name="fileUrl"/> null KHÔNG xóa link đã có (chỉ điền khi có link
     /// mới). <c>gsheet_da_huy</c> = <paramref name="daHuy"/>, <c>gsheet_da_co_van_don</c> =
-    /// <paramref name="coVanDon"/> và <c>gsheet_da_co_uoc_tinh</c> = <paramref name="coUocTinh"/> GHI ĐÈ LUÔN
-    /// (là trạng thái VỪA đẩy — để lần sau phát hiện đổi trạng thái hủy / vận đơn hoặc số ước tính vừa xuất
-    /// hiện). <c>gsheet_tab</c> dùng <c>COALESCE(cũ, $tab)</c> — GIỮ tab đã ghi LẦN ĐẦU, KHÔNG
+    /// <paramref name="coVanDon"/>, <c>gsheet_da_co_uoc_tinh</c> = <paramref name="coUocTinh"/> và
+    /// <c>gsheet_da_co_don_tra_hang</c> = <paramref name="coDonTraHang"/> GHI ĐÈ LUÔN
+    /// (là trạng thái VỪA đẩy — để lần sau phát hiện đổi trạng thái hủy / vận đơn, số ước tính hoặc mã yêu cầu
+    /// trả hàng vừa xuất hiện). <c>gsheet_tab</c> dùng <c>COALESCE(cũ, $tab)</c> — GIỮ tab đã ghi LẦN ĐẦU, KHÔNG
     /// đổi khi đẩy lại (đơn cập nhật luôn về đúng tab cũ dù tháng/override hiện tại đã khác). Khóa theo
     /// <c>(account_id, order_sn)</c>.
     /// </summary>
-    public void MarkGsheetSynced(long accountId, string orderSn, string? fileUrl, bool daHuy, bool coVanDon, bool coUocTinh, string tab, DateTime at)
+    public void MarkGsheetSynced(long accountId, string orderSn, string? fileUrl, bool daHuy, bool coVanDon, bool coUocTinh, bool coDonTraHang, string tab, DateTime at)
     {
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
@@ -379,6 +388,7 @@ public class OrdersRepository
     gsheet_da_huy = $daHuy,
     gsheet_da_co_van_don = $co,
     gsheet_da_co_uoc_tinh = $coUt,
+    gsheet_da_co_don_tra_hang = $coTh,
     gsheet_tab = COALESCE(gsheet_tab, $tab)
     WHERE account_id = $a AND order_sn = $sn;";
         cmd.Parameters.AddWithValue("$at", DbSerialization.FormatDate(at));
@@ -386,6 +396,7 @@ public class OrdersRepository
         cmd.Parameters.AddWithValue("$daHuy", daHuy ? 1 : 0);
         cmd.Parameters.AddWithValue("$co", coVanDon ? 1 : 0);
         cmd.Parameters.AddWithValue("$coUt", coUocTinh ? 1 : 0);
+        cmd.Parameters.AddWithValue("$coTh", coDonTraHang ? 1 : 0);
         cmd.Parameters.AddWithValue("$tab", tab);
         cmd.Parameters.AddWithValue("$a", accountId);
         cmd.Parameters.AddWithValue("$sn", orderSn);
@@ -418,6 +429,76 @@ public class OrdersRepository
         cmd.ExecuteNonQuery();
     }
 
+    /// <summary>Kết quả một lượt <see cref="SetReturnRequestCodes"/> — để log cho rõ mỗi lượt check trả hàng.</summary>
+    /// <param name="DaGhi">Số đơn VỪA ghi mã mới (khác mã cũ).</param>
+    /// <param name="KhongDoi">Số đơn đã mang đúng mã đó rồi (không ghi lại, không đẩy lại).</param>
+    /// <param name="KhongCoDon">Số mã yêu cầu KHÔNG khớp đơn nào trong DB (đơn cũ hơn thời gian giữ / shop khác).</param>
+    public sealed record ReturnCodeSaveResult(int DaGhi, int KhongDoi, int KhongCoDon);
+
+    /// <summary>
+    /// Lưu MÃ YÊU CẦU TRẢ HÀNG vào đơn theo <c>order_sn</c> (bước check đơn trả hàng, cuối flow shop).
+    /// <list type="bullet">
+    /// <item>GHI ĐÈ khi mã khác mã đang có (yêu cầu trả hàng có thể được tạo lại), nhưng KHÔNG bao giờ ghi đè bằng
+    /// RỖNG — cặp có mã rỗng bị bỏ qua.</item>
+    /// <item>Mã KHÔNG đổi → không chạm dòng (khỏi đẩy lại GSheet/hub vô ích).</item>
+    /// <item>Mã đơn không có trong DB → đếm vào <see cref="ReturnCodeSaveResult.KhongCoDon"/> để caller LOG; TUYỆT
+    /// ĐỐI không tạo đơn mới (đơn đã bị dọn theo vòng đời, insert lại sẽ lặp ghi-xóa).</item>
+    /// </list>
+    /// Khi mã ĐỔI: <c>hub_synced_at</c> RESET về NULL và <c>gsheet_da_co_don_tra_hang</c> RESET về NULL để lượt đẩy
+    /// KẾ mang mã mới lên hub + Google Sheet (đúng cơ chế cờ sẵn có của vận đơn/ước tính, không đẻ cơ chế mới).
+    /// Cập nhật nhiều đơn trong một transaction (mẫu <see cref="MarkHubSynced"/>).
+    /// </summary>
+    public ReturnCodeSaveResult SetReturnRequestCodes(long accountId, IEnumerable<(string OrderSn, string Code)> pairs)
+    {
+        int daGhi = 0, khongDoi = 0, khongCoDon = 0;
+        using var conn = _db.OpenConnection();
+        using var tx = conn.BeginTransaction();
+
+        foreach (var (sn, code) in pairs ?? Array.Empty<(string, string)>())
+        {
+            if (string.IsNullOrWhiteSpace(sn) || string.IsNullOrWhiteSpace(code))
+            {
+                continue; // không có khóa / mã rỗng → bỏ (không ghi đè bằng rỗng)
+            }
+
+            using (var sel = conn.CreateCommand())
+            {
+                sel.Transaction = tx;
+                sel.CommandText = "SELECT 1 FROM orders WHERE account_id = $a AND order_sn = $sn;";
+                sel.Parameters.AddWithValue("$a", accountId);
+                sel.Parameters.AddWithValue("$sn", sn.Trim());
+                if (sel.ExecuteScalar() is null)
+                {
+                    khongCoDon++;
+                    continue;
+                }
+            }
+
+            using var upd = conn.CreateCommand();
+            upd.Transaction = tx;
+            // WHERE ... <> $code lo luôn phần "chỉ ghi khi KHÁC": 0 dòng đổi = mã cũ đã đúng.
+            upd.CommandText = @"UPDATE orders SET
+    return_request_code = $code,
+    gsheet_da_co_don_tra_hang = NULL,
+    hub_synced_at = NULL
+    WHERE account_id = $a AND order_sn = $sn AND COALESCE(return_request_code, '') <> $code;";
+            upd.Parameters.AddWithValue("$code", code.Trim());
+            upd.Parameters.AddWithValue("$a", accountId);
+            upd.Parameters.AddWithValue("$sn", sn.Trim());
+            if (upd.ExecuteNonQuery() > 0)
+            {
+                daGhi++;
+            }
+            else
+            {
+                khongDoi++;
+            }
+        }
+
+        tx.Commit();
+        return new ReturnCodeSaveResult(daGhi, khongDoi, khongCoDon);
+    }
+
     /// <summary>
     /// Các đơn ỨNG VIÊN đẩy lên HUB đơn hàng: đơn của tài khoản CHƯA từng đẩy hub thành công
     /// (<c>hub_synced_at IS NULL</c>) — dựng lại <see cref="SyncedOrder"/> đầy đủ từ các cột bảng để client map
@@ -430,7 +511,8 @@ public class OrdersRepository
         using var cmd = conn.CreateCommand();
         cmd.CommandText = @"SELECT order_sn, shopee_order_id, buyer_username, items_json, item_count, item_summary, sku,
        total_price, total_price_text, final_amount, final_amount_text, payment_method,
-       status, status_description, cancel_reason, channel, carrier, tracking_number, shop_login, prepared_at
+       status, status_description, cancel_reason, channel, carrier, tracking_number, shop_login, prepared_at,
+       return_request_code
     FROM orders
     WHERE account_id = $a AND hub_synced_at IS NULL
     ORDER BY id;";
@@ -462,6 +544,7 @@ public class OrdersRepository
                 TrackingNumber = reader.IsDBNull(17) ? null : reader.GetString(17),
                 ShopLogin = reader.IsDBNull(18) ? null : reader.GetString(18),
                 PreparedAt = reader.IsDBNull(19) ? null : DbSerialization.ParseDate(reader.GetString(19)),
+                ReturnRequestCode = reader.IsDBNull(20) ? null : reader.GetString(20),
             });
         }
         return list;
@@ -886,10 +969,10 @@ public class OrdersRepository
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
 
-        // items_json thêm ở CUỐI danh sách cột để KHÔNG lệch chỉ số r.Get*(i) sẵn có trong MapRow.
+        // items_json + return_request_code thêm ở CUỐI danh sách cột để KHÔNG lệch chỉ số r.Get*(i) sẵn có trong MapRow.
         var sql = new StringBuilder(@"SELECT id, account_id, order_sn, buyer_username, item_count, item_summary, sku,
     total_price, total_price_text, final_amount, final_amount_text, payment_method, status, status_description, cancel_reason,
-    channel, carrier, tracking_number, synced_at, shop_login, items_json
+    channel, carrier, tracking_number, synced_at, shop_login, items_json, return_request_code
     FROM orders WHERE 1 = 1");
 
         if (!AppendFilter(cmd, sql, accountId, status, searchText, accountIds, shopLogin, shopExact))
@@ -1112,6 +1195,7 @@ public class OrdersRepository
         SyncedAt = r.IsDBNull(18) ? default : DbSerialization.ParseDate(r.GetString(18)),
         ShopLogin = r.IsDBNull(19) ? null : r.GetString(19),
         ItemsJson = r.IsDBNull(20) ? null : r.GetString(20),
+        ReturnRequestCode = r.IsDBNull(21) ? null : r.GetString(21),
     };
 
     /// <summary>Gắn các cột DỮ LIỆU (không gồm account_id/order_sn/khóa/thời gian) vào lệnh. Null → DBNull.</summary>

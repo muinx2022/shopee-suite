@@ -1,7 +1,7 @@
 ﻿# Plan: Bước check ĐƠN TRẢ HÀNG ở cuối flow mỗi shop
 
 - **Ngày:** 2026-07-28
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành (hub deploy ngay · app+extension chờ release; class khối "mã yêu cầu" CHƯA xác nhận trên trang thật — xem mục 5)
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-dev`)
 
 ## 1. Bối cảnh & yêu cầu

@@ -70,6 +70,10 @@ public sealed class OrderRow
     /// <summary>Mã vận đơn. Có thể null.</summary>
     public string? TrackingNumber { get; init; }
 
+    /// <summary>Mã yêu cầu trả hàng khớp đơn này (cột "Đơn trả hàng"), đọc ở trang "Trả hàng/Hoàn tiền/Hủy" cuối
+    /// flow shop. Null = đơn chưa có yêu cầu trả hàng nào.</summary>
+    public string? ReturnRequestCode { get; init; }
+
     /// <summary>Thời điểm sync gần nhất (UTC, đã parse từ DB).</summary>
     public DateTime SyncedAt { get; init; }
 }

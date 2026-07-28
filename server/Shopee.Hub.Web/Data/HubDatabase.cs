@@ -90,6 +90,9 @@ public sealed partial class HubDatabase : IDisposable
         AddColumnIfMissing("orders", "prepared_at", "TEXT");
         AddColumnIfMissing("orders", "prepared_day", "TEXT");
         ExecRaw("CREATE INDEX IF NOT EXISTS ix_orders_prepared_day ON orders(prepared_day);");
+        // Mã yêu cầu trả hàng khớp đơn (cột "Đơn trả hàng" trang /orders) — client đọc ở trang
+        // "Trả hàng/Hoàn tiền/Hủy" cuối flow shop rồi đẩy lên. NULL = đơn chưa có yêu cầu trả hàng.
+        AddColumnIfMissing("orders", "return_request_code", "TEXT");
     }
 
     /// <summary>Thêm cột nếu thiếu; trả true nếu VỪA thêm (để chạy backfill 1 lần).</summary>

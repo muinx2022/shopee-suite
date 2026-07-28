@@ -112,6 +112,55 @@ public class ResultsRepository
     }
 
     /// <summary>
+    /// MỐC "số yêu cầu trả hàng" của lần check GẦN NHẤT ở shop này (<c>account_shops.return_count_last</c>).
+    /// <c>null</c> = shop CHƯA từng check (kể cả khi shop chưa có dòng nào) → lượt này chỉ ghi nhớ số, không đọc
+    /// dòng nào (xem <c>TraHangParser.QuyetDinhCheck</c>). Khóa shop dùng CHUNG quy tắc với
+    /// <see cref="UpsertShops"/>: <c>LoginName</c> fallback <c>ShopName</c>. <paramref name="shopLogin"/> rỗng → null.
+    /// </summary>
+    public int? GetReturnCount(long accountId, string shopLogin)
+    {
+        if (string.IsNullOrWhiteSpace(shopLogin))
+        {
+            return null;
+        }
+
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText =
+            "SELECT return_count_last FROM account_shops WHERE account_id = $a AND shop_login = $login;";
+        cmd.Parameters.AddWithValue("$a", accountId);
+        cmd.Parameters.AddWithValue("$login", shopLogin.Trim());
+
+        var res = cmd.ExecuteScalar();
+        return res is null || res == DBNull.Value ? null : Convert.ToInt32(res);
+    }
+
+    /// <summary>
+    /// Ghi MỐC "số yêu cầu trả hàng" vừa đọc được cho shop này. UPSERT (mẫu <see cref="UpsertShops"/>) để mốc vẫn
+    /// lưu được cả khi shop chưa có dòng trong bảng — nhưng KHÔNG đụng <c>shop_name</c>/<c>sort_order</c> của dòng
+    /// đã có (danh sách shop do <see cref="UpsertShops"/> làm chủ). <paramref name="shopLogin"/> rỗng → bỏ qua;
+    /// số âm được kẹp về 0.
+    /// </summary>
+    public void SetReturnCount(long accountId, string shopLogin, int count)
+    {
+        if (string.IsNullOrWhiteSpace(shopLogin))
+        {
+            return;
+        }
+
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = @"INSERT INTO account_shops (account_id, shop_login, return_count_last, updated_at)
+    VALUES ($a, $login, $c, $now)
+    ON CONFLICT(account_id, shop_login) DO UPDATE SET return_count_last = $c;";
+        cmd.Parameters.AddWithValue("$a", accountId);
+        cmd.Parameters.AddWithValue("$login", shopLogin.Trim());
+        cmd.Parameters.AddWithValue("$c", Math.Max(0, count));
+        cmd.Parameters.AddWithValue("$now", DbSerialization.FormatDate(DateTime.UtcNow));
+        cmd.ExecuteNonQuery();
+    }
+
+    /// <summary>
     /// +1 số đơn ĐÃ "chuẩn bị hàng" cho <c>(accountId, shopLogin, day)</c> — mỗi đơn arrange xong gọi một lần
     /// (đếm theo ĐƠN, không theo phiếu). Chưa có dòng ngày đó → tạo mới count=1; đã có → count+1. <paramref name="day"/>
     /// là chuỗi <c>yyyy-MM-dd</c> giờ địa phương. <paramref name="shopLogin"/>/<paramref name="day"/> rỗng → bỏ qua.

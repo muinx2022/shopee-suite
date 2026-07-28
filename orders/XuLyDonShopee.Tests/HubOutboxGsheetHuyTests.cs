@@ -46,7 +46,7 @@ public class HubOutboxGsheetHuyTests
         services.Orders.UpsertMany(accId, new[] { DonHuyKhongVanDon("DAGHI") }, DateTime.UtcNow);
         // Đơn ĐÃ có dòng trên sheet (ghi lúc còn "Chờ lấy hàng", lúc đó có vận đơn) — cờ hủy lần đẩy trước = 0.
         services.Orders.MarkGsheetSynced(accId, "DAGHI", null, daHuy: false, coVanDon: true, coUocTinh: false,
-            tab: "Tháng 07-2026", DateTime.UtcNow);
+            coDonTraHang: false, tab: "Tháng 07-2026", DateTime.UtcNow);
 
         Assert.Equal(KetQuaDay.ThanhCong, await DayAsync(accId, services));
 

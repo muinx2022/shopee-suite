@@ -976,6 +976,7 @@ public static class OrdersModuleHost
         Channel = o.Channel,
         Carrier = o.Carrier,
         TrackingNumber = o.TrackingNumber,
+        ReturnRequestCode = o.ReturnRequestCode,
         PreparedAt = o.PreparedAt?.ToString("o", CultureInfo.InvariantCulture),
         PreparedDay = o.PreparedAt?.ToLocalTime().ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
     };

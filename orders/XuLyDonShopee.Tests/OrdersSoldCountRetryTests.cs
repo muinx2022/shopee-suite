@@ -178,7 +178,7 @@ public class OrdersSoldCountRetryTests
 
         Assert.Equal(2, repo.CountForGsheetPush(1));
 
-        repo.MarkGsheetSynced(1, "SN1", null, daHuy: false, coVanDon: false, coUocTinh: false, tab: "Tháng 07-2026", at: DateTime.UtcNow);
+        repo.MarkGsheetSynced(1, "SN1", null, daHuy: false, coVanDon: false, coUocTinh: false, coDonTraHang: false, tab: "Tháng 07-2026", at: DateTime.UtcNow);
         Assert.Equal(1, repo.CountForGsheetPush(1));
     }
 }

@@ -11,20 +11,34 @@ namespace XuLyDonShopee.Core.Services;
 /// (hợp đồng với <c>doPost</c>: chỉ ghi ô đang trống). <see cref="DoanhThu"/> gửi dạng SỐ (JSON number),
 /// KHÔNG format chuỗi — sheet của người dùng đang cộng tổng theo cột. <see cref="DaHuy"/> (JSON
 /// <c>daHuy</c>) LUÔN xuất hiện kể cả <c>false</c> — script cần giá trị tường minh để đổi màu 2 chiều
-/// (hủy → nền đỏ; hết hủy → xóa nền đỏ script đã tô). <see cref="PhanLoai"/> (JSON <c>phanLoai</c>, cột
+/// (hủy → nền đỏ; hết hủy → xóa nền đỏ script đã tô).
+/// <para>
+/// <b>Thứ tự trường xếp theo ĐÚNG thứ tự CỘT trong sheet của người dùng</b> (28/07/2026) để soi payload là đối
+/// chiếu được ngay với sheet — đây chỉ là quy ước ĐỌC, việc map trường → cột nằm ở Apps Script phía người dùng:
+/// <c>A</c> mã đơn hàng (tiêu đề TRỐNG — script phải cứng cột 1, KHÔNG tra được theo tên) · <c>B</c> mã vận đơn
+/// gửi · <c>C</c> ảnh mã vận đơn gửi (<see cref="FileName"/> + <see cref="FileBase64"/>) · <c>D</c> mã đơn đặt
+/// (người dùng tự điền) · <c>E</c> <see cref="DonTraHang"/> · <c>F</c> Note (tự điền) · <c>G</c> tiền đặt (tự
+/// điền) · <c>H</c> <see cref="DoanhThu"/> ("tiền bán") · <c>I</c> <see cref="Ngay"/> · <c>J</c>
+/// <see cref="TenShop"/> · <c>K</c> <see cref="PhanLoai"/> · <c>L</c> tk đặt (tự điền) · <c>M</c>
+/// <see cref="Sku"/> ("Mã Sp").
+/// </para>
+/// <see cref="PhanLoai"/> (JSON <c>phanLoai</c>, cột
 /// người dùng thêm NGAY SAU SKU) suy từ <c>items_json</c> qua <see cref="PhanLoaiExtractor"/>; không có
 /// phân loại thì để null để field VẮNG khỏi JSON (khỏi đè ô người dùng có thể đã tự điền).
+/// <see cref="DonTraHang"/> (JSON <c>donTraHang</c>, cột cạnh "Phân loại") = mã yêu cầu trả hàng khớp đơn, đọc ở
+/// bước cuối flow shop; chưa có thì để null để field VẮNG khỏi JSON (cùng nếp "chỉ điền ô trống").
 /// </summary>
 public sealed record GsheetOrderRow(
     string MaDon,
     string? MaVanDon,
-    string? TenShop,
-    long? DoanhThu,
-    string? Ngay,
-    string? Sku,
-    string? PhanLoai,
     string? FileName,
     string? FileBase64,
+    string? DonTraHang,
+    long? DoanhThu,
+    string? Ngay,
+    string? TenShop,
+    string? PhanLoai,
+    string? Sku,
     bool DaHuy);
 
 /// <summary>
@@ -185,7 +199,7 @@ public class GoogleSheetSyncService
         return batches;
     }
 
-    // Tùy chọn JSON: camelCase (hợp đồng script: maDon/maVanDon/tenShop/doanhThu/ngay/sku/phanLoai/fileName/fileBase64),
+    // Tùy chọn JSON: camelCase (hợp đồng script: maDon/maVanDon/tenShop/doanhThu/ngay/sku/phanLoai/donTraHang/fileName/fileBase64),
     // BỎ field null (chỉ điền ô trống), Relaxed escaping (đỡ escape '+' '/' của base64 → payload gọn hơn).
     private static readonly JsonSerializerOptions JsonOpts = new()
     {

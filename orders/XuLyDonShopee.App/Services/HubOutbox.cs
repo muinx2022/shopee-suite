@@ -311,6 +311,7 @@ public static class HubOutbox
                 var daHuyByMaDon = new Dictionary<string, bool>(StringComparer.Ordinal);
                 var coVanDonByMaDon = new Dictionary<string, bool>(StringComparer.Ordinal);
                 var coUocTinhByMaDon = new Dictionary<string, bool>(StringComparer.Ordinal);
+                var coDonTraHangByMaDon = new Dictionary<string, bool>(StringComparer.Ordinal);
                 foreach (var p in pending)
                 {
                     var daHuy = ShopeeShippingNav.LaDonHuy(p.Status, p.StatusDescription, p.CancelReason);
@@ -347,14 +348,17 @@ public static class HubOutbox
                     // link (fileBase64 chỉ set khi FileUrl null); (c) trạng thái hủy đổi so với lần đẩy trước (hoặc
                     // chưa từng đẩy) → sheet cần đổi màu; (d) vận đơn VỪA xuất hiện (đã ghi dòng lúc chưa có vận đơn,
                     // giờ có) → gửi lại để điền cột B; (e) số ước tính VỪA xuất hiện (đã ghi dòng lúc chưa mở trang
-                    // chi tiết nên ô tiền còn TRỐNG, giờ có ước tính) → gửi lại để điền cột tiền.
-                    // Không thỏa → bỏ qua (đã ghi đủ, không đẩy trùng) → settled.
+                    // chi tiết nên ô tiền còn TRỐNG, giờ có ước tính) → gửi lại để điền cột tiền; (f) mã yêu cầu
+                    // TRẢ HÀNG vừa xuất hiện/vừa đổi (bước check cuối flow shop reset cờ khi mã đổi) → gửi lại để
+                    // điền cột "Đơn trả hàng". Không thỏa → bỏ qua (đã ghi đủ, không đẩy trùng) → settled.
                     var coFileBoSung = fileBase64 is not null;
                     var huyDoi = p.GsheetDaHuy is null || daHuy != (p.GsheetDaHuy == 1);
                     var vanDonMoi = coVanDon && p.GsheetDaCoVanDon != 1;
                     var coUocTinh = p.FinalAmount is not null;
                     var uocTinhMoi = coUocTinh && p.GsheetDaCoUocTinh != 1;
-                    if (!(!p.DaGhiSheet || coFileBoSung || huyDoi || vanDonMoi || uocTinhMoi))
+                    var coDonTraHang = !string.IsNullOrWhiteSpace(p.ReturnRequestCode);
+                    var donTraHangMoi = coDonTraHang && p.GsheetDaCoDonTraHang != 1;
+                    if (!(!p.DaGhiSheet || coFileBoSung || huyDoi || vanDonMoi || uocTinhMoi || donTraHangMoi))
                     {
                         settled.Add(p.OrderSn);
                         continue;
@@ -363,6 +367,7 @@ public static class HubOutbox
                     daHuyByMaDon[p.OrderSn] = daHuy;
                     coVanDonByMaDon[p.OrderSn] = coVanDon;
                     coUocTinhByMaDon[p.OrderSn] = coUocTinh;
+                    coDonTraHangByMaDon[p.OrderSn] = coDonTraHang;
 
                     // Tab đích: tab đã nhớ của đơn (đẩy lại về đúng chỗ cũ) hoặc tab mặc định cho đơn mới.
                     var tab = string.IsNullOrEmpty(p.GsheetTab) ? defaultTab : p.GsheetTab;
@@ -371,21 +376,25 @@ public static class HubOutbox
                         tabRows = new List<GsheetOrderRow>();
                         rowsByTab[tab] = tabRows;
                     }
+                    // Thứ tự dưới đây xếp theo ĐÚNG thứ tự CỘT trong sheet (A→M) cho dễ đối chiếu — xem
+                    // GsheetOrderRow. Tham số CÓ TÊN nên đổi thứ tự cột sau này không gây lệch âm thầm.
                     tabRows.Add(new GsheetOrderRow(
-                        MaDon: p.OrderSn,
-                        MaVanDon: p.TrackingNumber,
-                        TenShop: tenShop,
-                        // Tiền bán = "Ước tính" (số tiền cuối cùng đọc ở trang chi tiết); chưa có thì để TRỐNG
+                        MaDon: p.OrderSn,                                     // A (tiêu đề trống)
+                        MaVanDon: p.TrackingNumber,                           // B
+                        FileName: fileName,                                   // C
+                        FileBase64: fileBase64,                               // C
+                        // E — mã yêu cầu trả hàng bước check cuối flow shop lưu được; chưa có thì gửi NULL để
+                        // field vắng khỏi JSON (hợp đồng "chỉ điền ô trống"), không đè ô đang có.
+                        DonTraHang: coDonTraHang ? p.ReturnRequestCode : null,
+                        // H "tiền bán" = "Ước tính" (số tiền cuối cùng đọc ở trang chi tiết); chưa có thì để TRỐNG
                         // (đơn hủy → tổng tiền, vì đơn hủy không bao giờ có ước tính) — xem GsheetMoney.Chon.
                         DoanhThu: GsheetMoney.Chon(p.FinalAmount, p.TotalPrice, daHuy),
-                        Ngay: ngay,
-                        Sku: p.Sku,
-                        // Cột "Phân loại" (ngay sau SKU): suy từ items_json đã quét — rỗng thì gửi NULL để field
-                        // vắng khỏi JSON (hợp đồng "chỉ điền ô trống"), không đè chuỗi rỗng lên ô đã có.
+                        Ngay: ngay,                                           // I
+                        TenShop: tenShop,                                     // J
+                        // K — suy từ items_json đã quét; rỗng thì gửi NULL (cùng nếp "chỉ điền ô trống").
                         PhanLoai: PhanLoaiExtractor.TuItemsJson(p.ItemsJson) is { Length: > 0 } phanLoai ? phanLoai : null,
-                        FileName: fileName,
-                        FileBase64: fileBase64,
-                        DaHuy: daHuy));
+                        Sku: p.Sku,                                           // M "Mã Sp"
+                        DaHuy: daHuy));                                       // cờ tô màu, không phải cột
                 }
 
                 if (rowsByTab.Count == 0)
@@ -417,7 +426,8 @@ public static class HubOutbox
                                     var daHuy = daHuyByMaDon.TryGetValue(r.MaDon, out var dh) && dh;
                                     var coVanDon = coVanDonByMaDon.TryGetValue(r.MaDon, out var cv) && cv;
                                     var coUocTinh = coUocTinhByMaDon.TryGetValue(r.MaDon, out var cu) && cu;
-                                    services.Orders.MarkGsheetSynced(accountId, r.MaDon, r.FileUrl, daHuy, coVanDon, coUocTinh, tabName, DateTime.UtcNow);
+                                    var coDonTraHang = coDonTraHangByMaDon.TryGetValue(r.MaDon, out var ct2) && ct2;
+                                    services.Orders.MarkGsheetSynced(accountId, r.MaDon, r.FileUrl, daHuy, coVanDon, coUocTinh, coDonTraHang, tabName, DateTime.UtcNow);
                                     settled.Add(r.MaDon); // gửi thành công → settled (đủ điều kiện dọn nếu kết thúc)
                                     if (r.Added) { added++; } else { updated++; }
                                     if (!string.IsNullOrEmpty(r.FileUrl)) { withFile++; }

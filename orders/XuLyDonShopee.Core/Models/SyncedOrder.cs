@@ -70,6 +70,11 @@ public sealed class SyncedOrder
     /// (<see cref="XuLyDonShopee.Core.Data.OrdersRepository.GetForHubPush"/>).</summary>
     public DateTime? PreparedAt { get; set; }
 
+    /// <summary>Mã yêu cầu trả hàng khớp đơn (cột "Đơn trả hàng"). KHÔNG phải cột dữ liệu quét DOM ở danh sách đơn:
+    /// bước check trang "Trả hàng/Hoàn tiền/Hủy" ghi thẳng vào DB, repo cấp lại từ cột <c>return_request_code</c>
+    /// khi đọc hàng đợi đẩy hub (<see cref="XuLyDonShopee.Core.Data.OrdersRepository.GetForHubPush"/>).</summary>
+    public string? ReturnRequestCode { get; set; }
+
     /// <summary>Tên đăng nhập shop của đơn (vd "alina99.store") — để đẩy lên hub NHÓM theo shop; null cho đơn cũ
     /// (trước khi có shop_login). KHÔNG phải cột dữ liệu quét DOM: repo cấp lại từ cột <c>shop_login</c> khi đọc
     /// hàng đợi đẩy hub (<see cref="XuLyDonShopee.Core.Data.OrdersRepository.GetForHubPush"/>).</summary>

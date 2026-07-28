@@ -94,6 +94,13 @@ public sealed class OrdersBridgeSession : IDisposable
     private readonly Action<string>? _onShopCheckFinished;
     // App rót tập order_sn ĐÃ có "Số tiền cuối cùng" trong DB → bỏ qua, không mở lại chi tiết mỗi chu kỳ. null → không lọc.
     private readonly Func<IReadOnlySet<string>>? _finalDoneSns;
+    // Bước CUỐI flow shop — check đơn trả hàng (callback do App rót vì Core không biết accountId). Null → bỏ hẳn bước.
+    //  · _returnCountLast: mốc "số yêu cầu" lần check trước của shop (null = shop chưa từng check → chỉ ghi nhớ).
+    //  · _saveReturnCount: ghi mốc mới SAU khi xử xong (kể cả lượt không check dòng nào).
+    //  · _saveReturnCodes: lưu các cặp (mã đơn, mã yêu cầu) vào đơn → trả chuỗi tóm tắt để log.
+    private readonly Func<string, int?>? _returnCountLast;
+    private readonly Action<string, int>? _saveReturnCount;
+    private readonly Func<IReadOnlyList<YeuCauTraHang>, string>? _saveReturnCodes;
     // Tập rỗng dùng khi _finalDoneSns null (tránh cấp phát mỗi shop).
     private static readonly IReadOnlySet<string> EmptyFinalSet = new HashSet<string>();
     // GĐ4: khoảng nghỉ ngẫu nhiên giữa các shop (ms) — kiểu người, tránh dồn dập.
@@ -118,6 +125,7 @@ public sealed class OrdersBridgeSession : IDisposable
     private TaskCompletionSource<PrepareResult?> _prepareTcs = NewTcs<PrepareResult?>(); // GĐ3: 1 đơn (null=hết)
     private TaskCompletionSource<bool> _closeShopTcs = NewTcs<bool>();         // GĐ4: đóng tab shop, về picker xong
     private TaskCompletionSource<string?> _redownloadTcs = NewTcs<string?>();  // Tải lại phiếu 1 đơn (base64; ""/null=không lấy được)
+    private TaskCompletionSource<string?> _returnsTcs = NewTcs<string?>();     // Bước cuối: JSON trang trả hàng
 
     // Chặng đang chờ (để extension báo "error" CHỈ fault đúng chặng đó — xem StageWaiter). Xem OnMessage case "error".
     private readonly StageWaiter _waiter = new();
@@ -168,6 +176,11 @@ public sealed class OrdersBridgeSession : IDisposable
     /// shop, ĐÚNG khóa <c>prepare_daily</c>) → App chuyển chấm sang shop đó + bật vòng quay. null → bỏ qua.</param>
     /// <param name="onShopCheckFinished">Tab "Kết quả" (cột tiến độ): gọi khi XONG shop đó — kể cả shop lỗi/captcha/bỏ
     /// qua (gọi trong <c>finally</c>) → App tắt vòng quay nhưng GIỮ chấm ở shop này tới khi shop kế bắt đầu. null → bỏ qua.</param>
+    /// <param name="returnCountLast">Check đơn trả hàng: mốc "số yêu cầu" lần check TRƯỚC của shop (tham số = nhãn shop);
+    /// null trả về = shop chưa từng check → lượt này CHỈ ghi nhớ số. Callback null → BỎ HẲN bước check trả hàng.</param>
+    /// <param name="saveReturnCount">Check đơn trả hàng: ghi mốc mới cho shop (nhãn shop, số vừa đọc). null → bỏ hẳn bước.</param>
+    /// <param name="saveReturnCodes">Check đơn trả hàng: lưu các cặp (mã đơn, mã yêu cầu) vào đơn tương ứng; trả chuỗi
+    /// tóm tắt để phiên log. null → bỏ hẳn bước.</param>
     public OrdersBridgeSession(string userDataDir, BrowserChoice browserChoice, Action<string>? log = null,
         string? invoiceDir = null, string? province = null,
         Func<string, string, IReadOnlyList<SyncedOrder>, CancellationToken, Task>? syncCallback = null,
@@ -175,7 +188,10 @@ public sealed class OrdersBridgeSession : IDisposable
         Action<IReadOnlyList<ShopListItem>>? onShopListRead = null,
         Action<string, string>? onOrderPrepared = null,
         Action<string>? onShopCheckStarted = null,
-        Action<string>? onShopCheckFinished = null)
+        Action<string>? onShopCheckFinished = null,
+        Func<string, int?>? returnCountLast = null,
+        Action<string, int>? saveReturnCount = null,
+        Func<IReadOnlyList<YeuCauTraHang>, string>? saveReturnCodes = null)
     {
         _userDataDir = userDataDir;
         _browserChoice = browserChoice;
@@ -188,6 +204,9 @@ public sealed class OrdersBridgeSession : IDisposable
         _onOrderPrepared = onOrderPrepared;
         _onShopCheckStarted = onShopCheckStarted;
         _onShopCheckFinished = onShopCheckFinished;
+        _returnCountLast = returnCountLast;
+        _saveReturnCount = saveReturnCount;
+        _saveReturnCodes = saveReturnCodes;
     }
 
     private static TaskCompletionSource<T> NewTcs<T>() =>
@@ -209,6 +228,7 @@ public sealed class OrdersBridgeSession : IDisposable
         _prepareTcs = NewTcs<PrepareResult?>();
         _closeShopTcs = NewTcs<bool>();
         _redownloadTcs = NewTcs<string?>();
+        _returnsTcs = NewTcs<string?>();
         _captchaSeen = false;
         _pickupFailedShop = null;
     }
@@ -858,7 +878,121 @@ public sealed class OrdersBridgeSession : IDisposable
             catch (TimeoutException) { L("Set địa chỉ khác: quá hạn — bỏ qua."); }
         }
 
+        // ── Mắt xích CUỐI CÙNG của flow shop (bước PHỤ): check ĐƠN TRẢ HÀNG ──────────────────────────────
+        // Bọc kín: lỗi/timeout/captcha ở đây KHÔNG được phá phần chuẩn bị hàng + in phiếu đã xong ở trên, cũng
+        // KHÔNG được dừng vòng shop. Chạy cả khi toShip = 0 (yêu cầu trả hàng không liên quan đơn chờ lấy hàng).
+        if (_returnCountLast is not null && _saveReturnCount is not null && _saveReturnCodes is not null
+            && !string.IsNullOrWhiteSpace(shopLogin))
+        {
+            var captchaTruocBuoc = _captchaSeen;
+            try
+            {
+                await CheckDonTraHangAsync(shopLogin, ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                L("Check đơn trả hàng lỗi: " + ex.Message + " — bỏ qua bước này, phần đã xong không bị ảnh hưởng.");
+            }
+            finally
+            {
+                // Captcha ở bước PHỤ này KHÔNG được dừng cả vòng (phần chính của shop đã xong xuôi) → trả cờ về
+                // đúng như trước bước. Captcha THẬT vẫn lộ ngay ở shop kế: openShopDetail rơi /verify → dừng vòng
+                // đúng chỗ, không mất mát gì.
+                _captchaSeen = captchaTruocBuoc;
+            }
+        }
+
         return (orders.Count, slips);
+    }
+
+    /// <summary>
+    /// <b>Bước CUỐI flow shop — check ĐƠN TRẢ HÀNG.</b> Gửi <c>readReturnRequests</c>: extension mở trang
+    /// "Trả hàng/Hoàn tiền/Hủy" của shop đang mở, đổi sắp xếp sang "Ngày yêu cầu (Mới - Cũ)" (mặc định trang là
+    /// "Ngày đến hạn" — không đổi thì luật "N dòng đầu" bỏ sót ÂM THẦM), rồi trả text ô tổng + HTML đầu mỗi dòng.
+    /// C# parse (<see cref="TraHangParser"/>), so số với MỐC lần trước của shop để biết check bao nhiêu dòng ĐẦU,
+    /// ghép cặp (mã đơn, mã yêu cầu) rồi lưu vào đơn tương ứng. Cập nhật mốc ở CUỐI, kể cả lượt không check dòng nào.
+    /// <para>
+    /// KHÔNG ném ra ngoài phần thân — caller đã bọc try/catch; ở đây chỉ return sớm + log khi không đọc được.
+    /// </para>
+    /// </summary>
+    private async Task CheckDonTraHangAsync(string shopLogin, CancellationToken ct)
+    {
+        // ĐÃ dính captcha TRƯỚC bước này (vòng chuẩn bị hàng vừa break vì captcha) → bỏ hẳn, đừng gửi lệnh rồi
+        // ngồi chờ 90s vô ích: trang đang là /verify nên extension không đọc được gì, mà mỗi shop tốn thêm 90s.
+        if (_captchaSeen)
+        {
+            L("Check đơn trả hàng: đã dính captcha từ bước trước — bỏ bước này (mốc giữ nguyên).");
+            return;
+        }
+
+        var mocCu = _returnCountLast!(shopLogin);
+
+        _returnsTcs = NewTcs<string?>();
+        await _ws!.SendAsync(new { action = "readReturnRequests" }).ConfigureAwait(false);
+        // 90s: điều hướng sang trang trả hàng (≤20s) + đổi sắp xếp + chờ danh sách vẽ lại.
+        var json = await _waiter.AwaitAsync(_returnsTcs, TimeSpan.FromSeconds(90), ct).ConfigureAwait(false);
+        if (_captchaSeen)
+        {
+            L("Check đơn trả hàng: gặp captcha/verify — bỏ bước này (mốc giữ nguyên), đi tiếp.");
+            return;
+        }
+
+        var doc = TraHangParser.ParseKetQua(json);
+        if (doc.SoYeuCau is null)
+        {
+            L("Check đơn trả hàng: KHÔNG đọc được số yêu cầu (trang chưa render / Shopee đổi giao diện) — bỏ lượt, mốc giữ nguyên.");
+            return;
+        }
+        if (!doc.SortApplied)
+        {
+            L("⚠ Check đơn trả hàng: KHÔNG đổi được sắp xếp sang 'Ngày yêu cầu (Mới - Cũ)' — 'N dòng đầu' có thể sót.");
+        }
+
+        var soMoi = doc.SoYeuCau.Value;
+        var quyetDinh = TraHangParser.QuyetDinhCheck(mocCu, soMoi);
+        var mocCuText = mocCu?.ToString() ?? "chưa có";
+        switch (quyetDinh.Luat)
+        {
+            case LuatSoYeuCau.LanDau:
+                L($"Check đơn trả hàng [{shopLogin}]: {soMoi} yêu cầu — LẦN ĐẦU, chỉ ghi nhớ mốc, không check dòng nào.");
+                break;
+            case LuatSoYeuCau.KhongDoi:
+                L($"Check đơn trả hàng [{shopLogin}]: {soMoi} yêu cầu — không đổi so với mốc {mocCuText}, bỏ qua.");
+                break;
+            case LuatSoYeuCau.Giam:
+                L($"Check đơn trả hàng [{shopLogin}]: {soMoi} yêu cầu — GIẢM so với mốc {mocCuText} (đã xử xong), chỉ cập nhật mốc.");
+                break;
+            default:
+                L($"Check đơn trả hàng [{shopLogin}]: {soMoi} yêu cầu — TĂNG {quyetDinh.SoDongCanCheck} so với mốc {mocCuText}, check {quyetDinh.SoDongCanCheck} dòng đầu.");
+                break;
+        }
+
+        if (quyetDinh.SoDongCanCheck > 0)
+        {
+            var canCheck = doc.Dong.Take(quyetDinh.SoDongCanCheck).ToList();
+            if (canCheck.Count < quyetDinh.SoDongCanCheck)
+            {
+                L($"Check đơn trả hàng: cần {quyetDinh.SoDongCanCheck} dòng nhưng trang chỉ có {canCheck.Count} — check phần đọc được.");
+            }
+
+            var ghep = TraHangParser.GhepCap(canCheck);
+            L($"Check đơn trả hàng: đọc {canCheck.Count} dòng → {ghep.Cap.Count} cặp đủ hai mã, {ghep.ThieuMaYeuCau.Count} dòng THIẾU mã yêu cầu.");
+            // In nguyên văn tối đa 3 dòng thiếu (kèm nhãn + HTML thô): nếu luật nhận diện theo nhãn trượt thì
+            // nhật ký lần chạy thật lộ ngay class/nhãn thật — class khối mã yêu cầu tới giờ vẫn CHƯA xác nhận.
+            foreach (var mo in ghep.ThieuMaYeuCau.Take(3))
+            {
+                L("Check đơn trả hàng — dòng thiếu mã yêu cầu → " + mo);
+            }
+
+            if (ghep.Cap.Count > 0)
+            {
+                L("Check đơn trả hàng — lưu mã: " + _saveReturnCodes!(ghep.Cap));
+            }
+        }
+
+        // Cập nhật mốc SAU khi xử xong (kể cả lượt không check dòng nào) để lần sau so đúng.
+        _saveReturnCount!(shopLogin, soMoi);
     }
 
     /// <summary>Parse JSON mảng <c>{orderSn, finalText}</c> (extension trả) → map <c>orderSn→finalText</c> → gán
@@ -977,6 +1111,10 @@ public sealed class OrdersBridgeSession : IDisposable
                     {
                         _finalsTcs.TrySetResult(data);
                     }
+                    else if (kind == "returns")
+                    {
+                        _returnsTcs.TrySetResult(data);
+                    }
                     break;
                 }
 
@@ -1046,6 +1184,7 @@ public sealed class OrdersBridgeSession : IDisposable
                     _prepareTcs.TrySetResult(null);
                     _closeShopTcs.TrySetResult(false);
                     _redownloadTcs.TrySetResult(null);
+                    _returnsTcs.TrySetResult(null);
                     break;
                 }
 

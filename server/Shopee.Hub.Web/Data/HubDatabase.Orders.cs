@@ -29,6 +29,9 @@ public sealed class OrderRecord
     public string? Channel { get; init; }
     public string? Carrier { get; init; }
     public string? TrackingNumber { get; init; }
+    /// <summary>Mã yêu cầu trả hàng khớp đơn (cột "Đơn trả hàng") — client đọc ở trang "Trả hàng/Hoàn tiền/Hủy"
+    /// cuối flow shop. NULL = đơn chưa có yêu cầu trả hàng.</summary>
+    public string? ReturnRequestCode { get; init; }
     public DateTimeOffset SyncedAt { get; init; }
     /// <summary>Thời điểm hub NHẬN file phiếu PDF của đơn (POST /api/orders/slip). NULL = chưa có phiếu trên hub.</summary>
     public DateTimeOffset? SlipAt { get; init; }
@@ -63,7 +66,7 @@ CREATE TABLE IF NOT EXISTS orders(
   payment_method TEXT, status TEXT, status_description TEXT, cancel_reason TEXT,
   channel TEXT, carrier TEXT, tracking_number TEXT,
   synced_at TEXT, slip_at TEXT,
-  prepared_at TEXT, prepared_day TEXT);
+  prepared_at TEXT, prepared_day TEXT, return_request_code TEXT);
 CREATE UNIQUE INDEX IF NOT EXISTS ux_orders_shop_sn ON orders(shop_id, order_sn);
 CREATE INDEX IF NOT EXISTS ix_orders_shop ON orders(shop_id);
 CREATE INDEX IF NOT EXISTS ix_orders_status ON orders(status);");
@@ -99,11 +102,13 @@ CREATE INDEX IF NOT EXISTS ix_orders_status ON orders(status);");
                 // status_description / cancel_reason) GHI ĐÈ thẳng: đó chính là dữ liệu cần cập nhật.
                 // prepared_at / prepared_day cũng COALESCE: đơn đẩy lại không kèm thì GIỮ, và MÁY KHÁC đẩy lại
                 // KHÔNG ghi đè ngày của máy đã thực sự chuẩn bị đơn (nguồn đếm /prepare-stats).
+                // return_request_code COALESCE cùng lý do: chỉ MÁY chạy bước check trả hàng của shop đó mới có mã,
+                // máy khác đẩy lại (không kèm) KHÔNG được xoá mã đang có.
                 c.CommandText = @"
 INSERT INTO orders(shop_id,order_sn,shopee_order_id,buyer_username,items_json,item_count,item_summary,sku,
   total_price,total_price_text,final_amount,final_amount_text,payment_method,status,status_description,
-  cancel_reason,channel,carrier,tracking_number,synced_at,prepared_at,prepared_day)
-VALUES($s,$sn,$soi,$bu,$ij,$ic,$is,$sku,$tp,$tpt,$fa,$fat,$pm,$st,$sd,$cr,$ch,$ca,$tn,$sa,$pa,$pd)
+  cancel_reason,channel,carrier,tracking_number,synced_at,prepared_at,prepared_day,return_request_code)
+VALUES($s,$sn,$soi,$bu,$ij,$ic,$is,$sku,$tp,$tpt,$fa,$fat,$pm,$st,$sd,$cr,$ch,$ca,$tn,$sa,$pa,$pd,$rrc)
 ON CONFLICT(shop_id,order_sn) DO UPDATE SET
   shopee_order_id=$soi, buyer_username=$bu, items_json=$ij, item_count=$ic, item_summary=$is, sku=$sku,
   total_price=$tp, total_price_text=$tpt,
@@ -112,6 +117,7 @@ ON CONFLICT(shop_id,order_sn) DO UPDATE SET
   status=$st, status_description=$sd, cancel_reason=$cr, channel=$ch, carrier=$ca,
   tracking_number=COALESCE($tn,tracking_number),
   prepared_at=COALESCE($pa,prepared_at), prepared_day=COALESCE($pd,prepared_day),
+  return_request_code=COALESCE($rrc,return_request_code),
   synced_at=$sa;";
                 c.Parameters.AddWithValue("$s", shopId);
                 c.Parameters.AddWithValue("$sn", o.OrderSn);
@@ -135,6 +141,7 @@ ON CONFLICT(shop_id,order_sn) DO UPDATE SET
                 c.Parameters.AddWithValue("$sa", now);
                 c.Parameters.AddWithValue("$pa", (object?)o.PreparedAt ?? DBNull.Value);
                 c.Parameters.AddWithValue("$pd", (object?)o.PreparedDay ?? DBNull.Value);
+                c.Parameters.AddWithValue("$rrc", (object?)o.ReturnRequestCode ?? DBNull.Value);
                 c.ExecuteNonQuery();
                 if (exists) updated++;
                 else { added++; inserted.Add(o); }
@@ -151,10 +158,11 @@ ON CONFLICT(shop_id,order_sn) DO UPDATE SET
         {
             var list = new List<OrderRecord>();
             using var c = _conn.CreateCommand();
-            // items_json thêm ở CUỐI danh sách cột để KHÔNG lệch chỉ số rd.Get*(i) sẵn có trong ReadOrderRow.
+            // items_json + return_request_code thêm ở CUỐI danh sách cột để KHÔNG lệch chỉ số rd.Get*(i) sẵn có
+            // trong ReadOrderRow.
             c.CommandText = "SELECT id,shop_id,order_sn,shopee_order_id,buyer_username,item_count,item_summary,sku,"
                 + "total_price,total_price_text,final_amount,final_amount_text,payment_method,status,status_description,"
-                + "cancel_reason,channel,carrier,tracking_number,synced_at,slip_at,items_json FROM orders"
+                + "cancel_reason,channel,carrier,tracking_number,synced_at,slip_at,items_json,return_request_code FROM orders"
                 + WhereClause(c, shopId, status, search)
                 + " ORDER BY synced_at DESC, id DESC LIMIT $lim OFFSET $off";
             c.Parameters.AddWithValue("$lim", Math.Clamp(limit, 1, 1000));
@@ -290,6 +298,7 @@ ON CONFLICT(shop_id,order_sn) DO UPDATE SET
         SyncedAt = D(rd, 19),
         SlipAt = rd.IsDBNull(20) ? null : D(rd, 20),
         ItemsJson = rd.IsDBNull(21) ? null : rd.GetString(21),
+        ReturnRequestCode = rd.IsDBNull(22) ? null : rd.GetString(22),
     };
 
     /// <summary>True nếu đã có đơn (shop_id + order_sn) trong bảng — dùng cho POST /api/orders/slip: đơn CHƯA có
