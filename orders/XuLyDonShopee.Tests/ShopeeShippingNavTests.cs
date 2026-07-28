@@ -522,6 +522,11 @@ public class ShopeeShippingNavTests
     [InlineData("  ₫ 89.000  ", 89000L)]
     [InlineData("0", 0L)]
     [InlineData("₫12", 12L)]
+    // Chuỗi THẬT của bảng doanh thu trang chi tiết (nguồn CHÍNH mới của "Số tiền cuối cùng"): .income-value giữ
+    // nguyên khoảng trắng đầu và có dòng bằng 0 — cả hai phải parse được như thường.
+    [InlineData("₫374.227", 374227L)]
+    [InlineData(" ₫923.774", 923774L)]
+    [InlineData("₫0", 0L)]
     public void ParseVndAmount_CoSo_TraVeSo(string? input, long expected)
     {
         Assert.Equal(expected, ShopeeShippingNav.ParseVndAmount(input));
@@ -536,5 +541,15 @@ public class ShopeeShippingNavTests
     public void ParseVndAmount_KhongCoSo_TraVeNull(string? input)
     {
         Assert.Null(ShopeeShippingNav.ParseVndAmount(input));
+    }
+
+    /// <summary>GHIM hành vi hiện tại với số ÂM: hàm bỏ MỌI ký tự không phải chữ số nên DẤU TRỪ BỊ MẤT
+    /// ("-₫18.300" → 18300, không phải -18300). Không sửa: các dòng ÂM của bảng doanh thu (phí, thuế) KHÔNG bao
+    /// giờ được lấy làm "Số tiền cuối cùng" — luật khớp nhãn đòi CẢ "doanh thu" LẪN "ước tính" — nên hành vi này
+    /// không ảnh hưởng đường mới, mà nơi khác (total_price) đang dựa vào chuẩn "chỉ lấy chữ số".</summary>
+    [Fact]
+    public void ParseVndAmount_SoAm_MatDauTru_GhimHanhViHienTai()
+    {
+        Assert.Equal(18300L, ShopeeShippingNav.ParseVndAmount("-₫18.300"));
     }
 }

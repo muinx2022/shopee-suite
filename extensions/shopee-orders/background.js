@@ -268,16 +268,62 @@ function pageOrderCount() {
   return document.querySelectorAll("a[data-testid='order-item']").length;
 }
 
-// Đọc text "Số tiền cuối cùng" trên TRANG CHI TIẾT đơn — port NGUYÊN FinalAmountJs (ShopeeLoginService.cs). Tự chứa
-// world MAIN: ưu tiên card [type='FinalAmount'] > .amount; fallback tìm phần tử text ĐÚNG "Số tiền cuối cùng" rồi lần
-// ≤4 cấp cha tìm .amount (tránh vơ nhầm .amount đầu trang). Trả chuỗi text (rỗng nếu chưa thấy).
+// Đọc text "Số tiền cuối cùng" trên TRANG CHI TIẾT đơn. Tự chứa, world MAIN. Trả chuỗi text (rỗng nếu chưa thấy).
+// THỨ TỰ ƯU TIÊN (người dùng chốt 28/07 — trước đây thẻ remote đứng đầu và hụt 1/3 số đơn):
+//  1) BẢNG DOANH THU (.income-item) của TRANG CHÍNH — render CÙNG NHỊP .product-list nên đọc được NGAY, không
+//     phải chờ. Bằng chứng 28/07: cùng một lượt mở tab, sản phẩm về 4/4 mà thẻ remote chỉ về 3/4.
+//  2) card [type='FinalAmount'] > .amount — port NGUYÊN FinalAmountJs (ShopeeLoginService.cs). Thẻ này nằm trong
+//     <div class="remote-component">, tải BẤT ĐỒNG BỘ và có hẳn nhánh fail="…renderFail…" ⇒ hụt ~1/3 số đơn.
+//     GIỮ làm dự phòng (phòng khối doanh thu bị GẬP / bố cục khác).
+//  3) fallback tìm phần tử text ĐÚNG "Số tiền cuối cùng" rồi lần ≤4 cấp cha tìm .amount (tránh vơ nhầm .amount đầu trang).
+// Đường 2 và 3 GIỮ NGUYÊN nội dung, chỉ lùi thứ tự — chúng đang phục vụ ~2/3 số đơn, đừng gỡ.
+// ⚠ BẪY của bảng doanh thu: BA dòng cùng chứa chữ "ước tính" ("Tổng phí vận chuyển ước tính", "Phí vận chuyển
+// ước tính", "Doanh thu đơn hàng ước tính") ⇒ phải khớp CẢ "doanh thu" LẪN "uoc tinh", kẻo ghi nhầm PHÍ VẬN
+// CHUYỂN lên Google Sheet (số sai còn tệ hơn để trống). Nhãn còn dính tooltip: textContent thô ra
+// "Doanh thu đơn hàng ước tính .cls-1{fill-rule:evenodd;}question" ⇒ CLONE rồi xoá svg/i/.eds-popover mới lấy text
+// (clone để KHÔNG đụng DOM thật — người dùng đang nhìn trang đó).
 function pageReadFinalAmount() {
   const norm = (s) => (s || "").replace(/\s+/g, " ").trim();
+
+  // Đường 1: bảng doanh thu trang chính (.payment-info-details → .income-container → .income-item).
+  // Bỏ dấu tại chỗ theo ĐÚNG cách của _na (mã ký tự, không regex): hàm này CỐ Ý tự chứa — nó là đường đọc chính,
+  // không được phụ thuộc pageInstallHelpers có chạy được hay không.
+  const boDau = (s) => {
+    const nf = norm(s).toLowerCase().normalize("NFD");
+    let out = "";
+    for (const ch of nf) {
+      const c = ch.charCodeAt(0);
+      if (c >= 0x300 && c <= 0x36f) continue; // bỏ dấu thanh (combining marks)
+      out += ch === "đ" ? "d" : ch;
+    }
+    return out;
+  };
+  let theoBang = "";
+  for (const item of document.querySelectorAll(".income-item")) {
+    const labEl = item.querySelector(".income-label-text");
+    const valEl = item.querySelector(".income-value");
+    if (!labEl || !valEl) continue;
+    let nhan;
+    try {
+      const clone = labEl.cloneNode(true);
+      for (const rac of clone.querySelectorAll("svg, i, .eds-popover")) rac.remove();
+      nhan = boDau(clone.textContent);
+    } catch (e) { nhan = boDau(labEl.textContent); }
+    if (nhan.indexOf("doanh thu") < 0 || nhan.indexOf("uoc tinh") < 0) continue; // ⚠ phải có CẢ HAI
+    const giaTri = norm(valEl.textContent);
+    if (!giaTri) continue;
+    if (item.classList && item.classList.contains("highlighted")) return giaTri; // dòng chốt (tô đậm) → lấy ngay
+    if (!theoBang) theoBang = giaTri;
+  }
+  if (theoBang) return theoBang;
+
+  // Đường 2 (dự phòng): thẻ remote.
   const card = document.querySelector("[type='FinalAmount']");
   if (card) {
     const amt = card.querySelector(".amount");
     if (amt) return norm(amt.textContent);
   }
+  // Đường 3 (dự phòng): neo theo chữ "Số tiền cuối cùng".
   const nodes = document.querySelectorAll("div, span, p");
   for (const t of nodes) {
     if (norm(t.textContent) === "Số tiền cuối cùng") {
@@ -289,6 +335,18 @@ function pageReadFinalAmount() {
     }
   }
   return "";
+}
+
+// CHẨN ĐOÁN cho log phía C# (đơn nào hụt vì lý do gì / bảng doanh thu đang cứu được bao nhiêu đơn). Gọi ĐÚNG MỘT
+// LẦN sau khi vòng poll đã kết thúc — KHÔNG dự phần vào việc quyết định chờ (trần poll vẫn là 15s như cũ).
+// Trả {coThe, theCoSo} = thẻ [type='FinalAmount'] có mặt chưa / .amount của nó đã có nội dung chưa.
+function pageChanDoanUocTinh() {
+  const card = document.querySelector("[type='FinalAmount']");
+  const amt = card ? card.querySelector(".amount") : null;
+  return {
+    coThe: !!card,
+    theCoSo: !!(amt && (amt.textContent || "").replace(/\s+/g, " ").trim()),
+  };
 }
 
 // Đọc DANH SÁCH SẢN PHẨM trên TRANG CHI TIẾT đơn. Chạy trong CHÍNH tab chi tiết doSyncOrderFinals đã mở sẵn để
@@ -1314,13 +1372,14 @@ async function doSyncOrders() {
   send({ action: "pageData", kind: "orders", data: JSON.stringify(all) });
 }
 
-// Lấy "Số tiền cuối cùng" (cột Ước tính) cho các đơn ĐANG chuẩn bị CHƯA có final (port FetchFinalAmountsForPageAsync
-// của Playwright): với mỗi đơn {orderSn, shopeeOrderId} → mở tab CHI TIẾT (active:false) → đọc [type='FinalAmount']
-// .amount → trả text. Best-effort per-đơn (1 đơn lỗi/timeout → finalText rỗng, KHÔNG phá lượt); LUÔN đóng tab chi tiết;
-// dò /verify → gom cờ captcha + dừng lượt. Chốt chặn 30 đơn/lượt. KHÔNG đổi active sang tab chi tiết (giữ tab thao tác).
+// Lấy "Số tiền cuối cùng" (cột Ước tính) cho các đơn C# rót sang (port FetchFinalAmountsForPageAsync của Playwright):
+// với mỗi đơn {orderSn, shopeeOrderId} → mở tab CHI TIẾT (active:false) → pageReadFinalAmount (nguồn CHÍNH nay là
+// BẢNG DOANH THU trang chính, thẻ [type='FinalAmount'] lùi làm dự phòng) → trả text. Best-effort per-đơn (1 đơn
+// lỗi/timeout → finalText rỗng, KHÔNG phá lượt); LUÔN đóng tab chi tiết; dò /verify → gom cờ captcha + dừng lượt.
+// Chốt chặn 30 đơn/lượt. KHÔNG đổi active sang tab chi tiết (giữ tab thao tác).
 // ĐỌC KÈM danh sách SẢN PHẨM (pageReadOrderProducts) NGAY TRONG tab chi tiết đó — miễn phí, KHÔNG thêm lượt mở
 // trang nào (chrome.tabs.create của hàm này vẫn là chỗ DUY NHẤT mở tab trong cả extension đơn hàng).
-// Trả {action:"pageData", kind:"finals", data:<json mảng {orderSn, finalText, sanPham:[…]}>}.
+// Trả {action:"pageData", kind:"finals", data:<json mảng {orderSn, finalText, sanPham:[…], nguon}>}.
 async function doSyncOrderFinals(orders) {
   const MAX_FINALS = 30;
   let list = Array.isArray(orders) ? orders : [];
@@ -1336,6 +1395,7 @@ async function doSyncOrderFinals(orders) {
     let tabId = null;
     let finalText = "";
     let sanPham = [];
+    let nguon = ""; // nguồn đọc được / lý do hụt — chỉ để C# log (xem pageChanDoanUocTinh)
     try {
       const t = await chrome.tabs.create({ url: ORDER_DETAIL_PREFIX + shopeeOrderId, active: false });
       tabId = t.id;
@@ -1348,13 +1408,24 @@ async function doSyncOrderFinals(orders) {
         send({ action: "captcha", message: url });
         return;
       }
-      // POLL ≤15s (500ms) tới khi .amount khác rỗng.
+      // POLL ≤15s (500ms) tới khi đọc được số. GIỮ NGUYÊN trần 15s — nguồn CHÍNH nay là bảng doanh thu của trang
+      // chính (render cùng nhịp .product-list) nên thường có ngay từ lần poll đầu, chờ thêm là vô ích.
       const dl = Date.now() + 15000;
       while (Date.now() < dl) {
         try { finalText = (await execInTab(tabId, pageReadFinalAmount, [])) || ""; } catch (e) { finalText = ""; }
         if (finalText) break;
         await sleep(500);
       }
+      // CHẨN ĐOÁN cho log phía C#: đọc SAU khi poll xong nên KHÔNG ảnh hưởng thời gian chờ.
+      //   "chi-bang"   = lấy được TRONG KHI thẻ remote chưa có số ⇒ đúng số đơn mà bảng doanh thu CỨU được
+      //   "ca-hai"     = lấy được và thẻ remote cũng đã có số (đường cũ cũng chạy được)
+      //   "dang-tai"   = KHÔNG lấy được, thẻ có mặt nhưng .amount còn rỗng (remote chưa về, hết giờ)
+      //   "khong-thay" = KHÔNG lấy được, chưa thấy thẻ nào trong DOM
+      try {
+        const cd = await execInTab(tabId, pageChanDoanUocTinh, []);
+        if (finalText) nguon = cd && cd.theCoSo ? "ca-hai" : "chi-bang";
+        else nguon = cd && cd.coThe ? "dang-tai" : "khong-thay";
+      } catch (e) { nguon = ""; }
       // Đọc THÊM sản phẩm trong CHÍNH tab này (kể cả khi finalText rỗng). Bọc try RIÊNG: sản phẩm là phần THÊM,
       // lỗi ở đây KHÔNG được làm mất finalText vừa đọc được.
       try {
@@ -1367,7 +1438,7 @@ async function doSyncOrderFinals(orders) {
     } finally {
       if (tabId != null) { try { await chrome.tabs.remove(tabId); } catch (e) {} } // LUÔN đóng tab chi tiết
     }
-    out.push({ orderSn: orderSn, finalText: finalText, sanPham: sanPham });
+    out.push({ orderSn: orderSn, finalText: finalText, sanPham: sanPham, nguon: nguon });
   }
   send({ action: "pageData", kind: "finals", data: JSON.stringify(out) });
 }
