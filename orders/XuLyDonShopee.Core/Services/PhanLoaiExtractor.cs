@@ -80,6 +80,53 @@ public static class PhanLoaiExtractor
     }
 
     /// <summary>
+    /// Chuỗi SKU của cả đơn từ <paramref name="itemsJson"/>: lấy khóa <c>sku</c> của TỪNG sản phẩm (chỉ trang
+    /// CHI TIẾT mới ghi), nối bằng <c>" · "</c> đúng thứ tự mảng — <b>KHÔNG khử trùng</b> (khác
+    /// <see cref="TuItemsJson"/>: mỗi SKU là riêng biệt). Không có sản phẩm nào mang <c>sku</c> → chuỗi rỗng
+    /// (caller lùi về field DB đơn-giá-trị <c>Sku</c>). Rỗng / <c>"[]"</c> / JSON hỏng → chuỗi rỗng (KHÔNG ném).
+    /// </summary>
+    public static string SkuTuItemsJson(string? itemsJson)
+    {
+        if (string.IsNullOrWhiteSpace(itemsJson))
+        {
+            return string.Empty;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(itemsJson);
+            if (doc.RootElement.ValueKind != JsonValueKind.Array)
+            {
+                return string.Empty;
+            }
+
+            var parts = new List<string>();
+            foreach (var item in doc.RootElement.EnumerateArray())
+            {
+                if (item.ValueKind != JsonValueKind.Object)
+                {
+                    continue;
+                }
+                if (!item.TryGetProperty("sku", out var v) || v.ValueKind != JsonValueKind.String)
+                {
+                    continue;
+                }
+                var s = v.GetString();
+                if (string.IsNullOrWhiteSpace(s))
+                {
+                    continue;
+                }
+                parts.Add(s!.Replace('\u00A0', ' ').Trim());
+            }
+            return string.Join(Noi, parts);
+        }
+        catch (JsonException)
+        {
+            return string.Empty;
+        }
+    }
+
+    /// <summary>
     /// Chuỗi phân loại THÔ của một phần tử: ƯU TIÊN khóa <c>phanLoai</c> (trang CHI TIẾT đơn ghi vào — đã SẠCH,
     /// không dính đuôi <c>[SKU SKU]</c>), không có mới quay về <c>variation</c> (bản quét trang DANH SÁCH của đơn
     /// cũ — vẫn đi luật cắt đuôi trong <see cref="DonGian"/>). Phần tử lạ / cả hai khóa đều thiếu hoặc không phải

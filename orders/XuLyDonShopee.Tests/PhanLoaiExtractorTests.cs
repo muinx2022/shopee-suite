@@ -60,4 +60,39 @@ public class PhanLoaiExtractorTests
     [InlineData("[{\"variation\":123}]")]       // variation không phải chuỗi
     public void TuItemsJson_RacHoacRong_TraChuoiRong(string? itemsJson)
         => Assert.Equal(string.Empty, PhanLoaiExtractor.TuItemsJson(itemsJson));
+
+    // ===== SkuTuItemsJson: SKU từng sản phẩm nối " · ", KHÔNG khử trùng =====
+    /// <summary>Dựng items_json có khóa sku (trang CHI TIẾT); phần tử null = thiếu hẳn field sku.</summary>
+    private static string ItemsCoSku(params string?[] skus)
+        => "[" + string.Join(",", skus.Select(s => s is null
+            ? "{\"name\":\"SP\",\"variation\":\"X\",\"amount\":\"1\"}"
+            : "{\"name\":\"SP\",\"sku\":" + JsonSerializer.Serialize(s) + ",\"phanLoai\":\"X\",\"amount\":\"1\"}")) + "]";
+
+    [Fact]
+    public void SkuTuItemsJson_HaiSanPham_NoiBangDauCham()
+        => Assert.Equal("A521 · A357-Đen Full LOLITA-36",
+            PhanLoaiExtractor.SkuTuItemsJson(ItemsCoSku("A521", "A357-Đen Full LOLITA-36")));
+
+    [Fact]
+    public void SkuTuItemsJson_DonCuKhongCoKhoaSku_TraChuoiRong()
+        => Assert.Equal(string.Empty,
+            PhanLoaiExtractor.SkuTuItemsJson(Items("Nâu Be,39 [A322 A322]", "Kem,36 [A141 A141]")));
+
+    [Fact]
+    public void SkuTuItemsJson_MotSanPham_KhongCoDauNoi()
+        => Assert.Equal("A521", PhanLoaiExtractor.SkuTuItemsJson(ItemsCoSku("A521")));
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("[]")]
+    [InlineData("{")]
+    [InlineData("khong phai json")]
+    public void SkuTuItemsJson_RacHoacRong_TraChuoiRong(string? itemsJson)
+        => Assert.Equal(string.Empty, PhanLoaiExtractor.SkuTuItemsJson(itemsJson));
+
+    [Fact]
+    public void SkuTuItemsJson_ThieuSkuXenGiua_ChiNoiCacMaCo()
+        => Assert.Equal("A521 · A357",
+            PhanLoaiExtractor.SkuTuItemsJson(ItemsCoSku("A521", null, "A357")));
 }

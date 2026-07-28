@@ -1,7 +1,7 @@
 # Plan: Client hiện cảnh báo khi ghi FILE PHỤ Google Sheet lỗi (`filePhu.loi`)
 
 - **Ngày:** 2026-07-28
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-executor`)
 
 ## 1. Bối cảnh & mục tiêu

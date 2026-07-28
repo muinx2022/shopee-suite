@@ -96,6 +96,9 @@ public class HubOutboxGsheetHuyTests
         /// <summary>URL truyền vào cấu hình "Web App URL" của test.</summary>
         public string Url { get; }
 
+        /// <summary>Nếu khác null → gắn <c>"filePhu":{"ghi":0,"them":0,"loi":…}</c> vào phản hồi (test cảnh báo lỗi file phụ).</summary>
+        public string? FilePhuLoi { get; set; }
+
         /// <summary>Body JSON của MỖI lô POST đã nhận, theo thứ tự nhận.</summary>
         public IReadOnlyList<string> Bodies
         {
@@ -202,8 +205,8 @@ public class HubOutboxGsheetHuyTests
             return 0;
         }
 
-        /// <summary>Phản hồi kiểu Apps Script: mỗi đơn trong body → một kết quả ok/added.</summary>
-        private static string TaoPhanHoi(string body)
+        /// <summary>Phản hồi kiểu Apps Script: mỗi đơn trong body → một kết quả ok/added; tùy chọn gắn filePhu.loi.</summary>
+        private string TaoPhanHoi(string body)
         {
             var sb = new StringBuilder("{\"results\":[");
             using var doc = JsonDocument.Parse(body);
@@ -219,7 +222,14 @@ public class HubOutboxGsheetHuyTests
                   .Append(JsonSerializer.Serialize(o.GetProperty("maDon").GetString()))
                   .Append(",\"ok\":true,\"added\":true}");
             }
-            return sb.Append("]}").ToString();
+            sb.Append(']');
+            if (FilePhuLoi is not null)
+            {
+                sb.Append(",\"filePhu\":{\"ghi\":0,\"them\":0,\"loi\":")
+                  .Append(JsonSerializer.Serialize(FilePhuLoi))
+                  .Append('}');
+            }
+            return sb.Append('}').ToString();
         }
 
         public void Dispose()

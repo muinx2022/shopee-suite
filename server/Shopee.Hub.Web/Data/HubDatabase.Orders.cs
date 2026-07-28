@@ -1,5 +1,6 @@
 using Microsoft.Data.Sqlite;
 using Shopee.Core.Coordination;
+using XuLyDonShopee.Core.Services;
 
 namespace Shopee.Hub;
 
@@ -85,13 +86,36 @@ CREATE INDEX IF NOT EXISTS ix_orders_status ON orders(status);");
             {
                 if (o is null || string.IsNullOrWhiteSpace(o.OrderSn)) continue;
                 bool exists;
+                string? itemsCu = null;
+                int itemCountCu = 0;
                 using (var chk = _conn.CreateCommand())
                 {
                     chk.Transaction = tx;
-                    chk.CommandText = "SELECT 1 FROM orders WHERE shop_id=$s AND order_sn=$sn";
+                    // Đọc luôn items_json + item_count cũ (đơn đã có) để chọn bản giàu hơn — cùng khoá/tx với ghi.
+                    chk.CommandText = "SELECT items_json, item_count FROM orders WHERE shop_id=$s AND order_sn=$sn";
                     chk.Parameters.AddWithValue("$s", shopId);
                     chk.Parameters.AddWithValue("$sn", o.OrderSn);
-                    exists = chk.ExecuteScalar() is not null;
+                    using var rd = chk.ExecuteReader();
+                    exists = rd.Read();
+                    if (exists)
+                    {
+                        itemsCu = rd.IsDBNull(0) ? null : rd.GetString(0);
+                        itemCountCu = rd.IsDBNull(1) ? 0 : rd.GetInt32(1);
+                    }
+                }
+
+                // items_json: đơn mới → ghi thẳng; đơn đã có → ChonItemsJson (bản nghèo KHÔNG đè bản giàu),
+                // item_count ĐI THEO bản được giữ (khỏi count nói dối). Giống client OrdersRepository.
+                string? itemsGhi = o.ItemsJson ?? "[]";
+                int itemCountGhi = o.ItemCount;
+                if (exists)
+                {
+                    var chon = SanPhamDonParser.ChonItemsJson(itemsCu, o.ItemsJson);
+                    if (!string.Equals(chon, o.ItemsJson, StringComparison.Ordinal))
+                    {
+                        itemsGhi = chon ?? "[]";
+                        itemCountGhi = itemCountCu;
+                    }
                 }
 
                 using var c = _conn.CreateCommand();
@@ -123,8 +147,8 @@ ON CONFLICT(shop_id,order_sn) DO UPDATE SET
                 c.Parameters.AddWithValue("$sn", o.OrderSn);
                 c.Parameters.AddWithValue("$soi", (object?)o.ShopeeOrderId ?? DBNull.Value);
                 c.Parameters.AddWithValue("$bu", (object?)o.BuyerUsername ?? DBNull.Value);
-                c.Parameters.AddWithValue("$ij", o.ItemsJson ?? "[]");
-                c.Parameters.AddWithValue("$ic", o.ItemCount);
+                c.Parameters.AddWithValue("$ij", itemsGhi);
+                c.Parameters.AddWithValue("$ic", itemCountGhi);
                 c.Parameters.AddWithValue("$is", (object?)o.ItemSummary ?? DBNull.Value);
                 c.Parameters.AddWithValue("$sku", (object?)o.Sku ?? DBNull.Value);
                 c.Parameters.AddWithValue("$tp", (object?)o.TotalPrice ?? DBNull.Value);

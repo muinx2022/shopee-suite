@@ -34,6 +34,9 @@ public sealed partial class OrderRowViewModel
     /// "Tải phiếu" không làm gì (dòng dựng cho CSV/in hàng loạt không cần).</summary>
     private readonly Func<OrderRowViewModel, Task>? _redownloadSlip;
 
+    /// <summary>SKU từng sản phẩm nối bằng " · " (từ items_json); rỗng khi đơn cũ không có khóa sku.</summary>
+    private readonly string _skuNhieu;
+
     public OrderRowViewModel(
         OrderRow row, string shopLabel, string invoiceDir,
         Action<string>? notify = null, Func<OrderRowViewModel, Task>? redownloadSlip = null)
@@ -45,6 +48,8 @@ public sealed partial class OrderRowViewModel
         _redownloadSlip = redownloadSlip;
         // Parse items_json MỘT LẦN lúc dựng dòng — lưới vẽ lại liên tục, không parse json mỗi lần binding đọc.
         PhanLoai = PhanLoaiExtractor.TuItemsJson(row.ItemsJson);
+        // SKU nhiều SP (nối " · ") từ items_json; rỗng = đơn cũ không có khóa sku → property Sku lùi về field DB.
+        _skuNhieu = PhanLoaiExtractor.SkuTuItemsJson(row.ItemsJson);
     }
 
     /// <summary>Nhãn shop (tên đăng nhập shop, vd "alina99.store") — do ViewModel lấy từ <c>shop_login</c>.</summary>
@@ -59,8 +64,9 @@ public sealed partial class OrderRowViewModel
     /// <summary>"Tên SP đầu (+n)" với n = số sản phẩm còn lại khi đơn có &gt;1 sản phẩm.</summary>
     public string Product => BuildProduct(_row.ItemSummary, _row.ItemCount);
 
-    /// <summary>SKU sản phẩm (chuỗi alphanumeric liên tục cuối cùng của tên sản phẩm, vd "B02435").</summary>
-    public string Sku => _row.Sku ?? string.Empty;
+    /// <summary>SKU từng sản phẩm nối bằng " · " (suy từ <c>items_json</c>); đơn cũ không có khóa <c>sku</c>
+    /// trong <c>items_json</c> → lùi về field DB đơn-giá-trị (SKU sản phẩm đầu).</summary>
+    public string Sku => !string.IsNullOrEmpty(_skuNhieu) ? _skuNhieu : (_row.Sku ?? string.Empty);
 
     /// <summary>Cột "Phân loại" (vd "Nâu Be,39") — suy từ <c>items_json</c> qua
     /// <see cref="PhanLoaiExtractor.TuItemsJson"/>, TÍNH SẴN trong constructor. Rỗng nếu đơn không có phân loại.</summary>

@@ -1,7 +1,7 @@
 # Plan: Hiển thị SKU đủ theo TỪNG sản phẩm ở app + hub (như Google Sheet)
 
 - **Ngày:** 2026-07-28
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-executor`)
 
 ## 1. Bối cảnh & mục tiêu

@@ -167,6 +167,13 @@ public class GoogleSheetSyncService
                 }
 
                 all.AddRange(parsed);
+
+                // Lỗi ghi FILE PHỤ (nếu có) chỉ CẢNH BÁO — không làm hỏng đường file chính (results vẫn ok).
+                var loiPhu = DocFilePhuLoi(respBody);
+                if (!string.IsNullOrEmpty(loiPhu))
+                {
+                    log("GSheet (file phụ): lỗi ghi — " + loiPhu);
+                }
             }
         }
         finally
@@ -262,6 +269,32 @@ public class GoogleSheetSyncService
         }
 
         return list;
+    }
+
+    /// <summary>
+    /// Đọc <c>filePhu.loi</c> từ phản hồi Apps Script. Thiếu <c>filePhu</c> / <c>loi</c> null / không phải
+    /// chuỗi / JSON rác → <c>null</c> (KHÔNG ném — <see cref="DocKetQua"/> đã xử phần ném cho <c>results</c>).
+    /// </summary>
+    internal static string? DocFilePhuLoi(string json)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object
+                || !doc.RootElement.TryGetProperty("filePhu", out var fp)
+                || fp.ValueKind != JsonValueKind.Object
+                || !fp.TryGetProperty("loi", out var loi)
+                || loi.ValueKind != JsonValueKind.String)
+            {
+                return null;
+            }
+            var s = loi.GetString();
+            return string.IsNullOrWhiteSpace(s) ? null : s;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     /// <summary>Đọc chuỗi từ property (chỉ nhận String; thiếu / null / kiểu khác → null).</summary>

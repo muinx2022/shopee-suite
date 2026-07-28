@@ -43,6 +43,10 @@
     <!-- Tách cột "Phân loại" từ items_json — LINK để trang /orders của hub hiện ĐÚNG CÙNG luật với màn Đơn hàng
          của app và với payload Google Sheet (hai nơi tự tính riêng là lệch). Thuần BCL. -->
     <Compile Include="..\..\orders\XuLyDonShopee.Core\Services\PhanLoaiExtractor.cs" Link="Shared\Notify\PhanLoaiExtractor.cs" />
+    <!-- Chọn items_json giàu hơn khi upsert — LINK để hub không cho bản nghèo (trang danh sách) đè bản giàu
+         (trang chi tiết). SanPhamDonParser phụ thuộc ShopeeShippingNav.ParseVndAmount (thuần BCL). -->
+    <Compile Include="..\..\orders\XuLyDonShopee.Core\Services\SanPhamDonParser.cs" Link="Shared\Notify\SanPhamDonParser.cs" />
+    <Compile Include="..\..\orders\XuLyDonShopee.Core\Services\ShopeeShippingNav.cs" Link="Shared\Notify\ShopeeShippingNav.cs" />
     <!-- Cổng thao tác kho + exception + LÕI lưới dùng chung — ProductDbDataOps (hub) hiện thực IProductDataOps;
          ProductGridEngine là lõi lưới cho trang /data + tab 📋 Dữ liệu của Fleet. KHÔNG link HubApiProductDataOps:
          adapter-client cần HubClient (chưa link vào hub). -->
