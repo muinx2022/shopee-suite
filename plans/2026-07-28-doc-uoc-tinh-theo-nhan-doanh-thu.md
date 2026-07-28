@@ -93,6 +93,7 @@ Thêm: nhãn có **tooltip lẫn vào text** — lấy thô ra `"Doanh thu đơn
 - Nới thời gian chờ thẻ remote, và **chờ đúng thứ cần** (`.amount` có nội dung) thay vì chờ mù.
 - Thêm **đường dự phòng** đọc bảng doanh thu trên trang chính khi thẻ remote không về.
 - Log rõ đơn nào hụt + hụt vì lý do gì, để lần sau soi được.
+- VÁ LỖ: đơn rời trạng thái "chuẩn bị" mà chưa có ước tính thì hiện KHÔNG bao giờ được lấy lại (xem Bước 6).
 
 **Không làm:**
 - KHÔNG đổi/bỏ hai đường dò hiện có — chúng ĐÚNG, đang chạy tốt cho ~2/3 số đơn.
@@ -159,6 +160,52 @@ Hiện chỉ có `Lấy Số tiền cuối cùng: 3/4 đơn.` — không biết 
 - Mã đơn hụt (tối đa 3) + lý do phân biệt được: `không thấy thẻ` / `thẻ đang tải, hết giờ` / `đọc được qua bảng
   doanh thu`.
 - Đếm riêng số đơn lấy được **qua đường dự phòng** — để biết bố cục nào đang phổ biến.
+
+### Bước 6 — VÁ LỖ: đơn rời trạng thái "chuẩn bị" là mất ước tính VĨNH VIỄN
+
+> **Người dùng chốt:** *"nó phải có chứ ước tính để còn chắc chắn"* — không chấp nhận ô tiền bán trống.
+
+Điều kiện chọn đơn để lấy ước tính hiện nay (`OrdersBridgeSession`, quanh dòng 745):
+
+```csharp
+var needFinal = orders.Where(o =>
+    ShopeeShippingNav.LaChuanBiHang(o.Status)      // ← CHỈ "chuẩn bị" / "chờ lấy hàng"
+    && o.FinalAmount is null
+    && !string.IsNullOrWhiteSpace(o.ShopeeOrderId)
+    && !done.Contains(o.OrderSn)).ToList();
+```
+
+⇒ Đơn nào **rời** trạng thái đó (đã giao cho vận chuyển, đang giao…) mà chưa kịp có ước tính thì **không bao giờ
+được thử lại**, ô "tiền bán" trên sheet trống vĩnh viễn.
+
+Và đây KHÔNG phải rủi ro lý thuyết — dữ liệu thật lúc lập plan:
+
+```
+260726PN0HHCS5   Chờ lấy hàng   ← đơn 26/07, thử lại suốt 2 ngày, VẪN chưa có ước tính
+260727S20VWQ0K   Chờ lấy hàng   ← đơn 27/07, tương tự
+```
+
+Có những đơn hỏng **có hệ thống**, thử lại bao nhiêu lần cũng vậy. Nếu chúng rời trạng thái trước khi ta sửa xong
+thì mất hẳn.
+
+**Sửa:** nới điều kiện thành *"đang chuẩn bị hàng **HOẶC** (thiếu ước tính VÀ đơn còn trong N ngày gần đây)"*, có
+chốt chặn để không nổ số tab:
+
+- `N = 7` ngày (đủ phủ vòng đời đơn; đơn cũ hơn coi như bỏ).
+- Trần **5 đơn/lượt** cho phần nới thêm này — TÁCH RIÊNG khỏi trần 30 đơn/lượt của phần chính, để đơn đang chuẩn
+  bị (việc gấp) không bị đơn cũ chiếm chỗ.
+- Ưu tiên đơn MỚI trước (mới thì Shopee còn dữ liệu, khả năng lấy được cao hơn).
+- Log riêng: `Lấy bù Số tiền cuối cùng (đơn đã rời trạng thái chuẩn bị): k/m đơn.`
+
+**Đừng** bỏ hẳn điều kiện trạng thái — làm thế thì mọi đơn cũ chưa có ước tính sẽ bị mở lại mỗi vòng, nổ số tab
+và tăng rủi ro captcha. Chốt chặn N ngày + trần 5 đơn/lượt là bắt buộc.
+
+Test cho hàm chọn đơn (tách hàm thuần nếu chưa có, đừng bỏ test):
+- [ ] Đơn đang "chờ lấy hàng" thiếu ước tính → CÓ trong danh sách.
+- [ ] Đơn đã rời trạng thái, thiếu ước tính, trong 7 ngày → CÓ (phần nới), và nằm trong trần 5.
+- [ ] Đơn đã rời trạng thái, thiếu ước tính, CŨ hơn 7 ngày → KHÔNG.
+- [ ] Đơn ĐÃ có ước tính → KHÔNG, dù ở trạng thái nào.
+- [ ] Nhiều hơn 5 đơn thuộc phần nới → chỉ lấy 5, ưu tiên MỚI nhất.
 
 ## 4. Tiêu chí nghiệm thu
 
