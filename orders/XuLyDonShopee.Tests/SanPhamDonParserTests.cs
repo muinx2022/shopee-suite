@@ -232,4 +232,58 @@ public class SanPhamDonParserTests
     [InlineData("[{\"name\":\"Giày\",\"variation\":\"Kem,36 [A141 A141]\",\"amount\":\"1\",\"image\":\"x\"}]")]
     public void CotGsheet_KhongCoDuLieuTrangChiTiet_TraNull(string? itemsJson)
         => Assert.Null(SanPhamDonParser.CotGsheet(itemsJson));
+
+    /// <summary>
+    /// <b>Payload NGUYÊN VĂN</b> mà <c>pageReadOrderProducts</c> đọc ra từ HTML THẬT của một đơn <b>3 sản phẩm</b>
+    /// trên trang chi tiết Shopee (người dùng gửi 28/07/2026) — chạy qua jsdom trên chính thân hàm trong
+    /// <c>background.js</c>, không chép tay. Đây là mỏ neo cho đường NHIỀU SẢN PHẨM: trước khi có mẫu này, đường
+    /// đó chưa từng chạy trên dữ liệu thật (17 đơn production đều 1 SP).
+    /// </summary>
+    private const string BaSanPhamThat =
+        "["
+        + "{\"stt\":\"1\",\"ten\":\"Áo Khoác Dù Nữ - Áo Gió Nhiều Màu Mũ Dây Rút Chắn Gió Chống Nắng Hàn Quốc Năng Động B41608\",\"phanLoai\":\"Màu Hồng (gió nhăn),L\",\"sku\":\"B41608\","
+        + "\"donGia\":\"324.000\",\"soLuong\":\"1\",\"thanhTien\":\"324.000\",\"anh\":\"https://cf.shopee.vn/file/sg-11134201-8259d-mql9lr71nt3i88_tn\",\"metaLa\":[]}"
+        + ","
+        + "{\"stt\":\"2\",\"ten\":\"Áo Chống Nắng Nam Nỉ - Áo Khoác Nắng Khóa 2 Vai Sọc Viền Phong Cách Trẻ Trung Mùa Hè B52246\",\"phanLoai\":\"xl\",\"sku\":\"B52246\","
+        + "\"donGia\":\"313.000\",\"soLuong\":\"1\",\"thanhTien\":\"313.000\",\"anh\":\"https://cf.shopee.vn/file/sg-11134201-825a2-mqlhx6iso7in82_tn\",\"metaLa\":[]}"
+        + ","
+        + "{\"stt\":\"3\",\"ten\":\"Áo Khoác Gió Phối Màu - Áo Gió Kẻ Vạch Trắng Logo Ngực Form Rộng Nam Nữ Sang Chảnh B21913\",\"phanLoai\":\"xám,m\",\"sku\":\"B21913\","
+        + "\"donGia\":\"345.000\",\"soLuong\":\"1\",\"thanhTien\":\"345.000\",\"anh\":\"https://cf.shopee.vn/file/sg-11134201-8257u-mqkhdzwh3dhna6_tn\",\"metaLa\":[]}"
+        + "]";
+
+    /// <summary>Đơn 3 SP thật → đọc ĐỦ 3, đúng thứ tự STT, SKU/phân loại/tiền khớp trang.</summary>
+    [Fact]
+    public void Parse_BaSanPhamThatTuTrangChiTiet_RaDu3()
+    {
+        var sp = SanPhamDonParser.Parse(BaSanPhamThat);
+
+        Assert.Equal(3, sp.Count);
+        Assert.Equal(new[] { "B41608", "B52246", "B21913" }, sp.Select(x => x.Sku).ToArray());
+        // Phân loại có DẤU NGOẶC ĐƠN ở giữa — luật cắt đuôi "[SKU SKU]" tuyệt đối không được đụng vào.
+        Assert.Equal("Màu Hồng (gió nhăn),L", sp[0].PhanLoai);
+        Assert.Equal("xl", sp[1].PhanLoai);
+        Assert.Equal("xám,m", sp[2].PhanLoai);
+        Assert.Equal(new long?[] { 324000, 313000, 345000 }, sp.Select(x => x.ThanhTien).ToArray());
+        Assert.All(sp, x => Assert.Equal(1, x.SoLuong));
+    }
+
+    /// <summary>Kiểm chứng ĐỘC LẬP: tổng thành tiền 3 SP phải bằng đúng "Tổng tiền sản phẩm ₫982.000" mà Shopee
+    /// tự in trên trang — sai một dòng hoặc parse hụt số là con số này lệch ngay.</summary>
+    [Fact]
+    public void Parse_BaSanPhamThat_TongThanhTienKhopTrangShopee()
+        => Assert.Equal(982_000, SanPhamDonParser.Parse(BaSanPhamThat).Sum(x => x.ThanhTien ?? 0));
+
+    /// <summary>Đơn 3 SP thật → hai cột GSheet mỗi cột 3 DÒNG, khớp cặp theo dòng; SL đều bằng 1 nên KHÔNG có "×N".</summary>
+    [Fact]
+    public void CotGsheet_BaSanPhamThat_HaiCotBaDongKhopCap()
+    {
+        var items = SanPhamDonParser.TaoItemsJson(SanPhamDonParser.Parse(BaSanPhamThat));
+
+        var cot = SanPhamDonParser.CotGsheet(items);
+
+        Assert.NotNull(cot);
+        Assert.Equal("B41608\nB52246\nB21913", cot!.Sku);
+        Assert.Equal("Màu Hồng (gió nhăn),L\nxl\nxám,m", cot.PhanLoai);
+        Assert.DoesNotContain("×", cot.PhanLoai, StringComparison.Ordinal); // SL = 1 → không gắn hậu tố
+    }
 }
