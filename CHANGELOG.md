@@ -5,6 +5,20 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Hiệu năng. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.6.11 — 2026-07-29
+
+- **SKU nhiều sản phẩm trên app + Hub:** đơn có nhiều SP (vd 2 giày) nay hiện đủ SKU từng sản phẩm nối bằng
+  `" · "` (giống cột Phân loại), không còn chỉ hiện SKU sản phẩm đầu. Đơn cũ không có khóa `sku` trong
+  `items_json` vẫn hiện field SKU cũ như trước.
+- **Không mất SKU/phân loại sau sync:** vòng sync trang danh sách không còn đè mất `items_json` giàu (đã đọc ở
+  trang chi tiết). Hub cũng giữ bản giàu khi máy khác đẩy lại bản nghèo.
+- **Google Sheet thứ hai:** ghi song song A/B/C/E sang file phụ (cấu hình URL/ID trên hub + client); lỗi ghi file
+  phụ được log cảnh báo thay vì im lặng — không làm hỏng đường ghi file chính.
+- **Ước tính:** ưu tiên bảng doanh thu trang chính; vá mất ước tính khi đơn rời trạng thái chuẩn bị hàng.
+- **Đọc sản phẩm trang chi tiết:** SKU thật + phân loại sạch theo từng SP, đẩy đủ lên Google Sheet.
+- **Hub trang Đơn hàng:** nút **Hủy lọc**, chọn số dòng mỗi trang, phân trang số trang rõ hơn.
+- **Thống kê đơn hàng:** lọc theo khoảng ngày (đã có từ bản trước khi chưa release).
+
 ## v1.6.10 — 2026-07-28
 
 - **Check đơn trả hàng ở cuối mỗi shop:** sau khi xử xong đơn của một shop, app mở trang **Trả hàng/Hoàn tiền/Hủy**
