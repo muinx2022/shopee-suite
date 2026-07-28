@@ -1,7 +1,7 @@
 ﻿# Plan: Bước check ĐƠN TRẢ HÀNG ở cuối flow mỗi shop
 
 - **Ngày:** 2026-07-28
-- **Trạng thái:** hoàn thành (hub deploy ngay · app+extension chờ release; class khối "mã yêu cầu" CHƯA xác nhận trên trang thật — xem mục 5)
+- **Trạng thái:** hoàn thành — hub đã deploy, client phát hành **v1.6.10** (28/07). Class khối mã yêu cầu ĐÃ xác nhận trên trang thật (`id return-id`) và ghim ở plan `2026-07-28-ghim-class-that-trang-tra-hang.md`. Còn chờ lần chạy thật có yêu cầu trả hàng mới để nghiệm thu đầu-cuối.
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-dev`)
 
 ## 1. Bối cảnh & yêu cầu

@@ -1,7 +1,7 @@
 # Plan: Thêm cột "Phân loại" cho đơn hàng (GSheet + app + hub)
 
 - **Ngày:** 2026-07-28
-- **Trạng thái:** hoàn thành (hub deploy ngay · app+GSheet chờ build local)
+- **Trạng thái:** hoàn thành — hub đã deploy, client phát hành **v1.6.10** (28/07). Apps Script phải dán bản mới thì cột Phân loại mới nhận được dữ liệu.
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-dev`)
 
 ## 1. Bối cảnh — dữ liệu ĐÃ CÓ SẴN, chỉ chưa ai hiện ra

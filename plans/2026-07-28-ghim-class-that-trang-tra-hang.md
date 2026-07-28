@@ -1,7 +1,7 @@
 # Plan: Ghim class THẬT của trang trả hàng + vá 2 lỗi luật nhận diện
 
 - **Ngày:** 2026-07-28
-- **Trạng thái:** hoàn thành (chờ release client · hub không ảnh hưởng)
+- **Trạng thái:** hoàn thành — client phát hành **v1.6.10** (28/07); hub không ảnh hưởng.
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-dev`)
 
 ## 1. Bối cảnh — đã có HTML THẬT của dòng trả hàng
