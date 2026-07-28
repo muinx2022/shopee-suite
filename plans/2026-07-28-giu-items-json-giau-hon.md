@@ -1,7 +1,7 @@
 # Plan: `items_json` bị vòng sync sau ghi đè, mất SKU/phân loại trang chi tiết
 
 - **Ngày:** 2026-07-28
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành — ca tái hiện đã kiểm FAIL trên code cũ (chuỗi khác nhau ở `variation`: bản nghèo có đuôi `[A141 A141]`) rồi PASS sau khi sửa. 1376 test xanh. Chờ build local + release.
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-dev`)
 
 ## 1. Bối cảnh — lỗi THẬT, quan sát trên dữ liệu production

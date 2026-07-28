@@ -273,6 +273,70 @@ public class SanPhamDonParserTests
     public void Parse_BaSanPhamThat_TongThanhTienKhopTrangShopee()
         => Assert.Equal(982_000, SanPhamDonParser.Parse(BaSanPhamThat).Sum(x => x.ThanhTien ?? 0));
 
+    // ===== Chọn bản items_json khi upsert: bản NGHÈO không được đè bản GIÀU =====
+
+    /// <summary>Bản GIÀU: <c>items_json</c> đọc ở TRANG CHI TIẾT — đủ 8 khóa (đơn thật lúc 08:17).</summary>
+    private static readonly string ItemsGiau = SanPhamDonParser.TaoItemsJson(SanPhamDonParser.Parse(MotSanPhamThat));
+
+    /// <summary>Bản NGHÈO: <c>items_json</c> quét ở TRANG DANH SÁCH — chỉ 4 khóa (CHÍNH đơn đó lúc 09:46, sau khi
+    /// bị đè: <c>[amount, image, name, variation]</c>).</summary>
+    private const string ItemsNgheo =
+        "[{\"name\":\"Giày Boots Da Nữ Cổ Ngắn - A141\",\"variation\":\"Kem,36 [A141 A141]\",\"amount\":\"1\",\"image\":\"x\"}]";
+
+    /// <summary>HỒI QUY (lỗi THẬT 28/07/2026): vòng sync sau chỉ đọc trang DANH SÁCH → bản nghèo KHÔNG được đè bản
+    /// giàu, kẻo mất SKU/phân loại vĩnh viễn (đơn đã có ước tính không được mở lại trang chi tiết).</summary>
+    [Fact]
+    public void ChonItemsJson_CuGiau_MoiNgheo_GiuCu()
+        => Assert.Equal(ItemsGiau, SanPhamDonParser.ChonItemsJson(ItemsGiau, ItemsNgheo));
+
+    [Fact]
+    public void ChonItemsJson_CuNgheo_MoiGiau_LayMoi()
+        => Assert.Equal(ItemsGiau, SanPhamDonParser.ChonItemsJson(ItemsNgheo, ItemsGiau));
+
+    /// <summary>Cả hai đều GIÀU → lấy bản MỚI (dữ liệu mới nhất luôn thắng).</summary>
+    [Fact]
+    public void ChonItemsJson_CaHaiGiau_LayMoi()
+    {
+        var moi = SanPhamDonParser.TaoItemsJson(SanPhamDonParser.Parse(BaSanPhamThat));
+        Assert.Equal(moi, SanPhamDonParser.ChonItemsJson(ItemsGiau, moi));
+    }
+
+    /// <summary>Cả hai đều NGHÈO → lấy bản mới (giữ hành vi cũ: bản quét danh sách mới nhất là hiện trạng đơn).</summary>
+    [Fact]
+    public void ChonItemsJson_CaHaiNgheo_LayMoi()
+    {
+        const string moi = "[{\"name\":\"Giày\",\"variation\":\"ĐEN,37\",\"amount\":\"2\",\"image\":\"y\"}]";
+        Assert.Equal(moi, SanPhamDonParser.ChonItemsJson(ItemsNgheo, moi));
+    }
+
+    /// <summary>Bản mới không có sản phẩm nào (null/rỗng/"[]"/rác) → GIỮ bản cũ, đừng xóa dữ liệu bằng rỗng.</summary>
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("[]")]
+    [InlineData("{")]                 // JSON hỏng ở bản MỚI → chọn bản đọc được (cũ)
+    [InlineData("[{}]")]              // toàn dòng rác
+    public void ChonItemsJson_MoiRongHoacRac_GiuCu(string? moi)
+        => Assert.Equal(ItemsGiau, SanPhamDonParser.ChonItemsJson(ItemsGiau, moi));
+
+    /// <summary>Chưa có bản cũ (đơn mới / cột NULL) → lấy bản mới, kể cả bản nghèo.</summary>
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("[]")]
+    [InlineData("{")]                 // JSON hỏng ở bản CŨ → chọn bản đọc được (mới)
+    public void ChonItemsJson_CuRongHoacRac_LayMoi(string? cu)
+        => Assert.Equal(ItemsNgheo, SanPhamDonParser.ChonItemsJson(cu, ItemsNgheo));
+
+    /// <summary>Cả hai đều không đọc được → trả bản mới (không ném, không dựng dữ liệu từ hư không).</summary>
+    [Fact]
+    public void ChonItemsJson_CaHaiRac_LayMoi()
+    {
+        Assert.Equal("[]", SanPhamDonParser.ChonItemsJson("{", "[]"));
+        Assert.Null(SanPhamDonParser.ChonItemsJson(null, null));
+    }
+
     /// <summary>Đơn 3 SP thật → hai cột GSheet mỗi cột 3 DÒNG, khớp cặp theo dòng; SL đều bằng 1 nên KHÔNG có "×N".</summary>
     [Fact]
     public void CotGsheet_BaSanPhamThat_HaiCotBaDongKhopCap()

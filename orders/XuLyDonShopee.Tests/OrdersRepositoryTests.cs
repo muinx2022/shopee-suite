@@ -195,6 +195,112 @@ public class OrdersRepositoryTests
         Assert.Equal("₫292.010", ReadString(db, "SN1", "final_amount_text"));
     }
 
+    // ===================== items_json: bản NGHÈO không được đè bản GIÀU =====================
+
+    /// <summary><c>items_json</c> bản GIÀU (2 SP) — đọc ở TRANG CHI TIẾT: đủ 8 khóa
+    /// <c>[amount, donGia, image, name, phanLoai, sku, thanhTien, variation]</c> như đơn thật lúc 08:17.</summary>
+    private const string ItemsGiau =
+        "[{\"name\":\"Giày Boots Da Nữ Cổ Ngắn - A141\",\"variation\":\"Kem,36\",\"amount\":\"1\","
+        + "\"image\":\"https://cf.shopee.vn/file/abc\",\"phanLoai\":\"Kem,36\",\"sku\":\"A141\","
+        + "\"donGia\":303050,\"thanhTien\":303050},"
+        + "{\"name\":\"Áo Khoác Gió Phối Màu B21913\",\"variation\":\"xám,m\",\"amount\":\"1\","
+        + "\"image\":\"https://cf.shopee.vn/file/def\",\"phanLoai\":\"xám,m\",\"sku\":\"B21913\","
+        + "\"donGia\":345000,\"thanhTien\":345000}]";
+
+    /// <summary><c>items_json</c> bản NGHÈO (1 SP) — quét ở TRANG DANH SÁCH: chỉ 4 khóa
+    /// <c>[amount, image, name, variation]</c> như CHÍNH đơn đó lúc 09:46 (sau khi bị đè).</summary>
+    private const string ItemsNgheo =
+        "[{\"name\":\"Giày Boots Da Nữ Cổ Ngắn - A141\",\"variation\":\"Kem,36 [A141 A141]\",\"amount\":\"1\","
+        + "\"image\":\"https://cf.shopee.vn/file/abc\"}]";
+
+    /// <summary>Đơn <paramref name="sn"/> với đúng cặp <c>items_json</c> + <c>item_count</c> muốn thử.</summary>
+    private static SyncedOrder VoiItems(string sn, string itemsJson, int itemCount)
+    {
+        var o = Sample(sn);
+        o.ItemsJson = itemsJson;
+        o.ItemCount = itemCount;
+        return o;
+    }
+
+    /// <summary>
+    /// HỒI QUY (lỗi THẬT 28/07/2026): đơn đã đọc trang CHI TIẾT (items_json giàu) bị vòng sync sau — chỉ đọc trang
+    /// DANH SÁCH — ghi đè bằng bản nghèo, mất SKU/phân loại VĨNH VIỄN (đơn đã có ước tính không được mở lại chi
+    /// tiết nữa). Phải GIỮ bản giàu, và <c>item_count</c> đi theo bản được giữ (kẻo số nói dối).
+    /// </summary>
+    [Fact]
+    public void UpsertMany_CapNhat_BanNgheoKhongDeBanGiau_ItemCountDiTheo()
+    {
+        using var temp = new TempDatabase();
+        var db = temp.Open();
+        var repo = new OrdersRepository(db);
+
+        // Lượt 1: vừa mở TRANG CHI TIẾT → items_json GIÀU (2 SP, có sku + phanLoai).
+        repo.UpsertMany(1, new[] { VoiItems("SN1", ItemsGiau, 2) }, DateTime.UtcNow);
+
+        // Lượt 2 (vòng sync sau): chỉ có bản quét TRANG DANH SÁCH (nghèo, 1 SP) + lượt này không lấy được ước
+        // tính/vận đơn — đúng hiện trường production.
+        var danhSach = VoiItems("SN1", ItemsNgheo, 1);
+        danhSach.FinalAmount = null;
+        danhSach.FinalAmountText = null;
+        danhSach.TrackingNumber = null;
+        danhSach.TotalPrice = 200000;   // cột thường vẫn cập nhật bình thường
+        repo.UpsertMany(1, new[] { danhSach }, DateTime.UtcNow);
+
+        Assert.Equal(ItemsGiau, ReadString(db, "SN1", "items_json"));   // GIỮ bản giàu
+        Assert.Equal("2", ReadString(db, "SN1", "item_count"));         // count ĐI THEO bản giữ (không tụt về 1)
+        Assert.Equal("200000", ReadString(db, "SN1", "total_price"));   // cột thường vẫn đè
+        // Các cột "đã lấy được" khác giữ nguyên luật COALESCE cũ.
+        Assert.Equal("160000", ReadString(db, "SN1", "final_amount"));
+        Assert.Equal("SPXVN068067521447", ReadString(db, "SN1", "tracking_number"));
+    }
+
+    [Fact]
+    public void UpsertMany_CapNhat_BanGiauDeBanNgheo_LayBanGiau()
+    {
+        using var temp = new TempDatabase();
+        var db = temp.Open();
+        var repo = new OrdersRepository(db);
+
+        repo.UpsertMany(1, new[] { VoiItems("SN1", ItemsNgheo, 1) }, DateTime.UtcNow);
+        // Trang chi tiết đọc được sản phẩm → bản GIÀU thắng (dữ liệu mới nhất + đầy đủ hơn), count theo bản mới.
+        repo.UpsertMany(1, new[] { VoiItems("SN1", ItemsGiau, 2) }, DateTime.UtcNow);
+
+        Assert.Equal(ItemsGiau, ReadString(db, "SN1", "items_json"));
+        Assert.Equal("2", ReadString(db, "SN1", "item_count"));
+    }
+
+    [Fact]
+    public void UpsertMany_CapNhat_ItemsRong_KhongXoaBanDaCo()
+    {
+        using var temp = new TempDatabase();
+        var db = temp.Open();
+        var repo = new OrdersRepository(db);
+
+        repo.UpsertMany(1, new[] { VoiItems("SN1", ItemsGiau, 2) }, DateTime.UtcNow);
+        // Lượt sau không quét được sản phẩm nào ("[]" — mặc định của SyncedOrder) → KHÔNG xóa bản đã có.
+        repo.UpsertMany(1, new[] { VoiItems("SN1", "[]", 0) }, DateTime.UtcNow);
+
+        Assert.Equal(ItemsGiau, ReadString(db, "SN1", "items_json"));
+        Assert.Equal("2", ReadString(db, "SN1", "item_count"));
+    }
+
+    [Fact]
+    public void UpsertMany_CapNhat_CaHaiDeuNgheo_LayBanMoi()
+    {
+        using var temp = new TempDatabase();
+        var db = temp.Open();
+        var repo = new OrdersRepository(db);
+
+        repo.UpsertMany(1, new[] { VoiItems("SN1", ItemsNgheo, 1) }, DateTime.UtcNow);
+
+        // Hai bản cùng nghèo → giữ hành vi CŨ: bản mới nhất thắng (danh sách vừa quét là đúng hiện trạng đơn).
+        var moi = VoiItems("SN1", "[{\"name\":\"Giày\",\"variation\":\"ĐEN,37\",\"amount\":\"2\",\"image\":\"y\"}]", 1);
+        repo.UpsertMany(1, new[] { moi }, DateTime.UtcNow);
+
+        Assert.Equal(moi.ItemsJson, ReadString(db, "SN1", "items_json"));
+        Assert.Equal("1", ReadString(db, "SN1", "item_count"));
+    }
+
     [Fact]
     public void GetOrderSnsWithFinalAmount_ChiTraDonCoFinalAmount_TheoTaiKhoan()
     {

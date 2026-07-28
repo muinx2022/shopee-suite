@@ -149,6 +149,42 @@ public static class SanPhamDonParser
     }
 
     /// <summary>
+    /// Chọn bản <c>items_json</c> để LƯU khi upsert. Bản đọc ở TRANG CHI TIẾT (có khóa <c>sku</c>/<c>phanLoai</c>)
+    /// GIÀU hơn bản quét ở trang DANH SÁCH (chỉ <c>name/variation/amount/image</c>) — <b>không được để bản nghèo
+    /// đè bản giàu</b>: trang chi tiết chỉ mở lại cho đơn THIẾU ước tính, nên đơn đã có ước tính mà bị đè là mất
+    /// SKU/phân loại VĨNH VIỄN.
+    /// <para>
+    /// Luật: <paramref name="moi"/> rỗng/null → GIỮ <paramref name="cu"/> (đừng xóa dữ liệu bằng rỗng);
+    /// <paramref name="moi"/> CÓ dữ liệu chi tiết → lấy <paramref name="moi"/> (bản mới nhất luôn thắng);
+    /// <paramref name="moi"/> KHÔNG có mà <paramref name="cu"/> CÓ → GIỮ <paramref name="cu"/>; cả hai đều không
+    /// có → lấy <paramref name="moi"/> (bản mới nhất từ trang danh sách — giữ hành vi cũ).
+    /// </para>
+    /// <para>
+    /// Nhận biết "giàu" bằng <see cref="Parse"/>, KHÔNG so chuỗi thô (JSON có thể đổi thứ tự khóa); JSON hỏng đọc
+    /// ra danh sách RỖNG nên tự rơi về bên đọc được. Caller phải cho <c>item_count</c> ĐI THEO bản được chọn.
+    /// </para>
+    /// </summary>
+    public static string? ChonItemsJson(string? cu, string? moi)
+    {
+        if (string.IsNullOrWhiteSpace(moi))
+        {
+            return cu; // không có gì để ghi → tuyệt đối không xóa bản đang có
+        }
+
+        var spMoi = Parse(moi);
+        if (spMoi.Count == 0)
+        {
+            // "[]" / rác: chỉ được ghi đè khi bản cũ cũng chẳng có sản phẩm nào.
+            return Parse(cu).Count == 0 ? moi : cu;
+        }
+        if (CoDuLieuChiTiet(spMoi))
+        {
+            return moi; // bản mới nhất + đủ chi tiết → luôn thắng
+        }
+        return CoDuLieuChiTiet(Parse(cu)) ? cu : moi; // moi nghèo: cu giàu thì GIỮ cu, cu cũng nghèo thì lấy moi
+    }
+
+    /// <summary>
     /// Hai cột "Mã Sp" và "Phân loại" của Google Sheet, dựng từ CÙNG một danh sách đã sắp thứ tự nên hai chuỗi
     /// BẰNG SỐ DÒNG (nối bằng <c>"\n"</c> — <c>setValue</c> của Apps Script cho ra ô nhiều dòng). Số lượng gắn
     /// hậu tố <c>" ×N"</c> vào phân loại <b>chỉ khi N ≥ 2</b> (đơn 1 cái giữ nguyên "Kem,36" như các dòng đã có
@@ -167,7 +203,7 @@ public static class SanPhamDonParser
             return null;
         }
         // Chỉ đi đường MỚI khi thật sự có dữ liệu trang CHI TIẾT — khóa sku/phanLoai chỉ trang chi tiết mới có.
-        if (!sanPham.Any(sp => !string.IsNullOrEmpty(sp.Sku) || !string.IsNullOrEmpty(sp.PhanLoai)))
+        if (!CoDuLieuChiTiet(sanPham))
         {
             return null;
         }
@@ -187,6 +223,11 @@ public static class SanPhamDonParser
         }
         return new CotGsheetSanPham(string.Join("\n", sku), string.Join("\n", phanLoai));
     }
+
+    /// <summary>Danh sách có dữ liệu TRANG CHI TIẾT chưa? = ít nhất MỘT sản phẩm mang <c>sku</c> hoặc
+    /// <c>phanLoai</c> — hai khóa chỉ trang chi tiết mới có (bản quét trang danh sách chỉ có <c>variation</c>).</summary>
+    private static bool CoDuLieuChiTiet(IReadOnlyList<SanPhamDon> sanPham)
+        => sanPham.Any(sp => !string.IsNullOrEmpty(sp.Sku) || !string.IsNullOrEmpty(sp.PhanLoai));
 
     /// <summary>Chuỗi từ property ĐẦU TIÊN có mặt trong <paramref name="khoa"/> (bí danh): đổi <c>&amp;nbsp;</c>
     /// thành khoảng trắng + trim. Thiếu / kiểu khác / rỗng → <c>null</c>.</summary>

@@ -108,18 +108,23 @@ public class OrdersRepository
                 continue; // không có mã đơn → không thể làm khóa upsert
             }
 
-            // Có sẵn chưa? (khóa nghiệp vụ account_id + order_sn)
+            // Có sẵn chưa? (khóa nghiệp vụ account_id + order_sn). Lấy luôn items_json + item_count ĐANG lưu:
+            // nhánh UPDATE phải giữ được bản sản phẩm GIÀU hơn (xem chỗ dùng $items bên dưới).
             long? existingId = null;
+            string? itemsCu = null;
+            var itemCountCu = 0;
             using (var sel = conn.CreateCommand())
             {
                 sel.Transaction = tx;
-                sel.CommandText = "SELECT id FROM orders WHERE account_id = $account AND order_sn = $sn;";
+                sel.CommandText = "SELECT id, items_json, item_count FROM orders WHERE account_id = $account AND order_sn = $sn;";
                 sel.Parameters.AddWithValue("$account", accountId);
                 sel.Parameters.AddWithValue("$sn", o.OrderSn);
-                var res = sel.ExecuteScalar();
-                if (res is not null && res != DBNull.Value)
+                using var res = sel.ExecuteReader();
+                if (res.Read())
                 {
-                    existingId = (long)res;
+                    existingId = res.GetInt64(0);
+                    itemsCu = res.IsDBNull(1) ? null : res.GetString(1);
+                    itemCountCu = res.IsDBNull(2) ? 0 : res.GetInt32(2);
                 }
             }
 
@@ -157,6 +162,10 @@ public class OrdersRepository
                 // tracking_number dùng COALESCE($tracking, tracking_number): lượt sync này KHÔNG đọc được mã vận đơn
                 // (đơn "Đã hủy" nên danh sách không hiện cột, hoặc lỗi đọc) thì GIỮ mã đã có, KHÔNG xóa về NULL —
                 // mất vận đơn kéo theo đơn hủy rơi vào nhánh BỎ QUA của GSheet (không tô đỏ) và hub mất dữ liệu.
+                // items_json/item_count: KHÔNG COALESCE được (bản nghèo vẫn khác NULL) nên chọn bằng C# ngay dưới —
+                // bản quét trang DANH SÁCH ({name,variation,amount,image}) tuyệt đối không được đè bản đọc ở trang
+                // CHI TIẾT (thêm sku/phanLoai/donGia/thanhTien): trang chi tiết chỉ mở lại cho đơn THIẾU ước tính
+                // nên đơn đã có ước tính mà bị đè là mất SKU/phân loại VĨNH VIỄN.
                 // hub_synced_at: RESET về NULL để lượt đẩy hub kế đẩy LẠI đơn kèm dữ liệu mới, khi một trong các
                 // điều kiện sau đúng (hub chỉ lấy đơn hub_synced_at IS NULL — KHÔNG có re-push "vận đơn mới" như
                 // GSheet; hub UpsertOrders idempotent nên đẩy lại chỉ cập nhật). Trong UPDATE của SQLite, cột ở vế
@@ -189,6 +198,13 @@ public class OrdersRepository
                 upd.Parameters.AddWithValue("$shopId", (object?)shopId ?? DBNull.Value);
                 upd.Parameters.AddWithValue("$shopLogin", (object?)shopLogin ?? DBNull.Value);
                 BindData(upd, o);
+                // GIỮ bản sản phẩm giàu hơn; item_count phải ĐI THEO bản được giữ, kẻo còn lại con số nói dối.
+                var itemsGiu = SanPhamDonParser.ChonItemsJson(itemsCu, o.ItemsJson);
+                if (!string.Equals(itemsGiu, o.ItemsJson, StringComparison.Ordinal))
+                {
+                    upd.Parameters["$items"].Value = (object?)itemsGiu ?? DBNull.Value;
+                    upd.Parameters["$itemCount"].Value = itemCountCu;
+                }
                 upd.Parameters.AddWithValue("$synced", syncedAtStr);
                 upd.Parameters.AddWithValue("$id", existingId.Value);
                 upd.ExecuteNonQuery();
