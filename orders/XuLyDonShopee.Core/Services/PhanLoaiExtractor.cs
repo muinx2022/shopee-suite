@@ -9,6 +9,11 @@ namespace XuLyDonShopee.Core.Services;
 /// <c>"Nâu Be,39 [A322 A322]"</c> — đuôi ngoặc vuông là SKU lặp lại, CẮT BỎ (SKU đã có cột riêng).
 /// Đơn nhiều sản phẩm → nối bằng <c>" · "</c>.
 /// <para>
+/// Từ bản đọc sản phẩm ở TRANG CHI TIẾT (<c>SanPhamDonParser</c> — chỉ có bên client, KHÔNG link sang hub nên
+/// nhắc bằng tên trần), mỗi phần tử có thể có thêm khóa <c>phanLoai</c> SẠCH sẵn — <see cref="ChuoiPhanLoai"/>
+/// ưu tiên khóa đó, đơn cũ không có thì vẫn dùng <c>variation</c> + luật cắt đuôi như trước.
+/// </para>
+/// <para>
 /// Dữ liệu đến từ web nên phải chịu được rác: JSON hỏng / thiếu field / <c>&amp;nbsp;</c> / chuỗi rỗng → trả
 /// chuỗi RỖNG, KHÔNG ném. File này được LINK sang hub (<c>server/Shopee.Hub.Web</c>) để hub và client hiện
 /// CÙNG một luật — sửa ở đây là đổi cả hai nơi.
@@ -47,14 +52,13 @@ public static class PhanLoaiExtractor
             var parts = new List<string>();
             foreach (var item in doc.RootElement.EnumerateArray())
             {
-                if (item.ValueKind != JsonValueKind.Object
-                    || !item.TryGetProperty("variation", out var v)
-                    || v.ValueKind != JsonValueKind.String)
+                var raw = ChuoiPhanLoai(item);
+                if (raw is null)
                 {
                     continue; // phần tử lạ / thiếu field → bỏ qua sản phẩm đó
                 }
 
-                var s = DonGian(v.GetString());
+                var s = DonGian(raw);
                 if (s.Length == 0)
                 {
                     continue;
@@ -73,6 +77,29 @@ public static class PhanLoaiExtractor
         {
             return string.Empty; // items_json rác (đơn cũ / dữ liệu cụt) → coi như không có phân loại
         }
+    }
+
+    /// <summary>
+    /// Chuỗi phân loại THÔ của một phần tử: ƯU TIÊN khóa <c>phanLoai</c> (trang CHI TIẾT đơn ghi vào — đã SẠCH,
+    /// không dính đuôi <c>[SKU SKU]</c>), không có mới quay về <c>variation</c> (bản quét trang DANH SÁCH của đơn
+    /// cũ — vẫn đi luật cắt đuôi trong <see cref="DonGian"/>). Phần tử lạ / cả hai khóa đều thiếu hoặc không phải
+    /// chuỗi → <c>null</c>.
+    /// </summary>
+    private static string? ChuoiPhanLoai(JsonElement item)
+    {
+        if (item.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+        if (item.TryGetProperty("phanLoai", out var p)
+            && p.ValueKind == JsonValueKind.String
+            && !string.IsNullOrWhiteSpace(p.GetString()))
+        {
+            return p.GetString();
+        }
+        return item.TryGetProperty("variation", out var v) && v.ValueKind == JsonValueKind.String
+            ? v.GetString()
+            : null;
     }
 
     /// <summary>

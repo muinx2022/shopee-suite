@@ -376,6 +376,16 @@ public static class HubOutbox
                         tabRows = new List<GsheetOrderRow>();
                         rowsByTab[tab] = tabRows;
                     }
+                    // K + M — trang CHI TIẾT đơn đã đọc được SKU/phân loại THẬT của TỪNG sản phẩm thì dựng cả hai
+                    // cột từ CÙNG một danh sách (dòng thứ i của cột SKU khớp dòng thứ i của cột Phân loại; đơn 1
+                    // sản phẩm ra chuỗi KHÔNG xuống dòng, y như trước). null = chưa có dữ liệu trang chi tiết
+                    // (đơn cũ) → giữ NGUYÊN đường cũ, không gửi chuỗi rỗng đè ô đang có.
+                    var cotSanPham = SanPhamDonParser.CotGsheet(p.ItemsJson);
+                    var phanLoai = cotSanPham is null
+                        ? PhanLoaiExtractor.TuItemsJson(p.ItemsJson)
+                        : cotSanPham.PhanLoai;
+                    var maSp = cotSanPham is null ? p.Sku : cotSanPham.Sku;
+
                     // Thứ tự dưới đây xếp theo ĐÚNG thứ tự CỘT trong sheet (A→M) cho dễ đối chiếu — xem
                     // GsheetOrderRow. Tham số CÓ TÊN nên đổi thứ tự cột sau này không gây lệch âm thầm.
                     tabRows.Add(new GsheetOrderRow(
@@ -392,8 +402,8 @@ public static class HubOutbox
                         Ngay: ngay,                                           // I
                         TenShop: tenShop,                                     // J
                         // K — suy từ items_json đã quét; rỗng thì gửi NULL (cùng nếp "chỉ điền ô trống").
-                        PhanLoai: PhanLoaiExtractor.TuItemsJson(p.ItemsJson) is { Length: > 0 } phanLoai ? phanLoai : null,
-                        Sku: p.Sku,                                           // M "Mã Sp"
+                        PhanLoai: string.IsNullOrWhiteSpace(phanLoai) ? null : phanLoai,
+                        Sku: string.IsNullOrWhiteSpace(maSp) ? null : maSp,    // M "Mã Sp"
                         DaHuy: daHuy));                                       // cờ tô màu, không phải cột
                 }
 

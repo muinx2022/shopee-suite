@@ -738,7 +738,8 @@ public sealed class OrdersBridgeSession : IDisposable
         L($"Đọc được {orders.Count} đơn (Tất cả).");
 
         // Lấy "Số tiền cuối cùng" (cột Ước tính) cho đơn ĐANG chuẩn bị CHƯA có final: mở CHI TIẾT từng đơn (extension) →
-        // đọc [type='FinalAmount'] .amount → MERGE vào DTO TRƯỚC callback persist (một lần upsert). finalDoneSns = tập
+        // đọc [type='FinalAmount'] .amount + DANH SÁCH SẢN PHẨM (SKU/phân loại thật) trong CÙNG lần mở đó →
+        // MERGE vào DTO TRƯỚC callback persist (một lần upsert). finalDoneSns = tập
         // order_sn ĐÃ có final trong DB (App rót) → bỏ, không mở lại mỗi chu kỳ. Best-effort: lỗi/timeout/captcha → vẫn lưu phần đã có.
         var done = _finalDoneSns?.Invoke() ?? EmptyFinalSet;
         var needFinal = orders.Where(o =>
@@ -765,7 +766,7 @@ public sealed class OrdersBridgeSession : IDisposable
                 }
                 else
                 {
-                    var got = MergeFinalAmounts(orders, finalsJson);
+                    var got = MergeFinalAmounts(orders, finalsJson, L);
                     L($"Lấy Số tiền cuối cùng: {got}/{needFinal.Count} đơn.");
                 }
             }
@@ -995,10 +996,18 @@ public sealed class OrdersBridgeSession : IDisposable
         _saveReturnCount!(shopLogin, soMoi);
     }
 
-    /// <summary>Parse JSON mảng <c>{orderSn, finalText}</c> (extension trả) → map <c>orderSn→finalText</c> → gán
+    /// <summary>Parse JSON mảng <c>{orderSn, finalText, sanPham:[…]}</c> (extension trả) → map theo <c>orderSn</c> → gán
     /// <see cref="SyncedOrder.FinalAmount"/> (<see cref="ShopeeShippingNav.ParseVndAmount"/>) + <see cref="SyncedOrder.FinalAmountText"/>
-    /// cho đơn khớp trong <paramref name="orders"/> (CHỈ khi finalText khác rỗng). Trả số đơn đã gán. Best-effort (JSON lỗi → 0).</summary>
-    private static int MergeFinalAmounts(IReadOnlyList<SyncedOrder> orders, string? finalsJson)
+    /// cho đơn khớp trong <paramref name="orders"/> (CHỈ khi finalText khác rỗng). Trả số đơn đã gán. Best-effort (JSON lỗi → 0).
+    /// <para>
+    /// Gộp LUÔN danh sách SẢN PHẨM trang chi tiết (<see cref="SanPhamDonParser"/>) vào <see cref="SyncedOrder.ItemsJson"/>:
+    /// trang chi tiết là nguồn CHUẨN (SKU thật, phân loại sạch, đủ sản phẩm hơn) nên THAY cả mảng; đọc được rỗng →
+    /// GIỮ NGUYÊN mảng cũ quét ở trang danh sách, không xoá. Dòng meta lạ / danh sách bị cắt vì vượt trần → log
+    /// qua <paramref name="log"/>, đừng nuốt im lặng.
+    /// </para>
+    /// <para>internal (không private) để test được luật gộp mà không cần mở trình duyệt — như
+    /// <see cref="QuyetDinhSauDatDiaChi"/>.</para></summary>
+    internal static int MergeFinalAmounts(IReadOnlyList<SyncedOrder> orders, string? finalsJson, Action<string> log)
     {
         if (string.IsNullOrWhiteSpace(finalsJson))
         {
@@ -1006,6 +1015,7 @@ public sealed class OrdersBridgeSession : IDisposable
         }
 
         var map = new Dictionary<string, string>(StringComparer.Ordinal);
+        var sanPhamMap = new Dictionary<string, string>(StringComparer.Ordinal);
         try
         {
             using var doc = JsonDocument.Parse(finalsJson);
@@ -1015,9 +1025,17 @@ public sealed class OrdersBridgeSession : IDisposable
                 {
                     var sn = el.TryGetProperty("orderSn", out var s) && s.ValueKind == JsonValueKind.String ? s.GetString() : null;
                     var ft = el.TryGetProperty("finalText", out var f) && f.ValueKind == JsonValueKind.String ? f.GetString() : null;
-                    if (!string.IsNullOrWhiteSpace(sn) && !string.IsNullOrWhiteSpace(ft))
+                    if (string.IsNullOrWhiteSpace(sn))
+                    {
+                        continue;
+                    }
+                    if (!string.IsNullOrWhiteSpace(ft))
                     {
                         map[sn!] = ft!;
+                    }
+                    if (el.TryGetProperty("sanPham", out var sp) && sp.ValueKind == JsonValueKind.Array)
+                    {
+                        sanPhamMap[sn!] = sp.GetRawText();
                     }
                 }
             }
@@ -1025,6 +1043,8 @@ public sealed class OrdersBridgeSession : IDisposable
         catch { return 0; }
 
         var got = 0;
+        var donCoSanPham = 0;
+        var tongSanPham = 0;
         foreach (var order in orders)
         {
             if (map.TryGetValue(order.OrderSn, out var finalText) && !string.IsNullOrWhiteSpace(finalText))
@@ -1033,6 +1053,35 @@ public sealed class OrdersBridgeSession : IDisposable
                 order.FinalAmountText = finalText;
                 got++;
             }
+
+            if (!sanPhamMap.TryGetValue(order.OrderSn, out var raw))
+            {
+                continue;
+            }
+            var sanPham = SanPhamDonParser.Parse(raw);
+            if (sanPham.Count == 0)
+            {
+                continue; // trang chi tiết không đọc được sản phẩm nào → GIỮ NGUYÊN mảng cũ
+            }
+
+            order.ItemsJson = SanPhamDonParser.TaoItemsJson(sanPham);
+            order.ItemCount = sanPham.Count; // giữ đúng bất biến "item_count = độ dài mảng items"
+            donCoSanPham++;
+            tongSanPham += sanPham.Count;
+
+            if (sanPham.Any(sp => sp.BiCat))
+            {
+                log($"Đơn {order.OrderSn}: danh sách sản phẩm VƯỢT trần của extension — đã cắt còn {sanPham.Count}, có thể thiếu sản phẩm.");
+            }
+            foreach (var la in sanPham.SelectMany(sp => sp.MetaLa).Distinct(StringComparer.Ordinal).Take(3))
+            {
+                log($"Đơn {order.OrderSn}: dòng thông tin sản phẩm KHÔNG khớp nhãn nào → '{la}'.");
+            }
+        }
+
+        if (donCoSanPham > 0)
+        {
+            log($"Đọc sản phẩm trang chi tiết: {donCoSanPham} đơn, {tongSanPham} sản phẩm.");
         }
         return got;
     }

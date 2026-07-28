@@ -75,8 +75,10 @@ public class HubOutboxGsheetHuyTests
     /// Web App Apps Script GIẢ trên loopback (TcpListener + HTTP/1.1 tối giản): GHI LẠI body từng POST rồi trả
     /// <c>{"results":[…ok…]}</c> cho đúng các <c>maDon</c> trong body. Đủ để kiểm ĐƠN NÀO được gửi và gửi kèm cờ
     /// <c>daHuy</c> nào — không đụng mạng ngoài, không cần đăng ký cổng với hệ điều hành.
+    /// <para>Dùng lại ở <see cref="HubOutboxGsheetSanPhamTests"/> (cùng một hợp đồng POST) nên để
+    /// <c>internal</c>.</para>
     /// </summary>
-    private sealed class FakeGsheetWebApp : IDisposable
+    internal sealed class FakeGsheetWebApp : IDisposable
     {
         private readonly TcpListener _listener;
         private readonly CancellationTokenSource _cts = new();

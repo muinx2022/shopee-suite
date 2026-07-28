@@ -291,6 +291,67 @@ function pageReadFinalAmount() {
   return "";
 }
 
+// Đọc DANH SÁCH SẢN PHẨM trên TRANG CHI TIẾT đơn. Chạy trong CHÍNH tab chi tiết doSyncOrderFinals đã mở sẵn để
+// lấy "Số tiền cuối cùng" ⇒ KHÔNG thêm lượt mở trang nào. Trả JSON mảng
+// [{stt, ten, phanLoai, sku, donGia, soLuong, thanhTien, anh, metaLa}]; không có .product-list → "[]" (KHÔNG ném).
+// BA CÁI BẪY của HTML này — đừng gỡ nếu chưa có HTML mới:
+//  1) Dòng TIÊU ĐỀ mang CẢ class product-list-item (class="product-list-item product-list-head") ⇒ phải loại
+//     .product-list-head, kẻo có một "sản phẩm" tên "Sản phẩm" giá "Đơn Giá".
+//  2) Nhãn "SKU phân loại" CHỨA chuỗi "phân loại" ⇒ xét nhãn SKU TRƯỚC, không thì SKU chui vào ô phân loại.
+//  3) Tên SP ở thuộc tính title (text bên trong dính <!----> của Vue); ảnh là background-image trong style,
+//     KHÔNG phải <img src>.
+// donGia/soLuong/thanhTien trả TEXT THÔ — C# parse số (test được, đúng nếp soYeuCauText của bước trả hàng).
+// Vượt trần maxItems → cắt + gắn cờ bicat trên dòng CUỐI để C# log (đừng im lặng nuốt sản phẩm).
+function pageReadOrderProducts(maxItems) {
+  const norm = (s) => (s || "").replace(/\u00A0/g, " ").replace(/\s+/g, " ").trim();
+  const tran = maxItems > 0 ? maxItems : 20;
+  const rows = document.querySelectorAll(".product-list .product-list-item:not(.product-list-head)");
+  const out = [];
+  for (const row of rows) {
+    if (out.length >= tran) {
+      if (out.length) out[out.length - 1].bicat = true;
+      break;
+    }
+    try {
+      const txt = (sel) => { const el = row.querySelector(sel); return el ? norm(el.textContent) : ""; };
+
+      const nameEl = row.querySelector(".product-name");
+      let ten = nameEl ? norm(nameEl.getAttribute("title")) : "";
+      if (!ten && nameEl) ten = norm(nameEl.textContent);
+
+      let phanLoai = "", sku = "";
+      const metaLa = [];
+      for (const d of row.querySelectorAll(".product-meta > div")) {
+        const raw = norm(d.textContent);
+        if (!raw) continue;
+        const ci = raw.indexOf(":");
+        const nhan = (ci >= 0 ? raw.substring(0, ci) : raw).toLowerCase();
+        const giaTri = ci >= 0 ? raw.substring(ci + 1).trim() : "";
+        if (nhan.indexOf("sku") >= 0) { if (!sku) sku = giaTri; }                          // BẪY 2: SKU xét TRƯỚC
+        else if (nhan.indexOf("phân loại") >= 0 || nhan.indexOf("phan loai") >= 0 || nhan.indexOf("variation") >= 0) {
+          if (!phanLoai) phanLoai = giaTri;
+        }
+        else metaLa.push(raw); // nhãn lạ → gửi NGUYÊN VĂN để C# log, đừng đoán bừa
+      }
+
+      let anh = "";
+      const imgEl = row.querySelector(".product-image");
+      if (imgEl) {
+        const bg = (imgEl.style && imgEl.style.backgroundImage) || "";
+        const m = bg.match(/url\((['"]?)(.*?)\1\)/);
+        if (m) anh = m[2];
+      }
+
+      out.push({
+        stt: txt(".no"), ten: ten, phanLoai: phanLoai, sku: sku,
+        donGia: txt(".price"), soLuong: txt(".qty"), thanhTien: txt(".subtotal"),
+        anh: anh, metaLa: metaLa,
+      });
+    } catch (e) { /* dòng lạ — bỏ qua, không phá cả đơn */ }
+  }
+  return JSON.stringify(out);
+}
+
 // Ký hiệu danh sách hiện tại: "<số card>|<mã đơn card đầu>" — phát hiện trang ĐỔI sau khi bấm trang sau.
 function pageListSignature() {
   const cards = document.querySelectorAll("a[data-testid='order-item']");
@@ -782,6 +843,7 @@ const ORDER_DETAIL_PREFIX = "https://banhang.shopee.vn/portal/sale/order/"; // +
 const SHIPPING_SETTINGS_URL = "https://banhang.shopee.vn/portal/all-settings/shipping";
 const RETURNS_URL = "https://banhang.shopee.vn/portal/sale/returnrefundcancel"; // trang "Trả hàng/Hoàn tiền/Hủy".
 const MAX_ORDER_PAGES = 10; // chốt chặn số trang quét (khớp MaxSyncPages phía C#).
+const MAX_ORDER_PRODUCTS = 20;     // trần số sản phẩm đọc/đơn ở trang chi tiết (vượt → cắt + cờ bicat cho C# log).
 const MAX_RETURN_ROWS = 50;        // trần số dòng trả hàng đọc/lượt (chỉ trang ĐẦU, không phân trang).
 const MAX_RETURN_HEAD_HTML = 4000; // trần ký tự HTML mỗi dòng gửi về C# (giữ payload gọn).
 // Mục sắp xếp cần chọn, so trên text KHÔNG dấu (_na): "Ngày yêu cầu (Mới - Cũ)". Ràng buộc "moi - cu" để KHÔNG
@@ -1256,7 +1318,9 @@ async function doSyncOrders() {
 // của Playwright): với mỗi đơn {orderSn, shopeeOrderId} → mở tab CHI TIẾT (active:false) → đọc [type='FinalAmount']
 // .amount → trả text. Best-effort per-đơn (1 đơn lỗi/timeout → finalText rỗng, KHÔNG phá lượt); LUÔN đóng tab chi tiết;
 // dò /verify → gom cờ captcha + dừng lượt. Chốt chặn 30 đơn/lượt. KHÔNG đổi active sang tab chi tiết (giữ tab thao tác).
-// Trả {action:"pageData", kind:"finals", data:<json mảng {orderSn, finalText}>}.
+// ĐỌC KÈM danh sách SẢN PHẨM (pageReadOrderProducts) NGAY TRONG tab chi tiết đó — miễn phí, KHÔNG thêm lượt mở
+// trang nào (chrome.tabs.create của hàm này vẫn là chỗ DUY NHẤT mở tab trong cả extension đơn hàng).
+// Trả {action:"pageData", kind:"finals", data:<json mảng {orderSn, finalText, sanPham:[…]}>}.
 async function doSyncOrderFinals(orders) {
   const MAX_FINALS = 30;
   let list = Array.isArray(orders) ? orders : [];
@@ -1271,6 +1335,7 @@ async function doSyncOrderFinals(orders) {
     if (!orderSn || !shopeeOrderId) continue;
     let tabId = null;
     let finalText = "";
+    let sanPham = [];
     try {
       const t = await chrome.tabs.create({ url: ORDER_DETAIL_PREFIX + shopeeOrderId, active: false });
       tabId = t.id;
@@ -1290,12 +1355,19 @@ async function doSyncOrderFinals(orders) {
         if (finalText) break;
         await sleep(500);
       }
+      // Đọc THÊM sản phẩm trong CHÍNH tab này (kể cả khi finalText rỗng). Bọc try RIÊNG: sản phẩm là phần THÊM,
+      // lỗi ở đây KHÔNG được làm mất finalText vừa đọc được.
+      try {
+        const raw = (await execInTab(tabId, pageReadOrderProducts, [MAX_ORDER_PRODUCTS])) || "[]";
+        const arr = JSON.parse(raw);
+        if (Array.isArray(arr)) sanPham = arr;
+      } catch (e) { sanPham = []; }
     } catch (e) {
       finalText = ""; // 1 đơn lỗi → bỏ, tiếp đơn kế
     } finally {
       if (tabId != null) { try { await chrome.tabs.remove(tabId); } catch (e) {} } // LUÔN đóng tab chi tiết
     }
-    out.push({ orderSn: orderSn, finalText: finalText });
+    out.push({ orderSn: orderSn, finalText: finalText, sanPham: sanPham });
   }
   send({ action: "pageData", kind: "finals", data: JSON.stringify(out) });
 }

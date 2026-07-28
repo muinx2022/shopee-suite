@@ -1,7 +1,7 @@
 # Plan: Đọc SẢN PHẨM của từng đơn ở trang chi tiết (nhiều SP lấy đủ)
 
 - **Ngày:** 2026-07-28
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành (chờ release client) — đường NHIỀU sản phẩm mới chỉ phủ bằng test + rig jsdom, CHƯA đối chiếu trang thật vì dữ liệu production chưa có đơn nào >1 SP
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-dev`)
 
 > Đây là **plan 1/2**. Plan này chỉ lo **cào + lưu + đẩy lên GSheet**. Phần hiển thị bung-dòng trên app và hub
