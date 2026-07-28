@@ -102,19 +102,22 @@ Thêm: nhãn có **tooltip lẫn vào text** — lấy thô ra `"Doanh thu đơn
 
 ## 3. Các bước
 
-### Bước 1 — Chờ thông minh hơn trong `doSyncOrderFinals`
+### Bước 1 — ĐẢO ƯU TIÊN: bảng doanh thu thành nguồn CHÍNH (người dùng chốt 28/07)
 
-Hiện tại: poll `pageReadFinalAmount` mỗi 500ms, trần **15s**, hụt thì bỏ.
+> **Người dùng chốt sau khi đọc chẩn đoán:** *"vậy lấy theo số Doanh thu đơn hàng ước tính, chỗ này là sync cùng
+> với list sản phẩm"*. ⇒ **BỎ hẳn** ý định nới thời gian chờ lên 30s.
+
+Lý do đúng: bảng `.income-container` thuộc **trang chính**, render cùng nhịp với `.product-list` — mà `.product-list`
+đã chứng minh đọc được **4/4** trong cùng lượt mà thẻ remote chỉ về 3/4. Đọc chỗ đã có sẵn thì không phải chờ gì.
 
 Sửa:
-- Nới trần lên **30s** — nhưng **chỉ khi đáng chờ**: nếu đã thấy thẻ `[type='FinalAmount']` trong DOM mà `.amount`
-  chưa có nội dung thì remote đang tải ⇒ chờ tiếp. Nếu **quá 8s vẫn không thấy thẻ nào**, coi như bố cục không có
-  thẻ đó ⇒ **thôi chờ**, sang đường dự phòng ngay (đừng đốt 30s vô ích cho mọi đơn).
-- Cần một page-func nhỏ trả trạng thái, vd `pageFinalAmountState()` → `"co-so"` / `"dang-tai"` / `"khong-thay"`,
-  để C#/JS quyết định chờ tiếp hay bỏ. Đừng nhét luật chờ vào `pageReadFinalAmount` (giữ hàm đó thuần đọc).
+- **Thứ tự dò mới trong `pageReadFinalAmount`:** bảng doanh thu **TRƯỚC**, thẻ `[type='FinalAmount']` lùi xuống
+  làm dự phòng (phòng khi khối doanh thu bị gập / bố cục khác).
+- **GIỮ NGUYÊN trần poll 15s**, không nới. Không thêm page-func trạng thái, không thêm vòng chờ nào.
+- Hai đường dò cũ giữ nguyên nguyên vẹn, chỉ đổi THỨ TỰ ưu tiên — vẫn là mạng lưới an toàn.
 
-Cân nhắc chi phí: 30 đơn/lượt × thêm 15s = tối đa +7,5 phút/lượt **nếu mọi đơn đều hỏng**. Thực tế chỉ ~1/3 đơn
-phải chờ thêm, và chỉ tới khi thẻ về. Vẫn phải nêu con số xấu nhất này trong báo cáo.
+Nhờ vậy thời gian mỗi lượt sync **không tăng**, thậm chí giảm: đơn nào trước đây phải poll đủ 15s rồi bỏ cuộc thì
+nay đọc được ngay từ lần poll đầu.
 
 ### Bước 2 — Đường dự phòng: bảng doanh thu trang chính
 
@@ -139,7 +142,8 @@ Trả **text thô** cho C# parse — giữ nếp hiện tại (`MergeFinalAmount
 Khuôn có sẵn: `scratchpad/kiemtra-sanpham.js`, `scratchpad/chay3sp.js` — tách **nguyên văn** thân hàm từ
 `background.js` rồi chạy trong jsdom, KHÔNG chép tay. Ca cần phủ:
 
-- [ ] **Thẻ remote ĐÃ về** (dựng đúng HTML ở mục 1) → ra `"₫374.227"` qua đường 1. *(hồi quy — đường đang chạy)*
+- [ ] **Có CẢ bảng doanh thu lẫn thẻ remote** → lấy theo bảng doanh thu, ra `"₫374.227"`; hai nguồn phải cho CÙNG số (đã đối chiếu trên mẫu thật).
+- [ ] **CHỈ có thẻ remote**, không có bảng doanh thu → dự phòng vẫn ra `"₫374.227"`. *(hồi quy đường cũ)*
 - [ ] **Thẻ remote có mà `.amount` RỖNG** (đang tải) → `pageReadFinalAmount` trả `""`, và hàm trạng thái báo
       `"dang-tai"` để caller chờ tiếp.
 - [ ] **KHÔNG có thẻ remote**, chỉ có bảng doanh thu → đường 3 ra đúng số của dòng "Doanh thu đơn hàng ước tính".
@@ -163,13 +167,13 @@ Hiện chỉ có `Lấy Số tiền cuối cùng: 3/4 đơn.` — không biết 
 - [ ] `node --check extensions/shopee-orders/background.js` OK.
 - [ ] Rig jsdom: đủ 4 ca ở Bước 4, dán kết quả chạy thật vào báo cáo.
 - [ ] Số lượt `chrome.tabs.create` không đổi (chỉ ra chỗ gọi).
-- [ ] Nêu rõ trong báo cáo: thời gian xấu nhất thêm vào mỗi lượt sync.
+- [ ] Khẳng định trong báo cáo: trần poll VẪN là 15s, không thêm vòng chờ nào ⇒ thời gian mỗi lượt sync KHÔNG tăng.
 
 ## 5. Rủi ro & lưu ý
 
 - **Đừng đổi hai đường dò hiện có.** Chúng đúng; ~2/3 đơn đang đọc được nhờ chúng. Chỉ THÊM.
 - **Bẫy "ước tính" phải khớp cả "doanh thu"** — ghi nhầm phí vận chuyển lên sheet còn tệ hơn để trống.
-- **Đừng chờ mù 30s cho mọi đơn** — chỉ chờ khi thẻ có mặt mà chưa có số. Chờ mù làm chậm cả lượt sync.
+- **Không nới thời gian chờ** (người dùng đã chốt) — nguồn chính nay render sẵn cùng trang, chờ thêm là vô ích.
 - Bảng doanh thu nằm trong khối có nút gập ("Ẩn chi tiết doanh thu"). Nếu người dùng/Shopee để mặc định GẬP thì
   `.income-container` có thể không render ⇒ đường 3 trượt. **Không bấm nút gập** (thêm thao tác = thêm rủi ro);
   chỉ đọc khi có, không có thì thôi.
