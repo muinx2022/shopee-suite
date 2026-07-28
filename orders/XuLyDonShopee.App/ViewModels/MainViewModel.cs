@@ -10,7 +10,7 @@ namespace XuLyDonShopee.App.ViewModels;
 public record NavItem(string Label, string Icon);
 
 /// <summary>
-/// ViewModel cửa sổ chính: điều hướng giữa các màn hình Tài khoản / Đơn hàng / Proxy / Cài đặt.
+/// ViewModel cửa sổ chính: điều hướng giữa các màn hình Tài khoản / Đơn hàng / Đơn toàn hệ thống / Thống kê.
 /// </summary>
 public partial class MainViewModel : ViewModelBase
 {
@@ -18,6 +18,7 @@ public partial class MainViewModel : ViewModelBase
     private readonly AccountsViewModel _accountsVm;
     private readonly OrdersViewModel _ordersVm;
     private readonly HubOrdersViewModel _hubOrdersVm;
+    private readonly OrderStatisticsViewModel _statisticsVm;
     private readonly SettingsViewModel _settingsVm;
 
     public MainViewModel(AppServices services)
@@ -26,6 +27,7 @@ public partial class MainViewModel : ViewModelBase
         _accountsVm = new AccountsViewModel(services);
         _ordersVm = new OrdersViewModel(services);
         _hubOrdersVm = new HubOrdersViewModel(services);
+        _statisticsVm = new OrderStatisticsViewModel(services);
         _settingsVm = new SettingsViewModel(services);
         _currentViewModel = _accountsVm;
 
@@ -46,6 +48,8 @@ public partial class MainViewModel : ViewModelBase
     public OrdersViewModel OrdersVm => _ordersVm;
     /// <summary>Màn "Đơn toàn hệ thống" (CHỈ ĐỌC — đơn của mọi máy, đọc thẳng từ Hub).</summary>
     public HubOrdersViewModel HubOrdersVm => _hubOrdersVm;
+    /// <summary>Màn "Thống kê" tổng hợp ảnh chụp kho đơn trên máy.</summary>
+    public OrderStatisticsViewModel StatisticsVm => _statisticsVm;
     /// <summary>Màn "Cài đặt" của đơn hàng — nhúng vào màn Cài đặt GỘP của suite.</summary>
     public SettingsViewModel SettingsVm => _settingsVm;
 
@@ -54,7 +58,8 @@ public partial class MainViewModel : ViewModelBase
     {
         new NavItem("Tài khoản", "◵"),
         new NavItem("Đơn hàng", "▤"),
-        new NavItem("Đơn toàn hệ thống", "▤")
+        new NavItem("Đơn toàn hệ thống", "▤"),
+        new NavItem("Thống kê", "▥")
     };
 
     [ObservableProperty]
@@ -127,6 +132,10 @@ public partial class MainViewModel : ViewModelBase
                 // ribbon là đơ UI tới khi Hub trả lời. VM tự đặt trạng thái "Đang tải…" rồi cập nhật lưới.
                 _ = _hubOrdersVm.LoadAsync();
                 CurrentViewModel = _hubOrdersVm;
+                break;
+            case 3:
+                _statisticsVm.Reload();
+                CurrentViewModel = _statisticsVm;
                 break;
         }
 

@@ -19,7 +19,7 @@ namespace Shopee.Suite.Infrastructure;
 /// </summary>
 public static class AppIcons
 {
-    // ══════════ ĐIỀU HƯỚNG (ribbon + màn Welcome) — 10 icon, KHÔNG đổi ══════════
+    // ══════════ ĐIỀU HƯỚNG (ribbon + màn Welcome) ══════════
 
     /// <summary>Ô bảng điều khiển — Workspace (Scrape · Import · Update).</summary>
     public const string Dashboard =
@@ -60,6 +60,10 @@ public static class AppIcons
         "M19.5 3.5L18 2l-1.5 1.5L15 2l-1.5 1.5L12 2l-1.5 1.5L9 2 7.5 3.5 6 2v14H3v3c0 1.66 1.34 3 3 " +
         "3h12c1.66 0 3-1.34 3-3V2l-1.5 1.5zM19 19c0 .55-.45 1-1 1s-1-.45-1-1v-3H8V5h11v14zM9 7h6v2H9V7zm7 " +
         "0h2v2h-2V7zm-7 3h6v2H9v-2zm7 0h2v2h-2v-2z";
+
+    /// <summary>Biểu đồ cột — thống kê vận hành đơn hàng.</summary>
+    public const string Analytics =
+        "M3 3v18h18v-2H5V3H3zm4 12h3v2H7v-2zm0-4h3v3H7v-3zm5-4h3v10h-3V7zm5 3h3v7h-3v-7z";
 
     /// <summary>Nút play trong vòng tròn — màn "Chạy tự động" (module đơn hàng).</summary>
     public const string PlayCircle =
