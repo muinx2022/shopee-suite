@@ -87,14 +87,15 @@ public class AppServices
     public Func<long, IReadOnlyList<(string OrderSn, string FileBase64)>, CancellationToken, Task<IReadOnlyList<string>?>>? PushOrderSlipsToHub { get; set; }
 
     /// <summary>
-    /// HOOK đẩy cấu hình ĐỒNG BỘ GOOGLE SHEET (URL Web App + tab override) của máy này lên HUB, do shell suite RÓT
-    /// (module Đơn hàng KHÔNG tham chiếu <c>Shopee.Core</c> nên không tự biết hub). Tham số: <c>url</c>, <c>tab</c>
-    /// ("" = tự động theo tháng), <c>ct</c>. Trả <c>true</c> = hub nhận OK → màn Cài đặt báo "đã đồng bộ lên Hub".
+    /// HOOK đẩy cấu hình ĐỒNG BỘ GOOGLE SHEET (URL Web App + tab override + link file phụ) của máy này lên HUB, do
+    /// shell suite RÓT (module Đơn hàng KHÔNG tham chiếu <c>Shopee.Core</c> nên không tự biết hub). Tham số:
+    /// <c>url</c>, <c>tab</c> ("" = tự động theo tháng), <c>sheet2</c> ("" = không ghi file phụ), <c>ct</c>. Trả
+    /// <c>true</c> = hub nhận OK → màn Cài đặt báo "đã đồng bộ lên Hub".
     /// Mặc định <c>null</c> = TẮT (app Đơn hàng chạy độc lập / hub chưa cấu hình → chỉ lưu local như cũ).
-    /// Màn Cài đặt gọi sau khi LƯU local; hub CHỈ nhận field khác trống nên máy chưa cấu hình không xoá được
-    /// cấu hình của cả fleet.
+    /// Màn Cài đặt gọi sau khi LƯU local; hub CHỈ nhận khối GSheet khi URL khác trống nên máy chưa cấu hình không
+    /// xoá được cấu hình của cả fleet.
     /// </summary>
-    public Func<string, string, CancellationToken, Task<bool>>? PushGsheetConfigToHub { get; set; }
+    public Func<string, string, string, CancellationToken, Task<bool>>? PushGsheetConfigToHub { get; set; }
 
     /// <summary>
     /// HOOK ĐỌC một TRANG đơn của MỌI shop/MỌI máy từ HUB (màn "Đơn toàn hệ thống"), do shell suite RÓT (module

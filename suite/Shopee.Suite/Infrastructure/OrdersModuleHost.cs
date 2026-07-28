@@ -583,15 +583,15 @@ public static class OrdersModuleHost
     /// RÓT cầu nối cấu hình ĐỒNG BỘ GOOGLE SHEET dùng chung (mẫu <see cref="WireHubPush"/>), gồm 2 chiều:
     /// <list type="bullet">
     /// <item><b>Đẩy lên</b> — hook <see cref="AppServices.PushGsheetConfigToHub"/>: màn Cài đặt lưu xong thì đẩy
-    /// URL + tab lên hub cho các máy khác nhận. URL TRỐNG thì KHÔNG đẩy (một máy chưa cấu hình không được xoá
-    /// cấu hình của cả fleet).</item>
+    /// URL + tab + link file phụ lên hub cho các máy khác nhận. URL TRỐNG thì KHÔNG đẩy (một máy chưa cấu hình
+    /// không được xoá cấu hình của cả fleet).</item>
     /// <item><b>Kéo về</b> — <see cref="ApplyGsheetFromHubAsync"/> chạy ngay khi mở app rồi định kỳ.</item>
     /// </list>
     /// Nuốt mọi lỗi (log <c>Trace</c>) — lỗi hub KHÔNG được làm chết luồng đơn hàng.
     /// </summary>
     private static void WireGsheetConfig(AppServices services)
     {
-        services.PushGsheetConfigToHub = async (url, tab, ct) =>
+        services.PushGsheetConfigToHub = async (url, tab, sheet2, ct) =>
         {
             try
             {
@@ -606,7 +606,8 @@ public static class OrdersModuleHost
                 }
 
                 var ok = await CoordinationRuntime.Client.PostOrdersConfigAsync(
-                    new OrdersSharedConfig { GsheetWebAppUrl = url, GsheetTabName = tab }, ct).ConfigureAwait(false);
+                    new OrdersSharedConfig { GsheetWebAppUrl = url, GsheetTabName = tab, GsheetSheet2 = sheet2 },
+                    ct).ConfigureAwait(false);
                 if (ok)
                 {
                     HubOrdersConfig.Invalidate(); // lượt kéo kế hỏi hub NGAY (khỏi chờ hết TTL mới thấy bản vừa đẩy)
@@ -664,8 +665,9 @@ public static class OrdersModuleHost
             }
 
             var quyet = GsheetConfigSync.QuyetDinhApBanHub(
-                cfg.GsheetWebAppUrl, cfg.GsheetTabName,
-                services.Settings.GetGsheetWebAppUrl(), services.Settings.GetGsheetTabName());
+                cfg.GsheetWebAppUrl, cfg.GsheetTabName, cfg.GsheetSheet2,
+                services.Settings.GetGsheetWebAppUrl(), services.Settings.GetGsheetTabName(),
+                services.Settings.GetGsheetSheet2());
             if (!quyet.Ap)
             {
                 return; // hub chưa cấu hình (KHÔNG đè) hoặc đã trùng bản local (khỏi ghi SQLite mỗi nhịp)
@@ -673,6 +675,7 @@ public static class OrdersModuleHost
 
             services.Settings.SetGsheetWebAppUrl(quyet.Url);
             services.Settings.SetGsheetTabName(quyet.Tab);
+            services.Settings.SetGsheetSheet2(quyet.Sheet2);
             services.Log.Append("Cấu hình", quyet.Tab.Length == 0
                 ? "Đã nhận cấu hình Google Sheet từ Hub (tab: tự động theo tháng)."
                 : $"Đã nhận cấu hình Google Sheet từ Hub (tab: {quyet.Tab}).");

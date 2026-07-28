@@ -88,9 +88,13 @@ public class GoogleSheetSyncService
     /// không tìm thấy tab) → ném <see cref="InvalidOperationException"/> (kèm mã HTTP + 200 ký tự đầu body /
     /// message lỗi của script) và DỪNG các lô sau (mạng đang hỏng — lượt sync sau tự đẩy lại nhờ cờ DB). Hủy
     /// chủ động (ct) → ném <see cref="OperationCanceledException"/> xuyên để caller dừng sạch.
+    /// <para>
+    /// <paramref name="sheet2"/> = ID bảng tính FILE PHỤ gửi kèm mọi lô (mặc định <c>""</c> = không ghi file phụ).
+    /// </para>
     /// </summary>
     public async Task<IReadOnlyList<GsheetOrderResult>> PushAsync(
-        string webAppUrl, string tabName, IReadOnlyList<GsheetOrderRow> rows, Action<string> log, CancellationToken ct)
+        string webAppUrl, string tabName, IReadOnlyList<GsheetOrderRow> rows, Action<string> log, CancellationToken ct,
+        string sheet2 = "")
     {
         var all = new List<GsheetOrderResult>();
         if (string.IsNullOrWhiteSpace(webAppUrl) || rows is null || rows.Count == 0)
@@ -112,7 +116,7 @@ public class GoogleSheetSyncService
                     log($"GSheet: đang gửi lô {i + 1}/{batches.Count} ({batch.Count} đơn)...");
                 }
 
-                var body = TaoJsonBody(tabName, batch);
+                var body = TaoJsonBody(tabName, batch, sheet2);
 
                 // Thời hạn từng lô: CTS liên kết ct + hết giờ sau PerBatchTimeoutSec.
                 using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -209,12 +213,18 @@ public class GoogleSheetSyncService
     };
 
     /// <summary>
-    /// Tạo JSON body <c>{"tab":"tháng 4","orders":[{...}]}</c> cho một lô: camelCase, BỎ field null, số để
-    /// dạng SỐ (không bọc nháy), <c>daHuy</c> LUÔN có mặt (bool). <paramref name="tabName"/> = tab đích của
-    /// script. Tách static để test được hợp đồng với script.
+    /// Tạo JSON body <c>{"tab":"tháng 4","sheet2":"&lt;ID&gt;","orders":[{...}]}</c> cho một lô: camelCase, BỎ
+    /// field null, số để dạng SỐ (không bọc nháy), <c>daHuy</c> LUÔN có mặt (bool). <paramref name="tabName"/> =
+    /// tab đích của script. Tách static để test được hợp đồng với script.
+    /// <para>
+    /// <paramref name="sheet2"/> = ID bảng tính FILE PHỤ, thuộc tính của CẢ LÔ (không phải của từng đơn) nên nằm
+    /// ở cấp body cạnh <c>tab</c>. <b>LUÔN gửi kể cả chuỗi rỗng</b> — khác quy ước "bỏ field null" của các field
+    /// trong đơn: script cần phân biệt <c>""</c> ("người dùng TẮT ghi file phụ") với field VẮNG HẲN ("client đời
+    /// cũ chưa biết field này" → script lùi về hằng dự phòng của nó). Vì vậy null cũng quy về <c>""</c>.
+    /// </para>
     /// </summary>
-    internal static string TaoJsonBody(string tabName, IEnumerable<GsheetOrderRow> rows)
-        => JsonSerializer.Serialize(new { tab = tabName, orders = rows }, JsonOpts);
+    internal static string TaoJsonBody(string tabName, IEnumerable<GsheetOrderRow> rows, string sheet2 = "")
+        => JsonSerializer.Serialize(new { tab = tabName, sheet2 = sheet2 ?? "", orders = rows }, JsonOpts);
 
     /// <summary>
     /// Parse phản hồi <c>{"results":[{maDon,ok,added,fileUrl,error}, ...]}</c> thành danh sách

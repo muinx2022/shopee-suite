@@ -250,4 +250,154 @@ public class GsheetConfigSyncTests
         Assert.NotNull(loi);
         Assert.Contains("script.google.com", loi);
     }
+
+    // ── Ô "Google Sheet thứ hai": validate RIÊNG + bóc ID (KHÔNG dùng chung validator Web App) ──
+
+    private const string IdSheet2 = "1CK-mu-rtLw0QnGDZ2cuEIkRelEnZkNWuB7Ir_ZuRLhk";
+    private const string UrlSheet2 = "https://docs.google.com/spreadsheets/d/" + IdSheet2 + "/edit";
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void KiemTraSheet2_Trong_HopLe(string? s)
+    {
+        Assert.Null(GsheetConfigSync.KiemTraSheet2(s)); // trống = TẮT ghi file phụ, KHÔNG phải lỗi
+    }
+
+    [Theory]
+    [InlineData(UrlSheet2)]
+    [InlineData(UrlSheet2 + "?usp=sharing")]
+    [InlineData(UrlSheet2 + "#gid=0")]
+    [InlineData("  " + UrlSheet2 + "  ")]
+    [InlineData(IdSheet2)]                       // ID trần
+    public void KiemTraSheet2_LinkBangTinhHoacIdTran_HopLe(string s)
+    {
+        Assert.Null(GsheetConfigSync.KiemTraSheet2(s));
+    }
+
+    [Theory]
+    [InlineData("rác rưởi")]
+    [InlineData("ABC")]                          // ID quá ngắn (gõ nhầm vài ký tự)
+    [InlineData("https://example.com/gì-đó")]
+    public void KiemTraSheet2_LinkRac_BaoLoi(string s)
+    {
+        Assert.NotNull(GsheetConfigSync.KiemTraSheet2(s));
+    }
+
+    [Fact]
+    public void KiemTraSheet2_UrlWebApp_BaoLoi()
+    {
+        // Dán nhầm URL Web App vào ô file phụ → phải báo lỗi (hai ô KHÁC loại giá trị).
+        Assert.NotNull(GsheetConfigSync.KiemTraSheet2(UrlHub));
+    }
+
+    [Fact]
+    public void KiemTraSheet2_KHONG_DungChungValidatorWebApp()
+    {
+        // BẪY đã ghi trong plan: link bảng tính là HỢP LỆ ở ô này, nhưng KiemTraUrl (ép tiền tố script.google.com)
+        // sẽ báo lỗi oan → hai ô phải dùng hai validator khác nhau.
+        Assert.Null(GsheetConfigSync.KiemTraSheet2(UrlSheet2));
+        Assert.NotNull(GsheetConfigSync.KiemTraUrl(UrlSheet2));
+    }
+
+    [Theory]
+    [InlineData(UrlSheet2, IdSheet2)]
+    [InlineData(UrlSheet2 + "?usp=sharing", IdSheet2)]
+    [InlineData(UrlSheet2 + "#gid=0", IdSheet2)]
+    [InlineData("https://docs.google.com/spreadsheets/d/" + IdSheet2, IdSheet2)] // không có đuôi /edit
+    [InlineData("  " + IdSheet2 + " ", IdSheet2)]                                // ID trần (trim)
+    [InlineData("rác rưởi", "")]
+    [InlineData("https://example.com/x.html", "")]
+    [InlineData("", "")]
+    [InlineData(null, "")]
+    public void BocIdSheet_DungLuatKhopAppsScript(string? s, string mongDoi)
+    {
+        Assert.Equal(mongDoi, GsheetConfigSync.BocIdSheet(s));
+    }
+
+    // ── Field sheet2 nằm TRONG khối GSheet (không có luật đồng bộ riêng) ──
+
+    [Fact]
+    public void ApBanHub_HubTrong_KhongDe_KeCaKhiHubCoSheet2()
+    {
+        // BẤT BIẾN #1 vẫn là URL Web App: hub chưa có URL = chưa cấu hình → không áp gì, sheet2 local GIỮ NGUYÊN.
+        var q = GsheetConfigSync.QuyetDinhApBanHub("", "", IdSheet2, UrlLocal, "", "id-cu-cua-may");
+        Assert.False(q.Ap);
+    }
+
+    [Fact]
+    public void ApBanHub_HubCoUrl_Sheet2HubTRONG_VanAp_XoaSheet2CuaClient()
+    {
+        // HÀNH VI CỐ Ý (khoá lại bằng test): hub CÓ URL ⇒ khối GSheet đã cấu hình ⇒ áp CẢ sheet2 rỗng — rỗng ở
+        // đây nghĩa là "TẮT ghi file phụ", y như tab rỗng nghĩa là "tự động theo tháng".
+        var q = GsheetConfigSync.QuyetDinhApBanHub(UrlHub, "", "", UrlHub, "", IdSheet2);
+        Assert.True(q.Ap);
+        Assert.Equal("", q.Sheet2);
+    }
+
+    [Fact]
+    public void ApBanHub_ChiKhacSheet2_VanAp()
+    {
+        var q = GsheetConfigSync.QuyetDinhApBanHub(UrlHub, "Tab A", IdSheet2, UrlHub, "Tab A", null);
+        Assert.True(q.Ap);
+        Assert.Equal(IdSheet2, q.Sheet2);
+    }
+
+    [Fact]
+    public void ApBanHub_BaFieldYHetLocal_KhongGhiLai()
+    {
+        var q = GsheetConfigSync.QuyetDinhApBanHub(UrlHub, "Tab A", IdSheet2, UrlHub, "Tab A", IdSheet2);
+        Assert.False(q.Ap);
+    }
+
+    [Fact]
+    public void ApBanHub_Sheet2ChiKhacKhoangTrangThua_KhongGhiLai()
+    {
+        var q = GsheetConfigSync.QuyetDinhApBanHub(UrlHub, "Tab A", "  " + IdSheet2 + " ", UrlHub, "Tab A", IdSheet2);
+        Assert.False(q.Ap);
+    }
+
+    [Fact]
+    public void ApBanHub_KhuonCu2Field_Sheet2Rong()
+    {
+        // Overload cũ (call site/test viết trước khi có ô này) → coi như sheet2 rỗng cả hai bên.
+        var q = GsheetConfigSync.QuyetDinhApBanHub(UrlHub, "Tab A", UrlLocal, "Tab A");
+        Assert.True(q.Ap);
+        Assert.Equal("", q.Sheet2);
+    }
+
+    [Fact]
+    public void NhanBanClient_ClientCoUrl_Sheet2Rong_XOA_Sheet2CuaHub()
+    {
+        // ĐỐI XỨNG chiều kéo: xoá ô ở client phải xoá được trên hub, không thì hub đẩy ngược bản cũ về.
+        var q = GsheetConfigSync.QuyetDinhNhanBanClient(UrlLocal, "", "", UrlLocal, "", IdSheet2);
+        Assert.True(q.Ap);
+        Assert.Equal("", q.Sheet2);
+    }
+
+    [Fact]
+    public void NhanBanClient_ChiKhacSheet2_Ghi()
+    {
+        var q = GsheetConfigSync.QuyetDinhNhanBanClient(UrlHub, "Tab A", IdSheet2, UrlHub, "Tab A", null);
+        Assert.True(q.Ap);
+        Assert.Equal(IdSheet2, q.Sheet2);
+    }
+
+    [Fact]
+    public void HaiChieu_DoiXung_Sheet2_SuaOClientRoiKeoVe_KhongBiRevert()
+    {
+        // End-to-end: client điền sheet2 → hub nhận → chính client kéo về thì KHÔNG bị hub đẩy ngược bản rỗng cũ.
+        var nhan = GsheetConfigSync.QuyetDinhNhanBanClient(UrlHub, "", IdSheet2, UrlHub, "", null);
+        Assert.True(nhan.Ap);
+        Assert.Equal(IdSheet2, nhan.Sheet2);
+
+        var ap = GsheetConfigSync.QuyetDinhApBanHub(nhan.Url, nhan.Tab, nhan.Sheet2, UrlHub, "", IdSheet2);
+        Assert.False(ap.Ap);
+
+        // Máy thứ 2 (chưa có sheet2) kéo về → nhận theo hub. Đúng ý "hub thắng".
+        var ap2 = GsheetConfigSync.QuyetDinhApBanHub(nhan.Url, nhan.Tab, nhan.Sheet2, UrlHub, "", null);
+        Assert.True(ap2.Ap);
+        Assert.Equal(IdSheet2, ap2.Sheet2);
+    }
 }
