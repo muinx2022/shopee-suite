@@ -5,6 +5,13 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Hiệu năng. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.6.14 — 2026-07-29
+
+- **Kéo tài khoản (sub-acc) Đơn hàng từ Hub về máy mới:** màn Tài khoản có nút **"Kéo TK từ Hub"** — hỏi Hub
+  danh bạ sub-acc gộp từ mọi máy (login + shop) rồi tạo sẵn các tài khoản máy **chưa có** (mật khẩu để trống,
+  ghi chú "Kéo từ Hub — cần nhập mật khẩu"). Tài khoản đã có ở máy **giữ nguyên** (không đè mật khẩu/cookie).
+  Vì lý do bảo mật, Hub **không** lưu/truyền mật khẩu — mở từng tài khoản nhập mật khẩu rồi bấm Chạy như thường.
+
 ## v1.6.13 — 2026-07-29
 
 - **Check đơn trả hàng bấm đúng tab + lần đầu phải check:** mở đúng tab **"Đơn Trả hàng/Hoàn tiền"**, lần đầu
