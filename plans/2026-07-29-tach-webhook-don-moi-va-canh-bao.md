@@ -1,123 +1,142 @@
-# Plan: Tách webhook đơn mới và cảnh báo (nhiều channel)
+# Plan: Webhook notify động (tên sự kiện do user đặt)
 
 - **Ngày:** 2026-07-29
 - **Trạng thái:** đang làm
 - **Người lập:** Auto · **Người thực thi:** Auto (khi user yêu cầu)
+- **Sửa:** thay plan cũ “2 ô cứng đơn mới / cảnh báo” — user muốn UI động kiểu Hub.
 
 ## 1. Bối cảnh & mục tiêu
 
-Hiện client chỉ có **1** setting `notify_webhook_url`: vừa báo **đơn mới**, vừa báo **cảnh báo sự cố** (vd. không đặt được địa chỉ lấy hàng). Người dùng muốn:
+User muốn cấu hình dạng **danh sách động**, mỗi dòng:
 
-- Đơn mới → channel Slack `#shopee-suite` (có thể thêm channel khác sau).
-- Sự cố / cảnh báo → channel `#canh-bao-app` (có thể thêm channel khác sau).
+| Tên sự kiện (ô text do user nhập) | Webhook (ô URL) |
+|-----------------------------------|-----------------|
+| cảnh báo                          | `https://hooks.slack.com/...` |
+| đơn mới                           | `https://hooks.slack.com/...` |
+| đơn trả                           | `https://hooks.slack.com/...` |
 
-**Quyết định UX (chốt):** 2 ô cấu hình riêng trên Settings client:
+- **Không** hard-code nhãn trên UI (“cảnh báo”, “đơn mới”, “đơn trả”…).
+- Thêm / xóa bao nhiêu dòng cũng được.
+- Cùng một tên có thể lặp nhiều dòng → gửi tới nhiều channel.
 
-1. **Webhook đơn mới** — mỗi dòng 1 URL.
-2. **Webhook cảnh báo sự cố** — mỗi dòng 1 URL.
+**Cách ghép tên ↔ tin app gửi (bắt buộc có):**
 
-Muốn thêm bao nhiêu channel cũng được: thêm dòng URL (mỗi channel Slack = 1 Incoming Webhook riêng). Không làm UI “danh sách gắn tag” phức tạp.
+App/Hub khi bắn tin gọi `SendTheoTen("đơn mới", text)` / `SendTheoTen("cảnh báo", text)`.  
+Chỉ các dòng có **tên khớp** (sau chuẩn hoá) mới nhận tin.
 
-**Kênh gửi:** giữ nhận diện Slack / Discord / Telegram như `OrderNotifyService` hiện có (cùng `SendAsync`). Ưu tiên kiểm thử Slack; không bỏ Discord/Telegram.
+- Chuẩn hoá khớp: `Trim` + không phân biệt hoa thường + **bỏ dấu tiếng Việt**  
+  → `"Đơn Mới"`, `"don moi"`, `"đơn mới"` đều khớp topic `"đơn mới"`.
+- Code giữ **hằng topic** (không phải dropdown UI), hiện có:
+  - `"đơn mới"` — client sync có đơn insert; Hub khi push `Added > 0`.
+  - `"cảnh báo"` — client khi dừng vì không đặt được địa chỉ lấy hàng.
+- `"đơn trả"`: user **được phép** thêm dòng sẵn; **chưa có chỗ gửi** trong code → chưa bắn tin cho tới khi có tính năng sau (ngoài phạm vi plan này). Hint UI liệt kê topic đang hoạt động.
 
-**Hub:** đã có textarea nhiều dòng cho **đơn mới** (`notify.webhooks`) — **không đổi** trong plan này. Cảnh báo địa chỉ chỉ chạy trên **client**, không qua Hub.
+**Nơi cấu hình:**
+
+1. **Hub** `/settings` — thay textarea URL-only bằng bảng động tên + webhook (nguồn chính user mô tả).
+2. **Client** Settings — cùng mô hình (cảnh báo chỉ chạy trên client; đơn mới local cũng dùng list này).
+
+**Kênh:** Slack / Discord / Telegram như `OrderNotifyService` hiện có.
 
 ## 2. Phạm vi
 
 - **Làm:**
-  - Settings client: 2 textarea (đơn mới / cảnh báo), validate từng dòng, lưu nhiều URL.
-  - Repository: 2 key mới + migrate từ key cũ.
-  - Gửi đơn mới → tất cả URL ô “đơn mới”; gửi cảnh báo → tất cả URL ô “cảnh báo”.
-  - Test parse/migrate/validate; cập nhật hint UI.
+  - Model + serialize JSON danh sách `{ name, url }`.
+  - Hub Settings: UI thêm/xóa dòng, lưu, migrate từ `notify.webhooks` cũ.
+  - Client Settings + SettingsRepository: cùng mô hình, migrate từ `notify_webhook_url`.
+  - `OrderNotifyService.SendTheoTen` / lọc URL theo tên; AccountSession + Hub `FireNotifyNewOrders` dùng topic.
+  - Test parse/match/migrate; hint topic đang hỗ trợ.
 - **Không làm:**
-  - Đổi Hub Settings / `notify.webhooks`.
-  - UI drag-drop / bảng động từng dòng có checkbox.
-  - Thêm loại sự kiện notify mới ngoài đơn mới + cảnh báo địa chỉ hiện có.
-  - Đổi nội dung tin nhắn Slack.
+  - Implement sự kiện `"đơn trả"` (chỉ cho phép cấu hình sẵn).
+  - Đồng bộ list webhook Hub → client (mỗi bên settings riêng).
+  - Đổi nội dung tin nhắn.
+  - Release / bump version (trừ khi user yêu cầu sau).
 
 ## 3. Các bước thực hiện
 
-### 3.1. SettingsRepository — 2 danh sách URL + migrate
+### 3.1. Model + helper khớp tên (Core, dùng chung Hub + client)
 
-File: `orders/XuLyDonShopee.Core/Data/SettingsRepository.cs`
+File mới gợi ý: `orders/XuLyDonShopee.Core/Services/NotifyWebhookEntry.cs` (hoặc nested trong `OrderNotifyService`).
 
-- Thêm key:
-  - `notify_webhook_urls_don_moi` — chuỗi nhiều dòng (mỗi dòng 1 URL).
-  - `notify_webhook_urls_canh_bao` — tương tự.
-- Helper thuần (có thể để static trên repo hoặc `OrderNotifyService`):
-  - `ParseWebhookLines(string? raw) → IReadOnlyList<string>`: tách `\r\n`/`\n`, trim, bỏ dòng trống, **giữ thứ tự**, không dedupe bắt buộc (dedupe optional theo URL trim).
-- API mới:
-  - `GetNotifyWebhookUrlsDonMoi()` / `SetNotifyWebhookUrlsDonMoi(string? multiline)`
-  - `GetNotifyWebhookUrlsCanhBao()` / `SetNotifyWebhookUrlsCanhBao(string? multiline)`
-  - Khi **get**: nếu key mới trống/null **và** key cũ `notify_webhook_url` còn giá trị → coi URL cũ thuộc **cả hai** danh sách (đọc runtime, không bắt buộc ghi lại ngay — hoặc one-shot migrate khi get lần đầu: ghi 2 key mới + có thể xóa key cũ sau khi save từ UI). **Chốt:** khi `Get*DonMoi` / `Get*CanhBao` thấy key mới trống và key cũ có URL → trả list 1 phần tử = URL cũ (lazy). Khi user **Lưu** từ UI mới → ghi key mới; khi cả hai ô lưu xong có thể xóa `notify_webhook_url` để tránh nhầm.
-- Giữ `GetNotifyWebhookUrl` / `SetNotifyWebhookUrl` tạm thời **obsolete** hoặc chuyển internal: mọi caller App đổi sang API mới. Không để code production còn gọi single-URL.
+```csharp
+public sealed class NotifyWebhookEntry
+{
+    public string Name { get; set; } = "";
+    public string Url { get; set; } = "";
+}
 
-### 3.2. OrderNotifyService — gửi nhiều URL
+// Hằng topic (code emit) — KHÔNG hiện dropdown cứng trên UI
+public static class NotifyTopics
+{
+    public const string DonMoi = "đơn mới";
+    public const string CanhBao = "cảnh báo";
+    // DonTra = "đơn trả"; // thêm khi có tính năng
+}
+```
 
-File: `orders/XuLyDonShopee.Core/Services/OrderNotifyService.cs`
+- `ChuanHoaTen(string?)` → trim, lower, bỏ dấu (dùng cùng cách normalize đã có trong repo nếu có; không thì helper nhỏ).
+- `TenKhop(a, b)` → `ChuanHoaTen(a) == ChuanHoaTen(b)`.
+- `ParseDanhSach(string? json) → List<NotifyWebhookEntry>`
+- `SerializeDanhSach(IEnumerable<NotifyWebhookEntry>) → string`
+- `LocUrlTheoTen(entries, topic) → IReadOnlyList<string>` — bỏ dòng name/url trống; URL phải qua `KiemTraUrl` khi **lưu**, lúc gửi bỏ qua URL lỗi + log.
+- `SendTheoTenAsync(entries | urls đã lọc, text, log, ct)` — gửi lần lượt, lỗi 1 URL không chặn URL sau; `true` nếu ≥1 thành công.
 
-- Thêm `SendNhieuAsync(IReadOnlyList<string> urls, string text, Action<string>? log, CancellationToken ct)`:
-  - `urls` rỗng → return `false` (hoặc no-op + log ngắn).
-  - Với mỗi URL: gọi lại logic `SendAsync` hiện có; lỗi 1 URL **không** chặn URL sau; log từng URL.
-  - Trả `true` nếu **ít nhất 1** URL gửi thành công (giữ tinh thần “đã báo” cho log AccountSession).
-- Cập nhật XML doc: không còn “chỉ một URL”.
-
-### 3.3. AccountSession — đọc đúng danh sách
-
-File: `orders/XuLyDonShopee.App/Services/AccountSession.cs`
-
-- `StartNotifyInBackground`: lấy `GetNotifyWebhookUrlsDonMoi()`; rỗng → return; else `SendNhieuAsync`.
-- `StartCanhBaoDiaChiInBackground`: lấy `GetNotifyWebhookUrlsCanhBao()`; rỗng → log nhắc cấu hình ô cảnh báo (đổi text hint cho đúng UI mới); else `SendNhieuAsync` với `TaoTinNhanLoiDiaChi`.
-
-### 3.4. Settings UI + ViewModel
+### 3.2. Hub — Settings động + migrate
 
 Files:
 
+- `server/Shopee.Hub.Web/Components/Pages/Settings.razor`
+- `server/Shopee.Hub.Web/Services/HubOptions.cs` (key mới hoặc tái dùng)
+
+- Key lưu: `notify.webhook_routes` = JSON mảng `[{ "name", "url" }, ...]`.
+- Migrate đọc: nếu key mới trống và `notify.webhooks` (multiline URL cũ) còn dữ liệu → mỗi URL cũ thành 1 dòng `name = "đơn mới"` (vì Hub trước đây chỉ báo đơn mới).
+- UI:
+  - Tiêu đề kiểu “Thông báo webhook (Slack / Discord / Telegram)”.
+  - Hint: tên do bạn đặt; app gửi theo topic đang hỗ trợ: **đơn mới** (Hub + client), **cảnh báo** (chỉ client). Có thể thêm dòng tên khác (vd đơn trả) để dùng sau.
+  - Mỗi dòng: `<input name>` + `<input url>` + nút xóa; nút **Thêm dòng**.
+  - Lưu: name trim không bắt buộc unique; URL không trống → `KiemTraUrl`; name trống + url trống = bỏ dòng; name có mà url trống (hoặc ngược) → lỗi.
+- `ClientApiEndpoints.FireNotifyNewOrders`: lấy routes, `LocUrlTheoTen(..., NotifyTopics.DonMoi)`, gửi như hiện tại (fire-and-forget).
+
+### 3.3. Client — SettingsRepository + UI
+
+Files:
+
+- `orders/XuLyDonShopee.Core/Data/SettingsRepository.cs`
 - `orders/XuLyDonShopee.App/ViewModels/SettingsViewModel.cs`
 - `orders/XuLyDonShopee.App/Views/SettingsView.axaml`
+- `orders/XuLyDonShopee.App/Services/AccountSession.cs`
 
-- Đổi property:
-  - `NotifyWebhookUrl` → `NotifyWebhookUrlsDonMoi` + `NotifyWebhookUrlsCanhBao` (string multiline bind TextBox).
-- Card “THÔNG BÁO…”:
-  - Label + TextBox (AcceptsReturn, MinHeight ~80) **Webhook đơn mới**.
-  - Label + TextBox tương tự **Webhook cảnh báo sự cố**.
-  - Hint: “Mỗi dòng 1 URL Slack/Discord/Telegram. Đơn mới và cảnh báo tách channel riêng.”
-- `SaveNotifyUrl` → validate **từng dòng không trống** bằng `OrderNotifyService.KiemTraUrl`; dòng lỗi báo số dòng; lưu cả hai ô (một nút Lưu cho cả card, hoặc 2 nút — **chốt: 1 nút Lưu** cho cả card thông báo).
-- Thông điệp lưu: tóm tắt số URL mỗi loại + kênh nhận diện dòng đầu (hoặc “N URL đơn mới, M URL cảnh báo”).
+- Key: `notify_webhook_routes` (JSON).
+- Migrate: nếu mới trống và `notify_webhook_url` cũ có giá trị → **2 dòng** cùng URL: `đơn mới` + `cảnh báo` (giữ hành vi cũ: một URL nhận cả hai).
+- UI Avalonia: `ItemsControl` / danh sách bind `ObservableCollection` row (Name, Url) + Thêm / Xóa + 1 nút Lưu; cùng rule validate Hub.
+- `StartNotifyInBackground` → topic `DonMoi`.
+- `StartCanhBaoDiaChiInBackground` → topic `CanhBao`; log nhắc nếu không có dòng khớp.
 
-### 3.5. Docs / hint
+### 3.4. Tests
 
-- Nếu có `docs/thong-bao-webhook-huong-dan.md` (hint UI đang trỏ tới): cập nhật 2 ô + ví dụ 2 channel Slack.
-- Không đụng CHANGELOG/`version.txt` trừ khi user yêu cầu release.
+- `ChuanHoaTen` / `TenKhop`: hoa thường, có dấu/không dấu.
+- `LocUrlTheoTen`: khớp đúng; không khớp; nhiều dòng cùng tên.
+- Migrate Hub-style (URLs → name đơn mới) và client-style (1 URL → 2 topic).
+- Serialize round-trip JSON.
+- (Nhẹ) list rỗng / không khớp → không ném.
 
-### 3.6. Tests
-
-Files: `orders/XuLyDonShopee.Tests/` (mở rộng `OrderNotifyServiceTests` và/hoặc test SettingsRepository nếu đã có pattern SQLite temp).
-
-- `ParseWebhookLines`: trống; 1 URL; nhiều dòng; dòng trắng giữa; CRLF.
-- Lazy migrate: DB chỉ có `notify_webhook_url` → cả `GetDonMoi` và `GetCanhBao` trả đúng URL đó.
-- Sau `Set` key mới: không còn phụ thuộc key cũ.
-- `KiemTraUrl` vẫn dùng từng dòng (không đổi hành vi).
-- (Tuỳ chọn nhẹ) `SendNhieuAsync` với list rỗng không ném.
-
-Chạy: `dotnet test orders/XuLyDonShopee.Tests` (hoặc filter tên test liên quan) + `dotnet build` project App/Core bị ảnh hưởng.
+`dotnet test orders/XuLyDonShopee.Tests` + build Hub nếu đụng.
 
 ## 4. Tiêu chí nghiệm thu
 
-- [ ] Settings hiện 2 ô multiline; lưu 2 URL khác nhau (1 đơn mới, 1 cảnh báo) thành công.
-- [ ] Sync có đơn mới chỉ POST tới URL(s) ô đơn mới (không gửi ô cảnh báo).
-- [ ] Cảnh báo địa chỉ chỉ POST tới URL(s) ô cảnh báo.
-- [ ] Mỗi ô có ≥2 dòng URL → gửi đủ tất cả URL của ô đó.
-- [ ] User cũ chỉ có `notify_webhook_url`: trước khi mở Settings lưu lại, đơn mới **và** cảnh báo vẫn gửi đúng URL cũ (lazy migrate).
-- [ ] URL dòng sai → không lưu, hiện lỗi rõ số dòng.
-- [ ] `dotnet test` phần notify/settings liên quan pass; build OK.
-- [ ] Hub webhook đơn mới không bị phá (không sửa, hoặc smoke đọc Settings Hub không đổi).
+- [ ] Hub Settings: thêm 3 dòng tên khác nhau + webhook, xóa 1 dòng, lưu/reload đúng JSON.
+- [ ] Hub push đơn mới chỉ gửi tới dòng tên khớp “đơn mới” (không gửi “cảnh báo”).
+- [ ] Client: đơn mới → chỉ webhook dòng “đơn mới”; cảnh báo địa chỉ → chỉ “cảnh báo”.
+- [ ] Hai dòng cùng tên “đơn mới” → gửi cả hai URL.
+- [ ] User cũ: migrate Hub (mọi URL cũ = đơn mới); client (URL cũ = đơn mới + cảnh báo).
+- [ ] Dòng tên “đơn trả” lưu được nhưng chưa có tin (chưa có emitter) — không lỗi.
+- [ ] Test + build pass.
 
 ## 5. Rủi ro & lưu ý
 
-- Lazy migrate “URL cũ → cả hai loại” tránh mất cảnh báo sau update; sau khi user cấu hình tách channel và Lưu, nên xóa key cũ để không “hồi sinh” URL cũ nếu xóa hết dòng ở UI.
-- Không commit / log nguyên webhook URL trong test output nếu có fixture thật.
-- Không đụng `scratchpad/`.
+- User gõ lệch tên (vd “canh bao app”) → không nhận tin; hint phải nêu đúng topic đang hỗ trợ và quy tắc bỏ dấu.
+- Không log/commit webhook URL thật.
+- Sau khi user xác nhận plan này → mới thực thi (plan trước 2 ô cứng **bỏ**).
 
 ---
 
