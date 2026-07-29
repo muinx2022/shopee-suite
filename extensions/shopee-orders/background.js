@@ -16,7 +16,7 @@
 //                {action:"shopOpened"}                                            (openShopDetail xong)
 //                {action:"pageData", kind:"shopList", data:<json-array-string>}
 //                {action:"pageData", kind:"toShip",   data:<raw-item-title-string>}
-//                {action:"pageData", kind:"returns",  data:<json {soYeuCauText,sortApplied,list}>}
+//                {action:"pageData", kind:"returns",  data:<json {soYeuCauText,sortApplied,tabTraHang,list}>}
 //                {action:"slipRedownloaded", orderSn, slipBase64}                 (base64 "" = không lấy được)
 //                {action:"progress", message}                                     (chỉ để log)
 //                {action:"captcha",  message}                                     (rơi vào trang /verify)
@@ -779,6 +779,29 @@ function pageLocateReturnTab() {
   return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
 }
 
+// Tab "Đơn Trả hàng Hoàn tiền" trên tab-strip của trang trả hàng (khớp reSrc = text đã chuẩn hoá KHÔNG dấu).
+// PHẠM VI CỐ Ý thu hẹp vào ".return-case-tab-wrapper": thanh điều hướng TRÁI có mục tên gần giống ("Đơn Trả
+// hàng/Hoàn tiền hoặc Đơn hủy") — dò text trên cả trang là bấm nhầm sang đó rồi lạc trang.
+// Trả { daDung: true } nếu tab khớp ĐANG chọn (class "active") ⇒ caller KHÔNG bấm: bấm lại rồi ngồi chờ danh
+// sách vẽ lại (mà nó không vẽ lại) là đốt thời gian mỗi shop. Khớp mà chưa active → toạ độ TÂM để trustedClick.
+// null = không có tab-strip / không tab nào khớp ⇒ caller vẫn đi tiếp với tab hiện tại (kèm cảnh báo).
+function pageLocateReturnCaseTab(reSrc) {
+  const re = new RegExp(reSrc);
+  for (const wrap of document.querySelectorAll(".return-case-tab-wrapper")) {
+    for (const tab of wrap.querySelectorAll(".eds-tabs__nav-tab")) {
+      if (!re.test(_na(tab.textContent))) continue;
+      const cls = " " + (tab.getAttribute("class") || "") + " ";
+      if (cls.indexOf(" active ") >= 0) return { daDung: true };
+      const r0 = tab.getBoundingClientRect();
+      if (!(r0.width > 0 && r0.height > 0)) continue;
+      try { tab.scrollIntoView({ block: "center" }); } catch (e) {}
+      const r = tab.getBoundingClientRect();
+      return { daDung: false, x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+    }
+  }
+  return null;
+}
+
 // Text ô tổng ".return-list-summary-title" (vd "7 Yêu cầu"). "" nếu chưa render — C# lo parse ra SỐ.
 function pageReturnSummaryText() {
   const el = document.querySelector(".return-list-summary-title");
@@ -907,6 +930,11 @@ const MAX_RETURN_HEAD_HTML = 4000; // trần ký tự HTML mỗi dòng gửi v�
 // Mục sắp xếp cần chọn, so trên text KHÔNG dấu (_na): "Ngày yêu cầu (Mới - Cũ)". Ràng buộc "moi - cu" để KHÔNG
 // dính nhầm mục ngược "Ngày yêu cầu (Cũ - Mới)".
 const SORT_NEWEST_RE = "ngay yeu cau.*moi\\s*[-–]\\s*cu";
+// Tab cần chọn trên tab-strip trang trả hàng, so trên text KHÔNG dấu (_na): "Đơn Trả hàng Hoàn tiền". Tab-strip
+// KHÔNG có data-testid nên buộc phải nhận theo TEXT — ngoại lệ so với tab điều hướng trái (pageLocateReturnTab
+// vẫn dùng data-testid). Không chọn tab thì ô tổng là của tab mặc định "Tất cả", gộp cả Đơn Hủy / Đơn Giao hàng
+// không thành công — hai loại KHÔNG có mã yêu cầu trả hàng, nên số phồng lên và lượt quét về tay không.
+const RETURN_TAB_RE = "don tra hang hoan tien";
 
 // Chạy một hàm trong trang (world MAIN), trả result[0].result.
 // Cài helper _na/_provCore lên window của TRANG (world MAIN) — vì page-func chạy executeScript được serialize
@@ -1800,7 +1828,7 @@ async function doRedownloadSlip(orderSn) {
 
 // Bước CUỐI flow shop (bước PHỤ): mở trang "Trả hàng/Hoàn tiền/Hủy" của shop đang mở → ĐỔI SẮP XẾP sang
 // "Ngày yêu cầu (Mới - Cũ)" (mặc định trang là "Ngày đến hạn" — không đổi thì luật "N dòng đầu" của C# bỏ sót
-// ÂM THẦM) → đọc text ô tổng + HTML đầu từng dòng → trả MỘT lượt {soYeuCauText, sortApplied, list}.
+// ÂM THẦM) → đọc text ô tổng + HTML đầu từng dòng → trả MỘT lượt {soYeuCauText, sortApplied, tabTraHang, list}.
 // MỘT NHỊP: gửi cả số LẪN các dòng, C# tự cắt còn k dòng đầu — trang chỉ mở/đọc đúng một lần, không tốn thêm
 // vòng WS (đọc DOM thừa vài chục dòng rẻ hơn nhiều so với một lượt chờ-trả-lời nữa).
 // LUÔN gửi pageData (kể cả khi không đọc được gì) để C# không phải ngồi chờ hết timeout; /verify → captcha.
@@ -1808,10 +1836,15 @@ async function doReadReturnRequests() {
   const tabId = orderTabId();
   if (tabId == null) { send({ action: "error", message: "chưa có tab shop để check đơn trả hàng" }); return; }
 
-  const traVe = (summary, sortApplied, list) => send({
+  const traVe = (summary, sortApplied, tabTraHang, list) => send({
     action: "pageData",
     kind: "returns",
-    data: JSON.stringify({ soYeuCauText: summary || "", sortApplied: !!sortApplied, list: list || [] }),
+    data: JSON.stringify({
+      soYeuCauText: summary || "",
+      sortApplied: !!sortApplied,
+      tabTraHang: !!tabTraHang,
+      list: list || [],
+    }),
   });
 
   // 1) Mở trang trả hàng: ưu tiên BẤM TAB (trusted click, data-testid ổn định); không thấy tab → điều hướng thẳng.
@@ -1844,11 +1877,42 @@ async function doReadReturnRequests() {
   }
   if (!summary) {
     send({ action: "progress", message: "trang trả hàng chưa render ô tổng sau 20s — bỏ lượt check này." });
-    traVe("", false, []);
+    traVe("", false, false, []);
     return;
   }
 
-  // 3) Đổi sắp xếp. Không thấy nút/mục → VẪN đọc tiếp nhưng sortApplied=false để C# log cảnh báo.
+  // 3) CHỌN TAB "Đơn Trả hàng Hoàn tiền" — PHẢI làm TRƯỚC bước đổi sắp xếp và trước khi đọc số. Không thấy tab
+  // nào khớp → VẪN đi tiếp với tab hiện tại nhưng tabTraHang=false để C# log CẢNH BÁO (số có thể lẫn đơn hủy);
+  // đừng làm hỏng cả bước chỉ vì Shopee đổi nhãn.
+  let tabTraHang = false;
+  try {
+    await ensureDbg(tabId);
+    const ct = await execInTab(tabId, pageLocateReturnCaseTab, [RETURN_TAB_RE]);
+    if (ct && ct.daDung) {
+      tabTraHang = true; // đã đúng tab → KHÔNG bấm (bấm lại = một vòng chờ vô ích, nhân với mọi shop mỗi lượt)
+    } else if (ct) {
+      const soTruoc = summary;
+      let dongTruoc = 0;
+      try { dongTruoc = (await execInTab(tabId, pageReturnRowCount, [])) || 0; } catch (e) { dongTruoc = 0; }
+      await trustedClick(tabId, ct.x, ct.y);
+      tabTraHang = true;
+      // Đổi tab → ô tổng VÀ danh sách vẽ lại. Chờ một trong hai đổi (trần 8s) rồi mới sang bước sắp xếp/đọc số.
+      const cdl = Date.now() + 8000;
+      while (Date.now() < cdl) {
+        await sleep(500);
+        let s2 = "", n2 = dongTruoc;
+        try { s2 = (await execInTab(tabId, pageReturnSummaryText, [])) || ""; } catch (e) { s2 = ""; }
+        try { n2 = (await execInTab(tabId, pageReturnRowCount, [])) || 0; } catch (e) { n2 = dongTruoc; }
+        if ((s2 && s2 !== soTruoc) || n2 !== dongTruoc) { summary = s2 || summary; break; }
+      }
+    }
+  } catch (e) { /* chọn tab lỗi → đọc theo tab đang có (tabTraHang=false) */ }
+  if (!tabTraHang) {
+    send({ action: "progress", message: "KHÔNG chọn được tab 'Đơn Trả hàng Hoàn tiền' — đọc theo tab đang mở." });
+  }
+
+  // 4) Đổi sắp xếp — áp SAU khi đổi tab (đổi tab nhiều khả năng reset sắp xếp về mặc định "Ngày đến hạn").
+  // Không thấy nút/mục → VẪN đọc tiếp nhưng sortApplied=false để C# log cảnh báo.
   let sortApplied = false;
   try {
     await ensureDbg(tabId);
@@ -1874,7 +1938,7 @@ async function doReadReturnRequests() {
     send({ action: "progress", message: "KHÔNG đổi được sắp xếp 'Ngày yêu cầu (Mới - Cũ)' — đọc theo thứ tự đang có." });
   }
 
-  // 4) Đọc lại ô tổng (sau khi danh sách vẽ lại) + quét dòng.
+  // 5) Đọc lại ô tổng (sau khi danh sách vẽ lại) + quét dòng.
   try { summary = (await execInTab(tabId, pageReturnSummaryText, [])) || summary; } catch (e) {}
   const rdl = Date.now() + 8000;
   while (Date.now() < rdl) {
@@ -1888,5 +1952,5 @@ async function doReadReturnRequests() {
   let list = [];
   try { list = JSON.parse(rows) || []; } catch (e) { list = []; }
 
-  traVe(summary, sortApplied, list);
+  traVe(summary, sortApplied, tabTraHang, list);
 }

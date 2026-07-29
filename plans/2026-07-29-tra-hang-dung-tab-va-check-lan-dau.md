@@ -1,7 +1,7 @@
 # Plan: Check đơn trả hàng — bấm đúng tab "Đơn Trả hàng Hoàn tiền" + lần đầu PHẢI check
 
 - **Ngày:** 2026-07-29
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành — rig jsdom 4/4 trên HTML tab-strip thật (ca bẫy sidebar đặt ở x≈9000, kết quả trả x=140 ⇒ bấm đúng tab). 1400 test xanh. Chờ build local + release.
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-dev`)
 
 ## 1. Bối cảnh — hai lỗi làm tính năng gần như không chạy

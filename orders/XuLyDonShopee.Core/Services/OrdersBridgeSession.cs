@@ -916,10 +916,13 @@ public sealed class OrdersBridgeSession : IDisposable
 
     /// <summary>
     /// <b>Bước CUỐI flow shop — check ĐƠN TRẢ HÀNG.</b> Gửi <c>readReturnRequests</c>: extension mở trang
-    /// "Trả hàng/Hoàn tiền/Hủy" của shop đang mở, đổi sắp xếp sang "Ngày yêu cầu (Mới - Cũ)" (mặc định trang là
-    /// "Ngày đến hạn" — không đổi thì luật "N dòng đầu" bỏ sót ÂM THẦM), rồi trả text ô tổng + HTML đầu mỗi dòng.
+    /// "Trả hàng/Hoàn tiền/Hủy" của shop đang mở, CHỌN TAB "Đơn Trả hàng Hoàn tiền" (không chọn thì ô tổng là của
+    /// tab "Tất cả" — gộp cả Đơn Hủy / Đơn Giao hàng không thành công, hai loại KHÔNG có mã yêu cầu trả hàng), đổi
+    /// sắp xếp sang "Ngày yêu cầu (Mới - Cũ)" (mặc định trang là "Ngày đến hạn" — không đổi thì luật "N dòng đầu"
+    /// bỏ sót ÂM THẦM), rồi trả text ô tổng + HTML đầu mỗi dòng.
     /// C# parse (<see cref="TraHangParser"/>), so số với MỐC lần trước của shop để biết check bao nhiêu dòng ĐẦU,
-    /// ghép cặp (mã đơn, mã yêu cầu) rồi lưu vào đơn tương ứng. Cập nhật mốc ở CUỐI, kể cả lượt không check dòng nào.
+    /// ghép cặp (mã đơn, mã yêu cầu), LỌC theo cửa sổ <see cref="SoNgayBuUocTinh"/> ngày (theo NGÀY ĐẶT ĐƠN suy từ
+    /// mã) rồi lưu vào đơn tương ứng. Cập nhật mốc ở CUỐI, kể cả lượt không check dòng nào.
     /// <para>
     /// KHÔNG ném ra ngoài phần thân — caller đã bọc try/catch; ở đây chỉ return sớm + log khi không đọc được.
     /// </para>
@@ -956,6 +959,10 @@ public sealed class OrdersBridgeSession : IDisposable
         {
             L("⚠ Check đơn trả hàng: KHÔNG đổi được sắp xếp sang 'Ngày yêu cầu (Mới - Cũ)' — 'N dòng đầu' có thể sót.");
         }
+        if (!doc.TabTraHang)
+        {
+            L("⚠ Check đơn trả hàng: KHÔNG chọn được tab \"Đơn Trả hàng Hoàn tiền\" — số có thể lẫn đơn hủy.");
+        }
 
         var soMoi = doc.SoYeuCau.Value;
         var quyetDinh = TraHangParser.QuyetDinhCheck(mocCu, soMoi);
@@ -963,7 +970,7 @@ public sealed class OrdersBridgeSession : IDisposable
         switch (quyetDinh.Luat)
         {
             case LuatSoYeuCau.LanDau:
-                L($"Check đơn trả hàng [{shopLogin}]: {soMoi} yêu cầu — LẦN ĐẦU, chỉ ghi nhớ mốc, không check dòng nào.");
+                L($"Check đơn trả hàng [{shopLogin}]: {soMoi} yêu cầu — LẦN ĐẦU, check {quyetDinh.SoDongCanCheck} dòng đầu rồi ghi mốc.");
                 break;
             case LuatSoYeuCau.KhongDoi:
                 L($"Check đơn trả hàng [{shopLogin}]: {soMoi} yêu cầu — không đổi so với mốc {mocCuText}, bỏ qua.");
@@ -993,9 +1000,21 @@ public sealed class OrdersBridgeSession : IDisposable
                 L("Check đơn trả hàng — dòng thiếu mã yêu cầu → " + mo);
             }
 
-            if (ghep.Cap.Count > 0)
+            // Chặn theo THỜI GIAN: chỉ giữ cặp có NGÀY ĐẶT ĐƠN trong cửa sổ SoNgayBuUocTinh ngày. Đơn cũ hơn gần
+            // như chắc chắn đã bị dọn khỏi DB (đơn kết thúc bị xoá sau khi ghi sheet) nên có lưu cũng không gắn
+            // vào đâu — nhất là lượt LẦN ĐẦU đọc tới vài chục dòng lịch sử.
+            var loc = TraHangParser.LocTheoCuaSo(ghep.Cap, DateTime.Now, SoNgayBuUocTinh);
+            if (loc.BoQuaViCu > 0 || loc.BoQuaViKhongRoNgay > 0)
             {
-                L("Check đơn trả hàng — lưu mã: " + _saveReturnCodes!(ghep.Cap));
+                var themPhan = loc.BoQuaViKhongRoNgay > 0
+                    ? $", {loc.BoQuaViKhongRoNgay} dòng không đọc được ngày từ mã đơn"
+                    : string.Empty;
+                L($"Check đơn trả hàng: bỏ {loc.BoQuaViCu} dòng vì đơn cũ hơn {SoNgayBuUocTinh} ngày{themPhan} — còn {loc.GiuLai.Count} mã để lưu.");
+            }
+
+            if (loc.GiuLai.Count > 0)
+            {
+                L("Check đơn trả hàng — lưu mã: " + _saveReturnCodes!(loc.GiuLai));
             }
         }
 

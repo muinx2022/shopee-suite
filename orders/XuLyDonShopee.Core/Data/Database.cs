@@ -140,7 +140,9 @@ CREATE TABLE IF NOT EXISTS account_shops (
     shop_login TEXT NOT NULL,
     shop_name  TEXT,
     sort_order INTEGER,                -- vị trí shop theo ĐÚNG thứ tự trang /portal/shop (NULL = dữ liệu cũ)
-    return_count_last INTEGER,         -- số yêu cầu trả hàng lần check gần nhất (NULL = chưa từng check)
+    return_count_last INTEGER,         -- MỐC CŨ, đếm trên tab Tất cả — chỉ giữ để chẩn đoán, KHÔNG còn đọc/ghi
+    return_count_last_tra_hang INTEGER,-- mốc ĐANG DÙNG: số yêu cầu ở tab Đơn Trả hàng Hoàn tiền lần check gần
+                                       -- nhất (NULL = chưa từng check → lượt sau quét trang đầu một lượt)
     updated_at TEXT NOT NULL,
     UNIQUE(account_id, shop_login)
 );
@@ -235,8 +237,17 @@ CREATE TABLE IF NOT EXISTS prepare_daily (
         EnsureColumn(conn, "account_shops", "sort_order", "INTEGER");
 
         // MỐC "số yêu cầu trả hàng" của lần check gần nhất, nhớ THEO TỪNG SHOP (bước check đơn trả hàng ở CUỐI
-        // flow mỗi shop). NULL = shop chưa từng check → lượt đầu CHỈ ghi nhớ số, không đọc dòng nào. Thêm cho DB CŨ.
+        // flow mỗi shop). NULL = shop chưa từng check. Thêm cho DB CŨ.
+        //
+        // HAI CỘT, KHÔNG PHẢI TRÙNG LẶP:
+        //  · return_count_last — mốc CŨ, đếm trên tab "Tất cả" (bản trước không chọn tab nên lấy nhầm số gộp cả
+        //    Đơn Hủy / Đơn Giao hàng không thành công). GIỮ LẠI để chẩn đoán, KHÔNG đọc/ghi nữa.
+        //  · return_count_last_tra_hang — mốc ĐANG DÙNG, đếm trên tab "Đơn Trả hàng Hoàn tiền". Cột mới nên bắt
+        //    đầu toàn NULL ⇒ mọi shop rơi vào nhánh LanDau và TỰ quét lại một lượt rồi vào nếp — không cần script
+        //    reset. So mốc tab "Tất cả" với số của tab mới là so hai đại lượng khác nhau (vd 141 → 12 sẽ ra nhánh
+        //    Giam, không check gì mà mốc lại chốt sai), nên bắt buộc phải sang cột riêng.
         EnsureColumn(conn, "account_shops", "return_count_last", "INTEGER");
+        EnsureColumn(conn, "account_shops", "return_count_last_tra_hang", "INTEGER");
 
         // MÃ YÊU CẦU TRẢ HÀNG khớp với đơn (đọc ở trang "Trả hàng/Hoàn tiền/Hủy" cuối flow shop) — đẩy lên cột
         // "Đơn trả hàng" của Google Sheet + hub + màn Đơn hàng. NULL = đơn chưa có yêu cầu trả hàng nào.

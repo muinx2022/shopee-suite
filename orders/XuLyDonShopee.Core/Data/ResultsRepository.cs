@@ -112,10 +112,14 @@ public class ResultsRepository
     }
 
     /// <summary>
-    /// MỐC "số yêu cầu trả hàng" của lần check GẦN NHẤT ở shop này (<c>account_shops.return_count_last</c>).
-    /// <c>null</c> = shop CHƯA từng check (kể cả khi shop chưa có dòng nào) → lượt này chỉ ghi nhớ số, không đọc
-    /// dòng nào (xem <c>TraHangParser.QuyetDinhCheck</c>). Khóa shop dùng CHUNG quy tắc với
-    /// <see cref="UpsertShops"/>: <c>LoginName</c> fallback <c>ShopName</c>. <paramref name="shopLogin"/> rỗng → null.
+    /// MỐC "số yêu cầu trả hàng" của lần check GẦN NHẤT ở shop này
+    /// (<c>account_shops.return_count_last_tra_hang</c>). <c>null</c> = shop CHƯA từng check (kể cả khi shop chưa
+    /// có dòng nào) → lượt này quét trang đầu một lượt rồi mới chốt mốc (xem <c>TraHangParser.QuyetDinhCheck</c>).
+    /// Khóa shop dùng CHUNG quy tắc với <see cref="UpsertShops"/>: <c>LoginName</c> fallback <c>ShopName</c>.
+    /// <paramref name="shopLogin"/> rỗng → null.
+    /// <para><b>CỐ Ý không đọc cột cũ <c>return_count_last</c></b>: nó đếm trên tab "Tất cả" (gộp cả đơn hủy) nên
+    /// so với số của tab "Đơn Trả hàng Hoàn tiền" là so hai đại lượng khác nhau. Cột mới bắt đầu NULL để mọi shop
+    /// tự quét lại một lượt — xem chú thích ở <c>Database.Initialize</c>.</para>
     /// </summary>
     public int? GetReturnCount(long accountId, string shopLogin)
     {
@@ -127,7 +131,7 @@ public class ResultsRepository
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
         cmd.CommandText =
-            "SELECT return_count_last FROM account_shops WHERE account_id = $a AND shop_login = $login;";
+            "SELECT return_count_last_tra_hang FROM account_shops WHERE account_id = $a AND shop_login = $login;";
         cmd.Parameters.AddWithValue("$a", accountId);
         cmd.Parameters.AddWithValue("$login", shopLogin.Trim());
 
@@ -139,7 +143,8 @@ public class ResultsRepository
     /// Ghi MỐC "số yêu cầu trả hàng" vừa đọc được cho shop này. UPSERT (mẫu <see cref="UpsertShops"/>) để mốc vẫn
     /// lưu được cả khi shop chưa có dòng trong bảng — nhưng KHÔNG đụng <c>shop_name</c>/<c>sort_order</c> của dòng
     /// đã có (danh sách shop do <see cref="UpsertShops"/> làm chủ). <paramref name="shopLogin"/> rỗng → bỏ qua;
-    /// số âm được kẹp về 0.
+    /// số âm được kẹp về 0. Ghi vào <c>return_count_last_tra_hang</c> — xem <see cref="GetReturnCount"/> về việc
+    /// cột cũ <c>return_count_last</c> KHÔNG còn được đụng tới.
     /// </summary>
     public void SetReturnCount(long accountId, string shopLogin, int count)
     {
@@ -150,9 +155,10 @@ public class ResultsRepository
 
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = @"INSERT INTO account_shops (account_id, shop_login, return_count_last, updated_at)
+        cmd.CommandText =
+            @"INSERT INTO account_shops (account_id, shop_login, return_count_last_tra_hang, updated_at)
     VALUES ($a, $login, $c, $now)
-    ON CONFLICT(account_id, shop_login) DO UPDATE SET return_count_last = $c;";
+    ON CONFLICT(account_id, shop_login) DO UPDATE SET return_count_last_tra_hang = $c;";
         cmd.Parameters.AddWithValue("$a", accountId);
         cmd.Parameters.AddWithValue("$login", shopLogin.Trim());
         cmd.Parameters.AddWithValue("$c", Math.Max(0, count));

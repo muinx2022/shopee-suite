@@ -22,17 +22,29 @@ public sealed record DongTraHang(string? ShopeeOrderId, string HeadHtml);
 
 /// <summary>Kết quả một lượt đọc trang trả hàng (đã parse JSON extension gửi). <see cref="SoYeuCau"/> null =
 /// không đọc được số (text lạ); <see cref="SortApplied"/> false = KHÔNG đổi được sắp xếp sang "Ngày yêu cầu
-/// (Mới - Cũ)" nên "N dòng đầu" có thể sai — caller phải log cảnh báo.</summary>
-public sealed record KetQuaDocTraHang(int? SoYeuCau, bool SortApplied, IReadOnlyList<DongTraHang> Dong);
+/// (Mới - Cũ)" nên "N dòng đầu" có thể sai; <see cref="TabTraHang"/> false = KHÔNG chọn được tab
+/// "Đơn Trả hàng Hoàn tiền" nên số đọc được là của tab "Tất cả" — GỘP cả Đơn Hủy / Đơn Giao hàng không thành
+/// công, hai loại KHÔNG có mã yêu cầu trả hàng. Cả hai cờ false đều chỉ để caller log CẢNH BÁO, không chặn bước.</summary>
+public sealed record KetQuaDocTraHang(
+    int? SoYeuCau, bool SortApplied, bool TabTraHang, IReadOnlyList<DongTraHang> Dong);
 
 /// <summary>Kết quả ghép cặp: <see cref="Cap"/> = dòng đủ hai mã; <see cref="ThieuMaYeuCau"/> = mô tả CHẨN ĐOÁN
 /// (mã đơn + class/nhãn đọc được của từng khối + HTML thô rút gọn) của dòng CÓ mã đơn mà KHÔNG có mã yêu cầu.</summary>
 public sealed record KetQuaGhepTraHang(IReadOnlyList<YeuCauTraHang> Cap, IReadOnlyList<string> ThieuMaYeuCau);
 
+/// <summary>Kết quả lọc theo cửa sổ ngày (<see cref="TraHangParser.LocTheoCuaSo"/>): <see cref="GiuLai"/> = cặp
+/// còn trong hạn; <see cref="BoQuaViCu"/> = số cặp bị bỏ vì đơn đặt quá cũ; <see cref="BoQuaViKhongRoNgay"/> = số
+/// cặp bị bỏ vì mã đơn không suy được ngày. Hai con số sau chỉ để LOG — nhìn nhật ký là biết vì sao đọc mấy chục
+/// dòng mà chỉ lưu được vài mã, khỏi tưởng hỏng.</summary>
+public sealed record KetQuaLocCuaSo(
+    IReadOnlyList<YeuCauTraHang> GiuLai, int BoQuaViCu, int BoQuaViKhongRoNgay);
+
 /// <summary>4 nhánh luật đếm số yêu cầu (xem <see cref="TraHangParser.QuyetDinhCheck"/>).</summary>
 public enum LuatSoYeuCau
 {
-    /// <summary>Chưa có mốc (shop này chưa từng check) → CHỈ ghi nhớ số, không check dòng nào.</summary>
+    /// <summary>Chưa có mốc (shop này chưa từng check) → check <c>min(số yêu cầu, trần dòng/lượt)</c> dòng ĐẦU
+    /// rồi mới ghi mốc. Bản đầu CHỈ ghi mốc mà không đọc dòng nào: hệ quả là shop nào cũng chốt mốc ở lượt đầu
+    /// rồi im lặng mãi, toàn bộ yêu cầu đang có KHÔNG bao giờ được đọc.</summary>
     LanDau,
 
     /// <summary>Số không đổi → bỏ qua hẳn.</summary>
@@ -66,6 +78,18 @@ public static class TraHangParser
     /// <summary>Trần ký tự HTML thô đưa vào thông báo chẩn đoán (đủ thấy khối mã, không làm ngập nhật ký).</summary>
     private const int TranHtmlChanDoan = 600;
 
+    /// <summary>
+    /// Trần số dòng đọc trong MỘT lượt (nhánh <see cref="LuatSoYeuCau.LanDau"/> kẹp về đây). Đây là chỗ khai báo
+    /// DUY NHẤT phía C# — mọi caller lấy qua hằng này, đừng gõ lại số.
+    /// <para><b>Phải khớp <c>MAX_RETURN_ROWS</c> trong <c>extensions/shopee-orders/background.js</c></b>: extension
+    /// đã cắt danh sách gửi về ở đúng trần đó, xin nhiều hơn cũng không có (cùng khuôn cặp hằng
+    /// <c>MAX_ORDER_PAGES</c> ↔ <c>MaxSyncPages</c>). Hai runtime khác nhau nên không dùng chung được một literal;
+    /// sửa một bên PHẢI sửa bên kia.</para>
+    /// <para>Không nới: <c>OrdersRepository.SetReturnRequestCodes</c> bỏ qua mã không khớp đơn nào trong DB, mà DB
+    /// chỉ giữ đơn vài ngày gần đây (đơn kết thúc bị dọn sau khi ghi sheet) — đọc sâu vào lịch sử là công cốc.</para>
+    /// </summary>
+    public const int TranDongMoiLuot = 50;
+
     /// <summary>Mọi thẻ HTML (kể cả <c>&lt;!----&gt;</c> của Vue) — dùng để cắt biên khối và bóc text nhãn.</summary>
     private static readonly Regex TheHtml = new("<[^>]*>", RegexOptions.Compiled);
 
@@ -76,17 +100,22 @@ public static class TraHangParser
     // ── Luật đếm ────────────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Luật người dùng chốt: <paramref name="mocCu"/> null (lần đầu) → CHỈ ghi nhớ; số không đổi → bỏ qua;
-    /// số GIẢM → chỉ cập nhật mốc; số TĂNG k → check k dòng ĐẦU. Ba nhánh đầu đều trả
+    /// Luật người dùng chốt: <paramref name="mocCu"/> null (lần đầu) → check <c>min(soMoi, tranDong)</c> dòng ĐẦU
+    /// rồi ghi mốc; số không đổi → bỏ qua; số GIẢM → chỉ cập nhật mốc; số TĂNG k → check k dòng ĐẦU.
+    /// <see cref="LuatSoYeuCau.KhongDoi"/>/<see cref="LuatSoYeuCau.Giam"/> đều trả
     /// <see cref="QuyetDinhTraHang.SoDongCanCheck"/> = 0 nhưng GIỮ nhánh riêng để log/nghiệm thu phân biệt được.
     /// <paramref name="soMoi"/> âm (rác) được kẹp về 0.
+    /// <para>LẦN ĐẦU phải đọc thật, không chỉ ghi mốc: nếu chỉ ghi mốc thì mọi yêu cầu ĐANG CÓ của shop không bao
+    /// giờ được đọc — chỉ yêu cầu phát sinh SAU mốc mới lọt vào nhánh <see cref="LuatSoYeuCau.Tang"/>.</para>
     /// </summary>
-    public static QuyetDinhTraHang QuyetDinhCheck(int? mocCu, int soMoi)
+    /// <param name="tranDong">Trần số dòng đọc lần đầu — mặc định <see cref="TranDongMoiLuot"/>; tham số hoá chỉ
+    /// để test kẹp trần được với số nhỏ, caller thật KHÔNG truyền.</param>
+    public static QuyetDinhTraHang QuyetDinhCheck(int? mocCu, int soMoi, int tranDong = TranDongMoiLuot)
     {
         var moi = Math.Max(0, soMoi);
         if (mocCu is null)
         {
-            return new QuyetDinhTraHang(LuatSoYeuCau.LanDau, 0);
+            return new QuyetDinhTraHang(LuatSoYeuCau.LanDau, Math.Min(moi, Math.Max(0, tranDong)));
         }
         if (moi == mocCu.Value)
         {
@@ -146,13 +175,13 @@ public static class TraHangParser
     // ── Parse JSON extension gửi về ─────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Parse JSON <c>{soYeuCauText, sortApplied, list:[{shopeeOrderId, headHtml}]}</c> extension gửi kèm
+    /// Parse JSON <c>{soYeuCauText, sortApplied, tabTraHang, list:[{shopeeOrderId, headHtml}]}</c> extension gửi kèm
     /// <c>pageData kind="returns"</c>. JSON rỗng/hỏng/thiếu field → kết quả RỖNG (<see cref="KetQuaDocTraHang.SoYeuCau"/>
     /// null, danh sách rỗng) chứ KHÔNG ném — bước này là bước phụ, hỏng thì đi tiếp.
     /// </summary>
     public static KetQuaDocTraHang ParseKetQua(string? json)
     {
-        var rong = new KetQuaDocTraHang(null, false, Array.Empty<DongTraHang>());
+        var rong = new KetQuaDocTraHang(null, false, false, Array.Empty<DongTraHang>());
         if (string.IsNullOrWhiteSpace(json))
         {
             return rong;
@@ -171,6 +200,9 @@ public static class TraHangParser
                 ? ParseSoYeuCau(t.GetString())
                 : null;
             var sortApplied = root.TryGetProperty("sortApplied", out var s) && s.ValueKind == JsonValueKind.True;
+            // Thiếu field (bản extension CŨ) → false ⇒ caller log cảnh báo. Mặc định "coi như chưa đúng tab" là
+            // phía AN TOÀN: cảnh báo thừa còn hơn im lặng khi số đang lẫn đơn hủy.
+            var tabTraHang = root.TryGetProperty("tabTraHang", out var tb) && tb.ValueKind == JsonValueKind.True;
 
             var dong = new List<DongTraHang>();
             if (root.TryGetProperty("list", out var list) && list.ValueKind == JsonValueKind.Array)
@@ -195,7 +227,7 @@ public static class TraHangParser
                 }
             }
 
-            return new KetQuaDocTraHang(soYeuCau, sortApplied, dong);
+            return new KetQuaDocTraHang(soYeuCau, sortApplied, tabTraHang, dong);
         }
         catch (JsonException)
         {
@@ -244,6 +276,50 @@ public static class TraHangParser
         }
 
         return new KetQuaGhepTraHang(cap, thieu);
+    }
+
+    /// <summary>
+    /// Lọc các cặp vừa <see cref="GhepCap"/> theo CỬA SỔ NGÀY ĐẶT ĐƠN: giữ cặp có ngày đặt (suy từ 6 ký tự đầu mã
+    /// đơn, <see cref="OrdersBridgeSession.NgayDonTuMa"/>) không cũ hơn <paramref name="homNay"/> trừ
+    /// <paramref name="soNgay"/> ngày. Biên ĐÓNG (đúng <paramref name="soNgay"/> ngày vẫn giữ) — cùng quy ước với
+    /// nhánh lấy bù ước tính, dùng chung con số <see cref="OrdersBridgeSession.SoNgayBuUocTinh"/>.
+    /// <para>
+    /// <b>⚠ Vì sao LỌC chứ không DỪNG SỚM:</b> danh sách trên trang sắp theo <b>NGÀY YÊU CẦU</b> (mới → cũ), còn
+    /// ngày ở đây là <b>NGÀY ĐẶT ĐƠN</b> — hai đại lượng KHÁC nhau (một yêu cầu hôm nay có thể thuộc đơn đặt từ
+    /// 20 ngày trước). Gặp một dòng quá hạn mà <c>break</c> là cắt mất các dòng SAU vẫn còn trong hạn.
+    /// </para>
+    /// <para>Lọc theo ngày đặt là hợp lý vì đơn cũ hơn cửa sổ gần như chắc chắn đã bị dọn khỏi DB (đơn kết thúc bị
+    /// xoá sau khi ghi sheet) ⇒ có lấy mã cũng không gắn vào đâu được.</para>
+    /// Mã đơn KHÔNG suy được ngày → bỏ dòng đó (thà bỏ còn hơn đoán) và đếm riêng để log.
+    /// </summary>
+    public static KetQuaLocCuaSo LocTheoCuaSo(
+        IEnumerable<YeuCauTraHang>? cap, DateTime homNay, int soNgay)
+    {
+        var giu = new List<YeuCauTraHang>();
+        var moc = homNay.Date.AddDays(-Math.Max(0, soNgay));
+        var boCu = 0;
+        var boKhongRoNgay = 0;
+
+        foreach (var c in cap ?? Array.Empty<YeuCauTraHang>())
+        {
+            if (c is null)
+            {
+                continue;
+            }
+            if (OrdersBridgeSession.NgayDonTuMa(c.MaDon) is not DateTime ngay)
+            {
+                boKhongRoNgay++;
+                continue;
+            }
+            if (ngay < moc)
+            {
+                boCu++;
+                continue; // CỐ Ý không break — xem phần ⚠ ở doc
+            }
+            giu.Add(c);
+        }
+
+        return new KetQuaLocCuaSo(giu, boCu, boKhongRoNgay);
     }
 
     /// <summary>Mã tách được từ MỘT khối đầu dòng + CLASS thẻ bao và NHÃN của từng khối (để chẩn đoán khi luật

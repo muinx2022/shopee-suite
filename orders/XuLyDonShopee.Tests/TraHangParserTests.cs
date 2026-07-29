@@ -5,7 +5,10 @@ namespace XuLyDonShopee.Tests;
 /// <summary>
 /// Test các hàm THUẦN của bước "check đơn trả hàng" (bước CUỐI flow mỗi shop):
 /// <list type="bullet">
-/// <item><see cref="TraHangParser.QuyetDinhCheck"/> — 4 nhánh luật đếm (lần đầu / không đổi / giảm / tăng k).</item>
+/// <item><see cref="TraHangParser.QuyetDinhCheck"/> — 4 nhánh luật đếm (lần đầu = min(số, trần) / không đổi /
+/// giảm / tăng k).</item>
+/// <item><see cref="TraHangParser.LocTheoCuaSo"/> — chặn theo cửa sổ NGÀY ĐẶT ĐƠN (suy từ mã đơn), LỌC chứ không
+/// dừng sớm vì danh sách sắp theo ngày YÊU CẦU.</item>
 /// <item><see cref="TraHangParser.ParseSoYeuCau"/> — "7 Yêu cầu" → 7, text lạ → null (KHÔNG ném).</item>
 /// <item><see cref="TraHangParser.TachMa"/> + <see cref="TraHangParser.GhepCap"/> — tách cặp mã từ HTML mẫu:
 /// dòng CHỈ có mã đơn (đơn hủy — chỗ mã yêu cầu là <c>&lt;!----&gt;</c>) phải BỊ BỎ, dòng đủ hai mã ra đúng cặp.</item>
@@ -23,10 +26,31 @@ public class TraHangParserTests
 {
     // ===================== Luật đếm: 4 nhánh =====================
 
+    /// <summary>LẦN ĐẦU phải ĐỌC, không chỉ ghi mốc: bản trước trả 0 nên shop nào cũng chốt mốc rồi im lặng mãi,
+    /// toàn bộ yêu cầu ĐANG CÓ không bao giờ được đọc (số thật lấy về từ lúc phát hành là 0).</summary>
     [Fact]
-    public void QuyetDinhCheck_LanDau_ChiGhiNho_KhongCheckDong()
+    public void QuyetDinhCheck_LanDau_CheckDungSoYeuCau_DuoiTran()
     {
-        var q = TraHangParser.QuyetDinhCheck(mocCu: null, soMoi: 36);
+        var q = TraHangParser.QuyetDinhCheck(mocCu: null, soMoi: 12);
+        Assert.Equal(LuatSoYeuCau.LanDau, q.Luat);
+        Assert.Equal(12, q.SoDongCanCheck);
+    }
+
+    /// <summary>Vượt trần → kẹp về <see cref="TraHangParser.TranDongMoiLuot"/> (extension cũng chỉ gửi tối đa
+    /// chừng đó dòng; đọc sâu hơn cũng vô ích vì DB chỉ giữ đơn vài ngày gần đây).</summary>
+    [Fact]
+    public void QuyetDinhCheck_LanDau_VuotTran_KepVeTran()
+    {
+        var q = TraHangParser.QuyetDinhCheck(mocCu: null, soMoi: 340);
+        Assert.Equal(LuatSoYeuCau.LanDau, q.Luat);
+        Assert.Equal(TraHangParser.TranDongMoiLuot, q.SoDongCanCheck);
+        Assert.Equal(50, q.SoDongCanCheck);
+    }
+
+    [Fact]
+    public void QuyetDinhCheck_LanDau_KhongCoYeuCauNao_Check0()
+    {
+        var q = TraHangParser.QuyetDinhCheck(mocCu: null, soMoi: 0);
         Assert.Equal(LuatSoYeuCau.LanDau, q.Luat);
         Assert.Equal(0, q.SoDongCanCheck);
     }
@@ -543,5 +567,87 @@ public class TraHangParserTests
 
         Assert.Equal(2, kq.SoYeuCau);
         Assert.Empty(kq.Dong);
+    }
+
+    [Fact]
+    public void ParseKetQua_TabTraHang_DocDuocCoTrue()
+    {
+        var kq = TraHangParser.ParseKetQua(
+            "{\"soYeuCauText\":\"3 Yêu cầu\",\"sortApplied\":true,\"tabTraHang\":true,\"list\":[]}");
+
+        Assert.True(kq.TabTraHang);
+    }
+
+    /// <summary>Thiếu field (bản extension CŨ) hoặc false → cờ false ⇒ caller log cảnh báo "số có thể lẫn đơn hủy".</summary>
+    [Theory]
+    [InlineData("{\"soYeuCauText\":\"3 Yêu cầu\",\"sortApplied\":true,\"tabTraHang\":false,\"list\":[]}")]
+    [InlineData("{\"soYeuCauText\":\"3 Yêu cầu\",\"sortApplied\":true,\"list\":[]}")]
+    public void ParseKetQua_TabTraHang_ThieuHoacFalse_LaFalse(string json)
+    {
+        Assert.False(TraHangParser.ParseKetQua(json).TabTraHang);
+    }
+
+    // ===================== Lọc theo cửa sổ NGÀY ĐẶT ĐƠN =====================
+
+    private static readonly DateTime HomNay = new(2026, 7, 29);
+
+    private static YeuCauTraHang Cap(string maDon) => new(maDon, "R-" + maDon);
+
+    [Fact]
+    public void LocTheoCuaSo_DonHomNay_Giu()
+    {
+        var kq = TraHangParser.LocTheoCuaSo(new[] { Cap("260729US91P2N2") }, HomNay, 7);
+
+        Assert.Equal("260729US91P2N2", Assert.Single(kq.GiuLai).MaDon);
+        Assert.Equal(0, kq.BoQuaViCu);
+        Assert.Equal(0, kq.BoQuaViKhongRoNgay);
+    }
+
+    [Fact]
+    public void LocTheoCuaSo_DonCuHon7Ngay_Bo()
+    {
+        var kq = TraHangParser.LocTheoCuaSo(new[] { Cap("260701ABCDEFG") }, HomNay, 7);
+
+        Assert.Empty(kq.GiuLai);
+        Assert.Equal(1, kq.BoQuaViCu);
+    }
+
+    /// <summary>⚠ Danh sách sắp theo NGÀY YÊU CẦU còn mã đơn cho NGÀY ĐẶT ĐƠN — hai đại lượng khác nhau, nên
+    /// dòng CŨ có thể nằm GIỮA hai dòng mới. Phải LỌC đúng dòng đó, KHÔNG được dừng sớm.</summary>
+    [Fact]
+    public void LocTheoCuaSo_DongCuNamGiua_ChiBoDungDongDo_KhongDungSom()
+    {
+        var kq = TraHangParser.LocTheoCuaSo(
+            new[] { Cap("260729AAA"), Cap("260610BBB"), Cap("260728CCC") }, HomNay, 7);
+
+        Assert.Equal(new[] { "260729AAA", "260728CCC" }, kq.GiuLai.Select(c => c.MaDon));
+        Assert.Equal(1, kq.BoQuaViCu);
+    }
+
+    /// <summary>Đúng biên <c>soNgay</c> ngày → VẪN giữ (biên ĐÓNG, cùng quy ước nhánh lấy bù ước tính).</summary>
+    [Fact]
+    public void LocTheoCuaSo_DungBien_VanGiu()
+    {
+        var kq = TraHangParser.LocTheoCuaSo(new[] { Cap("260722ZZZ") }, HomNay, 7);
+
+        Assert.Single(kq.GiuLai);
+        Assert.Equal(0, kq.BoQuaViCu);
+    }
+
+    [Fact]
+    public void LocTheoCuaSo_MaKhongDocDuocNgay_Bo_DemRieng_KhongNem()
+    {
+        var kq = TraHangParser.LocTheoCuaSo(new[] { Cap("ABCDEFGH"), Cap("260729AAA") }, HomNay, 7);
+
+        Assert.Equal("260729AAA", Assert.Single(kq.GiuLai).MaDon);
+        Assert.Equal(0, kq.BoQuaViCu);
+        Assert.Equal(1, kq.BoQuaViKhongRoNgay);
+    }
+
+    [Fact]
+    public void LocTheoCuaSo_RongHoacNull_TraRong_KhongNem()
+    {
+        Assert.Empty(TraHangParser.LocTheoCuaSo(Array.Empty<YeuCauTraHang>(), HomNay, 7).GiuLai);
+        Assert.Empty(TraHangParser.LocTheoCuaSo(null, HomNay, 7).GiuLai);
     }
 }
