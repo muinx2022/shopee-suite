@@ -1,131 +1,105 @@
-# Plan: Webhook theo sự kiện định nghĩa sẵn (dropdown) + nhiều channel
+# Plan: 3 webhook cố định — đơn mới / lỗi app / đơn trả
 
 - **Ngày:** 2026-07-29
 - **Trạng thái:** đang làm
 - **Người lập:** Auto · **Người thực thi:** Auto (khi user yêu cầu)
-- **Sửa lần 3:** không dùng tên sự kiện gõ tự do. Event **định nghĩa trong code**; UI chọn event + dán webhook.
+- **Sửa lần 4 (chốt):** không UI động, không dropdown nhiều dòng. **Fix 3 ô webhook** gắn 3 sự kiện. Sau này thêm sự kiện = thêm ô + code.
 
 ## 1. Bối cảnh & mục tiêu
 
-User muốn app **biết gửi cái gì cho ai**:
+User thống nhất cấu hình đơn giản trên Hub + client:
 
-- Mỗi **sự kiện** trong app được **định nghĩa sẵn** (code + nhãn tiếng Việt trên UI).
-- Settings (Hub + client): danh sách động các dòng  
-  **`[Chọn sự kiện ▼]` : `[URL webhook]`**  
-  Thêm/xóa bao nhiêu dòng cũng được; cùng một sự kiện có thể gắn nhiều webhook (nhiều channel).
+| Ô Settings (nhãn cố định) | Sự kiện | Emitter hiện tại |
+|---------------------------|---------|------------------|
+| Webhook **có đơn mới** | Sync/push có đơn mới → channel kiểu `#shopee-suite` | Client + Hub — **đã có** |
+| Webhook **lỗi app** | Lỗi vận hành app; nay: không đặt được địa chỉ lấy hàng; sau gom thêm lỗi khác vào cùng ô này | Client — **đã có** (địa chỉ) |
+| Webhook **có đơn trả hàng** | Khi check flow đơn hàng phát hiện đơn trả | **Chưa emit** — chỉ ô cấu hình + lưu; chỗ gọi gửi để stub/TODO rõ rang hoặc bỏ trống cho plan sau |
 
-Ví dụ cấu hình:
+Mỗi ô **một URL** (Slack/Discord/Telegram như `OrderNotifyService`). Trống = tắt sự kiện đó.
 
-| Sự kiện (dropdown) | Webhook |
-|--------------------|---------|
-| Có đơn mới | webhook channel `#shopee-suite` |
-| Không đặt được địa chỉ lấy hàng | webhook channel `#canh-bao-app` |
-| Có đơn trả hàng | webhook channel trả hàng (cấu hình trước; emitter sau) |
-
-Hành vi runtime:
-
-- Sync/push có đơn mới → gửi tới mọi dòng chọn **Có đơn mới**.
-- Không set được địa chỉ mặc định → gửi tới mọi dòng chọn **Không đặt được địa chỉ lấy hàng**.
-
-### Danh sách sự kiện (định nghĩa sẵn — mở rộng sau bằng code)
-
-| Id ổn định (lưu JSON) | Nhãn UI | Emitter hiện có |
-|----------------------|---------|-----------------|
-| `don_moi` | Có đơn mới | Client sync insert; Hub push `Added > 0` |
-| `khong_dat_duoc_dia_chi` | Không đặt được địa chỉ lấy hàng | Client `StartCanhBaoDiaChiInBackground` |
-| `don_tra_hang` | Có đơn trả hàng | **Chưa có** — vẫn cho chọn/lưu; chưa bắn tin |
-
-Id dùng snake_case ASCII trong JSON (không phụ thuộc chữ có dấu). Nhãn chỉ để hiển thị.
-
-**Kênh gửi:** Slack / Discord / Telegram qua `OrderNotifyService` như hiện tại.
+**Không làm** danh sách động / chọn event tự do.
 
 ## 2. Phạm vi
 
 - **Làm:**
-  - Enum/catalog sự kiện + nhãn; serialize list `{ eventId, url }`.
-  - Hub `/settings`: UI dropdown + URL, thêm/xóa dòng; migrate từ `notify.webhooks`.
-  - Client Settings + repo: cùng mô hình; migrate từ `notify_webhook_url`.
-  - Gửi theo `eventId`; AccountSession + Hub `FireNotifyNewOrders`.
-  - Test catalog/migrate/lọc URL; build.
+  - 3 key settings (client + Hub).
+  - UI 3 ô nhập URL + validate + lưu.
+  - Gửi đơn mới → ô 1; gửi lỗi địa chỉ → ô 2.
+  - Migrate URL cũ → ô đơn mới **và** ô lỗi app (giữ hành vi một webhook nhận cả hai).
+  - Ô đơn trả: lưu được; **chưa** nối emitter (flow trả hàng chưa có trong phạm vi này — chỉ chuẩn bị setting).
+  - Test migrate + đọc 3 URL; build.
 - **Không làm:**
-  - Implement emitter thật cho `don_tra_hang`.
-  - Đồng bộ cấu hình Hub ↔ client.
-  - Đổi nội dung tin nhắn; release/bump version (trừ khi user yêu cầu).
+  - Implement phát hiện / gửi tin đơn trả hàng.
+  - Gom thêm loại lỗi mới vào ô “lỗi app” (ngoài địa chỉ) — chỉ thiết kế tên ô cho tương lai.
+  - UI động nhiều dòng; release trừ khi user yêu cầu.
 
 ## 3. Các bước thực hiện
 
-### 3.1. Catalog + model (Core)
+### 3.1. Settings keys
 
-File gợi ý: `orders/XuLyDonShopee.Core/Services/NotifyWebhookRoutes.cs` (cạnh `OrderNotifyService`).
+**Client** `SettingsRepository.cs`:
 
-```csharp
-public enum NotifySuKien
-{
-    DonMoi,                 // don_moi
-    KhongDatDuocDiaChi,     // khong_dat_duoc_dia_chi
-    DonTraHang,             // don_tra_hang — chưa emit
-}
+- `notify_webhook_url_don_moi`
+- `notify_webhook_url_loi_app`
+- `notify_webhook_url_don_tra`
+- Get/Set từng cái (trim; trống → xóa key / null).
+- **Migrate lazy:** nếu cả 3 key mới trống và `notify_webhook_url` cũ còn giá trị → `GetDonMoi` và `GetLoiApp` trả URL cũ; `GetDonTra` vẫn null. Khi user Lưu từ UI mới → ghi key mới, xóa key cũ.
 
-public sealed class NotifyWebhookRoute
-{
-    public string EventId { get; set; } = ""; // "don_moi" | ...
-    public string Url { get; set; } = "";
-}
+**Hub** `HubOptions` / settings:
 
-public static class NotifySuKienCatalog
-{
-    // IdToEnum / EnumToId / NhanUi / TatCaChoDropdown
-}
-```
+- `notify.webhook_don_moi`
+- `notify.webhook_loi_app` (Hub hiện không emit lỗi app — vẫn cho cấu hình thống nhất UI; hoặc **chỉ hiện ô đơn mới + đơn trả trên Hub**, ô lỗi app chỉ client).
+- **Chốt UI Hub:** 3 ô giống client cho đồng bộ tư duy; Hub chỉ **dùng** ô đơn mới khi `FireNotifyNewOrders`. Ô lỗi app / đơn trả trên Hub chưa có emitter → lưu thôi.
+- Migrate: `notify.webhooks` multiline cũ → lấy **dòng đầu** làm `don_moi` (các dòng sau: hoặc bỏ, hoặc cũng coi là don_moi chỉ lấy dòng 1 — **chốt: dòng đầu → don_moi**; nếu nhiều dòng cũ, dòng 2+ bỏ kèm hint “bản mới mỗi sự kiện 1 URL”).
 
-- `ParseRoutes(json)` / `SerializeRoutes(list)`.
-- `LocUrl(IEnumerable<NotifyWebhookRoute> routes, NotifySuKien suKien) → IReadOnlyList<string>`.
-- `OrderNotifyService.SendNhieuAsync(urls, text, log, ct)` — gửi lần lượt; ≥1 OK → `true`.
+### 3.2. OrderNotifyService
 
-### 3.2. Hub Settings
+- Không bắt buộc API mới nếu vẫn `SendAsync(url, …)`.
+- Call site truyền đúng URL theo sự kiện.
 
-Files: `Settings.razor`, `HubOptions.cs` (`SettingKeys.NotifyWebhookRoutes = "notify.webhook_routes"`).
+### 3.3. Call sites
 
-- UI: mỗi dòng `<select>` options từ catalog + `<input>` URL + xóa; nút Thêm dòng; Lưu.
-- Hint: chọn sự kiện app định nghĩa sẵn; một sự kiện có thể nhiều dòng/webhook.
-- Validate: `EventId` phải thuộc catalog; URL `KiemTraUrl` (bỏ dòng cả hai trống).
-- Migrate: `notify.webhooks` multiline cũ → mỗi URL thành route `don_moi`.
-- `FireNotifyNewOrders` → `LocUrl(..., DonMoi)` rồi gửi.
+- `AccountSession.StartNotifyInBackground` → `Get…DonMoi()`.
+- `AccountSession.StartCanhBaoDiaChiInBackground` → `Get…LoiApp()`; đổi log hint sang “Cài đặt → webhook lỗi app”.
+- Hub `FireNotifyNewOrders` → setting `notify.webhook_don_moi` (một URL).
+- Đơn trả: **không** gọi gửi trong plan này.
 
-### 3.3. Client Settings + gửi
+### 3.4. UI
 
-Files: `SettingsRepository.cs`, `SettingsViewModel.cs`, `SettingsView.axaml`, `AccountSession.cs`.
+**Client** `SettingsView.axaml` + ViewModel:
 
-- Key `notify_webhook_routes` JSON.
-- Migrate: URL cũ `notify_webhook_url` → **hai** route cùng URL: `don_moi` + `khong_dat_duoc_dia_chi` (giữ hành vi một webhook nhận cả hai).
-- UI Avalonia: `ItemsControl` — ComboBox sự kiện + TextBox URL + Thêm/Xóa + Lưu.
-- `StartNotifyInBackground` → `DonMoi`.
-- `StartCanhBaoDiaChiInBackground` → `KhongDatDuocDiaChi`; không có route khớp → log nhắc cấu hình.
+- Card thông báo: 3 TextBox + 1 nút Lưu.
+- Nhãn:
+  - Có đơn mới
+  - Lỗi app (hiện: không đặt được địa chỉ lấy hàng; sau thêm lỗi khác cùng kênh)
+  - Có đơn trả hàng (chưa gửi — chỉ cấu hình)
+- Validate từng ô không trống bằng `KiemTraUrl`.
 
-### 3.4. Tests
+**Hub** `Settings.razor`: thay textarea multiline bằng 3 input tương ứng + lưu.
 
-- Catalog: mọi enum có id + nhãn; id lạ khi parse → bỏ hoặc fail rõ (chốt: **bỏ dòng id lạ** khi đọc + log/test).
-- `LocUrl` đúng event; nhiều URL cùng event.
-- Migrate Hub + client như trên.
-- Round-trip JSON.
+### 3.5. Tests
 
-`dotnet test orders/XuLyDonShopee.Tests` + build App/Core/Hub bị đụng.
+- Migrate client: URL cũ → don_moi + loi_app.
+- Migrate Hub: dòng đầu webhooks cũ → don_moi.
+- Set/Get 3 key độc lập.
+- (Không bắt buộc test HTTP.)
+
+`dotnet test orders/XuLyDonShopee.Tests` + build App/Core/Hub.
 
 ## 4. Tiêu chí nghiệm thu
 
-- [ ] Hub + client: dropdown đủ 3 sự kiện trên; thêm/xóa dòng; lưu/reload đúng.
-- [ ] Đơn mới chỉ tới webhook(s) chọn `don_moi`.
-- [ ] Cảnh báo địa chỉ chỉ tới webhook(s) chọn `khong_dat_duoc_dia_chi`.
-- [ ] Hai dòng cùng `don_moi` → gửi cả hai URL.
-- [ ] Chọn `don_tra_hang` + lưu OK; chưa có tin gửi (chưa emitter).
-- [ ] Migrate user cũ: Hub URL → `don_moi`; client URL → cả `don_moi` + `khong_dat_duoc_dia_chi`.
+- [ ] Settings client + Hub hiện đúng 3 ô; lưu/reload độc lập.
+- [ ] Đơn mới chỉ dùng URL ô “có đơn mới”.
+- [ ] Lỗi địa chỉ chỉ dùng URL ô “lỗi app”.
+- [ ] Ô “đơn trả” lưu được; chưa có tin gửi tự động.
+- [ ] User cũ một webhook: vẫn nhận cả đơn mới + lỗi địa chỉ cho tới khi cấu hình lại.
 - [ ] Test + build pass.
 
 ## 5. Rủi ro & lưu ý
 
-- Thêm sự kiện mới sau này = thêm enum + nhãn + một chỗ `Send` — không đổi format JSON.
-- Không hard-code nhãn vào JSON; chỉ lưu `eventId`.
-- Không log/commit webhook thật.
+- Hub ô “lỗi app” có thể gây nhầm (Hub không gửi) — hint UI: “Client dùng ô này khi lỗi app; Hub chưa gửi loại tin này.”
+- Thêm sự kiện sau = thêm key + ô + call site.
+- Không commit webhook URL thật.
 
 ---
 
