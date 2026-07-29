@@ -95,12 +95,7 @@
         _groups = Db.ListShopGroupsBySubAccount();
         _subCount = _groups.Count(g => !g.IsOrphan);
         _shopCount = _groups.Sum(g => g.Items.Count);
-        _orderCounts = new Dictionary<long, int>();
-        foreach (var item in _groups.SelectMany(g => g.Items))
-        {
-            if (item.Hub is { } h && !_orderCounts.ContainsKey(h.Id))
-                _orderCounts[h.Id] = Db.CountOrders(h.Id, null, null);
-        }
+        _orderCounts = Db.OrderCountsByShop();
     }
 
     // Nạp ĐỦ trường vào ShopEdit (kể cả username/password/cookie/proxy) để UpsertShop KHÔNG xoá mất giá trị

@@ -19,6 +19,12 @@
     <PackageReference Include="Microsoft.Playwright" Version="1.60.0" />
   </ItemGroup>
 
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
+      <_Parameter1>Shopee.Hub.Web.Tests</_Parameter1>
+    </AssemblyAttribute>
+  </ItemGroup>
+
   <!-- ── Nguồn dùng chung được LINK (file gốc giữ nguyên trong suite\Shopee.Core & Shopee.Module.Search) ── -->
   <ItemGroup>
     <Compile Include="..\..\suite\Shopee.Core\Coordination\HubDtos.cs" Link="Shared\Coordination\HubDtos.cs" />

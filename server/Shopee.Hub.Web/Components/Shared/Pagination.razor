@@ -1,0 +1,48 @@
+<div class="pager">
+    <div class="pager-meta">
+        <span class="stat">@RangeText</span>
+        <span class="stat">Trang @Page / @SafeTotalPages</span>
+    </div>
+    <div class="pager-controls" aria-label="Phân trang">
+        <button class="btn sm" title="Trang đầu" disabled="@IsFirstPage" @onclick="() => ChangePage(1)">«</button>
+        <button class="btn sm" title="Trang trước" disabled="@IsFirstPage" @onclick="() => ChangePage(Page - 1)">‹</button>
+        @foreach (var pageNumber in VisiblePageNumbers)
+        {
+            <button class="btn sm pager-page @(pageNumber == Page ? "primary current" : null)"
+                    title="@($"Trang {pageNumber}")"
+                    aria-current="@(pageNumber == Page ? "page" : null)"
+                    @onclick="() => ChangePage(pageNumber)">@pageNumber</button>
+        }
+        <button class="btn sm" title="Trang sau" disabled="@IsLastPage" @onclick="() => ChangePage(Page + 1)">›</button>
+        <button class="btn sm" title="Trang cuối" disabled="@IsLastPage" @onclick="() => ChangePage(SafeTotalPages)">»</button>
+    </div>
+</div>
+
+@code {
+    [Parameter] public int Page { get; set; } = 1;
+    [Parameter] public int TotalPages { get; set; } = 1;
+    [Parameter] public int TotalItems { get; set; }
+    [Parameter] public int PageSize { get; set; } = 50;
+    [Parameter] public string ItemLabel { get; set; } = "mục";
+    [Parameter] public EventCallback<int> PageChanged { get; set; }
+
+    private int SafeTotalPages => Math.Max(1, TotalPages);
+    private bool IsFirstPage => Page <= 1;
+    private bool IsLastPage => Page >= SafeTotalPages;
+    private int FirstItem => TotalItems == 0 ? 0 : ((Page - 1) * PageSize) + 1;
+    private int LastItem => TotalItems == 0 ? 0 : Math.Min(Page * PageSize, TotalItems);
+    private string RangeText => $"{FirstItem}-{LastItem} / {TotalItems} {ItemLabel}";
+
+    private IEnumerable<int> VisiblePageNumbers
+    {
+        get
+        {
+            var start = Math.Max(1, Page - 2);
+            var end = Math.Min(SafeTotalPages, start + 4);
+            start = Math.Max(1, end - 4);
+            for (var pageNumber = start; pageNumber <= end; pageNumber++) yield return pageNumber;
+        }
+    }
+
+    private Task ChangePage(int page) => PageChanged.InvokeAsync(Math.Clamp(page, 1, SafeTotalPages));
+}

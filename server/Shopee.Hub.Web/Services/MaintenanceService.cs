@@ -29,12 +29,30 @@ public sealed class MaintenanceService : BackgroundService
             catch (Exception ex) { _log.LogWarning(ex, "sweep failed"); }
 
             var now = DateTimeOffset.UtcNow;
+            try { CleanupImportTemp(now); }
+            catch (Exception ex) { _log.LogWarning(ex, "import temp cleanup failed"); }
             if (now.Hour == 3 && now.DayOfYear != _lastBackupDay)
             {
                 _lastBackupDay = now.DayOfYear;
                 try { Backup(now); }
                 catch (Exception ex) { _log.LogWarning(ex, "backup failed"); }
             }
+        }
+    }
+
+    private void CleanupImportTemp(DateTimeOffset now)
+    {
+        var dir = Path.Combine(_opts.DataDir, "import-temp");
+        if (!Directory.Exists(dir)) return;
+        var cutoff = now.UtcDateTime - TimeSpan.FromHours(1);
+        foreach (var path in Directory.EnumerateFiles(dir, "*.xlsx", SearchOption.TopDirectoryOnly))
+        {
+            try
+            {
+                if (File.GetLastWriteTimeUtc(path) < cutoff) File.Delete(path);
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
         }
     }
 

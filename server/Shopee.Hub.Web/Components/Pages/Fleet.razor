@@ -459,16 +459,15 @@
 
         // 1) Từ config: mọi acct, MỌI shop (kể cả chưa gán sheet) → dòng danh sách (InConfig = true).
         //    Shop chưa sheet vẫn hiện (glyph ⚠) để đợt 2 còn cấu hình được — nhưng KHÔNG ghim/đặt-tay được.
-        foreach (var acct in _accounts)
-        foreach (var shop in acct.Shops)
+        foreach (var shop in FleetViewProjection.ConfiguredShops(_accounts))
         {
-            shops[acct.Id + "__" + shop.Id] = new ShopRow
+            shops[shop.Key] = new ShopRow
             {
-                AccountId = acct.Id,
-                AccountName = acct.DisplayName,
-                ShopId = shop.Id,
-                ShopName = shop.DisplayName,
-                Sheet = shop.ShopeeDataSheet ?? "",
+                AccountId = shop.AccountId,
+                AccountName = shop.AccountName,
+                ShopId = shop.ShopId,
+                ShopName = shop.ShopName,
+                Sheet = shop.Sheet,
                 InConfig = true,
             };
         }
@@ -913,10 +912,7 @@
         _ => ("· chưa xong", "idle"),
     };
 
-    private static string OpLabel(string op) => op switch
-    {
-        "scrape" => "Scrape", "import" => "Import", "update" => "Update", "rewrite" => "Tên SP", _ => op,
-    };
+    private static string OpLabel(string op) => FleetViewProjection.OperationLabel(op);
 
     private static int CountRows(List<RowRange> rr) => rr.Sum(r => Math.Max(0, r.To - r.From + 1));
 

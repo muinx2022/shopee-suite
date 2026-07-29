@@ -19,30 +19,70 @@ public sealed record PresenceState(string Dot, string Label, bool Online);
 /// bắn sự kiện <see cref="Changed"/> để trang tự vẽ lại (giống nhịp poll 2s của tab Fleet WPF). Kèm các hàm
 /// tính ô trạng thái / hiện diện port nguyên từ FleetViewModel (OpCell, Presence, MachineOffline).
 /// </summary>
-public sealed class FleetStateService : IHostedService, IDisposable
+public sealed class FleetStateService : BackgroundService
 {
     private readonly HubDatabase _db;
-    private Timer? _timer;
+    private readonly ILogger<FleetStateService> _log;
+    private readonly SemaphoreSlim _refreshGate = new(1, 1);
+    private DateTimeOffset _lastErrorLoggedAt;
 
     public FleetSnapshot Snapshot { get; private set; } = new();
     public event Action? Changed;
 
-    public FleetStateService(HubDatabase db) => _db = db;
-
-    public Task StartAsync(CancellationToken ct)
+    public FleetStateService(HubDatabase db, ILogger<FleetStateService> log)
     {
-        _timer = new Timer(_ => Refresh(), null, TimeSpan.Zero, TimeSpan.FromSeconds(2));
-        return Task.CompletedTask;
+        _db = db;
+        _log = log;
     }
 
-    public Task StopAsync(CancellationToken ct) { _timer?.Dispose(); return Task.CompletedTask; }
-    public void Dispose() => _timer?.Dispose();
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        Refresh();
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(2));
+
+        try
+        {
+            while (await timer.WaitForNextTickAsync(stoppingToken)) Refresh();
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            // Normal host shutdown.
+        }
+    }
 
     /// <summary>Đọc lại snapshot ngay (dùng sau khi thao tác để UI phản hồi tức thì, khỏi chờ nhịp 2s).</summary>
     public void Refresh()
     {
-        try { Snapshot = _db.Fleet(); Changed?.Invoke(); }
-        catch { /* offline/khóa DB nhất thời → giữ snapshot cũ */ }
+        // Refresh tay tu UI co the trung nhip nen; bo qua nhip trung thay vi xep hang callback.
+        if (!_refreshGate.Wait(0)) return;
+        try
+        {
+            Snapshot = _db.Fleet();
+            NotifyChanged();
+        }
+        catch (Exception ex)
+        {
+            var now = DateTimeOffset.UtcNow;
+            if ((now - _lastErrorLoggedAt) >= TimeSpan.FromMinutes(1))
+            {
+                _lastErrorLoggedAt = now;
+                _log.LogWarning(ex, "Không thể cập nhật snapshot fleet; tiếp tục giữ snapshot gần nhất.");
+            }
+        }
+        finally
+        {
+            _refreshGate.Release();
+        }
+    }
+
+    private void NotifyChanged()
+    {
+        if (Changed is not { } changed) return;
+        foreach (Action subscriber in changed.GetInvocationList())
+        {
+            try { subscriber(); }
+            catch (Exception ex) { _log.LogDebug(ex, "Một subscriber snapshot fleet đã đóng hoặc bị lỗi."); }
+        }
     }
 
     /// <summary>Ngưỡng "CÒN CHẠY" để HIỂN THỊ ⏳: nhịp lease/máy trong 120s (= 4 nhịp heartbeat 30s bị lỡ; &lt; 180s

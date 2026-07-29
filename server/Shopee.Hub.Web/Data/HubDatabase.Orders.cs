@@ -54,6 +54,7 @@ public sealed record PrepareStatRow(string ShopUsername, int Count);
 /// đang ở trạng thái chờ, số đơn ĐÃ có phiếu trên hub, lần client đẩy đơn gần nhất. Kiểu NỘI BỘ hub (chỉ trang
 /// Blazor dùng, không đi qua dây).</summary>
 public sealed record ShopOrderSummary(long ShopId, int Waiting, int WithSlip, DateTimeOffset LastSynced);
+public sealed record OrdersPageResult(int Total, List<OrderRecord> Items);
 
 /// <summary>Phần HubDatabase: nghiệp vụ ĐƠN HÀNG — bảng <c>orders</c> (UNIQUE shop_id+order_sn) + upsert/query/count.</summary>
 public sealed partial class HubDatabase
@@ -193,34 +194,64 @@ ON CONFLICT(shop_id,order_sn) DO UPDATE SET
     /// <summary>Đọc đơn có lọc (shop/trạng thái/tìm kiếm) + phân trang. search khớp order_sn/buyer/tên SP/SKU.</summary>
     public List<OrderRecord> QueryOrders(long? shopId, string? status, string? search, int limit, int offset)
     {
-        lock (_gate)
-        {
-            var list = new List<OrderRecord>();
-            using var c = _conn.CreateCommand();
-            // items_json + return_request_code thêm ở CUỐI danh sách cột để KHÔNG lệch chỉ số rd.Get*(i) sẵn có
-            // trong ReadOrderRow.
-            c.CommandText = "SELECT id,shop_id,order_sn,shopee_order_id,buyer_username,item_count,item_summary,sku,"
-                + "total_price,total_price_text,final_amount,final_amount_text,payment_method,status,status_description,"
-                + "cancel_reason,channel,carrier,tracking_number,synced_at,slip_at,items_json,return_request_code FROM orders"
-                + WhereClause(c, shopId, status, search)
-                + " ORDER BY synced_at DESC, id DESC LIMIT $lim OFFSET $off";
-            c.Parameters.AddWithValue("$lim", Math.Clamp(limit, 1, 1000));
-            c.Parameters.AddWithValue("$off", Math.Max(0, offset));
-            using var rd = c.ExecuteReader();
-            while (rd.Read()) list.Add(ReadOrderRow(rd));
-            return list;
-        }
+        using var conn = OpenReadConnection();
+        return QueryOrdersCore(conn, null, shopId, status, search, limit, offset);
     }
 
     /// <summary>Đếm tổng đơn khớp bộ lọc (cho phân trang).</summary>
     public int CountOrders(long? shopId, string? status, string? search)
     {
-        lock (_gate)
-        {
-            using var c = _conn.CreateCommand();
-            c.CommandText = "SELECT COUNT(*) FROM orders" + WhereClause(c, shopId, status, search);
-            return Convert.ToInt32(c.ExecuteScalar());
-        }
+        using var conn = OpenReadConnection();
+        return CountOrdersCore(conn, null, shopId, status, search);
+    }
+
+    /// <summary>Count + page tren cung read transaction de UI khong bi lech tong khi client dang push don.</summary>
+    public OrdersPageResult QueryOrdersPage(long? shopId, string? status, string? search, int limit, int offset)
+    {
+        using var conn = OpenReadConnection();
+        using var tx = conn.BeginTransaction(deferred: true);
+        var total = CountOrdersCore(conn, tx, shopId, status, search);
+        var items = QueryOrdersCore(conn, tx, shopId, status, search, limit, offset);
+        tx.Commit();
+        return new OrdersPageResult(total, items);
+    }
+
+    public Dictionary<long, int> OrderCountsByShop()
+    {
+        using var conn = OpenReadConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT shop_id, COUNT(*) FROM orders GROUP BY shop_id";
+        using var rd = cmd.ExecuteReader();
+        var result = new Dictionary<long, int>();
+        while (rd.Read()) result[rd.GetInt64(0)] = checked((int)rd.GetInt64(1));
+        return result;
+    }
+
+    private static int CountOrdersCore(SqliteConnection conn, SqliteTransaction? tx,
+        long? shopId, string? status, string? search)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = "SELECT COUNT(*) FROM orders" + WhereClause(cmd, shopId, status, search);
+        return Convert.ToInt32(cmd.ExecuteScalar());
+    }
+
+    private static List<OrderRecord> QueryOrdersCore(SqliteConnection conn, SqliteTransaction? tx,
+        long? shopId, string? status, string? search, int limit, int offset)
+    {
+        var list = new List<OrderRecord>();
+        using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = "SELECT id,shop_id,order_sn,shopee_order_id,buyer_username,item_count,item_summary,sku,"
+            + "total_price,total_price_text,final_amount,final_amount_text,payment_method,status,status_description,"
+            + "cancel_reason,channel,carrier,tracking_number,synced_at,slip_at,items_json,return_request_code FROM orders"
+            + WhereClause(cmd, shopId, status, search)
+            + " ORDER BY synced_at DESC, id DESC LIMIT $lim OFFSET $off";
+        cmd.Parameters.AddWithValue("$lim", Math.Clamp(limit, 1, 1000));
+        cmd.Parameters.AddWithValue("$off", Math.Max(0, offset));
+        using var rd = cmd.ExecuteReader();
+        while (rd.Read()) list.Add(ReadOrderRow(rd));
+        return list;
     }
 
     /// <summary>

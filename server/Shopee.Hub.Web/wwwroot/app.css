@@ -203,6 +203,10 @@ html.dark .pinpanel { background: rgba(60, 80, 224, .10); border-color: rgba(60,
 
 /* ==================== Tables ==================== */
 .tablewrap { overflow-x: auto; border: 1px solid var(--stroke); border-radius: var(--radius); background: var(--card); box-shadow: var(--shadow); }
+.m-only { display: none !important; }
+.pager { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; margin: 12px 0 18px; }
+.pager-meta, .pager-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.pager-controls { gap: 6px; }
 
 /* Trang Fleet: khoá cao bằng viewport → chỉ LƯỚI acc×shop cuộn nội bộ, panel "Giao việc" luôn nằm dưới,
    KHÔNG cuộn cả trình duyệt. Then chốt: .main phải height:100vh (min-height:100vh cho phép nó phình cao
@@ -311,6 +315,10 @@ table.grid tr.acctrow:hover td { background: var(--gray); }
 .modal-head { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--stroke); font-weight: 700; font-size: 15px; color: var(--text); }
 .modal-body { padding: 18px 20px; overflow-y: auto; }
 .modal-body label { display: block; margin-bottom: 6px; color: var(--body); font-size: 13px; }
+.form-fields { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: flex-end; }
+.form-fields.start { align-items: flex-start; }
+.form-fields.detail-fields { margin-top: 8px; }
+.modal-body label.field-col { display: flex; flex-direction: column; gap: 4px; margin: 0; font-size: 12.5px; }
 .modal-foot { display: flex; align-items: center; gap: 10px; justify-content: flex-end; padding: 14px 20px; border-top: 1px solid var(--stroke); background: var(--gray); border-radius: 0 0 14px 14px; }
 .modal-foot .action { margin-right: auto; }
 
@@ -356,6 +364,7 @@ table.grid tr.acctrow:hover td { background: var(--gray); }
 
     /* Giấu thông tin phụ trên mobile (markup đánh dấu m-hide) — desktop hiện đầy đủ. */
     .m-hide { display: none !important; }
+    .m-only { display: initial !important; }
 
     .topbar { padding: 0 14px; }
     .topbar-user { display: none; }
@@ -415,6 +424,13 @@ table.grid tr.acctrow:hover td { background: var(--gray); }
 
     /* Checkbox trong bảng to lên cho dễ chạm (mặc định 15px). */
     table.grid input[type=checkbox] { width: 20px; height: 20px; }
+
+    .order-detail-toggle { margin-left: auto; }
+    .order-detail { flex: 1 1 100%; width: 100%; margin-top: 6px; padding-top: 8px; border-top: 1px solid var(--stroke); }
+    .order-detail > div { display: flex; justify-content: space-between; gap: 12px; padding: 5px 0; }
+    .order-detail > div b { color: var(--body); font-size: 11px; text-transform: uppercase; }
+    .order-detail > div span { min-width: 0; text-align: right; overflow-wrap: anywhere; }
+    .order-detail > .btn { display: flex !important; width: 100%; justify-content: center; margin-top: 8px; }
 
     /* Trang /data (100 dòng/trang tạo trang cuộn rất dài, sticky header chết): cap chiều cao để bảng tự cuộn trong khung. */
     .alldata .tablewrap { max-height: 70vh; max-height: 70dvh; }
@@ -573,6 +589,9 @@ html.dark .kpi-btn.open .kpi-label { color: var(--sidebar-ic-active); }
 
 /* Phone hẹp: sidebar drawer (đè nội dung), bỏ icon-rail 64px cướp bề ngang. */
 @media (max-width: 640px) {
+    .pager { align-items: stretch; }
+    .pager-meta, .pager-controls { width: 100%; justify-content: space-between; }
+    .pager-controls .btn { flex: 1 1 38px; min-width: 38px; padding-left: 6px; padding-right: 6px; }
     .nav-toggle { display: inline-flex; }
     .side {
         width: min(280px, 88vw);

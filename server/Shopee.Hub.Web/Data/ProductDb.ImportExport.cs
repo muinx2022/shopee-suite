@@ -33,6 +33,7 @@ public sealed partial class ProductDb
         foreach (var (sheet, rows) in parsed)
         {
             await using var tx = await conn.BeginTransactionAsync(ct);
+            await AcquireSheetWriteLockAsync(conn, tx, acct, sheet, ct);
 
             if (replace)
             {
@@ -74,6 +75,7 @@ public sealed partial class ProductDb
         CheckNoDupSkuWithin(rows);
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
         await using var tx = await conn.BeginTransactionAsync(ct);
+        await AcquireSheetWriteLockAsync(conn, tx, acct, sheet, ct);
 
         if (replace)
         {

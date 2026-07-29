@@ -40,22 +40,8 @@
     <button class="btn sm" title="Hủy lọc — bỏ mọi bộ lọc, xem tất cả đơn" @onclick="ClearFilters">Hủy lọc</button>
 </div>
 
-<div class="bar" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between">
-    <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
-        <span class="stat">@DisplayedRangeText</span>
-        <span class="stat">Trang @_page / @_totalPages</span>
-    </div>
-    <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center">
-        <button class="btn sm" title="Trang đầu" disabled="@IsFirstPage" @onclick="() => GoPage(1)">«</button>
-        <button class="btn sm" title="Trang trước" disabled="@IsFirstPage" @onclick="() => GoPage(_page - 1)">‹</button>
-        @foreach (var pageNumber in VisiblePageNumbers)
-        {
-            <button class="btn sm @(pageNumber == _page ? "primary" : null)" title="@($"Trang {pageNumber}")" aria-current="@(pageNumber == _page ? "page" : null)" @onclick="() => GoPage(pageNumber)">@pageNumber</button>
-        }
-        <button class="btn sm" title="Trang sau" disabled="@IsLastPage" @onclick="() => GoPage(_page + 1)">›</button>
-        <button class="btn sm" title="Trang cuối" disabled="@IsLastPage" @onclick="() => GoPage(_totalPages)">»</button>
-    </div>
-</div>
+<Pagination Page="_page" TotalPages="_totalPages" TotalItems="_total" PageSize="_pageSize"
+            ItemLabel="đơn" PageChanged="GoPage" />
 
 <div class="tablewrap">
 <table class="grid sm stack-sm">
@@ -80,7 +66,27 @@
             <td class="mono m-hide" data-label="Đơn trả hàng">@(o.ReturnRequestCode ?? "—")</td>
             <td data-label="Tổng tiền">@(o.TotalPriceText ?? (o.TotalPrice?.ToString("N0") ?? "—"))</td>
             <td class="m-hide" data-label="Cuối cùng">@(o.FinalAmountText ?? (o.FinalAmount?.ToString("N0") ?? "—"))</td>
-            <td data-label="Trạng thái"><span class="pill @StatusCss(o.Status)">@(o.Status ?? "—")</span></td>
+            <td data-label="Trạng thái">
+                <span class="pill @StatusCss(o.Status)">@(o.Status ?? "—")</span>
+                <button type="button" class="linkbtn m-only order-detail-toggle"
+                        aria-expanded="@(_expandedOrderId == o.Id)"
+                        @onclick="() => ToggleDetails(o.Id)">@(_expandedOrderId == o.Id ? "Thu gọn" : "Chi tiết")</button>
+                @if (_expandedOrderId == o.Id)
+                {
+                    <div class="m-only order-detail">
+                        <div><b>SKU</b><span>@(string.IsNullOrEmpty(sku) ? "—" : sku)</span></div>
+                        <div><b>Phân loại</b><span>@Trim(phanLoai)</span></div>
+                        <div><b>Đơn trả hàng</b><span>@(o.ReturnRequestCode ?? "—")</span></div>
+                        <div><b>Số tiền cuối</b><span>@(o.FinalAmountText ?? (o.FinalAmount?.ToString("N0") ?? "—"))</span></div>
+                        <div><b>Vận chuyển</b><span>@(string.IsNullOrEmpty(o.Carrier) ? (o.Channel ?? "—") : o.Carrier)@(string.IsNullOrEmpty(o.TrackingNumber) ? "" : $" · {o.TrackingNumber}")</span></div>
+                        <div><b>Đồng bộ</b><span>@(o.SyncedAt == default ? "—" : o.SyncedAt.LocalDateTime.ToString("MM-dd HH:mm"))</span></div>
+                        @if (o.SlipAt is not null)
+                        {
+                            <a class="btn sm" href="@($"/slips/{o.ShopId}/{o.OrderSn}")" target="_blank" rel="noopener">Mở phiếu PDF</a>
+                        }
+                    </div>
+                }
+            </td>
             <td class="m-hide" data-label="Vận chuyển">@(string.IsNullOrEmpty(o.Carrier) ? (o.Channel ?? "—") : o.Carrier)@(string.IsNullOrEmpty(o.TrackingNumber) ? "" : $" · {o.TrackingNumber}")</td>
             <td class="m-hide" data-label="Phiếu">
                 @if (o.SlipAt is not null)
@@ -101,22 +107,8 @@
 
 @if (_totalPages > 1)
 {
-    <div class="bar" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between">
-        <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
-            <span class="stat">@DisplayedRangeText</span>
-            <span class="stat">Trang @_page / @_totalPages</span>
-        </div>
-        <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center">
-            <button class="btn sm" title="Trang đầu" disabled="@IsFirstPage" @onclick="() => GoPage(1)">«</button>
-            <button class="btn sm" title="Trang trước" disabled="@IsFirstPage" @onclick="() => GoPage(_page - 1)">‹</button>
-            @foreach (var pageNumber in VisiblePageNumbers)
-            {
-                <button class="btn sm @(pageNumber == _page ? "primary" : null)" title="@($"Trang {pageNumber}")" aria-current="@(pageNumber == _page ? "page" : null)" @onclick="() => GoPage(pageNumber)">@pageNumber</button>
-            }
-            <button class="btn sm" title="Trang sau" disabled="@IsLastPage" @onclick="() => GoPage(_page + 1)">›</button>
-            <button class="btn sm" title="Trang cuối" disabled="@IsLastPage" @onclick="() => GoPage(_totalPages)">»</button>
-        </div>
-    </div>
+    <Pagination Page="_page" TotalPages="_totalPages" TotalItems="_total" PageSize="_pageSize"
+                ItemLabel="đơn" PageChanged="GoPage" />
 }
 
 @code {
@@ -134,24 +126,7 @@
     private int _page = 1;
     private int _total;
     private int _totalPages = 1;
-    private int FirstRow => _total == 0 ? 0 : ((_page - 1) * _pageSize) + 1;
-    private int LastRow => _total == 0 ? 0 : Math.Min(_page * _pageSize, _total);
-    private bool IsFirstPage => _page <= 1;
-    private bool IsLastPage => _page >= _totalPages;
-    private string DisplayedRangeText => $"{FirstRow}-{LastRow} / {_total} đơn";
-    private IEnumerable<int> VisiblePageNumbers
-    {
-        get
-        {
-            var start = Math.Max(1, _page - 2);
-            var end = Math.Min(_totalPages, start + 4);
-            start = Math.Max(1, end - 4);
-            for (var pageNumber = start; pageNumber <= end; pageNumber++)
-            {
-                yield return pageNumber;
-            }
-        }
-    }
+    private long? _expandedOrderId;
 
     protected override void OnInitialized()
     {
@@ -203,15 +178,22 @@
 
     private void GoPage(int p) { _page = Math.Clamp(p, 1, _totalPages); Load(); }
 
+    private void ToggleDetails(long id) => _expandedOrderId = _expandedOrderId == id ? null : id;
+
     private void Load()
     {
         long? shopFilter = _shopId > 0 ? _shopId : null;
         var status = string.IsNullOrWhiteSpace(_status) ? null : _status;
         var q = string.IsNullOrWhiteSpace(_search) ? null : _search;
-        _total = Db.CountOrders(shopFilter, status, q);
+        var result = Db.QueryOrdersPage(shopFilter, status, q, _pageSize, (_page - 1) * _pageSize);
+        _total = result.Total;
         _totalPages = Math.Max(1, (int)Math.Ceiling(_total / (double)_pageSize));
-        if (_page > _totalPages) _page = _totalPages;
-        _orders = Db.QueryOrders(shopFilter, status, q, _pageSize, (_page - 1) * _pageSize);
+        if (_page > _totalPages)
+        {
+            _page = _totalPages;
+            result = Db.QueryOrdersPage(shopFilter, status, q, _pageSize, (_page - 1) * _pageSize);
+        }
+        _orders = result.Items;
     }
 
     private string ShopName(long id) => _shopNames.GetValueOrDefault(id, id.ToString());

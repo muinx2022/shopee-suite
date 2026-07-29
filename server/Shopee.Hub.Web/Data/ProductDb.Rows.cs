@@ -252,6 +252,7 @@ WHERE account_id = $1 AND sheet = $2 AND row_no = $3;";
 
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
         await using var tx = await conn.BeginTransactionAsync(ct);
+        await AcquireSheetWriteLockAsync(conn, tx, req.Acct, req.Sheet, ct);
 
         int baseRow;
         await using (var q = new NpgsqlCommand(
@@ -313,6 +314,7 @@ WHERE account_id=$1 AND sheet=$2 AND row_no=$3;";
     {
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
         await using var tx = await conn.BeginTransactionAsync(ct);
+        await AcquireSheetWriteLockAsync(conn, tx, acct, sheet, ct);
 
         int rowNo;
         await using (var q = new NpgsqlCommand(
@@ -335,6 +337,21 @@ WHERE account_id=$1 AND sheet=$2 AND row_no=$3;";
     }
 
     // ── Helper dùng chung ──────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Tuan tu hoa cac transaction thay doi cau truc dong cua cung mot sheet. Neu khong co khoa nay, hai
+    /// transaction cung doc <c>max(row_no)+1</c> co the cap cung mot so; import replace cung co the xoa xen
+    /// giua mot luot append. Transaction-level advisory lock tu nha khi commit/rollback.
+    /// </summary>
+    internal static async Task AcquireSheetWriteLockAsync(NpgsqlConnection conn, NpgsqlTransaction tx,
+        string acct, string sheet, CancellationToken ct)
+    {
+        await using var cmd = new NpgsqlCommand(
+            "SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2));", conn, tx);
+        cmd.Parameters.AddWithValue(acct);
+        cmd.Parameters.AddWithValue(sheet);
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
 
     /// <summary>Cột INSERT/UPSERT của 1 dòng — 3 khoá + 17 ô dữ liệu + updated_at(now) + updated_by.
     /// $1..$21 (updated_at = now() nên KHÔNG là tham số).</summary>

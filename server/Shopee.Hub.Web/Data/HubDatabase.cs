@@ -20,6 +20,7 @@ namespace Shopee.Hub;
 public sealed partial class HubDatabase : IDisposable
 {
     private readonly object _gate = new();
+    private readonly string _connectionString;
     private readonly SqliteConnection _conn;
 
     public string FilesDir { get; }
@@ -43,7 +44,12 @@ public sealed partial class HubDatabase : IDisposable
         FilesDir = Path.Combine(dataDir, "files");
         Directory.CreateDirectory(FilesDir);
 
-        _conn = new SqliteConnection($"Data Source={Path.Combine(dataDir, "hub.db")}");
+        _connectionString = new SqliteConnectionStringBuilder
+        {
+            DataSource = Path.Combine(dataDir, "hub.db"),
+            Pooling = true,
+        }.ToString();
+        _conn = new SqliteConnection(_connectionString);
         _conn.Open();
         ExecRaw("PRAGMA journal_mode=WAL;");
         ExecRaw("PRAGMA busy_timeout=5000;");
@@ -111,6 +117,17 @@ public sealed partial class HubDatabase : IDisposable
     }
 
     public void Dispose() { lock (_gate) _conn.Dispose(); }
+
+    /// <summary>Connection doc ngan han: WAL cho phep query UI chay song song voi heartbeat/write tren connection chinh.</summary>
+    private SqliteConnection OpenReadConnection()
+    {
+        var conn = new SqliteConnection(_connectionString);
+        conn.Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "PRAGMA busy_timeout=5000; PRAGMA query_only=ON;";
+        cmd.ExecuteNonQuery();
+        return conn;
+    }
 
     /// <summary>Snapshot nhất quán của DB ra <paramref name="destPath"/> (VACUUM INTO) + checkpoint WAL để
     /// hub.db-wal khỏi phình. Dùng cho backup đêm. destPath phải CHƯA tồn tại (SQLite tự tạo).</summary>

@@ -5,7 +5,9 @@
    đăng ký DI → resolve qua IServiceProvider. LƯU Ý: component có thể được đặt TRONG .editcard (ProductGridPanel) →
    MỌI input trong modal PHẢI có width tường minh (.ci / inline) hoặc là checkbox, kẻo dính .editcard input{width:100%}. *@
 @using Microsoft.Extensions.DependencyInjection
+@implements IAsyncDisposable
 @inject FileStoreConfigService Config
+@inject HubOptions HubOptions
 @inject IServiceProvider Sp
 @inject IJSRuntime JS
 
@@ -26,14 +28,14 @@
                 @* Chọn đích (chỉ khi KHÔNG cố định) — 2 select Acc/Shop đầu form, prefill từ bộ lọc. *@
                 @if (!Fixed)
                 {
-                    <div style="display:flex;flex-wrap:wrap;gap:10px 16px;align-items:flex-end">
-                        <label style="@MapLbl">Tài khoản *
+                    <div class="form-fields">
+                        <label class="field-col">Tài khoản *
                             <select value="@_selAcct" @onchange="OnSelAcct" disabled="@_wizBusy" style="width:min(220px,100%)">
                                 <option value="">— chọn tài khoản —</option>
                                 @foreach (var a in _accounts) { <option value="@a.Id">@a.DisplayName</option> }
                             </select>
                         </label>
-                        <label style="@MapLbl">Shop *
+                        <label class="field-col">Shop *
                             <select value="@_selSheet" @onchange="OnSelSheet" disabled="@(_wizBusy || string.IsNullOrEmpty(_selAcct))" style="width:min(220px,100%)">
                                 <option value="">— chọn shop —</option>
                                 @foreach (var s in SelShopOptions()) { <option value="@s.ShopeeDataSheet">@s.DisplayName</option> }
@@ -95,21 +97,21 @@
                 </div>
 
                 <div class="subhead">Ánh xạ cột (1-based, 0 = bỏ trường)</div>
-                <div style="display:flex;flex-wrap:wrap;gap:10px 16px;align-items:flex-end">
-                    <label style="@MapLbl">Link <input type="number" @bind="_wizLink" class="ci" /></label>
-                    <label style="@MapLbl">Giá bán <input type="number" @bind="_wizPrice" class="ci" /></label>
-                    <label style="@MapLbl">SKU <input type="number" @bind="_wizSku" class="ci" /></label>
-                    <label style="@MapLbl">Item ID <input type="number" @bind="_wizItem" class="ci" /></label>
-                    <label style="@MapLbl">Tên gốc <input type="number" @bind="_wizName" class="ci" /></label>
-                    <label style="@MapLbl">Tên đã sửa <input type="number" @bind="_wizRewritten" class="ci" /></label>
+                <div class="form-fields">
+                    <label class="field-col">Link <input type="number" @bind="_wizLink" class="ci" /></label>
+                    <label class="field-col">Giá bán <input type="number" @bind="_wizPrice" class="ci" /></label>
+                    <label class="field-col">SKU <input type="number" @bind="_wizSku" class="ci" /></label>
+                    <label class="field-col">Item ID <input type="number" @bind="_wizItem" class="ci" /></label>
+                    <label class="field-col">Tên gốc <input type="number" @bind="_wizName" class="ci" /></label>
+                    <label class="field-col">Tên đã sửa <input type="number" @bind="_wizRewritten" class="ci" /></label>
                 </div>
                 <p class="hint">Các cột phụ (giá gốc, danh mục, rating…) đọc theo vị trí chuẩn B, H..Q nếu có.</p>
 
-                <div style="display:flex;flex-wrap:wrap;gap:10px 16px;align-items:flex-end">
-                    <label style="@MapLbl">Từ dòng <input type="number" @bind="_wizFrom" class="ci" /></label>
-                    <label style="@MapLbl">Đến dòng <input type="number" @bind="_wizTo" class="ci" /></label>
+                <div class="form-fields">
+                    <label class="field-col">Từ dòng <input type="number" @bind="_wizFrom" class="ci" /></label>
+                    <label class="field-col">Đến dòng <input type="number" @bind="_wizTo" class="ci" /></label>
                     <span class="hint" style="margin:0 0 4px">(dòng 1 là tiêu đề; đến dòng 0 = hết)</span>
-                    <label style="@MapLbl">Chế độ
+                    <label class="field-col">Chế độ
                         <select @bind="_wizMode" style="width:180px">
                             <option value="replace">Ghi đè (thay toàn bộ)</option>
                             <option value="append">Nối thêm (vào cuối)</option>
@@ -142,11 +144,11 @@
 
     private const int PreviewRows = 5;   // số dòng dữ liệu hiện trong bảng xem trước
     private const string Clip = "max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
-    // Label cột dọc trong modal (modal-body label mặc định display:block → ép flex-column cho input nằm dưới chữ).
-    private const string MapLbl = "display:flex;flex-direction:column;gap:4px;margin:0;font-size:12.5px";
-
+    private const long MaxUploadBytes = 256L * 1024 * 1024;
+    private static readonly SemaphoreSlim ParseGate = new(1, 1);
+    private readonly CancellationTokenSource _lifetimeCts = new();
     private bool _open, _wizBusy;
-    private byte[]? _wizBytes;
+    private string? _wizTempPath;
     private string _wizFileName = "", _wizSheet = "", _wizError = "", _wizMode = "replace";
     private List<string> _wizSheets = new(), _wizCols = new();
     private List<(int RowNo, List<string> Cells)> _wizPreview = new();
@@ -171,7 +173,7 @@
     private void OnSelAcct(ChangeEventArgs e) { _selAcct = e.Value?.ToString() ?? ""; _selSheet = ""; }
     private void OnSelSheet(ChangeEventArgs e) => _selSheet = e.Value?.ToString() ?? "";
 
-    // Chọn file → KHÔNG import ngay: đọc bytes (256MB), Task.Run lấy tên sheet + xem trước sheet đầu → MỞ modal.
+    // Chon file -> luu file tam (khong giu byte[] 256MB trong circuit), doc ten sheet + preview roi mo modal.
     private async Task OnFile(InputFileChangeEventArgs e)
     {
         if (_wizBusy) return;
@@ -180,35 +182,38 @@
         _wizBusy = true; _wizError = "";
         try
         {
-            byte[] bytes;
-            await using (var s = file.OpenReadStream(maxAllowedSize: 256L * 1024 * 1024))
-            using (var buf = new MemoryStream())
-            {
-                await s.CopyToAsync(buf);
-                bytes = buf.ToArray();
-            }
+            var ct = _lifetimeCts.Token;
+            DeleteTempFile();
+            var tempDir = Path.Combine(HubOptions.DataDir, "import-temp");
+            Directory.CreateDirectory(tempDir);
+            _wizTempPath = Path.Combine(tempDir, Guid.NewGuid().ToString("N") + ".xlsx");
+            await using (var input = file.OpenReadStream(MaxUploadBytes, ct))
+            await using (var output = new FileStream(_wizTempPath, FileMode.CreateNew, FileAccess.Write,
+                             FileShare.Read, 81920, FileOptions.Asynchronous | FileOptions.SequentialScan))
+                await input.CopyToAsync(output, ct);
 
-            var load = await Task.Run(() =>
+            var path = _wizTempPath;
+            var load = await ParseAsync(() =>
             {
                 try
                 {
                     List<string> sheets;
-                    using (var ms = new MemoryStream(bytes)) sheets = ProductXlsxCodec.ListSheetNames(ms);
+                    using (var stream = File.OpenRead(path)) sheets = ProductXlsxCodec.ListSheetNames(stream);
                     if (sheets.Count == 0)
                         return (sheets, "", new List<string>(), new List<(int, List<string>)>(), "File không có worksheet nào.");
                     var s0 = sheets[0];
-                    using var msp = new MemoryStream(bytes);
-                    var pv = ProductXlsxCodec.PreviewSheet(msp, s0, PreviewRows);
+                    using var previewStream = File.OpenRead(path);
+                    var pv = ProductXlsxCodec.PreviewSheet(previewStream, s0, PreviewRows);
                     return (sheets, s0, pv.ColLetters, pv.Rows, "");
                 }
                 catch (Exception ex)
                 {
                     return (new List<string>(), "", new List<string>(), new List<(int, List<string>)>(), "Không đọc được file: " + ex.Message);
                 }
-            });
+            }, ct);
 
             // Nạp state modal + reset map/khoảng dòng/chế độ về mặc định cho lần nhập này.
-            _wizBytes = bytes; _wizFileName = file.Name;
+            _wizFileName = file.Name;
             _wizSheets = load.Item1; _wizSheet = load.Item2; _wizCols = load.Item3; _wizPreview = load.Item4; _wizError = load.Item5;
             _wizLink = 1; _wizPrice = 3; _wizSku = 4; _wizItem = 5; _wizName = 6; _wizRewritten = 7;
             _wizFrom = 2; _wizTo = 0; _wizMode = "replace"; _wizFillSku = true;
@@ -221,7 +226,8 @@
             }
             _open = true;   // mở modal kể cả khi có lỗi (báo lỗi trong modal, không đóng)
         }
-        catch (Exception ex) { _wizError = "✘ Lỗi đọc file: " + ex.Message; _open = true; }
+        catch (OperationCanceledException) when (_lifetimeCts.IsCancellationRequested) { }
+        catch (Exception ex) { _wizError = "✘ Lỗi đọc file: " + ex.Message; _open = true; DeleteTempFile(); }
         finally { _wizBusy = false; }
     }
 
@@ -229,28 +235,28 @@
     private async Task WizSelectSheet(ChangeEventArgs e)
     {
         _wizSheet = e.Value?.ToString() ?? "";
-        if (_wizBytes is null || string.IsNullOrEmpty(_wizSheet)) return;
+        if (_wizTempPath is null || string.IsNullOrEmpty(_wizSheet)) return;
         _wizBusy = true; _wizError = "";
         try
         {
-            var bytes = _wizBytes; var sheet = _wizSheet;
-            var res = await Task.Run(() =>
+            var path = _wizTempPath; var sheet = _wizSheet;
+            var res = await ParseAsync(() =>
             {
-                try { using var ms = new MemoryStream(bytes); var pv = ProductXlsxCodec.PreviewSheet(ms, sheet, PreviewRows); return (pv.ColLetters, pv.Rows, ""); }
+                try { using var stream = File.OpenRead(path); var pv = ProductXlsxCodec.PreviewSheet(stream, sheet, PreviewRows); return (pv.ColLetters, pv.Rows, ""); }
                 catch (Exception ex) { return (new List<string>(), new List<(int, List<string>)>(), "Không đọc được sheet: " + ex.Message); }
-            });
+            }, _lifetimeCts.Token);
             _wizCols = res.Item1; _wizPreview = res.Item2; _wizError = res.Item3;
         }
         finally { _wizBusy = false; }
     }
 
-    private void Cancel() { _open = false; _wizBytes = null; _wizError = ""; }
+    private void Cancel() { _open = false; _wizError = ""; DeleteTempFile(); }
 
     // OK → confirm chế độ → ParseSheet(bytes, sheet, ov, from, to) → (fill SKU thiếu) → ImportIntoSheetAsync. Ghi đè giữ
     // RowNo từ ParseSheet; nối thêm để ProductDb tự cấp row_no từ max+1. Lỗi → giữ modal. Xong → bắn OnImported.
     private async Task Import()
     {
-        if (_wizBusy || _wizBytes is null || string.IsNullOrEmpty(_wizSheet)) return;
+        if (_wizBusy || _wizTempPath is null || string.IsNullOrEmpty(_wizSheet)) return;
         var pg = Pg;
         if (pg is null || !pg.IsReady) return;
         var acct = TargetAcct; var dest = TargetSheet;
@@ -264,23 +270,47 @@
         _wizBusy = true; _wizError = "";
         try
         {
-            var bytes = _wizBytes; var sheet = _wizSheet; var src = _wizFileName; var from = _wizFrom; var to = _wizTo;
+            var path = _wizTempPath; var sheet = _wizSheet; var src = _wizFileName; var from = _wizFrom; var to = _wizTo;
+            var ct = _lifetimeCts.Token;
             var ov = new ProductXlsxCodec.ColumnOverrides(
                 Math.Max(0, _wizLink), Math.Max(0, _wizPrice), Math.Max(0, _wizSku),
                 Math.Max(0, _wizItem), Math.Max(0, _wizName), Math.Max(0, _wizRewritten));
 
-            var rows = await Task.Run(() => { using var ms = new MemoryStream(bytes); return ProductXlsxCodec.ParseSheet(ms, sheet, ov, from, to); });
+            var rows = await ParseAsync(() => { using var stream = File.OpenRead(path); return ProductXlsxCodec.ParseSheet(stream, sheet, ov, from, to); }, ct);
             // Tự sinh SKU 'B#####' cho dòng file THIẾU SKU (nếu bật) → dòng nào cũng đạt chuẩn per-shop trước khi ghi.
             var filled = 0;
-            if (_wizFillSku) (rows, filled) = await Task.Run(() => pg.FillMissingSkusAsync(acct, dest, rows, CancellationToken.None));
-            var count = await Task.Run(() => pg.ImportIntoSheetAsync(acct, dest, rows, replace, src, "hub-web", CancellationToken.None));
+            if (_wizFillSku) (rows, filled) = await pg.FillMissingSkusAsync(acct, dest, rows, ct);
+            var count = await pg.ImportIntoSheetAsync(acct, dest, rows, replace, src, "hub-web", ct);
 
-            _open = false; _wizBytes = null;
+            _open = false; DeleteTempFile();
             var msg = $"✔ Đã nhập {count:N0} dòng vào shop ({(replace ? "ghi đè" : "nối thêm")})"
                 + (filled > 0 ? $" — tự sinh SKU cho {filled:N0} dòng thiếu." : ".");
             await OnImported.InvokeAsync(new ImportResult(msg, replace, count));
         }
+        catch (OperationCanceledException) when (_lifetimeCts.IsCancellationRequested) { }
         catch (Exception ex) { _wizError = "✘ Lỗi nhập: " + ProductDb.Friendly(ex); }
         finally { _wizBusy = false; }
+    }
+
+    private static async Task<T> ParseAsync<T>(Func<T> parse, CancellationToken ct)
+    {
+        await ParseGate.WaitAsync(ct);
+        try { return await Task.Run(parse, ct); }
+        finally { ParseGate.Release(); }
+    }
+
+    private void DeleteTempFile()
+    {
+        var path = _wizTempPath;
+        _wizTempPath = null;
+        if (string.IsNullOrEmpty(path)) return;
+        try { File.Delete(path); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        await _lifetimeCts.CancelAsync();
+        DeleteTempFile();
+        _lifetimeCts.Dispose();
     }
 }

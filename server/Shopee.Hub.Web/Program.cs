@@ -64,6 +64,8 @@ if (!string.IsNullOrWhiteSpace(pgConn))
 // FleetStateService: vừa là IHostedService (nền refresh 2s) vừa được inject vào trang Blazor → 1 singleton.
 builder.Services.AddSingleton<FleetStateService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<FleetStateService>());
+builder.Services.AddSingleton<WebhookQueueService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<WebhookQueueService>());
 // SheetMapService: đọc + cache cấu trúc dòng kho sản phẩm (Postgres) cho "bản đồ dòng" trang Thống kê.
 builder.Services.AddSingleton<SheetMapService>();
 // DispatcherService: BackgroundService + được inject (trang Fleet) → 1 singleton.

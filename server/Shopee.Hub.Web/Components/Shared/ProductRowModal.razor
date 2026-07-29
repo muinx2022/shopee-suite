@@ -16,14 +16,14 @@
                 @* Thêm ở /data (không cố định đích) → 2 select Acc/Shop; sửa HOẶC đích cố định (per-shop) → label read-only. *@
                 @if (!_isEdit && !FixedTarget)
                 {
-                    <div style="display:flex;flex-wrap:wrap;gap:10px 16px;align-items:flex-end">
-                        <label style="@MapLbl">Tài khoản *
+                    <div class="form-fields">
+                        <label class="field-col">Tài khoản *
                             <select value="@_acct" @onchange="OnAcct" disabled="@_busy" style="width:220px">
                                 <option value="">— chọn tài khoản —</option>
                                 @foreach (var a in Accounts) { <option value="@a.Id">@a.DisplayName</option> }
                             </select>
                         </label>
-                        <label style="@MapLbl">Shop *
+                        <label class="field-col">Shop *
                             <select value="@_sheet" @onchange="OnSheet" disabled="@(_busy || string.IsNullOrEmpty(_acct))" style="width:220px">
                                 <option value="">— chọn shop —</option>
                                 @foreach (var s in AddShopOptions()) { <option value="@s.ShopeeDataSheet">@s.DisplayName</option> }
@@ -45,31 +45,31 @@
                 }
 
                 <div class="subhead" style="margin-top:12px">Dữ liệu dòng</div>
-                <div style="display:flex;flex-wrap:wrap;gap:10px 16px;align-items:flex-start">
-                    <label style="@MapLbl">Link <input @bind="_edit.Link" style="width:240px" /></label>
-                    <label style="@MapLbl">Giá bán <input @bind="_edit.PriceSale" style="width:120px" /></label>
-                    <label style="@MapLbl">SKU <input @bind="_edit.Sku" placeholder="B#####" style="width:120px" />
+                <div class="form-fields start">
+                    <label class="field-col">Link <input @bind="_edit.Link" style="width:240px" /></label>
+                    <label class="field-col">Giá bán <input @bind="_edit.PriceSale" style="width:120px" /></label>
+                    <label class="field-col">SKU <input @bind="_edit.Sku" placeholder="B#####" style="width:120px" />
                         @if (!_isEdit) { <span class="hint" style="margin:0">Để trống → tự sinh B#####</span> }
                     </label>
-                    <label style="@MapLbl">ItemId <input @bind="_edit.ItemId" style="width:140px" /></label>
-                    <label style="@MapLbl">Tên gốc <input @bind="_edit.NameOriginal" style="width:240px" /></label>
-                    <label style="@MapLbl">Tên đã sửa <input @bind="_edit.NameRewritten" style="width:240px" /></label>
+                    <label class="field-col">ItemId <input @bind="_edit.ItemId" style="width:140px" /></label>
+                    <label class="field-col">Tên gốc <input @bind="_edit.NameOriginal" style="width:240px" /></label>
+                    <label class="field-col">Tên đã sửa <input @bind="_edit.NameRewritten" style="width:240px" /></label>
                 </div>
 
                 @if (_all)
                 {
-                    <div style="display:flex;flex-wrap:wrap;gap:10px 16px;align-items:flex-end;margin-top:8px">
-                        <label style="@MapLbl">Giá gốc <input @bind="_edit.PriceOriginal" style="width:120px" /></label>
-                        <label style="@MapLbl">Danh mục <input @bind="_edit.Category" style="width:160px" /></label>
-                        <label style="@MapLbl">Shop (tên) <input @bind="_edit.ShopName" style="width:160px" /></label>
-                        <label style="@MapLbl">Rating <input @bind="_edit.Rating" style="width:90px" /></label>
-                        <label style="@MapLbl">Bán/tháng <input @bind="_edit.SoldMonth" style="width:100px" /></label>
-                        <label style="@MapLbl">Thích <input @bind="_edit.Likes" style="width:90px" /></label>
-                        <label style="@MapLbl">Đánh giá <input @bind="_edit.Reviews" style="width:90px" /></label>
-                        <label style="@MapLbl">Vùng <input @bind="_edit.Region" style="width:120px" /></label>
-                        <label style="@MapLbl">Ảnh <input @bind="_edit.Image" style="width:240px" /></label>
-                        <label style="@MapLbl">MetaShopId <input @bind="_edit.MetaShopId" style="width:140px" /></label>
-                        <label style="@MapLbl">MetaItemId <input @bind="_edit.MetaItemId" style="width:140px" /></label>
+                    <div class="form-fields detail-fields">
+                        <label class="field-col">Giá gốc <input @bind="_edit.PriceOriginal" style="width:120px" /></label>
+                        <label class="field-col">Danh mục <input @bind="_edit.Category" style="width:160px" /></label>
+                        <label class="field-col">Shop (tên) <input @bind="_edit.ShopName" style="width:160px" /></label>
+                        <label class="field-col">Rating <input @bind="_edit.Rating" style="width:90px" /></label>
+                        <label class="field-col">Bán/tháng <input @bind="_edit.SoldMonth" style="width:100px" /></label>
+                        <label class="field-col">Thích <input @bind="_edit.Likes" style="width:90px" /></label>
+                        <label class="field-col">Đánh giá <input @bind="_edit.Reviews" style="width:90px" /></label>
+                        <label class="field-col">Vùng <input @bind="_edit.Region" style="width:120px" /></label>
+                        <label class="field-col">Ảnh <input @bind="_edit.Image" style="width:240px" /></label>
+                        <label class="field-col">MetaShopId <input @bind="_edit.MetaShopId" style="width:140px" /></label>
+                        <label class="field-col">MetaItemId <input @bind="_edit.MetaItemId" style="width:140px" /></label>
                     </div>
                 }
             </div>
@@ -104,7 +104,6 @@
     [Parameter] public EventCallback<(bool IsEdit, string Acct, string Sheet, int RowNo, string Sku)> OnSaved { get; set; }
 
     // Label cột dọc trong modal (modal-body label mặc định display:block → ép flex-column cho input nằm dưới chữ).
-    private const string MapLbl = "display:flex;flex-direction:column;gap:4px;margin:0;font-size:12.5px";
 
     private bool _open, _busy, _all, _isEdit;
     private string _acct = "", _sheet = "", _origSku = "";
