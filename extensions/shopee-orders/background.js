@@ -1664,14 +1664,30 @@ async function doPrepareNextOrder() {
   const orderCode = prep.orderCode || "";
 
   const beforeTabs = (await chrome.tabs.query({})).map((t) => t.id); // mọi tab (tab phiếu awbprint có thể khác domain).
-  await trustedClick(tabId, prep.x, prep.y);
 
-  // Modal "Giao Đơn Hàng".
+  // Modal "Giao Đơn Hàng" đôi khi dựng chậm hoặc cú click đầu bị hụt khi UI đang repaint.
+  // Cho phép bấm lại vài nhịp trước khi kết luận là không mở được.
   let hasShip = false;
-  const dl1 = Date.now() + 10000;
-  while (Date.now() < dl1) { hasShip = await execInTab(tabId, pageModalHasTitle, ["^giao don hang$"]); if (hasShip) break; await sleep(400); }
-  if (!hasShip) { send({ action: "error", message: "không mở được modal Giao Đơn Hàng (đơn " + orderCode + ")" }); return; }
-  await sleep(1000);
+  let shipAttempts = 0;
+  const shipDeadline = Date.now() + 18000;
+  while (!hasShip && Date.now() < shipDeadline && shipAttempts < 4) {
+    shipAttempts++;
+    await trustedClick(tabId, prep.x, prep.y);
+    const probeDeadline = Date.now() + 4500;
+    while (Date.now() < probeDeadline) {
+      hasShip = await execInTab(tabId, pageModalHasTitle, ["^giao don hang$"]);
+      if (hasShip) break;
+      await sleep(250);
+    }
+    if (!hasShip) await sleep(500);
+  }
+  if (!hasShip) {
+    let diag = "";
+    try { diag = await execInTab(tabId, pageDumpClickables, []); } catch (e) { diag = ""; }
+    send({ action: "error", message: "không mở được modal Giao Đơn Hàng (đơn " + orderCode + ")" + (diag ? " — clickable: " + diag : "") });
+    return;
+  }
+  await sleep(800);
 
   // Chọn "tự mang hàng tới Bưu cục" (nếu chưa selected).
   const drop = await execInTab(tabId, pageLocateInModal, ["^giao don hang$", ["div", "label", "[role='radio']", "span"], "tu mang hang toi buu cuc"]);

@@ -83,9 +83,11 @@ internal static class ExtensionRunnerAutomation
             ?? throw new InvalidOperationException(
                 "Không tìm thấy thư mục extension Shopee Data Runner — build lại launcher.");
 
-        // Theo d�i CDP unreachable d? b�o l?i s?m n?u Brave kh�ng ch?y
+        // Theo dõi CDP unreachable để chờ browser hồi lại sau khi bị đóng/restart.
+        // Khi Brave tắt, đừng coi ngay là lỗi chết của extension; cho phép phiên được tái nối nếu
+        // browser quay lại trong cùng lượt chạy.
         var cdpUnreachableSince = (DateTime?)null;
-        const int CdpUnreachableTimeoutSeconds = 25;
+        const int CdpUnreachableTimeoutSeconds = 120;
 
         // Phiên mới → xóa cache cũ để re-resolve đúng extension đang chạy
         ClearResolvedExtension(cdpPort);
@@ -105,16 +107,22 @@ internal static class ExtensionRunnerAutomation
             if (!cdpReachable)
             {
                 cdpUnreachableSince ??= DateTime.UtcNow;
-                if ((DateTime.UtcNow - cdpUnreachableSince.Value).TotalSeconds >= CdpUnreachableTimeoutSeconds)
-                    throw new InvalidOperationException(
-                        $"Brave không lắng nghe trên CDP port {cdpPort}. " +
-                        "Brave có thể đã tắt - hãy nhấn Stop rồi Start lại instance.");
+                ClearResolvedExtension(cdpPort);
 
                 if ((DateTime.UtcNow - lastLog).TotalSeconds >= 5)
                 {
-                    log?.Invoke($"CDP port {cdpPort} chưa sẵn sàng — chờ Brave khởi động…");
+                    var waited = (DateTime.UtcNow - cdpUnreachableSince.Value).TotalSeconds;
+                    log?.Invoke($"CDP port {cdpPort} đang mất kết nối ({waited:0}s) — chờ Brave quay lại…");
                     lastLog = DateTime.UtcNow;
                 }
+
+                if ((DateTime.UtcNow - cdpUnreachableSince.Value).TotalSeconds >= CdpUnreachableTimeoutSeconds)
+                {
+                    throw new InvalidOperationException(
+                        $"Brave không lắng nghe trên CDP port {cdpPort} quá {CdpUnreachableTimeoutSeconds}s. " +
+                        "Nếu đã đóng Brave thì mở lại cùng profile để nối tiếp phiên.");
+                }
+
                 await Task.Delay(1000, cancellationToken);
                 continue;
             }
