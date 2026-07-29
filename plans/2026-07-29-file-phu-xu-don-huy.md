@@ -1,7 +1,7 @@
 # Plan: File Sheet phụ — không nhận đơn hủy mới, và tô đỏ đơn bị hủy sau
 
 - **Ngày:** 2026-07-29
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành — 7/7 ca sheet giả, kèm vi sai chứng minh file chính bất biến. ĐÃ KIỂM CHỨNG TRỰC TIẾP trên Web App thật: đơn hủy MỚI → `{ghi:0, them:0, boQuaHuy:1}` (không tạo dòng); đơn ĐÃ CÓ báo hủy → `{ghi:1, them:0}` (chạm dòng để tô đỏ); `loi:null` ⇒ quyền ghi file phụ ổn. Người dùng đã dán đè + triển khai phiên bản mới.
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-dev`)
 
 ## 1. Bối cảnh

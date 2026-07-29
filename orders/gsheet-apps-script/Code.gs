@@ -19,6 +19,11 @@
 //  Sau khi xong cả lô ở file chính, script ghi thêm A/B/C/E sang file "Quản Lý Đơn 2" (ID_FILE_PHU)
 //  bằng openById — MỘT script, MỘT bản luật, dùng chung hàm với file chính (chép luật ra bản thứ hai
 //  chính là cái đã gây lỗi lệch cột ở trên). Lỗi ở file phụ chỉ vào `filePhu.loi`, KHÔNG phá file chính.
+//
+//  ─── SỬA 29/07/2026: file phụ cũng theo trạng thái HỦY ────────────────────────────────────────────
+//  Bản trước ghi sang file phụ mọi đơn `ok`, không xét hủy — mà file phụ cố ý không tô màu nên đơn hủy
+//  nằm đó trông y hệt đơn còn sống. Nay hai file CÙNG một trạng thái: hủy trước khi vào file phụ →
+//  KHÔNG tạo dòng; đã có dòng rồi mà file chính báo hủy → TÔ ĐỎ dòng đó (không xóa dòng).
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════
 
 const TEN_THU_MUC_PHIEU = 'Phieu-don-Shopee';
@@ -28,6 +33,9 @@ const SO_DONG_TIEU_DE = 1;       // dòng tiêu đề ở đầu tab (giữ khi 
 const MAU_DO_HUY = '#ea9998'; // nền đỏ đơn hủy — CỐ Ý lệch 1 so với "light red 2" (#ea9999) của bảng màu
                               // chuẩn để không xóa nhầm nền đỏ người dùng tự tô
 const SO_COT_TO_MAU = 13;     // tô nền từ cột A tới M (đã kẹp theo lưới thật của tab)
+const SO_COT_TO_MAU_PHU = 5;  // file phụ CHỈ có A–E, không phải 13 như file chính. Dùng nhầm SO_COT_TO_MAU
+                              // ở đây thì getRange vượt lưới sẽ NÉM, mà cả khối phụ nằm trong MỘT
+                              // try/catch ⇒ một đơn hủy nuốt luôn các đơn còn lại của cả lô.
 
 // Cột A KHÔNG có tiêu đề (ô trống) nên không tra được theo tên → chỉ chỗ này là số cứng.
 const COT_MA_DON = 1;
@@ -172,7 +180,7 @@ function doPost(e) {
       idPhu = cauHinh === '' ? '' : bocIdSheet(cauHinh);
       if (cauHinh !== '' && !idPhu) loiCauHinhPhu = 'Không đọc được ID sheet phụ từ cấu hình: ' + cauHinh;
     }
-    const filePhu = { ghi: 0, them: 0, loi: loiCauHinhPhu };
+    const filePhu = { ghi: 0, them: 0, boQuaHuy: 0, loi: loiCauHinhPhu };
     if (idPhu) {
       try {
         const ssPhu = SpreadsheetApp.openById(idPhu);   // MỘT lần cho cả lô, không phải mỗi đơn một lần
@@ -190,6 +198,10 @@ function doPost(e) {
           const key = String(don.maDon).trim();
           let cho = viTriPhu[key] || null;
           if (!cho) {
+            // Đơn ĐÃ HỦY mà chưa từng có dòng ở file phụ → KHÔNG tạo dòng (y như file chính bỏ hẳn đơn
+            // hủy chưa vào sổ). Phải xét TRƯỚC nhánh tạo dòng, xét sau là đã lỡ đẻ dòng rồi.
+            // `daHuy` vắng (client đời cũ) → không chặn, giữ nguyên hành vi cũ.
+            if (don.daHuy === true) { filePhu.boQuaHuy++; continue; }
             cho = { sh: tabPhu, row: tabPhu.getLastRow() + 1 };
             viTriPhu[key] = cho;
             filePhu.them++;
@@ -206,6 +218,16 @@ function doPost(e) {
           ghiTruong(cho.sh, map, cho.row, 'maVanDon',   don.maVanDon,   thieuCot);   // B
           ghiTruong(cho.sh, map, cho.row, 'fileUrl',    r.fileUrl,      thieuCot);   // C — DÙNG LẠI link
           ghiTruong(cho.sh, map, cho.row, 'donTraHang', don.donTraHang, thieuCot);   // E
+
+          // Đơn ĐÃ có dòng ở file phụ mà file chính đánh dấu hủy → file phụ đánh dấu hủy theo (TÔ ĐỎ,
+          // KHÔNG xóa dòng: xóa làm lệch mọi công thức tham chiếu theo số dòng và mất cột D người dùng
+          // gõ tay). Cùng một luật với file chính, chỉ khác số cột (A–E).
+          const vungDongPhu = cho.sh.getRange(cho.row, 1, 1, Math.min(SO_COT_TO_MAU_PHU, cho.sh.getMaxColumns()));
+          if (don.daHuy === true) {
+            vungDongPhu.setBackground(MAU_DO_HUY);
+          } else if (don.daHuy === false && String(cho.sh.getRange(cho.row, 1).getBackground()).toLowerCase() === MAU_DO_HUY) {
+            vungDongPhu.setBackground(null);
+          }
           filePhu.ghi++;
         }
       } catch (err) {
