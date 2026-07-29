@@ -3,12 +3,13 @@
 @inject HubDatabase Db
 @inject IJSRuntime JS
 
-<p class="hint m-hide">Danh bạ shop hub TỰ ĐĂNG KÝ khi client push đơn (khoá theo tài khoản đăng nhập shop).
-   Client không cần biết id trên hub — đẩy đơn kèm <code>ShopUsername</code> qua <code>POST /api/orders/push</code>,
-   hub tự tạo shop. Ở đây sửa được tên/ghi chú hoặc xoá shop (xoá kèm mọi đơn của shop).</p>
+<p class="hint m-hide">Danh bạ shop nhóm theo <b>subacc</b> (email đăng nhập) — quan hệ lấy từ gương client
+   (<code>orders_account_shops</code>). Mỗi shop trên hub khoá theo login shop (<code>ShopUsername</code> khi
+   push đơn). Ở đây sửa tên/ghi chú hoặc xoá shop hub (xoá kèm mọi đơn). Shop chỉ có trong gương, chưa push đơn
+   → hiện tên nhưng chưa Sửa/Xoá được.</p>
 
 <div class="bar">
-    <span class="stat">@_shops.Count shop</span>
+    <span class="stat">@_subCount subacc · @_shopCount shop</span>
     <span class="action">@_status</span>
 </div>
 
@@ -18,7 +19,7 @@
         <h2>Sửa shop</h2>
         <label>Tên shop <span style="color:#ef4444">*</span></label>
         <input @bind="_edit.Name" placeholder="vd Shop A" style="width:100%" />
-        <label style="margin-top:10px">Tài khoản đăng nhập</label>
+        <label style="margin-top:10px">Login shop</label>
         <input value="@(string.IsNullOrEmpty(_edit.Username) ? "—" : _edit.Username)" readonly style="width:100%;opacity:.7" />
         <label style="margin-top:10px">Ghi chú</label>
         <input @bind="_edit.Note" style="width:100%" />
@@ -31,33 +32,58 @@
 }
 
 <div class="tablewrap">
-<table class="grid sm">
-    <thead><tr><th>Tên</th><th>Tài khoản</th><th class="m-hide">Ghi chú</th><th>Đơn</th><th></th></tr></thead>
+<table class="grid sm stack-sm shops-grouped">
+    <thead><tr><th>Tên shop</th><th>Login shop</th><th class="m-hide">Ghi chú</th><th>Đơn</th><th></th></tr></thead>
     <tbody>
-    @foreach (var s in _shops)
+    @foreach (var g in _groups)
     {
-        <tr>
-            <td><b>@s.Name</b></td>
-            <td>@(string.IsNullOrEmpty(s.Username) ? "—" : s.Username)</td>
-            <td class="m-hide">@s.Note</td>
-            <td>@_orderCounts.GetValueOrDefault(s.Id)</td>
-            <td>
-                <button class="btn sm" @onclick="() => Edit(s)">✎ Sửa</button>
-                <button class="btn danger sm" @onclick="() => Delete(s)">🗑 Xoá</button>
+        var groupOrders = g.Items.Sum(i => i.Hub is { } h ? _orderCounts.GetValueOrDefault(h.Id) : 0);
+        <tr class="acctrow" @key="@(g.IsOrphan ? "__orphan__" : g.SubLogin)">
+            <td colspan="5">
+                @(g.IsOrphan ? "— Chưa gắn subacc —" : g.SubLogin)
+                <span class="cnt">· @g.Items.Count shop</span>
+                <span class="cnt">· @groupOrders đơn</span>
             </td>
         </tr>
+        @foreach (var item in g.Items)
+        {
+            <tr @key="@(g.SubLogin + "|" + item.ShopLogin)">
+                <td data-label="Tên shop"><b>@item.DisplayName</b>
+                    @if (item.Hub is null)
+                    {
+                        <span class="pill warn" title="Chỉ có trong gương client — chưa có hàng shops trên hub (chưa push đơn).">chưa trên hub</span>
+                    }
+                </td>
+                <td data-label="Login shop">@item.ShopLogin</td>
+                <td class="m-hide" data-label="Ghi chú">@(item.Hub?.Note)</td>
+                <td data-label="Đơn">@(item.Hub is { } hub ? _orderCounts.GetValueOrDefault(hub.Id).ToString() : "—")</td>
+                <td data-label="">
+                    @if (item.Hub is { } s)
+                    {
+                        <button class="btn sm" @onclick="() => Edit(s)">✎ Sửa</button>
+                        <button class="btn danger sm" @onclick="() => Delete(s)">🗑 Xoá</button>
+                    }
+                    else
+                    {
+                        <span class="stat" title="Chưa có bản ghi hub — đợi client push đơn của shop này.">—</span>
+                    }
+                </td>
+            </tr>
+        }
     }
-    @if (_shops.Count == 0)
+    @if (_groups.Count == 0)
     {
-        <tr><td colspan="5" class="empty">Chưa có shop nào — client chưa push đơn lần nào.</td></tr>
+        <tr><td colspan="5" class="empty">Chưa có shop nào — client chưa push đơn / chưa đẩy gương danh bạ.</td></tr>
     }
     </tbody>
 </table>
 </div>
 
 @code {
-    private List<Shop> _shops = new();
+    private List<ShopSubAccountGroup> _groups = new();
     private Dictionary<long, int> _orderCounts = new();
+    private int _subCount;
+    private int _shopCount;
     private ShopEdit? _edit;
     private string _status = "";
     private string _editStatus = "";
@@ -66,8 +92,15 @@
 
     private void Reload()
     {
-        _shops = Db.ListShops();
-        _orderCounts = _shops.ToDictionary(s => s.Id, s => Db.CountOrders(s.Id, null, null));
+        _groups = Db.ListShopGroupsBySubAccount();
+        _subCount = _groups.Count(g => !g.IsOrphan);
+        _shopCount = _groups.Sum(g => g.Items.Count);
+        _orderCounts = new Dictionary<long, int>();
+        foreach (var item in _groups.SelectMany(g => g.Items))
+        {
+            if (item.Hub is { } h && !_orderCounts.ContainsKey(h.Id))
+                _orderCounts[h.Id] = Db.CountOrders(h.Id, null, null);
+        }
     }
 
     // Nạp ĐỦ trường vào ShopEdit (kể cả username/password/cookie/proxy) để UpsertShop KHÔNG xoá mất giá trị

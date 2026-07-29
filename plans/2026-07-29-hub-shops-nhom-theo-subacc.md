@@ -1,7 +1,7 @@
 # Plan: Hub trang Shop — nhóm theo subacc
 
 - **Ngày:** 2026-07-29
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành
 - **Người lập:** Fable · **Người thực thi:** Auto (Cursor)
 
 ## 1. Bối cảnh & mục tiêu
@@ -60,4 +60,6 @@ Mô hình vận hành thật: **subacc (email đăng nhập)** → nhiều shop.
 
 ## Báo cáo thực thi
 
-_(chưa)_
+- `ListShopGroupsBySubAccount()`: gom gương `orders_account_shops` theo subacc, join `shops`; orphan → nhóm “Chưa gắn subacc”.
+- `Shops.razor`: header `acctrow` + shop con; shop chỉ-gương badge “chưa trên hub”; Sửa/Xoá chỉ khi có bản ghi hub.
+- `app.css?v=37` + build Hub Release OK. Chưa deploy.

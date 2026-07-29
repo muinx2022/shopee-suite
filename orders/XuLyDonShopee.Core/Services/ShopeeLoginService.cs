@@ -271,14 +271,9 @@ public class ShopeeLoginService
 
             // Launch Brave/Chromium với cổng 0 (Chromium tự chọn cổng trống, ghi vào DevToolsActivePort).
             // Trình duyệt điều khiển (Playwright) chỉ dùng để đăng nhập subaccount → KHÔNG nạp extension.
-            var psi = new ProcessStartInfo(exePath) { UseShellExecute = false };
-            foreach (var arg in BraveLaunchArgs.BuildBraveArgs(userDataDir, 0, proxy, extensionPath: null))
-            {
-                psi.ArgumentList.Add(arg);
-            }
-
-            process = Process.Start(psi)
-                      ?? throw new InvalidOperationException("Không khởi chạy được tiến trình trình duyệt.");
+            // Phóng qua BrowserProcessStarter (Suite rót Job Object → chết theo app khi force-kill).
+            var launchArgs = BraveLaunchArgs.BuildBraveArgs(userDataDir, 0, proxy, extensionPath: null);
+            process = BrowserProcessStarter.StartOrFallback(exePath, launchArgs);
             process.EnableRaisingEvents = true;
 
             // Chờ Brave mở cổng CDP (đọc cổng thật) rồi chờ endpoint /json/version sẵn sàng.

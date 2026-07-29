@@ -349,24 +349,6 @@ public sealed class HubClient : IDisposable
         return await r.Content.ReadFromJsonAsync<OrdersPushResult>(ct);
     }
 
-    // ── Đơn hàng: ĐỌC đơn của MỌI shop/MỌI máy về màn "Đơn toàn hệ thống" (CHỈ XEM, KHÔNG chép về CSDL máy) ──
-    // Dùng _http (control-plane 8s) CHỨ KHÔNG _bulkHttp (5'): đây là truy vấn UI — hub treo thì màn phải báo
-    // "Hub không phản hồi" sau vài giây, không đơ 5 phút. Payload nhỏ vì lọc + phân trang chạy PHÍA HUB.
-    // Mọi lỗi (offline / timeout / hub CŨ chưa có route → 404) → trả null = "không lấy được", KHÔNG ném:
-    // màn chỉ-đọc này không được làm chết luồng nào, chỉ hiện thông báo rồi để người dùng bấm Tải lại.
-
-    /// <summary>Một TRANG đơn trên hub theo bộ lọc (shop / trạng thái / từ khoá). Trả null = không lấy được.</summary>
-    public async Task<HubOrdersPage?> QueryOrdersAsync(long? shopId, string? status, string? q, int page, int pageSize, CancellationToken ct = default)
-    {
-        var url = $"{HubRoutes.Orders}?page={Math.Max(1, page)}&pageSize={Math.Clamp(pageSize, 1, 500)}";
-        if (shopId is { } sid) url += $"&shopId={sid}";
-        if (!string.IsNullOrWhiteSpace(status)) url += $"&status={Uri.EscapeDataString(status)}";
-        if (!string.IsNullOrWhiteSpace(q)) url += $"&q={Uri.EscapeDataString(q)}";
-        try { return await _http.GetFromJsonAsync<HubOrdersPage>(url, ct); }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; } // huỷ CHỦ ĐỘNG (đổi bộ lọc) → cho xuyên
-        catch { return null; }
-    }
-
     /// <summary>Số đơn ĐÃ "chuẩn bị hàng" theo shop trong ĐÚNG một ngày (<paramref name="day"/> = <c>yyyy-MM-dd</c>
     /// giờ địa phương của máy chuẩn bị đơn) — nguồn cho cột "Chuẩn bị hàng" tab "Kết quả". Trả list RỖNG = hub bảo
     /// ngày đó chưa shop nào có đơn; trả null = KHÔNG lấy được (offline / timeout / hub CŨ chưa có route) → caller
@@ -379,15 +361,6 @@ public sealed class HubClient : IDisposable
                 $"{HubRoutes.PrepareStats}?day={Uri.EscapeDataString(day)}", ct);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; } // huỷ CHỦ ĐỘNG → cho xuyên
-        catch { return null; }
-    }
-
-    /// <summary>Danh sách shop trên hub — để đổi <c>shopId</c> (SỐ) của đơn sang TÊN shop. Nạp MỘT LẦN rồi tra
-    /// trong bộ nhớ, KHÔNG gọi mỗi dòng. Trả null = không lấy được.</summary>
-    public async Task<IReadOnlyList<HubShopItem>?> ListShopsAsync(CancellationToken ct = default)
-    {
-        try { return await _http.GetFromJsonAsync<List<HubShopItem>>(HubRoutes.Shops, ct); }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch { return null; }
     }
 

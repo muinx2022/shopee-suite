@@ -90,12 +90,15 @@
     <h2>Máy bị chặn (@_revoked.Count)</h2>
     <p class="hint">Máy này bị 401 khi kết nối (dù còn token). Bỏ chặn để cho phép vào lại.</p>
     <div class="tablewrap">
-    <table class="grid sm">
+    <table class="grid sm stack-sm">
         <thead><tr><th>Machine ID</th><th></th></tr></thead>
         <tbody>
         @foreach (var id in _revoked)
         {
-            <tr><td class="mono">@id</td><td><button class="btn sm" @onclick="() => Unblock(id)">Bỏ chặn</button></td></tr>
+            <tr>
+                <td class="mono" data-label="Machine ID">@id</td>
+                <td data-label=""><button class="btn sm" @onclick="() => Unblock(id)">Bỏ chặn</button></td>
+            </tr>
         }
         </tbody>
     </table>

@@ -6,16 +6,19 @@
 <p class="hint m-hide">Cấu hình ghi Google Sheet DÙNG CHUNG cho mọi máy chạy module Đơn hàng. Máy client tự nhận trong ~1 phút, không cần khởi động lại.</p>
 
 <div class="editcard">
-    <div class="row">
-        <label>URL Web App Google Sheet
-            <input @bind="_cfg.GsheetWebAppUrl" placeholder="https://script.google.com/macros/s/…/exec" />
-        </label>
-        <label>Tab ghi vào (để trống = tự động)
-            <input @bind="_cfg.GsheetTabName" placeholder="Tháng MM-yyyy (tự động)" />
-        </label>
-        <label>Link Google Sheet 2 (để trống = không ghi file phụ)
-            <input @bind="_cfg.GsheetSheet2" placeholder="https://docs.google.com/spreadsheets/d/…" />
-        </label>
+    <div class="sheet-config">
+        <div class="sheet-config-row">
+            <label for="gsheet-webapp-url">URL Web App Google Sheet</label>
+            <input id="gsheet-webapp-url" @bind="_cfg.GsheetWebAppUrl" placeholder="https://script.google.com/macros/s/…/exec" />
+        </div>
+        <div class="sheet-config-row">
+            <label for="gsheet-tab-name">Tab ghi vào (để trống = tự động)</label>
+            <input id="gsheet-tab-name" @bind="_cfg.GsheetTabName" placeholder="Tháng MM-yyyy (tự động)" />
+        </div>
+        <div class="sheet-config-row">
+            <label for="gsheet-sheet-2">Link Google Sheet 2 (để trống = không ghi file phụ)</label>
+            <input id="gsheet-sheet-2" @bind="_cfg.GsheetSheet2" placeholder="https://docs.google.com/spreadsheets/d/…" />
+        </div>
     </div>
     <p class="hint">
         • Tab để trống = tự động ghi vào tab <code>Tháng MM-yyyy</code> theo tháng hiện tại; điền tên = ghi cố định vào tab đó.<br />
@@ -30,6 +33,38 @@
     <button class="btn primary" @onclick="Save">💾 Lưu</button>
     <span class="action">@_status</span>
 </div>
+
+<style>
+    .sheet-config {
+        display: grid;
+        gap: 14px;
+        margin-bottom: 14px;
+    }
+
+    .sheet-config-row {
+        display: grid;
+        grid-template-columns: minmax(240px, 320px) minmax(0, 1fr);
+        gap: 16px;
+        align-items: center;
+    }
+
+    .sheet-config-row label {
+        margin: 0;
+    }
+
+    .sheet-config-row input {
+        width: 100%;
+        max-width: none;
+    }
+
+    @@media (max-width: 720px) {
+        .sheet-config-row {
+            grid-template-columns: 1fr;
+            gap: 8px;
+            align-items: stretch;
+        }
+    }
+</style>
 
 @code {
     private OrdersSharedConfig _cfg = new();

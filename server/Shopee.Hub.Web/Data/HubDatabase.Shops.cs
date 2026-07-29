@@ -18,6 +18,14 @@ public sealed class Shop
     public DateTimeOffset UpdatedAt { get; init; }
 }
 
+/// <summary>Một dòng shop trên trang danh bạ nhóm theo subacc. <see cref="Hub"/> null = chỉ có trong gương
+/// client (chưa từng push đơn → chưa có hàng <c>shops</c>) → UI không cho Sửa/Xoá.</summary>
+public sealed record ShopListItem(string ShopLogin, string DisplayName, Shop? Hub);
+
+/// <summary>Nhóm shop theo subacc (<see cref="SubLogin"/>) hoặc nhóm mồ côi (<see cref="IsOrphan"/> =
+/// shop hub không xuất hiện trong gương <c>orders_account_shops</c>).</summary>
+public sealed record ShopSubAccountGroup(string SubLogin, bool IsOrphan, List<ShopListItem> Items);
+
 /// <summary>Phần HubDatabase: nghiệp vụ SHOP — bảng <c>shops</c> (UNIQUE username) + CRUD +
 /// <see cref="GetOrCreateShopByUsername"/> (hub tự đăng ký shop khi client push). Id=0 khi Upsert = thêm mới.</summary>
 public sealed partial class HubDatabase
@@ -39,6 +47,85 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_shops_username ON shops(username);");
             using var rd = c.ExecuteReader();
             while (rd.Read()) list.Add(ReadShopRow(rd));
             return list;
+        }
+    }
+
+    /// <summary>
+    /// Danh bạ shop nhóm theo subacc lấy từ gương <c>orders_account_shops</c> (gộp mọi máy; distinct
+    /// <c>login</c>+<c>shop_login</c>). Join <c>shops.username</c> để có bản ghi hub (note/id/đơn). Shop hub
+    /// không có trong gương → nhóm cuối <see cref="ShopSubAccountGroup.IsOrphan"/>.
+    /// </summary>
+    public List<ShopSubAccountGroup> ListShopGroupsBySubAccount()
+    {
+        lock (_gate)
+        {
+            var hubByLogin = new Dictionary<string, Shop>(StringComparer.OrdinalIgnoreCase);
+            using (var c = _conn.CreateCommand())
+            {
+                c.CommandText = "SELECT id,name,username,password,cookie,proxy_key,note,created_at,updated_at FROM shops";
+                using var rd = c.ExecuteReader();
+                while (rd.Read())
+                {
+                    var shop = ReadShopRow(rd);
+                    var key = shop.Username?.Trim() ?? "";
+                    if (key.Length == 0) continue;
+                    hubByLogin[key] = shop;
+                }
+            }
+
+            // login → (shop_login → display name gần nhất)
+            var grouped = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
+            using (var c = _conn.CreateCommand())
+            {
+                c.CommandText = @"
+SELECT login, shop_login, shop_name FROM orders_account_shops
+ORDER BY login COLLATE NOCASE, sort_order, shop_login COLLATE NOCASE";
+                using var rd = c.ExecuteReader();
+                while (rd.Read())
+                {
+                    var sub = S(rd, 0).Trim();
+                    var shopLogin = S(rd, 1).Trim();
+                    if (sub.Length == 0 || shopLogin.Length == 0) continue;
+                    var name = S(rd, 2).Trim();
+                    if (!grouped.TryGetValue(sub, out var map))
+                        grouped[sub] = map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                    if (!map.ContainsKey(shopLogin) || (name.Length > 0 && map[shopLogin].Length == 0))
+                        map[shopLogin] = name.Length > 0 ? name : shopLogin;
+                }
+            }
+
+            var seenShopLogins = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var result = new List<ShopSubAccountGroup>();
+            foreach (var sub in grouped.Keys.OrderBy(x => x, StringComparer.OrdinalIgnoreCase))
+            {
+                var items = new List<ShopListItem>();
+                foreach (var (shopLogin, display) in grouped[sub]
+                             .OrderBy(kv => kv.Value, StringComparer.OrdinalIgnoreCase)
+                             .ThenBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase))
+                {
+                    seenShopLogins.Add(shopLogin);
+                    hubByLogin.TryGetValue(shopLogin, out var hub);
+                    var title = hub is { Name.Length: > 0 } ? hub.Name
+                        : display.Length > 0 ? display : shopLogin;
+                    items.Add(new ShopListItem(shopLogin, title, hub));
+                }
+                if (items.Count > 0)
+                    result.Add(new ShopSubAccountGroup(sub, IsOrphan: false, items));
+            }
+
+            var orphans = new List<ShopListItem>();
+            foreach (var shop in hubByLogin.Values
+                         .OrderBy(s => s.Name, StringComparer.OrdinalIgnoreCase)
+                         .ThenBy(s => s.Id))
+            {
+                var key = shop.Username?.Trim() ?? "";
+                if (key.Length == 0 || seenShopLogins.Contains(key)) continue;
+                orphans.Add(new ShopListItem(key, string.IsNullOrWhiteSpace(shop.Name) ? key : shop.Name, shop));
+            }
+            if (orphans.Count > 0)
+                result.Add(new ShopSubAccountGroup("", IsOrphan: true, orphans));
+
+            return result;
         }
     }
 

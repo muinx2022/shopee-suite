@@ -398,6 +398,7 @@
                          theo shop/ngày). TabControl mang IsVisible=IsEditing; placeholder nằm NGOÀI (chồng cùng ô Grid). -->
                     <!-- Tag = tên tài khoản đang mở → template segmented control hiện ở mép phải khay tab. -->
                     <TabControl Classes="detailTabs" IsVisible="{Binding IsEditing}"
+                                SelectedIndex="{Binding DetailTabIndex}"
                                 Tag="{Binding SelectedRow.Email}">
                         <TabItem>
                             <TabItem.Header>
@@ -625,7 +626,7 @@
                                 <Border DockPanel.Dock="Top" Margin="0,0,0,10" Padding="12,7"
                                         Background="{StaticResource CardBg}" BorderBrush="{StaticResource Border}" BorderThickness="1" CornerRadius="6">
                                     <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                                        <TextBlock Text="Tổng đã chuẩn bị hàng:" FontSize="13"
+                                        <TextBlock Text="Tổng đã chuẩn bị hàng (trong ngày):" FontSize="13"
                                                    Foreground="{StaticResource TextMuted}" VerticalAlignment="Center" />
                                         <TextBlock Text="{Binding TongChuanBiHang}" FontSize="14" FontWeight="Bold"
                                                    VerticalAlignment="Center" />

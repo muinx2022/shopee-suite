@@ -52,7 +52,7 @@
         @if (_kpi == "machines")
         {
             <div class="tablewrap">
-            <table class="grid sm">
+            <table class="grid sm stack-sm">
                 <thead><tr>
                     <th>Máy</th><th>Chế độ</th><th>Suất</th><th class="m-hide">Quỹ Brave</th>
                     <th>Số việc</th><th class="m-hide">Bản app</th><th>Nhịp cuối</th><th></th>
@@ -64,17 +64,17 @@
                     var run = _used.GetValueOrDefault(m.MachineId);
                     var cap = m.MaxBrave > 0 ? m.MaxBrave : DefaultBrave;
                     <tr @key="m.MachineId">
-                        <td class="acct">@(string.IsNullOrWhiteSpace(m.Hostname) ? Short(m.MachineId) : m.Hostname)</td>
-                        <td>@(string.IsNullOrWhiteSpace(m.Mode) ? "—" : m.Mode)</td>
-                        <td>@(orders ? "Đơn hàng" : "Workspace")</td>
+                        <td class="acct" data-label="Máy">@(string.IsNullOrWhiteSpace(m.Hostname) ? Short(m.MachineId) : m.Hostname)</td>
+                        <td data-label="Chế độ">@(string.IsNullOrWhiteSpace(m.Mode) ? "—" : m.Mode)</td>
+                        <td data-label="Suất">@(orders ? "Đơn hàng" : "Workspace")</td>
                         @* Suất đơn hàng KHÔNG claim việc BigSeller → quỹ Brave ở đây vô nghĩa, hiện "—" thay vì số đánh lừa. *@
-                        <td class="m-hide" title="@(orders ? "Suất đơn hàng không nhận việc BigSeller." : "Khung Brave còn trống / trần máy tự báo.")">
+                        <td class="m-hide" data-label="Quỹ Brave" title="@(orders ? "Suất đơn hàng không nhận việc BigSeller." : "Khung Brave còn trống / trần máy tự báo.")">
                             @(orders ? "—" : $"{Math.Max(0, cap - run)}/{cap}")
                         </td>
-                        <td>@run</td>
-                        <td class="m-hide">@(string.IsNullOrWhiteSpace(m.AppVersion) ? "—" : m.AppVersion)</td>
-                        <td>@FleetStateService.Ago(m.LastSeen)</td>
-                        <td>
+                        <td data-label="Số việc">@run</td>
+                        <td class="m-hide" data-label="Bản app">@(string.IsNullOrWhiteSpace(m.AppVersion) ? "—" : m.AppVersion)</td>
+                        <td data-label="Nhịp cuối">@FleetStateService.Ago(m.LastSeen)</td>
+                        <td data-label="">
                             @if (orders)
                             {
                                 <span class="stat" title="Suất đơn hàng — không giao việc BigSeller vào đây được.">—</span>
@@ -98,7 +98,7 @@
         else if (_kpi == "running")
         {
             <div class="tablewrap">
-            <table class="grid sm">
+            <table class="grid sm stack-sm">
                 <thead><tr>
                     <th>Việc</th><th>Shop</th><th>Tài khoản</th><th>Máy</th>
                     <th title="Việc BigSeller: mốc BẮT ĐẦU chạy. Phiên Đơn hàng: nhịp gương gần nhất của máy — client không gửi mốc bắt đầu phiên.">Mốc thời gian</th>
@@ -108,13 +108,13 @@
                 @foreach (var w in _running)
                 {
                     <tr @key="w.Key">
-                        <td><span class="pill run">@OpLabel(w.Op)</span></td>
-                        <td class="shop">@w.ShopName</td>
-                        <td class="acct">@w.AcctName</td>
-                        <td>@w.Host</td>
-                        <td>@SinceText(w, running: true)</td>
-                        <td class="m-hide">@w.Rows</td>
-                        <td>
+                        <td data-label="Việc"><span class="pill run">@OpLabel(w.Op)</span></td>
+                        <td class="shop" data-label="Shop">@w.ShopName</td>
+                        <td class="acct" data-label="Tài khoản">@w.AcctName</td>
+                        <td data-label="Máy">@w.Host</td>
+                        <td data-label="Mốc thời gian">@SinceText(w, running: true)</td>
+                        <td class="m-hide" data-label="Dải dòng">@w.Rows</td>
+                        <td data-label="">
                             @* Phiên Đơn hàng không phải assignment → dừng bằng LỆNH xuống máy, không phải huỷ việc. *@
                             @if (w.Op == OrdersOp)
                             {
@@ -148,7 +148,7 @@
         else if (_kpi == "queued")
         {
             <div class="tablewrap">
-            <table class="grid sm">
+            <table class="grid sm stack-sm">
                 <thead><tr>
                     <th>Việc</th><th>Shop</th><th>Tài khoản</th><th>Máy đích</th>
                     <th title="Việc BigSeller: lúc XẾP vào hàng chờ. Phiên Đơn hàng: nhịp gương gần nhất của máy — client không gửi mốc xếp hàng.">Mốc thời gian</th>
@@ -158,13 +158,13 @@
                 @foreach (var w in _queued)
                 {
                     <tr @key="w.Key">
-                        <td><span class="pill queued">@OpLabel(w.Op)</span></td>
-                        <td class="shop">@w.ShopName</td>
-                        <td class="acct">@w.AcctName</td>
-                        <td title="@(w.Host == "—" ? "Việc chờ KHÔNG ghim máy nào — máy nào rảnh đúng vai trò sẽ nhận." : "")">@w.Host</td>
-                        <td>@SinceText(w, running: false)</td>
-                        <td class="m-hide">@w.Rows</td>
-                        <td>
+                        <td data-label="Việc"><span class="pill queued">@OpLabel(w.Op)</span></td>
+                        <td class="shop" data-label="Shop">@w.ShopName</td>
+                        <td class="acct" data-label="Tài khoản">@w.AcctName</td>
+                        <td data-label="Máy đích" title="@(w.Host == "—" ? "Việc chờ KHÔNG ghim máy nào — máy nào rảnh đúng vai trò sẽ nhận." : "")">@w.Host</td>
+                        <td data-label="Mốc thời gian">@SinceText(w, running: false)</td>
+                        <td class="m-hide" data-label="Dải dòng">@w.Rows</td>
+                        <td data-label="">
                             @* Phiên Đơn hàng đang xếp hàng: client tự quyết lượt chạy, hub không chen ngang được. *@
                             @if (w.Op == OrdersOp)
                             {
@@ -191,7 +191,7 @@
         else if (_kpi == "interrupted")
         {
             <div class="tablewrap">
-            <table class="grid sm">
+            <table class="grid sm stack-sm">
                 <thead><tr>
                     <th>Việc</th><th>Shop</th><th>Tài khoản</th><th>Máy cuối</th><th>Lý do</th><th>Lúc</th><th></th>
                 </tr></thead>
@@ -201,13 +201,13 @@
                     var shop = ShopLabel(a.ShopId);
                     var acct = AcctLabel(a.BigsellerId);
                     <tr @key="a.Id">
-                        <td><span class="pill warn">@OpLabel(a.Op)</span></td>
-                        <td class="shop" title="@shop.Title">@shop.Text</td>
-                        <td class="acct" title="@acct.Title">@acct.Text</td>
-                        <td>@IntMachine(a)</td>
-                        <td class="kpi-why">@IntReason(a)</td>
-                        <td>@FleetStateService.Ago(a.UpdatedAt)</td>
-                        <td>
+                        <td data-label="Việc"><span class="pill warn">@OpLabel(a.Op)</span></td>
+                        <td class="shop" data-label="Shop" title="@shop.Title">@shop.Text</td>
+                        <td class="acct" data-label="Tài khoản" title="@acct.Title">@acct.Text</td>
+                        <td data-label="Máy cuối">@IntMachine(a)</td>
+                        <td class="kpi-why" data-label="Lý do">@IntReason(a)</td>
+                        <td data-label="Lúc">@FleetStateService.Ago(a.UpdatedAt)</td>
+                        <td data-label="">
                             <button class="btn primary sm" @onclick="() => OnResume(a)"
                                     title="Đưa @OpLabel(a.Op) · @shop.Text về hàng chờ để client chạy lại (giữ nguyên tham số).">▶ Tiếp tục</button>
                         </td>
@@ -241,8 +241,8 @@
 }
 
 <div class="tabs">
-    <button class="@(_tab == "bs" ? "active" : "")" @onclick='() => SetTab("bs")'>🛒 BigSeller — theo shop</button>
-    <button class="@(_tab == "orders" ? "active" : "")" @onclick='() => SetTab("orders")'>📦 Đơn hàng — theo tài khoản</button>
+    <button class="@(_tab == "bs" ? "active" : "")" @onclick='() => SetTab("bs")'>🛒 BigSeller <span class="m-hide">— theo shop</span></button>
+    <button class="@(_tab == "orders" ? "active" : "")" @onclick='() => SetTab("orders")'>📦 Đơn hàng <span class="m-hide">— theo tài khoản</span></button>
 </div>
 
 @if (_tab == "bs")
@@ -293,11 +293,11 @@
         <div class="optspanel">
             <div class="subhead">⚙ Tham số cho lượt giao của @HostName(_selMachine)</div>
             <div class="optsrow">
-                <label>Từ dòng <input type="number" @bind="_optStart" style="width:80px" /></label>
-                <label>Đến dòng <input type="number" @bind="_optEnd" style="width:80px" /></label>
-                <label title="Import LUÔN chạy 1 lane — khoá cứng ở client, ô này KHÔNG ghi đè được.">Số process (chỉ Scrape/Update đọc — Import luôn 1 lane) <input type="number" @bind="_optProcs" style="width:70px" /></label>
-                <label>Số tk / khung (chỉ Scrape đọc) <input type="number" @bind="_optFrame" style="width:70px" /></label>
-                <label>Reload giây (chỉ Import/Update đọc) <input type="number" @bind="_optReload" style="width:70px" /></label>
+                <label>Từ dòng <input type="number" class="opt-num" @bind="_optStart" /></label>
+                <label>Đến dòng <input type="number" class="opt-num" @bind="_optEnd" /></label>
+                <label title="Import LUÔN chạy 1 lane — khoá cứng ở client, ô này KHÔNG ghi đè được.">Số process (chỉ Scrape/Update đọc — Import luôn 1 lane) <input type="number" class="opt-num" @bind="_optProcs" /></label>
+                <label>Số tk / khung (chỉ Scrape đọc) <input type="number" class="opt-num" @bind="_optFrame" /></label>
+                <label>Reload giây (chỉ Import/Update đọc) <input type="number" class="opt-num" @bind="_optReload" /></label>
                 <label><input type="checkbox" @bind="_optFromClaimed" /> Import từ tab "Đã nhận" (chỉ Import đọc)</label>
             </div>
             <div class="optsrow">
@@ -336,9 +336,8 @@
             }
         </span>
         <label>Tìm
-            <input type="text" @bind="_fQuery" @bind:event="oninput" @bind:after="OnFilterChanged"
-                   placeholder="tên shop / tài khoản" title="Gõ tên shop → giữ cả tài khoản chứa shop đó cùng mọi shop của nó."
-                   style="width:200px" />
+            <input type="text" class="opt-search" @bind="_fQuery" @bind:event="oninput" @bind:after="OnFilterChanged"
+                   placeholder="tên shop / tài khoản" title="Gõ tên shop → giữ cả tài khoản chứa shop đó cùng mọi shop của nó." />
         </label>
         <span class="stat m-hide">@_visible.Count/@_rows.Count shop@(_hiddenNoSheet > 0 ? $" · ẩn {_hiddenNoSheet} shop chưa gán ngăn dữ liệu" : "")</span>
     </div>
@@ -349,7 +348,7 @@
     }
 
     <div class="tablewrap">
-    <table class="grid sm">
+    <table class="grid sm dispatch-shops">
         <thead><tr>
             <th>Shop</th>
             @foreach (var op in DispatchOps)
@@ -395,13 +394,13 @@
                 <tr @key="r.Key">
                     @* Tên shop = lối sang trang BigSeller ("/") của đúng shop đó. Là <a> trong ô RIÊNG, không bọc
                        cả dòng → cú bấm không lẫn sang nút hành động ở các ô bên cạnh. *@
-                    <td class="shop">
+                    <td class="shop" data-label="Shop">
                         <a href="@FleetLink(r)" title="Mở @r.ShopName ở trang BigSeller (tiến độ · đặt tay ledger · rewrite · dữ liệu).">@r.ShopName</a>
                     </td>
                     @foreach (var op in DispatchOps)
                     {
                         var b = Btn(r, op);
-                        <td>
+                        <td data-label="@OpLabel(op)">
                             <button class="opbtn @b.Css" disabled="@b.Disabled" title="@b.Title"
                                     @onclick="() => OnOpClick(r, op)">@b.Label</button>
                             @* Lý do lượt trước hỏng — ô chỉ báo "✘ lỗi" đúng 3 phút rồi im, không có dòng này thì
@@ -412,8 +411,8 @@
                             }
                         </td>
                     }
-                    <td class="m-hide">@(HoldHostOf(r.AccountId) ?? "—")</td>
-                    <td class="m-hide">@LastUpdate(r)</td>
+                    <td class="m-hide" data-label="Máy đang giữ">@(HoldHostOf(r.AccountId) ?? "—")</td>
+                    <td class="m-hide" data-label="Cập nhật">@LastUpdate(r)</td>
                 </tr>
             }
         }
@@ -463,7 +462,7 @@ else
     }
 
     <div class="tablewrap">
-    <table class="grid sm">
+    <table class="grid sm stack-sm">
         <thead><tr>
             <th>Tài khoản (login)</th><th>Shop</th><th>Trạng thái</th>
             <th class="m-hide">Đơn chờ</th><th class="m-hide">Sync cuối</th><th>Hành động</th>
@@ -472,8 +471,8 @@ else
         @foreach (var a in _oAccounts)
         {
             <tr @key="a.Login">
-                <td class="acct">@a.Login</td>
-                <td>
+                <td class="acct" data-label="Tài khoản">@a.Login</td>
+                <td data-label="Shop">
                     @if (a.Shops.Count == 0)
                     {
                         <span class="stat" title="Máy chưa đọc được danh sách shop của tài khoản này (chưa chạy lần nào).">—</span>
@@ -486,16 +485,16 @@ else
                         </button>
                     }
                 </td>
-                <td>
+                <td data-label="Trạng thái">
                     <span class="pill @OrdersStateCss(a.SessionState)">@OrdersStateLabel(a.SessionState)</span>
                     @if (a.VerifyFailed)
                     {
                         <span class="pill warn" title="Lượt chạy gần nhất không tự xác minh được — cần vào máy đó xác minh tay.">⚠ Cần xác minh</span>
                     }
                 </td>
-                <td class="m-hide" title="Tổng đơn '@WaitingStatus' của mọi shop thuộc tài khoản này (hub đếm từ bảng đơn).">@OrdersWaiting(a).ToString("N0")</td>
-                <td class="m-hide">@(a.LastSyncAt is { } t ? FleetStateService.Ago(t) : "—")</td>
-                <td>
+                <td class="m-hide" data-label="Đơn chờ" title="Tổng đơn '@WaitingStatus' của mọi shop thuộc tài khoản này (hub đếm từ bảng đơn).">@OrdersWaiting(a).ToString("N0")</td>
+                <td class="m-hide" data-label="Sync cuối">@(a.LastSyncAt is { } t ? FleetStateService.Ago(t) : "—")</td>
+                <td data-label="Hành động">
                     @* Cụm nút mức TÀI KHOẢN — chỗ DUY NHẤT có hành động ở tab này. *@
                     <span class="oacts">
                         @{ var rb = OrdersRunBtn(a); }
@@ -519,7 +518,7 @@ else
             {
                 @* Shop CHỈ để xem: không nút nào ở đây (xem chú thích đầu tab). *@
                 <tr @key="@("shops|" + a.Login)">
-                    <td colspan="6" class="shoplist">
+                    <td colspan="6" class="shoplist" data-label="Danh sách shop">
                         @foreach (var s in a.Shops)
                         {
                             <span class="shopchip" title="Shop @s.Login của @a.Login — @OrdersWaitingOfShop(s).ToString("N0") đơn @WaitingStatus.ToLowerInvariant()">

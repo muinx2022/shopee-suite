@@ -26,18 +26,18 @@
 
 <h2>Manifest (@_files.Count file)</h2>
 <div class="tablewrap">
-<table class="grid sm">
+<table class="grid sm stack-sm">
     <thead><tr><th>Tên</th><th class="m-hide">Ver</th><th>Kích thước</th><th class="m-hide">SHA-256</th><th>Sửa lúc</th><th></th></tr></thead>
     <tbody>
     @foreach (var f in _files.OrderBy(x => x.Name))
     {
         <tr>
-            <td>@f.Name</td>
-            <td class="m-hide">@f.Version</td>
-            <td>@Size(f.Size)</td>
-            <td class="mono m-hide">@(f.Hash.Length > 12 ? f.Hash[..12] : f.Hash)…</td>
-            <td>@f.Mtime.LocalDateTime.ToString("MM-dd HH:mm")</td>
-            <td>
+            <td data-label="Tên">@f.Name</td>
+            <td class="m-hide" data-label="Ver">@f.Version</td>
+            <td data-label="Kích thước">@Size(f.Size)</td>
+            <td class="mono m-hide" data-label="SHA-256">@(f.Hash.Length > 12 ? f.Hash[..12] : f.Hash)…</td>
+            <td data-label="Sửa lúc">@f.Mtime.LocalDateTime.ToString("MM-dd HH:mm")</td>
+            <td data-label="">
                 <a class="btn sm" href="/dl/@f.Name" target="_blank">⬇</a>
                 @if (!f.Name.StartsWith("config/", StringComparison.OrdinalIgnoreCase)
                      && !string.Equals(f.Name, FileStoreConfigService.DefaultUpdateImageFile, StringComparison.OrdinalIgnoreCase))

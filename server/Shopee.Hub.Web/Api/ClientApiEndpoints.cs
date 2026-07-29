@@ -219,9 +219,7 @@ public static class ClientApiEndpoints
         });
 
         // ── Nghiệp vụ đơn hàng ──
-        // GET /api/shops → danh sách shop (hub tự đăng ký theo username khi client push). Client desktop gọi để
-        // đổi shopId (SỐ) của đơn sang TÊN shop ở màn "Đơn toàn hệ thống" → đây là endpoint client CHÍNH THỨC,
-        // KHÔNG còn LogLegacyHit (mỗi lượt mở màn sẽ ghi 1 dòng cảnh báo sai lệch). Map TƯỜNG MINH sang
+        // GET /api/shops → danh sách shop (hub tự đăng ký theo username khi client push). Map TƯỜNG MINH sang
         // HubShopItem: vừa khoá hợp đồng với client, vừa CẮT password/cookie/proxy của bản Shop đầy đủ.
         api.MapGet(HubRoutes.Shops, () =>
             Results.Json(db.ListShops().Select(ToHubShopItem).ToList()));
@@ -291,9 +289,8 @@ public static class ClientApiEndpoints
             return Results.Json(new OrdersSlipPushResult(saved, missing, errors));
         });
 
-        // GET /api/orders?shopId=&status=&q=&page=&pageSize= → xem đơn (admin lẫn client). Màn "Đơn toàn hệ thống"
-        // của client desktop đọc THẲNG qua đây (KHÔNG chép đơn về CSDL máy) → endpoint client CHÍNH THỨC, KHÔNG
-        // còn LogLegacyHit. LỌC + PHÂN TRANG chạy Ở ĐÂY (client không tải hết về rồi lọc).
+        // GET /api/orders?shopId=&status=&q=&page=&pageSize= → xem đơn (admin lẫn client API). LỌC + PHÂN TRANG
+        // chạy Ở ĐÂY. Map tường minh OrderRecord → HubOrderItem.
         api.MapGet(HubRoutes.Orders, (long? shopId, string? status, string? q, int? page, int? pageSize) =>
         {
             var ps = Math.Clamp(pageSize ?? 50, 1, 500);

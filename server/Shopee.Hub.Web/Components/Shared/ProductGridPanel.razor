@@ -47,8 +47,8 @@
 
         @* Thanh công cụ hiện KỂ CẢ khi Postgres chưa sẵn sàng — các nút disable theo pgReady (để user thấy có nút
            Nhập Excel/Thêm dòng, biết chỗ dùng khi kho đã lên). *@
-        <div class="bar">
-            <input placeholder="tìm sku / itemId / tên / link…" @bind="_search" @bind:event="oninput" @onkeydown="OnSearchKey" disabled="@(!pgReady || busy)" style="width:240px" />
+        <div class="bar bar-stack">
+            <input placeholder="tìm sku / itemId / tên / link…" class="opt-search" @bind="_search" @bind:event="oninput" @onkeydown="OnSearchKey" disabled="@(!pgReady || busy)" />
             <button class="btn sm" disabled="@(!pgReady || busy)" @onclick="DoSearch">🔍 Tìm</button>
             @if (!string.IsNullOrEmpty(_search) || !string.IsNullOrEmpty(_engine.Applied.Text))
             {

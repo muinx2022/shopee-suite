@@ -1,7 +1,7 @@
 # Plan: Hub Giao việc thân thiện mobile
 
 - **Ngày:** 2026-07-29
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành
 - **Người lập:** Fable · **Người thực thi:** Auto (Cursor)
 
 ## 1. Bối cảnh & mục tiêu
@@ -71,4 +71,7 @@ Mục tiêu: thao tác giao/huỷ việc trên phone **không cần cuộn ngang
 
 ## Báo cáo thực thi (điền sau khi xong)
 
-_(chưa)_
+- Drawer ≤640px: nút ☰ topbar + backdrop; đóng khi đổi trang / bấm nền.
+- `/dispatch`: KPI + Đơn hàng dùng `stack-sm` + `data-label`; lưới shop class `dispatch-shops` → thẻ trên ≤920px.
+- Lọc / tham số / thẻ máy / tab / nút op xếp dọc full-width trên mobile; `app.css?v=35`.
+- `dotnet build` Hub Web Release: OK. Chưa deploy VPS / chưa commit code.

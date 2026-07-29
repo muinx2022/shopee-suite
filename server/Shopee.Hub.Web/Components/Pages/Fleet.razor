@@ -90,7 +90,7 @@
             {
                 @* (a) Trạng thái 4 op của shop + combo đặt-tay ledger *@
                 <div class="tablewrap">
-                <table class="grid sm">
+                <table class="grid sm stack-sm">
                     <thead><tr><th>Việc</th><th>Trạng thái</th><th>Dòng</th><th></th></tr></thead>
                     <tbody>
                         @foreach (var op in OpOrder)
@@ -98,10 +98,10 @@
                             var cell = FleetStateService.OpCell(Snap, row.AccountId, row.ShopId, op);
                             var st = row.Ops.GetValueOrDefault(op);
                             <tr>
-                                <td>@OpLabel(op)</td>
-                                <td><span class="pill @cell.Css" title="@(st is null ? "" : $"{st.Machine} · {st.LastAgo}")">@cell.Text</span></td>
-                                <td>@(st is { RowCount: > 0 } ? st.RowCount.ToString("N0") : "")</td>
-                                <td>
+                                <td data-label="Việc">@OpLabel(op)</td>
+                                <td data-label="Trạng thái"><span class="pill @cell.Css" title="@(st is null ? "" : $"{st.Machine} · {st.LastAgo}")">@cell.Text</span></td>
+                                <td data-label="Dòng">@(st is { RowCount: > 0 } ? st.RowCount.ToString("N0") : "")</td>
+                                <td data-label="">
                                     @* Máy đang chạy (Locked) → ẩn combo. Rewrite + shop mồ côi + shop chưa gán sheet cũng không đặt-tay được. *@
                                     @if (op != "rewrite" && row.InConfig && !cell.Locked && !string.IsNullOrEmpty(row.Sheet))
                                     {
@@ -292,16 +292,16 @@
                     <div class="hint" style="margin:2px 0 8px">🔒 Acc đang do máy <b>@HostName(om)</b> giữ — việc mới của acc sẽ vào máy này.</div>
                 }
                 <div class="tablewrap" style="margin-top:10px">
-                <table class="grid sm">
+                <table class="grid sm stack-sm">
                     <thead><tr><th>Shop</th><th>Scrape</th><th>Import</th><th>Update</th><th>Tên SP</th></tr></thead>
                     <tbody>
                         @foreach (var r in AcctShops())
                         {
                             <tr @onclick="() => SelectShop(r)">
-                                <td class="shop">@r.ShopName</td>
+                                <td class="shop" data-label="Shop">@r.ShopName</td>
                                 @foreach (var op in OpOrder)
                                 {
-                                    <td>
+                                    <td data-label="@OpLabel(op)">
                                         @if (string.IsNullOrEmpty(r.Sheet))
                                         {
                                             <span class="sub">—</span>
@@ -319,11 +319,11 @@
                         @if (AcctShops().Any())
                         {
                             <tr class="acctrow">
-                                <td>Tổng</td>
+                                <td data-label="Shop">Tổng</td>
                                 @foreach (var op in OpOrder)
                                 {
                                     var tot = AcctShops().Sum(r => r.Ops.GetValueOrDefault(op)?.RowCount ?? 0);
-                                    <td>@tot.ToString("N0")</td>
+                                    <td data-label="@OpLabel(op)">@tot.ToString("N0")</td>
                                 }
                             </tr>
                         }

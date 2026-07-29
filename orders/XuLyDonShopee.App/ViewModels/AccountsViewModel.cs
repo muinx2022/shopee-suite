@@ -407,6 +407,10 @@ public partial class AccountsViewModel : ViewModelBase, IDisposable
     public bool CanDelete => SelectedRow is not null || Accounts.Any(r => r.IsSelected);
 
     /// <summary>Id của tài khoản đang được nạp trong form (null = form trống / tạo mới).</summary>
+    /// <summary>Tab chi tiết đang mở: 0 = Thông tin tài khoản, 1 = Kết quả. Click acc → nhảy sang Kết quả.</summary>
+    [ObservableProperty]
+    private int _detailTabIndex;
+
     private long? _editingId;
 
     partial void OnIsEditingChanged(bool value)
@@ -471,11 +475,15 @@ public partial class AccountsViewModel : ViewModelBase, IDisposable
 
             // Plan B: bấm 1 tài khoản → nổi lên đầu danh sách + đưa cửa sổ Brave của nó ra trước (best-effort).
             BringSelectedToFront(value);
+
+            // Click acc → mở tab Kết quả ngay (xem số chuẩn bị trong ngày), khỏi phải bấm tab tay.
+            DetailTabIndex = 1;
         }
         else if (!IsNew)
         {
             IsEditing = false;
             ClearForm();
+            DetailTabIndex = 0;
         }
 
         // Tab "Kết quả": nạp lưới Shop|Chuẩn bị hàng theo tài khoản vừa chọn (bỏ chọn → clear). Đặt SAU khi
@@ -985,6 +993,7 @@ public partial class AccountsViewModel : ViewModelBase, IDisposable
         IsNew = true;
         ClearForm();
         IsEditing = true;
+        DetailTabIndex = 0; // thêm mới → form Thông tin, không nhảy Kết quả (chưa có shop)
     }
 
     /// <summary>

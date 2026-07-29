@@ -6,7 +6,7 @@
 
 <p class="hint m-hide">Đơn hàng client đẩy lên hub qua <code>POST /api/orders/push</code>. Lọc theo shop / trạng thái / tìm kiếm (mã đơn, người mua, tên SP, SKU) + phân trang.</p>
 
-<div class="bar">
+<div class="bar bar-stack">
     <label>Shop
         <select @bind="_shopId" @bind:after="OnFilterChanged">
             <option value="0">— tất cả —</option>
@@ -26,7 +26,7 @@
         </select>
     </label>
     <label>Tìm
-        <input @bind="_search" @bind:event="oninput" @bind:after="OnSearchDebounced" placeholder="mã đơn / người mua / SP / SKU" style="width:240px" />
+        <input class="opt-search" @bind="_search" @bind:event="oninput" @bind:after="OnSearchDebounced" placeholder="mã đơn / người mua / SP / SKU" />
     </label>
     <label>Mỗi trang
         <select @bind="_pageSize" @bind:after="OnPageSizeChanged">
@@ -58,7 +58,7 @@
 </div>
 
 <div class="tablewrap">
-<table class="grid sm">
+<table class="grid sm stack-sm">
     <thead><tr>
         <th>Mã đơn</th><th>Shop</th><th>Người mua</th><th>Sản phẩm</th><th class="m-hide">SKU</th><th class="m-hide">Phân loại</th><th class="m-hide">Đơn trả hàng</th>
         <th>Tổng tiền</th><th class="m-hide">Cuối cùng</th><th>Trạng thái</th><th class="m-hide">Vận chuyển</th><th class="m-hide">Phiếu</th><th class="m-hide">Sync</th>
@@ -71,24 +71,24 @@
         var sku = PhanLoaiExtractor.SkuTuItemsJson(o.ItemsJson);
         if (string.IsNullOrEmpty(sku)) sku = o.Sku;
         <tr>
-            <td class="mono">@o.OrderSn</td>
-            <td>@ShopName(o.ShopId)</td>
-            <td>@(o.BuyerUsername ?? "—")</td>
-            <td title="@o.ItemSummary">@Trim(o.ItemSummary)@(o.ItemCount > 1 ? $" (+{o.ItemCount - 1})" : "")</td>
-            <td class="m-hide" title="@sku">@(string.IsNullOrEmpty(sku) ? "—" : Trim(sku))</td>
-            <td class="m-hide" title="@phanLoai">@Trim(phanLoai)</td>
-            <td class="mono m-hide">@(o.ReturnRequestCode ?? "—")</td>
-            <td>@(o.TotalPriceText ?? (o.TotalPrice?.ToString("N0") ?? "—"))</td>
-            <td class="m-hide">@(o.FinalAmountText ?? (o.FinalAmount?.ToString("N0") ?? "—"))</td>
-            <td><span class="pill @StatusCss(o.Status)">@(o.Status ?? "—")</span></td>
-            <td class="m-hide">@(string.IsNullOrEmpty(o.Carrier) ? (o.Channel ?? "—") : o.Carrier)@(string.IsNullOrEmpty(o.TrackingNumber) ? "" : $" · {o.TrackingNumber}")</td>
-            <td class="m-hide">
+            <td class="mono" data-label="Mã đơn">@o.OrderSn</td>
+            <td data-label="Shop">@ShopName(o.ShopId)</td>
+            <td data-label="Người mua">@(o.BuyerUsername ?? "—")</td>
+            <td data-label="Sản phẩm" title="@o.ItemSummary">@Trim(o.ItemSummary)@(o.ItemCount > 1 ? $" (+{o.ItemCount - 1})" : "")</td>
+            <td class="m-hide" data-label="SKU" title="@sku">@(string.IsNullOrEmpty(sku) ? "—" : Trim(sku))</td>
+            <td class="m-hide" data-label="Phân loại" title="@phanLoai">@Trim(phanLoai)</td>
+            <td class="mono m-hide" data-label="Đơn trả hàng">@(o.ReturnRequestCode ?? "—")</td>
+            <td data-label="Tổng tiền">@(o.TotalPriceText ?? (o.TotalPrice?.ToString("N0") ?? "—"))</td>
+            <td class="m-hide" data-label="Cuối cùng">@(o.FinalAmountText ?? (o.FinalAmount?.ToString("N0") ?? "—"))</td>
+            <td data-label="Trạng thái"><span class="pill @StatusCss(o.Status)">@(o.Status ?? "—")</span></td>
+            <td class="m-hide" data-label="Vận chuyển">@(string.IsNullOrEmpty(o.Carrier) ? (o.Channel ?? "—") : o.Carrier)@(string.IsNullOrEmpty(o.TrackingNumber) ? "" : $" · {o.TrackingNumber}")</td>
+            <td class="m-hide" data-label="Phiếu">
                 @if (o.SlipAt is not null)
                 {
                     <a class="linkbtn" href="@($"/slips/{o.ShopId}/{o.OrderSn}")" target="_blank" rel="noopener" title="Mở phiếu PDF (tab mới)">📄 Phiếu</a>
                 }
             </td>
-            <td class="m-hide">@(o.SyncedAt == default ? "" : o.SyncedAt.LocalDateTime.ToString("MM-dd HH:mm"))</td>
+            <td class="m-hide" data-label="Sync">@(o.SyncedAt == default ? "" : o.SyncedAt.LocalDateTime.ToString("MM-dd HH:mm"))</td>
         </tr>
     }
     @if (_orders.Count == 0)

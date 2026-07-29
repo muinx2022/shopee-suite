@@ -1,7 +1,7 @@
 # Plan: Dọn Brave đơn hàng khi tắt app (kể cả force-kill)
 
 - **Ngày:** 2026-07-29
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành
 - **Người lập:** Fable · **Người thực thi:** Auto (Cursor)
 
 ## 1. Bối cảnh & mục tiêu
@@ -74,4 +74,8 @@ Brave **module Đơn hàng** hiện phóng bằng `Process.Start` thường tạ
 
 ## Báo cáo thực thi (điền sau khi xong)
 
-_(chưa)_
+- Đã thêm `BrowserProcessStarter` (hook + `JoinArguments`); `PocCleanLauncher` / `ShopeeLoginService` phóng qua starter.
+- `BraveFleet.AddManagedRoot` + sweep `brave/chrome/msedge` dưới managed root.
+- `OrdersModuleHost.WireBrowserLifetime`: rót `BraveJobObject.Start`, đăng ký `%APPDATA%\XuLyDonShopee\profiles`, `StartupSweep`.
+- Test `BrowserProcessStarterTests`: 4/4 xanh; `dotnet build` Suite OK (0 lỗi).
+- Chưa commit code (chờ yêu cầu user). Chưa kiểm thủ công End Task.

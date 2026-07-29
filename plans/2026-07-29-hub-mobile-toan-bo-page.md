@@ -1,7 +1,7 @@
 # Plan: Hub — rà soát & sửa mobile toàn bộ page
 
 - **Ngày:** 2026-07-29
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành
 - **Người lập:** Fable · **Người thực thi:** Auto (Cursor)
 
 ## 1. Bối cảnh & mục tiêu
@@ -53,4 +53,7 @@ Sau đợt Giao việc + drawer ≤640px, còn nhiều trang Hub trên phone ph�
 
 ## Báo cáo thực thi
 
-_(chưa)_
+- Đã `stack-sm` + `data-label`: Orders, Shops, Files, ConfigAccounts, Search (máy + SP), Machines (chặn), Fleet (2 bảng).
+- `bar-stack` / form xếp dọc: Orders, ConfigAccounts, AllData, ProductGridPanel; Settings/Search bỏ width cứng.
+- CSS chung `.bar-stack` + `.editcard .row` trong `@media ≤920px`; `app.css?v=36`.
+- Giữ cuộn ngang bảng SP AllData (cố ý). Build Hub Release OK. Chưa commit code / chưa deploy.

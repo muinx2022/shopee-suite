@@ -2,9 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Shopee.Core.Browser;
 using Shopee.Core.Coordination;
 using XuLyDonShopee.App.Services;
 using XuLyDonShopee.App.ViewModels;
@@ -45,11 +47,11 @@ public static class OrdersModuleHost
         try
         {
             Services = new AppServices();
+            WireBrowserLifetime(Services);
             WireHubPush(Services);
             WireIncrementSoldBySku(Services);
             WireHubSlipPush(Services);
             WireGsheetConfig(Services);
-            WireHubOrdersRead(Services);
             WirePrepareStatsRead(Services);
             WireAccountLease(Services);
             WireOrdersMirror(Services);
@@ -66,6 +68,36 @@ public static class OrdersModuleHost
             Trace.WriteLine("[OrdersModuleHost] Không khởi tạo được module đơn hàng: " + ex);
             Services = null;
             return null;
+        }
+    }
+
+    /// <summary>
+    /// RÓT hook phóng trình duyệt + đăng ký thư mục profiles đơn hàng vào <see cref="BraveFleet"/>:
+    /// (1) mọi Brave/Chrome/Edge do module mở vào Job Object → chết theo app khi force-kill;
+    /// (2) StartupSweep dọn mồ côi sót từ lần chạy trước (kể cả chế độ chỉ Shopee, không có Workspace).
+    /// Module Đơn hàng KHÔNG tham chiếu <c>Shopee.Core</c> nên shell suite làm cầu nối.
+    /// </summary>
+    private static void WireBrowserLifetime(AppServices services)
+    {
+        BrowserProcessStarter.Start = (exe, args) =>
+            BraveJobObject.Start(exe, BrowserProcessStarter.JoinArguments(args), startMinimized: false);
+
+        try
+        {
+            var baseDir = Path.GetDirectoryName(services.Database.Path);
+            if (!string.IsNullOrWhiteSpace(baseDir))
+            {
+                var profilesRoot = Path.Combine(baseDir, "profiles");
+                BraveFleet.AddManagedRoot(profilesRoot);
+            }
+
+            var swept = BraveFleet.StartupSweep();
+            if (swept > 0)
+                Trace.WriteLine($"[OrdersModuleHost] StartupSweep: đã dọn {swept} trình duyệt mồ côi (profiles đơn hàng / persistent-data).");
+        }
+        catch (Exception ex)
+        {
+            Trace.WriteLine("[OrdersModuleHost] WireBrowserLifetime/sweep lỗi (bỏ qua): " + ex.Message);
         }
     }
 
@@ -240,75 +272,8 @@ public static class OrdersModuleHost
     }
 
     /// <summary>
-    /// RÓT 2 hook ĐỌC đơn toàn hệ thống từ hub vào bộ dịch vụ module Đơn hàng (mẫu <see cref="WireHubPush"/>) —
-    /// nguồn của màn "Đơn toàn hệ thống" (CHỈ XEM). Hub chưa kết nối → trả null (màn báo "chưa kết nối Hub");
-    /// hub lỗi/offline → <c>HubClient</c> đã tự nuốt thành null (màn báo "Hub không phản hồi"). Nuốt mọi lỗi
-    /// (log <c>Trace</c>) trả null — trừ hủy CHỦ ĐỘNG (ct: người dùng đổi bộ lọc liên tục) cho xuyên để màn bỏ
-    /// lượt cũ. <b>KHÔNG</b> ghi gì vào CSDL module: đơn lấy về chỉ đi thẳng ra lưới.
-    /// </summary>
-    private static void WireHubOrdersRead(AppServices services)
-    {
-        services.QueryHubOrders = async (query, ct) =>
-        {
-            try
-            {
-                if (!CoordinationRuntime.Active || CoordinationRuntime.Client is null)
-                {
-                    return null; // hub chưa kết nối → màn hiện "Máy này chưa kết nối Hub"
-                }
-
-                var page = await CoordinationRuntime.Client.QueryOrdersAsync(
-                    query.ShopId, query.Status, query.Search, query.Page, query.PageSize, ct).ConfigureAwait(false);
-                if (page is null)
-                {
-                    return null; // hub không phản hồi / hub cũ chưa có route
-                }
-
-                return new HubOrdersResult(
-                    page.Items.Select(ToHubOrderView).ToList(), page.Total, page.Page, page.PageSize);
-            }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
-            {
-                throw; // hủy CHỦ ĐỘNG (đổi bộ lọc) → cho xuyên để màn bỏ lượt cũ
-            }
-            catch (Exception ex)
-            {
-                Trace.WriteLine("[OrdersModuleHost] Đọc đơn từ hub lỗi: " + ex.Message);
-                return null;
-            }
-        };
-
-        services.ListHubShops = async ct =>
-        {
-            try
-            {
-                if (!CoordinationRuntime.Active || CoordinationRuntime.Client is null)
-                {
-                    return null;
-                }
-
-                var shops = await CoordinationRuntime.Client.ListShopsAsync(ct).ConfigureAwait(false);
-                // Tên hiển thị: Name của hub; hub cũ để trống Name → lùi về Username rồi "shop #id".
-                return shops?.Select(s => (
-                    Id: s.Id,
-                    Name: !string.IsNullOrWhiteSpace(s.Name) ? s.Name
-                        : (!string.IsNullOrWhiteSpace(s.Username) ? s.Username! : $"shop #{s.Id}"))).ToList();
-            }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                Trace.WriteLine("[OrdersModuleHost] Đọc danh sách shop từ hub lỗi: " + ex.Message);
-                return null;
-            }
-        };
-    }
-
-    /// <summary>
     /// RÓT hook đọc SỐ ĐƠN "chuẩn bị hàng" chung toàn hệ thống (tab "Kết quả" của màn Tài khoản) — mẫu
-    /// <see cref="WireHubOrdersRead"/>. Hub trả list <c>(shopUsername, count)</c> → đổi thành map
+    /// <see cref="WireHubPush"/>. Hub trả list <c>(shopUsername, count)</c> → đổi thành map
     /// <c>shop_login → count</c> (hub khoá shop theo ĐÚNG <c>shop_login</c> client đẩy lên nên tra thẳng được).
     /// <para><b>BẪY null vs rỗng:</b> hub chưa kết nối / lỗi / hub CŨ chưa có route → trả <c>null</c> = "không hỏi
     /// được" (màn GIỮ số cục bộ). TUYỆT ĐỐI không trả map rỗng ở các ca này — rỗng nghĩa là "hub bảo 0 đơn" và sẽ
@@ -544,30 +509,6 @@ public static class OrdersModuleHost
             return null;
         }
     }
-
-    /// <summary>Map một <see cref="HubOrderItem"/> (DTO hub) sang <see cref="HubOrderView"/> (kiểu của module Đơn
-    /// hàng) — map TAY từng field như <see cref="ToPushItem"/> ở chiều ngược lại, để đổi tên field một bên là gãy
-    /// build chứ không âm thầm làm rỗng cột trên lưới.</summary>
-    private static HubOrderView ToHubOrderView(HubOrderItem o) => new()
-    {
-        ShopId = o.ShopId,
-        OrderSn = o.OrderSn,
-        BuyerUsername = o.BuyerUsername,
-        ItemCount = o.ItemCount,
-        ItemSummary = o.ItemSummary,
-        Sku = o.Sku,
-        TotalPrice = o.TotalPrice,
-        TotalPriceText = o.TotalPriceText,
-        FinalAmount = o.FinalAmount,
-        FinalAmountText = o.FinalAmountText,
-        PaymentMethod = o.PaymentMethod,
-        Status = o.Status,
-        StatusDescription = o.StatusDescription,
-        CancelReason = o.CancelReason,
-        Carrier = o.Carrier,
-        TrackingNumber = o.TrackingNumber,
-        SyncedAt = o.SyncedAt,
-    };
 
     /// <summary>Nhịp kéo cấu hình GSheet dùng chung từ hub về. Khớp TTL 60s của <see cref="HubOrdersConfig"/> →
     /// máy client thấy cấu hình admin vừa đổi trong ~1 phút mà KHÔNG cần khởi động lại app.</summary>

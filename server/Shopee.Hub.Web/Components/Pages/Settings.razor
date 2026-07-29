@@ -12,13 +12,13 @@
        <b>Đổi token → TẤT CẢ client phải nhập lại token mới</b> (token cũ sẽ bị 401).</p>
     <label>Token hiện tại</label>
     <div class="row">
-        <input readonly value="@_token" style="width:440px;font-family:monospace" onfocus="this.select()" />
+        <input readonly value="@_token" class="opt-search" style="font-family:monospace;width:min(440px,100%)" onfocus="this.select()" />
         <button class="btn" @onclick="CopyToken">📋 Copy</button>
         <span class="action">@_copyStatus</span>
     </div>
     <label style="margin-top:12px">Đổi token</label>
     <div class="row">
-        <input @bind="_newToken" placeholder="dán token mới, hoặc bấm Sinh ngẫu nhiên" style="width:440px;font-family:monospace" />
+        <input @bind="_newToken" placeholder="dán token mới, hoặc bấm Sinh ngẫu nhiên" class="opt-search" style="font-family:monospace;width:min(440px,100%)" />
         <button class="btn" @onclick="GenToken">🎲 Sinh ngẫu nhiên</button>
     </div>
     <div class="bar">
@@ -44,7 +44,7 @@
 <h2>Đổi mật khẩu admin (đăng nhập web)</h2>
 <div class="editcard" style="max-width:720px">
     <label>Mật khẩu mới (≥ 6 ký tự)</label>
-    <input @bind="_newPass" type="password" style="width:320px" />
+    <input @bind="_newPass" type="password" class="opt-search" style="width:min(320px,100%)" />
     <div class="bar">
         <button class="btn primary" @onclick="SavePass">💾 Đổi mật khẩu</button>
         <span class="action">@_passStatus</span>

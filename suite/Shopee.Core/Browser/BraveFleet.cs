@@ -35,9 +35,24 @@ public static class BraveFleet
     // trong đây = "của app"; ngoài đây = Brave cá nhân/khác → tuyệt đối không đụng.
     private static readonly string ManagedRoot = NormalizePath(SuitePaths.ModuleDir("persistent-data"));
 
+    // Root phụ (vd %APPDATA%\XuLyDonShopee\profiles của module Đơn hàng) — đăng ký lúc boot qua
+    // AddManagedRoot. Sweep chỉ đụng browser có --user-data-dir nằm dưới các root này.
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> ExtraManagedRoots =
+        new(StringComparer.OrdinalIgnoreCase);
+
     // Profile của các session ĐANG SỐNG (đăng ký lúc phóng Brave, gỡ lúc đóng). Sweep CHỪA các dir này.
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> ActiveProfiles =
         new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Thêm thư mục gốc profile do module khác quản lý (vd Đơn hàng). Path được chuẩn hoá;
+    /// gọi trước <see cref="StartupSweep"/> để lần quét đầu phủ luôn root này. An toàn gọi nhiều lần.</summary>
+    public static void AddManagedRoot(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return;
+        var nd = NormalizePath(path);
+        if (nd.Length == 0) return;
+        ExtraManagedRoots[nd] = 0;
+    }
 
     /// <summary>Kênh thông báo (vd dòng log của tab Scrape) cho việc dọn nền. Best-effort, có thể null.</summary>
     public static Action<string>? Notice { get; set; }
@@ -235,17 +250,17 @@ public static class BraveFleet
         return killed;
     }
 
-    private static readonly string[] BraveOnly = ["brave.exe"];
+    private static readonly string[] ManagedBrowsers = ["brave.exe", "chrome.exe", "msedge.exe"];
 
     private static List<(int pid, string dir, DateTime? started)> EnumerateOurBrave(Action<string>? log)
     {
         var list = new List<(int, string, DateTime?)>();
-        foreach (var p in PlatformServices.ProcessFinder.Enumerate(BraveOnly, log))
+        foreach (var p in PlatformServices.ProcessFinder.Enumerate(ManagedBrowsers, log))
         {
             var dir = BraveProcessReaper.ExtractUserDataDir(p.CommandLine);
             if (dir is null) continue;
             var nd = NormalizePath(dir);
-            if (!IsUnderManagedRoot(nd)) continue;   // KHÔNG phải Brave của app → bỏ qua
+            if (!IsUnderManagedRoot(nd)) continue;   // KHÔNG phải browser của app → bỏ qua
             if (p.Pid <= 0) continue;
             DateTime? started = null;
             try { started = Process.GetProcessById(p.Pid).StartTime; } catch { }
@@ -268,9 +283,19 @@ public static class BraveFleet
         catch { return true; }   // không đếm được → coi như duy nhất (giữ hành vi dọn ở máy thường)
     }
 
-    private static bool IsUnderManagedRoot(string normalizedDir) =>
-        normalizedDir.Equals(ManagedRoot, StringComparison.OrdinalIgnoreCase) ||
-        normalizedDir.StartsWith(ManagedRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+    private static bool IsUnderManagedRoot(string normalizedDir)
+    {
+        if (IsUnderRoot(normalizedDir, ManagedRoot)) return true;
+        foreach (var root in ExtraManagedRoots.Keys)
+        {
+            if (IsUnderRoot(normalizedDir, root)) return true;
+        }
+        return false;
+    }
+
+    private static bool IsUnderRoot(string normalizedDir, string root) =>
+        normalizedDir.Equals(root, StringComparison.OrdinalIgnoreCase) ||
+        normalizedDir.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
 
     // ─────────────────────────── CẤU HÌNH TRẦN CỨNG (JOB OBJECT) ───────────────────────────
 

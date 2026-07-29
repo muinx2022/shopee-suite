@@ -6,7 +6,11 @@
 @inject IJSRuntime JS
 @inject AdminAccountService Admin
 
-<div class="app">
+<div class="app @(_navOpen ? "nav-open" : null)">
+    @if (_navOpen)
+    {
+        <div class="nav-backdrop" @onclick="CloseNav"></div>
+    }
     <nav class="side">
         <div class="brand">
             <div class="brand-logo">S</div>
@@ -52,6 +56,9 @@
 
     <div class="main">
         <header class="topbar">
+            <button type="button" class="nav-toggle" title="Mở menu" @onclick="ToggleNav" aria-label="Mở menu">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+            </button>
             <div class="topbar-title">@_pageTitle</div>
             <div class="topbar-right">
                 <span class="topbar-user">👤 @(Admin.Username ?? "admin")</span>
@@ -72,6 +79,7 @@
 @code {
     private int _online, _total;
     private string _pageTitle = "BigSeller";
+    private bool _navOpen;
 
     protected override void OnInitialized()
     {
@@ -83,8 +91,16 @@
 
     private async Task ToggleTheme() => await JS.InvokeVoidAsync("toggleTheme");
 
+    private void ToggleNav() => _navOpen = !_navOpen;
+    private void CloseNav() => _navOpen = false;
+
     private void OnChanged() => InvokeAsync(() => { Recount(); StateHasChanged(); });
-    private void OnLocationChanged(object? s, LocationChangedEventArgs e) => InvokeAsync(() => { UpdateTitle(); StateHasChanged(); });
+    private void OnLocationChanged(object? s, LocationChangedEventArgs e) => InvokeAsync(() =>
+    {
+        _navOpen = false;
+        UpdateTitle();
+        StateHasChanged();
+    });
 
     private void Recount()
     {

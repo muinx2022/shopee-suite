@@ -4,14 +4,14 @@
 
 <p class="hint m-hide">Web hub là nguồn sự thật. Client kéo về, giữ trạng thái riêng-máy (profile/disabled/captcha).</p>
 
-<div class="bar">
+<div class="bar bar-stack">
     <button class="btn" @onclick="AddAccount">+ Thêm acc</button>
     <button class="btn" @onclick="() => _showImport = true">⬇ Import acc / proxy</button>
     <button class="btn primary" @onclick="Save">💾 Lưu acc</button>
     <span class="action">@_status</span>
 </div>
 
-<div class="bar">
+<div class="bar bar-stack">
     <span class="stat">@_accounts.Count tài khoản</span>
     <label>Mỗi trang
         <select @bind="_pageSize">
@@ -26,20 +26,20 @@
 </div>
 
 <div class="tablewrap">
-<table class="grid sm">
+<table class="grid sm stack-sm cfg-accts">
     <thead><tr><th>#</th><th>Nhãn</th><th>Login (user|pass)</th><th>KiotProxy</th><th>Vùng</th><th>Proxy tay</th><th>Cần proxy</th><th></th></tr></thead>
     <tbody>
     @foreach (var (a, idx) in PagedAccounts)
     {
         <tr>
-            <td class="mono">@(idx + 1)</td>
-            <td><input @bind="a.Label" style="width:100px" /></td>
-            <td><input @bind="a.ShopeeAccountLogin" style="width:200px" /></td>
-            <td><input @bind="a.KiotProxyKey" style="width:96px" /></td>
-            <td><input @bind="a.Region" style="width:70px" /></td>
-            <td><input @bind="a.ManualProxy" style="width:110px" /></td>
-            <td style="text-align:center"><input type="checkbox" @bind="a.RequireProxy" /></td>
-            <td><button class="btn danger sm" @onclick="() => Remove(a)">×</button></td>
+            <td class="mono" data-label="#">@(idx + 1)</td>
+            <td data-label="Nhãn"><input @bind="a.Label" class="cfg-field cfg-label" /></td>
+            <td data-label="Login"><input @bind="a.ShopeeAccountLogin" class="cfg-field cfg-login" /></td>
+            <td data-label="KiotProxy"><input @bind="a.KiotProxyKey" class="cfg-field cfg-kiot" /></td>
+            <td data-label="Vùng"><input @bind="a.Region" class="cfg-field cfg-region" /></td>
+            <td data-label="Proxy tay"><input @bind="a.ManualProxy" class="cfg-field cfg-proxy" /></td>
+            <td data-label="Cần proxy" style="text-align:center"><input type="checkbox" @bind="a.RequireProxy" /></td>
+            <td data-label=""><button class="btn danger sm" @onclick="() => Remove(a)">×</button></td>
         </tr>
     }
     </tbody>

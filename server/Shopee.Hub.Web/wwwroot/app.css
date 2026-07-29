@@ -100,10 +100,13 @@ code { font-family: var(--mono); background: var(--gray); border: 1px solid var(
 .logout:hover { color: #fff; border-color: var(--sidebar-muted); background: rgba(255,255,255,.05); }
 
 .main { margin-left: 250px; min-height: 100vh; display: flex; flex-direction: column; }
-.topbar { position: sticky; top: 0; z-index: 15; display: flex; align-items: center; justify-content: space-between; height: 60px; padding: 0 34px; background: var(--topbar); border-bottom: 1px solid var(--stroke); }
-.topbar-title { font-size: 17px; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.topbar-right { display: flex; align-items: center; gap: 12px; }
+.topbar { position: sticky; top: 0; z-index: 15; display: flex; align-items: center; gap: 10px; height: 60px; padding: 0 34px; background: var(--topbar); border-bottom: 1px solid var(--stroke); }
+.topbar-title { flex: 1; min-width: 0; font-size: 17px; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.topbar-right { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
 .topbar-user { font-size: 13px; color: var(--body); font-weight: 500; }
+.nav-toggle { display: none; align-items: center; justify-content: center; width: 40px; height: 40px; margin: 0; padding: 0; border: 1px solid var(--stroke); border-radius: 8px; background: var(--card); color: var(--text); cursor: pointer; flex-shrink: 0; }
+.nav-toggle:hover { background: var(--gray); }
+.nav-backdrop { display: none; }
 .theme-btn { width: 38px; height: 38px; border-radius: 9px; border: 1px solid var(--stroke); background: var(--card); color: var(--body); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; transition: all .13s; }
 .theme-btn:hover { background: var(--gray); color: var(--text); }
 .theme-btn .ico-sun { display: none; }
@@ -415,6 +418,31 @@ table.grid tr.acctrow:hover td { background: var(--gray); }
 
     /* Trang /data (100 dòng/trang tạo trang cuộn rất dài, sticky header chết): cap chiều cao để bảng tự cuộn trong khung. */
     .alldata .tablewrap { max-height: 70vh; max-height: 70dvh; }
+
+    /* Hàng lọc / form xếp dọc (đánh dấu bar-stack trên markup). */
+    .bar-stack { flex-direction: column; align-items: stretch; }
+    .bar-stack > label {
+        display: flex; flex-direction: column; align-items: stretch; gap: 4px; width: 100%;
+        color: var(--body); font-size: 13px;
+    }
+    .bar-stack > label > input:not([type=checkbox]):not(.ci),
+    .bar-stack > label > select,
+    .bar-stack > input:not([type=checkbox]):not(.ci),
+    .bar-stack > select { width: 100% !important; max-width: none; }
+    .bar-stack .btn { width: 100%; justify-content: center; }
+    .bar-stack .toggle { width: 100%; }
+
+    /* Form editcard (Search, Settings…): hàng field xếp cột. */
+    .editcard .row { flex-direction: column; align-items: stretch; }
+    .editcard .row label { width: 100%; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: space-between; }
+    .editcard .row input:not([type=checkbox]) { flex: 1 1 8rem; min-width: 0; width: auto !important; max-width: 100%; }
+
+    /* Config Accounts: mỗi dòng = thẻ; input full width. */
+    table.cfg-accts.stack-sm tbody td input:not([type=checkbox]) { width: 100% !important; min-width: 0; flex: 1 1 10rem; }
+
+    /* Trang Shop nhóm subacc: header acctrow dạng block trên mobile. */
+    table.shops-grouped.stack-sm tbody tr.acctrow { display: block; padding: 8px 0 4px; }
+    table.shops-grouped.stack-sm tbody tr.acctrow td { display: block; padding: 8px 13px; border-bottom: 0; }
 }
 
 /* ===== Trang Giao việc (/dispatch) ===== */
@@ -446,6 +474,11 @@ html.dark .mcard.sel .mc-host { color: var(--sidebar-ic-active); }
 .optspanel .subhead { margin: 14px 0 10px; }
 .optspanel .optsrow { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 18px; margin-bottom: 8px; }
 .optspanel label { display: flex; align-items: center; gap: 6px; color: var(--body); font-size: 13px; }
+.cfg-field.cfg-label { width: 100px; }
+.cfg-field.cfg-login { width: 200px; }
+.cfg-field.cfg-kiot { width: 96px; }
+.cfg-field.cfg-region { width: 70px; }
+.cfg-field.cfg-proxy { width: 110px; }
 
 /* Ô op = MỘT nút hành động. min/max-width cố định: nhãn đổi theo nhịp fleet 2s mà cột không nhảy
    (title mang lời giải thích đầy đủ nên cắt bớt chữ vẫn không mất thông tin). */
@@ -505,5 +538,82 @@ html.dark .kpi-btn.open .kpi-label { color: var(--sidebar-ic-active); }
        phình hết dải. Panel bớt padding; bảng bên trong vẫn cuộn ngang trong .tablewrap của chính nó. */
     .kpi-btn { width: auto; }
     .kpipanel { padding: 0 13px 13px; margin-top: 0; }
-    .kpipanel .kpi-why { min-width: 180px; max-width: 240px; }
+    .kpipanel .kpi-why { min-width: 0; max-width: none; }
+
+    /* Giao việc: máy 1 cột; lọc/tham số xếp dọc; tab full-width; lưới shop → thẻ. */
+    .dispatch .mcards { grid-template-columns: 1fr; }
+    .dispatch .bar { flex-direction: column; align-items: stretch; }
+    .dispatch .bar label { width: 100%; justify-content: space-between; flex-wrap: wrap; }
+    .dispatch .bar select,
+    .dispatch .opt-search { width: 100%; max-width: none; }
+    .dispatch .chips { width: 100%; }
+    .dispatch .tabs { gap: 0; }
+    .dispatch .tabs button { flex: 1; text-align: center; padding: 11px 8px; white-space: normal; }
+    .dispatch .optspanel .optsrow { flex-direction: column; align-items: stretch; }
+    .dispatch .optspanel label { width: 100%; justify-content: space-between; flex-wrap: wrap; }
+    .dispatch .opt-num { width: 7rem; }
+    .dispatch .opnote { max-width: none; white-space: normal; overflow: visible; text-overflow: unset; }
+    .dispatch .acctacts,
+    .dispatch .oacts { display: flex; flex-direction: column; align-items: stretch; margin-left: 0; margin-top: 8px; width: 100%; }
+    .dispatch .acctacts .opbtn,
+    .dispatch .oacts .opbtn { min-width: 0; max-width: none; width: 100%; }
+
+    /* Lưới shop BigSeller → thẻ (thead ẩn; mỗi shop = card; nút op full-width). */
+    table.dispatch-shops thead { display: none; }
+    table.dispatch-shops tbody tr.acctrow { display: block; padding: 10px 0 6px; border-bottom: 1px solid var(--stroke); background: var(--gray); border-radius: var(--radius); margin-bottom: 8px; }
+    table.dispatch-shops tbody tr.acctrow td { display: block; padding: 10px 13px; border-bottom: 0; }
+    table.dispatch-shops tbody tr:not(.acctrow) { display: block; padding: 4px 0 10px; margin-bottom: 10px; border: 1px solid var(--stroke); border-radius: var(--radius); background: var(--card); box-shadow: var(--shadow); }
+    table.dispatch-shops tbody tr:not(.acctrow) td { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-start; gap: 8px; border-bottom: 0; padding: 6px 13px; }
+    table.dispatch-shops tbody tr:not(.acctrow) td::before { content: attr(data-label); color: var(--body); font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; flex-shrink: 0; padding-top: 6px; }
+    table.dispatch-shops tbody tr:not(.acctrow) td.shop { font-size: 14px; }
+    table.dispatch-shops tbody tr:not(.acctrow) td:not(.shop):not(.m-hide) .opbtn { min-width: 0; max-width: none; width: 100%; flex: 1 1 100%; }
+    table.dispatch-shops tbody tr:not(.acctrow) td[colspan] { display: block; }
+    .dispatch .tablewrap:has(table.dispatch-shops) { overflow: visible; }
+}
+
+/* Phone hẹp: sidebar drawer (đè nội dung), bỏ icon-rail 64px cướp bề ngang. */
+@media (max-width: 640px) {
+    .nav-toggle { display: inline-flex; }
+    .side {
+        width: min(280px, 88vw);
+        transform: translateX(-105%);
+        transition: transform .18s ease;
+        box-shadow: none;
+    }
+    .app.nav-open .side {
+        transform: translateX(0);
+        box-shadow: 8px 0 28px rgba(0, 0, 0, .35);
+    }
+    .app.nav-open .nav-backdrop {
+        display: block;
+        position: fixed;
+        inset: 0;
+        z-index: 18;
+        background: rgba(0, 0, 0, .45);
+        border: 0;
+        padding: 0;
+        margin: 0;
+        cursor: pointer;
+    }
+    .side { z-index: 25; }
+    .main { margin-left: 0 !important; }
+    /* Khôi phục chữ menu trong drawer (ghi đè icon-rail ≤920px). */
+    .brand { justify-content: flex-start; padding: 20px 20px 18px; margin: 0 6px 6px; }
+    .brand-text { display: block !important; }
+    .side-scroll { padding: 8px 12px 16px; }
+    .navsec {
+        font-size: 10px !important;
+        padding: 18px 12px 8px;
+        border-top: 0;
+        margin-top: 0;
+        text-transform: uppercase;
+        letter-spacing: .1em;
+    }
+    .nav { justify-content: flex-start; padding: 9px 12px; gap: 11px; }
+    .nav > span:not(.nav-ic) { display: inline !important; }
+    .side-foot { padding: 14px 16px; }
+    .fleet-badge { justify-content: flex-start; padding: 8px 11px; }
+    .fleet-badge > span:not(.fb-dot) { display: inline !important; }
+    .topbar { padding: 0 12px; }
+    .topbar-title { font-size: 14.5px; }
 }

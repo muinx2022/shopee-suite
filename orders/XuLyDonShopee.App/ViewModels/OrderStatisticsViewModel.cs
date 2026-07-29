@@ -35,8 +35,8 @@ public partial class OrderStatisticsViewModel : ViewModelBase
     {
         _services = services;
         _services.OrdersChanged += OnOrdersChanged;
-        var today = DateTimeOffset.Now;
-        _fromDate = new DateTimeOffset(today.Year, today.Month, 1, 0, 0, 0, today.Offset);
+        var today = DateTime.Today;
+        _fromDate = new DateTime(today.Year, today.Month, 1);
         _toDate = today;
         Reload();
     }
@@ -48,8 +48,8 @@ public partial class OrderStatisticsViewModel : ViewModelBase
     public ObservableCollection<OrderStatisticBreakdown> PaymentRows { get; } = new();
 
     [ObservableProperty] private string? _selectedShop;
-    [ObservableProperty] private DateTimeOffset _fromDate;
-    [ObservableProperty] private DateTimeOffset _toDate;
+    [ObservableProperty] private DateTime? _fromDate;
+    [ObservableProperty] private DateTime? _toDate;
     [ObservableProperty] private bool _hasData;
     [ObservableProperty] private string _emptyMessage = "Chưa có đơn hàng để thống kê.";
     [ObservableProperty] private string _scopeText = "Ảnh chụp kho đơn trên máy";
@@ -70,8 +70,8 @@ public partial class OrderStatisticsViewModel : ViewModelBase
             ApplyStatistics();
     }
 
-    partial void OnFromDateChanged(DateTimeOffset value) => ApplyStatistics();
-    partial void OnToDateChanged(DateTimeOffset value) => ApplyStatistics();
+    partial void OnFromDateChanged(DateTime? value) => ApplyStatistics();
+    partial void OnToDateChanged(DateTime? value) => ApplyStatistics();
 
     private void OnOrdersChanged()
     {
@@ -168,11 +168,18 @@ public partial class OrderStatisticsViewModel : ViewModelBase
         Replace(PaymentRows, Array.Empty<OrderStatisticBreakdown>());
     }
 
-    private static bool TryBuildCreatedRange(DateTimeOffset fromDate, DateTimeOffset toDate,
+    private static bool TryBuildCreatedRange(DateTime? fromDate, DateTime? toDate,
         out CreatedRange range, out string invalidMessage)
     {
-        var fromLocalDate = fromDate.Date;
-        var toLocalDate = toDate.Date;
+        if (!fromDate.HasValue || !toDate.HasValue)
+        {
+            range = default;
+            invalidMessage = "Hãy chọn đầy đủ Từ ngày và Đến ngày để xem thống kê.";
+            return false;
+        }
+
+        var fromLocalDate = fromDate.Value.Date;
+        var toLocalDate = toDate.Value.Date;
         if (fromLocalDate > toLocalDate)
         {
             range = default;

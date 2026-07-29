@@ -1,7 +1,7 @@
 # Plan: Xóa ribbon + màn "Đơn toàn hệ thống" (client)
 
 - **Ngày:** 2026-07-29
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành
 - **Người lập:** Fable · **Người thực thi:** Auto
 
 ## 1. Bối cảnh & mục tiêu
@@ -97,3 +97,11 @@ Xóa hẳn:
 ---
 
 ## Báo cáo thực thi (Auto điền sau khi xong)
+
+- Đã xóa 6 file màn/contract/test HubOrders.
+- Đã sửa MainViewModel (3 màn, Thống kê = index 2), ShellViewModel (bỏ ribbon), AppServices (bỏ 2 hook),
+  OrdersModuleHost (bỏ WireHubOrdersRead + ToHubOrderView), HubClient (bỏ QueryOrdersAsync + ListShopsAsync).
+- Comment API hub cập nhật (không còn nhắc màn đã xóa); API/DTO/`HubOrdersConfig` giữ nguyên.
+- Build sạch; test **1381 passed** (giảm 13 = đúng số test HubOrdersViewModelTests).
+- Grep `.cs`/`.axaml`: sạch (trừ plans/CHANGELOG lịch sử).
+- **Không commit.**

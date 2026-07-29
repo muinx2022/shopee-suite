@@ -25,24 +25,24 @@
     <p class="hint m-hide">Trang quản lý dữ liệu TOÀN BỘ acc/shop — thêm/sửa/xoá/nhập Excel/đánh dấu bán tại đây. (Tab Dữ liệu trong Cấu hình shop chỉ để xem + thao tác phạm vi shop đó.)</p>
 
     @* ── Hàng lọc (disable khi Postgres chưa sẵn sàng) ── *@
-    <div class="bar">
-        <select value="@_fAcct" @onchange="OnAcctChange" disabled="@(!pgReady || busy)" style="width:200px">
+    <div class="bar bar-stack">
+        <select value="@_fAcct" @onchange="OnAcctChange" disabled="@(!pgReady || busy)" class="opt-search">
             <option value="">— mọi tài khoản —</option>
             @foreach (var a in _accounts)
             {
                 <option value="@a.Id">@a.DisplayName</option>
             }
         </select>
-        <select @bind="_fSheet" disabled="@(!pgReady || busy || string.IsNullOrEmpty(_fAcct))" style="width:200px">
+        <select @bind="_fSheet" disabled="@(!pgReady || busy || string.IsNullOrEmpty(_fAcct))" class="opt-search">
             <option value="">— mọi shop —</option>
             @foreach (var s in ShopOptions())
             {
                 <option value="@s.ShopeeDataSheet">@s.DisplayName</option>
             }
         </select>
-        <input placeholder="SKU…" @bind="_fSku" @bind:event="oninput" @onkeydown="OnSkuKey" disabled="@(!pgReady || busy)" style="width:150px" />
-        <input type="number" placeholder="Giá từ" @bind="_fPriceMin" disabled="@(!pgReady || busy)" style="width:110px" />
-        <input type="number" placeholder="Giá đến" @bind="_fPriceMax" disabled="@(!pgReady || busy)" style="width:110px" />
+        <input placeholder="SKU…" @bind="_fSku" @bind:event="oninput" @onkeydown="OnSkuKey" disabled="@(!pgReady || busy)" class="opt-search" />
+        <input type="number" placeholder="Giá từ" @bind="_fPriceMin" disabled="@(!pgReady || busy)" class="opt-num" />
+        <input type="number" placeholder="Giá đến" @bind="_fPriceMax" disabled="@(!pgReady || busy)" class="opt-num" />
         <label class="toggle"><input type="checkbox" @bind="_fSoldOnly" disabled="@(!pgReady || busy)" /> Đã bán</label>
         <label class="toggle"><input type="checkbox" @bind="_fDupSku" disabled="@(!pgReady || busy)" /> SKU trùng trong shop</label>
         <button class="btn primary sm" disabled="@(!pgReady || busy)" @onclick="DoFilter">🔍 Lọc</button>

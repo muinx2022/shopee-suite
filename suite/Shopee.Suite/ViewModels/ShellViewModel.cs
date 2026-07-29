@@ -205,18 +205,14 @@ public sealed partial class ShellViewModel : ObservableObject
         Shopee.Core.Coordination.HttpCoordinationHub.UpdateRequested =
             (hub, requestedAt) => RemoteUpdateService.Shared.OnCommand(hub, requestedAt);
 
-        // ── Tab 3: Shopee (đơn hàng — 4 màn con LÊN ribbon; chỉ dựng khi module khởi tạo được) ──
+        // ── Tab 3: Shopee (đơn hàng — 3 màn con LÊN ribbon; chỉ dựng khi module khởi tạo được) ──
         RibbonTab? ordersTab = null;
         if (ordersVm is not null)
         {
             var acc = ordersVm.AccountsVm;
             var oAccounts = new RibbonScreenItem("Tài khoản", AppIcons.People, ordersVm, 0, "Tài khoản shop");
             var oOrders = new RibbonScreenItem("Đơn hàng", AppIcons.Receipt, ordersVm, 1, "Theo dõi & xử lý đơn · in phiếu");
-            // Màn CHỈ ĐỌC đơn của MỌI máy (đọc thẳng Hub). Icon "dàn máy chủ" = ý ĐA MÁY/toàn hệ thống —
-            // KHÔNG dùng lại Receipt (đã là "Đơn hàng" của máy này, đứng cạnh nhau sẽ không phân biệt được).
-            var oHubOrders = new RibbonScreenItem("Đơn toàn hệ thống", AppIcons.Servers, ordersVm, 2,
-                "Xem đơn của MỌI máy trên Hub (chỉ đọc — không xử lý ở đây)");
-            var oStatistics = new RibbonScreenItem("Thống kê", AppIcons.Analytics, ordersVm, 3,
+            var oStatistics = new RibbonScreenItem("Thống kê", AppIcons.Analytics, ordersVm, 2,
                 "Tổng quan đơn · doanh thu ước tính · trạng thái · shop · vận chuyển");
             // (Bỏ nút "Proxy" khỏi ribbon Shopee theo yêu cầu — màn proxy index 2 không còn điều hướng tới từ ribbon.)
 
@@ -242,7 +238,7 @@ public sealed partial class ShellViewModel : ObservableObject
 
             ordersTab = new RibbonTab("Shopee", new List<RibbonGroup>
             {
-                new RibbonGroup("Màn hình", new object[] { oAccounts, oOrders, oHubOrders, oStatistics }),
+                new RibbonGroup("Màn hình", new object[] { oAccounts, oOrders, oStatistics }),
                 oActionGroup,
                 oOptionGroup,
             });
