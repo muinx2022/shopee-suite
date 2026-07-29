@@ -54,6 +54,7 @@ public static class OrdersModuleHost
             WireGsheetConfig(Services);
             WirePrepareStatsRead(Services);
             WireAccountLease(Services);
+            WireOrdersDirectory(Services);
             WireOrdersMirror(Services);
             var vm = new MainViewModel(Services);
             _mainVm = vm;
@@ -489,6 +490,46 @@ public static class OrdersModuleHost
             {
                 // Nhả hỏng KHÔNG được ném ngược vào đường dọn dẹp của phiên; lease tự hết hạn ~5' phía hub.
                 Trace.WriteLine("[OrdersModuleHost] Nhả khóa tài khoản trên hub lỗi: " + ex.Message);
+            }
+        };
+    }
+
+    /// <summary>
+    /// RÓT hook kéo DANH BẠ sub-acc Đơn hàng gộp từ mọi máy trên Hub (mẫu <see cref="WirePrepareStatsRead"/>) —
+    /// máy MỚI dùng để tạo sẵn bản ghi tài khoản rỗng-mật-khẩu. Cổng kiểm là <c>Client</c> nên chạy được ở CẢ
+    /// chế độ Full/Workspace lẫn chế độ Shopee. Hub chưa kết nối / lỗi / hub cũ 404 → trả <c>null</c> ("không hỏi
+    /// được", khác list rỗng). Map DTO hub → kiểu của module (module không tham chiếu <c>Shopee.Core</c>).
+    /// </summary>
+    private static void WireOrdersDirectory(AppServices services)
+    {
+        services.QueryOrdersDirectory = async ct =>
+        {
+            try
+            {
+                if (CoordinationRuntime.Client is not { } client)
+                {
+                    return null; // hub chưa kết nối → "không hỏi được"
+                }
+
+                var dir = await client.GetOrdersAccountsDirectoryAsync(ct).ConfigureAwait(false);
+                if (dir is null)
+                {
+                    return null; // offline / timeout / hub cũ chưa có route
+                }
+
+                return dir.Select(a => new OrdersDirectoryItem(
+                    a.Login,
+                    (a.Shops ?? new List<OrdersShopItem>())
+                        .Select(s => (s.Login, s.Name)).ToList())).ToList();
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw; // hủy CHỦ ĐỘNG → cho xuyên
+            }
+            catch (Exception ex)
+            {
+                Trace.WriteLine("[OrdersModuleHost] Kéo danh bạ tài khoản từ hub lỗi: " + ex.Message);
+                return null;
             }
         };
     }

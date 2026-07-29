@@ -340,6 +340,19 @@ public sealed class HubClient : IDisposable
     public Task AckOrdersCommandAsync(OrdersCommandAckRequest req, CancellationToken ct = default)
         => PostAsync(HubRoutes.OrdersCommandsAck, req, ct);
 
+    /// <summary>Kéo DANH BẠ sub-acc Đơn hàng GỘP TỪ MỌI MÁY trên Hub (login + shop; KHÔNG mật khẩu/cookie) — máy
+    /// MỚI dùng để tạo sẵn bản ghi tài khoản rỗng-mật-khẩu. Trả <c>null</c> = KHÔNG lấy được (offline / timeout /
+    /// hub CŨ chưa có route) để caller phân biệt với "danh bạ rỗng" (list rỗng). Dùng _http (control-plane 8s).</summary>
+    public async Task<List<OrdersDirectoryAccount>?> GetOrdersAccountsDirectoryAsync(CancellationToken ct = default)
+    {
+        try
+        {
+            return await _http.GetFromJsonAsync<List<OrdersDirectoryAccount>>(HubRoutes.OrdersAccountsDirectory, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; } // huỷ CHỦ ĐỘNG → cho xuyên
+        catch { return null; }
+    }
+
     // ── Đơn hàng: client đẩy lô đơn đã sync của 1 shop lên hub (hub tự đăng ký shop theo username) ──
     // Dùng _bulkHttp (timeout dài): lô đơn 1 lượt sync có thể lớn (nhiều KB JSON qua tunnel).
     public async Task<OrdersPushResult?> PushOrdersAsync(OrdersPushRequest req, CancellationToken ct = default)

@@ -33,6 +33,11 @@ public readonly record struct OutboxPending(int Orders = 0, int Slips = 0, int S
 /// </summary>
 public sealed record OrdersLeaseResult(bool Ok, string? HolderMachine);
 
+/// <summary>Một sub-acc Đơn hàng trong DANH BẠ GỘP toàn Hub (kéo về máy mới): <paramref name="Login"/> = email
+/// đăng nhập, <paramref name="Shops"/> = shop con (login + tên). KHÔNG mang mật khẩu/cookie — Hub không giữ.
+/// Kiểu RIÊNG của module (module Đơn hàng KHÔNG tham chiếu <c>Shopee.Core</c> nên không lộ DTO hub vào đây).</summary>
+public sealed record OrdersDirectoryItem(string Login, IReadOnlyList<(string Login, string Name)> Shops);
+
 /// <summary>
 /// Gom Database + các repository, khởi tạo một lần và truyền vào ViewModel.
 /// (Bước đầu không dùng DI container.)
@@ -131,6 +136,15 @@ public class AppServices
     /// Mặc định <c>null</c> = TẮT (app Đơn hàng chạy độc lập / hub chưa cấu hình) → phiên chạy y như trước.
     /// </summary>
     public Func<string, CancellationToken, Task<OrdersLeaseResult>>? AcquireAccountLease { get; set; }
+
+    /// <summary>
+    /// HOOK kéo DANH BẠ sub-acc Đơn hàng GỘP TỪ MỌI MÁY trên Hub (login + shop; KHÔNG mật khẩu/cookie), do shell
+    /// suite RÓT (module Đơn hàng KHÔNG tham chiếu <c>Shopee.Core</c> nên không tự biết hub). Máy MỚI dùng để tạo
+    /// sẵn bản ghi tài khoản rỗng-mật-khẩu; người dùng tự nhập mật khẩu rồi đăng nhập.
+    /// <para><c>null</c> trả về = KHÔNG hỏi được Hub (chưa cấu hình / offline / hub cũ chưa có route) — khác list
+    /// rỗng ("Hub chưa có tài khoản nào"). Mặc định property <c>null</c> = TẮT (app chạy độc lập / hub chưa cấu hình).</para>
+    /// </summary>
+    public Func<CancellationToken, Task<IReadOnlyList<OrdersDirectoryItem>?>>? QueryOrdersDirectory { get; set; }
 
     /// <summary>
     /// HOOK NHẢ khóa chạy tài khoản — cặp với <see cref="AcquireAccountLease"/>, tham số cũng là <b>login

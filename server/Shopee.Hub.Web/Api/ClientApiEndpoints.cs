@@ -210,6 +210,15 @@ public static class ClientApiEndpoints
             return Results.Json(new { accounts = db.UpsertOrdersAccounts(r) });
         });
 
+        // GET /orders/accounts/directory → DANH BẠ sub-acc Đơn hàng GỘP TỪ MỌI MÁY (login + shop con), distinct
+        // theo login. KHÔNG mật khẩu/cookie (Hub không giữ). Máy MỚI kéo về để tạo sẵn bản ghi tài khoản
+        // rỗng-mật-khẩu; người dùng tự nhập mật khẩu rồi đăng nhập.
+        api.MapGet(HubRoutes.OrdersAccountsDirectory, () =>
+            Results.Json(db.AllOrdersAccountsDistinct()
+                .Select(a => new OrdersDirectoryAccount(a.Login, a.Shops
+                    .Select(s => new OrdersShopItem(s.Login, s.Name)).ToList()))
+                .ToList()));
+
         // POST /orders/commands/ack → client báo kết quả lệnh hub giao (lệnh ĐI kèm phản hồi heartbeat).
         api.MapPost(HubRoutes.OrdersCommandsAck, (OrdersCommandAckRequest? r) =>
         {

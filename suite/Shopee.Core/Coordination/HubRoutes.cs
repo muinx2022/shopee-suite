@@ -99,6 +99,11 @@ public static class HubRoutes
     /// CỐ Ý nằm ngoài tiền tố <c>config/</c> nên không dính chặn <c>AllowClientConfigPush</c>.</summary>
     public const string OrdersAccounts = "/orders/accounts";
 
+    /// <summary>GET: máy MỚI kéo DANH BẠ sub-acc Đơn hàng GỘP TỪ MỌI MÁY (login + shop con; KHÔNG mật khẩu,
+    /// KHÔNG cookie — Hub không hề giữ). Để tạo sẵn bản ghi tài khoản rỗng-mật-khẩu, người dùng tự nhập mật khẩu
+    /// rồi đăng nhập. CỐ Ý nằm ngoài tiền tố <c>config/</c> nên không dính chặn <c>AllowClientConfigPush</c>.</summary>
+    public const string OrdersAccountsDirectory = "/orders/accounts/directory";
+
     /// <summary>Client báo kết quả thực thi một lệnh hub giao (lệnh ĐI trong phản hồi heartbeat, không có route
     /// riêng để lấy).</summary>
     public const string OrdersCommandsAck = "/orders/commands/ack";

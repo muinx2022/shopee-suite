@@ -174,6 +174,67 @@ ON CONFLICT(machine_id,login,shop_login) DO UPDATE SET shop_name=$sn, sort_order
         }
     }
 
+    /// <summary>
+    /// DANH BẠ sub-acc Đơn hàng GỘP TỪ MỌI MÁY, distinct theo <c>login</c> (ignore-case), shop UNION theo
+    /// <c>shop_login</c> (ignore-case, tên hiển thị lấy bản KHÔNG rỗng đầu tiên). Dùng cho máy MỚI kéo về để tạo
+    /// sẵn bản ghi tài khoản rỗng-mật-khẩu — vì thế <see cref="OrdersMirrorAccount.SessionState"/>/
+    /// <see cref="OrdersMirrorAccount.VerifyFailed"/>/<see cref="OrdersMirrorAccount.LastSyncAt"/>/
+    /// <see cref="OrdersMirrorAccount.UpdatedAt"/> KHÔNG mang ý nghĩa (để mặc định) — chỉ <c>login</c> + <c>shops</c>
+    /// có giá trị. TUYỆT ĐỐI không có mật khẩu/cookie (bảng gương vốn không giữ). Bảng rỗng → list rỗng.
+    /// </summary>
+    public List<OrdersMirrorAccount> AllOrdersAccountsDistinct()
+    {
+        lock (_gate)
+        {
+            // login (thường hóa) → (login hiển thị, shop_login thường hóa → shop). Giữ thứ tự gặp đầu tiên.
+            var accs = new Dictionary<string, (string Login, Dictionary<string, OrdersMirrorShop> Shops)>(StringComparer.OrdinalIgnoreCase);
+
+            using (var c = _conn.CreateCommand())
+            {
+                c.CommandText = "SELECT DISTINCT login FROM orders_accounts";
+                using var rd = c.ExecuteReader();
+                while (rd.Read())
+                {
+                    var login = S(rd, 0).Trim();
+                    if (login.Length == 0) continue;
+                    if (!accs.ContainsKey(login))
+                        accs[login] = (login, new Dictionary<string, OrdersMirrorShop>(StringComparer.OrdinalIgnoreCase));
+                }
+            }
+
+            using (var c = _conn.CreateCommand())
+            {
+                c.CommandText = "SELECT login, shop_login, shop_name FROM orders_account_shops ORDER BY sort_order, shop_login";
+                using var rd = c.ExecuteReader();
+                while (rd.Read())
+                {
+                    var login = S(rd, 0).Trim();
+                    var shopLogin = S(rd, 1).Trim();
+                    var shopName = S(rd, 2).Trim();
+                    if (login.Length == 0 || shopLogin.Length == 0) continue;
+
+                    if (!accs.TryGetValue(login, out var entry))
+                    {
+                        // Shop trỏ tới login chưa có dòng trong orders_accounts (dữ liệu lệch) → vẫn nhận login đó.
+                        entry = (login, new Dictionary<string, OrdersMirrorShop>(StringComparer.OrdinalIgnoreCase));
+                        accs[login] = entry;
+                    }
+
+                    if (!entry.Shops.ContainsKey(shopLogin))
+                        entry.Shops[shopLogin] = new OrdersMirrorShop(shopLogin, shopName.Length > 0 ? shopName : shopLogin);
+                    else if (shopName.Length > 0 && entry.Shops[shopLogin].Name == entry.Shops[shopLogin].Login)
+                        entry.Shops[shopLogin] = new OrdersMirrorShop(shopLogin, shopName); // vá tên khi bản trước chỉ có login
+                }
+            }
+
+            return accs.Values
+                .Select(e => new OrdersMirrorAccount(
+                    e.Login, "", false, null, DateTimeOffset.MinValue, e.Shops.Values.ToList()))
+                .OrderBy(a => a.Login, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+    }
+
     /// <summary>Số tài khoản / số tài khoản đang chiếm phiên theo TỪNG máy (một lượt quét) — cho thẻ chọn máy ở
     /// tab Đơn hàng, khỏi gọi <see cref="OrdersAccountsOf"/> cho từng máy mỗi nhịp.</summary>
     public Dictionary<string, OrdersMirrorCount> OrdersMirrorCounts()

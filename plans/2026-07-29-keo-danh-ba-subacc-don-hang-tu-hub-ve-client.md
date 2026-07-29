@@ -1,7 +1,7 @@
 # Plan: Kéo DANH BẠ sub-acc module Đơn hàng từ Hub về client mới (login + shop, KHÔNG kèm mật khẩu)
 
 - **Ngày:** 2026-07-29
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-executor`)
 
 ## 1. Bối cảnh & mục tiêu
@@ -190,4 +190,31 @@ khoản, nhập mật khẩu (+ email xác minh nếu cần) rồi bấm Chạy 
 
 ---
 
-## Báo cáo thực thi (Opus điền sau khi xong)
+## Báo cáo thực thi (2026-07-29, làm trực tiếp trong Cursor)
+
+Đã làm đúng plan:
+
+- **Hub `HubDatabase.OrdersAccounts.cs`:** thêm `AllOrdersAccountsDistinct()` — gộp mọi máy, distinct login
+  (ignore-case), union shop theo `shop_login` (tên lấy bản không rỗng đầu). Trả `OrdersMirrorAccount` với các
+  field phiên để mặc định (chỉ login + shops có nghĩa).
+- **DTO/route:** `HubRoutes.OrdersAccountsDirectory = "/orders/accounts/directory"`; record
+  `OrdersDirectoryAccount(Login, Shops)` trong `HubDtos.cs`.
+- **Hub endpoint:** `GET /orders/accounts/directory` trong `ClientApiEndpoints.cs` (KHÔNG mật khẩu/cookie).
+- **Client `HubClient.GetOrdersAccountsDirectoryAsync`** — GET khoan dung, lỗi/hub cũ → null.
+- **`AppServices`:** kiểu module `OrdersDirectoryItem` + hook `QueryOrdersDirectory`.
+- **`OrdersModuleHost.WireOrdersDirectory`** — rót hook, map DTO hub → kiểu module; cổng kiểm `Client` (chạy cả
+  chế độ Shopee-thuần lẫn Full/Workspace).
+- **`AccountsViewModel`:** lệnh `KeoTuHubCommand` (Insert login CHƯA có, mật khẩu trống, ghi chú "Kéo từ Hub —
+  cần nhập mật khẩu", seed shop best-effort) + hàm thuần `TinhLoginCanThem` (chốt không đè local).
+- **`AccountsView.axaml`:** nút "Kéo TK từ Hub" (icon IconSync) cạnh Thêm/Xóa.
+- **Test:** `KeoTuHubTests` (6 ca cho `TinhLoginCanThem`). KHÔNG có project test hub nên phần
+  `AllOrdersAccountsDistinct` chưa có unit test — cần kiểm chứng tay/qua endpoint.
+
+Nghiệm thu:
+- `dotnet build ShopeeSuite.sln` → 0 warning, 0 error.
+- `dotnet build server/Shopee.Hub.Web` → compile 0 warning/0 error (build vào thư mục tạm; build vào `bin`
+  thường bị KHÓA FILE do có instance hub đang chạy local — không phải lỗi biên dịch).
+- `dotnet test orders/XuLyDonShopee.Tests` → 1440 passed, 0 failed.
+
+Còn lại (ngoài phạm vi code): cần **deploy Hub** rồi **release client** thì máy mới mới kéo được (thay đổi cả
+hai phía). Kịch bản tay 2 máy chưa chạy (cần môi trường thật) — đã có test cho nhánh logic then chốt.

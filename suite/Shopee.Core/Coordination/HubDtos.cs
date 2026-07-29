@@ -275,6 +275,11 @@ public sealed record OrdersAccountItem(
 /// danh bạ của máy đó (client là nguồn sự thật cho danh sách của chính nó), KHÔNG đụng máy khác.</summary>
 public sealed record OrdersAccountsPushRequest(string MachineId, string Hostname, List<OrdersAccountItem> Accounts);
 
+/// <summary>Một sub-acc Đơn hàng trong DANH BẠ GỘP toàn Hub (mọi máy, distinct theo login) — máy MỚI kéo về để
+/// tạo sẵn bản ghi tài khoản rỗng-mật-khẩu. Khoá là <see cref="Login"/> (email đăng nhập). TUYỆT ĐỐI KHÔNG mang
+/// mật khẩu/cookie — Hub không hề giữ (xem hợp đồng gương ở <see cref="OrdersAccountsPushRequest"/>).</summary>
+public sealed record OrdersDirectoryAccount(string Login, List<OrdersShopItem> Shops);
+
 /// <summary>Trạng thái phiên tài khoản Đơn hàng trong gương (chuỗi để DTO/JSON gọn, y khuôn
 /// <see cref="MachineRoles"/>). Rỗng = không có phiên / đã dừng / lỗi.</summary>
 public static class OrdersSessionStates
