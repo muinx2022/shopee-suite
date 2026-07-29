@@ -5,6 +5,14 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Hiệu năng. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.6.12 — 2026-07-29
+
+- **Xóa ribbon "Đơn toàn hệ thống":** tab Đơn hàng chỉ còn **Đơn hàng** / **Thống kê** (đơn toàn hệ thống xem trên Hub).
+- **Brave Đơn hàng chết theo app:** trình duyệt mở bởi module Đơn hàng vào Job Object — tắt cứng / crash app cũng
+  dọn Brave; lúc mở app quét thêm profile `XuLyDonShopee\profiles` mồ côi.
+- **Tab Kết quả khi click tài khoản:** chọn acc trong danh sách → mở tab **Kết quả** ngay; nhãn
+  **Tổng đã chuẩn bị hàng (trong ngày): xx đơn**.
+
 ## v1.6.11 — 2026-07-29
 
 - **SKU nhiều sản phẩm trên app + Hub:** đơn có nhiều SP (vd 2 giày) nay hiện đủ SKU từng sản phẩm nối bằng
