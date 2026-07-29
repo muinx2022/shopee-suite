@@ -147,6 +147,25 @@ CREATE TABLE IF NOT EXISTS account_shops (
     UNIQUE(account_id, shop_login)
 );
 
+-- MÃ YÊU CẦU TRẢ HÀNG, SỐNG ĐỘC LẬP với vòng đời đơn. Shopee cho trả hàng trong 15 ngày, mà app dọn đơn KẾT
+-- THÚC ngay khi đã ghi sheet + đếm + đẩy hub (AccountSession.NenXoaDonKetThuc) — nên lúc yêu cầu trả hàng xuất
+-- hiện thì đơn thường đã bị xoá khỏi `orders` và mã quét được bị vứt đi (đó là lý do số mã lấy được vẫn là 0).
+-- Bảng này là nguồn sự thật MỚI cho mã trả hàng; `orders.return_request_code` từ nay chỉ để HIỂN THỊ.
+--
+-- ⚠ TUYỆT ĐỐI KHÔNG gắn khoá ngoại tới `orders` và KHÔNG xoá theo đơn — đó là toàn bộ mục đích của bảng. Chống
+-- phình bằng DỌN THEO TUỔI (ReturnCodesRepository.DonDep, mặc định 90 ngày).
+--   · gsheet_synced_at NULL = mã CHƯA đẩy lên Google Sheet (mã ĐỔI thì reset về NULL để đẩy lại).
+--   · shop_login thuần để chẩn đoán (mã này của shop nào).
+CREATE TABLE IF NOT EXISTS return_codes (
+    account_id INTEGER NOT NULL,
+    order_sn   TEXT NOT NULL,
+    code       TEXT NOT NULL,
+    shop_login TEXT,
+    created_at TEXT NOT NULL,
+    gsheet_synced_at TEXT,
+    PRIMARY KEY (account_id, order_sn)
+);
+
 CREATE TABLE IF NOT EXISTS prepare_daily (
     account_id INTEGER NOT NULL,
     shop_login TEXT NOT NULL,

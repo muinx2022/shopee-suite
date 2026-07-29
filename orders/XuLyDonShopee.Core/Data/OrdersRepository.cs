@@ -445,6 +445,32 @@ public class OrdersRepository
         cmd.ExecuteNonQuery();
     }
 
+    /// <summary>
+    /// Map <c>order_sn → gsheet_tab</c> của các đơn CÒN trong app đã nhớ được tab (dùng cho lượt đẩy MÃ TRẢ HÀNG:
+    /// mã của đơn còn sống thì về đúng tab đã ghi). Đơn đã bị DỌN không có ở đây — caller lùi về tab theo tháng
+    /// hiện tại, mà tab chỉ là ĐIỂM VÀO vì script tra mã đơn trên MỌI tab.
+    /// </summary>
+    public Dictionary<string, string> GetGsheetTabs(long accountId)
+    {
+        var map = new Dictionary<string, string>(StringComparer.Ordinal);
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText =
+            "SELECT order_sn, gsheet_tab FROM orders WHERE account_id = $a AND gsheet_tab IS NOT NULL;";
+        cmd.Parameters.AddWithValue("$a", accountId);
+
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            if (reader.IsDBNull(0) || reader.IsDBNull(1))
+            {
+                continue;
+            }
+            map[reader.GetString(0)] = reader.GetString(1);
+        }
+        return map;
+    }
+
     /// <summary>Kết quả một lượt <see cref="SetReturnRequestCodes"/> — để log / notify đúng cặp vừa ghi.</summary>
     /// <param name="DaGhi">Số đơn VỪA ghi mã mới (khác mã cũ).</param>
     /// <param name="KhongDoi">Số đơn đã mang đúng mã đó rồi (không ghi lại, không đẩy lại).</param>

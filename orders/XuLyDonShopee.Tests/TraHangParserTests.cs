@@ -7,8 +7,8 @@ namespace XuLyDonShopee.Tests;
 /// <list type="bullet">
 /// <item><see cref="TraHangParser.QuyetDinhCheck"/> — 4 nhánh luật đếm (lần đầu = min(số, trần) / không đổi /
 /// giảm / tăng k).</item>
-/// <item><see cref="TraHangParser.LocTheoCuaSo"/> — chặn theo cửa sổ NGÀY ĐẶT ĐƠN (suy từ mã đơn), LỌC chứ không
-/// dừng sớm vì danh sách sắp theo ngày YÊU CẦU.</item>
+/// <item><see cref="TraHangParser.LocTheoCuaSo"/> — chặn theo cửa sổ NGÀY YÊU CẦU (suy từ MÃ YÊU CẦU, 20 ngày),
+/// LỌC chứ không dừng sớm.</item>
 /// <item><see cref="TraHangParser.ParseSoYeuCau"/> — "7 Yêu cầu" → 7, text lạ → null (KHÔNG ném).</item>
 /// <item><see cref="TraHangParser.TachMa"/> + <see cref="TraHangParser.GhepCap"/> — tách cặp mã từ HTML mẫu:
 /// dòng CHỈ có mã đơn (đơn hủy — chỗ mã yêu cầu là <c>&lt;!----&gt;</c>) phải BỊ BỎ, dòng đủ hai mã ra đúng cặp.</item>
@@ -587,67 +587,246 @@ public class TraHangParserTests
         Assert.False(TraHangParser.ParseKetQua(json).TabTraHang);
     }
 
-    // ===================== Lọc theo cửa sổ NGÀY ĐẶT ĐƠN =====================
+    // ===================== Chốt chặn theo href: bỏ dòng ĐƠN HỦY =====================
 
-    private static readonly DateTime HomNay = new(2026, 7, 29);
-
-    private static YeuCauTraHang Cap(string maDon) => new(maDon, "R-" + maDon);
-
+    /// <summary>
+    /// Dòng ĐƠN HỦY trên trang trả hàng có <c>href = /portal/sale/order/…</c> (không phải
+    /// <c>/portal/sale/return/…</c>) và KHÔNG có khối mã yêu cầu. Extension gửi cờ <c>laTraHang=false</c> để C#
+    /// bỏ + ĐẾM ĐƯỢC — chốt chặn thứ hai, độc lập với việc chọn được tab hay không.
+    /// </summary>
     [Fact]
-    public void LocTheoCuaSo_DonHomNay_Giu()
+    public void GhepCap_DongDonHuy_TheoHref_BiBo_VaDemRieng()
     {
-        var kq = TraHangParser.LocTheoCuaSo(new[] { Cap("260729US91P2N2") }, HomNay, 7);
+        var dong = new[]
+        {
+            new DongTraHang(null, "<div>" + KhoiMaDon("D1") + KhoiMaYeuCau("R1") + "</div>", true),
+            // Dòng đơn hủy THẬT: chỉ có khối mã đơn, href /portal/sale/order/… → cờ false.
+            new DongTraHang("238153025271149", "<div>" + KhoiMaDon("260713HUBU75VU") + "<!----><!----></div>", false),
+        };
 
-        Assert.Equal("260729US91P2N2", Assert.Single(kq.GiuLai).MaDon);
-        Assert.Equal(0, kq.BoQuaViCu);
-        Assert.Equal(0, kq.BoQuaViKhongRoNgay);
+        var kq = TraHangParser.GhepCap(dong);
+
+        Assert.Equal("D1", Assert.Single(kq.Cap).MaDon);
+        Assert.Equal(1, kq.BoQuaDonHuy);
+        // Dòng đơn hủy KHÔNG được rơi vào danh sách chẩn đoán "thiếu mã yêu cầu" — nó đâu phải dòng trả hàng.
+        Assert.Empty(kq.ThieuMaYeuCau);
+    }
+
+    /// <summary>
+    /// Dòng ĐƠN HỦY mà lại ĐỦ hai mã (giả định: Shopee đổi cấu trúc) vẫn bị bỏ theo href — href là chốt chặn
+    /// mạnh hơn nội dung, và đơn hủy thì không bao giờ có yêu cầu trả hàng thật.
+    /// </summary>
+    [Fact]
+    public void GhepCap_HrefDonHuy_ThangCaKhiDuHaiMa()
+    {
+        var dong = new[]
+        {
+            new DongTraHang(null, "<div>" + KhoiMaDon("D9") + KhoiMaYeuCau("R9") + "</div>", false),
+        };
+
+        var kq = TraHangParser.GhepCap(dong);
+
+        Assert.Empty(kq.Cap);
+        Assert.Equal(1, kq.BoQuaDonHuy);
+    }
+
+    /// <summary>Extension đời CŨ chưa gửi cờ (<c>null</c>) → GIỮ như trước; chốt chặn mới không được làm câm bản
+    /// client chưa cập nhật.</summary>
+    [Fact]
+    public void GhepCap_ThieuCoLaTraHang_ClientCu_VanGiuDong()
+    {
+        var dong = new[] { new DongTraHang(null, "<div>" + KhoiMaDon("D1") + KhoiMaYeuCau("R1") + "</div>") };
+
+        var kq = TraHangParser.GhepCap(dong);
+
+        Assert.Equal("R1", Assert.Single(kq.Cap).MaYeuCau);
+        Assert.Equal(0, kq.BoQuaDonHuy);
+    }
+
+    [Theory]
+    [InlineData("true", true)]
+    [InlineData("false", false)]
+    public void ParseKetQua_DocDuocCoLaTraHang(string giaTri, bool mong)
+    {
+        var kq = TraHangParser.ParseKetQua(
+            "{\"soYeuCauText\":\"1 Yêu cầu\",\"list\":[{\"laTraHang\":" + giaTri + ",\"headHtml\":\"<div>x</div>\"}]}");
+
+        Assert.Equal(mong, Assert.Single(kq.Dong).LaTraHang);
+    }
+
+    /// <summary>Thiếu field (extension đời cũ) → <c>null</c> = "không biết", KHÁC hẳn <c>false</c> = "đơn hủy".</summary>
+    [Fact]
+    public void ParseKetQua_ThieuCoLaTraHang_LaNull_KhongPhaiFalse()
+    {
+        var kq = TraHangParser.ParseKetQua(
+            "{\"soYeuCauText\":\"1 Yêu cầu\",\"list\":[{\"headHtml\":\"<div>x</div>\"}]}");
+
+        Assert.Null(Assert.Single(kq.Dong).LaTraHang);
+    }
+
+    // ===================== Chẩn đoán khi trang không render =====================
+
+    /// <summary>Gói <c>chanDoan</c> extension gửi khi BỎ lượt → một dòng text đủ phân biệt hết-giờ-thật /
+    /// lạc-trang / sai-selector. Không có gói → null (lượt đọc bình thường).</summary>
+    [Fact]
+    public void ParseKetQua_CoChanDoan_DungThanhMotDongDeLog()
+    {
+        var json = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            soYeuCauText = "",
+            list = Array.Empty<object>(),
+            chanDoan = new
+            {
+                url = "https://banhang.shopee.vn/portal/sale/returnrefundcancel",
+                title = "Trả hàng/Hoàn tiền/Hủy",
+                coOTong = true,
+                textOTong = "",
+                soDong = 12,
+                coTabWrapper = true,
+            },
+        });
+
+        var cd = TraHangParser.ParseKetQua(json).ChanDoan;
+
+        Assert.NotNull(cd);
+        Assert.Contains("returnrefundcancel", cd);
+        Assert.Contains("ô tổng CÓ nhưng RỖNG", cd);   // ⇒ hết giờ THẬT, không phải sai selector
+        Assert.Contains("12 dòng", cd);
+        Assert.Contains("CÓ .return-case-tab-wrapper", cd);
     }
 
     [Fact]
-    public void LocTheoCuaSo_DonCuHon7Ngay_Bo()
+    public void ParseKetQua_MatOTong_ChanDoanNoiRoLaMatSelector()
     {
-        var kq = TraHangParser.LocTheoCuaSo(new[] { Cap("260701ABCDEFG") }, HomNay, 7);
+        var json = "{\"soYeuCauText\":\"\",\"list\":[],\"chanDoan\":"
+            + "{\"url\":\"https://x/\",\"title\":\"t\",\"coOTong\":false,\"textOTong\":\"\",\"soDong\":0,\"coTabWrapper\":false}}";
+
+        var cd = TraHangParser.ParseKetQua(json).ChanDoan;
+
+        Assert.Contains("KHÔNG có .return-list-summary-title", cd);
+        Assert.Contains("KHÔNG có .return-case-tab-wrapper", cd);
+    }
+
+    [Fact]
+    public void ParseKetQua_KhongCoChanDoan_TraNull()
+        => Assert.Null(TraHangParser.ParseKetQua("{\"soYeuCauText\":\"3 Yêu cầu\",\"list\":[]}").ChanDoan);
+
+    // ===================== Lọc theo cửa sổ NGÀY YÊU CẦU =====================
+    //
+    // ⚠ Khối này trước đây đo trên NGÀY ĐẶT ĐƠN (mã đơn) với cửa sổ 7 ngày. Đổi trục là CHỦ ĐÍCH, không phải sửa
+    // test cho xanh: Shopee cho trả hàng trong 15 ngày, nên một yêu cầu HÔM NAY thường thuộc đơn đặt từ rất lâu —
+    // đo trên ngày đặt đơn là vứt đúng những mã vừa phát sinh. Từ khi có bảng `return_codes` (mã sống độc lập với
+    // vòng đời đơn), việc đơn còn hay đã bị dọn không còn liên quan. Mọi ca của khối cũ được GIỮ NGUYÊN Ý ĐỊNH và
+    // dựng lại trên trục mới; riêng ca "không đọc được ngày" ĐỔI CHIỀU (bỏ → GIỮ) theo đúng luật mới.
+
+    private static readonly DateTime HomNay = new(2026, 7, 29);
+
+    /// <summary>Cặp có NGÀY YÊU CẦU cho trước: mã yêu cầu mở đầu bằng <c>yyMMdd</c> y như mã đơn (dữ liệu thật
+    /// <c>2607280TS2VYAW3</c> = yêu cầu ngày 28/07). Mã ĐƠN cố tình để một ngày RẤT CŨ (17/06) để chứng minh luật
+    /// KHÔNG còn nhìn vào mã đơn nữa.</summary>
+    private static YeuCauTraHang CapYeuCau(string maYeuCau) => new("260617ANE669U9", maYeuCau);
+
+    /// <summary>
+    /// BA CẶP THẬT người dùng gửi 29/07 (tab "Đơn Trả hàng Hoàn tiền") — ca chốt của cả đợt sửa. Cửa sổ 20 ngày
+    /// tính từ 29/07 (mốc 09/07): yêu cầu 28/07 và 21/07 GIỮ, yêu cầu 21/06 BỎ. Hai cặp giữ lại đều thuộc đơn mà
+    /// app gần như chắc chắn đã dọn (đặt 25/07 và 15/07) — luật cũ đo trên ngày ĐẶT ĐƠN sẽ vứt cặp 15/07.
+    /// </summary>
+    [Fact]
+    public void LocTheoCuaSo_BaCapThat_CuaSo20Ngay_Giu2_Bo1()
+    {
+        var cap = new[]
+        {
+            new YeuCauTraHang("260725JTBTAJVD", "2607280TS2VYAW3"),   // đặt 25/07, yêu cầu 28/07 — HTML thật
+            new YeuCauTraHang("260715QNAP2587", "2607210QK4M8T21"),   // đặt 15/07, yêu cầu 21/07
+            new YeuCauTraHang("260617ANE669U9", "2606210RB7XN9C4"),   // đặt 17/06, yêu cầu 21/06 — quá hạn
+        };
+
+        var kq = TraHangParser.LocTheoCuaSo(cap, HomNay, TraHangParser.SoNgayCuaSoTraHang);
+
+        Assert.Equal(new[] { "260725JTBTAJVD", "260715QNAP2587" }, kq.GiuLai.Select(c => c.MaDon));
+        Assert.Equal(1, kq.BoQuaViCu);
+        Assert.Equal(0, kq.GiuViKhongRoNgay);
+    }
+
+    /// <summary>15 ngày chính sách Shopee + biên — hằng phải là 20 và là hằng RIÊNG, không dùng chung con số 7
+    /// ngày của nhánh lấy bù "Số tiền cuối cùng" (khác trục, khác ý nghĩa).</summary>
+    [Fact]
+    public void SoNgayCuaSoTraHang_La20_KhongDungChungVoiSoNgayBuUocTinh()
+        => Assert.Equal(20, TraHangParser.SoNgayCuaSoTraHang);
+
+    [Fact]
+    public void LocTheoCuaSo_YeuCauHomNay_Giu()
+    {
+        var kq = TraHangParser.LocTheoCuaSo(new[] { CapYeuCau("260729US91P2N2") }, HomNay, 20);
+
+        Assert.Equal("260729US91P2N2", Assert.Single(kq.GiuLai).MaYeuCau);
+        Assert.Equal(0, kq.BoQuaViCu);
+        Assert.Equal(0, kq.GiuViKhongRoNgay);
+    }
+
+    [Fact]
+    public void LocTheoCuaSo_YeuCauCuHonCuaSo_Bo()
+    {
+        var kq = TraHangParser.LocTheoCuaSo(new[] { CapYeuCau("260701ABCDEFG") }, HomNay, 20);
 
         Assert.Empty(kq.GiuLai);
         Assert.Equal(1, kq.BoQuaViCu);
     }
 
-    /// <summary>⚠ Danh sách sắp theo NGÀY YÊU CẦU còn mã đơn cho NGÀY ĐẶT ĐƠN — hai đại lượng khác nhau, nên
-    /// dòng CŨ có thể nằm GIỮA hai dòng mới. Phải LỌC đúng dòng đó, KHÔNG được dừng sớm.</summary>
+    /// <summary>⚠ Danh sách sắp theo ngày yêu cầu mới→cũ nhưng KHÔNG đơn điệu tuyệt đối (sắp xếp có thể không áp
+    /// được). Dòng quá hạn nằm GIỮA hai dòng còn hạn → phải LỌC đúng dòng đó, KHÔNG được dừng sớm.</summary>
     [Fact]
     public void LocTheoCuaSo_DongCuNamGiua_ChiBoDungDongDo_KhongDungSom()
     {
         var kq = TraHangParser.LocTheoCuaSo(
-            new[] { Cap("260729AAA"), Cap("260610BBB"), Cap("260728CCC") }, HomNay, 7);
+            new[] { CapYeuCau("260729AAA"), CapYeuCau("260610BBB"), CapYeuCau("260728CCC") }, HomNay, 20);
 
-        Assert.Equal(new[] { "260729AAA", "260728CCC" }, kq.GiuLai.Select(c => c.MaDon));
+        Assert.Equal(new[] { "260729AAA", "260728CCC" }, kq.GiuLai.Select(c => c.MaYeuCau));
         Assert.Equal(1, kq.BoQuaViCu);
     }
 
-    /// <summary>Đúng biên <c>soNgay</c> ngày → VẪN giữ (biên ĐÓNG, cùng quy ước nhánh lấy bù ước tính).</summary>
+    /// <summary>Đúng biên <c>soNgay</c> ngày → VẪN giữ (biên ĐÓNG).</summary>
     [Fact]
     public void LocTheoCuaSo_DungBien_VanGiu()
     {
-        var kq = TraHangParser.LocTheoCuaSo(new[] { Cap("260722ZZZ") }, HomNay, 7);
+        var kq = TraHangParser.LocTheoCuaSo(new[] { CapYeuCau("260709ZZZ") }, HomNay, 20);
+
+        Assert.Single(kq.GiuLai);
+        Assert.Equal(0, kq.BoQuaViCu);
+    }
+
+    /// <summary>
+    /// ĐỔI CHIỀU so với luật cũ: mã yêu cầu không suy được ngày thì <b>GIỮ</b> (đếm riêng để log), không bỏ. Mã
+    /// yêu cầu chính là thứ ta cần lấy — thà thừa một mã còn hơn mất nó vì một khuôn mã lạ. (Luật cũ đo trên mã
+    /// ĐƠN nên bỏ được: mã đơn chỉ dùng để suy ngày, không phải dữ liệu cần.)
+    /// </summary>
+    [Fact]
+    public void LocTheoCuaSo_MaYeuCauKhongDocDuocNgay_GIU_DemRieng_KhongNem()
+    {
+        var kq = TraHangParser.LocTheoCuaSo(
+            new[] { CapYeuCau("RMA-KHONG-CO-NGAY"), CapYeuCau("260729AAA") }, HomNay, 20);
+
+        Assert.Equal(new[] { "RMA-KHONG-CO-NGAY", "260729AAA" }, kq.GiuLai.Select(c => c.MaYeuCau));
+        Assert.Equal(0, kq.BoQuaViCu);
+        Assert.Equal(1, kq.GiuViKhongRoNgay);
+    }
+
+    /// <summary>Mã ĐƠN cũ mèm (17/06) mà yêu cầu MỚI (28/07) → GIỮ. Đây chính là ca luật cũ vứt nhầm, và cũng là
+    /// lý do số mã lấy được vẫn là 0 suốt các bản trước.</summary>
+    [Fact]
+    public void LocTheoCuaSo_DonRatCu_NhungYeuCauMoi_VanGiu()
+    {
+        var kq = TraHangParser.LocTheoCuaSo(
+            new[] { new YeuCauTraHang("260617ANE669U9", "2607280TS2VYAW3") }, HomNay, 20);
 
         Assert.Single(kq.GiuLai);
         Assert.Equal(0, kq.BoQuaViCu);
     }
 
     [Fact]
-    public void LocTheoCuaSo_MaKhongDocDuocNgay_Bo_DemRieng_KhongNem()
-    {
-        var kq = TraHangParser.LocTheoCuaSo(new[] { Cap("ABCDEFGH"), Cap("260729AAA") }, HomNay, 7);
-
-        Assert.Equal("260729AAA", Assert.Single(kq.GiuLai).MaDon);
-        Assert.Equal(0, kq.BoQuaViCu);
-        Assert.Equal(1, kq.BoQuaViKhongRoNgay);
-    }
-
-    [Fact]
     public void LocTheoCuaSo_RongHoacNull_TraRong_KhongNem()
     {
-        Assert.Empty(TraHangParser.LocTheoCuaSo(Array.Empty<YeuCauTraHang>(), HomNay, 7).GiuLai);
-        Assert.Empty(TraHangParser.LocTheoCuaSo(null, HomNay, 7).GiuLai);
+        Assert.Empty(TraHangParser.LocTheoCuaSo(Array.Empty<YeuCauTraHang>(), HomNay, 20).GiuLai);
+        Assert.Empty(TraHangParser.LocTheoCuaSo(null, HomNay, 20).GiuLai);
     }
 }

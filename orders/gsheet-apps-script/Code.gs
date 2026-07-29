@@ -20,6 +20,17 @@
 //  bằng openById — MỘT script, MỘT bản luật, dùng chung hàm với file chính (chép luật ra bản thứ hai
 //  chính là cái đã gây lỗi lệch cột ở trên). Lỗi ở file phụ chỉ vào `filePhu.loi`, KHÔNG phá file chính.
 //
+//  ─── THÊM 29/07/2026: cờ `chiDienNeuCo` + MÀU CHỮ đánh dấu trả hàng ───────────────────────────────
+//  Shopee cho trả hàng trong 15 ngày, mà app dọn đơn kết thúc ngay khi ghi sheet xong — nên mã trả hàng
+//  thường về TỚI đây khi đơn đã biến mất khỏi máy. App nay giữ mã ở một bảng riêng và đẩy lên bằng
+//  payload CHỈ-CÓ-MÃ-TRẢ: {maDon, donTraHang, chiDienNeuCo:true} — KHÔNG có `daHuy`.
+//    · `chiDienNeuCo:true` → đơn không tra thấy mã đơn ở BẤT KỲ tab nào thì BỎ QUA, không append (cả hai
+//      file). Thiếu cờ này thì nhánh append đẻ một dòng gần-như-rỗng cho mọi đơn chưa từng ghi sheet.
+//    · KHÔNG có `daHuy` là CỐ Ý: `daHuy === false` ở dưới sẽ XOÁ nền đỏ — đẩy mã trả cho một đơn ĐÃ HỦY
+//      mà kèm `daHuy:false` là xoá sạch dấu hủy ở cả hai file, im lặng.
+//  Đồng thời: dòng VỪA nhận mã trả hàng được đánh dấu bằng MÀU CHỮ (MAU_CHU_TRA_HANG), một trục riêng
+//  hoàn toàn với NỀN đỏ đơn hủy — dòng vừa hủy vừa có mã trả đọc được cả hai trạng thái.
+//
 //  ─── SỬA 29/07/2026: file phụ cũng theo trạng thái HỦY ────────────────────────────────────────────
 //  Bản trước ghi sang file phụ mọi đơn `ok`, không xét hủy — mà file phụ cố ý không tô màu nên đơn hủy
 //  nằm đó trông y hệt đơn còn sống. Nay hai file CÙNG một trạng thái: hủy trước khi vào file phụ →
@@ -32,6 +43,11 @@ const TEN_TAB_MAU = 'tháng 4';   // tab dùng làm MẪU cấu trúc khi tự t
 const SO_DONG_TIEU_DE = 1;       // dòng tiêu đề ở đầu tab (giữ khi nhân bản; cũng là dòng để tra tên cột)
 const MAU_DO_HUY = '#ea9998'; // nền đỏ đơn hủy — CỐ Ý lệch 1 so với "light red 2" (#ea9999) của bảng màu
                               // chuẩn để không xóa nhầm nền đỏ người dùng tự tô
+// MÀU CHỮ (font color) đánh dấu dòng CÓ MÃ TRẢ HÀNG — trục HOÀN TOÀN KHÁC với NỀN đỏ của đơn hủy ở trên.
+// Hai trục tách nhau nên không giẫm chân: dòng vừa hủy vừa có mã trả đọc được CẢ HAI trạng thái cùng lúc.
+// MỘT CHIỀU: chỉ SET khi vừa ghi được mã, KHÔNG bao giờ trả màu chữ về mặc định (mã trả hàng không biến mất,
+// mà đặt-lại là đụng vào thứ người dùng có thể đã tự chỉnh).
+const MAU_CHU_TRA_HANG = '#C05621';
 const SO_COT_TO_MAU = 13;     // tô nền từ cột A tới M (đã kẹp theo lưới thật của tab)
 const SO_COT_TO_MAU_PHU = 5;  // file phụ CHỈ có A–E, không phải 13 như file chính. Dùng nhầm SO_COT_TO_MAU
                               // ở đây thì getRange vượt lưới sẽ NÉM, mà cả khối phụ nằm trong MỘT
@@ -100,6 +116,7 @@ function doPost(e) {
     let folder = null;
     const results = [];
     const thieuCot = [];   // tiêu đề KHÔNG tìm thấy → báo về cho người gọi biết mà sửa sheet
+    let boQuaKhongThay = 0; // đơn có cờ chiDienNeuCo mà không tra thấy dòng nào → BỎ, không append (xem dưới)
     for (const don of (body.orders || [])) {
       const r = { maDon: don.maDon, ok: false, added: false, fileUrl: null, error: null };
       try {
@@ -127,6 +144,19 @@ function doPost(e) {
             fileUrl = 'https://drive.google.com/file/d/' + f.getId() + '/view?usp=sharing';
           }
         }
+        // Payload CHỈ-CÓ-MÃ-TRẢ (chiDienNeuCo): mã yêu cầu trả hàng của đơn app ĐÃ DỌN khỏi máy. Dòng của đơn
+        // đó thường vẫn còn trên sheet nên chỉ cần ĐIỀN vào ô "Mã đơn trả hàng" đang trống. KHÔNG tra thấy mã
+        // đơn ở bất kỳ tab nào ⇒ BỎ QUA, TUYỆT ĐỐI không append: nhánh dưới sẽ đẻ một dòng gần như rỗng (chỉ mã
+        // đơn + mã trả) cho mọi đơn chưa từng ghi sheet — vd đơn hủy-trước-khi-vào-pipeline mà app cố ý không ghi.
+        // Trả ok:true (không phải lỗi — chỉ là "không có gì để làm") để client đánh dấu đã đẩy, khỏi thử lại vô
+        // hạn mỗi lượt; số lần bỏ qua nằm ở `chiDienNeuCo.boQuaKhongThay` của phản hồi để còn soi.
+        if (!cho && don.chiDienNeuCo === true) {
+          boQuaKhongThay++;
+          r.ok = true;
+          r.boQua = true;
+          results.push(r);
+          continue;
+        }
         if (!cho) {
           cho = { sh: tabDich, row: tabDich.getLastRow() + 1 };
           r.added = true;
@@ -144,7 +174,7 @@ function doPost(e) {
         ghiNeuTrong(cho.sh, cho.row, COT_MA_DON, don.maDon);   // A — tiêu đề trống nên dùng số cứng
         ghiTruong(cho.sh, map, cho.row, 'maVanDon',   don.maVanDon,   thieuCot);
         ghiTruong(cho.sh, map, cho.row, 'fileUrl',    fileUrl,        thieuCot);
-        ghiTruong(cho.sh, map, cho.row, 'donTraHang', don.donTraHang, thieuCot);
+        const vuaGhiMaTra = ghiTruong(cho.sh, map, cho.row, 'donTraHang', don.donTraHang, thieuCot);
         ghiTruong(cho.sh, map, cho.row, 'tenShop',    don.tenShop,    thieuCot);
         ghiTruong(cho.sh, map, cho.row, 'doanhThu',   don.doanhThu,   thieuCot);
         ghiTruong(cho.sh, map, cho.row, 'ngay',       don.ngay,       thieuCot);
@@ -158,6 +188,13 @@ function doPost(e) {
           vungDong.setBackground(MAU_DO_HUY);
         } else if (don.daHuy === false && String(cho.sh.getRange(cho.row, 1).getBackground()).toLowerCase() === MAU_DO_HUY) {
           vungDong.setBackground(null);
+        }
+
+        // Dòng VỪA nhận mã trả hàng → đổi MÀU CHỮ cả dòng. Trục riêng, KHÔNG đụng setBackground: nền là của đơn
+        // hủy / của người dùng. Chỉ khi THỰC SỰ vừa ghi được mã (ô đang trống + có giá trị), không phải mỗi lượt
+        // đẩy cho mọi dòng. Dùng lại đúng dải A..min(SO_COT_TO_MAU, số cột thật) — bẫy vượt lưới vẫn còn nguyên.
+        if (vuaGhiMaTra) {
+          vungDong.setFontColor(MAU_CHU_TRA_HANG);
         }
 
         const cotAnh = map[COT.fileUrl];
@@ -180,7 +217,7 @@ function doPost(e) {
       idPhu = cauHinh === '' ? '' : bocIdSheet(cauHinh);
       if (cauHinh !== '' && !idPhu) loiCauHinhPhu = 'Không đọc được ID sheet phụ từ cấu hình: ' + cauHinh;
     }
-    const filePhu = { ghi: 0, them: 0, boQuaHuy: 0, loi: loiCauHinhPhu };
+    const filePhu = { ghi: 0, them: 0, boQuaHuy: 0, boQuaKhongThay: 0, loi: loiCauHinhPhu };
     if (idPhu) {
       try {
         const ssPhu = SpreadsheetApp.openById(idPhu);   // MỘT lần cho cả lô, không phải mỗi đơn một lần
@@ -198,6 +235,10 @@ function doPost(e) {
           const key = String(don.maDon).trim();
           let cho = viTriPhu[key] || null;
           if (!cho) {
+            // Payload CHỈ-CÓ-MÃ-TRẢ không tra thấy dòng → BỎ ở ĐÂY NỮA. Guard này BẮT BUỘC phải có: ở file chính
+            // đơn đó được trả ok:true, mà vòng dưới chỉ lọc theo `r.ok` — thiếu guard thì file phụ vẫn đẻ đúng
+            // cái dòng gần-như-rỗng mà file chính vừa từ chối tạo.
+            if (don.chiDienNeuCo === true) { filePhu.boQuaKhongThay++; continue; }
             // Đơn ĐÃ HỦY mà chưa từng có dòng ở file phụ → KHÔNG tạo dòng (y như file chính bỏ hẳn đơn
             // hủy chưa vào sổ). Phải xét TRƯỚC nhánh tạo dòng, xét sau là đã lỡ đẻ dòng rồi.
             // `daHuy` vắng (client đời cũ) → không chặn, giữ nguyên hành vi cũ.
@@ -217,7 +258,8 @@ function doPost(e) {
           ghiNeuTrong(cho.sh, cho.row, COT_MA_DON, don.maDon);              // A
           ghiTruong(cho.sh, map, cho.row, 'maVanDon',   don.maVanDon,   thieuCot);   // B
           ghiTruong(cho.sh, map, cho.row, 'fileUrl',    r.fileUrl,      thieuCot);   // C — DÙNG LẠI link
-          ghiTruong(cho.sh, map, cho.row, 'donTraHang', don.donTraHang, thieuCot);   // E
+          const vuaGhiMaTraPhu =
+            ghiTruong(cho.sh, map, cho.row, 'donTraHang', don.donTraHang, thieuCot); // E
 
           // Đơn ĐÃ có dòng ở file phụ mà file chính đánh dấu hủy → file phụ đánh dấu hủy theo (TÔ ĐỎ,
           // KHÔNG xóa dòng: xóa làm lệch mọi công thức tham chiếu theo số dòng và mất cột D người dùng
@@ -228,6 +270,11 @@ function doPost(e) {
           } else if (don.daHuy === false && String(cho.sh.getRange(cho.row, 1).getBackground()).toLowerCase() === MAU_DO_HUY) {
             vungDongPhu.setBackground(null);
           }
+          // MÀU CHỮ trả hàng — cùng luật file chính, chỉ khác SỐ CỘT (A–E). Dùng SO_COT_TO_MAU (13) ở đây thì
+          // getRange vượt lưới sẽ NÉM, mà cả khối phụ nằm trong MỘT try/catch ⇒ nuốt luôn các đơn còn lại của lô.
+          if (vuaGhiMaTraPhu) {
+            vungDongPhu.setFontColor(MAU_CHU_TRA_HANG);
+          }
           filePhu.ghi++;
         }
       } catch (err) {
@@ -237,6 +284,9 @@ function doPost(e) {
 
     const traVe = { results: results };
     if (idPhu || loiCauHinhPhu) traVe.filePhu = filePhu;
+    // Số đơn CHỈ-CÓ-MÃ-TRẢ bị bỏ vì không tra thấy dòng nào — chỉ để soi (client không đọc). Số này lớn bất
+    // thường = dòng của đơn chưa từng được ghi lên sheet, không phải script hỏng.
+    if (boQuaKhongThay) traVe.chiDienNeuCo = { boQuaKhongThay: boQuaKhongThay };
     if (thieuCot.length) {
       // KHÔNG tìm thấy tiêu đề ⇒ giá trị đã bị BỎ, không ghi bừa vào cột khác. Báo ra để còn biết mà sửa
       // tiêu đề sheet — chính vì bản cũ hỏng ÂM THẦM mà không ai phát hiện suốt nhiều ngày.
@@ -316,15 +366,17 @@ function mapCot(sheet) {
 
 // Ghi một TRƯỜNG vào cột tra theo tiêu đề. Không tìm thấy tiêu đề → KHÔNG ghi (thà để trống còn hơn ghi
 // nhầm cột) và gom tên tiêu đề vào `thieu` để báo ngược về người gọi.
+// TRẢ VỀ true khi THỰC SỰ ghi được (ô đang trống + có giá trị) — nhánh mã trả hàng dùng để biết có nên đổi
+// màu chữ dòng hay không, khỏi tô lại mỗi lượt đẩy cho mọi dòng.
 function ghiTruong(sheet, map, row, khoa, giaTri, thieu) {
-  if (giaTri === null || giaTri === undefined || giaTri === '') return;
+  if (giaTri === null || giaTri === undefined || giaTri === '') return false;
   const ten = COT[khoa];
   const col = ten ? map[ten] : null;
   if (!col) {
     if (ten && thieu.indexOf(ten) === -1) thieu.push(ten);
-    return;
+    return false;
   }
-  ghiNeuTrong(sheet, row, col, giaTri);
+  return ghiNeuTrong(sheet, row, col, giaTri);
 }
 
 // Tạo tab tháng MỚI theo cấu trúc tab mẫu: NHÂN BẢN tab mẫu (giữ dòng tiêu đề + định dạng +
@@ -363,10 +415,15 @@ function taoTabTheoThang(ss, tenMoi, tenMau, tieuDeMacDinh) {
 // Chỉ ghi khi ô đang trống — bảo vệ dữ liệu người dùng điền tay (mã đơn đặt, tiền đặt, tk đặt, ghi chú,
 // CÔNG THỨC =IMAGE…). Ô CÓ dữ liệu khi giá trị hiển thị khác rỗng HOẶC chứa công thức (công thức có thể
 // hiển thị rỗng, vd =IMAGE(...) → getValue() trả '' → KHÔNG được coi là trống).
+// Trả về true khi đã ghi thật (ô trống + có giá trị), false khi bỏ qua — xem ghiTruong.
 function ghiNeuTrong(sheet, row, col, giaTri) {
-  if (giaTri === null || giaTri === undefined || giaTri === '') return;
+  if (giaTri === null || giaTri === undefined || giaTri === '') return false;
   const o = sheet.getRange(row, col);
-  if (String(o.getValue()).trim() === '' && o.getFormula() === '') o.setValue(giaTri);
+  if (String(o.getValue()).trim() === '' && o.getFormula() === '') {
+    o.setValue(giaTri);
+    return true;
+  }
+  return false;
 }
 
 function chuanHoa(s) {

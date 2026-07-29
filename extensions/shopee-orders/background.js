@@ -843,12 +843,17 @@ function pageReturnRowCount() {
   return document.querySelectorAll(".return-table-content a.return-row-item").length;
 }
 
-// Quét các dòng yêu cầu (trang ĐẦU, không phân trang) → JSON [{shopeeOrderId, headHtml}].
+// Quét các dòng yêu cầu (trang ĐẦU, không phân trang) → JSON [{shopeeOrderId, laTraHang, headHtml}].
 // CỐ Ý KHÔNG phân loại mã ở đây: luật nhận diện (class order-id/return-id → nhãn → vị trí) nằm ở C#
 // (TraHangParser) — test được, và dòng nào trượt luật thì C# log NGUYÊN VĂN html để lộ cấu trúc thật.
 // shopeeOrderId THƯỜNG RỖNG: href dòng trả hàng là /portal/sale/return/<returnId> chứ không phải
 // /portal/sale/order/<id>. Không sao — C# ghép cặp chỉ bằng headHtml; đừng đổi regex sang bắt /return/(\d+)
 // rồi nhét return-id vào field tên "orderId" (sai ngữ nghĩa).
+//
+// laTraHang = href trỏ /portal/sale/return/… ⇒ dòng TRẢ HÀNG thật. Dòng ĐƠN HỦY trỏ /portal/sale/order/… và
+// KHÔNG có khối mã yêu cầu. Đây là chốt chặn THỨ HAI, độc lập với việc chọn được tab hay không (tab-strip nhận
+// theo TEXT nên vẫn có thể trượt). CỐ Ý VẪN GỬI dòng đơn hủy kèm cờ false thay vì lọc câm ở đây — C# đếm và
+// log được "bỏ k dòng vì là đơn hủy"; lọc ở JS thì con số đó biến mất khỏi nhật ký.
 function pageScanReturnRows(maxRows, maxHtml) {
   const rows = document.querySelectorAll(".return-table-content a.return-row-item");
   const out = [];
@@ -859,6 +864,7 @@ function pageScanReturnRows(maxRows, maxHtml) {
       const href = row.getAttribute("href") || "";
       const hm = href.match(/\/portal\/sale\/order\/(\d+)/);
       if (hm) shopeeOrderId = hm[1];
+      const laTraHang = /\/portal\/sale\/return\//.test(href);
       const head = row.querySelector(".return-row-item-head");
       const src = head || row; // không có head → gửi cả dòng (C# vẫn tách được)
       // Bỏ <img>/<svg> — avatar người mua có khi là data URI base64 (>1000 ký tự) và 2 icon copy mỗi cái ~450 ký
@@ -871,10 +877,28 @@ function pageScanReturnRows(maxRows, maxHtml) {
         html = clone.outerHTML;
       } catch (e) { html = src.outerHTML; } // clone lỗi (node lạ) → lùi về bản gốc, đừng phá cả lượt quét
       if (html.length > maxHtml) html = html.substring(0, maxHtml);
-      out.push({ shopeeOrderId: shopeeOrderId, headHtml: html });
+      out.push({ shopeeOrderId: shopeeOrderId, laTraHang: laTraHang, headHtml: html });
     } catch (e) { /* dòng lạ — bỏ qua, không phá cả lượt */ }
   }
   return JSON.stringify(out);
+}
+
+// CHẨN ĐOÁN khi hết giờ chờ ô tổng: 4 dấu hiệu phân biệt DỨT ĐIỂM "hết giờ thật" / "đọc nhầm tab" / "sai
+// selector" — trước đây chỉ có một dòng "chưa render sau 20s", nhìn vào không biết nới thời gian có ích không.
+//   · coOTong=false            → selector .return-list-summary-title KHÔNG còn (Shopee đổi giao diện).
+//   · coOTong=true, textRong   → ô có mà rỗng ⇒ hết giờ THẬT (Vue chưa rót số) → nới thời gian mới có nghĩa.
+//   · coTabWrapper=false       → chưa vào đúng trang trả hàng (lạc trang / còn ở trang đơn).
+//   · soDong>0 mà không có ô   → danh sách đã vẽ nhưng ô tổng đổi chỗ ⇒ sai selector, không phải hết giờ.
+function pageChanDoanTraHang() {
+  const el = document.querySelector(".return-list-summary-title");
+  return {
+    url: location.href,
+    title: document.title || "",
+    coOTong: !!el,
+    textOTong: el ? (el.textContent || "").replace(/\s+/g, " ").trim() : "",
+    soDong: document.querySelectorAll("a.return-row-item").length,
+    coTabWrapper: !!document.querySelector(".return-case-tab-wrapper"),
+  };
 }
 
 // Số dòng shop trong picker (tr[data-row-key]) — chờ trang chọn shop render sau SSO.
@@ -1836,7 +1860,7 @@ async function doReadReturnRequests() {
   const tabId = orderTabId();
   if (tabId == null) { send({ action: "error", message: "chưa có tab shop để check đơn trả hàng" }); return; }
 
-  const traVe = (summary, sortApplied, tabTraHang, list) => send({
+  const traVe = (summary, sortApplied, tabTraHang, list, chanDoan) => send({
     action: "pageData",
     kind: "returns",
     data: JSON.stringify({
@@ -1844,6 +1868,8 @@ async function doReadReturnRequests() {
       sortApplied: !!sortApplied,
       tabTraHang: !!tabTraHang,
       list: list || [],
+      // Chỉ có mặt ở lượt BỎ (không đọc được ô tổng) — xem pageChanDoanTraHang.
+      chanDoan: chanDoan || null,
     }),
   });
 
@@ -1876,8 +1902,12 @@ async function doReadReturnRequests() {
     await sleep(600);
   }
   if (!summary) {
+    // CỐ Ý KHÔNG nới 20s ở đây: chưa có dữ liệu thì nới là đoán. Thu 4 dấu hiệu rồi gửi kèm để C# log — lượt
+    // chạy thật sau sẽ nói rõ hết giờ THẬT hay đọc nhầm tab hay sai selector (xem pageChanDoanTraHang).
+    let cd = null;
+    try { cd = await execInTab(tabId, pageChanDoanTraHang, []); } catch (e) { cd = null; }
     send({ action: "progress", message: "trang trả hàng chưa render ô tổng sau 20s — bỏ lượt check này." });
-    traVe("", false, false, []);
+    traVe("", false, false, [], cd);
     return;
   }
 

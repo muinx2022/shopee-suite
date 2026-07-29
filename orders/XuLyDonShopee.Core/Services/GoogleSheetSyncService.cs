@@ -42,6 +42,31 @@ public sealed record GsheetOrderRow(
     bool DaHuy);
 
 /// <summary>
+/// Một dòng CHỈ-CÓ-MÃ-TRẢ gửi lên Web App: dùng cho mã yêu cầu trả hàng của đơn <b>đã bị dọn khỏi app</b>
+/// (bảng <c>return_codes</c> sống độc lập với vòng đời đơn) — dòng trên sheet vẫn còn, script tra theo mã đơn
+/// rồi điền ô "Mã đơn trả hàng" đang trống.
+/// <para>
+/// <b>⚠ Đây là record RIÊNG, KHÔNG dùng lại <see cref="GsheetOrderRow"/>, và đó là chủ ý:</b>
+/// <list type="number">
+/// <item><b>Không được có <c>daHuy</c>.</b> Apps Script xử <c>daHuy === true</c> → tô nền đỏ; <c>=== false</c> →
+/// <b>XOÁ</b> nền đỏ; VẮNG → không đụng màu. <see cref="GsheetOrderRow.DaHuy"/> là <c>bool</c> nên LUÔN được
+/// serialize ⇒ đẩy dòng mã-trả cho một đơn ĐÃ HỦY sẽ xoá sạch nền đỏ ở CẢ hai file, im lặng. Ở đây field không
+/// tồn tại nên tai nạn đó là điều KHÔNG THỂ, không phải điều "nhớ đừng làm". (Phương án đổi
+/// <see cref="GsheetOrderRow.DaHuy"/> thành <c>bool?</c> đã bị loại: nó biến một bất biến của kiểu thành kỷ luật
+/// của mọi call-site — hôm nay có 1 call-site, ngày mai có 3.)</item>
+/// <item><b><see cref="ChiDienNeuCo"/> luôn <c>true</c></b> (property TÍNH SẴN, không có setter): script BỎ QUA
+/// đơn không tra thấy mã đơn ở bất kỳ tab nào thay vì APPEND. Không có cờ này, nhánh append sẽ đẻ một dòng gần
+/// như rỗng (chỉ mã đơn + mã trả) cho mọi đơn chưa từng ghi sheet.</item>
+/// </list>
+/// </para>
+/// </summary>
+public sealed record GsheetReturnCodeRow(string MaDon, string DonTraHang)
+{
+    /// <summary>Luôn <c>true</c> — xem doc lớp (bẫy "đẻ dòng mới"). CỐ Ý không cho gán.</summary>
+    public bool ChiDienNeuCo => true;
+}
+
+/// <summary>
 /// Kết quả xử lý MỘT đơn phía Web App (đọc từ mảng <c>results</c> trong phản hồi):
 /// <see cref="Ok"/> = ghi thành công; <see cref="Added"/> = thêm dòng mới (khác với điền bổ sung dòng cũ);
 /// <see cref="FileUrl"/> = nội dung cột C sau khi ghi (link phiếu hiện có, null nếu chưa có);
@@ -92,9 +117,28 @@ public class GoogleSheetSyncService
     /// <paramref name="sheet2"/> = ID bảng tính FILE PHỤ gửi kèm mọi lô (mặc định <c>""</c> = không ghi file phụ).
     /// </para>
     /// </summary>
-    public async Task<IReadOnlyList<GsheetOrderResult>> PushAsync(
+    public Task<IReadOnlyList<GsheetOrderResult>> PushAsync(
         string webAppUrl, string tabName, IReadOnlyList<GsheetOrderRow> rows, Action<string> log, CancellationToken ct,
         string sheet2 = "")
+        => PushRowsAsync(webAppUrl, tabName, rows, log, ct, sheet2);
+
+    /// <summary>
+    /// Như <see cref="PushAsync"/> nhưng cho các dòng CHỈ-CÓ-MÃ-TRẢ (<see cref="GsheetReturnCodeRow"/>): mã yêu cầu
+    /// trả hàng của đơn đã bị dọn khỏi app. Payload KHÔNG có <c>daHuy</c> (không đụng màu dòng) và CÓ
+    /// <c>chiDienNeuCo</c> (script không đẻ dòng mới) — xem doc <see cref="GsheetReturnCodeRow"/>.
+    /// <para><paramref name="tabName"/> chỉ là ĐIỂM VÀO: script tra mã đơn trên MỌI tab, tab đích chỉ dùng cho
+    /// nhánh append mà nhánh đó đã bị <c>chiDienNeuCo</c> chặn.</para>
+    /// </summary>
+    public Task<IReadOnlyList<GsheetOrderResult>> PushReturnCodesAsync(
+        string webAppUrl, string tabName, IReadOnlyList<GsheetReturnCodeRow> rows, Action<string> log,
+        CancellationToken ct, string sheet2 = "")
+        => PushRowsAsync(webAppUrl, tabName, rows, log, ct, sheet2);
+
+    /// <summary>Thân dùng CHUNG của <see cref="PushAsync"/> và <see cref="PushReturnCodesAsync"/> — chia lô, POST,
+    /// đọc kết quả. Chỉ khác nhau ở KIỂU DÒNG (hai hợp đồng JSON khác nhau, cùng một đường mạng).</summary>
+    private async Task<IReadOnlyList<GsheetOrderResult>> PushRowsAsync<TRow>(
+        string webAppUrl, string tabName, IReadOnlyList<TRow> rows, Action<string> log, CancellationToken ct,
+        string sheet2)
     {
         var all = new List<GsheetOrderResult>();
         if (string.IsNullOrWhiteSpace(webAppUrl) || rows is null || rows.Count == 0)
@@ -188,9 +232,9 @@ public class GoogleSheetSyncService
     /// Chia <paramref name="rows"/> thành các lô tối đa <paramref name="max"/> phần tử (giữ nguyên thứ tự).
     /// Danh sách rỗng / <paramref name="max"/> ≤ 0 → trả danh sách rỗng. Tách static để test được.
     /// </summary>
-    internal static List<List<GsheetOrderRow>> ChiaLo(IReadOnlyList<GsheetOrderRow> rows, int max)
+    internal static List<List<TRow>> ChiaLo<TRow>(IReadOnlyList<TRow> rows, int max)
     {
-        var batches = new List<List<GsheetOrderRow>>();
+        var batches = new List<List<TRow>>();
         if (rows is null || rows.Count == 0 || max <= 0)
         {
             return batches;
@@ -198,7 +242,7 @@ public class GoogleSheetSyncService
 
         for (int i = 0; i < rows.Count; i += max)
         {
-            var batch = new List<GsheetOrderRow>();
+            var batch = new List<TRow>();
             var end = Math.Min(i + max, rows.Count);
             for (int j = i; j < end; j++)
             {
@@ -221,8 +265,9 @@ public class GoogleSheetSyncService
 
     /// <summary>
     /// Tạo JSON body <c>{"tab":"tháng 4","sheet2":"&lt;ID&gt;","orders":[{...}]}</c> cho một lô: camelCase, BỎ
-    /// field null, số để dạng SỐ (không bọc nháy), <c>daHuy</c> LUÔN có mặt (bool). <paramref name="tabName"/> =
-    /// tab đích của script. Tách static để test được hợp đồng với script.
+    /// field null, số để dạng SỐ (không bọc nháy). Với <see cref="GsheetOrderRow"/> thì <c>daHuy</c> LUÔN có mặt
+    /// (bool); với <see cref="GsheetReturnCodeRow"/> thì field đó KHÔNG tồn tại (cố ý — xem doc kiểu đó).
+    /// <paramref name="tabName"/> = tab đích của script. Tách static để test được hợp đồng với script.
     /// <para>
     /// <paramref name="sheet2"/> = ID bảng tính FILE PHỤ, thuộc tính của CẢ LÔ (không phải của từng đơn) nên nằm
     /// ở cấp body cạnh <c>tab</c>. <b>LUÔN gửi kể cả chuỗi rỗng</b> — khác quy ước "bỏ field null" của các field
@@ -230,7 +275,7 @@ public class GoogleSheetSyncService
     /// cũ chưa biết field này" → script lùi về hằng dự phòng của nó). Vì vậy null cũng quy về <c>""</c>.
     /// </para>
     /// </summary>
-    internal static string TaoJsonBody(string tabName, IEnumerable<GsheetOrderRow> rows, string sheet2 = "")
+    internal static string TaoJsonBody<TRow>(string tabName, IEnumerable<TRow> rows, string sheet2 = "")
         => JsonSerializer.Serialize(new { tab = tabName, sheet2 = sheet2 ?? "", orders = rows }, JsonOpts);
 
     /// <summary>

@@ -567,10 +567,23 @@ public sealed class OrdersBridgeSession : IDisposable
                     shopsDone++;
 
                     // Đóng tab shop → về picker /portal/shop (listTabId picker giữ nguyên; extension đóng shopTabId).
-                    _closeShopTcs = NewTcs<bool>();
-                    await _ws.SendAsync(new { action = "closeShopTab" }).ConfigureAwait(false);
-                    try { await _waiter.AwaitAsync(_closeShopTcs, TimeSpan.FromSeconds(30), ct).ConfigureAwait(false); }
-                    catch (TimeoutException) { L("closeShopTab quá hạn — vẫn tiếp shop kế."); }
+                    // ⚠ PHẢI đọc cờ ok: bản trước vứt giá trị trả về, nên hễ picker không sẵn sàng là shop KẾ chết
+                    // với thông báo lạc đề "chờ 30s chưa thấy tab shop mở" (3/3 lần trong nhật ký production, luôn
+                    // đi ngay sau một lượt trang trả hàng không render).
+                    if (!await DongTabShopAsync(ct).ConfigureAwait(false))
+                    {
+                        // Shop CUỐI thì picker hỏng không hại ai — vòng đằng nào cũng kết thúc và vòng sau mở cửa
+                        // sổ mới. Chỉ dừng khi CÒN shop phía sau, kẻo báo động giả ở đúng lúc mọi việc đã xong.
+                        if (i < shops.Count - 1)
+                        {
+                            L($"⛔ Dừng cả vòng của tài khoản (bỏ {shops.Count - i - 1} shop còn lại) — không đưa "
+                              + $"được về trang chọn shop sau shop {shopName}.");
+                            return new OrdersBridgeRunResult(shopCount, shopsDone, totalOrders, totalSlips, false,
+                                $"Không quay lại được trang chọn shop sau shop {shopName} — đã dừng vòng (shop kế "
+                                + "sẽ không mở được). Sẽ thử lại ở vòng sau.");
+                        }
+                        L($"closeShopTab không về được picker sau shop CUỐI ({shopName}) — vòng đã xong, bỏ qua.");
+                    }
                 }
                 finally
                 {
@@ -921,8 +934,8 @@ public sealed class OrdersBridgeSession : IDisposable
     /// sắp xếp sang "Ngày yêu cầu (Mới - Cũ)" (mặc định trang là "Ngày đến hạn" — không đổi thì luật "N dòng đầu"
     /// bỏ sót ÂM THẦM), rồi trả text ô tổng + HTML đầu mỗi dòng.
     /// C# parse (<see cref="TraHangParser"/>), so số với MỐC lần trước của shop để biết check bao nhiêu dòng ĐẦU,
-    /// ghép cặp (mã đơn, mã yêu cầu), LỌC theo cửa sổ <see cref="SoNgayBuUocTinh"/> ngày (theo NGÀY ĐẶT ĐƠN suy từ
-    /// mã) rồi lưu vào đơn tương ứng. Cập nhật mốc ở CUỐI, kể cả lượt không check dòng nào.
+    /// ghép cặp (mã đơn, mã yêu cầu), LỌC theo cửa sổ <see cref="TraHangParser.SoNgayCuaSoTraHang"/> ngày (theo
+    /// NGÀY YÊU CẦU suy từ mã yêu cầu) rồi lưu. Cập nhật mốc ở CUỐI, kể cả lượt không check dòng nào.
     /// <para>
     /// KHÔNG ném ra ngoài phần thân — caller đã bọc try/catch; ở đây chỉ return sớm + log khi không đọc được.
     /// </para>
@@ -953,6 +966,12 @@ public sealed class OrdersBridgeSession : IDisposable
         if (doc.SoYeuCau is null)
         {
             L("Check đơn trả hàng: KHÔNG đọc được số yêu cầu (trang chưa render / Shopee đổi giao diện) — bỏ lượt, mốc giữ nguyên.");
+            // 4 dấu hiệu extension thu ngay lúc bỏ lượt: phân biệt hết-giờ-THẬT / lạc-trang / sai-selector. Không
+            // có nó thì nới thời gian chờ chỉ là đoán mò (xem pageChanDoanTraHang bên extension).
+            if (!string.IsNullOrEmpty(doc.ChanDoan))
+            {
+                L("Check đơn trả hàng — chẩn đoán trang: " + doc.ChanDoan);
+            }
             return;
         }
         if (!doc.SortApplied)
@@ -992,7 +1011,8 @@ public sealed class OrdersBridgeSession : IDisposable
             }
 
             var ghep = TraHangParser.GhepCap(canCheck);
-            L($"Check đơn trả hàng: đọc {canCheck.Count} dòng → {ghep.Cap.Count} cặp đủ hai mã, {ghep.ThieuMaYeuCau.Count} dòng THIẾU mã yêu cầu.");
+            var phanDonHuy = ghep.BoQuaDonHuy > 0 ? $", bỏ {ghep.BoQuaDonHuy} dòng vì href là ĐƠN HỦY" : string.Empty;
+            L($"Check đơn trả hàng: đọc {canCheck.Count} dòng → {ghep.Cap.Count} cặp đủ hai mã, {ghep.ThieuMaYeuCau.Count} dòng THIẾU mã yêu cầu{phanDonHuy}.");
             // In nguyên văn tối đa 3 dòng thiếu (kèm nhãn + HTML thô): nếu luật nhận diện theo nhãn trượt thì
             // nhật ký lần chạy thật lộ ngay class/nhãn thật — class khối mã yêu cầu tới giờ vẫn CHƯA xác nhận.
             foreach (var mo in ghep.ThieuMaYeuCau.Take(3))
@@ -1000,16 +1020,16 @@ public sealed class OrdersBridgeSession : IDisposable
                 L("Check đơn trả hàng — dòng thiếu mã yêu cầu → " + mo);
             }
 
-            // Chặn theo THỜI GIAN: chỉ giữ cặp có NGÀY ĐẶT ĐƠN trong cửa sổ SoNgayBuUocTinh ngày. Đơn cũ hơn gần
-            // như chắc chắn đã bị dọn khỏi DB (đơn kết thúc bị xoá sau khi ghi sheet) nên có lưu cũng không gắn
-            // vào đâu — nhất là lượt LẦN ĐẦU đọc tới vài chục dòng lịch sử.
-            var loc = TraHangParser.LocTheoCuaSo(ghep.Cap, DateTime.Now, SoNgayBuUocTinh);
-            if (loc.BoQuaViCu > 0 || loc.BoQuaViKhongRoNgay > 0)
+            // Chặn theo THỜI GIAN trên NGÀY YÊU CẦU (suy từ mã yêu cầu), cửa sổ TraHangParser.SoNgayCuaSoTraHang
+            // = 15 ngày chính sách Shopee + biên. CỐ Ý không dùng SoNgayBuUocTinh (7 ngày, đo trên ngày ĐẶT ĐƠN,
+            // cho việc lấy bù "Số tiền cuối cùng") — khác trục, khác ý nghĩa.
+            var loc = TraHangParser.LocTheoCuaSo(ghep.Cap, DateTime.Now, TraHangParser.SoNgayCuaSoTraHang);
+            if (loc.BoQuaViCu > 0 || loc.GiuViKhongRoNgay > 0)
             {
-                var themPhan = loc.BoQuaViKhongRoNgay > 0
-                    ? $", {loc.BoQuaViKhongRoNgay} dòng không đọc được ngày từ mã đơn"
+                var themPhan = loc.GiuViKhongRoNgay > 0
+                    ? $", GIỮ {loc.GiuViKhongRoNgay} mã không đọc được ngày yêu cầu (thà thừa còn hơn mất)"
                     : string.Empty;
-                L($"Check đơn trả hàng: bỏ {loc.BoQuaViCu} dòng vì đơn cũ hơn {SoNgayBuUocTinh} ngày{themPhan} — còn {loc.GiuLai.Count} mã để lưu.");
+                L($"Check đơn trả hàng: bỏ {loc.BoQuaViCu} dòng vì yêu cầu cũ hơn {TraHangParser.SoNgayCuaSoTraHang} ngày{themPhan} — còn {loc.GiuLai.Count} mã để lưu.");
             }
 
             if (loc.GiuLai.Count > 0)
@@ -1020,6 +1040,49 @@ public sealed class OrdersBridgeSession : IDisposable
 
         // Cập nhật mốc SAU khi xử xong (kể cả lượt không check dòng nào) để lần sau so đúng.
         _saveReturnCount!(shopLogin, soMoi);
+    }
+
+    /// <summary>Số lần gửi <c>closeShopTab</c> tối đa cho MỘT shop: lần đầu + đúng MỘT lần thử lại.</summary>
+    private const int SoLanThuDongTabShop = 2;
+
+    /// <summary>
+    /// Đóng tab shop rồi đưa picker <c>/portal/shop</c> về trạng thái SẴN SÀNG cho shop kế. Trả <c>false</c> khi
+    /// vẫn không sẵn sàng sau <see cref="SoLanThuDongTabShop"/> lần — caller DỪNG vòng kèm đúng lý do.
+    /// <para>
+    /// <b>Vì sao gửi LẠI chính <c>closeShopTab</c> làm bước hồi phục</b> (chứ không thêm lệnh mới): ở lần hai,
+    /// <c>shopTabId</c> bên extension đã null nên <c>doCloseShopTab</c> rơi vào nhánh khác hẳn — điều hướng THẲNG
+    /// <c>listTabId</c> về <c>/portal/shop</c>, chờ tab load xong rồi <c>ensureShopPicker</c>. Đó đúng là "đưa
+    /// picker về trạng thái sạch", dùng ngay đường đã có thay vì đẻ thêm một lệnh cầu nối phải nuôi.
+    /// </para>
+    /// <para>Hết giờ (30s/lần) KHÔNG ném ra ngoài — nó chỉ là một lần thử trượt, cùng nghĩa với <c>ok=false</c>.</para>
+    /// </summary>
+    private async Task<bool> DongTabShopAsync(CancellationToken ct)
+    {
+        for (var lan = 1; lan <= SoLanThuDongTabShop; lan++)
+        {
+            _closeShopTcs = NewTcs<bool>();
+            await _ws!.SendAsync(new { action = "closeShopTab" }).ConfigureAwait(false);
+
+            var ok = false;
+            try
+            {
+                ok = await _waiter.AwaitAsync(_closeShopTcs, TimeSpan.FromSeconds(30), ct).ConfigureAwait(false);
+            }
+            catch (TimeoutException)
+            {
+                L($"closeShopTab quá hạn (lần {lan}/{SoLanThuDongTabShop}).");
+            }
+
+            if (ok)
+            {
+                return true;
+            }
+            if (lan < SoLanThuDongTabShop)
+            {
+                L("closeShopTab báo CHƯA về được trang chọn shop — thử đưa picker về trạng thái sạch một lần nữa.");
+            }
+        }
+        return false;
     }
 
     /// <summary>Lý do đọc được từ cờ <c>nguon</c> extension gửi kèm (<c>pageChanDoanUocTinh</c>) — chỉ để LOG.</summary>

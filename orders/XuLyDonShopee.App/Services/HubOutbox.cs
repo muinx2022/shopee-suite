@@ -528,6 +528,104 @@ public static class HubOutbox
     }
 
     /// <summary>
+    /// <b>Lượt đẩy MÃ TRẢ HÀNG lên Google Sheet — đường ĐỘC LẬP với đường đẩy đơn.</b> Chạy SAU
+    /// <see cref="PushOrdersToGsheetAsync"/> nhưng KHÔNG phụ thuộc nó: nguồn là bảng <c>return_codes</c>, mà bảng
+    /// đó sống độc lập với vòng đời đơn. Đây chính là toàn bộ mục đích — Shopee cho trả hàng trong 15 ngày, còn
+    /// app dọn đơn kết thúc sau một hai vòng, nên phần lớn mã trả hàng thuộc về đơn KHÔNG CÒN trong
+    /// <c>orders</c>; đường đẩy đơn thường không bao giờ chạm tới chúng.
+    /// <para>
+    /// Payload là <see cref="GsheetReturnCodeRow"/>: chỉ <c>maDon</c> + <c>donTraHang</c> + <c>chiDienNeuCo</c>,
+    /// <b>KHÔNG có <c>daHuy</c></b> (kèm <c>daHuy:false</c> là XOÁ nền đỏ của đơn đã hủy ở CẢ hai file, im lặng).
+    /// </para>
+    /// <para>
+    /// Tab đích chỉ là ĐIỂM VÀO (script tra mã đơn trên MỌI tab): đơn còn trong app → tab đã nhớ; đơn đã dọn →
+    /// tab theo tháng hiện tại / override ở Cài đặt.
+    /// </para>
+    /// <b>Không bao giờ ném</b>: hủy chủ động → thôi; lỗi khác → log, KHÔNG đánh dấu ⇒ lượt sau thử lại.
+    /// URL Web App trống → không đẩy (nhưng vẫn DỌN bản ghi quá hạn để bảng không phình).
+    /// </summary>
+    public static async Task<KetQuaDay> PushReturnCodesToGsheetAsync(
+        long accountId, AppServices services, Action<string> log, CancellationToken ct)
+    {
+        try
+        {
+            // Dọn theo TUỔI — KHÔNG theo vòng đời đơn (bất biến của bảng). Rẻ, chạy kèm mỗi lượt.
+            services.ReturnCodes.DonDep(DateTime.UtcNow.AddDays(-ReturnCodesRepository.SoNgayGiuMac));
+
+            var pending = services.ReturnCodes.LayMaTraHangChuaDay(accountId);
+            if (pending.Count == 0)
+            {
+                return KetQuaDay.KhongCanDay;
+            }
+
+            var url = services.Settings.GetGsheetWebAppUrl();
+            if (string.IsNullOrWhiteSpace(url))
+            {
+                return KetQuaDay.KhongCanDay; // không dùng sheet → giữ nguyên hàng đợi (điền URL là đẩy được ngay)
+            }
+
+            var now = DateTime.Now;
+            var overrideTab = services.Settings.GetGsheetTabName();      // "" = tự động theo tháng
+            var defaultTab = string.IsNullOrEmpty(overrideTab) ? GsheetTabName.ForMonth(now) : overrideTab;
+            var tabDaNho = services.Orders.GetGsheetTabs(accountId);     // đơn CÒN trong app mới có
+            var sheet2 = GsheetConfigSync.BocIdSheet(services.Settings.GetGsheetSheet2());
+
+            var rowsByTab = new Dictionary<string, List<GsheetReturnCodeRow>>(StringComparer.Ordinal);
+            foreach (var (sn, code) in pending)
+            {
+                var tab = tabDaNho.TryGetValue(sn, out var t) && !string.IsNullOrEmpty(t) ? t : defaultTab;
+                if (!rowsByTab.TryGetValue(tab, out var tabRows))
+                {
+                    tabRows = new List<GsheetReturnCodeRow>();
+                    rowsByTab[tab] = tabRows;
+                }
+                tabRows.Add(new GsheetReturnCodeRow(MaDon: sn, DonTraHang: code));
+            }
+
+            var day = 0;
+            var loi = 0;
+            string? loiDau = null;
+            foreach (var nhom in rowsByTab)
+            {
+                var xong = new List<string>();
+                var results = await services.GsheetSync
+                    .PushReturnCodesAsync(url, nhom.Key, nhom.Value, log, ct, sheet2).ConfigureAwait(false);
+                foreach (var r in results)
+                {
+                    if (r.Ok)
+                    {
+                        xong.Add(r.MaDon);
+                    }
+                    else
+                    {
+                        loi++;
+                        loiDau ??= $"{r.MaDon}: {r.Error}";
+                    }
+                }
+                // Đánh dấu NGAY theo từng tab: nhóm sau ném lỗi thì nhóm này vẫn không bị đẩy lại.
+                day += services.ReturnCodes.DanhDauDaDay(accountId, xong, DateTime.UtcNow);
+            }
+
+            var tomTat = $"GSheet mã trả hàng: đã đẩy {day}/{pending.Count} mã (đơn đã dọn vẫn điền được).";
+            if (loi > 0)
+            {
+                tomTat += $" Lỗi {loi} mã (vd {loiDau}).";
+            }
+            log(tomTat);
+            return day > 0 ? KetQuaDay.ThanhCong : KetQuaDay.ThatBai;
+        }
+        catch (OperationCanceledException)
+        {
+            return KetQuaDay.KhongCanDay; // hủy chủ động → chưa đánh dấu, lượt sau đẩy lại
+        }
+        catch (Exception ex)
+        {
+            log("GSheet mã trả hàng: lỗi — " + ex.Message);
+            return KetQuaDay.ThatBai;
+        }
+    }
+
+    /// <summary>
     /// HÀM THUẦN (test được) — lọc HÀNG ĐỢI đếm "Đã bán" (<see cref="OrdersRepository.GetForSoldCountRetry"/>:
     /// đơn <c>sold_counted_at</c> NULL + có SKU) thành cặp danh sách <c>(Skus, OrderSns)</c> song song để +1 lên hub:
     /// chỉ giữ đơn ĐÃ GIAO (<see cref="ShopeeShippingNav.LaDaGiaoDaBan"/>) và KHÔNG phải đơn hủy

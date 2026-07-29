@@ -446,6 +446,9 @@ public partial class AccountSession : ObservableObject, IAccountSession
                 await HubOutbox.PushOrdersToGsheetAsync(
                     _accountId, _services, shopId, shopLogin,
                     NenBaoThieuGsheetUrl, imLangKhiKhongCoDonMoi: false, log, ct).ConfigureAwait(false);
+                // Lượt NHẸ đi kèm: mã trả hàng của đơn ĐÃ BỊ DỌN khỏi app (bảng return_codes sống độc lập với
+                // vòng đời đơn). Đường trên không bao giờ chạm tới chúng vì nó duyệt bảng `orders`.
+                await HubOutbox.PushReturnCodesToGsheetAsync(_accountId, _services, log, ct).ConfigureAwait(false);
             }
             finally { PushGate.Exit(_accountId, PushKind.Gsheet); }
         }, CancellationToken.None);
@@ -1062,8 +1065,14 @@ public partial class AccountSession : ObservableObject, IAccountSession
                     saveReturnCount: (shopLabel, so) => _services.Results.SetReturnCount(_accountId, shopLabel, so),
                     saveReturnCodes: cap =>
                     {
-                        var kq = _services.Orders.SetReturnRequestCodes(
-                            _accountId, cap.Select(c => (c.MaDon, c.MaYeuCau)));
+                        // GHI VÀO CẢ HAI: `return_codes` là nguồn sự thật MỚI (sống độc lập với vòng đời đơn — đơn
+                        // đã dọn vẫn đẩy được mã lên GSheet), còn `orders.return_request_code` vẫn ghi để lưới app
+                        // + hub hiển thị được với đơn CÒN sống. Bảng riêng phải ghi TRƯỚC: nó không bao giờ trượt
+                        // vì "đơn không còn trong DB", nên dù đường kia bỏ hết mã thì mã vẫn được giữ.
+                        var pairs = cap.Select(c => (c.MaDon, c.MaYeuCau)).ToList();
+                        _services.ReturnCodes.LuuMaTraHang(
+                            _accountId, pairs, _currentShopLogin, DateTime.UtcNow);
+                        var kq = _services.Orders.SetReturnRequestCodes(_accountId, pairs);
                         if (kq.DaGhi > 0)
                         {
                             _services.RaiseOrdersChanged();
@@ -1074,7 +1083,8 @@ public partial class AccountSession : ObservableObject, IAccountSession
                             }
                         }
                         return $"{kq.DaGhi} đơn ghi mã mới, {kq.KhongDoi} đơn giữ nguyên, "
-                            + $"{kq.KhongCoDon} mã không khớp đơn nào trong app (đơn cũ đã dọn?).";
+                            + $"{kq.KhongCoDon} mã không khớp đơn nào trong app (đơn đã dọn — mã VẪN giữ ở kho "
+                            + "mã trả hàng, lượt đẩy sau vẫn điền lên Google Sheet).";
                     });
                 _bridge = bridge;
                 OrdersBridgeRunResult result;

@@ -51,6 +51,10 @@ public class AppServices
     /// phiên cầu nối ghi qua callback (lưu shop + tăng đếm mỗi đơn arrange); tab "Kết quả" đọc để hiển thị.</summary>
     public ResultsRepository Results { get; }
 
+    /// <summary>Kho MÃ YÊU CẦU TRẢ HÀNG (bảng <c>return_codes</c>) — sống ĐỘC LẬP với vòng đời đơn, nên mã của đơn
+    /// đã bị dọn khỏi app vẫn đẩy được lên Google Sheet.</summary>
+    public ReturnCodesRepository ReturnCodes { get; }
+
     /// <summary>Đẩy đơn (kèm file phiếu) lên Google Sheet qua Apps Script Web App — phiên gọi sau mỗi lượt Sync.</summary>
     public GoogleSheetSyncService GsheetSync { get; }
 
@@ -232,6 +236,7 @@ public class AppServices
         Settings = new SettingsRepository(Database);
         Orders = new OrdersRepository(Database);
         Results = new ResultsRepository(Database);
+        ReturnCodes = new ReturnCodesRepository(Database);
 
         // Migration MỘT LẦN (idempotent qua cờ settings): gộp ProxyKey cố định của tài khoản (cơ chế cũ) vào
         // pool KiotProxy CHUNG để không mất key sẵn có khi chuyển sang cấp phát key theo pool lúc chạy.

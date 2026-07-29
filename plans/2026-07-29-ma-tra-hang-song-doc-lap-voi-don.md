@@ -1,7 +1,7 @@
 # Plan: Mã trả hàng sống độc lập với đơn + 4 chốt chặn cho bước check
 
 - **Ngày:** 2026-07-29
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành — 1434 test xanh; 4 bộ rig đều ĐẠT. Bẫy #1 có THÍ NGHIỆM ĐỐI CHỨNG (CA 3b: cùng dòng đó, thêm `daHuy:false` là nền đỏ biến mất) ⇒ bẫy là thật, bản sửa không dính. Bổ sung giữa chừng theo yêu cầu người dùng: đơn hủy GIỮ tô nền đỏ, đơn trả hàng đánh dấu bằng MÀU CHỮ cam `#C05621` một chiều. Chờ dán Apps Script + release client.
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-dev`)
 
 ## 1. Bối cảnh — vì sao quét đúng vẫn không có kết quả

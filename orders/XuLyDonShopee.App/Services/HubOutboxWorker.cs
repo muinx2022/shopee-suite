@@ -172,10 +172,17 @@ public sealed class HubOutboxWorker : IDisposable
         var log = (Action<string>)(m => _services.Log.Append(tenTk, m));
 
         var (ton, skus, orderSns) = DemTon(accountId);
+
+        // 0) MÃ TRẢ HÀNG — phải xét TRƯỚC cửa "ton.Tong == 0": nguồn của nó là bảng `return_codes`, KHÔNG phải
+        // bảng `orders`, nên tài khoản đã dọn sạch đơn (4 loại tồn = 0) vẫn có thể còn cả đống mã chờ đẩy. Đặt
+        // sau cửa đó thì đúng trường hợp cần nhất lại không bao giờ chạy. Bản thân hàm tự thoát sớm khi rỗng.
+        var okMaTra = await ChayQuaGateAsync(accountId, PushKind.Gsheet,
+            () => HubOutbox.PushReturnCodesToGsheetAsync(accountId, _services, log, ct)).ConfigureAwait(false);
+
         if (ton.Tong == 0)
         {
             _tonDaBao.TryRemove(accountId, out _);
-            return (ton, null); // tài khoản này sạch → không đẩy, không log
+            return (ton, okMaTra); // 4 loại tồn kia sạch → chỉ còn kết quả lượt mã trả hàng (null = không có gì)
         }
 
         // Chỉ báo khi số tồn ĐỔI so với lần báo trước (lần đầu backlog xuất hiện, hoặc vơi/dày thêm).
@@ -185,7 +192,7 @@ public sealed class HubOutboxWorker : IDisposable
             log($"Vòng chờ: đẩy {ton.Orders} đơn / {ton.Slips} phiếu / {ton.SheetRows} dòng sheet / {ton.SoldCounts} lượt đếm Đã bán còn tồn.");
         }
 
-        bool? ok = null;
+        var ok = okMaTra;
         // 1) ĐƠN lên hub (phải trước phiếu — phiếu chỉ đẩy cho đơn đã có hub_synced_at).
         if (ton.Orders > 0)
         {
