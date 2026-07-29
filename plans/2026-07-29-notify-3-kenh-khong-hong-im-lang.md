@@ -1,7 +1,7 @@
 # Plan: 3 kênh notify — chặn gửi trùng, bỏ hỏng im lặng, lùi về webhook cũ
 
 - **Ngày:** 2026-07-29
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành — 1404 test xanh; harness reflection gọi thẳng dll thật xác nhận `ResolveWebhooks` 6/6 ca. ĐÍNH CHÍNH mục 1 Lỗi 2: chốt chặn gửi trùng ĐÃ có sẵn ở NƠI GỌI (`AccountSession.cs:1061`) — Fable đọc thân hàm mà không kiểm call-site nên báo nhầm là thiếu. Nay có hai lớp, cùng chiều nên hỏng theo hướng an toàn. Chờ deploy hub + release client.
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-dev`)
 
 ## 1. Bối cảnh — soi trên hub production

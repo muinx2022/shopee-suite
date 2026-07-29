@@ -38,9 +38,13 @@ public sealed class OrderRecord
     public DateTimeOffset? SlipAt { get; init; }
 }
 
-/// <summary>Kết quả upsert lô đơn: số thêm mới + số cập nhật + DANH SÁCH đơn VỪA THÊM MỚI (cho notify "đơn
-/// mới"). InsertedItems chỉ dùng nội bộ hub (không đi qua dây — endpoint chỉ trả <see cref="OrdersPushResult"/>).</summary>
-public sealed record UpsertOrdersResult(int Added, int Updated, List<OrderPushItem> InsertedItems);
+/// <summary>Kết quả upsert lô đơn: số thêm mới + số cập nhật + đơn vừa thêm + đơn có mã trả hàng mới/đổi
+/// (notify Hub). Các list chỉ dùng nội bộ hub.</summary>
+public sealed record UpsertOrdersResult(
+    int Added,
+    int Updated,
+    List<OrderPushItem> InsertedItems,
+    List<OrderPushItem> ReturnCodeChangedItems);
 
 /// <summary>Một dòng thống kê "chuẩn bị hàng" theo shop trong MỘT ngày (<see cref="HubDatabase.PrepareStatsByDay"/>)
 /// — kiểu NỘI BỘ hub, endpoint map tường minh sang <c>PrepareStatItem</c> (DTO dùng chung với client).</summary>
@@ -78,6 +82,7 @@ CREATE INDEX IF NOT EXISTS ix_orders_status ON orders(status);");
     {
         var added = 0; var updated = 0;
         var inserted = new List<OrderPushItem>();
+        var returnChanged = new List<OrderPushItem>();
         lock (_gate)
         {
             var now = Iso(DateTimeOffset.UtcNow);
@@ -88,11 +93,12 @@ CREATE INDEX IF NOT EXISTS ix_orders_status ON orders(status);");
                 bool exists;
                 string? itemsCu = null;
                 int itemCountCu = 0;
+                string? rrcCu = null;
                 using (var chk = _conn.CreateCommand())
                 {
                     chk.Transaction = tx;
-                    // Đọc luôn items_json + item_count cũ (đơn đã có) để chọn bản giàu hơn — cùng khoá/tx với ghi.
-                    chk.CommandText = "SELECT items_json, item_count FROM orders WHERE shop_id=$s AND order_sn=$sn";
+                    // Đọc items_json + item_count + return_request_code cũ để chọn bản giàu / phát hiện mã trả mới.
+                    chk.CommandText = "SELECT items_json, item_count, return_request_code FROM orders WHERE shop_id=$s AND order_sn=$sn";
                     chk.Parameters.AddWithValue("$s", shopId);
                     chk.Parameters.AddWithValue("$sn", o.OrderSn);
                     using var rd = chk.ExecuteReader();
@@ -101,6 +107,7 @@ CREATE INDEX IF NOT EXISTS ix_orders_status ON orders(status);");
                     {
                         itemsCu = rd.IsDBNull(0) ? null : rd.GetString(0);
                         itemCountCu = rd.IsDBNull(1) ? 0 : rd.GetInt32(1);
+                        rrcCu = rd.IsDBNull(2) ? null : rd.GetString(2);
                     }
                 }
 
@@ -169,10 +176,18 @@ ON CONFLICT(shop_id,order_sn) DO UPDATE SET
                 c.ExecuteNonQuery();
                 if (exists) updated++;
                 else { added++; inserted.Add(o); }
+
+                // Mã trả mới hoặc đổi (COALESCE sẽ ghi) → Hub notify "đơn trả".
+                var rrcMoi = o.ReturnRequestCode?.Trim();
+                if (!string.IsNullOrEmpty(rrcMoi)
+                    && !string.Equals(rrcMoi, rrcCu?.Trim(), StringComparison.Ordinal))
+                {
+                    returnChanged.Add(o);
+                }
             }
             tx.Commit();
         }
-        return new UpsertOrdersResult(added, updated, inserted);
+        return new UpsertOrdersResult(added, updated, inserted, returnChanged);
     }
 
     /// <summary>Đọc đơn có lọc (shop/trạng thái/tìm kiếm) + phân trang. search khớp order_sn/buyer/tên SP/SKU.</summary>

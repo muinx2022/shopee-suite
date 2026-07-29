@@ -389,6 +389,36 @@ public class OrderNotifyService
         return sb.ToString();
     }
 
+    /// <summary>
+    /// Dựng tin "có đơn trả hàng" sau khi check flow ghi mã yêu cầu mới. Tham số rỗng → <c>?</c> (không ném).
+    /// Liệt kê tối đa 20 cặp mã đơn / mã yêu cầu.
+    /// </summary>
+    public static string TaoTinNhanDonTra(
+        string tenShop,
+        IReadOnlyList<(string MaDon, string MaYeuCau)> capMoi,
+        DateTime luc)
+    {
+        var n = capMoi?.Count ?? 0;
+        var sb = new StringBuilder();
+        sb.Append($"↩️ {HoacDauHoi(tenShop)} — {n} đơn TRẢ HÀNG mới ({luc.ToString("HH:mm dd/MM", CultureInfo.InvariantCulture)})");
+
+        const int MaxDong = 20;
+        var hienThi = Math.Min(n, MaxDong);
+        for (int i = 0; i < hienThi; i++)
+        {
+            var (maDon, maYc) = capMoi![i];
+            sb.Append('\n');
+            sb.Append($"• {HoacDauHoi(maDon)} — yêu cầu {HoacDauHoi(maYc)}");
+        }
+
+        if (n > MaxDong)
+        {
+            sb.Append($"\n… và {n - MaxDong} đơn nữa.");
+        }
+
+        return sb.ToString();
+    }
+
     /// <summary>Chuỗi đã trim; null/rỗng → <c>"?"</c> (giữ tin đọc được, không để lộ chỗ trống khó hiểu).</summary>
     private static string HoacDauHoi(string? s) => string.IsNullOrWhiteSpace(s) ? "?" : s.Trim();
 

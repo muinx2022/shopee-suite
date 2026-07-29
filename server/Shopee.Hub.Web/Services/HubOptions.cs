@@ -22,6 +22,15 @@ public static class SettingKeys
     public const string AdminIter = "admin.iter";
     public const string DispatcherEnabled = "dispatcher.enabled";
     public const string DispatcherAuto = "dispatcher.auto";
-    /// <summary>Webhook báo "đơn mới": nhiều dòng, MỖI DÒNG 1 URL (Slack/Discord/Telegram tự nhận diện). Trống = tắt.</summary>
+    /// <summary>LEGACY: nhiều dòng URL báo đơn mới. Còn đọc để migrate → <see cref="NotifyWebhookDonMoi"/>.</summary>
     public const string NotifyWebhooks = "notify.webhooks";
+
+    /// <summary>Webhook khi client push đơn MỚI (1 URL). Trống = tắt.</summary>
+    public const string NotifyWebhookDonMoi = "notify.webhook_don_moi";
+
+    /// <summary>Webhook lỗi app — hub lưu đồng bộ UI; client gửi. Trống = tắt.</summary>
+    public const string NotifyWebhookLoiApp = "notify.webhook_loi_app";
+
+    /// <summary>Webhook đơn trả hàng — hub lưu đồng bộ UI; client gửi. Trống = tắt.</summary>
+    public const string NotifyWebhookDonTra = "notify.webhook_don_tra";
 }

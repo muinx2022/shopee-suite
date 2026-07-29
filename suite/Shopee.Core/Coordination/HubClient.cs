@@ -374,6 +374,10 @@ public sealed class HubClient : IDisposable
         return await r.Content.ReadFromJsonAsync<OrdersSlipPushResult>(ct);
     }
 
+    /// <summary>Báo sự kiện lỗi app (vd. không đặt địa chỉ) → Hub gửi webhook. Hub cũ chưa có route → ném → caller fallback local.</summary>
+    public Task ReportOrdersAppAlertAsync(OrdersAppAlertRequest req, CancellationToken ct = default)
+        => PostAsync(HubRoutes.OrdersAppAlert, req, ct);
+
     // ── File-sync ──
     public async Task<List<FileManifestEntry>> ManifestAsync(CancellationToken ct = default)
         => await _http.GetFromJsonAsync<List<FileManifestEntry>>(HubRoutes.Manifest, ct) ?? [];

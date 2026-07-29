@@ -141,19 +141,49 @@ public static class OrdersModuleHost
                     var res = await CoordinationRuntime.Client.PushOrdersAsync(req, ct).ConfigureAwait(false);
                     if (res is null)
                     {
-                        allOk = false; // nhóm này hub KHÔNG nhận → cả lô CHƯA đánh dấu (phiên mark theo lô), lượt sau đẩy lại
+                        allOk = false; // nhóm này hub KHÔNG nhận → cả lô CHƯA đánh dấu, lượt sau đẩy lại
                     }
                 }
-                return allOk; // MỌI nhóm OK → phiên đánh dấu hub_synced_at
+                return allOk;
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
-                throw; // hủy CHỦ ĐỘNG (dừng phiên) → cho xuyên để AccountSession xử như hủy
+                throw; // hủy CHỦ ĐỘNG → cho xuyên để AccountSession xử như hủy
             }
             catch (Exception ex)
             {
-                // Gồm cả timeout tunnel (TaskCanceledException khi ct CHƯA hủy) → coi như hub lỗi, thử lại lượt sau.
                 Trace.WriteLine("[OrdersModuleHost] Đẩy đơn lên hub lỗi: " + ex.Message);
+                return false;
+            }
+        };
+
+        // Báo lỗi app lên Hub — Hub quyết định gửi webhook (không để client tự Slack khi đã nối Hub).
+        services.ReportAppAlertToHub = async (kind, account, shop, detail, machine, ct) =>
+        {
+            try
+            {
+                if (!CoordinationRuntime.Active || CoordinationRuntime.Client is null)
+                {
+                    return false;
+                }
+                await CoordinationRuntime.Client.ReportOrdersAppAlertAsync(
+                    new OrdersAppAlertRequest
+                    {
+                        Kind = kind,
+                        AccountLabel = account,
+                        ShopName = shop,
+                        Detail = detail,
+                        MachineName = machine,
+                    }, ct).ConfigureAwait(false);
+                return true;
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                Trace.WriteLine("[OrdersModuleHost] Báo lỗi app lên hub lỗi: " + ex.Message);
                 return false;
             }
         };

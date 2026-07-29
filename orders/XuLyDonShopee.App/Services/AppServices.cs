@@ -67,6 +67,13 @@ public class AppServices
     public Func<long, IReadOnlyList<SyncedOrder>, CancellationToken, Task<bool>>? PushOrdersToHub { get; set; }
 
     /// <summary>
+    /// HOOK báo sự kiện lỗi app lên Hub (Hub quyết định gửi webhook). Tham số: kind (vd.
+    /// <c>khong_dat_duoc_dia_chi</c>), account, shop, detail, machine, ct. Trả true = Hub nhận OK.
+    /// Null = chưa nối Hub → caller gửi Slack local (fallback độc lập).
+    /// </summary>
+    public Func<string, string?, string?, string?, string?, CancellationToken, Task<bool>>? ReportAppAlertToHub { get; set; }
+
+    /// <summary>
     /// HOOK +1 "Đã bán" theo SKU (khớp TUYỆT ĐỐI, MỌI shop) trên kho sản phẩm HUB (Postgres), do shell suite RÓT
     /// (module Đơn hàng KHÔNG tham chiếu <c>Shopee.Core</c> nên không tự biết hub). Tham số: danh sách SKU — mỗi đơn
     /// vừa CHUYỂN sang "đã giao" đóng góp 1 SKU đại diện (đơn trùng SKU → +N); <c>ct</c>. Trả <c>true</c> = hub +1 OK

@@ -135,6 +135,7 @@ public class TraHangLuuTests
         Assert.Equal(1, kq.DaGhi);
         Assert.Equal(0, kq.KhongDoi);
         Assert.Equal(0, kq.KhongCoDon);
+        Assert.Equal(new[] { ("D1", "R001") }, kq.CapDaGhi);
 
         var rows = repo.Query(accountId: 1);
         Assert.Equal("R001", rows.Single(r => r.OrderSn == "D1").ReturnRequestCode);

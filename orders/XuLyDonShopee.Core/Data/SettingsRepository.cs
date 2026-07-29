@@ -38,8 +38,17 @@ public class SettingsRepository
     /// là giá trị trả về của <see cref="GetGsheetTabName"/> nữa (trống giờ trả chuỗi rỗng).</summary>
     public const string DefaultGsheetTabName = "tháng 4";
 
-    /// <summary>Key: URL webhook báo "đơn mới" (Slack / Discord / Telegram) — trống → tắt tính năng.</summary>
+    /// <summary>Key LEGACY: một URL chung (đơn mới + lỗi app). Còn dùng để migrate lazy sang 3 key mới.</summary>
     private const string NotifyWebhookUrlKey = "notify_webhook_url";
+
+    /// <summary>Key: webhook khi có đơn mới (Slack / Discord / Telegram) — trống → tắt.</summary>
+    private const string NotifyWebhookDonMoiKey = "notify_webhook_url_don_moi";
+
+    /// <summary>Key: webhook khi lỗi app (hiện: không đặt được địa chỉ lấy hàng) — trống → tắt.</summary>
+    private const string NotifyWebhookLoiAppKey = "notify_webhook_url_loi_app";
+
+    /// <summary>Key: webhook khi check flow phát hiện đơn trả hàng mới — trống → tắt.</summary>
+    private const string NotifyWebhookDonTraKey = "notify_webhook_url_don_tra";
 
     /// <summary>Key: trình duyệt người dùng chọn để mở phiên (thiếu/lạ → <see cref="BrowserChoice.Auto"/>).</summary>
     private const string BrowserChoiceKey = "browser_choice";
@@ -136,18 +145,54 @@ public class SettingsRepository
         Set(GsheetSheet2Key, string.IsNullOrEmpty(v) ? null : v);
     }
 
-    /// <summary>URL webhook báo "đơn mới" đã lưu (đã trim); trống/chưa đặt → <c>null</c> (tắt thông báo).</summary>
-    public string? GetNotifyWebhookUrl()
+    /// <summary>URL webhook "có đơn mới" (đã trim). Lazy migrate: nếu 3 key mới đều trống mà key legacy còn URL
+    /// → trả URL legacy (user cũ vẫn nhận tin cho tới khi Lưu lại Settings).</summary>
+    public string? GetNotifyWebhookUrlDonMoi() => GetNotifyWebhookMoiHoacLegacy(NotifyWebhookDonMoiKey, dungLegacy: true);
+
+    /// <summary>URL webhook "lỗi app". Lazy migrate giống <see cref="GetNotifyWebhookUrlDonMoi"/>.</summary>
+    public string? GetNotifyWebhookUrlLoiApp() => GetNotifyWebhookMoiHoacLegacy(NotifyWebhookLoiAppKey, dungLegacy: true);
+
+    /// <summary>URL webhook "có đơn trả hàng". Không dùng legacy (trước đây không có loại tin này).</summary>
+    public string? GetNotifyWebhookUrlDonTra() => GetNotifyWebhookMoiHoacLegacy(NotifyWebhookDonTraKey, dungLegacy: false);
+
+    /// <summary>Lưu 3 webhook notify cùng lúc; xóa key legacy để không “hồi sinh” URL cũ khi xóa hết ô mới.</summary>
+    public void SetNotifyWebhookUrls(string? donMoi, string? loiApp, string? donTra)
     {
-        var v = Get(NotifyWebhookUrlKey)?.Trim();
-        return string.IsNullOrEmpty(v) ? null : v;
+        Set(NotifyWebhookDonMoiKey, ChuanHoaWebhookHoacNull(donMoi));
+        Set(NotifyWebhookLoiAppKey, ChuanHoaWebhookHoacNull(loiApp));
+        Set(NotifyWebhookDonTraKey, ChuanHoaWebhookHoacNull(donTra));
+        Set(NotifyWebhookUrlKey, null);
     }
 
-    /// <summary>Lưu URL webhook báo "đơn mới" (trim); null/trống → xóa key (⇒ tắt thông báo).</summary>
-    public void SetNotifyWebhookUrl(string? url)
+    private string? GetNotifyWebhookMoiHoacLegacy(string keyMoi, bool dungLegacy)
+    {
+        var moi = Get(keyMoi)?.Trim();
+        if (!string.IsNullOrEmpty(moi))
+        {
+            return moi;
+        }
+
+        if (!dungLegacy)
+        {
+            return null;
+        }
+
+        // Chỉ fallback legacy khi CHƯA từng lưu bản 3 ô (cả 3 key mới trống).
+        if (!string.IsNullOrEmpty(Get(NotifyWebhookDonMoiKey)?.Trim())
+            || !string.IsNullOrEmpty(Get(NotifyWebhookLoiAppKey)?.Trim())
+            || !string.IsNullOrEmpty(Get(NotifyWebhookDonTraKey)?.Trim()))
+        {
+            return null;
+        }
+
+        var legacy = Get(NotifyWebhookUrlKey)?.Trim();
+        return string.IsNullOrEmpty(legacy) ? null : legacy;
+    }
+
+    private static string? ChuanHoaWebhookHoacNull(string? url)
     {
         var v = url?.Trim();
-        Set(NotifyWebhookUrlKey, string.IsNullOrEmpty(v) ? null : v);
+        return string.IsNullOrEmpty(v) ? null : v;
     }
 
     /// <summary>Trình duyệt người dùng chọn để mở phiên (thiếu/lạ → <see cref="BrowserChoice.Auto"/>).</summary>

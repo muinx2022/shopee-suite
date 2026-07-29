@@ -591,16 +591,20 @@ public partial class AccountSession : ObservableObject, IAccountSession
     }
 
     /// <summary>
-    /// Kích hoạt báo "đơn MỚI" (Slack/Discord/Telegram) CHẠY NỀN (fire-and-forget) sau khi Sync đã tổng kết —
-    /// y pattern <see cref="StartGsheetPushInBackground"/>. URL webhook chưa cấu hình → return im lặng (không
-    /// đổi hành vi cũ). Tên shop = <see cref="Account.Email"/> (tên đăng nhập người dùng nhập, như GSheet).
-    /// Dựng tin nhắn qua <see cref="OrderNotifyService.TaoTinNhanDonMoi"/> rồi gửi qua
-    /// <see cref="OrderNotifyService.SendAsync"/>; thành công → log 1 dòng. Mọi exception NUỐT + log (KHÔNG phá
-    /// sync — sync DB đã xong). <paramref name="ct"/> là token phiên → dừng phiên thì lượt gửi tự hủy.
+    /// Kích hoạt báo "đơn MỚI" (Slack/Discord/Telegram) CHẠY NỀN sau Sync — y pattern GSheet.
+    /// Khi <see cref="AppServices.PushOrdersToHub"/> đã rót: <b>bỏ qua</b> (Hub báo sau push, tránh trùng tin).
+    /// URL trống / không có đơn → im lặng. Exception nuốt + log.
     /// </summary>
     private void StartNotifyInBackground(IReadOnlyList<SyncedOrder> insertedOrders, Action<string> log, CancellationToken ct)
     {
-        var url = _services.Settings.GetNotifyWebhookUrl();
+        // Tránh trùng tin với Hub: khi hook push đã rót, Hub FireNotifyNewOrders sau orders/push.
+        // Ô "có đơn mới" trên client chỉ dùng khi chạy độc lập (không nối Hub).
+        if (_services.PushOrdersToHub is not null)
+        {
+            return;
+        }
+
+        var url = _services.Settings.GetNotifyWebhookUrlDonMoi();
         if (string.IsNullOrWhiteSpace(url) || insertedOrders is null || insertedOrders.Count == 0)
         {
             return; // người dùng chưa dùng tính năng / không có đơn mới → im lặng
@@ -671,17 +675,9 @@ public partial class AccountSession : ObservableObject, IAccountSession
             return;
         }
 
-        var url = _services.Settings.GetNotifyWebhookUrl();
-        if (string.IsNullOrWhiteSpace(url))
-        {
-            log("Cảnh báo địa chỉ: chưa cấu hình webhook (Cài đặt → thông báo đơn mới) — không gửi được tin ra ngoài, vòng VẪN dừng.");
-            return;
-        }
-
-        // Đánh dấu mốc TRƯỚC khi gửi: hai vòng lỗi sát nhau không cùng bắn tin (task gửi chạy nền).
+        // Đánh dấu mốc TRƯỚC khi gửi: hai vòng lỗi sát nhau không cùng bắn tin.
         _mocCanhBaoDiaChi[_accountId] = bayGio;
 
-        // Tên tài khoản = tên đăng nhập subaccount (như GSheet/notify đơn mới); fallback "TK {id}".
         var tenTaiKhoan = _services.Accounts.GetById(_accountId)?.Email;
         if (string.IsNullOrWhiteSpace(tenTaiKhoan))
         {
@@ -693,28 +689,105 @@ public partial class AccountSession : ObservableObject, IAccountSession
         {
             try
             {
+                // Ưu tiên Hub quyết định gửi; chỉ Slack local khi chưa nối Hub / báo Hub thất bại.
+                var report = _services.ReportAppAlertToHub;
+                if (report is not null)
+                {
+                    var okHub = await report(
+                        "khong_dat_duoc_dia_chi",
+                        tenTaiKhoan,
+                        tenShop,
+                        tinh,
+                        tenMay,
+                        ct).ConfigureAwait(false);
+                    if (okHub)
+                    {
+                        log("Cảnh báo địa chỉ: đã báo lên Hub (Hub gửi webhook lỗi app).");
+                        return;
+                    }
+                    log("Cảnh báo địa chỉ: Hub chưa nhận — thử webhook local (fallback).");
+                }
+
+                var url = _services.Settings.GetNotifyWebhookUrlLoiApp();
+                if (string.IsNullOrWhiteSpace(url))
+                {
+                    log("Cảnh báo địa chỉ: chưa cấu hình webhook lỗi app (Hub hoặc Cài đặt local) — không gửi được tin ra ngoài, vòng VẪN dừng.");
+                    return;
+                }
+
                 var text = OrderNotifyService.TaoTinNhanLoiDiaChi(tenTaiKhoan, tenShop ?? string.Empty, tinh, tenMay, bayGio);
                 var ok = await _services.Notify.SendAsync(url, text, log, ct).ConfigureAwait(false);
                 if (ok)
                 {
-                    log($"Cảnh báo địa chỉ: đã báo ra {OrderNotifyService.NhanDienKenh(url)}.");
+                    log($"Cảnh báo địa chỉ: đã báo ra {OrderNotifyService.NhanDienKenh(url)} (local).");
                 }
                 else
                 {
-                    // Gửi hỏng (mạng/HTTP lỗi — SendAsync đã log chi tiết) → NHẢ mốc của đúng lượt này để vòng sau
-                    // báo lại; để nguyên thì cảnh báo câm cả 60' trong khi không ai nhận được tin nào.
                     _mocCanhBaoDiaChi.TryRemove(new KeyValuePair<long, DateTime>(_accountId, bayGio));
                     log("Cảnh báo địa chỉ: gửi KHÔNG thành công — sẽ báo lại ở vòng sau (vòng này vẫn dừng).");
                 }
             }
             catch (OperationCanceledException)
             {
-                // Hủy chủ động (dừng phiên) — thôi.
             }
             catch (Exception ex)
             {
                 _mocCanhBaoDiaChi.TryRemove(new KeyValuePair<long, DateTime>(_accountId, bayGio));
                 log("Cảnh báo địa chỉ: lỗi — " + ex.Message);
+            }
+        }, CancellationToken.None);
+    }
+
+    /// <summary>HÀM THUẦN (test được): client có tự gửi tin notify local không. KHÔNG gửi khi đã nối Hub
+    /// (<paramref name="daNoiHub"/> — Hub bắn tin sau <c>orders/push</c>, gửi nữa là người trực nhận hai tin),
+    /// khi URL trống, hoặc khi chẳng có mục nào để báo. Máy chạy ĐỘC LẬP (chưa nối Hub) vẫn phải tự gửi.</summary>
+    internal static bool CoNenGuiNotifyLocal(bool daNoiHub, string? url, int soMuc)
+        => !daNoiHub && !string.IsNullOrWhiteSpace(url) && soMuc > 0;
+
+    /// <summary>
+    /// Báo "có đơn trả hàng" ra webhook riêng — fire-and-forget sau khi check flow ghi được mã mới.
+    /// Khi <see cref="AppServices.PushOrdersToHub"/> đã rót: <b>bỏ qua</b> (Hub bắn tin sau <c>orders/push</c>
+    /// nhờ <c>ReturnCodeChangedItems</c>, tránh trùng tin). URL trống → im lặng. Chỉ nhận các cặp <b>vừa ghi</b>
+    /// (không gửi cả list check).
+    /// </summary>
+    private void StartNotifyDonTraInBackground(
+        IReadOnlyList<(string OrderSn, string Code)> capDaGhi,
+        Action<string> log,
+        CancellationToken ct)
+    {
+        var url = _services.Settings.GetNotifyWebhookUrlDonTra();
+        // Luật thật nằm ở CoNenGuiNotifyLocal; hai vế sau CHỈ để compiler thấy url/capDaGhi đã non-null.
+        if (!CoNenGuiNotifyLocal(_services.PushOrdersToHub is not null, url, capDaGhi?.Count ?? 0)
+            || string.IsNullOrWhiteSpace(url) || capDaGhi is null)
+        {
+            return;
+        }
+
+        var tenShop = _services.Accounts.GetById(_accountId)?.Email;
+        if (string.IsNullOrWhiteSpace(tenShop))
+        {
+            tenShop = $"TK {_accountId}";
+        }
+        var luc = DateTime.Now;
+        var pairs = capDaGhi.ToList();
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var text = OrderNotifyService.TaoTinNhanDonTra(tenShop, pairs, luc);
+                var ok = await _services.Notify.SendAsync(url, text, log, ct).ConfigureAwait(false);
+                if (ok)
+                {
+                    log($"Notify: đã báo {pairs.Count} đơn trả hàng ({OrderNotifyService.NhanDienKenh(url)}).");
+                }
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            catch (Exception ex)
+            {
+                log("Notify đơn trả: lỗi — " + ex.Message);
             }
         }, CancellationToken.None);
     }
@@ -993,7 +1066,12 @@ public partial class AccountSession : ObservableObject, IAccountSession
                             _accountId, cap.Select(c => (c.MaDon, c.MaYeuCau)));
                         if (kq.DaGhi > 0)
                         {
-                            _services.RaiseOrdersChanged(); // lưới Đơn hàng đang mở hiện cột "Đơn trả hàng" ngay
+                            _services.RaiseOrdersChanged();
+                            // Đã nối Hub: Hub gửi khi push đơn. Độc lập: gửi Slack local.
+                            if (_services.PushOrdersToHub is null)
+                            {
+                                StartNotifyDonTraInBackground(kq.CapDaGhi, log, ct);
+                            }
                         }
                         return $"{kq.DaGhi} đơn ghi mã mới, {kq.KhongDoi} đơn giữ nguyên, "
                             + $"{kq.KhongCoDon} mã không khớp đơn nào trong app (đơn cũ đã dọn?).";

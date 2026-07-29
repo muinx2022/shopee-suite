@@ -190,4 +190,48 @@ public class SettingsRepositoryTests
             Assert.True(repo2.GetSyncFreshProfile());
         }
     }
+
+    [Fact]
+    public void NotifyWebhook_Legacy_MigrateSangDonMoiVaLoiApp()
+    {
+        using var temp = new TempDatabase();
+        var repo = new SettingsRepository(temp.Open());
+        repo.Set("notify_webhook_url", "https://hooks.slack.com/services/T/B/legacy");
+
+        Assert.Equal("https://hooks.slack.com/services/T/B/legacy", repo.GetNotifyWebhookUrlDonMoi());
+        Assert.Equal("https://hooks.slack.com/services/T/B/legacy", repo.GetNotifyWebhookUrlLoiApp());
+        Assert.Null(repo.GetNotifyWebhookUrlDonTra());
+    }
+
+    [Fact]
+    public void NotifyWebhook_BaODocLap_SauKhiSet()
+    {
+        using var temp = new TempDatabase();
+        var repo = new SettingsRepository(temp.Open());
+        repo.Set("notify_webhook_url", "https://hooks.slack.com/services/T/B/legacy");
+
+        repo.SetNotifyWebhookUrls(
+            "https://hooks.slack.com/services/T/B/donmoi",
+            "https://hooks.slack.com/services/T/B/loi",
+            "https://hooks.slack.com/services/T/B/tra");
+
+        Assert.Equal("https://hooks.slack.com/services/T/B/donmoi", repo.GetNotifyWebhookUrlDonMoi());
+        Assert.Equal("https://hooks.slack.com/services/T/B/loi", repo.GetNotifyWebhookUrlLoiApp());
+        Assert.Equal("https://hooks.slack.com/services/T/B/tra", repo.GetNotifyWebhookUrlDonTra());
+        // Legacy đã xóa — không còn fallback.
+        Assert.Null(repo.Get("notify_webhook_url"));
+    }
+
+    [Fact]
+    public void NotifyWebhook_ChiSetLoiApp_KhongFallbackLegacyChoDonMoi()
+    {
+        using var temp = new TempDatabase();
+        var repo = new SettingsRepository(temp.Open());
+        repo.Set("notify_webhook_url", "https://hooks.slack.com/services/T/B/legacy");
+        repo.SetNotifyWebhookUrls(null, "https://hooks.slack.com/services/T/B/loi", null);
+
+        Assert.Null(repo.GetNotifyWebhookUrlDonMoi());
+        Assert.Equal("https://hooks.slack.com/services/T/B/loi", repo.GetNotifyWebhookUrlLoiApp());
+        Assert.Null(repo.GetNotifyWebhookUrlDonTra());
+    }
 }

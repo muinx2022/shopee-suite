@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
 using System.Threading.Tasks;
@@ -58,9 +59,17 @@ public partial class SettingsViewModel : ViewModelBase
     [ObservableProperty]
     private string _gsheetSheet2 = string.Empty;
 
-    /// <summary>URL webhook báo "đơn mới" (Slack / Discord / Telegram) — để trống = tắt thông báo.</summary>
+    /// <summary>Webhook khi có đơn mới — để trống = tắt.</summary>
     [ObservableProperty]
-    private string _notifyWebhookUrl = string.Empty;
+    private string _notifyWebhookUrlDonMoi = string.Empty;
+
+    /// <summary>Webhook khi lỗi app (hiện: không đặt được địa chỉ) — để trống = tắt.</summary>
+    [ObservableProperty]
+    private string _notifyWebhookUrlLoiApp = string.Empty;
+
+    /// <summary>Webhook khi check flow có đơn trả hàng mới — để trống = tắt.</summary>
+    [ObservableProperty]
+    private string _notifyWebhookUrlDonTra = string.Empty;
 
     /// <summary>Thông báo sau khi lưu của card TỰ ĐỘNG HÓA (thư mục hóa đơn / chu kỳ) (null = ẩn).</summary>
     [ObservableProperty]
@@ -100,7 +109,9 @@ public partial class SettingsViewModel : ViewModelBase
         GsheetWebAppUrl = _services.Settings.GetGsheetWebAppUrl() ?? string.Empty;
         GsheetTabName = _services.Settings.GetGsheetTabName();
         GsheetSheet2 = _services.Settings.GetGsheetSheet2() ?? string.Empty;
-        NotifyWebhookUrl = _services.Settings.GetNotifyWebhookUrl() ?? string.Empty;
+        NotifyWebhookUrlDonMoi = _services.Settings.GetNotifyWebhookUrlDonMoi() ?? string.Empty;
+        NotifyWebhookUrlLoiApp = _services.Settings.GetNotifyWebhookUrlLoiApp() ?? string.Empty;
+        NotifyWebhookUrlDonTra = _services.Settings.GetNotifyWebhookUrlDonTra() ?? string.Empty;
 
         var choice = _services.Settings.GetBrowserChoice();
         SelectedBrowser = BrowserOptions.FirstOrDefault(o => o.Value == choice) ?? BrowserOptions[0];
@@ -211,31 +222,50 @@ public partial class SettingsViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Nút "Lưu" cấu hình THÔNG BÁO ĐƠN MỚI: cho phép TRỐNG (tắt thông báo). Khác trống thì
-    /// <see cref="OrderNotifyService.KiemTraUrl"/> phải trả <c>null</c> (hợp lệ) — trả về THÔNG ĐIỆP LỖI cụ
-    /// thể (URL lạ / Telegram sai dạng sendMessage / thiếu chat_id) thì hiện đúng message đó, KHÔNG lưu. Hợp
-    /// lệ → lưu URL, thông báo kèm tên kênh. Thông báo hiện ở RIÊNG card này (dọn hai card kia). Lưu xong phản
-    /// ánh lại bản đã chuẩn hóa.
+    /// Lưu 3 webhook thông báo: mỗi ô trống = tắt sự kiện đó; khác trống thì
+    /// <see cref="OrderNotifyService.KiemTraUrl"/> phải hợp lệ.
     /// </summary>
     [RelayCommand]
     private void SaveNotifyUrl()
     {
-        var url = NotifyWebhookUrl?.Trim() ?? string.Empty;
-        var loi = OrderNotifyService.KiemTraUrl(url);
-        if (loi is not null)
+        var donMoi = NotifyWebhookUrlDonMoi?.Trim() ?? string.Empty;
+        var loiApp = NotifyWebhookUrlLoiApp?.Trim() ?? string.Empty;
+        var donTra = NotifyWebhookUrlDonTra?.Trim() ?? string.Empty;
+
+        foreach (var (nhan, url) in new[]
+                 {
+                     ("Có đơn mới", donMoi),
+                     ("Lỗi app", loiApp),
+                     ("Có đơn trả hàng", donTra),
+                 })
         {
-            NotifySavedMessage = loi;
-            SavedMessage = null; // dọn thông báo các card kia
-            GsheetSavedMessage = null;
-            return;
+            var loi = OrderNotifyService.KiemTraUrl(url);
+            if (loi is not null)
+            {
+                NotifySavedMessage = $"{nhan}: {loi}";
+                SavedMessage = null;
+                GsheetSavedMessage = null;
+                return;
+            }
         }
 
-        _services.Settings.SetNotifyWebhookUrl(url);
-        NotifyWebhookUrl = _services.Settings.GetNotifyWebhookUrl() ?? string.Empty; // phản ánh bản đã chuẩn hóa
-        NotifySavedMessage = url.Length == 0
-            ? "Đã tắt thông báo đơn mới (URL trống)."
-            : $"Đã lưu cấu hình thông báo ({OrderNotifyService.NhanDienKenh(url)}).";
-        SavedMessage = null; // dọn thông báo các card kia
+        _services.Settings.SetNotifyWebhookUrls(donMoi, loiApp, donTra);
+        NotifyWebhookUrlDonMoi = _services.Settings.GetNotifyWebhookUrlDonMoi() ?? string.Empty;
+        NotifyWebhookUrlLoiApp = _services.Settings.GetNotifyWebhookUrlLoiApp() ?? string.Empty;
+        NotifyWebhookUrlDonTra = _services.Settings.GetNotifyWebhookUrlDonTra() ?? string.Empty;
+
+        var parts = new List<string>();
+        if (NotifyWebhookUrlDonMoi.Length > 0)
+            parts.Add($"đơn mới ({OrderNotifyService.NhanDienKenh(NotifyWebhookUrlDonMoi)})");
+        if (NotifyWebhookUrlLoiApp.Length > 0)
+            parts.Add($"lỗi app ({OrderNotifyService.NhanDienKenh(NotifyWebhookUrlLoiApp)})");
+        if (NotifyWebhookUrlDonTra.Length > 0)
+            parts.Add($"đơn trả ({OrderNotifyService.NhanDienKenh(NotifyWebhookUrlDonTra)})");
+
+        NotifySavedMessage = parts.Count == 0
+            ? "Đã tắt toàn bộ thông báo webhook (3 ô trống)."
+            : "Đã lưu: " + string.Join("; ", parts) + ".";
+        SavedMessage = null;
         GsheetSavedMessage = null;
     }
 

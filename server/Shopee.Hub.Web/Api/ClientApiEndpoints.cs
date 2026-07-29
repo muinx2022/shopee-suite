@@ -238,9 +238,25 @@ public static class ClientApiEndpoints
             if (res.Added > 0 && res.InsertedItems.Count > 0)
             {
                 var shopName = string.IsNullOrWhiteSpace(r.ShopName) ? username : r.ShopName!.Trim();
-                FireNotifyNewOrders(db, lf.CreateLogger("OrderNotify"), shopName, res.InsertedItems);
+                FireNotifyDonMoi(db, lf.CreateLogger("OrderNotify"), mid, shopName, res.InsertedItems);
+            }
+            if (res.ReturnCodeChangedItems.Count > 0)
+            {
+                var shopName = string.IsNullOrWhiteSpace(r.ShopName) ? username : r.ShopName!.Trim();
+                FireNotifyDonTra(db, lf.CreateLogger("OrderNotify"), mid, shopName, res.ReturnCodeChangedItems);
             }
             return Results.Json(new OrdersPushResult(res.Added, res.Updated));
+        });
+
+        // POST /api/orders/app-alert → client báo lỗi app; Hub quyết định gửi webhook lỗi app (fire-and-forget).
+        api.MapPost(HubRoutes.OrdersAppAlert, (OrdersAppAlertRequest? r, HttpRequest req, ILoggerFactory lf) =>
+        {
+            if (r is null || string.IsNullOrWhiteSpace(r.Kind)) return Results.BadRequest();
+            var mid = req.Headers["X-Machine-Id"].ToString();
+            db.AppendLog(new AppendLogRequest(mid, "", "warn",
+                $"orders/app-alert kind={r.Kind.Trim()} account={r.AccountLabel} shop={r.ShopName} detail={r.Detail}"));
+            FireNotifyLoiApp(db, lf.CreateLogger("OrderNotify"), mid, r);
+            return Results.Ok();
         });
 
         // POST /api/orders/slip → hub lưu file phiếu PDF cho các đơn ĐÃ có trên hub. Lô ≤5 (client tự chia).
@@ -374,30 +390,104 @@ public static class ClientApiEndpoints
         => b.Length >= 5 && b[0] == (byte)'%' && b[1] == (byte)'P'
            && b[2] == (byte)'D' && b[3] == (byte)'F' && b[4] == (byte)'-';
 
-    /// <summary>Fire-and-forget báo "đơn mới" tới TỪNG webhook cấu hình (mỗi dòng 1 URL). TUYỆT ĐỐI không chặn
-    /// response push: dựng tin nhắn xong thì <see cref="Task.Run(Action)"/> gửi ở nền, nuốt mọi lỗi vào
-    /// <see cref="ILogger.LogWarning(string, object?[])"/>. Chưa cấu hình webhook → bỏ qua im lặng.</summary>
-    private static void FireNotifyNewOrders(HubDatabase db, ILogger logger, string shopName, IReadOnlyList<OrderPushItem> inserted)
+    /// <summary>Fire-and-forget báo "đơn mới" (webhook đơn mới + fallback legacy multiline).</summary>
+    private static void FireNotifyDonMoi(HubDatabase db, ILogger logger, string mid, string shopName, IReadOnlyList<OrderPushItem> inserted)
     {
-        var raw = db.GetSetting(SettingKeys.NotifyWebhooks);
-        if (string.IsNullOrWhiteSpace(raw)) return; // chưa cấu hình → không notify
+        if (inserted.Count == 0) return;
+        var moTa = $"{inserted.Count} đơn mới ({shopName})";
+        var urls = ResolveWebhooks(db, SettingKeys.NotifyWebhookDonMoi);
+        if (urls.Count == 0) { LogChuaCauHinh(db, mid, "đơn mới", SettingKeys.NotifyWebhookDonMoi, moTa); return; }
+        var text = OrderNotifyService.TaoTinNhanDonMoi(shopName, inserted.Select(ToSyncedOrder).ToList(), DateTime.Now);
+        FireSendUrls(db, mid, urls, text, logger, "đơn mới", moTa);
+    }
 
-        var urls = raw.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                      .Where(u => u.Length > 0).ToList();
-        if (urls.Count == 0 || inserted.Count == 0) return;
+    /// <summary>Fire-and-forget báo "đơn trả hàng" khi mã trả mới/đổi sau push.</summary>
+    private static void FireNotifyDonTra(HubDatabase db, ILogger logger, string mid, string shopName, IReadOnlyList<OrderPushItem> items)
+    {
+        if (items.Count == 0) return;
+        var pairs = items
+            .Where(o => !string.IsNullOrWhiteSpace(o.ReturnRequestCode))
+            .Select(o => (o.OrderSn, o.ReturnRequestCode!.Trim()))
+            .ToList();
+        if (pairs.Count == 0) return;
 
-        var donMoi = inserted.Select(ToSyncedOrder).ToList();
-        var text = OrderNotifyService.TaoTinNhanDonMoi(shopName, donMoi, DateTime.Now);
+        var moTa = $"{pairs.Count} đơn trả ({shopName})";
+        var urls = ResolveWebhooks(db, SettingKeys.NotifyWebhookDonTra);
+        if (urls.Count == 0) { LogChuaCauHinh(db, mid, "đơn trả", SettingKeys.NotifyWebhookDonTra, moTa); return; }
+        var text = OrderNotifyService.TaoTinNhanDonTra(shopName, pairs, DateTime.Now);
+        FireSendUrls(db, mid, urls, text, logger, "đơn trả", moTa);
+    }
+
+    /// <summary>Fire-and-forget báo lỗi app (hiện: không đặt được địa chỉ).</summary>
+    private static void FireNotifyLoiApp(HubDatabase db, ILogger logger, string mid, OrdersAppAlertRequest r)
+    {
+        var moTa = $"lỗi app {r.Kind?.Trim()} ({r.AccountLabel} · {r.ShopName})";
+        var urls = ResolveWebhooks(db, SettingKeys.NotifyWebhookLoiApp);
+        if (urls.Count == 0) { LogChuaCauHinh(db, mid, "lỗi app", SettingKeys.NotifyWebhookLoiApp, moTa); return; }
+
+        string text;
+        if (string.Equals(r.Kind?.Trim(), "khong_dat_duoc_dia_chi", StringComparison.OrdinalIgnoreCase))
+        {
+            text = OrderNotifyService.TaoTinNhanLoiDiaChi(
+                r.AccountLabel ?? "", r.ShopName ?? "", r.Detail ?? "", r.MachineName ?? "", DateTime.Now);
+        }
+        else
+        {
+            text = $"⚠ Lỗi app ({r.Kind})\nMáy: {r.MachineName ?? "?"} · Tài khoản: {r.AccountLabel ?? "?"} · Shop: {r.ShopName ?? "?"}\n{r.Detail}";
+        }
+        FireSendUrls(db, mid, urls, text, logger, "lỗi app", moTa);
+    }
+
+    /// <summary>Ghi log CẢNH BÁO khi có sự kiện notify mà không giải ra được URL nào (cả ô riêng lẫn ô legacy đều
+    /// trống) — trước đây hàm <c>FireNotify*</c> lặng lẽ <c>return</c>, nhìn từ ngoài tưởng client không gửi.
+    /// MỘT dòng cho mỗi LÔ/sự kiện (không phải mỗi đơn) nên không ngập log.</summary>
+    private static void LogChuaCauHinh(HubDatabase db, string mid, string nhan, string keyRieng, string moTa)
+        => db.AppendLog(new AppendLogRequest(mid, "", "warn",
+            $"notify \"{nhan}\": có {moTa} nhưng CHƯA cấu hình webhook (trống cả {keyRieng} lẫn {SettingKeys.NotifyWebhooks})"
+            + " — điền ô webhook tương ứng ở Hub → Cài đặt"));
+
+    /// <summary>Gửi tin tới TẤT CẢ url (fire-and-forget) rồi ghi MỘT dòng log kết quả cho cả lô — soi được kênh
+    /// nào đang sống mà không ngập log.</summary>
+    private static void FireSendUrls(HubDatabase db, string mid, IReadOnlyList<string> urls, string text, ILogger logger, string nhan, string moTa)
+    {
         var svc = new OrderNotifyService();
         _ = Task.Run(async () =>
         {
+            var ok = 0;
             foreach (var url in urls)
             {
-                // SendAsync tự thêm tiền tố "Notify: " vào từng dòng log → KHÔNG prefix lại (tránh "Notify: Notify:").
-                try { await svc.SendAsync(url, text, m => logger.LogWarning("{Message}", m), CancellationToken.None); }
-                catch (Exception ex) { logger.LogWarning(ex, "Notify: lỗi gửi tới webhook."); }
+                try
+                {
+                    if (await svc.SendAsync(url, text, m => logger.LogWarning("{Message}", m), CancellationToken.None)) ok++;
+                }
+                catch (Exception ex) { logger.LogWarning(ex, "Notify: lỗi gửi webhook {Nhan}.", nhan); }
             }
+            // Ghi log KHÔNG được phá đường notify (task nền, không ai bắt exception hộ).
+            try
+            {
+                db.AppendLog(new AppendLogRequest(mid, "", ok == urls.Count ? "info" : "warn",
+                    $"notify \"{nhan}\": gửi {ok}/{urls.Count} webhook OK — {moTa}"));
+            }
+            catch (Exception ex) { logger.LogWarning(ex, "Notify: lỗi ghi log kết quả {Nhan}.", nhan); }
         });
+    }
+
+    /// <summary>URL(s) của MỘT kênh notify: ô riêng <paramref name="keyRieng"/> có giá trị → dùng đúng nó (1 URL);
+    /// trống → lùi về toàn bộ dòng của ô LEGACY <c>notify.webhooks</c> (mỗi dòng 1 URL, gửi TẤT CẢ). Lưới an toàn
+    /// cho lúc admin chưa tách kênh — không có nó thì kênh chưa điền ô riêng sẽ chết âm thầm.</summary>
+    private static IReadOnlyList<string> ResolveWebhooks(HubDatabase db, string keyRieng)
+        => ResolveWebhooks(db.GetSetting(keyRieng), db.GetSetting(SettingKeys.NotifyWebhooks));
+
+    /// <summary>HÀM THUẦN (test được) của <see cref="ResolveWebhooks(HubDatabase, string)"/>.</summary>
+    internal static IReadOnlyList<string> ResolveWebhooks(string? rieng, string? legacy)
+    {
+        var r = rieng?.Trim();
+        if (!string.IsNullOrEmpty(r)) return new[] { r };
+        if (string.IsNullOrWhiteSpace(legacy)) return Array.Empty<string>();
+        return legacy.Replace("\r\n", "\n").Replace('\r', '\n')
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(u => u.Length > 0)
+            .ToList();
     }
 
     /// <summary>Map <see cref="OrderPushItem"/> (DTO client) → <see cref="SyncedOrder"/> (type
@@ -422,6 +512,7 @@ public static class ClientApiEndpoints
         Channel = o.Channel,
         Carrier = o.Carrier,
         TrackingNumber = o.TrackingNumber,
+        ReturnRequestCode = o.ReturnRequestCode,
     };
 }
 

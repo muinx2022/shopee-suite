@@ -92,3 +92,15 @@ public sealed record SlipPushError(string OrderSn, string Error);
 /// CHƯA có trên hub (client thử lại lượt sau); <see cref="Errors"/> = phiếu lỗi. Client suy ra tập ĐÃ LƯU =
 /// (lô gửi) − Missing − Errors để đánh dấu đúng đơn.</summary>
 public sealed record OrdersSlipPushResult(int Saved, List<string> Missing, List<SlipPushError> Errors);
+
+/// <summary>Client báo sự kiện lỗi app lên Hub (POST /api/orders/app-alert). Hub quyết định gửi webhook.
+/// <see cref="Kind"/> ổn định ASCII — hiện: <c>khong_dat_duoc_dia_chi</c>.</summary>
+public sealed class OrdersAppAlertRequest
+{
+    public string Kind { get; set; } = "";
+    public string? MachineName { get; set; }
+    public string? AccountLabel { get; set; }
+    public string? ShopName { get; set; }
+    /// <summary>Chi tiết ngắn (vd. tỉnh địa chỉ định đặt).</summary>
+    public string? Detail { get; set; }
+}

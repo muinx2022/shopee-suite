@@ -205,28 +205,59 @@
                         </StackPanel>
                     </Border>
 
-                    <!-- ===== THÔNG BÁO ĐƠN MỚI (SLACK / DISCORD / TELEGRAM) ===== -->
-                    <TextBlock Classes="section" Text="THÔNG BÁO ĐƠN MỚI (SLACK / DISCORD / TELEGRAM)" Margin="0,0,0,12" />
+                    <!-- ===== THÔNG BÁO WEBHOOK (fallback khi chưa nối Hub) ===== -->
+                    <TextBlock Classes="section" Text="THÔNG BÁO WEBHOOK (CHỈ KHI CHƯA NỐI HUB)" Margin="0,0,0,12" />
                     <Border Classes="card" Padding="24,22">
                         <StackPanel Spacing="18">
+                            <TextBlock TextWrapping="Wrap" FontSize="11.5"
+                                       Foreground="{StaticResource TextMuted}"
+                                       Text="Máy đã nối Hub: cấu hình 3 webhook trên Hub → Cài đặt (Hub gửi tin). Ba ô dưới chỉ dùng khi chạy độc lập." />
 
-                            <!-- Link webhook (Slack / Discord / Telegram) -->
                             <StackPanel>
-                                <TextBlock Classes="fieldLabel" Text="Link webhook (Slack / Discord / Telegram)" />
+                                <TextBlock Classes="fieldLabel" Text="Có đơn mới" />
                                 <Border Classes="field">
                                     <Grid>
                                         <TextBox Classes="bare" Margin="12,0"
-                                                 Text="{Binding NotifyWebhookUrl}"
-                                                 Watermark="https://hooks.slack.com/services/… hoặc webhook Discord/Telegram" />
+                                                 Text="{Binding NotifyWebhookUrlDonMoi}"
+                                                 Watermark="https://hooks.slack.com/services/…" />
                                         <Border Classes="underline" />
                                     </Grid>
                                 </Border>
                                 <TextBlock TextWrapping="Wrap" FontSize="11.5" Margin="0,6,0,0"
                                            Foreground="{StaticResource TextMuted}"
-                                           Text="Có đơn hàng MỚI sau mỗi lần Sync → gửi thông tin đơn vào kênh chat. Cách lấy link: docs/thong-bao-webhook-huong-dan.md" />
+                                           Text="Fallback độc lập. Đã nối Hub → webhook đơn mới trên Hub." />
                             </StackPanel>
 
-                            <!-- Lưu link (thông báo RIÊNG của card Thông báo) -->
+                            <StackPanel>
+                                <TextBlock Classes="fieldLabel" Text="Lỗi app" />
+                                <Border Classes="field">
+                                    <Grid>
+                                        <TextBox Classes="bare" Margin="12,0"
+                                                 Text="{Binding NotifyWebhookUrlLoiApp}"
+                                                 Watermark="https://hooks.slack.com/services/…" />
+                                        <Border Classes="underline" />
+                                    </Grid>
+                                </Border>
+                                <TextBlock TextWrapping="Wrap" FontSize="11.5" Margin="0,6,0,0"
+                                           Foreground="{StaticResource TextMuted}"
+                                           Text="Hiện: không đặt được địa chỉ lấy hàng. Sau này các lỗi app khác cũng gửi vào đây (vd. #canh-bao-app)." />
+                            </StackPanel>
+
+                            <StackPanel>
+                                <TextBlock Classes="fieldLabel" Text="Có đơn trả hàng" />
+                                <Border Classes="field">
+                                    <Grid>
+                                        <TextBox Classes="bare" Margin="12,0"
+                                                 Text="{Binding NotifyWebhookUrlDonTra}"
+                                                 Watermark="https://hooks.slack.com/services/…" />
+                                        <Border Classes="underline" />
+                                    </Grid>
+                                </Border>
+                                <TextBlock TextWrapping="Wrap" FontSize="11.5" Margin="0,6,0,0"
+                                           Foreground="{StaticResource TextMuted}"
+                                           Text="Khi check flow đơn hàng ghi được mã trả hàng mới → gửi vào channel này." />
+                            </StackPanel>
+
                             <StackPanel Orientation="Horizontal" Spacing="12">
                                 <Button Classes="primary" Command="{Binding SaveNotifyUrlCommand}">
                                     <StackPanel Orientation="Horizontal" Spacing="7">

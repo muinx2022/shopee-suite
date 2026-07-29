@@ -264,4 +264,19 @@ public class OrderNotifyServiceTests
         var rebuilt = parts[0] + string.Concat(parts.Skip(1).Select(p => p.Substring("(tiếp) ".Length)));
         Assert.Equal(line, rebuilt);
     }
+
+    [Fact]
+    public void TaoTinNhanDonTra_CoCap_DungNoiDung()
+    {
+        var luc = new DateTime(2026, 7, 29, 11, 5, 0);
+        var text = OrderNotifyService.TaoTinNhanDonTra(
+            "shopA",
+            new[] { ("SN1", "RR1"), ("SN2", "RR2") },
+            luc);
+
+        var lines = text.Split('\n');
+        Assert.Equal("↩️ shopA — 2 đơn TRẢ HÀNG mới (11:05 29/07)", lines[0]);
+        Assert.Equal("• SN1 — yêu cầu RR1", lines[1]);
+        Assert.Equal("• SN2 — yêu cầu RR2", lines[2]);
+    }
 }

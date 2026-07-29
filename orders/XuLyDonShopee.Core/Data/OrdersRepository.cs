@@ -445,11 +445,16 @@ public class OrdersRepository
         cmd.ExecuteNonQuery();
     }
 
-    /// <summary>Kết quả một lượt <see cref="SetReturnRequestCodes"/> — để log cho rõ mỗi lượt check trả hàng.</summary>
+    /// <summary>Kết quả một lượt <see cref="SetReturnRequestCodes"/> — để log / notify đúng cặp vừa ghi.</summary>
     /// <param name="DaGhi">Số đơn VỪA ghi mã mới (khác mã cũ).</param>
     /// <param name="KhongDoi">Số đơn đã mang đúng mã đó rồi (không ghi lại, không đẩy lại).</param>
     /// <param name="KhongCoDon">Số mã yêu cầu KHÔNG khớp đơn nào trong DB (đơn cũ hơn thời gian giữ / shop khác).</param>
-    public sealed record ReturnCodeSaveResult(int DaGhi, int KhongDoi, int KhongCoDon);
+    /// <param name="CapDaGhi">Các cặp (order_sn, mã yêu cầu) vừa ghi thành công — dùng notify, không gửi cả list check.</param>
+    public sealed record ReturnCodeSaveResult(
+        int DaGhi,
+        int KhongDoi,
+        int KhongCoDon,
+        IReadOnlyList<(string OrderSn, string Code)> CapDaGhi);
 
     /// <summary>
     /// Lưu MÃ YÊU CẦU TRẢ HÀNG vào đơn theo <c>order_sn</c> (bước check đơn trả hàng, cuối flow shop).
@@ -467,6 +472,7 @@ public class OrdersRepository
     public ReturnCodeSaveResult SetReturnRequestCodes(long accountId, IEnumerable<(string OrderSn, string Code)> pairs)
     {
         int daGhi = 0, khongDoi = 0, khongCoDon = 0;
+        var capDaGhi = new List<(string OrderSn, string Code)>();
         using var conn = _db.OpenConnection();
         using var tx = conn.BeginTransaction();
 
@@ -477,12 +483,15 @@ public class OrdersRepository
                 continue; // không có khóa / mã rỗng → bỏ (không ghi đè bằng rỗng)
             }
 
+            var snTrim = sn.Trim();
+            var codeTrim = code.Trim();
+
             using (var sel = conn.CreateCommand())
             {
                 sel.Transaction = tx;
                 sel.CommandText = "SELECT 1 FROM orders WHERE account_id = $a AND order_sn = $sn;";
                 sel.Parameters.AddWithValue("$a", accountId);
-                sel.Parameters.AddWithValue("$sn", sn.Trim());
+                sel.Parameters.AddWithValue("$sn", snTrim);
                 if (sel.ExecuteScalar() is null)
                 {
                     khongCoDon++;
@@ -498,12 +507,13 @@ public class OrdersRepository
     gsheet_da_co_don_tra_hang = NULL,
     hub_synced_at = NULL
     WHERE account_id = $a AND order_sn = $sn AND COALESCE(return_request_code, '') <> $code;";
-            upd.Parameters.AddWithValue("$code", code.Trim());
+            upd.Parameters.AddWithValue("$code", codeTrim);
             upd.Parameters.AddWithValue("$a", accountId);
-            upd.Parameters.AddWithValue("$sn", sn.Trim());
+            upd.Parameters.AddWithValue("$sn", snTrim);
             if (upd.ExecuteNonQuery() > 0)
             {
                 daGhi++;
+                capDaGhi.Add((snTrim, codeTrim));
             }
             else
             {
@@ -512,7 +522,7 @@ public class OrdersRepository
         }
 
         tx.Commit();
-        return new ReturnCodeSaveResult(daGhi, khongDoi, khongCoDon);
+        return new ReturnCodeSaveResult(daGhi, khongDoi, khongCoDon, capDaGhi);
     }
 
     /// <summary>
