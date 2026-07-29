@@ -5,6 +5,16 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Hiệu năng. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.6.13 — 2026-07-29
+
+- **Check đơn trả hàng bấm đúng tab + lần đầu phải check:** mở đúng tab **"Đơn Trả hàng/Hoàn tiền"**, lần đầu
+  của mỗi shop luôn check, giới hạn cửa sổ **7 ngày**, và **mã yêu cầu trả hàng đọc độc lập với mã đơn** (thêm
+  4 chốt chặn để không ghép nhầm / bỏ sót).
+- **Tách 3 kênh notify do Hub quyết định:** webhook **đơn mới** / **lỗi app** / **đơn trả** tách riêng, chặn
+  gửi trùng, hết lỗi hỏng im lặng (log rõ), và tự lùi về webhook cũ nếu Hub chưa cấu hình — chỉnh trong
+  Settings.
+- **File Google Sheet phụ:** không nhận đơn hủy mới, và tô đỏ đơn bị hủy sau khi đã ghi.
+
 ## v1.6.12 — 2026-07-29
 
 - **Xóa ribbon "Đơn toàn hệ thống":** tab Đơn hàng chỉ còn **Đơn hàng** / **Thống kê** (đơn toàn hệ thống xem trên Hub).
