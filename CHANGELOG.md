@@ -5,6 +5,17 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Hiệu năng. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## Chưa phát hành
+
+- **Màn "Cài đặt" làm lại từ đầu:** trước đây màn này ghép hai màn cài đặt cũ lại với nhau nên có **hai dòng chữ
+  "Cài đặt"** chồng nhau, ba kiểu thẻ/phông/màu trộn lẫn và mỗi khối thụt lề một kiểu. Nay chỉ còn **một tiêu đề,
+  một hệ giao diện** và các mục xếp thành 5 nhóm rõ ràng theo thứ tự dùng: *Chế độ ứng dụng · Phiên bản & cập nhật ·
+  Hiệu năng · Đồng bộ nhiều máy · Đơn hàng* (nhóm Hiệu năng/Đồng bộ ẩn ở chế độ Shopee, nhóm Đơn hàng ẩn khi không
+  có module). Không có nút hay ô nhập nào bị bỏ — chỉ sắp lại chỗ.
+- **Bỏ ô cấu hình webhook trên máy client:** ba ô webhook (*đơn mới · lỗi app · đơn trả hàng*) không còn ở màn Cài
+  đặt của app, vì webhook giờ là cấu hình **dùng chung đặt trên Hub** (Hub → Cài đặt) và chính Hub gửi tin. Máy đã
+  lưu webhook từ trước vẫn gửi như cũ khi chạy độc lập — chỉ là không sửa được từ app nữa.
+
 ## v1.6.17 — 2026-07-31
 
 - **Không còn nuốt yêu cầu trả hàng khi app chọn nhầm tab:** trước đây nếu app không bấm được tab *"Đơn Trả hàng
