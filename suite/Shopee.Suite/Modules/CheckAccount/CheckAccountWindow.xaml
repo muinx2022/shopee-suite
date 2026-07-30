@@ -1,0 +1,11 @@
+<Window x:Class="Shopee.Suite.Modules.CheckAccount.CheckAccountWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:ca="clr-namespace:Shopee.Suite.Modules.CheckAccount"
+        Title="Check tài khoản Shopee" Width="940" Height="760" MinWidth="720" MinHeight="560"
+        WindowStartupLocation="CenterOwner"
+        Background="{StaticResource WindowBackgroundBrush}" FontFamily="{StaticResource UiFont}"
+        UseLayoutRounding="True" TextOptions.TextFormattingMode="Display">
+    <!-- DataContext = CheckAccountViewModel (do AccountsViewModel truyền vào khi mở). -->
+    <ca:CheckAccountView />
+</Window>

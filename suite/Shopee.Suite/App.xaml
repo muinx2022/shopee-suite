@@ -34,7 +34,8 @@
             <conv:WiderThanConverter x:Key="WiderThan" />
 
             <!-- ══════════ ViewModel-first navigation (thay ViewLocator reflection của bản Avalonia) ══════════ -->
-            <!-- ĐÃ PORT: Welcome + ComingSoon (đợt 1); BigSeller + Data + Accounts (đợt 2); Workspace (đợt 3). -->
+            <!-- ĐÃ PORT: Welcome + ComingSoon (đợt 1); BigSeller + Data + Accounts (đợt 2); Workspace (đợt 3);
+                 Search + CheckAccount + Fleet (đợt 4). -->
             <DataTemplate DataType="{x:Type vm:WelcomeViewModel}">
                 <views:WelcomeView />
             </DataTemplate>
@@ -53,18 +54,20 @@
             <DataTemplate DataType="{x:Type ws:WorkspaceViewModel}">
                 <ws:WorkspaceView />
             </DataTemplate>
+            <DataTemplate DataType="{x:Type srch:SearchViewModel}">
+                <srch:SearchView />
+            </DataTemplate>
+            <!-- CheckAccount thường mở trong cửa sổ riêng (CheckAccountWindow), nhưng giữ DataTemplate để VM
+                 này hiện đúng view nếu được đặt làm nội dung màn. -->
+            <DataTemplate DataType="{x:Type ca:CheckAccountViewModel}">
+                <ca:CheckAccountView />
+            </DataTemplate>
+            <DataTemplate DataType="{x:Type fleet:FleetViewModel}">
+                <fleet:FleetView />
+            </DataTemplate>
 
-            <!-- CHƯA PORT (đợt 4–5 thay từng dòng bằng view thật): mọi màn module tạm dùng ComingSoonView,
+            <!-- CHƯA PORT (đợt 5 thay từng dòng bằng view thật): màn module tạm dùng ComingSoonView,
                  view tự sinh chữ "đang port" từ kiểu ViewModel. -->
-            <DataTemplate DataType="{x:Type srch:SearchViewModel}">      <!-- đợt 4 -->
-                <views:ComingSoonView />
-            </DataTemplate>
-            <DataTemplate DataType="{x:Type ca:CheckAccountViewModel}">  <!-- đợt 4 -->
-                <views:ComingSoonView />
-            </DataTemplate>
-            <DataTemplate DataType="{x:Type fleet:FleetViewModel}">      <!-- đợt 4 -->
-                <views:ComingSoonView />
-            </DataTemplate>
             <DataTemplate DataType="{x:Type settings:SettingsViewModel}">        <!-- đợt 5 -->
                 <views:ComingSoonView />
             </DataTemplate>

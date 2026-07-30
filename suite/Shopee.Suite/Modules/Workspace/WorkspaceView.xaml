@@ -107,10 +107,11 @@
         <!-- Cả cụm tab nằm trong MỘT khay bo tròn nền xám ấm; ô ĐANG CHỌN nổi lên nền TRẮNG + viền mảnh + chữ
              đen đậm, ô còn lại chìm chữ xám. Bên phải khay là tên tài khoản BigSeller đang chọn (mờ, truyền
              qua Tag). Phải THAY TEMPLATE vì khay nền bao quanh dải tab không dựng được bằng setter rời. -->
+        <!-- BẪY WPF (phát hiện ở đợt 4, sửa lây sang đây): KHÔNG đặt Foreground/FontWeight/FontSize TRÊN CHÍNH
+             TabItem — thừa kế của WPF đi theo cây LOGIC mà `TabItem.Content` có logical parent là TabItem, nên
+             "SemiBold/Bold + màu chữ của ô tab" sẽ in đậm + tô màu TOÀN BỘ nội dung tab. Đặt TextElement.* trên
+             Border trong template thay thế (chi tiết ghi ở style TabItem trong Themes/Theme.xaml). -->
         <Style x:Key="subtabItem" TargetType="{x:Type TabItem}">
-            <Setter Property="FontSize" Value="12.5" />
-            <Setter Property="FontWeight" Value="SemiBold" />
-            <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}" />
             <Setter Property="Padding" Value="14,0" />
             <Setter Property="MinHeight" Value="30" />
             <Setter Property="Height" Value="30" />
@@ -130,20 +131,22 @@
                              theo luật mới màu chỉ để đánh dấu, không tô mảng lớn). Segmented control KHÔNG có
                              gạch chỉ báo (khác TabItem mặc định của theme). -->
                         <Border x:Name="PART_LayoutRoot" CornerRadius="7" Background="Transparent"
-                                BorderBrush="Transparent" BorderThickness="1" SnapsToDevicePixels="True">
+                                BorderBrush="Transparent" BorderThickness="1" SnapsToDevicePixels="True"
+                                TextElement.FontSize="12.5" TextElement.FontWeight="SemiBold"
+                                TextElement.Foreground="{StaticResource TextSecondaryBrush}">
                             <ContentPresenter ContentSource="Header" Margin="{TemplateBinding Padding}"
                                               HorizontalAlignment="Center" VerticalAlignment="Center" />
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
                                 <Setter TargetName="PART_LayoutRoot" Property="Background" Value="#66FFFFFF" />
-                                <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+                                <Setter TargetName="PART_LayoutRoot" Property="TextElement.Foreground" Value="{StaticResource TextPrimaryBrush}" />
                             </Trigger>
                             <Trigger Property="IsSelected" Value="True">
                                 <Setter TargetName="PART_LayoutRoot" Property="Background" Value="{StaticResource CardBackgroundBrush}" />
                                 <Setter TargetName="PART_LayoutRoot" Property="BorderBrush" Value="{StaticResource BorderBrush}" />
-                                <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
-                                <Setter Property="FontWeight" Value="Bold" />
+                                <Setter TargetName="PART_LayoutRoot" Property="TextElement.Foreground" Value="{StaticResource TextPrimaryBrush}" />
+                                <Setter TargetName="PART_LayoutRoot" Property="TextElement.FontWeight" Value="Bold" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>

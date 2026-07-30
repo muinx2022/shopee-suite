@@ -23,6 +23,13 @@ public partial class App : Application
     {
         base.OnStartup(e);
 
+        // Công tắc CHẨN ĐOÁN (mặc định TẮT, cùng họ với SHOPEESUITE_BINDING_LOG): ép WPF vẽ bằng đường PHẦN MỀM.
+        // Cần khi máy đang ở trạng thái mà đường tăng tốc D3D không "present" được — cửa sổ WPF mới hiện ra
+        // TRẮNG/ĐEN dù cây giao diện vẫn dựng đúng (đã gặp thật lúc nghiệm thu đợt 4: ảnh chụp trắng trơn trong
+        // khi UIAutomation vẫn đọc đủ phần tử). Đặt SHOPEESUITE_SOFTWARE_RENDER=1 để chụp/soi lại giao diện.
+        if (Environment.GetEnvironmentVariable("SHOPEESUITE_SOFTWARE_RENDER") == "1")
+            System.Windows.Media.RenderOptions.ProcessRenderMode = System.Windows.Interop.RenderMode.SoftwareOnly;
+
         HookBindingTrace();
 
         // Lưới đỡ lỗi UI: DispatcherUnhandledException (WPF) + callback UiThread + AppDomain + Task.

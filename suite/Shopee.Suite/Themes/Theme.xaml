@@ -674,14 +674,23 @@
     </Style>
 
     <!-- ══════════ TAB TRONG MODULE (TabControl/TabItem) — kiểu Win 11: gạch chân accent, chữ cam ══════════ -->
+    <!-- BẪY WPF (đợt 4): KHÔNG đặt Foreground/FontWeight/FontSize TRÊN CHÍNH TabItem. Ở WPF, thuộc tính
+         thừa kế chảy theo cây LOGIC, mà `TabItem.Content` (nội dung cả tab) có logical parent chính là
+         TabItem → đặt "chữ cam + Bold cho ô tab đang chọn" sẽ tô cam + in đậm TOÀN BỘ nội dung tab (mọi
+         TextBlock/TextBox không tự khai màu/độ đậm). Bản Avalonia KHÔNG dính vì thừa kế của nó đi theo cây
+         TRỰC QUAN, mà nội dung tab nằm trong ContentPresenter của TabControl chứ không nằm trong TabItem.
+         Cách đúng: đặt TextElement.* trên Border PART_bd BÊN TRONG template → chỉ phần header đổi màu/đậm. -->
     <Style TargetType="{x:Type TabItem}">
-        <Setter Property="FontFamily" Value="{StaticResource UiFont}" />
-        <Setter Property="FontSize" Value="12.5" />
-        <Setter Property="FontWeight" Value="SemiBold" />
-        <Setter Property="Foreground" Value="{StaticResource TabUnselectedBrush}" />
         <Setter Property="Padding" Value="14,7" />
         <Setter Property="Cursor" Value="Hand" />
         <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+        <!-- PHẢI Stretch (bổ sung đợt 4): TabControl.UpdateSelectedContent() CHÉP Horizontal/VerticalContentAlignment
+             của TabItem ĐANG CHỌN sang PART_SelectedContentHost. Theme mặc định của WPF đặt cả hai = Center (TabItem
+             thừa kế từ TabControl) → nội dung tab (lưới, ô log, form) co lại bằng kích thước mong muốn rồi trôi vào
+             giữa. Chữ trên ô tab vẫn canh giữa nhờ ContentPresenter trong template bên dưới (Alignment tường minh).
+             Đợt 3 đã gặp đúng lỗi này ở sub-tab Workspace (style `subtabItem` cũng để Stretch). -->
+        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        <Setter Property="VerticalContentAlignment" Value="Stretch" />
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="{x:Type TabItem}">
@@ -690,7 +699,12 @@
                             <RowDefinition Height="*" />
                             <RowDefinition Height="2" />
                         </Grid.RowDefinitions>
-                        <Border x:Name="PART_bd" Grid.Row="0" Background="Transparent" CornerRadius="4,4,0,0">
+                        <!-- Cỡ/độ đậm/màu chữ của NHÃN TAB đặt ở đây (TextElement.*), KHÔNG đặt trên TabItem. -->
+                        <Border x:Name="PART_bd" Grid.Row="0" Background="Transparent" CornerRadius="4,4,0,0"
+                                TextElement.FontFamily="{StaticResource UiFont}"
+                                TextElement.FontSize="12.5"
+                                TextElement.FontWeight="SemiBold"
+                                TextElement.Foreground="{StaticResource TabUnselectedBrush}">
                             <ContentPresenter ContentSource="Header" Margin="{TemplateBinding Padding}"
                                               HorizontalAlignment="Center" VerticalAlignment="Center" />
                         </Border>
@@ -700,12 +714,13 @@
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
                             <Setter TargetName="PART_bd" Property="Background" Value="{StaticResource TabHoverBrush}" />
-                            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+                            <Setter TargetName="PART_bd" Property="TextElement.Foreground" Value="{StaticResource TextPrimaryBrush}" />
                         </Trigger>
+                        <!-- Đặt SAU trigger hover → tab đang chọn mà rê chuột vẫn GIỮ màu accent (đúng bản Avalonia). -->
                         <Trigger Property="IsSelected" Value="True">
                             <Setter TargetName="PART_underline" Property="Background" Value="{StaticResource AccentBrush}" />
-                            <Setter Property="Foreground" Value="{StaticResource AccentBrush}" />
-                            <Setter Property="FontWeight" Value="Bold" />
+                            <Setter TargetName="PART_bd" Property="TextElement.Foreground" Value="{StaticResource AccentBrush}" />
+                            <Setter TargetName="PART_bd" Property="TextElement.FontWeight" Value="Bold" />
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
