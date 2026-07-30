@@ -50,14 +50,75 @@ internal sealed class OrdersBridgeChannel : IDisposable
     /// trang đăng nhập (khớp <c>DEFAULT_PORT</c> trong extension). Một phiên/lần test nên cố định là đủ.</summary>
     public const int BridgePort = 47821;
 
+    /// <summary>
+    /// TRẦN CHỜ của từng chặng cầu nối. Gom về đây (lớp sở hữu các chặng) vì trước đây là số trần rải khắp
+    /// <see cref="OrdersBridgeSession"/> + <see cref="ShopFlowRunner"/> — sửa hạn một chặng phải đi tìm, và
+    /// hai chỗ cùng chặng dễ lệch nhau. Mỗi tên khớp ĐÚNG một chặng (<c>Arm…</c>/property cùng tên).
+    /// <para>Giá trị GIỮ NGUYÊN như trước khi đặt tên — đợt này chỉ đặt tên, KHÔNG nới/siết chặng nào.</para>
+    /// </summary>
+    internal static class ChoChang
+    {
+        /// <summary>Extension nối cầu sau khi trình duyệt mở (chặng <see cref="OrdersBridgeChannel.Ready"/>).</summary>
+        internal static readonly TimeSpan Ready = TimeSpan.FromSeconds(45);
+
+        /// <summary>SSO "Kênh Người bán" → về trang chọn shop: đi qua nhiều lần redirect của Shopee nên rộng nhất
+        /// trong nhóm điều hướng.</summary>
+        internal static readonly TimeSpan AtSeller = TimeSpan.FromSeconds(120);
+
+        /// <summary>Đọc bảng shop ở <c>/portal/shop</c> (chỉ quét DOM trang đang mở).</summary>
+        internal static readonly TimeSpan ShopList = TimeSpan.FromSeconds(30);
+
+        /// <summary>Mở "Chi tiết" một shop (trusted click + chờ tab shop lên).</summary>
+        internal static readonly TimeSpan Detail = TimeSpan.FromSeconds(45);
+
+        /// <summary>Đọc số "Chờ Lấy Hàng" trên tab shop (chỉ quét DOM).</summary>
+        internal static readonly TimeSpan ToShip = TimeSpan.FromSeconds(30);
+
+        /// <summary>Đọc đơn tab "Tất cả": extension phân trang tới <c>MAX_ORDER_PAGES</c> trang.</summary>
+        internal static readonly TimeSpan Orders = TimeSpan.FromSeconds(120);
+
+        /// <summary>Đặt địa chỉ lấy hàng (mở modal "Sửa Địa chỉ" + chọn tỉnh + Lưu).</summary>
+        internal static readonly TimeSpan Pickup = TimeSpan.FromSeconds(90);
+
+        /// <summary>Trả địa chỉ lấy hàng về "địa chỉ khác" sau khi xử xong (cùng modal, ít bước hơn
+        /// <see cref="Pickup"/>).</summary>
+        internal static readonly TimeSpan PickupOther = TimeSpan.FromSeconds(60);
+
+        /// <summary>Chuẩn bị hàng MỘT đơn: extension chờ Shopee tạo vận đơn (≤90s) TRƯỚC khi in, rồi chờ tab
+        /// phiếu (≤120s) — nới hạn cho đủ cả hai.</summary>
+        internal static readonly TimeSpan Prepare = TimeSpan.FromSeconds(300);
+
+        /// <summary>Đóng tab shop, về lại trang chọn shop.</summary>
+        internal static readonly TimeSpan CloseShop = TimeSpan.FromSeconds(30);
+
+        /// <summary>Tải LẠI phiếu một đơn: về danh sách "Tất cả" → định vị đơn → in → tải PDF.</summary>
+        internal static readonly TimeSpan Redownload = TimeSpan.FromSeconds(180);
+
+        /// <summary>Đọc trang đơn trả hàng (bước phụ cuối vòng).</summary>
+        internal static readonly TimeSpan Returns = TimeSpan.FromSeconds(90);
+
+        /// <summary>Nền + mỗi đơn (giây) của <see cref="Finals"/>: extension mở TUẦN TỰ từng tab chi tiết nên hạn
+        /// phải co giãn theo số đơn, không cố định được.</summary>
+        private const int FinalsNenGiay = 20, FinalsMoiDonGiay = 20;
+
+        /// <summary>Trần CỨNG của <see cref="Finals"/> — dài hơn nữa thì coi như extension kẹt, thà bỏ bước final
+        /// (best-effort) còn hơn treo cả vòng shop.</summary>
+        private const int FinalsTranGiay = 300;
+
+        /// <summary>Hạn chặng "Số tiền cuối cùng" cho <paramref name="soDon"/> đơn cần mở chi tiết:
+        /// <c>20s + 20s/đơn</c>, trần cứng 300s.</summary>
+        internal static TimeSpan Finals(int soDon)
+            => TimeSpan.FromSeconds(Math.Min(FinalsTranGiay, FinalsNenGiay + (FinalsMoiDonGiay * soDon)));
+    }
+
     private readonly Action<string>? _log;
     private WebSocketServer? _ws;
 
     // Chặng đang chờ (để extension báo "error" CHỈ fault đúng chặng đó). Xem OnMessage case "error".
     private readonly StageWaiter _waiter = new();
 
-    /// <summary>GĐ3: kết quả extension "chuẩn bị hàng" 1 đơn (mã đơn + URL tab phiếu). null qua TCS = hết đơn.</summary>
-    internal sealed record PrepareResult(string OrderCode, string SlipTabUrl, string SlipBase64, string? Tracking);
+    /// <summary>GĐ3: kết quả extension "chuẩn bị hàng" 1 đơn (mã đơn + phiếu base64 + mã vận đơn). null qua TCS = hết đơn.</summary>
+    internal sealed record PrepareResult(string OrderCode, string SlipBase64, string? Tracking);
 
     // Cờ hoàn tất từng chặng — tạo mới mỗi lần chạy; RunContinuationsAsynchronously để continuation KHÔNG chạy
     // trên thread nhận WebSocket (tránh nghẽn vòng nhận / deadlock).
@@ -226,10 +287,9 @@ internal sealed class OrdersBridgeChannel : IDisposable
                 case "orderPrepared":
                 {
                     var code = root.TryGetProperty("orderCode", out var oc) ? (oc.GetString() ?? string.Empty) : string.Empty;
-                    var slip = root.TryGetProperty("slipTabUrl", out var su) ? (su.GetString() ?? string.Empty) : string.Empty;
                     var b64 = root.TryGetProperty("slipBase64", out var sb) ? (sb.GetString() ?? string.Empty) : string.Empty;
                     var trk = root.TryGetProperty("tracking", out var tk) ? tk.GetString() : null;
-                    _prepareTcs.TrySetResult(new PrepareResult(code, slip, b64, trk));
+                    _prepareTcs.TrySetResult(new PrepareResult(code, b64, trk));
                     break;
                 }
 

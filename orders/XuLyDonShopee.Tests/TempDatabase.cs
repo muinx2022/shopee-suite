@@ -22,8 +22,17 @@ public sealed class TempDatabase : IDisposable
 
     public void Dispose()
     {
-        // Xóa pool để giải phóng file handle trước khi xóa file.
-        SqliteConnection.ClearAllPools();
+        // Nhả pool để giải phóng file handle trước khi xóa file — CHỈ pool của ĐÚNG file này.
+        // KHÔNG dùng ClearAllPools(): nó chốt TOÀN TIẾN TRÌNH, mà xUnit chạy các lớp test SONG SONG ⇒ lớp này
+        // Dispose là đóng luôn connection đang mở của lớp khác → ObjectDisposedException lác đác, không tái hiện
+        // ổn định. Pool của Microsoft.Data.Sqlite khóa theo CHUỖI KẾT NỐI nên dựng lại đúng chuỗi mà Database
+        // dùng (SqliteConnectionStringBuilder{DataSource=Path}) là trúng pool cần nhả; connection này không cần Open.
+        using (var conn = new SqliteConnection(
+            new SqliteConnectionStringBuilder { DataSource = Path }.ToString()))
+        {
+            SqliteConnection.ClearPool(conn);
+        }
+
         try
         {
             if (File.Exists(Path))

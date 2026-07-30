@@ -177,7 +177,7 @@ public sealed class OrdersBridgeSession : IDisposable
         }
         catch (Exception ex)
         {
-            L("Cầu nối lỗi: " + ex.Message);
+            L("Cầu nối lỗi: " + ex.ToString());
             return Fail(ex.Message);
         }
     }
@@ -223,12 +223,12 @@ public sealed class OrdersBridgeSession : IDisposable
         ResetState();
         StartBridgeAndLaunch(ShopeeLoginService.SubaccountAccountUrl);
         L("Chờ extension nối cầu (ready) — tối đa 45s...");
-        await _channel.AwaitAsync(_channel.Ready, TimeSpan.FromSeconds(45), ct).ConfigureAwait(false);
+        await _channel.AwaitAsync(_channel.Ready, OrdersBridgeChannel.ChoChang.Ready, ct).ConfigureAwait(false);
         L("Extension đã nối cầu — SSO 'Kênh Người bán' để về trang chọn shop...");
 
         var atSellerTcs = _channel.ArmAtSeller();
         await _channel.SendAsync(new { action = "gotoSellerCentre" }).ConfigureAwait(false);
-        var atSeller = await _channel.AwaitAsync(atSellerTcs, TimeSpan.FromSeconds(120), ct).ConfigureAwait(false);
+        var atSeller = await _channel.AwaitAsync(atSellerTcs, OrdersBridgeChannel.ChoChang.AtSeller, ct).ConfigureAwait(false);
         if (_channel.CaptchaSeen)
         {
             L("PHÁT HIỆN captcha/verify khi vào Seller Centre.");
@@ -267,7 +267,7 @@ public sealed class OrdersBridgeSession : IDisposable
             // Đọc danh sách shop (picker).
             var shopListTcs = _channel.ArmShopList();
             await _channel.SendAsync(new { action = "readShopList" }).ConfigureAwait(false);
-            var json = await _channel.AwaitAsync(shopListTcs, TimeSpan.FromSeconds(30), ct).ConfigureAwait(false);
+            var json = await _channel.AwaitAsync(shopListTcs, OrdersBridgeChannel.ChoChang.ShopList, ct).ConfigureAwait(false);
             var shops = ShopeeLoginService.ParseShopListJson(json);
             _onShopListRead?.Invoke(shops); // tab "Kết quả": App lưu danh sách shop (mọi shop, kể cả 0 đơn).
             shopCount = shops.Count;
@@ -294,7 +294,7 @@ public sealed class OrdersBridgeSession : IDisposable
                     // Mở Chi tiết shop (trusted click).
                     var detailTcs = _channel.ArmDetail();
                     await _channel.SendAsync(new { action = "openShopDetail", shopId = shop.ShopId }).ConfigureAwait(false);
-                    var d = await _channel.AwaitAsync(detailTcs, TimeSpan.FromSeconds(45), ct).ConfigureAwait(false);
+                    var d = await _channel.AwaitAsync(detailTcs, OrdersBridgeChannel.ChoChang.Detail, ct).ConfigureAwait(false);
                     if (_channel.CaptchaSeen || d == "captcha")
                     {
                         return new OrdersBridgeRunResult(shopCount, shopsDone, totalOrders, totalSlips, true, "Rơi vào captcha khi mở Chi tiết.");
@@ -303,7 +303,7 @@ public sealed class OrdersBridgeSession : IDisposable
                     // Đọc "Chờ Lấy Hàng".
                     var toShipTcs = _channel.ArmToShip();
                     await _channel.SendAsync(new { action = "readToShip" }).ConfigureAwait(false);
-                    var raw = await _channel.AwaitAsync(toShipTcs, TimeSpan.FromSeconds(30), ct).ConfigureAwait(false);
+                    var raw = await _channel.AwaitAsync(toShipTcs, OrdersBridgeChannel.ChoChang.ToShip, ct).ConfigureAwait(false);
                     var toShip = ShopeeDashboard.ParseToShipCount(raw);
                     L($"[Shop {i + 1}] Chờ Lấy Hàng: {(toShip?.ToString() ?? "?")}.");
 
@@ -372,7 +372,7 @@ public sealed class OrdersBridgeSession : IDisposable
         }
         catch (Exception ex)
         {
-            L("Cầu nối lỗi: " + ex.Message);
+            L("Cầu nối lỗi: " + ex.ToString());
             return new OrdersBridgeRunResult(shopCount, shopsDone, totalOrders, totalSlips, false, ex.Message);
         }
     }
@@ -391,7 +391,7 @@ public sealed class OrdersBridgeSession : IDisposable
     {
         // 1) Đọc danh sách shop.
         await _channel.SendAsync(new { action = "readShopList" }).ConfigureAwait(false);
-        var shopListJson = await _channel.AwaitAsync(_channel.ShopList, TimeSpan.FromSeconds(30), ct).ConfigureAwait(false);
+        var shopListJson = await _channel.AwaitAsync(_channel.ShopList, OrdersBridgeChannel.ChoChang.ShopList, ct).ConfigureAwait(false);
         var shops = ShopeeLoginService.ParseShopListJson(shopListJson);
         _onShopListRead?.Invoke(shops); // tab "Kết quả": App lưu danh sách shop (mọi shop, kể cả 0 đơn).
         L($"Đọc được {shops.Count} shop từ /portal/shop.");
@@ -412,7 +412,7 @@ public sealed class OrdersBridgeSession : IDisposable
         try
         {
             await _channel.SendAsync(new { action = "openShopDetail", shopId = firstShopId }).ConfigureAwait(false);
-            var detail = await _channel.AwaitAsync(_channel.Detail, TimeSpan.FromSeconds(45), ct).ConfigureAwait(false);
+            var detail = await _channel.AwaitAsync(_channel.Detail, OrdersBridgeChannel.ChoChang.Detail, ct).ConfigureAwait(false);
             if (detail == "captcha" || _channel.CaptchaSeen)
             {
                 L("PHÁT HIỆN captcha/verify khi mở Chi tiết — cần soi lại.");
@@ -423,7 +423,7 @@ public sealed class OrdersBridgeSession : IDisposable
 
             // 3) Đọc số "Chờ Lấy Hàng".
             await _channel.SendAsync(new { action = "readToShip" }).ConfigureAwait(false);
-            var raw = await _channel.AwaitAsync(_channel.ToShip, TimeSpan.FromSeconds(30), ct).ConfigureAwait(false);
+            var raw = await _channel.AwaitAsync(_channel.ToShip, OrdersBridgeChannel.ChoChang.ToShip, ct).ConfigureAwait(false);
             var toShip = ShopeeDashboard.ParseToShipCount(raw);
             L($"Số 'Chờ Lấy Hàng' đọc được: {(toShip?.ToString() ?? "null")} (raw='{raw}').");
 

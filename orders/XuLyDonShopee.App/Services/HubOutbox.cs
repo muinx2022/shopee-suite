@@ -89,7 +89,7 @@ public static class HubOutbox
         catch (Exception ex)
         {
             // Lỗi đẩy hub KHÔNG phá lượt sync (đã ghi DB) — chỉ log; đơn CHƯA đánh dấu → lượt sau đẩy lại.
-            log("Hub: lỗi — " + ex.Message);
+            log("Hub: lỗi — " + ex.ToString());
             return KetQuaDay.ThatBai;
         }
     }
@@ -172,7 +172,7 @@ public static class HubOutbox
         catch (Exception ex)
         {
             // Lỗi đẩy phiếu KHÔNG phá lượt sync (đã ghi DB) — chỉ log; đơn CHƯA đánh dấu → lượt sau đẩy lại.
-            log("Hub phiếu: lỗi — " + ex.Message);
+            log("Hub phiếu: lỗi — " + ex.ToString());
             return KetQuaDay.ThatBai;
         }
     }
@@ -216,7 +216,7 @@ public static class HubOutbox
         }
         catch (Exception ex)
         {
-            log("Đã bán: lỗi — " + ex.Message);
+            log("Đã bán: lỗi — " + ex.ToString());
             return KetQuaDay.ThatBai;
         }
     }
@@ -469,7 +469,7 @@ public static class HubOutbox
                     catch (Exception ex)
                     {
                         // Lỗi đẩy GSheet (mạng/lô) → đơn định-gửi giữ CHƯA settled; vẫn xuống dọn đơn settled-by-design.
-                        log("GSheet: lỗi — " + ex.Message);
+                        log("GSheet: lỗi — " + ex.ToString());
                         ketQua = KetQuaDay.ThatBai;
                     }
                 }
@@ -522,7 +522,7 @@ public static class HubOutbox
         catch (Exception ex)
         {
             // Lỗi bất ngờ KHÔNG phá lượt sync (đã báo thành công) — chỉ ghi log.
-            log("GSheet: lỗi — " + ex.Message);
+            log("GSheet: lỗi — " + ex.ToString());
             return KetQuaDay.ThatBai;
         }
     }
@@ -620,7 +620,7 @@ public static class HubOutbox
         }
         catch (Exception ex)
         {
-            log("GSheet mã trả hàng: lỗi — " + ex.Message);
+            log("GSheet mã trả hàng: lỗi — " + ex.ToString());
             return KetQuaDay.ThatBai;
         }
     }

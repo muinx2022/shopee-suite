@@ -129,7 +129,7 @@ internal static class EmailVerifyFlow
         }
         catch (Exception ex)
         {
-            L("Lỗi khi xác minh qua email: " + ex.Message);
+            L("Lỗi khi xác minh qua email: " + ex.ToString());
             return false;
         }
         finally

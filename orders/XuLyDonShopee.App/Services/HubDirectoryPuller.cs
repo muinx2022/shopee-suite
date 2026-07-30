@@ -44,7 +44,7 @@ internal sealed class HubDirectoryPuller
         }
         catch (Exception ex)
         {
-            nhatKy("Kéo danh bạ từ Hub lỗi: " + ex.Message);
+            nhatKy("Kéo danh bạ từ Hub lỗi: " + ex.ToString());
             trangThai("Kéo danh bạ từ Hub lỗi.");
             return;
         }
@@ -103,7 +103,7 @@ internal sealed class HubDirectoryPuller
                 }
                 catch (Exception ex)
                 {
-                    System.Diagnostics.Trace.WriteLine("[AccountsViewModel] Seed shop khi kéo từ Hub lỗi: " + ex.Message);
+                    System.Diagnostics.Trace.WriteLine("[AccountsViewModel] Seed shop khi kéo từ Hub lỗi: " + ex.ToString());
                 }
             }
         }

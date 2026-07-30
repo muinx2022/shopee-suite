@@ -1,6 +1,5 @@
 using System;
 using System.IO;
-using XuLyDonShopee.Core.Services;
 
 namespace XuLyDonShopee.App.Services;
 
@@ -62,8 +61,8 @@ internal static class SlipFiles
     /// <summary>
     /// True nếu file phiếu <paramref name="path"/> TỒN TẠI và là PDF thật (5 byte đầu <c>%PDF-</c>). Đọc TỐI ĐA
     /// 5 byte đầu (nhẹ, gọi được cho mỗi dòng lưới) — KHÔNG áp trần dung lượng (chỉ kiểm tồn tại + magic, đúng
-    /// định nghĩa "có phiếu"). Mọi lỗi IO → <c>false</c>. Dùng cho <see cref="ThieuPhieu"/> (tự động khi sync) và
-    /// <c>OrderRowViewModel.HasSlipFile</c> (nút "Tải phiếu").
+    /// định nghĩa "có phiếu"). Mọi lỗi IO → <c>false</c>. Dùng cho <c>OrderRowViewModel.HasSlipFile</c> (nút
+    /// "Tải phiếu") và <c>HubOutbox</c> (giữ đơn tới khi phiếu lên hub).
     /// </summary>
     internal static bool SlipFileIsValidPdf(string path)
     {
@@ -84,16 +83,4 @@ internal static class SlipFiles
             return false;
         }
     }
-
-    /// <summary>
-    /// PURE — True khi đơn <b>THIẾU PHIẾU</b> (cần tải lại): trạng thái là "Chuẩn bị hàng"
-    /// (<see cref="ShopeeShippingNav.LaChuanBiHang"/>) VÀ ĐÃ có mã vận đơn (<paramref name="trackingNumber"/>
-    /// khác rỗng — tức arrange đã xong, phiếu đáng lẽ phải có) VÀ file <paramref name="pdfPath"/> KHÔNG tồn tại
-    /// hoặc KHÔNG phải PDF thật (<see cref="SlipFileIsValidPdf"/>). Đơn CHƯA có vận đơn KHÔNG tính (phiếu sẽ
-    /// được tạo ở bước Xử lý đơn). Dùng chung cho luồng tự-động-khi-sync và hiển thị nút "Tải phiếu".
-    /// </summary>
-    internal static bool ThieuPhieu(string? status, string? trackingNumber, string pdfPath)
-        => ShopeeShippingNav.LaChuanBiHang(status)
-           && !string.IsNullOrWhiteSpace(trackingNumber)
-           && !SlipFileIsValidPdf(pdfPath);
 }

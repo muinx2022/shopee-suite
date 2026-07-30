@@ -157,7 +157,7 @@ public sealed class HubOutboxWorker : IDisposable
         catch (Exception ex)
         {
             // Lỗi bất ngờ (đọc DB hỏng…) KHÔNG được giết vòng lặp — lượt sau thử lại.
-            _services.Log.Append(LogLabel, "Lỗi lượt quét: " + ex.Message);
+            _services.Log.Append(LogLabel, "Lỗi lượt quét: " + ex.ToString());
             return false;
         }
     }

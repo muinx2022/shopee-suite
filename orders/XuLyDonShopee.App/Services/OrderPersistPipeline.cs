@@ -345,7 +345,7 @@ internal sealed class OrderPersistPipeline
             catch (Exception ex)
             {
                 // Lỗi báo đơn KHÔNG phá lượt sync (đã báo thành công) — chỉ ghi log.
-                log("Notify: lỗi — " + ex.Message);
+                log("Notify: lỗi — " + ex.ToString());
             }
         }, CancellationToken.None);
     }
@@ -446,7 +446,7 @@ internal sealed class OrderPersistPipeline
             catch (Exception ex)
             {
                 _mocCanhBaoDiaChi.TryRemove(new KeyValuePair<long, DateTime>(_accountId, bayGio));
-                log("Cảnh báo địa chỉ: lỗi — " + ex.Message);
+                log("Cảnh báo địa chỉ: lỗi — " + ex.ToString());
             }
         }, CancellationToken.None);
     }
@@ -610,7 +610,7 @@ internal sealed class OrderPersistPipeline
             }
             catch (Exception ex)
             {
-                log("Notify đơn trả: lỗi — " + ex.Message);
+                log("Notify đơn trả: lỗi — " + ex.ToString());
             }
         }, CancellationToken.None);
     }

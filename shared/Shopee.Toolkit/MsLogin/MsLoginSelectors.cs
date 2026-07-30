@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Text;
 using System.Text.RegularExpressions;
 
 namespace Shopee.Toolkit.MsLogin;
@@ -35,13 +37,6 @@ public static class MsLoginSelectors
     /// span[role='button'] class fui-Link trong span[data-testid='viewFooter'].</summary>
     public static readonly string[] OtherWays =
         { "span[role='button']", "[role='button']", "a", "button" };
-
-    /// <summary>Lựa chọn "Mật khẩu"/"Password" trên màn DANH SÁCH cách đăng nhập (sau khi bấm "Các cách khác"):
-    /// clickable trước — thứ tự selector là thứ tự ưu tiên (button/role trước div/span to).
-    /// <para>Hiện KHÔNG caller nào dùng (cả hai phía đi thẳng từ "Các cách khác" sang tile
-    /// <see cref="UsePassword"/>); giữ lại làm vốn selector cho màn này khi Microsoft đổi form.</para></summary>
-    public static readonly string[] PasswordOption =
-        { "button", "[role='button']", "[role='radio']", "[role='listitem']", "[role='link']", "div[data-testid]", "span" };
 
     /// <summary>KMSI ("Duy trì đăng nhập?"/"Stay signed in?") bản Outlook CŨ — CHỈ dùng ID: nút là
     /// <c>&lt;input value="Yes"&gt;</c> KHÔNG có innerText nên không match theo text. KHÔNG dùng
@@ -81,4 +76,43 @@ public static class MsLoginSelectors
     /// <summary>Text nút "Đăng nhập"/"Sign in" (vi + en, có dấu lẫn không dấu — KHÔNG bám text EN cứng).</summary>
     public static readonly Regex SignInRegex =
         new(@"sign\s*in|đăng nhập|dang nhap", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    /// <summary>
+    /// Chuẩn hoá text để so khớp BỀN: bỏ dấu tiếng Việt (kể cả đ→d), gộp mọi cụm khoảng trắng về một dấu cách,
+    /// trim, hạ chữ thường — tức đưa text đọc từ trang về ĐÚNG dạng của <see cref="UsePasswordNeedles"/> /
+    /// <see cref="OtherWaysNeedles"/> để so <c>Contains</c>. TRỊ lỗi NFC/NFD: text tiếng Việt trên form Microsoft
+    /// ở dạng tổ hợp dấu (NFD) KHÔNG khớp literal dựng sẵn (NFC) dù mắt thấy giống.
+    /// <para>DÙNG CHUNG hai phía (module Đơn hàng qua <c>LoginParsers</c>, Hub/BigSeller qua
+    /// <c>HotmailOtpReader</c>) — trước đây là hai bản chép tay trùng logic. Đặt trong CHÍNH file này thay vì
+    /// file riêng vì hub chỉ <c>Compile</c>-link đúng file này từ Toolkit (xem
+    /// <c>server/Shopee.Hub.Web/Shopee.Hub.Web.csproj</c>), tách ra file mới thì hub không thấy.</para>
+    /// </summary>
+    public static string NormalizeForMatch(string? s)
+    {
+        if (string.IsNullOrWhiteSpace(s))
+        {
+            return string.Empty;
+        }
+
+        var collapsed = string.Join(' ', s.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        var decomposed = collapsed.Normalize(NormalizationForm.FormD);
+        var sb = new StringBuilder(decomposed.Length);
+        foreach (var ch in decomposed)
+        {
+            // Bỏ dấu thanh/dấu phụ (combining marks); đ/Đ không tách được bằng FormD → thay thủ công bên dưới.
+            if (CharUnicodeInfo.GetUnicodeCategory(ch) == UnicodeCategory.NonSpacingMark)
+            {
+                continue;
+            }
+
+            switch (ch)
+            {
+                case 'đ': sb.Append('d'); break;
+                case 'Đ': sb.Append('D'); break;
+                default: sb.Append(ch); break;
+            }
+        }
+
+        return sb.ToString().Normalize(NormalizationForm.FormC).ToLowerInvariant();
+    }
 }

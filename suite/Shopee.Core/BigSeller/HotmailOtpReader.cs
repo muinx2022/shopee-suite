@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
 using Microsoft.Playwright;
@@ -502,7 +501,7 @@ public static class HotmailOtpReader
                         try
                         {
                             if (!await IsElementVisibleByClientRectsAsync(el).ConfigureAwait(false)) continue;
-                            var txt = NormalizeForMatch(await el.InnerTextAsync().ConfigureAwait(false));
+                            var txt = MsLoginSelectors.NormalizeForMatch(await el.InnerTextAsync().ConfigureAwait(false));
                             if (txt.Length > 0 && Array.Exists(normalizedNeedles, n => txt.Contains(n, StringComparison.Ordinal)))
                                 return el;
                         }
@@ -560,25 +559,4 @@ public static class HotmailOtpReader
         catch { return false; }
     }
 
-    /// <summary>Chuẩn hóa text để so khớp bền: bỏ dấu tiếng Việt (kể cả đ→d), gộp khoảng trắng, hạ chữ thường.
-    /// PORT từ ShopeeLoginService.NormalizeForMatch — trị lỗi NFC/NFD của text form Microsoft.</summary>
-    private static string NormalizeForMatch(string? s)
-    {
-        if (string.IsNullOrWhiteSpace(s)) return string.Empty;
-
-        var collapsed = string.Join(' ', s.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
-        var decomposed = collapsed.Normalize(NormalizationForm.FormD);
-        var sb = new StringBuilder(decomposed.Length);
-        foreach (var ch in decomposed)
-        {
-            if (CharUnicodeInfo.GetUnicodeCategory(ch) == UnicodeCategory.NonSpacingMark) continue;
-            switch (ch)
-            {
-                case 'đ': sb.Append('d'); break;
-                case 'Đ': sb.Append('D'); break;
-                default: sb.Append(ch); break;
-            }
-        }
-        return sb.ToString().Normalize(NormalizationForm.FormC).ToLowerInvariant();
-    }
 }

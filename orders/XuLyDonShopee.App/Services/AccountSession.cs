@@ -244,25 +244,6 @@ public partial class AccountSession : ObservableObject, IAccountSession
     }
 
     /// <summary>
-    /// Gỡ cờ "TK chưa xác nhận" cho tài khoản này khi phiên vừa đăng nhập được (đọc số "Chờ Lấy Hàng" lần
-    /// đầu). Chỉ log + phát <see cref="AppServices.RaiseAccountsChanged"/> khi THỰC SỰ có cờ được gỡ
-    /// (<see cref="AccountRepository.ClearVerifyFailed"/> trả &gt;0) để không làm mới UI thừa mỗi lần mở phiên.
-    /// Best-effort: mọi lỗi bị nuốt (KHÔNG phá luồng theo dõi đơn).
-    /// </summary>
-    private void TryClearVerifyFailedAfterLogin()
-    {
-        try
-        {
-            if (_services.Accounts.ClearVerifyFailed(_accountId) > 0)
-            {
-                _services.Log.Append(_logLabel, "Đã xác minh được — gỡ nhãn TK chưa xác nhận.");
-                _services.RaiseAccountsChanged();
-            }
-        }
-        catch { /* best-effort — không phá luồng */ }
-    }
-
-    /// <summary>
     /// <b>Tải LẠI phiếu MỘT đơn (nút "Tải phiếu" màn Đơn hàng):</b> ĐỊNH TUYẾN qua PHIÊN CẦU NỐI extension đang
     /// chạy (nút "▶ Chạy" nay dùng đường cầu nối — <see cref="RunBridgeContinuousAsync"/> giữ tham chiếu
     /// <see cref="_bridge"/>) rồi gọi <see cref="OrdersBridgeSession.RedownloadSlipAsync"/> (extension về danh
@@ -339,7 +320,7 @@ public partial class AccountSession : ObservableObject, IAccountSession
         catch (Exception ex)
         {
             StatusText = $"Tải lại phiếu đơn {orderSn} gặp lỗi — xem nhật ký.";
-            log("Lỗi khi tải lại phiếu: " + ex.Message);
+            log("Lỗi khi tải lại phiếu: " + ex.ToString());
             return false;
         }
     }
@@ -404,7 +385,7 @@ public partial class AccountSession : ObservableObject, IAccountSession
         }
 
         try { await release(login).ConfigureAwait(false); }
-        catch (Exception ex) { _services.Log.Append(_logLabel, "Nhả khóa tài khoản lỗi: " + ex.Message); }
+        catch (Exception ex) { _services.Log.Append(_logLabel, "Nhả khóa tài khoản lỗi: " + ex.ToString()); }
     }
 
     /// <summary>

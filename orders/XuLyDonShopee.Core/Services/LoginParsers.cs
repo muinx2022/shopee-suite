@@ -1,6 +1,5 @@
-using System.Globalization;
-using System.Text;
 using System.Text.Json;
+using Shopee.Toolkit.MsLogin;
 using XuLyDonShopee.Core.Models;
 
 namespace XuLyDonShopee.Core.Services;
@@ -14,35 +13,11 @@ namespace XuLyDonShopee.Core.Services;
 internal static class LoginParsers
 {
     /// <summary>Chuẩn hóa text để so khớp bền: bỏ dấu tiếng Việt (kể cả đ→d), gộp mọi cụm khoảng trắng về một
-    /// dấu cách, trim, hạ chữ thường. Dùng cho lọc tiêu đề "Cảnh báo bảo mật" (so <c>Contains</c> không dấu).</summary>
-    internal static string NormalizeForMatch(string? s)
-    {
-        if (string.IsNullOrWhiteSpace(s))
-        {
-            return string.Empty;
-        }
-
-        var collapsed = string.Join(' ', s.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
-        var decomposed = collapsed.Normalize(NormalizationForm.FormD);
-        var sb = new StringBuilder(decomposed.Length);
-        foreach (var ch in decomposed)
-        {
-            // Bỏ dấu thanh/dấu phụ (combining marks); đ/Đ không tách được bằng FormD → thay thủ công bên dưới.
-            if (CharUnicodeInfo.GetUnicodeCategory(ch) == UnicodeCategory.NonSpacingMark)
-            {
-                continue;
-            }
-
-            switch (ch)
-            {
-                case 'đ': sb.Append('d'); break;
-                case 'Đ': sb.Append('D'); break;
-                default: sb.Append(ch); break;
-            }
-        }
-
-        return sb.ToString().Normalize(NormalizationForm.FormC).ToLowerInvariant();
-    }
+    /// dấu cách, trim, hạ chữ thường. Dùng cho lọc tiêu đề "Cảnh báo bảo mật" (so <c>Contains</c> không dấu).
+    /// <para>Thân nằm ở <see cref="MsLoginSelectors.NormalizeForMatch"/> (shared/Shopee.Toolkit) — DÙNG CHUNG với
+    /// phía Hub/BigSeller (<c>HotmailOtpReader</c>); tên cục bộ này giữ nguyên cho mọi caller sẵn có, đúng khuôn
+    /// các alias selector trong <see cref="LoginSelectors"/>.</para></summary>
+    internal static string NormalizeForMatch(string? s) => MsLoginSelectors.NormalizeForMatch(s);
 
     /// <summary>True nếu text của một dòng mail (InnerText: người gửi + tiêu đề + preview) là mail
     /// <b>"Cảnh báo bảo mật Tài khoản Shopee"</b> — người gửi khớp "shopee" VÀ nội dung (chuẩn hóa không dấu)
@@ -79,38 +54,14 @@ internal static class LoginParsers
     internal static bool MatchesSellerChannelEntry(string? text)
         => LoginSelectors.SellerChannelRegex.IsMatch(NormalizeForMatch(text));
 
-    // JS CHỈ-ĐỌC quét bảng shop: mỗi dòng tr[data-row-key] → {rowKey, name, login}. Bọc từng dòng trong try để
-    // một dòng lạ KHÔNG phá cả bảng. Trả JSON.stringify(mảng). Tên đăng nhập = span trong ô td thứ 2 (fallback
-    // text của td thứ 2). Selector dùng class-contains để bền khi Shopee thêm hậu tố hash vào tên class.
-    internal const string ScanShopListJs = @"() => {
-    const norm = s => (s || '').replace(/\s+/g, ' ').trim();
-    const rows = document.querySelectorAll(""tr[data-row-key]"");
-    const out = [];
-    for (const row of rows) {
-        try {
-            const rowKey = row.getAttribute('data-row-key') || '';
-            const nameEl = row.querySelector(""span[class*='shop-name-text']"");
-            const name = nameEl ? norm(nameEl.textContent) : '';
-            let login = '';
-            const tds = row.querySelectorAll('td');
-            if (tds.length >= 2) {
-                const span = tds[1].querySelector('span');
-                login = norm(span ? span.textContent : tds[1].textContent);
-            }
-            out.push({ rowKey: rowKey, name: name, login: login });
-        } catch (e) { /* dòng lạ — bỏ qua */ }
-    }
-    return JSON.stringify(out);
-}";
-
     // Deserialize không phân biệt hoa/thường: khóa JSON rowKey/name/login khớp thuộc tính record.
     private static readonly JsonSerializerOptions ShopRowJsonOpts = new() { PropertyNameCaseInsensitive = true };
 
     private sealed record RawShopRow(string? RowKey, string? Name, string? Login);
 
     /// <summary>
-    /// HÀM THUẦN (test được): chuyển JSON mảng <c>{rowKey,name,login}</c> (do <see cref="ScanShopListJs"/> đọc từ
-    /// DOM) thành <see cref="ShopListItem"/>. Trim mọi trường; BỎ dòng không có <c>rowKey</c> (không định vị được
+    /// HÀM THUẦN (test được): chuyển JSON mảng <c>{rowKey,name,login}</c> (extension quét bảng <c>/portal/shop</c>
+    /// rồi gửi về) thành <see cref="ShopListItem"/>. Trim mọi trường; BỎ dòng không có <c>rowKey</c> (không định vị được
     /// để mở). Dòng thiếu login vẫn nhận (LoginName rỗng). JSON rỗng/hỏng → danh sách rỗng.
     /// </summary>
     internal static IReadOnlyList<ShopListItem> ParseShopListJson(string? json)

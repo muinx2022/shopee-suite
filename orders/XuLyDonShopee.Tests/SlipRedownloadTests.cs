@@ -7,9 +7,9 @@ using XuLyDonShopee.Core.Models;
 namespace XuLyDonShopee.Tests;
 
 /// <summary>
-/// Test cho tính năng "tải lại phiếu thiếu": hàm PURE <see cref="SlipFiles.ThieuPhieu"/> (ma trận trạng
-/// thái/vận đơn/file), helper kiểm magic PDF <see cref="SlipFiles.SlipFileIsValidPdf"/>, và query
-/// <see cref="OrdersRepository.GetOrdersForSlipCheck"/>. KHÔNG test luồng browser (best-effort, verify tay).
+/// Test cho tính năng "tải lại phiếu thiếu": helper kiểm magic PDF <see cref="SlipFiles.SlipFileIsValidPdf"/>
+/// và query <see cref="OrdersRepository.GetOrdersForSlipCheck"/>. KHÔNG test luồng browser (best-effort,
+/// verify tay).
 /// </summary>
 public class SlipRedownloadTests
 {
@@ -53,56 +53,6 @@ public class SlipRedownloadTests
     [Fact]
     public void SlipFileIsValidPdf_FileKhongTonTai_False()
         => Assert.False(SlipFiles.SlipFileIsValidPdf(MissingPath()));
-
-    // ===== ThieuPhieu (ma trận) =====
-
-    [Fact]
-    public void ThieuPhieu_ChuanBiHang_CoVanDon_FileThieu_True()
-    {
-        // đúng trạng thái + có vận đơn + file không tồn tại → THIẾU
-        Assert.True(SlipFiles.ThieuPhieu("Chờ lấy hàng", "SPXVN123", MissingPath()));
-        Assert.True(SlipFiles.ThieuPhieu("Chuẩn bị hàng", "SPXVN123", MissingPath()));
-    }
-
-    [Fact]
-    public void ThieuPhieu_ChuanBiHang_CoVanDon_FileRac_True()
-    {
-        // file .pdf tồn tại nhưng KHÔNG có magic → coi như thiếu (không tin đuôi file)
-        var path = WriteGarbage();
-        try { Assert.True(SlipFiles.ThieuPhieu("Chờ lấy hàng", "SPXVN123", path)); }
-        finally { File.Delete(path); }
-    }
-
-    [Fact]
-    public void ThieuPhieu_ChuanBiHang_CoVanDon_FilePdfHopLe_False()
-    {
-        // đã có file PDF thật → KHÔNG thiếu
-        var path = WriteValidPdf();
-        try { Assert.False(SlipFiles.ThieuPhieu("Chờ lấy hàng", "SPXVN123", path)); }
-        finally { File.Delete(path); }
-    }
-
-    [Fact]
-    public void ThieuPhieu_KhongVanDon_False()
-    {
-        // chưa có vận đơn (chưa arrange) → phiếu tạo ở bước Xử lý đơn, KHÔNG tính thiếu
-        Assert.False(SlipFiles.ThieuPhieu("Chờ lấy hàng", null, MissingPath()));
-        Assert.False(SlipFiles.ThieuPhieu("Chuẩn bị hàng", "", MissingPath()));
-        Assert.False(SlipFiles.ThieuPhieu("Chuẩn bị hàng", "   ", MissingPath()));
-    }
-
-    [Theory]
-    [InlineData("Đã giao")]
-    [InlineData("Đang giao")]
-    [InlineData("Đã hủy")]
-    [InlineData("Hoàn thành")]
-    [InlineData("")]
-    [InlineData(null)]
-    public void ThieuPhieu_TrangThaiKhac_False(string? status)
-    {
-        // trạng thái không phải Chuẩn bị hàng → KHÔNG tính thiếu dù có vận đơn + thiếu file
-        Assert.False(SlipFiles.ThieuPhieu(status, "SPXVN123", MissingPath()));
-    }
 
     // ===== OrdersRepository.GetOrdersForSlipCheck =====
 

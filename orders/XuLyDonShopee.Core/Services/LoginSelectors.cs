@@ -11,29 +11,6 @@ namespace XuLyDonShopee.Core.Services;
 /// </summary>
 internal static class LoginSelectors
 {
-    // Selector ô đăng nhập Shopee (thử theo thứ tự; selector Shopee CÓ THỂ ĐỔI → luôn có fallback,
-    // không thấy gì thì bỏ qua để người dùng tự nhập tay).
-    internal static readonly string[] UserSelectors =
-    {
-        "input[name='loginKey']",       // ô user chính của Shopee
-        "input[type='text']",           // fallback: ô text đầu tiên
-        "input[type='email']",
-        "input[type='tel']",
-    };
-
-    internal static readonly string[] PasswordSelectors =
-    {
-        "input[name='password']",       // ô mật khẩu chính
-        "input[type='password']",       // fallback theo type
-    };
-
-    internal static readonly string[] SubmitSelectors =
-    {
-        "button[type='submit']",        // nút submit chính
-        "button:has-text('Đăng nhập')", // fallback: nút chứa chữ "Đăng nhập"
-        "button:has-text('ĐĂNG NHẬP')",
-    };
-
     // ===================== Nền tảng tài khoản phụ (subaccount.shopee.com) =====================
     // Form login subaccount là Vue SPA: input KHÔNG có name → dò trong .login-card trước, rồi placeholder,
     // rồi type (fallback rộng nhất cuối). Nút "Đăng nhập" là <button type="button"> (KHÔNG phải submit) chứa
@@ -79,14 +56,6 @@ internal static class LoginSelectors
     // --- Regex đa ngôn ngữ (vi/en), KHÔNG bám text EN cứng ---
     internal static readonly Regex VerifyEmailOptionRegex =
         new("email", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    internal static readonly Regex UsePasswordRegex =
-        new(@"use.*password|dùng mật khẩu|sử dụng mật khẩu|mật khẩu|mat khau", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    // Link "Các cách khác để đăng nhập" (footer form "Xác minh email của bạn" mới của Microsoft).
-    internal static readonly Regex OtherWaysRegex =
-        new(@"cách khác để đăng nhập|cach khac de dang nhap|other ways to sign in", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    // Nút "Có"/"Yes" ở màn KMSI mới (Fluent) — nút submit generic CHỈ được click khi text khớp đúng đây.
-    internal static readonly Regex KmsiYesRegex =
-        new(@"^\s*(yes|có|co)\s*$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     internal static readonly Regex ShopeeSenderRegex =
         new("shopee", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     // Tab "Khác"/"Ưu tiên" của hộp thư Outlook — UI đổi theo NGÔN NGỮ tài khoản (vi/en/es/pt/fr...). Thêm
@@ -117,10 +86,4 @@ internal static class LoginSelectors
     // mãi không thấy mail. Khớp text nút (InnerText "Gửi lại").
     internal static readonly Regex ResendVerifyRegex =
         new(@"^\s*(gửi lại|gui lai|resend)\s*$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-
-    // ===================== Danh sách shop (/portal/shop) — mô hình 1 subaccount = nhiều shop =====================
-
-    // Regex nhận entry nút mở shop ("Chi tiết"): chuẩn hóa không dấu rồi khớp. GIỮ nhiều biến thể (vi + en).
-    internal static readonly Regex ShopDetailRegex =
-        new(@"chi tiet|detail", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 }
