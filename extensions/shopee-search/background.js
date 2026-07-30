@@ -1,10 +1,13 @@
-﻿// â”€â”€ Config â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+﻿// shared/ là BẢN COPY của extensions/shared/ — sửa ở nguồn chuẩn rồi chạy extensions/sync-shared.cmd.
+import { createWsBridge } from './shared/ws-bridge.js';
+import { pacedSleep, rand, randInt, clamp } from './shared/util.js';
+import { waitForTabComplete, waitForTabUrl, waitForTabUrlChange } from './shared/tab-wait.js';
+import { isVerifyUrl, isNetworkErrorPage as detectNetworkErrorPage } from './shared/net-detect.js';
+
+// â”€â”€ Config â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const DEFAULT_WS_PORT = 9111;
 
 // â”€â”€ State â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-let ws          = null;
-let wsPort      = DEFAULT_WS_PORT;
-let reconnectTimer = null;
 let searchTabId = null;
 let initialTabId= null;
 let searchState = null;
@@ -14,37 +17,14 @@ chrome.alarms.create('keepAlive', { periodInMinutes: 0.4 });
 chrome.alarms.onAlarm.addListener(() => chrome.storage.local.get('_'));
 
 // â”€â”€ WebSocket â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-function connectWs(port) {
-  const targetPort = port || DEFAULT_WS_PORT;
-  // We're (re)connecting now → cancel any pending reconnect timer so a stale timer
-  // can't fire later and replace the socket we're about to open.
-  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
-  // Guard: a live socket to the SAME lane port already exists → nothing to do.
-  // Without this, a tab reload (onUpdated) or a late reconnect timer would create a
-  // second socket, whose onopen re-sends 'ready' → C# re-sends 'start' → a running
-  // search is stopped + restarted. Port-change still replaces (below), because a
-  // genuinely different targetPort skips this guard.
-  if (ws && targetPort === wsPort &&
-      (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
-  wsPort = targetPort;
-  // Persist this lane's port so a service-worker restart (MV3 kills the SW after ~30s)
-  // can restore it instead of resetting to DEFAULT_WS_PORT (9111) and hanging.
-  try { chrome.storage.local.set({ _wsPort: wsPort }); } catch (_) {}
-  if (ws) {
-    // Intentional replacement (port changed): detach onclose first so the old socket's
-    // close handler doesn't schedule a duplicate reconnect 3s later.
-    const old = ws;
-    old.onclose = null;
-    old.onerror = null;
-    try { old.close(); } catch (_) {}
-  }
-  const sock = new WebSocket(`ws://localhost:${wsPort}`);
-  ws = sock;
-  sock.onopen  = () => { if (ws !== sock) return; console.log('[SS] WS connected'); send({ action: 'ready' }); };
-  sock.onmessage = evt => { if (ws !== sock) return; try { handleMessage(JSON.parse(evt.data)); } catch (_) {} };
-  sock.onclose = () => {
-    if (ws !== sock) return;
-    ws = null;
+// Reconnect model lives in shared/ws-bridge.js (guard against a second socket, cancel stale
+// reconnect timers, per-socket identity checks). Only the search-specific bits stay here.
+const bridge = createWsBridge({
+  defaultPort: DEFAULT_WS_PORT,
+  reconnectDelayMs: 3000,
+  onOpen: b => { console.log('[SS] WS connected'); b.send({ action: 'ready' }); },
+  onMessage: msg => handleMessage(msg),
+  onClose: () => {
     // Reject every in-flight CDP gesture so its caller falls through to the synthetic
     // fallback immediately, instead of each one hanging the full 30s cdpGesture timeout.
     _gestPending.forEach(entry => {
@@ -52,13 +32,17 @@ function connectWs(port) {
       try { entry.reject(new Error('ws closed')); } catch (_) {}
     });
     _gestPending.clear();
-    if (reconnectTimer) clearTimeout(reconnectTimer);
-    reconnectTimer = setTimeout(() => { reconnectTimer = null; connectWs(wsPort); }, 3000);
-  };
-  sock.onerror = () => {};
+  },
+  // Persist this lane's port so a service-worker restart (MV3 kills the SW after ~30s)
+  // can restore it instead of resetting to DEFAULT_WS_PORT (9111) and hanging.
+  onPortChange: port => { try { chrome.storage.local.set({ _wsPort: port }); } catch (_) {} },
+});
+
+function connectWs(port) {
+  bridge.connect(port);
 }
 function send(obj) {
-  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
+  bridge.send(obj);
 }
 function log(msg) {
   console.log('[SS]', msg);
@@ -82,7 +66,7 @@ const _gestPending = new Map();
 
 function cdpGesture(op) {
   return new Promise((resolve, reject) => {
-    if (!ws || ws.readyState !== WebSocket.OPEN) { reject(new Error('ws not open')); return; }
+    if (!bridge.isOpen()) { reject(new Error('ws not open')); return; }
     const id = ++_gid;
     const timer = setTimeout(() => {
       _gestPending.delete(id);
@@ -877,8 +861,7 @@ async function getCurrentTabUrl() {
 }
 
 async function isVerifyPage() {
-  const url = await getCurrentTabUrl();
-  return /\/verify\//i.test(url || '');
+  return isVerifyUrl(await getCurrentTabUrl());
 }
 
 // Sản phẩm không tồn tại / đã bị xoá: trang Shopee trả 200 nhưng là trang "không tìm thấy".
@@ -917,30 +900,9 @@ async function isProductNotFoundPage() {
   }
 }
 
+// Marker list lives in shared/net-detect.js (union of the search + scrape lists).
 async function isNetworkErrorPage() {
-  try {
-    const [res] = await chrome.scripting.executeScript({
-      target: { tabId: searchTabId },
-      world: 'MAIN',
-      func: () => {
-        const bodyText = (document.body?.innerText || '').toLowerCase();
-        const title = (document.title || '').toLowerCase();
-        return title.includes('site can') ||
-          bodyText.includes('this site can') ||
-          bodyText.includes('err_timed_out') ||
-          bodyText.includes('err_proxy') ||
-          bodyText.includes('err_proxy_connection_failed') ||
-          bodyText.includes('no internet') ||
-          bodyText.includes('something wrong with the proxy server') ||
-          bodyText.includes('checking the proxy address') ||
-          bodyText.includes('took too long to respond') ||
-          bodyText.includes('checking the proxy');
-      },
-    });
-    return res?.result === true;
-  } catch (_) {
-    return false;
-  }
+  return detectNetworkErrorPage(searchTabId, { world: 'MAIN' });
 }
 
 // â”€â”€ Type keyword into Shopee search box and submit (human-like) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -2390,57 +2352,20 @@ async function extractPageData(keyword, categoryName = '') {
 // co giãn nhất quán theo phiên, diệt tính bất biến cross-session/account. KHÔNG áp cho timeout chờ load.
 let sessionPace = 0.8 + Math.random() * 0.7;
 { const h = new Date().getHours(); if (h >= 23 || h < 6) sessionPace *= 1.15; }   // đêm chậm hơn chút
-const rand    = (min, max) => min + Math.random() * (max - min);
-const randInt = (min, max) => Math.floor(min + Math.random() * (max - min + 1));
-const clamp   = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
-// Quãng chờ hành vi: nhân sessionPace (KHÔNG dùng cho timeout hệ thống).
-const sleep = ms => new Promise(r => setTimeout(r, Math.round(ms * sessionPace)));
+// Quãng chờ hành vi: nhân sessionPace (KHÔNG dùng cho timeout hệ thống). rand/randInt/clamp: shared/util.js.
+const sleep = pacedSleep(() => sessionPace);
 
+// Chờ tab/URL: shared/tab-wait.js — ở đây chỉ bọc lại cho gọn tham số của lane search.
 async function waitForTabLoad(tabId, timeoutMs = 15000) {
-  return new Promise(resolve => {
-    let done = false;
-    const finish = () => {
-      if (done) return;
-      done = true;
-      clearTimeout(timer);
-      chrome.tabs.onUpdated.removeListener(fn);
-      resolve();
-    };
-    const timer = setTimeout(finish, timeoutMs);
-    const fn = (id, info) => {
-      if (id === tabId && info.status === 'complete') {
-        finish();
-      }
-    };
-
-    chrome.tabs.get(tabId, tab => {
-      if (done) return;
-      if (tab?.status === 'complete') { finish(); return; }
-      chrome.tabs.onUpdated.addListener(fn);
-    });
-  });
+  return waitForTabComplete(tabId, timeoutMs);
 }
 
 async function waitForUrlChange(previousUrl, timeoutMs = 10000) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const tab = await chrome.tabs.get(searchTabId).catch(() => null);
-    if (!tab) return false;
-    if (tab.url && tab.url !== previousUrl) return true;
-    await sleep(350);
-  }
-  return false;
+  return waitForTabUrlChange(searchTabId, previousUrl, { timeoutMs, pollMs: 350, sleep });
 }
 
 async function waitForUrl(urlPart, timeoutMs = 10000) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const tab = await chrome.tabs.get(searchTabId).catch(() => null);
-    if (!tab) return false;
-    if (tab.url?.includes(urlPart)) return true;
-    await sleep(400);
-  }
-  return false;
+  return waitForTabUrl(searchTabId, urlPart, { timeoutMs, pollMs: 400, sleep });
 }
 
 // â”€â”€ Detect initial tab (from Brave launch URL) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -2457,8 +2382,8 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     initialTabId = tabId;
     log(`Port ${port}, tabId=${tabId}`);
     // Reconnect if the port changed OR the socket isn't actually open — after a service
-    // worker restart wsPort may have reset to 9111 while no fresh 'complete' fires.
-    if (port && (port !== wsPort || !ws || ws.readyState !== WebSocket.OPEN)) connectWs(port);
+    // worker restart the bridge port may have reset to 9111 while no fresh 'complete' fires.
+    if (port && (port !== bridge.port || !bridge.isOpen())) connectWs(port);
   }
 });
 

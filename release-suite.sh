@@ -14,6 +14,10 @@ PUB="publish/ShopeeSuite-linux"
 
 echo "=== Phát hành ShopeeSuite v$VER (linux-x64) ==="
 
+# 0) Bản copy shared/ của 3 extension phải còn khớp extensions/shared/ (nguồn chuẩn). Lệch → DỪNG,
+#    vì extension nạp thẳng từ thư mục của nó nên bản đóng gói sẽ chạy code cũ.
+bash extensions/sync-shared.sh --check
+
 # 1) Kéo bản cũ về để tạo DELTA (repo public → không cần token). Lần đầu chưa có → bỏ qua.
 vpk download github --repoUrl "$REPO" --channel linux --outputDir "$OUT" || echo "(chưa có bản trước — sẽ tạo full)"
 

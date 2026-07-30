@@ -14,6 +14,11 @@ set PUB=publish\ShopeeSuite
 
 echo === Phat hanh ShopeeSuite v%VER% (win-x64) ===
 
+REM 0) Ban copy shared\ cua 3 extension phai con khop extensions\shared\ (nguon chuan). Lech -> DUNG,
+REM    vi extension nap thang tu thu muc cua no nen ban dong goi se chay code cu.
+call extensions\sync-shared.cmd --check
+if errorlevel 1 goto :fail
+
 REM 1) Keo ban cu ve de tao DELTA (repo public -> khong can token). Lan dau chua co -> bo qua loi.
 vpk download github --repoUrl %REPO% --channel win --outputDir %OUT%
 
