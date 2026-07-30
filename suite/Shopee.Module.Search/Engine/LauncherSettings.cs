@@ -5,6 +5,9 @@ public sealed class LauncherSettings
     public List<InstanceConfig> Instances { get; set; } = [];
     public string BravePath { get; set; } = "";
     public string ExtensionPath { get; set; } = "";
+    /// <summary>KHÔNG còn được đọc ở đâu: mỗi lane tự xin cổng động qua PortAllocator.Reserve()
+    /// (xem SearchSession) rồi nhét vào URL "#_ss_ws={port}". Giữ lại để settings.json cũ vẫn nạp được;
+    /// 9111 chỉ là cổng mặc định phía extension (extensions/shopee-search/core.js) và Toolkit WebSocketServer.</summary>
     public int WsPort { get; set; } = 9111;
     public string OutputDirectory { get; set; } = "";
 

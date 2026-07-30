@@ -27,7 +27,7 @@ public static class VideoDownloader
         // Đo dung lượng từng ứng viên, chọn cái lớn nhất.
         var sized = new List<(VideoCandidate c, long size)>();
         foreach (var c in valid)
-            sized.Add((c, await ProbeSizeAsync(c.Url, ct) ?? 0));
+            sized.Add((c, await ProbeSizeAsync(c.Url, ct).ConfigureAwait(false) ?? 0));
         sized.Sort((a, b) => b.size.CompareTo(a.size));
         var best = sized[0].c;
 
@@ -42,12 +42,12 @@ public static class VideoDownloader
             var dest = Path.Combine(outputDir, SanitizeFileName(sku) + ".mp4");
             var tmp = dest + ".part";
 
-            using (var resp = await Http.GetAsync(best.Url, HttpCompletionOption.ResponseHeadersRead, ct))
+            using (var resp = await Http.GetAsync(best.Url, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false))
             {
                 resp.EnsureSuccessStatusCode();
-                await using var src = await resp.Content.ReadAsStreamAsync(ct);
+                await using var src = await resp.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
                 await using var dst = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None);
-                await src.CopyToAsync(dst, ct);
+                await src.CopyToAsync(dst, ct).ConfigureAwait(false);
             }
             if (File.Exists(dest)) File.Delete(dest);
             File.Move(tmp, dest);
@@ -66,7 +66,7 @@ public static class VideoDownloader
         try
         {
             using var head = new HttpRequestMessage(HttpMethod.Head, url);
-            using var resp = await Http.SendAsync(head, ct);
+            using var resp = await Http.SendAsync(head, ct).ConfigureAwait(false);
             if (resp.Content.Headers.ContentLength is { } len) return len;
         }
         catch { }
@@ -74,7 +74,7 @@ public static class VideoDownloader
         {
             using var get = new HttpRequestMessage(HttpMethod.Get, url);
             get.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(0, 0);
-            using var resp = await Http.SendAsync(get, HttpCompletionOption.ResponseHeadersRead, ct);
+            using var resp = await Http.SendAsync(get, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
             if (resp.Content.Headers.ContentRange?.Length is { } total) return total;
             if (resp.Content.Headers.ContentLength is { } len) return len;
         }

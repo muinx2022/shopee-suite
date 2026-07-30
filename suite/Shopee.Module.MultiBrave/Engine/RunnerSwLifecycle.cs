@@ -15,9 +15,9 @@ namespace OpenMultiBraveLauncherV3;
 internal static class RunnerSwLifecycle
 {
     /// <summary>
-    /// ID extension d� x�c th?c (c� launcher hook) theo t?ng CDP port.
-    /// M?i thao t�c (setDisplayState, executeScrapeStep, �) d�ng C�NG m?t ID
-    /// d? tr�nh ghi state v�o extension kh�c v?i popup dang hi?n th?.
+    /// ID extension đã xác thực (có launcher hook) theo từng CDP port.
+    /// Mọi thao tác (setDisplayState, executeScrapeStep, …) dùng CÙNG một ID
+    /// để tránh ghi state vào extension khác với popup đang hiển thị.
     /// </summary>
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, string> _resolvedExtensionByPort = new();
 
@@ -132,7 +132,7 @@ internal static class RunnerSwLifecycle
                 if (probeOk)
                 {
                     onCaptchaState?.Invoke(false);   // SW phản hồi lại = đã rời /verify (captcha giải xong) → cột Trạng thái về cũ
-                    // Ghi nh? ID d� x�c th?c � m?i thao t�c sau d�ng C�NG ID n�y
+                    // Ghi nhớ ID đã xác thực — mọi thao tác sau dùng CÙNG ID này
                     _resolvedExtensionByPort[cdpPort] = id;
                     await RunnerExtensionTabs.CloseRunnerExtensionPopupTabsAsync(cdpPort, profileRoot, cancellationToken);
                     return id;
@@ -222,9 +222,9 @@ internal static class RunnerSwLifecycle
     }
 
     /// <summary>
-    /// ��nh th?c MV3 service worker.
+    /// Đánh thức MV3 service worker.
     /// Brave không hỗ trợ ServiceWorker CDP domain.
-    /// C�ch d�ng tin c?y nh?t: m? popup.html trong tab m?i ? browser start SW.
+    /// Cách đáng tin cậy nhất: mở popup.html trong tab mới → browser tự start SW.
     /// </summary>
     internal static async Task TryWakeServiceWorkerAsync(
         int cdpPort,
@@ -256,7 +256,7 @@ internal static class RunnerSwLifecycle
                 url = popupUrl,
                 background = true,
             }, ct, receiveTimeoutMs: RunnerExtensionRpc.CdpReceiveTimeoutMs);
-            // Kh�ng d�ng tab � d? popup l�m c?u n?i g?i SW cho c�c l?nh launcher.
+            // Không đóng tab — để popup làm cầu nối gửi SW cho các lệnh launcher.
         }
         catch { }
         finally
@@ -289,7 +289,7 @@ internal static class RunnerSwLifecycle
             // fallback below
         }
 
-        // C�ch 2 (fallback): Target.activateTarget qua /json/list id (khi SW dang c� nhung chua active)
+        // Cách 2 (fallback): Target.activateTarget qua /json/list id (khi SW đang có nhưng chưa active)
         ClientWebSocket? browser2 = null;
         try
         {
@@ -371,7 +371,7 @@ internal static class RunnerSwLifecycle
 
     /// <summary>
     /// Giữ SW sống bằng flat session (Target.attachToTarget qua browser WS).
-    /// Kh�c v?i direct WS, flat session KH�NG l�m SW target bi?n kh?i /json/list �
+    /// Khác với direct WS, flat session KHÔNG làm SW target biến khỏi /json/list —
     /// probe vẫn thấy và kết nối được SW target trong khi pinner đang giữ.
     /// </summary>
     public static async Task PinSwWithFlatSessionAsync(
@@ -440,7 +440,7 @@ internal static class RunnerSwLifecycle
         DirectoryInfo profileRoot,
         CancellationToken ct)
     {
-        // D�ng l?i ID d� x�c th?c t? EnsureRunnerExtensionReadyAsync (nh?t qu�n + tr�nh re-probe)
+        // Dùng lại ID đã xác thực từ EnsureRunnerExtensionReadyAsync (nhất quán + tránh re-probe)
         if (_resolvedExtensionByPort.TryGetValue(cdpPort, out var cached))
             return cached;
 

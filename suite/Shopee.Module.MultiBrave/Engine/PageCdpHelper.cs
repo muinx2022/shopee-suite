@@ -280,7 +280,7 @@ internal static class PageCdpHelper
             }
         }
 
-        // Uu ti�n nh?ng page match hint tru?c; n?u v?n r?ng s? th? h?t c�c page c�n l?i.
+        // Ưu tiên những page khớp hint trước; nếu vẫn rỗng sẽ thử hết các page còn lại.
         var ordered = pages
             .OrderByDescending(p => UrlLooksLikeHint(p.url, hint))
             .ThenByDescending(p => p.url.Contains("shopee", StringComparison.OrdinalIgnoreCase))

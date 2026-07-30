@@ -19,7 +19,7 @@ public static class KiotProxyClient
             return new KiotResult(null, null, 0, "key rỗng");
 
         var url = $"https://api.kiotproxy.com/api/v1/proxies/new?key={Uri.EscapeDataString(key)}&region=random";
-        return await TryFetchAsync(url, proxyType, ct);
+        return await TryFetchAsync(url, proxyType, ct).ConfigureAwait(false);
     }
 
     /// <summary>Lấy proxy đang gán với key (không xoay) — dùng khi key chưa tới giờ đổi.</summary>
@@ -30,7 +30,7 @@ public static class KiotProxyClient
             return new KiotResult(null, null, 0, "key rỗng");
 
         var url = $"https://api.kiotproxy.com/api/v1/proxies/current?key={Uri.EscapeDataString(key)}";
-        return await TryFetchAsync(url, proxyType, ct);
+        return await TryFetchAsync(url, proxyType, ct).ConfigureAwait(false);
     }
 
     private static async Task<KiotResult> TryFetchAsync(
@@ -39,7 +39,7 @@ public static class KiotProxyClient
         string response;
         try
         {
-            response = await Http.GetStringAsync(url, ct);
+            response = await Http.GetStringAsync(url, ct).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -110,8 +110,8 @@ public static class KiotProxyClient
         var url = $"https://api.kiotproxy.com/api/v1/proxies/new?key={Uri.EscapeDataString(key)}&region={Uri.EscapeDataString(region)}";
         log?.Invoke($"Lay proxy: {region}");
 
-        using var response = await Http.GetAsync(url);
-        var json = await response.Content.ReadAsStringAsync();
+        using var response = await Http.GetAsync(url).ConfigureAwait(false);
+        var json = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
             throw new InvalidOperationException($"KiotProxy new {(int)response.StatusCode}: {ExtractError(json)}");
 
@@ -127,8 +127,8 @@ public static class KiotProxyClient
             throw new InvalidOperationException("Can nhap KiotProxy key.");
 
         var url = $"https://api.kiotproxy.com/api/v1/proxies/current?key={Uri.EscapeDataString(key)}";
-        using var response = await Http.GetAsync(url);
-        var json = await response.Content.ReadAsStringAsync();
+        using var response = await Http.GetAsync(url).ConfigureAwait(false);
+        var json = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
             throw new InvalidOperationException($"KiotProxy current {(int)response.StatusCode}: {ExtractError(json)}");
 
