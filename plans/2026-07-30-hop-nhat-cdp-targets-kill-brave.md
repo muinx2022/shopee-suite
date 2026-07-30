@@ -1,7 +1,7 @@
 # Plan: Hợp nhất CDP targets (3C) + kịch bản kill Brave (3D) + fix ngưỡng 120s
 
 - **Ngày:** 2026-07-30
-- **Trạng thái:** đã thực thi — chờ phiên chính nghiệm thu (xem "Báo cáo thực thi" cuối file)
+- **Trạng thái:** hoàn thành (đã nghiệm thu 31/07)
 - **Người lập:** Fable · **Người thực thi:** Opus
 
 ## 1. Bối cảnh & mục tiêu

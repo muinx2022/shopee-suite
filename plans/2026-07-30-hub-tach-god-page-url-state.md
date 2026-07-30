@@ -1,7 +1,7 @@
 # Plan: Hub web — tách god-page (Fleet/Dispatch) + UrlState dùng chung + URL-state 3 trang còn thiếu
 
 - **Ngày:** 2026-07-30
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành
 - **Người lập:** Fable · **Người thực thi:** Opus
 
 ## 1. Bối cảnh & mục tiêu

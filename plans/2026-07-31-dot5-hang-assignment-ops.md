@@ -1,7 +1,7 @@
 # Plan: Đợt 5 — hằng AssignmentOps/AssignmentStatus dùng chung client + hub
 
 - **Ngày:** 2026-07-31
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành
 - **Người lập:** Fable · **Người thực thi:** Opus
 
 ## 1. Bối cảnh

@@ -1,7 +1,7 @@
 # Plan: Nhật ký module Đơn hàng hết đơ khi chạy nhiều tài khoản
 
 - **Ngày:** 2026-07-30
-- **Trạng thái:** hoàn thành (chờ phiên chính nghiệm thu + commit)
+- **Trạng thái:** hoàn thành
 - **Người lập:** Fable · **Người thực thi:** opus-dev (trong worktree)
 
 ## 1. Bối cảnh & mục tiêu

@@ -1,7 +1,7 @@
 # Plan: Hợp nhất bộ Shopee-login (3A) + human-input CDP (3B) về Core
 
 - **Ngày:** 2026-07-30
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành
 - **Người lập:** Fable · **Người thực thi:** Opus
 
 ## 1. Bối cảnh & mục tiêu

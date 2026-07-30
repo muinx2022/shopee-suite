@@ -1,7 +1,7 @@
 # Plan: Review toàn repo 2026-07-30 + lộ trình refactor tiếp theo
 
 - **Ngày:** 2026-07-30
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành
 - **Người lập:** Fable · **Người thực thi:** Opus (mỗi đợt có plan con riêng)
 
 ## 1. Bối cảnh & mục tiêu

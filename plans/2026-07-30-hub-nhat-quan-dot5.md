@@ -1,7 +1,7 @@
 # Plan: Hub web — nhất quán đợt 5 (component trùng, hằng, dọn nốt)
 
 - **Ngày:** 2026-07-30
-- **Trạng thái:** hoàn thành (chờ phiên chính nghiệm thu + commit)
+- **Trạng thái:** hoàn thành
 - **Người lập:** Fable · **Người thực thi:** Opus
 
 ## 1. Bối cảnh & mục tiêu

@@ -1,7 +1,7 @@
 # Plan: Tách ShopeeLoginService (orders) + AccountsViewModel (đợt 4 — orders B)
 
 - **Ngày:** 2026-07-30
-- **Trạng thái:** hoàn thành (chờ phiên chính nghiệm thu)
+- **Trạng thái:** hoàn thành
 - **Người lập:** Fable · **Người thực thi:** Opus
 
 ## 1. Bối cảnh & mục tiêu

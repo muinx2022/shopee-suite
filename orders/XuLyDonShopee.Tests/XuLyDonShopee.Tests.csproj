@@ -30,6 +30,7 @@
   <ItemGroup>
     <Compile Include="..\..\suite\Shopee.Core\Coordination\MachineSlots.cs" Link="Shared\Coordination\MachineSlots.cs" />
     <!-- Luật SỐ LANE theo op (import khoá cứng 1 lane) — dùng chung chỗ chạy thật ↔ quỹ Brave, thuần BCL. -->
+    <Compile Include="..\..\suite\Shopee.Core\Coordination\AssignmentConsts.cs" Link="Shared\Coordination\AssignmentConsts.cs" />
     <Compile Include="..\..\suite\Shopee.Core\Coordination\OpLanes.cs" Link="Shared\Coordination\OpLanes.cs" />
     <!-- Điều phối "nhờ Hub đăng nhập lại BigSeller": thuần BCL (hub/đĩa là hàm tiêm vào) — dedup lời nhờ + kéo
          cookie đúng 1 lần + buông khi hỏng/quá hạn, sai chỗ nào cũng làm việc của acc kẹt hoặc chạy cookie chết. -->

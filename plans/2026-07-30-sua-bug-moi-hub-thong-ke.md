@@ -1,7 +1,7 @@
 # Plan: Sửa bug mới phía hub + luồng thống kê đơn dùng chung (đợt B2)
 
 - **Ngày:** 2026-07-30
-- **Trạng thái:** đã code xong — chờ phiên chính nghiệm thu
+- **Trạng thái:** hoàn thành (đã nghiệm thu 31/07)
 - **Người lập:** Fable · **Người thực thi:** Opus
 
 ## 1. Bối cảnh & mục tiêu

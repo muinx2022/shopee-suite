@@ -1,7 +1,7 @@
 # Plan: Sửa bug mới phía orders + extension shopee-orders (đợt B1)
 
 - **Ngày:** 2026-07-30
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành
 - **Người lập:** Fable · **Người thực thi:** Opus
 
 ## 1. Bối cảnh & mục tiêu

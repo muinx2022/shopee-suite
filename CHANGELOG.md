@@ -24,6 +24,23 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
   hình webhook lỗi app, mốc chống spam vẫn bị giữ dù **chưa ai được báo**. Nay mốc chỉ giữ khi ít nhất một kênh đã
   nhận tin.
 
+- **Số "chuẩn bị hàng" chung không còn thiếu/lệch:** sửa cuộc đua khiến đơn đổi trạng thái/mã trả trong lúc đang đẩy
+  lên Hub bị "niêm phong" không bao giờ đẩy lại (thêm cột thế hệ `hub_push_gen`); Hub gộp các shop trùng tên khác
+  HOA/thường (trước đây cùng một đơn bị đếm 2 lần, lọc theo shop trả 0); app cộng dồn thay vì đè khi Hub trả 2 dòng
+  cùng shop; đơn gửi bù kèm mốc "thấy lần đầu" của máy nên không rơi sai ngày.
+- **Giờ trong tin webhook từ Hub đúng giờ Việt Nam** (máy chủ chạy UTC từng làm tin lệch 7 tiếng); Hub mới dựng /
+  khôi phục backup không còn bắn loạt tin "đơn trả" cho dữ liệu lịch sử.
+- **Hub web nhanh và gọn hơn:** thống kê/danh sách đọc qua kết nối riêng (hết nghẽn khi nhiều máy cùng đẩy đơn);
+  trang Giao việc + BigSeller tách nhỏ; các trang `/orders`, `/logs-view`, `/config/accounts` giữ nguyên bộ lọc khi
+  F5/chia sẻ link.
+- **Dọn nền lớn toàn repo (không đổi tính năng):** hợp nhất code trùng lặp về thư viện chung (đăng nhập Shopee,
+  thao tác chuột-phím, WebSocket, dò trình duyệt, selector Microsoft, tiện ích extension); tách các file khổng lồ
+  thành phần nhỏ có chủ đích; thêm ~90 test mới (lần đầu có test cho cầu nối extension Đơn hàng).
+
+> ⚠ **Thứ tự cập nhật đợt này (bắt buộc): deploy Hub web lên VM TRƯỚC, rồi mới phát hành bản client.** Client mới
+> gửi thêm mốc "thấy lần đầu" của đơn + tin "đơn trả" qua Hub; Hub cũ không hiểu sẽ bỏ qua các cải thiện đó.
+> Lần khởi động đầu sau deploy, Hub tự gộp shop trùng tên (chạy một lần) — **backup `hub.db` trước khi deploy**.
+
 > ⚠ **Cần làm một lần trên Google Sheet, TRƯỚC khi cài bản client này:** Apps Script cũ chỉ điền vào **ô trống**, nên
 > khi Shopee tạo lại yêu cầu trả hàng với **mã khác**, ô *"Mã đơn trả hàng"* giữ mãi mã cũ trong khi app vẫn coi là
 > đẩy thành công — hỏng **im lặng**. Dán bản mới ở `orders/gsheet-apps-script/Code.gs` vào Apps Script rồi

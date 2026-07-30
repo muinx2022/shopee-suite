@@ -1,7 +1,7 @@
 # Plan: Tách `shopee-search/background.js` thành module ES (đợt 4 — extension search)
 
 - **Ngày:** 2026-07-30
-- **Trạng thái:** hoàn thành (chờ phiên chính nghiệm thu — xem "Báo cáo thực thi" cuối file)
+- **Trạng thái:** hoàn thành
 - **Người lập:** Fable · **Người thực thi:** Opus
 
 ## 1. Bối cảnh & mục tiêu

@@ -22,14 +22,13 @@ public static class OpLanes
     /// LUÔN <see cref="Import"/> (Hub ghi đè KHÔNG thắng). scrape/update: ưu tiên <paramref name="assignedProcesses"/>
     /// Hub đặt cho lượt này, else <paramref name="clientProcesses"/> (cấu hình client). Clamp theo trần engine:
     /// update 1..10, scrape 1..64.
-    /// <para>Op ở đây CỐ Ý để literal thay vì dùng <c>AssignmentOps</c>: file này được LINK vào
-    /// <c>orders\XuLyDonShopee.Tests</c> (khuôn "thuần BCL, không kéo theo file khác" — xem chú thích lớp) nên
-    /// tham chiếu <c>AssignmentConsts.cs</c> sẽ vỡ build project đó. Giá trị PHẢI khớp <c>AssignmentOps</c>.</para></summary>
+    /// <para>File này được LINK vào <c>orders\XuLyDonShopee.Tests</c> — csproj đó cũng link kèm
+    /// <c>AssignmentConsts.cs</c> để tham chiếu <c>AssignmentOps</c> ở đây không vỡ build.</para></summary>
     public static int RequiredBraves(string? op, int assignedProcesses, int clientProcesses)
     {
-        if (op is "rewrite" or "search") return 0;       // = AssignmentOps.Rewrite / .Search
-        if (op == "import") return Import;               // = AssignmentOps.Import
+        if (op is AssignmentOps.Rewrite or AssignmentOps.Search) return 0;
+        if (op == AssignmentOps.Import) return Import;
         var n = assignedProcesses > 0 ? assignedProcesses : clientProcesses;
-        return op == "scrape" ? Math.Clamp(n, 1, 64) : Math.Clamp(n, 1, 10);   // "scrape" = AssignmentOps.Scrape
+        return op == AssignmentOps.Scrape ? Math.Clamp(n, 1, 64) : Math.Clamp(n, 1, 10);
     }
 }

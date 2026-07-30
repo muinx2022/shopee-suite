@@ -1,7 +1,7 @@
 # Plan: Tách tab "Đơn hàng" ra khỏi Dispatch.razor
 
 - **Ngày:** 2026-07-30
-- **Trạng thái:** đã thực thi — chờ phiên chính nghiệm thu
+- **Trạng thái:** hoàn thành (đã nghiệm thu 31/07)
 - **Người lập:** Fable · **Người thực thi:** opus-dev
 - **Loại việc:** refactor thuần — **KHÔNG đổi một hành vi nào**
 

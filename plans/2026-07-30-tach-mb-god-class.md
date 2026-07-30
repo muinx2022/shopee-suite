@@ -1,7 +1,7 @@
 # Plan: Tách god class module MultiBrave + test ParseLoginLine (đợt 4 — suite MB)
 
 - **Ngày:** 2026-07-30
-- **Trạng thái:** hoàn thành (chờ nghiệm thu)
+- **Trạng thái:** hoàn thành
 - **Người lập:** Fable · **Người thực thi:** Opus
 
 ## 1. Bối cảnh & mục tiêu

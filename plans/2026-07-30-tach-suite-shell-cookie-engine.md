@@ -1,7 +1,7 @@
 # Plan: Tách ScrapeViewModel + OrdersModuleHost + BigSellerCookieEngine partial (đợt 4 — suite shell)
 
 - **Ngày:** 2026-07-30
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành
 - **Người lập:** Fable · **Người thực thi:** Opus
 
 ## 1. Bối cảnh & mục tiêu

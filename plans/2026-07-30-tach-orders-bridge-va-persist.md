@@ -1,7 +1,7 @@
 # Plan: Tách OrdersBridgeSession + OrderPersistPipeline khỏi AccountSession + bổ sung test bridge (đợt 4 — orders A)
 
 - **Ngày:** 2026-07-30
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành
 - **Người lập:** Fable · **Người thực thi:** Opus
 
 ## 1. Bối cảnh & mục tiêu

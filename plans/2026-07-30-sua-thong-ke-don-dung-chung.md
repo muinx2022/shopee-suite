@@ -1,7 +1,7 @@
 # Plan: Sửa 4 lỗi của thống kê đơn dùng chung từ Hub
 
 - **Ngày:** 2026-07-30
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành
 - **Người lập:** Fable · **Người thực thi:** opus-dev
 - **Nền:** commit `7abe9a3` (bản thống kê dùng chung ban đầu, đã commit làm mốc quay lui)
 

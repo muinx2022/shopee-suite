@@ -426,7 +426,7 @@ internal sealed partial class BigSellerProductUpdateRunner : BigSellerBraveRunne
         if (string.IsNullOrEmpty(itemId)) return;
         try
         {
-            OpProgressStore.Shared.MarkDone(_settings.AccountId, _settings.DataSheet, "update",
+            OpProgressStore.Shared.MarkDone(_settings.AccountId, _settings.DataSheet, AssignmentOps.Update,
                 new[] { new KeyValuePair<string, string?>(itemId, productName) });
         }
         catch { }

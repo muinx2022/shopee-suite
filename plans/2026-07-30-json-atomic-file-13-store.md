@@ -1,7 +1,7 @@
 # Plan: `JsonAtomicFile` — khử khuôn Load/Save lặp ở 13 store JSON (3E)
 
 - **Ngày:** 2026-07-30
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành
 - **Người lập:** Fable · **Người thực thi:** Opus
 
 ## 1. Bối cảnh & mục tiêu

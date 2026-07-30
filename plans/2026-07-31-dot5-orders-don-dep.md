@@ -1,7 +1,7 @@
 # Plan: Đợt 5 — orders: dọn code chết sau tách + nhất quán + fix test flaky
 
 - **Ngày:** 2026-07-31
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành
 - **Người lập:** Fable · **Người thực thi:** Opus
 
 ## 1. Bối cảnh
