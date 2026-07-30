@@ -99,6 +99,14 @@ public sealed partial class HubDatabase : IDisposable
         // Mã yêu cầu trả hàng khớp đơn (cột "Đơn trả hàng" trang /orders) — client đọc ở trang
         // "Trả hàng/Hoàn tiền/Hủy" cuối flow shop rồi đẩy lên. NULL = đơn chưa có yêu cầu trả hàng.
         AddColumnIfMissing("orders", "return_request_code", "TEXT");
+        // first_seen_at = lần ĐẦU đơn xuất hiện trên hub (đặt lúc INSERT, KHÔNG đổi khi đồng bộ lại) — mốc đếm đơn
+        // của thống kê dùng chung, tương đương created_at của DB client. Backfill 1 lần cho DB CŨ: lấy tạm synced_at
+        // — với đơn đã đồng bộ NHIỀU lần thì đó là lần GẦN NHẤT chứ không phải lần đầu, nên số liệu lịch sử TRƯỚC
+        // bản vá chỉ là XẤP XỈ (hạn chế đã biết, chấp nhận; đơn đẩy lên từ bản vá trở đi là chính xác).
+        // Index đặt ở ĐÂY (như prepared_day) — SAU khi cột chắc chắn có, kẻo DB cũ chạy CREATE INDEX trước ALTER.
+        if (AddColumnIfMissing("orders", "first_seen_at", "TEXT"))
+            ExecRaw("UPDATE orders SET first_seen_at = synced_at WHERE first_seen_at IS NULL;");
+        ExecRaw("CREATE INDEX IF NOT EXISTS ix_orders_first_seen ON orders(first_seen_at);");
     }
 
     /// <summary>Thêm cột nếu thiếu; trả true nếu VỪA thêm (để chạy backfill 1 lần).</summary>

@@ -190,4 +190,101 @@ Không cần chạy app thật nếu khó; **nhưng phải chỉ ra bằng code*
 
 ## Báo cáo thực thi
 
-<Để trống — người thực thi điền.>
+*(opus-dev, 2026-07-30 — chưa commit, chưa deploy, chưa bump version)*
+
+### File đã sửa/tạo
+
+| File | Thay đổi |
+|---|---|
+| `server/Shopee.Hub.Web/Data/HubDatabase.Orders.cs` | Thêm `first_seen_at TEXT` vào `CREATE TABLE`; `UpsertOrders` đặt `first_seen_at=$sa` **chỉ ở nhánh INSERT** (nhánh `DO UPDATE` không đụng); `GetSharedOrderStatistics` đổi chữ ký sang `(DateTime fromUtc, DateTime toUtcExclusive, string? shopLogin)`, bỏ hết `SpecifyKind(...,Unspecified).ToUniversalTime()`, lọc `first_seen_at >= $from AND < $to`, bỏ 5 trường chuỗi hiển thị → trả số thô (`ActiveOrders/WithTracking/WithFinalAmount/LastSyncedUtc`); thêm record nội bộ `StatOrderRow` (gói luật hủy + tiền của đơn) và gom doanh thu-theo-trạng-thái một lượt qua dictionary |
+| `server/Shopee.Hub.Web/Data/HubDatabase.cs` | `MigrateSchema`: `AddColumnIfMissing("orders","first_seen_at","TEXT")` + backfill `UPDATE ... SET first_seen_at = synced_at WHERE first_seen_at IS NULL` (chỉ chạy khi VỪA thêm cột, đúng mẫu `ledger.machines_json`) + `CREATE INDEX ix_orders_first_seen` đặt SAU ALTER (đúng mẫu `prepared_day`) |
+| `server/Shopee.Hub.Web/Api/ClientApiEndpoints.cs` | `GET /api/orders/stats` đổi tham số `from/to` → `fromUtc/toUtc`, parse `InvariantCulture + RoundtripKind`; thêm helper `AsUtc` chuẩn hoá Kind; giữ nguyên `RequireAuthorization("Client")` (ở cấp group, dòng 35) |
+| `suite/Shopee.Core/Coordination/HubOrderDtos.cs` | `SharedOrderStatistics`: bỏ `ScopeText/EmptyMessage/TrackingText/EstimateCoverageText/LastSyncedText`, thêm `ActiveOrders/WithTracking/WithFinalAmount/LastSyncedUtc` |
+| `suite/Shopee.Core/Coordination/HubClient.cs` | `GetOrderStatisticsAsync(DateTime fromUtc, DateTime toUtcExclusive, ...)`, gửi `?fromUtc=&toUtc=` định dạng `"o"` InvariantCulture; giữ nguyên quy ước nuốt lỗi → `null`, `OperationCanceledException` (huỷ chủ động) vẫn ném |
+| `suite/Shopee.Suite/Infrastructure/OrdersModuleHost.cs` | Hook truyền thẳng 2 mốc UTC (bỏ `ToString("yyyy-MM-dd")`); `MapSharedStats` map theo DTO mới |
+| `orders/XuLyDonShopee.App/Services/AppServices.cs` | Record `SharedOrderStatistics` khớp DTO mới; cập nhật doc hook `QueryOrderStatistics` (tham số giờ là mốc UTC) |
+| `orders/XuLyDonShopee.App/ViewModels/OrderStatisticsViewModel.cs` | Bỏ `LoadSharedStatistics` chặn luồng; tách `ApplyLocal` (vẽ số máy NGAY, đồng bộ) + `LoadSharedStatisticsAsync` (gọi hub ở nền, marshal về UI thread qua `Dispatcher.UIThread`); thêm `_statsRequestId` chống trả lời lạc nhịp; thêm `SourceText`; client tự dựng `TrackingText/EstimateCoverageText/LastSyncedText/ScopeText/EmptyMessage` |
+| `orders/XuLyDonShopee.App/Views/OrderStatisticsView.axaml` | Thêm 1 dòng `SourceText` dưới tiêu đề; sửa câu "Cách tính" cho đúng cả 2 nguồn |
+| `orders/XuLyDonShopee.Tests/OrdersViewModelTests.cs` | Sửa test không biên dịch (lỗi #4): bỏ `StubSession` + gán `services.Sessions`, viết lại đi qua `OrderRowViewModel.RedownloadSlipCommand` như code thật; dọn `using` trùng (CS0105) |
+| `orders/XuLyDonShopee.Tests/OrderStatisticsViewModelTests.cs` | **+3 test**: chưa nối hub / hub không phản hồi (giữ số local + nói rõ nguồn) và **hub chậm 3s không chặn luồng vẽ** (hồi quy lỗi #1) |
+| `server/Shopee.Hub.Web.Tests/HubSharedOrderStatsTests.cs` | **MỚI — 5 test** (4 test bắt buộc + 1 test migration) |
+| `server/Shopee.Hub.Web.Tests/Shopee.Hub.Web.Tests.csproj` | Thêm `ProjectReference` tới `XuLyDonShopee.Core` với `Aliases="ordersCore"` (Shopee.Hub.Web LINK sẵn vài file nguồn của project này → tham chiếu thẳng sẽ CS0433) — chỉ để test "số hub khớp số local" |
+
+### Build & test
+
+```text
+dotnet build ShopeeSuite.sln      -c Debug  → Build succeeded. 0 Warning(s) 0 Error(s)
+dotnet build server/ShopeeHub.sln -c Debug  → Build succeeded. 0 Warning(s) 0 Error(s)
+dotnet test orders/XuLyDonShopee.Tests      → Passed! Failed: 0, Passed: 1449, Total: 1449
+dotnet test server/Shopee.Hub.Web.Tests     → Passed! Failed: 0, Passed:   30, Total:   30
+```
+
+Trước bản vá project test KHÔNG biên dịch được (CS0200 dòng 133, CS1061 dòng 136) → 1445 test chưa từng chạy. Nay
+1449 (1445 cũ + 3 test VM mới + 1 test cũ viết lại) và 30 test hub (25 cũ + 5 mới).
+
+### 4 test bắt buộc (đều ở `server/Shopee.Hub.Web.Tests/HubSharedOrderStatsTests.cs`)
+
+1. `FirstSeenAt_GiuNguyenKhiDongBoLai_ChiSyncedAtDoi` — upsert lại: `first_seen_at` bất biến, `synced_at` mới hơn, dữ liệu vẫn cập nhật.
+2. `LocTheoKhoangUtc_BienDuoiDong_BienTrenMo` — đơn ở đúng mốc `from` được đếm, ở đúng mốc `to` bị loại.
+3. `KhoangLoc_HieuTheoUtc_KhongPhuThuocGioMayChu` — mốc `2026-03-15T22:30Z`: khoảng UTC ôm đúng mốc → 1 đơn; khoảng cùng giờ đồng hồ nhưng lệch 7 tiếng (UTC+7) → 0 đơn, kết quả không đổi theo múi giờ máy chạy test.
+4. `SoHubKhopSoLocal_KeCaSauKhiDongBoLai` — **chốt chặn lỗi #3**: cùng 3 đơn trên `OrdersRepository` (local) và `HubDatabase` (hub), đồng bộ lại ở thời điểm khác → khoảng chứa mốc cũ: local 3 = hub 3 (số đơn hủy cũng khớp); khoảng chứa mốc đồng bộ lại: local 0 = hub 0.
+
+Thêm `MoDbCu_ThemCotFirstSeen_BackfillTuSyncedAt_VaVanUpsertDuoc` — dựng `hub.db` với bảng `orders` ĐÚNG schema cũ
+(không có `first_seen_at`) + 1 đơn sẵn, mở `HubDatabase` như hub khởi động lại: không sập, backfill `first_seen_at =
+synced_at`, đơn cũ còn nguyên, upsert đơn mới vẫn chạy.
+
+**Đã kiểm chứng test bắt lỗi thật:** tạm đổi `WHERE o.first_seen_at` về `o.synced_at` → test 3 và 4 FAIL (2 passed /
+2 failed), rồi hoàn nguyên.
+
+### Grep chứng minh không còn lời gọi chặn luồng
+
+```text
+$ grep -rn "GetAwaiter()\.GetResult()|\.Result\b|\.Wait()" \
+    orders/XuLyDonShopee.App/ViewModels/OrderStatisticsViewModel.cs \
+    orders/XuLyDonShopee.App/Services/AppServices.cs \
+    suite/Shopee.Suite/Infrastructure/OrdersModuleHost.cs \
+    suite/Shopee.Core/Coordination/HubClient.cs
+OrderStatisticsViewModel.cs:205:    /// ... (đây là lỗi cũ: <c>GetAwaiter().GetResult()</c>   ← DÒNG COMMENT
+
+$ ... | grep -v "///"
+exit=1   (không còn dòng CODE nào)
+
+$ grep -rn "GetAwaiter()\.GetResult()|\.Wait()" orders/XuLyDonShopee.App --include=*.cs
+(chỉ đúng dòng comment trên — cả module Đơn hàng không còn chỗ nào)
+```
+
+Kèm test hành vi `HubChamKhongChanLuongUi_SoLocalHienNgay`: hook hub `await Task.Delay(3s)`, dựng VM + đổi ngày phải
+xong dưới 1s và đã có số local.
+
+### Lệch so với plan / điểm cần soi lại
+
+1. **Tên trường `LastSeenUtc` → `LastSyncedUtc`.** Plan đặt tên `LastSeenUtc`, nhưng giá trị là `MAX(synced_at)`
+   (ô UI là "ĐỒNG BỘ GẦN NHẤT", đúng nghĩa cũ). Đặt tên `LastSeenUtc` sẽ dễ nhầm với `first_seen_at`.
+2. **Thêm trạng thái nguồn thứ 3.** Plan nêu 2 chuỗi; đã thêm `"Số trên MÁY NÀY (app chạy độc lập, chưa nối Hub)."`
+   cho ca hook `QueryOrderStatistics == null` (app Đơn hàng chạy riêng / chế độ không có Hub) — nói "Hub không phản
+   hồi" trong ca đó là sai sự thật.
+3. **Test "Tải phiếu" không giữ được đúng ý định cũ.** Nhánh *"đang chờ đến lượt"* nằm sau
+   `_services.Sessions.Get(id)`, mà `AppServices.Sessions` là chỉ-đọc và tạo factory phiên THẬT trong ctor → không
+   bơm được stub nếu không sửa code sản phẩm (plan cấm). Đã viết lại test đi qua đúng API thật
+   (`OrderRowViewModel.RedownloadSlipCommand`) và kiểm nhánh **chưa mở phiên**; nhánh Queued chưa có test — ghi chú
+   ngay trong file test.
+4. **Thêm reference có alias vào project test hub** (`XuLyDonShopee.Core`, `Aliases="ordersCore"`) — cần thiết cho
+   test bắt buộc số 4; alias để không đụng các file test hub khác (Shopee.Hub.Web đã LINK sẵn `SyncedOrder`,
+   `ShopeeShippingNav`… nên tham chiếu thường sẽ trùng kiểu).
+5. **Định dạng mốc so sánh trong SQL:** hub ghi thời gian bằng `Iso(DateTimeOffset)` → hậu tố `+00:00`, còn
+   `DateTime(Kind=Utc).ToString("o")` ra `Z`; so chuỗi thì `'+' < 'Z'` nên đơn ở ĐÚNG biên `from` sẽ bị loại oan.
+   Đã dựng mốc qua `Iso(new DateTimeOffset(...))` cho cùng định dạng (bản cũ cũng dính, nhưng bị lỗi múi giờ che mất).
+6. **Chưa sờ tới** ngày đặt đơn thật của Shopee, `OrdersPush`, version, commit, deploy — đúng phạm vi plan.
+
+### Cần lưu ý khi deploy (PHÁ TƯƠNG THÍCH — deploy Hub và phát hành client CÙNG ĐỢT)
+
+- `GET /api/orders/stats` đổi tham số `from/to` → `fromUtc/toUtc`. **Client CŨ** gọi `?from=&to=` sẽ nhận
+  `400 BadRequest` → `GetOrderStatisticsAsync` trả `null` → tab Thống kê bản cũ **tự về số local** (không crash,
+  không hộp thoại), nhưng dòng nguồn của bản cũ chưa có nên người dùng bản cũ không biết mình đang xem số máy.
+- **Client MỚI + Hub CŨ** (nếu lỡ phát hành client trước): hub cũ đọc `from/to` rỗng → cũng `BadRequest` → client mới
+  hiển thị số local kèm chữ "Hub không phản hồi…". An toàn cả hai chiều, nhưng ĐỀ NGHỊ **deploy Hub trước**.
+- Migration chạy lúc hub khởi động: `ALTER TABLE orders ADD COLUMN first_seen_at TEXT` + backfill + tạo index. Với
+  DB thật trên VM, backfill lấy `synced_at` — với đơn đã đồng bộ nhiều lần đó là lần GẦN NHẤT, nên **số liệu lịch sử
+  trước bản vá chỉ là xấp xỉ** (đơn cũ có thể dồn vào ngày đồng bộ gần nhất). Từ bản vá trở đi số liệu chính xác.
+  Backfill + tạo index chạy một lần trên bảng `orders` — nếu bảng lớn, lần khởi động đầu sau deploy sẽ lâu hơn bình thường.
+- Chưa deploy, chưa commit, chưa bump version — để phiên chính quyết.

@@ -64,6 +64,9 @@
                            Foreground="{StaticResource TextInk}" />
                 <TextBlock Text="{Binding ScopeText}" FontSize="12" Foreground="{StaticResource TextMuted}"
                            Margin="0,2,0,0" />
+                <!-- Nguồn số đang xem (máy này / toàn hệ thống) — Hub lỗi mà vẫn hiện số local thì phải nói rõ. -->
+                <TextBlock Text="{Binding SourceText}" FontSize="11.5" FontWeight="SemiBold"
+                           Foreground="{StaticResource TextMuted}" TextWrapping="Wrap" Margin="0,3,0,0" />
             </StackPanel>
             <StackPanel Grid.Column="1" Spacing="8" HorizontalAlignment="Right">
                 <Grid ColumnDefinitions="Auto,190,Auto,190">
@@ -173,7 +176,7 @@
 
                     <Border Classes="statCard" Margin="0" Background="{StaticResource SubtleBg}">
                         <TextBlock FontSize="11.5" Foreground="{StaticResource TextMuted}" TextWrapping="Wrap"
-                                   Text="Cách tính: mọi số liệu chỉ tính các đơn được ghi nhận lần đầu trên máy trong khoảng ngày đang chọn (theo created_at), không dùng thời điểm đồng bộ lại. Doanh thu ước tính không gồm đơn hủy; ưu tiên “Số tiền cuối cùng”, nếu chưa có thì dùng “Tổng tiền”. Đây là ảnh chụp kho đơn cục bộ, không phải báo cáo doanh thu quyết toán của Shopee." />
+                                   Text="Cách tính: mọi số liệu chỉ tính các đơn được ghi nhận LẦN ĐẦU trong khoảng ngày đang chọn (số của máy này theo created_at, số chung theo mốc đơn xuất hiện lần đầu trên Hub), không dùng thời điểm đồng bộ lại. Doanh thu ước tính không gồm đơn hủy; ưu tiên “Số tiền cuối cùng”, nếu chưa có thì dùng “Tổng tiền”. Đây là ảnh chụp kho đơn, không phải báo cáo doanh thu quyết toán của Shopee." />
                     </Border>
                 </StackPanel>
             </ScrollViewer>

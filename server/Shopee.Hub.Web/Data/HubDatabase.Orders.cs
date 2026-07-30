@@ -56,6 +56,21 @@ public sealed record PrepareStatRow(string ShopUsername, int Count);
 public sealed record ShopOrderSummary(long ShopId, int Waiting, int WithSlip, DateTimeOffset LastSynced);
 public sealed record OrdersPageResult(int Total, List<OrderRecord> Items);
 
+/// <summary>Một dòng đơn THÔ đọc cho thống kê dùng chung (<see cref="HubDatabase.GetSharedOrderStatistics"/>) — kiểu
+/// NỘI BỘ hub, chỉ giữ các cột cần để gom số. Luật phân loại hủy / tiền của đơn để NGAY TRONG kiểu này để mọi chỗ
+/// gom số (tổng, theo trạng thái, theo shop) dùng đúng một luật — cùng luật với client.</summary>
+internal sealed record StatOrderRow(
+    string Shop, string? Status, string? StatusDescription, string? CancelReason, string? Carrier, string? Channel,
+    string? PaymentMethod, long? FinalAmount, long? TotalPrice, string? TrackingNumber, int ItemCount,
+    DateTimeOffset SyncedAt)
+{
+    /// <summary>Đơn hủy → KHÔNG tính vào doanh thu và "đơn hiệu lực".</summary>
+    public bool Cancelled => ShopeeShippingNav.LaDonHuy(Status, StatusDescription, CancelReason);
+
+    /// <summary>Tiền của đơn: ưu tiên "số tiền cuối cùng", chưa có thì "tổng tiền"; âm/thiếu → 0.</summary>
+    public long Revenue => Math.Max(0, FinalAmount ?? TotalPrice ?? 0);
+}
+
 /// <summary>Phần HubDatabase: nghiệp vụ ĐƠN HÀNG — bảng <c>orders</c> (UNIQUE shop_id+order_sn) + upsert/query/count.</summary>
 public sealed partial class HubDatabase
 {
@@ -72,7 +87,7 @@ CREATE TABLE IF NOT EXISTS orders(
   payment_method TEXT, status TEXT, status_description TEXT, cancel_reason TEXT,
   channel TEXT, carrier TEXT, tracking_number TEXT,
   synced_at TEXT, slip_at TEXT,
-  prepared_at TEXT, prepared_day TEXT, return_request_code TEXT);
+  prepared_at TEXT, prepared_day TEXT, return_request_code TEXT, first_seen_at TEXT);
 CREATE UNIQUE INDEX IF NOT EXISTS ux_orders_shop_sn ON orders(shop_id, order_sn);
 CREATE INDEX IF NOT EXISTS ix_orders_shop ON orders(shop_id);
 CREATE INDEX IF NOT EXISTS ix_orders_status ON orders(status);");
@@ -136,11 +151,14 @@ CREATE INDEX IF NOT EXISTS ix_orders_status ON orders(status);");
                 // KHÔNG ghi đè ngày của máy đã thực sự chuẩn bị đơn (nguồn đếm /prepare-stats).
                 // return_request_code COALESCE cùng lý do: chỉ MÁY chạy bước check trả hàng của shop đó mới có mã,
                 // máy khác đẩy lại (không kèm) KHÔNG được xoá mã đang có.
+                // first_seen_at CHỈ đặt lúc INSERT — lần ĐẦU đơn xuất hiện trên hub, mốc DUY NHẤT toàn hệ thống để
+                // thống kê đếm đơn (tương đương created_at của DB client). Nhánh DO UPDATE TUYỆT ĐỐI KHÔNG đụng cột
+                // này: đụng vào là đơn cũ đồng bộ lại nhảy sang ngày hôm nay (đúng lỗi của synced_at).
                 c.CommandText = @"
 INSERT INTO orders(shop_id,order_sn,shopee_order_id,buyer_username,items_json,item_count,item_summary,sku,
   total_price,total_price_text,final_amount,final_amount_text,payment_method,status,status_description,
-  cancel_reason,channel,carrier,tracking_number,synced_at,prepared_at,prepared_day,return_request_code)
-VALUES($s,$sn,$soi,$bu,$ij,$ic,$is,$sku,$tp,$tpt,$fa,$fat,$pm,$st,$sd,$cr,$ch,$ca,$tn,$sa,$pa,$pd,$rrc)
+  cancel_reason,channel,carrier,tracking_number,synced_at,prepared_at,prepared_day,return_request_code,first_seen_at)
+VALUES($s,$sn,$soi,$bu,$ij,$ic,$is,$sku,$tp,$tpt,$fa,$fat,$pm,$st,$sd,$cr,$ch,$ca,$tn,$sa,$pa,$pd,$rrc,$sa)
 ON CONFLICT(shop_id,order_sn) DO UPDATE SET
   shopee_order_id=$soi, buyer_username=$bu, items_json=$ij, item_count=$ic, item_summary=$is, sku=$sku,
   total_price=$tp, total_price_text=$tpt,
@@ -227,31 +245,39 @@ ON CONFLICT(shop_id,order_sn) DO UPDATE SET
         return result;
     }
 
-    public SharedOrderStatistics GetSharedOrderStatistics(DateTime fromLocalDate, DateTime toLocalDate, string? shopLogin)
+    /// <summary>
+    /// Thống kê đơn DÙNG CHUNG trong khoảng <c>[fromUtc, toUtcExclusive)</c> — hai mốc UTC do CLIENT tính sẵn từ
+    /// ngày địa phương của người dùng; hub KHÔNG suy diễn múi giờ (máy chủ chạy giờ UTC, mỗi client một múi giờ).
+    /// <para>Lọc theo <c>first_seen_at</c> = lần ĐẦU đơn xuất hiện trên hub (đặt lúc INSERT, không đổi khi đồng bộ
+    /// lại) — tương đương <c>created_at</c> của DB client, nên CÙNG khoảng ngày thì số của hub khớp số local.
+    /// TUYỆT ĐỐI không lọc theo <c>synced_at</c>: cột đó bị ghi đè mỗi lần đẩy lại nên đơn cũ sẽ nhảy vào hôm nay.</para>
+    /// Trả SỐ THÔ (không chuỗi hiển thị): định dạng ngày/tiền/tỉ lệ là việc của client.
+    /// </summary>
+    public SharedOrderStatistics GetSharedOrderStatistics(DateTime fromUtc, DateTime toUtcExclusive, string? shopLogin)
     {
-        var fromUtc = DateTime.SpecifyKind(fromLocalDate.Date, DateTimeKind.Unspecified).ToUniversalTime();
-        var toUtc = DateTime.SpecifyKind(toLocalDate.Date.AddDays(1), DateTimeKind.Unspecified).ToUniversalTime();
-        var fromStr = fromUtc.ToString("o");
-        var toStr = toUtc.ToString("o");
+        // Mốc so sánh phải dựng CÙNG cách các cột thời gian được GHI (Iso(DateTimeOffset) → hậu tố "+00:00"): so
+        // chuỗi mà một bên "…Z" một bên "…+00:00" là lệch ở đúng biên ('+' < 'Z').
+        var fromStr = Iso(new DateTimeOffset(DateTime.SpecifyKind(fromUtc, DateTimeKind.Utc), TimeSpan.Zero));
+        var toStr = Iso(new DateTimeOffset(DateTime.SpecifyKind(toUtcExclusive, DateTimeKind.Utc), TimeSpan.Zero));
 
         lock (_gate)
         {
             var stats = new SharedOrderStatistics();
-            var rows = new List<(string Shop, string? Status, string? StatusDescription, string? CancelReason, string? Carrier, string? Channel, string? PaymentMethod, long? FinalAmount, long? TotalPrice, string? TrackingNumber, int ItemCount, DateTimeOffset SyncedAt)>();
+            var rows = new List<StatOrderRow>();
 
             using (var c = _conn.CreateCommand())
             {
                 c.CommandText = @"SELECT COALESCE(s.username, ''), o.status, o.status_description, o.cancel_reason, o.carrier, o.channel,
        o.payment_method, o.final_amount, o.total_price, o.tracking_number, o.item_count, o.synced_at
 FROM orders o JOIN shops s ON s.id = o.shop_id
-WHERE o.synced_at >= $from AND o.synced_at < $to" + (string.IsNullOrWhiteSpace(shopLogin) ? "" : " AND s.username = $shop");
+WHERE o.first_seen_at >= $from AND o.first_seen_at < $to" + (string.IsNullOrWhiteSpace(shopLogin) ? "" : " AND s.username = $shop");
                 c.Parameters.AddWithValue("$from", fromStr);
                 c.Parameters.AddWithValue("$to", toStr);
                 if (!string.IsNullOrWhiteSpace(shopLogin)) c.Parameters.AddWithValue("$shop", shopLogin.Trim());
                 using var rd = c.ExecuteReader();
                 while (rd.Read())
                 {
-                    rows.Add((
+                    rows.Add(new StatOrderRow(
                         S(rd, 0),
                         rd.IsDBNull(1) ? null : rd.GetString(1),
                         rd.IsDBNull(2) ? null : rd.GetString(2),
@@ -267,33 +293,26 @@ WHERE o.synced_at >= $from AND o.synced_at < $to" + (string.IsNullOrWhiteSpace(s
                 }
             }
 
+            var active = rows.Where(r => !r.Cancelled).ToList();
             stats.TotalOrders = rows.Count;
             stats.TotalItems = rows.Sum(r => Math.Max(0, r.ItemCount));
-            var cancelled = rows.Where(r => XuLyDonShopee.Core.Services.ShopeeShippingNav.LaDonHuy(r.Status, r.StatusDescription, r.CancelReason)).ToList();
-            var active = rows.Where(r => !XuLyDonShopee.Core.Services.ShopeeShippingNav.LaDonHuy(r.Status, r.StatusDescription, r.CancelReason)).ToList();
-            stats.Cancelled = cancelled.Count;
-            stats.Delivered = rows.Count(r => !XuLyDonShopee.Core.Services.ShopeeShippingNav.LaDonHuy(r.Status, r.StatusDescription, r.CancelReason) && XuLyDonShopee.Core.Services.ShopeeShippingNav.LaDaGiaoDaBan(r.Status));
-            stats.NeedsAction = rows.Count(r => !XuLyDonShopee.Core.Services.ShopeeShippingNav.LaDonHuy(r.Status, r.StatusDescription, r.CancelReason) && XuLyDonShopee.Core.Services.ShopeeShippingNav.LaChuanBiHang(r.Status));
-            stats.Revenue = active.Sum(r => Math.Max(0, r.FinalAmount ?? r.TotalPrice ?? 0));
+            stats.Cancelled = rows.Count - active.Count;
+            stats.Delivered = active.Count(r => ShopeeShippingNav.LaDaGiaoDaBan(r.Status));
+            stats.NeedsAction = active.Count(r => ShopeeShippingNav.LaChuanBiHang(r.Status));
+            stats.Revenue = active.Sum(r => r.Revenue);
+            stats.ActiveOrders = active.Count;
             stats.AverageOrder = active.Count == 0 ? 0 : stats.Revenue / active.Count;
-            var withTracking = rows.Count(r => !string.IsNullOrWhiteSpace(r.TrackingNumber));
-            var withFinal = active.Count(r => r.FinalAmount is not null);
-            stats.TrackingText = $"{withTracking:N0}/{rows.Count:N0} đơn";
-            stats.EstimateCoverageText = $"{withFinal:N0}/{active.Count:N0} đơn hiệu lực";
-            var lastSynced = rows.Select(r => r.SyncedAt).DefaultIfEmpty(DateTimeOffset.MinValue).Max();
-            stats.LastSyncedText = lastSynced == DateTimeOffset.MinValue ? "Chưa đồng bộ" : lastSynced.ToLocalTime().ToString("dd/MM/yyyy HH:mm");
-            stats.ScopeText = string.IsNullOrWhiteSpace(shopLogin)
-                ? $"Đơn trong khoảng {fromLocalDate:dd/MM/yyyy} - {toLocalDate:dd/MM/yyyy}"
-                : $"Đơn của shop {shopLogin} trong khoảng {fromLocalDate:dd/MM/yyyy} - {toLocalDate:dd/MM/yyyy}";
-            stats.EmptyMessage = rows.Count == 0
-                ? (string.IsNullOrWhiteSpace(shopLogin)
-                    ? $"Không có đơn nào trong khoảng {fromLocalDate:dd/MM/yyyy} - {toLocalDate:dd/MM/yyyy}."
-                    : $"Shop {shopLogin} không có đơn nào trong khoảng {fromLocalDate:dd/MM/yyyy} - {toLocalDate:dd/MM/yyyy}.")
-                : string.Empty;
+            stats.WithTracking = rows.Count(r => !string.IsNullOrWhiteSpace(r.TrackingNumber));
+            stats.WithFinalAmount = active.Count(r => r.FinalAmount is not null);
+            stats.LastSyncedUtc = rows.Count == 0 ? null : rows.Max(r => r.SyncedAt);
 
             var total = rows.Count;
+            // Doanh thu theo trạng thái: gom MỘT lượt trên đơn hiệu lực rồi tra bảng (trước đây mỗi nhóm quét lại
+            // toàn bộ active → O(nhóm×n)).
+            var revenueByStatus = active.GroupBy(r => Clean(r.Status, "Chưa rõ"), StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.Sum(x => x.Revenue), StringComparer.OrdinalIgnoreCase);
             stats.StatusRows = rows.GroupBy(r => Clean(r.Status, "Chưa rõ"), StringComparer.OrdinalIgnoreCase)
-                .Select(g => new SharedOrderStatisticBreakdown { Label = g.Key, OrderCount = g.Count(), Value = active.Where(x => string.Equals(Clean(x.Status, "Chưa rõ"), g.Key, StringComparison.OrdinalIgnoreCase)).Sum(x => Math.Max(0, x.FinalAmount ?? x.TotalPrice ?? 0)), Percentage = total == 0 ? 0 : g.Count() * 100d / total })
+                .Select(g => new SharedOrderStatisticBreakdown { Label = g.Key, OrderCount = g.Count(), Value = revenueByStatus.TryGetValue(g.Key, out var rev) ? rev : 0, Percentage = total == 0 ? 0 : g.Count() * 100d / total })
                 .OrderByDescending(x => x.OrderCount).ThenBy(x => x.Label, StringComparer.OrdinalIgnoreCase).ToList();
             stats.CarrierRows = rows.GroupBy(r => Clean(r.Carrier ?? r.Channel, "Chưa rõ"), StringComparer.OrdinalIgnoreCase)
                 .Select(g => new SharedOrderStatisticBreakdown { Label = g.Key, OrderCount = g.Count(), Percentage = total == 0 ? 0 : g.Count() * 100d / total })
@@ -305,8 +324,8 @@ WHERE o.synced_at >= $from AND o.synced_at < $to" + (string.IsNullOrWhiteSpace(s
                 .Select(g =>
                 {
                     var list = g.ToList();
-                    var act = list.Where(r => !XuLyDonShopee.Core.Services.ShopeeShippingNav.LaDonHuy(r.Status, r.StatusDescription, r.CancelReason)).ToList();
-                    var rev = act.Sum(r => Math.Max(0, r.FinalAmount ?? r.TotalPrice ?? 0));
+                    var act = list.Where(r => !r.Cancelled).ToList();
+                    var rev = act.Sum(r => r.Revenue);
                     var tracked = list.Count(r => !string.IsNullOrWhiteSpace(r.TrackingNumber));
                     return new SharedShopStatisticRow { Shop = g.Key, OrderCount = list.Count, ItemCount = list.Sum(r => Math.Max(0, r.ItemCount)), Revenue = rev, Average = act.Count == 0 ? 0 : rev / act.Count, TrackingRate = list.Count == 0 ? 0 : tracked * 100d / list.Count };
                 })

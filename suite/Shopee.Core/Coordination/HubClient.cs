@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Json;
@@ -362,13 +363,16 @@ public sealed class HubClient : IDisposable
         return await r.Content.ReadFromJsonAsync<OrdersPushResult>(ct);
     }
 
-    /// <summary>Dữ liệu thống kê đơn dùng chung từ Hub. Trả null nếu hub không phản hồi / route chưa có; client
-    /// sẽ fallback local. Dùng _http vì payload nhỏ.</summary>
-    public async Task<SharedOrderStatistics?> GetOrderStatisticsAsync(string fromDate, string toDate, string? shopLogin, CancellationToken ct = default)
+    /// <summary>Dữ liệu thống kê đơn dùng chung từ Hub cho khoảng <c>[fromUtc, toUtcExclusive)</c> — hai MỐC UTC
+    /// client tính SẴN từ ngày địa phương người dùng, gửi dạng ISO-8601 "o" (hub không suy diễn múi giờ). Trả null
+    /// nếu hub không phản hồi / route chưa có / hub CŨ chỉ hiểu ?from=&amp;to= (BadRequest); client sẽ fallback
+    /// local. Huỷ CHỦ ĐỘNG (ct) thì ném tiếp. Dùng _http vì payload nhỏ.</summary>
+    public async Task<SharedOrderStatistics?> GetOrderStatisticsAsync(DateTime fromUtc, DateTime toUtcExclusive, string? shopLogin, CancellationToken ct = default)
     {
         try
         {
-            var url = $"{HubRoutes.OrdersStats}?from={Uri.EscapeDataString(fromDate)}&to={Uri.EscapeDataString(toDate)}";
+            var url = $"{HubRoutes.OrdersStats}?fromUtc={Uri.EscapeDataString(fromUtc.ToString("o", CultureInfo.InvariantCulture))}"
+                + $"&toUtc={Uri.EscapeDataString(toUtcExclusive.ToString("o", CultureInfo.InvariantCulture))}";
             if (!string.IsNullOrWhiteSpace(shopLogin))
             {
                 url += $"&shop={Uri.EscapeDataString(shopLogin)}";

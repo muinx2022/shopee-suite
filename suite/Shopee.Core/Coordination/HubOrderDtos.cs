@@ -73,11 +73,11 @@ public sealed class PrepareStatItem
 /// <summary>
 /// Dữ liệu thống kê đơn dùng chung lấy từ Hub. Số liệu được gom trên hub để mọi client nhìn cùng một ảnh chụp,
 /// thay vì mỗi máy tự tính trên SQLite local.
+/// <para><b>CHỈ SỐ THÔ.</b> Hub KHÔNG dựng chuỗi hiển thị (ngày/tiền/tỉ lệ): máy chủ chạy giờ UTC và không biết
+/// múi giờ/định dạng của từng client — client tự định dạng từ các số ở đây.</para>
 /// </summary>
 public sealed class SharedOrderStatistics
 {
-    public string ScopeText { get; set; } = string.Empty;
-    public string EmptyMessage { get; set; } = string.Empty;
     public int TotalOrders { get; set; }
     public int TotalItems { get; set; }
     public int NeedsAction { get; set; }
@@ -85,9 +85,20 @@ public sealed class SharedOrderStatistics
     public int Cancelled { get; set; }
     public long Revenue { get; set; }
     public long AverageOrder { get; set; }
-    public string TrackingText { get; set; } = string.Empty;
-    public string EstimateCoverageText { get; set; } = string.Empty;
-    public string LastSyncedText { get; set; } = string.Empty;
+
+    /// <summary>Số đơn HIỆU LỰC (không hủy) — mẫu số của "TB / đơn hiệu lực" và của <see cref="WithFinalAmount"/>.</summary>
+    public int ActiveOrders { get; set; }
+
+    /// <summary>Số đơn có mã vận đơn (trên tổng <see cref="TotalOrders"/>).</summary>
+    public int WithTracking { get; set; }
+
+    /// <summary>Số đơn hiệu lực đã có "số tiền cuối cùng" (trên tổng <see cref="ActiveOrders"/>).</summary>
+    public int WithFinalAmount { get; set; }
+
+    /// <summary>Lần đẩy đơn lên hub GẦN NHẤT trong khoảng hỏi (<c>MAX(synced_at)</c>, UTC); null = khoảng đó không
+    /// có đơn nào. Client tự đổi sang giờ máy mình để hiển thị.</summary>
+    public DateTimeOffset? LastSyncedUtc { get; set; }
+
     public List<SharedOrderStatisticBreakdown> StatusRows { get; set; } = [];
     public List<SharedOrderStatisticBreakdown> CarrierRows { get; set; } = [];
     public List<SharedOrderStatisticBreakdown> PaymentRows { get; set; } = [];

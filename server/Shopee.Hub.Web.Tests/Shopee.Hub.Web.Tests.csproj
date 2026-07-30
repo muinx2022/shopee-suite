@@ -15,6 +15,11 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Shopee.Hub.Web\Shopee.Hub.Web.csproj" />
+    <!-- Kho đơn LOCAL của client (Database + OrdersRepository) — CHỈ để test "số hub khớp số local" (thống kê dùng
+         chung phải đếm cùng một tập đơn). Aliases: Shopee.Hub.Web LINK sẵn vài file nguồn của XuLyDonShopee.Core
+         (SyncedOrder, ShopeeShippingNav…) nên tham chiếu thẳng sẽ TRÙNG kiểu (CS0433); alias giữ kiểu của assembly
+         này sau tên `ordersCore`, các file test khác không bị ảnh hưởng. -->
+    <ProjectReference Include="..\..\orders\XuLyDonShopee.Core\XuLyDonShopee.Core.csproj" Aliases="ordersCore" />
   </ItemGroup>
 
   <ItemGroup>

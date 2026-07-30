@@ -10,6 +10,7 @@ using XuLyDonShopee.App.Services;
 using XuLyDonShopee.Core.Models;
 using XuLyDonShopee.Core.Services;
 using System.Threading;
+using System.Threading.Tasks;
 
 namespace XuLyDonShopee.App.ViewModels;
 
@@ -22,15 +23,24 @@ public sealed record ShopStatisticRow(string Shop, int OrderCount, int ItemCount
     string AverageText, string TrackingRateText);
 
 /// <summary>
-/// Dashboard thống kê kho đơn cục bộ. Đây là ảnh chụp vận hành của các đơn còn được lưu trên máy;
-/// doanh thu ước tính bỏ đơn hủy, ưu tiên <c>final_amount</c> và dùng <c>total_price</c> khi chưa có số cuối cùng.
+/// Dashboard thống kê kho đơn. Số vẽ NGAY từ kho đơn trên máy (đồng bộ, không chặn), rồi nếu có Hub thì gọi NỀN
+/// xin số CHUNG toàn hệ thống và thay vào — <see cref="SourceText"/> luôn nói rõ đang xem số nào.
+/// Doanh thu ước tính bỏ đơn hủy, ưu tiên <c>final_amount</c> và dùng <c>total_price</c> khi chưa có số cuối cùng.
 /// </summary>
 public partial class OrderStatisticsViewModel : ViewModelBase
 {
     public const string AllShopsLabel = "Tất cả shop";
+    private const string SourceLocalText = "Số trên MÁY NÀY — Hub không phản hồi nên chưa gộp được số chung.";
+    private const string SourceStandaloneText = "Số trên MÁY NÀY (app chạy độc lập, chưa nối Hub).";
+    private const string SourceSharedText = "Số chung toàn hệ thống (từ Hub).";
     private static readonly CultureInfo VnCulture = CultureInfo.GetCultureInfo("vi-VN");
     private readonly AppServices _services;
     private bool _reloadingOptions;
+
+    /// <summary>Số thứ tự lượt thống kê ĐANG hiển thị (tăng mỗi lần <see cref="ApplyStatistics"/>). Kết quả Hub về
+    /// mà số thứ tự không còn khớp thì BỎ QUA — người dùng chỉnh ngày liên tục, lượt cũ về sau sẽ đè lượt mới.
+    /// Chỉ đọc/ghi trên luồng UI.</summary>
+    private int _statsRequestId;
 
     public OrderStatisticsViewModel(AppServices services)
     {
@@ -54,6 +64,9 @@ public partial class OrderStatisticsViewModel : ViewModelBase
     [ObservableProperty] private bool _hasData;
     [ObservableProperty] private string _emptyMessage = "Chưa có đơn hàng để thống kê.";
     [ObservableProperty] private string _scopeText = "Ảnh chụp kho đơn trên máy";
+    /// <summary>Dòng chữ dưới tiêu đề: số đang xem là của MÁY NÀY hay CHUNG toàn hệ thống (chống "hỏng im lặng" —
+    /// Hub lỗi mà vẫn hiện số local như thể là số chung).</summary>
+    [ObservableProperty] private string _sourceText = SourceStandaloneText;
     [ObservableProperty] private string _totalOrdersText = "0";
     [ObservableProperty] private string _totalItemsText = "0";
     [ObservableProperty] private string _needsActionText = "0";
@@ -93,8 +106,13 @@ public partial class OrderStatisticsViewModel : ViewModelBase
         ApplyStatistics();
     }
 
+    /// <summary>
+    /// Vẽ lại tab Thống kê. Số LOCAL vẽ NGAY (đồng bộ — không chặn luồng UI dù Hub chậm/chết), rồi mới hỏi Hub ở
+    /// NỀN; có số chung thì thay vào. Mỗi lượt mang một số thứ tự để kết quả Hub về muộn của lượt cũ không đè lượt mới.
+    /// </summary>
     private void ApplyStatistics()
     {
+        var requestId = ++_statsRequestId; // luôn ở luồng UI (đổi ngày/shop/Reload)
         var shop = string.IsNullOrWhiteSpace(SelectedShop) || SelectedShop == AllShopsLabel
             ? null
             : SelectedShop;
@@ -108,12 +126,19 @@ public partial class OrderStatisticsViewModel : ViewModelBase
             return;
         }
 
-        var shared = LoadSharedStatistics(range.FromLocalDate, range.ToLocalDate, shop);
-        if (shared is not null)
+        ApplyLocal(shop, range);
+
+        // Có hook Hub → hỏi số CHUNG ở nền (fire-and-forget); không có → app chạy độc lập, giữ số máy này.
+        if (_services.QueryOrderStatistics is { } query)
         {
-            ApplyShared(shared);
-            return;
+            _ = LoadSharedStatisticsAsync(query, requestId, shop, range);
         }
+    }
+
+    /// <summary>Gom số từ kho đơn TRÊN MÁY NÀY (đồng bộ) và vẽ lên màn — đường mặc định, luôn chạy trước.</summary>
+    private void ApplyLocal(string? shop, CreatedRange range)
+    {
+        SourceText = _services.QueryOrderStatistics is null ? SourceStandaloneText : SourceLocalText;
 
         var rows = _services.Orders.Query(
             shopLogin: shop,
@@ -123,8 +148,8 @@ public partial class OrderStatisticsViewModel : ViewModelBase
         HasData = rows.Count > 0;
         EmptyMessage = rows.Count > 0
             ? string.Empty
-            : BuildEmptyMessage(shop, range.FromLocalDate, range.ToLocalDate);
-        ScopeText = BuildScopeText(rows.Count, shop, range.FromLocalDate, range.ToLocalDate);
+            : BuildEmptyMessage(shop, range.FromLocalDate, range.ToLocalDate, PhamViMay);
+        ScopeText = BuildScopeText(rows.Count, shop, range.FromLocalDate, range.ToLocalDate, PhamViMay);
 
         if (rows.Count == 0)
         {
@@ -176,29 +201,54 @@ public partial class OrderStatisticsViewModel : ViewModelBase
         Replace(PaymentRows, Array.Empty<OrderStatisticBreakdown>());
     }
 
-    private SharedOrderStatistics? LoadSharedStatistics(DateTime fromLocalDate, DateTime toLocalDate, string? shop)
+    /// <summary>
+    /// Hỏi Hub số CHUNG ở NỀN rồi thay vào màn. KHÔNG chặn luồng UI (đây là lỗi cũ: <c>GetAwaiter().GetResult()</c>
+    /// trên đường HTTP timeout 8s). Hub lỗi/không có số → GIỮ nguyên số local đã vẽ + dòng nguồn "máy này".
+    /// Kết quả về được marshal lên luồng UI và chỉ áp khi <paramref name="requestId"/> vẫn là lượt mới nhất.
+    /// </summary>
+    private async Task LoadSharedStatisticsAsync(
+        Func<DateTime, DateTime, string?, CancellationToken, Task<SharedOrderStatistics?>> query,
+        int requestId, string? shop, CreatedRange range)
     {
+        SharedOrderStatistics? shared;
         try
         {
-            if (_services.QueryOrderStatistics is null)
-            {
-                return null;
-            }
-
-            return _services.QueryOrderStatistics(fromLocalDate, toLocalDate, shop, CancellationToken.None)
-                .GetAwaiter().GetResult();
+            shared = await query(range.CreatedFromUtc, range.CreatedBeforeUtc, shop, CancellationToken.None)
+                .ConfigureAwait(false);
         }
         catch
         {
-            return null;
+            shared = null; // hub lỗi/offline → im lặng giữ số local (dòng nguồn đã nói rõ)
+        }
+
+        if (shared is null)
+        {
+            return;
+        }
+
+        if (Dispatcher.UIThread.CheckAccess())
+        {
+            ApplyShared(shared, requestId, shop, range);
+        }
+        else
+        {
+            Dispatcher.UIThread.Post(() => ApplyShared(shared, requestId, shop, range));
         }
     }
 
-    private void ApplyShared(SharedOrderStatistics shared)
+    private void ApplyShared(SharedOrderStatistics shared, int requestId, string? shop, CreatedRange range)
     {
+        if (requestId != _statsRequestId)
+        {
+            return; // lượt cũ về muộn (người dùng đã đổi ngày/shop) → bỏ, không đè lượt mới
+        }
+
+        SourceText = SourceSharedText;
         HasData = shared.TotalOrders > 0;
-        EmptyMessage = shared.TotalOrders > 0 ? string.Empty : shared.EmptyMessage;
-        ScopeText = shared.ScopeText;
+        EmptyMessage = shared.TotalOrders > 0
+            ? string.Empty
+            : BuildEmptyMessage(shop, range.FromLocalDate, range.ToLocalDate, PhamViHeThong);
+        ScopeText = BuildScopeText(shared.TotalOrders, shop, range.FromLocalDate, range.ToLocalDate, PhamViHeThong);
         TotalOrdersText = Number(shared.TotalOrders);
         TotalItemsText = Number(shared.TotalItems);
         NeedsActionText = Number(shared.NeedsAction);
@@ -206,9 +256,12 @@ public partial class OrderStatisticsViewModel : ViewModelBase
         CancelledText = Number(shared.Cancelled);
         RevenueText = Money(shared.Revenue);
         AverageOrderText = Money(shared.AverageOrder);
-        TrackingText = shared.TrackingText;
-        EstimateCoverageText = shared.EstimateCoverageText;
-        LastSyncedText = shared.LastSyncedText;
+        // Chuỗi hiển thị dựng TẠI ĐÂY: hub trả số thô vì máy chủ chạy giờ UTC, không biết định dạng của máy này.
+        TrackingText = $"{Number(shared.WithTracking)}/{Number(shared.TotalOrders)} đơn";
+        EstimateCoverageText = $"{Number(shared.WithFinalAmount)}/{Number(shared.ActiveOrders)} đơn hiệu lực";
+        LastSyncedText = shared.LastSyncedUtc is { } lastSynced
+            ? lastSynced.ToLocalTime().ToString("dd/MM/yyyy HH:mm", VnCulture)
+            : "Chưa đồng bộ";
 
         Replace(StatusRows, shared.StatusRows.Select(x => new OrderStatisticBreakdown(
             x.Label,
@@ -270,20 +323,26 @@ public partial class OrderStatisticsViewModel : ViewModelBase
         return true;
     }
 
-    private static string BuildScopeText(int count, string? shop, DateTime fromLocalDate, DateTime toLocalDate)
+    /// <summary>Chỗ đơn được ghi nhận lần đầu, dùng trong câu mô tả phạm vi — số local đếm theo mốc trên MÁY NÀY,
+    /// số chung đếm theo mốc trên HỆ THỐNG (hub). Hai mốc cùng nghĩa "lần đầu thấy đơn", khác chỗ ghi nhận.</summary>
+    private const string PhamViMay = "trên máy";
+    private const string PhamViHeThong = "trên hệ thống";
+
+    private static string BuildScopeText(int count, string? shop, DateTime fromLocalDate, DateTime toLocalDate,
+        string phamVi)
     {
         var period = $"từ {FormatDate(fromLocalDate)} đến {FormatDate(toLocalDate)}";
         return shop is null
-            ? $"Đơn được ghi nhận lần đầu trên máy {period}: {Number(count)} đơn"
-            : $"Đơn của shop {shop} được ghi nhận lần đầu trên máy {period}: {Number(count)} đơn";
+            ? $"Đơn được ghi nhận lần đầu {phamVi} {period}: {Number(count)} đơn"
+            : $"Đơn của shop {shop} được ghi nhận lần đầu {phamVi} {period}: {Number(count)} đơn";
     }
 
-    private static string BuildEmptyMessage(string? shop, DateTime fromLocalDate, DateTime toLocalDate)
+    private static string BuildEmptyMessage(string? shop, DateTime fromLocalDate, DateTime toLocalDate, string phamVi)
     {
         var period = $"từ {FormatDate(fromLocalDate)} đến {FormatDate(toLocalDate)}";
         return shop is null
-            ? $"Không có đơn nào được ghi nhận lần đầu trên máy {period}. Hãy đổi ngày hoặc chạy đồng bộ Shopee."
-            : $"Shop {shop} không có đơn nào được ghi nhận lần đầu trên máy {period}.";
+            ? $"Không có đơn nào được ghi nhận lần đầu {phamVi} {period}. Hãy đổi ngày hoặc chạy đồng bộ Shopee."
+            : $"Shop {shop} không có đơn nào được ghi nhận lần đầu {phamVi} {period}.";
     }
 
     private static IEnumerable<OrderStatisticBreakdown> BuildBreakdown(

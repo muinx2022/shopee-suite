@@ -311,7 +311,7 @@ public static class OrdersModuleHost
     /// </summary>
     private static void WireOrderStatisticsRead(AppServices services)
     {
-        services.QueryOrderStatistics = async (fromLocal, toLocal, shopLogin, ct) =>
+        services.QueryOrderStatistics = async (fromUtc, toUtcExclusive, shopLogin, ct) =>
         {
             try
             {
@@ -320,11 +320,9 @@ public static class OrdersModuleHost
                     return null;
                 }
 
-                var stats = await client.GetOrderStatisticsAsync(
-                    fromLocal.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
-                    toLocal.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
-                    shopLogin,
-                    ct).ConfigureAwait(false);
+                // Gửi THẲNG hai mốc UTC màn hình đã tính (biên [from, to)) — hub không tự quy đổi ngày theo giờ máy chủ.
+                var stats = await client.GetOrderStatisticsAsync(fromUtc, toUtcExclusive, shopLogin, ct)
+                    .ConfigureAwait(false);
                 return stats is null ? null : MapSharedStats(stats);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -350,11 +348,10 @@ public static class OrdersModuleHost
         stats.Cancelled,
         stats.Revenue,
         stats.AverageOrder,
-        stats.TrackingText,
-        stats.EstimateCoverageText,
-        stats.LastSyncedText,
-        stats.ScopeText,
-        stats.EmptyMessage,
+        stats.ActiveOrders,
+        stats.WithTracking,
+        stats.WithFinalAmount,
+        stats.LastSyncedUtc,
         stats.StatusRows.Select(x => new XuLyDonShopee.App.Services.SharedStatBreakdown(
             x.Label, x.OrderCount, x.Value, x.Percentage)).ToList(),
         stats.ShopRows.Select(x => new XuLyDonShopee.App.Services.SharedShopStatRow(

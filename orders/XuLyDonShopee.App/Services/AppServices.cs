@@ -44,7 +44,12 @@ public sealed record SharedStatBreakdown(string Label, int OrderCount, long Valu
 /// <summary>Dòng shop thống kê dùng chung từ Hub.</summary>
 public sealed record SharedShopStatRow(string Shop, int OrderCount, int ItemCount, long Revenue, long Average, double TrackingRate);
 
-/// <summary>Kết quả thống kê dùng chung từ Hub.</summary>
+/// <summary>
+/// Kết quả thống kê dùng chung từ Hub — CHỈ SỐ THÔ. Hub chạy giờ UTC và không biết múi giờ/định dạng của từng
+/// máy nên KHÔNG dựng chuỗi hiển thị: màn Thống kê tự định dạng tiền/ngày/tỉ lệ.
+/// <paramref name="ActiveOrders"/> = số đơn không hủy (mẫu số "TB / đơn hiệu lực");
+/// <paramref name="LastSyncedUtc"/> = lần đẩy đơn lên hub gần nhất trong khoảng (null = khoảng đó không có đơn).
+/// </summary>
 public sealed record SharedOrderStatistics(
     int TotalOrders,
     int TotalItems,
@@ -53,11 +58,10 @@ public sealed record SharedOrderStatistics(
     int Cancelled,
     long Revenue,
     long AverageOrder,
-    string TrackingText,
-    string EstimateCoverageText,
-    string LastSyncedText,
-    string ScopeText,
-    string EmptyMessage,
+    int ActiveOrders,
+    int WithTracking,
+    int WithFinalAmount,
+    DateTimeOffset? LastSyncedUtc,
     IReadOnlyList<SharedStatBreakdown> StatusRows,
     IReadOnlyList<SharedShopStatRow> ShopRows,
     IReadOnlyList<SharedStatBreakdown> CarrierRows,
@@ -139,9 +143,11 @@ public class AppServices
     public Func<string, string, string, CancellationToken, Task<bool>>? PushGsheetConfigToHub { get; set; }
 
     /// <summary>
-    /// HOOK đọc thống kê ĐƠN HÀNG dùng chung từ Hub theo khoảng ngày + shop. Trả <c>null</c> = hub không
-    /// phản hồi / route chưa có, để client fallback local; trả object = số liệu CHUNG toàn hệ thống, mọi client
-    /// cùng nhìn một ảnh chụp.
+    /// HOOK đọc thống kê ĐƠN HÀNG dùng chung từ Hub theo khoảng + shop. Tham số: <c>fromUtc</c>,
+    /// <c>toUtcExclusive</c> (hai MỐC UTC màn hình tính SẴN từ ngày địa phương người dùng — hub không suy diễn múi
+    /// giờ; biên <c>[from, to)</c> y hệt bộ lọc <c>created_at</c> của kho đơn local), shop, <c>ct</c>. Trả
+    /// <c>null</c> = hub không phản hồi / route chưa có, để màn GIỮ số local; trả object = số liệu CHUNG toàn hệ
+    /// thống, mọi client cùng nhìn một ảnh chụp. Mặc định <c>null</c> = TẮT (app chạy độc lập / chưa nối Hub).
     /// </summary>
     public Func<DateTime, DateTime, string?, CancellationToken, Task<SharedOrderStatistics?>>? QueryOrderStatistics { get; set; }
 

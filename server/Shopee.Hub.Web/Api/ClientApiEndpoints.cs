@@ -1,3 +1,4 @@
+using System.Globalization;
 using Shopee.Core.Accounts;
 using Shopee.Core.BigSeller;
 using Shopee.Core.Coordination;
@@ -258,13 +259,18 @@ public static class ClientApiEndpoints
         });
 
         // GET /api/orders/stats → thống kê đơn dùng chung, trả ảnh chụp gom trên hub để mọi client thấy cùng số.
-        api.MapGet(HubRoutes.OrdersStats, (string? from, string? to, string? shop) =>
+        // Tham số là hai MỐC UTC (ISO-8601 "o") client tính SẴN từ ngày địa phương của người dùng — hub KHÔNG suy
+        // diễn múi giờ (máy chủ chạy giờ UTC, mỗi client một múi giờ). Parse với InvariantCulture + RoundtripKind,
+        // KHÔNG dùng TryParse một tham số (phụ thuộc culture máy chủ).
+        // PHÁ TƯƠNG THÍCH có chủ ý: client CŨ gọi ?from=&to= → BadRequest → tab Thống kê bản cũ tự về số local.
+        api.MapGet(HubRoutes.OrdersStats, (string? fromUtc, string? toUtc, string? shop) =>
         {
-            if (!DateTime.TryParse(from, out var fromDate) || !DateTime.TryParse(to, out var toDate))
+            if (!DateTime.TryParse(fromUtc, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var from)
+                || !DateTime.TryParse(toUtc, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var to))
             {
                 return Results.BadRequest();
             }
-            return Results.Json(db.GetSharedOrderStatistics(fromDate, toDate, shop));
+            return Results.Json(db.GetSharedOrderStatistics(AsUtc(from), AsUtc(to), shop));
         });
 
         // POST /api/orders/app-alert → client báo lỗi app; Hub quyết định gửi webhook lỗi app (fire-and-forget).
@@ -359,6 +365,16 @@ public static class ClientApiEndpoints
     /// <summary>Map <see cref="OrderRecord"/> (kiểu nội bộ hub) → <see cref="HubOrderItem"/> (DTO dùng chung với
     /// client). Map TAY từng field — KHÔNG serialize thẳng <c>OrderRecord</c> — để đổi tên field bên hub làm gãy
     /// build ngay, thay vì âm thầm trả cột rỗng cho client.</summary>
+    /// <summary>Chuẩn hoá mốc thời gian client gửi lên thành DateTime Kind=Utc. Chuỗi có "Z"/offset → parser đã ra
+    /// đúng thời điểm (Local chỉ là cách biểu diễn, <c>ToUniversalTime</c> lấy lại ĐÚNG mốc, không đoán múi giờ);
+    /// chuỗi KHÔNG hậu tố (Unspecified) → hiểu là UTC theo hợp đồng route, KHÔNG quy đổi theo giờ máy chủ.</summary>
+    private static DateTime AsUtc(DateTime v) => v.Kind switch
+    {
+        DateTimeKind.Utc => v,
+        DateTimeKind.Local => v.ToUniversalTime(),
+        _ => DateTime.SpecifyKind(v, DateTimeKind.Utc),
+    };
+
     private static HubOrderItem ToHubOrderItem(OrderRecord o) => new()
     {
         Id = o.Id,
