@@ -254,12 +254,9 @@
                                           ScrollViewer.VerticalScrollBarVisibility="Auto">
                                     <DataGrid.Columns>
                                         <DataGridTextColumn Header="Tên shop" Binding="{Binding Name}" Width="1.4*" />
-                                        <!-- Hub-mode: cột để TRỐNG (SheetDisplay), không phô GUID ngăn; excel-mode: tên sheet.
-                                             Chỉ HẸP lại 1.4* → 0.8* cho đỡ phí chỗ ở hub-mode, KHÔNG ẩn/bỏ cột theo chế độ:
-                                             DataGrid (Avalonia 11.3) không dựng lại được cột lúc chạy — cả IsVisible
-                                             false→true lẫn Columns.Remove/Insert đều cho ra cột rỗng, mất luôn header +
-                                             dữ liệu ở excel-mode (đã thử cả 2, xem plan 2026-07-30). -->
-                                        <DataGridTextColumn Header="Sheet" Binding="{Binding SheetDisplay}" Width="0.8*" />
+                                        <!-- (Đã BỎ cột "Sheet": kho dữ liệu nay nằm ở Hub, không còn dùng workbook Excel
+                                             nên cột này luôn rỗng — chỉ phí chỗ. Ô "Sheet dữ liệu" trong panel cấu hình
+                                             shop bên dưới vẫn giữ, chỉ hiện ở excel-mode.) -->
                                         <!-- 60 hiện ra "Ba", 78 vẫn cụt "Batc" (header còn chừa chỗ mũi tên sắp xếp) → 95 mới đủ. -->
                                         <DataGridTextColumn Header="Batch" Binding="{Binding OpenAiBatchSize}" Width="95" />
                                         <DataGridTextColumn Header="Crawl URL (Import)" Binding="{Binding BigSellerCrawlUrl}" Width="1.4*" />
