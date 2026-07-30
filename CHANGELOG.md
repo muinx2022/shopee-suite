@@ -5,6 +5,15 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Hiệu năng. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.6.15 — 2026-07-30
+
+- **Cửa sổ vừa màn hình nhỏ (1440×900):** trước đây app luôn mở cứng 1500×940 nên trên màn 1440×900 nó tràn
+  ra ngoài — mất thanh trạng thái dưới đáy, cắt mép trái/phải. Nay lúc mở app tự đo **vùng làm việc** (màn
+  hình trừ taskbar) của màn đang chứa cửa sổ, nếu không đủ chỗ thì thu kích thước lại cho vừa **rồi phóng to
+  toàn màn hình**. Bấm nút khôi phục sẽ ra cửa sổ vừa màn chứ không bật lại kích thước tràn. Máy màn to (Full
+  HD trở lên) mở y như cũ, không đổi gì. Các cửa sổ phụ (Kiểm tra TK, Nhập tài khoản, Thống kê scrape) cũng
+  tự thu cho vừa màn.
+
 ## v1.6.14 — 2026-07-29
 
 - **Kéo tài khoản (sub-acc) Đơn hàng từ Hub về máy mới:** màn Tài khoản có nút **"Kéo TK từ Hub"** — hỏi Hub

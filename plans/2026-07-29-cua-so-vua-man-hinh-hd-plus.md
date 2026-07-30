@@ -1,7 +1,7 @@
 # Plan: Cửa sổ vừa màn hình HD+ (1440×900)
 
 - **Ngày:** 2026-07-29
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành (v1.6.15)
 - **Người lập:** Fable · **Người thực thi:** Auto (Cursor)
 
 ## 1. Bối cảnh & mục tiêu
@@ -133,6 +133,47 @@ Kiểm thủ công (máy dev hoặc máy 1440×900):
 
 ---
 
-## Báo cáo thực thi (điền sau khi xong)
+## Báo cáo thực thi
 
-<Để trống — người thực thi điền.>
+**Ngày:** 2026-07-30 · **Người thực thi:** subagent Opus (opus-dev)
+
+### ⚠ User ĐỔI QUYẾT ĐỊNH so với plan (chốt sau khi xem lại ảnh máy thật)
+
+| Mục plan | Plan viết | User chốt lại — bản đang có trong code |
+|---|---|---|
+| Bước 1 | `Width 1500→1280`, `Height 940→780` | **GIỮ 1500×940**. Cơ chế kẹp đã lo cho máy màn nhỏ rồi, không việc gì bắt máy Full HD mở nhỏ hơn hiện tại. Chỉ giữ phần hạ `MinWidth 1080→1024`, `MinHeight 680→640`. |
+| Bước 2 | chỉ kẹp, "không đổi WindowState" | **Có thêm maximize** cho riêng cửa sổ chính khi màn nhỏ: kẹp + canh giữa TRƯỚC rồi mới `WindowState = Maximized`. |
+| Bước 3 | sửa hàng nút AccountsView (WrapPanel) | **BỎ HẲN** — user xem ảnh máy thật, 3 nút vẫn đủ chỗ trong cột 340. File đã `git checkout --` về đúng bản gốc. |
+
+Ngoài ra: **không thêm `ScrollViewer`** ở bất kỳ đâu (đã khảo sát — mọi màn đều có vùng `*` chứa DataGrid/ScrollViewer tự cuộn; bọc ScrollViewer ngoài DataGrid làm mất ảo hóa gây đơ).
+
+### File đã sửa/tạo
+
+| File | Thay đổi |
+|---|---|
+| `suite/Shopee.Suite/MainWindow.axaml` | Dòng 5: chỉ hạ `MinWidth 1080→1024`, `MinHeight 680→640`. `Width="1500" Height="940"` GIỮ NGUYÊN. Giữ `WindowStartupLocation="CenterScreen"`. |
+| `suite/Shopee.Suite/Infrastructure/WindowFit.cs` | **MỚI.** Extension `Window.FitOnOpen(bool maximizeIfTooSmall = false)` (gắn handler `Opened`, tự gỡ sau lần đầu) + `Window.FitToWorkingArea(bool maximizeIfTooSmall = false)`. Kẹp: `ScreenFromWindow(this) ?? Primary`; `WorkingArea` (pixel) chia `Scaling` ra DIP; lề an toàn 8 DIP mỗi phía; sàn = `MinWidth`/`MinHeight`; **chỉ thu nhỏ** (`Math.Min`), không phóng to. Kích thước XAML đã lọt màn → `return` sớm, không kẹp **và không maximize**. Khi kẹp thật: gán `Width`/`Height` mới → `WindowStartupLocation = Manual` + canh giữa bằng `Position` (pixel) → **cuối cùng** mới `WindowState = Maximized` nếu `maximizeIfTooSmall`. Thứ tự này bắt buộc: kích thước "khôi phục" chính là số vừa gán, nên bấm nút khôi phục ra cửa sổ vừa màn chứ không bật lại 1500×940. Bỏ qua khi: `WindowState != Normal`, `Width`/`Height` là NaN (cửa sổ SizeToContent), `Screens`/`Screen` null; toàn bộ bọc `try/catch` nuốt lỗi → không chặn mở app. Điều kiện maximize hoàn toàn theo phép so kích thước, **không ngưỡng số cứng**. |
+| `suite/Shopee.Suite/MainWindow.axaml.cs` | Ctor gọi `this.FitOnOpen(maximizeIfTooSmall: true)` sau `InitializeComponent()` — chỉ cửa sổ chính maximize. |
+| `suite/Shopee.Suite/Modules/CheckAccount/CheckAccountWindow.axaml.cs` | (Bước 4) ctor gọi `this.FitOnOpen()` — mặc định false → chỉ kẹp, không maximize. |
+| `suite/Shopee.Suite/Modules/Accounts/ImportAccountsWindow.axaml.cs` | (Bước 4) ctor gọi `this.FitOnOpen()` — chỉ kẹp. |
+| `suite/Shopee.Suite/Modules/Scrape/ScrapeStatsWindow.axaml.cs` | (Bước 4) ctor rỗng gọi `this.FitOnOpen()` — chỉ kẹp; ctor `(ScrapeStatsViewModel)` chuyển sang chain `: this()` để dùng chung (trước đó tự gọi `InitializeComponent()` riêng nên sẽ lọt). |
+| `orders/XuLyDonShopee.App/Views/AccountsView.axaml` | **Không đổi** — đã hoàn tác về bản gốc theo quyết định mới của user. |
+
+**KHÔNG** áp kẹp cho `MessageDialog` (SizeToContent) và `RowEditWindow` (SizeToContent=Height, CanResize=False) — đúng ghi chú Bước 4.
+
+### Build / test
+
+- `dotnet build suite/Shopee.Suite/Shopee.Suite.csproj -c Debug` (chạy lại sau khi sửa theo quyết định mới) → **Build succeeded. 0 Warning(s) 0 Error(s)** (8,9s).
+- `dotnet test orders/XuLyDonShopee.Tests` → **KHÔNG chạy được**, lỗi biên dịch nằm hoàn toàn trong `OrdersViewModelTests.cs` — phần việc dở đang có sẵn trên cây làm việc, KHÔNG thuộc plan này:
+  - `OrdersViewModelTests.cs(133,9): error CS0200: Property or indexer 'AppServices.Sessions' cannot be assigned to`
+  - `OrdersViewModelTests.cs(136,12): error CS1061: 'OrdersViewModel' does not contain a definition for 'RedownloadSlipCommand'`
+  - Cả 2 dòng đều nằm trong 47 dòng mới của diff chưa commit (`git diff` xác nhận). Không có test nào phủ layout/kích thước cửa sổ.
+
+### Điểm còn tồn / chưa kiểm chứng
+
+1. **Chưa test trên máy 1440×900 thật** — máy dev không có màn đó, cũng chưa chạy app. Toàn bộ nhánh "có kẹp" (gán `Width/Height`, `Position`, `WindowStartupLocation`, rồi `Maximized`) chưa chạy thật lần nào; máy dev màn lớn đi nhánh `return` sớm (mở 1500×940 như cũ). Cần user mở thử trên ADMIN-PC, kiểm 2 điểm: (a) mở ra là maximize, thấy đủ tab+ribbon+status; (b) bấm nút **khôi phục** thì cửa sổ vừa màn (~1424×844) chứ không phải 1500×940 tràn.
+2. **Chưa test scale ≠ 100%** — công thức chia `Scaling` mới chỉ đúng trên giấy.
+3. Dialog phụ khi bị kẹp sẽ canh giữa theo **màn hình**, không còn theo owner (`CenterOwner`) — chỉ xảy ra trên màn quá nhỏ, chấp nhận được.
+4. `MinHeight 640` như plan đã lường: vài màn (SearchView có khối cố định 190+150) sẽ chật khi thu tối thiểu — ngoài phạm vi lần này (và đã chốt KHÔNG thêm ScrollViewer).
+5. `dotnet test orders/XuLyDonShopee.Tests` không chạy được vì lỗi biên dịch trong `OrdersViewModelTests.cs` — việc dở của phiên chính, không liên quan hạng mục này (chi tiết ở mục Build/test).
+6. Phiên chính đã nghiệm thu (đọc lại code + tự chạy build) và phát hành **v1.6.15** để user kiểm trên máy ADMIN-PC 1440×900. Trạng thái plan chuyển `hoàn thành`; nếu bản thật còn sai thì mở plan mới.
