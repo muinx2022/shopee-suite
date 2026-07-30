@@ -35,7 +35,7 @@ public sealed class HubSharedOrderStatsTests : IDisposable
 
         Assert.Equal(firstSeen1, firstSeen2);                 // mốc "lần đầu thấy đơn" BẤT BIẾN
         Assert.True(synced2 > synced1, $"synced_at phải mới hơn: {synced1} → {synced2}");
-        Assert.Equal("Đã giao", db.QueryOrders(shopId, null, null, 10, 0).Single().Status); // dữ liệu VẪN được cập nhật
+        Assert.Equal("Đã giao", db.QueryOrdersPage(shopId, null, null, 10, 0).Items.Single().Status); // dữ liệu VẪN được cập nhật
     }
 
     // ===== 2. Biên khoảng UTC: [from, to) — đơn ở đúng mốc from được đếm, ở đúng mốc to bị loại =====

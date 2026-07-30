@@ -747,8 +747,10 @@ public partial class AccountsViewModel : ViewModelBase, IDisposable
     /// Dựng lại map hub thành từ điển khóa <see cref="StringComparer.OrdinalIgnoreCase"/> (khóa đã Trim). Nhãn shop
     /// giữa <c>account_shops</c> của máy và <c>shops.username</c> trên hub có thể lệch HOA/thường; tra theo
     /// <see cref="StringComparer.Ordinal"/> sẽ ra 0 một cách LẶNG (không lỗi, không log) — loại sai khó phát hiện
-    /// nhất. Cùng quy tắc so khớp với <see cref="MatchesShopLabel"/>. Khóa trùng nhau khi bỏ hoa/thường → bản sau
-    /// thắng (dùng indexer, KHÔNG ném như <c>ToDictionary</c>).
+    /// nhất. Cùng quy tắc so khớp với <see cref="MatchesShopLabel"/>.
+    /// <para>Khóa trùng nhau sau khi bỏ hoa/thường → CỘNG DỒN, không phải "bản sau thắng": hai dòng hub lệch
+    /// HOA/thường là CÙNG một shop vật lý bị tách đôi, lấy mỗi bản sau là MẤT số của bản kia. Vẫn giữ phép cộng
+    /// này kể cả khi hub đã gộp shop trùng — client có thể đang nói chuyện với hub chưa nâng cấp.</para>
     /// </summary>
     private static Dictionary<string, int> ChuanHoaKhoaShop(IReadOnlyDictionary<string, int> map)
     {
@@ -757,7 +759,9 @@ public partial class AccountsViewModel : ViewModelBase, IDisposable
         {
             if (!string.IsNullOrWhiteSpace(kv.Key))
             {
-                chuan[kv.Key.Trim()] = kv.Value;
+                var khoa = kv.Key.Trim();
+                chuan.TryGetValue(khoa, out var dangCo);
+                chuan[khoa] = dangCo + kv.Value;
             }
         }
         return chuan;

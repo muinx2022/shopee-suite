@@ -70,6 +70,9 @@ public sealed partial class HubDatabase : IDisposable
         ExecRaw("PRAGMA busy_timeout=5000;");
         EnsureSchema();
         MigrateSchema();
+        // Gộp shop trùng username khác hoa/thường + dựng lại unique index COLLATE NOCASE. Chạy SAU khi mọi bảng
+        // đã có; cần dataDir để dời kèm thư mục phiếu slips/<shopId>.
+        MergeDuplicateShopsOnce(dataDir);
     }
 
     /// <summary>Thêm cột mới vào DB ĐÃ TỒN TẠI (CREATE TABLE IF NOT EXISTS không thêm cột cho bảng cũ).</summary>

@@ -30,9 +30,16 @@ public sealed record ShopStatisticRow(string Shop, int OrderCount, int ItemCount
 public partial class OrderStatisticsViewModel : ViewModelBase
 {
     public const string AllShopsLabel = "Tất cả shop";
+    /// <summary>Lượt hỏi Hub CÒN ĐANG BAY — số đang hiện là số local vẽ tạm. KHÔNG được nói "Hub không phản hồi"
+    /// ở trạng thái này: lượt hỏi chưa xong thì chưa biết hub sống hay chết (đó là lỗi cũ — mỗi lần đổi ngày là
+    /// hiện một dòng cáo buộc hub chết trong khi hub vẫn đang trả lời).</summary>
+    private const string SourceDangHoiText = "Số trên MÁY NÀY — đang hỏi Hub số chung…";
     private const string SourceLocalText = "Số trên MÁY NÀY — Hub không phản hồi nên chưa gộp được số chung.";
     private const string SourceStandaloneText = "Số trên MÁY NÀY (app chạy độc lập, chưa nối Hub).";
     private const string SourceSharedText = "Số chung toàn hệ thống (từ Hub).";
+    /// <summary>Đang GIỮ số chung của lượt hỏi trước mà lượt hỏi mới nhất không về được — nói thẳng thay vì lẳng
+    /// lặng để nguyên dòng "Số chung (Hub)" như thể vừa cập nhật.</summary>
+    private const string SourceSharedStaleText = "Số chung (Hub) của lượt hỏi trước — lượt này Hub không phản hồi.";
     private static readonly CultureInfo VnCulture = CultureInfo.GetCultureInfo("vi-VN");
     private readonly AppServices _services;
     private bool _reloadingOptions;
@@ -41,6 +48,15 @@ public partial class OrderStatisticsViewModel : ViewModelBase
     /// mà số thứ tự không còn khớp thì BỎ QUA — người dùng chỉnh ngày liên tục, lượt cũ về sau sẽ đè lượt mới.
     /// Chỉ đọc/ghi trên luồng UI.</summary>
     private int _statsRequestId;
+
+    /// <summary>Số ĐANG hiển thị là số chung của Hub (đã vẽ xong một lượt <see cref="ApplyShared"/>), kèm shop +
+    /// khoảng ngày của lượt đó. Dùng để lượt vẽ kế tiếp CÙNG shop/khoảng (vd <c>OrdersChanged</c> bắn sau mỗi lượt
+    /// sync) KHÔNG vẽ đè số local lên nữa: người dùng đang thấy số nhảy xuống số máy rồi lại nhảy lên số chung mỗi
+    /// lần đồng bộ. Đổi shop/ngày thì các giá trị này không còn khớp → vẽ local ngay như cũ (số cũ của khoảng khác
+    /// còn sai hơn). Chỉ đọc/ghi trên luồng UI.</summary>
+    private bool _dangHienSoHub;
+    private string? _shopSoHub;
+    private CreatedRange _rangeSoHub;
 
     public OrderStatisticsViewModel(AppServices services)
     {
@@ -119,6 +135,7 @@ public partial class OrderStatisticsViewModel : ViewModelBase
 
         if (!TryBuildCreatedRange(FromDate, ToDate, out var range, out var invalidMessage))
         {
+            _dangHienSoHub = false;
             ResetStatistics();
             HasData = false;
             EmptyMessage = invalidMessage;
@@ -126,7 +143,15 @@ public partial class OrderStatisticsViewModel : ViewModelBase
             return;
         }
 
-        ApplyLocal(shop, range);
+        // Đang hiện số chung ĐÚNG shop + ĐÚNG khoảng ngày này → GIỮ nguyên lưới, chỉ hỏi lại Hub. Vẽ local đè ở đây
+        // là nguồn của "số nhảy": mỗi lượt sync bắn OrdersChanged → số tụt về số máy rồi lại vọt lên số chung.
+        var giuSoHub = _dangHienSoHub
+            && string.Equals(_shopSoHub, shop, StringComparison.Ordinal)
+            && _rangeSoHub.Equals(range);
+        if (!giuSoHub)
+        {
+            ApplyLocal(shop, range);
+        }
 
         // Có hook Hub → hỏi số CHUNG ở nền (fire-and-forget); không có → app chạy độc lập, giữ số máy này.
         if (_services.QueryOrderStatistics is { } query)
@@ -138,7 +163,10 @@ public partial class OrderStatisticsViewModel : ViewModelBase
     /// <summary>Gom số từ kho đơn TRÊN MÁY NÀY (đồng bộ) và vẽ lên màn — đường mặc định, luôn chạy trước.</summary>
     private void ApplyLocal(string? shop, CreatedRange range)
     {
-        SourceText = _services.QueryOrderStatistics is null ? SourceStandaloneText : SourceLocalText;
+        // Có hook Hub = lượt hỏi sắp bắn NGAY sau đây → "đang hỏi", KHÔNG phải "Hub không phản hồi" (chưa hỏi xong
+        // thì chưa có quyền kết luận hub chết). Dòng "không phản hồi" chỉ đặt khi lượt hỏi thực sự trả null.
+        _dangHienSoHub = false;
+        SourceText = _services.QueryOrderStatistics is null ? SourceStandaloneText : SourceDangHoiText;
 
         var rows = _services.Orders.Query(
             shopLogin: shop,
@@ -203,8 +231,10 @@ public partial class OrderStatisticsViewModel : ViewModelBase
 
     /// <summary>
     /// Hỏi Hub số CHUNG ở NỀN rồi thay vào màn. KHÔNG chặn luồng UI (đây là lỗi cũ: <c>GetAwaiter().GetResult()</c>
-    /// trên đường HTTP timeout 8s). Hub lỗi/không có số → GIỮ nguyên số local đã vẽ + dòng nguồn "máy này".
-    /// Kết quả về được marshal lên luồng UI và chỉ áp khi <paramref name="requestId"/> vẫn là lượt mới nhất.
+    /// trên đường HTTP timeout 8s). Kết quả về được marshal lên luồng UI và chỉ áp khi <paramref name="requestId"/>
+    /// vẫn là lượt mới nhất.
+    /// <para>Lượt hỏi trả <c>null</c> (hub lỗi/offline) → GIỮ nguyên lưới đang hiện, chỉ đổi DÒNG NGUỒN cho đúng
+    /// sự thật: đang hiện số local → "Hub không phản hồi"; đang giữ số chung của lượt trước → nói rõ là số CŨ.</para>
     /// </summary>
     private async Task LoadSharedStatisticsAsync(
         Func<DateTime, DateTime, string?, CancellationToken, Task<SharedOrderStatistics?>> query,
@@ -218,22 +248,34 @@ public partial class OrderStatisticsViewModel : ViewModelBase
         }
         catch
         {
-            shared = null; // hub lỗi/offline → im lặng giữ số local (dòng nguồn đã nói rõ)
-        }
-
-        if (shared is null)
-        {
-            return;
+            shared = null; // hub lỗi/offline → dòng nguồn bên dưới nói rõ, KHÔNG đổi số đang hiện
         }
 
         if (Dispatcher.UIThread.CheckAccess())
         {
-            ApplyShared(shared, requestId, shop, range);
+            ApDungKetQuaHub(shared, requestId, shop, range);
         }
         else
         {
-            Dispatcher.UIThread.Post(() => ApplyShared(shared, requestId, shop, range));
+            Dispatcher.UIThread.Post(() => ApDungKetQuaHub(shared, requestId, shop, range));
         }
+    }
+
+    /// <summary>Áp kết quả một lượt hỏi Hub (trên luồng UI): có số → vẽ số chung; null → chỉ sửa dòng nguồn.</summary>
+    private void ApDungKetQuaHub(SharedOrderStatistics? shared, int requestId, string? shop, CreatedRange range)
+    {
+        if (requestId != _statsRequestId)
+        {
+            return; // lượt cũ về muộn (người dùng đã đổi ngày/shop) → bỏ, không đè lượt mới
+        }
+
+        if (shared is null)
+        {
+            SourceText = _dangHienSoHub ? SourceSharedStaleText : SourceLocalText;
+            return;
+        }
+
+        ApplyShared(shared, requestId, shop, range);
     }
 
     private void ApplyShared(SharedOrderStatistics shared, int requestId, string? shop, CreatedRange range)
@@ -244,6 +286,10 @@ public partial class OrderStatisticsViewModel : ViewModelBase
         }
 
         SourceText = SourceSharedText;
+        // Nhớ "đang hiện số chung của (shop, khoảng) này" → lượt vẽ kế tiếp cùng shop/khoảng khỏi vẽ đè số local.
+        _dangHienSoHub = true;
+        _shopSoHub = shop;
+        _rangeSoHub = range;
         HasData = shared.TotalOrders > 0;
         EmptyMessage = shared.TotalOrders > 0
             ? string.Empty

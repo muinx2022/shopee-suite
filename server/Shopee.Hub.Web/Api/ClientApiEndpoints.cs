@@ -14,8 +14,8 @@ namespace Shopee.Hub.Web.Api;
 /// API cho CLIENT (bản WPF/Avalonia). Port NGUYÊN bảng route Map() của suite\Shopee.Hub\HubServer.cs — GIỮ
 /// đường dẫn + hình dạng JSON (camelCase, minimal-API defaults) để client cũ kết nối y hệt, khỏi sửa gì.
 /// Khác biệt: mỗi route yêu cầu policy "Client" (scheme X-Api-Token) thay vì middleware token thủ công;
-/// /health mở. THÊM: /accounts/append, /accounts/remove; cờ AllowClientConfigPush chặn client
-/// đè config/*.json sau cutover.
+/// /health mở; cờ AllowClientConfigPush chặn client đè config/*.json sau cutover.
+/// (Hai route legacy /accounts/append + /accounts/remove ĐÃ XOÁ 30/07 — log VM 10→30/07 không có lượt trúng nào.)
 /// </summary>
 public static class ClientApiEndpoints
 {
@@ -120,21 +120,6 @@ public static class ClientApiEndpoints
         api.MapPost(HubRoutes.AccountsErrored, (AccountErrorRequest? r) => { if (r is null) return Results.BadRequest(); db.ReportAccountError(r); return Results.Ok(); });
         api.MapGet(HubRoutes.AccountsErrored, () => Results.Json(db.AllAccountErrors()));
         api.MapPost(HubRoutes.AccountsErroredClear, (ClearAccountErrorRequest? r) => { if (r is null) return Results.BadRequest(); db.ClearAccountError(r.AccountId); return Results.Ok(); });
-
-        // ── MỚI: client đẩy acc Shopee OK mới check lên (web-hub là nguồn sự thật; client hết push accounts.json) ──
-        api.MapPost("/accounts/append", (List<ShopeeAccount>? r, FileStoreConfigService cfg, HttpContext ctx, ILoggerFactory lf) =>
-        {
-            LogLegacyHit(lf, ctx, "/accounts/append");
-            if (r is null) return Results.BadRequest();
-            var added = cfg.AppendShopeeAccounts(r);
-            return Results.Json(new { added });
-        });
-        api.MapPost("/accounts/remove", (AccountRemoveRequest? r, FileStoreConfigService cfg, HttpContext ctx, ILoggerFactory lf) =>
-        {
-            LogLegacyHit(lf, ctx, "/accounts/remove");
-            if (r is null || string.IsNullOrWhiteSpace(r.Id)) return Results.BadRequest();
-            return Results.Json(new { removed = cfg.RemoveShopeeAccount(r.Id) });
-        });
 
         // ── MỚI: client đẩy (upsert) acc/shop BigSeller lên hub. Client GIỜ phát sinh acc/shop; hub là nguồn sự
         //    thật nhưng client không có đường đẩy → lượt pull (MergeBigSeller mirror) xoá mất acc client vừa thêm.
@@ -273,14 +258,24 @@ public static class ClientApiEndpoints
             return Results.Json(db.GetSharedOrderStatistics(AsUtc(from), AsUtc(to), shop));
         });
 
-        // POST /api/orders/app-alert → client báo lỗi app; Hub quyết định gửi webhook lỗi app (fire-and-forget).
+        // POST /api/orders/app-alert → client báo SỰ KIỆN app; Hub quyết định kênh webhook (fire-and-forget).
+        // Kind="don_tra" là tin NGHIỆP VỤ (mã trả hàng của đơn đã bị dọn khỏi app — hub không thấy qua orders/push
+        // vì không còn đơn để so mã) → đi kênh ĐƠN TRẢ, không phải kênh lỗi app. Kind khác → kênh lỗi app như cũ.
         api.MapPost(HubRoutes.OrdersAppAlert, (OrdersAppAlertRequest? r, HttpRequest req, WebhookQueueService webhookQueue) =>
         {
             if (r is null || string.IsNullOrWhiteSpace(r.Kind)) return Results.BadRequest();
             var mid = req.Headers["X-Machine-Id"].ToString();
+            var kind = r.Kind.Trim();
             db.AppendLog(new AppendLogRequest(mid, "", "warn",
-                $"orders/app-alert kind={r.Kind.Trim()} account={r.AccountLabel} shop={r.ShopName} detail={r.Detail}"));
-            FireNotifyLoiApp(db, webhookQueue, mid, r);
+                $"orders/app-alert kind={kind} account={r.AccountLabel} shop={r.ShopName} detail={r.Detail}"));
+            if (string.Equals(kind, KindDonTra, StringComparison.OrdinalIgnoreCase))
+            {
+                FireNotifyDonTraTuAppAlert(db, webhookQueue, mid, r);
+            }
+            else
+            {
+                FireNotifyLoiApp(db, webhookQueue, mid, r);
+            }
             return Results.Ok();
         });
 
@@ -362,9 +357,6 @@ public static class ClientApiEndpoints
         });
     }
 
-    /// <summary>Map <see cref="OrderRecord"/> (kiểu nội bộ hub) → <see cref="HubOrderItem"/> (DTO dùng chung với
-    /// client). Map TAY từng field — KHÔNG serialize thẳng <c>OrderRecord</c> — để đổi tên field bên hub làm gãy
-    /// build ngay, thay vì âm thầm trả cột rỗng cho client.</summary>
     /// <summary>Chuẩn hoá mốc thời gian client gửi lên thành DateTime Kind=Utc. Chuỗi có "Z"/offset → parser đã ra
     /// đúng thời điểm (Local chỉ là cách biểu diễn, <c>ToUniversalTime</c> lấy lại ĐÚNG mốc, không đoán múi giờ);
     /// chuỗi KHÔNG hậu tố (Unspecified) → hiểu là UTC theo hợp đồng route, KHÔNG quy đổi theo giờ máy chủ.</summary>
@@ -375,6 +367,9 @@ public static class ClientApiEndpoints
         _ => DateTime.SpecifyKind(v, DateTimeKind.Utc),
     };
 
+    /// <summary>Map <see cref="OrderRecord"/> (kiểu nội bộ hub) → <see cref="HubOrderItem"/> (DTO dùng chung với
+    /// client). Map TAY từng field — KHÔNG serialize thẳng <c>OrderRecord</c> — để đổi tên field bên hub làm gãy
+    /// build ngay, thay vì âm thầm trả cột rỗng cho client.</summary>
     private static HubOrderItem ToHubOrderItem(OrderRecord o) => new()
     {
         Id = o.Id,
@@ -409,12 +404,6 @@ public static class ClientApiEndpoints
         Username = s.Username,
     };
 
-    /// <summary>Ghi cảnh báo mỗi lần trúng 1 endpoint LEGACY (repo không còn ai gọi, nhưng client CŨ ngoài fleet có
-    /// thể còn) — thu bằng chứng để đợt sau xoá hẳn nếu log im. IP thực đọc qua <see cref="LoginRateLimit.IpOf"/>
-    /// (CF-Connecting-IP → RemoteIpAddress).</summary>
-    private static void LogLegacyHit(ILoggerFactory lf, HttpContext ctx, string path) =>
-        lf.CreateLogger("LegacyApi").LogWarning("legacy endpoint hit: {Path} from {Ip}", path, LoginRateLimit.IpOf(ctx));
-
     /// <summary>Trần kích thước một file phiếu hub nhận qua POST /api/orders/slip (khớp trần client đọc phiếu).</summary>
     private const long MaxSlipBytes = 5 * 1024 * 1024;
 
@@ -431,7 +420,7 @@ public static class ClientApiEndpoints
         var moTa = $"{inserted.Count} đơn mới ({shopName})";
         var urls = ResolveWebhooks(db, SettingKeys.NotifyWebhookDonMoi);
         if (urls.Count == 0) { LogChuaCauHinh(db, mid, "đơn mới", SettingKeys.NotifyWebhookDonMoi, moTa); return; }
-        var text = OrderNotifyService.TaoTinNhanDonMoi(shopName, inserted.Select(ToSyncedOrder).ToList(), DateTime.Now);
+        var text = OrderNotifyService.TaoTinNhanDonMoi(shopName, inserted.Select(ToSyncedOrder).ToList(), GioVietNam.BayGio());
         QueueSend(queue, mid, urls, text, "đơn mới", moTa);
     }
 
@@ -448,8 +437,47 @@ public static class ClientApiEndpoints
         var moTa = $"{pairs.Count} đơn trả ({shopName})";
         var urls = ResolveWebhooks(db, SettingKeys.NotifyWebhookDonTra);
         if (urls.Count == 0) { LogChuaCauHinh(db, mid, "đơn trả", SettingKeys.NotifyWebhookDonTra, moTa); return; }
-        var text = OrderNotifyService.TaoTinNhanDonTra(shopName, pairs, DateTime.Now);
+        var text = OrderNotifyService.TaoTinNhanDonTra(shopName, pairs, GioVietNam.BayGio());
         QueueSend(queue, mid, urls, text, "đơn trả", moTa);
+    }
+
+    /// <summary><see cref="OrdersAppAlertRequest.Kind"/> đi kênh ĐƠN TRẢ thay vì kênh lỗi app.</summary>
+    private const string KindDonTra = "don_tra";
+
+    /// <summary>
+    /// Fire-and-forget báo "đơn trả hàng" từ app-alert <c>Kind="don_tra"</c>: client gửi mã trả của các đơn ĐÃ bị
+    /// dọn khỏi app (không còn đi qua <c>orders/push</c> nên hub không tự phát hiện được). Dùng ĐÚNG kênh + định
+    /// dạng tin của <see cref="FireNotifyDonTra"/>; <c>ShopName</c> = shop_login, <c>Detail</c> = các cặp
+    /// <c>SN=CODE</c> ngăn bằng <c>;</c>. Không tách được cặp nào → thôi (không bắn tin rỗng).
+    /// </summary>
+    private static void FireNotifyDonTraTuAppAlert(HubDatabase db, WebhookQueueService queue, string mid, OrdersAppAlertRequest r)
+    {
+        var pairs = TachCapDonTra(r.Detail);
+        if (pairs.Count == 0) return;
+
+        var shopName = string.IsNullOrWhiteSpace(r.ShopName) ? "?" : r.ShopName!.Trim();
+        var moTa = $"{pairs.Count} đơn trả ({shopName})";
+        var urls = ResolveWebhooks(db, SettingKeys.NotifyWebhookDonTra);
+        if (urls.Count == 0) { LogChuaCauHinh(db, mid, "đơn trả", SettingKeys.NotifyWebhookDonTra, moTa); return; }
+        var text = OrderNotifyService.TaoTinNhanDonTra(shopName, pairs, GioVietNam.BayGio());
+        QueueSend(queue, mid, urls, text, "đơn trả", moTa);
+    }
+
+    /// <summary>HÀM THUẦN (test được): tách <c>"SN1=CODE1; SN2=CODE2"</c> thành các cặp (mã đơn, mã yêu cầu). Bỏ
+    /// phần tử thiếu <c>=</c> hoặc có vế rỗng; null/rỗng → list rỗng.</summary>
+    internal static List<(string MaDon, string MaYeuCau)> TachCapDonTra(string? detail)
+    {
+        var list = new List<(string, string)>();
+        if (string.IsNullOrWhiteSpace(detail)) return list;
+        foreach (var phan in detail.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var eq = phan.IndexOf('=');
+            if (eq <= 0) continue;
+            var sn = phan[..eq].Trim();
+            var code = phan[(eq + 1)..].Trim();
+            if (sn.Length > 0 && code.Length > 0) list.Add((sn, code));
+        }
+        return list;
     }
 
     /// <summary>Fire-and-forget báo lỗi app (hiện: không đặt được địa chỉ).</summary>
@@ -463,7 +491,7 @@ public static class ClientApiEndpoints
         if (string.Equals(r.Kind?.Trim(), "khong_dat_duoc_dia_chi", StringComparison.OrdinalIgnoreCase))
         {
             text = OrderNotifyService.TaoTinNhanLoiDiaChi(
-                r.AccountLabel ?? "", r.ShopName ?? "", r.Detail ?? "", r.MachineName ?? "", DateTime.Now);
+                r.AccountLabel ?? "", r.ShopName ?? "", r.Detail ?? "", r.MachineName ?? "", GioVietNam.BayGio());
         }
         else
         {
@@ -528,6 +556,3 @@ public static class ClientApiEndpoints
         ReturnRequestCode = o.ReturnRequestCode,
     };
 }
-
-/// <summary>Body cho /accounts/remove.</summary>
-public sealed record AccountRemoveRequest(string Id);
