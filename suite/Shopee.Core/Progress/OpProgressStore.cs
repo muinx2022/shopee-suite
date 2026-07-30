@@ -53,29 +53,12 @@ public sealed class OpProgressStore
         lock (_lock)
         {
             _items.Clear();
-            try
-            {
-                if (File.Exists(FilePath))
-                {
-                    var list = JsonSerializer.Deserialize<List<OpProgress>>(File.ReadAllText(FilePath, Encoding.UTF8));
-                    if (list is not null) _items.AddRange(list);
-                }
-            }
-            catch { }
+            var list = JsonAtomicFile.TryLoad<List<OpProgress>>(FilePath);
+            if (list is not null) _items.AddRange(list);
         }
     }
 
-    private void SaveLocked()
-    {
-        try
-        {
-            var json = JsonSerializer.Serialize(_items, JsonOpts);
-            var tmp = FilePath + ".tmp";
-            File.WriteAllText(tmp, json, Encoding.UTF8);
-            File.Move(tmp, FilePath, overwrite: true);
-        }
-        catch { }
-    }
+    private void SaveLocked() => JsonAtomicFile.Save(FilePath, _items, JsonOpts);
 
     private OpProgress GetOrCreateLocked(string accountId, string sheet, string op, string accountName)
     {

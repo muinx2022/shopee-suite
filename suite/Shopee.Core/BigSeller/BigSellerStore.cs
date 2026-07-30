@@ -76,16 +76,8 @@ public sealed class BigSellerStore
         lock (_lock)
         {
             _accounts.Clear();
-            try
-            {
-                if (File.Exists(FilePath))
-                {
-                    var list = JsonSerializer.Deserialize<List<BigSellerAccount>>(
-                        File.ReadAllText(FilePath, Encoding.UTF8));
-                    if (list is not null) _accounts.AddRange(list);
-                }
-            }
-            catch { }
+            var list = JsonAtomicFile.TryLoad<List<BigSellerAccount>>(FilePath);
+            if (list is not null) _accounts.AddRange(list);
         }
     }
 
@@ -99,13 +91,10 @@ public sealed class BigSellerStore
 
     private bool SaveLocked()
     {
+        // Changed nằm TRONG try như cũ: handler ném ⇒ Save coi như hỏng ⇒ caller hoàn tác.
         try
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
-            var json = JsonSerializer.Serialize(_accounts, JsonOpts);
-            var tmp = FilePath + ".tmp";
-            File.WriteAllText(tmp, json, Encoding.UTF8);
-            File.Move(tmp, FilePath, overwrite: true);
+            if (!JsonAtomicFile.Save(FilePath, _accounts, JsonOpts)) return false;
             Changed?.Invoke();
             return true;
         }

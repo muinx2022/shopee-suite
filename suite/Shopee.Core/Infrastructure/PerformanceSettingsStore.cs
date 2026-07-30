@@ -32,12 +32,8 @@ public sealed class PerformanceSettingsStore
     {
         lock (_lock)
         {
-            try
-            {
-                if (File.Exists(FilePath))
-                    Current = JsonSerializer.Deserialize<PerformanceSettings>(File.ReadAllText(FilePath, Encoding.UTF8)) ?? new();
-            }
-            catch { Current = new(); }
+            if (!File.Exists(FilePath)) return;   // chưa có file → GIỮ bản đang có (khác file hỏng → về mặc định)
+            Current = JsonAtomicFile.TryLoad<PerformanceSettings>(FilePath) ?? new();
         }
     }
 
@@ -46,13 +42,7 @@ public sealed class PerformanceSettingsStore
         lock (_lock)
         {
             Current = settings;
-            try
-            {
-                var tmp = FilePath + ".tmp";
-                File.WriteAllText(tmp, JsonSerializer.Serialize(settings, JsonOpts), Encoding.UTF8);
-                File.Move(tmp, FilePath, overwrite: true);
-            }
-            catch { }
+            JsonAtomicFile.Save(FilePath, settings, JsonOpts);
         }
     }
 }

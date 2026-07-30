@@ -80,17 +80,9 @@ public sealed class AccountStore
         lock (_lock)
         {
             _accounts.Clear();
-            try
-            {
-                if (File.Exists(FilePath))
-                {
-                    var list = JsonSerializer.Deserialize<List<ShopeeAccount>>(
-                        File.ReadAllText(FilePath, Encoding.UTF8));
-                    if (list is not null)
-                        foreach (var a in list) { a.EnsureProfilePath(); _accounts.Add(a); }
-                }
-            }
-            catch { }
+            var list = JsonAtomicFile.TryLoad<List<ShopeeAccount>>(FilePath);
+            if (list is not null)
+                foreach (var a in list) { a.EnsureProfilePath(); _accounts.Add(a); }
         }
     }
 
@@ -104,13 +96,10 @@ public sealed class AccountStore
 
     private bool SaveLocked()
     {
+        // Changed nằm TRONG try như cũ: handler ném ⇒ Save coi như hỏng ⇒ caller (Add/Remove/ReplaceAll) hoàn tác.
         try
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
-            var json = JsonSerializer.Serialize(_accounts, JsonOpts);
-            var tmp = FilePath + ".tmp";
-            File.WriteAllText(tmp, json, Encoding.UTF8);
-            File.Move(tmp, FilePath, overwrite: true);
+            if (!JsonAtomicFile.Save(FilePath, _accounts, JsonOpts)) return false;
             Changed?.Invoke();
             return true;
         }

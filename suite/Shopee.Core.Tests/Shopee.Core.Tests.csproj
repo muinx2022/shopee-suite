@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" Version="6.0.0" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
+    <PackageReference Include="xunit" Version="2.5.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.5.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <!-- Ref thẳng cả Shopee.Core (khác XuLyDonShopee.Tests vốn LINK từng file để né dây Playwright/ClosedXML):
+       ở đây test nằm CÙNG solution với Core nên ref project là rẻ nhất, và cần chính các kiểu thật của store
+       (ShopeeAccount / BigSellerAccount / OpProgress) để đối chiếu byte JSON trên đĩa. -->
+  <ItemGroup>
+    <ProjectReference Include="..\Shopee.Core\Shopee.Core.csproj" />
+  </ItemGroup>
+
+</Project>
