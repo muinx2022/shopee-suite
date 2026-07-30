@@ -1,3 +1,5 @@
+using Shopee.Core.Accounts;
+
 namespace ShopeeStatApp.Services;
 
 /// <summary>
@@ -5,7 +7,6 @@ namespace ShopeeStatApp.Services;
 /// </summary>
 public sealed class ShopeeLoginService(AppSettingsService appSettings)
 {
-    private const string LoginUrl = "https://shopee.vn/buyer/login?next=https%3A%2F%2Fshopee.vn";
 
     /// <summary>
     /// Full login flow. Returns true if the account is (or becomes) logged in.
@@ -46,25 +47,26 @@ public sealed class ShopeeLoginService(AppSettingsService appSettings)
         }
 
         // Parse login string
-        if (!TryParseLoginLine(config.ShopeeAccountLogin,
-            out var username, out var password, out var cookieDomain, out var spcF))
+        var login = ShopeeAuth.ParseLoginLine(config.ShopeeAccountLogin, ShopeeLoginLineOptions.AllowEmptyPassword);
+        if (!login.Ok)
         {
             log("Chuỗi tài khoản sai định dạng (cần: user|pass|.shopee.vn=SPC_F=value).");
             return false;
         }
 
+        var username = login.Username;
         log($"Thiết lập cookie SPC_F cho {username}…");
-        await SetSpcFCookieAsync(cdp, cookieDomain, spcF, ct);
+        await SetSpcFCookieAsync(cdp, login.CookieDomain, login.SpcF, ct);
 
         log("Mở trang đăng nhập…");
-        await NavigateAsync(cdp, LoginUrl, ct);
+        await NavigateAsync(cdp, ShopeeAuth.LoginUrl, ct);
         await Task.Delay(2000, ct);
 
         log("Điền form đăng nhập…");
         for (var attempt = 0; attempt < 8; attempt++)
         {
             ct.ThrowIfCancellationRequested();
-            var fillResult = await FillLoginFormAsync(cdp, username, password, ct);
+            var fillResult = await FillLoginFormAsync(cdp, username, login.Password, ct);
             if (fillResult == "OK") break;
             await Task.Delay(900, ct);
         }
@@ -104,9 +106,7 @@ public sealed class ShopeeLoginService(AppSettingsService appSettings)
                 var name = cookie.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "";
                 var value = cookie.TryGetProperty("value", out var v) ? v.GetString() ?? "" : "";
 
-                if (!domain.Contains("shopee", StringComparison.OrdinalIgnoreCase)) continue;
-                if (name is not ("SPC_ST" or "SPC_EC")) continue;
-                if (value.Length > 5 && value != "-") return true;
+                if (ShopeeAuth.IsSessionCookie(domain, name, value)) return true;
             }
         }
         catch { }
@@ -116,18 +116,7 @@ public sealed class ShopeeLoginService(AppSettingsService appSettings)
     private static async Task SetSpcFCookieAsync(
         CdpSession cdp, string domain, string spcF, CancellationToken ct)
     {
-        var expires = (long)DateTimeOffset.UtcNow.AddDays(30).ToUnixTimeSeconds();
-        await cdp.SendAsync("Network.setCookie", new
-        {
-            name = "SPC_F",
-            value = spcF,
-            domain,
-            path = "/",
-            secure = true,
-            httpOnly = false,
-            sameSite = "Lax",
-            expires,
-        }, ct);
+        await cdp.SendAsync("Network.setCookie", ShopeeAuth.BuildSpcFCookie(domain, spcF), ct);
     }
 
     private static async Task NavigateAsync(CdpSession cdp, string url, CancellationToken ct)
@@ -184,35 +173,6 @@ public sealed class ShopeeLoginService(AppSettingsService appSettings)
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
-
-    private static bool TryParseLoginLine(string line,
-        out string username, out string password, out string cookieDomain, out string spcF)
-    {
-        username = password = cookieDomain = spcF = "";
-        if (string.IsNullOrWhiteSpace(line)) return false;
-
-        var parts = line.Split('|');
-        if (parts.Length < 3) return false;
-
-        username = parts[0].Trim();
-        password = parts[1].Trim();
-        var cookiePart = parts[2].Trim(); // e.g. ".shopee.vn=SPC_F=abc123..."
-
-        var eqIdx = cookiePart.IndexOf('=');
-        if (eqIdx < 0) return false;
-
-        cookieDomain = cookiePart[..eqIdx];         // ".shopee.vn"
-        var rest = cookiePart[(eqIdx + 1)..];        // "SPC_F=abc123..."
-
-        var spcIdx = rest.IndexOf('=');
-        if (spcIdx < 0) return false;
-
-        spcF = rest[(spcIdx + 1)..];                 // "abc123..."
-
-        return !string.IsNullOrWhiteSpace(username)
-            && !string.IsNullOrWhiteSpace(spcF)
-            && !string.IsNullOrWhiteSpace(cookieDomain);
-    }
 
     private static void ClearLoginFlag(InstanceConfig config)
     {

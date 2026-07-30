@@ -1,3 +1,4 @@
+using Shopee.Core.Accounts;
 using Shopee.Core.Browser;
 using Shopee.Core.Cdp;
 
@@ -26,18 +27,18 @@ public sealed class ShopeeAccountChecker
 {
     /// <summary>Trang đăng nhập Shopee — public để caller (vd "kiểm tra tk lỗi" double-click) mở cửa sổ
     /// THẲNG tại đây rồi bàn giao cho <see cref="LoginThenNavigateAsync"/> auto-login.</summary>
-    public const string LoginUrl = "https://shopee.vn/buyer/login?next=https%3A%2F%2Fshopee.vn";
+    public const string LoginUrl = ShopeeAuth.LoginUrl;
 
     private readonly Random _rng = new();
-    private double _mouseX;
-    private double _mouseY;
+    // Chuyển động/độ trễ kiểu người dùng chung với Search (Core) — chỉ khác bộ hằng. Dùng CHUNG _rng
+    // để chuỗi ngẫu nhiên của cả luồng không đổi so với lúc code này còn nằm trong lớp này.
+    private readonly CdpHumanInput _input;
 
     public event Action<string>? Log;
 
     public ShopeeAccountChecker()
     {
-        _mouseX = 220 + _rng.Next(0, 380);
-        _mouseY = 160 + _rng.Next(0, 260);
+        _input = new CdpHumanInput(HumanInputProfile.CheckAccount, _rng);
     }
 
     /// <summary>
@@ -50,8 +51,10 @@ public sealed class ShopeeAccountChecker
     public async Task<CheckResult> CheckAsync(
         string accountLine, string? proxy, string profileDir, int holdMs, CancellationToken ct)
     {
-        if (!TryParse(accountLine, out var username, out var password, out var cookieDomain, out var spcF))
+        var login = ShopeeAuth.ParseLoginLine(accountLine, ShopeeLoginLineOptions.AllowMissingCookie);
+        if (!login.Ok)
             return new CheckResult(CheckOutcome.Error, "Sai định dạng (cần tối thiểu user|pass).");
+        var username = login.Username;
 
         // Mở Brave với profile của tài khoản (caller chuẩn bị & quyết định giữ/xoá thư mục). Dùng Brave
         // (KHÔNG Edge) để profile/cookie đăng nhập DÙNG CHUNG được với Scrape & Search (cùng Chromium).
@@ -65,8 +68,8 @@ public sealed class ShopeeAccountChecker
             await TrySend(cdp, "Network.enable", null, ct);
             await TrySend(cdp, "Page.enable", null, ct);
 
-            if (!string.IsNullOrWhiteSpace(spcF))
-                await SetCookieAsync(cdp, "SPC_F", spcF, cookieDomain, ct);
+            if (!string.IsNullOrWhiteSpace(login.SpcF))
+                await SetSpcFCookieAsync(cdp, login.CookieDomain, login.SpcF, ct);
 
             // Điều hướng lại cho chắc (cookie SPC_F đã set trước khi tải form)
             await TrySend(cdp, "Page.navigate", new { url = LoginUrl }, ct);
@@ -86,7 +89,7 @@ public sealed class ShopeeAccountChecker
                     break;
 
                 default: // FormWait.Form → điền form kiểu human rồi chờ kết quả
-                    await HumanFillAsync(cdp, username, password, ct);
+                    await HumanFillAsync(cdp, username, login.Password, ct);
                     result = await WaitOutcomeAsync(cdp, username, ct);
                     break;
             }
@@ -124,20 +127,21 @@ public sealed class ShopeeAccountChecker
     private async Task<bool> EnsureLoggedInAsync(CdpSession cdp, string accountLine, CancellationToken ct)
     {
         if (await IsLoggedInAsync(cdp, ct)) return true;                       // còn phiên → khỏi login
-        if (!TryParse(accountLine, out var username, out var password, out var cookieDomain, out var spcF))
+        var login = ShopeeAuth.ParseLoginLine(accountLine, ShopeeLoginLineOptions.AllowMissingCookie);
+        if (!login.Ok)
             return false;                                                      // không có tk hợp lệ → chịu
 
         Log?.Invoke("  chưa có phiên → tự đăng nhập trước…");
-        if (!string.IsNullOrWhiteSpace(spcF))
-            await SetCookieAsync(cdp, "SPC_F", spcF, cookieDomain, ct);
+        if (!string.IsNullOrWhiteSpace(login.SpcF))
+            await SetSpcFCookieAsync(cdp, login.CookieDomain, login.SpcF, ct);
         await TrySend(cdp, "Page.navigate", new { url = LoginUrl }, ct);       // set SPC_F xong mới tải form
 
         switch (await WaitForFormOrLoginAsync(cdp, ct))
         {
             case FormWait.LoggedIn: return true;                              // redirect ra home → đã đăng nhập
             case FormWait.Form:
-                await HumanFillAsync(cdp, username, password, ct);
-                return (await WaitOutcomeAsync(cdp, username, ct)).Outcome == CheckOutcome.Success;
+                await HumanFillAsync(cdp, login.Username, login.Password, ct);
+                return (await WaitOutcomeAsync(cdp, login.Username, ct)).Outcome == CheckOutcome.Success;
             default: return false;                                            // không thấy form (bị chặn/đổi UI)
         }
     }
@@ -322,9 +326,7 @@ public sealed class ShopeeAccountChecker
                 var domain = cookie.TryGetProperty("domain", out var d) ? d.GetString() ?? "" : "";
                 var name = cookie.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "";
                 var value = cookie.TryGetProperty("value", out var v) ? v.GetString() ?? "" : "";
-                if (!domain.Contains("shopee", StringComparison.OrdinalIgnoreCase)) continue;
-                if (name is not ("SPC_ST" or "SPC_EC")) continue;
-                if (value.Length > 5 && value != "-") return true;
+                if (ShopeeAuth.IsSessionCookie(domain, name, value)) return true;
             }
         }
         catch { }
@@ -352,18 +354,9 @@ public sealed class ShopeeAccountChecker
         catch { return ("", ""); }
     }
 
-    private static async Task SetCookieAsync(CdpSession cdp, string name, string value, string domain, CancellationToken ct)
+    private static async Task SetSpcFCookieAsync(CdpSession cdp, string domain, string spcF, CancellationToken ct)
     {
-        var expires = (long)DateTimeOffset.UtcNow.AddDays(30).ToUnixTimeSeconds();
-        try
-        {
-            await cdp.SendAsync("Network.setCookie", new
-            {
-                name, value,
-                domain = string.IsNullOrWhiteSpace(domain) ? ".shopee.vn" : domain,
-                path = "/", secure = true, httpOnly = false, sameSite = "Lax", expires,
-            }, ct);
-        }
+        try { await cdp.SendAsync("Network.setCookie", ShopeeAuth.BuildSpcFCookie(domain, spcF), ct); }
         catch { }
     }
 
@@ -449,125 +442,19 @@ public sealed class ShopeeAccountChecker
 
     // ── Trusted input (human-like) ──────────────────────────────────────────────
 
-    private async Task ClickAtAsync(CdpSession cdp, double tx, double ty, CancellationToken ct)
-    {
-        await MoveMouseToAsync(cdp, tx, ty, ct);
-        await DelayAsync(160, 480, ct);
-        await MouseAsync(cdp, "mousePressed", tx, ty, "left", 1, 1, ct);
-        await DelayAsync(50, 140, ct);
-        await MouseAsync(cdp, "mouseReleased", tx, ty, "left", 0, 1, ct);
-    }
+    private Task ClickAtAsync(CdpSession cdp, double tx, double ty, CancellationToken ct) =>
+        _input.ClickAsync(CdpSender.For(cdp), tx, ty, ct: ct);
 
-    private async Task MoveMouseToAsync(CdpSession cdp, double tx, double ty, CancellationToken ct)
-    {
-        var sx = _mouseX;
-        var sy = _mouseY;
-        var steps = _rng.Next(10, 20);
-        for (var i = 1; i < steps; i++)
-        {
-            ct.ThrowIfCancellationRequested();
-            var t = (double)i / steps;
-            var ease = t < 0.5 ? 2 * t * t : 1 - Math.Pow(-2 * t + 2, 2) / 2;
-            var x = sx + (tx - sx) * ease + Math.Sin(t * Math.PI * 3) * Rand(-4, 4);
-            var y = sy + (ty - sy) * ease + Math.Cos(t * Math.PI * 2) * Rand(-3, 3);
-            await cdp.SendNoReplyAsync("Input.dispatchMouseEvent", new
-            {
-                type = "mouseMoved", x, y, button = "none", buttons = 0,
-            }, ct);
-            await Task.Delay(_rng.Next(8, 24), ct);
-        }
-        await MouseAsync(cdp, "mouseMoved", tx, ty, "none", 0, 0, ct);
-        _mouseX = tx;
-        _mouseY = ty;
-    }
+    private Task TypeHumanAsync(CdpSession cdp, string text, CancellationToken ct) =>
+        _input.TypeTextAsync(CdpSender.For(cdp), text, ct: ct);
 
-    private static Task MouseAsync(CdpSession cdp, string type, double x, double y,
-        string button, int buttons, int clickCount, CancellationToken ct) =>
-        cdp.SendAsync("Input.dispatchMouseEvent", new { type, x, y, button, buttons, clickCount }, ct);
-
-    private async Task TypeHumanAsync(CdpSession cdp, string text, CancellationToken ct)
-    {
-        if (string.IsNullOrEmpty(text)) return;
-
-        var isAscii = text.All(ch => ch >= 0x20 && ch <= 0x7E);
-        if (!isAscii)
-        {
-            await DelayAsync(120, 260, ct);
-            await cdp.SendAsync("Input.insertText", new { text }, ct);
-            return;
-        }
-
-        foreach (var ch in text)
-        {
-            ct.ThrowIfCancellationRequested();
-            var (code, vk) = KeyInfo(ch);
-            var s = ch.ToString();
-            await cdp.SendAsync("Input.dispatchKeyEvent",
-                new { type = "keyDown", text = s, key = s, code, windowsVirtualKeyCode = vk }, ct);
-            await cdp.SendAsync("Input.dispatchKeyEvent",
-                new { type = "keyUp", key = s, code, windowsVirtualKeyCode = vk }, ct);
-            await Task.Delay(_rng.Next(55, 150), ct);
-        }
-    }
-
-    private async Task PressEnterAsync(CdpSession cdp, CancellationToken ct)
-    {
-        await cdp.SendAsync("Input.dispatchKeyEvent",
-            new { type = "keyDown", key = "Enter", code = "Enter", windowsVirtualKeyCode = 13, text = "\r" }, ct);
-        await DelayAsync(40, 110, ct);
-        await cdp.SendAsync("Input.dispatchKeyEvent",
-            new { type = "keyUp", key = "Enter", code = "Enter", windowsVirtualKeyCode = 13 }, ct);
-    }
-
-    private static (string code, int vk) KeyInfo(char ch)
-    {
-        if (ch >= '0' && ch <= '9') return ("Digit" + ch, ch);
-        if (ch >= 'a' && ch <= 'z') return ("Key" + char.ToUpperInvariant(ch), char.ToUpperInvariant(ch));
-        if (ch >= 'A' && ch <= 'Z') return ("Key" + ch, ch);
-        if (ch == ' ') return ("Space", 32);
-        return ("", 0);
-    }
+    private Task PressEnterAsync(CdpSession cdp, CancellationToken ct) =>
+        _input.PressKeyAsync(CdpSender.For(cdp), "Enter", ct);
 
     private static async Task TrySend(CdpSession cdp, string method, object? @params, CancellationToken ct)
     {
         try { await cdp.SendAsync(method, @params, ct); } catch { }
     }
 
-    private double Rand(double min, double max) => min + _rng.NextDouble() * (max - min);
-
     private Task DelayAsync(int minMs, int maxMs, CancellationToken ct) => Task.Delay(_rng.Next(minMs, maxMs + 1), ct);
-
-    // ── Parse chuỗi tài khoản ────────────────────────────────────────────────────
-
-    /// <summary>
-    /// Hỗ trợ "user|pass" hoặc "user|pass|.shopee.vn=SPC_F=value". Phần cookie là tuỳ chọn.
-    /// </summary>
-    public static bool TryParse(string line, out string username, out string password,
-        out string cookieDomain, out string spcF)
-    {
-        username = password = cookieDomain = spcF = "";
-        if (string.IsNullOrWhiteSpace(line)) return false;
-
-        var parts = line.Split('|');
-        if (parts.Length < 2) return false;
-
-        username = parts[0].Trim();
-        password = parts[1].Trim();
-        if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(password)) return false;
-
-        if (parts.Length >= 3)
-        {
-            var cookiePart = parts[2].Trim(); // ".shopee.vn=SPC_F=abc..."
-            var eqIdx = cookiePart.IndexOf('=');
-            if (eqIdx > 0)
-            {
-                cookieDomain = cookiePart[..eqIdx];
-                var rest = cookiePart[(eqIdx + 1)..];      // "SPC_F=abc..."
-                var spcIdx = rest.IndexOf('=');
-                spcF = spcIdx >= 0 ? rest[(spcIdx + 1)..] : rest;
-            }
-        }
-
-        return true;
-    }
 }
