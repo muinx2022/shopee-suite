@@ -1,7 +1,7 @@
 # Plan: Tách tab "Đơn hàng" ra khỏi Dispatch.razor
 
 - **Ngày:** 2026-07-30
-- **Trạng thái:** đang làm
+- **Trạng thái:** đã thực thi — chờ phiên chính nghiệm thu
 - **Người lập:** Fable · **Người thực thi:** opus-dev
 - **Loại việc:** refactor thuần — **KHÔNG đổi một hành vi nào**
 
@@ -164,4 +164,119 @@ Báo số dòng `Dispatch.razor` trước/sau và số dòng file mới.
 
 ## Báo cáo thực thi
 
-<Để trống — người thực thi điền.>
+**Người thực thi:** opus-dev · **Ngày:** 2026-07-30 · **Kết quả:** làm xong toàn bộ phạm vi, chưa commit.
+
+### File đã sửa/tạo (đúng 4 file, khớp `git status`)
+
+| File | Thay đổi |
+|---|---|
+| `server/Shopee.Hub.Web/Components/Shared/DispatchOrdersTab.razor` | **TẠO** — 381 dòng. Toàn bộ markup + state + phương thức của tab Đơn hàng. |
+| `server/Shopee.Hub.Web/Components/Pages/Dispatch.razor` | **1601 → 1270 dòng**. Bỏ phần đã chuyển; nhánh `else` giờ chỉ gọi `<DispatchOrdersTab …/>`. |
+| `server/Shopee.Hub.Web/Components/DispatchViewLogic.cs` | +17 dòng: nhận `OpBtn` (public record, top-level cùng file — call site giữ nguyên `OpBtn`); kèm khối doc của `DispatchWorkItem` vốn bị mồ côi (nó đang bám nhờ vào `OpBtn`, chuyển `OpBtn` đi thì phải đưa doc về đúng chỗ). |
+| `server/Shopee.Hub.Web/Components/FleetViewProjection.cs` | +10 dòng: nhận `HostName(FleetSnapshot, string)`. Cha gọi lại qua hàm mới (`private string HostName(id) => FleetViewProjection.HostName(Snap, id);`), KHÔNG giữ 2 bản. |
+
+`Fleet.razor` **không đụng** — `HostName` bên đó khác luật (fallback `ShortId`, không phải id đầy đủ).
+
+### Ranh giới tách — đã làm đúng danh sách
+
+- Chuyển đi: `_shops`, `_orderSums`, `_shopIdByLogin`, `_ordersLoadedAt`, `_oHost`, `_oMachineMsg`, `_oResult`,
+  `_oMachines`, `_oAccounts`, `_oCmds`, `_oCounts`, `_oHolders`; record `OrdersMachineCard`; 18 phương thức theo
+  đúng danh sách plan; markup dòng 428–539. Kèm 2 thứ plan không liệt kê nhưng chỉ tab này dùng:
+  `const WaitingStatus` và `const OrdersLeasePrefix`.
+- Ở lại cha: `_ordersRunning`, `ReloadOrdersRunning()`, `OrdersItem(...)`, `OnOrdersStop(...)` (**bẫy số 1** —
+  đã đối chiếu từng tên, `ReloadOrdersLive` mới là hàm của tab); `_oMach`, `_oOpen`; toàn bộ tab BigSeller + KPI.
+
+### Build & test
+
+```text
+dotnet build server/ShopeeHub.sln -c Debug --no-incremental
+  → Build succeeded. 0 Warning(s), 0 Error(s)
+dotnet test server/Shopee.Hub.Web.Tests
+  → Passed! Failed: 0, Passed: 30, Skipped: 0
+```
+
+Không phải sửa test nào (`OpBtn`/`HostName` không có test cũ chạm tới).
+
+### Kiểm bằng mắt — CÓ chạy thật
+
+Hub chạy **cục bộ** `127.0.0.1:8199`, `HUB_DATA_DIR` trỏ thư mục tạm trong scratchpad (DB rỗng, tự seed
+4 máy / 2 acc BigSeller / 4 tk Đơn hàng / 9 đơn / 1 lease / 1 assignment qua chính API client). **Không đụng VM,
+không đụng DB thật.** Chụp bằng Chromium (Playwright) 1440×1000.
+
+Ảnh (thư mục scratchpad phiên `68d1c245-…/scratchpad/shots/`):
+
+| Trước | Sau | Nội dung |
+|---|---|---|
+| `truoc-bs.png` | `cuoi-bs.png` | tab BigSeller |
+| `truoc-orders.png` | `cuoi-orders.png` | tab Đơn hàng (mở từ URL có sẵn `omach`+`oacc`) |
+| `truoc-tuongtac-sau-bam.png` | `cuoi-tuongtac-sau-bam.png` | sau khi bấm chọn máy + bung shop |
+| `truoc-tuongtac-sau-f5.png` | `cuoi-tuongtac-sau-f5.png` | sau F5 |
+| — | `sau-kpi-dangchay.png` | panel KPI "Việc đang chạy" mở từ tab BigSeller |
+
+Ngoài ảnh còn **diff DOM thật** (`.dispatch` outerHTML lưu lại cả hai lượt, cùng bộ dữ liệu):
+
+- tab BigSeller: **giống hệt từng byte**;
+- tab Đơn hàng: chỉ khác thụt đầu dòng (markup ra khỏi khối `else` nên bớt 4 space — text node, không đổi hiển
+  thị) và chuỗi "N phút trước" (thời gian thực trôi giữa 2 lượt chạy). Chuẩn hoá 2 thứ đó → **giống hệt**.
+
+**Bất biến 1 — URL.** Trình tự bấm giống hệt nhau trước/sau:
+
+```text
+[1] vào /dispatch trần        -> (không có query)
+[2] bấm tab Đơn hàng          -> ?tab=orders
+[3] chọn máy PC-ALPHA         -> ?tab=orders&omach=pc-alpha%3Aorders
+[4] bung shop của 1 tài khoản -> ?tab=orders&omach=pc-alpha%3Aorders&oacc=seller.one%40example.com
+[5] F5                        -> URL giữ nguyên; máy đang chọn = PC-ALPHA; chip shop đang bung = Shop One / Shop Two
+[6] bấm lại thẻ máy = bỏ chọn -> ?tab=orders
+```
+
+**Bất biến 3 — chỉ chạy khi tab đang mở.** Thêm `Console.WriteLine` TẠM vào `OnParametersSet` của con, đứng ở
+tab BigSeller 30 giây rồi sang tab Đơn hàng 30 giây, đếm dòng log theo mốc thời gian:
+
+```text
+17:24:05 → 17:24:35 (đứng ở tab BigSeller):  0 lần
+17:24:35 → 17:25:05 (đứng ở tab Đơn hàng): 16 lần   (≈ nhịp 2s + 1 lần lúc vừa mở tab)
+```
+
+Dòng log tạm **đã gỡ**, build lại sạch (`grep` xác nhận không còn `TAM-KIEM-NHIP`/`Console.WriteLine`).
+
+**Bất biến 5 — KPI.** Đứng ở tab BigSeller: thẻ đọc `4 Máy online | 2 Việc đang chạy | 2 Việc chờ | 0 Việc gián
+đoạn` — **giống hệt ảnh trước**. Mở thẻ "Việc đang chạy" (vẫn ở tab BigSeller), bảng chi tiết liệt kê đúng 2
+phiên Đơn hàng kèm nút ✖ Dừng:
+
+```text
+📦 Đơn hàng — seller.one@example.com  PC-ALPHA  cập nhật 3 phút trước — ✖ Dừng
+📦 Đơn hàng — seller.four@example.com PC-GAMMA  cập nhật 3 phút trước — ✖ Dừng
+```
+
+Dữ liệu seed chỉ có 1 việc BigSeller (đang *chờ*, 0 đang chạy) → con số "2 đang chạy" **chỉ có thể** đến từ phiên
+Đơn hàng ⇒ `ReloadOrdersRunning`/`OrdersItem` đúng là còn ở cha và còn chạy.
+
+### Lỗi đã vấp trong lúc làm (ghi lại cho lần sau)
+
+Lượt chụp "sau" đầu tiên ra bảng RỖNG. Nguyên nhân: `<DispatchOrdersTab SelectedMachine="_oMach" …>` — tham số
+**kiểu string mà thiếu `@`** thì Razor coi là chuỗi HẰNG, con nhận đúng chuỗi `"_oMach"`. Build xanh, test xanh,
+chỉ lộ khi chạy thật. Đã sửa thành `SelectedMachine="@_oMach"` / `OpenAccount="@_oOpen"` và ghi chú ngay tại chỗ.
+
+### Điểm lệch so với plan / cần phiên chính soi
+
+1. **Con inject thêm `FleetStateService`** (plan chỉ nói `HubDatabase`). Bắt buộc: `OnOrdersRunClick` gọi
+   `FleetState.Refresh()`. Không phải state, chỉ là service.
+2. **`OpBtn` để `public`** đúng như plan ghi, nhưng nó nằm cạnh `DispatchKpiCard`/`DispatchWorkItem` đang là
+   `internal`, và không có nhu cầu public nào (test đã có `InternalsVisibleTo`). Đề nghị cân nhắc hạ về
+   `internal` cho đồng bộ — 1 chữ.
+3. **Đường TỰ bỏ chọn cố ý KHÔNG báo lên cha** (`DropOrdersMachine` khi máy offline, và thu gọn tài khoản trong
+   `ReloadOrdersLive`). Lý do: hai đường này chạy cả trong lượt render đầu (còn prerender), mà cha ghi URL bằng
+   `NavigateTo` — navigate lúc prerender là ném redirect (chính cái bẫy `RestoreFromUrl` đã ghi chú). Bản gộp cũ
+   cũng không ghi URL ở hai đường này. **Hệ quả:** sau một lượt tự-bỏ-chọn, `_oMach` bên cha còn giá trị cũ nên
+   một thao tác *khác* sau đó có thể ghi `omach=<máy đã rụng>` vào URL. Vô hại về hiển thị (F5 bỏ qua máy offline,
+   `RestoreFromUrl` đã lọc sẵn) nhưng là điểm duy nhất lệch bản cũ — nói ra để soi.
+4. **Con giữ bản chiếu `_oMach`/`_oOpen`, chỉ nhận lại khi cha đổi THẬT** (`_lastSelectedMachine`/`_lastOpenAccount`).
+   Đây là hệ quả bắt buộc của mục 3: nhận vô điều kiện mỗi nhịp thì cha sẽ đưa lại đúng cái máy con vừa bỏ.
+5. **Một thao tác của người dùng nay ghi URL 2 lượt** (`SelectedMachineChanged` rồi `OpenAccountChanged`, mỗi cái
+   một `UpdateUrl`), thay vì 1 lượt như bản gộp. Cả hai đều `replace:true` nên không đẻ history, URL cuối đúng.
+6. **Bảng tab Đơn hàng nạp thêm ở vài nhịp cha re-render vì lý do khác** (vd bấm nút trong panel KPI trong lúc
+   đang mở tab Đơn hàng): bản cũ chỉ nạp theo nhịp fleet. Chỉ là vài query nhỏ, không đổi hiển thị.
+7. `git status` lúc nhận việc (ảnh chụp đầu phiên) có 4 file `orders/…` đang sửa dở; lúc làm xong chúng **không
+   còn** trong `git status`. Tôi không đụng thư mục đó — nhiều khả năng phiên chính đã commit chúng, nhưng nêu ra
+   để đối chiếu.

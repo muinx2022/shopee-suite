@@ -1,4 +1,5 @@
 using Shopee.Core.BigSeller;
+using Shopee.Core.Coordination;
 
 namespace Shopee.Hub.Web.Components;
 
@@ -29,6 +30,15 @@ public static class FleetViewProjection
                 shop.DisplayName,
                 shop.ShopeeDataSheet ?? ""));
         return rows;
+    }
+
+    /// <summary>Tên máy để hiển thị: hostname máy đang có trong fleet, cạn thì chính id (KHÔNG rút gọn — trang
+    /// Giao việc cố ý phô đủ id để còn đối chiếu). Id rỗng → chuỗi rỗng.</summary>
+    public static string HostName(FleetSnapshot snap, string machineId)
+    {
+        if (string.IsNullOrEmpty(machineId)) return "";
+        var m = snap.Machines.FirstOrDefault(x => x.MachineId == machineId);
+        return m is not null && !string.IsNullOrWhiteSpace(m.Hostname) ? m.Hostname : machineId;
     }
 
     public static string OperationLabel(string op) => op switch
