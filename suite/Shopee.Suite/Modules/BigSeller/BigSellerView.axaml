@@ -130,7 +130,7 @@
                                 <TextBlock Text="Workbook (Excel)" Classes="caption" IsVisible="{Binding CanPickWorkbook}" />
                                 <Grid Margin="0,3,0,3" ColumnDefinitions="*,Auto,Auto" IsVisible="{Binding CanPickWorkbook}">
                                     <TextBox Grid.Column="0" Text="{Binding WorkbookPath}" IsReadOnly="True"
-                                             Classes="mono" />
+                                             Classes="mono" ToolTip.Tip="{Binding WorkbookPath}" />
                                     <Button Grid.Column="1" Width="40" Margin="8,0,0,0" Padding="0"
                                             ToolTip.Tip="Chọn file workbook"
                                             Command="{Binding #Root.DataContext.BrowseWorkbookCommand}">
@@ -155,7 +155,7 @@
                                 <TextBlock Text="File cookie BigSeller (muc_token — dùng chung)" Classes="caption" />
                                 <Grid Margin="0,3,0,8" ColumnDefinitions="*,Auto">
                                     <TextBox Grid.Column="0" Text="{Binding CookieFile}" IsReadOnly="True"
-                                             Classes="mono" />
+                                             Classes="mono" ToolTip.Tip="{Binding CookieFile}" />
                                     <Button Grid.Column="1" Width="40" Margin="8,0,0,0" Padding="0"
                                             ToolTip.Tip="Chọn file cookie"
                                             Command="{Binding #Root.DataContext.BrowseCookieCommand}">
@@ -182,35 +182,33 @@
                                 <TextBlock Text="{Binding ProxyStatus}" FontSize="11.5" Margin="0,0,0,10"
                                            Foreground="{DynamicResource TextSecondaryBrush}" />
 
-                                <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
-                                    <Button Classes="primary" MinWidth="150"
-                                            Command="{Binding #Root.DataContext.LoginCommand}">
+                                <!-- 4 nút hành động trên MỘT hàng (WrapPanel: cột hẹp thì tự xuống dòng, không cắt nút).
+                                     Chú thích cũ dưới từng hàng đã dồn vào ToolTip.Tip của nút để form đỡ cao. -->
+                                <WrapPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                    <Button Classes="primary" MinWidth="132" Margin="0,0,8,6"
+                                            Command="{Binding #Root.DataContext.LoginCommand}"
+                                            ToolTip.Tip="Có proxy → đăng nhập qua proxy đó; không → IP máy. Cookie tự lưu.">
                                         <StackPanel Orientation="Horizontal" Spacing="7">
                                             <PathIcon Data="{DynamicResource IconLogin}" />
                                             <TextBlock Text="Mở Profile Bigseller" />
                                         </StackPanel>
                                     </Button>
-                                    <Button Classes="danger" MinWidth="80" Margin="10,0,0,0"
+                                    <Button Classes="danger" MinWidth="74" Margin="0,0,8,6"
                                             Command="{Binding #Root.DataContext.StopLoginCommand}">
                                         <StackPanel Orientation="Horizontal" Spacing="7">
                                             <PathIcon Data="{DynamicResource IconClose}" />
                                             <TextBlock Text="Đóng" />
                                         </StackPanel>
                                     </Button>
-                                </StackPanel>
-                                <TextBlock Classes="caption" Margin="0,0,0,8" TextWrapping="Wrap"
-                                           Text="Có proxy → đăng nhập qua proxy đó; không → IP máy. Cookie tự lưu." />
-
-                                <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
-                                    <Button Classes="destructive" MinWidth="150"
+                                    <Button Classes="destructive" MinWidth="132" Margin="0,0,8,6"
                                             Command="{Binding #Root.DataContext.CleanMediasCommand}"
-                                            ToolTip.Tip="Xóa TOÀN BỘ media trong thư viện ảnh (Material Center) BigSeller của tk này — luồng dọn media của Update sản phẩm. Mở Brave riêng bằng cookie tk, dọn xong tự đóng.">
+                                            ToolTip.Tip="Dọn sạch TOÀN BỘ thư viện ảnh (Material Center) BigSeller của tk này — dùng khi kho ảnh đầy làm BigSeller chặn upload lúc update sản phẩm. Mở Brave riêng bằng cookie tk, dọn xong tự đóng.">
                                         <StackPanel Orientation="Horizontal" Spacing="7">
                                             <PathIcon Data="{DynamicResource IconDelete}" />
                                             <TextBlock Text="Xóa Medias" />
                                         </StackPanel>
                                     </Button>
-                                    <Button Classes="danger" MinWidth="80" Margin="10,0,0,0"
+                                    <Button Classes="danger" MinWidth="74" Margin="0,0,8,6"
                                             IsVisible="{Binding #Root.DataContext.IsCleaningMedia}"
                                             Command="{Binding #Root.DataContext.StopCleanMediasCommand}">
                                         <StackPanel Orientation="Horizontal" Spacing="7">
@@ -218,9 +216,7 @@
                                             <TextBlock Text="Dừng" />
                                         </StackPanel>
                                     </Button>
-                                </StackPanel>
-                                <TextBlock Classes="caption" Margin="0,0,0,8" TextWrapping="Wrap"
-                                           Text="Xóa Medias: dọn sạch thư viện ảnh khi kho đầy (BigSeller chặn upload ảnh lúc update)." />
+                                </WrapPanel>
                             </StackPanel>
                         </ScrollViewer>
 
@@ -258,9 +254,14 @@
                                           ScrollViewer.VerticalScrollBarVisibility="Auto">
                                     <DataGrid.Columns>
                                         <DataGridTextColumn Header="Tên shop" Binding="{Binding Name}" Width="1.4*" />
-                                        <!-- Hub-mode: cột để TRỐNG (SheetDisplay), không phô GUID ngăn; excel-mode: tên sheet. -->
-                                        <DataGridTextColumn Header="Sheet" Binding="{Binding SheetDisplay}" Width="1.4*" />
-                                        <DataGridTextColumn Header="Batch" Binding="{Binding OpenAiBatchSize}" Width="60" />
+                                        <!-- Hub-mode: cột để TRỐNG (SheetDisplay), không phô GUID ngăn; excel-mode: tên sheet.
+                                             Chỉ HẸP lại 1.4* → 0.8* cho đỡ phí chỗ ở hub-mode, KHÔNG ẩn/bỏ cột theo chế độ:
+                                             DataGrid (Avalonia 11.3) không dựng lại được cột lúc chạy — cả IsVisible
+                                             false→true lẫn Columns.Remove/Insert đều cho ra cột rỗng, mất luôn header +
+                                             dữ liệu ở excel-mode (đã thử cả 2, xem plan 2026-07-30). -->
+                                        <DataGridTextColumn Header="Sheet" Binding="{Binding SheetDisplay}" Width="0.8*" />
+                                        <!-- 60 hiện ra "Ba", 78 vẫn cụt "Batc" (header còn chừa chỗ mũi tên sắp xếp) → 95 mới đủ. -->
+                                        <DataGridTextColumn Header="Batch" Binding="{Binding OpenAiBatchSize}" Width="95" />
                                         <DataGridTextColumn Header="Crawl URL (Import)" Binding="{Binding BigSellerCrawlUrl}" Width="1.4*" />
                                     </DataGrid.Columns>
                                 </DataGrid>
@@ -341,7 +342,7 @@
                 </Grid>
             </Border>
             <!-- KHUNG LOG tách riêng — chạy hết chiều ngang cột phải, luôn hiển thị (kể cả khi chưa chọn tk) -->
-            <Border Grid.Row="1" Classes="card" Padding="6" Margin="0,12,0,0" Height="180" ClipToBounds="True">
+            <Border Grid.Row="1" Classes="card" Padding="6" Margin="0,12,0,0" Height="110" ClipToBounds="True">
                 <Border CornerRadius="6" ClipToBounds="True" Background="{DynamicResource LogBackgroundBrush}">
                     <TextBox Classes="log" FontSize="11.5" Padding="10,8"
                              b:LogText.Source="{Binding LogLines}" />

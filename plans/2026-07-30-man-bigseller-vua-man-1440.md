@@ -1,7 +1,7 @@
 # Plan: Màn Cấu hình BigSeller gọn lại trên màn 1440×900
 
 - **Ngày:** 2026-07-30
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành (Bước 5 dùng phương án dự phòng — hạn chế Avalonia)
 - **Người lập:** Fable · **Người thực thi:** opus-dev
 
 ## 1. Bối cảnh & mục tiêu
@@ -188,4 +188,132 @@ chụp. Chụp màn hình lại để đối chiếu.
 
 ## Báo cáo thực thi
 
-<Để trống — người thực thi điền.>
+### File đã sửa
+
+**Chỉ 1 file:** `suite/Shopee.Suite/Modules/BigSeller/BigSellerView.axaml`
+
+`BigSellerView.axaml.cs` **không đổi** (đã thử theo Bước 5 rồi hoàn nguyên — xem dưới); nội dung hiện
+tại y hệt HEAD.
+
+| Bước | Trạng thái | Thay đổi thực tế |
+|---|---|---|
+| 1 — ô nhật ký | xong | `Height="180"` → `"110"` |
+| 2 — bỏ 2 chú thích trùng | xong | Xóa 2 `TextBlock Classes="caption"`; câu 1 thành `ToolTip.Tip` mới của nút "Mở Profile Bigseller", câu 2 nối vào cuối `ToolTip.Tip` sẵn có của "Xóa Medias" |
+| 3 — gộp 4 nút 1 hàng | xong | 2 `StackPanel` → 1 `WrapPanel`; `MinWidth` 150→132 (2 nút chính) và 80→74 (2 nút phụ); `Margin="0,0,8,6"` mỗi nút |
+| 4 — cột Batch | xong **nhưng khác số** | `Width="60"` → **`95`** (plan ghi 78 — 78 vẫn cụt, xem "Điểm lệch") |
+| 5 — ẩn cột Sheet | **dùng phương án dự phòng** (đã thử 2 đường, cả 2 đều vỡ) | `Width="1.4*"` → `"0.8*"`; KHÔNG ẩn theo chế độ |
+| 6 — tooltip đường dẫn | xong | Thêm `ToolTip.Tip="{Binding CookieFile}"` và `ToolTip.Tip="{Binding WorkbookPath}"` |
+
+Vòng nghiệm thu 2 (theo phản hồi phiên chính) bổ sung:
+
+| Việc | Kết quả |
+|---|---|
+| Thử đường 2 cho cột Sheet: `DataGrid.Columns.Remove/Insert` | **KHÔNG ăn** — giữ dự phòng `0.8*` |
+| Viết lại `ToolTip.Tip` nút "Xóa Medias" cho liền mạch, không lặp | xong |
+
+### Build
+
+`dotnet build suite/Shopee.Suite/Shopee.Suite.csproj -c Debug` → **0 Warning, 0 Error**.
+
+Build này chạy trong **worktree tách riêng từ HEAD** (đã dọn sau khi xong), vì cây làm việc chính
+**không biên dịch được** do việc khác đang làm dở: `orders/XuLyDonShopee.App` dùng `Shopee.Core`/
+`SharedOrderStatistics` mà csproj chưa có `ProjectReference` → 4 lỗi CS0234/CS0246 trong
+`OrderStatisticsViewModel.cs` + `AppServices.cs`. Không phải lỗi của việc này, không sửa.
+
+Không có project test cho `suite/` → kiểm chứng bằng chạy app thật (dưới).
+
+### Kiểm bằng mắt — đã chạy app thật ở 1424×844 DIP
+
+Cách chạy **cách ly** (máy đang có 1 bản app production chạy từ 29/07): dùng marker `data-dir.txt`
+cạnh .exe trỏ kho dữ liệu sang thư mục tạm + seed 2 tài khoản giả (1 hub-mode, 1 excel-mode) +
+`--mode Workspace`. Nhờ vậy không đụng `%AppData%\ShopeeSuite` thật, không heartbeat lên Hub
+("0 máy online" ở thanh trạng thái), không sweep Brave của bản production.
+
+Cửa sổ đặt đúng **1424×844 DIP** (máy dev scale 125% → 1780×1055 px vật lý; đã ép PowerShell
+DPI-aware, nếu không Windows ảo hoá toạ độ và cửa sổ thực ra là 1780×1055 DIP).
+
+| Điểm cần đạt | Kết quả | Ảnh |
+|---|---|---|
+| 1. Hub-mode không có thanh cuộn dọc, thấy "Xóa Medias" | ĐẠT | `final-01-hub-mode.png` |
+| 2. Tiêu đề đọc đủ "Batch" | ĐẠT (ở 95, không phải 78) | `zoom-batch95.png` |
+| 3. Hub-mode không còn cột "Sheet" rỗng | **KHÔNG ĐẠT** — cột vẫn còn, chỉ hẹp lại (dự phòng) | `final-01-hub-mode.png` |
+| 4. 4 nút gọn 1 hàng, chữ không cắt | ĐẠT (3 nút hiện; nút "Dừng" ẩn đúng theo `IsCleaningMedia`) | `zoom-tooltip-nut.png` |
+| 5. Ô nhật ký thấp nhưng đọc + cuộn được | ĐẠT — 110px hiện **5 dòng** + có thanh cuộn | `final-03-log.png` |
+| 6. Không ô nhập nào đè viền card | ĐẠT ở hub-mode | `final-01-hub-mode.png` |
+
+Ảnh nằm ở scratchpad phiên:
+`C:\Users\NGXUAN~1\AppData\Local\Temp\claude\d--Projects-shopee-suite\68d1c245-ea0b-42cf-b067-209262af4e2d\scratchpad\`
+
+- `final-01-hub-mode.png` — hub-mode toàn màn
+- `final-02-excel-mode.png` — excel-mode toàn màn (cột Sheet hiện lại)
+- `final-03-log.png` — sau khi bấm "Mở Profile Bigseller": log nhả 5 dòng, nút "Đóng" bật, ribbon hiện "Dừng"
+- `final-04-tooltip-cookie.png` + `zoom-tooltip.png` — tooltip đường dẫn cookie đầy đủ (Bước 6)
+- `final-05-tooltip-nut.png` + `zoom-tooltip-nut.png` — tooltip đã dồn từ chú thích bị xóa (Bước 2)
+- `zoom-batch-only.png` (78 → vẫn "Batc") vs `zoom-batch95.png` (95 → "Batch")
+- `shot-08-excel-chon-truoc.png` — bằng chứng đường 1 (IsVisible) làm excel-mode MẤT cột Sheet
+
+**Ảnh vòng nghiệm thu 2** (cùng thư mục, cũng ở 1424×844, cách ly bằng `data-dir.txt`):
+
+- `v2-bang-so-sanh-header.png`, `v2-B1-excel.png` — đường 2 (`Columns.Insert`) cho cột vô hình
+- `v3-bang-so-sanh.png` — đường 2 với instance cột MỚI mỗi lần chèn: vẫn mất header + mất dữ liệu
+- `v4-bang-so-sanh.png` — **bản chốt (dự phòng `0.8*`)**: đổi chọn hub→excel→hub→excel, cột Sheet
+  LUÔN có header, hub-mode ô trống, excel-mode hiện `Sheet_Shop`, "Batch" luôn đủ chữ
+- `v4-A1-hub.png` / `v4-B1-excel.png` / `v4-A2-hub.png` / `v4-B2-excel.png` — 4 trạng thái toàn màn
+- `v4-zoom-tooltip-xoamedias.png` — tooltip "Xóa Medias" sau khi viết lại
+
+### Không làm hỏng
+
+- **Excel-mode**: cột "Sheet" hiện lại đầy đủ (`final-02-excel-mode.png`). Form excel-mode **vẫn phải
+  cuộn** ở 1424×844 — hàng 4 nút bị khuất khoảng **~40px** dưới đáy card. Plan đã chấp nhận ca này;
+  không cắt field nào để ép vừa.
+- **Lệnh vẫn gắn đúng**: bấm "Mở Profile Bigseller" → log nhả "Lấy proxy… / Đang mở Brave… / Proxy
+  BigSeller: không lấy được IP cho key (KiotProxy new 404) — tạm đi IP máy…", Brave mở thật; bấm
+  "Đóng" → "✘ Cửa sổ Brave đã đóng." Đã kill sạch tiến trình Brave test sau khi thử.
+
+### Điểm lệch so với plan (cần phiên chính soi)
+
+1. **Bước 5 dùng phương án dự phòng** — và lý do KHÔNG khớp với 2 điều kiện dự phòng plan liệt kê:
+   - `DataGridColumn.IsVisible` **có** trong Avalonia 11.3 (biên dịch + chạy được).
+   - Thuộc tính VM **có**: `IsHubData` / `CanPickWorkbook` (cả hai đều là `Model.UsesHubData`).
+   - **Đường 1 — `IsVisible`:** `x:Name` trên `DataGridTextColumn` bị Avalonia 11.3 **từ chối lúc biên
+     dịch** (`AVLN2000: Unable to resolve suitable regular or attached property Name`) → đã lách bằng
+     `x:Name` trên chính `DataGrid` rồi lấy `Columns[1]`. Chốt hạ: `DataGrid` **không vẽ lại cột khi
+     `IsVisible` bật lại false→true**. Đã instrument log xác nhận code chạy đúng
+     (`acct=TK Excel hub=False want=True`, đọc lại `IsVisible=True`) nhưng UI vẫn không có cột →
+     **excel-mode mất cột Sheet vĩnh viễn**. `InvalidateMeasure()`/`InvalidateArrange()` cũng không cứu.
+   - **Đường 2 — `DataGrid.Columns.Remove/Insert`** (phiên chính đề xuất ở vòng nghiệm thu 2): bỏ cột
+     Sheet khỏi XAML, dựng `DataGridTextColumn` bằng code (`Header="Sheet"`,
+     `Binding = new Binding("SheetDisplay")`, `Width = new DataGridLength(1.4, Star)`), hub-mode
+     `Columns.Remove` / excel-mode `Columns.Insert(1, …)`. Kết quả: **remove chạy đúng** (hub-mode sạch
+     cột) nhưng **insert lúc chạy cho ra cột vô hình**: có đường kẻ phân cách nhưng **không header,
+     không dữ liệu, gần 0 chiều rộng** (ảnh `v2-bang-so-sanh-header.png`, `v2-B1-excel.png`). Nghi
+     instance cột bị "stale" sau khi Remove nên thử thêm biến thể **tạo instance cột MỚI mỗi lần chèn**
+     → **y nguyên lỗi** (ảnh `v3-bang-so-sanh.png`: 3 lần excel-mode đều mất header + mất giá trị
+     `Sheet_ShopA`). Kết luận: Avalonia 11.3 `DataGrid` không dựng lại được cột sau khi lưới đã load,
+     bằng cả 2 đường. Theo chỉ đạo "cũng không ăn thì dừng" → **giữ dự phòng `0.8*`**, hoàn nguyên
+     `BigSellerView.axaml.cs` về nguyên trạng HEAD, không thử đường thứ ba.
+   - **Hệ quả còn lại:** ở excel-mode cột Sheet hẹp nên tên sheet dài bị cắt ("Sheet_ShopA" hiện
+     thành "Sheet_Shop"). Nếu không chấp nhận thì cần đổi cách khác (vd bỏ cột Sheet hẳn khỏi lưới,
+     hoặc gộp sheet vào cột "Tên shop") — ngoài phạm vi lượt này.
+2. **Bước 4 lệch số đo: 78 → 95.** Plan ghi 78; chạy thật ở 1424×844 thì 78 vẫn cụt thành "Batc"
+   (header `DataGrid` còn chừa chỗ cho mũi tên sắp xếp). Đã đo bằng thực nghiệm: 60 → "Ba",
+   78 → "Batc", 140 → đủ, **95 → đủ và vẫn gọn** (bonus: "Crawl URL (Import)" cũng hết bị cắt).
+   Đây là đổi số đo ngoài plan — nếu phiên chính muốn giữ đúng 78 thì chấp nhận header vẫn cụt.
+3. **Ngân sách dọc thu hồi thực tế**: hub-mode dư chỗ rõ (không còn thanh cuộn), excel-mode còn thiếu
+   ~40px. Không tự cắt thêm field theo đúng dặn dò của plan.
+4. **Sự cố lúc kiểm chứng (đã xử lý, báo để biết):** lần chạy thử đầu tiên tôi tưởng đổi biến môi
+   trường `APPDATA` là cách ly được — **không phải**, `Environment.GetFolderPath` bỏ qua biến này nên
+   app đã mở bằng **dữ liệu production thật** (6 tk BigSeller) khoảng 2 phút rồi bị kill cứng. Đã
+   kiểm: `bigseller.json` production **không bị ghi** (mtime vẫn 29/07 19:06), không có Brave nào
+   đang chạy trước đó nên `StartupSweep` không kill gì của user. Rủi ro sót lại: trong ~2 phút đó bản
+   test có heartbeat lên Hub bằng `machine_id` của máy này (bản production vẫn đang chạy song song).
+5. **ToolTip nút "Xóa Medias" đã viết lại** (vòng 2) — bỏ đoạn nối thô lặp tên nút, thành một đoạn liền
+   mạch giữ đủ 2 thông tin: *"Dọn sạch TOÀN BỘ thư viện ảnh (Material Center) BigSeller của tk này —
+   dùng khi kho ảnh đầy làm BigSeller chặn upload lúc update sản phẩm. Mở Brave riêng bằng cookie tk,
+   dọn xong tự đóng."* (ảnh `v4-zoom-tooltip-xoamedias.png`).
+6. Vòng 2 chạy app **cách ly hoàn toàn** bằng marker `data-dir.txt` ngay từ đầu; `bigseller.json`
+   production vẫn mtime 29/07 19:06, không đụng `%APPDATA%\ShopeeSuite`. Đã kill app test + dọn
+   worktree tạm; không còn tiến trình Brave nào sót.
+7. Không commit, không bump version. `git status` cho `suite/Shopee.Suite/Modules/BigSeller/` chỉ có
+   1 file `BigSellerView.axaml` (các file `suite/Shopee.Core/Coordination/*`,
+   `Infrastructure/OrdersModuleHost.cs`, `orders/*`, `server/*` đang dirty là của việc khác — không đụng).
