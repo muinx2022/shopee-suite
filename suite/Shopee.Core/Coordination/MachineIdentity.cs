@@ -75,19 +75,16 @@ public sealed class MachineIdentity
     {
         try
         {
-            if (File.Exists(FilePath))
+            var loaded = JsonAtomicFile.TryLoad<MachineInfo>(FilePath);
+            if (loaded is not null && !string.IsNullOrWhiteSpace(loaded.MachineId))
             {
-                var loaded = JsonSerializer.Deserialize<MachineInfo>(File.ReadAllText(FilePath, Encoding.UTF8));
-                if (loaded is not null && !string.IsNullOrWhiteSpace(loaded.MachineId))
+                var host = Environment.MachineName;
+                if (!string.Equals(loaded.Hostname, host, StringComparison.Ordinal))
                 {
-                    var host = Environment.MachineName;
-                    if (!string.Equals(loaded.Hostname, host, StringComparison.Ordinal))
-                    {
-                        loaded.Hostname = host;
-                        Save(loaded);
-                    }
-                    return loaded;
+                    loaded.Hostname = host;
+                    Save(loaded);
                 }
+                return loaded;
             }
         }
         catch { }
@@ -102,18 +99,7 @@ public sealed class MachineIdentity
         return created;
     }
 
-    private static void Save(MachineInfo info)
-    {
-        try
-        {
-            Directory.CreateDirectory(SuitePaths.Root);
-            var json = JsonSerializer.Serialize(info, JsonOpts);
-            var tmp = FilePath + ".tmp";
-            File.WriteAllText(tmp, json, Encoding.UTF8);
-            File.Move(tmp, FilePath, overwrite: true);
-        }
-        catch { }
-    }
+    private static void Save(MachineInfo info) => JsonAtomicFile.Save(FilePath, info, JsonOpts);
 
     private static MachineInfo Clone(MachineInfo m) =>
         new() { MachineId = m.MachineId, Hostname = m.Hostname, DisplayName = m.DisplayName, Role = m.Role, CreatedAt = m.CreatedAt };

@@ -26,12 +26,8 @@ public sealed class AiConfigStore
     {
         lock (_lock)
         {
-            try
-            {
-                if (File.Exists(FilePath))
-                    _config = JsonSerializer.Deserialize<AiConfig>(File.ReadAllText(FilePath, Encoding.UTF8)) ?? new AiConfig();
-            }
-            catch { _config = new AiConfig(); }
+            if (!File.Exists(FilePath)) return;   // chưa có file → GIỮ bản đang có (khác file hỏng → về mặc định)
+            _config = JsonAtomicFile.TryLoad<AiConfig>(FilePath) ?? new AiConfig();
         }
     }
 
@@ -41,9 +37,7 @@ public sealed class AiConfigStore
         {
             string json;
             lock (_lock) { _config = config.Clone(); json = JsonSerializer.Serialize(_config, JsonOpts); }
-            var tmp = FilePath + ".tmp";
-            File.WriteAllText(tmp, json, Encoding.UTF8);
-            File.Move(tmp, FilePath, overwrite: true);
+            JsonAtomicFile.SaveText(FilePath, json);   // serialize trong lock, ghi đĩa ngoài lock (giữ như cũ)
         }
         catch { }
         Changed?.Invoke();

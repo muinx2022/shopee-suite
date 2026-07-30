@@ -90,28 +90,18 @@ public sealed class KiotProxyPoolStore
         lock (_lock)
         {
             _keys.Clear();
-            try
-            {
-                if (File.Exists(FilePath))
-                {
-                    var list = JsonSerializer.Deserialize<List<string>>(File.ReadAllText(FilePath, Encoding.UTF8));
-                    if (list is not null)
-                        foreach (var e in list) { var t = (e ?? "").Trim(); if (t.Length > 0) _keys.Add(t); }
-                }
-            }
-            catch { }
+            var list = JsonAtomicFile.TryLoad<List<string>>(FilePath);
+            if (list is not null)
+                foreach (var e in list) { var t = (e ?? "").Trim(); if (t.Length > 0) _keys.Add(t); }
         }
     }
 
     private bool SaveLocked()
     {
+        // Changed nằm TRONG try như cũ: handler ném ⇒ Save coi như hỏng ⇒ ReplaceAll hoàn tác.
         try
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
-            var json = JsonSerializer.Serialize(_keys, JsonOpts);
-            var tmp = FilePath + ".tmp";
-            File.WriteAllText(tmp, json, Encoding.UTF8);
-            File.Move(tmp, FilePath, overwrite: true);
+            if (!JsonAtomicFile.Save(FilePath, _keys, JsonOpts)) return false;
             Changed?.Invoke();
             return true;
         }

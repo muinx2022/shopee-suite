@@ -45,15 +45,8 @@ public sealed class ScrapeTargetConfigStore
         lock (_lock)
         {
             _items.Clear();
-            try
-            {
-                if (File.Exists(FilePath))
-                {
-                    var list = JsonSerializer.Deserialize<List<ScrapeTargetConfig>>(File.ReadAllText(FilePath, Encoding.UTF8));
-                    if (list is not null) _items.AddRange(list);
-                }
-            }
-            catch { }
+            var list = JsonAtomicFile.TryLoad<List<ScrapeTargetConfig>>(FilePath);
+            if (list is not null) _items.AddRange(list);
         }
     }
 
@@ -79,17 +72,7 @@ public sealed class ScrapeTargetConfigStore
         }
     }
 
-    private void SaveLocked()
-    {
-        try
-        {
-            var json = JsonSerializer.Serialize(_items, JsonOpts);
-            var tmp = FilePath + ".tmp";
-            File.WriteAllText(tmp, json, Encoding.UTF8);
-            File.Move(tmp, FilePath, overwrite: true);
-        }
-        catch { }
-    }
+    private void SaveLocked() => JsonAtomicFile.Save(FilePath, _items, JsonOpts);
 
     private static ScrapeTargetConfig Clone(ScrapeTargetConfig c) => new()
     {

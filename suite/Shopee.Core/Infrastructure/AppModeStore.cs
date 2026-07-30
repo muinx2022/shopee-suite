@@ -90,18 +90,11 @@ public sealed class AppModeStore
     {
         lock (_lock)
         {
-            try
-            {
-                if (File.Exists(FilePath))
-                {
-                    var dto = JsonSerializer.Deserialize<Dto>(File.ReadAllText(FilePath, Encoding.UTF8), ReadOpts);
-                    // IsDefined loại số ngoài dải (vd "5") mà TryParse vẫn nhận → tránh trạng thái không tab.
-                    Current = Enum.TryParse<AppMode>(dto?.Mode, ignoreCase: true, out var m) && Enum.IsDefined(m)
-                        ? m : AppMode.Full;
-                }
-                else Current = AppMode.Full;
-            }
-            catch { Current = AppMode.Full; }
+            // Thiếu file / file hỏng → TryLoad trả null → rơi về Full, y như khuôn cũ.
+            var dto = JsonAtomicFile.TryLoad<Dto>(FilePath, ReadOpts);
+            // IsDefined loại số ngoài dải (vd "5") mà TryParse vẫn nhận → tránh trạng thái không tab.
+            Current = Enum.TryParse<AppMode>(dto?.Mode, ignoreCase: true, out var m) && Enum.IsDefined(m)
+                ? m : AppMode.Full;
         }
     }
 
@@ -113,14 +106,7 @@ public sealed class AppModeStore
         lock (_lock)
         {
             Current = mode;
-            try
-            {
-                Directory.CreateDirectory(SuitePaths.Root);
-                var tmp = FilePath + ".tmp";
-                File.WriteAllText(tmp, JsonSerializer.Serialize(new Dto { Mode = mode.ToString() }, WriteOpts), Encoding.UTF8);
-                File.Move(tmp, FilePath, overwrite: true);
-            }
-            catch { }
+            JsonAtomicFile.Save(FilePath, new Dto { Mode = mode.ToString() }, WriteOpts);
         }
     }
 
