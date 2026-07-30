@@ -74,7 +74,8 @@ public sealed partial class HubDatabase
             using (var c = _conn.CreateCommand())
             {
                 c.Transaction = tx;
-                c.CommandText = "UPDATE assignments SET status='canceled', updated_at=$ua WHERE status IN ('queued','running') AND (claimed_by=$m OR target_machine_id=$m)";
+                c.CommandText = $"UPDATE assignments SET status='{AssignmentStatus.Canceled}', updated_at=$ua "
+                    + $"WHERE status IN ('{AssignmentStatus.Queued}','{AssignmentStatus.Running}') AND (claimed_by=$m OR target_machine_id=$m)";
                 c.Parameters.AddWithValue("$ua", now);
                 c.Parameters.AddWithValue("$m", machineId);
                 canceled = c.ExecuteNonQuery();
@@ -86,7 +87,8 @@ public sealed partial class HubDatabase
             using (var c = _conn.CreateCommand())
             {
                 c.Transaction = tx;
-                c.CommandText = "UPDATE assignments SET dismissed=1 WHERE status IN ('failed','canceled') AND dismissed=0 AND (claimed_by=$m OR target_machine_id=$m)";
+                c.CommandText = $"UPDATE assignments SET dismissed=1 WHERE status IN ('{AssignmentStatus.Failed}','{AssignmentStatus.Canceled}') "
+                    + "AND dismissed=0 AND (claimed_by=$m OR target_machine_id=$m)";
                 c.Parameters.AddWithValue("$m", machineId);
                 dismissed = c.ExecuteNonQuery();
             }

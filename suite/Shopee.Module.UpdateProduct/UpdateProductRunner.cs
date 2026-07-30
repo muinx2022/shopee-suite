@@ -1,3 +1,4 @@
+using Shopee.Core.Coordination;
 using Shopee.Core.Progress;
 using UpdateProduct;
 
@@ -156,7 +157,7 @@ public sealed class UpdateProductRunner
         // RESUME: tiến độ update đã lưu (itemId → tên đã điền) — đọc 1 LẦN ở facade, chia CHUNG mọi lane (nhiều lane
         // chung 1 store). Runner bỏ qua SP đã update ĐÚNG tên hiện tại; MarkDone lúc save gọi thẳng OpProgressStore
         // singleton (thread-safe) nên snapshot này chỉ để SKIP, không cần refresh trong lượt.
-        var updateDone = OpProgressStore.Shared.GetDone(wf.AccountId, wf.DataSheet, "update");
+        var updateDone = OpProgressStore.Shared.GetDone(wf.AccountId, wf.DataSheet, AssignmentOps.Update);
         // Điều phối dọn Material Center DÙNG CHUNG mọi lane (1 account): đếm bắt-đầu-sửa TOÀN account (quota kho
         // per-account, đếm per-lane là lệch) + cổng pause-all khi kho đầy. Sống ở facade → xuyên qua lane-restart.
         var mediaCoord = new MediaCleanupCoordinator();

@@ -208,8 +208,8 @@ WHERE account_id = $1 AND sheet = $2 AND btrim(item_id) = ANY($3);";
     public async Task<int> ResetStoreProgressAsync(string acct, string sheet, string op, CancellationToken ct)
     {
         string sql;
-        if (op == "import") sql = "UPDATE product_rows SET store_imported_at = NULL WHERE account_id = $1 AND sheet = $2;";
-        else if (op == "update") sql = "UPDATE product_rows SET store_updated_at = NULL, store_updated_name = NULL WHERE account_id = $1 AND sheet = $2;";
+        if (op == AssignmentOps.Import) sql = "UPDATE product_rows SET store_imported_at = NULL WHERE account_id = $1 AND sheet = $2;";
+        else if (op == AssignmentOps.Update) sql = "UPDATE product_rows SET store_updated_at = NULL, store_updated_name = NULL WHERE account_id = $1 AND sheet = $2;";
         else return 0;
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
         await using var cmd = new NpgsqlCommand(sql, conn);

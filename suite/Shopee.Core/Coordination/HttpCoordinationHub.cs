@@ -186,7 +186,7 @@ public sealed class HttpCoordinationHub : ICoordinationHub, IUpdateAckSink, IDis
     {
         Key = key.Id, BigsellerId = key.BigsellerId, ShopId = key.ShopId, Sheet = key.Sheet, Op = OpStr(key.Op),
         Completed = [new RowRange { From = from, To = to }], LastRowReached = to,
-        Status = "running", LastMachineId = _machineId, LastHostname = Host, LastRunAt = DateTimeOffset.Now,
+        Status = LedgerStatus.Running, LastMachineId = _machineId, LastHostname = Host, LastRunAt = DateTimeOffset.Now,
     });
 
     public void PublishCompletion(CoordKey key, string status, int lastRow) => _ = TryPublish(new WorkLedgerRecord
@@ -362,7 +362,7 @@ public sealed class HttpCoordinationHub : ICoordinationHub, IUpdateAckSink, IDis
                 // CHỈ fold op=scrape: import/update/rewrite GIỜ cũng đẩy Completed (dòng đã làm) lên ledger để
                 // Thống kê xem "dòng nào đã import/update"; nhưng ĐÓ KHÔNG phải tiến độ scrape → nếu fold vào
                 // ScrapeProgressStore thì scrape sẽ tưởng các dòng ấy đã cào xong → BỎ SÓT khi Tiếp tục.
-                if (r.Op != "scrape") continue;
+                if (r.Op != AssignmentOps.Scrape) continue;
                 if (string.IsNullOrEmpty(r.BigsellerId) || r.Completed.Count == 0) continue;
                 foreach (var rr in r.Completed)
                     ScrapeProgressStore.Shared.MarkCompleted(r.BigsellerId, r.Sheet, rr.From, rr.To);
@@ -383,7 +383,7 @@ public sealed class HttpCoordinationHub : ICoordinationHub, IUpdateAckSink, IDis
         {
             foreach (var r in await _client.AllLedgerAsync())
             {
-                if (r.Op != "scrape" || r.BigsellerId != bigsellerId || r.Completed.Count == 0) continue;
+                if (r.Op != AssignmentOps.Scrape || r.BigsellerId != bigsellerId || r.Completed.Count == 0) continue;
                 if (!string.Equals(r.Sheet ?? "", sheet ?? "", StringComparison.OrdinalIgnoreCase)) continue;
                 foreach (var rr in r.Completed)
                     ScrapeProgressStore.Shared.MarkCompleted(r.BigsellerId, r.Sheet ?? "", rr.From, rr.To);

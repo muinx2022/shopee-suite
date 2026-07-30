@@ -29,7 +29,7 @@ internal sealed record OpBtn(string Label, string Act, string Css, string Title,
 
 internal static class DispatchViewLogic
 {
-    public const string OrdersOperation = "orders";
+    public const string OrdersOperation = AssignmentOps.Orders;
 
     public static readonly IReadOnlyList<DispatchKpiCard> KpiCards =
     [

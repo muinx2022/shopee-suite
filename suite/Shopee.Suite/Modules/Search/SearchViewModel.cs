@@ -296,8 +296,10 @@ public sealed partial class SearchViewModel : ModuleViewModelBase
     /// <summary>Dừng lượt chạy nếu nó thuộc việc Hub <paramref name="id"/> (Hub huỷ việc → client dừng).</summary>
     public void StopAssignment(string id) { if (_assignmentId == id) Stop(); }
 
-    /// <summary>Lấy (và xoá) kết quả terminal của việc Search <paramref name="id"/>: "completed" | "stopped" |
-    /// "failed"; null nếu chưa có (AssignmentWorker sẽ suy theo grace).</summary>
+    /// <summary>Lấy (và xoá) kết quả terminal của việc Search <paramref name="id"/>:
+    /// <see cref="LedgerStatus.Completed"/> | <see cref="LedgerStatus.Stopped"/> |
+    /// <see cref="AssignmentStatus.Failed"/>; null nếu chưa có (AssignmentWorker sẽ suy theo grace). Search
+    /// KHÔNG ghi ledger nên đây là kênh nội bộ client, mượn đúng bộ chữ của sổ hoàn thành.</summary>
     public string? TakeAssignmentOutcome(string id) => _assignmentOutcomes.TryRemove(id, out var v) ? v : null;
 
     /// <summary>
@@ -393,7 +395,9 @@ public sealed partial class SearchViewModel : ModuleViewModelBase
             // Kết quả terminal cho AssignmentWorker báo Hub đúng: chưa chạy được / lỗi = failed; bị dừng = stopped;
             // chạy hết bình thường = completed. (Search không ghi ledger nên phải tự ghi outcome ở đây.)
             var canceled = _cts?.IsCancellationRequested == true;
-            _assignmentOutcomes[assignmentId] = !startedRun || failedRun ? "failed" : canceled ? "stopped" : "completed";
+            _assignmentOutcomes[assignmentId] = !startedRun || failedRun
+                ? AssignmentStatus.Failed
+                : canceled ? LedgerStatus.Stopped : LedgerStatus.Completed;
             ResetUsedAccounts();
             _assignmentId = null;
             _cts?.Dispose();

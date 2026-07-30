@@ -331,7 +331,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
 
     private static string OpLabel(string op) => op switch
     {
-        "scrape" => "Scrape", "import" => "Import", "update" => "Update", _ => op,
+        AssignmentOps.Scrape => "Scrape", AssignmentOps.Import => "Import", AssignmentOps.Update => "Update", _ => op,
     };
 
     /// <summary>Tiến độ scrape thành chữ: "đã cào {tới}/{tổng} dòng" (Tổng=0 chưa biết → "đã cào tới dòng {tới}").</summary>
@@ -356,7 +356,8 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             string.Equals(a.BigsellerId, accId, StringComparison.Ordinal) &&
             string.Equals(a.ShopId, shopId, StringComparison.Ordinal) &&
             string.Equals(a.Op, op, StringComparison.Ordinal);
-        return fleet.Assignments.Any(a => Match(a) && a.Status is "queued" or "running") || fleet.Interrupted.Any(Match);
+        return fleet.Assignments.Any(a => Match(a) && a.Status is AssignmentStatus.Queued or AssignmentStatus.Running)
+               || fleet.Interrupted.Any(Match);
     }
 
     /// <summary>true nếu Hub đã HỦY HẲN việc (acc,shop,op): trong <c>fleet.Assignments</c> có bản khớp
@@ -375,8 +376,8 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             string.Equals(a.Op, op, StringComparison.Ordinal);
         var matches = fleet.Assignments.Where(Match).ToList();
         if (matches.Count == 0) return false;
-        if (matches.Any(a => a.Status is "queued" or "running")) return false;   // vừa giao lại → chưa hủy hẳn
-        return matches.Any(a => a.Status == "canceled" || a.Dismissed);
+        if (matches.Any(a => a.Status is AssignmentStatus.Queued or AssignmentStatus.Running)) return false;   // vừa giao lại → chưa hủy hẳn
+        return matches.Any(a => a.Status == AssignmentStatus.Canceled || a.Dismissed);
     }
 
     /// <summary>Đếm lại các việc chạy-tay còn dở: scrape (ScrapeProgressStore) + import/update (OpProgressStore)
@@ -394,28 +395,28 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         // Scrape: mỗi (acc, sheet) có tiến độ running/stopped → ứng viên tiếp tục dòng còn thiếu.
         foreach (var p in ScrapeProgressStore.Shared.All())
         {
-            if (p.Status is not ("running" or "stopped")) continue;
+            if (p.Status is not (LedgerStatus.Running or LedgerStatus.Stopped)) continue;
             var acct = Accounts.FirstOrDefault(a => a.Account.Id == p.AccountId);
             var shop = acct?.Account.Shops.FirstOrDefault(s =>
                 string.Equals(s.ShopeeDataSheet ?? "", p.Sheet ?? "", StringComparison.OrdinalIgnoreCase));
             if (acct is null || shop is null) continue;                               // acc/shop đã xoá → bỏ
-            if (HubManages(p.AccountId, shop.Id, "scrape")) continue;                 // hub đang/sắp xử / để dành resume → bỏ (GIỮ tiến độ)
-            if (HubCanceled(p.AccountId, shop.Id, "scrape"))                          // hub đã hủy hẳn → xoá tiến độ + bỏ
+            if (HubManages(p.AccountId, shop.Id, AssignmentOps.Scrape)) continue;     // hub đang/sắp xử / để dành resume → bỏ (GIỮ tiến độ)
+            if (HubCanceled(p.AccountId, shop.Id, AssignmentOps.Scrape))              // hub đã hủy hẳn → xoá tiến độ + bỏ
             {
                 clearScrape.Add((p.AccountId, p.Sheet ?? ""));
                 continue;
             }
             if (acct.ScrapeTarget.IsShopRunning?.Invoke(shop) ?? false) continue;     // đang scrape thật → bỏ
-            _resumePending.Add(new ResumeItem("scrape", acct, shop));
-            rows.Add(new ResumePendingRow(OpLabel("scrape"), acct.DisplayName, shop.DisplayName,
+            _resumePending.Add(new ResumeItem(AssignmentOps.Scrape, acct, shop));
+            rows.Add(new ResumePendingRow(OpLabel(AssignmentOps.Scrape), acct.DisplayName, shop.DisplayName,
                 ScrapeProgressText(p), FormatLastRun(p.LastRunAt)));
         }
 
         // Import/Update: tiến độ per-SP running/stopped → ứng viên.
         foreach (var (accId, sheet, op, status) in OpProgressStore.Shared.Snapshot())
         {
-            if (op is not ("import" or "update")) continue;
-            if (status is not ("running" or "stopped")) continue;
+            if (op is not (AssignmentOps.Import or AssignmentOps.Update)) continue;
+            if (status is not (LedgerStatus.Running or LedgerStatus.Stopped)) continue;
             var acct = Accounts.FirstOrDefault(a => a.Account.Id == accId);
             var shop = acct?.Account.Shops.FirstOrDefault(s =>
                 string.Equals(s.ShopeeDataSheet ?? "", sheet ?? "", StringComparison.OrdinalIgnoreCase));
@@ -468,15 +469,15 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         {
             switch (item.Op)
             {
-                case "scrape":
+                case AssignmentOps.Scrape:
                     item.Acct.ScrapeTarget.SelectedShop = item.Shop;
                     _ = Scrape.RunSingleAsync(item.Acct.ScrapeTarget, resume: true, silent: true);
                     break;
-                case "import":
+                case AssignmentOps.Import:
                     item.Acct.UpdateTarget.SelectedShop = item.Shop;
                     _ = Update.RunImportSingleAsync(item.Acct.UpdateTarget, silent: true);
                     break;
-                case "update":
+                case AssignmentOps.Update:
                     item.Acct.UpdateTarget.SelectedShop = item.Shop;
                     _ = Update.RunUpdateSingleAsync(item.Acct.UpdateTarget, silent: true);
                     break;
@@ -499,7 +500,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         {
             var acc = item.Acct.Account.Id;
             var sheet = item.Shop.ShopeeDataSheet ?? "";
-            if (item.Op == "scrape") ScrapeProgressStore.Shared.Clear(acc, sheet);
+            if (item.Op == AssignmentOps.Scrape) ScrapeProgressStore.Shared.Clear(acc, sheet);
             else                     OpProgressStore.Shared.Clear(acc, sheet, item.Op);
         }
         RecomputeResumePending();

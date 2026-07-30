@@ -1,3 +1,4 @@
+using Shopee.Core.Coordination;
 using Shopee.Core.Infrastructure;
 
 namespace Shopee.Core.Progress;
@@ -12,14 +13,14 @@ public sealed class OpProgress
 {
     public string AccountId { get; set; } = "";     // tài khoản BigSeller
     public string Sheet { get; set; } = "";
-    public string Op { get; set; } = "";             // "import" | "update"
+    public string Op { get; set; } = "";             // AssignmentOps.Import | AssignmentOps.Update
     public string AccountName { get; set; } = "";    // tên hiển thị (tiện cho UI/thống kê)
 
     /// <summary>itemId Shopee → tên đã điền lúc save (import: null). Có mặt = SP đã xử lý xong ở op này.</summary>
     public Dictionary<string, string?> Done { get; set; } = new(StringComparer.Ordinal);
 
-    /// <summary>idle | running | stopped | completed.</summary>
-    public string Status { get; set; } = "idle";
+    /// <summary>Xem <see cref="LedgerStatus"/> — client đẩy thẳng chuỗi này lên sổ hoàn thành của Hub.</summary>
+    public string Status { get; set; } = LedgerStatus.Idle;
     public DateTimeOffset? LastRunAt { get; set; }
 }
 
@@ -107,7 +108,7 @@ public sealed class OpProgressStore
         lock (_lock)
         {
             var p = GetOrCreateLocked(accountId, sheet, op, accountName);
-            p.Status = "running";
+            p.Status = LedgerStatus.Running;
             p.LastRunAt = DateTimeOffset.Now;
             SaveLocked();
         }
@@ -121,7 +122,7 @@ public sealed class OpProgressStore
         {
             var p = _items.FirstOrDefault(x => KeyEq(x, accountId, sheet, op));
             if (p is null) return;
-            p.Status = completed ? "completed" : "stopped";
+            p.Status = completed ? LedgerStatus.Completed : LedgerStatus.Stopped;
             SaveLocked();
         }
         Changed?.Invoke();

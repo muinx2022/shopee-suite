@@ -235,7 +235,7 @@
         : (!string.IsNullOrEmpty(a.TargetMachineId) ? DispatchRowsBuilder.HostLabel(Snap, a.TargetMachineId, "") : "—");
 
     private static string IntReason(Assignment a) =>
-        !string.IsNullOrWhiteSpace(a.LastError) ? a.LastError : (a.Status == "canceled" ? "đã huỷ" : "lỗi");
+        !string.IsNullOrWhiteSpace(a.LastError) ? a.LastError : (a.Status == AssignmentStatus.Canceled ? "đã huỷ" : "lỗi");
 
     private static string OpLabel(string op) => FleetViewProjection.OperationLabel(op);
 

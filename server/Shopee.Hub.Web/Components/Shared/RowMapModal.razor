@@ -87,7 +87,7 @@
         var abs = info.DataRows;                 // số dòng tuyệt đối, tăng dần; vị trí i ↔ chỉ số dồn i+1
         var ranges = Ledger?.Completed ?? new List<RowRange>();
         var done = new bool[abs.Count];
-        if (Op == "scrape")
+        if (Op == AssignmentOps.Scrape)
         {
             // scrape: ledger là CHỈ SỐ DỒN (1-based) → phần tử thứ p trong danh sách.
             foreach (var rr in ranges)

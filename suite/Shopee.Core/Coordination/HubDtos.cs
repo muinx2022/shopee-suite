@@ -64,20 +64,20 @@ public sealed class FleetSnapshot
 public static class MachineRoles
 {
     public const string Off = "off";
-    public const string Scrape = "scrape";
-    public const string Import = "import";
-    public const string Update = "update";
+    public const string Scrape = AssignmentOps.Scrape;
+    public const string Import = AssignmentOps.Import;
+    public const string Update = AssignmentOps.Update;
     public const string All = "all";
 
     /// <summary>Op "search" KHÔNG có vai trò tự động — luôn giao TAY (ghim máy) từ bảng điều phối Search.</summary>
-    public const string Search = "search";
+    public const string Search = AssignmentOps.Search;
 
     /// <summary>Vai trò phụ trách op này (rewrite gộp vào nhóm Update).</summary>
     public static string ForOp(string op) => op switch
     {
-        "scrape" => Scrape,
-        "import" => Import,
-        "update" or "rewrite" => Update,
+        AssignmentOps.Scrape => Scrape,
+        AssignmentOps.Import => Import,
+        AssignmentOps.Update or AssignmentOps.Rewrite => Update,
         _ => op,
     };
 
@@ -100,14 +100,14 @@ public sealed class Assignment
     public string BigsellerId { get; set; } = "";
     public string ShopId { get; set; } = "";
     public string Sheet { get; set; } = "";
-    public string Op { get; set; } = "";                 // scrape | import | update | rewrite | search
+    public string Op { get; set; } = "";                 // xem AssignmentOps: scrape | import | update | rewrite | search
     /// <summary>Ghim cứng vào 1 máy; null = để Hub định tuyến theo vai trò.</summary>
     public string? TargetMachineId { get; set; }
     /// <summary>Dữ liệu kèm theo việc (JSON). Hiện chỉ op "search" dùng: <see cref="SearchJobPayload"/>
     /// (danh sách link của khối + số acc khóa + lane + khu vực). Các op khác để rỗng.</summary>
     public string Payload { get; set; } = "";
     public bool Pinned { get; set; }
-    public string Status { get; set; } = "queued";       // queued | running | done | failed | canceled
+    public string Status { get; set; } = AssignmentStatus.Queued;   // xem AssignmentStatus
     /// <summary>Operator đã bỏ khỏi danh sách gián đoạn (hub-side; client không dùng) — ẩn khỏi ▶ Tiếp tục; status giữ nguyên.</summary>
     public bool Dismissed { get; set; }
     public string ClaimedByMachineId { get; set; } = "";

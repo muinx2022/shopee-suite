@@ -43,11 +43,11 @@ public static class FleetViewProjection
 
     public static string OperationLabel(string op) => op switch
     {
-        "scrape" => "Scrape",
-        "import" => "Import",
-        "update" => "Update",
-        "rewrite" => "Tên SP",
-        "orders" => "📦 Đơn hàng",
+        AssignmentOps.Scrape => "Scrape",
+        AssignmentOps.Import => "Import",
+        AssignmentOps.Update => "Update",
+        AssignmentOps.Rewrite => "Tên SP",
+        AssignmentOps.Orders => "📦 Đơn hàng",
         _ => op,
     };
 }

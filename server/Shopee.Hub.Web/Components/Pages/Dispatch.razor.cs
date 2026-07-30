@@ -328,14 +328,14 @@ public partial class Dispatch
     // ── Huỷ HÀNG LOẠT: toàn hệ thống / theo máy / theo tài khoản ─────────────────
     /// <summary>Việc hub-giao đang mở (queued/running) của TOÀN HỆ THỐNG — số trên nút "✖ Huỷ MỌI việc". Khác
     /// <see cref="MachineOpenCount"/> (chỉ máy đang chọn).</summary>
-    private int AllOpenCount => Snap.Assignments.Count(a => a.Status is "queued" or "running");
+    private int AllOpenCount => Snap.Assignments.Count(a => a.Status is AssignmentStatus.Queued or AssignmentStatus.Running);
 
     /// <summary>Việc hub-giao đang mở (queued/running) của máy đang chọn — đếm cả việc máy đã claim lẫn việc mới
     /// ghim chưa claim. Việc chạy TAY không có assignment nên KHÔNG nằm ở đây (hub không huỷ được).</summary>
     private int MachineOpenCount => _selMachine.Length == 0 ? 0 : OpenAssignmentsOfMachine().Count;
 
     private List<Assignment> OpenAssignmentsOfMachine() => Snap.Assignments
-        .Where(a => a.Status is "queued" or "running"
+        .Where(a => a.Status is AssignmentStatus.Queued or AssignmentStatus.Running
                     && (a.ClaimedByMachineId == _selMachine || a.TargetMachineId == _selMachine))
         .ToList();
 
@@ -355,7 +355,7 @@ public partial class Dispatch
     /// KPI "Việc gián đoạn" để chạy lại đúng lượt cũ.</summary>
     private void CancelAllWork()
     {
-        var open = Snap.Assignments.Where(a => a.Status is "queued" or "running").ToList();
+        var open = Snap.Assignments.Where(a => a.Status is AssignmentStatus.Queued or AssignmentStatus.Running).ToList();
         if (open.Count == 0) { _confirmCancel = ""; return; }
         if (!Arm("all")) return;
 
@@ -379,7 +379,7 @@ public partial class Dispatch
     private void CancelByAcct(DispatchRowGroup g)
     {
         var open = Snap.Assignments
-            .Where(a => a.BigsellerId == g.AccountId && a.Status is "queued" or "running").ToList();
+            .Where(a => a.BigsellerId == g.AccountId && a.Status is AssignmentStatus.Queued or AssignmentStatus.Running).ToList();
         if (open.Count == 0) { _confirmCancel = ""; return; }
         if (!Arm("acct|" + g.AccountId)) return;
 
@@ -414,15 +414,15 @@ public partial class Dispatch
     /// đọc, Reload chỉ import/update đọc → op khác truyền 0 để sạch dữ liệu. Processes áp mọi op.</summary>
     private void CreateJob(DispatchShopRow r, string op)
     {
-        var payload = op == "import"
+        var payload = op == AssignmentOps.Import
             ? JsonSerializer.Serialize(new ImportJobPayload { FromClaimedTab = _optFromClaimed })
             : "";
         Db.CreateAssignment(new CreateAssignmentRequest(
             r.AccountId, r.ShopId, r.Sheet, op, _selMachine, Pinned: true,
             Math.Max(0, _optStart), Math.Max(0, _optEnd), payload,
             Processes: Math.Max(0, _optProcs),
-            FrameSize: op == "scrape" ? Math.Max(0, _optFrame) : 0,
-            ReloadSeconds: op is "import" or "update" ? Math.Max(0, _optReload) : 0));
+            FrameSize: op == AssignmentOps.Scrape ? Math.Max(0, _optFrame) : 0,
+            ReloadSeconds: op is AssignmentOps.Import or AssignmentOps.Update ? Math.Max(0, _optReload) : 0));
     }
 
     // ── Nút mức tài khoản (chạy cả acc) ───────────────────────────────────────────

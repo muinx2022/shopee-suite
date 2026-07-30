@@ -97,7 +97,7 @@ public sealed class AssignmentWorker : IDisposable
         {
             // 'requeue' (running → queued + xoá claim) dùng lại đường sẵn có cho "chờ quỹ Brave" — GIỮ tham số
             // việc. hub null → chỉ dừng local (không có gì để trả về hàng chờ).
-            if (hub is not null) await hub.ReportAssignmentAsync(f.A.Id, "requeue", "tạm dừng để cập nhật app");
+            if (hub is not null) await hub.ReportAssignmentAsync(f.A.Id, AssignmentStatus.Requeue, "tạm dừng để cập nhật app");
             StopLocal(f.A);
             HubLog.Info($"⏸ Trả về hàng chờ hub: {Describe(f.A)} — cập nhật app");
             _liveIds.TryRemove(f.A.Id, out _);
@@ -117,7 +117,7 @@ public sealed class AssignmentWorker : IDisposable
     {
         var hub = CoordinationRuntime.Hub;
         if (hub is null) return;
-        foreach (var id in _liveIds.Keys) _ = hub.ReportAssignmentAsync(id, "running");
+        foreach (var id in _liveIds.Keys) _ = hub.ReportAssignmentAsync(id, AssignmentStatus.Running);
     }
 
     private async void Tick()
@@ -192,7 +192,7 @@ public sealed class AssignmentWorker : IDisposable
             // sẽ báo 'failed' oan sau 6 nhịp. Cookie mới về là nhịp sau claim lại chạy bình thường.
             if (CoordinationRuntime.Relogin?.IsRelogging(a.BigsellerId) == true)
             {
-                await hub.ReportAssignmentAsync(a.Id, "requeue", "BigSeller mất phiên — Hub đang đăng nhập lại");
+                await hub.ReportAssignmentAsync(a.Id, AssignmentStatus.Requeue, "BigSeller mất phiên — Hub đang đăng nhập lại");
                 continue;
             }
             var need = RequiredBraves(a);
@@ -204,7 +204,7 @@ public sealed class AssignmentWorker : IDisposable
                 // "Đang dùng" tính từ freeBraves HIỆN TẠI (không dùng usedBraves chụp trước vòng lặp) — việc vừa
                 // được cấp trong CHÍNH tick này cũng phải tính, kẻo message báo "0/10" dù quỹ vừa cạn.
                 var inUse = Shopee.Core.Browser.BraveFleet.MaxConcurrentWindows - freeBraves;
-                await hub.ReportAssignmentAsync(a.Id, "requeue", $"chờ quỹ Brave ({inUse}/{Shopee.Core.Browser.BraveFleet.MaxConcurrentWindows} đang dùng)");
+                await hub.ReportAssignmentAsync(a.Id, AssignmentStatus.Requeue, $"chờ quỹ Brave ({inUse}/{Shopee.Core.Browser.BraveFleet.MaxConcurrentWindows} đang dùng)");
                 continue;
             }
             // Cấp phần còn thiếu cho việc cuối; việc không dùng trình duyệt (need==0) cấp 0 (không trừ quỹ).
@@ -236,7 +236,7 @@ public sealed class AssignmentWorker : IDisposable
         }
 
         // Bàn giao xuyên máy: kéo cấu hình/cookie mới nhất trước khi import/update (workbook không còn sync).
-        if (AutoSyncHandoff && a.Op is "import" or "update" or "rewrite")
+        if (AutoSyncHandoff && a.Op is AssignmentOps.Import or AssignmentOps.Update or AssignmentOps.Rewrite)
         {
             try { if (CoordinationRuntime.ConfigSync is { } sync) await sync.PullAccountsAsync(); } catch { }
         }
@@ -257,12 +257,12 @@ public sealed class AssignmentWorker : IDisposable
         var n = _launchAttempts.AddOrUpdate(a.Id, 1, (_, v) => v + 1);
         if (n < MaxLaunchAttempts)
         {
-            await hub.ReportAssignmentAsync(a.Id, "requeue", problem);
+            await hub.ReportAssignmentAsync(a.Id, AssignmentStatus.Requeue, problem);
         }
         else
         {
             _launchAttempts.TryRemove(a.Id, out _);
-            await hub.ReportAssignmentAsync(a.Id, "failed", $"{problem} (đã thử {n} lần)");
+            await hub.ReportAssignmentAsync(a.Id, AssignmentStatus.Failed, $"{problem} (đã thử {n} lần)");
         }
     }
 
@@ -270,14 +270,14 @@ public sealed class AssignmentWorker : IDisposable
     private bool CanLaunch(Assignment a, out string problem)
     {
         problem = "";
-        if (a.Op == "search")
+        if (a.Op == AssignmentOps.Search)
         {
             if (_search.PoolCount == 0) { problem = "kho tài khoản Shopee trống"; return false; }
             if (_search.IsRunning) { problem = "máy đang chạy 1 việc Search khác"; return false; }
             if (string.IsNullOrWhiteSpace(a.Payload)) { problem = "thiếu dữ liệu khối link"; return false; }
             return true;
         }
-        if (a.Op == "scrape")
+        if (a.Op == AssignmentOps.Scrape)
         {
             var t = _scrape.ScrapeTargets.FirstOrDefault(x => x.Account.Id == a.BigsellerId);
             var shop = t?.Account.Shops.FirstOrDefault(s => s.Id == a.ShopId);
@@ -296,7 +296,7 @@ public sealed class AssignmentWorker : IDisposable
     {
         switch (a.Op)
         {
-            case "scrape":
+            case AssignmentOps.Scrape:
             {
                 var t = _scrape.ScrapeTargets.FirstOrDefault(x => x.Account.Id == a.BigsellerId);
                 var shop = t?.Account.Shops.FirstOrDefault(s => s.Id == a.ShopId);
@@ -307,9 +307,9 @@ public sealed class AssignmentWorker : IDisposable
                     grant > 0 ? grant : (int?)null, a.FrameSize > 0 ? a.FrameSize : (int?)null);
                 return true;
             }
-            case "import":
-            case "update":
-            case "rewrite":
+            case AssignmentOps.Import:
+            case AssignmentOps.Update:
+            case AssignmentOps.Rewrite:
             {
                 var t = _update.RunTargets.FirstOrDefault(x => x.Account.Id == a.BigsellerId);
                 var shop = t?.Account.Shops.FirstOrDefault(s => s.Id == a.ShopId);
@@ -317,14 +317,14 @@ public sealed class AssignmentWorker : IDisposable
                 t.SelectedShop = shop;
                 // import/update: số lane = quỹ Brave cấp; reload theo Hub đặt (0/null = dùng cấu hình client).
                 // rewrite: KHÔNG mở trình duyệt → processes null (quỹ đã cấp grant=0 cho op này).
-                if (a.Op == "import") _ = _update.RunImportSingleAsync(t, silent: true, a.StartRow, a.EndRow, ImportFromClaimedTab(a),
+                if (a.Op == AssignmentOps.Import) _ = _update.RunImportSingleAsync(t, silent: true, a.StartRow, a.EndRow, ImportFromClaimedTab(a),
                     processes: grant > 0 ? grant : (int?)null, reloadSeconds: a.ReloadSeconds > 0 ? a.ReloadSeconds : (int?)null);
-                else if (a.Op == "update") _ = _update.RunUpdateSingleAsync(t, silent: true, a.StartRow, a.EndRow,
+                else if (a.Op == AssignmentOps.Update) _ = _update.RunUpdateSingleAsync(t, silent: true, a.StartRow, a.EndRow,
                     processes: grant > 0 ? grant : (int?)null, reloadSeconds: a.ReloadSeconds > 0 ? a.ReloadSeconds : (int?)null);
                 else _ = _update.RunNameRewriteSingleAsync(t, silent: true, a.StartRow, a.EndRow);
                 return true;
             }
-            case "search":
+            case AssignmentOps.Search:
             {
                 if (_search.IsRunning) return false;   // đang chạy 1 search khác → báo failed NGAY (khỏi kẹt grace 60s)
                 var payload = TryParseSearch(a.Payload);
@@ -345,11 +345,15 @@ public sealed class AssignmentWorker : IDisposable
     /// <summary>Mô tả ngắn 1 việc cho dòng log tập trung: "Import · Shop (Tài khoản)" / "Search · file".</summary>
     private static string Describe(Assignment a)
     {
-        if (a.Op == MachineRoles.Search)
+        if (a.Op == AssignmentOps.Search)
             return $"Search · {(string.IsNullOrWhiteSpace(a.Sheet) ? "(file Hub giao)" : a.Sheet)}";
         var acct = BigSellerStore.Shared.Accounts.FirstOrDefault(x => x.Id == a.BigsellerId);
         var shop = acct?.Shops.FirstOrDefault(s => s.Id == a.ShopId);
-        var op = a.Op switch { "scrape" => "Scrape", "import" => "Import", "update" => "Update", "rewrite" => "Tên SP", _ => a.Op };
+        var op = a.Op switch
+        {
+            AssignmentOps.Scrape => "Scrape", AssignmentOps.Import => "Import",
+            AssignmentOps.Update => "Update", AssignmentOps.Rewrite => "Tên SP", _ => a.Op,
+        };
         var acctName = acct?.DisplayName ?? (a.BigsellerId.Length > 8 ? a.BigsellerId[..8] : a.BigsellerId);
         var shopName = shop?.DisplayName ?? (a.ShopId.Length > 8 ? a.ShopId[..8] : a.ShopId);
         return $"{op} · {shopName} ({acctName})";
@@ -371,7 +375,7 @@ public sealed class AssignmentWorker : IDisposable
         foreach (var f in _inflight.Values.ToList())
         {
             var st = hub.CurrentFleet.Assignments.FirstOrDefault(x => x.Id == f.A.Id)?.Status;
-            if (st == "canceled")
+            if (st == AssignmentStatus.Canceled)
             {
                 StopLocal(f.A);
                 HubLog.Warn($"✖ Huỷ {Describe(f.A)}");
@@ -397,17 +401,17 @@ public sealed class AssignmentWorker : IDisposable
         {
             // Search KHÔNG ghi ledger → kết luận theo OUTCOME client ghi lại (completed/stopped/failed). Không có
             // outcome mà đã từng thấy chạy → coi như xong (lưới an toàn); chưa từng chạy → lỗi.
-            if (f.A.Op == "search")
+            if (f.A.Op == AssignmentOps.Search)
             {
                 var outcome = _search.TakeAssignmentOutcome(f.A.Id);
-                var searchOk = outcome == "completed" || (outcome is null && f.SeenRunning);
+                var searchOk = outcome == LedgerStatus.Completed || (outcome is null && f.SeenRunning);
                 var searchErr = searchOk ? null : outcome switch
                 {
-                    "stopped" => "đã dừng dở (khối link chưa xong)",
-                    "failed" => "lỗi khi chạy Search",
+                    LedgerStatus.Stopped => "đã dừng dở (khối link chưa xong)",
+                    AssignmentStatus.Failed => "lỗi khi chạy Search",
                     _ => "không khởi động được (kho acc trống / bị máy khác giữ)",
                 };
-                await hub.ReportAssignmentAsync(f.A.Id, searchOk ? "done" : "failed", searchErr);
+                await hub.ReportAssignmentAsync(f.A.Id, searchOk ? AssignmentStatus.Done : AssignmentStatus.Failed, searchErr);
                 if (searchOk) HubLog.Ok($"✔ Xong {Describe(f.A)}"); else HubLog.Warn($"■ {Describe(f.A)} — {searchErr}");
                 _liveIds.TryRemove(f.A.Id, out _);
                 _inflight.TryRemove(f.A.Id, out _);
@@ -416,25 +420,25 @@ public sealed class AssignmentWorker : IDisposable
             // Scrape dừng vì LỖI HẠ TẦNG TOÀN CỤC (key proxy chết): ledger chỉ thấy 'stopped' — vô nghĩa với người
             // đọc. Lấy lý do runner để lại → 'failed' kèm lý do thật. KHÔNG 'requeue': key hết hạn thì thử lại 6
             // lần cũng vô ích, chỉ tổ đốt thêm dòng.
-            var fatal = f.A.Op == "scrape" ? _scrape.TakeJobFatal(f.A.BigsellerId) : null;
+            var fatal = f.A.Op == AssignmentOps.Scrape ? _scrape.TakeJobFatal(f.A.BigsellerId) : null;
             var status = await hub.FetchLedgerStatusAsync(f.A.CoordId);
-            var ok = fatal is null && status == "completed";
+            var ok = fatal is null && status == LedgerStatus.Completed;
             // Chưa xong VÌ tk BigSeller mất phiên và Hub đang đăng nhập lại → lỗi TẠM THỜI: trả về hàng đợi
             // ('requeue', KHÔNG 'failed' và KHÔNG đếm số lần thử) — cookie mới về là claim lại chạy tiếp.
             if (!ok && CoordinationRuntime.Relogin?.IsRelogging(f.A.BigsellerId) == true)
             {
-                await hub.ReportAssignmentAsync(f.A.Id, "requeue", "BigSeller mất phiên — Hub đang đăng nhập lại");
+                await hub.ReportAssignmentAsync(f.A.Id, AssignmentStatus.Requeue, "BigSeller mất phiên — Hub đang đăng nhập lại");
                 HubLog.Warn($"⏳ Trả về hàng chờ hub: {Describe(f.A)} — Hub đang đăng nhập lại BigSeller");
                 _liveIds.TryRemove(f.A.Id, out _);
                 _inflight.TryRemove(f.A.Id, out _);
                 continue;
             }
-            await hub.ReportAssignmentAsync(f.A.Id, ok ? "done" : "failed",
+            await hub.ReportAssignmentAsync(f.A.Id, ok ? AssignmentStatus.Done : AssignmentStatus.Failed,
                 ok ? null : fatal ?? (f.SeenRunning ? (status ?? "dừng dở") : "không khởi động được (có thể bị chặn khoá)"));
             if (ok) HubLog.Ok($"✔ Xong {Describe(f.A)}");
             else HubLog.Warn($"■ {Describe(f.A)} — {fatal ?? (f.SeenRunning ? (status ?? "dừng dở") : "không khởi động được")}");
 
-            if (AutoSyncHandoff && f.A.Op == "scrape" && ok && CoordinationRuntime.ConfigSync is { } cs)
+            if (AutoSyncHandoff && f.A.Op == AssignmentOps.Scrape && ok && CoordinationRuntime.ConfigSync is { } cs)
                 TaskExt.FireAndForget(cs.PushAsync(), "đẩy cấu hình/cookie sau scrape (hand-off)");
 
             _liveIds.TryRemove(f.A.Id, out _);
@@ -446,8 +450,8 @@ public sealed class AssignmentWorker : IDisposable
     {
         UiThread.Enqueue(() =>
         {
-            if (a.Op == "search") { _search.StopAssignment(a.Id); return; }
-            if (a.Op == "scrape")
+            if (a.Op == AssignmentOps.Search) { _search.StopAssignment(a.Id); return; }
+            if (a.Op == AssignmentOps.Scrape)
             {
                 var t = _scrape.ScrapeTargets.FirstOrDefault(x => x.Account.Id == a.BigsellerId);
                 if (t is not null) _ = _scrape.StopSingleAsync(t);
@@ -458,8 +462,8 @@ public sealed class AssignmentWorker : IDisposable
 
     private bool IsRunningLocally(Assignment a)
     {
-        if (a.Op == "search") return _search.IsRunningAssignment(a.Id);
-        if (a.Op == "scrape")
+        if (a.Op == AssignmentOps.Search) return _search.IsRunningAssignment(a.Id);
+        if (a.Op == AssignmentOps.Scrape)
         {
             var t = _scrape.ScrapeTargets.FirstOrDefault(x => x.Account.Id == a.BigsellerId);
             var shop = t?.Account.Shops.FirstOrDefault(s => s.Id == a.ShopId);

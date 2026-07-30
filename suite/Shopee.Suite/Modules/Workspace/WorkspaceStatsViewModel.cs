@@ -69,7 +69,8 @@ public sealed partial class WorkspaceOpKpi : ObservableObject
 public sealed partial class WorkspaceStatsViewModel : ObservableObject
 {
     /// <summary>Thứ tự op — index KHỚP <see cref="WorkspaceShopStats.Ops"/> và <see cref="Kpis"/>.</summary>
-    internal static readonly string[] OpKeys = ["scrape", "import", "update", "rewrite"];
+    internal static readonly string[] OpKeys =
+        [AssignmentOps.Scrape, AssignmentOps.Import, AssignmentOps.Update, AssignmentOps.Rewrite];
 
     public ObservableCollection<WorkspaceShopStats> Shops { get; } = [];
     public ObservableCollection<WorkspaceOpKpi> Kpis { get; } =
@@ -150,7 +151,7 @@ public sealed partial class WorkspaceStatsViewModel : ObservableObject
                 var led = FindLedger(fleet, accId, shop.Id, op);
                 if (led is null) continue;
                 rows += CountRows(led.Completed);
-                if (string.Equals(led.Status, "completed", StringComparison.OrdinalIgnoreCase)) done++;
+                if (string.Equals(led.Status, LedgerStatus.Completed, StringComparison.OrdinalIgnoreCase)) done++;
             }
             Kpis[i].RowsText = rows.ToString("N0");
             Kpis[i].ShopsDoneText = $"{done}/{account.Shops.Count} shop ✓";
@@ -251,19 +252,19 @@ public sealed partial class WorkspaceStatsViewModel : ObservableObject
             string.Equals(a.BigsellerId, accId, StringComparison.Ordinal) &&
             string.Equals(a.ShopId, shopId, StringComparison.Ordinal) &&
             string.Equals(a.Op, op, StringComparison.Ordinal) &&
-            a.Status is "queued" or "running");
+            a.Status is AssignmentStatus.Queued or AssignmentStatus.Running);
 
         // 2) Assignment 'running' mà máy claim KHÔNG offline → đang chạy.
-        if (asn is { Status: "running" } && !MachineOffline(f, asn.ClaimedByMachineId))
+        if (asn is { Status: AssignmentStatus.Running } && !MachineOffline(f, asn.ClaimedByMachineId))
             return ($"⏳ đang chạy · {Host(asn.ClaimedByHostname)}", RunningBg, RunningFg);
 
         // 3) Ledger xong / dừng dở.
         var led = f.Ledger.FirstOrDefault(l => string.Equals(l.Key, key, StringComparison.Ordinal));
-        if (led?.Status == "completed") return ("✓ xong", DoneBg, DoneFg);
-        if (led?.Status == "stopped") return ("■ dừng dở", WarnBg, WarnFg);
+        if (led?.Status == LedgerStatus.Completed) return ("✓ xong", DoneBg, DoneFg);
+        if (led?.Status == LedgerStatus.Stopped) return ("■ dừng dở", WarnBg, WarnFg);
 
         // 4) Assignment 'queued' → đã xếp (kèm máy đích / cảnh báo máy tắt).
-        if (asn is { Status: "queued" })
+        if (asn is { Status: AssignmentStatus.Queued })
         {
             if (!string.IsNullOrEmpty(asn.TargetMachineId))
             {
@@ -276,7 +277,7 @@ public sealed partial class WorkspaceStatsViewModel : ObservableObject
         }
 
         // 5) Ledger 'running' nhưng không còn lease/assignment đại diện → tiến trình chạy tay chết giữa chừng.
-        if (led?.Status == "running" && asn is not { Status: "running" })
+        if (led?.Status == LedgerStatus.Running && asn is not { Status: AssignmentStatus.Running })
             return ("■ dừng dở (mất kết nối)", WarnBg, WarnFg);
 
         // 6) Assignment 'failed' còn mới (<3 phút).
@@ -284,7 +285,7 @@ public sealed partial class WorkspaceStatsViewModel : ObservableObject
             .Where(a => string.Equals(a.BigsellerId, accId, StringComparison.Ordinal)
                 && string.Equals(a.ShopId, shopId, StringComparison.Ordinal)
                 && string.Equals(a.Op, op, StringComparison.Ordinal)
-                && a.Status == "failed")
+                && a.Status == AssignmentStatus.Failed)
             .OrderByDescending(a => a.UpdatedAt).FirstOrDefault();
         if (failed is not null && (DateTimeOffset.Now - failed.UpdatedAt) < TimeSpan.FromMinutes(3))
             return ($"✘ lỗi ({Host(failed.ClaimedByHostname)})", ErrorBg, ErrorFg);

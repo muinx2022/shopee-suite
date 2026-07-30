@@ -118,7 +118,7 @@ public sealed partial class FleetViewModel : ObservableObject
             rows.Add((MakeRow(l.BigsellerId, l.ShopId, l.Op, l.Hostname, "⏳ đang chạy", l.HeartbeatAt, true), l.HeartbeatAt));
 
         var leasedKeys = f.Leases.Select(l => l.Key).ToHashSet(StringComparer.Ordinal);
-        foreach (var g in f.Ledger.Where(g => !leasedKeys.Contains(g.Key) && g.Status is not ("idle" or "")))
+        foreach (var g in f.Ledger.Where(g => !leasedKeys.Contains(g.Key) && g.Status is not (LedgerStatus.Idle or "")))
             rows.Add((MakeRow(g.BigsellerId, g.ShopId, g.Op, g.LastHostname, StateIcon(g.Status), g.UpdatedAt, false), g.UpdatedAt));
 
         Rows.Clear();
@@ -140,12 +140,12 @@ public sealed partial class FleetViewModel : ObservableObject
         MyRole = RoleDisplay(f.Roles.FirstOrDefault(r => r.MachineId == myId)?.Role ?? MachineRoles.Off);
         MyJobs.Clear();
         foreach (var a in f.Assignments
-                     .Where(a => (a.Status == "running" && a.ClaimedByMachineId == myId)
-                                 || (a.Status == "queued" && a.TargetMachineId == myId))
-                     .OrderByDescending(a => a.Status == "running"))
+                     .Where(a => (a.Status == AssignmentStatus.Running && a.ClaimedByMachineId == myId)
+                                 || (a.Status == AssignmentStatus.Queued && a.TargetMachineId == myId))
+                     .OrderByDescending(a => a.Status == AssignmentStatus.Running))
         {
             // Search: không gắn với BigSeller shop → hiện tên file + khoảng link thay cho tài khoản/shop.
-            if (a.Op == MachineRoles.Search)
+            if (a.Op == AssignmentOps.Search)
             {
                 MyJobs.Add(new FleetMyJobRow
                 {
@@ -153,8 +153,8 @@ public sealed partial class FleetViewModel : ObservableObject
                     AccountLabel = "Search",
                     ShopName = string.IsNullOrWhiteSpace(a.Sheet) ? "(file Hub giao)" : a.Sheet,
                     Rows = RowRange(a.StartRow, a.EndRow),
-                    StateText = a.Status == "running" ? "▶ đang chạy" : "⏱ chờ tới lượt",
-                    StateBrush = a.Status == "running" ? RunningBrush : QueuedBrush,
+                    StateText = a.Status == AssignmentStatus.Running ? "▶ đang chạy" : "⏱ chờ tới lượt",
+                    StateBrush = a.Status == AssignmentStatus.Running ? RunningBrush : QueuedBrush,
                 });
                 continue;
             }
@@ -166,8 +166,8 @@ public sealed partial class FleetViewModel : ObservableObject
                 AccountLabel = AcctName(acct, a.BigsellerId),
                 ShopName = shop?.DisplayName ?? Short(a.ShopId),
                 Rows = RowRange(a.StartRow, a.EndRow),
-                StateText = a.Status == "running" ? "▶ đang chạy" : "⏱ chờ tới lượt",
-                StateBrush = a.Status == "running" ? RunningBrush : QueuedBrush,
+                StateText = a.Status == AssignmentStatus.Running ? "▶ đang chạy" : "⏱ chờ tới lượt",
+                StateBrush = a.Status == AssignmentStatus.Running ? RunningBrush : QueuedBrush,
             });
         }
     }
@@ -186,7 +186,7 @@ public sealed partial class FleetViewModel : ObservableObject
     /// viết riêng vì method của worker là private static).</summary>
     private static string DescribeAssignment(Assignment a)
     {
-        if (a.Op == MachineRoles.Search)
+        if (a.Op == AssignmentOps.Search)
             return $"Search · {(string.IsNullOrWhiteSpace(a.Sheet) ? "(file Hub giao)" : a.Sheet)}";
         var acct = BigSellerStore.Shared.Accounts.FirstOrDefault(x => x.Id == a.BigsellerId);
         var shop = acct?.Shops.FirstOrDefault(s => s.Id == a.ShopId);
@@ -197,7 +197,7 @@ public sealed partial class FleetViewModel : ObservableObject
     private static string InterruptedDetail(Assignment a)
     {
         var host = string.IsNullOrWhiteSpace(a.ClaimedByHostname) ? "—" : a.ClaimedByHostname;
-        var reason = string.IsNullOrWhiteSpace(a.LastError) ? (a.Status == "canceled" ? "đã huỷ" : "lỗi") : a.LastError;
+        var reason = string.IsNullOrWhiteSpace(a.LastError) ? (a.Status == AssignmentStatus.Canceled ? "đã huỷ" : "lỗi") : a.LastError;
         return $"Máy: {host}   ·   {reason}   ·   {a.UpdatedAt.ToLocalTime():HH:mm:ss}";
     }
 
@@ -313,8 +313,8 @@ public sealed partial class FleetViewModel : ObservableObject
 
     private static string OpVi(string op) => op switch
     {
-        "scrape" => "Scrape", "import" => "Import", "update" => "Update", "rewrite" => "Tên SP",
-        "search" => "Search", _ => op,
+        AssignmentOps.Scrape => "Scrape", AssignmentOps.Import => "Import", AssignmentOps.Update => "Update",
+        AssignmentOps.Rewrite => "Tên SP", AssignmentOps.Search => "Search", _ => op,
     };
 
     /// <summary>Hiển thị khoảng dòng Hub giao: "X→Y" (Y=0 ⇒ "hết"); 0/0 ⇒ "theo client" (Hub không đặt).</summary>
@@ -337,7 +337,8 @@ public sealed partial class FleetViewModel : ObservableObject
 
     private static string StateIcon(string status) => status switch
     {
-        "completed" => "✓ xong", "stopped" => "■ dừng dở", "running" => "⏳ đang chạy", _ => status,
+        LedgerStatus.Completed => "✓ xong", LedgerStatus.Stopped => "■ dừng dở",
+        LedgerStatus.Running => "⏳ đang chạy", _ => status,
     };
 
     private static string Ago(DateTimeOffset at)

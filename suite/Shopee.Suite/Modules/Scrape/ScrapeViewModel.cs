@@ -282,7 +282,7 @@ public sealed partial class ScrapeViewModel : ModuleViewModelBase
                 // op scrape của shop này (status "idle" = server xoá bản ghi ledger + tiến độ dòng). Fire-and-forget,
                 // có try/catch: offline/lỗi → thôi (local đã clear là đủ để chạy lại từ đầu).
                 if (accHub is not null)
-                    TaskExt.FireAndForget(accHub.SetLedgerStatusAsync(coordKey, "idle"),
+                    TaskExt.FireAndForget(accHub.SetLedgerStatusAsync(coordKey, LedgerStatus.Idle),
                         $"xoá ledger hub (idle) khi Reset · {account.DisplayName}/{sheet}");
             }
             // HAND-OFF XUYÊN MÁY: trước khi tính phần CÒN THIẾU, kéo ledger TƯƠI của shop này từ Hub → fold vào
@@ -389,7 +389,7 @@ public sealed partial class ScrapeViewModel : ModuleViewModelBase
             // Kết thúc: xong hết [startRow..total] → completed; còn dở → stopped (resume chạy nốt theo dòng).
             ScrapeProgressStore.Shared.FinishRun(account.Id, sheet, startRow, totalRows);
             var after = ScrapeProgressStore.Shared.Find(account.Id, sheet);
-            LogA(string.Equals(after?.Status, "completed", StringComparison.OrdinalIgnoreCase)
+            LogA(string.Equals(after?.Status, LedgerStatus.Completed, StringComparison.OrdinalIgnoreCase)
                 ? $"[{account.DisplayName}] ✔ Hoàn thành toàn bộ."
                 : $"[{account.DisplayName}] ■ Chưa xong (xong tới dòng {after?.LastRowReached ?? 0}) — Tiếp tục để chạy nốt.");
         }
@@ -405,7 +405,7 @@ public sealed partial class ScrapeViewModel : ModuleViewModelBase
             try
             {
                 var fin = ScrapeProgressStore.Shared.Find(account.Id, sheet);
-                Coordination.Hub.PublishCompletion(coordKey, fin?.Status ?? "stopped", fin?.LastRowReached ?? 0);
+                Coordination.Hub.PublishCompletion(coordKey, fin?.Status ?? LedgerStatus.Stopped, fin?.LastRowReached ?? 0);
             }
             catch { }
             // Nhả account-lease (heartbeat → UnmarkHubLeased → ReleaseAccountsAsync Hub → ReleaseReservation CẢ

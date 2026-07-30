@@ -109,15 +109,16 @@ public sealed class FleetStateService : BackgroundService
         if (lease is not null && (DateTimeOffset.Now - lease.HeartbeatAt) < LeaseFresh)
             return new($"⏳ {Host(lease.Hostname)}", "run", 1);
 
-        var asn = f.Assignments.FirstOrDefault(a => a.BigsellerId == bsId && a.ShopId == shopId && a.Op == op && a.Status is "queued" or "running");
+        var asn = f.Assignments.FirstOrDefault(a => a.BigsellerId == bsId && a.ShopId == shopId && a.Op == op
+            && a.Status is AssignmentStatus.Queued or AssignmentStatus.Running);
         // Assignment 'running' nhưng máy đã OFFLINE (≥180s) → thôi báo ⏳ (nội bộ vẫn 'running' để huỷ/hồi sinh).
-        if (asn is { Status: "running" } && !MachineOffline(f, asn.ClaimedByMachineId))
+        if (asn is { Status: AssignmentStatus.Running } && !MachineOffline(f, asn.ClaimedByMachineId))
             return new($"⏳ {Host(asn.ClaimedByHostname)}", "run", 1);
 
         var led = f.Ledger.FirstOrDefault(l => l.Key == key);
-        if (led?.Status == "completed") return new("✓ xong", "done", 0);
-        if (led?.Status == "stopped") return new("■ dừng dở", "warn", 3);
-        if (asn is { Status: "queued" })
+        if (led?.Status == LedgerStatus.Completed) return new("✓ xong", "done", 0);
+        if (led?.Status == LedgerStatus.Stopped) return new("■ dừng dở", "warn", 3);
+        if (asn is { Status: AssignmentStatus.Queued })
         {
             var retry = string.IsNullOrWhiteSpace(asn.LastError) ? "" : $" · thử lại: {asn.LastError}";
             if (!string.IsNullOrEmpty(asn.TargetMachineId))
@@ -136,11 +137,11 @@ public sealed class FleetStateService : BackgroundService
         // xuống "· chờ" nên việc chết dở thành VÔ HÌNH; giờ báo "■ dừng dở (mất kết nối)" cùng kind/màu nhánh
         // 'stopped' để operator thấy & ▶ tiếp tục lại trên máy cũ. (asn đang 'running'-nhưng-offline vẫn thuộc
         // cơ chế assignment nội bộ → loại khỏi đây, giữ nguyên hành vi cũ.)
-        if (led?.Status == "running" && asn is not { Status: "running" })
+        if (led?.Status == LedgerStatus.Running && asn is not { Status: AssignmentStatus.Running })
             return new("■ dừng dở (mất kết nối)", "warn", 3);
 
         var failed = f.Assignments
-            .Where(a => a.BigsellerId == bsId && a.ShopId == shopId && a.Op == op && a.Status == "failed")
+            .Where(a => a.BigsellerId == bsId && a.ShopId == shopId && a.Op == op && a.Status == AssignmentStatus.Failed)
             .OrderByDescending(a => a.UpdatedAt).FirstOrDefault();
         if (failed is not null && (DateTimeOffset.Now - failed.UpdatedAt) < TimeSpan.FromMinutes(3))
             return new($"✘ lỗi ({Host(failed.ClaimedByHostname)})", "fail", 3);
@@ -155,7 +156,7 @@ public sealed class FleetStateService : BackgroundService
         if ((DateTimeOffset.Now - m.LastSeen).TotalSeconds >= 180)
             return new("⚪", "offline · " + Ago(m.LastSeen), false);
         var working = f.Leases.Any(l => l.MachineId == m.MachineId && (DateTimeOffset.Now - l.HeartbeatAt) < LeaseFresh)
-            || f.Assignments.Any(a => a.Status == "running" && a.ClaimedByMachineId == m.MachineId);
+            || f.Assignments.Any(a => a.Status == AssignmentStatus.Running && a.ClaimedByMachineId == m.MachineId);
         return working
             ? new("🟢", "online · đang chạy", true)
             : new("🟡", "idle · " + Ago(m.LastSeen), true);

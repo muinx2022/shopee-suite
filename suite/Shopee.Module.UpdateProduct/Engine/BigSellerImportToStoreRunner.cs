@@ -142,7 +142,7 @@ internal sealed class BigSellerImportToStoreRunner : BigSellerBraveRunner
         // RESUME: seed _importedIds từ tiến độ ĐÃ LƯU (kill/dừng giữa chừng rồi chạy lại → KHÔNG import trùng —
         // chốt chặn cũ chỉ là HashSet trong RAM, mất khi thoát). Chỉ lấy id CÒN trong _importIds (khoảng dòng /
         // tập id có thể đã đổi giữa 2 lần chạy). Đủ hết ngay từ tiến độ → khỏi mở Brave.
-        var doneImport = OpProgressStore.Shared.GetDone(_settings.AccountId, _settings.DataSheet, "import");
+        var doneImport = OpProgressStore.Shared.GetDone(_settings.AccountId, _settings.DataSheet, AssignmentOps.Import);
         var seeded = 0;
         foreach (var id in doneImport.Keys)
             if (_importIds.Contains(id)) { _importedIds.Add(id); seeded++; }
@@ -316,7 +316,7 @@ internal sealed class BigSellerImportToStoreRunner : BigSellerBraveRunner
                     // RESUME: ghi tiến độ import NGAY (bền với kill) → lượt sau seed _importedIds, không import trùng.
                     // Import chỉ cần biết "đã import" nên doneName = null. Hub-mode: báo server để GetImportIds lượt sau
                     // lọc bớt (best-effort; store local là chính, lỗi mạng KHÔNG làm hỏng lượt chạy).
-                    OpProgressStore.Shared.MarkDone(_settings.AccountId, _settings.DataSheet, "import",
+                    OpProgressStore.Shared.MarkDone(_settings.AccountId, _settings.DataSheet, AssignmentOps.Import,
                         checkedIds.Select(id => new KeyValuePair<string, string?>(id, null)));
                     if (_settings.UseHubData) _ = MarkImportedHubAsync(checkedIds);
                 }

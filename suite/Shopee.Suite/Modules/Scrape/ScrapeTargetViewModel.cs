@@ -3,6 +3,7 @@ using Avalonia.Media;
 using Avalonia.Media.Immutable;
 using CommunityToolkit.Mvvm.ComponentModel;
 using Shopee.Core.BigSeller;
+using Shopee.Core.Coordination;
 using Shopee.Core.Scrape;
 
 namespace Shopee.Suite.Modules.Scrape;
@@ -148,9 +149,9 @@ public sealed partial class ScrapeTargetViewModel : ObservableObject
                 return "Chưa có tiến độ.";
             var status = p.Status switch
             {
-                "completed" => "✔ Hoàn thành",
-                "running" => "▶ Đang chạy",
-                "stopped" => "■ Dừng giữa chừng",
+                LedgerStatus.Completed => "✔ Hoàn thành",
+                LedgerStatus.Running => "▶ Đang chạy",
+                LedgerStatus.Stopped => "■ Dừng giữa chừng",
                 _ => "—",
             };
             return $"{status} · đã xong tới dòng {p.LastRowReached}";
@@ -189,7 +190,7 @@ public sealed partial class ScrapeTargetViewModel : ObservableObject
                 Tooltip = p is not null ? $"Đang chạy · đã xong tới dòng {p.LastRowReached}." : "Đang chạy…",
             };
 
-        if (p is not null && string.Equals(p.Status, "completed", StringComparison.OrdinalIgnoreCase))
+        if (p is not null && string.Equals(p.Status, LedgerStatus.Completed, StringComparison.OrdinalIgnoreCase))
             return new ShopScrapeStatus
             {
                 DisplayName = shop.DisplayName,

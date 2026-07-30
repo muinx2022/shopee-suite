@@ -130,7 +130,7 @@ public sealed partial class WorkspaceShopViewModel : ObservableObject
         if (hub is null) return false;
         var key = new CoordKey(Parent.Account.Id, Shop.Id, Shop.ShopeeDataSheet ?? "", op).Id;
         return hub.CurrentFleet.Ledger.Any(l => string.Equals(l.Key, key, StringComparison.Ordinal)
-                                                && string.Equals(l.Status, "completed", StringComparison.OrdinalIgnoreCase));
+                                                && string.Equals(l.Status, LedgerStatus.Completed, StringComparison.OrdinalIgnoreCase));
     }
     public bool ScrapeDone => !ScrapeRunning && IsOpDone(CoordOp.Scrape);
     public bool ImportDone => !ImportRunning && IsOpDone(CoordOp.Import);
@@ -157,8 +157,8 @@ public sealed partial class WorkspaceShopViewModel : ObservableObject
     //    Đặt command Ở ĐÂY (không phải WorkspaceViewModel) để MenuItem trong ContextMenu bind qua DataContext
     //    kế thừa (= shop này); popup của ContextMenu KHÔNG nằm trong visual tree UserControl nên $parent[...]
     //    không tra ngược tới WorkspaceViewModel được. Fire-and-forget: ResetOpProgressAsync tự nuốt lỗi Hub. ──
-    [RelayCommand] private void ResetImportProgress() => ResetOpProgress("import");
-    [RelayCommand] private void ResetUpdateProgress() => ResetOpProgress("update");
+    [RelayCommand] private void ResetImportProgress() => ResetOpProgress(AssignmentOps.Import);
+    [RelayCommand] private void ResetUpdateProgress() => ResetOpProgress(AssignmentOps.Update);
 
     private void ResetOpProgress(string op)
     {

@@ -101,14 +101,15 @@ public sealed class SearchBoardService
     /// <summary>Trạng thái việc search của 1 máy (đang chạy / chờ / rảnh) từ assignments.</summary>
     public static (bool busy, string text) SearchState(FleetSnapshot f, string machineId)
     {
-        var asn = f.Assignments.FirstOrDefault(a => a.Op == MachineRoles.Search && a.Status is "queued" or "running"
+        var asn = f.Assignments.FirstOrDefault(a => a.Op == AssignmentOps.Search
+            && a.Status is AssignmentStatus.Queued or AssignmentStatus.Running
             && (a.ClaimedByMachineId == machineId || a.TargetMachineId == machineId));
-        if (asn is { Status: "running" }) return (true, $"▶ đang chạy (link {asn.StartRow}–{asn.EndRow})");
-        if (asn is { Status: "queued" }) return (true, $"⏱ chờ nhận (link {asn.StartRow}–{asn.EndRow})");
+        if (asn is { Status: AssignmentStatus.Running }) return (true, $"▶ đang chạy (link {asn.StartRow}–{asn.EndRow})");
+        if (asn is { Status: AssignmentStatus.Queued }) return (true, $"⏱ chờ nhận (link {asn.StartRow}–{asn.EndRow})");
         // Việc search vừa 'failed' (thường: kho tài khoản Shopee của máy trống / đang chạy search khác) → hiện
         // lý do vài phút để người dùng biết vì sao "giao mà không chạy", thay vì lặng lẽ về "• rảnh".
         var failed = f.Assignments
-            .Where(a => a.Op == MachineRoles.Search && a.Status == "failed"
+            .Where(a => a.Op == AssignmentOps.Search && a.Status == AssignmentStatus.Failed
                 && (a.ClaimedByMachineId == machineId || a.TargetMachineId == machineId))
             .OrderByDescending(a => a.UpdatedAt).FirstOrDefault();
         if (failed is not null && (DateTimeOffset.Now - failed.UpdatedAt) < TimeSpan.FromMinutes(3))
@@ -130,13 +131,14 @@ public sealed class SearchBoardService
             Lanes = Math.Max(1, lanes), Region = region, SourceFile = sourceFile,
         };
         _db.CreateAssignment(new CreateAssignmentRequest(
-            "", $"{slice.MachineId}:{slice.Start}", sourceFile, MachineRoles.Search, slice.MachineId, true,
+            "", $"{slice.MachineId}:{slice.Start}", sourceFile, AssignmentOps.Search, slice.MachineId, true,
             slice.Start + 1, end, JsonSerializer.Serialize(payload)));
     }
 
     /// <summary>Việc search đang mở (queued/running) của 1 máy — để biết có gì mà Dừng.</summary>
     public static Assignment? OpenSearchAssignment(FleetSnapshot f, string machineId)
-        => f.Assignments.FirstOrDefault(a => a.Op == MachineRoles.Search && a.Status is "queued" or "running"
+        => f.Assignments.FirstOrDefault(a => a.Op == AssignmentOps.Search
+            && a.Status is AssignmentStatus.Queued or AssignmentStatus.Running
             && (a.ClaimedByMachineId == machineId || a.TargetMachineId == machineId));
 
     /// <summary>Dừng việc search đang mở của 1 máy: huỷ assignment → client thấy 'canceled' ở nhịp poll (≤12s)
@@ -153,7 +155,8 @@ public sealed class SearchBoardService
     public int StopAllSearch(FleetSnapshot f)
     {
         var n = 0;
-        foreach (var a in f.Assignments.Where(a => a.Op == MachineRoles.Search && a.Status is "queued" or "running"))
+        foreach (var a in f.Assignments.Where(a => a.Op == AssignmentOps.Search
+                     && a.Status is AssignmentStatus.Queued or AssignmentStatus.Running))
         { _db.CancelAssignment(a.Id); n++; }
         return n;
     }

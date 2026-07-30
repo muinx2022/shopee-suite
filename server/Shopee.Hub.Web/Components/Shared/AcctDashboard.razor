@@ -114,7 +114,7 @@
         // Máy đang giữ lease tươi hoặc assignment running của acc này.
         var lease = Snap.Leases.FirstOrDefault(l => l.BigsellerId == bs);
         if (lease is not null) return lease.MachineId;
-        var asn = Snap.Assignments.FirstOrDefault(a => a.BigsellerId == bs && a.Status == "running");
+        var asn = Snap.Assignments.FirstOrDefault(a => a.BigsellerId == bs && a.Status == AssignmentStatus.Running);
         return asn?.ClaimedByMachineId;
     }
 

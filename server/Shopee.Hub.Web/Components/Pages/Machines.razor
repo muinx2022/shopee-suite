@@ -23,7 +23,7 @@
         var pres = FleetStateService.Status(Snap, m);
         var orders = m.Kind == MachineSlots.Orders;
         var role = Snap.Roles.FirstOrDefault(r => r.MachineId == m.MachineId)?.Role ?? MachineRoles.Off;
-        var held = Snap.Assignments.Count(a => a.Status is "running" or "queued" && (a.ClaimedByMachineId == m.MachineId || a.TargetMachineId == m.MachineId))
+        var held = Snap.Assignments.Count(a => a.Status is AssignmentStatus.Running or AssignmentStatus.Queued && (a.ClaimedByMachineId == m.MachineId || a.TargetMachineId == m.MachineId))
                    + Snap.Leases.Count(l => l.MachineId == m.MachineId);
         // Việc gián đoạn của MÁY NÀY: failed có claimed_by (máy đã claim); canceled lúc còn queued chỉ có target.
         var interrupted = Snap.Interrupted.Count(a => a.ClaimedByMachineId == m.MachineId || a.TargetMachineId == m.MachineId);
@@ -110,8 +110,8 @@
     private string _status = "";
     private string? _latest;   // bản mới nhất trên GitHub (null = chưa đọc được → hiện "?")
 
-    private int RunningCount => Snap.Assignments.Count(a => a.Status == "running");
-    private int QueuedCount => Snap.Assignments.Count(a => a.Status == "queued");
+    private int RunningCount => Snap.Assignments.Count(a => a.Status == AssignmentStatus.Running);
+    private int QueuedCount => Snap.Assignments.Count(a => a.Status == AssignmentStatus.Queued);
 
     // Hai SUẤT của cùng một PC (cùng HostId) phải nằm CẠNH NHAU: gom theo HostId, cụm nào có nhịp mới nhất thì
     // lên trước (giữ đúng thói quen "máy vừa hoạt động ở trên" của bảng này), trong cụm thì Workspace rồi Đơn hàng.

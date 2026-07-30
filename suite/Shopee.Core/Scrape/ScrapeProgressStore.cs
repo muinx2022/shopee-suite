@@ -1,3 +1,4 @@
+using Shopee.Core.Coordination;
 using Shopee.Core.Infrastructure;
 
 namespace Shopee.Core.Scrape;
@@ -31,8 +32,8 @@ public sealed class ScrapeProgress
     public int LastRowReached { get; set; }
     public int TotalRowsAtLastRun { get; set; }
 
-    /// <summary>idle | running | stopped | completed.</summary>
-    public string Status { get; set; } = "idle";
+    /// <summary>Xem <see cref="LedgerStatus"/> — client đẩy thẳng chuỗi này lên sổ hoàn thành của Hub.</summary>
+    public string Status { get; set; } = LedgerStatus.Idle;
     public DateTimeOffset? LastRunAt { get; set; }
 }
 
@@ -113,7 +114,7 @@ public sealed class ScrapeProgressStore
             p.Completed.Clear();
             p.LastRowReached = 0;
             p.TotalRowsAtLastRun = totalRows;
-            p.Status = "running";
+            p.Status = LedgerStatus.Running;
             p.LastRunAt = DateTimeOffset.Now;
             SaveLocked();
         }
@@ -127,7 +128,7 @@ public sealed class ScrapeProgressStore
         {
             var p = GetOrCreateLocked(accountId, sheet, accountName);
             p.TotalRowsAtLastRun = totalRows;
-            p.Status = "running";
+            p.Status = LedgerStatus.Running;
             p.LastRunAt = DateTimeOffset.Now;
             SaveLocked();
         }
@@ -156,7 +157,7 @@ public sealed class ScrapeProgressStore
             var p = _items.FirstOrDefault(x => KeyEq(x, accountId, sheet));
             if (p is null) return;
             var remaining = RowRangeMath.Complement(p.Completed, start, total);
-            p.Status = remaining.Count == 0 && total >= start ? "completed" : "stopped";
+            p.Status = remaining.Count == 0 && total >= start ? LedgerStatus.Completed : LedgerStatus.Stopped;
             SaveLocked();
         }
         Changed?.Invoke();

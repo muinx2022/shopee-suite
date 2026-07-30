@@ -57,7 +57,7 @@ ON CONFLICT(key) DO UPDATE SET
         lock (_gate)
         {
             var now = DateTimeOffset.UtcNow;
-            if (string.IsNullOrWhiteSpace(status) || string.Equals(status, "idle", StringComparison.OrdinalIgnoreCase))
+            if (string.IsNullOrWhiteSpace(status) || string.Equals(status, LedgerStatus.Idle, StringComparison.OrdinalIgnoreCase))
             {
                 using var d = _conn.CreateCommand();
                 d.CommandText = "DELETE FROM ledger WHERE key=$k";

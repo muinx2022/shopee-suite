@@ -56,7 +56,7 @@ public sealed class DispatcherService : BackgroundService
             if (op is null) continue;   // shop đã xong cả pipeline
             // Sticky-cancel: bản assignment MỚI NHẤT của nhóm bị operator HUỶ ('canceled') → auto KHÔNG tạo lại
             // (nếu không sẽ huỷ-xong-tự-giao-lại mỗi 10s). Muốn chạy lại: bấm ▶ Tiếp tục (resume) hoặc đặt tay ledger.
-            if (_db.LatestAssignmentStatus(acct.Id, shop.Id, op) == "canceled") continue;
+            if (_db.LatestAssignmentStatus(acct.Id, shop.Id, op) == AssignmentStatus.Canceled) continue;
             _db.CreateAssignment(new CreateAssignmentRequest(acct.Id, shop.Id, shop.ShopeeDataSheet, op, null, false));
         }
     }
@@ -66,9 +66,9 @@ public sealed class DispatcherService : BackgroundService
     public static string? NextOp(FleetSnapshot fleet, string bsId, string shopId)
     {
         string St(string op) => fleet.Ledger.FirstOrDefault(l => l.Key == $"{bsId}__{shopId}__{op}")?.Status ?? "";
-        if (St("scrape") != "completed") return "scrape";
-        if (St("import") != "completed") return "import";
-        if (St("update") != "completed") return "update";
+        if (St(AssignmentOps.Scrape) != LedgerStatus.Completed) return AssignmentOps.Scrape;
+        if (St(AssignmentOps.Import) != LedgerStatus.Completed) return AssignmentOps.Import;
+        if (St(AssignmentOps.Update) != LedgerStatus.Completed) return AssignmentOps.Update;
         return null;
     }
 }

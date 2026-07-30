@@ -42,7 +42,7 @@ public sealed record DispatchGridContext(
 public static class DispatchRowsBuilder
 {
     // 3 op hub giao được cho client BigSeller (rewrite chạy trên hub → không có ở đây).
-    public static readonly string[] DispatchOps = ["scrape", "import", "update"];
+    public static readonly string[] DispatchOps = [AssignmentOps.Scrape, AssignmentOps.Import, AssignmentOps.Update];
 
     /// <summary>Trần Brave mặc định khi máy chưa báo <c>MaxBrave</c> (0 = CHƯA BÁO, không phải "không có quỹ").</summary>
     public const int DefaultBrave = 2;
@@ -83,7 +83,7 @@ public static class DispatchRowsBuilder
     public static Dictionary<string, int> UsedByMachine(FleetSnapshot snap)
     {
         var used = new Dictionary<string, int>(StringComparer.Ordinal);
-        foreach (var a in snap.Assignments.Where(a => a.Status is "queued" or "running"))
+        foreach (var a in snap.Assignments.Where(a => a.Status is AssignmentStatus.Queued or AssignmentStatus.Running))
         {
             var mid = !string.IsNullOrEmpty(a.ClaimedByMachineId) ? a.ClaimedByMachineId : a.TargetMachineId ?? "";
             if (mid.Length == 0) continue;
@@ -122,7 +122,7 @@ public static class DispatchRowsBuilder
         foreach (var l in snap.Leases)
             if (l.BigsellerId.Length > 0 && l.MachineId.Length > 0 && !map.ContainsKey(l.BigsellerId))
                 map[l.BigsellerId] = l.MachineId;
-        foreach (var a in snap.Assignments.Where(a => a.Status == "running"))
+        foreach (var a in snap.Assignments.Where(a => a.Status == AssignmentStatus.Running))
             if (a.BigsellerId.Length > 0 && a.ClaimedByMachineId.Length > 0 && !map.ContainsKey(a.BigsellerId))
                 map[a.BigsellerId] = a.ClaimedByMachineId;
         return map;
@@ -166,7 +166,8 @@ public static class DispatchRowsBuilder
     /// 'rewrite' lẫn của shop khác nên phải lọc đủ 3 khoá.</summary>
     public static Assignment? OpenAsn(FleetSnapshot snap, DispatchShopRow r, string op) =>
         snap.Assignments.FirstOrDefault(a =>
-            a.BigsellerId == r.AccountId && a.ShopId == r.ShopId && a.Op == op && a.Status is "queued" or "running");
+            a.BigsellerId == r.AccountId && a.ShopId == r.ShopId && a.Op == op
+            && a.Status is AssignmentStatus.Queued or AssignmentStatus.Running);
 
     /// <summary>Lý do lượt chạy TRƯỚC của (shop, op) hỏng — rỗng khi lượt trước không hỏng, hoặc hỏng vì bị HUỶ
     /// TAY (không phải sự cố, nói ra chỉ gây nhiễu). Nguồn Snap.Interrupted: đã lọc sẵn "bản mới nhất mỗi nhóm,
@@ -201,7 +202,7 @@ public static class DispatchRowsBuilder
         {
             var k = Cell(snap, r, op).Kind;
             if (k == 1) running.Add(RunningItem(snap, r, op));
-            else if (k == 2 && OpenAsn(snap, r, op) is { Status: "queued" } asn) queued.Add(QueuedItem(snap, r, op, asn));
+            else if (k == 2 && OpenAsn(snap, r, op) is { Status: AssignmentStatus.Queued } asn) queued.Add(QueuedItem(snap, r, op, asn));
         }
 
         foreach (var s in ordersRunning)
@@ -237,7 +238,7 @@ public static class DispatchRowsBuilder
         var lease = snap.Leases.FirstOrDefault(l => l.Key == LedgerKey(r, op)
             && (DateTimeOffset.Now - l.HeartbeatAt).TotalSeconds < 120);
         var asn = snap.Assignments.FirstOrDefault(a =>
-            a.BigsellerId == r.AccountId && a.ShopId == r.ShopId && a.Op == op && a.Status == "running");
+            a.BigsellerId == r.AccountId && a.ShopId == r.ShopId && a.Op == op && a.Status == AssignmentStatus.Running);
         // "Chạy từ": lease.AcquiredAt là mốc bắt đầu THẬT; assignment.UpdatedAt bị nhịp 'running' đẩy liên tục
         // nên vô dụng ở đây → cạn lease thì lấy CreatedAt (lúc xếp việc).
         var since = lease is not null ? lease.AcquiredAt : asn?.CreatedAt ?? default;

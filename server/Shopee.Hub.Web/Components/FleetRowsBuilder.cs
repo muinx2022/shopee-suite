@@ -30,8 +30,10 @@ public sealed record FleetSummary(int Machines, int Running, int Queued, string 
 public static class FleetRowsBuilder
 {
     // Cột lưới + thẻ Tiến độ (4 op). Đếm running/queued/failed cho summary CHỈ 3 op hub-điều-phối.
-    public static readonly string[] OpOrder = ["scrape", "import", "update", "rewrite"];
-    public static readonly string[] SummaryOps = ["scrape", "import", "update"];
+    public static readonly string[] OpOrder =
+        [AssignmentOps.Scrape, AssignmentOps.Import, AssignmentOps.Update, AssignmentOps.Rewrite];
+    public static readonly string[] SummaryOps =
+        [AssignmentOps.Scrape, AssignmentOps.Import, AssignmentOps.Update];
 
     public static List<FleetShopRow> BuildRows(List<BigSellerAccount> accounts, FleetSnapshot snap)
     {
@@ -73,7 +75,7 @@ public static class FleetRowsBuilder
                 };
                 shops[key] = row;
             }
-            var (stText, stCss) = LedgerStatus(l.Status);
+            var (stText, stCss) = LedgerCell(l.Status);
             var last = l.LastRunAt ?? l.UpdatedAt;
             row.Ops[l.Op] = new FleetOpStat
             {
@@ -135,10 +137,10 @@ public static class FleetRowsBuilder
             var k = FleetStateService.OpCell(snap, r.AccountId, r.ShopId, op).Kind;
             if (k == 1) running++; else if (k == 2) queued++; else if (k == 3) failed++;
         }
-        var tScrape = rows.Sum(r => r.Ops.GetValueOrDefault("scrape")?.RowCount ?? 0);
-        var tImport = rows.Sum(r => r.Ops.GetValueOrDefault("import")?.RowCount ?? 0);
-        var tUpdate = rows.Sum(r => r.Ops.GetValueOrDefault("update")?.RowCount ?? 0);
-        var tRewrite = rows.Sum(r => r.Ops.GetValueOrDefault("rewrite")?.RowCount ?? 0);
+        var tScrape = rows.Sum(r => r.Ops.GetValueOrDefault(AssignmentOps.Scrape)?.RowCount ?? 0);
+        var tImport = rows.Sum(r => r.Ops.GetValueOrDefault(AssignmentOps.Import)?.RowCount ?? 0);
+        var tUpdate = rows.Sum(r => r.Ops.GetValueOrDefault(AssignmentOps.Update)?.RowCount ?? 0);
+        var tRewrite = rows.Sum(r => r.Ops.GetValueOrDefault(AssignmentOps.Rewrite)?.RowCount ?? 0);
         var text = $"{running} đang chạy · {queued} chờ · {failed} dừng/lỗi · {snap.Machines.Count} máy · "
             + $"{tScrape:N0} scrape · {tImport:N0} import · {tUpdate:N0} update · {tRewrite:N0} tên SP · cập nhật {DateTimeOffset.Now:HH:mm:ss}";
         // KPI phải KHỚP lưới → lấy từ cùng nguồn OpCell (không đếm Assignments.Status, field đó không mang "running").
@@ -166,11 +168,13 @@ public static class FleetRowsBuilder
         return string.IsNullOrWhiteSpace(l.LastHostname) ? "" : l.LastHostname;
     }
 
-    private static (string text, string css) LedgerStatus(string s) => s switch
+    /// <summary>Nhãn + lớp CSS cho một trạng thái sổ hoàn thành (tên KHÔNG được trùng lớp hằng
+    /// <see cref="LedgerStatus"/> — trùng thì <c>LedgerStatus.Completed</c> trong file này không phân giải được).</summary>
+    private static (string text, string css) LedgerCell(string s) => s switch
     {
-        "completed" => ("✓ xong", "done"),
-        "stopped" => ("■ dừng dở", "warn"),
-        "running" => ("⏳ đang chạy", "run"),
+        LedgerStatus.Completed => ("✓ xong", "done"),
+        LedgerStatus.Stopped => ("■ dừng dở", "warn"),
+        LedgerStatus.Running => ("⏳ đang chạy", "run"),
         _ => ("· chưa xong", "idle"),
     };
 

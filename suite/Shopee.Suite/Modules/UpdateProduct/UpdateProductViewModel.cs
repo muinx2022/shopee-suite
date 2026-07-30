@@ -140,7 +140,7 @@ public sealed partial class UpdateProductViewModel : ModuleViewModelBase
 
     /// <summary>Tiền-kiểm điều kiện chạy import/update/rewrite cho 1 đích — KHÔNG mở dialog. Cho AssignmentWorker.</summary>
     public bool CanDispatchUpdate(UpdateRunTargetViewModel t, string op, out string problem) =>
-        ValidateUpdateTarget(t, requiresBigSellerLogin: op != "rewrite", out problem);
+        ValidateUpdateTarget(t, requiresBigSellerLogin: op != AssignmentOps.Rewrite, out problem);
 
     private sealed class WsJob
     {
@@ -194,7 +194,7 @@ public sealed partial class UpdateProductViewModel : ModuleViewModelBase
         var coordKey = new CoordKey(a.Id, s.Id, s.ShopeeDataSheet, coordOp);
         // RESUME per-SP (chỉ Import/Update — rewrite không có tiến độ store): đánh dấu running lúc chạy, completed/
         // stopped lúc kết thúc để UI biết lượt nào còn dở. null = op không theo dõi (rewrite).
-        var opProg = kind == UpdateKind.Import ? "import" : kind == UpdateKind.Update ? "update" : null;
+        var opProg = kind == UpdateKind.Import ? AssignmentOps.Import : kind == UpdateKind.Update ? AssignmentOps.Update : null;
         ILeaseHandle? lease = null;
         try
         {
@@ -217,7 +217,7 @@ public sealed partial class UpdateProductViewModel : ModuleViewModelBase
             if (kind == UpdateKind.Update && (string.IsNullOrWhiteSpace(img) || !File.Exists(img)))
             {
                 LogA($"{prefix} ⚠ Chưa có ảnh Update — BigSeller cần ảnh để cập nhật SP. Upload ảnh chung trên Hub (trang Files) hoặc đặt ảnh local.");
-                Coordination.Hub.PublishCompletion(coordKey, "stopped", 0);
+                Coordination.Hub.PublishCompletion(coordKey, LedgerStatus.Stopped, 0);
                 return;
             }
             var ctx = BuildContext(t, ai, startRow, endRow, importFromClaimedTab, kind == UpdateKind.Update ? img : null, processes, reloadSeconds);
@@ -236,18 +236,18 @@ public sealed partial class UpdateProductViewModel : ModuleViewModelBase
             if (job.Cts.Token.IsCancellationRequested)
             {
                 LogA($"{prefix} ■ đã dừng (hủy giữa chừng).");
-                Coordination.Hub.PublishCompletion(coordKey, "stopped", 0);
+                Coordination.Hub.PublishCompletion(coordKey, LedgerStatus.Stopped, 0);
                 if (opProg != null) OpProgressStore.Shared.FinishRun(a.Id, s.ShopeeDataSheet, opProg, completed: false);
             }
             else
             {
                 LogA($"{prefix} ✔ xong {name}.");
-                Coordination.Hub.PublishCompletion(coordKey, "completed", 0);
+                Coordination.Hub.PublishCompletion(coordKey, LedgerStatus.Completed, 0);
                 if (opProg != null) OpProgressStore.Shared.FinishRun(a.Id, s.ShopeeDataSheet, opProg, completed: true);
             }
         }
-        catch (OperationCanceledException) { LogA($"{prefix} ■ đã dừng."); Coordination.Hub.PublishCompletion(coordKey, "stopped", 0); if (opProg != null) OpProgressStore.Shared.FinishRun(a.Id, s.ShopeeDataSheet, opProg, completed: false); }
-        catch (Exception ex) { LogA($"{prefix} ✖ lỗi: {ex.Message}"); Coordination.Hub.PublishCompletion(coordKey, "stopped", 0); if (opProg != null) OpProgressStore.Shared.FinishRun(a.Id, s.ShopeeDataSheet, opProg, completed: false); }
+        catch (OperationCanceledException) { LogA($"{prefix} ■ đã dừng."); Coordination.Hub.PublishCompletion(coordKey, LedgerStatus.Stopped, 0); if (opProg != null) OpProgressStore.Shared.FinishRun(a.Id, s.ShopeeDataSheet, opProg, completed: false); }
+        catch (Exception ex) { LogA($"{prefix} ✖ lỗi: {ex.Message}"); Coordination.Hub.PublishCompletion(coordKey, LedgerStatus.Stopped, 0); if (opProg != null) OpProgressStore.Shared.FinishRun(a.Id, s.ShopeeDataSheet, opProg, completed: false); }
         finally
         {
             if (lease is not null) { try { await lease.DisposeAsync().ConfigureAwait(false); } catch { } }
@@ -269,7 +269,8 @@ public sealed partial class UpdateProductViewModel : ModuleViewModelBase
         foreach (var j in _wsJobs.SnapshotSelect(j => j)) CancelJob(j);
     }
 
-    /// <summary>Xoá tiến độ RESUME per-SP của 1 shop cho 1 op ("import"|"update") — "Chạy lại từ đầu": Clear store
+    /// <summary>Xoá tiến độ RESUME per-SP của 1 shop cho 1 op (<see cref="AssignmentOps.Import"/>|<see
+    /// cref="AssignmentOps.Update"/>) — "Chạy lại từ đầu": Clear store
     /// local + (acc hub-mode) gọi Hub xoá mốc store_imported_at/store_updated_at. CHƯA gắn UI (hạng mục khác làm nút),
     /// chỉ expose method + log. Lỗi Hub KHÔNG chặn — store local đã xoá là đủ để lượt sau làm lại từ đầu.</summary>
     public async Task ResetOpProgressAsync(UpdateRunTargetViewModel target, string op)

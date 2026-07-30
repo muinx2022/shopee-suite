@@ -15,7 +15,7 @@ public sealed partial class HubDatabase
             var existing = ReadLeaseLocked(r.Key);
             if (existing is not null
                 && !string.Equals(existing.MachineId, r.MachineId, StringComparison.Ordinal)
-                && existing.Status is "running" or "finishing"
+                && existing.Status is LeaseStatus.Running or LeaseStatus.Finishing
                 && (now - existing.HeartbeatAt) < StaleLease
                 && !r.Force)
             {
@@ -35,12 +35,12 @@ public sealed partial class HubDatabase
             }
 
             using var c = _conn.CreateCommand();
-            c.CommandText = @"
+            c.CommandText = $@"
 INSERT INTO leases(key,bigseller_id,shop_id,sheet,op,machine_id,hostname,acquired_at,heartbeat_at,status)
-VALUES($k,$b,$s,$sh,$o,$m,$h,$a,$hb,'running')
+VALUES($k,$b,$s,$sh,$o,$m,$h,$a,$hb,'{LeaseStatus.Running}')
 ON CONFLICT(key) DO UPDATE SET
   bigseller_id=$b, shop_id=$s, sheet=$sh, op=$o, machine_id=$m, hostname=$h,
-  acquired_at=$a, heartbeat_at=$hb, status='running';";
+  acquired_at=$a, heartbeat_at=$hb, status='{LeaseStatus.Running}';";
             c.Parameters.AddWithValue("$k", r.Key);
             c.Parameters.AddWithValue("$b", r.BigsellerId);
             c.Parameters.AddWithValue("$s", r.ShopId);

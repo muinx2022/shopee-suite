@@ -28,4 +28,34 @@ Op giao việc (`scrape`, `update`, `search`, `orders`, `rewrite`, `import`…) 
 
 ## Báo cáo thực thi (Opus điền sau khi xong)
 
-(chưa)
+### Nguồn hằng (mới)
+
+`suite/Shopee.Core/Coordination/AssignmentConsts.cs` — 4 lớp, giá trị chuỗi GIỮ NGUYÊN từng byte:
+
+| Lớp | Hằng → giá trị | Nơi dùng |
+|---|---|---|
+| `AssignmentOps` | `Scrape="scrape"` `Import="import"` `Update="update"` `Rewrite="rewrite"` `Search="search"` `Orders="orders"` | `Assignment.Op`, đuôi khoá lease/ledger |
+| `AssignmentStatus` | `Queued="queued"` `Running="running"` `Done="done"` `Failed="failed"` `Canceled="canceled"` `Requeue="requeue"` | `Assignment.Status` (Requeue = động từ wire, không lưu DB) |
+| `LedgerStatus` | `Idle="idle"` `Running="running"` `Stopped="stopped"` `Completed="completed"` | `WorkLedgerRecord.Status` + `ScrapeProgress/OpProgress.Status` |
+| `LeaseStatus` | `Running="running"` `Finishing="finishing"` `Released="released"` | `LeaseRecord.Status` |
+
+Link vào hub: `server/Shopee.Hub.Web/Shopee.Hub.Web.csproj` (khuôn `HubDtos.cs`).
+
+### Nghiệm thu
+
+- [x] Build 2 solution `--no-incremental`: **0 warning / 0 error** cả hai.
+- [x] Test: orders **1471**, Core **61**, hub **44** — khớp baseline, 0 fail.
+- [x] Giá trị chuỗi không đổi byte nào — **kiểm chứng máy**, không phải đọc mắt: 23 câu SQL (bản TRƯỚC khi sửa) + 16 từ op/status đều tìm thấy nguyên văn trong `Shopee.Hub.Web.dll` sau build (Roslyn gấp hằng nội suy `$"…{const}…"` thành literal duy nhất) → mọi chỗ tách `"A " + $"B"` ghép lại đúng từng ký tự.
+- [x] Grep literal op/status trong so-sánh/gán C# = 0 ngoài file hằng, TRỪ `OpLanes.cs` (xem "điểm lệch").
+
+### Điểm lệch so với spec
+
+1. **`OpLanes.RequiredBraves` GIỮ literal** (đã revert + thêm comment `// = AssignmentOps.X`). Lý do: `OpLanes.cs` được Compile-link vào `orders/XuLyDonShopee.Tests/XuLyDonShopee.Tests.csproj` (khuôn "thuần BCL"); dùng `AssignmentOps` làm vỡ build project đó, mà `orders/**` thuộc vùng cấm của đợt này. Muốn triệt để: thêm 1 dòng `<Compile Include="..\..\suite\Shopee.Core\Coordination\AssignmentConsts.cs" …>` vào csproj đó ở đợt sau.
+2. **File bị loại vì agent khác đang sửa** — còn literal, để đợt chót: `suite/Shopee.Module.UpdateProduct/Engine/BigSellerProductUpdateRunner.cs:429` (`OpProgressStore.Shared.MarkDone(…, "update", …)`) — chỗ DUY NHẤT còn sót thuộc phạm vi. (`SearchTaskStore.cs`, `HotmailOtpReader.cs`, `orders/**`, `shared/**`, file MB: kiểm tra lại — KHÔNG chứa literal op/status assignment nào.)
+3. **Ngoài phạm vi — value space KHÁC, cố ý không đụng**: trạng thái login BigSeller trên hub (`idle|running|needsOtp|success|failed`), `RewriteState.Status` (việc rewrite hub), `AccountError.Status` (`captcha|failed`), `RunnerPhase` của MultiBrave, `OrdersSessionStates`/`OrdersCommandStatuses` (đã là hằng sẵn), tên lớp CSS trùng chữ (`"run"`, `"done"`, `"warn"`, `"idle"`, `"fail"`), khoá tab/KPI nằm trong URL (`DispatchViewLogic.KpiCards`, `_tab == "orders"`), bảng DB tên `orders`, thư mục module `ModuleDir("search")`, và động từ tiếng Việt trong `WorkspaceShopViewModel.ToggleTip("scrape", …)` (là chữ hiển thị "Đang scrape — bấm để dừng", không phải khoá op).
+
+### Thay đổi kèm theo (không thuần thay literal)
+
+- `FleetRowsBuilder`: đổi tên method private `LedgerStatus(...)` → `LedgerCell(...)` — BẮT BUỘC, vì trùng tên lớp hằng mới thì `LedgerStatus.Completed` trong chính file đó không phân giải được.
+- `MachineRoles.Scrape/Import/Update/Search` giờ trỏ thẳng `AssignmentOps.*` (giá trị y hệt) — chỗ nào so sánh `Assignment.Op` mà trước đây mượn `MachineRoles.Search` đã sửa về `AssignmentOps.Search`.
+- Thêm `using Shopee.Core.Coordination;` vào 5 file (2 progress store Core, `ScrapeStatsViewModel`, `ScrapeTargetViewModel`, `UpdateProductRunner`).

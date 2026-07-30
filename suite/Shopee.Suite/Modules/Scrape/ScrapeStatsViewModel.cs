@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Shopee.Core.Accounts;
+using Shopee.Core.Coordination;
 using Shopee.Core.Scrape;
 
 namespace Shopee.Suite.Modules.Scrape;
@@ -20,9 +21,9 @@ public sealed class SheetProgressRow
         Sheet = p.Sheet;
         var status = p.Status switch
         {
-            "completed" => "✔ Hoàn thành",
-            "running" => "▶ Đang chạy",
-            "stopped" => "■ Dừng giữa chừng",
+            LedgerStatus.Completed => "✔ Hoàn thành",
+            LedgerStatus.Running => "▶ Đang chạy",
+            LedgerStatus.Stopped => "■ Dừng giữa chừng",
             _ => "—",
         };
         var sheetName = string.IsNullOrWhiteSpace(p.Sheet) ? "(mặc định)" : p.Sheet;

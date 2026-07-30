@@ -35,8 +35,8 @@ public sealed partial class HubDatabase
         // (1) 'running' hết nhịp → 'failed', TRỪ KHI lease còn sống (máy vẫn chạy thật).
         using (var c = _conn.CreateCommand())
         {
-            c.CommandText = "UPDATE assignments SET status='failed', last_error=$err, updated_at=$ua "
-                + "WHERE status='running' AND updated_at < $cut AND NOT " + leaseAlive;
+            c.CommandText = $"UPDATE assignments SET status='{AssignmentStatus.Failed}', last_error=$err, updated_at=$ua "
+                + $"WHERE status='{AssignmentStatus.Running}' AND updated_at < $cut AND NOT " + leaseAlive;
             c.Parameters.AddWithValue("$err", StaleSweepError);
             c.Parameters.AddWithValue("$ua", Iso(now));
             c.Parameters.AddWithValue("$cut", cut);
@@ -48,8 +48,8 @@ public sealed partial class HubDatabase
         //     thì client nhả lease → lease chết → không hồi).
         using (var c = _conn.CreateCommand())
         {
-            c.CommandText = "UPDATE assignments SET status='running', last_error='', updated_at=$ua "
-                + "WHERE status='failed' AND last_error=$err AND " + leaseAlive;
+            c.CommandText = $"UPDATE assignments SET status='{AssignmentStatus.Running}', last_error='', updated_at=$ua "
+                + $"WHERE status='{AssignmentStatus.Failed}' AND last_error=$err AND " + leaseAlive;
             c.Parameters.AddWithValue("$ua", Iso(now));
             c.Parameters.AddWithValue("$cut", cut);
             c.Parameters.AddWithValue("$err", StaleSweepError);
@@ -94,8 +94,8 @@ public sealed partial class HubDatabase
             if (!r.Pinned)
             {
                 var selfLed = ReadLedgerLocked($"{r.BigsellerId}__{r.ShopId}__{r.Op}");
-                if (selfLed?.Status == "completed")
-                    return new Assignment { BigsellerId = r.BigsellerId, ShopId = r.ShopId, Sheet = r.Sheet, Op = r.Op, Status = "done" };
+                if (selfLed?.Status == LedgerStatus.Completed)
+                    return new Assignment { BigsellerId = r.BigsellerId, ShopId = r.ShopId, Sheet = r.Sheet, Op = r.Op, Status = AssignmentStatus.Done };
             }
 
             var dup = FindOpenAssignmentLocked(r.BigsellerId, r.ShopId, r.Op);
@@ -103,10 +103,11 @@ public sealed partial class HubDatabase
             {
                 // Việc CÒN CHỜ (queued): người dùng giao lại có thể đổi đích/ghim/khoảng dòng/PAYLOAD (vd Search
                 // đổi slice link, lane, khu vực) → cập nhật bản chờ để chạy đúng cái mới. RUNNING thì KHÔNG đụng.
-                if (dup.Status == "queued")
+                if (dup.Status == AssignmentStatus.Queued)
                 {
                     using var u = _conn.CreateCommand();
-                    u.CommandText = "UPDATE assignments SET target_machine_id=$t, pinned=$p, start_row=$sr, end_row=$er, payload=$pl, processes=$pr, frame_size=$fs, reload_seconds=$rl, updated_at=$ua WHERE id=$id AND status='queued'";
+                    u.CommandText = "UPDATE assignments SET target_machine_id=$t, pinned=$p, start_row=$sr, end_row=$er, payload=$pl, processes=$pr, frame_size=$fs, reload_seconds=$rl, updated_at=$ua "
+                        + $"WHERE id=$id AND status='{AssignmentStatus.Queued}'";
                     u.Parameters.AddWithValue("$t", (object?)r.TargetMachineId ?? DBNull.Value);
                     u.Parameters.AddWithValue("$p", r.Pinned ? 1 : 0);
                     u.Parameters.AddWithValue("$sr", r.StartRow);
@@ -133,12 +134,12 @@ public sealed partial class HubDatabase
                 TargetMachineId = r.TargetMachineId, Pinned = r.Pinned,
                 StartRow = r.StartRow, EndRow = r.EndRow, Payload = r.Payload ?? "",
                 Processes = r.Processes, FrameSize = r.FrameSize, ReloadSeconds = r.ReloadSeconds,
-                Status = "queued", CreatedAt = now, UpdatedAt = now,
+                Status = AssignmentStatus.Queued, CreatedAt = now, UpdatedAt = now,
             };
             using var c = _conn.CreateCommand();
-            c.CommandText = @"
+            c.CommandText = $@"
 INSERT INTO assignments(id,bigseller_id,shop_id,sheet,op,target_machine_id,pinned,status,claimed_by,claimed_host,last_error,created_at,updated_at,start_row,end_row,payload,processes,frame_size,reload_seconds)
-VALUES($id,$b,$s,$sh,$o,$t,$p,'queued','','','',$ca,$ua,$sr,$er,$pl,$pr,$fs,$rl);";
+VALUES($id,$b,$s,$sh,$o,$t,$p,'{AssignmentStatus.Queued}','','','',$ca,$ua,$sr,$er,$pl,$pr,$fs,$rl);";
             c.Parameters.AddWithValue("$id", a.Id);
             c.Parameters.AddWithValue("$b", a.BigsellerId);
             c.Parameters.AddWithValue("$s", a.ShopId);
@@ -163,7 +164,8 @@ VALUES($id,$b,$s,$sh,$o,$t,$p,'queued','','','',$ca,$ua,$sr,$er,$pl,$pr,$fs,$rl)
     private Assignment? FindOpenAssignmentLocked(string bsId, string shopId, string op)
     {
         using var c = _conn.CreateCommand();
-        c.CommandText = "SELECT * FROM assignments WHERE bigseller_id=$b AND shop_id=$s AND op=$o AND status IN ('queued','running') LIMIT 1";
+        c.CommandText = "SELECT * FROM assignments WHERE bigseller_id=$b AND shop_id=$s AND op=$o "
+            + $"AND status IN ('{AssignmentStatus.Queued}','{AssignmentStatus.Running}') LIMIT 1";
         c.Parameters.AddWithValue("$b", bsId);
         c.Parameters.AddWithValue("$s", shopId);
         c.Parameters.AddWithValue("$o", op);
@@ -179,7 +181,8 @@ VALUES($id,$b,$s,$sh,$o,$t,$p,'queued','','','',$ca,$ua,$sr,$er,$pl,$pr,$fs,$rl)
             var list = new List<Assignment>();
             using var c = _conn.CreateCommand();
             // Bỏ việc đã kết thúc lâu (>2h) để bảng gọn.
-            c.CommandText = "SELECT * FROM assignments WHERE status IN ('queued','running') OR updated_at > $cut ORDER BY created_at";
+            c.CommandText = $"SELECT * FROM assignments WHERE status IN ('{AssignmentStatus.Queued}','{AssignmentStatus.Running}') "
+                + "OR updated_at > $cut ORDER BY created_at";
             c.Parameters.AddWithValue("$cut", Iso(DateTimeOffset.UtcNow - TimeSpan.FromHours(2)));
             using var rd = c.ExecuteReader();
             while (rd.Read()) list.Add(ReadAssignmentRow(rd));
@@ -209,7 +212,8 @@ VALUES($id,$b,$s,$sh,$o,$t,$p,'queued','','','',$ca,$ua,$sr,$er,$pl,$pr,$fs,$rl)
         var rows = new List<Assignment>();
         using (var c = _conn.CreateCommand())
         {
-            c.CommandText = "SELECT * FROM assignments WHERE status IN ('failed','canceled') AND updated_at >= $cut ORDER BY updated_at DESC";
+            c.CommandText = $"SELECT * FROM assignments WHERE status IN ('{AssignmentStatus.Failed}','{AssignmentStatus.Canceled}') "
+                + "AND updated_at >= $cut ORDER BY updated_at DESC";
             c.Parameters.AddWithValue("$cut", cut);
             using var rd = c.ExecuteReader();
             while (rd.Read()) rows.Add(ReadAssignmentRow(rd));
@@ -224,7 +228,7 @@ VALUES($id,$b,$s,$sh,$o,$t,$p,'queued','','','',$ca,$ua,$sr,$er,$pl,$pr,$fs,$rl)
             // Nhóm còn việc queued|running → KHÔNG "gián đoạn" (đang chờ/chạy tiếp) → bỏ.
             if (FindOpenAssignmentLocked(a.BigsellerId, a.ShopId, a.Op) is not null) continue;
             // Đã xong theo ledger → khỏi mời tiếp tục (search không ghi ledger nên bỏ qua điều kiện này).
-            if (a.Op != "search" && ReadLedgerLocked(grp)?.Status == "completed") continue;
+            if (a.Op != AssignmentOps.Search && ReadLedgerLocked(grp)?.Status == LedgerStatus.Completed) continue;
             result.Add(a);
         }
         return result;
@@ -260,7 +264,7 @@ VALUES($id,$b,$s,$sh,$o,$t,$p,'queued','','','',$ca,$ua,$sr,$er,$pl,$pr,$fs,$rl)
             var owner = AccountOwnersLocked(now);
 
             using var c = _conn.CreateCommand();
-            c.CommandText = "SELECT * FROM assignments WHERE status='queued' ORDER BY created_at";
+            c.CommandText = $"SELECT * FROM assignments WHERE status='{AssignmentStatus.Queued}' ORDER BY created_at";
             var candidates = new List<Assignment>();
             using (var rd = c.ExecuteReader())
                 while (rd.Read()) candidates.Add(ReadAssignmentRow(rd));
@@ -286,14 +290,15 @@ VALUES($id,$b,$s,$sh,$o,$t,$p,'queued','','','',$ca,$ua,$sr,$er,$pl,$pr,$fs,$rl)
                 if (!PipelineReadyLocked(a)) continue;
 
                 using var u = _conn.CreateCommand();
-                u.CommandText = "UPDATE assignments SET status='running', claimed_by=$m, claimed_host=$h, updated_at=$ua WHERE id=$id AND status='queued'";
+                u.CommandText = $"UPDATE assignments SET status='{AssignmentStatus.Running}', claimed_by=$m, claimed_host=$h, updated_at=$ua "
+                    + $"WHERE id=$id AND status='{AssignmentStatus.Queued}'";
                 u.Parameters.AddWithValue("$m", machineId);
                 u.Parameters.AddWithValue("$h", host);
                 u.Parameters.AddWithValue("$ua", Iso(now));
                 u.Parameters.AddWithValue("$id", a.Id);
                 if (u.ExecuteNonQuery() == 1)
                 {
-                    a.Status = "running"; a.ClaimedByMachineId = machineId; a.ClaimedByHostname = host; a.UpdatedAt = now;
+                    a.Status = AssignmentStatus.Running; a.ClaimedByMachineId = machineId; a.ClaimedByHostname = host; a.UpdatedAt = now;
                     claimed.Add(a);
                     if (fam is not null && a.BigsellerId.Length > 0) busy.Add($"{a.BigsellerId}__{fam}");   // không cấp thêm việc cho acc này trong cùng lượt
                 }
@@ -308,7 +313,7 @@ VALUES($id,$b,$s,$sh,$o,$t,$p,'queued','','','',$ca,$ua,$sr,$er,$pl,$pr,$fs,$rl)
     /// ("log in first"). null = op KHÔNG tính bận (vd "search" — không đụng cookie BigSeller).</summary>
     private static string? OpFamily(string op) => op switch
     {
-        "scrape" or "import" or "update" or "rewrite" => "bs",
+        AssignmentOps.Scrape or AssignmentOps.Import or AssignmentOps.Update or AssignmentOps.Rewrite => "bs",
         _ => null,
     };
 
@@ -326,13 +331,14 @@ VALUES($id,$b,$s,$sh,$o,$t,$p,'queued','','','',$ca,$ua,$sr,$er,$pl,$pr,$fs,$rl)
             {
                 var hb = DateTimeOffset.TryParse(S(rd, 2), out var d) ? d : DateTimeOffset.MinValue;
                 var fam = OpFamily(S(rd, 1));
-                if ((now - hb) < StaleLease && S(rd, 3) is "running" or "finishing" && fam is not null)
+                if ((now - hb) < StaleLease && S(rd, 3) is LeaseStatus.Running or LeaseStatus.Finishing && fam is not null)
                     set.Add($"{S(rd, 0)}__{fam}");
             }
         }
         using (var c = _conn.CreateCommand())
         {
-            c.CommandText = "SELECT bigseller_id,op FROM assignments WHERE status='running' AND op IN ('scrape','import','update','rewrite')";
+            c.CommandText = $"SELECT bigseller_id,op FROM assignments WHERE status='{AssignmentStatus.Running}' "
+                + $"AND op IN ('{AssignmentOps.Scrape}','{AssignmentOps.Import}','{AssignmentOps.Update}','{AssignmentOps.Rewrite}')";
             using var rd = c.ExecuteReader();
             while (rd.Read())
             {
@@ -361,12 +367,12 @@ VALUES($id,$b,$s,$sh,$o,$t,$p,'queued','','','',$ca,$ua,$sr,$er,$pl,$pr,$fs,$rl)
             while (rd.Read())
             {
                 var hb = DateTimeOffset.TryParse(S(rd, 2), out var d) ? d : DateTimeOffset.MinValue;
-                if ((now - hb) < StaleLease && S(rd, 3) is "running" or "finishing") Put(S(rd, 0), S(rd, 1));
+                if ((now - hb) < StaleLease && S(rd, 3) is LeaseStatus.Running or LeaseStatus.Finishing) Put(S(rd, 0), S(rd, 1));
             }
         }
         using (var c = _conn.CreateCommand())
         {
-            c.CommandText = "SELECT bigseller_id,claimed_by FROM assignments WHERE status='running'";
+            c.CommandText = $"SELECT bigseller_id,claimed_by FROM assignments WHERE status='{AssignmentStatus.Running}'";
             using var rd = c.ExecuteReader();
             while (rd.Read()) Put(S(rd, 0), S(rd, 1));
         }
@@ -384,12 +390,17 @@ VALUES($id,$b,$s,$sh,$o,$t,$p,'queued','','','',$ca,$ua,$sr,$er,$pl,$pr,$fs,$rl)
         if (a.Pinned) return true;
 
         var self = ReadLedgerLocked($"{a.BigsellerId}__{a.ShopId}__{a.Op}");
-        if (self?.Status == "completed") return false;
-        string? need = a.Op switch { "import" => "scrape", "update" => "import", _ => null };
+        if (self?.Status == LedgerStatus.Completed) return false;
+        string? need = a.Op switch
+        {
+            AssignmentOps.Import => AssignmentOps.Scrape,
+            AssignmentOps.Update => AssignmentOps.Import,
+            _ => null,
+        };
         if (need is null) return true;
         var key = $"{a.BigsellerId}__{a.ShopId}__{need}";
         var led = ReadLedgerLocked(key);
-        return led is not null && led.Status == "completed";
+        return led is not null && led.Status == LedgerStatus.Completed;
     }
 
     public void UpdateAssignmentStatus(string id, string machineId, string status, string? error)
@@ -397,12 +408,13 @@ VALUES($id,$b,$s,$sh,$o,$t,$p,'queued','','','',$ca,$ua,$sr,$er,$pl,$pr,$fs,$rl)
         lock (_gate)
         {
             using var c = _conn.CreateCommand();
-            if (status == "requeue")
+            if (status == AssignmentStatus.Requeue)
             {
                 // Máy nhận đã claim (running) nhưng CHƯA chạy được vì lỗi TẠM THỜI (client mới chưa kịp đồng bộ
                 // tài khoản/workbook…) → trả việc về 'queued' + bỏ claim để claim lại nhịp sau. Giữ '• đã xếp'
                 // thay vì lặng lẽ 'failed' → về 'chờ'. Chỉ tác động khi CHÍNH máy đó còn giữ (running).
-                c.CommandText = "UPDATE assignments SET status='queued', claimed_by='', claimed_host='', last_error=$e, updated_at=$ua WHERE id=$id AND claimed_by=$m AND status='running'";
+                c.CommandText = $"UPDATE assignments SET status='{AssignmentStatus.Queued}', claimed_by='', claimed_host='', last_error=$e, updated_at=$ua "
+                    + $"WHERE id=$id AND claimed_by=$m AND status='{AssignmentStatus.Running}'";
                 c.Parameters.AddWithValue("$e", error ?? "");
                 c.Parameters.AddWithValue("$ua", Iso(DateTimeOffset.UtcNow));
                 c.Parameters.AddWithValue("$id", id);
@@ -412,7 +424,8 @@ VALUES($id,$b,$s,$sh,$o,$t,$p,'queued','','','',$ca,$ua,$sr,$er,$pl,$pr,$fs,$rl)
             }
             // Guard: chỉ đổi khi đang 'running' (hoặc set lại CHÍNH trạng thái đó) → KHÔNG cho nhịp 'running'
             // hồi sinh việc đã done/failed/canceled (giữ Cancel có hiệu lực + không hiện job ma).
-            c.CommandText = "UPDATE assignments SET status=$st, last_error=$e, updated_at=$ua WHERE id=$id AND claimed_by=$m AND (status='running' OR status=$st)";
+            c.CommandText = "UPDATE assignments SET status=$st, last_error=$e, updated_at=$ua "
+                + $"WHERE id=$id AND claimed_by=$m AND (status='{AssignmentStatus.Running}' OR status=$st)";
             c.Parameters.AddWithValue("$st", status);
             c.Parameters.AddWithValue("$e", error ?? "");
             c.Parameters.AddWithValue("$ua", Iso(DateTimeOffset.UtcNow));
@@ -427,7 +440,8 @@ VALUES($id,$b,$s,$sh,$o,$t,$p,'queued','','','',$ca,$ua,$sr,$er,$pl,$pr,$fs,$rl)
         lock (_gate)
         {
             using var c = _conn.CreateCommand();
-            c.CommandText = "UPDATE assignments SET status='canceled', updated_at=$ua WHERE id=$id AND status IN ('queued','running')";
+            c.CommandText = $"UPDATE assignments SET status='{AssignmentStatus.Canceled}', updated_at=$ua "
+                + $"WHERE id=$id AND status IN ('{AssignmentStatus.Queued}','{AssignmentStatus.Running}')";
             c.Parameters.AddWithValue("$ua", Iso(DateTimeOffset.UtcNow));
             c.Parameters.AddWithValue("$id", id);
             c.ExecuteNonQuery();
@@ -451,14 +465,14 @@ VALUES($id,$b,$s,$sh,$o,$t,$p,'queued','','','',$ca,$ua,$sr,$er,$pl,$pr,$fs,$rl)
                 a = rd.Read() ? ReadAssignmentRow(rd) : null;
             }
             if (a is null) return "không tìm thấy việc để tiếp tục";
-            if (a.Status is not ("failed" or "canceled")) return "chỉ tiếp tục được việc đã dừng/hủy";
+            if (a.Status is not (AssignmentStatus.Failed or AssignmentStatus.Canceled)) return "chỉ tiếp tục được việc đã dừng/hủy";
             if (FindOpenAssignmentLocked(a.BigsellerId, a.ShopId, a.Op) is not null)
                 return "đã có việc khác đang mở cho op này";
 
             // Chỉ đụng status + bỏ claim + xoá cờ lỗi; KHÔNG chạm các cột tham số → lượt chạy lại y lệnh cũ.
             // dismissed=0: bản từng bị bỏ mà operator chủ động Tiếp tục qua API thì trở lại vòng đời bình thường.
             using var u = _conn.CreateCommand();
-            u.CommandText = "UPDATE assignments SET status='queued', dismissed=0, claimed_by='', claimed_host='', last_error='', updated_at=$ua WHERE id=$id";
+            u.CommandText = $"UPDATE assignments SET status='{AssignmentStatus.Queued}', dismissed=0, claimed_by='', claimed_host='', last_error='', updated_at=$ua WHERE id=$id";
             u.Parameters.AddWithValue("$ua", Iso(DateTimeOffset.UtcNow));
             u.Parameters.AddWithValue("$id", id);
             u.ExecuteNonQuery();
@@ -490,7 +504,8 @@ VALUES($id,$b,$s,$sh,$o,$t,$p,'queued','','','',$ca,$ua,$sr,$er,$pl,$pr,$fs,$rl)
             int n;
             using (var c = _conn.CreateCommand())
             {
-                c.CommandText = "UPDATE assignments SET status='queued', claimed_by='', claimed_host='', last_error='', updated_at=$ua WHERE claimed_by=$m AND status='running'";
+                c.CommandText = $"UPDATE assignments SET status='{AssignmentStatus.Queued}', claimed_by='', claimed_host='', last_error='', updated_at=$ua "
+                    + $"WHERE claimed_by=$m AND status='{AssignmentStatus.Running}'";
                 c.Parameters.AddWithValue("$ua", now);
                 c.Parameters.AddWithValue("$m", machineId);
                 n = c.ExecuteNonQuery();
@@ -503,7 +518,7 @@ VALUES($id,$b,$s,$sh,$o,$t,$p,'queued','','','',$ca,$ua,$sr,$er,$pl,$pr,$fs,$rl)
             using (var c = _conn.CreateCommand())
             {
                 // dismissed=0: bản operator đã Reset máy thì KHÔNG hồi (họ chủ động xoá, không phải máy chết oan).
-                c.CommandText = "SELECT * FROM assignments WHERE claimed_by=$m AND status='failed' AND last_error=$err AND dismissed=0";
+                c.CommandText = $"SELECT * FROM assignments WHERE claimed_by=$m AND status='{AssignmentStatus.Failed}' AND last_error=$err AND dismissed=0";
                 c.Parameters.AddWithValue("$m", machineId);
                 c.Parameters.AddWithValue("$err", StaleSweepError);
                 using var rd = c.ExecuteReader();
@@ -512,9 +527,10 @@ VALUES($id,$b,$s,$sh,$o,$t,$p,'queued','','','',$ca,$ua,$sr,$er,$pl,$pr,$fs,$rl)
             foreach (var a in revive)
             {
                 if (FindOpenAssignmentLocked(a.BigsellerId, a.ShopId, a.Op) is not null) continue;   // nhóm còn bản mở → bỏ
-                if (ReadLedgerLocked($"{a.BigsellerId}__{a.ShopId}__{a.Op}")?.Status == "completed") continue;   // đã xong ở máy khác
+                if (ReadLedgerLocked($"{a.BigsellerId}__{a.ShopId}__{a.Op}")?.Status == LedgerStatus.Completed) continue;   // đã xong ở máy khác
                 using var u = _conn.CreateCommand();
-                u.CommandText = "UPDATE assignments SET status='queued', claimed_by='', claimed_host='', last_error='', updated_at=$ua WHERE id=$id AND status='failed'";
+                u.CommandText = $"UPDATE assignments SET status='{AssignmentStatus.Queued}', claimed_by='', claimed_host='', last_error='', updated_at=$ua "
+                    + $"WHERE id=$id AND status='{AssignmentStatus.Failed}'";
                 u.Parameters.AddWithValue("$ua", now);
                 u.Parameters.AddWithValue("$id", a.Id);
                 if (u.ExecuteNonQuery() == 1) n++;
@@ -531,7 +547,7 @@ VALUES($id,$b,$s,$sh,$o,$t,$p,'queued','','','',$ca,$ua,$sr,$er,$pl,$pr,$fs,$rl)
         lock (_gate)
         {
             using var c = _conn.CreateCommand();
-            c.CommandText = "UPDATE assignments SET dismissed=1 WHERE status IN ('failed','canceled') AND dismissed=0";
+            c.CommandText = $"UPDATE assignments SET dismissed=1 WHERE status IN ('{AssignmentStatus.Failed}','{AssignmentStatus.Canceled}') AND dismissed=0";
             return c.ExecuteNonQuery();
         }
     }

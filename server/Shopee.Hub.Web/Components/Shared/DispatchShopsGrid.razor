@@ -104,7 +104,7 @@
         Ctx.Holds.TryGetValue(accountId, out var m) ? FleetViewProjection.HostName(Ctx.Snap, m) : null;
 
     private int AcctOpenCount(DispatchRowGroup g) => Ctx.Snap.Assignments
-        .Count(a => a.BigsellerId == g.AccountId && a.Status is "queued" or "running");
+        .Count(a => a.BigsellerId == g.AccountId && a.Status is AssignmentStatus.Queued or AssignmentStatus.Running);
 
     // Lần chạy gần nhất của shop (mọi op) — cột "Cập nhật".
     private string LastUpdate(DispatchShopRow r)
