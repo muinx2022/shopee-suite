@@ -1,8 +1,17 @@
+using Shopee.Toolkit.Browser;
+
 namespace XuLyDonShopee.Core.Services;
 
 /// <summary>
 /// Dựng danh sách tham số dòng lệnh để tự khởi chạy <b>Brave thật</b> (hoặc Chromium đóng gói) rồi
 /// nối vào bằng CDP. Hàm thuần (không IO/không trạng thái) nên test được độc lập.
+/// <para>
+/// WRAPPER MỎNG: từng cờ do <see cref="BraveArgs"/> (shared/Shopee.Toolkit) dựng — CÙNG builder mà phía
+/// suite dùng để phóng Brave, nên khối cờ nền cửa sổ / remote-debugging-port / load-extension không còn hai
+/// bản chép tay. Ở đây chỉ còn CHÍNH SÁCH riêng của module Đơn hàng: dùng chế độ DANH SÁCH (args đi vào
+/// <c>ProcessStartInfo.ArgumentList</c> / <c>args</c> của Playwright nên KHÔNG bọc ngoặc kép), thêm nhóm cờ
+/// chống-treo-nền + locale VN + không chặn popup, và tuyệt đối không proxy.
+/// </para>
 /// <para>
 /// Bộ cờ khớp theo <c>shopee-suite</c> (cùng cơ chế Brave + CDP) — đã chứng minh chạy tốt với Shopee.
 /// KHÔNG ép <c>navigator.webdriver=false</c> nữa: bỏ hẳn việc tắt <c>AutomationControlled</c>
@@ -28,6 +37,23 @@ namespace XuLyDonShopee.Core.Services;
 /// </summary>
 public static class BraveLaunchArgs
 {
+    // Nhóm cờ chống Brave bóp tài nguyên khi cửa sổ bị che/chạy nền (nhiều account mở song song) → tránh
+    // CDP treo/"hay lỗi". Giữ renderer + timer chạy đều dù cửa sổ không ở tiền cảnh.
+    private static readonly string[] KhongBopTaiNguyenNen =
+    {
+        "--disable-background-timer-throttling",
+        "--disable-backgrounding-occluded-windows",
+        "--disable-renderer-backgrounding",
+    };
+
+    // Tắt các tính năng gây bóp/che tài nguyên: Translate (popup dịch), CalculateNativeWinOcclusion
+    // (Brave coi cửa sổ bị che → giảm hoạt động), IntensiveWakeUpThrottling (bóp timer tab nền).
+    // KHÔNG còn AutomationControlled ở đây — không ép webdriver=false nữa (khớp shopee-suite).
+    private const string DisableFeaturesCoBan = "Translate,CalculateNativeWinOcclusion,IntensiveWakeUpThrottling";
+
+    // Chrome/Brave 137+ MẶC ĐỊNH chặn --load-extension → phải tắt feature này thì extension mới nạp được.
+    private const string ChoPhepLoadExtension = "DisableLoadExtensionCommandLineSwitch";
+
     /// <summary>
     /// Trả về danh sách tham số dòng lệnh cho Brave/Chromium:
     /// cổng gỡ lỗi CDP, thư mục hồ sơ riêng, nhóm cờ chống-treo-nền, locale VN.
@@ -41,47 +67,32 @@ public static class BraveLaunchArgs
         string userDataDir, int remoteDebuggingPort, string? extensionPath = null)
     {
         // Có extension → thêm DisableLoadExtensionCommandLineSwitch để Chrome/Brave 137+ CHO PHÉP --load-extension
-        // (từ 137 mặc định chặn cờ này; khớp cách module Search làm). Không có ext → giữ danh sách cũ.
-        var disableFeatures = "Translate,CalculateNativeWinOcclusion,IntensiveWakeUpThrottling";
-        if (!string.IsNullOrEmpty(extensionPath))
-        {
-            disableFeatures += ",DisableLoadExtensionCommandLineSwitch";
-        }
+        // (khớp cách module Search làm). Không có ext → giữ danh sách cũ.
+        var coExtension = !string.IsNullOrEmpty(extensionPath);
+        var disableFeatures = coExtension
+            ? $"{DisableFeaturesCoBan},{ChoPhepLoadExtension}"
+            : DisableFeaturesCoBan;
 
-        var args = new List<string>
-        {
-            $"--remote-debugging-port={remoteDebuggingPort}",
-            $"--user-data-dir={userDataDir}",
-            "--profile-directory=Default",
-            "--new-window",
-            "--no-first-run",
-            "--no-default-browser-check",
-            "--hide-crash-restore-bubble",
-            // Chống Brave bóp tài nguyên khi cửa sổ bị che/chạy nền (nhiều account mở song song) → tránh
-            // CDP treo/"hay lỗi". Giữ renderer + timer chạy đều dù cửa sổ không ở tiền cảnh.
-            "--disable-background-timer-throttling",
-            "--disable-backgrounding-occluded-windows",
-            "--disable-renderer-backgrounding",
-            // Tắt các tính năng gây bóp/che tài nguyên: Translate (popup dịch), CalculateNativeWinOcclusion
-            // (Brave coi cửa sổ bị che → giảm hoạt động), IntensiveWakeUpThrottling (bóp timer tab nền).
-            // KHÔNG còn AutomationControlled ở đây — không ép webdriver=false nữa (khớp shopee-suite).
-            $"--disable-features={disableFeatures}",
+        var b = BraveArgs.CreateRaw()
+            .RemoteDebuggingPort(remoteDebuggingPort)
+            .WindowBlock(userDataDir)
+            .AddRange(KhongBopTaiNguyenNen)
+            .Add($"--disable-features={disableFeatures}")
             // Locale tiếng Việt đặt bằng cờ trình duyệt (KHÔNG hook navigator.languages bằng JS —
             // hook JS tự tạo dấu hiệu lộ bot).
-            "--lang=vi-VN",
+            .Add("--lang=vi-VN")
             // KHÔNG chặn popup: nút "In phiếu giao" mở tab phiếu bằng window.open — nếu bị chặn popup thì
             // tab phiếu không mở ra (không bắt được để tải/in). Cho phép popup để tab phiếu luôn mở.
-            "--disable-popup-blocking",
-        };
+            .Add("--disable-popup-blocking");
 
         // Nạp extension (POC né anti-bot: thao tác Seller Centre bằng extension thay Playwright). Đường dẫn
         // do tầng gọi phân giải (thư mục extension đã giải nén). Không có → không nạp (giữ hành vi cũ).
-        if (!string.IsNullOrEmpty(extensionPath))
+        if (coExtension)
         {
-            args.Add($"--load-extension={extensionPath}");
+            b.LoadExtension(extensionPath!);
         }
 
-        return args;
+        return b.BuildList();
     }
 
     /// <summary>
@@ -91,28 +102,17 @@ public static class BraveLaunchArgs
     /// </summary>
     public static IReadOnlyList<string> BuildCleanPocArgs(string userDataDir, string extensionPath, string startUrl)
     {
-        // POC LUÔN nạp extension → luôn kèm DisableLoadExtensionCommandLineSwitch (Chrome/Brave 137+ mặc định
-        // chặn --load-extension; khớp cách module Search + BuildBraveArgs làm). KHÁC BuildBraveArgs: bỏ hẳn
+        // POC LUÔN nạp extension → luôn kèm DisableLoadExtensionCommandLineSwitch. KHÁC BuildBraveArgs: bỏ hẳn
         // --remote-debugging-port (không mở endpoint CDP) và bỏ nhánh proxy; thêm startUrl positional ở cuối.
-        return new List<string>
-        {
-            $"--user-data-dir={userDataDir}",
-            "--profile-directory=Default",
-            "--new-window",
-            "--no-first-run",
-            "--no-default-browser-check",
-            "--hide-crash-restore-bubble",
-            // Chống Brave bóp tài nguyên khi cửa sổ bị che/chạy nền (giữ renderer + timer chạy đều).
-            "--disable-background-timer-throttling",
-            "--disable-backgrounding-occluded-windows",
-            "--disable-renderer-backgrounding",
-            "--disable-features=Translate,CalculateNativeWinOcclusion,IntensiveWakeUpThrottling,DisableLoadExtensionCommandLineSwitch",
-            "--lang=vi-VN",
-            "--disable-popup-blocking",
-            $"--load-extension={extensionPath}",
+        return BraveArgs.WindowRaw(userDataDir)
+            .AddRange(KhongBopTaiNguyenNen)
+            .Add($"--disable-features={DisableFeaturesCoBan},{ChoPhepLoadExtension}")
+            .Add("--lang=vi-VN")
+            .Add("--disable-popup-blocking")
+            .LoadExtension(extensionPath)
             // startUrl positional cuối cùng — mở URL kiểu người dùng (KHÔNG phải CDP navigation).
-            startUrl,
-        };
+            .StartUrl(startUrl)
+            .BuildList();
     }
 
     /// <summary>

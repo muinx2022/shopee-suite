@@ -27,7 +27,8 @@ public static class PlatformServices
             Memory = new WindowsSystemMemoryInfo();
             WorkingSet = new WindowsWorkingSetTrimmer();
             ProcessFinder = new WindowsBrowserProcessFinder();
-            BrowserLocator = new WindowsBrowserLocator();
+            // Dò trình duyệt KHÔNG còn tách theo HĐH: bản dùng chung (shared/Shopee.Toolkit) tự phân nhánh bên trong.
+            BrowserLocator = new ToolkitBrowserLocator();
             WindowActivator = new WindowsWindowActivator();
             OsCrypt = new WindowsOsCrypt();
         }
@@ -37,7 +38,7 @@ public static class PlatformServices
             Memory = new LinuxSystemMemoryInfo();
             WorkingSet = new LinuxWorkingSetTrimmer();
             ProcessFinder = new LinuxBrowserProcessFinder();
-            BrowserLocator = new LinuxBrowserLocator();
+            BrowserLocator = new ToolkitBrowserLocator();
             WindowActivator = new NoopWindowActivator();
             OsCrypt = new NoopOsCrypt();
         }

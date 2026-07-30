@@ -9,3 +9,4 @@ global using ClosedXML.Excel;
 global using ShopeeStatApp.Models;
 global using ShopeeStatApp.Services;
 global using Shopee.Core.Cdp;   // CdpSession dùng chung từ Core (đã xoá bản trùng trong Search)
+global using Shopee.Toolkit.Ws; // WebSocketServer dùng chung với module Đơn hàng (đã xoá bản trùng trong Search)

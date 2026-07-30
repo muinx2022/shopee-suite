@@ -1,5 +1,26 @@
-namespace ShopeeStatApp.Services;
+using System.Net;
+using System.Net.WebSockets;
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
+namespace Shopee.Toolkit.Ws;
+
+/// <summary>
+/// Máy chủ WebSocket cục bộ (loopback) làm CẦU NỐI giữa C# và extension trình duyệt. Một
+/// <see cref="HttpListener"/> nghe <c>http://localhost:{port}/</c>, nâng cấp lên WebSocket, giữ 1 socket
+/// mới nhất, gom frame tới hết message rồi raise <see cref="MessageReceived"/> với <see cref="JsonDocument"/>.
+/// <para>
+/// DÙNG CHUNG cho module Search (suite) và module Đơn hàng (orders) — trước đây là hai bản chép tay đã bắt
+/// đầu lệch nhau (bản orders có fail-fast + tùy chọn serialize dùng chung, bản Search thì không). Bản hợp
+/// nhất này lấy bản orders làm gốc; thứ duy nhất của bản Search được giữ là cổng mặc định 9111.
+/// </para>
+/// <para>
+/// Hàm thuần về IO mạng — không phụ thuộc Playwright/Avalonia nên test/độc lập được. Lưu ý khác nhau giữa
+/// hai chỗ dùng: ở Đơn hàng KHÔNG mở <c>--remote-debugging-port</c> (không có kênh CDP cho C#), input "thật"
+/// do extension tự bắn qua <c>chrome.debugger</c>; WebSocket này CHỈ trao đổi lệnh/dữ liệu.
+/// </para>
+/// </summary>
 public sealed class WebSocketServer : IDisposable
 {
     private readonly int _port;
@@ -13,6 +34,13 @@ public sealed class WebSocketServer : IDisposable
     public event Action? Disconnected;
 
     public bool IsConnected => _socket?.State == WebSocketState.Open;
+
+    // Tùy chọn serialize DÙNG CHUNG (trước đây khởi tạo MỚI mỗi lần SendAsync — phí + rác GC theo tần suất lệnh).
+    private static readonly JsonSerializerOptions SendOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+    };
 
     public WebSocketServer(int port = 9111) => _port = port;
 
@@ -47,8 +75,7 @@ public sealed class WebSocketServer : IDisposable
 
     private async Task HandleConnectionAsync(WebSocket ws, CancellationToken ct)
     {
-        // Only the newest connection is live: close the previous one so its receive
-        // loop exits instead of lingering and racing this one.
+        // Chỉ kết nối mới nhất là "sống": đóng kết nối cũ để vòng nhận của nó thoát thay vì lơ lửng và đua với cái mới.
         var old = Interlocked.Exchange(ref _socket, ws);
         if (old is not null && old.State == WebSocketState.Open)
         {
@@ -58,8 +85,7 @@ public sealed class WebSocketServer : IDisposable
         Connected?.Invoke();
 
         var buffer = new byte[256 * 1024];
-        // Per-connection buffer: a shared field corrupts interleaved frames when an
-        // old connection is still draining while a new one arrives.
+        // Buffer theo từng kết nối: dùng chung một field sẽ hỏng frame khi kết nối cũ còn đang xả trong lúc cái mới tới.
         var msgBuffer = new List<byte>();
 
         while (ws.State == WebSocketState.Open && !ct.IsCancellationRequested)
@@ -94,16 +120,23 @@ public sealed class WebSocketServer : IDisposable
         Disconnected?.Invoke();
     }
 
+    /// <summary>
+    /// Gửi <paramref name="message"/> (serialize JSON camelCase) cho extension đang nối. FAIL-FAST:
+    /// socket CHƯA nối / đã rớt (<c>State != Open</c>) → ném <see cref="InvalidOperationException"/> NGAY thay vì
+    /// return im lặng — nhờ đó caller phân biệt "extension chưa kết nối" (fail tức thì) với "extension kẹt"
+    /// (TimeoutException khi chờ phản hồi). Trước đây return âm thầm → caller ngồi chờ TCS 30–300s rồi nhận
+    /// TimeoutException sai hướng.
+    /// </summary>
     public async Task SendAsync(object message)
     {
         var ws = _socket;
-        if (ws?.State != WebSocketState.Open) return;
-
-        var json = JsonSerializer.Serialize(message, new JsonSerializerOptions
+        if (ws?.State != WebSocketState.Open)
         {
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-        });
+            throw new InvalidOperationException(
+                "Cầu nối extension chưa kết nối (WebSocket chưa mở) — không gửi được lệnh.");
+        }
+
+        var json = JsonSerializer.Serialize(message, SendOptions);
         var bytes = Encoding.UTF8.GetBytes(json);
 
         await _sendLock.WaitAsync();

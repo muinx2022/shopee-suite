@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.Playwright;
+using Shopee.Toolkit.MsLogin;
 using XuLyDonShopee.Core.Models;
 
 namespace XuLyDonShopee.Core.Services;
@@ -546,30 +547,16 @@ public class ShopeeLoginService
             "input[type='password']",
         };
 
-        // --- Selector đăng nhập Microsoft/Outlook (đổi thường xuyên → luôn nhiều fallback, timeout ngắn bỏ qua được) ---
-        private static readonly string[] MsUserSelectors =
-            { "input[type='email']", "input[name='loginfmt']", "#i0116" };
-        private static readonly string[] MsPasswordSelectors =
-            { "input[name='passwd']", "input[type='password']", "#i0118" };
-        private static readonly string[] MsSubmitSelectors =
-            { "#idSIButton9", "input[type='submit']", "button[type='submit']" };
-        private static readonly string[] MsUsePasswordSelectors =
-            { "#idA_PWD_SwitchToPassword", "a", "[role='button']", "button", "span" };
-        // Link "Các cách khác để đăng nhập" trên form mới "Xác minh email của bạn" (Fluent UI):
-        // span[role='button'] class fui-Link trong span[data-testid='viewFooter'].
-        private static readonly string[] MsOtherWaysSelectors =
-            { "span[role='button']", "[role='button']", "a", "button" };
-        // Lựa chọn "Mật khẩu"/"Password" trên màn danh sách cách đăng nhập (sau khi bấm "Các cách khác"):
-        // clickable trước — thứ tự selector là thứ tự ưu tiên (button/role trước div/span to).
-        private static readonly string[] MsPasswordOptionSelectors =
-            { "button", "[role='button']", "[role='radio']", "[role='listitem']", "[role='link']", "div[data-testid]", "span" };
-        // KMSI ("Stay signed in?") chỉ dùng ID: UI cũ là <input value="Yes"> KHÔNG có innerText → không match theo text.
-        // KHÔNG dùng "button[type='submit']" trần: trên form mới "Xác minh email" nút submit chính là "Gửi mã" → click nhầm.
-        private static readonly string[] MsKmsiYesSelectors =
-            { "#acceptButton", "#idSIButton9" };
-        // Nút "Đăng nhập"/"Sign in" ở trang landing (khi chưa nhảy thẳng vào form nhập email).
-        private static readonly string[] MsSignInSelectors =
-            { "a[data-task='signin']", "a[href*='login.live.com']", "a[href*='login.microsoftonline']", "a[href*='login']", "a", "button", "[role='button']" };
+        // --- Selector đăng nhập Microsoft/Outlook: LẤY TỪ BỘ DÙNG CHUNG <see cref="MsLoginSelectors"/>
+        //     (shared/Shopee.Toolkit). Microsoft đổi form thì sửa ở ĐÓ — chỗ này chỉ đặt tên cục bộ cho gọn,
+        //     tuyệt đối KHÔNG chép lại chuỗi selector vào đây (bản chép tay cũ là nguồn lệch với phía Hub). ---
+        private static readonly string[] MsUserSelectors = MsLoginSelectors.User;
+        private static readonly string[] MsPasswordSelectors = MsLoginSelectors.Password;
+        private static readonly string[] MsSubmitSelectors = MsLoginSelectors.Submit;
+        private static readonly string[] MsUsePasswordSelectors = MsLoginSelectors.UsePassword;
+        private static readonly string[] MsOtherWaysSelectors = MsLoginSelectors.OtherWays;
+        private static readonly string[] MsKmsiYesSelectors = MsLoginSelectors.KmsiYes;
+        private static readonly string[] MsSignInSelectors = MsLoginSelectors.SignIn;
 
         // --- Regex đa ngôn ngữ (vi/en), KHÔNG bám text EN cứng ---
         private static readonly Regex VerifyEmailOptionRegex =
@@ -596,8 +583,9 @@ public class ShopeeLoginService
         // chỉ cần khớp các cụm xác nhận tiếng Việt an toàn.
         private static readonly Regex ConfirmLinkRegex =
             new(@"xác nhận|xac nhan|verify|confirm|đúng là tôi|dung la toi|yes,?\s*it'?s me|tại đây|tại đấy|tai day|nhấn vào đây|bấm vào đây|nhan vao day|bam vao day", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-        private static readonly Regex SignInRegex =
-            new(@"sign\s*in|đăng nhập|dang nhap", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        // Text nút "Đăng nhập"/"Sign in" — dùng CHUNG với form Microsoft (bộ selector dùng chung), và cũng khớp
+        // đúng nút "Đăng nhập" của form subaccount Shopee nên hai chỗ xài chung một regex.
+        private static readonly Regex SignInRegex = MsLoginSelectors.SignInRegex;
         // Thông báo Shopee đã XÁC NHẬN đăng nhập thành công (trên tab mở ra sau khi bấm "TẠI ĐÂY") — chờ dấu
         // hiệu này rồi mới đóng tab, kẻo đóng sớm khi Shopee CHƯA kịp ghi nhận xác nhận.
         private static readonly Regex ConfirmSuccessRegex =
@@ -1257,7 +1245,7 @@ public class ShopeeLoginService
                 }
                 await Task.Delay(rng.Next(1500, 3000), ct).ConfigureAwait(false);
 
-                if (await IsSelectorVisibleAsync(mailPage, "#usernameError").ConfigureAwait(false))
+                if (await IsSelectorVisibleAsync(mailPage, MsLoginSelectors.UsernameError).ConfigureAwait(false))
                 {
                     L("Email hộp thư không hợp lệ (Microsoft báo lỗi tài khoản).");
                     return false;
@@ -1284,7 +1272,7 @@ public class ShopeeLoginService
 
                 // "Sử dụng mật khẩu" (màn chọn cách) HOẶC tile "Nhập mật khẩu" (màn 'các cách khác') — khớp KHÔNG
                 // dấu để tránh lỗi NFC/NFD (text MS dạng tổ hợp dấu).
-                var usePwd = await FindByNormalizedTextInFramesAsync(mailPage, MsUsePasswordSelectors, new[] { "mat khau", "password", "contrasena" }, ct, 1200).ConfigureAwait(false);
+                var usePwd = await FindByNormalizedTextInFramesAsync(mailPage, MsUsePasswordSelectors, MsLoginSelectors.UsePasswordNeedles, ct, 1200).ConfigureAwait(false);
                 if (usePwd is not null)
                 {
                     L("Chọn 'Dùng mật khẩu' / 'Nhập mật khẩu'...");
@@ -1296,7 +1284,7 @@ public class ShopeeLoginService
                 // Form mới "Xác minh email của bạn" (Fluent, passwordless): "Các cách khác để đăng nhập" → (vòng sau
                 // thấy tile "Nhập mật khẩu"). Quét mọi frame + khớp KHÔNG dấu (tránh lỗi NFC/NFD). Click 1 lần rồi
                 // để vòng sau lo tile mật khẩu.
-                var otherWays = await FindByNormalizedTextInFramesAsync(mailPage, MsOtherWaysSelectors, new[] { "cach khac de dang nhap", "other ways to sign in", "otras formas de iniciar sesion" }, ct, 1200).ConfigureAwait(false);
+                var otherWays = await FindByNormalizedTextInFramesAsync(mailPage, MsOtherWaysSelectors, MsLoginSelectors.OtherWaysNeedles, ct, 1200).ConfigureAwait(false);
                 if (otherWays is not null)
                 {
                     L("Form 'Xác minh email' — bấm 'Các cách khác để đăng nhập'...");
@@ -1327,7 +1315,7 @@ public class ShopeeLoginService
                 }
                 await Task.Delay(rng.Next(2000, 4000), ct).ConfigureAwait(false);
 
-                if (await IsSelectorVisibleAsync(mailPage, "#passwordError").ConfigureAwait(false))
+                if (await IsSelectorVisibleAsync(mailPage, MsLoginSelectors.PasswordError).ConfigureAwait(false))
                 {
                     L("Sai mật khẩu hộp thư (Microsoft báo lỗi).");
                     return false;
@@ -1345,10 +1333,8 @@ public class ShopeeLoginService
             {
                 ct.ThrowIfCancellationRequested();
                 var onKmsi = await IsAnyVisibleByClientRectsAsync(
-                    mailPage, new[] { "[data-testid='kmsiVideo']", "[data-testid='kmsiImage']" }, ct).ConfigureAwait(false);
-                var kmsiSelectors = onKmsi
-                    ? new[] { "[data-testid='primaryButton']", "#acceptButton", "#idSIButton9" }
-                    : MsKmsiYesSelectors;
+                    mailPage, MsLoginSelectors.KmsiFormMarkers, ct).ConfigureAwait(false);
+                var kmsiSelectors = onKmsi ? MsLoginSelectors.KmsiYesFluent : MsKmsiYesSelectors;
                 var kmsi = await FindFirstVisibleByRectsAsync(mailPage, kmsiSelectors, 1000, ct).ConfigureAwait(false);
                 if (kmsi is not null)
                 {

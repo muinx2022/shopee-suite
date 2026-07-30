@@ -94,8 +94,8 @@ internal static class BraveProfileManager
         bool loadRunnerExtension = true,
         string? bigSellerProxyServer = null)
     {
-        // Khối 6 cờ nền cửa sổ (BraveArgsBuilder.Window) + remote-debugging-port, rồi cờ RIÊNG scrape giữ nguyên thứ tự gốc.
-        var parts = Shopee.Core.Browser.BraveArgsBuilder.Window(userDataDir)
+        // Khối 6 cờ nền cửa sổ (BraveArgs.Window) + remote-debugging-port, rồi cờ RIÊNG scrape giữ nguyên thứ tự gốc.
+        var parts = Shopee.Toolkit.Browser.BraveArgs.Window(userDataDir)
             .RemoteDebuggingPort(cdpPort)
 
             // GIỮ CỬA SỔ NỀN LUÔN HOẠT ĐỘNG. Khi chạy nhiều instance, mở/đưa cửa sổ instance khác lên

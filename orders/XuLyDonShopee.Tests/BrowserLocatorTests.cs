@@ -1,11 +1,13 @@
 using XuLyDonShopee.Core.Models;
 using XuLyDonShopee.Core.Services;
+using ToolkitLocator = Shopee.Toolkit.Browser.BrowserLocator;
 
 namespace XuLyDonShopee.Tests;
 
 /// <summary>
-/// Test cho hàm lõi thuần <see cref="BrowserLocator.FindFirstExisting"/> và
-/// <see cref="BrowserLocator.ResolveExecutableCore"/> (không phụ thuộc máy thật — tiêm predicate).
+/// Test cho hàm lõi thuần <see cref="ToolkitLocator.FindFirstExisting"/> (đã chuyển sang bộ dò dùng chung
+/// shared/Shopee.Toolkit) và <see cref="BrowserLocator.ResolveExecutableCore"/> (luật BrowserChoice còn ở
+/// module Đơn hàng) — không phụ thuộc máy thật vì tiêm predicate.
 /// Không test <see cref="BrowserLocator.FindBraveExecutable"/>/<c>FindChromeExecutable</c>/<c>FindEdgeExecutable</c>
 /// vì phụ thuộc hệ thống file cụ thể.
 /// </summary>
@@ -16,7 +18,7 @@ public class BrowserLocatorTests
     {
         var candidates = new[] { "a", "b", "c" };
 
-        var result = BrowserLocator.FindFirstExisting(candidates, p => p == "b" || p == "c");
+        var result = ToolkitLocator.FindFirstExisting(candidates, p => p == "b" || p == "c");
 
         Assert.Equal("b", result);
     }
@@ -26,7 +28,7 @@ public class BrowserLocatorTests
     {
         var candidates = new[] { "a", "b", "c" };
 
-        var result = BrowserLocator.FindFirstExisting(candidates, _ => false);
+        var result = ToolkitLocator.FindFirstExisting(candidates, _ => false);
 
         Assert.Null(result);
     }
@@ -36,7 +38,7 @@ public class BrowserLocatorTests
     {
         var candidates = new string?[] { null, "", "   ", "match" };
 
-        var result = BrowserLocator.FindFirstExisting(candidates!, p => p == "match");
+        var result = ToolkitLocator.FindFirstExisting(candidates!, p => p == "match");
 
         Assert.Equal("match", result);
     }
@@ -47,7 +49,7 @@ public class BrowserLocatorTests
         // Cả "first" lẫn "second" đều khớp predicate → phải trả phần tử đầu tiên theo thứ tự.
         var candidates = new[] { "first", "second" };
 
-        var result = BrowserLocator.FindFirstExisting(candidates, _ => true);
+        var result = ToolkitLocator.FindFirstExisting(candidates, _ => true);
 
         Assert.Equal("first", result);
     }
@@ -55,7 +57,7 @@ public class BrowserLocatorTests
     [Fact]
     public void FindFirstExisting_DanhSachRong_TraNull()
     {
-        var result = BrowserLocator.FindFirstExisting(System.Array.Empty<string>(), _ => true);
+        var result = ToolkitLocator.FindFirstExisting(System.Array.Empty<string>(), _ => true);
 
         Assert.Null(result);
     }
