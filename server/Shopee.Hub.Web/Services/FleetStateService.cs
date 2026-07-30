@@ -91,6 +91,15 @@ public sealed class FleetStateService : BackgroundService
     /// ngữ HIỂN THỊ, KHÔNG đụng khoá/sweep (việc hub-giao vẫn 'running' nội bộ, vẫn huỷ + hồi sinh được).</summary>
     private static readonly TimeSpan LeaseFresh = TimeSpan.FromSeconds(120);
 
+    /// <summary>Ngưỡng "máy CÒN NỐI" cho các chỗ ĐẾM/LỌC máy online (chấm 🟢 trên header, ô đếm máy của BigSeller,
+    /// danh sách máy nhận việc của Giao việc): mất nhịp dưới 45s = còn nối (heartbeat 30s → cho lỡ nửa nhịp).
+    /// KHẮT KHE hơn ngưỡng 180s của <see cref="Status"/>/<see cref="MachineOffline"/> — hai cái đó trả lời "máy còn
+    /// claim được việc không" nên khoan dung hơn; ở đây chỉ là con số hiện diện cho người xem.</summary>
+    public static readonly TimeSpan OnlineThreshold = TimeSpan.FromSeconds(45);
+
+    /// <summary>Máy còn nhịp trong <see cref="OnlineThreshold"/>.</summary>
+    public static bool IsOnline(MachinePresence m) => (DateTimeOffset.Now - m.LastSeen) < OnlineThreshold;
+
     // ── Hàm tính trạng thái (port FleetViewModel) ────────────────────────────────
     public static OpCellState OpCell(FleetSnapshot f, string bsId, string shopId, string op)
     {

@@ -106,7 +106,7 @@
     {
         var m = Fleet.Snapshot.Machines;
         _total = m.Count;
-        _online = m.Count(x => (DateTimeOffset.Now - x.LastSeen).TotalSeconds < 45);
+        _online = m.Count(FleetStateService.IsOnline);
     }
 
     private void UpdateTitle()

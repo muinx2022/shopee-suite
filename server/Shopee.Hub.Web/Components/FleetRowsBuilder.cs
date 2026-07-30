@@ -127,7 +127,7 @@ public static class FleetRowsBuilder
 
     public static FleetSummary Summarize(List<FleetShopRow> rows, FleetSnapshot snap)
     {
-        var machines = snap.Machines.Count(m => (DateTimeOffset.Now - m.LastSeen).TotalSeconds < 45);
+        var machines = snap.Machines.Count(FleetStateService.IsOnline);
         int running = 0, queued = 0, failed = 0;
         foreach (var r in rows)
         foreach (var op in SummaryOps)

@@ -179,7 +179,7 @@ public static class DispatchRowsBuilder
     }
 
     public static List<MachinePresence> OnlineMachines(FleetSnapshot snap) => snap.Machines
-        .Where(m => (DateTimeOffset.Now - m.LastSeen).TotalSeconds < 45)
+        .Where(FleetStateService.IsOnline)
         .OrderBy(m => m.Kind == MachineSlots.Orders)   // suất workspace (giao việc được) lên trước
         .ThenBy(m => m.Hostname, StringComparer.CurrentCultureIgnoreCase)
         .ToList();

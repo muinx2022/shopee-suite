@@ -85,7 +85,12 @@
         try
         {
             while (await timer.WaitForNextTickAsync(ct))
-                await InvokeAsync(() => { Load(); StateHasChanged(); });
+            {
+                // Lỗi DB nhất thời (hub đang ghi, file bận…) KHÔNG được giết cả vòng poll — giữ nguyên bản log
+                // đang hiện, nhịp sau thử lại. Lúc ĐANG huỷ thì để lỗi bay ra ngoài cho catch dưới đóng vòng.
+                try { await InvokeAsync(() => { Load(); StateHasChanged(); }); }
+                catch (Exception) when (!ct.IsCancellationRequested) { }
+            }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -116,8 +121,10 @@
         await _pollCts.CancelAsync();
         if (_pollTask is not null)
         {
+            // Vòng poll đã tự nuốt lỗi nhất thời; ở đây chặn nốt mọi thứ còn sót lúc đóng (huỷ / circuit đã chết)
+            // vì DisposeAsync ném ra sẽ làm hỏng cả lượt dispose của trang.
             try { await _pollTask; }
-            catch (OperationCanceledException) { }
+            catch (Exception) { }
         }
         _pollCts.Dispose();
     }
