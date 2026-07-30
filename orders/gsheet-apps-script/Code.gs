@@ -31,6 +31,15 @@
 //  Đồng thời: dòng VỪA nhận mã trả hàng được đánh dấu bằng MÀU CHỮ (MAU_CHU_TRA_HANG), một trục riêng
 //  hoàn toàn với NỀN đỏ đơn hủy — dòng vừa hủy vừa có mã trả đọc được cả hai trạng thái.
 //
+//  ─── SỬA 30/07/2026: mã trả hàng ĐỔI thì GHI ĐÈ ───────────────────────────────────────────────────
+//  App reset cờ đã-đẩy khi Shopee tạo LẠI yêu cầu với mã khác — nhưng ghiNeuTrong chỉ ghi ô TRỐNG nên ô
+//  còn mã CŨ không bao giờ nhận được mã mới, mà lượt đẩy vẫn trả ok:true ⇒ app đánh dấu "đã đẩy" và mã
+//  mới mất IM LẶNG. Nay riêng cột "Mã đơn trả hàng" của payload chỉ-mã-trả (`chiDienNeuCo === true`)
+//  dùng ghiDeNeuKhac: ghi đè khi giá trị KHÁC, bỏ qua ô có CÔNG THỨC. Cột này do máy ghi, người dùng
+//  không gõ tay. Mọi cột khác + payload đơn thường GIỮ NGUYÊN luật "chỉ điền ô trống".
+//  ⚠ TRIỂN KHAI: file này chỉ là BẢN SAO tham chiếu — phải tự dán lên script.google.com rồi Triển khai
+//  lại Web App TRƯỚC khi phát hành bản client mới, nếu không mã đổi vẫn kẹt ở bản script cũ.
+//
 //  ─── SỬA 29/07/2026: file phụ cũng theo trạng thái HỦY ────────────────────────────────────────────
 //  Bản trước ghi sang file phụ mọi đơn `ok`, không xét hủy — mà file phụ cố ý không tô màu nên đơn hủy
 //  nằm đó trông y hệt đơn còn sống. Nay hai file CÙNG một trạng thái: hủy trước khi vào file phụ →
@@ -174,7 +183,11 @@ function doPost(e) {
         ghiNeuTrong(cho.sh, cho.row, COT_MA_DON, don.maDon);   // A — tiêu đề trống nên dùng số cứng
         ghiTruong(cho.sh, map, cho.row, 'maVanDon',   don.maVanDon,   thieuCot);
         ghiTruong(cho.sh, map, cho.row, 'fileUrl',    fileUrl,        thieuCot);
-        const vuaGhiMaTra = ghiTruong(cho.sh, map, cho.row, 'donTraHang', don.donTraHang, thieuCot);
+        // Cột "Mã đơn trả hàng" do MÁY ghi (người dùng không gõ tay) → payload chỉ-mã-trả được GHI ĐÈ khi mã
+        // KHÁC: yêu cầu bị tạo lại mang mã mới, app đã reset cờ để đẩy lại, ô còn mã cũ mà chỉ-ghi-ô-trống thì
+        // mã mới không bao giờ tới nơi (mà lượt đẩy vẫn ok ⇒ hỏng IM LẶNG). Payload đơn thường giữ nguyên luật cũ.
+        const vuaGhiMaTra = ghiTruong(
+          cho.sh, map, cho.row, 'donTraHang', don.donTraHang, thieuCot, don.chiDienNeuCo === true);
         ghiTruong(cho.sh, map, cho.row, 'tenShop',    don.tenShop,    thieuCot);
         ghiTruong(cho.sh, map, cho.row, 'doanhThu',   don.doanhThu,   thieuCot);
         ghiTruong(cho.sh, map, cho.row, 'ngay',       don.ngay,       thieuCot);
@@ -258,8 +271,8 @@ function doPost(e) {
           ghiNeuTrong(cho.sh, cho.row, COT_MA_DON, don.maDon);              // A
           ghiTruong(cho.sh, map, cho.row, 'maVanDon',   don.maVanDon,   thieuCot);   // B
           ghiTruong(cho.sh, map, cho.row, 'fileUrl',    r.fileUrl,      thieuCot);   // C — DÙNG LẠI link
-          const vuaGhiMaTraPhu =
-            ghiTruong(cho.sh, map, cho.row, 'donTraHang', don.donTraHang, thieuCot); // E
+          const vuaGhiMaTraPhu = ghiTruong(                                          // E
+            cho.sh, map, cho.row, 'donTraHang', don.donTraHang, thieuCot, don.chiDienNeuCo === true);
 
           // Đơn ĐÃ có dòng ở file phụ mà file chính đánh dấu hủy → file phụ đánh dấu hủy theo (TÔ ĐỎ,
           // KHÔNG xóa dòng: xóa làm lệch mọi công thức tham chiếu theo số dòng và mất cột D người dùng
@@ -366,9 +379,11 @@ function mapCot(sheet) {
 
 // Ghi một TRƯỜNG vào cột tra theo tiêu đề. Không tìm thấy tiêu đề → KHÔNG ghi (thà để trống còn hơn ghi
 // nhầm cột) và gom tên tiêu đề vào `thieu` để báo ngược về người gọi.
-// TRẢ VỀ true khi THỰC SỰ ghi được (ô đang trống + có giá trị) — nhánh mã trả hàng dùng để biết có nên đổi
-// màu chữ dòng hay không, khỏi tô lại mỗi lượt đẩy cho mọi dòng.
-function ghiTruong(sheet, map, row, khoa, giaTri, thieu) {
+// TRẢ VỀ true khi THỰC SỰ ghi được (ô đổi giá trị) — nhánh mã trả hàng dùng để biết có nên đổi màu chữ dòng
+// hay không, khỏi tô lại mỗi lượt đẩy cho mọi dòng.
+// `choGhiDe` = true → dùng ghiDeNeuKhac (ô đã có giá trị KHÁC vẫn ghi đè). CHỈ dùng cho cột "Mã đơn trả hàng"
+// của payload chỉ-mã-trả — xem ghiDeNeuKhac.
+function ghiTruong(sheet, map, row, khoa, giaTri, thieu, choGhiDe) {
   if (giaTri === null || giaTri === undefined || giaTri === '') return false;
   const ten = COT[khoa];
   const col = ten ? map[ten] : null;
@@ -376,7 +391,9 @@ function ghiTruong(sheet, map, row, khoa, giaTri, thieu) {
     if (ten && thieu.indexOf(ten) === -1) thieu.push(ten);
     return false;
   }
-  return ghiNeuTrong(sheet, row, col, giaTri);
+  return choGhiDe === true
+    ? ghiDeNeuKhac(sheet, row, col, giaTri)
+    : ghiNeuTrong(sheet, row, col, giaTri);
 }
 
 // Tạo tab tháng MỚI theo cấu trúc tab mẫu: NHÂN BẢN tab mẫu (giữ dòng tiêu đề + định dạng +
@@ -424,6 +441,21 @@ function ghiNeuTrong(sheet, row, col, giaTri) {
     return true;
   }
   return false;
+}
+
+// Ghi ĐÈ khi giá trị KHÁC (ô trống cũng ghi) — CHỈ dùng cho cột "Mã đơn trả hàng" ở payload chỉ-mã-trả.
+// Vì sao phải có: app RESET cờ đã-đẩy khi Shopee tạo LẠI yêu cầu với mã khác, để đẩy mã mới lên. Nếu ở đây
+// vẫn là ghiNeuTrong thì ô đã có mã CŨ nên không bao giờ ghi được, mà lượt đẩy vẫn trả ok:true ⇒ app đánh dấu
+// "đã đẩy" và mã mới mất im lặng.
+// Ô có CÔNG THỨC thì KHÔNG đụng (người dùng có thể tự dựng =…) — cùng lằn ranh với ghiNeuTrong.
+// Trả true khi thực sự đổi giá trị ô.
+function ghiDeNeuKhac(sheet, row, col, giaTri) {
+  if (giaTri === null || giaTri === undefined || giaTri === '') return false;
+  const o = sheet.getRange(row, col);
+  if (o.getFormula() !== '') return false;
+  if (String(o.getValue()).trim() === String(giaTri).trim()) return false;
+  o.setValue(giaTri);
+  return true;
 }
 
 function chuanHoa(s) {

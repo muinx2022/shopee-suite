@@ -20,6 +20,12 @@ namespace XuLyDonShopee.Core.Data;
 /// + hub) — nay chỉ KHÔNG còn là đường duy nhất; caller ghi vào CẢ hai.
 /// </para>
 /// </summary>
+/// <summary>Kết quả một lượt <see cref="ReturnCodesRepository.LuuMaTraHang"/>.</summary>
+/// <param name="DaGhi">Số bản ghi THỰC SỰ thêm mới hoặc đổi mã (= <see cref="CapMoi"/>.Count).</param>
+/// <param name="CapMoi">Đúng các cặp vừa thêm/đổi — nguồn DUY NHẤT đúng để notify "có đơn trả hàng": phần lớn mã
+/// trả thuộc đơn ĐÃ bị dọn khỏi <c>orders</c> nên <c>OrdersRepository.ReturnCodeSaveResult.CapDaGhi</c> không có.</param>
+public sealed record KetQuaLuuMaTraHang(int DaGhi, IReadOnlyList<(string OrderSn, string Code)> CapMoi);
+
 public class ReturnCodesRepository
 {
     /// <summary>Số ngày GIỮ một bản ghi mã trả hàng trước khi <see cref="DonDep"/> xoá (tính từ <c>created_at</c>).
@@ -32,7 +38,8 @@ public class ReturnCodesRepository
 
     /// <summary>
     /// UPSERT các cặp <c>(mã đơn, mã yêu cầu)</c> vừa quét được. Cặp thiếu mã đơn / mã yêu cầu → bỏ qua (không ghi
-    /// đè bằng rỗng). Ghi trong MỘT transaction; trả về số bản ghi THỰC SỰ thêm mới hoặc đổi mã.
+    /// đè bằng rỗng). Ghi trong MỘT transaction; trả về số bản ghi THỰC SỰ thêm mới hoặc đổi mã KÈM chính các cặp
+    /// đó (<see cref="KetQuaLuuMaTraHang.CapMoi"/> — caller notify đúng phần mới, không báo lại cả lô quét).
     /// <list type="bullet">
     /// <item>Chưa có → thêm mới, <c>gsheet_synced_at</c> NULL (chờ đẩy).</item>
     /// <item>Đã có, mã KHÔNG đổi → KHÔNG chạm dòng ⇒ giữ nguyên cờ đã đẩy (đừng đẩy trùng).</item>
@@ -40,12 +47,12 @@ public class ReturnCodesRepository
     /// lượt kế đẩy lại — cùng mẫu <c>SetReturnRequestCodes</c> đang dùng cho <c>hub_synced_at</c>.</item>
     /// </list>
     /// </summary>
-    public int LuuMaTraHang(
+    public KetQuaLuuMaTraHang LuuMaTraHang(
         long accountId, IEnumerable<(string OrderSn, string Code)> pairs, string? shopLogin, DateTime nowUtc)
     {
         var nowStr = DbSerialization.FormatDate(nowUtc);
         var shop = string.IsNullOrWhiteSpace(shopLogin) ? null : shopLogin.Trim();
-        var ghi = 0;
+        var capMoi = new List<(string OrderSn, string Code)>();
 
         using var conn = _db.OpenConnection();
         using var tx = conn.BeginTransaction();
@@ -73,10 +80,13 @@ public class ReturnCodesRepository
             cmd.Parameters.AddWithValue("$code", code.Trim());
             cmd.Parameters.AddWithValue("$shop", (object?)shop ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$now", nowStr);
-            ghi += cmd.ExecuteNonQuery();
+            if (cmd.ExecuteNonQuery() > 0)
+            {
+                capMoi.Add((sn.Trim(), code.Trim()));
+            }
         }
         tx.Commit();
-        return ghi;
+        return new KetQuaLuuMaTraHang(capMoi.Count, capMoi);
     }
 
     /// <summary>

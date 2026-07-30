@@ -1,5 +1,3 @@
-using XuLyDonShopee.Core.Models;
-
 namespace XuLyDonShopee.Core.Services;
 
 /// <summary>
@@ -32,15 +30,15 @@ public static class BraveLaunchArgs
 {
     /// <summary>
     /// Trả về danh sách tham số dòng lệnh cho Brave/Chromium:
-    /// cổng gỡ lỗi CDP, thư mục hồ sơ riêng, nhóm cờ chống-treo-nền, locale VN, và proxy (nếu có).
+    /// cổng gỡ lỗi CDP, thư mục hồ sơ riêng, nhóm cờ chống-treo-nền, locale VN.
+    /// <para>KHÔNG còn nhánh <c>--proxy-server</c>: module Đơn hàng đã bỏ hẳn proxy runtime (mọi caller đi IP
+    /// máy). Cần lại thì thêm ở đây, đừng dựng lại cả cụm xoay proxy đã gỡ.</para>
     /// </summary>
     /// <param name="userDataDir">Thư mục hồ sơ persistent riêng cho tài khoản.</param>
     /// <param name="remoteDebuggingPort">Cổng CDP; truyền <c>0</c> để Chromium tự chọn cổng trống
     /// (đọc lại cổng thật từ file <c>DevToolsActivePort</c>).</param>
-    /// <param name="proxy">Proxy đã chọn; <c>null</c> = đi IP máy. User/pass KHÔNG nhét vào chuỗi
-    /// <c>--proxy-server</c> (Chromium không hỗ trợ) — xác thực xử lý qua CDP ở tầng trên.</param>
     public static IReadOnlyList<string> BuildBraveArgs(
-        string userDataDir, int remoteDebuggingPort, ProxyEntry? proxy, string? extensionPath = null)
+        string userDataDir, int remoteDebuggingPort, string? extensionPath = null)
     {
         // Có extension → thêm DisableLoadExtensionCommandLineSwitch để Chrome/Brave 137+ CHO PHÉP --load-extension
         // (từ 137 mặc định chặn cờ này; khớp cách module Search làm). Không có ext → giữ danh sách cũ.
@@ -81,12 +79,6 @@ public static class BraveLaunchArgs
         if (!string.IsNullOrEmpty(extensionPath))
         {
             args.Add($"--load-extension={extensionPath}");
-        }
-
-        if (proxy is not null)
-        {
-            // Proxy đặt qua --proxy-server (http:// hoặc socks5:// theo Type). KHÔNG kèm user:pass.
-            args.Add($"--proxy-server={ProxyHealthChecker.ToProxyAddress(proxy)}");
         }
 
         return args;

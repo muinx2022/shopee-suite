@@ -10,7 +10,7 @@ public class BraveCleanPocArgsTests
 {
     private static IReadOnlyList<string> Build() =>
         BraveLaunchArgs.BuildCleanPocArgs(
-            "C:/tmp/prof", "C:/ext/shopee-orders-test", "https://banhang.shopee.vn/portal/shop");
+            "C:/tmp/prof", "C:/ext/ext-mau", "https://banhang.shopee.vn/portal/shop");
 
     [Fact]
     public void KhongCo_RemoteDebuggingPort()
@@ -29,7 +29,7 @@ public class BraveCleanPocArgsTests
     [Fact]
     public void CoLoadExtension_DungDuongDan()
     {
-        Assert.Contains("--load-extension=C:/ext/shopee-orders-test", Build());
+        Assert.Contains("--load-extension=C:/ext/ext-mau", Build());
     }
 
     [Fact]

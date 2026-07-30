@@ -5,6 +5,31 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Hiệu năng. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## Chưa phát hành
+
+- **Không còn nuốt yêu cầu trả hàng khi app chọn nhầm tab:** trước đây nếu app không bấm được tab *"Đơn Trả hàng
+  Hoàn tiền"*, nó vẫn lấy con số của tab *"Tất cả"* (gộp cả Đơn Hủy / Giao không thành công) làm **mốc** của shop —
+  vòng sau đọc đúng tab thì số nhỏ hơn mốc rác nên bị coi là *"đã xử xong"*, và mọi yêu cầu phát sinh giữa chừng
+  **mất vĩnh viễn**, không lên Google Sheet. Nay app **xác nhận tab đang chọn** sau cú bấm; không chắc thì **bỏ lượt,
+  giữ nguyên mốc** (chậm một vòng, không mất mã).
+- **Hết bấm "Chuẩn bị hàng" chồng lên hộp thoại đang mở:** máy chậm dựng hộp thoại ~5 giây thì cú bấm lại rơi vào
+  giữa màn hình lúc hộp thoại vừa hiện — trúng nền mờ (đóng hộp thoại, lặp mở/đóng rồi báo *"không mở được"* oan) hoặc
+  trúng nút bên trong (đơn bị giao với **phương thức mặc định sai**). Nay app kiểm tra hộp thoại **trước mỗi lần bấm
+  lại** và chờ đủ 10 giây mỗi lượt như bản cũ.
+- **Thông báo "có đơn trả hàng" không còn im lặng:** phần lớn mã trả hàng thuộc đơn app **đã dọn**, mà tin báo lại
+  chỉ dựa trên đơn còn trong máy nên gần như không bao giờ bắn. Nay tin dựa trên **kho mã trả hàng**: máy chạy độc
+  lập gửi webhook local, máy đã nối Hub thì báo lên Hub.
+- **Badge "⏳ Chờ đẩy" đếm cả mã trả hàng còn tồn** (trước đây hiện 0 dù hàng chục mã đang kẹt).
+- **Cảnh báo "không đặt được địa chỉ" không còn câm 60 phút vô cớ:** khi Hub không nhận tin mà máy cũng chưa cấu
+  hình webhook lỗi app, mốc chống spam vẫn bị giữ dù **chưa ai được báo**. Nay mốc chỉ giữ khi ít nhất một kênh đã
+  nhận tin.
+
+> ⚠ **Cần làm một lần trên Google Sheet, TRƯỚC khi cài bản client này:** Apps Script cũ chỉ điền vào **ô trống**, nên
+> khi Shopee tạo lại yêu cầu trả hàng với **mã khác**, ô *"Mã đơn trả hàng"* giữ mãi mã cũ trong khi app vẫn coi là
+> đẩy thành công — hỏng **im lặng**. Dán bản mới ở `orders/gsheet-apps-script/Code.gs` vào Apps Script rồi
+> **Triển khai → Phiên bản mới** (chỉ Lưu là chưa đủ): bản mới cho **ghi đè** đúng cột *"Mã đơn trả hàng"* khi mã
+> khác, các cột còn lại giữ nguyên luật cũ.
+
 ## v1.6.16 — 2026-07-30
 
 - **Thống kê đơn dùng chung từ Hub** (mọi máy nhìn cùng một số), kèm 4 lỗi đã sửa trước khi phát hành:

@@ -10,20 +10,24 @@ using XuLyDonShopee.Core.Services;
 namespace XuLyDonShopee.App.Services;
 
 /// <summary>
-/// SỐ HÀNG CÒN TỒN trong vòng chờ đẩy, tách theo 4 loại đích: <paramref name="Orders"/> đơn lên Hub ·
+/// SỐ HÀNG CÒN TỒN trong vòng chờ đẩy, tách theo 5 loại đích: <paramref name="Orders"/> đơn lên Hub ·
 /// <paramref name="Slips"/> file phiếu lên Hub · <paramref name="SheetRows"/> dòng Google Sheet ·
-/// <paramref name="SoldCounts"/> lượt +1 "Đã bán". <see cref="HubOutboxWorker"/> tính lại sau mỗi lượt; thanh
-/// trạng thái hiện <see cref="Tong"/> khi &gt; 0. Loại nào KHÔNG có đích (hook hub chưa rót / URL sheet trống)
-/// được đếm 0 để badge không kẹt số vĩnh viễn.
+/// <paramref name="SoldCounts"/> lượt +1 "Đã bán" · <paramref name="ReturnCodes"/> mã trả hàng chờ lên Google
+/// Sheet (kho <c>return_codes</c> — sống ĐỘC LẬP với bảng <c>orders</c> nên phải đếm riêng, tài khoản đã dọn sạch
+/// đơn vẫn có thể còn cả đống mã). <see cref="HubOutboxWorker"/> tính lại sau mỗi lượt; thanh trạng thái hiện
+/// <see cref="Tong"/> khi &gt; 0. Loại nào KHÔNG có đích (hook hub chưa rót / URL sheet trống) được đếm 0 để badge
+/// không kẹt số vĩnh viễn.
 /// </summary>
-public readonly record struct OutboxPending(int Orders = 0, int Slips = 0, int SheetRows = 0, int SoldCounts = 0)
+public readonly record struct OutboxPending(
+    int Orders = 0, int Slips = 0, int SheetRows = 0, int SoldCounts = 0, int ReturnCodes = 0)
 {
-    /// <summary>Tổng hàng còn chờ đẩy (cả 4 loại).</summary>
-    public int Tong => Orders + Slips + SheetRows + SoldCounts;
+    /// <summary>Tổng hàng còn chờ đẩy (cả 5 loại).</summary>
+    public int Tong => Orders + Slips + SheetRows + SoldCounts + ReturnCodes;
 
     /// <summary>Cộng dồn số tồn của một tài khoản nữa vào tổng của cả lượt.</summary>
     public OutboxPending Cong(OutboxPending khac)
-        => new(Orders + khac.Orders, Slips + khac.Slips, SheetRows + khac.SheetRows, SoldCounts + khac.SoldCounts);
+        => new(Orders + khac.Orders, Slips + khac.Slips, SheetRows + khac.SheetRows,
+            SoldCounts + khac.SoldCounts, ReturnCodes + khac.ReturnCodes);
 }
 
 /// <summary>
@@ -75,7 +79,6 @@ public class AppServices
 {
     public Database Database { get; }
     public AccountRepository Accounts { get; }
-    public ProxyRepository Proxies { get; }
     public SettingsRepository Settings { get; }
 
     /// <summary>Kho đơn hàng đã sync (bảng <c>orders</c>) — phiên ghi qua đây khi Sync Đơn hàng.</summary>
@@ -284,7 +287,8 @@ public class AppServices
     {
         Database = new Database(dbPath);
         Accounts = new AccountRepository(Database);
-        Proxies = new ProxyRepository(Database);
+        // KHÔNG còn ProxyRepository: proxy runtime đã gỡ khỏi module (bảng `proxies` trong app.db vẫn giữ
+        // nguyên, chỉ không còn code nào đọc).
         Settings = new SettingsRepository(Database);
         Orders = new OrdersRepository(Database);
         Results = new ResultsRepository(Database);
@@ -300,7 +304,7 @@ public class AppServices
         var logDir = Path.Combine(Path.GetDirectoryName(Database.Path) ?? ".", "logs");
         Directory.CreateDirectory(logDir);
         Log = new ActivityLog(logDir);
-        // Tạo sau các repository vì factory phiên đọc Accounts/Proxies/Settings khi chạy.
+        // Tạo sau các repository vì factory phiên đọc Accounts/Settings khi chạy.
         Sessions = new AccountSessionManager(this);
     }
 }

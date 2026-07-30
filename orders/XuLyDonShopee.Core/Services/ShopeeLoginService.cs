@@ -235,14 +235,14 @@ public class ShopeeLoginService
     /// <summary>
     /// Mở một cửa sổ trình duyệt (Brave nếu có, không thì Chromium đóng gói) tới trang bán hàng bằng
     /// <b>hồ sơ persistent</b> đặt tại <paramref name="userDataDir"/> (mỗi tài khoản một thư mục riêng)
-    /// — nhờ đó lần sau mở lại vẫn còn đăng nhập — qua proxy đã chọn, rồi trả về phiên đang mở.
-    /// Cơ chế: tự khởi chạy tiến trình Brave với cờ stealth + <c>--user-data-dir</c> +
-    /// <c>--remote-debugging-port</c> + <c>--proxy-server</c>, chờ CDP sẵn sàng, nối vào qua
+    /// — nhờ đó lần sau mở lại vẫn còn đăng nhập — rồi trả về phiên đang mở. Đi thẳng IP máy (module đã bỏ
+    /// hẳn proxy runtime). Cơ chế: tự khởi chạy tiến trình Brave với cờ stealth + <c>--user-data-dir</c> +
+    /// <c>--remote-debugging-port</c>, chờ CDP sẵn sàng, nối vào qua
     /// <see cref="IBrowserType.ConnectOverCDPAsync"/>. Ném <see cref="InvalidOperationException"/>
     /// (message tiếng Việt) nếu không mở được.
     /// </summary>
     public async Task<ILoginSession> OpenAsync(
-        string userDataDir, ProxyEntry? proxy, BrowserChoice browserChoice = BrowserChoice.Auto, CancellationToken ct = default)
+        string userDataDir, BrowserChoice browserChoice = BrowserChoice.Auto, CancellationToken ct = default)
     {
         IPlaywright? playwright = null;
         Process? process = null;
@@ -272,7 +272,7 @@ public class ShopeeLoginService
             // Launch Brave/Chromium với cổng 0 (Chromium tự chọn cổng trống, ghi vào DevToolsActivePort).
             // Trình duyệt điều khiển (Playwright) chỉ dùng để đăng nhập subaccount → KHÔNG nạp extension.
             // Phóng qua BrowserProcessStarter (Suite rót Job Object → chết theo app khi force-kill).
-            var launchArgs = BraveLaunchArgs.BuildBraveArgs(userDataDir, 0, proxy, extensionPath: null);
+            var launchArgs = BraveLaunchArgs.BuildBraveArgs(userDataDir, 0, extensionPath: null);
             process = BrowserProcessStarter.StartOrFallback(exePath, launchArgs);
             process.EnableRaisingEvents = true;
 
@@ -328,7 +328,7 @@ public class ShopeeLoginService
             try { playwright?.Dispose(); } catch { /* bỏ qua */ }
 
             throw new InvalidOperationException(
-                "Không mở được trình duyệt Shopee. Kiểm tra đã cài Brave hoặc Chromium và kết nối mạng/proxy. " +
+                "Không mở được trình duyệt Shopee. Kiểm tra đã cài Brave hoặc Chromium và kết nối mạng. " +
                 "Chi tiết: " + ex.Message, ex);
         }
     }

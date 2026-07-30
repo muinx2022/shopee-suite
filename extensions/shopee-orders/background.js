@@ -6,7 +6,7 @@
 // nhập nhờ hồ sơ). KHÔNG mở --remote-debugging-port.
 //
 // Kênh lệnh/dữ liệu: WebSocket tới ws://localhost:<port> (C# chạy OrdersWebSocketServer). Cổng: hash #_od_ws=<port>
-// nếu còn, không thì DEFAULT_PORT cố định; content.js gửi 'wake'/'hello' đánh thức SW + nối cầu.
+// nếu còn, không thì DEFAULT_PORT cố định; content.js gửi 'wake' đánh thức SW + nối cầu.
 //
 // Protocol:
 //   C#  -> ext:  {action:"readShopList"} | {action:"openShopDetail", shopId} | {action:"readToShip"}
@@ -66,11 +66,11 @@ function connect() {
   };
 }
 
-// content.js gửi 'wake' (mọi trang khớp) hoặc 'hello' → đánh thức SW + nối cầu. Không còn phụ thuộc hash sống sót:
+// content.js gửi 'wake' (mọi trang khớp) → đánh thức SW + nối cầu. Không còn phụ thuộc hash sống sót:
 // mất hash thì content.js gửi DEFAULT_PORT. listTabId gán tab đầu tiên khớp; ensureListTab(BANHANG_HOSTS) tự
 // phân giải lại tab /portal/shop khi chạy lát cắt (login đã do C#/Playwright lo, extension chỉ ở Seller Centre).
 chrome.runtime.onMessage.addListener((msg, sender) => {
-  if (msg && (msg.type === "wake" || msg.type === "hello")) {
+  if (msg && msg.type === "wake") {
     if (msg.wsPort) wsPort = msg.wsPort;
     if (listTabId == null && sender.tab && sender.tab.id != null) listTabId = sender.tab.id;
     try { chrome.storage.session.set({ wsPort, listTabId }); } catch (e) {}
@@ -542,6 +542,16 @@ function pageModalHasTitle(reSrc) {
     // Tiêu đề modal CHUẨN là .eds-modal__title (KHÔNG phải .title — .title đầu tiên thường là order-sn/logo).
     const title = box.querySelector(".eds-modal__title") || box.querySelector(".title");
     if (title && re.test(_na(title.textContent))) return true;
+  }
+  return false;
+}
+
+// True nếu có BẤT KỲ modal (.eds-modal__box) nào đang hiển thị — không quan tâm tiêu đề. Dùng làm chốt chặn
+// TRƯỚC khi bấm lại một toạ độ đã đọc từ trước: modal đang mở thì cú bấm đó rơi vào mask/nút trong modal.
+function pageAnyModalVisible() {
+  for (const box of document.querySelectorAll(".eds-modal__box")) {
+    const r = box.getBoundingClientRect();
+    if (r.width > 0 && r.height > 0) return true;
   }
   return false;
 }
@@ -1032,14 +1042,6 @@ function dbgDetach(target) {
   return new Promise((resolve) => { chrome.debugger.detach(target, () => resolve()); });
 }
 
-// Attach 1 lần → chạy chuỗi thao tác → detach (đỡ nhấp nháy banner debug so với attach/detach từng cú).
-async function withDebugger(tabId, fn) {
-  const target = { tabId };
-  await dbgAttach(target);
-  try { await fn(target); }
-  finally { await sleep(500); await dbgDetach(target); }
-}
-
 // Cú click chuột trusted (giả định debugger ĐÃ attach).
 async function dbgClick(target, x, y) {
   await dbgSend(target, "Input.dispatchMouseEvent", { type: "mouseMoved", x, y, buttons: 0 });
@@ -1049,55 +1051,16 @@ async function dbgClick(target, x, y) {
   await dbgSend(target, "Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", buttons: 0, clickCount: 1 });
 }
 
-// code/vk cho ký tự ASCII (port KeyInfo của CdpInputController) — cho gõ địa chỉ ở GĐ3 (nếu cần).
-function keyInfo(ch) {
-  const c = ch.charCodeAt(0);
-  if (ch >= "0" && ch <= "9") return { code: "Digit" + ch, vk: c };
-  if (ch >= "a" && ch <= "z") return { code: "Key" + ch.toUpperCase(), vk: ch.toUpperCase().charCodeAt(0) };
-  if (ch >= "A" && ch <= "Z") return { code: "Key" + ch, vk: c };
-  if (ch === " ") return { code: "Space", vk: 32 };
-  return { code: "", vk: 0 };
-}
-
-// Gõ trusted (port TypeAsync): ASCII in-được → keyDown/keyUp từng ký tự; có unicode → insertText cả chuỗi.
-async function dbgType(target, text) {
-  if (!text) return;
-  let isAscii = true;
-  for (const ch of text) { const c = ch.charCodeAt(0); if (c < 0x20 || c > 0x7e) { isAscii = false; break; } }
-  if (!isAscii) {
-    await sleep(150);
-    await dbgSend(target, "Input.insertText", { text });
-    return;
-  }
-  for (const ch of text) {
-    const ki = keyInfo(ch);
-    await dbgSend(target, "Input.dispatchKeyEvent", { type: "keyDown", text: ch, key: ch, code: ki.code, windowsVirtualKeyCode: ki.vk });
-    await dbgSend(target, "Input.dispatchKeyEvent", { type: "keyUp", key: ch, code: ki.code, windowsVirtualKeyCode: ki.vk });
-    await sleep(50 + Math.floor(Math.random() * 70));
-  }
-}
-
-// Enter: keyDown kèm text "\r" (renderer cần keypress để submit form) + keyUp (port PressKeyAsync).
-async function dbgEnter(target) {
-  await dbgSend(target, "Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, text: "\r" });
-  await sleep(50);
-  await dbgSend(target, "Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
-}
-
-// Giữ chrome.debugger ATTACH XUYÊN SUỐT một lệnh (KHÔNG attach/detach từng cú) — vì: (1) banner "đang gỡ lỗi"
-// hết nhấp nháy; (2) mọi toạ độ (execInTab) + cú click ở CÙNG trạng thái banner → click không trượt. Gọi
-// ensureDbg(tab) đầu mỗi lệnh nhiều-click (trước khi đọc toạ độ), releaseDbg() ở cuối.
+// Giữ chrome.debugger ATTACH XUYÊN SUỐT (KHÔNG attach/detach từng cú, cũng KHÔNG detach ở cuối mỗi lệnh) — vì:
+// (1) banner "đang gỡ lỗi" hết nhấp nháy; (2) mọi toạ độ (execInTab) + cú click ở CÙNG trạng thái banner → click
+// không trượt. Gọi ensureDbg(tab) đầu mỗi lệnh nhiều-click (TRƯỚC khi đọc toạ độ); chỉ detach khi ĐỔI sang tab
+// khác (ngay trong ensureDbg) hoặc khi Chrome tự detach.
 let _dbgTab = null;
 async function ensureDbg(tabId) {
   if (_dbgTab === tabId) return;
   if (_dbgTab != null) { try { await dbgDetach({ tabId: _dbgTab }); } catch (e) {} _dbgTab = null; }
   try { await dbgAttach({ tabId }); } catch (e) { /* có thể đã attach sẵn — coi như ok */ }
   _dbgTab = tabId;
-}
-async function releaseDbg() {
-  if (_dbgTab == null) return;
-  const t = _dbgTab; _dbgTab = null;
-  try { await sleep(300); await dbgDetach({ tabId: t }); } catch (e) {}
 }
 // Debugger tự detach (điều hướng trang / user bấm "Huỷ" trên banner) → reset để cú click sau tự attach lại.
 try { chrome.debugger.onDetach.addListener((source) => { if (_dbgTab != null && source && source.tabId === _dbgTab) _dbgTab = null; }); } catch (e) {}
@@ -1671,9 +1634,20 @@ async function doPrepareNextOrder() {
   let shipAttempts = 0;
   const shipDeadline = Date.now() + 18000;
   while (!hasShip && Date.now() < shipDeadline && shipAttempts < 4) {
+    // TRƯỚC mỗi cú bấm (nhất là cú bấm LẠI): modal đúng tiêu đề đã mở → xong; còn BẤT KỲ modal nào đang hiện
+    // → CHỜ, tuyệt đối không bấm. prep.y nằm giữa viewport (pageFindPrepareOrder cuộn về center) nên cú bấm mù
+    // lúc modal đang dựng rơi trúng lớp mask (modal đóng lại → lặp mở/đóng → báo "không mở được modal" OAN)
+    // hoặc trúng nút TRONG modal (đơn bị arrange với phương thức giao MẶC ĐỊNH, sai).
+    hasShip = await execInTab(tabId, pageModalHasTitle, ["^giao don hang$"]);
+    if (hasShip) break;
+    let coModal = false;
+    try { coModal = await execInTab(tabId, pageAnyModalVisible, []); } catch (e) { coModal = false; }
+    if (coModal) { await sleep(500); continue; } // modal khác đang dựng/đang đóng → chờ, không tiêu một lượt bấm
+
     shipAttempts++;
     await trustedClick(tabId, prep.x, prep.y);
-    const probeDeadline = Date.now() + 4500;
+    // ≥10s mỗi lượt (bằng bản trước khi có retry): máy chậm dựng modal ~5s, probe ngắn là bấm chồng lên modal.
+    const probeDeadline = Date.now() + 10000;
     while (Date.now() < probeDeadline) {
       hasShip = await execInTab(tabId, pageModalHasTitle, ["^giao don hang$"]);
       if (hasShip) break;
@@ -1928,8 +1902,8 @@ async function doReadReturnRequests() {
   }
 
   // 3) CHỌN TAB "Đơn Trả hàng Hoàn tiền" — PHẢI làm TRƯỚC bước đổi sắp xếp và trước khi đọc số. Không thấy tab
-  // nào khớp → VẪN đi tiếp với tab hiện tại nhưng tabTraHang=false để C# log CẢNH BÁO (số có thể lẫn đơn hủy);
-  // đừng làm hỏng cả bước chỉ vì Shopee đổi nhãn.
+  // nào khớp / bấm mà tab KHÔNG lên "active" → tabTraHang=false, C# BỎ LƯỢT (mốc giữ nguyên): số của tab "Tất cả"
+  // ghi vào mốc là nuốt vĩnh viễn mọi yêu cầu mới, xem QuyetDinhLuotTraHang bên C#.
   let tabTraHang = false;
   try {
     await ensureDbg(tabId);
@@ -1941,8 +1915,9 @@ async function doReadReturnRequests() {
       let dongTruoc = 0;
       try { dongTruoc = (await execInTab(tabId, pageReturnRowCount, [])) || 0; } catch (e) { dongTruoc = 0; }
       await trustedClick(tabId, ct.x, ct.y);
-      tabTraHang = true;
       // Đổi tab → ô tổng VÀ danh sách vẽ lại. Chờ một trong hai đổi (trần 8s) rồi mới sang bước sắp xếp/đọc số.
+      // Thoát sớm khi tab-strip đã báo "active": hai tab CÙNG số + cùng số dòng là chuyện thường, chờ trọn 8s
+      // mỗi shop chỉ để chắc là phí.
       const cdl = Date.now() + 8000;
       while (Date.now() < cdl) {
         await sleep(500);
@@ -1950,11 +1925,19 @@ async function doReadReturnRequests() {
         try { s2 = (await execInTab(tabId, pageReturnSummaryText, [])) || ""; } catch (e) { s2 = ""; }
         try { n2 = (await execInTab(tabId, pageReturnRowCount, [])) || 0; } catch (e) { n2 = dongTruoc; }
         if ((s2 && s2 !== soTruoc) || n2 !== dongTruoc) { summary = s2 || summary; break; }
+        let ct2 = null;
+        try { ct2 = await execInTab(tabId, pageLocateReturnCaseTab, [RETURN_TAB_RE]); } catch (e) { ct2 = null; }
+        if (ct2 && ct2.daDung) { summary = s2 || summary; break; }
       }
+      // XÁC NHẬN bằng chính tab-strip, KHÔNG đặt cờ mù sau cú click: click TRƯỢT và "hai tab cùng số" trông y
+      // hệt nhau qua ô tổng/số dòng, mà một bên là dữ liệu SAI tab.
+      let ctSau = null;
+      try { ctSau = await execInTab(tabId, pageLocateReturnCaseTab, [RETURN_TAB_RE]); } catch (e) { ctSau = null; }
+      tabTraHang = !!(ctSau && ctSau.daDung);
     }
-  } catch (e) { /* chọn tab lỗi → đọc theo tab đang có (tabTraHang=false) */ }
+  } catch (e) { /* chọn tab lỗi → tabTraHang=false ⇒ C# bỏ lượt */ }
   if (!tabTraHang) {
-    send({ action: "progress", message: "KHÔNG chọn được tab 'Đơn Trả hàng Hoàn tiền' — đọc theo tab đang mở." });
+    send({ action: "progress", message: "KHÔNG xác nhận được tab 'Đơn Trả hàng Hoàn tiền' đang chọn — C# sẽ bỏ lượt check (mốc giữ nguyên)." });
   }
 
   // 4) Đổi sắp xếp — áp SAU khi đổi tab (đổi tab nhiều khả năng reset sắp xếp về mặc định "Ngày đến hạn").

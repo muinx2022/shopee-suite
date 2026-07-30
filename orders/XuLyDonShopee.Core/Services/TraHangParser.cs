@@ -30,7 +30,9 @@ public sealed record DongTraHang(string? ShopeeOrderId, string HeadHtml, bool? L
 /// không đọc được số (text lạ); <see cref="SortApplied"/> false = KHÔNG đổi được sắp xếp sang "Ngày yêu cầu
 /// (Mới - Cũ)" nên "N dòng đầu" có thể sai; <see cref="TabTraHang"/> false = KHÔNG chọn được tab
 /// "Đơn Trả hàng Hoàn tiền" nên số đọc được là của tab "Tất cả" — GỘP cả Đơn Hủy / Đơn Giao hàng không thành
-/// công, hai loại KHÔNG có mã yêu cầu trả hàng. Cả hai cờ false đều chỉ để caller log CẢNH BÁO, không chặn bước.
+/// công, hai loại KHÔNG có mã yêu cầu trả hàng. <see cref="SortApplied"/> false chỉ để caller log CẢNH BÁO;
+/// <see cref="TabTraHang"/> false thì caller BỎ HẲN LƯỢT (mốc giữ nguyên) — ghi số tab "Tất cả" vào mốc là đầu
+/// độc mốc, xem <see cref="OrdersBridgeSession.QuyetDinhLuotTraHang"/>.
 /// <para><see cref="ChanDoan"/> = mô tả 4 dấu hiệu trang lúc extension BỎ lượt vì không đọc được ô tổng (url,
 /// title, ô tổng có/rỗng, số dòng, có tab-wrapper) — null khi đọc bình thường. Thuần để LOG.</para></summary>
 public sealed record KetQuaDocTraHang(

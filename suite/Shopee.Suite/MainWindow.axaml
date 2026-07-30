@@ -253,7 +253,8 @@
                     </StackPanel>
                 </StackPanel>
 
-                <!-- Cụm đếm đoạn Shopee (đơn hàng): tài khoản · đơn hàng · proxy — ẩn khi hẹp -->
+                <!-- Cụm đếm đoạn Shopee (đơn hàng): tài khoản · đơn hàng — ẩn khi hẹp.
+                     Đếm proxy đã BỎ cùng cụm proxy runtime của module Đơn hàng (StatusProxiesText không còn). -->
                 <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" Classes="statusOptional">
                     <StackPanel Orientation="Horizontal" IsVisible="{Binding ShowShopeeStatus}">
                         <Rectangle Classes="statusSep" />
@@ -262,8 +263,6 @@
                                 <TextBlock Text="{Binding ShopeeStatusVm.StatusAccountsText}" />
                                 <TextBlock Classes="dot" Text="·" />
                                 <TextBlock Text="{Binding ShopeeStatusVm.StatusOrdersText}" />
-                                <TextBlock Classes="dot" Text="·" />
-                                <TextBlock Text="{Binding ShopeeStatusVm.StatusProxiesText}" />
                             </StackPanel>
                         </Border>
                     </StackPanel>

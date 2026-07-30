@@ -1,4 +1,3 @@
-using XuLyDonShopee.Core.Models;
 using XuLyDonShopee.Core.Services;
 
 namespace XuLyDonShopee.Tests;
@@ -25,7 +24,7 @@ public class BraveLaunchArgsTests
     public void CoNhomCoChongTreoNen()
     {
         // Nhóm cờ khớp shopee-suite: chống Brave bóp renderer khi cửa sổ nền + mở đúng profile/cửa sổ mới.
-        var args = BraveLaunchArgs.BuildBraveArgs("/tmp/p", 0, null);
+        var args = BraveLaunchArgs.BuildBraveArgs("/tmp/p", 0);
 
         Assert.Contains("--disable-background-timer-throttling", args);
         Assert.Contains("--disable-backgrounding-occluded-windows", args);
@@ -40,7 +39,7 @@ public class BraveLaunchArgsTests
     {
         // Chuỗi --disable-features đúng như shopee-suite: Translate + CalculateNativeWinOcclusion +
         // IntensiveWakeUpThrottling — và tuyệt đối KHÔNG chứa AutomationControlled.
-        var args = BraveLaunchArgs.BuildBraveArgs("/tmp/p", 0, null);
+        var args = BraveLaunchArgs.BuildBraveArgs("/tmp/p", 0);
 
         Assert.Contains("--disable-features=Translate,CalculateNativeWinOcclusion,IntensiveWakeUpThrottling", args);
         Assert.DoesNotContain(args, a => a.StartsWith("--disable-features") && a.Contains("AutomationControlled"));
@@ -50,7 +49,7 @@ public class BraveLaunchArgsTests
     public void CoCoLocaleTiengViet()
     {
         // Locale VN đặt bằng cờ trình duyệt (không hook navigator.languages bằng JS để tránh lộ bot).
-        var args = BraveLaunchArgs.BuildBraveArgs("/tmp/p", 0, null);
+        var args = BraveLaunchArgs.BuildBraveArgs("/tmp/p", 0);
 
         Assert.Contains("--lang=vi-VN", args);
     }
@@ -60,7 +59,7 @@ public class BraveLaunchArgsTests
     {
         // Nút "In phiếu giao" mở tab phiếu bằng window.open — không chặn popup để tab phiếu luôn mở ra
         // (nếu bị chặn thì không bắt được tab để tải/in). Cờ này BẮT BUỘC có cho bước In phiếu giao.
-        var args = BraveLaunchArgs.BuildBraveArgs("/tmp/p", 0, null);
+        var args = BraveLaunchArgs.BuildBraveArgs("/tmp/p", 0);
 
         Assert.Contains("--disable-popup-blocking", args);
     }
@@ -68,7 +67,7 @@ public class BraveLaunchArgsTests
     [Fact]
     public void KhongChua_EnableAutomation_VaKhongChua_Headless()
     {
-        var args = BraveLaunchArgs.BuildBraveArgs("/tmp/p", 0, null);
+        var args = BraveLaunchArgs.BuildBraveArgs("/tmp/p", 0);
 
         // Không có bất kỳ tham số nào bật cờ automation hoặc chạy ẩn.
         Assert.DoesNotContain(args, a => a.Contains("--enable-automation"));
@@ -76,50 +75,12 @@ public class BraveLaunchArgsTests
         Assert.DoesNotContain(args, a => a.Contains("--remote-debugging-pipe"));
     }
 
+    /// <summary>Module Đơn hàng đã bỏ hẳn proxy runtime — args KHÔNG bao giờ được mang <c>--proxy-server</c>
+    /// nữa (cụm xoay proxy + ProxyHealthChecker đã xoá). Chốt để đừng ai lặng lẽ nối lại.</summary>
     [Fact]
-    public void CoProxyHttp_ChuaProxyServerHttp()
+    public void KhongBaoGioCoProxyServer()
     {
-        var proxy = new ProxyEntry { Host = "1.2.3.4", Port = 8080, Type = ProxyType.Http };
-
-        var args = BraveLaunchArgs.BuildBraveArgs("/tmp/p", 0, proxy);
-
-        Assert.Contains("--proxy-server=http://1.2.3.4:8080", args);
-    }
-
-    [Fact]
-    public void CoProxySocks5_ChuaProxyServerSocks5()
-    {
-        var proxy = new ProxyEntry { Host = "9.9.9.9", Port = 1080, Type = ProxyType.Socks5 };
-
-        var args = BraveLaunchArgs.BuildBraveArgs("/tmp/p", 0, proxy);
-
-        Assert.Contains("--proxy-server=socks5://9.9.9.9:1080", args);
-    }
-
-    [Fact]
-    public void CoProxyCoUserPass_ProxyServerKhongKemUserPass()
-    {
-        // User/pass KHÔNG được nhét vào --proxy-server (Chromium không hỗ trợ) — xử lý auth qua CDP.
-        var proxy = new ProxyEntry
-        {
-            Host = "1.2.3.4",
-            Port = 8080,
-            Username = "u",
-            Password = "p",
-            Type = ProxyType.Http
-        };
-
-        var args = BraveLaunchArgs.BuildBraveArgs("/tmp/p", 0, proxy);
-
-        Assert.Contains("--proxy-server=http://1.2.3.4:8080", args);
-        Assert.DoesNotContain(args, a => a.Contains("u:p@"));
-        Assert.DoesNotContain(args, a => a.Contains("--proxy-server=http://u:p"));
-    }
-
-    [Fact]
-    public void ProxyNull_KhongCoProxyServer()
-    {
-        var args = BraveLaunchArgs.BuildBraveArgs("/tmp/p", 0, null);
+        var args = BraveLaunchArgs.BuildBraveArgs("/tmp/p", 0);
 
         Assert.DoesNotContain(args, a => a.StartsWith("--proxy-server"));
     }

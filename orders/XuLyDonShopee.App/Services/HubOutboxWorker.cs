@@ -163,7 +163,7 @@ public sealed class HubOutboxWorker : IDisposable
     }
 
     /// <summary>
-    /// Xử MỘT tài khoản trong một lượt: đếm 4 loại tồn → có tồn thì đẩy (thứ tự ĐƠN → PHIẾU giữ nguyên như phiên,
+    /// Xử MỘT tài khoản trong một lượt: đếm 5 loại tồn → có tồn thì đẩy (thứ tự ĐƠN → PHIẾU giữ nguyên như phiên,
     /// vì phiếu chỉ đẩy được cho đơn ĐÃ lên hub) → đếm LẠI để báo số CÒN tồn. Trả (số tồn còn lại, kết quả đẩy) —
     /// kết quả <c>null</c> = không có gì để đẩy. Mọi lỗi bị nuốt (các hàm <see cref="HubOutbox"/> tự nuốt).
     /// </summary>
@@ -173,23 +173,24 @@ public sealed class HubOutboxWorker : IDisposable
 
         var (ton, skus, orderSns) = DemTon(accountId);
 
-        // 0) MÃ TRẢ HÀNG — phải xét TRƯỚC cửa "ton.Tong == 0": nguồn của nó là bảng `return_codes`, KHÔNG phải
-        // bảng `orders`, nên tài khoản đã dọn sạch đơn (4 loại tồn = 0) vẫn có thể còn cả đống mã chờ đẩy. Đặt
-        // sau cửa đó thì đúng trường hợp cần nhất lại không bao giờ chạy. Bản thân hàm tự thoát sớm khi rỗng.
+        // 0) MÃ TRẢ HÀNG — chạy TRƯỚC cửa "ton.Tong == 0" và KHÔNG gác theo số đếm: nguồn của nó là bảng
+        // `return_codes`, KHÔNG phải bảng `orders`, nên tài khoản đã dọn sạch đơn vẫn có thể còn cả đống mã chờ
+        // đẩy. Đặt sau cửa đó thì đúng trường hợp cần nhất lại không bao giờ chạy. Hàm tự thoát sớm khi rỗng.
         var okMaTra = await ChayQuaGateAsync(accountId, PushKind.Gsheet,
             () => HubOutbox.PushReturnCodesToGsheetAsync(accountId, _services, log, ct)).ConfigureAwait(false);
 
         if (ton.Tong == 0)
         {
             _tonDaBao.TryRemove(accountId, out _);
-            return (ton, okMaTra); // 4 loại tồn kia sạch → chỉ còn kết quả lượt mã trả hàng (null = không có gì)
+            return (ton, okMaTra); // mọi loại tồn đều sạch → chỉ còn kết quả lượt mã trả hàng (null = không có gì)
         }
 
         // Chỉ báo khi số tồn ĐỔI so với lần báo trước (lần đầu backlog xuất hiện, hoặc vơi/dày thêm).
         if (!_tonDaBao.TryGetValue(accountId, out var daBao) || !daBao.Equals(ton))
         {
             _tonDaBao[accountId] = ton;
-            log($"Vòng chờ: đẩy {ton.Orders} đơn / {ton.Slips} phiếu / {ton.SheetRows} dòng sheet / {ton.SoldCounts} lượt đếm Đã bán còn tồn.");
+            log($"Vòng chờ: đẩy {ton.Orders} đơn / {ton.Slips} phiếu / {ton.SheetRows} dòng sheet / {ton.SoldCounts} lượt đếm Đã bán"
+                + $" / {ton.ReturnCodes} mã trả hàng còn tồn.");
         }
 
         var ok = okMaTra;
@@ -234,7 +235,7 @@ public sealed class HubOutboxWorker : IDisposable
     /// viễn: máy chạy độc lập không có hub thì <c>hub_synced_at</c> NULL mãi mãi, không dùng sheet thì
     /// <c>gsheet_synced_at</c> cũng vậy — đó không phải "hàng chờ đẩy".
     /// </para>
-    /// Đếm bằng SQL <c>COUNT</c> cho 3 loại đầu (worker quét mọi tài khoản mỗi 2′ nên phải nhẹ); riêng "Đã bán"
+    /// Đếm bằng SQL <c>COUNT</c> cho 3 loại đầu + mã trả hàng (worker quét mọi tài khoản mỗi 2′ nên phải nhẹ); riêng "Đã bán"
     /// phải nạp danh sách hẹp rồi lọc bằng C# (SQL không biết luật "đã giao"/"đơn hủy").
     /// </summary>
     private (OutboxPending Ton, List<string> Skus, List<string> OrderSns) DemTon(long accountId)
@@ -247,6 +248,9 @@ public sealed class HubOutboxWorker : IDisposable
         var tonDon = coHub ? _services.Orders.CountForHubPush(accountId) : 0;
         var tonPhieu = coHubPhieu ? _services.Orders.CountForHubSlipPush(accountId) : 0;
         var tonSheet = coSheet ? _services.Orders.CountForGsheetPush(accountId) : 0;
+        // Mã trả hàng cũng đi Google Sheet nhưng ĐẾM RIÊNG (kho `return_codes` độc lập với `orders`): thiếu số này
+        // thì badge "⏳ Chờ đẩy" hiện 0 trong khi hàng chục mã đang kẹt vì Web App lỗi.
+        var tonMaTra = coSheet ? _services.ReturnCodes.DemChuaDay(accountId) : 0;
 
         var skus = new List<string>();
         var orderSns = new List<string>();
@@ -256,7 +260,7 @@ public sealed class HubOutboxWorker : IDisposable
             (skus, orderSns) = HubOutbox.LocHangDoiDemDaBan(hangDoi);
         }
 
-        return (new OutboxPending(tonDon, tonPhieu, tonSheet, skus.Count), skus, orderSns);
+        return (new OutboxPending(tonDon, tonPhieu, tonSheet, skus.Count, tonMaTra), skus, orderSns);
     }
 
     /// <summary>

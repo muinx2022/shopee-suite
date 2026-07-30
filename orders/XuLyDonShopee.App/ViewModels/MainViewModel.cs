@@ -63,16 +63,13 @@ public partial class MainViewModel : ViewModelBase
     [ObservableProperty]
     private ViewModelBase _currentViewModel;
 
-    // ===== Thanh trạng thái đáy (số tài khoản / đơn / proxy / trình duyệt) =====
+    // ===== Thanh trạng thái đáy (số tài khoản / đơn / trình duyệt) =====
 
     [ObservableProperty]
     private string _statusAccountsText = "";
 
     [ObservableProperty]
     private string _statusOrdersText = "";
-
-    [ObservableProperty]
-    private string _statusProxiesText = "";
 
     [ObservableProperty]
     private string _statusBrowserText = "";
@@ -86,7 +83,7 @@ public partial class MainViewModel : ViewModelBase
     [ObservableProperty]
     private string _outboxPendingText = "";
 
-    /// <summary>Tooltip tách theo từng loại đích (đơn / phiếu / dòng sheet / lượt đếm).</summary>
+    /// <summary>Tooltip tách theo từng loại đích (đơn / phiếu / dòng sheet / lượt đếm / mã trả hàng).</summary>
     [ObservableProperty]
     private string _outboxPendingTooltip = "";
 
@@ -98,15 +95,15 @@ public partial class MainViewModel : ViewModelBase
         OutboxPendingText = $"⏳ Chờ đẩy: {p.Tong}";
         OutboxPendingTooltip =
             $"Hàng còn chờ đẩy: {p.Orders} đơn lên Hub · {p.Slips} phiếu · {p.SheetRows} dòng Google Sheet · "
-            + $"{p.SoldCounts} lượt đếm Đã bán.\nTự đẩy lại mỗi 2 phút khi kết nối được.";
+            + $"{p.SoldCounts} lượt đếm Đã bán · {p.ReturnCodes} mã trả hàng.\nTự đẩy lại mỗi 2 phút khi kết nối được.";
     }
 
-    /// <summary>Đọc lại 4 số liệu cho thanh trạng thái đáy. Gọi ở ctor, khi đổi màn, và sau khi kho đơn đổi.</summary>
+    /// <summary>Đọc lại 3 số liệu cho thanh trạng thái đáy. Gọi ở ctor, khi đổi màn, và sau khi kho đơn đổi.
+    /// <para>Đếm proxy đã BỎ cùng cụm proxy runtime (module đi thẳng IP máy).</para></summary>
     public void RefreshStatus()
     {
         StatusAccountsText = $"{_services.Accounts.GetAll().Count} tài khoản";
         StatusOrdersText = $"{_services.Orders.Count()} đơn hàng";
-        StatusProxiesText = $"{_services.Proxies.GetAll().Count} proxy";
         StatusBrowserText = "Trình duyệt: " + BrowserChoices.VnLabel(_services.Settings.GetBrowserChoice());
     }
 

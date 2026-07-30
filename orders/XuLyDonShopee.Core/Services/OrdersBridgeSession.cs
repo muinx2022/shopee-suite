@@ -58,6 +58,25 @@ internal enum SauDatDiaChi
     DungViDiaChi,
 }
 
+/// <summary>Quyết định sau khi ĐỌC xong trang trả hàng, TRƯỚC khi chạy luật đếm
+/// (xem <see cref="OrdersBridgeSession.QuyetDinhLuotTraHang"/>).</summary>
+internal enum SauDocTraHang
+{
+    /// <summary>Không đọc được số yêu cầu (trang chưa render / đổi giao diện) → bỏ lượt, mốc GIỮ NGUYÊN.</summary>
+    BoLuotKhongCoSo,
+
+    /// <summary>Đọc được số nhưng KHÔNG chọn được tab "Đơn Trả hàng Hoàn tiền" → số đang là của tab "Tất cả" →
+    /// bỏ lượt, mốc GIỮ NGUYÊN.</summary>
+    BoLuotSaiTab,
+
+    /// <summary>Số đọc được là của ĐÚNG tab trả hàng → chạy luật đếm + chốt mốc.</summary>
+    XuLy,
+}
+
+/// <summary>Kết quả <see cref="OrdersBridgeSession.QuyetDinhLuotTraHang"/>: nhánh xử lý + số yêu cầu đọc được
+/// (0 ở nhánh <see cref="SauDocTraHang.BoLuotKhongCoSo"/>).</summary>
+internal readonly record struct LuotDocTraHang(SauDocTraHang Nhanh, int SoMoi);
+
 /// <summary>
 /// Vòng đời MỘT phiên cầu nối: cấp cổng loopback trống → chạy <see cref="OrdersWebSocketServer"/> →
 /// mở trình duyệt SẠCH (không CDP, không remote-debugging-port) qua <see cref="PocCleanLauncher"/> với
@@ -437,7 +456,7 @@ public sealed class OrdersBridgeSession : IDisposable
         {
             L("Đăng nhập Nền tảng tài khoản phụ bằng trình duyệt điều khiển (Playwright)...");
             var svc = new ShopeeLoginService();
-            session = await svc.OpenAsync(_userDataDir, null /* proxy */, _browserChoice, ct).ConfigureAwait(false);
+            session = await svc.OpenAsync(_userDataDir, _browserChoice, ct).ConfigureAwait(false);
             entered = await session.TryLoginSubaccountAsync(
                 login.User, login.Pass, login.VerifyEmail, login.VerifyEmailPassword, _log, ct).ConfigureAwait(false);
         }
@@ -928,9 +947,30 @@ public sealed class OrdersBridgeSession : IDisposable
     }
 
     /// <summary>
+    /// HÀM THUẦN (test được, không cần trình duyệt) — lượt đọc trang trả hàng vừa rồi có DÙNG ĐƯỢC để chạy luật
+    /// đếm + chốt mốc không.
+    /// <para>
+    /// <b>Vì sao <c>tabTraHang</c> = false cũng phải BỎ LƯỢT</b> (chứ không chỉ cảnh báo như bản đầu): số đọc được
+    /// lúc đó là của tab "Tất cả" — gộp cả Đơn Hủy / Giao hàng không thành công — nên LỚN HƠN hẳn số thật. Ghi nó
+    /// vào mốc là ĐẦU ĐỘC mốc: lượt sau chọn được tab, số thật NHỎ hơn mốc rác ⇒ rơi nhánh
+    /// <see cref="LuatSoYeuCau.Giam"/> "chỉ cập nhật mốc" ⇒ mọi yêu cầu phát sinh giữa chừng bị NUỐT vĩnh viễn
+    /// (không vào <c>return_codes</c>, không lên Google Sheet). Bỏ lượt thì cùng lắm chậm một vòng.
+    /// </para>
+    /// </summary>
+    internal static LuotDocTraHang QuyetDinhLuotTraHang(KetQuaDocTraHang doc)
+    {
+        if (doc?.SoYeuCau is not int soMoi)
+        {
+            return new LuotDocTraHang(SauDocTraHang.BoLuotKhongCoSo, 0);
+        }
+        return new LuotDocTraHang(doc.TabTraHang ? SauDocTraHang.XuLy : SauDocTraHang.BoLuotSaiTab, soMoi);
+    }
+
+    /// <summary>
     /// <b>Bước CUỐI flow shop — check ĐƠN TRẢ HÀNG.</b> Gửi <c>readReturnRequests</c>: extension mở trang
-    /// "Trả hàng/Hoàn tiền/Hủy" của shop đang mở, CHỌN TAB "Đơn Trả hàng Hoàn tiền" (không chọn thì ô tổng là của
-    /// tab "Tất cả" — gộp cả Đơn Hủy / Đơn Giao hàng không thành công, hai loại KHÔNG có mã yêu cầu trả hàng), đổi
+    /// "Trả hàng/Hoàn tiền/Hủy" của shop đang mở, CHỌN TAB "Đơn Trả hàng Hoàn tiền" (không chọn được thì ô tổng là
+    /// của tab "Tất cả" — gộp cả Đơn Hủy / Đơn Giao hàng không thành công, hai loại KHÔNG có mã yêu cầu trả hàng →
+    /// BỎ LƯỢT, xem <see cref="QuyetDinhLuotTraHang"/>), đổi
     /// sắp xếp sang "Ngày yêu cầu (Mới - Cũ)" (mặc định trang là "Ngày đến hạn" — không đổi thì luật "N dòng đầu"
     /// bỏ sót ÂM THẦM), rồi trả text ô tổng + HTML đầu mỗi dòng.
     /// C# parse (<see cref="TraHangParser"/>), so số với MỐC lần trước của shop để biết check bao nhiêu dòng ĐẦU,
@@ -963,7 +1003,8 @@ public sealed class OrdersBridgeSession : IDisposable
         }
 
         var doc = TraHangParser.ParseKetQua(json);
-        if (doc.SoYeuCau is null)
+        var luot = QuyetDinhLuotTraHang(doc);
+        if (luot.Nhanh == SauDocTraHang.BoLuotKhongCoSo)
         {
             L("Check đơn trả hàng: KHÔNG đọc được số yêu cầu (trang chưa render / Shopee đổi giao diện) — bỏ lượt, mốc giữ nguyên.");
             // 4 dấu hiệu extension thu ngay lúc bỏ lượt: phân biệt hết-giờ-THẬT / lạc-trang / sai-selector. Không
@@ -974,16 +1015,18 @@ public sealed class OrdersBridgeSession : IDisposable
             }
             return;
         }
+        if (luot.Nhanh == SauDocTraHang.BoLuotSaiTab)
+        {
+            L($"⚠ Check đơn trả hàng [{shopLogin}]: KHÔNG chọn được tab \"Đơn Trả hàng Hoàn tiền\" — {luot.SoMoi} là số của "
+              + "tab \"Tất cả\" (gộp Đơn Hủy / Giao không thành công) → BỎ LƯỢT, mốc giữ nguyên.");
+            return;
+        }
         if (!doc.SortApplied)
         {
             L("⚠ Check đơn trả hàng: KHÔNG đổi được sắp xếp sang 'Ngày yêu cầu (Mới - Cũ)' — 'N dòng đầu' có thể sót.");
         }
-        if (!doc.TabTraHang)
-        {
-            L("⚠ Check đơn trả hàng: KHÔNG chọn được tab \"Đơn Trả hàng Hoàn tiền\" — số có thể lẫn đơn hủy.");
-        }
 
-        var soMoi = doc.SoYeuCau.Value;
+        var soMoi = luot.SoMoi;
         var quyetDinh = TraHangParser.QuyetDinhCheck(mocCu, soMoi);
         var mocCuText = mocCu?.ToString() ?? "chưa có";
         switch (quyetDinh.Luat)

@@ -81,4 +81,117 @@ Sửa: nối `DemChuaDay` vào chỗ tính số tồn của `HubOutboxWorker.Dem
 
 ## Báo cáo thực thi (Opus điền sau khi xong)
 
-(chưa)
+**Kết quả kiểm chứng (sau vòng chỉnh theo phản hồi nghiệm thu):** `dotnet build ShopeeSuite.sln` → **0 lỗi,
+0 warning**; `dotnet test orders/XuLyDonShopee.Tests` → **1427 pass / 0 fail**;
+`node --check extensions/shopee-orders/background.js` sạch (Code.gs cũng check qua bản sao `.js` → sạch). Grep
+nghiệm thu `ProxyRotator|KiotKeyPool|ProxyParser|withDebugger|dbgEnter|releaseDbg` = **0 hit** trong source.
+
+**Số test 1449 → 1427 (−22)** = xoá 37 ca + thêm 15 ca:
+- Xoá cùng code chết: `ProxyRotatorTests` 5 · `KiotProxyClientTests` 13 · `KiotKeyPoolTests` 7 · `ProxyParserTests` 7 ·
+  `ProxyHealthCheckerTests` 2 = **34**; `BraveLaunchArgsTests` bỏ 3 ca proxy (tham số `proxy` đã gỡ) = **37**.
+- Thêm: `TraHangBoLuotSaiTabTests` 5 · `NotifyDonTraKhoMaTests` 10 = **15**.
+
+### A1 — bỏ lượt khi không chắc đúng tab
+- `orders/XuLyDonShopee.Core/Services/OrdersBridgeSession.cs`: thêm `enum SauDocTraHang` (d.63), `record struct
+  LuotDocTraHang` (d.78), hàm THUẦN `QuyetDinhLuotTraHang` (d.960, cùng khuôn `QuyetDinhSauDatDiaChi` sẵn có);
+  `CheckDonTraHangAsync` nay rẽ theo hàm này — nhánh `BoLuotSaiTab` (d.1018) **log + return TRƯỚC**
+  `QuyetDinhCheck`/`_saveReturnCount` ⇒ mốc giữ nguyên. Cảnh báo `SortApplied` giữ nguyên (chỉ log).
+  Tách hàm thuần (thay vì `if` trần) để test được mà không cần trình duyệt, và để `soMoi` không còn `.Value`
+  (tránh CS8629 khi build cảnh-báo-sạch).
+- `orders/XuLyDonShopee.Core/Services/TraHangParser.cs`: sửa doc `KetQuaDocTraHang` — `TabTraHang=false` nay là
+  **bỏ lượt**, không còn "chỉ cảnh báo".
+- Test: `orders/XuLyDonShopee.Tests/TraHangBoLuotSaiTabTests.cs` (5 ca, gồm ca diễn lại 3 vòng 10→141→12 chứng minh
+  mốc rác đẩy vòng sau vào nhánh `Giảm`).
+
+### A2 — extension xác nhận tab thật sự active
+- `extensions/shopee-orders/background.js` `doReadReturnRequests` bước 3 (~d.1905-1940): bỏ `tabTraHang = true` đặt mù
+  ngay sau `trustedClick`; sau vòng chờ gọi lại `pageLocateReturnCaseTab` (d.1935) và chỉ `true` khi `daDung`
+  (d.1936). Trong vòng chờ 8s thêm probe `pageLocateReturnCaseTab` → break sớm khi tab đã active (khỏi đốt trọn 8s
+  mỗi shop khi hai tab cùng số). Thông điệp `progress` đổi cho khớp hành vi mới (C# sẽ bỏ lượt).
+- KHÔNG đổi delay/easing/thứ tự thao tác nào khác.
+
+### A3 — retry "Chuẩn bị hàng" không bấm mù
+- `background.js`: thêm hàm trang `pageAnyModalVisible` (d.551); vòng retry (d.1637-1657): **trước mỗi cú bấm** probe
+  `pageModalHasTitle` (d.1641, true → break, không bấm) và probe modal-bất-kỳ — đang có modal thì `sleep(500);
+  continue` mà **không tiêu một lượt bấm**; `probeDeadline` nâng 4.5s → **10s** (d.1650, bằng hành vi trước khi có
+  retry). Giữ nguyên `shipDeadline` 18s và trần 4 lượt bấm (thực tế ≈2 lượt × 10s).
+
+### B1 — notify đơn trả bám kho mã
+- `orders/XuLyDonShopee.Core/Data/ReturnCodesRepository.cs`: `LuuMaTraHang` đổi kiểu trả về `int` →
+  `KetQuaLuuMaTraHang(int DaGhi, IReadOnlyList<(OrderSn, Code)> CapMoi)` (d.27, 50-89) — gom đúng cặp vừa thêm/đổi.
+- `orders/XuLyDonShopee.App/Services/AccountSession.cs`: callback `saveReturnCodes` nay notify theo `kqMa.CapMoi`
+  (không còn `kq.CapDaGhi` làm nguồn, không còn điều kiện `PushOrdersToHub is null`);
+  `StartNotifyDonTraInBackground` nhận thêm `capDonConSong` + `shopLogin`, đi hai đường: **có Hub** →
+  `ReportAppAlertToHub` với `Kind="don_tra"` (hằng `KindDonTra`), `ShopName=shopLogin`, `AccountLabel`=email tk,
+  `Detail` do hàm thuần `MoTaCapDonTra` dựng `"SN1=CODE1; SN2=CODE2"`; **không Hub** → webhook local như cũ (vẫn
+  qua `CoNenGuiNotifyLocal`, hành vi + nội dung tin không đổi).
+- **Chống hai tin một mã (chốt ở vòng nghiệm thu):** nhánh Hub chỉ gửi các cặp thuộc đơn **ĐÃ BỊ DỌN** khỏi
+  `orders` — hàm thuần `LocCapDonDaDon(capMoi, kq.CapDaGhi)` (đối chiếu theo mã đơn); đơn CÒN SỐNG để Hub tự bắn
+  qua `ReturnCodeChangedItems` của `orders/push` (`server/.../ClientApiEndpoints.cs:253`, plan B2 siết đường đó).
+  Không còn cặp nào cần báo → log một dòng rồi thôi. Nhánh standalone giữ TOÀN BỘ `CapMoi` (không có nguồn trùng).
+- Không sửa logic `suite/` — hook `ReportAppAlertToHub` truyền `kind` thẳng qua (`OrdersModuleHost.cs:164`).
+- Test: `orders/XuLyDonShopee.Tests/NotifyDonTraKhoMaTests.cs` 10 ca (đơn đã dọn: kho mã có `CapMoi`, đường cũ
+  rỗng; mã không đổi → không báo lại; `KindDonTra`; `MoTaCapDonTra`; **3 ca `LocCapDonDaDon`**: bỏ đơn còn sống /
+  giữ cả lô khi không đơn nào còn sống / rỗng khi tất cả còn sống; 2 ca badge B4); 4 assert trong
+  `MaTraHangDocLapTests` đổi `n` → `kq.DaGhi` + kiểm luôn `CapMoi`.
+
+### B2 — nhả mốc chống spam cảnh báo địa chỉ
+- `AccountSession.cs` d.718-724: nhánh `okHub == false` + webhook local trống nay `TryRemove` mốc trước khi return
+  (thành 3 lối nhả: d.723, 736, 745). Doc hàm ghi rõ quy tắc "mốc chỉ giữ khi ít nhất MỘT kênh đã nhận tin".
+
+### B3 — Apps Script cho ghi đè mã trả hàng
+- `orders/gsheet-apps-script/Code.gs`: thêm `ghiDeNeuKhac` (d.452 — ghi khi giá trị KHÁC, **bỏ qua ô có công thức**);
+  `ghiTruong` thêm tham số `choGhiDe` (d.384-396); cột `donTraHang` truyền `don.chiDienNeuCo === true` ở **cả tab
+  chính** (d.190) **lẫn file phụ** (d.275). Mọi cột khác + payload đơn thường giữ nguyên `ghiNeuTrong`.
+- Ghi chú "SỬA 30/07/2026" ở đầu file + `CHANGELOG.md` mục **"Chưa phát hành"** có khối `⚠` nhắc **phải redeploy
+  Apps Script tay TRƯỚC khi phát hành client**.
+
+### B4 — badge "⏳ Chờ đẩy" đếm mã trả hàng
+- `orders/XuLyDonShopee.App/Services/AppServices.cs`: `OutboxPending` thêm trường thứ 5 `ReturnCodes` (d.22), vào
+  `Tong` + `Cong`.
+- `HubOutboxWorker.cs`: `DemTon` đếm `_services.ReturnCodes.DemChuaDay` khi CÓ URL sheet (d.253, 263 — không có đích
+  thì 0 để badge không kẹt); dòng log "Vòng chờ" thêm số mã trả (d.192).
+- `MainViewModel.cs`: tooltip badge thêm "· N mã trả hàng".
+- Test: 2 ca trong `NotifyDonTraKhoMaTests` (đẩy hỏng → badge 1; chưa có URL sheet → badge 0).
+
+### C1 — dọn cụm proxy mồ côi
+- Xoá (đã grep 0 caller ngay trước khi xoá): `Services/ProxyRotator.cs`, `Services/KiotProxyClient.cs`,
+  `Services/IKiotProxyClient.cs`, `Services/KiotKeyPool.cs`, `Services/ProxyParser.cs`,
+  `Services/ProxyHealthChecker.cs` + 5 file test tương ứng.
+- `BraveLaunchArgs.BuildBraveArgs`: gỡ tham số `ProxyEntry? proxy` + nhánh `--proxy-server` (và `using
+  ...Core.Models` không còn dùng); `ShopeeLoginService.OpenAsync` gỡ tham số `proxy`;
+  `OrdersBridgeSession` d.459 gọi theo chữ ký mới. `BraveLaunchArgsTests` bỏ 3 ca proxy, giữ 1 ca chốt
+  "không bao giờ có `--proxy-server`".
+- `AppServices`: gỡ property + wiring `Proxies` (giữ nguyên bảng `proxies` trong app.db, giữ `ProxyRepository.cs`
+  + `ProxyRepositoryTests` vì plan chỉ yêu cầu gỡ wiring/hiển thị). `MainViewModel`: gỡ `StatusProxiesText` +
+  dòng đếm proxy. `suite/Shopee.Suite/MainWindow.axaml` (~d.256-266, **được phiên chính mở phạm vi đúng file
+  này**): gỡ `<TextBlock ...StatusProxiesText />` + dấu `·` đứng trước + sửa comment cụm — hết binding mồ côi.
+- **Giữ lại có chủ đích** (test/khu khác, không thuộc cụm chết): `KiotProxyKeyParser`, `ProxyKeyPoolMigration`,
+  `ProxyRepository`, `KiotApiClientTests` + `ProxyFleetWideFailureTests` (hai file này test
+  `Shopee.Proxy.Kiot`/`Shopee.Core.Proxy` của **suite**, chỉ nhắc tên KiotProxyClient trong comment).
+
+### C2 — dọn code chết extension
+- `background.js`: xoá `withDebugger`, `keyInfo`, `dbgType`, `dbgEnter`, `releaseDbg` (grep 0 caller trước khi xoá;
+  `dbgSend`/`dbgAttach`/`dbgDetach`/`dbgClick`/`ensureDbg` còn sống, không đụng); bỏ `'hello'` khỏi điều kiện
+  message + 2 comment nhắc `'hello'` (content.js chỉ gửi `'wake'`); viết lại comment cụm `ensureDbg` cho khớp
+  hành vi 24f7234 (attach xuyên suốt, chỉ detach khi đổi tab / Chrome tự detach).
+
+### C3
+- `orders/XuLyDonShopee.Tests/BraveCleanPocArgsTests.cs` d.13, 32: `C:/ext/shopee-orders-test` → `C:/ext/ext-mau`.
+
+### Đã chốt ở vòng nghiệm thu (phiên chính quyết — đã thi hành)
+1. ~~Nguy cơ TRÙNG TIN đơn trả khi đã nối Hub~~ → **ĐÃ SỬA**: nhánh Hub chỉ gửi cặp thuộc đơn **đã dọn**
+   (`LocCapDonDaDon(kqMa.CapMoi, kq.CapDaGhi)` — xem mục B1); đơn còn sống để Hub bắn qua `orders/push`
+   (`server/Shopee.Hub.Web/Api/ClientApiEndpoints.cs:253`, plan B2 siết). Standalone giữ toàn bộ `CapMoi`. +3 test.
+2. ~~`StatusProxiesText` mồ côi~~ → **ĐÃ SỬA** `suite/Shopee.Suite/MainWindow.axaml` (phiên chính mở phạm vi đúng
+   file này; không đụng gì khác trong `suite/`).
+3. **A3 ngân sách thời gian** → phiên chính **chấp nhận giữ nguyên**: 10s/lượt bấm (cũ 4.5s), `shipDeadline` vẫn
+   18s ⇒ thực tế ~2 lượt bấm thay vì 4.
+
+### Điểm còn cần soi
+4. **A2 tốn thêm 1 lượt `execInTab`/500ms** trong vòng chờ đổi tab (probe tab-strip). `pageLocateReturnCaseTab` có
+   `scrollIntoView` khi tab chưa active — cùng thao tác hàm này vốn đã làm ở lần dò đầu, không thêm click/gõ nào.
+5. **B3 chưa chạy được trên sheet thật** (Apps Script chỉ có bản sao trong repo): mới kiểm cú pháp. Trước khi phát
+   hành client phải redeploy tay + thử một mã đổi trên sheet nháp.
+6. `LuuMaTraHang` **đổi kiểu trả về** (int → record). Chỉ 1 caller production + 10 chỗ trong test; đã cập nhật hết,
+   nhưng đây là breaking change trong Core nếu có nhánh khác đang dùng.

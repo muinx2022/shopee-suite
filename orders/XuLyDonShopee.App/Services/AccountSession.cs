@@ -667,7 +667,9 @@ public partial class AccountSession : ObservableObject, IAccountSession
     /// trống / mạng hỏng chỉ làm mất TIN, không làm app chạy tiếp).
     /// <para>
     /// Chống spam <see cref="NguongCanhBaoDiaChi"/> theo tài khoản — nhưng MỌI trường hợp không gửi đều GHI LOG:
-    /// im lặng hoàn toàn sẽ khiến người trực tưởng đã hết lỗi. Gửi hỏng → nhả mốc để vòng sau báo lại.
+    /// im lặng hoàn toàn sẽ khiến người trực tưởng đã hết lỗi. <b>Mốc chỉ được GIỮ khi ít nhất MỘT kênh đã nhận
+    /// tin</b>; mọi lối ra không-gửi-được đều nhả mốc để vòng sau báo lại (Hub 502 đúng lúc + chưa cấu hình
+    /// webhook local từng làm câm 60' dù chưa ai được báo).
     /// </para>
     /// </summary>
     private void StartCanhBaoDiaChiInBackground(string? tenShop, string tinh, Action<string> log, CancellationToken ct)
@@ -716,6 +718,9 @@ public partial class AccountSession : ObservableObject, IAccountSession
                 var url = _services.Settings.GetNotifyWebhookUrlLoiApp();
                 if (string.IsNullOrWhiteSpace(url))
                 {
+                    // KHÔNG kênh nào nhận được tin → NHẢ mốc: giữ mốc ở đây là câm 60' dù chưa ai được báo.
+                    // Quy tắc: mốc chỉ được giữ khi ÍT NHẤT MỘT kênh đã nhận (xem hai nhánh TryRemove bên dưới).
+                    _mocCanhBaoDiaChi.TryRemove(new KeyValuePair<long, DateTime>(_accountId, bayGio));
                     log("Cảnh báo địa chỉ: chưa cấu hình webhook lỗi app (Hub hoặc Cài đặt local) — không gửi được tin ra ngoài, vòng VẪN dừng.");
                     return;
                 }
@@ -749,42 +754,118 @@ public partial class AccountSession : ObservableObject, IAccountSession
     internal static bool CoNenGuiNotifyLocal(bool daNoiHub, string? url, int soMuc)
         => !daNoiHub && !string.IsNullOrWhiteSpace(url) && soMuc > 0;
 
+    /// <summary>Kind của tin "có đơn trả hàng" gửi lên Hub (<c>/api/orders/app-alert</c>) — Hub nhận Kind này rồi
+    /// bắn webhook. Hằng để hai đầu không lệch chuỗi.</summary>
+    internal const string KindDonTra = "don_tra";
+
+    /// <summary>HÀM THUẦN (test được): gói các cặp <c>(mã đơn, mã yêu cầu)</c> vừa ghi thành một dòng
+    /// <c>Detail</c> cho Hub — <c>"SN1=CODE1; SN2=CODE2"</c>. Cặp thiếu vế nào bị bỏ (không gửi rác).</summary>
+    internal static string MoTaCapDonTra(IEnumerable<(string OrderSn, string Code)>? cap)
+        => string.Join("; ", (cap ?? Array.Empty<(string OrderSn, string Code)>())
+            .Where(c => !string.IsNullOrWhiteSpace(c.OrderSn) && !string.IsNullOrWhiteSpace(c.Code))
+            .Select(c => $"{c.OrderSn.Trim()}={c.Code.Trim()}"));
+
     /// <summary>
-    /// Báo "có đơn trả hàng" ra webhook riêng — fire-and-forget sau khi check flow ghi được mã mới.
-    /// Khi <see cref="AppServices.PushOrdersToHub"/> đã rót: <b>bỏ qua</b> (Hub bắn tin sau <c>orders/push</c>
-    /// nhờ <c>ReturnCodeChangedItems</c>, tránh trùng tin). URL trống → im lặng. Chỉ nhận các cặp <b>vừa ghi</b>
-    /// (không gửi cả list check).
+    /// HÀM THUẦN (test được): các cặp thuộc đơn <b>ĐÃ BỊ DỌN</b> khỏi bảng <c>orders</c> = có trong
+    /// <paramref name="capMoi"/> (kho mã) mà KHÔNG có trong <paramref name="capDonConSong"/>
+    /// (<c>SetReturnRequestCodes</c> vừa ghi được ⇒ đơn còn sống, sẽ theo <c>orders/push</c> lên Hub).
+    /// <para>
+    /// Đây là phần Hub KHÔNG tự biết được. Đơn CÒN SỐNG để Hub tự bắn tin qua <c>ReturnCodeChangedItems</c> của
+    /// <c>orders/push</c> — client báo thêm là người trực nhận HAI tin cho cùng một mã.
+    /// </para>
+    /// <para>Đối chiếu theo <b>mã đơn</b> (một đơn một mã yêu cầu; hai đường nhận cùng một lô cặp).</para>
+    /// </summary>
+    internal static IReadOnlyList<(string OrderSn, string Code)> LocCapDonDaDon(
+        IReadOnlyList<(string OrderSn, string Code)>? capMoi,
+        IReadOnlyList<(string OrderSn, string Code)>? capDonConSong)
+    {
+        var moi = capMoi ?? Array.Empty<(string OrderSn, string Code)>();
+        var conSong = new HashSet<string>(
+            (capDonConSong ?? Array.Empty<(string OrderSn, string Code)>())
+                .Select(c => (c.OrderSn ?? string.Empty).Trim()),
+            StringComparer.Ordinal);
+        return moi.Where(c => !conSong.Contains((c.OrderSn ?? string.Empty).Trim())).ToList();
+    }
+
+    /// <summary>
+    /// Báo "có đơn trả hàng" — fire-and-forget sau khi kho mã (<c>return_codes</c>) ghi được mã MỚI. Nhận đúng
+    /// <see cref="KetQuaLuuMaTraHang.CapMoi"/> (cặp vừa thêm/đổi), KHÔNG phải cả lô quét.
+    /// <list type="bullet">
+    /// <item>Đã nối Hub → đẩy lên Hub (<see cref="KindDonTra"/>) <b>CHỈ phần đơn đã bị dọn</b>
+    /// (<see cref="LocCapDonDaDon"/>); đơn còn sống để Hub tự bắn theo <c>orders/push</c>, tránh hai tin một mã.
+    /// KHÔNG gửi local nữa.</item>
+    /// <item>Chạy ĐỘC LẬP → tự gửi webhook "đơn trả" local cho TOÀN BỘ cặp mới (không có nguồn tin nào khác để
+    /// trùng); URL trống → im lặng.</item>
+    /// </list>
+    /// <para><b>Vì sao không dùng thẳng <c>OrdersRepository.ReturnCodeSaveResult.CapDaGhi</c> làm nguồn:</b> nó
+    /// chỉ có đơn CÒN trong <c>orders</c>, mà mã trả hàng thường tới sau khi đơn đã bị dọn ⇒ notify im lặng gần
+    /// như luôn. Ở đây nó chỉ đóng vai "phần Hub đã biết rồi".</para>
     /// </summary>
     private void StartNotifyDonTraInBackground(
-        IReadOnlyList<(string OrderSn, string Code)> capDaGhi,
+        IReadOnlyList<(string OrderSn, string Code)> capMoi,
+        IReadOnlyList<(string OrderSn, string Code)> capDonConSong,
+        string? shopLogin,
         Action<string> log,
         CancellationToken ct)
     {
-        var url = _services.Settings.GetNotifyWebhookUrlDonTra();
-        // Luật thật nằm ở CoNenGuiNotifyLocal; hai vế sau CHỈ để compiler thấy url/capDaGhi đã non-null.
-        if (!CoNenGuiNotifyLocal(_services.PushOrdersToHub is not null, url, capDaGhi?.Count ?? 0)
-            || string.IsNullOrWhiteSpace(url) || capDaGhi is null)
+        var pairs = (capMoi ?? Array.Empty<(string OrderSn, string Code)>()).ToList();
+        if (pairs.Count == 0)
         {
             return;
         }
 
-        var tenShop = _services.Accounts.GetById(_accountId)?.Email;
-        if (string.IsNullOrWhiteSpace(tenShop))
+        var url = _services.Settings.GetNotifyWebhookUrlDonTra();
+        var report = _services.ReportAppAlertToHub;
+        // Luật thật nằm ở CoNenGuiNotifyLocal; vế url CHỈ để compiler thấy nó đã non-null ở nhánh local.
+        var guiLocal = CoNenGuiNotifyLocal(_services.PushOrdersToHub is not null, url, pairs.Count)
+                       && !string.IsNullOrWhiteSpace(url);
+
+        // Đã nối Hub: chỉ báo phần Hub không tự biết (đơn đã bị dọn khỏi `orders`).
+        var capHub = report is null
+            ? Array.Empty<(string OrderSn, string Code)>()
+            : LocCapDonDaDon(pairs, capDonConSong);
+        if (report is not null && capHub.Count == 0)
         {
-            tenShop = $"TK {_accountId}";
+            log($"Notify đơn trả: {pairs.Count} mã mới đều thuộc đơn CÒN trong app — để Hub bắn tin theo lượt đẩy đơn (không báo trùng).");
+            return;
         }
+        if (report is null && !guiLocal)
+        {
+            return;
+        }
+
+        var tenTaiKhoan = _services.Accounts.GetById(_accountId)?.Email;
+        if (string.IsNullOrWhiteSpace(tenTaiKhoan))
+        {
+            tenTaiKhoan = $"TK {_accountId}";
+        }
+        var tenMay = Environment.MachineName;
         var luc = DateTime.Now;
-        var pairs = capDaGhi.ToList();
 
         _ = Task.Run(async () =>
         {
             try
             {
-                var text = OrderNotifyService.TaoTinNhanDonTra(tenShop, pairs, luc);
-                var ok = await _services.Notify.SendAsync(url, text, log, ct).ConfigureAwait(false);
+                if (report is not null)
+                {
+                    var okHub = await report(
+                        KindDonTra,
+                        tenTaiKhoan,
+                        shopLogin,
+                        MoTaCapDonTra(capHub),
+                        tenMay,
+                        ct).ConfigureAwait(false);
+                    log(okHub
+                        ? $"Notify đơn trả: đã báo {capHub.Count} mã (đơn đã dọn) lên Hub (Hub gửi tin)."
+                        : $"Notify đơn trả: Hub chưa nhận {capHub.Count} mã — tin này không gửi được (mã VẪN nằm trong kho, vẫn lên Google Sheet).");
+                    return;
+                }
+
+                var text = OrderNotifyService.TaoTinNhanDonTra(tenTaiKhoan, pairs, luc);
+                var ok = await _services.Notify.SendAsync(url!, text, log, ct).ConfigureAwait(false);
                 if (ok)
                 {
-                    log($"Notify: đã báo {pairs.Count} đơn trả hàng ({OrderNotifyService.NhanDienKenh(url)}).");
+                    log($"Notify: đã báo {pairs.Count} đơn trả hàng ({OrderNotifyService.NhanDienKenh(url!)}).");
                 }
             }
             catch (OperationCanceledException)
@@ -1072,17 +1153,21 @@ public partial class AccountSession : ObservableObject, IAccountSession
                         // + hub hiển thị được với đơn CÒN sống. Bảng riêng phải ghi TRƯỚC: nó không bao giờ trượt
                         // vì "đơn không còn trong DB", nên dù đường kia bỏ hết mã thì mã vẫn được giữ.
                         var pairs = cap.Select(c => (c.MaDon, c.MaYeuCau)).ToList();
-                        _services.ReturnCodes.LuuMaTraHang(
+                        var kqMa = _services.ReturnCodes.LuuMaTraHang(
                             _accountId, pairs, _currentShopLogin, DateTime.UtcNow);
                         var kq = _services.Orders.SetReturnRequestCodes(_accountId, pairs);
                         if (kq.DaGhi > 0)
                         {
                             _services.RaiseOrdersChanged();
-                            // Đã nối Hub: Hub gửi khi push đơn. Độc lập: gửi Slack local.
-                            if (_services.PushOrdersToHub is null)
-                            {
-                                StartNotifyDonTraInBackground(kq.CapDaGhi, log, ct);
-                            }
+                        }
+                        // Notify theo KHO MÃ (`return_codes`), KHÔNG theo `kq.CapDaGhi`: phần lớn mã trả thuộc đơn
+                        // ĐÃ bị NenXoaDonKetThuc dọn khỏi `orders` nên đường kia rỗng — chính là lý do bảng riêng
+                        // tồn tại. Chỉ các cặp VỪA thêm/đổi mới được báo (chống báo lại cả lô quét). `kq.CapDaGhi`
+                        // đi kèm để nhánh Hub trừ ra phần đơn CÒN SỐNG (Hub tự bắn theo orders/push — xem
+                        // LocCapDonDaDon), khỏi hai tin một mã.
+                        if (kqMa.DaGhi > 0)
+                        {
+                            StartNotifyDonTraInBackground(kqMa.CapMoi, kq.CapDaGhi, _currentShopLogin, log, ct);
                         }
                         return $"{kq.DaGhi} đơn ghi mã mới, {kq.KhongDoi} đơn giữ nguyên, "
                             + $"{kq.KhongCoDon} mã không khớp đơn nào trong app (đơn đã dọn — mã VẪN giữ ở kho "

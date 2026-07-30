@@ -101,9 +101,10 @@ public class MaTraHangDocLapTests
         var repo = new ReturnCodesRepository(temp.Open());
 
         // KHÔNG hề có đơn nào trong bảng `orders` — đó chính là cảnh thật sau khi app dọn đơn.
-        var n = repo.LuuMaTraHang(1, new[] { ("260617ANE669U9", "2606210RB7XN9C4") }, "alina99.store", Luc);
+        var kq = repo.LuuMaTraHang(1, new[] { ("260617ANE669U9", "2606210RB7XN9C4") }, "alina99.store", Luc);
 
-        Assert.Equal(1, n);
+        Assert.Equal(1, kq.DaGhi);
+        Assert.Equal(("260617ANE669U9", "2606210RB7XN9C4"), Assert.Single(kq.CapMoi));
         Assert.Equal(("260617ANE669U9", "2606210RB7XN9C4"), Assert.Single(repo.LayMaTraHangChuaDay(1)));
     }
 
@@ -116,9 +117,10 @@ public class MaTraHangDocLapTests
         repo.DanhDauDaDay(1, new[] { "D1" }, Luc);
         Assert.Empty(repo.LayMaTraHangChuaDay(1));
 
-        var n = repo.LuuMaTraHang(1, new[] { ("D1", "R1") }, "shop", Luc.AddDays(1));
+        var kq = repo.LuuMaTraHang(1, new[] { ("D1", "R1") }, "shop", Luc.AddDays(1));
 
-        Assert.Equal(0, n);
+        Assert.Equal(0, kq.DaGhi);
+        Assert.Empty(kq.CapMoi);
         Assert.Empty(repo.LayMaTraHangChuaDay(1)); // KHÔNG đẩy trùng
     }
 
@@ -131,9 +133,10 @@ public class MaTraHangDocLapTests
         repo.LuuMaTraHang(1, new[] { ("D1", "R1") }, "shop", Luc);
         repo.DanhDauDaDay(1, new[] { "D1" }, Luc);
 
-        var n = repo.LuuMaTraHang(1, new[] { ("D1", "R2") }, "shop", Luc.AddDays(1));
+        var kq = repo.LuuMaTraHang(1, new[] { ("D1", "R2") }, "shop", Luc.AddDays(1));
 
-        Assert.Equal(1, n);
+        Assert.Equal(1, kq.DaGhi);
+        Assert.Equal(("D1", "R2"), Assert.Single(kq.CapMoi));
         Assert.Equal(("D1", "R2"), Assert.Single(repo.LayMaTraHangChuaDay(1)));
     }
 
@@ -143,9 +146,10 @@ public class MaTraHangDocLapTests
         using var temp = new TempDatabase();
         var repo = new ReturnCodesRepository(temp.Open());
 
-        var n = repo.LuuMaTraHang(1, new[] { ("D1", "  "), ("", "R1"), ("D2", "R2") }, null, Luc);
+        var kq = repo.LuuMaTraHang(1, new[] { ("D1", "  "), ("", "R1"), ("D2", "R2") }, null, Luc);
 
-        Assert.Equal(1, n);
+        Assert.Equal(1, kq.DaGhi);
+        Assert.Equal(("D2", "R2"), Assert.Single(kq.CapMoi));
         Assert.Equal("D2", Assert.Single(repo.LayMaTraHangChuaDay(1)).OrderSn);
     }
 
