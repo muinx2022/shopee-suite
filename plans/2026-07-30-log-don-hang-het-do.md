@@ -1,7 +1,7 @@
 # Plan: Nhật ký module Đơn hàng hết đơ khi chạy nhiều tài khoản
 
 - **Ngày:** 2026-07-30
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành (chờ phiên chính nghiệm thu + commit)
 - **Người lập:** Fable · **Người thực thi:** opus-dev (trong worktree)
 
 ## 1. Bối cảnh & mục tiêu
@@ -188,4 +188,78 @@ thật của user**), vào tab Shopee → Tài khoản:
 
 ## Báo cáo thực thi
 
-<Để trống — người thực thi điền.>
+**Ngày:** 2026-07-30 · **Người thực thi:** opus-dev (worktree `agent-ab1fc2db54e1eb5f2`) · **Chưa commit.**
+
+Plan đối chiếu với code thật: **khớp toàn bộ** (7 vị trí `file:dòng` ở mục 1 đều đúng). Không có điểm nào
+phải hỏi lại trước khi làm.
+
+### File đã sửa (4 — 3 theo phạm vi + 1 file test được plan §4 cho phép)
+
+| File | Thay đổi |
+|---|---|
+| `orders/XuLyDonShopee.App/Services/ActivityLog.cs` | Viết lại ruột. Bỏ `ObservableCollection Entries` (rổ chung cap 500) → `Dictionary<string, Queue<LogEntry>>` khóa `OrdinalIgnoreCase`, trần `MaxLinesPerSource = 200` **cho mỗi nguồn**. `Append` chỉ `_pending.Enqueue(...)` + nhét buffer + hẹn báo → **không I/O trên luồng gọi**. `Timer` nền flush 1s/lần bằng `File.AppendAllLines` + `RollIfNeeded` 8MB (bê từ `LogBuffer.cs`). Thêm `event Action<string>? SourceUpdated` gom nhóm 250ms (cờ `_notifyScheduled` + timer một-nhịp), `Snapshot(source)` trả bản sao dưới lock, `Flush()` public, `IDisposable`. Giữ nguyên `Append(string,string)`, `CurrentLogPath`, `FormatLine`, `Clear()`, `Clear(string)`. |
+| `orders/XuLyDonShopee.App/ViewModels/AccountsViewModel.cs` | Bỏ `LogEntries`, `FilteredLogEntries`, `OnLogEntriesChanged`, `RebuildFilteredLog`. `LogText` từ property tính toán → `[ObservableProperty]` gán 1 lần/nhịp trong `RebuildLogText()`. Thêm `OnLogSourceUpdated(string)` (chỉ dựng lại khi nguồn == `SelectedRow.Email`). `LogPath` được `OnPropertyChanged` mỗi lần rebuild (sửa lỗi đứng ở file hôm qua sau nửa đêm). `Dispose` gỡ `SourceUpdated`. |
+| `orders/XuLyDonShopee.App/Views/AccountsView.axaml.cs` | Bỏ nghe `FilteredLogEntries.CollectionChanged` → nghe `vm.PropertyChanged` lọc `nameof(LogText)`, mỗi lần đổi `Post` **một** lượt đặt `CaretIndex`. Nút Copy dùng thẳng `vm.LogText`. Xóa comment lỗi thời "log nằm trong ListBox". |
+| `orders/XuLyDonShopee.Tests/ActivityLogTests.cs` | Cập nhật theo API mới + thêm test cap-riêng-từng-nguồn, `Snapshot` (hoa/thường, bản sao, rỗng), file-vẫn-đủ-dòng-khi-hiển-thị-bị-cắt, `Clear` báo ngay, và test đo hiệu năng 5000 dòng/5 luồng. |
+
+### Đo hiệu năng (số THẬT — test `Append_5000DongTu5Luong_NhanhKhongChamDia_BaoUIGomNhom_FileDuDong`)
+
+5000 dòng, 5 luồng song song, 5 nguồn:
+
+| # | Chỉ số | Kết quả |
+|---|---|---|
+| 1 | Thời gian `Append` | **trung bình 6,99 µs · p50 0,60 µs · p99 6,60 µs · tệ nhất 4428,7 µs**. Mốc bản CŨ (`File.AppendAllText` 1 dòng/lần, chính việc `Append` cũ làm): **85,0 µs/dòng** → p50 nhanh hơn ~**140×**. Cả 5000 dòng xong trong **10,1 ms**. |
+| 2 | Số lần `SourceUpdated` bắn | **5** (không gom nhóm sẽ là 5000) → giảm **1000×**. |
+| 3 | Log không mất | file có **đúng 5000 dòng** sau `Flush()`. |
+| 4 | Buffer mỗi nguồn | **200 dòng**, đầu = `dong 800`, cuối = `dong 999` → đúng 200 dòng MỚI NHẤT. |
+
+Ghi chú số "tệ nhất 4,4 ms": xảy ra ở lượt #657 giữa vòng lặp (GC/điều phối luồng), **không phải chạm đĩa** —
+p99 chỉ 6,6 µs. Bản thân phép đo `Stopwatch.GetTimestamp()` quanh mỗi lượt cũng cộng ~0,1 µs vào con số.
+
+### Build & test
+
+- `dotnet build ShopeeSuite.sln -c Debug` → **Build succeeded, 0 Warning, 0 Error**.
+- `dotnet test orders/XuLyDonShopee.Tests` → **Passed 1445 / Failed 0 / Skipped 0**. (Con số 774 trong plan là
+  ghi chép cũ; số thật hiện tại là 1445.)
+- `git status` trong worktree: **đúng 4 file M**, không có file lạ.
+
+### Kiểm bằng mắt (cách ly tuyệt đối)
+
+**Cảnh báo phải ghi lại:** ở commit này `data-dir.txt` **KHÔNG** cách ly được module Đơn hàng — nó chỉ đổi
+`SuitePaths.Root` (phía suite), còn orders đi đường `OrdersModuleHost` → `new AppServices()` →
+`Database.DefaultPath()` = `%AppData%\XuLyDonShopee\app.db` cứng, không đọc marker cũng không đọc `--data-dir`.
+Chạy app suite thật sẽ đụng dữ liệu thật của user.
+
+Nên thay vì chạy app suite, dựng **bệ thử Avalonia riêng NGOÀI repo** (trong scratchpad) nạp đúng
+`AccountsView` + `AccountsViewModel` thật, với `new AppServices(<db trong scratchpad>)` — đường duy nhất
+truyền được thư mục dữ liệu. Đã xác nhận sau khi chạy: `%APPDATA%\XuLyDonShopee` có `LastWriteTime` =
+**29/07**, không sinh file nào của hôm nay.
+
+Ảnh chụp (`RenderTargetBitmap` của chính cửa sổ), 3 tấm:
+`…\scratchpad\shots\01-dang-xem-log-cua-tk-A.png`, `02-doi-sang-tk-B.png`, `03-sau-khi-bam-xoa.png`
+(scratchpad phiên `68d1c245-ea0b-42cf-b067-209262af4e2d`; mã bệ thử ở `…\scratchpad\LogPanelHarness\`).
+
+Kịch bản: 2 tài khoản, tk A bơm 400 dòng (6ms/dòng) trong lúc tk B "chạy ồn" bơm liên tục (2ms/dòng).
+
+1. Panel hiện log tk A, **tự cuộn** xuống dòng mới nhất, không lẫn một dòng nào của tk B — dù tk B đang dội. ✔
+2. Đổi chọn sang tk B → panel đổi hẳn sang log tk B, vẫn tự cuộn. ✔
+3. Nút **Xóa** dọn sạch panel của tk đang chọn; đường dẫn file log dưới panel vẫn hiện đúng. ✔
+4. File log trên đĩa: **866 dòng** = 400 (tk A) + 466 (tk B) — cắt hiển thị 200, KHÔNG cắt file. ✔
+
+### Điểm cần phiên chính soi lại
+
+1. **Hàng đợi ≤1 giây có thể mất khi tắt app** — `ActivityLog.Dispose()`/`Flush()` đã có nhưng **không ai gọi**:
+   nơi duy nhất giữ nó là `AppServices` (file bị cấm sửa). Đúng như plan Bước 2 dặn "nếu không có thì thôi".
+   Việc sau: gọi `Log.Dispose()` trong `OrdersModuleHost.StopAsync`.
+2. **So khớp nguồn đổi từ `Ordinal` sang `OrdinalIgnoreCase`** (cả buffer lẫn `OnLogSourceUpdated`) cho khớp
+   cách gom buffer theo email. Nới lỏng chứ không siết, nhưng là khác biệt hành vi có chủ ý.
+3. **Nhãn `"TK {id}"`** — xác nhận đúng như plan cảnh báo (`AccountSession.cs:91` đặt, `:985` mới đổi sang
+   email). Các dòng phát trước đó vào buffer `"TK 1"` nên không hiện trên panel. **Không phải hồi quy** (bản cũ
+   lọc `Source == email` cũng không hiện). Chưa sửa vì file bị cấm — để việc sau.
+4. **Dòng log xếp hàng trước nửa đêm mà flush sau nửa đêm sẽ rơi vào file NGÀY MỚI** (đường dẫn tính lúc
+   flush). Lệch tối đa 1 giây, `LogBuffer` của suite cũng cùng dạng — không xử để khỏi phình phạm vi.
+5. **Test đo hiệu năng có yếu tố thời gian** (`Thread.Sleep(600)` chờ nhịp báo cuối). Ngưỡng assert để rất
+   rộng (trung bình < 50 µs, số lần báo < 500) nên khó nhấp nháy, nhưng vẫn là test chạm đồng hồ — nếu phiên
+   chính không muốn giữ trong bộ test thường thì cứ bỏ hẳn test đó, 4 số đo đã có ở trên.
+6. **`ActivityLogTests.cs` bị sửa** — nằm ngoài danh sách 3 file, nhưng plan §4 cho phép ("sửa test cho khớp
+   API mới"); file này không nằm trong danh sách cấm.

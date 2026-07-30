@@ -1,5 +1,4 @@
-using System.Collections.Specialized;
-using System.Linq;
+using System.ComponentModel;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
@@ -10,8 +9,8 @@ namespace XuLyDonShopee.App.Views;
 
 public partial class AccountsView : UserControl
 {
-    // Đang lắng nghe collection nào (để gỡ đăng ký khi DataContext đổi, tránh rò rỉ / cuộn nhầm).
-    private INotifyCollectionChanged? _watchedLog;
+    // Đang lắng nghe VM nào (để gỡ đăng ký khi DataContext đổi, tránh rò rỉ / cuộn nhầm).
+    private INotifyPropertyChanged? _watchedVm;
 
     public AccountsView()
     {
@@ -21,22 +20,22 @@ public partial class AccountsView : UserControl
     }
 
     /// <summary>
-    /// Khi DataContext (AccountsViewModel) gắn/đổi: đăng ký lắng nghe <c>FilteredLogEntries</c> (collection
-    /// ĐANG HIỂN THỊ của panel — đã lọc theo tài khoản) để mỗi khi có dòng mới thì tự cuộn xuống dòng cuối.
-    /// Gỡ đăng ký cũ trước để không rò rỉ. Nuốt lỗi an toàn.
+    /// Khi DataContext (AccountsViewModel) gắn/đổi: đăng ký nghe <c>LogText</c> đổi để tự cuộn xuống dòng cuối.
+    /// VM chỉ gán lại <c>LogText</c> mỗi nhịp gom của <c>ActivityLog</c> (~250ms) nên tự cuộn cũng chỉ chạy ngần
+    /// ấy, dù log đang dội. Gỡ đăng ký cũ trước để không rò rỉ. Nuốt lỗi an toàn.
     /// </summary>
     private void OnDataContextChanged(object? sender, System.EventArgs e)
     {
-        if (_watchedLog is not null)
+        if (_watchedVm is not null)
         {
-            _watchedLog.CollectionChanged -= OnLogEntriesChanged;
-            _watchedLog = null;
+            _watchedVm.PropertyChanged -= OnVmPropertyChanged;
+            _watchedVm = null;
         }
 
-        if (DataContext is AccountsViewModel vm && vm.FilteredLogEntries is INotifyCollectionChanged incc)
+        if (DataContext is AccountsViewModel vm)
         {
-            _watchedLog = incc;
-            incc.CollectionChanged += OnLogEntriesChanged;
+            _watchedVm = vm;
+            vm.PropertyChanged += OnVmPropertyChanged;
         }
     }
 
@@ -71,13 +70,8 @@ public partial class AccountsView : UserControl
         e.Handled = true;
     }
 
-    /// <summary>
-    /// Có dòng log mới (Add) → cuộn ListBox xuống dòng cuối để luôn thấy hoạt động mới nhất. Marshal về UI
-    /// thread cho chắc (FilteredLogEntries chỉ mutate trên UI thread nhưng vẫn phòng hờ). Nuốt mọi lỗi (panel
-    /// có thể chưa gắn xong).
-    /// </summary>
-    /// <summary>Nút "Copy": chép toàn bộ nhật ký đang hiển thị (FilteredLogEntries → Display) vào clipboard để dán
-    /// ra ngoài (log nằm trong ListBox từng dòng nên bôi đen không được). Clipboard lấy qua TopLevel. Nuốt lỗi.</summary>
+    /// <summary>Nút "Copy": chép toàn bộ nhật ký đang hiển thị (<c>LogText</c> — chính chuỗi TextBox đang vẽ) vào
+    /// clipboard để dán ra ngoài. Clipboard lấy qua TopLevel. Nuốt lỗi.</summary>
     private async void CopyLog_Click(object? sender, RoutedEventArgs e)
     {
         if (DataContext is not AccountsViewModel vm)
@@ -86,7 +80,7 @@ public partial class AccountsView : UserControl
         }
         try
         {
-            var text = string.Join("\n", vm.FilteredLogEntries.Select(x => x.Display));
+            var text = vm.LogText;
             var clip = TopLevel.GetTopLevel(this)?.Clipboard;
             if (clip is null)
             {
@@ -94,7 +88,8 @@ public partial class AccountsView : UserControl
                 return;
             }
             await clip.SetTextAsync(text);
-            vm.BusyStatus = $"Đã copy {vm.FilteredLogEntries.Count} dòng log vào clipboard.";
+            var soDong = text.Length == 0 ? 0 : text.Split('\n').Length;
+            vm.BusyStatus = $"Đã copy {soDong} dòng log vào clipboard.";
         }
         catch (System.Exception ex)
         {
@@ -102,9 +97,14 @@ public partial class AccountsView : UserControl
         }
     }
 
-    private void OnLogEntriesChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    /// <summary>
+    /// <c>LogText</c> vừa đổi (panel có log mới / đổi tài khoản) → cuộn xuống dòng cuối để luôn thấy hoạt động
+    /// mới nhất. Marshal về UI thread cho chắc (VM chỉ gán trên UI thread nhưng vẫn phòng hờ) và ĐỌC độ dài từ
+    /// chính TextBox sau khi binding đã áp. Nuốt mọi lỗi (panel có thể chưa gắn xong).
+    /// </summary>
+    private void OnVmPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.Action != NotifyCollectionChangedAction.Add)
+        if (e.PropertyName != nameof(AccountsViewModel.LogText))
         {
             return;
         }
@@ -113,7 +113,7 @@ public partial class AccountsView : UserControl
         {
             try
             {
-                // Log nay là TextBox chỉ-đọc: đặt con trỏ về CUỐI → cuộn xuống dòng mới nhất.
+                // Log là TextBox chỉ-đọc: đặt con trỏ về CUỐI → cuộn xuống dòng mới nhất.
                 var box = this.FindControl<TextBox>("LogBox");
                 if (box is not null)
                 {
