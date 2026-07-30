@@ -260,12 +260,14 @@ ON CONFLICT(shop_id,order_sn) DO UPDATE SET
         var fromStr = Iso(new DateTimeOffset(DateTime.SpecifyKind(fromUtc, DateTimeKind.Utc), TimeSpan.Zero));
         var toStr = Iso(new DateTimeOffset(DateTime.SpecifyKind(toUtcExclusive, DateTimeKind.Utc), TimeSpan.Zero));
 
-        lock (_gate)
+        // Đọc qua connection ĐỌC riêng (WAL) chứ KHÔNG giữ _gate: truy vấn này quét mọi đơn trong khoảng ngày,
+        // giữ khóa toàn cục suốt lượt quét sẽ chặn heartbeat và mọi lượt client đẩy đơn.
+        using (var conn = OpenReadConnection())
         {
             var stats = new SharedOrderStatistics();
             var rows = new List<StatOrderRow>();
 
-            using (var c = _conn.CreateCommand())
+            using (var c = conn.CreateCommand())
             {
                 c.CommandText = @"SELECT COALESCE(s.username, ''), o.status, o.status_description, o.cancel_reason, o.carrier, o.channel,
        o.payment_method, o.final_amount, o.total_price, o.tracking_number, o.item_count, o.synced_at

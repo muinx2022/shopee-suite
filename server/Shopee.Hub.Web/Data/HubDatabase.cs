@@ -21,6 +21,7 @@ public sealed partial class HubDatabase : IDisposable
 {
     private readonly object _gate = new();
     private readonly string _connectionString;
+    private readonly string _readConnectionString;
     private readonly SqliteConnection _conn;
 
     public string FilesDir { get; }
@@ -44,10 +45,24 @@ public sealed partial class HubDatabase : IDisposable
         FilesDir = Path.Combine(dataDir, "files");
         Directory.CreateDirectory(FilesDir);
 
+        var dbPath = Path.Combine(dataDir, "hub.db");
         _connectionString = new SqliteConnectionStringBuilder
         {
-            DataSource = Path.Combine(dataDir, "hub.db"),
+            DataSource = dbPath,
             Pooling = true,
+        }.ToString();
+        // Connection ĐỌC dùng chuỗi kết nối RIÊNG với Pooling=false — thay đổi PHÒNG NGỪA, không phải vá lỗi
+        // đang nổ. Sự thật đã kiểm bằng thực nghiệm: pool của Microsoft.Data.Sqlite KHÔNG reset pragma, nên
+        // connection từng bật `query_only=ON` lúc trả về pool vẫn giữ cờ đó, ai lấy lại để GHI sẽ dính
+        // "attempt to write a readonly database". Hiện KHÔNG có đường nào chạm tới: _conn mở một lần lúc khởi
+        // động và là con được nhả SAU CÙNG, nên vòng sau vẫn vớ đúng nó (đã thử dựng test tái hiện qua API
+        // công khai — không tái hiện được). Nhưng cái bẫy chỉ nằm im chừng nào chưa ai mở thêm connection GHI
+        // từ _connectionString; tách pool ra là gỡ hẳn ngòi. Mở connection SQLite rất rẻ nên bỏ pool ở đây
+        // không đáng kể.
+        _readConnectionString = new SqliteConnectionStringBuilder
+        {
+            DataSource = dbPath,
+            Pooling = false,
         }.ToString();
         _conn = new SqliteConnection(_connectionString);
         _conn.Open();
@@ -129,7 +144,7 @@ public sealed partial class HubDatabase : IDisposable
     /// <summary>Connection doc ngan han: WAL cho phep query UI chay song song voi heartbeat/write tren connection chinh.</summary>
     private SqliteConnection OpenReadConnection()
     {
-        var conn = new SqliteConnection(_connectionString);
+        var conn = new SqliteConnection(_readConnectionString);
         conn.Open();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = "PRAGMA busy_timeout=5000; PRAGMA query_only=ON;";
