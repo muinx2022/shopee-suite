@@ -4,12 +4,12 @@ namespace Shopee.Suite;
 
 /// <summary>
 /// Facade tĩnh hộp thoại của app — ViewModel gọi qua đây, không đụng MessageBox/framework UI trực tiếp.
-/// Ruột là <see cref="IDialogService"/> (hiện <see cref="WpfDialogService"/>, sẽ swap khi chuyển Avalonia).
-/// API async vì dialog Avalonia vốn async; impl tự marshal UI thread nên gọi được từ luồng nền.
+/// Ruột là <see cref="IDialogService"/> (hiện <see cref="WpfDialogService"/>).
+/// API async để ViewModel gọi được từ luồng nền (impl tự marshal về UI thread).
 /// </summary>
 public static class Dialogs
 {
-    public static IDialogService Service { get; set; } = new AvaloniaDialogService();
+    public static IDialogService Service { get; set; } = new WpfDialogService();
 
     /// <summary>Hộp Có/Không. true = Có.</summary>
     public static Task<bool> ConfirmAsync(string text, string caption = "", DialogIcon icon = DialogIcon.Question) =>

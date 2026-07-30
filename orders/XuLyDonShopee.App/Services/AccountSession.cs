@@ -94,21 +94,13 @@ public partial class AccountSession : ObservableObject, IAccountSession
 
     /// <summary>
     /// Marshal thông báo <b>PropertyChanged</b> về UI thread. Phiên chạy nền (RunAsync) set
-    /// State/StatusText/ToShipCount trên thread nền; nếu UI (Plan B) bind TRỰC TIẾP vào phiên thì Avalonia
-    /// cập nhật binding phải trên UI thread — nếu bắn từ nền sẽ ném "Call from invalid thread". Chạy ngay
-    /// nếu đã ở UI thread; ngược lại <c>Dispatcher.UIThread.Post</c>.
+    /// State/StatusText/ToShipCount trên thread nền; nếu UI (Plan B) bind TRỰC TIẾP vào phiên thì cập nhật
+    /// binding phải trên UI thread — bắn từ nền sẽ ném "Call from invalid thread". Chạy ngay nếu đã ở UI
+    /// thread; ngược lại xếp hàng qua <see cref="UiDispatch"/>.
     /// </summary>
     protected override void OnPropertyChanged(System.ComponentModel.PropertyChangedEventArgs e)
     {
-        var ui = Avalonia.Threading.Dispatcher.UIThread;
-        if (ui.CheckAccess())
-        {
-            base.OnPropertyChanged(e);
-        }
-        else
-        {
-            ui.Post(() => base.OnPropertyChanged(e));
-        }
+        UiDispatch.Run(() => base.OnPropertyChanged(e));
     }
 
     public Process? BraveProcess => _bridge?.Process;

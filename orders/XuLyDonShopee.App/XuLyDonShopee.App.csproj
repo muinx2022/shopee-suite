@@ -2,26 +2,23 @@
   <PropertyGroup>
     <!-- Thư viện module (phase 1b): trước là WinExe độc lập, nay build thành DLL để shell Shopee.Suite nạp.
          Bỏ ApplicationManifest/app.manifest (chỉ dùng cho exe) và BuiltInComInteropSupport (không có COM interop;
-         WindowFocus dùng P/Invoke DllImport, không cần cờ này). -->
-    <TargetFramework>net8.0</TargetFramework>
+         WindowFocus dùng P/Invoke DllImport, không cần cờ này).
+         View của module port sang WPF ở ĐỢT 5 — hiện tại project chỉ chứa VM/service/converter. -->
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
     <Nullable>enable</Nullable>
-    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
-    <!-- KHÔNG bật PublishReadyToRun: R2R crossgen recompile mọi DLL ngay trên máy → sinh hash lạ →
-         Avalonia.Desktop.dll mất uy tín ISG cloud của bản NuGet gốc → WDAC (UMCI Enforced) chặn 0x800711C7.
-         Publish IL-thuần giữ nguyên hash gốc các DLL NuGet (ISG biết là an toàn) nên chạy được.
-         Đã đo thực nghiệm back-to-back 2026-07-14: IL chạy 3/3, R2R chặn 6/6 trên cùng máy. -->
+    <!-- KHÔNG bật PublishReadyToRun: R2R crossgen recompile mọi DLL ngay trên máy → sinh hash lạ → DLL mất
+         uy tín ISG cloud của bản NuGet gốc → WDAC (UMCI Enforced) chặn 0x800711C7. Publish IL-thuần giữ
+         nguyên hash gốc các DLL NuGet (ISG biết là an toàn) nên chạy được. Đã đo thực nghiệm back-to-back
+         2026-07-14 (hồi UI còn chạy trên DLL NuGet bên thứ ba): IL chạy 3/3, R2R chặn 6/6 trên cùng máy.
+         Ràng buộc này phải KIỂM LẠI ở đợt cuối của cuộc port — runtime WPF là DLL chính chủ Microsoft. -->
   </PropertyGroup>
 
   <ItemGroup>
-    <AvaloniaResource Include="Assets\**" />
+    <Resource Include="Assets\**" />
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Avalonia" Version="11.3.0" />
-    <PackageReference Include="Avalonia.Desktop" Version="11.3.0" />
-    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.0" />
-    <PackageReference Include="Avalonia.Fonts.Inter" Version="11.3.0" />
-    <PackageReference Include="Avalonia.Controls.DataGrid" Version="11.3.0" />
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
   </ItemGroup>
 

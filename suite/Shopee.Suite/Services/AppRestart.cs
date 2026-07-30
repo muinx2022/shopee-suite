@@ -1,5 +1,4 @@
-using Avalonia;
-using Avalonia.Controls.ApplicationLifetimes;
+using System.Windows;
 
 namespace Shopee.Suite.Services;
 
@@ -7,8 +6,8 @@ namespace Shopee.Suite.Services;
 /// Khởi động lại CHÍNH app đang chạy (KHÁC Velopack update — không đổi phiên bản): dùng khi đổi "Chế độ
 /// ứng dụng" cần dựng lại shell. Relaunch đúng exe hiện hành qua <see cref="Environment.ProcessPath"/>
 /// (đúng cả khi cài single-file/Velopack; KHÔNG dùng Assembly.Location — rỗng khi single-file) KÈM lại mọi
-/// tham số dòng lệnh gốc (để <c>--mode</c> của shortcut sống qua restart), rồi đóng app ÊM qua desktop
-/// lifetime (Shutdown kích ShutdownRequested → module dừng như đóng thường).
+/// tham số dòng lệnh gốc (để <c>--mode</c> của shortcut sống qua restart), rồi đóng app ÊM qua
+/// <see cref="Application.Shutdown()"/> (kích event Exit → hook dừng module chạy như đóng thường).
 /// </summary>
 public static class AppRestart
 {
@@ -34,10 +33,10 @@ public static class AppRestart
             return;
         }
 
-        // Đóng êm: Shutdown() kích ShutdownRequested (đã dừng module đơn hàng + lưu store trong App.axaml).
-        // Không lấy được lifetime (vd chạy ngoài desktop) → Environment.Exit.
-        if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
-            desktop.Shutdown();
+        // Đóng êm: Shutdown() kích event Exit (đã dừng module đơn hàng + lưu store trong App.xaml.cs).
+        // Không có Application (không nên xảy ra) → Environment.Exit.
+        if (Application.Current is { } app)
+            app.Shutdown();
         else
             Environment.Exit(0);
     }

@@ -1,7 +1,7 @@
 using System.Collections.Generic;
-using Avalonia.Controls;
-using Avalonia.LogicalTree;
-using Avalonia.VisualTree;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Media;
 
 namespace XuLyDonShopee.App.Views;
 
@@ -15,7 +15,7 @@ namespace XuLyDonShopee.App.Views;
 /// </list>
 /// Viết thuần (không phụ thuộc bước render) để test được: duyệt gộp cả visual tree (lúc app chạy, sau khi ô
 /// đã render) LẪN logical tree (lúc test dựng control bằng tay, chưa render — <c>Border.Child</c>/
-/// <c>Panel.Children</c> đã là con ngay khi gán). Phòng thủ null, không ném khi gặp ô lạ.
+/// <c>Panel.Children</c> đã là con logic ngay khi gán). Phòng thủ null, không ném khi gặp ô lạ.
 /// </summary>
 public static class CellTextExtractor
 {
@@ -23,7 +23,7 @@ public static class CellTextExtractor
     /// Trả text ô để copy, hoặc <c>null</c> nếu ô không có text đáng copy: ô chứa <see cref="Button"/>
     /// (cột "Phiếu") hoặc không có <see cref="TextBlock"/> nào có chữ (ô trống).
     /// </summary>
-    public static string? ExtractCellText(Control? cell)
+    public static string? ExtractCellText(DependencyObject? cell)
     {
         if (cell is null)
         {
@@ -41,7 +41,7 @@ public static class CellTextExtractor
     }
 
     /// <summary>Có bất kỳ <see cref="Button"/> nào trong cây con của ô không (nhận diện ô "Phiếu").</summary>
-    private static bool ContainsButton(Control node)
+    private static bool ContainsButton(DependencyObject node)
     {
         if (node is Button)
         {
@@ -60,7 +60,7 @@ public static class CellTextExtractor
     }
 
     /// <summary><see cref="TextBlock"/> đầu tiên theo thứ tự duyệt sâu (DFS) trong cây con của ô, hoặc null.</summary>
-    private static TextBlock? FindFirstTextBlock(Control node)
+    private static TextBlock? FindFirstTextBlock(DependencyObject node)
     {
         if (node is TextBlock tb)
         {
@@ -80,24 +80,30 @@ public static class CellTextExtractor
     }
 
     /// <summary>
-    /// Con trực tiếp của một control: gộp visual children (đầy đủ sau khi render, lúc app chạy) và logical
+    /// Con trực tiếp của một phần tử: gộp visual children (đầy đủ sau khi render, lúc app chạy) và logical
     /// children (đủ cho control dựng tay lúc test), loại trùng theo tham chiếu.
     /// </summary>
-    private static IEnumerable<Control> Children(Control node)
+    private static IEnumerable<DependencyObject> Children(DependencyObject node)
     {
-        var seen = new HashSet<Control>();
+        var seen = new HashSet<DependencyObject>();
 
-        foreach (var v in node.GetVisualChildren())
+        // VisualTreeHelper chỉ nhận Visual/Visual3D — phần tử khác (vd ContentElement) bỏ qua nhánh visual.
+        if (node is Visual or System.Windows.Media.Media3D.Visual3D)
         {
-            if (v is Control c && seen.Add(c))
+            var count = VisualTreeHelper.GetChildrenCount(node);
+            for (var i = 0; i < count; i++)
             {
-                yield return c;
+                var v = VisualTreeHelper.GetChild(node, i);
+                if (seen.Add(v))
+                {
+                    yield return v;
+                }
             }
         }
 
-        foreach (var l in ((ILogical)node).LogicalChildren)
+        foreach (var l in LogicalTreeHelper.GetChildren(node))
         {
-            if (l is Control c && seen.Add(c))
+            if (l is DependencyObject c && seen.Add(c))
             {
                 yield return c;
             }

@@ -1,0 +1,80 @@
+<Application x:Class="Shopee.Suite.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:Shopee.Suite.ViewModels"
+             xmlns:views="clr-namespace:Shopee.Suite.Views"
+             xmlns:ws="clr-namespace:Shopee.Suite.Modules.Workspace"
+             xmlns:bs="clr-namespace:Shopee.Suite.Modules.BigSeller"
+             xmlns:data="clr-namespace:Shopee.Suite.Modules.Data"
+             xmlns:srch="clr-namespace:Shopee.Suite.Modules.Search"
+             xmlns:acc="clr-namespace:Shopee.Suite.Modules.Accounts"
+             xmlns:ca="clr-namespace:Shopee.Suite.Modules.CheckAccount"
+             xmlns:fleet="clr-namespace:Shopee.Suite.Modules.Fleet"
+             xmlns:settings="clr-namespace:Shopee.Suite.Modules.Settings"
+             xmlns:conv="clr-namespace:Shopee.Suite.Infrastructure"
+             xmlns:orders="clr-namespace:XuLyDonShopee.App.ViewModels;assembly=XuLyDonShopee.App">
+    <!-- KHÔNG đặt StartupUri: MainWindow dựng tay trong App.OnStartup để gán DataContext = ShellViewModel.
+         Entry point thật là Program.Main (csproj: StartupObject) — Velopack phải chạy trước app WPF. -->
+
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="Themes/Theme.xaml" />
+                <!-- Bộ icon hành động dùng chung 2 module — merge ở cấp Application để mọi view/window
+                     (kể cả module Đơn hàng chạy trong app này) tra được. -->
+                <ResourceDictionary Source="Themes/Icons.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+
+            <!-- ══════════ Converter dùng chung (WPF không có IsVisible → mọi ẩn/hiện qua đây) ══════════ -->
+            <BooleanToVisibilityConverter x:Key="BoolToVis" />
+            <conv:InverseBoolConverter x:Key="InvBool" />
+            <conv:InverseBoolToVisibilityConverter x:Key="InvBoolToVis" />
+            <conv:CountToVisibilityConverter x:Key="CountToVis" />
+            <conv:StringToVisibilityConverter x:Key="StringToVis" />
+            <conv:WiderThanConverter x:Key="WiderThan" />
+
+            <!-- ══════════ ViewModel-first navigation (thay ViewLocator reflection của bản Avalonia) ══════════ -->
+            <!-- ĐÃ PORT: Welcome + ComingSoon. -->
+            <DataTemplate DataType="{x:Type vm:WelcomeViewModel}">
+                <views:WelcomeView />
+            </DataTemplate>
+            <DataTemplate DataType="{x:Type vm:ComingSoonViewModel}">
+                <views:ComingSoonView />
+            </DataTemplate>
+
+            <!-- CHƯA PORT (đợt 2–5 thay từng dòng bằng view thật): mọi màn module tạm dùng ComingSoonView,
+                 view tự sinh chữ "đang port" từ kiểu ViewModel. -->
+            <DataTemplate DataType="{x:Type ws:WorkspaceViewModel}">     <!-- đợt 3 -->
+                <views:ComingSoonView />
+            </DataTemplate>
+            <DataTemplate DataType="{x:Type bs:BigSellerViewModel}">     <!-- đợt 2 -->
+                <views:ComingSoonView />
+            </DataTemplate>
+            <DataTemplate DataType="{x:Type data:DataViewModel}">        <!-- đợt 2 -->
+                <views:ComingSoonView />
+            </DataTemplate>
+            <DataTemplate DataType="{x:Type acc:AccountsViewModel}">     <!-- đợt 2 -->
+                <views:ComingSoonView />
+            </DataTemplate>
+            <DataTemplate DataType="{x:Type srch:SearchViewModel}">      <!-- đợt 4 -->
+                <views:ComingSoonView />
+            </DataTemplate>
+            <DataTemplate DataType="{x:Type ca:CheckAccountViewModel}">  <!-- đợt 4 -->
+                <views:ComingSoonView />
+            </DataTemplate>
+            <DataTemplate DataType="{x:Type fleet:FleetViewModel}">      <!-- đợt 4 -->
+                <views:ComingSoonView />
+            </DataTemplate>
+            <DataTemplate DataType="{x:Type settings:SettingsViewModel}">        <!-- đợt 5 -->
+                <views:ComingSoonView />
+            </DataTemplate>
+            <DataTemplate DataType="{x:Type settings:UnifiedSettingsViewModel}"> <!-- đợt 5 -->
+                <views:ComingSoonView />
+            </DataTemplate>
+            <!-- Module "Xử lý đơn Shopee" (MainView + 3 màn con) — đợt 5. -->
+            <DataTemplate DataType="{x:Type orders:MainViewModel}">
+                <views:ComingSoonView />
+            </DataTemplate>
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>

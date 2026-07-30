@@ -1,103 +1,93 @@
 using System.Collections.Generic;
+using System.IO;
 using System.Threading.Tasks;
-using Avalonia.Controls;
-using Avalonia.Platform.Storage;
+using System.Windows;
+using Microsoft.Win32;
 using XuLyDonShopee.App.ViewModels;
-using XuLyDonShopee.App.Views;
 
 namespace XuLyDonShopee.App.Services;
 
 /// <summary>
-/// Hiển thị các hộp thoại modal (xác nhận, nhập proxy). Cửa sổ chính được gán khi app khởi động.
+/// Hiển thị các hộp thoại modal (xác nhận, chọn thư mục, lưu CSV). Cửa sổ chính được shell gán khi app
+/// khởi động (<c>DialogService.MainWindow = …</c>).
+/// <para>
+/// ⚠ ĐỢT 1 của cuộc port: 2 hộp thoại RIÊNG của module (ConfirmDialog, OrderDetailDialog) chưa dựng lại
+/// bằng WPF (đợt 5) → <see cref="ConfirmAsync"/>/<see cref="InfoAsync"/> tạm dùng <see cref="MessageBox"/>
+/// của Windows, còn <see cref="EditOrderAsync"/> trả null (coi như người dùng bấm Hủy). Chọn thư mục / lưu
+/// CSV đã là bản WPF THẬT (Microsoft.Win32) nên dùng được ngay.
+/// </para>
 /// </summary>
 public static class DialogService
 {
     public static Window? MainWindow { get; set; }
 
     /// <summary>Hộp thoại xác nhận (Đồng ý/Hủy). Trả true nếu người dùng đồng ý.</summary>
-    public static async Task<bool> ConfirmAsync(string title, string message)
+    public static Task<bool> ConfirmAsync(string title, string message)
     {
         if (MainWindow is null)
         {
-            return false;
+            return Task.FromResult(false);
         }
 
-        var dialog = new ConfirmDialog(title, message);
-        return await dialog.ShowDialog<bool>(MainWindow);
+        var result = MessageBox.Show(MainWindow, message, title, MessageBoxButton.OKCancel, MessageBoxImage.Question);
+        return Task.FromResult(result == MessageBoxResult.OK);
     }
 
     /// <summary>Hộp thoại thông báo (chỉ nút Đóng).</summary>
-    public static async Task InfoAsync(string title, string message)
+    public static Task InfoAsync(string title, string message)
     {
         if (MainWindow is null)
         {
-            return;
+            return Task.CompletedTask;
         }
 
-        var dialog = new ConfirmDialog(title, message, infoOnly: true);
-        await dialog.ShowDialog<bool>(MainWindow);
+        MessageBox.Show(MainWindow, message, title, MessageBoxButton.OK, MessageBoxImage.Information);
+        return Task.CompletedTask;
     }
 
     /// <summary>
-    /// Mở hộp thoại chọn THƯ MỤC (StorageProvider của cửa sổ chính) cho người dùng chọn nơi lưu hóa đơn.
-    /// Trả về đường dẫn thư mục đã chọn, hoặc null nếu chưa gán cửa sổ chính / người dùng bấm Hủy.
-    /// <paramref name="startFolder"/> (nếu có &amp; mở được) dùng làm thư mục mở đầu; lỗi/không tồn tại → mở mặc định.
+    /// Mở hộp thoại chọn THƯ MỤC cho người dùng chọn nơi lưu hóa đơn. Trả về đường dẫn thư mục đã chọn,
+    /// hoặc null nếu chưa gán cửa sổ chính / người dùng bấm Hủy.
+    /// <paramref name="startFolder"/> (nếu có &amp; tồn tại) dùng làm thư mục mở đầu; không có → mở mặc định.
     /// </summary>
-    public static async Task<string?> PickInvoiceFolderAsync(string? startFolder = null)
+    public static Task<string?> PickInvoiceFolderAsync(string? startFolder = null)
     {
         if (MainWindow is null)
         {
-            return null;
+            return Task.FromResult<string?>(null);
         }
 
-        IStorageFolder? start = null;
-        if (!string.IsNullOrWhiteSpace(startFolder))
+        var dlg = new OpenFolderDialog { Title = "Chọn thư mục lưu hóa đơn" };
+        try
         {
-            try
-            {
-                start = await MainWindow.StorageProvider.TryGetFolderFromPathAsync(startFolder);
-            }
-            catch
-            {
-                start = null; // thư mục không tồn tại / lỗi → mở mặc định
-            }
+            if (!string.IsNullOrWhiteSpace(startFolder) && Directory.Exists(startFolder))
+                dlg.InitialDirectory = startFolder;
+        }
+        catch
+        {
+            // đường dẫn lỗi → mở mặc định
         }
 
-        var folders = await MainWindow.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
-        {
-            Title = "Chọn thư mục lưu hóa đơn",
-            AllowMultiple = false,
-            SuggestedStartLocation = start
-        });
-
-        var folder = folders.Count > 0 ? folders[0] : null;
-        if (folder is null)
-        {
-            return null; // người dùng bấm Hủy
-        }
-
-        return folder.TryGetLocalPath() ?? folder.Name;
+        return Task.FromResult(dlg.ShowDialog(MainWindow) == true ? dlg.FolderName : null);
     }
 
     /// <summary>
     /// Hộp thoại thông tin đơn + đổi trạng thái. <paramref name="statuses"/> = các trạng thái đã sync về
     /// (chuỗi tự do). Trả về trạng thái người dùng chọn khi bấm "Lưu", hoặc null nếu Hủy / chưa gán cửa sổ.
+    /// <para>ĐỢT 1: cửa sổ chi tiết đơn chưa port (đợt 5) → luôn trả null (như bấm Hủy).</para>
     /// </summary>
-    public static async Task<string?> EditOrderAsync(OrderRowViewModel row, IReadOnlyList<string> statuses)
+    public static Task<string?> EditOrderAsync(OrderRowViewModel row, IReadOnlyList<string> statuses)
     {
-        if (MainWindow is null)
-        {
-            return null;
-        }
-
-        var dialog = new OrderDetailDialog(row, statuses);
-        return await dialog.ShowDialog<string?>(MainWindow);
+        _ = row;
+        _ = statuses;
+        System.Diagnostics.Trace.WriteLine(
+            "[Orders] Hộp thoại chi tiết đơn chưa được port sang WPF (đợt 5) — bỏ qua lần mở này.");
+        return Task.FromResult<string?>(null);
     }
 
     /// <summary>
-    /// Mở SaveFileDialog (StorageProvider của cửa sổ chính) cho người dùng chọn nơi lưu, rồi GHI
-    /// <paramref name="content"/> (đã gồm BOM) ra file đó. Trả về đường dẫn đã lưu, hoặc null nếu chưa
-    /// gán cửa sổ chính / người dùng bấm Hủy. Ghi đè file cũ thì cắt phần đuôi dư (SetLength).
+    /// Mở SaveFileDialog cho người dùng chọn nơi lưu, rồi GHI <paramref name="content"/> (đã gồm BOM) ra
+    /// file đó. Trả về đường dẫn đã lưu, hoặc null nếu chưa gán cửa sổ chính / người dùng bấm Hủy.
     /// </summary>
     public static async Task<string?> SaveCsvAsync(string suggestedFileName, byte[] content)
     {
@@ -106,30 +96,25 @@ public static class DialogService
             return null;
         }
 
-        var file = await MainWindow.StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+        var dlg = new SaveFileDialog
         {
             Title = "Xuất đơn hàng ra CSV",
-            SuggestedFileName = suggestedFileName,
-            DefaultExtension = "csv",
-            FileTypeChoices = new[]
-            {
-                new FilePickerFileType("CSV (mở bằng Excel)") { Patterns = new[] { "*.csv" } }
-            }
-        });
-        if (file is null)
+            FileName = suggestedFileName,
+            DefaultExt = "csv",
+            Filter = "CSV (mở bằng Excel)|*.csv",
+            OverwritePrompt = true,
+        };
+        if (dlg.ShowDialog(MainWindow) != true)
         {
             return null;
         }
 
-        await using (var stream = await file.OpenWriteAsync())
+        // Ghi đè file cũ thì cắt phần đuôi dư → dùng Create (truncate) thay vì mở ghi chèn.
+        await using (var stream = new FileStream(dlg.FileName, FileMode.Create, FileAccess.Write, FileShare.None))
         {
             await stream.WriteAsync(content);
-            if (stream.CanSeek)
-            {
-                stream.SetLength(content.Length);
-            }
         }
 
-        return file.TryGetLocalPath() ?? file.Name;
+        return dlg.FileName;
     }
 }

@@ -503,16 +503,5 @@ public partial class AccountsViewModel : ViewModelBase, IDisposable
     private void OnAccountsChanged() => RunOnUi(Reload);
 
     /// <summary>Chạy <paramref name="action"/> trên UI thread (chạy ngay nếu đã ở UI thread).</summary>
-    private static void RunOnUi(Action action)
-    {
-        var ui = Avalonia.Threading.Dispatcher.UIThread;
-        if (ui.CheckAccess())
-        {
-            action();
-        }
-        else
-        {
-            ui.Post(action);
-        }
-    }
+    private static void RunOnUi(Action action) => Services.UiDispatch.Run(action);
 }

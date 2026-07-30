@@ -1,6 +1,7 @@
-using Avalonia.Media;
+using System.Windows.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using Shopee.Core.Coordination;
+using Shopee.Suite.Infrastructure;
 
 namespace Shopee.Suite.Modules.Data;
 
@@ -12,7 +13,7 @@ namespace Shopee.Suite.Modules.Data;
 public sealed partial class DataRowItem : ObservableObject
 {
     // Nền dòng đã-bán: xanh lá nhạt (khớp tông "đang chạy" ở Workspace) — cell trong suốt để lộ màu này.
-    private static readonly IBrush SoldBrush = new SolidColorBrush(Color.Parse("#EAF8F0"));
+    private static readonly Brush SoldBrush = AppBrushes.From("#EAF8F0");
 
     private readonly Action<DataRowItem> _onSelectionChanged;
 
@@ -52,5 +53,5 @@ public sealed partial class DataRowItem : ObservableObject
     public string UpdatedLocal => Model.UpdatedAt.LocalDateTime.ToString("dd/MM/yyyy HH:mm");
 
     /// <summary>Nền dòng theo trạng thái đã-bán (bind ở DataGridRow).</summary>
-    public IBrush RowBackground => IsSold ? SoldBrush : Brushes.Transparent;
+    public Brush RowBackground => IsSold ? SoldBrush : Brushes.Transparent;
 }

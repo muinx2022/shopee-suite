@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Linq;
-using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using XuLyDonShopee.App.Services;
@@ -105,8 +104,7 @@ public partial class OrderStatisticsViewModel : ViewModelBase
 
     private void OnOrdersChanged()
     {
-        if (Dispatcher.UIThread.CheckAccess()) Reload();
-        else Dispatcher.UIThread.Post(Reload);
+        UiDispatch.Run(Reload);
     }
 
     [RelayCommand]
@@ -251,14 +249,7 @@ public partial class OrderStatisticsViewModel : ViewModelBase
             shared = null; // hub lỗi/offline → dòng nguồn bên dưới nói rõ, KHÔNG đổi số đang hiện
         }
 
-        if (Dispatcher.UIThread.CheckAccess())
-        {
-            ApDungKetQuaHub(shared, requestId, shop, range);
-        }
-        else
-        {
-            Dispatcher.UIThread.Post(() => ApDungKetQuaHub(shared, requestId, shop, range));
-        }
+        UiDispatch.Run(() => ApDungKetQuaHub(shared, requestId, shop, range));
     }
 
     /// <summary>Áp kết quả một lượt hỏi Hub (trên luồng UI): có số → vẽ số chung; null → chỉ sửa dòng nguồn.</summary>

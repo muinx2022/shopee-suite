@@ -57,18 +57,7 @@ public partial class OrdersViewModel : ViewModelBase
     /// phiên) → MARSHAL về UI thread rồi <see cref="Reload"/> để màn đang mở tự đón đơn mới, GIỮ NGUYÊN bộ lọc
     /// tài khoản/trạng thái/tìm kiếm hiện tại. ObservableCollection <see cref="Rows"/> chỉ được đụng trên UI thread.
     /// </summary>
-    private void OnOrdersChanged()
-    {
-        var ui = Avalonia.Threading.Dispatcher.UIThread;
-        if (ui.CheckAccess())
-        {
-            Reload();
-        }
-        else
-        {
-            ui.Post(Reload);
-        }
-    }
+    private void OnOrdersChanged() => Services.UiDispatch.Run(Reload);
 
     /// <summary>Lựa chọn của ComboBox lọc shop: "Tất cả shop" + từng tên shop (từ <c>AllShopLogins</c>).</summary>
     public ObservableCollection<AccountFilterOption> AccountOptions { get; } = new();

@@ -1,4 +1,4 @@
-using Avalonia.Media;
+using System.Windows.Media;
 
 namespace Shopee.Suite.ViewModels;
 
@@ -9,7 +9,7 @@ public sealed class ModuleItem(string title, string iconData, string subtitle, o
 
     /// <summary>Icon vector (path 24×24) — render qua PathIcon, tô theo Foreground nên tự đổi màu theo
     /// trạng thái tab. Xem <see cref="Infrastructure.AppIcons"/>.</summary>
-    public Geometry Icon { get; } = StreamGeometry.Parse(iconData);
+    public Geometry Icon { get; } = Geometry.Parse(iconData);
 
     public string Subtitle { get; } = subtitle;
     public object ViewModel { get; } = viewModel;

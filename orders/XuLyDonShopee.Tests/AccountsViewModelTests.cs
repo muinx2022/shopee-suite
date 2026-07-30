@@ -7,9 +7,9 @@ using XuLyDonShopee.Core.Services;
 namespace XuLyDonShopee.Tests;
 
 /// <summary>
-/// Test hồi quy cho AccountsViewModel. ViewModel không cần Avalonia runtime để chạy logic
+/// Test hồi quy cho AccountsViewModel. ViewModel không cần runtime UI để chạy logic
 /// (chỉ dùng ObservableObject + repository trên DB tạm), nên test được bằng xunit thuần.
-/// Lưu ý: đường dẫn xóa/hủy dùng DialogService (Avalonia Window) nên KHÔNG test ở đây.
+/// Lưu ý: đường dẫn xóa/hủy dùng DialogService (cần cửa sổ thật) nên KHÔNG test ở đây.
 /// </summary>
 public class AccountsViewModelTests
 {

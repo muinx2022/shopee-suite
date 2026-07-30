@@ -1,7 +1,7 @@
 using System;
 using System.Globalization;
-using Avalonia.Data.Converters;
-using Avalonia.Media;
+using System.Windows.Data;
+using System.Windows.Media;
 using XuLyDonShopee.Core.Models;
 
 namespace XuLyDonShopee.App.Converters;
@@ -36,7 +36,7 @@ public class StatusPillConverter : IValueConverter
             _ => "#FFF4E5"
         };
 
-        return new SolidColorBrush(Color.Parse(hex));
+        return BrushPalette.From(hex);
     }
 
     public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
