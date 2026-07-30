@@ -72,9 +72,9 @@ internal static class LoginPageProbe
         catch { return string.Empty; }
     }
 
-    /// <summary>Dò phần tử ĐẦU TIÊN đang HIỂN THỊ (getClientRects) khớp một trong <paramref name="selectors"/>,
-    /// poll tới hết <paramref name="timeoutMs"/>. Giống <see cref="FindFirstVisibleAsync"/> nhưng kiểm hiển
-    /// thị bằng getClientRects (không offsetParent) — dùng cho form Microsoft/Outlook.</summary>
+    /// <summary>Dò phần tử ĐẦU TIÊN đang HIỂN THỊ khớp một trong <paramref name="selectors"/>, poll tới hết
+    /// <paramref name="timeoutMs"/>. Kiểm hiển thị bằng getClientRects (KHÔNG offsetParent, KHÔNG
+    /// <c>IsVisibleAsync</c>) — dùng cho form Microsoft/Outlook.</summary>
     internal static async Task<IElementHandle?> FindFirstVisibleByRectsAsync(
         IPage page, string[] selectors, int timeoutMs, CancellationToken ct)
     {
@@ -225,40 +225,6 @@ internal static class LoginPageProbe
                 }
             }
             await Task.Delay(300, ct).ConfigureAwait(false);
-        }
-        while (DateTime.UtcNow < deadline);
-
-        return null;
-    }
-
-    /// <summary>
-    /// Dò phần tử đầu tiên <b>đang hiển thị</b> khớp một trong <paramref name="selectors"/> (thử lần
-    /// lượt), poll tới khi hết <paramref name="timeoutMs"/>. Trả <c>null</c> nếu không thấy. Nuốt lỗi
-    /// từng selector (selector có thể không hợp lệ trên trang hiện tại).
-    /// </summary>
-    internal static async Task<IElementHandle?> FindFirstVisibleAsync(
-        IPage page, string[] selectors, int timeoutMs, CancellationToken ct)
-    {
-        var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
-        do
-        {
-            ct.ThrowIfCancellationRequested();
-            foreach (var sel in selectors)
-            {
-                try
-                {
-                    var el = await page.QuerySelectorAsync(sel).ConfigureAwait(false);
-                    if (el is not null && await el.IsVisibleAsync().ConfigureAwait(false))
-                    {
-                        return el;
-                    }
-                }
-                catch
-                {
-                    // Selector không dùng được trên trang này — thử selector kế.
-                }
-            }
-            await Task.Delay(200, ct).ConfigureAwait(false);
         }
         while (DateTime.UtcNow < deadline);
 

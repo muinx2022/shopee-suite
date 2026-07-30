@@ -328,7 +328,7 @@ public class OrderNotifyService
             }
             catch (Exception ex)
             {
-                log($"Notify: lỗi gửi ({kenh}){moTaPhan} — {ex.Message}");
+                log($"Notify: lỗi gửi ({kenh}){moTaPhan} — {ex.ToString()}");
                 return false;
             }
         }

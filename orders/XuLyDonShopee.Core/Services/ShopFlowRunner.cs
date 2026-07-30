@@ -65,6 +65,16 @@ internal sealed class ShopFlowRunner
     // Tập rỗng dùng khi _finalDoneSns null (tránh cấp phát mỗi shop).
     private static readonly IReadOnlySet<string> EmptyFinalSet = new HashSet<string>();
 
+    /// <summary>
+    /// CHỐT CHẶN số đơn Chuẩn bị hàng trong MỘT lượt của MỘT shop — vòng <c>prepareNextOrder</c> dừng theo tín hiệu
+    /// "hết đơn" của extension, hằng này chỉ là dây bảo hiểm để một extension kẹt (luôn trả đơn) KHÔNG quay vô tận.
+    /// Để thấp (50) vì mỗi đơn tốn tới <see cref="OrdersBridgeChannel.ChoChang.Prepare"/>: shop nhiều đơn hơn thì
+    /// lượt sau xử tiếp, chứ không ngồi một shop cả buổi trong khi các shop khác chưa được sờ tới.
+    /// <para>KHÁC <c>OrderPersistPipeline.HubPushBatchSize</c> (200): đó là cỡ LÔ đẩy đơn lên hub — thao tác HTTP
+    /// thuần, rẻ, nên chia to cho ít lượt gọi. Hai con số ở hai tầng khác nhau, KHÔNG liên quan.</para>
+    /// </summary>
+    private const int TranDonMoiLuotShop = 50;
+
     public ShopFlowRunner(
         OrdersBridgeChannel channel,
         Action<string>? log,
@@ -118,7 +128,7 @@ internal sealed class ShopFlowRunner
         // Phần A — đọc đơn tab "Tất cả" (test được ngay, kể cả shop 0 đơn chờ).
         var ordersTcs = _ch.ArmOrders();
         await _ch.SendAsync(new { action = "syncOrders" }).ConfigureAwait(false);
-        var ordersJson = await _ch.AwaitAsync(ordersTcs, TimeSpan.FromSeconds(120), ct).ConfigureAwait(false);
+        var ordersJson = await _ch.AwaitAsync(ordersTcs, OrdersBridgeChannel.ChoChang.Orders, ct).ConfigureAwait(false);
         if (_ch.CaptchaSeen)
         {
             L("PHÁT HIỆN captcha khi đọc đơn.");
@@ -147,7 +157,7 @@ internal sealed class ShopFlowRunner
                     orders = needFinal.Select(o => new { orderSn = o.OrderSn, shopeeOrderId = o.ShopeeOrderId }),
                 }).ConfigureAwait(false);
                 // Đủ thời gian mở tuần tự nhiều tab chi tiết (20s/đơn), trần cứng 300s.
-                var timeout = TimeSpan.FromSeconds(Math.Min(300, 20 + 20 * needFinal.Count));
+                var timeout = OrdersBridgeChannel.ChoChang.Finals(needFinal.Count);
                 var finalsJson = await _ch.AwaitAsync(finalsTcs, timeout, ct).ConfigureAwait(false);
                 if (_ch.CaptchaSeen)
                 {
@@ -168,7 +178,7 @@ internal sealed class ShopFlowRunner
                 }
             }
             catch (OperationCanceledException) { throw; }
-            catch (Exception ex) { L("Lấy Số tiền cuối cùng lỗi: " + ex.Message + " — vẫn lưu phần đã có."); }
+            catch (Exception ex) { L("Lấy Số tiền cuối cùng lỗi: " + ex.ToString() + " — vẫn lưu phần đã có."); }
         }
 
         // GĐ4: App lưu DB/GSheet/hub cho shop này (callback do App rót; null ở đường "Chạy thử" → chỉ đọc, không lưu).
@@ -176,7 +186,7 @@ internal sealed class ShopFlowRunner
         {
             try { await _syncCallback(shopId, shopLogin, orders, ct).ConfigureAwait(false); }
             catch (OperationCanceledException) { throw; }
-            catch (Exception ex) { L("Lưu đơn (DB/GSheet/hub) lỗi: " + ex.Message); }
+            catch (Exception ex) { L("Lưu đơn (DB/GSheet/hub) lỗi: " + ex.ToString()); }
         }
 
         // Phần B — chỉ khi có đơn Chờ Lấy Hàng VÀ có thư mục lưu phiếu.
@@ -186,7 +196,7 @@ internal sealed class ShopFlowRunner
             L($"Có {toShip} đơn Chờ Lấy Hàng — đặt địa chỉ lấy hàng ({_province}) rồi xử từng đơn...");
             var pickupTcs = _ch.ArmPickup();
             await _ch.SendAsync(new { action = "setPickupAddress", province = _province }).ConfigureAwait(false);
-            var pickupOk = await _ch.AwaitAsync(pickupTcs, TimeSpan.FromSeconds(90), ct).ConfigureAwait(false);
+            var pickupOk = await _ch.AwaitAsync(pickupTcs, OrdersBridgeChannel.ChoChang.Pickup, ct).ConfigureAwait(false);
             var quyetDinh = QuyetDinhSauDatDiaChi(pickupOk, _ch.CaptchaSeen);
             if (quyetDinh == SauDatDiaChi.DungViCaptcha)
             {
@@ -207,17 +217,17 @@ internal sealed class ShopFlowRunner
                 return (orders.Count, 0);
             }
 
-            // Lặp Chuẩn bị hàng tới khi hết đơn / chốt chặn 50 đơn / captcha. Mã vận đơn bắt NGAY tại modal
+            // Lặp Chuẩn bị hàng tới khi hết đơn / chạm chốt chặn / captcha. Mã vận đơn bắt NGAY tại modal
             // "Thông Tin Chi Tiết" (extension đọc trước khi in phiếu) → gom theo mã đơn để cập nhật DB same-cycle.
             var capturedTracking = new Dictionary<string, string>(StringComparer.Ordinal);
             var guard = 0;
-            while (guard++ < 50)
+            while (guard++ < TranDonMoiLuotShop)
             {
                 ct.ThrowIfCancellationRequested();
                 var prepareTcs = _ch.ArmPrepare();
                 await _ch.SendAsync(new { action = "prepareNextOrder" }).ConfigureAwait(false);
                 // 300s: extension chờ Shopee tạo vận đơn (≤90s) TRƯỚC khi in, rồi chờ tab phiếu (≤120s) — nới hạn cho đủ.
-                var prep = await _ch.AwaitAsync(prepareTcs, TimeSpan.FromSeconds(300), ct).ConfigureAwait(false);
+                var prep = await _ch.AwaitAsync(prepareTcs, OrdersBridgeChannel.ChoChang.Prepare, ct).ConfigureAwait(false);
                 if (_ch.CaptchaSeen)
                 {
                     L("PHÁT HIỆN captcha khi xử đơn — dừng.");
@@ -264,7 +274,7 @@ internal sealed class ShopFlowRunner
                     L($"Cập nhật {updated} mã vận đơn (lúc chuẩn bị hàng) → lưu lại + đẩy GSheet/hub.");
                     try { await _syncCallback(shopId, shopLogin, orders, ct).ConfigureAwait(false); }
                     catch (OperationCanceledException) { throw; }
-                    catch (Exception ex) { L("Lưu lại mã vận đơn lỗi: " + ex.Message); }
+                    catch (Exception ex) { L("Lưu lại mã vận đơn lỗi: " + ex.ToString()); }
                 }
             }
 
@@ -272,7 +282,7 @@ internal sealed class ShopFlowRunner
             L("Set địa chỉ lấy hàng về địa chỉ khác (hoàn tất flow shop)...");
             var pickupOtherTcs = _ch.ArmPickupOther();
             await _ch.SendAsync(new { action = "setPickupAddressToOther" }).ConfigureAwait(false);
-            try { await _ch.AwaitAsync(pickupOtherTcs, TimeSpan.FromSeconds(60), ct).ConfigureAwait(false); }
+            try { await _ch.AwaitAsync(pickupOtherTcs, OrdersBridgeChannel.ChoChang.PickupOther, ct).ConfigureAwait(false); }
             catch (TimeoutException) { L("Set địa chỉ khác: quá hạn — bỏ qua."); }
         }
 
@@ -290,7 +300,7 @@ internal sealed class ShopFlowRunner
             catch (OperationCanceledException) { throw; }
             catch (Exception ex)
             {
-                L("Check đơn trả hàng lỗi: " + ex.Message + " — bỏ qua bước này, phần đã xong không bị ảnh hưởng.");
+                L("Check đơn trả hàng lỗi: " + ex.ToString() + " — bỏ qua bước này, phần đã xong không bị ảnh hưởng.");
             }
             finally
             {
@@ -353,7 +363,7 @@ internal sealed class ShopFlowRunner
         var returnsTcs = _ch.ArmReturns();
         await _ch.SendAsync(new { action = "readReturnRequests" }).ConfigureAwait(false);
         // 90s: điều hướng sang trang trả hàng (≤20s) + đổi sắp xếp + chờ danh sách vẽ lại.
-        var json = await _ch.AwaitAsync(returnsTcs, TimeSpan.FromSeconds(90), ct).ConfigureAwait(false);
+        var json = await _ch.AwaitAsync(returnsTcs, OrdersBridgeChannel.ChoChang.Returns, ct).ConfigureAwait(false);
         if (_ch.CaptchaSeen)
         {
             L("Check đơn trả hàng: gặp captcha/verify — bỏ bước này (mốc giữ nguyên), đi tiếp.");
@@ -467,7 +477,7 @@ internal sealed class ShopFlowRunner
             var ok = false;
             try
             {
-                ok = await _ch.AwaitAsync(closeTcs, TimeSpan.FromSeconds(30), ct).ConfigureAwait(false);
+                ok = await _ch.AwaitAsync(closeTcs, OrdersBridgeChannel.ChoChang.CloseShop, ct).ConfigureAwait(false);
             }
             catch (TimeoutException)
             {
@@ -491,7 +501,7 @@ internal sealed class ShopFlowRunner
     /// <c>redownloadSlip</c> (extension về danh sách "Tất cả" → định vị card theo <paramref name="orderSn"/> →
     /// bấm "In phiếu giao" → tải PDF trong tab awbprint → trả base64) rồi LƯU PDF vào thư mục phiếu đúng khuôn
     /// <see cref="TrySaveSlip"/> (tên file <c>SanitizeFileName(orderSn).pdf</c> — khớp chỗ
-    /// <c>SlipFiles.TryReadSlipBase64</c>/<c>SlipFiles.ThieuPhieu</c> đọc, để cột "thiếu phiếu" tự hết đỏ). Trả
+    /// <c>SlipFiles.TryReadSlipBase64</c>/<c>SlipFiles.SlipFileIsValidPdf</c> đọc, để cột "thiếu phiếu" tự hết đỏ). Trả
     /// <c>true</c> khi lưu được PDF hợp lệ. Ràng buộc mô hình cầu nối: phiên đang mở tab của shop nào thì tải lại
     /// được đơn của shop đó (extension quét danh sách trên tab đang mở) — đơn của shop khác/quá cũ → extension trả
     /// base64 rỗng → false.
@@ -522,7 +532,7 @@ internal sealed class ShopFlowRunner
         await _ch.SendAsync(new { action = "redownloadSlip", orderSn }).ConfigureAwait(false); // ném nếu extension chưa kết nối
 
         // 180s: extension có thể phải duyệt vài trang danh sách + chờ tab phiếu (~30s) + tải PDF (~25s).
-        var b64 = await _ch.AwaitAsync(redownloadTcs, TimeSpan.FromSeconds(180), ct).ConfigureAwait(false);
+        var b64 = await _ch.AwaitAsync(redownloadTcs, OrdersBridgeChannel.ChoChang.Redownload, ct).ConfigureAwait(false);
         if (_ch.CaptchaSeen)
         {
             L($"Gặp captcha khi tải lại phiếu đơn {orderSn} — dừng.");

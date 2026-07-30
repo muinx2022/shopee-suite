@@ -126,7 +126,7 @@ internal static class SubaccountLoginFlow
                     catch (OperationCanceledException) { throw; }
                     catch (Exception ex)
                     {
-                        L("Lỗi khi mở hộp thư: " + ex.Message + " — bạn tự lấy mã và nhập vào trang Shopee.");
+                        L("Lỗi khi mở hộp thư: " + ex.ToString() + " — bạn tự lấy mã và nhập vào trang Shopee.");
                     }
 
                     // Đưa cửa sổ về trang Shopee cho người dùng gõ code (best-effort).
@@ -292,7 +292,7 @@ internal static class SubaccountLoginFlow
         }
         catch (Exception ex)
         {
-            L("Lỗi khi đăng nhập Nền tảng tài khoản phụ: " + ex.Message + " — GIỮ cửa sổ để bạn thao tác tay.");
+            L("Lỗi khi đăng nhập Nền tảng tài khoản phụ: " + ex.ToString() + " — GIỮ cửa sổ để bạn thao tác tay.");
             return false;
         }
         // KHÔNG đóng tab seller/subaccount ở finally — việc đóng tab subaccount làm CÓ CHỦ ĐÍCH ở Bước 8; tab mail

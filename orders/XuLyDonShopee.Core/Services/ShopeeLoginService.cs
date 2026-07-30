@@ -108,9 +108,6 @@ public interface ILoginSession : IAsyncDisposable
 /// </summary>
 public class ShopeeLoginService
 {
-    /// <summary>URL trang bán hàng (Shopee Seller Centre).</summary>
-    public const string SellerUrl = "https://banhang.shopee.vn/";
-
     /// <summary>URL Nền tảng tài khoản phụ — điểm vào đăng nhập mới (một tài khoản có nhiều shop).</summary>
     public const string SubaccountUrl = "https://subaccount.shopee.com/";
 
@@ -118,9 +115,6 @@ public class ShopeeLoginService
     /// hiện trang tài khoản (có "Kênh Người bán"); hết cookie → ra form đăng nhập. Dùng để SSO lại về trang chọn
     /// shop (né sticky-shop server-side khi mở thẳng /portal/shop).</summary>
     public const string SubaccountAccountUrl = "https://subaccount.shopee.com/account";
-
-    /// <summary>URL bảng danh sách shop của Nền tảng tài khoản phụ — sau khi đăng nhập, mở thẳng đây để lặp qua từng shop.</summary>
-    public const string ShopListUrl = "https://banhang.shopee.vn/portal/shop";
 
     // ===== Forwarder cho test (luồng verify-email) =====
     // Logic khớp text thực nằm trong <see cref="LoginParsers"/> (nơi giữ các hàm thuần dùng chung với các luồng).
@@ -242,11 +236,6 @@ public class ShopeeLoginService
         private readonly IBrowserContext _context;
         private readonly Process _process;
 
-        // "TRANG LÀM VIỆC" hiện tại của các hàm flow đơn (mô hình nhiều-shop): tab của shop đang được mở qua
-        // OpenShopDetailAsync. null → dùng Pages[0] (tab gốc / danh sách shop). Các hàm flow đọc qua WorkPage()
-        // để chạy trên ĐÚNG tab shop thay vì cứng Pages[0]. volatile: RunAsync (thread nền) đặt, hàm flow đọc.
-        private volatile IPage? _workPage;
-
         // Hoàn tất khi cửa sổ đóng (tiến trình Brave thoát / CDP ngắt). RunContinuationsAsynchronously
         // để không chạy tiếp phần chờ ngay trong callback sự kiện của Playwright/Process.
         private readonly TaskCompletionSource _closedTcs =
@@ -286,22 +275,6 @@ public class ShopeeLoginService
                 try { return _context.Pages.Count; }
                 catch { return 0; }
             }
-        }
-
-        /// <summary>Đặt "trang làm việc" hiện tại (tab shop) cho các hàm flow đơn. null → về Pages[0].</summary>
-        internal void SetWorkPage(IPage? p) => _workPage = p;
-
-        /// <summary>"Trang làm việc" hiện tại của các hàm flow đơn: <see cref="_workPage"/> (tab shop) nếu đã đặt,
-        /// ngược lại Pages[0] (tab gốc). null nếu không còn tab nào.</summary>
-        private IPage? WorkPage()
-        {
-            var wp = _workPage;
-            if (wp is not null && !wp.IsClosed)
-            {
-                return wp;
-            }
-            try { return _context.Pages.Count > 0 ? _context.Pages[0] : null; }
-            catch { return null; }
         }
 
         public Task<ShopeePageState> DetectPageStateAsync(CancellationToken ct = default)
