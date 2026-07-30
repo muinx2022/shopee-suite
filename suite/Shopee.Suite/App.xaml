@@ -34,7 +34,7 @@
             <conv:WiderThanConverter x:Key="WiderThan" />
 
             <!-- ══════════ ViewModel-first navigation (thay ViewLocator reflection của bản Avalonia) ══════════ -->
-            <!-- ĐÃ PORT: Welcome + ComingSoon (đợt 1); BigSeller + Data + Accounts (đợt 2). -->
+            <!-- ĐÃ PORT: Welcome + ComingSoon (đợt 1); BigSeller + Data + Accounts (đợt 2); Workspace (đợt 3). -->
             <DataTemplate DataType="{x:Type vm:WelcomeViewModel}">
                 <views:WelcomeView />
             </DataTemplate>
@@ -50,12 +50,12 @@
             <DataTemplate DataType="{x:Type acc:AccountsViewModel}">
                 <acc:AccountsView />
             </DataTemplate>
-
-            <!-- CHƯA PORT (đợt 3–5 thay từng dòng bằng view thật): mọi màn module tạm dùng ComingSoonView,
-                 view tự sinh chữ "đang port" từ kiểu ViewModel. -->
-            <DataTemplate DataType="{x:Type ws:WorkspaceViewModel}">     <!-- đợt 3 -->
-                <views:ComingSoonView />
+            <DataTemplate DataType="{x:Type ws:WorkspaceViewModel}">
+                <ws:WorkspaceView />
             </DataTemplate>
+
+            <!-- CHƯA PORT (đợt 4–5 thay từng dòng bằng view thật): mọi màn module tạm dùng ComingSoonView,
+                 view tự sinh chữ "đang port" từ kiểu ViewModel. -->
             <DataTemplate DataType="{x:Type srch:SearchViewModel}">      <!-- đợt 4 -->
                 <views:ComingSoonView />
             </DataTemplate>

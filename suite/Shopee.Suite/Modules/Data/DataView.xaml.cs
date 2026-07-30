@@ -2,7 +2,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
-using System.Windows.Media;
+using Shopee.Suite.Infrastructure;
 
 namespace Shopee.Suite.Modules.Data;
 
@@ -27,9 +27,7 @@ public partial class DataView : UserControl
         while (d is not null and not DataGridRow)
         {
             if (d is ButtonBase) return;   // Button (✏) và CheckBox đều là ButtonBase
-            d = d is Visual or System.Windows.Media.Media3D.Visual3D
-                ? VisualTreeHelper.GetParent(d)
-                : (d as FrameworkContentElement)?.Parent;
+            d = VisualTreeSearch.GetParent(d);   // bắc cầu visual ⇄ content element (Infrastructure)
         }
         if (d is DataGridRow row && row.Item is DataRowItem item)
             item.IsSelected = !item.IsSelected;
