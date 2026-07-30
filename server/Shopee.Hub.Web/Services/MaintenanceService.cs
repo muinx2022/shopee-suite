@@ -44,7 +44,9 @@ public sealed class MaintenanceService : BackgroundService
     {
         var dir = Path.Combine(_opts.DataDir, "import-temp");
         if (!Directory.Exists(dir)) return;
-        var cutoff = now.UtcDateTime - TimeSpan.FromHours(1);
+        // 24h chứ không phải 1h: file tạm sống theo PHIÊN mở wizard của admin (chọn file → soi trước → map cột →
+        // Nhập). Cắt sau 1h là xoá mất file của phiên đang mở, rồi bước Nhập nổ FileNotFoundException.
+        var cutoff = now.UtcDateTime - TimeSpan.FromHours(24);
         foreach (var path in Directory.EnumerateFiles(dir, "*.xlsx", SearchOption.TopDirectoryOnly))
         {
             try

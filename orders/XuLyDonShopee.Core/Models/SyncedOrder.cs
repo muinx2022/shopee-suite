@@ -75,6 +75,13 @@ public sealed class SyncedOrder
     /// khi đọc hàng đợi đẩy hub (<see cref="XuLyDonShopee.Core.Data.OrdersRepository.GetForHubPush"/>).</summary>
     public string? ReturnRequestCode { get; set; }
 
+    /// <summary>Thời điểm (UTC) đơn được ghi nhận LẦN ĐẦU trên MÁY NÀY (cột <c>created_at</c>) — đẩy lên hub để hub
+    /// đặt <c>first_seen_at</c> đúng lúc đơn XUẤT HIỆN chứ không phải lúc hub NHẬN gói (gửi bù / qua nửa đêm thì hai
+    /// mốc rơi khác ngày, làm thống kê dùng chung lệch số local). null = không biết (dòng DB cũ) → hub lùi về giờ
+    /// nhận như trước. KHÔNG phải cột dữ liệu quét DOM: repo cấp lại khi đọc hàng đợi đẩy hub
+    /// (<see cref="XuLyDonShopee.Core.Data.OrdersRepository.GetForHubPush"/>).</summary>
+    public DateTime? CreatedAt { get; set; }
+
     /// <summary>Tên đăng nhập shop của đơn (vd "alina99.store") — để đẩy lên hub NHÓM theo shop; null cho đơn cũ
     /// (trước khi có shop_login). KHÔNG phải cột dữ liệu quét DOM: repo cấp lại từ cột <c>shop_login</c> khi đọc
     /// hàng đợi đẩy hub (<see cref="XuLyDonShopee.Core.Data.OrdersRepository.GetForHubPush"/>).</summary>

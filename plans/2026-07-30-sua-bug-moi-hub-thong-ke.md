@@ -1,7 +1,7 @@
 # Plan: Sửa bug mới phía hub + luồng thống kê đơn dùng chung (đợt B2)
 
 - **Ngày:** 2026-07-30
-- **Trạng thái:** đang làm
+- **Trạng thái:** đã code xong — chờ phiên chính nghiệm thu
 - **Người lập:** Fable · **Người thực thi:** Opus
 
 ## 1. Bối cảnh & mục tiêu
@@ -93,4 +93,179 @@ Sửa: tách 3 trạng thái nguồn: "đang hỏi Hub…" (đặt khi bắn Loa
 
 ## Báo cáo thực thi (Opus điền sau khi xong)
 
-(chưa)
+**Kết quả build/test cuối** (chạy trong worktree `agent-ab2177e3520eb6999`, đã fast-forward lên `main` 38dea24
+vì worktree được tạo từ commit cũ hơn 19 nhịp nên chưa có file plan này):
+
+| Lệnh | Kết quả |
+|---|---|
+| `dotnet build server/ShopeeHub.sln --no-incremental` | 0 lỗi, 0 warning |
+| `dotnet build ShopeeSuite.sln --no-incremental` | 0 lỗi, 0 warning |
+| `dotnet test server/Shopee.Hub.Web.Tests` | 44 pass / 0 fail (baseline 30 → **+14**) |
+| `dotnet test orders/XuLyDonShopee.Tests` | 1462 pass / 0 fail (baseline 1449 → **+13**) |
+
+Không xoá test nào (E4: test `HubSharedOrderStatsTests` chuyển sang `QueryOrdersPage`, không bỏ).
+
+### A1 — Race "cờ đã đẩy"
+
+Cặp cột **thế hệ** thay vì một cột `hub_push_gen` như plan mô tả (lý do ở mục "Điểm lệch" bên dưới):
+
+- `orders/XuLyDonShopee.Core/Data/Database.cs:119-120` (CREATE TABLE) + `:280-292` (`EnsureColumn` cho DB cũ):
+  thêm `hub_push_gen INTEGER NOT NULL DEFAULT 0` + `hub_push_gen_sent INTEGER`. `:323` — `BackfillHubFinalAmountOnce`
+  cũng +1 gen (là một chỗ reset cờ).
+- `OrdersRepository.cs` — mọi chỗ reset `hub_synced_at=NULL` đều +1 `hub_push_gen`: `:198-202` (`UpsertMany`,
+  cùng đúng 4 điều kiện với nhánh reset), `:447-448` (`MarkPrepared`), `:542-543` (`SetReturnRequestCodes`).
+- `OrdersRepository.cs:576-640` (`GetForHubPush`): CHỤP thế hệ (`hub_push_gen_sent = hub_push_gen`) trong CÙNG
+  transaction với lượt đọc → hàm này GIỜ CÓ GHI (trước là đọc thuần). Thêm cột `created_at` vào SELECT (cho C2).
+- `OrdersRepository.cs:699-720` (`MarkHubSynced`): `SET hub_synced_at=$at WHERE … AND hub_synced_at IS NULL AND
+  (hub_push_gen_sent IS NULL OR hub_push_gen_sent = hub_push_gen)`. Bỏ `COALESCE` nhưng GIỮ hành vi "gọi 2 lần
+  không dời mốc đầu" nhờ `hub_synced_at IS NULL`.
+- `orders/XuLyDonShopee.Core/Models/SyncedOrder.cs:78-83`: thêm `CreatedAt` (theo đúng mẫu `PreparedAt`/
+  `ReturnRequestCode`/`ShopLogin` — field repo cấp lại khi đọc hàng đợi, không phải cột quét DOM).
+
+**Test:** `orders/XuLyDonShopee.Tests/HubPushGenRaceTests.cs` (7 test) — reset xen giữa snapshot↔mark cho cả 3
+đường (`MarkPrepared` / đổi trạng thái / ghi mã trả) → đơn CÒN trong hàng đợi; đường bình thường vẫn đóng cờ;
+đơn khác trong cùng lô không vạ lây; lượt đẩy kế tiếp chụp lại thế hệ mới nên không kẹt vĩnh viễn.
+`DatabaseMigrationTests.cs:449-479` — migration trên DB cũ + **chạy 2 lần không đổi gì**.
+
+### B1 — Chuẩn hoá khoá shop trên hub
+
+- `server/Shopee.Hub.Web/Data/HubDatabase.Shops.cs:40-142`: `MergeDuplicateShopsOnce(dataDir)` — nhóm theo
+  `LOWER(TRIM(username))`, giữ hàng **id nhỏ nhất**, đơn trùng `order_sn` ở cả 2 shop thì giữ bản `synced_at`
+  mới nhất, chuyển đơn còn lại sang, xoá hàng shop thừa, **dời thư mục `slips/<shopId>`** (`MoveSlipDir`, nuốt
+  lỗi I/O để không chặn khởi động hub), rồi `DROP INDEX` + dựng lại `ux_shops_username ON shops(username COLLATE
+  NOCASE)`. Idempotent 2 lớp: khoá `settings['merge_shops_nocase_v1']` + bản thân phép gộp lần 2 không còn nhóm trùng.
+- `HubDatabase.cs:73-75`: gọi sau `EnsureSchema()`/`MigrateSchema()`.
+- `HubDatabase.Shops.cs:237-267` (`GetOrCreateShopByUsername`): `WHERE username=$u COLLATE NOCASE` + Trim (Trim
+  áp cả cho giá trị INSERT).
+- `HubDatabase.Orders.cs:282-285` (`GetSharedOrderStatistics`): `AND s.username = $shop COLLATE NOCASE`.
+- Đã rà `server/**`: KHÔNG còn chỗ so username kiểu khác (`ListShopGroupsBySubAccount` vốn đã dùng
+  `StringComparer.OrdinalIgnoreCase`; `PrepareStatsByDay` `GROUP BY s.username` giờ an toàn vì index NOCASE
+  không cho 2 hàng lệch hoa/thường tồn tại).
+
+**Test:** `server/Shopee.Hub.Web.Tests/HubShopMergeAndPushTests.cs` test 1-4 — dựng hub.db kiểu bản CŨ (index
+phân biệt hoa/thường, 2 hàng `ShopA`/`shopa`, `SN1` nằm ở CẢ HAI) → sau migration còn 1 shop, `GetSharedOrderStatistics`
+trả **2 đơn thay vì 3**, bản giữ lại là bản `synced_at` mới nhất, phiếu đã dời sang `slips/1/`; lọc theo shop
+không phân biệt hoa/thường; chạy lần 2 không đổi gì; sau migration push lệch hoa/thường về cùng một `shop_id`.
+
+### B2 — Map client cộng dồn
+
+- `orders/XuLyDonShopee.App/ViewModels/AccountsViewModel.cs:753-772` (`ChuanHoaKhoaShop`)
+- `suite/Shopee.Suite/Infrastructure/OrdersModuleHost.cs:391-407` (`WirePrepareStatsRead`)
+
+Cả hai đổi sang `TryGetValue` + cộng. **Test:** `PrepareHubCountTests.HubTraHaiDongCungShop_CongDon_KhongLayBanSauThang`
+(hub trả 5 + 3 cho cùng shop → lưới hiện 8, không phải 3).
+
+### C1 — Mốc giờ notify
+
+- **File mới** `server/Shopee.Hub.Web/Services/GioVietNam.cs`: `Doi()` / `BayGio()` / `DinhDang()` qua
+  `TimeZoneInfo.FindSystemTimeZoneById("Asia/Ho_Chi_Minh")`, thiếu dữ liệu múi giờ → lùi về UTC+7 cố định
+  (VN không có DST nên offset cố định vẫn ĐÚNG — cần vì hub bật `InvariantGlobalization`).
+- `ClientApiEndpoints.cs`: cả 3 chỗ `DateTime.Now` → `GioVietNam.BayGio()` (`FireNotifyDonMoi` :423,
+  `FireNotifyDonTra` :440, `FireNotifyLoiApp` :494).
+
+**Test:** `AppAlertDonTraTests.GioVietNam_*` (22:30 UTC → "31/07 05:30", offset +7, mốc rỗng → chuỗi rỗng).
+
+### C2 — `first_seen_at` theo mốc client
+
+- `suite/Shopee.Core/Coordination/OrderDtos.cs:41-46`: `OrderPushItem.CreatedAt` (string? — **TÙY CHỌN**, client
+  cũ không gửi vẫn hợp lệ).
+- `suite/Shopee.Suite/Infrastructure/OrdersModuleHost.cs:1063-1064` (`ToPushItem`): điền từ `SyncedOrder.CreatedAt`.
+- `server/Shopee.Hub.Web/Data/HubDatabase.Orders.cs:163` — `first_seen_at` = `COALESCE($fsa,$sa)`; `:197` bind
+  qua `NormalizeIso` (`:218-229`) — **bắt buộc chuẩn hoá**: client gửi `"o"` của DateTime UTC là hậu tố `Z`, hub
+  ghi `+00:00`; lọc theo khoảng ở đây so CHUỖI nên trộn 2 dạng là lệch ở đúng biên (`'+' < 'Z'`).
+
+**Test:** `HubShopMergeAndPushTests` test 6-7 (có `CreatedAt` → `first_seen_at` đúng mốc đó + chuỗi kết thúc
+`+00:00` + rơi đúng khoảng ngày của mốc; không có → bằng `synced_at`; đẩy lại KHÔNG dời mốc) và
+`HubPushGenRaceTests.GetForHubPush_TraCreatedAt_DeHubDatFirstSeen` phía client.
+
+### C3 — Giờ hiển thị trang /orders
+
+`server/Shopee.Hub.Web/Components/Pages/Orders.razor:82` (khối mobile) + `:97` (cột Sync desktop) → dùng
+`GioVietNam.DinhDang(o.SyncedAt, "MM-dd HH:mm")` (chọn cách "format theo Asia/Ho_Chi_Minh + helper C1", dùng
+thống nhất cả 2 chỗ; mốc rỗng → chuỗi rỗng như trước).
+
+### D1 — 3 hàm đọc stats bỏ `lock(_gate)`
+
+`HubDatabase.Orders.cs`: `PrepareStatsByDay` (:383), `ShopOrderSummaries` (:413), `DistinctOrderStatuses` (:440)
+→ `using var conn = OpenReadConnection();`, bỏ `lock` tương ứng (mẫu `GetSharedOrderStatistics` sau 6893481).
+
+### D2 — Notify "đơn trả" hết spam
+
+`HubDatabase.Orders.cs:200-207`: thêm điều kiện `exists &&`. Hạn chế (đơn có mã TRƯỚC push đầu tiên thì hub
+không notify) đã ghi thành comment ngay tại chỗ. **Test:** `HubShopMergeAndPushTests` test 5.
+
+### D3 — app-alert `Kind="don_tra"` sang kênh đơn trả
+
+- `ClientApiEndpoints.cs:261-278`: rẽ nhánh theo Kind (so `OrdinalIgnoreCase`), Kind khác giữ `FireNotifyLoiApp`.
+- `:430-464`: `FireNotifyDonTraTuAppAlert` (dùng đúng key webhook `NotifyWebhookDonTra` + `TaoTinNhanDonTra` +
+  mốc giờ C1) và `TachCapDonTra` — hàm THUẦN tách `"SN=CODE; SN=CODE"`, `internal` để test.
+- `OrderDtos.cs:96-108`: doc-comment `OrdersAppAlertRequest` liệt kê 3 Kind + ý nghĩa `Detail` từng loại.
+
+**Test:** `AppAlertDonTraTests` (tách nhiều cặp / bỏ phần rác không ném / null-rỗng → list rỗng).
+
+### E1 — Màn Thống kê client
+
+`orders/XuLyDonShopee.App/ViewModels/OrderStatisticsViewModel.cs`:
+- `:33-42` thêm `SourceDangHoiText` ("đang hỏi Hub…") + `SourceSharedStaleText`; `ApplyLocal` (:154) đặt
+  "đang hỏi" thay vì "Hub không phản hồi" — dòng "không phản hồi" chỉ đặt khi lượt hỏi THỰC SỰ trả null.
+- `:51-60` nhớ `_dangHienSoHub` + `_shopSoHub` + `_rangeSoHub`; `ApplyStatistics` (:139-146) BỎ bước vẽ local
+  đè khi lượt vẽ mới CÙNG shop + CÙNG khoảng ngày với số chung đang hiện (đây là "số nhảy" mỗi lượt sync).
+- `LoadSharedStatisticsAsync` (:229-…) luôn marshal về UI qua `ApDungKetQuaHub`: null → chỉ sửa dòng nguồn
+  (đang giữ số chung → nói rõ là số của lượt hỏi TRƯỚC, không im lặng).
+
+**Test:** `OrderStatisticsViewModelTests` +4 (đang hỏi không kết luận hub chết; vẽ lại cùng khoảng giữ số chung;
+đổi khoảng ngày thì vẽ lại số local; lượt hỏi mới thất bại → nói rõ là số cũ).
+
+### E2 — Dispose ActivityLog
+
+`OrdersModuleHost.cs:1075` (`StopAsync`): `svc.Log.Dispose()` đặt SAU `Sessions.StopAllAsync()` (phiên đang dừng
+vẫn còn ghi log).
+
+### E3 — Xoá 2 endpoint legacy
+
+`ClientApiEndpoints.cs`: xoá `/accounts/append` + `/accounts/remove`, `LogLegacyHit`, record `AccountRemoveRequest`;
+cập nhật doc-comment đầu class. `FileStoreConfigService.cs`: xoá `AppendShopeeAccounts` (hết caller).
+Grep nghiệm thu `LogLegacyHit|AccountRemoveRequest|CountOrders|AppendShopeeAccounts` = **0 hit** trong source.
+
+### E4 — Dọn `QueryOrders`/`CountOrders`
+
+`HubDatabase.Orders.cs`: xoá cả hai (`QueryOrdersCore`/`CountOrdersCore` private vẫn dùng qua `QueryOrdersPage`).
+`HubSharedOrderStatsTests.cs:38` → `QueryOrdersPage(...).Items`. Sửa 2 doc-comment/comment còn nhắc tên cũ
+(`HubDatabase.Orders.cs` ShopOrderSummaries, `Orders.razor:162`).
+
+### E5 — Vặt
+
+- (a) `ClientApiEndpoints.cs`: doc-comment "Map OrderRecord → HubOrderItem…" dời từ trên `AsUtc` về đúng
+  `ToHubOrderItem` (:367-369).
+- (b) `MaintenanceService.cs:47`: cutoff file tạm 1h → **24h**; `ImportExcelWizard.razor`: thêm
+  `TempFileConHan()` (kiểm `File.Exists`, thiếu → `_wizError` "File tạm đã hết hạn hoặc bị dọn — hãy chọn lại
+  file Excel.") gọi ở đầu `WizSelectSheet` và `Import`.
+
+---
+
+## Điểm lệch so với plan / cần phiên chính soi lại
+
+1. **A1 dùng 2 cột thay vì 1** (`hub_push_gen` + `hub_push_gen_sent`), và `MarkHubSynced` GIỮ NGUYÊN chữ ký
+   `(accountId, IEnumerable<string> orderSns, atUtc)` thay vì nhận `$gen` từng đơn như plan mô tả.
+   **Lý do:** gen phải đi từ `GetForHubPush` → qua `AccountSession.PushPendingToHubAsync` (chỉ chuyển
+   `IReadOnlyList<string>` sang callback `markSynced`) → `HubOutbox.cs`. Cả hai file nằm trong
+   `orders/XuLyDonShopee.App/Services/**` — khu plan B1 đang chạy song song, plan này CẤM đụng. Cột
+   `hub_push_gen_sent` để repo tự chuyển mốc so sánh qua DB, cho ra ĐÚNG ngữ nghĩa plan yêu cầu mà không sửa file
+   nào ngoài khu được giao. Nếu phiên chính muốn đúng chữ ký như plan thì làm ở đợt sau, khi B1 đã merge.
+2. **`GetForHubPush` giờ CÓ GHI** (mở write-transaction để chụp thế hệ). Trước là đọc thuần. `PushGate` đã chống
+   2 lượt đẩy chồng nhau cùng account nên không đua với chính nó; nhưng đây là thay đổi tính chất của hàm — đáng soi.
+3. **`SyncedOrder.cs` (Models) và `Database.cs` (Data) bị sửa** — hai file không nằm trong danh sách khu được
+   giao nhưng bắt buộc: `CreatedAt` phải đi qua `SyncedOrder` (đúng mẫu `PreparedAt`/`ShopLogin` sẵn có) và
+   migration app.db chỉ có chỗ đặt duy nhất là `Database.Initialize()`. Không đụng `Services/**`.
+4. **Helper giờ VN đặt ở `server/Shopee.Hub.Web/Services/GioVietNam.cs`**, KHÔNG đặt trong `OrderNotifyService`
+   như plan gợi ý ("vd") — `OrderNotifyService.cs` nằm trong `orders/XuLyDonShopee.Core/Services/**` (khu cấm).
+   Đặt ở hub cũng phục vụ luôn C3 (Orders.razor).
+5. **CHƯA ghi CHANGELOG** cho C2 ("deploy hub TRƯỚC, release client SAU"). CHANGELOG không có mục "chưa phát
+   hành", thêm mục version mới bây giờ sẽ đụng bản của plan B1 và chốt sớm số version. Ghi chú deploy-order đã
+   nằm trong doc-comment `OrderPushItem.CreatedAt`; đề nghị phiên chính viết CHANGELOG lúc gộp B1+B2 và release.
+6. **`FileStoreConfigService.RemoveShopeeAccount` giờ cũng hết caller** (endpoint `/accounts/remove` đã xoá).
+   Plan chỉ nêu đích danh `AppendShopeeAccounts` nên tôi giữ lại `RemoveShopeeAccount` — phiên chính quyết có xoá nốt không.
+7. **Chưa chạy thật trên dữ liệu production**: migration gộp shop mới chỉ verify bằng DB dựng trong test.
+   Trước khi deploy nên backup `hub.db` (`VacuumInto` đã có sẵn ở job backup 3h sáng) và soi số shop trước/sau.
+8. **Worktree đã fast-forward từ 0d7918c lên main 38dea24** (19 commit) — worktree được tạo từ commit cũ nên
+   không có file plan; tại thời điểm đó worktree sạch và 0 commit đi trước main nên fast-forward an toàn.

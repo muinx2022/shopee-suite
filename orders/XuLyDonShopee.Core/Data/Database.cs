@@ -116,6 +116,8 @@ CREATE TABLE IF NOT EXISTS orders (
     gsheet_tab         TEXT,
     return_request_code TEXT,
     hub_synced_at      TEXT,
+    hub_push_gen       INTEGER NOT NULL DEFAULT 0,
+    hub_push_gen_sent  INTEGER,
     hub_slip_synced_at TEXT,
     sold_counted_at    TEXT,
     total_price        INTEGER,
@@ -275,6 +277,20 @@ CREATE TABLE IF NOT EXISTS prepare_daily (
         EnsureColumn(conn, "orders", "return_request_code", "TEXT");
         EnsureColumn(conn, "orders", "gsheet_da_co_don_tra_hang", "INTEGER");
 
+        // CẶP CỘT "THẾ HỆ" chống ĐUA giữa lượt đẩy hub đang bay và các chỗ reset cờ `hub_synced_at`:
+        //  · hub_push_gen      = thế hệ DỮ LIỆU của đơn — MỌI chỗ reset `hub_synced_at = NULL` (UpsertMany khi
+        //    trạng thái/vận đơn/ước tính đổi, MarkPrepared, SetReturnRequestCodes) +1 cột này.
+        //  · hub_push_gen_sent = thế hệ đã CHỤP cho lượt đẩy đang bay (GetForHubPush ghi = hub_push_gen; NULL =
+        //    chưa chụp lần nào).
+        // MarkHubSynced chỉ niêm phong đơn khi hai số CÒN BẰNG NHAU: đơn bị đổi giữa lúc lô đang bay (tunnel có thể
+        // hàng chục giây) có gen mới hơn → không bị đóng cờ oan → lượt đẩy sau mang dữ liệu MỚI lên hub. Trước đây
+        // `COALESCE(hub_synced_at, $at)` đóng cờ vô điều kiện nên dữ liệu mới KHÔNG BAO GIỜ lên hub (đơn hủy kẹt
+        // "Chờ lấy hàng", mã trả bị nuốt) — cùng lớp lỗi "cờ đã đẩy kẹt" đã sửa ở v1.6.3.
+        // Đơn CŨ nhận mặc định 0/NULL: gen_sent NULL nghĩa là "chưa chụp" nên lượt mark đầu tiên sau khi nâng cấp
+        // không đóng cờ; GetForHubPush ngay trước đó đã chụp nên thực tế không có đơn nào kẹt.
+        EnsureColumn(conn, "orders", "hub_push_gen", "INTEGER NOT NULL DEFAULT 0");
+        EnsureColumn(conn, "orders", "hub_push_gen_sent", "INTEGER");
+
         // Backfill MỘT LẦN: đơn ĐÃ lên hub TRƯỚC bản này có thể thiếu "Số tiền cuối cùng" trên hub — bản cũ chỉ
         // RESET hub_synced_at khi mã vận đơn vừa xuất hiện, KHÔNG reset khi final_amount vừa lấy được, nên đơn
         // lên hub ở lượt sync đầu (chưa mở trang chi tiết) hiển thị "—" VĨNH VIỄN dù local đã có số. Đẩy lại các
@@ -304,7 +320,9 @@ CREATE TABLE IF NOT EXISTS prepare_daily (
 
         using (var upd = conn.CreateCommand())
         {
-            upd.CommandText = @"UPDATE orders SET hub_synced_at = NULL
+            // +1 hub_push_gen như MỌI chỗ reset cờ khác (xem cặp cột "thế hệ" ở Initialize): lượt đẩy nào đang bay
+            // lúc app khởi động lại cũng không được đóng cờ đè lên đợt backfill này.
+            upd.CommandText = @"UPDATE orders SET hub_synced_at = NULL, hub_push_gen = hub_push_gen + 1
 WHERE final_amount IS NOT NULL AND hub_synced_at IS NOT NULL;";
             upd.ExecuteNonQuery();
         }

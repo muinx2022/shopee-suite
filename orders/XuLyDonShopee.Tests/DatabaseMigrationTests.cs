@@ -443,6 +443,38 @@ CREATE TABLE orders (
         Assert.Empty(repo.GetForHubPush(11));
     }
 
+    // ==== Migration cặp cột "thế hệ" hub_push_gen / hub_push_gen_sent (chống đua khi đẩy hub) ====
+
+    [Fact]
+    public void KhoiTao_DbCu_Orders_ThieuHubPushGen_DuocThemCot_ChayLai2LanKhongDoiGi()
+    {
+        using var temp = new TempDatabase();
+        CreateOldOrdersSchemaWithRow(temp.Path, accountId: 21, orderSn: "SNGEN");
+        Assert.False(HasColumn(temp.Path, "orders", "hub_push_gen"));
+        Assert.False(HasColumn(temp.Path, "orders", "hub_push_gen_sent"));
+
+        _ = new Database(temp.Path);
+
+        Assert.True(HasColumn(temp.Path, "orders", "hub_push_gen"));
+        Assert.True(HasColumn(temp.Path, "orders", "hub_push_gen_sent"));
+        // Đơn CŨ: thế hệ 0, chưa từng chụp (NULL) — vẫn đẩy được lên hub như trước.
+        Assert.Equal(0L, Convert.ToInt64(ReadOrderColumn(temp.Path, "SNGEN", "hub_push_gen")));
+        Assert.Null(ReadOrderColumn(temp.Path, "SNGEN", "hub_push_gen_sent"));
+
+        var repo = new OrdersRepository(new Database(temp.Path));
+        Assert.Equal(new[] { "SNGEN" }, repo.GetForHubPush(21).Select(o => o.OrderSn));
+        repo.MarkHubSynced(21, new[] { "SNGEN" }, DateTime.UtcNow);
+        Assert.Empty(repo.GetForHubPush(21));
+
+        // IDEMPOTENT: mở lại DB lần nữa (migration chạy lại) → không lỗi, không đổi thêm gì.
+        var genTruoc = ReadOrderColumn(temp.Path, "SNGEN", "hub_push_gen");
+        var syncedTruoc = ReadOrderColumn(temp.Path, "SNGEN", "hub_synced_at");
+        _ = new Database(temp.Path);
+        Assert.Equal(genTruoc, ReadOrderColumn(temp.Path, "SNGEN", "hub_push_gen"));
+        Assert.Equal(syncedTruoc, ReadOrderColumn(temp.Path, "SNGEN", "hub_synced_at"));
+        Assert.Empty(new OrdersRepository(new Database(temp.Path)).GetForHubPush(21));
+    }
+
     // ==== Migration cột hub_slip_synced_at cho bảng orders (đẩy FILE PHIẾU lên hub) ====
 
     [Fact]

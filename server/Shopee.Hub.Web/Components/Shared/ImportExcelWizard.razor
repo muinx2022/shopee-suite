@@ -236,6 +236,7 @@
     {
         _wizSheet = e.Value?.ToString() ?? "";
         if (_wizTempPath is null || string.IsNullOrEmpty(_wizSheet)) return;
+        if (!TempFileConHan()) return;
         _wizBusy = true; _wizError = "";
         try
         {
@@ -257,6 +258,7 @@
     private async Task Import()
     {
         if (_wizBusy || _wizTempPath is null || string.IsNullOrEmpty(_wizSheet)) return;
+        if (!TempFileConHan()) return;
         var pg = Pg;
         if (pg is null || !pg.IsReady) return;
         var acct = TargetAcct; var dest = TargetSheet;
@@ -297,6 +299,16 @@
         await ParseGate.WaitAsync(ct);
         try { return await Task.Run(parse, ct); }
         finally { ParseGate.Release(); }
+    }
+
+    // File tam co the da bi don (MaintenanceService) hoac mat vi ly do khac giua luc modal dang mo. Bao ro mot cau
+    // roi de admin chon lai file, thay vi de FileNotFoundException noi len thanh "Loi nhap: ..." kho hieu.
+    private bool TempFileConHan()
+    {
+        if (_wizTempPath is not null && File.Exists(_wizTempPath)) return true;
+        _wizTempPath = null;
+        _wizError = "✘ File tạm đã hết hạn hoặc bị dọn — hãy chọn lại file Excel.";
+        return false;
     }
 
     private void DeleteTempFile()

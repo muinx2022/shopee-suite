@@ -166,6 +166,8 @@ public class OrdersRepository
                 // bản quét trang DANH SÁCH ({name,variation,amount,image}) tuyệt đối không được đè bản đọc ở trang
                 // CHI TIẾT (thêm sku/phanLoai/donGia/thanhTien): trang chi tiết chỉ mở lại cho đơn THIẾU ước tính
                 // nên đơn đã có ước tính mà bị đè là mất SKU/phân loại VĨNH VIỄN.
+                // hub_push_gen: +1 ĐÚNG các điều kiện reset cờ bên dưới — đơn bị đổi trong lúc một lô đang bay lên
+                // hub sẽ có "thế hệ" mới hơn thế hệ đã chụp, nên MarkHubSynced KHÔNG đóng cờ oan (xem MarkHubSynced).
                 // hub_synced_at: RESET về NULL để lượt đẩy hub kế đẩy LẠI đơn kèm dữ liệu mới, khi một trong các
                 // điều kiện sau đúng (hub chỉ lấy đơn hub_synced_at IS NULL — KHÔNG có re-push "vận đơn mới" như
                 // GSheet; hub UpsertOrders idempotent nên đẩy lại chỉ cập nhật). Trong UPDATE của SQLite, cột ở vế
@@ -193,6 +195,11 @@ public class OrdersRepository
                            OR (COALESCE(status, '') <> COALESCE($status, ''))
                            OR (COALESCE(cancel_reason, '') <> COALESCE($cancelReason, ''))
                          THEN NULL ELSE hub_synced_at END,
+    hub_push_gen = CASE WHEN (tracking_number IS NULL AND $tracking IS NOT NULL)
+                          OR (final_amount IS NULL AND $finalAmount IS NOT NULL)
+                          OR (COALESCE(status, '') <> COALESCE($status, ''))
+                          OR (COALESCE(cancel_reason, '') <> COALESCE($cancelReason, ''))
+                        THEN hub_push_gen + 1 ELSE hub_push_gen END,
     synced_at = $synced, updated_at = $synced
     WHERE id = $id;";
                 upd.Parameters.AddWithValue("$shopId", (object?)shopId ?? DBNull.Value);
@@ -437,7 +444,8 @@ public class OrdersRepository
         using var cmd = conn.CreateCommand();
         cmd.CommandText = @"UPDATE orders SET
     prepared_at = COALESCE(prepared_at, $at),
-    hub_synced_at = NULL
+    hub_synced_at = NULL,
+    hub_push_gen = hub_push_gen + 1
     WHERE account_id = $a AND order_sn = $sn;";
         cmd.Parameters.AddWithValue("$at", DbSerialization.FormatDate(atUtc));
         cmd.Parameters.AddWithValue("$a", accountId);
@@ -531,7 +539,8 @@ public class OrdersRepository
             upd.CommandText = @"UPDATE orders SET
     return_request_code = $code,
     gsheet_da_co_don_tra_hang = NULL,
-    hub_synced_at = NULL
+    hub_synced_at = NULL,
+    hub_push_gen = hub_push_gen + 1
     WHERE account_id = $a AND order_sn = $sn AND COALESCE(return_request_code, '') <> $code;";
             upd.Parameters.AddWithValue("$code", codeTrim);
             upd.Parameters.AddWithValue("$a", accountId);
@@ -556,49 +565,74 @@ public class OrdersRepository
     /// (<c>hub_synced_at IS NULL</c>) — dựng lại <see cref="SyncedOrder"/> đầy đủ từ các cột bảng để client map
     /// 1-1 sang DTO hub (mẫu <see cref="GetForGsheetPush"/>). NULL = còn trong hàng đợi ngầm → hub offline thì
     /// lượt sync sau tự đẩy bù. Sắp theo id tăng (đơn cũ trước) để đẩy đúng thứ tự xuất hiện.
+    /// <para>
+    /// <b>CÓ GHI, không thuần đọc:</b> chụp luôn "thế hệ" dữ liệu của từng đơn được trả về
+    /// (<c>hub_push_gen_sent = hub_push_gen</c>) trong CÙNG transaction với lượt đọc. Đơn nào bị đổi TRONG LÚC lô
+    /// đang bay lên hub (arrange/ghi mã trả/sync lại) sẽ được +1 <c>hub_push_gen</c> ở các hàm ghi đó, nên
+    /// <see cref="MarkHubSynced"/> nhận ra hai số đã lệch và KHÔNG đóng cờ đơn ấy — dữ liệu mới còn đường lên hub
+    /// ở lượt đẩy sau.
+    /// </para>
     /// </summary>
     public IReadOnlyList<SyncedOrder> GetForHubPush(long accountId)
     {
         using var conn = _db.OpenConnection();
+        using var tx = conn.BeginTransaction();
+
+        // CHỤP thế hệ trước khi đọc (cùng transaction) → mọi đơn trả về đều mang mốc so sánh cho MarkHubSynced.
+        using (var claim = conn.CreateCommand())
+        {
+            claim.Transaction = tx;
+            claim.CommandText =
+                "UPDATE orders SET hub_push_gen_sent = hub_push_gen WHERE account_id = $a AND hub_synced_at IS NULL;";
+            claim.Parameters.AddWithValue("$a", accountId);
+            claim.ExecuteNonQuery();
+        }
+
         using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
         cmd.CommandText = @"SELECT order_sn, shopee_order_id, buyer_username, items_json, item_count, item_summary, sku,
        total_price, total_price_text, final_amount, final_amount_text, payment_method,
        status, status_description, cancel_reason, channel, carrier, tracking_number, shop_login, prepared_at,
-       return_request_code
+       return_request_code, created_at
     FROM orders
     WHERE account_id = $a AND hub_synced_at IS NULL
     ORDER BY id;";
         cmd.Parameters.AddWithValue("$a", accountId);
 
         var list = new List<SyncedOrder>();
-        using var reader = cmd.ExecuteReader();
-        while (reader.Read())
+        using (var reader = cmd.ExecuteReader())
         {
-            list.Add(new SyncedOrder
+            while (reader.Read())
             {
-                OrderSn = reader.GetString(0),
-                ShopeeOrderId = reader.IsDBNull(1) ? null : reader.GetString(1),
-                BuyerUsername = reader.IsDBNull(2) ? null : reader.GetString(2),
-                ItemsJson = reader.IsDBNull(3) ? "[]" : reader.GetString(3),
-                ItemCount = reader.IsDBNull(4) ? 0 : reader.GetInt32(4),
-                ItemSummary = reader.IsDBNull(5) ? null : reader.GetString(5),
-                Sku = reader.IsDBNull(6) ? null : reader.GetString(6),
-                TotalPrice = reader.IsDBNull(7) ? null : reader.GetInt64(7),
-                TotalPriceText = reader.IsDBNull(8) ? null : reader.GetString(8),
-                FinalAmount = reader.IsDBNull(9) ? null : reader.GetInt64(9),
-                FinalAmountText = reader.IsDBNull(10) ? null : reader.GetString(10),
-                PaymentMethod = reader.IsDBNull(11) ? null : reader.GetString(11),
-                Status = reader.IsDBNull(12) ? null : reader.GetString(12),
-                StatusDescription = reader.IsDBNull(13) ? null : reader.GetString(13),
-                CancelReason = reader.IsDBNull(14) ? null : reader.GetString(14),
-                Channel = reader.IsDBNull(15) ? null : reader.GetString(15),
-                Carrier = reader.IsDBNull(16) ? null : reader.GetString(16),
-                TrackingNumber = reader.IsDBNull(17) ? null : reader.GetString(17),
-                ShopLogin = reader.IsDBNull(18) ? null : reader.GetString(18),
-                PreparedAt = reader.IsDBNull(19) ? null : DbSerialization.ParseDate(reader.GetString(19)),
-                ReturnRequestCode = reader.IsDBNull(20) ? null : reader.GetString(20),
-            });
+                list.Add(new SyncedOrder
+                {
+                    OrderSn = reader.GetString(0),
+                    ShopeeOrderId = reader.IsDBNull(1) ? null : reader.GetString(1),
+                    BuyerUsername = reader.IsDBNull(2) ? null : reader.GetString(2),
+                    ItemsJson = reader.IsDBNull(3) ? "[]" : reader.GetString(3),
+                    ItemCount = reader.IsDBNull(4) ? 0 : reader.GetInt32(4),
+                    ItemSummary = reader.IsDBNull(5) ? null : reader.GetString(5),
+                    Sku = reader.IsDBNull(6) ? null : reader.GetString(6),
+                    TotalPrice = reader.IsDBNull(7) ? null : reader.GetInt64(7),
+                    TotalPriceText = reader.IsDBNull(8) ? null : reader.GetString(8),
+                    FinalAmount = reader.IsDBNull(9) ? null : reader.GetInt64(9),
+                    FinalAmountText = reader.IsDBNull(10) ? null : reader.GetString(10),
+                    PaymentMethod = reader.IsDBNull(11) ? null : reader.GetString(11),
+                    Status = reader.IsDBNull(12) ? null : reader.GetString(12),
+                    StatusDescription = reader.IsDBNull(13) ? null : reader.GetString(13),
+                    CancelReason = reader.IsDBNull(14) ? null : reader.GetString(14),
+                    Channel = reader.IsDBNull(15) ? null : reader.GetString(15),
+                    Carrier = reader.IsDBNull(16) ? null : reader.GetString(16),
+                    TrackingNumber = reader.IsDBNull(17) ? null : reader.GetString(17),
+                    ShopLogin = reader.IsDBNull(18) ? null : reader.GetString(18),
+                    PreparedAt = reader.IsDBNull(19) ? null : DbSerialization.ParseDate(reader.GetString(19)),
+                    ReturnRequestCode = reader.IsDBNull(20) ? null : reader.GetString(20),
+                    CreatedAt = reader.IsDBNull(21) ? null : DbSerialization.ParseDate(reader.GetString(21)),
+                });
+            }
         }
+
+        tx.Commit();
         return list;
     }
 
@@ -648,9 +682,19 @@ public class OrdersRepository
     }
 
     /// <summary>
-    /// Đánh dấu các đơn ĐÃ được hub nhận OK (chống đẩy trùng lượt sync sau). <c>hub_synced_at</c> dùng
-    /// <c>COALESCE(cũ, $at)</c> — GIỮ thời điểm đẩy LẦN ĐẦU, không đè khi gọi lại. Khóa theo
+    /// Đánh dấu các đơn ĐÃ được hub nhận OK (chống đẩy trùng lượt sync sau). Khóa theo
     /// <c>(account_id, order_sn)</c>; đơn không có mã (rỗng) bị bỏ qua. Cập nhật nhiều đơn trong một transaction.
+    /// <para>
+    /// Chỉ đóng cờ khi đơn CÒN đang chờ (<c>hub_synced_at IS NULL</c> — nên gọi lại lần 2 KHÔNG dời mốc đẩy lần đầu,
+    /// y như <c>COALESCE</c> cũ) VÀ "thế hệ" dữ liệu vẫn ĐÚNG bản đã chụp lúc
+    /// <see cref="GetForHubPush"/> (<c>hub_push_gen_sent = hub_push_gen</c>). Đơn bị đổi TRONG LÚC lô đang bay
+    /// (arrange xong, ghi mã trả hàng, sync lại thấy "Đã hủy"…) đã được +1 <c>hub_push_gen</c> ở các hàm ghi đó →
+    /// hai số lệch → KHÔNG đóng cờ → lượt đẩy sau mang dữ liệu MỚI lên hub. Không có bước này thì cờ bị niêm phong
+    /// vô điều kiện và dữ liệu mới KHÔNG BAO GIỜ tới hub (đơn hủy kẹt "Chờ lấy hàng", mã trả bị nuốt), mà client
+    /// lại DỌN đơn kết thúc vì tưởng đã đẩy xong.
+    /// </para>
+    /// <c>hub_push_gen_sent IS NULL</c> = đơn chưa từng qua <see cref="GetForHubPush"/> (không có bằng chứng đua) →
+    /// vẫn đóng cờ như trước, để đường gọi thẳng không bị chặn oan.
     /// </summary>
     public void MarkHubSynced(long accountId, IEnumerable<string> orderSns, DateTime atUtc)
     {
@@ -666,8 +710,10 @@ public class OrdersRepository
             using var cmd = conn.CreateCommand();
             cmd.Transaction = tx;
             cmd.CommandText = @"UPDATE orders SET
-    hub_synced_at = COALESCE(hub_synced_at, $at)
-    WHERE account_id = $a AND order_sn = $sn;";
+    hub_synced_at = $at
+    WHERE account_id = $a AND order_sn = $sn
+      AND hub_synced_at IS NULL
+      AND (hub_push_gen_sent IS NULL OR hub_push_gen_sent = hub_push_gen);";
             cmd.Parameters.AddWithValue("$at", atStr);
             cmd.Parameters.AddWithValue("$a", accountId);
             cmd.Parameters.AddWithValue("$sn", sn);

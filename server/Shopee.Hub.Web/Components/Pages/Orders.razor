@@ -79,7 +79,7 @@
                         <div><b>Đơn trả hàng</b><span>@(o.ReturnRequestCode ?? "—")</span></div>
                         <div><b>Số tiền cuối</b><span>@(o.FinalAmountText ?? (o.FinalAmount?.ToString("N0") ?? "—"))</span></div>
                         <div><b>Vận chuyển</b><span>@(string.IsNullOrEmpty(o.Carrier) ? (o.Channel ?? "—") : o.Carrier)@(string.IsNullOrEmpty(o.TrackingNumber) ? "" : $" · {o.TrackingNumber}")</span></div>
-                        <div><b>Đồng bộ</b><span>@(o.SyncedAt == default ? "—" : o.SyncedAt.LocalDateTime.ToString("MM-dd HH:mm"))</span></div>
+                        <div><b>Đồng bộ</b><span>@(o.SyncedAt == default ? "—" : GioVietNam.DinhDang(o.SyncedAt, "MM-dd HH:mm"))</span></div>
                         @if (o.SlipAt is not null)
                         {
                             <a class="btn sm" href="@($"/slips/{o.ShopId}/{o.OrderSn}")" target="_blank" rel="noopener">Mở phiếu PDF</a>
@@ -94,7 +94,7 @@
                     <a class="linkbtn" href="@($"/slips/{o.ShopId}/{o.OrderSn}")" target="_blank" rel="noopener" title="Mở phiếu PDF (tab mới)">📄 Phiếu</a>
                 }
             </td>
-            <td class="m-hide" data-label="Sync">@(o.SyncedAt == default ? "" : o.SyncedAt.LocalDateTime.ToString("MM-dd HH:mm"))</td>
+            <td class="m-hide" data-label="Sync">@GioVietNam.DinhDang(o.SyncedAt, "MM-dd HH:mm")</td>
         </tr>
     }
     @if (_orders.Count == 0)
@@ -159,7 +159,7 @@
         Load();
     }
 
-    // Ô TÌM gõ liên tục (oninput) từng chạy CountOrders+QueryOrders (LIKE %…% không index) dưới lock(_gate) toàn cục
+    // Ô TÌM gõ liên tục (oninput) từng chạy đếm+đọc trang (LIKE %…% không index) dưới lock(_gate) toàn cục
     // của HubDatabase MỖI phím → nghẽn heartbeat/lease cả fleet. Debounce 300ms: huỷ timer cũ mỗi keystroke, chỉ query
     // KHI ngừng gõ. Callback bắn từ threadpool → InvokeAsync đưa về sync-context của circuit trước khi đụng state/DB.
     private System.Threading.Timer? _searchTimer;

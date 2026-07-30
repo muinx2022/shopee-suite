@@ -239,6 +239,28 @@ public class PrepareHubCountTests
         Assert.True(vm.DangDungSoHub);
     }
 
+    // ===== BẪY MẤT SỐ: hub trả HAI dòng cùng shop (lệch hoa/thường) → phải CỘNG DỒN, không lấy bản sau =====
+    [Fact]
+    public async Task HubTraHaiDongCungShop_CongDon_KhongLayBanSauThang()
+    {
+        using var temp = new TempDatabase();
+        var (services, vm) = NewVmVoiSoCucBo(temp);
+
+        // Hub CHƯA gộp shop trùng (bản hub cũ) nên cùng một shop vật lý về thành 2 dòng: 5 + 3 = 8 đơn.
+        // Lấy "bản sau thắng" là báo 3 — mất trắng 5 đơn của dòng kia.
+        services.QueryPrepareStats = (_, _) => Task.FromResult<IReadOnlyDictionary<string, int>?>(
+            new Dictionary<string, int>(StringComparer.Ordinal)
+            {
+                [LoginA] = 5,
+                ["Alina99.Store"] = 3,
+            });
+
+        await vm.RefreshHubCountsAsync();
+
+        Assert.Equal(8, Row(vm, LoginA).PreparedCount);
+        Assert.True(vm.DangDungSoHub);
+    }
+
     // ===== 6. Hook chưa rót (bản chạy KHÔNG có hub) → y như cũ, không ném =====
     [Fact]
     public async Task HookChuaRot_HanhViYNhuCu_KhongNem()

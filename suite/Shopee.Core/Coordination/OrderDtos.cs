@@ -38,6 +38,13 @@ public sealed class OrderPushItem
     /// bên có, và máy khác đẩy lại KHÔNG ghi đè mốc của máy đã chuẩn bị.</summary>
     public string? PreparedAt { get; set; }
 
+    /// <summary>Thời điểm máy client ghi nhận đơn LẦN ĐẦU (cột <c>orders.created_at</c>) — ISO-8601 UTC. Hub dùng làm
+    /// <c>first_seen_at</c> lúc INSERT để thống kê dùng chung đếm đơn theo lúc đơn XUẤT HIỆN, không phải lúc hub NHẬN
+    /// gói (đẩy bù sau khi hub offline / gói bay qua nửa đêm thì hai mốc rơi khác ngày).
+    /// <para><b>TÙY CHỌN</b> — client CŨ không gửi field này vẫn hợp lệ: NULL → hub lùi về giờ nhận như trước. Vì thế
+    /// deploy hub TRƯỚC, release client SAU.</para></summary>
+    public string? CreatedAt { get; set; }
+
     /// <summary>Ngày <c>yyyy-MM-dd</c> theo GIỜ ĐỊA PHƯƠNG của máy đã chuẩn bị đơn — KHÓA NHÓM để hub đếm số đơn
     /// "chuẩn bị hàng" theo shop/ngày (GET /prepare-stats). Client tính SẴN nên hub KHÔNG cần biết múi giờ (mọi
     /// máy ở VN nhưng vẫn không hard-code offset ở hub). NULL đi cùng <see cref="PreparedAt"/> NULL.</summary>
@@ -93,14 +100,21 @@ public sealed record SlipPushError(string OrderSn, string Error);
 /// (lô gửi) − Missing − Errors để đánh dấu đúng đơn.</summary>
 public sealed record OrdersSlipPushResult(int Saved, List<string> Missing, List<SlipPushError> Errors);
 
-/// <summary>Client báo sự kiện lỗi app lên Hub (POST /api/orders/app-alert). Hub quyết định gửi webhook.
-/// <see cref="Kind"/> ổn định ASCII — hiện: <c>khong_dat_duoc_dia_chi</c>.</summary>
+/// <summary>Client báo sự kiện lên Hub (POST /api/orders/app-alert). Hub quyết định KÊNH webhook theo
+/// <see cref="Kind"/> (chuỗi ASCII ổn định):
+/// <list type="bullet">
+/// <item><c>khong_dat_duoc_dia_chi</c> — kênh LỖI APP; <see cref="Detail"/> = tỉnh của địa chỉ định đặt.</item>
+/// <item><c>don_tra</c> — kênh ĐƠN TRẢ (không phải lỗi app): mã yêu cầu trả hàng của các đơn ĐÃ bị dọn khỏi app
+/// nên hub không thấy qua <c>orders/push</c>. <see cref="ShopName"/> = shop_login, <see cref="Detail"/> = các cặp
+/// <c>SN=CODE</c> ngăn nhau bằng <c>;</c>.</item>
+/// <item>Kind lạ (client mới hơn hub) — kênh LỖI APP, in nguyên Kind + Detail.</item>
+/// </list></summary>
 public sealed class OrdersAppAlertRequest
 {
     public string Kind { get; set; } = "";
     public string? MachineName { get; set; }
     public string? AccountLabel { get; set; }
     public string? ShopName { get; set; }
-    /// <summary>Chi tiết ngắn (vd. tỉnh địa chỉ định đặt).</summary>
+    /// <summary>Chi tiết ngắn — ý nghĩa tuỳ <see cref="Kind"/> (xem bảng ở trên).</summary>
     public string? Detail { get; set; }
 }

@@ -37,6 +37,110 @@ CREATE TABLE IF NOT EXISTS shops(
   proxy_key TEXT, note TEXT, created_at TEXT, updated_at TEXT);
 CREATE UNIQUE INDEX IF NOT EXISTS ux_shops_username ON shops(username);");
 
+    /// <summary>Khoá "đã chạy" của <see cref="MergeDuplicateShopsOnce"/> trong bảng <c>settings</c>.</summary>
+    private const string MergeShopsKey = "merge_shops_nocase_v1";
+
+    /// <summary>
+    /// GỘP các hàng <c>shops</c> trùng username sau khi bỏ hoa/thường rồi dựng lại
+    /// <c>ux_shops_username</c> thành <c>COLLATE NOCASE</c> — chạy MỘT LẦN trên DB đang có dữ liệu.
+    /// <para>
+    /// Vì sao có trùng: fallback <c>ResolveShopUsername</c> của client lấy tạm email subaccount rồi lần sau đổi
+    /// sang shop_login thật, và hai máy gõ email lệch HOA/thường. Hai hàng shop cho cùng một shop vật lý làm
+    /// khoá chống trùng đơn <c>(shop_id, order_sn)</c> mất tác dụng → cùng một đơn được đếm 2 lần.
+    /// </para>
+    /// Cách gộp: giữ hàng CŨ NHẤT (id nhỏ nhất) của mỗi nhóm; chuyển đơn của các hàng thừa về hàng giữ lại —
+    /// đơn trùng <c>order_sn</c> ở cả hai bên thì giữ bản có <c>synced_at</c> MỚI NHẤT; dời luôn thư mục phiếu
+    /// <c>slips/&lt;shopId&gt;</c>; xoá hàng shop thừa.
+    /// <para><b>Idempotent:</b> chốt bằng khoá trong <c>settings</c> + bản thân phép gộp chạy lần 2 cũng không
+    /// còn nhóm trùng nào (chạy 2 lần không đổi thêm gì).</para>
+    /// </summary>
+    private void MergeDuplicateShopsOnce(string dataDir)
+    {
+        lock (_gate)
+        {
+            if (GetSetting(MergeShopsKey) is not null) return;
+
+            // (id GIỮ LẠI, id BỎ) của mọi hàng thừa — nhóm theo username đã bỏ hoa/thường + trim.
+            var pairs = new List<(long Keep, long Drop)>();
+            using (var c = _conn.CreateCommand())
+            {
+                c.CommandText = @"
+SELECT MIN(id), GROUP_CONCAT(id) FROM shops
+WHERE username IS NOT NULL AND TRIM(username) <> ''
+GROUP BY LOWER(TRIM(username)) HAVING COUNT(*) > 1";
+                using var rd = c.ExecuteReader();
+                while (rd.Read())
+                {
+                    var keep = rd.GetInt64(0);
+                    foreach (var raw in S(rd, 1).Split(',', StringSplitOptions.RemoveEmptyEntries))
+                        if (long.TryParse(raw, out var id) && id != keep) pairs.Add((keep, id));
+                }
+            }
+
+            if (pairs.Count > 0)
+            {
+                using var tx = _conn.BeginTransaction();
+                foreach (var (keep, drop) in pairs)
+                {
+                    // Đơn trùng order_sn ở CẢ hai shop: bỏ bản CŨ hơn (so synced_at dạng ISO = so chuỗi) rồi mới
+                    // chuyển phần còn lại sang — làm ngược thứ tự là vi phạm UNIQUE(shop_id, order_sn).
+                    using (var d = _conn.CreateCommand())
+                    {
+                        d.Transaction = tx;
+                        d.CommandText = @"
+DELETE FROM orders WHERE shop_id=$drop AND order_sn IN (
+  SELECT o2.order_sn FROM orders o2 WHERE o2.shop_id=$keep
+    AND COALESCE(o2.synced_at,'') >= COALESCE((SELECT o3.synced_at FROM orders o3
+        WHERE o3.shop_id=$drop AND o3.order_sn=o2.order_sn), ''));
+DELETE FROM orders WHERE shop_id=$keep AND order_sn IN (
+  SELECT o2.order_sn FROM orders o2 WHERE o2.shop_id=$drop);";
+                        d.Parameters.AddWithValue("$keep", keep);
+                        d.Parameters.AddWithValue("$drop", drop);
+                        d.ExecuteNonQuery();
+                    }
+                    using (var m = _conn.CreateCommand())
+                    {
+                        m.Transaction = tx;
+                        m.CommandText = "UPDATE orders SET shop_id=$keep WHERE shop_id=$drop; DELETE FROM shops WHERE id=$drop;";
+                        m.Parameters.AddWithValue("$keep", keep);
+                        m.Parameters.AddWithValue("$drop", drop);
+                        m.ExecuteNonQuery();
+                    }
+                }
+                tx.Commit();
+
+                // Phiếu PDF trên đĩa keyed theo shopId → dời sang thư mục của shop giữ lại (file trùng tên: giữ
+                // bản đích, đơn nào cũng chỉ có một phiếu). Lỗi I/O KHÔNG được làm sập lượt khởi động hub.
+                foreach (var (keep, drop) in pairs) MoveSlipDir(dataDir, drop, keep);
+            }
+
+            ExecRaw("DROP INDEX IF EXISTS ux_shops_username;");
+            ExecRaw("CREATE UNIQUE INDEX IF NOT EXISTS ux_shops_username ON shops(username COLLATE NOCASE);");
+            SetSetting(MergeShopsKey, DateTimeOffset.UtcNow.ToString("o"));
+        }
+    }
+
+    /// <summary>Dời <c>slips/&lt;from&gt;</c> vào <c>slips/&lt;to&gt;</c> (file trùng tên → giữ bản đích). Nuốt lỗi
+    /// I/O: phiếu là dữ liệu phụ, không đáng để hub không khởi động được.</summary>
+    private static void MoveSlipDir(string dataDir, long from, long to)
+    {
+        try
+        {
+            var src = Path.Combine(dataDir, "slips", from.ToString());
+            if (!Directory.Exists(src)) return;
+            var dst = Path.Combine(dataDir, "slips", to.ToString());
+            Directory.CreateDirectory(dst);
+            foreach (var file in Directory.EnumerateFiles(src))
+            {
+                var target = Path.Combine(dst, Path.GetFileName(file));
+                if (File.Exists(target)) File.Delete(file);
+                else File.Move(file, target);
+            }
+            try { Directory.Delete(src, recursive: false); } catch { }
+        }
+        catch { /* phiếu là dữ liệu phụ — không chặn khởi động hub */ }
+    }
+
     public List<Shop> ListShops()
     {
         lock (_gate)
@@ -130,27 +234,33 @@ ORDER BY login COLLATE NOCASE, sort_order, shop_login COLLATE NOCASE";
     }
 
     /// <summary>Tìm shop theo username; chưa có → TẠO shop mới (name = <paramref name="name"/> hoặc chính
-    /// username nếu trống). Trả id shop. Dùng ở đường push đơn để client khỏi biết id trên hub.</summary>
+    /// username nếu trống). Trả id shop. Dùng ở đường push đơn để client khỏi biết id trên hub.
+    /// <para>So khớp KHÔNG phân biệt hoa/thường (+ Trim) — cùng luật với unique index
+    /// <c>ux_shops_username</c>: "ShopA" và "shopa" là MỘT shop vật lý. Khớp phân biệt hoa/thường sẽ đẻ 2 hàng
+    /// <c>shops</c>, mà khoá chống trùng đơn là <c>(shop_id, order_sn)</c> → CÙNG một đơn bị đếm 2 lần trong
+    /// thống kê, còn lọc theo shop thì trả 0 một cách LẶNG. Chữ hoa/thường LƯU vẫn giữ nguyên bản đầu tiên
+    /// (chỉ để hiển thị).</para></summary>
     public long GetOrCreateShopByUsername(string username, string? name)
     {
         lock (_gate)
         {
+            var u = username?.Trim() ?? "";
             using (var q = _conn.CreateCommand())
             {
-                q.CommandText = "SELECT id FROM shops WHERE username=$u";
-                q.Parameters.AddWithValue("$u", username);
+                q.CommandText = "SELECT id FROM shops WHERE username=$u COLLATE NOCASE";
+                q.Parameters.AddWithValue("$u", u);
                 var found = q.ExecuteScalar();
                 if (found is not null && found is not DBNull) return Convert.ToInt64(found);
             }
 
             var now = Iso(DateTimeOffset.UtcNow);
-            var shopName = string.IsNullOrWhiteSpace(name) ? username : name.Trim();
+            var shopName = string.IsNullOrWhiteSpace(name) ? u : name.Trim();
             using (var c = _conn.CreateCommand())
             {
                 c.CommandText = @"
 INSERT INTO shops(name,username,created_at,updated_at) VALUES($n,$u,$ca,$ua);";
                 c.Parameters.AddWithValue("$n", shopName);
-                c.Parameters.AddWithValue("$u", username);
+                c.Parameters.AddWithValue("$u", u);
                 c.Parameters.AddWithValue("$ca", now);
                 c.Parameters.AddWithValue("$ua", now);
                 c.ExecuteNonQuery();

@@ -389,14 +389,18 @@ public static class OrdersModuleHost
                 }
 
                 // Khoá map = shop_login, so khớp KHÔNG phân biệt hoa/thường: nhãn shop giữa account_shops của máy
-                // và shops.username trên hub có thể lệch HOA/thường → tra Ordinal sẽ ra 0 một cách LẶNG. Indexer
-                // chứ không ToDictionary để hub trả dòng trùng khoá cũng không ném.
+                // và shops.username trên hub có thể lệch HOA/thường → tra Ordinal sẽ ra 0 một cách LẶNG.
+                // Hai dòng hub trùng khoá sau khi bỏ hoa/thường là CÙNG một shop vật lý bị tách đôi → CỘNG DỒN
+                // (lấy bản sau là mất số của bản kia). Giữ phép cộng kể cả khi hub đã gộp shop trùng — máy này có
+                // thể đang nói chuyện với hub chưa nâng cấp.
                 var map = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
                 foreach (var s in stats)
                 {
                     if (!string.IsNullOrWhiteSpace(s.ShopUsername))
                     {
-                        map[s.ShopUsername.Trim()] = s.Count;
+                        var khoa = s.ShopUsername.Trim();
+                        map.TryGetValue(khoa, out var dangCo);
+                        map[khoa] = dangCo + s.Count;
                     }
                 }
                 return map;
@@ -1053,6 +1057,8 @@ public static class OrdersModuleHost
         ReturnRequestCode = o.ReturnRequestCode,
         PreparedAt = o.PreparedAt?.ToString("o", CultureInfo.InvariantCulture),
         PreparedDay = o.PreparedAt?.ToLocalTime().ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+        // Mốc đơn xuất hiện LẦN ĐẦU trên máy này → hub đặt first_seen_at theo mốc này thay vì giờ hub nhận gói.
+        CreatedAt = o.CreatedAt?.ToString("o", CultureInfo.InvariantCulture),
     };
 
     /// <summary>
@@ -1069,5 +1075,8 @@ public static class OrdersModuleHost
         try { _outboxWorker?.Dispose(); } catch { /* bỏ qua khi thoát */ }  // dừng vòng chờ đẩy
         try { _mainVm?.AccountsVm.Dispose(); } catch { /* bỏ qua khi thoát */ } // dừng nhịp dò sang ngày mới
         try { await svc.Sessions.StopAllAsync(); } catch { /* bỏ qua khi thoát */ }
+        // Dispose SAU CÙNG: phiên đang dừng vẫn còn ghi log. ActivityLog gom dòng trong bộ đệm rồi mới xả ra file
+        // theo nhịp — không Dispose là mất nốt phần _pending của phút cuối (đúng lúc cần soi nhất khi thoát bất thường).
+        try { svc.Log.Dispose(); } catch { /* bỏ qua khi thoát */ }
     }
 }

@@ -151,14 +151,16 @@ CREATE INDEX IF NOT EXISTS ix_orders_status ON orders(status);");
                 // KHÔNG ghi đè ngày của máy đã thực sự chuẩn bị đơn (nguồn đếm /prepare-stats).
                 // return_request_code COALESCE cùng lý do: chỉ MÁY chạy bước check trả hàng của shop đó mới có mã,
                 // máy khác đẩy lại (không kèm) KHÔNG được xoá mã đang có.
-                // first_seen_at CHỈ đặt lúc INSERT — lần ĐẦU đơn xuất hiện trên hub, mốc DUY NHẤT toàn hệ thống để
-                // thống kê đếm đơn (tương đương created_at của DB client). Nhánh DO UPDATE TUYỆT ĐỐI KHÔNG đụng cột
-                // này: đụng vào là đơn cũ đồng bộ lại nhảy sang ngày hôm nay (đúng lỗi của synced_at).
+                // first_seen_at CHỈ đặt lúc INSERT — lần ĐẦU đơn xuất hiện, mốc DUY NHẤT toàn hệ thống để thống kê
+                // đếm đơn. Lấy created_at CLIENT gửi kèm (lúc đơn xuất hiện trên máy đó) và chỉ lùi về $sa (giờ hub
+                // NHẬN) khi client cũ không gửi: đẩy bù sau lúc hub offline / gói bay qua nửa đêm thì hai mốc rơi
+                // KHÁC NGÀY, làm số chung lệch số local. Nhánh DO UPDATE TUYỆT ĐỐI KHÔNG đụng cột này: đụng vào là
+                // đơn cũ đồng bộ lại nhảy sang ngày hôm nay (đúng lỗi của synced_at).
                 c.CommandText = @"
 INSERT INTO orders(shop_id,order_sn,shopee_order_id,buyer_username,items_json,item_count,item_summary,sku,
   total_price,total_price_text,final_amount,final_amount_text,payment_method,status,status_description,
   cancel_reason,channel,carrier,tracking_number,synced_at,prepared_at,prepared_day,return_request_code,first_seen_at)
-VALUES($s,$sn,$soi,$bu,$ij,$ic,$is,$sku,$tp,$tpt,$fa,$fat,$pm,$st,$sd,$cr,$ch,$ca,$tn,$sa,$pa,$pd,$rrc,$sa)
+VALUES($s,$sn,$soi,$bu,$ij,$ic,$is,$sku,$tp,$tpt,$fa,$fat,$pm,$st,$sd,$cr,$ch,$ca,$tn,$sa,$pa,$pd,$rrc,COALESCE($fsa,$sa))
 ON CONFLICT(shop_id,order_sn) DO UPDATE SET
   shopee_order_id=$soi, buyer_username=$bu, items_json=$ij, item_count=$ic, item_summary=$is, sku=$sku,
   total_price=$tp, total_price_text=$tpt,
@@ -192,13 +194,17 @@ ON CONFLICT(shop_id,order_sn) DO UPDATE SET
                 c.Parameters.AddWithValue("$pa", (object?)o.PreparedAt ?? DBNull.Value);
                 c.Parameters.AddWithValue("$pd", (object?)o.PreparedDay ?? DBNull.Value);
                 c.Parameters.AddWithValue("$rrc", (object?)o.ReturnRequestCode ?? DBNull.Value);
+                c.Parameters.AddWithValue("$fsa", (object?)NormalizeIso(o.CreatedAt) ?? DBNull.Value);
                 c.ExecuteNonQuery();
                 if (exists) updated++;
                 else { added++; inserted.Add(o); }
 
-                // Mã trả mới hoặc đổi (COALESCE sẽ ghi) → Hub notify "đơn trả".
+                // Mã trả ĐỔI trên đơn hub ĐÃ CÓ → Hub notify "đơn trả". CHỈ nhánh `exists`: đơn INSERT lần đầu mà
+                // đã mang sẵn mã trả KHÔNG phải tin mới — dựng lại hub / shop mới vào / client đẩy bù cả kho sẽ
+                // bắn một loạt tin CŨ. Hạn chế đã biết: đơn có mã TRƯỚC lần push đầu tiên thì hub không notify
+                // (client lo phần đó — xem plan "mã trả hàng sống độc lập với đơn").
                 var rrcMoi = o.ReturnRequestCode?.Trim();
-                if (!string.IsNullOrEmpty(rrcMoi)
+                if (exists && !string.IsNullOrEmpty(rrcMoi)
                     && !string.Equals(rrcMoi, rrcCu?.Trim(), StringComparison.Ordinal))
                 {
                     returnChanged.Add(o);
@@ -209,18 +215,19 @@ ON CONFLICT(shop_id,order_sn) DO UPDATE SET
         return new UpsertOrdersResult(added, updated, inserted, returnChanged);
     }
 
-    /// <summary>Đọc đơn có lọc (shop/trạng thái/tìm kiếm) + phân trang. search khớp order_sn/buyer/tên SP/SKU.</summary>
-    public List<OrderRecord> QueryOrders(long? shopId, string? status, string? search, int limit, int offset)
+    /// <summary>
+    /// Chuẩn hoá mốc ISO-8601 CLIENT gửi lên về ĐÚNG dạng hub tự ghi (<see cref="Iso(DateTimeOffset)"/> → hậu tố
+    /// <c>+00:00</c>, giờ UTC). BẮT BUỘC: mọi lượt lọc theo thời gian ở đây so CHUỖI, mà client gửi
+    /// <c>DateTime.ToString("o")</c> cho mốc UTC là hậu tố <c>Z</c> — trộn hai dạng thì so sánh lệch ở đúng biên
+    /// (<c>'+' &lt; 'Z'</c>). Chuỗi trống / không parse được → <c>null</c> (caller lùi về mốc mặc định).
+    /// </summary>
+    private static string? NormalizeIso(string? raw)
     {
-        using var conn = OpenReadConnection();
-        return QueryOrdersCore(conn, null, shopId, status, search, limit, offset);
-    }
-
-    /// <summary>Đếm tổng đơn khớp bộ lọc (cho phân trang).</summary>
-    public int CountOrders(long? shopId, string? status, string? search)
-    {
-        using var conn = OpenReadConnection();
-        return CountOrdersCore(conn, null, shopId, status, search);
+        if (string.IsNullOrWhiteSpace(raw)) return null;
+        return DateTimeOffset.TryParse(raw, System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.RoundtripKind, out var at)
+            ? Iso(at.ToUniversalTime())
+            : null;
     }
 
     /// <summary>Count + page tren cung read transaction de UI khong bi lech tong khi client dang push don.</summary>
@@ -272,7 +279,10 @@ ON CONFLICT(shop_id,order_sn) DO UPDATE SET
                 c.CommandText = @"SELECT COALESCE(s.username, ''), o.status, o.status_description, o.cancel_reason, o.carrier, o.channel,
        o.payment_method, o.final_amount, o.total_price, o.tracking_number, o.item_count, o.synced_at
 FROM orders o JOIN shops s ON s.id = o.shop_id
-WHERE o.first_seen_at >= $from AND o.first_seen_at < $to" + (string.IsNullOrWhiteSpace(shopLogin) ? "" : " AND s.username = $shop");
+WHERE o.first_seen_at >= $from AND o.first_seen_at < $to"
+                    // COLLATE NOCASE: cùng luật với ux_shops_username / GetOrCreateShopByUsername — client gửi nhãn
+                    // shop lệch HOA/thường so với bản lưu thì lọc phải vẫn ra đúng shop, không trả 0 một cách LẶNG.
+                    + (string.IsNullOrWhiteSpace(shopLogin) ? "" : " AND s.username = $shop COLLATE NOCASE");
                 c.Parameters.AddWithValue("$from", fromStr);
                 c.Parameters.AddWithValue("$to", toStr);
                 if (!string.IsNullOrWhiteSpace(shopLogin)) c.Parameters.AddWithValue("$shop", shopLogin.Trim());
@@ -373,65 +383,63 @@ WHERE o.first_seen_at >= $from AND o.first_seen_at < $to" + (string.IsNullOrWhit
     /// </summary>
     public List<PrepareStatRow> PrepareStatsByDay(string day)
     {
-        lock (_gate)
+        // Connection ĐỌC riêng (WAL) chứ KHÔNG giữ _gate — mẫu GetSharedOrderStatistics: MỌI client hỏi hàm này 4
+        // mốc/ngày và sau MỖI shop, giữ khoá toàn cục là chặn cả heartbeat lẫn lượt đẩy đơn.
+        using var conn = OpenReadConnection();
+        var list = new List<PrepareStatRow>();
+        using var c = conn.CreateCommand();
+        c.CommandText = "SELECT s.username, COUNT(*) FROM orders o JOIN shops s ON s.id = o.shop_id "
+            + "WHERE o.prepared_day = $d GROUP BY s.username";
+        c.Parameters.AddWithValue("$d", day);
+        using var rd = c.ExecuteReader();
+        while (rd.Read())
         {
-            var list = new List<PrepareStatRow>();
-            using var c = _conn.CreateCommand();
-            c.CommandText = "SELECT s.username, COUNT(*) FROM orders o JOIN shops s ON s.id = o.shop_id "
-                + "WHERE o.prepared_day = $d GROUP BY s.username";
-            c.Parameters.AddWithValue("$d", day);
-            using var rd = c.ExecuteReader();
-            while (rd.Read())
-            {
-                if (rd.IsDBNull(0)) continue;
-                list.Add(new PrepareStatRow(rd.GetString(0), rd.GetInt32(1)));
-            }
-            return list;
+            if (rd.IsDBNull(0)) continue;
+            list.Add(new PrepareStatRow(rd.GetString(0), rd.GetInt32(1)));
         }
+        return list;
     }
 
     /// <summary>
     /// Gom số đơn theo TỪNG shop trong MỘT lượt quét bảng <c>orders</c> — trang Giao việc bám nhịp fleet nên
-    /// KHÔNG gọi <see cref="CountOrders"/> nhiều lần (mỗi lần một query dưới <c>lock(_gate)</c> toàn cục).
+    /// KHÔNG đếm lại từng shop một (mỗi lần một query riêng).
     /// <paramref name="waitingStatus"/> = trạng thái coi là "đang chờ" (vd "Chờ lấy hàng"). Shop chưa có đơn nào
     /// → KHÔNG có dòng (bên gọi tự hiển thị 0). Hàm ĐỌC thuần, không đụng hàm đếm sẵn có.
     /// </summary>
     public List<ShopOrderSummary> ShopOrderSummaries(string waitingStatus)
     {
-        lock (_gate)
-        {
-            var list = new List<ShopOrderSummary>();
-            using var c = _conn.CreateCommand();
-            // MAX(synced_at) so sánh chuỗi ISO ("o") — mọi bản ghi đều do Iso(UtcNow) ghi nên cùng định dạng,
-            // thứ tự từ điển = thứ tự thời gian.
-            c.CommandText = "SELECT shop_id, "
-                + "SUM(CASE WHEN status=$w THEN 1 ELSE 0 END), "
-                + "SUM(CASE WHEN slip_at IS NOT NULL THEN 1 ELSE 0 END), "
-                + "MAX(synced_at) FROM orders GROUP BY shop_id";
-            c.Parameters.AddWithValue("$w", waitingStatus ?? "");
-            using var rd = c.ExecuteReader();
-            while (rd.Read())
-                list.Add(new ShopOrderSummary(
-                    rd.GetInt64(0),
-                    rd.IsDBNull(1) ? 0 : rd.GetInt32(1),
-                    rd.IsDBNull(2) ? 0 : rd.GetInt32(2),
-                    D(rd, 3)));
-            return list;
-        }
+        // Connection ĐỌC riêng (WAL) — trang Giao việc gọi hàm này mỗi ≤10s theo nhịp fleet.
+        using var conn = OpenReadConnection();
+        var list = new List<ShopOrderSummary>();
+        using var c = conn.CreateCommand();
+        // MAX(synced_at) so sánh chuỗi ISO ("o") — mọi bản ghi đều do Iso(UtcNow) ghi nên cùng định dạng,
+        // thứ tự từ điển = thứ tự thời gian.
+        c.CommandText = "SELECT shop_id, "
+            + "SUM(CASE WHEN status=$w THEN 1 ELSE 0 END), "
+            + "SUM(CASE WHEN slip_at IS NOT NULL THEN 1 ELSE 0 END), "
+            + "MAX(synced_at) FROM orders GROUP BY shop_id";
+        c.Parameters.AddWithValue("$w", waitingStatus ?? "");
+        using var rd = c.ExecuteReader();
+        while (rd.Read())
+            list.Add(new ShopOrderSummary(
+                rd.GetInt64(0),
+                rd.IsDBNull(1) ? 0 : rd.GetInt32(1),
+                rd.IsDBNull(2) ? 0 : rd.GetInt32(2),
+                D(rd, 3)));
+        return list;
     }
 
     /// <summary>Danh sách các trạng thái phân biệt (cho dropdown lọc).</summary>
     public List<string> DistinctOrderStatuses()
     {
-        lock (_gate)
-        {
-            var list = new List<string>();
-            using var c = _conn.CreateCommand();
-            c.CommandText = "SELECT DISTINCT status FROM orders WHERE status IS NOT NULL AND status<>'' ORDER BY status";
-            using var rd = c.ExecuteReader();
-            while (rd.Read()) list.Add(S(rd, 0));
-            return list;
-        }
+        // Connection ĐỌC riêng (WAL) — nạp dropdown ở trang /orders, không đáng giữ khoá ghi toàn cục.
+        using var conn = OpenReadConnection();
+        var list = new List<string>();
+        using var c = conn.CreateCommand();
+        c.CommandText = "SELECT DISTINCT status FROM orders WHERE status IS NOT NULL AND status<>'' ORDER BY status";
+        using var rd = c.ExecuteReader();
+        while (rd.Read()) list.Add(S(rd, 0));
+        return list;
     }
 
     private static string WhereClause(SqliteCommand c, long? shopId, string? status, string? search)

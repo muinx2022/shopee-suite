@@ -105,52 +105,7 @@ public sealed class FileStoreConfigService
         return false;
     }
 
-    // ── Gộp acc Shopee từ client (endpoint /accounts/append & /accounts/remove) ──
-    /// <summary>Gộp danh sách acc Shopee client gửi lên vào config/accounts.json: KHỚP theo Id rồi login, có
-    /// thì cập nhật field dùng-chung, không có thì THÊM (đánh HubOwned=true). KHÔNG BAO GIỜ xoá. Bump version →
-    /// client khác pull về. Không có gì đổi thật → KHÔNG lưu (khỏi bump version làm cả fleet re-pull vô ích).
-    /// Thử lại tối đa 3 lần nếu dính version-conflict (client khác đẩy chen). Trả số acc mới.</summary>
-    public int AppendShopeeAccounts(IReadOnlyList<ShopeeAccount> incoming)
-    {
-        for (var attempt = 0; attempt < 3; attempt++)
-        {
-            var list = ShopeeAccounts();
-            var added = 0;
-            var changed = false;
-            foreach (var a in incoming)
-            {
-                if (a is null) continue;
-                var login = a.ShopeeAccountLogin?.Trim() ?? "";
-                var match = list.FirstOrDefault(x => x.Id == a.Id)
-                            ?? (login.Length > 0 ? list.FirstOrDefault(x => string.Equals(x.ShopeeAccountLogin?.Trim(), login, StringComparison.OrdinalIgnoreCase)) : null);
-                if (match is null)
-                {
-                    a.HubOwned = true;
-                    list.Add(a);
-                    added++;
-                    changed = true;
-                }
-                else
-                {
-                    // Cập nhật field dùng-chung (giữ Id + trạng thái riêng-máy của bản Hub). Chỉ gán khi KHÁC
-                    // giá trị cũ → nếu incoming trùng khớp bản đang có thì không đánh dấu đổi (khỏi bump version).
-                    if (!string.IsNullOrWhiteSpace(a.Label) && match.Label != a.Label) { match.Label = a.Label; changed = true; }
-                    if (login.Length > 0 && match.ShopeeAccountLogin != login) { match.ShopeeAccountLogin = login; changed = true; }
-                    if (match.KiotProxyKey != a.KiotProxyKey) { match.KiotProxyKey = a.KiotProxyKey; changed = true; }
-                    if (match.Region != a.Region) { match.Region = a.Region; changed = true; }
-                    if (match.ProxyType != a.ProxyType) { match.ProxyType = a.ProxyType; changed = true; }
-                    if (match.ManualProxy != a.ManualProxy) { match.ManualProxy = a.ManualProxy; changed = true; }
-                    if (match.RequireProxy != a.RequireProxy) { match.RequireProxy = a.RequireProxy; changed = true; }
-                }
-            }
-            if (!changed) return added;   // KHÔNG có gì đổi thật → không Save, không bump version (khỏi cả fleet re-pull).
-            var res = Save(AccountsFile, list, VersionOf(AccountsFile));
-            if (res.Ok) return added;
-            // version-conflict → vòng lặp đọc lại bản mới rồi gộp lại.
-        }
-        return 0;
-    }
-
+    // ── Xoá acc Shopee (trang Config trên web) ──
     /// <summary>Xoá 1 acc Shopee khỏi config/accounts.json (trang Config trên web / nút xoá acc lỗi). Thử lại
     /// nếu dính version-conflict. Trả true nếu đã xoá.</summary>
     public bool RemoveShopeeAccount(string id)
