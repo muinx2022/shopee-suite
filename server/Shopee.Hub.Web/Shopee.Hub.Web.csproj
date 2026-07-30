@@ -72,7 +72,10 @@
     <Compile Include="..\..\suite\Shopee.Core\Ai\NameRewriteEngine.cs" Link="Shared\Ai\NameRewriteEngine.cs" />
     <Compile Include="..\..\suite\Shopee.Core\BigSeller\BigSellerCaptchaSolver.cs" Link="Shared\BigSeller\BigSellerCaptchaSolver.cs" />
     <Compile Include="..\..\suite\Shopee.Core\BigSeller\BigSellerLoginForm.cs" Link="Shared\BigSeller\BigSellerLoginForm.cs" />
-    <!-- Reader tự mở Hotmail/Outlook đọc mã verify 6 số BigSeller (hub tự giải OTP thay vì chờ admin gõ tay). -->
+    <!-- Reader tự mở Hotmail/Outlook đọc mã verify 6 số BigSeller (hub tự giải OTP thay vì chờ admin gõ tay).
+         Kèm bộ selector form đăng nhập Microsoft dùng chung (shared\Shopee.Toolkit) mà reader đọc từ đó —
+         cùng bộ với module Đơn hàng, để Microsoft đổi form thì chỉ phải sửa MỘT chỗ. Thuần BCL. -->
+    <Compile Include="..\..\shared\Shopee.Toolkit\MsLogin\MsLoginSelectors.cs" Link="Shared\MsLogin\MsLoginSelectors.cs" />
     <Compile Include="..\..\suite\Shopee.Core\BigSeller\HotmailOtpReader.cs" Link="Shared\BigSeller\HotmailOtpReader.cs" />
     <Compile Include="..\..\suite\Shopee.Module.Search\Engine\ProductResult.cs" Link="Shared\Search\ProductResult.cs" />
     <Compile Include="..\..\suite\Shopee.Module.Search\Engine\ExcelExporter.cs" Link="Shared\Search\ExcelExporter.cs" />

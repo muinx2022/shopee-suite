@@ -1,7 +1,7 @@
 # Plan: Orders dùng hạ tầng chung `shared/Shopee.Toolkit` (3F)
 
 - **Ngày:** 2026-07-30
-- **Trạng thái:** hoàn thành (trừ 1 điểm chặn phía `server/**` — xem "Điểm chặn" ở Báo cáo thực thi)
+- **Trạng thái:** hoàn thành (điểm chặn `server/**` đã gỡ ở lượt 2, sau khi P4-hub merge)
 - **Người lập:** Fable · **Người thực thi:** Opus
 
 ## 1. Bối cảnh & mục tiêu
@@ -46,7 +46,8 @@ Mẫu làm đúng có sẵn: `shared/Shopee.Proxy.Kiot` (cả 2 phía ref).
 
 ## Báo cáo thực thi (Opus điền sau khi xong)
 
-**Kết quả:** 4/5 bước xong. Bước 5 (MS selectors) xong PHÍA ORDERS, **phía suite bị chặn** — xem "Điểm chặn".
+**Kết quả:** 5/5 bước xong (lượt 1 làm 4 bước + bước 5 phía orders; lượt 2 — sau khi P4-hub merge, khu
+`server/**` rảnh — làm nốt bước 5 phía suite). Xem "Điểm chặn (ĐÃ XỬ LÝ)".
 
 ### Project mới `shared/Shopee.Toolkit` (net8.0, `WarningsAsErrors=CA1416`)
 Ref DUY NHẤT: `Microsoft.Win32.Registry` 5.0.0 (registry App Paths cho BrowserLocator — Shopee.Core vốn đã có
@@ -122,7 +123,7 @@ Xoá `WindowsBrowserLocator.cs` + `LinuxBrowserLocator.cs`; thay bằng **1 wrap
 `FindFirstExisting` chuyển hẳn sang Toolkit (public) → 5 test trong `BrowserLocatorTests` đổi sang alias
 `ToolkitLocator`; 15 test còn lại (ResolveExecutableCore/ClassifyExe) không đổi.
 
-### 4. MS selectors — bảng diff (PHÍA ORDERS đã xong)
+### 4. MS selectors — bảng diff (CẢ HAI PHÍA đã xong)
 
 | Bộ | orders `ShopeeLoginService` | suite `HotmailOtpReader` | Bản chung |
 |---|---|---|---|
@@ -135,20 +136,32 @@ Xoá `WindowsBrowserLocator.cs` + `LinuxBrowserLocator.cs`; thay bằng **1 wrap
 | `MsDomainFamilies` (gate hotmail/outlook/live…) | không có | chỉ suite | **để nguyên ở HotmailOtpReader** — là luật gate domain, không phải selector; đưa sang chung cũng không có bên thứ hai hưởng |
 | `NormalizeForMatch` | có (`LoginSession`) | có (bản chép) | **chưa gom** — cùng lý do chặn ở dưới |
 
-### Điểm chặn (cần phiên chính xử lý)
+### Điểm chặn (ĐÃ XỬ LÝ ở lượt 2)
 
-`HotmailOtpReader.cs` **CHƯA** chuyển sang `MsLoginSelectors` (vẫn giữ bản selector chép tay). Lý do:
-`server/Shopee.Hub.Web.csproj:76` **LINK** file này (`<Compile Include="..\..\suite\Shopee.Core\BigSeller\HotmailOtpReader.cs">`)
-mà project hub KHÔNG có ProjectReference nào — thêm `using Shopee.Toolkit.MsLogin;` vào file là gãy
-`dotnet build server/ShopeeHub.sln` (CS0246). Sửa được bằng 1 dòng trong `server/**`, nhưng khu đó bị cấm sửa
-trong lượt này (agent khác đang làm song song). Việc còn lại, làm sau khi agent server land:
+Vấn đề lượt 1: `server/Shopee.Hub.Web.csproj` **LINK** `HotmailOtpReader.cs` mà project hub không có
+ProjectReference nào → thêm `using Shopee.Toolkit.MsLogin;` vào file là gãy `dotnet build server/ShopeeHub.sln`
+(CS0246); khu `server/**` khi đó đang có agent P4-hub làm song song nên không được đụng.
 
-1. `server/Shopee.Hub.Web.csproj` — thêm vào ItemGroup nguồn-link:
+Lượt 2 (sau `git merge --ff-only main`, P4-hub đã land) đã làm nốt, ĐÚNG 2 việc đã mô tả:
+
+1. `server/Shopee.Hub.Web/Shopee.Hub.Web.csproj` — thêm 1 dòng Compile-link ngay TRƯỚC dòng link
+   `HotmailOtpReader.cs` (đúng khuôn các link sẵn có, kèm comment lý do):
    `<Compile Include="..\..\shared\Shopee.Toolkit\MsLogin\MsLoginSelectors.cs" Link="Shared\MsLogin\MsLoginSelectors.cs" />`
-2. `suite/Shopee.Core/BigSeller/HotmailOtpReader.cs` — thay 7 mảng `Ms*Selectors` + `SignInRegex` + 2 mảng
-   needle inline + bộ KMSI Fluent/marker + `#usernameError`/`#passwordError` bằng thành viên tương ứng của
-   `MsLoginSelectors` (đối chiếu: 7 mảng + SignInRegex GIỐNG HỆT bản orders nên thay thẳng, không lệch hành vi).
-3. Sau đó tiêu chí "selector Microsoft literal chỉ còn trong MsLoginSelectors" mới ĐẠT đủ.
+   → hub compile file selector vào assembly của nó (namespace `Shopee.Toolkit.MsLogin`), KHÔNG cần
+   ProjectReference tới Shopee.Toolkit nên không kéo thêm dây nào vào hub.
+2. `suite/Shopee.Core/BigSeller/HotmailOtpReader.cs` — thay hết bằng thành viên `MsLoginSelectors`:
+   7 mảng `Ms*Selectors`, `SignInRegex`, 2 mảng needle inline (`UsePasswordNeedles`/`OtherWaysNeedles`),
+   bộ KMSI Fluent + marker (`KmsiYesFluent`/`KmsiFormMarkers`), `#usernameError`/`#passwordError`.
+   Đã đối chiếu lại sau merge: 7 mảng + `SignInRegex` GIỐNG HỆT bản chung → thay thẳng, KHÔNG lệch hành vi.
+   Sửa thêm xmldoc đầu lớp (bỏ câu "PORT selector từ ShopeeLoginService" — giờ đọc thẳng từ bộ chung).
+   `MsDomainFamilies` + `SixDigitRegex` giữ nguyên tại chỗ (luật riêng BigSeller, không phải selector MS).
+
+**Tiêu chí "selector Microsoft literal chỉ còn trong MsLoginSelectors": ĐẠT.** Grep toàn repo
+(`idSIButton9|loginfmt|i0116|i0118|acceptButton|idA_PWD_SwitchToPassword|kmsiVideo|kmsiImage|usernameError|
+passwordError|data-task='signin'|mat khau|cach khac de dang nhap`) chỉ còn hit trong
+`shared/Shopee.Toolkit/MsLogin/MsLoginSelectors.cs`; các hit khác đều là COMMENT/xmldoc giải thích.
+
+KHÔNG làm `NormalizeForMatch` (theo chỉ đạo — orders `LoginSession` đang được agent khác tách, để đợt 5).
 
 ### Ngoài phạm vi, cố ý KHÔNG làm
 
@@ -164,10 +177,14 @@ trong lượt này (agent khác đang làm song song). Việc còn lại, làm s
 
 | Lệnh | Kết quả |
 |---|---|
+Lượt 2 (sau khi merge main — baseline Core.Tests đã lên 43 do P4-hub thêm test):
+
+| Lệnh | Kết quả |
+|---|---|
 | `dotnet build ShopeeSuite.sln` | 0 lỗi, 0 warning |
 | `dotnet build server/ShopeeHub.sln` | 0 lỗi, 0 warning |
-| `dotnet test orders/XuLyDonShopee.Tests` | 1440/1440 pass (đúng baseline) |
-| `dotnet test suite/Shopee.Core.Tests` | 16/16 pass (đúng baseline) |
-| `dotnet test server/Shopee.Hub.Web.Tests` | 44/44 pass |
+| `dotnet test suite/Shopee.Core.Tests` | 43/43 pass (đúng baseline) |
+| `dotnet test server/Shopee.Hub.Web.Tests` | 44/44 pass (đúng baseline) |
+| `dotnet test orders/XuLyDonShopee.Tests` | 1440/1440 pass (chạy thêm cho chắc, không đụng orders lượt này) |
 
 CHƯA commit (để phiên chính review).
