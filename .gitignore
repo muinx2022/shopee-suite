@@ -26,3 +26,8 @@ persistent-data/
 
 # Công cụ dev cục bộ (chỉ chạy trên máy này, không đưa lên repo)
 tools/scrape-test-agent/
+
+# Thu muc lam viec tam / build artifacts
+.cursor/
+artifacts/
+scratchpad/
