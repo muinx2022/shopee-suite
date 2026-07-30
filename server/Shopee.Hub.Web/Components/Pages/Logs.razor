@@ -3,11 +3,12 @@
 @implements IAsyncDisposable
 @inject HubDatabase Db
 @inject IJSRuntime JS
+@inject NavigationManager Nav
 
 <div class="logpage">
     <div class="bar">
         <label>Máy
-            <select @bind="_machineFilter">
+            <select @bind="_machineFilter" @bind:after="UpdateUrl">
                 <option value="">— tất cả —</option>
                 @foreach (var h in _hosts)
                 {
@@ -16,7 +17,7 @@
             </select>
         </label>
         <label>Mức
-            <select @bind="_levelFilter">
+            <select @bind="_levelFilter" @bind:after="UpdateUrl">
                 <option value="">— tất cả —</option>
                 <option value="info">info</option>
                 <option value="ok">ok</option>
@@ -50,6 +51,8 @@
 </div>
 
 @code {
+    private static readonly string[] Levels = ["info", "ok", "warn", "error"];
+
     private List<LogEntry> _logs = new();
     private List<string> _hosts = new();
     private string _machineFilter = "";
@@ -60,8 +63,21 @@
     protected override void OnInitialized()
     {
         Load();
+        // F5/deep-link: khôi phục 2 ô lọc SAU khi Load() dựng xong danh sách máy. KHÔNG navigate ở đây (còn
+        // prerender → NavigateTo sẽ ném redirect); URL chỉ được ghi lại khi user đổi ô lọc.
+        RestoreFromUrl();
         _pollTask = PollAsync(_pollCts.Token);
     }
+
+    // ── Ô lọc ↔ URL query (?machine=&level=) — F5 / chia sẻ link giữ nguyên ──
+    private void RestoreFromUrl() => UrlState.Restore(Nav,
+        // Máy trong URL không còn dòng log nào → BỎ QUA (kẻo ô chọn hiện trống mà khung log lại rỗng không rõ vì sao).
+        ("machine", v => _machineFilter = _hosts.Contains(v) ? v : ""),
+        ("level", v => _levelFilter = Levels.Contains(v) ? v : ""));
+
+    private void UpdateUrl() => UrlState.Update(Nav, replace: true,
+        ("machine", _machineFilter),
+        ("level", _levelFilter));
 
     private async Task PollAsync(CancellationToken ct)
     {

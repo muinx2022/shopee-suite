@@ -1,0 +1,124 @@
+@* Lưới shop × op của tab BigSeller trên trang Giao việc (/dispatch). Tách khỏi Dispatch.razor: vùng này chỉ VẼ
+   + báo cú bấm lên cha. Nhãn/luật khoá của MỌI nút hỏi DispatchButtons — đúng cùng hàm cha dùng lúc xử lý
+   cú bấm, để không có chuyện nút bấm được mà cha lại từ chối. *@
+
+<div class="tablewrap">
+<table class="grid sm dispatch-shops">
+    <thead><tr>
+        <th>Shop</th>
+        @foreach (var op in DispatchRowsBuilder.DispatchOps)
+        {
+            <th>@OpLabel(op)</th>
+        }
+        <th class="m-hide">Máy đang giữ</th>
+        <th class="m-hide">Cập nhật</th>
+    </tr></thead>
+    <tbody>
+    @foreach (var g in Groups)
+    {
+        <tr class="acctrow" @key="@("g|" + g.AccountId)">
+            <td colspan="6">
+                @g.AccountName <span class="cnt">· @g.Rows.Count shop</span>
+                @if (HoldHostOf(g.AccountId) is { } gh)
+                {
+                    <span class="cnt">· đang do <b>@gh</b> giữ</span>
+                }
+                @* Cụm nút mức tài khoản = "chọn nhiều" duy nhất còn lại → xác nhận 2 bước (1 bấm tạo N việc). *@
+                <span class="acctacts">
+                    @foreach (var op in DispatchRowsBuilder.DispatchOps)
+                    {
+                        var ab = DispatchButtons.AcctBtn(Ctx, g, op);
+                        <button class="opbtn @ab.Css" disabled="@ab.Disabled" title="@ab.Title"
+                                @onclick="() => OnAcctClick.InvokeAsync((g, op))">@ab.Label</button>
+                    }
+                    @* Huỷ theo ACC: 1 acc chỉ chạy 1 máy nên huỷ ở đây là dọn sạch acc đó, không cần chọn đúng
+                       máy trước. Hiện cả khi acc đang do máy KHÁC giữ (đó chính là lúc cần huỷ nhất). *@
+                    @{ var accOpen = AcctOpenCount(g); }
+                    <button class="opbtn @(accOpen > 0 ? "cancel" : "blocked")" disabled="@(accOpen == 0)"
+                            title="Huỷ MỌI việc hub-giao đang chạy/chờ của tài khoản @g.AccountName (kể cả trên máy khác)."
+                            @onclick="() => OnCancelAcct.InvokeAsync(g)">
+                        @(Ctx.ConfirmCancel == "acct|" + g.AccountId
+                            ? $"Bấm lần nữa để huỷ {accOpen} việc"
+                            : $"✖ Huỷ cả acc ({accOpen})")
+                    </button>
+                </span>
+            </td>
+        </tr>
+        @foreach (var r in g.Rows)
+        {
+            <tr @key="r.Key">
+                @* Tên shop = lối sang trang BigSeller ("/") của đúng shop đó. Là <a> trong ô RIÊNG, không bọc
+                   cả dòng → cú bấm không lẫn sang nút hành động ở các ô bên cạnh. *@
+                <td class="shop" data-label="Shop">
+                    <a href="@FleetLink(r)" title="Mở @r.ShopName ở trang BigSeller (tiến độ · đặt tay ledger · rewrite · dữ liệu).">@r.ShopName</a>
+                </td>
+                @foreach (var op in DispatchRowsBuilder.DispatchOps)
+                {
+                    var b = DispatchButtons.Btn(Ctx, r, op);
+                    <td data-label="@OpLabel(op)">
+                        <button class="opbtn @b.Css" disabled="@b.Disabled" title="@b.Title"
+                                @onclick="() => OnOpClick.InvokeAsync((r, op))">@b.Label</button>
+                        @* Lý do lượt trước hỏng — ô chỉ báo "✘ lỗi" đúng 3 phút rồi im, không có dòng này thì
+                           job "chạy tí rồi dừng" mà người vận hành không biết vì sao. Cắt bằng CSS, đủ chữ ở title. *@
+                        @if (b.Note.Length > 0)
+                        {
+                            <div class="opnote" title="@b.Note">⚠ @b.Note</div>
+                        }
+                    </td>
+                }
+                <td class="m-hide" data-label="Máy đang giữ">@(HoldHostOf(r.AccountId) ?? "—")</td>
+                <td class="m-hide" data-label="Cập nhật">@LastUpdate(r)</td>
+            </tr>
+        }
+    }
+    @if (VisibleCount == 0)
+    {
+        <tr><td colspan="6" class="empty">@EmptyText</td></tr>
+    }
+    </tbody>
+</table>
+</div>
+
+@code {
+    /// <summary>Dòng đang hiện, đã nhóm theo tài khoản (cha lọc rồi nhóm).</summary>
+    [Parameter] public List<DispatchRowGroup> Groups { get; set; } = new();
+
+    /// <summary>Snapshot + khoá acc + máy đang chọn + hai cờ chờ-bấm-lần-nữa — mọi luật nút đọc từ đây.</summary>
+    [Parameter] public DispatchGridContext Ctx { get; set; } = new(new(), new(), "", "", "");
+
+    /// <summary>Số dòng đang hiện (0 → vẽ dòng rỗng với <see cref="EmptyText"/>).</summary>
+    [Parameter] public int VisibleCount { get; set; }
+    [Parameter] public string EmptyText { get; set; } = "";
+
+    [Parameter] public EventCallback<(DispatchShopRow Row, string Op)> OnOpClick { get; set; }
+    [Parameter] public EventCallback<(DispatchRowGroup Group, string Op)> OnAcctClick { get; set; }
+    [Parameter] public EventCallback<DispatchRowGroup> OnCancelAcct { get; set; }
+
+    /// <summary>Link mở trang BigSeller ("/") đúng shop này. Tên tham số ĐÚNG như
+    /// <c>Fleet.RestoreSelectionFromUrl</c> đọc: <c>acc</c> = id tài khoản, <c>shop</c> = id shop (tab mặc định
+    /// là Hành động). CHÚ Ý: trang đó dùng <c>acc</c>, trang này dùng <c>acct</c> — khác nhau.</summary>
+    private static string FleetLink(DispatchShopRow r) =>
+        $"/?acc={Uri.EscapeDataString(r.AccountId)}&shop={Uri.EscapeDataString(r.ShopId)}";
+
+    private string? HoldHostOf(string accountId) =>
+        Ctx.Holds.TryGetValue(accountId, out var m) ? FleetViewProjection.HostName(Ctx.Snap, m) : null;
+
+    private int AcctOpenCount(DispatchRowGroup g) => Ctx.Snap.Assignments
+        .Count(a => a.BigsellerId == g.AccountId && a.Status is "queued" or "running");
+
+    // Lần chạy gần nhất của shop (mọi op) — cột "Cập nhật".
+    private string LastUpdate(DispatchShopRow r)
+    {
+        DateTimeOffset last = default;
+        foreach (var op in DispatchRowsBuilder.DispatchOps)
+        {
+            var led = Ctx.Snap.Ledger.FirstOrDefault(l => l.Key == DispatchRowsBuilder.LedgerKey(r, op));
+            if (led is null) continue;
+            var at = led.LastRunAt ?? led.UpdatedAt;
+            if (at > last) last = at;
+        }
+        return last == default ? "—" : FleetStateService.Ago(last);
+    }
+
+    private static string OpLabel(string op) => FleetViewProjection.OperationLabel(op);
+}

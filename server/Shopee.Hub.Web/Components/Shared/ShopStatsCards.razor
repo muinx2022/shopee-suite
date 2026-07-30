@@ -1,0 +1,60 @@
+@* Tab 📊 Thống kê của MỘT shop (trang BigSeller "/"): 4 thẻ op · số dòng · dải · máy gần nhất.
+   Thuần hiển thị — chỉ báo lên cha khi bấm "🔍 xem dòng" (cha mở modal bản đồ dòng). *@
+
+<div class="opcards">
+    @foreach (var op in FleetRowsBuilder.OpOrder)
+    {
+        var cell = FleetStateService.OpCell(Snap, Row.AccountId, Row.ShopId, op);
+        var st = Row.Ops.GetValueOrDefault(op);
+        <div class="opcard @(st is null ? "empty0" : "")">
+            <div class="ohead">
+                <span class="olabel">@OpLabel(op)</span>
+                @* Đang chạy (lease sống) → ưu tiên chip ⏳+máy từ OpCell, kể cả khi ledger chưa có
+                   bản ghi (per-row chưa về / bị reset) — tránh báo "chưa chạy" gây hiểu nhầm. *@
+                @if (cell.Kind == 1)
+                {
+                    <span class="pill @cell.Css">@cell.Text</span>
+                }
+                else if (st is not null)
+                {
+                    <span class="pill @st.StatusCss">@st.StatusText</span>
+                }
+                else
+                {
+                    <span class="pill idle">chưa chạy</span>
+                }
+            </div>
+            @if (st is not null)
+            {
+                <div class="n">@st.RowCount.ToString("N0") <span class="sub">dòng</span>
+                    <button class="linkbtn" @onclick="() => OnOpenMap.InvokeAsync(op)">🔍 xem dòng</button>
+                </div>
+                <div class="sub">tới dòng @st.LastRow</div>
+                <div class="rng m-hide">@st.Ranges</div>
+                <div class="sub" title="@st.LastAbs">Gần nhất: @(string.IsNullOrEmpty(st.Machine) ? "—" : st.Machine)@(string.IsNullOrEmpty(st.LastAgo) ? "" : $" · {st.LastAgo}")</div>
+                @if (st.Machines.Count > 1)
+                {
+                    <div class="sub m-hide">Đã tham gia (@st.Machines.Count máy): @string.Join(", ", st.Machines)</div>
+                }
+            }
+            else if (cell.Kind == 1)
+            {
+                <div class="sub">Đang chạy — chưa có dòng nào báo về.</div>
+            }
+            else
+            {
+                <div class="sub">Chưa có lượt chạy nào cho việc này.</div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public FleetSnapshot Snap { get; set; } = new();
+    [Parameter] public FleetShopRow Row { get; set; } = new();
+
+    /// <summary>Bấm "🔍 xem dòng" của một op — cha dựng ngữ cảnh rồi mở <c>RowMapModal</c>.</summary>
+    [Parameter] public EventCallback<string> OnOpenMap { get; set; }
+
+    private static string OpLabel(string op) => FleetViewProjection.OperationLabel(op);
+}

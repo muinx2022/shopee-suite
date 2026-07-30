@@ -1,0 +1,246 @@
+@* Bảng chi tiết của thẻ KPI đang mở trên trang Giao việc (/dispatch) — xổ NGAY DƯỚI hàng KPI, trên hàng tab
+   (không modal: trang đã có .tablewrap cuộn ngang, modal trên mobile thì bí). Mọi cột nói TÊN (shop/tài khoản/
+   máy), không phô GUID. Tách khỏi Dispatch.razor: vùng này chỉ VẼ + báo cú bấm lên cha; mọi danh sách đều do cha
+   dựng trong CÙNG một lượt quét với số trên thẻ, nên thẻ không bao giờ nói một đằng bảng một nẻo. *@
+
+<div class="kpipanel">
+    <div class="subhead">@Title</div>
+
+    @if (Kpi == "machines")
+    {
+        <div class="tablewrap">
+        <table class="grid sm stack-sm">
+            <thead><tr>
+                <th>Máy</th><th>Chế độ</th><th>Suất</th><th class="m-hide">Quỹ Brave</th>
+                <th>Số việc</th><th class="m-hide">Bản app</th><th>Nhịp cuối</th><th></th>
+            </tr></thead>
+            <tbody>
+            @foreach (var m in Machines)
+            {
+                var orders = m.Kind == MachineSlots.Orders;
+                var run = Used.GetValueOrDefault(m.MachineId);
+                var cap = m.MaxBrave > 0 ? m.MaxBrave : DispatchRowsBuilder.DefaultBrave;
+                <tr @key="m.MachineId">
+                    <td class="acct" data-label="Máy">@(string.IsNullOrWhiteSpace(m.Hostname) ? DispatchRowsBuilder.Short(m.MachineId) : m.Hostname)</td>
+                    <td data-label="Chế độ">@(string.IsNullOrWhiteSpace(m.Mode) ? "—" : m.Mode)</td>
+                    <td data-label="Suất">@(orders ? "Đơn hàng" : "Workspace")</td>
+                    @* Suất đơn hàng KHÔNG claim việc BigSeller → quỹ Brave ở đây vô nghĩa, hiện "—" thay vì số đánh lừa. *@
+                    <td class="m-hide" data-label="Quỹ Brave" title="@(orders ? "Suất đơn hàng không nhận việc BigSeller." : "Khung Brave còn trống / trần máy tự báo.")">
+                        @(orders ? "—" : $"{Math.Max(0, cap - run)}/{cap}")
+                    </td>
+                    <td data-label="Số việc">@run</td>
+                    <td class="m-hide" data-label="Bản app">@(string.IsNullOrWhiteSpace(m.AppVersion) ? "—" : m.AppVersion)</td>
+                    <td data-label="Nhịp cuối">@FleetStateService.Ago(m.LastSeen)</td>
+                    <td data-label="">
+                        @if (orders)
+                        {
+                            <span class="stat" title="Suất đơn hàng — không giao việc BigSeller vào đây được.">—</span>
+                        }
+                        else
+                        {
+                            <button class="btn sm" title="Chọn @m.Hostname làm máy nhận việc rồi đóng bảng này."
+                                    @onclick="() => OnPickMachine.InvokeAsync(m.MachineId)">→ Chọn máy này</button>
+                        }
+                    </td>
+                </tr>
+            }
+            @if (Machines.Count == 0)
+            {
+                <tr><td colspan="8" class="empty">Không còn máy nào online.</td></tr>
+            }
+            </tbody>
+        </table>
+        </div>
+    }
+    else if (Kpi == "running")
+    {
+        <div class="tablewrap">
+        <table class="grid sm stack-sm">
+            <thead><tr>
+                <th>Việc</th><th>Shop</th><th>Tài khoản</th><th>Máy</th>
+                <th title="Việc BigSeller: mốc BẮT ĐẦU chạy. Phiên Đơn hàng: nhịp gương gần nhất của máy — client không gửi mốc bắt đầu phiên.">Mốc thời gian</th>
+                <th class="m-hide">Dải dòng</th><th></th>
+            </tr></thead>
+            <tbody>
+            @foreach (var w in Running)
+            {
+                <tr @key="w.Key">
+                    <td data-label="Việc"><span class="pill run">@OpLabel(w.Op)</span></td>
+                    <td class="shop" data-label="Shop">@w.ShopName</td>
+                    <td class="acct" data-label="Tài khoản">@w.AcctName</td>
+                    <td data-label="Máy">@w.Host</td>
+                    <td data-label="Mốc thời gian">@SinceText(w, running: true)</td>
+                    <td class="m-hide" data-label="Dải dòng">@w.Rows</td>
+                    <td data-label="">
+                        @* Phiên Đơn hàng không phải assignment → dừng bằng LỆNH xuống máy, không phải huỷ việc. *@
+                        @if (w.Op == DispatchViewLogic.OrdersOperation)
+                        {
+                            <button class="btn danger sm" @onclick="() => OnOrdersStop.InvokeAsync(w)"
+                                    title="Dừng phiên Đơn hàng của @w.AcctName trên máy @w.Host (huỷ vòng lặp shop + đóng trình duyệt). Máy nhận lệnh ở nhịp 12s.">
+                                @(ConfirmWork == w.Key ? "Bấm lần nữa để dừng" : "✖ Dừng")
+                            </button>
+                        }
+                        else if (w.Manual)
+                        {
+                            <span class="stat" title="Việc chạy TAY (không do hub giao) — hub không huỷ được; dừng bằng nút ■ trong app trên máy @w.Host.">chạy tay</span>
+                        }
+                        else
+                        {
+                            <button class="btn danger sm" @onclick="() => OnWorkCancel.InvokeAsync(w)"
+                                    title="Huỷ @OpLabel(w.Op) · @w.ShopName trên máy @w.Host (tham số giữ nguyên, ▶ Tiếp tục chạy lại được).">
+                                @(ConfirmWork == w.Key ? "Bấm lần nữa để huỷ" : "✖ Huỷ")
+                            </button>
+                        }
+                    </td>
+                </tr>
+            }
+            @if (Running.Count == 0)
+            {
+                <tr><td colspan="7" class="empty">Không còn việc nào đang chạy.</td></tr>
+            }
+            </tbody>
+        </table>
+        </div>
+    }
+    else if (Kpi == "queued")
+    {
+        <div class="tablewrap">
+        <table class="grid sm stack-sm">
+            <thead><tr>
+                <th>Việc</th><th>Shop</th><th>Tài khoản</th><th>Máy đích</th>
+                <th title="Việc BigSeller: lúc XẾP vào hàng chờ. Phiên Đơn hàng: nhịp gương gần nhất của máy — client không gửi mốc xếp hàng.">Mốc thời gian</th>
+                <th class="m-hide">Dải dòng</th><th></th>
+            </tr></thead>
+            <tbody>
+            @foreach (var w in Queued)
+            {
+                <tr @key="w.Key">
+                    <td data-label="Việc"><span class="pill queued">@OpLabel(w.Op)</span></td>
+                    <td class="shop" data-label="Shop">@w.ShopName</td>
+                    <td class="acct" data-label="Tài khoản">@w.AcctName</td>
+                    <td data-label="Máy đích" title="@(w.Host == "—" ? "Việc chờ KHÔNG ghim máy nào — máy nào rảnh đúng vai trò sẽ nhận." : "")">@w.Host</td>
+                    <td data-label="Mốc thời gian">@SinceText(w, running: false)</td>
+                    <td class="m-hide" data-label="Dải dòng">@w.Rows</td>
+                    <td data-label="">
+                        @* Phiên Đơn hàng đang xếp hàng: client tự quyết lượt chạy, hub không chen ngang được. *@
+                        @if (w.Op == DispatchViewLogic.OrdersOperation)
+                        {
+                            <span class="stat" title="Máy @w.Host tự xếp lượt cho @w.AcctName — hub không chen ngang được; muốn dừng thì đợi phiên vào chạy rồi bấm ✖ Dừng.">—</span>
+                        }
+                        else
+                        {
+                            <button class="btn danger sm" @onclick="() => OnWorkCancel.InvokeAsync(w)"
+                                    title="Huỷ @OpLabel(w.Op) · @w.ShopName (tham số giữ nguyên, ▶ Tiếp tục chạy lại được).">
+                                @(ConfirmWork == w.Key ? "Bấm lần nữa để huỷ" : "✖ Huỷ")
+                            </button>
+                        }
+                    </td>
+                </tr>
+            }
+            @if (Queued.Count == 0)
+            {
+                <tr><td colspan="7" class="empty">Không còn việc nào đang chờ.</td></tr>
+            }
+            </tbody>
+        </table>
+        </div>
+    }
+    else if (Kpi == "interrupted")
+    {
+        <div class="tablewrap">
+        <table class="grid sm stack-sm">
+            <thead><tr>
+                <th>Việc</th><th>Shop</th><th>Tài khoản</th><th>Máy cuối</th><th>Lý do</th><th>Lúc</th><th></th>
+            </tr></thead>
+            <tbody>
+            @foreach (var a in Snap.Interrupted)
+            {
+                var shop = ShopLabel(a.ShopId);
+                var acct = AcctLabel(a.BigsellerId);
+                <tr @key="a.Id">
+                    <td data-label="Việc"><span class="pill warn">@OpLabel(a.Op)</span></td>
+                    <td class="shop" data-label="Shop" title="@shop.Title">@shop.Text</td>
+                    <td class="acct" data-label="Tài khoản" title="@acct.Title">@acct.Text</td>
+                    <td data-label="Máy cuối">@IntMachine(a)</td>
+                    <td class="kpi-why" data-label="Lý do">@IntReason(a)</td>
+                    <td data-label="Lúc">@FleetStateService.Ago(a.UpdatedAt)</td>
+                    <td data-label="">
+                        <button class="btn primary sm" @onclick="() => OnResume.InvokeAsync(a)"
+                                title="Đưa @OpLabel(a.Op) · @shop.Text về hàng chờ để client chạy lại (giữ nguyên tham số).">▶ Tiếp tục</button>
+                    </td>
+                </tr>
+            }
+            @if (Snap.Interrupted.Count == 0)
+            {
+                <tr><td colspan="7" class="empty">Không còn việc gián đoạn nào.</td></tr>
+            }
+            </tbody>
+        </table>
+        </div>
+        @* HubDatabase CHỈ có DismissAllInterrupted() (bỏ HẾT) — không có API bỏ TỪNG việc → nút đặt ở CHÂN
+           panel và nói rõ là bỏ tất cả (khuôn nút "✕ Bỏ … việc gián đoạn" cũ của trang Fleet). Xác nhận 2 bước. *@
+        @if (Snap.Interrupted.Count > 0)
+        {
+            <div class="bar">
+                <button class="btn sm" @onclick="() => OnDismissAll.InvokeAsync()"
+                        title="Bỏ hẳn MỌI việc gián đoạn khỏi danh sách (hub chưa có đường bỏ từng việc) — không tiếp tục lại được từ đây; ledger/thống kê giữ nguyên.">
+                    @(ConfirmDismiss ? $"Bấm lần nữa để BỎ HẲN cả {Snap.Interrupted.Count} việc" : $"✕ Bỏ cả {Snap.Interrupted.Count} việc gián đoạn")
+                </button>
+            </div>
+        }
+    }
+
+    @if (!string.IsNullOrEmpty(Message))
+    {
+        <div class="bar"><span class="action">@Message</span></div>
+    }
+</div>
+
+@code {
+    /// <summary>Thẻ KPI đang mở (cha chỉ render component này khi khác rỗng — giá trị cũng nằm trong URL <c>?kpi=</c>).</summary>
+    [Parameter] public string Kpi { get; set; } = "";
+    [Parameter] public string Title { get; set; } = "";
+    [Parameter] public FleetSnapshot Snap { get; set; } = new();
+
+    /// <summary>4 danh sách của 4 bảng — cha dựng CÙNG lượt với 4 số trên thẻ (xem <c>Dispatch.RecomputeKpis</c>);
+    /// bảng gián đoạn đọc thẳng <c>Snap.Interrupted</c>.</summary>
+    [Parameter] public List<MachinePresence> Machines { get; set; } = new();
+    [Parameter] public List<DispatchWorkItem> Running { get; set; } = new();
+    [Parameter] public List<DispatchWorkItem> Queued { get; set; } = new();
+
+    /// <summary>Số việc hub-giao đang chạy/chờ theo máy (cột Quỹ Brave / Số việc).</summary>
+    [Parameter] public Dictionary<string, int> Used { get; set; } = new();
+
+    /// <summary>Tên tài khoản / shop theo GUID (cha dựng từ TOÀN BỘ config, kể cả shop chưa gán ngăn dữ liệu).</summary>
+    [Parameter] public Dictionary<string, string> AcctNames { get; set; } = new();
+    [Parameter] public Dictionary<string, string> ShopNames { get; set; } = new();
+
+    /// <summary>Dòng / nút đang chờ bấm-lần-nữa + kết quả cú bấm gần nhất (state của cha, panel chỉ vẽ ra).</summary>
+    [Parameter] public string ConfirmWork { get; set; } = "";
+    [Parameter] public bool ConfirmDismiss { get; set; }
+    [Parameter] public string Message { get; set; } = "";
+
+    [Parameter] public EventCallback<string> OnPickMachine { get; set; }
+    [Parameter] public EventCallback<DispatchWorkItem> OnWorkCancel { get; set; }
+    [Parameter] public EventCallback<DispatchWorkItem> OnOrdersStop { get; set; }
+    [Parameter] public EventCallback<Assignment> OnResume { get; set; }
+    [Parameter] public EventCallback OnDismissAll { get; set; }
+
+    private (string Text, string Title) AcctLabel(string id) => DispatchRowsBuilder.NameLabel(AcctNames, id);
+    private (string Text, string Title) ShopLabel(string id) => DispatchRowsBuilder.NameLabel(ShopNames, id);
+
+    // Máy cuối của việc gián đoạn: hostname đã claim (failed), fallback máy đích (canceled lúc còn queued chỉ có target).
+    private string IntMachine(Assignment a) =>
+        !string.IsNullOrWhiteSpace(a.ClaimedByHostname) ? a.ClaimedByHostname
+        : (!string.IsNullOrEmpty(a.TargetMachineId) ? DispatchRowsBuilder.HostLabel(Snap, a.TargetMachineId, "") : "—");
+
+    private static string IntReason(Assignment a) =>
+        !string.IsNullOrWhiteSpace(a.LastError) ? a.LastError : (a.Status == "canceled" ? "đã huỷ" : "lỗi");
+
+    private static string OpLabel(string op) => FleetViewProjection.OperationLabel(op);
+
+    /// <summary>Cột thời gian của hai bảng chi tiết KPI. Mốc mang Ý NGHĨA KHÁC NHAU theo loại dòng nên mỗi ô tự
+    /// nói ra: việc BigSeller có mốc bắt đầu THẬT ("chạy từ" / "xếp lúc"), còn dòng Đơn hàng chỉ có nhịp gương
+    /// gần nhất ("cập nhật") — gương không lưu mốc bắt đầu phiên, ghi "chạy từ" ở đó là nói sai.</summary>
+    private static string SinceText(DispatchWorkItem w, bool running) => DispatchViewLogic.SinceText(w, running);
+}
