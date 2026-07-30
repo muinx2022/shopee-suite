@@ -79,4 +79,72 @@ tiên + 2 cửa sổ con của chúng. **Nguồn đối chiếu**: bản Avaloni
 
 ## Báo cáo thực thi (Opus điền sau khi xong)
 
-<để trống>
+### Bổ sung sau khi agent trước bị dừng giữa chừng: sửa lỗi binding watermark (Error 40)
+
+> Phần này CHỈ nói về hạng mục sửa bug watermark + chạy lại nghiệm thu. 5 file view/window của đợt 2 do
+> lượt thực thi trước viết (agent đó bị dừng trước khi điền báo cáo) — lượt này KHÔNG soát lại nội dung port
+> của chúng, chỉ dùng chúng để nghiệm thu.
+
+**Hiện tượng**: bật `SHOPEESUITE_BINDING_LOG`, mở màn Tài khoản & Proxy + cửa sổ Import tài khoản → 3 dòng
+`System.Windows.Data Error: 40 : … '(b:WatermarkAssist.Watermark)' property not found on 'object' 'TextBox'`.
+
+**Root cause (đã kiểm chứng bằng đo thật, KHÔNG phải "modal vs cửa sổ chính")**: template TextBox trong
+`Theme.xaml` bind watermark bằng `Path` dạng CHUỖI có prefix — `{Binding (b:WatermarkAssist.Watermark),
+RelativeSource={RelativeSource TemplatedParent}}`. WPF giữ nguyên chuỗi đó và phân giải prefix `b:` **lúc
+chạy, theo phạm vi xmlns của file XAML khai ra ô nhập** (tức view đang dùng template), chứ KHÔNG theo
+`Theme.xaml` — nơi câu binding được viết. Hệ quả: view nào tình cờ có khai
+`xmlns:b="clr-namespace:Shopee.Suite.Behaviors"` thì phân giải được; view nào không khai thì Error 40.
+Đối chiếu thực tế khớp 100%:
+
+| XAML | khai `xmlns:b` | ô nhập được dựng lúc đo | số lỗi (bản CHƯA sửa) |
+|---|---|---|---|
+| `DataView.xaml` | có | 4 | 0 |
+| `BigSellerView.xaml` | có | nhiều | 0 |
+| `RowEditWindow.xaml` | có | 6 | 0 |
+| `AccountsView.xaml` | **không** | 1 (ô kho KiotProxy) | **1** |
+| `ImportAccountsWindow.xaml` | **không** | 2 (`LoginsBox`, `KeysBox`) | **2** |
+
+Cửa sổ modal `RowEditWindow` (có khai prefix) sạch lỗi trong khi màn `AccountsView` nằm NGAY TRONG cửa sổ
+chính lại lỗi → yếu tố quyết định là phạm vi xmlns của file XAML, không phải modal hay không. MultiTrigger
+`Condition Property="b:WatermarkAssist.HasText"` không bao giờ lỗi vì `Property` được phân giải lúc biên
+dịch (DependencyPropertyConverter chạy trong xmlns của chính `Theme.xaml`).
+
+**Đã sửa** (1 file): `suite/Shopee.Suite/Themes/Theme.xaml` (template TextBox mặc định, ~dòng 398–410) —
+đổi sang `Text="{TemplateBinding b:WatermarkAssist.Watermark}"`. `TemplateBinding` phân giải attached
+property **lúc biên dịch BAML** theo xmlns của `Theme.xaml` → không còn PropertyPath chuỗi, mọi view dùng
+được mà KHÔNG cần khai `xmlns:b`. Kèm comment giải thích để đợt port sau không lặp lại lối `{Binding (b:…)}`.
+Không đụng `WatermarkAssist.cs` (cơ chế `HasText` + trigger ẩn/hiện giữ nguyên) và không thêm `xmlns:b` vào
+view nào (không cần nữa).
+
+**Build / test**
+
+| Lệnh | Kết quả |
+|---|---|
+| `dotnet build ShopeeSuite.sln` | Build succeeded — 0 Warning, 0 Error |
+| `dotnet test suite/Shopee.Core.Tests` | Passed 61 / Failed 0 |
+| `dotnet test orders/XuLyDonShopee.Tests` | Passed 1459 / Failed 0 |
+
+**Nghiệm thu chạy thật** (bản dev, `data-dir.txt` trỏ thư mục tạm trong scratchpad, `--mode workspace`,
+không bấm nút phóng Brave; bản production trên máy không bị đụng):
+
+| Lượt | Kịch bản | Binding log |
+|---|---|---|
+| trước khi sửa | Tài khoản & Proxy → Import → Dữ liệu → Thêm dòng → Cấu hình BigSeller | **3 dòng** (1 + 2 như bảng trên) |
+| sau khi sửa | y hệt | **0 dòng**, ExitCode 0 |
+| sau khi sửa | script 3 màn chính (`verify-dot2.ps1`, data-dir chưa cấu hình Hub) | **0 dòng**, ExitCode 0 |
+
+Ảnh chụp (scratchpad `…86f7fb17…\scratchpad\`): `modal-import-fix2.png` (Import tài khoản),
+`modal-rowedit-fix2.png` (Dòng dữ liệu — watermark `B#####` hiện đúng ở ô SKU),
+`modal-rowedit-typed-fix2.png` (gõ `B12345` vào ô SKU → watermark biến mất: trigger `HasText` còn nguyên),
+`modal-data-fix2.png` (watermark `SKU…` / `Giá từ` / `Giá đến` vẫn hiện), `modal-accounts-fix2.png`,
+`dot2-0..3-*.png`.
+
+**Ghi chú cho lần nghiệm thu sau** (script `verify-modals2.ps1` trong scratchpad đã xử lý sẵn):
+1. Ribbon: màn "Dữ liệu"/"Tài khoản & Proxy" nằm trong tab **Workspace** → phải bấm tab Workspace trước.
+2. Cửa sổ modal `ShowDialog` **không** liệt kê được qua `AutomationElement.RootElement.FindAll(Children)`;
+   phải dò bằng `EnumWindows` (Win32) rồi `AutomationElement.FromHandle`. Đây là lý do script cũ báo
+   "KHONG mo duoc modal" dù modal đã mở thật.
+3. Nút "Thêm dòng" chỉ chạy khi `DataViewModel._engine` khác null → cần `hub-client.json` có cấu hình (lượt
+   đo trỏ `http://127.0.0.1:59999` là cổng chết, an toàn); nút còn bị khoá (`IsBusy`) trong lúc truy vấn đầu
+   tiên → phải chờ `IsEnabled` rồi mới Invoke. Muốn thấy nút "Import…" thì thêm `hub-server.json` bật
+   `Enabled` (nếu không, `IsReadOnlyMode`=true sẽ ẩn cả nút này lẫn thẻ kho KiotProxy).

@@ -34,26 +34,26 @@
             <conv:WiderThanConverter x:Key="WiderThan" />
 
             <!-- ══════════ ViewModel-first navigation (thay ViewLocator reflection của bản Avalonia) ══════════ -->
-            <!-- ĐÃ PORT: Welcome + ComingSoon. -->
+            <!-- ĐÃ PORT: Welcome + ComingSoon (đợt 1); BigSeller + Data + Accounts (đợt 2). -->
             <DataTemplate DataType="{x:Type vm:WelcomeViewModel}">
                 <views:WelcomeView />
             </DataTemplate>
             <DataTemplate DataType="{x:Type vm:ComingSoonViewModel}">
                 <views:ComingSoonView />
             </DataTemplate>
+            <DataTemplate DataType="{x:Type bs:BigSellerViewModel}">
+                <bs:BigSellerView />
+            </DataTemplate>
+            <DataTemplate DataType="{x:Type data:DataViewModel}">
+                <data:DataView />
+            </DataTemplate>
+            <DataTemplate DataType="{x:Type acc:AccountsViewModel}">
+                <acc:AccountsView />
+            </DataTemplate>
 
-            <!-- CHƯA PORT (đợt 2–5 thay từng dòng bằng view thật): mọi màn module tạm dùng ComingSoonView,
+            <!-- CHƯA PORT (đợt 3–5 thay từng dòng bằng view thật): mọi màn module tạm dùng ComingSoonView,
                  view tự sinh chữ "đang port" từ kiểu ViewModel. -->
             <DataTemplate DataType="{x:Type ws:WorkspaceViewModel}">     <!-- đợt 3 -->
-                <views:ComingSoonView />
-            </DataTemplate>
-            <DataTemplate DataType="{x:Type bs:BigSellerViewModel}">     <!-- đợt 2 -->
-                <views:ComingSoonView />
-            </DataTemplate>
-            <DataTemplate DataType="{x:Type data:DataViewModel}">        <!-- đợt 2 -->
-                <views:ComingSoonView />
-            </DataTemplate>
-            <DataTemplate DataType="{x:Type acc:AccountsViewModel}">     <!-- đợt 2 -->
                 <views:ComingSoonView />
             </DataTemplate>
             <DataTemplate DataType="{x:Type srch:SearchViewModel}">      <!-- đợt 4 -->

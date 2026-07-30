@@ -1,0 +1,120 @@
+<Window x:Class="Shopee.Suite.Modules.Data.RowEditWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:c="clr-namespace:Shopee.Suite.Controls"
+        xmlns:b="clr-namespace:Shopee.Suite.Behaviors"
+        Title="Dòng dữ liệu" SizeToContent="Height" Width="600" ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner"
+        Background="{StaticResource WindowBackgroundBrush}" FontFamily="{StaticResource UiFont}"
+        UseLayoutRounding="True" TextOptions.TextFormattingMode="Display">
+    <Window.Resources>
+        <!-- Mỗi ô = nhãn caption trên + TextBox dưới, cách đều nhau khi wrap. (Avalonia: selector
+             `StackPanel.field` + `StackPanel.field > TextBlock`; WPF không có selector con → nhãn dùng
+             style riêng `fieldLabel` kế thừa `caption`.) -->
+        <Style x:Key="field" TargetType="{x:Type StackPanel}">
+            <Setter Property="Margin" Value="0,0,14,10" />
+        </Style>
+        <Style x:Key="fieldLabel" TargetType="{x:Type TextBlock}" BasedOn="{StaticResource caption}">
+            <Setter Property="Margin" Value="0,0,0,3" />
+        </Style>
+    </Window.Resources>
+
+    <DockPanel Margin="18">
+        <TextBlock DockPanel.Dock="Top" Text="{Binding Title}" Style="{StaticResource h2}" Margin="0,0,0,12" />
+
+        <!-- Chân: nhập-đủ-17-cột + Huỷ/Lưu -->
+        <Grid DockPanel.Dock="Bottom" Margin="0,14,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <CheckBox Grid.Column="0" Content="Nhập đủ 17 cột" IsChecked="{Binding ShowAll}" VerticalAlignment="Center" />
+            <Button Grid.Column="2" MinWidth="90" Click="OnCancel" IsEnabled="{Binding CanSave}">
+                <StackPanel Orientation="Horizontal">
+                    <c:PathIcon Data="{StaticResource IconClose}" />
+                    <TextBlock Style="{StaticResource btnLabel}" Text="Huỷ" />
+                </StackPanel>
+            </Button>
+            <Button Grid.Column="3" Style="{StaticResource primary}" MinWidth="110" Margin="10,0,0,0"
+                    Click="OnSave" IsEnabled="{Binding CanSave}">
+                <StackPanel Orientation="Horizontal">
+                    <c:PathIcon Data="{StaticResource IconSave}" />
+                    <TextBlock Style="{StaticResource btnLabel}" Text="Lưu" />
+                </StackPanel>
+            </Button>
+        </Grid>
+
+        <!-- Dòng lỗi trong window -->
+        <TextBlock DockPanel.Dock="Bottom" Text="{Binding Error}" Foreground="{StaticResource DangerBrush}"
+                   TextWrapping="Wrap" Margin="0,10,0,0"
+                   Visibility="{Binding Error, Converter={StaticResource StringToVis}}" />
+
+        <ScrollViewer MaxHeight="520" VerticalScrollBarVisibility="Auto">
+            <StackPanel>
+                <!-- THÊM: chọn tài khoản + shop -->
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,4"
+                            Visibility="{Binding IsAddMode, Converter={StaticResource BoolToVis}}">
+                    <StackPanel>
+                        <TextBlock Text="Tài khoản *" Style="{StaticResource fieldLabel}" />
+                        <ComboBox Width="250" ItemsSource="{Binding AccountOptions}" SelectedItem="{Binding SelectedAccount}">
+                            <ComboBox.ItemTemplate>
+                                <DataTemplate><TextBlock Text="{Binding Label}" /></DataTemplate>
+                            </ComboBox.ItemTemplate>
+                        </ComboBox>
+                    </StackPanel>
+                    <StackPanel Margin="16,0,0,0">
+                        <TextBlock Text="Shop *" Style="{StaticResource fieldLabel}" />
+                        <ComboBox Width="250" ItemsSource="{Binding ShopOptions}" SelectedItem="{Binding SelectedShop}">
+                            <ComboBox.ItemTemplate>
+                                <DataTemplate><TextBlock Text="{Binding Label}" /></DataTemplate>
+                            </ComboBox.ItemTemplate>
+                        </ComboBox>
+                    </StackPanel>
+                </StackPanel>
+
+                <!-- SỬA: đích cố định -->
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,4"
+                            Visibility="{Binding IsEdit, Converter={StaticResource BoolToVis}}">
+                    <TextBlock Text="Tài khoản:" Style="{StaticResource caption}" VerticalAlignment="Center" />
+                    <TextBlock Text="{Binding AccountLabel}" FontWeight="SemiBold" VerticalAlignment="Center" Margin="8,0,0,0" />
+                    <TextBlock Text="Shop:" Style="{StaticResource caption}" VerticalAlignment="Center" Margin="20,0,0,0" />
+                    <TextBlock Text="{Binding ShopLabel}" FontWeight="SemiBold" VerticalAlignment="Center" Margin="8,0,0,0" />
+                </StackPanel>
+
+                <TextBlock Text="Dữ liệu dòng" Style="{StaticResource h2}" Margin="0,8,0,8" />
+
+                <!-- 6 ô chính -->
+                <WrapPanel>
+                    <StackPanel Style="{StaticResource field}"><TextBlock Text="Link" Style="{StaticResource fieldLabel}" /><TextBox Width="260" Text="{Binding Link, UpdateSourceTrigger=PropertyChanged}" /></StackPanel>
+                    <StackPanel Style="{StaticResource field}"><TextBlock Text="Giá bán" Style="{StaticResource fieldLabel}" /><TextBox Width="120" Text="{Binding PriceSale, UpdateSourceTrigger=PropertyChanged}" /></StackPanel>
+                    <StackPanel Style="{StaticResource field}">
+                        <TextBlock Text="SKU" Style="{StaticResource fieldLabel}" />
+                        <TextBox Width="140" Text="{Binding Sku, UpdateSourceTrigger=PropertyChanged}" b:WatermarkAssist.Watermark="B#####" />
+                        <TextBlock Text="Để trống → tự sinh B#####" Style="{StaticResource caption}" Margin="0,3,0,0"
+                                   Visibility="{Binding IsAddMode, Converter={StaticResource BoolToVis}}" />
+                    </StackPanel>
+                    <StackPanel Style="{StaticResource field}"><TextBlock Text="ItemId" Style="{StaticResource fieldLabel}" /><TextBox Width="150" Text="{Binding ItemId, UpdateSourceTrigger=PropertyChanged}" /></StackPanel>
+                    <StackPanel Style="{StaticResource field}"><TextBlock Text="Tên gốc" Style="{StaticResource fieldLabel}" /><TextBox Width="260" Text="{Binding NameOriginal, UpdateSourceTrigger=PropertyChanged}" /></StackPanel>
+                    <StackPanel Style="{StaticResource field}"><TextBlock Text="Tên đã sửa" Style="{StaticResource fieldLabel}" /><TextBox Width="260" Text="{Binding NameRewritten, UpdateSourceTrigger=PropertyChanged}" /></StackPanel>
+                </WrapPanel>
+
+                <!-- 11 ô còn lại (nhập đủ 17 cột) -->
+                <WrapPanel Visibility="{Binding ShowAll, Converter={StaticResource BoolToVis}}" Margin="0,4,0,0">
+                    <StackPanel Style="{StaticResource field}"><TextBlock Text="Giá gốc" Style="{StaticResource fieldLabel}" /><TextBox Width="120" Text="{Binding PriceOriginal, UpdateSourceTrigger=PropertyChanged}" /></StackPanel>
+                    <StackPanel Style="{StaticResource field}"><TextBlock Text="Danh mục" Style="{StaticResource fieldLabel}" /><TextBox Width="170" Text="{Binding Category, UpdateSourceTrigger=PropertyChanged}" /></StackPanel>
+                    <StackPanel Style="{StaticResource field}"><TextBlock Text="Shop (tên)" Style="{StaticResource fieldLabel}" /><TextBox Width="170" Text="{Binding ShopName, UpdateSourceTrigger=PropertyChanged}" /></StackPanel>
+                    <StackPanel Style="{StaticResource field}"><TextBlock Text="Rating" Style="{StaticResource fieldLabel}" /><TextBox Width="90" Text="{Binding Rating, UpdateSourceTrigger=PropertyChanged}" /></StackPanel>
+                    <StackPanel Style="{StaticResource field}"><TextBlock Text="Bán/tháng" Style="{StaticResource fieldLabel}" /><TextBox Width="100" Text="{Binding SoldMonth, UpdateSourceTrigger=PropertyChanged}" /></StackPanel>
+                    <StackPanel Style="{StaticResource field}"><TextBlock Text="Thích" Style="{StaticResource fieldLabel}" /><TextBox Width="90" Text="{Binding Likes, UpdateSourceTrigger=PropertyChanged}" /></StackPanel>
+                    <StackPanel Style="{StaticResource field}"><TextBlock Text="Đánh giá" Style="{StaticResource fieldLabel}" /><TextBox Width="90" Text="{Binding Reviews, UpdateSourceTrigger=PropertyChanged}" /></StackPanel>
+                    <StackPanel Style="{StaticResource field}"><TextBlock Text="Vùng" Style="{StaticResource fieldLabel}" /><TextBox Width="120" Text="{Binding Region, UpdateSourceTrigger=PropertyChanged}" /></StackPanel>
+                    <StackPanel Style="{StaticResource field}"><TextBlock Text="Ảnh" Style="{StaticResource fieldLabel}" /><TextBox Width="260" Text="{Binding Image, UpdateSourceTrigger=PropertyChanged}" /></StackPanel>
+                    <StackPanel Style="{StaticResource field}"><TextBlock Text="MetaShopId" Style="{StaticResource fieldLabel}" /><TextBox Width="150" Text="{Binding MetaShopId, UpdateSourceTrigger=PropertyChanged}" /></StackPanel>
+                    <StackPanel Style="{StaticResource field}"><TextBlock Text="MetaItemId" Style="{StaticResource fieldLabel}" /><TextBox Width="150" Text="{Binding MetaItemId, UpdateSourceTrigger=PropertyChanged}" /></StackPanel>
+                </WrapPanel>
+            </StackPanel>
+        </ScrollViewer>
+    </DockPanel>
+</Window>
