@@ -50,8 +50,8 @@
         <DataTemplate DataType="acc:AccountsViewModel"><acc:AccountsView /></DataTemplate>
         <DataTemplate DataType="ca:CheckAccountViewModel"><ca:CheckAccountView /></DataTemplate>
         <DataTemplate DataType="fleet:FleetViewModel"><fleet:FleetView /></DataTemplate>
-        <DataTemplate DataType="settings:SettingsViewModel"><settings:SettingsView /></DataTemplate>
-        <!-- Màn Cài đặt GỘP (suite + đơn hàng) — nhúng 2 view con qua ContentControl bên trong. -->
+        <!-- Màn Cài đặt DUY NHẤT (chế độ · cập nhật · hiệu năng · Hub · đơn hàng) — nội dung inline trong
+             một view, KHÔNG còn view con nào để map (2 SettingsView cũ đã xoá). -->
         <DataTemplate DataType="settings:UnifiedSettingsViewModel"><settings:UnifiedSettingsView /></DataTemplate>
 
         <!-- Module "Xử lý đơn Shopee" (phase 1b): ViewLocator reflection của app đơn hàng — Match CHỈ nhận

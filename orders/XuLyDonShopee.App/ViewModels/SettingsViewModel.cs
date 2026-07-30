@@ -1,4 +1,3 @@
-using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
 using System.Threading.Tasks;
@@ -23,9 +22,14 @@ public sealed record BrowserChoiceOption(BrowserChoice Value, string Label);
 /// <item><b>Đồng bộ Google Sheet</b> — link Web App Apps Script + tên tab đích; sau mỗi lần Sync app tự ghi
 /// đơn + link phiếu vào Google Sheet.</item>
 /// </list>
-/// Ba card (Tự động hóa / Đồng bộ Google Sheet / Thông báo đơn mới) có ô thông báo RIÊNG
-/// (<see cref="SavedMessage"/> / <see cref="GsheetSavedMessage"/> / <see cref="NotifySavedMessage"/>): lưu
-/// card nào thì chỉ hiện thông báo ở card đó, clear hai card kia.
+/// Ba card (Tự động hóa / Đồng bộ Google Sheet / Trình duyệt) có ô thông báo RIÊNG
+/// (<see cref="SavedMessage"/> / <see cref="GsheetSavedMessage"/> / <see cref="BrowserSavedMessage"/>): lưu
+/// card nào thì chỉ hiện thông báo ở card đó, clear các card kia.
+/// <para>
+/// Webhook thông báo KHÔNG còn cấu hình ở client: đó là cấu hình HUB-OWNED (đặt trên trang Cài đặt của Hub
+/// web, Hub gửi tin). Backend giữ nguyên — <c>SettingsRepository</c> vẫn đọc/ghi được và
+/// <c>OrderNotifyService</c> vẫn dùng giá trị đã lưu từ trước cho máy chạy độc lập.
+/// </para>
 /// </summary>
 public partial class SettingsViewModel : ViewModelBase
 {
@@ -59,18 +63,6 @@ public partial class SettingsViewModel : ViewModelBase
     [ObservableProperty]
     private string _gsheetSheet2 = string.Empty;
 
-    /// <summary>Webhook khi có đơn mới — để trống = tắt.</summary>
-    [ObservableProperty]
-    private string _notifyWebhookUrlDonMoi = string.Empty;
-
-    /// <summary>Webhook khi lỗi app (hiện: không đặt được địa chỉ) — để trống = tắt.</summary>
-    [ObservableProperty]
-    private string _notifyWebhookUrlLoiApp = string.Empty;
-
-    /// <summary>Webhook khi check flow có đơn trả hàng mới — để trống = tắt.</summary>
-    [ObservableProperty]
-    private string _notifyWebhookUrlDonTra = string.Empty;
-
     /// <summary>Thông báo sau khi lưu của card TỰ ĐỘNG HÓA (thư mục hóa đơn / chu kỳ) (null = ẩn).</summary>
     [ObservableProperty]
     private string? _savedMessage;
@@ -79,11 +71,6 @@ public partial class SettingsViewModel : ViewModelBase
     /// hiện lẫn ở card kia.</summary>
     [ObservableProperty]
     private string? _gsheetSavedMessage;
-
-    /// <summary>Thông báo sau khi lưu của card THÔNG BÁO ĐƠN MỚI (webhook) (null = ẩn) — RIÊNG để không hiện
-    /// lẫn ở card kia.</summary>
-    [ObservableProperty]
-    private string? _notifySavedMessage;
 
     /// <summary>Các lựa chọn trình duyệt (Tự động · Chrome · Edge · Brave · Chromium đóng gói) cho ComboBox.</summary>
     public ObservableCollection<BrowserChoiceOption> BrowserOptions { get; } =
@@ -109,9 +96,6 @@ public partial class SettingsViewModel : ViewModelBase
         GsheetWebAppUrl = _services.Settings.GetGsheetWebAppUrl() ?? string.Empty;
         GsheetTabName = _services.Settings.GetGsheetTabName();
         GsheetSheet2 = _services.Settings.GetGsheetSheet2() ?? string.Empty;
-        NotifyWebhookUrlDonMoi = _services.Settings.GetNotifyWebhookUrlDonMoi() ?? string.Empty;
-        NotifyWebhookUrlLoiApp = _services.Settings.GetNotifyWebhookUrlLoiApp() ?? string.Empty;
-        NotifyWebhookUrlDonTra = _services.Settings.GetNotifyWebhookUrlDonTra() ?? string.Empty;
 
         var choice = _services.Settings.GetBrowserChoice();
         SelectedBrowser = BrowserOptions.FirstOrDefault(o => o.Value == choice) ?? BrowserOptions[0];
@@ -120,7 +104,6 @@ public partial class SettingsViewModel : ViewModelBase
 
         SavedMessage = null;
         GsheetSavedMessage = null;
-        NotifySavedMessage = null;
     }
 
     /// <summary>Đổi lựa chọn ở ComboBox → cập nhật ngay dòng "Đang dùng" (trình duyệt THỰC sẽ dùng).</summary>
@@ -147,7 +130,6 @@ public partial class SettingsViewModel : ViewModelBase
         InvoiceFolder = _services.Settings.GetInvoiceFolder(); // phản ánh giá trị đã lưu (đã chuẩn hóa)
         SavedMessage = "Đã lưu thư mục lưu hóa đơn.";
         GsheetSavedMessage = null; // dọn thông báo các card kia
-        NotifySavedMessage = null;
     }
 
     /// <summary>Nút "Lưu": chuẩn hóa (kẹp [1,1440]) + ghi chu kỳ theo dõi đơn xuống DB, phản ánh lại lên form.</summary>
@@ -158,7 +140,6 @@ public partial class SettingsViewModel : ViewModelBase
         OrderIntervalMinutes = _services.Settings.GetOrderIntervalMinutes(); // phản ánh bản đã kẹp
         SavedMessage = "Đã lưu chu kỳ theo dõi đơn (áp cho các phiên mở sau khi lưu).";
         GsheetSavedMessage = null; // dọn thông báo các card kia
-        NotifySavedMessage = null;
     }
 
     /// <summary>
@@ -184,7 +165,6 @@ public partial class SettingsViewModel : ViewModelBase
         {
             GsheetSavedMessage = loi;
             SavedMessage = null; // dọn thông báo các card kia
-            NotifySavedMessage = null;
             return;
         }
 
@@ -196,7 +176,6 @@ public partial class SettingsViewModel : ViewModelBase
         GsheetSheet2 = _services.Settings.GetGsheetSheet2() ?? string.Empty;
         GsheetSavedMessage = "Đã lưu cấu hình Google Sheet.";
         SavedMessage = null; // dọn thông báo các card kia
-        NotifySavedMessage = null;
 
         // CHỤP giá trị vào biến cục bộ TRƯỚC await (không đọc lại field mutable sau await).
         var tab = GsheetTabName;
@@ -222,56 +201,8 @@ public partial class SettingsViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Lưu 3 webhook thông báo: mỗi ô trống = tắt sự kiện đó; khác trống thì
-    /// <see cref="OrderNotifyService.KiemTraUrl"/> phải hợp lệ.
-    /// </summary>
-    [RelayCommand]
-    private void SaveNotifyUrl()
-    {
-        var donMoi = NotifyWebhookUrlDonMoi?.Trim() ?? string.Empty;
-        var loiApp = NotifyWebhookUrlLoiApp?.Trim() ?? string.Empty;
-        var donTra = NotifyWebhookUrlDonTra?.Trim() ?? string.Empty;
-
-        foreach (var (nhan, url) in new[]
-                 {
-                     ("Có đơn mới", donMoi),
-                     ("Lỗi app", loiApp),
-                     ("Có đơn trả hàng", donTra),
-                 })
-        {
-            var loi = OrderNotifyService.KiemTraUrl(url);
-            if (loi is not null)
-            {
-                NotifySavedMessage = $"{nhan}: {loi}";
-                SavedMessage = null;
-                GsheetSavedMessage = null;
-                return;
-            }
-        }
-
-        _services.Settings.SetNotifyWebhookUrls(donMoi, loiApp, donTra);
-        NotifyWebhookUrlDonMoi = _services.Settings.GetNotifyWebhookUrlDonMoi() ?? string.Empty;
-        NotifyWebhookUrlLoiApp = _services.Settings.GetNotifyWebhookUrlLoiApp() ?? string.Empty;
-        NotifyWebhookUrlDonTra = _services.Settings.GetNotifyWebhookUrlDonTra() ?? string.Empty;
-
-        var parts = new List<string>();
-        if (NotifyWebhookUrlDonMoi.Length > 0)
-            parts.Add($"đơn mới ({OrderNotifyService.NhanDienKenh(NotifyWebhookUrlDonMoi)})");
-        if (NotifyWebhookUrlLoiApp.Length > 0)
-            parts.Add($"lỗi app ({OrderNotifyService.NhanDienKenh(NotifyWebhookUrlLoiApp)})");
-        if (NotifyWebhookUrlDonTra.Length > 0)
-            parts.Add($"đơn trả ({OrderNotifyService.NhanDienKenh(NotifyWebhookUrlDonTra)})");
-
-        NotifySavedMessage = parts.Count == 0
-            ? "Đã tắt toàn bộ thông báo webhook (3 ô trống)."
-            : "Đã lưu: " + string.Join("; ", parts) + ".";
-        SavedMessage = null;
-        GsheetSavedMessage = null;
-    }
-
-    /// <summary>
     /// Nút "Lưu" của card TRÌNH DUYỆT: lưu lựa chọn xuống DB (thiếu → Auto), thông báo RIÊNG ở card này (dọn
-    /// ba card kia), cập nhật lại dòng "Đang dùng". Áp cho các phiên MỞ SAU khi lưu (phiên đang chạy giữ nguyên).
+    /// các card kia), cập nhật lại dòng "Đang dùng". Áp cho các phiên MỞ SAU khi lưu (phiên đang chạy giữ nguyên).
     /// </summary>
     [RelayCommand]
     private void SaveBrowser()
@@ -282,6 +213,5 @@ public partial class SettingsViewModel : ViewModelBase
         BrowserSavedMessage = "Đã lưu trình duyệt (áp cho các phiên mở sau khi lưu).";
         SavedMessage = null; // dọn thông báo các card kia
         GsheetSavedMessage = null;
-        NotifySavedMessage = null;
     }
 }

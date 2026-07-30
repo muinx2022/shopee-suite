@@ -1,7 +1,7 @@
 # Plan: Làm lại màn Cài đặt (một hệ style duy nhất) + bỏ card webhook phía client
 
 - **Ngày:** 2026-07-31
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-executor`)
 
 ## 1. Bối cảnh & mục tiêu
@@ -155,4 +155,73 @@ Quyết định đã chốt:
 
 ## Báo cáo thực thi (Opus điền sau khi xong)
 
-<để trống>
+**Ngày thực thi:** 2026-07-31 · **Người thực thi:** Opus (`opus-executor`) · **Chưa commit** (theo yêu cầu).
+
+### Khảo sát trước khi xoá (bước 1)
+
+- Grep `SettingsView` toàn `suite/` + `orders/` (trừ bin/obj): **2 view sắp xoá chỉ được dựng qua
+  DataTemplate/ViewLocator từ màn gộp** — không có chỗ nào `new SettingsView()` trực tiếp.
+  - Suite: `App.axaml:53` `<DataTemplate DataType="settings:SettingsViewModel">` là mối duy nhất → đã gỡ.
+  - Orders: `ViewLocator.cs` là locator **phản chiếu** (`ViewModel`→`View` theo tên), KHÔNG có entry tường minh
+    nào để gỡ. `MainView.axaml` không tham chiếu màn Cài đặt; `MainViewModel.SettingsVm` chỉ để shell suite lấy
+    VM. ⇒ Không còn đường nào resolve tới `XuLyDonShopee.App.Views.SettingsView` sau khi xoá.
+- Icon: **không phải chép gì**. `Icons.axaml` của orders (nguồn DUY NHẤT) đã được merge ở cấp Application trong
+  `App.axaml` của suite, đủ cả `IconSave/IconAdd/IconSync/IconExport/IconUpgrade/IconFolder`.
+
+### File đã tạo/sửa/xoá
+
+| File | Việc |
+|---|---|
+| `suite/Shopee.Suite/Modules/Settings/UnifiedSettingsView.axaml` | **Viết lại toàn bộ** — màn Cài đặt hoàn chỉnh, 1 tiêu đề, 5 section |
+| `suite/Shopee.Suite/Modules/Settings/SettingsView.axaml` (+`.axaml.cs`) | **XOÁ** |
+| `orders/XuLyDonShopee.App/Views/SettingsView.axaml` (+`.axaml.cs`) | **XOÁ** |
+| `suite/Shopee.Suite/App.axaml` | Gỡ DataTemplate `SettingsViewModel → SettingsView`, sửa comment |
+| `orders/XuLyDonShopee.App/ViewModels/SettingsViewModel.cs` | Bỏ 3 property `NotifyWebhookUrl*`, `NotifySavedMessage`, command `SaveNotifyUrl`, 3 dòng nạp trong `Reload()`, 5 dòng `NotifySavedMessage = null;` ở các command khác, `using System.Collections.Generic` (hết dùng); cập nhật xmldoc class |
+| `CHANGELOG.md` | Thêm mục `## Chưa phát hành` trên cùng (KHÔNG bump `version.txt`) |
+
+`UnifiedSettingsView.axaml.cs` giữ nguyên. KHÔNG đụng `SettingsRepository`, `OrderNotifyService`,
+`GsheetConfigSync`, `OrdersModuleHost`, `Theme.axaml`, các màn khác của orders.
+
+### Kết quả kiểm chứng (số liệu thật)
+
+- `dotnet build ShopeeSuite.sln` → **Build succeeded. 0 Warning(s), 0 Error(s)**.
+- `dotnet test orders/XuLyDonShopee.Tests` → **Passed! Failed: 0, Passed: 1459, Skipped: 0, Total: 1459** —
+  **không phải sửa test nào**; `SettingsRepositoryTests` + `OrderNotifyServiceTests` giữ nguyên byte.
+- Grep `NotifyWebhookUrl|NotifySavedMessage|SaveNotifyUrl` trong `orders/XuLyDonShopee.App/`: chỉ còn **3 lời gọi
+  getter repository** trong `Services/OrderPersistPipeline.cs` (315/421/554 — đường gửi tin, đúng như plan giữ);
+  ViewModels + Views = **0**. Trong `XuLyDonShopee.Core/`: **8** kết quả (repository + service còn nguyên).
+- `find -name SettingsView.axaml*` (trừ bin/obj) = **0 file**. Grep `SettingsView` trong source chỉ còn khớp
+  `SettingsViewModel` (VM vẫn sống) + 1 comment ở `App.axaml`.
+- **Ảnh chụp màn hình thật (render offscreen, KHÔNG đụng dữ liệu máy):** đã dựng harness Avalonia headless +
+  Skia nạp đúng `Themes/Theme.axaml` + `Icons.axaml` + converter của suite, `new UnifiedSettingsView()` với
+  DataContext GIẢ, chụp 2 chế độ:
+  - `settings-full.png` (Full/Workspace): đủ 5 section theo thứ tự, 1 tiêu đề, không TabControl.
+  - `settings-shopee.png` (`ShowsWorkspaceSettings=false`): section **Hiệu năng + Đồng bộ nhiều máy ẩn đúng**,
+    section Đơn hàng hiện đủ 3 card (Tự động hóa · Trình duyệt · Đồng bộ Google Sheet), **không có card webhook**.
+  - Ảnh nằm ở scratchpad phiên: `…\scratchpad\settings-full.png` / `…\scratchpad\settings-shopee.png`.
+  - Nhờ ảnh này bắt được **2 lỗi bố cục đã sửa ngay**: (a) `MaxWidth` + HorizontalAlignment mặc định (Stretch)
+    làm 3 dòng chú thích ở section "Chế độ ứng dụng" bị **canh giữa** → thêm `HorizontalAlignment="Left"`;
+    (b) header để tiêu đề và chip trạng thái **chồng lớp** trong cùng ô Grid → đổi thành Grid 2 cột `*,Auto`.
+- **KHÔNG chạy app thật** (`dotnet run --project suite/Shopee.Suite`): lúc thực thi máy **đang chạy bản cài
+  production** `C:\Users\…\AppData\Local\ShopeeSuite\current\ShopeeSuite.exe` (PID 33732, mở từ 01:23). Mở thêm
+  instance thứ hai sẽ dùng chung `app.db`, chung `machine_id` khi heartbeat lên Hub và tranh cổng cầu nối 47821
+  → rủi ro làm hỏng phiên đang chạy của người dùng. Render offscreen ở trên là bản thay thế (đã thấy layout thật).
+
+### Chênh so với plan (đều là bố cục, đã cân nhắc)
+
+1. Chip trạng thái header thêm `IsVisible` theo `Suite.Status` (plan ghi "giữ nguyên như header cũ"): tránh một
+   ô xám rỗng nằm chình ình khi chưa có thông báo. Thuần hiển thị, không đụng VM.
+2. Header đổi từ Grid 1 ô (chồng lớp, y như bản cũ) sang Grid 2 cột `*,Auto` — chống đè chữ ở cửa sổ hẹp.
+3. Nhãn section khai bằng `UserControl.Styles` cục bộ (`TextBlock.sectionLabel`) thay vì lặp 5 lần thuộc tính.
+   **Không** đụng `Theme.axaml` toàn cục.
+4. Section "Đơn hàng": tiêu đề card ("Tự động hóa" / "Trình duyệt" / "Đồng bộ Google Sheet") dùng `Classes="h2"`
+   bên TRONG card cho khớp các card của suite, thay vì nhãn `Classes="section"` riêng của orders.
+
+### Việc cần người điều phối quyết (ngoài phạm vi plan)
+
+- `OrderNotifyService.KiemTraUrl` (Core) nay **0 caller production** — chỉ còn test gọi (nó vốn chỉ phục vụ
+  `SaveNotifyUrl` của VM). Plan cấm đụng `OrderNotifyService` nên đã **giữ nguyên**; nếu muốn dọn 0-caller thì
+  mở việc riêng.
+- Cùng lý do, xmldoc `OrderNotifyService.cs:76` ("`public` vì màn Cài đặt (SettingsViewModel) dùng để validate
+  URL") nay **lỗi thời** — chưa sửa vì nằm trong file plan cấm đụng.
+- Chưa bump `version.txt` và mục CHANGELOG để tiêu đề `## Chưa phát hành` — chờ người điều phối đánh version.
