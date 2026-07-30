@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
 using Microsoft.Playwright;
+using Shopee.Toolkit.MsLogin;
 
 namespace Shopee.Core.BigSeller;
 
@@ -11,7 +12,9 @@ namespace Shopee.Core.BigSeller;
 /// (ShopeeLoginService.LoginHotmailAsync) — GIỮ các nhánh khó (landing → "Đăng nhập"; form Fluent "Xác minh
 /// email" mới → "Các cách khác để đăng nhập" → tile "Nhập mật khẩu"; KMSI "Duy trì đăng nhập?" → "Có") nhưng
 /// BỎ các helper "human-like" (di chuột cong / gõ từng ký tự) vì chạy headless trên server, thay bằng locator
-/// API thẳng. Phần ĐỌC MÃ viết mới: KHÔNG click link (khác luồng Shopee), chỉ đọc text + regex <c>\b\d{6}\b</c>.
+/// API thẳng. Bộ SELECTOR thì KHÔNG port nữa mà đọc thẳng từ <see cref="MsLoginSelectors"/> dùng chung với
+/// module Đơn hàng (trước đây là hai bản chép tay, Microsoft đổi form là phải nhớ vá cả hai). Phần ĐỌC MÃ viết
+/// mới: KHÔNG click link (khác luồng Shopee), chỉ đọc text + regex <c>\b\d{6}\b</c>.
 /// BẤT BIẾN: KHÔNG ném (trừ hủy) — mọi lỗi trả <c>null</c> để caller fallback về đường admin-gõ-tay; KHÔNG log
 /// giá trị mật khẩu.
 /// </summary>
@@ -23,29 +26,18 @@ public static class HotmailOtpReader
     private static readonly string[] MsDomainFamilies =
         { "hotmail", "outlook", "live", "msn", "windowslive", "passport" };
 
-    // --- Selector đăng nhập Microsoft/Outlook (đổi thường xuyên → luôn nhiều fallback, timeout ngắn bỏ qua được).
-    //     PORT từ ShopeeLoginService (MsUserSelectors…MsSignInSelectors). ---
-    private static readonly string[] MsUserSelectors =
-        { "input[type='email']", "input[name='loginfmt']", "#i0116" };
-    private static readonly string[] MsPasswordSelectors =
-        { "input[name='passwd']", "input[type='password']", "#i0118" };
-    private static readonly string[] MsSubmitSelectors =
-        { "#idSIButton9", "input[type='submit']", "button[type='submit']" };
-    // Tile "Nhập mật khẩu"/"Sử dụng mật khẩu" (khớp KHÔNG dấu "mat khau"/"password"/"contrasena" trong đám clickable).
-    private static readonly string[] MsUsePasswordSelectors =
-        { "#idA_PWD_SwitchToPassword", "a", "[role='button']", "button", "span" };
-    // Link "Các cách khác để đăng nhập" trên form mới "Xác minh email của bạn" (Fluent UI).
-    private static readonly string[] MsOtherWaysSelectors =
-        { "span[role='button']", "[role='button']", "a", "button" };
-    // KMSI ("Duy trì đăng nhập?") chỉ dùng ID cho bản Outlook cũ; form Fluent mới nhận diện qua testid rồi bấm primaryButton.
-    private static readonly string[] MsKmsiYesSelectors =
-        { "#acceptButton", "#idSIButton9" };
-    // Nút "Đăng nhập"/"Sign in" ở trang landing (khi chưa nhảy thẳng vào form nhập email).
-    private static readonly string[] MsSignInSelectors =
-        { "a[data-task='signin']", "a[href*='login.live.com']", "a[href*='login.microsoftonline']", "a[href*='login']", "a", "button", "[role='button']" };
+    // --- Selector đăng nhập Microsoft/Outlook: LẤY TỪ BỘ DÙNG CHUNG <see cref="MsLoginSelectors"/>
+    //     (shared/Shopee.Toolkit — cùng bộ mà module Đơn hàng dùng). Microsoft đổi form thì sửa ở ĐÓ, một chỗ
+    //     cho cả hai; chỗ này chỉ đặt tên cục bộ cho gọn, tuyệt đối KHÔNG chép lại chuỗi selector vào đây. ---
+    private static readonly string[] MsUserSelectors = MsLoginSelectors.User;
+    private static readonly string[] MsPasswordSelectors = MsLoginSelectors.Password;
+    private static readonly string[] MsSubmitSelectors = MsLoginSelectors.Submit;
+    private static readonly string[] MsUsePasswordSelectors = MsLoginSelectors.UsePassword;
+    private static readonly string[] MsOtherWaysSelectors = MsLoginSelectors.OtherWays;
+    private static readonly string[] MsKmsiYesSelectors = MsLoginSelectors.KmsiYes;
+    private static readonly string[] MsSignInSelectors = MsLoginSelectors.SignIn;
 
-    private static readonly Regex SignInRegex =
-        new(@"sign\s*in|đăng nhập|dang nhap", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex SignInRegex = MsLoginSelectors.SignInRegex;
     // Mã xác minh BigSeller: đúng 6 chữ số, không dính số dài hơn (\b biên từ).
     private static readonly Regex SixDigitRegex =
         new(@"\b(\d{6})\b", RegexOptions.Compiled);
@@ -170,7 +162,7 @@ public static class HotmailOtpReader
             if (next is not null) { try { await next.ClickAsync().ConfigureAwait(false); } catch { } }
             await Task.Delay(2000, ct).ConfigureAwait(false);
 
-            if (await IsSelectorVisibleAsync(page, "#usernameError").ConfigureAwait(false))
+            if (await IsSelectorVisibleAsync(page, MsLoginSelectors.UsernameError).ConfigureAwait(false))
             {
                 L("Email hộp thư không hợp lệ (Microsoft báo lỗi tài khoản).");
                 return false;
@@ -192,7 +184,7 @@ public static class HotmailOtpReader
             if (passField is not null) break;
 
             var usePwd = await FindByNormalizedTextInFramesAsync(
-                page, MsUsePasswordSelectors, new[] { "mat khau", "password", "contrasena" }, 1200, ct).ConfigureAwait(false);
+                page, MsUsePasswordSelectors, MsLoginSelectors.UsePasswordNeedles, 1200, ct).ConfigureAwait(false);
             if (usePwd is not null)
             {
                 L("Chọn 'Dùng mật khẩu' / 'Nhập mật khẩu'…");
@@ -202,9 +194,7 @@ public static class HotmailOtpReader
             }
 
             var otherWays = await FindByNormalizedTextInFramesAsync(
-                page, MsOtherWaysSelectors,
-                new[] { "cach khac de dang nhap", "other ways to sign in", "otras formas de iniciar sesion" },
-                1200, ct).ConfigureAwait(false);
+                page, MsOtherWaysSelectors, MsLoginSelectors.OtherWaysNeedles, 1200, ct).ConfigureAwait(false);
             if (otherWays is not null)
             {
                 L("Form 'Xác minh email' — bấm 'Các cách khác để đăng nhập'…");
@@ -230,7 +220,7 @@ public static class HotmailOtpReader
         if (signInBtn is not null) { try { await signInBtn.ClickAsync().ConfigureAwait(false); } catch { } }
         await Task.Delay(3000, ct).ConfigureAwait(false);
 
-        if (await IsSelectorVisibleAsync(page, "#passwordError").ConfigureAwait(false))
+        if (await IsSelectorVisibleAsync(page, MsLoginSelectors.PasswordError).ConfigureAwait(false))
         {
             L("Sai mật khẩu hộp thư (Microsoft báo lỗi).");
             return false;
@@ -245,10 +235,8 @@ public static class HotmailOtpReader
         {
             ct.ThrowIfCancellationRequested();
             var onKmsi = await IsAnyVisibleByClientRectsAsync(
-                page, new[] { "[data-testid='kmsiVideo']", "[data-testid='kmsiImage']" }, ct).ConfigureAwait(false);
-            var kmsiSelectors = onKmsi
-                ? new[] { "[data-testid='primaryButton']", "#acceptButton", "#idSIButton9" }
-                : MsKmsiYesSelectors;
+                page, MsLoginSelectors.KmsiFormMarkers, ct).ConfigureAwait(false);
+            var kmsiSelectors = onKmsi ? MsLoginSelectors.KmsiYesFluent : MsKmsiYesSelectors;
             var kmsi = await FindFirstVisibleHandleAsync(page, kmsiSelectors, 1000, ct).ConfigureAwait(false);
             if (kmsi is not null)
             {
