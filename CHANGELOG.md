@@ -5,6 +5,20 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Hiệu năng. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.6.16 — 2026-07-30
+
+- **Thống kê đơn dùng chung từ Hub** (mọi máy nhìn cùng một số), kèm 4 lỗi đã sửa trước khi phát hành:
+  đổi ngày không còn làm app đứng hình tới 8 giây (số của máy hiện ngay, số chung về sau); khoảng ngày
+  không còn lệch 7 tiếng do máy chủ chạy giờ UTC; đơn cũ đồng bộ lại không còn bị đếm nhầm vào hôm nay
+  (Hub ghi thêm mốc "lần đầu thấy đơn"); và tab Thống kê nay **nói rõ** đang xem số chung toàn hệ thống
+  hay số của riêng máy này.
+- **Nhật ký (tab Shopee → Tài khoản) hết đơ khi chạy nhiều tài khoản:** không còn ghi file chặn luồng
+  từng dòng, gom nhóm cập nhật giao diện, và mỗi tài khoản có **200 dòng gần nhất của riêng mình** —
+  tài khoản chạy ồn không còn đẩy văng nhật ký của tài khoản đang xem. File log trên đĩa vẫn ghi đủ,
+  tự xoay vòng khi quá 8MB.
+- **Màn Cấu hình BigSeller gọn lại trên màn nhỏ:** không phải cuộn mới thấy hết, cột "Batch" hết cụt
+  chữ, bỏ cột "Sheet" (kho dữ liệu đã ở Hub, không còn dùng workbook Excel).
+
 ## v1.6.15 — 2026-07-30
 
 - **Cửa sổ vừa màn hình nhỏ (1440×900):** trước đây app luôn mở cứng 1500×940 nên trên màn 1440×900 nó tràn
