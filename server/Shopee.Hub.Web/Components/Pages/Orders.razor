@@ -3,6 +3,7 @@
 @implements IDisposable
 @using XuLyDonShopee.Core.Services
 @inject HubDatabase Db
+@inject NavigationManager Nav
 
 <p class="hint m-hide">Đơn hàng client đẩy lên hub qua <code>POST /api/orders/push</code>. Lọc theo shop / trạng thái / tìm kiếm (mã đơn, người mua, tên SP, SKU) + phân trang.</p>
 
@@ -114,13 +115,19 @@
 @code {
     private static readonly int[] PageSizeOptions = [25, 50, 100];
 
+    /// <summary>Trạng thái lọc MẶC ĐỊNH (đơn đang cần xử lý) — vắng trong URL nghĩa là giá trị này.</summary>
+    private const string DefaultStatus = "Chờ lấy hàng";
+    /// <summary>Token cho "— tất cả —" trong URL. Cần token riêng vì chuỗi rỗng bị bỏ khỏi query, mà "rỗng" ở
+    /// đây KHÁC "vắng": vắng = lọc mặc định, rỗng = xem mọi trạng thái.</summary>
+    private const string AllStatusToken = "all";
+
     private List<Shop> _shops = new();
     private List<string> _statuses = new();
     private List<OrderRecord> _orders = new();
     private Dictionary<long, string> _shopNames = new();
 
     private long _shopId;      // 0 = tất cả
-    private string _status = "Chờ lấy hàng";   // MẶC ĐỊNH lọc đơn đang cần xử lý (đổi được sang "— tất cả —")
+    private string _status = DefaultStatus;   // MẶC ĐỊNH lọc đơn đang cần xử lý (đổi được sang "— tất cả —")
     private string _search = "";
     private int _pageSize = 50;
     private int _page = 1;
@@ -135,11 +142,34 @@
         _statuses = Db.DistinctOrderStatuses();
         // Đảm bảo option "Chờ lấy hàng" LUÔN có trong dropdown (kể cả khi hiện chưa có đơn nào trạng thái đó) —
         // vì đây là filter MẶC ĐỊNH, cần hiện đúng lựa chọn đang chọn.
-        if (!_statuses.Contains("Chờ lấy hàng")) _statuses.Insert(0, "Chờ lấy hàng");
+        if (!_statuses.Contains(DefaultStatus)) _statuses.Insert(0, DefaultStatus);
+        // F5/deep-link: khôi phục bộ lọc + trang TRƯỚC lượt đọc đầu tiên. KHÔNG navigate ở đây (còn prerender →
+        // NavigateTo sẽ ném redirect); URL chỉ được ghi lại khi user thao tác sau đó.
+        RestoreFromUrl();
         Load();
     }
 
-    private void OnFilterChanged() { _page = 1; Load(); }
+    // ── Bộ lọc ↔ URL query (?shop=&status=&q=&page=) — F5 / chia sẻ link giữ nguyên ──
+    private void RestoreFromUrl()
+    {
+        UrlState.Restore(Nav,
+            // Shop trong URL đã bị xoá khỏi hub → BỎ QUA (kẻo ô chọn hiện trống mà lưới lại đang lọc).
+            ("shop", v => _shopId = long.TryParse(v, out var id) && _shops.Any(s => s.Id == id) ? id : 0),
+            ("status", v => _status = v.Length == 0 ? DefaultStatus : (v == AllStatusToken ? "" : v)),
+            ("q", v => _search = v),
+            ("page", v => _page = int.TryParse(v, out var p) && p >= 1 ? p : 1));
+        // Trạng thái trong URL hiện chưa có đơn nào → vẫn phải là một option, kẻo ô chọn hiện trống.
+        if (_status.Length > 0 && !_statuses.Contains(_status)) _statuses.Insert(0, _status);
+    }
+
+    private void UpdateUrl() =>
+        UrlState.Update(Nav, replace: true,
+            ("shop", _shopId > 0 ? _shopId.ToString() : ""),
+            ("status", _status == DefaultStatus ? "" : (_status.Length == 0 ? AllStatusToken : _status)),
+            ("q", _search),
+            ("page", _page > 1 ? _page.ToString() : ""));
+
+    private void OnFilterChanged() { _page = 1; Load(); UpdateUrl(); }
 
     // "Hủy lọc": bỏ MỌI bộ lọc (shop/trạng thái/tìm) về xem tất cả + về trang 1. Reset luôn ô Tìm nên huỷ timer
     // debounce đang chờ, tránh nó nạp lại với chuỗi cũ ngay sau khi mình vừa xoá.
@@ -151,12 +181,14 @@
         _search = "";
         _page = 1;
         Load();
+        UpdateUrl();
     }
 
     private void OnPageSizeChanged()
     {
         _page = 1;
         Load();
+        UpdateUrl();
     }
 
     // Ô TÌM gõ liên tục (oninput) từng chạy đếm+đọc trang (LIKE %…% không index) dưới lock(_gate) toàn cục
@@ -170,13 +202,14 @@
         {
             _page = 1;
             Load();
+            UpdateUrl();
             StateHasChanged();
         }), null, 300, System.Threading.Timeout.Infinite);
     }
 
     public void Dispose() => _searchTimer?.Dispose();   // huỷ timer đang chờ khi rời trang (khỏi rò timer + callback trên circuit đã đóng)
 
-    private void GoPage(int p) { _page = Math.Clamp(p, 1, _totalPages); Load(); }
+    private void GoPage(int p) { _page = Math.Clamp(p, 1, _totalPages); Load(); UpdateUrl(); }
 
     private void ToggleDetails(long id) => _expandedOrderId = _expandedOrderId == id ? null : id;
 

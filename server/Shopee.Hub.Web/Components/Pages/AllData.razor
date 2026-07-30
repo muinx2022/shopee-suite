@@ -5,7 +5,6 @@
    → F5 giữ nguyên (KHÔNG navigate lúc init/prerender; chỉ ghi URL khi query đổi thật ở Lọc/Xóa lọc/đổi trang/đổi cỡ
    trang). Engine gọi THẲNG ProductDb in-process qua ProductDbDataOps; ProductDb chưa cấu hình → PgReady=false, hiện hint. *@
 @attribute [Authorize(Policy = "Web")]
-@using Microsoft.AspNetCore.WebUtilities
 @using Microsoft.Extensions.DependencyInjection
 @inject FileStoreConfigService Config
 @inject IServiceProvider Sp
@@ -229,17 +228,16 @@
     // trong config vẫn cứ áp (kết quả rỗng là đúng). KHÔNG navigate ở đây (còn prerender → NavigateTo sẽ ném redirect).
     private (AllDataFilter, int, int) ParseUrl()
     {
-        var q = QueryHelpers.ParseQuery(new Uri(Nav.Uri).Query);
-        string qs(string k) => q.TryGetValue(k, out var v) ? v.ToString() : "";
-        _fAcct = qs("acc");
-        _fSheet = qs("shop");
-        _fSku = qs("sku");
-        _fPriceMin = long.TryParse(qs("pmin"), out var mn) && mn > 0 ? mn : null;
-        _fPriceMax = long.TryParse(qs("pmax"), out var mx) && mx > 0 ? mx : null;
-        _fSoldOnly = qs("sold") == "1";
-        _fDupSku = qs("dup") == "1";
-        var size = int.TryParse(qs("size"), out var sz) && ProductGridEngine.PageSizes.Contains(sz) ? sz : 100;
-        var page = int.TryParse(qs("page"), out var pgv) && pgv >= 1 ? pgv : 1;
+        var q = UrlState.Read(Nav);
+        _fAcct = q["acc"];
+        _fSheet = q["shop"];
+        _fSku = q["sku"];
+        _fPriceMin = long.TryParse(q["pmin"], out var mn) && mn > 0 ? mn : null;
+        _fPriceMax = long.TryParse(q["pmax"], out var mx) && mx > 0 ? mx : null;
+        _fSoldOnly = q.Flag("sold");
+        _fDupSku = q.Flag("dup");
+        var size = int.TryParse(q["size"], out var sz) && ProductGridEngine.PageSizes.Contains(sz) ? sz : 100;
+        var page = q.Int("page", 1, min: 1);
         return (BuildFilter(), page, size);
     }
 
@@ -248,8 +246,7 @@
     private void UpdateUrl()
     {
         var f = _engine.Applied;
-        var want = new (string K, string V)[]
-        {
+        UrlState.Update(Nav, replace: true,
             ("acc",  f.Acct ?? ""),
             ("shop", f.Sheet ?? ""),
             ("sku",  f.Sku ?? ""),
@@ -258,14 +255,7 @@
             ("sold", f.SoldOnly ? "1" : ""),
             ("dup",  f.DupSkuOnly ? "1" : ""),
             ("page", _engine.Page > 1 ? _engine.Page.ToString() : ""),
-            ("size", _engine.PageSize != 100 ? _engine.PageSize.ToString() : ""),
-        };
-        var q = QueryHelpers.ParseQuery(new Uri(Nav.Uri).Query);
-        string cur(string k) => q.TryGetValue(k, out var v) ? v.ToString() : "";
-        if (want.All(w => cur(w.K) == w.V)) return;   // query đã khớp → khỏi navigate
-
-        var query = string.Join("&", want.Where(w => w.V.Length > 0).Select(w => w.K + "=" + Uri.EscapeDataString(w.V)));
-        Nav.NavigateTo(query.Length == 0 ? "/data" : "/data?" + query, forceLoad: false, replace: true);
+            ("size", _engine.PageSize != 100 ? _engine.PageSize.ToString() : ""));
     }
 
     private void OnAcctChange(ChangeEventArgs e)

@@ -1,6 +1,7 @@
 @page "/config/accounts"
 @attribute [Authorize(Policy = "Web")]
 @inject FileStoreConfigService Config
+@inject NavigationManager Nav
 
 <p class="hint m-hide">Web hub là nguồn sự thật. Client kéo về, giữ trạng thái riêng-máy (profile/disabled/captcha).</p>
 
@@ -14,15 +15,15 @@
 <div class="bar bar-stack">
     <span class="stat">@_accounts.Count tài khoản</span>
     <label>Mỗi trang
-        <select @bind="_pageSize">
+        <select @bind="_pageSize" @bind:after="OnPageSizeChanged">
             <option value="10">10</option>
             <option value="50">50</option>
             <option value="100">100</option>
         </select>
     </label>
-    <button class="btn sm" disabled="@(_page <= 0)" @onclick="() => _page--">◀</button>
+    <button class="btn sm" disabled="@(_page <= 0)" @onclick="() => GoPage(_page - 1)">◀</button>
     <span class="stat">Trang @(_page + 1)/@PageCount</span>
-    <button class="btn sm" disabled="@(_page >= PageCount - 1)" @onclick="() => _page++">▶</button>
+    <button class="btn sm" disabled="@(_page >= PageCount - 1)" @onclick="() => GoPage(_page + 1)">▶</button>
 </div>
 
 <div class="tablewrap">
@@ -96,8 +97,10 @@
     private int _proxyVersion;
     private string _proxyStatus = "";
 
+    private static readonly int[] PageSizeOptions = [10, 50, 100];
+
     private int _pageSize = 50;
-    private int _page;
+    private int _page;   // 0-based trong code; URL dùng số trang 1-based như mọi trang khác
     private int PageCount => Math.Max(1, (int)Math.Ceiling(_accounts.Count / (double)_pageSize));
     private IEnumerable<(ShopeeAccount a, int idx)> PagedAccounts
     {
@@ -109,7 +112,32 @@
         }
     }
 
-    protected override void OnInitialized() => Load();
+    protected override void OnInitialized()
+    {
+        Load();
+        // F5/deep-link: khôi phục trang + cỡ trang SAU khi Load() có danh sách acc. KHÔNG navigate ở đây (còn
+        // prerender → NavigateTo sẽ ném redirect); URL chỉ được ghi lại khi user đổi trang / cỡ trang.
+        RestoreFromUrl();
+    }
+
+    // ── Phân trang ↔ URL query (?page=&size=) — F5 / chia sẻ link giữ nguyên ──
+    private void RestoreFromUrl() => UrlState.Restore(Nav,
+        ("size", v => _pageSize = int.TryParse(v, out var sz) && PageSizeOptions.Contains(sz) ? sz : 50),
+        ("page", v => _page = int.TryParse(v, out var p) && p >= 1 ? p - 1 : 0));
+
+    private void UpdateUrl() => UrlState.Update(Nav, replace: true,
+        ("page", _page > 0 ? (_page + 1).ToString() : ""),
+        ("size", _pageSize != 50 ? _pageSize.ToString() : ""));
+
+    private void GoPage(int page)
+    {
+        _page = Math.Clamp(page, 0, PageCount - 1);
+        UpdateUrl();
+    }
+
+    // Đổi cỡ trang có thể đẩy trang hiện tại ra ngoài phạm vi → kẹp NGAY (y hệt PagedAccounts vẫn làm lúc render)
+    // để URL ghi ra đúng trang sẽ hiện.
+    private void OnPageSizeChanged() => GoPage(_page);
 
     private void Load()
     {

@@ -10,8 +10,9 @@ internal sealed record DispatchKpiCard(string Key, string Icon, string Tone, str
 /// <c>AsnId</c> rỗng. Tên shop/tài khoản đã tra sẵn ở đây để markup khỏi đụng GUID.
 /// <para>Dòng phiên ĐƠN HÀNG (<c>Op</c> = <c>orders</c>) cũng nằm chung hai bảng này nhưng không phải
 /// assignment: <c>AsnId</c> rỗng và huỷ bằng LỆNH tới máy (xem <c>Dispatch.OnOrdersStop</c>) → cần
-/// <c>MachineId</c>/<c>Login</c> làm đích lệnh. Hai field đó RỖNG với mọi dòng BigSeller.</para></summary>
-internal sealed record DispatchWorkItem(
+/// <c>MachineId</c>/<c>Login</c> làm đích lệnh. Hai field đó RỖNG với mọi dòng BigSeller.</para>
+/// <para>public vì đây là kiểu THAM SỐ của <c>DispatchKpiPanel</c> (component Razor sinh ra là class public).</para></summary>
+public sealed record DispatchWorkItem(
     string Key, string AsnId, string Op, string ShopName, string AcctName, string Host,
     DateTimeOffset Since, string Rows, bool Manual, string MachineId = "", string Login = "");
 
