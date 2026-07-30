@@ -5,7 +5,7 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Hiệu năng. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
-## Chưa phát hành
+## v1.6.17 — 2026-07-31
 
 - **Không còn nuốt yêu cầu trả hàng khi app chọn nhầm tab:** trước đây nếu app không bấm được tab *"Đơn Trả hàng
   Hoàn tiền"*, nó vẫn lấy con số của tab *"Tất cả"* (gộp cả Đơn Hủy / Giao không thành công) làm **mốc** của shop —
