@@ -3,6 +3,7 @@ using System.Net.Http;
 using System.Net.WebSockets;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Shopee.Core.Accounts;
 using Shopee.Core.BigSeller;
 using Shopee.Core.Browser;
 using Shopee.Core.Cdp;
@@ -1468,20 +1469,10 @@ internal sealed class BraveInstanceSession : IDisposable
         try
         {
             var cookies = await GetAllCookiesFromBraveAsync().ConfigureAwait(false);
-            return cookies.Any(c =>
-            {
-                var domain = c.TryGetValue("domain", out var d) ? d?.ToString() ?? "" : "";
-                if (!domain.Contains("shopee", StringComparison.OrdinalIgnoreCase))
-                    return false;
-
-                var name = c.TryGetValue("name", out var n) ? n?.ToString() ?? "" : "";
-                if (!string.Equals(name, "SPC_ST", StringComparison.OrdinalIgnoreCase) &&
-                    !string.Equals(name, "SPC_EC", StringComparison.OrdinalIgnoreCase))
-                    return false;
-
-                var value = c.TryGetValue("value", out var v) ? v?.ToString() ?? "" : "";
-                return !string.IsNullOrWhiteSpace(value) && value != "-" && value.Length > 5;
-            });
+            return cookies.Any(c => ShopeeAuth.IsSessionCookie(
+                c.TryGetValue("domain", out var d) ? d?.ToString() ?? "" : "",
+                c.TryGetValue("name", out var n) ? n?.ToString() ?? "" : "",
+                c.TryGetValue("value", out var v) ? v?.ToString() ?? "" : ""));
         }
         catch
         {
@@ -1571,9 +1562,10 @@ internal sealed class BraveInstanceSession : IDisposable
 
         try
         {
-            if (!TryParseShopeeAccountLogin(_config.ShopeeAccountLogin, out var login, out var parseError))
+            var login = ShopeeAuth.ParseLoginLine(_config.ShopeeAccountLogin, ShopeeLoginLineOptions.Strict);
+            if (!login.Ok)
             {
-                Log($"Shopee login: {parseError}");
+                Log($"Shopee login: {login.Error}");
                 return false;
             }
 
@@ -1617,11 +1609,6 @@ internal sealed class BraveInstanceSession : IDisposable
         }
     }
 
-    private static bool TryParseShopeeAccountLogin(
-        string raw,
-        out ShopeeAccountLogin login,
-        out string error) =>
-        ShopeeLoginAutomation.TryParseLoginLine(raw, out login, out error);
     private string? _shopeeSessionProfileDir;
 
     /// <summary>Thư mục profile (Edge) ĐÃ đăng nhập Shopee của tk này — để import nguyên session (SPC_ST/
@@ -1663,19 +1650,9 @@ internal sealed class BraveInstanceSession : IDisposable
         return payloads.Length;
     }
 
-    private async Task SetShopeeSpcFCookieAsync(ShopeeAccountLogin login)
+    private async Task SetShopeeSpcFCookieAsync(ShopeeLoginLine login)
     {
-        var payload = new Dictionary<string, object?>
-        {
-            ["name"] = "SPC_F",
-            ["value"] = login.SpcF,
-            ["domain"] = string.IsNullOrWhiteSpace(login.CookieDomain) ? ".shopee.vn" : login.CookieDomain,
-            ["path"] = "/",
-            ["secure"] = true,
-            ["httpOnly"] = false,
-            ["sameSite"] = "Lax",
-            ["expires"] = DateTimeOffset.UtcNow.AddDays(30).ToUnixTimeSeconds(),
-        };
+        var payload = ShopeeAuth.BuildSpcFCookie(login.CookieDomain, login.SpcF);
 
         using var browser = new ClientWebSocket();
         await browser.ConnectAsync(new Uri(await GetBrowserWebSocketUrlAsync().ConfigureAwait(false)), CancellationToken.None);
@@ -1684,18 +1661,16 @@ internal sealed class BraveInstanceSession : IDisposable
 
     private async Task OpenShopeeLoginPageAsync()
     {
-        const string loginUrl = "https://shopee.vn/buyer/login?next=https%3A%2F%2Fshopee.vn";
-
         var wsUrl = await _cdpClient.EnsurePageTargetAsync(
-            url => url.StartsWith("https://shopee.vn/buyer/login", StringComparison.OrdinalIgnoreCase),
-            loginUrl).ConfigureAwait(false);
+            url => url.StartsWith(ShopeeAuth.LoginUrlPrefix, StringComparison.OrdinalIgnoreCase),
+            ShopeeAuth.LoginUrl).ConfigureAwait(false);
 
         using var page = new ClientWebSocket();
         await page.ConnectAsync(new Uri(wsUrl), CancellationToken.None).ConfigureAwait(false);
-        await SendCdpAsync(page, 721, "Page.navigate", new { url = loginUrl });
+        await SendCdpAsync(page, 721, "Page.navigate", new { url = ShopeeAuth.LoginUrl });
     }
 
-    private async Task FillShopeeLoginFormAsync(ShopeeAccountLogin login)
+    private async Task FillShopeeLoginFormAsync(ShopeeLoginLine login)
     {
         var usernameJson = JsonSerializer.Serialize(login.Username);
         var passwordJson = JsonSerializer.Serialize(login.Password);
@@ -1755,7 +1730,7 @@ internal sealed class BraveInstanceSession : IDisposable
             try
             {
                 var wsUrl = await FindPageWebSocketUrlAsync(url =>
-                    url.StartsWith("https://shopee.vn/buyer/login", StringComparison.OrdinalIgnoreCase) ||
+                    url.StartsWith(ShopeeAuth.LoginUrlPrefix, StringComparison.OrdinalIgnoreCase) ||
                     url.StartsWith("https://shopee.vn/", StringComparison.OrdinalIgnoreCase)).ConfigureAwait(false);
                 if (string.IsNullOrWhiteSpace(wsUrl))
                 {

@@ -15,11 +15,10 @@ public sealed class CdpInputController : IAsyncDisposable
     private readonly WebSocketServer _ws;
     private readonly int _cdpPort;
     private readonly SemaphoreSlim _gate = new(1, 1);
-    private readonly Random _rng = new();
+    // Chuyển động/độ trễ kiểu người dùng chung với Check tài khoản (Core) — chỉ khác bộ hằng.
+    private readonly CdpHumanInput _input = new(HumanInputProfile.Search);
 
     private CdpSession? _cdp;
-    private double _mouseX;
-    private double _mouseY;
     private bool _disposed;
     private bool _dprLogged;
 
@@ -29,8 +28,6 @@ public sealed class CdpInputController : IAsyncDisposable
     {
         _ws = ws;
         _cdpPort = cdpPort;
-        _mouseX = 200 + _rng.Next(0, 400);
-        _mouseY = 150 + _rng.Next(0, 300);
     }
 
     /// <summary>Attaches a CDP session to the Shopee search tab and starts listening for gestures.</summary>
@@ -107,13 +104,14 @@ public sealed class CdpInputController : IAsyncDisposable
             }
             else
             {
+                var cdp = CdpSender.For(_cdp!);
                 switch (op)
                 {
-                    case "moveTo": await MoveMouseToAsync(x, y); ok = true; break;
-                    case "click":  await ClickAsync(x, y, clickCount); ok = true; break;
-                    case "wheel":  await WheelAsync(x, y, deltaX, deltaY); ok = true; break;
-                    case "type":   await TypeAsync(text, clearFirst); ok = true; break;
-                    case "pressKey": await PressKeyAsync(string.IsNullOrEmpty(key) ? "Enter" : key); ok = true; break;
+                    case "moveTo": await _input.MoveMouseToAsync(cdp, x, y); ok = true; break;
+                    case "click":  await _input.ClickAsync(cdp, x, y, clickCount); ok = true; break;
+                    case "wheel":  await _input.WheelAsync(cdp, x, y, deltaX, deltaY); ok = true; break;
+                    case "type":   await _input.TypeTextAsync(cdp, text, clearFirst); ok = true; break;
+                    case "pressKey": await _input.PressKeyAsync(cdp, string.IsNullOrEmpty(key) ? "Enter" : key); ok = true; break;
                     default: error = "unknown op: " + op; break;
                 }
             }
@@ -135,146 +133,10 @@ public sealed class CdpInputController : IAsyncDisposable
         catch { }
     }
 
-    // â”€â”€ Trusted input primitives â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
-    private async Task MoveMouseToAsync(double tx, double ty)
-    {
-        var sx = _mouseX;
-        var sy = _mouseY;
-        // Intermediate moves are fire-and-forget: awaiting each CDP reply while the
-        // renderer is busy pushes the whole gesture past the extension's ack timeout.
-        var steps = _rng.Next(10, 20);
-        for (var i = 1; i < steps; i++)
-        {
-            var t = (double)i / steps;
-            var ease = t < 0.5 ? 2 * t * t : 1 - Math.Pow(-2 * t + 2, 2) / 2;
-            var x = sx + (tx - sx) * ease + Math.Sin(t * Math.PI * 3) * Rand(-4, 4);
-            var y = sy + (ty - sy) * ease + Math.Cos(t * Math.PI * 2) * Rand(-3, 3);
-            await MouseNoReply("mouseMoved", x, y, button: "none", buttons: 0);
-            await Delay(8, 24);
-        }
-        // Final move is awaited so the cursor is guaranteed at the target before click.
-        await Mouse("mouseMoved", tx, ty, button: "none", buttons: 0);
-        _mouseX = tx;
-        _mouseY = ty;
-    }
-
-    private async Task ClickAsync(double tx, double ty, int clickCount)
-    {
-        await MoveMouseToAsync(tx, ty);
-        await Delay(180, 520);
-        await Mouse("mousePressed", tx, ty, button: "left", buttons: 1, clickCount: clickCount);
-        await Delay(55, 150);
-        await Mouse("mouseReleased", tx, ty, button: "left", buttons: 0, clickCount: clickCount);
-    }
-
-    // Wheel = fire-and-forget: KHÔNG chờ phản hồi CDP. Trang nặng làm phản hồi tới chậm > timeout
-    // → trước đây "A task was canceled" → fallback synthetic dù trang vẫn cuộn. Extension tự đọc lại
-    // scrollY sau mỗi wheel để biết đã cuộn chưa, nên không cần ack giá trị từ CDP.
-    private Task WheelAsync(double x, double y, double deltaX, double deltaY) =>
-        _cdp!.SendNoReplyAsync("Input.dispatchMouseEvent", new
-        {
-            type = "mouseWheel", x, y, button = "none", buttons = 0, clickCount = 0, deltaX, deltaY,
-        });
-
-    private async Task TypeAsync(string text, bool clearFirst)
-    {
-        if (clearFirst) await SelectAllAndDeleteAsync();
-        if (string.IsNullOrEmpty(text)) return;
-
-        // ASCII printable → type char-by-char with key events (most human-like).
-        // Anything with accents/unicode → insertText for the whole string (reliable + trusted).
-        var isAscii = text.All(ch => ch >= 0x20 && ch <= 0x7E);
-        if (!isAscii)
-        {
-            await Delay(120, 260);
-            await _cdp!.SendAsync("Input.insertText", new { text });
-            return;
-        }
-
-        foreach (var ch in text)
-        {
-            var (code, vk) = KeyInfo(ch);
-            var s = ch.ToString();
-            await _cdp!.SendAsync("Input.dispatchKeyEvent",
-                new { type = "keyDown", text = s, key = s, code, windowsVirtualKeyCode = vk });
-            await _cdp.SendAsync("Input.dispatchKeyEvent",
-                new { type = "keyUp", key = s, code, windowsVirtualKeyCode = vk });
-            await Delay(45, 120);
-        }
-    }
-
-    private async Task SelectAllAndDeleteAsync()
-    {
-        // Ctrl+A then Delete (modifiers bitmask: 2 = Ctrl).
-        await _cdp!.SendAsync("Input.dispatchKeyEvent",
-            new { type = "keyDown", key = "Control", code = "ControlLeft", windowsVirtualKeyCode = 17, modifiers = 2 });
-        await _cdp.SendAsync("Input.dispatchKeyEvent",
-            new { type = "keyDown", key = "a", code = "KeyA", windowsVirtualKeyCode = 65, modifiers = 2 });
-        await _cdp.SendAsync("Input.dispatchKeyEvent",
-            new { type = "keyUp", key = "a", code = "KeyA", windowsVirtualKeyCode = 65, modifiers = 2 });
-        await _cdp.SendAsync("Input.dispatchKeyEvent",
-            new { type = "keyUp", key = "Control", code = "ControlLeft", windowsVirtualKeyCode = 17 });
-        await Delay(40, 110);
-        await PressKeyAsync("Delete");
-    }
-
-    private async Task PressKeyAsync(string key)
-    {
-        var (code, vk) = SpecialKeyInfo(key);
-        // Enter phải là "keyDown" kèm text "\r" để renderer sinh đủ keydown+keypress —
-        // form Shopee không submit với rawKeyDown (thiếu keypress).
-        if (key == "Enter")
-            await _cdp!.SendAsync("Input.dispatchKeyEvent",
-                new { type = "keyDown", key, code, windowsVirtualKeyCode = vk, text = "\r" });
-        else
-            await _cdp!.SendAsync("Input.dispatchKeyEvent",
-                new { type = "rawKeyDown", key, code, windowsVirtualKeyCode = vk });
-        await Delay(40, 110);
-        await _cdp.SendAsync("Input.dispatchKeyEvent",
-            new { type = "keyUp", key, code, windowsVirtualKeyCode = vk });
-    }
-
-    private Task Mouse(string type, double x, double y, string button, int buttons,
-        int clickCount = 0, double deltaX = 0, double deltaY = 0) =>
-        _cdp!.SendAsync("Input.dispatchMouseEvent", new
-        {
-            type, x, y, button, buttons, clickCount, deltaX, deltaY,
-        });
-
-    private Task MouseNoReply(string type, double x, double y, string button, int buttons) =>
-        _cdp!.SendNoReplyAsync("Input.dispatchMouseEvent", new
-        {
-            type, x, y, button, buttons, clickCount = 0, deltaX = 0d, deltaY = 0d,
-        });
-
     // â”€â”€ helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
-    private double Rand(double min, double max) => min + _rng.NextDouble() * (max - min);
-
-    private Task Delay(int minMs, int maxMs) => Task.Delay(_rng.Next(minMs, maxMs + 1));
 
     private static double GetDouble(JsonElement el, string key) =>
         el.TryGetProperty(key, out var v) && v.TryGetDouble(out var d) ? d : 0;
-
-    private static (string code, int vk) KeyInfo(char ch)
-    {
-        if (ch >= '0' && ch <= '9') return ("Digit" + ch, ch);
-        if (ch >= 'a' && ch <= 'z') return ("Key" + char.ToUpperInvariant(ch), char.ToUpperInvariant(ch));
-        if (ch >= 'A' && ch <= 'Z') return ("Key" + ch, ch);
-        if (ch == ' ') return ("Space", 32);
-        return ("", 0);
-    }
-
-    private static (string code, int vk) SpecialKeyInfo(string key) => key switch
-    {
-        "Enter" => ("Enter", 13),
-        "Delete" => ("Delete", 46),
-        "Backspace" => ("Backspace", 8),
-        "Escape" => ("Escape", 27),
-        "Tab" => ("Tab", 9),
-        _ => ("", 0),
-    };
 
     public async ValueTask DisposeAsync()
     {
