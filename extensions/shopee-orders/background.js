@@ -22,48 +22,32 @@
 //                {action:"captcha",  message}                                     (rơi vào trang /verify)
 //                {action:"error",    message}
 
+// shared/ là BẢN COPY của extensions/shared/ — sửa ở nguồn chuẩn rồi chạy extensions/sync-shared.cmd.
+import { sleep } from "./shared/util.js";
+import { createWsBridge } from "./shared/ws-bridge.js";
+import { waitForTabComplete } from "./shared/tab-wait.js";
+import { ensureDbg, trustedClick } from "./shared/dbg-input.js";
+
 const DEFAULT_PORT = 47821; // PHẢI khớp OrdersBridgeSession.BridgePort phía C# (khi hash rụng).
 
-let ws = null;
-let wsPort = DEFAULT_PORT;
 let listTabId = null; // tab đang thao tác (subaccount → sau SSO là tab banhang /portal/shop)
 let shopTabId = null; // tab shop mở ra sau khi bấm "Chi tiết"
-let reconnectTimer = null;
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ---- WebSocket ------------------------------------------------------------
+// Mẫu reconnect ở shared/ws-bridge.js (bản đã fix của shopee-search); nhịp nối lại 1200ms giữ như cũ.
+// C# chưa lên / rớt → tự thử lại (browser bị kill thì SW chết theo).
+
+const bridge = createWsBridge({
+  defaultPort: DEFAULT_PORT,
+  reconnectDelayMs: 1200,
+  onOpen: (b) => b.send({ action: "ready" }),
+  onMessage: (cmd) => {
+    handleCommand(cmd).catch((e) => send({ action: "error", message: String((e && e.message) || e) }));
+  },
+});
 
 function send(obj) {
-  try {
-    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
-  } catch (e) {
-    /* bỏ qua */
-  }
-}
-
-function scheduleReconnect() {
-  if (reconnectTimer) return;
-  reconnectTimer = setTimeout(() => { reconnectTimer = null; connect(); }, 1200);
-}
-
-function connect() {
-  if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
-  const port = wsPort || DEFAULT_PORT;
-  try {
-    ws = new WebSocket("ws://localhost:" + port);
-  } catch (e) {
-    scheduleReconnect();
-    return;
-  }
-  ws.onopen = () => send({ action: "ready" });
-  ws.onclose = () => { ws = null; scheduleReconnect(); }; // C# chưa lên / rớt → thử lại (browser bị kill thì SW chết theo).
-  ws.onerror = () => { /* onclose sẽ dọn + hẹn lại */ };
-  ws.onmessage = (ev) => {
-    let cmd;
-    try { cmd = JSON.parse(ev.data); } catch (e) { return; }
-    handleCommand(cmd).catch((e) => send({ action: "error", message: String((e && e.message) || e) }));
-  };
+  bridge.send(obj);
 }
 
 // content.js gửi 'wake' (mọi trang khớp) → đánh thức SW + nối cầu. Không còn phụ thuộc hash sống sót:
@@ -71,21 +55,19 @@ function connect() {
 // phân giải lại tab /portal/shop khi chạy lát cắt (login đã do C#/Playwright lo, extension chỉ ở Seller Centre).
 chrome.runtime.onMessage.addListener((msg, sender) => {
   if (msg && msg.type === "wake") {
-    if (msg.wsPort) wsPort = msg.wsPort;
     if (listTabId == null && sender.tab && sender.tab.id != null) listTabId = sender.tab.id;
-    try { chrome.storage.session.set({ wsPort, listTabId }); } catch (e) {}
-    connect();
+    bridge.connect(msg.wsPort);
+    try { chrome.storage.session.set({ wsPort: bridge.port, listTabId }); } catch (e) {}
   }
 });
 
 // Service worker khởi động lại (MV3 có thể ngủ) → nạp cổng đã lưu (hoặc mặc định) rồi nối lại.
 try {
   chrome.storage.session.get(["wsPort", "listTabId"], (v) => {
-    if (v && v.wsPort) wsPort = v.wsPort;
     if (v && v.listTabId != null) listTabId = v.listTabId;
-    connect();
+    bridge.connect(v && v.wsPort ? v.wsPort : undefined);
   });
-} catch (e) { connect(); }
+} catch (e) { bridge.connect(); }
 
 // ---- Hàm chạy trong trang (world MAIN) ------------------------------------
 // (Port từ ScanShopListJs / OpenShopDetailAsync / FindToShipTitleAsync / SubUserSelectors... phía C#.)
@@ -1009,67 +991,9 @@ async function execInTab(tabId, func, args) {
   return res && res[0] ? res[0].result : null;
 }
 
-async function waitTabComplete(tabId, ms) {
-  const dl = Date.now() + ms;
-  while (Date.now() < dl) {
-    try {
-      const t = await chrome.tabs.get(tabId);
-      if (t.status === "complete") return;
-    } catch (e) { return; }
-    await sleep(400);
-  }
-}
+// Chờ tab load xong: waitForTabComplete ở shared/tab-wait.js (nghe sự kiện thay vì poll).
 
-// ---- Trusted input qua chrome.debugger (mouse: từ POC; key: port CdpInputController.TypeAsync) ----
-
-function dbgSend(target, method, params) {
-  return new Promise((resolve, reject) => {
-    chrome.debugger.sendCommand(target, method, params || {}, () => {
-      const e = chrome.runtime.lastError;
-      if (e) reject(new Error(e.message)); else resolve();
-    });
-  });
-}
-function dbgAttach(target) {
-  return new Promise((resolve, reject) => {
-    chrome.debugger.attach(target, "1.3", () => {
-      const e = chrome.runtime.lastError;
-      if (e) reject(new Error(e.message)); else resolve();
-    });
-  });
-}
-function dbgDetach(target) {
-  return new Promise((resolve) => { chrome.debugger.detach(target, () => resolve()); });
-}
-
-// Cú click chuột trusted (giả định debugger ĐÃ attach).
-async function dbgClick(target, x, y) {
-  await dbgSend(target, "Input.dispatchMouseEvent", { type: "mouseMoved", x, y, buttons: 0 });
-  await sleep(70);
-  await dbgSend(target, "Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", buttons: 1, clickCount: 1 });
-  await sleep(50);
-  await dbgSend(target, "Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", buttons: 0, clickCount: 1 });
-}
-
-// Giữ chrome.debugger ATTACH XUYÊN SUỐT (KHÔNG attach/detach từng cú, cũng KHÔNG detach ở cuối mỗi lệnh) — vì:
-// (1) banner "đang gỡ lỗi" hết nhấp nháy; (2) mọi toạ độ (execInTab) + cú click ở CÙNG trạng thái banner → click
-// không trượt. Gọi ensureDbg(tab) đầu mỗi lệnh nhiều-click (TRƯỚC khi đọc toạ độ); chỉ detach khi ĐỔI sang tab
-// khác (ngay trong ensureDbg) hoặc khi Chrome tự detach.
-let _dbgTab = null;
-async function ensureDbg(tabId) {
-  if (_dbgTab === tabId) return;
-  if (_dbgTab != null) { try { await dbgDetach({ tabId: _dbgTab }); } catch (e) {} _dbgTab = null; }
-  try { await dbgAttach({ tabId }); } catch (e) { /* có thể đã attach sẵn — coi như ok */ }
-  _dbgTab = tabId;
-}
-// Debugger tự detach (điều hướng trang / user bấm "Huỷ" trên banner) → reset để cú click sau tự attach lại.
-try { chrome.debugger.onDetach.addListener((source) => { if (_dbgTab != null && source && source.tabId === _dbgTab) _dbgTab = null; }); } catch (e) {}
-
-// Cú click trusted — dùng debugger đã attach (ensureDbg trước đó), KHÔNG detach sau mỗi cú.
-async function trustedClick(tabId, x, y) {
-  await ensureDbg(tabId);
-  await dbgClick({ tabId }, x, y);
-}
+// Trusted input (chrome.debugger): ensureDbg/trustedClick ở shared/dbg-input.js.
 
 // ---- Xử lý lệnh từ C# -----------------------------------------------------
 
@@ -1102,7 +1026,7 @@ async function doCloseShopTab() {
   } else if (listTabId != null) {
     // Shop mở cùng tab picker (hoặc không rõ) → đưa picker về /portal/shop.
     try { await chrome.tabs.update(listTabId, { url: SHOP_LIST_URL }); } catch (e) {}
-    await waitTabComplete(listTabId, 20000);
+    await waitForTabComplete(listTabId, 20000);
     shopTabId = null;
   }
   if (listTabId == null) { send({ action: "shopTabClosed", ok: false }); return; }
@@ -1177,7 +1101,7 @@ async function gotoSellerCentre() {
 
   listTabId = found.id;
   shopTabId = null;
-  await waitTabComplete(listTabId, 15000);
+  await waitForTabComplete(listTabId, 15000);
   let url = "";
   try { url = (await chrome.tabs.get(listTabId)).url || ""; } catch (e) {}
   if (/\/verify/i.test(url)) { send({ action: "captcha", message: url }); return; }
@@ -1215,7 +1139,7 @@ async function ensureShopPicker(tabId) {
     if (u.indexOf("/portal/shop") < 0 && !navigated) {
       navigated = true;
       try { await chrome.tabs.update(tabId, { url: SHOP_LIST_URL }); } catch (e) {}
-      await waitTabComplete(tabId, 20000);
+      await waitForTabComplete(tabId, 20000);
       continue;
     }
     await sleep(700);
@@ -1347,7 +1271,7 @@ async function doSyncOrders() {
   if (tabId == null) { send({ action: "error", message: "chưa có tab shop để đọc đơn" }); return; }
 
   try { await chrome.tabs.update(tabId, { url: ORDERS_URL }); } catch (e) {}
-  await waitTabComplete(tabId, 20000);
+  await waitForTabComplete(tabId, 20000);
   let url = "";
   try { url = (await chrome.tabs.get(tabId)).url || ""; } catch (e) {}
   if (/\/verify/i.test(url)) { send({ action: "captcha", message: url }); return; }
@@ -1414,7 +1338,7 @@ async function doSyncOrderFinals(orders) {
     try {
       const t = await chrome.tabs.create({ url: ORDER_DETAIL_PREFIX + shopeeOrderId, active: false });
       tabId = t.id;
-      await waitTabComplete(tabId, 20000);
+      await waitForTabComplete(tabId, 20000);
       let url = "";
       try { url = (await chrome.tabs.get(tabId)).url || ""; } catch (e) {}
       if (/\/verify/i.test(url)) {
@@ -1464,7 +1388,7 @@ async function doSetPickupAddress(province) {
   if (tabId == null) { send({ action: "error", message: "chưa có tab shop để đặt địa chỉ" }); return; }
 
   try { await chrome.tabs.update(tabId, { url: SHIPPING_SETTINGS_URL }); } catch (e) {}
-  await waitTabComplete(tabId, 20000);
+  await waitForTabComplete(tabId, 20000);
   let url = "";
   try { url = (await chrome.tabs.get(tabId)).url || ""; } catch (e) {}
   if (/\/verify/i.test(url)) { send({ action: "captcha", message: url }); return; }
@@ -1539,7 +1463,7 @@ async function doSetPickupAddressToOther() {
   if (tabId == null) { send({ action: "error", message: "chưa có tab shop để set địa chỉ khác" }); return; }
 
   try { await chrome.tabs.update(tabId, { url: SHIPPING_SETTINGS_URL }); } catch (e) {}
-  await waitTabComplete(tabId, 20000);
+  await waitForTabComplete(tabId, 20000);
   let url = "";
   try { url = (await chrome.tabs.get(tabId)).url || ""; } catch (e) {}
   if (/\/verify/i.test(url)) { send({ action: "captcha", message: url }); return; }
@@ -1608,7 +1532,7 @@ async function doPrepareNextOrder() {
   if (tabId == null) { send({ action: "error", message: "chưa có tab shop để xử đơn" }); return; }
 
   try { await chrome.tabs.update(tabId, { url: ORDERS_URL }); } catch (e) {}
-  await waitTabComplete(tabId, 20000);
+  await waitForTabComplete(tabId, 20000);
   let url = "";
   try { url = (await chrome.tabs.get(tabId)).url || ""; } catch (e) {}
   if (/\/verify/i.test(url)) { send({ action: "captcha", message: url }); return; }
@@ -1731,7 +1655,7 @@ async function doPrepareNextOrder() {
   }
 
   // Tải PDF phiếu NGAY TRONG TAB PHIẾU (có cookie, same-origin blob) → base64. Poll ~25s để khung nhúng PDF kịp render.
-  await waitTabComplete(slipId, 15000);
+  await waitForTabComplete(slipId, 15000);
   let slipB64 = "";
   const fd = Date.now() + 25000;
   while (Date.now() < fd) {
@@ -1755,7 +1679,7 @@ async function doRedownloadSlip(orderSn) {
   if (tabId == null || !orderSn) { send({ action: "slipRedownloaded", orderSn: orderSn, slipBase64: "" }); return; }
 
   try { await chrome.tabs.update(tabId, { url: ORDERS_URL }); } catch (e) {}
-  await waitTabComplete(tabId, 20000);
+  await waitForTabComplete(tabId, 20000);
   let url = "";
   try { url = (await chrome.tabs.get(tabId)).url || ""; } catch (e) {}
   if (/\/verify/i.test(url)) { send({ action: "captcha", message: url }); return; }
@@ -1827,7 +1751,7 @@ async function doRedownloadSlip(orderSn) {
     try { const t = await chrome.tabs.get(slipId); slipUrl = t.url || slipUrl; if (slipUrl.indexOf("awbprint") >= 0) break; } catch (e) { break; }
     await sleep(300);
   }
-  await waitTabComplete(slipId, 15000);
+  await waitForTabComplete(slipId, 15000);
   let slipB64 = "";
   const fd = Date.now() + 25000;
   while (Date.now() < fd) {
@@ -1877,7 +1801,7 @@ async function doReadReturnRequests() {
   } else {
     send({ action: "progress", message: "không thấy tab 'Trả hàng/Hoàn tiền/Hủy' — điều hướng thẳng tới trang." });
     try { await chrome.tabs.update(tabId, { url: RETURNS_URL }); } catch (e) {}
-    await waitTabComplete(tabId, 20000);
+    await waitForTabComplete(tabId, 20000);
   }
 
   // 2) Chờ ô tổng render (trần 20s). Rơi /verify → báo captcha rồi thôi (C# coi là bỏ bước, đi tiếp).

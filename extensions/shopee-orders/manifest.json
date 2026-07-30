@@ -9,7 +9,7 @@
     "https://subaccount.shopee.com/*",
     "https://accounts.shopee.vn/*"
   ],
-  "background": { "service_worker": "background.js" },
+  "background": { "service_worker": "background.js", "type": "module" },
   "content_scripts": [
     {
       "matches": [

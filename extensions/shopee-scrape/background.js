@@ -5,6 +5,11 @@
  * - click scrape và trả kết quả
  */
 
+// shared/ là BẢN COPY của extensions/shared/ — sửa ở nguồn chuẩn rồi chạy extensions/sync-shared.cmd.
+import { sleep } from "./shared/util.js";
+import { getTabSafe, waitForTabComplete } from "./shared/tab-wait.js";
+import { isVerifyUrl, isNetworkErrorPage } from "./shared/net-detect.js";
+
 const SCRAPE_SCRIPT = "content.js";
 const OVERLAY_SCRIPT = "overlay.js";
 const TAB_LOAD_TIMEOUT_MS = 30_000;
@@ -107,15 +112,6 @@ const normalizeLink = (value) => {
   return trimmed;
 };
 
-const getTabSafe = async (tabId) => {
-  if (!tabId) return null;
-  try {
-    return await chrome.tabs.get(tabId);
-  } catch (_) {
-    return null;
-  }
-};
-
 const isScrapeWorkTabUrl = (url) => {
   if (!url || typeof url !== "string") return false;
   if (url.startsWith("chrome-extension://")) return false;
@@ -170,53 +166,9 @@ const openLinkInTab = async (tabId, url) => {
   return created.id;
 };
 
-const waitForTabComplete = async (tabId, timeoutMs = TAB_LOAD_TIMEOUT_MS) => {
-  const tab = await getTabSafe(tabId);
-  if (!tab) return false;
-  if (tab.status === "complete") return true;
-
-  return new Promise((resolve) => {
-    const timeout = setTimeout(() => {
-      chrome.tabs.onUpdated.removeListener(onUpdated);
-      chrome.tabs.onRemoved.removeListener(onRemoved);
-      resolve(false);
-    }, timeoutMs);
-
-    const cleanup = () => {
-      clearTimeout(timeout);
-      chrome.tabs.onUpdated.removeListener(onUpdated);
-      chrome.tabs.onRemoved.removeListener(onRemoved);
-    };
-
-    const onRemoved = (removedTabId) => {
-      if (removedTabId !== tabId) return;
-      cleanup();
-      resolve(false);
-    };
-
-    const onUpdated = (updatedTabId, changeInfo) => {
-      if (updatedTabId !== tabId || changeInfo.status !== "complete") return;
-      cleanup();
-      resolve(true);
-    };
-
-    chrome.tabs.onUpdated.addListener(onUpdated);
-    chrome.tabs.onRemoved.addListener(onRemoved);
-  });
-};
-
 const getCurrentTabUrl = async (tabId, fallback = "") => {
   const tab = await getTabSafe(tabId);
   return tab?.url || fallback || "";
-};
-
-const isVerifyUrl = (url) => {
-  try {
-    const parsed = new URL(url);
-    return /^\/verify(?:\/|$)/i.test(parsed.pathname);
-  } catch (_) {
-    return false;
-  }
 };
 
 const isShopeeProductUrl = (url) => {
@@ -323,28 +275,10 @@ const waitForScrapeResult = async (token, timeoutMs = SCRAPE_WAIT_TIMEOUT_MS) =>
   });
 };
 
-const checkPageLoadSuccess = async (tabId) => {
-  try {
-    const results = await chrome.scripting.executeScript({
-      target: { tabId },
-      func: () => {
-        const body = document.body?.innerText || "";
-        const isProxyError =
-          body.includes("ERR_PROXY_CONNECTION_FAILED") ||
-          body.includes("ERR_TUNNEL_CONNECTION_FAILED") ||
-          body.includes("ERR_PROXY_AUTH_UNSUPPORTED") ||
-          body.includes("ERR_SOCKS_CONNECTION_FAILED") ||
-          document.title === "No internet";
-        return { ok: !isProxyError };
-      },
-    });
-    return results?.[0]?.result ?? { ok: true };
-  } catch (_) {
-    return { ok: false };
-  }
-};
-
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+// Trang lỗi mạng/proxy: dùng bộ dấu hiệu GỘP ở shared/net-detect.js. Giữ world ISOLATED (mặc định cũ) và
+// coi "không inject được" là lỗi trang — y như checkPageLoadSuccess trước đây.
+const isProxyErrorPage = (tabId) =>
+  isNetworkErrorPage(tabId, { world: "ISOLATED", onInjectError: true });
 
 const detectCaptcha = async (tabId) => {
   // URL của tab đọc qua chrome.tabs (KHÔNG cần inject). Trang /verify/captcha của Shopee có thể CHẶN
@@ -352,7 +286,7 @@ const detectCaptcha = async (tabId) => {
   // bắt captcha theo URL ở ngay tầng background (kể cả khi inject lỗi).
   let tabUrl = "";
   try { tabUrl = await getCurrentTabUrl(tabId); } catch (_) {}
-  const urlIsVerify = /\/verify(?:\/|$)/i.test(tabUrl);
+  const urlIsVerify = isVerifyUrl(tabUrl);
   try {
     const results = await chrome.scripting.executeScript({
       target: { tabId },
@@ -586,7 +520,7 @@ globalThis.__launcherExecuteScrapeStep = async (payload) => {
 
     tabId = await openLinkInTab(tabId, link);
 
-    let loaded = await waitForTabComplete(tabId);
+    let loaded = await waitForTabComplete(tabId, TAB_LOAD_TIMEOUT_MS);
     if (!loaded) {
       const stillThere = await getTabSafe(tabId);
       if (stillThere?.id) {
@@ -640,8 +574,7 @@ globalThis.__launcherExecuteScrapeStep = async (payload) => {
       currentPageUrl = await waitForUrlStable(tabId);
     }
 
-    const pageCheck = await checkPageLoadSuccess(tabId);
-    if (!pageCheck.ok) {
+    if (await isProxyErrorPage(tabId)) {
       return {
         ok: false,
         scrapeOk: false,
@@ -755,7 +688,7 @@ globalThis.__launcherExecuteScrapeStep = async (payload) => {
     for (let retry = 1; retry <= MAX_SCRAPE_RETRIES && !scrapeResult?.ok && !scrapeResult?.needLogin && !abortRequested; retry++) {
       if (!(await getTabSafe(tabId))) {
         tabId = await openLinkInTab(await findReuseableScrapeTab(), link);
-        await waitForTabComplete(tabId);
+        await waitForTabComplete(tabId, TAB_LOAD_TIMEOUT_MS);
         await injectOverlayManager(tabId);
       }
       await showOverlay(tabId, `Thử lại scrape (lần ${retry}) — dòng ${rowNumber}…`);
