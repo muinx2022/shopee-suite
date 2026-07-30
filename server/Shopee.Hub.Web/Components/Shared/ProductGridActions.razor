@@ -1,0 +1,26 @@
+@* Khối NÚT HÀNH ĐỘNG trên tập chọn của lưới sản phẩm (chọn tất cả / bỏ chọn / đã bán / reset / sinh SKU / xoá)
+   — dùng chung trang /data (AllData) và lưới per-shop (ProductGridPanel). Render THẲNG vào <div class="bar"> của
+   trang gọi, ngay sau ProductGridPager. KHÔNG giữ state riêng: tập chọn nằm trong Engine (Engine bắn Changed →
+   trang cha vẽ lại cả bảng). Chỉ nút XOÁ khác nhau giữa 2 bên (nhãn + việc cha làm sau khi xoá) → tham số hoá. *@
+
+<button class="btn sm" style="margin-left:8px" disabled="@(Engine.Busy || Engine.Rows.Count == 0)"
+        @onclick="() => Engine.SelectAllOnPage()" title="Chọn tất cả dòng của trang này">☑ Chọn tất cả</button>
+@if (Engine.SelectedCount > 0)
+{
+    <span style="flex:1"></span>
+    <button class="btn sm" disabled="@Engine.Busy" @onclick="() => Engine.ClearSelection()">✖ Bỏ chọn (@Engine.SelectedCount)</button>
+    <button class="btn sm" style="background:var(--success-bg);color:var(--success)" disabled="@Engine.Busy" @onclick="() => Engine.MarkSoldAsync()">✔ Đã bán (@Engine.SelectedCount)</button>
+    <button class="btn sm" disabled="@Engine.Busy" @onclick="() => Engine.ResetSoldAsync()" title="Xoá lịch sử đã bán của các dòng chọn (sold về 0)">↺ Đã bán = 0 (@Engine.SelectedCount)</button>
+    <button class="btn sm" disabled="@Engine.Busy" @onclick="() => Engine.RegenSkusAsync()" title="Cấp SKU B##### mới cho các dòng chọn (vá đuôi tên nếu có tên-sửa)">🆕 Sinh SKU mới (@Engine.SelectedCount)</button>
+    <button class="btn danger sm" disabled="@Engine.Busy" @onclick="OnDelete">@(DeleteLabel) (@Engine.SelectedCount)</button>
+}
+
+@code {
+    [Parameter, EditorRequired] public ProductGridEngine Engine { get; set; } = default!;
+
+    /// <summary>Nhãn nút xoá KHÔNG kèm số đếm (số đếm component tự nối) — /data "🗑 Xóa nhiều", per-shop "🗑 Xoá".</summary>
+    [Parameter] public string DeleteLabel { get; set; } = "🗑 Xoá";
+
+    /// <summary>Việc xoá thật (engine tự confirm) — mỗi bên còn làm thêm phần riêng sau khi xoá xong.</summary>
+    [Parameter] public EventCallback OnDelete { get; set; }
+}

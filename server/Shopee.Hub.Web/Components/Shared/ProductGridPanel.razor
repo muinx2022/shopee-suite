@@ -68,32 +68,10 @@
         }
         else
         {
+        @* Phân trang + nút hành động = 2 component DÙNG CHUNG với trang /data (render thẳng vào .bar này). *@
         <div class="bar">
-            <button class="btn sm" disabled="@(_engine.Page <= 1 || busy)" @onclick="() => GoPage(1)" title="Trang đầu">«</button>
-            <button class="btn sm" disabled="@(_engine.Page <= 1 || busy)" @onclick="() => GoPage(_engine.Page - 1)">‹</button>
-            <span class="action">trang
-                <input type="number" class="ci" style="width:64px" min="1" max="@_engine.PageCount" value="@_engine.Page" @onchange="OnPageInput" disabled="@busy" />
-                / @_engine.PageCount</span>
-            <button class="btn sm" disabled="@(_engine.Page >= _engine.PageCount || busy)" @onclick="() => GoPage(_engine.Page + 1)">›</button>
-            <button class="btn sm" disabled="@(_engine.Page >= _engine.PageCount || busy)" @onclick="() => GoPage(_engine.PageCount)" title="Trang cuối">»</button>
-            <span class="action" style="margin-left:8px">dòng/trang</span>
-            <select value="@_engine.PageSize" @onchange="OnPageSizeChange" disabled="@busy" style="width:74px">
-                @foreach (var sz in ProductGridEngine.PageSizes)
-                {
-                    <option value="@sz">@sz</option>
-                }
-            </select>
-            <button class="btn sm" style="margin-left:8px" disabled="@(busy || _engine.Rows.Count == 0)"
-                    @onclick="() => _engine.SelectAllOnPage()" title="Chọn tất cả dòng của trang này">☑ Chọn tất cả</button>
-            @if (_engine.SelectedCount > 0)
-            {
-                <span style="flex:1"></span>
-                <button class="btn sm" disabled="@busy" @onclick="() => _engine.ClearSelection()">✖ Bỏ chọn (@_engine.SelectedCount)</button>
-                <button class="btn sm" style="background:var(--success-bg);color:var(--success)" disabled="@busy" @onclick="() => _engine.MarkSoldAsync()">✔ Đã bán (@_engine.SelectedCount)</button>
-                <button class="btn sm" disabled="@busy" @onclick="() => _engine.ResetSoldAsync()" title="Xoá lịch sử đã bán của các dòng chọn (sold về 0)">↺ Đã bán = 0 (@_engine.SelectedCount)</button>
-                <button class="btn sm" disabled="@busy" @onclick="() => _engine.RegenSkusAsync()" title="Cấp SKU B##### mới cho các dòng chọn (vá đuôi tên nếu có tên-sửa)">🆕 Sinh SKU mới (@_engine.SelectedCount)</button>
-                <button class="btn danger sm" disabled="@busy" @onclick="DeleteSelected">🗑 Xoá (@_engine.SelectedCount)</button>
-            }
+            <ProductGridPager Engine="_engine" OnViewChanged="NotifyView" />
+            <ProductGridActions Engine="_engine" DeleteLabel="🗑 Xoá" OnDelete="DeleteSelected" />
         </div>
 
         <div class="tablewrap">
@@ -274,25 +252,6 @@
     private async Task OnSearchKey(KeyboardEventArgs e)
     {
         if (e.Key == "Enter") await DoSearch();
-    }
-
-    private async Task GoPage(int p)
-    {
-        await _engine.GoPageAsync(p);
-        await NotifyView();
-    }
-
-    // Đổi số dòng/trang → engine về trang 1, bỏ chọn, nạp lại. Giá trị ngoài PageSizes bị engine bỏ qua.
-    private async Task OnPageSizeChange(ChangeEventArgs e)
-    {
-        if (int.TryParse(e.Value?.ToString(), out var sz)) await _engine.SetPageSizeAsync(sz);
-        await NotifyView();
-    }
-
-    // Ô nhập số trang (Enter/blur) → GoPage tự kẹp [1..PageCount].
-    private async Task OnPageInput(ChangeEventArgs e)
-    {
-        if (int.TryParse(e.Value?.ToString(), out var p)) await GoPage(p);
     }
 
     private void ToggleAll() => _showAll = !_showAll;

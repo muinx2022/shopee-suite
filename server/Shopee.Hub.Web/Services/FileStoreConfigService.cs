@@ -105,23 +105,6 @@ public sealed class FileStoreConfigService
         return false;
     }
 
-    // ── Xoá acc Shopee (trang Config trên web) ──
-    /// <summary>Xoá 1 acc Shopee khỏi config/accounts.json (trang Config trên web / nút xoá acc lỗi). Thử lại
-    /// nếu dính version-conflict. Trả true nếu đã xoá.</summary>
-    public bool RemoveShopeeAccount(string id)
-    {
-        if (string.IsNullOrWhiteSpace(id)) return false;
-        for (var attempt = 0; attempt < 3; attempt++)
-        {
-            var list = ShopeeAccounts();
-            var n = list.RemoveAll(x => x.Id == id);
-            if (n == 0) return false;
-            var res = Save(AccountsFile, list, VersionOf(AccountsFile));
-            if (res.Ok) return true;
-        }
-        return false;
-    }
-
     /// <summary>Set CookieFile của 1 acc BigSeller = TÊN FILE THUẦN (không path) để client RelinkCookie nối được
     /// cookie đa nền tảng (client Linux dùng Path.GetFileName KHÔNG tách được path Windows). Gọi sau khi hub
     /// login lưu cookie. No-op nếu đã đúng. Thử lại nếu dính version-conflict.</summary>

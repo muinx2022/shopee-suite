@@ -1,0 +1,52 @@
+@* Khối PHÂN TRANG của lưới sản phẩm — dùng chung trang /data (AllData) và lưới per-shop (ProductGridPanel).
+   Render THẲNG vào <div class="bar"> của trang gọi (component không tự bọc thẻ nào) → markup y hệt bản cũ.
+   KHÔNG giữ state riêng (lưới per-shop nằm trong workspace tick 2s — bẫy tick-clobber): mọi thứ đọc từ Engine
+   truyền vào; đổi trang/cỡ trang gọi engine rồi bắn OnViewChanged để trang cha ghi URL (/data) hoặc báo Fleet. *@
+
+<button class="btn sm" disabled="@(Engine.Page <= 1 || Engine.Busy)" @onclick="() => GoPage(1)" title="Trang đầu">«</button>
+<button class="btn sm" disabled="@(Engine.Page <= 1 || Engine.Busy)" @onclick="() => GoPage(Engine.Page - 1)">‹</button>
+<span class="action">trang
+    <input type="number" class="ci" style="width:64px" min="1" max="@Engine.PageCount" value="@Engine.Page" @onchange="OnPageInput" disabled="@Engine.Busy" />
+    / @PageTail</span>
+<button class="btn sm" disabled="@(Engine.Page >= Engine.PageCount || Engine.Busy)" @onclick="() => GoPage(Engine.Page + 1)">›</button>
+<button class="btn sm" disabled="@(Engine.Page >= Engine.PageCount || Engine.Busy)" @onclick="() => GoPage(Engine.PageCount)" title="Trang cuối">»</button>
+<span class="action" style="margin-left:8px">dòng/trang</span>
+<select value="@Engine.PageSize" @onchange="OnPageSizeChange" disabled="@Engine.Busy" style="width:74px">
+    @foreach (var sz in ProductGridEngine.PageSizes)
+    {
+        <option value="@sz">@sz</option>
+    }
+</select>
+
+@code {
+    [Parameter, EditorRequired] public ProductGridEngine Engine { get; set; } = default!;
+
+    /// <summary>Trang /data khoe thêm tổng số dòng cạnh số trang; lưới per-shop đã có ô đếm riêng trên thanh tìm.</summary>
+    [Parameter] public bool ShowTotal { get; set; }
+
+    /// <summary>Bắn khi user ĐỔI trang / ĐỔI cỡ trang → cha ghi URL (/data) hoặc báo Fleet (lưới per-shop).</summary>
+    [Parameter] public EventCallback OnViewChanged { get; set; }
+
+    private string PageTail => ShowTotal
+        ? $"{Engine.PageCount} · {Engine.Total.ToString("N0")} dòng"
+        : Engine.PageCount.ToString();
+
+    private async Task GoPage(int p)
+    {
+        await Engine.GoPageAsync(p);
+        await OnViewChanged.InvokeAsync();
+    }
+
+    // Ô nhập số trang (Enter/blur) → nhảy tới trang đó (GoPage tự kẹp [1..PageCount]).
+    private async Task OnPageInput(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out var p)) await GoPage(p);
+    }
+
+    // Đổi số dòng/trang → engine về trang 1, bỏ chọn, nạp lại (giá trị ngoài PageSizes bị engine bỏ qua).
+    private async Task OnPageSizeChange(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out var sz)) await Engine.SetPageSizeAsync(sz);
+        await OnViewChanged.InvokeAsync();
+    }
+}
