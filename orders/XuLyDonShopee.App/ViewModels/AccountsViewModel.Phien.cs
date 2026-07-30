@@ -368,13 +368,6 @@ public partial class AccountsViewModel
         }
     }
 
-    /// <summary>
-    /// Một phiên nền vừa lưu cookie vào DB cho <paramref name="accountId"/> — marshal về UI thread để dựng
-    /// lại danh sách (ObservableCollection chỉ được đụng trên UI thread) và cập nhật form nếu đang mở đúng
-    /// tài khoản đó.
-    /// </summary>
-    private void OnSessionCookieSaved(long accountId) => RunOnUi(() => RefreshAfterCookieSaved(accountId));
-
     /// <summary>Đổ trạng thái/số đơn của phiên theo tài khoản ĐANG CHỌN vào ô hiển thị; cập nhật nút mở/dừng.</summary>
     private void UpdateSelectedSessionStatus()
     {
@@ -400,39 +393,6 @@ public partial class AccountsViewModel
         return n > 0
             ? $"Chờ Lấy Hàng: {n} đơn — vẫn theo dõi mỗi 30'."
             : "Chờ Lấy Hàng: 0 — kiểm lại sau 30'.";
-    }
-
-    /// <summary>
-    /// Sau khi một phiên nền đã ghi cookie vào DB cho <paramref name="accountId"/>, CẬP NHẬT TẠI CHỖ — KHÔNG
-    /// dựng lại cả danh sách. Danh sách không hiển thị cookie nên không cần rebuild; rebuild ở đây (sự kiện
-    /// <c>CookieSaved</c> bắn liên tục khi nhiều phiên đăng nhập + theo dõi 30') sẽ xóa tick người dùng và
-    /// đảo thứ tự "nổi lên đầu". Chỉ cần: (1) cập nhật cookie/UpdatedAt lên đúng instance <see cref="Account"/>
-    /// đang có trong <c>_all</c> (row bọc CHÍNH instance này → Save sau không ghi đè cookie về null), (2) nếu
-    /// đang MỞ đúng tài khoản đó thì cập nhật form. Chạy trên UI thread (gọi từ <see cref="RunOnUi"/>).
-    /// </summary>
-    private void RefreshAfterCookieSaved(long accountId)
-    {
-        var fresh = _services.Accounts.GetById(accountId);
-        if (fresh is null)
-        {
-            return; // tài khoản đã bị xóa — không có gì để cập nhật
-        }
-
-        // Cập nhật cookie/UpdatedAt trên instance đang có trong _all (row bọc chính instance này) → GIỮ tick
-        // + thứ tự (không đụng ObservableCollection).
-        var cached = _all.FirstOrDefault(a => a.Id == accountId);
-        if (cached is not null)
-        {
-            cached.Cookie = fresh.Cookie;
-            cached.UpdatedAt = fresh.UpdatedAt;
-        }
-
-        // Đang mở đúng tài khoản đó → cập nhật form (EditCookie đổi → HasCookie/CookieSizeText tự cập nhật).
-        if (_editingId == accountId)
-        {
-            EditCookie = fresh.Cookie ?? string.Empty;
-            UpdatedAtText = FormatDate(fresh.UpdatedAt);
-        }
     }
 
     /// <summary>Kết quả của thao tác lưu cookie đã bắt được vào tài khoản.</summary>

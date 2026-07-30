@@ -34,12 +34,10 @@ public class AccountRowViewModelTests
         public Process? BraveProcess => null;
 
         public event Action? Changed;
-        public event Action<long>? CookieSaved;
 
         public Task StartAsync()
         {
             Changed?.Invoke();
-            CookieSaved?.Invoke(AccountId);
             return Task.CompletedTask;
         }
 

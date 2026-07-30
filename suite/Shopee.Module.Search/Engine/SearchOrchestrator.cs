@@ -69,12 +69,6 @@ public sealed class SearchOrchestrator
         });
     }
 
-    public async Task StopAsync()
-    {
-        _searchActive = false;
-        await _ws.SendAsync(new { action = "stop" });
-    }
-
     private void OnMessage(JsonDocument doc)
     {
         var root = doc.RootElement;

@@ -379,7 +379,7 @@ public class AccountsViewModelTests
             r.IsSelected = true;
         }
 
-        // Một phiên lưu cookie xong → dựng lại danh sách (mô phỏng luồng CookieSaved gây rebuild).
+        // Lưu cookie bắt được xong → dựng lại danh sách (mô phỏng luồng lưu cookie gây rebuild).
         var result = vm.SaveCapturedCookie(aId, SampleCookieJson());
         Assert.Equal(AccountsViewModel.SaveCookieResult.Saved, result);
 

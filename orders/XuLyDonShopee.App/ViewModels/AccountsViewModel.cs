@@ -39,7 +39,6 @@ public partial class AccountsViewModel : ViewModelBase, IDisposable
         // Nghe các phiên chạy nền để cập nhật nút/hiển thị theo TỪNG tài khoản (không còn cờ IsBusy toàn cục).
         // Sự kiện có thể đến từ thread nền → handler marshal về UI thread trước khi đụng UI (xem RunOnUi).
         _services.Sessions.Changed += OnSessionsChanged;
-        _services.Sessions.CookieSaved += OnSessionCookieSaved;
 
         // Panel log hiển thị theo TỪNG tài khoản: ActivityLog giữ buffer RIÊNG mỗi nguồn và báo về đã GOM NHÓM
         // (tối đa 1 lần/250ms cho mỗi nguồn), LUÔN trên UI thread → handler chỉ việc dựng lại chuỗi MỘT lần,

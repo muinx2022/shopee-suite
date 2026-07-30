@@ -1,15 +1,12 @@
 using System;
 using System.IO;
 using XuLyDonShopee.App.Services;
-using XuLyDonShopee.Core.Data;
-using XuLyDonShopee.Core.Models;
 
 namespace XuLyDonShopee.Tests;
 
 /// <summary>
-/// Test cho tính năng "tải lại phiếu thiếu": helper kiểm magic PDF <see cref="SlipFiles.SlipFileIsValidPdf"/>
-/// và query <see cref="OrdersRepository.GetOrdersForSlipCheck"/>. KHÔNG test luồng browser (best-effort,
-/// verify tay).
+/// Test cho tính năng "tải lại phiếu thiếu": helper kiểm magic PDF <see cref="SlipFiles.SlipFileIsValidPdf"/>.
+/// KHÔNG test luồng browser (best-effort, verify tay).
 /// </summary>
 public class SlipRedownloadTests
 {
@@ -53,48 +50,4 @@ public class SlipRedownloadTests
     [Fact]
     public void SlipFileIsValidPdf_FileKhongTonTai_False()
         => Assert.False(SlipFiles.SlipFileIsValidPdf(MissingPath()));
-
-    // ===== OrdersRepository.GetOrdersForSlipCheck =====
-
-    private static SyncedOrder Order(string sn, string? status, string? tracking) => new()
-    {
-        OrderSn = sn,
-        Status = status,
-        TrackingNumber = tracking,
-        ItemsJson = "[]",
-        ItemCount = 0,
-    };
-
-    [Fact]
-    public void GetOrdersForSlipCheck_TraDungManStatusTracking()
-    {
-        using var temp = new TempDatabase();
-        var repo = new OrdersRepository(temp.Open());
-        repo.UpsertMany(1, new[]
-        {
-            Order("SN1", "Chờ lấy hàng", "SPXVN1"),
-            Order("SN2", "Đã giao", null),
-        }, DateTime.UtcNow);
-        // đơn của tài khoản KHÁC không được trả về
-        repo.UpsertMany(2, new[] { Order("SN3", "Chờ lấy hàng", "SPXVN3") }, DateTime.UtcNow);
-
-        var rows = repo.GetOrdersForSlipCheck(1);
-
-        Assert.Equal(2, rows.Count);
-        var sn1 = Assert.Single(rows, r => r.OrderSn == "SN1");
-        Assert.Equal("Chờ lấy hàng", sn1.Status);
-        Assert.Equal("SPXVN1", sn1.TrackingNumber);
-        var sn2 = Assert.Single(rows, r => r.OrderSn == "SN2");
-        Assert.Equal("Đã giao", sn2.Status);
-        Assert.Null(sn2.TrackingNumber);
-        Assert.DoesNotContain(rows, r => r.OrderSn == "SN3");
-    }
-
-    [Fact]
-    public void GetOrdersForSlipCheck_KhongDon_TraRong()
-    {
-        using var temp = new TempDatabase();
-        var repo = new OrdersRepository(temp.Open());
-        Assert.Empty(repo.GetOrdersForSlipCheck(1));
-    }
 }

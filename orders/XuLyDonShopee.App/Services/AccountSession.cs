@@ -21,7 +21,7 @@ namespace XuLyDonShopee.App.Services;
 /// trình duyệt → mở → tự đăng nhập kiểu người → vòng poll bắt cookie + theo dõi đơn theo chu kỳ cấu hình → bắt-cookie-chốt),
 /// CHỈ khác: <b>bỏ mọi hộp thoại modal</b> (15 phiên = 15 modal) → thay bằng trạng thái/log per-account; và
 /// việc cập nhật danh sách UI được <b>marshal về UI thread</b> ở ViewModel qua sự kiện (session chỉ ghi DB
-/// trên thread nền — SQLite an toàn — rồi phát <see cref="CookieSaved"/>).
+/// trên thread nền — SQLite an toàn — rồi phát <see cref="Changed"/>).
 /// </para>
 /// </summary>
 public partial class AccountSession : ObservableObject, IAccountSession
@@ -125,7 +125,6 @@ public partial class AccountSession : ObservableObject, IAccountSession
     public bool IsShopLoopRunning => false;
 
     public event Action? Changed;
-    public event Action<long>? CookieSaved;
 
     public Task StartAsync()
     {
@@ -572,30 +571,5 @@ public partial class AccountSession : ObservableObject, IAccountSession
         StatusText = message;
         State = SessionState.Error;
         _services.Log.Append(_logLabel, "LỖI: " + message);
-    }
-
-    /// <summary>
-    /// Ghi cookie JSON vào ĐÚNG tài khoản của phiên (thread nền — SQLite an toàn) rồi phát
-    /// <see cref="CookieSaved"/> để VM làm mới danh sách trên UI thread. Trả true nếu đã ghi.
-    /// </summary>
-    private bool TrySaveCookie(string cookieJson)
-    {
-        if (CookieJson.Deserialize(cookieJson).Count == 0)
-        {
-            return false; // JSON không chứa cookie nào
-        }
-
-        var acc = _services.Accounts.GetById(_accountId);
-        if (acc is null)
-        {
-            return false; // tài khoản đã bị xóa
-        }
-
-        acc.Cookie = cookieJson;
-        _services.Accounts.Update(acc);
-
-        // VM nghe sự kiện này để dựng lại danh sách (instance trong Accounts có cookie mới) trên UI thread.
-        CookieSaved?.Invoke(_accountId);
-        return true;
     }
 }

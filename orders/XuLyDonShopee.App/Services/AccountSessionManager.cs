@@ -41,9 +41,6 @@ public class AccountSessionManager
     /// <summary>Phát khi bất kỳ phiên nào đổi trạng thái — VM/UI nghe để cập nhật (marshal về UI thread).</summary>
     public event Action? Changed;
 
-    /// <summary>Chuyển tiếp sự kiện "đã lưu cookie" của các phiên (kèm accountId) cho VM làm mới danh sách.</summary>
-    public event Action<long>? CookieSaved;
-
     /// <summary>Ctor thật: tạo <see cref="AccountSession"/> chạy qua cầu nối extension (không dùng proxy).</summary>
     public AccountSessionManager(AppServices services)
     {
@@ -109,7 +106,6 @@ public class AccountSessionManager
         }
         var created = _factory(id);
         created.Changed += () => OnSessionChanged(created);
-        created.CookieSaved += accId => CookieSaved?.Invoke(accId);
         _sessions[id] = created;
         return created;
     }

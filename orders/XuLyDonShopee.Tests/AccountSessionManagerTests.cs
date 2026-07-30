@@ -31,7 +31,6 @@ public class AccountSessionManagerTests
         public int StopCalls { get; private set; }
 
         public event Action? Changed;
-        public event Action<long>? CookieSaved;
 
         public StubSession(long id) => AccountId = id;
 
@@ -74,9 +73,6 @@ public class AccountSessionManagerTests
 
         /// <summary>Mô phỏng phiên phát lại sự kiện Changed (vd event Stopped TRỄ) mà không đổi State.</summary>
         public void RaiseChanged() => Changed?.Invoke();
-
-        // Không dùng trong test nhưng cần để tránh cảnh báo "event không được dùng".
-        internal void RaiseCookieSaved() => CookieSaved?.Invoke(AccountId);
     }
 
     [Fact]

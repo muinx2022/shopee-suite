@@ -77,9 +77,6 @@ public interface IAccountSession
     /// <summary>Phát khi State/StatusText/ToShipCount/LastError đổi — manager/VM nghe để cập nhật UI.</summary>
     event Action? Changed;
 
-    /// <summary>Phát khi vừa lưu cookie vào DB cho tài khoản (id) — VM nghe để làm mới danh sách trên UI thread.</summary>
-    event Action<long>? CookieSaved;
-
     /// <summary>Bắt đầu phiên. Nếu đang chuẩn bị/đang chạy thì bỏ qua (idempotent — không mở trùng).</summary>
     Task StartAsync();
 
