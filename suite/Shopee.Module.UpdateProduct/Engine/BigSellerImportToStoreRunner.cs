@@ -4,6 +4,7 @@ using Microsoft.Playwright;
 using Shopee.Core.Ai;
 using Shopee.Core.BigSeller;
 using Shopee.Core.Browser;
+using Shopee.Core.Cdp;
 using Shopee.Core.Coordination;
 using Shopee.Core.Progress;
 
@@ -242,7 +243,7 @@ internal sealed class BigSellerImportToStoreRunner : BigSellerBraveRunner
                     rowCount = await GetBodyRowCountAsync(page);
                     checkedIds = await CheckMatchingRowsOnPageAsync(page);
                 }
-                catch (Exception ex) when (IsTransientNavigationError(ex))
+                catch (Exception ex) when (CdpErrors.IsTransientNavigationError(ex))
                 {
                     _log($"Trang đang reload, thử lại: {ex.Message}");
                     await DelayAsync(3000, cancellationToken);
@@ -284,7 +285,7 @@ internal sealed class BigSellerImportToStoreRunner : BigSellerBraveRunner
                 catch (OperationCanceledException) { throw; }
                 catch (Exception ex)
                 {
-                    if (committed && IsTransientNavigationError(ex))
+                    if (committed && CdpErrors.IsTransientNavigationError(ex))
                     {
                         importCount++;
                         _log($"Import lô đã gửi (#{importCount}) — trang điều hướng làm mất context.");
@@ -368,15 +369,10 @@ internal sealed class BigSellerImportToStoreRunner : BigSellerBraveRunner
             try { await _browser.DisposeAsync(); } catch { }
             _browser = null;
         }
-        if (_braveProcess is not null)
-        {
-            try { if (!_braveProcess.HasExited) _braveProcess.Kill(entireProcessTree: true); } catch { }
-            try { _braveProcess.Dispose(); } catch { }
-            _braveProcess = null;
-        }
-        // Brave fork browser thật rồi stub thoát → Kill no-op, browser cũ giữ profile lock. Phải diệt
-        // orphan theo --user-data-dir TRƯỚC khi mở lại cùng profile, kẻo instance mới đụng lock/port cũ.
-        try { BraveProcessReaper.KillByUserDataDir(_settings.ProfileDir, _log); } catch { }
+        // Kịch bản kill + reap dùng chung (Core). Brave fork browser thật rồi stub thoát → Kill no-op, browser
+        // cũ giữ profile lock: phải diệt orphan theo --user-data-dir TRƯỚC khi mở lại cùng profile, kẻo
+        // instance mới đụng lock/port cũ.
+        BraveTeardown.KillAndReap(ref _braveProcess, _settings.ProfileDir, new BraveTeardownOptions { Log = _log });
 
         StartBrave();
         _log($"  Đã khởi động lại Brave PID={_braveProcess?.Id.ToString() ?? "unknown"}, chờ CDP port {_settings.DebugPort}…");
@@ -449,14 +445,6 @@ internal sealed class BigSellerImportToStoreRunner : BigSellerBraveRunner
 
         _log("Cảnh báo: Không chọn được tab Đã nhận.");
         return false;
-    }
-
-    private static bool IsTransientNavigationError(Exception ex)
-    {
-        var message = ex.Message ?? "";
-        return message.Contains("Execution context was destroyed", StringComparison.OrdinalIgnoreCase) ||
-               message.Contains("most likely because of a navigation", StringComparison.OrdinalIgnoreCase) ||
-               message.Contains("Cannot find context with specified id", StringComparison.OrdinalIgnoreCase);
     }
 
     // onCommitting: bắn NGAY TRƯỚC khi bấm nút "Import to Stores" (mốc commit) — caller dùng để biết

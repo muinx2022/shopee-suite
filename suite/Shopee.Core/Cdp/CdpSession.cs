@@ -78,7 +78,7 @@ public sealed class CdpSession : IAsyncDisposable
             ct.ThrowIfCancellationRequested();
             try
             {
-                var json = await GetDirectStringAsync($"http://127.0.0.1:{cdpPort}/json/version", ct);
+                var json = await GetDirectStringAsync(CdpEndpoints.Version(cdpPort), ct);
                 using var doc = JsonDocument.Parse(json);
                 if (doc.RootElement.TryGetProperty("webSocketDebuggerUrl", out var u))
                 {
@@ -100,7 +100,7 @@ public sealed class CdpSession : IAsyncDisposable
     {
         try
         {
-            var json = await GetDirectStringAsync($"http://127.0.0.1:{cdpPort}/json/version", ct);
+            var json = await GetDirectStringAsync(CdpEndpoints.Version(cdpPort), ct);
             return !string.IsNullOrWhiteSpace(json);
         }
         catch { return false; }
@@ -117,9 +117,9 @@ public sealed class CdpSession : IAsyncDisposable
             ct.ThrowIfCancellationRequested();
             try
             {
-                // 127.0.0.1 (KHÔNG dùng "localhost") — Brave/Chromium chỉ nghe CDP trên IPv4
-                // 127.0.0.1; "localhost" trên Windows phân giải ::1 (IPv6) trước → timeout/đứt.
-                var json = await GetDirectStringAsync($"http://127.0.0.1:{cdpPort}/json", ct);
+                // URL dựng qua CdpEndpoints — nơi giữ quy tắc "luôn 127.0.0.1, KHÔNG localhost"
+                // (Brave/Chromium chỉ nghe CDP trên IPv4; "localhost" trên Windows ra ::1 trước → timeout/đứt).
+                var json = await GetDirectStringAsync(CdpEndpoints.Targets(cdpPort), ct);
                 using var doc = JsonDocument.Parse(json);
                 foreach (var target in doc.RootElement.EnumerateArray())
                 {

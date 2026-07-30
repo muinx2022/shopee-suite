@@ -204,15 +204,10 @@ internal abstract class BigSellerBraveRunner : IAsyncDisposable
         }
 
         // KILL Brave NGAY (đóng profile + giải phóng RAM) — KHÔNG phụ thuộc dispose browser/playwright (có thể treo).
-        if (_braveProcess is not null)
-        {
-            try { if (!_braveProcess.HasExited) _braveProcess.Kill(entireProcessTree: true); } catch { }
-            try { _braveProcess.Dispose(); } catch { }
-            _braveProcess = null;
-        }
-        // Fallback: Brave hay fork browser thật rồi để stub thoát ngay → _braveProcess.HasExited=true,
-        // Kill ở trên no-op, browser thật thành orphan (giữ profile lock + RAM). Diệt theo --user-data-dir.
-        try { BraveProcessReaper.KillByUserDataDir(_settings.ProfileDir, _log); } catch { }
+        // Kèm fallback theo --user-data-dir: Brave hay fork browser thật rồi để stub thoát ngay
+        // (_braveProcess.HasExited=true → Kill no-op) nên browser thật thành orphan giữ profile lock + RAM.
+        // Kịch bản kill + reap dùng chung (Core); bản này KHÔNG đóng êm, KHÔNG chờ thoát (dispose phải nhanh).
+        BraveTeardown.KillAndReap(ref _braveProcess, _settings.ProfileDir, new BraveTeardownOptions { Log = _log });
 
         // Gỡ đăng ký SAU khi đã giết → còn sót tiến trình nào thì lần sweep kế dọn nốt.
         BraveFleet.UnregisterActiveProfile(_settings.ProfileDir);

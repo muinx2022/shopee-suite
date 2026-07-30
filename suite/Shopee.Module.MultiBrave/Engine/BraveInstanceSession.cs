@@ -860,38 +860,15 @@ internal sealed class BraveInstanceSession : IDisposable
         // Brave sắp chết → đóng kết nối CDP DÙNG CHUNG của port (WS cũ chết theo); lần dùng sau hub tự
         // nối lại tới Brave mới. Best-effort, không chặn.
         if (_cdpPort > 0) PortCdpHub.For(_cdpPort).ResetSoon();
-        // Giết tiến trình stub mà launcher giữ tham chiếu (nếu còn).
-        if (_braveProcess is not null)
-        {
-            try
-            {
-                if (!_braveProcess.HasExited)
-                {
-                    TryCloseBraveGracefully(maxWaitMs);
-                    if (!_braveProcess.HasExited)
-                    {
-                        _braveProcess.Kill(entireProcessTree: true);
-                        if (maxWaitMs > 0)
-                            _braveProcess.WaitForExit(maxWaitMs);
-                    }
-                }
-            }
-            catch { }
-            finally
-            {
-                _braveProcess.Dispose();
-                _braveProcess = null;
-            }
-        }
 
-        // Brave hay fork rồi thoát stub → browser thật + GPU/renderer/utility chạy ở PID khác,
-        // Kill(tree) ở trên bỏ sót. Quét & giết tận gốc theo --user-data-dir duy nhất của profile
-        // để không tích tụ zombie qua mỗi vòng xoay (nguyên nhân đơ máy sau vài vòng).
-        try
+        // Kịch bản kill + reap dùng chung (Core). Riêng bản này: thử đóng ÊM trước (giữ phiên/profile sạch)
+        // rồi mới Kill, và CHỜ tiến trình thoát trước khi reaper quét.
+        BraveTeardown.KillAndReap(ref _braveProcess, _profileRoot?.FullName, new BraveTeardownOptions
         {
-            BraveProcessReaper.KillByUserDataDir(_profileRoot?.FullName, Log);
-        }
-        catch { }
+            GracefulClose = () => TryCloseBraveGracefully(maxWaitMs),
+            WaitForExitMs = maxWaitMs,
+            Log = Log,
+        });
     }
 
     private void TryCloseBraveGracefully(int maxWaitMs)
@@ -916,7 +893,7 @@ internal sealed class BraveInstanceSession : IDisposable
             using var browser = new ClientWebSocket();
             browser.ConnectAsync(new Uri(GetBrowserWebSocketUrlAsync().GetAwaiter().GetResult()), CancellationToken.None)
                 .GetAwaiter().GetResult();
-            SendCdpAsync(browser, 501, "Browser.close", null).GetAwaiter().GetResult();
+            CdpClient.SendAsync(browser, 501, "Browser.close", null).GetAwaiter().GetResult();
             _braveProcess.WaitForExit(waitMs);
         }
         catch
@@ -958,7 +935,7 @@ internal sealed class BraveInstanceSession : IDisposable
                 using var browser = new ClientWebSocket();
                 var wsUrl = await GetBrowserWebSocketUrlAsync().ConfigureAwait(false);
                 await browser.ConnectAsync(new Uri(wsUrl), CancellationToken.None).ConfigureAwait(false);
-                await SendCdpAsync(browser, 502, "Browser.close", null).ConfigureAwait(false);
+                await CdpClient.SendAsync(browser, 502, "Browser.close", null).ConfigureAwait(false);
             }
             catch { /* port đang đóng dở; vòng lặp sẽ kiểm tra lại */ }
             await Task.Delay(400).ConfigureAwait(false);
@@ -1437,23 +1414,14 @@ internal sealed class BraveInstanceSession : IDisposable
     {
         try
         {
-            using var response = await AppServices.DirectHttp.GetAsync(
-                $"http://127.0.0.1:{_cdpPort}/json/list",
-                CancellationToken.None).ConfigureAwait(false);
-            if (!response.IsSuccessStatusCode) return false;
-
-            using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync().ConfigureAwait(false));
-            foreach (var item in doc.RootElement.EnumerateArray())
+            foreach (var target in await CdpClient.ListTargetsAsync(_cdpPort).ConfigureAwait(false))
             {
-                var type = item.TryGetProperty("type", out var t) ? t.GetString() ?? "" : "";
-                if (!string.Equals(type, "page", StringComparison.OrdinalIgnoreCase))
+                if (!target.IsPage)
                     continue;
 
-                var url = item.TryGetProperty("url", out var u) ? u.GetString() ?? "" : "";
-                var title = item.TryGetProperty("title", out var ti) ? ti.GetString() ?? "" : "";
-                if (url.StartsWith("chrome-error://", StringComparison.OrdinalIgnoreCase) ||
-                    title.Contains("No internet", StringComparison.OrdinalIgnoreCase) ||
-                    title.Contains("ERR_PROXY_CONNECTION_FAILED", StringComparison.OrdinalIgnoreCase))
+                if (target.Url.StartsWith("chrome-error://", StringComparison.OrdinalIgnoreCase) ||
+                    target.Title.Contains("No internet", StringComparison.OrdinalIgnoreCase) ||
+                    target.Title.Contains("ERR_PROXY_CONNECTION_FAILED", StringComparison.OrdinalIgnoreCase))
                     return true;
             }
         }
@@ -1646,7 +1614,7 @@ internal sealed class BraveInstanceSession : IDisposable
 
         using var browser = new ClientWebSocket();
         await browser.ConnectAsync(new Uri(await GetBrowserWebSocketUrlAsync().ConfigureAwait(false)), CancellationToken.None);
-        await SendCdpAsync(browser, 716, "Storage.setCookies", new { cookies = payloads });
+        await CdpClient.SendAsync(browser, 716, "Storage.setCookies", new { cookies = payloads });
         return payloads.Length;
     }
 
@@ -1656,7 +1624,7 @@ internal sealed class BraveInstanceSession : IDisposable
 
         using var browser = new ClientWebSocket();
         await browser.ConnectAsync(new Uri(await GetBrowserWebSocketUrlAsync().ConfigureAwait(false)), CancellationToken.None);
-        await SendCdpAsync(browser, 710, "Storage.setCookies", new { cookies = new[] { payload } });
+        await CdpClient.SendAsync(browser, 710, "Storage.setCookies", new { cookies = new[] { payload } });
     }
 
     private async Task OpenShopeeLoginPageAsync()
@@ -1667,7 +1635,7 @@ internal sealed class BraveInstanceSession : IDisposable
 
         using var page = new ClientWebSocket();
         await page.ConnectAsync(new Uri(wsUrl), CancellationToken.None).ConfigureAwait(false);
-        await SendCdpAsync(page, 721, "Page.navigate", new { url = ShopeeAuth.LoginUrl });
+        await CdpClient.SendAsync(page, 721, "Page.navigate", new { url = ShopeeAuth.LoginUrl });
     }
 
     private async Task FillShopeeLoginFormAsync(ShopeeLoginLine login)
@@ -1740,9 +1708,9 @@ internal sealed class BraveInstanceSession : IDisposable
 
                 using var page = new ClientWebSocket();
                 await page.ConnectAsync(new Uri(wsUrl), CancellationToken.None);
-                await SendCdpAsync(page, 730, "Runtime.enable", null);
+                await CdpClient.SendAsync(page, 730, "Runtime.enable", null);
                 await Task.Delay(500).ConfigureAwait(false);
-                await SendCdpAsync(page, 731, "Runtime.evaluate", new
+                await CdpClient.SendAsync(page, 731, "Runtime.evaluate", new
                 {
                     expression,
                     awaitPromise = true,
@@ -1750,11 +1718,7 @@ internal sealed class BraveInstanceSession : IDisposable
                 });
                 return;
             }
-            catch (Exception ex) when (
-                ex.Message.Contains("Execution context was destroyed", StringComparison.OrdinalIgnoreCase) ||
-                ex.Message.Contains("Cannot find context", StringComparison.OrdinalIgnoreCase) ||
-                ex.Message.Contains("Target closed", StringComparison.OrdinalIgnoreCase) ||
-                ex.Message.Contains("WebSocket", StringComparison.OrdinalIgnoreCase))
+            catch (Exception ex) when (CdpErrors.IsTransientNavigationError(ex))
             {
                 lastError = ex;
                 await Task.Delay(900).ConfigureAwait(false);
@@ -1769,8 +1733,6 @@ internal sealed class BraveInstanceSession : IDisposable
         _cdpClient.GetBrowserWebSocketUrlAsync();
     private Task<string?> FindPageWebSocketUrlAsync(Func<string, bool> urlMatches) =>
         _cdpClient.FindPageWebSocketUrlAsync(urlMatches);
-    private static Task<JsonElement> SendCdpAsync(ClientWebSocket socket, int id, string method, object? @params) =>
-        CdpClient.SendAsync(socket, id, method, @params);
     private Task<List<Dictionary<string, object?>>> GetAllCookiesFromBraveAsync() =>
         _cookieService.GetShopeeCookiesAsync();
 

@@ -83,8 +83,8 @@ public sealed class AppSettingsService
                 // khoá profile (delete-pending) buông trước khi thử lại CreateDirectory.
                 try
                 {
-                    if (Shopee.Core.Browser.BraveProcessReaper.KillByUserDataDir(dir, includeCrashpadOrphans: true) > 0)
-                        Thread.Sleep(400);
+                    Shopee.Core.Browser.BraveTeardown.Reap(
+                        dir, includeCrashpadOrphans: true, sleepAfterReapMs: 400);
                 }
                 catch { }
             }

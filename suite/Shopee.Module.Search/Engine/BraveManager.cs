@@ -78,72 +78,36 @@ public sealed class BraveManager(AppSettingsService appSettings)
     {
         if (_cdpPort <= 0) return;
 
-        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
-        JsonDocument? targetsDoc = null;
-
-        try
+        // Chờ Brave dựng xong target đầu tiên (tối đa 6s). Timeout 3s/lần đọc để không kẹt cả 15s mặc định
+        // của HttpClient chung khi CDP câm; URL 127.0.0.1 do CdpEndpoints dựng.
+        IReadOnlyList<CdpTarget> targets = [];
+        var deadline = Environment.TickCount64 + 6_000;
+        while (Environment.TickCount64 < deadline)
         {
-            var deadline = Environment.TickCount64 + 6_000;
-            while (Environment.TickCount64 < deadline)
-            {
-                ct.ThrowIfCancellationRequested();
-                try
-                {
-                    // 127.0.0.1 (KHÔNG "localhost") — Windows phân giải ::1 IPv6 trước → CDP chậm/timeout.
-                    var json = await http.GetStringAsync($"http://127.0.0.1:{_cdpPort}/json/list", ct);
-                    targetsDoc = JsonDocument.Parse(json);
-                    if (targetsDoc.RootElement.GetArrayLength() > 0) break;
-                }
-                catch
-                {
-                    targetsDoc?.Dispose();
-                    targetsDoc = null;
-                    await Task.Delay(300, ct);
-                }
-            }
-
-            if (targetsDoc is null) return;
-
-            var pageTargets = targetsDoc.RootElement.EnumerateArray()
-                .Where(t => GetJsonString(t, "type") == "page")
-                .Select(t => new
-                {
-                    Id = GetJsonString(t, "id"),
-                    Url = GetJsonString(t, "url"),
-                })
-                .Where(t => !string.IsNullOrWhiteSpace(t.Id))
-                .ToList();
-
-            if (pageTargets.Count <= 1) return;
-
-            var keep =
-                pageTargets.FirstOrDefault(t => t.Url.Contains($"_ss_ws={wsPort}", StringComparison.OrdinalIgnoreCase))
-                ?? pageTargets.FirstOrDefault(t =>
-                    t.Url.Contains("_ss_ws=", StringComparison.OrdinalIgnoreCase))
-                ?? pageTargets.FirstOrDefault(t =>
-                    t.Url.Contains("shopee.vn", StringComparison.OrdinalIgnoreCase)
-                    && !t.Url.Contains("shopee.vn/api/", StringComparison.OrdinalIgnoreCase))
-                ?? pageTargets[0];
-
-            foreach (var target in pageTargets.Where(t => t.Id != keep.Id))
-            {
-                try
-                {
-                    await http.GetStringAsync(
-                        $"http://127.0.0.1:{_cdpPort}/json/close/{Uri.EscapeDataString(target.Id)}",
-                        ct);
-                }
-                catch { }
-            }
+            ct.ThrowIfCancellationRequested();
+            targets = await CdpClient.TryListTargetsAsync(_cdpPort, ct, timeoutMs: 3_000);
+            if (targets.Count > 0) break;
+            await Task.Delay(300, ct);
         }
-        finally
-        {
-            targetsDoc?.Dispose();
-        }
+
+        var pageTargets = targets
+            .Where(t => t.IsPage && !string.IsNullOrWhiteSpace(t.Id))
+            .ToList();
+
+        if (pageTargets.Count <= 1) return;
+
+        var keep =
+            pageTargets.FirstOrDefault(t => t.Url.Contains($"_ss_ws={wsPort}", StringComparison.OrdinalIgnoreCase))
+            ?? pageTargets.FirstOrDefault(t =>
+                t.Url.Contains("_ss_ws=", StringComparison.OrdinalIgnoreCase))
+            ?? pageTargets.FirstOrDefault(t =>
+                t.Url.Contains("shopee.vn", StringComparison.OrdinalIgnoreCase)
+                && !t.Url.Contains("shopee.vn/api/", StringComparison.OrdinalIgnoreCase))
+            ?? pageTargets[0];
+
+        foreach (var target in pageTargets.Where(t => t.Id != keep.Id))
+            await CdpClient.CloseTargetAsync(_cdpPort, target.Id, ct, timeoutMs: 3_000);
     }
-
-    private static string GetJsonString(JsonElement element, string propertyName) =>
-        element.TryGetProperty(propertyName, out var value) ? value.GetString() ?? "" : "";
 
     private static string? FindExecutableOnPath(string fileName)
     {
@@ -271,25 +235,16 @@ public sealed class BraveManager(AppSettingsService appSettings)
 
     public void Kill()
     {
-        try
-        {
-            if (_process is { HasExited: false })
-                _process.Kill(entireProcessTree: true);
-        }
-        catch { }
-
-        // Giải phóng handle tiến trình. Trước đây chỉ gán _process=null → mỗi lần relaunch (tab
-        // "Tìm theo file" relaunch MỖI link) rò một SafeProcessHandle → tích luỹ → góp phần đơ máy.
-        try { _process?.Dispose(); } catch { }
-
-        if (!string.IsNullOrWhiteSpace(_currentProfileDir))
-        {
-            // Giết ĐÚNG Brave của profile này theo giá trị --user-data-dir (khớp CHÍNH XÁC, không Contains →
-            // không giết nhầm acc_1 vs acc_10). Nếu có process bị giết, chờ ngắn cho khoá profile (delete-pending) buông.
-            if (Shopee.Core.Browser.BraveProcessReaper.KillByUserDataDir(
-                    _currentProfileDir, includeCrashpadOrphans: true) > 0)
-                Thread.Sleep(400);
-        }
+        // Kịch bản kill + reap dùng chung (Core): giết tiến trình đang giữ (kèm Dispose handle — trước đây chỉ
+        // gán _process=null nên mỗi lần relaunch rò một SafeProcessHandle), rồi giết ĐÚNG Brave của profile này
+        // theo giá trị --user-data-dir. Riêng bản Search: quét thêm crashpad mồ côi + chờ 400ms cho khoá profile
+        // (delete-pending) buông trước khi mở lại cùng profile.
+        Shopee.Core.Browser.BraveTeardown.KillAndReap(
+            ref _process, _currentProfileDir, new Shopee.Core.Browser.BraveTeardownOptions
+            {
+                IncludeCrashpadOrphans = true,
+                SleepAfterReapMs = 400,
+            });
 
         // The CDP port was reserved for this browser's lifetime; free it now that Brave is gone.
         if (_cdpPort > 0)
@@ -297,8 +252,6 @@ public sealed class BraveManager(AppSettingsService appSettings)
             Shopee.Core.Infrastructure.PortAllocator.Release(_cdpPort);
             _cdpPort = 0;
         }
-
-        _process = null;
     }
 }
 

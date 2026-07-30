@@ -242,7 +242,6 @@ public sealed class SearchSession : IAsyncDisposable
     private async Task WatchForVerifyAsync(int cdpPort, TaskCompletionSource<SearchRunOutcome> completion, CancellationToken ct)
     {
         if (cdpPort <= 0) return;
-        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
         var hits = 0;
         try
         {
@@ -252,12 +251,10 @@ public sealed class SearchSession : IAsyncDisposable
                 if (completion.Task.IsCompleted) return;
                 try
                 {
-                    var json = await http.GetStringAsync($"http://127.0.0.1:{cdpPort}/json/list", ct);
-                    using var doc = JsonDocument.Parse(json);
-                    var onVerify = doc.RootElement.EnumerateArray().Any(t =>
-                        t.TryGetProperty("type", out var ty) && ty.GetString() == "page" &&
-                        t.TryGetProperty("url", out var u) &&
-                        (u.GetString() ?? "").Contains("/verify/", StringComparison.OrdinalIgnoreCase));
+                    // Timeout 3s/lần dò (không để kẹt tới 15s mặc định của HttpClient chung).
+                    var targets = await CdpClient.ListTargetsAsync(cdpPort, ct, timeoutMs: 3_000);
+                    var onVerify = targets.Any(t =>
+                        t.IsPage && t.Url.Contains("/verify/", StringComparison.OrdinalIgnoreCase));
                     // Cần thấy ở 2 lần dò liên tiếp (~16s) để tránh redirect verify thoáng qua.
                     hits = onVerify ? hits + 1 : 0;
                     if (hits >= 2)

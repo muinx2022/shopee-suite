@@ -2,6 +2,7 @@ using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Shopee.Core.Cdp;
 using Shopee.Core.Coordination;
 using Shopee.Core.Infrastructure;
 
@@ -122,6 +123,14 @@ internal static class ExtensionRunnerAutomation
                         $"Brave không lắng nghe trên CDP port {cdpPort} quá {CdpUnreachableTimeoutSeconds}s. " +
                         "Nếu đã đóng Brave thì mở lại cùng profile để nối tiếp phiên.");
                 }
+
+                // Gia hạn deadline vòng ngoài (giống nhánh chờ-captcha bên dưới) tới đủ ngưỡng CDP-unreachable:
+                // deadline mặc định 90s NGẮN HƠN 120s nên trước đây hết 90s là ném lỗi CHUNG ("Đóng profile →
+                // Mở profile lại") — thông điệp riêng "mở lại cùng profile để nối tiếp phiên" ở trên KHÔNG bao
+                // giờ chạy được. Chỉ nới, không rút ngắn deadline đang dài hơn.
+                var cdpDeadline = cdpUnreachableSince.Value.AddSeconds(CdpUnreachableTimeoutSeconds);
+                if (deadline < cdpDeadline)
+                    deadline = cdpDeadline;
 
                 await Task.Delay(1000, cancellationToken);
                 continue;
@@ -259,7 +268,7 @@ internal static class ExtensionRunnerAutomation
             if (!forceNewPopup)
                 return;
 
-            await TryCloseCdpTargetAsync(cdpPort, existingPopupTarget, ct);
+            await CdpClient.CloseTargetAsync(cdpPort, existingPopupTarget, ct);
             await Task.Delay(350, ct);
         }
 
@@ -267,11 +276,11 @@ internal static class ExtensionRunnerAutomation
         try
         {
             browser = await ConnectBrowserWebSocketAsync(cdpPort, ct);
-            await SendCdpAsync(browser, 50, "Target.createTarget", new
+            await CdpClient.SendAsync(browser, 50, "Target.createTarget", new
             {
                 url = popupUrl,
                 background = true,
-            }, ct);
+            }, ct, receiveTimeoutMs: CdpReceiveTimeoutMs);
             // Kh�ng d�ng tab � d? popup l�m c?u n?i g?i SW cho c�c l?nh launcher.
         }
         catch { }
@@ -294,7 +303,7 @@ internal static class ExtensionRunnerAutomation
         try
         {
             using var response = await AppServices.DirectHttp.PutAsync(
-                $"http://127.0.0.1:{cdpPort}/json/new?{Uri.EscapeDataString(popupUrl)}",
+                CdpEndpoints.New(cdpPort, popupUrl),
                 content: null,
                 ct);
             if (response.IsSuccessStatusCode)
@@ -309,26 +318,18 @@ internal static class ExtensionRunnerAutomation
         ClientWebSocket? browser2 = null;
         try
         {
-            using var response = await AppServices.DirectHttp.GetAsync(
-                $"http://127.0.0.1:{cdpPort}/json/list", ct);
-            if (response.IsSuccessStatusCode)
+            foreach (var target in await CdpClient.TryListTargetsAsync(cdpPort, ct))
             {
-                using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
-                foreach (var item in doc.RootElement.EnumerateArray())
-                {
-                    var type = item.TryGetProperty("type", out var ty) ? ty.GetString() ?? "" : "";
-                    var url = item.TryGetProperty("url", out var u) ? u.GetString() ?? "" : "";
-                    var id = item.TryGetProperty("id", out var idEl) ? idEl.GetString() : null;
-                    if (!string.Equals(type, "service_worker", StringComparison.OrdinalIgnoreCase) ||
-                        !url.Contains(extensionId, StringComparison.OrdinalIgnoreCase) ||
-                        string.IsNullOrWhiteSpace(id))
-                        continue;
+                if (!target.IsServiceWorker ||
+                    !target.Url.Contains(extensionId, StringComparison.OrdinalIgnoreCase) ||
+                    string.IsNullOrWhiteSpace(target.Id))
+                    continue;
 
-                    browser2 = await ConnectBrowserWebSocketAsync(cdpPort, ct);
-                    await SendCdpAsync(browser2, 33, "Target.activateTarget", new { targetId = id }, ct);
-                    await Task.Delay(500, ct);
-                    return;
-                }
+                browser2 = await ConnectBrowserWebSocketAsync(cdpPort, ct);
+                await CdpClient.SendAsync(browser2, 33, "Target.activateTarget", new { targetId = target.Id }, ct,
+                    receiveTimeoutMs: CdpReceiveTimeoutMs);
+                await Task.Delay(500, ct);
+                return;
             }
         }
         catch { }
@@ -353,13 +354,14 @@ internal static class ExtensionRunnerAutomation
             {
                 using var socket = new ClientWebSocket();
                 await socket.ConnectAsync(new Uri(swWsUrl), ct);
-                await SendCdpAsync(socket, 1, "Runtime.enable", null, ct);
-                await SendCdpAsync(socket, 2, "Runtime.evaluate", new
+                await CdpClient.SendAsync(socket, 1, "Runtime.enable", null, ct,
+                    receiveTimeoutMs: CdpReceiveTimeoutMs);
+                await CdpClient.SendAsync(socket, 2, "Runtime.evaluate", new
                 {
                     expression,
                     awaitPromise = true,
                     returnByValue = true,
-                }, ct);
+                }, ct, receiveTimeoutMs: CdpReceiveTimeoutMs);
                 return;
             }
         }
@@ -377,13 +379,14 @@ internal static class ExtensionRunnerAutomation
 
             using var socket = new ClientWebSocket();
             await socket.ConnectAsync(new Uri(popupWsUrl), ct);
-            await SendCdpAsync(socket, 1, "Runtime.enable", null, ct);
-            await SendCdpAsync(socket, 2, "Runtime.evaluate", new
+            await CdpClient.SendAsync(socket, 1, "Runtime.enable", null, ct,
+                receiveTimeoutMs: CdpReceiveTimeoutMs);
+            await CdpClient.SendAsync(socket, 2, "Runtime.evaluate", new
             {
                 expression,
                 awaitPromise = true,
                 returnByValue = true,
-            }, ct);
+            }, ct, receiveTimeoutMs: CdpReceiveTimeoutMs);
         }
         catch
         {
@@ -513,30 +516,15 @@ internal static class ExtensionRunnerAutomation
     {
         var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        try
-        {
-            using var response = await AppServices.DirectHttp.GetAsync(
-                $"http://127.0.0.1:{cdpPort}/json/list", ct);
-            if (response.IsSuccessStatusCode)
-            {
-                using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
-                foreach (var item in doc.RootElement.EnumerateArray())
-                {
-                    var url = item.TryGetProperty("url", out var u) ? u.GetString() ?? "" : "";
-                    TryAddExtensionIdFromUrl(url, ids);
-                }
-            }
-        }
-        catch
-        {
-            // ignore
-        }
+        foreach (var target in await CdpClient.TryListTargetsAsync(cdpPort, ct))
+            TryAddExtensionIdFromUrl(target.Url, ids);
 
         ClientWebSocket? browser = null;
         try
         {
             browser = await ConnectBrowserWebSocketAsync(cdpPort, ct);
-            var targets = await SendCdpAsync(browser, 40, "Target.getTargets", new { }, ct);
+            var targets = await CdpClient.SendAsync(browser, 40, "Target.getTargets", new { }, ct,
+                receiveTimeoutMs: CdpReceiveTimeoutMs);
             if (targets.TryGetProperty("targetInfos", out var targetInfos))
             {
                 foreach (var target in targetInfos.EnumerateArray())
@@ -585,27 +573,12 @@ internal static class ExtensionRunnerAutomation
 
     private static async Task CloseAllExtensionPopupTabsAsync(int cdpPort, CancellationToken ct)
     {
-        try
+        foreach (var target in await CdpClient.TryListTargetsAsync(cdpPort, ct))
         {
-            using var response = await AppServices.DirectHttp.GetAsync(
-                $"http://127.0.0.1:{cdpPort}/json/list", ct);
-            if (!response.IsSuccessStatusCode)
-                return;
+            if (!target.Url.StartsWith("chrome-extension://", StringComparison.OrdinalIgnoreCase))
+                continue;
 
-            using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
-            foreach (var item in doc.RootElement.EnumerateArray())
-            {
-                var url = item.TryGetProperty("url", out var u) ? u.GetString() ?? "" : "";
-                if (!url.StartsWith("chrome-extension://", StringComparison.OrdinalIgnoreCase))
-                    continue;
-
-                if (item.TryGetProperty("id", out var idEl))
-                    await TryCloseCdpTargetAsync(cdpPort, idEl.GetString(), ct);
-            }
-        }
-        catch
-        {
-            // ignore
+            await CdpClient.CloseTargetAsync(cdpPort, target.Id, ct);
         }
     }
 
@@ -623,46 +596,14 @@ internal static class ExtensionRunnerAutomation
         if (runnerIds.Count == 0)
             return;
 
-        try
+        foreach (var target in await CdpClient.TryListTargetsAsync(cdpPort, ct))
         {
-            using var response = await AppServices.DirectHttp.GetAsync(
-                $"http://127.0.0.1:{cdpPort}/json/list", ct);
-            if (!response.IsSuccessStatusCode)
-                return;
+            if (!runnerIds.Any(id => target.Url.Equals(
+                    $"chrome-extension://{id}/popup.html",
+                    StringComparison.OrdinalIgnoreCase)))
+                continue;
 
-            using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
-            foreach (var item in doc.RootElement.EnumerateArray())
-            {
-                var url = item.TryGetProperty("url", out var u) ? u.GetString() ?? "" : "";
-                if (!runnerIds.Any(id => url.Equals(
-                        $"chrome-extension://{id}/popup.html",
-                        StringComparison.OrdinalIgnoreCase)))
-                    continue;
-
-                if (item.TryGetProperty("id", out var idEl))
-                    await TryCloseCdpTargetAsync(cdpPort, idEl.GetString(), ct);
-            }
-        }
-        catch
-        {
-            // ignore
-        }
-    }
-
-    private static async Task TryCloseCdpTargetAsync(int cdpPort, string? targetId, CancellationToken ct)
-    {
-        if (string.IsNullOrWhiteSpace(targetId))
-            return;
-
-        try
-        {
-            using var _ = await AppServices.DirectHttp.GetAsync(
-                $"http://127.0.0.1:{cdpPort}/json/close/{Uri.EscapeDataString(targetId)}",
-                ct);
-        }
-        catch
-        {
-            // ignore
+            await CdpClient.CloseTargetAsync(cdpPort, target.Id, ct);
         }
     }
 
@@ -674,45 +615,24 @@ internal static class ExtensionRunnerAutomation
     {
         await CloseAllExtensionPopupTabsAsync(cdpPort, ct);
 
-        try
-        {
-            using var response = await AppServices.DirectHttp.GetAsync(
-                $"http://127.0.0.1:{cdpPort}/json/list", ct);
-            if (!response.IsSuccessStatusCode)
-                return;
+        var pages = (await CdpClient.TryListTargetsAsync(cdpPort, ct))
+            .Where(t => t.IsPage && !string.IsNullOrWhiteSpace(t.Id))
+            .Select(t => (t.Id, t.Url))
+            .ToList();
 
-            using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
-            var pages = new List<(string Id, string Url)>();
-            foreach (var item in doc.RootElement.EnumerateArray())
-            {
-                var type = item.TryGetProperty("type", out var ty) ? ty.GetString() ?? "" : "";
-                if (!string.Equals(type, "page", StringComparison.OrdinalIgnoreCase))
-                    continue;
+        if (pages.Count == 0)
+            return;
 
-                var url = item.TryGetProperty("url", out var u) ? u.GetString() ?? "" : "";
-                var id = item.TryGetProperty("id", out var idEl) ? idEl.GetString() : null;
-                if (!string.IsNullOrWhiteSpace(id))
-                    pages.Add((id, url));
-            }
+        var toClose = pages
+            .Where(p => ShouldCloseAuxiliaryTab(p.Url, closeShopeeLoginTabs))
+            .Select(p => p.Id)
+            .ToList();
 
-            if (pages.Count == 0)
-                return;
+        while (toClose.Count > 0 && pages.Count - toClose.Count < 1)
+            toClose.RemoveAt(toClose.Count - 1);
 
-            var toClose = pages
-                .Where(p => ShouldCloseAuxiliaryTab(p.Url, closeShopeeLoginTabs))
-                .Select(p => p.Id)
-                .ToList();
-
-            while (toClose.Count > 0 && pages.Count - toClose.Count < 1)
-                toClose.RemoveAt(toClose.Count - 1);
-
-            foreach (var id in toClose)
-                await TryCloseCdpTargetAsync(cdpPort, id, ct);
-        }
-        catch
-        {
-            // ignore
-        }
+        foreach (var id in toClose)
+            await CdpClient.CloseTargetAsync(cdpPort, id, ct);
     }
 
     private static bool ShouldCloseAuxiliaryTab(string url, bool closeShopeeLoginTabs)
@@ -870,13 +790,14 @@ internal static class ExtensionRunnerAutomation
 
                 using var socket = new ClientWebSocket();
                 await socket.ConnectAsync(new Uri(popupWs), cancellationToken);
-                await SendCdpAsync(socket, 1, "Runtime.enable", null, cancellationToken);
-                await SendCdpAsync(socket, 2, "Runtime.evaluate", new
+                await CdpClient.SendAsync(socket, 1, "Runtime.enable", null, cancellationToken,
+                    receiveTimeoutMs: CdpReceiveTimeoutMs);
+                await CdpClient.SendAsync(socket, 2, "Runtime.evaluate", new
                 {
                     expression = BuildPopupInvokeExpression("setDisplayState", PayloadExpression(stateJson)),
                     awaitPromise = true,
                     returnByValue = true,
-                }, cancellationToken);
+                }, cancellationToken, receiveTimeoutMs: CdpReceiveTimeoutMs);
             }
         }
         catch { /* bản trùng không phản hồi — bỏ qua */ }
@@ -1193,13 +1114,14 @@ internal static class ExtensionRunnerAutomation
             {
                 using var socket = new ClientWebSocket();
                 await socket.ConnectAsync(new Uri(popupWsUrl), ct);
-                await SendCdpAsync(socket, 1, "Runtime.enable", null, ct);
-                var popupResult = await SendCdpAsync(socket, 2, "Runtime.evaluate", new
+                await CdpClient.SendAsync(socket, 1, "Runtime.enable", null, ct,
+                    receiveTimeoutMs: CdpReceiveTimeoutMs);
+                var popupResult = await CdpClient.SendAsync(socket, 2, "Runtime.evaluate", new
                 {
                     expression = popupExpression,
                     awaitPromise = true,
                     returnByValue = true,
-                }, ct, receiveTimeoutOverride: receiveTimeoutOverride);
+                }, ct, receiveTimeoutMs: ReceiveTimeoutMsOf(receiveTimeoutOverride));
 
                 if (!IsPopupBridgeError(popupResult) && !HasTransientSwException(popupResult))
                     return popupResult;
@@ -1325,24 +1247,13 @@ internal static class ExtensionRunnerAutomation
     private static async Task<string?> GetSwDebuggerUrlFromListAsync(
         int cdpPort, string extensionId, CancellationToken ct)
     {
-        try
+        foreach (var target in await CdpClient.TryListTargetsAsync(cdpPort, ct))
         {
-            using var response = await AppServices.DirectHttp.GetAsync(
-                $"http://127.0.0.1:{cdpPort}/json/list", ct);
-            if (!response.IsSuccessStatusCode) return null;
-            using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
-            foreach (var item in doc.RootElement.EnumerateArray())
-            {
-                var type = item.TryGetProperty("type", out var ty) ? ty.GetString() ?? "" : "";
-                var url = item.TryGetProperty("url", out var u) ? u.GetString() ?? "" : "";
-                var ws = item.TryGetProperty("webSocketDebuggerUrl", out var w) ? w.GetString() : null;
-                if (string.Equals(type, "service_worker", StringComparison.OrdinalIgnoreCase) &&
-                    url.Contains(extensionId, StringComparison.OrdinalIgnoreCase) &&
-                    !string.IsNullOrWhiteSpace(ws))
-                    return ws;
-            }
+            if (target.IsServiceWorker &&
+                target.Url.Contains(extensionId, StringComparison.OrdinalIgnoreCase) &&
+                target.HasWsUrl)
+                return target.WsUrl;
         }
-        catch { }
         return null;
     }
 
@@ -1353,24 +1264,13 @@ internal static class ExtensionRunnerAutomation
     private static async Task<string?> GetSwTargetIdFromListAsync(
         int cdpPort, string extensionId, CancellationToken ct)
     {
-        try
+        foreach (var target in await CdpClient.TryListTargetsAsync(cdpPort, ct))
         {
-            using var response = await AppServices.DirectHttp.GetAsync(
-                $"http://127.0.0.1:{cdpPort}/json/list", ct);
-            if (!response.IsSuccessStatusCode) return null;
-            using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
-            foreach (var item in doc.RootElement.EnumerateArray())
-            {
-                var type = item.TryGetProperty("type", out var ty) ? ty.GetString() ?? "" : "";
-                var url = item.TryGetProperty("url", out var u) ? u.GetString() ?? "" : "";
-                var id = item.TryGetProperty("id", out var idEl) ? idEl.GetString() : null;
-                if (string.Equals(type, "service_worker", StringComparison.OrdinalIgnoreCase) &&
-                    url.Contains(extensionId, StringComparison.OrdinalIgnoreCase) &&
-                    !string.IsNullOrWhiteSpace(id))
-                    return id;
-            }
+            if (target.IsServiceWorker &&
+                target.Url.Contains(extensionId, StringComparison.OrdinalIgnoreCase) &&
+                !string.IsNullOrWhiteSpace(target.Id))
+                return target.Id;
         }
-        catch { }
         return null;
     }
 
@@ -1421,8 +1321,7 @@ internal static class ExtensionRunnerAutomation
 
     private static async Task<ClientWebSocket> ConnectBrowserWebSocketAsync(int cdpPort, CancellationToken ct)
     {
-        using var response = await AppServices.DirectHttp.GetAsync(
-            $"http://127.0.0.1:{cdpPort}/json/version", ct);
+        using var response = await AppServices.DirectHttp.GetAsync(CdpEndpoints.Version(cdpPort), ct);
         response.EnsureSuccessStatusCode();
         using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
         var wsUrl = doc.RootElement.GetProperty("webSocketDebuggerUrl").GetString()
@@ -1603,21 +1502,17 @@ internal static class ExtensionRunnerAutomation
     {
         try
         {
-            using var response = await AppServices.DirectHttp.GetAsync(
-                $"http://127.0.0.1:{cdpPort}/json/list", ct);
-            if (!response.IsSuccessStatusCode) return "(HTTP fail)";
-            using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
             var entries = new List<string>();
-            foreach (var item in doc.RootElement.EnumerateArray())
+            foreach (var target in await CdpClient.ListTargetsAsync(cdpPort, ct))
             {
-                var type = item.TryGetProperty("type", out var ty) ? ty.GetString() ?? "?" : "?";
-                var url = item.TryGetProperty("url", out var u) ? u.GetString() ?? "" : "";
-                var wsOk = item.TryGetProperty("webSocketDebuggerUrl", out _) ? "ws+" : "ws-";
-                var shortUrl = url.Length > 55 ? url[..55] : url;
+                var type = string.IsNullOrEmpty(target.Type) ? "?" : target.Type;
+                var wsOk = target.WsUrl is null ? "ws-" : "ws+";
+                var shortUrl = target.Url.Length > 55 ? target.Url[..55] : target.Url;
                 entries.Add($"{type}({wsOk}):{shortUrl}");
             }
             return entries.Count == 0 ? "(list rỗng)" : string.Join(" | ", entries);
         }
+        catch (HttpRequestException) { return "(HTTP fail)"; }
         catch (Exception ex) { return $"(ex: {ex.Message})"; }
     }
 
@@ -1749,30 +1644,11 @@ internal static class ExtensionRunnerAutomation
         string extensionId,
         CancellationToken ct)
     {
-        try
+        var popupUrl = $"chrome-extension://{extensionId}/popup.html";
+        foreach (var target in await CdpClient.TryListTargetsAsync(cdpPort, ct))
         {
-            using var response = await AppServices.DirectHttp.GetAsync(
-                $"http://127.0.0.1:{cdpPort}/json/list",
-                ct);
-            if (!response.IsSuccessStatusCode)
-                return null;
-
-            using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
-            var popupSuffix = $"chrome-extension://{extensionId}/popup.html";
-
-            foreach (var item in doc.RootElement.EnumerateArray())
-            {
-                var url = item.TryGetProperty("url", out var u) ? u.GetString() ?? "" : "";
-                if (!url.Equals(popupSuffix, StringComparison.OrdinalIgnoreCase))
-                    continue;
-
-                if (item.TryGetProperty("webSocketDebuggerUrl", out var ws))
-                    return ws.GetString();
-            }
-        }
-        catch
-        {
-            // ignore
+            if (target.Url.Equals(popupUrl, StringComparison.OrdinalIgnoreCase) && target.HasWsUrl)
+                return target.WsUrl;
         }
 
         return null;
@@ -1783,122 +1659,34 @@ internal static class ExtensionRunnerAutomation
         string extensionId,
         CancellationToken ct)
     {
-        try
+        var popupUrl = $"chrome-extension://{extensionId}/popup.html";
+        foreach (var target in await CdpClient.TryListTargetsAsync(cdpPort, ct))
         {
-            using var response = await AppServices.DirectHttp.GetAsync(
-                $"http://127.0.0.1:{cdpPort}/json/list", ct);
-            if (!response.IsSuccessStatusCode)
-                return null;
-
-            using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
-            var popupSuffix = $"chrome-extension://{extensionId}/popup.html";
-
-            foreach (var item in doc.RootElement.EnumerateArray())
-            {
-                var url = item.TryGetProperty("url", out var u) ? u.GetString() ?? "" : "";
-                if (!url.Equals(popupSuffix, StringComparison.OrdinalIgnoreCase))
-                    continue;
-
-                if (item.TryGetProperty("id", out var idEl))
-                    return idEl.GetString();
-            }
+            if (target.Url.Equals(popupUrl, StringComparison.OrdinalIgnoreCase) &&
+                !string.IsNullOrWhiteSpace(target.Id))
+                return target.Id;
         }
-        catch { }
 
         return null;
     }
 
-    // 8s quá ngắn khi chạy nhiều Brave song song: handshake (Runtime.enable) dồn cục làm CDP đáp
-    // chậm → "Runtime.enable quá thời gian chờ (8s)" dù SW vẫn sống. Nới lên 20s cho tải cao.
-    private static readonly TimeSpan CdpDefaultReceiveTimeout = TimeSpan.FromSeconds(20);
-    private static readonly TimeSpan CdpEvaluateReceiveTimeout = TimeSpan.FromSeconds(20);
+    // Trần chờ phản hồi CDP của module (CdpClient mặc định 30s — ở đây phải là 20s):
+    // 8s quá ngắn khi chạy nhiều Brave song song vì handshake (Runtime.enable) dồn cục làm CDP đáp
+    // chậm → "Runtime.enable quá thời gian chờ (8s)" dù SW vẫn sống; 20s vừa đủ cho tải cao.
+    private const int CdpReceiveTimeoutMs = 20_000;
 
-    private static async Task<JsonElement> SendCdpAsync(
-        ClientWebSocket socket,
-        int id,
-        string method,
-        object? parameters,
-        CancellationToken ct,
-        string? sessionId = null,
-        TimeSpan? receiveTimeoutOverride = null)
-    {
-        // receiveTimeoutOverride: dùng cho lệnh CHỜ LÂU (vd executeScrapeStep — BigSeller có thể crawl
-        // vài phút). Nếu không truyền, theo mặc định 20s. KHÔNG để 20s cho scrape-step, nếu không C# sẽ
-        // tưởng hết giờ → retry gọi lại executeScrapeStep → reload + click lại GIỮA CHỪNG khi đang crawl.
-        var receiveTimeout = receiveTimeoutOverride
-            ?? (string.Equals(method, "Runtime.evaluate", StringComparison.Ordinal)
-                ? CdpEvaluateReceiveTimeout
-                : CdpDefaultReceiveTimeout);
-
-        string json;
-        if (parameters is null)
-        {
-            json = sessionId is null
-                ? JsonSerializer.Serialize(new { id, method })
-                : JsonSerializer.Serialize(new { id, method, sessionId });
-        }
-        else
-        {
-            json = sessionId is null
-                ? JsonSerializer.Serialize(new { id, method, @params = parameters })
-                : JsonSerializer.Serialize(new { id, method, sessionId, @params = parameters });
-        }
-
-        var bytes = Encoding.UTF8.GetBytes(json);
-        await socket.SendAsync(bytes, WebSocketMessageType.Text, true, ct);
-
-        using var receiveCts = receiveTimeout is { } timeout
-            ? CancellationTokenSource.CreateLinkedTokenSource(ct)
-            : null;
-        if (receiveTimeout is { } evalTimeout)
-        {
-            receiveCts?.CancelAfter(evalTimeout);
-        }
-        var receiveCt = receiveCts?.Token ?? ct;
-
-        var buffer = new byte[1024 * 512];
-        while (true)
-        {
-            using var ms = new MemoryStream();
-            WebSocketReceiveResult recv;
-            try
-            {
-                do
-                {
-                    recv = await socket.ReceiveAsync(buffer, receiveCt);
-                    if (recv.MessageType == WebSocketMessageType.Close)
-                        throw new InvalidOperationException("CDP đóng khi gọi extension.");
-                    ms.Write(buffer, 0, recv.Count);
-                } while (!recv.EndOfMessage);
-            }
-            catch (OperationCanceledException) when (receiveCts is not null && receiveCts.IsCancellationRequested && !ct.IsCancellationRequested)
-            {
-                throw new TimeoutException($"CDP {method} quá thời gian chờ ({receiveTimeout.TotalSeconds:0}s).");
-            }
-
-            if (receiveCts?.IsCancellationRequested == true && !ct.IsCancellationRequested)
-                throw new TimeoutException($"CDP {method} quá thời gian chờ ({receiveTimeout.TotalSeconds:0}s).");
-
-            using var response = JsonDocument.Parse(ms.ToArray());
-            var root = response.RootElement;
-            if (!root.TryGetProperty("id", out var idProp) || idProp.GetInt32() != id)
-                continue;
-
-            if (root.TryGetProperty("error", out var err))
-                throw new InvalidOperationException($"CDP: {err}");
-
-            return root.TryGetProperty("result", out var result)
-                ? result.Clone()
-                : default;
-        }
-    }
+    /// <summary>Đổi trần chờ tuỳ chọn sang ms cho <see cref="CdpClient.SendAsync"/>. Dùng cho lệnh CHỜ LÂU
+    /// (vd executeScrapeStep — BigSeller có thể crawl vài phút): để 20s thì C# tưởng hết giờ → gọi lại
+    /// executeScrapeStep → reload + click lại GIỮA CHỪNG khi đang crawl.</summary>
+    private static int ReceiveTimeoutMsOf(TimeSpan? receiveTimeoutOverride) =>
+        (int)(receiveTimeoutOverride?.TotalMilliseconds ?? CdpReceiveTimeoutMs);
 
     private static async Task<bool> IsCdpPortReachableAsync(int port, CancellationToken ct)
     {
         try
         {
             using var tcp = new System.Net.Sockets.TcpClient();
-            var connectTask = tcp.ConnectAsync("127.0.0.1", port, ct).AsTask();
+            var connectTask = tcp.ConnectAsync(CdpEndpoints.Host, port, ct).AsTask();
             return await Task.WhenAny(connectTask, Task.Delay(1500, ct)) == connectTask
                    && connectTask.IsCompletedSuccessfully;
         }

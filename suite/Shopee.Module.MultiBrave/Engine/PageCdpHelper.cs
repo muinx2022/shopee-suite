@@ -1,7 +1,5 @@
-using System.Net.WebSockets;
-using System.Text;
 using System.Text.Json;
-using Shopee.Core.Infrastructure;
+using Shopee.Core.Cdp;
 
 namespace OpenMultiBraveLauncherV3;
 
@@ -182,29 +180,18 @@ internal static class PageCdpHelper
     private static async Task<string?> FindWorkPageTargetIdAsync(
         int cdpPort, string pageUrlHint, CancellationToken cancellationToken)
     {
-        using var response = await AppServices.DirectHttp.GetAsync(
-            $"http://127.0.0.1:{cdpPort}/json/list", cancellationToken);
-        if (!response.IsSuccessStatusCode)
-            return null;
-
-        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
         var hint = (pageUrlHint ?? "").Trim();
         var pages = new List<(string url, string id)>();
-        foreach (var item in doc.RootElement.EnumerateArray())
+        foreach (var target in await CdpClient.TryListTargetsAsync(cdpPort, cancellationToken))
         {
-            var type = item.TryGetProperty("type", out var t) ? t.GetString() : "";
-            if (!string.Equals(type, "page", StringComparison.OrdinalIgnoreCase))
+            if (!target.IsPage)
                 continue;
-            var url = item.TryGetProperty("url", out var u) ? u.GetString() ?? "" : "";
-            if (string.IsNullOrWhiteSpace(url) ||
-                url.StartsWith("chrome://", StringComparison.OrdinalIgnoreCase) ||
-                url.StartsWith("chrome-extension://", StringComparison.OrdinalIgnoreCase))
+            if (string.IsNullOrWhiteSpace(target.Url) ||
+                target.Url.StartsWith("chrome://", StringComparison.OrdinalIgnoreCase) ||
+                target.Url.StartsWith("chrome-extension://", StringComparison.OrdinalIgnoreCase))
                 continue;
-            if (!item.TryGetProperty("id", out var idEl))
-                continue;
-            var id = idEl.GetString();
-            if (!string.IsNullOrWhiteSpace(id))
-                pages.Add((url, id!));
+            if (!string.IsNullOrWhiteSpace(target.Id))
+                pages.Add((target.Url, target.Id));
         }
 
         if (pages.Count == 0)
@@ -252,34 +239,23 @@ internal static class PageCdpHelper
         string expression,
         CancellationToken cancellationToken)
     {
-        using var response = await AppServices.DirectHttp.GetAsync(
-            $"http://127.0.0.1:{cdpPort}/json/list",
-            cancellationToken);
-        response.EnsureSuccessStatusCode();
-
-        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
         var hint = (pageUrlHint ?? "").Trim();
 
         var pages = new List<(string url, string id)>();
-        foreach (var item in doc.RootElement.EnumerateArray())
+        foreach (var target in await CdpClient.ListTargetsAsync(cdpPort, cancellationToken))
         {
-            var type = item.TryGetProperty("type", out var t) ? t.GetString() : "";
-            if (!string.Equals(type, "page", StringComparison.OrdinalIgnoreCase))
+            if (!target.IsPage)
                 continue;
 
-            var url = item.TryGetProperty("url", out var u) ? u.GetString() ?? "" : "";
-            if (string.IsNullOrWhiteSpace(url))
+            if (string.IsNullOrWhiteSpace(target.Url))
                 continue;
-            if (url.StartsWith("chrome://", StringComparison.OrdinalIgnoreCase) ||
-                url.StartsWith("chrome-extension://", StringComparison.OrdinalIgnoreCase))
+            if (target.Url.StartsWith("chrome://", StringComparison.OrdinalIgnoreCase) ||
+                target.Url.StartsWith("chrome-extension://", StringComparison.OrdinalIgnoreCase))
                 continue;
 
-            if (!item.TryGetProperty("id", out var idEl))
+            if (string.IsNullOrWhiteSpace(target.Id))
                 continue;
-            var id = idEl.GetString();
-            if (string.IsNullOrWhiteSpace(id))
-                continue;
-            pages.Add((url, id));
+            pages.Add((target.Url, target.Id));
         }
 
         if (pages.Count == 0)

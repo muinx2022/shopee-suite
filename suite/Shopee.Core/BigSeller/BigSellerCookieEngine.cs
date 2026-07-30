@@ -1,7 +1,6 @@
 using System.Net.WebSockets;
 using System.Text.Json;
 using Shopee.Core.Cdp;
-using Shopee.Core.Infrastructure;
 
 namespace Shopee.Core.BigSeller;
 
@@ -766,29 +765,14 @@ public static class BigSellerCookieEngine
     {
         try
         {
-            using var response = await AppServices.DirectHttp
-                .GetAsync($"http://127.0.0.1:{client.Port}/json/list").ConfigureAwait(false);
-            if (!response.IsSuccessStatusCode)
-                return;
-
-            using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync().ConfigureAwait(false));
             var navigated = false;
-            foreach (var item in doc.RootElement.EnumerateArray())
+            foreach (var target in await CdpClient.ListTargetsAsync(client.Port).ConfigureAwait(false))
             {
-                var type = item.TryGetProperty("type", out var t) ? t.GetString() : null;
-                if (!string.Equals(type, "page", StringComparison.OrdinalIgnoreCase))
-                    continue;
-
-                var url = item.TryGetProperty("url", out var u) ? u.GetString() ?? "" : "";
-                if (!IsBigSellerUrl(url))
-                    continue;
-
-                var ws = item.TryGetProperty("webSocketDebuggerUrl", out var wsProp) ? wsProp.GetString() : null;
-                if (string.IsNullOrWhiteSpace(ws))
+                if (!target.IsPage || !IsBigSellerUrl(target.Url) || !target.HasWsUrl)
                     continue;
 
                 using var page = new ClientWebSocket();
-                await page.ConnectAsync(new Uri(ws), CancellationToken.None).ConfigureAwait(false);
+                await page.ConnectAsync(new Uri(target.WsUrl!), CancellationToken.None).ConfigureAwait(false);
                 await CdpClient.SendAsync(page, 92, "Page.navigate", new { url = targetUrl }).ConfigureAwait(false);
                 navigated = true;
             }
