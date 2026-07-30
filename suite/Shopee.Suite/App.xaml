@@ -12,7 +12,8 @@
              xmlns:fleet="clr-namespace:Shopee.Suite.Modules.Fleet"
              xmlns:settings="clr-namespace:Shopee.Suite.Modules.Settings"
              xmlns:conv="clr-namespace:Shopee.Suite.Infrastructure"
-             xmlns:orders="clr-namespace:XuLyDonShopee.App.ViewModels;assembly=XuLyDonShopee.App">
+             xmlns:orders="clr-namespace:XuLyDonShopee.App.ViewModels;assembly=XuLyDonShopee.App"
+             xmlns:ordersViews="clr-namespace:XuLyDonShopee.App.Views;assembly=XuLyDonShopee.App">
     <!-- KHÔNG đặt StartupUri: MainWindow dựng tay trong App.OnStartup để gán DataContext = ShellViewModel.
          Entry point thật là Program.Main (csproj: StartupObject) — Velopack phải chạy trước app WPF. -->
 
@@ -34,8 +35,9 @@
             <conv:WiderThanConverter x:Key="WiderThan" />
 
             <!-- ══════════ ViewModel-first navigation (thay ViewLocator reflection của bản Avalonia) ══════════ -->
-            <!-- ĐÃ PORT: Welcome + ComingSoon (đợt 1); BigSeller + Data + Accounts (đợt 2); Workspace (đợt 3);
-                 Search + CheckAccount + Fleet (đợt 4). -->
+            <!-- ĐÃ PORT HẾT: Welcome + ComingSoon (đợt 1); BigSeller + Data + Accounts (đợt 2); Workspace
+                 (đợt 3); Search + CheckAccount + Fleet (đợt 4); Cài đặt gộp + module Đơn hàng (đợt 5).
+                 `ComingSoonView` chỉ còn phục vụ ComingSoonViewModel (màn báo "sắp có" thật của shell). -->
             <DataTemplate DataType="{x:Type vm:WelcomeViewModel}">
                 <views:WelcomeView />
             </DataTemplate>
@@ -66,17 +68,14 @@
                 <fleet:FleetView />
             </DataTemplate>
 
-            <!-- CHƯA PORT (đợt 5 thay từng dòng bằng view thật): màn module tạm dùng ComingSoonView,
-                 view tự sinh chữ "đang port" từ kiểu ViewModel. -->
-            <DataTemplate DataType="{x:Type settings:SettingsViewModel}">        <!-- đợt 5 -->
-                <views:ComingSoonView />
+            <DataTemplate DataType="{x:Type settings:UnifiedSettingsViewModel}">
+                <settings:UnifiedSettingsView />
             </DataTemplate>
-            <DataTemplate DataType="{x:Type settings:UnifiedSettingsViewModel}"> <!-- đợt 5 -->
-                <views:ComingSoonView />
-            </DataTemplate>
-            <!-- Module "Xử lý đơn Shopee" (MainView + 3 màn con) — đợt 5. -->
+            <!-- Module "Xử lý đơn Shopee": MainView là vỏ, 3 màn con (Tài khoản / Đơn hàng / Thống kê) có
+                 DataTemplate riêng khai TRONG MainView.xaml của module (tài nguyên cam của orders chỉ sống
+                 trong subtree đó, không đổ vào Application này). -->
             <DataTemplate DataType="{x:Type orders:MainViewModel}">
-                <views:ComingSoonView />
+                <ordersViews:MainView />
             </DataTemplate>
         </ResourceDictionary>
     </Application.Resources>

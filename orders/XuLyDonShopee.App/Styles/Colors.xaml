@@ -1,0 +1,83 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- ═══════════════════════════════════════════════════════════════════════════════════════
+         Palette module Đơn hàng — port 1:1 từ Styles/Colors.axaml (giữ NGUYÊN key + giá trị).
+         GIÁ TRỊ khớp với suite (Themes/Theme.xaml, bộ design handoff); TÊN KEY giữ như cũ vì rất nhiều
+         view của module đang bind. Đối chiếu tên ↔ token suite ghi ngay ở từng dòng.
+
+         Bộ này KHÔNG merge vào Application của suite: mỗi view/dialog của module merge
+         Styles/ModuleResources.xaml vào Resources RIÊNG → cam của orders không đè AccentBrush của suite
+         và ngược lại (đúng ý đồ cô lập của bản Avalonia).
+         ═══════════════════════════════════════════════════════════════════════════════════════ -->
+
+    <!-- ===== Accent (cam Shopee) ===== -->
+    <SolidColorBrush x:Key="AccentBrush" Color="#EE4D2D" />
+    <SolidColorBrush x:Key="AccentHoverBrush" Color="#D8401F" />
+    <SolidColorBrush x:Key="AccentTextBrush" Color="#C93B1D" />
+    <!-- 2 nấc nền cam nhạt = BrandTint / BrandTintStrong của suite. -->
+    <SolidColorBrush x:Key="AccentSoft1" Color="#FFF3EF" />
+    <SolidColorBrush x:Key="AccentSoft2" Color="#FFE8E1" />
+    <SolidColorBrush x:Key="AccentBorderSoft" Color="#FBD6CA" />
+
+    <!-- ===== Cảnh báo / trạng thái ===== -->
+    <SolidColorBrush x:Key="WarnSoftBg" Color="#FFF6E6" />
+    <SolidColorBrush x:Key="WarnSoftBorder" Color="#F0DFC0" />
+    <!-- AmberBrush/AmberTextBrush = chữ cảnh báo (Warning fg #B06F06). -->
+    <SolidColorBrush x:Key="AmberBrush" Color="#B06F06" />
+    <SolidColorBrush x:Key="AmberTextBrush" Color="#B06F06" />
+    <SolidColorBrush x:Key="SuccessBrush" Color="#1F8A4C" />
+    <SolidColorBrush x:Key="InfoBrush" Color="#2B5FC4" />
+    <SolidColorBrush x:Key="DangerBrush" Color="#C22B1E" />
+
+    <!-- ===== Bề mặt / nền ===== -->
+    <SolidColorBrush x:Key="CardBg" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="InputBg" Color="#FBFAF9" />
+    <SolidColorBrush x:Key="SubtleBg" Color="#FBFAF9" />
+    <SolidColorBrush x:Key="WindowTop" Color="#F7F5F3" />
+    <SolidColorBrush x:Key="WindowBottom" Color="#F7F5F3" />
+    <!-- Phản hồi rê chuột / bấm của NÚT (khớp ButtonHover/ButtonPressed của suite). -->
+    <SolidColorBrush x:Key="ButtonHoverBg" Color="#FAF8F6" />
+    <SolidColorBrush x:Key="ButtonPressedBg" Color="#F2EFEC" />
+
+    <!-- ===== Chữ (4 nấc của suite: primary · body · secondary · muted) ===== -->
+    <SolidColorBrush x:Key="TextInk" Color="#2C2724" />
+    <SolidColorBrush x:Key="Text232" Color="#2C2724" />
+    <SolidColorBrush x:Key="Text252" Color="#2C2724" />
+    <SolidColorBrush x:Key="TextSecondary" Color="#423C38" />
+    <SolidColorBrush x:Key="Text5A" Color="#7D756F" />
+    <SolidColorBrush x:Key="TextMuted" Color="#7D756F" />
+    <SolidColorBrush x:Key="Text9A" Color="#A8A09B" />
+    <SolidColorBrush x:Key="PlaceholderBrush" Color="#A8A09B" />
+    <SolidColorBrush x:Key="Text7A" Color="#A8A09B" />
+
+    <!-- ===== Viền (hex ẤM theo 3 nấc của suite) ===== -->
+    <SolidColorBrush x:Key="BorderSoft" Color="#EBE7E3" />
+    <SolidColorBrush x:Key="Border06" Color="#F4F1EE" />
+    <SolidColorBrush x:Key="Border05" Color="#F0EDEA" />
+    <SolidColorBrush x:Key="Border010" Color="#E2DDD8" />
+    <SolidColorBrush x:Key="Border012" Color="#E2DDD8" />
+    <SolidColorBrush x:Key="Border014" Color="#E2DDD8" />
+    <SolidColorBrush x:Key="BorderHover" Color="#CFC8C2" />
+    <SolidColorBrush x:Key="UnderlineBrush" Color="#CFC8C2" />
+
+    <!-- ===== Sidebar / nav ===== -->
+    <SolidColorBrush x:Key="SidebarBg" Color="#FBFAF9" />
+    <SolidColorBrush x:Key="SidebarFooterBg" Color="#FBFAF9" />
+    <SolidColorBrush x:Key="NavActiveBg" Color="#FFF3EF" />
+    <SolidColorBrush x:Key="SelectedCardBorder" Color="#F6C6BB" />
+
+    <!-- ===== Toggle ===== -->
+    <SolidColorBrush x:Key="ToggleOffBrush" Color="#D3CCC7" />
+
+    <!-- ===== Khối code (cookie) ===== -->
+    <SolidColorBrush x:Key="CodeBg" Color="#1E2430" />
+    <SolidColorBrush x:Key="CodeText" Color="#CBD5E1" />
+
+    <!-- ===== Font ===== -->
+    <!-- Bỏ Inter (gói font của Avalonia, không còn nhúng) + JetBrains Mono/monospace (Windows không có):
+         về đúng bộ font hệ thống Windows 11 mà Theme.xaml của suite đang dùng. -->
+    <FontFamily x:Key="UiFont">Segoe UI Variable Text, Segoe UI</FontFamily>
+    <FontFamily x:Key="MonoFont">Cascadia Code, Cascadia Mono, Consolas</FontFamily>
+
+</ResourceDictionary>

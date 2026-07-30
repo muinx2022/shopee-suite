@@ -4,17 +4,17 @@ using System.Threading.Tasks;
 using System.Windows;
 using Microsoft.Win32;
 using XuLyDonShopee.App.ViewModels;
+using XuLyDonShopee.App.Views;
 
 namespace XuLyDonShopee.App.Services;
 
 /// <summary>
-/// Hiển thị các hộp thoại modal (xác nhận, chọn thư mục, lưu CSV). Cửa sổ chính được shell gán khi app
-/// khởi động (<c>DialogService.MainWindow = …</c>).
+/// Hiển thị các hộp thoại modal (xác nhận, thông báo, chi tiết đơn, chọn thư mục, lưu CSV). Cửa sổ chính
+/// được shell gán khi app khởi động (<c>DialogService.MainWindow = …</c>).
 /// <para>
-/// ⚠ ĐỢT 1 của cuộc port: 2 hộp thoại RIÊNG của module (ConfirmDialog, OrderDetailDialog) chưa dựng lại
-/// bằng WPF (đợt 5) → <see cref="ConfirmAsync"/>/<see cref="InfoAsync"/> tạm dùng <see cref="MessageBox"/>
-/// của Windows, còn <see cref="EditOrderAsync"/> trả null (coi như người dùng bấm Hủy). Chọn thư mục / lưu
-/// CSV đã là bản WPF THẬT (Microsoft.Win32) nên dùng được ngay.
+/// WPF <c>ShowDialog()</c> chặn luồng và trả <c>bool?</c>; chữ ký async ở đây giữ nguyên như bản Avalonia
+/// (QĐ 13 của plan tổng) nên nơi gọi không phải sửa. Kết quả tuỳ biến (trạng thái đơn đã chọn) lấy qua
+/// property <c>OrderDetailDialog.Result</c> thay cho <c>Close(string?)</c> của Avalonia.
 /// </para>
 /// </summary>
 public static class DialogService
@@ -29,8 +29,8 @@ public static class DialogService
             return Task.FromResult(false);
         }
 
-        var result = MessageBox.Show(MainWindow, message, title, MessageBoxButton.OKCancel, MessageBoxImage.Question);
-        return Task.FromResult(result == MessageBoxResult.OK);
+        var dlg = new ConfirmDialog(title, message) { Owner = MainWindow };
+        return Task.FromResult(dlg.ShowDialog() == true);
     }
 
     /// <summary>Hộp thoại thông báo (chỉ nút Đóng).</summary>
@@ -41,7 +41,8 @@ public static class DialogService
             return Task.CompletedTask;
         }
 
-        MessageBox.Show(MainWindow, message, title, MessageBoxButton.OK, MessageBoxImage.Information);
+        var dlg = new ConfirmDialog(title, message, infoOnly: true) { Owner = MainWindow };
+        dlg.ShowDialog();
         return Task.CompletedTask;
     }
 
@@ -74,15 +75,16 @@ public static class DialogService
     /// <summary>
     /// Hộp thoại thông tin đơn + đổi trạng thái. <paramref name="statuses"/> = các trạng thái đã sync về
     /// (chuỗi tự do). Trả về trạng thái người dùng chọn khi bấm "Lưu", hoặc null nếu Hủy / chưa gán cửa sổ.
-    /// <para>ĐỢT 1: cửa sổ chi tiết đơn chưa port (đợt 5) → luôn trả null (như bấm Hủy).</para>
     /// </summary>
     public static Task<string?> EditOrderAsync(OrderRowViewModel row, IReadOnlyList<string> statuses)
     {
-        _ = row;
-        _ = statuses;
-        System.Diagnostics.Trace.WriteLine(
-            "[Orders] Hộp thoại chi tiết đơn chưa được port sang WPF (đợt 5) — bỏ qua lần mở này.");
-        return Task.FromResult<string?>(null);
+        if (MainWindow is null)
+        {
+            return Task.FromResult<string?>(null);
+        }
+
+        var dlg = new OrderDetailDialog(row, statuses) { Owner = MainWindow };
+        return Task.FromResult(dlg.ShowDialog() == true ? dlg.Result : null);
     }
 
     /// <summary>

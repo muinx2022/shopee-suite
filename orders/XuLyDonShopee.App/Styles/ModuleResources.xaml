@@ -1,0 +1,40 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:conv="clr-namespace:XuLyDonShopee.App.Converters">
+
+    <!-- ═══ Tài nguyên DÙNG CHUNG của module Đơn hàng: màu (Colors) + style (Controls) + converter ═══
+         Khi app còn độc lập, bộ này nằm ở App.xaml cấp Application nên mọi view thấy được. Nay app là DLL
+         module của Shopee.Suite: mỗi view/dialog merge file này vào Resources RIÊNG để (a) tự đủ tài nguyên
+         dù được dựng độc lập, và (b) KHÔNG đổ token cam của orders vào Application của suite (2 bên trùng
+         key AccentBrush/SuccessBrush/…).
+
+         Icon KHÔNG nằm ở đây nữa: kho Geometry dùng chung đã dời sang suite (Themes/Icons.xaml) và được
+         merge ở cấp Application (QĐ 4 của plan tổng) → view của module tra bằng {DynamicResource IconX},
+         phân giải lúc chạy theo cây trực quan lên tới Application. -->
+    <!-- Chỉ merge Controls: Controls.xaml TỰ merge Colors.xaml (bắt buộc — xem ghi chú trong file đó), và
+         tra tài nguyên của WPF đi ĐỆ QUY qua các dictionary lồng nhau, nên view merge file này vẫn thấy đủ
+         token màu. Merge Colors thêm một lần nữa ở đây chỉ tạo bản sao brush thứ hai cho cùng key. -->
+    <ResourceDictionary.MergedDictionaries>
+        <ResourceDictionary Source="pack://application:,,,/XuLyDonShopee.App;component/Styles/Controls.xaml" />
+    </ResourceDictionary.MergedDictionaries>
+
+    <!-- 6 converter cũ của module (đã port sang IValueConverter của WPF ở đợt 1). -->
+    <conv:VietnameseEnumConverter x:Key="VnEnum" />
+    <conv:StatusColorConverter x:Key="StatusColor" />
+    <conv:DateTimeDisplayConverter x:Key="DateDisplay" />
+    <conv:InitialConverter x:Key="Initial" />
+    <conv:StatusPillConverter x:Key="StatusPill" />
+    <conv:OrderStatusPillConverter x:Key="OrderStatusPill" />
+
+    <!-- Converter ẩn/hiện + ngày (WPF không có IsVisible, cũng không có StringConverters/ObjectConverters
+         của Avalonia). Trùng tên với bộ của suite ở App.xaml là CỐ Ý — cùng ngữ nghĩa, bản này gần hơn
+         trong cây tài nguyên nên thắng trong phạm vi module. -->
+    <BooleanToVisibilityConverter x:Key="BoolToVis" />
+    <conv:InverseBoolToVisibilityConverter x:Key="InvBoolToVis" />
+    <conv:StringToVisibilityConverter x:Key="StringToVis" />
+    <conv:StringEmptyToVisibilityConverter x:Key="EmptyToVis" />
+    <conv:NullToVisibilityConverter x:Key="NullToVis" />
+    <conv:NotNullToVisibilityConverter x:Key="NotNullToVis" />
+    <conv:DateTimeOffsetConverter x:Key="DateOffset" />
+
+</ResourceDictionary>

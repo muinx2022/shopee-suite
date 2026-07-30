@@ -1,0 +1,284 @@
+<UserControl x:Class="XuLyDonShopee.App.Views.OrderStatisticsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="clr-namespace:XuLyDonShopee.App.Controls">
+
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="pack://application:,,,/XuLyDonShopee.App;component/Styles/ModuleResources.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+
+            <Style x:Key="statCard" TargetType="{x:Type Border}">
+                <Setter Property="Background" Value="{StaticResource CardBg}" />
+                <Setter Property="BorderBrush" Value="{StaticResource BorderSoft}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="CornerRadius" Value="6" />
+                <Setter Property="Padding" Value="16,14" />
+                <Setter Property="Margin" Value="0,0,8,0" />
+            </Style>
+            <Style x:Key="statLabel" TargetType="{x:Type TextBlock}">
+                <Setter Property="FontSize" Value="11.5" />
+                <Setter Property="Foreground" Value="{StaticResource TextMuted}" />
+            </Style>
+            <Style x:Key="statValue" TargetType="{x:Type TextBlock}">
+                <Setter Property="FontSize" Value="22" />
+                <Setter Property="FontWeight" Value="Bold" />
+                <Setter Property="Foreground" Value="{StaticResource TextInk}" />
+                <Setter Property="Margin" Value="0,5,0,0" />
+            </Style>
+            <Style x:Key="miniValue" TargetType="{x:Type TextBlock}">
+                <Setter Property="FontSize" Value="15" />
+                <Setter Property="FontWeight" Value="SemiBold" />
+                <Setter Property="Foreground" Value="{StaticResource TextInk}" />
+                <Setter Property="Margin" Value="0,4,0,0" />
+            </Style>
+            <!-- Đầu cột của 4 lưới thống kê (Avalonia: `DataGrid.statsGrid DataGridColumnHeader`).
+                 Khai TRƯỚC `statsGrid` — StaticResource chỉ thấy key khai trước nó trong cùng dictionary. -->
+            <Style x:Key="statsGridHeader" TargetType="{x:Type DataGridColumnHeader}"
+                   BasedOn="{StaticResource {x:Type DataGridColumnHeader}}">
+                <Setter Property="Background" Value="{StaticResource SubtleBg}" />
+                <Setter Property="Foreground" Value="{StaticResource TextSecondary}" />
+                <Setter Property="FontWeight" Value="SemiBold" />
+            </Style>
+            <Style x:Key="statsGrid" TargetType="{x:Type DataGrid}" BasedOn="{StaticResource {x:Type DataGrid}}">
+                <Setter Property="BorderBrush" Value="{StaticResource BorderSoft}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="Background" Value="{StaticResource CardBg}" />
+                <Setter Property="GridLinesVisibility" Value="Horizontal" />
+                <Setter Property="HorizontalGridLinesBrush" Value="{StaticResource Border05}" />
+                <Setter Property="RowHeight" Value="34" />
+                <Setter Property="HeadersVisibility" Value="Column" />
+                <Setter Property="CanUserSortColumns" Value="False" />
+                <Setter Property="IsReadOnly" Value="True" />
+                <Setter Property="ColumnHeaderStyle" Value="{StaticResource statsGridHeader}" />
+            </Style>
+        </ResourceDictionary>
+    </UserControl.Resources>
+
+    <Grid Margin="24,24,32,24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <!-- ══════════ Đầu màn: tiêu đề + bộ lọc khoảng ngày / shop ══════════ -->
+        <Grid Grid.Row="0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Grid.Column="0">
+                <TextBlock Text="Thống kê đơn hàng" FontSize="19" FontWeight="Bold"
+                           Foreground="{StaticResource TextInk}" />
+                <TextBlock Text="{Binding ScopeText}" FontSize="12" Foreground="{StaticResource TextMuted}"
+                           Margin="0,2,0,0" />
+                <!-- Nguồn số đang xem (máy này / toàn hệ thống) — Hub lỗi mà vẫn hiện số local thì phải nói rõ. -->
+                <TextBlock Text="{Binding SourceText}" FontSize="11.5" FontWeight="SemiBold"
+                           Foreground="{StaticResource TextMuted}" TextWrapping="Wrap" Margin="0,3,0,0" />
+            </StackPanel>
+            <StackPanel Grid.Column="1" HorizontalAlignment="Right">
+                <!-- CalendarDatePicker (Avalonia) → DatePicker (WPF). FromDate/ToDate đã là DateTime? nên
+                     bind thẳng, không cần converter. -->
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="190" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="190" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0" Text="Từ ngày" FontSize="12" FontWeight="SemiBold"
+                               Foreground="{StaticResource TextMuted}" VerticalAlignment="Center" Margin="0,0,8,0" />
+                    <DatePicker Grid.Column="1" SelectedDate="{Binding FromDate}" SelectedDateFormat="Short"
+                                HorizontalAlignment="Stretch" />
+                    <TextBlock Grid.Column="2" Text="Đến ngày" FontSize="12" FontWeight="SemiBold"
+                               Foreground="{StaticResource TextMuted}" VerticalAlignment="Center" Margin="14,0,8,0" />
+                    <DatePicker Grid.Column="3" SelectedDate="{Binding ToDate}" SelectedDateFormat="Short"
+                                HorizontalAlignment="Stretch" />
+                </Grid>
+                <Grid Margin="0,8,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="240" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <ComboBox Grid.Column="0" Style="{StaticResource fieldCombo}" ItemsSource="{Binding ShopOptions}"
+                              SelectedItem="{Binding SelectedShop}" VerticalAlignment="Center"
+                              ToolTip="Chọn phạm vi shop cần thống kê" />
+                    <Button Grid.Column="1" Style="{StaticResource primary}" Margin="8,0,0,0" VerticalAlignment="Center"
+                            Command="{Binding ReloadCommand}" ToolTip="Đọc lại số liệu từ kho đơn">
+                        <StackPanel Orientation="Horizontal">
+                            <c:PathIcon Data="{DynamicResource IconRefresh}" />
+                            <TextBlock Text="Làm mới" Style="{StaticResource btnLabel}" />
+                        </StackPanel>
+                    </Button>
+                </Grid>
+            </StackPanel>
+        </Grid>
+
+        <!-- ══════════ Thân: các thẻ số + 4 lưới (hoặc thẻ "chưa có dữ liệu") ══════════ -->
+        <Grid Grid.Row="1" Margin="0,14,0,0">
+            <ScrollViewer Visibility="{Binding HasData, Converter={StaticResource BoolToVis}}"
+                          HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+                <StackPanel>
+                    <!-- Chỉ số vận hành chính. Doanh thu bỏ đơn hủy, ưu tiên số tiền cuối cùng. -->
+                    <UniformGrid Columns="5">
+                        <Border Style="{StaticResource statCard}">
+                            <StackPanel>
+                                <TextBlock Style="{StaticResource statLabel}" Text="TỔNG ĐƠN" />
+                                <TextBlock Style="{StaticResource statValue}" Text="{Binding TotalOrdersText}" />
+                            </StackPanel>
+                        </Border>
+                        <Border Style="{StaticResource statCard}">
+                            <StackPanel>
+                                <TextBlock Style="{StaticResource statLabel}" Text="CẦN XỬ LÝ" />
+                                <TextBlock Style="{StaticResource statValue}" Foreground="{StaticResource AccentBrush}"
+                                           Text="{Binding NeedsActionText}" />
+                            </StackPanel>
+                        </Border>
+                        <Border Style="{StaticResource statCard}">
+                            <StackPanel>
+                                <TextBlock Style="{StaticResource statLabel}" Text="ĐÃ GIAO" />
+                                <TextBlock Style="{StaticResource statValue}" Foreground="{StaticResource SuccessBrush}"
+                                           Text="{Binding DeliveredText}" />
+                            </StackPanel>
+                        </Border>
+                        <Border Style="{StaticResource statCard}">
+                            <StackPanel>
+                                <TextBlock Style="{StaticResource statLabel}" Text="ĐÃ HỦY" />
+                                <TextBlock Style="{StaticResource statValue}" Foreground="{StaticResource DangerBrush}"
+                                           Text="{Binding CancelledText}" />
+                            </StackPanel>
+                        </Border>
+                        <Border Style="{StaticResource statCard}" Margin="0">
+                            <StackPanel>
+                                <TextBlock Style="{StaticResource statLabel}" Text="DOANH THU ƯỚC TÍNH" />
+                                <TextBlock Style="{StaticResource statValue}" FontSize="20" Text="{Binding RevenueText}" />
+                                <TextBlock Text="Không tính đơn hủy" FontSize="10.5"
+                                           Foreground="{StaticResource TextMuted}" />
+                            </StackPanel>
+                        </Border>
+                    </UniformGrid>
+
+                    <UniformGrid Columns="5" Margin="0,14,0,0">
+                        <Border Style="{StaticResource statCard}">
+                            <StackPanel>
+                                <TextBlock Style="{StaticResource statLabel}" Text="SẢN PHẨM" />
+                                <TextBlock Style="{StaticResource miniValue}" Text="{Binding TotalItemsText}" />
+                            </StackPanel>
+                        </Border>
+                        <Border Style="{StaticResource statCard}">
+                            <StackPanel>
+                                <TextBlock Style="{StaticResource statLabel}" Text="TB / ĐƠN HIỆU LỰC" />
+                                <TextBlock Style="{StaticResource miniValue}" Text="{Binding AverageOrderText}" />
+                            </StackPanel>
+                        </Border>
+                        <Border Style="{StaticResource statCard}">
+                            <StackPanel>
+                                <TextBlock Style="{StaticResource statLabel}" Text="CÓ MÃ VẬN ĐƠN" />
+                                <TextBlock Style="{StaticResource miniValue}" Text="{Binding TrackingText}" />
+                            </StackPanel>
+                        </Border>
+                        <Border Style="{StaticResource statCard}">
+                            <StackPanel>
+                                <TextBlock Style="{StaticResource statLabel}" Text="ĐỦ SỐ TIỀN CUỐI" />
+                                <TextBlock Style="{StaticResource miniValue}" Text="{Binding EstimateCoverageText}" />
+                            </StackPanel>
+                        </Border>
+                        <Border Style="{StaticResource statCard}" Margin="0">
+                            <StackPanel>
+                                <TextBlock Style="{StaticResource statLabel}" Text="ĐỒNG BỘ GẦN NHẤT" />
+                                <TextBlock Style="{StaticResource miniValue}" FontSize="13" Text="{Binding LastSyncedText}" />
+                            </StackPanel>
+                        </Border>
+                    </UniformGrid>
+
+                    <Grid Margin="0,14,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="1.05*" />
+                            <ColumnDefinition Width="1.6*" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="250" />
+                        </Grid.RowDefinitions>
+                        <TextBlock Grid.Row="0" Grid.Column="0" Style="{StaticResource section}"
+                                   Text="PHÂN BỔ TRẠNG THÁI" Margin="0,0,0,7" />
+                        <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource section}"
+                                   Text="HIỆU QUẢ THEO SHOP" Margin="14,0,0,7" />
+                        <DataGrid Grid.Row="1" Grid.Column="0" Style="{StaticResource statsGrid}"
+                                  ItemsSource="{Binding StatusRows}" CanUserResizeColumns="True">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Trạng thái" Binding="{Binding Label}" Width="*" MinWidth="110" />
+                                <DataGridTextColumn Header="Đơn" Binding="{Binding OrderCountText}" Width="65" />
+                                <DataGridTextColumn Header="Tỷ lệ" Binding="{Binding PercentageText}" Width="65" />
+                                <DataGridTextColumn Header="Ước tính" Binding="{Binding ValueText}" Width="110" />
+                            </DataGrid.Columns>
+                        </DataGrid>
+                        <DataGrid Grid.Row="1" Grid.Column="1" Margin="14,0,0,0" Style="{StaticResource statsGrid}"
+                                  ItemsSource="{Binding ShopRows}" CanUserResizeColumns="True">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Shop" Binding="{Binding Shop}" Width="*" MinWidth="120" />
+                                <DataGridTextColumn Header="Đơn" Binding="{Binding OrderCount}" Width="60" />
+                                <DataGridTextColumn Header="SP" Binding="{Binding ItemCount}" Width="55" />
+                                <DataGridTextColumn Header="Doanh thu ƯT" Binding="{Binding RevenueText}" Width="115" />
+                                <DataGridTextColumn Header="TB/đơn" Binding="{Binding AverageText}" Width="105" />
+                                <DataGridTextColumn Header="Có vận đơn" Binding="{Binding TrackingRateText}" Width="85" />
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </Grid>
+
+                    <Grid Margin="0,16,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="1*" />
+                            <ColumnDefinition Width="1*" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="220" />
+                        </Grid.RowDefinitions>
+                        <TextBlock Grid.Row="0" Grid.Column="0" Style="{StaticResource section}"
+                                   Text="ĐƠN VỊ VẬN CHUYỂN" Margin="0,0,0,7" />
+                        <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource section}"
+                                   Text="PHƯƠNG THỨC THANH TOÁN" Margin="14,0,0,7" />
+                        <DataGrid Grid.Row="1" Grid.Column="0" Style="{StaticResource statsGrid}"
+                                  ItemsSource="{Binding CarrierRows}">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Đơn vị" Binding="{Binding Label}" Width="*" />
+                                <DataGridTextColumn Header="Số đơn" Binding="{Binding OrderCountText}" Width="85" />
+                                <DataGridTextColumn Header="Tỷ lệ" Binding="{Binding PercentageText}" Width="80" />
+                            </DataGrid.Columns>
+                        </DataGrid>
+                        <DataGrid Grid.Row="1" Grid.Column="1" Margin="14,0,0,0" Style="{StaticResource statsGrid}"
+                                  ItemsSource="{Binding PaymentRows}">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Phương thức" Binding="{Binding Label}" Width="*" />
+                                <DataGridTextColumn Header="Số đơn" Binding="{Binding OrderCountText}" Width="85" />
+                                <DataGridTextColumn Header="Tỷ lệ" Binding="{Binding PercentageText}" Width="80" />
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </Grid>
+
+                    <Border Style="{StaticResource statCard}" Margin="0,14,0,0" Background="{StaticResource SubtleBg}">
+                        <TextBlock FontSize="11.5" Foreground="{StaticResource TextMuted}" TextWrapping="Wrap"
+                                   Text="Cách tính: mọi số liệu chỉ tính các đơn được ghi nhận LẦN ĐẦU trong khoảng ngày đang chọn (số của máy này theo created_at, số chung theo mốc đơn xuất hiện lần đầu trên Hub), không dùng thời điểm đồng bộ lại. Doanh thu ước tính không gồm đơn hủy; ưu tiên “Số tiền cuối cùng”, nếu chưa có thì dùng “Tổng tiền”. Đây là ảnh chụp kho đơn, không phải báo cáo doanh thu quyết toán của Shopee." />
+                    </Border>
+                </StackPanel>
+            </ScrollViewer>
+
+            <Border Style="{StaticResource statCard}" Margin="0"
+                    Visibility="{Binding HasData, Converter={StaticResource InvBoolToVis}}">
+                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <TextBlock Text="{Binding EmptyMessage}" TextWrapping="Wrap" TextAlignment="Center"
+                               FontSize="13" Foreground="{StaticResource TextMuted}" MaxWidth="520" />
+                    <Button Style="{StaticResource primary}" HorizontalAlignment="Center" Margin="0,12,0,0"
+                            Command="{Binding ReloadCommand}">
+                        <StackPanel Orientation="Horizontal">
+                            <c:PathIcon Data="{DynamicResource IconRefresh}" />
+                            <TextBlock Text="Làm mới" Style="{StaticResource btnLabel}" />
+                        </StackPanel>
+                    </Button>
+                </StackPanel>
+            </Border>
+        </Grid>
+    </Grid>
+</UserControl>
