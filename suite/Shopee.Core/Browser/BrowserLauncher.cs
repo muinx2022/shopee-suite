@@ -1,5 +1,6 @@
 using Shopee.Core.Infrastructure;
 using Shopee.Core.Platform;
+using BraveArgs = Shopee.Toolkit.Browser.BraveArgs;
 
 namespace Shopee.Core.Browser;
 
@@ -65,8 +66,8 @@ public sealed class BrowserLauncher
     private static string BuildArgs(
         int cdpPort, string userDataDir, string? proxy, string startUrl, IReadOnlyList<string>? extraArgs)
     {
-        // Khối 6 cờ nền cửa sổ (BraveArgsBuilder.Window) + cờ RIÊNG của launcher này giữ nguyên thứ tự gốc.
-        var b = BraveArgsBuilder.Window(userDataDir)
+        // Khối 6 cờ nền cửa sổ (BraveArgs.Window) + cờ RIÊNG của launcher này giữ nguyên thứ tự gốc.
+        var b = BraveArgs.Window(userDataDir)
             .Add("--no-restore-last-session")
             .Add("--restore-last-session=false")
             .Add("--disable-background-mode")

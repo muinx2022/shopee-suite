@@ -1,5 +1,6 @@
 using System.IO;
 using System.Text.Json.Nodes;
+using BraveArgs = Shopee.Toolkit.Browser.BraveArgs;
 
 namespace Shopee.Core.Browser;
 
@@ -39,19 +40,11 @@ public enum ProfileLaunchPrep
 public static class BraveCachePolicy
 {
     /// <summary>
-    /// Cờ dòng lệnh chặn cache phình khi chạy. Thêm vào MỌI lệnh phóng Brave của app.
-    ///  - disk-cache-size: trần 50 MB cho Default\Cache (mặc định Chromium tự cap ~320 MB/profile).
-    ///  - media-cache-size: trần 32 MB cho cache media.
-    ///  - disable-gpu-shader-disk-cache: bỏ GrShaderCache/ShaderCache trên đĩa.
-    ///  - disable-component-update: chặn tải component (~75 MB/profile: Widevine, danh sách…) → không cần cho scrape.
+    /// Cờ dòng lệnh chặn cache phình khi chạy. Thêm vào MỌI lệnh phóng Brave của app. Danh sách gốc nằm ở
+    /// <see cref="BraveArgs.DiskCacheLimitFlags"/> (shared/Shopee.Toolkit — cùng nơi với builder args) để phía
+    /// orders cũng dùng được; ở đây chỉ giữ TÊN CŨ cho các caller sẵn có.
     /// </summary>
-    public static readonly IReadOnlyList<string> DiskLimitArgs = new[]
-    {
-        "--disk-cache-size=52428800",
-        "--media-cache-size=33554432",
-        "--disable-gpu-shader-disk-cache",
-        "--disable-component-update",
-    };
+    public static readonly IReadOnlyList<string> DiskLimitArgs = BraveArgs.DiskCacheLimitFlags;
 
     /// <summary>Các cờ trên nối bằng dấu cách — tiện nhét vào chuỗi args dựng sẵn.</summary>
     public static string DiskLimitArgString => string.Join(" ", DiskLimitArgs);

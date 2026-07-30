@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Shopee.Toolkit</RootNamespace>
+    <AssemblyName>Shopee.Toolkit</AssemblyName>
+    <!-- TFM OS-neutral: analyzer CA1416 tự bật → mọi API chỉ-Windows (registry App Paths) PHẢI nằm sau
+         [SupportedOSPlatform("windows")] + gọi trong OperatingSystem.IsWindows(). Coi CA1416 là LỖI
+         (khớp Shopee.Core) để không có call Windows nào lọt ra ngoài guard — orders/suite đều chạy cả Ubuntu. -->
+    <WarningsAsErrors>CA1416</WarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Registry cho BrowserLocator (App Paths\brave.exe). Không còn implicit khi TFM không có -windows.
+         ĐÂY LÀ REF DUY NHẤT ĐƯỢC PHÉP: toolkit này dùng chung cho CẢ orders lẫn suite nên tuyệt đối
+         KHÔNG kéo Avalonia/WPF/Playwright vào (orders ref Playwright, suite ref Avalonia — trộn vào đây
+         là kéo cả dây sang phía kia). -->
+    <PackageReference Include="Microsoft.Win32.Registry" Version="5.0.0" />
+  </ItemGroup>
+
+</Project>

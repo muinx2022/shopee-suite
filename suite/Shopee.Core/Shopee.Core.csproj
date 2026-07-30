@@ -20,4 +20,9 @@
     <!-- Registry cho WindowsBrowserLocator (App Paths\brave.exe). Không còn implicit khi bỏ -windows. -->
     <PackageReference Include="Microsoft.Win32.Registry" Version="5.0.0" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- Hạ tầng thuần BCL dùng chung với module Đơn hàng (orders KHÔNG ref Shopee.Core để né dây Avalonia):
+         BraveArgs, BrowserLocator, WebSocketServer, selector đăng nhập Microsoft. -->
+    <ProjectReference Include="..\..\shared\Shopee.Toolkit\Shopee.Toolkit.csproj" />
+  </ItemGroup>
 </Project>

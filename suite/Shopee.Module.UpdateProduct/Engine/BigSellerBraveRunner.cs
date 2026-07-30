@@ -3,6 +3,7 @@ using Microsoft.Playwright;
 using Shopee.Core.BigSeller;
 using Shopee.Core.Browser;
 using Shopee.Core.Cdp;
+using BraveArgs = Shopee.Toolkit.Browser.BraveArgs;
 
 namespace UpdateProduct;
 
@@ -49,7 +50,7 @@ internal abstract class BigSellerBraveRunner : IAsyncDisposable
         PrepareProfileBeforeLaunch();
         // Runner CDP lắp cờ theo thứ tự riêng (KHÔNG dùng khối cửa sổ Window: không profile-directory/new-window,
         // dùng --disable-session-crashed-bubble thay --hide-crash-restore-bubble). Giữ nguyên từng cờ gốc.
-        var args = BraveArgsBuilder.Create()
+        var args = BraveArgs.Create()
             .RemoteDebuggingPort(_settings.DebugPort)
             .UserDataDir(_settings.ProfileDir)
             .NoFirstRun()

@@ -232,8 +232,8 @@ public sealed class BraveManager(AppSettingsService appSettings)
 
     private static string BuildArgs(int cdpPort, string userDataDir, string? proxy, string extPath, int wsPort)
     {
-        // Khối 6 cờ nền cửa sổ (BraveArgsBuilder.Window) + cờ RIÊNG của Search giữ nguyên thứ tự gốc.
-        return Shopee.Core.Browser.BraveArgsBuilder.Window(userDataDir)
+        // Khối 6 cờ nền cửa sổ (BraveArgs.Window) + cờ RIÊNG của Search giữ nguyên thứ tự gốc.
+        return Shopee.Toolkit.Browser.BraveArgs.Window(userDataDir)
             .Add("--no-restore-last-session")
             .Add("--restore-last-session=false")
             .Add("--disable-background-mode")

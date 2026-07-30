@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Shopee.Toolkit.Ws;
 using XuLyDonShopee.Core.Models;
 
 namespace XuLyDonShopee.Core.Services;
@@ -78,7 +79,7 @@ internal enum SauDocTraHang
 internal readonly record struct LuotDocTraHang(SauDocTraHang Nhanh, int SoMoi);
 
 /// <summary>
-/// Vòng đời MỘT phiên cầu nối: cấp cổng loopback trống → chạy <see cref="OrdersWebSocketServer"/> →
+/// Vòng đời MỘT phiên cầu nối: cấp cổng loopback trống → chạy <see cref="WebSocketServer"/> →
 /// mở trình duyệt SẠCH (không CDP, không remote-debugging-port) qua <see cref="PocCleanLauncher"/> với
 /// <c>startUrl</c> có hash <c>#_od_ws=&lt;port&gt;</c> để extension đọc cổng → chờ extension báo <c>ready</c>.
 /// <list type="bullet">
@@ -125,7 +126,7 @@ public sealed class OrdersBridgeSession : IDisposable
     // GĐ4: khoảng nghỉ ngẫu nhiên giữa các shop (ms) — kiểu người, tránh dồn dập.
     private readonly Random _rng = new();
 
-    private OrdersWebSocketServer? _ws;
+    private WebSocketServer? _ws;
 
     /// <summary>GĐ3: kết quả extension "chuẩn bị hàng" 1 đơn (mã đơn + URL tab phiếu). null qua TCS = hết đơn.</summary>
     private sealed record PrepareResult(string OrderCode, string SlipTabUrl, string SlipBase64, string? Tracking);
@@ -276,10 +277,10 @@ public sealed class OrdersBridgeSession : IDisposable
     private void StartBridgeAndLaunch(string baseUrl)
     {
         // Bind cổng cố định; phiên trước vừa đóng có thể chưa nhả hẳn → retry vài nhịp.
-        OrdersWebSocketServer? ws = null;
+        WebSocketServer? ws = null;
         for (var attempt = 0; attempt < 5 && ws is null; attempt++)
         {
-            try { var s = new OrdersWebSocketServer(BridgePort); s.Start(); ws = s; }
+            try { var s = new WebSocketServer(BridgePort); s.Start(); ws = s; }
             catch when (attempt < 4) { System.Threading.Thread.Sleep(400); }
         }
         _ws = ws ?? throw new InvalidOperationException(
@@ -645,7 +646,7 @@ public sealed class OrdersBridgeSession : IDisposable
     /// được PDF hợp lệ. Ràng buộc mô hình cầu nối: phiên đang mở tab của shop nào thì tải lại được đơn của shop
     /// đó (extension quét danh sách trên tab đang mở) — đơn của shop khác/quá cũ → extension trả base64 rỗng → false.
     /// <para>
-    /// FAIL-FAST: <see cref="OrdersWebSocketServer.SendAsync"/> ném <see cref="InvalidOperationException"/> khi
+    /// FAIL-FAST: <see cref="WebSocketServer.SendAsync"/> ném <see cref="InvalidOperationException"/> khi
     /// extension chưa/không còn kết nối → NÉM ra ngoài cho caller (App) báo đúng "extension chưa kết nối", KHÔNG
     /// ngồi chờ timeout. Hủy chủ động (<paramref name="ct"/>) ném <see cref="OperationCanceledException"/>.
     /// </para>

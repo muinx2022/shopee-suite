@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Shopee.Toolkit.Ws;
 using XuLyDonShopee.Core.Services;
 
 namespace XuLyDonShopee.Tests;
@@ -9,7 +10,7 @@ namespace XuLyDonShopee.Tests;
 /// <summary>
 /// Test hai fix hành vi của cầu nối Đơn hàng:
 /// <list type="bullet">
-/// <item><b>Bước 3</b> — <see cref="OrdersWebSocketServer.SendAsync"/> FAIL-FAST: socket chưa nối thì NÉM ngay
+/// <item><b>Bước 3</b> — <see cref="WebSocketServer.SendAsync"/> FAIL-FAST: socket chưa nối thì NÉM ngay
 /// (<see cref="InvalidOperationException"/>) thay vì return im lặng khiến caller chờ TCS 30–300s.</item>
 /// <item><b>Bước 4</b> — <see cref="OrdersBridgeSession.StageWaiter"/>: khi extension báo lỗi CHỈ fault chặng
 /// ĐANG chờ (không fault hàng loạt TCS không ai await → hết <c>UnobservedTaskException</c>).</item>
@@ -23,7 +24,7 @@ public class OrdersBridgeFailFastTests
     public async Task SendAsync_ChuaKetNoi_NemInvalidOperation_KhongTreo()
     {
         // KHÔNG gọi Start() → _socket null (mô phỏng extension chưa/không còn kết nối). Không cần bind cổng.
-        using var server = new OrdersWebSocketServer(0);
+        using var server = new WebSocketServer(0);
 
         // Ném NGAY (fail-fast) — không ngồi chờ timeout.
         await Assert.ThrowsAsync<InvalidOperationException>(() => server.SendAsync(new { action = "x" }));
