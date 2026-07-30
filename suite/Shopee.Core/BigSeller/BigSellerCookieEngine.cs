@@ -242,7 +242,13 @@ public static class BigSellerCookieEngine
             for (var attempt = 0; ; attempt++)
             {
                 try { File.Move(tmp, cookieFile, overwrite: true); return true; }
-                catch (IOException) when (attempt < 4) { Thread.Sleep(150); }
+                // Windows trả ERROR_ACCESS_DENIED (→ UnauthorizedAccessException, KHÔNG phải IOException) khi
+                // 2 tiến trình cùng thay một file đích — chỉ bắt IOException thì retry không bao giờ chạy đúng
+                // ca nó sinh ra để đỡ (đã kiểm chứng bằng test đột biến ở JsonAtomicFile).
+                catch (Exception ex) when ((ex is IOException or UnauthorizedAccessException) && attempt < 4)
+                {
+                    Thread.Sleep(150);
+                }
             }
         }
         catch (Exception ex)
