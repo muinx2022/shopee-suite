@@ -1,4 +1,5 @@
 using Shopee.Core.BigSeller;
+using Shopee.Core.Scrape;
 
 namespace OpenMultiBraveLauncherV3;
 
@@ -62,7 +63,7 @@ internal static class LauncherRunnerLoop
 
         var endRow = config.EndRow;
         if (endRow is null || endRow < startRow)
-            endRow = await ExtensionRunnerAutomation.ResolveEndRowAsync(
+            endRow = await ScrapeLinkSource.ResolveEndRowAsync(
                 workbookPath, sheet, startRow, cancellationToken, useHubData, hubAccountId);
 
         config.EndRow = endRow;
@@ -70,7 +71,7 @@ internal static class LauncherRunnerLoop
         log(useHubData
             ? $"Đang tải dữ liệu (kho Hub): {sheet} dòng {startRow}–{endRow}…"
             : $"Đang tải dữ liệu: {sheet} dòng {startRow}–{endRow}…");
-        var fetch = await ExtensionRunnerAutomation.FetchSheetLinksAsync(
+        var fetch = await ScrapeLinkSource.FetchSheetLinksAsync(
             workbookPath, sheet, startRow, endRow.Value, cancellationToken, useHubData, hubAccountId);
         var items = fetch.Items;
 
