@@ -1,7 +1,7 @@
 # Plan: Kế hoạch refactor toàn app (đợt review 2026-07-25)
 
 - **Ngày:** 2026-07-25
-- **Trạng thái:** đang làm
+- **Trạng thái:** đang làm — kiểm chứng 30/07: đợt 1 + đợt 2 ĐÃ HOÀN THÀNH (commit 567cdcb, 01a689d, 24f7234, 1c26dad, b2310c5…); phần sót + đợt 3-5 chuyển sang `2026-07-30-review-toan-repo-va-lo-trinh.md`
 - **Người lập:** Fable · **Người thực thi:** Opus (mỗi đợt sẽ có plan con riêng khi giao việc)
 
 ## 1. Bối cảnh & mục tiêu
