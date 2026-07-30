@@ -362,6 +362,23 @@ public sealed class HubClient : IDisposable
         return await r.Content.ReadFromJsonAsync<OrdersPushResult>(ct);
     }
 
+    /// <summary>Dữ liệu thống kê đơn dùng chung từ Hub. Trả null nếu hub không phản hồi / route chưa có; client
+    /// sẽ fallback local. Dùng _http vì payload nhỏ.</summary>
+    public async Task<SharedOrderStatistics?> GetOrderStatisticsAsync(string fromDate, string toDate, string? shopLogin, CancellationToken ct = default)
+    {
+        try
+        {
+            var url = $"{HubRoutes.OrdersStats}?from={Uri.EscapeDataString(fromDate)}&to={Uri.EscapeDataString(toDate)}";
+            if (!string.IsNullOrWhiteSpace(shopLogin))
+            {
+                url += $"&shop={Uri.EscapeDataString(shopLogin)}";
+            }
+            return await _http.GetFromJsonAsync<SharedOrderStatistics>(url, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch { return null; }
+    }
+
     /// <summary>Số đơn ĐÃ "chuẩn bị hàng" theo shop trong ĐÚNG một ngày (<paramref name="day"/> = <c>yyyy-MM-dd</c>
     /// giờ địa phương của máy chuẩn bị đơn) — nguồn cho cột "Chuẩn bị hàng" tab "Kết quả". Trả list RỖNG = hub bảo
     /// ngày đó chưa shop nào có đơn; trả null = KHÔNG lấy được (offline / timeout / hub CŨ chưa có route) → caller

@@ -374,9 +374,11 @@ public partial class AccountSession : ObservableObject, IAccountSession
         // Phiên chưa chạy (không có cầu nối đang mở) → hướng dẫn bấm Chạy trước. State phải Running (cầu nối đã lên).
         if (bridge is null || State != SessionState.Running)
         {
-            StatusText = "Hãy bấm Chạy tài khoản rồi mới tải lại phiếu.";
+            StatusText = State == SessionState.Queued
+                ? "Tài khoản này đang chờ đến lượt, chưa thể tải lại phiếu."
+                : "Hãy bấm Chạy tài khoản rồi mới tải lại phiếu.";
             _services.Log.Append(_logLabel,
-                $"Tải lại phiếu đơn {orderSn}: phiên chưa chạy — hãy bấm Chạy tài khoản trước.");
+                $"Tải lại phiếu đơn {orderSn}: phiên chưa chạy hoặc chưa tới lượt.");
             return false;
         }
 
@@ -1138,11 +1140,7 @@ public partial class AccountSession : ObservableObject, IAccountSession
         }
         finally
         {
-            _readyForActions = false;
-            // Chốt chặn: kill trình duyệt sạch nếu còn (vòng bị ngắt giữa chừng), giải phóng cổng.
-            try { var p = _bridge?.Process; if (p is { HasExited: false }) p.Kill(entireProcessTree: true); } catch { /* bỏ qua */ }
-            try { _bridge?.Dispose(); } catch { /* bỏ qua */ }
-            _bridge = null;
+            ResetBridgeState();
 
             // Nhả khóa chạy tài khoản trên MỌI lối ra (xong / lỗi / hủy) — đúng MỘT lần, và không nhả khi chưa
             // từng giành được. Nhả TRƯỚC khi đặt Stopped: manager thấy Stopped là start ngay account kế trong hàng
@@ -1166,9 +1164,15 @@ public partial class AccountSession : ObservableObject, IAccountSession
         _services.Log.Append(_logLabel, text);
     }
 
+    private void ResetBridgeState()
+    {
+        _readyForActions = false;
+        _bridge = null;
+    }
+
     private void SetError(string message)
     {
-        _readyForActions = false; // lỗi → không còn sẵn sàng (nút Sync/Kiểm tra sẽ tự mở/khởi động lại phiên)
+        ResetBridgeState();
         LastError = message;
         StatusText = message;
         State = SessionState.Error;

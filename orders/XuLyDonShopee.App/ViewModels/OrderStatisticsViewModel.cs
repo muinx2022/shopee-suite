@@ -9,6 +9,7 @@ using CommunityToolkit.Mvvm.Input;
 using XuLyDonShopee.App.Services;
 using XuLyDonShopee.Core.Models;
 using XuLyDonShopee.Core.Services;
+using System.Threading;
 
 namespace XuLyDonShopee.App.ViewModels;
 
@@ -107,6 +108,13 @@ public partial class OrderStatisticsViewModel : ViewModelBase
             return;
         }
 
+        var shared = LoadSharedStatistics(range.FromLocalDate, range.ToLocalDate, shop);
+        if (shared is not null)
+        {
+            ApplyShared(shared);
+            return;
+        }
+
         var rows = _services.Orders.Query(
             shopLogin: shop,
             shopExact: shop is not null,
@@ -166,6 +174,70 @@ public partial class OrderStatisticsViewModel : ViewModelBase
         Replace(ShopRows, Array.Empty<ShopStatisticRow>());
         Replace(CarrierRows, Array.Empty<OrderStatisticBreakdown>());
         Replace(PaymentRows, Array.Empty<OrderStatisticBreakdown>());
+    }
+
+    private SharedOrderStatistics? LoadSharedStatistics(DateTime fromLocalDate, DateTime toLocalDate, string? shop)
+    {
+        try
+        {
+            if (_services.QueryOrderStatistics is null)
+            {
+                return null;
+            }
+
+            return _services.QueryOrderStatistics(fromLocalDate, toLocalDate, shop, CancellationToken.None)
+                .GetAwaiter().GetResult();
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private void ApplyShared(SharedOrderStatistics shared)
+    {
+        HasData = shared.TotalOrders > 0;
+        EmptyMessage = shared.TotalOrders > 0 ? string.Empty : shared.EmptyMessage;
+        ScopeText = shared.ScopeText;
+        TotalOrdersText = Number(shared.TotalOrders);
+        TotalItemsText = Number(shared.TotalItems);
+        NeedsActionText = Number(shared.NeedsAction);
+        DeliveredText = Number(shared.Delivered);
+        CancelledText = Number(shared.Cancelled);
+        RevenueText = Money(shared.Revenue);
+        AverageOrderText = Money(shared.AverageOrder);
+        TrackingText = shared.TrackingText;
+        EstimateCoverageText = shared.EstimateCoverageText;
+        LastSyncedText = shared.LastSyncedText;
+
+        Replace(StatusRows, shared.StatusRows.Select(x => new OrderStatisticBreakdown(
+            x.Label,
+            x.OrderCount,
+            Number(x.OrderCount),
+            x.Value == 0 ? string.Empty : Money((long)x.Value),
+            x.Percentage,
+            x.Percentage.ToString("0.#", VnCulture) + "%")));
+        Replace(ShopRows, shared.ShopRows.Select(x => new ShopStatisticRow(
+            x.Shop,
+            x.OrderCount,
+            x.ItemCount,
+            Money((long)x.Revenue),
+            Money((long)x.Average),
+            x.TrackingRate.ToString("0.#", VnCulture) + "%")));
+        Replace(CarrierRows, shared.CarrierRows.Select(x => new OrderStatisticBreakdown(
+            x.Label,
+            x.OrderCount,
+            Number(x.OrderCount),
+            string.Empty,
+            x.Percentage,
+            x.Percentage.ToString("0.#", VnCulture) + "%")));
+        Replace(PaymentRows, shared.PaymentRows.Select(x => new OrderStatisticBreakdown(
+            x.Label,
+            x.OrderCount,
+            Number(x.OrderCount),
+            string.Empty,
+            x.Percentage,
+            x.Percentage.ToString("0.#", VnCulture) + "%")));
     }
 
     private static bool TryBuildCreatedRange(DateTime? fromDate, DateTime? toDate,

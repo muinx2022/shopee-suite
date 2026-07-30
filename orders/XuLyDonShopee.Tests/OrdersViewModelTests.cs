@@ -4,6 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using XuLyDonShopee.App.Services;
+using XuLyDonShopee.Core.Services;
 using XuLyDonShopee.App.ViewModels;
 using XuLyDonShopee.Core.Models;
 using XuLyDonShopee.Core.Services;
@@ -19,6 +20,35 @@ public class OrdersViewModelTests
 {
     private static long SeedAccount(AppServices services, string email)
         => services.Accounts.Insert(new Account { Email = email, Password = "p" });
+
+    private sealed class StubSession : IAccountSession
+    {
+        public long AccountId { get; }
+        public SessionState State { get; private set; } = SessionState.Stopped;
+        public string? StatusText => null;
+        public int? ToShipCount => null;
+        public bool ReadyForActions => false;
+        public bool IsShopLoopRunning => false;
+        public string? LastError => null;
+        public System.Diagnostics.Process? BraveProcess => null;
+        public event Action? Changed;
+        public event Action<long>? CookieSaved;
+
+        public StubSession(long accountId, SessionState state)
+        {
+            AccountId = accountId;
+            State = state;
+        }
+
+        public Task StartAsync() => Task.CompletedTask;
+        public Task StopAsync() => Task.CompletedTask;
+        public Task<bool> ProcessOrdersAsync() => Task.FromResult(false);
+        public Task<bool> CheckOrdersAsync() => Task.FromResult(false);
+        public Task<bool> SyncOrdersAsync() => Task.FromResult(false);
+        public Task<bool> RedownloadSlipAsync(string orderSn) => Task.FromResult(false);
+        public Task<bool> SyncFullAsync() => Task.FromResult(false);
+        public void MarkQueued() => State = SessionState.Queued;
+    }
 
     [Fact]
     public void Reload_HienThiTatCaDon_MapNhanShop_VaDinhDangHienThi()
@@ -89,6 +119,23 @@ public class OrdersViewModelTests
         vm.SelectedAccount = vm.AccountOptions.First(o => o.Label == "shopB.store");
         Assert.Equal(2, vm.Rows.Count);
         Assert.All(vm.Rows, r => Assert.Equal("shopB.store", r.ShopLabel));
+    }
+
+    [Fact]
+    public void TảiPhiếu_KhiTaiKhoanDangChoDoi_ThongBaoDung()
+    {
+        using var temp = new TempDatabase();
+        var services = new AppServices(temp.Path);
+        var accId = SeedAccount(services, "a@mail.com");
+        services.Orders.UpsertMany(accId, new[] { new SyncedOrder { OrderSn = "SN1", TrackingNumber = "TRK1" } }, DateTime.UtcNow);
+
+        var mgr = new AccountSessionManager(id => new StubSession(id, SessionState.Queued));
+        services.Sessions = mgr;
+        var vm = new OrdersViewModel(services);
+
+        vm.RedownloadSlipCommand.Execute(vm.Rows[0]);
+
+        Assert.Equal("Tài khoản này đang chờ đến lượt, hãy đợi phiên được mở rồi bấm Tải phiếu.", vm.StatusMessage);
     }
 
     [Fact]

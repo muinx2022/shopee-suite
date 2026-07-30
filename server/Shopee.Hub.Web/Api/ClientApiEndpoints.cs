@@ -257,6 +257,16 @@ public static class ClientApiEndpoints
             return Results.Json(new OrdersPushResult(res.Added, res.Updated));
         });
 
+        // GET /api/orders/stats → thống kê đơn dùng chung, trả ảnh chụp gom trên hub để mọi client thấy cùng số.
+        api.MapGet(HubRoutes.OrdersStats, (string? from, string? to, string? shop) =>
+        {
+            if (!DateTime.TryParse(from, out var fromDate) || !DateTime.TryParse(to, out var toDate))
+            {
+                return Results.BadRequest();
+            }
+            return Results.Json(db.GetSharedOrderStatistics(fromDate, toDate, shop));
+        });
+
         // POST /api/orders/app-alert → client báo lỗi app; Hub quyết định gửi webhook lỗi app (fire-and-forget).
         api.MapPost(HubRoutes.OrdersAppAlert, (OrdersAppAlertRequest? r, HttpRequest req, WebhookQueueService webhookQueue) =>
         {

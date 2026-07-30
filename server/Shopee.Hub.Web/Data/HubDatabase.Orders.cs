@@ -227,6 +227,96 @@ ON CONFLICT(shop_id,order_sn) DO UPDATE SET
         return result;
     }
 
+    public SharedOrderStatistics GetSharedOrderStatistics(DateTime fromLocalDate, DateTime toLocalDate, string? shopLogin)
+    {
+        var fromUtc = DateTime.SpecifyKind(fromLocalDate.Date, DateTimeKind.Unspecified).ToUniversalTime();
+        var toUtc = DateTime.SpecifyKind(toLocalDate.Date.AddDays(1), DateTimeKind.Unspecified).ToUniversalTime();
+        var fromStr = fromUtc.ToString("o");
+        var toStr = toUtc.ToString("o");
+
+        lock (_gate)
+        {
+            var stats = new SharedOrderStatistics();
+            var rows = new List<(string Shop, string? Status, string? StatusDescription, string? CancelReason, string? Carrier, string? Channel, string? PaymentMethod, long? FinalAmount, long? TotalPrice, string? TrackingNumber, int ItemCount, DateTimeOffset SyncedAt)>();
+
+            using (var c = _conn.CreateCommand())
+            {
+                c.CommandText = @"SELECT COALESCE(s.username, ''), o.status, o.status_description, o.cancel_reason, o.carrier, o.channel,
+       o.payment_method, o.final_amount, o.total_price, o.tracking_number, o.item_count, o.synced_at
+FROM orders o JOIN shops s ON s.id = o.shop_id
+WHERE o.synced_at >= $from AND o.synced_at < $to" + (string.IsNullOrWhiteSpace(shopLogin) ? "" : " AND s.username = $shop");
+                c.Parameters.AddWithValue("$from", fromStr);
+                c.Parameters.AddWithValue("$to", toStr);
+                if (!string.IsNullOrWhiteSpace(shopLogin)) c.Parameters.AddWithValue("$shop", shopLogin.Trim());
+                using var rd = c.ExecuteReader();
+                while (rd.Read())
+                {
+                    rows.Add((
+                        S(rd, 0),
+                        rd.IsDBNull(1) ? null : rd.GetString(1),
+                        rd.IsDBNull(2) ? null : rd.GetString(2),
+                        rd.IsDBNull(3) ? null : rd.GetString(3),
+                        rd.IsDBNull(4) ? null : rd.GetString(4),
+                        rd.IsDBNull(5) ? null : rd.GetString(5),
+                        rd.IsDBNull(6) ? null : rd.GetString(6),
+                        rd.IsDBNull(7) ? null : rd.GetInt64(7),
+                        rd.IsDBNull(8) ? null : rd.GetInt64(8),
+                        rd.IsDBNull(9) ? null : rd.GetString(9),
+                        rd.IsDBNull(10) ? 0 : rd.GetInt32(10),
+                        D(rd, 11)));
+                }
+            }
+
+            stats.TotalOrders = rows.Count;
+            stats.TotalItems = rows.Sum(r => Math.Max(0, r.ItemCount));
+            var cancelled = rows.Where(r => XuLyDonShopee.Core.Services.ShopeeShippingNav.LaDonHuy(r.Status, r.StatusDescription, r.CancelReason)).ToList();
+            var active = rows.Where(r => !XuLyDonShopee.Core.Services.ShopeeShippingNav.LaDonHuy(r.Status, r.StatusDescription, r.CancelReason)).ToList();
+            stats.Cancelled = cancelled.Count;
+            stats.Delivered = rows.Count(r => !XuLyDonShopee.Core.Services.ShopeeShippingNav.LaDonHuy(r.Status, r.StatusDescription, r.CancelReason) && XuLyDonShopee.Core.Services.ShopeeShippingNav.LaDaGiaoDaBan(r.Status));
+            stats.NeedsAction = rows.Count(r => !XuLyDonShopee.Core.Services.ShopeeShippingNav.LaDonHuy(r.Status, r.StatusDescription, r.CancelReason) && XuLyDonShopee.Core.Services.ShopeeShippingNav.LaChuanBiHang(r.Status));
+            stats.Revenue = active.Sum(r => Math.Max(0, r.FinalAmount ?? r.TotalPrice ?? 0));
+            stats.AverageOrder = active.Count == 0 ? 0 : stats.Revenue / active.Count;
+            var withTracking = rows.Count(r => !string.IsNullOrWhiteSpace(r.TrackingNumber));
+            var withFinal = active.Count(r => r.FinalAmount is not null);
+            stats.TrackingText = $"{withTracking:N0}/{rows.Count:N0} đơn";
+            stats.EstimateCoverageText = $"{withFinal:N0}/{active.Count:N0} đơn hiệu lực";
+            var lastSynced = rows.Select(r => r.SyncedAt).DefaultIfEmpty(DateTimeOffset.MinValue).Max();
+            stats.LastSyncedText = lastSynced == DateTimeOffset.MinValue ? "Chưa đồng bộ" : lastSynced.ToLocalTime().ToString("dd/MM/yyyy HH:mm");
+            stats.ScopeText = string.IsNullOrWhiteSpace(shopLogin)
+                ? $"Đơn trong khoảng {fromLocalDate:dd/MM/yyyy} - {toLocalDate:dd/MM/yyyy}"
+                : $"Đơn của shop {shopLogin} trong khoảng {fromLocalDate:dd/MM/yyyy} - {toLocalDate:dd/MM/yyyy}";
+            stats.EmptyMessage = rows.Count == 0
+                ? (string.IsNullOrWhiteSpace(shopLogin)
+                    ? $"Không có đơn nào trong khoảng {fromLocalDate:dd/MM/yyyy} - {toLocalDate:dd/MM/yyyy}."
+                    : $"Shop {shopLogin} không có đơn nào trong khoảng {fromLocalDate:dd/MM/yyyy} - {toLocalDate:dd/MM/yyyy}.")
+                : string.Empty;
+
+            var total = rows.Count;
+            stats.StatusRows = rows.GroupBy(r => Clean(r.Status, "Chưa rõ"), StringComparer.OrdinalIgnoreCase)
+                .Select(g => new SharedOrderStatisticBreakdown { Label = g.Key, OrderCount = g.Count(), Value = active.Where(x => string.Equals(Clean(x.Status, "Chưa rõ"), g.Key, StringComparison.OrdinalIgnoreCase)).Sum(x => Math.Max(0, x.FinalAmount ?? x.TotalPrice ?? 0)), Percentage = total == 0 ? 0 : g.Count() * 100d / total })
+                .OrderByDescending(x => x.OrderCount).ThenBy(x => x.Label, StringComparer.OrdinalIgnoreCase).ToList();
+            stats.CarrierRows = rows.GroupBy(r => Clean(r.Carrier ?? r.Channel, "Chưa rõ"), StringComparer.OrdinalIgnoreCase)
+                .Select(g => new SharedOrderStatisticBreakdown { Label = g.Key, OrderCount = g.Count(), Percentage = total == 0 ? 0 : g.Count() * 100d / total })
+                .OrderByDescending(x => x.OrderCount).ThenBy(x => x.Label, StringComparer.OrdinalIgnoreCase).ToList();
+            stats.PaymentRows = rows.GroupBy(r => Clean(r.PaymentMethod, "Chưa rõ"), StringComparer.OrdinalIgnoreCase)
+                .Select(g => new SharedOrderStatisticBreakdown { Label = g.Key, OrderCount = g.Count(), Percentage = total == 0 ? 0 : g.Count() * 100d / total })
+                .OrderByDescending(x => x.OrderCount).ThenBy(x => x.Label, StringComparer.OrdinalIgnoreCase).ToList();
+            stats.ShopRows = rows.GroupBy(r => Clean(r.Shop, "(shop chưa xác định)"), StringComparer.OrdinalIgnoreCase)
+                .Select(g =>
+                {
+                    var list = g.ToList();
+                    var act = list.Where(r => !XuLyDonShopee.Core.Services.ShopeeShippingNav.LaDonHuy(r.Status, r.StatusDescription, r.CancelReason)).ToList();
+                    var rev = act.Sum(r => Math.Max(0, r.FinalAmount ?? r.TotalPrice ?? 0));
+                    var tracked = list.Count(r => !string.IsNullOrWhiteSpace(r.TrackingNumber));
+                    return new SharedShopStatisticRow { Shop = g.Key, OrderCount = list.Count, ItemCount = list.Sum(r => Math.Max(0, r.ItemCount)), Revenue = rev, Average = act.Count == 0 ? 0 : rev / act.Count, TrackingRate = list.Count == 0 ? 0 : tracked * 100d / list.Count };
+                })
+                .OrderByDescending(x => x.OrderCount).ThenBy(x => x.Shop, StringComparer.OrdinalIgnoreCase).ToList();
+            return stats;
+        }
+
+        static string Clean(string? value, string fallback) => string.IsNullOrWhiteSpace(value) ? fallback : value.Trim();
+    }
+
     private static int CountOrdersCore(SqliteConnection conn, SqliteTransaction? tx,
         long? shopId, string? status, string? search)
     {

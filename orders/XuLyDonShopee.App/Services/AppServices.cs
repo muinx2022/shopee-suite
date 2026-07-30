@@ -38,6 +38,31 @@ public sealed record OrdersLeaseResult(bool Ok, string? HolderMachine);
 /// Kiểu RIÊNG của module (module Đơn hàng KHÔNG tham chiếu <c>Shopee.Core</c> nên không lộ DTO hub vào đây).</summary>
 public sealed record OrdersDirectoryItem(string Login, IReadOnlyList<(string Login, string Name)> Shops);
 
+/// <summary>Dòng thống kê dùng chung từ Hub cho tab "Thống kê".</summary>
+public sealed record SharedStatBreakdown(string Label, int OrderCount, long Value, double Percentage);
+
+/// <summary>Dòng shop thống kê dùng chung từ Hub.</summary>
+public sealed record SharedShopStatRow(string Shop, int OrderCount, int ItemCount, long Revenue, long Average, double TrackingRate);
+
+/// <summary>Kết quả thống kê dùng chung từ Hub.</summary>
+public sealed record SharedOrderStatistics(
+    int TotalOrders,
+    int TotalItems,
+    int NeedsAction,
+    int Delivered,
+    int Cancelled,
+    long Revenue,
+    long AverageOrder,
+    string TrackingText,
+    string EstimateCoverageText,
+    string LastSyncedText,
+    string ScopeText,
+    string EmptyMessage,
+    IReadOnlyList<SharedStatBreakdown> StatusRows,
+    IReadOnlyList<SharedShopStatRow> ShopRows,
+    IReadOnlyList<SharedStatBreakdown> CarrierRows,
+    IReadOnlyList<SharedStatBreakdown> PaymentRows);
+
 /// <summary>
 /// Gom Database + các repository, khởi tạo một lần và truyền vào ViewModel.
 /// (Bước đầu không dùng DI container.)
@@ -112,6 +137,13 @@ public class AppServices
     /// xoá được cấu hình của cả fleet.
     /// </summary>
     public Func<string, string, string, CancellationToken, Task<bool>>? PushGsheetConfigToHub { get; set; }
+
+    /// <summary>
+    /// HOOK đọc thống kê ĐƠN HÀNG dùng chung từ Hub theo khoảng ngày + shop. Trả <c>null</c> = hub không
+    /// phản hồi / route chưa có, để client fallback local; trả object = số liệu CHUNG toàn hệ thống, mọi client
+    /// cùng nhìn một ảnh chụp.
+    /// </summary>
+    public Func<DateTime, DateTime, string?, CancellationToken, Task<SharedOrderStatistics?>>? QueryOrderStatistics { get; set; }
 
     /// <summary>
     /// HOOK đọc SỐ ĐƠN "chuẩn bị hàng" CHUNG TOÀN HỆ THỐNG theo shop trong MỘT ngày (tab "Kết quả"), do shell

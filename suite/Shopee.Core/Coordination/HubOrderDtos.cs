@@ -71,6 +71,48 @@ public sealed class PrepareStatItem
 }
 
 /// <summary>
+/// Dữ liệu thống kê đơn dùng chung lấy từ Hub. Số liệu được gom trên hub để mọi client nhìn cùng một ảnh chụp,
+/// thay vì mỗi máy tự tính trên SQLite local.
+/// </summary>
+public sealed class SharedOrderStatistics
+{
+    public string ScopeText { get; set; } = string.Empty;
+    public string EmptyMessage { get; set; } = string.Empty;
+    public int TotalOrders { get; set; }
+    public int TotalItems { get; set; }
+    public int NeedsAction { get; set; }
+    public int Delivered { get; set; }
+    public int Cancelled { get; set; }
+    public long Revenue { get; set; }
+    public long AverageOrder { get; set; }
+    public string TrackingText { get; set; } = string.Empty;
+    public string EstimateCoverageText { get; set; } = string.Empty;
+    public string LastSyncedText { get; set; } = string.Empty;
+    public List<SharedOrderStatisticBreakdown> StatusRows { get; set; } = [];
+    public List<SharedOrderStatisticBreakdown> CarrierRows { get; set; } = [];
+    public List<SharedOrderStatisticBreakdown> PaymentRows { get; set; } = [];
+    public List<SharedShopStatisticRow> ShopRows { get; set; } = [];
+}
+
+public sealed class SharedOrderStatisticBreakdown
+{
+    public string Label { get; set; } = string.Empty;
+    public int OrderCount { get; set; }
+    public long Value { get; set; }
+    public double Percentage { get; set; }
+}
+
+public sealed class SharedShopStatisticRow
+{
+    public string Shop { get; set; } = string.Empty;
+    public int OrderCount { get; set; }
+    public int ItemCount { get; set; }
+    public long Revenue { get; set; }
+    public long Average { get; set; }
+    public double TrackingRate { get; set; }
+}
+
+/// <summary>
 /// Một shop hub theo dõi (GET /api/shops) — RÚT GỌN từ <c>Shop</c> của hub: chỉ 3 field cần để đổi
 /// <see cref="HubOrderItem.ShopId"/> (số) sang tên hiển thị. CỐ Ý bỏ password/cookie/proxy của bản hub —
 /// client xem đơn không cần và không nên nhận.

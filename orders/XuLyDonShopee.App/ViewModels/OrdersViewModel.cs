@@ -407,30 +407,66 @@ public partial class OrdersViewModel : ViewModelBase
     /// Chạy NỀN (async) — không block UI. Lưu được → phiên tự phát OrdersChanged nên lưới tự nạp lại (cột Phiếu
     /// đổi). Mọi lỗi → báo qua <see cref="StatusMessage"/>, KHÔNG crash.
     /// </summary>
-    private async Task RedownloadSlipForRowAsync(OrderRowViewModel row)
+    private async Task RedownloadSlipForRowAsync(OrderRowViewModel? row)
     {
-        var session = _services.Sessions.Get(row.AccountId);
-        if (session is null || session.State != SessionState.Running)
+        if (row is null)
         {
-            StatusMessage = "Mở phiên tài khoản này trước (màn Tài khoản) rồi bấm Tải phiếu.";
+            StatusMessage = "Không xác định được đơn để tải phiếu.";
             return;
         }
 
-        StatusMessage = $"Đang tải lại phiếu đơn {row.OrderSn}...";
+        var orderSn = row.OrderSn;
+        if (string.IsNullOrWhiteSpace(orderSn))
+        {
+            StatusMessage = "Không xác định được mã đơn để tải phiếu.";
+            return;
+        }
+
+        var accountId = row.AccountId;
+        if (!TryGetRunningSession(accountId, out var session, out var message))
+        {
+            StatusMessage = message;
+            return;
+        }
+
+        var runningSession = session ?? throw new InvalidOperationException("Không lấy được phiên đang chạy.");
+
+        StatusMessage = $"Đang tải lại phiếu đơn {orderSn}...";
         bool ok;
         try
         {
-            ok = await session.RedownloadSlipAsync(row.OrderSn);
+            ok = await runningSession.RedownloadSlipAsync(orderSn);
         }
         catch (Exception ex)
         {
-            StatusMessage = $"Tải phiếu đơn {row.OrderSn} lỗi: {ex.Message}";
+            StatusMessage = $"Tải phiếu đơn {orderSn} lỗi: {ex.Message}";
             return;
         }
 
         StatusMessage = ok
-            ? $"Đã tải lại phiếu đơn {row.OrderSn}."
-            : $"Chưa tải được phiếu đơn {row.OrderSn} (tài khoản đang bận thao tác khác hoặc không thấy đơn — thử lại sau, xem nhật ký).";
+            ? $"Đã tải lại phiếu đơn {orderSn}."
+            : $"Chưa tải được phiếu đơn {orderSn} (tài khoản đang bận thao tác khác hoặc không thấy đơn — thử lại sau, xem nhật ký).";
+    }
+
+    private bool TryGetRunningSession(long accountId, out IAccountSession? session, out string message)
+    {
+        session = _services.Sessions.Get(accountId);
+        if (session is null)
+        {
+            message = "Mở phiên tài khoản này trước (màn Tài khoản) rồi bấm Tải phiếu.";
+            return false;
+        }
+
+        if (session.State == SessionState.Running)
+        {
+            message = string.Empty;
+            return true;
+        }
+
+        message = session.State == SessionState.Queued
+            ? "Tài khoản này đang chờ đến lượt, hãy đợi phiên được mở rồi bấm Tải phiếu."
+            : "Mở phiên tài khoản này trước (màn Tài khoản) rồi bấm Tải phiếu.";
+        return false;
     }
 
     /// <summary>Nút "Làm mới": nạp lại toàn bộ từ DB (đón tài khoản/trạng thái/đơn mới sau khi sync) + áp bộ lọc.</summary>

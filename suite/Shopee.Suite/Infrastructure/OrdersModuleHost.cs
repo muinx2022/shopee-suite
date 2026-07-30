@@ -8,6 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Shopee.Core.Browser;
 using Shopee.Core.Coordination;
+using HubSharedOrderStatistics = Shopee.Core.Coordination.SharedOrderStatistics;
 using XuLyDonShopee.App.Services;
 using XuLyDonShopee.App.ViewModels;
 using XuLyDonShopee.Core.Models;
@@ -52,6 +53,7 @@ public static class OrdersModuleHost
             WireIncrementSoldBySku(Services);
             WireHubSlipPush(Services);
             WireGsheetConfig(Services);
+            WireOrderStatisticsRead(Services);
             WirePrepareStatsRead(Services);
             WireAccountLease(Services);
             WireOrdersDirectory(Services);
@@ -301,6 +303,66 @@ public static class OrdersModuleHost
             }
         };
     }
+
+    /// <summary>
+    /// RÓT hook đọc thống kê đơn DÙNG CHUNG từ hub — ưu tiên nguồn này để tab "Thống kê" của mọi client cùng nhìn
+    /// một ảnh chụp. Hub cũ / offline / lỗi → trả null để màn fallback local. Dùng cổng Client như các hook đẩy
+    /// đơn, timeout ngắn vì payload nhỏ.
+    /// </summary>
+    private static void WireOrderStatisticsRead(AppServices services)
+    {
+        services.QueryOrderStatistics = async (fromLocal, toLocal, shopLogin, ct) =>
+        {
+            try
+            {
+                if (CoordinationRuntime.Client is not { } client)
+                {
+                    return null;
+                }
+
+                var stats = await client.GetOrderStatisticsAsync(
+                    fromLocal.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                    toLocal.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                    shopLogin,
+                    ct).ConfigureAwait(false);
+                return stats is null ? null : MapSharedStats(stats);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                Trace.WriteLine("[OrdersModuleHost] Đọc thống kê đơn từ hub lỗi: " + ex.Message);
+                return null;
+            }
+        };
+    }
+
+    /// <summary>
+    /// Chuyển DTO thống kê từ hub sang model local của module Đơn hàng.
+    /// </summary>
+    private static XuLyDonShopee.App.Services.SharedOrderStatistics MapSharedStats(HubSharedOrderStatistics stats) => new(
+        stats.TotalOrders,
+        stats.TotalItems,
+        stats.NeedsAction,
+        stats.Delivered,
+        stats.Cancelled,
+        stats.Revenue,
+        stats.AverageOrder,
+        stats.TrackingText,
+        stats.EstimateCoverageText,
+        stats.LastSyncedText,
+        stats.ScopeText,
+        stats.EmptyMessage,
+        stats.StatusRows.Select(x => new XuLyDonShopee.App.Services.SharedStatBreakdown(
+            x.Label, x.OrderCount, x.Value, x.Percentage)).ToList(),
+        stats.ShopRows.Select(x => new XuLyDonShopee.App.Services.SharedShopStatRow(
+            x.Shop, x.OrderCount, x.ItemCount, x.Revenue, x.Average, x.TrackingRate)).ToList(),
+        stats.CarrierRows.Select(x => new XuLyDonShopee.App.Services.SharedStatBreakdown(
+            x.Label, x.OrderCount, x.Value, x.Percentage)).ToList(),
+        stats.PaymentRows.Select(x => new XuLyDonShopee.App.Services.SharedStatBreakdown(
+            x.Label, x.OrderCount, x.Value, x.Percentage)).ToList());
 
     /// <summary>
     /// RÓT hook đọc SỐ ĐƠN "chuẩn bị hàng" chung toàn hệ thống (tab "Kết quả" của màn Tài khoản) — mẫu
