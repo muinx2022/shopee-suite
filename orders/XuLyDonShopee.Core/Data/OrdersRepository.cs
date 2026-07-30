@@ -20,7 +20,7 @@ namespace XuLyDonShopee.Core.Data;
 /// <see cref="StatusDescription"/>/<see cref="CancelReason"/> dùng phân loại hủy (<c>ShopeeShippingNav.LaDonHuy</c>).
 /// <see cref="DaDemDaBan"/> = đã đếm "Đã bán" (<c>sold_counted_at IS NOT NULL</c>) và
 /// <see cref="DaDayHub"/> = đã đẩy lên hub đơn hàng (<c>hub_synced_at IS NOT NULL</c>) — dùng để QUYẾT ĐỊNH có
-/// được DỌN đơn kết thúc khỏi DB chưa (giữ lại đến khi mọi nghĩa vụ hoàn tất — xem <c>AccountSession.NenXoaDonKetThuc</c>).
+/// được DỌN đơn kết thúc khỏi DB chưa (giữ lại đến khi mọi nghĩa vụ hoàn tất — xem <c>OrderPersistPipeline.NenXoaDonKetThuc</c>).
 /// <see cref="DaDayPhieuHub"/> = đã đẩy FILE PHIẾU lên hub (<c>hub_slip_synced_at IS NOT NULL</c>) — dùng để GIỮ
 /// đơn kết thúc khi còn phiếu local hợp lệ CHƯA đẩy hub (hub đang bật).
 /// <see cref="GsheetTab"/> = tab (sheet) đã ghi LẦN ĐẦU của đơn (<c>gsheet_tab</c>; null = chưa ghi/chưa nhớ) —

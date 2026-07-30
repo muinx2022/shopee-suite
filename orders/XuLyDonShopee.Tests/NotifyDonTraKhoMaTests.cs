@@ -53,7 +53,7 @@ public class NotifyDonTraKhoMaTests
     // ===== Hợp đồng gửi Hub =====
 
     [Fact]
-    public void KindGuiHub_DungChuoiHopDong() => Assert.Equal("don_tra", AccountSession.KindDonTra);
+    public void KindGuiHub_DungChuoiHopDong() => Assert.Equal("don_tra", OrderPersistPipeline.KindDonTra);
 
     /// <summary>Chống HAI TIN một mã: Hub đã tự bắn tin cho đơn CÒN trong <c>orders</c> (qua
     /// <c>ReturnCodeChangedItems</c> của <c>orders/push</c>) ⇒ app-alert chỉ mang phần đơn ĐÃ BỊ DỌN.</summary>
@@ -63,7 +63,7 @@ public class NotifyDonTraKhoMaTests
         var capMoi = new[] { ("DA-DON", "R1"), ("CON-SONG", "R2") };
         var conSong = new[] { ("CON-SONG", "R2") }; // SetReturnRequestCodes ghi được ⇒ đơn còn trong app
 
-        Assert.Equal(("DA-DON", "R1"), Assert.Single(AccountSession.LocCapDonDaDon(capMoi, conSong)));
+        Assert.Equal(("DA-DON", "R1"), Assert.Single(OrderPersistPipeline.LocCapDonDaDon(capMoi, conSong)));
     }
 
     [Fact]
@@ -71,8 +71,8 @@ public class NotifyDonTraKhoMaTests
     {
         var capMoi = new[] { ("D1", "R1"), ("D2", "R2") };
 
-        Assert.Equal(capMoi, AccountSession.LocCapDonDaDon(capMoi, Array.Empty<(string, string)>()));
-        Assert.Equal(capMoi, AccountSession.LocCapDonDaDon(capMoi, null));
+        Assert.Equal(capMoi, OrderPersistPipeline.LocCapDonDaDon(capMoi, Array.Empty<(string, string)>()));
+        Assert.Equal(capMoi, OrderPersistPipeline.LocCapDonDaDon(capMoi, null));
     }
 
     /// <summary>Mọi mã mới đều thuộc đơn còn sống → KHÔNG còn gì để app-alert (nhánh Hub im lặng, Hub lo).</summary>
@@ -81,14 +81,14 @@ public class NotifyDonTraKhoMaTests
     {
         var capMoi = new[] { ("D1", "R1") };
 
-        Assert.Empty(AccountSession.LocCapDonDaDon(capMoi, new[] { ("D1", "R1") }));
-        Assert.Empty(AccountSession.LocCapDonDaDon(null, capMoi));
+        Assert.Empty(OrderPersistPipeline.LocCapDonDaDon(capMoi, new[] { ("D1", "R1") }));
+        Assert.Empty(OrderPersistPipeline.LocCapDonDaDon(null, capMoi));
     }
 
     [Fact]
     public void MoTaCapDonTra_GhepCapTheoDinhDangSN_Bang_CODE()
     {
-        var s = AccountSession.MoTaCapDonTra(new[] { ("SN1", "CODE1"), ("SN2", "CODE2") });
+        var s = OrderPersistPipeline.MoTaCapDonTra(new[] { ("SN1", "CODE1"), ("SN2", "CODE2") });
 
         Assert.Equal("SN1=CODE1; SN2=CODE2", s);
     }
@@ -96,9 +96,9 @@ public class NotifyDonTraKhoMaTests
     [Fact]
     public void MoTaCapDonTra_BoCapThieuVe_VaChiuDuocDanhSachRong()
     {
-        Assert.Equal("SN2=CODE2", AccountSession.MoTaCapDonTra(new[] { ("SN1", "  "), ("", "CODE1"), ("SN2", "CODE2") }));
-        Assert.Equal(string.Empty, AccountSession.MoTaCapDonTra(Array.Empty<(string, string)>()));
-        Assert.Equal(string.Empty, AccountSession.MoTaCapDonTra(null));
+        Assert.Equal("SN2=CODE2", OrderPersistPipeline.MoTaCapDonTra(new[] { ("SN1", "  "), ("", "CODE1"), ("SN2", "CODE2") }));
+        Assert.Equal(string.Empty, OrderPersistPipeline.MoTaCapDonTra(Array.Empty<(string, string)>()));
+        Assert.Equal(string.Empty, OrderPersistPipeline.MoTaCapDonTra(null));
     }
 
     // ===== Badge "⏳ Chờ đẩy" =====

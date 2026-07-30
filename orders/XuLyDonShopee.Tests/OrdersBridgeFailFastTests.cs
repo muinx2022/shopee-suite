@@ -12,7 +12,7 @@ namespace XuLyDonShopee.Tests;
 /// <list type="bullet">
 /// <item><b>Bước 3</b> — <see cref="WebSocketServer.SendAsync"/> FAIL-FAST: socket chưa nối thì NÉM ngay
 /// (<see cref="InvalidOperationException"/>) thay vì return im lặng khiến caller chờ TCS 30–300s.</item>
-/// <item><b>Bước 4</b> — <see cref="OrdersBridgeSession.StageWaiter"/>: khi extension báo lỗi CHỈ fault chặng
+/// <item><b>Bước 4</b> — <see cref="StageWaiter"/>: khi extension báo lỗi CHỈ fault chặng
 /// ĐANG chờ (không fault hàng loạt TCS không ai await → hết <c>UnobservedTaskException</c>).</item>
 /// </list>
 /// </summary>
@@ -35,7 +35,7 @@ public class OrdersBridgeFailFastTests
     [Fact]
     public async Task StageWaiter_Loi_ChiFaultChangDangCho_ChangKhacDeNguyen()
     {
-        var w = new OrdersBridgeSession.StageWaiter();
+        var w = new StageWaiter();
         var awaited = NewTcs();
         var other = NewTcs(); // mô phỏng một chặng KHÁC không được await
 
@@ -54,7 +54,7 @@ public class OrdersBridgeFailFastTests
     public async Task StageWaiter_Loi_KhongDeLaiChangDangChoLamGiuLock()
     {
         // Sau khi chặng hoàn tất (fault), FaultCurrent lần nữa KHÔNG còn tác động (đã gỡ đăng ký ở finally).
-        var w = new OrdersBridgeSession.StageWaiter();
+        var w = new StageWaiter();
         var awaited = NewTcs();
         var t = w.AwaitAsync(awaited, TimeSpan.FromSeconds(5), CancellationToken.None);
         w.FaultCurrent(new InvalidOperationException("boom"));
@@ -102,7 +102,7 @@ public class OrdersBridgeFailFastTests
     /// (thiết kế mới KHÔNG fault chúng). Các TCS "khác" rời scope ở cuối (pending → GC lặng, không raise unobserved).</summary>
     private static async Task RunFaultScenarioAsync(string marker)
     {
-        var w = new OrdersBridgeSession.StageWaiter();
+        var w = new StageWaiter();
         var awaited = NewTcs();
         var others = Enumerable.Range(0, 10).Select(_ => NewTcs()).ToList();
 

@@ -7,9 +7,9 @@ namespace XuLyDonShopee.Tests;
 /// Test hành vi "KHÔNG đặt được địa chỉ lấy hàng → DỪNG + cảnh báo ra kênh ngoài" (sự cố 28/07: app biết chưa đặt
 /// được địa chỉ, vẫn in phiếu + giao đơn ⇒ shipper tới sai chỗ lấy hàng):
 /// <list type="bullet">
-/// <item><see cref="OrdersBridgeSession.QuyetDinhSauDatDiaChi"/> — nhánh quyết định: <c>pickupOk=false</c> KHÔNG
+/// <item><see cref="ShopFlowRunner.QuyetDinhSauDatDiaChi"/> — nhánh quyết định: <c>pickupOk=false</c> KHÔNG
 /// bao giờ dẫn tới bước Chuẩn bị hàng (in phiếu); captcha giữ nguyên hành vi cũ.</item>
-/// <item><see cref="AccountSession.CoNenGuiCanhBao"/> — luật chặn spam 1 tin / tài khoản / 60 phút.</item>
+/// <item><see cref="OrderPersistPipeline.CoNenGuiCanhBao"/> — luật chặn spam 1 tin / tài khoản / 60 phút.</item>
 /// <item><see cref="OrderNotifyService.TaoTinNhanLoiDiaChi"/> — nội dung tin cảnh báo (máy · tài khoản/shop ·
 /// lỗi gì · app đã làm gì).</item>
 /// </list>
@@ -21,22 +21,22 @@ public class PickupAddressStopTests
     [Fact]
     public void QuyetDinh_DatDiaChiOk_KhongCaptcha_ThiXuDon()
     {
-        Assert.Equal(SauDatDiaChi.XuDon, OrdersBridgeSession.QuyetDinhSauDatDiaChi(pickupOk: true, captchaSeen: false));
+        Assert.Equal(SauDatDiaChi.XuDon, ShopFlowRunner.QuyetDinhSauDatDiaChi(pickupOk: true, captchaSeen: false));
     }
 
     [Fact]
     public void QuyetDinh_KhongDatDuocDiaChi_ThiDUNG_KhongInPhieu()
     {
         // Đây là chính lỗi production: trước đây nhánh này chạy tiếp prepareNextOrder → in phiếu sai địa chỉ.
-        Assert.Equal(SauDatDiaChi.DungViDiaChi, OrdersBridgeSession.QuyetDinhSauDatDiaChi(pickupOk: false, captchaSeen: false));
+        Assert.Equal(SauDatDiaChi.DungViDiaChi, ShopFlowRunner.QuyetDinhSauDatDiaChi(pickupOk: false, captchaSeen: false));
     }
 
     [Fact]
     public void QuyetDinh_Captcha_GiuNguyenHanhViCu()
     {
         // Captcha ưu tiên hơn (thông điệp phải là captcha, kẻo người trực xử nhầm nguyên nhân).
-        Assert.Equal(SauDatDiaChi.DungViCaptcha, OrdersBridgeSession.QuyetDinhSauDatDiaChi(pickupOk: true, captchaSeen: true));
-        Assert.Equal(SauDatDiaChi.DungViCaptcha, OrdersBridgeSession.QuyetDinhSauDatDiaChi(pickupOk: false, captchaSeen: true));
+        Assert.Equal(SauDatDiaChi.DungViCaptcha, ShopFlowRunner.QuyetDinhSauDatDiaChi(pickupOk: true, captchaSeen: true));
+        Assert.Equal(SauDatDiaChi.DungViCaptcha, ShopFlowRunner.QuyetDinhSauDatDiaChi(pickupOk: false, captchaSeen: true));
     }
 
     [Fact]
@@ -45,7 +45,7 @@ public class PickupAddressStopTests
         // Ràng buộc AN TOÀN: pickupOk=false thì KHÔNG có tổ hợp nào cho ra "xử đơn" (in phiếu).
         foreach (var captcha in new[] { false, true })
         {
-            Assert.NotEqual(SauDatDiaChi.XuDon, OrdersBridgeSession.QuyetDinhSauDatDiaChi(pickupOk: false, captchaSeen: captcha));
+            Assert.NotEqual(SauDatDiaChi.XuDon, ShopFlowRunner.QuyetDinhSauDatDiaChi(pickupOk: false, captchaSeen: captcha));
         }
     }
 
@@ -57,28 +57,28 @@ public class PickupAddressStopTests
     [Fact]
     public void ChanSpam_LanDau_ThiGui()
     {
-        Assert.True(AccountSession.CoNenGuiCanhBao(mocGanNhat: null, bayGio: Moc, nguong: Nguong));
+        Assert.True(OrderPersistPipeline.CoNenGuiCanhBao(mocGanNhat: null, bayGio: Moc, nguong: Nguong));
     }
 
     [Fact]
     public void ChanSpam_TrongNguong_ThiKhongGuiLai()
     {
         // Vòng chạy lặp lại sau ~30' — vẫn trong 60' nên KHÔNG gửi lại (caller vẫn phải LOG).
-        Assert.False(AccountSession.CoNenGuiCanhBao(Moc, Moc.AddMinutes(30), Nguong));
-        Assert.False(AccountSession.CoNenGuiCanhBao(Moc, Moc.AddMinutes(59), Nguong));
+        Assert.False(OrderPersistPipeline.CoNenGuiCanhBao(Moc, Moc.AddMinutes(30), Nguong));
+        Assert.False(OrderPersistPipeline.CoNenGuiCanhBao(Moc, Moc.AddMinutes(59), Nguong));
     }
 
     [Fact]
     public void ChanSpam_QuaNguong_ThiGuiLai()
     {
-        Assert.True(AccountSession.CoNenGuiCanhBao(Moc, Moc.AddMinutes(60), Nguong));   // đúng ngưỡng → gửi
-        Assert.True(AccountSession.CoNenGuiCanhBao(Moc, Moc.AddMinutes(61), Nguong));
+        Assert.True(OrderPersistPipeline.CoNenGuiCanhBao(Moc, Moc.AddMinutes(60), Nguong));   // đúng ngưỡng → gửi
+        Assert.True(OrderPersistPipeline.CoNenGuiCanhBao(Moc, Moc.AddMinutes(61), Nguong));
     }
 
     [Fact]
     public void ChanSpam_NguongMacDinh_La60Phut()
     {
-        Assert.Equal(TimeSpan.FromMinutes(60), AccountSession.NguongCanhBaoDiaChi);
+        Assert.Equal(TimeSpan.FromMinutes(60), OrderPersistPipeline.NguongCanhBaoDiaChi);
     }
 
     // ===================== Nội dung tin cảnh báo =====================

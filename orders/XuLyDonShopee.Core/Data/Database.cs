@@ -150,7 +150,7 @@ CREATE TABLE IF NOT EXISTS account_shops (
 );
 
 -- MÃ YÊU CẦU TRẢ HÀNG, SỐNG ĐỘC LẬP với vòng đời đơn. Shopee cho trả hàng trong 15 ngày, mà app dọn đơn KẾT
--- THÚC ngay khi đã ghi sheet + đếm + đẩy hub (AccountSession.NenXoaDonKetThuc) — nên lúc yêu cầu trả hàng xuất
+-- THÚC ngay khi đã ghi sheet + đếm + đẩy hub (OrderPersistPipeline.NenXoaDonKetThuc) — nên lúc yêu cầu trả hàng xuất
 -- hiện thì đơn thường đã bị xoá khỏi `orders` và mã quét được bị vứt đi (đó là lý do số mã lấy được vẫn là 0).
 -- Bảng này là nguồn sự thật MỚI cho mã trả hàng; `orders.return_request_code` từ nay chỉ để HIỂN THỊ.
 --

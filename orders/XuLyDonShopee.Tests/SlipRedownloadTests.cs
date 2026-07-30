@@ -7,8 +7,8 @@ using XuLyDonShopee.Core.Models;
 namespace XuLyDonShopee.Tests;
 
 /// <summary>
-/// Test cho tính năng "tải lại phiếu thiếu": hàm PURE <see cref="AccountSession.ThieuPhieu"/> (ma trận trạng
-/// thái/vận đơn/file), helper kiểm magic PDF <see cref="AccountSession.SlipFileIsValidPdf"/>, và query
+/// Test cho tính năng "tải lại phiếu thiếu": hàm PURE <see cref="SlipFiles.ThieuPhieu"/> (ma trận trạng
+/// thái/vận đơn/file), helper kiểm magic PDF <see cref="SlipFiles.SlipFileIsValidPdf"/>, và query
 /// <see cref="OrdersRepository.GetOrdersForSlipCheck"/>. KHÔNG test luồng browser (best-effort, verify tay).
 /// </summary>
 public class SlipRedownloadTests
@@ -38,7 +38,7 @@ public class SlipRedownloadTests
     public void SlipFileIsValidPdf_FilePdfThat_True()
     {
         var path = WriteValidPdf();
-        try { Assert.True(AccountSession.SlipFileIsValidPdf(path)); }
+        try { Assert.True(SlipFiles.SlipFileIsValidPdf(path)); }
         finally { File.Delete(path); }
     }
 
@@ -46,13 +46,13 @@ public class SlipRedownloadTests
     public void SlipFileIsValidPdf_FileRac_False()
     {
         var path = WriteGarbage();
-        try { Assert.False(AccountSession.SlipFileIsValidPdf(path)); }
+        try { Assert.False(SlipFiles.SlipFileIsValidPdf(path)); }
         finally { File.Delete(path); }
     }
 
     [Fact]
     public void SlipFileIsValidPdf_FileKhongTonTai_False()
-        => Assert.False(AccountSession.SlipFileIsValidPdf(MissingPath()));
+        => Assert.False(SlipFiles.SlipFileIsValidPdf(MissingPath()));
 
     // ===== ThieuPhieu (ma trận) =====
 
@@ -60,8 +60,8 @@ public class SlipRedownloadTests
     public void ThieuPhieu_ChuanBiHang_CoVanDon_FileThieu_True()
     {
         // đúng trạng thái + có vận đơn + file không tồn tại → THIẾU
-        Assert.True(AccountSession.ThieuPhieu("Chờ lấy hàng", "SPXVN123", MissingPath()));
-        Assert.True(AccountSession.ThieuPhieu("Chuẩn bị hàng", "SPXVN123", MissingPath()));
+        Assert.True(SlipFiles.ThieuPhieu("Chờ lấy hàng", "SPXVN123", MissingPath()));
+        Assert.True(SlipFiles.ThieuPhieu("Chuẩn bị hàng", "SPXVN123", MissingPath()));
     }
 
     [Fact]
@@ -69,7 +69,7 @@ public class SlipRedownloadTests
     {
         // file .pdf tồn tại nhưng KHÔNG có magic → coi như thiếu (không tin đuôi file)
         var path = WriteGarbage();
-        try { Assert.True(AccountSession.ThieuPhieu("Chờ lấy hàng", "SPXVN123", path)); }
+        try { Assert.True(SlipFiles.ThieuPhieu("Chờ lấy hàng", "SPXVN123", path)); }
         finally { File.Delete(path); }
     }
 
@@ -78,7 +78,7 @@ public class SlipRedownloadTests
     {
         // đã có file PDF thật → KHÔNG thiếu
         var path = WriteValidPdf();
-        try { Assert.False(AccountSession.ThieuPhieu("Chờ lấy hàng", "SPXVN123", path)); }
+        try { Assert.False(SlipFiles.ThieuPhieu("Chờ lấy hàng", "SPXVN123", path)); }
         finally { File.Delete(path); }
     }
 
@@ -86,9 +86,9 @@ public class SlipRedownloadTests
     public void ThieuPhieu_KhongVanDon_False()
     {
         // chưa có vận đơn (chưa arrange) → phiếu tạo ở bước Xử lý đơn, KHÔNG tính thiếu
-        Assert.False(AccountSession.ThieuPhieu("Chờ lấy hàng", null, MissingPath()));
-        Assert.False(AccountSession.ThieuPhieu("Chuẩn bị hàng", "", MissingPath()));
-        Assert.False(AccountSession.ThieuPhieu("Chuẩn bị hàng", "   ", MissingPath()));
+        Assert.False(SlipFiles.ThieuPhieu("Chờ lấy hàng", null, MissingPath()));
+        Assert.False(SlipFiles.ThieuPhieu("Chuẩn bị hàng", "", MissingPath()));
+        Assert.False(SlipFiles.ThieuPhieu("Chuẩn bị hàng", "   ", MissingPath()));
     }
 
     [Theory]
@@ -101,7 +101,7 @@ public class SlipRedownloadTests
     public void ThieuPhieu_TrangThaiKhac_False(string? status)
     {
         // trạng thái không phải Chuẩn bị hàng → KHÔNG tính thiếu dù có vận đơn + thiếu file
-        Assert.False(AccountSession.ThieuPhieu(status, "SPXVN123", MissingPath()));
+        Assert.False(SlipFiles.ThieuPhieu(status, "SPXVN123", MissingPath()));
     }
 
     // ===== OrdersRepository.GetOrdersForSlipCheck =====

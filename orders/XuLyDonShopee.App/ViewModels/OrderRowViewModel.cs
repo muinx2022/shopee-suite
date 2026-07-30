@@ -154,9 +154,9 @@ public sealed partial class OrderRowViewModel
 
     /// <summary>
     /// Đã có file PDF phiếu HỢP LỆ (tồn tại + magic <c>%PDF-</c>) chưa — tính lúc nạp dòng (đọc 5 byte đầu qua
-    /// <see cref="AccountSession.SlipFileIsValidPdf"/>). Dùng để hiện/ẩn nút "Tải phiếu": thiếu file → hiện.
+    /// <see cref="SlipFiles.SlipFileIsValidPdf"/>). Dùng để hiện/ẩn nút "Tải phiếu": thiếu file → hiện.
     /// </summary>
-    public bool HasSlipFile => AccountSession.SlipFileIsValidPdf(SlipPath);
+    public bool HasSlipFile => SlipFiles.SlipFileIsValidPdf(SlipPath);
 
     /// <summary>
     /// Hiện nút "Tải phiếu" khi đơn ĐÃ có mã vận đơn (arrange xong, phiếu đáng lẽ phải có) NHƯNG file phiếu

@@ -6,7 +6,7 @@ namespace XuLyDonShopee.Core.Data;
 /// Kho MÃ YÊU CẦU TRẢ HÀNG (<c>return_codes</c>) — <b>sống ĐỘC LẬP với vòng đời đơn</b>.
 /// <para>
 /// Vì sao cần bảng riêng: Shopee cho trả hàng trong 15 ngày, mà app DỌN đơn kết thúc ngay khi đã ghi sheet + đếm
-/// + đẩy hub (<c>AccountSession.NenXoaDonKetThuc</c>) — thường trong một hai vòng. Khi yêu cầu trả hàng xuất hiện
+/// + đẩy hub (<c>OrderPersistPipeline.NenXoaDonKetThuc</c>) — thường trong một hai vòng. Khi yêu cầu trả hàng xuất hiện
 /// (nhiều ngày sau) thì <c>OrdersRepository.SetReturnRequestCodes</c> không tìm thấy đơn nữa và VỨT mã đi. Dòng
 /// trên Google Sheet thì vẫn còn, và Apps Script tra theo MÃ ĐƠN rồi điền ô trống — nó không cần máy còn giữ đơn.
 /// </para>

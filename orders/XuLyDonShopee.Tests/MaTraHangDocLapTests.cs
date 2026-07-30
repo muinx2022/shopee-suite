@@ -8,7 +8,7 @@ namespace XuLyDonShopee.Tests;
 
 /// <summary>
 /// Test đợt <b>"mã trả hàng sống độc lập với đơn"</b>. Bối cảnh: Shopee cho trả hàng trong 15 ngày, mà app DỌN
-/// đơn kết thúc ngay khi ghi sheet xong (<see cref="AccountSession.NenXoaDonKetThuc"/>) — nên lúc yêu cầu trả
+/// đơn kết thúc ngay khi ghi sheet xong (<see cref="OrderPersistPipeline.NenXoaDonKetThuc"/>) — nên lúc yêu cầu trả
 /// hàng xuất hiện thì đơn đã bị xoá khỏi <c>orders</c> và <c>SetReturnRequestCodes</c> VỨT mã đi. Đó là lý do số
 /// mã lấy được vẫn là 0 dù đã sửa hai lỗi trước.
 /// <list type="bullet">

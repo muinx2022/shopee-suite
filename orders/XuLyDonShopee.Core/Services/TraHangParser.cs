@@ -32,7 +32,7 @@ public sealed record DongTraHang(string? ShopeeOrderId, string HeadHtml, bool? L
 /// "Đơn Trả hàng Hoàn tiền" nên số đọc được là của tab "Tất cả" — GỘP cả Đơn Hủy / Đơn Giao hàng không thành
 /// công, hai loại KHÔNG có mã yêu cầu trả hàng. <see cref="SortApplied"/> false chỉ để caller log CẢNH BÁO;
 /// <see cref="TabTraHang"/> false thì caller BỎ HẲN LƯỢT (mốc giữ nguyên) — ghi số tab "Tất cả" vào mốc là đầu
-/// độc mốc, xem <see cref="OrdersBridgeSession.QuyetDinhLuotTraHang"/>.
+/// độc mốc, xem <see cref="ShopFlowRunner.QuyetDinhLuotTraHang"/>.
 /// <para><see cref="ChanDoan"/> = mô tả 4 dấu hiệu trang lúc extension BỎ lượt vì không đọc được ô tổng (url,
 /// title, ô tổng có/rỗng, số dòng, có tab-wrapper) — null khi đọc bình thường. Thuần để LOG.</para></summary>
 public sealed record KetQuaDocTraHang(
@@ -349,7 +349,7 @@ public static class TraHangParser
     /// Số ngày lùi tối đa (theo <b>NGÀY YÊU CẦU</b>, suy từ 6 ký tự đầu mã yêu cầu) còn được lấy mã trả hàng.
     /// <para>
     /// <b>20 = 15 ngày chính sách trả hàng của Shopee + biên.</b> CỐ Ý là hằng RIÊNG, KHÔNG dùng chung
-    /// <see cref="OrdersBridgeSession.SoNgayBuUocTinh"/> (7 ngày): con số đó đo trên NGÀY ĐẶT ĐƠN cho việc lấy bù
+    /// <see cref="UocTinhDon.SoNgayBuUocTinh"/> (7 ngày): con số đó đo trên NGÀY ĐẶT ĐƠN cho việc lấy bù
     /// "Số tiền cuối cùng" — khác trục, khác ý nghĩa, sửa một bên không được kéo bên kia theo.
     /// </para>
     /// </summary>
@@ -357,7 +357,7 @@ public static class TraHangParser
 
     /// <summary>
     /// Lọc các cặp vừa <see cref="GhepCap"/> theo CỬA SỔ <b>NGÀY YÊU CẦU</b>: giữ cặp có ngày yêu cầu (suy từ 6 ký
-    /// tự đầu MÃ YÊU CẦU, <see cref="OrdersBridgeSession.NgayDonTuMa"/> — mã yêu cầu cũng mở đầu bằng <c>yyMMdd</c>,
+    /// tự đầu MÃ YÊU CẦU, <see cref="UocTinhDon.NgayDonTuMa"/> — mã yêu cầu cũng mở đầu bằng <c>yyMMdd</c>,
     /// vd <c>2607280TS2VYAW3</c> → 28/07) không cũ hơn <paramref name="homNay"/> trừ <paramref name="soNgay"/> ngày.
     /// Biên ĐÓNG (đúng <paramref name="soNgay"/> ngày vẫn giữ).
     /// <para>
@@ -389,7 +389,7 @@ public static class TraHangParser
             {
                 continue;
             }
-            if (OrdersBridgeSession.NgayDonTuMa(c.MaYeuCau) is not DateTime ngay)
+            if (UocTinhDon.NgayDonTuMa(c.MaYeuCau) is not DateTime ngay)
             {
                 giuKhongRoNgay++;
                 giu.Add(c);

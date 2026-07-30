@@ -373,7 +373,7 @@ public class OrderNotifyService
 
     /// <summary>
     /// Dựng tin CẢNH BÁO "không đặt được địa chỉ lấy hàng" — vòng của tài khoản đã DỪNG, CHƯA in phiếu nào cho
-    /// shop này (xem <c>OrdersBridgeSession.QuyetDinhSauDatDiaChi</c>). Text THUẦN + emoji + xuống dòng như
+    /// shop này (xem <c>ShopFlowRunner.QuyetDinhSauDatDiaChi</c>). Text THUẦN + emoji + xuống dòng như
     /// <see cref="TaoTinNhanDonMoi"/> (render đẹp trên cả 3 kênh). Trả lời đủ 4 câu hỏi của người trực: <b>máy
     /// nào · tài khoản/shop nào · lỗi gì · app đã làm gì</b> — và việc cần làm để chạy lại. Tham số rỗng/null →
     /// in <c>?</c> (KHÔNG ném, KHÔNG in "null": tin cảnh báo thiếu một trường vẫn phải tới được người trực).

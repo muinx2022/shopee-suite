@@ -4,7 +4,7 @@ namespace XuLyDonShopee.Tests;
 
 /// <summary>
 /// Chốt luật <b>BỎ LƯỢT khi không chắc đang ở tab "Đơn Trả hàng Hoàn tiền"</b>
-/// (<see cref="OrdersBridgeSession.QuyetDinhLuotTraHang"/>).
+/// (<see cref="ShopFlowRunner.QuyetDinhLuotTraHang"/>).
 /// <para>
 /// Sự cố: extension đặt <c>tabTraHang=true</c> mù sau cú click, C# chỉ log cảnh báo rồi VẪN chốt mốc bằng con số
 /// của tab "Tất cả" (gộp Đơn Hủy / Giao không thành công) — lớn hơn hẳn số thật. Vòng sau chọn được tab, số thật
@@ -20,7 +20,7 @@ public class TraHangBoLuotSaiTabTests
     [Fact]
     public void DungTab_CoSo_ThiXuLy()
     {
-        var luot = OrdersBridgeSession.QuyetDinhLuotTraHang(Doc(12, tabTraHang: true));
+        var luot = ShopFlowRunner.QuyetDinhLuotTraHang(Doc(12, tabTraHang: true));
 
         Assert.Equal(SauDocTraHang.XuLy, luot.Nhanh);
         Assert.Equal(12, luot.SoMoi);
@@ -31,7 +31,7 @@ public class TraHangBoLuotSaiTabTests
     [Fact]
     public void SaiTab_DuCoSo_ThiBoLuot()
     {
-        var luot = OrdersBridgeSession.QuyetDinhLuotTraHang(Doc(141, tabTraHang: false));
+        var luot = ShopFlowRunner.QuyetDinhLuotTraHang(Doc(141, tabTraHang: false));
 
         Assert.Equal(SauDocTraHang.BoLuotSaiTab, luot.Nhanh);
         Assert.Equal(141, luot.SoMoi); // vẫn mang số ra để LOG cho biết đã đọc nhầm số nào
@@ -40,7 +40,7 @@ public class TraHangBoLuotSaiTabTests
     [Fact]
     public void KhongDocDuocSo_ThiBoLuot_DuBaoDungTab()
     {
-        var luot = OrdersBridgeSession.QuyetDinhLuotTraHang(Doc(null, tabTraHang: true));
+        var luot = ShopFlowRunner.QuyetDinhLuotTraHang(Doc(null, tabTraHang: true));
 
         Assert.Equal(SauDocTraHang.BoLuotKhongCoSo, luot.Nhanh);
         Assert.Equal(0, luot.SoMoi);
@@ -53,7 +53,7 @@ public class TraHangBoLuotSaiTabTests
     {
         var doc = TraHangParser.ParseKetQua("{\"soYeuCauText\":\"141 Yêu cầu\",\"sortApplied\":true,\"list\":[]}");
 
-        Assert.Equal(SauDocTraHang.BoLuotSaiTab, OrdersBridgeSession.QuyetDinhLuotTraHang(doc).Nhanh);
+        Assert.Equal(SauDocTraHang.BoLuotSaiTab, ShopFlowRunner.QuyetDinhLuotTraHang(doc).Nhanh);
     }
 
     /// <summary>
@@ -65,7 +65,7 @@ public class TraHangBoLuotSaiTabTests
     public void GiuMocKhiSaiTab_VongSauVanDocDuocYeuCauMoi()
     {
         var docLoi = Doc(141, tabTraHang: false);
-        Assert.Equal(SauDocTraHang.BoLuotSaiTab, OrdersBridgeSession.QuyetDinhLuotTraHang(docLoi).Nhanh);
+        Assert.Equal(SauDocTraHang.BoLuotSaiTab, ShopFlowRunner.QuyetDinhLuotTraHang(docLoi).Nhanh);
 
         // Mốc GIỮ NGUYÊN 10 (lượt lỗi không gọi saveReturnCount) → vòng sau đọc 12 là TĂNG 2.
         Assert.Equal(new QuyetDinhTraHang(LuatSoYeuCau.Tang, 2), TraHangParser.QuyetDinhCheck(10, 12));

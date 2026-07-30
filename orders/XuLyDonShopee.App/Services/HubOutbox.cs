@@ -43,7 +43,7 @@ public static class HubOutbox
     /// (do shell suite rót). <b>Không bao giờ ném</b> (sync DB đã xong — lỗi hub chỉ ghi log): hủy CHỦ ĐỘNG → thôi;
     /// lỗi khác → log "Hub: lỗi — ...". Hook null (app Đơn hàng chạy độc lập / hub chưa cấu hình) → return im lặng
     /// (không đổi hành vi cũ, KHÔNG đụng DB). Không có đơn chờ → return. Logic chia lô + đánh dấu tách sang hàm thuần
-    /// <see cref="AccountSession.PushPendingToHubAsync"/> (test được, không đụng trình duyệt).
+    /// <see cref="OrderPersistPipeline.PushPendingToHubAsync"/> (test được, không đụng trình duyệt).
     /// </summary>
     public static async Task<KetQuaDay> PushOrdersToHubAsync(
         long accountId, AppServices services, Action<string> log, CancellationToken ct)
@@ -62,12 +62,12 @@ public static class HubOutbox
                 return KetQuaDay.KhongCanDay;
             }
 
-            var marked = await AccountSession.PushPendingToHubAsync(
+            var marked = await OrderPersistPipeline.PushPendingToHubAsync(
                 accountId,
                 pending,
                 push,
                 sns => services.Orders.MarkHubSynced(accountId, sns, DateTime.UtcNow),
-                AccountSession.HubPushBatchSize,
+                OrderPersistPipeline.HubPushBatchSize,
                 ct).ConfigureAwait(false);
 
             if (marked > 0)
@@ -98,8 +98,8 @@ public static class HubOutbox
     /// Đẩy FILE PHIẾU của các đơn ĐÃ lên hub nhưng CHƯA đẩy phiếu (<see cref="OrdersRepository.GetForHubSlipPush"/>)
     /// lên HUB qua hook <see cref="AppServices.PushOrderSlipsToHub"/> (do shell suite rót). Với từng đơn: đọc file
     /// <c>&lt;invoiceDir&gt;/&lt;SanitizeFileName(sn)&gt;.pdf</c> qua kiểm magic sẵn có
-    /// (<see cref="AccountSession.TryReadSlipBase64"/>) — file THIẾU/hỏng → bỏ qua im lặng (khi file có, lượt sau tự
-    /// đẩy). Chia lô ≤ <see cref="AccountSession.HubSlipPushBatchSize"/>, gọi hook; danh sách <c>order_sn</c> hub báo
+    /// (<see cref="SlipFiles.TryReadSlipBase64"/>) — file THIẾU/hỏng → bỏ qua im lặng (khi file có, lượt sau tự
+    /// đẩy). Chia lô ≤ <see cref="OrderPersistPipeline.HubSlipPushBatchSize"/>, gọi hook; danh sách <c>order_sn</c> hub báo
     /// ĐÃ LƯU → <see cref="OrdersRepository.MarkHubSlipSynced"/> đúng các đơn đó; hook trả null (hub lỗi cả lô) →
     /// DỪNG các lô sau (lượt sau thử lại). Log 1 dòng khi đẩy được ≥1 phiếu.
     /// <b>Không bao giờ ném</b>: hủy CHỦ ĐỘNG → thôi; lỗi khác → log. Hook null / không có đơn chờ → return im lặng.
@@ -127,7 +127,7 @@ public static class HubOutbox
             foreach (var (sn, _) in pending)
             {
                 var path = Path.Combine(invoiceDir, ShopeeShippingNav.SanitizeFileName(sn) + ".pdf");
-                if (AccountSession.TryReadSlipBase64(path, log, out var b64) && b64 is not null)
+                if (SlipFiles.TryReadSlipBase64(path, log, out var b64) && b64 is not null)
                 {
                     ready.Add((sn, b64));
                 }
@@ -138,11 +138,11 @@ public static class HubOutbox
             }
 
             var pushed = 0;
-            for (var i = 0; i < ready.Count; i += AccountSession.HubSlipPushBatchSize)
+            for (var i = 0; i < ready.Count; i += OrderPersistPipeline.HubSlipPushBatchSize)
             {
                 ct.ThrowIfCancellationRequested();
 
-                var count = Math.Min(AccountSession.HubSlipPushBatchSize, ready.Count - i);
+                var count = Math.Min(OrderPersistPipeline.HubSlipPushBatchSize, ready.Count - i);
                 var batch = ready.GetRange(i, count);
 
                 var saved = await push(accountId, batch, ct).ConfigureAwait(false);
@@ -224,7 +224,7 @@ public static class HubOutbox
     /// <summary>
     /// Đẩy các đơn của tài khoản này (kèm file phiếu PDF base64) lên Google Sheet qua Apps Script Web App, RỒI
     /// DỌN đơn KẾT THÚC (Đã giao / Đã hủy) khỏi app (chính sách "app chỉ giữ đơn Chuẩn bị hàng"). Gọi CHẠY NỀN
-    /// (qua <c>AccountSession.StartGsheetPushInBackground</c> hoặc <see cref="HubOutboxWorker"/>) SAU khi Sync đã
+    /// (qua <c>OrderPersistPipeline.StartGsheetPushInBackground</c> hoặc <see cref="HubOutboxWorker"/>) SAU khi Sync đã
     /// ghi đơn vào DB + tổng kết.
     /// <b>Không bao giờ ném</b> (sync DB đã xong — lỗi GSheet chỉ ghi log): hủy chủ động → thôi; lỗi khác → log.
     /// <para>
@@ -235,7 +235,7 @@ public static class HubOutbox
     /// <para>
     /// <b>DỌN vòng đời:</b> đơn kết thúc chỉ bị XÓA khi (a) đã settled GSheet, (b) nếu Đã giao có SKU thì "Đã bán"
     /// đã đếm (<c>sold_counted_at</c>), (c) nếu hub bật thì đã đẩy hub (<c>hub_synced_at</c>) — xem
-    /// <see cref="AccountSession.NenXoaDonKetThuc"/>. Nghi ngờ thì GIỮ (đơn thừa vô hại, đơn mất là mất dữ liệu);
+    /// <see cref="OrderPersistPipeline.NenXoaDonKetThuc"/>. Nghi ngờ thì GIỮ (đơn thừa vô hại, đơn mất là mất dữ liệu);
     /// lượt sync sau tự đẩy + dọn tiếp. Xóa xong phát <see cref="AppServices.RaiseOrdersChanged"/> để lưới Đơn hàng vẽ lại.
     /// </para>
     /// <paramref name="nenBaoThieuGsheetUrl"/>: cờ "được phép báo THIẾU URL Web App lần này" — phiên chỉ cho phép
@@ -341,7 +341,7 @@ public static class HubOutbox
                     {
                         var safeName = ShopeeShippingNav.SanitizeFileName(p.OrderSn);
                         var path = Path.Combine(invoiceDir, safeName + ".pdf");
-                        if (AccountSession.TryReadSlipBase64(path, log, out var b64))
+                        if (SlipFiles.TryReadSlipBase64(path, log, out var b64))
                         {
                             fileName = safeName + ".pdf";
                             fileBase64 = b64;
@@ -490,8 +490,8 @@ public static class HubOutbox
                 }
                 // Còn phiếu local HỢP LỆ chưa đẩy hub (hub bật) → GIỮ đơn để lượt sau đẩy phiếu xong mới dọn.
                 var coPhieuLocalChuaDayHub = hubHookActive && !p.DaDayPhieuHub
-                    && AccountSession.SlipFileIsValidPdf(Path.Combine(slipDir, ShopeeShippingNav.SanitizeFileName(p.OrderSn) + ".pdf"));
-                if (AccountSession.NenXoaDonKetThuc(p, settled.Contains(p.OrderSn), hubHookActive, coPhieuLocalChuaDayHub))
+                    && SlipFiles.SlipFileIsValidPdf(Path.Combine(slipDir, ShopeeShippingNav.SanitizeFileName(p.OrderSn) + ".pdf"));
+                if (OrderPersistPipeline.NenXoaDonKetThuc(p, settled.Contains(p.OrderSn), hubHookActive, coPhieuLocalChuaDayHub))
                 {
                     deletable.Add(p.OrderSn);
                 }

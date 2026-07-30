@@ -5,11 +5,11 @@ namespace XuLyDonShopee.Tests;
 
 /// <summary>
 /// Test luật CHỌN đơn cần mở trang chi tiết lấy "Số tiền cuối cùng"
-/// (<see cref="OrdersBridgeSession.ChonDonLayUocTinh"/>) và phần LOG chẩn đoán của
-/// <see cref="OrdersBridgeSession.MergeFinalAmounts"/>.
+/// (<see cref="UocTinhDon.ChonDonLayUocTinh"/>) và phần LOG chẩn đoán của
+/// <see cref="UocTinhDon.MergeFinalAmounts"/>.
 /// <para>Điểm phải ghim: đơn RỜI trạng thái "chuẩn bị hàng" mà chưa có ước tính vẫn phải được thử lại (trước đây
 /// mất VĨNH VIỄN — ô "tiền bán" trên Google Sheet trống mãi), nhưng phần nới thêm đó phải bị chốt chặn cứng
-/// (≤ <see cref="OrdersBridgeSession.MaxBuUocTinh"/> đơn/lượt, ≤ <see cref="OrdersBridgeSession.SoNgayBuUocTinh"/>
+/// (≤ <see cref="UocTinhDon.MaxBuUocTinh"/> đơn/lượt, ≤ <see cref="UocTinhDon.SoNgayBuUocTinh"/>
 /// ngày, ưu tiên đơn MỚI) kẻo nổ số tab chi tiết mỗi vòng ⇒ tăng rủi ro captcha.</para>
 /// </summary>
 public class UocTinhChonDonTests
@@ -24,7 +24,7 @@ public class UocTinhChonDonTests
         => new() { OrderSn = sn, Status = status, FinalAmount = final, ShopeeOrderId = shopeeId };
 
     private static (List<SyncedOrder> Chinh, List<SyncedOrder> Bu) Chon(params SyncedOrder[] orders)
-        => OrdersBridgeSession.ChonDonLayUocTinh(orders, KhongBoQua, HomNay);
+        => UocTinhDon.ChonDonLayUocTinh(orders, KhongBoQua, HomNay);
 
     // ===== NgayDonTuMa: 6 ký tự đầu mã đơn =====
 
@@ -34,7 +34,7 @@ public class UocTinhChonDonTests
     [InlineData("260619GSNQ36U7", 2026, 6, 19)]
     public void NgayDonTuMa_LayDuocNgayDat(string sn, int nam, int thang, int ngay)
     {
-        Assert.Equal(new DateTime(nam, thang, ngay), OrdersBridgeSession.NgayDonTuMa(sn));
+        Assert.Equal(new DateTime(nam, thang, ngay), UocTinhDon.NgayDonTuMa(sn));
     }
 
     /// <summary>Mã không đọc được ngày → null ⇒ đơn đó KHÔNG được lấy bù (thà bỏ còn hơn đoán).</summary>
@@ -46,7 +46,7 @@ public class UocTinhChonDonTests
     [InlineData("269928TV14FVU8")]  // tháng 99 — không phải ngày hợp lệ
     public void NgayDonTuMa_MaLa_TraVeNull(string? sn)
     {
-        Assert.Null(OrdersBridgeSession.NgayDonTuMa(sn));
+        Assert.Null(UocTinhDon.NgayDonTuMa(sn));
     }
 
     // ===== Nhóm CHÍNH: luật cũ giữ nguyên =====
@@ -102,17 +102,17 @@ public class UocTinhChonDonTests
     [Fact]
     public void RoiTrangThai_CuHonHanNgay_KhongChon()
     {
-        var (chinh, bu) = Chon(Don(Ma(HomNay.AddDays(-OrdersBridgeSession.SoNgayBuUocTinh - 1)), "Đang giao"));
+        var (chinh, bu) = Chon(Don(Ma(HomNay.AddDays(-UocTinhDon.SoNgayBuUocTinh - 1)), "Đang giao"));
 
         Assert.Empty(chinh);
         Assert.Empty(bu);
     }
 
-    /// <summary>Đúng biên <see cref="OrdersBridgeSession.SoNgayBuUocTinh"/> ngày → VẪN lấy (biên đóng).</summary>
+    /// <summary>Đúng biên <see cref="UocTinhDon.SoNgayBuUocTinh"/> ngày → VẪN lấy (biên đóng).</summary>
     [Fact]
     public void RoiTrangThai_DungBienNgay_VanChon()
     {
-        var (_, bu) = Chon(Don(Ma(HomNay.AddDays(-OrdersBridgeSession.SoNgayBuUocTinh)), "Đang giao"));
+        var (_, bu) = Chon(Don(Ma(HomNay.AddDays(-UocTinhDon.SoNgayBuUocTinh)), "Đang giao"));
 
         Assert.Single(bu);
     }
@@ -149,7 +149,7 @@ public class UocTinhChonDonTests
         Assert.Empty(bu);
     }
 
-    /// <summary>Quá trần → chỉ lấy <see cref="OrdersBridgeSession.MaxBuUocTinh"/> đơn, ưu tiên MỚI nhất.</summary>
+    /// <summary>Quá trần → chỉ lấy <see cref="UocTinhDon.MaxBuUocTinh"/> đơn, ưu tiên MỚI nhất.</summary>
     [Fact]
     public void QuaTran_ChiLayToiDa_VaUuTienDonMoiNhat()
     {
@@ -160,9 +160,9 @@ public class UocTinhChonDonTests
 
         var (_, bu) = Chon(dons);
 
-        Assert.Equal(OrdersBridgeSession.MaxBuUocTinh, bu.Count);
+        Assert.Equal(UocTinhDon.MaxBuUocTinh, bu.Count);
         Assert.Equal(
-            dons.Take(OrdersBridgeSession.MaxBuUocTinh).Select(o => o.OrderSn),
+            dons.Take(UocTinhDon.MaxBuUocTinh).Select(o => o.OrderSn),
             bu.Select(o => o.OrderSn));
     }
 
@@ -178,7 +178,7 @@ public class UocTinhChonDonTests
         var (chinh, bu) = Chon(chuanBi.Concat(daRoi).ToArray());
 
         Assert.Equal(12, chinh.Count);                                  // nhóm chính KHÔNG bị cắt bởi trần nhóm bù
-        Assert.Equal(OrdersBridgeSession.MaxBuUocTinh, bu.Count);
+        Assert.Equal(UocTinhDon.MaxBuUocTinh, bu.Count);
         Assert.All(chinh, o => Assert.Contains(o, chuanBi));
         Assert.All(bu, o => Assert.Contains(o, daRoi));
     }
@@ -191,7 +191,7 @@ public class UocTinhChonDonTests
         var sn2 = Ma(HomNay.AddDays(-1), "BBBBBBBB");
         var done = new HashSet<string> { sn1, sn2 };
 
-        var (chinh, bu) = OrdersBridgeSession.ChonDonLayUocTinh(
+        var (chinh, bu) = UocTinhDon.ChonDonLayUocTinh(
             new[] { Don(sn1, "Chờ lấy hàng"), Don(sn2, "Đang giao") }, done, HomNay);
 
         Assert.Empty(chinh);
@@ -203,7 +203,7 @@ public class UocTinhChonDonTests
     private static List<string> GopVaLog(string finalsJson)
     {
         var nhatKy = new List<string>();
-        OrdersBridgeSession.MergeFinalAmounts(
+        UocTinhDon.MergeFinalAmounts(
             new[] { Don("SN1", "Chờ lấy hàng"), Don("SN2", "Chờ lấy hàng") }, finalsJson, nhatKy.Add);
         return nhatKy;
     }

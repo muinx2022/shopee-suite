@@ -9,7 +9,7 @@ using XuLyDonShopee.Core.Models;
 namespace XuLyDonShopee.Tests;
 
 /// <summary>
-/// Test hàm thuần <see cref="AccountSession.PushPendingToHubAsync"/> — lõi chia LÔ + đánh dấu của việc đẩy đơn
+/// Test hàm thuần <see cref="OrderPersistPipeline.PushPendingToHubAsync"/> — lõi chia LÔ + đánh dấu của việc đẩy đơn
 /// lên hub (tách khỏi <see cref="AccountSession"/> để test được, không cần Brave/Playwright thật; luồng nền +
 /// hook thật kiểm ở smoke như các phần browser khác của dự án). Kiểm: hook nhận đúng lô ≤ batchSize theo thứ tự;
 /// hook trả false → KHÔNG đánh dấu + dừng các lô sau; hook null / pending rỗng → không nổ, không đánh dấu; hủy → ném.
@@ -27,7 +27,7 @@ public class AccountSessionHubPushTests
         var markedBatches = new List<List<string>>();
         long? seenAccountId = null;
 
-        var marked = await AccountSession.PushPendingToHubAsync(
+        var marked = await OrderPersistPipeline.PushPendingToHubAsync(
             accountId: 42,
             pending: pending,
             push: (accId, batch, ct) =>
@@ -54,7 +54,7 @@ public class AccountSessionHubPushTests
         var pending = MakeOrders(3);
         var pushCount = 0;
 
-        var marked = await AccountSession.PushPendingToHubAsync(
+        var marked = await OrderPersistPipeline.PushPendingToHubAsync(
             accountId: 1,
             pending: pending,
             push: (accId, batch, ct) => { pushCount++; return Task.FromResult(true); },
@@ -72,7 +72,7 @@ public class AccountSessionHubPushTests
         var pending = MakeOrders(10);
         var markedAny = false;
 
-        var marked = await AccountSession.PushPendingToHubAsync(
+        var marked = await OrderPersistPipeline.PushPendingToHubAsync(
             accountId: 1,
             pending: pending,
             push: (accId, batch, ct) => Task.FromResult(false), // hub offline
@@ -91,7 +91,7 @@ public class AccountSessionHubPushTests
         var pushedBatches = new List<int>();
         var markedTotal = 0;
 
-        var marked = await AccountSession.PushPendingToHubAsync(
+        var marked = await OrderPersistPipeline.PushPendingToHubAsync(
             accountId: 1,
             pending: pending,
             push: (accId, batch, ct) =>
@@ -114,7 +114,7 @@ public class AccountSessionHubPushTests
         var pending = MakeOrders(5);
         var markedAny = false;
 
-        var marked = await AccountSession.PushPendingToHubAsync(
+        var marked = await OrderPersistPipeline.PushPendingToHubAsync(
             accountId: 1,
             pending: pending,
             push: null,                       // hub tắt / hook chưa rót
@@ -131,7 +131,7 @@ public class AccountSessionHubPushTests
     {
         var pushCalled = false;
 
-        var marked = await AccountSession.PushPendingToHubAsync(
+        var marked = await OrderPersistPipeline.PushPendingToHubAsync(
             accountId: 1,
             pending: new List<SyncedOrder>(),
             push: (accId, batch, ct) => { pushCalled = true; return Task.FromResult(true); },
@@ -151,7 +151,7 @@ public class AccountSessionHubPushTests
         cts.Cancel();
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
-            AccountSession.PushPendingToHubAsync(
+            OrderPersistPipeline.PushPendingToHubAsync(
                 accountId: 1,
                 pending: pending,
                 push: (accId, batch, ct) => Task.FromResult(true),

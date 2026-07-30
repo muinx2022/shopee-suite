@@ -5,7 +5,7 @@ namespace XuLyDonShopee.Tests;
 
 /// <summary>
 /// Test luật GỘP payload <c>kind="finals"</c> của extension vào DTO đơn
-/// (<see cref="OrdersBridgeSession.MergeFinalAmounts"/>): "Số tiền cuối cùng" như cũ, kèm danh sách SẢN PHẨM đọc
+/// (<see cref="UocTinhDon.MergeFinalAmounts"/>): "Số tiền cuối cùng" như cũ, kèm danh sách SẢN PHẨM đọc
 /// được TRONG CÙNG lần mở trang chi tiết. Điểm phải ghim: sản phẩm là phần THÊM — lỗi/rỗng ở đó KHÔNG được làm
 /// mất số tiền cuối cùng, cũng KHÔNG được xoá mảng <c>items_json</c> quét ở trang danh sách.
 /// </summary>
@@ -19,7 +19,7 @@ public class MergeSanPhamDonTests
         => new() { OrderSn = sn, Status = "Chờ lấy hàng", ItemsJson = ItemsCu, ItemCount = 1, Sku = "A141" };
 
     private static int Gop(SyncedOrder don, string? finalsJson)
-        => OrdersBridgeSession.MergeFinalAmounts(new[] { don }, finalsJson, _ => { });
+        => UocTinhDon.MergeFinalAmounts(new[] { don }, finalsJson, _ => { });
 
     [Fact]
     public void CoSanPham_ThayCaMang_VaCapNhatItemCount()
@@ -83,7 +83,7 @@ public class MergeSanPhamDonTests
     public void BiCatVaMetaLa_DuocLog()
     {
         var nhatKy = new List<string>();
-        OrdersBridgeSession.MergeFinalAmounts(
+        UocTinhDon.MergeFinalAmounts(
             new[] { Don() },
             "[{\"orderSn\":\"SN1\",\"finalText\":\"\",\"sanPham\":"
             + "[{\"ten\":\"SP\",\"sku\":\"A141\",\"metaLa\":[\"Bảo hành: 12 tháng\"],\"bicat\":true}]}]",
