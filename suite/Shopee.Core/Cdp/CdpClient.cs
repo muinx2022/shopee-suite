@@ -85,9 +85,9 @@ public sealed class CdpClient(int cdpPort)
 
     public async Task<string> GetBrowserWebSocketUrlAsync()
     {
-        using var response = await AppServices.DirectHttp.GetAsync(CdpEndpoints.Version(Port));
+        using var response = await AppServices.DirectHttp.GetAsync(CdpEndpoints.Version(Port)).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
-        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync().ConfigureAwait(false));
         return doc.RootElement.GetProperty("webSocketDebuggerUrl").GetString()
                ?? throw new InvalidOperationException("CDP /json/version thieu browser WebSocket.");
     }
@@ -110,7 +110,8 @@ public sealed class CdpClient(int cdpPort)
             return existing;
 
         using var browser = new ClientWebSocket();
-        await browser.ConnectAsync(new Uri(await GetBrowserWebSocketUrlAsync().ConfigureAwait(false)), CancellationToken.None);
+        await browser.ConnectAsync(new Uri(await GetBrowserWebSocketUrlAsync().ConfigureAwait(false)), CancellationToken.None)
+            .ConfigureAwait(false);
         await SendAsync(browser, 90, "Target.createTarget", new
         {
             url = createUrl,
@@ -163,7 +164,7 @@ public sealed class CdpClient(int cdpPort)
                 continue;
 
             using var page = new ClientWebSocket();
-            await page.ConnectAsync(new Uri(target.WsUrl!), CancellationToken.None);
+            await page.ConnectAsync(new Uri(target.WsUrl!), CancellationToken.None).ConfigureAwait(false);
             await SendAsync(page, 91, "Page.reload", new { ignoreCache = true }).ConfigureAwait(false);
         }
     }
@@ -181,7 +182,7 @@ public sealed class CdpClient(int cdpPort)
                 continue;
 
             using var page = new ClientWebSocket();
-            await page.ConnectAsync(new Uri(target.WsUrl!), CancellationToken.None);
+            await page.ConnectAsync(new Uri(target.WsUrl!), CancellationToken.None).ConfigureAwait(false);
             await SendAsync(page, 93, "Page.navigate", new { url = targetUrl }).ConfigureAwait(false);
         }
     }

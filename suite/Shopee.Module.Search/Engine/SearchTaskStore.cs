@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.Data.Sqlite;
 
 namespace ShopeeStatApp.Services;
@@ -31,7 +32,7 @@ public sealed class SearchTaskStore
                  'Running', 1, '', 0, $now, $now, '');
                 SELECT last_insert_rowid();
                 """;
-            var now = DateTime.Now.ToString("O");
+            var now = Stamp();
             Add(cmd, "$keyword", config.Keyword);
             Add(cmd, "$accountId", account.Id);
             Add(cmd, "$accountName", account.DisplayName);
@@ -89,7 +90,7 @@ public sealed class SearchTaskStore
                     WHERE id=$taskId
                     """;
                 Add(count, "$taskId", taskId);
-                Add(count, "$now", DateTime.Now.ToString("O"));
+                Add(count, "$now", Stamp());
                 count.ExecuteNonQuery();
             }
 
@@ -116,7 +117,7 @@ public sealed class SearchTaskStore
             Add(cmd, "$catIndex", Math.Max(1, categoryIndex));
             Add(cmd, "$category", categoryName);
             Add(cmd, "$page", page);
-            Add(cmd, "$now", DateTime.Now.ToString("O"));
+            Add(cmd, "$now", Stamp());
             cmd.ExecuteNonQuery();
         }
     }
@@ -136,7 +137,7 @@ public sealed class SearchTaskStore
             Add(cmd, "$id", taskId);
             Add(cmd, "$status", status);
             Add(cmd, "$error", lastError);
-            Add(cmd, "$now", DateTime.Now.ToString("O"));
+            Add(cmd, "$now", Stamp());
             cmd.ExecuteNonQuery();
         }
     }
@@ -277,7 +278,8 @@ public sealed class SearchTaskStore
         }
     }
 
-    /// <summary>Một danh mục trong "từ điển" danh mục (số liệu tính trực tiếp từ shop_products).</summary>
+    /// <summary>Một danh mục trong "từ điển" danh mục (số liệu tính trực tiếp từ shop_products).
+    /// FirstSeen/LastSeen đã quy đổi sang giờ local để hiển thị thẳng (DB lưu UTC).</summary>
     public sealed record CategoryRow(string Name, int ProductCount, int ShopCount, string FirstSeen, string LastSeen);
 
     /// <summary>Upsert danh mục (theo tên, không phân biệt hoa/thường): có thì cập nhật last_seen,
@@ -295,7 +297,7 @@ public sealed class SearchTaskStore
         {
             using var con = Open();
             using var tx = con.BeginTransaction();
-            var now = DateTime.Now.ToString("O");
+            var now = Stamp();
             foreach (var name in distinct)
             {
                 using var cmd = con.CreateCommand();
@@ -426,8 +428,8 @@ public sealed class SearchTaskStore
                     GetString(reader, "name"),
                     GetInt(reader, "product_count"),
                     GetInt(reader, "shop_count"),
-                    GetString(reader, "first_seen"),
-                    GetString(reader, "last_seen")));
+                    ToLocalDisplay(GetString(reader, "first_seen")),
+                    ToLocalDisplay(GetString(reader, "last_seen"))));
             }
             return rows;
         }
@@ -481,7 +483,7 @@ public sealed class SearchTaskStore
                 Add(cmd, "$location", p.ShopLocation);
                 Add(cmd, "$image", p.ImageUrl);
                 Add(cmd, "$category", p.Category);
-                Add(cmd, "$now", DateTime.Now.ToString("O"));
+                Add(cmd, "$now", Stamp());
                 cmd.ExecuteNonQuery();
             }
             tx.Commit();
@@ -571,6 +573,22 @@ public sealed class SearchTaskStore
     private static void Add(SqliteCommand cmd, string name, object? value) =>
         cmd.Parameters.AddWithValue(name, value ?? DBNull.Value);
 
+    /// <summary>Mốc thời gian ghi vào DB — LUÔN UTC (chuỗi "O" có hậu tố Z). Các cột này dùng làm khoá
+    /// ORDER BY dạng chuỗi nên phải cùng một múi giờ, giờ local sẽ nhảy khi đổi múi/DST.
+    /// Chuyển đổi 1 lần: DB cũ có bản ghi giờ local (+7) nên trong ~7h đầu, ORDER BY trộn cũ-mới có thể
+    /// xếp bản ghi cũ lên trên bản ghi vừa ghi; tự hết khi mọi dòng liên quan đã ghi lại theo UTC.</summary>
+    private static string Stamp() => DateTime.UtcNow.ToString("O");
+
+    /// <summary>Đổi mốc thời gian trong DB sang giờ local để HIỂN THỊ. Bản ghi mới có hậu tố Z (Kind=Utc)
+    /// nên quy đổi thật; bản ghi cũ ghi bằng giờ local, không hậu tố (Kind=Unspecified) → giữ nguyên.</summary>
+    private static string ToLocalDisplay(string stored)
+    {
+        if (!DateTime.TryParse(stored, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var dt))
+            return stored;
+        if (dt.Kind == DateTimeKind.Utc) dt = dt.ToLocalTime();
+        return dt.ToString("dd/MM/yyyy HH:mm", CultureInfo.InvariantCulture);
+    }
+
     private static void AddProductParams(SqliteCommand cmd, long taskId, ProductResult product)
     {
         Add(cmd, "$taskId", taskId);
@@ -587,7 +605,7 @@ public sealed class SearchTaskStore
         Add(cmd, "$image", product.ImageUrl);
         Add(cmd, "$category", product.Category);
         Add(cmd, "$shopName", product.ShopName);
-        Add(cmd, "$now", DateTime.Now.ToString("O"));
+        Add(cmd, "$now", Stamp());
     }
 
     private static SearchTaskRecord ReadTask(SqliteDataReader reader) => new()

@@ -5,7 +5,7 @@ namespace OpenMultiBraveLauncherV3;
 
 internal static class UnpackedExtensionId
 {
-    /// <summary>ID 32 k� t? Chrome g�n cho thu m?c --load-extension (SHA-256 path ? a-p).</summary>
+    /// <summary>ID 32 ký tự Chrome gán cho thư mục --load-extension (SHA-256 của path → a-p).</summary>
     public static string FromPath(string path)
     {
         var fullPath = Path.GetFullPath(path);

@@ -130,7 +130,7 @@ internal static class RunnerExtensionRpc
         }
 
         // Cập nhật thêm BẤT KỲ extension trùng nào đang có popup MỞ SẴN (không mở tab mới).
-        // Ph�ng tru?ng h?p ngu?i d�ng dang xem popup c?a b?n extension tr�ng (ID kh�c).
+        // Phòng trường hợp người dùng đang xem popup của bản extension trùng (ID khác).
         try
         {
             foreach (var otherId in await RunnerExtensionTargets.DiscoverRunnerExtensionIdsAsync(cdpPort, profileRoot, cancellationToken))
@@ -461,7 +461,7 @@ internal static class RunnerExtensionRpc
             // ƯU TIÊN đường popup → chrome.runtime.sendMessage → SW.
             // Trong Brave, SW extension thường KHÔNG xuất hiện như target độc lập trong /json/list,
             // và Target.getTargets có thể trả về SW context rỗng (function chưa định nghĩa → false sai).
-            // �u?ng popup d�ng sendMessage t? d�nh th?c SW v� g?i d�ng message handler ? d�ng tin c?y.
+            // Đường popup dùng sendMessage tự đánh thức SW và gọi đúng message handler → đáng tin cậy.
             var popupWsUrl = await RunnerExtensionTargets.FindExtensionPopupDebuggerUrlAsync(cdpPort, extensionId, ct);
             if (popupWsUrl is not null)
             {
@@ -498,7 +498,7 @@ internal static class RunnerExtensionRpc
             }
 
             // Fallback: SW-direct (khi popup chưa mở nhưng SW target có trong /json/list)
-            // Kh�ng c� popup l?n SW target ? m? popup d? d�nh th?c SW r?i th? l?i
+            // Không có popup lẫn SW target → mở popup để đánh thức SW rồi thử lại.
             await RunnerSwLifecycle.TryWakeServiceWorkerAsync(cdpPort, extensionId, ct);
             if (attempt < maxAttempts - 1)
             {

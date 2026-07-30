@@ -33,9 +33,9 @@ public sealed class CdpSession : IAsyncDisposable
     /// <summary>Polls until the browser's CDP HTTP endpoint responds, then connects to the first page.</summary>
     public static async Task<CdpSession> ConnectToPageAsync(int cdpPort, CancellationToken ct = default)
     {
-        var wsUrl = await WaitForPageWsUrlAsync(cdpPort, ct);
+        var wsUrl = await WaitForPageWsUrlAsync(cdpPort, ct).ConfigureAwait(false);
         var session = new CdpSession();
-        await session.ConnectAsync(wsUrl, ct);
+        await session.ConnectAsync(wsUrl, ct).ConfigureAwait(false);
         return session;
     }
 
@@ -46,9 +46,9 @@ public sealed class CdpSession : IAsyncDisposable
     public static async Task<CdpSession> ConnectToPageMatchingAsync(
         int cdpPort, Func<string, bool> urlPredicate, CancellationToken ct = default)
     {
-        var wsUrl = await WaitForPageWsUrlAsync(cdpPort, ct, urlPredicate: urlPredicate);
+        var wsUrl = await WaitForPageWsUrlAsync(cdpPort, ct, urlPredicate: urlPredicate).ConfigureAwait(false);
         var session = new CdpSession();
-        await session.ConnectAsync(wsUrl, ct);
+        await session.ConnectAsync(wsUrl, ct).ConfigureAwait(false);
         return session;
     }
 
@@ -60,9 +60,9 @@ public sealed class CdpSession : IAsyncDisposable
     public static async Task<CdpSession> ConnectToBrowserAsync(
         int cdpPort, CancellationToken ct = default, int waitTimeoutMs = 20_000)
     {
-        var wsUrl = await WaitForBrowserWsUrlAsync(cdpPort, ct, waitTimeoutMs);
+        var wsUrl = await WaitForBrowserWsUrlAsync(cdpPort, ct, waitTimeoutMs).ConfigureAwait(false);
         var session = new CdpSession();
-        await session.ConnectAsync(wsUrl, ct);
+        await session.ConnectAsync(wsUrl, ct).ConfigureAwait(false);
         return session;
     }
 
@@ -78,7 +78,7 @@ public sealed class CdpSession : IAsyncDisposable
             ct.ThrowIfCancellationRequested();
             try
             {
-                var json = await GetDirectStringAsync(CdpEndpoints.Version(cdpPort), ct);
+                var json = await GetDirectStringAsync(CdpEndpoints.Version(cdpPort), ct).ConfigureAwait(false);
                 using var doc = JsonDocument.Parse(json);
                 if (doc.RootElement.TryGetProperty("webSocketDebuggerUrl", out var u))
                 {
@@ -89,7 +89,7 @@ public sealed class CdpSession : IAsyncDisposable
             catch (OperationCanceledException) { throw; }
             catch { }
 
-            await Task.Delay(500, ct);
+            await Task.Delay(500, ct).ConfigureAwait(false);
         }
 
         throw new TimeoutException($"CDP browser endpoint on port {cdpPort} did not respond within {timeoutMs / 1000}s.");
@@ -100,7 +100,7 @@ public sealed class CdpSession : IAsyncDisposable
     {
         try
         {
-            var json = await GetDirectStringAsync(CdpEndpoints.Version(cdpPort), ct);
+            var json = await GetDirectStringAsync(CdpEndpoints.Version(cdpPort), ct).ConfigureAwait(false);
             return !string.IsNullOrWhiteSpace(json);
         }
         catch { return false; }
@@ -119,7 +119,7 @@ public sealed class CdpSession : IAsyncDisposable
             {
                 // URL dựng qua CdpEndpoints — nơi giữ quy tắc "luôn 127.0.0.1, KHÔNG localhost"
                 // (Brave/Chromium chỉ nghe CDP trên IPv4; "localhost" trên Windows ra ::1 trước → timeout/đứt).
-                var json = await GetDirectStringAsync(CdpEndpoints.Targets(cdpPort), ct);
+                var json = await GetDirectStringAsync(CdpEndpoints.Targets(cdpPort), ct).ConfigureAwait(false);
                 using var doc = JsonDocument.Parse(json);
                 foreach (var target in doc.RootElement.EnumerateArray())
                 {
@@ -140,7 +140,7 @@ public sealed class CdpSession : IAsyncDisposable
             }
             catch { }
 
-            await Task.Delay(500, ct);
+            await Task.Delay(500, ct).ConfigureAwait(false);
         }
 
         throw new TimeoutException($"CDP on port {cdpPort} did not respond within {timeoutMs / 1000}s.");
@@ -160,7 +160,7 @@ public sealed class CdpSession : IAsyncDisposable
     private async Task ConnectAsync(string wsUrl, CancellationToken ct)
     {
         _ws = new ClientWebSocket();
-        await _ws.ConnectAsync(new Uri(wsUrl), ct);
+        await _ws.ConnectAsync(new Uri(wsUrl), ct).ConfigureAwait(false);
         _ = ReadLoopAsync(_cts.Token);
     }
 
@@ -171,7 +171,7 @@ public sealed class CdpSession : IAsyncDisposable
         var msg = JsonSerializer.Serialize(new { id, method, @params, sessionId }, JsonOpts);
         var bytes = Encoding.UTF8.GetBytes(msg);
         await _sendLock.WaitAsync(ct).ConfigureAwait(false);
-        try { await _ws!.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, ct); }
+        try { await _ws!.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, ct).ConfigureAwait(false); }
         finally { _sendLock.Release(); }
     }
 
@@ -190,7 +190,7 @@ public sealed class CdpSession : IAsyncDisposable
 
         var bytes = Encoding.UTF8.GetBytes(msg);
         await _sendLock.WaitAsync(ct).ConfigureAwait(false);
-        try { await _ws!.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, ct); }
+        try { await _ws!.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, ct).ConfigureAwait(false); }
         finally { _sendLock.Release(); }
 
         using var timeout = new CancellationTokenSource(timeoutMs);
@@ -199,7 +199,7 @@ public sealed class CdpSession : IAsyncDisposable
         // với session sống lâu (PortCdpHub) khi Brave lặng thinh, _pending rò dictionary (mỗi lệnh treo 1 entry mãi).
         linked.Token.Register(() => { _pending.TryRemove(id, out _); tcs.TrySetCanceled(); });
 
-        return await tcs.Task;
+        return await tcs.Task.ConfigureAwait(false);
     }
 
     /// <summary>Gắn FLAT SESSION vào 1 target (page/SW) → trả sessionId để gửi lệnh tới target đó qua CÙNG
@@ -208,7 +208,7 @@ public sealed class CdpSession : IAsyncDisposable
     {
         try
         {
-            var r = await SendAsync("Target.attachToTarget", new { targetId, flatten = true }, ct);
+            var r = await SendAsync("Target.attachToTarget", new { targetId, flatten = true }, ct).ConfigureAwait(false);
             return r.TryGetProperty("sessionId", out var s) ? s.GetString() : null;
         }
         catch { return null; }
@@ -230,7 +230,7 @@ public sealed class CdpSession : IAsyncDisposable
                 WebSocketReceiveResult result;
                 try
                 {
-                    result = await _ws.ReceiveAsync(new ArraySegment<byte>(buf), ct);
+                    result = await _ws.ReceiveAsync(new ArraySegment<byte>(buf), ct).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException) { break; }
                 catch { break; }
@@ -283,7 +283,7 @@ public sealed class CdpSession : IAsyncDisposable
 
         if (_ws is { State: WebSocketState.Open })
         {
-            try { await _ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "", CancellationToken.None); }
+            try { await _ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "", CancellationToken.None).ConfigureAwait(false); }
             catch { }
         }
         _ws?.Dispose();

@@ -89,7 +89,7 @@ public sealed class ProxyPool
                 continue;
             }
 
-            var r = await KiotProxyClient.FetchNewAsync(e.Raw, ct);
+            var r = await KiotProxyClient.FetchNewAsync(e.Raw, ct).ConfigureAwait(false);
             if (r.Proxy is not null)
             {
                 var changed = !string.Equals(e.CurrentIp, r.Ip, StringComparison.Ordinal);
@@ -118,10 +118,10 @@ public sealed class ProxyPool
         if (wait > 0)
         {
             Log?.Invoke($"  tất cả key đang chờ — đợi {wait / 1000}s để có IP mới…");
-            await Task.Delay((int)Math.Min(wait + 1000, 150_000), ct);
+            await Task.Delay((int)Math.Min(wait + 1000, 150_000), ct).ConfigureAwait(false);
         }
 
-        var rr = await KiotProxyClient.FetchNewAsync(soonest.Raw, ct);
+        var rr = await KiotProxyClient.FetchNewAsync(soonest.Raw, ct).ConfigureAwait(false);
         if (rr.Proxy is not null)
         {
             soonest.CurrentProxy = rr.Proxy;

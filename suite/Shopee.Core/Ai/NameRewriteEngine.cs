@@ -116,7 +116,7 @@ public sealed class NameRewriteEngine
                 mapError: ex => ex is JsonException
                     ? new InvalidOperationException($"OpenAI seo-title JSON lỗi: {ex.Message}", ex)
                     : ex,
-                delay: _retryDelay);
+                delay: _retryDelay).ConfigureAwait(false);
         }
         catch (AiHttpException) { throw; }   // key/quota/model sai → dừng, không chia nhỏ
         catch (InvalidOperationException ex)
@@ -128,8 +128,8 @@ public sealed class NameRewriteEngine
             }
             var mid = names.Count / 2;
             log?.Invoke($"⚠ Viết tên batch {names.Count} lỗi — chia đôi ({mid}+{names.Count - mid}). ({Shorten(ex.Message)})");
-            var left = await RequestSeoTitlesWithSplitAsync(names.Take(mid).ToList(), log, ct);
-            var right = await RequestSeoTitlesWithSplitAsync(names.Skip(mid).ToList(), log, ct);
+            var left = await RequestSeoTitlesWithSplitAsync(names.Take(mid).ToList(), log, ct).ConfigureAwait(false);
+            var right = await RequestSeoTitlesWithSplitAsync(names.Skip(mid).ToList(), log, ct).ConfigureAwait(false);
             left.AddRange(right);
             return left;
         }
@@ -145,7 +145,7 @@ public sealed class NameRewriteEngine
         var user = JsonSerializer.Serialize(
             new { items = names.Select((name, index) => new { index, name }).ToList() }, JsonOptions);
 
-        var outputText = await AiJsonAsync(system, user, ct, temperature: 0.4);
+        var outputText = await AiJsonAsync(system, user, ct, temperature: 0.4).ConfigureAwait(false);
 
         using var parsed = JsonDocument.Parse(outputText);
         var items = parsed.RootElement.GetProperty("items").EnumerateArray().ToList();

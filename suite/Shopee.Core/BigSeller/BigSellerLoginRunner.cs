@@ -60,7 +60,7 @@ public static class BigSellerLoginRunner
 
             // Kết nối cấp BROWSER (không gắn vào 1 page) → đọc cookie không bị đứt khi trang
             // login điều hướng/redirect. Đây là điểm khác bản cũ (page-session chết lúc login).
-            cdp = await CdpSession.ConnectToBrowserAsync(port, ct);
+            cdp = await CdpSession.ConnectToBrowserAsync(port, ct).ConfigureAwait(false);
 
             // GIỮ COOKIE qua các lần mở (đúng nhu cầu "login 1 lần → instance nạp cookie → scrape"):
             // profile login là thư mục BỀN nên Chromium tự giữ muc_token qua các phiên. Khi mở lại →
@@ -73,7 +73,7 @@ public static class BigSellerLoginRunner
             var aliveKept = false;
             try
             {
-                if (await ProbeLoggedInAsync(port, ct))
+                if (await ProbeLoggedInAsync(port, ct).ConfigureAwait(false))
                 {
                     aliveKept = true;
                     log("✔ Phiên BigSeller còn sống — GIỮ cookie, không cần đăng nhập lại. Bấm Dừng để đóng.");
@@ -90,11 +90,11 @@ public static class BigSellerLoginRunner
             {
                 try
                 {
-                    var seeded = await ImportCookiesFromFileAsync(cdp, cookieFile, ct);
+                    var seeded = await ImportCookiesFromFileAsync(cdp, cookieFile, ct).ConfigureAwait(false);
                     if (seeded > 0)
                     {
                         log($"Đã nạp {seeded} cookie đã đồng bộ vào profile — đang kiểm tra phiên…");
-                        if (await ProbeLoggedInAsync(port, ct))
+                        if (await ProbeLoggedInAsync(port, ct).ConfigureAwait(false))
                         {
                             aliveKept = true;
                             log("✔ Phiên BigSeller (từ cookie đã đồng bộ) còn sống — không cần đăng nhập lại. Bấm Dừng để đóng.");
@@ -109,10 +109,10 @@ public static class BigSellerLoginRunner
             {
                 try
                 {
-                    await cdp.SendAsync("Storage.clearCookies", null, ct);
-                    var pg = await CdpSession.ConnectToPageAsync(port, ct);
-                    await pg.SendNoReplyAsync("Page.navigate", new { url = ListingUrl }, ct);
-                    await pg.DisposeAsync();
+                    await cdp.SendAsync("Storage.clearCookies", null, ct).ConfigureAwait(false);
+                    var pg = await CdpSession.ConnectToPageAsync(port, ct).ConfigureAwait(false);
+                    await pg.SendNoReplyAsync("Page.navigate", new { url = ListingUrl }, ct).ConfigureAwait(false);
+                    await pg.DisposeAsync().ConfigureAwait(false);
                     log("Chưa có phiên sống — hãy đăng nhập BigSeller để lưu token mới (đảm bảo còn sống).");
                 }
                 catch { }
@@ -124,7 +124,7 @@ public static class BigSellerLoginRunner
                     log("Đang thử TỰ đăng nhập BigSeller (điền tài khoản + giải captcha)…");
                     try
                     {
-                        if (await tryAutoLogin(port, ct))
+                        if (await tryAutoLogin(port, ct).ConfigureAwait(false))
                             log("✔ Tự đăng nhập được — đang chờ lưu cookie…");
                         else
                             log("Tự đăng nhập chưa xong — hãy đăng nhập TAY trong cửa sổ Brave.");
@@ -151,26 +151,26 @@ public static class BigSellerLoginRunner
             const int maxWaitPolls = 12;          // ~36s: fallback lưu kẻo kẹt nếu cookie cứ refresh
             while (!ct.IsCancellationRequested)
             {
-                await Task.Delay(3000, ct);
+                await Task.Delay(3000, ct).ConfigureAwait(false);
 
                 // Người dùng TỰ ĐÓNG cửa sổ Brave (không bấm Dừng) → endpoint CDP chết. Probe nhanh
                 // (/json/version, 3s) để THOÁT NGAY thay vì để Storage.getCookies treo tới 20s mới biết
                 // → ViewModel chạy finally (IsLoggingIn=false) → nút "Open Bigseller" hiện/bật lại kịp thời.
-                if (!await CdpSession.IsBrowserAliveAsync(port, ct))
+                if (!await CdpSession.IsBrowserAliveAsync(port, ct).ConfigureAwait(false))
                 {
                     log("✘ Cửa sổ Brave đã đóng.");
                     return saved;
                 }
 
-                var (cookies, sessionOk) = await GetBigSellerCookiesAsync(cdp, ct);
+                var (cookies, sessionOk) = await GetBigSellerCookiesAsync(cdp, ct).ConfigureAwait(false);
                 if (!sessionOk)
                 {
                     // Session đứt → thử kết nối lại NHANH. Nếu endpoint CDP không còn (người dùng
                     // tự đóng Brave) thì reconnect ném timeout → dừng (giữ kết quả đã lưu nếu có).
                     try
                     {
-                        await cdp.DisposeAsync();
-                        cdp = await CdpSession.ConnectToBrowserAsync(port, ct, waitTimeoutMs: 6000);
+                        await cdp.DisposeAsync().ConfigureAwait(false);
+                        cdp = await CdpSession.ConnectToBrowserAsync(port, ct, waitTimeoutMs: 6000).ConfigureAwait(false);
                         continue;
                     }
                     catch (OperationCanceledException) { throw; }
@@ -231,7 +231,7 @@ public static class BigSellerLoginRunner
             // Bấm Dừng → đóng Brave GRACEFUL (CDP Browser.close) để Chromium flush phiên xuống
             // profile → lần đăng nhập sau KHÔNG hiện lại form login. Hard-kill ngay sẽ mất phiên.
             log("■ Đang đóng cửa sổ BigSeller…");
-            await CloseBrowserGracefullyAsync(cdp);
+            await CloseBrowserGracefullyAsync(cdp).ConfigureAwait(false);
             return saved;
         }
         catch (Exception ex)
@@ -241,7 +241,7 @@ public static class BigSellerLoginRunner
         }
         finally
         {
-            if (cdp is not null) await cdp.DisposeAsync();
+            if (cdp is not null) await cdp.DisposeAsync().ConfigureAwait(false);
             launcher.Kill();
         }
     }
@@ -252,8 +252,8 @@ public static class BigSellerLoginRunner
         if (cdp is null) return;
         try
         {
-            await cdp.SendNoReplyAsync("Browser.close");
-            await Task.Delay(2500, CancellationToken.None);
+            await cdp.SendNoReplyAsync("Browser.close").ConfigureAwait(false);
+            await Task.Delay(2500, CancellationToken.None).ConfigureAwait(false);
         }
         catch { }
     }
@@ -264,7 +264,7 @@ public static class BigSellerLoginRunner
     {
         try
         {
-            var json = await File.ReadAllTextAsync(cookieFile, ct);
+            var json = await File.ReadAllTextAsync(cookieFile, ct).ConfigureAwait(false);
             using var doc = JsonDocument.Parse(json);
             if (!doc.RootElement.TryGetProperty("cookies", out var arr) || arr.ValueKind != JsonValueKind.Array)
                 return 0;
@@ -277,7 +277,7 @@ public static class BigSellerLoginRunner
             }
             if (list.Count == 0) return 0;
 
-            await cdp.SendAsync("Storage.setCookies", new { cookies = list }, ct);
+            await cdp.SendAsync("Storage.setCookies", new { cookies = list }, ct).ConfigureAwait(false);
             return list.Count;
         }
         catch { return 0; }
@@ -322,7 +322,7 @@ public static class BigSellerLoginRunner
         var list = new List<JsonElement>();
         try
         {
-            var result = await cdp.SendAsync("Storage.getCookies", null, ct);
+            var result = await cdp.SendAsync("Storage.getCookies", null, ct).ConfigureAwait(false);
             if (result.TryGetProperty("cookies", out var cookies))
                 foreach (var c in cookies.EnumerateArray())
                 {
@@ -389,11 +389,11 @@ public static class BigSellerLoginRunner
         CdpSession? pg = null;
         try
         {
-            pg = await CdpSession.ConnectToPageAsync(port, ct);
-            await pg.SendNoReplyAsync("Page.navigate", new { url = ListingUrl }, ct);
+            pg = await CdpSession.ConnectToPageAsync(port, ct).ConfigureAwait(false);
+            await pg.SendNoReplyAsync("Page.navigate", new { url = ListingUrl }, ct).ConfigureAwait(false);
             for (var i = 0; i < 20; i++)   // ~10s
             {
-                await Task.Delay(500, ct);
+                await Task.Delay(500, ct).ConfigureAwait(false);
                 string href = "", ready = "";
                 try
                 {
@@ -401,7 +401,7 @@ public static class BigSellerLoginRunner
                     {
                         expression = "JSON.stringify({href:location.href, ready:document.readyState})",
                         returnByValue = true,
-                    }, ct);
+                    }, ct).ConfigureAwait(false);
                     if (r.TryGetProperty("result", out var rv) && rv.TryGetProperty("value", out var vv) &&
                         vv.ValueKind == JsonValueKind.String)
                     {
@@ -422,7 +422,7 @@ public static class BigSellerLoginRunner
         }
         catch (OperationCanceledException) { throw; }
         catch { return false; }
-        finally { if (pg is not null) await pg.DisposeAsync(); }
+        finally { if (pg is not null) await pg.DisposeAsync().ConfigureAwait(false); }
     }
 
     private static bool IsLoginUrl(string url) =>

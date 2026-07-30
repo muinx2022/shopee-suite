@@ -835,10 +835,10 @@ internal sealed partial class BigSellerProductUpdateRunner : BigSellerBraveRunne
                 await r.ScrollIntoViewIfNeededAsync();
                 await r.ClickAsync();
                 // chờ khối upload (spc_box) hiện sau khi sizeChartContent bỏ display:none
-                try { await page.Locator(ImageGalleryBox).First.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 4000 }); } catch { }
+                try { await page.Locator(ImageGalleryBox).First.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 4000 }); } catch { /* chờ best-effort */ }
             }
         }
-        catch { }
+        catch (Exception ex) { _log($"  ↳ Tick radio 'Tải lên hình ảnh' lỗi: {ex.Message}"); }
 
         // [3] image — bước Lưu TIÊN QUYẾT ảnh-đã-lên (SaveWithImageRetry không bấm Lưu khi ảnh chưa lên) → ảnh KHÔNG
         // lên = save không bao giờ được bấm → đi tiếp chỉ ĐỐT AI vô ích. Ảnh fail thì THOÁT SỚM để SP thử lại.
@@ -883,12 +883,12 @@ internal sealed partial class BigSellerProductUpdateRunner : BigSellerBraveRunne
                 await md5.ClickAsync();
                 if (await BigSellerMaterialCenterCleaner.IsMediaInsufficientSignalAsync(page))
                 { _mediaFullDetected = true; await DismissStorageNagAsync(page); return false; }   // return KHÔNG bị catch nuốt
-                try { await page.Locator(Md5CompleteStatus).First.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 10000 }); } catch { }
+                try { await page.Locator(Md5CompleteStatus).First.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 10000 }); } catch { /* chờ best-effort */ }
                 await CloseVisibleAntModalAsync(page, 5000);
             }
         }
-        catch { }
-        // Check LẦN NỮA sau block md5, NGOÀI try để catch { } không nuốt mất đường return (1 query DOM, rẻ).
+        catch (Exception ex) { _log($"  ↳ Đồng bộ ảnh (MD5) lỗi: {ex.Message}"); }
+        // Check LẦN NỮA sau block md5, NGOÀI try để catch không nuốt mất đường return (1 query DOM, rẻ).
         if (await BigSellerMaterialCenterCleaner.IsMediaInsufficientSignalAsync(page))
         { _mediaFullDetected = true; await DismissStorageNagAsync(page); return false; }
 
@@ -903,10 +903,11 @@ internal sealed partial class BigSellerProductUpdateRunner : BigSellerBraveRunne
                 await s.EvaluateAsync("el => el.dispatchEvent(new Event('input', {bubbles:true}))");
             }
         }
-        catch { }
+        catch (Exception ex) { _log($"  ↳ Điền SKU cha lỗi: {ex.Message}"); }
 
         // [6] brand
-        try { await SelectNoBrandAsync(page, ct); } catch { }
+        try { await SelectNoBrandAsync(page, ct); }
+        catch (Exception ex) { _log($"  ↳ Chọn thương hiệu 'No Brand' lỗi: {ex.Message}"); }
 
         // [7] variation SKUs
         await ForEachVisibleAsync(page.Locator(VariationSkuInputs), async el =>
@@ -948,7 +949,7 @@ internal sealed partial class BigSellerProductUpdateRunner : BigSellerBraveRunne
                 if (await ship.Locator(ShippingCheckedMark).CountAsync() == 0) await ship.ClickAsync();
             }
         }
-        catch { }
+        catch (Exception ex) { _log($"  ↳ Chọn vận chuyển 'Nhanh' lỗi: {ex.Message}"); }
 
         // [11] weight
         try
@@ -962,7 +963,7 @@ internal sealed partial class BigSellerProductUpdateRunner : BigSellerBraveRunne
                 await w.EvaluateAsync("el => el.blur()");
             }
         }
-        catch { }
+        catch (Exception ex) { _log($"  ↳ Điền cân nặng lỗi: {ex.Message}"); }
 
         // video discovery
         var videoPath = ResolveVideoPath(rec.Sku);
@@ -973,7 +974,8 @@ internal sealed partial class BigSellerProductUpdateRunner : BigSellerBraveRunne
             await StepAsync("Upload video");
             for (var attempt = 0; attempt < 3; attempt++)
             {
-                try { if (await UploadVideoAsync(page, videoPath, ct)) break; } catch { }
+                try { if (await UploadVideoAsync(page, videoPath, ct)) break; }
+                catch (Exception ex) { _log($"  ↳ Upload video lượt {attempt + 1}/3 lỗi: {ex.Message}"); }
                 await DelayAsync(3000, ct);
             }
         }

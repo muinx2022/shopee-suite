@@ -91,11 +91,11 @@ public sealed class CdpHumanInput
             var ease = t < 0.5 ? 2 * t * t : 1 - Math.Pow(-2 * t + 2, 2) / 2;
             var x = sx + (tx - sx) * ease + Math.Sin(t * Math.PI * 3) * Rand(-4, 4);
             var y = sy + (ty - sy) * ease + Math.Cos(t * Math.PI * 2) * Rand(-3, 3);
-            await cdp.SendNoReply("Input.dispatchMouseEvent", MoveStepArgs(x, y), ct);
-            await DelayAsync(_profile.MoveStepMinMs, _profile.MoveStepMaxMs, ct);
+            await cdp.SendNoReply("Input.dispatchMouseEvent", MoveStepArgs(x, y), ct).ConfigureAwait(false);
+            await DelayAsync(_profile.MoveStepMinMs, _profile.MoveStepMaxMs, ct).ConfigureAwait(false);
         }
         // Bước cuối CHỜ phản hồi để chắc chắn con trỏ đã tới đích trước khi bấm.
-        await cdp.Send("Input.dispatchMouseEvent", MouseArgs("mouseMoved", tx, ty, "none", 0, 0), ct);
+        await cdp.Send("Input.dispatchMouseEvent", MouseArgs("mouseMoved", tx, ty, "none", 0, 0), ct).ConfigureAwait(false);
         _mouseX = tx;
         _mouseY = ty;
     }
@@ -103,11 +103,11 @@ public sealed class CdpHumanInput
     public async Task ClickAsync(
         CdpSender cdp, double tx, double ty, int clickCount = 1, CancellationToken ct = default)
     {
-        await MoveMouseToAsync(cdp, tx, ty, ct);
-        await DelayAsync(_profile.ClickBeforePressMinMs, _profile.ClickBeforePressMaxMs, ct);
-        await cdp.Send("Input.dispatchMouseEvent", MouseArgs("mousePressed", tx, ty, "left", 1, clickCount), ct);
-        await DelayAsync(_profile.ClickHoldMinMs, _profile.ClickHoldMaxMs, ct);
-        await cdp.Send("Input.dispatchMouseEvent", MouseArgs("mouseReleased", tx, ty, "left", 0, clickCount), ct);
+        await MoveMouseToAsync(cdp, tx, ty, ct).ConfigureAwait(false);
+        await DelayAsync(_profile.ClickBeforePressMinMs, _profile.ClickBeforePressMaxMs, ct).ConfigureAwait(false);
+        await cdp.Send("Input.dispatchMouseEvent", MouseArgs("mousePressed", tx, ty, "left", 1, clickCount), ct).ConfigureAwait(false);
+        await DelayAsync(_profile.ClickHoldMinMs, _profile.ClickHoldMaxMs, ct).ConfigureAwait(false);
+        await cdp.Send("Input.dispatchMouseEvent", MouseArgs("mouseReleased", tx, ty, "left", 0, clickCount), ct).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -129,14 +129,14 @@ public sealed class CdpHumanInput
     public async Task TypeTextAsync(
         CdpSender cdp, string text, bool clearFirst = false, CancellationToken ct = default)
     {
-        if (clearFirst) await SelectAllAndDeleteAsync(cdp, ct);
+        if (clearFirst) await SelectAllAndDeleteAsync(cdp, ct).ConfigureAwait(false);
         if (string.IsNullOrEmpty(text)) return;
 
         var isAscii = text.All(ch => ch >= 0x20 && ch <= 0x7E);
         if (!isAscii)
         {
-            await DelayAsync(120, 260, ct);
-            await cdp.Send("Input.insertText", new { text }, ct);
+            await DelayAsync(120, 260, ct).ConfigureAwait(false);
+            await cdp.Send("Input.insertText", new { text }, ct).ConfigureAwait(false);
             return;
         }
 
@@ -146,10 +146,10 @@ public sealed class CdpHumanInput
             var (code, vk) = KeyInfo(ch);
             var s = ch.ToString();
             await cdp.Send("Input.dispatchKeyEvent",
-                new { type = "keyDown", text = s, key = s, code, windowsVirtualKeyCode = vk }, ct);
+                new { type = "keyDown", text = s, key = s, code, windowsVirtualKeyCode = vk }, ct).ConfigureAwait(false);
             await cdp.Send("Input.dispatchKeyEvent",
-                new { type = "keyUp", key = s, code, windowsVirtualKeyCode = vk }, ct);
-            await DelayAsync(_profile.AsciiKeyMinMs, _profile.AsciiKeyMaxMs, ct);
+                new { type = "keyUp", key = s, code, windowsVirtualKeyCode = vk }, ct).ConfigureAwait(false);
+            await DelayAsync(_profile.AsciiKeyMinMs, _profile.AsciiKeyMaxMs, ct).ConfigureAwait(false);
         }
     }
 
@@ -157,15 +157,15 @@ public sealed class CdpHumanInput
     {
         // Ctrl+A rồi Delete (bitmask modifiers: 2 = Ctrl).
         await cdp.Send("Input.dispatchKeyEvent",
-            new { type = "keyDown", key = "Control", code = "ControlLeft", windowsVirtualKeyCode = 17, modifiers = 2 }, ct);
+            new { type = "keyDown", key = "Control", code = "ControlLeft", windowsVirtualKeyCode = 17, modifiers = 2 }, ct).ConfigureAwait(false);
         await cdp.Send("Input.dispatchKeyEvent",
-            new { type = "keyDown", key = "a", code = "KeyA", windowsVirtualKeyCode = 65, modifiers = 2 }, ct);
+            new { type = "keyDown", key = "a", code = "KeyA", windowsVirtualKeyCode = 65, modifiers = 2 }, ct).ConfigureAwait(false);
         await cdp.Send("Input.dispatchKeyEvent",
-            new { type = "keyUp", key = "a", code = "KeyA", windowsVirtualKeyCode = 65, modifiers = 2 }, ct);
+            new { type = "keyUp", key = "a", code = "KeyA", windowsVirtualKeyCode = 65, modifiers = 2 }, ct).ConfigureAwait(false);
         await cdp.Send("Input.dispatchKeyEvent",
-            new { type = "keyUp", key = "Control", code = "ControlLeft", windowsVirtualKeyCode = 17 }, ct);
-        await DelayAsync(40, 110, ct);
-        await PressKeyAsync(cdp, "Delete", ct);
+            new { type = "keyUp", key = "Control", code = "ControlLeft", windowsVirtualKeyCode = 17 }, ct).ConfigureAwait(false);
+        await DelayAsync(40, 110, ct).ConfigureAwait(false);
+        await PressKeyAsync(cdp, "Delete", ct).ConfigureAwait(false);
     }
 
     public async Task PressKeyAsync(CdpSender cdp, string key, CancellationToken ct = default)
@@ -175,13 +175,13 @@ public sealed class CdpHumanInput
         // form Shopee không submit với rawKeyDown (thiếu keypress).
         if (key == "Enter")
             await cdp.Send("Input.dispatchKeyEvent",
-                new { type = "keyDown", key, code, windowsVirtualKeyCode = vk, text = "\r" }, ct);
+                new { type = "keyDown", key, code, windowsVirtualKeyCode = vk, text = "\r" }, ct).ConfigureAwait(false);
         else
             await cdp.Send("Input.dispatchKeyEvent",
-                new { type = "rawKeyDown", key, code, windowsVirtualKeyCode = vk }, ct);
-        await DelayAsync(40, 110, ct);
+                new { type = "rawKeyDown", key, code, windowsVirtualKeyCode = vk }, ct).ConfigureAwait(false);
+        await DelayAsync(40, 110, ct).ConfigureAwait(false);
         await cdp.Send("Input.dispatchKeyEvent",
-            new { type = "keyUp", key, code, windowsVirtualKeyCode = vk }, ct);
+            new { type = "keyUp", key, code, windowsVirtualKeyCode = vk }, ct).ConfigureAwait(false);
     }
 
     // ── helpers ───────────────────────────────────────────────────────────────

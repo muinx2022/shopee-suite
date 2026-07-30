@@ -12,6 +12,11 @@ namespace Shopee.Core.Products;
 ///
 /// FIXED-SCOPE (<see cref="SetScope"/>): lưới per-shop (tab Dữ liệu Fleet) ép Acct/Sheet của MỌI query về 1 shop —
 /// filter chỉ còn <see cref="AllDataFilter.Text"/> tìm đa trường. Trang "📦 Dữ liệu" liên-shop không set scope.
+///
+/// CỐ Ý KHÔNG dùng <c>ConfigureAwait(false)</c> ở file này (khác phần còn lại của Shopee.Core): hàm confirm do UI
+/// tiêm vào PHẢI được gọi trên ngữ cảnh của UI — client là hộp thoại Avalonia (Dialogs.ConfirmAsync), hub web là
+/// JS interop của Blazor — nên các await phải quay lại đúng ngữ cảnh gọi (vd <see cref="SaveRowAsync"/> await
+/// SkuExistsAsync TRƯỚC khi gọi confirm). Bỏ ngữ cảnh ở đây sẽ làm confirm chạy sai thread/circuit.
 /// </summary>
 public sealed class ProductGridEngine
 {

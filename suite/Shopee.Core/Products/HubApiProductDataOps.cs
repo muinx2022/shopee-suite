@@ -16,7 +16,7 @@ public sealed class HubApiProductDataOps : IProductDataOps
     public Task<AllDataPage> QueryAllAsync(AllDataFilter f, int offset, int limit, CancellationToken ct)
         => Guard(async () =>
         {
-            var page = await _hub.QueryProductAllDataAsync(new AllDataQueryRequest(f, offset, limit), ct);
+            var page = await _hub.QueryProductAllDataAsync(new AllDataQueryRequest(f, offset, limit), ct).ConfigureAwait(false);
             return page ?? new AllDataPage(0, new List<AllDataRow>());   // null (không nội dung) → trang rỗng
         });
 
@@ -38,7 +38,7 @@ public sealed class HubApiProductDataOps : IProductDataOps
     public Task<(int RowNo, string Sku)> InsertRowAsync(string acct, string sheet, ProductRowData data, CancellationToken ct)
         => Guard(async () =>
         {
-            var res = await _hub.InsertProductRowAsync(new ProductInsertRowRequest(acct, sheet, data), ct);
+            var res = await _hub.InsertProductRowAsync(new ProductInsertRowRequest(acct, sheet, data), ct).ConfigureAwait(false);
             if (res is null) throw new InvalidOperationException("Không thêm được dòng.");
             return (res.RowNo, res.Sku);
         });
@@ -49,7 +49,7 @@ public sealed class HubApiProductDataOps : IProductDataOps
     // 503 (ServiceUnavailable) = pg-not-ready → đổi sang ProductStoreNotReadyException; lỗi mạng/timeout khác cứ ném.
     private static async Task<T> Guard<T>(Func<Task<T>> call)
     {
-        try { return await call(); }
+        try { return await call().ConfigureAwait(false); }
         catch (HttpRequestException ex) when (ex.StatusCode == HttpStatusCode.ServiceUnavailable)
         { throw new ProductStoreNotReadyException(); }
     }
