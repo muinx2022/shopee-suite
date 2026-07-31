@@ -5,6 +5,17 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Hiệu năng. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.7.1 — 2026-07-31
+
+- **Màn "Cài đặt" chia TAB — mỗi phần một tab, hết cuộn dài.** Thay vì một cột dọc phải cuộn qua tất cả các
+  nhóm, màn Cài đặt nay có dải tab ngay dưới tiêu đề: *Chế độ ứng dụng · Phiên bản & cập nhật · Hiệu năng &
+  Đồng bộ · Đơn hàng*. Hai nhóm cũ **Hiệu năng** và **Đồng bộ nhiều máy** gộp chung MỘT tab, xếp 2 cột (trái:
+  tài nguyên → trần cửa sổ Brave + thông tin máy; phải: tên máy + kết nối Hub). Tab ẩn/hiện theo chế độ như
+  trước: chế độ Shopee không có tab *Hiệu năng & Đồng bộ*, chế độ Workspace không có tab *Đơn hàng*. Không nút
+  hay ô nhập nào bị bỏ — chỉ đổi chỗ đứng.
+- **Gỡ nốt chữ nhắc webhook ở màn Cài đặt:** ô cấu hình webhook đã bỏ từ bản trước nhưng dòng mô tả dưới tiêu
+  đề vẫn còn nhắc; nay viết lại cho đúng (cấu hình AI/prompt vẫn đặt trên Hub).
+
 ## v1.7.0 — 2026-07-31
 
 - **Toàn bộ giao diện app dựng lại trên WPF — từ bản này app là bản CHỈ chạy Windows.** Bố cục, màu sắc và cách

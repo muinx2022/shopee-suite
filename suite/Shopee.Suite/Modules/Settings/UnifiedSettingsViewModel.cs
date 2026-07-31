@@ -41,7 +41,7 @@ public sealed partial class UnifiedSettingsViewModel : ObservableObject
     /// <summary>Cài đặt Shopee Suite (hiệu năng · đồng bộ Hub · phiên bản/cập nhật).</summary>
     public SettingsViewModel Suite { get; }
 
-    /// <summary>Cài đặt module Đơn hàng (trình duyệt · thư mục phiếu · chu kỳ · GSheet · webhook). null nếu module không chạy.</summary>
+    /// <summary>Cài đặt module Đơn hàng (trình duyệt · thư mục phiếu · chu kỳ · GSheet). null nếu module không chạy.</summary>
     public OrdersSettingsViewModel? Orders { get; }
 
     /// <summary>true khi có module đơn hàng → hiện section "Đơn hàng".</summary>
