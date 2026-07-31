@@ -5,6 +5,18 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Hiệu năng. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.7.3 — 2026-07-31
+
+- **Chữ trên dải tab TRÊN CÙNG to hơn** (*Workspace · Cấu hình BigSeller · Shopee · Cài đặt*) — dễ đọc hơn ở
+  màn hình lớn; dải tab cao thêm 4px, các phần bên dưới không đổi.
+- **Tab đang xem không in đậm chữ nữa** — ở cả ba loại dải tab (tab trên cùng, dải tab "viên" trắng của
+  Workspace/Cài đặt, dải tab gạch chân cam trong các màn Search/Fleet/Check tài khoản). Tab đang xem vẫn nhận
+  ra ngay nhờ màu chữ + gạch cam / viên trắng, nhưng chữ giữ nguyên nét nên dải tab không bị xê dịch mỗi lần
+  đổi tab.
+- **Nét chữ và viền của 3 hộp thoại tròn pixel như các cửa sổ khác** (hộp thoại thông báo của suite, hộp thoại
+  *Xác nhận* và *Thông tin đơn hàng* của module Đơn hàng) — trước còn thiếu nên chữ/viền có thể lệch nửa pixel,
+  trông mờ hơn phần còn lại của app.
+
 ## v1.7.2 — 2026-07-31
 
 - **Dải tab màn "Cài đặt" đổi sang đúng kiểu tab của màn Workspace** — thay vì hàng chữ gạch chân cam, 4 tab

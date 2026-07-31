@@ -135,7 +135,8 @@
 
             <!-- ══════════ Sub-tab (Thông tin tài khoản | Kết quả) — SEGMENTED CONTROL kiểu Windows 11 ══════════ -->
             <!-- Cả cụm nằm trong MỘT khay bo tròn nền xám ấm; ô ĐANG CHỌN nổi lên nền TRẮNG + viền mảnh + chữ
-                 đen đậm, ô còn lại chìm chữ xám. Bên phải khay là tên tài khoản đang mở (truyền qua Tag).
+                 đen (nét chữ GIỮ NGUYÊN, không nhảy sang Bold — khớp `subtabItem` của suite), ô còn lại chìm
+                 chữ xám. Bên phải khay là tên tài khoản đang mở (truyền qua Tag).
                  Phải THAY TEMPLATE của TabControl vì khay nền bao quanh dải tab không dựng được bằng setter rời.
                  BẪY WPF (đợt 4): KHÔNG đặt Foreground/FontWeight/FontSize TRÊN CHÍNH TabItem — thừa kế của WPF
                  đi theo cây LOGIC mà `TabItem.Content` có logical parent là TabItem → sẽ in đậm + tô màu TOÀN BỘ
@@ -170,7 +171,6 @@
                                     <Setter TargetName="PART_LayoutRoot" Property="Background" Value="{StaticResource CardBg}" />
                                     <Setter TargetName="PART_LayoutRoot" Property="BorderBrush" Value="{StaticResource Border010}" />
                                     <Setter TargetName="PART_LayoutRoot" Property="TextElement.Foreground" Value="{StaticResource TextInk}" />
-                                    <Setter TargetName="PART_LayoutRoot" Property="TextElement.FontWeight" Value="Bold" />
                                 </Trigger>
                             </ControlTemplate.Triggers>
                         </ControlTemplate>

@@ -881,11 +881,12 @@
                             <Setter TargetName="PART_bd" Property="Background" Value="{StaticResource TabHoverBrush}" />
                             <Setter TargetName="PART_bd" Property="TextElement.Foreground" Value="{StaticResource TextPrimaryBrush}" />
                         </Trigger>
-                        <!-- Đặt SAU trigger hover → tab đang chọn mà rê chuột vẫn GIỮ màu accent (đúng bản Avalonia). -->
+                        <!-- Đặt SAU trigger hover → tab đang chọn mà rê chuột vẫn GIỮ màu accent (đúng bản Avalonia).
+                             KHÔNG đổi FontWeight khi chọn: tín hiệu active là chữ cam + gạch chân, nét chữ giữ
+                             nguyên như các tab còn lại (chữ nhảy đậm làm dải tab giật ngang mỗi lần đổi tab). -->
                         <Trigger Property="IsSelected" Value="True">
                             <Setter TargetName="PART_underline" Property="Background" Value="{StaticResource AccentBrush}" />
                             <Setter TargetName="PART_bd" Property="TextElement.Foreground" Value="{StaticResource AccentBrush}" />
-                            <Setter TargetName="PART_bd" Property="TextElement.FontWeight" Value="Bold" />
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -901,7 +902,8 @@
     <!-- Bộ tab con DÙNG CHUNG cho mọi màn có dải tab cấp 2 (Workspace, Cài đặt) — trước nằm trong resource
          CỤC BỘ của WorkspaceView, đưa lên đây để sửa MỘT chỗ là đổi cả các màn. Khác TabItem mặc định ở trên
          (gạch chân accent): cả cụm nằm trong MỘT khay bo tròn nền xám ấm, ô ĐANG CHỌN nổi lên nền TRẮNG +
-         viền mảnh + chữ đen đậm, ô còn lại chìm chữ xám, KHÔNG có gạch chỉ báo.
+         viền mảnh + chữ đen, ô còn lại chìm chữ xám, KHÔNG có gạch chỉ báo. Nét chữ GIỮ NGUYÊN khi chọn
+         (không nhảy sang Bold) — viên trắng + màu chữ đã đủ làm tín hiệu.
          3 mảnh: `subtabItem` (ô tab) · `subtabTray` (khay bọc dải ô) · `subtabs` (TabControl ráp sẵn). -->
     <!-- BẪY WPF (đợt 4): KHÔNG đặt Foreground/FontWeight/FontSize TRÊN CHÍNH TabItem — thừa kế của WPF đi theo
          cây LOGIC mà `TabItem.Content` có logical parent là TabItem, nên "SemiBold/Bold + màu chữ của ô tab" sẽ
@@ -940,7 +942,6 @@
                             <Setter TargetName="PART_LayoutRoot" Property="Background" Value="{StaticResource CardBackgroundBrush}" />
                             <Setter TargetName="PART_LayoutRoot" Property="BorderBrush" Value="{StaticResource BorderBrush}" />
                             <Setter TargetName="PART_LayoutRoot" Property="TextElement.Foreground" Value="{StaticResource TextPrimaryBrush}" />
-                            <Setter TargetName="PART_LayoutRoot" Property="TextElement.FontWeight" Value="Bold" />
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
