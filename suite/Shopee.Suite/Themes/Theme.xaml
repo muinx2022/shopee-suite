@@ -517,16 +517,179 @@
     </Style>
 
     <!-- ══════════ COMBOBOX · CHECKBOX ══════════ -->
-    <!-- Giữ template mặc định của WPF (đủ phẳng), chỉ đồng bộ cỡ/viền/màu chữ với ô nhập. -->
+    <!-- Đợt 6: BỎ chrome mặc định (Aero2: nền gradient xám + viền 2 lớp + nút thả nổi) — trái hẳn hướng
+         phẳng Win 11 của theme và lệch hẳn với ô nhập ngay cạnh. Template tự viết dùng ĐÚNG bộ token của
+         TextBox: nền trắng, viền 1px BorderBrush, bo 5, hover → viền đậm, mở/focus → viền CAM. Mũi thả là
+         chevron vẽ bằng Path (không phải glyph font) để sắc ở mọi DPI.
+         Bề rộng khoang chevron cố định 22 — ô "gõ để lọc shop" ở màn Đơn hàng phủ watermark/nút xoá theo
+         lề phải 24/34px, đổi số này là phải đo lại chỗ đó. -->
+    <Style x:Key="comboItem" TargetType="{x:Type ComboBoxItem}">
+        <Setter Property="Padding" Value="10,6" />
+        <Setter Property="Foreground" Value="{StaticResource TextBodyBrush}" />
+        <Setter Property="FontFamily" Value="{StaticResource UiFont}" />
+        <Setter Property="FontSize" Value="{StaticResource ControlContentFontSize}" />
+        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type ComboBoxItem}">
+                    <Border x:Name="bd" Background="Transparent" Padding="{TemplateBinding Padding}"
+                            CornerRadius="4" SnapsToDevicePixels="True">
+                        <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                          VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="bd" Property="Background" Value="{StaticResource SurfaceHoverBrush}" />
+                        </Trigger>
+                        <!-- Đang chọn = nền cam nhạt + chữ cam (đúng ngữ pháp "active" của theme). -->
+                        <Trigger Property="IsSelected" Value="True">
+                            <Setter TargetName="bd" Property="Background" Value="{StaticResource BrandTintBrush}" />
+                            <Setter Property="Foreground" Value="{StaticResource BrandTextBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Foreground" Value="{StaticResource TextMutedBrush}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
     <Style TargetType="{x:Type ComboBox}">
         <Setter Property="MinHeight" Value="30" />
         <Setter Property="Padding" Value="8,3" />
         <Setter Property="Background" Value="{StaticResource CardBackgroundBrush}" />
         <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
         <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
         <Setter Property="FontFamily" Value="{StaticResource UiFont}" />
         <Setter Property="FontSize" Value="{StaticResource ControlContentFontSize}" />
         <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="HorizontalContentAlignment" Value="Left" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+        <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled" />
+        <Setter Property="ItemContainerStyle" Value="{StaticResource comboItem}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type ComboBox}">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="22" />
+                        </Grid.ColumnDefinitions>
+
+                        <!-- KHUNG (luôn phủ cả 2 cột, tách khỏi vùng bấm — ở chế độ có sửa được thì vùng bấm
+                             co lại còn mỗi khoang chevron nhưng khung vẫn phải nguyên). -->
+                        <Border x:Name="PART_BorderElement" Grid.ColumnSpan="2"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="5" SnapsToDevicePixels="True" />
+
+                        <!-- Vùng bấm mở dropdown. ClickMode=Press là hành vi chuẩn của ComboBox. Template
+                             trần (chỉ 1 Border trong suốt) — khung do PART_BorderElement bên dưới lo. -->
+                        <ToggleButton x:Name="PART_ToggleButton" Grid.ColumnSpan="2"
+                                      Focusable="False" ClickMode="Press" Cursor="Hand"
+                                      IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}">
+                            <ToggleButton.Template>
+                                <ControlTemplate TargetType="{x:Type ToggleButton}">
+                                    <Border Background="Transparent" />
+                                </ControlTemplate>
+                            </ToggleButton.Template>
+                        </ToggleButton>
+
+                        <!-- Ô hiển thị giá trị (chế độ KHÔNG sửa được). -->
+                        <ContentPresenter x:Name="ContentSite" Grid.Column="0" IsHitTestVisible="False"
+                                          Content="{TemplateBinding SelectionBoxItem}"
+                                          ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                                          ContentStringFormat="{TemplateBinding SelectionBoxItemStringFormat}"
+                                          Margin="{TemplateBinding Padding}"
+                                          HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                          VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+
+                        <!-- Ô nhập (IsEditable="True"). Template TRẦN: viền do PART_BorderElement bên dưới
+                             vẽ, không thì hai viền chồng nhau. Tên PART_EditableTextBox là bắt buộc. -->
+                        <TextBox x:Name="PART_EditableTextBox" Grid.Column="0" Visibility="Collapsed"
+                                 Margin="{TemplateBinding Padding}" Background="Transparent"
+                                 BorderThickness="0" Padding="0"
+                                 Foreground="{TemplateBinding Foreground}"
+                                 FontFamily="{TemplateBinding FontFamily}" FontSize="{TemplateBinding FontSize}"
+                                 CaretBrush="{StaticResource TextPrimaryBrush}"
+                                 SelectionBrush="{StaticResource AccentBrush}"
+                                 VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}"
+                                 IsReadOnly="{TemplateBinding IsReadOnly}" FocusVisualStyle="{x:Null}">
+                            <TextBox.Template>
+                                <ControlTemplate TargetType="{x:Type TextBox}">
+                                    <ScrollViewer x:Name="PART_ContentHost" Focusable="False"
+                                                  VerticalAlignment="Center"
+                                                  HorizontalScrollBarVisibility="Hidden"
+                                                  VerticalScrollBarVisibility="Hidden" />
+                                </ControlTemplate>
+                            </TextBox.Template>
+                        </TextBox>
+
+                        <!-- Chevron ▾ vẽ vector. IsHitTestVisible=False để cú bấm rơi xuống ToggleButton. -->
+                        <Path x:Name="Chevron" Grid.Column="1" IsHitTestVisible="False"
+                              HorizontalAlignment="Center" VerticalAlignment="Center"
+                              Width="9" Height="5" Stretch="Fill"
+                              Data="M 0,0 L 5,5 L 10,0"
+                              Stroke="{StaticResource TextSecondaryBrush}" StrokeThickness="1.4"
+                              StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" />
+
+                        <Popup x:Name="PART_Popup" Grid.ColumnSpan="2" Placement="Bottom" AllowsTransparency="True"
+                               IsOpen="{TemplateBinding IsDropDownOpen}" PopupAnimation="None" Focusable="False">
+                            <Border Margin="0,4,0,0" Padding="3" CornerRadius="6"
+                                    MinWidth="{TemplateBinding ActualWidth}"
+                                    MaxHeight="{TemplateBinding MaxDropDownHeight}"
+                                    Background="{StaticResource CardBackgroundBrush}"
+                                    BorderBrush="{StaticResource BorderStrongBrush}" BorderThickness="1"
+                                    SnapsToDevicePixels="True">
+                                <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                              HorizontalScrollBarVisibility="Disabled">
+                                    <ItemsPresenter KeyboardNavigation.DirectionalNavigation="Contained"
+                                                    SnapsToDevicePixels="True" />
+                                </ScrollViewer>
+                            </Border>
+                        </Popup>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsEditable" Value="True">
+                            <Setter TargetName="PART_EditableTextBox" Property="Visibility" Value="Visible" />
+                            <Setter TargetName="ContentSite" Property="Visibility" Value="Collapsed" />
+                            <!-- Ô nhập phải nhận được con trỏ chuột, không thì không gõ/bôi đen được →
+                                 vùng bấm co lại còn mỗi khoang chevron. -->
+                            <Setter TargetName="PART_ToggleButton" Property="Grid.ColumnSpan" Value="1" />
+                            <Setter TargetName="PART_ToggleButton" Property="Grid.Column" Value="1" />
+                            <Setter Property="Cursor" Value="IBeam" />
+                        </Trigger>
+                        <!-- Setter ĐI THEO TÊN (PART_BorderElement) chứ không đặt lại BorderBrush của chính
+                             ComboBox: chỗ dùng nào lỡ khai BorderBrush tại chỗ (local value) là trigger đặt
+                             lên templated parent sẽ THUA, còn setter theo tên thì luôn thắng. -->
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="PART_BorderElement" Property="BorderBrush" Value="{StaticResource InputHoverBorderBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                            <Setter TargetName="PART_BorderElement" Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsDropDownOpen" Value="True">
+                            <Setter TargetName="PART_BorderElement" Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+                            <Setter TargetName="Chevron" Property="Stroke" Value="{StaticResource AccentBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="PART_BorderElement" Property="Background" Value="{StaticResource SubtleBrush}" />
+                            <Setter TargetName="PART_BorderElement" Property="BorderBrush" Value="{StaticResource BorderLightBrush}" />
+                            <Setter Property="Foreground" Value="{StaticResource TextMutedBrush}" />
+                            <Setter TargetName="Chevron" Property="Stroke" Value="{StaticResource TextMutedBrush}" />
+                            <Setter Property="Cursor" Value="Arrow" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
     </Style>
     <Style TargetType="{x:Type CheckBox}">
         <Setter Property="Foreground" Value="{StaticResource TextBodyBrush}" />
@@ -732,7 +895,7 @@
         <Setter Property="BorderThickness" Value="0" />
     </Style>
 
-    <!-- ══════════ DATAGRID (nền tảng — cột/template riêng của từng màn port ở đợt sau) ══════════ -->
+    <!-- ══════════ DATAGRID (nền tảng — cột/template riêng thì từng màn tự khai tại chỗ) ══════════ -->
     <!-- Viết theo template WPF THẬT (không dịch selector Avalonia 1:1): WPF không có Rectangle
          #BackgroundRectangle; hover/selected của dòng đặt bằng trigger trên DataGridRow. -->
     <Style TargetType="{x:Type DataGrid}">

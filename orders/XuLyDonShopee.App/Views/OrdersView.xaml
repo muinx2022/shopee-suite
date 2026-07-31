@@ -93,8 +93,9 @@
                         </DataTemplate>
                     </ComboBox.ItemTemplate>
                 </ComboBox>
-                <!-- Gợi ý mờ: ComboBox WPF dùng template mặc định nên không chèn được PART_Watermark như
-                     TextBox — phủ một TextBlock, ẩn ngay khi ô có chữ. -->
+                <!-- Gợi ý mờ: template ComboBox phẳng của theme (đợt 6) không chèn PART_Watermark như
+                     template TextBox — phủ một TextBlock, ẩn ngay khi ô có chữ. Lề 13/34 khớp với
+                     Padding="12,0" của `fieldCombo` + viền 1 và khoang chevron 22 của template. -->
                 <TextBlock Text="Gõ tên shop để lọc… (trống = tất cả)"
                            Margin="13,0,34,0" VerticalAlignment="Center" FontSize="12.5"
                            Foreground="{StaticResource PlaceholderBrush}"
@@ -225,17 +226,24 @@
                 <DataGridTextColumn Header="Ước tính" Binding="{Binding Estimate}" Width="105" />
                 <DataGridTextColumn Header="Thanh toán" Binding="{Binding Payment}" Width="1.2*" />
                 <!-- Trạng thái: badge PILL nền nhạt + chữ đậm, màu theo từ khóa (OrderStatusPill).
-                     Ẩn pill khi trạng thái rỗng (đơn chưa có status) → ô trống sạch, không badge xám. -->
-                <DataGridTemplateColumn Header="Trạng thái" Width="140">
+                     Ẩn pill khi trạng thái rỗng (đơn chưa có status) → ô trống sạch, không badge xám.
+                     Rộng 160 (bản Avalonia: 140): trạng thái là chuỗi TỰ DO cào từ Shopee, dài nhất trong các
+                     giá trị thường gặp là "Trả hàng/Hoàn tiền" — cần 147px cả lề ô (10+10) lẫn lề pill
+                     (10+10+viền) nên ở 140 bị cắt cụt thành "Trả hàng/Hoàn t". 160 chừa dư ~12px.
+                     Vì chuỗi tự do có thể dài hơn nữa (vd "Giao hàng không thành công" cần ~201px) nên pill
+                     thêm TextTrimming = cắt có "…" thay vì cụt giữa chữ, kèm ToolTip cho đọc đủ. -->
+                <DataGridTemplateColumn Header="Trạng thái" Width="160">
                     <DataGridTemplateColumn.CellTemplate>
                         <DataTemplate>
                             <Border CornerRadius="4" Padding="10,3"
                                     HorizontalAlignment="Left" VerticalAlignment="Center"
                                     BorderThickness="1"
+                                    ToolTip="{Binding Status}"
                                     Background="{Binding Status, Converter={StaticResource OrderStatusPill}, ConverterParameter=bg}"
                                     BorderBrush="{Binding Status, Converter={StaticResource OrderStatusPill}, ConverterParameter=border}"
                                     Visibility="{Binding Status, Converter={StaticResource StringToVis}}">
                                 <TextBlock Text="{Binding Status}" FontSize="12" FontWeight="SemiBold"
+                                           TextTrimming="CharacterEllipsis"
                                            Foreground="{Binding Status, Converter={StaticResource OrderStatusPill}, ConverterParameter=text}" />
                             </Border>
                         </DataTemplate>

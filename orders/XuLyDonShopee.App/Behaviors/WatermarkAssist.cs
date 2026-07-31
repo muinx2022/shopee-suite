@@ -14,8 +14,8 @@ namespace XuLyDonShopee.App.Behaviors;
 /// <see cref="TextBox.TextChanged"/> — view không set tay.
 /// </para>
 /// <para>CHỈ áp cho <see cref="TextBox"/>. Ô "gõ để lọc shop" (ComboBox IsEditable, thay AutoCompleteBox của
-/// Avalonia) dùng template mặc định của WPF nên không chèn được PART_Watermark — màn Đơn hàng đặt gợi ý
-/// bằng một TextBlock phủ, ẩn/hiện theo chuỗi đang lọc.</para>
+/// Avalonia) KHÔNG đi qua đây: template ComboBox phẳng của theme (đợt 6) không chèn PART_Watermark, nên màn
+/// Đơn hàng đặt gợi ý bằng một TextBlock phủ, ẩn/hiện theo chuỗi đang lọc.</para>
 /// </summary>
 public static class WatermarkAssist
 {

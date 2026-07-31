@@ -34,7 +34,17 @@
                 <Grid Margin="0,12,0,0">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
-                        <RowDefinition Height="190" />
+                        <!-- Danh sách link: bản Avalonia để CỐ ĐỊNH 190 → cửa sổ thấp thì WPF ép hàng `*`
+                             (dải tab kết quả theo link) về 0 TRƯỚC, mà ô log 150 vẫn đòi đủ chỗ nên cả hai
+                             bị đẩy TRÀN khỏi đáy cửa sổ. Đổi sang SAO CÓ KẸP: cửa sổ cao thì vẫn đúng 190
+                             như cũ (MaxHeight), chật thì nhường dần xuống 150 (DataGrid tự có thanh cuộn).
+                             Đã đo thật (cửa sổ rộng 1500, số px VẬT LÝ ở DPI 125%):
+                                 cao 1400 → lưới link 178 (y hệt bản cũ), ô log nằm trong cửa sổ
+                                 cao 1175 → lưới 128 (cũ: 178), ô log nằm trong cửa sổ
+                                 cao 1000 → lưới 128, ô log 802..975 NẰM TRONG (bản cũ 852..1025 = TRÀN)
+                                 cao  860 → vẫn tràn: riêng thẻ nhập ~155 + ô log 150 đã quá khổ; muốn đỡ
+                                            thì phải cho cả tab cuộn dọc — ngoài phạm vi đợt 6. -->
+                        <RowDefinition Height="*" MinHeight="150" MaxHeight="190" />
                         <RowDefinition Height="*" />
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="150" />

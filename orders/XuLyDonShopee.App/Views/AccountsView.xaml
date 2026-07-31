@@ -245,7 +245,10 @@
     <!-- Bố cục: 2 cột — danh sách (trái, cao hết màn) | chi tiết + nhật ký của tài khoản đang chọn (phải). -->
     <Grid>
         <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="340" />
+            <!-- 360 (bản Avalonia: 340) — hàng nút dưới cần 303px chỗ (Thêm tài khoản 131 + 8 + Kéo TK từ Hub
+                 126 + 8 + nút xoá 30) nhưng 340 chỉ chừa 295 sau viền/lề ⇒ nhãn "Thêm tài khoản" bị cắt cụt
+                 thành "Thêm tài khoả". 360 chừa 315 (dư ~12). Sửa số này thì đo lại hàng nút. -->
+            <ColumnDefinition Width="360" />
             <ColumnDefinition Width="*" />
         </Grid.ColumnDefinitions>
 

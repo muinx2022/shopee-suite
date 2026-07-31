@@ -3,15 +3,19 @@
     <!-- Thư viện module (phase 1b): trước là WinExe độc lập, nay build thành DLL để shell Shopee.Suite nạp.
          Bỏ ApplicationManifest/app.manifest (chỉ dùng cho exe) và BuiltInComInteropSupport (không có COM interop;
          WindowFocus dùng P/Invoke DllImport, không cần cờ này).
-         View của module port sang WPF ở ĐỢT 5 — hiện tại project chỉ chứa VM/service/converter. -->
+         Toàn bộ view của module là WPF (port xong ở đợt 5): Views/*.xaml + Styles/*.xaml + Controls/PathIcon. -->
     <TargetFramework>net8.0-windows</TargetFramework>
     <UseWPF>true</UseWPF>
     <Nullable>enable</Nullable>
-    <!-- KHÔNG bật PublishReadyToRun: R2R crossgen recompile mọi DLL ngay trên máy → sinh hash lạ → DLL mất
-         uy tín ISG cloud của bản NuGet gốc → WDAC (UMCI Enforced) chặn 0x800711C7. Publish IL-thuần giữ
-         nguyên hash gốc các DLL NuGet (ISG biết là an toàn) nên chạy được. Đã đo thực nghiệm back-to-back
-         2026-07-14 (hồi UI còn chạy trên DLL NuGet bên thứ ba): IL chạy 3/3, R2R chặn 6/6 trên cùng máy.
-         Ràng buộc này phải KIỂM LẠI ở đợt cuối của cuộc port — runtime WPF là DLL chính chủ Microsoft. -->
+    <!-- WDAC / PublishReadyToRun — TRẠNG THÁI SAU KHI PORT WPF (đợt 6, 2026-07-31):
+         Ghi chú cũ (2026-07-14) nói KHÔNG bật R2R vì crossgen recompile các DLL NuGet BÊN THỨ BA (hồi đó UI
+         chạy trên bộ DLL Avalonia tải từ NuGet) → hash đổi → mất uy tín ISG cloud → WDAC (UMCI Enforced)
+         chặn 0x800711C7; đo back-to-back khi ấy: IL chạy 3/3, R2R chặn 6/6.
+         Nay UI là WPF — runtime nằm trong .NET desktop CHÍNH CHỦ Microsoft (ký sẵn), gói NuGet bên thứ ba
+         chỉ còn CommunityToolkit.Mvvm + Velopack, nên ràng buộc trên NHIỀU KHẢ NĂNG HẾT ÁP DỤNG. Chưa đo
+         lại được ở đợt này (cần đúng máy bật WDAC UMCI Enforced) → GIỮ NGUYÊN quyết định cũ cho an toàn:
+         project này không tự bật R2R. `release-suite.cmd` vẫn publish suite với -p:PublishReadyToRun=true
+         như trước, không đổi. Kiểm lại trên máy WDAC ở lần phát hành thật rồi hãy sửa ghi chú này. -->
   </PropertyGroup>
 
   <ItemGroup>

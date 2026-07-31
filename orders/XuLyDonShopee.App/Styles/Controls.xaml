@@ -294,9 +294,11 @@
     <!-- =========================================================
          7. COMBOBOX FIELD
          ========================================================= -->
-    <!-- CornerRadius của Avalonia BỎ: ComboBox WPF không có thuộc tính đó và template mặc định (Aero2) tự
-         lo chrome. Giữ nguyên template mặc định — đúng như bên suite đang làm (đợt 4 đã ghi nhận: dựng
-         template ComboBox phẳng dồn về đợt 6 để 2 module đổi cùng lúc, không lệch nhau). -->
+    <!-- CornerRadius của Avalonia BỎ khỏi đây: ComboBox WPF không có thuộc tính đó — bo góc nằm trong
+         TEMPLATE. Từ đợt 6 template PHẲNG do `Themes/Theme.xaml` của suite cấp (implicit style
+         `{x:Type ComboBox}`, tra được nhờ dự phòng Application.Resources — cùng đường với `{x:Type Button}`),
+         nên style này chỉ còn đè token màu/cỡ của module lên trên. Padding 12,0 ăn khớp với lề 13/34 của
+         lớp gợi ý mờ + nút xoá lọc phủ lên ô "gõ để lọc shop" ở OrdersView — đổi Padding thì đo lại chỗ đó. -->
     <Style x:Key="fieldCombo" TargetType="{x:Type ComboBox}" BasedOn="{StaticResource {x:Type ComboBox}}">
         <Setter Property="Background" Value="{StaticResource InputBg}" />
         <Setter Property="BorderBrush" Value="{StaticResource Border010}" />
