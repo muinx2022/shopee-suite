@@ -1,8 +1,8 @@
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Windows;
 using System.Windows.Input;
-using Avalonia;
-using Avalonia.Media;
+using System.Windows.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace Shopee.Suite.ViewModels;
@@ -45,8 +45,8 @@ public sealed partial class RibbonGroup : ObservableObject
     public IReadOnlyList<object> Items { get; }
 
     /// <summary>
-    /// Bật/tắt CẢ NHÓM: container nhóm bind <c>IsEnabled</c> vào đây (xem MainWindow.axaml). <c>false</c> →
-    /// Avalonia làm mờ (disable) mọi item con, KHÔNG ẩn. <c>true</c> (mặc định) → item con theo trạng thái
+    /// Bật/tắt CẢ NHÓM: container nhóm bind <c>IsEnabled</c> vào đây (xem MainWindow.xaml). <c>false</c> →
+    /// WPF làm mờ (disable) mọi item con, KHÔNG ẩn. <c>true</c> (mặc định) → item con theo trạng thái
     /// riêng của chúng (nút hành động vẫn tự disable theo CanExecute của command). Dùng để khóa nhóm
     /// "Hành động"/"Tùy chọn" của tab Shopee khi KHÔNG ở màn "Tài khoản".
     /// </summary>
@@ -63,7 +63,7 @@ public sealed partial class RibbonScreenItem : ObservableObject
     public RibbonScreenItem(string title, string iconData, object screenVm, int navIndex = -1, string? toolTip = null)
     {
         Title = title;
-        Icon = StreamGeometry.Parse(iconData);
+        Icon = Geometry.Parse(iconData);
         ScreenVm = screenVm;
         NavIndex = navIndex;
         ToolTip = toolTip;
@@ -97,9 +97,9 @@ public sealed partial class RibbonScreenItem : ObservableObject
 /// Enable/Disable tự theo CanExecute của command (không chế fallback).
 /// <para>
 /// Icon nhận vào bằng KHÓA tài nguyên (<c>IconStop</c>, <c>IconPlay</c>… — bảng ánh xạ ở đầu
-/// <c>orders/XuLyDonShopee.App/Styles/Icons.axaml</c>) rồi tra sang <see cref="Geometry"/> NGAY lúc dựng.
+/// <c>suite/Shopee.Suite/Themes/Icons.xaml</c>) rồi tra sang <see cref="Geometry"/> NGAY lúc dựng.
 /// Phải tra ở C# vì XAML không lồng được <c>{DynamicResource {Binding …}}</c>; dựng ở đây an toàn vì
-/// ShellViewModel chỉ được tạo SAU khi App.axaml đã nạp xong Application.Resources.
+/// ShellViewModel chỉ được tạo SAU khi App.xaml đã nạp xong Application.Resources.
 /// </para>
 /// </summary>
 public sealed class RibbonActionItem
@@ -125,8 +125,7 @@ public sealed class RibbonActionItem
     /// đáng làm sập cả dải ribbon lúc khởi động.</summary>
     private static Geometry? LookupIcon(string key)
     {
-        var app = Application.Current;
-        if (app?.Resources.TryGetResource(key, app.ActualThemeVariant, out var res) == true && res is Geometry g)
+        if (Application.Current?.TryFindResource(key) is Geometry g)
         {
             return g;
         }

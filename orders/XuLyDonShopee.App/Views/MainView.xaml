@@ -1,0 +1,43 @@
+<UserControl x:Class="XuLyDonShopee.App.Views.MainView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:XuLyDonShopee.App.ViewModels"
+             xmlns:v="clr-namespace:XuLyDonShopee.App.Views"
+             FontFamily="{StaticResource UiFont}">
+
+    <!-- ═══ Gốc của module Đơn hàng: đổi màn con theo MainViewModel.CurrentViewModel ═══
+         Tài nguyên/style của module cô lập vào ĐÚNG subtree này (không đổ vào Application của suite):
+         trước đây (app độc lập) Colors + 6 converter + Controls nằm ở App.axaml cấp Application; nay khai
+         tại UserControl để cam/converter/style của Đơn hàng KHÔNG đè lên (và không bị đè bởi) Theme.xaml
+         của suite — 2 bên trùng key AccentBrush/SuccessBrush/…
+
+         DataTemplate của 3 màn con khai TƯỜNG MINH ở đây (ViewLocator reflection đã bỏ — QĐ 7). Mỗi view
+         con TỰ merge ModuleResources lần nữa: chúng cũng được dựng độc lập ở nơi khác (test/designer) và
+         StaticResource trong Style cục bộ phân giải ngay lúc parse. -->
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="pack://application:,,,/XuLyDonShopee.App;component/Styles/ModuleResources.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+
+            <DataTemplate DataType="{x:Type vm:AccountsViewModel}">
+                <v:AccountsView />
+            </DataTemplate>
+            <DataTemplate DataType="{x:Type vm:OrdersViewModel}">
+                <v:OrdersView />
+            </DataTemplate>
+            <DataTemplate DataType="{x:Type vm:OrderStatisticsViewModel}">
+                <v:OrderStatisticsView />
+            </DataTemplate>
+        </ResourceDictionary>
+    </UserControl.Resources>
+
+    <!-- (Thanh MENU NGANG cũ đã bỏ: 4 màn con nay điều hướng từ dải Ribbon của shell suite qua
+         MainViewModel.SelectedNavIndex; màn Cài đặt dời sang tab Cài đặt chung.)
+         (Thanh TRẠNG THÁI đáy đã dời lên FOOTER cấp shell — MainWindow.xaml. Counter Status*Text của
+         MainViewModel vẫn giữ; footer shell bind qua ShellViewModel.ShopeeStatusVm.)
+         Nền phẳng dùng TOKEN (không hard-code) để module Đơn hàng cùng tông ẤM với suite. -->
+    <DockPanel Background="{StaticResource WindowTop}">
+        <ContentControl Content="{Binding CurrentViewModel}" />
+    </DockPanel>
+</UserControl>

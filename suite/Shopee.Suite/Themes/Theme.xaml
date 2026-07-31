@@ -1,0 +1,1021 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:sys="clr-namespace:System;assembly=mscorlib"
+                    xmlns:c="clr-namespace:Shopee.Suite.Controls"
+                    xmlns:b="clr-namespace:Shopee.Suite.Behaviors">
+
+    <!-- ══════════════════════════════════════════════════════════════════════════════════════════════
+         THEME WPF của app (port từ Themes/Theme.axaml của bản Avalonia — giữ NGUYÊN key + giá trị token).
+
+         QUY ƯỚC DỊCH "class" Avalonia → "x:Key" WPF (dùng chung cho mọi đợt port view):
+             Classes="h1"          →  Style="{StaticResource h1}"
+             Classes="pill danger" →  Style="{StaticResource pillDanger}"   (WPF không cộng dồn class)
+             Classes.active="{…}"  →  DataTrigger trong style (xem style ribbon)
+         Va tên: Avalonia có CẢ `Button.card` (thẻ bấm được ở màn Chào) LẪN `Border.card` (thẻ trắng) —
+         x:Key phải duy nhất nên: Border → `card`, Button → `cardButton`.
+         ══════════════════════════════════════════════════════════════════════════════════════════════ -->
+
+    <!-- ══════════ COLOR / BRUSH TOKENS — palette ẤM-trung tính (bộ design handoff) ══════════ -->
+    <!-- Accent = CAM Shopee #EE4D2D (đồng nhất toàn suite với module Đơn hàng). Hover/pressed là cam đậm dần. -->
+    <SolidColorBrush x:Key="AccentBrush" Color="#EE4D2D" />
+    <SolidColorBrush x:Key="AccentHoverBrush" Color="#D8401F" />
+    <SolidColorBrush x:Key="AccentPressedBrush" Color="#C93B1D" />
+    <SolidColorBrush x:Key="SuccessBrush" Color="#1F8A4C" />
+    <SolidColorBrush x:Key="SuccessHoverBrush" Color="#17703C" />
+    <SolidColorBrush x:Key="DangerBrush" Color="#C22B1E" />
+    <SolidColorBrush x:Key="DangerHoverBrush" Color="#A82217" />
+    <SolidColorBrush x:Key="WarningBrush" Color="#B06F06" />
+    <SolidColorBrush x:Key="InfoBrush" Color="#2B5FC4" />
+
+    <SolidColorBrush x:Key="WindowBackgroundBrush" Color="#F7F5F3" />
+    <SolidColorBrush x:Key="CardBackgroundBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="BorderBrush" Color="#E2DDD8" />
+    <SolidColorBrush x:Key="SubtleBrush" Color="#FBFAF9" />
+
+    <!-- Viền theo 3 nấc đậm→nhạt: dải/ribbon (strong) · thẻ + khung bảng (light) · kẻ dòng (lightest). -->
+    <SolidColorBrush x:Key="BorderStrongBrush" Color="#E5E1DD" />
+    <SolidColorBrush x:Key="BorderLightBrush" Color="#EBE7E3" />
+    <SolidColorBrush x:Key="BorderLightestBrush" Color="#F4F1EE" />
+    <!-- Nền hover: dòng bảng (ấm hồng rất nhạt) · nút/ô trắng (be nhạt) · viền ô nhập khi rê chuột. -->
+    <SolidColorBrush x:Key="RowHoverBrush" Color="#FFFAF8" />
+    <SolidColorBrush x:Key="SurfaceHoverBrush" Color="#F6F3F0" />
+    <SolidColorBrush x:Key="InputHoverBorderBrush" Color="#CFC8C2" />
+    <!-- Phản hồi rê chuột / bấm của NÚT — cố ý RẤT nhẹ: nút không bao giờ được "tô nền" (luật nút mới),
+         hover chỉ để biết con trỏ đang ở đâu. Viền đậm lên dùng InputHoverBorderBrush ở trên. -->
+    <SolidColorBrush x:Key="ButtonHoverBrush" Color="#FAF8F6" />
+    <SolidColorBrush x:Key="ButtonPressedBrush" Color="#F2EFEC" />
+
+    <!-- Thương hiệu dạng "tint": chữ cam đậm trên nền sáng + 2 nấc nền/viền cam nhạt (nút phụ tông cam,
+         dòng đang chọn, nút ribbon hover/active). -->
+    <SolidColorBrush x:Key="BrandTextBrush" Color="#C93B1D" />
+    <SolidColorBrush x:Key="BrandTintBrush" Color="#FFF3EF" />
+    <SolidColorBrush x:Key="BrandTintStrongBrush" Color="#FFE8E1" />
+    <SolidColorBrush x:Key="BrandTintBorderBrush" Color="#FBD6CA" />
+    <SolidColorBrush x:Key="BrandTintBorderStrongBrush" Color="#F6C6BB" />
+
+    <!-- Nền + chấm cho pill/badge trạng thái (chữ dùng Success/Warning/Danger/Info ở trên). -->
+    <SolidColorBrush x:Key="SuccessBgBrush" Color="#EAFAF0" />
+    <SolidColorBrush x:Key="SuccessDotBrush" Color="#3FA860" />
+    <SolidColorBrush x:Key="WarningBgBrush" Color="#FFF6E6" />
+    <SolidColorBrush x:Key="DangerBgBrush" Color="#FDECEB" />
+    <SolidColorBrush x:Key="InfoBgBrush" Color="#EEF4FF" />
+    <SolidColorBrush x:Key="NeutralBadgeBrush" Color="#6A625D" />
+    <SolidColorBrush x:Key="NeutralBadgeBgBrush" Color="#F2EFEC" />
+    <SolidColorBrush x:Key="IdleDotBrush" Color="#D3CCC7" />
+
+    <SolidColorBrush x:Key="SidebarBackgroundBrush" Color="#1E2230" />
+    <SolidColorBrush x:Key="SidebarHeaderBrush" Color="#161925" />
+    <SolidColorBrush x:Key="SidebarItemHoverBrush" Color="#2A3042" />
+    <SolidColorBrush x:Key="SidebarSelectedBrush" Color="#2A3042" />
+    <SolidColorBrush x:Key="SidebarTextBrush" Color="#C7CCD6" />
+    <SolidColorBrush x:Key="SidebarMutedBrush" Color="#7E869B" />
+
+    <!-- ══════════ SHELL: DẢI TAB · RIBBON · THANH TRẠNG THÁI (bộ handoff "Ribbon Window") ══════════ -->
+    <SolidColorBrush x:Key="TabStripBorderBrush" Color="#F0EDEA" />
+    <SolidColorBrush x:Key="TabHoverBrush" Color="#FAF8F6" />
+    <SolidColorBrush x:Key="RibbonDividerBrush" Color="#EFECEA" />
+    <!-- Huy hiệu thương hiệu (app-mark dải tab + màn Welcome): accent CAM Shopee ĐẶC. -->
+    <SolidColorBrush x:Key="BrandBadgeBrush" Color="#EE4D2D" />
+    <!-- Thanh trạng thái đáy: TRUNG TÍNH (cố ý không cam) — nền, hover đoạn, vạch ngăn 1×16, màu chữ. -->
+    <SolidColorBrush x:Key="StatusBarBrush" Color="#F2EFEC" />
+    <SolidColorBrush x:Key="StatusBarHoverBrush" Color="#E8E3DF" />
+    <SolidColorBrush x:Key="StatusBarDividerBrush" Color="#DCD6D1" />
+    <SolidColorBrush x:Key="StatusBarTextBrush" Color="#55504C" />
+
+    <SolidColorBrush x:Key="LogBackgroundBrush" Color="#121212" />
+    <SolidColorBrush x:Key="LogForegroundBrush" Color="#E8E8E8" />
+
+    <!-- Chữ 4 nấc: tiêu đề/giá trị (primary) · nhãn nút, ô bảng (body) · mô tả, đầu cột (secondary) ·
+         nhãn nhóm, gợi ý, placeholder (muted). -->
+    <SolidColorBrush x:Key="TextPrimaryBrush" Color="#2C2724" />
+    <SolidColorBrush x:Key="TextBodyBrush" Color="#423C38" />
+    <SolidColorBrush x:Key="TextSecondaryBrush" Color="#7D756F" />
+    <SolidColorBrush x:Key="TextMutedBrush" Color="#A8A09B" />
+    <SolidColorBrush x:Key="TextOnAccentBrush" Color="#FFFFFF" />
+    <!-- Tab trong module (TabControl): chữ tab CHƯA chọn — xám ấm RÕ. -->
+    <SolidColorBrush x:Key="TabUnselectedBrush" Color="#7D756F" />
+
+    <!-- ══════════ FONTS ══════════ -->
+    <!-- Bỏ Inter nhúng (của Avalonia) → font hệ thống Windows 11: "Segoe UI Variable Text" là cỡ quang học
+         thân chữ; máy Win10 không có nó thì rơi về "Segoe UI". Mono cho log/list; Emoji cho icon chuỗi. -->
+    <FontFamily x:Key="UiFont">Segoe UI Variable Text, Segoe UI</FontFamily>
+    <FontFamily x:Key="MonoFont">Cascadia Mono, Consolas</FontFamily>
+    <FontFamily x:Key="EmojiFont">Segoe UI Emoji, Segoe UI Symbol</FontFamily>
+
+    <!-- Cỡ chữ nội dung control — nhỏ lại để hợp màn Full HD (WPF mặc định 12 ≈ 16px, quá to). -->
+    <sys:Double x:Key="ControlContentFontSize">12.5</sys:Double>
+
+    <!-- ══════════ PATHICON — icon vector đơn sắc, tô theo Foreground ══════════ -->
+    <!-- Cỡ mặc định 14 (KHÔNG phải 16): 16 nhìn thô so với nhãn chữ 12 — icon là phụ trợ cho nhãn. Chỗ dùng
+         KHÔNG đặt Foreground tại chỗ, để style của nút quyết (primary → cam · danger → đỏ · success → xanh). -->
+    <Style TargetType="{x:Type c:PathIcon}">
+        <Setter Property="Width" Value="14" />
+        <Setter Property="Height" Value="14" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type c:PathIcon}">
+                    <Path Data="{TemplateBinding Data}" Fill="{TemplateBinding Foreground}"
+                          Stretch="Uniform" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" />
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- ══════════ TYPOGRAPHY ══════════ -->
+    <!-- h1 = tiêu đề màn 17/700 · h2 = tiêu đề thẻ 14.5/700 · body = chữ thường 12.5/400 ·
+         caption = mô tả/phụ 12/400 màu chữ phụ. (LetterSpacing của Avalonia không có ở WPF — bỏ.) -->
+    <Style x:Key="h1" TargetType="{x:Type TextBlock}">
+        <Setter Property="FontSize" Value="17" />
+        <Setter Property="FontWeight" Value="Bold" />
+        <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+    </Style>
+    <Style x:Key="h2" TargetType="{x:Type TextBlock}">
+        <Setter Property="FontSize" Value="14.5" />
+        <Setter Property="FontWeight" Value="Bold" />
+        <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+    </Style>
+    <Style x:Key="body" TargetType="{x:Type TextBlock}">
+        <Setter Property="FontSize" Value="12.5" />
+        <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+        <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+    <Style x:Key="caption" TargetType="{x:Type TextBlock}">
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}" />
+        <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+    <Style x:Key="emoji" TargetType="{x:Type TextBlock}">
+        <Setter Property="FontFamily" Value="{StaticResource EmojiFont}" />
+    </Style>
+    <!-- Nhãn nhóm nhỏ trên form (Avalonia: TextBlock.section). -->
+    <Style x:Key="section" TargetType="{x:Type TextBlock}">
+        <Setter Property="FontSize" Value="11" />
+        <Setter Property="FontWeight" Value="Bold" />
+        <Setter Property="Foreground" Value="{StaticResource TextMutedBrush}" />
+    </Style>
+
+    <!-- ══════════ BUTTON — MỘT DÁNG DUY NHẤT, MÀU NGỮ NGHĨA CHỈ Ở ICON ══════════ -->
+    <!-- Luật nút (người dùng chốt 2026-07-26): "không dùng bg cho button, chỉ dùng icon màu, button dùng
+         mặc định" → mọi nút chung một dáng (nền trắng · viền #E2DDD8 luôn thấy rõ · bo 5 · cao 30 ·
+         chữ #423C38); style con chỉ ĐẶT MÀU ICON. Ngoại lệ duy nhất: nút ribbon. -->
+    <Style TargetType="{x:Type Button}">
+        <Setter Property="Background" Value="{StaticResource CardBackgroundBrush}" />
+        <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="Padding" Value="12,5" />
+        <Setter Property="MinHeight" Value="30" />
+        <Setter Property="Foreground" Value="{StaticResource TextBodyBrush}" />
+        <Setter Property="FontFamily" Value="{StaticResource UiFont}" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="HorizontalContentAlignment" Value="Center" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="SnapsToDevicePixels" Value="True" />
+        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type Button}">
+                    <Border x:Name="PART_bd" Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="5" SnapsToDevicePixels="True">
+                        <ContentPresenter x:Name="PART_ContentPresenter"
+                                          Margin="{TemplateBinding Padding}"
+                                          HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                          VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                          RecognizesAccessKey="True"
+                                          SnapsToDevicePixels="True" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="PART_bd" Property="Background" Value="{StaticResource ButtonHoverBrush}" />
+                            <Setter TargetName="PART_bd" Property="BorderBrush" Value="{StaticResource InputHoverBorderBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="PART_bd" Property="Background" Value="{StaticResource ButtonPressedBrush}" />
+                            <Setter TargetName="PART_bd" Property="BorderBrush" Value="{StaticResource InputHoverBorderBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.45" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Nhãn chữ trong nút "icon + nhãn" (Avalonia: selector `Button StackPanel > TextBlock` + `Spacing="7"`
+         của StackPanel). WPF không có selector con LẪN Spacing → gộp cả hai vào MỘT style dùng ở chỗ dùng:
+         canh giữa dọc cho thẳng hàng với icon + cách icon đúng 7px. -->
+    <Style x:Key="btnLabel" TargetType="{x:Type TextBlock}">
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="Margin" Value="7,0,0,0" />
+    </Style>
+
+
+    <!-- .primary = HÀNH ĐỘNG CHÍNH của màn → icon CAM (chữ vẫn màu thường). -->
+    <Style x:Key="primary" TargetType="{x:Type Button}" BasedOn="{StaticResource {x:Type Button}}">
+        <Style.Resources>
+            <Style TargetType="{x:Type c:PathIcon}" BasedOn="{StaticResource {x:Type c:PathIcon}}">
+                <Setter Property="Foreground" Value="{StaticResource AccentBrush}" />
+            </Style>
+        </Style.Resources>
+    </Style>
+    <!-- .success = xác nhận / hoàn tất → icon XANH. -->
+    <Style x:Key="success" TargetType="{x:Type Button}" BasedOn="{StaticResource {x:Type Button}}">
+        <Style.Resources>
+            <Style TargetType="{x:Type c:PathIcon}" BasedOn="{StaticResource {x:Type c:PathIcon}}">
+                <Setter Property="Foreground" Value="{StaticResource SuccessBrush}" />
+            </Style>
+        </Style.Resources>
+    </Style>
+    <!-- .danger = nguy hiểm (Dừng · Hủy bỏ) và .destructive = XÓA THẬT → icon ĐỎ (hai tên, một biểu hiện). -->
+    <Style x:Key="danger" TargetType="{x:Type Button}" BasedOn="{StaticResource {x:Type Button}}">
+        <Style.Resources>
+            <Style TargetType="{x:Type c:PathIcon}" BasedOn="{StaticResource {x:Type c:PathIcon}}">
+                <Setter Property="Foreground" Value="{StaticResource DangerBrush}" />
+            </Style>
+        </Style.Resources>
+    </Style>
+    <Style x:Key="destructive" TargetType="{x:Type Button}" BasedOn="{StaticResource danger}" />
+
+    <!-- .iconOnly = nút vuông chỉ có icon (30×30, bo 4) — vẫn giữ nền trắng + viền của dáng chung. -->
+    <Style x:Key="iconOnly" TargetType="{x:Type Button}" BasedOn="{StaticResource {x:Type Button}}">
+        <Setter Property="Width" Value="30" />
+        <Setter Property="Height" Value="30" />
+        <Setter Property="MinHeight" Value="30" />
+        <Setter Property="Padding" Value="0" />
+    </Style>
+
+    <!-- Thẻ bấm được (màn Chào) — Avalonia `Button.card`. Bo 8, canh trái, hover nền cam rất nhạt + viền accent. -->
+    <Style x:Key="cardButton" TargetType="{x:Type Button}" BasedOn="{StaticResource {x:Type Button}}">
+        <Setter Property="Padding" Value="18,16" />
+        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type Button}">
+                    <Border x:Name="PART_bd" Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="8" SnapsToDevicePixels="True">
+                        <ContentPresenter Margin="{TemplateBinding Padding}"
+                                          HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                          VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="PART_bd" Property="Background" Value="{StaticResource BrandTintBrush}" />
+                            <Setter TargetName="PART_bd" Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.45" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- App-mark + tên app ở đầu dải tab: nút phẳng, nền trong suốt, hover be rất nhạt. -->
+    <Style x:Key="brand" TargetType="{x:Type Button}" BasedOn="{StaticResource {x:Type Button}}">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderBrush" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="Padding" Value="6,0" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type Button}">
+                    <Border x:Name="PART_bd" Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="5">
+                        <ContentPresenter Margin="{TemplateBinding Padding}"
+                                          HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="PART_bd" Property="Background" Value="{StaticResource StatusBarBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="PART_bd" Property="Background" Value="{StaticResource StatusBarHoverBrush}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- ══════════ RIBBON (dải nút kiểu Office) — nút LỚN: icon trên, nhãn dưới ══════════ -->
+    <!-- Nền + viền trong suốt; hover là tint cam nhạt (#FFF3EF + viền #FBD6CA) theo spec.
+         Rộng 78 (nhãn dài giãn tới 112 rồi mới xuống dòng, tối đa ~2 dòng).
+         `ribbon` = nút HÀNH ĐỘNG (không có trạng thái active); nút ĐIỀU HƯỚNG dùng `ribbonNav` bên dưới. -->
+    <Style x:Key="ribbon" TargetType="{x:Type Button}" BasedOn="{StaticResource {x:Type Button}}">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderBrush" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="Padding" Value="2,6" />
+        <Setter Property="MinWidth" Value="78" />
+        <Setter Property="MaxWidth" Value="112" />
+        <Setter Property="MinHeight" Value="58" />
+        <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type Button}">
+                    <Border x:Name="PART_bd" Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="5">
+                        <ContentPresenter Margin="{TemplateBinding Padding}"
+                                          HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="PART_bd" Property="Background" Value="{StaticResource BrandTintBrush}" />
+                            <Setter TargetName="PART_bd" Property="BorderBrush" Value="{StaticResource BrandTintBorderBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.45" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Nút ĐIỀU HƯỚNG MÀN: thêm trạng thái ACTIVE (`Classes.active="{Binding IsActive}"` của bản cũ) —
+         màn đang mở giữ thường trực tint hover + nhãn/icon CAM (cả hai thừa kế Foreground của nút).
+         Tách riêng khỏi `ribbon` vì RibbonActionItem KHÔNG có property IsActive: để chung thì mỗi nút hành
+         động đẻ một dòng "System.Windows.Data Error: 40" lúc mở app. -->
+    <Style x:Key="ribbonNav" TargetType="{x:Type Button}" BasedOn="{StaticResource ribbon}">
+        <Style.Triggers>
+            <DataTrigger Binding="{Binding IsActive}" Value="True">
+                <Setter Property="Background" Value="{StaticResource BrandTintBrush}" />
+                <Setter Property="BorderBrush" Value="{StaticResource BrandTintBorderBrush}" />
+                <Setter Property="Foreground" Value="{StaticResource AccentBrush}" />
+            </DataTrigger>
+        </Style.Triggers>
+    </Style>
+
+    <!-- Icon của nút ribbon: thừa kế Foreground của nút (đen ấm → cam khi active). -->
+    <Style x:Key="ribbonIcon" TargetType="{x:Type c:PathIcon}" BasedOn="{StaticResource {x:Type c:PathIcon}}">
+        <Setter Property="Width" Value="18" />
+        <Setter Property="Height" Value="18" />
+        <Setter Property="HorizontalAlignment" Value="Center" />
+        <Setter Property="Foreground"
+                Value="{Binding Foreground, RelativeSource={RelativeSource AncestorType={x:Type Button}}}" />
+    </Style>
+    <!-- Nhãn nút ribbon: chữ 11.5, xuống dòng, canh giữa; màu thừa kế nút. -->
+    <Style x:Key="ribbonLabel" TargetType="{x:Type TextBlock}">
+        <Setter Property="FontSize" Value="11.5" />
+        <Setter Property="TextWrapping" Value="Wrap" />
+        <Setter Property="TextAlignment" Value="Center" />
+        <Setter Property="HorizontalAlignment" Value="Center" />
+        <Setter Property="Foreground"
+                Value="{Binding Foreground, RelativeSource={RelativeSource AncestorType={x:Type Button}}}" />
+    </Style>
+
+    <!-- ══════════ Ô NHẬP (TextBox) — cao 30, nền trắng, viền ẤM, focus viền cam ══════════ -->
+    <Style TargetType="{x:Type TextBox}">
+        <Setter Property="MinHeight" Value="30" />
+        <Setter Property="Padding" Value="9,4" />
+        <Setter Property="Background" Value="{StaticResource CardBackgroundBrush}" />
+        <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+        <Setter Property="FontFamily" Value="{StaticResource UiFont}" />
+        <Setter Property="FontSize" Value="{StaticResource ControlContentFontSize}" />
+        <Setter Property="CaretBrush" Value="{StaticResource TextPrimaryBrush}" />
+        <Setter Property="SelectionBrush" Value="{StaticResource AccentBrush}" />
+        <!-- Ô 1 DÒNG: chữ canh giữa dọc. Ô NHIỀU DÒNG (AcceptsReturn) chảy từ trên xuống — trigger bên dưới. -->
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type TextBox}">
+                    <Border x:Name="PART_BorderElement" Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="5">
+                        <Grid>
+                            <!-- Gợi ý mờ (Watermark của Avalonia) — ẩn ngay khi có chữ hoặc đang gõ.
+                                 PHẢI dùng TemplateBinding, KHÔNG dùng {Binding (b:…), RelativeSource=TemplatedParent}:
+                                 Path dạng chuỗi có prefix chỉ được phân giải LÚC CHẠY theo phạm vi xmlns của file
+                                 XAML khai ô nhập (không phải file này) → view nào không khai `xmlns:b` (AccountsView,
+                                 ImportAccountsWindow…) sẽ ăn "BindingExpression path error 40". TemplateBinding phân
+                                 giải attached property NGAY LÚC BIÊN DỊCH theo xmlns của chính Theme.xaml → mọi view
+                                 dùng được, khỏi cần khai prefix. -->
+                            <TextBlock x:Name="PART_Watermark" Margin="{TemplateBinding Padding}"
+                                       Text="{TemplateBinding b:WatermarkAssist.Watermark}"
+                                       Foreground="{StaticResource TextMutedBrush}"
+                                       VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                       IsHitTestVisible="False" Visibility="Collapsed" />
+                            <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}"
+                                          VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                          Focusable="False" HorizontalScrollBarVisibility="Hidden"
+                                          VerticalScrollBarVisibility="Hidden" />
+                        </Grid>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <MultiTrigger>
+                            <MultiTrigger.Conditions>
+                                <Condition Property="b:WatermarkAssist.HasText" Value="False" />
+                                <Condition Property="IsFocused" Value="False" />
+                            </MultiTrigger.Conditions>
+                            <Setter TargetName="PART_Watermark" Property="Visibility" Value="Visible" />
+                        </MultiTrigger>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="PART_BorderElement" Property="BorderBrush" Value="{StaticResource InputHoverBorderBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                            <Setter TargetName="PART_BorderElement" Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="PART_BorderElement" Property="Background" Value="{StaticResource SubtleBrush}" />
+                            <Setter TargetName="PART_BorderElement" Property="BorderBrush" Value="{StaticResource BorderLightBrush}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+        <Style.Triggers>
+            <Trigger Property="AcceptsReturn" Value="True">
+                <Setter Property="VerticalContentAlignment" Value="Stretch" />
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+
+    <!-- .mono = chữ mono (dùng cho cả path 1 dòng lẫn ô nhiều dòng; ô nhiều dòng tự đặt AcceptsReturn). -->
+    <Style x:Key="mono" TargetType="{x:Type TextBox}" BasedOn="{StaticResource {x:Type TextBox}}">
+        <Setter Property="FontFamily" Value="{StaticResource MonoFont}" />
+        <Setter Property="FontSize" Value="12.5" />
+        <Setter Property="TextWrapping" Value="NoWrap" />
+    </Style>
+    <!-- .log = ô log nền tối, chỉ đọc, cuộn hai chiều (giữ nền tối cả khi hover/focus). -->
+    <Style x:Key="log" TargetType="{x:Type TextBox}" BasedOn="{StaticResource {x:Type TextBox}}">
+        <Setter Property="FontFamily" Value="{StaticResource MonoFont}" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="Foreground" Value="{StaticResource LogForegroundBrush}" />
+        <Setter Property="Background" Value="{StaticResource LogBackgroundBrush}" />
+        <Setter Property="BorderBrush" Value="{StaticResource LogBackgroundBrush}" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="IsReadOnly" Value="True" />
+        <Setter Property="TextWrapping" Value="NoWrap" />
+        <Setter Property="VerticalContentAlignment" Value="Stretch" />
+        <Setter Property="VerticalScrollBarVisibility" Value="Auto" />
+        <Setter Property="HorizontalScrollBarVisibility" Value="Auto" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type TextBox}">
+                    <Border Background="{TemplateBinding Background}" CornerRadius="5">
+                        <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}" Focusable="False" />
+                    </Border>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- ══════════ Ô MẬT KHẨU (PasswordBox) ══════════ -->
+    <!-- Avalonia dùng `TextBox PasswordChar="●"`; WPF không có PasswordChar trên TextBox → PasswordBox +
+         attached property `PasswordBoxAssist` để bind được (đợt 2). Dáng giống hệt ô nhập thường. -->
+    <Style TargetType="{x:Type PasswordBox}">
+        <Setter Property="MinHeight" Value="30" />
+        <Setter Property="Padding" Value="9,4" />
+        <Setter Property="Background" Value="{StaticResource CardBackgroundBrush}" />
+        <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+        <Setter Property="FontFamily" Value="{StaticResource UiFont}" />
+        <Setter Property="FontSize" Value="{StaticResource ControlContentFontSize}" />
+        <Setter Property="CaretBrush" Value="{StaticResource TextPrimaryBrush}" />
+        <Setter Property="SelectionBrush" Value="{StaticResource AccentBrush}" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="PasswordChar" Value="●" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type PasswordBox}">
+                    <Border x:Name="PART_BorderElement" Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="5">
+                        <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}"
+                                      VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                      Focusable="False" HorizontalScrollBarVisibility="Hidden"
+                                      VerticalScrollBarVisibility="Hidden" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="PART_BorderElement" Property="BorderBrush" Value="{StaticResource InputHoverBorderBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                            <Setter TargetName="PART_BorderElement" Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="PART_BorderElement" Property="Background" Value="{StaticResource SubtleBrush}" />
+                            <Setter TargetName="PART_BorderElement" Property="BorderBrush" Value="{StaticResource BorderLightBrush}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- ══════════ COMBOBOX · CHECKBOX ══════════ -->
+    <!-- Đợt 6: BỎ chrome mặc định (Aero2: nền gradient xám + viền 2 lớp + nút thả nổi) — trái hẳn hướng
+         phẳng Win 11 của theme và lệch hẳn với ô nhập ngay cạnh. Template tự viết dùng ĐÚNG bộ token của
+         TextBox: nền trắng, viền 1px BorderBrush, bo 5, hover → viền đậm, mở/focus → viền CAM. Mũi thả là
+         chevron vẽ bằng Path (không phải glyph font) để sắc ở mọi DPI.
+         Bề rộng khoang chevron cố định 22 — ô "gõ để lọc shop" ở màn Đơn hàng phủ watermark/nút xoá theo
+         lề phải 24/34px, đổi số này là phải đo lại chỗ đó. -->
+    <Style x:Key="comboItem" TargetType="{x:Type ComboBoxItem}">
+        <Setter Property="Padding" Value="10,6" />
+        <Setter Property="Foreground" Value="{StaticResource TextBodyBrush}" />
+        <Setter Property="FontFamily" Value="{StaticResource UiFont}" />
+        <Setter Property="FontSize" Value="{StaticResource ControlContentFontSize}" />
+        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type ComboBoxItem}">
+                    <Border x:Name="bd" Background="Transparent" Padding="{TemplateBinding Padding}"
+                            CornerRadius="4" SnapsToDevicePixels="True">
+                        <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                          VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="bd" Property="Background" Value="{StaticResource SurfaceHoverBrush}" />
+                        </Trigger>
+                        <!-- Đang chọn = nền cam nhạt + chữ cam (đúng ngữ pháp "active" của theme). -->
+                        <Trigger Property="IsSelected" Value="True">
+                            <Setter TargetName="bd" Property="Background" Value="{StaticResource BrandTintBrush}" />
+                            <Setter Property="Foreground" Value="{StaticResource BrandTextBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Foreground" Value="{StaticResource TextMutedBrush}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style TargetType="{x:Type ComboBox}">
+        <Setter Property="MinHeight" Value="30" />
+        <Setter Property="Padding" Value="8,3" />
+        <Setter Property="Background" Value="{StaticResource CardBackgroundBrush}" />
+        <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+        <Setter Property="FontFamily" Value="{StaticResource UiFont}" />
+        <Setter Property="FontSize" Value="{StaticResource ControlContentFontSize}" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="HorizontalContentAlignment" Value="Left" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+        <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled" />
+        <Setter Property="ItemContainerStyle" Value="{StaticResource comboItem}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type ComboBox}">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="22" />
+                        </Grid.ColumnDefinitions>
+
+                        <!-- KHUNG (luôn phủ cả 2 cột, tách khỏi vùng bấm — ở chế độ có sửa được thì vùng bấm
+                             co lại còn mỗi khoang chevron nhưng khung vẫn phải nguyên). -->
+                        <Border x:Name="PART_BorderElement" Grid.ColumnSpan="2"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="5" SnapsToDevicePixels="True" />
+
+                        <!-- Vùng bấm mở dropdown. ClickMode=Press là hành vi chuẩn của ComboBox. Template
+                             trần (chỉ 1 Border trong suốt) — khung do PART_BorderElement bên dưới lo. -->
+                        <ToggleButton x:Name="PART_ToggleButton" Grid.ColumnSpan="2"
+                                      Focusable="False" ClickMode="Press" Cursor="Hand"
+                                      IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}">
+                            <ToggleButton.Template>
+                                <ControlTemplate TargetType="{x:Type ToggleButton}">
+                                    <Border Background="Transparent" />
+                                </ControlTemplate>
+                            </ToggleButton.Template>
+                        </ToggleButton>
+
+                        <!-- Ô hiển thị giá trị (chế độ KHÔNG sửa được). -->
+                        <ContentPresenter x:Name="ContentSite" Grid.Column="0" IsHitTestVisible="False"
+                                          Content="{TemplateBinding SelectionBoxItem}"
+                                          ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                                          ContentStringFormat="{TemplateBinding SelectionBoxItemStringFormat}"
+                                          Margin="{TemplateBinding Padding}"
+                                          HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                          VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+
+                        <!-- Ô nhập (IsEditable="True"). Template TRẦN: viền do PART_BorderElement bên dưới
+                             vẽ, không thì hai viền chồng nhau. Tên PART_EditableTextBox là bắt buộc. -->
+                        <TextBox x:Name="PART_EditableTextBox" Grid.Column="0" Visibility="Collapsed"
+                                 Margin="{TemplateBinding Padding}" Background="Transparent"
+                                 BorderThickness="0" Padding="0"
+                                 Foreground="{TemplateBinding Foreground}"
+                                 FontFamily="{TemplateBinding FontFamily}" FontSize="{TemplateBinding FontSize}"
+                                 CaretBrush="{StaticResource TextPrimaryBrush}"
+                                 SelectionBrush="{StaticResource AccentBrush}"
+                                 VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}"
+                                 IsReadOnly="{TemplateBinding IsReadOnly}" FocusVisualStyle="{x:Null}">
+                            <TextBox.Template>
+                                <ControlTemplate TargetType="{x:Type TextBox}">
+                                    <ScrollViewer x:Name="PART_ContentHost" Focusable="False"
+                                                  VerticalAlignment="Center"
+                                                  HorizontalScrollBarVisibility="Hidden"
+                                                  VerticalScrollBarVisibility="Hidden" />
+                                </ControlTemplate>
+                            </TextBox.Template>
+                        </TextBox>
+
+                        <!-- Chevron ▾ vẽ vector. IsHitTestVisible=False để cú bấm rơi xuống ToggleButton. -->
+                        <Path x:Name="Chevron" Grid.Column="1" IsHitTestVisible="False"
+                              HorizontalAlignment="Center" VerticalAlignment="Center"
+                              Width="9" Height="5" Stretch="Fill"
+                              Data="M 0,0 L 5,5 L 10,0"
+                              Stroke="{StaticResource TextSecondaryBrush}" StrokeThickness="1.4"
+                              StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" />
+
+                        <Popup x:Name="PART_Popup" Grid.ColumnSpan="2" Placement="Bottom" AllowsTransparency="True"
+                               IsOpen="{TemplateBinding IsDropDownOpen}" PopupAnimation="None" Focusable="False">
+                            <Border Margin="0,4,0,0" Padding="3" CornerRadius="6"
+                                    MinWidth="{TemplateBinding ActualWidth}"
+                                    MaxHeight="{TemplateBinding MaxDropDownHeight}"
+                                    Background="{StaticResource CardBackgroundBrush}"
+                                    BorderBrush="{StaticResource BorderStrongBrush}" BorderThickness="1"
+                                    SnapsToDevicePixels="True">
+                                <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                              HorizontalScrollBarVisibility="Disabled">
+                                    <ItemsPresenter KeyboardNavigation.DirectionalNavigation="Contained"
+                                                    SnapsToDevicePixels="True" />
+                                </ScrollViewer>
+                            </Border>
+                        </Popup>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsEditable" Value="True">
+                            <Setter TargetName="PART_EditableTextBox" Property="Visibility" Value="Visible" />
+                            <Setter TargetName="ContentSite" Property="Visibility" Value="Collapsed" />
+                            <!-- Ô nhập phải nhận được con trỏ chuột, không thì không gõ/bôi đen được →
+                                 vùng bấm co lại còn mỗi khoang chevron. -->
+                            <Setter TargetName="PART_ToggleButton" Property="Grid.ColumnSpan" Value="1" />
+                            <Setter TargetName="PART_ToggleButton" Property="Grid.Column" Value="1" />
+                            <Setter Property="Cursor" Value="IBeam" />
+                        </Trigger>
+                        <!-- Setter ĐI THEO TÊN (PART_BorderElement) chứ không đặt lại BorderBrush của chính
+                             ComboBox: chỗ dùng nào lỡ khai BorderBrush tại chỗ (local value) là trigger đặt
+                             lên templated parent sẽ THUA, còn setter theo tên thì luôn thắng. -->
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="PART_BorderElement" Property="BorderBrush" Value="{StaticResource InputHoverBorderBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                            <Setter TargetName="PART_BorderElement" Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsDropDownOpen" Value="True">
+                            <Setter TargetName="PART_BorderElement" Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+                            <Setter TargetName="Chevron" Property="Stroke" Value="{StaticResource AccentBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="PART_BorderElement" Property="Background" Value="{StaticResource SubtleBrush}" />
+                            <Setter TargetName="PART_BorderElement" Property="BorderBrush" Value="{StaticResource BorderLightBrush}" />
+                            <Setter Property="Foreground" Value="{StaticResource TextMutedBrush}" />
+                            <Setter TargetName="Chevron" Property="Stroke" Value="{StaticResource TextMutedBrush}" />
+                            <Setter Property="Cursor" Value="Arrow" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+    <Style TargetType="{x:Type CheckBox}">
+        <Setter Property="Foreground" Value="{StaticResource TextBodyBrush}" />
+        <Setter Property="FontFamily" Value="{StaticResource UiFont}" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+    </Style>
+    <!-- Toggle trên ribbon: ô vuông + nhãn thẳng hàng, cao tự nhiên (Border bọc lo chiều cao 58). -->
+    <Style x:Key="ribbonToggle" TargetType="{x:Type CheckBox}" BasedOn="{StaticResource {x:Type CheckBox}}">
+        <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+
+    <!-- ══════════ CARD · PILL (Border) ══════════ -->
+    <Style x:Key="card" TargetType="{x:Type Border}">
+        <Setter Property="Background" Value="{StaticResource CardBackgroundBrush}" />
+        <Setter Property="BorderBrush" Value="{StaticResource BorderLightBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="8" />
+    </Style>
+    <!-- Badge trạng thái: mặc định trung tính; biến thể đổi nền + màu chữ (TextElement.Foreground chảy
+         xuống TextBlock con, thay selector `Border.pill TextBlock` của Avalonia). -->
+    <Style x:Key="pill" TargetType="{x:Type Border}">
+        <Setter Property="CornerRadius" Value="20" />
+        <Setter Property="Padding" Value="9,3" />
+        <Setter Property="Background" Value="{StaticResource NeutralBadgeBgBrush}" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="TextElement.FontSize" Value="11" />
+        <Setter Property="TextElement.FontWeight" Value="SemiBold" />
+        <Setter Property="TextElement.Foreground" Value="{StaticResource NeutralBadgeBrush}" />
+    </Style>
+    <Style x:Key="pillSuccess" TargetType="{x:Type Border}" BasedOn="{StaticResource pill}">
+        <Setter Property="Background" Value="{StaticResource SuccessBgBrush}" />
+        <Setter Property="TextElement.Foreground" Value="{StaticResource SuccessBrush}" />
+    </Style>
+    <Style x:Key="pillWarning" TargetType="{x:Type Border}" BasedOn="{StaticResource pill}">
+        <Setter Property="Background" Value="{StaticResource WarningBgBrush}" />
+        <Setter Property="TextElement.Foreground" Value="{StaticResource WarningBrush}" />
+    </Style>
+    <Style x:Key="pillDanger" TargetType="{x:Type Border}" BasedOn="{StaticResource pill}">
+        <Setter Property="Background" Value="{StaticResource DangerBgBrush}" />
+        <Setter Property="TextElement.Foreground" Value="{StaticResource DangerBrush}" />
+    </Style>
+    <Style x:Key="pillInfo" TargetType="{x:Type Border}" BasedOn="{StaticResource pill}">
+        <Setter Property="Background" Value="{StaticResource InfoBgBrush}" />
+        <Setter Property="TextElement.Foreground" Value="{StaticResource InfoBrush}" />
+    </Style>
+    <Style x:Key="pillRunning" TargetType="{x:Type Border}" BasedOn="{StaticResource pill}">
+        <Setter Property="Background" Value="{StaticResource BrandTintBrush}" />
+        <Setter Property="TextElement.Foreground" Value="{StaticResource BrandTextBrush}" />
+    </Style>
+
+    <!-- ══════════ DẢI TAB (ListBox topnav) — tab module ngang trên nền TRẮNG ══════════ -->
+    <!-- Item KHÔNG có padding riêng: toàn bộ padding + gạch chỉ báo 3px nằm trong ItemTemplate
+         (MainWindow.xaml) → gạch thụt đúng 12px mỗi bên. Tab đang chọn KHÔNG tô chip. -->
+    <Style x:Key="topnavItem" TargetType="{x:Type ListBoxItem}">
+        <Setter Property="Margin" Value="1,0" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="VerticalContentAlignment" Value="Bottom" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}" />
+        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type ListBoxItem}">
+                    <Border x:Name="PART_bd" Background="{TemplateBinding Background}" CornerRadius="5,5,0,0">
+                        <ContentPresenter VerticalAlignment="Bottom" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="PART_bd" Property="Background" Value="{StaticResource TabHoverBrush}" />
+                            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsSelected" Value="True">
+                            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+    <Style x:Key="topnav" TargetType="{x:Type ListBox}">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="ItemContainerStyle" Value="{StaticResource topnavItem}" />
+        <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Auto" />
+        <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Disabled" />
+        <Setter Property="ItemsPanel">
+            <Setter.Value>
+                <ItemsPanelTemplate>
+                    <StackPanel Orientation="Horizontal" />
+                </ItemsPanelTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- ══════════ THANH TRẠNG THÁI (đáy) — đoạn · vạch ngăn · chấm nhấp nháy ══════════ -->
+    <Style x:Key="statusSeg" TargetType="{x:Type Border}">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Padding" Value="12,0" />
+        <Setter Property="TextElement.FontSize" Value="11.5" />
+        <Setter Property="TextElement.Foreground" Value="{StaticResource StatusBarTextBrush}" />
+        <Style.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+                <Setter Property="Background" Value="{StaticResource StatusBarHoverBrush}" />
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+    <!-- Chữ trong đoạn: không xuống dòng, canh giữa dọc (Avalonia: `Border.statusSeg TextBlock`). -->
+    <Style x:Key="statusText" TargetType="{x:Type TextBlock}">
+        <Setter Property="TextWrapping" Value="NoWrap" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <!-- Dấu "·" ngăn các số trong CÙNG một đoạn (nhạt hơn chữ). -->
+    <Style x:Key="statusDotSep" TargetType="{x:Type TextBlock}" BasedOn="{StaticResource statusText}">
+        <Setter Property="Foreground" Value="{StaticResource TextMutedBrush}" />
+    </Style>
+    <!-- Vạch ngăn giữa 2 đoạn: 1×16. -->
+    <Style x:Key="statusSep" TargetType="{x:Type Rectangle}">
+        <Setter Property="Width" Value="1" />
+        <Setter Property="Height" Value="16" />
+        <Setter Property="Fill" Value="{StaticResource StatusBarDividerBrush}" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <!-- Chấm trạng thái NHẤP NHÁY: opacity 1 → 0.3 → 1, chu kỳ 2.4s, lặp vô hạn. -->
+    <Style x:Key="statusDot" TargetType="{x:Type Ellipse}">
+        <Setter Property="Width" Value="7" />
+        <Setter Property="Height" Value="7" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Style.Triggers>
+            <EventTrigger RoutedEvent="Loaded">
+                <BeginStoryboard>
+                    <Storyboard RepeatBehavior="Forever" AutoReverse="True">
+                        <DoubleAnimation Storyboard.TargetProperty="Opacity" From="1.0" To="0.3"
+                                         Duration="0:0:1.2">
+                            <DoubleAnimation.EasingFunction>
+                                <SineEase EasingMode="EaseInOut" />
+                            </DoubleAnimation.EasingFunction>
+                        </DoubleAnimation>
+                    </Storyboard>
+                </BeginStoryboard>
+            </EventTrigger>
+        </Style.Triggers>
+    </Style>
+
+    <!-- ══════════ TAB TRONG MODULE (TabControl/TabItem) — kiểu Win 11: gạch chân accent, chữ cam ══════════ -->
+    <!-- BẪY WPF (đợt 4): KHÔNG đặt Foreground/FontWeight/FontSize TRÊN CHÍNH TabItem. Ở WPF, thuộc tính
+         thừa kế chảy theo cây LOGIC, mà `TabItem.Content` (nội dung cả tab) có logical parent chính là
+         TabItem → đặt "chữ cam + Bold cho ô tab đang chọn" sẽ tô cam + in đậm TOÀN BỘ nội dung tab (mọi
+         TextBlock/TextBox không tự khai màu/độ đậm). Bản Avalonia KHÔNG dính vì thừa kế của nó đi theo cây
+         TRỰC QUAN, mà nội dung tab nằm trong ContentPresenter của TabControl chứ không nằm trong TabItem.
+         Cách đúng: đặt TextElement.* trên Border PART_bd BÊN TRONG template → chỉ phần header đổi màu/đậm. -->
+    <Style TargetType="{x:Type TabItem}">
+        <Setter Property="Padding" Value="14,7" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+        <!-- PHẢI Stretch (bổ sung đợt 4): TabControl.UpdateSelectedContent() CHÉP Horizontal/VerticalContentAlignment
+             của TabItem ĐANG CHỌN sang PART_SelectedContentHost. Theme mặc định của WPF đặt cả hai = Center (TabItem
+             thừa kế từ TabControl) → nội dung tab (lưới, ô log, form) co lại bằng kích thước mong muốn rồi trôi vào
+             giữa. Chữ trên ô tab vẫn canh giữa nhờ ContentPresenter trong template bên dưới (Alignment tường minh).
+             Đợt 3 đã gặp đúng lỗi này ở sub-tab Workspace (style `subtabItem` cũng để Stretch). -->
+        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        <Setter Property="VerticalContentAlignment" Value="Stretch" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type TabItem}">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="*" />
+                            <RowDefinition Height="2" />
+                        </Grid.RowDefinitions>
+                        <!-- Cỡ/độ đậm/màu chữ của NHÃN TAB đặt ở đây (TextElement.*), KHÔNG đặt trên TabItem. -->
+                        <Border x:Name="PART_bd" Grid.Row="0" Background="Transparent" CornerRadius="4,4,0,0"
+                                TextElement.FontFamily="{StaticResource UiFont}"
+                                TextElement.FontSize="12.5"
+                                TextElement.FontWeight="SemiBold"
+                                TextElement.Foreground="{StaticResource TabUnselectedBrush}">
+                            <ContentPresenter ContentSource="Header" Margin="{TemplateBinding Padding}"
+                                              HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <Border x:Name="PART_underline" Grid.Row="1" Margin="10,0" CornerRadius="2,2,0,0"
+                                Background="Transparent" />
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="PART_bd" Property="Background" Value="{StaticResource TabHoverBrush}" />
+                            <Setter TargetName="PART_bd" Property="TextElement.Foreground" Value="{StaticResource TextPrimaryBrush}" />
+                        </Trigger>
+                        <!-- Đặt SAU trigger hover → tab đang chọn mà rê chuột vẫn GIỮ màu accent (đúng bản Avalonia). -->
+                        <Trigger Property="IsSelected" Value="True">
+                            <Setter TargetName="PART_underline" Property="Background" Value="{StaticResource AccentBrush}" />
+                            <Setter TargetName="PART_bd" Property="TextElement.Foreground" Value="{StaticResource AccentBrush}" />
+                            <Setter TargetName="PART_bd" Property="TextElement.FontWeight" Value="Bold" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+    <Style TargetType="{x:Type TabControl}">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+    </Style>
+
+    <!-- ══════════ DATAGRID (nền tảng — cột/template riêng thì từng màn tự khai tại chỗ) ══════════ -->
+    <!-- Viết theo template WPF THẬT (không dịch selector Avalonia 1:1): WPF không có Rectangle
+         #BackgroundRectangle; hover/selected của dòng đặt bằng trigger trên DataGridRow. -->
+    <Style TargetType="{x:Type DataGrid}">
+        <Setter Property="Background" Value="{StaticResource CardBackgroundBrush}" />
+        <Setter Property="BorderBrush" Value="{StaticResource BorderLightBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="GridLinesVisibility" Value="Horizontal" />
+        <Setter Property="HorizontalGridLinesBrush" Value="{StaticResource BorderLightestBrush}" />
+        <Setter Property="RowBackground" Value="{StaticResource CardBackgroundBrush}" />
+        <Setter Property="AlternatingRowBackground" Value="{StaticResource CardBackgroundBrush}" />
+        <Setter Property="HeadersVisibility" Value="Column" />
+        <Setter Property="AutoGenerateColumns" Value="False" />
+        <Setter Property="CanUserAddRows" Value="False" />
+        <Setter Property="CanUserDeleteRows" Value="False" />
+        <Setter Property="SelectionUnit" Value="FullRow" />
+        <Setter Property="FontFamily" Value="{StaticResource UiFont}" />
+        <Setter Property="FontSize" Value="{StaticResource ControlContentFontSize}" />
+        <Setter Property="Foreground" Value="{StaticResource TextBodyBrush}" />
+    </Style>
+    <!-- Header: dải nền #FBFAF9, chữ NHỎ 11px/700 màu phụ (chữ HOA do view tự đặt). -->
+    <Style TargetType="{x:Type DataGridColumnHeader}">
+        <Setter Property="FontSize" Value="11" />
+        <Setter Property="FontWeight" Value="Bold" />
+        <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}" />
+        <Setter Property="Background" Value="{StaticResource SubtleBrush}" />
+        <Setter Property="BorderBrush" Value="{StaticResource BorderLightestBrush}" />
+        <Setter Property="BorderThickness" Value="0,0,1,1" />
+        <Setter Property="MinHeight" Value="36" />
+        <Setter Property="Padding" Value="14,0,6,0" />
+        <Setter Property="HorizontalContentAlignment" Value="Left" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+    </Style>
+    <Style TargetType="{x:Type DataGridRow}">
+        <Setter Property="Background" Value="{StaticResource CardBackgroundBrush}" />
+        <Style.Triggers>
+            <!-- Rê chuột lên dòng CHƯA chọn: nền hồng-ấm rất nhạt. -->
+            <MultiTrigger>
+                <MultiTrigger.Conditions>
+                    <Condition Property="IsMouseOver" Value="True" />
+                    <Condition Property="IsSelected" Value="False" />
+                </MultiTrigger.Conditions>
+                <Setter Property="Background" Value="{StaticResource RowHoverBrush}" />
+            </MultiTrigger>
+            <!-- Dòng đang chọn: nền accent NHẠT (không tô đặc), chữ giữ đen dễ đọc. -->
+            <Trigger Property="IsSelected" Value="True">
+                <Setter Property="Background" Value="{StaticResource BrandTintBrush}" />
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+    <Style TargetType="{x:Type DataGridCell}">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="Foreground" Value="{StaticResource TextBodyBrush}" />
+        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+        <Setter Property="Padding" Value="10,7" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type DataGridCell}">
+                    <Border Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}"
+                            MinHeight="34">
+                        <ContentPresenter VerticalAlignment="Center" />
+                    </Border>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- ── Bổ sung đợt 2 (DataView / Workspace dùng chung) ── -->
+    <!-- Dòng lưới TÔ NỀN THEO VM (Avalonia: `DataGrid.data DataGridRow { Background = {Binding RowBackground} }`).
+         Ô đã Background=Transparent ở style gốc nên màu dòng lộ ra. Trigger hover/chọn của style nền tảng vẫn
+         thắng setter này (trigger > setter) → rê/chọn vẫn đổi màu như thường. -->
+    <Style x:Key="dataRow" TargetType="{x:Type DataGridRow}" BasedOn="{StaticResource {x:Type DataGridRow}}">
+        <Setter Property="Background" Value="{Binding RowBackground}" />
+    </Style>
+    <!-- Chữ trong ô lưới dựng bằng CellTemplate (Avalonia: `TextBlock.cell`): canh giữa dọc + cắt ellipsis.
+         KHÔNG đặt Margin trái như bản Avalonia — ở WPF lề trái đã do Padding của DataGridCell lo (10,7), thêm
+         nữa thì cột template lệch so với cột DataGridTextColumn. -->
+    <Style x:Key="cell" TargetType="{x:Type TextBlock}">
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+    </Style>
+    <!-- Ô lưới HẸP (cột checkbox / nút icon rộng 40–44): bỏ padding để control bên trong không bị cắt. -->
+    <Style x:Key="cellTight" TargetType="{x:Type DataGridCell}" BasedOn="{StaticResource {x:Type DataGridCell}}">
+        <Setter Property="Padding" Value="0" />
+    </Style>
+
+    <!-- ══════════ LIST TÀI KHOẢN (dùng chung Workspace + Cấu hình BigSeller) ══════════ -->
+    <!-- Thẻ con acctCard: hover xám nhẹ, CHỌN = nền thẻ + viền cam. Item bỏ nền/khung mặc định. -->
+    <Style x:Key="acctListItem" TargetType="{x:Type ListBoxItem}">
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="Margin" Value="0" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type ListBoxItem}">
+                    <Border x:Name="PART_bd" Background="Transparent" BorderBrush="Transparent"
+                            BorderThickness="1" CornerRadius="4" Padding="10,9" Margin="0,0,0,6">
+                        <ContentPresenter />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="PART_bd" Property="Background" Value="{StaticResource RowHoverBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsSelected" Value="True">
+                            <Setter TargetName="PART_bd" Property="Background" Value="{StaticResource CardBackgroundBrush}" />
+                            <Setter TargetName="PART_bd" Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+    <Style x:Key="acctList" TargetType="{x:Type ListBox}">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="ItemContainerStyle" Value="{StaticResource acctListItem}" />
+        <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled" />
+    </Style>
+
+</ResourceDictionary>

@@ -1,9 +1,8 @@
 namespace Shopee.Suite.Services;
 
 /// <summary>
-/// Chọn file/thư mục, không dính framework UI để ViewModel dùng chung WPF ↔ Avalonia.
-/// <paramref name="filter"/> theo cú pháp WPF quen thuộc: "Tên|*.ext;*.ext2|Tất cả|*.*"
-/// (impl Avalonia tự parse). Trả null khi người dùng hủy.
+/// Chọn file/thư mục, không dính framework UI để ViewModel không phải biết tầng view.
+/// <paramref name="filter"/> theo cú pháp WPF: "Tên|*.ext;*.ext2|Tất cả|*.*". Trả null khi người dùng hủy.
 /// </summary>
 public interface IFilePickerService
 {

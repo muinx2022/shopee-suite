@@ -1,5 +1,5 @@
 using System.Globalization;
-using Avalonia.Media;
+using System.Windows.Media;
 using XuLyDonShopee.App.Converters;
 
 namespace XuLyDonShopee.Tests;
@@ -15,7 +15,9 @@ public class OrderStatusPillConverterTests
     /// <summary>Gọi converter với vai trò cho trước và lấy <see cref="Color"/> của brush trả về.</summary>
     private static Color ColorFor(string? status, string role)
         => ((SolidColorBrush)OrderStatusPillConverter.Instance
-                .Convert(status, typeof(IBrush), role, CultureInfo.InvariantCulture)!).Color;
+                .Convert(status, typeof(Brush), role, CultureInfo.InvariantCulture)!).Color;
+
+    private static Color Hex(string hex) => (Color)ColorConverter.ConvertFromString(hex);
 
     [Theory]
     // Hủy / trả hàng / hoàn tiền / giao thất bại → đỏ
@@ -38,7 +40,7 @@ public class OrderStatusPillConverterTests
     [InlineData(null, "#5A6169")]
     [InlineData("trạng thái lạ", "#5A6169")]
     public void Mau_chu_theo_tu_khoa_trang_thai(string? status, string expectedHex)
-        => Assert.Equal(Color.Parse(expectedHex), ColorFor(status, "text"));
+        => Assert.Equal(Hex(expectedHex), ColorFor(status, "text"));
 
     [Fact]
     public void Cung_trang_thai_vai_tro_bg_khac_text()

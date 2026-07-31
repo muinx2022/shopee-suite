@@ -1,0 +1,130 @@
+<Window x:Class="XuLyDonShopee.App.Views.OrderDetailDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:c="clr-namespace:XuLyDonShopee.App.Controls"
+        Width="480" SizeToContent="Height"
+        ResizeMode="NoResize" ShowInTaskbar="False" WindowStyle="SingleBorderWindow"
+        WindowStartupLocation="CenterOwner"
+        Background="{StaticResource WindowBackgroundBrush}"
+        FontFamily="{StaticResource UiFont}"
+        TextOptions.TextFormattingMode="Display"
+        Title="Thông tin đơn hàng">
+
+    <Window.Resources>
+        <ResourceDictionary>
+            <!-- Merge tài nguyên module: cần style `primary` + kiểu c:PathIcon RIÊNG của module thì icon nút
+                 "Lưu" mới lên cam (style `primary` của suite chỉ tô được PathIcon kiểu suite). -->
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="pack://application:,,,/XuLyDonShopee.App;component/Styles/ModuleResources.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+
+            <!-- Nhãn cột trái (xám ẤM — token chữ phụ của theme suite, tra ở Application). -->
+            <Style x:Key="lbl" TargetType="{x:Type TextBlock}">
+                <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+                <Setter Property="VerticalAlignment" Value="Top" />
+                <Setter Property="Margin" Value="0,0,10,9" />
+            </Style>
+
+            <!-- Giá trị (CHỌN & COPY được) — thay SelectableTextBlock của Avalonia: WPF không có control đó
+                 nên dùng TextBox chỉ-đọc, bỏ hết chrome để trông y như chữ thường. -->
+            <Style x:Key="selText" TargetType="{x:Type TextBox}">
+                <Setter Property="IsReadOnly" Value="True" />
+                <Setter Property="IsReadOnlyCaretVisible" Value="False" />
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="Padding" Value="0" />
+                <Setter Property="MinHeight" Value="0" />
+                <Setter Property="Margin" Value="0,0,0,9" />
+                <Setter Property="FontFamily" Value="{StaticResource UiFont}" />
+                <Setter Property="FontSize" Value="12.5" />
+                <Setter Property="Foreground" Value="{StaticResource TextInk}" />
+                <Setter Property="TextWrapping" Value="Wrap" />
+                <Setter Property="VerticalAlignment" Value="Top" />
+                <Setter Property="SelectionBrush" Value="{StaticResource AccentBrush}" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="{x:Type TextBox}">
+                            <ScrollViewer x:Name="PART_ContentHost" Focusable="False"
+                                          HorizontalScrollBarVisibility="Hidden"
+                                          VerticalScrollBarVisibility="Hidden" />
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+        </ResourceDictionary>
+    </Window.Resources>
+
+    <StackPanel Margin="20">
+        <TextBlock Text="Thông tin đơn hàng" FontSize="16" FontWeight="SemiBold"
+                   Foreground="{StaticResource TextInk}" Margin="0,0,0,16" />
+
+        <!-- Thông tin cơ bản (chỉ đọc): nhãn : giá trị -->
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="120" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <TextBlock Grid.Row="0" Grid.Column="0" Style="{StaticResource lbl}" Text="Mã đơn" />
+            <TextBox Grid.Row="0" Grid.Column="1" x:Name="OrderSnText" Style="{StaticResource selText}"
+                     FontWeight="SemiBold" />
+
+            <TextBlock Grid.Row="1" Grid.Column="0" Style="{StaticResource lbl}" Text="Người mua" />
+            <TextBox Grid.Row="1" Grid.Column="1" x:Name="BuyerText" Style="{StaticResource selText}" />
+
+            <TextBlock Grid.Row="2" Grid.Column="0" Style="{StaticResource lbl}" Text="Sản phẩm" />
+            <TextBox Grid.Row="2" Grid.Column="1" x:Name="ProductText" Style="{StaticResource selText}" />
+
+            <TextBlock Grid.Row="3" Grid.Column="0" Style="{StaticResource lbl}" Text="Tổng tiền" />
+            <TextBox Grid.Row="3" Grid.Column="1" x:Name="TotalText" Style="{StaticResource selText}" />
+
+            <TextBlock Grid.Row="4" Grid.Column="0" Style="{StaticResource lbl}" Text="Thanh toán" />
+            <TextBox Grid.Row="4" Grid.Column="1" x:Name="PaymentText" Style="{StaticResource selText}" />
+
+            <TextBlock Grid.Row="5" Grid.Column="0" Style="{StaticResource lbl}" Text="Trạng thái" />
+            <TextBox Grid.Row="5" Grid.Column="1" x:Name="StatusText" Style="{StaticResource selText}" />
+
+            <TextBlock Grid.Row="6" Grid.Column="0" Style="{StaticResource lbl}" Text="ĐVVC" />
+            <TextBox Grid.Row="6" Grid.Column="1" x:Name="CarrierText" Style="{StaticResource selText}" />
+
+            <TextBlock Grid.Row="7" Grid.Column="0" Style="{StaticResource lbl}" Text="Mã vận đơn" />
+            <TextBox Grid.Row="7" Grid.Column="1" x:Name="TrackingText" Style="{StaticResource selText}" />
+
+            <TextBlock Grid.Row="8" Grid.Column="0" Style="{StaticResource lbl}" Text="Ngày sync" />
+            <TextBox Grid.Row="8" Grid.Column="1" x:Name="SyncedAtText" Style="{StaticResource selText}" />
+        </Grid>
+
+        <!-- Đổi trạng thái: nguồn = các trạng thái ĐÃ SYNC về (chuỗi tự do, không enum).
+             LƯU Ý: sửa CỤC BỘ (local-only), lần sync sau lấy trạng thái thật sẽ ghi đè. -->
+        <TextBlock Text="Đổi trạng thái" FontWeight="SemiBold" Margin="0,7,0,6"
+                   Foreground="{StaticResource TextInk}" />
+        <ComboBox x:Name="StatusCombo" HorizontalAlignment="Stretch" MinHeight="34" />
+
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
+            <!-- Nút chính: dáng mặc định của theme, KHÔNG tô nền (luật nút 2026-07-26). -->
+            <Button Style="{StaticResource primary}" IsDefault="True" Click="OnSave">
+                <StackPanel Orientation="Horizontal">
+                    <c:PathIcon Data="{DynamicResource IconSave}" />
+                    <TextBlock Text="Lưu" Style="{StaticResource btnLabel}" />
+                </StackPanel>
+            </Button>
+            <Button Margin="8,0,0,0" IsCancel="True" Click="OnCancel">
+                <StackPanel Orientation="Horizontal">
+                    <c:PathIcon Data="{DynamicResource IconClose}" />
+                    <TextBlock Text="Hủy" Style="{StaticResource btnLabel}" />
+                </StackPanel>
+            </Button>
+        </StackPanel>
+    </StackPanel>
+</Window>

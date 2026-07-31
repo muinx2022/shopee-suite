@@ -74,13 +74,13 @@ public sealed class ActivityLog : IDisposable
     /// Khởi tạo service log.
     /// </summary>
     /// <param name="logDir">Thư mục chứa file log (đã được người gọi tạo sẵn).</param>
-    /// <param name="uiPost">Cách marshal một hành động về UI thread. Null → dùng
-    /// <c>Dispatcher.UIThread.Post</c>. Test truyền <c>a =&gt; a()</c> để chạy đồng bộ (không cần dispatcher).</param>
+    /// <param name="uiPost">Cách marshal một hành động về UI thread. Null → dùng <see cref="UiDispatch"/>.
+    /// Test truyền <c>a =&gt; a()</c> để chạy đồng bộ (không cần dispatcher).</param>
     /// <param name="maxLinesPerSource">Số dòng tối đa giữ để hiển thị cho MỖI nguồn (ring-buffer).</param>
     public ActivityLog(string logDir, Action<Action>? uiPost = null, int maxLinesPerSource = MaxLinesPerSource)
     {
         _logDir = logDir;
-        _uiPost = uiPost ?? (a => Avalonia.Threading.Dispatcher.UIThread.Post(() => a()));
+        _uiPost = uiPost ?? (a => UiDispatch.Post(() => a()));
         _maxLinesPerSource = Math.Max(1, maxLinesPerSource);
 
         // Ghi file ở luồng nền, gom theo nhịp — best-effort, không bao giờ được ném ra khỏi callback.

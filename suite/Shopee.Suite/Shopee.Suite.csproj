@@ -1,7 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <!-- WinForms CHỈ để dùng System.Windows.Forms.Screen (WorkingArea đa màn hình) trong WindowFit —
+         WPF không có API vùng làm việc của màn chứa cửa sổ. Không dùng control WinForms nào. -->
+    <UseWindowsForms>true</UseWindowsForms>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>Shopee.Suite</RootNamespace>
@@ -9,21 +13,32 @@
     <!-- Phiên bản đọc từ version.txt (repo root) = NGUỒN DUY NHẤT. Script release cũng đọc file này để
          truyền cho vpk pack (packVersion). Bump 1 chỗ, app và bản phát hành luôn khớp nhau. -->
     <Version>$([System.IO.File]::ReadAllText('$(MSBuildThisFileDirectory)../../version.txt').Trim())</Version>
-    <!-- Reflection binding (không ép x:DataType) → hành vi giống WPF, tránh churn lúc port. Compiled binding
-         là tối ưu để sau. -->
-    <AvaloniaUseCompiledBindingsByDefault>false</AvaloniaUseCompiledBindingsByDefault>
-    <!-- Bỏ app.manifest (dpiAware của WPF) — Avalonia tự lo DPI cross-platform. -->
+    <!-- Entry point THẬT là Program.Main (VelopackApp.Build().Run() phải chạy TRƯỚC khi dựng App WPF) —
+         App.xaml vẫn là ApplicationDefinition nhưng Main sinh tự động bị tắt bởi StartupObject này. -->
+    <StartupObject>Shopee.Suite.Program</StartupObject>
+    <!-- DPI PerMonitorV2 — WPF chỉ nhận qua manifest (file này từng mồ côi trên đĩa, nay tham chiếu lại). -->
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>..\..\assets\app-icon.ico</ApplicationIcon>
+    <!-- WFAC010: analyzer WinForms đòi bỏ dpiAware khỏi manifest và dùng Application.SetHighDpiMode. Ở đây
+         KHÔNG có app WinForms nào chạy (chỉ mượn lớp Screen) — WPF lại BẮT BUỘC khai PerMonitorV2 trong
+         manifest, nên cảnh báo này sai ngữ cảnh. Tắt đúng mã này, không tắt cả nhóm. -->
+    <NoWarn>$(NoWarn);WFAC010</NoWarn>
   </PropertyGroup>
+
+  <!-- SDK desktop tự thêm global using System.Windows.Forms + System.Drawing (vì UseWindowsForms) → VA TÊN
+       với WPF ở hàng loạt kiểu (Control · TextBox · Brush · Timer · Application). Gỡ 2 using đó; WindowFit
+       gọi System.Windows.Forms.Screen bằng tên đầy đủ. Đồng thời THÊM LẠI System.IO + System.Net.Http:
+       danh sách implicit của SDK desktop không có 2 cái này (SDK thường thì có) — bỏ là vỡ cả loạt file cũ. -->
+  <ItemGroup>
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Drawing" />
+    <Using Include="System.IO" />
+    <Using Include="System.Net.Http" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
-    <PackageReference Include="Avalonia" Version="11.3.0" />
-    <PackageReference Include="Avalonia.Desktop" Version="11.3.0" />
-    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.0" />
-    <PackageReference Include="Avalonia.Controls.DataGrid" Version="11.3.0" />
-    <PackageReference Include="Avalonia.Fonts.Inter" Version="11.3.0" />
-    <PackageReference Include="Avalonia.Diagnostics" Version="11.3.0" Condition="'$(Configuration)' == 'Debug'" />
-    <!-- Tự cập nhật đa nền tảng (Win Setup.exe + Linux AppImage), tải delta, apply atomic có rollback. -->
+    <!-- Tự cập nhật (Win Setup.exe), tải delta, apply atomic có rollback. -->
     <PackageReference Include="Velopack" Version="1.2.0" />
   </ItemGroup>
 

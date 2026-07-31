@@ -1,7 +1,7 @@
-# Plan: Port WPF — Đợt 1: hạ tầng + shell chạy được (nhánh `only-windows`)
+﻿# Plan: Port WPF — Đợt 1: hạ tầng + shell chạy được (nhánh `only-windows`)
 
 - **Ngày:** 2026-07-31
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-executor`)
 
 > **ĐỌC TRƯỚC:** `plans/2026-07-31-port-wpf-ke-hoach-tong.md` — mọi quy ước chuyển đổi (mục 2, đánh số 1–20)
@@ -132,4 +132,110 @@ Nguồn đối chiếu hành vi/giao diện: bản Avalonia hiện tại ngay tr
 
 ## Báo cáo thực thi (Opus điền sau khi xong)
 
-<để trống>
+**Ngày:** 2026-07-31 · **Người thực thi:** Opus (`opus-executor`) · **Nơi làm:** worktree `d:\Projects\shopee-suite-onlywin`
+(nhánh `only-windows`) · **CHƯA commit** (theo plan).
+
+### 1. Kết quả kiểm chứng (số liệu thật)
+
+| Hạng mục | Lệnh | Kết quả |
+|---|---|---|
+| Build | `dotnet build ShopeeSuite.sln --no-incremental` | **Build succeeded — 0 Warning(s), 0 Error(s)** |
+| Test orders | `dotnet test orders/XuLyDonShopee.Tests` | **Passed 1459 / Failed 0 / Skipped 0** |
+| Test core | `dotnet test suite/Shopee.Core.Tests` | **Passed 61 / Failed 0 / Skipped 0** |
+| Còn file `.axaml`? | `find . -name "*.axaml"` | **0 file** |
+| Còn `Avalonia` trong `.cs`/`.csproj` của 3 project UI? | grep (loại bin/obj) | **0 kết quả** (xem mục 5 về 2 file `Shopee.Core` ngoài phạm vi) |
+| Lỗi binding runtime | biến môi trường `SHOPEESUITE_BINDING_LOG` + chạy app | **0 dòng** `System.Windows.Data Error` (trước khi sửa: 4 dòng, đã xử lý — mục 3) |
+| Chạy app | mở → Ctrl+2 → Ctrl+3 → bấm X | Shell hiện đúng, chuyển tab được, **đóng sạch, exit code 0** (hook shutdown chạy hết, không sót process) |
+
+### 2. Đã làm (theo từng bước của plan)
+
+1. **csproj** — `Shopee.Suite`: `net8.0-windows` + `UseWPF` + `UseWindowsForms`, bỏ 6 gói Avalonia,
+   `StartupObject=Shopee.Suite.Program`, `ApplicationManifest=app.manifest` (file mồ côi cũ), `ApplicationIcon`
+   → `assets/app-icon.ico`; giữ Velopack/Toolkit/`version.txt`/2 target Bundle extension.
+   `XuLyDonShopee.App`: `net8.0-windows` + `UseWPF`, bỏ 5 gói Avalonia, `AvaloniaResource` → `Resource`.
+   `XuLyDonShopee.Tests`: `net8.0-windows` + `UseWPF` + gói `Xunit.StaFact` 1.1.11.
+2. **Xoá view Avalonia** — 30 `.axaml` + 20 `.axaml.cs` + `ViewLocator.cs` (`git rm`, đang ở trạng thái staged-delete).
+3. **Theme + icon + control** — mới: `Themes/Theme.xaml` (≈690 dòng, giữ NGUYÊN key + giá trị token, kèm bảng quy
+   ước dịch `Classes` → `x:Key` cho các đợt sau), `Themes/Icons.xaml` (dời từ orders sang suite, giữ nguyên key +
+   bảng ánh xạ hành-động→icon), `Controls/PathIcon.cs`, `Behaviors/WatermarkAssist.cs`.
+4. **Bootstrap + shell** — `Program.cs` (Velopack chạy trước, rồi `new App()`), `App.xaml`/`App.xaml.cs`
+   (merge theme+icon, 6 converter, 11 `DataTemplate` tường minh, port nguyên thứ tự init engine, hook shutdown
+   3 đường), `MainWindow.xaml(+.cs)`, `MessageDialog.xaml(+.cs)`, `Views/WelcomeView.*`, `Views/ComingSoonView.*`.
+5. **C# suite đụng Avalonia** — `Services/UiThread.cs`, `AvaloniaDialogService.cs`→`WpfDialogService.cs`,
+   `AvaloniaFilePickerService.cs`→`WpfFilePickerService.cs`, `WindowHost.cs`, `AppRestart.cs`,
+   `Infrastructure/WindowFit.cs`, `Behaviors/LogText.cs`, `Infrastructure/Converters.cs` (đổi sang trả
+   `Visibility` + thêm `InvBool`/`InvBoolToVis`/`WiderThan`), `ViewModels/RibbonModels.cs`, `ViewModels/ModuleItem.cs`,
+   8 VM brush đi qua `Infrastructure/AppBrushes.cs` (mới, parse + **Freeze** + cache), `Dialogs.cs`/`FilePicker.cs`
+   trỏ impl mới.
+6. **C# orders** — `Services/DialogService.cs`, `Views/CellTextExtractor.cs`, 6 converter + `Converters/BrushPalette.cs`
+   (mới, Freeze), 6 chỗ dùng Dispatcher gom về `Services/UiDispatch.cs` (mới); 2 file test port sang control WPF.
+
+### 3. Điểm phải trệch plan (và lý do)
+
+1. **4 cửa sổ phụ phải có bản placeholder** — `ImportAccountsWindow`, `CheckAccountWindow`, `RowEditWindow`,
+   `ScrapeStatsWindow` bị ViewModel gọi trực tiếp (`AccountsViewModel`, `DataViewModel`, `ScrapeViewModel`), xoá
+   `.axaml` là 4 VM không compile. Đã thêm `Views/PortingWindow.cs` + 4 lớp con thuần C# **giữ nguyên tên + chữ ký
+   hàm dựng + property** (`Logins`/`ProxyKeys`) → VM không phải sửa một dòng nào. Cửa sổ chỉ hiện "đang port +
+   nút Đóng", đóng trả `DialogResult=false` (VM coi như người dùng bấm Hủy). Đợt 2/3/4 xoá file `.cs` này, thêm
+   cặp `.xaml/.xaml.cs` cùng tên.
+2. **`ComingSoonView` điền chữ bằng code-behind thay vì binding** — plan nói dùng `ComingSoonView` làm placeholder
+   cho MỌI VM module; nhưng bind `Title`/`Description` vào VM module (không có 2 property đó) sẽ đổ hàng loạt
+   `System.Windows.Data Error` — đúng thứ tiêu chí nghiệm thu cấm. Nay view tự nhận: `ComingSoonViewModel` → lấy
+   Title/Description như cũ; VM khác → tiêu đề suy từ tên kiểu (`WorkspaceViewModel` → "Workspace") + badge
+   "Đang port" + câu giải thích.
+3. **`ribbon` tách làm 2 style** — `ribbon` (nút hành động) và `ribbonNav` (nút điều hướng, có `DataTrigger IsActive`).
+   Để chung một style thì mỗi `RibbonActionItem` đẻ 1 dòng `System.Windows.Data Error: 40` lúc mở app (đã đo: 4 dòng);
+   tách xong log còn **0 dòng**.
+4. **`x:Key` `card` bị va tên** — Avalonia có cả `Button.card` (thẻ bấm ở màn Chào) lẫn `Border.card`. WPF bắt key duy
+   nhất → `card` = Border, `cardButton` = Button. (Ghi trong đầu file Theme.xaml.)
+5. **csproj phải chỉnh implicit usings** — SDK desktop (`net8.0-windows`) tự thêm `using System.Windows.Forms` +
+   `System.Drawing` (do `UseWindowsForms`) → va tên `Control/TextBox/Brush/Timer/Application` khắp nơi, và **bỏ**
+   `System.IO` + `System.Net.Http` so với SDK thường → vỡ loạt file cũ. Đã `<Using Remove>` 2 cái đầu và
+   `<Using Include>` 2 cái sau (suite + test project).
+6. **`NoWarn WFAC010`** — analyzer WinForms đòi bỏ `dpiAware` khỏi `app.manifest`, nhưng WPF BẮT BUỘC khai
+   PerMonitorV2 ở manifest và app này không chạy WinForms (chỉ mượn lớp `Screen`). Tắt đúng một mã cảnh báo,
+   có ghi lý do trong csproj — nếu không thì không đạt "0 warning".
+7. **`DialogService` của orders tạm dùng `MessageBox`** — 2 hộp thoại riêng của module (`ConfirmDialog`,
+   `OrderDetailDialog`) thuộc đợt 5. `ConfirmAsync`/`InfoAsync` tạm dùng MessageBox của Windows;
+   **`EditOrderAsync` trả `null`** (như bấm Hủy) + ghi Trace. Chọn thư mục / lưu CSV đã là bản WPF thật.
+8. **`Xunit.StaFact` là bắt buộc, không phải tuỳ chọn** — control WPF chỉ dựng được trên luồng STA, xunit chạy MTA
+   (8 test `CellTextExtractorTests` fail đúng lỗi này trước khi thêm). Sau khi đổi sang `[StaFact]/[StaTheory]`:
+   xanh hết, **không có test nào bị Skip**.
+9. **Thêm hook log lỗi binding (opt-in)** — WPF chỉ đẩy `System.Windows.Data Error` vào Output của debugger, chạy
+   thường không thấy gì → không kiểm được tiêu chí nghiệm thu. `App.HookBindingTrace()` bật khi có biến môi trường
+   `SHOPEESUITE_BINDING_LOG=<đường-dẫn>`; mặc định tắt. Dùng lại được cho các đợt sau.
+10. **`CellTextExtractor.ExtractCellText` đổi kiểu tham số** `Control?` → `DependencyObject?` (WPF duyệt cây bằng
+    `VisualTreeHelper`/`LogicalTreeHelper` trên `DependencyObject`). Hành vi giữ nguyên, test giữ nguyên ca kiểm.
+
+### 4. Khác biệt nhìn thấy so với bản Avalonia (đã chụp màn hình khi chạy)
+
+Giống về bố cục: dải tab trắng + app-mark cam + gạch cam 3px dưới tab đang chọn + gợi ý "Ctrl + 1…4"; ribbon nút lớn
+(icon trên / nhãn dưới, nhóm + caption đáy, vạch dọc ngăn nhóm, nút active tint cam + chữ/icon cam); thanh trạng thái
+32px với chấm xanh nhấp nháy, các cụm đếm, vạch ngăn 1×16, phiên bản `v1.6.17` ở góc phải. Co hẹp cửa sổ (~1100 DIP)
+thì các đoạn phụ (acc Shopee · proxy, Trình duyệt, máy online) tự ẩn — đúng như `ContainerQuery` cũ.
+
+Khác biệt cố ý / chấp nhận ở đợt này:
+- **Font**: Segoe UI Variable Text thay Inter → chữ mảnh và "Windows" hơn một chút.
+- **LetterSpacing** (h1, header DataGrid) bỏ vì WPF không có.
+- Icon nút ribbon nay thừa kế `Foreground` của nút (thường `#2C2724`, active → cam) thay vì 2 màu tách rời.
+- Nội dung mọi màn module là thẻ "Đang port" (đúng phạm vi đợt 1).
+
+### 5. Vướng mắc / còn lại
+
+1. **Grep `Avalonia` = 0 chỉ đúng với 3 project UI.** Toàn repo còn 5 file dính chữ Avalonia trong **comment**:
+   `suite/Shopee.Core/Infrastructure/AppModeStore.cs`, `suite/Shopee.Core/Products/ProductGridEngine.cs`,
+   `suite/Shopee.Core/Shopee.Core.csproj`, `orders/XuLyDonShopee.Core/XuLyDonShopee.Core.csproj`, cộng vài file
+   `server/`+`shared/`. Plan mục 2 CẤM sửa các project này nên tôi để nguyên — cần Fable quyết (sửa comment là
+   thao tác 1 dòng/ file, không đụng logic).
+2. **Chỉ chạy thật được chế độ `--mode workspace`.** Máy này ĐANG chạy bản production (`ShopeeSuite.exe` PID 33732 +
+   8 tiến trình Brave). Chạy chế độ Full sẽ (a) `BraveFleet.StartupSweep()` giết Brave "mồ côi" của bản production,
+   (b) `OrdersModuleHost` mở chung `%APPDATA%\XuLyDonShopee\app.db` và có thể chạy vòng đẩy dữ liệu ra ngoài.
+   Nên tôi chạy bản dev với `data-dir.txt` trỏ vào thư mục tạm (cơ chế có sẵn của `SuitePaths`) + `--mode workspace`
+   → kho dữ liệu rỗng, không có cấu hình Hub (coordination NoOp), không đụng gì của production; file `data-dir.txt`
+   đã xoá sau khi chạy. **Hệ quả: tab "Shopee" và template `RibbonToggleItem` (checkbox "Xóa profile và tạo lại")
+   chưa được nhìn tận mắt** — đề nghị Fable chạy `--mode full` lúc máy rảnh để soát nốt.
+3. **Chưa kiểm bằng mắt**: `MessageDialog` (chưa có thao tác nào gọi tới), `WatermarkAssist`, các style TextBox/
+   ComboBox/DataGrid/TabItem (chưa có view nào dùng) — sẽ lộ ở đợt 2–5. Style DataGrid mới chỉ là nền tảng
+   (header/dòng/ô), cột và template riêng của từng màn dựng ở đợt sau.
+4. **`RowEditWindow` placeholder không gán `RowEditViewModel.ConfirmOwner`** — vô hại vì cửa sổ không lưu gì; đợt 2
+   dựng cửa sổ thật phải gán lại (bản cũ dùng nó cho hộp "SKU trùng").

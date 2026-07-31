@@ -1,5 +1,4 @@
 using System.Collections.ObjectModel;
-using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using XuLyDonShopee.App.Services;
 using XuLyDonShopee.Core.Models;
@@ -31,9 +30,9 @@ public partial class MainViewModel : ViewModelBase
 
         // Kho đơn đổi (phiên sync ghi xong, CÓ THỂ từ thread nền) → cập nhật số đơn ở thanh trạng thái.
         // Marshal về UI thread vì các property bind chỉ được đụng trên UI thread. VM sống suốt vòng đời app.
-        _services.OrdersChanged += () => Dispatcher.UIThread.Post(RefreshStatus);
+        _services.OrdersChanged += () => UiDispatch.Post(RefreshStatus);
         // Vòng chờ đẩy quét xong một lượt (thread nền của worker) → cập nhật đoạn "⏳ Chờ đẩy".
-        _services.PendingOutboxChanged += () => Dispatcher.UIThread.Post(RefreshOutboxPending);
+        _services.PendingOutboxChanged += () => UiDispatch.Post(RefreshOutboxPending);
         RefreshStatus();
         RefreshOutboxPending();
     }

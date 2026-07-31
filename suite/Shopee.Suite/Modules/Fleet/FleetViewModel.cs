@@ -1,6 +1,5 @@
 using System.Collections.ObjectModel;
-using Avalonia.Media;
-using Avalonia.Media.Immutable;
+using System.Windows.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Shopee.Core.BigSeller;
@@ -351,13 +350,14 @@ public sealed partial class FleetViewModel : ObservableObject
 
     private static string Short(string id) => string.IsNullOrEmpty(id) ? "?" : id[..Math.Min(8, id.Length)];
 
-    private static readonly IBrush RunningBrush = Frozen(0x1E, 0xA0, 0x55);
-    private static readonly IBrush DoneBrush = Frozen(0x2E, 0x7D, 0x32);
-    private static readonly IBrush WarnBrush = Frozen(0xC8, 0x6A, 0x00);
-    private static readonly IBrush QueuedBrush = Frozen(0x00, 0x78, 0xD7);
-    private static readonly IBrush IdleBrush = Frozen(0x6E, 0x72, 0x7A);
-    private static readonly IBrush FailBrush = Frozen(0xD1, 0x34, 0x38);
-    private static IBrush Frozen(byte r, byte g, byte b) => new ImmutableSolidColorBrush(Color.FromRgb(r, g, b));
+    private static readonly Brush RunningBrush = Frozen(0x1E, 0xA0, 0x55);
+    private static readonly Brush DoneBrush = Frozen(0x2E, 0x7D, 0x32);
+    private static readonly Brush WarnBrush = Frozen(0xC8, 0x6A, 0x00);
+    private static readonly Brush QueuedBrush = Frozen(0x00, 0x78, 0xD7);
+    private static readonly Brush IdleBrush = Frozen(0x6E, 0x72, 0x7A);
+    private static readonly Brush FailBrush = Frozen(0xD1, 0x34, 0x38);
+    // Brush cho dòng lưới dựng từ luồng nền → PHẢI Freeze (AppBrushes lo parse + Freeze + cache).
+    private static Brush Frozen(byte r, byte g, byte b) => AppBrushes.From(r, g, b);
 }
 
 /// <summary>1 dòng log tập trung (nhiều máy gửi về Hub) hiển thị ở tab Log.</summary>
@@ -366,7 +366,7 @@ public sealed class FleetLogRow
     public string Time { get; init; } = "";
     public string Machine { get; init; } = "";
     public string Text { get; init; } = "";
-    public IBrush Brush { get; init; } = Brushes.Gray;
+    public Brush Brush { get; init; } = Brushes.Gray;
 }
 
 /// <summary>1 việc Hub giao cho máy này (bản client).</summary>
@@ -379,7 +379,7 @@ public sealed class FleetMyJobRow
     /// <summary>Khoảng dòng Hub giao cho việc này ("X→Y" hoặc "theo client").</summary>
     public string Rows { get; init; } = "";
     public string StateText { get; init; } = "";
-    public IBrush StateBrush { get; init; } = Brushes.Gray;
+    public Brush StateBrush { get; init; } = Brushes.Gray;
 }
 
 /// <summary>1 việc GIÁN ĐOẠN (failed/canceled, chưa xong) ở khối "Việc gián đoạn" — bấm ▶ Tiếp tục để đưa lại

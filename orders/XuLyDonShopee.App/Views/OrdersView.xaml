@@ -1,0 +1,259 @@
+<UserControl x:Class="XuLyDonShopee.App.Views.OrdersView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="clr-namespace:XuLyDonShopee.App.Controls"
+             xmlns:b="clr-namespace:XuLyDonShopee.App.Behaviors">
+
+    <!-- Tài nguyên (màu + style + converter) của module — mỗi view TỰ CHỨA vì view có thể được dựng độc lập
+         trước khi gắn cây; StaticResource trong Style cục bộ / Converter của Binding phân giải NGAY lúc
+         parse nên phải thấy ở scope view (không tràn vào Application của suite). Đặt TRƯỚC phần nội dung. -->
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="pack://application:,,,/XuLyDonShopee.App;component/Styles/ModuleResources.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+
+            <!-- Nút dạng LINK (cột "Phiếu"): nền trong suốt, chữ cam, gạch chân khi rê chuột.
+                 Avalonia dùng selector con `Button.linky:pointerover TextBlock { TextDecorations }`; WPF không
+                 có selector con và TextDecorations KHÔNG thừa kế → template tự dựng TextBlock để trigger đụng
+                 tới được (chỗ dùng đặt Content là CHUỖI, không bọc TextBlock nữa). -->
+            <Style x:Key="linky" TargetType="{x:Type Button}">
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="Padding" Value="0" />
+                <Setter Property="MinHeight" Value="0" />
+                <Setter Property="FontFamily" Value="{StaticResource UiFont}" />
+                <Setter Property="FontSize" Value="13" />
+                <Setter Property="FontWeight" Value="SemiBold" />
+                <Setter Property="Foreground" Value="{StaticResource AccentBrush}" />
+                <Setter Property="Cursor" Value="Hand" />
+                <Setter Property="HorizontalAlignment" Value="Left" />
+                <Setter Property="VerticalAlignment" Value="Center" />
+                <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="{x:Type Button}">
+                            <TextBlock x:Name="txt" Background="Transparent"
+                                       Text="{TemplateBinding Content}"
+                                       Foreground="{TemplateBinding Foreground}"
+                                       VerticalAlignment="Center" />
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="txt" Property="TextDecorations" Value="Underline" />
+                                    <Setter TargetName="txt" Property="Foreground" Value="{StaticResource AccentHoverBrush}" />
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+        </ResourceDictionary>
+    </UserControl.Resources>
+
+    <DockPanel Margin="24,24,32,24">
+
+        <!-- Tiêu đề -->
+        <StackPanel DockPanel.Dock="Top" Margin="0,0,0,16">
+            <TextBlock Text="Đơn hàng" FontSize="19" FontWeight="Bold"
+                       Foreground="{StaticResource TextInk}" />
+            <TextBlock Text="Đơn đã đồng bộ từ trang bán hàng Shopee" FontSize="12"
+                       Foreground="{StaticResource TextMuted}" Margin="0,2,0,0" />
+        </StackPanel>
+
+        <!-- Thanh lọc: tài khoản · trạng thái · tìm kiếm · Làm mới · In nhiều đơn · Xuất CSV -->
+        <Grid DockPanel.Dock="Top" Margin="0,0,0,12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="230" />
+                <ColumnDefinition Width="200" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <!-- Lọc theo tài khoản: GÕ ĐỂ LỌC tên shop (≈100 shop, cuộn ComboBox tay rất cực). NGUỒN SỰ THẬT là
+                 CHUỖI TEXT trong ô (AccountFilterText, 2 chiều) — lọc SỐNG theo từng ký tự, KHÔNG bắt buộc chọn
+                 gợi ý: trống → tất cả shop; khớp đúng nhãn → đúng shop đó (click gợi ý làm control tự đặt
+                 Text=Label → cùng đường đi này); gõ dở ("mex") → HỢP mọi shop có Email CHỨA text (lọc trong bộ
+                 nhớ). Không khớp shop nào → 0 dòng.
+                 QĐ 15: AutoCompleteBox của Avalonia → ComboBox IsEditable của WPF. Khác biệt CÓ Ý THỨC:
+                 dropdown gợi ý KHÔNG tự lọc theo chuỗi đang gõ (WPF không có FilterMode) — nó vẫn liệt kê đủ
+                 shop; việc lọc THẬT nằm ở bảng bên dưới nên hành vi người dùng không đổi. -->
+            <Grid Grid.Column="0">
+                <ComboBox x:Name="ShopFilterBox" Style="{StaticResource fieldCombo}"
+                          IsEditable="True" StaysOpenOnEdit="True"
+                          HorizontalAlignment="Stretch"
+                          ItemsSource="{Binding AccountOptions}"
+                          TextSearch.TextPath="Label"
+                          Text="{Binding AccountFilterText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                          ToolTip="Gõ tên shop để lọc — để trống là hiện tất cả">
+                    <ComboBox.ItemTemplate>
+                        <DataTemplate>
+                            <TextBlock Text="{Binding Label}" VerticalAlignment="Center" />
+                        </DataTemplate>
+                    </ComboBox.ItemTemplate>
+                </ComboBox>
+                <!-- Gợi ý mờ: template ComboBox phẳng của theme (đợt 6) không chèn PART_Watermark như
+                     template TextBox — phủ một TextBlock, ẩn ngay khi ô có chữ. Lề 13/34 khớp với
+                     Padding="12,0" của `fieldCombo` + viền 1 và khoang chevron 22 của template. -->
+                <TextBlock Text="Gõ tên shop để lọc… (trống = tất cả)"
+                           Margin="13,0,34,0" VerticalAlignment="Center" FontSize="12.5"
+                           Foreground="{StaticResource PlaceholderBrush}"
+                           TextTrimming="CharacterEllipsis" IsHitTestVisible="False"
+                           Visibility="{Binding AccountFilterText, Converter={StaticResource EmptyToVis}}" />
+                <!-- Nút xóa lọc NẰM TRONG ô nhập → dáng .ghostIcon (không viền) như nút con mắt mật khẩu. -->
+                <Button Style="{StaticResource ghostIcon}" Width="24" Height="24"
+                        HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,24,0"
+                        Command="{Binding ClearAccountFilterCommand}"
+                        Visibility="{Binding AccountFilterText, Converter={StaticResource StringToVis}}"
+                        ToolTip="Xóa lọc shop — hiện tất cả">
+                    <c:PathIcon Data="{DynamicResource IconClose}" />
+                </Button>
+            </Grid>
+
+            <ComboBox Grid.Column="1" Style="{StaticResource fieldCombo}" HorizontalAlignment="Stretch"
+                      Margin="8,0,0,0"
+                      ItemsSource="{Binding StatusOptions}"
+                      SelectedItem="{Binding SelectedStatus}" />
+
+            <Border Grid.Column="2" Style="{StaticResource field}" Margin="8,0,0,0">
+                <Grid>
+                    <TextBox Style="{StaticResource bare}" Margin="12,0"
+                             Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
+                             b:WatermarkAssist.Watermark="Tìm mã đơn / người mua / sản phẩm" />
+                    <Border Style="{StaticResource underline}" />
+                </Grid>
+            </Border>
+
+            <Button Grid.Column="3" Margin="8,0,0,0" Command="{Binding RefreshCommand}">
+                <StackPanel Orientation="Horizontal">
+                    <c:PathIcon Data="{DynamicResource IconRefresh}" />
+                    <TextBlock Text="Làm mới" Style="{StaticResource btnLabel}" />
+                </StackPanel>
+            </Button>
+            <!-- "In nhiều đơn" có icon MÁY IN riêng — "In" và "Xuất file" là hai hành động khác nhau nên
+                 KHÔNG dùng chung icon với "Xuất CSV". -->
+            <Button Grid.Column="4" Margin="8,0,0,0" Command="{Binding PrintPendingSlipsCommand}"
+                    ToolTip="In toàn bộ phiếu (PDF) của đơn Chờ lấy hàng trong danh sách đang lọc (mọi trang, không chỉ trang hiện tại)">
+                <StackPanel Orientation="Horizontal">
+                    <c:PathIcon Data="{DynamicResource IconPrint}" />
+                    <TextBlock Text="In nhiều đơn" Style="{StaticResource btnLabel}" />
+                </StackPanel>
+            </Button>
+            <Button Grid.Column="5" Style="{StaticResource primary}" Margin="8,0,0,0"
+                    Command="{Binding ExportCsvCommand}">
+                <StackPanel Orientation="Horizontal">
+                    <c:PathIcon Data="{DynamicResource IconExport}" />
+                    <TextBlock Text="Xuất CSV" Style="{StaticResource btnLabel}" />
+                </StackPanel>
+            </Button>
+        </Grid>
+
+        <!-- Dòng tổng số + thông báo xuất + phân trang (pager BÊN PHẢI) -->
+        <Grid DockPanel.Dock="Top" Margin="0,0,0,10">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBlock Grid.Column="0" Text="{Binding TotalText}" VerticalAlignment="Center"
+                       Foreground="{StaticResource Text5A}" />
+            <TextBlock Grid.Column="1" Text="{Binding StatusMessage}" HorizontalAlignment="Right"
+                       VerticalAlignment="Center" Margin="8,0" Foreground="{StaticResource SuccessBrush}"
+                       TextWrapping="NoWrap"
+                       Visibility="{Binding StatusMessage, Converter={StaticResource StringToVis}}" />
+
+            <!-- Pager: ‹ Trước · Trang x/y · Sau › · cỡ trang (50/100/200) -->
+            <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                <Button Style="{StaticResource secondary}" Height="30" Padding="10,4" Content="‹ Trước"
+                        Command="{Binding PrevPageCommand}"
+                        ToolTip="Trang trước" />
+                <TextBlock Text="{Binding PageInfoText}" VerticalAlignment="Center" Margin="6,0,0,0"
+                           Foreground="{StaticResource Text5A}" />
+                <Button Style="{StaticResource secondary}" Height="30" Padding="10,4" Content="Sau ›"
+                        Margin="6,0,0,0" Command="{Binding NextPageCommand}"
+                        ToolTip="Trang sau" />
+                <!-- Width 96: padding 12 hai bên + cột mũi tên dropdown ~30px, hẹp hơn thì "100"/"200" bị mũi
+                     tên che mất số cuối (trông như "10"). -->
+                <ComboBox Style="{StaticResource fieldCombo}" Width="96" MinHeight="30" Margin="6,0,0,0"
+                          VerticalAlignment="Center"
+                          ItemsSource="{Binding PageSizeOptions}"
+                          SelectedItem="{Binding PageSize}"
+                          ToolTip="Số đơn mỗi trang" />
+                <TextBlock Text="/trang" VerticalAlignment="Center" Margin="6,0,0,0" FontSize="12"
+                           Foreground="{StaticResource TextMuted}" />
+            </StackPanel>
+        </Grid>
+
+        <!-- Bảng đơn (đọc-chỉ). Double-click 1 dòng → hộp thoại thông tin đơn + đổi trạng thái (code-behind). -->
+        <DataGrid x:Name="OrdersGrid"
+                  Style="{StaticResource proxy}"
+                  ClipToBounds="True"
+                  ItemsSource="{Binding Rows}"
+                  IsReadOnly="True"
+                  AutoGenerateColumns="False"
+                  CanUserResizeColumns="True"
+                  CanUserSortColumns="False">
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="Shop" Binding="{Binding ShopLabel}" Width="1.7*" MinWidth="120" />
+                <DataGridTextColumn Header="Mã đơn" Binding="{Binding OrderSn}" Width="130" />
+                <DataGridTemplateColumn Header="Phiếu" Width="96">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <StackPanel Orientation="Vertical" VerticalAlignment="Center">
+                                <!-- Ẩn cho đơn "Đã hủy" (CanPrintSlip=false): đơn hủy chưa qua xử lý nên không có phiếu. -->
+                                <Button Style="{StaticResource linky}" Content="In phiếu"
+                                        Command="{Binding PrintSlipCommand}"
+                                        Visibility="{Binding CanPrintSlip, Converter={StaticResource BoolToVis}}"
+                                        ToolTip="Gửi phiếu PDF của đơn này tới máy in mặc định" />
+                                <!-- Chỉ hiện khi đơn có vận đơn nhưng THIẾU file phiếu → tải lại (cần phiên tài khoản đang chạy). -->
+                                <Button Style="{StaticResource linky}" Content="Tải phiếu" Margin="0,2,0,0"
+                                        Command="{Binding RedownloadSlipCommand}"
+                                        Visibility="{Binding ShowRedownloadSlip, Converter={StaticResource BoolToVis}}"
+                                        ToolTip="Tải lại file phiếu bị thiếu (mở phiên tài khoản trước)" />
+                            </StackPanel>
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTextColumn Header="Người mua" Binding="{Binding Buyer}" Width="1.2*" />
+                <DataGridTextColumn Header="Sản phẩm" Binding="{Binding Product}" Width="2*" />
+                <DataGridTextColumn Header="SKU" Binding="{Binding Sku}" Width="80" />
+                <!-- Phân loại (vd "Nâu Be,39") suy từ items_json — rộng đủ đọc "Đen 9p-form chuẩn,37". -->
+                <DataGridTextColumn Header="Phân loại" Binding="{Binding PhanLoai}" Width="150" />
+                <!-- Mã yêu cầu trả hàng (bước check cuối flow shop) — rộng bằng mã đơn. -->
+                <DataGridTextColumn Header="Đơn trả hàng" Binding="{Binding DonTraHang}" Width="130" />
+                <DataGridTextColumn Header="Tổng tiền" Binding="{Binding Total}" Width="105" />
+                <DataGridTextColumn Header="Ước tính" Binding="{Binding Estimate}" Width="105" />
+                <DataGridTextColumn Header="Thanh toán" Binding="{Binding Payment}" Width="1.2*" />
+                <!-- Trạng thái: badge PILL nền nhạt + chữ đậm, màu theo từ khóa (OrderStatusPill).
+                     Ẩn pill khi trạng thái rỗng (đơn chưa có status) → ô trống sạch, không badge xám.
+                     Rộng 160 (bản Avalonia: 140): trạng thái là chuỗi TỰ DO cào từ Shopee, dài nhất trong các
+                     giá trị thường gặp là "Trả hàng/Hoàn tiền" — cần 147px cả lề ô (10+10) lẫn lề pill
+                     (10+10+viền) nên ở 140 bị cắt cụt thành "Trả hàng/Hoàn t". 160 chừa dư ~12px.
+                     Vì chuỗi tự do có thể dài hơn nữa (vd "Giao hàng không thành công" cần ~201px) nên pill
+                     thêm TextTrimming = cắt có "…" thay vì cụt giữa chữ, kèm ToolTip cho đọc đủ. -->
+                <DataGridTemplateColumn Header="Trạng thái" Width="160">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <Border CornerRadius="4" Padding="10,3"
+                                    HorizontalAlignment="Left" VerticalAlignment="Center"
+                                    BorderThickness="1"
+                                    ToolTip="{Binding Status}"
+                                    Background="{Binding Status, Converter={StaticResource OrderStatusPill}, ConverterParameter=bg}"
+                                    BorderBrush="{Binding Status, Converter={StaticResource OrderStatusPill}, ConverterParameter=border}"
+                                    Visibility="{Binding Status, Converter={StaticResource StringToVis}}">
+                                <TextBlock Text="{Binding Status}" FontSize="12" FontWeight="SemiBold"
+                                           TextTrimming="CharacterEllipsis"
+                                           Foreground="{Binding Status, Converter={StaticResource OrderStatusPill}, ConverterParameter=text}" />
+                            </Border>
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTextColumn Header="Mô tả/Lý do hủy" Binding="{Binding Note}" Width="2*" />
+                <DataGridTextColumn Header="ĐVVC" Binding="{Binding Carrier}" Width="110" />
+                <DataGridTextColumn Header="Mã vận đơn" Binding="{Binding Tracking}" Width="150" />
+                <DataGridTextColumn Header="Sync lúc" Binding="{Binding SyncedAtDisplay}" Width="140" />
+            </DataGrid.Columns>
+        </DataGrid>
+    </DockPanel>
+</UserControl>

@@ -7,6 +7,21 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 
 ## Chưa phát hành
 
+- **Toàn bộ giao diện app dựng lại trên WPF — từ bản này app là bản CHỈ chạy Windows.** Bố cục, màu sắc và cách
+  thao tác giữ **nguyên như cũ** (dải tab trên cùng, ribbon, các màn Workspace / Đơn hàng / Cài đặt, mọi nút và ô
+  nhập ở đúng chỗ); thay đổi nằm ở tầng vẽ giao diện bên dưới: bỏ bộ dựng giao diện đa nền tảng (Avalonia), dùng
+  thẳng WPF của Windows. Những gì người dùng nhận thấy:
+  - **Chữ sắc nét hơn** (ClearType của Windows) và app dùng đúng phông hệ thống Windows 11 — *Segoe UI Variable* —
+    thay cho phông nhúng riêng trước đây.
+  - Cửa sổ, hộp thoại, menu chuột phải, thanh cuộn, ô chọn ngày… hành xử **giống mọi app Windows khác**.
+  - **Ô chọn (combo box) nay phẳng đúng tông app** — nền trắng, viền mảnh bo góc, viền cam khi mở, mục đang chọn
+    tô cam nhạt — thay cho kiểu nút xám bóng mặc định của Windows.
+  - Hai chỗ chữ bị cắt cụt đã nới cho đủ: nút **"Thêm tài khoản"** (màn Tài khoản của Đơn hàng) và nhãn trạng thái
+    **"Trả hàng/Hoàn tiền"** trong bảng đơn (nhãn quá dài nay cắt có dấu "…" và rê chuột xem đủ chữ).
+  - Màn **Search** ở cửa sổ thấp không còn nuốt mất khung kết quả: danh sách link tự co lại (vẫn cuộn được) để
+    nhường chỗ cho phần kết quả bên dưới.
+  - **Lưu ý:** từ bản này **bản cho Ubuntu/Linux phát hành riêng từ nhánh `avalonia`**; bản Windows (kênh `win`)
+    không còn kèm đường build Linux. Máy Windows cập nhật như thường lệ, **không phải cài lại**.
 - **Màn "Cài đặt" làm lại từ đầu:** trước đây màn này ghép hai màn cài đặt cũ lại với nhau nên có **hai dòng chữ
   "Cài đặt"** chồng nhau, ba kiểu thẻ/phông/màu trộn lẫn và mỗi khối thụt lề một kiểu. Nay chỉ còn **một tiêu đề,
   một hệ giao diện** và các mục xếp thành 5 nhóm rõ ràng theo thứ tự dùng: *Chế độ ứng dụng · Phiên bản & cập nhật ·

@@ -1,7 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <!-- net8.0-windows + UseWPF: test dựng control WPF thật (CellTextExtractorTests) và đọc SolidColorBrush
+         (OrderStatusPillConverterTests). Chạy trên thread MTA của xunit vẫn được vì chỉ TẠO đối tượng,
+         không bơm message loop / không hiện cửa sổ. -->
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
 
@@ -14,10 +18,17 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
     <PackageReference Include="xunit" Version="2.5.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.5.3" />
+    <!-- [StaFact]/[StaTheory]: control WPF (TextBlock/Border/Button) CHỈ dựng được trên luồng STA, còn xunit
+         chạy test trên threadpool MTA. Chỉ CellTextExtractorTests cần; các test khác giữ [Fact] như cũ. -->
+    <PackageReference Include="Xunit.StaFact" Version="1.1.11" />
   </ItemGroup>
 
   <ItemGroup>
     <Using Include="Xunit" />
+    <!-- Danh sách implicit của SDK desktop (net8.0-windows) KHÔNG có System.IO + System.Net.Http như SDK
+         thường → thêm lại, không thì các test cũ (KiotApiClient…) vỡ vì thiếu using. -->
+    <Using Include="System.IO" />
+    <Using Include="System.Net.Http" />
   </ItemGroup>
 
   <ItemGroup>

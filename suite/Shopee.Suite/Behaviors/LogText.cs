@@ -1,38 +1,36 @@
 using System.Collections;
 using System.Collections.Specialized;
 using System.Text;
-using Avalonia;
-using Avalonia.Controls;
+using System.Windows;
+using System.Windows.Controls;
 
 namespace Shopee.Suite.Behaviors;
 
 /// <summary>
 /// Gắn 1 collection log (ObservableCollection&lt;string&gt;) vào 1 <see cref="TextBox"/> read-only để hiển thị
 /// mà VẪN chọn/copy được — thay ItemsControl chỉ xem. Tự nối dòng mới + cuộn cuối; Reset (Clear) thì xoá hết.
-/// Avalonia TextBox không có AppendText/ScrollToEnd → set Text + CaretIndex ở cuối. Dùng:
-/// <c>&lt;TextBox Classes="log" b:LogText.Source="{Binding LogLines}" /&gt;</c>.
+/// Dùng: <c>&lt;TextBox Style="{StaticResource log}" b:LogText.Source="{Binding LogLines}" /&gt;</c>.
 /// </summary>
-public class LogText : AvaloniaObject
+public static class LogText
 {
-    public static readonly AttachedProperty<IEnumerable?> SourceProperty =
-        AvaloniaProperty.RegisterAttached<LogText, TextBox, IEnumerable?>("Source");
+    public static readonly DependencyProperty SourceProperty =
+        DependencyProperty.RegisterAttached("Source", typeof(IEnumerable), typeof(LogText),
+            new PropertyMetadata(null, OnSourceChanged));
 
-    public static IEnumerable? GetSource(TextBox e) => e.GetValue(SourceProperty);
-    public static void SetSource(TextBox e, IEnumerable? v) => e.SetValue(SourceProperty, v);
+    public static IEnumerable? GetSource(DependencyObject e) => (IEnumerable?)e.GetValue(SourceProperty);
+    public static void SetSource(DependencyObject e, IEnumerable? v) => e.SetValue(SourceProperty, v);
 
     // Giữ handler theo từng TextBox để gỡ đăng ký khi đổi nguồn (tránh rò + nối nhầm log của VM cũ).
-    private static readonly AttachedProperty<NotifyCollectionChangedEventHandler?> HandlerProperty =
-        AvaloniaProperty.RegisterAttached<LogText, TextBox, NotifyCollectionChangedEventHandler?>("Handler");
+    private static readonly DependencyProperty HandlerProperty =
+        DependencyProperty.RegisterAttached("Handler", typeof(NotifyCollectionChangedEventHandler), typeof(LogText),
+            new PropertyMetadata(null));
 
-    static LogText()
+    private static void OnSourceChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
     {
-        SourceProperty.Changed.AddClassHandler<TextBox>(OnSourceChanged);
-    }
+        if (d is not TextBox box) return;
 
-    private static void OnSourceChanged(TextBox box, AvaloniaPropertyChangedEventArgs e)
-    {
         if (e.OldValue is INotifyCollectionChanged oldNotify &&
-            box.GetValue(HandlerProperty) is { } oldHandler)
+            box.GetValue(HandlerProperty) is NotifyCollectionChangedEventHandler oldHandler)
             oldNotify.CollectionChanged -= oldHandler;
 
         var items = e.NewValue as IEnumerable;
@@ -59,12 +57,8 @@ public class LogText : AvaloniaObject
         var sb = new StringBuilder();
         if (items is not null)
             foreach (var line in items) sb.Append(line).Append('\n');
-        SetText(box, sb.ToString());
-    }
-
-    private static void SetText(TextBox box, string text)
-    {
-        box.Text = text;
-        box.CaretIndex = text.Length;   // đưa con trỏ về cuối → TextBox tự cuộn xuống
+        box.Text = sb.ToString();
+        box.CaretIndex = box.Text.Length;
+        box.ScrollToEnd();   // luôn dán đáy: dòng mới nhất phải tự lộ ra
     }
 }

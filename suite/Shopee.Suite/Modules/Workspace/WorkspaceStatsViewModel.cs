@@ -1,11 +1,11 @@
 using System.Collections.ObjectModel;
-using Avalonia.Media;
-using Avalonia.Media.Immutable;
-using Avalonia.Threading;
+using System.Windows.Media;
+using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using Shopee.Core.BigSeller;
 using Shopee.Core.Coordination;
 using Shopee.Core.Scrape;
+using Shopee.Suite.Infrastructure;
 using Shopee.Suite.Services;
 
 namespace Shopee.Suite.Modules.Workspace;
@@ -21,8 +21,8 @@ public sealed partial class WorkspaceOpStat : ObservableObject
     public WorkspaceOpStat(string opLabel) => OpLabel = opLabel;
 
     [ObservableProperty] private string _statusText = "";
-    [ObservableProperty] private IBrush _statusBg = Brushes.Transparent;
-    [ObservableProperty] private IBrush _statusFg = Brushes.Black;
+    [ObservableProperty] private Brush _statusBg = Brushes.Transparent;
+    [ObservableProperty] private Brush _statusFg = Brushes.Black;
     [ObservableProperty] private string _rowsText = "0 dòng";
     [ObservableProperty] private string _lastRowText = "";
     [ObservableProperty] private string _rangesText = "—";
@@ -239,7 +239,7 @@ public sealed partial class WorkspaceStatsViewModel : ObservableObject
     // ── Logic trạng thái 1 ô op — PORT FleetStateService.OpCell (giữ nguyên thứ tự ưu tiên) ──────────────
     private static readonly TimeSpan LeaseFresh = TimeSpan.FromSeconds(120);
 
-    private static (string text, IBrush bg, IBrush fg) BuildOpStatus(FleetSnapshot f, string accId, string shopId, string op)
+    private static (string text, Brush bg, Brush fg) BuildOpStatus(FleetSnapshot f, string accId, string shopId, string op)
     {
         var key = $"{accId}__{shopId}__{op}";
 
@@ -344,11 +344,11 @@ public sealed partial class WorkspaceStatsViewModel : ObservableObject
     private static string Host(string h) => string.IsNullOrWhiteSpace(h) ? "?" : h;
 
     // ── Màu chip (nền nhạt + chữ đậm) — freeze để tái dùng, hài hoà với ScrapeTargetViewModel ──
-    private static readonly IBrush DoneBg = FrozenBrush("#E8F5E9"), DoneFg = FrozenBrush("#2E7D32");
-    private static readonly IBrush RunningBg = FrozenBrush("#FFF3E0"), RunningFg = FrozenBrush("#E65100");
-    private static readonly IBrush TodoBg = FrozenBrush("#ECEFF1"), TodoFg = FrozenBrush("#546E7A");
-    private static readonly IBrush WarnBg = FrozenBrush("#FFF8E1"), WarnFg = FrozenBrush("#B26A00");
-    private static readonly IBrush ErrorBg = FrozenBrush("#FDECEA"), ErrorFg = FrozenBrush("#C62828");
+    private static readonly Brush DoneBg = FrozenBrush("#E8F5E9"), DoneFg = FrozenBrush("#2E7D32");
+    private static readonly Brush RunningBg = FrozenBrush("#FFF3E0"), RunningFg = FrozenBrush("#E65100");
+    private static readonly Brush TodoBg = FrozenBrush("#ECEFF1"), TodoFg = FrozenBrush("#546E7A");
+    private static readonly Brush WarnBg = FrozenBrush("#FFF8E1"), WarnFg = FrozenBrush("#B26A00");
+    private static readonly Brush ErrorBg = FrozenBrush("#FDECEA"), ErrorFg = FrozenBrush("#C62828");
 
-    private static IBrush FrozenBrush(string hex) => new ImmutableSolidColorBrush(Color.Parse(hex));
+    private static Brush FrozenBrush(string hex) => AppBrushes.From(hex);
 }

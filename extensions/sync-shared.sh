@@ -5,7 +5,9 @@
 #  ngược ra ngoài thư mục extension được → mỗi extension giữ một bản copy trong repo.
 #
 #    extensions/sync-shared.sh            → CHÉP (chạy sau mỗi lần sửa extensions/shared/)
-#    extensions/sync-shared.sh --check    → chỉ KIỂM TRA lệch, exit 1 nếu có (release-suite.sh gọi)
+#    extensions/sync-shared.sh --check    → chỉ KIỂM TRA lệch, exit 1 nếu có
+#  (Nhánh Windows phát hành bằng release-suite.cmd → nó gọi bản .cmd cạnh file này; bản .sh giữ cho ai
+#   chạy trên Linux/WSL và cho nhánh `avalonia`.)
 # ═══════════════════════════════════════════════════════════════════════════════════════════
 set -euo pipefail
 cd "$(dirname "$0")"

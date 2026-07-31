@@ -4,7 +4,7 @@ namespace Shopee.Suite.Services;
 public enum DialogIcon { None, Info, Warning, Error, Question }
 
 /// <summary>
-/// Hộp thoại thông báo/xác nhận, không dính framework UI để ViewModel dùng chung WPF ↔ Avalonia.
+/// Hộp thoại thông báo/xác nhận, không dính framework UI để ViewModel không phải biết tầng view.
 /// Impl tự lo marshal về UI thread — gọi được từ luồng nền.
 /// </summary>
 public interface IDialogService

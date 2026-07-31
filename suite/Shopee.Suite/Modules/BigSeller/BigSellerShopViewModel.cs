@@ -25,7 +25,7 @@ public sealed class BigSellerShopViewModel : ObservableObject
     /// không phô cho user); excel-mode hiện tên sheet như cũ. ShopeeDataSheet (dùng cho runner) KHÔNG đổi.</summary>
     public string SheetDisplay => UsesHubData ? "" : Model.ShopeeDataSheet;
 
-    // Gộp ghi đĩa (Avalonia bind cập nhật mỗi phím) — xem PersistDebounce, thay LostFocus của WPF. Model cập nhật ngay.
+    // Gộp ghi đĩa khi ô nhập bắn giá trị mỗi phím — xem PersistDebounce. Model cập nhật ngay.
     private static void Persist() => PersistDebounce.Schedule();
 
     public string Name

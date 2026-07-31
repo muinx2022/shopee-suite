@@ -1,7 +1,7 @@
 using System;
 using System.Globalization;
-using Avalonia.Data.Converters;
-using Avalonia.Media;
+using System.Windows.Data;
+using System.Windows.Media;
 
 namespace XuLyDonShopee.App.Converters;
 
@@ -56,7 +56,7 @@ public class OrderStatusPillConverter : IValueConverter
             _ => bg
         };
 
-        return new SolidColorBrush(Color.Parse(hex));
+        return BrushPalette.From(hex);
     }
 
     /// <summary>

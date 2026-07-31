@@ -12,7 +12,7 @@ namespace XuLyDonShopee.Tests;
 /// <summary>
 /// Test phần THUẦN của <see cref="ActivityLog"/>: định dạng dòng, ring-buffer RIÊNG từng nguồn, ghi file gom
 /// nhóm. Truyền <c>uiPost: a =&gt; a()</c> để sự kiện <see cref="ActivityLog.SourceUpdated"/> nổ đồng bộ (không
-/// cần Avalonia dispatcher). Ghi file chạy ở timer nền → test gọi <see cref="ActivityLog.Flush"/> để khỏi chờ nhịp.
+/// cần dispatcher UI). Ghi file chạy ở timer nền → test gọi <see cref="ActivityLog.Flush"/> để khỏi chờ nhịp.
 /// </summary>
 public class ActivityLogTests
 {

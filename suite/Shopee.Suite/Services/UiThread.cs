@@ -1,45 +1,60 @@
-using Avalonia.Threading;
+using System.Windows;
+using System.Windows.Threading;
 
 namespace Shopee.Suite.Services;
 
 /// <summary>
-/// Lớp đệm UI-thread — điểm chạm duy nhất của ViewModel với threading của framework UI (Avalonia Dispatcher).
+/// Lớp đệm UI-thread — điểm chạm duy nhất của ViewModel với threading của framework UI (Dispatcher của WPF).
 /// Callback qua <see cref="Post"/>/<see cref="Enqueue"/>/<see cref="UiTimer"/> được bọc try/catch nối vào
-/// <see cref="OnError"/> — lưới đỡ lỗi UI chính (Avalonia không có DispatcherUnhandledException kiểu WPF).
+/// <see cref="OnError"/> (cùng chính sách với DispatcherUnhandledException — xem App.xaml.cs).
+/// <para>
+/// Chưa có <see cref="Application"/> (unit test / lỗi rất sớm lúc boot) → chạy THẲNG trên luồng gọi thay vì
+/// ném NullReference.
+/// </para>
 /// </summary>
 public static class UiThread
 {
     /// <summary>Lỗi lọt từ callback — App nối vào filter teardown lành tính + crash log + popup.</summary>
     public static Action<Exception>? OnError { get; set; }
 
-    public static bool CheckAccess() => Dispatcher.UIThread.CheckAccess();
+    private static Dispatcher? Ui => Application.Current?.Dispatcher;
+
+    public static bool CheckAccess() => Ui?.CheckAccess() ?? true;
 
     /// <summary>Chạy NGAY nếu đang ở UI thread, ngược lại xếp hàng sang UI thread.</summary>
     public static void Post(Action action)
     {
-        if (Dispatcher.UIThread.CheckAccess()) Run(action);
-        else Dispatcher.UIThread.Post(() => Run(action));
+        var ui = Ui;
+        if (ui is null || ui.CheckAccess()) Run(action);
+        else ui.BeginInvoke(new Action(() => Run(action)));
     }
 
     /// <summary>LUÔN xếp hàng (kể cả đang ở UI thread) — dùng khi cần thoát khỏi call stack hiện tại
     /// (vd tránh chạy trong nested pump của dialog đang mở).</summary>
-    public static void Enqueue(Action action) => Dispatcher.UIThread.Post(() => Run(action));
+    public static void Enqueue(Action action)
+    {
+        var ui = Ui;
+        if (ui is null) Run(action);
+        else ui.BeginInvoke(new Action(() => Run(action)));
+    }
 
     /// <summary>Chạy trên UI thread và đợi xong (await được từ luồng nền).</summary>
     public static Task InvokeAsync(Action action)
     {
-        if (Dispatcher.UIThread.CheckAccess()) { Run(action); return Task.CompletedTask; }
-        return Dispatcher.UIThread.InvokeAsync(() => Run(action)).GetTask();
+        var ui = Ui;
+        if (ui is null || ui.CheckAccess()) { Run(action); return Task.CompletedTask; }
+        return ui.InvokeAsync(() => Run(action)).Task;
     }
 
     /// <summary>Chạy trên UI thread và trả kết quả (await được từ luồng nền).</summary>
     public static Task<T> InvokeAsync<T>(Func<T> func)
     {
-        if (Dispatcher.UIThread.CheckAccess()) return Task.FromResult(func());
-        return Dispatcher.UIThread.InvokeAsync(func).GetTask();
+        var ui = Ui;
+        if (ui is null || ui.CheckAccess()) return Task.FromResult(func());
+        return ui.InvokeAsync(func).Task;
     }
 
-    /// <summary>Timer tick trên UI thread (thay DispatcherTimer). Chưa Start — caller tự Start().</summary>
+    /// <summary>Timer tick trên UI thread. Chưa Start — caller tự Start().</summary>
     public static UiTimer Interval(TimeSpan interval, Action tick) => new(interval, tick);
 
     private static void Run(Action action)
