@@ -5,7 +5,7 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Hiệu năng. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
-## Chưa phát hành
+## v1.7.0 — 2026-07-31
 
 - **Toàn bộ giao diện app dựng lại trên WPF — từ bản này app là bản CHỈ chạy Windows.** Bố cục, màu sắc và cách
   thao tác giữ **nguyên như cũ** (dải tab trên cùng, ribbon, các màn Workspace / Đơn hàng / Cài đặt, mọi nút và ô
