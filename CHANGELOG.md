@@ -5,6 +5,14 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Hiệu năng. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.7.4 — 2026-07-31
+
+- **Chữ trên MỌI dải tab về nét thường hoàn toàn** — bản trước mới bỏ in đậm ở tab đang xem, nhưng nền chữ
+  của các dải tab vẫn hơi đậm (SemiBold) cho mọi ô. Nay cả dải tab "viên" trắng (*Workspace · Cài đặt*) lẫn
+  dải tab gạch chân cam (*Search · Trạng thái · Check tài khoản*) và dải tab chi tiết tài khoản của module
+  Đơn hàng đều dùng nét chữ thường ở mọi trạng thái (bình thường · rê chuột · đang xem). Tab đang xem vẫn
+  nhận ra ngay nhờ viên trắng / gạch cam + màu chữ.
+
 ## v1.7.3 — 2026-07-31
 
 - **Chữ trên dải tab TRÊN CÙNG to hơn** (*Workspace · Cấu hình BigSeller · Shopee · Cài đặt*) — dễ đọc hơn ở
