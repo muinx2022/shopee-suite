@@ -5,6 +5,19 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Hiệu năng. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.7.2 — 2026-07-31
+
+- **Dải tab màn "Cài đặt" đổi sang đúng kiểu tab của màn Workspace** — thay vì hàng chữ gạch chân cam, 4 tab
+  nay nằm trong một khay xám bo tròn, tab đang xem là "viên" trắng nổi lên (y hệt dải *Shop & cấu hình ·
+  Thống kê · Dữ liệu · Theo dõi Scrape · Theo dõi Update* ở màn Workspace). **Thứ tự tab sắp lại theo mức
+  hay dùng:** *Chế độ ứng dụng · Đơn hàng · Hiệu năng & Đồng bộ · Phiên bản & cập nhật*. Nội dung từng tab
+  giữ nguyên, không nút/ô nhập nào bị bỏ; màn Workspace không đổi gì.
+- **Đổi font chữ toàn app về Segoe UI chuẩn — nét đều, sắc hơn.** Bản trước dùng *Segoe UI Variable* (phông
+  "biến thiên") nên khi WPF vẽ ra thì độ dày nét chữ không đều, chỗ mảnh chỗ đậm; nay dùng *Segoe UI* bản
+  tĩnh cho cả suite lẫn module Đơn hàng. Các cửa sổ phụ (hộp thoại xác nhận, Import tài khoản, Check tài
+  khoản, Thống kê scrape, Sửa dòng dữ liệu, Chi tiết đơn) cũng được đặt cùng chế độ vẽ chữ như cửa sổ chính
+  để chữ nhỏ nét đều nhau ở mọi cửa sổ.
+
 ## v1.7.1 — 2026-07-31
 
 - **Màn "Cài đặt" chia TAB — mỗi phần một tab, hết cuộn dài.** Thay vì một cột dọc phải cuộn qua tất cả các

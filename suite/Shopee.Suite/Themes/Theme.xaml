@@ -96,9 +96,11 @@
     <SolidColorBrush x:Key="TabUnselectedBrush" Color="#7D756F" />
 
     <!-- ══════════ FONTS ══════════ -->
-    <!-- Bỏ Inter nhúng (của Avalonia) → font hệ thống Windows 11: "Segoe UI Variable Text" là cỡ quang học
-         thân chữ; máy Win10 không có nó thì rơi về "Segoe UI". Mono cho log/list; Emoji cho icon chuỗi. -->
-    <FontFamily x:Key="UiFont">Segoe UI Variable Text, Segoe UI</FontFamily>
+    <!-- Bỏ Inter nhúng (của Avalonia) → font hệ thống Windows: "Segoe UI" bản TĨNH.
+         KHÔNG dùng "Segoe UI Variable Text": đó là font BIẾN THIÊN (variable font), WPF chỉ đọc được một
+         instance tĩnh của nó nên nét chữ ra KHÔNG ĐỀU (chỗ mảnh chỗ dày) ở cỡ nhỏ — user đã chê và chốt
+         quay về Segoe UI chuẩn. Mono cho log/list; Emoji cho icon chuỗi. -->
+    <FontFamily x:Key="UiFont">Segoe UI</FontFamily>
     <FontFamily x:Key="MonoFont">Cascadia Mono, Consolas</FontFamily>
     <FontFamily x:Key="EmojiFont">Segoe UI Emoji, Segoe UI Symbol</FontFamily>
 
@@ -893,6 +895,101 @@
     <Style TargetType="{x:Type TabControl}">
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="BorderThickness" Value="0" />
+    </Style>
+
+    <!-- ══════════ TAB CON (sub-tab) — SEGMENTED CONTROL kiểu Windows 11 ══════════ -->
+    <!-- Bộ tab con DÙNG CHUNG cho mọi màn có dải tab cấp 2 (Workspace, Cài đặt) — trước nằm trong resource
+         CỤC BỘ của WorkspaceView, đưa lên đây để sửa MỘT chỗ là đổi cả các màn. Khác TabItem mặc định ở trên
+         (gạch chân accent): cả cụm nằm trong MỘT khay bo tròn nền xám ấm, ô ĐANG CHỌN nổi lên nền TRẮNG +
+         viền mảnh + chữ đen đậm, ô còn lại chìm chữ xám, KHÔNG có gạch chỉ báo.
+         3 mảnh: `subtabItem` (ô tab) · `subtabTray` (khay bọc dải ô) · `subtabs` (TabControl ráp sẵn). -->
+    <!-- BẪY WPF (đợt 4): KHÔNG đặt Foreground/FontWeight/FontSize TRÊN CHÍNH TabItem — thừa kế của WPF đi theo
+         cây LOGIC mà `TabItem.Content` có logical parent là TabItem, nên "SemiBold/Bold + màu chữ của ô tab" sẽ
+         in đậm + tô màu TOÀN BỘ nội dung tab. Đặt TextElement.* trên Border trong template thay thế. -->
+    <Style x:Key="subtabItem" TargetType="{x:Type TabItem}">
+        <Setter Property="Padding" Value="14,0" />
+        <Setter Property="MinHeight" Value="30" />
+        <Setter Property="Height" Value="30" />
+        <Setter Property="Margin" Value="0" />
+        <!-- PHẢI để Stretch: TabControl.UpdateSelectedContent() CHÉP Horizontal/VerticalContentAlignment
+             của TabItem ĐANG CHỌN sang PART_SelectedContentHost → đặt Center ở đây thì NỘI DUNG tab (lưới
+             shop, ô log, DataView) co lại bằng chiều cao mong muốn và nằm giữa. Chữ trên ô tab vẫn canh
+             giữa nhờ ContentPresenter trong template dưới đây (đặt Alignment tường minh). -->
+        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        <Setter Property="VerticalContentAlignment" Value="Stretch" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type TabItem}">
+                    <!-- Ô thường: chìm vào khay. Ô ĐANG CHỌN: nổi lên nền trắng + viền mảnh (không tô cam —
+                         theo luật màu chỉ để đánh dấu, không tô mảng lớn). -->
+                    <Border x:Name="PART_LayoutRoot" CornerRadius="7" Background="Transparent"
+                            BorderBrush="Transparent" BorderThickness="1" SnapsToDevicePixels="True"
+                            TextElement.FontSize="12.5" TextElement.FontWeight="SemiBold"
+                            TextElement.Foreground="{StaticResource TextSecondaryBrush}">
+                        <ContentPresenter ContentSource="Header" Margin="{TemplateBinding Padding}"
+                                          HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="PART_LayoutRoot" Property="Background" Value="#66FFFFFF" />
+                            <Setter TargetName="PART_LayoutRoot" Property="TextElement.Foreground" Value="{StaticResource TextPrimaryBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsSelected" Value="True">
+                            <Setter TargetName="PART_LayoutRoot" Property="Background" Value="{StaticResource CardBackgroundBrush}" />
+                            <Setter TargetName="PART_LayoutRoot" Property="BorderBrush" Value="{StaticResource BorderBrush}" />
+                            <Setter TargetName="PART_LayoutRoot" Property="TextElement.Foreground" Value="{StaticResource TextPrimaryBrush}" />
+                            <Setter TargetName="PART_LayoutRoot" Property="TextElement.FontWeight" Value="Bold" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+    <!-- KHAY segmented bọc dải ô tab: nền xám ấm #F2EFEC (token NeutralBadgeBg), bo 10, đệm 4 để ô đang chọn
+         nổi hẳn lên trên nền khay. Tách thành style riêng để màn nào tự dựng template TabControl (Workspace)
+         vẫn dùng ĐÚNG bộ số này. -->
+    <Style x:Key="subtabTray" TargetType="{x:Type Border}">
+        <Setter Property="Background" Value="{StaticResource NeutralBadgeBgBrush}" />
+        <Setter Property="CornerRadius" Value="10" />
+        <Setter Property="Padding" Value="4" />
+    </Style>
+    <!-- TabControl segmented RÁP SẴN (bản gọn): khay tab sát mép trái ở trên, nội dung tab ngay dưới, KHÔNG
+         lề riêng (chỗ dùng tự đặt Margin cho cả control / cho nội dung từng tab). Màn cần trang trí thêm
+         (Workspace: tên tài khoản ở mép phải khay + lề riêng) khai style riêng BasedOn style này rồi ghi đè
+         Template — vẫn dùng chung `subtabItem` + `subtabTray`. -->
+    <Style x:Key="subtabs" TargetType="{x:Type TabControl}" BasedOn="{StaticResource {x:Type TabControl}}">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="ItemContainerStyle" Value="{StaticResource subtabItem}" />
+        <!-- Các ô nằm NGANG (mặc định của TabControl là TabPanel co giãn/xuống dòng). -->
+        <Setter Property="ItemsPanel">
+            <Setter.Value>
+                <ItemsPanelTemplate>
+                    <StackPanel Orientation="Horizontal" />
+                </ItemsPanelTemplate>
+            </Setter.Value>
+        </Setter>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type TabControl}">
+                    <DockPanel>
+                        <!-- HorizontalAlignment=Left: khay ôm vừa số ô tab, không kéo ngang cả màn. -->
+                        <Border DockPanel.Dock="Top" HorizontalAlignment="Left"
+                                Style="{StaticResource subtabTray}">
+                            <ItemsPresenter />
+                        </Border>
+                        <!-- PHẢI ghi rõ Stretch: ContentPresenter trong ControlTemplate tự alias
+                             Horizontal/VerticalAlignment sang Horizontal/VerticalContentAlignment của
+                             control, mà theme mặc định của TabControl đặt cả hai = Center → nội dung tab
+                             co lại bằng kích thước mong muốn rồi nằm giữa. -->
+                        <ContentPresenter x:Name="PART_SelectedContentHost" ContentSource="SelectedContent"
+                                          HorizontalAlignment="Stretch" VerticalAlignment="Stretch" />
+                    </DockPanel>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
     </Style>
 
     <!-- ══════════ DATAGRID (nền tảng — cột/template riêng thì từng màn tự khai tại chỗ) ══════════ -->

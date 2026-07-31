@@ -5,7 +5,8 @@
         Title="Import tài khoản" Width="720" Height="560"
         WindowStartupLocation="CenterOwner"
         Background="{StaticResource WindowBackgroundBrush}" FontFamily="{StaticResource UiFont}"
-        UseLayoutRounding="True" TextOptions.TextFormattingMode="Display">
+        UseLayoutRounding="True" TextOptions.TextFormattingMode="Display"
+        TextOptions.TextRenderingMode="ClearType">
     <Grid Margin="20">
         <Grid.RowDefinitions>
             <RowDefinition Height="*" />

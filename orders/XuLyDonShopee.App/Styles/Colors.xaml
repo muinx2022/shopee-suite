@@ -76,8 +76,9 @@
 
     <!-- ===== Font ===== -->
     <!-- Bỏ Inter (gói font của Avalonia, không còn nhúng) + JetBrains Mono/monospace (Windows không có):
-         về đúng bộ font hệ thống Windows 11 mà Theme.xaml của suite đang dùng. -->
-    <FontFamily x:Key="UiFont">Segoe UI Variable Text, Segoe UI</FontFamily>
+         về đúng bộ font hệ thống mà Theme.xaml của suite đang dùng. PHẢI GIỮ GIỐNG suite: "Segoe UI" bản
+         TĨNH, KHÔNG dùng "Segoe UI Variable Text" (font biến thiên → WPF render nét không đều ở cỡ nhỏ). -->
+    <FontFamily x:Key="UiFont">Segoe UI</FontFamily>
     <FontFamily x:Key="MonoFont">Cascadia Code, Cascadia Mono, Consolas</FontFamily>
 
 </ResourceDictionary>

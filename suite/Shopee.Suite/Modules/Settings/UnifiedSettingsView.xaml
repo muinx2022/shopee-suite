@@ -5,7 +5,9 @@
              xmlns:b="clr-namespace:Shopee.Suite.Behaviors">
 
     <!-- Màn "Cài đặt" DUY NHẤT của app: MỘT tiêu đề, MỘT hệ style (Theme của suite), MỖI PHẦN MỘT TAB.
-         4 tab: Chế độ ứng dụng · Phiên bản & cập nhật · Hiệu năng & Đồng bộ (GỘP 2 phần cũ) · Đơn hàng.
+         4 tab THEO THỨ TỰ: Chế độ ứng dụng · Đơn hàng · Hiệu năng & Đồng bộ (GỘP 2 phần cũ) · Phiên bản & cập nhật.
+         Dải tab dùng bộ tab con DÙNG CHUNG của theme (`subtabs` — segmented control y hệt dải tab con màn
+         Workspace: viên trắng nổi trong khay xám), KHÔNG phải TabItem gạch-chân mặc định.
          DataContext = UnifiedSettingsViewModel ⇒ MỌI binding phải prefix `Suite.` (VM cài đặt suite) hoặc
          `Orders.` (VM cài đặt module Đơn hàng). `Orders` CÓ THỂ NULL (chế độ không có module đơn hàng) nên
          cả tab "Đơn hàng" nằm trong Visibility gate `HasOrders`; tab "Hiệu năng & Đồng bộ" gate theo
@@ -53,7 +55,10 @@
             </Border>
         </Grid>
 
-        <TabControl Grid.Row="1" Background="Transparent" BorderThickness="0">
+        <!-- Dải tab = segmented control DÙNG CHUNG với màn Workspace (style `subtabs` trong Themes/Theme.xaml:
+             khay xám bo tròn ở trên, ô đang chọn là "viên" trắng nổi + viền mảnh). Nội dung mỗi tab tự chừa
+             khoảng cách với dải tab bằng Margin="0,12,0,0" như trước. -->
+        <TabControl Grid.Row="1" Style="{StaticResource subtabs}">
 
             <!-- ══════════ TAB 1: CHẾ ĐỘ ỨNG DỤNG (LUÔN hiện ở mọi chế độ) ══════════ -->
             <TabItem Header="Chế độ ứng dụng">
@@ -111,46 +116,167 @@
                 </ScrollViewer>
             </TabItem>
 
-            <!-- ══════════ TAB 2: PHIÊN BẢN & CẬP NHẬT (LUÔN hiện — dùng chung mọi chế độ) ══════════ -->
-            <!-- KHÔNG gate theo chế độ: chế độ Shopee ẩn nhóm Workspace nhưng vẫn phải cập nhật được. -->
-            <TabItem Header="Phiên bản &amp; cập nhật">
+            <!-- ══════════ TAB 2: ĐƠN HÀNG (ẩn khi module không chạy — Orders có thể NULL) ══════════ -->
+            <!-- Binding CLASSIC + gate Visibility theo HasOrders (Orders có thể null ở chế độ Workspace).
+                 Đường bind giữ nguyên prefix `Orders.` như bản Avalonia; đã ĐO thực tế: Orders=null KHÔNG
+                 đổ dòng "System.Windows.Data Error" nào (WPF coi mắt xích null trong PropertyPath là giá
+                 trị chưa có, không phải lỗi thiếu property) — xem báo cáo đợt 5. Thêm nữa: TabControl chỉ
+                 dựng nội dung của tab ĐANG CHỌN, mà tab này Collapsed ở chế độ Workspace nên cây bind
+                 `Orders.*` thậm chí không được tạo. -->
+            <TabItem Header="Đơn hàng"
+                     Visibility="{Binding HasOrders, Converter={StaticResource BoolToVis}}">
                 <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                    <StackPanel MaxWidth="1180" HorizontalAlignment="Left" Margin="0,12,0,0">
-                        <Border Style="{StaticResource card}" Padding="18" HorizontalAlignment="Left" MaxWidth="560">
+                    <Grid MaxWidth="1180" HorizontalAlignment="Left" Margin="0,12,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="14" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+
+                        <!-- ── Cột trái: tự động hoá + trình duyệt ── -->
+                        <StackPanel Grid.Column="0">
+
+                            <Border Style="{StaticResource card}" Padding="18">
+                                <StackPanel>
+                                    <TextBlock Text="Tự động hóa" Style="{StaticResource h2}" />
+
+                                    <!-- Thư mục lưu hóa đơn -->
+                                    <StackPanel Margin="0,14,0,0">
+                                        <TextBlock Text="Thư mục lưu hóa đơn" Style="{StaticResource caption}" />
+                                        <Grid Margin="0,4,0,0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="8" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Grid.Column="0" Text="{Binding Orders.InvoiceFolder}"
+                                                       FontFamily="{StaticResource MonoFont}" FontSize="12.5"
+                                                       Foreground="{StaticResource TextBodyBrush}"
+                                                       TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                                            <Button Grid.Column="2" Command="{Binding Orders.ChooseInvoiceFolderCommand}">
+                                                <StackPanel Orientation="Horizontal">
+                                                    <c:PathIcon Data="{StaticResource IconFolder}" />
+                                                    <TextBlock Text="Chọn…" Style="{StaticResource btnLabel}" />
+                                                </StackPanel>
+                                            </Button>
+                                        </Grid>
+                                        <TextBlock Style="{StaticResource caption}" Margin="0,4,0,0"
+                                                   Text="Phiếu giao (PDF) khi Xử lý đơn được lưu vào đây; link &quot;In phiếu&quot; ở màn Đơn hàng cũng mở từ đây. Bỏ trống ⇒ dùng thư mục mặc định cạnh dữ liệu app." />
+                                    </StackPanel>
+
+                                    <!-- Chu kỳ theo dõi đơn — QĐ 15: WPF không có NumericUpDown → TextBox,
+                                         giá trị được VM kẹp [1,1440] khi bấm Lưu (SettingsRepository). -->
+                                    <StackPanel Margin="0,14,0,0">
+                                        <TextBlock Text="Chu kỳ theo dõi đơn (phút)" Style="{StaticResource caption}" />
+                                        <TextBox Width="180" HorizontalAlignment="Left" Margin="0,4,0,0"
+                                                 Text="{Binding Orders.OrderIntervalMinutes}"
+                                                 ToolTip="Số nguyên phút, tự kẹp về khoảng 1–1440 khi bấm Lưu" />
+                                        <TextBlock Style="{StaticResource caption}" Margin="0,4,0,0"
+                                                   Text="Số phút giữa các lần tự đọc số &quot;Chờ Lấy Hàng&quot;. Áp dụng cho các phiên mở SAU khi lưu (giá trị ngoài khoảng 1–1440 sẽ tự kẹp lại)." />
+                                    </StackPanel>
+
+                                    <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
+                                        <Button Style="{StaticResource primary}" Command="{Binding Orders.SaveIntervalCommand}">
+                                            <StackPanel Orientation="Horizontal">
+                                                <c:PathIcon Data="{StaticResource IconSave}" />
+                                                <TextBlock Text="Lưu" Style="{StaticResource btnLabel}" />
+                                            </StackPanel>
+                                        </Button>
+                                        <TextBlock Text="{Binding Orders.SavedMessage}" Margin="12,0,0,0"
+                                                   Foreground="{StaticResource SuccessBrush}"
+                                                   VerticalAlignment="Center" TextWrapping="Wrap"
+                                                   Visibility="{Binding Orders.SavedMessage, Converter={StaticResource StringToVis}}" />
+                                    </StackPanel>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Style="{StaticResource card}" Padding="18" Margin="0,14,0,0">
+                                <StackPanel>
+                                    <TextBlock Text="Trình duyệt" Style="{StaticResource h2}" />
+
+                                    <StackPanel Margin="0,14,0,0">
+                                        <TextBlock Text="Trình duyệt mở phiên" Style="{StaticResource caption}" />
+                                        <ComboBox Width="260" HorizontalAlignment="Left" Margin="0,4,0,0"
+                                                  ItemsSource="{Binding Orders.BrowserOptions}"
+                                                  SelectedItem="{Binding Orders.SelectedBrowser}">
+                                            <ComboBox.ItemTemplate>
+                                                <DataTemplate>
+                                                    <TextBlock Text="{Binding Label}" />
+                                                </DataTemplate>
+                                            </ComboBox.ItemTemplate>
+                                        </ComboBox>
+                                    </StackPanel>
+
+                                    <!-- Trình duyệt THỰC sẽ dùng -->
+                                    <TextBlock Style="{StaticResource caption}" Margin="0,14,0,0"
+                                               Text="{Binding Orders.DetectedBrowserText, StringFormat='Đang dùng: {0}'}" />
+
+                                    <TextBlock Style="{StaticResource caption}" Margin="0,14,0,0"
+                                               Text="Chrome thường ít bị Shopee bắt captcha hơn Brave (Brave bật sẵn chống-fingerprint dễ bị nhận diện). Mỗi tài khoản vẫn mở hồ sơ riêng, không đụng trình duyệt cá nhân của bạn. Áp cho các phiên mở SAU khi lưu." />
+
+                                    <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
+                                        <Button Style="{StaticResource primary}" Command="{Binding Orders.SaveBrowserCommand}">
+                                            <StackPanel Orientation="Horizontal">
+                                                <c:PathIcon Data="{StaticResource IconSave}" />
+                                                <TextBlock Text="Lưu" Style="{StaticResource btnLabel}" />
+                                            </StackPanel>
+                                        </Button>
+                                        <TextBlock Text="{Binding Orders.BrowserSavedMessage}" Margin="12,0,0,0"
+                                                   Foreground="{StaticResource SuccessBrush}"
+                                                   VerticalAlignment="Center" TextWrapping="Wrap"
+                                                   Visibility="{Binding Orders.BrowserSavedMessage, Converter={StaticResource StringToVis}}" />
+                                    </StackPanel>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+
+                        <!-- ── Cột phải: đồng bộ Google Sheet ── -->
+                        <Border Grid.Column="2" Style="{StaticResource card}" Padding="18" VerticalAlignment="Top">
                             <StackPanel>
-                                <TextBlock Text="{Binding Suite.AppVersionText}" FontSize="14.5" FontWeight="SemiBold"
-                                           FontFamily="{StaticResource MonoFont}" />
+                                <TextBlock Text="Đồng bộ Google Sheet" Style="{StaticResource h2}" />
 
-                                <TextBlock Text="{Binding Suite.UpdateStatus}" Margin="0,10,0,0" TextWrapping="Wrap"
-                                           Foreground="{StaticResource TextSecondaryBrush}"
-                                           Visibility="{Binding Suite.UpdateStatus, Converter={StaticResource StringToVis}}" />
-
-                                <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
-                                    <Button MinWidth="160"
-                                            Visibility="{Binding Suite.UpdateSupported, Converter={StaticResource BoolToVis}}"
-                                            Command="{Binding Suite.CheckUpdateCommand}">
-                                        <StackPanel Orientation="Horizontal">
-                                            <c:PathIcon Data="{StaticResource IconUpgrade}" />
-                                            <TextBlock Text="Kiểm tra bản mới" Style="{StaticResource btnLabel}" />
-                                        </StackPanel>
-                                    </Button>
-                                    <Button Style="{StaticResource success}" MinWidth="200" Margin="10,0,0,0"
-                                            Visibility="{Binding Suite.UpdateReady, Converter={StaticResource BoolToVis}}"
-                                            Command="{Binding Suite.ApplyUpdateCommand}"
-                                            ToolTip="Đóng app + áp dụng bản đã tải + mở lại. Làm khi KHÔNG có job đang chạy.">
-                                        <StackPanel Orientation="Horizontal">
-                                            <c:PathIcon Data="{StaticResource IconUpgrade}" />
-                                            <TextBlock Text="Cập nhật &amp; khởi động lại" Style="{StaticResource btnLabel}" />
-                                        </StackPanel>
-                                    </Button>
+                                <StackPanel Margin="0,14,0,0">
+                                    <TextBlock Text="Link Web App Google Sheet" Style="{StaticResource caption}" />
+                                    <TextBox Margin="0,4,0,0" Text="{Binding Orders.GsheetWebAppUrl}"
+                                             FontFamily="{StaticResource MonoFont}" FontSize="12"
+                                             b:WatermarkAssist.Watermark="https://script.google.com/macros/s/…/exec" />
                                 </StackPanel>
 
-                                <TextBlock Style="{StaticResource caption}" Margin="0,10,0,0"
-                                           Visibility="{Binding Suite.UpdateNotSupported, Converter={StaticResource BoolToVis}}"
-                                           Text="ℹ Tự cập nhật chỉ hoạt động khi app được cài qua bộ cài Velopack (Setup.exe trên Windows). Bản chạy trực tiếp từ thư mục build không tự cập nhật." />
+                                <StackPanel Margin="0,14,0,0">
+                                    <TextBlock Text="Tab ghi vào" Style="{StaticResource caption}" />
+                                    <TextBox Margin="0,4,0,0" Text="{Binding Orders.GsheetTabName}" Width="260"
+                                             HorizontalAlignment="Left"
+                                             b:WatermarkAssist.Watermark="để trống = tự động Tháng MM-yyyy" />
+                                    <TextBlock Style="{StaticResource caption}" Margin="0,4,0,0"
+                                               Text="Sau mỗi lần Sync đơn hàng, app tự ghi đơn + link phiếu vào Google Sheet. Để trống = tự ghi vào tab &quot;Tháng MM-yyyy&quot; theo tháng hiện tại (script tự tạo tab); điền tên = ghi cố định vào tab đó. Cách lấy link: docs/gsheet-huong-dan-cai-dat.md" />
+                                    <TextBlock Style="{StaticResource caption}" Margin="0,4,0,0"
+                                               Text="Lưu ý: cấu hình này DÙNG CHUNG toàn hệ thống qua Hub — bấm Lưu là đẩy lên Hub và các máy khác nhận theo trong ~1 phút. Ngược lại, sửa trên Hub thì máy này cũng tự nhận (không cần khởi động lại)." />
+                                </StackPanel>
+
+                                <StackPanel Margin="0,14,0,0">
+                                    <TextBlock Text="Link Google Sheet 2 (tuỳ chọn)" Style="{StaticResource caption}" />
+                                    <TextBox Margin="0,4,0,0" Text="{Binding Orders.GsheetSheet2}"
+                                             FontFamily="{StaticResource MonoFont}" FontSize="12"
+                                             b:WatermarkAssist.Watermark="https://docs.google.com/spreadsheets/d/…" />
+                                    <TextBlock Style="{StaticResource caption}" Margin="0,4,0,0"
+                                               Text="File phụ nhận thêm cột A–E (mã đơn, mã vận đơn, ảnh vận đơn, đơn trả hàng) — để trống = không ghi file phụ. Dán link bảng tính hoặc ID; KHÁC ô Web App ở trên." />
+                                </StackPanel>
+
+                                <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
+                                    <Button Style="{StaticResource primary}" Command="{Binding Orders.SaveGsheetUrlCommand}">
+                                        <StackPanel Orientation="Horizontal">
+                                            <c:PathIcon Data="{StaticResource IconSave}" />
+                                            <TextBlock Text="Lưu" Style="{StaticResource btnLabel}" />
+                                        </StackPanel>
+                                    </Button>
+                                    <TextBlock Text="{Binding Orders.GsheetSavedMessage}" Margin="12,0,0,0"
+                                               Foreground="{StaticResource SuccessBrush}"
+                                               VerticalAlignment="Center" TextWrapping="Wrap"
+                                               Visibility="{Binding Orders.GsheetSavedMessage, Converter={StaticResource StringToVis}}" />
+                                </StackPanel>
                             </StackPanel>
                         </Border>
-                    </StackPanel>
+                    </Grid>
                 </ScrollViewer>
             </TabItem>
 
@@ -323,167 +449,46 @@
                 </ScrollViewer>
             </TabItem>
 
-            <!-- ══════════ TAB 4: ĐƠN HÀNG (ẩn khi module không chạy — Orders có thể NULL) ══════════ -->
-            <!-- Binding CLASSIC + gate Visibility theo HasOrders (Orders có thể null ở chế độ Workspace).
-                 Đường bind giữ nguyên prefix `Orders.` như bản Avalonia; đã ĐO thực tế: Orders=null KHÔNG
-                 đổ dòng "System.Windows.Data Error" nào (WPF coi mắt xích null trong PropertyPath là giá
-                 trị chưa có, không phải lỗi thiếu property) — xem báo cáo đợt 5. Thêm nữa: TabControl chỉ
-                 dựng nội dung của tab ĐANG CHỌN, mà tab này Collapsed ở chế độ Workspace nên cây bind
-                 `Orders.*` thậm chí không được tạo. -->
-            <TabItem Header="Đơn hàng"
-                     Visibility="{Binding HasOrders, Converter={StaticResource BoolToVis}}">
+            <!-- ══════════ TAB 4: PHIÊN BẢN & CẬP NHẬT (LUÔN hiện — dùng chung mọi chế độ) ══════════ -->
+            <!-- KHÔNG gate theo chế độ: chế độ Shopee ẩn nhóm Workspace nhưng vẫn phải cập nhật được. -->
+            <TabItem Header="Phiên bản &amp; cập nhật">
                 <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                    <Grid MaxWidth="1180" HorizontalAlignment="Left" Margin="0,12,0,0">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="14" />
-                            <ColumnDefinition Width="*" />
-                        </Grid.ColumnDefinitions>
-
-                        <!-- ── Cột trái: tự động hoá + trình duyệt ── -->
-                        <StackPanel Grid.Column="0">
-
-                            <Border Style="{StaticResource card}" Padding="18">
-                                <StackPanel>
-                                    <TextBlock Text="Tự động hóa" Style="{StaticResource h2}" />
-
-                                    <!-- Thư mục lưu hóa đơn -->
-                                    <StackPanel Margin="0,14,0,0">
-                                        <TextBlock Text="Thư mục lưu hóa đơn" Style="{StaticResource caption}" />
-                                        <Grid Margin="0,4,0,0">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="8" />
-                                                <ColumnDefinition Width="Auto" />
-                                            </Grid.ColumnDefinitions>
-                                            <TextBlock Grid.Column="0" Text="{Binding Orders.InvoiceFolder}"
-                                                       FontFamily="{StaticResource MonoFont}" FontSize="12.5"
-                                                       Foreground="{StaticResource TextBodyBrush}"
-                                                       TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
-                                            <Button Grid.Column="2" Command="{Binding Orders.ChooseInvoiceFolderCommand}">
-                                                <StackPanel Orientation="Horizontal">
-                                                    <c:PathIcon Data="{StaticResource IconFolder}" />
-                                                    <TextBlock Text="Chọn…" Style="{StaticResource btnLabel}" />
-                                                </StackPanel>
-                                            </Button>
-                                        </Grid>
-                                        <TextBlock Style="{StaticResource caption}" Margin="0,4,0,0"
-                                                   Text="Phiếu giao (PDF) khi Xử lý đơn được lưu vào đây; link &quot;In phiếu&quot; ở màn Đơn hàng cũng mở từ đây. Bỏ trống ⇒ dùng thư mục mặc định cạnh dữ liệu app." />
-                                    </StackPanel>
-
-                                    <!-- Chu kỳ theo dõi đơn — QĐ 15: WPF không có NumericUpDown → TextBox,
-                                         giá trị được VM kẹp [1,1440] khi bấm Lưu (SettingsRepository). -->
-                                    <StackPanel Margin="0,14,0,0">
-                                        <TextBlock Text="Chu kỳ theo dõi đơn (phút)" Style="{StaticResource caption}" />
-                                        <TextBox Width="180" HorizontalAlignment="Left" Margin="0,4,0,0"
-                                                 Text="{Binding Orders.OrderIntervalMinutes}"
-                                                 ToolTip="Số nguyên phút, tự kẹp về khoảng 1–1440 khi bấm Lưu" />
-                                        <TextBlock Style="{StaticResource caption}" Margin="0,4,0,0"
-                                                   Text="Số phút giữa các lần tự đọc số &quot;Chờ Lấy Hàng&quot;. Áp dụng cho các phiên mở SAU khi lưu (giá trị ngoài khoảng 1–1440 sẽ tự kẹp lại)." />
-                                    </StackPanel>
-
-                                    <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
-                                        <Button Style="{StaticResource primary}" Command="{Binding Orders.SaveIntervalCommand}">
-                                            <StackPanel Orientation="Horizontal">
-                                                <c:PathIcon Data="{StaticResource IconSave}" />
-                                                <TextBlock Text="Lưu" Style="{StaticResource btnLabel}" />
-                                            </StackPanel>
-                                        </Button>
-                                        <TextBlock Text="{Binding Orders.SavedMessage}" Margin="12,0,0,0"
-                                                   Foreground="{StaticResource SuccessBrush}"
-                                                   VerticalAlignment="Center" TextWrapping="Wrap"
-                                                   Visibility="{Binding Orders.SavedMessage, Converter={StaticResource StringToVis}}" />
-                                    </StackPanel>
-                                </StackPanel>
-                            </Border>
-
-                            <Border Style="{StaticResource card}" Padding="18" Margin="0,14,0,0">
-                                <StackPanel>
-                                    <TextBlock Text="Trình duyệt" Style="{StaticResource h2}" />
-
-                                    <StackPanel Margin="0,14,0,0">
-                                        <TextBlock Text="Trình duyệt mở phiên" Style="{StaticResource caption}" />
-                                        <ComboBox Width="260" HorizontalAlignment="Left" Margin="0,4,0,0"
-                                                  ItemsSource="{Binding Orders.BrowserOptions}"
-                                                  SelectedItem="{Binding Orders.SelectedBrowser}">
-                                            <ComboBox.ItemTemplate>
-                                                <DataTemplate>
-                                                    <TextBlock Text="{Binding Label}" />
-                                                </DataTemplate>
-                                            </ComboBox.ItemTemplate>
-                                        </ComboBox>
-                                    </StackPanel>
-
-                                    <!-- Trình duyệt THỰC sẽ dùng -->
-                                    <TextBlock Style="{StaticResource caption}" Margin="0,14,0,0"
-                                               Text="{Binding Orders.DetectedBrowserText, StringFormat='Đang dùng: {0}'}" />
-
-                                    <TextBlock Style="{StaticResource caption}" Margin="0,14,0,0"
-                                               Text="Chrome thường ít bị Shopee bắt captcha hơn Brave (Brave bật sẵn chống-fingerprint dễ bị nhận diện). Mỗi tài khoản vẫn mở hồ sơ riêng, không đụng trình duyệt cá nhân của bạn. Áp cho các phiên mở SAU khi lưu." />
-
-                                    <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
-                                        <Button Style="{StaticResource primary}" Command="{Binding Orders.SaveBrowserCommand}">
-                                            <StackPanel Orientation="Horizontal">
-                                                <c:PathIcon Data="{StaticResource IconSave}" />
-                                                <TextBlock Text="Lưu" Style="{StaticResource btnLabel}" />
-                                            </StackPanel>
-                                        </Button>
-                                        <TextBlock Text="{Binding Orders.BrowserSavedMessage}" Margin="12,0,0,0"
-                                                   Foreground="{StaticResource SuccessBrush}"
-                                                   VerticalAlignment="Center" TextWrapping="Wrap"
-                                                   Visibility="{Binding Orders.BrowserSavedMessage, Converter={StaticResource StringToVis}}" />
-                                    </StackPanel>
-                                </StackPanel>
-                            </Border>
-                        </StackPanel>
-
-                        <!-- ── Cột phải: đồng bộ Google Sheet ── -->
-                        <Border Grid.Column="2" Style="{StaticResource card}" Padding="18" VerticalAlignment="Top">
+                    <StackPanel MaxWidth="1180" HorizontalAlignment="Left" Margin="0,12,0,0">
+                        <Border Style="{StaticResource card}" Padding="18" HorizontalAlignment="Left" MaxWidth="560">
                             <StackPanel>
-                                <TextBlock Text="Đồng bộ Google Sheet" Style="{StaticResource h2}" />
+                                <TextBlock Text="{Binding Suite.AppVersionText}" FontSize="14.5" FontWeight="SemiBold"
+                                           FontFamily="{StaticResource MonoFont}" />
 
-                                <StackPanel Margin="0,14,0,0">
-                                    <TextBlock Text="Link Web App Google Sheet" Style="{StaticResource caption}" />
-                                    <TextBox Margin="0,4,0,0" Text="{Binding Orders.GsheetWebAppUrl}"
-                                             FontFamily="{StaticResource MonoFont}" FontSize="12"
-                                             b:WatermarkAssist.Watermark="https://script.google.com/macros/s/…/exec" />
-                                </StackPanel>
+                                <TextBlock Text="{Binding Suite.UpdateStatus}" Margin="0,10,0,0" TextWrapping="Wrap"
+                                           Foreground="{StaticResource TextSecondaryBrush}"
+                                           Visibility="{Binding Suite.UpdateStatus, Converter={StaticResource StringToVis}}" />
 
-                                <StackPanel Margin="0,14,0,0">
-                                    <TextBlock Text="Tab ghi vào" Style="{StaticResource caption}" />
-                                    <TextBox Margin="0,4,0,0" Text="{Binding Orders.GsheetTabName}" Width="260"
-                                             HorizontalAlignment="Left"
-                                             b:WatermarkAssist.Watermark="để trống = tự động Tháng MM-yyyy" />
-                                    <TextBlock Style="{StaticResource caption}" Margin="0,4,0,0"
-                                               Text="Sau mỗi lần Sync đơn hàng, app tự ghi đơn + link phiếu vào Google Sheet. Để trống = tự ghi vào tab &quot;Tháng MM-yyyy&quot; theo tháng hiện tại (script tự tạo tab); điền tên = ghi cố định vào tab đó. Cách lấy link: docs/gsheet-huong-dan-cai-dat.md" />
-                                    <TextBlock Style="{StaticResource caption}" Margin="0,4,0,0"
-                                               Text="Lưu ý: cấu hình này DÙNG CHUNG toàn hệ thống qua Hub — bấm Lưu là đẩy lên Hub và các máy khác nhận theo trong ~1 phút. Ngược lại, sửa trên Hub thì máy này cũng tự nhận (không cần khởi động lại)." />
-                                </StackPanel>
-
-                                <StackPanel Margin="0,14,0,0">
-                                    <TextBlock Text="Link Google Sheet 2 (tuỳ chọn)" Style="{StaticResource caption}" />
-                                    <TextBox Margin="0,4,0,0" Text="{Binding Orders.GsheetSheet2}"
-                                             FontFamily="{StaticResource MonoFont}" FontSize="12"
-                                             b:WatermarkAssist.Watermark="https://docs.google.com/spreadsheets/d/…" />
-                                    <TextBlock Style="{StaticResource caption}" Margin="0,4,0,0"
-                                               Text="File phụ nhận thêm cột A–E (mã đơn, mã vận đơn, ảnh vận đơn, đơn trả hàng) — để trống = không ghi file phụ. Dán link bảng tính hoặc ID; KHÁC ô Web App ở trên." />
-                                </StackPanel>
-
-                                <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
-                                    <Button Style="{StaticResource primary}" Command="{Binding Orders.SaveGsheetUrlCommand}">
+                                <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                                    <Button MinWidth="160"
+                                            Visibility="{Binding Suite.UpdateSupported, Converter={StaticResource BoolToVis}}"
+                                            Command="{Binding Suite.CheckUpdateCommand}">
                                         <StackPanel Orientation="Horizontal">
-                                            <c:PathIcon Data="{StaticResource IconSave}" />
-                                            <TextBlock Text="Lưu" Style="{StaticResource btnLabel}" />
+                                            <c:PathIcon Data="{StaticResource IconUpgrade}" />
+                                            <TextBlock Text="Kiểm tra bản mới" Style="{StaticResource btnLabel}" />
                                         </StackPanel>
                                     </Button>
-                                    <TextBlock Text="{Binding Orders.GsheetSavedMessage}" Margin="12,0,0,0"
-                                               Foreground="{StaticResource SuccessBrush}"
-                                               VerticalAlignment="Center" TextWrapping="Wrap"
-                                               Visibility="{Binding Orders.GsheetSavedMessage, Converter={StaticResource StringToVis}}" />
+                                    <Button Style="{StaticResource success}" MinWidth="200" Margin="10,0,0,0"
+                                            Visibility="{Binding Suite.UpdateReady, Converter={StaticResource BoolToVis}}"
+                                            Command="{Binding Suite.ApplyUpdateCommand}"
+                                            ToolTip="Đóng app + áp dụng bản đã tải + mở lại. Làm khi KHÔNG có job đang chạy.">
+                                        <StackPanel Orientation="Horizontal">
+                                            <c:PathIcon Data="{StaticResource IconUpgrade}" />
+                                            <TextBlock Text="Cập nhật &amp; khởi động lại" Style="{StaticResource btnLabel}" />
+                                        </StackPanel>
+                                    </Button>
                                 </StackPanel>
+
+                                <TextBlock Style="{StaticResource caption}" Margin="0,10,0,0"
+                                           Visibility="{Binding Suite.UpdateNotSupported, Converter={StaticResource BoolToVis}}"
+                                           Text="ℹ Tự cập nhật chỉ hoạt động khi app được cài qua bộ cài Velopack (Setup.exe trên Windows). Bản chạy trực tiếp từ thư mục build không tự cập nhật." />
                             </StackPanel>
                         </Border>
-                    </Grid>
+                    </StackPanel>
                 </ScrollViewer>
             </TabItem>
         </TabControl>

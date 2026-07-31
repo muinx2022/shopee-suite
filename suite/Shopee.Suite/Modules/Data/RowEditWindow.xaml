@@ -6,7 +6,8 @@
         Title="Dòng dữ liệu" SizeToContent="Height" Width="600" ResizeMode="NoResize"
         WindowStartupLocation="CenterOwner"
         Background="{StaticResource WindowBackgroundBrush}" FontFamily="{StaticResource UiFont}"
-        UseLayoutRounding="True" TextOptions.TextFormattingMode="Display">
+        UseLayoutRounding="True" TextOptions.TextFormattingMode="Display"
+        TextOptions.TextRenderingMode="ClearType">
     <Window.Resources>
         <!-- Mỗi ô = nhãn caption trên + TextBox dưới, cách đều nhau khi wrap. (Avalonia: selector
              `StackPanel.field` + `StackPanel.field > TextBlock`; WPF không có selector con → nhãn dùng

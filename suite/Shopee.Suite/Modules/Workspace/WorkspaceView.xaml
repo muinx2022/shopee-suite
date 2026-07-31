@@ -104,67 +104,10 @@
         </Style>
 
         <!-- ══════════ Sub-tabs — SEGMENTED CONTROL kiểu Windows 11 ══════════ -->
-        <!-- Cả cụm tab nằm trong MỘT khay bo tròn nền xám ấm; ô ĐANG CHỌN nổi lên nền TRẮNG + viền mảnh + chữ
-             đen đậm, ô còn lại chìm chữ xám. Bên phải khay là tên tài khoản BigSeller đang chọn (mờ, truyền
-             qua Tag). Phải THAY TEMPLATE vì khay nền bao quanh dải tab không dựng được bằng setter rời. -->
-        <!-- BẪY WPF (phát hiện ở đợt 4, sửa lây sang đây): KHÔNG đặt Foreground/FontWeight/FontSize TRÊN CHÍNH
-             TabItem — thừa kế của WPF đi theo cây LOGIC mà `TabItem.Content` có logical parent là TabItem, nên
-             "SemiBold/Bold + màu chữ của ô tab" sẽ in đậm + tô màu TOÀN BỘ nội dung tab. Đặt TextElement.* trên
-             Border trong template thay thế (chi tiết ghi ở style TabItem trong Themes/Theme.xaml). -->
-        <Style x:Key="subtabItem" TargetType="{x:Type TabItem}">
-            <Setter Property="Padding" Value="14,0" />
-            <Setter Property="MinHeight" Value="30" />
-            <Setter Property="Height" Value="30" />
-            <Setter Property="Margin" Value="0" />
-            <!-- PHẢI để Stretch: TabControl.UpdateSelectedContent() CHÉP Horizontal/VerticalContentAlignment
-                 của TabItem ĐANG CHỌN sang PART_SelectedContentHost → đặt Center ở đây thì NỘI DUNG tab (lưới
-                 shop, ô log, DataView) co lại bằng chiều cao mong muốn và nằm giữa. Chữ trên ô tab vẫn canh
-                 giữa nhờ ContentPresenter trong template dưới đây (đặt Alignment tường minh). -->
-            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-            <Setter Property="VerticalContentAlignment" Value="Stretch" />
-            <Setter Property="Cursor" Value="Hand" />
-            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="{x:Type TabItem}">
-                        <!-- Ô thường: chìm vào khay. Ô ĐANG CHỌN: nổi lên nền trắng + viền mảnh (không tô cam —
-                             theo luật mới màu chỉ để đánh dấu, không tô mảng lớn). Segmented control KHÔNG có
-                             gạch chỉ báo (khác TabItem mặc định của theme). -->
-                        <Border x:Name="PART_LayoutRoot" CornerRadius="7" Background="Transparent"
-                                BorderBrush="Transparent" BorderThickness="1" SnapsToDevicePixels="True"
-                                TextElement.FontSize="12.5" TextElement.FontWeight="SemiBold"
-                                TextElement.Foreground="{StaticResource TextSecondaryBrush}">
-                            <ContentPresenter ContentSource="Header" Margin="{TemplateBinding Padding}"
-                                              HorizontalAlignment="Center" VerticalAlignment="Center" />
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="PART_LayoutRoot" Property="Background" Value="#66FFFFFF" />
-                                <Setter TargetName="PART_LayoutRoot" Property="TextElement.Foreground" Value="{StaticResource TextPrimaryBrush}" />
-                            </Trigger>
-                            <Trigger Property="IsSelected" Value="True">
-                                <Setter TargetName="PART_LayoutRoot" Property="Background" Value="{StaticResource CardBackgroundBrush}" />
-                                <Setter TargetName="PART_LayoutRoot" Property="BorderBrush" Value="{StaticResource BorderBrush}" />
-                                <Setter TargetName="PART_LayoutRoot" Property="TextElement.Foreground" Value="{StaticResource TextPrimaryBrush}" />
-                                <Setter TargetName="PART_LayoutRoot" Property="TextElement.FontWeight" Value="Bold" />
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-        <Style x:Key="subtabs" TargetType="{x:Type TabControl}" BasedOn="{StaticResource {x:Type TabControl}}">
-            <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Padding" Value="0" />
-            <Setter Property="ItemContainerStyle" Value="{StaticResource subtabItem}" />
-            <!-- Các ô nằm NGANG (mặc định của TabControl là TabPanel co giãn/xuống dòng). -->
-            <Setter Property="ItemsPanel">
-                <Setter.Value>
-                    <ItemsPanelTemplate>
-                        <StackPanel Orientation="Horizontal" />
-                    </ItemsPanelTemplate>
-                </Setter.Value>
-            </Setter>
+        <!-- Ô tab (`subtabItem`) + khay bọc (`subtabTray`) nay nằm ở Themes/Theme.xaml (DÙNG CHUNG với màn Cài
+             đặt — sửa diện mạo tab con thì sửa ở đó). Ở đây chỉ còn phần RIÊNG của Workspace: template có tên
+             tài khoản BigSeller đang chọn ở mép phải khay (truyền qua Tag) + lề riêng của màn. -->
+        <Style x:Key="subtabsWorkspace" TargetType="{x:Type TabControl}" BasedOn="{StaticResource subtabs}">
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="{x:Type TabControl}">
@@ -176,10 +119,7 @@
                                     <ColumnDefinition Width="Auto" />
                                     <ColumnDefinition Width="*" />
                                 </Grid.ColumnDefinitions>
-                                <!-- KHAY segmented: nền xám ấm #F2EFEC (token NeutralBadgeBg), bo 10, đệm 4 để ô
-                                     đang chọn nổi hẳn lên trên nền khay. -->
-                                <Border Grid.Column="0" Background="{StaticResource NeutralBadgeBgBrush}"
-                                        CornerRadius="10" Padding="4">
+                                <Border Grid.Column="0" Style="{StaticResource subtabTray}">
                                     <ItemsPresenter />
                                 </Border>
                                 <!-- Tên tài khoản BigSeller đang chọn — view truyền vào qua Tag. -->
@@ -523,7 +463,7 @@
             <!-- ─── RIGHT: sub-tabs + nút "Dừng việc shop này" đè góc trên-phải, thẳng hàng dải tab ─── -->
             <Grid Grid.Column="1">
                 <!-- Tag = tên tài khoản BigSeller đang chọn → template segmented control hiện ở mép phải khay tab. -->
-                <TabControl Style="{StaticResource subtabs}" Tag="{Binding SelectedAccount.DisplayName}">
+                <TabControl Style="{StaticResource subtabsWorkspace}" Tag="{Binding SelectedAccount.DisplayName}">
 
                     <!-- ══════════ TAB 1: Shop & cấu hình ══════════ -->
                     <TabItem>
