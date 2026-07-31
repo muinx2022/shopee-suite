@@ -1,7 +1,7 @@
 # Plan TỔNG: Port toàn bộ UI Avalonia → WPF (nhánh `only-windows`)
 
 - **Ngày:** 2026-07-31
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành (đã merge về main; còn smoke-test Full + phát hành 1.7.0)
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-executor`) — theo TỪNG plan đợt, không thực thi trực tiếp plan này
 
 ## 1. Bối cảnh & mục tiêu
@@ -128,3 +128,4 @@ bước nhánh/merge ở đợt 6.
 ## Nhật ký điều phối (Fable cập nhật)
 
 - 2026-07-31: chốt WPF với người dùng; khảo sát xong; viết plan tổng + plan đợt 1.
+- 2026-07-31: đợt 1–6 hoàn thành, nghiệm thu đạt (build 0 warning, test 1459+61, binding log 0). Nhánh `avalonia` repoint về 5432766 (bản Avalonia cuối, có màn Cài đặt mới); merge only-windows → main = b7766cb. Còn lại trước 1.7.0: smoke-test mode Full trên máy thật, đo R2R/WDAC, thử vpk pack; 2 món nhỏ ghi nợ: cột ĐVVC lưới Đơn hàng cắt chữ, màn Search cửa sổ <860px cần ScrollViewer (plan riêng nếu cần).

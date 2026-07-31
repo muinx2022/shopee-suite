@@ -1,7 +1,7 @@
 # Plan: Port WPF — Đợt 2: AccountsView + DataView + BigSellerView (nhánh `only-windows`)
 
 - **Ngày:** 2026-07-31
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-executor`)
 
 > **ĐỌC TRƯỚC:** `plans/2026-07-31-port-wpf-ke-hoach-tong.md` (20 quyết định kỹ thuật, QĐ n) và mục

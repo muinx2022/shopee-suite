@@ -1,7 +1,7 @@
 # Plan: Port WPF — Đợt 5: toàn bộ module Đơn hàng + màn Cài đặt gộp (nhánh `only-windows`)
 
 - **Ngày:** 2026-07-31
-- **Trạng thái:** chờ nghiệm thu (Opus đã thực thi xong — xem "Báo cáo thực thi" cuối file)
+- **Trạng thái:** hoàn thành (Opus đã thực thi xong — xem "Báo cáo thực thi" cuối file)
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-executor`)
 
 > **ĐỌC TRƯỚC:** `plans/2026-07-31-port-wpf-ke-hoach-tong.md` (20 quyết định) + "Báo cáo thực thi" plan đợt

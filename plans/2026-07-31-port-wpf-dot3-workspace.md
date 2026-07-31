@@ -1,7 +1,7 @@
 # Plan: Port WPF — Đợt 3: WorkspaceView (màn nặng nhất) + ScrapeStatsWindow (nhánh `only-windows`)
 
 - **Ngày:** 2026-07-31
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-executor`)
 
 > **ĐỌC TRƯỚC:** `plans/2026-07-31-port-wpf-ke-hoach-tong.md` (20 quyết định kỹ thuật) + mục "Báo cáo thực

@@ -1,7 +1,7 @@
 # Plan: Port WPF — Đợt 6: tổng dọn + chuẩn bị phát hành (nhánh `only-windows`)
 
 - **Ngày:** 2026-07-31
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-executor`)
 
 > **ĐỌC TRƯỚC:** `plans/2026-07-31-port-wpf-ke-hoach-tong.md` + "Báo cáo thực thi" plan đợt 1–5 (mục "Đề nghị

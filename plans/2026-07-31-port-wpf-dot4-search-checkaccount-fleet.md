@@ -1,7 +1,7 @@
 # Plan: Port WPF — Đợt 4: SearchView + CheckAccountView/Window + FleetView (nhánh `only-windows`)
 
 - **Ngày:** 2026-07-31
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-executor`)
 
 > **ĐỌC TRƯỚC:** `plans/2026-07-31-port-wpf-ke-hoach-tong.md` (20 quyết định) + mục "Báo cáo thực thi" của
