@@ -40,8 +40,10 @@ internal static class OrdersBridgeLauncher
 
     /// <summary>Chép thư mục extension <paramref name="srcDir"/> ra một thư mục MỚI (GUID) dưới temp và trả về
     /// đường dẫn bản chép. Mục đích: đường dẫn mới ⇒ Brave cấp extension ID mới ⇒ service worker MV3 mới tinh (không
-    /// dính SW cache của hồ sơ persistent). Dọn các bản chép cũ trước (best-effort) để không tích tụ. Chỉ chép file
-    /// top-level (manifest.json/background.js/content.js — extension không có thư mục con).</summary>
+    /// dính SW cache của hồ sơ persistent). Dọn các bản chép cũ trước (best-effort) để không tích tụ.
+    /// Chép ĐỆ QUY cả thư mục con: <c>background.js</c> là ES module <c>import</c> từ <c>./shared/*.js</c> — thiếu
+    /// <c>shared/</c> thì service worker chết ngay lúc nạp ⇒ extension KHÔNG BAO GIỜ gửi <c>ready</c> ⇒ cầu nối
+    /// treo hết 45s. Đừng rút về chỉ-chép-file-top-level.</summary>
     private static string PrepareFreshExtensionCopy(string srcDir)
     {
         var baseDir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "shopee-orders-bridge");
@@ -58,12 +60,23 @@ internal static class OrdersBridgeLauncher
         catch { /* bỏ qua */ }
 
         var dest = System.IO.Path.Combine(baseDir, "shopee-orders-" + System.Guid.NewGuid().ToString("N"));
-        System.IO.Directory.CreateDirectory(dest);
+        CopyDirectory(srcDir, dest);
+        return dest;
+    }
+
+    /// <summary>Chép TOÀN BỘ cây thư mục <paramref name="srcDir"/> sang <paramref name="destDir"/> (tạo thư mục con
+    /// theo đúng cấu trúc). Dùng cho bản chép extension — phải giữ nguyên <c>shared/</c> để ES module import được.</summary>
+    internal static void CopyDirectory(string srcDir, string destDir)
+    {
+        System.IO.Directory.CreateDirectory(destDir);
         foreach (var f in System.IO.Directory.GetFiles(srcDir))
         {
-            System.IO.File.Copy(f, System.IO.Path.Combine(dest, System.IO.Path.GetFileName(f)), true);
+            System.IO.File.Copy(f, System.IO.Path.Combine(destDir, System.IO.Path.GetFileName(f)), true);
         }
-        return dest;
+        foreach (var d in System.IO.Directory.GetDirectories(srcDir))
+        {
+            CopyDirectory(d, System.IO.Path.Combine(destDir, System.IO.Path.GetFileName(d)));
+        }
     }
 
     /// <summary>Kill mọi tiến trình trình duyệt (brave/chrome/msedge) có <paramref name="userDataDir"/> HOẶC đang nạp

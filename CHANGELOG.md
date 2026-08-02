@@ -5,6 +5,13 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Hiệu năng. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.7.5 — 2026-08-02
+
+- **Sửa lỗi module Đơn hàng đứng ở "Chờ extension nối cầu" rồi báo "hết thời gian chờ phản hồi từ extension"**
+  — đăng nhập xong là dừng, không đọc được shop/đơn nào. Nguyên nhân: mỗi lần chạy app chép extension cầu nối
+  ra một thư mục tạm mới, nhưng chỉ chép các file ngoài cùng nên thư mục `shared/` (thêm từ 30/07) bị rụng →
+  extension chết ngay lúc nạp, không bao giờ báo "sẵn sàng". Nay chép cả thư mục con.
+
 ## v1.7.4 — 2026-07-31
 
 - **Chữ trên MỌI dải tab về nét thường hoàn toàn** — bản trước mới bỏ in đậm ở tab đang xem, nhưng nền chữ
