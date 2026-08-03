@@ -66,8 +66,7 @@
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
             <StackPanel Grid.Column="0">
-                <TextBlock Text="Thống kê đơn hàng" FontSize="19"
-                           Foreground="{StaticResource TextInk}" />
+                <TextBlock Text="Thống kê đơn hàng" Style="{StaticResource h1}" />
                 <TextBlock Text="{Binding ScopeText}" FontSize="12" Foreground="{StaticResource TextMuted}"
                            Margin="0,2,0,0" />
                 <!-- Nguồn số đang xem (máy này / toàn hệ thống) — Hub lỗi mà vẫn hiện số local thì phải nói rõ. -->

@@ -257,8 +257,7 @@
             <DockPanel Margin="24,24,20,16">
 
                 <TextBlock DockPanel.Dock="Top" Text="Danh sách tài khoản"
-                           FontSize="19"
-                           Foreground="{StaticResource TextInk}"
+                           Style="{StaticResource h1}"
                            Margin="0,0,0,16" />
 
                 <!-- Ô tìm kiếm -->
@@ -428,8 +427,7 @@
 
                                 <!-- Header (chỉ còn tiêu đề + subtitle; đã bỏ badge trạng thái tài khoản). -->
                                 <StackPanel Margin="0,0,0,16">
-                                    <TextBlock Text="Chi tiết tài khoản" FontSize="19"
-                                               Foreground="{StaticResource TextInk}" />
+                                    <TextBlock Text="Chi tiết tài khoản" Style="{StaticResource h1}" />
                                     <TextBlock Text="Thông tin đăng nhập và địa chỉ lấy hàng" FontSize="12"
                                                Foreground="{StaticResource TextMuted}" Margin="0,2,0,0" />
                                 </StackPanel>

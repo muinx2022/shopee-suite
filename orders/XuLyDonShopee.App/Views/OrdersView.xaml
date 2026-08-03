@@ -53,8 +53,7 @@
 
         <!-- Tiêu đề -->
         <StackPanel DockPanel.Dock="Top" Margin="0,0,0,16">
-            <TextBlock Text="Đơn hàng" FontSize="19"
-                       Foreground="{StaticResource TextInk}" />
+            <TextBlock Text="Đơn hàng" Style="{StaticResource h1}" />
             <TextBlock Text="Đơn đã đồng bộ từ trang bán hàng Shopee" FontSize="12"
                        Foreground="{StaticResource TextMuted}" Margin="0,2,0,0" />
         </StackPanel>

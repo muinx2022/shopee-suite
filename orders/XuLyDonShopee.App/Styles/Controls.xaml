@@ -180,6 +180,12 @@
         <Setter Property="Foreground" Value="{StaticResource TextSecondary}" />
         <Setter Property="Margin" Value="0,0,0,6" />
     </Style>
+    <!-- Tiêu đề trang — khớp `h1` của suite (Segoe UI 17 / Medium / màu chữ chính) để đồng bộ với Workspace. -->
+    <Style x:Key="h1" TargetType="{x:Type TextBlock}">
+        <Setter Property="FontSize" Value="17" />
+        <Setter Property="FontWeight" Value="Medium" />
+        <Setter Property="Foreground" Value="{StaticResource TextInk}" />
+    </Style>
 
     <!-- =========================================================
          6. FIELD INPUT (kiểu Fluent underline)
