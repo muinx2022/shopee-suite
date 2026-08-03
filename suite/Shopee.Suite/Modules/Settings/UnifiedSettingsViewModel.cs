@@ -14,6 +14,12 @@ public sealed record AppModeOption(AppMode Mode, string Label, string ShortLabel
     public override string ToString() => Label;
 }
 
+/// <summary>Một mức THU PHÓNG giao diện cho ComboBox: hệ số (1.15) + nhãn phần trăm ("115%").</summary>
+public sealed record ZoomOption(double Value)
+{
+    public override string ToString() => UiZoomStore.Percent(Value) + (Value == UiZoomStore.Default ? " (mặc định)" : "");
+}
+
 /// <summary>
 /// ViewModel cho màn Cài đặt GỘP: giữ 2 VM cài đặt con (suite + đơn hàng) để một màn chia section hiển thị
 /// cả hai, CỘNG selector "Chế độ ứng dụng" (LUÔN hiện ở mọi chế độ; đổi = lưu + khởi động lại app). Không
@@ -36,6 +42,12 @@ public sealed partial class UnifiedSettingsViewModel : ObservableObject
         var current = AppModeStore.Shared.Current;
         _selectedMode = Array.Find(Modes, o => o.Mode == current) ?? Modes[0];
         ShowsWorkspaceSettings = AppModeStore.ShowsWorkspace(current);
+
+        Zooms = Array.ConvertAll(UiZoomStore.Steps, v => new ZoomOption(v));
+        _selectedZoom = NearestZoom(UiZoom.Current);
+
+        // Đổi bằng phím tắt (Ctrl +/−/0) → ComboBox ở đây phải theo, không hiện số cũ.
+        UiZoom.Changed += () => SelectedZoom = NearestZoom(UiZoom.Current);
     }
 
     /// <summary>Cài đặt Shopee Suite (hiệu năng · đồng bộ Hub · phiên bản/cập nhật).</summary>
@@ -62,6 +74,24 @@ public sealed partial class UnifiedSettingsViewModel : ObservableObject
 
     /// <summary>Chế độ đang chọn trong ComboBox (CHƯA lưu tới khi bấm "Lưu &amp; khởi động lại").</summary>
     [ObservableProperty] private AppModeOption _selectedMode;
+
+    /// <summary>Các mức thu phóng cho ComboBox (đúng dải nấc của phím tắt Ctrl +/−).</summary>
+    public ZoomOption[] Zooms { get; }
+
+    /// <summary>Mức thu phóng đang chọn — áp NGAY khi đổi (không cần lưu/khởi động lại).</summary>
+    [ObservableProperty] private ZoomOption _selectedZoom;
+
+    partial void OnSelectedZoomChanged(ZoomOption value) => UiZoom.Set(value.Value);
+
+    /// <summary>Nấc gần <paramref name="zoom"/> nhất — để ComboBox vẫn chọn được khi mức đến từ file cấu hình
+    /// sửa tay (giá trị lẻ, không trùng nấc nào).</summary>
+    private ZoomOption NearestZoom(double zoom)
+    {
+        var best = Zooms[0];
+        foreach (var z in Zooms)
+            if (Math.Abs(z.Value - zoom) < Math.Abs(best.Value - zoom)) best = z;
+        return best;
+    }
 
     /// <summary>Lưu chế độ đã chọn rồi khởi động lại app để áp dụng (đổi chế độ = restart, không hot-swap).
     /// Không đổi so với hiện tại → chỉ báo, không restart. Cập nhật vẫn tải bản đầy đủ (không gate theo chế độ).</summary>

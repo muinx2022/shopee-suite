@@ -81,6 +81,12 @@ public sealed partial class ShellViewModel : ObservableObject
     /// <summary>Đoạn đầu thanh trạng thái: "Đang chạy · N job" / "Rảnh · không có job".</summary>
     [ObservableProperty] private string _jobStatusText = "Rảnh · không có job";
 
+    /// <summary>Mức thu phóng giao diện cho thanh trạng thái ("Thu phóng 125%").</summary>
+    public string ZoomText => $"Thu phóng {UiZoom.PercentText}";
+
+    /// <summary>Chỉ hiện đoạn thu phóng khi KHÁC 100% — ở mức mặc định thì đoạn này chỉ tổ chật thanh.</summary>
+    public bool ShowZoom => Math.Abs(UiZoom.Current - 1.0) > 1e-6;
+
     public ShellViewModel()
     {
         // ══════════ Chế độ ứng dụng: chỉ dựng NHÓM module cần thiết cho gọn ══════════
@@ -297,6 +303,14 @@ public sealed partial class ShellViewModel : ObservableObject
 
         // Mặc định mở tab Shopee → Workspace → (Cài đặt nếu chỉ còn nó). Không để null ở bất kỳ chế độ nào.
         SelectedTab = ordersTab ?? workspaceTab ?? settingsTab;
+
+        // Thu phóng đổi (Ctrl +/−/0 hoặc ô trong Cài đặt) → vẽ lại đoạn thu phóng ở thanh trạng thái.
+        // Shell sống suốt vòng đời app nên không cần gỡ handler.
+        UiZoom.Changed += () =>
+        {
+            OnPropertyChanged(nameof(ZoomText));
+            OnPropertyChanged(nameof(ShowZoom));
+        };
     }
 
     /// <summary>Chuyển màn đang hiển thị cho tab chứa nút. Với module đơn hàng: set SelectedNavIndex để giữ

@@ -32,6 +32,10 @@ public partial class App : Application
 
         HookBindingTrace();
 
+        // Thu phóng giao diện (Ctrl + / Ctrl − / Ctrl 0) — cài TRƯỚC khi dựng cửa sổ nào để cửa sổ chính cũng
+        // dính class handler và mở ra đúng mức đã lưu lần trước.
+        try { UiZoom.Install(); } catch (Exception ex) { TryLog("UiZoom.Install", ex); }
+
         // Lưới đỡ lỗi UI: DispatcherUnhandledException (WPF) + callback UiThread + AppDomain + Task.
         UiThread.OnError = HandleUiCallbackException;
         DispatcherUnhandledException += OnDispatcherUnhandledException;

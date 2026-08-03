@@ -186,6 +186,16 @@
                     <TextBlock Style="{StaticResource statusText}" Text="{Binding AppVersionText}" />
                 </Border>
 
+                <!-- Mức thu phóng — CHỈ hiện khi khác 100% (Ctrl +/− đổi mức, Ctrl 0 về mặc định) -->
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal"
+                            Visibility="{Binding ShowZoom, Converter={StaticResource BoolToVis}}">
+                    <Rectangle Style="{StaticResource statusSep}" />
+                    <Border Style="{StaticResource statusSeg}"
+                            ToolTip="Ctrl + và Ctrl − để thu phóng giao diện · Ctrl 0 về 100%">
+                        <TextBlock Style="{StaticResource statusText}" Text="{Binding ZoomText}" />
+                    </Border>
+                </StackPanel>
+
                 <!-- Máy online (ưu tiên thấp) -->
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal"
                             Visibility="{Binding ActualWidth, ElementName=StatusBarRoot,

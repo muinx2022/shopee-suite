@@ -5,6 +5,14 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Hiệu năng. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.7.8 — 2026-08-03
+
+- **Thu phóng giao diện bằng phím tắt:** `Ctrl` `+` phóng to, `Ctrl` `−` thu nhỏ, `Ctrl` `0` về 100%. Phóng cả
+  **chữ lẫn khung** (nút, bảng, ô nhập, hộp thoại) theo 8 nấc 75% → 200%, áp ngay cho mọi cửa sổ đang mở.
+- Mức thu phóng được **nhớ giữa các lần mở app** (`%AppData%\ShopeeSuite\ui-zoom.json`, cập nhật app không xoá)
+  và hiện ở góc phải thanh trạng thái khi khác 100%.
+- Thêm ô **"Cỡ giao diện"** trong Cài đặt → Chế độ ứng dụng cho ai không nhớ phím tắt.
+
 ## v1.7.7 — 2026-08-03
 
 - **Bỏ chữ in đậm toàn app (suite + Đơn hàng):** mọi tiêu đề, nhãn, header lưới, badge, tên tài khoản chuyển

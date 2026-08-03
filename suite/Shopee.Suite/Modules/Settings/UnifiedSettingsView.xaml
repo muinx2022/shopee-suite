@@ -110,6 +110,20 @@
                                                Style="{StaticResource caption}" MaxWidth="560" HorizontalAlignment="Left"
                                                Margin="0,4,0,0" />
                                 </StackPanel>
+
+                                <!-- Cỡ giao diện (thu phóng): áp NGAY, không cần khởi động lại. Cùng dải nấc với
+                                     phím tắt Ctrl + / Ctrl − / Ctrl 0 nên hai đường đổi không lệch nhau. -->
+                                <Rectangle Height="1" Margin="0,16,0,0" Fill="{StaticResource BorderBrush}" />
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,14,0,0">
+                                    <TextBlock Text="Cỡ giao diện:" VerticalAlignment="Center" Style="{StaticResource caption}" />
+                                    <ComboBox MinWidth="180" VerticalAlignment="Center" Margin="10,0,0,0"
+                                              ItemsSource="{Binding Zooms}"
+                                              SelectedItem="{Binding SelectedZoom, Mode=TwoWay}"
+                                              ToolTip="Phóng to / thu nhỏ toàn bộ chữ và khung của app" />
+                                </StackPanel>
+                                <TextBlock Text="Phóng to hoặc thu nhỏ toàn bộ giao diện (chữ, nút, bảng). Áp dụng ngay. Phím tắt: Ctrl + để phóng to, Ctrl − để thu nhỏ, Ctrl 0 về 100%."
+                                           Style="{StaticResource caption}" MaxWidth="640" HorizontalAlignment="Left"
+                                           Margin="0,6,0,0" />
                             </StackPanel>
                         </Border>
                     </StackPanel>

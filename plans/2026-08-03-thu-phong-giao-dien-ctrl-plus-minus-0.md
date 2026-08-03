@@ -1,7 +1,7 @@
 # Plan: Thu phóng giao diện toàn app bằng Ctrl + / Ctrl - / Ctrl 0
 
 - **Ngày:** 2026-08-03
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành
 - **Người lập & thực thi:** phiên chat chính (theo CLAUDE.md dự án — phiên chính tự thực thi)
 
 ## 1. Bối cảnh & mục tiêu
@@ -125,3 +125,40 @@ kèm câu mô tả nhắc phím tắt.
 - **Chia sẻ `ScaleTransform`:** `Transform` là `Freezable`, gắn cho nhiều phần tử được miễn KHÔNG `Freeze()`.
 - **`WindowFit.FitToWorkingArea`** bỏ qua cửa sổ có `Width/Height` = NaN (SizeToContent) — đúng ý, không cần
   chỉnh; chỉ cần gọi lại sau khi đổi kích thước.
+
+---
+
+## Báo cáo thực thi (2026-08-03)
+
+**Đã làm đúng 5 bước của plan.** File mới: `suite/Shopee.Core/Infrastructure/UiZoomStore.cs`,
+`suite/Shopee.Suite/Services/UiZoom.cs`, `suite/Shopee.Core.Tests/UiZoomStoreTests.cs`. File sửa:
+`App.xaml.cs`, `MainWindow.xaml`, `ViewModels/ShellViewModel.cs`, `Modules/Settings/UnifiedSettingsView.xaml`,
+`Modules/Settings/UnifiedSettingsViewModel.cs`, `CHANGELOG.md`, `version.txt` (1.7.7 → 1.7.8).
+
+### Kiểm chứng
+
+- `dotnet build ShopeeSuite.sln -c Debug` → 0 lỗi, 0 cảnh báo.
+- `dotnet test ShopeeSuite.sln` → **1532 test xanh** (71 Core + 1461 Đơn hàng), gồm 7 test mới cho `UiZoomStore`.
+- **Harness WPF thật** (scratchpad, `Compile Include` THẲNG `UiZoom.cs` + `WindowFit.cs` của app, kho dữ liệu
+  cách ly bằng `data-dir.txt` nên không đụng `%AppData%\ShopeeSuite`): mở cửa sổ thật, gõ phím thật bằng
+  `SendKeys` → **21/21 PASS**, kèm ảnh chụp 100% / 130% / 85% đối chiếu mắt thường.
+  Không boot app thật vì bản cài đang chạy trên máy (né `BraveFleet.StartupSweep` + `HubOutboxWorker` đúp).
+
+### 2 lỗi harness bắt được và đã sửa (nếu không chạy thật thì không thấy)
+
+1. **Hộp thoại mở khi đang phóng bị kẹt ở đúng `MinWidth` mới** (440 ở mức 130% ra 468 thay vì 572): lúc
+   `Loaded`, cửa sổ mới mở còn trong lượt tự-đo `SizeToContent` và GHI ĐÈ `Width/Height` bằng kích thước HWND
+   cũ, rồi bị `MinWidth` mới kẹp lên. → Hoãn `ApplySize` một nhịp `DispatcherPriority.Background`.
+2. **Thu nhỏ lại không được** khi hộp thoại đang mở (về 100% mà `Width` vẫn 468): gán `Width` TRƯỚC `MinWidth`
+   thì `Width` nhỏ mới bị `MinWidth` cũ (lớn) kẹp lên. → Bắt buộc thứ tự **Min/Max trước, Width/Height sau**.
+
+### Khác plan
+
+- Không có. Riêng phần "ô chỉnh trong Cài đặt" đặt ở tab **Chế độ ứng dụng** (tab duy nhất LUÔN hiện ở mọi chế
+  độ app) để chế độ `Shopee`/`Workspace` đều dùng được.
+
+### Chưa làm / còn lại
+
+- Chưa chạy thử trên **app thật** (bản cài của người dùng đang mở). Cần người dùng bấm thử sau khi phát hành,
+  đặc biệt: mức phóng cao trên màn nhỏ ở các màn lưới dày (Dữ liệu, Đơn hàng).
+- Chưa phát hành (`release-suite.cmd`) — chờ người dùng yêu cầu.
