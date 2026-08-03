@@ -13,14 +13,12 @@ namespace XuLyDonShopee.Core.Services;
 /// <c>daHuy</c>) LUÔN xuất hiện kể cả <c>false</c> — script cần giá trị tường minh để đổi màu 2 chiều
 /// (hủy → nền đỏ; hết hủy → xóa nền đỏ script đã tô).
 /// <para>
-/// <b>Thứ tự trường xếp theo ĐÚNG thứ tự CỘT trong sheet của người dùng</b> (28/07/2026) để soi payload là đối
-/// chiếu được ngay với sheet — đây chỉ là quy ước ĐỌC, việc map trường → cột nằm ở Apps Script phía người dùng:
-/// <c>A</c> mã đơn hàng (tiêu đề TRỐNG — script phải cứng cột 1, KHÔNG tra được theo tên) · <c>B</c> mã vận đơn
-/// gửi · <c>C</c> ảnh mã vận đơn gửi (<see cref="FileName"/> + <see cref="FileBase64"/>) · <c>D</c> mã đơn đặt
-/// (người dùng tự điền) · <c>E</c> <see cref="DonTraHang"/> · <c>F</c> Note (tự điền) · <c>G</c> tiền đặt (tự
-/// điền) · <c>H</c> <see cref="DoanhThu"/> ("tiền bán") · <c>I</c> <see cref="Ngay"/> · <c>J</c>
-/// <see cref="TenShop"/> · <c>K</c> <see cref="PhanLoai"/> · <c>L</c> tk đặt (tự điền) · <c>M</c>
-/// <see cref="Sku"/> ("Mã Sp").
+    /// Layout sheet hiện tại (03/08/2026); việc map trường → cột nằm ở Apps Script phía người dùng:
+    /// <c>A</c> mã đơn gửi · <c>B</c> mã vận đơn
+    /// gửi · <c>C</c> ảnh mã vận đơn gửi (<see cref="FileName"/> + <see cref="FileBase64"/>) · <c>D</c> mã đơn đặt
+    /// (người dùng tự điền) · <c>E</c> <see cref="DonTraHang"/> · <c>F</c> <see cref="TenShop"/> · <c>G</c> tiền
+    /// đặt (tự điền) · <c>H</c> <see cref="DoanhThu"/> ("tiền bán") · <c>I</c> <see cref="Ngay"/> · <c>J</c>
+    /// <see cref="Sku"/> · <c>K</c> <see cref="PhanLoai"/>.
 /// </para>
 /// <see cref="PhanLoai"/> (JSON <c>phanLoai</c>, cột
 /// người dùng thêm NGAY SAU SKU) suy từ <c>items_json</c> qua <see cref="PhanLoaiExtractor"/>; không có

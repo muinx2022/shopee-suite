@@ -4,6 +4,7 @@ using System.Globalization;
 using Microsoft.Data.Sqlite;
 using Shopee.Core.Coordination;
 using Shopee.Hub;
+using Shopee.Hub.Web.Services;
 using XuLyDonShopee.Core.Services;
 using LocalDatabase = ordersCore::XuLyDonShopee.Core.Data.Database;
 using LocalOrdersRepository = ordersCore::XuLyDonShopee.Core.Data.OrdersRepository;
@@ -19,6 +20,46 @@ namespace Shopee.Hub.Web.Tests;
 public sealed class HubSharedOrderStatsTests : IDisposable
 {
     private readonly string _dataDir = Path.Combine(Path.GetTempPath(), "hub-stats-test-" + Guid.NewGuid().ToString("N"));
+
+    [Fact]
+    public void ShopOrderSummaries_ChiDemDonChoTrongNgayVietNam()
+    {
+        using var db = new HubDatabase(_dataDir);
+        var shopId = db.GetOrCreateShopByUsername("shop-login", "Shop Test");
+        var oldOnlyShopId = db.GetOrCreateShopByUsername("shop-old", "Shop chỉ có đơn cũ");
+        db.UpsertOrders(shopId,
+        [
+            new OrderPushItem { OrderSn = "HOM-QUA", Status = "Chờ lấy hàng" },
+            new OrderPushItem { OrderSn = "HOM-NAY", Status = "Chờ lấy hàng" },
+            new OrderPushItem { OrderSn = "DA-GIAO", Status = "Đã giao" },
+        ]);
+        db.UpsertOrders(oldOnlyShopId,
+        [
+            new OrderPushItem { OrderSn = "CHI-HOM-QUA", Status = "Chờ lấy hàng" },
+        ]);
+
+        SetFirstSeen("HOM-QUA", "2026-08-02T16:59:59.0000000+00:00"); // 23:59:59 ngày 02/08 giờ VN
+        SetFirstSeen("HOM-NAY", "2026-08-02T17:00:00.0000000+00:00"); // 00:00:00 ngày 03/08 giờ VN
+        SetFirstSeen("DA-GIAO", "2026-08-03T03:00:00.0000000+00:00");
+        SetFirstSeen("CHI-HOM-QUA", "2026-08-02T10:00:00.0000000+00:00");
+
+        var (fromUtc, toUtc) = GioVietNam.KhoangNgayUtc(
+            new DateTimeOffset(2026, 8, 3, 10, 0, 0, TimeSpan.FromHours(7)));
+        var summary = Assert.Single(db.ShopOrderSummaries("Chờ lấy hàng", fromUtc, toUtc));
+
+        Assert.Equal(shopId, summary.ShopId);
+        Assert.Equal(1, summary.Waiting);
+    }
+
+    [Fact]
+    public void KhoangNgayVietNam_DungBienUtcCongBay()
+    {
+        var (fromUtc, toUtc) = GioVietNam.KhoangNgayUtc(
+            new DateTimeOffset(2026, 8, 3, 10, 24, 0, TimeSpan.FromHours(7)));
+
+        Assert.Equal(new DateTimeOffset(2026, 8, 2, 17, 0, 0, TimeSpan.Zero), fromUtc);
+        Assert.Equal(new DateTimeOffset(2026, 8, 3, 17, 0, 0, TimeSpan.Zero), toUtc);
+    }
 
     // ===== 1. first_seen_at đặt lúc INSERT và KHÔNG đổi khi đồng bộ lại (đây là mốc đếm đơn) =====
     [Fact]

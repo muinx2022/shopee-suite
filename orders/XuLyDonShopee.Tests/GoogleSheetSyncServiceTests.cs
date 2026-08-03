@@ -37,8 +37,8 @@ public class GoogleSheetSyncServiceTests
     {
         var rows = new[]
         {
-            // Thứ tự tham số theo CỘT sheet: A maDon · B maVanDon · C file · E donTraHang · H doanhThu · I ngay
-            // · J tenShop · K phanLoai · M sku · cờ daHuy.
+            // Dữ liệu đích: A maDon · B maVanDon · C file · E donTraHang · F tenShop · H doanhThu · I ngay
+            // · J sku · K phanLoai · cờ daHuy.
             new GsheetOrderRow("D1", "SPXVN1", null, null, "260728R7ABCD", 166500, "20/07/2026", "sully", "Nâu Be,39", "B02435", false),
         };
 

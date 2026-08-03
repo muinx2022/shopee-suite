@@ -5,6 +5,16 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Hiệu năng. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.7.6 — 2026-08-03
+
+- **Google Sheet khớp layout mẫu A–K mới:** payload đẩy đủ mã đơn, mã vận đơn, ảnh/PDF, mã đơn trả hàng,
+  tiền bán, ngày đặt và phân loại; **Shop ở cột F, SKU ở cột J, Phân Loại Đơn Hàng ở cột K**.
+- **Vòng Đơn hàng chạy liên tục cho tới khi người dùng dừng:** bỏ giới hạn cứng 12 giờ và ghi rõ giờ dự kiến
+  chạy vòng kế tiếp trong nhật ký để dễ theo dõi lúc app đang nghỉ giữa hai vòng.
+- **Hub → Giao việc → Đơn hàng hiển thị “Đơn chờ hôm nay” theo ngày Việt Nam:** chỉ đếm đơn xuất hiện trong
+  ngày hiện tại bằng mốc `first_seen_at`, không cộng dồn đơn cũ. Đây là thay đổi source Hub và cần deploy Hub
+  riêng; bản phát hành client này không tự triển khai Hub.
+
 ## v1.7.5 — 2026-08-02
 
 - **Sửa lỗi module Đơn hàng đứng ở "Chờ extension nối cầu" rồi báo "hết thời gian chờ phản hồi từ extension"**

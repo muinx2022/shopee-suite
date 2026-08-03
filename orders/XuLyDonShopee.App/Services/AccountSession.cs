@@ -385,7 +385,7 @@ public partial class AccountSession : ObservableObject, IAccountSession
     /// LẶP mọi shop: đọc đơn → callback <see cref="OrderPersistPipeline.PersistSyncedOrdersAsync"/> lưu DB/GSheet/hub → nếu có đơn chờ
     /// thì Chuẩn bị hàng + in phiếu + revert địa chỉ → đóng tab shop) → nghỉ <c>GetOrderIntervalMinutes()</c> → lặp.
     /// Dừng (ct hủy) đóng cả trình duyệt điều khiển (finally trong bridge) lẫn trình duyệt sạch (Stop kill _bridge.Process).
-    /// Cap cứng 12h. KHÔNG dùng proxy (bridge mở sạch, không CDP).
+    /// Vòng chỉ kết thúc khi bị hủy hoặc gặp lỗi không thể tiếp tục; KHÔNG dùng proxy (bridge mở sạch, không CDP).
     /// </summary>
     private async Task RunBridgeContinuousAsync(CancellationToken ct)
     {
@@ -434,10 +434,9 @@ public partial class AccountSession : ObservableObject, IAccountSession
                     return _persist.PersistSyncedOrdersAsync(shopId, orders, log, c);
                 };
 
-            var hardCap = DateTime.UtcNow.AddHours(12);
             SetStatus(SessionState.Running, "Đang chạy (cầu nối extension) — đăng nhập + duyệt mọi shop...");
 
-            while (!ct.IsCancellationRequested && DateTime.UtcNow < hardCap)
+            while (!ct.IsCancellationRequested)
             {
                 var bridge = new OrdersBridgeSession(userDataDir, browserChoice, log, invoiceDir, province, syncCallback,
                     finalDoneSns: () => _services.Orders.GetOrderSnsWithFinalAmount(_accountId),
@@ -511,9 +510,13 @@ public partial class AccountSession : ObservableObject, IAccountSession
                         $"Vòng xong: {result.ShopsDone}/{result.ShopCount} shop, {result.TotalOrders} đơn, {result.TotalSlips} phiếu — nghỉ {intervalMin}'.");
                 }
 
-                // Nghỉ interval trước chu kỳ kế (hủy giữa chừng → thoát vòng).
+                // Nghỉ interval trước chu kỳ kế (hủy giữa chừng → thoát vòng). Ghi mốc dự kiến để nhật ký cho
+                // biết phiên vẫn sống trong lúc không có hoạt động trình duyệt.
+                var nextRunAt = DateTime.Now.AddMinutes(intervalMin);
+                log($"Vòng kế tiếp dự kiến bắt đầu lúc {nextRunAt:HH:mm:ss}.");
                 try { await Task.Delay(TimeSpan.FromMinutes(intervalMin), ct).ConfigureAwait(false); }
                 catch (OperationCanceledException) { break; }
+                log("Hết thời gian nghỉ — bắt đầu vòng mới.");
             }
         }
         catch (OperationCanceledException)

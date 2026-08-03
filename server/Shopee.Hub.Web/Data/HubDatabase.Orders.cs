@@ -51,8 +51,8 @@ public sealed record UpsertOrdersResult(
 public sealed record PrepareStatRow(string ShopUsername, int Count);
 
 /// <summary>Tổng quan ĐƠN của 1 shop cho trang Giao việc (<see cref="HubDatabase.ShopOrderSummaries"/>): số đơn
-/// đang ở trạng thái chờ, số đơn ĐÃ có phiếu trên hub, lần client đẩy đơn gần nhất. Kiểu NỘI BỘ hub (chỉ trang
-/// Blazor dùng, không đi qua dây).</summary>
+/// trong khoảng đang ở trạng thái chờ, số đơn trong khoảng ĐÃ có phiếu trên hub, lần client đẩy đơn gần nhất.
+/// Kiểu NỘI BỘ hub (chỉ trang Blazor dùng, không đi qua dây).</summary>
 public sealed record ShopOrderSummary(long ShopId, int Waiting, int WithSlip, DateTimeOffset LastSynced);
 public sealed record OrdersPageResult(int Total, List<OrderRecord> Items);
 
@@ -401,12 +401,17 @@ WHERE o.first_seen_at >= $from AND o.first_seen_at < $to"
     }
 
     /// <summary>
-    /// Gom số đơn theo TỪNG shop trong MỘT lượt quét bảng <c>orders</c> — trang Giao việc bám nhịp fleet nên
+    /// Gom số đơn theo TỪNG shop trong khoảng UTC <c>[fromUtc, toUtcExclusive)</c> bằng MỘT lượt quét bảng
+    /// <c>orders</c> — trang Giao việc bám nhịp fleet nên
     /// KHÔNG đếm lại từng shop một (mỗi lần một query riêng).
     /// <paramref name="waitingStatus"/> = trạng thái coi là "đang chờ" (vd "Chờ lấy hàng"). Shop chưa có đơn nào
-    /// → KHÔNG có dòng (bên gọi tự hiển thị 0). Hàm ĐỌC thuần, không đụng hàm đếm sẵn có.
+    /// → KHÔNG có dòng (bên gọi tự hiển thị 0). Lọc bằng <c>first_seen_at</c>, tuyệt đối không dùng
+    /// <c>synced_at</c> vì đồng bộ lại sẽ làm đơn cũ nhảy sang ngày mới. Hàm ĐỌC thuần, không đụng hàm đếm sẵn có.
     /// </summary>
-    public List<ShopOrderSummary> ShopOrderSummaries(string waitingStatus)
+    public List<ShopOrderSummary> ShopOrderSummaries(
+        string waitingStatus,
+        DateTimeOffset fromUtc,
+        DateTimeOffset toUtcExclusive)
     {
         // Connection ĐỌC riêng (WAL) — trang Giao việc gọi hàm này mỗi ≤10s theo nhịp fleet.
         using var conn = OpenReadConnection();
@@ -414,11 +419,15 @@ WHERE o.first_seen_at >= $from AND o.first_seen_at < $to"
         using var c = conn.CreateCommand();
         // MAX(synced_at) so sánh chuỗi ISO ("o") — mọi bản ghi đều do Iso(UtcNow) ghi nên cùng định dạng,
         // thứ tự từ điển = thứ tự thời gian.
+        // Đặt khoảng ngày ở WHERE để SQLite dùng ix_orders_first_seen và không GROUP BY toàn bộ lịch sử.
         c.CommandText = "SELECT shop_id, "
             + "SUM(CASE WHEN status=$w THEN 1 ELSE 0 END), "
             + "SUM(CASE WHEN slip_at IS NOT NULL THEN 1 ELSE 0 END), "
-            + "MAX(synced_at) FROM orders GROUP BY shop_id";
+            + "MAX(synced_at) FROM orders "
+            + "WHERE first_seen_at >= $from AND first_seen_at < $to GROUP BY shop_id";
         c.Parameters.AddWithValue("$w", waitingStatus ?? "");
+        c.Parameters.AddWithValue("$from", Iso(fromUtc.ToUniversalTime()));
+        c.Parameters.AddWithValue("$to", Iso(toUtcExclusive.ToUniversalTime()));
         using var rd = c.ExecuteReader();
         while (rd.Read())
             list.Add(new ShopOrderSummary(

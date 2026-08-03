@@ -57,38 +57,34 @@ const MAU_DO_HUY = '#ea9998'; // nền đỏ đơn hủy — CỐ Ý lệch 1 so
 // MỘT CHIỀU: chỉ SET khi vừa ghi được mã, KHÔNG bao giờ trả màu chữ về mặc định (mã trả hàng không biến mất,
 // mà đặt-lại là đụng vào thứ người dùng có thể đã tự chỉnh).
 const MAU_CHU_TRA_HANG = '#C05621';
-const SO_COT_TO_MAU = 13;     // tô nền từ cột A tới M (đã kẹp theo lưới thật của tab)
-const SO_COT_TO_MAU_PHU = 5;  // file phụ CHỈ có A–E, không phải 13 như file chính. Dùng nhầm SO_COT_TO_MAU
+const SO_COT_TO_MAU = 11;     // tô nền từ cột A tới K (đã kẹp theo lưới thật của tab)
+const SO_COT_TO_MAU_PHU = 5;  // file phụ CHỈ có A–E, không phải 11 như file chính. Dùng nhầm SO_COT_TO_MAU
                               // ở đây thì getRange vượt lưới sẽ NÉM, mà cả khối phụ nằm trong MỘT
                               // try/catch ⇒ một đơn hủy nuốt luôn các đơn còn lại của cả lô.
 
-// Cột A KHÔNG có tiêu đề (ô trống) nên không tra được theo tên → chỉ chỗ này là số cứng.
+// Các cột đã được người dùng chốt theo VỊ TRÍ, không phụ thuộc chữ ở dòng tiêu đề.
 const COT_MA_DON = 1;
+const COT_TEN_SHOP = 6;   // F — Shop
+const COT_SKU = 10;       // J — SKU
+const COT_PHAN_LOAI = 11; // K — Phân Loại Đơn Hàng
 
 // ─── BẢN ĐỒ TRƯỜNG → TÊN TIÊU ĐỀ (chữ thường) ────────────────────────────────────────────────────
 // ĐÂY LÀ CHỖ DUY NHẤT cần sửa khi muốn đổi cột đích. Tên viết thường, khoảng trắng gộp lại — so khớp
 // qua chuanHoa() nên hoa/thường và khoảng trắng thừa trong tiêu đề đều không ảnh hưởng.
 //
-// LƯU Ý hai chỗ trông "lệch tên" nhưng CỐ Ý giữ nguyên theo hiện trạng sheet:
-//   · tenShop → cột "Note"  (tên shop vẫn nằm ở Note từ trước tới nay)
-//   · sku     → cột "shop"  (SKU vẫn nằm ở cột tên "shop")
-// Muốn dọn lại cho đúng nghĩa thì đổi thành 'shop' và 'mã sp' — NHƯNG nhớ kéo dữ liệu các dòng CŨ
-// sang cột mới trước, kẻo nửa sheet một kiểu.
+// Shop (F), SKU (J) và Phân Loại Đơn Hàng (K) dùng số cột cố định ở trên, nên không nằm trong bản đồ này.
 const COT = {
   maVanDon:   'mã vận đơn gửi',
   fileUrl:    'ảnh mã vận đơn gửi',
   donTraHang: 'mã đơn trả hàng',
-  tenShop:    'note',
   doanhThu:   'tiền bán',
   ngay:       'ngày đặt',
-  sku:        'shop',
-  phanLoai:   'phân loại',
 };
 
-// Tiêu đề dựng cho tab mới khi KHÔNG tìm thấy tab mẫu (A để trống đúng như sheet thật đang dùng).
+// Tiêu đề dựng cho tab mới khi KHÔNG tìm thấy tab mẫu — đúng layout A–K hiện tại.
 const TIEU_DE_MAC_DINH = [
-  '', 'mã vận đơn gửi', 'ảnh mã vận đơn gửi', 'mã đơn đặt', 'Mã đơn trả hàng', 'Note',
-  'tiền đặt', 'tiền bán', 'ngày đặt', 'shop', 'Phân loại', 'tk đặt', 'Mã Sp'
+  'Mã Đơn Gửi', 'mã vận đơn gửi', 'ảnh mã vận đơn gửi', 'mã đơn đặt', 'Mã Đơn Trả Hàng', 'Shop',
+  'tiền đặt', 'tiền bán', 'ngày đặt', 'SKU', 'Phân Loại Đơn Hàng'
 ];
 
 // ─── FILE PHỤ "Quản Lý Đơn 2" (chỉ cột A–E) ──────────────────────────────────────────────────────
@@ -180,7 +176,7 @@ function doPost(e) {
         // nên "Ước tính" về muộn / phân loại / mã trả hàng KHÔNG BAO GIỜ tới sheet. Gộp lại được vì
         // ghiNeuTrong chỉ ghi vào ô TRỐNG — dòng cũ không hề bị sửa.
         const map = layMap(cho.sh);
-        ghiNeuTrong(cho.sh, cho.row, COT_MA_DON, don.maDon);   // A — tiêu đề trống nên dùng số cứng
+        ghiNeuTrong(cho.sh, cho.row, COT_MA_DON, don.maDon);          // A — Mã Đơn Gửi
         ghiTruong(cho.sh, map, cho.row, 'maVanDon',   don.maVanDon,   thieuCot);
         ghiTruong(cho.sh, map, cho.row, 'fileUrl',    fileUrl,        thieuCot);
         // Cột "Mã đơn trả hàng" do MÁY ghi (người dùng không gõ tay) → payload chỉ-mã-trả được GHI ĐÈ khi mã
@@ -188,11 +184,11 @@ function doPost(e) {
         // mã mới không bao giờ tới nơi (mà lượt đẩy vẫn ok ⇒ hỏng IM LẶNG). Payload đơn thường giữ nguyên luật cũ.
         const vuaGhiMaTra = ghiTruong(
           cho.sh, map, cho.row, 'donTraHang', don.donTraHang, thieuCot, don.chiDienNeuCo === true);
-        ghiTruong(cho.sh, map, cho.row, 'tenShop',    don.tenShop,    thieuCot);
+        ghiNeuTrong(cho.sh, cho.row, COT_TEN_SHOP, don.tenShop);      // F — Shop
         ghiTruong(cho.sh, map, cho.row, 'doanhThu',   don.doanhThu,   thieuCot);
         ghiTruong(cho.sh, map, cho.row, 'ngay',       don.ngay,       thieuCot);
-        ghiTruong(cho.sh, map, cho.row, 'sku',        don.sku,        thieuCot);
-        ghiTruong(cho.sh, map, cho.row, 'phanLoai',   don.phanLoai,   thieuCot);
+        ghiNeuTrong(cho.sh, cho.row, COT_SKU, don.sku);               // J — SKU
+        ghiNeuTrong(cho.sh, cho.row, COT_PHAN_LOAI, don.phanLoai);    // K — Phân Loại Đơn Hàng
 
         // Màu trạng thái: hủy → nền đỏ cả dòng; hết hủy (daHuy === false TƯỜNG MINH) → CHỈ xóa đúng màu
         // đỏ script đã tô (không đụng màu người dùng tự tô; thiếu field daHuy → không đụng màu).
@@ -283,7 +279,7 @@ function doPost(e) {
           } else if (don.daHuy === false && String(cho.sh.getRange(cho.row, 1).getBackground()).toLowerCase() === MAU_DO_HUY) {
             vungDongPhu.setBackground(null);
           }
-          // MÀU CHỮ trả hàng — cùng luật file chính, chỉ khác SỐ CỘT (A–E). Dùng SO_COT_TO_MAU (13) ở đây thì
+          // MÀU CHỮ trả hàng — cùng luật file chính, chỉ khác SỐ CỘT (A–E). Dùng SO_COT_TO_MAU (11) ở đây thì
           // getRange vượt lưới sẽ NÉM, mà cả khối phụ nằm trong MỘT try/catch ⇒ nuốt luôn các đơn còn lại của lô.
           if (vuaGhiMaTraPhu) {
             vungDongPhu.setFontColor(MAU_CHU_TRA_HANG);

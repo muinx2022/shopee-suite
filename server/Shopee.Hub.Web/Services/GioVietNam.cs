@@ -32,6 +32,16 @@ public static class GioVietNam
     /// <summary>BÂY GIỜ theo giờ Việt Nam — thay cho <c>DateTime.Now</c> ở mọi chỗ dựng tin cho người đọc.</summary>
     public static DateTime BayGio() => Doi(DateTimeOffset.UtcNow).DateTime;
 
+    /// <summary>Khoảng UTC nửa mở <c>[00:00 hôm nay, 00:00 ngày mai)</c> chứa
+    /// <paramref name="at"/>, với ngày được xác định theo múi giờ Việt Nam. Dùng khoảng UTC này khi lọc các
+    /// cột thời gian lưu trên hub; không dựa vào múi giờ của máy chủ.</summary>
+    public static (DateTimeOffset FromUtc, DateTimeOffset ToUtcExclusive) KhoangNgayUtc(DateTimeOffset at)
+    {
+        var local = Doi(at);
+        var fromLocal = new DateTimeOffset(local.Date, local.Offset);
+        return (fromLocal.ToUniversalTime(), fromLocal.AddDays(1).ToUniversalTime());
+    }
+
     /// <summary><paramref name="at"/> theo giờ Việt Nam, định dạng <paramref name="format"/>. Mốc rỗng
     /// (<c>default</c>/<see cref="DateTimeOffset.MinValue"/>) → chuỗi rỗng (bảng hiện "—" thay vì năm 0001).</summary>
     public static string DinhDang(DateTimeOffset at, string format)

@@ -4,7 +4,7 @@ using XuLyDonShopee.Core.Models;
 namespace XuLyDonShopee.Tests;
 
 /// <summary>
-/// Test PAYLOAD Google Sheet hai cột "Phân loại" (K) + "Mã Sp" (M) khi <c>items_json</c> mang dữ liệu TRANG CHI
+/// Test PAYLOAD Google Sheet hai cột "Phân Loại Đơn Hàng" (K) + "SKU" (J) khi <c>items_json</c> mang dữ liệu TRANG CHI
 /// TIẾT: hai cột phải dựng từ CÙNG một danh sách sản phẩm nên KHỚP CẶP theo dòng. Chạy qua chính thân
 /// <see cref="HubOutbox.PushOrdersToGsheetAsync"/> + Web App Apps Script GIẢ trên loopback (dùng lại
 /// <see cref="HubOutboxGsheetHuyTests.FakeGsheetWebApp"/>) — quyết định nằm trong thân hàm, không tách kiến trúc

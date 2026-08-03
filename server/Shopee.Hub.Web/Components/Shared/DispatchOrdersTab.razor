@@ -44,7 +44,7 @@
 <table class="grid sm stack-sm">
     <thead><tr>
         <th>Tài khoản (login)</th><th>Shop</th><th>Trạng thái</th>
-        <th class="m-hide">Đơn chờ</th><th class="m-hide">Sync cuối</th><th>Hành động</th>
+        <th class="m-hide" title="Đơn '@WaitingStatus' xuất hiện hôm nay theo giờ Việt Nam.">Đơn chờ hôm nay</th><th class="m-hide">Sync cuối</th><th>Hành động</th>
     </tr></thead>
     <tbody>
     @foreach (var a in _oAccounts)
@@ -71,7 +71,7 @@
                     <span class="pill warn" title="Lượt chạy gần nhất không tự xác minh được — cần vào máy đó xác minh tay.">⚠ Cần xác minh</span>
                 }
             </td>
-            <td class="m-hide" data-label="Đơn chờ" title="Tổng đơn '@WaitingStatus' của mọi shop thuộc tài khoản này (hub đếm từ bảng đơn).">@OrdersWaiting(a).ToString("N0")</td>
+            <td class="m-hide" data-label="Đơn chờ hôm nay" title="Tổng đơn '@WaitingStatus' xuất hiện hôm nay theo giờ Việt Nam của mọi shop thuộc tài khoản này.">@OrdersWaiting(a).ToString("N0")</td>
             <td class="m-hide" data-label="Sync cuối">@(a.LastSyncAt is { } t ? FleetStateService.Ago(t) : "—")</td>
             <td data-label="Hành động">
                 @* Cụm nút mức TÀI KHOẢN — chỗ DUY NHẤT có hành động ở tab này. *@
@@ -100,7 +100,7 @@
                 <td colspan="6" class="shoplist" data-label="Danh sách shop">
                     @foreach (var s in a.Shops)
                     {
-                        <span class="shopchip" title="Shop @s.Login của @a.Login — @OrdersWaitingOfShop(s).ToString("N0") đơn @WaitingStatus.ToLowerInvariant()">
+                        <span class="shopchip" title="Shop @s.Login của @a.Login — @OrdersWaitingOfShop(s).ToString("N0") đơn @WaitingStatus.ToLowerInvariant() xuất hiện hôm nay theo giờ Việt Nam">
                             🛍 @s.Name <b>@OrdersWaitingOfShop(s).ToString("N0")</b>
                         </span>
                     }
@@ -187,7 +187,8 @@
         try
         {
             _shops = Db.ListShops();
-            _orderSums = Db.ShopOrderSummaries(WaitingStatus).ToDictionary(s => s.ShopId);
+            var (fromUtc, toUtcExclusive) = GioVietNam.KhoangNgayUtc(DateTimeOffset.UtcNow);
+            _orderSums = Db.ShopOrderSummaries(WaitingStatus, fromUtc, toUtcExclusive).ToDictionary(s => s.ShopId);
             _shopIdByLogin = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
             foreach (var s in _shops)
             {
