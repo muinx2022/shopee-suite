@@ -1,4 +1,4 @@
-<UserControl x:Class="Shopee.Suite.Modules.BigSeller.BigSellerView"
+﻿<UserControl x:Class="Shopee.Suite.Modules.BigSeller.BigSellerView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:c="clr-namespace:Shopee.Suite.Controls"
@@ -77,16 +77,27 @@
                     </Button>
                 </StackPanel>
 
-                <Border Style="{StaticResource card}" ClipToBounds="True">
-                    <!-- Thẻ con `Border.acctCard` của bản Avalonia đã gộp vào template của `acctListItem`
-                         (Theme.xaml, đợt 1) → item template chỉ còn phần chữ. -->
+                <!-- Nền xám nhạt để thẻ tk (nền trắng) nổi lên — khớp cột trái màn Workspace. -->
+                <Border Style="{StaticResource card}" Background="{StaticResource SubtleBrush}" ClipToBounds="True">
+                    <!-- Thẻ tk dùng chung `acctList`/`acctListItem` (Theme.xaml): nền trắng · chọn = nền cam nhạt. -->
                     <ListBox Style="{StaticResource acctList}" ItemsSource="{Binding Items}" SelectedItem="{Binding Selected}"
                              BorderThickness="0" Background="Transparent">
                         <ListBox.ItemTemplate>
                             <DataTemplate>
                                 <StackPanel>
-                                    <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" FontSize="13.5" />
-                                    <TextBlock Text="{Binding CookieStatus}" FontSize="11"
+                                    <!-- Chấm 6px + tên (cắt … khi dài) — chấm dùng chung acctDot với Workspace. -->
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <Ellipse Grid.Column="0" Style="{StaticResource acctDot}"
+                                                 VerticalAlignment="Center" Margin="0,0,8,0" />
+                                        <TextBlock Grid.Column="1" Text="{Binding DisplayName}" FontSize="13.5"
+                                                   TextTrimming="CharacterEllipsis" />
+                                    </Grid>
+                                    <!-- Dòng 2 thụt 14px cho thẳng tên: trạng thái cookie -->
+                                    <TextBlock Text="{Binding CookieStatus}" FontSize="11" Margin="14,2,0,0"
                                                Foreground="{StaticResource TextSecondaryBrush}" />
                                 </StackPanel>
                             </DataTemplate>

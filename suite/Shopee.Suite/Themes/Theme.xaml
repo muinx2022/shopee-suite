@@ -89,8 +89,8 @@
          nhãn nhóm, gợi ý, placeholder (muted). -->
     <SolidColorBrush x:Key="TextPrimaryBrush" Color="#2C2724" />
     <SolidColorBrush x:Key="TextBodyBrush" Color="#423C38" />
-    <SolidColorBrush x:Key="TextSecondaryBrush" Color="#7D756F" />
-    <SolidColorBrush x:Key="TextMutedBrush" Color="#A8A09B" />
+    <SolidColorBrush x:Key="TextSecondaryBrush" Color="#675F5A" />
+    <SolidColorBrush x:Key="TextMutedBrush" Color="#8B837D" />
     <SolidColorBrush x:Key="TextOnAccentBrush" Color="#FFFFFF" />
     <!-- Tab trong module (TabControl): chữ tab CHƯA chọn — xám ấm RÕ. -->
     <SolidColorBrush x:Key="TabUnselectedBrush" Color="#7D756F" />
@@ -130,12 +130,12 @@
          caption = mô tả/phụ 12/400 màu chữ phụ. (LetterSpacing của Avalonia không có ở WPF — bỏ.) -->
     <Style x:Key="h1" TargetType="{x:Type TextBlock}">
         <Setter Property="FontSize" Value="17" />
-        <Setter Property="FontWeight" Value="Bold" />
+        <Setter Property="FontWeight" Value="Medium" />
         <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
     </Style>
     <Style x:Key="h2" TargetType="{x:Type TextBlock}">
         <Setter Property="FontSize" Value="14.5" />
-        <Setter Property="FontWeight" Value="Bold" />
+        <Setter Property="FontWeight" Value="Medium" />
         <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
     </Style>
     <Style x:Key="body" TargetType="{x:Type TextBlock}">
@@ -154,7 +154,7 @@
     <!-- Nhãn nhóm nhỏ trên form (Avalonia: TextBlock.section). -->
     <Style x:Key="section" TargetType="{x:Type TextBlock}">
         <Setter Property="FontSize" Value="11" />
-        <Setter Property="FontWeight" Value="Bold" />
+        <Setter Property="FontWeight" Value="Medium" />
         <Setter Property="Foreground" Value="{StaticResource TextMutedBrush}" />
     </Style>
 
@@ -719,7 +719,7 @@
         <Setter Property="Background" Value="{StaticResource NeutralBadgeBgBrush}" />
         <Setter Property="VerticalAlignment" Value="Center" />
         <Setter Property="TextElement.FontSize" Value="11" />
-        <Setter Property="TextElement.FontWeight" Value="SemiBold" />
+        <Setter Property="TextElement.FontWeight" Value="Medium" />
         <Setter Property="TextElement.Foreground" Value="{StaticResource NeutralBadgeBrush}" />
     </Style>
     <Style x:Key="pillSuccess" TargetType="{x:Type Border}" BasedOn="{StaticResource pill}">
@@ -1018,7 +1018,7 @@
     <!-- Header: dải nền #FBFAF9, chữ NHỎ 11px/700 màu phụ (chữ HOA do view tự đặt). -->
     <Style TargetType="{x:Type DataGridColumnHeader}">
         <Setter Property="FontSize" Value="11" />
-        <Setter Property="FontWeight" Value="Bold" />
+        <Setter Property="FontWeight" Value="Medium" />
         <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}" />
         <Setter Property="Background" Value="{StaticResource SubtleBrush}" />
         <Setter Property="BorderBrush" Value="{StaticResource BorderLightestBrush}" />
@@ -1093,27 +1093,42 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="{x:Type ListBoxItem}">
-                    <Border x:Name="PART_bd" Background="Transparent" BorderBrush="Transparent"
-                            BorderThickness="1" CornerRadius="4" Padding="10,9" Margin="0,0,0,6">
+                    <Border x:Name="PART_bd" Padding="11,9" Margin="0,0,0,2" CornerRadius="6"
+                            Background="{StaticResource CardBackgroundBrush}"
+                            BorderBrush="{StaticResource BorderLightBrush}" BorderThickness="1"
+                            SnapsToDevicePixels="True">
                         <ContentPresenter />
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="PART_bd" Property="Background" Value="{StaticResource RowHoverBrush}" />
+                            <Setter TargetName="PART_bd" Property="BorderBrush" Value="{StaticResource BorderBrush}" />
                         </Trigger>
+                        <!-- CHỌN = nền cam nhạt + viền cam (khác hẳn thẻ thường nền trắng). -->
                         <Trigger Property="IsSelected" Value="True">
-                            <Setter TargetName="PART_bd" Property="Background" Value="{StaticResource CardBackgroundBrush}" />
-                            <Setter TargetName="PART_bd" Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+                            <Setter TargetName="PART_bd" Property="Background" Value="{StaticResource BrandTintBrush}" />
+                            <Setter TargetName="PART_bd" Property="BorderBrush" Value="{StaticResource BrandTintBorderStrongBrush}" />
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
             </Setter.Value>
         </Setter>
     </Style>
+    <!-- Chấm tròn 6px đầu thẻ tài khoản: xám khi thường, CAM khi thẻ đang chọn. Dùng chung Workspace + BigSeller. -->
+    <Style x:Key="acctDot" TargetType="{x:Type Ellipse}">
+        <Setter Property="Width" Value="6" />
+        <Setter Property="Height" Value="6" />
+        <Setter Property="Fill" Value="{StaticResource IdleDotBrush}" />
+        <Style.Triggers>
+            <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType={x:Type ListBoxItem}}}"
+                         Value="True">
+                <Setter Property="Fill" Value="{StaticResource AccentBrush}" />
+            </DataTrigger>
+        </Style.Triggers>
+    </Style>
     <Style x:Key="acctList" TargetType="{x:Type ListBox}">
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="BorderThickness" Value="0" />
-        <Setter Property="Padding" Value="0" />
+        <Setter Property="Padding" Value="8,0,8,12" />
         <Setter Property="ItemContainerStyle" Value="{StaticResource acctListItem}" />
         <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled" />
     </Style>

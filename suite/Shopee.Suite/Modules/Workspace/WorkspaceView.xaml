@@ -1,4 +1,4 @@
-<UserControl x:Class="Shopee.Suite.Modules.Workspace.WorkspaceView"
+﻿<UserControl x:Class="Shopee.Suite.Modules.Workspace.WorkspaceView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:c="clr-namespace:Shopee.Suite.Controls"
@@ -28,55 +28,10 @@
             <Setter Property="Padding" Value="18,8" />
         </Style>
 
-        <!-- ══════════ Cột trái: list tài khoản (292px) ══════════ -->
-        <!-- Thẻ tk (Avalonia `Border.wsAcct` trong ItemTemplate + selector `:pointerover`/`:selected`) gộp vào
-             TEMPLATE của ListBoxItem — WPF không có selector con nên trạng thái chọn/rê phải nằm cùng template.
-             KHÔNG dùng `acctListItem` của theme: thẻ Workspace có padding/bo/nền riêng (không dính màn BigSeller). -->
-        <Style x:Key="wsAcctItem" TargetType="{x:Type ListBoxItem}">
-            <Setter Property="Padding" Value="0" />
-            <Setter Property="Margin" Value="0" />
-            <Setter Property="Cursor" Value="Hand" />
-            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="{x:Type ListBoxItem}">
-                        <Border x:Name="PART_bd" Padding="11,9" Margin="0,0,0,2" CornerRadius="6"
-                                Background="{StaticResource CardBackgroundBrush}"
-                                BorderBrush="{StaticResource BorderLightBrush}" BorderThickness="1"
-                                SnapsToDevicePixels="True">
-                            <ContentPresenter />
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="PART_bd" Property="BorderBrush" Value="{StaticResource BorderBrush}" />
-                            </Trigger>
-                            <!-- CHỌN = nền cam nhạt + viền cam nhạt (spec), khác hẳn thẻ thường nền trắng. -->
-                            <Trigger Property="IsSelected" Value="True">
-                                <Setter TargetName="PART_bd" Property="Background" Value="{StaticResource BrandTintBrush}" />
-                                <Setter TargetName="PART_bd" Property="BorderBrush" Value="{StaticResource BrandTintBorderStrongBrush}" />
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-        <Style x:Key="wsAcctList" TargetType="{x:Type ListBox}" BasedOn="{StaticResource acctList}">
-            <Setter Property="ItemContainerStyle" Value="{StaticResource wsAcctItem}" />
-            <Setter Property="Padding" Value="8,0,8,12" />
-        </Style>
-        <!-- Chấm tròn 6px đầu thẻ: xám khi thường, CAM khi thẻ đang chọn. -->
-        <Style x:Key="acctDot" TargetType="{x:Type Ellipse}">
-            <Setter Property="Width" Value="6" />
-            <Setter Property="Height" Value="6" />
-            <Setter Property="Fill" Value="{StaticResource IdleDotBrush}" />
-            <Style.Triggers>
-                <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType={x:Type ListBoxItem}}}"
-                             Value="True">
-                    <Setter Property="Fill" Value="{StaticResource AccentBrush}" />
-                </DataTrigger>
-            </Style.Triggers>
-        </Style>
+        <!-- ══════════ Cột trái: list tài khoản (300px) ══════════ -->
+        <!-- Thẻ tk dùng CHUNG style `acctList`/`acctListItem` của Theme.xaml (giống hệt màn Cấu hình BigSeller):
+             thẻ nền trắng viền nhạt · rê = đậm viền · chọn = nền cam nhạt + viền cam. -->
+        <!-- Chấm tròn `acctDot` dùng chung cũng ở Theme.xaml (Workspace + BigSeller cùng dùng). -->
         <!-- Dòng 2 của thẻ: trạng thái cookie (xanh = có, vàng = chưa đăng nhập). -->
         <Style x:Key="acctCookie" TargetType="{x:Type TextBlock}">
             <Setter Property="FontSize" Value="11" />
@@ -151,7 +106,7 @@
             <Setter Property="Padding" Value="7,1" />
             <Setter Property="VerticalAlignment" Value="Center" />
             <Setter Property="TextElement.FontSize" Value="10.5" />
-            <Setter Property="TextElement.FontWeight" Value="Bold" />
+            <Setter Property="TextElement.FontWeight" Value="Medium" />
             <Setter Property="TextElement.Foreground" Value="{StaticResource TextSecondaryBrush}" />
             <Style.Triggers>
                 <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType={x:Type TabItem}}}"
@@ -356,7 +311,7 @@
                              XamlParseException lúc dựng cây (không phải chỉ ghi log) → PHẢI ghi rõ Mode=OneWay
                              ở MỌI Run trong file này. -->
                         <TextBlock VerticalAlignment="Center" TextWrapping="Wrap" Margin="10,0,0,0"
-                                   Foreground="{StaticResource TextPrimaryBrush}"><Run Text="Có " /><Run Text="{Binding ResumePendingCount, Mode=OneWay}" FontWeight="Bold" /><Run Text=" việc đang dở dang từ lần trước:" /></TextBlock>
+                                   Foreground="{StaticResource TextPrimaryBrush}"><Run Text="Có " /><Run Text="{Binding ResumePendingCount, Mode=OneWay}" /><Run Text=" việc đang dở dang từ lần trước:" /></TextBlock>
                     </StackPanel>
                     <!-- Danh sách chi tiết (cuộn nếu nhiều) -->
                     <ScrollViewer MaxHeight="160" VerticalScrollBarVisibility="Auto" Margin="26,6,0,0">
@@ -372,7 +327,7 @@
                                             <!-- Nhãn op (pill) -->
                                             <Border Background="{StaticResource CardBackgroundBrush}" CornerRadius="3"
                                                     Padding="6,1" VerticalAlignment="Center">
-                                                <TextBlock Text="{Binding OpLabel}" FontSize="11" FontWeight="SemiBold" />
+                                                <TextBlock Text="{Binding OpLabel}" FontSize="11" />
                                             </Border>
                                             <!-- tk · shop · tiến độ -->
                                             <TextBlock VerticalAlignment="Center" FontSize="11.5" Margin="6,0,0,0"
@@ -410,10 +365,10 @@
             </Grid>
         </Border>
 
-        <!-- ════ Row 3: trái = list tk (292px, luôn hiện) · phải = sub-tab + nội dung ════ -->
+        <!-- ════ Row 3: trái = list tk (300px, luôn hiện) · phải = sub-tab + nội dung ════ -->
         <Grid Grid.Row="3">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="292" />
+                <ColumnDefinition Width="300" />
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
 
@@ -422,12 +377,12 @@
                     BorderBrush="{StaticResource BorderLightBrush}" BorderThickness="0,0,1,0">
                 <DockPanel>
                     <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="14,12,14,8">
-                        <TextBlock Text="TÀI KHOẢN BIGSELLER" FontSize="10.5" FontWeight="Bold"
+                        <TextBlock Text="TÀI KHOẢN BIGSELLER" FontSize="10.5"
                                    VerticalAlignment="Bottom" Foreground="{StaticResource TextMutedBrush}" />
                         <TextBlock FontSize="11" VerticalAlignment="Bottom" Margin="6,0,0,0"
                                    Foreground="{StaticResource TextMutedBrush}"><Run Text="{Binding Accounts.Count, Mode=OneWay}" /><Run Text=" tài khoản" /></TextBlock>
                     </StackPanel>
-                    <ListBox Style="{StaticResource wsAcctList}" ItemsSource="{Binding Accounts}"
+                    <ListBox Style="{StaticResource acctList}" ItemsSource="{Binding Accounts}"
                              SelectedItem="{Binding SelectedAccount}"
                              BorderThickness="0" Background="Transparent">
                         <ListBox.ItemTemplate>
@@ -441,7 +396,7 @@
                                         </Grid.ColumnDefinitions>
                                         <Ellipse Grid.Column="0" Style="{StaticResource acctDot}"
                                                  VerticalAlignment="Center" Margin="0,0,8,0" />
-                                        <TextBlock Grid.Column="1" Text="{Binding DisplayName}" FontSize="12.5" FontWeight="SemiBold"
+                                        <TextBlock Grid.Column="1" Text="{Binding DisplayName}" FontSize="13.5"
                                                    Foreground="{StaticResource TextPrimaryBrush}"
                                                    TextTrimming="CharacterEllipsis" />
                                     </Grid>
@@ -561,7 +516,7 @@
                                                         <DataGridTemplateColumn.CellTemplate>
                                                             <DataTemplate>
                                                                 <TextBlock Text="{Binding Name}" Margin="14,0,0,0" VerticalAlignment="Center"
-                                                                           FontSize="12.5" FontWeight="SemiBold"
+                                                                           FontSize="12.5"
                                                                            Foreground="{StaticResource TextPrimaryBrush}"
                                                                            TextTrimming="CharacterEllipsis" />
                                                             </DataTemplate>
@@ -697,7 +652,7 @@
                                         <!-- Cấu hình chạy — chiều cao tự nhiên, KHÔNG cuộn. Ô số dàn theo bề ngang
                                              (WrapPanel: hết chỗ thì xuống dòng), ô đường dẫn chia đôi bề ngang. -->
                                         <StackPanel Grid.Row="1" Margin="0,18,0,0">
-                                            <TextBlock FontSize="11" FontWeight="Bold"
+                                            <TextBlock FontSize="11"
                                                        Foreground="{StaticResource TextSecondaryBrush}"><Run Text="CẤU HÌNH CHẠY" /><Run Text=" · tài khoản này · máy này" FontWeight="Normal"
                                                      Foreground="{StaticResource TextMutedBrush}" /></TextBlock>
                                             <WrapPanel Margin="0,10,0,0">
@@ -803,9 +758,9 @@
                                         <DataTemplate>
                                             <Border Style="{StaticResource card}" Padding="14,10" Margin="0,0,10,0" MinWidth="150">
                                                 <StackPanel>
-                                                    <TextBlock Text="{Binding OpLabel}" Style="{StaticResource caption}" FontWeight="SemiBold" />
+                                                    <TextBlock Text="{Binding OpLabel}" Style="{StaticResource caption}" />
                                                     <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
-                                                        <TextBlock Text="{Binding RowsText}" FontSize="20" FontWeight="SemiBold" VerticalAlignment="Bottom" />
+                                                        <TextBlock Text="{Binding RowsText}" FontSize="20" VerticalAlignment="Bottom" />
                                                         <TextBlock Text="dòng" Style="{StaticResource caption}" Margin="5,0,0,3" VerticalAlignment="Bottom" />
                                                     </StackPanel>
                                                     <TextBlock Text="{Binding ShopsDoneText}" Style="{StaticResource caption}" Margin="0,2,0,0" />
@@ -823,7 +778,7 @@
                                                 <Border Style="{StaticResource card}" Margin="0,0,0,10" Padding="14,12">
                                                     <StackPanel>
                                                         <StackPanel Orientation="Horizontal">
-                                                            <TextBlock Text="{Binding ShopName}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                                            <TextBlock Text="{Binding ShopName}" TextTrimming="CharacterEllipsis" />
                                                             <TextBlock Text="{Binding SheetText}" Style="{StaticResource caption}" Margin="8,0,0,0"
                                                                        VerticalAlignment="Center"
                                                                        Visibility="{Binding SheetText, Converter={StaticResource StringToVis}}" />
@@ -843,16 +798,16 @@
                                                                                     <ColumnDefinition Width="*" />
                                                                                     <ColumnDefinition Width="Auto" />
                                                                                 </Grid.ColumnDefinitions>
-                                                                                <TextBlock Grid.Column="0" Text="{Binding OpLabel}" FontWeight="SemiBold" VerticalAlignment="Center" />
+                                                                                <TextBlock Grid.Column="0" Text="{Binding OpLabel}" VerticalAlignment="Center" />
                                                                                 <Border Grid.Column="1" CornerRadius="4" Padding="8,2" Background="{Binding StatusBg}"
                                                                                         ToolTip="{Binding Tooltip}">
-                                                                                    <TextBlock Text="{Binding StatusText}" FontSize="11" FontWeight="SemiBold"
+                                                                                    <TextBlock Text="{Binding StatusText}" FontSize="11"
                                                                                                Foreground="{Binding StatusFg}" />
                                                                                 </Border>
                                                                             </Grid>
                                                                             <!-- Hàng 2: tổng dòng + tới dòng -->
                                                                             <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
-                                                                                <TextBlock Text="{Binding RowsText}" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Bottom" />
+                                                                                <TextBlock Text="{Binding RowsText}" FontSize="16" VerticalAlignment="Bottom" />
                                                                                 <TextBlock Text="{Binding LastRowText}" Style="{StaticResource caption}" Margin="8,0,0,2" VerticalAlignment="Bottom"
                                                                                            Visibility="{Binding LastRowText, Converter={StaticResource StringToVis}}" />
                                                                             </StackPanel>
@@ -895,7 +850,7 @@
                             <DockPanel Grid.Column="0">
                                 <StackPanel DockPanel.Dock="Bottom" Margin="0,8,0,0"
                                             Visibility="{Binding ErroredAccounts.Count, Converter={StaticResource CountToVis}}">
-                                    <TextBlock Margin="0,0,0,4" FontSize="12" FontWeight="SemiBold"
+                                    <TextBlock Margin="0,0,0,4" FontSize="12"
                                                Foreground="{StaticResource DangerBrush}"><Run Text="⚠ Tài khoản lỗi (" /><Run Text="{Binding ErroredAccounts.Count, Mode=OneWay}" /><Run Text=") — đã tự đổi tk" /></TextBlock>
                                     <Border Style="{StaticResource card}" MaxHeight="110" ClipToBounds="True">
                                         <DataGrid ItemsSource="{Binding ErroredAccounts}" BorderThickness="0" IsReadOnly="True"
@@ -909,7 +864,7 @@
                                     </Border>
                                 </StackPanel>
                                 <TextBlock DockPanel.Dock="Top" Text="Tiến trình scrape" Style="{StaticResource caption}"
-                                           FontWeight="SemiBold" Margin="0,0,0,6" />
+                                           Margin="0,0,0,6" />
                                 <Border Style="{StaticResource card}" ClipToBounds="True">
                                     <DataGrid x:Name="InstancesGrid" ItemsSource="{Binding Instances}" BorderThickness="0" IsReadOnly="True"
                                               RowStyle="{StaticResource instanceRow}"
@@ -926,7 +881,7 @@
                             <DockPanel Grid.Column="2">
                                 <Grid DockPanel.Dock="Top" Margin="0,0,0,6">
                                     <!-- DataContext vùng này = Scrape → binding tới workspace phải qua ElementName=Root. -->
-                                    <TextBlock Style="{StaticResource caption}" FontWeight="SemiBold" VerticalAlignment="Center"
+                                    <TextBlock Style="{StaticResource caption}" VerticalAlignment="Center"
                                                TextTrimming="CharacterEllipsis"><Run Text="Nhật ký Scrape — " /><Run Text="{Binding DataContext.SelectedAccount.DisplayName, ElementName=Root, Mode=OneWay}" /><Run Text=" (500 dòng cuối · riêng acc này)" /></TextBlock>
                                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                                         <Button Padding="8,2" FontSize="11.5" Margin="0,0,6,0"
@@ -960,7 +915,7 @@
                         <DockPanel DataContext="{Binding Update}">
                             <Grid DockPanel.Dock="Top" Margin="0,0,0,6">
                                 <!-- DataContext vùng này = Update → binding tới workspace phải qua ElementName=Root. -->
-                                <TextBlock Style="{StaticResource caption}" FontWeight="SemiBold" VerticalAlignment="Center"
+                                <TextBlock Style="{StaticResource caption}" VerticalAlignment="Center"
                                            TextTrimming="CharacterEllipsis"><Run Text="Nhật ký Update — " /><Run Text="{Binding DataContext.SelectedAccount.DisplayName, ElementName=Root, Mode=OneWay}" /><Run Text=" (500 dòng cuối · riêng acc này)" /></TextBlock>
                                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                                     <Button Padding="8,2" FontSize="11.5" Margin="0,0,6,0"

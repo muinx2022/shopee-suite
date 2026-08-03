@@ -24,7 +24,6 @@
                 <Setter Property="MinHeight" Value="0" />
                 <Setter Property="FontFamily" Value="{StaticResource UiFont}" />
                 <Setter Property="FontSize" Value="13" />
-                <Setter Property="FontWeight" Value="SemiBold" />
                 <Setter Property="Foreground" Value="{StaticResource AccentBrush}" />
                 <Setter Property="Cursor" Value="Hand" />
                 <Setter Property="HorizontalAlignment" Value="Left" />
@@ -54,7 +53,7 @@
 
         <!-- Tiêu đề -->
         <StackPanel DockPanel.Dock="Top" Margin="0,0,0,16">
-            <TextBlock Text="Đơn hàng" FontSize="19" FontWeight="Bold"
+            <TextBlock Text="Đơn hàng" FontSize="19"
                        Foreground="{StaticResource TextInk}" />
             <TextBlock Text="Đơn đã đồng bộ từ trang bán hàng Shopee" FontSize="12"
                        Foreground="{StaticResource TextMuted}" Margin="0,2,0,0" />
@@ -242,7 +241,7 @@
                                     Background="{Binding Status, Converter={StaticResource OrderStatusPill}, ConverterParameter=bg}"
                                     BorderBrush="{Binding Status, Converter={StaticResource OrderStatusPill}, ConverterParameter=border}"
                                     Visibility="{Binding Status, Converter={StaticResource StringToVis}}">
-                                <TextBlock Text="{Binding Status}" FontSize="12" FontWeight="SemiBold"
+                                <TextBlock Text="{Binding Status}" FontSize="12"
                                            TextTrimming="CharacterEllipsis"
                                            Foreground="{Binding Status, Converter={StaticResource OrderStatusPill}, ConverterParameter=text}" />
                             </Border>

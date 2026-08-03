@@ -23,13 +23,11 @@
             </Style>
             <Style x:Key="statValue" TargetType="{x:Type TextBlock}">
                 <Setter Property="FontSize" Value="22" />
-                <Setter Property="FontWeight" Value="Bold" />
                 <Setter Property="Foreground" Value="{StaticResource TextInk}" />
                 <Setter Property="Margin" Value="0,5,0,0" />
             </Style>
             <Style x:Key="miniValue" TargetType="{x:Type TextBlock}">
                 <Setter Property="FontSize" Value="15" />
-                <Setter Property="FontWeight" Value="SemiBold" />
                 <Setter Property="Foreground" Value="{StaticResource TextInk}" />
                 <Setter Property="Margin" Value="0,4,0,0" />
             </Style>
@@ -39,7 +37,6 @@
                    BasedOn="{StaticResource {x:Type DataGridColumnHeader}}">
                 <Setter Property="Background" Value="{StaticResource SubtleBg}" />
                 <Setter Property="Foreground" Value="{StaticResource TextSecondary}" />
-                <Setter Property="FontWeight" Value="SemiBold" />
             </Style>
             <Style x:Key="statsGrid" TargetType="{x:Type DataGrid}" BasedOn="{StaticResource {x:Type DataGrid}}">
                 <Setter Property="BorderBrush" Value="{StaticResource BorderSoft}" />
@@ -69,12 +66,12 @@
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
             <StackPanel Grid.Column="0">
-                <TextBlock Text="Thống kê đơn hàng" FontSize="19" FontWeight="Bold"
+                <TextBlock Text="Thống kê đơn hàng" FontSize="19"
                            Foreground="{StaticResource TextInk}" />
                 <TextBlock Text="{Binding ScopeText}" FontSize="12" Foreground="{StaticResource TextMuted}"
                            Margin="0,2,0,0" />
                 <!-- Nguồn số đang xem (máy này / toàn hệ thống) — Hub lỗi mà vẫn hiện số local thì phải nói rõ. -->
-                <TextBlock Text="{Binding SourceText}" FontSize="11.5" FontWeight="SemiBold"
+                <TextBlock Text="{Binding SourceText}" FontSize="11.5"
                            Foreground="{StaticResource TextMuted}" TextWrapping="Wrap" Margin="0,3,0,0" />
             </StackPanel>
             <StackPanel Grid.Column="1" HorizontalAlignment="Right">
@@ -87,11 +84,11 @@
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="190" />
                     </Grid.ColumnDefinitions>
-                    <TextBlock Grid.Column="0" Text="Từ ngày" FontSize="12" FontWeight="SemiBold"
+                    <TextBlock Grid.Column="0" Text="Từ ngày" FontSize="12"
                                Foreground="{StaticResource TextMuted}" VerticalAlignment="Center" Margin="0,0,8,0" />
                     <DatePicker Grid.Column="1" SelectedDate="{Binding FromDate}" SelectedDateFormat="Short"
                                 HorizontalAlignment="Stretch" />
-                    <TextBlock Grid.Column="2" Text="Đến ngày" FontSize="12" FontWeight="SemiBold"
+                    <TextBlock Grid.Column="2" Text="Đến ngày" FontSize="12"
                                Foreground="{StaticResource TextMuted}" VerticalAlignment="Center" Margin="14,0,8,0" />
                     <DatePicker Grid.Column="3" SelectedDate="{Binding ToDate}" SelectedDateFormat="Short"
                                 HorizontalAlignment="Stretch" />

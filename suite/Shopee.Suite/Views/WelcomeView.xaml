@@ -14,11 +14,11 @@
             <!-- Hero -->
             <StackPanel Grid.Row="0" Orientation="Horizontal">
                 <Border Width="56" Height="56" CornerRadius="6" Background="{StaticResource BrandBadgeBrush}">
-                    <TextBlock Text="S" FontSize="30" FontWeight="Bold" Foreground="White"
+                    <TextBlock Text="S" FontSize="30" Foreground="White"
                                HorizontalAlignment="Center" VerticalAlignment="Center" />
                 </Border>
                 <StackPanel Margin="18,0,0,0" VerticalAlignment="Center">
-                    <TextBlock Text="Shopee Suite" FontSize="28" FontWeight="SemiBold"
+                    <TextBlock Text="Shopee Suite" FontSize="28"
                                Foreground="{StaticResource TextPrimaryBrush}" />
                     <TextBlock Style="{StaticResource caption}" Margin="0,2,0,0"
                                Text="Bộ công cụ hợp nhất — quản lý tài khoản, scrape, tìm kiếm và cập nhật sản phẩm Shopee." />
@@ -48,7 +48,7 @@
                                                 HorizontalAlignment="Center" VerticalAlignment="Center" />
                                 </Border>
                                 <StackPanel Margin="14,0,0,0" VerticalAlignment="Center" Width="190">
-                                    <TextBlock Text="{Binding Title}" FontSize="15" FontWeight="SemiBold"
+                                    <TextBlock Text="{Binding Title}" FontSize="15"
                                                Foreground="{StaticResource TextPrimaryBrush}" />
                                     <TextBlock Style="{StaticResource caption}" Text="{Binding Subtitle}" Margin="0,2,0,0" />
                                 </StackPanel>

@@ -57,7 +57,7 @@
     </Window.Resources>
 
     <StackPanel Margin="20">
-        <TextBlock Text="Thông tin đơn hàng" FontSize="16" FontWeight="SemiBold"
+        <TextBlock Text="Thông tin đơn hàng" FontSize="16"
                    Foreground="{StaticResource TextInk}" Margin="0,0,0,16" />
 
         <!-- Thông tin cơ bản (chỉ đọc): nhãn : giá trị -->
@@ -79,8 +79,7 @@
             </Grid.RowDefinitions>
 
             <TextBlock Grid.Row="0" Grid.Column="0" Style="{StaticResource lbl}" Text="Mã đơn" />
-            <TextBox Grid.Row="0" Grid.Column="1" x:Name="OrderSnText" Style="{StaticResource selText}"
-                     FontWeight="SemiBold" />
+            <TextBox Grid.Row="0" Grid.Column="1" x:Name="OrderSnText" Style="{StaticResource selText}" />
 
             <TextBlock Grid.Row="1" Grid.Column="0" Style="{StaticResource lbl}" Text="Người mua" />
             <TextBox Grid.Row="1" Grid.Column="1" x:Name="BuyerText" Style="{StaticResource selText}" />
@@ -109,7 +108,7 @@
 
         <!-- Đổi trạng thái: nguồn = các trạng thái ĐÃ SYNC về (chuỗi tự do, không enum).
              LƯU Ý: sửa CỤC BỘ (local-only), lần sync sau lấy trạng thái thật sẽ ghi đè. -->
-        <TextBlock Text="Đổi trạng thái" FontWeight="SemiBold" Margin="0,7,0,6"
+        <TextBlock Text="Đổi trạng thái" Margin="0,7,0,6"
                    Foreground="{StaticResource TextInk}" />
         <ComboBox x:Name="StatusCombo" HorizontalAlignment="Stretch" MinHeight="34" />
 

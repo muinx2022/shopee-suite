@@ -1,4 +1,4 @@
-<Window x:Class="Shopee.Suite.Modules.Data.RowEditWindow"
+﻿<Window x:Class="Shopee.Suite.Modules.Data.RowEditWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:c="clr-namespace:Shopee.Suite.Controls"
@@ -79,9 +79,9 @@
                 <StackPanel Orientation="Horizontal" Margin="0,0,0,4"
                             Visibility="{Binding IsEdit, Converter={StaticResource BoolToVis}}">
                     <TextBlock Text="Tài khoản:" Style="{StaticResource caption}" VerticalAlignment="Center" />
-                    <TextBlock Text="{Binding AccountLabel}" FontWeight="SemiBold" VerticalAlignment="Center" Margin="8,0,0,0" />
+                    <TextBlock Text="{Binding AccountLabel}" VerticalAlignment="Center" Margin="8,0,0,0" />
                     <TextBlock Text="Shop:" Style="{StaticResource caption}" VerticalAlignment="Center" Margin="20,0,0,0" />
-                    <TextBlock Text="{Binding ShopLabel}" FontWeight="SemiBold" VerticalAlignment="Center" Margin="8,0,0,0" />
+                    <TextBlock Text="{Binding ShopLabel}" VerticalAlignment="Center" Margin="8,0,0,0" />
                 </StackPanel>
 
                 <TextBlock Text="Dữ liệu dòng" Style="{StaticResource h2}" Margin="0,8,0,8" />

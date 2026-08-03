@@ -1,4 +1,4 @@
-<UserControl x:Class="Shopee.Suite.Modules.Search.SearchView"
+﻿<UserControl x:Class="Shopee.Suite.Modules.Search.SearchView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:c="clr-namespace:Shopee.Suite.Controls"
@@ -219,7 +219,7 @@
                                 <DockPanel Margin="0,10,0,0">
                                     <TextBlock DockPanel.Dock="Top" Margin="2,0,0,8" FontSize="12.5"
                                                Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap">
-                                        <Run Text="Tài khoản: " /><Run Text="{Binding Account, Mode=OneWay}" FontWeight="SemiBold" /><Run Text="   ·   " /><Run Text="{Binding Status, Mode=OneWay}" /><Run Text="   ·   " /><Run Text="{Binding Link, Mode=OneWay}" />
+                                        <Run Text="Tài khoản: " /><Run Text="{Binding Account, Mode=OneWay}" /><Run Text="   ·   " /><Run Text="{Binding Status, Mode=OneWay}" /><Run Text="   ·   " /><Run Text="{Binding Link, Mode=OneWay}" />
                                     </TextBlock>
                                     <Border Style="{StaticResource card}" ClipToBounds="True">
                                         <DataGrid ItemsSource="{Binding Products}" BorderThickness="0" IsReadOnly="True"
@@ -243,7 +243,7 @@
                     <!-- Errored accounts -->
                     <StackPanel Grid.Row="3" Margin="0,10,0,0"
                                 Visibility="{Binding ErroredAccounts.Count, Converter={StaticResource CountToVis}}">
-                        <TextBlock Margin="0,0,0,5" FontSize="12.5" FontWeight="SemiBold"
+                        <TextBlock Margin="0,0,0,5" FontSize="12.5"
                                    Foreground="{StaticResource DangerBrush}">
                             <Run Text="⚠ Tài khoản lỗi (" /><Run Text="{Binding ErroredAccounts.Count, Mode=OneWay}" /><Run Text=") — engine tự đổi tk" />
                         </TextBlock>
@@ -369,7 +369,7 @@
                     <Border Grid.Row="0" Style="{StaticResource card}" Padding="18,16" Margin="0,0,0,12">
                         <StackPanel>
                             <TextBlock Style="{StaticResource caption}" Margin="0,0,0,4">
-                                <Run Text="File danh mục lá Shopee (.docx) — provider AI đang dùng: " /><Run Text="{Binding AiProviderName, Mode=OneWay}" FontWeight="SemiBold" />
+                                <Run Text="File danh mục lá Shopee (.docx) — provider AI đang dùng: " /><Run Text="{Binding AiProviderName, Mode=OneWay}" />
                             </TextBlock>
                             <Grid>
                                 <Grid.ColumnDefinitions>
@@ -441,7 +441,7 @@
                         </DockPanel>
                         <DockPanel Grid.Column="2">
                             <TextBlock DockPanel.Dock="Top" Style="{StaticResource h2}" Margin="0,0,0,8">
-                                <Run Text="Sản phẩm: " /><Run Text="{Binding SelectedCategoryName, Mode=OneWay}" FontWeight="SemiBold" />
+                                <Run Text="Sản phẩm: " /><Run Text="{Binding SelectedCategoryName, Mode=OneWay}" />
                             </TextBlock>
                             <Border Style="{StaticResource card}" ClipToBounds="True">
                                 <DataGrid ItemsSource="{Binding CategoryProducts}" BorderThickness="0" IsReadOnly="True"

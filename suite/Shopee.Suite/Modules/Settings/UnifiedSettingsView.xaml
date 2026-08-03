@@ -1,4 +1,4 @@
-<UserControl x:Class="Shopee.Suite.Modules.Settings.UnifiedSettingsView"
+﻿<UserControl x:Class="Shopee.Suite.Modules.Settings.UnifiedSettingsView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:c="clr-namespace:Shopee.Suite.Controls"
@@ -21,7 +21,7 @@
              các tab khác đã có nhãn chính là tiêu đề tab nên không lặp lại. -->
         <Style x:Key="sectionLabel" TargetType="{x:Type TextBlock}">
             <Setter Property="FontSize" Value="12" />
-            <Setter Property="FontWeight" Value="Bold" />
+            <Setter Property="FontWeight" Value="Medium" />
             <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}" />
             <Setter Property="Margin" Value="0,0,0,10" />
         </Style>
@@ -333,7 +333,7 @@
                                     </Grid>
 
                                     <Border Background="{StaticResource SubtleBrush}" CornerRadius="4" Padding="12,8" Margin="0,14,0,0">
-                                        <TextBlock Text="{Binding Suite.ComputedMaxInfo}" FontSize="14" FontWeight="SemiBold"
+                                        <TextBlock Text="{Binding Suite.ComputedMaxInfo}" FontSize="14"
                                                    TextWrapping="Wrap" />
                                     </Border>
 
@@ -353,7 +353,7 @@
                             <Border Style="{StaticResource card}" Padding="18" Margin="0,14,0,0" VerticalAlignment="Top">
                                 <StackPanel>
                                     <TextBlock Text="Máy của bạn" Style="{StaticResource h2}" Margin="0,0,0,8" />
-                                    <TextBlock Text="{Binding Suite.MachineInfo}" FontSize="14.5" FontWeight="SemiBold"
+                                    <TextBlock Text="{Binding Suite.MachineInfo}" FontSize="14.5"
                                                TextWrapping="Wrap" />
                                 </StackPanel>
                             </Border>
@@ -364,7 +364,7 @@
                             <Border Style="{StaticResource card}" Padding="18" VerticalAlignment="Top">
                                 <StackPanel>
                                     <TextBlock Text="Máy này" Style="{StaticResource h2}" Margin="0,0,0,8" />
-                                    <TextBlock Text="{Binding Suite.MachineLabel}" FontSize="14.5" FontWeight="SemiBold"
+                                    <TextBlock Text="{Binding Suite.MachineLabel}" FontSize="14.5"
                                                FontFamily="{StaticResource MonoFont}" TextWrapping="Wrap" />
                                     <TextBlock Style="{StaticResource caption}" Margin="0,6,0,0"
                                                Text="Tên này nhận diện máy trên bảng trạng thái và khi giành/khoá việc giữa các máy." />
@@ -430,7 +430,7 @@
                                         </Button>
                                     </StackPanel>
 
-                                    <TextBlock Text="{Binding Suite.HubClientStatus}" Margin="0,10,0,0" FontWeight="SemiBold"
+                                    <TextBlock Text="{Binding Suite.HubClientStatus}" Margin="0,10,0,0"
                                                TextWrapping="Wrap"
                                                Visibility="{Binding Suite.HubClientStatus, Converter={StaticResource StringToVis}}" />
 
@@ -456,7 +456,7 @@
                     <StackPanel MaxWidth="1180" HorizontalAlignment="Left" Margin="0,12,0,0">
                         <Border Style="{StaticResource card}" Padding="18" HorizontalAlignment="Left" MaxWidth="560">
                             <StackPanel>
-                                <TextBlock Text="{Binding Suite.AppVersionText}" FontSize="14.5" FontWeight="SemiBold"
+                                <TextBlock Text="{Binding Suite.AppVersionText}" FontSize="14.5"
                                            FontFamily="{StaticResource MonoFont}" />
 
                                 <TextBlock Text="{Binding Suite.UpdateStatus}" Margin="0,10,0,0" TextWrapping="Wrap"

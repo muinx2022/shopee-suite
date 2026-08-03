@@ -5,6 +5,14 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Hiệu năng. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.7.7 — 2026-08-03
+
+- **Bỏ chữ in đậm toàn app (suite + Đơn hàng):** mọi tiêu đề, nhãn, header lưới, badge, tên tài khoản chuyển
+  từ đậm (Bold/SemiBold) sang nét vừa (Medium) cho êm mắt; đồng thời làm đậm 2 sắc xám chữ phụ để chữ không bị nhạt.
+- **Đồng bộ 2 danh sách tài khoản (Workspace ↔ Cấu hình BigSeller):** cùng kiểu thẻ (nền trắng, chọn = nền cam
+  nhạt), chấm tròn trạng thái, cỡ chữ 13.5 và độ rộng lưới 300px; gộp style dùng chung trong theme.
+- **Dọn lề XAML:** vá lại các dòng bị rớt thụt lề từ đợt sửa trước.
+
 ## v1.7.6 — 2026-08-03
 
 - **Google Sheet khớp layout mẫu A–K mới:** payload đẩy đủ mã đơn, mã vận đơn, ảnh/PDF, mã đơn trả hàng,

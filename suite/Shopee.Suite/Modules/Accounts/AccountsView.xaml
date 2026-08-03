@@ -1,4 +1,4 @@
-<UserControl x:Class="Shopee.Suite.Modules.Accounts.AccountsView"
+﻿<UserControl x:Class="Shopee.Suite.Modules.Accounts.AccountsView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:c="clr-namespace:Shopee.Suite.Controls"
@@ -118,7 +118,7 @@
                                 <DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate>
                                         <TextBlock Text="{Binding UsageStatus}" Foreground="{Binding UsageStatusBrush}"
-                                                   FontWeight="SemiBold" VerticalAlignment="Center" />
+                                                   VerticalAlignment="Center" />
                                     </DataTemplate>
                                 </DataGridTemplateColumn.CellTemplate>
                             </DataGridTemplateColumn>
@@ -162,7 +162,7 @@
                                       IsChecked="{Binding OpenWithShopeeAccount}"
                                       IsEnabled="{Binding DataContext.IsFullEditMode, ElementName=Root}" />
 
-                            <TextBlock Text="PROXY" FontSize="11" FontWeight="SemiBold"
+                            <TextBlock Text="PROXY" FontSize="11"
                                        Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,8" />
                             <TextBlock Text="KiotProxy key" Style="{StaticResource caption}" />
                             <TextBox Text="{Binding KiotProxyKey, UpdateSourceTrigger=PropertyChanged}" Margin="0,3,0,10"
