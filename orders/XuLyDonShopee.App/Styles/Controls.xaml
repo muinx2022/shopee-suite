@@ -36,9 +36,9 @@
     </ResourceDictionary.MergedDictionaries>
 
     <!-- =========================================================
-         1. ICON TRONG NÚT — cỡ 14, mặc định xám trung tính
+         1. ICON TRONG NÚT — cỡ 12, mặc định xám trung tính
          =========================================================
-         ĐÚNG BẰNG theme suite ("Button PathIcon" cỡ 14) để nút cùng vai của 2 module đứng cạnh nhau icon
+         ĐÚNG BẰNG theme suite ("Button PathIcon" cỡ 12) để nút cùng vai của 2 module đứng cạnh nhau icon
          không to nhỏ khác nhau. Đây là style MẶC ĐỊNH của c:PathIcon (kiểu RIÊNG của module — suite có
          kiểu PathIcon riêng, style của suite không áp được sang kiểu này và ngược lại).
 
@@ -46,8 +46,8 @@
          mặc định" ⇒ các style nút dưới đây KHÔNG có setter nền/viền/chữ, chỉ đổi MÀU ICON (qua
          Style.Resources — cách WPF làm "selector con" của Avalonia). -->
     <Style TargetType="{x:Type c:PathIcon}">
-        <Setter Property="Width" Value="14" />
-        <Setter Property="Height" Value="14" />
+        <Setter Property="Width" Value="12" />
+        <Setter Property="Height" Value="12" />
         <Setter Property="VerticalAlignment" Value="Center" />
         <Setter Property="Foreground" Value="{StaticResource TextMuted}" />
         <Setter Property="Focusable" Value="False" />

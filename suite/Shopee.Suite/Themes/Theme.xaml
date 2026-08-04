@@ -108,11 +108,12 @@
     <sys:Double x:Key="ControlContentFontSize">12.5</sys:Double>
 
     <!-- ══════════ PATHICON — icon vector đơn sắc, tô theo Foreground ══════════ -->
-    <!-- Cỡ mặc định 14 (KHÔNG phải 16): 16 nhìn thô so với nhãn chữ 12 — icon là phụ trợ cho nhãn. Chỗ dùng
-         KHÔNG đặt Foreground tại chỗ, để style của nút quyết (primary → cam · danger → đỏ · success → xanh). -->
+    <!-- Cỡ mặc định 12 (nút cao 30 · padding 5 · chữ 12): 14 trước đây gần kín chiều cao nội dung
+         khiến icon nhìn to hơn nhãn. Chỗ dùng KHÔNG đặt Foreground tại chỗ, để style của nút quyết
+         (primary → cam · danger → đỏ · success → xanh). -->
     <Style TargetType="{x:Type c:PathIcon}">
-        <Setter Property="Width" Value="14" />
-        <Setter Property="Height" Value="14" />
+        <Setter Property="Width" Value="12" />
+        <Setter Property="Height" Value="12" />
         <Setter Property="VerticalAlignment" Value="Center" />
         <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}" />
         <Setter Property="Template">
@@ -360,8 +361,8 @@
 
     <!-- Icon của nút ribbon: thừa kế Foreground của nút (đen ấm → cam khi active). -->
     <Style x:Key="ribbonIcon" TargetType="{x:Type c:PathIcon}" BasedOn="{StaticResource {x:Type c:PathIcon}}">
-        <Setter Property="Width" Value="18" />
-        <Setter Property="Height" Value="18" />
+        <Setter Property="Width" Value="16" />
+        <Setter Property="Height" Value="16" />
         <Setter Property="HorizontalAlignment" Value="Center" />
         <Setter Property="Foreground"
                 Value="{Binding Foreground, RelativeSource={RelativeSource AncestorType={x:Type Button}}}" />

@@ -13,7 +13,7 @@ namespace XuLyDonShopee.App.Controls;
 /// mà các style <c>primary/success/danger</c> trong <c>Styles/Controls.xaml</c> dựa vào.
 /// </para>
 /// <para>
-/// Template mặc định (Path + Stretch=Uniform, cỡ 14×14) khai trong <c>Styles/Controls.xaml</c> — file đó
+/// Template mặc định (Path + Stretch=Uniform, cỡ 12×12) khai trong <c>Styles/Controls.xaml</c> — file đó
 /// được mỗi view/dialog của module merge vào Resources riêng (không đổ vào Application của suite).
 /// </para>
 /// </summary>

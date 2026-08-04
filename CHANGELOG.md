@@ -5,6 +5,11 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Hiệu năng. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.7.10 — 2026-08-04
+
+- **Thu nhỏ icon trong nút toàn app:** `PathIcon` mặc định 14→12px (ribbon 18→16) cho khớp nút cao 30; áp
+  chung theme suite + module Đơn hàng.
+
 ## v1.7.9 — 2026-08-04
 
 - **Đơn hàng — lỗi đặt địa chỉ lấy hàng chỉ bỏ qua shop đó:** không còn dừng cả vòng tài khoản. Shop lỗi vẫn

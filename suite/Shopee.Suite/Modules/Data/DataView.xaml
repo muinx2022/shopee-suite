@@ -164,7 +164,7 @@
                                         Command="{Binding DataContext.EditRowCommand,
                                                   RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
                                         CommandParameter="{Binding}">
-                                    <c:PathIcon Data="{StaticResource IconEdit}" Width="14" Height="14" />
+                                    <c:PathIcon Data="{StaticResource IconEdit}" Width="12" Height="12" />
                                 </Button>
                             </DataTemplate>
                         </DataGridTemplateColumn.CellTemplate>

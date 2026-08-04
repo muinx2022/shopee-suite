@@ -10,7 +10,7 @@ namespace Shopee.Suite.Controls;
 /// (<c>&lt;c:PathIcon Data="{StaticResource IconSave}" /&gt;</c>) và cơ chế "icon ăn theo màu chữ của nút"
 /// mà theme đang dựa vào (style .primary/.danger/.success chỉ đổi Foreground của icon).
 /// <para>
-/// Template mặc định (Path + Stretch=Uniform, cỡ 14×14) khai trong <c>Themes/Theme.xaml</c> — merge ở cấp
+/// Template mặc định (Path + Stretch=Uniform, cỡ 12×12) khai trong <c>Themes/Theme.xaml</c> — merge ở cấp
 /// Application nên mọi cửa sổ/việt dựng bằng code đều thấy.
 /// </para>
 /// </summary>
