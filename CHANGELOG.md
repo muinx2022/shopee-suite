@@ -5,6 +5,16 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Hiệu năng. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.7.17 — 2026-08-04
+
+- **Đơn hàng — vá 5 lỗ hổng đồng bộ banner lỗi địa chỉ (hậu review v1.7.16):**
+  - Tombstone Hub cũ **không còn xoá** banner của lỗi mới phát hiện ở local (ca Hub chết lúc phát hiện lỗi →
+    đẩy Hub fail); thay vào đó giữ banner và sửa lại Hub. Luồng lan dismiss đa máy giữ nguyên.
+  - Hub: dismiss tới muộn (mốc cũ hơn `created_at`) không chôn banner mới — đối xứng với luật upsert.
+  - Sửa nhịp 60s chạm danh sách banner ngoài UI thread (chế độ Shopee / tài khoản chưa có email).
+  - Gom banner local không còn ném khi có shop trùng hoa/thường.
+  - Một cờ chống chồng lượt cho mọi lối gọi sync, có coalesce nên đổi tài khoản giữa chừng không mất lượt.
+
 ## v1.7.16 — 2026-08-04
 
 - **Đơn hàng — đóng banner lỗi địa chỉ đồng bộ Hub:** bấm X ghi dismiss local + tombstone Hub (kể cả Hub chưa

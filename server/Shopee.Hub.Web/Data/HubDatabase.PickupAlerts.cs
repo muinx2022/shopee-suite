@@ -73,6 +73,8 @@ ON CONFLICT(account_login, shop_login) DO UPDATE SET
     /// <summary>
     /// Đánh dấu đã đóng (bấm X): UPSERT tombstone — chưa có dòng vẫn INSERT với <c>dismissed_at</c>
     /// để máy khác kéo Hub biết đã đóng. <paramref name="occurredAtIso"/> thiếu → giờ Hub.
+    /// <para>Dismiss có mốc <c>&lt;</c> <c>created_at</c> hiện có thì bỏ qua: đó là lần bấm X CŨ tới muộn,
+    /// không được chôn banner của lỗi mới phát hiện sau đó (đối xứng với <see cref="UpsertPickupAlert"/>).</para>
     /// </summary>
     public bool DismissPickupAlert(
         string accountLogin, string shopLogin, string? machineId, string? occurredAtIso = null)
@@ -90,8 +92,12 @@ ON CONFLICT(account_login, shop_login) DO UPDATE SET
 INSERT INTO orders_pickup_alerts(account_login, shop_login, province, created_at, dismissed_at, updated_by_machine)
 VALUES($a, $s, '', $d, $d, $m)
 ON CONFLICT(account_login, shop_login) DO UPDATE SET
-  dismissed_at=$d,
-  updated_by_machine=$m;";
+  updated_by_machine=$m,
+  dismissed_at=CASE
+    WHEN $d < orders_pickup_alerts.created_at
+    THEN orders_pickup_alerts.dismissed_at
+    ELSE $d
+  END;";
             c.Parameters.AddWithValue("$a", acc);
             c.Parameters.AddWithValue("$s", shop);
             c.Parameters.AddWithValue("$d", d);

@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using XuLyDonShopee.App.Services;
+using XuLyDonShopee.Core.Data;
 using XuLyDonShopee.Core.Services;
 
 namespace XuLyDonShopee.App.ViewModels;
@@ -59,8 +60,11 @@ public partial class AccountsViewModel
     /// <summary>Đồng hồ kéo Hub pickup-alerts khi tab Kết quả đang mở + có tài khoản chọn. Dựng ở ctor, dọn ở Dispose.</summary>
     private readonly System.Threading.Timer _timerSyncPickupAlerts;
 
-    /// <summary>0/1 — tránh chồng hai lượt <see cref="SyncAddressAlertsFromHubAsync"/>.</summary>
+    /// <summary>0/1 — có một lượt <see cref="SyncAddressAlertsFromHubAsync"/> đang chạy.</summary>
     private int _syncPickupAlertsBusy;
+
+    /// <summary>0/1 — có nơi gọi sync trong lúc đang bận → chạy lại đúng một lượt nữa khi lượt này xong.</summary>
+    private int _syncPickupAlertsPending;
 
     /// <summary>Tab "Kết quả": các dòng Shop | số Chuẩn bị hàng của NGÀY đang lọc — MỌI shop của tài khoản (kể cả
     /// shop 0 đơn). Dựng lại trong <see cref="LoadResults"/> khi đổi tài khoản chọn / đổi ngày.</summary>
@@ -624,9 +628,37 @@ public partial class AccountsViewModel
     }
 
     /// <summary>
-    /// Kéo Hub rồi merge theo <see cref="PickupAlertMerge.QuyetDinh"/>. Best-effort — Hub null/offline giữ local.
+    /// Kéo Hub rồi merge — lối vào DUY NHẤT cho mọi nơi gọi (chọn tài khoản, đổi tab, nhịp 60s).
+    /// <para>Đang chạy dở thì KHÔNG chạy chồng: đánh dấu "có lượt mới" rồi chạy lại đúng một lần sau khi lượt
+    /// hiện tại xong — đổi tài khoản giữa chừng vẫn được sync (lượt đang chạy sẽ bỏ qua vì khác accountId).</para>
     /// </summary>
     private async Task SyncAddressAlertsFromHubAsync()
+    {
+        if (Interlocked.CompareExchange(ref _syncPickupAlertsBusy, 1, 0) != 0)
+        {
+            Volatile.Write(ref _syncPickupAlertsPending, 1);
+            return;
+        }
+
+        try
+        {
+            do
+            {
+                Volatile.Write(ref _syncPickupAlertsPending, 0);
+                await SyncAddressAlertsOnceAsync().ConfigureAwait(false);
+            }
+            while (Volatile.Read(ref _syncPickupAlertsPending) == 1);
+        }
+        finally
+        {
+            Volatile.Write(ref _syncPickupAlertsBusy, 0);
+        }
+    }
+
+    /// <summary>
+    /// Một lượt kéo + merge theo <see cref="PickupAlertMerge.QuyetDinh"/>. Best-effort — Hub null/offline giữ local.
+    /// </summary>
+    private async Task SyncAddressAlertsOnceAsync()
     {
         if (SelectedRow?.Id is not long accountId)
         {
@@ -637,7 +669,8 @@ public partial class AccountsViewModel
         var fetch = _services.FetchPickupAlertsFromHub;
         if (fetch is null || accountLogin.Length == 0)
         {
-            LoadAddressAlertsFromLocal();
+            // Nhịp 60s gọi từ thread nền → phải marshal: AddressAlertRows đang bind, sửa ngoài UI thread là ném.
+            RunOnUi(LoadAddressAlertsFromLocal);
             return;
         }
 
@@ -652,6 +685,7 @@ public partial class AccountsViewModel
         }
 
         List<(string Shop, DateTimeOffset OccurredAt)>? repushDismiss = null;
+        List<(string Shop, string Province, DateTimeOffset OccurredAt)>? repushUpsert = null;
 
         RunOnUi(() =>
         {
@@ -662,8 +696,14 @@ public partial class AccountsViewModel
 
             if (hub is not null)
             {
-                var localByShop = _services.PickupAlerts.ListAll(accountId)
-                    .ToDictionary(a => a.ShopLogin, a => a, StringComparer.OrdinalIgnoreCase);
+                // Khóa bảng local là (account_id, shop_login) collation BINARY nên VỀ LÝ THUYẾT có hai dòng
+                // khác hoa/thường → gom bằng TryAdd (ListAll sắp created_at DESC ⇒ giữ dòng mới nhất) thay vì
+                // ToDictionary (ném ArgumentException giữa callback UI).
+                var localByShop = new Dictionary<string, PickupAddressAlert>(StringComparer.OrdinalIgnoreCase);
+                foreach (var a in _services.PickupAlerts.ListAll(accountId))
+                {
+                    localByShop.TryAdd(a.ShopLogin, a);
+                }
 
                 foreach (var dong in hub)
                 {
@@ -673,7 +713,8 @@ public partial class AccountsViewModel
                     }
 
                     localByShop.TryGetValue(dong.ShopLogin, out var local);
-                    var action = PickupAlertMerge.QuyetDinh(local?.DismissedAt, dong.Dismissed, dong.CreatedAt);
+                    var action = PickupAlertMerge.QuyetDinh(
+                        local?.CreatedAt, local?.DismissedAt, dong.Dismissed, dong.CreatedAt, dong.DismissedAt);
                     switch (action)
                     {
                         case MergePickupAlertAction.LocalDismiss:
@@ -686,6 +727,13 @@ public partial class AccountsViewModel
                             repushDismiss ??= [];
                             repushDismiss.Add((dong.ShopLogin, ToUtcOffset(local?.DismissedAt)));
                             break;
+                        case MergePickupAlertAction.KeepLocalActiveRepushHub:
+                            repushUpsert ??= [];
+                            repushUpsert.Add((
+                                dong.ShopLogin,
+                                local?.Province ?? dong.Province,
+                                ToUtcOffset(local?.CreatedAt)));
+                            break;
                     }
                 }
             }
@@ -693,33 +741,41 @@ public partial class AccountsViewModel
             LoadAddressAlertsFromLocal();
         });
 
-        if (repushDismiss is { Count: > 0 })
+        if (repushDismiss is { Count: > 0 } && _services.DismissPickupAlertToHub is { } dismissHub)
         {
-            var dismissHub = _services.DismissPickupAlertToHub;
-            if (dismissHub is not null)
+            foreach (var (shop, when) in repushDismiss)
             {
-                foreach (var (shop, when) in repushDismiss)
-                {
-                    _ = Task.Run(async () =>
-                    {
-                        try
-                        {
-                            var ok = await PickupAlertHubGate.RunAsync(accountLogin, shop, () =>
-                                dismissHub(accountLogin, shop, when, default)).ConfigureAwait(false);
-                            if (!ok)
-                            {
-                                Trace.WriteLine($"[AccountsViewModel] Re-push dismiss pickup-alert Hub thất bại shop={shop}");
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            Trace.WriteLine("[AccountsViewModel] Re-push dismiss pickup-alert Hub lỗi: " + ex.Message);
-                        }
-                    });
-                }
+                DayLaiHub(accountLogin, shop, "dismiss", () => dismissHub(accountLogin, shop, when, default));
+            }
+        }
+
+        if (repushUpsert is { Count: > 0 } && _services.UpsertPickupAlertToHub is { } upsertHub)
+        {
+            foreach (var (shop, province, when) in repushUpsert)
+            {
+                DayLaiHub(accountLogin, shop, "upsert", () => upsertHub(accountLogin, shop, province, when, default));
             }
         }
     }
+
+    /// <summary>Fire-and-forget sửa lại Hub cho một shop (nối đuôi theo shop qua <see cref="PickupAlertHubGate"/>,
+    /// log khi hỏng — không chặn UI, không làm fail lượt sync).</summary>
+    private static void DayLaiHub(string accountLogin, string shop, string thaoTac, Func<Task<bool>> day)
+        => _ = Task.Run(async () =>
+        {
+            try
+            {
+                var ok = await PickupAlertHubGate.RunAsync(accountLogin, shop, day).ConfigureAwait(false);
+                if (!ok)
+                {
+                    Trace.WriteLine($"[AccountsViewModel] Re-push {thaoTac} pickup-alert Hub thất bại shop={shop}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Trace.WriteLine($"[AccountsViewModel] Re-push {thaoTac} pickup-alert Hub lỗi shop={shop}: {ex.Message}");
+            }
+        });
 
     /// <summary>Bấm X trên một dòng banner — dismiss local + Hub (tombstone); chỉ dòng đó biến mất.</summary>
     [RelayCommand]
@@ -782,15 +838,10 @@ public partial class AccountsViewModel
         }
     }
 
-    /// <summary>Nhịp 60s trên thread nền → sync banner địa chỉ (bỏ qua nếu đang sync).</summary>
+    /// <summary>Nhịp 60s trên thread nền → sync banner địa chỉ (chống chồng lượt nằm trong chính hàm sync).</summary>
     private void NhipSyncPickupAlerts()
     {
         if (DetailTabIndex != 1 || SelectedRow is null)
-        {
-            return;
-        }
-
-        if (Interlocked.CompareExchange(ref _syncPickupAlertsBusy, 1, 0) != 0)
         {
             return;
         }
@@ -804,10 +855,6 @@ public partial class AccountsViewModel
             catch (Exception ex)
             {
                 Trace.WriteLine("[AccountsViewModel] Sync pickup-alerts Hub (timer) lỗi: " + ex.Message);
-            }
-            finally
-            {
-                Interlocked.Exchange(ref _syncPickupAlertsBusy, 0);
             }
         });
     }
