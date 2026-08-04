@@ -5,6 +5,16 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Hiệu năng. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.7.18 — 2026-08-04
+
+- **Đơn hàng — sản phẩm KHÔNG có phân loại không còn ghi `SL: 1` đè lên Google Sheet.** Từ v1.7.14, hàng không
+  biến thể làm cột Phân loại gửi lên Sheet chuỗi `SL: 1` (trong khi lưới app và Hub hiện trống) → ghi đè ô
+  Phân loại người dùng đã tự điền. Nay để ô trống như trước v1.7.14; app, Hub và Sheet dùng chung một luật.
+- Bỏ code chết cột "Số lượng" (đã gỡ khỏi lưới ở v1.7.15) — mỗi dòng lưới bớt một lượt parse `items_json`.
+- **Ghi chú bổ sung cho v1.7.14** (khi đó không khai báo): cột Phân loại **không còn khử trùng lặp** hai dòng
+  giống nhau liên tiếp — cần thiết để không mất số lượng của từng sản phẩm, nhưng đơn có hai sản phẩm giống
+  hệt mà thiếu số lượng sẽ hiện lặp (vd `Kem,36 · Kem,36`).
+
 ## v1.7.17 — 2026-08-04
 
 - **Đơn hàng — vá lỗ hổng đồng bộ banner lỗi địa chỉ (hậu review v1.7.16):**

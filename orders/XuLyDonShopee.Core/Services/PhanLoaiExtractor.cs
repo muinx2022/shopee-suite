@@ -94,47 +94,6 @@ public static class PhanLoaiExtractor
     }
 
     /// <summary>
-    /// Chuỗi số lượng từng sản phẩm từ <paramref name="itemsJson"/> (khóa <c>amount</c>/<c>soLuong</c>), nối
-    /// bằng <c>" · "</c> đúng thứ tự. Không có số nào ≥ 1 → chuỗi rỗng. JSON hỏng → chuỗi rỗng (KHÔNG ném).
-    /// </summary>
-    public static string SoLuongTuItemsJson(string? itemsJson)
-    {
-        if (string.IsNullOrWhiteSpace(itemsJson))
-        {
-            return string.Empty;
-        }
-
-        try
-        {
-            using var doc = JsonDocument.Parse(itemsJson);
-            if (doc.RootElement.ValueKind != JsonValueKind.Array)
-            {
-                return string.Empty;
-            }
-
-            var parts = new List<string>();
-            foreach (var item in doc.RootElement.EnumerateArray())
-            {
-                if (item.ValueKind != JsonValueKind.Object)
-                {
-                    continue;
-                }
-
-                var sl = DocSoLuong(item);
-                if (sl is >= 1)
-                {
-                    parts.Add(sl.Value.ToString(CultureInfo.InvariantCulture));
-                }
-            }
-            return string.Join(Noi, parts);
-        }
-        catch (JsonException)
-        {
-            return string.Empty;
-        }
-    }
-
-    /// <summary>
     /// Chuỗi SKU của cả đơn từ <paramref name="itemsJson"/>: lấy khóa <c>sku</c> của TỪNG sản phẩm (chỉ trang
     /// CHI TIẾT mới ghi), nối bằng <c>" · "</c> đúng thứ tự mảng — <b>KHÔNG khử trùng</b> (khác
     /// <see cref="TuItemsJson"/>: mỗi SKU là riêng biệt). Không có sản phẩm nào mang <c>sku</c> → chuỗi rỗng

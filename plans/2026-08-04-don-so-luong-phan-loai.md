@@ -1,7 +1,7 @@
 # Plan: Dọn hậu quả việc "số lượng vào phân loại" (v1.7.14/15)
 
 - **Ngày:** 2026-08-04
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành
 - **Người lập:** phiên chính · **Người thực thi:** phiên chính
 
 ## 1. Bối cảnh & mục tiêu
@@ -126,4 +126,18 @@ GSheet ở Bước 2.
 
 ---
 
-## Báo cáo thực thi (điền sau khi xong)
+## Báo cáo thực thi
+
+| Bước | Kết quả |
+|---|---|
+| 1. Dọn dữ liệu test | Hub: 63 → 62 đơn, xoá đúng 1, còn 0 dòng `TEST%` (backup `hub.db.bak2-20260804`). Local: 23 → 22, backup `app.db.bak-20260804`. `tools/PushTestOrderSl/` đã xoá (chưa từng commit) |
+| 2. Sửa lệch app/GSheet | `SanPhamDonParser.cs:222` — phân loại rỗng ⇒ dòng TRỐNG, không gắn `SL: N` |
+| 3. Xoá code chết | `OrderRowViewModel.SoLuong` + lời gọi + `PhanLoaiExtractor.SoLuongTuItemsJson`; grep còn đúng `sp.SoLuong` của parser |
+| 4. CHANGELOG | Mục v1.7.18 + ghi chú bổ sung cho v1.7.14 (bỏ khử trùng lặp) |
+| 5. Test | +4 ca (SP không phân loại; thiếu phân loại ở giữa vẫn khớp cặp; 2 ca đối chiếu `TuItemsJson` vs `CotGsheet` cùng luật); −1 ca của hàm đã xoá |
+| 6. Build + release | build 0 warning; `dotnet test orders` **1485 passed** (1482 − 1 + 4) |
+
+**Việc user phải tự làm:** xoá dòng `TEST-SL-20260804114245` trên Google Sheet tab **"Tháng 08-2026"** —
+không có quyền ghi sheet từ đây.
+
+**Không đụng:** `.kilo/worktrees/vivacious-monkey/` (worktree của agent khác, có thể còn việc dở).

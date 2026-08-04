@@ -48,7 +48,6 @@ public sealed partial class OrderRowViewModel
         _redownloadSlip = redownloadSlip;
         // Parse items_json MỘT LẦN lúc dựng dòng — lưới vẽ lại liên tục, không parse json mỗi lần binding đọc.
         PhanLoai = PhanLoaiExtractor.TuItemsJson(row.ItemsJson);
-        SoLuong = PhanLoaiExtractor.SoLuongTuItemsJson(row.ItemsJson);
         // SKU nhiều SP (nối " · ") từ items_json; rỗng = đơn cũ không có khóa sku → property Sku lùi về field DB.
         _skuNhieu = PhanLoaiExtractor.SkuTuItemsJson(row.ItemsJson);
     }
@@ -72,10 +71,6 @@ public sealed partial class OrderRowViewModel
     /// <summary>Cột "Phân loại" (vd "Nâu Be,39. SL: 1") — suy từ <c>items_json</c> qua
     /// <see cref="PhanLoaiExtractor.TuItemsJson"/>, TÍNH SẴN trong constructor. Rỗng nếu đơn không có phân loại.</summary>
     public string PhanLoai { get; }
-
-    /// <summary>Cột "Số lượng" — từng SP nối bằng " · " (vd "2 · 1"), suy từ <c>amount</c>/<c>soLuong</c>
-    /// trong <c>items_json</c>. Rỗng nếu không đọc được số nào.</summary>
-    public string SoLuong { get; }
 
     /// <summary>Cột "Đơn trả hàng" = mã yêu cầu trả hàng khớp đơn (bước check cuối flow shop ghi vào DB). Rỗng nếu
     /// đơn chưa có yêu cầu trả hàng nào.</summary>

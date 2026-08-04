@@ -223,6 +223,56 @@ public class SanPhamDonParserTests
         Assert.Equal(3, cot.PhanLoai.Split('\n').Length);
     }
 
+    /// <summary>
+    /// HỒI QUY: sản phẩm KHÔNG có phân loại (hàng không biến thể) → ô Phân loại để TRỐNG, KHÔNG ra "SL: 1".
+    /// Cột này là "Phân loại"; một mình số lượng không phải phân loại. Quan trọng hơn: chuỗi phải RỖNG thì
+    /// <c>HubOutbox</c> mới gửi null và Apps Script mới chừa ô người dùng đã tự điền.
+    /// </summary>
+    [Fact]
+    public void CotGsheet_SanPhamKhongCoPhanLoai_OTrongChuKhongPhaiSL1()
+    {
+        var json = SanPhamDonParser.TaoItemsJson(SanPhamDonParser.Parse(
+            "[" + Sp("Giày A", "", "A141", "303.050", "1", "303.050") + "]"));
+        var cot = SanPhamDonParser.CotGsheet(json);
+        Assert.NotNull(cot);
+        Assert.Equal("A141", cot!.Sku);
+        Assert.Equal(string.Empty, cot.PhanLoai);
+        // Rỗng-toàn-phần ⇒ HubOutbox coi là "không có gì để ghi" (IsNullOrWhiteSpace) ⇒ không đè ô trên sheet.
+        Assert.True(string.IsNullOrWhiteSpace(cot.PhanLoai));
+    }
+
+    /// <summary>SP không phân loại nằm GIỮA → dòng trống đúng chỗ, hai cột vẫn khớp cặp với cột SKU.</summary>
+    [Fact]
+    public void CotGsheet_ThieuPhanLoaiOGiua_DeDongTrongVanKhopCap()
+    {
+        var json = SanPhamDonParser.TaoItemsJson(SanPhamDonParser.Parse(
+            "[" + Sp("Giày A", "Kem,36", "A141", "1", "1", "1") + ","
+                + Sp("Giày B", "", "A322", "1", "2", "2") + ","
+                + Sp("Giày C", "Đen,37", "B80482", "1", "1", "1") + "]"));
+        var cot = SanPhamDonParser.CotGsheet(json);
+        Assert.NotNull(cot);
+        Assert.Equal("A141\nA322\nB80482", cot!.Sku);
+        Assert.Equal("Kem,36. SL: 1\n\nĐen,37. SL: 1", cot.PhanLoai);
+        Assert.Equal(cot.Sku.Split('\n').Length, cot.PhanLoai.Split('\n').Length);
+    }
+
+    /// <summary>
+    /// App/hub (<c>TuItemsJson</c>) và GSheet (<c>CotGsheet</c>) phải CÙNG luật về việc có sinh "SL" hay không —
+    /// lệch nhau từng làm sheet nhận "SL: 1" trong khi lưới app trống (bản v1.7.14–v1.7.17).
+    /// </summary>
+    [Theory]
+    [InlineData("", "A141", "1")]      // không phân loại → cả hai đều KHÔNG có SL
+    [InlineData("Kem,36", "A141", "1")] // có phân loại → cả hai đều có SL
+    public void TuItemsJson_VaCotGsheet_CungLuatSinhSL(string phanLoai, string sku, string soLuong)
+    {
+        var json = SanPhamDonParser.TaoItemsJson(SanPhamDonParser.Parse(
+            "[" + Sp("Giày A", phanLoai, sku, "1", soLuong, "1") + "]"));
+        var app = PhanLoaiExtractor.TuItemsJson(json);
+        var gsheet = SanPhamDonParser.CotGsheet(json)!.PhanLoai;
+        Assert.Equal(app.Contains("SL:", StringComparison.Ordinal), gsheet.Contains("SL:", StringComparison.Ordinal));
+        Assert.Equal(app, gsheet);
+    }
+
     /// <summary>HỒI QUY: <c>items_json</c> đời cũ (quét trang DANH SÁCH — không có khóa sku/phanLoai) → <c>null</c>
     /// để caller giữ NGUYÊN đường cũ, KHÔNG gửi chuỗi rỗng đè ô đang có trên sheet.</summary>
     [Theory]

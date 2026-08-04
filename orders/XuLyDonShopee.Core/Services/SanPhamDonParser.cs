@@ -214,7 +214,12 @@ public static class SanPhamDonParser
         {
             sku.Add(sp.Sku ?? string.Empty); // thiếu SKU → DÒNG TRỐNG, tuyệt đối không nhảy dòng (lệch cặp)
             var pl = PhanLoaiExtractor.DonGian(sp.PhanLoai);
-            phanLoai.Add(PhanLoaiExtractor.GanSoLuong(pl, sp.SoLuong));
+            // SP không có phân loại (hàng không biến thể) → DÒNG TRỐNG, KHÔNG gắn "SL: N": cột này là
+            // "Phân loại", một mình số lượng không phải phân loại. Gắn vào là lệch với app/hub
+            // (PhanLoaiExtractor.TuItemsJson bỏ hẳn SP không phân loại) và tệ hơn: chuỗi hết rỗng nên
+            // HubOutbox đẩy lên Sheet, ĐÈ ô người dùng đã tự điền (Apps Script chỉ chừa ô đang trống).
+            // Vẫn phải ĐỂ DÒNG TRỐNG chứ không bỏ phần tử — hai cột nối "\n" theo cùng vòng lặp này.
+            phanLoai.Add(pl.Length == 0 ? string.Empty : PhanLoaiExtractor.GanSoLuong(pl, sp.SoLuong));
         }
         return new CotGsheetSanPham(string.Join("\n", sku), string.Join("\n", phanLoai));
     }

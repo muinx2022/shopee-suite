@@ -72,15 +72,6 @@ public class PhanLoaiExtractorTests
         Assert.Equal("SL: 1", PhanLoaiExtractor.GanSoLuong("", 1));
     }
 
-    [Fact]
-    public void SoLuongTuItemsJson_NoiBangDauCham()
-    {
-        Assert.Equal("1", PhanLoaiExtractor.SoLuongTuItemsJson(Items("Kem,36")));
-        Assert.Equal("1 · 2", PhanLoaiExtractor.SoLuongTuItemsJson(
-            "[" + Item("Kem,36", "1") + "," + Item("Nâu Be,39", "2") + "]"));
-        Assert.Equal(string.Empty, PhanLoaiExtractor.SoLuongTuItemsJson("[" + Item("Kem,36", null) + "]"));
-    }
-
     // ===== Rác từ web: KHÔNG ném, trả chuỗi rỗng =====
     [Theory]
     [InlineData(null)]
