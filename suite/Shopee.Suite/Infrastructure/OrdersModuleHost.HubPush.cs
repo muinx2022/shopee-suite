@@ -299,12 +299,6 @@ public static partial class OrdersModuleHost
         return $"account-{accountId}";
     }
 
-    private static DateTimeOffset? ParseIsoOffset(string? iso)
-        => !string.IsNullOrWhiteSpace(iso) && DateTimeOffset.TryParse(iso, CultureInfo.InvariantCulture,
-            DateTimeStyles.RoundtripKind, out var d)
-            ? d
-            : null;
-
     /// <summary>Map một <see cref="SyncedOrder"/> (module Đơn hàng) sang <see cref="OrderPushItem"/> (DTO hub) —
     /// mirror field-by-field để client đẩy 1-1, khỏi lệch field.
     /// <para><see cref="OrderPushItem.PreparedDay"/> tính TẠI ĐÂY (giờ ĐỊA PHƯƠNG của máy đã chuẩn bị đơn) chứ

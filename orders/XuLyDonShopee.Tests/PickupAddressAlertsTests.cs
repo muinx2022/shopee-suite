@@ -1,4 +1,4 @@
-using System.Linq;
+﻿using System.Linq;
 using XuLyDonShopee.App.Services;
 using XuLyDonShopee.App.ViewModels;
 using XuLyDonShopee.Core.Data;
@@ -71,11 +71,62 @@ public class PickupAddressAlertsTests
         Assert.True(cho.ChoDay);
         Assert.Equal(0, cho.HubRev);
 
-        repo.DanhDauDaDay(1, "a.store", 7);
+        repo.DanhDauDaDay(1, "a.store", 7, daDayDismiss: false);
         Assert.Empty(repo.ListChoDay(1));
         var xong = Assert.Single(repo.ListAll(1));
         Assert.False(xong.ChoDay);
         Assert.Equal(7, xong.HubRev);
+    }
+
+    /// <summary>
+    /// CA MẤT LẦN BẤM X: user bấm X trong lúc lượt đẩy "đang lỗi" còn đang bay. Ack của lượt CŨ về sau, mang
+    /// trạng thái MỞ trong khi local đã ĐÓNG → KHÔNG được hạ cờ. Hạ oan là: nếu POST dismiss tiếp theo hỏng
+    /// thì local đóng / Hub mở / rev bằng nhau ⇒ đứng yên vĩnh viễn, banner kẹt trên các máy khác.
+    /// </summary>
+    [Fact]
+    public void DanhDauDaDay_TrangThaiDaDoi_KhongHaCoOan()
+    {
+        using var temp = new TempDatabase();
+        var repo = new PickupAddressAlertsRepository(temp.Open());
+
+        repo.GhiPhatHienTaiCho(1, "a.store", "TH");   // đang lỗi, POST upsert bay đi
+        repo.DismissTaiCho(1, "a.store");             // user bấm X ngay lúc đó
+        repo.DanhDauDaDay(1, "a.store", 7, daDayDismiss: false); // ack của lượt upsert CŨ
+
+        var con = Assert.Single(repo.ListChoDay(1));  // vẫn phải chờ đẩy lần bấm X
+        Assert.NotNull(con.DismissedAt);
+    }
+
+    /// <summary>Chiều ngược: ack của lượt dismiss cũ không được xoá cờ của lỗi vừa phát hiện lại.</summary>
+    [Fact]
+    public void DanhDauDaDay_AckDismissCu_KhongXoaCoCuaLoiMoi()
+    {
+        using var temp = new TempDatabase();
+        var repo = new PickupAddressAlertsRepository(temp.Open());
+
+        repo.DismissTaiCho(1, "a.store");
+        repo.GhiPhatHienTaiCho(1, "a.store", "TH");   // vòng shop kế lại lỗi
+        repo.DanhDauDaDay(1, "a.store", 9, daDayDismiss: true);
+
+        Assert.Single(repo.ListChoDay(1));
+    }
+
+    /// <summary>
+    /// Hub đời cũ không trả rev (0) vẫn phải hạ cờ — thay đổi ĐÃ lên Hub. Đòi <c>rev &gt;= hub_rev</c> thì mọi
+    /// dòng từng sync sẽ đẩy lại vô hạn mỗi 60 giây.
+    /// </summary>
+    [Fact]
+    public void DanhDauDaDay_Rev0_VanHaCo_GiuHubRevDangCo()
+    {
+        using var temp = new TempDatabase();
+        var repo = new PickupAddressAlertsRepository(temp.Open());
+
+        repo.ApDungTuHub(1, "a.store", "TH", dismissed: false, hubRev: 5);
+        repo.GhiPhatHienTaiCho(1, "a.store", "TH");
+        repo.DanhDauDaDay(1, "a.store", 0, daDayDismiss: false);
+
+        Assert.Empty(repo.ListChoDay(1));
+        Assert.Equal(5, Assert.Single(repo.ListAll(1)).HubRev); // giữ rev đang có, GET sau mang rev thật về
     }
 
     [Fact]
@@ -111,16 +162,16 @@ public class PickupAddressAlertsTests
     }
 
     [Fact]
-    public void DanhDauDaDay_RevCu_KhongHaCoCuaThayDoiMoiHon()
+    public void DanhDauDaDay_RevCu_KhongHaHubRevDangGiu()
     {
         using var temp = new TempDatabase();
         var repo = new PickupAddressAlertsRepository(temp.Open());
 
         repo.ApDungTuHub(1, "a.store", "TH", dismissed: false, hubRev: 10);
-        repo.DismissTaiCho(1, "a.store");            // thay đổi mới, chờ đẩy
+        repo.GhiPhatHienTaiCho(1, "a.store", "TH");
 
-        repo.DanhDauDaDay(1, "a.store", 4);          // ack của lượt đẩy CŨ đáp muộn
-        Assert.Single(repo.ListChoDay(1));           // vẫn phải còn chờ đẩy
+        repo.DanhDauDaDay(1, "a.store", 4, daDayDismiss: false); // ack rev THẤP hơn đáp muộn
+        Assert.Equal(10, Assert.Single(repo.ListAll(1)).HubRev); // hub_rev không được lùi
     }
 
     [Fact]
@@ -257,54 +308,54 @@ public class PickupAddressAlertsTests
     public void Merge_LocalChoDay_KhongBiTombstoneHubXoa()
         => Assert.Equal(MergePickupAlertAction.DayLenHub,
             PickupAlertMerge.QuyetDinh(
-                localCoDong: true, localChoDay: true, localHubRev: 5, hubRev: 5));
+                localCoDong: true, localChoDay: true, localHubRev: 5, hubCoDong: true, hubRev: 5));
 
     /// <summary>Cờ chờ đẩy thắng cả khi Hub có rev MỚI hơn — thay đổi tại chỗ chưa ai biết, phải đẩy trước.</summary>
     [Fact]
     public void Merge_LocalChoDay_ThangCaKhiHubRevMoiHon()
         => Assert.Equal(MergePickupAlertAction.DayLenHub,
             PickupAlertMerge.QuyetDinh(
-                localCoDong: true, localChoDay: true, localHubRev: 2, hubRev: 9));
+                localCoDong: true, localChoDay: true, localHubRev: 2, hubCoDong: true, hubRev: 9));
 
     /// <summary>Máy khác bấm X (Hub tăng rev) → máy này nghe Hub, gỡ banner. Chức năng CHÍNH, không được hồi quy.</summary>
     [Fact]
     public void Merge_HubRevMoiHon_TheoHub()
         => Assert.Equal(MergePickupAlertAction.TheoHub,
             PickupAlertMerge.QuyetDinh(
-                localCoDong: true, localChoDay: false, localHubRev: 4, hubRev: 5));
+                localCoDong: true, localChoDay: false, localHubRev: 4, hubCoDong: true, hubRev: 5));
 
     /// <summary>Đã nhận rev này rồi → không ghi lại DB mỗi 60 giây.</summary>
     [Fact]
     public void Merge_HubRevBang_GiuNguyen()
         => Assert.Equal(MergePickupAlertAction.GiuNguyen,
             PickupAlertMerge.QuyetDinh(
-                localCoDong: true, localChoDay: false, localHubRev: 5, hubRev: 5));
+                localCoDong: true, localChoDay: false, localHubRev: 5, hubCoDong: true, hubRev: 5));
 
     /// <summary>Rev Hub LÙI (Hub khôi phục từ bản sao lưu cũ) → không nghe, giữ trạng thái đang có.</summary>
     [Fact]
     public void Merge_HubRevLui_GiuNguyen()
         => Assert.Equal(MergePickupAlertAction.GiuNguyen,
             PickupAlertMerge.QuyetDinh(
-                localCoDong: true, localChoDay: false, localHubRev: 9, hubRev: 3));
+                localCoDong: true, localChoDay: false, localHubRev: 9, hubCoDong: true, hubRev: 3));
 
     /// <summary>Máy này chưa biết shop → nhận Hub (banner lan sang máy mới).</summary>
     [Fact]
     public void Merge_LocalChuaCoDong_TheoHub()
         => Assert.Equal(MergePickupAlertAction.TheoHub,
             PickupAlertMerge.QuyetDinh(
-                localCoDong: false, localChoDay: false, localHubRev: 0, hubRev: 1));
+                localCoDong: false, localChoDay: false, localHubRev: 0, hubCoDong: true, hubRev: 1));
 
     /// <summary>Chỉ local có dòng, đã đồng bộ xong, Hub không có → không có gì để làm.</summary>
     [Fact]
     public void Merge_HubKhongCoDong_DaDongBo_GiuNguyen()
         => Assert.Equal(MergePickupAlertAction.GiuNguyen,
             PickupAlertMerge.QuyetDinh(
-                localCoDong: true, localChoDay: false, localHubRev: 2, hubRev: 0));
+                localCoDong: true, localChoDay: false, localHubRev: 2, hubCoDong: false, hubRev: 0));
 
     /// <summary>Dòng chờ đẩy mà Hub CHƯA hề có → vẫn phải đẩy (nếu bỏ sót thì kẹt cờ vĩnh viễn).</summary>
     [Fact]
     public void Merge_ChoDay_HubChuaCoDong_VanDay()
         => Assert.Equal(MergePickupAlertAction.DayLenHub,
             PickupAlertMerge.QuyetDinh(
-                localCoDong: true, localChoDay: true, localHubRev: 0, hubRev: 0));
+                localCoDong: true, localChoDay: true, localHubRev: 0, hubCoDong: false, hubRev: 0));
 }

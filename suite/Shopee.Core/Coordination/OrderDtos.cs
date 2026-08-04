@@ -145,4 +145,15 @@ public sealed class OrdersPickupAlertItem
     /// <summary>Số hiệu bản ghi trên Hub, tăng sau mỗi lần ghi. Client chỉ nghe Hub khi số này LỚN HƠN
     /// <c>hub_rev</c> nó đang giữ — thay cho việc so mốc thời gian giữa các máy.</summary>
     public long Rev { get; set; }
+
+    /// <summary>
+    /// ISO <c>created_at</c> / <c>dismissed_at</c> trên Hub. Client TỪ v1.7.19 KHÔNG dùng (merge theo
+    /// <see cref="Rev"/>), nhưng Hub PHẢI tiếp tục trả về: client ≤ v1.7.18 merge bằng hai mốc này, thiếu là
+    /// chúng rơi vào nhánh "Hub thiếu mốc → đẩy lại dismiss cũ" và dập chết banner của lỗi vừa phát hiện.
+    /// Đừng bỏ khi trên fleet còn máy đời cũ.
+    /// </summary>
+    public string? CreatedAt { get; set; }
+
+    /// <inheritdoc cref="CreatedAt"/>
+    public string? DismissedAt { get; set; }
 }

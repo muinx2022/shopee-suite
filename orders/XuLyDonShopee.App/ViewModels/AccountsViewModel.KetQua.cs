@@ -745,6 +745,7 @@ public partial class AccountsViewModel
                 localCoDong: local is not null,
                 localChoDay: local?.ChoDay == true,
                 localHubRev: local?.HubRev ?? 0,
+                hubCoDong: coHub,
                 hubRev: coHub ? dong.Rev : 0))
             {
                 case MergePickupAlertAction.TheoHub when coHub:
@@ -777,6 +778,13 @@ public partial class AccountsViewModel
             return;
         }
 
+        // Cờ cho_day chỉ hạ khi Hub nhận được, nên nhịp 60s sẽ thấy dòng này "còn chờ đẩy" ở mọi lượt cho tới
+        // lúc đó — không giữ chỗ thì mỗi lượt lại xếp thêm một lệnh cho cùng shop.
+        if (!PickupAlertHubGate.GiuCho(accountLogin, shop))
+        {
+            return;
+        }
+
         _ = Task.Run(async () =>
         {
             try
@@ -791,11 +799,15 @@ public partial class AccountsViewModel
                     return;
                 }
 
-                RunOnUi(() => _services.PickupAlerts.DanhDauDaDay(accountId, shop, rev.Value));
+                RunOnUi(() => _services.PickupAlerts.DanhDauDaDay(accountId, shop, rev.Value, daDismiss));
             }
             catch (Exception ex)
             {
                 Trace.WriteLine($"[AccountsViewModel] Đẩy pickup-alert Hub lỗi shop={shop}: {ex.Message}");
+            }
+            finally
+            {
+                PickupAlertHubGate.NhaCho(accountLogin, shop);
             }
         });
     }
@@ -866,18 +878,4 @@ public partial class AccountsViewModel
         });
     }
 
-    private static DateTimeOffset ToUtcOffset(DateTime? utcOrUnspecified)
-    {
-        if (utcOrUnspecified is not DateTime raw)
-        {
-            return DateTimeOffset.UtcNow;
-        }
-
-        return raw.Kind switch
-        {
-            DateTimeKind.Utc => new DateTimeOffset(raw, TimeSpan.Zero),
-            DateTimeKind.Local => new DateTimeOffset(raw).ToUniversalTime(),
-            _ => new DateTimeOffset(DateTime.SpecifyKind(raw, DateTimeKind.Utc), TimeSpan.Zero),
-        };
-    }
 }

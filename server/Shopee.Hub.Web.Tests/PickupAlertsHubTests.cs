@@ -1,6 +1,37 @@
+using System.Text.Json;
+using Shopee.Core.Coordination;
 using Shopee.Hub;
 
 namespace Shopee.Hub.Web.Tests;
+
+/// <summary>
+/// HỢP ĐỒNG API với client ĐỜI CŨ (≤ v1.7.18) — đừng gỡ hai field này khi trên fleet còn máy chưa cập nhật.
+/// Client cũ merge banner bằng <c>createdAt</c>/<c>dismissedAt</c>; thiếu là chúng rơi vào nhánh "Hub thiếu
+/// mốc → đẩy lại dismiss cũ" và dập chết banner của lỗi vừa phát hiện. Đã từng lỡ gỡ và phải deploy vá gấp.
+/// </summary>
+public sealed class PickupAlertsApiContractTests
+{
+    [Fact]
+    public void OrdersPickupAlertItem_VanCoCreatedAtVaDismissedAt()
+    {
+        // Dùng đúng bộ tuỳ chọn của minimal API (Results.Json → JsonSerializerDefaults.Web, camelCase).
+        var json = JsonSerializer.Serialize(
+            new OrdersPickupAlertItem
+            {
+                ShopLogin = "shop.a",
+                Province = "TH",
+                Dismissed = true,
+                Rev = 3,
+                CreatedAt = "2026-08-04T04:00:00.0000000+00:00",
+                DismissedAt = "2026-08-04T05:00:00.0000000+00:00",
+            },
+            new JsonSerializerOptions(JsonSerializerDefaults.Web));
+
+        Assert.Contains("\"createdAt\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"dismissedAt\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"rev\"", json, StringComparison.Ordinal);
+    }
+}
 
 /// <summary>
 /// Hub DB banner lỗi địa chỉ: dismiss tạo tombstone; mọi lượt ghi tăng <c>rev</c> (client merge theo số này,

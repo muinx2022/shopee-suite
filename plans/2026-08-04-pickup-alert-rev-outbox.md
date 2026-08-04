@@ -167,13 +167,13 @@ Client (`orders/XuLyDonShopee.Tests/PickupAddressAlertsTests.cs`):
 
 ## Báo cáo thực thi
 
-Làm đúng 7 bước, không lệch plan.
+Làm đúng 7 bước. Lượt phản biện đầu tìm được **4 lỗi thật**, đã tự kiểm chứng và vá hết (xem cuối mục).
 
 | Tiêu chí | Kết quả |
 |---|---|
 | Build solution | 0 warning, 0 error |
-| Test orders | **1494 passed** (mốc trước 1485) |
-| Test hub | **52 passed** (mốc trước 51) |
+| Test orders | **1497 passed** (mốc trước 1485) |
+| Test hub | **53 passed** (mốc trước 51) |
 | `grep DateTime\|Iso\|OccurredAt\|TimeSpan` trong `PickupAlertMerge.cs` | **không kết quả** — đường quyết định sạch đồng hồ |
 | Hub deploy | active, health 200; `PRAGMA table_info` xác nhận cột `rev`; dòng `alina99.store` còn nguyên, nhận `rev=0` |
 | Migration client | test dựng bảng đời cũ (5 cột) → thêm `hub_rev`/`cho_day`, banner cũ còn nguyên, KHÔNG bị coi là chờ đẩy |
@@ -201,3 +201,27 @@ Client ≤ v1.7.18 vẫn gửi `OccurredAt` (Hub bỏ qua) và bỏ qua `rev` tr
   chung `PhanLoaiExtractor.TuItemsJson` với lưới app / Hub / Google Sheet. +3 test.
 - Xoá worktree `.kilo/worktrees/vivacious-monkey` + nhánh `vivacious-monkey`: đã kiểm tra sạch (không có
   thay đổi chưa commit) và `git log main..vivacious-monkey` rỗng nên không mất commit nào.
+
+### 4 lỗi phản biện tìm được — đã vá trước khi phát hành
+
+1. **NẶNG, đã LIVE — Hub mới phá client ≤ v1.7.18.** Bản đầu bỏ `CreatedAt`/`DismissedAt` khỏi
+   `OrdersPickupAlertItem` vì client mới không dùng. Nhưng client cũ merge BẰNG hai mốc đó; thiếu là chúng
+   rơi vào nhánh `hubCreatedAt is null → KeepLocalDismissRepushHub` và **đẩy dismiss cũ đè chết banner của
+   lỗi vừa phát hiện** — đúng lớp lỗi plan muốn diệt, bị đẻ lại qua đường tương thích. Nguy hiểm gấp bội vì
+   Hub đã deploy trong khi CHƯA máy nào lên v1.7.19. Đã trả lại 2 field + **test hợp đồng**
+   `PickupAlertsApiContractTests` khoá lại, và deploy Hub vá gấp.
+2. **NẶNG — `DanhDauDaDay` hạ cờ oan, mất lần bấm X.** Guard `$r >= hub_rev` chỉ chống rev lùi, không nhận
+   diện được ack thuộc THAY ĐỔI nào. User bấm X lúc lượt upsert đang bay → ack upsert hạ cờ của lần bấm X →
+   nếu POST dismiss hỏng thì local đóng / Hub mở / rev bằng nhau ⇒ **đứng yên vĩnh viễn**. Đã đổi sang so
+   TRẠNG THÁI đã đẩy với trạng thái local hiện tại (`daDayDismiss`), + 2 test cho cả hai chiều.
+3. **TRUNG BÌNH — ack rev 0 gây đẩy lại vô hạn.** `0 >= hub_rev` sai với mọi dòng đã từng sync ⇒ cờ không bao
+   giờ hạ, 60 giây một lệnh. Đã bỏ điều kiện đó, dùng `hub_rev = MAX(hub_rev, $r)` + test.
+4. **NHỎ — dòng Hub đời cũ `rev=0` không lan được** (`hubRev <= 0` bị hiểu nhầm là "Hub không có dòng"). Đã
+   tách cờ `hubCoDong` riêng, và backfill `UPDATE … SET rev=1 WHERE rev=0` ngay trong migration (idempotent).
+   Xác nhận trên VM: dòng `alina99.store` đã lên `rev=1`.
+
+Kèm theo: xoá code chết `ToUtcOffset`/`ParseIsoOffset`; thêm chốt `PickupAlertHubGate.GiuCho/NhaCho` chống
+xếp trùng lệnh đẩy mỗi nhịp 60s (mỗi lệnh thừa bơm `rev` Hub thêm 1).
+
+**Còn nợ:** chưa có test mức ViewModel cho `MergeVaDayOutbox`/`DayLenHub` (vùng mới rủi ro nhất hiện chỉ
+được chứng minh bằng đọc code + test hàm thuần + test repository).

@@ -40,11 +40,14 @@ public static class PickupAlertMerge
     /// <param name="localCoDong">Local đã có dòng cho shop này chưa.</param>
     /// <param name="localChoDay">Local có thay đổi tại chỗ (phát hiện lỗi / bấm X) chưa đẩy được lên Hub.</param>
     /// <param name="localHubRev">Số hiệu bản ghi Hub mà local đã nhận (0 = chưa nhận lần nào).</param>
-    /// <param name="hubRev">Số hiệu bản ghi hiện tại trên Hub; &lt;= 0 = Hub không có dòng này.</param>
+    /// <param name="hubCoDong">Hub CÓ dòng cho shop này không. Cờ RIÊNG, không suy từ <paramref name="hubRev"/>:
+    /// dòng Hub tạo trước bản này mang <c>rev=0</c> mà vẫn là dòng thật, suy từ rev sẽ bỏ sót chúng.</param>
+    /// <param name="hubRev">Số hiệu bản ghi hiện tại trên Hub.</param>
     public static MergePickupAlertAction QuyetDinh(
         bool localCoDong,
         bool localChoDay,
         long localHubRev,
+        bool hubCoDong,
         long hubRev)
     {
         // Ưu tiên TUYỆT ĐỐI cho thay đổi tại chỗ: đây là chỗ vá lỗ "Hub chết đúng lúc phát hiện lỗi thì
@@ -55,7 +58,7 @@ public static class PickupAlertMerge
         }
 
         // Hub không có dòng (chỉ local có, đã đồng bộ xong) → không có gì để nhận.
-        if (hubRev <= 0)
+        if (!hubCoDong)
         {
             return MergePickupAlertAction.GiuNguyen;
         }

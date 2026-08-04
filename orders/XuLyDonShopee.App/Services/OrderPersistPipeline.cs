@@ -506,7 +506,9 @@ internal sealed class OrderPersistPipeline
                         upsertHub(accountLogin, shop, tinh, ct)).ConfigureAwait(false);
                     if (rev is not null)
                     {
-                        _services.PickupAlerts.DanhDauDaDay(_accountId, shop, rev.Value);
+                        // daDayDismiss: false — lượt này đẩy trạng thái ĐANG LỖI. User bấm X xen giữa thì local
+                        // đã là "đóng", không khớp nên cờ KHÔNG bị hạ oan, lần bấm X vẫn được đẩy sau.
+                        _services.PickupAlerts.DanhDauDaDay(_accountId, shop, rev.Value, daDayDismiss: false);
                         log($"Banner địa chỉ: đã đồng bộ Hub shop {shop} (rev {rev}).");
                     }
                     else

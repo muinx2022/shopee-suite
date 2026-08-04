@@ -37,9 +37,13 @@ CREATE TABLE IF NOT EXISTS orders_pickup_alerts(
 CREATE INDEX IF NOT EXISTS ix_orders_pickup_alerts_account
   ON orders_pickup_alerts(account_login);");
 
-        // DB đã tồn tại trước khi có rev → thêm cột; dòng cũ nhận 0, lượt ghi kế nâng lên 1 nên client
-        // (hub_rev cũng khởi tạo 0) vẫn nhận được thay đổi đầu tiên.
+        // DB đã tồn tại trước khi có rev → thêm cột.
         AddColumnIfMissing("orders_pickup_alerts", "rev", "INTEGER NOT NULL DEFAULT 0");
+
+        // Nâng dòng đời cũ lên rev 1: client mới khởi tạo hub_rev = 0, nên dòng còn rev 0 sẽ KHÔNG BAO GIỜ
+        // thoả "rev Hub > rev đã nhận" ⇒ tombstone/banner cũ không lan được sang máy nào. Idempotent: sau lượt
+        // này không còn dòng rev 0 (mọi lượt ghi đều đặt rev ≥ 1).
+        ExecRaw("UPDATE orders_pickup_alerts SET rev = 1 WHERE rev = 0;");
     }
 
     /// <summary>

@@ -315,6 +315,9 @@ public static class ClientApiEndpoints
                 Province = x.Province,
                 Dismissed = !string.IsNullOrEmpty(x.DismissedAt),
                 Rev = x.Rev,
+                // BẮT BUỘC giữ cho client ≤ v1.7.18 (chúng merge bằng 2 mốc này) — xem xmldoc OrdersPickupAlertItem.
+                CreatedAt = x.CreatedAt,
+                DismissedAt = x.DismissedAt,
             }).ToList();
             return Results.Json(items);
         });

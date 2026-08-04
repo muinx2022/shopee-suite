@@ -42,8 +42,16 @@ public sealed class PickupAddressAlertsRepository
     public void ApDungTuHub(long accountId, string shopLogin, string? province, bool dismissed, long hubRev)
         => Ghi(accountId, shopLogin, province, dismissed, choDay: false, hubRev: hubRev);
 
-    /// <summary>Đẩy lên Hub thành công → hạ cờ chờ đẩy và nhớ rev Hub vừa cấp. Không đụng trạng thái hiện/ẩn.</summary>
-    public void DanhDauDaDay(long accountId, string shopLogin, long hubRev)
+    /// <summary>
+    /// Đẩy lên Hub thành công → hạ cờ chờ đẩy và nhớ rev Hub vừa cấp. Không đụng trạng thái hiện/ẩn.
+    /// <para><paramref name="daDayDismiss"/> = lượt đẩy vừa rồi mang trạng thái ĐÓNG hay MỞ. Chỉ hạ cờ khi
+    /// trạng thái local HIỆN TẠI vẫn đúng bằng trạng thái đã đẩy. Bắt buộc phải khớp: user bấm X trong lúc
+    /// lượt upsert đang bay thì ack của upsert KHÔNG được xoá dấu của lần bấm X — nếu xoá, POST dismiss mà
+    /// hỏng là mất luôn lần bấm X (local đóng, Hub mở, hai bên đứng yên vì rev đã bằng nhau).</para>
+    /// <para>Rev 0 (Hub đời cũ không trả rev) vẫn hạ cờ — thay đổi ĐÃ lên Hub — nhưng giữ <c>hub_rev</c> đang
+    /// có, lượt GET sau mang rev thật về. Nếu đòi <c>$r >= hub_rev</c> thì dòng từng sync sẽ đẩy lại vô hạn.</para>
+    /// </summary>
+    public void DanhDauDaDay(long accountId, string shopLogin, long hubRev, bool daDayDismiss)
     {
         var login = (shopLogin ?? string.Empty).Trim();
         if (login.Length == 0)
@@ -53,13 +61,15 @@ public sealed class PickupAddressAlertsRepository
 
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
-        // Chỉ hạ cờ khi rev Hub KHÔNG lùi: lượt đẩy cũ đáp muộn không được xoá dấu của thay đổi mới hơn.
         cmd.CommandText = @"
-UPDATE pickup_address_alerts SET cho_day = 0, hub_rev = $r
-WHERE account_id = $a AND shop_login = $s AND $r >= hub_rev;";
+UPDATE pickup_address_alerts
+SET cho_day = 0, hub_rev = MAX(hub_rev, $r)
+WHERE account_id = $a AND shop_login = $s
+  AND (CASE WHEN dismissed_at IS NULL THEN 0 ELSE 1 END) = $q;";
         cmd.Parameters.AddWithValue("$a", accountId);
         cmd.Parameters.AddWithValue("$s", login);
         cmd.Parameters.AddWithValue("$r", hubRev);
+        cmd.Parameters.AddWithValue("$q", daDayDismiss ? 1 : 0);
         cmd.ExecuteNonQuery();
     }
 
