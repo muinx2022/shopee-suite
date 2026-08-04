@@ -7,13 +7,15 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 
 ## v1.7.17 — 2026-08-04
 
-- **Đơn hàng — vá 5 lỗ hổng đồng bộ banner lỗi địa chỉ (hậu review v1.7.16):**
-  - Tombstone Hub cũ **không còn xoá** banner của lỗi mới phát hiện ở local (ca Hub chết lúc phát hiện lỗi →
-    đẩy Hub fail); thay vào đó giữ banner và sửa lại Hub. Luồng lan dismiss đa máy giữ nguyên.
-  - Hub: dismiss tới muộn (mốc cũ hơn `created_at`) không chôn banner mới — đối xứng với luật upsert.
+- **Đơn hàng — vá lỗ hổng đồng bộ banner lỗi địa chỉ (hậu review v1.7.16):**
+  - **Đóng banner ở một máy giờ mới thật sự lan sang Hub.** Nhánh "đẩy lại lên Hub" của v1.7.16 chưa từng chạy
+    (gom danh sách trong callback UI bất đồng bộ rồi đọc ngay sau đó nên luôn rỗng) → Hub có thể mắc kẹt ở
+    trạng thái cũ. Nay đẩy ngay trong callback.
   - Sửa nhịp 60s chạm danh sách banner ngoài UI thread (chế độ Shopee / tài khoản chưa có email).
-  - Gom banner local không còn ném khi có shop trùng hoa/thường.
+  - Gom banner local không còn ném lỗi khi có shop trùng tên khác hoa/thường; ghi local cũng không còn trượt dòng.
   - Một cờ chống chồng lượt cho mọi lối gọi sync, có coalesce nên đổi tài khoản giữa chừng không mất lượt.
+  - Giữ nguyên tắc **bấm X luôn thắng**: cố ý không so mốc thời gian giữa các máy (đồng hồ lệch nhau sẽ làm
+    banner kẹt không gỡ được). Lỗi còn thật thì vòng shop kế tự dựng lại banner.
 
 ## v1.7.16 — 2026-08-04
 
