@@ -441,6 +441,15 @@ public class OrderNotifyService
             parts.Add($"SKU {o.Sku}");
         }
 
+        // Phân loại kèm số lượng (vd "Kem,36. SL: 2") — CÙNG luật với lưới app, hub và Google Sheet
+        // (<see cref="PhanLoaiExtractor.TuItemsJson"/>), để người trực đọc tin là biết size/màu + SL,
+        // khỏi mở app. Đơn không có phân loại → bỏ phần này, không in chỗ trống.
+        var phanLoai = PhanLoaiExtractor.TuItemsJson(o.ItemsJson);
+        if (!string.IsNullOrWhiteSpace(phanLoai))
+        {
+            parts.Add(phanLoai);
+        }
+
         // Tổng tiền: ưu tiên nguyên văn (vd "₫166.500"); thiếu thì định dạng số ("166.500₫").
         if (!string.IsNullOrWhiteSpace(o.TotalPriceText))
         {

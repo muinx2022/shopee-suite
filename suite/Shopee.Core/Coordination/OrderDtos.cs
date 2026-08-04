@@ -125,8 +125,15 @@ public sealed class OrdersPickupAlertRequest
     public string AccountLogin { get; set; } = "";
     public string ShopLogin { get; set; } = "";
     public string? Province { get; set; }
-    /// <summary>Mốc sự kiện phía client (ISO). Thiếu → Hub dùng giờ nhận. Upsert cũ hơn dismissed_at bị bỏ qua.</summary>
+    /// <summary>KHÔNG DÙNG NỮA (client ≤ v1.7.18 còn gửi). Hub chốt trạng thái bằng <c>rev</c>, không so mốc
+    /// thời gian — mốc do các máy có đồng hồ độc lập sinh ra nên đem so là đẻ ca banner kẹt / dismiss bị từ chối.</summary>
     public string? OccurredAt { get; set; }
+}
+
+/// <summary>Body trả về của POST upsert/dismiss — <see cref="Rev"/> là số hiệu bản ghi MỚI trên Hub.</summary>
+public sealed class OrdersPickupAlertAck
+{
+    public long Rev { get; set; }
 }
 
 /// <summary>Một dòng GET /api/orders/pickup-alerts — <see cref="Dismissed"/> true = máy khác (hoặc máy này) đã bấm X.</summary>
@@ -135,8 +142,7 @@ public sealed class OrdersPickupAlertItem
     public string ShopLogin { get; set; } = "";
     public string Province { get; set; } = "";
     public bool Dismissed { get; set; }
-    /// <summary>ISO created_at trên Hub (khi active = mốc lỗi; khi chỉ tombstone dismiss có thể = dismissed).</summary>
-    public string? CreatedAt { get; set; }
-    /// <summary>ISO dismissed_at — null/rỗng = đang hiện banner.</summary>
-    public string? DismissedAt { get; set; }
+    /// <summary>Số hiệu bản ghi trên Hub, tăng sau mỗi lần ghi. Client chỉ nghe Hub khi số này LỚN HƠN
+    /// <c>hub_rev</c> nó đang giữ — thay cho việc so mốc thời gian giữa các máy.</summary>
+    public long Rev { get; set; }
 }

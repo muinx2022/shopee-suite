@@ -101,48 +101,45 @@ public static partial class OrdersModuleHost
             }
         };
 
-        services.UpsertPickupAlertToHub = async (accountLogin, shopLogin, province, occurredAt, ct) =>
+        // Trả rev Hub vừa cấp; null = CHƯA đẩy được → client giữ cờ cho_day và thử lại ở lượt sync sau.
+        services.UpsertPickupAlertToHub = async (accountLogin, shopLogin, province, ct) =>
         {
             try
             {
-                if (!CoordinationRuntime.Active || CoordinationRuntime.Client is null) return false;
-                await CoordinationRuntime.Client.UpsertPickupAlertAsync(
+                if (!CoordinationRuntime.Active || CoordinationRuntime.Client is null) return null;
+                return await CoordinationRuntime.Client.UpsertPickupAlertAsync(
                     new OrdersPickupAlertRequest
                     {
                         AccountLogin = accountLogin,
                         ShopLogin = shopLogin,
                         Province = province,
-                        OccurredAt = (occurredAt ?? DateTimeOffset.UtcNow).ToString("o"),
                     }, ct).ConfigureAwait(false);
-                return true;
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
             catch (Exception ex)
             {
                 Trace.WriteLine("[OrdersModuleHost] Upsert pickup-alert hub lỗi: " + ex.Message);
-                return false;
+                return null;
             }
         };
 
-        services.DismissPickupAlertToHub = async (accountLogin, shopLogin, occurredAt, ct) =>
+        services.DismissPickupAlertToHub = async (accountLogin, shopLogin, ct) =>
         {
             try
             {
-                if (!CoordinationRuntime.Active || CoordinationRuntime.Client is null) return false;
-                await CoordinationRuntime.Client.DismissPickupAlertAsync(
+                if (!CoordinationRuntime.Active || CoordinationRuntime.Client is null) return null;
+                return await CoordinationRuntime.Client.DismissPickupAlertAsync(
                     new OrdersPickupAlertRequest
                     {
                         AccountLogin = accountLogin,
                         ShopLogin = shopLogin,
-                        OccurredAt = (occurredAt ?? DateTimeOffset.UtcNow).ToString("o"),
                     }, ct).ConfigureAwait(false);
-                return true;
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
             catch (Exception ex)
             {
                 Trace.WriteLine("[OrdersModuleHost] Dismiss pickup-alert hub lỗi: " + ex.Message);
-                return false;
+                return null;
             }
         };
 
@@ -159,8 +156,7 @@ public static partial class OrdersModuleHost
                         x.ShopLogin.Trim(),
                         x.Province ?? "",
                         x.Dismissed,
-                        ParseIsoOffset(x.CreatedAt),
-                        ParseIsoOffset(x.DismissedAt)))
+                        x.Rev))
                     .ToList();
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }

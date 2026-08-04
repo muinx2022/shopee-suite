@@ -43,6 +43,44 @@ public class OrderNotifyServiceTests
             lines[1]);
     }
 
+    /// <summary>
+    /// Phân loại + SL đứng NGAY SAU SKU (giống thứ tự cột lưới app), dùng chung luật
+    /// <c>PhanLoaiExtractor.TuItemsJson</c> nên tin Slack, lưới app, hub và Google Sheet không lệch nhau.
+    /// </summary>
+    [Fact]
+    public void TaoTinNhanDonMoi_CoPhanLoai_HienKemSL_NgaySauSku()
+    {
+        var o = Full("SN1");
+        o.ItemsJson = "[{\"variation\":\"Kem,36\",\"amount\":\"2\"}]";
+        var text = OrderNotifyService.TaoTinNhanDonMoi("shopA", new[] { o }, new DateTime(2026, 8, 4, 1, 2, 0));
+
+        Assert.Contains("SKU B02435 — Kem,36. SL: 2 — ₫166.500", text, StringComparison.Ordinal);
+    }
+
+    /// <summary>Đơn nhiều sản phẩm → từng phân loại nối " · ", mỗi cái giữ SL riêng.</summary>
+    [Fact]
+    public void TaoTinNhanDonMoi_NhieuSanPham_MoiPhanLoaiGiuSLRieng()
+    {
+        var o = Full("SN1");
+        o.ItemsJson = "[{\"variation\":\"Kem,36\",\"amount\":\"1\"},{\"variation\":\"Nâu Be,39\",\"amount\":\"2\"}]";
+        var text = OrderNotifyService.TaoTinNhanDonMoi("shopA", new[] { o }, new DateTime(2026, 8, 4, 1, 2, 0));
+
+        Assert.Contains("Kem,36. SL: 1 · Nâu Be,39. SL: 2", text, StringComparison.Ordinal);
+    }
+
+    /// <summary>Đơn KHÔNG có phân loại → không chèn phần nào (không "SL: 1" trơ trọi, không thừa " — ").</summary>
+    [Fact]
+    public void TaoTinNhanDonMoi_KhongCoPhanLoai_KhongChenGiThem()
+    {
+        var o = Full("SN1");
+        o.ItemsJson = "[{\"amount\":\"1\"}]";
+        var text = OrderNotifyService.TaoTinNhanDonMoi("shopA", new[] { o }, new DateTime(2026, 8, 4, 1, 2, 0));
+
+        Assert.DoesNotContain("SL:", text, StringComparison.Ordinal);
+        Assert.DoesNotContain(" —  — ", text, StringComparison.Ordinal);
+        Assert.Contains("SKU B02435 — ₫166.500", text, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void TaoTinNhanDonMoi_DonThieuTruong_KhongInNull_KhongThuaDauNgan()
     {

@@ -1,18 +1,30 @@
 namespace Shopee.Hub;
 
-/// <summary>Một dòng banner lỗi địa chỉ trên Hub (đồng bộ đa máy theo tài khoản).</summary>
+/// <summary>Một dòng banner lỗi địa chỉ trên Hub (đồng bộ đa máy theo tài khoản).
+/// <paramref name="Rev"/> = số hiệu bản ghi, Hub tăng sau MỖI lần ghi — client merge theo số này.</summary>
 public sealed record OrdersPickupAlertRow(
     string AccountLogin,
     string ShopLogin,
     string Province,
     string CreatedAt,
-    string? DismissedAt);
+    string? DismissedAt,
+    long Rev);
 
-/// <summary>Phần HubDatabase: banner cảnh báo lỗi địa chỉ lấy hàng — khóa theo account_login + shop_login
-/// (KHÔNG theo máy) để mọi máy chạy cùng subaccount thấy cùng banner tới khi bấm X.</summary>
+/// <summary>
+/// Phần HubDatabase: banner cảnh báo lỗi địa chỉ lấy hàng — khóa theo account_login + shop_login
+/// (KHÔNG theo máy) để mọi máy chạy cùng subaccount thấy cùng banner tới khi bấm X.
+/// <para>
+/// Trạng thái chốt bằng <c>rev</c> (bộ đếm của RIÊNG Hub), KHÔNG bằng mốc thời gian. Lý do: mốc do client gửi
+/// đến từ các máy có đồng hồ độc lập; hai lần vá trước đem mốc máy này so mốc máy kia đều đẻ ca hỏng nặng
+/// (banner kẹt không gỡ được / Hub từ chối bấm X vĩnh viễn). <c>created_at</c> và <c>dismissed_at</c> giữ lại
+/// CHỈ để đọc và chẩn đoán — tuyệt đối không dùng để quyết định.
+/// </para>
+/// </summary>
 public sealed partial class HubDatabase
 {
-    private void EnsurePickupAlertsSchema() => ExecRaw(@"
+    private void EnsurePickupAlertsSchema()
+    {
+        ExecRaw(@"
 CREATE TABLE IF NOT EXISTS orders_pickup_alerts(
   account_login TEXT NOT NULL,
   shop_login TEXT NOT NULL,
@@ -20,92 +32,80 @@ CREATE TABLE IF NOT EXISTS orders_pickup_alerts(
   created_at TEXT NOT NULL,
   dismissed_at TEXT,
   updated_by_machine TEXT DEFAULT '',
+  rev INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY(account_login, shop_login));
 CREATE INDEX IF NOT EXISTS ix_orders_pickup_alerts_account
   ON orders_pickup_alerts(account_login);");
 
+        // DB đã tồn tại trước khi có rev → thêm cột; dòng cũ nhận 0, lượt ghi kế nâng lên 1 nên client
+        // (hub_rev cũng khởi tạo 0) vẫn nhận được thay đổi đầu tiên.
+        AddColumnIfMissing("orders_pickup_alerts", "rev", "INTEGER NOT NULL DEFAULT 0");
+    }
+
     /// <summary>
-    /// Ghi/hiện lại banner. <paramref name="occurredAtIso"/> = mốc sự kiện phía client (ISO);
-    /// thiếu → dùng giờ nhận trên Hub. Nếu dòng đang dismiss và mốc sự kiện <c>&lt;</c> <c>dismissed_at</c>
-    /// thì bỏ qua (không clear dismiss — chống upsert chậm tới sau khi user bấm X).
+    /// Ghi/hiện lại banner (xoá <c>dismissed_at</c>) và tăng <c>rev</c>. Trả rev MỚI, 0 = thiếu khoá.
+    /// Ghi vô điều kiện — người ghi sau thắng; hội tụ do mọi máy đều đọc lại cùng một <c>rev</c>.
     /// </summary>
-    public bool UpsertPickupAlert(
-        string accountLogin, string shopLogin, string? province, string? machineId, string? occurredAtIso = null)
+    public long UpsertPickupAlert(string accountLogin, string shopLogin, string? province, string? machineId)
     {
         var acc = (accountLogin ?? "").Trim();
         var shop = (shopLogin ?? "").Trim();
-        if (acc.Length == 0 || shop.Length == 0) return false;
+        if (acc.Length == 0 || shop.Length == 0) return 0;
 
         lock (_gate)
         {
             var now = Iso(DateTimeOffset.UtcNow);
-            var occ = ChuanHoaIso(occurredAtIso) ?? now;
             using var c = _conn.CreateCommand();
-            // ISO "o" so sánh lexicographic được khi cùng dạng UTC.
             c.CommandText = @"
-INSERT INTO orders_pickup_alerts(account_login, shop_login, province, created_at, dismissed_at, updated_by_machine)
-VALUES($a, $s, $p, $occ, NULL, $m)
+INSERT INTO orders_pickup_alerts(account_login, shop_login, province, created_at, dismissed_at, updated_by_machine, rev)
+VALUES($a, $s, $p, $now, NULL, $m, 1)
 ON CONFLICT(account_login, shop_login) DO UPDATE SET
   province=$p,
+  created_at=$now,
+  dismissed_at=NULL,
   updated_by_machine=$m,
-  created_at=CASE
-    WHEN orders_pickup_alerts.dismissed_at IS NOT NULL
-         AND $occ < orders_pickup_alerts.dismissed_at
-    THEN orders_pickup_alerts.created_at
-    ELSE $occ
-  END,
-  dismissed_at=CASE
-    WHEN orders_pickup_alerts.dismissed_at IS NOT NULL
-         AND $occ < orders_pickup_alerts.dismissed_at
-    THEN orders_pickup_alerts.dismissed_at
-    ELSE NULL
-  END;";
+  rev=orders_pickup_alerts.rev+1
+RETURNING rev;";
             c.Parameters.AddWithValue("$a", acc);
             c.Parameters.AddWithValue("$s", shop);
             c.Parameters.AddWithValue("$p", (province ?? "").Trim());
-            c.Parameters.AddWithValue("$occ", occ);
+            c.Parameters.AddWithValue("$now", now);
             c.Parameters.AddWithValue("$m", (machineId ?? "").Trim());
-            c.ExecuteNonQuery();
-            return true;
+            return Convert.ToInt64(c.ExecuteScalar() ?? 0L);
         }
     }
 
     /// <summary>
-    /// Đánh dấu đã đóng (bấm X): UPSERT tombstone — chưa có dòng vẫn INSERT với <c>dismissed_at</c>
-    /// để máy khác kéo Hub biết đã đóng. <paramref name="occurredAtIso"/> thiếu → giờ Hub.
-    /// <para>CỐ Ý ghi vô điều kiện, KHÔNG so <c>$d</c> với <c>created_at</c>: hai mốc đó đến từ hai máy có đồng
-    /// hồ độc lập, nên hễ so là có ca máy phát hiện lỗi chạy nhanh giờ khiến lần bấm X của máy khác bị Hub từ
-    /// chối vĩnh viễn — banner không bao giờ gỡ được. Bấm X phải LUÔN thắng; lỗi còn thật thì vòng shop kế
-    /// upsert với mốc mới hơn <c>dismissed_at</c> nên banner tự hiện lại.</para>
+    /// Đánh dấu đã đóng (bấm X) và tăng <c>rev</c>. Chưa có dòng vẫn INSERT tombstone để máy khác kéo Hub biết
+    /// đã đóng. Trả rev MỚI, 0 = thiếu khoá.
     /// </summary>
-    public bool DismissPickupAlert(
-        string accountLogin, string shopLogin, string? machineId, string? occurredAtIso = null)
+    public long DismissPickupAlert(string accountLogin, string shopLogin, string? machineId)
     {
         var acc = (accountLogin ?? "").Trim();
         var shop = (shopLogin ?? "").Trim();
-        if (acc.Length == 0 || shop.Length == 0) return false;
+        if (acc.Length == 0 || shop.Length == 0) return 0;
 
         lock (_gate)
         {
             var now = Iso(DateTimeOffset.UtcNow);
-            var d = ChuanHoaIso(occurredAtIso) ?? now;
             using var c = _conn.CreateCommand();
             c.CommandText = @"
-INSERT INTO orders_pickup_alerts(account_login, shop_login, province, created_at, dismissed_at, updated_by_machine)
-VALUES($a, $s, '', $d, $d, $m)
+INSERT INTO orders_pickup_alerts(account_login, shop_login, province, created_at, dismissed_at, updated_by_machine, rev)
+VALUES($a, $s, '', $now, $now, $m, 1)
 ON CONFLICT(account_login, shop_login) DO UPDATE SET
-  dismissed_at=$d,
-  updated_by_machine=$m;";
+  dismissed_at=$now,
+  updated_by_machine=$m,
+  rev=orders_pickup_alerts.rev+1
+RETURNING rev;";
             c.Parameters.AddWithValue("$a", acc);
             c.Parameters.AddWithValue("$s", shop);
-            c.Parameters.AddWithValue("$d", d);
+            c.Parameters.AddWithValue("$now", now);
             c.Parameters.AddWithValue("$m", (machineId ?? "").Trim());
-            c.ExecuteNonQuery();
-            return true;
+            return Convert.ToInt64(c.ExecuteScalar() ?? 0L);
         }
     }
 
-    /// <summary>Mọi banner của tài khoản (kể cả đã dismiss) — client merge theo mốc thời gian.</summary>
+    /// <summary>Mọi banner của tài khoản (kể cả đã dismiss) — client merge theo <c>rev</c>.</summary>
     public List<OrdersPickupAlertRow> ListPickupAlerts(string accountLogin)
     {
         var acc = (accountLogin ?? "").Trim();
@@ -115,7 +115,7 @@ ON CONFLICT(account_login, shop_login) DO UPDATE SET
         {
             using var c = _conn.CreateCommand();
             c.CommandText = @"
-SELECT account_login, shop_login, province, created_at, dismissed_at
+SELECT account_login, shop_login, province, created_at, dismissed_at, rev
 FROM orders_pickup_alerts
 WHERE account_login=$a
 ORDER BY created_at DESC, shop_login COLLATE NOCASE;";
@@ -130,16 +130,10 @@ ORDER BY created_at DESC, shop_login COLLATE NOCASE;";
                     r.GetString(1),
                     r.IsDBNull(2) ? "" : r.GetString(2),
                     r.GetString(3),
-                    r.IsDBNull(4) ? null : r.GetString(4)));
+                    r.IsDBNull(4) ? null : r.GetString(4),
+                    r.IsDBNull(5) ? 0L : r.GetInt64(5)));
             }
             return list;
         }
-    }
-
-    /// <summary>Chuẩn hoá chuỗi ISO client gửi; rỗng/không parse → null.</summary>
-    private static string? ChuanHoaIso(string? iso)
-    {
-        if (string.IsNullOrWhiteSpace(iso)) return null;
-        return DateTimeOffset.TryParse(iso.Trim(), out var d) ? Iso(d.ToUniversalTime()) : null;
     }
 }

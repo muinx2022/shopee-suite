@@ -5,71 +5,69 @@ public readonly record struct PickupAlertHubDong(
     string ShopLogin,
     string Province,
     bool Dismissed,
-    DateTimeOffset? CreatedAt,
-    DateTimeOffset? DismissedAt);
+    long Rev);
 
-/// <summary>Quyết định sau khi so một dòng Hub với trạng thái dismiss local của cùng shop.</summary>
+/// <summary>Quyết định sau khi so một shop giữa Hub và local.</summary>
 public enum MergePickupAlertAction
 {
-    /// <summary>Hub (hoặc máy khác) đã đóng → dismiss local.</summary>
-    LocalDismiss,
+    /// <summary>Nhận trạng thái Hub về local (hiện/ẩn banner theo Hub) và nhớ <c>rev</c>.</summary>
+    TheoHub,
 
-    /// <summary>Hub còn active và mới hơn dismiss local (hoặc local chưa dismiss) → upsert local.</summary>
-    LocalUpsert,
+    /// <summary>Local có thay đổi tại chỗ chưa lên Hub → đẩy lên Hub, KHÔNG nghe Hub lượt này.</summary>
+    DayLenHub,
 
-    /// <summary>Local đã dismiss mới hơn (hoặc bằng) Hub active → giữ dismiss, đẩy lại tombstone lên Hub.</summary>
-    KeepLocalDismissRepushHub,
+    /// <summary>Hai bên đã khớp (rev Hub không mới hơn) → không làm gì.</summary>
+    GiuNguyen,
 }
 
-/// <summary>Hàm thuần merge banner lỗi địa chỉ Hub ↔ local (test được, không đụng DB/UI).</summary>
+/// <summary>
+/// Hàm thuần merge banner lỗi địa chỉ Hub ↔ local (test được, không đụng DB/UI).
+/// <para>
+/// KHÔNG dùng thời gian ở bất kỳ đâu trong đường quyết định. Mốc thời gian đến từ các máy có đồng hồ độc
+/// lập; hai lần vá trước đem mốc máy này so mốc máy kia đều đẻ ca hỏng nặng hơn lỗi định vá (banner kẹt
+/// không gỡ được / Hub từ chối bấm X vĩnh viễn). Thay bằng hai thứ đo được:
+/// </para>
+/// <list type="bullet">
+/// <item><c>rev</c> — bộ đếm của RIÊNG Hub, tăng sau mỗi lần ghi. Một đồng hồ duy nhất cho cả fleet.</item>
+/// <item><c>cho_day</c> — cờ outbox: local có thay đổi chưa đẩy được. Hub KHÔNG được đè, phải đẩy lại.</item>
+/// </list>
+/// </summary>
 public static class PickupAlertMerge
 {
     /// <summary>
-    /// So một dòng Hub với dòng local cùng shop:
-    /// <list type="bullet">
-    /// <item>Hub dismissed → <see cref="MergePickupAlertAction.LocalDismiss"/>. Bấm X LUÔN thắng, không so mốc.</item>
-    /// <item>Hub active mới hơn dismiss local → <see cref="MergePickupAlertAction.LocalUpsert"/>.</item>
-    /// <item>Local dismiss mới hơn/bằng Hub active (hoặc Hub thiếu mốc) → <see cref="MergePickupAlertAction.KeepLocalDismissRepushHub"/>.</item>
-    /// </list>
-    /// <para>CỐ Ý để "dismiss thắng" vô điều kiện: đồng hồ các máy độc lập nhau, hễ đem mốc của máy này so mốc
-    /// của máy kia là có ca banner KẸT không gỡ được (máy lệch giờ giữ banner + đẩy lại upsert → hồi sinh trên
-    /// máy vừa bấm X → lặp vô hạn). Đổi lại, tombstone cũ có thể xoá nhầm banner của lỗi vừa phát hiện mà Hub
-    /// chưa kịp biết — ca này TỰ LÀNH: vòng shop kế (3–5 phút) phát hiện lại và upsert với mốc mới hơn
-    /// <c>dismissed_at</c> nên Hub bỏ tombstone, banner hiện lại ở mọi máy.</para>
+    /// Quyết định cho MỘT shop.
     /// </summary>
-    /// <param name="localDismissedAt">Mốc bấm X ở local; null = local đang hiện banner (hoặc chưa có dòng).</param>
+    /// <param name="localCoDong">Local đã có dòng cho shop này chưa.</param>
+    /// <param name="localChoDay">Local có thay đổi tại chỗ (phát hiện lỗi / bấm X) chưa đẩy được lên Hub.</param>
+    /// <param name="localHubRev">Số hiệu bản ghi Hub mà local đã nhận (0 = chưa nhận lần nào).</param>
+    /// <param name="hubRev">Số hiệu bản ghi hiện tại trên Hub; &lt;= 0 = Hub không có dòng này.</param>
     public static MergePickupAlertAction QuyetDinh(
-        DateTime? localDismissedAt,
-        bool hubDismissed,
-        DateTimeOffset? hubCreatedAt)
+        bool localCoDong,
+        bool localChoDay,
+        long localHubRev,
+        long hubRev)
     {
-        if (hubDismissed)
+        // Ưu tiên TUYỆT ĐỐI cho thay đổi tại chỗ: đây là chỗ vá lỗ "Hub chết đúng lúc phát hiện lỗi thì
+        // tombstone cũ trên Hub xoá mất cảnh báo". Cờ chỉ hạ khi Hub đã NHẬN được (DanhDauDaDay).
+        if (localChoDay)
         {
-            return MergePickupAlertAction.LocalDismiss;
+            return MergePickupAlertAction.DayLenHub;
         }
 
-        if (localDismissedAt is null)
+        // Hub không có dòng (chỉ local có, đã đồng bộ xong) → không có gì để nhận.
+        if (hubRev <= 0)
         {
-            return MergePickupAlertAction.LocalUpsert;
+            return MergePickupAlertAction.GiuNguyen;
         }
 
-        // Local đã đóng: thiếu mốc Hub → không dựng lại (an toàn hơn là resurrect).
-        if (hubCreatedAt is null)
+        // Máy này chưa biết gì về shop → nhận Hub (kể cả tombstone: ghi để lần sau khỏi hỏi lại).
+        if (!localCoDong)
         {
-            return MergePickupAlertAction.KeepLocalDismissRepushHub;
+            return MergePickupAlertAction.TheoHub;
         }
 
-        return ToUtc(localDismissedAt)!.Value >= hubCreatedAt.Value.UtcDateTime
-            ? MergePickupAlertAction.KeepLocalDismissRepushHub
-            : MergePickupAlertAction.LocalUpsert;
+        return hubRev > localHubRev
+            ? MergePickupAlertAction.TheoHub
+            : MergePickupAlertAction.GiuNguyen;
     }
-
-    /// <summary>Mốc local về UTC — <see cref="DateTimeKind.Unspecified"/> (DB đời cũ) coi như đã là UTC.</summary>
-    private static DateTime? ToUtc(DateTime? moc) => moc?.Kind switch
-    {
-        null => null,
-        DateTimeKind.Utc => moc,
-        DateTimeKind.Local => moc.Value.ToUniversalTime(),
-        _ => DateTime.SpecifyKind(moc!.Value, DateTimeKind.Utc),
-    };
 }

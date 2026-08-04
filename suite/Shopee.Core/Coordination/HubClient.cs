@@ -412,13 +412,13 @@ public sealed class HubClient : IDisposable
     public Task ReportOrdersAppAlertAsync(OrdersAppAlertRequest req, CancellationToken ct = default)
         => PostAsync(HubRoutes.OrdersAppAlert, req, ct);
 
-    /// <summary>Upsert banner lỗi địa chỉ (hiện lại nếu đã dismiss). Hub cũ → ném.</summary>
-    public Task UpsertPickupAlertAsync(OrdersPickupAlertRequest req, CancellationToken ct = default)
-        => PostAsync(HubRoutes.OrdersPickupAlertsUpsert, req, ct);
+    /// <summary>Upsert banner lỗi địa chỉ (hiện lại nếu đã dismiss). Trả <c>rev</c> Hub vừa cấp. Hub cũ → ném.</summary>
+    public Task<long> UpsertPickupAlertAsync(OrdersPickupAlertRequest req, CancellationToken ct = default)
+        => PostLayRevAsync(HubRoutes.OrdersPickupAlertsUpsert, req, ct);
 
-    /// <summary>Dismiss banner lỗi địa chỉ (bấm X). Hub cũ → ném.</summary>
-    public Task DismissPickupAlertAsync(OrdersPickupAlertRequest req, CancellationToken ct = default)
-        => PostAsync(HubRoutes.OrdersPickupAlertsDismiss, req, ct);
+    /// <summary>Dismiss banner lỗi địa chỉ (bấm X). Trả <c>rev</c> Hub vừa cấp. Hub cũ → ném.</summary>
+    public Task<long> DismissPickupAlertAsync(OrdersPickupAlertRequest req, CancellationToken ct = default)
+        => PostLayRevAsync(HubRoutes.OrdersPickupAlertsDismiss, req, ct);
 
     /// <summary>Kéo mọi banner của tài khoản (kể cả đã dismiss) để merge local. Hub cũ → null.</summary>
     public async Task<List<OrdersPickupAlertItem>?> GetPickupAlertsAsync(string accountLogin, CancellationToken ct = default)
@@ -466,6 +466,21 @@ public sealed class HubClient : IDisposable
     {
         var r = await _http.PostAsJsonAsync(path, body, ct);
         r.EnsureSuccessStatusCode();
+    }
+
+    /// <summary>POST rồi đọc <c>rev</c> trong body. Hub đời cũ trả body rỗng/khác dạng → 0 (coi như chưa biết
+    /// rev, client sẽ nhận rev thật ở lượt GET kế) chứ KHÔNG coi là lỗi đẩy.</summary>
+    private async Task<long> PostLayRevAsync<T>(string path, T body, CancellationToken ct)
+    {
+        var r = await _http.PostAsJsonAsync(path, body, ct);
+        r.EnsureSuccessStatusCode();
+        try
+        {
+            var ack = await r.Content.ReadFromJsonAsync<OrdersPickupAlertAck>(ct);
+            return ack?.Rev ?? 0;
+        }
+        catch (JsonException) { return 0; }
+        catch (NotSupportedException) { return 0; }
     }
 
     /// <summary>Encode từng đoạn tên (giữ '/') để URL an toàn với tên có dấu cách/ký tự lạ.</summary>

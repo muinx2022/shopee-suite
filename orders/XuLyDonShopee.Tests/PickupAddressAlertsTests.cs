@@ -14,21 +14,21 @@ public class PickupAddressAlertsTests
     private const string ShopHai = "shop9x.store";
 
     [Fact]
-    public void Upsert_ListActive_Dismiss_HienLaiSauDismiss()
+    public void GhiPhatHien_ListActive_Dismiss_HienLaiSauDismiss()
     {
         using var temp = new TempDatabase();
         var repo = new PickupAddressAlertsRepository(temp.Open());
 
-        repo.Upsert(1, "alina99.store", "Thanh Hóa");
+        repo.GhiPhatHienTaiCho(1, "alina99.store", "Thanh Hóa");
         var one = Assert.Single(repo.ListActive(1));
         Assert.Equal("alina99.store", one.ShopLogin);
         Assert.Equal("Thanh Hóa", one.Province);
         Assert.Null(one.DismissedAt);
 
-        repo.Dismiss(1, "alina99.store");
+        repo.DismissTaiCho(1, "alina99.store");
         Assert.Empty(repo.ListActive(1));
 
-        repo.Upsert(1, "alina99.store", "Hà Nội");
+        repo.GhiPhatHienTaiCho(1, "alina99.store", "Hà Nội");
         var again = Assert.Single(repo.ListActive(1));
         Assert.Equal("Hà Nội", again.Province);
         Assert.Null(again.DismissedAt);
@@ -40,22 +40,87 @@ public class PickupAddressAlertsTests
         using var temp = new TempDatabase();
         var repo = new PickupAddressAlertsRepository(temp.Open());
 
-        repo.Upsert(1, "shop-a", null);
-        repo.Upsert(2, "shop-b", null);
+        repo.GhiPhatHienTaiCho(1, "shop-a", null);
+        repo.GhiPhatHienTaiCho(2, "shop-b", null);
 
         Assert.Equal("shop-a", Assert.Single(repo.ListActive(1)).ShopLogin);
         Assert.Equal("shop-b", Assert.Single(repo.ListActive(2)).ShopLogin);
     }
 
     [Fact]
-    public void Upsert_NhieuShop_ListActive_DuDong()
+    public void GhiPhatHien_NhieuShop_ListActive_DuDong()
     {
         using var temp = new TempDatabase();
         var repo = new PickupAddressAlertsRepository(temp.Open());
 
-        repo.Upsert(1, "a.store", "TH");
-        repo.Upsert(1, "b.store", "TH");
+        repo.GhiPhatHienTaiCho(1, "a.store", "TH");
+        repo.GhiPhatHienTaiCho(1, "b.store", "TH");
         Assert.Equal(2, repo.ListActive(1).Count);
+    }
+
+    // ===== Outbox: thay đổi tại chỗ phải chờ Hub NHẬN mới hạ cờ =====
+
+    [Fact]
+    public void GhiPhatHienTaiCho_BatCoChoDay_DanhDauDaDay_MoiHa()
+    {
+        using var temp = new TempDatabase();
+        var repo = new PickupAddressAlertsRepository(temp.Open());
+
+        repo.GhiPhatHienTaiCho(1, "a.store", "TH");
+        var cho = Assert.Single(repo.ListChoDay(1));
+        Assert.True(cho.ChoDay);
+        Assert.Equal(0, cho.HubRev);
+
+        repo.DanhDauDaDay(1, "a.store", 7);
+        Assert.Empty(repo.ListChoDay(1));
+        var xong = Assert.Single(repo.ListAll(1));
+        Assert.False(xong.ChoDay);
+        Assert.Equal(7, xong.HubRev);
+    }
+
+    [Fact]
+    public void DismissTaiCho_BatCoChoDay_VaAnBanner()
+    {
+        using var temp = new TempDatabase();
+        var repo = new PickupAddressAlertsRepository(temp.Open());
+
+        repo.ApDungTuHub(1, "a.store", "TH", dismissed: false, hubRev: 3);
+        Assert.Single(repo.ListActive(1));
+        Assert.Empty(repo.ListChoDay(1));
+
+        repo.DismissTaiCho(1, "a.store");
+        Assert.Empty(repo.ListActive(1));
+        var cho = Assert.Single(repo.ListChoDay(1));
+        Assert.Equal(3, cho.HubRev); // thay đổi tại chỗ KHÔNG được hạ hub_rev đang giữ
+    }
+
+    [Fact]
+    public void ApDungTuHub_NhanTrangThaiVaRev_HaCoChoDay()
+    {
+        using var temp = new TempDatabase();
+        var repo = new PickupAddressAlertsRepository(temp.Open());
+
+        repo.GhiPhatHienTaiCho(1, "a.store", "TH");
+        repo.ApDungTuHub(1, "a.store", "", dismissed: true, hubRev: 9);
+
+        Assert.Empty(repo.ListActive(1));
+        Assert.Empty(repo.ListChoDay(1));
+        var row = Assert.Single(repo.ListAll(1));
+        Assert.Equal(9, row.HubRev);
+        Assert.Equal("TH", row.Province); // province rỗng từ tombstone KHÔNG xoá tỉnh đã biết
+    }
+
+    [Fact]
+    public void DanhDauDaDay_RevCu_KhongHaCoCuaThayDoiMoiHon()
+    {
+        using var temp = new TempDatabase();
+        var repo = new PickupAddressAlertsRepository(temp.Open());
+
+        repo.ApDungTuHub(1, "a.store", "TH", dismissed: false, hubRev: 10);
+        repo.DismissTaiCho(1, "a.store");            // thay đổi mới, chờ đẩy
+
+        repo.DanhDauDaDay(1, "a.store", 4);          // ack của lượt đẩy CŨ đáp muộn
+        Assert.Single(repo.ListChoDay(1));           // vẫn phải còn chờ đẩy
     }
 
     [Fact]
@@ -182,68 +247,64 @@ public class PickupAddressAlertsTests
         Assert.False(vm.ResultRows.Single().ShowLoiDiaChi);
     }
 
-    // ── Merge Hub ↔ local ─────────────────────────────────────────────────────────────────────────────
-    // Bấm X (Hub dismissed) LUÔN thắng — cố ý không so mốc chéo máy, xem xmldoc PickupAlertMerge.QuyetDinh.
+    // ── Merge Hub ↔ local: theo rev + outbox, KHÔNG đụng đồng hồ ──────────────────────────────────────
 
-    /// <summary>Máy khác bấm X → máy này gỡ banner, kể cả khi local đang hiện (luồng chính của tính năng).</summary>
+    /// <summary>
+    /// CA MÀ BẢN CŨ THUA: Hub chết đúng lúc vòng shop phát hiện lỗi (cờ chờ đẩy còn nguyên), trên Hub vẫn là
+    /// tombstone cũ của lần bấm X trước. Bản cũ nghe Hub → xoá mất cảnh báo của lỗi CHƯA sửa. Nay giữ + đẩy lên.
+    /// </summary>
     [Fact]
-    public void Merge_HubDismissed_LocalDangHienBanner_LocalDismiss()
-        => Assert.Equal(MergePickupAlertAction.LocalDismiss,
+    public void Merge_LocalChoDay_KhongBiTombstoneHubXoa()
+        => Assert.Equal(MergePickupAlertAction.DayLenHub,
             PickupAlertMerge.QuyetDinh(
-                localDismissedAt: null,
-                hubDismissed: true,
-                hubCreatedAt: DateTimeOffset.UtcNow.AddMinutes(-5)));
+                localCoDong: true, localChoDay: true, localHubRev: 5, hubRev: 5));
 
-    /// <summary>Local cũng đã đóng rồi → cứ dismiss, không có gì để giữ.</summary>
+    /// <summary>Cờ chờ đẩy thắng cả khi Hub có rev MỚI hơn — thay đổi tại chỗ chưa ai biết, phải đẩy trước.</summary>
     [Fact]
-    public void Merge_HubDismissed_LocalDaDismiss_LocalDismiss()
-        => Assert.Equal(MergePickupAlertAction.LocalDismiss,
+    public void Merge_LocalChoDay_ThangCaKhiHubRevMoiHon()
+        => Assert.Equal(MergePickupAlertAction.DayLenHub,
             PickupAlertMerge.QuyetDinh(
-                localDismissedAt: new DateTime(2026, 8, 4, 5, 10, 0, DateTimeKind.Utc),
-                hubDismissed: true,
-                hubCreatedAt: null));
+                localCoDong: true, localChoDay: true, localHubRev: 2, hubRev: 9));
 
+    /// <summary>Máy khác bấm X (Hub tăng rev) → máy này nghe Hub, gỡ banner. Chức năng CHÍNH, không được hồi quy.</summary>
     [Fact]
-    public void Merge_LocalDismissMoiHonHubActive_KeepVaRepush()
-    {
-        var hubCreated = new DateTimeOffset(2026, 8, 4, 4, 0, 0, TimeSpan.Zero);
-        var localDismiss = new DateTime(2026, 8, 4, 4, 40, 0, DateTimeKind.Utc);
-        Assert.Equal(MergePickupAlertAction.KeepLocalDismissRepushHub,
-            PickupAlertMerge.QuyetDinh(localDismiss, hubDismissed: false, hubCreated));
-    }
-
-    [Fact]
-    public void Merge_HubActiveMoiHonLocalDismiss_LocalUpsert()
-    {
-        var localDismiss = new DateTime(2026, 8, 4, 4, 0, 0, DateTimeKind.Utc);
-        var hubCreated = new DateTimeOffset(2026, 8, 4, 5, 0, 0, TimeSpan.Zero);
-        Assert.Equal(MergePickupAlertAction.LocalUpsert,
-            PickupAlertMerge.QuyetDinh(localDismiss, hubDismissed: false, hubCreated));
-    }
-
-    /// <summary>Mốc dismiss local đời cũ (Kind=Unspecified) coi như UTC, không lệch theo múi giờ máy.</summary>
-    [Fact]
-    public void Merge_MocDismissKhongKind_CoiNhuUtc()
-        => Assert.Equal(MergePickupAlertAction.KeepLocalDismissRepushHub,
+    public void Merge_HubRevMoiHon_TheoHub()
+        => Assert.Equal(MergePickupAlertAction.TheoHub,
             PickupAlertMerge.QuyetDinh(
-                localDismissedAt: new DateTime(2026, 8, 4, 4, 40, 0, DateTimeKind.Unspecified),
-                hubDismissed: false,
-                hubCreatedAt: new DateTimeOffset(2026, 8, 4, 4, 0, 0, TimeSpan.Zero)));
+                localCoDong: true, localChoDay: false, localHubRev: 4, hubRev: 5));
 
+    /// <summary>Đã nhận rev này rồi → không ghi lại DB mỗi 60 giây.</summary>
     [Fact]
-    public void Merge_LocalDismiss_HubActiveThieuCreatedAt_KeepVaRepush()
-        => Assert.Equal(MergePickupAlertAction.KeepLocalDismissRepushHub,
+    public void Merge_HubRevBang_GiuNguyen()
+        => Assert.Equal(MergePickupAlertAction.GiuNguyen,
             PickupAlertMerge.QuyetDinh(
-                localDismissedAt: DateTime.UtcNow,
-                hubDismissed: false,
-                hubCreatedAt: null));
+                localCoDong: true, localChoDay: false, localHubRev: 5, hubRev: 5));
 
-    /// <summary>Local chưa dismiss + Hub active → upsert (banner lan sang máy này).</summary>
+    /// <summary>Rev Hub LÙI (Hub khôi phục từ bản sao lưu cũ) → không nghe, giữ trạng thái đang có.</summary>
     [Fact]
-    public void Merge_HubActive_LocalChuaDismiss_LocalUpsert()
-        => Assert.Equal(MergePickupAlertAction.LocalUpsert,
+    public void Merge_HubRevLui_GiuNguyen()
+        => Assert.Equal(MergePickupAlertAction.GiuNguyen,
             PickupAlertMerge.QuyetDinh(
-                localDismissedAt: null,
-                hubDismissed: false,
-                hubCreatedAt: new DateTimeOffset(2026, 8, 4, 5, 0, 0, TimeSpan.Zero)));
+                localCoDong: true, localChoDay: false, localHubRev: 9, hubRev: 3));
+
+    /// <summary>Máy này chưa biết shop → nhận Hub (banner lan sang máy mới).</summary>
+    [Fact]
+    public void Merge_LocalChuaCoDong_TheoHub()
+        => Assert.Equal(MergePickupAlertAction.TheoHub,
+            PickupAlertMerge.QuyetDinh(
+                localCoDong: false, localChoDay: false, localHubRev: 0, hubRev: 1));
+
+    /// <summary>Chỉ local có dòng, đã đồng bộ xong, Hub không có → không có gì để làm.</summary>
+    [Fact]
+    public void Merge_HubKhongCoDong_DaDongBo_GiuNguyen()
+        => Assert.Equal(MergePickupAlertAction.GiuNguyen,
+            PickupAlertMerge.QuyetDinh(
+                localCoDong: true, localChoDay: false, localHubRev: 2, hubRev: 0));
+
+    /// <summary>Dòng chờ đẩy mà Hub CHƯA hề có → vẫn phải đẩy (nếu bỏ sót thì kẹt cờ vĩnh viễn).</summary>
+    [Fact]
+    public void Merge_ChoDay_HubChuaCoDong_VanDay()
+        => Assert.Equal(MergePickupAlertAction.DayLenHub,
+            PickupAlertMerge.QuyetDinh(
+                localCoDong: true, localChoDay: true, localHubRev: 0, hubRev: 0));
 }

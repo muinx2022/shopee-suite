@@ -473,12 +473,13 @@ internal sealed class OrderPersistPipeline
     public void GhiBannerLoiDiaChi(string? pickupFailedShop, string tinh, Action<string> log, CancellationToken ct)
     {
         var shops = TachTenShopLoiDiaChi(pickupFailedShop);
-        var occurredAt = DateTimeOffset.UtcNow;
         foreach (var shop in shops)
         {
             try
             {
-                _services.PickupAlerts.Upsert(_accountId, shop, tinh);
+                // Đặt cờ "chờ đẩy" ngay: Hub chết lúc này thì lượt sync sau tự đẩy lại, và tombstone cũ trên
+                // Hub KHÔNG được phép xoá banner của lỗi vừa phát hiện (xem PickupAlertMerge.QuyetDinh).
+                _services.PickupAlerts.GhiPhatHienTaiCho(_accountId, shop, tinh);
             }
             catch (Exception ex)
             {
@@ -501,15 +502,17 @@ internal sealed class OrderPersistPipeline
             {
                 foreach (var shop in shops)
                 {
-                    var ok = await PickupAlertHubGate.RunAsync(accountLogin, shop, () =>
-                        upsertHub(accountLogin, shop, tinh, occurredAt, ct)).ConfigureAwait(false);
-                    if (ok)
+                    var rev = await PickupAlertHubGate.RunAsync(accountLogin, shop, () =>
+                        upsertHub(accountLogin, shop, tinh, ct)).ConfigureAwait(false);
+                    if (rev is not null)
                     {
-                        log($"Banner địa chỉ: đã đồng bộ Hub shop {shop}.");
+                        _services.PickupAlerts.DanhDauDaDay(_accountId, shop, rev.Value);
+                        log($"Banner địa chỉ: đã đồng bộ Hub shop {shop} (rev {rev}).");
                     }
                     else
                     {
-                        log($"Banner địa chỉ: Hub chưa nhận shop {shop} — giữ local, sẽ kéo/đẩy lại sau.");
+                        // GIỮ cờ cho_day → nhịp sync tab Kết quả sẽ đẩy lại; không mất cảnh báo.
+                        log($"Banner địa chỉ: Hub chưa nhận shop {shop} — giữ local, sẽ đẩy lại sau.");
                     }
                 }
             }

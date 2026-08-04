@@ -302,6 +302,14 @@ CREATE TABLE IF NOT EXISTS pickup_address_alerts (
         EnsureColumn(conn, "orders", "hub_push_gen", "INTEGER NOT NULL DEFAULT 0");
         EnsureColumn(conn, "orders", "hub_push_gen_sent", "INTEGER");
 
+        // Banner lỗi địa chỉ đồng bộ đa máy KHÔNG so mốc thời gian (đồng hồ mỗi máy một khác), mà theo:
+        //  · hub_rev = số hiệu bản ghi của Hub mà máy này ĐÃ NHẬN. Hub lớn hơn → nghe Hub.
+        //  · cho_day = có thay đổi tại chỗ (phát hiện lỗi / bấm X) CHƯA đẩy được lên Hub → Hub KHÔNG được đè,
+        //    và mỗi lượt sync phải thử đẩy lại. Đây là chỗ vá lỗ "Hub chết lúc phát hiện lỗi thì mất cảnh báo".
+        // Dòng CŨ nhận 0/0: hub_rev=0 nên lượt ghi kế trên Hub (rev≥1) chắc chắn lớn hơn → vẫn nhận được.
+        EnsureColumn(conn, "pickup_address_alerts", "hub_rev", "INTEGER NOT NULL DEFAULT 0");
+        EnsureColumn(conn, "pickup_address_alerts", "cho_day", "INTEGER NOT NULL DEFAULT 0");
+
         // Backfill MỘT LẦN: đơn ĐÃ lên hub TRƯỚC bản này có thể thiếu "Số tiền cuối cùng" trên hub — bản cũ chỉ
         // RESET hub_synced_at khi mã vận đơn vừa xuất hiện, KHÔNG reset khi final_amount vừa lấy được, nên đơn
         // lên hub ở lượt sync đầu (chưa mở trang chi tiết) hiển thị "—" VĨNH VIỄN dù local đã có số. Đẩy lại các

@@ -285,22 +285,25 @@ public static class ClientApiEndpoints
             if (r is null || string.IsNullOrWhiteSpace(r.AccountLogin) || string.IsNullOrWhiteSpace(r.ShopLogin))
                 return Results.BadRequest();
             var mid = req.Headers["X-Machine-Id"].ToString();
-            if (!db.UpsertPickupAlert(r.AccountLogin, r.ShopLogin, r.Province, mid, r.OccurredAt))
+            var rev = db.UpsertPickupAlert(r.AccountLogin, r.ShopLogin, r.Province, mid);
+            if (rev == 0)
                 return Results.BadRequest();
             db.AppendLog(new AppendLogRequest(mid, "", "info",
-                $"orders/pickup-alerts/upsert account={r.AccountLogin.Trim()} shop={r.ShopLogin.Trim()}"));
-            return Results.Ok();
+                $"orders/pickup-alerts/upsert account={r.AccountLogin.Trim()} shop={r.ShopLogin.Trim()} rev={rev}"));
+            // Client cũ (≤ v1.7.18) bỏ qua body này; client mới lưu rev để merge.
+            return Results.Json(new OrdersPickupAlertAck { Rev = rev });
         });
         api.MapPost(HubRoutes.OrdersPickupAlertsDismiss, (OrdersPickupAlertRequest? r, HttpRequest req) =>
         {
             if (r is null || string.IsNullOrWhiteSpace(r.AccountLogin) || string.IsNullOrWhiteSpace(r.ShopLogin))
                 return Results.BadRequest();
             var mid = req.Headers["X-Machine-Id"].ToString();
-            if (!db.DismissPickupAlert(r.AccountLogin, r.ShopLogin, mid, r.OccurredAt))
+            var rev = db.DismissPickupAlert(r.AccountLogin, r.ShopLogin, mid);
+            if (rev == 0)
                 return Results.BadRequest();
             db.AppendLog(new AppendLogRequest(mid, "", "info",
-                $"orders/pickup-alerts/dismiss account={r.AccountLogin.Trim()} shop={r.ShopLogin.Trim()}"));
-            return Results.Ok();
+                $"orders/pickup-alerts/dismiss account={r.AccountLogin.Trim()} shop={r.ShopLogin.Trim()} rev={rev}"));
+            return Results.Json(new OrdersPickupAlertAck { Rev = rev });
         });
         api.MapGet(HubRoutes.OrdersPickupAlerts, (string? accountLogin) =>
         {
@@ -311,8 +314,7 @@ public static class ClientApiEndpoints
                 ShopLogin = x.ShopLogin,
                 Province = x.Province,
                 Dismissed = !string.IsNullOrEmpty(x.DismissedAt),
-                CreatedAt = x.CreatedAt,
-                DismissedAt = x.DismissedAt,
+                Rev = x.Rev,
             }).ToList();
             return Results.Json(items);
         });

@@ -1,7 +1,7 @@
 # Plan: Banner lỗi địa chỉ — bỏ so mốc giờ, dùng `rev` + outbox
 
 - **Ngày:** 2026-08-04
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành
 - **Người lập:** phiên chính · **Người thực thi:** phiên chính
 
 ## 1. Bối cảnh & mục tiêu
@@ -165,4 +165,39 @@ Client (`orders/XuLyDonShopee.Tests/PickupAddressAlertsTests.cs`):
 
 ---
 
-## Báo cáo thực thi (điền sau khi xong)
+## Báo cáo thực thi
+
+Làm đúng 7 bước, không lệch plan.
+
+| Tiêu chí | Kết quả |
+|---|---|
+| Build solution | 0 warning, 0 error |
+| Test orders | **1494 passed** (mốc trước 1485) |
+| Test hub | **52 passed** (mốc trước 51) |
+| `grep DateTime\|Iso\|OccurredAt\|TimeSpan` trong `PickupAlertMerge.cs` | **không kết quả** — đường quyết định sạch đồng hồ |
+| Hub deploy | active, health 200; `PRAGMA table_info` xác nhận cột `rev`; dòng `alina99.store` còn nguyên, nhận `rev=0` |
+| Migration client | test dựng bảng đời cũ (5 cột) → thêm `hub_rev`/`cho_day`, banner cũ còn nguyên, KHÔNG bị coi là chờ đẩy |
+
+### Chốt thiết kế
+
+- Hub là **đồng hồ duy nhất**: mỗi lần ghi `rev = rev + 1`, POST trả rev mới trong body.
+- Client giữ `hub_rev` (đã nhận tới đâu) + `cho_day` (thay đổi tại chỗ chưa đẩy). Cờ chỉ hạ khi Hub **thực
+  sự nhận** (`DanhDauDaDay`), nên Hub chết bao lâu cũng không mất cảnh báo lẫn lần bấm X.
+- `PickupAddressAlertsRepository` **tách rõ 2 nguồn ghi** (`GhiPhatHienTaiCho`/`DismissTaiCho` vs
+  `ApDungTuHub`) — gộp chung chính là gốc lỗi cũ: đường nhận-từ-Hub ghi đè mốc của đường phát-hiện-tại-chỗ
+  mỗi 60 giây.
+- Vòng merge xét **Hub ∪ outbox local**: dòng chưa từng lên Hub không nằm trong danh sách Hub trả về, bỏ sót
+  là kẹt cờ vĩnh viễn.
+- `DanhDauDaDay` có điều kiện `$r >= hub_rev` để ack của lượt đẩy cũ đáp muộn không xoá dấu của thay đổi mới hơn.
+
+### Tương thích ngược
+
+Client ≤ v1.7.18 vẫn gửi `OccurredAt` (Hub bỏ qua) và bỏ qua `rev` trong body/JSON trả về. `PostLayRevAsync`
+đọc rev lỗi thì trả 0 chứ không coi là đẩy hỏng, nên Hub đời cũ (nếu rollback) cũng không làm client mới kẹt.
+
+### Kèm theo trong cùng bản
+
+- Tin nhắn Slack/Discord/Telegram thêm phân loại kèm SL ngay sau SKU (`OrderNotifyService.DongDon`), dùng
+  chung `PhanLoaiExtractor.TuItemsJson` với lưới app / Hub / Google Sheet. +3 test.
+- Xoá worktree `.kilo/worktrees/vivacious-monkey` + nhánh `vivacious-monkey`: đã kiểm tra sạch (không có
+  thay đổi chưa commit) và `git log main..vivacious-monkey` rỗng nên không mất commit nào.

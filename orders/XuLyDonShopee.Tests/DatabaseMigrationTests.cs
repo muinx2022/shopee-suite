@@ -413,6 +413,52 @@ CREATE TABLE orders (
         Assert.Null(p.GsheetDaCoUocTinh);
     }
 
+    // ==== Migration cột hub_rev + cho_day cho bảng pickup_address_alerts (banner lỗi địa chỉ theo rev/outbox) ====
+
+    /// <summary>
+    /// DB đời trước (bảng banner chỉ có 5 cột) phải được thêm <c>hub_rev</c> + <c>cho_day</c> mà KHÔNG mất
+    /// banner đang có. Dòng cũ nhận 0/0: <c>hub_rev=0</c> nên lượt ghi kế trên Hub (rev ≥ 1) chắc chắn lớn hơn
+    /// → máy vẫn nhận được thay đổi; <c>cho_day=0</c> nên không đẩy nhầm dòng đã đồng bộ từ đời cũ.
+    /// </summary>
+    [Fact]
+    public void KhoiTao_DbCu_PickupAlerts_ThieuHubRevVaChoDay_DuocThemCot_KhongMatDuLieu()
+    {
+        using var temp = new TempDatabase();
+        var cs = new SqliteConnectionStringBuilder { DataSource = temp.Path }.ToString();
+        using (var conn = new SqliteConnection(cs))
+        {
+            conn.Open();
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = @"
+CREATE TABLE pickup_address_alerts (
+    account_id INTEGER NOT NULL,
+    shop_login TEXT NOT NULL,
+    province TEXT DEFAULT '',
+    created_at TEXT NOT NULL,
+    dismissed_at TEXT,
+    PRIMARY KEY(account_id, shop_login));
+INSERT INTO pickup_address_alerts(account_id, shop_login, province, created_at, dismissed_at)
+VALUES(7, 'cu.store', 'Thanh Hoa', '2026-08-01T00:00:00.0000000Z', NULL);";
+            cmd.ExecuteNonQuery();
+        }
+
+        Assert.False(HasColumn(temp.Path, "pickup_address_alerts", "hub_rev"));
+        Assert.False(HasColumn(temp.Path, "pickup_address_alerts", "cho_day"));
+
+        var db = new Database(temp.Path);
+
+        Assert.True(HasColumn(temp.Path, "pickup_address_alerts", "hub_rev"));
+        Assert.True(HasColumn(temp.Path, "pickup_address_alerts", "cho_day"));
+
+        var repo = new PickupAddressAlertsRepository(db);
+        var row = Assert.Single(repo.ListActive(7));
+        Assert.Equal("cu.store", row.ShopLogin);
+        Assert.Equal("Thanh Hoa", row.Province);
+        Assert.Equal(0, row.HubRev);
+        Assert.False(row.ChoDay);
+        Assert.Empty(repo.ListChoDay(7));   // dòng đời cũ KHÔNG bị coi là đang chờ đẩy
+    }
+
     // ==== Migration cột hub_synced_at cho bảng orders (đẩy đơn lên hub) ====
 
     [Fact]

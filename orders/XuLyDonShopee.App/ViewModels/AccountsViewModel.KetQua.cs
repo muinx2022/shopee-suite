@@ -684,8 +684,6 @@ public partial class AccountsViewModel
             hub = null;
         }
 
-        var dismissHub = _services.DismissPickupAlertToHub;
-
         RunOnUi(() =>
         {
             if (SelectedRow?.Id != accountId)
@@ -695,75 +693,117 @@ public partial class AccountsViewModel
 
             if (hub is not null)
             {
-                // Khóa bảng local là (account_id, shop_login) collation BINARY nên VỀ LÝ THUYẾT có hai dòng
-                // khác hoa/thường → gom bằng TryAdd (ListAll sắp created_at DESC ⇒ giữ dòng mới nhất) thay vì
-                // ToDictionary (ném ArgumentException giữa callback UI).
-                var localByShop = new Dictionary<string, PickupAddressAlert>(StringComparer.OrdinalIgnoreCase);
-                foreach (var a in _services.PickupAlerts.ListAll(accountId))
-                {
-                    localByShop.TryAdd(a.ShopLogin, a);
-                }
-
-                foreach (var dong in hub)
-                {
-                    if (string.IsNullOrWhiteSpace(dong.ShopLogin))
-                    {
-                        continue;
-                    }
-
-                    localByShop.TryGetValue(dong.ShopLogin, out var local);
-                    // Ghi local phải dùng ĐÚNG chuỗi shop của dòng local (khớp không phân biệt hoa/thường ở trên,
-                    // nhưng SQL so BINARY) — lấy dong.ShopLogin sẽ trượt sang dòng khác/không dòng nào.
-                    var shopLocal = local?.ShopLogin ?? dong.ShopLogin;
-                    switch (PickupAlertMerge.QuyetDinh(local?.DismissedAt, dong.Dismissed, dong.CreatedAt))
-                    {
-                        case MergePickupAlertAction.LocalDismiss:
-                            _services.PickupAlerts.Dismiss(accountId, shopLocal);
-                            break;
-                        case MergePickupAlertAction.LocalUpsert:
-                            _services.PickupAlerts.Upsert(accountId, shopLocal, dong.Province);
-                            break;
-                        case MergePickupAlertAction.KeepLocalDismissRepushHub:
-                            // Bắn NGAY trong callback UI: RunOnUi là BeginInvoke (bất đồng bộ) nên gom vào list
-                            // rồi đọc sau khối này thì luôn đọc phải list rỗng — đó là lý do repush chưa từng chạy.
-                            if (dismissHub is not null)
-                            {
-                                DayLaiHub(accountLogin, dong.ShopLogin, ToUtcOffset(local?.DismissedAt), dismissHub);
-                            }
-                            break;
-                    }
-                }
+                MergeVaDayOutbox(accountId, accountLogin, hub);
             }
 
             LoadAddressAlertsFromLocal();
         });
     }
 
-    /// <summary>Fire-and-forget đẩy lại tombstone dismiss lên Hub cho một shop (Hub còn active nhưng local đã
-    /// đóng mới hơn). Nối đuôi theo shop qua <see cref="PickupAlertHubGate"/>, log khi hỏng — không chặn UI.</summary>
-    private static void DayLaiHub(
-        string accountLogin,
-        string shop,
-        DateTimeOffset when,
-        Func<string, string, DateTimeOffset?, CancellationToken, Task<bool>> dismissHub)
-        => _ = Task.Run(async () =>
+    /// <summary>
+    /// Merge một lượt: mỗi shop trong (Hub ∪ hàng đợi outbox local) → nhận Hub hoặc đẩy local lên Hub.
+    /// <para>Phải xét CẢ shop chỉ có trong outbox: dòng local chưa từng lên Hub sẽ không nằm trong danh sách
+    /// Hub trả về, bỏ sót là nó kẹt cờ <c>cho_day</c> vĩnh viễn.</para>
+    /// <para>Chạy TRONG callback UI, và mọi lệnh đẩy bắn ngay tại đây — <c>RunOnUi</c> là
+    /// <c>BeginInvoke</c> nên gom vào biến rồi đọc sau khối callback thì luôn đọc phải giá trị rỗng.</para>
+    /// </summary>
+    private void MergeVaDayOutbox(long accountId, string accountLogin, IReadOnlyList<PickupAlertHubDong> hub)
+    {
+        // Khóa bảng local là (account_id, shop_login) collation BINARY nên VỀ LÝ THUYẾT có hai dòng khác
+        // hoa/thường → gom bằng TryAdd (ListAll sắp created_at DESC ⇒ giữ dòng mới nhất) thay vì ToDictionary
+        // (ném ArgumentException giữa callback UI).
+        var localByShop = new Dictionary<string, PickupAddressAlert>(StringComparer.OrdinalIgnoreCase);
+        foreach (var a in _services.PickupAlerts.ListAll(accountId))
+        {
+            localByShop.TryAdd(a.ShopLogin, a);
+        }
+
+        var hubByShop = new Dictionary<string, PickupAlertHubDong>(StringComparer.OrdinalIgnoreCase);
+        foreach (var dong in hub)
+        {
+            if (!string.IsNullOrWhiteSpace(dong.ShopLogin))
+            {
+                hubByShop.TryAdd(dong.ShopLogin, dong);
+            }
+        }
+
+        var canXet = new HashSet<string>(hubByShop.Keys, StringComparer.OrdinalIgnoreCase);
+        foreach (var a in _services.PickupAlerts.ListChoDay(accountId))
+        {
+            canXet.Add(a.ShopLogin);
+        }
+
+        foreach (var shop in canXet)
+        {
+            localByShop.TryGetValue(shop, out var local);
+            var coHub = hubByShop.TryGetValue(shop, out var dong);
+            // Ghi local phải dùng ĐÚNG chuỗi shop của dòng local (khớp không phân biệt hoa/thường ở trên,
+            // nhưng SQL so BINARY) — lấy chuỗi của Hub sẽ trượt sang dòng khác/không dòng nào.
+            var shopLocal = local?.ShopLogin ?? shop;
+
+            switch (PickupAlertMerge.QuyetDinh(
+                localCoDong: local is not null,
+                localChoDay: local?.ChoDay == true,
+                localHubRev: local?.HubRev ?? 0,
+                hubRev: coHub ? dong.Rev : 0))
+            {
+                case MergePickupAlertAction.TheoHub when coHub:
+                    _services.PickupAlerts.ApDungTuHub(
+                        accountId, shopLocal, dong.Province, dong.Dismissed, dong.Rev);
+                    break;
+
+                case MergePickupAlertAction.DayLenHub when local is not null:
+                    DayLenHub(accountId, accountLogin, local);
+                    break;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Fire-and-forget đẩy trạng thái local của MỘT shop lên Hub (đang hiện banner → upsert; đã bấm X →
+    /// dismiss). Đẩy được mới hạ cờ <c>cho_day</c> + nhớ <c>rev</c>; hỏng thì GIỮ cờ để lượt sync sau thử lại
+    /// — đây chính là chỗ chịu được Hub chết/mất mạng mà không mất cảnh báo. Nối đuôi theo shop qua
+    /// <see cref="PickupAlertHubGate"/> để upsert và dismiss cùng shop không chồng nhau.
+    /// </summary>
+    private void DayLenHub(long accountId, string accountLogin, PickupAddressAlert local)
+    {
+        var shop = local.ShopLogin;
+        var daDismiss = local.DismissedAt is not null;
+        var province = local.Province;
+        var upsertHub = _services.UpsertPickupAlertToHub;
+        var dismissHub = _services.DismissPickupAlertToHub;
+        if (accountLogin.Length == 0 || (daDismiss ? dismissHub is null : upsertHub is null))
+        {
+            return;
+        }
+
+        _ = Task.Run(async () =>
         {
             try
             {
-                var ok = await PickupAlertHubGate.RunAsync(accountLogin, shop, () =>
-                    dismissHub(accountLogin, shop, when, default)).ConfigureAwait(false);
-                if (!ok)
+                var rev = await PickupAlertHubGate.RunAsync(accountLogin, shop, () => daDismiss
+                    ? dismissHub!(accountLogin, shop, default)
+                    : upsertHub!(accountLogin, shop, province, default)).ConfigureAwait(false);
+
+                if (rev is null)
                 {
-                    Trace.WriteLine($"[AccountsViewModel] Re-push dismiss pickup-alert Hub thất bại shop={shop}");
+                    Trace.WriteLine($"[AccountsViewModel] Đẩy pickup-alert Hub chưa được shop={shop} — giữ cờ, thử lại lượt sau");
+                    return;
                 }
+
+                RunOnUi(() => _services.PickupAlerts.DanhDauDaDay(accountId, shop, rev.Value));
             }
             catch (Exception ex)
             {
-                Trace.WriteLine($"[AccountsViewModel] Re-push dismiss pickup-alert Hub lỗi shop={shop}: {ex.Message}");
+                Trace.WriteLine($"[AccountsViewModel] Đẩy pickup-alert Hub lỗi shop={shop}: {ex.Message}");
             }
         });
+    }
 
-    /// <summary>Bấm X trên một dòng banner — dismiss local + Hub (tombstone); chỉ dòng đó biến mất.</summary>
+    /// <summary>
+    /// Bấm X trên một dòng banner — đóng local NGAY (đặt cờ chờ đẩy) rồi đẩy lên Hub; chỉ dòng đó biến mất.
+    /// Hub chết thì cờ ở lại và mỗi lượt sync sau tự đẩy lại, nên lần bấm X không bao giờ mất.
+    /// </summary>
     [RelayCommand]
     private void DismissAddressAlert(PickupAlertRow? row)
     {
@@ -772,36 +812,17 @@ public partial class AccountsViewModel
             return;
         }
 
-        var occurredAt = DateTimeOffset.UtcNow;
-        _services.PickupAlerts.Dismiss(accountId, row.ShopLogin);
+        _services.PickupAlerts.DismissTaiCho(accountId, row.ShopLogin);
         AddressAlertRows.Remove(row);
         ApplyAddressErrorFlags();
 
         var accountLogin = SelectedRow.Email?.Trim() ?? "";
-        var dismissHub = _services.DismissPickupAlertToHub;
-        if (dismissHub is null || accountLogin.Length == 0)
+        var local = _services.PickupAlerts.ListAll(accountId)
+            .FirstOrDefault(a => string.Equals(a.ShopLogin, row.ShopLogin, StringComparison.OrdinalIgnoreCase));
+        if (local is not null)
         {
-            return;
+            DayLenHub(accountId, accountLogin, local);
         }
-
-        var shop = row.ShopLogin;
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                var ok = await PickupAlertHubGate.RunAsync(accountLogin, shop, () =>
-                    dismissHub(accountLogin, shop, occurredAt, default)).ConfigureAwait(false);
-                if (!ok)
-                {
-                    Trace.WriteLine($"[AccountsViewModel] Dismiss pickup-alert Hub thất bại shop={shop} — local đã đóng");
-                }
-            }
-            catch (Exception ex)
-            {
-                // offline — local đã dismiss; máy khác lệch tới khi Hub nhận được / sync sau
-                Trace.WriteLine("[AccountsViewModel] Dismiss pickup-alert Hub lỗi: " + ex.Message);
-            }
-        });
     }
 
     /// <summary>Bật/tắt nhịp kéo Hub pickup-alerts: chỉ khi tab Kết quả (index 1) + có tài khoản chọn.</summary>

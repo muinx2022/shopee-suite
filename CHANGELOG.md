@@ -5,6 +5,17 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Hiệu năng. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.7.19 — 2026-08-04
+
+- **Đơn hàng — banner lỗi địa chỉ không còn mất khi Hub chết.** Trước đây nếu Hub không nhận được lúc vòng
+  shop phát hiện lỗi, lần đẩy đó mất luôn và banner có thể bị trạng thái cũ trên Hub xoá mất. Nay mỗi thay
+  đổi tại chỗ (phát hiện lỗi / bấm X) được xếp hàng cho tới khi Hub **thực sự nhận**, và Hub không được đè
+  lên thay đổi đang chờ. Mất mạng bao lâu cũng không mất cảnh báo, cũng không mất lần bấm X.
+- Đồng bộ chuyển sang **số hiệu bản ghi do Hub cấp** thay cho so mốc thời gian giữa các máy — các máy lệch
+  đồng hồ không còn gây banner kẹt không gỡ được hay bấm X bị bỏ qua.
+- **Slack/Discord/Telegram: tin báo đơn mới có thêm phân loại kèm số lượng** (vd `Kem,36. SL: 2`), đặt ngay
+  sau SKU, dùng chung luật với lưới app, Hub và Google Sheet.
+
 ## v1.7.18 — 2026-08-04
 
 - **Đơn hàng — sản phẩm KHÔNG có phân loại không còn ghi `SL: 1` đè lên Google Sheet.** Từ v1.7.14, hàng không

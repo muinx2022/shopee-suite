@@ -119,15 +119,17 @@ public class AppServices
     public Func<string, string?, string?, string?, string?, CancellationToken, Task<bool>>? ReportAppAlertToHub { get; set; }
 
     /// <summary>
-    /// HOOK upsert banner lỗi địa chỉ lên Hub (đồng bộ đa máy). Tham số: accountLogin, shopLogin, province,
-    /// occurredAt (mốc sự kiện local), ct. Trả true = Hub nhận OK. Null = chưa nối Hub.
+    /// HOOK upsert banner lỗi địa chỉ lên Hub (đồng bộ đa máy). Tham số: accountLogin, shopLogin, province, ct.
+    /// Trả <c>rev</c> MỚI Hub vừa cấp; <c>null</c> = chưa đẩy được (giữ cờ chờ đẩy, lượt sync sau thử lại).
+    /// Hook null = chưa nối Hub.
     /// </summary>
-    public Func<string, string, string?, DateTimeOffset?, CancellationToken, Task<bool>>? UpsertPickupAlertToHub { get; set; }
+    public Func<string, string, string?, CancellationToken, Task<long?>>? UpsertPickupAlertToHub { get; set; }
 
     /// <summary>
-    /// HOOK dismiss banner lỗi địa chỉ trên Hub. Tham số: accountLogin, shopLogin, occurredAt, ct. Null = chưa nối Hub.
+    /// HOOK dismiss banner lỗi địa chỉ trên Hub. Tham số: accountLogin, shopLogin, ct.
+    /// Trả <c>rev</c> MỚI; <c>null</c> = chưa đẩy được. Hook null = chưa nối Hub.
     /// </summary>
-    public Func<string, string, DateTimeOffset?, CancellationToken, Task<bool>>? DismissPickupAlertToHub { get; set; }
+    public Func<string, string, CancellationToken, Task<long?>>? DismissPickupAlertToHub { get; set; }
 
     /// <summary>
     /// HOOK kéo danh sách banner lỗi địa chỉ từ Hub cho một tài khoản (kể cả đã dismiss — để merge).
