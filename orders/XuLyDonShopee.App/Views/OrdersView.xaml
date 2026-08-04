@@ -218,7 +218,6 @@
                 <DataGridTextColumn Header="SKU" Binding="{Binding Sku}" Width="80" />
                 <!-- Phân loại (vd "Nâu Be,39. SL: 1") suy từ items_json — rộng đủ đọc "Đen 9p-form chuẩn,37. SL: 2". -->
                 <DataGridTextColumn Header="Phân loại" Binding="{Binding PhanLoai}" Width="170" />
-                <DataGridTextColumn Header="Số lượng" Binding="{Binding SoLuong}" Width="70" />
                 <!-- Mã yêu cầu trả hàng (bước check cuối flow shop) — rộng bằng mã đơn. -->
                 <DataGridTextColumn Header="Đơn trả hàng" Binding="{Binding DonTraHang}" Width="130" />
                 <DataGridTextColumn Header="Tổng tiền" Binding="{Binding Total}" Width="105" />

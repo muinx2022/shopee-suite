@@ -5,6 +5,10 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Hiệu năng. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.7.15 — 2026-08-04
+
+- **Đơn hàng — bỏ cột Số lượng trên màn Đơn hàng:** vẫn giữ hậu tố `. SL: N` trong cột Phân loại (app + GSheet).
+
 ## v1.7.14 — 2026-08-04
 
 - **Đơn hàng — số lượng trong phân loại + cột App:** cột Phân loại (GSheet + app) gắn `. SL: N` khi đã biết số
