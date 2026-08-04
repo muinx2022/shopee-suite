@@ -260,6 +260,7 @@ public partial class AccountsViewModel : ViewModelBase, IDisposable
         // form/_editingId đã đồng bộ (dùng SelectedRow.Id). Lưới hiện NGAY bằng số cục bộ, rồi hỏi hub đè số chung.
         LoadResults();
         LoadAddressAlertsFromLocal();
+        OnPropertyChanged(nameof(EpShopDauLoiDiaChi));
         _ = RefreshHubCountsAsync();
         _ = SyncAddressAlertsFromHubAsync();
     }

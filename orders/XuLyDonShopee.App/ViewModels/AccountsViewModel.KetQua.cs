@@ -2,9 +2,12 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using XuLyDonShopee.App.Services;
+using XuLyDonShopee.Core.Services;
 
 namespace XuLyDonShopee.App.ViewModels;
 
@@ -668,6 +671,105 @@ public partial class AccountsViewModel
 
             LoadAddressAlertsFromLocal();
         });
+    }
+
+    /// <summary>
+    /// Login cố định cho tình huống TEST khi tài khoản chưa có shop nào trên lưới Kết quả.
+    /// Shop đầu = lỗi địa chỉ; shop hai = vẫn chạy được (để thấy bỏ qua + tiếp tục).
+    /// </summary>
+    internal const string TestShopDauLoiDiaChi = "__test_dia_chi_1.store";
+    internal const string TestShopHaiOk = "__test_dia_chi_2.store";
+
+    /// <summary>Cờ TEST: vòng chạy kế tiếp ép shop đầu lỗi địa chỉ (một lần, tự tắt sau khi tiêu thụ).</summary>
+    public bool EpShopDauLoiDiaChi
+    {
+        get => _services.Settings.GetForceFirstShopPickupFail();
+        set
+        {
+            if (_services.Settings.GetForceFirstShopPickupFail() == value)
+            {
+                return;
+            }
+
+            _services.Settings.SetForceFirstShopPickupFail(value);
+            OnPropertyChanged(nameof(EpShopDauLoiDiaChi));
+        }
+    }
+
+    /// <summary>
+    /// Giả lập NGAY trên UI (không cần chạy vòng Shopee): shop đầu lỗi địa chỉ → dừng shop đó (không in phiếu),
+    /// hiện banner + dấu X đỏ; nếu có shop hai thì giả lập tiếp tục check shop đó.
+    /// </summary>
+    [RelayCommand]
+    private async Task GiaLapLoiDiaChiShopDauAsync()
+    {
+        if (SelectedRow?.Id is not long accountId)
+        {
+            return;
+        }
+
+        DetailTabIndex = 1; // nhảy sang tab Kết quả để thấy banner + X
+
+        // Chưa có shop trên lưới → dựng 2 shop TEST (đầu lỗi, hai ok).
+        if (ResultRows.Count == 0)
+        {
+            _services.Results.UpsertShops(accountId, new[]
+            {
+                new ShopListItem("test-1", "TEST shop đầu (lỗi địa chỉ)", TestShopDauLoiDiaChi),
+                new ShopListItem("test-2", "TEST shop hai (ok)", TestShopHaiOk),
+            });
+            LoadResults();
+        }
+
+        if (ResultRows.Count == 0)
+        {
+            return;
+        }
+
+        var shopDau = ResultRows[0].ShopLogin;
+        var shopHai = ResultRows.Count > 1 ? ResultRows[1].ShopLogin : null;
+        var province = string.IsNullOrWhiteSpace(SelectedRow.Account.PickupAddress)
+            ? "Thanh Hóa"
+            : SelectedRow.Account.PickupAddress!.Trim();
+        var email = SelectedRow.Email ?? "";
+
+        void Log(string m)
+        {
+            if (email.Length > 0)
+            {
+                _services.Log.Append(email, m);
+            }
+        }
+
+        // 1) Đang check shop đầu → rồi xong (bỏ qua vì địa chỉ).
+        _services.RaiseShopCheckChanged(accountId, shopDau, checking: true);
+        await Task.Delay(450).ConfigureAwait(true);
+        _services.RaiseShopCheckChanged(accountId, shopDau, checking: false);
+
+        Log($"⛔ [TEST] Không đặt được địa chỉ lấy hàng ({province}) — BỎ QUA shop {shopDau}, "
+            + "KHÔNG in phiếu; sang shop kế (nếu còn).");
+
+        // 2) Cùng đường production: GhiBanner → AddressAlertsChanged → banner + dấu X.
+        new OrderPersistPipeline(accountId, _services)
+            .GhiBannerLoiDiaChi(shopDau, province, Log, CancellationToken.None);
+
+        // 3) Shop hai vẫn chạy (nếu có) — chứng minh chỉ dừng shop lỗi, không dừng cả vòng.
+        if (shopHai is not null)
+        {
+            await Task.Delay(350).ConfigureAwait(true);
+            _services.RaiseShopCheckChanged(accountId, shopHai, checking: true);
+            Log($"[TEST] Tiếp tục shop kế {shopHai}...");
+            await Task.Delay(700).ConfigureAwait(true);
+            _services.RaiseShopCheckChanged(accountId, shopHai, checking: false);
+            Log($"[TEST] Xong giả lập: shop {shopDau} có banner + X đỏ; shop {shopHai} đã chạy tiếp.");
+        }
+        else
+        {
+            Log($"[TEST] Xong giả lập: shop {shopDau} có banner + X đỏ (không còn shop kế trên lưới).");
+        }
+
+        // Đồng bộ cờ checkbox (nếu user vừa bật ép vòng thật — không đụng ở đây).
+        OnPropertyChanged(nameof(EpShopDauLoiDiaChi));
     }
 
     /// <summary>Bấm X trên một dòng banner — dismiss local + Hub; chỉ dòng đó biến mất.</summary>

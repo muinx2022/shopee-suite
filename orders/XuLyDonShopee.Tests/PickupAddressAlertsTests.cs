@@ -157,6 +157,48 @@ public class PickupAddressAlertsTests
         Assert.True(row.ShowTick);
     }
 
+    /// <summary>
+    /// Tình huống TEST trên UI: lệnh giả lập shop đầu lỗi → banner + X đỏ; shop hai vẫn được check tiếp.
+    /// </summary>
+    [Fact]
+    public async Task GiaLapLoiDiaChiShopDau_HienBannerVaDauX_ShopHaiTiepTuc()
+    {
+        using var temp = new TempDatabase();
+        var services = new AppServices(temp.Path);
+        services.Accounts.Insert(new Account { Email = "test-dia-chi@mail.com", Password = "p" });
+
+        var vm = new AccountsViewModel(services);
+        vm.SelectedRow = vm.Accounts.First();
+        Assert.Empty(vm.ResultRows); // chưa có shop → lệnh sẽ dựng 2 shop TEST
+
+        await vm.GiaLapLoiDiaChiShopDauCommand.ExecuteAsync(null);
+
+        Assert.Equal(2, vm.ResultRows.Count);
+        Assert.Equal(AccountsViewModel.TestShopDauLoiDiaChi, vm.ResultRows[0].ShopLogin);
+        Assert.Equal(AccountsViewModel.TestShopHaiOk, vm.ResultRows[1].ShopLogin);
+
+        var banner = Assert.Single(vm.AddressAlertRows);
+        Assert.Equal(AccountsViewModel.TestShopDauLoiDiaChi, banner.ShopLogin);
+        Assert.True(vm.ResultRows[0].ShowLoiDiaChi);
+        Assert.False(vm.ResultRows[1].CoLoiDiaChi);
+        Assert.True(vm.ResultRows[1].DaKiemTra); // shop hai đã được giả lập chạy tiếp
+        Assert.False(vm.ResultRows[1].IsChecking);
+    }
+
+    [Fact]
+    public void TryConsumeForceFirstShopPickupFail_MotLanRoiTat()
+    {
+        using var temp = new TempDatabase();
+        var services = new AppServices(temp.Path);
+        Assert.False(services.Settings.TryConsumeForceFirstShopPickupFail());
+
+        services.Settings.SetForceFirstShopPickupFail(true);
+        Assert.True(services.Settings.GetForceFirstShopPickupFail());
+        Assert.True(services.Settings.TryConsumeForceFirstShopPickupFail());
+        Assert.False(services.Settings.GetForceFirstShopPickupFail());
+        Assert.False(services.Settings.TryConsumeForceFirstShopPickupFail());
+    }
+
     [Fact]
     public void DismissBanner_TatDauXTrenDongShop()
     {

@@ -662,6 +662,16 @@
                                            FontSize="11" Foreground="{StaticResource TextMuted}"
                                            VerticalAlignment="Center"
                                            Visibility="{Binding DangDungSoHub, Converter={StaticResource InvBoolToVis}}" />
+                                <!-- Tình huống TEST lỗi địa chỉ: giả lập ngay trên UI, hoặc ép shop đầu khi chạy vòng. -->
+                                <Button Margin="16,0,0,0" Padding="10,4" FontSize="12"
+                                        Command="{Binding GiaLapLoiDiaChiShopDauCommand}"
+                                        ToolTip="Giả lập shop đầu lỗi địa chỉ: dừng shop đó, hiện banner + dấu X đỏ; shop kế vẫn chạy (không cần vòng Shopee).">
+                                    <TextBlock Text="Giả lập lỗi địa chỉ (shop đầu)" />
+                                </Button>
+                                <CheckBox Margin="10,0,0,0" VerticalAlignment="Center" FontSize="12"
+                                          IsChecked="{Binding EpShopDauLoiDiaChi}"
+                                          Content="Ép shop đầu lỗi khi chạy vòng (1 lần)"
+                                          ToolTip="Bật rồi mở phiên chạy vòng: shop đầu bị bỏ qua như lỗi địa chỉ (banner + X), shop kế vẫn chạy; cờ tự tắt sau một lần." />
                             </StackPanel>
                             <!-- Dòng TỔNG — nằm ngay trên lưới để liếc là thấy, khỏi cuộn hết danh sách shop.
                                  Cộng đúng cột "Chuẩn bị hàng" của MỌI shop đang hiện. -->

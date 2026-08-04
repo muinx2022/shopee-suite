@@ -61,6 +61,10 @@ public class SettingsRepository
     /// tìm mail Shopee + bấm link "TẠI ĐÂY" + chờ đăng nhập; TẮT ⇒ chỉ đăng nhập hộp thư rồi DỪNG cho user tay.</summary>
     private const string AutoConfirmEmailKey = "auto_confirm_email";
 
+    /// <summary>Key: cờ TEST một lần — vòng chạy kế tiếp ép shop ĐẦU TIÊN lỗi địa chỉ (bỏ qua shop đó + banner).
+    /// Sau khi vòng tiêu thụ sẽ tự tắt.</summary>
+    private const string ForceFirstShopPickupFailKey = "force_first_shop_pickup_fail";
+
     private readonly Database _db;
 
     public SettingsRepository(Database db) => _db = db;
@@ -232,6 +236,37 @@ public class SettingsRepository
 
     /// <summary>Lưu cờ "Tự động xác nhận" ("true"/"false").</summary>
     public void SetAutoConfirmEmail(bool value) => Set(AutoConfirmEmailKey, value ? "true" : "false");
+
+    /// <summary>Cờ TEST: vòng kế tiếp ép shop đầu lỗi địa chỉ. Thiếu/lạ → false.</summary>
+    public bool GetForceFirstShopPickupFail()
+    {
+        var v = Get(ForceFirstShopPickupFailKey)?.Trim();
+        if (string.IsNullOrEmpty(v))
+        {
+            return false;
+        }
+
+        return bool.TryParse(v, out var b) ? b : v == "1";
+    }
+
+    /// <summary>Bật/tắt cờ TEST ép shop đầu lỗi địa chỉ (một lần khi chạy vòng).</summary>
+    public void SetForceFirstShopPickupFail(bool value)
+        => Set(ForceFirstShopPickupFailKey, value ? "true" : "false");
+
+    /// <summary>
+    /// Nếu cờ TEST đang bật → tắt ngay và trả <c>true</c> (tiêu thụ một lần). Không bật → <c>false</c>.
+    /// Gọi từ vòng shop khi gặp shop đầu.
+    /// </summary>
+    public bool TryConsumeForceFirstShopPickupFail()
+    {
+        if (!GetForceFirstShopPickupFail())
+        {
+            return false;
+        }
+
+        SetForceFirstShopPickupFail(false);
+        return true;
+    }
 
     /// <summary>Lấy giá trị theo key, trả null nếu chưa có.</summary>
     public string? Get(string key)
