@@ -119,21 +119,21 @@ public class AppServices
     public Func<string, string?, string?, string?, string?, CancellationToken, Task<bool>>? ReportAppAlertToHub { get; set; }
 
     /// <summary>
-    /// HOOK upsert banner lỗi địa chỉ lên Hub (đồng bộ đa máy). Tham số: accountLogin, shopLogin, province, ct.
-    /// Trả true = Hub nhận OK. Null = chưa nối Hub.
+    /// HOOK upsert banner lỗi địa chỉ lên Hub (đồng bộ đa máy). Tham số: accountLogin, shopLogin, province,
+    /// occurredAt (mốc sự kiện local), ct. Trả true = Hub nhận OK. Null = chưa nối Hub.
     /// </summary>
-    public Func<string, string, string?, CancellationToken, Task<bool>>? UpsertPickupAlertToHub { get; set; }
+    public Func<string, string, string?, DateTimeOffset?, CancellationToken, Task<bool>>? UpsertPickupAlertToHub { get; set; }
 
     /// <summary>
-    /// HOOK dismiss banner lỗi địa chỉ trên Hub. Tham số: accountLogin, shopLogin, ct. Null = chưa nối Hub.
+    /// HOOK dismiss banner lỗi địa chỉ trên Hub. Tham số: accountLogin, shopLogin, occurredAt, ct. Null = chưa nối Hub.
     /// </summary>
-    public Func<string, string, CancellationToken, Task<bool>>? DismissPickupAlertToHub { get; set; }
+    public Func<string, string, DateTimeOffset?, CancellationToken, Task<bool>>? DismissPickupAlertToHub { get; set; }
 
     /// <summary>
     /// HOOK kéo danh sách banner lỗi địa chỉ từ Hub cho một tài khoản (kể cả đã dismiss — để merge).
-    /// Trả null = không hỏi được Hub. Mỗi phần tử: shopLogin, province, dismissed.
+    /// Trả null = không hỏi được Hub.
     /// </summary>
-    public Func<string, CancellationToken, Task<IReadOnlyList<(string ShopLogin, string Province, bool Dismissed)>?>>? FetchPickupAlertsFromHub { get; set; }
+    public Func<string, CancellationToken, Task<IReadOnlyList<PickupAlertHubDong>?>>? FetchPickupAlertsFromHub { get; set; }
 
     /// <summary>
     /// HOOK +1 "Đã bán" theo SKU (khớp TUYỆT ĐỐI, MỌI shop) trên kho sản phẩm HUB (Postgres), do shell suite RÓT

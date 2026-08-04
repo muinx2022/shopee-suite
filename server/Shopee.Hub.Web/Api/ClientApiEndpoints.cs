@@ -285,7 +285,7 @@ public static class ClientApiEndpoints
             if (r is null || string.IsNullOrWhiteSpace(r.AccountLogin) || string.IsNullOrWhiteSpace(r.ShopLogin))
                 return Results.BadRequest();
             var mid = req.Headers["X-Machine-Id"].ToString();
-            if (!db.UpsertPickupAlert(r.AccountLogin, r.ShopLogin, r.Province, mid))
+            if (!db.UpsertPickupAlert(r.AccountLogin, r.ShopLogin, r.Province, mid, r.OccurredAt))
                 return Results.BadRequest();
             db.AppendLog(new AppendLogRequest(mid, "", "info",
                 $"orders/pickup-alerts/upsert account={r.AccountLogin.Trim()} shop={r.ShopLogin.Trim()}"));
@@ -296,7 +296,7 @@ public static class ClientApiEndpoints
             if (r is null || string.IsNullOrWhiteSpace(r.AccountLogin) || string.IsNullOrWhiteSpace(r.ShopLogin))
                 return Results.BadRequest();
             var mid = req.Headers["X-Machine-Id"].ToString();
-            if (!db.DismissPickupAlert(r.AccountLogin, r.ShopLogin, mid))
+            if (!db.DismissPickupAlert(r.AccountLogin, r.ShopLogin, mid, r.OccurredAt))
                 return Results.BadRequest();
             db.AppendLog(new AppendLogRequest(mid, "", "info",
                 $"orders/pickup-alerts/dismiss account={r.AccountLogin.Trim()} shop={r.ShopLogin.Trim()}"));
@@ -311,6 +311,8 @@ public static class ClientApiEndpoints
                 ShopLogin = x.ShopLogin,
                 Province = x.Province,
                 Dismissed = !string.IsNullOrEmpty(x.DismissedAt),
+                CreatedAt = x.CreatedAt,
+                DismissedAt = x.DismissedAt,
             }).ToList();
             return Results.Json(items);
         });

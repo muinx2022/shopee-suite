@@ -24,8 +24,13 @@ CREATE TABLE IF NOT EXISTS orders_pickup_alerts(
 CREATE INDEX IF NOT EXISTS ix_orders_pickup_alerts_account
   ON orders_pickup_alerts(account_login);");
 
-    /// <summary>Ghi/hiện lại banner (xóa dismissed_at). Trả false nếu thiếu khóa.</summary>
-    public bool UpsertPickupAlert(string accountLogin, string shopLogin, string? province, string? machineId)
+    /// <summary>
+    /// Ghi/hiện lại banner. <paramref name="occurredAtIso"/> = mốc sự kiện phía client (ISO);
+    /// thiếu → dùng giờ nhận trên Hub. Nếu dòng đang dismiss và mốc sự kiện <c>&lt;</c> <c>dismissed_at</c>
+    /// thì bỏ qua (không clear dismiss — chống upsert chậm tới sau khi user bấm X).
+    /// </summary>
+    public bool UpsertPickupAlert(
+        string accountLogin, string shopLogin, string? province, string? machineId, string? occurredAtIso = null)
     {
         var acc = (accountLogin ?? "").Trim();
         var shop = (shopLogin ?? "").Trim();
@@ -34,24 +39,43 @@ CREATE INDEX IF NOT EXISTS ix_orders_pickup_alerts_account
         lock (_gate)
         {
             var now = Iso(DateTimeOffset.UtcNow);
+            var occ = ChuanHoaIso(occurredAtIso) ?? now;
             using var c = _conn.CreateCommand();
+            // ISO "o" so sánh lexicographic được khi cùng dạng UTC.
             c.CommandText = @"
 INSERT INTO orders_pickup_alerts(account_login, shop_login, province, created_at, dismissed_at, updated_by_machine)
-VALUES($a, $s, $p, $c, NULL, $m)
+VALUES($a, $s, $p, $occ, NULL, $m)
 ON CONFLICT(account_login, shop_login) DO UPDATE SET
-  province=$p, created_at=$c, dismissed_at=NULL, updated_by_machine=$m;";
+  province=$p,
+  updated_by_machine=$m,
+  created_at=CASE
+    WHEN orders_pickup_alerts.dismissed_at IS NOT NULL
+         AND $occ < orders_pickup_alerts.dismissed_at
+    THEN orders_pickup_alerts.created_at
+    ELSE $occ
+  END,
+  dismissed_at=CASE
+    WHEN orders_pickup_alerts.dismissed_at IS NOT NULL
+         AND $occ < orders_pickup_alerts.dismissed_at
+    THEN orders_pickup_alerts.dismissed_at
+    ELSE NULL
+  END;";
             c.Parameters.AddWithValue("$a", acc);
             c.Parameters.AddWithValue("$s", shop);
             c.Parameters.AddWithValue("$p", (province ?? "").Trim());
-            c.Parameters.AddWithValue("$c", now);
+            c.Parameters.AddWithValue("$occ", occ);
             c.Parameters.AddWithValue("$m", (machineId ?? "").Trim());
             c.ExecuteNonQuery();
             return true;
         }
     }
 
-    /// <summary>Đánh dấu đã đóng (bấm X). Trả false nếu thiếu khóa.</summary>
-    public bool DismissPickupAlert(string accountLogin, string shopLogin, string? machineId)
+    /// <summary>
+    /// Đánh dấu đã đóng (bấm X): UPSERT tombstone — chưa có dòng vẫn INSERT với <c>dismissed_at</c>
+    /// để máy khác kéo Hub biết đã đóng. <paramref name="occurredAtIso"/> thiếu → giờ Hub.
+    /// </summary>
+    public bool DismissPickupAlert(
+        string accountLogin, string shopLogin, string? machineId, string? occurredAtIso = null)
     {
         var acc = (accountLogin ?? "").Trim();
         var shop = (shopLogin ?? "").Trim();
@@ -60,21 +84,24 @@ ON CONFLICT(account_login, shop_login) DO UPDATE SET
         lock (_gate)
         {
             var now = Iso(DateTimeOffset.UtcNow);
+            var d = ChuanHoaIso(occurredAtIso) ?? now;
             using var c = _conn.CreateCommand();
             c.CommandText = @"
-UPDATE orders_pickup_alerts
-SET dismissed_at=$d, updated_by_machine=$m
-WHERE account_login=$a AND shop_login=$s AND dismissed_at IS NULL;";
-            c.Parameters.AddWithValue("$d", now);
-            c.Parameters.AddWithValue("$m", (machineId ?? "").Trim());
+INSERT INTO orders_pickup_alerts(account_login, shop_login, province, created_at, dismissed_at, updated_by_machine)
+VALUES($a, $s, '', $d, $d, $m)
+ON CONFLICT(account_login, shop_login) DO UPDATE SET
+  dismissed_at=$d,
+  updated_by_machine=$m;";
             c.Parameters.AddWithValue("$a", acc);
             c.Parameters.AddWithValue("$s", shop);
+            c.Parameters.AddWithValue("$d", d);
+            c.Parameters.AddWithValue("$m", (machineId ?? "").Trim());
             c.ExecuteNonQuery();
             return true;
         }
     }
 
-    /// <summary>Mọi banner của tài khoản (kể cả đã dismiss) — client merge: Hub dismiss thắng.</summary>
+    /// <summary>Mọi banner của tài khoản (kể cả đã dismiss) — client merge theo mốc thời gian.</summary>
     public List<OrdersPickupAlertRow> ListPickupAlerts(string accountLogin)
     {
         var acc = (accountLogin ?? "").Trim();
@@ -103,5 +130,12 @@ ORDER BY created_at DESC, shop_login COLLATE NOCASE;";
             }
             return list;
         }
+    }
+
+    /// <summary>Chuẩn hoá chuỗi ISO client gửi; rỗng/không parse → null.</summary>
+    private static string? ChuanHoaIso(string? iso)
+    {
+        if (string.IsNullOrWhiteSpace(iso)) return null;
+        return DateTimeOffset.TryParse(iso.Trim(), out var d) ? Iso(d.ToUniversalTime()) : null;
     }
 }

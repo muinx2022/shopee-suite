@@ -473,6 +473,7 @@ internal sealed class OrderPersistPipeline
     public void GhiBannerLoiDiaChi(string? pickupFailedShop, string tinh, Action<string> log, CancellationToken ct)
     {
         var shops = TachTenShopLoiDiaChi(pickupFailedShop);
+        var occurredAt = DateTimeOffset.UtcNow;
         foreach (var shop in shops)
         {
             try
@@ -500,7 +501,8 @@ internal sealed class OrderPersistPipeline
             {
                 foreach (var shop in shops)
                 {
-                    var ok = await upsertHub(accountLogin, shop, tinh, ct).ConfigureAwait(false);
+                    var ok = await PickupAlertHubGate.RunAsync(accountLogin, shop, () =>
+                        upsertHub(accountLogin, shop, tinh, occurredAt, ct)).ConfigureAwait(false);
                     if (ok)
                     {
                         log($"Banner địa chỉ: đã đồng bộ Hub shop {shop}.");

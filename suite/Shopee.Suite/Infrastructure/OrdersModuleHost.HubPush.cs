@@ -6,6 +6,7 @@ using System.Linq;
 using Shopee.Core.Coordination;
 using XuLyDonShopee.App.Services;
 using XuLyDonShopee.Core.Models;
+using XuLyDonShopee.Core.Services;
 
 namespace Shopee.Suite.Infrastructure;
 
@@ -100,7 +101,7 @@ public static partial class OrdersModuleHost
             }
         };
 
-        services.UpsertPickupAlertToHub = async (accountLogin, shopLogin, province, ct) =>
+        services.UpsertPickupAlertToHub = async (accountLogin, shopLogin, province, occurredAt, ct) =>
         {
             try
             {
@@ -111,6 +112,7 @@ public static partial class OrdersModuleHost
                         AccountLogin = accountLogin,
                         ShopLogin = shopLogin,
                         Province = province,
+                        OccurredAt = (occurredAt ?? DateTimeOffset.UtcNow).ToString("o"),
                     }, ct).ConfigureAwait(false);
                 return true;
             }
@@ -122,7 +124,7 @@ public static partial class OrdersModuleHost
             }
         };
 
-        services.DismissPickupAlertToHub = async (accountLogin, shopLogin, ct) =>
+        services.DismissPickupAlertToHub = async (accountLogin, shopLogin, occurredAt, ct) =>
         {
             try
             {
@@ -132,6 +134,7 @@ public static partial class OrdersModuleHost
                     {
                         AccountLogin = accountLogin,
                         ShopLogin = shopLogin,
+                        OccurredAt = (occurredAt ?? DateTimeOffset.UtcNow).ToString("o"),
                     }, ct).ConfigureAwait(false);
                 return true;
             }
@@ -152,7 +155,12 @@ public static partial class OrdersModuleHost
                 if (list is null) return null;
                 return list
                     .Where(x => !string.IsNullOrWhiteSpace(x.ShopLogin))
-                    .Select(x => (x.ShopLogin.Trim(), x.Province ?? "", x.Dismissed))
+                    .Select(x => new PickupAlertHubDong(
+                        x.ShopLogin.Trim(),
+                        x.Province ?? "",
+                        x.Dismissed,
+                        ParseIsoOffset(x.CreatedAt),
+                        ParseIsoOffset(x.DismissedAt)))
                     .ToList();
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
@@ -294,6 +302,12 @@ public static partial class OrdersModuleHost
         }
         return $"account-{accountId}";
     }
+
+    private static DateTimeOffset? ParseIsoOffset(string? iso)
+        => !string.IsNullOrWhiteSpace(iso) && DateTimeOffset.TryParse(iso, CultureInfo.InvariantCulture,
+            DateTimeStyles.RoundtripKind, out var d)
+            ? d
+            : null;
 
     /// <summary>Map một <see cref="SyncedOrder"/> (module Đơn hàng) sang <see cref="OrderPushItem"/> (DTO hub) —
     /// mirror field-by-field để client đẩy 1-1, khỏi lệch field.

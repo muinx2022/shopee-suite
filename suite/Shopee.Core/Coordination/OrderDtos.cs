@@ -125,6 +125,8 @@ public sealed class OrdersPickupAlertRequest
     public string AccountLogin { get; set; } = "";
     public string ShopLogin { get; set; } = "";
     public string? Province { get; set; }
+    /// <summary>Mốc sự kiện phía client (ISO). Thiếu → Hub dùng giờ nhận. Upsert cũ hơn dismissed_at bị bỏ qua.</summary>
+    public string? OccurredAt { get; set; }
 }
 
 /// <summary>Một dòng GET /api/orders/pickup-alerts — <see cref="Dismissed"/> true = máy khác (hoặc máy này) đã bấm X.</summary>
@@ -133,4 +135,8 @@ public sealed class OrdersPickupAlertItem
     public string ShopLogin { get; set; } = "";
     public string Province { get; set; } = "";
     public bool Dismissed { get; set; }
+    /// <summary>ISO created_at trên Hub (khi active = mốc lỗi; khi chỉ tombstone dismiss có thể = dismissed).</summary>
+    public string? CreatedAt { get; set; }
+    /// <summary>ISO dismissed_at — null/rỗng = đang hiện banner.</summary>
+    public string? DismissedAt { get; set; }
 }

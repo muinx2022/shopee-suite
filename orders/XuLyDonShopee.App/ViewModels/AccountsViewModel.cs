@@ -78,6 +78,10 @@ public partial class AccountsViewModel : ViewModelBase, IDisposable
         // qua nửa đêm số đóng băng ở hôm qua và đơn của ngày mới không hiện ra nữa. Callback chạy trên thread
         // nền nên tự marshal về UI thread (xem NhipSangNgay).
         _timerSangNgay = new System.Threading.Timer(_ => NhipSangNgay(), null, NhipDoSangNgay, NhipDoSangNgay);
+
+        // Kéo Hub pickup-alerts khi đang mở tab Kết quả (ban đầu tắt — bật trong CapNhatTimerSyncPickupAlerts).
+        _timerSyncPickupAlerts = new System.Threading.Timer(
+            _ => NhipSyncPickupAlerts(), null, System.Threading.Timeout.Infinite, System.Threading.Timeout.Infinite);
     }
 
     /// <summary>Dọn đồng hồ dò sang ngày. VM sống suốt vòng đời app (dựng một lần trong <see cref="MainViewModel"/>)
@@ -86,6 +90,7 @@ public partial class AccountsViewModel : ViewModelBase, IDisposable
     public void Dispose()
     {
         try { _timerSangNgay.Dispose(); } catch { /* bỏ qua khi thoát */ }
+        try { _timerSyncPickupAlerts.Dispose(); } catch { /* bỏ qua khi thoát */ }
         // ActivityLog sống suốt vòng đời app → không gỡ là VM này còn bị giữ lại (rò bộ nhớ).
         try { _services.Log.SourceUpdated -= OnLogSourceUpdated; } catch { /* bỏ qua khi thoát */ }
         try { _services.AddressAlertsChanged -= OnAddressAlertsChanged; } catch { /* bỏ qua khi thoát */ }
@@ -262,6 +267,17 @@ public partial class AccountsViewModel : ViewModelBase, IDisposable
         LoadAddressAlertsFromLocal();
         _ = RefreshHubCountsAsync();
         _ = SyncAddressAlertsFromHubAsync();
+        CapNhatTimerSyncPickupAlerts();
+    }
+
+    partial void OnDetailTabIndexChanged(int value)
+    {
+        CapNhatTimerSyncPickupAlerts();
+        // Vào tab Kết quả → kéo Hub ngay (không chờ đủ 60s) để nhận dismiss từ máy khác sớm.
+        if (value == 1 && SelectedRow is not null)
+        {
+            _ = SyncAddressAlertsFromHubAsync();
+        }
     }
 
     /// <summary>

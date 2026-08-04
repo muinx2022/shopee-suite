@@ -1,7 +1,7 @@
 # Plan: Đóng banner lỗi địa chỉ → bền local + Hub + client khác
 
 - **Ngày:** 2026-08-04
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành
 - **Người lập:** Fable · **Người thực thi:** Auto
 
 ## 1. Bối cảnh & mục tiêu
@@ -158,4 +158,8 @@ Chạy: `dotnet test orders/XuLyDonShopee.Tests/XuLyDonShopee.Tests.csproj --fil
 
 ## Báo cáo thực thi (điền sau khi xong)
 
-_(chưa thực thi)_
+- Hub: dismiss UPSERT tombstone; upsert tôn trọng `OccurredAt` vs `dismissed_at` — đã deploy VPS, health 200.
+- Smoke production: dismiss `alina99.store` → `dismissed=true`; stale upsert giữ dismiss.
+- Client: merge `PickupAlertMerge`, gate Hub, timer 60s tab Kết quả, log khi dismiss Hub fail.
+- Test: `PickupAddressAlerts` 12 passed; `PickupAlertsHub` 3 passed. Suite + Hub build 0 warning.
+- Version/CHANGELOG: chuẩn bị **v1.7.16** (chưa chạy `release-suite.cmd` — cần user bảo release).

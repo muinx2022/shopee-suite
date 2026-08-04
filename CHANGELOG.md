@@ -5,6 +5,12 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Hiệu năng. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.7.16 — 2026-08-04
+
+- **Đơn hàng — đóng banner lỗi địa chỉ đồng bộ Hub:** bấm X ghi dismiss local + tombstone Hub (kể cả Hub chưa
+  từng có dòng); merge không dựng lại banner đã đóng khi Hub còn active cũ; chống race upsert chậm sau dismiss;
+  kéo Hub mỗi ~60s khi đang mở tab Kết quả để máy khác nhận dismiss sớm hơn.
+
 ## v1.7.15 — 2026-08-04
 
 - **Đơn hàng — bỏ cột Số lượng trên màn Đơn hàng:** vẫn giữ hậu tố `. SL: N` trong cột Phân loại (app + GSheet).

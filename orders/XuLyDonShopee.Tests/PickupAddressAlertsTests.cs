@@ -181,4 +181,38 @@ public class PickupAddressAlertsTests
         Assert.False(vm.ResultRows.Single().CoLoiDiaChi);
         Assert.False(vm.ResultRows.Single().ShowLoiDiaChi);
     }
+
+    [Fact]
+    public void Merge_HubDismissed_LocalDismiss()
+        => Assert.Equal(MergePickupAlertAction.LocalDismiss,
+            PickupAlertMerge.QuyetDinh(
+                localDismissedAt: null,
+                hubDismissed: true,
+                hubCreatedAt: DateTimeOffset.UtcNow.AddMinutes(-5)));
+
+    [Fact]
+    public void Merge_LocalDismissMoiHonHubActive_KeepVaRepush()
+    {
+        var hubCreated = new DateTimeOffset(2026, 8, 4, 4, 0, 0, TimeSpan.Zero);
+        var localDismiss = new DateTime(2026, 8, 4, 4, 40, 0, DateTimeKind.Utc);
+        Assert.Equal(MergePickupAlertAction.KeepLocalDismissRepushHub,
+            PickupAlertMerge.QuyetDinh(localDismiss, hubDismissed: false, hubCreated));
+    }
+
+    [Fact]
+    public void Merge_HubActiveMoiHonLocalDismiss_LocalUpsert()
+    {
+        var localDismiss = new DateTime(2026, 8, 4, 4, 0, 0, DateTimeKind.Utc);
+        var hubCreated = new DateTimeOffset(2026, 8, 4, 5, 0, 0, TimeSpan.Zero);
+        Assert.Equal(MergePickupAlertAction.LocalUpsert,
+            PickupAlertMerge.QuyetDinh(localDismiss, hubDismissed: false, hubCreated));
+    }
+
+    [Fact]
+    public void Merge_LocalDismiss_HubActiveThieuCreatedAt_KeepVaRepush()
+        => Assert.Equal(MergePickupAlertAction.KeepLocalDismissRepushHub,
+            PickupAlertMerge.QuyetDinh(
+                localDismissedAt: DateTime.UtcNow,
+                hubDismissed: false,
+                hubCreatedAt: null));
 }
