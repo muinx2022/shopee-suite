@@ -1,4 +1,6 @@
-﻿using System.Text.Json;
+﻿using System.Globalization;
+using System.Text;
+using System.Text.Json;
 
 namespace XuLyDonShopee.Core.Services;
 
@@ -7,7 +9,7 @@ namespace XuLyDonShopee.Core.Services;
 /// TRANG DANH SÁCH — KHÔNG cần mở trang chi tiết đơn) để hiện thành cột riêng. Shopee gộp cả hai dòng
 /// "Phân loại:" và "SKU phân loại:" vào MỘT ô <c>.item-description</c> nên chuỗi thật có dạng
 /// <c>"Nâu Be,39 [A322 A322]"</c> — đuôi ngoặc vuông là SKU lặp lại, CẮT BỎ (SKU đã có cột riêng).
-/// Đơn nhiều sản phẩm → nối bằng <c>" · "</c>.
+/// Đơn nhiều sản phẩm → nối bằng <c>" · "</c>. Khi đã đọc được số lượng (≥1) gắn hậu tố <c>". SL: N"</c>.
 /// <para>
 /// Từ bản đọc sản phẩm ở TRANG CHI TIẾT (<c>SanPhamDonParser</c> — chỉ có bên client, KHÔNG link sang hub nên
 /// nhắc bằng tên trần), mỗi phần tử có thể có thêm khóa <c>phanLoai</c> SẠCH sẵn — <see cref="ChuoiPhanLoai"/>
@@ -21,7 +23,7 @@ namespace XuLyDonShopee.Core.Services;
 /// </summary>
 public static class PhanLoaiExtractor
 {
-    /// <summary>Dấu nối phân loại của nhiều sản phẩm trong cùng một đơn.</summary>
+    /// <summary>Dấu nối phân loại / số lượng của nhiều sản phẩm trong cùng một đơn.</summary>
     private const string Noi = " · ";
 
     /// <summary>Tiền tố Shopee gắn trước phân loại, tùy NGÔN NGỮ giao diện. Extension chỉ bóc bản tiếng Anh
@@ -30,9 +32,26 @@ public static class PhanLoaiExtractor
     private static readonly string[] TienTo = { "Phân loại", "Variation" };
 
     /// <summary>
-    /// Chuỗi "Phân loại" của cả đơn từ <paramref name="itemsJson"/>: lấy <c>variation</c> của từng sản phẩm, dọn
-    /// theo <see cref="DonGian"/>, bỏ sản phẩm không có phân loại, bỏ TRÙNG LẶP LIÊN TIẾP rồi nối bằng
-    /// <c>" · "</c>. Rỗng / <c>"[]"</c> / JSON hỏng / không phải mảng → chuỗi rỗng (KHÔNG ném).
+    /// Gắn hậu tố <c>". SL: N"</c> khi đã biết số lượng <paramref name="soLuong"/> ≥ 1 (kể cả 1).
+    /// Không đọc được số / &lt; 1 → trả nguyên <paramref name="phanLoai"/> (không bịa SL).
+    /// </summary>
+    internal static string GanSoLuong(string phanLoai, int? soLuong)
+    {
+        if (soLuong is not >= 1)
+        {
+            return phanLoai ?? string.Empty;
+        }
+
+        var n = soLuong.Value.ToString(CultureInfo.InvariantCulture);
+        var pl = phanLoai ?? string.Empty;
+        return pl.Length > 0 ? pl + ". SL: " + n : "SL: " + n;
+    }
+
+    /// <summary>
+    /// Chuỗi "Phân loại" của cả đơn từ <paramref name="itemsJson"/>: lấy <c>variation</c>/<c>phanLoai</c> của
+    /// từng sản phẩm, dọn theo <see cref="DonGian"/>, gắn <c>. SL: N</c> khi có <c>amount</c>/<c>soLuong</c> ≥ 1,
+    /// bỏ sản phẩm không có phân loại, nối bằng <c>" · "</c>. Không khử trùng (mỗi dòng SP giữ riêng để không
+    /// mất số lượng). Rỗng / JSON hỏng → chuỗi rỗng (KHÔNG ném).
     /// </summary>
     public static string TuItemsJson(string? itemsJson)
     {
@@ -64,18 +83,54 @@ public static class PhanLoaiExtractor
                     continue;
                 }
 
-                // Đơn nhiều SP cùng một phân loại → không lặp lại "Kem,36 · Kem,36".
-                if (parts.Count > 0 && string.Equals(parts[^1], s, StringComparison.Ordinal))
-                {
-                    continue;
-                }
-                parts.Add(s);
+                parts.Add(GanSoLuong(s, DocSoLuong(item)));
             }
             return string.Join(Noi, parts);
         }
         catch (JsonException)
         {
             return string.Empty; // items_json rác (đơn cũ / dữ liệu cụt) → coi như không có phân loại
+        }
+    }
+
+    /// <summary>
+    /// Chuỗi số lượng từng sản phẩm từ <paramref name="itemsJson"/> (khóa <c>amount</c>/<c>soLuong</c>), nối
+    /// bằng <c>" · "</c> đúng thứ tự. Không có số nào ≥ 1 → chuỗi rỗng. JSON hỏng → chuỗi rỗng (KHÔNG ném).
+    /// </summary>
+    public static string SoLuongTuItemsJson(string? itemsJson)
+    {
+        if (string.IsNullOrWhiteSpace(itemsJson))
+        {
+            return string.Empty;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(itemsJson);
+            if (doc.RootElement.ValueKind != JsonValueKind.Array)
+            {
+                return string.Empty;
+            }
+
+            var parts = new List<string>();
+            foreach (var item in doc.RootElement.EnumerateArray())
+            {
+                if (item.ValueKind != JsonValueKind.Object)
+                {
+                    continue;
+                }
+
+                var sl = DocSoLuong(item);
+                if (sl is >= 1)
+                {
+                    parts.Add(sl.Value.ToString(CultureInfo.InvariantCulture));
+                }
+            }
+            return string.Join(Noi, parts);
+        }
+        catch (JsonException)
+        {
+            return string.Empty;
         }
     }
 
@@ -146,6 +201,56 @@ public static class PhanLoaiExtractor
         }
         return item.TryGetProperty("variation", out var v) && v.ValueKind == JsonValueKind.String
             ? v.GetString()
+            : null;
+    }
+
+    /// <summary>Đọc số lượng từ khóa <c>soLuong</c> hoặc <c>amount</c> (số hoặc chuỗi có chữ số). Không đọc được → null.</summary>
+    private static int? DocSoLuong(JsonElement item)
+    {
+        foreach (var khoa in new[] { "soLuong", "amount" })
+        {
+            if (!item.TryGetProperty(khoa, out var v))
+            {
+                continue;
+            }
+
+            if (v.ValueKind == JsonValueKind.Number && v.TryGetInt32(out var n) && n >= 1)
+            {
+                return n;
+            }
+
+            if (v.ValueKind == JsonValueKind.String)
+            {
+                var parsed = DocSoTuChuoi(v.GetString());
+                if (parsed is >= 1)
+                {
+                    return parsed;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>Giữ chữ số trong chuỗi rồi parse (tiền tố <c>x</c>/<c>×</c> tự rụng). Không được → null.</summary>
+    private static int? DocSoTuChuoi(string? s)
+    {
+        if (string.IsNullOrWhiteSpace(s))
+        {
+            return null;
+        }
+
+        var sb = new StringBuilder(s.Length);
+        foreach (var c in s)
+        {
+            if (c is >= '0' and <= '9')
+            {
+                sb.Append(c);
+            }
+        }
+
+        return sb.Length > 0 && int.TryParse(sb.ToString(), NumberStyles.None, CultureInfo.InvariantCulture, out var n) && n >= 1
+            ? n
             : null;
     }
 

@@ -33,8 +33,8 @@ public class MergeSanPhamDonTests
         Assert.Equal(292010, don.FinalAmount);
         Assert.Equal(2, don.ItemCount);
         Assert.Equal(new[] { "A141", "A322" }, SanPhamDonParser.Parse(don.ItemsJson).Select(x => x.Sku));
-        // Khóa cũ còn nguyên → PhanLoaiExtractor (app + hub) vẫn đọc được.
-        Assert.Equal("Kem,36 · Nâu Be,39", PhanLoaiExtractor.TuItemsJson(don.ItemsJson));
+        // Khóa cũ còn nguyên → PhanLoaiExtractor (app + hub) vẫn đọc được (+ gắn . SL: N).
+        Assert.Equal("Kem,36. SL: 1 · Nâu Be,39. SL: 2", PhanLoaiExtractor.TuItemsJson(don.ItemsJson));
     }
 
     /// <summary>Trang chi tiết KHÔNG đọc được sản phẩm nào → giữ NGUYÊN mảng cũ, vẫn lấy được số tiền cuối cùng.</summary>

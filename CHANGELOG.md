@@ -5,6 +5,12 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Hiệu năng. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.7.14 — 2026-08-04
+
+- **Đơn hàng — số lượng trong phân loại + cột App:** cột Phân loại (GSheet + app) gắn `. SL: N` khi đã biết số
+  lượng (kể cả `SL: 1`); thêm cột **Số lượng** trên màn Đơn hàng. Chỉ áp đơn đẩy/hiển thị sau bản này — không
+  backfill Sheet cũ.
+
 ## v1.7.13 — 2026-08-04
 
 - **Đơn hàng — gỡ tình huống TEST lỗi địa chỉ:** bỏ nút giả lập / checkbox ép shop đầu trên tab Kết quả; giữ banner

@@ -26,7 +26,7 @@ public class HubOutboxGsheetSanPhamTests
             nenBaoThieuGsheetUrl: () => false, imLangKhiKhongCoDonMoi: true, log: _ => { },
             ct: CancellationToken.None);
 
-    /// <summary>Đơn HAI sản phẩm đọc từ trang chi tiết → cột K và M CÙNG số dòng, số lượng ≥2 mới có "×N".</summary>
+    /// <summary>Đơn HAI sản phẩm đọc từ trang chi tiết → cột K và J CÙNG số dòng, gắn ". SL: N" kể cả N=1.</summary>
     [Fact]
     public async Task HaiSanPham_HaiCotKhopCapTheoDong()
     {
@@ -53,7 +53,7 @@ public class HubOutboxGsheetSanPhamTests
         Assert.Equal(KetQuaDay.ThanhCong, await DayAsync(accId, services));
 
         var body = Assert.Single(web.Bodies);
-        Assert.Contains("\"phanLoai\":\"Kem,36\\nNâu Be,39 ×2\"", body);
+        Assert.Contains("\"phanLoai\":\"Kem,36. SL: 1\\nNâu Be,39. SL: 2\"", body);
         Assert.Contains("\"sku\":\"A141\\nA322\"", body);
     }
 
@@ -83,7 +83,7 @@ public class HubOutboxGsheetSanPhamTests
         Assert.Equal(KetQuaDay.ThanhCong, await DayAsync(accId, services));
 
         var body = Assert.Single(web.Bodies);
-        Assert.Contains("\"phanLoai\":\"Kem,36\"", body);
+        Assert.Contains("\"phanLoai\":\"Kem,36. SL: 1\"", body);
         Assert.Contains("\"sku\":\"A141\"", body);
         Assert.DoesNotContain("\\n", body); // không có ô nhiều dòng nào lọt vào payload đơn cũ
     }

@@ -11,41 +11,75 @@ namespace XuLyDonShopee.Tests;
 public class PhanLoaiExtractorTests
 {
     /// <summary>Dựng <c>items_json</c> đúng dạng extension quét ra (<c>{name, variation, amount, image}</c>);
-    /// phần tử <c>null</c> = sản phẩm THIẾU hẳn field <c>variation</c>.</summary>
+    /// phần tử <c>null</c> = sản phẩm THIẾU hẳn field <c>variation</c>. Mặc định <c>amount=1</c>.</summary>
     private static string Items(params string?[] variations)
         => "[" + string.Join(",", variations.Select(v => v is null
             ? "{\"name\":\"SP\",\"amount\":\"1\"}"
             : "{\"name\":\"SP\",\"variation\":" + JsonSerializer.Serialize(v) + ",\"amount\":\"1\"}")) + "]";
 
-    // ===== Một sản phẩm: cắt đuôi SKU, bóc tiền tố, giữ nguyên phần phân loại =====
+    private static string Item(string variation, string? amount)
+        => amount is null
+            ? "{\"name\":\"SP\",\"variation\":" + JsonSerializer.Serialize(variation) + "}"
+            : "{\"name\":\"SP\",\"variation\":" + JsonSerializer.Serialize(variation)
+              + ",\"amount\":" + JsonSerializer.Serialize(amount) + "}";
+
+    // ===== Một sản phẩm: cắt đuôi SKU, bóc tiền tố, gắn . SL: 1 (Items luôn có amount=1) =====
     [Theory]
-    [InlineData("Nâu Be,39 [A322 A322]", "Nâu Be,39")]                          // đơn 260728T47N5KSS
-    [InlineData("Kem,36 [A141 A141]", "Kem,36")]                                // đơn 260727S2R0097C
-    [InlineData("Trắng sữa,36 [B80482 B80482]", "Trắng sữa,36")]                // đơn 260727S20VWQ0K
-    [InlineData("Đen 9p-form chuẩn,37 [B21318 B21318]", "Đen 9p-form chuẩn,37")]
-    [InlineData("KEM,38/39", "KEM,38/39")]                                       // không có ngoặc → giữ nguyên
-    [InlineData("Phân loại:\u00A0KEM,38/39", "KEM,38/39")]                       // tiền tố tiếng Việt + &nbsp;
-    [InlineData("phân loại: Nâu Be,39 [A322 A322]", "Nâu Be,39")]                // tiền tố thường/hoa lẫn lộn
-    [InlineData("Variation: Kem,36 [A141 A141]", "Kem,36")]                      // tiền tố tiếng Anh (UI EN)
-    [InlineData("Xanh [nhạt],38 [A9 A9]", "Xanh [nhạt],38")]                     // ngoặc GIỮA chuỗi → chỉ cắt ĐUÔI
-    [InlineData("  Nâu Be,39 [A322 A322]  ", "Nâu Be,39")]                       // khoảng trắng thừa 2 đầu
-    [InlineData("[A322 A322]", "")]                                              // chỉ còn SKU → coi như không có
+    [InlineData("Nâu Be,39 [A322 A322]", "Nâu Be,39. SL: 1")]
+    [InlineData("Kem,36 [A141 A141]", "Kem,36. SL: 1")]
+    [InlineData("Trắng sữa,36 [B80482 B80482]", "Trắng sữa,36. SL: 1")]
+    [InlineData("Đen 9p-form chuẩn,37 [B21318 B21318]", "Đen 9p-form chuẩn,37. SL: 1")]
+    [InlineData("KEM,38/39", "KEM,38/39. SL: 1")]
+    [InlineData("Phân loại:\u00A0KEM,38/39", "KEM,38/39. SL: 1")]
+    [InlineData("phân loại: Nâu Be,39 [A322 A322]", "Nâu Be,39. SL: 1")]
+    [InlineData("Variation: Kem,36 [A141 A141]", "Kem,36. SL: 1")]
+    [InlineData("Xanh [nhạt],38 [A9 A9]", "Xanh [nhạt],38. SL: 1")]
+    [InlineData("  Nâu Be,39 [A322 A322]  ", "Nâu Be,39. SL: 1")]
+    [InlineData("[A322 A322]", "")] // chỉ còn SKU → coi như không có (không gắn SL)
     public void TuItemsJson_MotSanPham(string variation, string expected)
         => Assert.Equal(expected, PhanLoaiExtractor.TuItemsJson(Items(variation)));
 
-    // ===== Nhiều sản phẩm: nối " · ", bỏ item thiếu variation, bỏ trùng lặp liên tiếp =====
     [Fact]
     public void TuItemsJson_HaiSanPham_NoiBangDauCham()
-        => Assert.Equal("Nâu Be,39 · Kem,36",
+        => Assert.Equal("Nâu Be,39. SL: 1 · Kem,36. SL: 1",
             PhanLoaiExtractor.TuItemsJson(Items("Nâu Be,39 [A322 A322]", "Kem,36 [A141 A141]")));
 
     [Fact]
     public void TuItemsJson_ItemThieuVariation_BoQua()
-        => Assert.Equal("Kem,36", PhanLoaiExtractor.TuItemsJson(Items(null, "Kem,36 [A141 A141]", "")));
+        => Assert.Equal("Kem,36. SL: 1", PhanLoaiExtractor.TuItemsJson(Items(null, "Kem,36 [A141 A141]", "")));
 
     [Fact]
-    public void TuItemsJson_TrungLapLienTiep_ChiGiuMot()
-        => Assert.Equal("Kem,36", PhanLoaiExtractor.TuItemsJson(Items("Kem,36 [A141 A141]", "Kem,36 [A141 A141]")));
+    public void TuItemsJson_HaiDongGiongNhau_KhongKhuTrung_GiuSL()
+        => Assert.Equal("Kem,36. SL: 1 · Kem,36. SL: 1",
+            PhanLoaiExtractor.TuItemsJson(Items("Kem,36 [A141 A141]", "Kem,36 [A141 A141]")));
+
+    [Fact]
+    public void TuItemsJson_Amount2_GanSL2()
+        => Assert.Equal("Nâu Be,39. SL: 2",
+            PhanLoaiExtractor.TuItemsJson("[" + Item("Nâu Be,39 [A322 A322]", "2") + "]"));
+
+    [Fact]
+    public void TuItemsJson_ThieuAmount_KhongGanSL()
+        => Assert.Equal("Nâu Be,39",
+            PhanLoaiExtractor.TuItemsJson("[" + Item("Nâu Be,39 [A322 A322]", null) + "]"));
+
+    [Fact]
+    public void GanSoLuong_N1VaN2()
+    {
+        Assert.Equal("Kem,36. SL: 1", PhanLoaiExtractor.GanSoLuong("Kem,36", 1));
+        Assert.Equal("Kem,36. SL: 2", PhanLoaiExtractor.GanSoLuong("Kem,36", 2));
+        Assert.Equal("Kem,36", PhanLoaiExtractor.GanSoLuong("Kem,36", null));
+        Assert.Equal("SL: 1", PhanLoaiExtractor.GanSoLuong("", 1));
+    }
+
+    [Fact]
+    public void SoLuongTuItemsJson_NoiBangDauCham()
+    {
+        Assert.Equal("1", PhanLoaiExtractor.SoLuongTuItemsJson(Items("Kem,36")));
+        Assert.Equal("1 · 2", PhanLoaiExtractor.SoLuongTuItemsJson(
+            "[" + Item("Kem,36", "1") + "," + Item("Nâu Be,39", "2") + "]"));
+        Assert.Equal(string.Empty, PhanLoaiExtractor.SoLuongTuItemsJson("[" + Item("Kem,36", null) + "]"));
+    }
 
     // ===== Rác từ web: KHÔNG ném, trả chuỗi rỗng =====
     [Theory]
@@ -53,16 +87,15 @@ public class PhanLoaiExtractorTests
     [InlineData("")]
     [InlineData("   ")]
     [InlineData("[]")]
-    [InlineData("{")]                       // JSON hỏng (cụt)
+    [InlineData("{")]
     [InlineData("khong phai json")]
-    [InlineData("{\"variation\":\"Kem,36\"}")]  // object chứ không phải mảng
-    [InlineData("[1,2,\"x\"]")]                 // phần tử không phải object
-    [InlineData("[{\"variation\":123}]")]       // variation không phải chuỗi
+    [InlineData("{\"variation\":\"Kem,36\"}")]
+    [InlineData("[1,2,\"x\"]")]
+    [InlineData("[{\"variation\":123}]")]
     public void TuItemsJson_RacHoacRong_TraChuoiRong(string? itemsJson)
         => Assert.Equal(string.Empty, PhanLoaiExtractor.TuItemsJson(itemsJson));
 
-    // ===== SkuTuItemsJson: SKU từng sản phẩm nối " · ", KHÔNG khử trùng =====
-    /// <summary>Dựng items_json có khóa sku (trang CHI TIẾT); phần tử null = thiếu hẳn field sku.</summary>
+    // ===== SkuTuItemsJson =====
     private static string ItemsCoSku(params string?[] skus)
         => "[" + string.Join(",", skus.Select(s => s is null
             ? "{\"name\":\"SP\",\"variation\":\"X\",\"amount\":\"1\"}"

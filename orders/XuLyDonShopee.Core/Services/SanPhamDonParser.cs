@@ -187,8 +187,8 @@ public static class SanPhamDonParser
     /// <summary>
     /// Hai cột "Mã Sp" và "Phân loại" của Google Sheet, dựng từ CÙNG một danh sách đã sắp thứ tự nên hai chuỗi
     /// BẰNG SỐ DÒNG (nối bằng <c>"\n"</c> — <c>setValue</c> của Apps Script cho ra ô nhiều dòng). Số lượng gắn
-    /// hậu tố <c>" ×N"</c> vào phân loại <b>chỉ khi N ≥ 2</b> (đơn 1 cái giữ nguyên "Kem,36" như các dòng đã có
-    /// trên sheet).
+    /// hậu tố <c>". SL: N"</c> vào phân loại khi đã biết N ≥ 1 (kể cả 1), qua
+    /// <see cref="PhanLoaiExtractor.GanSoLuong"/>.
     /// <para>
     /// Trả <c>null</c> = KHÔNG có dữ liệu trang chi tiết (đơn cũ: <c>items_json</c> chỉ có
     /// <c>name/variation/amount/image</c>, hoặc không đọc được sản phẩm nào) ⇒ caller phải giữ NGUYÊN đường cũ
@@ -214,12 +214,7 @@ public static class SanPhamDonParser
         {
             sku.Add(sp.Sku ?? string.Empty); // thiếu SKU → DÒNG TRỐNG, tuyệt đối không nhảy dòng (lệch cặp)
             var pl = PhanLoaiExtractor.DonGian(sp.PhanLoai);
-            if (sp.SoLuong is >= 2)
-            {
-                var so = "×" + sp.SoLuong.Value.ToString(CultureInfo.InvariantCulture);
-                pl = pl.Length > 0 ? pl + " " + so : so;
-            }
-            phanLoai.Add(pl);
+            phanLoai.Add(PhanLoaiExtractor.GanSoLuong(pl, sp.SoLuong));
         }
         return new CotGsheetSanPham(string.Join("\n", sku), string.Join("\n", phanLoai));
     }

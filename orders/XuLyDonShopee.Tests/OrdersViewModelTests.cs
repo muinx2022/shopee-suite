@@ -296,15 +296,19 @@ public class OrdersViewModelTests
         Assert.Equal(expected, row.IsPendingPickup);
     }
 
-    // ===== Cột "Phân loại": dòng tính SẴN từ items_json (cắt đuôi SKU), items_json rỗng/null → chuỗi rỗng =====
+    // ===== Cột "Phân loại" / "Số lượng": suy từ items_json; thiếu amount → không gắn SL =====
     [Theory]
-    [InlineData("[{\"variation\":\"Nâu Be,39 [A322 A322]\"}]", "Nâu Be,39")]
-    [InlineData("[]", "")]
-    [InlineData(null, "")]
-    public void PhanLoai_SuyTuItemsJson(string? itemsJson, string expected)
+    [InlineData("[{\"variation\":\"Nâu Be,39 [A322 A322]\"}]", "Nâu Be,39", "")]
+    [InlineData("[{\"variation\":\"Nâu Be,39 [A322 A322]\",\"amount\":\"2\"}]", "Nâu Be,39. SL: 2", "2")]
+    [InlineData("[{\"variation\":\"Kem,36\",\"amount\":\"1\"},{\"variation\":\"Nâu Be,39\",\"amount\":\"2\"}]",
+        "Kem,36. SL: 1 · Nâu Be,39. SL: 2", "1 · 2")]
+    [InlineData("[]", "", "")]
+    [InlineData(null, "", "")]
+    public void PhanLoaiVaSoLuong_SuyTuItemsJson(string? itemsJson, string expectedPhanLoai, string expectedSoLuong)
     {
         var row = new OrderRowViewModel(new OrderRow { OrderSn = "SN", ItemsJson = itemsJson }, "lbl", "dir");
-        Assert.Equal(expected, row.PhanLoai);
+        Assert.Equal(expectedPhanLoai, row.PhanLoai);
+        Assert.Equal(expectedSoLuong, row.SoLuong);
     }
 
     // ===== B: "In nhiều đơn" — CHỈ tính đơn "Chờ lấy hàng" đang hiển thị; thiếu file phiếu → đếm "thiếu file", KHÔNG in =====

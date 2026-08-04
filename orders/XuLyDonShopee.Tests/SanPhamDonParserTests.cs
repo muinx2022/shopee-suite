@@ -157,16 +157,16 @@ public class SanPhamDonParserTests
         Assert.Equal(303050, item.GetProperty("thanhTien").GetInt64());
     }
 
-    /// <summary>HỒI QUY: <c>items_json</c> mới vẫn đọc được bằng <see cref="PhanLoaiExtractor.TuItemsJson"/> như cũ.</summary>
+    /// <summary>HỒI QUY: <c>items_json</c> mới vẫn đọc được bằng <see cref="PhanLoaiExtractor.TuItemsJson"/> (+ SL).</summary>
     [Fact]
     public void TaoItemsJson_PhanLoaiExtractor_VanDocDuoc()
     {
         var motSp = SanPhamDonParser.TaoItemsJson(SanPhamDonParser.Parse(MotSanPhamThat));
-        Assert.Equal("Kem,36", PhanLoaiExtractor.TuItemsJson(motSp));
+        Assert.Equal("Kem,36. SL: 1", PhanLoaiExtractor.TuItemsJson(motSp));
 
         var haiSp = SanPhamDonParser.TaoItemsJson(SanPhamDonParser.Parse(
             "[" + Sp("Giày A", "Kem,36", "A141", "1", "1", "1") + "," + Sp("Giày B", "Nâu Be,39", "A322", "1", "1", "1") + "]"));
-        Assert.Equal("Kem,36 · Nâu Be,39", PhanLoaiExtractor.TuItemsJson(haiSp));
+        Assert.Equal("Kem,36. SL: 1 · Nâu Be,39. SL: 1", PhanLoaiExtractor.TuItemsJson(haiSp));
     }
 
     /// <summary>Đọc lại chính chuỗi mình ghi ra (items_json dùng khóa <c>name</c>/<c>amount</c>/<c>image</c>).</summary>
@@ -183,17 +183,17 @@ public class SanPhamDonParserTests
 
     // ===== Hai cột Google Sheet: cùng số dòng, khớp cặp =====
 
-    /// <summary>Đơn 1 sản phẩm → KHÔNG xuống dòng, KHÔNG có "×1" (giữ đúng định dạng ~30 dòng đã có trên sheet).</summary>
+    /// <summary>Đơn 1 sản phẩm → KHÔNG xuống dòng; gắn ". SL: 1".</summary>
     [Fact]
     public void CotGsheet_MotSanPham_KhongXuongDong()
     {
         var cot = SanPhamDonParser.CotGsheet(SanPhamDonParser.TaoItemsJson(SanPhamDonParser.Parse(MotSanPhamThat)));
         Assert.NotNull(cot);
         Assert.Equal("A141", cot!.Sku);
-        Assert.Equal("Kem,36", cot.PhanLoai);
+        Assert.Equal("Kem,36. SL: 1", cot.PhanLoai);
     }
 
-    /// <summary>Hai sản phẩm → hai cột CÙNG số dòng; số lượng ≥2 mới gắn "×N".</summary>
+    /// <summary>Hai sản phẩm → hai cột CÙNG số dòng; gắn ". SL: N" kể cả N=1.</summary>
     [Fact]
     public void CotGsheet_HaiSanPham_KhopCap()
     {
@@ -203,7 +203,7 @@ public class SanPhamDonParserTests
         var cot = SanPhamDonParser.CotGsheet(json);
         Assert.NotNull(cot);
         Assert.Equal("A141\nA322", cot!.Sku);
-        Assert.Equal("Kem,36\nNâu Be,39 ×2", cot.PhanLoai);
+        Assert.Equal("Kem,36. SL: 1\nNâu Be,39. SL: 2", cot.PhanLoai);
         Assert.Equal(cot.Sku.Split('\n').Length, cot.PhanLoai.Split('\n').Length);
     }
 
@@ -218,7 +218,7 @@ public class SanPhamDonParserTests
         var cot = SanPhamDonParser.CotGsheet(json);
         Assert.NotNull(cot);
         Assert.Equal("A141\n\nB80482", cot!.Sku);
-        Assert.Equal("Kem,36\nNâu Be,39\nĐen,37", cot.PhanLoai);
+        Assert.Equal("Kem,36. SL: 1\nNâu Be,39. SL: 1\nĐen,37. SL: 1", cot.PhanLoai);
         Assert.Equal(3, cot.Sku.Split('\n').Length);
         Assert.Equal(3, cot.PhanLoai.Split('\n').Length);
     }
@@ -337,7 +337,7 @@ public class SanPhamDonParserTests
         Assert.Null(SanPhamDonParser.ChonItemsJson(null, null));
     }
 
-    /// <summary>Đơn 3 SP thật → hai cột GSheet mỗi cột 3 DÒNG, khớp cặp theo dòng; SL đều bằng 1 nên KHÔNG có "×N".</summary>
+    /// <summary>Đơn 3 SP thật → hai cột GSheet mỗi cột 3 DÒNG, khớp cặp; SL=1 cũng gắn ". SL: 1".</summary>
     [Fact]
     public void CotGsheet_BaSanPhamThat_HaiCotBaDongKhopCap()
     {
@@ -347,7 +347,7 @@ public class SanPhamDonParserTests
 
         Assert.NotNull(cot);
         Assert.Equal("B41608\nB52246\nB21913", cot!.Sku);
-        Assert.Equal("Màu Hồng (gió nhăn),L\nxl\nxám,m", cot.PhanLoai);
-        Assert.DoesNotContain("×", cot.PhanLoai, StringComparison.Ordinal); // SL = 1 → không gắn hậu tố
+        Assert.Equal("Màu Hồng (gió nhăn),L. SL: 1\nxl. SL: 1\nxám,m. SL: 1", cot.PhanLoai);
+        Assert.DoesNotContain("×", cot.PhanLoai, StringComparison.Ordinal);
     }
 }
