@@ -472,9 +472,7 @@ public partial class AccountSession : ObservableObject, IAccountSession
                     returnCountLast: shopLabel => _services.Results.GetReturnCount(_accountId, shopLabel),
                     saveReturnCount: (shopLabel, so) => _services.Results.SetReturnCount(_accountId, shopLabel, so),
                     // Ghi kho mã + vào đơn, notify phần Hub không tự biết — xem OrderPersistPipeline.LuuMaTraHang.
-                    saveReturnCodes: cap => _persist.LuuMaTraHang(cap, log, ct),
-                    // TEST: cờ "ép shop đầu lỗi địa chỉ" (tab Kết quả) — tiêu thụ một lần rồi tự tắt.
-                    tryConsumeForceFirstShopPickupFail: () => _services.Settings.TryConsumeForceFirstShopPickupFail());
+                    saveReturnCodes: cap => _persist.LuuMaTraHang(cap, log, ct));
                 _bridge = bridge;
                 OrdersBridgeRunResult result;
                 try

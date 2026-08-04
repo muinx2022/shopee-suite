@@ -5,6 +5,11 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Hiệu năng. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.7.13 — 2026-08-04
+
+- **Đơn hàng — gỡ tình huống TEST lỗi địa chỉ:** bỏ nút giả lập / checkbox ép shop đầu trên tab Kết quả; giữ banner
+  bền + dấu X đỏ khi lỗi địa chỉ thật.
+
 ## v1.7.12 — 2026-08-04
 
 - **Đơn hàng — tình huống TEST lỗi địa chỉ trên tab Kết quả:** nút "Giả lập lỗi địa chỉ (shop đầu)" (banner + X đỏ

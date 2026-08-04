@@ -71,8 +71,6 @@ public sealed class OrdersBridgeSession : IDisposable
     private readonly Action<IReadOnlyList<ShopListItem>>? _onShopListRead;
     private readonly Action<string>? _onShopCheckStarted;
     private readonly Action<string>? _onShopCheckFinished;
-    /// <summary>TEST: gọi ở shop đầu — trả true = ép bỏ qua vì lỗi địa chỉ (một lần). null = tắt.</summary>
-    private readonly Func<bool>? _tryConsumeForceFirstShopPickupFail;
     // GĐ4: khoảng nghỉ ngẫu nhiên giữa các shop (ms) — kiểu người, tránh dồn dập.
     private readonly Random _rng = new();
 
@@ -100,8 +98,6 @@ public sealed class OrdersBridgeSession : IDisposable
     /// <param name="saveReturnCount">Check đơn trả hàng: ghi mốc mới cho shop (nhãn shop, số vừa đọc). null → bỏ hẳn bước.</param>
     /// <param name="saveReturnCodes">Check đơn trả hàng: lưu các cặp (mã đơn, mã yêu cầu) vào đơn tương ứng; trả chuỗi
     /// tóm tắt để phiên log. null → bỏ hẳn bước.</param>
-    /// <param name="tryConsumeForceFirstShopPickupFail">TEST: ở shop đầu, trả <c>true</c> một lần → bỏ qua shop
-    /// đó như lỗi địa chỉ (không in phiếu), vẫn chạy shop kế. null → tắt.</param>
     public OrdersBridgeSession(string userDataDir, BrowserChoice browserChoice, Action<string>? log = null,
         string? invoiceDir = null, string? province = null,
         Func<string, string, IReadOnlyList<SyncedOrder>, CancellationToken, Task>? syncCallback = null,
@@ -112,8 +108,7 @@ public sealed class OrdersBridgeSession : IDisposable
         Action<string>? onShopCheckFinished = null,
         Func<string, int?>? returnCountLast = null,
         Action<string, int>? saveReturnCount = null,
-        Func<IReadOnlyList<YeuCauTraHang>, string>? saveReturnCodes = null,
-        Func<bool>? tryConsumeForceFirstShopPickupFail = null)
+        Func<IReadOnlyList<YeuCauTraHang>, string>? saveReturnCodes = null)
     {
         _userDataDir = userDataDir;
         _browserChoice = browserChoice;
@@ -122,7 +117,6 @@ public sealed class OrdersBridgeSession : IDisposable
         _onShopListRead = onShopListRead;
         _onShopCheckStarted = onShopCheckStarted;
         _onShopCheckFinished = onShopCheckFinished;
-        _tryConsumeForceFirstShopPickupFail = tryConsumeForceFirstShopPickupFail;
 
         _channel = new OrdersBridgeChannel(log);
         _flow = new ShopFlowRunner(_channel, log, invoiceDir, _province, syncCallback, finalDoneSns,
@@ -300,14 +294,6 @@ public sealed class OrdersBridgeSession : IDisposable
                 _onShopCheckStarted?.Invoke(shopLogin);
                 try
                 {
-                    // TEST: ép shop ĐẦU lỗi địa chỉ (một lần) — bỏ qua không in phiếu, vẫn chạy shop kế + banner.
-                    if (i == 0 && _tryConsumeForceFirstShopPickupFail?.Invoke() == true)
-                    {
-                        pickupFailedShops.Add(shopLogin);
-                        L($"⛔ [TEST] Ép lỗi địa chỉ shop đầu {shopLogin} — BỎ QUA shop này, KHÔNG in phiếu; sang shop kế.");
-                    }
-                    else
-                    {
                     // Mở Chi tiết shop (trusted click).
                     var detailTcs = _channel.ArmDetail();
                     await _channel.SendAsync(new { action = "openShopDetail", shopId = shop.ShopId }).ConfigureAwait(false);
@@ -369,7 +355,6 @@ public sealed class OrdersBridgeSession : IDisposable
                         }
                         L($"closeShopTab không về được picker sau shop CUỐI ({shopName}) — vòng đã xong, bỏ qua.");
                     }
-                    } // else (không ép TEST)
                 }
                 finally
                 {
