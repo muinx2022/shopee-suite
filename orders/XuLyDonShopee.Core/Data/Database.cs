@@ -174,6 +174,17 @@ CREATE TABLE IF NOT EXISTS prepare_daily (
     day        TEXT NOT NULL,          -- yyyy-MM-dd (giờ địa phương)
     count      INTEGER NOT NULL DEFAULT 0,
     UNIQUE(account_id, shop_login, day)
+);
+
+-- Banner canh bao loi dia chi lay hang tren tab Ket qua: ben toi khi user bam X
+-- (khong tu an theo vong / ngay / restart). Khoa (account_id, shop_login); dismissed_at NULL = dang hien.
+CREATE TABLE IF NOT EXISTS pickup_address_alerts (
+    account_id INTEGER NOT NULL,
+    shop_login TEXT NOT NULL,
+    province TEXT DEFAULT '',
+    created_at TEXT NOT NULL,
+    dismissed_at TEXT,
+    PRIMARY KEY(account_id, shop_login)
 );";
         cmd.ExecuteNonQuery();
 

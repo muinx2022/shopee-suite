@@ -279,6 +279,42 @@ public static class ClientApiEndpoints
             return Results.Ok();
         });
 
+        // Banner lỗi địa chỉ bền (đồng bộ đa máy theo account_login + shop_login).
+        api.MapPost(HubRoutes.OrdersPickupAlertsUpsert, (OrdersPickupAlertRequest? r, HttpRequest req) =>
+        {
+            if (r is null || string.IsNullOrWhiteSpace(r.AccountLogin) || string.IsNullOrWhiteSpace(r.ShopLogin))
+                return Results.BadRequest();
+            var mid = req.Headers["X-Machine-Id"].ToString();
+            if (!db.UpsertPickupAlert(r.AccountLogin, r.ShopLogin, r.Province, mid))
+                return Results.BadRequest();
+            db.AppendLog(new AppendLogRequest(mid, "", "info",
+                $"orders/pickup-alerts/upsert account={r.AccountLogin.Trim()} shop={r.ShopLogin.Trim()}"));
+            return Results.Ok();
+        });
+        api.MapPost(HubRoutes.OrdersPickupAlertsDismiss, (OrdersPickupAlertRequest? r, HttpRequest req) =>
+        {
+            if (r is null || string.IsNullOrWhiteSpace(r.AccountLogin) || string.IsNullOrWhiteSpace(r.ShopLogin))
+                return Results.BadRequest();
+            var mid = req.Headers["X-Machine-Id"].ToString();
+            if (!db.DismissPickupAlert(r.AccountLogin, r.ShopLogin, mid))
+                return Results.BadRequest();
+            db.AppendLog(new AppendLogRequest(mid, "", "info",
+                $"orders/pickup-alerts/dismiss account={r.AccountLogin.Trim()} shop={r.ShopLogin.Trim()}"));
+            return Results.Ok();
+        });
+        api.MapGet(HubRoutes.OrdersPickupAlerts, (string? accountLogin) =>
+        {
+            if (string.IsNullOrWhiteSpace(accountLogin)) return Results.BadRequest();
+            var rows = db.ListPickupAlerts(accountLogin);
+            var items = rows.Select(x => new OrdersPickupAlertItem
+            {
+                ShopLogin = x.ShopLogin,
+                Province = x.Province,
+                Dismissed = !string.IsNullOrEmpty(x.DismissedAt),
+            }).ToList();
+            return Results.Json(items);
+        });
+
         // POST /api/orders/slip → hub lưu file phiếu PDF cho các đơn ĐÃ có trên hub. Lô ≤5 (client tự chia).
         // Mỗi phiếu: đơn CHƯA có trên hub → missing (client thử lại lượt sau, sau khi orders/push xong); base64
         // hỏng / không phải PDF (%PDF-) / >5MB → errors; hợp lệ → ghi <DataDir>/slips/<shopId>/<sn>.pdf (đè, bản

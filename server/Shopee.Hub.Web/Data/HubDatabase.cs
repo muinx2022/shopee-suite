@@ -220,6 +220,7 @@ CREATE TABLE IF NOT EXISTS revoked_machines(
         EnsureShopsSchema();
         EnsureOrdersSchema();
         EnsureOrdersAccountsSchema();
+        EnsurePickupAlertsSchema();
     }
 
     // ── Settings (key/value; thay hub-server.json: admin PBKDF2, api token, cờ điều phối…) ──

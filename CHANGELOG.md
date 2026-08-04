@@ -5,6 +5,13 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Hiệu năng. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.7.11 — 2026-08-04
+
+- **Đơn hàng — banner lỗi địa chỉ bền trên tab Kết quả:** mỗi shop lỗi một dòng "Cảnh báo: Lỗi địa chỉ. Shop …"
+  + nút X (chỉ đóng khi bấm X; không tự ẩn theo vòng/ngày). Đồng bộ qua Hub khi có mạng.
+- **Dấu X đỏ** trên cột tiến độ của shop đang còn banner lỗi (ưu tiên hơn tick xanh).
+- Shop lỗi địa chỉ vẫn chỉ bị bỏ qua (không in phiếu); các shop khác tiếp tục chạy.
+
 ## v1.7.10 — 2026-08-04
 
 - **Thu nhỏ icon trong nút toàn app:** `PathIcon` mặc định 14→12px (ribbon 18→16) cho khớp nút cao 30; áp

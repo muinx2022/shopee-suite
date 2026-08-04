@@ -99,6 +99,69 @@ public static partial class OrdersModuleHost
                 return false;
             }
         };
+
+        services.UpsertPickupAlertToHub = async (accountLogin, shopLogin, province, ct) =>
+        {
+            try
+            {
+                if (!CoordinationRuntime.Active || CoordinationRuntime.Client is null) return false;
+                await CoordinationRuntime.Client.UpsertPickupAlertAsync(
+                    new OrdersPickupAlertRequest
+                    {
+                        AccountLogin = accountLogin,
+                        ShopLogin = shopLogin,
+                        Province = province,
+                    }, ct).ConfigureAwait(false);
+                return true;
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+            catch (Exception ex)
+            {
+                Trace.WriteLine("[OrdersModuleHost] Upsert pickup-alert hub lỗi: " + ex.Message);
+                return false;
+            }
+        };
+
+        services.DismissPickupAlertToHub = async (accountLogin, shopLogin, ct) =>
+        {
+            try
+            {
+                if (!CoordinationRuntime.Active || CoordinationRuntime.Client is null) return false;
+                await CoordinationRuntime.Client.DismissPickupAlertAsync(
+                    new OrdersPickupAlertRequest
+                    {
+                        AccountLogin = accountLogin,
+                        ShopLogin = shopLogin,
+                    }, ct).ConfigureAwait(false);
+                return true;
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+            catch (Exception ex)
+            {
+                Trace.WriteLine("[OrdersModuleHost] Dismiss pickup-alert hub lỗi: " + ex.Message);
+                return false;
+            }
+        };
+
+        services.FetchPickupAlertsFromHub = async (accountLogin, ct) =>
+        {
+            try
+            {
+                if (!CoordinationRuntime.Active || CoordinationRuntime.Client is null) return null;
+                var list = await CoordinationRuntime.Client.GetPickupAlertsAsync(accountLogin, ct).ConfigureAwait(false);
+                if (list is null) return null;
+                return list
+                    .Where(x => !string.IsNullOrWhiteSpace(x.ShopLogin))
+                    .Select(x => (x.ShopLogin.Trim(), x.Province ?? "", x.Dismissed))
+                    .ToList();
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+            catch (Exception ex)
+            {
+                Trace.WriteLine("[OrdersModuleHost] Fetch pickup-alerts hub lỗi: " + ex.Message);
+                return null;
+            }
+        };
     }
 
     /// <summary>

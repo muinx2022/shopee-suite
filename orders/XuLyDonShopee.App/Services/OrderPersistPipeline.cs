@@ -451,6 +451,74 @@ internal sealed class OrderPersistPipeline
         }, CancellationToken.None);
     }
 
+    /// <summary>HÀM THUẦN: tách danh sách shop từ <c>PickupFailedShop</c> (có thể nối bằng <c>", "</c>).</summary>
+    internal static IReadOnlyList<string> TachTenShopLoiDiaChi(string? pickupFailedShop)
+    {
+        if (string.IsNullOrWhiteSpace(pickupFailedShop))
+        {
+            return ["(không rõ shop)"];
+        }
+
+        var parts = pickupFailedShop.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(s => s.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        return parts.Count > 0 ? parts : ["(không rõ shop)"];
+    }
+
+    /// <summary>
+    /// Ghi banner bền trên tab Kết quả (mỗi shop một dòng): upsert local ngay + fire-and-forget Hub;
+    /// rồi <see cref="AppServices.RaiseAddressAlertsChanged"/>. Nuốt lỗi Hub — local vẫn đúng khi offline.
+    /// </summary>
+    public void GhiBannerLoiDiaChi(string? pickupFailedShop, string tinh, Action<string> log, CancellationToken ct)
+    {
+        var shops = TachTenShopLoiDiaChi(pickupFailedShop);
+        foreach (var shop in shops)
+        {
+            try
+            {
+                _services.PickupAlerts.Upsert(_accountId, shop, tinh);
+            }
+            catch (Exception ex)
+            {
+                log("Banner địa chỉ (local): lỗi ghi — " + ex.ToString());
+            }
+        }
+
+        _services.RaiseAddressAlertsChanged(_accountId);
+
+        var accountLogin = _services.Accounts.GetById(_accountId)?.Email?.Trim() ?? "";
+        var upsertHub = _services.UpsertPickupAlertToHub;
+        if (upsertHub is null || accountLogin.Length == 0)
+        {
+            return;
+        }
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                foreach (var shop in shops)
+                {
+                    var ok = await upsertHub(accountLogin, shop, tinh, ct).ConfigureAwait(false);
+                    if (ok)
+                    {
+                        log($"Banner địa chỉ: đã đồng bộ Hub shop {shop}.");
+                    }
+                    else
+                    {
+                        log($"Banner địa chỉ: Hub chưa nhận shop {shop} — giữ local, sẽ kéo/đẩy lại sau.");
+                    }
+                }
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception ex)
+            {
+                log("Banner địa chỉ (Hub): lỗi — " + ex.ToString());
+            }
+        }, CancellationToken.None);
+    }
+
     /// <summary>HÀM THUẦN (test được): client có tự gửi tin notify local không. KHÔNG gửi khi đã nối Hub
     /// (<paramref name="daNoiHub"/> — Hub bắn tin sau <c>orders/push</c>, gửi nữa là người trực nhận hai tin),
     /// khi URL trống, hoặc khi chẳng có mục nào để báo. Máy chạy ĐỘC LẬP (chưa nối Hub) vẫn phải tự gửi.</summary>

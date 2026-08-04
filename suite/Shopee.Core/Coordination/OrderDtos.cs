@@ -118,3 +118,19 @@ public sealed class OrdersAppAlertRequest
     /// <summary>Chi tiết ngắn — ý nghĩa tuỳ <see cref="Kind"/> (xem bảng ở trên).</summary>
     public string? Detail { get; set; }
 }
+
+/// <summary>Body POST upsert/dismiss banner lỗi địa chỉ (khóa account_login + shop_login).</summary>
+public sealed class OrdersPickupAlertRequest
+{
+    public string AccountLogin { get; set; } = "";
+    public string ShopLogin { get; set; } = "";
+    public string? Province { get; set; }
+}
+
+/// <summary>Một dòng GET /api/orders/pickup-alerts — <see cref="Dismissed"/> true = máy khác (hoặc máy này) đã bấm X.</summary>
+public sealed class OrdersPickupAlertItem
+{
+    public string ShopLogin { get; set; } = "";
+    public string Province { get; set; } = "";
+    public bool Dismissed { get; set; }
+}

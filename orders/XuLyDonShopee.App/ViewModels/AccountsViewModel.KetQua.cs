@@ -4,6 +4,7 @@ using System.Collections.ObjectModel;
 using System.Linq;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
 
 namespace XuLyDonShopee.App.ViewModels;
 
@@ -51,6 +52,10 @@ public partial class AccountsViewModel
     /// <summary>Tab "Kết quả": các dòng Shop | số Chuẩn bị hàng của NGÀY đang lọc — MỌI shop của tài khoản (kể cả
     /// shop 0 đơn). Dựng lại trong <see cref="LoadResults"/> khi đổi tài khoản chọn / đổi ngày.</summary>
     public ObservableCollection<ShopPrepareRow> ResultRows { get; } = new();
+
+    /// <summary>Banner lỗi địa chỉ đang hiện (mỗi shop một dòng). Độc lập <see cref="ResultDate"/> — chỉ đổi khi
+    /// chọn tài khoản / ghi alert / bấm X / kéo Hub.</summary>
+    public ObservableCollection<PickupAlertRow> AddressAlertRows { get; } = new();
 
     /// <summary>TỔNG số đơn "Chuẩn bị hàng" của MỌI shop đang hiện ở tab Kết quả (ngày đang lọc). Bám ĐÚNG cột
     /// trong lưới: hub áp số của nó vào từng dòng thì tổng này cũng là số hub — không tính riêng một đường khác,
@@ -197,6 +202,7 @@ public partial class AccountsViewModel
         {
             DangDungSoHub = false;
             CapNhatTongChuanBiHang();   // lưới rỗng → tổng phải về 0, đừng giữ số của tài khoản vừa xem
+            LoadAddressAlertsFromLocal(); // clear banners khi bỏ chọn
             return;
         }
 
@@ -224,10 +230,38 @@ public partial class AccountsViewModel
         // Dòng vừa dựng lại là dòng MỚI (cờ tiến độ về mặc định) → áp lại tick/vòng quay. Bắt buộc: hàm này chạy
         // sau MỖI đơn chuẩn bị xong (PrepareCountChanged), thiếu bước này là tick nhấp nháy/biến mất khi đang chạy.
         ApplyShopCheckFlags();
+        ApplyAddressErrorFlags();
 
         // Số vừa dựng ở trên là số CỤC BỘ → áp ĐÈ lại số HUB đã lấy được (nếu còn đúng bối cảnh). Bắt buộc vì
         // cùng lý do với ApplyShopCheckFlags: hàm này chạy sau MỖI đơn, thiếu bước này là số nhảy về số của máy.
         ApplyHubCounts();
+    }
+
+    /// <summary>
+    /// Gắn <see cref="ShopPrepareRow.CoLoiDiaChi"/> theo banner lỗi địa chỉ còn active của tài khoản đang mở.
+    /// Gọi sau LoadResults / sau nạp banner / sau dismiss X.
+    /// </summary>
+    private void ApplyAddressErrorFlags()
+    {
+        HashSet<string>? alertShops = null;
+        if (SelectedRow?.Id is long accountId)
+        {
+            try
+            {
+                alertShops = new HashSet<string>(
+                    _services.PickupAlerts.ListActive(accountId).Select(a => a.ShopLogin),
+                    StringComparer.OrdinalIgnoreCase);
+            }
+            catch
+            {
+                // Best-effort: DB lỗi thì không gắn cờ X — banner vẫn hiện từ AddressAlertRows nếu đã nạp được.
+            }
+        }
+
+        foreach (var row in ResultRows)
+        {
+            row.CoLoiDiaChi = alertShops is not null && alertShops.Contains(row.ShopLogin);
+        }
     }
 
     /// <summary>Ngày đang lọc ở tab "Kết quả" dưới dạng KHÓA <c>yyyy-MM-dd</c> — dùng chung cho <c>prepare_daily</c>,
@@ -549,4 +583,123 @@ public partial class AccountsViewModel
             }
         }
     });
+
+    /// <summary>Phiên vừa ghi/đóng banner địa chỉ → nạp lại nếu đúng tài khoản đang mở.</summary>
+    private void OnAddressAlertsChanged(long accountId) => RunOnUi(() =>
+    {
+        if (SelectedRow?.Id == accountId)
+        {
+            LoadAddressAlertsFromLocal();
+        }
+    });
+
+    /// <summary>Đọc banner active từ SQLite local vào <see cref="AddressAlertRows"/> (không đụng ResultDate).</summary>
+    private void LoadAddressAlertsFromLocal()
+    {
+        AddressAlertRows.Clear();
+        if (SelectedRow?.Id is not long accountId)
+        {
+            return;
+        }
+
+        foreach (var a in _services.PickupAlerts.ListActive(accountId))
+        {
+            AddressAlertRows.Add(new PickupAlertRow(a.ShopLogin));
+        }
+
+        ApplyAddressErrorFlags();
+    }
+
+    /// <summary>
+    /// Kéo Hub rồi merge: Hub dismiss → local dismiss; Hub active → local upsert. Sau đó nạp lại UI.
+    /// Best-effort — Hub null/offline giữ local.
+    /// </summary>
+    private async Task SyncAddressAlertsFromHubAsync()
+    {
+        if (SelectedRow?.Id is not long accountId)
+        {
+            return;
+        }
+
+        var accountLogin = SelectedRow.Email?.Trim() ?? "";
+        var fetch = _services.FetchPickupAlertsFromHub;
+        if (fetch is null || accountLogin.Length == 0)
+        {
+            LoadAddressAlertsFromLocal();
+            return;
+        }
+
+        IReadOnlyList<(string ShopLogin, string Province, bool Dismissed)>? hub;
+        try
+        {
+            hub = await fetch(accountLogin, default).ConfigureAwait(false);
+        }
+        catch
+        {
+            hub = null;
+        }
+
+        RunOnUi(() =>
+        {
+            if (SelectedRow?.Id != accountId)
+            {
+                return;
+            }
+
+            if (hub is not null)
+            {
+                foreach (var (shop, province, dismissed) in hub)
+                {
+                    if (string.IsNullOrWhiteSpace(shop))
+                    {
+                        continue;
+                    }
+
+                    if (dismissed)
+                    {
+                        _services.PickupAlerts.Dismiss(accountId, shop);
+                    }
+                    else
+                    {
+                        _services.PickupAlerts.Upsert(accountId, shop, province);
+                    }
+                }
+            }
+
+            LoadAddressAlertsFromLocal();
+        });
+    }
+
+    /// <summary>Bấm X trên một dòng banner — dismiss local + Hub; chỉ dòng đó biến mất.</summary>
+    [RelayCommand]
+    private void DismissAddressAlert(PickupAlertRow? row)
+    {
+        if (row is null || SelectedRow?.Id is not long accountId)
+        {
+            return;
+        }
+
+        _services.PickupAlerts.Dismiss(accountId, row.ShopLogin);
+        AddressAlertRows.Remove(row);
+        ApplyAddressErrorFlags();
+
+        var accountLogin = SelectedRow.Email?.Trim() ?? "";
+        var dismissHub = _services.DismissPickupAlertToHub;
+        if (dismissHub is null || accountLogin.Length == 0)
+        {
+            return;
+        }
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await dismissHub(accountLogin, row.ShopLogin, default).ConfigureAwait(false);
+            }
+            catch
+            {
+                // offline — local đã dismiss; máy khác sẽ lệch tới khi Hub nhận được lần sau
+            }
+        });
+    }
 }

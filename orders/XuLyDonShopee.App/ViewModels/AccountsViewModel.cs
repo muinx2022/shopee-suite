@@ -62,6 +62,9 @@ public partial class AccountsViewModel : ViewModelBase, IDisposable
         // nền của phiên → marshal về UI thread (RunOnUi) trước khi đụng ResultRows.
         _services.ShopCheckChanged += OnShopCheckChanged;
 
+        // Banner lỗi địa chỉ vừa ghi/đóng → nạp lại list trên tab Kết quả (thread nền → RunOnUi).
+        _services.AddressAlertsChanged += OnAddressAlertsChanged;
+
         // Nạp cờ "Xóa profile và tạo lại" từ Settings (bền qua restart). Setter tự LƯU nên chặn ghi ngược
         // trong lúc nạp bằng _loadingSettings.
         _loadingSettings = true;
@@ -85,6 +88,12 @@ public partial class AccountsViewModel : ViewModelBase, IDisposable
         try { _timerSangNgay.Dispose(); } catch { /* bỏ qua khi thoát */ }
         // ActivityLog sống suốt vòng đời app → không gỡ là VM này còn bị giữ lại (rò bộ nhớ).
         try { _services.Log.SourceUpdated -= OnLogSourceUpdated; } catch { /* bỏ qua khi thoát */ }
+        try { _services.AddressAlertsChanged -= OnAddressAlertsChanged; } catch { /* bỏ qua khi thoát */ }
+        try { _services.PrepareCountChanged -= OnPrepareCountChanged; } catch { /* bỏ qua khi thoát */ }
+        try { _services.ShopListChanged -= OnShopListChanged; } catch { /* bỏ qua khi thoát */ }
+        try { _services.ShopCheckChanged -= OnShopCheckChanged; } catch { /* bỏ qua khi thoát */ }
+        try { _services.AccountsChanged -= OnAccountsChanged; } catch { /* bỏ qua khi thoát */ }
+        try { _services.Sessions.Changed -= OnSessionsChanged; } catch { /* bỏ qua khi thoát */ }
     }
 
     /// <summary>Danh sách tài khoản đang hiển thị (sau khi lọc). Mỗi phần tử là <see cref="AccountRowViewModel"/>
@@ -250,7 +259,9 @@ public partial class AccountsViewModel : ViewModelBase, IDisposable
         // Tab "Kết quả": nạp lưới Shop|Chuẩn bị hàng theo tài khoản vừa chọn (bỏ chọn → clear). Đặt SAU khi
         // form/_editingId đã đồng bộ (dùng SelectedRow.Id). Lưới hiện NGAY bằng số cục bộ, rồi hỏi hub đè số chung.
         LoadResults();
+        LoadAddressAlertsFromLocal();
         _ = RefreshHubCountsAsync();
+        _ = SyncAddressAlertsFromHubAsync();
     }
 
     /// <summary>

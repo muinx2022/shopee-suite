@@ -88,6 +88,10 @@ public class AppServices
     /// phiên cầu nối ghi qua callback (lưu shop + tăng đếm mỗi đơn arrange); tab "Kết quả" đọc để hiển thị.</summary>
     public ResultsRepository Results { get; }
 
+    /// <summary>Kho banner cảnh báo lỗi địa chỉ lấy hàng (bảng <c>pickup_address_alerts</c>) — bền tới khi bấm X;
+    /// đồng bộ Hub theo tài khoản.</summary>
+    public PickupAddressAlertsRepository PickupAlerts { get; }
+
     /// <summary>Kho MÃ YÊU CẦU TRẢ HÀNG (bảng <c>return_codes</c>) — sống ĐỘC LẬP với vòng đời đơn, nên mã của đơn
     /// đã bị dọn khỏi app vẫn đẩy được lên Google Sheet.</summary>
     public ReturnCodesRepository ReturnCodes { get; }
@@ -113,6 +117,23 @@ public class AppServices
     /// Null = chưa nối Hub → caller gửi Slack local (fallback độc lập).
     /// </summary>
     public Func<string, string?, string?, string?, string?, CancellationToken, Task<bool>>? ReportAppAlertToHub { get; set; }
+
+    /// <summary>
+    /// HOOK upsert banner lỗi địa chỉ lên Hub (đồng bộ đa máy). Tham số: accountLogin, shopLogin, province, ct.
+    /// Trả true = Hub nhận OK. Null = chưa nối Hub.
+    /// </summary>
+    public Func<string, string, string?, CancellationToken, Task<bool>>? UpsertPickupAlertToHub { get; set; }
+
+    /// <summary>
+    /// HOOK dismiss banner lỗi địa chỉ trên Hub. Tham số: accountLogin, shopLogin, ct. Null = chưa nối Hub.
+    /// </summary>
+    public Func<string, string, CancellationToken, Task<bool>>? DismissPickupAlertToHub { get; set; }
+
+    /// <summary>
+    /// HOOK kéo danh sách banner lỗi địa chỉ từ Hub cho một tài khoản (kể cả đã dismiss — để merge).
+    /// Trả null = không hỏi được Hub. Mỗi phần tử: shopLogin, province, dismissed.
+    /// </summary>
+    public Func<string, CancellationToken, Task<IReadOnlyList<(string ShopLogin, string Province, bool Dismissed)>?>>? FetchPickupAlertsFromHub { get; set; }
 
     /// <summary>
     /// HOOK +1 "Đã bán" theo SKU (khớp TUYỆT ĐỐI, MỌI shop) trên kho sản phẩm HUB (Postgres), do shell suite RÓT
@@ -256,6 +277,15 @@ public class AppServices
     public void RaiseShopCheckChanged(long accountId, string shopLabel, bool checking)
         => ShopCheckChanged?.Invoke(accountId, shopLabel, checking);
 
+    /// <summary>
+    /// Phát khi vừa ghi/đóng banner lỗi địa chỉ (upsert hoặc dismiss) — tab Kết quả nghe để nạp lại list.
+    /// CỐ Ý có thể bắn từ THREAD NỀN → người nghe PHẢI marshal về UI thread.
+    /// </summary>
+    public event Action<long>? AddressAlertsChanged;
+
+    /// <summary>Phiên / ViewModel gọi sau khi upsert hoặc dismiss alert địa chỉ.</summary>
+    public void RaiseAddressAlertsChanged(long accountId) => AddressAlertsChanged?.Invoke(accountId);
+
     /// <summary>Bên ngoài (vd sync shop BigSeller) gọi sau khi Insert tài khoản THÀNH CÔNG để phát <see cref="AccountsChanged"/>.</summary>
     public void RaiseAccountsChanged() => AccountsChanged?.Invoke();
 
@@ -292,6 +322,7 @@ public class AppServices
         Settings = new SettingsRepository(Database);
         Orders = new OrdersRepository(Database);
         Results = new ResultsRepository(Database);
+        PickupAlerts = new PickupAddressAlertsRepository(Database);
         ReturnCodes = new ReturnCodesRepository(Database);
 
         // Migration MỘT LẦN (idempotent qua cờ settings): gộp ProxyKey cố định của tài khoản (cơ chế cũ) vào

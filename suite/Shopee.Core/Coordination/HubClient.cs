@@ -412,6 +412,27 @@ public sealed class HubClient : IDisposable
     public Task ReportOrdersAppAlertAsync(OrdersAppAlertRequest req, CancellationToken ct = default)
         => PostAsync(HubRoutes.OrdersAppAlert, req, ct);
 
+    /// <summary>Upsert banner lỗi địa chỉ (hiện lại nếu đã dismiss). Hub cũ → ném.</summary>
+    public Task UpsertPickupAlertAsync(OrdersPickupAlertRequest req, CancellationToken ct = default)
+        => PostAsync(HubRoutes.OrdersPickupAlertsUpsert, req, ct);
+
+    /// <summary>Dismiss banner lỗi địa chỉ (bấm X). Hub cũ → ném.</summary>
+    public Task DismissPickupAlertAsync(OrdersPickupAlertRequest req, CancellationToken ct = default)
+        => PostAsync(HubRoutes.OrdersPickupAlertsDismiss, req, ct);
+
+    /// <summary>Kéo mọi banner của tài khoản (kể cả đã dismiss) để merge local. Hub cũ → null.</summary>
+    public async Task<List<OrdersPickupAlertItem>?> GetPickupAlertsAsync(string accountLogin, CancellationToken ct = default)
+    {
+        try
+        {
+            var url = $"{HubRoutes.OrdersPickupAlerts}?accountLogin={Uri.EscapeDataString(accountLogin ?? "")}";
+            return await _http.GetFromJsonAsync<List<OrdersPickupAlertItem>>(url, ct) ?? [];
+        }
+        catch (HttpRequestException) { return null; }
+        catch (TaskCanceledException) when (!ct.IsCancellationRequested) { return null; }
+        catch (System.Text.Json.JsonException) { return null; }
+    }
+
     // ── File-sync ──
     public async Task<List<FileManifestEntry>> ManifestAsync(CancellationToken ct = default)
         => await _http.GetFromJsonAsync<List<FileManifestEntry>>(HubRoutes.Manifest, ct) ?? [];

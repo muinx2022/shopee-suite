@@ -675,6 +675,34 @@
                                                Foreground="{StaticResource TextMuted}" VerticalAlignment="Center" />
                                 </StackPanel>
                             </Border>
+                            <!-- Banner lỗi địa chỉ bền: mỗi shop một dòng + nút X; không tự ẩn theo ngày/vòng. -->
+                            <ItemsControl DockPanel.Dock="Top" ItemsSource="{Binding AddressAlertRows}"
+                                          Margin="0,0,0,10">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border Margin="0,0,0,6" Padding="10,7" CornerRadius="5"
+                                                Background="{StaticResource WarnSoftBg}"
+                                                BorderBrush="{StaticResource WarnSoftBorder}" BorderThickness="1">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Grid.Column="0" Text="{Binding Message}" FontSize="12.5"
+                                                           Foreground="{StaticResource AmberTextBrush}"
+                                                           VerticalAlignment="Center" TextWrapping="Wrap" />
+                                                <Button Grid.Column="1" Style="{StaticResource ghostIcon}"
+                                                        Margin="8,0,0,0" ToolTip="Đóng cảnh báo"
+                                                        Command="{Binding DataContext.DismissAddressAlertCommand, RelativeSource={RelativeSource AncestorType=TabControl}}"
+                                                        CommandParameter="{Binding}">
+                                                    <c:PathIcon Data="{DynamicResource IconClose}" Width="11" Height="11"
+                                                                Foreground="{StaticResource DangerBrush}" />
+                                                </Button>
+                                            </Grid>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
                             <!-- Lưới 3 cột: tiến độ (tick/vòng quay) | Shop (mọi shop của tài khoản) |
                                  Chuẩn bị hàng (số đơn arrange trong ngày). -->
                             <DataGrid Style="{StaticResource proxy}" ClipToBounds="True"
@@ -683,14 +711,19 @@
                                       CanUserResizeColumns="True" CanUserSortColumns="False">
                                 <DataGrid.Columns>
                                     <!-- Cột tiến độ — HẸP, không tiêu đề, MỘT biểu tượng mỗi dòng: vòng quay cam
-                                         = đang kiểm tra shop này; tick xanh = đã kiểm tra XONG shop này trong
-                                         lượt chạy (giữ tới hết lượt); chưa tới thì để trống. -->
+                                         = đang kiểm tra; X đỏ = lỗi địa chỉ bền (đứng TRƯỚC cột Shop); tick xanh
+                                         = đã check xong (lỗi địa chỉ ưu tiên hơn tick). -->
                                     <DataGridTemplateColumn Header="" Width="40" CanUserResize="False"
                                                             CellStyle="{StaticResource cellTight}">
                                         <DataGridTemplateColumn.CellTemplate>
                                             <DataTemplate>
                                                 <Grid VerticalAlignment="Center" HorizontalAlignment="Center"
                                                       Width="18" Height="18">
+                                                    <c:PathIcon Data="{DynamicResource IconClose}"
+                                                                Width="12" Height="12"
+                                                                Foreground="{StaticResource DangerBrush}"
+                                                                VerticalAlignment="Center" HorizontalAlignment="Center"
+                                                                Visibility="{Binding ShowLoiDiaChi, Converter={StaticResource BoolToVis}}" />
                                                     <c:PathIcon Data="{DynamicResource IconCheck}"
                                                                 Width="13" Height="13"
                                                                 Foreground="{StaticResource SuccessBrush}"

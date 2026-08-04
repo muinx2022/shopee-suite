@@ -37,14 +37,26 @@ public sealed partial class ShopPrepareRow : ObservableObject
     /// Xóa sạch khi lượt chạy mới bắt đầu (phiên đọc lại danh sách shop).</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ShowTick))]
+    [NotifyPropertyChangedFor(nameof(ShowLoiDiaChi))]
     private bool _daKiemTra;
 
     /// <summary>Đang check chính shop này (vòng quay + chữ "đang kiểm tra…" thay cho số).</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ShowTick))]
+    [NotifyPropertyChangedFor(nameof(ShowLoiDiaChi))]
     private bool _isChecking;
 
-    /// <summary>Hiện dấu TICK: đã kiểm tra xong shop này NHƯNG không còn quay (mỗi dòng chỉ một biểu tượng — đang
-    /// quay thì vòng quay thế chỗ tick).</summary>
-    public bool ShowTick => DaKiemTra && !IsChecking;
+    /// <summary>Shop đang có banner lỗi địa chỉ chưa đóng (X) — hiện dấu X đỏ trước tên shop / cột tiến độ.
+    /// Bền tới khi user bấm X trên banner (không theo vòng chạy).</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowTick))]
+    [NotifyPropertyChangedFor(nameof(ShowLoiDiaChi))]
+    private bool _coLoiDiaChi;
+
+    /// <summary>Hiện dấu X đỏ lỗi địa chỉ: có lỗi và không đang quay (đang quay thì vòng quay thế chỗ).</summary>
+    public bool ShowLoiDiaChi => CoLoiDiaChi && !IsChecking;
+
+    /// <summary>Hiện dấu TICK: đã kiểm tra xong shop này NHƯNG không còn quay và KHÔNG đang lỗi địa chỉ
+    /// (lỗi địa chỉ ưu tiên hiện X đỏ).</summary>
+    public bool ShowTick => DaKiemTra && !IsChecking && !CoLoiDiaChi;
 }

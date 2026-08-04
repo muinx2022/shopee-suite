@@ -500,6 +500,8 @@ public partial class AccountSession : ObservableObject, IAccountSession
                     log($"⛔ {result.Error} Đã bỏ qua shop lỗi địa chỉ; các shop khác trong vòng này vẫn chạy.");
                     log($"Vòng xong: {result.ShopsDone}/{result.ShopCount} shop, {result.TotalOrders} đơn, {result.TotalSlips} phiếu.");
                     _persist.StartCanhBaoDiaChiInBackground(result.PickupFailedShop, province, log, ct);
+                    // Banner bền trên tab Kết quả (mỗi shop một dòng) — local + Hub; không phụ thuộc Slack.
+                    _persist.GhiBannerLoiDiaChi(result.PickupFailedShop, province, log, ct);
                 }
                 else if (result.Error is not null)
                 {

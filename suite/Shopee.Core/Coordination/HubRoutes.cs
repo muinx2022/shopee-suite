@@ -117,6 +117,10 @@ public static class HubRoutes
     public const string OrdersSlip = "/api/orders/slip";
     /// <summary>Client báo sự kiện lỗi app (vd. không đặt được địa chỉ) → Hub quyết định gửi webhook lỗi app.</summary>
     public const string OrdersAppAlert = "/api/orders/app-alert";
+    /// <summary>POST upsert / POST dismiss / GET ?accountLogin= — banner lỗi địa chỉ bền, khóa theo tài khoản+shop.</summary>
+    public const string OrdersPickupAlerts = "/api/orders/pickup-alerts";
+    public const string OrdersPickupAlertsUpsert = "/api/orders/pickup-alerts/upsert";
+    public const string OrdersPickupAlertsDismiss = "/api/orders/pickup-alerts/dismiss";
     /// <summary>GET <c>?day=yyyy-MM-dd</c> → số đơn ĐÃ "chuẩn bị hàng" theo shop trong ngày đó, hub đếm THẲNG từ
     /// bảng đơn (mỗi đơn 1 dòng) nên là số CHUNG toàn hệ thống, không cộng trùng dù nhiều máy cùng chạy.</summary>
     public const string PrepareStats = "/prepare-stats";
