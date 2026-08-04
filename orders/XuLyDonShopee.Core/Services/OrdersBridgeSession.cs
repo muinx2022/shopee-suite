@@ -37,9 +37,11 @@ public sealed record OrdersLoginParams(
 /// <param name="TotalSlips">Tổng số phiếu PDF đã lưu.</param>
 /// <param name="Captcha">True nếu dừng vòng vì captcha/verify.</param>
 /// <param name="Error">Thông báo lỗi (null nếu vòng chạy trọn không lỗi).</param>
-/// <param name="PickupAddressFailed">True nếu dừng vòng vì KHÔNG đặt được địa chỉ lấy hàng (chưa in phiếu nào
-/// cho shop đó) — caller cảnh báo ra kênh ngoài. KHÁC <paramref name="Captcha"/>: nguyên nhân khác, xử khác.</param>
-/// <param name="PickupFailedShop">Nhãn shop không đặt được địa chỉ (null nếu không dính lỗi này).</param>
+/// <param name="PickupAddressFailed">True nếu có ≥1 shop bị BỎ QUA vì KHÔNG đặt được địa chỉ lấy hàng
+/// (chưa in phiếu cho shop đó; các shop khác trong vòng vẫn chạy) — caller cảnh báo ra kênh ngoài.
+/// KHÁC <paramref name="Captcha"/>: nguyên nhân khác, xử khác.</param>
+/// <param name="PickupFailedShop">Nhãn shop (hoặc nhiều shop nối bằng ", ") không đặt được địa chỉ
+/// (null nếu không dính lỗi này).</param>
 public sealed record OrdersBridgeRunResult(
     int ShopCount, int ShopsDone, int TotalOrders, int TotalSlips, bool Captcha, string? Error,
     bool PickupAddressFailed = false, string? PickupFailedShop = null);
@@ -252,6 +254,7 @@ public sealed class OrdersBridgeSession : IDisposable
     public async Task<OrdersBridgeRunResult> RunAllShopsAsync(OrdersLoginParams login, CancellationToken ct = default)
     {
         int shopCount = 0, shopsDone = 0, totalOrders = 0, totalSlips = 0;
+        var pickupFailedShops = new List<string>();
         try
         {
             var err = await LoginAndReachPickerAsync(login, ct).ConfigureAwait(false);
@@ -315,21 +318,26 @@ public sealed class OrdersBridgeSession : IDisposable
                     }
                     if (_flow.PickupFailedShop is not null)
                     {
-                        // Không đặt được địa chỉ lấy hàng → BỎ LUÔN các shop còn lại: modal địa chỉ hỏng thường do
-                        // Shopee đổi giao diện / extension lỗi ⇒ shop sau cũng hỏng, chạy tiếp chỉ tổ in thêm phiếu sai.
-                        L($"⛔ Dừng cả vòng của tài khoản (bỏ {shops.Count - i - 1} shop còn lại) — sửa được địa chỉ rồi hãy chạy lại.");
-                        return new OrdersBridgeRunResult(shopCount, shopsDone, totalOrders + orders, totalSlips + slips, false,
-                            $"Không đặt được địa chỉ lấy hàng ({_province}) ở shop {_flow.PickupFailedShop} — đã dừng vòng, chưa in phiếu nào cho shop này.",
-                            PickupAddressFailed: true, PickupFailedShop: _flow.PickupFailedShop);
+                        // Không đặt được địa chỉ → BỎ QUA shop này (không in phiếu), vẫn chạy shop kế.
+                        // Lỗi địa chỉ thường chỉ của một shop; giả thuyết cũ "modal hỏng = mọi shop hỏng" đã bỏ (2026-08-04).
+                        var failed = _flow.PickupFailedShop;
+                        pickupFailedShops.Add(failed);
+                        L($"⛔ Không đặt được địa chỉ lấy hàng ở shop {failed} — BỎ QUA shop này, KHÔNG in phiếu; sang shop kế.");
+                        totalOrders += orders; // Phần A có thể đã sync đơn; slips = 0
+                        _flow.PickupFailedShop = null; // tránh shop sau dính cờ cũ
                     }
-                    totalOrders += orders;
-                    totalSlips += slips;
-                    shopsDone++;
+                    else
+                    {
+                        totalOrders += orders;
+                        totalSlips += slips;
+                        shopsDone++;
+                    }
 
                     // Đóng tab shop → về picker /portal/shop (listTabId picker giữ nguyên; extension đóng shopTabId).
                     // ⚠ PHẢI đọc cờ ok: bản trước vứt giá trị trả về, nên hễ picker không sẵn sàng là shop KẾ chết
                     // với thông báo lạc đề "chờ 30s chưa thấy tab shop mở" (3/3 lần trong nhật ký production, luôn
                     // đi ngay sau một lượt trang trả hàng không render).
+                    // Cũng bắt buộc sau nhánh bỏ-qua-địa-chỉ — quên thì shop kế chết.
                     if (!await _flow.DongTabShopAsync(ct).ConfigureAwait(false))
                     {
                         // Shop CUỐI thì picker hỏng không hại ai — vòng đằng nào cũng kết thúc và vòng sau mở cửa
@@ -338,9 +346,12 @@ public sealed class OrdersBridgeSession : IDisposable
                         {
                             L($"⛔ Dừng cả vòng của tài khoản (bỏ {shops.Count - i - 1} shop còn lại) — không đưa "
                               + $"được về trang chọn shop sau shop {shopName}.");
-                            return new OrdersBridgeRunResult(shopCount, shopsDone, totalOrders, totalSlips, false,
-                                $"Không quay lại được trang chọn shop sau shop {shopName} — đã dừng vòng (shop kế "
-                                + "sẽ không mở được). Sẽ thử lại ở vòng sau.");
+                            var closeErr = $"Không quay lại được trang chọn shop sau shop {shopName} — đã dừng vòng (shop kế "
+                                + "sẽ không mở được). Sẽ thử lại ở vòng sau.";
+                            // Giữ tín hiệu địa chỉ nếu đã có shop bị bỏ qua → AccountSession vẫn gửi Slack.
+                            return new OrdersBridgeRunResult(shopCount, shopsDone, totalOrders, totalSlips, false, closeErr,
+                                PickupAddressFailed: pickupFailedShops.Count > 0,
+                                PickupFailedShop: pickupFailedShops.Count > 0 ? string.Join(", ", pickupFailedShops) : null);
                         }
                         L($"closeShopTab không về được picker sau shop CUỐI ({shopName}) — vòng đã xong, bỏ qua.");
                     }
@@ -361,7 +372,15 @@ public sealed class OrdersBridgeSession : IDisposable
                 }
             }
 
-            L($"Xong 1 vòng: {shopsDone}/{shopCount} shop, {totalOrders} đơn, {totalSlips} phiếu.");
+            L($"Xong 1 vòng: {shopsDone}/{shopCount} shop, {totalOrders} đơn, {totalSlips} phiếu"
+              + (pickupFailedShops.Count > 0 ? $", bỏ qua {pickupFailedShops.Count} shop lỗi địa chỉ." : "."));
+            if (pickupFailedShops.Count > 0)
+            {
+                var tenLoi = string.Join(", ", pickupFailedShops);
+                return new OrdersBridgeRunResult(shopCount, shopsDone, totalOrders, totalSlips, false,
+                    $"Không đặt được địa chỉ lấy hàng ({_province}) ở shop {tenLoi} — đã bỏ qua shop đó, chưa in phiếu; các shop khác vẫn chạy.",
+                    PickupAddressFailed: true, PickupFailedShop: tenLoi);
+            }
             return new OrdersBridgeRunResult(shopCount, shopsDone, totalOrders, totalSlips, false, null);
         }
         catch (OperationCanceledException) { throw; }
@@ -436,9 +455,9 @@ public sealed class OrdersBridgeSession : IDisposable
             }
             if (_flow.PickupFailedShop is not null)
             {
-                // "Chạy thử" cũng phải nói THẬT: dừng vì địa chỉ, đừng báo OK (người soi sẽ tưởng đã chạy trọn).
+                // "Chạy thử" chỉ 1 shop — bỏ qua shop đó, đừng báo OK (người soi sẽ tưởng đã chạy trọn).
                 return new OrdersBridgeSliceResult(shops, firstShopId, toShip, false,
-                    $"Không đặt được địa chỉ lấy hàng ({_province}) — đã dừng, KHÔNG in phiếu.", ordersCount, slipsSaved);
+                    $"Không đặt được địa chỉ lấy hàng ({_province}) — đã bỏ qua shop, KHÔNG in phiếu.", ordersCount, slipsSaved);
             }
 
             return new OrdersBridgeSliceResult(shops, firstShopId, toShip, false, null, ordersCount, slipsSaved);

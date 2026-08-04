@@ -4,8 +4,9 @@ using XuLyDonShopee.Core.Services;
 namespace XuLyDonShopee.Tests;
 
 /// <summary>
-/// Test hành vi "KHÔNG đặt được địa chỉ lấy hàng → DỪNG + cảnh báo ra kênh ngoài" (sự cố 28/07: app biết chưa đặt
-/// được địa chỉ, vẫn in phiếu + giao đơn ⇒ shipper tới sai chỗ lấy hàng):
+/// Test hành vi "KHÔNG đặt được địa chỉ lấy hàng → BỎ QUA shop + cảnh báo ra kênh ngoài" (sự cố 28/07: app biết
+/// chưa đặt được địa chỉ, vẫn in phiếu + giao đơn ⇒ shipper tới sai chỗ; 2026-08-04: chỉ bỏ qua shop lỗi, vẫn
+/// chạy shop kế):
 /// <list type="bullet">
 /// <item><see cref="ShopFlowRunner.QuyetDinhSauDatDiaChi"/> — nhánh quyết định: <c>pickupOk=false</c> KHÔNG
 /// bao giờ dẫn tới bước Chuẩn bị hàng (in phiếu); captcha giữ nguyên hành vi cũ.</item>
@@ -90,7 +91,8 @@ public class PickupAddressStopTests
             "hoangdh200392", "deilca.store", "Thanh Hóa", "muinx-nuc", new DateTime(2026, 7, 28, 10, 11, 0));
 
         Assert.Contains("KHÔNG ĐẶT ĐƯỢC ĐỊA CHỈ LẤY HÀNG", text);
-        Assert.Contains("đã dừng vòng, chưa in phiếu nào", text);
+        Assert.Contains("đã bỏ qua shop này (chưa in phiếu), vẫn chạy shop khác", text);
+        Assert.DoesNotContain("đã dừng vòng", text);
         Assert.Contains("Máy: muinx-nuc", text);
         Assert.Contains("Tài khoản: hoangdh200392", text);
         Assert.Contains("Shop: deilca.store", text);

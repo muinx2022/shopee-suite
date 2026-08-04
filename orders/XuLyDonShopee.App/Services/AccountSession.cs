@@ -495,9 +495,10 @@ public partial class AccountSession : ObservableObject, IAccountSession
                 }
                 else if (result.PickupAddressFailed)
                 {
-                    // Vòng ĐÃ dừng trong bridge (không in phiếu nào cho shop lỗi, bỏ luôn shop còn lại). Ở đây chỉ
-                    // báo người trực — gửi được hay không KHÔNG ảnh hưởng việc dừng.
-                    log("⛔ " + result.Error + " Sửa địa chỉ trên Shopee rồi chạy lại — sẽ thử lại sau khi nghỉ.");
+                    // Có shop bị bỏ qua vì địa chỉ; các shop khác trong vòng đã chạy (nếu còn). Báo người trực —
+                    // gửi được hay không KHÔNG ảnh hưởng việc bỏ qua / chạy tiếp.
+                    log($"⛔ {result.Error} Đã bỏ qua shop lỗi địa chỉ; các shop khác trong vòng này vẫn chạy.");
+                    log($"Vòng xong: {result.ShopsDone}/{result.ShopCount} shop, {result.TotalOrders} đơn, {result.TotalSlips} phiếu.");
                     _persist.StartCanhBaoDiaChiInBackground(result.PickupFailedShop, province, log, ct);
                 }
                 else if (result.Error is not null)

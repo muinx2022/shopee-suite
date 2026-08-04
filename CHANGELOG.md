@@ -5,6 +5,11 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Hiệu năng. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.7.9 — 2026-08-04
+
+- **Đơn hàng — lỗi đặt địa chỉ lấy hàng chỉ bỏ qua shop đó:** không còn dừng cả vòng tài khoản. Shop lỗi vẫn
+  không in phiếu (tránh phiếu sai địa chỉ) và vẫn gửi cảnh báo Slack/Hub; các shop khác trong vòng tiếp tục chạy.
+
 ## v1.7.8 — 2026-08-03
 
 - **Thu phóng giao diện bằng phím tắt:** `Ctrl` `+` phóng to, `Ctrl` `−` thu nhỏ, `Ctrl` `0` về 100%. Phóng cả

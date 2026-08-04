@@ -11,7 +11,7 @@ internal enum SauDatDiaChi
     /// <summary>Rơi vào captcha/verify → dừng shop này (hành vi cũ, không đổi).</summary>
     DungViCaptcha,
 
-    /// <summary>KHÔNG đặt được địa chỉ lấy hàng → DỪNG, tuyệt đối không in phiếu (phiếu sẽ sai địa chỉ).</summary>
+    /// <summary>KHÔNG đặt được địa chỉ lấy hàng → dừng SHOP này (không in phiếu); vòng ngoài vẫn chạy shop kế.</summary>
     DungViDiaChi,
 }
 
@@ -101,7 +101,7 @@ internal sealed class ShopFlowRunner
 
     /// <summary>Nhãn shop KHÔNG đặt được địa chỉ lấy hàng (null = chưa dính). Cùng khuôn cờ với
     /// <see cref="OrdersBridgeChannel.CaptchaSeen"/>: <see cref="RunShopOrdersAsync"/> đặt, vòng ngoài (phiên) đọc
-    /// để DỪNG và trả lý do — KHÔNG đẻ kênh sự kiện thứ hai.</summary>
+    /// để BỎ QUA shop này (không in phiếu) rồi sang shop kế — KHÔNG đẻ kênh sự kiện thứ hai.</summary>
     public string? PickupFailedShop { get; set; }
 
     private void L(string m) => _log?.Invoke(m);
@@ -112,8 +112,9 @@ internal sealed class ShopFlowRunner
     /// <list type="bullet">
     /// <item><paramref name="captchaSeen"/> → <see cref="SauDatDiaChi.DungViCaptcha"/> (ưu tiên: captcha nuốt luôn
     /// <c>pickupOk=false</c>, thông điệp phải là captcha kẻo người trực xử nhầm).</item>
-    /// <item><paramref name="pickupOk"/> = false → <see cref="SauDatDiaChi.DungViDiaChi"/>: DỪNG, KHÔNG in phiếu.
-    /// Bài học 28/07: app biết chưa đặt được địa chỉ mà vẫn in phiếu + giao đơn ⇒ shipper tới sai chỗ lấy hàng.</item>
+    /// <item><paramref name="pickupOk"/> = false → <see cref="SauDatDiaChi.DungViDiaChi"/>: dừng SHOP, KHÔNG in phiếu;
+    /// vòng ngoài vẫn chạy shop kế. Bài học 28/07: app biết chưa đặt được địa chỉ mà vẫn in phiếu + giao đơn
+    /// ⇒ shipper tới sai chỗ lấy hàng.</item>
     /// <item>còn lại → <see cref="SauDatDiaChi.XuDon"/>.</item>
     /// </list>
     /// </summary>
@@ -211,9 +212,9 @@ internal sealed class ShopFlowRunner
                 // modal Sửa Địa chỉ ⇒ địa chỉ lấy hàng của shop còn NGUYÊN như trước vòng này, không có gì để trả về;
                 // chạy revert lúc này chỉ là một lượt GHI nữa vào đúng màn hình đang hỏng.
                 // Nhãn shop có thể RỖNG (picker không đọc được tên) — vẫn phải là chuỗi KHÁC null, kẻo tín hiệu
-                // DỪNG (null = không lỗi) mất theo cái nhãn.
+                // lỗi địa chỉ (null = không lỗi) mất theo cái nhãn.
                 PickupFailedShop = string.IsNullOrWhiteSpace(shopLogin) ? "(không rõ shop)" : shopLogin;
-                L($"⛔ Không đặt được địa chỉ lấy hàng ({_province}) — DỪNG vòng, KHÔNG in phiếu (tránh phiếu sai địa chỉ).");
+                L($"⛔ Không đặt được địa chỉ lấy hàng ({_province}) — BỎ QUA shop này, sang shop kế (nếu còn), KHÔNG in phiếu (tránh phiếu sai địa chỉ).");
                 return (orders.Count, 0);
             }
 

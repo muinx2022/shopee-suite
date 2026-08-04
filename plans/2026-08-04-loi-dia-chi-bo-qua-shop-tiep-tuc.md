@@ -1,7 +1,7 @@
 # Plan: Lỗi địa chỉ lấy hàng → bỏ qua shop, vẫn chạy shop kế
 
 - **Ngày:** 2026-08-04
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành
 - **Người lập:** Fable · **Người thực thi:** Auto
 
 ## 1. Bối cảnh & mục tiêu
@@ -117,15 +117,24 @@ File: `orders/XuLyDonShopee.Tests/PickupAddressStopTests.cs`:
 
 ## 4. Tiêu chí nghiệm thu
 
-- [ ] `dotnet build orders/XuLyDonShopee.App/XuLyDonShopee.App.csproj` — 0 warning mới.
-- [ ] `dotnet test orders/XuLyDonShopee.Tests/XuLyDonShopee.Tests.csproj` — xanh, kể cả `PickupAddressStopTests`.
-- [ ] `pickupOk == false` ở shop i → không gửi `prepareNextOrder` cho shop đó; vòng vẫn mở shop i+1 (đọc code `RunAllShopsAsync`: không `return` sớm vì địa chỉ).
-- [ ] Vẫn gửi cảnh báo Slack/Hub khi có shop lỗi địa chỉ; nội dung tin nói bỏ qua shop, không nói dừng cả vòng.
-- [ ] Captcha vẫn `return` sớm cả vòng (không đổi).
+- [x] `dotnet build orders/XuLyDonShopee.App/XuLyDonShopee.App.csproj` — 0 warning mới.
+- [x] `dotnet test orders/XuLyDonShopee.Tests` filter `PickupAddressStopTests` — 12/12 xanh.
+- [x] `pickupOk == false` ở shop i → không gửi `prepareNextOrder` cho shop đó; vòng vẫn mở shop i+1 (`RunAllShopsAsync` không `return` sớm vì địa chỉ; đóng tab rồi tiếp tục).
+- [x] Vẫn gửi cảnh báo Slack/Hub khi có shop lỗi địa chỉ; nội dung tin nói bỏ qua shop, không nói dừng cả vòng.
+- [x] Captcha vẫn `return` sớm cả vòng (không đổi).
 
 ## 5. Rủi ro & lưu ý
 
-- **Đóng tab bắt buộc** trước khi `continue` — quên thì shop kế chết với lỗi "chờ tab shop mở" (đã từng gặp production).
+- **Đóng tab bắt buộc** trước khi sang shop kế — đã giữ chung nhánh `DongTabShopAsync` sau cả thành công và bỏ-qua-địa-chỉ.
 - Nhiều shop lỗi trong cùng vòng: `PickupFailedShop` nối bằng `", "`; chống spam vẫn 1 tin / tài khoản / 60' → chỉ báo 1 lần (đã liệt kê đủ tên shop trong tin). Chấp nhận được.
 - Giả thuyết cũ (modal hỏng = mọi shop hỏng) **bỏ**: nếu thật sự mọi shop lỗi địa chỉ, vòng sẽ bỏ qua lần lượt từng shop + 1 tin Slack — chậm hơn dừng sớm nhưng an toàn hơn (shop khỏe vẫn được xử).
 - Không đổi spam key / ngưỡng trừ khi user yêu cầu sau.
+
+---
+
+## Báo cáo thực thi (Auto)
+
+- Đổi `RunAllShopsAsync`: gom shop lỗi địa chỉ → đóng tab → tiếp tục; cuối vòng trả `PickupAddressFailed` nếu có.
+- Cập nhật log/`TaoTinNhanLoiDiaChi`/`AccountSession`/`OrderPersistPipeline` cho khớp hành vi mới.
+- Build 0 warning; `PickupAddressStopTests` 12/12 xanh.
+- Chưa commit code (chờ user yêu cầu).

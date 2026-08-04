@@ -364,10 +364,10 @@ internal sealed class OrderPersistPipeline
         => mocGanNhat is null || bayGio - mocGanNhat.Value >= nguong;
 
     /// <summary>
-    /// Cảnh báo ra kênh ngoài (Slack/Discord/Telegram) khi vòng đã DỪNG vì KHÔNG đặt được địa chỉ lấy hàng — y
-    /// pattern <see cref="StartNotifyInBackground"/>: fire-and-forget, nuốt mọi exception, KHÔNG nằm trên đường
-    /// quyết định dừng (vòng đã dừng trong <see cref="OrdersBridgeSession"/> trước khi hàm này được gọi; webhook
-    /// trống / mạng hỏng chỉ làm mất TIN, không làm app chạy tiếp).
+    /// Cảnh báo ra kênh ngoài (Slack/Discord/Telegram) khi có shop bị BỎ QUA vì KHÔNG đặt được địa chỉ lấy hàng —
+    /// y pattern <see cref="StartNotifyInBackground"/>: fire-and-forget, nuốt mọi exception, KHÔNG nằm trên đường
+    /// quyết định vòng (shop đã bỏ qua trong <see cref="OrdersBridgeSession"/> trước khi hàm này được gọi; webhook
+    /// trống / mạng hỏng chỉ làm mất TIN, không làm app đổi hành vi).
     /// <para>
     /// Chống spam <see cref="NguongCanhBaoDiaChi"/> theo tài khoản — nhưng MỌI trường hợp không gửi đều GHI LOG:
     /// im lặng hoàn toàn sẽ khiến người trực tưởng đã hết lỗi. <b>Mốc chỉ được GIỮ khi ít nhất MỘT kênh đã nhận
@@ -381,7 +381,7 @@ internal sealed class OrderPersistPipeline
         DateTime? mocGanNhat = _mocCanhBaoDiaChi.TryGetValue(_accountId, out var m) ? m : null;
         if (!CoNenGuiCanhBao(mocGanNhat, bayGio, NguongCanhBaoDiaChi))
         {
-            log($"Cảnh báo địa chỉ: đã báo lúc {mocGanNhat!.Value:HH:mm}, không gửi lại trong {NguongCanhBaoDiaChi.TotalMinutes:0}' — lỗi VẪN còn, vòng vẫn dừng.");
+            log($"Cảnh báo địa chỉ: đã báo lúc {mocGanNhat!.Value:HH:mm}, không gửi lại trong {NguongCanhBaoDiaChi.TotalMinutes:0}' — lỗi VẪN còn, shop bị bỏ qua, vòng vẫn chạy shop khác.");
             return;
         }
 
@@ -424,7 +424,7 @@ internal sealed class OrderPersistPipeline
                     // KHÔNG kênh nào nhận được tin → NHẢ mốc: giữ mốc ở đây là câm 60' dù chưa ai được báo.
                     // Quy tắc: mốc chỉ được giữ khi ÍT NHẤT MỘT kênh đã nhận (xem hai nhánh TryRemove bên dưới).
                     _mocCanhBaoDiaChi.TryRemove(new KeyValuePair<long, DateTime>(_accountId, bayGio));
-                    log("Cảnh báo địa chỉ: chưa cấu hình webhook lỗi app (Hub hoặc Cài đặt local) — không gửi được tin ra ngoài, vòng VẪN dừng.");
+                    log("Cảnh báo địa chỉ: chưa cấu hình webhook lỗi app (Hub hoặc Cài đặt local) — không gửi được tin ra ngoài; shop vẫn bị bỏ qua, vòng vẫn chạy shop khác.");
                     return;
                 }
 
@@ -437,7 +437,7 @@ internal sealed class OrderPersistPipeline
                 else
                 {
                     _mocCanhBaoDiaChi.TryRemove(new KeyValuePair<long, DateTime>(_accountId, bayGio));
-                    log("Cảnh báo địa chỉ: gửi KHÔNG thành công — sẽ báo lại ở vòng sau (vòng này vẫn dừng).");
+                    log("Cảnh báo địa chỉ: gửi KHÔNG thành công — sẽ báo lại ở vòng sau (shop bị bỏ qua, vòng vẫn chạy shop khác).");
                 }
             }
             catch (OperationCanceledException)
