@@ -1,7 +1,7 @@
 # Plan: Vá 5 lỗ hổng đồng bộ banner lỗi địa chỉ (hậu review v1.7.16)
 
 - **Ngày:** 2026-08-04
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành (Bước 1 và Bước 5 ĐÃ ĐỔI HƯỚNG sau phản biện — xem Báo cáo thực thi)
 - **Người lập:** phiên chính · **Người thực thi:** phiên chính
 
 ## 1. Bối cảnh & mục tiêu
@@ -176,4 +176,58 @@ Nhánh INSERT (chưa có dòng → tombstone) giữ nguyên.
 
 ---
 
-## Báo cáo thực thi (điền sau khi xong)
+## Báo cáo thực thi
+
+### Đổi hướng ở Bước 1 và Bước 5 — plan ban đầu SAI
+
+Bản vá đầu (commit `561797a`) làm đúng plan, build 0 warning, test 1485/51 xanh. Nhưng phản biện độc lập
+chỉ ra hai lỗi nặng mà tôi đã **tự kiểm chứng lại trên code và xác nhận là đúng**:
+
+1. **`localCreatedAt` không phải "mốc lỗi"** — `PickupAddressAlertsRepository.Upsert` ghi
+   `created_at = UtcNow` mỗi lần, mà đường merge mirror-upsert lại chạy **mỗi 60s** khi Hub còn active. Mốc
+   local do đó trôi theo giờ hiện tại. Luật mới đem mốc trôi đó so `hubDismissedAt` → máy nào vừa mirror xong
+   sau lúc máy khác bấm X sẽ giữ banner **vĩnh viễn** (mỗi tick quyết định y hệt).
+2. **So mốc chéo máy trong SQL dismiss** (`$d < created_at`) — hai mốc đến từ hai đồng hồ độc lập. Máy phát
+   hiện lỗi chạy nhanh giờ ⇒ Hub **từ chối vĩnh viễn** lần bấm X của máy khác, banner không bao giờ gỡ được.
+   Trước bản vá, dismiss vô điều kiện nên vẫn hội tụ.
+
+Đánh giá lại mức nghiêm trọng của lỗi gốc (Lỗi 1 trong §1): nếu địa chỉ **vẫn lỗi thật**, vòng shop kế
+(3–5 phút) phát hiện lại và upsert với mốc mới hơn `dismissed_at` ⇒ Hub bỏ tombstone ⇒ banner hiện lại ở mọi
+máy. Tức Lỗi 1 chỉ làm **mất banner tạm một vòng và TỰ LÀNH**, trong khi bản vá đánh đổi bằng nguy cơ banner
+**kẹt vĩnh viễn** — đắt hơn nhiều. Quyết định: **gỡ cả hai luật so mốc**, giữ nguyên tắc "bấm X LUÔN thắng".
+
+### Lỗi thứ 6 phát hiện thêm (nặng, có từ v1.7.16 đang phát hành)
+
+`RunOnUi` là `Dispatcher.BeginInvoke` (bất đồng bộ). Code gom `repushDismiss` **bên trong** callback rồi đọc
+**ngay sau** khối đó — mà sau `await fetch(...).ConfigureAwait(false)` luồng luôn là threadpool ⇒ callback mới
+chỉ được xếp hàng ⇒ list luôn rỗng. **Nhánh repush chưa từng chạy lần nào**, kể cả ở v1.7.16. Đã sửa: bắn
+`DayLaiHub` ngay trong callback UI.
+
+### Đã giao
+
+| Hạng mục | Trạng thái |
+|---|---|
+| Lỗi 1 (tombstone cũ xoá banner mới) | **KHÔNG sửa** — chấp nhận, tự lành sau 1 vòng shop; lý do ghi trong xmldoc `PickupAlertMerge.QuyetDinh` |
+| Lỗi 2 (`LoadAddressAlertsFromLocal` ngoài UI thread) | xong — bọc `RunOnUi` |
+| Lỗi 3 (`ToDictionary` ném) | xong — `Dictionary` + `TryAdd` |
+| Lỗi 4 (sync chồng) | xong — cờ busy + pending coalesce dùng chung mọi lối gọi |
+| Lỗi 5 (Hub dismiss vô điều kiện) | **KHÔNG sửa** — cố ý, ghi rõ lý do trong xmldoc `DismissPickupAlert` |
+| Lỗi 6 (repush chết) | xong — bắn trong callback UI |
+| Ghi local trượt dòng khi shop lệch hoa/thường | xong — dùng `local?.ShopLogin ?? dong.ShopLogin` |
+| Rác `probe.store` trên Hub production | xong — backup `hub.db.bak-20260804` rồi xoá đúng 1 dòng |
+
+### Kiểm chứng
+
+- `dotnet build ShopeeSuite.sln` → 0 warning, 0 error.
+- `dotnet test orders` → 1482 passed (mốc trước 1479, +3 test merge).
+- `dotnet test hub` → 51 passed (mốc trước 49, +2 test dismiss).
+- Hub deploy lại + restart, `systemctl is-active` = active, health 200; `strings -el` xác nhận SQL dismiss đã
+  về dạng vô điều kiện (0 hit cho luật `$d < created_at`).
+- `orders_pickup_alerts` production còn đúng 1 dòng `alina99.store` (nguyên vẹn).
+
+### Còn tồn
+
+Chưa vá được **gốc** của Lỗi 1 bằng cách không đụng đồng hồ. Hướng đúng khi cần: bỏ so mốc, thay bằng
+số hiệu bản ghi tăng dần (`rev`) do Hub cấp + cờ "chưa đẩy được lên Hub" ở local (outbox) — client chỉ nghe
+Hub khi `rev` Hub mới hơn `rev` đã thấy, và không để tombstone Hub đè dòng local còn đang chờ đẩy. Việc này
+cần thêm cột hai phía + migration, nên tách plan riêng.

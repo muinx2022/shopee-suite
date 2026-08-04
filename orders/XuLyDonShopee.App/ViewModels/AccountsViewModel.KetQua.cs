@@ -684,8 +684,7 @@ public partial class AccountsViewModel
             hub = null;
         }
 
-        List<(string Shop, DateTimeOffset OccurredAt)>? repushDismiss = null;
-        List<(string Shop, string Province, DateTimeOffset OccurredAt)>? repushUpsert = null;
+        var dismissHub = _services.DismissPickupAlertToHub;
 
         RunOnUi(() =>
         {
@@ -713,26 +712,24 @@ public partial class AccountsViewModel
                     }
 
                     localByShop.TryGetValue(dong.ShopLogin, out var local);
-                    var action = PickupAlertMerge.QuyetDinh(
-                        local?.CreatedAt, local?.DismissedAt, dong.Dismissed, dong.CreatedAt, dong.DismissedAt);
-                    switch (action)
+                    // Ghi local phải dùng ĐÚNG chuỗi shop của dòng local (khớp không phân biệt hoa/thường ở trên,
+                    // nhưng SQL so BINARY) — lấy dong.ShopLogin sẽ trượt sang dòng khác/không dòng nào.
+                    var shopLocal = local?.ShopLogin ?? dong.ShopLogin;
+                    switch (PickupAlertMerge.QuyetDinh(local?.DismissedAt, dong.Dismissed, dong.CreatedAt))
                     {
                         case MergePickupAlertAction.LocalDismiss:
-                            _services.PickupAlerts.Dismiss(accountId, dong.ShopLogin);
+                            _services.PickupAlerts.Dismiss(accountId, shopLocal);
                             break;
                         case MergePickupAlertAction.LocalUpsert:
-                            _services.PickupAlerts.Upsert(accountId, dong.ShopLogin, dong.Province);
+                            _services.PickupAlerts.Upsert(accountId, shopLocal, dong.Province);
                             break;
                         case MergePickupAlertAction.KeepLocalDismissRepushHub:
-                            repushDismiss ??= [];
-                            repushDismiss.Add((dong.ShopLogin, ToUtcOffset(local?.DismissedAt)));
-                            break;
-                        case MergePickupAlertAction.KeepLocalActiveRepushHub:
-                            repushUpsert ??= [];
-                            repushUpsert.Add((
-                                dong.ShopLogin,
-                                local?.Province ?? dong.Province,
-                                ToUtcOffset(local?.CreatedAt)));
+                            // Bắn NGAY trong callback UI: RunOnUi là BeginInvoke (bất đồng bộ) nên gom vào list
+                            // rồi đọc sau khối này thì luôn đọc phải list rỗng — đó là lý do repush chưa từng chạy.
+                            if (dismissHub is not null)
+                            {
+                                DayLaiHub(accountLogin, dong.ShopLogin, ToUtcOffset(local?.DismissedAt), dismissHub);
+                            }
                             break;
                     }
                 }
@@ -740,40 +737,29 @@ public partial class AccountsViewModel
 
             LoadAddressAlertsFromLocal();
         });
-
-        if (repushDismiss is { Count: > 0 } && _services.DismissPickupAlertToHub is { } dismissHub)
-        {
-            foreach (var (shop, when) in repushDismiss)
-            {
-                DayLaiHub(accountLogin, shop, "dismiss", () => dismissHub(accountLogin, shop, when, default));
-            }
-        }
-
-        if (repushUpsert is { Count: > 0 } && _services.UpsertPickupAlertToHub is { } upsertHub)
-        {
-            foreach (var (shop, province, when) in repushUpsert)
-            {
-                DayLaiHub(accountLogin, shop, "upsert", () => upsertHub(accountLogin, shop, province, when, default));
-            }
-        }
     }
 
-    /// <summary>Fire-and-forget sửa lại Hub cho một shop (nối đuôi theo shop qua <see cref="PickupAlertHubGate"/>,
-    /// log khi hỏng — không chặn UI, không làm fail lượt sync).</summary>
-    private static void DayLaiHub(string accountLogin, string shop, string thaoTac, Func<Task<bool>> day)
+    /// <summary>Fire-and-forget đẩy lại tombstone dismiss lên Hub cho một shop (Hub còn active nhưng local đã
+    /// đóng mới hơn). Nối đuôi theo shop qua <see cref="PickupAlertHubGate"/>, log khi hỏng — không chặn UI.</summary>
+    private static void DayLaiHub(
+        string accountLogin,
+        string shop,
+        DateTimeOffset when,
+        Func<string, string, DateTimeOffset?, CancellationToken, Task<bool>> dismissHub)
         => _ = Task.Run(async () =>
         {
             try
             {
-                var ok = await PickupAlertHubGate.RunAsync(accountLogin, shop, day).ConfigureAwait(false);
+                var ok = await PickupAlertHubGate.RunAsync(accountLogin, shop, () =>
+                    dismissHub(accountLogin, shop, when, default)).ConfigureAwait(false);
                 if (!ok)
                 {
-                    Trace.WriteLine($"[AccountsViewModel] Re-push {thaoTac} pickup-alert Hub thất bại shop={shop}");
+                    Trace.WriteLine($"[AccountsViewModel] Re-push dismiss pickup-alert Hub thất bại shop={shop}");
                 }
             }
             catch (Exception ex)
             {
-                Trace.WriteLine($"[AccountsViewModel] Re-push {thaoTac} pickup-alert Hub lỗi shop={shop}: {ex.Message}");
+                Trace.WriteLine($"[AccountsViewModel] Re-push dismiss pickup-alert Hub lỗi shop={shop}: {ex.Message}");
             }
         });
 

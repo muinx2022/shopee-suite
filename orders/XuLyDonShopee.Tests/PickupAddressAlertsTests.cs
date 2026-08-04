@@ -182,74 +182,26 @@ public class PickupAddressAlertsTests
         Assert.False(vm.ResultRows.Single().ShowLoiDiaChi);
     }
 
-    // ── Merge Hub ↔ local: mốc thời gian mới hơn thắng, HAI CHIỀU ──────────────────────────────────────
-    private static readonly DateTimeOffset HubDismiss0440 = new(2026, 8, 4, 4, 40, 0, TimeSpan.Zero);
+    // ── Merge Hub ↔ local ─────────────────────────────────────────────────────────────────────────────
+    // Bấm X (Hub dismissed) LUÔN thắng — cố ý không so mốc chéo máy, xem xmldoc PickupAlertMerge.QuyetDinh.
 
-    /// <summary>Máy khác bấm X SAU khi banner sinh ra → lan dismiss (luồng chính của tính năng).</summary>
+    /// <summary>Máy khác bấm X → máy này gỡ banner, kể cả khi local đang hiện (luồng chính của tính năng).</summary>
     [Fact]
-    public void Merge_HubDismissMoiHonBannerLocal_LocalDismiss()
+    public void Merge_HubDismissed_LocalDangHienBanner_LocalDismiss()
         => Assert.Equal(MergePickupAlertAction.LocalDismiss,
             PickupAlertMerge.QuyetDinh(
-                localCreatedAt: new DateTime(2026, 8, 4, 4, 0, 0, DateTimeKind.Utc),
                 localDismissedAt: null,
                 hubDismissed: true,
-                hubCreatedAt: new DateTimeOffset(2026, 8, 4, 4, 0, 0, TimeSpan.Zero),
-                hubDismissedAt: HubDismiss0440));
-
-    /// <summary>Lỗi MỚI phát hiện lúc Hub chết (upsert Hub fail) + Hub còn tombstone cũ → GIỮ banner, sửa Hub.</summary>
-    [Fact]
-    public void Merge_BannerLocalMoiHonTombstoneHub_KeepActiveVaRepush()
-        => Assert.Equal(MergePickupAlertAction.KeepLocalActiveRepushHub,
-            PickupAlertMerge.QuyetDinh(
-                localCreatedAt: new DateTime(2026, 8, 4, 5, 0, 0, DateTimeKind.Utc),
-                localDismissedAt: null,
-                hubDismissed: true,
-                hubCreatedAt: new DateTimeOffset(2026, 8, 4, 4, 0, 0, TimeSpan.Zero),
-                hubDismissedAt: HubDismiss0440));
+                hubCreatedAt: DateTimeOffset.UtcNow.AddMinutes(-5)));
 
     /// <summary>Local cũng đã đóng rồi → cứ dismiss, không có gì để giữ.</summary>
     [Fact]
     public void Merge_HubDismissed_LocalDaDismiss_LocalDismiss()
         => Assert.Equal(MergePickupAlertAction.LocalDismiss,
             PickupAlertMerge.QuyetDinh(
-                localCreatedAt: new DateTime(2026, 8, 4, 5, 0, 0, DateTimeKind.Utc),
                 localDismissedAt: new DateTime(2026, 8, 4, 5, 10, 0, DateTimeKind.Utc),
                 hubDismissed: true,
-                hubCreatedAt: null,
-                hubDismissedAt: HubDismiss0440));
-
-    /// <summary>Local chưa có dòng nào → nghe Hub (không dựng banner từ hư không).</summary>
-    [Fact]
-    public void Merge_HubDismissed_LocalChuaCoDong_LocalDismiss()
-        => Assert.Equal(MergePickupAlertAction.LocalDismiss,
-            PickupAlertMerge.QuyetDinh(
-                localCreatedAt: null,
-                localDismissedAt: null,
-                hubDismissed: true,
-                hubCreatedAt: null,
-                hubDismissedAt: HubDismiss0440));
-
-    /// <summary>Hub báo dismissed nhưng THIẾU mốc → không giữ bừa banner local.</summary>
-    [Fact]
-    public void Merge_HubDismissed_ThieuDismissedAt_LocalDismiss()
-        => Assert.Equal(MergePickupAlertAction.LocalDismiss,
-            PickupAlertMerge.QuyetDinh(
-                localCreatedAt: new DateTime(2026, 8, 4, 5, 0, 0, DateTimeKind.Utc),
-                localDismissedAt: null,
-                hubDismissed: true,
-                hubCreatedAt: null,
-                hubDismissedAt: null));
-
-    /// <summary>Mốc local đời cũ (Kind=Unspecified) coi như UTC, không lệch múi giờ máy.</summary>
-    [Fact]
-    public void Merge_MocLocalKhongKind_CoiNhuUtc()
-        => Assert.Equal(MergePickupAlertAction.KeepLocalActiveRepushHub,
-            PickupAlertMerge.QuyetDinh(
-                localCreatedAt: new DateTime(2026, 8, 4, 5, 0, 0, DateTimeKind.Unspecified),
-                localDismissedAt: null,
-                hubDismissed: true,
-                hubCreatedAt: null,
-                hubDismissedAt: HubDismiss0440));
+                hubCreatedAt: null));
 
     [Fact]
     public void Merge_LocalDismissMoiHonHubActive_KeepVaRepush()
@@ -257,7 +209,7 @@ public class PickupAddressAlertsTests
         var hubCreated = new DateTimeOffset(2026, 8, 4, 4, 0, 0, TimeSpan.Zero);
         var localDismiss = new DateTime(2026, 8, 4, 4, 40, 0, DateTimeKind.Utc);
         Assert.Equal(MergePickupAlertAction.KeepLocalDismissRepushHub,
-            PickupAlertMerge.QuyetDinh(null, localDismiss, hubDismissed: false, hubCreated, null));
+            PickupAlertMerge.QuyetDinh(localDismiss, hubDismissed: false, hubCreated));
     }
 
     [Fact]
@@ -266,27 +218,32 @@ public class PickupAddressAlertsTests
         var localDismiss = new DateTime(2026, 8, 4, 4, 0, 0, DateTimeKind.Utc);
         var hubCreated = new DateTimeOffset(2026, 8, 4, 5, 0, 0, TimeSpan.Zero);
         Assert.Equal(MergePickupAlertAction.LocalUpsert,
-            PickupAlertMerge.QuyetDinh(null, localDismiss, hubDismissed: false, hubCreated, null));
+            PickupAlertMerge.QuyetDinh(localDismiss, hubDismissed: false, hubCreated));
     }
+
+    /// <summary>Mốc dismiss local đời cũ (Kind=Unspecified) coi như UTC, không lệch theo múi giờ máy.</summary>
+    [Fact]
+    public void Merge_MocDismissKhongKind_CoiNhuUtc()
+        => Assert.Equal(MergePickupAlertAction.KeepLocalDismissRepushHub,
+            PickupAlertMerge.QuyetDinh(
+                localDismissedAt: new DateTime(2026, 8, 4, 4, 40, 0, DateTimeKind.Unspecified),
+                hubDismissed: false,
+                hubCreatedAt: new DateTimeOffset(2026, 8, 4, 4, 0, 0, TimeSpan.Zero)));
 
     [Fact]
     public void Merge_LocalDismiss_HubActiveThieuCreatedAt_KeepVaRepush()
         => Assert.Equal(MergePickupAlertAction.KeepLocalDismissRepushHub,
             PickupAlertMerge.QuyetDinh(
-                localCreatedAt: null,
                 localDismissedAt: DateTime.UtcNow,
                 hubDismissed: false,
-                hubCreatedAt: null,
-                hubDismissedAt: null));
+                hubCreatedAt: null));
 
     /// <summary>Local chưa dismiss + Hub active → upsert (banner lan sang máy này).</summary>
     [Fact]
     public void Merge_HubActive_LocalChuaDismiss_LocalUpsert()
         => Assert.Equal(MergePickupAlertAction.LocalUpsert,
             PickupAlertMerge.QuyetDinh(
-                localCreatedAt: null,
                 localDismissedAt: null,
                 hubDismissed: false,
-                hubCreatedAt: new DateTimeOffset(2026, 8, 4, 5, 0, 0, TimeSpan.Zero),
-                hubDismissedAt: null));
+                hubCreatedAt: new DateTimeOffset(2026, 8, 4, 5, 0, 0, TimeSpan.Zero)));
 }

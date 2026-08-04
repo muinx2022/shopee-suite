@@ -44,31 +44,33 @@ public sealed class PickupAlertsHubTests : IDisposable
         Assert.Equal("HN", row.Province);
     }
 
-    /// <summary>Dismiss CŨ tới muộn không được chôn banner của lỗi phát hiện SAU đó.</summary>
+    /// <summary>
+    /// Bấm X LUÔN thắng, kể cả khi mốc dismiss cũ hơn <c>created_at</c> (hai máy lệch đồng hồ).
+    /// Cố ý: so mốc chéo máy ở đây từng làm Hub từ chối dismiss vĩnh viễn → banner không gỡ được.
+    /// </summary>
     [Fact]
-    public void DismissCu_SauUpsertMoi_KhongChonBanner()
+    public void DismissMocCuHonCreatedAt_VanDong()
     {
         using var db = new HubDatabase(_dataDir);
-        // Bấm X lúc 04:00 (request đi lạc), rồi 05:00 shop lỗi lại → banner active.
+        // Máy phát hiện lỗi chạy nhanh giờ → created_at 05:00; máy bấm X giờ đúng → dismiss 04:00.
         Assert.True(db.UpsertPickupAlert("acc@x", "shop.a", "TH", "m1", "2026-08-04T05:00:00Z"));
-
-        // Dismiss cũ (04:00 < created_at 05:00) đáp muộn → phải bị bỏ qua.
-        Assert.True(db.DismissPickupAlert("acc@x", "shop.a", "m1", "2026-08-04T04:00:00Z"));
-
-        var row = Assert.Single(db.ListPickupAlerts("acc@x"));
-        Assert.True(string.IsNullOrEmpty(row.DismissedAt));
-    }
-
-    /// <summary>Dismiss mới hơn created_at vẫn ăn (chống hồi quy cho luật vừa thêm).</summary>
-    [Fact]
-    public void DismissMoi_SauUpsert_VanAn()
-    {
-        using var db = new HubDatabase(_dataDir);
-        Assert.True(db.UpsertPickupAlert("acc@x", "shop.a", "TH", "m1", "2026-08-04T05:00:00Z"));
-        Assert.True(db.DismissPickupAlert("acc@x", "shop.a", "m1", "2026-08-04T05:30:00Z"));
+        Assert.True(db.DismissPickupAlert("acc@x", "shop.a", "m2", "2026-08-04T04:00:00Z"));
 
         var row = Assert.Single(db.ListPickupAlerts("acc@x"));
         Assert.False(string.IsNullOrEmpty(row.DismissedAt));
+    }
+
+    /// <summary>Lỗi còn thật → vòng shop kế upsert mốc mới hơn dismissed_at ⇒ banner tự hiện lại (ca tự lành).</summary>
+    [Fact]
+    public void SauDismiss_VongKeUpsertMocMoi_BannerHienLai()
+    {
+        using var db = new HubDatabase(_dataDir);
+        Assert.True(db.UpsertPickupAlert("acc@x", "shop.a", "TH", "m1", "2026-08-04T04:00:00Z"));
+        Assert.True(db.DismissPickupAlert("acc@x", "shop.a", "m1", "2026-08-04T04:40:00Z"));
+        Assert.True(db.UpsertPickupAlert("acc@x", "shop.a", "TH", "m1", "2026-08-04T04:45:00Z"));
+
+        var row = Assert.Single(db.ListPickupAlerts("acc@x"));
+        Assert.True(string.IsNullOrEmpty(row.DismissedAt));
     }
 
     public void Dispose()
