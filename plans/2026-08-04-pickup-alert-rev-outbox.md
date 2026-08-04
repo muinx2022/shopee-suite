@@ -223,5 +223,23 @@ Client ≤ v1.7.18 vẫn gửi `OccurredAt` (Hub bỏ qua) và bỏ qua `rev` tr
 Kèm theo: xoá code chết `ToUtcOffset`/`ParseIsoOffset`; thêm chốt `PickupAlertHubGate.GiuCho/NhaCho` chống
 xếp trùng lệnh đẩy mỗi nhịp 60s (mỗi lệnh thừa bơm `rev` Hub thêm 1).
 
-**Còn nợ:** chưa có test mức ViewModel cho `MergeVaDayOutbox`/`DayLenHub` (vùng mới rủi ro nhất hiện chỉ
-được chứng minh bằng đọc code + test hàm thuần + test repository).
+### Bổ sung: test mức ViewModel + kiểm chứng bằng đột biến
+
+`orders/XuLyDonShopee.Tests/PickupAlertSyncViewModelTests.cs` — 6 test chạy ĐƯỜNG THẬT (AppServices hook giả
+→ SQLite thật → collection UI thật), phủ đúng vùng chứa cả 4 lỗi trên: Hub tombstone không xoá được banner
+đang chờ đẩy; máy khác bấm X thì gỡ banner; đẩy được thì hạ cờ và không đẩy lại; dòng chờ đẩy mà Hub chưa có
+vẫn được rút hàng đợi; bấm X lúc Hub chết thì giữ cờ và tự đẩy lại; không nối Hub thì không ném.
+
+**Đã kiểm chứng test KHÔNG rỗng** bằng cách phá từng luật rồi chạy lại (khôi phục ngay sau đó):
+
+| Luật bị phá | Test đổ |
+|---|---|
+| `if (localChoDay) return DayLenHub` | 3 test |
+| Vòng merge chỉ duyệt Hub, bỏ hợp outbox | 2 test |
+| `DanhDauDaDay` bỏ so trạng thái đã đẩy | 2 test |
+
+Lượt phá đầu tiên còn lộ ra chính test lõi lúc đó đang **xanh vì lý do sai** (Hub giữ nguyên rev nên nhánh
+`TheoHub` không bao giờ chạy) — đã dựng lại kịch bản cho đúng: máy chưa từng nhận rev nào (`hub_rev = 0`) rồi
+Hub sống lại mang tombstone rev cao hơn.
+
+Test cuối: build 0 warning; orders **1503 passed**; hub **53 passed**.
