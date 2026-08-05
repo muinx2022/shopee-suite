@@ -8,7 +8,6 @@
 @using Microsoft.Extensions.DependencyInjection
 @inject FileStoreConfigService Config
 @inject IServiceProvider Sp
-@inject IJSRuntime JS
 @inject NavigationManager Nav
 @implements IDisposable
 
@@ -132,6 +131,8 @@
 @* Modal CHUNG Thêm/Sửa dòng (component dùng chung với lưới per-shop) — /data: chọn acc/shop trong form, prefill. *@
 <ProductRowModal @ref="_modal" Engine="_engine" Accounts="_accounts" AcctLabel="AcctLabel" ShopLabel="ShopCell" OnSaved="OnRowSaved" />
 
+<ConfirmDialog @ref="_confirm" />
+
 @code {
     // Ô cắt ngắn text dài (Link/Tên/Acc/Shop…) — bảng cuộn ngang qua .tablewrap; title giữ giá trị đầy đủ.
     private const string Clip = "max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
@@ -147,15 +148,17 @@
 
     private ProductGridEngine _engine = default!;
     private ProductRowModal? _modal;
+    private ConfirmDialog? _confirm;
     private string _status = "";   // status RIÊNG của wizard nhập Excel (engine không biết) — clear khi Lọc/Xóa lọc.
 
     protected override async Task OnInitializedAsync()
     {
         LoadAccounts();
-        // Engine gọi ProductDb in-process; confirm = JS confirm của trang (engine tự bọc validate/xác nhận tiếng Việt).
+        // Engine gọi ProductDb in-process; confirm = hộp xác nhận của hub (engine tự bọc validate/xác nhận tiếng Việt).
+        // _confirm chỉ có sau lần render đầu (@ref) — engine chỉ hỏi khi user bấm nút nên lúc đó đã sẵn; null = không làm.
         _engine = new ProductGridEngine(
             new ProductDbDataOps(Sp.GetService<ProductDb>(), "hub-web"),
-            msg => JS.InvokeAsync<bool>("confirm", msg).AsTask());
+            msg => _confirm is null ? Task.FromResult(false) : _confirm.AskEngineAsync(msg));
         _engine.Changed += OnEngineChanged;
         // Đọc query → ô lọc + filter/trang/cỡ trang, rồi nạp trong 1 lượt (KHÔNG navigate — còn prerender).
         var (f, page, size) = ParseUrl();

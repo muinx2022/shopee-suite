@@ -1,0 +1,85 @@
+@* Hộp XÁC NHẬN dùng chung — thay hộp `window.confirm` của trình duyệt (không theo theme sáng/tối của hub,
+   không đặt được chữ trên nút, và chặn cứng luồng JS trong lúc chờ). Khuôn lấy nguyên của RowMapModal
+   (.modal-overlay/.modal/.modal-head/.modal-body/.modal-foot) nên tự đúng ở cả nền tối.
+
+   Cách dùng: đặt <ConfirmDialog @@ref="_confirm" /> ở CUỐI markup của trang (ngoài mọi .tablewrap), rồi:
+       if (!await _confirm!.AskAsync("Xoá máy?", "…hệ quả…", "🗑 Xoá & chặn", danger: true)) return;
+
+   Trả về Task<bool>: true = bấm nút hành động; false = Huỷ / Esc / bấm ra nền / rời trang.
+   Đóng-khi-bấm-ngoài làm bằng overlay bắt click (Blazor thuần) — KHÔNG gắn handler JS toàn cục, nên không rò
+   handler qua circuit. Esc bắt bằng @@onkeydown ở overlay: mở hộp là focus nhảy vào nút Huỷ (nằm trong overlay)
+   nên phím nổi bọt lên tới đây. *@
+@implements IDisposable
+
+@if (_open)
+{
+    <div class="modal-overlay" tabindex="-1" @onclick="Cancel" @onkeydown="OnKeyDown">
+        <div class="modal confirm-modal" role="alertdialog" aria-modal="true" @onclick:stopPropagation="true">
+            <div class="modal-head"><span>@_title</span></div>
+            <div class="modal-body"><div class="confirm-text">@_message</div></div>
+            <div class="modal-foot">
+                @* Nút HUỶ được focus khi mở (Enter/Space ngay lúc mở = huỷ, không phải làm) — chủ ý an toàn. *@
+                <button class="btn" @ref="_cancelBtn" @onclick="Cancel">@_cancelText</button>
+                <button class="btn @(_danger ? "danger" : "primary")" @onclick="Ok">@_okText</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private bool _open, _danger, _needFocus;
+    private string _title = "", _message = "", _okText = "", _cancelText = "";
+    private TaskCompletionSource<bool>? _tcs;
+    private ElementReference _cancelBtn;
+
+    /// <summary>Mở hộp và CHỜ người dùng chọn. <paramref name="danger"/> = nút hành động tô đỏ (thao tác phá huỷ).</summary>
+    public Task<bool> AskAsync(string title, string message, string okText = "Đồng ý",
+        string cancelText = "Huỷ", bool danger = false)
+    {
+        // Hộp cũ còn treo (user bấm nút thứ hai khi hộp đang mở) → trả false cho lượt cũ, kẻo await đó treo mãi.
+        _tcs?.TrySetResult(false);
+        _title = title; _message = message; _okText = okText; _cancelText = cancelText; _danger = danger;
+        // RunContinuationsAsynchronously: TrySetResult không chạy tiếp phần sau `await` NGAY trong lượt xử lý sự
+        // kiện của nút — để Blazor đóng render của nút trước, rồi mới chạy tiếp trên sync-context của circuit.
+        _tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _open = true; _needFocus = true;
+        StateHasChanged();
+        return _tcs.Task;
+    }
+
+    /// <summary>Lối vào cho <c>ProductGridEngine</c> — lõi lưới chỉ tiêm được <c>Func&lt;string, Task&lt;bool&gt;&gt;</c>
+    /// nên không truyền được tiêu đề riêng: dùng tiêu đề chung, câu hỏi có chữ "xoá" thì nút hành động tô đỏ.</summary>
+    public Task<bool> AskEngineAsync(string message) =>
+        AskAsync("Xác nhận", message, danger: message.Contains("xoá", StringComparison.OrdinalIgnoreCase));
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!_needFocus) return;
+        _needFocus = false;
+        // Circuit đang đóng / element vừa bị gỡ → focus hỏng cũng không được làm chết lượt render.
+        try { await _cancelBtn.FocusAsync(); }
+        catch (Exception) { }
+    }
+
+    private void Ok() => Close(true);
+    private void Cancel() => Close(false);
+
+    private void OnKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape") Close(false);
+    }
+
+    private void Close(bool result)
+    {
+        _open = false;
+        var tcs = _tcs; _tcs = null;
+        tcs?.TrySetResult(result);
+    }
+
+    // Rời trang khi hộp đang mở: trả false để chỗ `await` không treo trên circuit đã chết.
+    public void Dispose()
+    {
+        var tcs = _tcs; _tcs = null;
+        tcs?.TrySetResult(false);
+    }
+}

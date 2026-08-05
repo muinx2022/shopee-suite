@@ -2,9 +2,9 @@
 @attribute [Authorize(Policy = "Web")]
 @implements IAsyncDisposable
 @inject HubDatabase Db
-@inject IJSRuntime JS
 @inject NavigationManager Nav
 
+@{ var lines = Filtered().ToList(); }
 <div class="logpage">
     <div class="bar">
         <label>Máy
@@ -25,15 +25,23 @@
                 <option value="error">error</option>
             </select>
         </label>
+        @* Lọc chuỗi CHẠY TRÊN 500 dòng đã nạp (không đụng DB) → gõ tới đâu lọc tới đó, khỏi debounce. *@
+        <label>Tìm
+            <input class="opt-search" @bind="_textFilter" @bind:event="oninput" @bind:after="UpdateUrl"
+                   placeholder="mã đơn / tên shop / chuỗi bất kỳ" title="Lọc trong 500 dòng đang xem — không phân biệt hoa thường. Khớp cả tên máy." />
+        </label>
+        @* Tạm dừng: vòng poll vẫn chạy nhưng BỎ QUA lượt nạp → khung log đứng yên để soi/bôi đen, bấm ▶ là bắt kịp. *@
+        <button class="btn @(_paused ? "primary" : "")"
+                title="@(_paused ? "Đang tạm dừng làm tươi — bấm để chạy lại (nhịp 2s)." : "Tạm dừng làm tươi (khung log đang nhảy mỗi 2s).")"
+                @onclick="TogglePause">@(_paused ? "▶ Chạy lại" : "⏸ Tạm dừng")</button>
         <button class="btn danger" @onclick="Clear">🗑 Xoá log</button>
-        <span class="stat">@_logs.Count dòng</span>
+        <span class="stat">@(lines.Count == _logs.Count ? $"{_logs.Count} dòng" : $"{lines.Count}/{_logs.Count} dòng")@(_paused ? " · ⏸ đang dừng" : "")</span>
     </div>
 
     <div class="logbox">
-        @{ var lines = Filtered().ToList(); }
         @if (lines.Count == 0)
         {
-            <div class="empty">Chưa có log.</div>
+            <div class="empty">@(_logs.Count == 0 ? "Chưa có log." : "Không dòng nào khớp bộ lọc.")</div>
         }
         else
         {
@@ -50,6 +58,8 @@
     </div>
 </div>
 
+<ConfirmDialog @ref="_confirm" />
+
 @code {
     private static readonly string[] Levels = ["info", "ok", "warn", "error"];
 
@@ -57,6 +67,9 @@
     private List<string> _hosts = new();
     private string _machineFilter = "";
     private string _levelFilter = "";
+    private string _textFilter = "";
+    private bool _paused;             // true = vòng poll bỏ qua lượt nạp (KHÔNG persist vào URL — trạng thái tức thời)
+    private ConfirmDialog? _confirm;
     private readonly CancellationTokenSource _pollCts = new();
     private Task? _pollTask;
 
@@ -69,15 +82,19 @@
         _pollTask = PollAsync(_pollCts.Token);
     }
 
-    // ── Ô lọc ↔ URL query (?machine=&level=) — F5 / chia sẻ link giữ nguyên ──
+    // ── Ô lọc ↔ URL query (?machine=&level=&q=) — F5 / chia sẻ link giữ nguyên ──
     private void RestoreFromUrl() => UrlState.Restore(Nav,
         // Máy trong URL không còn dòng log nào → BỎ QUA (kẻo ô chọn hiện trống mà khung log lại rỗng không rõ vì sao).
         ("machine", v => _machineFilter = _hosts.Contains(v) ? v : ""),
-        ("level", v => _levelFilter = Levels.Contains(v) ? v : ""));
+        ("level", v => _levelFilter = Levels.Contains(v) ? v : ""),
+        ("q", v => _textFilter = v));
 
     private void UpdateUrl() => UrlState.Update(Nav, replace: true,
         ("machine", _machineFilter),
-        ("level", _levelFilter));
+        ("level", _levelFilter),
+        ("q", _textFilter));
+
+    private void TogglePause() => _paused = !_paused;
 
     private async Task PollAsync(CancellationToken ct)
     {
@@ -86,6 +103,8 @@
         {
             while (await timer.WaitForNextTickAsync(ct))
             {
+                // Tạm dừng: vẫn giữ nhịp timer (bấm ▶ là bắt kịp ngay nhịp sau), chỉ bỏ lượt nạp + vẽ lại.
+                if (_paused) continue;
                 // Lỗi DB nhất thời (hub đang ghi, file bận…) KHÔNG được giết cả vòng poll — giữ nguyên bản log
                 // đang hiện, nhịp sau thử lại. Lúc ĐANG huỷ thì để lỗi bay ra ngoài cho catch dưới đóng vòng.
                 try { await InvokeAsync(() => { Load(); StateHasChanged(); }); }
@@ -107,11 +126,24 @@
     private IEnumerable<LogEntry> Filtered() => _logs
         .Where(l => string.IsNullOrEmpty(_machineFilter) || l.Hostname == _machineFilter)
         .Where(l => string.IsNullOrEmpty(_levelFilter) || l.Level == _levelFilter)
+        .Where(MatchesText)
         .OrderByDescending(l => l.Id);
+
+    // Khớp chuỗi tìm trên NỘI DUNG lẫn TÊN MÁY, không phân biệt hoa/thường (dán mã đơn từ Slack là ra).
+    private bool MatchesText(LogEntry l)
+    {
+        if (_textFilter.Length == 0) return true;
+        return l.Text.Contains(_textFilter, StringComparison.OrdinalIgnoreCase)
+            || l.Hostname.Contains(_textFilter, StringComparison.OrdinalIgnoreCase);
+    }
 
     private async Task Clear()
     {
-        if (!await JS.InvokeAsync<bool>("confirm", "Xoá toàn bộ log trên hub?")) return;
+        if (_confirm is null) return;
+        if (!await _confirm.AskAsync("Xoá toàn bộ log trên hub?",
+                "Xoá sạch bảng log của hub (mọi máy, mọi mức). Không thể hoàn tác — log mới sẽ tiếp tục chảy về sau đó.",
+                "🗑 Xoá log", danger: true))
+            return;
         Db.ClearLogs();
         Load();
     }

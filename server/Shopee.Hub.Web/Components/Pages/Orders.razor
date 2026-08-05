@@ -39,6 +39,27 @@
     </label>
     <span class="stat">@_total đơn</span>
     <button class="btn sm" title="Hủy lọc — bỏ mọi bộ lọc, xem tất cả đơn" @onclick="ClearFilters">Hủy lọc</button>
+    @* Chọn cột: bảng 13 cột quá rộng cho việc soi hằng ngày. Cột ẩn đi vào URL (?hide=…) nên F5 / gửi link
+       giữ nguyên. Menu thuần Blazor: .menu-backdrop bắt click ra ngoài, Esc bắt ở @onkeydown của .menuwrap. *@
+    <span class="menuwrap" @onkeydown="OnColsKey">
+        <button class="btn sm" title="Ẩn/hiện cột phụ (Shop, Mã đơn, Trạng thái luôn hiện)"
+                aria-haspopup="true" aria-expanded="@_colsOpen" @onclick="ToggleColsMenu">🧩 Cột ▾@(HiddenCount > 0 ? $" (ẩn {HiddenCount})" : "")</button>
+        @if (_colsOpen)
+        {
+            <button class="menu-backdrop" title="Đóng menu" aria-label="Đóng menu chọn cột" @onclick="CloseColsMenu"></button>
+            <div class="menu">
+                @foreach (var c in OptionalCols)
+                {
+                    <label class="menu-check">
+                        <input type="checkbox" checked="@Vis(c.Key)" @onchange="e => SetCol(c.Key, e.Value is true)" />
+                        @c.Label
+                    </label>
+                }
+                <div class="menu-sep"></div>
+                <button class="menu-item" disabled="@(HiddenCount == 0)" @onclick="ShowAllCols">↺ Hiện tất cả</button>
+            </div>
+        }
+    </span>
 </div>
 
 <Pagination Page="_page" TotalPages="_totalPages" TotalItems="_total" PageSize="_pageSize"
@@ -47,8 +68,18 @@
 <div class="tablewrap">
 <table class="grid sm stack-sm">
     <thead><tr>
-        <th>Mã đơn</th><th>Shop</th><th>Người mua</th><th>Sản phẩm</th><th class="m-hide">SKU</th><th class="m-hide">Phân loại</th><th class="m-hide">Đơn trả hàng</th>
-        <th>Tổng tiền</th><th class="m-hide">Cuối cùng</th><th>Trạng thái</th><th class="m-hide">Vận chuyển</th><th class="m-hide">Phiếu</th><th class="m-hide">Sync</th>
+        <th>Mã đơn</th><th>Shop</th>
+        @if (Vis("buyer")) { <th>Người mua</th> }
+        @if (Vis("sp")) { <th>Sản phẩm</th> }
+        @if (Vis("sku")) { <th class="m-hide">SKU</th> }
+        @if (Vis("loai")) { <th class="m-hide">Phân loại</th> }
+        @if (Vis("tra")) { <th class="m-hide">Đơn trả hàng</th> }
+        @if (Vis("tien")) { <th>Tổng tiền</th> }
+        @if (Vis("cuoi")) { <th class="m-hide">Cuối cùng</th> }
+        <th>Trạng thái</th>
+        @if (Vis("vc")) { <th class="m-hide">Vận chuyển</th> }
+        @if (Vis("phieu")) { <th class="m-hide">Phiếu</th> }
+        @if (Vis("sync")) { <th class="m-hide">Sync</th> }
     </tr></thead>
     <tbody>
     @foreach (var o in _orders)
@@ -60,47 +91,55 @@
         <tr>
             <td class="mono" data-label="Mã đơn">@o.OrderSn</td>
             <td data-label="Shop">@ShopName(o.ShopId)</td>
-            <td data-label="Người mua">@(o.BuyerUsername ?? "—")</td>
-            <td data-label="Sản phẩm" title="@o.ItemSummary">@Trim(o.ItemSummary)@(o.ItemCount > 1 ? $" (+{o.ItemCount - 1})" : "")</td>
-            <td class="m-hide" data-label="SKU" title="@sku">@(string.IsNullOrEmpty(sku) ? "—" : Trim(sku))</td>
-            <td class="m-hide" data-label="Phân loại" title="@phanLoai">@Trim(phanLoai)</td>
-            <td class="mono m-hide" data-label="Đơn trả hàng">@(o.ReturnRequestCode ?? "—")</td>
-            <td data-label="Tổng tiền">@(o.TotalPriceText ?? (o.TotalPrice?.ToString("N0") ?? "—"))</td>
-            <td class="m-hide" data-label="Cuối cùng">@(o.FinalAmountText ?? (o.FinalAmount?.ToString("N0") ?? "—"))</td>
+            @if (Vis("buyer")) { <td data-label="Người mua">@(o.BuyerUsername ?? "—")</td> }
+            @if (Vis("sp")) { <td data-label="Sản phẩm" title="@o.ItemSummary">@Trim(o.ItemSummary)@(o.ItemCount > 1 ? $" (+{o.ItemCount - 1})" : "")</td> }
+            @if (Vis("sku")) { <td class="m-hide" data-label="SKU" title="@sku">@(string.IsNullOrEmpty(sku) ? "—" : Trim(sku))</td> }
+            @if (Vis("loai")) { <td class="m-hide" data-label="Phân loại" title="@phanLoai">@Trim(phanLoai)</td> }
+            @if (Vis("tra")) { <td class="mono m-hide" data-label="Đơn trả hàng">@(o.ReturnRequestCode ?? "—")</td> }
+            @if (Vis("tien")) { <td data-label="Tổng tiền">@(o.TotalPriceText ?? (o.TotalPrice?.ToString("N0") ?? "—"))</td> }
+            @if (Vis("cuoi")) { <td class="m-hide" data-label="Cuối cùng">@(o.FinalAmountText ?? (o.FinalAmount?.ToString("N0") ?? "—"))</td> }
             <td data-label="Trạng thái">
                 <span class="pill @StatusCss(o.Status)">@(o.Status ?? "—")</span>
-                <button type="button" class="linkbtn m-only order-detail-toggle"
-                        aria-expanded="@(_expandedOrderId == o.Id)"
-                        @onclick="() => ToggleDetails(o.Id)">@(_expandedOrderId == o.Id ? "Thu gọn" : "Chi tiết")</button>
-                @if (_expandedOrderId == o.Id)
+                @* Khối chi tiết CHỈ trên mobile (các cột m-hide bị giấu ở khung hẹp) — ẩn cột nào thì khối này
+                   cũng bỏ mục đó; ẩn hết thì không còn gì để xổ nên bỏ luôn nút. *@
+                @if (HasMobileDetail)
+                {
+                    <button type="button" class="linkbtn m-only order-detail-toggle"
+                            aria-expanded="@(_expandedOrderId == o.Id)"
+                            @onclick="() => ToggleDetails(o.Id)">@(_expandedOrderId == o.Id ? "Thu gọn" : "Chi tiết")</button>
+                }
+                @if (_expandedOrderId == o.Id && HasMobileDetail)
                 {
                     <div class="m-only order-detail">
-                        <div><b>SKU</b><span>@(string.IsNullOrEmpty(sku) ? "—" : sku)</span></div>
-                        <div><b>Phân loại</b><span>@Trim(phanLoai)</span></div>
-                        <div><b>Đơn trả hàng</b><span>@(o.ReturnRequestCode ?? "—")</span></div>
-                        <div><b>Số tiền cuối</b><span>@(o.FinalAmountText ?? (o.FinalAmount?.ToString("N0") ?? "—"))</span></div>
-                        <div><b>Vận chuyển</b><span>@(string.IsNullOrEmpty(o.Carrier) ? (o.Channel ?? "—") : o.Carrier)@(string.IsNullOrEmpty(o.TrackingNumber) ? "" : $" · {o.TrackingNumber}")</span></div>
-                        <div><b>Đồng bộ</b><span>@(o.SyncedAt == default ? "—" : GioVietNam.DinhDang(o.SyncedAt, "MM-dd HH:mm"))</span></div>
-                        @if (o.SlipAt is not null)
+                        @if (Vis("sku")) { <div><b>SKU</b><span>@(string.IsNullOrEmpty(sku) ? "—" : sku)</span></div> }
+                        @if (Vis("loai")) { <div><b>Phân loại</b><span>@Trim(phanLoai)</span></div> }
+                        @if (Vis("tra")) { <div><b>Đơn trả hàng</b><span>@(o.ReturnRequestCode ?? "—")</span></div> }
+                        @if (Vis("cuoi")) { <div><b>Số tiền cuối</b><span>@(o.FinalAmountText ?? (o.FinalAmount?.ToString("N0") ?? "—"))</span></div> }
+                        @if (Vis("vc")) { <div><b>Vận chuyển</b><span>@(string.IsNullOrEmpty(o.Carrier) ? (o.Channel ?? "—") : o.Carrier)@(string.IsNullOrEmpty(o.TrackingNumber) ? "" : $" · {o.TrackingNumber}")</span></div> }
+                        @if (Vis("sync")) { <div><b>Đồng bộ</b><span>@(o.SyncedAt == default ? "—" : GioVietNam.DinhDang(o.SyncedAt, "MM-dd HH:mm"))</span></div> }
+                        @if (Vis("phieu") && o.SlipAt is not null)
                         {
                             <a class="btn sm" href="@($"/slips/{o.ShopId}/{o.OrderSn}")" target="_blank" rel="noopener">Mở phiếu PDF</a>
                         }
                     </div>
                 }
             </td>
-            <td class="m-hide" data-label="Vận chuyển">@(string.IsNullOrEmpty(o.Carrier) ? (o.Channel ?? "—") : o.Carrier)@(string.IsNullOrEmpty(o.TrackingNumber) ? "" : $" · {o.TrackingNumber}")</td>
-            <td class="m-hide" data-label="Phiếu">
-                @if (o.SlipAt is not null)
-                {
-                    <a class="linkbtn" href="@($"/slips/{o.ShopId}/{o.OrderSn}")" target="_blank" rel="noopener" title="Mở phiếu PDF (tab mới)">📄 Phiếu</a>
-                }
-            </td>
-            <td class="m-hide" data-label="Sync">@GioVietNam.DinhDang(o.SyncedAt, "MM-dd HH:mm")</td>
+            @if (Vis("vc")) { <td class="m-hide" data-label="Vận chuyển">@(string.IsNullOrEmpty(o.Carrier) ? (o.Channel ?? "—") : o.Carrier)@(string.IsNullOrEmpty(o.TrackingNumber) ? "" : $" · {o.TrackingNumber}")</td> }
+            @if (Vis("phieu"))
+            {
+                <td class="m-hide" data-label="Phiếu">
+                    @if (o.SlipAt is not null)
+                    {
+                        <a class="linkbtn" href="@($"/slips/{o.ShopId}/{o.OrderSn}")" target="_blank" rel="noopener" title="Mở phiếu PDF (tab mới)">📄 Phiếu</a>
+                    }
+                </td>
+            }
+            @if (Vis("sync")) { <td class="m-hide" data-label="Sync">@GioVietNam.DinhDang(o.SyncedAt, "MM-dd HH:mm")</td> }
         </tr>
     }
     @if (_orders.Count == 0)
     {
-        <tr><td colspan="13" class="empty">Không có đơn nào khớp bộ lọc.</td></tr>
+        <tr><td colspan="@ColCount" class="empty">Không có đơn nào khớp bộ lọc.</td></tr>
     }
     </tbody>
 </table>
@@ -114,6 +153,18 @@
 
 @code {
     private static readonly int[] PageSizeOptions = [25, 50, 100];
+
+    /// <summary>Cột PHỤ bật/tắt được — Shop / Mã đơn / Trạng thái luôn hiện nên KHÔNG có ở đây. Thứ tự trong mảng
+    /// cũng là thứ tự ghi vào URL (link sinh ra ổn định). Key đi vào query <c>?hide=</c>: ĐỔI key = link cũ hỏng.</summary>
+    private static readonly (string Key, string Label)[] OptionalCols =
+    [
+        ("buyer", "Người mua"), ("sp", "Sản phẩm"), ("sku", "SKU"), ("loai", "Phân loại"),
+        ("tra", "Đơn trả hàng"), ("tien", "Tổng tiền"), ("cuoi", "Cuối cùng"),
+        ("vc", "Vận chuyển"), ("phieu", "Phiếu"), ("sync", "Sync"),
+    ];
+
+    /// <summary>Các cột m-hide (chỉ hiện trên desktop) — mobile xem qua khối "Chi tiết"; ẩn hết thì bỏ luôn nút xổ.</summary>
+    private static readonly string[] MobileDetailCols = ["sku", "loai", "tra", "cuoi", "vc", "sync", "phieu"];
 
     /// <summary>Trạng thái lọc MẶC ĐỊNH (đơn đang cần xử lý) — vắng trong URL nghĩa là giá trị này.</summary>
     private const string DefaultStatus = "Chờ lấy hàng";
@@ -135,6 +186,15 @@
     private int _totalPages = 1;
     private long? _expandedOrderId;
 
+    /// <summary>Key các cột ĐANG ẨN (rỗng = hiện đủ 13 cột — trạng thái mặc định, không có mặt trong URL).</summary>
+    private readonly HashSet<string> _hiddenCols = new(StringComparer.Ordinal);
+    private bool _colsOpen;
+
+    private bool Vis(string key) => !_hiddenCols.Contains(key);
+    private int HiddenCount => _hiddenCols.Count;
+    private int ColCount => 3 + OptionalCols.Count(c => Vis(c.Key));   // 3 cột luôn hiện + cột phụ còn bật
+    private bool HasMobileDetail => MobileDetailCols.Any(Vis);
+
     protected override void OnInitialized()
     {
         _shops = Db.ListShops();
@@ -149,7 +209,7 @@
         Load();
     }
 
-    // ── Bộ lọc ↔ URL query (?shop=&status=&q=&page=) — F5 / chia sẻ link giữ nguyên ──
+    // ── Bộ lọc + cột đang ẩn ↔ URL query (?shop=&status=&q=&page=&hide=) — F5 / chia sẻ link giữ nguyên ──
     private void RestoreFromUrl()
     {
         UrlState.Restore(Nav,
@@ -157,9 +217,18 @@
             ("shop", v => _shopId = long.TryParse(v, out var id) && _shops.Any(s => s.Id == id) ? id : 0),
             ("status", v => _status = v.Length == 0 ? DefaultStatus : (v == AllStatusToken ? "" : v)),
             ("q", v => _search = v),
-            ("page", v => _page = int.TryParse(v, out var p) && p >= 1 ? p : 1));
+            ("page", v => _page = int.TryParse(v, out var p) && p >= 1 ? p : 1),
+            ("hide", RestoreHiddenCols));
         // Trạng thái trong URL hiện chưa có đơn nào → vẫn phải là một option, kẻo ô chọn hiện trống.
         if (_status.Length > 0 && !_statuses.Contains(_status)) _statuses.Insert(0, _status);
+    }
+
+    // Key lạ trong URL (link cũ / gõ tay) → BỎ QUA, kẻo bảng thiếu cột mà menu không có ô nào bỏ tick được.
+    private void RestoreHiddenCols(string raw)
+    {
+        _hiddenCols.Clear();
+        foreach (var key in raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            if (OptionalCols.Any(c => c.Key == key)) _hiddenCols.Add(key);
     }
 
     private void UpdateUrl() =>
@@ -167,7 +236,28 @@
             ("shop", _shopId > 0 ? _shopId.ToString() : ""),
             ("status", _status == DefaultStatus ? "" : (_status.Length == 0 ? AllStatusToken : _status)),
             ("q", _search),
-            ("page", _page > 1 ? _page.ToString() : ""));
+            ("page", _page > 1 ? _page.ToString() : ""),
+            // Đi theo THỨ TỰ của OptionalCols (không theo thứ tự bấm) → cùng bộ cột luôn ra cùng một URL.
+            ("hide", string.Join(",", OptionalCols.Where(c => _hiddenCols.Contains(c.Key)).Select(c => c.Key))));
+
+    // ── Menu "🧩 Cột ▾" ──────────────────────────────────────────────────────────────────────
+    private void ToggleColsMenu() => _colsOpen = !_colsOpen;
+    private void CloseColsMenu() => _colsOpen = false;
+    private void OnColsKey(KeyboardEventArgs e) { if (e.Key == "Escape") _colsOpen = false; }
+
+    // Chỉ đổi cách HIỂN THỊ (không đọc lại DB, không về trang 1) — menu vẫn mở để tick tiếp nhiều cột.
+    private void SetCol(string key, bool visible)
+    {
+        if (visible) _hiddenCols.Remove(key); else _hiddenCols.Add(key);
+        UpdateUrl();
+    }
+
+    private void ShowAllCols()
+    {
+        _hiddenCols.Clear();
+        _colsOpen = false;
+        UpdateUrl();
+    }
 
     private void OnFilterChanged() { _page = 1; Load(); UpdateUrl(); }
 

@@ -2,7 +2,6 @@
 @attribute [Authorize(Policy = "Web")]
 @inherits FleetPageBase
 @inject HubDatabase Db
-@inject IJSRuntime JS
 @inject LatestReleaseService Releases
 
 <p class="hint m-hide">Máy tự đăng ký bằng token. Ở đây bạn ra lệnh cập nhật app, reset việc (huỷ + bỏ việc gián đoạn, nhả khoá acc ngay), tiếp tục việc gián đoạn của máy, đặt vai trò, hoặc xoá &amp; chặn máy.</p>
@@ -66,14 +65,29 @@
                     }
                 </select>
             </td>
+            @* Chỉ nút CHÍNH (▶ Tiếp tục / ⬆ Cập nhật) đứng ngoài; hai việc phá huỷ nằm trong menu ⋯ để không
+               bấm nhầm khi đang nhắm nút bên cạnh. *@
             <td data-label="Hành động">
                 @if (interrupted > 0)
                 {
                     <button class="btn primary sm" title="Đưa mọi việc gián đoạn của máy về hàng chờ (giữ tham số) — dùng sau khi update app máy này." @onclick="() => ResumeMachine(m.MachineId, m.Hostname)">▶ Tiếp tục (@interrupted)</button>
                 }
                 <button class="btn sm" title="Ra lệnh cập nhật app cho máy này — máy tự khởi động lại bản mới rồi tự nhận lại việc." @onclick="() => UpdateMachine(m.MachineId, m.Hostname, pres.Online)">⬆ Cập nhật</button>
-                <button class="btn sm" title="Huỷ mọi việc đang giữ + bỏ hẳn việc gián đoạn của máy — máy về trạng thái trắng." @onclick="() => ResetMachine(m.MachineId, m.Hostname)">⟳ Reset việc</button>
-                <button class="btn danger sm" @onclick="() => DeleteMachine(m.MachineId, m.Hostname)">🗑 Xoá &amp; chặn</button>
+                <span class="menuwrap" @onkeydown="OnMenuKey">
+                    @* title có nội suy @m.Hostname ⇒ Razor tự HTML-encode CẢ chuỗi: viết "&" thẳng, gõ "&amp;"
+                       ở đây sẽ hiện ra đúng chữ "&amp;" trên tooltip. *@
+                    <button class="btn sm" title="Thao tác khác cho @m.Hostname (reset việc, xoá & chặn)"
+                            aria-haspopup="true" aria-expanded="@(_menuFor == m.MachineId)"
+                            @onclick="() => ToggleMenu(m.MachineId)">⋯</button>
+                    @if (_menuFor == m.MachineId)
+                    {
+                        <button class="menu-backdrop" title="Đóng menu" aria-label="Đóng menu" @onclick="CloseMenu"></button>
+                        <div class="menu">
+                            <button class="menu-item" title="Huỷ mọi việc đang giữ + bỏ hẳn việc gián đoạn của máy — máy về trạng thái trắng." @onclick="() => ResetMachine(m.MachineId, m.Hostname)">⟳ Reset việc</button>
+                            <button class="menu-item danger" title="Xoá máy khỏi danh sách và CHẶN nó đăng ký lại." @onclick="() => DeleteMachine(m.MachineId, m.Hostname)">🗑 Xoá &amp; chặn</button>
+                        </div>
+                    }
+                </span>
             </td>
         </tr>
     }
@@ -105,10 +119,16 @@
     </div>
 }
 
+@* Đặt NGOÀI .tablewrap: overlay là position:fixed nên không bị bảng cắt, nhưng để ở đây cho rõ ràng. *@
+<ConfirmDialog @ref="_confirm" />
+
 @code {
     private List<string> _revoked = new();
     private string _status = "";
     private string? _latest;   // bản mới nhất trên GitHub (null = chưa đọc được → hiện "?")
+    private ConfirmDialog? _confirm;
+    /// <summary>MachineId của dòng đang mở menu ⋯ (rỗng = không dòng nào). Chỉ MỘT menu mở một lúc.</summary>
+    private string _menuFor = "";
 
     private int RunningCount => Snap.Assignments.Count(a => a.Status == AssignmentStatus.Running);
     private int QueuedCount => Snap.Assignments.Count(a => a.Status == AssignmentStatus.Queued);
@@ -154,9 +174,21 @@
         FleetState.Refresh();
     }
 
+    // ── Menu ⋯ per-dòng ──────────────────────────────────────────────────────────────────────
+    // Đóng menu TRƯỚC khi mở hộp xác nhận (kẻo menu treo lại sau lưng hộp), rồi mới await.
+    private void ToggleMenu(string machineId) => _menuFor = _menuFor == machineId ? "" : machineId;
+    private void CloseMenu() => _menuFor = "";
+    private void OnMenuKey(KeyboardEventArgs e) { if (e.Key == "Escape") _menuFor = ""; }
+
     private async Task ResetMachine(string machineId, string host)
     {
-        if (!await JS.InvokeAsync<bool>("confirm", $"Reset máy {host}? Huỷ mọi việc đang giữ + bỏ hẳn việc gián đoạn của máy (nút ▶ Tiếp tục biến mất), khoá acc nhả ngay.")) return;
+        _menuFor = "";
+        if (_confirm is null) return;
+        if (!await _confirm.AskAsync($"Reset việc của máy {host}?",
+                "Huỷ MỌI việc máy này đang giữ và bỏ hẳn các việc gián đoạn của nó (nút ▶ Tiếp tục biến mất, "
+                + "không chạy lại được). Khoá tài khoản máy đang giữ được nhả ngay.",
+                "⟳ Reset việc", danger: true))
+            return;
         var n = Db.ResetMachineWork(machineId);
         _status = $"⟳ Đã reset {host}: huỷ {n.Canceled} việc, bỏ {n.Dismissed} việc gián đoạn, nhả khoá acc. Máy về trạng thái trắng.";
         FleetState.Refresh();
@@ -164,7 +196,13 @@
 
     private async Task DeleteMachine(string machineId, string host)
     {
-        if (!await JS.InvokeAsync<bool>("confirm", $"Xoá & CHẶN máy {host}? Máy này sẽ bị 401 (mất kết nối) dù còn token.")) return;
+        _menuFor = "";
+        if (_confirm is null) return;
+        if (!await _confirm.AskAsync($"Xoá & CHẶN máy {host}?",
+                $"Xoá {host} khỏi danh sách và CHẶN nó đăng ký lại — máy sẽ bị 401 (mất kết nối) dù còn token đúng. "
+                + "Mọi việc máy đang giữ bị thu hồi. Bỏ chặn được ở bảng \"Máy bị chặn\" bên dưới.",
+                "🗑 Xoá & chặn", danger: true))
+            return;
         _ = Db.ResetMachineWork(machineId);   // nhả việc trước
         Db.RevokeMachine(machineId);       // chặn (401 khi vào lại)
         Db.RemoveMachine(machineId);       // xoá khỏi danh sách
@@ -204,7 +242,12 @@
     {
         var targets = Snap.Machines.Where(NeedsUpdate).ToList();
         if (targets.Count == 0) return;
-        if (!await JS.InvokeAsync<bool>("confirm", $"Ra lệnh cập nhật {targets.Count} máy? Mỗi máy sẽ dừng êm việc đang chạy, tự khởi động lại bản mới rồi tự nhận lại việc.")) return;
+        if (_confirm is null) return;
+        if (!await _confirm.AskAsync($"Cập nhật app cho {targets.Count} máy?",
+                "Mỗi máy sẽ dừng êm việc đang chạy, tự khởi động lại bản mới rồi tự nhận lại việc. "
+                + "Lệnh tới máy ở nhịp heartbeat kế (≤12s).",
+                "⬆ Ra lệnh cập nhật"))
+            return;
         var n = targets.Count(t => Db.RequestUpdate(t.MachineId));
         _status = $"⬆ Đã ra lệnh cập nhật cho {n} máy — chờ mỗi máy nhận lệnh (nhịp 12s), tự update rồi tự nhận lại việc.";
         FleetState.Refresh();
@@ -212,8 +255,12 @@
 
     private async Task UpdateMachine(string machineId, string host, bool online)
     {
-        var extra = online ? "" : " Máy đang offline — lệnh sẽ chờ tới khi máy online.";
-        if (!await JS.InvokeAsync<bool>("confirm", $"Ra lệnh cập nhật {host}? Máy sẽ dừng êm việc đang chạy, tự khởi động lại bản mới rồi tự nhận lại việc.{extra}")) return;
+        var extra = online ? "" : " Máy đang OFFLINE — lệnh nằm chờ tới khi máy online trở lại.";
+        if (_confirm is null) return;
+        if (!await _confirm.AskAsync($"Cập nhật app cho {host}?",
+                "Máy sẽ dừng êm việc đang chạy, tự khởi động lại bản mới rồi tự nhận lại việc." + extra,
+                "⬆ Ra lệnh cập nhật"))
+            return;
         _status = Db.RequestUpdate(machineId)
             ? $"⬆ Đã ra lệnh cập nhật {host} — chờ máy nhận lệnh (nhịp 12s)."
             : $"⚠ Không ra lệnh được cho {host} (không tìm thấy máy).";

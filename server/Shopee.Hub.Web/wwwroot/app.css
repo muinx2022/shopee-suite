@@ -322,6 +322,33 @@ table.grid tr.acctrow:hover td { background: var(--gray); }
 .modal-foot { display: flex; align-items: center; gap: 10px; justify-content: flex-end; padding: 14px 20px; border-top: 1px solid var(--stroke); background: var(--gray); border-radius: 0 0 14px 14px; }
 .modal-foot .action { margin-right: auto; }
 
+/* Hộp xác nhận dùng chung (ConfirmDialog) — hẹp hơn modal thường, thân chỉ có một câu hỏi. */
+.modal.confirm-modal { width: 470px; }
+.confirm-text { color: var(--text); font-size: 13.5px; line-height: 1.6; overflow-wrap: anywhere; }
+
+/* ==================== Menu ⋯ / bảng chọn cột (dropdown thuần Blazor) ==================== */
+/* Không lib ngoài (CSP chặn) và KHÔNG gắn handler JS toàn cục: "bấm ra ngoài để đóng" làm bằng .menu-backdrop —
+   nút trong suốt phủ kín màn, nằm DƯỚI .menu về z-index. Esc do @onkeydown của .menuwrap lo. */
+.menuwrap { position: relative; display: inline-flex; vertical-align: middle; }
+.menu-backdrop { position: fixed; inset: 0; z-index: 90; margin: 0; padding: 0; border: 0; background: transparent; cursor: default; }
+.menu { position: absolute; top: calc(100% + 4px); right: 0; z-index: 91; min-width: 200px; max-width: min(330px, calc(100vw - 28px)); padding: 5px; display: flex; flex-direction: column; gap: 2px; text-align: left; background: var(--card); border: 1px solid var(--stroke); border-radius: var(--radius); box-shadow: var(--shadow-lg); }
+.menu-item { display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 10px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--text); font-family: inherit; font-size: 13px; font-weight: 500; text-align: left; white-space: nowrap; cursor: pointer; }
+.menu-item:hover { background: var(--gray); }
+.menu-item.danger { color: var(--danger); }
+.menu-item.danger:hover { background: var(--danger-bg); }
+.menu-check { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: var(--radius-sm); color: var(--text); font-size: 13px; white-space: nowrap; cursor: pointer; }
+.menu-check:hover { background: var(--gray); }
+.menu-sep { height: 1px; margin: 4px 2px; background: var(--stroke); }
+/* .tablewrap cắt nội dung (overflow-x:auto ⇒ overflow-y tính ra auto) nên menu xổ ra bị xén. Chỉ nhả kẹp
+   ĐÚNG LÚC có menu đang mở; đóng menu là trở lại cuộn ngang như cũ. */
+.tablewrap:has(.menu) { overflow: visible; }
+
+/* Lỗi mức field (vd hai ô mật khẩu lệch nhau) — nhỏ, đỏ, ngay dưới ô nhập. */
+.fielderr { color: var(--danger); font-size: 12.5px; font-weight: 600; margin-top: 6px; }
+
+/* Ô sửa TẠI CHỖ trong bảng (trang /shops) — chiếm trọn bề ngang ô, không làm dòng nhảy cao. */
+.inline-edit { width: 100%; min-width: 90px; padding: 5px 8px; font-size: 12.5px; }
+
 /* ==================== Logs (dark terminal box) ==================== */
 /* Trang Logs: cửa sổ log tràn xuống sát đáy màn hình (flex-fill, không phụ thuộc offset cứng). */
 .main:has(.logpage) { height: 100vh; height: 100dvh; overflow: hidden; }
@@ -416,6 +443,12 @@ table.grid tr.acctrow:hover td { background: var(--gray); }
        margin dọc âm giữ nguyên chiều cao dòng bảng (media chỉ phóng .btn, bỏ sót .linkbtn). */
     .linkbtn { display: inline-flex; align-items: center; justify-content: center; min-width: 36px; min-height: 36px; padding: 6px 10px; margin: -8px 0; }
     .modal-foot { flex-wrap: wrap; }
+
+    /* Menu ⋯ / chọn cột: mục menu cao hơn cho vừa ngón tay; trong hàng lọc xếp dọc thì nút mở menu full-width
+       như mọi .btn khác của .bar-stack. */
+    .menu-item, .menu-check { padding: 10px 12px; }
+    .bar-stack .menuwrap { width: 100%; }
+    .bar-stack .menuwrap > .btn { width: 100%; justify-content: center; }
 
     /* Trang Logs ở khung hẹp: bỏ flex (.h 96px + .lv 46px không co làm cột text còn ~20px) → các span
        chảy inline, gãy chữ tự nhiên. */

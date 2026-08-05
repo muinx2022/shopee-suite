@@ -9,7 +9,6 @@
 @inject FileStoreConfigService Config
 @inject HubOptions HubOptions
 @inject IServiceProvider Sp
-@inject IJSRuntime JS
 
 <label class="btn sm" style="@(BtnDisabled ? "opacity:.45;cursor:not-allowed" : "")">⬆ Nhập Excel
     <InputFile OnChange="OnFile" accept=".xlsx" disabled="@BtnDisabled" style="display:none" />
@@ -130,6 +129,9 @@
     </div>
 }
 
+@* Đứng SAU modal wizard trong DOM → cùng z-index nhưng vẽ đè lên trên (hộp xác nhận phải nằm trên wizard). *@
+<ConfirmDialog @ref="_confirm" />
+
 @code {
     // Đích CỐ ĐỊNH (per-shop): set cả 2 → ẩn selector Acc/Shop. Null → cho chọn trong form (prefill từ bộ lọc /data).
     [Parameter] public string? FixedAcct { get; set; }
@@ -147,6 +149,7 @@
     private const long MaxUploadBytes = 256L * 1024 * 1024;
     private static readonly SemaphoreSlim ParseGate = new(1, 1);
     private readonly CancellationTokenSource _lifetimeCts = new();
+    private ConfirmDialog? _confirm;
     private bool _open, _wizBusy;
     private string? _wizTempPath;
     private string _wizFileName = "", _wizSheet = "", _wizError = "", _wizMode = "replace";
@@ -264,9 +267,13 @@
         var acct = TargetAcct; var dest = TargetSheet;
         if (string.IsNullOrEmpty(acct) || string.IsNullOrEmpty(dest)) { _wizError = "Chọn tài khoản + shop đích."; return; }
         var replace = !string.Equals(_wizMode, "append", StringComparison.Ordinal);
-        if (!await JS.InvokeAsync<bool>("confirm", replace
-                ? $"Nhập từ sheet '{_wizSheet}' theo GHI ĐÈ — XOÁ toàn bộ dòng hiện có của shop rồi nạp phần đã chọn. Tiếp tục?"
-                : $"Nhập từ sheet '{_wizSheet}' theo NỐI THÊM — thêm phần đã chọn vào cuối shop. Tiếp tục?"))
+        if (_confirm is null) return;
+        if (!await _confirm.AskAsync(
+                replace ? "Nhập Excel theo GHI ĐÈ?" : "Nhập Excel theo NỐI THÊM?",
+                replace
+                    ? $"XOÁ toàn bộ dòng hiện có của shop rồi nạp phần đã chọn từ sheet '{_wizSheet}'. Không thể hoàn tác."
+                    : $"Thêm phần đã chọn từ sheet '{_wizSheet}' vào CUỐI danh sách dòng của shop.",
+                replace ? "⚠ Ghi đè" : "Nối thêm", danger: replace))
             return;
 
         _wizBusy = true; _wizError = "";

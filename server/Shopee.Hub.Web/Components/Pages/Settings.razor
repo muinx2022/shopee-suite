@@ -12,8 +12,14 @@
        <b>Đổi token → TẤT CẢ client phải nhập lại token mới</b> (token cũ sẽ bị 401).</p>
     <label>Token hiện tại</label>
     <div class="row">
-        <input readonly value="@_token" class="opt-search" style="font-family:monospace;width:min(440px,100%)" onfocus="this.select()" />
-        <button class="btn" @onclick="CopyToken">📋 Copy</button>
+        @* CHE = KHÔNG render token ra DOM (không phải type=password / css): xem source lúc đang che chỉ thấy
+           chuỗi chấm. onfocus-select cũng chỉ gắn khi đang hiện, kẻo bôi đen lại copy nhầm mấy dấu chấm. *@
+        <input readonly value="@(_showToken ? _token : MaskedToken)" class="opt-search"
+               style="font-family:monospace;width:min(440px,100%)"
+               onfocus="@(_showToken ? "this.select()" : null)" />
+        <button class="btn" title="@(_showToken ? "Ẩn token" : "Hiện token thật")" @onclick="ToggleToken">@(_showToken ? "🙈 Ẩn" : "👁 Hiện")</button>
+        @* Copy LUÔN lấy giá trị thật (không đọc từ ô đang che) — copy được cả khi đang che. *@
+        <button class="btn" title="Copy token thật vào clipboard (không cần bấm Hiện)" @onclick="CopyToken">📋 Copy</button>
         <span class="action">@_copyStatus</span>
     </div>
     <label style="margin-top:12px">Đổi token</label>
@@ -54,21 +60,42 @@
 
 <h2>Đổi mật khẩu admin (đăng nhập web)</h2>
 <div class="editcard" style="max-width:720px">
+    @* Hai ô + nút Lưu chỉ bật khi KHỚP: gõ nhầm mật khẩu mới = tự khoá mình khỏi hub (không có đường khôi phục
+       ngoài sửa DB trên VM). @bind:event="oninput" để nút/dòng lỗi phản hồi ngay từng phím, không đợi rời ô. *@
     <label>Mật khẩu mới (≥ 6 ký tự)</label>
-    <input @bind="_newPass" type="password" class="opt-search" style="width:min(320px,100%)" />
+    <input @bind="_newPass" @bind:event="oninput" type="password" class="opt-search" style="width:min(320px,100%)" />
+    <label style="margin-top:10px">Nhập lại mật khẩu</label>
+    <input @bind="_newPass2" @bind:event="oninput" type="password" class="opt-search" style="width:min(320px,100%)" />
+    @if (_newPass2.Length > 0 && _newPass != _newPass2)
+    {
+        <div class="fielderr">⚠ Hai ô mật khẩu chưa khớp.</div>
+    }
     <div class="bar">
-        <button class="btn primary" @onclick="SavePass">💾 Đổi mật khẩu</button>
+        <button class="btn primary" disabled="@(!PassMatches)"
+                title="@(PassMatches ? "Đổi mật khẩu đăng nhập web" : "Nhập mật khẩu mới ở CẢ HAI ô và phải khớp nhau")"
+                @onclick="SavePass">💾 Đổi mật khẩu</button>
         <span class="action">@_passStatus</span>
     </div>
 </div>
 
+<ConfirmDialog @ref="_confirm" />
+
 @code {
+    /// <summary>Chuỗi hiện thay token khi đang che — độ dài CỐ ĐỊNH, không tiết lộ độ dài token thật.</summary>
+    private const string Mask = "••••••••••••";
+
+    private ConfirmDialog? _confirm;
     private string _token = "";
+    private bool _showToken;      // false = ô token chỉ render Mask (token thật KHÔNG có trong DOM)
     private string _newToken = "";
     private string _tokenStatus = "";
     private string _copyStatus = "";
     private string _newPass = "";
+    private string _newPass2 = "";
     private string _passStatus = "";
+
+    private string MaskedToken => _token.Length == 0 ? "" : Mask;
+    private bool PassMatches => _newPass.Length > 0 && _newPass == _newPass2;
     private string _webhookDonMoi = "";
     private string _webhookLoiApp = "";
     private string _webhookDonTra = "";
@@ -103,27 +130,36 @@
     private void GenToken() =>
         _newToken = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(24));
 
+    private void ToggleToken() { _showToken = !_showToken; _copyStatus = ""; }
+
     private async Task CopyToken()
     {
         try { await JS.InvokeVoidAsync("navigator.clipboard.writeText", _token); _copyStatus = "✔ đã copy"; }
-        catch { _copyStatus = "⚠ trình duyệt chặn — bôi đen ô để copy tay"; }
+        catch { _copyStatus = "⚠ trình duyệt chặn — bấm 👁 Hiện rồi bôi đen ô để copy tay"; }
     }
 
     private async Task SaveToken()
     {
         var t = _newToken.Trim();
         if (t.Length < 8) { _tokenStatus = "⚠ Token quá ngắn (≥ 8 ký tự)."; return; }
-        if (!await JS.InvokeAsync<bool>("confirm", "Đổi token → MỌI client mất kết nối cho tới khi nhập token mới. Tiếp tục?")) return;
+        if (_confirm is null) return;
+        if (!await _confirm.AskAsync("Đổi API token?",
+                "MỌI client đang chạy sẽ mất kết nối (401) cho tới khi bạn nhập token mới vào từng máy. "
+                + "Token cũ hết hiệu lực NGAY khi lưu.",
+                "💾 Đổi token", danger: true))
+            return;
         Db.SetSetting(SettingKeys.ApiToken, t);
         _token = t; _newToken = "";
+        _showToken = false;   // token mới cũng che mặc định; muốn xem thì bấm 👁 (hoặc bấm 📋 Copy)
         _tokenStatus = "✔ Đã đổi token — hiệu lực NGAY. Nhập token này vào MỌI client (token cũ giờ bị 401).";
     }
 
     private void SavePass()
     {
+        if (!PassMatches) { _passStatus = "⚠ Hai ô mật khẩu chưa khớp."; return; }
         if (_newPass.Length < 6) { _passStatus = "⚠ Mật khẩu < 6 ký tự."; return; }
         Admin.SetAdmin(Admin.Username ?? "admin", _newPass);
-        _newPass = "";
+        _newPass = ""; _newPass2 = "";
         _passStatus = "✔ Đã đổi mật khẩu admin (lần đăng nhập sau dùng mật khẩu mới).";
     }
 

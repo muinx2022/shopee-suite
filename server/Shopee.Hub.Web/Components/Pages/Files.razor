@@ -1,7 +1,6 @@
 @page "/files"
 @attribute [Authorize(Policy = "Web")]
 @inject HubDatabase Db
-@inject IJSRuntime JS
 
 <p class="hint m-hide">Config + cookie + ảnh dùng chung của fleet. Bytes nằm ở <code>files\</code>; version tăng dần (client kéo theo manifest).</p>
 
@@ -51,7 +50,10 @@
 </table>
 </div>
 
+<ConfirmDialog @ref="_confirm" />
+
 @code {
+    private ConfirmDialog? _confirm;
     private List<FileManifestEntry> _files = new();
     private string _imgStatus = "";
     private string? _imgPreview;
@@ -95,7 +97,11 @@
 
     private async Task Delete(string name)
     {
-        if (!await JS.InvokeAsync<bool>("confirm", $"Xoá file {name} khỏi kho dùng chung?")) return;
+        if (_confirm is null) return;
+        if (!await _confirm.AskAsync("Xoá file khỏi kho dùng chung?",
+                $"Xoá \"{name}\" khỏi manifest của hub. Máy client nào chưa kéo về sẽ không còn lấy được file này.",
+                "🗑 Xoá file", danger: true))
+            return;
         Db.DeleteFile(name);
         Reload();
     }

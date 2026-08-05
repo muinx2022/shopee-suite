@@ -1,7 +1,6 @@
 @page "/shops"
 @attribute [Authorize(Policy = "Web")]
 @inject HubDatabase Db
-@inject IJSRuntime JS
 
 <p class="hint m-hide">Danh bạ shop nhóm theo <b>subacc</b> (email đăng nhập) — quan hệ lấy từ gương client
    (<code>orders_account_shops</code>). Mỗi shop trên hub khoá theo login shop (<code>ShopUsername</code> khi
@@ -13,22 +12,9 @@
     <span class="action">@_status</span>
 </div>
 
-@if (_edit is not null)
+@if (_editStatus.Length > 0)
 {
-    <div class="editcard" style="max-width:720px">
-        <h2>Sửa shop</h2>
-        <label>Tên shop <span style="color:#ef4444">*</span></label>
-        <input @bind="_edit.Name" placeholder="vd Shop A" style="width:100%" />
-        <label style="margin-top:10px">Login shop</label>
-        <input value="@(string.IsNullOrEmpty(_edit.Username) ? "—" : _edit.Username)" readonly style="width:100%;opacity:.7" />
-        <label style="margin-top:10px">Ghi chú</label>
-        <input @bind="_edit.Note" style="width:100%" />
-        <div class="bar">
-            <button class="btn primary" @onclick="Save">💾 Lưu</button>
-            <button class="btn" @onclick="() => _edit = null">Huỷ</button>
-            <span class="action">@_editStatus</span>
-        </div>
-    </div>
+    <div class="bar"><span class="action">@_editStatus</span></div>
 }
 
 <div class="tablewrap">
@@ -45,22 +31,51 @@
                 <span class="cnt">· @groupOrders đơn</span>
             </td>
         </tr>
+        @* Sửa TẠI CHỖ: ô Tên/Ghi chú của ĐÚNG dòng đang sửa thành input, bảng không xê dịch. Enter = lưu,
+           Esc = huỷ (bắt ở @onkeydown của từng input). *@
         @foreach (var item in g.Items)
         {
-            <tr @key="@(g.SubLogin + "|" + item.ShopLogin)">
-                <td data-label="Tên shop"><b>@item.DisplayName</b>
-                    @if (item.Hub is null)
+            var editing = _edit is not null && item.Hub is not null && _edit.Id == item.Hub.Id;
+            <tr @key="@(g.SubLogin + "|" + item.ShopLogin)" class="@(editing ? "sel" : "")">
+                <td data-label="Tên shop">
+                    @if (editing)
                     {
-                        <span class="pill warn" title="Chỉ có trong gương client — chưa có hàng shops trên hub (chưa push đơn).">chưa trên hub</span>
+                        <input class="inline-edit" @bind="_edit!.Name" @bind:event="oninput" @onkeydown="OnEditKey"
+                               placeholder="vd Shop A" title="Tên shop (bắt buộc) — Enter lưu, Esc huỷ" />
+                    }
+                    else
+                    {
+                        <b>@item.DisplayName</b>
+                        @if (item.Hub is null)
+                        {
+                            <span class="pill warn" title="Chỉ có trong gương client — chưa có hàng shops trên hub (chưa push đơn).">chưa trên hub</span>
+                        }
                     }
                 </td>
                 <td data-label="Login shop">@item.ShopLogin</td>
-                <td class="m-hide" data-label="Ghi chú">@(item.Hub?.Note)</td>
+                @* Cột Ghi chú vốn ẩn ở khung hẹp (m-hide); DÒNG ĐANG SỬA phải hiện, kẻo trên điện thoại
+                   không sửa được ghi chú nữa. *@
+                <td class="@(editing ? "" : "m-hide")" data-label="Ghi chú">
+                    @if (editing)
+                    {
+                        <input class="inline-edit" @bind="_edit!.Note" @bind:event="oninput" @onkeydown="OnEditKey"
+                               placeholder="ghi chú" title="Ghi chú — Enter lưu, Esc huỷ" />
+                    }
+                    else
+                    {
+                        @(item.Hub?.Note)
+                    }
+                </td>
                 <td data-label="Đơn">@(item.Hub is { } hub ? _orderCounts.GetValueOrDefault(hub.Id).ToString() : "—")</td>
                 <td data-label="">
-                    @if (item.Hub is { } s)
+                    @if (editing)
                     {
-                        <button class="btn sm" @onclick="() => Edit(s)">✎ Sửa</button>
+                        <button class="btn primary sm" title="Lưu (Enter)" @onclick="Save">✓ Lưu</button>
+                        <button class="btn sm" title="Huỷ (Esc)" @onclick="CancelEdit">✕</button>
+                    }
+                    else if (item.Hub is { } s)
+                    {
+                        <button class="btn sm" title="Sửa tên / ghi chú ngay tại dòng này" @onclick="() => Edit(s)">✎ Sửa</button>
                         <button class="btn danger sm" @onclick="() => Delete(s)">🗑 Xoá</button>
                     }
                     else
@@ -79,14 +94,17 @@
 </table>
 </div>
 
+<ConfirmDialog @ref="_confirm" />
+
 @code {
     private List<ShopSubAccountGroup> _groups = new();
     private Dictionary<long, int> _orderCounts = new();
     private int _subCount;
     private int _shopCount;
-    private ShopEdit? _edit;
+    private ShopEdit? _edit;          // null = không dòng nào đang sửa; Id trỏ hàng shops đang sửa
+    private ConfirmDialog? _confirm;
     private string _status = "";
-    private string _editStatus = "";
+    private string _editStatus = "";  // lỗi/nhắc của lượt sửa đang mở (hiện ngay trên bảng)
 
     protected override void OnInitialized() => Reload();
 
@@ -99,12 +117,24 @@
     }
 
     // Nạp ĐỦ trường vào ShopEdit (kể cả username/password/cookie/proxy) để UpsertShop KHÔNG xoá mất giá trị
-    // hiện có khi ta chỉ hiện Tên + Ghi chú trên form.
-    private void Edit(Shop s) => _edit = new ShopEdit
+    // hiện có khi ta chỉ hiện Tên + Ghi chú trên dòng.
+    private void Edit(Shop s)
     {
-        Id = s.Id, Name = s.Name, Username = s.Username, Password = s.Password,
-        Cookie = s.Cookie, ProxyKey = s.ProxyKey, Note = s.Note,
-    };
+        _editStatus = "";
+        _edit = new ShopEdit
+        {
+            Id = s.Id, Name = s.Name, Username = s.Username, Password = s.Password,
+            Cookie = s.Cookie, ProxyKey = s.ProxyKey, Note = s.Note,
+        };
+    }
+
+    private void CancelEdit() { _edit = null; _editStatus = ""; }
+
+    private void OnEditKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") Save();
+        else if (e.Key == "Escape") CancelEdit();
+    }
 
     private void Save()
     {
@@ -115,16 +145,25 @@
             Id = _edit.Id, Name = _edit.Name.Trim(), Username = _edit.Username, Password = _edit.Password,
             Cookie = _edit.Cookie, ProxyKey = _edit.ProxyKey, Note = _edit.Note,
         });
-        _status = $"✔ Đã lưu shop \"{_edit.Name}\".";
+        _status = $"✔ Đã lưu shop \"{_edit.Name.Trim()}\".";
         _edit = null;
+        _editStatus = "";
         Reload();
     }
 
     private async Task Delete(Shop s)
     {
+        if (_confirm is null) return;
         var n = _orderCounts.GetValueOrDefault(s.Id);
-        if (!await JS.InvokeAsync<bool>("confirm", $"Xoá shop \"{s.Name}\"?{(n > 0 ? $" Kèm {n} đơn của shop này." : "")}")) return;
+        if (!await _confirm.AskAsync($"Xoá shop \"{s.Name}\"?",
+                n > 0
+                    ? $"Xoá shop khỏi hub KÈM {n} đơn của shop này (kể cả phiếu PDF đã lưu). Không thể hoàn tác — "
+                      + "client push đơn lần sau sẽ tạo lại shop rỗng."
+                    : "Xoá shop khỏi hub. Client push đơn lần sau sẽ tạo lại shop rỗng.",
+                "🗑 Xoá shop", danger: true))
+            return;
         Db.DeleteShop(s.Id);
+        if (_edit is not null && _edit.Id == s.Id) _edit = null;   // đang sửa đúng shop vừa xoá
         _status = $"🗑 Đã xoá shop \"{s.Name}\".";
         Reload();
     }

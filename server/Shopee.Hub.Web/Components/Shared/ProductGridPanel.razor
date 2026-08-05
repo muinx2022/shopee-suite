@@ -6,7 +6,6 @@
 @using Microsoft.Extensions.DependencyInjection
 @inject FileStoreConfigService Config
 @inject IServiceProvider Sp
-@inject IJSRuntime JS
 @implements IDisposable
 
 <style>
@@ -158,6 +157,8 @@
                  FixedAcctLabel="@AcctLabelText()" FixedShopLabel="@ShopLabelText()"
                  OnSaved="OnRowSaved" />
 
+<ConfirmDialog @ref="_confirm" />
+
 @code {
     [Parameter] public string AccountId { get; set; } = "";
     [Parameter] public string Sheet { get; set; } = "";
@@ -174,6 +175,7 @@
 
     private ProductGridEngine _engine = default!;
     private ProductRowModal? _modal;
+    private ConfirmDialog? _confirm;
     private BigSellerAccount? _acct;
     private string _search = "";       // ô tìm cục bộ (engine.Applied.Text = tìm ĐÃ áp)
     private string _localStatus = "";  // status riêng (wizard nhập Excel / thêm dòng) — engine không biết
@@ -184,10 +186,11 @@
 
     protected override void OnInitialized()
     {
-        // Engine gọi ProductDb in-process; confirm = JS confirm (engine tự bọc validate/xác nhận tiếng Việt).
+        // Engine gọi ProductDb in-process; confirm = hộp xác nhận của hub (engine tự bọc validate/xác nhận tiếng Việt).
+        // _confirm chỉ có sau lần render đầu (@ref) — engine chỉ hỏi khi user bấm nút nên lúc đó đã sẵn; null = không làm.
         _engine = new ProductGridEngine(
             new ProductDbDataOps(Sp.GetService<ProductDb>(), "hub-web"),
-            msg => JS.InvokeAsync<bool>("confirm", msg).AsTask());
+            msg => _confirm is null ? Task.FromResult(false) : _confirm.AskEngineAsync(msg));
         _engine.Changed += OnEngineChanged;
     }
 

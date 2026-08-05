@@ -3,7 +3,6 @@
 @inherits FleetPageBase
 @inject SearchBoardService Board
 @inject HubOptions Opts
-@inject IJSRuntime JS
 @using System.Text
 @using Microsoft.AspNetCore.Components.Web.Virtualization
 
@@ -158,8 +157,12 @@ else
     }
 </div>
 
+<ConfirmDialog @ref="_confirm" />
+
 @code {
     private const int ResultLimit = 200;
+
+    private ConfirmDialog? _confirm;
 
     private List<MachinePresence> _machines = new();
     private readonly HashSet<string> _selected = new(StringComparer.Ordinal);
@@ -295,7 +298,11 @@ else
 
     private async Task ClearMerged()
     {
-        if (!await JS.InvokeAsync<bool>("confirm", $"Xoá kho gộp ({_mergedCount} sản phẩm)? Kết quả các máy đã đẩy về sẽ mất hết.")) return;
+        if (_confirm is null) return;
+        if (!await _confirm.AskAsync("Xoá kho gộp kết quả search?",
+                $"Xoá sạch {_mergedCount:N0} sản phẩm các máy đã đẩy về. Không thể hoàn tác — muốn có lại phải chạy search lần nữa.",
+                "🗑 Xoá kho gộp", danger: true))
+            return;
         Board.ClearMerged(); _lastResultCount = -1; RefreshResults();
     }
 

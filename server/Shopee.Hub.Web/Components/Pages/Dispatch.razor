@@ -104,13 +104,17 @@
            lúc tạo assignment vẫn lọc theo op y như Fleet.Pin(). *@
         <div class="optspanel">
             <div class="subhead">⚙ Tham số cho lượt giao của @HostName(_selMachine)</div>
+            @* Nhãn NGẮN, chú thích "op nào đọc field này" chuyển hết vào title (đúng lối dùng title của cả trang):
+               nhãn dài trước đây làm gãy dòng, mỗi field chiếm 2-3 dòng. *@
             <div class="optsrow">
-                <label>Từ dòng <input type="number" class="opt-num" @bind="_optStart" /></label>
-                <label>Đến dòng <input type="number" class="opt-num" @bind="_optEnd" /></label>
-                <label title="Import LUÔN chạy 1 lane — khoá cứng ở client, ô này KHÔNG ghi đè được.">Số process (chỉ Scrape/Update đọc — Import luôn 1 lane) <input type="number" class="opt-num" @bind="_optProcs" /></label>
-                <label>Số tk / khung (chỉ Scrape đọc) <input type="number" class="opt-num" @bind="_optFrame" /></label>
-                <label>Reload giây (chỉ Import/Update đọc) <input type="number" class="opt-num" @bind="_optReload" /></label>
-                <label><input type="checkbox" @bind="_optFromClaimed" /> Import từ tab "Đã nhận" (chỉ Import đọc)</label>
+                <label title="Dòng bắt đầu trong ngăn dữ liệu của shop (0 = từ đầu).">Từ dòng <input type="number" class="opt-num" @bind="_optStart" /></label>
+                <label title="Dòng kết thúc (0 = tới hết).">Đến dòng <input type="number" class="opt-num" @bind="_optEnd" /></label>
+                <label title="Số cửa sổ Brave chạy song song. CHỈ Scrape/Update đọc — Import LUÔN 1 lane (khoá cứng ở client, ô này KHÔNG ghi đè được).">Số process <input type="number" class="opt-num" @bind="_optProcs" /></label>
+                <label title="Số tài khoản Shopee mở trong một khung. CHỈ Scrape đọc.">Tk / khung <input type="number" class="opt-num" @bind="_optFrame" /></label>
+                <label title="Giãn cách tải lại trang, tính bằng giây. CHỈ Import/Update đọc.">Reload (giây) <input type="number" class="opt-num" @bind="_optReload" /></label>
+                @* Blazor HTML-encode MỌI giá trị attribute → viết &quot; ở đây sẽ hiện ra chữ "&quot;" trên
+                   tooltip; dùng nháy đơn bọc attribute để nhét được dấu " thật. *@
+                <label title='Nhập từ tab "Đã nhận" của BigSeller thay vì tab mặc định. CHỈ Import đọc.'><input type="checkbox" @bind="_optFromClaimed" /> Từ tab "Đã nhận"</label>
             </div>
             <div class="optsrow">
                 <span class="stat">0 = dùng cấu hình của máy client.</span>
