@@ -345,7 +345,7 @@ public sealed class ScrapeRunner
         };
     }
 
-    private readonly record struct ChunkResult(bool Errored, string Reason, int LastCompletedRow, bool IsCaptcha, bool NeedLogin = false, string? CaptchaUrl = null);
+    private readonly record struct ChunkResult(bool Errored, string Reason, int LastCompletedRow, bool IsCaptcha, bool NeedLogin = false);
 
     /// <summary>Dòng cuối ĐÃ scrape xong của 1 chunk (đọc từ cfg do engine ghi per-row). Chưa xong
     /// dòng nào → from-1. Kẹp trong [from-1, to].</summary>
@@ -368,7 +368,7 @@ public sealed class ScrapeRunner
         cfg.UseHubData = _useHubData;   // hub-mode: đọc link/tổng-dòng từ kho Hub thay vì workbook
         cfg.HubAccountId = _bigSellerAccountId;   // khoá kho Hub theo tk BigSeller (TÁCH khỏi AccountId auto-login)
         cfg.BigSellerAccountName = _bigSellerAccountName;   // để overlay hiện "Bigseller Account: …"
-        var port = PortAllocator.Shared.AllocateInstancePort();
+        var port = ScrapePorts.Shared.Allocate();
         var windowSlotHeld = false;
         try
         {
@@ -448,7 +448,7 @@ public sealed class ScrapeRunner
             // Trả suất cửa sổ về gate (sau khi đã đóng Brave) để worker khác mở cửa sổ kế.
             if (windowSlotHeld) BraveFleet.ReleaseWindowSlot();
             // Trả port về pool — nếu thiếu dòng này, mỗi chunk rò 1 port → auto run dài cạn pool (600 port) rồi chết.
-            PortAllocator.Shared.Release(port);
+            ScrapePorts.Shared.Free(port);
         }
     }
 
@@ -465,7 +465,9 @@ public sealed class ScrapeRunner
         // LastCompletedRow=0 là placeholder — caller ghi đè bằng `with { LastCompletedRow = … }`.
         if (string.Equals(phase, "needlogin", StringComparison.OrdinalIgnoreCase))
             return new ChunkResult(true, string.IsNullOrWhiteSpace(msg) ? "BigSeller mất đăng nhập — cần đăng nhập lại" : msg, 0, false, NeedLogin: true);
-        if (captcha) return new ChunkResult(true, "Captcha/verify", 0, true, CaptchaUrl: cfg.CaptchaUrl);   // IsCaptcha=true → quarantine
+        if (captcha) return new ChunkResult(true, "Captcha/verify", 0, true);   // IsCaptcha=true → quarantine
+        // (URL captcha KHÔNG đi qua ChunkResult: đã lưu thẳng vào cfg.CaptchaUrl ở LauncherRunnerLoop, nơi
+        //  "Kiểm tra tk lỗi" đọc lại. Field CaptchaUrl trên record này từng chỉ-ghi-không-đọc → đã bỏ.)
         // Lỗi HẠ TẦNG TOÀN CỤC (key proxy chết) → GIỮ NGUYÊN thông điệp gốc (KEY_EXPIRED…) thay vì gộp thành
         // "Lỗi proxy" ở dòng dưới: AutoWorkerAsync cần chuỗi này để nhận ra ca dừng-job + báo lý do thật lên Hub.
         if (ProxyFailure.IsFleetWideProxyFailure(msg)) return new ChunkResult(true, msg, 0, false);

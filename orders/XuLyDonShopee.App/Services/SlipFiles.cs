@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using XuLyDonShopee.Core.Services;
 
 namespace XuLyDonShopee.App.Services;
 
@@ -37,7 +38,7 @@ internal static class SlipFiles
             }
 
             var bytes = File.ReadAllBytes(path);
-            if (!BytesLookPdf(bytes))
+            if (!SlipMagic.LooksPdf(bytes))
             {
                 return false; // không phải PDF thật → không gửi rác
             }
@@ -50,13 +51,6 @@ internal static class SlipFiles
             return false; // lỗi đọc file → bỏ qua, không phá luồng
         }
     }
-
-    /// <summary>True nếu 5 byte đầu là magic <c>%PDF-</c> — nhận đúng file PDF thật, tránh coi HTML/redirect
-    /// (GET lại phiếu có thể ra HTML 200-OK) là phiếu. Dùng chung cho <see cref="TryReadSlipBase64"/> và
-    /// <see cref="SlipFileIsValidPdf"/>.</summary>
-    private static bool BytesLookPdf(ReadOnlySpan<byte> b)
-        => b.Length >= 5 && b[0] == (byte)'%' && b[1] == (byte)'P'
-           && b[2] == (byte)'D' && b[3] == (byte)'F' && b[4] == (byte)'-';
 
     /// <summary>
     /// True nếu file phiếu <paramref name="path"/> TỒN TẠI và là PDF thật (5 byte đầu <c>%PDF-</c>). Đọc TỐI ĐA
@@ -76,7 +70,7 @@ internal static class SlipFiles
             using var fs = File.OpenRead(path);
             Span<byte> head = stackalloc byte[5];
             var n = fs.Read(head);
-            return BytesLookPdf(head[..Math.Max(0, n)]);
+            return SlipMagic.LooksPdf(head[..Math.Max(0, n)]);
         }
         catch
         {

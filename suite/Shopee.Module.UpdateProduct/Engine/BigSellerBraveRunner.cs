@@ -3,6 +3,7 @@ using Microsoft.Playwright;
 using Shopee.Core.BigSeller;
 using Shopee.Core.Browser;
 using Shopee.Core.Cdp;
+using Shopee.Core.Coordination;
 using BraveArgs = Shopee.Toolkit.Browser.BraveArgs;
 
 namespace UpdateProduct;
@@ -37,6 +38,29 @@ internal abstract class BigSellerBraveRunner : IAsyncDisposable
 
     /// <summary>URL BigSeller mở lúc phóng Brave + dùng để probe/nạp phiên (Update: trang Listing; Import: Crawl List).</summary>
     protected abstract string StartUrl { get; }
+
+    /// <summary>
+    /// RESUME (hub-mode): báo Hub các itemId vừa xong một thao tác → lượt sau server lọc bớt. Best-effort,
+    /// fire-and-forget: store/tiến-độ local đã là nguồn chính nên lỗi mạng ở đây KHÔNG được làm hỏng lượt chạy
+    /// (nuốt + log ngắn). Dùng chung cho mark-imported (Import) và mark-updated (Update) — chỉ khác endpoint
+    /// (<paramref name="send"/>) và chữ trong log.
+    /// </summary>
+    /// <param name="send">Lời gọi endpoint tương ứng của <c>HubClient</c>.</param>
+    /// <param name="ids">Danh sách itemId; rỗng → không gọi gì.</param>
+    /// <param name="opLabel">Tên thao tác trong log ("imported" / "updated").</param>
+    /// <param name="localSourceLabel">Nguồn chính trong log ("tiến độ local" / "store local").</param>
+    protected async Task MarkStoreProgressHubAsync(
+        Func<HubClient, string[], CancellationToken, Task<int>> send, string[] ids,
+        string opLabel, string localSourceLabel)
+    {
+        try
+        {
+            var client = CoordinationRuntime.Client;
+            if (client is null || ids.Length == 0) return;
+            await send(client, ids, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception ex) { _log($"  (mark-{opLabel} Hub lỗi, bỏ qua — {localSourceLabel} là chính: {ex.Message})"); }
+    }
 
     /// <summary>Hook trước khi phóng Brave (sau khi tạo thư mục profile). Mặc định no-op; Import xoá session-tab.</summary>
     protected virtual void PrepareProfileBeforeLaunch() { }

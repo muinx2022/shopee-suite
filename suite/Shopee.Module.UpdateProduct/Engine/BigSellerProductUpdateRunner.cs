@@ -1,6 +1,5 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
-using ClosedXML.Excel;
 using Microsoft.Playwright;
 using Shopee.Core.BigSeller;
 using Shopee.Core.Browser;
@@ -61,34 +60,23 @@ internal sealed class WorkbookRecordCache
         if (settings.ItemIdColumn <= 0 && settings.LinkColumn <= 0)
             throw new InvalidOperationException("Cần map ít nhất 'Item ID' hoặc 'Link' để khớp dòng (mục BigSeller → Ánh xạ cột).");
 
-        using var _ = await WorkbookFileLockHandle.AcquireAsync(settings.WorkbookPath, ct).ConfigureAwait(false);
         var map = new Dictionary<string, WorkbookRecord>();
-        using var wb = new XLWorkbook(settings.WorkbookPath);
-        var ws = string.IsNullOrWhiteSpace(settings.DataSheet)
-            ? wb.Worksheets.First()
-            : wb.Worksheet(settings.DataSheet);
-        var start = Math.Max(2, settings.StartRow);
-        var last = ws.LastRowUsed()?.RowNumber() ?? 0;
-        var end = settings.EndRow > 0 ? Math.Min(settings.EndRow, last) : last;
-
         var emptyRewriteRows = new List<int>();   // dòng có SP để update nhưng cột G (Tên đã sửa) còn trống
-        for (var r = start; r <= end; r++)
+        await WorkbookSheetReader.ForEachDataRowAsync(settings, (row, r) =>
         {
-            var row = ws.Row(r);
-            // Cột = 0 ("không dùng") → đọc rỗng, KHÔNG gọi Cell(0) (ClosedXML 1-based, Cell(0) ném lỗi).
-            var link = settings.LinkColumn > 0 ? row.Cell(settings.LinkColumn).GetString().Trim() : "";
-            var price = settings.PriceColumn > 0 ? row.Cell(settings.PriceColumn).GetString().Trim() : "";
-            var sku = settings.SkuColumn > 0 ? row.Cell(settings.SkuColumn).GetString().Trim() : "";
-            var colE = settings.ItemIdColumn > 0 ? row.Cell(settings.ItemIdColumn).GetString().Trim() : "";
+            var link = WorkbookSheetReader.Cell(row, settings.LinkColumn);
+            var price = WorkbookSheetReader.Cell(row, settings.PriceColumn);
+            var sku = WorkbookSheetReader.Cell(row, settings.SkuColumn);
+            var colE = WorkbookSheetReader.Cell(row, settings.ItemIdColumn);
             var rewritten = row.Cell(settings.RewrittenNameColumn).GetString().Trim();   // Tên đã sửa (đã validate > 0)
 
-            var rowId = !string.IsNullOrWhiteSpace(colE) ? colE : (BigSellerCrawlHelper.ExtractShopeeId(link) ?? "");
-            if (string.IsNullOrWhiteSpace(rowId)) continue;
+            var rowId = WorkbookSheetReader.RowId(colE, link);
+            if (string.IsNullOrWhiteSpace(rowId)) return;
 
             // Cột G trống → BỎ QUA riêng dòng đó (không update tên gốc cột F), vẫn chạy tiếp các dòng khác.
-            if (string.IsNullOrWhiteSpace(rewritten)) { emptyRewriteRows.Add(r); continue; }
+            if (string.IsNullOrWhiteSpace(rewritten)) { emptyRewriteRows.Add(r); return; }
             map[rowId] = new WorkbookRecord(link, sku, rewritten, price, r);
-        }
+        }, ct).ConfigureAwait(false);
 
         return (map, emptyRewriteRows);
     }
@@ -100,17 +88,14 @@ internal sealed class WorkbookRecordCache
     private static async Task<(Dictionary<string, WorkbookRecord> map, List<int> emptyRewriteRows)> LoadRecordMapFromHubAsync(
         BigSellerWorkflowSettings settings, CancellationToken ct)
     {
-        var client = CoordinationRuntime.Client
-            ?? throw new InvalidOperationException("⛔ Tk ở chế độ kho Hub nhưng chưa kết nối Hub — kiểm tra Cài đặt → Hub rồi chạy lại.");
-        var start = Math.Max(2, settings.StartRow);
-        var end = settings.EndRow;   // 0 = đến hết (server: toRow<=0 → không chặn trên)
+        var (client, start, end) = WorkbookSheetReader.BeginHubRead(settings);
         var rows = await client.GetProductRecordMapAsync(settings.AccountId, settings.DataSheet, start, end, ct).ConfigureAwait(false)
             ?? throw new InvalidOperationException("⛔ Hub chưa sẵn sàng (kho sản phẩm Postgres) — thử lại sau.");
 
         var map = new Dictionary<string, WorkbookRecord>();
         foreach (var r in rows)
         {
-            var rowId = !string.IsNullOrWhiteSpace(r.ItemId) ? r.ItemId.Trim() : (BigSellerCrawlHelper.ExtractShopeeId(r.Link) ?? "");
+            var rowId = WorkbookSheetReader.RowId(r.ItemId, r.Link);
             if (string.IsNullOrWhiteSpace(rowId)) continue;
             map[rowId] = new WorkbookRecord(r.Link, r.Sku, r.NameRewritten, r.PriceSale, r.RowNo);
         }
@@ -416,16 +401,10 @@ internal sealed partial class BigSellerProductUpdateRunner : BigSellerBraveRunne
         if (_settings.UseHubData) _ = MarkUpdatedHubAsync(itemId);
     }
 
-    private async Task MarkUpdatedHubAsync(string itemId)
-    {
-        try
-        {
-            var client = CoordinationRuntime.Client;
-            if (client is null) return;
-            await client.MarkProductUpdatedAsync(_settings.AccountId, _settings.DataSheet, new[] { itemId }, CancellationToken.None).ConfigureAwait(false);
-        }
-        catch (Exception ex) { _log($"  (mark-updated Hub lỗi, bỏ qua — store local là chính: {ex.Message})"); }
-    }
+    // Khung chung ở base (BigSellerBraveRunner.MarkStoreProgressHubAsync) — best-effort, nuốt lỗi mạng.
+    private Task MarkUpdatedHubAsync(string itemId) => MarkStoreProgressHubAsync(
+        (client, items, ct) => client.MarkProductUpdatedAsync(_settings.AccountId, _settings.DataSheet, items, ct),
+        new[] { itemId }, "updated", "store local");
 
     // ── phân trang Listing → uỷ quyền BigSellerCrawlHelper.ClickNextCrawlPageAsync (bản chung Crawl + Listing) ──
     // Nút Next bảng Listing dùng li.next_item (trang cuối → li.next_item.disabled → không khớp :not(.disabled)

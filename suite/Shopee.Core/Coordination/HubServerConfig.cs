@@ -33,7 +33,8 @@ public sealed class HubServerConfigStore
 
     public HubServerConfig Current { get { lock (_lock) return _config.Clone(); } }
 
-    public void Load()
+    /// <summary>Đọc file cấu hình một lần lúc dựng singleton (không có nơi nào nạp lại lúc chạy).</summary>
+    private void Load()
     {
         lock (_lock)
         {

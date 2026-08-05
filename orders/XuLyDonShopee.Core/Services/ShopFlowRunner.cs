@@ -565,8 +565,8 @@ internal sealed class ShopFlowRunner
         {
             byte[] bytes;
             try { bytes = Convert.FromBase64String(slipBase64); } catch { return false; }
-            // Magic %PDF (0x25 0x50 0x44 0x46) — tránh lưu HTML/rác thành .pdf.
-            if (bytes.Length < 4 || bytes[0] != 0x25 || bytes[1] != 0x50 || bytes[2] != 0x44 || bytes[3] != 0x46)
+            // Magic %PDF- — tránh lưu HTML/rác thành .pdf. Kiểm chung với phía đọc (SlipFiles) qua SlipMagic.
+            if (!SlipMagic.LooksPdf(bytes))
             {
                 return false;
             }

@@ -183,14 +183,14 @@ public sealed class UpdateProductRunner
         var wf = BuildWorkflow(ctx);
         // Profile/port RIÊNG để KHÔNG tranh CDP/profile-lock với lane update đang chạy cùng tk; cookie seed
         // từ file qua EnsureCookieAsync (giữ phiên nếu còn sống, login lại nếu thiu).
-        var port = PortAllocator.Shared.AllocateBigSellerPort();
+        var port = BigSellerPorts.Shared.Allocate();
         try
         {
             wf = wf with { ProfileDir = wf.ProfileDir + "-mediaclean", DebugPort = port };
             await using var runner = new BigSellerMediaCleanupRunner(wf, m => Log?.Invoke(m));
             await runner.RunAsync(ct);
         }
-        finally { PortAllocator.Shared.Release(port); }
+        finally { BigSellerPorts.Shared.Free(port); }
     }
 
     // Spawn N lane song song: lane 0 dùng profile/port BASE (giữ phiên login); lane phụ có profile
@@ -213,7 +213,7 @@ public sealed class UpdateProductRunner
                 {
                     // 1 port/lane: cả Import lẫn Update runner chỉ dùng DebugPort/ProfileDir → cấp 2 port là
                     // phí, cạn pool BigSeller nhanh gấp đôi. (Cặp Import* riêng đã bỏ hẳn — 0 runner nào đọc.)
-                    var p1 = PortAllocator.Shared.AllocateBigSellerPort();
+                    var p1 = BigSellerPorts.Shared.Allocate();
                     ports.Add(p1);
                     laneWf = wf with { ProfileDir = $"{wf.ProfileDir}-p{lane}", DebugPort = p1 };
                     try { await Task.Delay(2500 + lane * 1500, ct).ConfigureAwait(false); } catch (OperationCanceledException) { break; }
@@ -256,7 +256,7 @@ public sealed class UpdateProductRunner
         }
         finally
         {
-            foreach (var p in ports) PortAllocator.Shared.Release(p);
+            foreach (var p in ports) BigSellerPorts.Shared.Free(p);
         }
     }
 

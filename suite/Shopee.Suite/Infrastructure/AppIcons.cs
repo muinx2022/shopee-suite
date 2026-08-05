@@ -1,9 +1,9 @@
 namespace Shopee.Suite.Infrastructure;
 
 /// <summary>
-/// Icon vector ĐƠN SẮC (Material filled, viewbox 24×24) của các nút ĐIỀU HƯỚNG MÀN — ribbon + thẻ màn
-/// Welcome. Ở đây (C#) vì ribbon/Welcome bind icon qua ViewModel nên cần <c>string</c>; PathIcon tô bằng
-/// Foreground nên icon tự đổi màu theo trạng thái tab mà không cần đổi icon.
+/// Icon vector ĐƠN SẮC (Material filled, viewbox 24×24) của các nút ĐIỀU HƯỚNG MÀN trên ribbon. Ở đây (C#)
+/// vì ribbon bind icon qua ViewModel nên cần <c>string</c>; PathIcon tô bằng Foreground nên icon tự đổi màu
+/// theo trạng thái tab mà không cần đổi icon.
 /// <para>
 /// ⚠ Icon <b>HÀNH ĐỘNG</b> (Lưu · Xóa · Tải lại · Chạy · Dừng …) KHÔNG còn ở file này — chúng nằm ở
 /// <c>orders/XuLyDonShopee.App/Styles/Icons.axaml</c> (ResourceDictionary, key <c>IconSave</c>,
@@ -19,7 +19,7 @@ namespace Shopee.Suite.Infrastructure;
 /// </summary>
 public static class AppIcons
 {
-    // ══════════ ĐIỀU HƯỚNG (ribbon + màn Welcome) ══════════
+    // ══════════ ĐIỀU HƯỚNG (ribbon) ══════════
 
     /// <summary>Ô bảng điều khiển — Workspace (Scrape · Import · Update).</summary>
     public const string Dashboard =

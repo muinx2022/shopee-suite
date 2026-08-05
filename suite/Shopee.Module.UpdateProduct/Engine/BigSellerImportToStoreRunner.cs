@@ -1,5 +1,4 @@
 using System.Text.Json;
-using ClosedXML.Excel;
 using Microsoft.Playwright;
 using Shopee.Core.Ai;
 using Shopee.Core.BigSeller;
@@ -78,25 +77,15 @@ internal sealed class BigSellerImportToStoreRunner : BigSellerBraveRunner
         if (_settings.ItemIdColumn <= 0 && _settings.LinkColumn <= 0)
             throw new InvalidOperationException("Cần map ít nhất 'Item ID' hoặc 'Link' để lấy item id import (mục BigSeller → Ánh xạ cột).");
 
-        using var _ = await WorkbookFileLockHandle.AcquireAsync(_settings.WorkbookPath, ct).ConfigureAwait(false);
         var ids = new HashSet<string>(StringComparer.Ordinal);
         var rowById = new Dictionary<string, int>(StringComparer.Ordinal);
-        using var wb = new XLWorkbook(_settings.WorkbookPath);
-        var ws = string.IsNullOrWhiteSpace(_settings.DataSheet)
-            ? wb.Worksheets.First()
-            : wb.Worksheet(_settings.DataSheet);
-        var start = Math.Max(2, _settings.StartRow);
-        var last = ws.LastRowUsed()?.RowNumber() ?? 0;
-        var end = _settings.EndRow > 0 ? Math.Min(_settings.EndRow, last) : last;
-
-        for (var r = start; r <= end; r++)
+        var (start, end) = await WorkbookSheetReader.ForEachDataRowAsync(_settings, (row, r) =>
         {
-            var row = ws.Row(r);
-            var colE = _settings.ItemIdColumn > 0 ? row.Cell(_settings.ItemIdColumn).GetString().Trim() : "";
-            var link = _settings.LinkColumn > 0 ? row.Cell(_settings.LinkColumn).GetString().Trim() : "";
-            var id = !string.IsNullOrWhiteSpace(colE) ? colE : (BigSellerCrawlHelper.ExtractShopeeId(link) ?? "");
+            var colE = WorkbookSheetReader.Cell(row, _settings.ItemIdColumn);
+            var link = WorkbookSheetReader.Cell(row, _settings.LinkColumn);
+            var id = WorkbookSheetReader.RowId(colE, link);
             if (!string.IsNullOrWhiteSpace(id)) { ids.Add(id); rowById.TryAdd(id, r); }
-        }
+        }, ct).ConfigureAwait(false);
 
         _importIds = ids;
         _rowByImportId = rowById;
@@ -107,10 +96,7 @@ internal sealed class BigSellerImportToStoreRunner : BigSellerBraveRunner
     // [StartRow..EndRow] → dựng CÙNG tập (itemId ưu tiên ItemId, rỗng thì ExtractShopeeId(Link)) + map id→dòng đầu.
     private async Task LoadImportItemIdSetFromHubAsync(CancellationToken ct)
     {
-        var client = CoordinationRuntime.Client
-            ?? throw new InvalidOperationException("⛔ Tk ở chế độ kho Hub nhưng chưa kết nối Hub — kiểm tra Cài đặt → Hub rồi chạy lại.");
-        var start = Math.Max(2, _settings.StartRow);
-        var end = _settings.EndRow;   // 0 = đến hết (server: toRow<=0 → không chặn trên)
+        var (client, start, end) = WorkbookSheetReader.BeginHubRead(_settings);
         var rows = await client.GetProductImportIdsAsync(_settings.AccountId, _settings.DataSheet, start, end, ct).ConfigureAwait(false)
             ?? throw new InvalidOperationException("⛔ Hub chưa sẵn sàng (kho sản phẩm Postgres) — thử lại sau.");
 
@@ -118,7 +104,7 @@ internal sealed class BigSellerImportToStoreRunner : BigSellerBraveRunner
         var rowById = new Dictionary<string, int>(StringComparer.Ordinal);
         foreach (var r in rows)
         {
-            var id = !string.IsNullOrWhiteSpace(r.ItemId) ? r.ItemId.Trim() : (BigSellerCrawlHelper.ExtractShopeeId(r.Link) ?? "");
+            var id = WorkbookSheetReader.RowId(r.ItemId, r.Link);
             if (!string.IsNullOrWhiteSpace(id)) { ids.Add(id); rowById.TryAdd(id, r.RowNo); }
         }
         _importIds = ids;
@@ -447,13 +433,11 @@ internal sealed class BigSellerImportToStoreRunner : BigSellerBraveRunner
         return false;
     }
 
-    // onCommitting: bắn NGAY TRƯỚC khi bấm nút "Import to Stores" (mốc commit) — caller dùng để biết
-    // lỗi xảy ra TRƯỚC hay SAU khi click (sau = đã gửi lên server → không import lại tránh trùng).
-    private async Task SelectImportShopAndConfirmAsync(ILocator modal, string shopName, Action? onCommitting = null)
-    {
-        _log($"Chon shop import: {shopName}");
-        var selectedLabel = await modal.EvaluateAsync<string>(
-            @"(root, targetShop) => {
+    // ── HỢP ĐỒNG DOM: modal "chọn shop import" ──────────────
+    // Khối khai báo JS DÙNG CHUNG cho 2 hàm eval bên dưới (trước đây chép nguyên xi 2 lần): chuẩn hoá tên
+    // shop (bỏ dấu → gộp khoảng trắng → hạ chữ; bản compact bỏ luôn mọi ký tự ngoài a-z0-9) để so khớp bền
+    // với nhãn trên modal. ĐỪNG "tiện tay" sửa — hợp đồng với DOM BigSeller, lệch 1 ký tự là hỏng chọn shop.
+    private const string ShopLabelJsPrelude = @"
                 const normalize = value => (value || '')
                     .normalize('NFD')
                     .replace(/[\u0300-\u036f]/g, '')
@@ -465,13 +449,25 @@ internal sealed class BigSellerImportToStoreRunner : BigSellerBraveRunner
                 const compact = value => normalize(value).replace(/[^a-z0-9]/g, '');
                 const target = normalize(targetShop);
                 const targetCompact = compact(targetShop);
-                const labelText = label => (label.textContent || '').replace(/\s+/g, ' ').trim();
+                const labelText = label => (label.textContent || '').replace(/\s+/g, ' ').trim();";
+
+    // Selector các label shop trong modal (3 mức hẹp → rộng) — dùng chung 2 hàm eval.
+    private const string ShopLabelSelector =
+        ".cont_btm.btmOut label.ant-checkbox-wrapper, .btmOut label.ant-checkbox-wrapper, label.ant-checkbox-wrapper";
+
+    // onCommitting: bắn NGAY TRƯỚC khi bấm nút "Import to Stores" (mốc commit) — caller dùng để biết
+    // lỗi xảy ra TRƯỚC hay SAU khi click (sau = đã gửi lên server → không import lại tránh trùng).
+    private async Task SelectImportShopAndConfirmAsync(ILocator modal, string shopName, Action? onCommitting = null)
+    {
+        _log($"Chon shop import: {shopName}");
+        var selectedLabel = await modal.EvaluateAsync<string>(
+            "(root, targetShop) => {" + ShopLabelJsPrelude + @"
                 const isVisible = el => {
                     const rect = el.getBoundingClientRect();
                     return rect.width > 0 && rect.height > 0;
                 };
                 const labels = Array.from(root.querySelectorAll(
-                    '.cont_btm.btmOut label.ant-checkbox-wrapper, .btmOut label.ant-checkbox-wrapper, label.ant-checkbox-wrapper'))
+                    '" + ShopLabelSelector + @"'))
                     .filter(label => isVisible(label) && label.querySelector('input[type=checkbox]'));
                 const stores = labels.filter(label => !normalize(labelText(label)).includes('select all'));
                 const targetLabel = stores.find(label => {
@@ -520,21 +516,9 @@ internal sealed class BigSellerImportToStoreRunner : BigSellerBraveRunner
     }
     private static Task<bool> IsImportShopCheckedAsync(ILocator modal, string shopName) =>
         modal.EvaluateAsync<bool>(
-            @"(root, targetShop) => {
-                const normalize = value => (value || '')
-                    .normalize('NFD')
-                    .replace(/[\u0300-\u036f]/g, '')
-                    .replace(/\u0111/g, 'd')
-                    .replace(/\u0110/g, 'd')
-                    .replace(/\s+/g, ' ')
-                    .trim()
-                    .toLowerCase();
-                const compact = value => normalize(value).replace(/[^a-z0-9]/g, '');
-                const target = normalize(targetShop);
-                const targetCompact = compact(targetShop);
-                const labelText = label => (label.textContent || '').replace(/\s+/g, ' ').trim();
+            "(root, targetShop) => {" + ShopLabelJsPrelude + @"
                 const labels = Array.from(root.querySelectorAll(
-                    '.cont_btm.btmOut label.ant-checkbox-wrapper, .btmOut label.ant-checkbox-wrapper, label.ant-checkbox-wrapper'))
+                    '" + ShopLabelSelector + @"'))
                     .filter(label => label.querySelector('input[type=checkbox]'));
                 const label = labels.find(label => {
                     const text = labelText(label);
@@ -604,6 +588,11 @@ internal sealed class BigSellerImportToStoreRunner : BigSellerBraveRunner
         catch { /* best-effort */ }
     }
 
+    // Bản JS của ImgKey (chạy TRONG trang) — dùng chung 2 hàm eval quét ảnh dòng. Phải cho CÙNG kết quả
+    // với <see cref="ImgKey"/> bên C#: khoá ảnh API trả về phải khớp khoá ảnh đọc từ DOM thì mới bắc cầu được.
+    private const string ImgKeyJs = @"
+                const key = src => { if (!src) return ''; const u = src.split('?')[0].replace(/\/+$/, ''); const p = u.split('/'); return p[p.length - 1] || ''; };";
+
     // Khoá ảnh = đoạn cuối URL ảnh (bỏ query) — cầu nối vì cả JSON (mainImage) lẫn DOM (<img src>) đều có.
     private static string ImgKey(string? url)
     {
@@ -632,8 +621,7 @@ internal sealed class BigSellerImportToStoreRunner : BigSellerBraveRunner
 
     private static Task<string[]> GetVisibleImageKeysAsync(IPage page) =>
         page.EvaluateAsync<string[]>(
-            @"() => {
-                const key = src => { if (!src) return ''; const u = src.split('?')[0].replace(/\/+$/, ''); const p = u.split('/'); return p[p.length - 1] || ''; };
+            "() => {" + ImgKeyJs + @"
                 const set = new Set();
                 for (const tr of Array.from(document.querySelectorAll('tr.vxe-body--row'))) {
                     const img = tr.querySelector('img');
@@ -657,8 +645,7 @@ internal sealed class BigSellerImportToStoreRunner : BigSellerBraveRunner
         if (toTick.Count == 0) return Array.Empty<string>();
 
         var clicked = await page.EvaluateAsync<string[]>(
-            @"(map) => {
-                const key = src => { if (!src) return ''; const u = src.split('?')[0].replace(/\/+$/, ''); const p = u.split('/'); return p[p.length - 1] || ''; };
+            "(map) => {" + ImgKeyJs + @"
                 const vis = el => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
                 const byId = new Map();   // rowid -> { key, checkboxCell, icon }
                 for (const tr of Array.from(document.querySelectorAll('tr.vxe-body--row'))) {
@@ -741,18 +728,11 @@ internal sealed class BigSellerImportToStoreRunner : BigSellerBraveRunner
     private Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken) =>
         _pauseToken?.DelayAsync(delay, cancellationToken) ?? Task.Delay(delay, cancellationToken);
 
-    // RESUME (hub-mode): báo Hub các itemId vừa import → GetImportIds lượt sau lọc bớt. Best-effort, fire-and-forget:
-    // store local đã là nguồn chính, lỗi mạng ở đây KHÔNG được làm hỏng lượt chạy (nuốt + log ngắn).
-    private async Task MarkImportedHubAsync(string[] ids)
-    {
-        try
-        {
-            var client = CoordinationRuntime.Client;
-            if (client is null || ids.Length == 0) return;
-            await client.MarkProductImportedAsync(_settings.AccountId, _settings.DataSheet, ids, CancellationToken.None).ConfigureAwait(false);
-        }
-        catch (Exception ex) { _log($"  (mark-imported Hub lỗi, bỏ qua — tiến độ local là chính: {ex.Message})"); }
-    }
+    // RESUME (hub-mode): báo Hub các itemId vừa import → GetImportIds lượt sau lọc bớt. Khung chung ở base
+    // (BigSellerBraveRunner.MarkStoreProgressHubAsync) — best-effort, lỗi mạng KHÔNG làm hỏng lượt chạy.
+    private Task MarkImportedHubAsync(string[] ids) => MarkStoreProgressHubAsync(
+        (client, items, ct) => client.MarkProductImportedAsync(_settings.AccountId, _settings.DataSheet, items, ct),
+        ids, "imported", "tiến độ local");
 
     // Tổng kết ledger khi import kết thúc BÌNH THƯỜNG: đã báo Thống kê bao nhiêu dòng vs bao nhiêu SP import xong
     // mà không khớp được dòng sheet → soi nhanh vì sao Thống kê Hub thiếu dòng import (miss=0 mà Thống kê vẫn thiếu

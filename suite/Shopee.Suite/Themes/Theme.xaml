@@ -11,8 +11,7 @@
              Classes="h1"          →  Style="{StaticResource h1}"
              Classes="pill danger" →  Style="{StaticResource pillDanger}"   (WPF không cộng dồn class)
              Classes.active="{…}"  →  DataTrigger trong style (xem style ribbon)
-         Va tên: Avalonia có CẢ `Button.card` (thẻ bấm được ở màn Chào) LẪN `Border.card` (thẻ trắng) —
-         x:Key phải duy nhất nên: Border → `card`, Button → `cardButton`.
+         Va tên: `card` (Border) là thẻ trắng; các style Avalonia của màn Chào đã xoá cùng màn đó.
          ══════════════════════════════════════════════════════════════════════════════════════════════ -->
 
     <!-- ══════════ COLOR / BRUSH TOKENS — palette ẤM-trung tính (bộ design handoff) ══════════ -->
@@ -74,8 +73,6 @@
     <SolidColorBrush x:Key="TabStripBorderBrush" Color="#F0EDEA" />
     <SolidColorBrush x:Key="TabHoverBrush" Color="#FAF8F6" />
     <SolidColorBrush x:Key="RibbonDividerBrush" Color="#EFECEA" />
-    <!-- Huy hiệu thương hiệu (app-mark dải tab + màn Welcome): accent CAM Shopee ĐẶC. -->
-    <SolidColorBrush x:Key="BrandBadgeBrush" Color="#EE4D2D" />
     <!-- Thanh trạng thái đáy: TRUNG TÍNH (cố ý không cam) — nền, hover đoạn, vạch ngăn 1×16, màu chữ. -->
     <SolidColorBrush x:Key="StatusBarBrush" Color="#F2EFEC" />
     <SolidColorBrush x:Key="StatusBarHoverBrush" Color="#E8E3DF" />
@@ -148,9 +145,6 @@
         <Setter Property="FontSize" Value="12" />
         <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}" />
         <Setter Property="TextWrapping" Value="Wrap" />
-    </Style>
-    <Style x:Key="emoji" TargetType="{x:Type TextBlock}">
-        <Setter Property="FontFamily" Value="{StaticResource EmojiFont}" />
     </Style>
     <!-- Nhãn nhóm nhỏ trên form (Avalonia: TextBlock.section). -->
     <Style x:Key="section" TargetType="{x:Type TextBlock}">
@@ -250,35 +244,6 @@
         <Setter Property="Height" Value="30" />
         <Setter Property="MinHeight" Value="30" />
         <Setter Property="Padding" Value="0" />
-    </Style>
-
-    <!-- Thẻ bấm được (màn Chào) — Avalonia `Button.card`. Bo 8, canh trái, hover nền cam rất nhạt + viền accent. -->
-    <Style x:Key="cardButton" TargetType="{x:Type Button}" BasedOn="{StaticResource {x:Type Button}}">
-        <Setter Property="Padding" Value="18,16" />
-        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-        <Setter Property="Template">
-            <Setter.Value>
-                <ControlTemplate TargetType="{x:Type Button}">
-                    <Border x:Name="PART_bd" Background="{TemplateBinding Background}"
-                            BorderBrush="{TemplateBinding BorderBrush}"
-                            BorderThickness="{TemplateBinding BorderThickness}"
-                            CornerRadius="8" SnapsToDevicePixels="True">
-                        <ContentPresenter Margin="{TemplateBinding Padding}"
-                                          HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
-                                          VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
-                    </Border>
-                    <ControlTemplate.Triggers>
-                        <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="PART_bd" Property="Background" Value="{StaticResource BrandTintBrush}" />
-                            <Setter TargetName="PART_bd" Property="BorderBrush" Value="{StaticResource AccentBrush}" />
-                        </Trigger>
-                        <Trigger Property="IsEnabled" Value="False">
-                            <Setter Property="Opacity" Value="0.45" />
-                        </Trigger>
-                    </ControlTemplate.Triggers>
-                </ControlTemplate>
-            </Setter.Value>
-        </Setter>
     </Style>
 
     <!-- App-mark + tên app ở đầu dải tab: nút phẳng, nền trong suốt, hover be rất nhạt. -->

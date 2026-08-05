@@ -1,3 +1,5 @@
+using Shopee.Core.Infrastructure;
+
 namespace UpdateProduct;
 
 internal static class BigSellerContextFactory
@@ -16,7 +18,7 @@ internal static class BigSellerContextFactory
         UpdateProductSettings.Normalize(settings);
         var account = ActiveAccount(settings);
         var shop = ActiveShop(settings);
-        BigSellerProfileManager.EnsureWorkflowProfile(settings.Accounts, account, shop);
+        BigSellerProfileManager.EnsureWorkflowProfile(settings.Accounts, account);
 
         return new BigSellerWorkflowSettings
         {

@@ -1,16 +1,17 @@
+using Shopee.Core.Infrastructure;
+
 namespace UpdateProduct;
 
 internal static class BigSellerProfileManager
 {
     // Cache port theo account.Id (process-wide) — chạy lại cùng account KHÔNG cấp port mới (tránh rò
-    // port mỗi run); nhiều account chạy SONG SONG nhận port phân biệt (PortAllocator lease theo lượt).
+    // port mỗi run); nhiều account chạy SONG SONG nhận port phân biệt (BigSellerPorts lease theo lượt).
     private static readonly object _portLock = new();
     private static readonly Dictionary<string, int> _accountPorts = new();
 
     public static void EnsureWorkflowProfile(
         IEnumerable<BigSellerAccountConfig> accounts,
-        BigSellerAccountConfig account,
-        ShopConfig shop) =>
+        BigSellerAccountConfig account) =>
         EnsureAccountProfile(accounts, account);
 
     /// <summary>
@@ -64,11 +65,11 @@ internal static class BigSellerProfileManager
 
         for (var attempt = 0; attempt < 400; attempt++)
         {
-            var port = PortAllocator.Shared.AllocateBigSellerPort();
+            var port = BigSellerPorts.Shared.Allocate();
             if (!used.Contains(port))
                 return port;
 
-            PortAllocator.Shared.Release(port);
+            BigSellerPorts.Shared.Free(port);
         }
 
         throw new InvalidOperationException("Khong con port BigSeller trong.");

@@ -6,6 +6,6 @@ namespace Shopee.Modules.MultiBrave;
 /// lúc app khởi động và lúc thoát.</summary>
 public static class MultiBraveRuntime
 {
-    public static void Initialize() => AppSession.Initialize();
-    public static void Cleanup() => AppSession.Cleanup();
+    public static void Initialize() => ScrapeSession.Current.Initialize();
+    public static void Cleanup() => ScrapeSession.Current.Cleanup();
 }

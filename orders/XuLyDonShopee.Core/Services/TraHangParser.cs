@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Shopee.Toolkit.MsLogin;
 
 namespace XuLyDonShopee.Core.Services;
 
@@ -639,26 +640,12 @@ public static class TraHangParser
         return string.Join(' ', text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)).Trim();
     }
 
-    /// <summary>Bỏ dấu tiếng Việt + hạ chữ + gộp khoảng trắng (đề phòng giao diện đổi ngôn ngữ / đổi chữ hoa).</summary>
-    internal static string KhongDau(string? s)
-    {
-        var norm = ShopeeShippingNav.NormalizeUiText(s);
-        if (norm.Length == 0)
-        {
-            return string.Empty;
-        }
-
-        var sb = new StringBuilder(norm.Length);
-        foreach (var ch in norm.Normalize(NormalizationForm.FormD))
-        {
-            if (CharUnicodeInfo.GetUnicodeCategory(ch) == UnicodeCategory.NonSpacingMark)
-            {
-                continue; // dấu thanh
-            }
-            sb.Append(ch == 'đ' ? 'd' : ch);
-        }
-        return sb.ToString().Normalize(NormalizationForm.FormC);
-    }
+    /// <summary>Bỏ dấu tiếng Việt + hạ chữ + gộp khoảng trắng (đề phòng giao diện đổi ngôn ngữ / đổi chữ hoa).
+    /// <para>Thân nằm ở <see cref="MsLoginSelectors.NormalizeForMatch"/> (shared/Shopee.Toolkit) — DÙNG CHUNG với
+    /// <c>LoginParsers.NormalizeForMatch</c> và phía Hub/BigSeller (<c>HotmailOtpReader</c>); trước đây đây là bản
+    /// chép thứ ba. Bản chung hạ chữ ở BƯỚC CUỐI thay vì bước đầu — cùng kết quả (Đ tách thành D rồi mới hạ, đ có
+    /// nhánh riêng), đã đối chiếu bằng <c>TraHangParserTests</c>.</para></summary>
+    internal static string KhongDau(string? s) => MsLoginSelectors.NormalizeForMatch(s);
 
     /// <summary>Chuỗi CHẨN ĐOÁN cho dòng thiếu mã yêu cầu: mã đơn + CLASS/NHÃN dò được của từng khối + HTML thô
     /// (cắt bớt) — nhật ký lần chạy thật nhìn vào đây là biết luật trượt ở tầng nào và cấu trúc thật là gì.</summary>

@@ -167,8 +167,7 @@ public sealed class SearchRunner
         return file.ApplyAndSave(cats);
     }
 
-    private static CategoryAiUpdater MakeUpdater(AiConfig ai) =>
-        new(CategoryAiUpdater.ParseProvider(ai.Provider), ai.ActiveApiKey, ai.ActiveModel);
+    private static CategoryAiUpdater MakeUpdater(AiConfig ai) => new(ai);
 
     // ── Helpers ──────────────────────────────────────────────────────────────────
     private static List<InstanceConfig> ToAccounts(IReadOnlyList<SearchAccountSpec> specs) =>

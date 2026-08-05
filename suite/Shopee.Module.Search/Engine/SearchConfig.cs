@@ -14,11 +14,13 @@ public sealed class SearchConfig
     public int ResumePage { get; set; } = 1;
 
     /// <summary>
-    /// "keyword" (search by keyword), "shopFromLink" (product link → its shop → all products),
-    /// or "categoryFromLink" (mở link category → lặp mọi sub-category → lọc Nơi Bán + Bán chạy → cào).
+    /// Chế độ cào. Hiện CHỈ CÒN "categoryFromLink" (mở link category → lặp mọi sub-category → lọc Nơi Bán +
+    /// Bán chạy → cào): phía C# chỉ dựng đúng giá trị này (<c>FileRunCoordinator</c>) và extension chỉ đấu
+    /// <c>startCategoryFromLink</c> cho lệnh <c>start</c>. Mặc định cũ là "keyword" — trỏ vào flow KHÔNG còn
+    /// tồn tại, nên đổi về đúng flow đang sống.
     /// </summary>
-    public string Mode { get; set; } = "keyword";
+    public string Mode { get; set; } = "categoryFromLink";
 
-    /// <summary>URL để mở khi Mode == "shopFromLink" (link sản phẩm) hoặc "categoryFromLink" (link category).</summary>
+    /// <summary>URL category để mở khi chạy (Mode "categoryFromLink").</summary>
     public string ProductLink { get; set; } = "";
 }

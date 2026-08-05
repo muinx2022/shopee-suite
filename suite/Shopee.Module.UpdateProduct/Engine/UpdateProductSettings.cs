@@ -1,4 +1,5 @@
 using Shopee.Core.Browser;
+using Shopee.Core.Infrastructure;
 
 namespace UpdateProduct;
 

@@ -20,18 +20,18 @@ public static class BackupService
     private static string SharedDir => SuitePaths.ModuleDir("shared");
     private static string CookieDir => Path.Combine(SharedDir, "bigseller-cookies");
 
-    /// <summary>Gộp danh sách BigSeller vào store (dùng chung cho import-zip + đồng bộ Hub). append = replace:false.
-    /// Acc ĐÃ CÓ (theo Id/email) mà nội dung DÙNG CHUNG khác (shop/label/email/proxy) → CẬP NHẬT xuống (Hub là
-    /// nguồn sự thật: sửa shop ở Hub lan tới mọi client), GIỮ NGUYÊN field local: cookie, workbook, lựa chọn UI.</summary>
-    public static (int added, int updated, int skipped) MergeBigSeller(List<BigSellerAccount> imported, bool replace, string? rebaseDir, bool mirror = false)
+    /// <summary>Gộp danh sách BigSeller từ Hub vào store — LUÔN gộp thêm (đường "thay thế toàn bộ" của import-zip
+    /// đã bỏ cùng file .zip). Acc ĐÃ CÓ (theo Id/email) mà nội dung DÙNG CHUNG khác (shop/label/email/proxy) →
+    /// CẬP NHẬT xuống (Hub là nguồn sự thật: sửa shop ở Hub lan tới mọi client), GIỮ NGUYÊN field local: cookie,
+    /// workbook, lựa chọn UI.</summary>
+    public static (int added, int updated, int skipped) MergeBigSeller(List<BigSellerAccount> imported, bool mirror = false)
     {
-        var current = replace ? new List<BigSellerAccount>() : BigSellerStore.Shared.Accounts.ToList();
+        var current = BigSellerStore.Shared.Accounts.ToList();
         int added = 0, updated = 0, skipped = 0;
         foreach (var a in imported)
         {
-            var existing = replace ? null
-                : current.FirstOrDefault(x => x.Id == a.Id)
-                  ?? (EmailKey(a).Length > 0 ? current.FirstOrDefault(x => EmailKey(x) == EmailKey(a)) : null);
+            var existing = current.FirstOrDefault(x => x.Id == a.Id)
+                ?? (EmailKey(a).Length > 0 ? current.FirstOrDefault(x => EmailKey(x) == EmailKey(a)) : null);
             if (existing is not null)
             {
                 var changed = false;
@@ -69,7 +69,7 @@ public static class BackupService
                 if (changed) updated++; else skipped++;
                 continue;
             }
-            RebaseBigSeller(a, rebaseDir);
+            RebaseBigSeller(a);
             if (mirror) a.HubOwned = true;   // acc mới từ Hub
             current.Add(a);
             added++;
@@ -82,9 +82,9 @@ public static class BackupService
             var keepEmails = imported.Select(EmailKey).Where(k => k.Length > 0).ToHashSet();
             removed = current.RemoveAll(x => x.HubOwned && !keepIds.Contains(x.Id) && !(EmailKey(x).Length > 0 && keepEmails.Contains(EmailKey(x))));
         }
-        // Chỉ ghi store khi THỰC SỰ đổi (thêm mới / cập nhật / xóa / chế độ thay-thế) → auto-pull định kỳ không bắn
+        // Chỉ ghi store khi THỰC SỰ đổi (thêm mới / cập nhật / xóa) → auto-pull định kỳ không bắn
         // sự kiện Changed làm UI dựng lại danh sách khi không có gì mới.
-        if (replace || added > 0 || updated > 0 || removed > 0) BigSellerStore.Shared.ReplaceAll(current);
+        if (added > 0 || updated > 0 || removed > 0) BigSellerStore.Shared.ReplaceAll(current);
         return (added, updated, skipped);
     }
 
@@ -143,20 +143,20 @@ public static class BackupService
         return merged;
     }
 
-    /// <summary>Gộp danh sách Shopee account (kèm proxy) vào store. append = replace:false. Acc ĐÃ CÓ (theo
+    /// <summary>Gộp danh sách Shopee account (kèm proxy) vào store — LUÔN gộp thêm. Acc ĐÃ CÓ (theo
     /// Id/login) mà field DÙNG CHUNG khác (login/proxy/label) → CẬP NHẬT xuống; GIỮ NGUYÊN field local (profile,
     /// cờ login, Disabled/lỗi, LastUsedTick). <paramref name="mirror"/>=true (client sync): còn XÓA acc local
     /// KHÔNG có ở Hub (chỉ khi list Hub không rỗng) → client khớp trọn vẹn danh sách Hub.</summary>
-    public static (int added, int updated, int skipped) MergeShopee(List<ShopeeAccount> imported, bool replace, bool mirror = false)
+    public static (int added, int updated, int skipped) MergeShopee(List<ShopeeAccount> imported, bool mirror = false)
     {
-        var current = replace ? new List<ShopeeAccount>() : AccountStore.Shared.Accounts.ToList();
+        var current = AccountStore.Shared.Accounts.ToList();
         int added = 0, updated = 0, skipped = 0;
         foreach (var a in imported)
         {
             var key = LoginKey(a);
             var existing = current.FirstOrDefault(x => x.Id == a.Id)
                 ?? (key.Length > 0 ? current.FirstOrDefault(x => LoginKey(x) == key) : null);
-            if (!replace && existing is not null)
+            if (existing is not null)
             {
                 // Cập nhật field DÙNG CHUNG (Hub là nguồn sự thật); GIỮ field riêng-máy.
                 if (ShopeeSharedSignature(existing) != ShopeeSharedSignature(a))
@@ -184,7 +184,7 @@ public static class BackupService
             var keepLogins = imported.Select(LoginKey).Where(k => k.Length > 0).ToHashSet();
             removed = current.RemoveAll(x => x.HubOwned && !keepIds.Contains(x.Id) && !(LoginKey(x).Length > 0 && keepLogins.Contains(LoginKey(x))));
         }
-        if (replace || added > 0 || updated > 0 || removed > 0) AccountStore.Shared.ReplaceAll(current);
+        if (added > 0 || updated > 0 || removed > 0) AccountStore.Shared.ReplaceAll(current);
         return (added, updated, skipped);
     }
 
@@ -207,12 +207,12 @@ public static class BackupService
     private static string EmailKey(BigSellerAccount a) => (a.Email ?? "").Trim().ToLowerInvariant();
     private static string LoginKey(ShopeeAccount a) => (a.ShopeeAccountLogin ?? "").Trim().ToLowerInvariant();
 
-    private static void RebaseBigSeller(BigSellerAccount a, string? rebaseDir)
+    /// <summary>Acc BigSeller MỚI về từ Hub: <see cref="BigSellerAccount.CookieFile"/> là đường dẫn của MÁY KHÁC
+    /// → trỏ lại file cookie CÙNG TÊN trong kho local; không có thì để rỗng (lượt sau <see cref="RelinkCookie"/>
+    /// nối lại khi cookie đã về).</summary>
+    private static void RebaseBigSeller(BigSellerAccount a)
     {
-        // WorkbookPath tuyệt đối theo máy cũ → đổi sang thư mục mới (giữ tên file) nếu người dùng chỉ định.
-        if (!string.IsNullOrWhiteSpace(rebaseDir) && !string.IsNullOrWhiteSpace(a.WorkbookPath))
-            a.WorkbookPath = Path.Combine(rebaseDir, Path.GetFileName(a.WorkbookPath));
-        // CookieFile → trỏ tới file cookie vừa giải nén vào máy này (theo tên file).
+        // CookieFile → trỏ tới file cookie đã đồng bộ về máy này (theo tên file).
         if (!string.IsNullOrWhiteSpace(a.CookieFile))
         {
             var local = Path.Combine(CookieDir, Path.GetFileName(a.CookieFile));

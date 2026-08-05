@@ -108,14 +108,14 @@ public sealed class HubConfigSync
             catch (Exception ex) when (ex is not OperationCanceledException) { }
         }
 
-        // 2) BigSeller (+ rebase CookieFile/WorkbookPath theo máy này).
+        // 2) BigSeller (+ trỏ lại CookieFile theo kho cookie của máy này).
         try
         {
             var bsBytes = await _client.DownloadAsync("config/bigseller.json", ct);
             if (bsBytes is not null)
             {
                 var list = JsonSerializer.Deserialize<List<BigSellerAccount>>(NoBom(bsBytes)) ?? [];
-                (bsA, bsU, bsS) = BackupService.MergeBigSeller(list, replace: false, rebaseDir: null, mirror: mirror);
+                (bsA, bsU, bsS) = BackupService.MergeBigSeller(list, mirror: mirror);
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException) { }
@@ -127,7 +127,7 @@ public sealed class HubConfigSync
             if (shBytes is not null)
             {
                 var list = JsonSerializer.Deserialize<List<ShopeeAccount>>(NoBom(shBytes)) ?? [];
-                (shA, shU, shS) = BackupService.MergeShopee(list, replace: false, mirror: mirror);
+                (shA, shU, shS) = BackupService.MergeShopee(list, mirror: mirror);
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException) { }

@@ -1,23 +1,58 @@
 using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
-using Shopee.Core.Infrastructure;
 
-namespace OpenMultiBraveLauncherV3;
+namespace Shopee.Core.Infrastructure;
 
-internal static class AppSession
+/// <summary>
+/// Tham số của MỘT phiên runtime (<see cref="AppSession"/>). Mỗi module engine mở trình duyệt (Scrape,
+/// Update Product) giữ phiên RIÊNG với dải cổng riêng — khác nhau đúng ở mấy tham số dưới đây.
+/// </summary>
+public sealed class AppSessionOptions
 {
+    /// <summary>Các cổng probe theo OFFSET block (<c>base + offset</c>): block chỉ được nhận khi TẤT CẢ còn trống.</summary>
+    public int[] ProbePortsAtOffset { get; init; } = [];
+
+    /// <summary>Các cổng probe theo CHỈ SỐ block (<c>base + offset / PortBlockSize</c>) — dải cấp 1 cổng/1 block.</summary>
+    public int[] ProbePortsAtBlockIndex { get; init; } = [];
+
+    /// <summary>Tạo sẵn thư mục persistent-data ngay trong <see cref="AppSession.Initialize"/>.
+    /// (Thực tế dư: <see cref="SuitePaths.ModuleDir"/> đã <c>CreateDirectory</c> — giữ cờ để không đổi hành vi
+    /// so với bản UpdateProduct cũ vốn có thêm dòng này.)</summary>
+    public bool CreatePersistentDataDir { get; init; }
+
+    /// <summary>Chuỗi lỗi khi quét hết 80 block mà không nhận được block nào.</summary>
+    public string NoFreeBlockMessage { get; init; } = "Khong tim duoc block port trong.";
+}
+
+/// <summary>
+/// PHIÊN RUNTIME của một module engine: cấp một BLOCK cổng riêng (giữ chỗ bằng file-lock độc quyền trong
+/// <c>runtime-sessions/_port-locks</c>) + thư mục session tạm, và dọn session cũ. Trước đây là HAI bản chép tay
+/// (MultiBrave · UpdateProduct) khác nhau đúng ở danh sách cổng probe, cờ tạo thư mục và chuỗi lỗi — nay gộp về
+/// một lớp, khác biệt truyền qua <see cref="AppSessionOptions"/>.
+/// <para>
+/// <b>Mỗi module một THỂ HIỆN riêng</b> (không dùng chung static): file-lock mở với <see cref="FileShare.None"/>
+/// nên phiên thứ hai trong CÙNG process bị <see cref="IOException"/> ở block đã bị phiên thứ nhất giữ → tự nhảy
+/// sang block kế. Đó chính là cơ chế giữ cho Scrape và Update Product không giẫm dải cổng của nhau.
+/// </para>
+/// </summary>
+public sealed class AppSession
+{
+    /// <summary>Số cổng mỗi block — offset của block thứ n là <c>n * PortBlockSize</c>.</summary>
     public const int PortBlockSize = 1000;
 
-    private static FileStream? _portLock;
+    private readonly AppSessionOptions _options;
+    private FileStream? _portLock;
+
+    public AppSession(AppSessionOptions options) => _options = options;
 
     public static string BaseDirectory { get; } = AppContext.BaseDirectory;
 
-    public static string SessionId { get; private set; } = "";
-    public static string RootDirectory { get; private set; } = "";
-    public static int PortOffset { get; private set; }
+    public string SessionId { get; private set; } = "";
+    public string RootDirectory { get; private set; } = "";
+    public int PortOffset { get; private set; }
 
-    public static void Initialize()
+    public void Initialize()
     {
         if (!string.IsNullOrWhiteSpace(RootDirectory))
             return;
@@ -25,6 +60,8 @@ internal static class AppSession
         SessionId = $"run-{Process.GetCurrentProcess().Id}-{DateTime.Now:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}"[..34];
         RootDirectory = Path.Combine(BaseDirectory, "runtime-sessions", SessionId);
         Directory.CreateDirectory(RootDirectory);
+        if (_options.CreatePersistentDataDir)
+            Directory.CreateDirectory(ResolvePersistentDataPath());
         PortOffset = AllocatePortOffset();
         CleanupStaleSessions();
     }
@@ -32,6 +69,7 @@ internal static class AppSession
     // Dữ liệu bền (profile/cookie login Shopee + BigSeller) lưu ở %AppData%\ShopeeSuite\persistent-data —
     // KHÔNG neo theo vị trí .exe nữa: trước đây tính BaseDirectory\..\..\.. nên bản publish (thêm cấp
     // win-x64\publish) trỏ vào trong bin/publish → bị xóa/ghi đè mỗi lần build publish → mất login.
+    // (static: đường dẫn KHÔNG phụ thuộc phiên — mọi module dùng chung một kho persistent-data.)
     public static string ResolvePersistentDataPath(params string[] parts)
     {
         var all = new string[parts.Length + 1];
@@ -40,7 +78,7 @@ internal static class AppSession
         return Path.Combine(all);
     }
 
-    public static void Cleanup()
+    public void Cleanup()
     {
         try { _portLock?.Dispose(); } catch { }
         _portLock = null;
@@ -63,7 +101,7 @@ internal static class AppSession
         }
     }
 
-    private static int AllocatePortOffset()
+    private int AllocatePortOffset()
     {
         var lockRoot = Path.Combine(BaseDirectory, "runtime-sessions", "_port-locks");
         Directory.CreateDirectory(lockRoot);
@@ -91,15 +129,19 @@ internal static class AppSession
             }
         }
 
-        throw new InvalidOperationException("Khong tim duoc block port trong cho phien v3 moi.");
+        throw new InvalidOperationException(_options.NoFreeBlockMessage);
     }
 
-    private static bool PortsLookFree(int offset) =>
-        IsPortFree(9330 + offset) &&
-        IsPortFree(9430 + offset) &&
-        IsPortFree(10000 + offset) &&
-        IsPortFree(10400 + offset) &&
-        IsPortFree(9700 + offset);
+    private bool PortsLookFree(int offset)
+    {
+        foreach (var basePort in _options.ProbePortsAtOffset)
+            if (!IsPortFree(basePort + offset))
+                return false;
+        foreach (var basePort in _options.ProbePortsAtBlockIndex)
+            if (!IsPortFree(basePort + (offset / PortBlockSize)))
+                return false;
+        return true;
+    }
 
     public static bool IsPortFree(int port)
     {
@@ -115,7 +157,7 @@ internal static class AppSession
         }
     }
 
-    private static void CleanupStaleSessions()
+    private void CleanupStaleSessions()
     {
         var root = Path.Combine(BaseDirectory, "runtime-sessions");
         if (!Directory.Exists(root))

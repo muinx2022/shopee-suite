@@ -143,12 +143,12 @@ internal static class BigSellerCrawlHelper
         return false;
     }
 
-    public static async Task<bool> SelectClaimedTabByTextAsync(IPage page, Action<string>? log = null)
-    {
-        try
-        {
-            var result = await page.EvaluateAsync<string>(
-                @"() => {
+    // ── HỢP ĐỒNG DOM: dải tab trang Crawl List ────────────────────
+    // Khối JS DÙNG CHUNG cho 2 hàm eval bên dưới (trước đây chép 2 lần): chuẩn hoá text không dấu, 14 selector
+    // dò dải tab (hẹp → rộng, khử trùng theo phần tử), rồi chọn tab theo TEXT "da nhan"; không thấy thì rơi về
+    // tab THỨ 3 (thứ tự cố định của BigSeller). Sau khối này JS có sẵn `items` và `el` (có thể undefined).
+    // ĐỪNG sửa selector ở đây nếu không đo thật trên DOM BigSeller.
+    private const string ClaimedTabJsPrelude = @"
                     const normalize = v => (v || '')
                         .normalize('NFD')
                         .replace(/[̀-ͯ]/g, '')
@@ -168,10 +168,16 @@ internal static class BigSellerCrawlHelper
                         .flatMap(s => Array.from(document.querySelectorAll(s)))
                         .filter(el => { if (seen.has(el)) return false; seen.add(el); return true; });
 
-                    if (items.length === 0) return 'no-items';
-
                     let el = items.find(item => normalize(item.textContent).includes('da nhan'));
-                    if (!el && items.length >= 3) el = items[2];
+                    if (!el && items.length >= 3) el = items[2];";
+
+    public static async Task<bool> SelectClaimedTabByTextAsync(IPage page, Action<string>? log = null)
+    {
+        try
+        {
+            var result = await page.EvaluateAsync<string>(
+                "() => {" + ClaimedTabJsPrelude + @"
+                    if (items.length === 0) return 'no-items';
                     if (!el) return 'not-found:' + items.length;
 
                     const isActive = el.classList.contains('active') ||
@@ -216,22 +222,7 @@ internal static class BigSellerCrawlHelper
         try
         {
             return await page.EvaluateAsync<bool>(
-                @"() => {
-                    const normalize = v => (v || '')
-                        .normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[đĐdd]/g, 'd')
-                        .replace(/\s+/g, ' ').trim().toLowerCase();
-                    const selectors = [
-                        '#activeTab li', '#activeTab a', '#activeTab > div', '#activeTab > span',
-                        '.tabs_module li', '.tabs_module a', '.tabs_module > div', '.tabs_module > span',
-                        '.ant-tabs-tab', '[class*=""tab-nav""] li', '[class*=""tab-nav""] a',
-                        '[class*=""tab-list""] li', '[class*=""tab-list""] a', '[class*=""tab-item""]',
-                    ];
-                    const seen = new Set();
-                    const items = selectors
-                        .flatMap(s => Array.from(document.querySelectorAll(s)))
-                        .filter(el => { if (seen.has(el)) return false; seen.add(el); return true; });
-                    let el = items.find(i => normalize(i.textContent).includes('da nhan'));
-                    if (!el && items.length >= 3) el = items[2];
+                "() => {" + ClaimedTabJsPrelude + @"
                     if (!el) return false;
                     return el.classList.contains('active') ||
                            el.classList.contains('ant-tabs-tab-active') ||
