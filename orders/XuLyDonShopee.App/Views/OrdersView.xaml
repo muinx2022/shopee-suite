@@ -183,7 +183,9 @@
             </StackPanel>
         </Grid>
 
-        <!-- Bảng đơn (đọc-chỉ). Double-click 1 dòng → hộp thoại thông tin đơn + đổi trạng thái (code-behind). -->
+        <!-- Bảng đơn (đọc-chỉ). Double-click 1 dòng → hộp thoại thông tin đơn + đổi trạng thái (code-behind).
+             FrozenColumnCount=2: GHIM "Shop" + "Mã đơn" — 15 cột ≈ 1600px nên cuộn ngang là mất luôn hai cột
+             nhận diện đơn. (Hai cột đầu đều là DataGridTextColumn thuần chữ → ghim không đụng cột template.) -->
         <DataGrid x:Name="OrdersGrid"
                   Style="{StaticResource proxy}"
                   ClipToBounds="True"
@@ -191,7 +193,41 @@
                   IsReadOnly="True"
                   AutoGenerateColumns="False"
                   CanUserResizeColumns="True"
-                  CanUserSortColumns="False">
+                  CanUserSortColumns="False"
+                  FrozenColumnCount="2">
+            <!-- ══════════ Chuột phải (kể cả trên ĐẦU CỘT): ẩn/hiện 6 cột phụ ══════════ -->
+            <!-- Menu gắn ở LƯỚI chứ không ở từng đầu cột: bấm chuột phải lên đầu cột vẫn ra menu này (WPF leo
+                 lên tổ tiên gần nhất có ContextMenu), mà PlacementTarget lại luôn là chính lưới — DataContext
+                 của nó chắc chắn là VM màn Đơn hàng. Bind qua PlacementTarget (KHÔNG bind trần) vì ContextMenu
+                 nằm ngoài cây trực quan của lưới.
+                 StaysOpenOnClick: tick nhiều cột trong một lần mở menu.
+                 Tick/bỏ tick GHI NGAY vào settings của máy (OrdersViewModel.SetColumnShown) — mở lại app giữ
+                 nguyên; code-behind đồng bộ Visibility của cột (DataGridColumn không nằm trong cây trực quan
+                 nên KHÔNG bind Visibility thẳng vào VM được). -->
+            <DataGrid.ContextMenu>
+                <ContextMenu>
+                    <MenuItem Header="Cột hiện trong bảng" IsEnabled="False" />
+                    <Separator />
+                    <MenuItem Header="Phân loại" IsCheckable="True" StaysOpenOnClick="True"
+                              IsChecked="{Binding PlacementTarget.DataContext.ShowColPhanLoai,
+                                          RelativeSource={RelativeSource AncestorType=ContextMenu}, Mode=TwoWay}" />
+                    <MenuItem Header="Đơn trả hàng" IsCheckable="True" StaysOpenOnClick="True"
+                              IsChecked="{Binding PlacementTarget.DataContext.ShowColDonTraHang,
+                                          RelativeSource={RelativeSource AncestorType=ContextMenu}, Mode=TwoWay}" />
+                    <MenuItem Header="Ước tính" IsCheckable="True" StaysOpenOnClick="True"
+                              IsChecked="{Binding PlacementTarget.DataContext.ShowColUocTinh,
+                                          RelativeSource={RelativeSource AncestorType=ContextMenu}, Mode=TwoWay}" />
+                    <MenuItem Header="Thanh toán" IsCheckable="True" StaysOpenOnClick="True"
+                              IsChecked="{Binding PlacementTarget.DataContext.ShowColThanhToan,
+                                          RelativeSource={RelativeSource AncestorType=ContextMenu}, Mode=TwoWay}" />
+                    <MenuItem Header="ĐVVC" IsCheckable="True" StaysOpenOnClick="True"
+                              IsChecked="{Binding PlacementTarget.DataContext.ShowColDvvc,
+                                          RelativeSource={RelativeSource AncestorType=ContextMenu}, Mode=TwoWay}" />
+                    <MenuItem Header="Sync lúc" IsCheckable="True" StaysOpenOnClick="True"
+                              IsChecked="{Binding PlacementTarget.DataContext.ShowColSyncLuc,
+                                          RelativeSource={RelativeSource AncestorType=ContextMenu}, Mode=TwoWay}" />
+                </ContextMenu>
+            </DataGrid.ContextMenu>
             <DataGrid.Columns>
                 <DataGridTextColumn Header="Shop" Binding="{Binding ShopLabel}" Width="1.7*" MinWidth="120" />
                 <DataGridTextColumn Header="Mã đơn" Binding="{Binding OrderSn}" Width="130" />
@@ -216,13 +252,15 @@
                 <DataGridTextColumn Header="Người mua" Binding="{Binding Buyer}" Width="1.2*" />
                 <DataGridTextColumn Header="Sản phẩm" Binding="{Binding Product}" Width="2*" />
                 <DataGridTextColumn Header="SKU" Binding="{Binding Sku}" Width="80" />
+                <!-- 6 cột PHỤ (x:Name = chỗ code-behind bật/tắt theo menu chuột phải): Phân loại · Đơn trả
+                     hàng · Ước tính · Thanh toán · ĐVVC · Sync lúc. -->
                 <!-- Phân loại (vd "Nâu Be,39. SL: 1") suy từ items_json — rộng đủ đọc "Đen 9p-form chuẩn,37. SL: 2". -->
-                <DataGridTextColumn Header="Phân loại" Binding="{Binding PhanLoai}" Width="170" />
+                <DataGridTextColumn x:Name="ColPhanLoai" Header="Phân loại" Binding="{Binding PhanLoai}" Width="170" />
                 <!-- Mã yêu cầu trả hàng (bước check cuối flow shop) — rộng bằng mã đơn. -->
-                <DataGridTextColumn Header="Đơn trả hàng" Binding="{Binding DonTraHang}" Width="130" />
+                <DataGridTextColumn x:Name="ColDonTraHang" Header="Đơn trả hàng" Binding="{Binding DonTraHang}" Width="130" />
                 <DataGridTextColumn Header="Tổng tiền" Binding="{Binding Total}" Width="105" />
-                <DataGridTextColumn Header="Ước tính" Binding="{Binding Estimate}" Width="105" />
-                <DataGridTextColumn Header="Thanh toán" Binding="{Binding Payment}" Width="1.2*" />
+                <DataGridTextColumn x:Name="ColUocTinh" Header="Ước tính" Binding="{Binding Estimate}" Width="105" />
+                <DataGridTextColumn x:Name="ColThanhToan" Header="Thanh toán" Binding="{Binding Payment}" Width="1.2*" />
                 <!-- Trạng thái: badge PILL nền nhạt + chữ đậm, màu theo từ khóa (OrderStatusPill).
                      Ẩn pill khi trạng thái rỗng (đơn chưa có status) → ô trống sạch, không badge xám.
                      Rộng 160 (bản Avalonia: 140): trạng thái là chuỗi TỰ DO cào từ Shopee, dài nhất trong các
@@ -248,9 +286,9 @@
                     </DataGridTemplateColumn.CellTemplate>
                 </DataGridTemplateColumn>
                 <DataGridTextColumn Header="Mô tả/Lý do hủy" Binding="{Binding Note}" Width="2*" />
-                <DataGridTextColumn Header="ĐVVC" Binding="{Binding Carrier}" Width="110" />
+                <DataGridTextColumn x:Name="ColDvvc" Header="ĐVVC" Binding="{Binding Carrier}" Width="110" />
                 <DataGridTextColumn Header="Mã vận đơn" Binding="{Binding Tracking}" Width="150" />
-                <DataGridTextColumn Header="Sync lúc" Binding="{Binding SyncedAtDisplay}" Width="140" />
+                <DataGridTextColumn x:Name="ColSyncLuc" Header="Sync lúc" Binding="{Binding SyncedAtDisplay}" Width="140" />
             </DataGrid.Columns>
         </DataGrid>
     </DockPanel>

@@ -61,18 +61,22 @@
         <!-- ══════════ Sub-tabs — SEGMENTED CONTROL kiểu Windows 11 ══════════ -->
         <!-- Ô tab (`subtabItem`) + khay bọc (`subtabTray`) nay nằm ở Themes/Theme.xaml (DÙNG CHUNG với màn Cài
              đặt — sửa diện mạo tab con thì sửa ở đó). Ở đây chỉ còn phần RIÊNG của Workspace: template có tên
-             tài khoản BigSeller đang chọn ở mép phải khay (truyền qua Tag) + lề riêng của màn. -->
+             tài khoản BigSeller đang chọn ở mép phải khay (truyền qua Tag), nút "Dừng việc shop này" ở cột
+             cuối, + lề riêng của màn. -->
         <Style x:Key="subtabsWorkspace" TargetType="{x:Type TabControl}" BasedOn="{StaticResource subtabs}">
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="{x:Type TabControl}">
                         <DockPanel>
-                            <!-- Lề PHẢI 210: nút "Dừng việc shop này" là lớp ĐÈ ở góc trên-phải (nằm ngoài
-                                 TabControl) → chừa chỗ cho nó khỏi che tên tk. -->
-                            <Grid DockPanel.Dock="Top" Margin="18,12,210,10">
+                            <!-- 3 cột: khay tab (Auto) · tên tk (*, cắt "…" khi chật) · nút Dừng (Auto).
+                                 Trước đợt G nút Dừng là lớp ĐÈ ở góc trên-phải nằm NGOÀI TabControl nên hàng
+                                 này phải chừa lề phải CỨNG 210px; nay nút nằm cùng hàng → lề phải về 18 và
+                                 hàng tự co giãn theo bề rộng thật của nút. -->
+                            <Grid DockPanel.Dock="Top" Margin="18,12,18,10">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="Auto" />
                                     <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
                                 <Border Grid.Column="0" Style="{StaticResource subtabTray}">
                                     <ItemsPresenter />
@@ -83,6 +87,20 @@
                                            Margin="12,0,0,0" FontSize="12"
                                            Foreground="{StaticResource TextMutedBrush}"
                                            TextTrimming="CharacterEllipsis" />
+                                <!-- Nút Dừng: binding đi theo DataContext của TabControl = WorkspaceViewModel.
+                                     FallbackValue=Collapsed → chưa chọn acc / không chạy gì thì ẨN HẲN (cột
+                                     Auto co về 0, tên tk lấy lại chỗ). -->
+                                <Button Grid.Column="2" Style="{StaticResource danger}" Margin="12,0,0,0"
+                                        VerticalAlignment="Center"
+                                        Visibility="{Binding SelectedAccount.HasRunningWork,
+                                                     Converter={StaticResource BoolToVis}, FallbackValue=Collapsed}"
+                                        Command="{Binding StopSelectedWorkCommand}"
+                                        ToolTip="Dừng scrape / import / update / tên SP đang chạy của tài khoản đang chọn (shop đang chạy). Tài khoản khác chạy tiếp.">
+                                    <StackPanel Orientation="Horizontal">
+                                        <c:PathIcon Data="{StaticResource IconStop}" />
+                                        <TextBlock Style="{StaticResource btnLabel}" Text="Dừng việc shop này" />
+                                    </StackPanel>
+                                </Button>
                             </Grid>
                             <!-- Padding vùng nội dung giữ như trước (spec 18/14/18/18).
                                  PHẢI ghi rõ Stretch: ContentPresenter trong ControlTemplate tự alias
@@ -102,7 +120,7 @@
              (Avalonia dùng selector `TabItem:selected Border.tabBadge`; WPF leo tổ tiên TabItem bằng DataTrigger.) -->
         <Style x:Key="tabBadge" TargetType="{x:Type Border}">
             <Setter Property="Background" Value="{StaticResource BorderLightestBrush}" />
-            <Setter Property="CornerRadius" Value="9" />
+            <Setter Property="CornerRadius" Value="4" />
             <Setter Property="Padding" Value="7,1" />
             <Setter Property="VerticalAlignment" Value="Center" />
             <Setter Property="TextElement.FontSize" Value="10.5" />
@@ -133,13 +151,20 @@
             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
         </Style>
 
+        <!-- ══════════ Ô của 4 CỘT OP (SCRAPE · IMPORT · UPDATE · TÊN SP) — MỘT template dùng chung ══════════ -->
         <!-- Nút op trên dòng shop — 40×30, 3 trạng thái: icon xám (chờ) · ICON + VIỀN CAM (đang chạy) ·
              huy hiệu ✓ (xong). Theo LUẬT NÚT MỚI: nền LUÔN trắng, không nút nào tô nền — "đang chạy" nhận ra
              bằng icon cam + viền cam.
-             "Đang chạy" là cờ RIÊNG mỗi cột (ScrapeRunning/ImportRunning/…) nên chỗ dùng đẩy cờ vào `Tag`,
-             style đọc ngược qua RelativeSource Self → một style dùng cho cả 4 cột.
-             Template KHÔNG có trigger (khác nút chung của theme): mọi trạng thái đặt ở Style.Triggers để
-             trigger "đang chạy" không bị trigger template ghi đè phần viền/nền. -->
+             ĐỢT G: cả THÂN ô (khung nút + icon + huy hiệu ✓) nay nằm TRONG template này; 4 cột trước đó chép
+             gần nguyên xi ~121 dòng. Cái RIÊNG của từng cột truyền vào bằng property ở chỗ dùng:
+                 Tag                    = cờ "đang chạy" (ScrapeRunning/ImportRunning/…) — style đọc ngược qua Self
+                 Content                = icon (c:PathIcon) của op
+                 ToolTip / IsEnabled    = ToggleTip / ToggleEnabled của op
+                 Command/CommandParameter = lệnh bật-tắt của op (trên WorkspaceViewModel) + dòng shop
+                 b:OpBadgeAssist.Done/.Tip = cờ "đã xong (Hub)" + tooltip của huy hiệu ✓
+             KHÁC BIỆT CÓ CHỦ ĐÍCH giữ nguyên tại chỗ dùng: chỉ IMPORT và UPDATE có ContextMenu "xoá tiến độ".
+             Trigger màu (viền/nền/chữ) vẫn nằm ở Style.Triggers như trước — trigger TRONG template chỉ đụng
+             Visibility/Opacity nên không ghi đè phần viền/nền của trạng thái "đang chạy". -->
         <Style x:Key="wsAction" TargetType="{x:Type Button}" BasedOn="{StaticResource {x:Type Button}}">
             <!-- (Style.Resources phải đứng TRƯỚC mọi Setter: Setters là content của Style, property element
                  không được nằm chen giữa content — lỗi MC3088.) -->
@@ -163,11 +188,37 @@
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="{x:Type Button}">
-                        <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
-                                BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="5"
-                                SnapsToDevicePixels="True">
-                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
-                        </Border>
+                        <!-- Grid bọc để huy hiệu ✓ ĐÈ ra ngoài mép nút (Margin âm) đúng như bản cũ — trước đợt G
+                             nó là phần tử anh em của nút trong Grid ở CellTemplate. -->
+                        <Grid>
+                            <Border x:Name="PART_chrome" Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="4"
+                                    SnapsToDevicePixels="True">
+                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            </Border>
+                            <!-- Huy hiệu ✓ xanh 14px = op đã xong (Hub ghi nhận). NGOẠI LỆ bo góc (chuẩn 4/6):
+                                 14×14 bo 7 = hình TRÒN — đổi sang 4 là thành ô vuông bo. -->
+                            <Border x:Name="PART_done" Width="14" Height="14" CornerRadius="7" Panel.ZIndex="1"
+                                    Background="{StaticResource SuccessDotBrush}"
+                                    HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-5,-5,0"
+                                    Visibility="Collapsed"
+                                    ToolTip="{TemplateBinding b:OpBadgeAssist.Tip}"
+                                    ToolTipService.ShowOnDisabled="True">
+                                <TextBlock Text="✓" Foreground="White" FontSize="9"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            </Border>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="b:OpBadgeAssist.Done" Value="True">
+                                <Setter TargetName="PART_done" Property="Visibility" Value="Visible" />
+                            </Trigger>
+                            <!-- Mờ khi không bấm được: chỉ mờ KHUNG NÚT, KHÔNG mờ huy hiệu ✓ — "đã xong" là sự
+                                 thật của op, không phụ thuộc máy này có được bấm hay không. -->
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="PART_chrome" Property="Opacity" Value="0.45" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
@@ -176,9 +227,6 @@
                 <Trigger Property="IsMouseOver" Value="True">
                     <Setter Property="BorderBrush" Value="{StaticResource BrandTintBorderStrongBrush}" />
                     <Setter Property="Background" Value="{StaticResource CardBackgroundBrush}" />
-                </Trigger>
-                <Trigger Property="IsEnabled" Value="False">
-                    <Setter Property="Opacity" Value="0.45" />
                 </Trigger>
                 <!-- ĐANG CHẠY = ICON CAM + VIỀN CAM, nền vẫn TRẮNG (bấm lại để dừng — tooltip nói rõ). -->
                 <DataTrigger Binding="{Binding Tag, RelativeSource={RelativeSource Self}}" Value="True">
@@ -202,26 +250,9 @@
                 </MultiDataTrigger>
             </Style.Triggers>
         </Style>
-        <!-- Badge ✓ xanh 14px đè góc trên-phải nút = op đã xong (Hub ghi nhận). -->
-        <Style x:Key="doneBadge" TargetType="{x:Type Border}">
-            <Setter Property="Width" Value="14" />
-            <Setter Property="Height" Value="14" />
-            <Setter Property="CornerRadius" Value="7" />
-            <Setter Property="Background" Value="{StaticResource SuccessDotBrush}" />
-            <Setter Property="HorizontalAlignment" Value="Right" />
-            <Setter Property="VerticalAlignment" Value="Top" />
-            <Setter Property="Margin" Value="0,-5,-5,0" />
-            <Setter Property="Panel.ZIndex" Value="1" />
-        </Style>
-
-        <!-- ══════════ CẤU HÌNH CHẠY — nhãn 11.5 màu phụ NẰM TRÊN ô cao 30 ══════════ -->
-        <Style x:Key="fieldLabel" TargetType="{x:Type TextBlock}">
-            <Setter Property="FontSize" Value="11.5" />
-            <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}" />
-            <Setter Property="TextWrapping" Value="NoWrap" />
-            <Setter Property="TextTrimming" Value="CharacterEllipsis" />
-            <Setter Property="Margin" Value="0,0,0,5" />
-        </Style>
+        <!-- (Style `doneBadge` đã BỎ ở đợt G: huy hiệu ✓ nay nằm trong template `wsAction` ở trên.
+             Style `fieldLabel` — nhãn 11.5 màu phụ nằm TRÊN ô cao 30 — dời lên Themes/Theme.xaml để dùng
+             chung với RowEditWindow; định nghĩa giữ NGUYÊN số.) -->
 
         <!-- Tô nền dòng process (tab Theo dõi Scrape) theo tài khoản BigSeller. Ô đã Transparent ở style nền
              tảng nên màu dòng lộ ra; AccountBrush null (dòng manual) → giữ nền thẻ trắng. -->
@@ -254,8 +285,10 @@
                                Style="{StaticResource caption}" Margin="0,3,0,0" TextWrapping="Wrap" />
                 </StackPanel>
                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                    <TextBlock Text="{Binding Status}" FontSize="11.5" Margin="0,0,12,0" VerticalAlignment="Center"
-                               Foreground="{StaticResource TextMutedBrush}" />
+                    <!-- Trạng thái dùng CHUNG chip `headerStatusChip` với 5 màn kia (trước là chữ trần) — vẫn
+                         ở cột Auto nên không đè tiêu đề, và tự ẩn khi Status rỗng. -->
+                    <ContentControl Style="{StaticResource headerStatusChip}" Margin="0,0,12,0"
+                                    Content="{Binding Status}" />
                     <Button Style="{StaticResource primary}" Command="{Binding ReloadCommand}"
                             ToolTip="Đọc lại danh sách tài khoản · shop · tiến độ từ kho.">
                         <StackPanel Orientation="Horizontal">
@@ -325,7 +358,7 @@
                                         </Grid.ColumnDefinitions>
                                         <StackPanel Grid.Column="0" Orientation="Horizontal">
                                             <!-- Nhãn op (pill) -->
-                                            <Border Background="{StaticResource CardBackgroundBrush}" CornerRadius="3"
+                                            <Border Background="{StaticResource CardBackgroundBrush}" CornerRadius="4"
                                                     Padding="6,1" VerticalAlignment="Center">
                                                 <TextBlock Text="{Binding OpLabel}" FontSize="11" />
                                             </Border>
@@ -415,7 +448,8 @@
                 </DockPanel>
             </Border>
 
-            <!-- ─── RIGHT: sub-tabs + nút "Dừng việc shop này" đè góc trên-phải, thẳng hàng dải tab ─── -->
+            <!-- ─── RIGHT: sub-tabs (nút "Dừng việc shop này" nằm TRONG hàng khay tab — xem template
+                 `subtabsWorkspace` ở đầu file; trước đợt G nó là lớp đè ngoài TabControl) ─── -->
             <Grid Grid.Column="1">
                 <!-- Tag = tên tài khoản BigSeller đang chọn → template segmented control hiện ở mép phải khay tab. -->
                 <TabControl Style="{StaticResource subtabsWorkspace}" Tag="{Binding SelectedAccount.DisplayName}">
@@ -501,7 +535,7 @@
                                         <!-- Lưới SHOP pipeline — lấp đầy chiều cao còn lại. KHÔNG có cột Tiến độ:
                                              trạng thái từng op nằm ngay trên nút (viền cam = đang chạy, ✓ = xong). -->
                                         <Border Grid.Row="0" BorderBrush="{StaticResource BorderLightBrush}" BorderThickness="1"
-                                                CornerRadius="7" ClipToBounds="True">
+                                                CornerRadius="6" ClipToBounds="True">
                                             <DataGrid x:Name="ShopGrid" ItemsSource="{Binding Shops}" IsReadOnly="True"
                                                       BorderThickness="0" SelectionChanged="ShopGrid_SelectionChanged" RowHeight="44"
                                                       AutoGenerateColumns="False" CanUserSortColumns="False"
@@ -522,29 +556,29 @@
                                                             </DataTemplate>
                                                         </DataGridTemplateColumn.CellTemplate>
                                                     </DataGridTemplateColumn>
-                                                    <!-- Mỗi op 1 cột, 1 nút toggle 40×30: bấm chạy ↔ bấm lại dừng.
-                                                         Tag = cờ "đang chạy" của op đó (style wsAction đọc ngược qua Self). -->
+                                                    <!-- 4 CỘT OP — mỗi op 1 cột, 1 nút toggle 40×30: bấm chạy ↔ bấm lại dừng.
+                                                         THÂN ô (khung + icon + huy hiệu ✓) nằm TRONG template của style
+                                                         `wsAction` (khai ở đầu file) → ở đây mỗi cột chỉ còn phần RIÊNG:
+                                                         Tag = cờ đang chạy · Content = icon · ToolTip/IsEnabled/Command của op ·
+                                                         b:OpBadgeAssist.Done/.Tip = huy hiệu "đã xong (Hub)".
+                                                         KHÁC BIỆT CÓ CHỦ ĐÍCH: chỉ IMPORT + UPDATE có ContextMenu xoá tiến độ. -->
                                                     <DataGridTemplateColumn Width="68">
                                                         <DataGridTemplateColumn.Header>
                                                             <TextBlock Text="SCRAPE" HorizontalAlignment="Center" />
                                                         </DataGridTemplateColumn.Header>
                                                         <DataGridTemplateColumn.CellTemplate>
                                                             <DataTemplate>
-                                                                <Grid HorizontalAlignment="Center">
-                                                                    <Button Style="{StaticResource wsAction}" Tag="{Binding ScrapeRunning}"
-                                                                            ToolTip="{Binding ScrapeToggleTip}"
-                                                                            IsEnabled="{Binding ScrapeToggleEnabled}"
-                                                                            Command="{Binding DataContext.ScrapeToggleCommand,
-                                                                                      RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
-                                                                            CommandParameter="{Binding}">
-                                                                        <c:PathIcon Data="{StaticResource IconPlay}" />
-                                                                    </Button>
-                                                                    <Border Style="{StaticResource doneBadge}" ToolTip="Scrape đã xong (Hub)"
-                                                                            Visibility="{Binding ScrapeDone, Converter={StaticResource BoolToVis}}">
-                                                                        <TextBlock Text="✓" Foreground="White" FontSize="9"
-                                                                                   HorizontalAlignment="Center" VerticalAlignment="Center" />
-                                                                    </Border>
-                                                                </Grid>
+                                                                <Button Style="{StaticResource wsAction}" Tag="{Binding ScrapeRunning}"
+                                                                        HorizontalAlignment="Center"
+                                                                        ToolTip="{Binding ScrapeToggleTip}"
+                                                                        IsEnabled="{Binding ScrapeToggleEnabled}"
+                                                                        b:OpBadgeAssist.Done="{Binding ScrapeDone}"
+                                                                        b:OpBadgeAssist.Tip="Scrape đã xong (Hub)"
+                                                                        Command="{Binding DataContext.ScrapeToggleCommand,
+                                                                                  RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                                                        CommandParameter="{Binding}">
+                                                                    <c:PathIcon Data="{StaticResource IconPlay}" />
+                                                                </Button>
                                                             </DataTemplate>
                                                         </DataGridTemplateColumn.CellTemplate>
                                                     </DataGridTemplateColumn>
@@ -554,34 +588,30 @@
                                                         </DataGridTemplateColumn.Header>
                                                         <DataGridTemplateColumn.CellTemplate>
                                                             <DataTemplate>
-                                                                <Grid HorizontalAlignment="Center">
-                                                                    <Button Style="{StaticResource wsAction}" Tag="{Binding ImportRunning}"
-                                                                            ToolTip="{Binding ImportToggleTip}"
-                                                                            IsEnabled="{Binding ImportToggleEnabled}"
-                                                                            Command="{Binding DataContext.ImportToggleCommand,
-                                                                                      RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
-                                                                            CommandParameter="{Binding}">
-                                                                        <c:PathIcon Data="{StaticResource IconImport}" />
-                                                                        <!-- Chuột phải → xoá tiến độ resume import (2 bước xác nhận, khỏi dialog).
-                                                                             ContextMenu kế thừa DataContext = shop → bind thẳng command trên WorkspaceShopViewModel. -->
-                                                                        <Button.ContextMenu>
-                                                                            <ContextMenu>
-                                                                                <MenuItem Header="Xoá tiến độ import (chạy lại từ đầu)…">
-                                                                                    <MenuItem.Icon>
-                                                                                        <c:PathIcon Data="{StaticResource IconRefresh}" Width="12" Height="12" />
-                                                                                    </MenuItem.Icon>
-                                                                                    <MenuItem Header="Xác nhận: xoá tiến độ import"
-                                                                                              Command="{Binding ResetImportProgressCommand}" />
-                                                                                </MenuItem>
-                                                                            </ContextMenu>
-                                                                        </Button.ContextMenu>
-                                                                    </Button>
-                                                                    <Border Style="{StaticResource doneBadge}" ToolTip="Import đã xong (Hub)"
-                                                                            Visibility="{Binding ImportDone, Converter={StaticResource BoolToVis}}">
-                                                                        <TextBlock Text="✓" Foreground="White" FontSize="9"
-                                                                                   HorizontalAlignment="Center" VerticalAlignment="Center" />
-                                                                    </Border>
-                                                                </Grid>
+                                                                <Button Style="{StaticResource wsAction}" Tag="{Binding ImportRunning}"
+                                                                        HorizontalAlignment="Center"
+                                                                        ToolTip="{Binding ImportToggleTip}"
+                                                                        IsEnabled="{Binding ImportToggleEnabled}"
+                                                                        b:OpBadgeAssist.Done="{Binding ImportDone}"
+                                                                        b:OpBadgeAssist.Tip="Import đã xong (Hub)"
+                                                                        Command="{Binding DataContext.ImportToggleCommand,
+                                                                                  RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                                                        CommandParameter="{Binding}">
+                                                                    <c:PathIcon Data="{StaticResource IconImport}" />
+                                                                    <!-- Chuột phải → xoá tiến độ resume import (2 bước xác nhận, khỏi dialog).
+                                                                         ContextMenu kế thừa DataContext = shop → bind thẳng command trên WorkspaceShopViewModel. -->
+                                                                    <Button.ContextMenu>
+                                                                        <ContextMenu>
+                                                                            <MenuItem Header="Xoá tiến độ import (chạy lại từ đầu)…">
+                                                                                <MenuItem.Icon>
+                                                                                    <c:PathIcon Data="{StaticResource IconRefresh}" Width="12" Height="12" />
+                                                                                </MenuItem.Icon>
+                                                                                <MenuItem Header="Xác nhận: xoá tiến độ import"
+                                                                                          Command="{Binding ResetImportProgressCommand}" />
+                                                                            </MenuItem>
+                                                                        </ContextMenu>
+                                                                    </Button.ContextMenu>
+                                                                </Button>
                                                             </DataTemplate>
                                                         </DataGridTemplateColumn.CellTemplate>
                                                     </DataGridTemplateColumn>
@@ -591,33 +621,29 @@
                                                         </DataGridTemplateColumn.Header>
                                                         <DataGridTemplateColumn.CellTemplate>
                                                             <DataTemplate>
-                                                                <Grid HorizontalAlignment="Center">
-                                                                    <Button Style="{StaticResource wsAction}" Tag="{Binding UpdateRunning}"
-                                                                            ToolTip="{Binding UpdateToggleTip}"
-                                                                            IsEnabled="{Binding UpdateToggleEnabled}"
-                                                                            Command="{Binding DataContext.UpdateToggleCommand,
-                                                                                      RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
-                                                                            CommandParameter="{Binding}">
-                                                                        <c:PathIcon Data="{StaticResource IconEdit}" />
-                                                                        <!-- Chuột phải → xoá tiến độ resume update (2 bước xác nhận, khỏi dialog). -->
-                                                                        <Button.ContextMenu>
-                                                                            <ContextMenu>
-                                                                                <MenuItem Header="Xoá tiến độ update (chạy lại từ đầu)…">
-                                                                                    <MenuItem.Icon>
-                                                                                        <c:PathIcon Data="{StaticResource IconRefresh}" Width="12" Height="12" />
-                                                                                    </MenuItem.Icon>
-                                                                                    <MenuItem Header="Xác nhận: xoá tiến độ update"
-                                                                                              Command="{Binding ResetUpdateProgressCommand}" />
-                                                                                </MenuItem>
-                                                                            </ContextMenu>
-                                                                        </Button.ContextMenu>
-                                                                    </Button>
-                                                                    <Border Style="{StaticResource doneBadge}" ToolTip="Update đã xong (Hub)"
-                                                                            Visibility="{Binding UpdateDone, Converter={StaticResource BoolToVis}}">
-                                                                        <TextBlock Text="✓" Foreground="White" FontSize="9"
-                                                                                   HorizontalAlignment="Center" VerticalAlignment="Center" />
-                                                                    </Border>
-                                                                </Grid>
+                                                                <Button Style="{StaticResource wsAction}" Tag="{Binding UpdateRunning}"
+                                                                        HorizontalAlignment="Center"
+                                                                        ToolTip="{Binding UpdateToggleTip}"
+                                                                        IsEnabled="{Binding UpdateToggleEnabled}"
+                                                                        b:OpBadgeAssist.Done="{Binding UpdateDone}"
+                                                                        b:OpBadgeAssist.Tip="Update đã xong (Hub)"
+                                                                        Command="{Binding DataContext.UpdateToggleCommand,
+                                                                                  RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                                                        CommandParameter="{Binding}">
+                                                                    <c:PathIcon Data="{StaticResource IconEdit}" />
+                                                                    <!-- Chuột phải → xoá tiến độ resume update (2 bước xác nhận, khỏi dialog). -->
+                                                                    <Button.ContextMenu>
+                                                                        <ContextMenu>
+                                                                            <MenuItem Header="Xoá tiến độ update (chạy lại từ đầu)…">
+                                                                                <MenuItem.Icon>
+                                                                                    <c:PathIcon Data="{StaticResource IconRefresh}" Width="12" Height="12" />
+                                                                                </MenuItem.Icon>
+                                                                                <MenuItem Header="Xác nhận: xoá tiến độ update"
+                                                                                          Command="{Binding ResetUpdateProgressCommand}" />
+                                                                            </MenuItem>
+                                                                        </ContextMenu>
+                                                                    </Button.ContextMenu>
+                                                                </Button>
                                                             </DataTemplate>
                                                         </DataGridTemplateColumn.CellTemplate>
                                                     </DataGridTemplateColumn>
@@ -627,21 +653,17 @@
                                                         </DataGridTemplateColumn.Header>
                                                         <DataGridTemplateColumn.CellTemplate>
                                                             <DataTemplate>
-                                                                <Grid HorizontalAlignment="Center">
-                                                                    <Button Style="{StaticResource wsAction}" Tag="{Binding RewriteRunning}"
-                                                                            ToolTip="{Binding RewriteToggleTip}"
-                                                                            IsEnabled="{Binding RewriteToggleEnabled}"
-                                                                            Command="{Binding DataContext.RewriteToggleCommand,
-                                                                                      RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
-                                                                            CommandParameter="{Binding}">
-                                                                        <c:PathIcon Data="{StaticResource IconSparkle}" />
-                                                                    </Button>
-                                                                    <Border Style="{StaticResource doneBadge}" ToolTip="Tên SP đã xong (Hub)"
-                                                                            Visibility="{Binding RewriteDone, Converter={StaticResource BoolToVis}}">
-                                                                        <TextBlock Text="✓" Foreground="White" FontSize="9"
-                                                                                   HorizontalAlignment="Center" VerticalAlignment="Center" />
-                                                                    </Border>
-                                                                </Grid>
+                                                                <Button Style="{StaticResource wsAction}" Tag="{Binding RewriteRunning}"
+                                                                        HorizontalAlignment="Center"
+                                                                        ToolTip="{Binding RewriteToggleTip}"
+                                                                        IsEnabled="{Binding RewriteToggleEnabled}"
+                                                                        b:OpBadgeAssist.Done="{Binding RewriteDone}"
+                                                                        b:OpBadgeAssist.Tip="Tên SP đã xong (Hub)"
+                                                                        Command="{Binding DataContext.RewriteToggleCommand,
+                                                                                  RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                                                        CommandParameter="{Binding}">
+                                                                    <c:PathIcon Data="{StaticResource IconSparkle}" />
+                                                                </Button>
                                                             </DataTemplate>
                                                         </DataGridTemplateColumn.CellTemplate>
                                                     </DataGridTemplateColumn>
@@ -943,20 +965,6 @@
                         </DockPanel>
                     </TabItem>
                 </TabControl>
-
-                <!-- Nút Dừng: DataContext của Grid này = WorkspaceViewModel. FallbackValue=Collapsed → acc null /
-                     không chạy gì thì ẨN HẲN. Tab bên trái, nút bên phải nên không đè lên tab. -->
-                <Button Style="{StaticResource danger}"
-                        HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,12,18,0"
-                        Visibility="{Binding SelectedAccount.HasRunningWork,
-                                     Converter={StaticResource BoolToVis}, FallbackValue=Collapsed}"
-                        Command="{Binding StopSelectedWorkCommand}"
-                        ToolTip="Dừng scrape / import / update / tên SP đang chạy của tài khoản đang chọn (shop đang chạy). Tài khoản khác chạy tiếp.">
-                    <StackPanel Orientation="Horizontal">
-                        <c:PathIcon Data="{StaticResource IconStop}" />
-                        <TextBlock Style="{StaticResource btnLabel}" Text="Dừng việc shop này" />
-                    </StackPanel>
-                </Button>
             </Grid>
         </Grid>
     </Grid>

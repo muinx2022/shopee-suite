@@ -16,16 +16,8 @@
          Cấu hình AI + prompt KHÔNG còn ở client: đó là cấu hình HUB-OWNED, đặt trên trang Cài đặt của Hub
          web. Backend (SettingsRepository/OrderNotifyService) giữ nguyên. -->
 
-    <UserControl.Resources>
-        <!-- Nhãn phần nhỏ TRONG một tab — chỉ còn dùng ở tab gộp "Hiệu năng & Đồng bộ" (2 cột = 2 phần cũ);
-             các tab khác đã có nhãn chính là tiêu đề tab nên không lặp lại. -->
-        <Style x:Key="sectionLabel" TargetType="{x:Type TextBlock}">
-            <Setter Property="FontSize" Value="12" />
-            <Setter Property="FontWeight" Value="Medium" />
-            <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}" />
-            <Setter Property="Margin" Value="0,0,0,10" />
-        </Style>
-    </UserControl.Resources>
+    <!-- (Style CỤC BỘ `sectionLabel` đã BỎ ở đợt G: nó chồng đúng vai với `section` của Themes/Theme.xaml —
+         nhãn nhóm nhỏ trên form. Hai chỗ dùng chuyển sang `section` + override Margin tại chỗ.) -->
 
     <Grid Margin="28,22,28,24">
         <Grid.RowDefinitions>
@@ -45,14 +37,11 @@
                 <TextBlock Style="{StaticResource caption}" Margin="0,3,0,0"
                            Text="Chế độ ứng dụng · cập nhật · hiệu năng · đồng bộ nhiều máy · Đơn hàng. Cấu hình AI và prompt đặt trên Hub." />
             </StackPanel>
-            <!-- Chip trạng thái của các thao tác cài đặt suite (lưu hiệu năng / tên máy / đẩy cấu hình). -->
-            <Border Grid.Column="1" VerticalAlignment="Center"
-                    Background="{StaticResource SubtleBrush}" CornerRadius="4" Padding="14,6"
-                    MaxWidth="420"
-                    Visibility="{Binding Suite.Status, Converter={StaticResource StringToVis}}">
-                <TextBlock Text="{Binding Suite.Status}" FontSize="12.5" TextWrapping="Wrap"
-                           Foreground="{StaticResource TextSecondaryBrush}" />
-            </Border>
+            <!-- Chip trạng thái của các thao tác cài đặt suite (lưu hiệu năng / tên máy / đẩy cấu hình).
+                 Mẫu này là NGUỒN của style dùng chung `headerStatusChip` (Themes/Theme.xaml) — 4 màn kia đã
+                 theo, màn này dùng luôn style đó để chỉ còn MỘT bản. -->
+            <ContentControl Grid.Column="1" Style="{StaticResource headerStatusChip}"
+                            Content="{Binding Suite.Status}" />
         </Grid>
 
         <!-- Dải tab = segmented control DÙNG CHUNG với màn Workspace (style `subtabs` trong Themes/Theme.xaml:
@@ -311,8 +300,12 @@
                             <RowDefinition Height="*" />
                         </Grid.RowDefinitions>
 
-                        <TextBlock Grid.Row="0" Grid.Column="0" Style="{StaticResource sectionLabel}" Text="HIỆU NĂNG" />
-                        <TextBlock Grid.Row="0" Grid.Column="2" Style="{StaticResource sectionLabel}" Text="ĐỒNG BỘ NHIỀU MÁY" />
+                        <!-- Nhãn 2 phần cũ trong tab gộp: style `section` dùng chung của theme, chỉ override
+                             khoảng cách xuống nội dung. -->
+                        <TextBlock Grid.Row="0" Grid.Column="0" Style="{StaticResource section}" Margin="0,0,0,10"
+                                   Text="HIỆU NĂNG" />
+                        <TextBlock Grid.Row="0" Grid.Column="2" Style="{StaticResource section}" Margin="0,0,0,10"
+                                   Text="ĐỒNG BỘ NHIỀU MÁY" />
 
                         <!-- ── Cột trái: ngân sách tài nguyên → trần cửa sổ Brave + thông tin máy ── -->
                         <StackPanel Grid.Row="1" Grid.Column="0">
@@ -346,7 +339,7 @@
                                                    Style="{StaticResource caption}"><Run Text="/ máy có " /><Run Text="{Binding Suite.RamGbMax, Mode=OneWay}" /><Run Text=" GB   (mỗi cửa sổ ~2GB)" /></TextBlock>
                                     </Grid>
 
-                                    <Border Background="{StaticResource SubtleBrush}" CornerRadius="4" Padding="12,8" Margin="0,14,0,0">
+                                    <Border Background="{StaticResource SubtleBrush}" CornerRadius="6" Padding="12,8" Margin="0,14,0,0">
                                         <TextBlock Text="{Binding Suite.ComputedMaxInfo}" FontSize="14"
                                                    TextWrapping="Wrap" />
                                     </Border>

@@ -61,6 +61,10 @@ public class SettingsRepository
     /// tìm mail Shopee + bấm link "TẠI ĐÂY" + chờ đăng nhập; TẮT ⇒ chỉ đăng nhập hộp thư rồi DỪNG cho user tay.</summary>
     private const string AutoConfirmEmailKey = "auto_confirm_email";
 
+    /// <summary>Key: các cột PHỤ đang ẨN ở bảng màn Đơn hàng (danh sách id ngăn bằng dấu phẩy).
+    /// Thiếu/trống = hiện đủ mọi cột. Lựa chọn hiển thị này là của RIÊNG MÁY NÀY (không đẩy lên Hub).</summary>
+    private const string OrdersHiddenColumnsKey = "orders_hidden_columns";
+
     private readonly Database _db;
 
     public SettingsRepository(Database db) => _db = db;
@@ -232,6 +236,36 @@ public class SettingsRepository
 
     /// <summary>Lưu cờ "Tự động xác nhận" ("true"/"false").</summary>
     public void SetAutoConfirmEmail(bool value) => Set(AutoConfirmEmailKey, value ? "true" : "false");
+
+    /// <summary>Id các cột PHỤ đang ẨN ở bảng đơn (đã trim, bỏ mục rỗng, không trùng). Thiếu/trống → tập rỗng
+    /// = hiện đủ mọi cột. So sánh id theo ĐÚNG chữ (Ordinal) — id do view đặt, không phải chuỗi người dùng gõ.</summary>
+    public HashSet<string> GetHiddenOrderColumns()
+    {
+        var set = new HashSet<string>(StringComparer.Ordinal);
+        var raw = Get(OrdersHiddenColumnsKey);
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return set;
+        }
+
+        foreach (var part in raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            set.Add(part);
+        }
+
+        return set;
+    }
+
+    /// <summary>Lưu id các cột phụ đang ẩn; tập rỗng → xóa key (⇒ lần đọc sau trả tập rỗng = hiện đủ).</summary>
+    public void SetHiddenOrderColumns(IEnumerable<string> ids)
+    {
+        var clean = ids
+            .Select(x => x?.Trim() ?? string.Empty)
+            .Where(x => x.Length > 0)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        Set(OrdersHiddenColumnsKey, clean.Count == 0 ? null : string.Join(",", clean));
+    }
 
     /// <summary>Lấy giá trị theo key, trả null nếu chưa có.</summary>
     public string? Get(string key)

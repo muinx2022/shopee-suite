@@ -29,6 +29,11 @@
     <SolidColorBrush x:Key="SuccessBrush" Color="#1F8A4C" />
     <SolidColorBrush x:Key="InfoBrush" Color="#2B5FC4" />
     <SolidColorBrush x:Key="DangerBrush" Color="#C22B1E" />
+    <!-- Nền + viền NHẠT của nhãn cảnh báo ĐỎ (badge "TK chưa xác nhận"), cùng họ với WarnSoftBg/WarnSoftBorder
+         ở trên. Thêm ở đợt G để bỏ 2 hex ghi cứng trong AccountsView; GIỮ NGUYÊN giá trị cũ của chỗ đó
+         (#FDECEA/#F5C6C0) nên diện mạo không đổi — cố ý lệch 1 nấc so với DangerBg #FDECEB của suite. -->
+    <SolidColorBrush x:Key="DangerSoftBg" Color="#FDECEA" />
+    <SolidColorBrush x:Key="DangerSoftBorder" Color="#F5C6C0" />
 
     <!-- ===== Bề mặt / nền ===== -->
     <SolidColorBrush x:Key="CardBg" Color="#FFFFFF" />

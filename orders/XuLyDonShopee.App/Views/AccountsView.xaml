@@ -125,6 +125,17 @@
                 </Style.Triggers>
             </Style>
 
+            <!-- Nút "Đóng" của banner lỗi địa chỉ: dáng chung của module (nền trắng + viền) nhưng thấp hơn một
+                 nấc (28) cho vừa dòng banner. Icon để màu XÁM mặc định — CỐ Ý không đỏ, để không lẫn với dấu
+                 ✕ đỏ "shop lỗi địa chỉ" ở cột tiến độ. -->
+            <Style x:Key="alertClose" TargetType="{x:Type Button}" BasedOn="{StaticResource secondary}">
+                <Setter Property="Height" Value="28" />
+                <Setter Property="MinHeight" Value="28" />
+                <Setter Property="Padding" Value="10,0" />
+                <Setter Property="FontSize" Value="12" />
+                <Setter Property="VerticalAlignment" Value="Center" />
+            </Style>
+
             <!-- Nút lọc "Những TK chưa xác nhận (N)": dáng chung (nền trắng + viền), chỉ giữ canh TRÁI + kéo
                  hết bề ngang cột; giọng đỏ nằm ở ICON (cảnh báo — KHÔNG phải .destructive vì nút không xóa gì). -->
             <Style x:Key="unverifiedFilter" TargetType="{x:Type Button}" BasedOn="{StaticResource danger}">
@@ -245,10 +256,13 @@
     <!-- Bố cục: 2 cột — danh sách (trái, cao hết màn) | chi tiết + nhật ký của tài khoản đang chọn (phải). -->
     <Grid>
         <Grid.ColumnDefinitions>
-            <!-- 360 (bản Avalonia: 340) — hàng nút dưới cần 303px chỗ (Thêm tài khoản 131 + 8 + Kéo TK từ Hub
-                 126 + 8 + nút xoá 30) nhưng 340 chỉ chừa 295 sau viền/lề ⇒ nhãn "Thêm tài khoản" bị cắt cụt
-                 thành "Thêm tài khoả". 360 chừa 315 (dư ~12). Sửa số này thì đo lại hàng nút. -->
-            <ColumnDefinition Width="360" />
+            <!-- Cột trái TỰ ĐO theo nội dung (đợt G) thay cho con số 360 đo tay — bản cũ phải đo lại hàng nút
+                 mỗi lần đổi nhãn, quên đo là nhãn "Thêm tài khoản" bị cắt cụt thành "Thêm tài khoả".
+                 Auto = ôm vừa phần rộng NHẤT trong cột. Hai thành phần bề rộng vốn KHÔNG có trần (ô tìm kiếm
+                 và danh sách tài khoản — đo với bề ngang vô hạn nên đòi đúng bề rộng chuỗi dài nhất) đã bị kẹp
+                 MaxWidth 320 ngay tại chỗ, nên phần quyết định còn lại chính là HÀNG NÚT ở đáy: đổi/ thêm nhãn
+                 nút là cột tự nới ra vừa đủ. MinWidth 300 chặn đầu dưới lúc danh sách rỗng. -->
+            <ColumnDefinition Width="Auto" MinWidth="300" />
             <ColumnDefinition Width="*" />
         </Grid.ColumnDefinitions>
 
@@ -260,8 +274,10 @@
                            Style="{StaticResource h1}"
                            Margin="0,0,0,16" />
 
-                <!-- Ô tìm kiếm -->
-                <Border DockPanel.Dock="Top" Style="{StaticResource field}" Margin="0,0,0,14">
+                <!-- Ô tìm kiếm. MaxWidth: cột trái đo bằng Auto → ô nhập không có trần sẽ đòi đúng bề rộng
+                     chuỗi đang gõ và kéo phình cả cột. -->
+                <Border DockPanel.Dock="Top" Style="{StaticResource field}" Margin="0,0,0,14" MaxWidth="320"
+                        HorizontalAlignment="Stretch">
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
@@ -278,15 +294,17 @@
                 </Border>
 
                 <!-- Hàng nút dưới — cặp Thêm/Xóa cùng từ vựng với suite: Thêm = icon XANH (.success),
-                     Xóa = nút vuông icon ĐỎ (.destructive .iconOnly). -->
+                     Xóa = nút vuông icon ĐỎ (.destructive .iconOnly).
+                     3 nút để bề rộng TỰ NHIÊN (Auto) + một cột `*` co giãn ở giữa: nhãn không bao giờ bị cắt
+                     cụt nữa, và cột trái (Auto) tự nới đúng bằng hàng này khi nhãn dài ra. -->
                 <Grid DockPanel.Dock="Bottom" Margin="0,14,0,0">
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
                     <Button Grid.Column="0" Style="{StaticResource success}"
-                            HorizontalAlignment="Stretch"
                             Command="{Binding AddCommand}">
                         <StackPanel Orientation="Horizontal">
                             <c:PathIcon Data="{DynamicResource IconAdd}" />
@@ -301,7 +319,7 @@
                             <TextBlock Text="Kéo TK từ Hub" Style="{StaticResource btnLabel}" />
                         </StackPanel>
                     </Button>
-                    <Button Grid.Column="2" Style="{StaticResource destructiveIconOnly}" Margin="8,0,0,0"
+                    <Button Grid.Column="3" Style="{StaticResource destructiveIconOnly}" Margin="8,0,0,0"
                             Command="{Binding DeleteCommand}"
                             IsEnabled="{Binding CanDelete}"
                             ToolTip="Xóa các tài khoản đang tick — không tick dòng nào thì xóa tài khoản đang chọn. Hỏi xác nhận trước khi xóa.">
@@ -323,8 +341,10 @@
                     </StackPanel>
                 </Button>
 
-                <!-- Danh sách tài khoản: mỗi dòng "[ ] Tên shop" + (khi đang chạy) chấm xanh & số chờ lấy. -->
-                <ListBox Style="{StaticResource acctFlat}"
+                <!-- Danh sách tài khoản: mỗi dòng "[ ] Tên shop" + (khi đang chạy) chấm xanh & số chờ lấy.
+                     MaxWidth: cột trái đo bằng Auto → danh sách không có trần sẽ đòi bề rộng của DÒNG DÀI NHẤT
+                     (email + nhãn đỏ + nút) và kéo phình cả cột. -->
+                <ListBox Style="{StaticResource acctFlat}" MaxWidth="320" HorizontalAlignment="Stretch"
                          ItemsSource="{Binding Accounts}"
                          SelectedItem="{Binding SelectedRow}">
                     <ListBox.ItemTemplate>
@@ -357,10 +377,12 @@
                                      (khi đang chạy) chấm xanh & "Chờ lấy: N". -->
                                 <StackPanel Grid.Column="3" Orientation="Horizontal"
                                             VerticalAlignment="Center" Margin="8,0,0,0">
-                                    <!-- Nhãn đỏ: đỏ nền hồng nhạt, chữ đậm — không phá layout dòng. -->
+                                    <!-- Nhãn đỏ: đỏ nền hồng nhạt, chữ đậm — không phá layout dòng.
+                                         Màu lấy TOKEN DangerSoft* (Styles/Colors.xaml), không ghi cứng hex. -->
                                     <Border VerticalAlignment="Center"
                                             Visibility="{Binding IsVerifyFailed, Converter={StaticResource BoolToVis}}"
-                                            Background="#FDECEA" BorderBrush="#F5C6C0" BorderThickness="1"
+                                            Background="{StaticResource DangerSoftBg}"
+                                            BorderBrush="{StaticResource DangerSoftBorder}" BorderThickness="1"
                                             CornerRadius="4" Padding="6,1">
                                         <TextBlock Text="TK chưa xác nhận" FontSize="10"
                                                    Foreground="{StaticResource DangerBrush}" VerticalAlignment="Center" />
@@ -691,12 +713,21 @@
                                                 <TextBlock Grid.Column="0" Text="{Binding Message}" FontSize="12.5"
                                                            Foreground="{StaticResource AmberTextBrush}"
                                                            VerticalAlignment="Center" TextWrapping="Wrap" />
-                                                <Button Grid.Column="1" Style="{StaticResource ghostIcon}"
-                                                        Margin="8,0,0,0" ToolTip="Đóng cảnh báo"
+                                                <!-- Nút ĐÓNG banner: trước là ✕ ĐỎ 11px — vừa khó bấm, vừa TRÙNG
+                                                     NGÔN NGỮ với ✕ đỏ ở cột tiến độ ngay dưới (dấu hiệu "shop
+                                                     lỗi địa chỉ", không phải nút). Nay là nút CHỮ "Đóng" kèm ✕
+                                                     nhỏ XÁM, cao 28 (vùng bấm ≥ 28px), màu theo token.
+                                                     HÀNH VI KHÔNG ĐỔI: vẫn đúng command + tham số cũ (luật
+                                                     rev/tombstone của banner nằm trong VM, không đụng tới). -->
+                                                <Button Grid.Column="1" Style="{StaticResource alertClose}"
+                                                        Margin="8,0,0,0"
+                                                        ToolTip="Đóng cảnh báo địa chỉ của shop này"
                                                         Command="{Binding DataContext.DismissAddressAlertCommand, RelativeSource={RelativeSource AncestorType=TabControl}}"
                                                         CommandParameter="{Binding}">
-                                                    <c:PathIcon Data="{DynamicResource IconClose}" Width="11" Height="11"
-                                                                Foreground="{StaticResource DangerBrush}" />
+                                                    <StackPanel Orientation="Horizontal">
+                                                        <c:PathIcon Data="{DynamicResource IconClose}" Width="9" Height="9" />
+                                                        <TextBlock Text="Đóng" Style="{StaticResource btnLabel}" Margin="6,0,0,0" />
+                                                    </StackPanel>
                                                 </Button>
                                             </Grid>
                                         </Border>

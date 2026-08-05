@@ -46,6 +46,8 @@ public partial class OrdersViewModel : ViewModelBase
     public OrdersViewModel(AppServices services)
     {
         _services = services;
+        // Cột phụ đang ẩn — đọc MỘT lần lúc mở màn (view đọc lại qua IsColumnShown khi dựng lưới).
+        _hiddenColumns = _services.Settings.GetHiddenOrderColumns();
         // Sync xong (phiên ghi đơn vào DB rồi phát OrdersChanged, có thể từ thread nền) → TỰ nạp lại màn.
         // VM sống suốt vòng đời app (MainViewModel giữ) cùng AppServices → không cần gỡ đăng ký.
         _services.OrdersChanged += OnOrdersChanged;
@@ -94,6 +96,53 @@ public partial class OrdersViewModel : ViewModelBase
 
     /// <summary>Nhãn tổng số đơn: dòng đang hiển thị (1 trang) / tổng khớp bộ lọc (mọi trang).</summary>
     public string TotalText => $"Đang hiển thị: {Rows.Count}/{TotalCount} đơn";
+
+    // ═══════════ Ẩn/hiện CỘT PHỤ của bảng đơn (chuột phải lên đầu cột) ═══════════
+    // Bảng có 15 cột ≈ 1600px nên màn hẹp phải cuộn ngang liên tục. 6 cột ít dùng dưới đây tắt/bật được;
+    // lựa chọn lưu vào settings SQLite của MÁY NÀY (key orders_hidden_columns) nên mở lại app vẫn giữ.
+    // Các cột KHÔNG cho tắt (Shop · Mã đơn · Phiếu · Người mua · Sản phẩm · SKU · Tổng tiền · Trạng thái ·
+    // Mô tả/Lý do hủy · Mã vận đơn) là bộ tối thiểu để nhận ra và xử lý một đơn.
+    // Id là chuỗi CỐ ĐỊNH (đã ghi vào DB người dùng) — đổi tên cột hiển thị thì GIỮ NGUYÊN id ở đây.
+    public const string ColPhanLoai = "phan_loai";
+    public const string ColDonTraHang = "don_tra_hang";
+    public const string ColUocTinh = "uoc_tinh";
+    public const string ColThanhToan = "thanh_toan";
+    public const string ColDvvc = "dvvc";
+    public const string ColSyncLuc = "sync_luc";
+
+    private readonly HashSet<string> _hiddenColumns;
+
+    /// <summary>Cột phụ <paramref name="id"/> có đang hiện không (view đọc để đặt Visibility của cột).</summary>
+    public bool IsColumnShown(string id) => !_hiddenColumns.Contains(id);
+
+    public bool ShowColPhanLoai { get => IsColumnShown(ColPhanLoai); set => SetColumnShown(ColPhanLoai, value); }
+    public bool ShowColDonTraHang { get => IsColumnShown(ColDonTraHang); set => SetColumnShown(ColDonTraHang, value); }
+    public bool ShowColUocTinh { get => IsColumnShown(ColUocTinh); set => SetColumnShown(ColUocTinh, value); }
+    public bool ShowColThanhToan { get => IsColumnShown(ColThanhToan); set => SetColumnShown(ColThanhToan, value); }
+    public bool ShowColDvvc { get => IsColumnShown(ColDvvc); set => SetColumnShown(ColDvvc, value); }
+    public bool ShowColSyncLuc { get => IsColumnShown(ColSyncLuc); set => SetColumnShown(ColSyncLuc, value); }
+
+    /// <summary>Bật/tắt một cột phụ + GHI NGAY vào settings (không có nút "Lưu" — tick là xong).
+    /// <paramref name="prop"/> tự lấy tên property gọi tới để bắn PropertyChanged đúng chỗ.</summary>
+    private void SetColumnShown(string id, bool shown, [System.Runtime.CompilerServices.CallerMemberName] string? prop = null)
+    {
+        if (IsColumnShown(id) == shown)
+        {
+            return;
+        }
+
+        if (shown)
+        {
+            _hiddenColumns.Remove(id);
+        }
+        else
+        {
+            _hiddenColumns.Add(id);
+        }
+
+        _services.Settings.SetHiddenOrderColumns(_hiddenColumns);
+        OnPropertyChanged(prop);
+    }
 
     // ===================== Phân trang (phía DB — LIMIT/OFFSET + COUNT) =====================
 

@@ -38,6 +38,58 @@
                 <Setter Property="Background" Value="{StaticResource SubtleBg}" />
                 <Setter Property="Foreground" Value="{StaticResource TextSecondary}" />
             </Style>
+            <!-- ══════════ Chip chọn nhanh khoảng ngày — SEGMENTED CONTROL kiểu Windows 11 ══════════ -->
+            <!-- Cả cụm nằm trong MỘT khay bo tròn nền xám ấm (`dateChipTray`), chip ĐANG CHỌN nổi lên nền
+                 TRẮNG + viền mảnh, chip còn lại chìm chữ xám — cùng ngữ pháp với dải sub-tab của màn Tài khoản
+                 và của suite. Cờ "đang chọn" là property RIÊNG mỗi chip (IsPresetHomNay/…) nên chỗ dùng đẩy cờ
+                 vào `Tag`, style đọc ngược qua RelativeSource Self → MỘT style cho cả 3 chip (đúng lối `wsAction`
+                 bên WorkspaceView). Template KHÔNG có trigger: mọi trạng thái đặt ở Style.Triggers để trigger
+                 "đang chọn" (đứng sau) không bị trigger hover ghi đè. -->
+            <Style x:Key="dateChipTray" TargetType="{x:Type Border}">
+                <Setter Property="Background" Value="{DynamicResource NeutralBadgeBgBrush}" />
+                <Setter Property="CornerRadius" Value="6" />
+                <Setter Property="Padding" Value="3" />
+                <Setter Property="HorizontalAlignment" Value="Right" />
+            </Style>
+            <Style x:Key="dateChip" TargetType="{x:Type Button}">
+                <Setter Property="Height" Value="26" />
+                <Setter Property="MinHeight" Value="26" />
+                <Setter Property="Padding" Value="12,0" />
+                <Setter Property="Margin" Value="2,0,0,0" />
+                <Setter Property="FontFamily" Value="{StaticResource UiFont}" />
+                <Setter Property="FontSize" Value="12" />
+                <Setter Property="Foreground" Value="{StaticResource TextMuted}" />
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="BorderBrush" Value="Transparent" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="Cursor" Value="Hand" />
+                <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="{x:Type Button}">
+                            <Border Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    CornerRadius="4" SnapsToDevicePixels="True">
+                                <ContentPresenter Margin="{TemplateBinding Padding}"
+                                                  HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            </Border>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+                <Style.Triggers>
+                    <Trigger Property="IsMouseOver" Value="True">
+                        <Setter Property="Background" Value="#66FFFFFF" />
+                        <Setter Property="Foreground" Value="{StaticResource TextInk}" />
+                    </Trigger>
+                    <DataTrigger Binding="{Binding Tag, RelativeSource={RelativeSource Self}}" Value="True">
+                        <Setter Property="Background" Value="{StaticResource CardBg}" />
+                        <Setter Property="BorderBrush" Value="{StaticResource Border010}" />
+                        <Setter Property="Foreground" Value="{StaticResource TextInk}" />
+                    </DataTrigger>
+                </Style.Triggers>
+            </Style>
+
             <Style x:Key="statsGrid" TargetType="{x:Type DataGrid}" BasedOn="{StaticResource {x:Type DataGrid}}">
                 <Setter Property="BorderBrush" Value="{StaticResource BorderSoft}" />
                 <Setter Property="BorderThickness" Value="1" />
@@ -74,6 +126,24 @@
                            Foreground="{StaticResource TextMuted}" TextWrapping="Wrap" Margin="0,3,0,0" />
             </StackPanel>
             <StackPanel Grid.Column="1" HorizontalAlignment="Right">
+                <!-- Chip chọn nhanh khoảng ngày: bấm là set CẢ HAI ô ngày bên dưới rồi vẽ lại đúng một lượt
+                     (ApplyDatePresetCommand). Tự chọn ngày trên lịch → cả 3 chip nhả ra. -->
+                <Border Style="{StaticResource dateChipTray}" Margin="0,0,0,8">
+                    <StackPanel Orientation="Horizontal">
+                        <Button Style="{StaticResource dateChip}" Margin="0" Content="Hôm nay"
+                                Tag="{Binding IsPresetHomNay}"
+                                Command="{Binding ApplyDatePresetCommand}" CommandParameter="hom-nay"
+                                ToolTip="Chỉ đơn của hôm nay" />
+                        <Button Style="{StaticResource dateChip}" Content="7 ngày"
+                                Tag="{Binding IsPresetBayNgay}"
+                                Command="{Binding ApplyDatePresetCommand}" CommandParameter="7-ngay"
+                                ToolTip="7 ngày gần nhất (tính cả hôm nay)" />
+                        <Button Style="{StaticResource dateChip}" Content="Tháng này"
+                                Tag="{Binding IsPresetThangNay}"
+                                Command="{Binding ApplyDatePresetCommand}" CommandParameter="thang-nay"
+                                ToolTip="Từ ngày 1 của tháng đến hôm nay" />
+                    </StackPanel>
+                </Border>
                 <!-- CalendarDatePicker (Avalonia) → DatePicker (WPF). FromDate/ToDate đã là DateTime? nên
                      bind thẳng, không cần converter. -->
                 <Grid>

@@ -9,14 +9,19 @@
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <!-- Header -->
+        <!-- Header — 2 CỘT + chip dùng chung `headerStatusChip` (xem ghi chú ở style trong Themes/Theme.xaml).
+             Màn này có thêm nút "Check Acc" ở cột phải: nút + chip nằm CÙNG cột Auto, không đè lên tiêu đề. -->
         <Grid Grid.Row="0" Margin="0,0,0,16">
-            <StackPanel>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Grid.Column="0" Margin="0,0,16,0">
                 <TextBlock Text="Tài khoản &amp; Proxy" Style="{StaticResource h1}" />
                 <TextBlock Text="Kho tài khoản Shopee dùng chung — Scrape và Search đều chạy trên danh sách này."
                            Style="{StaticResource caption}" Margin="0,3,0,0" />
             </StackPanel>
-            <StackPanel HorizontalAlignment="Right" VerticalAlignment="Center" Orientation="Horizontal">
+            <StackPanel Grid.Column="1" VerticalAlignment="Center" Orientation="Horizontal">
                 <Button Style="{StaticResource primary}" MinWidth="120" Command="{Binding OpenCheckAccountCommand}"
                         AutomationProperties.Name="Check Acc"
                         ToolTip="Mở form kiểm tra hàng loạt tài khoản Shopee (Edge + proxy).">
@@ -25,9 +30,8 @@
                         <TextBlock Style="{StaticResource btnLabel}" Text="Check Acc" />
                     </StackPanel>
                 </Button>
-                <Border Background="{StaticResource SubtleBrush}" CornerRadius="4" Padding="14,6" Margin="12,0,0,0">
-                    <TextBlock Text="{Binding Status}" FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" />
-                </Border>
+                <ContentControl Style="{StaticResource headerStatusChip}" Margin="12,0,0,0"
+                                Content="{Binding Status}" />
             </StackPanel>
         </Grid>
 

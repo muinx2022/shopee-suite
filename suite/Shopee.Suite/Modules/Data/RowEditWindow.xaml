@@ -9,14 +9,12 @@
         UseLayoutRounding="True" TextOptions.TextFormattingMode="Display"
         TextOptions.TextRenderingMode="ClearType">
     <Window.Resources>
-        <!-- Mỗi ô = nhãn caption trên + TextBox dưới, cách đều nhau khi wrap. (Avalonia: selector
-             `StackPanel.field` + `StackPanel.field > TextBlock`; WPF không có selector con → nhãn dùng
-             style riêng `fieldLabel` kế thừa `caption`.) -->
+        <!-- Mỗi ô = nhãn trên + TextBox dưới, cách đều nhau khi wrap. (Avalonia: selector `StackPanel.field`
+             + `StackPanel.field > TextBlock`; WPF không có selector con → nhãn dùng style riêng.)
+             Nhãn ô dùng `fieldLabel` DÙNG CHUNG ở Themes/Theme.xaml — bản cục bộ ở đây đã bỏ (đợt G: 2 bản
+             `fieldLabel` lệch nhau giữa cửa sổ này và WorkspaceView đã hợp nhất về theme). -->
         <Style x:Key="field" TargetType="{x:Type StackPanel}">
             <Setter Property="Margin" Value="0,0,14,10" />
-        </Style>
-        <Style x:Key="fieldLabel" TargetType="{x:Type TextBlock}" BasedOn="{StaticResource caption}">
-            <Setter Property="Margin" Value="0,0,0,3" />
         </Style>
     </Window.Resources>
 

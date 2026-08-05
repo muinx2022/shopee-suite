@@ -16,16 +16,19 @@
         </Grid.RowDefinitions>
 
         <!-- ══ Header ══ -->
+        <!-- 2 CỘT (không chồng lớp): chip trạng thái dùng chung `headerStatusChip` của Theme — xem ghi chú ở
+             style đó. Cửa sổ hẹp / status dài thì mô tả tự xuống dòng chứ không chui xuống dưới chip. -->
         <Grid Grid.Row="0" Margin="0,0,0,12">
-            <StackPanel>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Grid.Column="0" Margin="0,0,16,0">
                 <TextBlock Text="Shopee Search" Style="{StaticResource h1}" />
                 <TextBlock Text="Nạp file link CATEGORY (.txt mỗi dòng 1 link) → tick chọn → mỗi link 1 tab/account: mọi sub-category · lọc Nơi Bán · Bán chạy."
                            Style="{StaticResource caption}" Margin="0,3,0,0" />
             </StackPanel>
-            <Border HorizontalAlignment="Right" VerticalAlignment="Center"
-                    Background="{StaticResource SubtleBrush}" CornerRadius="4" Padding="14,6">
-                <TextBlock Text="{Binding Status}" FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" />
-            </Border>
+            <ContentControl Grid.Column="1" Style="{StaticResource headerStatusChip}" Content="{Binding Status}" />
         </Grid>
 
         <TabControl Grid.Row="1">

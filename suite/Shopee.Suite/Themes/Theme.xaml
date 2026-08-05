@@ -146,17 +146,64 @@
         <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}" />
         <Setter Property="TextWrapping" Value="Wrap" />
     </Style>
-    <!-- Nhãn nhóm nhỏ trên form (Avalonia: TextBlock.section). -->
+    <!-- Nhãn nhóm nhỏ trên form (Avalonia: TextBlock.section). DÙNG CHUNG: màn Cài đặt từng có bản riêng
+         `sectionLabel` chồng đúng vai này — đã bỏ (đợt G), chỗ dùng override Margin tại chỗ. -->
     <Style x:Key="section" TargetType="{x:Type TextBlock}">
         <Setter Property="FontSize" Value="11" />
         <Setter Property="FontWeight" Value="Medium" />
         <Setter Property="Foreground" Value="{StaticResource TextMutedBrush}" />
     </Style>
+    <!-- Nhãn của MỘT Ô NHẬP, nằm NGAY TRÊN ô (khác `section` là nhãn của cả NHÓM). DÙNG CHUNG cho mọi form:
+         Workspace (cấu hình chạy) + RowEditWindow từng có 2 bản riêng lệch nhau — hợp nhất ở đợt G, chỗ nào
+         cần thưa/khít hơn thì override Margin tại chỗ. Nhãn ô luôn NGẮN → NoWrap + cắt "…" khi ô hẹp. -->
+    <Style x:Key="fieldLabel" TargetType="{x:Type TextBlock}">
+        <Setter Property="FontSize" Value="11.5" />
+        <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}" />
+        <Setter Property="TextWrapping" Value="NoWrap" />
+        <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+        <Setter Property="Margin" Value="0,0,0,5" />
+    </Style>
+
+    <!-- ══════════ CHIP TRẠNG THÁI Ở HEADER MÀN (dùng chung 6 màn) ══════════ -->
+    <!-- Trước đợt G mỗi màn tự dựng một Border CHỒNG LỚP lên cùng ô Grid với khối tiêu đề → status dài hoặc
+         cửa sổ hẹp là chữ đè chữ. Mẫu ĐÚNG (rút từ màn Cài đặt) gồm 2 phần:
+             (1) Header là Grid 2 CỘT: `*` cho khối tiêu đề (StackPanel, Margin phải 16) + `Auto` cho chip;
+             (2) chip = ContentControl dưới đây — MaxWidth 420, chữ tự xuống dòng, TỰ ẨN khi Status rỗng/null.
+         Chỗ dùng chỉ còn: <ContentControl Grid.Column="1" Style="{StaticResource headerStatusChip}"
+                                           Content="{Binding Status}" />
+         (KHÔNG cần converter ẩn/hiện: 2 trigger Content bên dưới lo — cũng vì thế mà chip PHẢI nhận Content là
+         CHUỖI, không bọc TextBlock ở chỗ dùng.) -->
+    <Style x:Key="headerStatusChip" TargetType="{x:Type ContentControl}">
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="MaxWidth" Value="420" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type ContentControl}">
+                    <Border Background="{StaticResource SubtleBrush}" CornerRadius="4" Padding="14,6"
+                            SnapsToDevicePixels="True">
+                        <TextBlock Text="{TemplateBinding Content}" FontSize="12.5" TextWrapping="Wrap"
+                                   Foreground="{StaticResource TextSecondaryBrush}" />
+                    </Border>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+        <Style.Triggers>
+            <Trigger Property="Content" Value="{x:Null}">
+                <Setter Property="Visibility" Value="Collapsed" />
+            </Trigger>
+            <Trigger Property="Content" Value="">
+                <Setter Property="Visibility" Value="Collapsed" />
+            </Trigger>
+        </Style.Triggers>
+    </Style>
 
     <!-- ══════════ BUTTON — MỘT DÁNG DUY NHẤT, MÀU NGỮ NGHĨA CHỈ Ở ICON ══════════ -->
     <!-- Luật nút (người dùng chốt 2026-07-26): "không dùng bg cho button, chỉ dùng icon màu, button dùng
-         mặc định" → mọi nút chung một dáng (nền trắng · viền #E2DDD8 luôn thấy rõ · bo 5 · cao 30 ·
-         chữ #423C38); style con chỉ ĐẶT MÀU ICON. Ngoại lệ duy nhất: nút ribbon. -->
+         mặc định" → mọi nút chung một dáng (nền trắng · viền #E2DDD8 luôn thấy rõ · bo 4 · cao 30 ·
+         chữ #423C38); style con chỉ ĐẶT MÀU ICON. Ngoại lệ duy nhất: nút ribbon.
+         BO GÓC (chuẩn hoá đợt G — CHỈ 2 NẤC trong cả suite): control nhỏ (nút · ô nhập · chip · pill · ô tab)
+         = 4 · panel/khung/popup/thẻ = 6. Ngoại lệ có lý do: huy hiệu tròn (bán kính = nửa cạnh) và gạch chỉ
+         báo cao 2–3px (bo 4 > nửa chiều cao sẽ méo). -->
     <Style TargetType="{x:Type Button}">
         <Setter Property="Background" Value="{StaticResource CardBackgroundBrush}" />
         <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
@@ -177,7 +224,7 @@
                     <Border x:Name="PART_bd" Background="{TemplateBinding Background}"
                             BorderBrush="{TemplateBinding BorderBrush}"
                             BorderThickness="{TemplateBinding BorderThickness}"
-                            CornerRadius="5" SnapsToDevicePixels="True">
+                            CornerRadius="4" SnapsToDevicePixels="True">
                         <ContentPresenter x:Name="PART_ContentPresenter"
                                           Margin="{TemplateBinding Padding}"
                                           HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
@@ -257,7 +304,7 @@
                 <ControlTemplate TargetType="{x:Type Button}">
                     <Border x:Name="PART_bd" Background="{TemplateBinding Background}"
                             BorderBrush="{TemplateBinding BorderBrush}"
-                            BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="5">
+                            BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="4">
                         <ContentPresenter Margin="{TemplateBinding Padding}"
                                           HorizontalAlignment="Center" VerticalAlignment="Center" />
                     </Border>
@@ -292,7 +339,7 @@
                 <ControlTemplate TargetType="{x:Type Button}">
                     <Border x:Name="PART_bd" Background="{TemplateBinding Background}"
                             BorderBrush="{TemplateBinding BorderBrush}"
-                            BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="5">
+                            BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="4">
                         <ContentPresenter Margin="{TemplateBinding Padding}"
                                           HorizontalAlignment="Center" VerticalAlignment="Center" />
                     </Border>
@@ -361,7 +408,7 @@
                 <ControlTemplate TargetType="{x:Type TextBox}">
                     <Border x:Name="PART_BorderElement" Background="{TemplateBinding Background}"
                             BorderBrush="{TemplateBinding BorderBrush}"
-                            BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="5">
+                            BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="4">
                         <Grid>
                             <!-- Gợi ý mờ (Watermark của Avalonia) — ẩn ngay khi có chữ hoặc đang gõ.
                                  PHẢI dùng TemplateBinding, KHÔNG dùng {Binding (b:…), RelativeSource=TemplatedParent}:
@@ -432,7 +479,8 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="{x:Type TextBox}">
-                    <Border Background="{TemplateBinding Background}" CornerRadius="5">
+                    <!-- Ô log là một MẢNG lớn (panel) chứ không phải ô nhập 1 dòng → bo 6 như thẻ/khung. -->
+                    <Border Background="{TemplateBinding Background}" CornerRadius="6">
                         <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}" Focusable="False" />
                     </Border>
                 </ControlTemplate>
@@ -461,7 +509,7 @@
                 <ControlTemplate TargetType="{x:Type PasswordBox}">
                     <Border x:Name="PART_BorderElement" Background="{TemplateBinding Background}"
                             BorderBrush="{TemplateBinding BorderBrush}"
-                            BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="5">
+                            BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="4">
                         <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}"
                                       VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
                                       Focusable="False" HorizontalScrollBarVisibility="Hidden"
@@ -556,7 +604,7 @@
                                 Background="{TemplateBinding Background}"
                                 BorderBrush="{TemplateBinding BorderBrush}"
                                 BorderThickness="{TemplateBinding BorderThickness}"
-                                CornerRadius="5" SnapsToDevicePixels="True" />
+                                CornerRadius="4" SnapsToDevicePixels="True" />
 
                         <!-- Vùng bấm mở dropdown. ClickMode=Press là hành vi chuẩn của ComboBox. Template
                              trần (chỉ 1 Border trong suốt) — khung do PART_BorderElement bên dưới lo. -->
@@ -671,16 +719,18 @@
     </Style>
 
     <!-- ══════════ CARD · PILL (Border) ══════════ -->
+    <!-- `card` là PANEL → bo 6 (đợt G, trước là 8). -->
     <Style x:Key="card" TargetType="{x:Type Border}">
         <Setter Property="Background" Value="{StaticResource CardBackgroundBrush}" />
         <Setter Property="BorderBrush" Value="{StaticResource BorderLightBrush}" />
         <Setter Property="BorderThickness" Value="1" />
-        <Setter Property="CornerRadius" Value="8" />
+        <Setter Property="CornerRadius" Value="6" />
     </Style>
     <!-- Badge trạng thái: mặc định trung tính; biến thể đổi nền + màu chữ (TextElement.Foreground chảy
-         xuống TextBlock con, thay selector `Border.pill TextBlock` của Avalonia). -->
+         xuống TextBlock con, thay selector `Border.pill TextBlock` của Avalonia).
+         Bo 4 (đợt G, trước là 20 = viên thuốc): pill là CONTROL NHỎ, dùng chung nấc bo với nút/chip. -->
     <Style x:Key="pill" TargetType="{x:Type Border}">
-        <Setter Property="CornerRadius" Value="20" />
+        <Setter Property="CornerRadius" Value="4" />
         <Setter Property="Padding" Value="9,3" />
         <Setter Property="Background" Value="{StaticResource NeutralBadgeBgBrush}" />
         <Setter Property="VerticalAlignment" Value="Center" />
@@ -723,7 +773,7 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="{x:Type ListBoxItem}">
-                    <Border x:Name="PART_bd" Background="{TemplateBinding Background}" CornerRadius="5,5,0,0">
+                    <Border x:Name="PART_bd" Background="{TemplateBinding Background}" CornerRadius="4,4,0,0">
                         <ContentPresenter VerticalAlignment="Bottom" />
                     </Border>
                     <ControlTemplate.Triggers>
@@ -841,6 +891,8 @@
                             <ContentPresenter ContentSource="Header" Margin="{TemplateBinding Padding}"
                                               HorizontalAlignment="Center" VerticalAlignment="Center" />
                         </Border>
+                        <!-- NGOẠI LỆ bo góc: gạch chỉ báo chỉ cao 2px — bo 4 (> nửa chiều cao) sẽ méo thành
+                             hình thoi, nên giữ 2. -->
                         <Border x:Name="PART_underline" Grid.Row="1" Margin="10,0" CornerRadius="2,2,0,0"
                                 Background="Transparent" />
                     </Grid>
@@ -894,7 +946,7 @@
                 <ControlTemplate TargetType="{x:Type TabItem}">
                     <!-- Ô thường: chìm vào khay. Ô ĐANG CHỌN: nổi lên nền trắng + viền mảnh (không tô cam —
                          theo luật màu chỉ để đánh dấu, không tô mảng lớn). -->
-                    <Border x:Name="PART_LayoutRoot" CornerRadius="7" Background="Transparent"
+                    <Border x:Name="PART_LayoutRoot" CornerRadius="4" Background="Transparent"
                             BorderBrush="Transparent" BorderThickness="1" SnapsToDevicePixels="True"
                             TextElement.FontSize="12.5" TextElement.FontWeight="Normal"
                             TextElement.Foreground="{StaticResource TextSecondaryBrush}">
@@ -916,12 +968,12 @@
             </Setter.Value>
         </Setter>
     </Style>
-    <!-- KHAY segmented bọc dải ô tab: nền xám ấm #F2EFEC (token NeutralBadgeBg), bo 10, đệm 4 để ô đang chọn
-         nổi hẳn lên trên nền khay. Tách thành style riêng để màn nào tự dựng template TabControl (Workspace)
-         vẫn dùng ĐÚNG bộ số này. -->
+    <!-- KHAY segmented bọc dải ô tab: nền xám ấm #F2EFEC (token NeutralBadgeBg), bo 6 (nấc PANEL — đợt G,
+         trước là 10), đệm 4 để ô đang chọn nổi hẳn lên trên nền khay. Tách thành style riêng để màn nào tự
+         dựng template TabControl (Workspace) vẫn dùng ĐÚNG bộ số này. -->
     <Style x:Key="subtabTray" TargetType="{x:Type Border}">
         <Setter Property="Background" Value="{StaticResource NeutralBadgeBgBrush}" />
-        <Setter Property="CornerRadius" Value="10" />
+        <Setter Property="CornerRadius" Value="6" />
         <Setter Property="Padding" Value="4" />
     </Style>
     <!-- TabControl segmented RÁP SẴN (bản gọn): khay tab sát mép trái ở trên, nội dung tab ngay dưới, KHÔNG

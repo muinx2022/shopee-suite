@@ -57,6 +57,18 @@ public partial class OrderStatisticsViewModel : ViewModelBase
     private string? _shopSoHub;
     private CreatedRange _rangeSoHub;
 
+    // ══════════ Chip chọn nhanh khoảng ngày (Hôm nay · 7 ngày · Tháng này) ══════════
+    /// <summary>Chip "Hôm nay": Từ = Đến = hôm nay.</summary>
+    public const string PresetHomNay = "hom-nay";
+    /// <summary>Chip "7 ngày": 7 ngày GẦN NHẤT tính CẢ hôm nay (hôm nay − 6 → hôm nay).</summary>
+    public const string PresetBayNgay = "7-ngay";
+    /// <summary>Chip "Tháng này": ngày 1 của tháng → hôm nay (= mặc định lúc mở màn).</summary>
+    public const string PresetThangNay = "thang-nay";
+
+    /// <summary>Đang set 2 mốc ngày theo chip ⇒ setter FromDate/ToDate KHÔNG vẽ lại (vẽ MỘT lần sau khi đặt
+    /// xong cả hai) và KHÔNG xoá dấu chip đang chọn.</summary>
+    private bool _dangDatPreset;
+
     public OrderStatisticsViewModel(AppServices services)
     {
         _services = services;
@@ -99,8 +111,74 @@ public partial class OrderStatisticsViewModel : ViewModelBase
             ApplyStatistics();
     }
 
-    partial void OnFromDateChanged(DateTime? value) => ApplyStatistics();
-    partial void OnToDateChanged(DateTime? value) => ApplyStatistics();
+    partial void OnFromDateChanged(DateTime? value) => SauKhiDoiNgay();
+    partial void OnToDateChanged(DateTime? value) => SauKhiDoiNgay();
+
+    /// <summary>Đổi một mốc ngày: người dùng tự chọn trên lịch ⇒ BỎ dấu chip (khoảng ngày không còn là preset
+    /// nào) rồi vẽ lại. Đang chạy <see cref="ApplyDatePreset"/> thì bỏ qua — chip đó tự vẽ một lượt duy nhất
+    /// sau khi đặt xong CẢ HAI mốc (đặt lần lượt sẽ lọt qua trạng thái Từ &gt; Đến = "khoảng không hợp lệ").</summary>
+    private void SauKhiDoiNgay()
+    {
+        if (_dangDatPreset) return;
+        DatePreset = string.Empty;
+        ApplyStatistics();
+    }
+
+    /// <summary>Chip khoảng ngày đang chọn (<see cref="PresetHomNay"/>…); rỗng = người dùng tự chọn ngày trên
+    /// lịch. CHỈ để tô chip đang chọn — nguồn sự thật của thống kê vẫn là FromDate/ToDate.</summary>
+    [ObservableProperty] private string _datePreset = PresetThangNay;
+
+    partial void OnDatePresetChanged(string value) => NotifyPresetFlags();
+
+    private void NotifyPresetFlags()
+    {
+        OnPropertyChanged(nameof(IsPresetHomNay));
+        OnPropertyChanged(nameof(IsPresetBayNgay));
+        OnPropertyChanged(nameof(IsPresetThangNay));
+    }
+
+    // 3 cờ cho XAML tô chip đang chọn (view đẩy vào Tag của nút, style đọc ngược qua RelativeSource Self —
+    // cùng lối với nút op của màn Workspace bên suite).
+    public bool IsPresetHomNay => DatePreset == PresetHomNay;
+    public bool IsPresetBayNgay => DatePreset == PresetBayNgay;
+    public bool IsPresetThangNay => DatePreset == PresetThangNay;
+
+    /// <summary>
+    /// Bấm chip khoảng ngày: đặt CẢ HAI mốc rồi vẽ lại ĐÚNG MỘT lượt. Ngày lấy theo đồng hồ MÁY
+    /// (<see cref="DateTime.Today"/>) — phải cùng đồng hồ với <see cref="TryBuildCreatedRange"/> (nó quy đổi
+    /// mốc ngày sang UTC bằng <see cref="TimeZoneInfo.Local"/>); các máy chạy app đều để giờ Việt Nam.
+    /// Tham số lạ/null → không làm gì (không đổi khoảng đang xem).
+    /// </summary>
+    [RelayCommand]
+    private void ApplyDatePreset(string? preset)
+    {
+        var today = DateTime.Today;
+        DateTime from;
+        switch (preset)
+        {
+            case PresetHomNay: from = today; break;
+            case PresetBayNgay: from = today.AddDays(-6); break;
+            case PresetThangNay: from = new DateTime(today.Year, today.Month, 1); break;
+            default: return;
+        }
+
+        _dangDatPreset = true;
+        try
+        {
+            FromDate = from;
+            ToDate = today;
+        }
+        finally
+        {
+            _dangDatPreset = false;
+        }
+
+        DatePreset = preset!;
+        // Bấm lại ĐÚNG chip đang chọn: DatePreset không đổi ⇒ SetProperty không bắn PropertyChanged, mà chip
+        // vẫn cần được xác nhận là đang chọn → ép thông báo lại 3 cờ.
+        NotifyPresetFlags();
+        ApplyStatistics();
+    }
 
     private void OnOrdersChanged()
     {

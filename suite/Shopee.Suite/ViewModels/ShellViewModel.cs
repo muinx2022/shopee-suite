@@ -39,6 +39,13 @@ public sealed partial class ShellViewModel : ObservableObject
     /// <summary>Các tab trên dải ribbon (tập phụ thuộc chế độ ứng dụng).</summary>
     public ObservableCollection<RibbonTab> Tabs { get; } = new();
 
+    /// <summary>Chữ gợi ý phím tắt ở cuối dải tab — theo SỐ TAB THẬT của chế độ đang chạy (chế độ Shopee chỉ
+    /// 2 tab, Workspace 3, Full 4) chứ không ghi cứng "1…4". Tabs dựng xong trong constructor và không đổi
+    /// nữa nên đọc trực tiếp là đủ, không cần thông báo thay đổi.</summary>
+    public string TabShortcutHint => Tabs.Count <= 1
+        ? "Ctrl + 1 để chuyển tab"
+        : $"Ctrl + 1…{Tabs.Count} để chuyển tab";
+
     [ObservableProperty] private RibbonTab? _selectedTab;
 
     /// <summary>Màn đang chọn RIÊNG cho từng tab (quay lại tab thấy đúng màn cũ).</summary>

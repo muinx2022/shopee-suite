@@ -13,17 +13,19 @@
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <!-- Header -->
+        <!-- Header — 2 CỘT + chip dùng chung `headerStatusChip` (xem ghi chú ở style trong Themes/Theme.xaml):
+             không chồng lớp nên status dài / cửa sổ hẹp không đè lên mô tả. -->
         <Grid Grid.Row="0" Margin="0,0,0,16">
-            <StackPanel>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Grid.Column="0" Margin="0,0,16,0">
                 <TextBlock Style="{StaticResource h1}" Text="Check tài khoản Shopee" />
                 <TextBlock Style="{StaticResource caption}" Margin="0,3,0,0"
                            Text="Kiểm tra hàng loạt tài khoản qua Edge + proxy, giữ profile khi đăng nhập thành công." />
             </StackPanel>
-            <Border HorizontalAlignment="Right" VerticalAlignment="Center"
-                    Background="{StaticResource SubtleBrush}" CornerRadius="4" Padding="14,6">
-                <TextBlock Text="{Binding Status}" FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" />
-            </Border>
+            <ContentControl Grid.Column="1" Style="{StaticResource headerStatusChip}" Content="{Binding Status}" />
         </Grid>
 
         <!-- Body -->
