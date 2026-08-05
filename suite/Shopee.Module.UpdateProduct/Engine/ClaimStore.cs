@@ -32,6 +32,4 @@ internal sealed class ClaimStore
         _done.TryAdd(key!, 0);
         _inProgress.TryRemove(key!, out _);
     }
-
-    public bool IsClaimed(string? key) => !string.IsNullOrEmpty(key) && (_inProgress.ContainsKey(key!) || _done.ContainsKey(key!));
 }

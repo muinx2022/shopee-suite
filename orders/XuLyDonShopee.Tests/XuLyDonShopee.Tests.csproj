@@ -26,7 +26,7 @@
   <ItemGroup>
     <Using Include="Xunit" />
     <!-- Danh sách implicit của SDK desktop (net8.0-windows) KHÔNG có System.IO + System.Net.Http như SDK
-         thường → thêm lại, không thì các test cũ (KiotApiClient…) vỡ vì thiếu using. -->
+         thường → thêm lại, không thì các test dùng FileStream/HttpClient vỡ vì thiếu using. -->
     <Using Include="System.IO" />
     <Using Include="System.Net.Http" />
   </ItemGroup>

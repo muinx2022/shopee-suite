@@ -8,7 +8,7 @@ Seller Centre → lặp qua từng shop (đọc đơn, đặt địa chỉ lấy
 
 | Project | Vai trò |
 |---|---|
-| `XuLyDonShopee.Core` | Thư viện lõi: model, `Data/` (SQLite qua `Microsoft.Data.Sqlite`), `Services/` (luồng đăng nhập Playwright, cầu nối extension, parser, GSheet). Ref `shared/Shopee.Proxy.Kiot` + `shared/Shopee.Toolkit` — **KHÔNG** ref `suite/Shopee.Core`. |
+| `XuLyDonShopee.Core` | Thư viện lõi: model, `Data/` (SQLite qua `Microsoft.Data.Sqlite`), `Services/` (luồng đăng nhập Playwright, cầu nối extension, parser, GSheet). Ref `shared/Shopee.Toolkit` — **KHÔNG** ref `suite/Shopee.Core`. |
 | `XuLyDonShopee.App` | **WPF** (`net8.0-windows` + `UseWPF`) + `CommunityToolkit.Mvvm`. Build ra **DLL**, không phải exe — shell `Shopee.Suite` nạp làm module. `ViewModels/`, `Views/` (`*.xaml` + `Styles/` + `Controls/`), `Services/` (vòng đời phiên, đẩy hub/GSheet). |
 | `XuLyDonShopee.Tests` | xUnit, cũng `net8.0-windows` + `UseWPF` (có test dựng control WPF thật). `Using Include="Xunit"` sẵn nên file test không cần `using Xunit;`. |
 

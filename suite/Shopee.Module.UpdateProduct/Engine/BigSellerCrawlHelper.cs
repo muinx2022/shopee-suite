@@ -13,7 +13,8 @@ internal static class BigSellerCrawlHelper
     {
         url ??= "";
         if (url.Contains("/verify/captcha") || url.Contains("/verify/traffic")) return null;
-        foreach (var pat in new[] { @"i\.\d+\.(\d+)", @"product/\d+/(\d+)", @"i\.\d+\.(\d+)\?" })
+        // Pattern 1 KHÔNG neo cuối nên đã phủ mọi URL dạng i.<shop>.<item>?… — không cần biến thể "\?".
+        foreach (var pat in new[] { @"i\.\d+\.(\d+)", @"product/\d+/(\d+)" })
         {
             var m = Regex.Match(url, pat);
             if (m.Success) return m.Groups[1].Value;
@@ -141,9 +142,6 @@ internal static class BigSellerCrawlHelper
 
         return false;
     }
-
-    public static async Task<bool> SelectClaimedTabAsync(IPage page, Action<string>? log = null) =>
-        await SelectClaimedTabByTextAsync(page, log);
 
     public static async Task<bool> SelectClaimedTabByTextAsync(IPage page, Action<string>? log = null)
     {
@@ -530,31 +528,6 @@ internal static class BigSellerCrawlHelper
 
         try { await page.Keyboard.PressAsync("Escape"); } catch { }
         await Task.Delay(500);
-    }
-
-    public static async Task<bool> DeleteBrokenRowAsync(IPage page, ILocator rowElem, Action<string>? log = null)
-    {
-        try
-        {
-            var deleteBtn = rowElem.Locator("a[title='Xóa']");
-            if (await deleteBtn.CountAsync() == 0)
-            {
-                log?.Invoke("Không tìm thấy nút Xóa");
-                return false;
-            }
-
-            await deleteBtn.ClickAsync();
-            var confirmBtn = page.Locator(".ant-modal-confirm-btns button.ant-btn-primary");
-            await confirmBtn.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 3000 });
-            await confirmBtn.ClickAsync();
-            await Task.Delay(2000);
-            return true;
-        }
-        catch (Exception ex)
-        {
-            log?.Invoke($"Lỗi khi xóa dòng: {ex.Message}");
-            return false;
-        }
     }
 
     public static string ResolveCrawlUrl(string? targetUrl) =>

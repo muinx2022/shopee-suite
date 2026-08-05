@@ -91,8 +91,7 @@ internal static class BraveProfileManager
         string? proxyServer,
         Action<string>? log = null,
         string? sourceUserData = null,
-        bool loadRunnerExtension = true,
-        string? bigSellerProxyServer = null)
+        bool loadRunnerExtension = true)
     {
         // Khối 6 cờ nền cửa sổ (BraveArgs.Window) + remote-debugging-port, rồi cờ RIÊNG scrape giữ nguyên thứ tự gốc.
         var parts = Shopee.Toolkit.Browser.BraveArgs.Window(userDataDir)
@@ -110,25 +109,7 @@ internal static class BraveProfileManager
             .Add("--disable-features=CalculateNativeWinOcclusion,IntensiveWakeUpThrottling,DisableLoadExtensionCommandLineSwitch")
             // Chặn cache phình khi 24 cửa sổ chạy song song (profile bền → cache không tự dọn). Xem BraveCachePolicy.
             .DiskCacheLimit();
-        if (!string.IsNullOrWhiteSpace(bigSellerProxyServer))
-        {
-            // TK BIGSELLER CÓ PROXY RIÊNG → split-tunnel qua PAC: bigseller.com đi proxy RIÊNG của tk
-            // BigSeller (mỗi tk 1 IP → chạy SONG SONG nhiều tk không bị "nhiều token / 1 IP" → không đá
-            // phiên), còn lại (Shopee) GIỮ proxy instance, localhost đi DIRECT (API dữ liệu 127.0.0.1:8012
-            // KHÔNG qua proxy). Không dùng được --proxy-server cho việc này vì nó áp cho TOÀN browser.
-            var pacUrl = WriteBigSellerSplitPac(userDataDir, proxyServer, bigSellerProxyServer, log);
-            if (pacUrl is not null)
-            {
-                parts.Add($"--proxy-pac-url=\"{pacUrl}\"");
-            }
-            else if (!string.IsNullOrWhiteSpace(proxyServer))
-            {
-                // Ghi PAC lỗi → quay về hành vi cũ (BigSeller qua IP máy) để Shopee KHÔNG mất proxy.
-                parts.Add($"--proxy-server={proxyServer}");
-                parts.Add("--proxy-bypass-list=*.bigseller.com;bigseller.com;*.bigseller.pro;bigseller.pro");
-            }
-        }
-        else if (!string.IsNullOrWhiteSpace(proxyServer))
+        if (!string.IsNullOrWhiteSpace(proxyServer))
         {
             // BigSeller đi qua 1 IP CHUNG (IP máy) cho MỌI instance; Shopee vẫn giữ proxy riêng của instance.
             // LÝ DO (24/06, theo log thực tế): khi cho bigseller đi proxy RIÊNG từng instance thì 1 token
@@ -257,51 +238,6 @@ internal static class BraveProfileManager
         }
         catch { }
         return name;
-    }
-
-    /// <summary>
-    /// Ghi file PAC split-tunnel vào profile rồi trả về URL <c>file://</c> cho <c>--proxy-pac-url</c>:
-    /// bigseller.* → proxy RIÊNG của tk BigSeller; localhost → DIRECT (API dữ liệu local); còn lại →
-    /// proxy Shopee (hoặc DIRECT nếu Shopee không proxy). Trả null nếu ghi lỗi (caller fallback IP máy).
-    /// </summary>
-    private static string? WriteBigSellerSplitPac(
-        string userDataDir, string? shopeeProxyServer, string bigSellerProxyServer, Action<string>? log)
-    {
-        try
-        {
-            var bigSeller = ToPacProxy(bigSellerProxyServer);
-            var rest = ToPacProxy(shopeeProxyServer);   // "DIRECT" khi Shopee không proxy
-            var pac =
-                "function FindProxyForURL(url, host) {\n" +
-                "  if (host == \"localhost\" || host == \"127.0.0.1\" || shExpMatch(host, \"127.*\") || host == \"[::1]\") return \"DIRECT\";\n" +
-                "  if (host == \"bigseller.com\" || dnsDomainIs(host, \".bigseller.com\") || host == \"bigseller.pro\" || dnsDomainIs(host, \".bigseller.pro\")) return \"" + bigSeller + "\";\n" +
-                "  return \"" + rest + "\";\n" +
-                "}\n";
-
-            var pacPath = Path.Combine(userDataDir, "bigseller-split.pac");
-            File.WriteAllText(pacPath, pac, Encoding.UTF8);
-            return new Uri(pacPath).AbsoluteUri;   // file:///D:/.../bigseller-split.pac (đã escape khoảng trắng)
-        }
-        catch (Exception ex)
-        {
-            log?.Invoke($"Không ghi được PAC BigSeller ({ex.Message}) — BigSeller tạm đi IP máy.");
-            return null;
-        }
-    }
-
-    /// <summary>Chuyển chuỗi proxy-server ("http://h:p" / "socks5://h:p") sang token PAC ("PROXY h:p" /
-    /// "SOCKS5 h:p"). Trống → "DIRECT".</summary>
-    private static string ToPacProxy(string? proxyServer)
-    {
-        if (string.IsNullOrWhiteSpace(proxyServer))
-            return "DIRECT";
-        var s = proxyServer.Trim();
-        var kind = "PROXY";
-        foreach (var (scheme, pac) in new[] { ("socks5://", "SOCKS5"), ("socks4://", "SOCKS"), ("https://", "PROXY"), ("http://", "PROXY") })
-        {
-            if (s.StartsWith(scheme, StringComparison.OrdinalIgnoreCase)) { kind = pac; s = s[scheme.Length..]; break; }
-        }
-        return $"{kind} {s}";
     }
 
     private static void CopyExtensionState(DirectoryInfo src, DirectoryInfo dst)

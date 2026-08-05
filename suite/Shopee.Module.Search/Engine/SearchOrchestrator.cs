@@ -3,7 +3,6 @@ namespace ShopeeStatApp.Services;
 public sealed class SearchOrchestrator
 {
     private readonly WebSocketServer _ws;
-    private readonly AppSettingsService _appSettings;
     private readonly List<ProductResult> _results = [];
     // Chỉ mục (ItemId, ShopId) → CHÍNH phần tử đang nằm trong _results. AddResultIfNew chạy cho MỌI item của
     // MỖI trang, ngay trên handler message WS; tra trùng bằng FirstOrDefault trên List là O(n) mỗi item ⇒ O(n²)
@@ -30,10 +29,9 @@ public sealed class SearchOrchestrator
     public event Action? SearchCompleted;
     public event Action<string>? ErrorOccurred;
 
-    public SearchOrchestrator(WebSocketServer ws, AppSettingsService appSettings)
+    public SearchOrchestrator(WebSocketServer ws)
     {
         _ws = ws;
-        _appSettings = appSettings;
         _ws.MessageReceived += OnMessage;
     }
 
@@ -66,13 +64,7 @@ public sealed class SearchOrchestrator
             region = config.RegionFilterText,   // categoryFromLink: tick "Nơi Bán" khớp khu vực này trong trình duyệt
             resumeCategoryIndex = Math.Max(1, config.ResumeCategoryIndex),
             resumePage = Math.Max(1, config.ResumePage),
-            filters = new
-            {
-                minPrice = config.MinPriceVnd,
-                minSold = config.MinMonthlySold,
-                checkStock = config.CheckVariantStock,
-            },
-            apis = _appSettings.ApiConfig,
+            // (Không gửi `filters`/`apis` nữa — extension chưa bao giờ đọc; lọc giá/bán đã chạy phía app.)
         });
     }
 

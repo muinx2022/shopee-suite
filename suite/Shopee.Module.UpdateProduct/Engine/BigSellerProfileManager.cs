@@ -27,7 +27,7 @@ internal static class BigSellerProfileManager
         // 1 port cho cả account: dùng lại port đã có ở bất kỳ shop nào (set trong cùng phiên),
         // chưa có thì cấp mới — tránh đụng port của account KHÁC.
         var port = account.Shops
-            .SelectMany(s => new[] { s.BigSellerDebugPort, s.BigSellerImportDebugPort })
+            .Select(s => s.BigSellerDebugPort)
             .FirstOrDefault(p => p > 0);
         if (port <= 0)
         {
@@ -44,9 +44,7 @@ internal static class BigSellerProfileManager
         foreach (var s in account.Shops)
         {
             s.BigSellerProfileRelativePath = profile;
-            s.BigSellerImportProfileRelativePath = profile;
             s.BigSellerDebugPort = port;
-            s.BigSellerImportDebugPort = port;
         }
 
         Directory.CreateDirectory(Path.GetFullPath(AppSession.ResolvePersistentDataPath(profile)));
@@ -60,7 +58,7 @@ internal static class BigSellerProfileManager
         var used = accounts
             .Where(a => a.Id != accountId)
             .SelectMany(a => a.Shops)
-            .SelectMany(s => new[] { s.BigSellerDebugPort, s.BigSellerImportDebugPort })
+            .Select(s => s.BigSellerDebugPort)
             .Where(p => p > 0)
             .ToHashSet();
 

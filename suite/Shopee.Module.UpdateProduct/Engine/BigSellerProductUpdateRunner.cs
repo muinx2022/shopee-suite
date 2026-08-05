@@ -135,23 +135,6 @@ internal sealed partial class BigSellerProductUpdateRunner : BigSellerBraveRunne
     private const int TargetDescriptionMinChars = 2700;
     private const string ListingUrl = "https://www.bigseller.com/web/listing/shopee/index.htm?bsStatus=1";
 
-    private const string DescriptionSystemPrompt =
-        "Bạn là chuyên gia SEO TMĐT chuyên viết mô tả sản phẩm GIÀY – DÉP NỮ để đăng Shopee, Lazada, Tiki, Ozon.\n\n" +
-        "NHIỆM VỤ:\nViết MỘT bài mô tả sản phẩm duy nhất, sẵn sàng đăng bán.\n\n" +
-        "YÊU CẦU BẮT BUỘC:\n" +
-        "- ĐỘ DÀI: cố gắng trong khoảng 2800–2900 ký tự.\n" +
-        "- TUYỆT ĐỐI KHÔNG VƯỢT 3000 ký tự vì Shopee sẽ báo lỗi.\n" +
-        "- Chuẩn SEO theo hành vi tìm kiếm người mua giày nữ online.\n" +
-        "- Lặp tự nhiên từ khóa chính và biến thể liên quan đến giày nữ, không spam.\n" +
-        "- Văn phong chuyên nghiệp, dễ đọc, tập trung lợi ích người dùng nữ.\n\n" +
-        "CẤU TRÚC:\n" +
-        "- Mở bài: giới thiệu sản phẩm, nêu từ khóa chính.\n" +
-        "- Thân bài: thiết kế, chất liệu, đế, form, cảm giác mang, tính ứng dụng.\n" +
-        "- Kết bài: gợi ý phối đồ, đối tượng phù hợp, kêu gọi mua.\n\n" +
-        "QUY ĐỊNH:\n- Không chèn tiêu đề thừa.\n- Không ghi \"Thông số\", \"Cam kết\", \"Chính sách\".\n- Không giải thích SEO.\n\n" +
-        "HASHTAG:\n- Đặt NGAY SAU đoạn mô tả cuối cùng.\n- Viết liền, không tiêu đề.\n- Đúng ngành giày nữ, có mã sản phẩm.\n- CHÍNH XÁC 18 hashtag.\n\n" +
-        "NGUYÊN TẮC CUỐI:\n- Nếu cần điều chỉnh, chỉ thay đổi độ dài câu để nằm trong khoảng 2800–2900 ký tự.\n- Tuyệt đối không thêm hoặc bớt hashtag.";
-
     private IBrowserContext? _context;
 
     private IReadOnlyDictionary<string, WorkbookRecord> _records = new Dictionary<string, WorkbookRecord>();

@@ -11,39 +11,23 @@ public sealed class HubServerConfig
     public bool Enabled { get; set; }
     /// <summary>Cổng local Kestrel lắng nghe (cloudflared map api.&lt;domain&gt; → 127.0.0.1:Port).</summary>
     public int Port { get; set; } = HubDefaults.Port;
-    /// <summary>Tên miền công khai, ví dụ "api.schedra.net" (để hiển thị URL + tạo DNS/tunnel).</summary>
-    public string Domain { get; set; } = HubDefaults.Domain;
     /// <summary>Token bảo vệ API (client phải gửi khớp ở header X-Api-Token). Tự đặt/tự sinh.</summary>
     public string ApiToken { get; set; } = HubDefaults.ApiToken;
-    /// <summary>Cloudflare API token (tùy chọn) — để app TỰ tạo Named Tunnel + DNS.</summary>
-    public string CloudflareApiToken { get; set; } = "";
-    /// <summary>Tunnel token dán sẵn (tùy chọn) — nếu người dùng tự tạo tunnel trên dashboard CF.</summary>
-    public string TunnelToken { get; set; } = "";
-    /// <summary>Thư mục dữ liệu Hub (DB + blob). Trống = %AppData%\ShopeeSuite\hub-data.</summary>
-    public string DataDir { get; set; } = "";
 
-    public string PublicUrl => string.IsNullOrWhiteSpace(Domain) ? "" : $"https://{Domain.Trim().TrimStart('/')}";
-
-    public HubServerConfig Clone() => new()
-    {
-        Enabled = Enabled, Port = Port, Domain = Domain, ApiToken = ApiToken,
-        CloudflareApiToken = CloudflareApiToken, TunnelToken = TunnelToken, DataDir = DataDir,
-    };
+    public HubServerConfig Clone() => new() { Enabled = Enabled, Port = Port, ApiToken = ApiToken };
 }
 
-/// <summary>Kho cấu hình chế độ Hub, lưu tại %AppData%\ShopeeSuite\hub-server.json (local-only). Singleton.</summary>
+/// <summary>Kho cấu hình chế độ Hub, đọc từ %AppData%\ShopeeSuite\hub-server.json (local-only, CHỈ ĐỌC —
+/// hub web nay chạy riêng trên VM nên app không còn ghi file này). Singleton.</summary>
 public sealed class HubServerConfigStore
 {
     private static readonly Lazy<HubServerConfigStore> _shared = new(() => new HubServerConfigStore());
     public static HubServerConfigStore Shared => _shared.Value;
 
     private static readonly string FilePath = SuitePaths.RootFile("hub-server.json");
-    private static readonly JsonSerializerOptions JsonOpts = new() { WriteIndented = true };
 
     private readonly object _lock = new();
     private HubServerConfig _config = new();
-
-    public event Action? Changed;
 
     private HubServerConfigStore() => Load();
 
@@ -56,17 +40,5 @@ public sealed class HubServerConfigStore
             if (!File.Exists(FilePath)) return;   // chưa có file → GIỮ bản đang có (khác file hỏng → về mặc định)
             _config = JsonAtomicFile.TryLoad<HubServerConfig>(FilePath) ?? new HubServerConfig();
         }
-    }
-
-    public void Save(HubServerConfig config)
-    {
-        try
-        {
-            string json;
-            lock (_lock) { _config = config.Clone(); json = JsonSerializer.Serialize(_config, JsonOpts); }
-            JsonAtomicFile.SaveText(FilePath, json);   // serialize trong lock, ghi đĩa ngoài lock (giữ như cũ)
-        }
-        catch { }
-        Changed?.Invoke();
     }
 }

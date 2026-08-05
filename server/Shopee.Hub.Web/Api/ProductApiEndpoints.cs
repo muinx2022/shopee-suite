@@ -68,15 +68,20 @@ public static class ProductApiEndpoints
                 return Results.Json(await pdb.SetRewrittenAsync(r, by, ct));
             }));
 
-        // ── Ghi: nối dòng vào cuối sheet ──
+        // ── Ghi: nối dòng vào cuối sheet ── HẾT consumer từ đợt dọn 06/08 (HubClient bỏ PostProductAppendAsync).
+        //    KHÔNG xoá vội — soak 2–3 tuần xem log VM có lượt trúng nào không rồi mới gỡ.
         api.MapPost(HubRoutes.ProductsAppend, (ProductAppendRequest? r, HttpRequest req,
             IServiceProvider sp, CancellationToken ct) =>
-            WithPg(sp, async pdb =>
+        {
+            // Log NGOÀI WithPg: Pg chưa sẵn sàng thì WithPg trả sớm không chạy body — mất đúng bằng chứng soak.
+            app.Logger.LogWarning("legacy endpoint hit: {path} tu {ip}", req.Path.Value, req.HttpContext.Connection.RemoteIpAddress?.ToString() ?? "?");
+            return WithPg(sp, async pdb =>
             {
                 if (r is null) return Results.BadRequest();
                 var by = req.Headers["X-Machine-Id"].ToString();
                 return Results.Json(await pdb.AppendRowsAsync(r, by, ct));
-            }));
+            });
+        });
 
         // ── RESUME: đánh dấu đã Import-to-store N itemId (import lại là SAI → GetImportIds lọc bỏ) ──
         api.MapPost(HubRoutes.ProductsMarkImported, (ProductMarkStoreRequest? r, IServiceProvider sp, CancellationToken ct) =>

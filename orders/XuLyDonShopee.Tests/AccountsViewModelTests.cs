@@ -107,6 +107,37 @@ public class AccountsViewModelTests
         Assert.Equal("keep@mail.com", vm.SelectedRow!.Email);
     }
 
+    // ===== Save KHÔNG được xoá dữ liệu các cột form không có ô nhập (Phone/Note/ProxyKey) =====
+    // Form Chi tiết KHÔNG có ô nhập cho Phone/Note/ProxyKey (3 property Edit* đã bỏ ở đợt dọn 06/08).
+    // Bẫy: nếu Save gán lại 3 cột này từ một ô form rỗng thì mọi lần bấm Lưu sẽ XOÁ SẠCH dữ liệu người
+    // dùng đã nhập bằng đường khác (sync hub / sửa tay DB). Save phải GIỮ NGUYÊN giá trị đang có.
+    [Fact]
+    public void Save_KhongCoONhap_GiuNguyenPhoneNoteProxyKey()
+    {
+        using var temp = new TempDatabase();
+        var services = new AppServices(temp.Path);
+        services.Accounts.Insert(new Account
+        {
+            Email = "keep@mail.com",
+            Password = "orig",
+            Phone = "0912345678",
+            Note = "ghi chú cũ",
+            ProxyKey = "kiot-key-abc",
+        });
+
+        var vm = new AccountsViewModel(services);
+        vm.SelectedRow = vm.Accounts.First(a => a.Email == "keep@mail.com");
+        vm.EditPassword = "moi";
+        vm.SaveCommand.Execute(null);
+
+        Assert.Null(vm.ErrorMessage);
+        var saved = services.Accounts.GetAll().Single();
+        Assert.Equal("moi", saved.Password);            // trường CÓ ô nhập vẫn ghi được
+        Assert.Equal("0912345678", saved.Phone);        // 3 trường KHÔNG có ô nhập phải nguyên vẹn
+        Assert.Equal("ghi chú cũ", saved.Note);
+        Assert.Equal("kiot-key-abc", saved.ProxyKey);
+    }
+
     // ===== Chọn sang tài khoản KHÁC vẫn phải nạp form của tài khoản đó (không hồi quy) =====
     [Fact]
     public void ChonTaiKhoanKhac_NapFormCuaTaiKhoanDo()

@@ -36,13 +36,6 @@ internal static class ExtensionProgressReader
     private static readonly Regex LastMessageRx =
         new(@"lastMessage[^\w""]{0,16}""([^""]{8,200})", RegexOptions.Compiled);
 
-    public static string? TryGetRunnerExtensionId(DirectoryInfo profileRoot)
-    {
-        if (!TryReadBestFromProfile(profileRoot, out _, out var extensionId))
-            return null;
-        return extensionId;
-    }
-
     public static bool TryRead(DirectoryInfo profileRoot, out ExtensionRunnerState state) =>
         TryReadBestFromProfile(profileRoot, out state, out _);
 

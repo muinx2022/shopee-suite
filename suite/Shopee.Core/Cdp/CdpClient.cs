@@ -170,24 +170,6 @@ public sealed class CdpClient(int cdpPort)
     }
 
     /// <summary>
-    /// Điều hướng (Page.navigate) các tab khớp <paramref name="urlMatches"/> tới <paramref name="targetUrl"/>.
-    /// Khác reload: ép tab rời khỏi trang hiện tại (vd trang marketing/login bị redirect khi chưa có cookie)
-    /// để nạp thẳng khu app đã đăng nhập sau khi cookie vừa được set.
-    /// </summary>
-    public async Task NavigatePageTargetsAsync(Func<string, bool> urlMatches, string targetUrl)
-    {
-        foreach (var target in await TryListTargetsAsync(Port).ConfigureAwait(false))
-        {
-            if (!target.IsPage || !urlMatches(target.Url) || !target.HasWsUrl)
-                continue;
-
-            using var page = new ClientWebSocket();
-            await page.ConnectAsync(new Uri(target.WsUrl!), CancellationToken.None).ConfigureAwait(false);
-            await SendAsync(page, 93, "Page.navigate", new { url = targetUrl }).ConfigureAwait(false);
-        }
-    }
-
-    /// <summary>
     /// Gửi 1 lệnh CDP qua WebSocket đang mở rồi chờ phản hồi mang đúng <paramref name="id"/>.
     /// <paramref name="sessionId"/>: gửi trong flat-session (Target.attachToTarget) — bỏ trống = lệnh cấp
     /// browser/page của chính socket. <paramref name="receiveTimeoutMs"/>: trần chờ phản hồi, hết giờ ném

@@ -76,7 +76,6 @@ internal sealed partial class BigSellerProductUpdateRunner
 
     private const string AddVideoButton = "button:has-text('Thêm video')";
     private const string UploadLocalVideoOpt = "li[autoid='upload_local_video_option']";
-    private const string VideoBoxes = "div.pro_vid_box div.page_edit_img_item.comm_img_module";
     private const string VideoSuccessSignal = "span.top_status.bk_green:has-text('Tải lên thành công')";
     private static readonly string[] VideoErrSels =
         { ".ant-message-error", ".ant-notification-notice-message", ".ant-notification-notice-description", ".ant-message-notice-content", ".toast", ".el-message--error" };

@@ -7,10 +7,9 @@ namespace Shopee.Core.Ai;
 /// ghép SKU + cắt ≤120 ký tự (giữ SKU) qua <see cref="_truncate"/>.
 ///
 /// KHÔNG đụng workbook/Postgres/ledger — 100% thuần → test độc lập bằng cách inject <see cref="AiCompleter"/> giả
-/// (stub trả JSON mẫu) + <see cref="_truncate"/>. Client (runner) và hub cùng gọi engine này:
-///  · <see cref="RewriteTitlesAsync"/> = tiêu đề THÔ theo từng batch (dedup + gọi AI 1 lần/tên) — caller ghép SKU
-///    PER-DÒNG (mỗi dòng cùng tên gốc có thể SKU khác nhau) qua <see cref="ComposeFinalName"/>.
-///  · <see cref="RewriteAsync"/> = tiện ích map tên-gốc → tên-mới-đã-ghép-SKU-cắt-120 (dùng SKU đại diện mỗi tên).
+/// (stub trả JSON mẫu) + <see cref="_truncate"/>. Client (runner) và hub cùng gọi engine này qua ĐÚNG một đường:
+/// <see cref="RewriteTitlesAsync"/> = tiêu đề THÔ theo từng batch (dedup + gọi AI 1 lần/tên) → caller ghép SKU
+/// PER-DÒNG (mỗi dòng cùng tên gốc có thể SKU khác nhau) qua <see cref="ComposeFinalName"/>.
 /// </summary>
 public sealed class NameRewriteEngine
 {
@@ -67,36 +66,6 @@ public sealed class NameRewriteEngine
     {
         if (names is null || names.Count == 0) return Task.FromResult(new List<string>());
         return RequestSeoTitlesWithSplitAsync(names.ToList(), log, ct);
-    }
-
-    /// <summary>Tiện ích cấp cao: map tên-gốc → tên-mới-đã-ghép-SKU-cắt-120. Dùng SKU ĐẠI DIỆN của mỗi tên
-    /// (<paramref name="entries"/> đã dedup theo tên). Batch theo <paramref name="batchSize"/> (clamp 1..500) để
-    /// KHÔNG dội AI. Caller cần ghép SKU PER-DÒNG thì dùng <see cref="RewriteTitlesAsync"/> + <see cref="ComposeFinalName"/>.</summary>
-    public async Task<Dictionary<string, string>> RewriteAsync(
-        IReadOnlyList<(string Name, string Sku)> entries, int batchSize, Action<string>? log, CancellationToken ct)
-    {
-        var result = new Dictionary<string, string>(StringComparer.Ordinal);
-        if (entries is null || entries.Count == 0) return result;
-        var size = Math.Clamp(batchSize, 1, 500);
-        var names = entries.Select(e => e.Name).ToList();
-        var skuByName = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (var (name, sku) in entries)
-            if (!skuByName.ContainsKey(name)) skuByName[name] = sku;
-
-        for (var i = 0; i < names.Count; i += size)
-        {
-            ct.ThrowIfCancellationRequested();
-            var batch = names.Skip(i).Take(Math.Min(size, names.Count - i)).ToList();
-            var titles = await RewriteTitlesAsync(batch, log, ct).ConfigureAwait(false);
-            for (var idx = 0; idx < batch.Count; idx++)
-            {
-                var name = batch[idx];
-                var finalName = ComposeFinalName(titles[idx], skuByName.GetValueOrDefault(name, ""));
-                if (!string.IsNullOrWhiteSpace(finalName))
-                    result[name] = finalName;
-            }
-        }
-        return result;
     }
 
     // ── Viết lại TÊN: 1 lần gọi → tiêu đề SEO hoàn chỉnh (dùng AiConfig + prompt SEO cấu hình trên Hub) ──

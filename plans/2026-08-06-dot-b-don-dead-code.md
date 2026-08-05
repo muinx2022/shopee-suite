@@ -1,7 +1,7 @@
 # Plan: Đợt B — Dọn dead-code toàn repo (~2.500 dòng)
 
 - **Ngày:** 2026-08-06
-- **Trạng thái:** chờ làm (sau đợt A)
+- **Trạng thái:** hoàn thành
 - **Người lập:** Fable · **Người thực thi:** Opus (`opus-executor`)
 
 ## 1. Bối cảnh & mục tiêu
@@ -97,6 +97,93 @@ Toàn bộ chuỗi đang unreachable vì `BigSellerTokenGuard.ResolveProxyServer
 
 ---
 
-## Báo cáo thực thi (Opus điền sau khi xong)
+## Báo cáo thực thi (Opus, 2026-08-06)
 
-<chưa có>
+**Tổng: 82 file thay đổi, +124 / −3009 dòng** (`git diff --cached --shortstat`). Build 2 solution 0 error
+0 warning; 3 project test xanh. KHÔNG commit (theo yêu cầu). KHÔNG đụng `extensions/shopee-orders/`.
+
+### Kết quả kiểm chứng (số thật)
+
+| Lệnh | Trước | Sau |
+|---|---|---|
+| `dotnet build ShopeeSuite.sln` (--no-incremental) | 0 warn / 0 err | **0 warn / 0 err** |
+| `dotnet build server/ShopeeHub.sln` (--no-incremental) | 0 warn / 0 err | **0 warn / 0 err** |
+| `dotnet test orders/XuLyDonShopee.Tests` | 1506 pass | **1489 pass** (−17) |
+| `dotnet test suite/Shopee.Core.Tests` | 71 pass | **71 pass** |
+| `dotnet test server/Shopee.Hub.Web.Tests` | 53 pass | **53 pass** |
+| `extensions\sync-shared.cmd --check` | — | **OK, exit 0** |
+
+Δ test orders = −17 khớp chính xác: −12 `KiotApiClientTests` (B1) −6 `ProxyRepositoryTests` (B2)
+**+1 test mới** `Save_KhongCoONhap_GiuNguyenPhoneNoteProxyKey` (B12). Không test nào khác biến mất.
+
+`rg 'legacy endpoint hit' server/` = **6 vị trí** (ClientApiEndpoints.cs:117/122/127/240/398 +
+ProductApiEndpoints.cs:77) — đúng 6 endpoint plan yêu cầu, KHÔNG endpoint nào bị xoá.
+
+**Test mới đã thử phá**: chèn `existing.Phone = null; existing.Note = null; existing.ProxyKey = null;` vào
+nhánh update của `Save()` → test **FAIL** đúng như mong đợi; gỡ sabotage → PASS lại. Test thật sự canh luật.
+
+### Đã hoàn thành — 13/13 hạng mục
+
+- **B1** Xoá `shared/Shopee.Proxy.Kiot/` (5 file) + `<ProjectReference>` trong `orders/XuLyDonShopee.Core/XuLyDonShopee.Core.csproj` + 7 dòng trong `ShopeeSuite.sln` + `orders/XuLyDonShopee.Tests/KiotApiClientTests.cs`. Đã kiểm chứng `KiotProxyKeyParser` nằm ở `orders/XuLyDonShopee.Core/Services/` (KHÔNG thuộc project bị xoá) và `ProxyFleetWideFailureTests` dùng `Shopee.Core.Proxy` của suite → cả hai GIỮ nguyên.
+- **B2** Xoá `orders/XuLyDonShopee.Core/Data/ProxyRepository.cs`, `Models/ProxyEntry.cs`, `Tests/ProxyRepositoryTests.cs`. Bảng `proxies` trong `Database.cs:83` GIỮ nguyên (đã xác nhận).
+- **B3** Xoá `extensions/shopee-search/flow-keyword.js` + `flow-shop.js`; `background.js` bỏ 2 import + rút dispatch còn `case 'start': startCategoryFromLink(msg)`. Xác nhận `FileRunCoordinator.cs:226` là nơi DUY NHẤT tạo `SearchConfig` và luôn đặt `Mode="categoryFromLink"`.
+- **B4** Gỡ toàn bộ nhánh PAC: `BraveProfileManager` (tham số + nhánh `bigSellerProxyServer`, `WriteBigSellerSplitPac`, `ToPacProxy`), `BigSellerTokenGuard` (`ResolveProxyServerAsync`, `SetProxy`, 3 field `_proxy*`), `BraveInstanceSession.SetBigSellerProxy`, caller `ScrapeRunner.cs`, caller `BraveInstanceSession.Profile.cs`. **Nhánh `else if (proxyServer)` giữ NGUYÊN** → args Brave sinh ra y hệt trước.
+- **B5** `BackupService`: xoá `Export`/`Import`/`BackupOptions`/`AddFile`/`Deserialize` + `using System.IO.Compression` + `using Shopee.Core.Ai` + `JsonOpts`. Giữ `MergeBigSeller`/`MergeShopee`/`ImportResult`. Sửa xmldoc class cho khớp vai trò thật (bộ gộp đồng bộ Hub).
+- **B6** `HubServerConfig`: xoá `Domain`/`PublicUrl`/`CloudflareApiToken`/`TunnelToken`/`DataDir`, `HubServerConfigStore.Save` + event `Changed`, `HubDefaults.Domain`. Giữ `Enabled`/`ApiToken`/`Port` (7 điểm đọc còn nguyên).
+- **B7** `HubClient`: xoá 4 method 0-caller; giữ `PushSearchProductsAsync` (SearchViewModel.cs:429). Server thêm 6 `LogWarning("legacy endpoint hit: …")`, KHÔNG xoá endpoint/DTO nào.
+- **B8** Xoá `MultiBrave/Engine/ShopConfig.cs` (cả file); `ScrapeRunner.RunAsync` manual + event `AccountErrored` + subscriber ở `ScrapeViewModel.RunnerEvents.cs` + `ScrapeAccountSpec.StartRow/EndRow` (sửa `ShopeeAccountSpecFactory`); `ShopeeAccountChecker.LoginThenManualSolveAsync` (60 dòng); `InstanceConfig` (`ShopId`, `UsePersistentSharedProfile`, `ExportShopee`, `PendingScrapeLinks` + class `PendingScrapeLink`); `AppSession` MultiBrave (`ApiPort`, `ProjectSourceDirectory`, `ResolveDataPath`, bỏ 8012 khỏi `PortsLookFree`); biến `payload` chết trong `DownloadBestVideoAsync`; `ScrapeNativeSettings.WorkbookPath`; cờ ma `preferSuggestedResume` (xoá HẾT 7 vị trí) + sửa comment sai :187; 4 API 0-caller (`ExtensionInterrupted` + Invoke, `OpenShopeeAccountLoginAsync`, `PushFormConfigAsync`, `ExtensionProgressReader.TryGetRunnerExtensionId`).
+- **B9** Xoá `ShopeeApiConfig.cs` + `Shopee.Module.Search/appsettings.json` (+ dòng `<None Include>` trong csproj) + `AppSettingsService.SaveApiConfig/GetApiConfigJson/ApiConfig/_apiConfigPath` + khối `apis`/`filters` trong `SearchOrchestrator.SendStartCommandAsync` + `SearchConfig.FilterPriceClientSide`. Dây chuyền profile-Import-riêng: `BigSellerWorkflowSettings.ImportProfileDir/ImportDebugPort`, `ShopConfig.BigSellerImportProfileRelativePath/BigSellerImportDebugPort/UseSharedProfiles` + 4 điểm gán/đọc (2 phép gom port trong `BigSellerProfileManager` đổi `SelectMany` → `Select`, kết quả không đổi vì 2 port luôn bằng nhau). `BigSellerCrawlHelper`: `DeleteBrokenRowAsync`, wrapper `SelectClaimedTabAsync`, pattern regex thứ 3, `VideoBoxes`, `DescriptionSystemPrompt` (17 dòng), `ClaimStore.IsClaimed`, `RewritePlan.SkuByOriginalName` (+ 2 local `skuByName`). `NameRewriteEngine.RewriteAsync` + xmldoc.
+- **B10** `CdpClient.NavigatePageTargetsAsync`, `ShopeeAccountUsage.TryReserveMany` + xmldoc.
+- **B11** Xoá 7 file (`WelcomeViewModel`, `ModuleItem`, `ComingSoonViewModel`, `WelcomeView.xaml(+.cs)`, `ComingSoonView.xaml(+.cs)`) + 2 DataTemplate + 2 xmlns `vm`/`views` trong `App.xaml` (thư mục `Views/` của Shopee.Suite nay rỗng và đã biến mất).
+- **B12** Xoá 5 converter + 5 dòng đăng ký `ModuleResources.xaml`; giữ `OrderStatusPillConverter`/`BrushPalette`/`VisibilityConverters`. `AccountsViewModel.Form.cs`: xoá `CookieSizeText` (+ `OnPropertyChanged` bắn hư không), xoá `EditPhone`/`EditNote`/`EditProxyKey` — nhánh update KHÔNG gán lại 3 cột (giữ nguyên giá trị `existing` đọc từ DB), nhánh insert để null như mặc định model. `git rm Assets/avalonia-logo.ico` (glob `<Resource Include="Assets\**"/>` để nguyên, rỗng vẫn build xanh).
+- **B13** `git rm tools/split_shops.py`, `split_shops_5k.py`, `split_shops_5k_ttn.py` (387 dòng).
+
+### Ngoài danh sách plan nhưng BẮT BUỘC phải làm kèm (khai báo rõ)
+
+1. **`ScrapeRunner`: 3 field `_bigSellerKiotKey/_bigSellerRegion/_bigSellerProxyType` + 3 tham số ctor + 1 dòng ở `ScrapeViewModel.cs:370`.** Sau khi gỡ `SetBigSellerProxy` (B4) chúng thành 0-reader; plan không liệt kê nhưng giữ lại là để lại rác đúng loại B4 đang dọn. `BigSellerProxyResolver` **vẫn sống** (BigSellerViewModel dùng cho cửa sổ login BigSeller) — KHÔNG đụng.
+2. **`ResumeContinueAsync(… preferSuggestedResume …)` + 4 call site.** Plan chỉ nêu tham số của `LauncherRunnerLoop.RunAsync`, nhưng tiêu chí nghiệm thu đòi grep symbol = 0 hit; nếu chỉ gỡ một tầng thì cờ ma vẫn còn 5 hit ở tầng trên. Đã gỡ hết.
+3. **`SearchOrchestrator._appSettings` + tham số ctor + call site duy nhất `SearchSession.cs:132`.** Field này tồn tại CHỈ để cấp `ApiConfig` cho payload vừa xoá ở B9; giữ lại là field gán-không-đọc.
+4. **3 sửa tài liệu/comment thành sai sau khi xoá:** `orders/CLAUDE.md:11` (còn ghi Core ref `shared/Shopee.Proxy.Kiot`), `orders/XuLyDonShopee.Tests/XuLyDonShopee.Tests.csproj:29` (nhắc test KiotApiClient đã xoá), `OrderStatusPillConverter.cs:14` (`<see cref="StatusPillConverter"/>` trỏ vào class vừa xoá — cref treo).
+5. **Bỏ 2 `using` mồ côi** ở `ScrapeViewModel.RunnerEvents.cs` (`Shopee.Core.Accounts`, `Shopee.Suite.Infrastructure`) sau khi xoá subscriber `AccountErrored`.
+
+### Kiểm chứng "grep từng symbol trước khi xoá" — các trường hợp đáng lưu ý
+
+- `AccountErrorReporter.Report` và `ShopeeAccountUsage.MarkCaptcha`: subscriber `AccountErrored` bị xoá là **không phải** caller duy nhất (SearchViewModel.cs:481 + FileRunCoordinator.cs:404 vẫn gọi) → 2 API này GIỮ.
+- `ShopeeSessionBootstrapper.OpenAccountLoginAsync` (:125) vẫn được gọi nội bộ ở :94 → GIỮ; chỉ xoá wrapper `BraveInstanceSession.OpenShopeeAccountLoginAsync`.
+- `ExtensionRunnerAutomation.TryApplyFormConfigAsync` KHÔNG mồ côi sau khi xoá `PushFormConfigAsync` — `LauncherRunnerLoop.cs:97` vẫn gọi → GIỮ.
+- `RunnerExtensionTargets.TryGetRunnerExtensionIdFromProfile` (tên gần giống) vẫn sống → GIỮ; chỉ xoá `ExtensionProgressReader.TryGetRunnerExtensionId`.
+- `SearchRunner.AccountErrored` (module Search) là event KHÁC, còn subscriber → GIỮ.
+- `UpdateProduct.ShopConfig` / `BigSellerAccountConfig` (namespace `UpdateProduct`) là bộ KHÁC với `OpenMultiBraveLauncherV3.ShopConfig` vừa xoá → GIỮ.
+- `RewriteJobService.cs` đã hết NUL byte (đợt A sửa) — kiểm bằng python, grep đọc được, xác nhận chỉ dùng `RewriteTitlesAsync`.
+- `extensions/shopee-orders/flow-shop.js` là file KHÁC (của agent đợt E) — 2 hit grep còn lại thuộc file đó, **không đụng**.
+
+### Vướng mắc / cố ý bỏ dở
+
+- **Không có hạng mục nào phải dừng.** 13/13 làm được, không phát hiện symbol nào trong plan hoá ra còn caller.
+- `git status` chỉ chứa file thuộc phạm vi (82 file, `grep -c shopee-orders` = 0). Đã `git add` để phiên chính xem `git diff --cached`; **chưa commit**.
+
+### Đề xuất cho phiên chính / đợt sau
+
+1. **`suite/Shopee.Module.UpdateProduct/Engine/AppSession.cs` có bản sao y hệt các thành viên chết vừa dọn ở MultiBrave**: `ProjectSourceDirectory` (:15), `ApiPort` (:20, :32 — cổng 8112), `ResolveDataPath` (:36) đều 0 reader. Plan B8 ghi rõ "(MultiBrave)" nên tôi KHÔNG đụng. Nên gom vào đợt sau.
+2. `BigSellerProfileManager.EnsureWorkflowProfile(…, ShopConfig shop)` có tham số `shop` không dùng (đã vậy từ trước đợt này) — ứng viên dọn tiếp.
+3. Sau khi xoá `flow-keyword.js`/`flow-shop.js`, một số helper trong `extensions/shopee-search/` có thể mồ côi (`isProductNotFoundPage` ở `detect.js`, `typeAndSearch`/`getCurrentTabUrl` ở `page-funcs.js`/`tabs.js`). Chưa kiểm kỹ vì ngoài phạm vi plan — nên rà ở đợt C/D.
+4. `SearchConfig.Mode` vẫn mặc định `"keyword"` dù chỉ còn 1 flow sống. Không đổi (ngoài phạm vi), nhưng để mặc định là giá trị không còn flow xử lý là một cái bẫy — cân nhắc đổi mặc định thành `"categoryFromLink"`.
+5. `<Resource Include="Assets\**" />` trong `XuLyDonShopee.App.csproj` giờ trỏ vào thư mục không tồn tại (build vẫn xanh, đúng như plan dự liệu). Xoá hẳn ItemGroup đó nếu không định thêm asset lại.
+
+---
+
+## Nghiệm thu (Fable tổng hợp sau phản biện, 2026-08-06)
+
+`nghiem-thu` chấm **ĐẠT CÓ ĐIỀU KIỆN** — 13/13 đúng, KHÔNG xóa nhầm thứ còn sống (tự quét lại 62 symbol;
+xác nhận B4 args Brave bất biến, B11 không gãy StaticResource/binding nào, B12 các prop bị xóa chưa từng có
+binding XAML, test mới canh thật). Nó còn bắt được executor đoán SAI ở đề xuất: `getCurrentTabUrl` vẫn sống
+(crawl.js:4 + detect.js:3) — may là executor không xóa. Cố ý KHÔNG chạy app suite vì app khởi động sẽ
+heartbeat lên Hub production + có thể giành lease — đúng quyết định.
+
+Điều kiện đã sửa ngay (phiên chính): LogWarning ở `/products/rows/append` nằm TRONG `WithPg` → Pg chưa sẵn
+sàng là mất vết soak; đã đưa ra ngoài, build + test server lại xanh (0 warning, 53/53).
+
+7 "xác mới" nghiệm thu liệt kê (ChunkResult.CaptchaUrl chỉ-ghi, BackupService tham số replace/rebaseDir chết,
+enum ProxyType/ProxyStatus, typeAndSearch/typeAndSearchSynthetic/isProductNotFoundPage mồ côi, 3 resource
+Theme.xaml mồ côi, HubServerConfig.Load nên private, tài liệu AppIcons/SearchConfig nói sai) → GOM VÀO ĐỢT C
+(đã thêm mục C9 vào plan C), không chặn commit đợt này.

@@ -46,6 +46,19 @@
 ### C8. Magic PDF về một helper
 - Core `ShopFlowRunner.TrySaveSlip` (~568–571) kiểm 4 byte `%PDF` khi GHI; App `SlipFiles.BytesLookPdf` (~57–59) đòi 5 byte `%PDF-` khi ĐỌC. Đặt helper ở XuLyDonShopee.Core (vd `SlipMagic.LooksPdf`, chuẩn 5 byte `%PDF-` — chặt hơn, PDF hợp lệ luôn có); cả 2 nơi gọi chung. Ghi rõ vào báo cáo việc siết Core từ 4→5 byte (khác biệt hành vi lý thuyết: file 4-byte-đúng 5-byte-sai trước đây được lưu rồi App từ chối đọc — giờ từ chối ngay từ lúc lưu, hợp lý hơn).
 
+### C9. Dọn "xác mới" lộ ra sau đợt B (danh sách từ nghiệm thu đợt B + đề xuất executor B)
+Grep xác nhận lại từng cái trước khi xóa (luật như đợt B):
+- `ScrapeRunner.ChunkResult.CaptchaUrl` — chỉ-ghi-không-đọc (reader là RunAsync manual đã xóa).
+- `BackupService`: tham số `replace` luôn false ở cả 2 call site → nhánh replace bất khả đạt; `rebaseDir` luôn null; xmldoc còn nhắc "import-zip". Rút chữ ký `MergeBigSeller`/`MergeShopee` cho khớp thực tế.
+- `orders/.../Enums.cs`: `ProxyType` + `ProxyStatus` 0 consumer (GIỮ `AccountStatus`).
+- `extensions/shopee-search`: `typeAndSearch` + `typeAndSearchSynthetic` (page-funcs.js, ~130 dòng) + `isProductNotFoundPage` (detect.js) mồ côi. **`getCurrentTabUrl` CÒN SỐNG (crawl.js:4, detect.js:3) — KHÔNG xóa.**
+- `Theme.xaml`: `BrandBadgeBrush`, `cardButton`, `emoji` 0 StaticResource dùng.
+- `HubServerConfig.Load()` hạ private (chỉ ctor gọi).
+- `AppSession` (UpdateProduct): `ProjectSourceDirectory`/`ApiPort` 8112/`ResolveDataPath` 0 reader — bản sao thành viên chết đã dọn ở MultiBrave (nếu C1 hợp nhất AppSession thì tự khắc biến mất — đừng làm 2 lần).
+- `BigSellerProfileManager.EnsureWorkflowProfile` tham số `shop` không dùng.
+- `SearchConfig.Mode` đổi mặc định `"keyword"` → `"categoryFromLink"` (mặc định đang trỏ vào flow không tồn tại) + sửa xmldoc SearchConfig.cs:17,22 và comment AppIcons.cs:5,22 còn nhắc màn Welcome.
+- `XuLyDonShopee.App.csproj`: xóa `<Resource Include="Assets\**"/>` (thư mục không còn tồn tại).
+
 ## 4. Tiêu chí nghiệm thu
 
 - [ ] Build 2 solution 0 error 0 warning; 3 bộ test xanh, số test KHÔNG giảm.

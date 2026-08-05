@@ -9,9 +9,6 @@ public static class HubDefaults
     /// <summary>URL hub công khai (qua Cloudflare Tunnel).</summary>
     public const string BaseUrl = "https://api.schedra.net";
 
-    /// <summary>Domain công khai của Hub (public hostname trên Cloudflare).</summary>
-    public const string Domain = "api.schedra.net";
-
     /// <summary>Cổng local mà Hub (Kestrel) lắng nghe / cloudflared trỏ tới.</summary>
     public const int Port = 8088;
 

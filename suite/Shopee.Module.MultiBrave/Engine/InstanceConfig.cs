@@ -6,7 +6,6 @@ public sealed class InstanceConfig
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
     public string AccountId { get; set; } = "";
-    public string ShopId { get; set; } = "";
     public string Label { get; set; } = "";
     public string KiotProxyKey { get; set; } = "";
     public string Region { get; set; } = "random";
@@ -22,12 +21,7 @@ public sealed class InstanceConfig
     public bool RequireProxy { get; set; } = true;
     public string ProfileRelativePath { get; set; } = "";
 
-    /// <summary>
-    /// Profile nằm trong persistent-data (bền) thay vì runtime-sessions (ephemeral, bị xoá mỗi phiên).
-    /// </summary>
-    public bool UsePersistentSharedProfile { get; set; }
     public bool CreateNewProfileOnNextStart { get; set; }
-    public bool ExportShopee { get; set; } = true;
     public string ShopeeAccountLogin { get; set; } = "";
     public bool OpenWithShopeeAccount { get; set; }
 
@@ -83,7 +77,6 @@ public sealed class InstanceConfig
     /// <summary>URL trang lúc dính captcha (để lưu vào tk Shopee → "Kiểm tra tk lỗi" mở đúng trang đó).</summary>
     public string? CaptchaUrl { get; set; }
     public List<RunnerLogEntry> RunLog { get; set; } = [];
-    public List<PendingScrapeLink> PendingScrapeLinks { get; set; } = [];
     public DateTimeOffset? ProgressSyncedAt { get; set; }
 
     [JsonIgnore]
@@ -236,13 +229,4 @@ public sealed class InstanceConfig
 
     [JsonIgnore]
     public int? SuggestedResumeRow => ComputeSuggestedNextRow();
-}
-
-public sealed class PendingScrapeLink
-{
-    public int RowNumber { get; set; }
-    public string SheetName { get; set; } = "";
-    public string Link { get; set; } = "";
-    public DateTimeOffset SavedAt { get; set; } = DateTimeOffset.Now;
-    public string Reason { get; set; } = "";
 }

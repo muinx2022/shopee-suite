@@ -1,8 +1,6 @@
 <Application x:Class="Shopee.Suite.App"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:vm="clr-namespace:Shopee.Suite.ViewModels"
-             xmlns:views="clr-namespace:Shopee.Suite.Views"
              xmlns:ws="clr-namespace:Shopee.Suite.Modules.Workspace"
              xmlns:bs="clr-namespace:Shopee.Suite.Modules.BigSeller"
              xmlns:data="clr-namespace:Shopee.Suite.Modules.Data"
@@ -35,15 +33,9 @@
             <conv:WiderThanConverter x:Key="WiderThan" />
 
             <!-- ══════════ ViewModel-first navigation (thay ViewLocator reflection của bản Avalonia) ══════════ -->
-            <!-- ĐÃ PORT HẾT: Welcome + ComingSoon (đợt 1); BigSeller + Data + Accounts (đợt 2); Workspace
-                 (đợt 3); Search + CheckAccount + Fleet (đợt 4); Cài đặt gộp + module Đơn hàng (đợt 5).
-                 `ComingSoonView` chỉ còn phục vụ ComingSoonViewModel (màn báo "sắp có" thật của shell). -->
-            <DataTemplate DataType="{x:Type vm:WelcomeViewModel}">
-                <views:WelcomeView />
-            </DataTemplate>
-            <DataTemplate DataType="{x:Type vm:ComingSoonViewModel}">
-                <views:ComingSoonView />
-            </DataTemplate>
+            <!-- ĐÃ PORT HẾT: BigSeller + Data + Accounts (đợt 2); Workspace (đợt 3); Search + CheckAccount +
+                 Fleet (đợt 4); Cài đặt gộp + module Đơn hàng (đợt 5). Màn Chào (Welcome) + màn "Sắp có"
+                 (ComingSoon) đã XOÁ ở đợt dọn 2026-08-06 — không màn nào của shell còn dùng. -->
             <DataTemplate DataType="{x:Type bs:BigSellerViewModel}">
                 <bs:BigSellerView />
             </DataTemplate>

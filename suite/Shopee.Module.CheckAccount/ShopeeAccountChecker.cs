@@ -147,66 +147,6 @@ public sealed class ShopeeAccountChecker
     }
 
     /// <summary>
-    /// Luồng "kiểm tra tk lỗi" (batch) CÓ link captcha: MỞ Brave → nếu profile CHƯA có phiên thì TỰ ĐĂNG
-    /// NHẬP trước (giống "Check Shopee Account") → rồi ĐIỀU HƯỚNG tới ĐÚNG URL đã lưu để user GIẢI TAY.
-    /// Đã đăng nhập sẵn → bỏ qua login, vào thẳng URL. Giữ cửa sổ tới khi giải xong (đã đăng nhập / rời
-    /// trang verify) hoặc hết <paramref name="maxWaitMs"/>. Trả Success nếu đã giải; NeedsManual nếu chưa
-    /// (caller GIỮ tk để thử lại). <paramref name="accountLine"/> rỗng → bỏ qua login, chỉ mở URL (như cũ).
-    /// </summary>
-    public async Task<CheckResult> LoginThenManualSolveAsync(
-        string accountLine, string url, string? proxy, string profileDir, int maxWaitMs, CancellationToken ct)
-    {
-        if (string.IsNullOrWhiteSpace(url))
-            return new CheckResult(CheckOutcome.Error, "Không có URL captcha đã lưu.");
-
-        var launcher = new BrowserLauncher(BrowserKind.Brave);
-        CdpSession? cdp = null;
-        try
-        {
-            var hasLogin = !string.IsNullOrWhiteSpace(accountLine);
-            // Có tk → mở trang login trước (để auto-login); không có tk → mở luôn URL captcha.
-            launcher.Launch(profileDir, proxy, hasLogin ? LoginUrl : url);
-            cdp = await CdpSession.ConnectToPageAsync(launcher.CdpPort, ct);
-            await TrySend(cdp, "Network.enable", null, ct);
-            await TrySend(cdp, "Page.enable", null, ct);
-
-            if (hasLogin) await EnsureLoggedInAsync(cdp, accountLine, ct);
-
-            // Đã login (hoặc đã có phiên / không có tk) → mở ĐÚNG URL đã lưu để GIẢI TAY.
-            await TrySend(cdp, "Page.navigate", new { url }, ct);
-            Log?.Invoke("  đã mở ĐÚNG trang đã lưu — GIẢI TAY trong cửa sổ Brave…");
-
-            // Giữ cửa sổ tối đa maxWaitMs (sàn 30s) — thường ~1' để user giải tay; đăng nhập được thì đóng sớm.
-            var deadline = DateTime.UtcNow.AddMilliseconds(Math.Max(30_000, maxWaitMs));
-            var sawCaptcha = false;   // đã từng thấy trang /verify|captcha chưa (để tránh báo "đã rời" GIẢ)
-            while (DateTime.UtcNow < deadline)
-            {
-                ct.ThrowIfCancellationRequested();
-                await Task.Delay(2500, ct);
-                if (await IsLoggedInAsync(cdp, ct))
-                    return new CheckResult(CheckOutcome.Success, "Đã giải captcha (đã đăng nhập).");
-                var (u, _) = await ReadPageStateAsync(cdp, ct);
-                var lu = u.ToLowerInvariant();
-                if (lu.Contains("/verify") || lu.Contains("captcha")) { sawCaptcha = true; continue; }
-                // CHỈ coi "đã rời trang captcha → giải xong" khi TRƯỚC ĐÓ đã thực sự ở trang verify/captcha.
-                // Tránh: link lưu không phải /verify (fallback lưu link SP) → poll đầu tiên đã báo success GIẢ
-                // và đóng cửa sổ sau ~2.5s (thay vì giữ ~1' cho user thao tác).
-                if (sawCaptcha && !string.IsNullOrWhiteSpace(u))
-                    return new CheckResult(CheckOutcome.Success, "Đã rời trang captcha.");
-            }
-            return new CheckResult(CheckOutcome.NeedsManual, "Chưa giải captcha trong thời gian chờ — giữ tk để thử lại.");
-        }
-        catch (OperationCanceledException) { return new CheckResult(CheckOutcome.Error, "Đã dừng."); }
-        catch (Exception ex) { return new CheckResult(CheckOutcome.NeedsManual, "Cửa sổ đóng/lỗi — giữ tk: " + ex.Message); }
-        finally
-        {
-            if (cdp is not null) await cdp.DisposeAsync();
-            launcher.Kill();
-            await Task.Delay(400, CancellationToken.None);
-        }
-    }
-
-    /// <summary>
     /// Luồng GIẢI TAY double-click ("kiểm tra tk lỗi"): trên MỘT cửa sổ Brave ĐÃ được caller mở sẵn (caller
     /// GIỮ <paramref name="launcher"/> để tự Kill() bất cứ lúc nào — kể cả GIỮA lúc auto-login), nếu profile
     /// CHƯA có phiên thì TỰ ĐĂNG NHẬP trước (giống "Check Shopee Account") rồi điều hướng tới <paramref

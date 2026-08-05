@@ -1,13 +1,8 @@
-using System.IO.Compression;
 using System.Text.Json;
 using Shopee.Core.Accounts;
-using Shopee.Core.Ai;
 using Shopee.Core.BigSeller;
 
 namespace Shopee.Core.Infrastructure;
-
-/// <summary>Chọn mục để sao lưu/khôi phục.</summary>
-public sealed record BackupOptions(bool BigSeller, bool ShopeeAccounts, bool AiConfig);
 
 /// <summary>Kết quả khôi phục để báo người dùng.</summary>
 public sealed record ImportResult(
@@ -15,80 +10,15 @@ public sealed record ImportResult(
     int BigSellerUpdated = 0, int ShopeeUpdated = 0);
 
 /// <summary>
-/// Sao lưu / khôi phục dữ liệu suite ra/từ 1 file .zip để đồng bộ sang máy khác.
-/// Gói: tài khoản BigSeller (+ cookie BigSeller), tài khoản Shopee + proxy, cấu hình AI (keys).
-/// Khôi phục có 2 chế độ: GỘP (thêm mới, giữ cũ) hoặc THAY THẾ (ghi đè). Tự re-base đường dẫn
-/// WorkbookPath + CookieFile (vốn tuyệt đối theo máy cũ) sang máy hiện tại.
+/// Bộ GỘP dữ liệu suite khi đồng bộ từ Hub xuống client: tài khoản BigSeller (+ cookie) và tài khoản
+/// Shopee. Quy tắc gộp nằm hết ở đây — Hub là nguồn sự thật cho field DÙNG CHUNG, field RIÊNG-MÁY
+/// (cookie, workbook, profile, cấu hình chạy) luôn được giữ nguyên. Caller duy nhất: <c>HubConfigSync</c>.
+/// (Đường sao lưu/khôi phục ra file .zip đã bỏ ở đợt dọn 2026-08-06 — không còn UI nào gọi.)
 /// </summary>
 public static class BackupService
 {
     private static string SharedDir => SuitePaths.ModuleDir("shared");
     private static string CookieDir => Path.Combine(SharedDir, "bigseller-cookies");
-    private static readonly JsonSerializerOptions JsonOpts = new() { WriteIndented = true };
-
-    public static void Export(string zipPath, BackupOptions opt)
-    {
-        if (File.Exists(zipPath)) File.Delete(zipPath);
-        using var zip = ZipFile.Open(zipPath, ZipArchiveMode.Create);
-
-        if (opt.BigSeller)
-        {
-            AddFile(zip, Path.Combine(SharedDir, "bigseller.json"), "bigseller.json");
-            if (Directory.Exists(CookieDir))
-                foreach (var f in Directory.GetFiles(CookieDir, "*.json"))
-                    AddFile(zip, f, "bigseller-cookies/" + Path.GetFileName(f));
-        }
-        if (opt.ShopeeAccounts)
-            AddFile(zip, Path.Combine(SharedDir, "accounts.json"), "accounts.json");
-        if (opt.AiConfig)
-            AddFile(zip, Path.Combine(SharedDir, "ai.json"), "ai.json");
-
-        var manifest = zip.CreateEntry("manifest.json");
-        using var w = new StreamWriter(manifest.Open());
-        w.Write(JsonSerializer.Serialize(new { app = "ShopeeSuite", opt }, JsonOpts));
-    }
-
-    public static ImportResult Import(string zipPath, BackupOptions opt, bool replace, string? rebaseWorkbookDir)
-    {
-        using var zip = ZipFile.OpenRead(zipPath);
-        int bsAdded = 0, bsUpdated = 0, bsSkipped = 0, shAdded = 0, shUpdated = 0, shSkipped = 0, cookies = 0;
-        var aiImported = false;
-
-        // 1) Giải nén cookie BigSeller trước (để re-base CookieFile khi nạp account).
-        if (opt.BigSeller)
-        {
-            Directory.CreateDirectory(CookieDir);
-            foreach (var e in zip.Entries.Where(e =>
-                e.FullName.StartsWith("bigseller-cookies/", StringComparison.OrdinalIgnoreCase) && e.Name.Length > 0))
-            {
-                var dest = Path.Combine(CookieDir, e.Name);
-                if (replace || !File.Exists(dest)) { e.ExtractToFile(dest, overwrite: true); cookies++; }
-            }
-        }
-
-        // 2) Tài khoản BigSeller (gộp theo Email / thay thế).
-        if (opt.BigSeller && zip.GetEntry("bigseller.json") is { } bsEntry)
-        {
-            var imported = Deserialize<List<BigSellerAccount>>(bsEntry) ?? [];
-            (bsAdded, bsUpdated, bsSkipped) = MergeBigSeller(imported, replace, rebaseWorkbookDir);
-        }
-
-        // 3) Tài khoản Shopee (gộp theo login / thay thế).
-        if (opt.ShopeeAccounts && zip.GetEntry("accounts.json") is { } shEntry)
-        {
-            var imported = Deserialize<List<ShopeeAccount>>(shEntry) ?? [];
-            (shAdded, shUpdated, shSkipped) = MergeShopee(imported, replace);
-        }
-
-        // 4) Cấu hình AI (luôn ghi đè — là 1 cấu hình duy nhất).
-        if (opt.AiConfig && zip.GetEntry("ai.json") is { } aiEntry && Deserialize<AiConfig>(aiEntry) is { } cfg)
-        {
-            AiConfigStore.Shared.Save(cfg);
-            aiImported = true;
-        }
-
-        return new ImportResult(bsAdded, bsSkipped, shAdded, shSkipped, aiImported, cookies, bsUpdated, shUpdated);
-    }
 
     /// <summary>Gộp danh sách BigSeller vào store (dùng chung cho import-zip + đồng bộ Hub). append = replace:false.
     /// Acc ĐÃ CÓ (theo Id/email) mà nội dung DÙNG CHUNG khác (shop/label/email/proxy) → CẬP NHẬT xuống (Hub là
@@ -305,16 +235,5 @@ public static class BackupService
         if (!File.Exists(local)) return false;
         existing.CookieFile = local;
         return true;
-    }
-
-    private static void AddFile(ZipArchive zip, string path, string entryName)
-    {
-        if (File.Exists(path)) zip.CreateEntryFromFile(path, entryName);
-    }
-
-    private static T? Deserialize<T>(ZipArchiveEntry entry)
-    {
-        try { using var s = entry.Open(); return JsonSerializer.Deserialize<T>(s); }
-        catch { return default; }
     }
 }

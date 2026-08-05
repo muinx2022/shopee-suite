@@ -132,15 +132,6 @@ public sealed class HubClient : IDisposable
         var r = await _bulkHttp.PostAsJsonAsync(HubRoutes.SearchProducts, req, ct);
         r.EnsureSuccessStatusCode();
     }
-    public async Task<List<string>> SearchProductsAsync(CancellationToken ct = default)
-        => await _bulkHttp.GetFromJsonAsync<List<string>>(HubRoutes.SearchProducts, ct) ?? [];
-    public async Task<int> SearchProductCountAsync(CancellationToken ct = default)
-        => await _http.GetFromJsonAsync<int>(HubRoutes.SearchProductsCount, ct);
-    public async Task ClearSearchProductsAsync(CancellationToken ct = default)
-    {
-        var r = await _http.PostAsync(HubRoutes.SearchProductsClear, null, ct);
-        r.EnsureSuccessStatusCode();
-    }
 
     // ── Kho sản phẩm (Postgres — thay dần workbook Excel) ── (dùng _bulkHttp: payload dòng có thể vài MB qua tunnel)
     // Lỗi theo convention GET/POST hiện có: non-2xx → HttpRequestException (kèm StatusCode → 503 pg-not-ready
@@ -171,13 +162,6 @@ public sealed class HubClient : IDisposable
         var r = await _bulkHttp.PostAsJsonAsync(HubRoutes.ProductsRewritten, req, ct);
         r.EnsureSuccessStatusCode();
         return await r.Content.ReadFromJsonAsync<ProductRewrittenResponse>(ct);
-    }
-
-    public async Task<ProductAppendResponse?> PostProductAppendAsync(ProductAppendRequest req, CancellationToken ct = default)
-    {
-        var r = await _bulkHttp.PostAsJsonAsync(HubRoutes.ProductsAppend, req, ct);
-        r.EnsureSuccessStatusCode();
-        return await r.Content.ReadFromJsonAsync<ProductAppendResponse>(ct);
     }
 
     // ── RESUME per-SP: báo Hub đã Import / đã Update N itemId (tối ưu lọc lượt sau). Lỗi mạng → ném theo convention;

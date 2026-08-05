@@ -12,8 +12,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- Lớp HTTP client + parser KiotProxy dùng chung (một chiều: orders -> shared). -->
-    <ProjectReference Include="..\..\shared\Shopee.Proxy.Kiot\Shopee.Proxy.Kiot.csproj" />
     <!-- Hạ tầng thuần BCL dùng chung với suite (BraveArgs, BrowserLocator, WebSocketServer, selector đăng nhập
          Microsoft). Vẫn KHÔNG ref Shopee.Core — toolkit không kéo theo Avalonia/ClosedXML/WMI. -->
     <ProjectReference Include="..\..\shared\Shopee.Toolkit\Shopee.Toolkit.csproj" />

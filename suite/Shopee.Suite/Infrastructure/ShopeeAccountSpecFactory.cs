@@ -27,7 +27,7 @@ public static class ShopeeAccountSpecFactory
     {
         var (kiot, manual) = ResolveProxy(a);
         return new(a.Id, a.DisplayName, a.ShopeeAccountLogin, a.OpenWithShopeeAccount,
-            kiot, a.Region, a.ProxyType, manual, a.RequireProxy, sheet, 0, 0,
+            kiot, a.Region, a.ProxyType, manual, a.RequireProxy, sheet,
             ResolveScrapeProfileDir(a));
     }
 

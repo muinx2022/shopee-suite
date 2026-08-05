@@ -211,15 +211,11 @@ public sealed class UpdateProductRunner
                 var laneWf = wf;
                 if (lane > 0)
                 {
-                    // 1 port/lane: cả Import lẫn Update runner chỉ dùng DebugPort/ProfileDir (ImportDebugPort/
-                    // ImportProfileDir không runner nào đọc) → cấp 2 port là phí, cạn pool BigSeller nhanh gấp đôi.
+                    // 1 port/lane: cả Import lẫn Update runner chỉ dùng DebugPort/ProfileDir → cấp 2 port là
+                    // phí, cạn pool BigSeller nhanh gấp đôi. (Cặp Import* riêng đã bỏ hẳn — 0 runner nào đọc.)
                     var p1 = PortAllocator.Shared.AllocateBigSellerPort();
                     ports.Add(p1);
-                    laneWf = wf with
-                    {
-                        ProfileDir = $"{wf.ProfileDir}-p{lane}", DebugPort = p1,
-                        ImportProfileDir = $"{wf.ImportProfileDir}-p{lane}", ImportDebugPort = p1,
-                    };
+                    laneWf = wf with { ProfileDir = $"{wf.ProfileDir}-p{lane}", DebugPort = p1 };
                     try { await Task.Delay(2500 + lane * 1500, ct).ConfigureAwait(false); } catch (OperationCanceledException) { break; }
                 }
                 var captured = laneWf;

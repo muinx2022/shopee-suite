@@ -35,21 +35,4 @@ internal static class ExtensionProgressCoordinator
 
         return null;
     }
-
-    public static Task<bool> PushFormConfigAsync(
-        int cdpPort,
-        DirectoryInfo profileRoot,
-        string sheet,
-        int? startRow,
-        int? endRow,
-        CancellationToken cancellationToken)
-    {
-        return ExtensionRunnerAutomation.TryApplyFormConfigAsync(
-            cdpPort,
-            profileRoot,
-            sheet,
-            startRow,
-            endRow,
-            cancellationToken);
-    }
 }

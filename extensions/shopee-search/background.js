@@ -1,8 +1,6 @@
-// Entry service worker (MV3) của Shopee Search: đăng ký listener ở TOP-LEVEL rồi điều phối 3 flow.
-// Thân code nằm ở các module: core (state/WS/CDP), tabs, detect, crawl, extract, page-funcs, flow-*.
+// Entry service worker (MV3) của Shopee Search: đăng ký listener ở TOP-LEVEL rồi chạy flow category.
+// Thân code nằm ở các module: core (state/WS/CDP), tabs, detect, crawl, extract, page-funcs, flow-category.
 import { ctx, bridge, connectWs, log, resolveGesture, setAppMessageHandler, stopSearch, DEFAULT_WS_PORT } from './core.js';
-import { startSearch } from './flow-keyword.js';
-import { startShopFromLink } from './flow-shop.js';
 import { startCategoryFromLink } from './flow-category.js';
 
 // â”€â”€ Service worker keep-alive â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -14,11 +12,8 @@ function handleMessage(msg) {
   if (msg.kind === 'cdpInputAck') { resolveGesture(msg); return; }
   console.log('[SS] recv:', msg.action);
   switch (msg.action) {
-    case 'start':
-      if (msg.mode === 'shopFromLink') startShopFromLink(msg);
-      else if (msg.mode === 'categoryFromLink') startCategoryFromLink(msg);
-      else startSearch(msg);
-      break;
+    // Phía C# chỉ tạo SearchConfig với Mode="categoryFromLink" (FileRunCoordinator) — flow duy nhất còn sống.
+    case 'start':  startCategoryFromLink(msg); break;
     case 'stop':   stopSearch();     break;
   }
 }

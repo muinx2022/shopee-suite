@@ -44,7 +44,6 @@ internal sealed partial class BraveInstanceSession : IDisposable, ISessionMonito
     public event Action? StatusChanged;
     public event Action<string>? LogLine;
     public event Action? ExtensionProgressSynced;
-    public event Action<InstanceConfig>? ExtensionInterrupted;
     /// <summary>Runner loop kết thúc (xong / dừng / lỗi) — dùng cho chạy lượt.</summary>
     public event Action<string>? RunnerLoopEnded;
 
@@ -88,11 +87,8 @@ internal sealed partial class BraveInstanceSession : IDisposable, ISessionMonito
 
     public void ApplyConfig(InstanceConfig config) => _config = config;
 
-    // ── Cookie / proxy BigSeller (uỷ quyền cho BigSellerTokenGuard) ────────────────────────────────
+    // ── Cookie BigSeller (uỷ quyền cho BigSellerTokenGuard) ────────────────────────────────────────
     public void SetBigSellerCookieFile(string? cookieFile) => _bigSeller.SetCookieFile(cookieFile);
-
-    public void SetBigSellerProxy(string? key, string? region, string? proxyType) =>
-        _bigSeller.SetProxy(key, region, proxyType);
 
     /// <summary>Browser của instance này HIỆN có muc_token BigSeller sống không (qua CDP).</summary>
     public Task<bool> HasBigSellerAuthAsync() => _bigSeller.HasAuthAsync();
@@ -105,8 +101,6 @@ internal sealed partial class BraveInstanceSession : IDisposable, ISessionMonito
     /// <summary>Đảm bảo profile đã đăng nhập Shopee trước khi scrape.</summary>
     public Task<bool> EnsureShopeeLoggedInAsync(CancellationToken cancellationToken = default) =>
         _shopee.EnsureLoggedInAsync(cancellationToken);
-
-    public Task<bool> OpenShopeeAccountLoginAsync() => _shopee.OpenAccountLoginAsync();
 
     public async Task<bool> WaitForCdpReadyAsync(
         int attempts = 20,

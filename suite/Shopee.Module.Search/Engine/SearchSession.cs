@@ -129,7 +129,7 @@ public sealed class SearchSession : IAsyncDisposable
         _runCompletion = completion;
         using var registration = ct.Register(() => completion.TrySetResult(SearchRunOutcome.Cancelled));
 
-        _orchestrator = new SearchOrchestrator(_ws, _appSettings);
+        _orchestrator = new SearchOrchestrator(_ws);
         _orchestrator.ProgressChanged += msg => { Touch(); Log?.Invoke(msg); };
         _orchestrator.ProductFound += product => { Touch(); ProductFound?.Invoke(product); };
         _orchestrator.ProductPersisted += product => _taskStore.SaveProduct(TaskId, product);

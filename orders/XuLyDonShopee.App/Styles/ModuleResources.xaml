@@ -18,12 +18,8 @@
         <ResourceDictionary Source="pack://application:,,,/XuLyDonShopee.App;component/Styles/Controls.xaml" />
     </ResourceDictionary.MergedDictionaries>
 
-    <!-- 6 converter cũ của module (đã port sang IValueConverter của WPF ở đợt 1). -->
-    <conv:VietnameseEnumConverter x:Key="VnEnum" />
-    <conv:StatusColorConverter x:Key="StatusColor" />
-    <conv:DateTimeDisplayConverter x:Key="DateDisplay" />
-    <conv:InitialConverter x:Key="Initial" />
-    <conv:StatusPillConverter x:Key="StatusPill" />
+    <!-- Converter của module. (5 converter cũ VnEnum/StatusColor/DateDisplay/Initial/StatusPill đã XOÁ ở đợt
+         dọn 2026-08-06 — chỉ còn đăng ký ở đây, không view nào bind tới.) -->
     <conv:OrderStatusPillConverter x:Key="OrderStatusPill" />
 
     <!-- Converter ẩn/hiện + ngày (WPF không có IsVisible, cũng không có StringConverters/ObjectConverters

@@ -10,8 +10,7 @@ namespace XuLyDonShopee.App.Converters;
 /// "Đang giao", "Hoàn thành", "Đã hủy", "Đã hủy một phần", "Trả hàng/Hoàn tiền") + tham số vai trò
 /// (<c>bg</c> / <c>border</c> / <c>text</c>) thành <see cref="SolidColorBrush"/> cho badge pill ở cột
 /// "Trạng thái" màn Đơn hàng. Trạng thái là chuỗi tự do nên phân loại theo TỪ KHÓA (chứa) cho bền với
-/// biến thể chữ; không khớp nhóm nào → xám trung tính. Cùng bảng màu pill với
-/// <see cref="StatusPillConverter"/> (nền nhạt + viền mềm + chữ đậm) để đồng bộ giao diện.
+/// biến thể chữ; không khớp nhóm nào → xám trung tính. Bảng màu pill: nền nhạt + viền mềm + chữ đậm.
 /// </summary>
 public class OrderStatusPillConverter : IValueConverter
 {

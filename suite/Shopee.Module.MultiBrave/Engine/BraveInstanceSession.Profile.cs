@@ -30,11 +30,10 @@ internal sealed partial class BraveInstanceSession
     private static void PrepareProfileForLaunch(string profileRoot) =>
         BraveProfileManager.PrepareProfileForLaunch(profileRoot);
 
-    private string BuildBraveArguments(string userDataDir, string? proxyServer, string? bigSellerProxyServer) =>
+    private string BuildBraveArguments(string userDataDir, string? proxyServer) =>
         BraveProfileManager.BuildBraveArguments(
             _cdpPort, userDataDir, proxyServer, Log, _sourceUserData,
-            loadRunnerExtension: _extensionAutomationEnabled,
-            bigSellerProxyServer: bigSellerProxyServer);
+            loadRunnerExtension: _extensionAutomationEnabled);
 
     /// <summary>
     /// ĐƯỜNG THỰC THI DUY NHẤT để dựng Brave lên cho profile này — dùng cho CẢ khởi động lần đầu
@@ -68,10 +67,9 @@ internal sealed partial class BraveInstanceSession
         PrepareProfileForLaunch(_profileRoot.FullName);
         await _brave.KillAndWaitPortFreeAsync().ConfigureAwait(false);
 
-        // Phân giải proxy RIÊNG của tk BigSeller (nếu có key) NGAY trước khi build args → bigseller.com
-        // split-tunnel qua IP này (PAC), Shopee giữ proxyServer của instance. Không key → null = IP máy.
-        var bigSellerProxyServer = await _bigSeller.ResolveProxyServerAsync().ConfigureAwait(false);
-        var args = BuildBraveArguments(_profileRoot.FullName, proxyServer, bigSellerProxyServer);
+        // BigSeller LUÔN đi IP máy (--proxy-bypass-list trong BuildBraveArguments); Shopee giữ proxyServer
+        // của instance. Nhánh proxy RIÊNG cho BigSeller (PAC split-tunnel) đã bỏ hẳn — xem BigSellerTokenGuard.
+        var args = BuildBraveArguments(_profileRoot.FullName, proxyServer);
         _brave.Launch(_braveExe, args);
         _running = true;
         _proxySummary = proxyServer ?? "(không proxy)";
@@ -165,8 +163,7 @@ internal sealed partial class BraveInstanceSession
             if (wasRunnerActive)
             {
                 await Task.Delay(2500).ConfigureAwait(false);
-                await ResumeContinueAsync(_braveExe, _sourceUserData, preferSuggestedResume: true)
-                    .ConfigureAwait(false);
+                await ResumeContinueAsync(_braveExe, _sourceUserData).ConfigureAwait(false);
             }
         }
         finally
@@ -186,8 +183,7 @@ internal sealed partial class BraveInstanceSession
             if (wasRunnerActive)
             {
                 await Task.Delay(2500).ConfigureAwait(false);
-                await ResumeContinueAsync(_braveExe, _sourceUserData, preferSuggestedResume: true)
-                    .ConfigureAwait(false);
+                await ResumeContinueAsync(_braveExe, _sourceUserData).ConfigureAwait(false);
             }
         }
         finally

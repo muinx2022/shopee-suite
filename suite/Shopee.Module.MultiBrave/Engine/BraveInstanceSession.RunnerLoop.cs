@@ -32,7 +32,6 @@ internal sealed partial class BraveInstanceSession
     public Task ResumeContinueAsync(
         string braveExe,
         string sourceUserData,
-        bool preferSuggestedResume = true,
         bool retryExtensionStart = false,
         CancellationToken cancellationToken = default)
     {
@@ -125,7 +124,6 @@ internal sealed partial class BraveInstanceSession
                             _config!,   // non-null: ResumeContinueAsync throw nếu _config null trước khi lên Task.Run; ApplyConfig chỉ gán non-null.
                             Log,
                             () => { RefreshRunStatusFromConfig(); ExtensionProgressSynced?.Invoke(); },
-                            preferSuggestedResume: proxyAttempt > 0 || preferSuggestedResume,
                             loopToken,
                             onBeforeExtensionReady: async () =>
                             {
@@ -183,8 +181,8 @@ internal sealed partial class BraveInstanceSession
 
                     // Phase 4c: mất phiên BigSeller GIỮA CHỪNG (phase="needlogin") → TỰ đăng nhập lại (mint
                     // token mới khớp IP proxy này) rồi CHẠY TIẾP từ dòng dừng, thay vì bỏ cả job. Chỉ khi có
-                    // mật khẩu + còn lượt; xoá TTL để ép login lại. `continue` tăng proxyAttempt → vòng sau
-                    // preferSuggestedResume (proxyAttempt>0) tự chạy tiếp từ dòng dừng gần nhất.
+                    // mật khẩu + còn lượt; xoá TTL để ép login lại. `continue` chạy lại vòng runner; điểm tiếp
+                    // tục do `config.GetEffectiveRunRow()` quyết (dòng dừng gần nhất) — KHÔNG có cờ nào khác.
                     if (!loopToken.IsCancellationRequested
                         && string.Equals(_config?.RunnerPhase, "needlogin", StringComparison.OrdinalIgnoreCase)
                         && bigSellerReloginTries < maxBigSellerReloginTries

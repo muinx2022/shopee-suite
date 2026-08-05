@@ -104,17 +104,6 @@ public sealed class ShopeeAccountUsage
         lock (_lock) return _reserved.Add(id);
     }
 
-    /// <summary>Giành NHIỀU tk (best-effort) — trả về danh sách tk GIÀNH ĐƯỢC (bỏ tk module khác đang giữ).
-    /// Dùng cho Scrape đóng cả khung 1 lần.</summary>
-    public List<string> TryReserveMany(IEnumerable<string> ids)
-    {
-        var got = new List<string>();
-        lock (_lock)
-            foreach (var id in ids)
-                if (!string.IsNullOrEmpty(id) && _reserved.Add(id)) got.Add(id);
-        return got;
-    }
-
     /// <summary>tk có đang được module nào giữ chỗ không (để bỏ qua khi mượn).</summary>
     public bool IsReserved(string id)
     {

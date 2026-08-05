@@ -102,7 +102,6 @@ internal sealed partial class BraveInstanceSession
                     Log(
                         $"Bị dừng giữa chừng tại dòng {at} — sheet \"{sheet}\"{sku}{phase}. " +
                         $"Chạy tiếp từ dòng {resume} (bấm nút Chạy tiếp bên phải).");
-                    ExtensionInterrupted?.Invoke(_config);
                 }
             }
             else if (!silent)

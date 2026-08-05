@@ -34,6 +34,10 @@ public static class ClientApiEndpoints
         // Gom mọi route client vào 1 group yêu cầu policy "Client" (X-Api-Token).
         var api = app.MapGroup("").RequireAuthorization("Client");
 
+        // Logger để đánh dấu các endpoint HẾT consumer (client 08/2026 không còn gọi). KHÔNG xoá vội — soak
+        // 2–3 tuần xem log VM có lượt trúng nào không rồi mới gỡ (tiền lệ /accounts/append, gỡ 30/07).
+        var log = app.Logger;
+
         // ── File-sync (manifest + blob) ──
         api.MapGet(HubRoutes.Manifest, () => Results.Json(db.ListFiles()));
         api.MapGet("/files/{*name}", (string name) =>
@@ -107,9 +111,23 @@ public static class ClientApiEndpoints
 
         // ── Kho gộp kết quả Search ──
         api.MapPost(HubRoutes.SearchProducts, (SearchProductsPushRequest? r) => { if (r is null) return Results.BadRequest(); db.SaveSearchProducts(r); return Results.Ok(); });
-        api.MapGet(HubRoutes.SearchProducts, () => Results.Json(db.AllSearchProductJson()));
-        api.MapGet(HubRoutes.SearchProductsCount, () => Results.Json(db.SearchProductCount()));
-        api.MapPost(HubRoutes.SearchProductsClear, () => { db.ClearSearchProducts(); return Results.Ok(); });
+        // 3 route dưới HẾT consumer từ đợt dọn 06/08 (HubClient bỏ SearchProductsAsync/…Count/…Clear).
+        api.MapGet(HubRoutes.SearchProducts, (HttpRequest req) =>
+        {
+            log.LogWarning("legacy endpoint hit: {path} tu {ip}", req.Path.Value, req.HttpContext.Connection.RemoteIpAddress?.ToString() ?? "?");
+            return Results.Json(db.AllSearchProductJson());
+        });
+        api.MapGet(HubRoutes.SearchProductsCount, (HttpRequest req) =>
+        {
+            log.LogWarning("legacy endpoint hit: {path} tu {ip}", req.Path.Value, req.HttpContext.Connection.RemoteIpAddress?.ToString() ?? "?");
+            return Results.Json(db.SearchProductCount());
+        });
+        api.MapPost(HubRoutes.SearchProductsClear, (HttpRequest req) =>
+        {
+            log.LogWarning("legacy endpoint hit: {path} tu {ip}", req.Path.Value, req.HttpContext.Connection.RemoteIpAddress?.ToString() ?? "?");
+            db.ClearSearchProducts();
+            return Results.Ok();
+        });
 
         // ── Log tập trung ──
         api.MapPost(HubRoutes.Logs, (AppendLogRequest? r) => { if (r is null) return Results.BadRequest(); db.AppendLog(r); return Results.Ok(); });
@@ -216,8 +234,12 @@ public static class ClientApiEndpoints
         // ── Nghiệp vụ đơn hàng ──
         // GET /api/shops → danh sách shop (hub tự đăng ký theo username khi client push). Map TƯỜNG MINH sang
         // HubShopItem: vừa khoá hợp đồng với client, vừa CẮT password/cookie/proxy của bản Shop đầy đủ.
-        api.MapGet(HubRoutes.Shops, () =>
-            Results.Json(db.ListShops().Select(ToHubShopItem).ToList()));
+        // HẾT consumer (client không còn gọi) — đang soak trước khi gỡ.
+        api.MapGet(HubRoutes.Shops, (HttpRequest req) =>
+        {
+            log.LogWarning("legacy endpoint hit: {path} tu {ip}", req.Path.Value, req.HttpContext.Connection.RemoteIpAddress?.ToString() ?? "?");
+            return Results.Json(db.ListShops().Select(ToHubShopItem).ToList());
+        });
 
         // POST /api/orders/push → hub tự đăng ký shop theo username rồi upsert lô đơn + ghi log; có đơn MỚI
         // (Added>0) → bắn tin về webhook cấu hình (fire-and-forget, KHÔNG chặn response).
@@ -370,8 +392,10 @@ public static class ClientApiEndpoints
 
         // GET /api/orders?shopId=&status=&q=&page=&pageSize= → xem đơn (admin lẫn client API). LỌC + PHÂN TRANG
         // chạy Ở ĐÂY. Map tường minh OrderRecord → HubOrderItem.
-        api.MapGet(HubRoutes.Orders, (long? shopId, string? status, string? q, int? page, int? pageSize) =>
+        // HẾT consumer (client không còn gọi) — đang soak trước khi gỡ.
+        api.MapGet(HubRoutes.Orders, (long? shopId, string? status, string? q, int? page, int? pageSize, HttpRequest req) =>
         {
+            log.LogWarning("legacy endpoint hit: {path} tu {ip}", req.Path.Value, req.HttpContext.Connection.RemoteIpAddress?.ToString() ?? "?");
             var ps = Math.Clamp(pageSize ?? 50, 1, 500);
             var p = Math.Max(1, page ?? 1);
             var result = db.QueryOrdersPage(shopId, status, q, ps, (p - 1) * ps);

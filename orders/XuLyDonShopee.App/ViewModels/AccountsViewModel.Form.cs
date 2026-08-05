@@ -41,17 +41,7 @@ public partial class AccountsViewModel
     private string _editPassword = string.Empty;
 
     [ObservableProperty]
-    private string _editPhone = string.Empty;
-
-    [ObservableProperty]
     private string _editCookie = string.Empty;
-
-    [ObservableProperty]
-    private string _editNote = string.Empty;
-
-    /// <summary>API key KiotProxy riêng của tài khoản (để trống = dùng cấu hình chung / IP máy).</summary>
-    [ObservableProperty]
-    private string _editProxyKey = string.Empty;
 
     /// <summary>Địa chỉ lấy hàng mặc định của tài khoản (chọn từ <see cref="PickupAddressOptions"/>).</summary>
     [ObservableProperty]
@@ -87,11 +77,6 @@ public partial class AccountsViewModel
     /// <summary>Panel phải hiện chữ mờ khi không ở chế độ xem/sửa.</summary>
     public bool ShowPlaceholder => !IsEditing;
 
-    /// <summary>Nhãn kích thước cookie hiển thị cạnh tiêu đề khối cookie.</summary>
-    public string CookieSizeText => string.IsNullOrEmpty(EditCookie)
-        ? "JSON · trống"
-        : $"JSON · {System.Text.Encoding.UTF8.GetByteCount(EditCookie) / 1024.0:0.0} KB";
-
     /// <summary>True nếu tài khoản đang có cookie đăng nhập — dùng để hiện trạng thái gọn ("đã có/chưa có")
     /// thay cho ô hiển thị chuỗi cookie thô (đỡ dài form).</summary>
     public bool HasCookie => !string.IsNullOrWhiteSpace(EditCookie);
@@ -114,11 +99,7 @@ public partial class AccountsViewModel
         OnPropertyChanged(nameof(CanRun));
     }
 
-    partial void OnEditCookieChanged(string value)
-    {
-        OnPropertyChanged(nameof(CookieSizeText));
-        OnPropertyChanged(nameof(HasCookie));
-    }
+    partial void OnEditCookieChanged(string value) => OnPropertyChanged(nameof(HasCookie));
 
     [RelayCommand]
     private void Save()
@@ -153,14 +134,12 @@ public partial class AccountsViewModel
         Account account;
         if (IsNew || _editingId is null)
         {
+            // Phone/Note/ProxyKey KHÔNG có ô nhập trên form (đã bỏ) → tài khoản mới để null như mặc định model.
             account = new Account
             {
                 Email = user,
                 Password = EditPassword,
-                Phone = NullIfEmpty(EditPhone),
                 Cookie = NullIfEmpty(EditCookie),
-                Note = NullIfEmpty(EditNote),
-                ProxyKey = NullIfEmpty(EditProxyKey),
                 PickupAddress = EditPickupAddress,
                 VerifyEmail = EditVerifyEmail?.Trim() ?? "",
                 VerifyEmailPassword = EditVerifyEmailPassword ?? "",
@@ -179,12 +158,11 @@ public partial class AccountsViewModel
                 return;
             }
 
+            // Phone/Note/ProxyKey KHÔNG có ô nhập trên form → KHÔNG gán lại, giữ NGUYÊN giá trị vừa đọc từ DB
+            // (existing đến từ GetById). Gán qua form rỗng sẽ XOÁ dữ liệu người dùng đã có trong bảng.
             existing.Email = user;
             existing.Password = EditPassword;
-            existing.Phone = NullIfEmpty(EditPhone);
             existing.Cookie = NullIfEmpty(EditCookie);
-            existing.Note = NullIfEmpty(EditNote);
-            existing.ProxyKey = NullIfEmpty(EditProxyKey);
             existing.PickupAddress = EditPickupAddress;
             existing.VerifyEmail = EditVerifyEmail?.Trim() ?? "";
             existing.VerifyEmailPassword = EditVerifyEmailPassword ?? "";
@@ -248,10 +226,7 @@ public partial class AccountsViewModel
         _editingId = a.Id;
         EditEmail = a.Email;
         EditPassword = a.Password;
-        EditPhone = a.Phone ?? string.Empty;
         EditCookie = a.Cookie ?? string.Empty;
-        EditNote = a.Note ?? string.Empty;
-        EditProxyKey = a.ProxyKey ?? string.Empty;
         // Giá trị lạ/null (bản ghi cũ hoặc ngoài danh sách) → về mặc định, tránh ComboBox trống.
         EditPickupAddress = PickupAddressOptions.Contains(a.PickupAddress ?? "")
             ? a.PickupAddress!
@@ -272,10 +247,7 @@ public partial class AccountsViewModel
         _editingId = null;
         EditEmail = string.Empty;
         EditPassword = string.Empty;
-        EditPhone = string.Empty;
         EditCookie = string.Empty;
-        EditNote = string.Empty;
-        EditProxyKey = string.Empty;
         EditPickupAddress = DefaultPickupAddress;
         EditVerifyEmail = string.Empty;
         EditVerifyEmailPassword = string.Empty;

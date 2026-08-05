@@ -10,22 +10,18 @@ public sealed class AppSettingsService
     };
 
     private readonly string _settingsPath;
-    private readonly string _apiConfigPath;
     // Parallel auto-run logs in concurrently (login write-back), so serialize disk writes.
     private readonly object _saveLock = new();
 
     public LauncherSettings Settings { get; private set; } = new();
-    public ShopeeApiConfig ApiConfig { get; private set; } = new();
 
     public AppSettingsService()
     {
-        var appDir = AppContext.BaseDirectory;
         var dataDir = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
             "ShopeeStatApp");
         Directory.CreateDirectory(dataDir);
         _settingsPath = Path.Combine(dataDir, "settings.json");
-        _apiConfigPath = Path.Combine(appDir, "appsettings.json");
     }
 
     public void Load()
@@ -35,12 +31,6 @@ public sealed class AppSettingsService
             try { Settings = JsonSerializer.Deserialize<LauncherSettings>(File.ReadAllText(_settingsPath), Opts) ?? new(); }
             catch { Settings = new(); }
         }
-
-        if (File.Exists(_apiConfigPath))
-        {
-            try { ApiConfig = JsonSerializer.Deserialize<ShopeeApiConfig>(File.ReadAllText(_apiConfigPath), Opts) ?? new(); }
-            catch { ApiConfig = new(); }
-        }
     }
 
     public void SaveSettings()
@@ -48,20 +38,6 @@ public sealed class AppSettingsService
         lock (_saveLock)
             File.WriteAllText(_settingsPath, JsonSerializer.Serialize(Settings, Opts), Encoding.UTF8);
     }
-
-    public void SaveApiConfig(string json)
-    {
-        File.WriteAllText(_apiConfigPath, json, Encoding.UTF8);
-        try { ApiConfig = JsonSerializer.Deserialize<ShopeeApiConfig>(json, Opts) ?? new(); }
-        catch { }
-    }
-
-    public string GetApiConfigJson() =>
-        JsonSerializer.Serialize(ApiConfig, new JsonSerializerOptions
-        {
-            WriteIndented = true,
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        });
 
     public string GetProfileDir(InstanceConfig config)
     {

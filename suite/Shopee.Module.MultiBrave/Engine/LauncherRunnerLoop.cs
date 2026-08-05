@@ -33,7 +33,6 @@ internal static class LauncherRunnerLoop
         InstanceConfig config,
         Action<string> log,
         Action onProgress,
-        bool preferSuggestedResume,
         CancellationToken cancellationToken,
         Func<Task>? onBeforeExtensionReady = null,
         Func<Task>? onAfterExtensionReady = null,
@@ -642,17 +641,6 @@ internal static class LauncherRunnerLoop
         List<VideoCandidate> candidates,
         CancellationToken cancellationToken)
     {
-        var payload = new
-        {
-            sku,
-            candidates = candidates.Select(c => new
-            {
-                url = c.Url,
-                duration = c.Duration,
-                label = c.Label,
-            }),
-        };
-
         // TẢI NATIVE (HttpClient) thay cho API Python.
         var coreCandidates = candidates.Select(c => new Shopee.Core.Scrape.VideoCandidate(c.Url, c.Duration ?? 0, c.Label));
         var r = await Shopee.Core.Scrape.VideoDownloader.DownloadBestAsync(

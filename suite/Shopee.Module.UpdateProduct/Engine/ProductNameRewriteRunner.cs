@@ -277,7 +277,6 @@ internal sealed class ProductNameRewriteRunner
         var uniqueNames = new List<string>();
         var seen = new HashSet<string>(StringComparer.Ordinal);
         var rowsByName = new Dictionary<string, List<(int RowIndex, string Sku)>>(StringComparer.Ordinal);
-        var skuByName = new Dictionary<string, string>(StringComparer.Ordinal);
 
         var skippedNoName = 0;
         var skippedNoSku = 0;
@@ -309,8 +308,6 @@ internal sealed class ProductNameRewriteRunner
             rowsToUpdate.Add((r, originalName, sku));
             rowsByName.TryAdd(originalName, []);
             rowsByName[originalName].Add((r, sku));
-            if (!skuByName.ContainsKey(originalName))
-                skuByName[originalName] = sku;
             if (seen.Add(originalName))
                 uniqueNames.Add(originalName);
         }
@@ -327,7 +324,6 @@ internal sealed class ProductNameRewriteRunner
             RowsToUpdate = rowsToUpdate,
             UniqueNames = uniqueNames,
             RowsByOriginalName = rowsByName,
-            SkuByOriginalName = skuByName,
             SkippedNoName = skippedNoName,
             SkippedNoSku = skippedNoSku,
             SkippedExisting = skippedExisting,
@@ -350,7 +346,6 @@ internal sealed class ProductNameRewriteRunner
         var uniqueNames = new List<string>();
         var seen = new HashSet<string>(StringComparer.Ordinal);
         var rowsByName = new Dictionary<string, List<(int RowIndex, string Sku)>>(StringComparer.Ordinal);
-        var skuByName = new Dictionary<string, string>(StringComparer.Ordinal);
         var lastIncludedRow = firstRow;
 
         foreach (var r in rows)
@@ -363,8 +358,6 @@ internal sealed class ProductNameRewriteRunner
             rowsToUpdate.Add((r.RowNo, originalName, sku));
             rowsByName.TryAdd(originalName, []);
             rowsByName[originalName].Add((r.RowNo, sku));
-            if (!skuByName.ContainsKey(originalName))
-                skuByName[originalName] = sku;
             if (seen.Add(originalName))
                 uniqueNames.Add(originalName);
         }
@@ -381,7 +374,6 @@ internal sealed class ProductNameRewriteRunner
             RowsToUpdate = rowsToUpdate,
             UniqueNames = uniqueNames,
             RowsByOriginalName = rowsByName,
-            SkuByOriginalName = skuByName,
             SkippedNoName = 0,
             SkippedNoSku = 0,
             SkippedExisting = 0,
@@ -457,7 +449,6 @@ internal sealed class ProductNameRewriteRunner
         public required List<(int RowIndex, string OriginalName, string Sku)> RowsToUpdate { get; init; }
         public required List<string> UniqueNames { get; init; }
         public required Dictionary<string, List<(int RowIndex, string Sku)>> RowsByOriginalName { get; init; }
-        public required Dictionary<string, string> SkuByOriginalName { get; init; }
         public required int SkippedNoName { get; init; }
         public required int SkippedNoSku { get; init; }
         public required int SkippedExisting { get; init; }

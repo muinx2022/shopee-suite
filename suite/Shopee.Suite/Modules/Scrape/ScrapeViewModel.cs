@@ -367,7 +367,6 @@ public sealed partial class ScrapeViewModel : ModuleViewModelBase
             OnUi(target.RefreshProgress);
 
             runner = new ScrapeRunner(account.WorkbookPath, VideoDir, braveExe: null, s.SourceUserData, bigSellerAccountName: account.DisplayName,
-                bigSellerKiotKey: account.KiotProxyKey, bigSellerRegion: account.Region, bigSellerProxyType: account.ProxyType,
                 bigSellerAccountId: account.Id, useHubData: account.UsesHubData);   // hub-mode: engine nạp link từ kho Hub
             s.Jobs.TryUpdate(account.Id, j => j.Runner = runner);   // gán Runner DƯỚI lock (vs snapshot ở Stop)
             // Mỗi chunk xong → lưu tiến độ ngay (bền với dừng/treo).

@@ -29,7 +29,6 @@ internal static class UpdateProductSettings
             {
                 if (string.IsNullOrWhiteSpace(shop.Id))
                     shop.Id = Guid.NewGuid().ToString("N");
-                shop.UseSharedProfiles = true;
                 shop.BigSellerStartRow = Math.Max(2, shop.BigSellerStartRow);
                 shop.BigSellerEndRow = Math.Max(0, shop.BigSellerEndRow);
                 shop.BigSellerImportMaxProcess = Math.Clamp(shop.BigSellerImportMaxProcess, 1, 10);

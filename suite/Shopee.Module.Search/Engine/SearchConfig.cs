@@ -21,10 +21,4 @@ public sealed class SearchConfig
 
     /// <summary>URL để mở khi Mode == "shopFromLink" (link sản phẩm) hoặc "categoryFromLink" (link category).</summary>
     public string ProductLink { get; set; } = "";
-
-    /// <summary>
-    /// When true, results below MinPriceVnd are dropped in the app (used by shop-from-link mode,
-    /// where there is no Shopee price-range filter UI to enforce it).
-    /// </summary>
-    public bool FilterPriceClientSide { get; set; }
 }

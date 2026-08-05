@@ -12,7 +12,4 @@
   <ItemGroup>
     <ProjectReference Include="..\Shopee.Core\Shopee.Core.csproj" />
   </ItemGroup>
-  <ItemGroup>
-    <None Include="appsettings.json" Condition="Exists('appsettings.json')" CopyToOutputDirectory="PreserveNewest" />
-  </ItemGroup>
 </Project>

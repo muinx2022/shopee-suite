@@ -23,8 +23,6 @@ internal static class BigSellerContextFactory
             BravePath = settings.BraveExe.Trim(),
             ProfileDir = Path.GetFullPath(AppSession.ResolvePersistentDataPath(shop.BigSellerProfileRelativePath)),
             DebugPort = shop.BigSellerDebugPort,
-            ImportProfileDir = Path.GetFullPath(AppSession.ResolvePersistentDataPath(shop.BigSellerImportProfileRelativePath)),
-            ImportDebugPort = shop.BigSellerImportDebugPort,
             AccountId = account.Id,
             Email = account.Email,
             Password = account.Password,

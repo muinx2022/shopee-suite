@@ -1,11 +1,9 @@
 using System.IO;
-using Shopee.Core.Accounts;
 using Shopee.Core.BigSeller;
 using Shopee.Core.Browser;
 using Shopee.Core.Coordination;
 using Shopee.Core.Infrastructure;
 using Shopee.Modules.MultiBrave;
-using Shopee.Suite.Infrastructure;
 
 namespace Shopee.Suite.Modules.Scrape;
 
@@ -33,17 +31,6 @@ public sealed partial class ScrapeViewModel
         {
             var inst = Instances.FirstOrDefault(x => x.Key == K(key));
             if (inst is not null) { inst.AccountName = account; inst.RangeText = range; }
-        });
-        runner.AccountErrored += (id, label, reason, captchaUrl) => OnUi(() =>
-        {
-            // Lỗi NON-CAPTCHA (giữ nguyên): quarantine tk qua khu "Tài khoản bị lỗi" + đánh dấu bền + báo Hub.
-            // (Captcha KHÔNG đi đường này nữa — xem AccountCaptchaDropped.)
-            AccountErrorReporter.Report(ErroredAccounts, id, label, reason, "Scrape", captchaUrl);
-            var text = $"⚠ Tk lỗi: {label} — {reason}";
-            LogLines.Add(text);
-            AccountLogs.Get(account.Id, bigSellerName).Add(text);
-            // Cột "Tình trạng" → "⚠ Captcha" cho tk vừa dính lỗi trong lượt chạy này.
-            ShopeeAccountUsage.Shared.MarkCaptcha(id);
         });
         runner.AccountCaptchaDropped += (id, label) =>
         {

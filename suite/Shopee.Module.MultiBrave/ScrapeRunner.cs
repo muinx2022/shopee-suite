@@ -9,7 +9,7 @@ namespace Shopee.Modules.MultiBrave;
 public sealed record ScrapeAccountSpec(
     string Id, string Label, string ShopeeAccountLogin, bool OpenWithShopeeAccount,
     string KiotProxyKey, string Region, string ProxyType, string ManualProxy, bool RequireProxy,
-    string Sheet, int StartRow, int EndRow, string ShopeeProfileDir = "");
+    string Sheet, string ShopeeProfileDir = "");
 
 /// <summary>Kho tk Shopee DÙNG CHUNG cho auto-run: worker mượn 1 tk (nghỉ lâu nhất) TRƯỚC mỗi khối,
 /// chạy xong TRẢ về kho → xoay vòng toàn kho, cho tk nghỉ luân phiên. Nhiều job BigSeller chia sẻ cùng
@@ -42,9 +42,6 @@ public sealed class ScrapeRunner
     private readonly string _bigSellerAccountName;
     private readonly string _bigSellerAccountId;
     private readonly bool _useHubData;
-    private readonly string _bigSellerKiotKey;
-    private readonly string _bigSellerRegion;
-    private readonly string _bigSellerProxyType;
     private readonly ConcurrentDictionary<string, BraveInstanceSession> _sessions = new();
 
     /// <summary>(key, dòng log). key = account.Id (manual) hoặc "P{slot}" (auto).</summary>
@@ -53,12 +50,9 @@ public sealed class ScrapeRunner
     public event Action<string, string>? InstanceStatus;
     /// <summary>(key, tên account, khối dòng) — auto: khi 1 slot nhận tk + khối mới.</summary>
     public event Action<string, string, string>? SlotAssigned;
-    /// <summary>(accountId, tên account, lý do, urlCaptcha?) — tk dính captcha/proxy lỗi, bị loại khỏi vòng
-    /// xoay. urlCaptcha = trang lúc dính captcha (để "Kiểm tra tk lỗi" mở đúng trang đó), null nếu không có.</summary>
-    public event Action<string, string, string, string?>? AccountErrored;
     /// <summary>(accountId, label) — tk Shopee dính captcha khi scrape: đã LOẠI khỏi khung (đổi tk khác) và
-    /// CẦN xóa profile để lần chạy sau ép login mới. KHÁC <see cref="AccountErrored"/>: KHÔNG đánh dấu tk lỗi
-    /// (không Disabled, không vào lưới lỗi, không báo Hub). Handler ngoài lo xóa profile + log.</summary>
+    /// CẦN xóa profile để lần chạy sau ép login mới. KHÔNG đánh dấu tk lỗi (không Disabled, không vào lưới
+    /// lỗi, không báo Hub). Handler ngoài lo xóa profile + log.</summary>
     public event Action<string, string>? AccountCaptchaDropped;
     /// <summary>(from, to) — khoảng dòng vừa cào XONG (để lưu tiến độ resume). Báo theo từng chunk.</summary>
     public event Action<int, int>? RowsCompleted;
@@ -70,7 +64,6 @@ public sealed class ScrapeRunner
     public event Action<string>? JobFatal;
 
     public ScrapeRunner(string workbookPath, string videoOutputDir, string? braveExe = null, string sourceUserData = "", string bigSellerAccountName = "",
-        string bigSellerKiotKey = "", string bigSellerRegion = "random", string bigSellerProxyType = "http",
         string bigSellerAccountId = "", bool useHubData = false)
     {
         // Workbook giữ PER-INSTANCE (mang qua InstanceConfig) để chạy song song nhiều BigSeller mỗi
@@ -80,48 +73,10 @@ public sealed class ScrapeRunner
         // Hub-mode: link/tổng-dòng đọc từ kho Hub theo accountId (thay workbook). Mang qua InstanceConfig.
         _bigSellerAccountId = bigSellerAccountId ?? "";
         _useHubData = useHubData;
-        // Proxy RIÊNG của tk BigSeller (nếu có key) → mỗi instance đẩy bigseller.com qua IP này (split-tunnel).
-        _bigSellerKiotKey = bigSellerKiotKey ?? "";
-        _bigSellerRegion = string.IsNullOrWhiteSpace(bigSellerRegion) ? "random" : bigSellerRegion;
-        _bigSellerProxyType = string.IsNullOrWhiteSpace(bigSellerProxyType) ? "http" : bigSellerProxyType;
         if (!string.IsNullOrWhiteSpace(videoOutputDir)) ScrapeNativeSettings.VideoOutputDir = videoOutputDir;
         _braveExe = braveExe ?? BrowserLauncher.Detect(BrowserKind.Brave)
             ?? throw new FileNotFoundException("Không tìm thấy brave.exe. Hãy cài Brave Browser.");
         _sourceUserData = sourceUserData;
-    }
-
-    // ── Manual: mỗi account 1 khối cố định (spec.StartRow..EndRow), tối đa N đồng thời ──
-    public async Task RunAsync(
-        IReadOnlyList<ScrapeAccountSpec> specs, string? bigSellerCookieFile, int maxConcurrent, CancellationToken ct)
-    {
-        using var gate = new SemaphoreSlim(Math.Max(1, maxConcurrent));
-        // CTS phạm vi 1 job tk BigSeller: 1 lane thấy "log in first" → cancel để dừng mọi lane cùng tk.
-        using var jobCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        var jct = jobCts.Token;
-        var tasks = specs.Select(async (spec, index) =>
-        {
-            // Giãn khởi động lane đầu (tối đa maxConcurrent cái vào ngay) để không phóng Brave dồn cục.
-            if (index > 0 && index < maxConcurrent)
-            {
-                try { await Task.Delay(index * LaunchStaggerMs, jct).ConfigureAwait(false); }
-                catch (OperationCanceledException) { return; }
-            }
-            try { await gate.WaitAsync(jct).ConfigureAwait(false); }
-            catch (OperationCanceledException) { return; }
-            try
-            {
-                var res = await RunChunkAsync(spec, spec.Id, spec.StartRow, spec.EndRow, bigSellerCookieFile, jct).ConfigureAwait(false);
-                if (res.NeedLogin)
-                {
-                    InstanceLog?.Invoke(spec.Id, "⛔ " + res.Reason + " — DỪNG toàn bộ job tk BigSeller này.");
-                    BigSellerNeedLogin?.Invoke(res.Reason);
-                    try { jobCts.Cancel(); } catch { }
-                }
-                else if (res.Errored) AccountErrored?.Invoke(spec.Id, spec.Label, res.Reason, res.CaptchaUrl);
-            }
-            finally { gate.Release(); }
-        }).ToArray();
-        await Task.WhenAll(tasks);
     }
 
     // ── Auto (mô hình tiến trình động + vá): KHÔNG chia hết khối từ đầu. Có 1 đường biên (frontier)
@@ -456,8 +411,6 @@ public sealed class ScrapeRunner
                 }
             };
             if (!string.IsNullOrWhiteSpace(cookieFile)) session.SetBigSellerCookieFile(cookieFile);
-            // Proxy riêng tk BigSeller (nếu có) → engine phân giải IP mỗi lần mở Brave + split-tunnel bigseller.com.
-            session.SetBigSellerProxy(_bigSellerKiotKey, _bigSellerRegion, _bigSellerProxyType);
             // Import session Shopee đã đăng nhập (profile Edge của tk) → khỏi login form → tránh captcha.
             session.SetShopeeSessionProfileDir(spec.ShopeeProfileDir);
             session.ApplyConfig(cfg);
@@ -474,7 +427,7 @@ public sealed class ScrapeRunner
             try
             {
                 await session.ResumeContinueAsync(
-                    _braveExe, _sourceUserData, preferSuggestedResume: true, retryExtensionStart: true, ct)
+                    _braveExe, _sourceUserData, retryExtensionStart: true, cancellationToken: ct)
                     .ConfigureAwait(false);
                 using (ct.Register(() => done.TrySetResult()))
                     await done.Task.ConfigureAwait(false);

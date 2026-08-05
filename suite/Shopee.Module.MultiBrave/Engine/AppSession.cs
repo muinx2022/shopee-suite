@@ -13,14 +13,9 @@ internal static class AppSession
 
     public static string BaseDirectory { get; } = AppContext.BaseDirectory;
 
-    /// <summary>Thư mục project source (3 cấp trên bin/Release/net8.0-windows/) — không bị xóa khi Rebuild.</summary>
-    public static string ProjectSourceDirectory { get; } =
-        Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", ".."));
-
     public static string SessionId { get; private set; } = "";
     public static string RootDirectory { get; private set; } = "";
     public static int PortOffset { get; private set; }
-    public static int ApiPort { get; private set; }
 
     public static void Initialize()
     {
@@ -31,16 +26,7 @@ internal static class AppSession
         RootDirectory = Path.Combine(BaseDirectory, "runtime-sessions", SessionId);
         Directory.CreateDirectory(RootDirectory);
         PortOffset = AllocatePortOffset();
-        ApiPort = 8012 + (PortOffset / PortBlockSize);
         CleanupStaleSessions();
-    }
-
-    public static string ResolveDataPath(params string[] parts)
-    {
-        var all = new string[parts.Length + 1];
-        all[0] = RootDirectory;
-        Array.Copy(parts, 0, all, 1, parts.Length);
-        return Path.Combine(all);
     }
 
     // Dữ liệu bền (profile/cookie login Shopee + BigSeller) lưu ở %AppData%\ShopeeSuite\persistent-data —
@@ -113,8 +99,7 @@ internal static class AppSession
         IsPortFree(9430 + offset) &&
         IsPortFree(10000 + offset) &&
         IsPortFree(10400 + offset) &&
-        IsPortFree(9700 + offset) &&
-        IsPortFree(8012 + (offset / PortBlockSize));
+        IsPortFree(9700 + offset);
 
     public static bool IsPortFree(int port)
     {

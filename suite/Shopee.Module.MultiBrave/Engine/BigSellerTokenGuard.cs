@@ -25,28 +25,12 @@ internal sealed class BigSellerTokenGuard(
     /// <summary>Có cấu hình file cookie cho tk này không (không có → mọi bước token đều bỏ qua).</summary>
     public bool HasCookieFile => !string.IsNullOrWhiteSpace(_cookieFile);
 
-    /// <summary>
-    /// Proxy RIÊNG cho tk BigSeller (KiotProxy key/region/type). Có key → traffic bigseller.com đi qua
-    /// proxy này (split-tunnel PAC, xem BraveProfileManager) thay vì IP máy → mỗi tk BigSeller 1 IP.
-    /// Phân giải LẠI mỗi lần mở Brave (ưu tiên /current sticky) để không dùng IP đã hết hạn.
-    /// </summary>
-    private string _proxyKey = "";
-    private string _proxyRegion = "random";
-    private string _proxyType = "http";
-
-    public void SetProxy(string? key, string? region, string? proxyType)
-    {
-        _proxyKey = key?.Trim() ?? "";
-        _proxyRegion = string.IsNullOrWhiteSpace(region) ? "random" : region!.Trim();
-        _proxyType = string.IsNullOrWhiteSpace(proxyType) ? "http" : proxyType!.Trim();
-    }
-
-    // BIGSELLER LUÔN ĐI IP MÁY (direct/bypass) — CHỦ ĐÍCH tắt proxy riêng cho BigSeller.
+    // BIGSELLER LUÔN ĐI IP MÁY (direct/bypass) — CHỦ ĐÍCH bỏ hẳn proxy riêng cho BigSeller.
     // Lý do: proxy riêng (/current·/new) phân giải LẠI mỗi lần mở Brave, không đồng bộ giữa các lane →
     // IP đổi giữa chừng / nhiều IP trên 1 token → server đá phiên. Đây vốn là bản vá muộn không hiệu quả.
-    // Trả null → BraveProfileManager dùng --proxy-bypass-list cho bigseller.* (đi IP máy ổn định).
-    // (Muốn bật lại proxy riêng theo tk: khôi phục bản gọi BigSellerProxyResolver.ResolveServerAsync.)
-    public Task<string?> ResolveProxyServerAsync() => Task.FromResult<string?>(null);
+    // BraveProfileManager dùng --proxy-bypass-list cho bigseller.* (đi IP máy ổn định).
+    // (Muốn bật lại proxy riêng theo tk: dựng lại bản gọi BigSellerProxyResolver.ResolveServerAsync + PAC
+    //  split-tunnel — xem lịch sử git trước đợt dọn 2026-08-06.)
 
     /// <summary>Browser của instance này HIỆN có muc_token BigSeller sống không (qua CDP). Dùng để verify
     /// "BigSeller có out thật không": nếu 1 process báo login-first mà process ANH EM cùng khung vẫn còn
