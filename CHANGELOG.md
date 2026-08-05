@@ -2,7 +2,7 @@
 
 App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cài qua
 `ShopeeSuite-win-Setup.exe` một lần, từ đó tự tải delta và cập nhật bằng nút
-"Cập nhật & khởi động lại" trong Settings → Hiệu năng. Quy trình ra bản mới: sửa
+"Cập nhật & khởi động lại" trong Settings → Phiên bản & cập nhật. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
 ## v1.7.19 — 2026-08-04

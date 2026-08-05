@@ -30,6 +30,9 @@ namespace XuLyDonShopee.Core.Data;
 /// <see cref="ReturnRequestCode"/> = mã yêu cầu trả hàng khớp đơn (<c>return_request_code</c>; null = đơn chưa có
 /// yêu cầu trả hàng) và <see cref="GsheetDaCoDonTraHang"/> = lần đẩy gần nhất có gửi kèm mã đó chưa (0/1; null =
 /// chưa đẩy) — mẫu y hệt cặp vận đơn, để mã xuất hiện SAU vẫn được đẩy lại điền vào ô.
+/// <see cref="ShopLogin"/> = TÊN ĐĂNG NHẬP SHOP của ĐƠN (<c>shop_login</c>; null = đơn cũ chưa gắn shop) — nguồn
+/// cột "Shop" (F) trên sheet. Bắt buộc phải per-đơn: đường đẩy BÙ của worker gom MỌI shop của tài khoản trong
+/// một lượt nên không có "tên shop của cả lượt" để dùng chung.
 /// </summary>
 public sealed record GsheetPendingOrder(
     string OrderSn,
@@ -51,7 +54,8 @@ public sealed record GsheetPendingOrder(
     bool DaDayPhieuHub,
     string? GsheetTab,
     string? ReturnRequestCode,
-    long? GsheetDaCoDonTraHang);
+    long? GsheetDaCoDonTraHang,
+    string? ShopLogin = null);
 
 /// <summary>
 /// Kết quả phát hiện đơn CHUYỂN sang "đã giao" giữa 2 lần sync (<see cref="OrdersRepository.DetectNewlyDelivered"/>),
@@ -317,12 +321,13 @@ public class OrdersRepository
         // Lọc theo shop khi có shopId (mô hình nhiều-shop: chỉ đẩy đơn CỦA shop hiện tại, TenShop lấy theo shop đó
         // — không đẩy nhầm tên shop). shopId null → hành vi CŨ (mọi đơn của account).
         var shopFilter = string.IsNullOrEmpty(shopId) ? string.Empty : " AND shop_id = $shopId";
-        // items_json + cặp cột "đơn trả hàng" thêm ở CUỐI danh sách cột để KHÔNG lệch chỉ số reader.Get*(i) sẵn có.
+        // items_json + cặp cột "đơn trả hàng" + shop_login thêm ở CUỐI danh sách cột để KHÔNG lệch chỉ số
+        // reader.Get*(i) sẵn có.
         cmd.CommandText = @"SELECT order_sn, tracking_number, sku, total_price, final_amount,
        status, status_description, cancel_reason,
        gsheet_synced_at, gsheet_file_url, gsheet_da_huy, gsheet_da_co_van_don, gsheet_da_co_uoc_tinh,
        sold_counted_at, hub_synced_at, hub_slip_synced_at, gsheet_tab, items_json,
-       return_request_code, gsheet_da_co_don_tra_hang
+       return_request_code, gsheet_da_co_don_tra_hang, shop_login
     FROM orders
     WHERE account_id = $a" + shopFilter + @"
     ORDER BY id;";
@@ -356,7 +361,8 @@ public class OrdersRepository
                 DaDayPhieuHub: !reader.IsDBNull(15),
                 GsheetTab: reader.IsDBNull(16) ? null : reader.GetString(16),
                 ReturnRequestCode: reader.IsDBNull(18) ? null : reader.GetString(18),
-                GsheetDaCoDonTraHang: reader.IsDBNull(19) ? null : reader.GetInt64(19)));
+                GsheetDaCoDonTraHang: reader.IsDBNull(19) ? null : reader.GetInt64(19),
+                ShopLogin: reader.IsDBNull(20) ? null : reader.GetString(20)));
         }
         return list;
     }

@@ -5,6 +5,12 @@ public sealed class SearchOrchestrator
     private readonly WebSocketServer _ws;
     private readonly AppSettingsService _appSettings;
     private readonly List<ProductResult> _results = [];
+    // Chỉ mục (ItemId, ShopId) → CHÍNH phần tử đang nằm trong _results. AddResultIfNew chạy cho MỌI item của
+    // MỖI trang, ngay trên handler message WS; tra trùng bằng FirstOrDefault trên List là O(n) mỗi item ⇒ O(n²)
+    // cả lượt cào (vài chục nghìn SP thì handler nghẽn). Dictionary tra O(1).
+    // ⚠ PHẢI đồng bộ với _results ở MỌI chỗ mutate (hiện có đúng hai: Clear trong PrepareSearch + Add ở cuối
+    // AddResultIfNew). _results GIỮ NGUYÊN kiểu List vì Results phơi ra ngoài theo THỨ TỰ gặp.
+    private readonly Dictionary<(long ItemId, long ShopId), ProductResult> _resultIndex = new();
 
     private SearchConfig? _searchConfig;
     private SearchConfig? _pendingConfig;
@@ -42,6 +48,7 @@ public sealed class SearchOrchestrator
         _searchConfig = config;
         _searchActive = true;
         _results.Clear();
+        _resultIndex.Clear();
 
         // Extension already connected (e.g. it connected from the launch URL hash before we
         // finished logging in)? Send "start" now — there won't be another "ready" to trigger it.
@@ -234,8 +241,8 @@ public sealed class SearchOrchestrator
     private bool AddResultIfNew(ProductResult result)
     {
         if (result.ItemId <= 0 || result.ShopId <= 0) return false;
-        var existing = _results.FirstOrDefault(r => r.ItemId == result.ItemId && r.ShopId == result.ShopId);
-        if (existing is not null)
+        var key = (result.ItemId, result.ShopId);
+        if (_resultIndex.TryGetValue(key, out var existing))
         {
             var changed = false;
             if (!string.IsNullOrWhiteSpace(result.Name) && existing.Name != result.Name)
@@ -286,6 +293,7 @@ public sealed class SearchOrchestrator
         }
 
         _results.Add(result);
+        _resultIndex[key] = result;
         ProductFound?.Invoke(result);
         ProductPersisted?.Invoke(result);
         return true;
@@ -333,7 +341,7 @@ public sealed class SearchOrchestrator
 
         return sb.ToString()
             .Normalize(System.Text.NormalizationForm.FormC)
-            .Replace("d", "d")
+            .Replace("đ", "d")
             .Replace(".", " ")
             .Replace("-", " ")
             .Replace("_", " ")

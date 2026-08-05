@@ -9,11 +9,14 @@ Seller Centre → lặp qua từng shop (đọc đơn, đặt địa chỉ lấy
 | Project | Vai trò |
 |---|---|
 | `XuLyDonShopee.Core` | Thư viện lõi: model, `Data/` (SQLite qua `Microsoft.Data.Sqlite`), `Services/` (luồng đăng nhập Playwright, cầu nối extension, parser, GSheet). Ref `shared/Shopee.Proxy.Kiot` + `shared/Shopee.Toolkit` — **KHÔNG** ref `suite/Shopee.Core`. |
-| `XuLyDonShopee.App` | **Avalonia 11.3** (KHÔNG phải WPF) + `CommunityToolkit.Mvvm`. Build ra **DLL**, không phải exe — shell `Shopee.Suite` nạp làm module. `ViewModels/`, `Views/`, `Services/` (vòng đời phiên, đẩy hub/GSheet). |
-| `XuLyDonShopee.Tests` | xUnit. `Using Include="Xunit"` sẵn nên file test không cần `using Xunit;`. |
+| `XuLyDonShopee.App` | **WPF** (`net8.0-windows` + `UseWPF`) + `CommunityToolkit.Mvvm`. Build ra **DLL**, không phải exe — shell `Shopee.Suite` nạp làm module. `ViewModels/`, `Views/` (`*.xaml` + `Styles/` + `Controls/`), `Services/` (vòng đời phiên, đẩy hub/GSheet). |
+| `XuLyDonShopee.Tests` | xUnit, cũng `net8.0-windows` + `UseWPF` (có test dựng control WPF thật). `Using Include="Xunit"` sẵn nên file test không cần `using Xunit;`. |
 
-`net8.0`, `Nullable=enable` cả ba. Hai project nguồn đều mở `InternalsVisibleTo` cho Tests → **test thẳng được
-hàm `internal`**, không phải nới `public` chỉ để test.
+`Nullable=enable` cả ba. Khung đích: Core `net8.0`, App + Tests `net8.0-windows`. Hai project nguồn đều mở
+`InternalsVisibleTo` cho Tests → **test thẳng được hàm `internal`**, không phải nới `public` chỉ để test.
+
+> Module này TỪNG chạy Avalonia; đã port sang WPF xong ở đợt 6 (31/07/2026). Nhánh `avalonia` chỉ còn cho
+> hướng Ubuntu — đừng lấy nó làm hiện trạng của `orders/`.
 
 ## Build / test
 

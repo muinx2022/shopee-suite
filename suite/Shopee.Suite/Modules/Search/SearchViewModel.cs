@@ -32,7 +32,9 @@ public sealed partial class SearchViewModel : ModuleViewModelBase
     [ObservableProperty] private SearchFileTab? _selectedLinkTab;
 
     public ObservableCollection<ErroredAccountRow> ErroredAccounts { get; } = [];
-    public ObservableCollection<string> Categories { get; } = ["(Tất cả)"];
+    /// <summary>Mục "không lọc" của ComboBox Danh mục (tab Xuất Excel).</summary>
+    private const string TatCaDanhMuc = "(Tất cả)";
+    public ObservableCollection<string> Categories { get; } = [TatCaDanhMuc];
 
     // Tab "Danh mục (AI)"
     public ObservableCollection<SearchTaskStore.CategoryRow> CategoryRows { get; } = [];
@@ -54,7 +56,7 @@ public sealed partial class SearchViewModel : ModuleViewModelBase
     [ObservableProperty] private long _minPrice;
     [ObservableProperty] private int _minSoldFrom;
     [ObservableProperty] private int _minSoldTo;
-    [ObservableProperty] private string _categoryFilter = "(Tất cả)";
+    [ObservableProperty] private string _categoryFilter = TatCaDanhMuc;
 
     // Tab Danh mục (AI)
     [ObservableProperty] private string _categoryDocxPath = "";
@@ -95,7 +97,7 @@ public sealed partial class SearchViewModel : ModuleViewModelBase
     {
         LoadUiSettings();
         Reload();
-        RefreshCategoryGrid();
+        NapDanhMucLucKhoiDong();
         if (_filePaths.Count > 0) LoadLinks();
         AccountStore.Shared.Changed += () =>
         {
@@ -484,7 +486,7 @@ public sealed partial class SearchViewModel : ModuleViewModelBase
     // ── Xuất Excel ──────────────────────────────────────────────────────────────
     private SearchFilter? BuildFilter()
     {
-        var cat = CategoryFilter == "(Tất cả)" ? null : CategoryFilter;
+        var cat = CategoryFilter == TatCaDanhMuc ? null : CategoryFilter;
         return new SearchFilter(MinPrice, MinSoldFrom, MinSoldTo, cat);
     }
 
@@ -519,6 +521,9 @@ public sealed partial class SearchViewModel : ModuleViewModelBase
         _all.Clear(); _seenLinks.Clear();
         foreach (var t in LinkTabs) { t.Products.Clear(); t.ProductCount = 0; }
         RefreshCategoryGrid();
+        // ComboBox lọc Danh mục cũng phải theo: ClearFileHistory xoá cả bảng categories, để nguyên thì combo
+        // còn treo danh mục của dữ liệu vừa bị xoá (chọn vào là xuất ra file rỗng).
+        ReloadCategoryFilterFromDb();
         Status = "Đã xóa dữ liệu đã quét.";
     }
 
@@ -536,6 +541,24 @@ public sealed partial class SearchViewModel : ModuleViewModelBase
         CategoryRows.Clear();
         foreach (var c in Db.GetCategoryRows()) CategoryRows.Add(c);
         Status = $"{CategoryRows.Count} danh mục trong CSDL.";
+    }
+
+    /// <summary>Nạp danh mục lúc khởi động bằng MỘT lượt truy vấn cho cả lưới lẫn combo lọc
+    /// (<c>GetCategoryRows</c> là JOIN <c>shop_products</c> — gọi riêng hai lượt là quét hai lần trên UI thread
+    /// khi mở app), và CSDL hỏng không được làm chết ctor VM: lưới để trống, combo còn "(Tất cả)".</summary>
+    private void NapDanhMucLucKhoiDong()
+    {
+        IReadOnlyList<SearchTaskStore.CategoryRow> rows;
+        try { rows = Db.GetCategoryRows(); }
+        catch (Exception ex)
+        {
+            Log("Không nạp được danh mục từ CSDL: " + ex.Message);
+            rows = [];
+        }
+        CategoryRows.Clear();
+        foreach (var c in rows) CategoryRows.Add(c);
+        Status = $"{CategoryRows.Count} danh mục trong CSDL.";
+        ReloadCategoryFilterFromDb(rows);
     }
 
     private bool CanRunAi() => AiIdle;
@@ -642,6 +665,38 @@ public sealed partial class SearchViewModel : ModuleViewModelBase
     {
         foreach (var c in _all.Select(x => x.Category).Where(c => !string.IsNullOrWhiteSpace(c)).Distinct().OrderBy(c => c))
             if (!Categories.Contains(c)) Categories.Add(c);
+    }
+
+    /// <summary>
+    /// Nạp ComboBox lọc Danh mục (tab Xuất Excel) TỪ CSDL. Nguồn phải là CSDL vì nút "Xuất tất cả" xuất từ CSDL
+    /// (<c>Db.ExportAllShops</c> → <c>shop_products</c>), không phải từ dữ liệu phiên: trước đây
+    /// <see cref="Categories"/> chỉ được <see cref="RefreshCategories"/> bơm từ <c>_all</c> (kết quả của lượt chạy
+    /// hiện tại) nên mở app lên chưa chạy gì là combo trống trơn — không lọc nổi kho đã quét từ trước.
+    /// <para>Bảng <c>categories</c> chính là từ điển danh mục của <c>shop_products</c> (upsert mỗi lần
+    /// <c>SaveShopProducts</c>, xoá cùng lúc trong <c>ClearFileSearchHistory</c>) nên dùng thẳng làm nguồn.</para>
+    /// Giữ lựa chọn đang có nếu danh mục đó còn trong CSDL, ngược lại về "(Tất cả)".
+    /// </summary>
+    private void ReloadCategoryFilterFromDb(IReadOnlyList<SearchTaskStore.CategoryRow>? rows = null)
+    {
+        var dangChon = CategoryFilter;
+        Categories.Clear();
+        Categories.Add(TatCaDanhMuc);
+        try
+        {
+            foreach (var name in (rows ?? Db.GetCategoryRows())
+                         .Select(c => c.Name)
+                         .Where(n => !string.IsNullOrWhiteSpace(n))
+                         .Distinct(StringComparer.OrdinalIgnoreCase)
+                         .OrderBy(n => n, StringComparer.CurrentCultureIgnoreCase))
+                Categories.Add(name);
+        }
+        catch (Exception ex)
+        {
+            // CSDL hỏng/khoá → combo vẫn dùng được với mỗi "(Tất cả)"; không để chết constructor VM.
+            Log("Không nạp được danh mục từ CSDL: " + ex.Message);
+        }
+
+        CategoryFilter = Categories.Contains(dangChon) ? dangChon : TatCaDanhMuc;
     }
 
 }

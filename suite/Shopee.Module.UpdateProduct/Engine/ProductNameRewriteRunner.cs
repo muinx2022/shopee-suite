@@ -430,7 +430,7 @@ internal sealed class ProductNameRewriteRunner
             if (NormalizeText(ws.Name) == desired)
                 return ws;
         }
-        throw new InvalidOperationException($"Không tìm th?y sheet: {sheetName}");
+        throw new InvalidOperationException($"Không tìm thấy sheet: {sheetName}");
     }
 
     private static void EnsureRewrittenNameColumnHeader(IXLWorksheet ws, int rewrittenNameColumn)

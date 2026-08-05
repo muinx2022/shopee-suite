@@ -31,3 +31,11 @@ tools/scrape-test-agent/
 .cursor/
 artifacts/
 scratchpad/
+
+# Du lieu runtime cua hub web khi chay LOCAL — TUYET DOI khong commit (repo la public):
+#   hub-data/dp-keys/ = khoa Data Protection (XML chua khoa doi xung)
+#   hub-data/files/   = kho cookie/workbook client sync len
+server/Shopee.Hub.Web/hub-data/
+
+# Ket qua chay test (dotnet test --results-directory)
+test-results/

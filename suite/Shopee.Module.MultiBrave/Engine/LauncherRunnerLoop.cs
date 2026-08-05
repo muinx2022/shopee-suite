@@ -382,8 +382,19 @@ internal static class LauncherRunnerLoop
                 if (config.RunLog.Count > 200)
                     config.RunLog.RemoveRange(0, config.RunLog.Count - 200);
 
-                config.LastCompletedRow = rowNumber;
-                config.NextRunRow = rowNumber + 1;
+                // CHỈ ghi nhận "đã xong" khi ĐÃ SCRAPE ĐƯỢC. Trước đây ghi VÔ ĐIỀU KIỆN ở đây nên dòng lỗi
+                // TẠM (không thuộc nhóm Aborted/ProxyError/Captcha/NeedLogin/"No SW" — vd "Tab scrape tạm mất
+                // kết nối", "Extension không phản hồi.") vẫn bị đánh dấu xong: ScrapeRunner.LastDoneOf đọc
+                // LastCompletedRow → phần vá tính từ lastDone+1 nên KHÔNG bao giờ chạy lại dòng đó, và cơ chế
+                // bỏ-dòng-kẹt (MaxStallRetries, chỉ kích hoạt khi lastDone KHÔNG tiến) cũng không thấy →
+                // mất dữ liệu IM LẶNG. Ca scrapeOk=true không đổi hành vi: dòng 251-252 đã ghi đúng giá trị này
+                // (ghi SỚM, trước bước video) nên bỏ ghi lại ở đây là no-op với dòng thành công.
+                if (scrapeOk)
+                {
+                    config.LastCompletedRow = rowNumber;
+                    config.NextRunRow = rowNumber + 1;
+                }
+
                 config.LastSku = sku;
                 config.LastRunnerMessage = videoOk
                     ? $"Xong dòng {rowNumber} - đã tải video."

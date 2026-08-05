@@ -221,7 +221,7 @@ internal sealed class SessionMonitor : IDisposable
                 _host.CurrentProxyFingerprint = fp;
             }
 
-            // Proxy API báo OK nhung Brave v?n hi?n "No internet"/ERR_PROXY... (tab chrome-error).
+            // Proxy API báo OK nhưng Brave vẫn hiện "No internet"/ERR_PROXY… (tab chrome-error).
             // Trường hợp này user đang phải Đóng profile → Mở lại thủ công. Tự động làm tương tự.
             // Runner đang chạy → để bước scrape tự bắt proxyError và handoff sang profile khác (proxy mới).
             // Monitor mở lại ở đây sẽ huỷ scrape đang chạy + dùng lại proxy cũ → vòng reload cùng một dòng.

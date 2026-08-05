@@ -8,27 +8,42 @@ Hướng dẫn chạy Shopee Suite ổn định khi cào nhiều Brave (Scrape/S
 
 ---
 
-## TL;DR — máy mới cần làm 5 việc
+## TL;DR — máy mới cần làm 4 việc
 1. Cài **Brave** + extension **"Product Copy" của BigSeller** cho Brave (Scrape bắt buộc có).
-2. **Build bản mới** (`publish-suite.cmd`).
+2. **Cài app bằng bộ cài** `ShopeeSuite-win-Setup.exe` tải từ
+   [GitHub Releases](https://github.com/muinx2022/shopee-suite/releases) — **KHÔNG build ở máy này**.
 3. **Thêm Windows Defender exclusions** (PowerShell Admin) — quan trọng nhất, chống ì.
 4. **Đặt số cửa sổ song song** hợp với RAM máy.
-5. Chạy `publish\ShopeeSuite\ShopeeSuite.exe`.
 
 ---
 
-## 1. Build / cập nhật bản chạy
-- **Đóng app + Brave trước khi build** (publish ghi đè đúng folder đang chạy, app đang mở sẽ khoá file).
-- Chạy `publish-suite.cmd` ở gốc repo, hoặc lệnh tương đương:
-  ```
-  dotnet publish suite\Shopee.Suite\Shopee.Suite.csproj -c Release -r win-x64 --self-contained true -p:PublishReadyToRun=true -o "publish\ShopeeSuite"
-  ```
-- Exe ra ở `publish\ShopeeSuite\ShopeeSuite.exe`.
-- Kiểm tra đang chạy ĐÚNG bản mới (PowerShell):
-  ```powershell
-  $s = Get-Process ShopeeSuite -ErrorAction SilentlyContinue
-  $s.Path; (Get-Item $s.Path).LastWriteTime    # ngày build phải mới
-  ```
+## 1. Cài đặt / cập nhật bản chạy
+
+> **Máy dùng thật KHÔNG build từ mã nguồn.** App phát hành qua **Velopack + GitHub Releases**: cài một lần
+> bằng bộ cài, sau đó client **tự tải bản delta**. Máy cài bằng cách chép thư mục `publish\` sẽ **không bao giờ**
+> nhận được delta hay lệnh cập nhật từ Hub — đó chính là cái bẫy tài liệu này từng mắc.
+
+**Cài lần đầu**
+1. Tải `ShopeeSuite-win-Setup.exe` ở [GitHub Releases](https://github.com/muinx2022/shopee-suite/releases)
+   (bản mới nhất) rồi chạy. Không cần quyền Admin.
+2. App cài vào **`%LocalAppData%\ShopeeSuite`** (`current\` = bản đang chạy, `packages\` = gói tải về,
+   `ShopeeSuite.exe` ở gốc là stub khởi động). Shortcut được tạo sẵn ở Start Menu.
+
+**Cập nhật về sau**
+- Trong app: **Cài đặt → tab Phiên bản & cập nhật → "Cập nhật & khởi động lại"**. App tự tải delta rồi khởi động lại.
+- Hoặc chờ Hub ra lệnh cập nhật cho cả fleet.
+- **Không** chạy lại bộ cài để cập nhật, **không** chép đè thư mục.
+
+**Kiểm tra đang chạy đúng bản nào** (PowerShell):
+```powershell
+$s = Get-Process ShopeeSuite -ErrorAction SilentlyContinue
+$s.Path                                          # …\AppData\Local\ShopeeSuite\current\ShopeeSuite.exe
+(Get-Item $s.Path).VersionInfo.ProductVersion    # so với version.txt / tag release mới nhất
+```
+
+> **Chỉ máy DEV mới build.** `publish-suite.cmd` (publish ra `publish\ShopeeSuite\`) giữ lại cho việc chạy thử
+> cục bộ khi đang phát triển; ra bản cho fleet thì dùng `release-suite.cmd` (bump `version.txt` → `vpk pack` →
+> `vpk upload github`). Bản chạy từ `publish\` **không tự cập nhật được**.
 
 ---
 
@@ -37,13 +52,13 @@ Hướng dẫn chạy Shopee Suite ổn định khi cào nhiều Brave (Scrape/S
 → nghẽn đĩa/CPU → máy **ì dù RAM còn dư**. Loại các thư mục dữ liệu app + 2 process khỏi quét realtime sẽ
 cắt nguồn ì này. (Chỉ loại dữ liệu app tin cậy — an toàn, và gỡ lại được bất cứ lúc nào.)
 
-Mở **PowerShell (Run as administrator)** → dán (sửa path video + publish cho đúng máy):
+Mở **PowerShell (Run as administrator)** → dán (chỉ sửa path video cho đúng máy):
 ```powershell
 Add-MpPreference -ExclusionProcess "brave.exe"
 Add-MpPreference -ExclusionProcess "ShopeeSuite.exe"
-Add-MpPreference -ExclusionPath "$env:APPDATA\ShopeeSuite"
-Add-MpPreference -ExclusionPath "D:\videos"                                       # ĐỔI thành thư mục video thật
-Add-MpPreference -ExclusionPath "D:\Projects\shopee-suite\publish\ShopeeSuite"    # ĐỔI thành nơi đặt publish
+Add-MpPreference -ExclusionPath "$env:APPDATA\ShopeeSuite"        # dữ liệu app (profile, db, cache)
+Add-MpPreference -ExclusionPath "$env:LOCALAPPDATA\ShopeeSuite"   # nơi Velopack cài app + tải gói cập nhật
+Add-MpPreference -ExclusionPath "D:\videos"                       # ĐỔI thành thư mục video thật
 ```
 Kiểm tra đã vào chưa:
 ```powershell
@@ -107,5 +122,6 @@ $s=Get-Process ShopeeSuite; "$($s.HandleCount) handle / $($s.Threads.Count) thre
 
 ## Lưu ý quan trọng
 - Phải cài **extension "Product Copy" của BigSeller cho Brave** trước khi chạy Scrape (thiếu là Scrape dừng báo lỗi).
-- Profile login Shopee/BigSeller lưu ở `%AppData%\ShopeeSuite\persistent-data` — **bền qua các lần build** (không bị xoá).
+- Profile login Shopee/BigSeller lưu ở `%AppData%\ShopeeSuite\persistent-data` — **bền qua các lần cập nhật**
+  (Velopack chỉ thay thư mục cài `%LocalAppData%\ShopeeSuite`, không đụng dữ liệu ở `%AppData%`).
 - Đừng tắt media (ảnh/video) của Shopee để "cho nhẹ" — Shopee coi là bất thường, dễ dính captcha; và luồng tải video cần thẻ `<video>` nạp metadata.

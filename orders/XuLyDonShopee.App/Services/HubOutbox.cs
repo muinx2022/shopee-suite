@@ -284,10 +284,10 @@ public static class HubOutbox
             }
             else
             {
-                // Tên shop (cột E) = TÊN ĐĂNG NHẬP của SHOP hiện tại (mô hình nhiều-shop: vd "alina99.store"), lấy từ
-                // bảng /portal/shop khi vào loop. Fallback về Account.Email khi CHƯA vào loop (shopLogin null/rỗng —
-                // giữ hành vi cũ cho các đường không qua vòng lặp shop).
-                var tenShop = string.IsNullOrWhiteSpace(shopLogin)
+                // Tên shop (cột F) = TÊN ĐĂNG NHẬP của SHOP, tính THEO TỪNG ĐƠN bên dưới (p.ShopLogin). Đây là giá
+                // trị DÙNG CHUNG khi đơn chưa gắn shop (đơn cũ, shop_login NULL): shop hiện tại của vòng lặp, hoặc
+                // Account.Email khi CHƯA vào loop — giữ nguyên hành vi cũ cho các đường không qua vòng lặp shop.
+                var tenShopFallback = string.IsNullOrWhiteSpace(shopLogin)
                     ? services.Accounts.GetById(accountId)?.Email
                     : shopLogin;
 
@@ -389,6 +389,12 @@ public static class HubOutbox
                         ? PhanLoaiExtractor.TuItemsJson(p.ItemsJson)
                         : cotSanPham.PhanLoai;
                     var maSp = cotSanPham is null ? p.Sku : cotSanPham.Sku;
+
+                    // F "Shop" — LẤY THEO ĐƠN. Đường đẩy BÙ của HubOutboxWorker gọi với shopId/shopLogin = null
+                    // (gom MỌI shop của tài khoản trong một lượt) nên dùng một tên chung cho cả lô sẽ ghi EMAIL
+                    // SUBACCOUNT vào cột Shop của mọi dòng. Đường đẩy theo shop không đổi: đơn đã lọc theo shopId
+                    // nên p.ShopLogin chính là shopLogin truyền vào; đơn cũ chưa gắn shop mới rơi về fallback.
+                    var tenShop = string.IsNullOrWhiteSpace(p.ShopLogin) ? tenShopFallback : p.ShopLogin;
 
                     // Thứ tự dưới đây xếp theo ĐÚNG thứ tự CỘT trong sheet (A→M) cho dễ đối chiếu — xem
                     // GsheetOrderRow. Tham số CÓ TÊN nên đổi thứ tự cột sau này không gây lệch âm thầm.
