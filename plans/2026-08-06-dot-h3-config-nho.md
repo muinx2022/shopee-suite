@@ -13,6 +13,21 @@
 - **Làm:** 3 mục phần 3.
 - **Không làm:** không thêm tính năng khác; không deploy/release.
 
+### 2b. HIỆN TRẠNG CÂY (cập nhật 06/08 sau A–G + H1/H2 — dò theo symbol)
+
+- **Bo góc suite đã chuẩn hoá 4/6** (đợt G2) và có style chip dùng chung `headerStatusChip` (G1): dải chip
+  của H3.1 phải theo đúng 2 nấc bo đó, tái dùng style `subtabItem`/`subtabTray` sẵn có.
+- **`LauncherRunnerLoop` đã bị đợt A sửa** (chỉ ghi `LastCompletedRow` khi `scrapeOk`) và đợt B gỡ cờ ma
+  `preferSuggestedResume` — H3.2 đụng đúng file này, đọc kỹ trước khi thêm tham số nghỉ.
+- **`AppSession`/`PortAllocator` đã dồn về `Shopee.Core/Infrastructure`** (đợt C1) — module không còn bản riêng.
+- **`BigSellerProductUpdateRunner` đã tách 5 partial** (D1: `.Fields/.Save/.Selectors/.Process/.Overlay/.Listing`):
+  3 hằng `StockValue/WeightValue/'Nhanh'` của H3.3 nằm ở partial nào thì sửa đúng chỗ đó, đừng dồn về file gốc.
+- **Tham số hub-run-params hiện có** (Processes/FrameSize/Reload, quy ước 0 = dùng cấu hình client) là khuôn bắt
+  buộc cho H3.2; `/dispatch` vừa được F8 rút nhãn + chuyển chú thích vào `title` — field mới theo đúng kiểu đó.
+- **Hợp đồng sync field shop BigSeller**: H1/H2 KHÔNG đụng `SharedSignature`; H3.3 là chỗ đụng đầu tiên trong
+  loạt này — đọc memory `bigseller-shop-field-sync-contract` trước khi viết dòng nào.
+- **Test nền để so:** orders 1506 · Core 83 · hub 80 (+ phần H2 thêm). Số chỉ được TĂNG.
+
 ## 3. Các bước thực hiện
 
 ### H3.1 (Suite) Tab log theo từng tài khoản BigSeller

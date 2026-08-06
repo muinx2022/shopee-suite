@@ -13,6 +13,27 @@
 - **Làm:** 6 mục phần 3 (hub: H2.1/H2.3/H2.4; client orders app: H2.2/H2.5/H2.6).
 - **Không làm:** không đụng vòng scrape/update; không deploy/release (phiên chính lo).
 
+### 2b. HIỆN TRẠNG CÂY (cập nhật 06/08 sau các đợt A–G + H1 — dò theo symbol, plan viết trước các đợt đó)
+
+- **`OrdersRepository` đã tách 5 partial** (đợt D): `.Sync/.Gsheet/.Hub/.SoldCount/.Query.cs`. Hàm mới phải đặt
+  đúng partial theo mảng, KHÔNG dồn về file gốc (gốc chỉ giữ record + ctor + hàm bắc nhiều mảng).
+- **`OrderNotifyService` vừa được H1.3 thêm 2 hàm dựng tin webhook** (máy mất nhịp / trở lại) — H2.1 thêm tin
+  digest theo ĐÚNG khuôn đó, đừng chế khuôn thứ hai.
+- **`/orders` của hub đã có toggle ẩn cột `?hide=` + pattern UrlState** (đợt F5): lọc "có mã trả" của H2.3 phải
+  vào URL cùng cách (mặc định = vắng key), và nhớ cột bị ẩn vẫn phải khớp `colspan` khối mobile.
+- **`window.confirm` đã bị xoá sạch khỏi hub** (đợt F3): mọi xác nhận mới dùng `Shared/ConfirmDialog.razor`
+  (`AskAsync`), nút nguy hiểm `danger: true`.
+- **`OrdersView.xaml` (client) vừa đổi ở đợt G6**: `FrozenColumnCount=2` + ContextMenu ẩn/hiện 6 cột phụ (state
+  trong `OrdersViewModel.ShowCol*`, lưu key `orders_hidden_columns`). Thanh lọc ngày của H2.2 thêm vào hàng lọc
+  hiện có, KHÔNG phá bố cục cột.
+- **`OrdersView.xaml.cs` đăng ký `PropertyChanged` ở `Loaded`/gỡ ở `Unloaded`** (vá rò rỉ đợt G) — nếu đụng
+  code-behind này thì giữ nguyên vòng đời đó.
+- **Màn Thống kê đã có chip preset ngày** (G8, `ApplyDatePresetCommand`, dùng `DateTime.Today` để khớp
+  `TryBuildCreatedRange`). H2.2 làm ở màn ĐƠN HÀNG — nếu tái dùng được style `dateChip` thì dùng lại.
+- **Cột `machines.outbox_pending` + `MachinePresence.OutboxPending`** đã có từ H1.4 (null = máy không báo).
+  H2.6 (tooltip breakdown) là phía CLIENT, đọc `OutboxPending` 5 field của `AppServices` — không đụng hub.
+- **Test hiện tại (nền để so):** orders 1506 · Core 83 · hub 80. Số chỉ được TĂNG.
+
 ## 3. Các bước thực hiện
 
 ### H2.1 (Hub) Tin tổng kết cuối ngày qua webhook
