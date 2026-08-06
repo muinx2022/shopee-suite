@@ -1,4 +1,4 @@
-using Microsoft.Data.Sqlite;
+﻿using Microsoft.Data.Sqlite;
 using Shopee.Core.Coordination;
 using XuLyDonShopee.Core.Services;
 
@@ -87,7 +87,7 @@ CREATE TABLE IF NOT EXISTS orders(
   payment_method TEXT, status TEXT, status_description TEXT, cancel_reason TEXT,
   channel TEXT, carrier TEXT, tracking_number TEXT,
   synced_at TEXT, slip_at TEXT,
-  prepared_at TEXT, prepared_day TEXT, return_request_code TEXT, first_seen_at TEXT);
+  prepared_at TEXT, prepared_day TEXT, return_request_code TEXT, first_seen_at TEXT, return_code_at TEXT);
 CREATE UNIQUE INDEX IF NOT EXISTS ux_orders_shop_sn ON orders(shop_id, order_sn);
 CREATE INDEX IF NOT EXISTS ix_orders_shop ON orders(shop_id);
 CREATE INDEX IF NOT EXISTS ix_orders_status ON orders(status);");
@@ -156,11 +156,18 @@ CREATE INDEX IF NOT EXISTS ix_orders_status ON orders(status);");
                 // NHẬN) khi client cũ không gửi: đẩy bù sau lúc hub offline / gói bay qua nửa đêm thì hai mốc rơi
                 // KHÁC NGÀY, làm số chung lệch số local. Nhánh DO UPDATE TUYỆT ĐỐI KHÔNG đụng cột này: đụng vào là
                 // đơn cũ đồng bộ lại nhảy sang ngày hôm nay (đúng lỗi của synced_at).
+                // return_code_at: mốc hub ghi nhận mã trả hàng MỚI/ĐỔI — đặt ĐÚNG các ca mà `returnChanged` bên
+                // dưới coi là tin mới (nhánh UPDATE + mã khác rỗng + khác mã cũ, so sau TRIM y hệt C#), để số
+                // "mã trả hàng mới hôm nay" của tin tổng kết ngày và số tin webhook đã bắn nói cùng một chuyện.
+                // Nhánh INSERT để NULL: đơn lên hub lần đầu đã mang sẵn mã KHÔNG phải mã mới phát sinh (dựng lại
+                // hub / client đẩy bù cả kho sẽ dồn cả đống mã cũ vào tổng kết hôm nay) — cùng lý do bỏ notify.
                 c.CommandText = @"
 INSERT INTO orders(shop_id,order_sn,shopee_order_id,buyer_username,items_json,item_count,item_summary,sku,
   total_price,total_price_text,final_amount,final_amount_text,payment_method,status,status_description,
-  cancel_reason,channel,carrier,tracking_number,synced_at,prepared_at,prepared_day,return_request_code,first_seen_at)
-VALUES($s,$sn,$soi,$bu,$ij,$ic,$is,$sku,$tp,$tpt,$fa,$fat,$pm,$st,$sd,$cr,$ch,$ca,$tn,$sa,$pa,$pd,$rrc,COALESCE($fsa,$sa))
+  cancel_reason,channel,carrier,tracking_number,synced_at,prepared_at,prepared_day,return_request_code,first_seen_at,
+  return_code_at)
+VALUES($s,$sn,$soi,$bu,$ij,$ic,$is,$sku,$tp,$tpt,$fa,$fat,$pm,$st,$sd,$cr,$ch,$ca,$tn,$sa,$pa,$pd,$rrc,COALESCE($fsa,$sa),
+  NULL)
 ON CONFLICT(shop_id,order_sn) DO UPDATE SET
   shopee_order_id=$soi, buyer_username=$bu, items_json=$ij, item_count=$ic, item_summary=$is, sku=$sku,
   total_price=$tp, total_price_text=$tpt,
@@ -169,6 +176,9 @@ ON CONFLICT(shop_id,order_sn) DO UPDATE SET
   status=$st, status_description=$sd, cancel_reason=$cr, channel=$ch, carrier=$ca,
   tracking_number=COALESCE($tn,tracking_number),
   prepared_at=COALESCE($pa,prepared_at), prepared_day=COALESCE($pd,prepared_day),
+  return_code_at=CASE WHEN TRIM(COALESCE($rrc,'')) <> ''
+                       AND TRIM(COALESCE($rrc,'')) <> TRIM(COALESCE(return_request_code,''))
+                      THEN $sa ELSE return_code_at END,
   return_request_code=COALESCE($rrc,return_request_code),
   synced_at=$sa;";
                 c.Parameters.AddWithValue("$s", shopId);
@@ -230,15 +240,40 @@ ON CONFLICT(shop_id,order_sn) DO UPDATE SET
             : null;
     }
 
-    /// <summary>Count + page tren cung read transaction de UI khong bi lech tong khi client dang push don.</summary>
-    public OrdersPageResult QueryOrdersPage(long? shopId, string? status, string? search, int limit, int offset)
+    /// <summary>Count + page tren cung read transaction de UI khong bi lech tong khi client dang push don.
+    /// <paramref name="coMaTra"/> = chỉ đơn CÓ mã yêu cầu trả hàng (<c>return_request_code</c> khác NULL/rỗng) —
+    /// toggle "Có mã trả" của trang /orders; false = không lọc theo mã trả.</summary>
+    public OrdersPageResult QueryOrdersPage(long? shopId, string? status, string? search, int limit, int offset,
+        bool coMaTra = false)
     {
         using var conn = OpenReadConnection();
         using var tx = conn.BeginTransaction(deferred: true);
-        var total = CountOrdersCore(conn, tx, shopId, status, search);
-        var items = QueryOrdersCore(conn, tx, shopId, status, search, limit, offset);
+        var total = CountOrdersCore(conn, tx, shopId, status, search, coMaTra);
+        var items = QueryOrdersCore(conn, tx, shopId, status, search, limit, offset, coMaTra);
         tx.Commit();
         return new OrdersPageResult(total, items);
+    }
+
+    /// <summary>
+    /// Các đơn khớp BỘ LỌC của trang /orders mà hub ĐANG CÓ file phiếu (<c>slip_at</c> khác NULL) — nguồn cho nút
+    /// "⬇ ZIP phiếu" (H2.4). Trả <c>(shop_id, order_sn)</c> theo đúng thứ tự lưới (sync mới nhất trước) để tên
+    /// entry trong file zip ổn định. <paramref name="limit"/> nên truyền TRẦN+1 để caller phát hiện "quá trần" mà
+    /// không phải đếm cả bảng. Không dựng <see cref="OrderRecord"/> (chỉ cần 2 cột để mở file trên đĩa).
+    /// </summary>
+    public List<(long ShopId, string OrderSn)> OrdersWithSlip(
+        long? shopId, string? status, string? search, bool coMaTra, int limit)
+    {
+        using var conn = OpenReadConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT shop_id, order_sn FROM orders"
+            + WhereClause(cmd, shopId, status, search, coMaTra, slipOnly: true)
+            + " ORDER BY synced_at DESC, id DESC LIMIT $lim";
+        cmd.Parameters.AddWithValue("$lim", Math.Max(1, limit));
+
+        var list = new List<(long, string)>();
+        using var rd = cmd.ExecuteReader();
+        while (rd.Read()) list.Add((rd.GetInt64(0), S(rd, 1)));
+        return list;
     }
 
     public Dictionary<long, int> OrderCountsByShop()
@@ -349,16 +384,16 @@ WHERE o.first_seen_at >= $from AND o.first_seen_at < $to"
     }
 
     private static int CountOrdersCore(SqliteConnection conn, SqliteTransaction? tx,
-        long? shopId, string? status, string? search)
+        long? shopId, string? status, string? search, bool coMaTra)
     {
         using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
-        cmd.CommandText = "SELECT COUNT(*) FROM orders" + WhereClause(cmd, shopId, status, search);
+        cmd.CommandText = "SELECT COUNT(*) FROM orders" + WhereClause(cmd, shopId, status, search, coMaTra);
         return Convert.ToInt32(cmd.ExecuteScalar());
     }
 
     private static List<OrderRecord> QueryOrdersCore(SqliteConnection conn, SqliteTransaction? tx,
-        long? shopId, string? status, string? search, int limit, int offset)
+        long? shopId, string? status, string? search, int limit, int offset, bool coMaTra)
     {
         var list = new List<OrderRecord>();
         using var cmd = conn.CreateCommand();
@@ -366,7 +401,7 @@ WHERE o.first_seen_at >= $from AND o.first_seen_at < $to"
         cmd.CommandText = "SELECT id,shop_id,order_sn,shopee_order_id,buyer_username,item_count,item_summary,sku,"
             + "total_price,total_price_text,final_amount,final_amount_text,payment_method,status,status_description,"
             + "cancel_reason,channel,carrier,tracking_number,synced_at,slip_at,items_json,return_request_code FROM orders"
-            + WhereClause(cmd, shopId, status, search)
+            + WhereClause(cmd, shopId, status, search, coMaTra)
             + " ORDER BY synced_at DESC, id DESC LIMIT $lim OFFSET $off";
         cmd.Parameters.AddWithValue("$lim", Math.Clamp(limit, 1, 1000));
         cmd.Parameters.AddWithValue("$off", Math.Max(0, offset));
@@ -438,6 +473,60 @@ WHERE o.first_seen_at >= $from AND o.first_seen_at < $to"
         return list;
     }
 
+    /// <summary>
+    /// Ghi mã yêu cầu trả hàng lấy từ <c>app-alert kind=don_tra</c> vào bảng <c>orders</c> — CÁI ĐƠN Ở ĐÂY ĐÃ BỊ
+    /// APP DỌN nên không còn về hub qua <c>orders/push</c>, nhưng HUB VẪN GIỮ dòng đơn đó (hub không dọn theo app).
+    /// Không có bước này thì <c>return_code_at</c> chỉ phủ phần thiểu số (đơn còn sống), làm dòng "mã trả hàng mới
+    /// hôm nay" của tin tổng kết gần như luôn báo 0 và bộ lọc "Có mã trả" ở /orders bỏ sót.
+    /// <para>Chỉ ghi khi mã THẬT SỰ mới/khác (so sau TRIM, đúng luật <c>returnChanged</c> của
+    /// <see cref="UpsertOrders"/>) ⇒ gọi lại cùng lô KHÔNG cộng thêm số vào tin tổng kết. Khoá theo
+    /// <c>order_sn</c> (mã đơn Shopee là duy nhất toàn sàn; app-alert không mang shop_id).</para>
+    /// Trả về số đơn vừa ghi mã mới.
+    /// </summary>
+    public int ApplyReturnCodesFromAppAlert(IEnumerable<(string MaDon, string MaYeuCau)> cap)
+    {
+        var now = Iso(DateTimeOffset.UtcNow);
+        var ghi = 0;
+        lock (_gate)
+        {
+            using var tx = _conn.BeginTransaction();
+            foreach (var (maDon, maYeuCau) in cap)
+            {
+                var sn = (maDon ?? "").Trim();
+                var code = (maYeuCau ?? "").Trim();
+                if (sn.Length == 0 || code.Length == 0) continue;
+
+                using var c = _conn.CreateCommand();
+                c.Transaction = tx;
+                c.CommandText = @"
+UPDATE orders SET return_request_code = $code, return_code_at = $at
+WHERE order_sn = $sn AND (return_request_code IS NULL OR TRIM(return_request_code) <> $code);";
+                c.Parameters.AddWithValue("$code", code);
+                c.Parameters.AddWithValue("$at", now);
+                c.Parameters.AddWithValue("$sn", sn);
+                ghi += c.ExecuteNonQuery();
+            }
+            tx.Commit();
+        }
+        return ghi;
+    }
+
+    /// <summary>
+    /// SỐ ĐƠN được ghi nhận mã yêu cầu trả hàng MỚI/ĐỔI trong khoảng UTC <c>[fromUtc, toUtcExclusive)</c>
+    /// (cột <c>return_code_at</c> — xem <see cref="UpsertOrders"/>). Nguồn dòng "Mã trả hàng mới hôm nay" của tin
+    /// tổng kết ngày. Đơn có mã từ TRƯỚC bản vá thêm cột này mang NULL nên không rơi vào khoảng nào — cố ý.
+    /// </summary>
+    public int CountReturnCodesInRange(DateTimeOffset fromUtc, DateTimeOffset toUtcExclusive)
+    {
+        // Connection ĐỌC riêng (WAL) — chạy mỗi ngày một lần từ luồng nền, không đáng giữ khoá ghi toàn cục.
+        using var conn = OpenReadConnection();
+        using var c = conn.CreateCommand();
+        c.CommandText = "SELECT COUNT(*) FROM orders WHERE return_code_at >= $from AND return_code_at < $to";
+        c.Parameters.AddWithValue("$from", Iso(fromUtc.ToUniversalTime()));
+        c.Parameters.AddWithValue("$to", Iso(toUtcExclusive.ToUniversalTime()));
+        return Convert.ToInt32(c.ExecuteScalar());
+    }
+
     /// <summary>Danh sách các trạng thái phân biệt (cho dropdown lọc).</summary>
     public List<string> DistinctOrderStatuses()
     {
@@ -451,9 +540,15 @@ WHERE o.first_seen_at >= $from AND o.first_seen_at < $to"
         return list;
     }
 
-    private static string WhereClause(SqliteCommand c, long? shopId, string? status, string? search)
+    /// <summary>Mệnh đề WHERE dùng CHUNG cho đếm/đọc trang/gom phiếu của trang /orders — một nguồn duy nhất để
+    /// tổng, lưới và file ZIP luôn nói về cùng một tập đơn. <paramref name="coMaTra"/> = chỉ đơn có mã yêu cầu trả
+    /// hàng; <paramref name="slipOnly"/> = chỉ đơn hub đã có file phiếu (dùng cho ZIP).</summary>
+    private static string WhereClause(SqliteCommand c, long? shopId, string? status, string? search,
+        bool coMaTra, bool slipOnly = false)
     {
         var conds = new List<string>();
+        if (coMaTra) conds.Add("(return_request_code IS NOT NULL AND TRIM(return_request_code) <> '')");
+        if (slipOnly) conds.Add("slip_at IS NOT NULL");
         if (shopId is { } sid)
         {
             conds.Add("shop_id=$s");

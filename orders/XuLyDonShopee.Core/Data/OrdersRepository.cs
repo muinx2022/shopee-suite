@@ -145,6 +145,56 @@ public partial class OrdersRepository
         cmd.ExecuteNonQuery();
     }
 
+    /// <summary>
+    /// <b>ĐẨY LẠI MỘT ĐƠN</b> theo lệnh người dùng (nút "Đẩy lại" trên màn chẩn đoán đơn kẹt): đưa đơn về hàng
+    /// chờ của CẢ hai đích để lượt outbox sau gửi lại. Khóa <c>(account_id, order_sn)</c>; trả số dòng đổi
+    /// (0 = không có đơn đó). Mã đơn rỗng → 0, KHÔNG chạm DB.
+    /// <para><b>Cờ được đặt lại (bộ TỐI THIỂU để hai đích thật sự đẩy lại):</b></para>
+    /// <list type="bullet">
+    /// <item><c>hub_synced_at = NULL</c> — <c>GetForHubPush</c> chỉ lấy đơn NULL.</item>
+    /// <item><c>hub_push_gen + 1</c> — BẮT BUỘC đi kèm: nếu đúng lúc này có một lô đang bay lên hub,
+    /// <c>MarkHubSynced</c> sẽ thấy thế hệ đã lệch và KHÔNG đóng cờ oan ngay sau khi ta vừa mở (xem
+    /// <see cref="MarkHubSynced"/>).</item>
+    /// <item><c>gsheet_synced_at = NULL</c> — <c>CountForGsheetPush</c> đếm theo cột này, mà
+    /// <c>HubOutboxWorker</c> CHỈ chạy lượt đẩy sheet khi số đếm &gt; 0; không đặt lại thì lượt sheet không bao
+    /// giờ được kích hoạt và mấy cờ dưới đây vô nghĩa.</item>
+    /// <item>4 cờ "trạng thái đã đẩy lần trước" <c>gsheet_da_huy</c> / <c>gsheet_da_co_van_don</c> /
+    /// <c>gsheet_da_co_uoc_tinh</c> / <c>gsheet_da_co_don_tra_hang</c> = NULL — để nhánh quyết định gửi của
+    /// <c>HubOutbox.ConNghiaVuGhiSheet</c> bật lên (mẫu sẵn có của "vận đơn vừa xuất hiện").</item>
+    /// </list>
+    /// <para><b>TUYỆT ĐỐI KHÔNG đụng</b> (mỗi cột là một lỗi đã từng trả giá):</para>
+    /// <list type="bullet">
+    /// <item><c>gsheet_tab</c> — đơn đẩy lại phải về ĐÚNG tab cũ; xoá đi là dòng bị ghi lần hai ở tab tháng mới.</item>
+    /// <item><c>sold_counted_at</c> — mở lại là +1 "Đã bán" LẦN HAI trên kho hub (sai số liệu, không sửa ngược được).</item>
+    /// <item><c>gsheet_file_url</c> — mở lại là upload lại file phiếu đã có link.</item>
+    /// <item><c>hub_slip_synced_at</c> — đơn còn nợ phiếu thì cột này VỐN đã NULL; mở lại cho đơn đã đẩy phiếu chỉ
+    /// tạo hàng tồn không bao giờ vơi khi file phiếu local đã bị xoá.</item>
+    /// <item><c>created_at</c> / <c>prepared_at</c> / <c>return_request_code</c> — dữ liệu, không phải cờ đẩy.</item>
+    /// </list>
+    /// </summary>
+    public int DatLaiCoDayLai(long accountId, string orderSn)
+    {
+        if (string.IsNullOrWhiteSpace(orderSn))
+        {
+            return 0;
+        }
+
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = @"UPDATE orders SET
+    hub_synced_at = NULL,
+    hub_push_gen = hub_push_gen + 1,
+    gsheet_synced_at = NULL,
+    gsheet_da_huy = NULL,
+    gsheet_da_co_van_don = NULL,
+    gsheet_da_co_uoc_tinh = NULL,
+    gsheet_da_co_don_tra_hang = NULL
+    WHERE account_id = $a AND order_sn = $sn;";
+        cmd.Parameters.AddWithValue("$a", accountId);
+        cmd.Parameters.AddWithValue("$sn", orderSn.Trim());
+        return cmd.ExecuteNonQuery();
+    }
+
     /// <summary>Kết quả một lượt <see cref="SetReturnRequestCodes"/> — để log / notify đúng cặp vừa ghi.</summary>
     /// <param name="DaGhi">Số đơn VỪA ghi mã mới (khác mã cũ).</param>
     /// <param name="KhongDoi">Số đơn đã mang đúng mã đó rồi (không ghi lại, không đẩy lại).</param>

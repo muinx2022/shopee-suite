@@ -39,6 +39,36 @@ public enum KetQuaDay
 public static class HubOutbox
 {
     /// <summary>
+    /// HÀM THUẦN (test được): đơn <paramref name="p"/> CÒN nghĩa vụ ghi Google Sheet không — tức lượt đẩy sheet
+    /// có phải GỬI nó lên Apps Script không. Đây là <b>một nguồn duy nhất</b> cho hai chỗ: nhánh quyết định gửi
+    /// trong <see cref="PushOrdersToGsheetAsync"/> và màn chẩn đoán "đơn kết thúc chưa dọn được"
+    /// (<see cref="OrderPersistPipeline.ChanDoanDonKetThuc"/>) — hai nơi tự tính riêng là hai luật trôi lệch.
+    /// <list type="bullet">
+    /// <item><c>false</c> khi đơn HỦY mà CHƯA từng có vận đơn VÀ CHƯA từng ghi sheet: không thuộc sổ theo dõi →
+    /// by design không ghi (và vì thế coi như đã xong nghĩa vụ).</item>
+    /// <item><c>true</c> khi: chưa từng ghi dòng · có file phiếu để bổ sung link (<paramref name="coFileBoSung"/>,
+    /// caller tính từ đĩa) · trạng thái hủy đổi so với lần đẩy trước · vận đơn / số ước tính / mã yêu cầu trả hàng
+    /// VỪA xuất hiện so với lần đẩy trước.</item>
+    /// </list>
+    /// KHÔNG xét URL Web App: người dùng không dùng sheet thì caller tự coi MỌI đơn là đã settled.
+    /// </summary>
+    internal static bool ConNghiaVuGhiSheet(GsheetPendingOrder p, bool coFileBoSung)
+    {
+        var daHuy = ShopeeShippingNav.LaDonHuy(p.Status, p.StatusDescription, p.CancelReason);
+        var coVanDon = !string.IsNullOrWhiteSpace(p.TrackingNumber);
+        if (daHuy && !coVanDon && !p.DaGhiSheet)
+        {
+            return false; // đơn hủy trước khi vào pipeline giao → by design không ghi sheet
+        }
+
+        var huyDoi = p.GsheetDaHuy is null || daHuy != (p.GsheetDaHuy == 1);
+        var vanDonMoi = coVanDon && p.GsheetDaCoVanDon != 1;
+        var uocTinhMoi = p.FinalAmount is not null && p.GsheetDaCoUocTinh != 1;
+        var donTraHangMoi = !string.IsNullOrWhiteSpace(p.ReturnRequestCode) && p.GsheetDaCoDonTraHang != 1;
+        return !p.DaGhiSheet || coFileBoSung || huyDoi || vanDonMoi || uocTinhMoi || donTraHangMoi;
+    }
+
+    /// <summary>
     /// Đẩy các đơn CHƯA đẩy hub của tài khoản này lên HUB đơn hàng qua hook <see cref="AppServices.PushOrdersToHub"/>
     /// (do shell suite rót). <b>Không bao giờ ném</b> (sync DB đã xong — lỗi hub chỉ ghi log): hủy CHỦ ĐỘNG → thôi;
     /// lỗi khác → log "Hub: lỗi — ...". Hook null (app Đơn hàng chạy độc lập / hub chưa cấu hình) → return im lặng
@@ -327,6 +357,8 @@ public static class HubOutbox
                     // cột B tự điền sau. Đơn ĐÃ CÓ DÒNG trên sheet (DaGhiSheet) thì KHÔNG bỏ qua dù giờ mất vận đơn
                     // (Shopee hủy → danh sách không còn hiện mã): phải đi tiếp xuống phần quyết định gửi để huyDoi
                     // bật và Apps Script TÔ ĐỎ dòng cũ, kẻo dòng đó nằm trắng vĩnh viễn sau khi đơn bị dọn khỏi app.
+                    // (Nhánh này là LỐI TẮT của ConNghiaVuGhiSheet — đặt TRƯỚC lượt đọc đĩa để khỏi mở file phiếu
+                    //  vô ích. Hàm kia trả false cho đúng bộ điều kiện này; test canh hai bên không lệch nhau.)
                     if (daHuy && !coVanDon && !p.DaGhiSheet)
                     {
                         settled.Add(p.OrderSn);
@@ -356,13 +388,9 @@ public static class HubOutbox
                     // TRẢ HÀNG vừa xuất hiện/vừa đổi (bước check cuối flow shop reset cờ khi mã đổi) → gửi lại để
                     // điền cột "Đơn trả hàng". Không thỏa → bỏ qua (đã ghi đủ, không đẩy trùng) → settled.
                     var coFileBoSung = fileBase64 is not null;
-                    var huyDoi = p.GsheetDaHuy is null || daHuy != (p.GsheetDaHuy == 1);
-                    var vanDonMoi = coVanDon && p.GsheetDaCoVanDon != 1;
                     var coUocTinh = p.FinalAmount is not null;
-                    var uocTinhMoi = coUocTinh && p.GsheetDaCoUocTinh != 1;
                     var coDonTraHang = !string.IsNullOrWhiteSpace(p.ReturnRequestCode);
-                    var donTraHangMoi = coDonTraHang && p.GsheetDaCoDonTraHang != 1;
-                    if (!(!p.DaGhiSheet || coFileBoSung || huyDoi || vanDonMoi || uocTinhMoi || donTraHangMoi))
+                    if (!ConNghiaVuGhiSheet(p, coFileBoSung))
                     {
                         settled.Add(p.OrderSn);
                         continue;

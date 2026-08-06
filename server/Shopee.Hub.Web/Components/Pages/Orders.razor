@@ -2,6 +2,7 @@
 @attribute [Authorize(Policy = "Web")]
 @implements IDisposable
 @using XuLyDonShopee.Core.Services
+@using Shopee.Hub.Web.Api
 @inject HubDatabase Db
 @inject NavigationManager Nav
 
@@ -37,8 +38,16 @@
             }
         </select>
     </label>
+    @* Lọc "có mã trả": cột "Đơn trả hàng" đã có sẵn để đối chiếu. Trạng thái vào URL (?comatra=1) như mọi
+       view-state khác — KHÔNG trùng key với cột ẩn "tra" của ?hide=. *@
+    <label class="toggle" title="Chỉ hiện đơn ĐÃ có mã yêu cầu trả hàng (cột Đơn trả hàng)">
+        <input type="checkbox" checked="@_coMaTra" @onchange="OnCoMaTraChanged" />
+        Có mã trả
+    </label>
     <span class="stat">@_total đơn</span>
     <button class="btn sm" title="Hủy lọc — bỏ mọi bộ lọc, xem tất cả đơn" @onclick="ClearFilters">Hủy lọc</button>
+    @* Tải ZIP: đi thẳng endpoint (thẻ <a> tải file, KHÔNG qua circuit Blazor) với ĐÚNG bộ lọc đang xem. *@
+    <a class="btn sm" href="@ZipHref" title="Tải mọi phiếu PDF (tối đa @MaxZipSlips) của các đơn khớp bộ lọc hiện tại">⬇ ZIP phiếu</a>
     @* Chọn cột: bảng 13 cột quá rộng cho việc soi hằng ngày. Cột ẩn đi vào URL (?hide=…) nên F5 / gửi link
        giữ nguyên. Menu thuần Blazor: .menu-backdrop bắt click ra ngoài, Esc bắt ở @onkeydown của .menuwrap. *@
     <span class="menuwrap" @onkeydown="OnColsKey">
@@ -177,9 +186,13 @@
     private List<OrderRecord> _orders = new();
     private Dictionary<long, string> _shopNames = new();
 
+    /// <summary>Trần số phiếu MỘT lượt tải ZIP — khớp <c>OrdersZip.MaxSlips</c> (chỉ để hiện trong tooltip).</summary>
+    private const int MaxZipSlips = OrdersZip.MaxSlips;
+
     private long _shopId;      // 0 = tất cả
     private string _status = DefaultStatus;   // MẶC ĐỊNH lọc đơn đang cần xử lý (đổi được sang "— tất cả —")
     private string _search = "";
+    private bool _coMaTra;     // false = không lọc theo mã trả hàng (mặc định, vắng khỏi URL)
     private int _pageSize = 50;
     private int _page = 1;
     private int _total;
@@ -217,6 +230,7 @@
             ("shop", v => _shopId = long.TryParse(v, out var id) && _shops.Any(s => s.Id == id) ? id : 0),
             ("status", v => _status = v.Length == 0 ? DefaultStatus : (v == AllStatusToken ? "" : v)),
             ("q", v => _search = v),
+            ("comatra", v => _coMaTra = v == "1"),
             ("page", v => _page = int.TryParse(v, out var p) && p >= 1 ? p : 1),
             ("hide", RestoreHiddenCols));
         // Trạng thái trong URL hiện chưa có đơn nào → vẫn phải là một option, kẻo ô chọn hiện trống.
@@ -236,6 +250,7 @@
             ("shop", _shopId > 0 ? _shopId.ToString() : ""),
             ("status", _status == DefaultStatus ? "" : (_status.Length == 0 ? AllStatusToken : _status)),
             ("q", _search),
+            ("comatra", _coMaTra ? "1" : ""),
             ("page", _page > 1 ? _page.ToString() : ""),
             // Đi theo THỨ TỰ của OptionalCols (không theo thứ tự bấm) → cùng bộ cột luôn ra cùng một URL.
             ("hide", string.Join(",", OptionalCols.Where(c => _hiddenCols.Contains(c.Key)).Select(c => c.Key))));
@@ -261,6 +276,12 @@
 
     private void OnFilterChanged() { _page = 1; Load(); UpdateUrl(); }
 
+    private void OnCoMaTraChanged(ChangeEventArgs e)
+    {
+        _coMaTra = e.Value is true;
+        OnFilterChanged();
+    }
+
     // "Hủy lọc": bỏ MỌI bộ lọc (shop/trạng thái/tìm) về xem tất cả + về trang 1. Reset luôn ô Tìm nên huỷ timer
     // debounce đang chờ, tránh nó nạp lại với chuỗi cũ ngay sau khi mình vừa xoá.
     private void ClearFilters()
@@ -269,6 +290,7 @@
         _shopId = 0;
         _status = "";
         _search = "";
+        _coMaTra = false;
         _page = 1;
         Load();
         UpdateUrl();
@@ -308,15 +330,30 @@
         long? shopFilter = _shopId > 0 ? _shopId : null;
         var status = string.IsNullOrWhiteSpace(_status) ? null : _status;
         var q = string.IsNullOrWhiteSpace(_search) ? null : _search;
-        var result = Db.QueryOrdersPage(shopFilter, status, q, _pageSize, (_page - 1) * _pageSize);
+        var result = Db.QueryOrdersPage(shopFilter, status, q, _pageSize, (_page - 1) * _pageSize, _coMaTra);
         _total = result.Total;
         _totalPages = Math.Max(1, (int)Math.Ceiling(_total / (double)_pageSize));
         if (_page > _totalPages)
         {
             _page = _totalPages;
-            result = Db.QueryOrdersPage(shopFilter, status, q, _pageSize, (_page - 1) * _pageSize);
+            result = Db.QueryOrdersPage(shopFilter, status, q, _pageSize, (_page - 1) * _pageSize, _coMaTra);
         }
         _orders = result.Items;
+    }
+
+    /// <summary>Link "⬇ ZIP phiếu" — mang ĐÚNG bộ lọc đang xem (trừ phân trang: ZIP lấy mọi trang). Giá trị mặc
+    /// định được bỏ khỏi query y như <see cref="UpdateUrl"/> để link ngắn và ổn định.</summary>
+    private string ZipHref
+    {
+        get
+        {
+            var parts = new List<string>();
+            if (_shopId > 0) parts.Add("shop=" + _shopId);
+            if (!string.IsNullOrWhiteSpace(_status)) parts.Add("status=" + Uri.EscapeDataString(_status));
+            if (!string.IsNullOrWhiteSpace(_search)) parts.Add("q=" + Uri.EscapeDataString(_search));
+            if (_coMaTra) parts.Add("comatra=1");
+            return OrdersZip.Route + (parts.Count == 0 ? "" : "?" + string.Join("&", parts));
+        }
     }
 
     private string ShopName(long id) => _shopNames.GetValueOrDefault(id, id.ToString());

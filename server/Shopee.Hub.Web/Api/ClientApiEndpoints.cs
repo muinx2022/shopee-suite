@@ -522,6 +522,11 @@ public static class ClientApiEndpoints
         var pairs = TachCapDonTra(r.Detail);
         if (pairs.Count == 0) return;
 
+        // GHI mã vào bảng orders trước khi bắn tin: đơn ở đây đã bị app dọn nên không còn về qua orders/push,
+        // nhưng hub vẫn giữ dòng đơn → không ghi thì cột "Đơn trả hàng" ở /orders trống và dòng "mã trả hàng mới
+        // hôm nay" của tin tổng kết đếm hụt gần hết. Ghi lại lô cũ không cộng số (chỉ ghi khi mã khác).
+        db.ApplyReturnCodesFromAppAlert(pairs);
+
         var shopName = string.IsNullOrWhiteSpace(r.ShopName) ? "?" : r.ShopName!.Trim();
         var moTa = $"{pairs.Count} đơn trả ({shopName})";
         var urls = ResolveWebhooks(db, SettingKeys.NotifyWebhookDonTra);

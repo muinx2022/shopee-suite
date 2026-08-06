@@ -439,6 +439,60 @@ public class OrderNotifyService
         => $"🟢 Máy client đã nối lại — {HoacDauHoi(tenMay)}"
            + $"\nTrước đó báo mất nhịp khi đang giữ {Math.Max(0, soViec)} việc · Lúc: {luc.ToString("dd/MM/yyyy HH:mm", CultureInfo.InvariantCulture)}";
 
+    /// <summary>Số shop nhiều nhất được liệt kê trong tin tổng kết ngày — phần còn lại gộp vào dòng "… và N shop nữa".</summary>
+    private const int TongKetTopShop = 10;
+
+    /// <summary>
+    /// Dựng tin TỔNG KẾT CUỐI NGÀY (H2.1) — Hub tự bắn MỘT lần/ngày để người trực nghỉ vẫn nắm tình hình (vòng
+    /// đơn chạy 24/7, tin này là để NGƯỜI nghỉ chứ không phải để máy nghỉ). Khuôn text THUẦN + emoji như 5 tin kia
+    /// (render đẹp trên cả Slack/Discord/Telegram).
+    /// <list type="bullet">
+    /// <item><paramref name="tongDonCho"/>/<paramref name="theoShop"/>: đơn "chuẩn bị hàng" PHÁT SINH trong ngày,
+    /// gộp và tách theo shop (đã sắp giảm dần từ bên gọi). Liệt kê tối đa <see cref="TongKetTopShop"/> shop.</item>
+    /// <item><paramref name="maTraMoi"/>: số mã yêu cầu trả hàng MỚI ghi nhận trong ngày.</item>
+    /// <item><paramref name="shopCanhBaoDiaChi"/>: số shop còn banner lỗi địa chỉ ĐANG MỞ (chưa ai bấm X).</item>
+    /// <item><paramref name="mayOffline"/>: số máy client đang mất nhịp quá ngưỡng.</item>
+    /// </list>
+    /// Số âm → kẹp về 0; danh sách null/rỗng → in dòng "chưa shop nào" (KHÔNG ném: tin tổng kết thiếu một mục vẫn
+    /// phải tới được người trực).
+    /// </summary>
+    public static string TaoTinNhanTongKetNgay(
+        DateTime luc,
+        int tongDonCho,
+        IReadOnlyList<(string Shop, int SoDon)>? theoShop,
+        int maTraMoi,
+        int shopCanhBaoDiaChi,
+        int mayOffline)
+    {
+        var sb = new StringBuilder();
+        sb.Append($"📊 TỔNG KẾT NGÀY {luc.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture)}"
+                  + $" (lúc {luc.ToString("HH:mm", CultureInfo.InvariantCulture)})");
+        sb.Append($"\nĐơn chuẩn bị hàng phát sinh hôm nay: {Math.Max(0, tongDonCho)}");
+
+        var shops = theoShop ?? Array.Empty<(string, int)>();
+        if (shops.Count == 0)
+        {
+            sb.Append("\n• (chưa shop nào có đơn hôm nay)");
+        }
+        else
+        {
+            var hienThi = Math.Min(shops.Count, TongKetTopShop);
+            for (int i = 0; i < hienThi; i++)
+            {
+                sb.Append($"\n• {HoacDauHoi(shops[i].Shop)} — {Math.Max(0, shops[i].SoDon)} đơn");
+            }
+            if (shops.Count > TongKetTopShop)
+            {
+                sb.Append($"\n… và {shops.Count - TongKetTopShop} shop nữa.");
+            }
+        }
+
+        sb.Append($"\nMã trả hàng mới hôm nay: {Math.Max(0, maTraMoi)}");
+        sb.Append($"\nShop còn cảnh báo địa chỉ lấy hàng: {Math.Max(0, shopCanhBaoDiaChi)}");
+        sb.Append($"\nMáy client đang offline: {Math.Max(0, mayOffline)}");
+        return sb.ToString();
+    }
+
     /// <summary>Khoảng thời gian cho người đọc: &lt;1 phút · N phút · N giờ M phút. Âm → coi như 0.</summary>
     private static string MoTaKhoang(TimeSpan d)
     {

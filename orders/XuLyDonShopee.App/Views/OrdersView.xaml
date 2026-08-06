@@ -147,6 +147,32 @@
             </Button>
         </Grid>
 
+        <!-- Hàng lọc thứ HAI: khoảng ngày (theo created_at — lần đầu đơn được ghi nhận trên máy này).
+             Đặt xuống dòng riêng thay vì chen vào hàng trên: hàng trên đã 6 cột (2 ô lọc + tìm + 3 nút), thêm 2
+             DatePicker nữa là ô "Tìm" bị bóp còn vài chục pixel. Bộ lọc ngày ăn vào CẢ "Xuất CSV" lẫn "In nhiều
+             đơn" (chúng dùng chung CurrentFilter) nên phạm vi luôn khớp lưới đang xem. -->
+        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,12">
+            <TextBlock Text="Từ ngày" VerticalAlignment="Center" FontSize="12"
+                       Foreground="{StaticResource TextMuted}" />
+            <DatePicker Width="150" Margin="8,0,0,0" VerticalAlignment="Center"
+                        SelectedDate="{Binding FromDate}" SelectedDateFormat="Short"
+                        ToolTip="Chỉ hiện đơn ghi nhận TỪ ngày này (để trống = không chặn)" />
+            <TextBlock Text="Đến ngày" VerticalAlignment="Center" Margin="14,0,0,0" FontSize="12"
+                       Foreground="{StaticResource TextMuted}" />
+            <DatePicker Width="150" Margin="8,0,0,0" VerticalAlignment="Center"
+                        SelectedDate="{Binding ToDate}" SelectedDateFormat="Short"
+                        ToolTip="Chỉ hiện đơn ghi nhận ĐẾN HẾT ngày này (để trống = không chặn)" />
+            <Button Style="{StaticResource ghostIcon}" Width="28" Height="28" Margin="6,0,0,0"
+                    VerticalAlignment="Center"
+                    Command="{Binding ClearDateFilterCommand}"
+                    ToolTip="Xóa lọc ngày — hiện mọi ngày">
+                <c:PathIcon Data="{DynamicResource IconClose}" />
+            </Button>
+            <TextBlock Text="{Binding DateWarning}" VerticalAlignment="Center" Margin="14,0,0,0" FontSize="12"
+                       Foreground="{StaticResource DangerBrush}"
+                       Visibility="{Binding DateWarning, Converter={StaticResource StringToVis}}" />
+        </StackPanel>
+
         <!-- Dòng tổng số + thông báo xuất + phân trang (pager BÊN PHẢI) -->
         <Grid DockPanel.Dock="Top" Margin="0,0,0,10">
             <Grid.ColumnDefinitions>

@@ -90,6 +90,23 @@ public partial class OrdersViewModel : ViewModelBase
     [ObservableProperty]
     private string _searchText = string.Empty;
 
+    // ══════════ Lọc theo KHOẢNG NGÀY (cột created_at — lần ĐẦU đơn được ghi nhận trên máy này) ══════════
+    // Hai đầu mút ĐỘC LẬP: bỏ trống đầu nào là không chặn đầu đó. "Đến" tính HẾT NGÀY (cộng 1 ngày rồi so <).
+    // Quy đổi ngày địa phương → UTC bằng TimeZoneInfo.Local, CÙNG luật với màn Thống kê (TryBuildCreatedRange)
+    // để hai màn không bao giờ đếm lệch nhau một ngày.
+
+    /// <summary>Lọc từ ngày (null = không chặn đầu dưới).</summary>
+    [ObservableProperty]
+    private DateTime? _fromDate;
+
+    /// <summary>Lọc đến ngày, tính HẾT ngày đó (null = không chặn đầu trên).</summary>
+    [ObservableProperty]
+    private DateTime? _toDate;
+
+    /// <summary>Cảnh báo khoảng ngày không hợp lệ (Từ &gt; Đến) — null = ẩn.</summary>
+    [ObservableProperty]
+    private string? _dateWarning;
+
     /// <summary>Thông báo kết quả xuất CSV (null = ẩn).</summary>
     [ObservableProperty]
     private string? _statusMessage;
@@ -233,7 +250,8 @@ public partial class OrdersViewModel : ViewModelBase
     ///  · gõ dở              → LIKE <c>%text%</c> trên cột <c>shop_login</c> (shopExact=false; không khớp thì 0 đơn).
     /// Repo lọc <c>shop_login</c> phía SQL nên phân trang không thiếu dòng.
     /// </summary>
-    private (string? shopLogin, bool shopExact, string? status, string? search) CurrentFilter()
+    private (string? shopLogin, bool shopExact, string? status, string? search,
+        DateTime? createdFromUtc, DateTime? createdBeforeUtc) CurrentFilter()
     {
         var text = (AccountFilterText ?? string.Empty).Trim();
         var status = string.IsNullOrEmpty(SelectedStatus) || SelectedStatus == AllStatusesLabel
@@ -259,8 +277,41 @@ public partial class OrdersViewModel : ViewModelBase
             }
         }
 
-        return (shopLogin, shopExact, status, search);
+        var (fromUtc, beforeUtc) = BuildCreatedRange(FromDate, ToDate);
+        return (shopLogin, shopExact, status, search, fromUtc, beforeUtc);
     }
+
+    /// <summary>
+    /// HÀM THUẦN (test được): quy hai mốc ngày ĐỊA PHƯƠNG người dùng chọn thành cặp biên UTC
+    /// <c>[createdFromUtc, createdBeforeUtc)</c> cho <c>OrdersRepository.Query/Count</c>.
+    /// <list type="bullet">
+    /// <item><paramref name="from"/> → 00:00 ngày đó (giờ máy) đổi sang UTC; null → null (không chặn đầu dưới).</item>
+    /// <item><paramref name="to"/> → 00:00 của NGÀY HÔM SAU (giờ máy) đổi sang UTC — biên MỞ, nên "Đến" bao trọn
+    /// cả ngày đó; null → null (không chặn đầu trên).</item>
+    /// </list>
+    /// Dùng <see cref="TimeZoneInfo.Local"/> y như màn Thống kê (mọi máy chạy app đều để giờ Việt Nam). Hai đầu
+    /// mút độc lập nên "Từ &gt; Đến" KHÔNG bị chặn ở đây — nó tự ra 0 dòng, còn lời cảnh báo do
+    /// <see cref="CapNhatCanhBaoNgay"/> lo.
+    /// </summary>
+    internal static (DateTime? FromUtc, DateTime? BeforeUtc) BuildCreatedRange(DateTime? from, DateTime? to)
+    {
+        DateTime? fromUtc = from is null
+            ? null
+            : TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(from.Value.Date, DateTimeKind.Unspecified),
+                TimeZoneInfo.Local);
+        DateTime? beforeUtc = to is null
+            ? null
+            : TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(to.Value.Date.AddDays(1), DateTimeKind.Unspecified),
+                TimeZoneInfo.Local);
+        return (fromUtc, beforeUtc);
+    }
+
+    /// <summary>Đặt/xoá <see cref="DateWarning"/> theo cặp mốc hiện tại (Từ &gt; Đến → luôn 0 đơn, phải nói ra
+    /// kẻo người dùng tưởng mất dữ liệu).</summary>
+    private void CapNhatCanhBaoNgay()
+        => DateWarning = FromDate is { } f && ToDate is { } t && f.Date > t.Date
+            ? "⚠ Khoảng ngày không hợp lệ: \"Từ ngày\" phải ≤ \"Đến ngày\"."
+            : null;
 
     /// <summary>Nhãn cột "Shop" của một dòng: tên shop (<c>shop_login</c>), hoặc "(shop ?)" cho đơn cũ chưa gắn shop.</summary>
     private static string ShopLabelOf(Core.Models.OrderRow row)
@@ -273,7 +324,8 @@ public partial class OrdersViewModel : ViewModelBase
     /// </summary>
     private void Apply()
     {
-        var (shopLogin, shopExact, status, search) = CurrentFilter();
+        var (shopLogin, shopExact, status, search, createdFromUtc, createdBeforeUtc) = CurrentFilter();
+        CapNhatCanhBaoNgay();
 
         // Thư mục hóa đơn: đọc MỘT LẦN khi nạp danh sách (config hoặc mặc định cạnh app.db) rồi truyền vào mỗi
         // dòng → link "In phiếu" (SlipPath) trỏ CÙNG chỗ nơi xử lý đơn LƯU phiếu. Đổi thư mục ở Cài đặt → bấm
@@ -281,7 +333,8 @@ public partial class OrdersViewModel : ViewModelBase
         var invoiceDir = _services.Settings.GetInvoiceFolder();
 
         // Tổng khớp bộ lọc (mọi trang) → số trang. Clamp trang hiện tại; KHÔNG kéo về 1 giữa chừng (auto-refresh).
-        TotalCount = _services.Orders.Count(status: status, searchText: search, shopLogin: shopLogin, shopExact: shopExact);
+        TotalCount = _services.Orders.Count(status: status, searchText: search, shopLogin: shopLogin,
+            shopExact: shopExact, createdFromUtc: createdFromUtc, createdBeforeUtc: createdBeforeUtc);
         if (CurrentPage > TotalPages)
         {
             CurrentPage = TotalPages;
@@ -295,7 +348,8 @@ public partial class OrdersViewModel : ViewModelBase
 
         Rows.Clear();
         foreach (var row in _services.Orders.Query(status: status, searchText: search,
-                     limit: PageSize, offset: offset, shopLogin: shopLogin, shopExact: shopExact))
+                     limit: PageSize, offset: offset, shopLogin: shopLogin, shopExact: shopExact,
+                     createdFromUtc: createdFromUtc, createdBeforeUtc: createdBeforeUtc))
         {
             var label = ShopLabelOf(row);
             // notify: link "In phiếu" của dòng báo trạng thái (thiếu file / lỗi mở) ra StatusMessage của màn.
@@ -404,6 +458,22 @@ public partial class OrdersViewModel : ViewModelBase
             CurrentPage = 1;  // đổi từ khóa tìm → về trang 1
             Apply(); // tìm kiếm trực tiếp theo từng ký tự
         }
+    }
+
+    // Đổi một mốc ngày → về trang 1 rồi truy vấn lại (như mọi bộ lọc khác). Cờ _suppressApply để nút "✕" đặt cả
+    // HAI mốc mà chỉ Apply MỘT lần (đặt lần lượt sẽ lọt qua trạng thái nửa vời).
+    partial void OnFromDateChanged(DateTime? value) => SauKhiDoiNgay();
+
+    partial void OnToDateChanged(DateTime? value) => SauKhiDoiNgay();
+
+    private void SauKhiDoiNgay()
+    {
+        if (_suppressApply)
+        {
+            return;
+        }
+        CurrentPage = 1; // đổi khoảng ngày → về trang 1
+        Apply();
     }
 
     /// <summary>Đổi cỡ trang → về trang 1 rồi truy vấn lại (số trang đổi theo cỡ trang mới).</summary>
@@ -522,6 +592,30 @@ public partial class OrdersViewModel : ViewModelBase
         AccountFilterText = string.Empty;
     }
 
+    /// <summary>Nút "✕" cạnh hai ô ngày: xóa CẢ HAI mốc (về "mọi ngày") rồi truy vấn lại ĐÚNG một lượt.</summary>
+    [RelayCommand]
+    private void ClearDateFilter()
+    {
+        if (FromDate is null && ToDate is null)
+        {
+            return; // đã trống → khỏi query lại
+        }
+
+        _suppressApply = true;
+        try
+        {
+            FromDate = null;
+            ToDate = null;
+        }
+        finally
+        {
+            _suppressApply = false;
+        }
+
+        CurrentPage = 1;
+        Apply();
+    }
+
     /// <summary>
     /// Nút "Xuất CSV": ghi ra file (UTF-8 BOM) qua SaveFileDialog. Xuất TOÀN BỘ đơn khớp bộ lọc trên MỌI
     /// trang (truy vấn KHÔNG phân trang cùng bộ lọc) — phân trang chỉ tối ưu hiển thị, không thu hẹp dữ liệu xuất.
@@ -529,11 +623,12 @@ public partial class OrdersViewModel : ViewModelBase
     [RelayCommand]
     private async Task ExportCsvAsync()
     {
-        var (shopLogin, shopExact, status, search) = CurrentFilter();
+        var (shopLogin, shopExact, status, search, createdFromUtc, createdBeforeUtc) = CurrentFilter();
         var invoiceDir = _services.Settings.GetInvoiceFolder();
 
         // KHÔNG dùng Rows (chỉ 1 trang) — truy vấn lại toàn bộ đơn khớp bộ lọc rồi map như Apply (giữ nguyên format CSV).
-        var exportRows = _services.Orders.Query(status: status, searchText: search, shopLogin: shopLogin, shopExact: shopExact)
+        var exportRows = _services.Orders.Query(status: status, searchText: search, shopLogin: shopLogin,
+                shopExact: shopExact, createdFromUtc: createdFromUtc, createdBeforeUtc: createdBeforeUtc)
             .Select(row => new OrderRowViewModel(row, ShopLabelOf(row), invoiceDir))
             .ToList();
 
@@ -585,11 +680,12 @@ public partial class OrdersViewModel : ViewModelBase
     [RelayCommand]
     private async Task PrintPendingSlipsAsync()
     {
-        var (shopLogin, shopExact, status, search) = CurrentFilter();
+        var (shopLogin, shopExact, status, search, createdFromUtc, createdBeforeUtc) = CurrentFilter();
         var invoiceDir = _services.Settings.GetInvoiceFolder();
 
         // Chụp danh sách đơn Chờ lấy hàng khớp bộ lọc trên MỌI trang NGAY lúc bấm (nhãn shop không cần cho SlipPath).
-        var pending = _services.Orders.Query(status: status, searchText: search, shopLogin: shopLogin, shopExact: shopExact)
+        var pending = _services.Orders.Query(status: status, searchText: search, shopLogin: shopLogin,
+                shopExact: shopExact, createdFromUtc: createdFromUtc, createdBeforeUtc: createdBeforeUtc)
             .Select(row => new OrderRowViewModel(row, string.Empty, invoiceDir))
             .Where(r => r.IsPendingPickup)
             .ToList();

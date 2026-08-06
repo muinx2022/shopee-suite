@@ -69,6 +69,8 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<WebhookQueueServic
 // Cảnh báo "máy client rơi offline khi đang giữ việc" — đọc snapshot của FleetStateService, gửi qua hàng đợi
 // webhook ở trên (nên đăng ký SAU nó). Tắt/bật + ngưỡng nằm ở /settings.
 builder.Services.AddHostedService<MachineOfflineWatchService>();
+// Tin TỔNG KẾT CUỐI NGÀY (1 tin/ngày lúc giờ VN cấu hình ở /settings) — cùng hàng đợi webhook, cùng snapshot fleet.
+builder.Services.AddHostedService<DailyDigestService>();
 // SheetMapService: đọc + cache cấu trúc dòng kho sản phẩm (Postgres) cho "bản đồ dòng" trang Thống kê.
 builder.Services.AddSingleton<SheetMapService>();
 // DispatcherService: BackgroundService + được inject (trang Fleet) → 1 singleton.
@@ -225,6 +227,9 @@ app.MapGet("/slips/{shopId:long}/{orderSn}", (long shopId, string orderSn, HubOp
     var path = Path.Combine(opts.DataDir, "slips", shopId.ToString(), safe + ".pdf");
     return File.Exists(path) ? Results.File(path, "application/pdf") : Results.NotFound();
 }).RequireAuthorization("Web");
+
+// ── Tải GÓI ZIP phiếu theo bộ lọc trang /orders (admin, cookie) ──
+app.MapOrdersZip(db);
 
 // ── Chẩn đoán Chromium/Playwright (admin) — verify hạ tầng login BigSeller trên VM ──
 app.MapGet("/admin/chromium-test", async (BigSellerLoginService svc) =>

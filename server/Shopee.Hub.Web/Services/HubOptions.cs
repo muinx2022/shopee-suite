@@ -45,4 +45,18 @@ public static class SettingKeys
     /// <summary>Ngưỡng mất nhịp (PHÚT) trước khi báo máy offline. Thiếu/không parse được → mặc định
     /// <c>MachineOfflineWatchService.NguongMacDinhPhut</c>.</summary>
     public const string NotifyMayOfflinePhut = "notify.may_offline_phut";
+
+    /// <summary>Webhook TIN TỔNG KẾT CUỐI NGÀY (1 URL). Trống = tắt. KHÔNG lùi về ô legacy
+    /// <see cref="NotifyWebhooks"/> (cùng lý do như kênh máy offline: kênh mới chưa từng nằm trong đó).</summary>
+    public const string NotifyWebhookTongKet = "notify.webhook_tong_ket";
+
+    /// <summary>Bật tin tổng kết cuối ngày: "1" = bật, còn lại (kể cả thiếu khoá) = tắt.</summary>
+    public const string NotifyTongKetBat = "notify.tong_ket_bat";
+
+    /// <summary>GIỜ gửi tin tổng kết (0–23, giờ Việt Nam). Thiếu/không parse được → <c>DailyDigest.GioMacDinh</c>.</summary>
+    public const string NotifyTongKetGio = "notify.tong_ket_gio";
+
+    /// <summary>NGÀY VIỆT NAM (<c>yyyy-MM-dd</c>) của tin tổng kết ĐÃ GỬI gần nhất — chống gửi trùng khi hub
+    /// restart quanh giờ gửi. Do <c>DailyDigestService</c> ghi, KHÔNG có ô nhập trên /settings.</summary>
+    public const string NotifyTongKetDaGuiNgay = "notify.tong_ket_da_gui_ngay";
 }

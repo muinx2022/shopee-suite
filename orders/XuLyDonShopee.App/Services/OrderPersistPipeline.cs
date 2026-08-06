@@ -691,6 +691,80 @@ internal sealed class OrderPersistPipeline
     }
 
     /// <summary>
+    /// HÀM THUẦN (test được): đơn đã ở trạng thái KẾT THÚC chưa — <c>LaDonHuy</c> (Đã hủy) hoặc
+    /// <c>LaDaGiaoDaBan</c> (Đã giao). Chỉ đơn kết thúc mới bị xét dọn / mới lên màn chẩn đoán.
+    /// </summary>
+    internal static bool LaDonKetThuc(GsheetPendingOrder p)
+        => ShopeeShippingNav.LaDonHuy(p.Status, p.StatusDescription, p.CancelReason)
+           || ShopeeShippingNav.LaDaGiaoDaBan(p.Status);
+
+    /// <summary>Một NGHĨA VỤ đơn kết thúc còn nợ, khiến nó chưa được dọn khỏi app (xem
+    /// <see cref="ChanDoanDonKetThuc"/>). Thứ tự khai báo = thứ tự hiện trên màn chẩn đoán.</summary>
+    internal enum NghiaVuDonKetThuc
+    {
+        /// <summary>Còn phải ghi/cập nhật dòng Google Sheet (<see cref="HubOutbox.ConNghiaVuGhiSheet"/>).</summary>
+        GhiSheet,
+
+        /// <summary>Hub đang bật mà đơn chưa có <c>hub_synced_at</c>.</summary>
+        DayHub,
+
+        /// <summary>Còn file phiếu local HỢP LỆ chưa đẩy lên hub.</summary>
+        DayPhieuHub,
+
+        /// <summary>Đơn Đã giao có SKU mà chưa +1 "Đã bán" (<c>sold_counted_at</c> còn NULL).</summary>
+        DemDaBan,
+    }
+
+    /// <summary>Nhãn tiếng Việt của một nghĩa vụ — dùng cho màn chẩn đoán (và log nếu cần).</summary>
+    internal static string MoTaNghiaVu(NghiaVuDonKetThuc nghiaVu) => nghiaVu switch
+    {
+        NghiaVuDonKetThuc.GhiSheet => "chưa ghi Google Sheet",
+        NghiaVuDonKetThuc.DayHub => "chưa đẩy lên Hub",
+        NghiaVuDonKetThuc.DayPhieuHub => "phiếu chưa đẩy lên Hub",
+        NghiaVuDonKetThuc.DemDaBan => "chưa đếm \"Đã bán\"",
+        _ => nghiaVu.ToString(),
+    };
+
+    /// <summary>
+    /// HÀM THUẦN (test được): các NGHĨA VỤ một đơn KẾT THÚC còn nợ — chính là lý do nó chưa bị dọn khỏi app.
+    /// Danh sách RỖNG ⇔ đơn đủ điều kiện dọn (xem <see cref="NenXoaDonKetThuc"/>, hàm đó gọi THẲNG hàm này nên
+    /// hai luật KHÔNG THỂ trôi lệch — thêm/bớt điều kiện ở đây là đổi luôn luật dọn, cố ý như vậy).
+    /// <para>
+    /// Tham số vào giống hệt <see cref="NenXoaDonKetThuc"/>: <paramref name="gsheetSettled"/> (đã xong nghĩa vụ
+    /// sheet — URL trống thì caller truyền <c>true</c> cho MỌI đơn), <paramref name="hubHookActive"/> (hub đang
+    /// bật), <paramref name="coPhieuLocalChuaDayHub"/> (còn file phiếu local hợp lệ chưa lên hub).
+    /// </para>
+    /// <para>
+    /// <b>KHÔNG có mục "mã trả hàng chưa đẩy":</b> mã trả sống trong bảng <c>return_codes</c> ĐỘC LẬP với vòng đời
+    /// đơn (đơn đã dọn vẫn đẩy được mã), nên nó chưa bao giờ là điều kiện giữ đơn. Phần mã trả hàng CÓ ảnh hưởng
+    /// tới đơn còn sống thì đã nằm trong nghĩa vụ <see cref="NghiaVuDonKetThuc.GhiSheet"/> (mã mới làm
+    /// <see cref="HubOutbox.ConNghiaVuGhiSheet"/> trả true để đẩy lại điền ô).
+    /// </para>
+    /// </summary>
+    internal static IReadOnlyList<NghiaVuDonKetThuc> ChanDoanDonKetThuc(
+        GsheetPendingOrder p, bool gsheetSettled, bool hubHookActive, bool coPhieuLocalChuaDayHub)
+    {
+        var thieu = new List<NghiaVuDonKetThuc>(4);
+        if (!gsheetSettled)
+        {
+            thieu.Add(NghiaVuDonKetThuc.GhiSheet);
+        }
+        if (hubHookActive && !p.DaDayHub)
+        {
+            thieu.Add(NghiaVuDonKetThuc.DayHub);
+        }
+        if (coPhieuLocalChuaDayHub)
+        {
+            thieu.Add(NghiaVuDonKetThuc.DayPhieuHub);
+        }
+        if (ShopeeShippingNav.LaDaGiaoDaBan(p.Status) && !string.IsNullOrWhiteSpace(p.Sku) && !p.DaDemDaBan)
+        {
+            thieu.Add(NghiaVuDonKetThuc.DemDaBan);
+        }
+        return thieu;
+    }
+
+    /// <summary>
     /// HÀM THUẦN (test được) quyết định một đơn KẾT THÚC có được XÓA khỏi app chưa. Trả true khi:
     /// <list type="bullet">
     /// <item>đơn KẾT THÚC — <c>LaDonHuy</c> (Đã hủy) hoặc <c>LaDaGiaoDaBan</c> (Đã giao); VÀ</item>
@@ -705,15 +779,12 @@ internal sealed class OrderPersistPipeline
     /// Đơn trung gian (chưa kết thúc) hoặc chưa settled → false (GIỮ). Nghi ngờ thì GIỮ — đơn thừa vô hại.
     /// <paramref name="coPhieuLocalChuaDayHub"/> do caller tính: hub bật + <c>!p.DaDayPhieuHub</c> + file phiếu
     /// local hợp lệ tồn tại. File local KHÔNG tồn tại → false (không giữ vì phiếu, như cũ).
+    /// <para>
+    /// Thân hàm CỐ Ý chỉ còn "đơn kết thúc + không còn nghĩa vụ nào" — bộ điều kiện thật nằm ở
+    /// <see cref="ChanDoanDonKetThuc"/> để màn chẩn đoán và luật dọn dùng CHUNG một nguồn.
+    /// </para>
     /// </summary>
     internal static bool NenXoaDonKetThuc(GsheetPendingOrder p, bool gsheetSettled, bool hubHookActive, bool coPhieuLocalChuaDayHub)
-    {
-        var terminal = ShopeeShippingNav.LaDonHuy(p.Status, p.StatusDescription, p.CancelReason)
-            || ShopeeShippingNav.LaDaGiaoDaBan(p.Status);
-        return terminal
-            && gsheetSettled
-            && (!ShopeeShippingNav.LaDaGiaoDaBan(p.Status) || string.IsNullOrWhiteSpace(p.Sku) || p.DaDemDaBan)
-            && (!hubHookActive || p.DaDayHub)
-            && !coPhieuLocalChuaDayHub;
-    }
+        => LaDonKetThuc(p)
+           && ChanDoanDonKetThuc(p, gsheetSettled, hubHookActive, coPhieuLocalChuaDayHub).Count == 0;
 }

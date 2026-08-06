@@ -129,6 +129,12 @@ public sealed partial class HubDatabase : IDisposable
         if (AddColumnIfMissing("orders", "first_seen_at", "TEXT"))
             ExecRaw("UPDATE orders SET first_seen_at = synced_at WHERE first_seen_at IS NULL;");
         ExecRaw("CREATE INDEX IF NOT EXISTS ix_orders_first_seen ON orders(first_seen_at);");
+        // return_code_at = lúc hub GHI NHẬN mã yêu cầu trả hàng MỚI/ĐỔI của đơn (đúng cùng điều kiện mà
+        // UpsertOrders dùng để bắn notify "đơn trả") — nguồn đếm "mã trả hàng mới hôm nay" của tin tổng kết ngày
+        // (H2.1). KHÔNG backfill: dòng cũ để NULL, nghĩa là "không biết ghi lúc nào" nên không được đếm vào ngày
+        // nào cả — thà thiếu số của quá khứ còn hơn dồn cả kho mã cũ vào tin tổng kết đầu tiên.
+        AddColumnIfMissing("orders", "return_code_at", "TEXT");
+        ExecRaw("CREATE INDEX IF NOT EXISTS ix_orders_return_code_at ON orders(return_code_at);");
     }
 
     /// <summary>Thêm cột nếu thiếu; trả true nếu VỪA thêm (để chạy backfill 1 lần).</summary>

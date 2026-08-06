@@ -88,6 +88,21 @@ public static class DialogService
     }
 
     /// <summary>
+    /// Mở màn CHẨN ĐOÁN "đơn kết thúc chưa dọn được" (H2.5) — modal trên cửa sổ chính. Chưa gán cửa sổ chính →
+    /// không làm gì (giữ nếp mọi hàm ở đây).
+    /// </summary>
+    public static void ShowChanDoanDon(ChanDoanDonViewModel vm)
+    {
+        if (MainWindow is null)
+        {
+            return;
+        }
+
+        var dlg = new ChanDoanDonDialog(vm) { Owner = MainWindow };
+        dlg.ShowDialog();
+    }
+
+    /// <summary>
     /// Mở SaveFileDialog cho người dùng chọn nơi lưu, rồi GHI <paramref name="content"/> (đã gồm BOM) ra
     /// file đó. Trả về đường dẫn đã lưu, hoặc null nếu chưa gán cửa sổ chính / người dùng bấm Hủy.
     /// </summary>

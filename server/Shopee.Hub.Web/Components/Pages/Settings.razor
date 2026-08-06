@@ -69,6 +69,23 @@
     </div>
     <p class="hint m-hide" style="margin-top:4px">Mỗi lần máy rơi chỉ gửi 1 tin, máy nối lại gửi 1 tin nữa (hub khởi động lại thì quên trạng thái này và có thể báo lại một lần). "Đang giữ việc" đếm cả việc vừa bị hub đánh rụng vì máy hết nhịp.</p>
 
+    <label style="margin-top:12px">Tổng kết cuối ngày</label>
+    <input @bind="_webhookTongKet" class="opt-search" style="width:100%;font-family:monospace;font-size:12px"
+           placeholder="https://hooks.slack.com/services/… (vd. #tong-ket-ngay)" />
+    <div class="row" style="margin-top:8px">
+        <label class="toggle" title="Tắt = Hub không gửi tin tổng kết nữa (ô URL vẫn giữ nguyên).">
+            <input type="checkbox" @bind="_tongKetBat" />
+            Bật tin tổng kết
+        </label>
+        <label class="toggle" title="Giờ Việt Nam. Hub tắt qua giờ này rồi lên lại trong ngày vẫn gửi bù đúng 1 tin.">
+            Giờ gửi
+            <input type="number" @bind="_tongKetGio" min="@DailyDigest.GioMin" max="@DailyDigest.GioMax"
+                   class="opt-search" style="width:90px" />
+            giờ (VN)
+        </label>
+    </div>
+    <p class="hint m-hide" style="margin-top:4px">Mỗi ngày ĐÚNG 1 tin (mốc "đã gửi ngày nào" lưu trong DB nên restart hub không gửi lại). Nội dung: đơn chuẩn bị hàng phát sinh hôm nay theo shop, mã trả hàng mới, shop còn cảnh báo địa chỉ, máy đang offline (theo cùng ngưỡng mất nhịp ở trên).</p>
+
     <div class="bar" style="margin-top:12px">
         <button class="btn primary" @onclick="SaveWebhooks">💾 Lưu webhook</button>
         <span class="action">@_webhookStatus</span>
@@ -119,6 +136,9 @@
     private string _webhookMayOffline = "";
     private bool _mayOfflineBat;
     private int _mayOfflinePhut = MachineOfflineWatchService.NguongMacDinhPhut;
+    private string _webhookTongKet = "";
+    private bool _tongKetBat;
+    private int _tongKetGio = DailyDigest.GioMacDinh;
     private string _webhookStatus = "";
 
     protected override void OnInitialized()
@@ -137,6 +157,10 @@
         _webhookMayOffline = Db.GetSetting(SettingKeys.NotifyWebhookMayOffline)?.Trim() ?? "";
         _mayOfflineBat = (Db.GetSetting(SettingKeys.NotifyMayOfflineBat) ?? "").Trim() == "1";
         _mayOfflinePhut = MachineOfflineWatchService.KepNguong(Db.GetSetting(SettingKeys.NotifyMayOfflinePhut));
+        // Kênh tổng kết ngày cũng KHÔNG có bản legacy → không tham gia khối migrate bên dưới.
+        _webhookTongKet = Db.GetSetting(SettingKeys.NotifyWebhookTongKet)?.Trim() ?? "";
+        _tongKetBat = (Db.GetSetting(SettingKeys.NotifyTongKetBat) ?? "").Trim() == "1";
+        _tongKetGio = DailyDigest.KepGio(Db.GetSetting(SettingKeys.NotifyTongKetGio));
 
         if (_webhookDonMoi.Length == 0 && _webhookLoiApp.Length == 0 && _webhookDonTra.Length == 0)
         {
@@ -194,10 +218,12 @@
         var loiApp = (_webhookLoiApp ?? "").Trim();
         var donTra = (_webhookDonTra ?? "").Trim();
         var mayOffline = (_webhookMayOffline ?? "").Trim();
+        var tongKet = (_webhookTongKet ?? "").Trim();
 
         foreach (var (nhan, url) in new[]
         {
             ("Có đơn mới", donMoi), ("Lỗi app", loiApp), ("Có đơn trả hàng", donTra), ("Máy offline", mayOffline),
+            ("Tổng kết cuối ngày", tongKet),
         })
         {
             var err = OrderNotifyService.KiemTraUrl(url);
@@ -213,21 +239,29 @@
         Db.SetSetting(SettingKeys.NotifyWebhookMayOffline, mayOffline);
         Db.SetSetting(SettingKeys.NotifyMayOfflineBat, _mayOfflineBat ? "1" : "0");
         Db.SetSetting(SettingKeys.NotifyMayOfflinePhut, phut.ToString());
+        var gio = Math.Clamp(_tongKetGio, DailyDigest.GioMin, DailyDigest.GioMax);
+        Db.SetSetting(SettingKeys.NotifyWebhookTongKet, tongKet);
+        Db.SetSetting(SettingKeys.NotifyTongKetBat, _tongKetBat ? "1" : "0");
+        Db.SetSetting(SettingKeys.NotifyTongKetGio, gio.ToString());
 
         _webhookDonMoi = donMoi;
         _webhookLoiApp = loiApp;
         _webhookDonTra = donTra;
         _webhookMayOffline = mayOffline;
         _mayOfflinePhut = phut;
+        _webhookTongKet = tongKet;
+        _tongKetGio = gio;
 
         var parts = new List<string>();
         if (donMoi.Length > 0) parts.Add("đơn mới");
         if (loiApp.Length > 0) parts.Add("lỗi app");
         if (donTra.Length > 0) parts.Add("đơn trả");
         if (mayOffline.Length > 0 && _mayOfflineBat) parts.Add($"máy offline > {phut}'");
+        if (tongKet.Length > 0 && _tongKetBat) parts.Add($"tổng kết {gio}h");
         _webhookStatus = parts.Count == 0
             ? "✔ Đã tắt toàn bộ webhook."
             : "✔ Đã lưu: " + string.Join(", ", parts) + " — Hub gửi khi có sự kiện."
-              + (mayOffline.Length > 0 && !_mayOfflineBat ? " (kênh máy offline đang TẮT)" : "");
+              + (mayOffline.Length > 0 && !_mayOfflineBat ? " (kênh máy offline đang TẮT)" : "")
+              + (tongKet.Length > 0 && !_tongKetBat ? " (kênh tổng kết ngày đang TẮT)" : "");
     }
 }

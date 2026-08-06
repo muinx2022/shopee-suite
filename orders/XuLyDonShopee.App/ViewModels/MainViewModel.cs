@@ -1,5 +1,7 @@
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
 using XuLyDonShopee.App.Services;
 using XuLyDonShopee.Core.Models;
 
@@ -92,10 +94,32 @@ public partial class MainViewModel : ViewModelBase
         var p = _services.PendingOutbox;
         HasOutboxPending = p.Tong > 0;
         OutboxPendingText = $"⏳ Chờ đẩy: {p.Tong}";
-        OutboxPendingTooltip =
-            $"Hàng còn chờ đẩy: {p.Orders} đơn lên Hub · {p.Slips} phiếu · {p.SheetRows} dòng Google Sheet · "
-            + $"{p.SoldCounts} lượt đếm Đã bán · {p.ReturnCodes} mã trả hàng.\nTự đẩy lại mỗi 2 phút khi kết nối được.";
+        OutboxPendingTooltip = MoTaTonTooltip(p);
     }
+
+    /// <summary>
+    /// HÀM THUẦN (test được) dựng tooltip của badge "⏳ Chờ đẩy": MỖI loại đích một DÒNG, và <b>bỏ hẳn dòng nào
+    /// bằng 0</b> — badge chỉ hiện khi còn tồn, nên liệt kê cả mấy loại đã sạch chỉ làm loãng đúng con số đang kẹt.
+    /// Mọi loại đều 0 (badge đang ẩn) → chỉ còn dòng nhắc nhịp đẩy lại.
+    /// </summary>
+    internal static string MoTaTonTooltip(OutboxPending p)
+    {
+        var dong = new List<string> { $"Hàng còn chờ đẩy: {p.Tong}" };
+        if (p.Orders > 0) dong.Add($"• {p.Orders} đơn lên Hub");
+        if (p.Slips > 0) dong.Add($"• {p.Slips} phiếu lên Hub");
+        if (p.SheetRows > 0) dong.Add($"• {p.SheetRows} dòng Google Sheet");
+        if (p.SoldCounts > 0) dong.Add($"• {p.SoldCounts} lượt đếm Đã bán");
+        if (p.ReturnCodes > 0) dong.Add($"• {p.ReturnCodes} mã trả hàng");
+        dong.Add("Tự đẩy lại mỗi 2 phút khi kết nối được — bấm để xem đơn kết thúc đang kẹt.");
+        return string.Join("\n", dong);
+    }
+
+    /// <summary>
+    /// Bấm badge "⏳ Chờ đẩy" → mở màn chẩn đoán "đơn kết thúc chưa dọn được" (H2.5). VM của màn được dựng MỚI
+    /// mỗi lần mở (nó tự quét trong ctor) rồi bỏ đi khi đóng — không giữ trạng thái giữa hai lần mở.
+    /// </summary>
+    [RelayCommand]
+    private void MoChanDoanDon() => DialogService.ShowChanDoanDon(new ChanDoanDonViewModel(_services));
 
     /// <summary>Đọc lại 3 số liệu cho thanh trạng thái đáy. Gọi ở ctor, khi đổi màn, và sau khi kho đơn đổi.
     /// <para>Đếm proxy đã BỎ cùng cụm proxy runtime (module đi thẳng IP máy).</para></summary>

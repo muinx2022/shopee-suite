@@ -817,6 +817,34 @@
             </Trigger>
         </Style.Triggers>
     </Style>
+    <!-- Đoạn thanh trạng thái BẤM ĐƯỢC: nhìn y hệt `statusSeg` (kể cả nền hover) nhưng là Button — dùng cho badge
+         "⏳ Chờ đẩy" mở màn chẩn đoán đơn kẹt. Không dùng chung Style với Border được (khác TargetType) nên
+         template dựng lại đúng cái Border ấy; đổi màu ở statusSeg thì sửa cả hai. -->
+    <Style x:Key="statusSegBtn" TargetType="{x:Type Button}">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="Padding" Value="12,0" />
+        <Setter Property="MinHeight" Value="0" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="FontSize" Value="11.5" />
+        <Setter Property="Foreground" Value="{StaticResource StatusBarTextBrush}" />
+        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type Button}">
+                    <Border x:Name="bd" Background="{TemplateBinding Background}"
+                            Padding="{TemplateBinding Padding}">
+                        <ContentPresenter VerticalAlignment="Center" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="bd" Property="Background" Value="{StaticResource StatusBarHoverBrush}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
     <!-- Chữ trong đoạn: không xuống dòng, canh giữa dọc (Avalonia: `Border.statusSeg TextBlock`). -->
     <Style x:Key="statusText" TargetType="{x:Type TextBlock}">
         <Setter Property="TextWrapping" Value="NoWrap" />

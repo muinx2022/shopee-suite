@@ -1,0 +1,83 @@
+<Window x:Class="XuLyDonShopee.App.Views.ChanDoanDonDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:c="clr-namespace:XuLyDonShopee.App.Controls"
+        Width="940" Height="560" MinWidth="640" MinHeight="360"
+        ShowInTaskbar="False" WindowStyle="SingleBorderWindow"
+        WindowStartupLocation="CenterOwner"
+        Background="{StaticResource WindowBackgroundBrush}"
+        FontFamily="{StaticResource UiFont}"
+        UseLayoutRounding="True"
+        TextOptions.TextFormattingMode="Display"
+        TextOptions.TextRenderingMode="ClearType"
+        Title="Đơn kết thúc chưa dọn được">
+
+    <Window.Resources>
+        <ResourceDictionary>
+            <!-- Merge tài nguyên module: style `proxy` (DataGrid), `primary`, `btnLabel` + kiểu c:PathIcon RIÊNG
+                 của module — y như OrderDetailDialog / ConfirmDialog. -->
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="pack://application:,,,/XuLyDonShopee.App;component/Styles/ModuleResources.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </Window.Resources>
+
+    <DockPanel Margin="20">
+        <StackPanel DockPanel.Dock="Top" Margin="0,0,0,12">
+            <TextBlock Text="Đơn kết thúc chưa dọn được" Style="{StaticResource h1}" />
+            <TextBlock Text="{Binding SummaryText}" FontSize="12" Margin="0,4,0,0"
+                       TextWrapping="Wrap" Foreground="{StaticResource TextMuted}" />
+            <TextBlock Text="App chỉ xoá đơn Đã giao / Đã hủy sau khi mọi nghĩa vụ hoàn tất. Cột &quot;Còn thiếu&quot; là lý do đơn còn nằm lại; bấm Đẩy lại để xếp đơn vào hàng chờ đẩy ở lượt sau."
+                       FontSize="12" Margin="0,2,0,0"
+                       TextWrapping="Wrap" Foreground="{StaticResource TextMuted}" />
+        </StackPanel>
+
+        <Grid DockPanel.Dock="Bottom" Margin="0,12,0,0">
+            <TextBlock Text="{Binding StatusMessage}" VerticalAlignment="Center" HorizontalAlignment="Left"
+                       TextWrapping="Wrap" Margin="0,0,12,0"
+                       Foreground="{StaticResource SuccessBrush}" />
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button Command="{Binding ReloadCommand}" ToolTip="Quét lại danh sách đơn kẹt">
+                    <StackPanel Orientation="Horizontal">
+                        <c:PathIcon Data="{DynamicResource IconRefresh}" />
+                        <TextBlock Text="Làm mới" Style="{StaticResource btnLabel}" />
+                    </StackPanel>
+                </Button>
+                <Button Margin="8,0,0,0" IsCancel="True" Click="OnClose">
+                    <StackPanel Orientation="Horizontal">
+                        <c:PathIcon Data="{DynamicResource IconClose}" />
+                        <TextBlock Text="Đóng" Style="{StaticResource btnLabel}" />
+                    </StackPanel>
+                </Button>
+            </StackPanel>
+        </Grid>
+
+        <DataGrid Style="{StaticResource proxy}"
+                  ItemsSource="{Binding Rows}"
+                  IsReadOnly="True"
+                  AutoGenerateColumns="False"
+                  CanUserResizeColumns="True"
+                  CanUserSortColumns="False">
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="Shop" Binding="{Binding ShopLabel}" Width="1.4*" MinWidth="110" />
+                <DataGridTextColumn Header="Mã đơn" Binding="{Binding OrderSn}" Width="130" />
+                <DataGridTextColumn Header="Trạng thái" Binding="{Binding Status}" Width="130" />
+                <DataGridTextColumn Header="Còn thiếu" Binding="{Binding ThieuText}" Width="2.4*" MinWidth="200" />
+                <DataGridTemplateColumn Header="" Width="110">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <!-- Command nằm ở VM của CỬA SỔ (không phải của dòng) → bind qua Window rồi truyền
+                                 chính dòng làm tham số. -->
+                            <Button Content="Đẩy lại" Padding="10,4" Height="28"
+                                    HorizontalAlignment="Left" VerticalAlignment="Center"
+                                    ToolTip="Xếp đơn này vào hàng chờ đẩy lại lên Hub + Google Sheet (có xác nhận)"
+                                    Command="{Binding DataContext.DayLaiCommand,
+                                              RelativeSource={RelativeSource AncestorType={x:Type Window}}}"
+                                    CommandParameter="{Binding}" />
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+            </DataGrid.Columns>
+        </DataGrid>
+    </DockPanel>
+</Window>
