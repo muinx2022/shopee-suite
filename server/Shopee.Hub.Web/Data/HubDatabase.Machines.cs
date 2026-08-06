@@ -1,4 +1,4 @@
-using Shopee.Core.Coordination;
+﻿using Shopee.Core.Coordination;
 
 namespace Shopee.Hub;
 
@@ -139,10 +139,10 @@ public sealed partial class HubDatabase
             using (var c = _conn.CreateCommand())
             {
                 c.CommandText = @"
-INSERT INTO machines(machine_id,hostname,last_seen,app_version,max_brave,mode,kind,host_id)
-VALUES($m,$h,$ls,$v,$mb,$mo,$k,$hi)
+INSERT INTO machines(machine_id,hostname,last_seen,app_version,max_brave,mode,kind,host_id,outbox_pending)
+VALUES($m,$h,$ls,$v,$mb,$mo,$k,$hi,$ob)
 ON CONFLICT(machine_id) DO UPDATE SET hostname=$h, last_seen=$ls, app_version=$v, max_brave=$mb,
-                                      mode=$mo, kind=$k, host_id=$hi;";
+                                      mode=$mo, kind=$k, host_id=$hi, outbox_pending=$ob;";
                 c.Parameters.AddWithValue("$m", r.MachineId);
                 c.Parameters.AddWithValue("$h", r.Hostname);
                 c.Parameters.AddWithValue("$ls", Iso(DateTimeOffset.UtcNow));
@@ -154,6 +154,13 @@ ON CONFLICT(machine_id) DO UPDATE SET hostname=$h, last_seen=$ls, app_version=$v
                 c.Parameters.AddWithValue("$mo", MachineSlots.NormalizeMode(r.Mode));
                 c.Parameters.AddWithValue("$k", MachineSlots.NormalizeKind(r.Kind, r.MachineId));
                 c.Parameters.AddWithValue("$hi", MachineSlots.NormalizeHostId(r.HostId, r.MachineId));
+                // Backlog "chờ đẩy" (H1.4): GHI THẲNG giá trị nhịp mang theo, KHÔNG COALESCE giữ giá trị cũ. Client
+                // cũ (và suất workspace) không gửi → NULL, tức "máy này không báo" — đúng nghĩa cần hiển thị. Giữ
+                // số cũ ở đây sẽ để lại một con số CHẾT trên bảng khi máy hạ bản / đổi chế độ, không ai gỡ được.
+                // Kẹp ≥ 0 NGAY Ở HUB, đừng tin client đã kẹp: số âm lọt vào DB sẽ rơi vào nhánh màu "đã đẩy hết"
+                // của bảng /machines và hiện pill xanh "-9".
+                c.Parameters.AddWithValue("$ob",
+                    r.OutboxPending is { } ob ? Math.Max(0, ob) : (object)DBNull.Value);
                 c.ExecuteNonQuery();
             }
             return new MachineHeartbeatResponse
@@ -219,12 +226,12 @@ WHERE machine_id=$m;";
         {
             var list = new List<MachinePresence>();
             using var c = _conn.CreateCommand();
-            c.CommandText = "SELECT machine_id,hostname,last_seen,app_version,max_brave,update_status,update_requested_at,mode,kind,host_id FROM machines";
+            c.CommandText = "SELECT machine_id,hostname,last_seen,app_version,max_brave,update_status,update_requested_at,mode,kind,host_id,outbox_pending FROM machines";
             using var rd = c.ExecuteReader();
             while (rd.Read())
             {
                 var id = S(rd, 0);
-                list.Add(new MachinePresence { MachineId = id, Hostname = S(rd, 1), LastSeen = D(rd, 2), AppVersion = rd.IsDBNull(3) ? null : rd.GetString(3), MaxBrave = rd.IsDBNull(4) ? 0 : rd.GetInt32(4), UpdateStatus = S(rd, 5), UpdateRequestedAt = S(rd, 6) is { Length: > 0 } ua && DateTimeOffset.TryParse(ua, out var uat) ? uat : null, Mode = MachineSlots.NormalizeMode(S(rd, 7)), Kind = MachineSlots.NormalizeKind(S(rd, 8), id), HostId = MachineSlots.NormalizeHostId(S(rd, 9), id) });
+                list.Add(new MachinePresence { MachineId = id, Hostname = S(rd, 1), LastSeen = D(rd, 2), AppVersion = rd.IsDBNull(3) ? null : rd.GetString(3), MaxBrave = rd.IsDBNull(4) ? 0 : rd.GetInt32(4), UpdateStatus = S(rd, 5), UpdateRequestedAt = S(rd, 6) is { Length: > 0 } ua && DateTimeOffset.TryParse(ua, out var uat) ? uat : null, Mode = MachineSlots.NormalizeMode(S(rd, 7)), Kind = MachineSlots.NormalizeKind(S(rd, 8), id), HostId = MachineSlots.NormalizeHostId(S(rd, 9), id), OutboxPending = rd.IsDBNull(10) ? null : rd.GetInt32(10) });
             }
             return list;
         }

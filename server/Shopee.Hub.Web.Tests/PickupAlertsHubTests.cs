@@ -1,6 +1,10 @@
+extern alias ordersCore;
+
 using System.Text.Json;
 using Shopee.Core.Coordination;
 using Shopee.Hub;
+using MergeAction = ordersCore::XuLyDonShopee.Core.Services.MergePickupAlertAction;
+using PickupMerge = ordersCore::XuLyDonShopee.Core.Services.PickupAlertMerge;
 
 namespace Shopee.Hub.Web.Tests;
 
@@ -117,6 +121,69 @@ public sealed class PickupAlertsHubTests : IDisposable
         Assert.Equal(2, rows.Count);
         Assert.Equal(2, rows.Single(x => x.ShopLogin == "shop.a").Rev);
         Assert.Equal(1, rows.Single(x => x.ShopLogin == "shop.b").Rev);
+    }
+
+    // ── Section "Cảnh báo địa chỉ" trên web hub (H1.2) ───────────────────────────
+    /// <summary>Nguồn của section: CHỈ banner đang mở, gộp mọi tài khoản, kèm máy báo + rev.</summary>
+    [Fact]
+    public void ActivePickupAlerts_ChiDongDangMo_GopMoiTaiKhoan()
+    {
+        using var db = new HubDatabase(_dataDir);
+        db.UpsertPickupAlert("acc@x", "shop.a", "TH", "may-1");
+        db.UpsertPickupAlert("acc@y", "shop.b", "HN", "may-2");
+        db.UpsertPickupAlert("acc@x", "shop.c", "DN", "may-1");
+        db.DismissPickupAlert("acc@x", "shop.c", "may-1");   // đã xử → phải biến khỏi section
+
+        var rows = db.ActivePickupAlerts();
+
+        Assert.Equal(2, rows.Count);
+        Assert.DoesNotContain(rows, r => r.ShopLogin == "shop.c");
+        var a = rows.Single(r => r.ShopLogin == "shop.a");
+        Assert.Equal("acc@x", a.AccountLogin);
+        Assert.Equal("TH", a.Province);
+        Assert.Equal("may-1", a.UpdatedByMachine);
+        Assert.Equal(1, a.Rev);
+    }
+
+    /// <summary>Lỗi còn thật → vòng shop kế upsert lại ⇒ dòng QUAY LẠI section (tombstone không khoá vĩnh viễn).</summary>
+    [Fact]
+    public void ActivePickupAlerts_SauDismissRoiUpsertLai_HienLai()
+    {
+        using var db = new HubDatabase(_dataDir);
+        db.UpsertPickupAlert("acc@x", "shop.a", "TH", "may-1");
+        db.DismissPickupAlert("acc@x", "shop.a", "hub-web");
+        Assert.Empty(db.ActivePickupAlerts());
+
+        db.UpsertPickupAlert("acc@x", "shop.a", "TH", "may-1");
+
+        Assert.Equal("shop.a", Assert.Single(db.ActivePickupAlerts()).ShopLogin);
+    }
+
+    /// <summary>
+    /// CHỐT CHẶN của H1.2: admin bấm "✓ Đã xử lý" trên web đi ĐÚNG hàm <see cref="HubDatabase.DismissPickupAlert"/>
+    /// mà endpoint của client gọi ⇒ máy đang chạy tài khoản đó, khi merge lượt kế bằng ĐÚNG luật của client
+    /// (<c>PickupAlertMerge.QuyetDinh</c> — so <c>rev</c>, KHÔNG so mốc giờ), phải quyết định NHẬN trạng thái Hub
+    /// và tắt banner. Không có đường ghi riêng nào cho web.
+    /// </summary>
+    [Fact]
+    public void DismissTuWeb_ClientMergeTheoRev_TatBanner()
+    {
+        using var db = new HubDatabase(_dataDir);
+        // Máy client phát hiện lỗi và đã đồng bộ xong (local nhớ rev này, không còn gì chờ đẩy).
+        var revMay = db.UpsertPickupAlert("acc@x", "shop.a", "TH", "may-1");
+
+        // Admin đóng banner từ web — CÙNG hàm mà POST /orders/pickup-alerts/dismiss gọi.
+        var revWeb = db.DismissPickupAlert("acc@x", "shop.a", "hub-web");
+        Assert.True(revWeb > revMay, "dismiss phải tăng rev thì máy khác mới nhận ra là bản mới hơn");
+
+        var hub = Assert.Single(db.ListPickupAlerts("acc@x"));   // đúng payload GET mà client kéo về
+        Assert.False(string.IsNullOrEmpty(hub.DismissedAt));
+
+        var quyetDinh = PickupMerge.QuyetDinh(
+            localCoDong: true, localChoDay: false, localHubRev: revMay,
+            hubCoDong: true, hubRev: hub.Rev);
+
+        Assert.Equal(MergeAction.TheoHub, quyetDinh);
     }
 
     public void Dispose()

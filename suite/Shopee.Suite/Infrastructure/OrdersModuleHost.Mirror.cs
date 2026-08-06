@@ -50,6 +50,10 @@ public static partial class OrdersModuleHost
         services.Sessions.Changed += () => _mirrorDirty = true;
         // Hub giao lệnh cho suất đơn hàng → thực thi ở đây (module Đơn hàng không biết hub, suite làm cầu nối).
         OrdersSlotHeartbeat.CommandsReceived = cmds => RunOrdersCommands(services, cmds);
+        // Backlog "chờ đẩy" đi kèm NHỊP SỐNG (không phải gương): đó là một con số, đọc tại chỗ từ bộ nhớ
+        // (HubOutboxWorker cập nhật sau mỗi lượt quét ~2 phút) nên không tốn thêm request nào. Chỉ rót ở ĐÂY ⇒
+        // chế độ không có module Đơn hàng thì hook vẫn null và nhịp không mang field → hub hiện "—".
+        OrdersSlotHeartbeat.OutboxPendingProvider = () => services.PendingOutbox.Tong;
         _mirrorTimer = new Timer(_ => _ = MirrorTickAsync(services), null, TimeSpan.Zero, MirrorTick);
     }
 

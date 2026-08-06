@@ -31,6 +31,12 @@ public sealed class MachinePresence
     public string Kind { get; set; } = "";
     /// <summary>Id PC THẬT (gộp 2 suất của cùng một máy). Suất workspace: = <see cref="MachineId"/>.</summary>
     public string HostId { get; set; } = "";
+
+    /// <summary>Tổng hàng còn TỒN trong vòng chờ đẩy của module Đơn hàng trên máy này (đơn + phiếu + dòng
+    /// GSheet + lượt "Đã bán" + mã trả hàng). <c>null</c> = máy KHÔNG báo — bản client cũ, hoặc suất/chế độ
+    /// không có module Đơn hàng (suất workspace luôn null). Phân biệt null với 0 là CỐ Ý: 0 = "đã đẩy hết",
+    /// null = "không biết" → bảng /machines hiện "—" thay vì con số bịa.</summary>
+    public int? OutboxPending { get; set; }
 }
 
 /// <summary>Mục manifest của một file dùng chung trên Hub.</summary>
@@ -228,11 +234,15 @@ public sealed record SetAccountHomeRequest(List<string> AccountIds, string Machi
 public sealed record AccountHomeItem(string AccountId, string MachineId, string Hostname, bool Binding);
 
 /// <summary>Nhịp sống 1 SUẤT làm việc. <paramref name="MachineId"/> = id SUẤT (suất workspace GIỮ NGUYÊN id máy,
-/// suất đơn hàng có hậu tố — xem <see cref="MachineSlots"/>). 3 field cuối có MẶC ĐỊNH RỖNG để client CŨ (không
-/// gửi) vẫn hợp lệ; Hub suy ra qua <c>MachineSlots.Normalize*</c>.</summary>
+/// suất đơn hàng có hậu tố — xem <see cref="MachineSlots"/>). 3 field Mode/Kind/HostId có MẶC ĐỊNH RỖNG để client
+/// CŨ (không gửi) vẫn hợp lệ; Hub suy ra qua <c>MachineSlots.Normalize*</c>.
+/// <para><paramref name="OutboxPending"/> = tổng hàng còn chờ đẩy của module Đơn hàng trên máy (xem
+/// <see cref="MachinePresence.OutboxPending"/>). MẶC ĐỊNH <c>null</c> ⇒ tương thích NGƯỢC cả hai chiều: client cũ
+/// không gửi thì hub mới đọc ra null ("không biết"); client mới gửi thêm field thì hub cũ bỏ qua field lạ khi
+/// deserialize (System.Text.Json mặc định) — không phá thứ tự deploy nào.</para></summary>
 public sealed record MachineHeartbeatRequest(
     string MachineId, string Hostname, string? AppVersion, int MaxBrave = 0,
-    string Mode = "", string Kind = "", string HostId = "");
+    string Mode = "", string Kind = "", string HostId = "", int? OutboxPending = null);
 /// <summary>Phản hồi heartbeat: kênh Hub đẩy lệnh xuống client. <see cref="UpdateRequestedAt"/> null/rỗng = không có
 /// lệnh; có giá trị = chuỗi ISO lúc operator ra lệnh update, client dùng làm ID dedup (chỉ update 1 lần/lệnh).
 /// Là class để sau này thêm lệnh khác chỉ cần thêm field (client cũ bỏ qua field lạ).</summary>

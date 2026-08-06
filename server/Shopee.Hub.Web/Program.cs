@@ -66,6 +66,9 @@ builder.Services.AddSingleton<FleetStateService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<FleetStateService>());
 builder.Services.AddSingleton<WebhookQueueService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<WebhookQueueService>());
+// Cảnh báo "máy client rơi offline khi đang giữ việc" — đọc snapshot của FleetStateService, gửi qua hàng đợi
+// webhook ở trên (nên đăng ký SAU nó). Tắt/bật + ngưỡng nằm ở /settings.
+builder.Services.AddHostedService<MachineOfflineWatchService>();
 // SheetMapService: đọc + cache cấu trúc dòng kho sản phẩm (Postgres) cho "bản đồ dòng" trang Thống kê.
 builder.Services.AddSingleton<SheetMapService>();
 // DispatcherService: BackgroundService + được inject (trang Fleet) → 1 singleton.

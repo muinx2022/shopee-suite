@@ -52,6 +52,23 @@
            placeholder="https://hooks.slack.com/services/…" />
     <p class="hint m-hide" style="margin-top:4px">Khi push đơn kèm mã trả mới/đổi → Hub gửi.</p>
 
+    <label style="margin-top:12px">Máy client rơi offline khi đang giữ việc</label>
+    <input @bind="_webhookMayOffline" class="opt-search" style="width:100%;font-family:monospace;font-size:12px"
+           placeholder="https://hooks.slack.com/services/… (vd. #canh-bao-may)" />
+    <div class="row" style="margin-top:8px">
+        <label class="toggle" title="Tắt = Hub không theo dõi máy mất nhịp nữa (ô URL vẫn giữ nguyên).">
+            <input type="checkbox" @bind="_mayOfflineBat" />
+            Bật cảnh báo máy offline
+        </label>
+        <label class="toggle" title="Máy mất nhịp quá số phút này MÀ đang giữ việc → Hub gửi 1 tin; máy nối lại gửi 1 tin nữa.">
+            Ngưỡng mất nhịp
+            <input type="number" @bind="_mayOfflinePhut" min="@MachineOfflineWatchService.NguongMinPhut"
+                   max="@MachineOfflineWatchService.NguongMaxPhut" class="opt-search" style="width:90px" />
+            phút
+        </label>
+    </div>
+    <p class="hint m-hide" style="margin-top:4px">Mỗi lần máy rơi chỉ gửi 1 tin, máy nối lại gửi 1 tin nữa (hub khởi động lại thì quên trạng thái này và có thể báo lại một lần). "Đang giữ việc" đếm cả việc vừa bị hub đánh rụng vì máy hết nhịp.</p>
+
     <div class="bar" style="margin-top:12px">
         <button class="btn primary" @onclick="SaveWebhooks">💾 Lưu webhook</button>
         <span class="action">@_webhookStatus</span>
@@ -99,6 +116,9 @@
     private string _webhookDonMoi = "";
     private string _webhookLoiApp = "";
     private string _webhookDonTra = "";
+    private string _webhookMayOffline = "";
+    private bool _mayOfflineBat;
+    private int _mayOfflinePhut = MachineOfflineWatchService.NguongMacDinhPhut;
     private string _webhookStatus = "";
 
     protected override void OnInitialized()
@@ -112,6 +132,11 @@
         _webhookDonMoi = Db.GetSetting(SettingKeys.NotifyWebhookDonMoi)?.Trim() ?? "";
         _webhookLoiApp = Db.GetSetting(SettingKeys.NotifyWebhookLoiApp)?.Trim() ?? "";
         _webhookDonTra = Db.GetSetting(SettingKeys.NotifyWebhookDonTra)?.Trim() ?? "";
+        // Kênh máy-offline KHÔNG có bản legacy (chưa từng nằm trong ô notify.webhooks) → không tham gia khối
+        // migrate bên dưới. Ngưỡng đọc qua đúng hàm kẹp mà service dùng, để ô hiện ra bằng số thực sự có hiệu lực.
+        _webhookMayOffline = Db.GetSetting(SettingKeys.NotifyWebhookMayOffline)?.Trim() ?? "";
+        _mayOfflineBat = (Db.GetSetting(SettingKeys.NotifyMayOfflineBat) ?? "").Trim() == "1";
+        _mayOfflinePhut = MachineOfflineWatchService.KepNguong(Db.GetSetting(SettingKeys.NotifyMayOfflinePhut));
 
         if (_webhookDonMoi.Length == 0 && _webhookLoiApp.Length == 0 && _webhookDonTra.Length == 0)
         {
@@ -168,8 +193,12 @@
         var donMoi = (_webhookDonMoi ?? "").Trim();
         var loiApp = (_webhookLoiApp ?? "").Trim();
         var donTra = (_webhookDonTra ?? "").Trim();
+        var mayOffline = (_webhookMayOffline ?? "").Trim();
 
-        foreach (var (nhan, url) in new[] { ("Có đơn mới", donMoi), ("Lỗi app", loiApp), ("Có đơn trả hàng", donTra) })
+        foreach (var (nhan, url) in new[]
+        {
+            ("Có đơn mới", donMoi), ("Lỗi app", loiApp), ("Có đơn trả hàng", donTra), ("Máy offline", mayOffline),
+        })
         {
             var err = OrderNotifyService.KiemTraUrl(url);
             if (err is not null) { _webhookStatus = $"⚠ {nhan}: {err}"; return; }
@@ -179,17 +208,26 @@
         Db.SetSetting(SettingKeys.NotifyWebhookLoiApp, loiApp);
         Db.SetSetting(SettingKeys.NotifyWebhookDonTra, donTra);
         Db.SetSetting(SettingKeys.NotifyWebhooks, "");
+        // Kẹp NGAY khi lưu (không chỉ khi đọc): ô number vẫn gõ tay được số ngoài min/max.
+        var phut = Math.Clamp(_mayOfflinePhut, MachineOfflineWatchService.NguongMinPhut, MachineOfflineWatchService.NguongMaxPhut);
+        Db.SetSetting(SettingKeys.NotifyWebhookMayOffline, mayOffline);
+        Db.SetSetting(SettingKeys.NotifyMayOfflineBat, _mayOfflineBat ? "1" : "0");
+        Db.SetSetting(SettingKeys.NotifyMayOfflinePhut, phut.ToString());
 
         _webhookDonMoi = donMoi;
         _webhookLoiApp = loiApp;
         _webhookDonTra = donTra;
+        _webhookMayOffline = mayOffline;
+        _mayOfflinePhut = phut;
 
         var parts = new List<string>();
         if (donMoi.Length > 0) parts.Add("đơn mới");
         if (loiApp.Length > 0) parts.Add("lỗi app");
         if (donTra.Length > 0) parts.Add("đơn trả");
+        if (mayOffline.Length > 0 && _mayOfflineBat) parts.Add($"máy offline > {phut}'");
         _webhookStatus = parts.Count == 0
             ? "✔ Đã tắt toàn bộ webhook."
-            : "✔ Đã lưu: " + string.Join(", ", parts) + " — Hub gửi khi có sự kiện.";
+            : "✔ Đã lưu: " + string.Join(", ", parts) + " — Hub gửi khi có sự kiện."
+              + (mayOffline.Length > 0 && !_mayOfflineBat ? " (kênh máy offline đang TẮT)" : "");
     }
 }

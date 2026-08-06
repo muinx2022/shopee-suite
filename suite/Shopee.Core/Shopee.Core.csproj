@@ -25,4 +25,12 @@
          BraveArgs, BrowserLocator, WebSocketServer, selector đăng nhập Microsoft. -->
     <ProjectReference Include="..\..\shared\Shopee.Toolkit\Shopee.Toolkit.csproj" />
   </ItemGroup>
+
+  <ItemGroup>
+    <!-- Cho phép bộ test đọc thành viên `internal` (khuôn đã dùng ở Shopee.Hub.Web) — để test được luật nội bộ
+         mà KHÔNG phải nới `public` chỉ vì test, vd OrdersSlotHeartbeat.TonChoDay. -->
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
+      <_Parameter1>Shopee.Core.Tests</_Parameter1>
+    </AssemblyAttribute>
+  </ItemGroup>
 </Project>

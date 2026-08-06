@@ -9,8 +9,11 @@ public sealed partial class HubDatabase
     // ── Vai trò máy + Giao việc (Hub đẩy việc cho client) ────────────────────────
     /// <summary>Cờ lỗi mà SweepStaleLocked GHI cho việc 'running' hết nhịp — và ĐỐI CHIẾU bằng equality khi hồi sinh
     /// (SweepStaleLocked bước 2) + resume-mine (ResumeMachineWork). GIÁ TRỊ tuyệt đối KHÔNG ĐỔI: DB production đang
-    /// chứa các dòng mang đúng chuỗi này; đổi wording là logic hồi sinh/resume bỏ sót dòng cũ (gãy âm thầm).</summary>
-    private const string StaleSweepError = "hết nhịp (máy nhận có thể đã thoát)";
+    /// chứa các dòng mang đúng chuỗi này; đổi wording là logic hồi sinh/resume bỏ sót dòng cũ (gãy âm thầm).
+    /// <para><c>internal</c> (không private nữa) vì cảnh báo "máy rơi offline khi đang giữ việc"
+    /// (<c>MachineOfflineWatch</c>) phải NHẬN RA đúng các việc vừa bị chính sweep này đánh rụng — xem chú thích
+    /// ở đó. Vẫn KHÔNG lộ ra ngoài assembly.</para></summary>
+    internal const string StaleSweepError = "hết nhịp (máy nhận có thể đã thoát)";
 
     public TimeSpan StaleMachine { get; init; } = TimeSpan.FromSeconds(45);
     /// <summary>Việc 'running' quá lâu không có nhịp (worker báo "running" mỗi ~10s) ⇒ coi như máy nhận đã

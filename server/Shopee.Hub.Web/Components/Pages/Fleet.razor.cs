@@ -1,6 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Shopee.Core.BigSeller;
 using Shopee.Core.Coordination;
+using Shopee.Hub.Web.Components.Shared;
 using Shopee.Hub.Web.Services;
 
 namespace Shopee.Hub.Web.Components.Pages;
@@ -40,10 +41,44 @@ public partial class Fleet
     private RowMapCtx? _map;
     private sealed record RowMapCtx(string Title, string Op, string OpLabel, string AccountId, string Sheet, WorkLedgerRecord? Ledger);
 
+    // ── Hàng thẻ TỔNG QUAN + section cảnh báo địa chỉ (đợt H1) ───────────────────
+    /// <summary>Trạng thái đơn coi là "đang chờ xử lý" (chỉ để dựng tooltip) — số thật do
+    /// <see cref="HomeOverview.DonChoHomNay"/> tính.</summary>
+    private const string TrangThaiCho = HomeOverview.TrangThaiCho;
+
+    private int _ovDonCho;     // đơn "Chờ lấy hàng" xuất hiện HÔM NAY (giờ VN) trên toàn hệ thống
+    private int _ovAccLoi;     // acc Shopee client báo lỗi/captcha chưa xử
+    private List<PickupAlertActiveRow> _alerts = new();
+    private DateTimeOffset _ovLoadedAt;
+    private bool _alertsOpen = true;   // mặc định MỞ khi có cảnh báo (nằm trong URL: ?al=0 = đang thu gọn)
+    private string _alertMsg = "";
+    private ConfirmDialog? _confirm;
+
+    private int OvGianDoan => Snap.Interrupted.Count;
+
+    private int OvMayOffline => Snap.Machines.Count(m => FleetStateService.MachineOffline(Snap, m.MachineId));
+
+    /// <summary>Có máy offline MÀ đang ôm việc → thẻ tô ĐỎ. Máy tắt mà không giữ việc gì là chuyện thường
+    /// (hết ca, tắt máy) → chỉ hiện số, không kêu. Dùng CHUNG hàm đếm với cảnh báo webhook máy offline để
+    /// hai chỗ không định nghĩa "đang giữ việc" theo hai kiểu.</summary>
+    private bool OvMayOfflineGiuViec => Snap.Machines.Any(m =>
+        FleetStateService.MachineOffline(Snap, m.MachineId)
+        && MachineOfflineWatch.SoViecDangGiu(Snap, m.MachineId, DateTimeOffset.Now) > 0);
+
+    private string OvMayTitle => OvMayOfflineGiuViec
+        ? "CÓ máy offline mà vẫn đang ôm việc — bấm để sang trang Máy client (⟳ Reset việc để nhả khoá + giao lại)."
+        : OvMayOffline > 0
+            ? "Có máy offline nhưng không máy nào đang ôm việc. Bấm để sang trang Máy client."
+            : "Mọi máy đã đăng ký đều còn nhịp. Bấm để sang trang Máy client.";
+
+    /// <summary>Rút gọn machine_id cho cột "Máy báo" (client gửi id máy, không phải hostname).</summary>
+    private static string Short(string id) => id.Length <= 12 ? id : id[..12];
+
     protected override void OnInitialized()
     {
         base.OnInitialized();
         ReloadAccounts();
+        ReloadOverview();
         Rebuild();
         // F5/deep-link: khôi phục acc/shop/tab từ query SAU KHI _rows dựng xong. Không navigate ở đây (còn ở
         // giai đoạn prerender → NavigateTo sẽ ném redirect); URL chỉ được ghi lại khi user thao tác sau đó.
@@ -58,6 +93,9 @@ public partial class Fleet
     {
         // Config đọc lại tối đa mỗi 10s (khỏi đọc file mỗi 2s).
         if ((DateTimeOffset.UtcNow - _accountsLoadedAt).TotalSeconds > 10) ReloadAccounts();
+        // Số của hàng thẻ tổng quan cũng là nguồn CHẬM (quét bảng đơn + bảng acc lỗi + bảng banner) → 10s một
+        // lượt, KHÔNG chạy mỗi nhịp 2s. Ba số còn lại (máy offline / gián đoạn) đọc thẳng snapshot nên luôn tươi.
+        if ((DateTimeOffset.UtcNow - _ovLoadedAt).TotalSeconds > 10) ReloadOverview();
         Rebuild();
         RecomputeSummary();
         MaybeAutoRefreshRewrite();
@@ -69,6 +107,56 @@ public partial class Fleet
         _accountsLoadedAt = DateTimeOffset.UtcNow;
         try { _kCookies = Db.ListFiles().Count(f => f.Name.StartsWith("cookies/", StringComparison.OrdinalIgnoreCase)); } catch { }
     }
+
+    /// <summary>Nạp 3 số/danh sách chạm DB của hàng thẻ tổng quan + section cảnh báo. Mỗi nguồn một try/catch:
+    /// khoá DB nhất thời ở một bảng không được xoá sổ hai bảng kia (giữ giá trị lượt trước, y các đường đọc khác).</summary>
+    private void ReloadOverview()
+    {
+        _ovLoadedAt = DateTimeOffset.UtcNow;
+        try { _ovDonCho = HomeOverview.DonChoHomNay(Db, DateTimeOffset.UtcNow); }
+        catch { /* khoá DB nhất thời → giữ số lượt trước */ }
+        try { _ovAccLoi = Db.AllAccountErrors().Count; } catch { }
+        try { _alerts = Db.ActivePickupAlerts(); } catch { }
+    }
+
+    private void ToggleAlerts()
+    {
+        _alertsOpen = !_alertsOpen;
+        _alertMsg = "";
+        UpdateUrl();
+    }
+
+    /// <summary>
+    /// "✓ Đã xử lý" trên web = ĐÚNG thao tác bấm X trên app: gọi thẳng <see cref="HubDatabase.DismissPickupAlert"/>
+    /// — CÙNG hàm mà endpoint <c>POST /orders/pickup-alerts/dismiss</c> của client gọi. Hub tăng <c>rev</c>, máy
+    /// nào cũng thấy tombstone ở lượt merge kế (client so <c>rev</c>, KHÔNG so mốc thời gian — xem xmldoc
+    /// <c>HubDatabase</c> phần pickup alerts và <c>PickupAlertMerge</c>). Ở đây KHÔNG có, và không được có, bất kỳ
+    /// phép so mốc giờ chéo máy nào.
+    /// <para><c>machineId</c> ghi vào cột <c>updated_by_machine</c> là nhãn <see cref="NguoiGhiWeb"/> để log/bảng
+    /// phân biệt "admin đóng từ web" với "một máy client đóng".</para>
+    /// </summary>
+    private async Task DismissAlert(PickupAlertActiveRow a)
+    {
+        if (_confirm is null) return;
+        if (!await _confirm.AskAsync($"Đóng cảnh báo địa chỉ của {a.ShopLogin}?",
+                $"Banner của shop {a.ShopLogin} (tài khoản {a.AccountLogin}) sẽ tắt trên MỌI máy đang chạy tài khoản này, "
+                + "y như bấm X trên app. Nếu lỗi vẫn còn thật thì vòng chạy kế của shop đó sẽ báo lại.",
+                "✓ Đã xử lý"))
+            return;
+
+        var rev = Db.DismissPickupAlert(a.AccountLogin, a.ShopLogin, NguoiGhiWeb);
+        _alertMsg = rev > 0
+            ? $"✓ Đã đóng cảnh báo {a.ShopLogin} (rev {rev}) — các máy nhận ở lượt đồng bộ kế (~60s)."
+            : $"⚠ Không đóng được cảnh báo {a.ShopLogin} (thiếu tài khoản/shop).";
+        // Để lại vết ở /logs-view y như đường client (ClientApiEndpoints ghi cùng dạng dòng) — thao tác admin
+        // tắt banner cả fleet mà không có vết thì lúc truy "ai tắt lúc nào" chỉ còn cột updated_by_machine.
+        Db.AppendLog(new AppendLogRequest(NguoiGhiWeb, "", "info",
+            $"orders/pickup-alerts/dismiss (web) acc={a.AccountLogin} shop={a.ShopLogin} rev={rev}"));
+        ReloadOverview();   // hiện ngay, khỏi chờ nhịp 10s
+    }
+
+    /// <summary>Nhãn ghi vào <c>updated_by_machine</c> khi admin thao tác từ web (không phải máy client nào cả).</summary>
+    private const string NguoiGhiWeb = "hub-web";
 
     private void Rebuild()
     {
@@ -223,7 +311,9 @@ public partial class Fleet
             ("tab", tab),
             ("q", gv?.Q ?? ""),
             ("p", gv is { } g1 && g1.P > 1 ? g1.P.ToString() : ""),
-            ("ps", gv is { } g2 && g2.Ps != 100 ? g2.Ps.ToString() : ""));
+            ("ps", gv is { } g2 && g2.Ps != 100 ? g2.Ps.ToString() : ""),
+            // Section cảnh báo địa chỉ: MẶC ĐỊNH mở → chỉ ghi khi đang THU GỌN (giá trị mặc định về rỗng = mất key).
+            ("al", _alertsOpen ? "" : "0"));
     }
 
     // Đọc query lúc vào trang: shop khớp (acc+shop) → chọn shop; chỉ acc khớp → chọn acc; không khớp gì (đã xoá) →
@@ -236,6 +326,7 @@ public partial class Fleet
         var qAcc = q["acc"];
         var qShop = q["shop"];
         var qTab = q["tab"];
+        _alertsOpen = q["al"] != "0";   // thiếu key / giá trị lạ = mở (mặc định)
         _suppressUrl = true;
         try
         {

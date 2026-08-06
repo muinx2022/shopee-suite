@@ -419,6 +419,36 @@ public class OrderNotifyService
         return sb.ToString();
     }
 
+    /// <summary>
+    /// Dựng tin "MÁY CLIENT RƠI OFFLINE KHI ĐANG GIỮ VIỆC" — Hub tự phát hiện (không máy nào báo được: nó chết
+    /// rồi). Khuôn text THUẦN + emoji như 3 tin kia. Trả lời đủ: máy nào · mất nhịp bao lâu · đang ôm bao nhiêu
+    /// việc · phải làm gì. <paramref name="matNhip"/> in gọn theo phút (dưới 1 phút → "&lt;1 phút").
+    /// </summary>
+    public static string TaoTinNhanMayMatNhip(string tenMay, int soViec, TimeSpan matNhip, DateTime luc)
+    {
+        var sb = new StringBuilder();
+        sb.Append($"🔌 MÁY CLIENT MẤT NHỊP KHI ĐANG GIỮ VIỆC — {HoacDauHoi(tenMay)}");
+        sb.Append($"\nMất nhịp: {MoTaKhoang(matNhip)} · Đang giữ: {Math.Max(0, soViec)} việc · Lúc: {luc.ToString("dd/MM/yyyy HH:mm", CultureInfo.InvariantCulture)}");
+        sb.Append("\nViệc cần làm: kiểm tra máy (mạng/app còn chạy không). Máy không lên lại được thì vào Hub → Máy client bấm ⟳ Reset việc để nhả khoá + giao cho máy khác.");
+        return sb.ToString();
+    }
+
+    /// <summary>Dựng tin "máy đã nối lại" — luôn đi SAU một tin <see cref="TaoTinNhanMayMatNhip"/> của cùng máy
+    /// (nhắc lại số việc của tin đó để người đọc nối được hai tin).</summary>
+    public static string TaoTinNhanMayTroLai(string tenMay, int soViec, DateTime luc)
+        => $"🟢 Máy client đã nối lại — {HoacDauHoi(tenMay)}"
+           + $"\nTrước đó báo mất nhịp khi đang giữ {Math.Max(0, soViec)} việc · Lúc: {luc.ToString("dd/MM/yyyy HH:mm", CultureInfo.InvariantCulture)}";
+
+    /// <summary>Khoảng thời gian cho người đọc: &lt;1 phút · N phút · N giờ M phút. Âm → coi như 0.</summary>
+    private static string MoTaKhoang(TimeSpan d)
+    {
+        if (d < TimeSpan.Zero) d = TimeSpan.Zero;
+        var phut = (int)d.TotalMinutes;
+        if (phut < 1) return "<1 phút";
+        if (phut < 60) return $"{phut} phút";
+        return $"{phut / 60} giờ {phut % 60} phút";
+    }
+
     /// <summary>Chuỗi đã trim; null/rỗng → <c>"?"</c> (giữ tin đọc được, không để lộ chỗ trống khó hiểu).</summary>
     private static string HoacDauHoi(string? s) => string.IsNullOrWhiteSpace(s) ? "?" : s.Trim();
 

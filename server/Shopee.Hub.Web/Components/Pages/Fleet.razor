@@ -13,6 +13,93 @@
 @inject IServiceProvider Sp
 
 <div class="fleetpage">
+@* ── Hàng thẻ TỔNG QUAN (H1.1): "hôm nay ổn không" trong một cái liếc, mỗi thẻ là lối sang trang chi tiết.
+   Thẻ = 0 thì MỜ (icon xám, không màu cảnh báo) — chỉ thẻ có số mới được kêu. Máy offline + việc gián đoạn đọc
+   THẲNG snapshot fleet (miễn phí, tươi mỗi nhịp 2s); ba thẻ chạm DB (đơn chờ hôm nay · acc lỗi · cảnh báo địa
+   chỉ) nạp lại tối đa mỗi 10s như các nguồn chậm khác của trang — xem ReloadOverview. *@
+<div class="kpis overview">
+    <a class="kpi @(_ovDonCho > 0 ? "" : "dim")" href="/orders"
+       title="Đơn '@TrangThaiCho' xuất hiện HÔM NAY theo giờ Việt Nam (mốc first_seen_at — đồng bộ lại không làm đơn cũ nhảy sang hôm nay). Bấm để sang trang Đơn hàng.">
+        <div class="kpi-ic @(_ovDonCho > 0 ? "blue" : "mute")">@HubIcons.Svg("orders", 22)</div>
+        <div><div class="kpi-val">@_ovDonCho.ToString("N0")</div><div class="kpi-label">Đơn chờ hôm nay</div></div>
+    </a>
+    <a class="kpi @(OvMayOffline > 0 ? "" : "dim")" href="/machines"
+       title="@OvMayTitle">
+        <div class="kpi-ic @(OvMayOfflineGiuViec ? "red" : OvMayOffline > 0 ? "amber" : "mute")">@HubIcons.Svg("machines", 22)</div>
+        <div><div class="kpi-val">@OvMayOffline<span class="kpi-sub">/@Snap.Machines.Count</span></div><div class="kpi-label">Máy offline</div></div>
+    </a>
+    <a class="kpi @(_ovAccLoi > 0 ? "" : "dim")" href="/config/errored"
+       title="Tài khoản Shopee client báo lỗi/captcha, chưa ai xử. Bấm để sang trang Acc lỗi.">
+        <div class="kpi-ic @(_ovAccLoi > 0 ? "amber" : "mute")">@HubIcons.Svg("users", 22)</div>
+        <div><div class="kpi-val">@_ovAccLoi</div><div class="kpi-label">Acc lỗi</div></div>
+    </a>
+    <a class="kpi @(OvGianDoan > 0 ? "" : "dim")" href="/dispatch?kpi=interrupted"
+       title="Việc dừng/lỗi chưa xong — bấm để sang trang Giao việc, mở sẵn bảng việc gián đoạn.">
+        <div class="kpi-ic @(OvGianDoan > 0 ? "red" : "mute")">@HubIcons.Svg("alert", 22)</div>
+        <div><div class="kpi-val">@OvGianDoan</div><div class="kpi-label">Việc gián đoạn</div></div>
+    </a>
+    @* Cảnh báo địa chỉ KHÔNG có trang riêng — section nằm ngay dưới hàng thẻ này. Trang chủ khoá chiều cao
+       (.main:has(.fleetpage){overflow:hidden}) nên anchor "#" không cuộn được tới đâu: thẻ làm NÚT đóng/mở
+       section, y khuôn .kpi-btn của trang Giao việc. Không có cảnh báo nào → <div> trơ, không mời bấm hụt. *@
+    @if (_alerts.Count > 0)
+    {
+        <button class="kpi kpi-btn @(_alertsOpen ? "open" : "")"
+                title="@(_alertsOpen ? "Đang hiện danh sách cảnh báo địa chỉ — bấm để thu gọn." : $"Xem {_alerts.Count} cảnh báo địa chỉ đang mở.")"
+                @onclick="ToggleAlerts">
+            <div class="kpi-ic red">@HubIcons.Svg("alert", 22)</div>
+            <div><div class="kpi-val">@_alerts.Count</div><div class="kpi-label">Cảnh báo địa chỉ@(_alertsOpen ? " ▾" : " ▸")</div></div>
+        </button>
+    }
+    else
+    {
+        <div class="kpi dim" title="Không shop nào đang báo lỗi đặt địa chỉ lấy hàng.">
+            <div class="kpi-ic mute">@HubIcons.Svg("alert", 22)</div>
+            <div><div class="kpi-val">0</div><div class="kpi-label">Cảnh báo địa chỉ</div></div>
+        </div>
+    }
+</div>
+
+@* ── Section cảnh báo địa chỉ (H1.2). Nút "Đã xử lý" đi ĐÚNG hàm mà client bấm X đi qua
+   (HubDatabase.DismissPickupAlert) → rev tăng, mọi máy nhận tombstone ở lượt merge kế. KHÔNG có luật so mốc
+   thời gian nào ở đây; cột "Phát hiện" chỉ để xem (mốc do chính hub ghi). *@
+@if (_alerts.Count > 0 && _alertsOpen)
+{
+    <div class="alertsec">
+        <div class="subhead">⛔ Lỗi đặt địa chỉ lấy hàng — @_alerts.Count shop đang báo</div>
+        <div class="tablewrap alertwrap">
+        <table class="grid sm stack-sm">
+            <thead><tr>
+                <th>Tài khoản</th><th>Shop</th><th class="m-hide">Địa chỉ định đặt</th>
+                <th class="m-hide">Phát hiện</th><th class="m-hide">Máy báo</th><th>Hành động</th>
+            </tr></thead>
+            <tbody>
+            @foreach (var a in _alerts)
+            {
+                <tr @key="@(a.AccountLogin + "|" + a.ShopLogin)">
+                    <td class="acct" data-label="Tài khoản">@a.AccountLogin</td>
+                    <td data-label="Shop">@a.ShopLogin</td>
+                    <td class="m-hide" data-label="Địa chỉ định đặt">@(a.Province.Length > 0 ? a.Province : "—")</td>
+                    <td class="m-hide" data-label="Phát hiện" title="Mốc do HUB ghi lúc nhận báo cáo (chỉ để xem — không luật nào của banner dùng mốc thời gian).">@FleetStateService.Ago(a.CreatedAt)</td>
+                    <td class="m-hide" data-label="Máy báo">@(a.UpdatedByMachine.Length > 0 ? Short(a.UpdatedByMachine) : "—")</td>
+                    <td data-label="Hành động">
+                        <button class="btn sm" title="Đóng banner này trên MỌI máy đang chạy tài khoản @a.AccountLogin (đúng như bấm X trên app). Lỗi còn thật thì vòng shop kế sẽ hiện lại."
+                                @onclick="() => DismissAlert(a)">✓ Đã xử lý</button>
+                    </td>
+                </tr>
+            }
+            </tbody>
+        </table>
+        </div>
+    </div>
+}
+
+@* Kết quả lượt đóng để NGOÀI khối section: đóng nốt cảnh báo CUỐI thì section biến mất, dòng báo nằm trong đó
+   sẽ mất theo — admin không thấy xác nhận nào. *@
+@if (!string.IsNullOrEmpty(_alertMsg))
+{
+    <div class="bar"><span class="action">@_alertMsg</span></div>
+}
+
 <div class="kpis">
     <div class="kpi">
         <div class="kpi-ic green">@HubIcons.Svg("machines", 22)</div>
@@ -226,3 +313,6 @@
     <RowMapModal Title="@_map.Title" Op="@_map.Op" OpLabel="@_map.OpLabel" AccountId="@_map.AccountId"
                  Sheet="@_map.Sheet" Ledger="_map.Ledger" OnClose="() => _map = null" />
 }
+
+@* Đặt NGOÀI mọi .tablewrap (overlay position:fixed) — khuôn dùng chung, xem ConfirmDialog.razor. *@
+<ConfirmDialog @ref="_confirm" />

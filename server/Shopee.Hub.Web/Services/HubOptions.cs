@@ -33,4 +33,16 @@ public static class SettingKeys
 
     /// <summary>Webhook đơn trả hàng — hub lưu đồng bộ UI; client gửi. Trống = tắt.</summary>
     public const string NotifyWebhookDonTra = "notify.webhook_don_tra";
+
+    /// <summary>Webhook "máy client rơi offline khi đang giữ việc" (1 URL). Trống = tắt. KHÔNG lùi về ô legacy
+    /// <see cref="NotifyWebhooks"/>: đó là lưới an toàn cho 3 kênh CŨ được tách ra từ nó, kênh mới này chưa từng
+    /// nằm trong đó nên lùi về sẽ bắn tin máy-offline vào kênh "đơn mới".</summary>
+    public const string NotifyWebhookMayOffline = "notify.webhook_may_offline";
+
+    /// <summary>Bật cảnh báo máy offline: "1" = bật, còn lại (kể cả thiếu khoá) = tắt.</summary>
+    public const string NotifyMayOfflineBat = "notify.may_offline_bat";
+
+    /// <summary>Ngưỡng mất nhịp (PHÚT) trước khi báo máy offline. Thiếu/không parse được → mặc định
+    /// <c>MachineOfflineWatchService.NguongMacDinhPhut</c>.</summary>
+    public const string NotifyMayOfflinePhut = "notify.may_offline_phut";
 }

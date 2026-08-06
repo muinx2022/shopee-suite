@@ -31,6 +31,17 @@ public sealed class OrdersSlotHeartbeat : IUpdateAckSink, IDisposable
     /// <see cref="HttpCoordinationHub.UpdateRequested"/> (static vì nhịp chạy NỀN, không có context để bám).</summary>
     public static Action<IReadOnlyList<OrdersCommandDto>>? CommandsReceived { get; set; }
 
+    /// <summary>
+    /// Nguồn số "hàng còn chờ đẩy" của module Đơn hàng cho mỗi nhịp (xem <see cref="MachinePresence.OutboxPending"/>).
+    /// Khuôn giống <c>BraveFleet.MaxConcurrentWindows</c> của suất workspace, chỉ khác là phải qua HOOK: module Đơn
+    /// hàng nằm ngoài <c>Shopee.Core</c> nên ở đây không gọi thẳng được — shell suite rót vào lúc khởi động
+    /// (<c>OrdersModuleHost</c>).
+    /// <para><c>null</c> (chưa ai rót — chế độ không có module Đơn hàng, hoặc module init hỏng) ⇒ nhịp KHÔNG mang
+    /// field này ⇒ Hub lưu NULL ⇒ bảng /machines hiện "—". Hàm ném lỗi cũng coi như không báo: một con số phụ
+    /// KHÔNG được phép làm chết nhịp sống.</para>
+    /// </summary>
+    public static Func<int>? OutboxPendingProvider { get; set; }
+
     public OrdersSlotHeartbeat(HubClient client, string hostId)
     {
         _client = client;
@@ -49,7 +60,8 @@ public sealed class OrdersSlotHeartbeat : IUpdateAckSink, IDisposable
             // của đợt sau — suất này không tự khai trần để Hub khỏi cộng nhầm thành 2 máy 2 quỹ.
             var resp = await _client.MachineHeartbeatAsync(new MachineHeartbeatRequest(
                 _slotId, Host, Infrastructure.AppInfo.Version, 0,
-                Infrastructure.AppModeStore.Shared.Current.ToString(), MachineSlots.Orders, _hostId));
+                Infrastructure.AppModeStore.Shared.Current.ToString(), MachineSlots.Orders, _hostId,
+                TonChoDay()));
             // Hub đẩy lệnh update xuống suất này? Bắn CHUNG hook của đường workspace (handler tự dedup + chạy
             // nền) → dùng lại y bộ xử lý update sẵn có, ack quay về đúng machine_id của suất đơn hàng.
             var reqAt = resp?.UpdateRequestedAt;
@@ -62,6 +74,15 @@ public sealed class OrdersSlotHeartbeat : IUpdateAckSink, IDisposable
                 try { CommandsReceived?.Invoke(cmds); } catch { }
         }
         catch { /* offline: bỏ nhịp này, lượt sau bù */ }
+    }
+
+    /// <summary>Số hàng chờ đẩy để gửi kèm nhịp: chưa ai rót hook / hook ném → <c>null</c> ("máy không báo").
+    /// Số âm (không nên có) kẹp về 0 để Hub khỏi lưu giá trị vô nghĩa.</summary>
+    internal static int? TonChoDay()
+    {
+        if (OutboxPendingProvider is not { } lay) return null;
+        try { return Math.Max(0, lay()); }
+        catch { return null; }
     }
 
     /// <summary>Ack tiến trình/kết quả tự-update app cho SUẤT NÀY. true = gửi được; false = offline/lỗi mạng

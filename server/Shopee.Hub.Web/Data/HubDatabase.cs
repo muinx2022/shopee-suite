@@ -99,6 +99,10 @@ public sealed partial class HubDatabase : IDisposable
         AddColumnIfMissing("machines", "mode", "TEXT DEFAULT ''");
         AddColumnIfMissing("machines", "kind", "TEXT DEFAULT ''");
         AddColumnIfMissing("machines", "host_id", "TEXT DEFAULT ''");
+        // Backlog "chờ đẩy" của module Đơn hàng trên máy (H1.4). CỐ Ý không DEFAULT: NULL = máy chưa báo (client
+        // cũ / suất workspace / chế độ không có module Đơn hàng) — khác hẳn 0 = "đã đẩy hết". Dòng máy có sẵn
+        // trong DB cũ nhận NULL ⇒ bảng /machines hiện "—" tới khi máy đó gửi nhịp bằng bản client mới.
+        AddColumnIfMissing("machines", "outbox_pending", "INTEGER");
         // Tập máy đã tham gia mỗi việc (Thống kê). Backfill: khởi tạo = [last_machine_id] cho bản ghi cũ
         // (machine_id là hex GUID, an toàn để nối chuỗi JSON). Publish sau sẽ union thêm máy mới.
         if (AddColumnIfMissing("ledger", "machines_json", "TEXT DEFAULT ''"))
@@ -191,7 +195,7 @@ CREATE TABLE IF NOT EXISTS ledger(
 CREATE TABLE IF NOT EXISTS machines(
   machine_id TEXT PRIMARY KEY, hostname TEXT, last_seen TEXT, app_version TEXT, max_brave INTEGER DEFAULT 0,
   update_requested_at TEXT DEFAULT '', update_requested_from TEXT DEFAULT '', update_status TEXT DEFAULT '',
-  mode TEXT DEFAULT '', kind TEXT DEFAULT '', host_id TEXT DEFAULT '');
+  mode TEXT DEFAULT '', kind TEXT DEFAULT '', host_id TEXT DEFAULT '', outbox_pending INTEGER);
 CREATE TABLE IF NOT EXISTS files(
   name TEXT PRIMARY KEY, version INTEGER, hash TEXT, size INTEGER, mtime TEXT,
   updated_by TEXT, updated_at TEXT);

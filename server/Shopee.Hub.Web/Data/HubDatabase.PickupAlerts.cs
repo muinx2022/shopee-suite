@@ -10,6 +10,20 @@ public sealed record OrdersPickupAlertRow(
     string? DismissedAt,
     long Rev);
 
+/// <summary>Một banner lỗi địa chỉ ĐANG MỞ (chưa ai bấm X) — dòng cho trang web của Hub. Khác
+/// <see cref="OrdersPickupAlertRow"/> (bản cho client, gồm cả tombstone): ở đây bỏ <c>dismissed_at</c> (luôn NULL)
+/// và thêm <paramref name="UpdatedByMachine"/> = máy ghi lần cuối, để admin biết máy nào đang kêu.
+/// <para><paramref name="CreatedAt"/> do CHÍNH HUB ghi (<c>Iso(UtcNow)</c> lúc nhận upsert), không phải mốc của
+/// máy client → hiển thị "bao lâu trước" trên web là so đồng hồ hub với đồng hồ hub. Vẫn CHỈ để xem: không luật
+/// nào của banner được quyết định bằng mốc thời gian (xem xmldoc lớp bên dưới).</para></summary>
+public sealed record PickupAlertActiveRow(
+    string AccountLogin,
+    string ShopLogin,
+    string Province,
+    DateTimeOffset CreatedAt,
+    string UpdatedByMachine,
+    long Rev);
+
 /// <summary>
 /// Phần HubDatabase: banner cảnh báo lỗi địa chỉ lấy hàng — khóa theo account_login + shop_login
 /// (KHÔNG theo máy) để mọi máy chạy cùng subaccount thấy cùng banner tới khi bấm X.
@@ -139,5 +153,30 @@ ORDER BY created_at DESC, shop_login COLLATE NOCASE;";
             }
             return list;
         }
+    }
+
+    /// <summary>
+    /// MỌI banner đang MỞ của MỌI tài khoản (<c>dismissed_at IS NULL</c>) — nguồn của section "Cảnh báo địa chỉ"
+    /// trên trang chủ web. Hàm ĐỌC thuần: không sweep, không hạn tuổi, không so mốc thời gian — một dòng còn ở
+    /// đây đúng bằng "chưa máy nào (và chưa admin nào) bấm X". Sắp mới→cũ theo <c>created_at</c> chỉ để hiển thị.
+    /// </summary>
+    public List<PickupAlertActiveRow> ActivePickupAlerts()
+    {
+        // Connection ĐỌC riêng (WAL): trang chủ gọi hàm này theo nhịp làm mới, không đáng giữ khoá ghi toàn cục.
+        using var conn = OpenReadConnection();
+        var list = new List<PickupAlertActiveRow>();
+        using var c = conn.CreateCommand();
+        c.CommandText = @"
+SELECT account_login, shop_login, province, created_at, updated_by_machine, rev
+FROM orders_pickup_alerts
+WHERE dismissed_at IS NULL
+ORDER BY created_at DESC, account_login COLLATE NOCASE, shop_login COLLATE NOCASE;";
+        using var rd = c.ExecuteReader();
+        while (rd.Read())
+        {
+            list.Add(new PickupAlertActiveRow(
+                S(rd, 0), S(rd, 1), S(rd, 2), D(rd, 3), S(rd, 4), rd.IsDBNull(5) ? 0L : rd.GetInt64(5)));
+        }
+        return list;
     }
 }

@@ -15,7 +15,7 @@
 
 <div class="tablewrap">
 <table class="grid sm stack-sm">
-    <thead><tr><th>Máy</th><th title="Chế độ app máy đang chạy (Cài đặt → Chế độ ứng dụng)">Chế độ</th><th title="Suất làm việc: Workspace = việc BigSeller · Đơn hàng = việc Shopee. Máy chế độ Full chiếm CẢ HAI suất (2 dòng, cùng một PC).">Suất</th><th>Trạng thái</th><th>Phiên bản</th><th title="Trần cửa sổ Brave client tự báo (Settings → Hiệu năng)">Brave max</th><th>Việc đang giữ</th><th>Vai trò (auto)</th><th>Hành động</th></tr></thead>
+    <thead><tr><th>Máy</th><th title="Chế độ app máy đang chạy (Cài đặt → Chế độ ứng dụng)">Chế độ</th><th title="Suất làm việc: Workspace = việc BigSeller · Đơn hàng = việc Shopee. Máy chế độ Full chiếm CẢ HAI suất (2 dòng, cùng một PC).">Suất</th><th>Trạng thái</th><th>Phiên bản</th><th title="Trần cửa sổ Brave client tự báo (Settings → Hiệu năng)">Brave max</th><th title="Hàng còn chờ đẩy của module Đơn hàng trên máy (đơn + phiếu + dòng GSheet + lượt Đã bán + mã trả hàng). '—' = máy không báo: bản client cũ, hoặc suất/chế độ không có module Đơn hàng.">⏳ Tồn</th><th>Việc đang giữ</th><th>Vai trò (auto)</th><th>Hành động</th></tr></thead>
     <tbody>
     @foreach (var m in SortedMachines())
     {
@@ -50,6 +50,16 @@
                 }
             </td>
             <td data-label="Brave max">@(m.MaxBrave > 0 ? m.MaxBrave.ToString() : "—")</td>
+            <td data-label="⏳ Tồn">
+                @if (m.OutboxPending is { } ton)
+                {
+                    <span class="pill @TonCss(ton)" title="@TonTitle(ton)">@ton.ToString("N0")</span>
+                }
+                else
+                {
+                    <span title="Máy này không báo số tồn (bản client cũ, hoặc suất/chế độ không có module Đơn hàng).">—</span>
+                }
+            </td>
             <td data-label="Việc đang giữ">
                 @(held > 0 ? $"{held}" : "—")
                 @if (interrupted > 0)
@@ -93,7 +103,7 @@
     }
     @if (Snap.Machines.Count == 0)
     {
-        <tr><td colspan="9" class="empty">Chưa có máy nào kết nối.</td></tr>
+        <tr><td colspan="10" class="empty">Chưa có máy nào kết nối.</td></tr>
     }
     </tbody>
 </table>
@@ -153,6 +163,19 @@
     // Đã ra lệnh > 10' mà máy chưa lên bản mới (cờ chưa tự clear) → nhắc operator soi (máy kẹt/không cài Velopack).
     private static bool OverdueUpdate(MachinePresence m)
         => m.UpdateRequestedAt is { } at && (DateTimeOffset.Now - at) > TimeSpan.FromMinutes(10);
+
+    /// <summary>Ngưỡng tô màu cột "⏳ Tồn": còn tồn = vàng, quá <see cref="TonDo"/> = đỏ. Vòng chờ đẩy chạy mỗi
+    /// ~2 phút nên vài chục hàng tồn là bình thường lúc đang chạy; ngưỡng đỏ đặt ở 50 để chỉ kêu khi thật sự ứ
+    /// (mất mạng/hub từ chối kéo dài).</summary>
+    private const int TonDo = 50;
+
+    private static string TonCss(int ton) => ton > TonDo ? "fail" : ton > 0 ? "warn" : "done";
+
+    private static string TonTitle(int ton) => ton == 0
+        ? "Đã đẩy hết — không còn hàng chờ."
+        : ton > TonDo
+            ? $"{ton:N0} hàng còn chờ đẩy (> {TonDo}) — soi log máy này xem hub/GSheet có đang từ chối không."
+            : $"{ton:N0} hàng còn chờ đẩy — vòng chờ đẩy chạy lại mỗi ~2 phút.";
 
     protected override void OnInitialized()
     {
