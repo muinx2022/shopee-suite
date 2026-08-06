@@ -5,6 +5,18 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Phiên bản & cập nhật. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.8.1 — 2026-08-06
+
+- **Đơn hàng — sửa lỗi trình duyệt thoát ngay khi khởi động ở bước đăng nhập (mất trọn cả tiếng).** Bước đăng
+  nhập phóng thẳng vào hồ sơ trình duyệt mà không dọn hồ sơ trước; chỉ cần còn sót một cửa sổ của hồ sơ đó là
+  Chromium chuyển lệnh cho tiến trình cũ rồi tiến trình mới thoát ngay, không ai ghi cổng gỡ lỗi → chết cả vòng.
+  - Tách bước dọn hồ sơ dùng chung: đóng cửa sổ theo dòng lệnh, chờ tới khi chết hẳn, xoá cờ session-restore +
+    Singleton; có log rõ khi còn sót hoặc khi không đọc được kết quả.
+  - Bước đăng nhập nay dọn hồ sơ trước MỖI lần phóng, thử lại tối đa 2 lần và chỉ thử lại đúng ca thoát sớm;
+    thông báo lỗi kèm tên trình duyệt, mã thoát, hồ sơ, lần thử.
+  - Cuối vòng đóng trình duyệt sạch: kill theo handle RỒI quét lại theo hồ sơ (kill-theo-handle trượt khi trình
+    duyệt tự fork sang tiến trình khác).
+
 ## v1.8.0 — 2026-08-06
 
 Đợt rà soát toàn repo + 10 đợt sửa liên tiếp. Mỗi đợt đều qua một lượt phản biện độc lập; phần "phản biện bắt
