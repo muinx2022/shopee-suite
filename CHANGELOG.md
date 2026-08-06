@@ -5,6 +5,77 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Phiên bản & cập nhật. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.8.0 — 2026-08-06
+
+Đợt rà soát toàn repo + 10 đợt sửa liên tiếp. Mỗi đợt đều qua một lượt phản biện độc lập; phần "phản biện bắt
+được" ghi rõ vì đó là những lỗi mà build xanh + test xanh KHÔNG thấy.
+
+**Sửa lỗi đang chạy sai**
+
+- **Search — lọc khu vực loại nhầm mọi tỉnh có chữ Đ.** Một dòng chuẩn hoá viết nhầm `d → d` (không làm gì)
+  thay vì `đ → d`, nên gõ "da nang" không khớp "Đà Nẵng"; sản phẩm bị bỏ qua im lặng ở Đà Nẵng, Đồng Nai,
+  Đắk Lắk…
+- **Scrape — dòng lỗi tạm bị ghi nhận "đã xong" nên không bao giờ được cào lại.** Lỗi tạm (mất kết nối tab,
+  extension không phản hồi) vẫn đánh dấu hoàn tất, làm cả cơ chế vá lẫn cơ chế thử lại bỏ qua dòng đó vĩnh
+  viễn — mất dữ liệu mà báo cáo vẫn đủ.
+- **Đơn hàng — lượt đẩy bù Google Sheet ghi cột Shop bằng email tài khoản phụ** thay vì tên shop thật của
+  từng đơn (đơn lỡ lượt đẩy trong phiên sẽ lên sheet sai tên shop, không tự sửa được về sau).
+- **Scrape — pool cổng teo dần rồi báo "hết cổng" oan**: cổng đang bận tạm (vừa đóng Brave) bị loại vĩnh viễn
+  khỏi pool thay vì trả lại.
+- **Search — tab Xuất Excel không lọc được theo danh mục sau khi mở lại app**, và danh sách không được xoá khi
+  bấm "Xóa dữ liệu đã quét".
+- Vá nguy cơ lộ dữ liệu: thư mục dữ liệu Hub (khoá mã hoá + kho cookie đồng bộ) chưa được `.gitignore`.
+
+**Quan sát từ xa qua Hub**
+
+- **Trang chủ Hub có hàng thẻ tổng quan**: đơn chờ hôm nay, máy offline, tài khoản lỗi, việc gián đoạn, cảnh
+  báo địa chỉ — bấm thẻ sang thẳng trang chi tiết.
+- **Xem và đóng banner lỗi địa chỉ ngay trên Hub.** Nút "Đã xử lý" đi đúng một đường với nút X trên app nên
+  mọi máy nhận như thường; không thêm phép so mốc giờ giữa các máy.
+- **Cảnh báo khi một máy mất nhịp trong lúc đang giữ việc** + tin "đã nối lại" (mỗi sự việc đúng một tin),
+  ngưỡng mặc định 10 phút, chỉnh được ở Cài đặt.
+- **Cột "⏳ Tồn" ở trang Máy**: mỗi máy báo số bản ghi còn chờ đẩy — máy kẹt đẩy không còn im lặng.
+
+**Vòng đơn hàng**
+
+- **Tin tổng kết cuối ngày** qua Slack/Discord/Telegram (mặc định 21h giờ VN): đơn chuẩn bị hàng hôm nay theo
+  shop, mã trả hàng mới, shop còn cảnh báo địa chỉ, máy offline. Hub restart quanh giờ gửi cũng chỉ gửi 1 tin.
+- **Màn "Đơn kết thúc chưa dọn được"** (bấm badge ⏳ Chờ đẩy): liệt kê từng đơn kèm nghĩa vụ còn thiếu, có nút
+  **Đẩy lại** cho từng đơn. Luật chẩn đoán và luật dọn đơn nay dùng chung một nguồn nên không thể trôi lệch.
+- **Lọc theo khoảng ngày** ở màn Đơn hàng (Xuất CSV và In nhiều đơn theo cùng phạm vi).
+- **Hub: lọc "Có mã trả"** và **tải ZIP toàn bộ phiếu** theo đúng bộ lọc đang xem (trần 500 phiếu/lượt).
+- Tooltip badge ⏳ tách 5 loại tồn thay vì một con số tổng.
+- *Phản biện bắt được*: mã trả hàng của đơn đã bị app dọn không vào bảng đơn của Hub, làm dòng "mã trả mới hôm
+  nay" gần như luôn báo 0 — nay Hub ghi thẳng mã từ báo cáo của client.
+
+**Cấu hình mới**
+
+- **Khoảng nghỉ giữa 2 link của Scrape** đặt được ở client và ở lượt giao việc trên Hub (bỏ trống = giữ nguyên
+  120–240s như trước).
+- **Tồn kho / cân nặng / kênh vận chuyển khi điền form Update** đặt được theo từng shop trên Hub (bỏ trống =
+  giữ nguyên 30069 / 500 / Nhanh như trước).
+- **Dải chip lọc log theo từng tài khoản** trên 2 tab log của Workspace.
+
+**Giao diện**
+
+- **Hub**: token API mặc định che, ô nhập lại mật khẩu khi đổi mật khẩu admin, hộp xác nhận tiếng Việt thay hộp
+  thoại trình duyệt (12 chỗ), gom nút nguy hiểm vào menu ⋯ ở trang Máy, ẩn/hiện cột ở trang Đơn hàng (lưu vào
+  địa chỉ trang), tìm chuỗi + tạm dừng ở trang Nhật ký, sửa shop ngay tại dòng.
+- **App**: chip trạng thái dùng chung 6 màn (hết chồng chữ khi cửa sổ hẹp), bo góc chuẩn hoá phẳng Win 11, nút
+  "Dừng việc shop này" thôi đè lên khay tab, bảng đơn ghim 2 cột đầu khi cuộn ngang + ẩn/hiện cột phụ (nhớ
+  giữa các lần mở app), nút đóng banner địa chỉ dễ bấm hơn, chip "Hôm nay · 7 ngày · Tháng này" ở màn Thống kê.
+- *Phản biện bắt được*: mỗi lần vào lại màn Đơn hàng để lại một bản sao màn cũ trong bộ nhớ — đã vá.
+
+**Dọn dẹp bên trong (không đổi hành vi)**
+
+- Xoá khoảng **3.000 dòng code chết**; hợp nhất các bản chép đôi/ba còn sót.
+  *Phản biện bắt được*: bản hợp nhất làm mất `temperature` khi dùng Claude và làm lỗi mạng bị thử lại tới ~19
+  phút — đã vá cả hai, kèm tôn trọng `Retry-After`.
+- Tách 3 file C# dài nhất (1.231 / 1.319 / 702 dòng) thành 13 file và tách cầu nối extension Đơn hàng (1.909
+  dòng) thành 10 module — thuần dời chỗ.
+  *Phản biện bắt được*: một dòng bị dời sót làm vòng quét shop hỏng ngay từ shop đầu — đã vá trước phát hành.
+- Thêm hơn **190 test mới** (tổng: 1.550 + 105 + 120).
+
 ## v1.7.19 — 2026-08-04
 
 - **Đơn hàng — banner lỗi địa chỉ không còn mất khi Hub chết.** Trước đây nếu Hub không nhận được lúc vòng
