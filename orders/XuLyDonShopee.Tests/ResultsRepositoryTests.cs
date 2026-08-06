@@ -5,7 +5,7 @@ using XuLyDonShopee.Core.Services;
 namespace XuLyDonShopee.Tests;
 
 /// <summary>
-/// Test <see cref="ResultsRepository"/> (tab "Kết quả"): UpsertShops lưu/đọc danh sách shop (login làm khóa, tên để
+/// Test <see cref="ResultsRepository"/> (tab "Shops"): UpsertShops lưu/đọc danh sách shop (login làm khóa, tên để
 /// hiển thị, gọi lại cập nhật tên không trùng, login rỗng dùng ShopName làm khóa để khớp nhãn đếm, GIỮ ĐÚNG thứ tự
 /// nguồn của trang <c>/portal/shop</c>); IncrementPrepared cộng dồn theo (tài khoản, shop, ngày); GetPreparedByDay
 /// tách theo ngày; mọi thứ tách theo tài khoản.

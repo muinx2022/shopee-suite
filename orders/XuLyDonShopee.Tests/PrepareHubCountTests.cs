@@ -10,7 +10,7 @@ namespace XuLyDonShopee.Tests;
 
 /// <summary>
 /// Số đơn "chuẩn bị hàng" CHUNG toàn hệ thống: client đánh dấu <c>prepared_at</c> cho ĐÚNG đơn vừa arrange rồi đẩy
-/// lên hub; tab "Kết quả" lấy số từ hub, mất hub thì lùi về số cục bộ + ghi chú.
+/// lên hub; tab "Shops" lấy số từ hub, mất hub thì lùi về số cục bộ + ghi chú.
 /// <list type="bullet">
 /// <item>Phần kho (<see cref="OrdersRepository.MarkPrepared"/>): ghi LẦN ĐẦU, reset cờ đẩy hub, mã đơn lạ không phá gì.</item>
 /// <item>Phần ViewModel: <b>null KHÁC map rỗng</b> — null = "không hỏi được hub" (giữ số máy), rỗng = "hub bảo 0".</item>

@@ -353,7 +353,7 @@ public partial class OrdersViewModel : ViewModelBase
         {
             var label = ShopLabelOf(row);
             // notify: link "In phiếu" của dòng báo trạng thái (thiếu file / lỗi mở) ra StatusMessage của màn.
-            // redownloadSlip: nút "Tải phiếu" nhờ phiên của tài khoản tải lại file phiếu thiếu (nếu phiên chạy).
+            // redownloadSlip: nút "Tải lại" nhờ phiên của tài khoản tải lại file phiếu thiếu (nếu phiên chạy).
             Rows.Add(new OrderRowViewModel(row, label, invoiceDir, msg => StatusMessage = msg, RedownloadSlipForRowAsync));
         }
 
@@ -509,7 +509,7 @@ public partial class OrdersViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Nút "Tải phiếu" trên một dòng đơn thiếu file: tìm phiên ĐANG chạy của tài khoản (qua
+    /// Nút "Tải lại" trên một dòng đơn thiếu file: tìm phiên ĐANG chạy của tài khoản (qua
     /// <see cref="AccountSessionManager"/>) rồi nhờ nó tải lại phiếu. Phiên KHÔNG chạy → hướng dẫn mở phiên;
     /// phiên đang bận điều hướng → <see cref="AccountSession.RedownloadSlipAsync"/> trả false (báo thử lại sau).
     /// Chạy NỀN (async) — không block UI. Lưu được → phiên tự phát OrdersChanged nên lưới tự nạp lại (cột Phiếu
@@ -561,7 +561,7 @@ public partial class OrdersViewModel : ViewModelBase
         session = _services.Sessions.Get(accountId);
         if (session is null)
         {
-            message = "Mở phiên tài khoản này trước (màn Tài khoản) rồi bấm Tải phiếu.";
+            message = "Mở phiên tài khoản này trước (màn Tài khoản) rồi bấm Tải lại.";
             return false;
         }
 
@@ -572,8 +572,8 @@ public partial class OrdersViewModel : ViewModelBase
         }
 
         message = session.State == SessionState.Queued
-            ? "Tài khoản này đang chờ đến lượt, hãy đợi phiên được mở rồi bấm Tải phiếu."
-            : "Mở phiên tài khoản này trước (màn Tài khoản) rồi bấm Tải phiếu.";
+            ? "Tài khoản này đang chờ đến lượt, hãy đợi phiên được mở rồi bấm Tải lại."
+            : "Mở phiên tài khoản này trước (màn Tài khoản) rồi bấm Tải lại.";
         return false;
     }
 

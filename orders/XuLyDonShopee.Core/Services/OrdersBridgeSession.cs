@@ -65,7 +65,7 @@ public sealed class OrdersBridgeSession : IDisposable
     private readonly BrowserChoice _browserChoice;
     private readonly Action<string>? _log;
     private readonly string _province;
-    // Tab "Kết quả": callback do App rót (Core không ref App/DB) — CHỈ THÊM lời gọi, không đổi luồng. Null-safe.
+    // Tab "Shops": callback do App rót (Core không ref App/DB) — CHỈ THÊM lời gọi, không đổi luồng. Null-safe.
     //  · _onShopListRead: gọi ngay sau khi parse xong danh sách shop → App lưu account_shops (mọi shop, kể cả 0 đơn).
     //  · _onShopCheckStarted/_onShopCheckFinished: cột tiến độ — bắt đầu/xong MỘT shop (nhãn shop = khóa prepare_daily).
     private readonly Action<IReadOnlyList<ShopListItem>>? _onShopListRead;
@@ -86,18 +86,21 @@ public sealed class OrdersBridgeSession : IDisposable
     /// <param name="syncCallback">GĐ4: gọi SAU khi đọc xong đơn mỗi shop — App lưu DB/GSheet/hub, kèm tên shop. null → chỉ log.</param>
     /// <param name="finalDoneSns">GĐ4: tập <c>order_sn</c> ĐÃ có "Số tiền cuối cùng" trong DB (App rót) — đơn nằm trong
     /// tập này KHÔNG mở lại chi tiết. null → không lọc (mở chi tiết cho MỌI đơn pending chưa có final).</param>
-    /// <param name="onShopListRead">Tab "Kết quả": gọi ngay sau khi parse xong danh sách shop → App lưu account_shops. null → bỏ qua.</param>
-    /// <param name="onOrderPrepared">Tab "Kết quả": gọi mỗi khi chuẩn bị xong 1 đơn (tham số = nhãn shop, MÃ ĐƠN
+    /// <param name="onShopListRead">Tab "Shops": gọi ngay sau khi parse xong danh sách shop → App lưu account_shops. null → bỏ qua.</param>
+    /// <param name="onOrderPrepared">Tab "Shops": gọi mỗi khi chuẩn bị xong 1 đơn (tham số = nhãn shop, MÃ ĐƠN
     /// <c>order_sn</c>) → App +1 đếm ngày + đánh dấu đơn đó đã chuẩn bị hàng (để đẩy lên hub). null → bỏ qua.</param>
-    /// <param name="onShopCheckStarted">Tab "Kết quả" (cột tiến độ): gọi NGAY khi bắt đầu xử một shop (tham số = nhãn
+    /// <param name="onShopCheckStarted">Tab "Shops" (cột tiến độ): gọi NGAY khi bắt đầu xử một shop (tham số = nhãn
     /// shop, ĐÚNG khóa <c>prepare_daily</c>) → App chuyển chấm sang shop đó + bật vòng quay. null → bỏ qua.</param>
-    /// <param name="onShopCheckFinished">Tab "Kết quả" (cột tiến độ): gọi khi XONG shop đó — kể cả shop lỗi/captcha/bỏ
+    /// <param name="onShopCheckFinished">Tab "Shops" (cột tiến độ): gọi khi XONG shop đó — kể cả shop lỗi/captcha/bỏ
     /// qua (gọi trong <c>finally</c>) → App tắt vòng quay nhưng GIỮ chấm ở shop này tới khi shop kế bắt đầu. null → bỏ qua.</param>
     /// <param name="returnCountLast">Check đơn trả hàng: mốc "số yêu cầu" lần check TRƯỚC của shop (tham số = nhãn shop);
     /// null trả về = shop chưa từng check → lượt này CHỈ ghi nhớ số. Callback null → BỎ HẲN bước check trả hàng.</param>
     /// <param name="saveReturnCount">Check đơn trả hàng: ghi mốc mới cho shop (nhãn shop, số vừa đọc). null → bỏ hẳn bước.</param>
     /// <param name="saveReturnCodes">Check đơn trả hàng: lưu các cặp (mã đơn, mã yêu cầu) vào đơn tương ứng; trả chuỗi
     /// tóm tắt để phiên log. null → bỏ hẳn bước.</param>
+    /// <param name="layDonThieuPhieu">Tự tải lại phiếu thiếu (bước BÙ cuối flow shop): tham số = nhãn shop; App trả
+    /// danh sách <c>order_sn</c> của ĐÚNG shop đó đang có mã vận đơn nhưng thiếu file PDF hợp lệ, xếp MỚI NHẤT
+    /// TRƯỚC. null → BỎ HẲN bước (đường "Chạy thử" chỉ đọc, không lưu, nên không rót).</param>
     public OrdersBridgeSession(string userDataDir, BrowserChoice browserChoice, Action<string>? log = null,
         string? invoiceDir = null, string? province = null,
         Func<string, string, IReadOnlyList<SyncedOrder>, CancellationToken, Task>? syncCallback = null,
@@ -108,7 +111,8 @@ public sealed class OrdersBridgeSession : IDisposable
         Action<string>? onShopCheckFinished = null,
         Func<string, int?>? returnCountLast = null,
         Action<string, int>? saveReturnCount = null,
-        Func<IReadOnlyList<YeuCauTraHang>, string>? saveReturnCodes = null)
+        Func<IReadOnlyList<YeuCauTraHang>, string>? saveReturnCodes = null,
+        Func<string, CancellationToken, Task<IReadOnlyList<string>>>? layDonThieuPhieu = null)
     {
         _userDataDir = userDataDir;
         _browserChoice = browserChoice;
@@ -120,7 +124,7 @@ public sealed class OrdersBridgeSession : IDisposable
 
         _channel = new OrdersBridgeChannel(log);
         _flow = new ShopFlowRunner(_channel, log, invoiceDir, _province, syncCallback, finalDoneSns,
-            onOrderPrepared, returnCountLast, saveReturnCount, saveReturnCodes);
+            onOrderPrepared, returnCountLast, saveReturnCount, saveReturnCodes, layDonThieuPhieu);
     }
 
     private void L(string m) => _log?.Invoke(m);
@@ -272,7 +276,7 @@ public sealed class OrdersBridgeSession : IDisposable
             await _channel.SendAsync(new { action = "readShopList" }).ConfigureAwait(false);
             var json = await _channel.AwaitAsync(shopListTcs, OrdersBridgeChannel.ChoChang.ShopList, ct).ConfigureAwait(false);
             var shops = ShopeeLoginService.ParseShopListJson(json);
-            _onShopListRead?.Invoke(shops); // tab "Kết quả": App lưu danh sách shop (mọi shop, kể cả 0 đơn).
+            _onShopListRead?.Invoke(shops); // tab "Shops": App lưu danh sách shop (mọi shop, kể cả 0 đơn).
             shopCount = shops.Count;
             L($"Đọc được {shops.Count} shop — bắt đầu lặp qua từng shop.");
             if (shops.Count == 0)
@@ -290,7 +294,7 @@ public sealed class OrdersBridgeSession : IDisposable
                 var shopLogin = string.IsNullOrWhiteSpace(shop.LoginName) ? shop.ShopName : shop.LoginName;
                 L($"[Shop {i + 1}/{shops.Count}] {shopName} — mở Chi tiết...");
 
-                // Cột tiến độ tab "Kết quả": bắt đầu check shop này → chấm nhảy sang đây + bật vòng quay.
+                // Cột tiến độ tab "Shops": bắt đầu check shop này → chấm nhảy sang đây + bật vòng quay.
                 _onShopCheckStarted?.Invoke(shopLogin);
                 try
                 {
@@ -412,7 +416,7 @@ public sealed class OrdersBridgeSession : IDisposable
         await _channel.SendAsync(new { action = "readShopList" }).ConfigureAwait(false);
         var shopListJson = await _channel.AwaitAsync(_channel.ShopList, OrdersBridgeChannel.ChoChang.ShopList, ct).ConfigureAwait(false);
         var shops = ShopeeLoginService.ParseShopListJson(shopListJson);
-        _onShopListRead?.Invoke(shops); // tab "Kết quả": App lưu danh sách shop (mọi shop, kể cả 0 đơn).
+        _onShopListRead?.Invoke(shops); // tab "Shops": App lưu danh sách shop (mọi shop, kể cả 0 đơn).
         L($"Đọc được {shops.Count} shop từ /portal/shop.");
         if (shops.Count == 0)
         {
@@ -423,10 +427,12 @@ public sealed class OrdersBridgeSession : IDisposable
         // 2) Mở "Chi tiết" shop đầu bằng trusted click (kỳ vọng KHÔNG captcha).
         var firstShopId = shops[0].ShopId;
         // Nhãn shop cho khớp chữ ký (callback null ở "Chạy thử" nên không dùng, nhưng phải truyền). shops[0] an toàn (đã guard rỗng ở trên).
+        // "Chạy thử" dựng phiên KHÔNG rót callback nào (xem AccountsViewModel.Phien) ⇒ bước BÙ "tự tải lại phiếu
+        // thiếu" trong RunShopOrdersAsync tự tắt: lát cắt này chỉ ĐỌC, không lưu DB, nên không được kéo theo nó.
         var firstShopLogin = string.IsNullOrWhiteSpace(shops[0].LoginName) ? shops[0].ShopName : shops[0].LoginName;
         L($"Mở 'Chi tiết' shop đầu (id={firstShopId}) bằng trusted click...");
 
-        // Cột tiến độ tab "Kết quả": lát cắt chỉ chạy shop đầu — vẫn báo bắt đầu/xong y như vòng RunAllShopsAsync.
+        // Cột tiến độ tab "Shops": lát cắt chỉ chạy shop đầu — vẫn báo bắt đầu/xong y như vòng RunAllShopsAsync.
         _onShopCheckStarted?.Invoke(firstShopLogin);
         try
         {

@@ -260,17 +260,18 @@
                 <DataGridTemplateColumn Header="Phiếu" Width="96">
                     <DataGridTemplateColumn.CellTemplate>
                         <DataTemplate>
+                            <!-- MỘT hành động cho mỗi dòng: đã có file phiếu → "In phiếu"; có vận đơn mà thiếu
+                                 file → "Tải lại"; chưa chuẩn bị hàng → không nút nào. Hai nút loại trừ nhau vì
+                                 cùng soi HasSlipFile (CanPrintSlip = có file + không phải đơn hủy). -->
                             <StackPanel Orientation="Vertical" VerticalAlignment="Center">
-                                <!-- Ẩn cho đơn "Đã hủy" (CanPrintSlip=false): đơn hủy chưa qua xử lý nên không có phiếu. -->
                                 <Button Style="{StaticResource linky}" Content="In phiếu"
                                         Command="{Binding PrintSlipCommand}"
                                         Visibility="{Binding CanPrintSlip, Converter={StaticResource BoolToVis}}"
                                         ToolTip="Gửi phiếu PDF của đơn này tới máy in mặc định" />
-                                <!-- Chỉ hiện khi đơn có vận đơn nhưng THIẾU file phiếu → tải lại (cần phiên tài khoản đang chạy). -->
-                                <Button Style="{StaticResource linky}" Content="Tải phiếu" Margin="0,2,0,0"
+                                <Button Style="{StaticResource linky}" Content="Tải lại" Margin="0,2,0,0"
                                         Command="{Binding RedownloadSlipCommand}"
                                         Visibility="{Binding ShowRedownloadSlip, Converter={StaticResource BoolToVis}}"
-                                        ToolTip="Tải lại file phiếu bị thiếu (mở phiên tài khoản trước)" />
+                                        ToolTip="Tải lại phiếu bị thiếu — cần phiên tài khoản đang chạy và đang mở đúng shop này. Bình thường vòng check shop sẽ tự tải lại." />
                             </StackPanel>
                         </DataTemplate>
                     </DataGridTemplateColumn.CellTemplate>

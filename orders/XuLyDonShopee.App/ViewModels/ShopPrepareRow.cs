@@ -3,7 +3,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 namespace XuLyDonShopee.App.ViewModels;
 
 /// <summary>
-/// Một dòng lưới tab "Kết quả": tên Shop (hiển thị) + số đơn đã Chuẩn bị hàng của ngày đang lọc + cột tiến độ
+/// Một dòng lưới tab "Shops": tên Shop (hiển thị) + số đơn đã Chuẩn bị hàng của ngày đang lọc + cột tiến độ
 /// (vòng quay khi đang check shop đó / dấu tick khi đã check xong shop đó trong lượt chạy).
 /// <para>
 /// Là LỚP quan sát được (không còn <c>record</c> bất biến) vì các cờ tiến độ đổi TẠI CHỖ trong lúc chạy — dựng

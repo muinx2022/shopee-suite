@@ -14,7 +14,7 @@ using XuLyDonShopee.Core.Services;
 namespace XuLyDonShopee.App.ViewModels;
 
 /// <summary>
-/// <b>Tab "Kết quả"</b> của màn Tài khoản: lưới Shop | số đơn Chuẩn bị hàng theo NGÀY (số CỤC BỘ của máy, đè
+/// <b>Tab "Shops"</b> của màn Tài khoản: lưới Shop | số đơn Chuẩn bị hàng theo NGÀY (số CỤC BỘ của máy, đè
 /// bằng số CHUNG lấy từ Hub khi hỏi được), cột tiến độ (vòng quay / dấu tick theo shop phiên đang check) và
 /// nhịp tự sang ngày lúc qua nửa đêm.
 /// <para>Là phần <c>partial</c> của <see cref="AccountsViewModel"/> — property công khai vẫn nằm trên VM chính
@@ -22,26 +22,26 @@ namespace XuLyDonShopee.App.ViewModels;
 /// </summary>
 public partial class AccountsViewModel
 {
-    /// <summary>Tab "Kết quả" (cột tiến độ): shop mà phiên của TỪNG tài khoản đang/vừa check — nhãn shop + có
+    /// <summary>Tab "Shops" (cột tiến độ): shop mà phiên của TỪNG tài khoản đang/vừa check — nhãn shop + có
     /// đang check hay không. Nhớ theo tài khoản (không phải một ô duy nhất) để chuyển qua lại giữa nhiều tài
     /// khoản đang chạy vẫn thấy đúng chấm của tài khoản đang mở. Chỉ ghi/đọc trên UI thread (xem
     /// <see cref="OnShopCheckChanged"/> đã marshal qua <see cref="RunOnUi"/>) nên không cần khóa.</summary>
     private readonly Dictionary<long, (string ShopLabel, bool IsChecking)> _shopCheck = new();
 
-    /// <summary>Tab "Kết quả" (cột tiến độ): NHÃN các shop đã kiểm tra XONG trong LƯỢT CHẠY hiện tại của từng tài
+    /// <summary>Tab "Shops" (cột tiến độ): NHÃN các shop đã kiểm tra XONG trong LƯỢT CHẠY hiện tại của từng tài
     /// khoản — nguồn của dấu tick. Trạng thái của lượt chạy nên chỉ sống trong bộ nhớ (KHÔNG lưu DB) và bị xóa
     /// sạch khi lượt mới bắt đầu. So khớp nhãn không phân biệt hoa/thường. Chỉ ghi/đọc trên UI thread (xem
     /// <see cref="OnShopCheckChanged"/>/<see cref="OnShopListChanged"/> đã marshal qua <see cref="RunOnUi"/>) nên
     /// không cần khóa.</summary>
     private readonly Dictionary<long, HashSet<string>> _shopDaCheck = new();
 
-    /// <summary>Tab "Kết quả": NGÀY đang lọc (mặc định hôm nay). Đổi ngày → <see cref="LoadResults"/> nạp lại số
+    /// <summary>Tab "Shops": NGÀY đang lọc (mặc định hôm nay). Đổi ngày → <see cref="LoadResults"/> nạp lại số
     /// chuẩn bị hàng của ngày đó. DatePicker trả <c>DateTimeOffset?</c> — dùng kiểu KHÔNG null nên xóa trắng lịch
     /// KHÔNG ghi được về đây (giữ giá trị cũ).</summary>
     [ObservableProperty]
     private DateTimeOffset _resultDate = DateTimeOffset.Now;
 
-    /// <summary>Ngày mà ô lọc "Kết quả" coi là HÔM NAY ở lần dò gần nhất. Dùng để phân biệt "người dùng đang xem
+    /// <summary>Ngày mà ô lọc của tab "Shops" coi là HÔM NAY ở lần dò gần nhất. Dùng để phân biệt "người dùng đang xem
     /// hôm nay" (→ tự chuyển sang ngày mới lúc qua nửa đêm) với "người dùng chủ động chọn ngày cũ để xem lại"
     /// (→ TUYỆT ĐỐI không giật ngày khỏi tay họ). Chỉ đụng trên UI thread (xem <see cref="KiemTraSangNgay"/>).</summary>
     private DateTime _ngayCoiLaHomNay = DateTimeOffset.Now.Date;
@@ -50,14 +50,14 @@ public partial class AccountsViewModel
     /// như không tốn gì (chỉ so hai <c>DateTime</c>, không đụng DB/hub khi ngày chưa đổi).</summary>
     private static readonly TimeSpan NhipDoSangNgay = TimeSpan.FromSeconds(60);
 
-    /// <summary>Khoảng cách kéo banner lỗi địa chỉ từ Hub khi đang mở tab Kết quả (lan dismiss/upsert đa máy).</summary>
+    /// <summary>Khoảng cách kéo banner lỗi địa chỉ từ Hub khi đang mở tab Shops (lan dismiss/upsert đa máy).</summary>
     private static readonly TimeSpan KhoangSyncPickupAlerts = TimeSpan.FromSeconds(60);
 
     /// <summary>Đồng hồ dò sang ngày (chạy trên thread nền → callback marshal về UI thread). Dựng ở ctor, dọn ở
     /// <see cref="Dispose"/> (shell gọi khi thoát app — <c>OrdersModuleHost.StopAsync</c>).</summary>
     private readonly System.Threading.Timer _timerSangNgay;
 
-    /// <summary>Đồng hồ kéo Hub pickup-alerts khi tab Kết quả đang mở + có tài khoản chọn. Dựng ở ctor, dọn ở Dispose.</summary>
+    /// <summary>Đồng hồ kéo Hub pickup-alerts khi tab Shops đang mở + có tài khoản chọn. Dựng ở ctor, dọn ở Dispose.</summary>
     private readonly System.Threading.Timer _timerSyncPickupAlerts;
 
     /// <summary>0/1 — có một lượt <see cref="SyncAddressAlertsFromHubAsync"/> đang chạy.</summary>
@@ -66,7 +66,7 @@ public partial class AccountsViewModel
     /// <summary>0/1 — có nơi gọi sync trong lúc đang bận → chạy lại đúng một lượt nữa khi lượt này xong.</summary>
     private int _syncPickupAlertsPending;
 
-    /// <summary>Tab "Kết quả": các dòng Shop | số Chuẩn bị hàng của NGÀY đang lọc — MỌI shop của tài khoản (kể cả
+    /// <summary>Tab "Shops": các dòng Shop | số Chuẩn bị hàng của NGÀY đang lọc — MỌI shop của tài khoản (kể cả
     /// shop 0 đơn). Dựng lại trong <see cref="LoadResults"/> khi đổi tài khoản chọn / đổi ngày.</summary>
     public ObservableCollection<ShopPrepareRow> ResultRows { get; } = new();
 
@@ -74,7 +74,7 @@ public partial class AccountsViewModel
     /// chọn tài khoản / ghi alert / bấm X / kéo Hub.</summary>
     public ObservableCollection<PickupAlertRow> AddressAlertRows { get; } = new();
 
-    /// <summary>TỔNG số đơn "Chuẩn bị hàng" của MỌI shop đang hiện ở tab Kết quả (ngày đang lọc). Bám ĐÚNG cột
+    /// <summary>TỔNG số đơn "Chuẩn bị hàng" của MỌI shop đang hiện ở tab Shops (ngày đang lọc). Bám ĐÚNG cột
     /// trong lưới: hub áp số của nó vào từng dòng thì tổng này cũng là số hub — không tính riêng một đường khác,
     /// kẻo tổng nói một đằng các dòng nói một nẻo.</summary>
     [ObservableProperty]
@@ -92,7 +92,7 @@ public partial class AccountsViewModel
         TongChuanBiHang = tong;
     }
 
-    /// <summary>Tab "Kết quả": số đang hiện là số CHUNG TOÀN HỆ THỐNG lấy từ Hub (true) hay số CỤC BỘ của riêng máy
+    /// <summary>Tab "Shops": số đang hiện là số CHUNG TOÀN HỆ THỐNG lấy từ Hub (true) hay số CỤC BỘ của riêng máy
     /// này (false — chưa hỏi được Hub / bản chạy không có Hub). Ghi chú cạnh ô lọc ngày bám cờ này để người dùng
     /// biết mình đang xem con số nào. Bật ở <see cref="RefreshHubCountsAsync"/> khi hub trả lời được; hạ ở
     /// <see cref="ApplyHubCounts"/> khi không còn số hub nào áp được cho bối cảnh đang xem.</summary>
@@ -122,7 +122,7 @@ public partial class AccountsViewModel
     /// <summary>Ngày (<c>yyyy-MM-dd</c>) mà <see cref="_hubCounts"/> thuộc về (chỉ áp khi trùng ngày đang lọc).</summary>
     private string? _hubCountsDay;
 
-    /// <summary>Đổi NGÀY lọc ở tab "Kết quả" → nạp lại số chuẩn bị hàng của ngày mới (cục bộ trước, hub sau).</summary>
+    /// <summary>Đổi NGÀY lọc ở tab "Shops" → nạp lại số chuẩn bị hàng của ngày mới (cục bộ trước, hub sau).</summary>
     partial void OnResultDateChanged(DateTimeOffset value)
     {
         LoadResults();
@@ -130,7 +130,7 @@ public partial class AccountsViewModel
     }
 
     /// <summary>
-    /// Quy tắc TỰ kéo ô ngày tab "Kết quả" sang ngày mới — hàm THUẦN (không đụng state, test được; đừng test
+    /// Quy tắc TỰ kéo ô ngày tab "Shops" sang ngày mới — hàm THUẦN (không đụng state, test được; đừng test
     /// bằng cách chờ timer). <paramref name="dangXem"/> = ngày ô lọc đang hiển thị, <paramref name="coiLaHomNay"/>
     /// = ngày mà lần dò TRƯỚC coi là hôm nay, <paramref name="homNay"/> = ngày của đồng hồ máy lúc dò.
     /// <list type="bullet">
@@ -204,7 +204,7 @@ public partial class AccountsViewModel
     }
 
     /// <summary>
-    /// Dựng lại <see cref="ResultRows"/> cho tab "Kết quả": MỌI shop của tài khoản đang chọn (từ
+    /// Dựng lại <see cref="ResultRows"/> cho tab "Shops": MỌI shop của tài khoản đang chọn (từ
     /// <c>account_shops</c>) LEFT JOIN số đơn chuẩn bị hàng của <see cref="ResultDate"/> (từ <c>prepare_daily</c>) —
     /// shop không có đơn trong ngày → 0. Shop CÓ đơn trong ngày nhưng CHƯA có trong danh sách shop (lỡ đọc shop-list)
     /// → vẫn thêm để không sót. Chưa chọn tài khoản → lưới rỗng. Chạy trên UI thread (gọi từ setter/OnSelectedRowChanged).
@@ -281,7 +281,7 @@ public partial class AccountsViewModel
         }
     }
 
-    /// <summary>Ngày đang lọc ở tab "Kết quả" dưới dạng KHÓA <c>yyyy-MM-dd</c> — dùng chung cho <c>prepare_daily</c>,
+    /// <summary>Ngày đang lọc ở tab "Shops" dưới dạng KHÓA <c>yyyy-MM-dd</c> — dùng chung cho <c>prepare_daily</c>,
     /// câu hỏi gửi hub và bộ nhớ <see cref="_hubCountsDay"/> (một chỗ định dạng, không lệch nhau).</summary>
     private string ResultDayKey
         => ResultDate.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
@@ -501,7 +501,7 @@ public partial class AccountsViewModel
     }
 
     /// <summary>
-    /// Phiên vừa đọc được danh sách shop của một tài khoản → dựng lại lưới tab "Kết quả" nếu ĐÚNG tài khoản
+    /// Phiên vừa đọc được danh sách shop của một tài khoản → dựng lại lưới tab "Shops" nếu ĐÚNG tài khoản
     /// đang mở. KHÔNG lọc theo ngày (khác <see cref="OnPrepareCountChanged"/>): danh sách shop không phụ thuộc
     /// ngày, xem ngày cũ vẫn phải thấy đủ shop.
     /// <para>Cũng là mốc RESET dấu tick: đọc xong danh sách shop = phiên sắp lặp qua từng shop, tức LƯỢT CHẠY MỚI
@@ -519,7 +519,7 @@ public partial class AccountsViewModel
     });
 
     /// <summary>
-    /// Số "chuẩn bị hàng" của một tài khoản vừa tăng → nạp lại lưới tab "Kết quả" nếu ĐÚNG tài khoản đang mở.
+    /// Số "chuẩn bị hàng" của một tài khoản vừa tăng → nạp lại lưới tab "Shops" nếu ĐÚNG tài khoản đang mở.
     /// Tài khoản khác thì bỏ qua (đang chạy nhiều tk cùng lúc mà nạp hết là phí). Sự kiện đến từ THREAD NỀN của
     /// phiên → marshal về UI thread trước khi đụng <c>ResultRows</c>.
     /// <para>Dò sang ngày (<see cref="KiemTraSangNgay"/>) TRƯỚC mọi điều kiện: đơn vừa chuẩn bị luôn thuộc hôm
@@ -548,7 +548,7 @@ public partial class AccountsViewModel
 
     /// <summary>
     /// Phiên vừa BẮT ĐẦU (<paramref name="checking"/> = true) hoặc XONG (false) việc check shop
-    /// <paramref name="shopLabel"/> của tài khoản <paramref name="accountId"/> → cập nhật cột tiến độ tab "Kết quả".
+    /// <paramref name="shopLabel"/> của tài khoản <paramref name="accountId"/> → cập nhật cột tiến độ tab "Shops".
     /// <list type="bullet">
     /// <item>bắt đầu → nhớ shop mới ⇒ vòng quay CHUYỂN sang shop đó ngay;</item>
     /// <item>xong → tắt vòng quay + ghi nhãn shop vào tập "đã kiểm tra" của lượt chạy ⇒ shop đó nhận dấu tick và
@@ -837,7 +837,7 @@ public partial class AccountsViewModel
         }
     }
 
-    /// <summary>Bật/tắt nhịp kéo Hub pickup-alerts: chỉ khi tab Kết quả (index 1) + có tài khoản chọn.</summary>
+    /// <summary>Bật/tắt nhịp kéo Hub pickup-alerts: chỉ khi tab Shops (index 1) + có tài khoản chọn.</summary>
     private void CapNhatTimerSyncPickupAlerts()
     {
         try

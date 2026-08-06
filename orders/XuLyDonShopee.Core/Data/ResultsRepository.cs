@@ -4,7 +4,7 @@ using XuLyDonShopee.Core.Services;
 namespace XuLyDonShopee.Core.Data;
 
 /// <summary>
-/// Lưu/đọc "Kết quả chuẩn bị hàng" theo shop/ngày cho màn chi tiết tài khoản (tab "Kết quả"):
+/// Lưu/đọc "Kết quả chuẩn bị hàng" theo shop/ngày cho màn chi tiết tài khoản (tab "Shops"):
 /// <list type="bullet">
 /// <item><c>account_shops</c>: DANH SÁCH shop của mỗi tài khoản (khóa <c>(account_id, shop_login)</c>) — để cột
 /// Shop hiện MỌI shop kể cả shop 0 đơn trong ngày. Ghi mỗi lượt đọc <c>/portal/shop</c> (callback shop-list).</item>
@@ -85,7 +85,7 @@ public class ResultsRepository
     /// <summary>
     /// MỌI shop đã lưu của một tài khoản (<c>shop_login</c> + <c>shop_name</c>), sắp theo ĐÚNG thứ tự trang
     /// <c>/portal/shop</c> của subaccount (<c>sort_order</c> do <see cref="UpsertShops"/> ghi). Dùng cho cột
-    /// Shop tab "Kết quả" (hiện cả shop 0 đơn trong ngày). Tài khoản chưa có shop nào → list rỗng.
+    /// Shop tab "Shops" (hiện cả shop 0 đơn trong ngày). Tài khoản chưa có shop nào → list rỗng.
     /// </summary>
     public IReadOnlyList<(string ShopLogin, string? ShopName)> GetShops(long accountId)
     {

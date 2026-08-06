@@ -100,7 +100,7 @@
                 </Style.Triggers>
             </Style>
 
-            <!-- Vòng quay của cột tiến độ tab "Kết quả" (shop ĐANG được check): icon "làm mới" xoay 0→360°.
+            <!-- Vòng quay của cột tiến độ tab "Shops" (shop ĐANG được check): icon "làm mới" xoay 0→360°.
                  CHỈ chạy khi IsChecking=true (EnterActions/ExitActions) nên lúc rảnh không tốn CPU — đúng ý
                  bản Avalonia (nó gắn animation vào icon chỉ hiện khi đang check).
                  RenderTransform đặt TẠI CHỖ DÙNG chứ không trong Setter: giá trị Setter dùng CHUNG cho mọi
@@ -144,7 +144,7 @@
                 <Setter Property="HorizontalContentAlignment" Value="Left" />
             </Style>
 
-            <!-- ══════════ Sub-tab (Thông tin tài khoản | Kết quả) — SEGMENTED CONTROL kiểu Windows 11 ══════════ -->
+            <!-- ══════════ Sub-tab (Thông tin tài khoản | Shops) — SEGMENTED CONTROL kiểu Windows 11 ══════════ -->
             <!-- Cả cụm nằm trong MỘT khay bo tròn nền xám ấm; ô ĐANG CHỌN nổi lên nền TRẮNG + viền mảnh + chữ
                  đen (nét chữ NORMAL ở MỌI trạng thái — không SemiBold/Bold ở đâu cả, khớp `subtabItem` của
                  suite), ô còn lại chìm chữ xám. Bên phải khay là tên tài khoản đang mở (truyền qua Tag).
@@ -429,7 +429,7 @@
                            HorizontalAlignment="Center" VerticalAlignment="Center"
                            Visibility="{Binding ShowPlaceholder, Converter={StaticResource BoolToVis}}" />
 
-                <!-- Khối chi tiết: 2 tab — "Thông tin tài khoản" (form) | "Kết quả" (chuẩn bị hàng theo shop/ngày).
+                <!-- Khối chi tiết: 2 tab — "Thông tin tài khoản" (form) | "Shops" (chuẩn bị hàng theo shop/ngày).
                      TabControl mang Visibility=IsEditing; placeholder nằm NGOÀI (chồng cùng ô Grid).
                      Tag = tên tài khoản đang mở → template segmented control hiện ở mép phải khay tab. -->
                 <TabControl Style="{StaticResource detailTabs}"
@@ -654,12 +654,12 @@
                         </ScrollViewer>
                     </TabItem>
 
-                    <!-- ───────── Tab 2: Kết quả — chọn ngày + lưới Shop | Chuẩn bị hàng ───────── -->
+                    <!-- ───────── Tab 2: Shops — chọn ngày + lưới Shop | Chuẩn bị hàng ───────── -->
                     <TabItem>
                         <!-- Huy hiệu = SỐ SHOP đang hiện trong lưới kết quả (số thật, không phải trang trí). -->
                         <TabItem.Header>
                             <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="Kết quả" VerticalAlignment="Center" />
+                                <TextBlock Text="Shops" VerticalAlignment="Center" />
                                 <Border Style="{StaticResource tabBadge}" Margin="8,0,0,0">
                                     <TextBlock Text="{Binding ResultRows.Count, Mode=OneWay}" />
                                 </Border>

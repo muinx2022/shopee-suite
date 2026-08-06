@@ -440,11 +440,11 @@ public partial class AccountSession : ObservableObject, IAccountSession
             {
                 var bridge = new OrdersBridgeSession(userDataDir, browserChoice, log, invoiceDir, province, syncCallback,
                     finalDoneSns: () => _services.Orders.GetOrderSnsWithFinalAmount(_accountId),
-                    // Tab "Kết quả": lưu danh sách shop + tăng đếm mỗi đơn arrange theo (tài khoản, shop, ngày yyyy-MM-dd giờ địa phương).
+                    // Tab "Shops": lưu danh sách shop + tăng đếm mỗi đơn arrange theo (tài khoản, shop, ngày yyyy-MM-dd giờ địa phương).
                     onShopListRead: shops =>
                     {
                         _services.Results.UpsertShops(_accountId, shops);
-                        // Báo tab "Kết quả" dựng lưới NGAY. Thiếu dòng này thì màn đang mở giữ nguyên kết quả
+                        // Báo tab "Shops" dựng lưới NGAY. Thiếu dòng này thì màn đang mở giữ nguyên kết quả
                         // rỗng của lần nạp đầu (mở app + chọn tài khoản TRƯỚC khi phiên đọc được shop).
                         _services.RaiseShopListChanged(_accountId);
                     },
@@ -460,11 +460,11 @@ public partial class AccountSession : ObservableObject, IAccountSession
                         {
                             _services.Orders.MarkPrepared(_accountId, orderSn, DateTime.UtcNow);
                         }
-                        // Báo tab "Kết quả" đang mở tự nạp lại → số nhảy NGAY sau mỗi đơn, không phải đợi
+                        // Báo tab "Shops" đang mở tự nạp lại → số nhảy NGAY sau mỗi đơn, không phải đợi
                         // đổi tài khoản / đổi ngày mới thấy.
                         _services.RaisePrepareCountChanged(_accountId);
                     },
-                    // Cột tiến độ tab "Kết quả": chấm tròn + vòng quay chạy theo shop mà vòng này đang check tới.
+                    // Cột tiến độ tab "Shops": chấm tròn + vòng quay chạy theo shop mà vòng này đang check tới.
                     onShopCheckStarted: shopLabel => _services.RaiseShopCheckChanged(_accountId, shopLabel, checking: true),
                     onShopCheckFinished: shopLabel => _services.RaiseShopCheckChanged(_accountId, shopLabel, checking: false),
                     // Bước CUỐI flow shop — check đơn trả hàng: mốc "số yêu cầu" nhớ THEO SHOP (account_shops), mã
@@ -472,7 +472,10 @@ public partial class AccountSession : ObservableObject, IAccountSession
                     returnCountLast: shopLabel => _services.Results.GetReturnCount(_accountId, shopLabel),
                     saveReturnCount: (shopLabel, so) => _services.Results.SetReturnCount(_accountId, shopLabel, so),
                     // Ghi kho mã + vào đơn, notify phần Hub không tự biết — xem OrderPersistPipeline.LuuMaTraHang.
-                    saveReturnCodes: cap => _persist.LuuMaTraHang(cap, log, ct));
+                    saveReturnCodes: cap => _persist.LuuMaTraHang(cap, log, ct),
+                    // Bước BÙ cuối flow shop: danh sách đơn của CHÍNH shop đó đang thiếu phiếu (mới nhất trước) để
+                    // phiên tự tải lại ngay trên tab đang mở. Đọc DB đồng bộ (nhanh, đang ở thread nền của phiên).
+                    layDonThieuPhieu: (shopLogin, _) => Task.FromResult(LayDonThieuPhieu(shopLogin, invoiceDir)));
                 _bridge = bridge;
                 OrdersBridgeRunResult result;
                 try
@@ -492,6 +495,11 @@ public partial class AccountSession : ObservableObject, IAccountSession
 
                 _readyForActions = true; // đã chạy xong ít nhất 1 vòng → nút phụ thuộc phiên mở
 
+                // Vòng vừa rồi CÓ THỂ đã tự tải lại vài phiếu thiếu — mà việc đó chỉ ghi FILE xuống đĩa, không
+                // đụng DB nên không lượt lưu đơn nào bắn sự kiện. Không có dòng này thì lưới Đơn hàng đang mở
+                // vẫn hiện "Tải lại" cho những đơn đã có phiếu, tới khi người dùng tự bấm "Làm mới".
+                _services.RaiseOrdersChanged();
+
                 if (result.Captcha)
                 {
                     log("Gặp captcha/verify — dừng vòng này, sẽ thử lại sau khi nghỉ.");
@@ -503,7 +511,7 @@ public partial class AccountSession : ObservableObject, IAccountSession
                     log($"⛔ {result.Error} Đã bỏ qua shop lỗi địa chỉ; các shop khác trong vòng này vẫn chạy.");
                     log($"Vòng xong: {result.ShopsDone}/{result.ShopCount} shop, {result.TotalOrders} đơn, {result.TotalSlips} phiếu.");
                     _persist.StartCanhBaoDiaChiInBackground(result.PickupFailedShop, province, log, ct);
-                    // Banner bền trên tab Kết quả (mỗi shop một dòng) — local + Hub; không phụ thuộc Slack.
+                    // Banner bền trên tab Shops (mỗi shop một dòng) — local + Hub; không phụ thuộc Slack.
                     _persist.GhiBannerLoiDiaChi(result.PickupFailedShop, province, log, ct);
                 }
                 else if (result.Error is not null)
@@ -549,6 +557,49 @@ public partial class AccountSession : ObservableObject, IAccountSession
                     State = SessionState.Stopped;
                 }
             }
+        }
+    }
+
+    /// <summary>
+    /// Danh sách <c>order_sn</c> của MỘT shop (thuộc tài khoản này) đang <b>THIẾU PHIẾU</b>: đã có mã vận đơn
+    /// nhưng chưa có file PDF hợp lệ trong <paramref name="invoiceDir"/>. Xếp MỚI NHẤT TRƯỚC — phiên cầu nối tự
+    /// tải lại tối đa <c>ShopFlowRunner.TranTaiLaiPhieuMoiShop</c> đơn đầu ngay trong vòng check shop đó.
+    /// <para>
+    /// Dùng ĐÚNG bộ luật của nút "Tải lại" trên lưới Đơn hàng: cùng công thức đường dẫn
+    /// (<see cref="SlipFiles.SlipPath"/>) + cùng phép kiểm (<see cref="SlipFiles.SlipFileIsValidPdf"/>). Hai nơi
+    /// tự tính riêng là lệch — dòng hiện nút mà vòng không tải, hoặc ngược lại.
+    /// </para>
+    /// Chỉ mở file của đơn ĐÃ có mã vận đơn (đơn chưa chuẩn bị hàng thì khỏi đụng đĩa). Luật lọc/xếp thuần nằm ở
+    /// <see cref="DonThieuPhieu.ChonDonThieuPhieu"/>.
+    /// </summary>
+    private IReadOnlyList<string> LayDonThieuPhieu(string shopLogin, string? invoiceDir)
+    {
+        if (string.IsNullOrWhiteSpace(shopLogin) || string.IsNullOrWhiteSpace(invoiceDir))
+        {
+            return Array.Empty<string>();
+        }
+
+        try
+        {
+            var rows = _services.Orders.Query(accountId: _accountId, shopLogin: shopLogin, shopExact: true);
+            var ungVien = new List<DonUngVienTaiLaiPhieu>(rows.Count);
+            foreach (var r in rows)
+            {
+                if (string.IsNullOrWhiteSpace(r.OrderSn) || string.IsNullOrWhiteSpace(r.TrackingNumber))
+                {
+                    continue; // chưa chuẩn bị hàng → chưa có phiếu để tải lại
+                }
+                var coFile = SlipFiles.SlipFileIsValidPdf(SlipFiles.SlipPath(invoiceDir!, r.OrderSn));
+                var daHuy = ShopeeShippingNav.LaDonHuy(r.Status, r.StatusDescription, r.CancelReason);
+                ungVien.Add(new DonUngVienTaiLaiPhieu(r.OrderSn, r.TrackingNumber, coFile, r.Id, daHuy));
+            }
+            return DonThieuPhieu.ChonDonThieuPhieu(ungVien);
+        }
+        catch (Exception ex)
+        {
+            // Best-effort: đọc DB/đĩa hỏng KHÔNG được phá vòng check shop — bỏ lượt tải lại của shop này.
+            _services.Log.Append(_logLabel, "Đọc danh sách đơn thiếu phiếu lỗi: " + ex.ToString());
+            return Array.Empty<string>();
         }
     }
 

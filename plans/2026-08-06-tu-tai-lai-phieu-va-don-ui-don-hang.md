@@ -1,7 +1,7 @@
 # Plan: tự tải lại phiếu thiếu khi check shop + dọn UI ô Phiếu / tab Shops / ô lịch
 
 - **Ngày:** 2026-08-06
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành
 - **Người lập:** phiên chính · **Người thực thi:** Opus (`opus-executor`)
 
 ## 1. Bối cảnh & mục tiêu
@@ -127,6 +127,49 @@ AccountsView, 2 ở OrderStatisticsView, 2 ở OrdersView):
 
 ---
 
-## Báo cáo thực thi
+## Báo cáo thực thi — HOÀN THÀNH
 
-<chưa có>
+Người thực thi: `opus-executor` (4 bước). Phiên chính tự kiểm chứng + **tự sửa 3 lỗi** người thực thi để lại.
+
+### Phiên chính kiểm chứng được gì
+
+- `dotnet build ShopeeSuite.sln --no-incremental` = **0 warning / 0 error**; `dotnet test orders` = **1628 xanh**.
+  (Dùng `--no-incremental` vì người thực thi báo đã dính bẫy `Copy-Item` giữ nguyên `LastWriteTime` ⇒ MSBuild bỏ
+  qua biên dịch lại ⇒ binary còn mutant trong khi `git diff` sạch.)
+- Đo bằng harness WPF: bấm nút lịch → `IsDropDownOpen=True` (không dính bẫy "sai tên part thì bấm câm");
+  `PART_TextBox` hiện `01/08/2026`; chữ THẬT trong lịch là `Tháng 8 năm 2026 | T2 T3 T4 T5 T6 T7 CN`.
+
+### 3 lỗi phiên chính tự sửa
+
+1. **Style lịch KHÔNG hề tới được popup** (lỗi thật, đã đo): lịch của `DatePicker` nằm trong `Popup` = cây hiển
+   thị RIÊNG nên **không tra được style implicit** của view — đo tận nơi thấy `CalendarDayButton.Style = null`,
+   template vẫn là Aero2 (viền xanh + nền xám) dù build xanh. Sửa: gắn TƯỜNG MINH
+   `DatePicker.CalendarStyle` → `Calendar.CalendarDayButtonStyle`. Sau khi sửa, đo lại:
+   `CalendarDayButton style=co, template cua module=CO (dayBd)`; ảnh render cho thấy ngày đang chọn nền cam,
+   hôm nay viền cam, ngày tháng khác chữ mờ.
+2. **Test `LichBungRa_CoStyleRieng_KhongDeAero2Ve` là test RỖNG** — nó chỉ kiểm "dictionary CÓ chứa style", nên
+   vẫn xanh suốt trong lúc lịch thật là Aero2. Thêm `StyleONgay_GanTuongMinh_StyleLichVaONgayVaoPopup` đi theo
+   ĐÚNG đường dây thật (style DatePicker → `CalendarStyle` → `CalendarDayButtonStyle` → template có `dayBd`).
+3. **Đơn ĐÃ HỦY ngốn suất trần vĩnh viễn** (chính người thực thi nêu ở mục Đề xuất — đúng, đã sửa): đơn hủy vẫn
+   có mã vận đơn + thiếu file, mà Seller Centre không còn nút "In phiếu giao" nên mọi lượt tải lại đều trượt ⇒
+   chiếm suất trần 20 của MỌI vòng. Sửa: thêm cờ `DaHuy` vào `DonUngVienTaiLaiPhieu`, loại ở hàm thuần
+   `ChonDonThieuPhieu` (dùng `ShopeeShippingNav.LaDonHuy` — cùng luật toàn app), và ẩn luôn nút "Tải lại" cho
+   đơn hủy ở lưới. Cộng thêm: phát `RaiseOrdersChanged()` sau mỗi vòng để lưới hết "Tải lại" mà không phải bấm
+   Làm mới (việc tự tải lại chỉ ghi FILE, không đụng DB nên không có sự kiện nào bắn).
+
+### Thử phá (phiên chính tự làm)
+
+| Mutant | Kết quả |
+|---|---|
+| Bỏ setter `CalendarStyle` khỏi style DatePicker | **ĐỎ** `StyleONgay_GanTuongMinh_…` |
+| Bỏ `&& !d.DaHuy` khỏi `ChonDonThieuPhieu` | **ĐỎ** `ChonDonThieuPhieu_BoDonDaHuy_…` |
+
+Ghi lại một cái bẫy của chính khâu thử phá: hai lượt mutant đầu **không thực sự áp được** (file CRLF + điều kiện
+nằm cuối dòng kèm `)` nên `replace` trượt) mà vẫn "thấy test xanh" — suýt kết luận nhầm là test rỗng. Luôn in ra
+số dòng đã đổi và `grep` lại file sau khi áp mutant.
+
+### Còn để lại có chủ ý
+
+- Không làm lệnh "chạy riêng một shop" (người dùng chọn hướng tự-tải-lại).
+- `_shopTuHub` (đợt trước) chỉ lớn dần trong phiên — đổi tên shop nhiều lần thì ô lọc đọng tên cũ tới khi khởi
+  động lại app. Giữ đúng luật "không tự dọn dữ liệu ở local".

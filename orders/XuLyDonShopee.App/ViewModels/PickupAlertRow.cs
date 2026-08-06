@@ -2,7 +2,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace XuLyDonShopee.App.ViewModels;
 
-/// <summary>Một dòng banner "Cảnh báo: Lỗi địa chỉ. Shop …" trên tab Kết quả — mỗi shop một dòng + nút X.</summary>
+/// <summary>Một dòng banner "Cảnh báo: Lỗi địa chỉ. Shop …" trên tab Shops — mỗi shop một dòng + nút X.</summary>
 public sealed partial class PickupAlertRow : ObservableObject
 {
     public PickupAlertRow(string shopLogin)

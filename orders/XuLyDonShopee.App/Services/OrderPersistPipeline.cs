@@ -467,7 +467,7 @@ internal sealed class OrderPersistPipeline
     }
 
     /// <summary>
-    /// Ghi banner bền trên tab Kết quả (mỗi shop một dòng): upsert local ngay + fire-and-forget Hub;
+    /// Ghi banner bền trên tab Shops (mỗi shop một dòng): upsert local ngay + fire-and-forget Hub;
     /// rồi <see cref="AppServices.RaiseAddressAlertsChanged"/>. Nuốt lỗi Hub — local vẫn đúng khi offline.
     /// </summary>
     public void GhiBannerLoiDiaChi(string? pickupFailedShop, string tinh, Action<string> log, CancellationToken ct)
@@ -513,7 +513,7 @@ internal sealed class OrderPersistPipeline
                     }
                     else
                     {
-                        // GIỮ cờ cho_day → nhịp sync tab Kết quả sẽ đẩy lại; không mất cảnh báo.
+                        // GIỮ cờ cho_day → nhịp sync tab Shops sẽ đẩy lại; không mất cảnh báo.
                         log($"Banner địa chỉ: Hub chưa nhận shop {shop} — giữ local, sẽ đẩy lại sau.");
                     }
                 }

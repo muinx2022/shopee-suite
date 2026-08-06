@@ -16,6 +16,15 @@ internal static class SlipFiles
     internal const long MaxSlipBytes = 5 * 1024 * 1024;
 
     /// <summary>
+    /// Đường dẫn file PDF phiếu giao của một đơn: <c>{thư mục phiếu}\{SanitizeFileName(order_sn)}.pdf</c> — ĐÚNG
+    /// khuôn <c>ShopFlowRunner.TrySaveSlip</c> đặt tên lúc lưu. MỘT chỗ tính duy nhất cho mọi nơi hỏi "đơn này có
+    /// phiếu chưa" (<c>OrderRowViewModel.SlipPath</c> vẽ nút, <c>AccountSession</c> dựng danh sách đơn thiếu phiếu
+    /// cho vòng tự tải lại): hai công thức riêng là hai định nghĩa "thiếu phiếu" lệch nhau.
+    /// </summary>
+    internal static string SlipPath(string invoiceDir, string orderSn)
+        => Path.Combine(invoiceDir, ShopeeShippingNav.SanitizeFileName(orderSn) + ".pdf");
+
+    /// <summary>
     /// Đọc file phiếu <paramref name="path"/> thành base64 nếu HỢP LỆ: tồn tại, ≤ 5MB, và 5 byte đầu là
     /// <c>%PDF-</c> (kiểm magic — bài học cũ: đừng tin đuôi file, GET lại phiếu có thể ra HTML 200-OK). File
     /// quá lớn → log 1 dòng + bỏ qua. Mọi lỗi đọc → false. Trả true + base64 khi hợp lệ.

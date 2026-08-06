@@ -92,7 +92,7 @@ internal sealed class HubDirectoryPuller
             };
             _services.Accounts.Insert(acc);
 
-            // Seed shop (tùy chọn, best-effort): hiện shop ngay ở tab "Kết quả"; lỗi KHÔNG chặn việc tạo tài khoản.
+            // Seed shop (tùy chọn, best-effort): hiện shop ngay ở tab "Shops"; lỗi KHÔNG chặn việc tạo tài khoản.
             if (shopsByLogin.TryGetValue(login, out var shops) && shops.Count > 0)
             {
                 try

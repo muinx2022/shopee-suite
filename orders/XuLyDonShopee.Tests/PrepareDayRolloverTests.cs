@@ -8,7 +8,7 @@ using XuLyDonShopee.Core.Services;
 namespace XuLyDonShopee.Tests;
 
 /// <summary>
-/// Tab "Kết quả" phải TỰ sang ngày mới khi máy chạy xuyên đêm (module Đơn hàng chạy vòng liên tục cả đêm):
+/// Tab "Shops" phải TỰ sang ngày mới khi máy chạy xuyên đêm (module Đơn hàng chạy vòng liên tục cả đêm):
 /// trước đây ô ngày được đặt MỘT LẦN lúc mở app nên qua nửa đêm số đóng băng ở hôm qua, và
 /// <c>OnPrepareCountChanged</c> thoát sớm vì ngày lệch ⇒ đơn của ngày mới KHÔNG hiện ra tới khi mở lại app.
 /// <para>Phần quyết định là hàm THUẦN <see cref="AccountsViewModel.QuyetDinhSangNgay"/> (test thẳng, KHÔNG chờ

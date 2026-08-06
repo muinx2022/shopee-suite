@@ -14,7 +14,7 @@ namespace XuLyDonShopee.App.ViewModels;
 /// <summary>
 /// Màn hình tài khoản: panel trái là danh sách + tìm kiếm, panel phải là form CRUD.
 /// <para>Chia thành nhiều file <c>partial</c> theo khối việc — file này giữ DANH SÁCH (nạp/lọc/tick/xóa),
-/// LỰA CHỌN và panel NHẬT KÝ; form Chi tiết ở <c>AccountsViewModel.Form.cs</c>; tab "Kết quả" (thống kê chuẩn bị
+/// LỰA CHỌN và panel NHẬT KÝ; form Chi tiết ở <c>AccountsViewModel.Form.cs</c>; tab "Shops" (thống kê chuẩn bị
 /// hàng, local + hub) ở <c>AccountsViewModel.KetQua.cs</c>; phiên chạy/bridge ở <c>AccountsViewModel.Phien.cs</c>.
 /// Mọi property công khai vẫn nằm trên CÙNG một lớp nên XAML binding không đổi.</para>
 /// </summary>
@@ -50,19 +50,19 @@ public partial class AccountsViewModel : ViewModelBase, IDisposable
         // thread (RunOnUi) trước khi đụng ObservableCollection.
         _services.AccountsChanged += OnAccountsChanged;
 
-        // Vừa chuẩn bị xong 1 đơn → số ở tab "Kết quả" của tài khoản đó vừa tăng trong CSDL. Nghe để nạp lại
+        // Vừa chuẩn bị xong 1 đơn → số ở tab "Shops" của tài khoản đó vừa tăng trong CSDL. Nghe để nạp lại
         // NGAY (chỉ khi đúng tài khoản đang mở), thay vì bắt người dùng đổi tài khoản/đổi ngày mới thấy số mới.
         _services.PrepareCountChanged += OnPrepareCountChanged;
 
-        // Phiên vừa đọc được danh sách shop → dựng lưới tab "Kết quả" NGAY. Không có cái này thì mở app + chọn
+        // Phiên vừa đọc được danh sách shop → dựng lưới tab "Shops" NGAY. Không có cái này thì mở app + chọn
         // tài khoản TRƯỚC khi phiên đọc shop sẽ thấy lưới TRỐNG mãi (chỉ hết khi bấm sang tk khác rồi bấm lại).
         _services.ShopListChanged += OnShopListChanged;
 
-        // Phiên vào/ra một shop → cột tiến độ của tab "Kết quả" chuyển chấm + bật/tắt vòng quay. Cũng từ thread
+        // Phiên vào/ra một shop → cột tiến độ của tab "Shops" chuyển chấm + bật/tắt vòng quay. Cũng từ thread
         // nền của phiên → marshal về UI thread (RunOnUi) trước khi đụng ResultRows.
         _services.ShopCheckChanged += OnShopCheckChanged;
 
-        // Banner lỗi địa chỉ vừa ghi/đóng → nạp lại list trên tab Kết quả (thread nền → RunOnUi).
+        // Banner lỗi địa chỉ vừa ghi/đóng → nạp lại list trên tab Shops (thread nền → RunOnUi).
         _services.AddressAlertsChanged += OnAddressAlertsChanged;
 
         // Nạp cờ "Xóa profile và tạo lại" từ Settings (bền qua restart). Setter tự LƯU nên chặn ghi ngược
@@ -74,12 +74,12 @@ public partial class AccountsViewModel : ViewModelBase, IDisposable
 
         Reload();
 
-        // Máy chạy vòng liên tục CẢ ĐÊM: không có nhịp này thì ô ngày tab "Kết quả" đứng mãi ở ngày mở app —
+        // Máy chạy vòng liên tục CẢ ĐÊM: không có nhịp này thì ô ngày tab "Shops" đứng mãi ở ngày mở app —
         // qua nửa đêm số đóng băng ở hôm qua và đơn của ngày mới không hiện ra nữa. Callback chạy trên thread
         // nền nên tự marshal về UI thread (xem NhipSangNgay).
         _timerSangNgay = new System.Threading.Timer(_ => NhipSangNgay(), null, NhipDoSangNgay, NhipDoSangNgay);
 
-        // Kéo Hub pickup-alerts khi đang mở tab Kết quả (ban đầu tắt — bật trong CapNhatTimerSyncPickupAlerts).
+        // Kéo Hub pickup-alerts khi đang mở tab Shops (ban đầu tắt — bật trong CapNhatTimerSyncPickupAlerts).
         _timerSyncPickupAlerts = new System.Threading.Timer(
             _ => NhipSyncPickupAlerts(), null, System.Threading.Timeout.Infinite, System.Threading.Timeout.Infinite);
     }
@@ -205,7 +205,7 @@ public partial class AccountsViewModel : ViewModelBase, IDisposable
     /// <see cref="OnSelectedRowChanged"/>) để nút cập nhật kịp.</summary>
     public bool CanDelete => SelectedRow is not null || Accounts.Any(r => r.IsSelected);
 
-    /// <summary>Tab chi tiết đang mở: 0 = Thông tin tài khoản, 1 = Kết quả. Click acc → nhảy sang Kết quả.</summary>
+    /// <summary>Tab chi tiết đang mở: 0 = Thông tin tài khoản, 1 = Shops. Click acc → nhảy sang Shops.</summary>
     [ObservableProperty]
     private int _detailTabIndex;
 
@@ -251,7 +251,7 @@ public partial class AccountsViewModel : ViewModelBase, IDisposable
             // Plan B: bấm 1 tài khoản → nổi lên đầu danh sách + đưa cửa sổ Brave của nó ra trước (best-effort).
             BringSelectedToFront(value);
 
-            // Click acc → mở tab Kết quả ngay (xem số chuẩn bị trong ngày), khỏi phải bấm tab tay.
+            // Click acc → mở tab Shops ngay (xem số chuẩn bị trong ngày), khỏi phải bấm tab tay.
             DetailTabIndex = 1;
         }
         else if (!IsNew)
@@ -261,7 +261,7 @@ public partial class AccountsViewModel : ViewModelBase, IDisposable
             DetailTabIndex = 0;
         }
 
-        // Tab "Kết quả": nạp lưới Shop|Chuẩn bị hàng theo tài khoản vừa chọn (bỏ chọn → clear). Đặt SAU khi
+        // Tab "Shops": nạp lưới Shop|Chuẩn bị hàng theo tài khoản vừa chọn (bỏ chọn → clear). Đặt SAU khi
         // form/_editingId đã đồng bộ (dùng SelectedRow.Id). Lưới hiện NGAY bằng số cục bộ, rồi hỏi hub đè số chung.
         LoadResults();
         LoadAddressAlertsFromLocal();
@@ -273,7 +273,7 @@ public partial class AccountsViewModel : ViewModelBase, IDisposable
     partial void OnDetailTabIndexChanged(int value)
     {
         CapNhatTimerSyncPickupAlerts();
-        // Vào tab Kết quả → kéo Hub ngay (không chờ đủ 60s) để nhận dismiss từ máy khác sớm.
+        // Vào tab Shops → kéo Hub ngay (không chờ đủ 60s) để nhận dismiss từ máy khác sớm.
         if (value == 1 && SelectedRow is not null)
         {
             _ = SyncAddressAlertsFromHubAsync();
@@ -404,7 +404,7 @@ public partial class AccountsViewModel : ViewModelBase, IDisposable
         IsNew = true;
         ClearForm();
         IsEditing = true;
-        DetailTabIndex = 0; // thêm mới → form Thông tin, không nhảy Kết quả (chưa có shop)
+        DetailTabIndex = 0; // thêm mới → form Thông tin, không nhảy Shops (chưa có shop)
     }
 
     /// <summary>

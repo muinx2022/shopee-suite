@@ -264,7 +264,7 @@ CREATE TABLE IF NOT EXISTS pickup_address_alerts (
         EnsureColumn(conn, "orders", "prepared_at", "TEXT");
 
         // Vị trí shop trong danh sách của subaccount: ghi theo ĐÚNG thứ tự trang /portal/shop trả về (0, 1, 2…)
-        // để tab "Kết quả" hiện shop cùng thứ tự người dùng thấy trên Shopee. NULL = dữ liệu CŨ chưa biết thứ tự
+        // để tab "Shops" hiện shop cùng thứ tự người dùng thấy trên Shopee. NULL = dữ liệu CŨ chưa biết thứ tự
         // (chưa đọc lại shop-list lần nào) → xếp cuối theo tên. Thêm cho DB CŨ.
         EnsureColumn(conn, "account_shops", "sort_order", "INTEGER");
 

@@ -85,7 +85,7 @@ public class AppServices
     public OrdersRepository Orders { get; }
 
     /// <summary>Kho "Kết quả chuẩn bị hàng" theo shop/ngày (bảng <c>account_shops</c> + <c>prepare_daily</c>) —
-    /// phiên cầu nối ghi qua callback (lưu shop + tăng đếm mỗi đơn arrange); tab "Kết quả" đọc để hiển thị.</summary>
+    /// phiên cầu nối ghi qua callback (lưu shop + tăng đếm mỗi đơn arrange); tab "Shops" đọc để hiển thị.</summary>
     public ResultsRepository Results { get; }
 
     /// <summary>Kho banner cảnh báo lỗi địa chỉ lấy hàng (bảng <c>pickup_address_alerts</c>) — bền tới khi bấm X;
@@ -188,7 +188,7 @@ public class AppServices
     public Func<bool>? HubDaCauHinh { get; set; }
 
     /// <summary>
-    /// HOOK đọc SỐ ĐƠN "chuẩn bị hàng" CHUNG TOÀN HỆ THỐNG theo shop trong MỘT ngày (tab "Kết quả"), do shell
+    /// HOOK đọc SỐ ĐƠN "chuẩn bị hàng" CHUNG TOÀN HỆ THỐNG theo shop trong MỘT ngày (tab "Shops"), do shell
     /// suite RÓT (module Đơn hàng KHÔNG tham chiếu <c>Shopee.Core</c> nên không tự biết hub). Tham số: <c>day</c>
     /// (<c>yyyy-MM-dd</c> giờ địa phương), <c>ct</c>; trả map <c>shop_login → số đơn</c>. Hub đếm THẲNG từ bảng đơn
     /// nên nhiều máy cùng chạy vẫn ra con số thật (không cộng trùng bộ đếm rời của từng máy). Khóa map so khớp
@@ -255,18 +255,18 @@ public class AppServices
     public event Action? AccountsChanged;
 
     /// <summary>
-    /// Phát khi vừa CHUẨN BỊ HÀNG xong một đơn (số đếm của tab "Kết quả" vừa tăng) — kèm id tài khoản để màn
-    /// "Tài khoản" chỉ nạp lại khi ĐÚNG tài khoản đang mở. Trước đây tab "Kết quả" chỉ đọc lại lúc đổi tài khoản
+    /// Phát khi vừa CHUẨN BỊ HÀNG xong một đơn (số đếm của tab "Shops" vừa tăng) — kèm id tài khoản để màn
+    /// "Tài khoản" chỉ nạp lại khi ĐÚNG tài khoản đang mở. Trước đây tab "Shops" chỉ đọc lại lúc đổi tài khoản
     /// / đổi ngày, nên đang chạy thì số đứng im dù CSDL đã cộng ngay. Y như <see cref="OrdersChanged"/>: CỐ Ý bắn
     /// từ THREAD NỀN của phiên → người nghe PHẢI marshal về UI thread.
     /// </summary>
     public event Action<long>? PrepareCountChanged;
 
-    /// <summary>Phiên gọi ngay sau <c>ResultsRepository.IncrementPrepared</c> để tab "Kết quả" tự cập nhật.</summary>
+    /// <summary>Phiên gọi ngay sau <c>ResultsRepository.IncrementPrepared</c> để tab "Shops" tự cập nhật.</summary>
     public void RaisePrepareCountChanged(long accountId) => PrepareCountChanged?.Invoke(accountId);
 
     /// <summary>
-    /// Phát khi vừa ĐỌC ĐƯỢC danh sách shop của một tài khoản (ghi <c>account_shops</c>) — tab "Kết quả" nghe để
+    /// Phát khi vừa ĐỌC ĐƯỢC danh sách shop của một tài khoản (ghi <c>account_shops</c>) — tab "Shops" nghe để
     /// dựng lưới NGAY. Không có sự kiện này thì màn đang mở giữ nguyên kết quả nạp lần đầu: người dùng mở app
     /// rồi chọn tài khoản TRƯỚC khi phiên kịp đọc shop sẽ thấy lưới TRỐNG mãi (chỉ hết khi bấm sang tài khoản
     /// khác rồi bấm lại). Y như <see cref="OrdersChanged"/>: CỐ Ý bắn từ THREAD NỀN → người nghe PHẢI marshal
@@ -274,23 +274,23 @@ public class AppServices
     /// </summary>
     public event Action<long>? ShopListChanged;
 
-    /// <summary>Phiên gọi ngay sau <c>ResultsRepository.UpsertShops</c> để tab "Kết quả" dựng lưới shop.</summary>
+    /// <summary>Phiên gọi ngay sau <c>ResultsRepository.UpsertShops</c> để tab "Shops" dựng lưới shop.</summary>
     public void RaiseShopListChanged(long accountId) => ShopListChanged?.Invoke(accountId);
 
     /// <summary>
-    /// Phát khi phiên BẮT ĐẦU / XONG việc check một shop — cột tiến độ của tab "Kết quả" dùng để chuyển vòng quay
+    /// Phát khi phiên BẮT ĐẦU / XONG việc check một shop — cột tiến độ của tab "Shops" dùng để chuyển vòng quay
     /// sang shop đang chạy tới và đóng dấu tick cho shop vừa xong. Tham số: id tài khoản + <b>nhãn shop</b> (ĐÚNG khóa
     /// <c>prepare_daily</c>: <c>LoginName</c>, rỗng thì <c>ShopName</c>) + đang-check hay không. Y như
     /// <see cref="OrdersChanged"/>: CỐ Ý bắn từ THREAD NỀN của phiên → người nghe PHẢI marshal về UI thread.
     /// </summary>
     public event Action<long, string, bool>? ShopCheckChanged;
 
-    /// <summary>Phiên gọi khi vào/ra một shop để tab "Kết quả" vẽ vòng quay + tick đúng shop.</summary>
+    /// <summary>Phiên gọi khi vào/ra một shop để tab "Shops" vẽ vòng quay + tick đúng shop.</summary>
     public void RaiseShopCheckChanged(long accountId, string shopLabel, bool checking)
         => ShopCheckChanged?.Invoke(accountId, shopLabel, checking);
 
     /// <summary>
-    /// Phát khi vừa ghi/đóng banner lỗi địa chỉ (upsert hoặc dismiss) — tab Kết quả nghe để nạp lại list.
+    /// Phát khi vừa ghi/đóng banner lỗi địa chỉ (upsert hoặc dismiss) — tab Shops nghe để nạp lại list.
     /// CỐ Ý có thể bắn từ THREAD NỀN → người nghe PHẢI marshal về UI thread.
     /// </summary>
     public event Action<long>? AddressAlertsChanged;

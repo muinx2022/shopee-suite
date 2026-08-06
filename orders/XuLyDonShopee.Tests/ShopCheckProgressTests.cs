@@ -8,7 +8,7 @@ using XuLyDonShopee.Core.Services;
 namespace XuLyDonShopee.Tests;
 
 /// <summary>
-/// Cột tiến độ của tab "Kết quả" — MỖI dòng một biểu tượng: vòng quay khi đang check shop đó, dấu tick khi đã
+/// Cột tiến độ của tab "Shops" — MỖI dòng một biểu tượng: vòng quay khi đang check shop đó, dấu tick khi đã
 /// check XONG shop đó trong lượt chạy, để trống khi chưa tới.
 /// Sự kiện <c>AppServices.ShopCheckChanged</c> do phiên cầu nối bắn; test gọi thẳng
 /// <c>RaiseShopCheckChanged</c> nên không cần trình duyệt. Chạy trên thread test (CheckAccess()==true) →

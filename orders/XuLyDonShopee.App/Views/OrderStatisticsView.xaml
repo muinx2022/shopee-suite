@@ -176,9 +176,11 @@
                 </Border>
                 <!-- CalendarDatePicker (Avalonia) → DatePicker (WPF). FromDate/ToDate đã là DateTime? nên
                      bind thẳng, không cần converter.
-                     Language="vi-VN": WPF lấy culture của DatePicker từ FrameworkElement.Language, để mặc định thì
-                     ô ngày theo locale máy (máy dev: 8/1/2026) trong khi mọi câu mô tả trên màn ép vi-VN
-                     (01/08/2026) — cùng một màn hai định dạng, đọc nhầm ngày↔tháng như chơi. -->
+                     Language="vi-VN" KHÔNG còn khai ở đây: style implicit {x:Type DatePicker} (Styles/Controls.xaml)
+                     đặt sẵn cho CẢ 5 ô ngày của module. Lý do vẫn phải ép: WPF lấy culture của DatePicker từ
+                     FrameworkElement.Language, để mặc định thì ô ngày theo locale máy (máy dev: 8/1/2026) trong khi
+                     mọi câu mô tả trên màn ép vi-VN (01/08/2026) — cùng một màn hai định dạng, đọc nhầm
+                     ngày↔tháng như chơi. -->
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto" />
@@ -189,11 +191,11 @@
                     <TextBlock Grid.Column="0" Text="Từ ngày" FontSize="12"
                                Foreground="{StaticResource TextMuted}" VerticalAlignment="Center" Margin="0,0,8,0" />
                     <DatePicker Grid.Column="1" SelectedDate="{Binding FromDate}" SelectedDateFormat="Short"
-                                Language="vi-VN" HorizontalAlignment="Stretch" />
+                                HorizontalAlignment="Stretch" />
                     <TextBlock Grid.Column="2" Text="Đến ngày" FontSize="12"
                                Foreground="{StaticResource TextMuted}" VerticalAlignment="Center" Margin="14,0,8,0" />
                     <DatePicker Grid.Column="3" SelectedDate="{Binding ToDate}" SelectedDateFormat="Short"
-                                Language="vi-VN" HorizontalAlignment="Stretch" />
+                                HorizontalAlignment="Stretch" />
                 </Grid>
                 <Grid Margin="0,8,0,0">
                     <Grid.ColumnDefinitions>

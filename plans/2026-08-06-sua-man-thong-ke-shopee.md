@@ -1,7 +1,7 @@
 # Plan: sửa màn "Shopee → Thống kê" (module Đơn hàng)
 
 - **Ngày:** 2026-08-06
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành
 - **Người lập:** phiên chính · **Người thực thi:** Opus (`opus-executor`)
 
 ## 1. Bối cảnh & mục tiêu

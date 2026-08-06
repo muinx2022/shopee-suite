@@ -31,7 +31,7 @@ public sealed partial class OrderRowViewModel
     private readonly Action<string>? _notify;
 
     /// <summary>Callback tải lại phiếu cho dòng này (OrdersViewModel nối tới phiên của tài khoản). Null → nút
-    /// "Tải phiếu" không làm gì (dòng dựng cho CSV/in hàng loạt không cần).</summary>
+    /// "Tải lại" không làm gì (dòng dựng cho CSV/in hàng loạt không cần).</summary>
     private readonly Func<OrderRowViewModel, Task>? _redownloadSlip;
 
     /// <summary>SKU từng sản phẩm nối bằng " · " (từ items_json); rỗng khi đơn cũ không có khóa sku.</summary>
@@ -87,11 +87,18 @@ public sealed partial class OrderRowViewModel
     public string Status => _row.Status ?? string.Empty;
 
     /// <summary>
-    /// Có hiện nút "In phiếu" cho dòng này không: FALSE khi trạng thái CHỨA "hủy" (đơn "Đã hủy" / "Đã hủy
-    /// một phần" chưa qua xử lý nên KHÔNG có file phiếu giao → ẩn nút). Chuẩn hóa (bỏ hoa/thường + gộp khoảng
-    /// trắng) rồi so "chứa" — bền với biến thể chữ, giống <c>OrderStatusPillConverter</c>.
+    /// Có hiện nút "In phiếu" cho dòng này không. Hai điều kiện:
+    /// <list type="bullet">
+    /// <item>trạng thái KHÔNG chứa "hủy" (đơn "Đã hủy" / "Đã hủy một phần" chưa qua xử lý nên không có phiếu
+    /// giao). Chuẩn hóa (bỏ hoa/thường + gộp khoảng trắng) rồi so "chứa" — bền với biến thể chữ, giống
+    /// <c>OrderStatusPillConverter</c>;</item>
+    /// <item>ĐÃ có file phiếu hợp lệ trên đĩa (<see cref="HasSlipFile"/>). Thiếu file mà vẫn hiện "In phiếu" thì
+    /// bấm vào chỉ ra câu "chưa có file phiếu" — ô "Phiếu" nay chỉ còn MỘT hành động đúng cho mỗi dòng.</item>
+    /// </list>
+    /// Loại trừ nhau với <see cref="ShowRedownloadSlip"/> theo đúng <see cref="HasSlipFile"/>: có phiếu → "In
+    /// phiếu"; chưa có → "Tải lại"; không cái nào khi đơn còn chưa chuẩn bị hàng.
     /// </summary>
-    public bool CanPrintSlip => !NormalizeStatus(Status).Contains("hủy");
+    public bool CanPrintSlip => HasSlipFile && !NormalizeStatus(Status).Contains("hủy");
 
     /// <summary>
     /// Đơn "Chờ lấy hàng" (đã arrange, chờ bưu cục lấy) — dùng để LỌC in hàng loạt phiếu giao ở màn Đơn hàng.
@@ -120,11 +127,11 @@ public sealed partial class OrderRowViewModel
     /// Đường dẫn file PDF phiếu giao đã tải lúc xử lý đơn: <c>{thư mục hóa đơn cấu hình}\{sanitize(order_sn)}.pdf</c>.
     /// KHỚP TUYỆT ĐỐI cách <c>SaveSlipAsync</c> đặt tên: CÙNG thư mục (đọc từ Cài đặt qua
     /// <c>SettingsRepository.GetInvoiceFolder()</c>, truyền vào <c>_invoiceDir</c> — cùng nguồn với nơi xử lý đơn
-    /// LƯU phiếu) + cùng <see cref="ShopeeShippingNav.SanitizeFileName"/>. Chỉ SUY RA đường dẫn — KHÔNG kiểm tồn
-    /// tại lúc render (tránh IO mỗi dòng); chỉ kiểm khi bấm in trong <see cref="PrintSlip"/>.
+    /// LƯU phiếu) + cùng <see cref="ShopeeShippingNav.SanitizeFileName"/> — công thức chung ở
+    /// <see cref="SlipFiles.SlipPath"/>. Chỉ SUY RA đường dẫn, không đụng đĩa; việc kiểm file có thật nằm ở
+    /// <see cref="HasSlipFile"/> (một lần mỗi dòng) và ở <see cref="PrintSlip"/> lúc bấm in.
     /// </summary>
-    public string SlipPath => Path.Combine(
-        _invoiceDir, ShopeeShippingNav.SanitizeFileName(OrderSn) + ".pdf");
+    public string SlipPath => SlipFiles.SlipPath(_invoiceDir, OrderSn);
 
     /// <summary>
     /// Link "In phiếu": GỬI THẲNG file PDF phiếu đã tải tới MÁY IN MẶC ĐỊNH của Windows qua
@@ -153,19 +160,29 @@ public sealed partial class OrderRowViewModel
     }
 
     /// <summary>
-    /// Đã có file PDF phiếu HỢP LỆ (tồn tại + magic <c>%PDF-</c>) chưa — tính lúc nạp dòng (đọc 5 byte đầu qua
-    /// <see cref="SlipFiles.SlipFileIsValidPdf"/>). Dùng để hiện/ẩn nút "Tải phiếu": thiếu file → hiện.
+    /// Đã có file PDF phiếu HỢP LỆ (tồn tại + magic <c>%PDF-</c>) chưa — đọc 5 byte đầu qua
+    /// <see cref="SlipFiles.SlipFileIsValidPdf"/>. Nay CẢ HAI nút của ô "Phiếu" đều hỏi giá trị này
+    /// (<see cref="CanPrintSlip"/> và <see cref="ShowRedownloadSlip"/>) nên NHỚ kết quả lần đầu: một dòng lưới
+    /// được binding đọc nhiều lần khi cuộn, không việc gì mở file mỗi lần. Nhớ trong PHẠM VI MỘT dòng là an toàn
+    /// — mỗi lần lọc/nạp lại, các dòng được TẠO LẠI (xem mô tả lớp).
     /// </summary>
-    public bool HasSlipFile => SlipFiles.SlipFileIsValidPdf(SlipPath);
+    public bool HasSlipFile => _hasSlipFile ??= SlipFiles.SlipFileIsValidPdf(SlipPath);
+
+    private bool? _hasSlipFile;
 
     /// <summary>
-    /// Hiện nút "Tải phiếu" khi đơn ĐÃ có mã vận đơn (arrange xong, phiếu đáng lẽ phải có) NHƯNG file phiếu
+    /// Hiện nút "Tải lại" khi đơn ĐÃ có mã vận đơn (chuẩn bị hàng xong, phiếu đáng lẽ phải có) NHƯNG file phiếu
     /// đang thiếu/không hợp lệ (<see cref="HasSlipFile"/> = false). Đơn chưa xử lý (chưa có vận đơn) → không hiện.
+    /// Loại trừ nhau với <see cref="CanPrintSlip"/> (cùng soi <see cref="HasSlipFile"/>).
+    /// <para>Đơn ĐÃ HỦY cũng KHÔNG hiện: Seller Centre không còn nút "In phiếu giao" cho đơn hủy nên bấm vào
+    /// chắc chắn trượt — cùng luật với việc vòng check shop bỏ đơn hủy khỏi danh sách tự tải lại
+    /// (<c>DonThieuPhieu.ChonDonThieuPhieu</c>). Đơn hủy thiếu phiếu ⇒ ô "Phiếu" trống, đúng bản chất.</para>
     /// </summary>
-    public bool ShowRedownloadSlip => !string.IsNullOrWhiteSpace(Tracking) && !HasSlipFile;
+    public bool ShowRedownloadSlip =>
+        !string.IsNullOrWhiteSpace(Tracking) && !HasSlipFile && !NormalizeStatus(Status).Contains("hủy");
 
     /// <summary>
-    /// Nút "Tải phiếu": nhờ OrdersViewModel (đã nối tới phiên của tài khoản) tải lại file phiếu cho đơn này.
+    /// Nút "Tải lại": nhờ OrdersViewModel (đã nối tới phiên của tài khoản) tải lại file phiếu cho đơn này.
     /// Phiên không chạy / bận → OrdersViewModel báo hướng dẫn qua StatusMessage (xem callback). Chạy NỀN (async
     /// command) — không treo UI. Callback null (dòng CSV/in hàng loạt) → báo nhẹ, không làm gì.
     /// </summary>

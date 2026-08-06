@@ -37,7 +37,8 @@ internal readonly record struct LuotDocTraHang(SauDocTraHang Nhanh, int SoMoi);
 /// <summary>
 /// <b>FLOW của MỘT shop trên tab đang mở</b>: đọc đơn tab "Tất cả" → lấy "Số tiền cuối cùng" → callback lưu
 /// DB/GSheet/hub → (nếu có đơn Chờ Lấy Hàng) đặt địa chỉ lấy hàng + Chuẩn bị hàng từng đơn + in phiếu + revert địa
-/// chỉ → bước PHỤ cuối: check đơn trả hàng. Kèm hai thao tác lẻ trên cùng tab đó: đóng tab shop về picker
+/// chỉ → bước BÙ: tự tải lại phiếu THIẾU của shop (<see cref="TaiLaiPhieuThieuAsync"/>) → bước PHỤ cuối: check đơn
+/// trả hàng. Kèm hai thao tác lẻ trên cùng tab đó: đóng tab shop về picker
 /// (<see cref="DongTabShopAsync"/>) và tải lại phiếu một đơn (<see cref="RedownloadSlipAsync"/>).
 /// <para>
 /// Tách khỏi <see cref="OrdersBridgeSession"/> (đợt dọn 2026-07-30): phiên chỉ còn lo vòng đời (đăng nhập → SSO →
@@ -55,12 +56,16 @@ internal sealed class ShopFlowRunner
     private readonly Func<string, string, IReadOnlyList<SyncedOrder>, CancellationToken, Task>? _syncCallback;
     // App rót tập order_sn ĐÃ có "Số tiền cuối cùng" trong DB → bỏ qua, không mở lại chi tiết mỗi chu kỳ. null → không lọc.
     private readonly Func<IReadOnlySet<string>>? _finalDoneSns;
-    // Tab "Kết quả": gọi mỗi khi chuẩn bị xong 1 đơn (nhãn shop, MÃ ĐƠN) → App +1 prepare_daily + đánh dấu đơn đó.
+    // Tab "Shops": gọi mỗi khi chuẩn bị xong 1 đơn (nhãn shop, MÃ ĐƠN) → App +1 prepare_daily + đánh dấu đơn đó.
     private readonly Action<string, string>? _onOrderPrepared;
     // Bước CUỐI flow shop — check đơn trả hàng (callback do App rót vì Core không biết accountId). Null → bỏ hẳn bước.
     private readonly Func<string, int?>? _returnCountLast;
     private readonly Action<string, int>? _saveReturnCount;
     private readonly Func<IReadOnlyList<YeuCauTraHang>, string>? _saveReturnCodes;
+    // TỰ TẢI LẠI PHIẾU THIẾU: App trả danh sách order_sn của ĐÚNG shop đang mở đang có mã vận đơn NHƯNG thiếu file
+    // PDF hợp lệ, đã xếp MỚI NHẤT TRƯỚC (Core không biết accountId/thư mục phiếu của App). Null → bỏ HẲN bước —
+    // đó cũng là đường "Chạy thử" (RunSliceCoreAsync): nó chỉ đọc, không lưu, nên không được kéo theo bước này.
+    private readonly Func<string, CancellationToken, Task<IReadOnlyList<string>>>? _layDonThieuPhieu;
 
     // Tập rỗng dùng khi _finalDoneSns null (tránh cấp phát mỗi shop).
     private static readonly IReadOnlySet<string> EmptyFinalSet = new HashSet<string>();
@@ -75,6 +80,18 @@ internal sealed class ShopFlowRunner
     /// </summary>
     private const int TranDonMoiLuotShop = 50;
 
+    /// <summary>
+    /// CHỐT CHẶN số đơn TỰ TẢI LẠI PHIẾU trong MỘT lượt của MỘT shop. Mỗi lượt <c>redownloadSlip</c> là một vòng
+    /// điều hướng THẬT trên Seller Centre (về danh sách "Tất cả" → duyệt trang tìm card → bấm In phiếu giao → chờ
+    /// tab phiếu), tốn tới <see cref="OrdersBridgeChannel.ChoChang.Redownload"/> mỗi đơn — lần đầu bật tính năng có
+    /// thể tồn đọng hàng trăm đơn thiếu phiếu, tải hết trong một vòng là shop này ngốn cả buổi còn shop khác chưa
+    /// được sờ tới. Lấy <b>MỚI NHẤT TRƯỚC</b> (xem <see cref="ChiaTheoTranTaiLaiPhieu"/>), phần còn lại để vòng sau
+    /// và LOG rõ số bỏ lại — cấm im lặng cắt.
+    /// <para>Thấp hơn <see cref="TranDonMoiLuotShop"/> (50) vì đây là việc BÙ (đơn đáng lẽ đã có phiếu từ vòng
+    /// trước), không phải việc chính của lượt.</para>
+    /// </summary>
+    private const int TranTaiLaiPhieuMoiShop = 20;
+
     public ShopFlowRunner(
         OrdersBridgeChannel channel,
         Action<string>? log,
@@ -85,7 +102,8 @@ internal sealed class ShopFlowRunner
         Action<string, string>? onOrderPrepared,
         Func<string, int?>? returnCountLast,
         Action<string, int>? saveReturnCount,
-        Func<IReadOnlyList<YeuCauTraHang>, string>? saveReturnCodes)
+        Func<IReadOnlyList<YeuCauTraHang>, string>? saveReturnCodes,
+        Func<string, CancellationToken, Task<IReadOnlyList<string>>>? layDonThieuPhieu = null)
     {
         _ch = channel;
         _log = log;
@@ -97,6 +115,7 @@ internal sealed class ShopFlowRunner
         _returnCountLast = returnCountLast;
         _saveReturnCount = saveReturnCount;
         _saveReturnCodes = saveReturnCodes;
+        _layDonThieuPhieu = layDonThieuPhieu;
     }
 
     /// <summary>Nhãn shop KHÔNG đặt được địa chỉ lấy hàng (null = chưa dính). Cùng khuôn cờ với
@@ -240,7 +259,7 @@ internal sealed class ShopFlowRunner
                     break;
                 }
 
-                // Tab "Kết quả": mỗi prep = 1 đơn arrange xong → App +1 đếm theo (shop, ngày) VÀ đánh dấu ĐÚNG đơn
+                // Tab "Shops": mỗi prep = 1 đơn arrange xong → App +1 đếm theo (shop, ngày) VÀ đánh dấu ĐÚNG đơn
                 // (prep.OrderCode = order_sn — cùng khóa đang dùng cho capturedTracking/tên file phiếu) đã chuẩn bị
                 // hàng, để hub đếm chung. Đếm theo ĐƠN (không theo phiếu) nên đặt TRƯỚC TrySaveSlip: phiếu lưu lỗi
                 // vẫn tính đã chuẩn bị. Null-safe, không đổi luồng.
@@ -287,6 +306,21 @@ internal sealed class ShopFlowRunner
             catch (TimeoutException) { L("Set địa chỉ khác: quá hạn — bỏ qua."); }
         }
 
+        // ── Bước BÙ: TỰ TẢI LẠI PHIẾU THIẾU của shop này ────────────────────────────────────────────────
+        // Chạy SAU cả Phần B và SAU mọi lượt _syncCallback: danh sách "thiếu phiếu" do App tính trên DB, phải là DB
+        // VỪA cập nhật (mã vận đơn bắt lúc chuẩn bị hàng đã lưu ở trên) — chạy trước thì sót đúng những đơn vừa
+        // arrange. Cũng chạy khi toShip = 0: đơn thiếu phiếu là DI SẢN của vòng/máy trước, không liên quan đơn chờ
+        // lấy hàng của lượt này. Bọc kín như bước check trả hàng: hỏng ở đây KHÔNG được phá phần đã xong.
+        try
+        {
+            await TaiLaiPhieuThieuAsync(shopLogin, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            L("Tự tải lại phiếu thiếu lỗi: " + ex.ToString() + " — bỏ qua bước này, phần đã xong không bị ảnh hưởng.");
+        }
+
         // ── Mắt xích CUỐI CÙNG của flow shop (bước PHỤ): check ĐƠN TRẢ HÀNG ──────────────────────────────
         // Bọc kín: lỗi/timeout/captcha ở đây KHÔNG được phá phần chuẩn bị hàng + in phiếu đã xong ở trên, cũng
         // KHÔNG được dừng vòng shop. Chạy cả khi toShip = 0 (yêu cầu trả hàng không liên quan đơn chờ lấy hàng).
@@ -313,6 +347,136 @@ internal sealed class ShopFlowRunner
         }
 
         return (orders.Count, slips);
+    }
+
+    /// <summary>
+    /// HÀM THUẦN (test được, không cần trình duyệt) — chia danh sách đơn thiếu phiếu của MỘT shop (App đã lọc +
+    /// xếp <b>MỚI NHẤT TRƯỚC</b>) thành phần LÀM NGAY (tối đa <paramref name="tran"/> đơn đầu = mới nhất) và số đơn
+    /// ĐỂ LẠI vòng sau. Bỏ mã rỗng + trùng lặp (giữ lần xuất hiện đầu = bản mới nhất) trước khi cắt, kẻo trần bị
+    /// một mã lặp ăn mất suất.
+    /// <para><paramref name="tran"/> ≤ 0 → không tải đơn nào, cả danh sách tính là "còn lại" (không nuốt số).</para>
+    /// </summary>
+    internal static (IReadOnlyList<string> CanTai, int ConLai) ChiaTheoTranTaiLaiPhieu(
+        IReadOnlyList<string>? ds, int tran)
+    {
+        if (ds is null || ds.Count == 0)
+        {
+            return (Array.Empty<string>(), 0);
+        }
+
+        var sach = ds
+            .Where(sn => !string.IsNullOrWhiteSpace(sn))
+            .Select(sn => sn.Trim())
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        if (tran <= 0)
+        {
+            return (Array.Empty<string>(), sach.Count);
+        }
+
+        var canTai = sach.Take(tran).ToList();
+        return (canTai, sach.Count - canTai.Count);
+    }
+
+    /// <summary>
+    /// <b>Bước BÙ của flow shop — TỰ TẢI LẠI PHIẾU THIẾU.</b> Hỏi App danh sách <c>order_sn</c> của ĐÚNG shop đang
+    /// mở đang có mã vận đơn nhưng thiếu file PDF hợp lệ (đã xếp mới nhất trước), cắt theo
+    /// <see cref="TranTaiLaiPhieuMoiShop"/> rồi gọi <see cref="RedownloadSlipAsync"/> cho từng mã trên chính tab
+    /// shop này (extension quét danh sách trên tab đang mở nên chỉ ở đây mới tải được).
+    /// <list type="bullet">
+    /// <item>BỎ HẲN bước khi: chưa rót callback (đường "Chạy thử"), không có thư mục lưu phiếu, nhãn shop rỗng, đã
+    /// thấy captcha, hoặc <paramref name="ct"/> đã hủy.</item>
+    /// <item><b>KHÔNG thử lại trong CÙNG vòng:</b> mỗi mã đúng MỘT lượt. Đơn quá cũ đã rơi khỏi danh sách "Tất cả"
+    /// thì extension trả rỗng mãi mãi — thử lại chỉ đốt thời gian của shop khác.</item>
+    /// <item>Hết giờ chờ extension → DỪNG cả bước (extension không phản hồi thì các đơn sau cũng vậy, mỗi lượt
+    /// chờ tốn <see cref="OrdersBridgeChannel.ChoChang.Redownload"/>); lỗi lẻ khác → log rồi đi tiếp đơn kế.</item>
+    /// </list>
+    /// </summary>
+    internal async Task TaiLaiPhieuThieuAsync(string shopLogin, CancellationToken ct)
+    {
+        if (_layDonThieuPhieu is null || string.IsNullOrWhiteSpace(shopLogin))
+        {
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(_invoiceDir))
+        {
+            L("Tải lại phiếu thiếu: chưa cấu hình thư mục lưu phiếu — bỏ bước này.");
+            return;
+        }
+        if (_ch.CaptchaSeen)
+        {
+            L("Tải lại phiếu thiếu: đã dính captcha từ bước trước — bỏ bước này (để vòng sau).");
+            return;
+        }
+        ct.ThrowIfCancellationRequested();
+
+        IReadOnlyList<string>? ds;
+        try
+        {
+            ds = await _layDonThieuPhieu(shopLogin, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            L("Tải lại phiếu thiếu: không đọc được danh sách đơn thiếu phiếu: " + ex.ToString());
+            return;
+        }
+
+        var (canTai, conLai) = ChiaTheoTranTaiLaiPhieu(ds, TranTaiLaiPhieuMoiShop);
+        if (canTai.Count == 0)
+        {
+            // conLai > 0 chỉ xảy ra khi trần ≤ 0 (không có ở production) — vẫn log để không im lặng cắt.
+            if (conLai > 0)
+            {
+                L($"Tải lại phiếu thiếu shop {shopLogin}: 0/0 thành công (còn {conLai} đơn để vòng sau).");
+            }
+            return;
+        }
+
+        L($"Tải lại phiếu thiếu shop {shopLogin}: {canTai.Count} đơn trong lượt này (mới nhất trước)"
+          + (conLai > 0 ? $", để lại {conLai} đơn cho vòng sau (trần {TranTaiLaiPhieuMoiShop})." : "."));
+
+        var ok = 0;
+        var thu = 0;
+        foreach (var sn in canTai)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (_ch.CaptchaSeen)
+            {
+                L("Tải lại phiếu thiếu: gặp captcha — dừng bước này, các đơn còn lại để vòng sau.");
+                break;
+            }
+
+            thu++;
+            try
+            {
+                if (await RedownloadSlipAsync(sn, ct).ConfigureAwait(false))
+                {
+                    ok++;
+                }
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (TimeoutException)
+            {
+                L($"Tải lại phiếu thiếu: quá hạn chờ extension ở đơn {sn} — dừng bước này (các đơn sau cũng sẽ chờ vô ích).");
+                break;
+            }
+            catch (InvalidOperationException ex)
+            {
+                // Cầu nối chưa khởi động / extension rụng kết nối (fail-fast của SendAsync) — mọi đơn sau cũng thế.
+                L("Tải lại phiếu thiếu: cầu nối/extension không sẵn sàng (" + ex.Message + ") — dừng bước này.");
+                break;
+            }
+            catch (Exception ex)
+            {
+                L($"Tải lại phiếu đơn {sn} lỗi: " + ex.ToString() + " — đi tiếp đơn kế.");
+            }
+        }
+
+        // "còn k đơn" = số đơn CHƯA THỬ trong lượt này (phần vượt trần + phần bị cắt vì captcha/hết giờ). Đơn đã
+        // thử mà trượt thì m-n ở vế trước đã nói, và nó vẫn thiếu phiếu nên vòng sau tự gặp lại.
+        L($"Tải lại phiếu thiếu shop {shopLogin}: {ok}/{thu} thành công "
+          + $"(còn {canTai.Count - thu + conLai} đơn chưa thử — để vòng sau).");
     }
 
     /// <summary>

@@ -1,7 +1,7 @@
 namespace XuLyDonShopee.Core.Data;
 
 /// <summary>
-/// Một dòng cảnh báo lỗi địa chỉ lấy hàng (tab Kết quả) — <see cref="DismissedAt"/> null = đang hiện.
+/// Một dòng cảnh báo lỗi địa chỉ lấy hàng (tab Shops) — <see cref="DismissedAt"/> null = đang hiện.
 /// <para><see cref="HubRev"/> = số hiệu bản ghi Hub mà máy này đã nhận; <see cref="ChoDay"/> = thay đổi tại chỗ
 /// chưa đẩy được lên Hub (Hub không được đè dòng này).</para>
 /// </summary>
@@ -15,7 +15,7 @@ public sealed record PickupAddressAlert(
     bool ChoDay);
 
 /// <summary>
-/// Kho banner "Cảnh báo: Lỗi địa chỉ. Shop …" trên tab Kết quả — bảng <c>pickup_address_alerts</c>.
+/// Kho banner "Cảnh báo: Lỗi địa chỉ. Shop …" trên tab Shops — bảng <c>pickup_address_alerts</c>.
 /// Active = <c>dismissed_at IS NULL</c>.
 /// <para>
 /// TÁCH RÕ hai nguồn ghi, đừng gộp lại: <see cref="GhiPhatHienTaiCho"/> / <see cref="DismissTaiCho"/> là thay

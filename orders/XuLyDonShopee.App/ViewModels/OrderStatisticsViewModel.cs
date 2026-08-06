@@ -118,7 +118,7 @@ public partial class OrderStatisticsViewModel : ViewModelBase, IDisposable
     // ══════════ Nhịp tự sang ngày mới (app chạy 24/7) ══════════
     /// <summary>Nhịp dò "đã sang ngày mới chưa" — 60s: đủ nhạy để chip khoảng ngày trượt sang ngày mới gần như
     /// tức thì mà gần như không tốn gì (chỉ so hai <see cref="DateTime"/>, không đụng DB/hub khi ngày chưa đổi).
-    /// Cùng con số với nhịp của tab "Kết quả" bên màn Tài khoản.</summary>
+    /// Cùng con số với nhịp của tab "Shops" bên màn Tài khoản.</summary>
     private static readonly TimeSpan NhipDoSangNgay = TimeSpan.FromSeconds(60);
 
     /// <summary>Đồng hồ dò sang ngày (chạy trên thread nền → callback marshal về UI thread). Dựng ở ctor, dọn ở

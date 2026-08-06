@@ -91,7 +91,7 @@ public class OrdersViewModelTests
         Assert.All(vm.Rows, r => Assert.Equal("shopB.store", r.ShopLabel));
     }
 
-    // Nút "Tải phiếu" nằm TRÊN DÒNG (OrderRowViewModel.RedownloadSlipCommand → callback OrdersViewModel nối vào),
+    // Nút "Tải lại" nằm TRÊN DÒNG (OrderRowViewModel.RedownloadSlipCommand → callback OrdersViewModel nối vào),
     // KHÔNG phải command của màn. Tài khoản chưa mở phiên → màn hướng dẫn mở phiên, KHÔNG ném.
     // (Nhánh "đang chờ đến lượt" cần bơm AccountSessionManager stub, mà AppServices.Sessions là chỉ-đọc → không kiểm
     // được nếu không sửa code sản phẩm; xem báo cáo.)
@@ -107,7 +107,7 @@ public class OrdersViewModelTests
 
         await vm.Rows[0].RedownloadSlipCommand.ExecuteAsync(null);
 
-        Assert.Equal("Mở phiên tài khoản này trước (màn Tài khoản) rồi bấm Tải phiếu.", vm.StatusMessage);
+        Assert.Equal("Mở phiên tài khoản này trước (màn Tài khoản) rồi bấm Tải lại.", vm.StatusMessage);
     }
 
     [Fact]
@@ -266,19 +266,48 @@ public class OrdersViewModelTests
         Assert.Contains(orderSn, msg!);
     }
 
-    // ===== C: CanPrintSlip — ẩn nút "In phiếu" khi trạng thái CHỨA "hủy" (chuẩn hóa hoa/thường + khoảng trắng) =====
+    // ===== C: ô "Phiếu" chỉ còn MỘT hành động (2026-08-06) =====
+    // Ma trận (có/không mã vận đơn) × (có/không file phiếu) × (hủy/không hủy). Trước đây "In phiếu" hiện cả khi
+    // THIẾU file (bấm vào chỉ ra câu "chưa có file phiếu") và đứng chung dòng với "Tải phiếu" → ô loằng ngoằng.
     [Theory]
-    [InlineData("Đã hủy", false)]
-    [InlineData("Đã hủy một phần", false)]
-    [InlineData("ĐÃ HỦY", false)]                 // hoa/thường không ảnh hưởng
-    [InlineData("Chờ lấy hàng", true)]
-    [InlineData("Hoàn thành", true)]
-    [InlineData("Đang giao", true)]
-    [InlineData("", true)]                         // rỗng → không phải hủy → vẫn hiện (không ẩn nhầm)
-    public void CanPrintSlip_AnKhiTrangThaiChuaHuy(string status, bool expected)
+    // chưa chuẩn bị hàng (không vận đơn) + chưa có file → KHÔNG nút nào
+    [InlineData(false, false, "Chờ lấy hàng", false, false)]
+    [InlineData(false, false, "Đã hủy", false, false)]
+    // không vận đơn nhưng ĐÃ có file trên đĩa → in được (file là thật), không mời tải lại
+    [InlineData(false, true, "Hoàn thành", true, false)]
+    [InlineData(false, true, "Đã hủy", false, false)]
+    // có vận đơn mà THIẾU file → chỉ "Tải lại"
+    [InlineData(true, false, "Chờ lấy hàng", false, true)]
+    // …TRỪ đơn ĐÃ HỦY: Seller Centre không còn nút "In phiếu giao" cho đơn hủy nên bấm "Tải lại" chắc chắn
+    // trượt → ô "Phiếu" để TRỐNG (cùng luật với việc vòng check shop bỏ đơn hủy khỏi danh sách tự tải lại).
+    [InlineData(true, false, "ĐÃ HỦY", false, false)]
+    // có vận đơn + có file → chỉ "In phiếu" (đơn hủy thì không nút nào)
+    [InlineData(true, true, "Chờ lấy hàng", true, false)]
+    [InlineData(true, true, "Đã hủy một phần", false, false)]
+    public void OPhieu_ChiHienMotNut(bool coVanDon, bool coFile, string status, bool hienInPhieu, bool hienTaiLai)
     {
-        var row = new OrderRowViewModel(new OrderRow { OrderSn = "SN", Status = status }, "lbl", "dir");
-        Assert.Equal(expected, row.CanPrintSlip);
+        var dir = Path.Combine(Path.GetTempPath(), "xlds_phieu_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            if (coFile)
+            {
+                File.WriteAllBytes(Path.Combine(dir, "SN.pdf"),
+                    System.Text.Encoding.ASCII.GetBytes("%PDF-1.4\nphiếu giả lập"));
+            }
+
+            var row = new OrderRowViewModel(
+                new OrderRow { OrderSn = "SN", Status = status, TrackingNumber = coVanDon ? "SPX1" : null },
+                "lbl", dir);
+
+            Assert.Equal(hienInPhieu, row.CanPrintSlip);
+            Assert.Equal(hienTaiLai, row.ShowRedownloadSlip);
+            Assert.False(row.CanPrintSlip && row.ShowRedownloadSlip); // hai nút LOẠI TRỪ nhau, không bao giờ cùng hiện
+        }
+        finally
+        {
+            try { Directory.Delete(dir, true); } catch { /* thư mục tạm */ }
+        }
     }
 
     // ===== B: IsPendingPickup — nhận diện đơn "Chờ lấy hàng" để in hàng loạt (chuẩn hóa CHỨA) =====
