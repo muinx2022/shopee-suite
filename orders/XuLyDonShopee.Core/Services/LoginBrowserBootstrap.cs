@@ -100,7 +100,8 @@ internal static class LoginBrowserBootstrap
     /// <c>--lang=vi-VN</c> trong <see cref="BraveLaunchArgs"/>.</para>
     /// </summary>
     internal static async Task<(Process Process, IBrowser Browser, IBrowserContext Context)> LaunchAndConnectAsync(
-        IPlaywright playwright, string userDataDir, BrowserChoice browserChoice, CancellationToken ct)
+        IPlaywright playwright, string userDataDir, BrowserChoice browserChoice, CancellationToken ct,
+        Action<string>? log = null)
     {
         // Phân giải trình duyệt thật theo lựa chọn của người dùng; không có → Chromium đóng gói (cùng cơ chế CDP).
         var exePath = BrowserLocator.ResolveExecutable(browserChoice);
@@ -115,6 +116,62 @@ internal static class LoginBrowserBootstrap
             }
         }
 
+        return await PhongVoiDonHoSoAsync(
+            // DỌN HỒ SƠ TRƯỚC MỖI LẦN PHÓNG. Bỏ bước này là để cả vòng chết ngay ở bước đăng nhập khi còn sót cửa
+            // sổ của hồ sơ (Chromium chuyển dòng lệnh cho tiến trình cũ rồi tiến trình mới thoát ngay ⇒ không ai
+            // ghi DevToolsActivePort). Nguồn sót đã gặp thật: user bấm Dừng rồi Chạy lại ngay, trình duyệt sạch của
+            // vòng trước fork sang PID khác nên handle ta giữ đã HasExited (kill trượt), app crash lần chạy trước.
+            // KHÔNG match 'shopee-orders': ở đây chỉ cần hồ sơ CỦA MÌNH rảnh, đừng cướp cửa sổ của phiên khác.
+            donHoSo: _ => BrowserProfileGuard.FreeProfile(userDataDir, alsoMatchBridgeExtension: false, log),
+            phongLan: lan => LaunchOnceAsync(playwright, exePath, userDataDir, lan, ct),
+            choTruocKhiThuLai: lan =>
+            {
+                log?.Invoke($"Mở trình duyệt đăng nhập hỏng ở lần {lan} (hồ sơ đang bị giữ) — dọn lại rồi thử lần kế.");
+                return Task.Delay(ChoTruocKhiThuLaiMs, ct);
+            },
+            soLanToiDa: SoLanThuMoTrinhDuyet,
+            ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Số lần thử mở trình duyệt đăng nhập trong một vòng (lần đầu + đúng 1 lần thử lại).</summary>
+    internal const int SoLanThuMoTrinhDuyet = 2;
+
+    /// <summary>Chờ giữa hai lần thử — cho kill của lần dọn trước kịp ngấm rồi mới phóng lại.</summary>
+    private const int ChoTruocKhiThuLaiMs = 1500;
+
+    /// <summary>
+    /// Vòng "dọn hồ sơ → phóng", thử tối đa <paramref name="soLanToiDa"/> lần. CHỈ thử lại đúng ca trình duyệt
+    /// <b>thoát sớm</b> (<see cref="BrowserExitedEarlyException"/> = hồ sơ đang bị cửa sổ khác giữ); mọi lỗi khác
+    /// và hủy đều ném thẳng lên (đừng biến lỗi thật thành thử-lại-vô-ích, đừng nuốt lệnh Dừng của user).
+    /// Tách riêng + nhận delegate để test được luồng điều khiển này mà không cần trình duyệt thật.
+    /// </summary>
+    internal static async Task<T> PhongVoiDonHoSoAsync<T>(
+        Action<int> donHoSo, Func<int, Task<T>> phongLan, Func<int, Task> choTruocKhiThuLai,
+        int soLanToiDa, CancellationToken ct)
+    {
+        for (var lan = 1; ; lan++)
+        {
+            ct.ThrowIfCancellationRequested();
+            donHoSo(lan);
+
+            try
+            {
+                return await phongLan(lan).ConfigureAwait(false);
+            }
+            catch (BrowserExitedEarlyException) when (lan < soLanToiDa)
+            {
+                await choTruocKhiThuLai(lan).ConfigureAwait(false);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Một lần phóng: xóa <c>DevToolsActivePort</c> cũ → phóng trình duyệt → chờ cổng CDP → chờ endpoint → nối CDP.
+    /// Hỏng sau khi đã phóng thì tự dọn tiến trình trước khi ném (bên gọi chưa cầm được handle nào).
+    /// </summary>
+    private static async Task<(Process Process, IBrowser Browser, IBrowserContext Context)> LaunchOnceAsync(
+        IPlaywright playwright, string exePath, string userDataDir, int lan, CancellationToken ct)
+    {
         // Đọc cổng CDP thật từ DevToolsActivePort → xóa file cũ để tránh đọc nhầm cổng phiên trước.
         var portFile = Path.Combine(userDataDir, "DevToolsActivePort");
         try { if (File.Exists(portFile)) File.Delete(portFile); } catch { /* bỏ qua */ }
@@ -130,7 +187,8 @@ internal static class LoginBrowserBootstrap
         try
         {
             // Chờ Brave mở cổng CDP (đọc cổng thật) rồi chờ endpoint /json/version sẵn sàng.
-            var port = await WaitForDevToolsPortAsync(portFile, process, TimeSpan.FromSeconds(15), ct).ConfigureAwait(false);
+            var port = await WaitForDevToolsPortAsync(portFile, process, exePath, userDataDir, lan,
+                TimeSpan.FromSeconds(15), ct).ConfigureAwait(false);
             await WaitForCdpEndpointAsync(port, TimeSpan.FromSeconds(15), ct).ConfigureAwait(false);
 
             // Nối vào Brave đang chạy qua CDP.
@@ -163,12 +221,23 @@ internal static class LoginBrowserBootstrap
     }
 
     /// <summary>
+    /// Trình duyệt thoát ngay khi vừa phóng — hầu như luôn là <i>process singleton handoff</i>: hồ sơ đang được một
+    /// cửa sổ khác giữ nên Chromium chuyển dòng lệnh cho tiến trình cũ rồi tự thoát. Có kiểu riêng để tầng trên
+    /// phân biệt được ca này mà thử lại (các lỗi khác thì không).
+    /// </summary>
+    internal sealed class BrowserExitedEarlyException : InvalidOperationException
+    {
+        internal BrowserExitedEarlyException(string message) : base(message) { }
+    }
+
+    /// <summary>
     /// Chờ Brave khởi động xong và ghi cổng CDP vào file <c>DevToolsActivePort</c> (dòng đầu = cổng).
-    /// Poll có timeout; nếu tiến trình thoát sớm (thường do hồ sơ đang bị một cửa sổ Brave khác khóa)
-    /// thì ném lỗi tiếng Việt.
+    /// Poll có timeout; nếu tiến trình thoát sớm (thường do hồ sơ đang bị một cửa sổ trình duyệt khác giữ)
+    /// thì ném <see cref="BrowserExitedEarlyException"/> (tầng trên thử lại 1 lần sau khi dọn hồ sơ).
     /// </summary>
     private static async Task<int> WaitForDevToolsPortAsync(
-        string portFile, Process process, TimeSpan timeout, CancellationToken ct)
+        string portFile, Process process, string exePath, string userDataDir, int lan,
+        TimeSpan timeout, CancellationToken ct)
     {
         var deadline = DateTime.UtcNow + timeout;
         while (DateTime.UtcNow < deadline)
@@ -177,9 +246,7 @@ internal static class LoginBrowserBootstrap
 
             if (process.HasExited)
             {
-                throw new InvalidOperationException(
-                    "Trình duyệt thoát ngay khi khởi động (thường do hồ sơ đang bị một cửa sổ Brave khác khóa). " +
-                    "Hãy đóng hết cửa sổ Brave rồi thử lại.");
+                throw new BrowserExitedEarlyException(MoTaThoatSom(process, exePath, userDataDir, lan));
             }
 
             try
@@ -203,6 +270,31 @@ internal static class LoginBrowserBootstrap
 
         throw new InvalidOperationException(
             "Quá thời gian chờ trình duyệt mở cổng gỡ lỗi (DevToolsActivePort).");
+    }
+
+    /// <summary>
+    /// Dựng thông báo cho ca trình duyệt thoát ngay khi phóng: tên file thực thi + <b>mã thoát</b> + hồ sơ đang
+    /// dùng + <b>lần thử thứ mấy</b>. Đủ để đọc log là biết trình duyệt nào, có phải handoff không (handoff
+    /// thường trả mã 0) và bước dọn+thử-lại đã chạy hay chưa.
+    /// Hàm thuần theo phần chuỗi — <paramref name="exitCode"/> do bên gọi đọc từ tiến trình.
+    /// </summary>
+    internal static string MoTaThoatSom(string exePath, string userDataDir, int? exitCode, int lan)
+    {
+        var ten = string.IsNullOrEmpty(exePath) ? "Trình duyệt" : Path.GetFileName(exePath);
+        var ma = exitCode.HasValue ? exitCode.Value.ToString() : "?";
+        return $"Trình duyệt thoát ngay khi khởi động ({ten}, mã thoát {ma}, lần thử {lan}/{SoLanThuMoTrinhDuyet}) — "
+             + "hồ sơ đang bị một cửa sổ trình duyệt khác giữ nên lệnh bị chuyển sang cửa sổ đó. "
+             + $"Hồ sơ: {userDataDir}. "
+             + "Đã tự đóng các cửa sổ của hồ sơ này trước mỗi lần thử; vẫn lỗi thì đóng tay mọi cửa sổ "
+             + "Brave/Chrome/Edge của app rồi chạy lại.";
+    }
+
+    /// <summary>Đọc mã thoát (nuốt lỗi nếu tiến trình chưa thoát/không đọc được) rồi gọi <see cref="MoTaThoatSom(string, string, int?, int)"/>.</summary>
+    private static string MoTaThoatSom(Process process, string exePath, string userDataDir, int lan)
+    {
+        int? exitCode = null;
+        try { exitCode = process.ExitCode; } catch { /* chưa thoát hẳn / không đọc được */ }
+        return MoTaThoatSom(exePath, userDataDir, exitCode, lan);
     }
 
     /// <summary>

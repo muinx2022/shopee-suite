@@ -481,8 +481,11 @@ public partial class AccountSession : ObservableObject, IAccountSession
                 }
                 finally
                 {
-                    // Đóng cửa sổ sạch của vòng này + giải phóng cổng cầu nối (vòng sau mở phiên mới).
-                    try { var p = bridge.Process; if (p is { HasExited: false }) p.Kill(entireProcessTree: true); } catch { /* bỏ qua */ }
+                    // Đóng cửa sổ sạch của vòng này + giải phóng cổng cầu nối (vòng sau mở phiên mới). Đóng bằng
+                    // DongTrinhDuyetSach (kill handle RỒI quét theo hồ sơ): kill-theo-handle một mình trượt khi
+                    // trình duyệt fork browser thật sang PID khác ⇒ để lại cửa sổ mồ côi giữ hồ sơ ⇒ vòng SAU chết
+                    // ngay ở bước đăng nhập Playwright.
+                    try { bridge.DongTrinhDuyetSach(); } catch { /* bỏ qua */ }
                     try { bridge.Dispose(); } catch { /* bỏ qua */ }
                     _bridge = null;
                 }

@@ -168,7 +168,8 @@ public class ShopeeLoginService
     /// (message tiếng Việt) nếu không mở được.
     /// </summary>
     public async Task<ILoginSession> OpenAsync(
-        string userDataDir, BrowserChoice browserChoice = BrowserChoice.Auto, CancellationToken ct = default)
+        string userDataDir, BrowserChoice browserChoice = BrowserChoice.Auto, CancellationToken ct = default,
+        Action<string>? log = null)
     {
         IPlaywright? playwright = null;
         Process? process = null;
@@ -180,7 +181,7 @@ public class ShopeeLoginService
 
             IBrowserContext context;
             (process, browser, context) = await LoginBrowserBootstrap
-                .LaunchAndConnectAsync(playwright, userDataDir, browserChoice, ct).ConfigureAwait(false);
+                .LaunchAndConnectAsync(playwright, userDataDir, browserChoice, ct, log).ConfigureAwait(false);
 
             var page = context.Pages.Count > 0
                 ? context.Pages[0]

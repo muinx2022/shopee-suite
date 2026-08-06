@@ -1,7 +1,7 @@
 # Plan: Sửa lỗi "Trình duyệt thoát ngay khi khởi động" ở bước đăng nhập Playwright (module Đơn hàng)
 
 - **Ngày:** 2026-08-06
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành
 - **Người lập:** phiên chính (Opus 5) · **Người thực thi:** phiên chính, `nghiem-thu` phản biện
 
 ## 1. Bối cảnh & mục tiêu
@@ -123,7 +123,8 @@ có **thử lại 1 lần** nếu vẫn thoát sớm, và thông báo lỗi nói
   nguyên logic cũ, không nới rộng.
 - **Đa tài khoản trên cùng máy:** cầu nối hiện là 1 tài khoản/lúc (cổng 47821 cố định), nhưng vẫn chọn
   `alsoMatchBridgeExtension: false` ở đường login + cuối vòng để không cướp cửa sổ của phiên khác.
-- **Chi phí:** mỗi vòng thêm 1 lần chạy PowerShell (~0,5–3,2s). Không đáng kể so với vòng vài chục phút.
+- **Chi phí:** mỗi vòng thêm 2 lần chạy PowerShell (bước đăng nhập + dọn cuối vòng; cộng với 1 lần vốn có của
+  đường cầu nối là 3 lần/vòng), mỗi lần ~0,5–3,2s. Không đáng kể so với vòng vài chục phút.
 - **Không nuốt lỗi thật:** chỉ thử lại đúng ca "thoát sớm"; hủy (Dừng) phải thoát ngay, không thử lại.
 - Sau khi xong: hỏi user có phát hành client (`version.txt` + Velopack) hay không — plan này không tự release.
 
@@ -131,4 +132,69 @@ có **thử lại 1 lần** nếu vẫn thoát sớm, và thông báo lỗi nói
 
 ## Báo cáo thực thi
 
-<điền sau khi xong>
+Phiên chính tự thực thi (2026-08-06). Đã làm đúng 6 bước của plan, không đổi hướng:
+
+- **Mới** `orders/XuLyDonShopee.Core/Services/BrowserProfileGuard.cs`: `FreeProfile(userDataDir, alsoMatchBridgeExtension)`
+  + `BuildProcessFilter` (thuần) + `ClearProfileSessionAndLocks` (chuyển nguyên văn từ `OrdersBridgeLauncher`).
+- `OrdersBridgeLauncher`: hai hàm private đã chuyển đi, gọi `FreeProfile(..., alsoMatchBridgeExtension: true)` →
+  mệnh đề lọc sinh ra **giống hệt** bản cũ (có test khoá nguyên văn chuỗi).
+- `LoginBrowserBootstrap`: tách `LaunchOnceAsync`; vòng thử tối đa 2 lần, mỗi lần `FreeProfile(..., false)` trước khi
+  phóng, chỉ thử lại khi `BrowserExitedEarlyException` (kiểu riêng, `when (lan == 1)`); thông báo lỗi mới có tên
+  trình duyệt + mã thoát + đường dẫn hồ sơ (`MoTaThoatSom`).
+- `OrdersBridgeSession.DongTrinhDuyetSach()`: kill handle **rồi** quét theo hồ sơ; `AccountSession` (finally cuối
+  vòng) gọi hàm này thay cho kill-theo-handle.
+- **Mới** `orders/XuLyDonShopee.Tests/BrowserProfileGuardTests.cs` (8 test).
+
+Kiểm chứng thật (phiên chính tự chạy):
+
+- `dotnet build orders/XuLyDonShopee.App/XuLyDonShopee.App.csproj` → **0 Warning, 0 Error**.
+- `dotnet test orders/XuLyDonShopee.Tests/XuLyDonShopee.Tests.csproj` → **1558/1558 xanh**.
+- **Thử phá luật** (4 đột biến cùng lúc: bỏ escape `'`, luôn bật nhánh `shopee-orders`, xóa thêm `Cookies`, bỏ
+  tên+mã thoát khỏi thông báo) → đúng **5 test mới đỏ**
+  (`…KhongBatExtension…`, `…DuongDanCoNhayDon_DuocEscape`, `…GiuCookies`, 2 test `MoTaThoatSom`), 3 test còn lại
+  xanh như mong đợi. Khôi phục → 1558/1558 xanh trở lại.
+### Vòng 2 — sau phản biện của `nghiem-thu`
+
+`nghiem-thu` chấm ĐẠT CÓ ĐIỀU KIỆN và nêu 2 điểm nặng cùng vài điểm nhỏ; đã sửa hết những điểm đúng:
+
+1. **Test không canh chính bản vá** (agent chứng minh: gỡ hẳn dòng `FreeProfile` khỏi `LaunchAndConnectAsync`
+   mà 1558 test vẫn xanh — 4 đột biến vòng 1 đều rơi vào hàm phụ trợ). → Tách luồng điều khiển thành
+   `LoginBrowserBootstrap.PhongVoiDonHoSoAsync` (nhận delegate) + bộ test mới
+   `orders/XuLyDonShopee.Tests/PhongVoiDonHoSoTests.cs` (7 test): dọn trước MỖI lần phóng, thử lại đúng 1 lần,
+   chỉ thử lại ca thoát sớm, lỗi khác ném ngay, hủy thì chưa kịp dọn/không thử tiếp.
+2. **`FreeProfile` nuốt lỗi không dấu vết** (trái `orders/CLAUDE.md`; PowerShell bị chặn / WMI hỏng / hết giờ →
+   vòng vẫn chết mà log trắng). → Thêm tham số `log`, rót từ `_log` của phiên qua `ShopeeLoginService.OpenAsync`,
+   `OrdersBridgeLauncher.Launch`, `DongTrinhDuyetSach`. Script dọn in `killed=<n>;conlai=<m>`: im lặng khi hồ sơ
+   vốn rảnh, báo khi có đóng cửa sổ, **kêu ⚠ khi còn sót / không đọc được kết quả / PS treo**. Hết giờ thì kill
+   luôn PowerShell (trước đây rò tiến trình).
+3. **Lượt thử lại không có log** → đã log "Mở trình duyệt đăng nhập hỏng ở lần N…".
+4. **Escape thiếu ký tự đại diện `-like`** → `EscapeLikePattern`: `` ` `` → ` `` ` rồi `[` → `` `[ `` rồi `'` → `''`
+   (đúng thứ tự, có test cả ca tên chứa dấu huyền ngang).
+5. **Thông báo thiếu "thử lần mấy"** (plan §3 bước 3) → đã thêm `lần thử N/2`.
+6. **Xmldoc sai về Windows** (xóa `Singleton*` không phải thứ chống handoff ở Windows — đó là cửa sổ ẩn + mutex
+   theo hồ sơ; thứ thật sự chống handoff là bước KILL) → đã viết lại cảnh báo.
+7. Plan §5 ghi sai "+1 lần PowerShell/vòng" → sửa thành 3 lần/vòng.
+
+Không nhận điểm #9 (LF/CRLF) — vô hại, git tự xử theo `core.autocrlf`.
+
+### Kiểm chứng vòng 2
+
+- `dotnet build …App.csproj` → **0 Warning, 0 Error**; `dotnet test` → **1578/1578 xanh**.
+- **Đột biến luồng điều khiển** (`when (lan < soLanToiDa)` → `when (false)` + bỏ `ct.ThrowIfCancellationRequested()`)
+  → **4/7 test mới đỏ** đúng chỗ (`ThoatSomLanDau…`, `ThoatSomCaHaiLan…`, `DaHuy…`, `HuyTrongLucCho…`). Khôi phục → xanh.
+- **Test tích hợp chạy PowerShell THẬT** (`FreeProfile_ChayTHATTrenWindows_HoSoKhongAiGiu_ThiImLang`, đường dẫn có
+  khoảng trắng + nháy đơn + `[ ]`) → xanh ⇒ chuỗi lệnh mới không hỏng cú pháp.
+- **✅ ĐÃ KIỂM TAY KỊCH BẢN HANDOFF THẬT** (tiêu chí §4 mục 5 — vòng 1 còn nợ). Test tạm `_TempHandoffVerify`
+  (đã xóa sau khi chạy) trên máy dev, dùng Chrome thật + hồ sơ tạm:
+  - mở 1 cửa sổ giữ hồ sơ → phóng bản CDP vào đúng hồ sơ đó ⇒ `lan1 thoat som = True, exitCode = 0,
+    co portFile = False` — **tái hiện chính xác lỗi production** (thoát ngay, mã 0, không có `DevToolsActivePort`);
+  - gọi `BrowserProfileGuard.FreeProfile` ⇒ log `đã đóng 13 cửa sổ còn giữ hồ sơ trước khi mở phiên mới`, không có ⚠;
+  - phóng lại ⇒ `lan2 co portFile = True` — **mở được cổng CDP**.
+  Dọn sạch sau test: không còn tiến trình `handoff-*` nào, thư mục tạm đã xóa.
+
+### Còn nợ / hạn chế (khai rõ)
+
+- Không có test nào bắt được ca "xóa hẳn lời gọi `PhongVoiDonHoSoAsync` khỏi `LaunchAndConnectAsync`" — muốn bắt
+  phải trừu tượng hóa cả `BrowserProcessStarter` lẫn Playwright, không đáng cho một dây nối 1 dòng.
+- `FreeProfile` là **Windows-only** (`OperatingSystem.IsWindows()`); nhánh `avalonia` cho Ubuntu vẫn mang lỗi cũ.
+- Chưa chạy thử trên máy production của user (mới chỉ máy dev).

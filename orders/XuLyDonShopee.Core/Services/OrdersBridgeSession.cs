@@ -140,7 +140,7 @@ public sealed class OrdersBridgeSession : IDisposable
 
         // Vẫn nhúng hash (extension đọc nếu còn) nhưng KHÔNG phụ thuộc: mất hash → extension dùng cổng cố định.
         var startUrl = $"{baseUrl}#_od_ws={OrdersBridgeChannel.BridgePort}";
-        Process = OrdersBridgeLauncher.Launch(_userDataDir, _browserChoice, startUrl);
+        Process = OrdersBridgeLauncher.Launch(_userDataDir, _browserChoice, startUrl, _log);
     }
 
     // ── GĐ2 (pivot): đăng nhập bằng Playwright (an toàn — subaccount + /portal/shop KHÔNG bị captcha) → đóng
@@ -199,7 +199,7 @@ public sealed class OrdersBridgeSession : IDisposable
         {
             L("Đăng nhập Nền tảng tài khoản phụ bằng trình duyệt điều khiển (Playwright)...");
             var svc = new ShopeeLoginService();
-            session = await svc.OpenAsync(_userDataDir, _browserChoice, ct).ConfigureAwait(false);
+            session = await svc.OpenAsync(_userDataDir, _browserChoice, ct, _log).ConfigureAwait(false);
             entered = await session.TryLoginSubaccountAsync(
                 login.User, login.Pass, login.VerifyEmail, login.VerifyEmailPassword, _log, ct).ConfigureAwait(false);
         }
@@ -471,6 +471,32 @@ public sealed class OrdersBridgeSession : IDisposable
 
     private OrdersBridgeSliceResult Fail(string message) =>
         new(Array.Empty<ShopListItem>(), null, null, _channel.CaptchaSeen, message);
+
+    /// <summary>
+    /// Đóng trình duyệt sạch của phiên này: kill <see cref="Process"/> (nếu còn) RỒI quét theo hồ sơ để chắc không
+    /// sót tiến trình nào.
+    /// <para><b>Vì sao không chỉ kill handle:</b> Brave/Chrome có thể fork tiến trình browser THẬT sang PID khác rồi
+    /// stub thoát — lúc đó <c>Process.HasExited</c> đã true nên kill trượt, browser thật sống mồ côi giữ hồ sơ, và
+    /// vòng SAU chết ngay ở bước đăng nhập ("Trình duyệt thoát ngay khi khởi động"). Quét theo <c>--user-data-dir</c>
+    /// bắt được cả bản fork.</para>
+    /// KHÔNG match 'shopee-orders' — chỉ đụng hồ sơ của chính phiên này, không cướp cửa sổ của phiên khác.
+    /// Best-effort: nuốt mọi lỗi.
+    /// </summary>
+    public void DongTrinhDuyetSach()
+    {
+        try
+        {
+            var p = Process;
+            if (p is { HasExited: false })
+            {
+                p.Kill(entireProcessTree: true);
+            }
+        }
+        catch { /* bỏ qua */ }
+
+        try { BrowserProfileGuard.FreeProfile(_userDataDir, alsoMatchBridgeExtension: false, _log); }
+        catch { /* bỏ qua */ }
+    }
 
     public void Dispose() => _channel.Dispose();
 }

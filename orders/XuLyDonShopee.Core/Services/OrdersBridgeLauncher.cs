@@ -14,7 +14,8 @@ internal static class OrdersBridgeLauncher
     /// mục mới → kill mọi trình duyệt của hồ sơ (POLL tới khi chết hẳn) → xóa session-restore + khóa Singleton →
     /// mở. Đảo thứ tự là dính "single-instance handoff" vào tiến trình Playwright còn CDP ⇒ Chi tiết ăn captcha.
     /// </summary>
-    public static System.Diagnostics.Process? Launch(string userDataDir, BrowserChoice browserChoice, string startUrl)
+    public static System.Diagnostics.Process? Launch(string userDataDir, BrowserChoice browserChoice, string startUrl,
+        Action<string>? log = null)
     {
         var srcExt = BraveLaunchArgs.ResolveOrdersBridgeExtension()
             ?? throw new InvalidOperationException(
@@ -27,13 +28,10 @@ internal static class OrdersBridgeLauncher
         // mới tinh, luôn đúng code. Tên thư mục vẫn chứa 'shopee-orders' để KillBrowsersOnProfile nhận diện.
         var extPath = PrepareFreshExtensionCopy(srcExt);
 
-        // Kill MỌI trình duyệt của cầu nối (theo hồ sơ HOẶC đang nạp 'shopee-orders') + POLL tới khi chết hẳn TRƯỚC
-        // khi mở bản sạch: chống "single-instance handoff" vào tiến trình Playwright login còn CDP (→ Chi tiết captcha)
-        // + orphan cùng nối cổng cố định 47821 cướp lệnh.
-        KillBrowsersOnProfile(userDataDir);
-
-        // Sau khi mọi trình duyệt đã chết: xóa session-restore (đóng tab cũ) + khóa Singleton (chống handoff). Giữ Cookies.
-        ClearProfileSessionAndLocks(userDataDir);
+        // Kill MỌI trình duyệt của cầu nối (theo hồ sơ HOẶC đang nạp 'shopee-orders') + POLL tới khi chết hẳn, rồi
+        // xóa session-restore + khóa Singleton TRƯỚC khi mở bản sạch: chống "single-instance handoff" vào tiến trình
+        // Playwright login còn CDP (→ Chi tiết captcha) + orphan cùng nối cổng cố định 47821 cướp lệnh.
+        BrowserProfileGuard.FreeProfile(userDataDir, alsoMatchBridgeExtension: true, log);
 
         return PocCleanLauncher.Open(userDataDir, browserChoice, startUrl, extPath);
     }
@@ -79,64 +77,4 @@ internal static class OrdersBridgeLauncher
         }
     }
 
-    /// <summary>Kill mọi tiến trình trình duyệt (brave/chrome/msedge) có <paramref name="userDataDir"/> HOẶC đang nạp
-    /// 'shopee-orders' trong dòng lệnh, VÀ POLL tới khi hết (tối đa ~5s). Vì sao POLL: trình duyệt Playwright login có
-    /// <c>--remote-debugging-port</c> — nếu còn sống lúc mở bản sạch, Brave single-instance sẽ NHỒI bản sạch vào tiến
-    /// trình còn CDP đó ⇒ Chi tiết DÍNH CAPTCHA. Phải chắc chết hẳn mới mở. Windows-only (CIM), best-effort.</summary>
-    private static void KillBrowsersOnProfile(string userDataDir)
-    {
-        if (!OperatingSystem.IsWindows() || string.IsNullOrWhiteSpace(userDataDir))
-        {
-            return;
-        }
-        try
-        {
-            var safe = userDataDir.Replace("'", "''");
-            var filter =
-                "$_.Name -in 'brave.exe','chrome.exe','msedge.exe' -and " +
-                "($_.CommandLine -like '*" + safe + "*' -or $_.CommandLine -like '*shopee-orders*')";
-            // Vòng: liệt kê → nếu hết thì thoát; còn thì kill + chờ 400ms. Chạy tới 8 lần (~3.2s) để chắc chết hẳn.
-            var cmd =
-                "for ($i=0; $i -lt 8; $i++) { " +
-                "$ps = Get-CimInstance Win32_Process | Where-Object { " + filter + " }; " +
-                "if (-not $ps) { break }; " +
-                "$ps | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }; " +
-                "Start-Sleep -Milliseconds 400 }";
-            var psi = new System.Diagnostics.ProcessStartInfo("powershell",
-                "-NoProfile -NonInteractive -Command \"" + cmd + "\"")
-            {
-                UseShellExecute = false,
-                CreateNoWindow = true,
-            };
-            using var p = System.Diagnostics.Process.Start(psi);
-            p?.WaitForExit(10000);
-        }
-        catch { /* best-effort — không chặn launch nếu dọn lỗi */ }
-    }
-
-    /// <summary>Xóa session-restore của hồ sơ (Current/Last Session|Tabs + thư mục Sessions) và các khóa Singleton —
-    /// GỌI SAU khi mọi trình duyệt của hồ sơ đã chết. Tác dụng: (1) bản sạch mở CHỈ start URL, KHÔNG khôi phục tab cũ
-    /// (tránh tab shop cũ / tab CDP còn sót); (2) xóa SingletonLock/Cookie/Socket chống "handoff" vào tiến trình cũ.
-    /// KHÔNG xóa Cookies nên GIỮ đăng nhập. Best-effort.</summary>
-    private static void ClearProfileSessionAndLocks(string userDataDir)
-    {
-        if (string.IsNullOrWhiteSpace(userDataDir))
-        {
-            return;
-        }
-        try
-        {
-            var def = System.IO.Path.Combine(userDataDir, "Default");
-            foreach (var f in new[] { "Current Session", "Current Tabs", "Last Session", "Last Tabs" })
-            {
-                try { System.IO.File.Delete(System.IO.Path.Combine(def, f)); } catch { /* bỏ qua */ }
-            }
-            try { System.IO.Directory.Delete(System.IO.Path.Combine(def, "Sessions"), true); } catch { /* bỏ qua */ }
-            foreach (var s in new[] { "SingletonLock", "SingletonCookie", "SingletonSocket" })
-            {
-                try { System.IO.File.Delete(System.IO.Path.Combine(userDataDir, s)); } catch { /* bỏ qua */ }
-            }
-        }
-        catch { /* bỏ qua */ }
-    }
 }
