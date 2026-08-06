@@ -5,6 +5,58 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Phiên bản & cập nhật. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.8.2 — 2026-08-06
+
+Rà soát màn **Shopee → Thống kê** (đọc toàn tuyến + render màn thật + soi đối kháng nhiều góc) và dọn ba chỗ
+khó dùng ở màn Đơn hàng / Tài khoản. Phần "phản biện bắt được" ghi rõ vì đó là những lỗi mà build xanh + test
+xanh KHÔNG thấy.
+
+**Sửa lỗi đang chạy sai**
+
+- **Đơn hàng — phiếu giao thiếu thì KHÔNG BAO GIỜ được lấy lại.** Phiếu chỉ được lưu đúng một lần, ngay lúc xử
+  đơn; lưu hỏng, hoặc đơn đã xử từ máy khác/vòng trước, là mất hẳn — vòng sau chỉ hỏi "đơn kế cần chuẩn bị
+  hàng" nên không quay lại đơn cũ. Nay cuối mỗi lượt check một shop, app tự lấy lại phiếu thiếu của chính shop
+  đó (trần 20 đơn/shop/vòng, ưu tiên đơn mới nhất, có log số còn để lại). Đơn đã hủy bị loại khỏi danh sách —
+  Seller Centre không còn nút "In phiếu giao" cho đơn hủy nên mọi lượt tải đều trượt và sẽ chiếm suất trần của
+  mọi vòng, vĩnh viễn.
+- **Đơn hàng — ô "Phiếu" hiện hai nút mâu thuẫn.** Dòng đang THIẾU file phiếu vẫn hiện nút "In phiếu" (bấm vào
+  chắc chắn hỏng) ngay trên nút "Tải phiếu". Nay mỗi dòng chỉ còn MỘT hành động: có phiếu → "In phiếu"; thiếu →
+  "Tải lại"; đơn hủy thiếu phiếu → để trống.
+- **Thống kê — số của máy này luôn HỤT mà màn không nói.** Kho đơn trên máy chỉ giữ đơn CHƯA kết thúc (đơn Đã
+  giao/Đã hủy bị dọn sau khi đẩy Hub + Google Sheet), nên 3 thẻ ĐÃ GIAO / ĐÃ HỦY / DOANH THU thiếu số. Hub trả
+  lời được thì số đúng ngay, nhưng Hub tắt/timeout là ngồi nhìn số cụt vô thời hạn. Nay nói thẳng trên màn.
+- **Thống kê — Hub báo 0 đơn thì màn kẹt rỗng dù máy đang có đơn.** Bấm "Làm mới" chỉ thấy số nháy một cái rồi
+  trắng màn. Nay giữ số máy và nói rõ hai bên đang nói ngược nhau.
+- **Thống kê — chip "Hôm nay/7 ngày/Tháng này" đóng băng qua nửa đêm.** App chạy 24/7 mà khoảng ngày chỉ tính
+  một lần lúc bấm: sáng ra chip vẫn sáng nhưng dữ liệu là của hôm qua. Nay có nhịp dò sang ngày mới (người dùng
+  tự chọn ngày trên lịch thì không bị giật khỏi tay).
+- **Thống kê — lăn chuột trên bảng thì cả trang đứng im.** 4 bảng nuốt sạch bánh xe chuột mà chúng chiếm gần
+  hết màn hình. (Đo được: trước 0→0, sau 0→48.)
+- **Thống kê — nút "Làm mới" không đọc lại kho đơn** dù tooltip hứa vậy; và máy chưa cấu hình Hub vẫn bị tố
+  "Hub không phản hồi".
+- **Thống kê — shop biến mất khỏi ô lọc** khi đơn của shop đó đã được dọn khỏi máy, kéo bộ lọc âm thầm về
+  "Tất cả shop" trong lúc đang xem số chung toàn hệ thống.
+
+**Dễ nhìn, dễ dùng hơn**
+
+- Ô chọn ngày (cả 5 ô của module) nay phẳng theo hệ giao diện chung và hiện **dd/MM/yyyy**; trước đó ô lịch
+  dùng định dạng của Windows (`8/6/2026`) trong khi cả app viết `06/08/2026` — cùng một màn hai kiểu ngày, rất
+  dễ đọc nhầm ngày với tháng. Lịch bung ra cũng đã theo tiếng Việt và bỏ giao diện cũ.
+- Tab **"Kết quả"** ở màn Tài khoản đổi tên thành **"Shops"**.
+- Thống kê: bỏ chiều cao bảng ghim cứng (màn 1366×768 nhìn được nhiều hơn hẳn); lọc đúng 1 shop thì ẩn bảng
+  "Hiệu quả theo shop" (nó chỉ lặp lại các thẻ số) và cho bảng trạng thái rộng ra; nhãn "Đồng bộ gần nhất" nói
+  rõ là **trong khoảng** đang lọc; số local và số Hub nay cùng luật hiển thị + cùng thứ tự sắp xếp nên lưới
+  không đổi hình mỗi lần Hub trả lời.
+- Màn Thống kê đang ẩn thì không quét kho đơn và không gọi Hub sau mỗi lượt đồng bộ nữa.
+
+**Phản biện bắt được (build xanh + test xanh vẫn lọt)**
+
+- Style của lịch **không hề tới được** ô lịch: lịch nằm trong popup — cây hiển thị riêng — nên không nhận style
+  của màn; đo tận nơi thì nó vẫn là giao diện Windows cũ dù code trông như đã sửa.
+- Hai test "canh" chức năng thực ra **rỗng**: một test lịch chỉ kiểm "có khai style" chứ không kiểm lịch thật;
+  một test nhịp sang ngày chỉ kiểm "đã vẽ lại" chứ không kiểm khoảng ngày có trượt sang ngày mới hay không.
+- Một test sẽ **tự đỏ vào ngày mùng 4 hằng tháng** do chọn mốc ngày trùng giá trị mặc định.
+
 ## v1.8.1 — 2026-08-06
 
 - **Đơn hàng — sửa lỗi trình duyệt thoát ngay khi khởi động ở bước đăng nhập (mất trọn cả tiếng).** Bước đăng
