@@ -79,7 +79,7 @@
                 </Setter>
                 <Style.Triggers>
                     <Trigger Property="IsMouseOver" Value="True">
-                        <Setter Property="Background" Value="#66FFFFFF" />
+                        <Setter Property="Background" Value="{StaticResource ButtonHoverBg}" />
                         <Setter Property="Foreground" Value="{StaticResource TextInk}" />
                     </Trigger>
                     <DataTrigger Binding="{Binding Tag, RelativeSource={RelativeSource Self}}" Value="True">
@@ -100,7 +100,34 @@
                 <Setter Property="HeadersVisibility" Value="Column" />
                 <Setter Property="CanUserSortColumns" Value="False" />
                 <Setter Property="IsReadOnly" Value="True" />
+                <!-- Tự đặt, KHÔNG ăn nhờ implicit style của suite: dựng view ngoài shell là 4 lưới nhân đôi cột
+                     (cột khai tay + cột tự sinh từ property của record). -->
+                <Setter Property="AutoGenerateColumns" Value="False" />
                 <Setter Property="ColumnHeaderStyle" Value="{StaticResource statsGridHeader}" />
+            </Style>
+            <!-- Lưới PHÂN BỔ TRẠNG THÁI: lọc đúng 1 shop ⇒ khối "HIỆU QUẢ THEO SHOP" bên phải biến mất (nó chỉ còn
+                 1 dòng lặp lại y các thẻ số phía trên) → lưới này nuốt luôn cột bên phải thay vì để trống nửa màn. -->
+            <Style x:Key="statsGridTrangThai" TargetType="{x:Type DataGrid}" BasedOn="{StaticResource statsGrid}">
+                <Setter Property="Grid.ColumnSpan" Value="1" />
+                <Style.Triggers>
+                    <DataTrigger Binding="{Binding HienLuoiShop}" Value="False">
+                        <Setter Property="Grid.ColumnSpan" Value="2" />
+                    </DataTrigger>
+                </Style.Triggers>
+            </Style>
+            <!-- Ghi chú "chỉ đơn CÒN trên máy" dán dưới 3 thẻ ĐÃ GIAO / ĐÃ HỦY / DOANH THU. Ẩn bằng HIDDEN chứ
+                 KHÔNG Collapsed: mỗi lượt Hub trả lời là cờ DangXemSoMay lật một lần, Collapsed sẽ làm cả hàng thẻ
+                 nhảy lên ~14px rồi tụt xuống. Hidden giữ nguyên chỗ. -->
+            <Style x:Key="statNoteMay" TargetType="{x:Type TextBlock}">
+                <Setter Property="FontSize" Value="10.5" />
+                <Setter Property="Foreground" Value="{StaticResource TextMuted}" />
+                <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+                <Setter Property="Visibility" Value="Hidden" />
+                <Style.Triggers>
+                    <DataTrigger Binding="{Binding DangXemSoMay}" Value="True">
+                        <Setter Property="Visibility" Value="Visible" />
+                    </DataTrigger>
+                </Style.Triggers>
             </Style>
         </ResourceDictionary>
     </UserControl.Resources>
@@ -121,9 +148,12 @@
                 <TextBlock Text="Thống kê đơn hàng" Style="{StaticResource h1}" />
                 <TextBlock Text="{Binding ScopeText}" FontSize="12" Foreground="{StaticResource TextMuted}"
                            Margin="0,2,0,0" />
-                <!-- Nguồn số đang xem (máy này / toàn hệ thống) — Hub lỗi mà vẫn hiện số local thì phải nói rõ. -->
-                <TextBlock Text="{Binding SourceText}" FontSize="11.5"
-                           Foreground="{StaticResource TextMuted}" TextWrapping="Wrap" Margin="0,3,0,0" />
+                <!-- Nguồn số đang xem (máy này / toàn hệ thống) — Hub lỗi mà vẫn hiện số local thì phải nói rõ.
+                     Chữ giữ NGẮN (một dòng ở 1366px), phần giải thích dài nằm ở ToolTip; rỗng (khoảng ngày không
+                     hợp lệ) thì ẩn hẳn dòng thay vì khẳng định một nguồn số không có thật. -->
+                <TextBlock Text="{Binding SourceText}" ToolTip="{Binding SourceToolTip}" FontSize="11.5"
+                           Foreground="{StaticResource TextMuted}" TextWrapping="Wrap" Margin="0,3,0,0"
+                           Visibility="{Binding SourceText, Converter={StaticResource StringToVis}}" />
             </StackPanel>
             <StackPanel Grid.Column="1" HorizontalAlignment="Right">
                 <!-- Chip chọn nhanh khoảng ngày: bấm là set CẢ HAI ô ngày bên dưới rồi vẽ lại đúng một lượt
@@ -145,7 +175,10 @@
                     </StackPanel>
                 </Border>
                 <!-- CalendarDatePicker (Avalonia) → DatePicker (WPF). FromDate/ToDate đã là DateTime? nên
-                     bind thẳng, không cần converter. -->
+                     bind thẳng, không cần converter.
+                     Language="vi-VN": WPF lấy culture của DatePicker từ FrameworkElement.Language, để mặc định thì
+                     ô ngày theo locale máy (máy dev: 8/1/2026) trong khi mọi câu mô tả trên màn ép vi-VN
+                     (01/08/2026) — cùng một màn hai định dạng, đọc nhầm ngày↔tháng như chơi. -->
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto" />
@@ -156,11 +189,11 @@
                     <TextBlock Grid.Column="0" Text="Từ ngày" FontSize="12"
                                Foreground="{StaticResource TextMuted}" VerticalAlignment="Center" Margin="0,0,8,0" />
                     <DatePicker Grid.Column="1" SelectedDate="{Binding FromDate}" SelectedDateFormat="Short"
-                                HorizontalAlignment="Stretch" />
+                                Language="vi-VN" HorizontalAlignment="Stretch" />
                     <TextBlock Grid.Column="2" Text="Đến ngày" FontSize="12"
                                Foreground="{StaticResource TextMuted}" VerticalAlignment="Center" Margin="14,0,8,0" />
                     <DatePicker Grid.Column="3" SelectedDate="{Binding ToDate}" SelectedDateFormat="Short"
-                                HorizontalAlignment="Stretch" />
+                                Language="vi-VN" HorizontalAlignment="Stretch" />
                 </Grid>
                 <Grid Margin="0,8,0,0">
                     <Grid.ColumnDefinitions>
@@ -209,9 +242,7 @@
                                 <TextBlock Style="{StaticResource statLabel}" Text="ĐÃ GIAO" />
                                 <TextBlock Style="{StaticResource statValue}" Foreground="{StaticResource SuccessBrush}"
                                            Text="{Binding DeliveredText}" />
-                                <TextBlock Text="chỉ đơn CÒN trên máy" FontSize="10.5"
-                                           Foreground="{StaticResource TextMuted}"
-                                           Visibility="{Binding DangXemSoMay, Converter={StaticResource BoolToVis}}" />
+                                <TextBlock Style="{StaticResource statNoteMay}" Text="chỉ đơn CÒN trên máy" />
                             </StackPanel>
                         </Border>
                         <Border Style="{StaticResource statCard}">
@@ -219,23 +250,28 @@
                                 <TextBlock Style="{StaticResource statLabel}" Text="ĐÃ HỦY" />
                                 <TextBlock Style="{StaticResource statValue}" Foreground="{StaticResource DangerBrush}"
                                            Text="{Binding CancelledText}" />
-                                <TextBlock Text="chỉ đơn CÒN trên máy" FontSize="10.5"
-                                           Foreground="{StaticResource TextMuted}"
-                                           Visibility="{Binding DangXemSoMay, Converter={StaticResource BoolToVis}}" />
+                                <TextBlock Style="{StaticResource statNoteMay}" Text="chỉ đơn CÒN trên máy" />
                             </StackPanel>
                         </Border>
                         <Border Style="{StaticResource statCard}" Margin="0">
                             <StackPanel>
                                 <TextBlock Style="{StaticResource statLabel}" Text="DOANH THU ƯỚC TÍNH" />
-                                <TextBlock Style="{StaticResource statValue}" FontSize="20" Text="{Binding RevenueText}" />
-                                <!-- Thẻ này ĐÃ có dòng chú thích riêng → ghép làm MỘT dòng động, không chồng 2 dòng. -->
-                                <TextBlock FontSize="10.5" Foreground="{StaticResource TextMuted}">
+                                <TextBlock Style="{StaticResource statValue}" FontSize="20" Text="{Binding RevenueText}"
+                                           TextTrimming="CharacterEllipsis" ToolTip="{Binding RevenueText}" />
+                                <!-- Thẻ này ĐÃ có dòng chú thích riêng → ghép làm MỘT dòng động, không chồng 2 dòng.
+                                     MỘT dòng thật: cắt bằng "…" (TextTrimming) chứ không cho xuống dòng, kẻo thẻ
+                                     cao thêm một dòng mỗi lượt Hub trả lời và cả hàng thẻ nhảy. -->
+                                <TextBlock FontSize="10.5" Foreground="{StaticResource TextMuted}"
+                                           TextTrimming="CharacterEllipsis">
                                     <TextBlock.Style>
                                         <Style TargetType="{x:Type TextBlock}">
                                             <Setter Property="Text" Value="Không tính đơn hủy" />
+                                            <Setter Property="ToolTip" Value="Doanh thu ước tính không gồm đơn hủy." />
                                             <Style.Triggers>
                                                 <DataTrigger Binding="{Binding DangXemSoMay}" Value="True">
                                                     <Setter Property="Text" Value="Không tính đơn hủy · chỉ đơn CÒN trên máy" />
+                                                    <Setter Property="ToolTip"
+                                                            Value="Không tính đơn hủy · chỉ đơn CÒN trên máy" />
                                                 </DataTrigger>
                                             </Style.Triggers>
                                         </Style>
@@ -270,14 +306,21 @@
                                 <TextBlock Style="{StaticResource miniValue}" Text="{Binding EstimateCoverageText}" />
                             </StackPanel>
                         </Border>
-                        <Border Style="{StaticResource statCard}" Margin="0">
+                        <!-- Mốc sync lấy trong ĐÚNG khoảng ngày đang lọc (cả số máy lẫn số Hub) — không nói rõ thì
+                             chọn tháng 6 sẽ tưởng app ngừng đồng bộ cả tháng nay. -->
+                        <Border Style="{StaticResource statCard}" Margin="0"
+                                ToolTip="Lần đồng bộ gần nhất trong ĐÚNG khoảng ngày đang lọc, không phải lần đồng bộ gần nhất của app.">
                             <StackPanel>
-                                <TextBlock Style="{StaticResource statLabel}" Text="ĐỒNG BỘ GẦN NHẤT" />
+                                <TextBlock Style="{StaticResource statLabel}" Text="ĐỒNG BỘ GẦN NHẤT (TRONG KHOẢNG)"
+                                           TextTrimming="CharacterEllipsis" />
                                 <TextBlock Style="{StaticResource miniValue}" FontSize="13" Text="{Binding LastSyncedText}" />
                             </StackPanel>
                         </Border>
                     </UniformGrid>
 
+                    <!-- Hàng lưới TRÊN. Chiều cao KHÔNG ghim cứng: hàng Auto + MaxHeight trên lưới ⇒ ít dòng thì
+                         không chừa khoảng trống, nhiều dòng vẫn cuộn được trong lưới. TUYỆT ĐỐI không dùng "*" —
+                         cả khối này nằm trong ScrollViewer (chiều cao khả dụng là vô hạn). -->
                     <Grid Margin="0,14,0,0">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="1.05*" />
@@ -285,14 +328,15 @@
                         </Grid.ColumnDefinitions>
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
-                            <RowDefinition Height="250" />
+                            <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
                         <TextBlock Grid.Row="0" Grid.Column="0" Style="{StaticResource section}"
                                    Text="PHÂN BỔ TRẠNG THÁI" Margin="0,0,0,7" />
                         <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource section}"
-                                   Text="HIỆU QUẢ THEO SHOP" Margin="14,0,0,7" />
-                        <DataGrid Grid.Row="1" Grid.Column="0" Style="{StaticResource statsGrid}"
-                                  ItemsSource="{Binding StatusRows}" CanUserResizeColumns="True"
+                                   Text="HIỆU QUẢ THEO SHOP" Margin="14,0,0,7"
+                                   Visibility="{Binding HienLuoiShop, Converter={StaticResource BoolToVis}}" />
+                        <DataGrid Grid.Row="1" Grid.Column="0" Style="{StaticResource statsGridTrangThai}"
+                                  ItemsSource="{Binding StatusRows}" MaxHeight="320"
                                   PreviewMouseWheel="LuoiXemSo_PreviewMouseWheel">
                             <DataGrid.Columns>
                                 <DataGridTextColumn Header="Trạng thái" Binding="{Binding Label}" Width="*" MinWidth="110" />
@@ -301,8 +345,10 @@
                                 <DataGridTextColumn Header="Ước tính" Binding="{Binding ValueText}" Width="110" />
                             </DataGrid.Columns>
                         </DataGrid>
+                        <!-- Lọc đúng 1 shop ⇒ lưới này chỉ còn 1 dòng lặp lại y các thẻ số phía trên → ẩn hẳn. -->
                         <DataGrid Grid.Row="1" Grid.Column="1" Margin="14,0,0,0" Style="{StaticResource statsGrid}"
-                                  ItemsSource="{Binding ShopRows}" CanUserResizeColumns="True"
+                                  ItemsSource="{Binding ShopRows}" MaxHeight="320"
+                                  Visibility="{Binding HienLuoiShop, Converter={StaticResource BoolToVis}}"
                                   PreviewMouseWheel="LuoiXemSo_PreviewMouseWheel">
                             <DataGrid.Columns>
                                 <DataGridTextColumn Header="Shop" Binding="{Binding Shop}" Width="*" MinWidth="120" />
@@ -322,14 +368,14 @@
                         </Grid.ColumnDefinitions>
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
-                            <RowDefinition Height="220" />
+                            <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
                         <TextBlock Grid.Row="0" Grid.Column="0" Style="{StaticResource section}"
                                    Text="ĐƠN VỊ VẬN CHUYỂN" Margin="0,0,0,7" />
                         <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource section}"
                                    Text="PHƯƠNG THỨC THANH TOÁN" Margin="14,0,0,7" />
                         <DataGrid Grid.Row="1" Grid.Column="0" Style="{StaticResource statsGrid}"
-                                  ItemsSource="{Binding CarrierRows}"
+                                  ItemsSource="{Binding CarrierRows}" MaxHeight="260"
                                   PreviewMouseWheel="LuoiXemSo_PreviewMouseWheel">
                             <DataGrid.Columns>
                                 <DataGridTextColumn Header="Đơn vị" Binding="{Binding Label}" Width="*" />
@@ -338,7 +384,7 @@
                             </DataGrid.Columns>
                         </DataGrid>
                         <DataGrid Grid.Row="1" Grid.Column="1" Margin="14,0,0,0" Style="{StaticResource statsGrid}"
-                                  ItemsSource="{Binding PaymentRows}"
+                                  ItemsSource="{Binding PaymentRows}" MaxHeight="260"
                                   PreviewMouseWheel="LuoiXemSo_PreviewMouseWheel">
                             <DataGrid.Columns>
                                 <DataGridTextColumn Header="Phương thức" Binding="{Binding Label}" Width="*" />

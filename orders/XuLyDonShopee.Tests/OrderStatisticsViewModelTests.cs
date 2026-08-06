@@ -12,15 +12,18 @@ namespace XuLyDonShopee.Tests;
 /// </summary>
 public class OrderStatisticsViewModelTests
 {
-    /// <summary>Vế CẢNH BÁO mà VM ghép vào MỌI dòng nguồn số LOCAL (kho máy đã dọn đơn kết thúc nên 3 thẻ
-    /// ĐÃ GIAO / ĐÃ HỦY / DOANH THU bị hụt). Chép ĐÚNG chuỗi của VM: bỏ vế này đi là test đổ.</summary>
-    private const string CanhBaoHut =
-        " Kho máy chỉ giữ đơn CHƯA kết thúc (đơn Đã giao/Đã hủy đã dọn sau khi đẩy Hub & Google Sheet)" +
-        " — ĐÃ GIAO / ĐÃ HỦY / DOANH THU bên dưới bị HỤT.";
+    /// <summary>Vế CẢNH BÁO NGẮN mà VM ghép vào dòng nguồn số LOCAL khi màn ĐANG có thẻ số (kho máy đã dọn đơn kết
+    /// thúc nên 3 thẻ ĐÃ GIAO / ĐÃ HỦY / DOANH THU bị hụt). Chép ĐÚNG chuỗi của VM: bỏ vế này đi là test đổ.
+    /// Bản dài nằm ở ToolTip (<c>SourceToolTip</c>) — xem <see cref="CoDon_CanhBaoDaiNamOToolTip_DongLuonHienGiuNgan"/>.</summary>
+    private const string CanhBaoHut = " ĐÃ GIAO / ĐÃ HỦY / DOANH THU bị HỤT — rê chuột để xem vì sao.";
 
-    private const string NguonDangHoi = "Số trên MÁY NÀY — đang hỏi Hub số chung…" + CanhBaoHut;
-    private const string NguonHubChet = "Số trên MÁY NÀY — Hub không phản hồi nên chưa gộp được số chung." + CanhBaoHut;
-    private const string NguonDocLap = "Số trên MÁY NÀY (app chạy độc lập, chưa nối Hub)." + CanhBaoHut;
+    private const string NenDangHoi = "Số trên MÁY NÀY — đang hỏi Hub số chung…";
+    private const string NenHubChet = "Số trên MÁY NÀY — Hub không phản hồi nên chưa gộp được số chung.";
+    private const string NenDocLap = "Số trên MÁY NÀY (app chạy độc lập, chưa nối Hub).";
+
+    private const string NguonDangHoi = NenDangHoi + CanhBaoHut;
+    private const string NguonHubChet = NenHubChet + CanhBaoHut;
+    private const string NguonDocLap = NenDocLap + CanhBaoHut;
 
     [Fact]
     public void Constructor_DefaultsToCurrentMonthThroughToday()
@@ -54,6 +57,10 @@ public class OrderStatisticsViewModelTests
         Assert.False(vm.HasData);
         Assert.Equal("Hãy chọn đầy đủ Từ ngày và Đến ngày để xem thống kê.", vm.EmptyMessage);
         Assert.Equal(vm.EmptyMessage, vm.ScopeText);
+        // Chưa lọc được gì thì KHÔNG có nguồn số nào để nói: để nguyên dòng cũ là header vừa bảo "hãy chọn ngày"
+        // vừa khẳng định "Số chung toàn hệ thống (từ Hub)". Rỗng ⇒ XAML ẩn hẳn dòng (StringToVis).
+        Assert.Equal(string.Empty, vm.SourceText);
+        Assert.Null(vm.SourceToolTip);
     }
 
     // ===== Nguồn số đang xem phải nói RÕ (chống "hỏng im lặng": hub chết mà vẫn hiện số máy như số chung) =====
@@ -140,6 +147,7 @@ public class OrderStatisticsViewModelTests
         // đường KHÁC (ép vẽ số local), gọi nó ở đây sẽ đo nhầm cơ chế.
         var treo = new TaskCompletionSource<SharedOrderStatistics?>();
         services.QueryOrderStatistics = (_, _, _, _) => treo.Task;
+        vm.DangHienTrenMan = true; // màn đang mở, không thì OrdersChanged bị gate bỏ qua và test đo hụt
         services.RaiseOrdersChanged();
 
         Assert.Equal("7", vm.TotalOrdersText);                       // KHÔNG tụt về số local ("1")
@@ -200,6 +208,7 @@ public class OrderStatisticsViewModelTests
 
         var vm = new OrderStatisticsViewModel(services);
         services.QueryOrderStatistics = (_, _, _, _) => Task.FromResult<SharedOrderStatistics?>(null);
+        vm.DangHienTrenMan = true; // màn đang mở, không thì OrdersChanged bị gate bỏ qua và test đo hụt
         services.RaiseOrdersChanged(); // đường THẬT: phiên sync vừa ghi kho đơn (không phải nút "Làm mới")
 
         Assert.Equal("7", vm.TotalOrdersText); // số chung cũ vẫn có để nhìn
@@ -241,10 +250,241 @@ public class OrderStatisticsViewModelTests
         Assert.Contains("trên hệ thống", vm.EmptyMessage, StringComparison.Ordinal);
     }
 
-    private static SharedOrderStatistics SoChung(int tongDon) => new(
+    private static SharedOrderStatistics SoChung(int tongDon,
+        IReadOnlyList<SharedStatBreakdown>? statusRows = null,
+        IReadOnlyList<SharedShopStatRow>? shopRows = null) => new(
         tongDon, tongDon, 0, 0, 0, 0, 0, tongDon, 0, 0, null,
-        Array.Empty<SharedStatBreakdown>(), Array.Empty<SharedShopStatRow>(),
+        statusRows ?? Array.Empty<SharedStatBreakdown>(), shopRows ?? Array.Empty<SharedShopStatRow>(),
         Array.Empty<SharedStatBreakdown>(), Array.Empty<SharedStatBreakdown>());
+
+    // ══════════ Dòng nguồn: dài vừa đủ để đọc, chi tiết đẩy vào ToolTip, và CÂM khi không có thẻ nào ══════════
+
+    /// <summary>Kho máy RỖNG thì màn chỉ có thẻ "chưa có dữ liệu" — dòng nguồn KHÔNG được dọa "ĐÃ GIAO / ĐÃ HỦY /
+    /// DOANH THU bị HỤT" nữa: nó đang trỏ vào ba cái thẻ không tồn tại.</summary>
+    [Fact]
+    public void KhoRong_DongNguonKhongDoaBaTheKhongTonTai()
+    {
+        using var temp = new TempDatabase();
+        var services = new AppServices(temp.Path); // kho đơn RỖNG
+
+        var vm = new OrderStatisticsViewModel(services);
+
+        Assert.False(vm.HasData);
+        Assert.Equal(NenDocLap, vm.SourceText);
+        Assert.DoesNotContain("HỤT", vm.SourceText, StringComparison.Ordinal);
+        Assert.Null(vm.SourceToolTip);
+    }
+
+    /// <summary>Khoảng ngày KHÔNG hợp lệ cũng là ca "không có thẻ nào bên dưới" — và ở đây thì im hẳn.</summary>
+    [Fact]
+    public void KhoangNgayKhongHopLe_DongNguonCamHan()
+    {
+        using var temp = new TempDatabase();
+        var services = new AppServices(temp.Path);
+        services.Orders.UpsertMany(1, new[] { new SyncedOrder { OrderSn = "SN1" } }, DateTime.UtcNow);
+        var vm = new OrderStatisticsViewModel(services);
+        Assert.Contains("HỤT", vm.SourceText, StringComparison.Ordinal); // đang có đơn ⇒ có cảnh báo
+
+        vm.FromDate = vm.ToDate!.Value.AddDays(3); // Từ > Đến
+
+        Assert.False(vm.HasData);
+        Assert.Equal(string.Empty, vm.SourceText);
+        Assert.Null(vm.SourceToolTip);
+    }
+
+    /// <summary>Có đơn thì vẫn phải cảnh báo, nhưng dòng LUÔN HIỆN giữ NGẮN (bản cũ 179 ký tự tràn 2 dòng và chạy
+    /// sát ô "Từ ngày" ở 1366px) — phần giải thích dài dời vào ToolTip.</summary>
+    [Fact]
+    public void CoDon_CanhBaoDaiNamOToolTip_DongLuonHienGiuNgan()
+    {
+        using var temp = new TempDatabase();
+        var services = new AppServices(temp.Path);
+        services.Orders.UpsertMany(1, new[] { new SyncedOrder { OrderSn = "SN1" } }, DateTime.UtcNow);
+
+        var vm = new OrderStatisticsViewModel(services);
+
+        Assert.Equal(NguonDocLap, vm.SourceText);
+        Assert.True(vm.SourceText.Length <= 140, $"Dòng nguồn phải đủ ngắn để nằm 1 dòng: {vm.SourceText.Length} ký tự");
+        Assert.NotNull(vm.SourceToolTip);
+        Assert.Contains("bị dọn khỏi máy", vm.SourceToolTip!, StringComparison.Ordinal);
+    }
+
+    // ══════════ Danh sách shop phải GỘP shop chỉ còn sống trên Hub ══════════
+
+    /// <summary>Kho máy dọn hết đơn kết thúc của một shop ⇒ <c>AllShopLogins()</c> không còn shop đó, nhưng Hub vẫn
+    /// có số của nó. Không gộp lại thì shop biến mất khỏi ô lọc và bộ lọc âm thầm tụt về "Tất cả shop" ngay giữa
+    /// lúc người dùng đang xem đúng shop đó bằng SỐ CHUNG.</summary>
+    [Fact]
+    public void ShopChiConTrenHub_VanNamTrongDanhSachVaGiuChon()
+    {
+        using var temp = new TempDatabase();
+        var services = new AppServices(temp.Path);
+        // Kho máy chỉ còn shop A; Hub có cả A lẫn B.
+        services.Orders.UpsertMany(1, new[] { new SyncedOrder { OrderSn = "A1" } }, DateTime.UtcNow,
+            shopLogin: "a.store");
+        services.QueryOrderStatistics = (_, _, _, _) => Task.FromResult<SharedOrderStatistics?>(
+            SoChung(5, shopRows: new[]
+            {
+                new SharedShopStatRow("a.store", 3, 3, 0, 0, 0),
+                new SharedShopStatRow("b.store", 2, 2, 0, 0, 0),
+            }));
+
+        var vm = new OrderStatisticsViewModel(services);
+
+        Assert.Contains("b.store", vm.ShopOptions);
+        vm.SelectedShop = "b.store";
+
+        // Lượt sync ghi xong kho đơn → Reload dựng LẠI danh sách từ kho máy (không có b.store).
+        vm.DangHienTrenMan = true;
+        services.RaiseOrdersChanged();
+
+        Assert.Contains("b.store", vm.ShopOptions);
+        Assert.Equal("b.store", vm.SelectedShop); // KHÔNG được âm thầm tụt về "Tất cả shop"
+    }
+
+    /// <summary>Bẫy của bước 7: bổ sung mục vào <c>ShopOptions</c> mà quên cờ <c>_reloadingOptions</c> thì mỗi lần
+    /// thêm shop lại kích <c>OnSelectedShopChanged</c> → <c>ApplyStatistics</c> → hỏi Hub → thêm shop… Ở WPF,
+    /// ComboBox có thể NHẢ <c>SelectedItem</c> khi <c>ItemsSource</c> đổi — test mô phỏng đúng cú đó bằng
+    /// <c>CollectionChanged</c>: một lượt vẽ phải là ĐÚNG MỘT lượt hỏi Hub, và lựa chọn của người dùng phải còn.</summary>
+    [Fact]
+    public void GopShopTuHub_KhongKichVongVeLai_VaGiuLuaChon()
+    {
+        using var temp = new TempDatabase();
+        var services = new AppServices(temp.Path);
+        services.Orders.UpsertMany(1, new[] { new SyncedOrder { OrderSn = "A1" } }, DateTime.UtcNow,
+            shopLogin: "a.store");
+        var dem = 0;
+        var shopHub = new List<SharedShopStatRow> { new("a.store", 3, 3, 0, 0, 0) };
+        services.QueryOrderStatistics = (_, _, _, _) =>
+        {
+            dem++;
+            return Task.FromResult<SharedOrderStatistics?>(SoChung(5, shopRows: shopHub.ToList()));
+        };
+
+        var vm = new OrderStatisticsViewModel(services);
+        vm.SelectedShop = "a.store";
+        // Shop MỚI chỉ xuất hiện ở lượt hỏi Hub sắp tới ⇒ lượt vẽ dưới đây thật sự phải CHÈN mục vào ShopOptions
+        // (không dựng sẵn từ trước thì đoạn chèn không bao giờ chạy và test rỗng).
+        shopHub.Add(new SharedShopStatRow("b.store", 2, 2, 0, 0, 0));
+        var truoc = dem;
+        vm.ShopOptions.CollectionChanged += (_, _) => vm.SelectedShop = null; // ComboBox nhả lựa chọn
+
+        vm.Reload();
+
+        Assert.Contains("b.store", vm.ShopOptions); // đúng là có chèn thật
+        Assert.Equal("a.store", vm.SelectedShop);
+        Assert.Equal(truoc + 1, dem);
+    }
+
+    // ══════════ Local và Hub: cùng luật hiển thị + cùng thứ tự ══════════
+
+    /// <summary>Hai nguồn số vẽ lên CÙNG một lưới thì phải cùng định dạng (0 đồng ⇒ ô "Ước tính" RỖNG, không phải
+    /// "₫0") và cùng thứ tự (Hub sắp theo Ordinal — "Giao hàng" trước "Đã giao" — nên client phải sắp lại).</summary>
+    [Fact]
+    public void LuoiTrangThai_LocalVaHub_CungDinhDangVaCungThuTu()
+    {
+        using var temp = new TempDatabase();
+        var services = new AppServices(temp.Path);
+        services.Orders.UpsertMany(1, new[]
+        {
+            new SyncedOrder { OrderSn = "A1", Status = "Giao hàng" },
+            new SyncedOrder { OrderSn = "A2", Status = "Giao hàng" },
+            new SyncedOrder { OrderSn = "B1", Status = "Đã giao" },
+            new SyncedOrder { OrderSn = "B2", Status = "Đã giao" },
+        }, DateTime.UtcNow);
+
+        var vm = new OrderStatisticsViewModel(services); // chưa nối Hub → số LOCAL
+        var soMay = vm.StatusRows.Select(x => (x.Label, x.ValueText)).ToList();
+
+        Assert.Equal(new[] { "Đã giao", "Giao hàng" }, soMay.Select(x => x.Label));
+        Assert.All(soMay, x => Assert.Equal(string.Empty, x.ValueText)); // 0 đồng ⇒ RỖNG
+
+        // Hub trả CÙNG dữ liệu nhưng theo thứ tự Ordinal.
+        services.QueryOrderStatistics = (_, _, _, _) => Task.FromResult<SharedOrderStatistics?>(
+            SoChung(4, statusRows: new[]
+            {
+                new SharedStatBreakdown("Giao hàng", 2, 0, 50),
+                new SharedStatBreakdown("Đã giao", 2, 0, 50),
+            }));
+        vm.LamMoiCommand.Execute(null);
+
+        Assert.Equal(soMay, vm.StatusRows.Select(x => (x.Label, x.ValueText)).ToList());
+    }
+
+    // ══════════ Màn ẩn thì đừng quét kho đơn + bắn HTTP ══════════
+
+    /// <summary>VM sống suốt vòng đời app và <c>OrdersChanged</c> bắn sau MỖI shop của MỖI lượt sync — màn đang ẩn
+    /// mà vẫn quét kho đơn trên luồng UI + hỏi Hub là đốt công cho một màn không ai nhìn.</summary>
+    [Fact]
+    public void ManAn_KhoDonDoi_KhongGoiHub()
+    {
+        using var temp = new TempDatabase();
+        var services = new AppServices(temp.Path);
+        services.Orders.UpsertMany(1, new[] { new SyncedOrder { OrderSn = "SN1" } }, DateTime.UtcNow);
+        var (vm, soLan) = VmDemLuotHoiHub(services);
+        Assert.False(vm.DangHienTrenMan); // mặc định: màn chưa từng mở
+        var truoc = soLan();
+
+        services.RaiseOrdersChanged();
+
+        Assert.Equal(truoc, soLan());
+        Assert.True(vm.DangChoVeLai, "Bỏ qua lượt vẽ thì phải NHỚ là còn nợ một lượt");
+
+        // Người dùng chọn lại màn: MainViewModel bật cờ rồi gọi Reload() (case 2) → số tươi trở lại.
+        vm.DangHienTrenMan = true;
+        vm.Reload();
+
+        Assert.True(soLan() > truoc, "Mở lại màn thì phải vẽ lại từ kho đơn hiện tại");
+        Assert.False(vm.DangChoVeLai);
+    }
+
+    /// <summary>Mặt kia của cửa: màn ĐANG hiện thì kho đơn đổi vẫn phải vẽ lại ngay (nếu không thì "gate" chỉ là
+    /// cách viết hoa mỹ của "không bao giờ cập nhật").</summary>
+    [Fact]
+    public void ManDangHien_KhoDonDoi_VanVeLaiNgay()
+    {
+        using var temp = new TempDatabase();
+        var services = new AppServices(temp.Path);
+        services.Orders.UpsertMany(1, new[] { new SyncedOrder { OrderSn = "SN1" } }, DateTime.UtcNow);
+        var (vm, soLan) = VmDemLuotHoiHub(services);
+        vm.DangHienTrenMan = true;
+        var truoc = soLan();
+
+        services.Orders.UpsertMany(1, new[] { new SyncedOrder { OrderSn = "SN2" } }, DateTime.UtcNow);
+        services.RaiseOrdersChanged();
+
+        Assert.True(soLan() > truoc);
+        Assert.Equal("2", vm.TotalOrdersText);
+        Assert.False(vm.DangChoVeLai);
+    }
+
+    // ══════════ Lọc 1 shop thì bỏ khối "HIỆU QUẢ THEO SHOP" ══════════
+
+    /// <summary>Lọc đúng một shop ⇒ lưới shop chỉ còn MỘT dòng lặp lại y các thẻ số phía trên → XAML ẩn khối đó và
+    /// cho "PHÂN BỔ TRẠNG THÁI" chiếm hết chiều ngang. Cờ phải BÁO ĐỔI, không thì màn vẽ theo giá trị cũ.</summary>
+    [Fact]
+    public void LocMotShop_TatCoLuoiShop_VaBaoDoi()
+    {
+        using var temp = new TempDatabase();
+        var services = new AppServices(temp.Path);
+        services.Orders.UpsertMany(1, new[] { new SyncedOrder { OrderSn = "A1" } }, DateTime.UtcNow,
+            shopLogin: "a.store");
+        var vm = new OrderStatisticsViewModel(services);
+        var baoDoi = 0;
+        vm.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(vm.HienLuoiShop)) baoDoi++;
+        };
+
+        Assert.True(vm.HienLuoiShop); // mặc định "Tất cả shop"
+
+        vm.SelectedShop = "a.store";
+        Assert.False(vm.HienLuoiShop);
+        Assert.True(baoDoi > 0, "Đổi shop mà không báo đổi thì XAML không ẩn được khối shop");
+
+        vm.SelectedShop = OrderStatisticsViewModel.AllShopsLabel;
+        Assert.True(vm.HienLuoiShop);
+    }
 
     /// <summary>Hồi quy lỗi "đơ tới 8 giây mỗi lần chỉnh ngày": số local phải vẽ NGAY, lời gọi Hub chạy nền.</summary>
     [Fact]

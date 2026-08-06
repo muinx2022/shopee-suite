@@ -44,6 +44,10 @@
     <!-- Phản hồi rê chuột / bấm của NÚT (khớp ButtonHover/ButtonPressed của suite). -->
     <SolidColorBrush x:Key="ButtonHoverBg" Color="#FAF8F6" />
     <SolidColorBrush x:Key="ButtonPressedBg" Color="#F2EFEC" />
+    <!-- Nền khay/nhãn TRUNG TÍNH (khay chip khoảng ngày ở màn Thống kê, badge số ở màn Tài khoản). Cùng giá trị
+         với NeutralBadgeBgBrush của suite: trước đây module tra NHỜ token của suite qua DynamicResource nên dựng
+         view ngoài shell là mất nền — trái lời hứa "ModuleResources tự đủ tài nguyên". -->
+    <SolidColorBrush x:Key="NeutralBadgeBgBrush" Color="#F2EFEC" />
 
     <!-- ===== Chữ (4 nấc của suite: primary · body · secondary · muted) ===== -->
     <SolidColorBrush x:Key="TextInk" Color="#2C2724" />

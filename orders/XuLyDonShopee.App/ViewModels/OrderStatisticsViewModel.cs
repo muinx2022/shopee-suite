@@ -31,23 +31,32 @@ public partial class OrderStatisticsViewModel : ViewModelBase, IDisposable
     public const string AllShopsLabel = "Tất cả shop";
 
     /// <summary>
-    /// Vế CẢNH BÁO ghép vào MỌI dòng nguồn số LOCAL. Kho <c>orders</c> trên máy KHÔNG phải kho lịch sử:
-    /// <c>HubOutbox</c> xoá hẳn đơn Đã giao/Đã hủy sau khi xong nghĩa vụ đẩy, và <c>OrderPersistPipeline</c> chỉ
-    /// INSERT đơn mới khi còn "Chuẩn bị hàng" — nên khi đang xem số của máy thì 3 thẻ ĐÃ GIAO / ĐÃ HỦY / DOANH THU
-    /// luôn HỤT. Nói thẳng ra màn thay vì dựng thêm bảng tổng hợp ở client (đã chốt: Hub là kho lịch sử duy nhất).
+    /// Vế CẢNH BÁO ghép vào dòng nguồn số LOCAL — bản NGẮN, vì đây là dòng LUÔN hiện trên đầu màn. Kho
+    /// <c>orders</c> trên máy KHÔNG phải kho lịch sử: <c>HubOutbox</c> xoá hẳn đơn Đã giao/Đã hủy sau khi xong
+    /// nghĩa vụ đẩy, và <c>OrderPersistPipeline</c> chỉ INSERT đơn mới khi còn "Chuẩn bị hàng" — nên khi đang xem
+    /// số của máy thì 3 thẻ ĐÃ GIAO / ĐÃ HỦY / DOANH THU luôn HỤT. Nói thẳng ra màn thay vì dựng thêm bảng tổng
+    /// hợp ở client (đã chốt: Hub là kho lịch sử duy nhất).
+    /// <para>Câu giải thích ĐẦY ĐỦ nằm ở <see cref="GiaiThichKhoMayHutText"/> (đổ vào ToolTip): bản dài ghép thẳng
+    /// vào dòng nguồn làm nó tràn 2 dòng và chạy sát ô "Từ ngày" ở màn 1366px.</para>
     /// </summary>
-    private const string CanhBaoKhoMayHutText =
-        " Kho máy chỉ giữ đơn CHƯA kết thúc (đơn Đã giao/Đã hủy đã dọn sau khi đẩy Hub & Google Sheet)" +
-        " — ĐÃ GIAO / ĐÃ HỦY / DOANH THU bên dưới bị HỤT.";
+    private const string CanhBaoKhoMayHutNganText =
+        " ĐÃ GIAO / ĐÃ HỦY / DOANH THU bị HỤT — rê chuột để xem vì sao.";
+
+    /// <summary>Bản ĐẦY ĐỦ của <see cref="CanhBaoKhoMayHutNganText"/> — đổ vào <see cref="SourceToolTip"/> để dòng
+    /// luôn hiện được ngắn mà người dùng vẫn tra được lý do.</summary>
+    private const string GiaiThichKhoMayHutText =
+        "Kho đơn trên MÁY NÀY chỉ giữ đơn CHƯA kết thúc: đơn Đã giao/Đã hủy bị dọn khỏi máy ngay sau khi đã đẩy"
+        + " lên Hub và Google Sheet. Vì vậy 3 thẻ ĐÃ GIAO / ĐÃ HỦY / DOANH THU ƯỚC TÍNH của số máy luôn hụt —"
+        + " chỉ số CHUNG (Hub) mới giữ đủ lịch sử.";
 
     /// <summary>Lượt hỏi Hub CÒN ĐANG BAY — số đang hiện là số local vẽ tạm. KHÔNG được nói "Hub không phản hồi"
     /// ở trạng thái này: lượt hỏi chưa xong thì chưa biết hub sống hay chết (đó là lỗi cũ — mỗi lần đổi ngày là
-    /// hiện một dòng cáo buộc hub chết trong khi hub vẫn đang trả lời).</summary>
-    private const string SourceDangHoiText = "Số trên MÁY NÀY — đang hỏi Hub số chung…" + CanhBaoKhoMayHutText;
-    private const string SourceLocalText =
-        "Số trên MÁY NÀY — Hub không phản hồi nên chưa gộp được số chung." + CanhBaoKhoMayHutText;
-    private const string SourceStandaloneText =
-        "Số trên MÁY NÀY (app chạy độc lập, chưa nối Hub)." + CanhBaoKhoMayHutText;
+    /// hiện một dòng cáo buộc hub chết trong khi hub vẫn đang trả lời).
+    /// <para>Ba hằng dưới đây là câu NỀN: vế cảnh báo ghép thêm ở <see cref="DatDongNguonLocal"/>, và CHỈ ghép khi
+    /// màn thật sự đang có thẻ số.</para></summary>
+    private const string SourceDangHoiText = "Số trên MÁY NÀY — đang hỏi Hub số chung…";
+    private const string SourceLocalText = "Số trên MÁY NÀY — Hub không phản hồi nên chưa gộp được số chung.";
+    private const string SourceStandaloneText = "Số trên MÁY NÀY (app chạy độc lập, chưa nối Hub).";
     private const string SourceSharedText = "Số chung toàn hệ thống (từ Hub).";
     /// <summary>Đang GIỮ số chung của lượt hỏi trước mà lượt hỏi mới nhất không về được — nói thẳng thay vì lẳng
     /// lặng để nguyên dòng "Số chung (Hub)" như thể vừa cập nhật.</summary>
@@ -58,10 +67,32 @@ public partial class OrderStatisticsViewModel : ViewModelBase, IDisposable
     /// lặng": người dùng bấm "Làm mới", thấy số nháy một cái rồi màn trắng. Giữ số máy và nói thẳng ra.</summary>
     private const string SourceHubBaoRongFormat =
         "Hub báo 0 đơn cho khoảng này, nhưng máy này đang có {0} đơn — hiện SỐ MÁY NÀY"
-        + " (thường do đơn của máy chưa đẩy hết lên Hub)." + CanhBaoKhoMayHutText;
+        + " (thường do đơn của máy chưa đẩy hết lên Hub).";
     private static readonly CultureInfo VnCulture = CultureInfo.GetCultureInfo("vi-VN");
     private readonly AppServices _services;
     private bool _reloadingOptions;
+
+    /// <summary>Shop mà HUB có số nhưng kho đơn trên máy KHÔNG còn (đơn kết thúc đã bị dọn). Không nhớ lại thì
+    /// <c>AllShopLogins()</c> làm shop biến mất khỏi ComboBox và bộ lọc âm thầm tụt về "Tất cả shop" trong khi số
+    /// đang xem là số CHUNG toàn hệ thống. So khớp KHÔNG phân biệt hoa/thường vì shop_login của máy và của hub có
+    /// thể khác nhau ở chữ hoa. Chỉ đọc/ghi trên luồng UI.</summary>
+    private readonly HashSet<string> _shopTuHub = new(StringComparer.CurrentCultureIgnoreCase);
+
+    /// <summary>Kho đơn ĐÃ đổi trong lúc màn bị ẩn nên lưới đang mang số CŨ — hạ khi <see cref="Reload"/> vẽ lại.
+    /// Xem <see cref="DangHienTrenMan"/>.</summary>
+    private bool _canVeLai;
+
+    /// <summary>
+    /// Màn Thống kê ĐANG là màn hiển thị hay không (<c>MainViewModel.OnSelectedNavIndexChanged</c> đặt). VM sống
+    /// suốt vòng đời app, mà <c>OrdersChanged</c> bắn sau MỖI shop của MỖI lượt sync — không có cờ này thì mỗi lượt
+    /// sync là một lần quét kho đơn trên luồng UI + một lần bắn HTTP lên Hub, kể cả khi người dùng đang ở màn khác.
+    /// <para>Mặc định <c>false</c> (màn chưa từng mở). Không sợ số mốc meo lúc mở lên: đường vào màn
+    /// (<c>case 2</c>) gọi <see cref="Reload"/> nên lưới luôn được vẽ lại từ kho đơn hiện tại.</para>
+    /// </summary>
+    public bool DangHienTrenMan { get; set; }
+
+    /// <summary>Cho test soi cờ "đã bỏ qua một lượt vẽ vì màn đang ẩn" (xem <see cref="DangHienTrenMan"/>).</summary>
+    internal bool DangChoVeLai => _canVeLai;
 
     /// <summary>Số thứ tự lượt thống kê ĐANG hiển thị (tăng mỗi lần <see cref="ApplyStatistics"/>). Kết quả Hub về
     /// mà số thứ tự không còn khớp thì BỎ QUA — người dùng chỉnh ngày liên tục, lượt cũ về sau sẽ đè lượt mới.
@@ -195,12 +226,17 @@ public partial class OrderStatisticsViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private string _emptyMessage = "Chưa có đơn hàng để thống kê.";
     [ObservableProperty] private string _scopeText = "Ảnh chụp kho đơn trên máy";
     /// <summary>Dòng chữ dưới tiêu đề: số đang xem là của MÁY NÀY hay CHUNG toàn hệ thống (chống "hỏng im lặng" —
-    /// Hub lỗi mà vẫn hiện số local như thể là số chung).</summary>
+    /// Hub lỗi mà vẫn hiện số local như thể là số chung). RỖNG = không có gì để nói (khoảng ngày không hợp lệ) →
+    /// XAML ẩn hẳn dòng, đừng để header vừa báo "hãy chọn ngày" vừa khẳng định đang xem số chung.</summary>
     [ObservableProperty] private string _sourceText = SourceStandaloneText;
+
+    /// <summary>Chú giải dài của <see cref="SourceText"/> (vì sao số máy bị hụt) — <c>null</c> = KHÔNG có tooltip
+    /// (WPF không hiện khung nào khi ToolTip null; chuỗi rỗng thì lại hiện một khung trắng).</summary>
+    [ObservableProperty] private string? _sourceToolTip;
 
     /// <summary>
     /// Lưới đang hiện số LOCAL (số của MÁY NÀY) — XAML bám cờ này để dán ghi chú "chỉ đơn CÒN trên máy" lên 3 thẻ
-    /// ĐÃ GIAO / ĐÃ HỦY / DOANH THU (ba thẻ luôn hụt khi xem số máy, xem <see cref="CanhBaoKhoMayHutText"/>).
+    /// ĐÃ GIAO / ĐÃ HỦY / DOANH THU (ba thẻ luôn hụt khi xem số máy, xem <see cref="GiaiThichKhoMayHutText"/>).
     /// <para><b>KHÔNG gộp với <see cref="_dangHienSoHub"/>:</b> cái kia là field NỘI BỘ điều khiển việc có vẽ đè số
     /// local hay không (cơ chế chống "số nhảy" mỗi lượt sync); cái này chỉ để XAML biết đang hiện nguồn nào. Gộp
     /// hai thứ là làm hỏng chống-số-nhảy.</para>
@@ -219,9 +255,16 @@ public partial class OrderStatisticsViewModel : ViewModelBase, IDisposable
 
     partial void OnSelectedShopChanged(string? value)
     {
+        // Báo CẢ khi đang dựng lại danh sách (_reloadingOptions): lượt Reload có thể tự tụt về "Tất cả shop", lúc
+        // đó khối "HIỆU QUẢ THEO SHOP" phải hiện lại.
+        OnPropertyChanged(nameof(HienLuoiShop));
         if (!_reloadingOptions)
             ApplyStatistics();
     }
+
+    /// <summary>Có vẽ khối "HIỆU QUẢ THEO SHOP" không. Lọc ĐÚNG MỘT shop thì lưới đó chỉ còn một dòng lặp lại y các
+    /// thẻ số phía trên — bỏ đi, nhường cả chiều ngang cho "PHÂN BỔ TRẠNG THÁI".</summary>
+    public bool HienLuoiShop => string.IsNullOrWhiteSpace(SelectedShop) || SelectedShop == AllShopsLabel;
 
     partial void OnFromDateChanged(DateTime? value) => SauKhiDoiNgay();
     partial void OnToDateChanged(DateTime? value) => SauKhiDoiNgay();
@@ -301,9 +344,18 @@ public partial class OrderStatisticsViewModel : ViewModelBase, IDisposable
 
     /// <summary>Kho đơn vừa đổi (phiên sync ghi xong — CÓ THỂ từ thread nền) → vẽ lại. Đường TỰ ĐỘNG này KHÔNG ép
     /// vẽ số local (<c>epVeLocal = false</c>): đang hiện số chung thì giữ nguyên, kẻo mỗi lượt sync là một lần
-    /// "số nhảy".</summary>
+    /// "số nhảy".
+    /// <para>Màn đang ẨN thì chỉ ghi cờ rồi thôi — quét kho đơn trên luồng UI + bắn HTTP lên Hub cho một màn không
+    /// ai nhìn là lãng phí thuần (sự kiện này bắn sau MỖI shop của MỖI lượt sync). Lúc người dùng chọn lại màn,
+    /// <c>MainViewModel</c> gọi <see cref="Reload()"/> nên số vẫn tươi.</para></summary>
     private void OnOrdersChanged()
     {
+        if (!DangHienTrenMan)
+        {
+            _canVeLai = true;
+            return;
+        }
+
         UiDispatch.Run(() => Reload());
     }
 
@@ -323,14 +375,74 @@ public partial class OrderStatisticsViewModel : ViewModelBase, IDisposable
     /// </summary>
     public void Reload(bool epVeLocal = false)
     {
+        _canVeLai = false; // lượt vẽ này đã cuốn theo mọi thay đổi kho đơn bỏ lỡ lúc màn còn ẩn
         var previous = SelectedShop;
         _reloadingOptions = true;
         ShopOptions.Clear();
         ShopOptions.Add(AllShopsLabel);
-        foreach (var shop in _services.Orders.AllShopLogins()) ShopOptions.Add(shop);
+        foreach (var shop in DanhSachShop()) ShopOptions.Add(shop);
         SelectedShop = previous is not null && ShopOptions.Contains(previous) ? previous : AllShopsLabel;
         _reloadingOptions = false;
         ApplyStatistics(epVeLocal);
+    }
+
+    /// <summary>
+    /// Danh sách shop cho ComboBox lọc = shop CÒN đơn trên máy GỘP shop mà Hub từng trả số về
+    /// (<see cref="_shopTuHub"/>). Không gộp thì shop đã dọn hết đơn kết thúc sẽ biến mất khỏi danh sách và bộ lọc
+    /// âm thầm tụt về "Tất cả shop" ngay giữa lúc người dùng đang xem shop đó bằng SỐ CHUNG.
+    /// <para>Trùng tên KHÔNG phân biệt hoa/thường; giữ cách viết của MÁY (đứng trước trong chuỗi ghép) rồi sắp theo
+    /// đúng comparer dùng cho mọi thứ tự khác của màn.</para>
+    /// </summary>
+    private IEnumerable<string> DanhSachShop()
+        => _services.Orders.AllShopLogins()
+            .Concat(_shopTuHub)
+            .Distinct(StringComparer.CurrentCultureIgnoreCase)
+            .OrderBy(x => x, StringComparer.CurrentCultureIgnoreCase);
+
+    /// <summary>
+    /// Nhớ các shop Hub vừa trả về và bổ sung NGAY vào <see cref="ShopOptions"/> những shop còn thiếu (chèn đúng
+    /// chỗ theo thứ tự, không dựng lại cả danh sách — dựng lại là ComboBox nhả mất lựa chọn đang có).
+    /// <para><b>Bắt buộc bật <see cref="_reloadingOptions"/>:</b> quên là mỗi lần thêm mục lại kích
+    /// <c>OnSelectedShopChanged</c> → <c>ApplyStatistics</c> → hỏi Hub → thêm mục… (vòng vẽ lại vô tận).</para>
+    /// </summary>
+    private void GopShopTuHub(IEnumerable<string> shopsTuHub)
+    {
+        foreach (var shop in shopsTuHub)
+        {
+            var ten = shop?.Trim();
+            if (!string.IsNullOrEmpty(ten)) _shopTuHub.Add(ten);
+        }
+
+        var thieu = _shopTuHub
+            .Where(x => !ShopOptions.Contains(x, StringComparer.CurrentCultureIgnoreCase))
+            .OrderBy(x => x, StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
+        if (thieu.Count == 0) return;
+
+        var dangChon = SelectedShop;
+        _reloadingOptions = true;
+        try
+        {
+            foreach (var shop in thieu) ShopOptions.Insert(ViTriChenShop(shop), shop);
+            // ComboBox có thể nhả SelectedItem khi ItemsSource đổi → giữ nguyên lựa chọn của người dùng.
+            if (!string.Equals(SelectedShop, dangChon, StringComparison.Ordinal)) SelectedShop = dangChon;
+        }
+        finally
+        {
+            _reloadingOptions = false;
+        }
+    }
+
+    /// <summary>Chỗ chèn một shop mới cho <see cref="ShopOptions"/> giữ được thứ tự A→Z. Mục 0 là
+    /// "Tất cả shop" — LUÔN đứng đầu, không bao giờ chèn trước nó.</summary>
+    private int ViTriChenShop(string shop)
+    {
+        for (var i = 1; i < ShopOptions.Count; i++)
+        {
+            if (StringComparer.CurrentCultureIgnoreCase.Compare(ShopOptions[i], shop) > 0) return i;
+        }
+
+        return ShopOptions.Count;
     }
 
     /// <summary>
@@ -352,6 +464,10 @@ public partial class OrderStatisticsViewModel : ViewModelBase, IDisposable
             HasData = false;
             EmptyMessage = invalidMessage;
             ScopeText = invalidMessage;
+            // Chưa lọc được gì thì KHÔNG có nguồn số nào để nói — để nguyên dòng cũ là header vừa bảo "hãy chọn
+            // ngày" vừa khẳng định "Số chung toàn hệ thống (từ Hub)". Rỗng ⇒ XAML ẩn hẳn dòng.
+            SourceText = string.Empty;
+            SourceToolTip = null;
             return;
         }
 
@@ -383,7 +499,6 @@ public partial class OrderStatisticsViewModel : ViewModelBase, IDisposable
         // Đặt cờ ở ĐẦU hàm (không phải cuối): nhánh kho rỗng bên dưới return sớm, mà XAML vẫn cần biết đang xem
         // nguồn nào. Đây là cờ CHO XAML — khác hẳn _dangHienSoHub ở trên (điều khiển việc vẽ đè), đừng gộp.
         DangXemSoMay = true;
-        SourceText = ChayDocLap() ? SourceStandaloneText : SourceDangHoiText;
 
         var rows = _services.Orders.Query(
             shopLogin: shop,
@@ -395,6 +510,9 @@ public partial class OrderStatisticsViewModel : ViewModelBase, IDisposable
         _shopLocalLuotNay = shop;
         _rangeLocalLuotNay = range;
         HasData = rows.Count > 0;
+        // Dòng nguồn đặt SAU khi biết kho có đơn hay không: vế cảnh báo trỏ vào 3 THẺ SỐ, mà kho rỗng thì bên dưới
+        // chỉ có thẻ "chưa có dữ liệu" — dọa hụt số ở đó là trỏ vào chỗ trống.
+        DatDongNguonLocal(ChayDocLap() ? SourceStandaloneText : SourceDangHoiText, rows.Count > 0);
         EmptyMessage = rows.Count > 0
             ? string.Empty
             : BuildEmptyMessage(shop, range.FromLocalDate, range.ToLocalDate, PhamViMay);
@@ -485,7 +603,16 @@ public partial class OrderStatisticsViewModel : ViewModelBase, IDisposable
 
         if (shared is null)
         {
-            SourceText = _dangHienSoHub ? SourceSharedStaleText : NguonSoLocalText();
+            if (_dangHienSoHub)
+            {
+                SourceText = SourceSharedStaleText;
+                SourceToolTip = null;
+            }
+            else
+            {
+                DatDongNguonLocal(NguonSoLocalText(), HasData);
+            }
+
             return;
         }
 
@@ -501,9 +628,20 @@ public partial class OrderStatisticsViewModel : ViewModelBase, IDisposable
     private bool ChayDocLap()
         => _services.QueryOrderStatistics is null || _services.HubDaCauHinh?.Invoke() == false;
 
-    /// <summary>Dòng nguồn khi đang hiện số LOCAL và lượt hỏi Hub đã kết thúc mà không có số: máy CHƯA cấu hình
-    /// Hub thì nói "chạy độc lập" (không có gì để tố), có Hub mà im lặng thì nói thẳng Hub không phản hồi.</summary>
+    /// <summary>Câu NỀN của dòng nguồn khi đang hiện số LOCAL và lượt hỏi Hub đã kết thúc mà không có số: máy CHƯA
+    /// cấu hình Hub thì nói "chạy độc lập" (không có gì để tố), có Hub mà im lặng thì nói thẳng Hub không phản hồi.</summary>
     private string NguonSoLocalText() => ChayDocLap() ? SourceStandaloneText : SourceLocalText;
+
+    /// <summary>
+    /// Đặt dòng nguồn cho số LOCAL: câu nền + vế cảnh báo NGẮN, bản giải thích dài đẩy vào ToolTip. Chỉ ghép cảnh
+    /// báo khi <paramref name="coTheSo"/> — màn đang là thẻ "chưa có dữ liệu" mà vẫn nói "ĐÃ GIAO / ĐÃ HỦY /
+    /// DOANH THU bị HỤT" là đang trỏ vào những thẻ KHÔNG tồn tại (nghiệm thu đợt 1 bắt được).
+    /// </summary>
+    private void DatDongNguonLocal(string cauNen, bool coTheSo)
+    {
+        SourceText = coTheSo ? cauNen + CanhBaoKhoMayHutNganText : cauNen;
+        SourceToolTip = coTheSo ? GiaiThichKhoMayHutText : null;
+    }
 
     private void ApplyShared(SharedOrderStatistics shared, int requestId, string? shop, CreatedRange range)
     {
@@ -521,11 +659,16 @@ public partial class OrderStatisticsViewModel : ViewModelBase, IDisposable
             && string.Equals(_shopLocalLuotNay, shop, StringComparison.Ordinal)
             && _rangeLocalLuotNay.Equals(range))
         {
-            SourceText = string.Format(VnCulture, SourceHubBaoRongFormat, Number(_soDonLocalLuotNay));
+            DatDongNguonLocal(string.Format(VnCulture, SourceHubBaoRongFormat, Number(_soDonLocalLuotNay)), HasData);
             return;
         }
 
+        // Shop chỉ CÒN sống trên Hub (máy đã dọn hết đơn kết thúc của nó) vẫn phải nằm trong ô lọc — nếu không,
+        // lượt Reload sau sẽ đá bộ lọc về "Tất cả shop" giữa lúc người dùng đang xem đúng shop đó.
+        GopShopTuHub(shared.ShopRows.Select(x => x.Shop));
+
         SourceText = SourceSharedText;
+        SourceToolTip = null; // số chung đủ lịch sử → không còn gì để giải thích
         DangXemSoMay = false; // lưới sắp mang số CHUNG → gỡ ghi chú "chỉ đơn CÒN trên máy" khỏi 3 thẻ
         // Nhớ "đang hiện số chung của (shop, khoảng) này" → lượt vẽ kế tiếp cùng shop/khoảng khỏi vẽ đè số local.
         _dangHienSoHub = true;
@@ -550,35 +693,48 @@ public partial class OrderStatisticsViewModel : ViewModelBase, IDisposable
             ? lastSynced.ToLocalTime().ToString("dd/MM/yyyy HH:mm", VnCulture)
             : "Chưa đồng bộ";
 
-        Replace(StatusRows, shared.StatusRows.Select(x => new OrderStatisticBreakdown(
+        // 4 lưới đều SẮP LẠI ở client: hub sắp theo Ordinal ("Giao hàng" trước "Đã giao"), số local sắp theo
+        // CurrentCultureIgnoreCase — cùng một màn mà hai nguồn cho hai thứ tự khác nhau thì người dùng tưởng dữ
+        // liệu đổi. Sắp ở đây chứ KHÔNG sửa hub: client cũ vẫn đang chạy với hợp đồng hiện tại.
+        Replace(StatusRows, SapNhuSoLocal(shared.StatusRows.Select(x => new OrderStatisticBreakdown(
             x.Label,
             x.OrderCount,
             Number(x.OrderCount),
             x.Value == 0 ? string.Empty : Money((long)x.Value),
             x.Percentage,
-            x.Percentage.ToString("0.#", VnCulture) + "%")));
-        Replace(ShopRows, shared.ShopRows.Select(x => new ShopStatisticRow(
+            x.Percentage.ToString("0.#", VnCulture) + "%"))));
+        Replace(ShopRows, SapNhuSoLocal(shared.ShopRows.Select(x => new ShopStatisticRow(
             x.Shop,
             x.OrderCount,
             x.ItemCount,
             Money((long)x.Revenue),
             Money((long)x.Average),
-            x.TrackingRate.ToString("0.#", VnCulture) + "%")));
-        Replace(CarrierRows, shared.CarrierRows.Select(x => new OrderStatisticBreakdown(
+            x.TrackingRate.ToString("0.#", VnCulture) + "%"))));
+        Replace(CarrierRows, SapNhuSoLocal(shared.CarrierRows.Select(x => new OrderStatisticBreakdown(
             x.Label,
             x.OrderCount,
             Number(x.OrderCount),
             string.Empty,
             x.Percentage,
-            x.Percentage.ToString("0.#", VnCulture) + "%")));
-        Replace(PaymentRows, shared.PaymentRows.Select(x => new OrderStatisticBreakdown(
+            x.Percentage.ToString("0.#", VnCulture) + "%"))));
+        Replace(PaymentRows, SapNhuSoLocal(shared.PaymentRows.Select(x => new OrderStatisticBreakdown(
             x.Label,
             x.OrderCount,
             Number(x.OrderCount),
             string.Empty,
             x.Percentage,
-            x.Percentage.ToString("0.#", VnCulture) + "%")));
+            x.Percentage.ToString("0.#", VnCulture) + "%"))));
     }
+
+    /// <summary>Sắp dòng Hub theo ĐÚNG luật của số local: nhiều đơn trước, bằng nhau thì theo nhãn (so sánh theo
+    /// văn hoá, bỏ qua hoa/thường) — xem <see cref="BuildBreakdown"/>.</summary>
+    private static IEnumerable<OrderStatisticBreakdown> SapNhuSoLocal(IEnumerable<OrderStatisticBreakdown> rows)
+        => rows.OrderByDescending(x => x.OrderCount).ThenBy(x => x.Label, StringComparer.CurrentCultureIgnoreCase);
+
+    /// <summary>Bản cho lưới shop của <see cref="SapNhuSoLocal(IEnumerable{OrderStatisticBreakdown})"/> — cùng luật
+    /// với <see cref="BuildShopRows"/>.</summary>
+    private static IEnumerable<ShopStatisticRow> SapNhuSoLocal(IEnumerable<ShopStatisticRow> rows)
+        => rows.OrderByDescending(x => x.OrderCount).ThenBy(x => x.Shop, StringComparer.CurrentCultureIgnoreCase);
 
     private static bool TryBuildCreatedRange(DateTime? fromDate, DateTime? toDate,
         out CreatedRange range, out string invalidMessage)
@@ -641,7 +797,10 @@ public partial class OrderStatisticsViewModel : ViewModelBase, IDisposable
             {
                 var count = g.Count();
                 var percent = total == 0 ? 0 : count * 100d / total;
-                var value = includeRevenue ? Money(g.Where(r => !IsCancelled(r)).Sum(RevenueOf)) : string.Empty;
+                // Tổng = 0 ⇒ ô "Ước tính" để RỖNG, KHÔNG in "₫0": đường Hub đã bỏ trống ô này khi hub trả 0
+                // (xem ApplyShared), hai nguồn phải cùng một luật hiển thị.
+                var revenue = includeRevenue ? g.Where(r => !IsCancelled(r)).Sum(RevenueOf) : 0;
+                var value = revenue == 0 ? string.Empty : Money(revenue);
                 return new OrderStatisticBreakdown(g.Key, count, Number(count), value, percent,
                     percent.ToString("0.#", VnCulture) + "%");
             })

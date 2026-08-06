@@ -132,6 +132,9 @@ public partial class MainViewModel : ViewModelBase
 
     partial void OnSelectedNavIndexChanged(int value)
     {
+        // Màn Thống kê sống suốt vòng đời app: cho nó biết đang hiện hay đang ẩn để lúc ẩn thì bỏ qua việc quét kho
+        // đơn + hỏi Hub mỗi lượt sync (case 2 bên dưới vẫn Reload nên mở lên là số tươi).
+        _statisticsVm.DangHienTrenMan = value == 2;
         switch (value)
         {
             case 0:

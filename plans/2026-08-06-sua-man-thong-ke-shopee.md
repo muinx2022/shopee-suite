@@ -259,6 +259,25 @@ nhịp sang ngày tự đọc đồng hồ ⇒ 2 test đỏ; bỏ chốt Hub-0-�
 Ba mục còn lại của báo cáo nghiệm thu (dòng cảnh báo trỏ vào chỗ trống, nhảy bố cục do `Collapsed`, dòng thẻ
 DOANH THU có nguy cơ tràn) đã dồn vào **bước 15** ở trên.
 
-### Đợt 2 (bước 7-15)
+### Đợt 2 (bước 7-15) — HOÀN THÀNH
 
-<chưa làm>
+Người thực thi: `opus-executor`. Đã làm đủ 9 bước, chạm đúng 5 file, **không đụng `server/Shopee.Hub.Web`**.
+
+**Lệch plan có chủ ý (phiên chính đồng ý):** bước 7 gộp **toàn bộ** shop Hub vào `ShopOptions` thay vì chỉ giữ
+lại shop đang chọn — bản literal của plan chỉ cứu được shop đang chọn, các shop Hub khác vẫn biến mất ngay lượt
+`Reload` kế tiếp và không bao giờ quay lại (khi đã lọc 1 shop thì Hub chỉ trả `ShopRows` của shop đó).
+
+**Kiểm chứng (phiên chính tự chạy):** build `ShopeeSuite.sln` = 0 warning/0 error; `dotnet test orders` =
+**1604 xanh** (đợt 1: 1595, +9 ca). Người thực thi thử 13 mutant, 12 chết ngay, 1 sống (test bước 7 dựng sẵn shop
+từ ctor nên đoạn chèn không bao giờ chạy) → đã viết lại test cho tới khi mutant chết.
+
+**Soi bằng mắt (harness render, việc mà subagent không làm được):**
+- 2 ô ngày hiện `01/08/2026` / `06/08/2026` — hết cảnh một màn hai định dạng ngày.
+- Dòng nguồn rút còn 1 dòng, phần dài đã vào ToolTip; header hết chật.
+- Nhãn `ĐỒNG BỘ GẦN NHẤT (TRONG KHOẢNG)`.
+- Cột "Ước tính" của dòng "Đã hủy" nay TRỐNG (trước `₫0`) — khớp luật của số Hub.
+- Lưới cao theo nội dung: ở 1366×768 nhìn được thêm hẳn một khối so với trước.
+- Lọc 1 shop → khối "HIỆU QUẢ THEO SHOP" biến mất và lưới trạng thái nở ra 2 cột (`Grid.ColumnSpan` qua
+  `DataTrigger` chạy thật — đây là chỗ người thực thi tự đánh dấu "dễ câm nhất").
+- Dòng ghép thẻ DOANH THU hiện đủ, không bị cắt `…` ở 1366px.
+- Lăn chuột trên lưới: trang vẫn cuộn được (`0→48`) — đợt 2 không làm hỏng bản vá của đợt 1.
