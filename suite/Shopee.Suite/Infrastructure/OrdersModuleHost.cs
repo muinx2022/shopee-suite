@@ -114,6 +114,7 @@ public static partial class OrdersModuleHost
         try { _mirrorTimer?.Dispose(); } catch { /* bỏ qua khi thoát */ }   // dừng worker đẩy gương danh bạ
         try { _outboxWorker?.Dispose(); } catch { /* bỏ qua khi thoát */ }  // dừng vòng chờ đẩy
         try { _mainVm?.AccountsVm.Dispose(); } catch { /* bỏ qua khi thoát */ } // dừng nhịp dò sang ngày mới
+        try { _mainVm?.StatisticsVm.Dispose(); } catch { /* bỏ qua khi thoát */ } // nhịp sang ngày của màn Thống kê
         try { await svc.Sessions.StopAllAsync(); } catch { /* bỏ qua khi thoát */ }
         // Dispose SAU CÙNG: phiên đang dừng vẫn còn ghi log. ActivityLog gom dòng trong bộ đệm rồi mới xả ra file
         // theo nhịp — không Dispose là mất nốt phần _pending của phút cuối (đúng lúc cần soi nhất khi thoát bất thường).

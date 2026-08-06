@@ -178,6 +178,16 @@ public class AppServices
     public Func<DateTime, DateTime, string?, CancellationToken, Task<SharedOrderStatistics?>>? QueryOrderStatistics { get; set; }
 
     /// <summary>
+    /// HOOK hỏi "máy này ĐÃ cấu hình Hub chưa" — do shell suite RÓT (module Đơn hàng KHÔNG tham chiếu
+    /// <c>Shopee.Core</c> nên không tự biết hub). Các hook đọc/đẩy Hub được rót VÔ ĐIỀU KIỆN (chúng tự trả null khi
+    /// chưa nối), nên riêng chúng KHÔNG phân biệt được "chưa cấu hình Hub" với "Hub chết" — màn Thống kê cần cờ này
+    /// để đừng tố "Hub không phản hồi" trên máy vốn chạy độc lập.
+    /// <para>Phải đọc TƯƠI mỗi lần gọi (người dùng có thể cấu hình Hub rồi kết nối lại giữa chừng). Mặc định
+    /// <c>null</c> = KHÔNG BIẾT → bên gọi coi như CÓ hub, giữ nguyên hành vi cũ.</para>
+    /// </summary>
+    public Func<bool>? HubDaCauHinh { get; set; }
+
+    /// <summary>
     /// HOOK đọc SỐ ĐƠN "chuẩn bị hàng" CHUNG TOÀN HỆ THỐNG theo shop trong MỘT ngày (tab "Kết quả"), do shell
     /// suite RÓT (module Đơn hàng KHÔNG tham chiếu <c>Shopee.Core</c> nên không tự biết hub). Tham số: <c>day</c>
     /// (<c>yyyy-MM-dd</c> giờ địa phương), <c>ct</c>; trả map <c>shop_login → số đơn</c>. Hub đếm THẲNG từ bảng đơn

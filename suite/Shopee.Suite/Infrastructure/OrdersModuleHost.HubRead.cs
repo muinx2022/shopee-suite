@@ -19,6 +19,11 @@ public static partial class OrdersModuleHost
     /// </summary>
     private static void WireOrderStatisticsRead(AppServices services)
     {
+        // Cờ "máy này đã cấu hình Hub chưa" — hook QueryOrderStatistics bên dưới được rót VÔ ĐIỀU KIỆN nên tự nó
+        // không phân biệt được "chưa nối Hub" với "Hub chết"; màn Thống kê đọc cờ này để đừng tố oan Hub trên máy
+        // vốn chạy độc lập. Đọc TƯƠI mỗi lần gọi (người dùng có thể cấu hình Hub rồi Reconnect giữa chừng).
+        services.HubDaCauHinh = () => CoordinationRuntime.Client is not null;
+
         services.QueryOrderStatistics = async (fromUtc, toUtcExclusive, shopLogin, ct) =>
         {
             try

@@ -224,6 +224,41 @@ style của suite. Đã đo: dựng view ngoài shell thì cả 4 lưới **nhâ
 
 ---
 
-## Báo cáo thực thi (Opus điền sau khi xong)
+## Bổ sung sau nghiệm thu đợt 1 (dồn sang ĐỢT 2)
 
-<chưa có>
+**Bước 15 — dọn phần chữ + bố cục mà đợt 1 làm phát sinh:**
+- `SourceText` nay dài, tràn 2 dòng và chạy sát ô "Từ ngày" ở 1366px → rút gọn phần luôn hiện, đẩy phần giải
+  thích dài vào `ToolTip`.
+- Câu cảnh báo "…ĐÃ GIAO / ĐÃ HỦY / DOANH THU **bên dưới** bị HỤT" vẫn hiện khi `HasData == false` (kho rỗng) —
+  lúc đó bên dưới không có thẻ nào. Phải câm ở cả nhánh kho rỗng, không chỉ nhánh khoảng-ngày-không-hợp-lệ.
+- `BoolToVis` = Visible/**Collapsed** ⇒ 2 dòng ghi chú xuất hiện rồi biến mất làm cả hàng thẻ nhảy ~14px mỗi lượt
+  Hub trả lời → dùng `Hidden` hoặc chừa `MinHeight` giữ chỗ.
+- Dòng ghép của thẻ DOANH THU ("Không tính đơn hủy · chỉ đơn CÒN trên máy") chưa có `TextTrimming`/`TextWrapping`,
+  cần đo lại bề rộng ở 1366px.
+
+## Báo cáo thực thi
+
+### Đợt 1 (bước 1-6) — HOÀN THÀNH
+
+Người thực thi: `opus-executor`. Phản biện: `nghiem-thu` → kết luận "đạt có điều kiện", chỉ ra **2 lỗi thật**;
+phiên chính tự kiểm chứng lại, xác nhận cả hai đúng và **tự sửa**:
+
+1. **Test nhịp sang ngày là test RỖNG.** `ApplyDatePreset` tự đọc `DateTime.Today` nên tham số `homNay` của
+   `KiemTraSangNgay` không đi tới đâu; test chỉ assert "đã vẽ lại". Đã tách lõi
+   `ApDungChipNgay(preset, homNay)` để nhịp truyền ngày mới xuống, và siết test assert `FromDate`/`ToDate`
+   THẬT SỰ trượt (+ thêm ca chip "Hôm nay").
+2. **Ca "Hub báo 0 đơn" vẫn kẹt màn rỗng.** Lượt `epVeLocal` vẫn bắn hỏi Hub, Hub trả 0 → `ApplyShared` hạ
+   `HasData` → số local chỉ nháy một vòng HTTP. Đã thêm chốt trong `ApplyShared`: Hub báo 0 đơn mà kho máy vừa
+   đọc ra đơn cho ĐÚNG (shop, khoảng) đó → GIỮ lưới số máy, đổi dòng nguồn nói thẳng lý do.
+
+**Kiểm chứng cuối (phiên chính tự chạy):** `dotnet build ShopeeSuite.sln` = 0 warning/0 error;
+`dotnet test orders` = **1595 xanh** (trước đợt: 1578). Thử phá 3 luật mới → **cả 3 mutant đều bị test giết**:
+nhịp sang ngày tự đọc đồng hồ ⇒ 2 test đỏ; bỏ chốt Hub-0-đơn ⇒ 1 test đỏ; nới chốt thành `>= 0` ⇒ 1 test đỏ.
+Đo bằng harness WPF render offscreen: lăn chuột trên lưới `0→0` (trước) → `0→48` (sau), lăn ngược ở đỉnh cũng nhả.
+
+Ba mục còn lại của báo cáo nghiệm thu (dòng cảnh báo trỏ vào chỗ trống, nhảy bố cục do `Collapsed`, dòng thẻ
+DOANH THU có nguy cơ tràn) đã dồn vào **bước 15** ở trên.
+
+### Đợt 2 (bước 7-15)
+
+<chưa làm>

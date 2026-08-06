@@ -26,19 +26,39 @@ public sealed record ShopStatisticRow(string Shop, int OrderCount, int ItemCount
 /// xin số CHUNG toàn hệ thống và thay vào — <see cref="SourceText"/> luôn nói rõ đang xem số nào.
 /// Doanh thu ước tính bỏ đơn hủy, ưu tiên <c>final_amount</c> và dùng <c>total_price</c> khi chưa có số cuối cùng.
 /// </summary>
-public partial class OrderStatisticsViewModel : ViewModelBase
+public partial class OrderStatisticsViewModel : ViewModelBase, IDisposable
 {
     public const string AllShopsLabel = "Tất cả shop";
+
+    /// <summary>
+    /// Vế CẢNH BÁO ghép vào MỌI dòng nguồn số LOCAL. Kho <c>orders</c> trên máy KHÔNG phải kho lịch sử:
+    /// <c>HubOutbox</c> xoá hẳn đơn Đã giao/Đã hủy sau khi xong nghĩa vụ đẩy, và <c>OrderPersistPipeline</c> chỉ
+    /// INSERT đơn mới khi còn "Chuẩn bị hàng" — nên khi đang xem số của máy thì 3 thẻ ĐÃ GIAO / ĐÃ HỦY / DOANH THU
+    /// luôn HỤT. Nói thẳng ra màn thay vì dựng thêm bảng tổng hợp ở client (đã chốt: Hub là kho lịch sử duy nhất).
+    /// </summary>
+    private const string CanhBaoKhoMayHutText =
+        " Kho máy chỉ giữ đơn CHƯA kết thúc (đơn Đã giao/Đã hủy đã dọn sau khi đẩy Hub & Google Sheet)" +
+        " — ĐÃ GIAO / ĐÃ HỦY / DOANH THU bên dưới bị HỤT.";
+
     /// <summary>Lượt hỏi Hub CÒN ĐANG BAY — số đang hiện là số local vẽ tạm. KHÔNG được nói "Hub không phản hồi"
     /// ở trạng thái này: lượt hỏi chưa xong thì chưa biết hub sống hay chết (đó là lỗi cũ — mỗi lần đổi ngày là
     /// hiện một dòng cáo buộc hub chết trong khi hub vẫn đang trả lời).</summary>
-    private const string SourceDangHoiText = "Số trên MÁY NÀY — đang hỏi Hub số chung…";
-    private const string SourceLocalText = "Số trên MÁY NÀY — Hub không phản hồi nên chưa gộp được số chung.";
-    private const string SourceStandaloneText = "Số trên MÁY NÀY (app chạy độc lập, chưa nối Hub).";
+    private const string SourceDangHoiText = "Số trên MÁY NÀY — đang hỏi Hub số chung…" + CanhBaoKhoMayHutText;
+    private const string SourceLocalText =
+        "Số trên MÁY NÀY — Hub không phản hồi nên chưa gộp được số chung." + CanhBaoKhoMayHutText;
+    private const string SourceStandaloneText =
+        "Số trên MÁY NÀY (app chạy độc lập, chưa nối Hub)." + CanhBaoKhoMayHutText;
     private const string SourceSharedText = "Số chung toàn hệ thống (từ Hub).";
     /// <summary>Đang GIỮ số chung của lượt hỏi trước mà lượt hỏi mới nhất không về được — nói thẳng thay vì lẳng
     /// lặng để nguyên dòng "Số chung (Hub)" như thể vừa cập nhật.</summary>
     private const string SourceSharedStaleText = "Số chung (Hub) của lượt hỏi trước — lượt này Hub không phản hồi.";
+
+    /// <summary>Hub bảo khoảng này KHÔNG có đơn nào trong khi kho máy vừa đọc ra {0} đơn. Hai bên nói ngược nhau
+    /// (thường vì đơn của máy CHƯA đẩy lên Hub xong) — vẽ đè màn rỗng của Hub lên số máy đang có là "hỏng im
+    /// lặng": người dùng bấm "Làm mới", thấy số nháy một cái rồi màn trắng. Giữ số máy và nói thẳng ra.</summary>
+    private const string SourceHubBaoRongFormat =
+        "Hub báo 0 đơn cho khoảng này, nhưng máy này đang có {0} đơn — hiện SỐ MÁY NÀY"
+        + " (thường do đơn của máy chưa đẩy hết lên Hub)." + CanhBaoKhoMayHutText;
     private static readonly CultureInfo VnCulture = CultureInfo.GetCultureInfo("vi-VN");
     private readonly AppServices _services;
     private bool _reloadingOptions;
@@ -57,6 +77,27 @@ public partial class OrderStatisticsViewModel : ViewModelBase
     private string? _shopSoHub;
     private CreatedRange _rangeSoHub;
 
+    /// <summary>Số đơn kho MÁY đọc ra ở lượt <see cref="ApplyLocal"/> gần nhất, kèm shop + khoảng ngày của lượt
+    /// đó. Dùng để bắt ca "Hub báo 0 đơn mà máy đang có đơn" (xem <see cref="SourceHubBaoRongFormat"/>) — phải so
+    /// CẢ shop lẫn khoảng, vì số của khoảng khác thì không nói lên điều gì. Chỉ đọc/ghi trên luồng UI.</summary>
+    private int _soDonLocalLuotNay;
+    private string? _shopLocalLuotNay;
+    private CreatedRange _rangeLocalLuotNay;
+
+    // ══════════ Nhịp tự sang ngày mới (app chạy 24/7) ══════════
+    /// <summary>Nhịp dò "đã sang ngày mới chưa" — 60s: đủ nhạy để chip khoảng ngày trượt sang ngày mới gần như
+    /// tức thì mà gần như không tốn gì (chỉ so hai <see cref="DateTime"/>, không đụng DB/hub khi ngày chưa đổi).
+    /// Cùng con số với nhịp của tab "Kết quả" bên màn Tài khoản.</summary>
+    private static readonly TimeSpan NhipDoSangNgay = TimeSpan.FromSeconds(60);
+
+    /// <summary>Đồng hồ dò sang ngày (chạy trên thread nền → callback marshal về UI thread). Dựng ở ctor, dọn ở
+    /// <see cref="Dispose"/> (shell gọi khi thoát app — <c>OrdersModuleHost.StopAsync</c>).</summary>
+    private readonly System.Threading.Timer _timerSangNgay;
+
+    /// <summary>Ngày mà màn coi là HÔM NAY ở lần dò gần nhất. Chỉ đụng trên UI thread (xem
+    /// <see cref="KiemTraSangNgay"/>).</summary>
+    private DateTime _ngayCoiLaHomNay;
+
     // ══════════ Chip chọn nhanh khoảng ngày (Hôm nay · 7 ngày · Tháng này) ══════════
     /// <summary>Chip "Hôm nay": Từ = Đến = hôm nay.</summary>
     public const string PresetHomNay = "hom-nay";
@@ -74,9 +115,71 @@ public partial class OrderStatisticsViewModel : ViewModelBase
         _services = services;
         _services.OrdersChanged += OnOrdersChanged;
         var today = DateTime.Today;
+        _ngayCoiLaHomNay = today;
         _fromDate = new DateTime(today.Year, today.Month, 1);
         _toDate = today;
         Reload();
+
+        // App chạy VÒNG LIÊN TỤC CẢ ĐÊM: không có nhịp này thì qua nửa đêm chip "Hôm nay"/"7 ngày"/"Tháng này"
+        // vẫn sáng nhưng khoảng ngày đứng ở HÔM QUA — người dùng đọc số cũ mà tưởng số của ngày mới. Callback
+        // chạy trên thread nền nên tự marshal về UI thread (xem NhipSangNgay).
+        _timerSangNgay = new System.Threading.Timer(_ => NhipSangNgay(), null, NhipDoSangNgay, NhipDoSangNgay);
+    }
+
+    /// <summary>Dọn nhịp dò sang ngày + gỡ đăng ký <c>OrdersChanged</c>. VM sống suốt vòng đời app (dựng một lần
+    /// trong <see cref="MainViewModel"/>) nên điểm dọn là lúc THOÁT app — <c>OrdersModuleHost.StopAsync</c>, đúng
+    /// chỗ đang dọn timer nền của các màn con khác.</summary>
+    public void Dispose()
+    {
+        try { _timerSangNgay.Dispose(); } catch { /* bỏ qua khi thoát */ }
+        // AppServices sống suốt vòng đời app → không gỡ là VM này còn bị giữ lại (rò bộ nhớ).
+        try { _services.OrdersChanged -= OnOrdersChanged; } catch { /* bỏ qua khi thoát */ }
+    }
+
+    /// <summary>Một nhịp của <see cref="_timerSangNgay"/> (THREAD NỀN) → marshal về UI thread rồi dò sang ngày.
+    /// Nuốt lỗi: ngoại lệ lọt ra khỏi callback <see cref="System.Threading.Timer"/> sẽ GIẾT tiến trình, mà nhịp
+    /// này chỉ là tiện ích (vd đang tắt app, không có dispatcher) — bỏ một nhịp thì nhịp sau dò lại.</summary>
+    private void NhipSangNgay()
+    {
+        try
+        {
+            UiDispatch.Run(() => KiemTraSangNgay(DateTime.Today));
+        }
+        catch
+        {
+            // bỏ nhịp này
+        }
+    }
+
+    /// <summary>
+    /// Dò sang ngày mới rồi cho khoảng ngày TRƯỢT theo: đang dùng CHIP (<see cref="DatePreset"/> khác rỗng) thì
+    /// tính lại đúng chip đó cho ngày hôm nay; <see cref="DatePreset"/> RỖNG = người dùng tự chọn ngày trên lịch
+    /// → <b>TUYỆT ĐỐI không giật ngày khỏi tay họ</b>.
+    /// <para>Mốc <see cref="_ngayCoiLaHomNay"/> LUÔN được cập nhật (kể cả nhánh không đổi gì) — không thì mỗi
+    /// nhịp 60s của hôm sau lại chạy lại một lượt vẽ + một lượt hỏi Hub vô ích.</para>
+    /// Nhận <paramref name="homNay"/> từ bên gọi (thay vì tự đọc đồng hồ) để test mô phỏng được lúc qua nửa đêm.
+    /// Trả <c>true</c> khi ĐÃ tính lại khoảng ngày. Chỉ chạy trên UI thread (bên gọi đã marshal).
+    /// </summary>
+    internal bool KiemTraSangNgay(DateTime homNay)
+    {
+        var nay = homNay.Date;
+        if (nay == _ngayCoiLaHomNay)
+        {
+            return false; // chưa sang ngày → đường nóng, không đụng gì
+        }
+
+        _ngayCoiLaHomNay = nay;
+
+        var chip = DatePreset;
+        if (string.IsNullOrEmpty(chip))
+        {
+            return false; // người dùng tự chọn khoảng ngày → giữ nguyên, không giật khỏi tay họ
+        }
+
+        // Truyền NGÀY MỚI xuống (không để hàm kia tự đọc đồng hồ): có vậy khoảng ngày mới thật sự trượt sang
+        // hôm nay, và test mới mô phỏng được lúc qua nửa đêm.
+        ApDungChipNgay(chip, nay); // tự đặt lại CẢ HAI mốc + vẽ lại đúng MỘT lượt
+        return true;
     }
 
     public ObservableCollection<string> ShopOptions { get; } = new();
@@ -94,6 +197,15 @@ public partial class OrderStatisticsViewModel : ViewModelBase
     /// <summary>Dòng chữ dưới tiêu đề: số đang xem là của MÁY NÀY hay CHUNG toàn hệ thống (chống "hỏng im lặng" —
     /// Hub lỗi mà vẫn hiện số local như thể là số chung).</summary>
     [ObservableProperty] private string _sourceText = SourceStandaloneText;
+
+    /// <summary>
+    /// Lưới đang hiện số LOCAL (số của MÁY NÀY) — XAML bám cờ này để dán ghi chú "chỉ đơn CÒN trên máy" lên 3 thẻ
+    /// ĐÃ GIAO / ĐÃ HỦY / DOANH THU (ba thẻ luôn hụt khi xem số máy, xem <see cref="CanhBaoKhoMayHutText"/>).
+    /// <para><b>KHÔNG gộp với <see cref="_dangHienSoHub"/>:</b> cái kia là field NỘI BỘ điều khiển việc có vẽ đè số
+    /// local hay không (cơ chế chống "số nhảy" mỗi lượt sync); cái này chỉ để XAML biết đang hiện nguồn nào. Gộp
+    /// hai thứ là làm hỏng chống-số-nhảy.</para>
+    /// </summary>
+    [ObservableProperty] private bool _dangXemSoMay = true;
     [ObservableProperty] private string _totalOrdersText = "0";
     [ObservableProperty] private string _totalItemsText = "0";
     [ObservableProperty] private string _needsActionText = "0";
@@ -150,9 +262,16 @@ public partial class OrderStatisticsViewModel : ViewModelBase
     /// Tham số lạ/null → không làm gì (không đổi khoảng đang xem).
     /// </summary>
     [RelayCommand]
-    private void ApplyDatePreset(string? preset)
+    private void ApplyDatePreset(string? preset) => ApDungChipNgay(preset, DateTime.Today);
+
+    /// <summary>
+    /// LÕI của chip khoảng ngày — nhận mốc <paramref name="homNay"/> từ bên gọi thay vì tự đọc đồng hồ, để nhịp
+    /// sang ngày (<see cref="KiemTraSangNgay"/>) truyền ngày MỚI xuống được và để test mô phỏng được lúc qua nửa
+    /// đêm. Người bấm chip trên màn đi qua <see cref="ApplyDatePresetCommand"/> nên vẫn dùng đồng hồ máy.
+    /// </summary>
+    internal void ApDungChipNgay(string? preset, DateTime homNay)
     {
-        var today = DateTime.Today;
+        var today = homNay.Date;
         DateTime from;
         switch (preset)
         {
@@ -180,13 +299,29 @@ public partial class OrderStatisticsViewModel : ViewModelBase
         ApplyStatistics();
     }
 
+    /// <summary>Kho đơn vừa đổi (phiên sync ghi xong — CÓ THỂ từ thread nền) → vẽ lại. Đường TỰ ĐỘNG này KHÔNG ép
+    /// vẽ số local (<c>epVeLocal = false</c>): đang hiện số chung thì giữ nguyên, kẻo mỗi lượt sync là một lần
+    /// "số nhảy".</summary>
     private void OnOrdersChanged()
     {
-        UiDispatch.Run(Reload);
+        UiDispatch.Run(() => Reload());
     }
 
+    /// <summary>
+    /// Nút "Làm mới" trên màn — tooltip hứa "Đọc lại số liệu từ kho đơn" nên phải ĐỌC THẬT: ép vẽ lại số LOCAL
+    /// ngay cả khi đang hiện số chung của Hub. Không có đường ép này thì bấm nút cũng vô nghĩa (mọi lối vào đều
+    /// bị <c>giuSoHub</c> chặn) và Hub báo 0 đơn là màn kẹt rỗng dù kho đơn trên máy có đơn.
+    /// <para>Đường TỰ ĐỘNG (<see cref="OnOrdersChanged"/> — bắn sau mỗi shop của mỗi lượt sync) vẫn gọi
+    /// <see cref="Reload()"/> KHÔNG ép, để giữ nguyên cơ chế chống "số nhảy".</para>
+    /// </summary>
     [RelayCommand]
-    public void Reload()
+    private void LamMoi() => Reload(epVeLocal: true);
+
+    /// <summary>
+    /// Dựng lại danh sách shop rồi vẽ lại thống kê. <paramref name="epVeLocal"/> = true (chỉ nút "Làm mới") ⇒ vẽ
+    /// đè số LOCAL kể cả khi đang hiện số chung; false (mặc định — đổi màn, kho đơn đổi) ⇒ giữ số chung như cũ.
+    /// </summary>
+    public void Reload(bool epVeLocal = false)
     {
         var previous = SelectedShop;
         _reloadingOptions = true;
@@ -195,14 +330,15 @@ public partial class OrderStatisticsViewModel : ViewModelBase
         foreach (var shop in _services.Orders.AllShopLogins()) ShopOptions.Add(shop);
         SelectedShop = previous is not null && ShopOptions.Contains(previous) ? previous : AllShopsLabel;
         _reloadingOptions = false;
-        ApplyStatistics();
+        ApplyStatistics(epVeLocal);
     }
 
     /// <summary>
     /// Vẽ lại tab Thống kê. Số LOCAL vẽ NGAY (đồng bộ — không chặn luồng UI dù Hub chậm/chết), rồi mới hỏi Hub ở
     /// NỀN; có số chung thì thay vào. Mỗi lượt mang một số thứ tự để kết quả Hub về muộn của lượt cũ không đè lượt mới.
+    /// <para><paramref name="epVeLocal"/> = true (nút "Làm mới") ⇒ bỏ qua cơ chế giữ số Hub, vẽ đè số local.</para>
     /// </summary>
-    private void ApplyStatistics()
+    private void ApplyStatistics(bool epVeLocal = false)
     {
         var requestId = ++_statsRequestId; // luôn ở luồng UI (đổi ngày/shop/Reload)
         var shop = string.IsNullOrWhiteSpace(SelectedShop) || SelectedShop == AllShopsLabel
@@ -221,7 +357,9 @@ public partial class OrderStatisticsViewModel : ViewModelBase
 
         // Đang hiện số chung ĐÚNG shop + ĐÚNG khoảng ngày này → GIỮ nguyên lưới, chỉ hỏi lại Hub. Vẽ local đè ở đây
         // là nguồn của "số nhảy": mỗi lượt sync bắn OrdersChanged → số tụt về số máy rồi lại vọt lên số chung.
-        var giuSoHub = _dangHienSoHub
+        // Trừ khi người dùng CHỦ ĐỘNG bấm "Làm mới" — lúc đó họ đang đòi đọc lại kho đơn, phải chiều.
+        var giuSoHub = !epVeLocal
+            && _dangHienSoHub
             && string.Equals(_shopSoHub, shop, StringComparison.Ordinal)
             && _rangeSoHub.Equals(range);
         if (!giuSoHub)
@@ -242,13 +380,20 @@ public partial class OrderStatisticsViewModel : ViewModelBase
         // Có hook Hub = lượt hỏi sắp bắn NGAY sau đây → "đang hỏi", KHÔNG phải "Hub không phản hồi" (chưa hỏi xong
         // thì chưa có quyền kết luận hub chết). Dòng "không phản hồi" chỉ đặt khi lượt hỏi thực sự trả null.
         _dangHienSoHub = false;
-        SourceText = _services.QueryOrderStatistics is null ? SourceStandaloneText : SourceDangHoiText;
+        // Đặt cờ ở ĐẦU hàm (không phải cuối): nhánh kho rỗng bên dưới return sớm, mà XAML vẫn cần biết đang xem
+        // nguồn nào. Đây là cờ CHO XAML — khác hẳn _dangHienSoHub ở trên (điều khiển việc vẽ đè), đừng gộp.
+        DangXemSoMay = true;
+        SourceText = ChayDocLap() ? SourceStandaloneText : SourceDangHoiText;
 
         var rows = _services.Orders.Query(
             shopLogin: shop,
             shopExact: shop is not null,
             createdFromUtc: range.CreatedFromUtc,
             createdBeforeUtc: range.CreatedBeforeUtc);
+        // Nhớ lại số đơn của ĐÚNG (shop, khoảng) này để lượt Hub trả lời còn đối chiếu được (ca Hub báo 0 đơn).
+        _soDonLocalLuotNay = rows.Count;
+        _shopLocalLuotNay = shop;
+        _rangeLocalLuotNay = range;
         HasData = rows.Count > 0;
         EmptyMessage = rows.Count > 0
             ? string.Empty
@@ -340,12 +485,25 @@ public partial class OrderStatisticsViewModel : ViewModelBase
 
         if (shared is null)
         {
-            SourceText = _dangHienSoHub ? SourceSharedStaleText : SourceLocalText;
+            SourceText = _dangHienSoHub ? SourceSharedStaleText : NguonSoLocalText();
             return;
         }
 
         ApplyShared(shared, requestId, shop, range);
     }
+
+    /// <summary>
+    /// Máy này đang chạy ĐỘC LẬP (chưa nối Hub) hay không. Hook <c>QueryOrderStatistics</c> KHÔNG đủ để kết luận:
+    /// shell suite rót nó VÔ ĐIỀU KIỆN, nên máy chưa cấu hình Hub vẫn có hook và bị màn tố "Hub không phản hồi".
+    /// Cờ thật nằm ở <see cref="AppServices.HubDaCauHinh"/> — đọc TƯƠI mỗi lần (người dùng có thể cấu hình Hub
+    /// rồi kết nối lại giữa chừng); hook đó null = không ai biết → coi như CÓ hub, giữ nguyên hành vi cũ.
+    /// </summary>
+    private bool ChayDocLap()
+        => _services.QueryOrderStatistics is null || _services.HubDaCauHinh?.Invoke() == false;
+
+    /// <summary>Dòng nguồn khi đang hiện số LOCAL và lượt hỏi Hub đã kết thúc mà không có số: máy CHƯA cấu hình
+    /// Hub thì nói "chạy độc lập" (không có gì để tố), có Hub mà im lặng thì nói thẳng Hub không phản hồi.</summary>
+    private string NguonSoLocalText() => ChayDocLap() ? SourceStandaloneText : SourceLocalText;
 
     private void ApplyShared(SharedOrderStatistics shared, int requestId, string? shop, CreatedRange range)
     {
@@ -354,7 +512,21 @@ public partial class OrderStatisticsViewModel : ViewModelBase
             return; // lượt cũ về muộn (người dùng đã đổi ngày/shop) → bỏ, không đè lượt mới
         }
 
+        // Hub nói 0 đơn mà kho máy VỪA đọc ra đơn cho ĐÚNG shop + khoảng này → hai bên nói ngược nhau. Vẽ đè màn
+        // rỗng của Hub lên số máy đang có là hỏng im lặng (bấm "Làm mới" thấy số nháy một cái rồi trắng màn).
+        // GIỮ nguyên lưới số máy, chỉ đổi dòng nguồn cho đúng sự thật; _dangHienSoHub giữ false nên lượt vẽ sau
+        // vẫn đọc lại kho máy như thường.
+        if (shared.TotalOrders == 0
+            && _soDonLocalLuotNay > 0
+            && string.Equals(_shopLocalLuotNay, shop, StringComparison.Ordinal)
+            && _rangeLocalLuotNay.Equals(range))
+        {
+            SourceText = string.Format(VnCulture, SourceHubBaoRongFormat, Number(_soDonLocalLuotNay));
+            return;
+        }
+
         SourceText = SourceSharedText;
+        DangXemSoMay = false; // lưới sắp mang số CHUNG → gỡ ghi chú "chỉ đơn CÒN trên máy" khỏi 3 thẻ
         // Nhớ "đang hiện số chung của (shop, khoảng) này" → lượt vẽ kế tiếp cùng shop/khoảng khỏi vẽ đè số local.
         _dangHienSoHub = true;
         _shopSoHub = shop;

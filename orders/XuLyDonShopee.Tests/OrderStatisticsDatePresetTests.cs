@@ -69,18 +69,38 @@ public class OrderStatisticsDatePresetTests
         Assert.True(vm.IsPresetThangNay);
     }
 
+    /// <summary>
+    /// Gán mốc mới bằng cách LÙI từ chính giá trị đang có, KHÔNG dùng <c>DateTime.Today.AddDays(-3)</c>: mặc định
+    /// <c>FromDate</c> là NGÀY 1 của tháng, nên chạy vào MÙNG 4 thì <c>Today.AddDays(-3)</c> trùng đúng giá trị cũ
+    /// ⇒ setter không bắn ⇒ chip không nhả ⇒ test đỏ mỗi tháng một ngày (bom hẹn giờ).
+    /// </summary>
     [Fact]
     public void TuChonNgayTrenLich_NhaHetChip()
     {
         using var temp = new TempDatabase();
         var vm = NewVm(temp);
 
-        vm.FromDate = DateTime.Today.AddDays(-3);
+        vm.FromDate = vm.FromDate!.Value.AddDays(-3);
 
         Assert.Equal(string.Empty, vm.DatePreset);
         Assert.False(vm.IsPresetHomNay);
         Assert.False(vm.IsPresetBayNgay);
         Assert.False(vm.IsPresetThangNay);
+    }
+
+    /// <summary>Chốt hành vi đứng SAU bom hẹn giờ ở trên: gán lại ĐÚNG giá trị đang có thì setter của
+    /// <c>CommunityToolkit.Mvvm</c> KHÔNG bắn (SetProperty so bằng trước) ⇒ màn không coi đó là "người dùng tự
+    /// chọn ngày" ⇒ chip GIỮ nguyên. Test viết ra để lần sau ai dựa vào mốc ngày tuyệt đối thì biết vì sao hỏng.</summary>
+    [Fact]
+    public void GanLaiDungGiaTriCu_KhongCoiLaNguoiDungDoiNgay()
+    {
+        using var temp = new TempDatabase();
+        var vm = NewVm(temp);
+
+        vm.FromDate = vm.FromDate; // gán TRÙNG giá trị cũ
+
+        Assert.Equal(OrderStatisticsViewModel.PresetThangNay, vm.DatePreset);
+        Assert.True(vm.IsPresetThangNay);
     }
 
     /// <summary>Chip KHÔNG được đi ngang qua trạng thái "khoảng ngày không hợp lệ" (Từ &gt; Đến) khi đặt lần
