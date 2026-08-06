@@ -53,6 +53,8 @@ public partial class Dispatch
     private string _selMachine = "", _selHost = "";
     private string _machineMsg = "";      // "máy vừa offline — đã bỏ chọn" (nhịp fleet 2s tự phát hiện)
     private int _optStart, _optEnd, _optProcs, _optFrame, _optReload;   // 0 = dùng cấu hình client
+    // Khoảng nghỉ giữa 2 link của Scrape (giây) — 0 = dùng cấu hình client (mặc định 120–240s).
+    private int _optRestMin, _optRestMax;
     private bool _optFromClaimed;
     private string _result = "";
     private string _confirmAcct = "";     // "accountId|op" đang chờ bấm-lần-nữa (rỗng = không có)
@@ -410,19 +412,22 @@ public partial class Dispatch
         FleetState.Refresh();
     }
 
-    /// <summary>Tạo 1 assignment ghim vào máy đang chọn — khuôn giống <c>Fleet.Pin()</c>. FrameSize chỉ scrape
-    /// đọc, Reload chỉ import/update đọc → op khác truyền 0 để sạch dữ liệu. Processes áp mọi op.</summary>
+    /// <summary>Tạo 1 assignment ghim vào máy đang chọn — khuôn giống <c>Fleet.Pin()</c>. FrameSize + khoảng nghỉ
+    /// chỉ scrape đọc, Reload chỉ import/update đọc → op khác truyền 0 để sạch dữ liệu. Processes áp mọi op.</summary>
     private void CreateJob(DispatchShopRow r, string op)
     {
         var payload = op == AssignmentOps.Import
             ? JsonSerializer.Serialize(new ImportJobPayload { FromClaimedTab = _optFromClaimed })
             : "";
+        var scrape = op == AssignmentOps.Scrape;
         Db.CreateAssignment(new CreateAssignmentRequest(
             r.AccountId, r.ShopId, r.Sheet, op, _selMachine, Pinned: true,
             Math.Max(0, _optStart), Math.Max(0, _optEnd), payload,
             Processes: Math.Max(0, _optProcs),
-            FrameSize: op == AssignmentOps.Scrape ? Math.Max(0, _optFrame) : 0,
-            ReloadSeconds: op is AssignmentOps.Import or AssignmentOps.Update ? Math.Max(0, _optReload) : 0));
+            FrameSize: scrape ? Math.Max(0, _optFrame) : 0,
+            ReloadSeconds: op is AssignmentOps.Import or AssignmentOps.Update ? Math.Max(0, _optReload) : 0,
+            RestMinSec: scrape ? Math.Max(0, _optRestMin) : 0,
+            RestMaxSec: scrape ? Math.Max(0, _optRestMax) : 0));
     }
 
     // ── Nút mức tài khoản (chạy cả acc) ───────────────────────────────────────────

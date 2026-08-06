@@ -374,7 +374,10 @@ public sealed partial class UpdateProductViewModel : ModuleViewModelBase
             OpLanes.Import, lanes, reload, ai.OpenAiApiKey,
             s.ColumnMap.LinkColumn, s.ColumnMap.PriceColumn, s.ColumnMap.SkuColumn,
             s.ColumnMap.ItemIdColumn, s.ColumnMap.ProductNameColumn, s.ColumnMap.RewrittenNameColumn,
-            a.Password, a.UsesHubData);   // hub-mode: đọc/ghi kho Hub (Postgres) thay vì workbook Excel local
+            a.Password, a.UsesHubData,   // hub-mode: đọc/ghi kho Hub (Postgres) thay vì workbook Excel local
+            // Bộ 3 giá trị điền form Update — cấu hình per-shop do HUB đặt (client chỉ đọc bản đã sync về).
+            // Rỗng = dùng mặc định 30069/500/"Nhanh" (hằng BigSellerShop.DefaultUpdate*).
+            s.UpdateStockValue, s.UpdateWeightValue, s.UpdateShippingChannel);
     }
 
 }

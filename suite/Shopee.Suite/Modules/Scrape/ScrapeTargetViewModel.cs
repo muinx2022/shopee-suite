@@ -70,6 +70,10 @@ public sealed partial class ScrapeTargetViewModel : ObservableObject
     /// null = dùng <see cref="MaxProcess"/>/<see cref="FrameSize"/> của người dùng. Runner đọc rồi tự xoá.</summary>
     public int? PendingMaxProcess { get; set; }
     public int? PendingFrameSize { get; set; }
+    /// <summary>Override khoảng nghỉ giữa 2 link (GIÂY) TẠM cho 1 lượt chạy (Hub giao việc) — KHÔNG persist,
+    /// dùng-một-lần. null = dùng <see cref="RestMinSeconds"/>/<see cref="RestMaxSeconds"/> của máy này.</summary>
+    public int? PendingRestMinSeconds { get; set; }
+    public int? PendingRestMaxSeconds { get; set; }
     /// <summary>Số dòng mỗi khối (mỗi tk Shopee nhận 1 khối kế tiếp theo số này).</summary>
     public int RowsPerAccount
     {
@@ -88,6 +92,40 @@ public sealed partial class ScrapeTargetViewModel : ObservableObject
     {
         get => Cfg.FrameSize;
         set { if (Cfg.FrameSize != value) { Cfg.FrameSize = value; OnPropertyChanged(); BigSellerStore.Shared.Save(); } }
+    }
+
+    // ── Khoảng nghỉ giữa 2 link của scrape (GIÂY, riêng-máy). Setter TỰ HỢP LỆ HOÁ qua ScrapeRestWindow.Resolve
+    //    rồi ghi CẢ CẶP: gõ min > max thì max được kéo lên theo min (và ngược lại) → ô nhập không bao giờ để lại
+    //    cặp vô nghĩa cho engine. Ghi 0/để trống = về mặc định 120–240s. ──
+    /// <summary>Nghỉ tối thiểu giữa 2 link (giây). 0 → mặc định 120s.</summary>
+    public int RestMinSeconds
+    {
+        get => Cfg.RestMinSeconds;
+        set => ApplyRestWindow(ScrapeRestWindow.Resolve(value, Cfg.RestMaxSeconds));
+    }
+
+    /// <summary>Nghỉ tối đa giữa 2 link (giây). 0 → mặc định 240s; nhỏ hơn min → bị kéo lên bằng min.</summary>
+    public int RestMaxSeconds
+    {
+        get => Cfg.RestMaxSeconds;
+        set => ApplyRestWindow(ScrapeRestWindow.Resolve(Cfg.RestMinSeconds, value));
+    }
+
+    private void ApplyRestWindow(ScrapeRestWindow w)
+    {
+        if (Cfg.RestMinSeconds == w.MinSeconds && Cfg.RestMaxSeconds == w.MaxSeconds)
+        {
+            // Giá trị sau hợp lệ hoá KHÔNG đổi (vd người dùng gõ 0 khi đang là mặc định) → vẫn phải raise để
+            // TextBox vẽ lại con số ĐÃ hợp lệ hoá thay vì giữ chuỗi người dùng vừa gõ.
+            OnPropertyChanged(nameof(RestMinSeconds));
+            OnPropertyChanged(nameof(RestMaxSeconds));
+            return;
+        }
+        Cfg.RestMinSeconds = w.MinSeconds;
+        Cfg.RestMaxSeconds = w.MaxSeconds;
+        OnPropertyChanged(nameof(RestMinSeconds));
+        OnPropertyChanged(nameof(RestMaxSeconds));
+        BigSellerStore.Shared.Save();
     }
 
     public ScrapeTargetViewModel(BigSellerAccount account)

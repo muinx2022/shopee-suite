@@ -126,6 +126,11 @@ public sealed class Assignment
     public int Processes { get; set; }
     public int FrameSize { get; set; }
     public int ReloadSeconds { get; set; }
+    /// <summary>Khoảng nghỉ giữa 2 link của Scrape, tính bằng GIÂY (chỉ op scrape đọc). 0 = dùng cấu hình client
+    /// (mặc định 120–240s — xem <see cref="Shopee.Core.Scrape.ScrapeRestWindow"/>). Client CŨ không biết 2 field
+    /// này thì bỏ qua an toàn: JSON thừa field → deserialize bỏ qua, và cấu hình máy vẫn quyết định khoảng nghỉ.</summary>
+    public int RestMinSec { get; set; }
+    public int RestMaxSec { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 
@@ -136,10 +141,12 @@ public sealed record SetRoleRequest(string MachineId, string Role);
 // Processes/FrameSize/ReloadSeconds đặt SAU Payload (không phải "trước Payload") vì các call-site hiện có
 // truyền StartRow/EndRow/Payload THEO VỊ TRÍ (Fleet.razor, FleetViewModel, SearchBoardService…) — chèn param
 // int vào giữa sẽ nuốt nhầm đối số Payload (string) → vỡ build. Sau Payload thì mọi call-site cũ giữ nguyên.
+// RestMinSec/RestMaxSec thêm ở CUỐI (cùng lý do như 3 param trên: mọi call-site cũ truyền positional).
 public sealed record CreateAssignmentRequest(
     string BigsellerId, string ShopId, string Sheet, string Op, string? TargetMachineId, bool Pinned,
     int StartRow = 0, int EndRow = 0, string Payload = "",
-    int Processes = 0, int FrameSize = 0, int ReloadSeconds = 0);
+    int Processes = 0, int FrameSize = 0, int ReloadSeconds = 0,
+    int RestMinSec = 0, int RestMaxSec = 0);
 
 /// <summary>Dữ liệu việc Import Hub giao (ghi vào <see cref="Assignment.Payload"/> cho op "import"):
 /// cờ import từ tab "Đã nhận" (Claimed) thay vì danh sách crawl. Payload rỗng = client dùng cấu hình của nó.</summary>

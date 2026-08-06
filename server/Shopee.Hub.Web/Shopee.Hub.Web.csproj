@@ -64,6 +64,9 @@
     <Compile Include="..\..\suite\Shopee.Core\Products\ProductGridEngine.cs" Link="Shared\Products\ProductGridEngine.cs" />
     <Compile Include="..\..\suite\Shopee.Core\BigSeller\BigSellerAccount.cs" Link="Shared\BigSeller\BigSellerAccount.cs" />
     <Compile Include="..\..\suite\Shopee.Core\BigSeller\BigSellerRunConfig.cs" Link="Shared\BigSeller\BigSellerRunConfig.cs" />
+    <!-- Khoảng nghỉ giữa 2 link của scrape: mặc định + luật hợp lệ hoá DÙNG CHUNG hub & client (hub đặt tham số
+         lượt giao, client áp; hai bên tính khác nhau là lệch hành vi). Thuần BCL. -->
+    <Compile Include="..\..\suite\Shopee.Core\Scrape\ScrapeRestWindow.cs" Link="Shared\Scrape\ScrapeRestWindow.cs" />
     <Compile Include="..\..\suite\Shopee.Core\BigSeller\BigSellerShop.cs" Link="Shared\BigSeller\BigSellerShop.cs" />
     <Compile Include="..\..\suite\Shopee.Core\BigSeller\BigSellerColumnMap.cs" Link="Shared\BigSeller\BigSellerColumnMap.cs" />
     <Compile Include="..\..\suite\Shopee.Core\Accounts\ShopeeAccount.cs" Link="Shared\Accounts\ShopeeAccount.cs" />

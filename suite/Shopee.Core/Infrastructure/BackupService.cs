@@ -91,14 +91,19 @@ public static class BackupService
     /// <summary>Chữ ký các trường DÙNG CHUNG của 1 acc BigSeller (bỏ qua cookie/workbook/lựa-chọn-UI là field
     /// cục bộ-theo-máy) → so để biết Hub có sửa nội dung (shop…) hay không. Shops chỉ tính phần Hub quản
     /// (tên/sheet/map cột/AI/crawl); cấu hình CHẠY (StartRow/EndRow/worker/reload) là riêng-máy — nếu tính
-    /// vào chữ ký thì set worker trên client làm lệch chữ ký → pull sau đó lấy bản Hub đè ngược mất giá trị.</summary>
-    private static string SharedSignature(BigSellerAccount a) => JsonSerializer.Serialize(new
+    /// vào chữ ký thì set worker trên client làm lệch chữ ký → pull sau đó lấy bản Hub đè ngược mất giá trị.
+    /// <para><c>internal</c> (không private) để bộ test đối chiếu trực tiếp luật này — xem InternalsVisibleTo
+    /// trong Shopee.Core.csproj.</para></summary>
+    internal static string SharedSignature(BigSellerAccount a) => JsonSerializer.Serialize(new
     {
         a.Label, a.Email, a.Password, a.EmailPassword, a.KiotProxyKey, a.Region, a.ProxyType, a.DataSource,
         Shops = a.Shops.Select(s => new
         {
             s.Id, s.Name, s.ShopeeDataSheet, s.ColumnMap, s.BigSellerCrawlUrl, s.BigSellerImportFromClaimedTab,
             s.OpenAiModel, s.OpenAiApiKeyFile, s.OpenAiBatchSize,
+            // Bộ 3 giá trị điền form Update (Hub-owned, per-shop) — field CHUNG nên PHẢI có trong chữ ký, kẻo
+            // admin đổi trên Hub mà client không thấy lệch → không bao giờ pull về.
+            s.UpdateStockValue, s.UpdateWeightValue, s.UpdateShippingChannel,
         }).ToList(),
     });
 
@@ -106,8 +111,9 @@ public static class BackupService
     /// fallback: cùng sheet): chép các field Hub-quản (đúng bộ trong SharedSignature) lên object cũ; shop
     /// mới thêm nguyên bản; shop Hub đã bỏ rơi khỏi danh sách. Field RIÊNG-MÁY (StartRow/EndRow/worker/
     /// reload) nằm sẵn trên object cũ nên tự sống sót — không cần graft như KeepLocalRunConfig trước đây,
-    /// và mọi VM đang giữ reference tới shop tiếp tục nhìn thấy đúng object được persist.</summary>
-    private static List<BigSellerShop> MergeShopsKeepInstance(List<BigSellerShop> old, List<BigSellerShop> incoming)
+    /// và mọi VM đang giữ reference tới shop tiếp tục nhìn thấy đúng object được persist.
+    /// <para><c>internal</c> (không private) để bộ test kiểm trực tiếp bộ field được chép + việc giữ object.</para></summary>
+    internal static List<BigSellerShop> MergeShopsKeepInstance(List<BigSellerShop> old, List<BigSellerShop> incoming)
     {
         // Khớp Id CHÍNH XÁC cho TẤT CẢ trước, rồi mới fallback theo sheet trên phần còn thừa — không thì shop
         // Hub thêm-mới trùng sheet (đứng trước) có thể "cướp" object cũ mà lẽ ra thuộc shop khớp Id ở sau,
@@ -138,6 +144,10 @@ public static class BackupService
             o.Name = s.Name; o.ShopeeDataSheet = s.ShopeeDataSheet; o.ColumnMap = s.ColumnMap;
             o.BigSellerCrawlUrl = s.BigSellerCrawlUrl; o.BigSellerImportFromClaimedTab = s.BigSellerImportFromClaimedTab;
             o.OpenAiModel = s.OpenAiModel; o.OpenAiApiKeyFile = s.OpenAiApiKeyFile; o.OpenAiBatchSize = s.OpenAiBatchSize;
+            // Bộ 3 giá trị điền form Update (Hub-owned): chép TẠI CHỖ như mọi field CHUNG khác → admin sửa trên
+            // Hub là client thấy ngay lượt pull kế, KHÔNG cần restart (object shop giữ nguyên identity).
+            o.UpdateStockValue = s.UpdateStockValue; o.UpdateWeightValue = s.UpdateWeightValue;
+            o.UpdateShippingChannel = s.UpdateShippingChannel;
             merged.Add(o);
         }
         return merged;

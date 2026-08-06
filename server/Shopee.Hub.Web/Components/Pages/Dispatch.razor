@@ -112,6 +112,8 @@
                 <label title="Số cửa sổ Brave chạy song song. CHỈ Scrape/Update đọc — Import LUÔN 1 lane (khoá cứng ở client, ô này KHÔNG ghi đè được).">Số process <input type="number" class="opt-num" @bind="_optProcs" /></label>
                 <label title="Số tài khoản Shopee mở trong một khung. CHỈ Scrape đọc.">Tk / khung <input type="number" class="opt-num" @bind="_optFrame" /></label>
                 <label title="Giãn cách tải lại trang, tính bằng giây. CHỈ Import/Update đọc.">Reload (giây) <input type="number" class="opt-num" @bind="_optReload" /></label>
+                <label title="Nghỉ TỐI THIỂU giữa 2 link, tính bằng giây. CHỈ Scrape đọc. 0 = dùng cấu hình máy client (mặc định 120s).">Nghỉ min (giây) <input type="number" class="opt-num" @bind="_optRestMin" /></label>
+                <label title="Nghỉ TỐI ĐA giữa 2 link, tính bằng giây. CHỈ Scrape đọc. 0 = dùng cấu hình máy client (mặc định 240s); nhỏ hơn min thì client tự kéo lên bằng min.">Nghỉ max (giây) <input type="number" class="opt-num" @bind="_optRestMax" /></label>
                 @* Blazor HTML-encode MỌI giá trị attribute → viết &quot; ở đây sẽ hiện ra chữ "&quot;" trên
                    tooltip; dùng nháy đơn bọc attribute để nhét được dấu " thật. *@
                 <label title='Nhập từ tab "Đã nhận" của BigSeller thay vì tab mặc định. CHỈ Import đọc.'><input type="checkbox" @bind="_optFromClaimed" /> Từ tab "Đã nhận"</label>

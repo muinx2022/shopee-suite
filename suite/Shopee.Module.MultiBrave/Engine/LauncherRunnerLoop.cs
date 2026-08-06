@@ -5,8 +5,9 @@ namespace OpenMultiBraveLauncherV3;
 
 internal static class LauncherRunnerLoop
 {
-    private const int MinRestMs = 120_000;
-    private const int MaxRestMs = 240_000;
+    // Khoảng nghỉ giữa 2 link KHÔNG còn là hằng ở đây: đọc từ config của lượt chạy (cfg.RestMinMs/RestMaxMs —
+    // nguồn = cấu hình Scrape của máy hoặc tham số Hub giao). Mặc định của InstanceConfig đúng bằng 2 hằng cũ
+    // (120_000/240_000) nên bản không đặt gì vẫn nghỉ 120–240s như trước. Xem Shopee.Core.Scrape.ScrapeRestWindow.
     private const int VideoMaxDurationS = 60;
     private const int MaxDownloadRetries = 1;
     private static readonly Random RestRandom = new();
@@ -51,6 +52,10 @@ internal static class LauncherRunnerLoop
 
         var startRow = runRow.Value;
 
+        // Khoảng nghỉ giữa 2 link của lượt này (cấu hình máy / tham số Hub). Resolve là chốt an toàn: 0 hoặc
+        // max<min đều về khoảng hợp lệ, mặc định 120–240s = đúng hành vi trước khi có cấu hình.
+        var restWindow = ScrapeRestWindow.Resolve(config.RestMinSeconds, config.RestMaxSeconds);
+
         // HUB-MODE: nguồn link là kho Hub (Postgres) theo HubAccountId — KHÔNG cần workbook file. Excel-mode giữ
         // nguyên: bắt buộc file tồn tại. Guard file chỉ chạy ở excel-mode (workbookPath hub-mode có thể rỗng).
         var useHubData = config.UseHubData;
@@ -68,8 +73,8 @@ internal static class LauncherRunnerLoop
         config.EndRow = endRow;
 
         log(useHubData
-            ? $"Đang tải dữ liệu (kho Hub): {sheet} dòng {startRow}–{endRow}…"
-            : $"Đang tải dữ liệu: {sheet} dòng {startRow}–{endRow}…");
+            ? $"Đang tải dữ liệu (kho Hub): {sheet} dòng {startRow}–{endRow}… (nghỉ giữa link {restWindow})"
+            : $"Đang tải dữ liệu: {sheet} dòng {startRow}–{endRow}… (nghỉ giữa link {restWindow})");
         var fetch = await ScrapeLinkSource.FetchSheetLinksAsync(
             workbookPath, sheet, startRow, endRow.Value, cancellationToken, useHubData, hubAccountId);
         var items = fetch.Items;
@@ -406,7 +411,7 @@ internal static class LauncherRunnerLoop
 
                 if (index < items.Count - 1)
                 {
-                    var restMs = RestRandom.Next(MinRestMs, MaxRestMs + 1);
+                    var restMs = restWindow.NextRestMs(RestRandom);
                     var nextRow = rowNumber + 1;
                     var nextAt = DateTimeOffset.Now.AddMilliseconds(restMs);
                     var nextMsg = $"Link tiếp theo (dòng {nextRow}) lúc {nextAt.LocalDateTime:HH:mm:ss}";

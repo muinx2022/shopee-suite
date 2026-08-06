@@ -42,6 +42,9 @@ public sealed class ScrapeRunner
     private readonly string _bigSellerAccountName;
     private readonly string _bigSellerAccountId;
     private readonly bool _useHubData;
+    // Khoảng nghỉ giữa 2 link (giây) của CẢ lượt chạy — cấu hình máy hoặc tham số Hub giao; mang xuống engine
+    // qua InstanceConfig. null lúc dựng → Default (120–240s) = hành vi cũ.
+    private readonly Shopee.Core.Scrape.ScrapeRestWindow _restWindow;
     private readonly ConcurrentDictionary<string, BraveInstanceSession> _sessions = new();
 
     /// <summary>(key, dòng log). key = account.Id (manual) hoặc "P{slot}" (auto).</summary>
@@ -64,8 +67,9 @@ public sealed class ScrapeRunner
     public event Action<string>? JobFatal;
 
     public ScrapeRunner(string workbookPath, string videoOutputDir, string? braveExe = null, string sourceUserData = "", string bigSellerAccountName = "",
-        string bigSellerAccountId = "", bool useHubData = false)
+        string bigSellerAccountId = "", bool useHubData = false, Shopee.Core.Scrape.ScrapeRestWindow? restWindow = null)
     {
+        _restWindow = restWindow ?? Shopee.Core.Scrape.ScrapeRestWindow.Default;
         // Workbook giữ PER-INSTANCE (mang qua InstanceConfig) để chạy song song nhiều BigSeller mỗi
         // workbook khác nhau. VideoOutputDir dùng chung mọi BigSeller nên vẫn để static.
         _workbookPath = workbookPath;
@@ -479,10 +483,12 @@ public sealed class ScrapeRunner
         return new ChunkResult(false, "", 0, false);
     }
 
-    private static InstanceConfig BuildConfig(ScrapeAccountSpec spec, int from, int to)
+    private InstanceConfig BuildConfig(ScrapeAccountSpec spec, int from, int to)
     {
         var cfg = new InstanceConfig
         {
+            RestMinSeconds = _restWindow.MinSeconds,
+            RestMaxSeconds = _restWindow.MaxSeconds,
             Id = spec.Id,
             Label = spec.Label,
             ShopeeAccountLogin = spec.ShopeeAccountLogin,

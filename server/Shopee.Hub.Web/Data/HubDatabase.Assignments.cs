@@ -109,7 +109,7 @@ public sealed partial class HubDatabase
                 if (dup.Status == AssignmentStatus.Queued)
                 {
                     using var u = _conn.CreateCommand();
-                    u.CommandText = "UPDATE assignments SET target_machine_id=$t, pinned=$p, start_row=$sr, end_row=$er, payload=$pl, processes=$pr, frame_size=$fs, reload_seconds=$rl, updated_at=$ua "
+                    u.CommandText = "UPDATE assignments SET target_machine_id=$t, pinned=$p, start_row=$sr, end_row=$er, payload=$pl, processes=$pr, frame_size=$fs, reload_seconds=$rl, rest_min_sec=$rmin, rest_max_sec=$rmax, updated_at=$ua "
                         + $"WHERE id=$id AND status='{AssignmentStatus.Queued}'";
                     u.Parameters.AddWithValue("$t", (object?)r.TargetMachineId ?? DBNull.Value);
                     u.Parameters.AddWithValue("$p", r.Pinned ? 1 : 0);
@@ -119,12 +119,15 @@ public sealed partial class HubDatabase
                     u.Parameters.AddWithValue("$pr", r.Processes);
                     u.Parameters.AddWithValue("$fs", r.FrameSize);
                     u.Parameters.AddWithValue("$rl", r.ReloadSeconds);
+                    u.Parameters.AddWithValue("$rmin", r.RestMinSec);
+                    u.Parameters.AddWithValue("$rmax", r.RestMaxSec);
                     u.Parameters.AddWithValue("$ua", Iso(DateTimeOffset.UtcNow));
                     u.Parameters.AddWithValue("$id", dup.Id);
                     u.ExecuteNonQuery();
                     dup.TargetMachineId = r.TargetMachineId; dup.Pinned = r.Pinned;
                     dup.StartRow = r.StartRow; dup.EndRow = r.EndRow; dup.Payload = r.Payload ?? "";
                     dup.Processes = r.Processes; dup.FrameSize = r.FrameSize; dup.ReloadSeconds = r.ReloadSeconds;
+                    dup.RestMinSec = r.RestMinSec; dup.RestMaxSec = r.RestMaxSec;
                 }
                 return dup;
             }
@@ -137,12 +140,13 @@ public sealed partial class HubDatabase
                 TargetMachineId = r.TargetMachineId, Pinned = r.Pinned,
                 StartRow = r.StartRow, EndRow = r.EndRow, Payload = r.Payload ?? "",
                 Processes = r.Processes, FrameSize = r.FrameSize, ReloadSeconds = r.ReloadSeconds,
+                RestMinSec = r.RestMinSec, RestMaxSec = r.RestMaxSec,
                 Status = AssignmentStatus.Queued, CreatedAt = now, UpdatedAt = now,
             };
             using var c = _conn.CreateCommand();
             c.CommandText = $@"
-INSERT INTO assignments(id,bigseller_id,shop_id,sheet,op,target_machine_id,pinned,status,claimed_by,claimed_host,last_error,created_at,updated_at,start_row,end_row,payload,processes,frame_size,reload_seconds)
-VALUES($id,$b,$s,$sh,$o,$t,$p,'{AssignmentStatus.Queued}','','','',$ca,$ua,$sr,$er,$pl,$pr,$fs,$rl);";
+INSERT INTO assignments(id,bigseller_id,shop_id,sheet,op,target_machine_id,pinned,status,claimed_by,claimed_host,last_error,created_at,updated_at,start_row,end_row,payload,processes,frame_size,reload_seconds,rest_min_sec,rest_max_sec)
+VALUES($id,$b,$s,$sh,$o,$t,$p,'{AssignmentStatus.Queued}','','','',$ca,$ua,$sr,$er,$pl,$pr,$fs,$rl,$rmin,$rmax);";
             c.Parameters.AddWithValue("$id", a.Id);
             c.Parameters.AddWithValue("$b", a.BigsellerId);
             c.Parameters.AddWithValue("$s", a.ShopId);
@@ -158,6 +162,8 @@ VALUES($id,$b,$s,$sh,$o,$t,$p,'{AssignmentStatus.Queued}','','','',$ca,$ua,$sr,$
             c.Parameters.AddWithValue("$pr", a.Processes);
             c.Parameters.AddWithValue("$fs", a.FrameSize);
             c.Parameters.AddWithValue("$rl", a.ReloadSeconds);
+            c.Parameters.AddWithValue("$rmin", a.RestMinSec);
+            c.Parameters.AddWithValue("$rmax", a.RestMaxSec);
             c.ExecuteNonQuery();
             return a;
         }
@@ -452,7 +458,7 @@ VALUES($id,$b,$s,$sh,$o,$t,$p,'{AssignmentStatus.Queued}','','','',$ca,$ua,$sr,$
     }
 
     /// <summary>Operator bấm ▶ Tiếp tục 1 việc đã dừng/huỷ: đưa về 'queued' để claim lại, GIỮ NGUYÊN mọi cột
-    /// tham số (khoảng dòng/payload/processes/frame/reload/đích/ghim) → chạy tiếp đúng lượt cũ. Trả null = OK;
+    /// tham số (khoảng dòng/payload/processes/frame/reload/nghỉ/đích/ghim) → chạy tiếp đúng lượt cũ. Trả null = OK;
     /// chuỗi tiếng Việt = lý do từ chối. Chỉ tiếp tục được việc 'failed'/'canceled'; nhóm (acc,shop,op) đang có
     /// việc mở thì từ chối (kẻo 2 bản chạy song song → 2 phiên cùng cookie BigSeller).</summary>
     public string? ResumeAssignment(string id)
@@ -591,6 +597,8 @@ VALUES($id,$b,$s,$sh,$o,$t,$p,'{AssignmentStatus.Queued}','','','',$ca,$ua,$sr,$
             Processes = rd.IsDBNull(i("processes")) ? 0 : rd.GetInt32(i("processes")),
             FrameSize = rd.IsDBNull(i("frame_size")) ? 0 : rd.GetInt32(i("frame_size")),
             ReloadSeconds = rd.IsDBNull(i("reload_seconds")) ? 0 : rd.GetInt32(i("reload_seconds")),
+            RestMinSec = rd.IsDBNull(i("rest_min_sec")) ? 0 : rd.GetInt32(i("rest_min_sec")),
+            RestMaxSec = rd.IsDBNull(i("rest_max_sec")) ? 0 : rd.GetInt32(i("rest_max_sec")),
             CreatedAt = D(rd, i("created_at")), UpdatedAt = D(rd, i("updated_at")),
         };
     }

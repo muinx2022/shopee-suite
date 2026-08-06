@@ -17,6 +17,32 @@ public sealed class BigSellerShop
     /// <summary>Import từ tab "Claimed" thay vì danh sách crawl.</summary>
     public bool BigSellerImportFromClaimedTab { get; set; }
 
+    // ── Bộ 3 giá trị ĐIỀN FORM của workflow Update product (trước đây là 3 hằng cứng trong
+    //    BigSellerProductUpdateRunner: StockValue="30069", WeightValue="500", kênh vận chuyển "Nhanh").
+    //    Đây là cấu hình DÙNG CHUNG toàn fleet theo TỪNG SHOP, CHỦ SỞ HỮU = HUB:
+    //      • nằm trong BackupService.SharedSignature + được chép trong MergeShopsKeepInstance (Hub → client);
+    //      • CỐ Ý không nhận từ client (xem FileStoreConfigService.UpdateSharedShopFields / FreshShopFromClient,
+    //        cùng lý do như DataSource): client KHÔNG có UI cho 3 field này nên bản push của client cũ mang giá
+    //        trị RỖNG — nếu hub nhận thì mỗi lượt upsert sẽ XOÁ TRẮNG cấu hình admin vừa đặt.
+    //    RỖNG = dùng mặc định (3 hằng Default* dưới đây) → không đặt gì thì hành vi y như trước.
+    /// <summary>Tồn kho điền cho MỌI biến thể khi Update product. Rỗng = <see cref="DefaultUpdateStock"/>.</summary>
+    public string UpdateStockValue { get; set; } = "";
+    /// <summary>Cân nặng (gram) điền khi Update product. Rỗng = <see cref="DefaultUpdateWeight"/>.</summary>
+    public string UpdateWeightValue { get; set; } = "";
+    /// <summary>Tên kênh vận chuyển cần tick khi Update product. Rỗng = <see cref="DefaultUpdateShippingChannel"/>.</summary>
+    public string UpdateShippingChannel { get; set; } = "";
+
+    /// <summary>Mặc định tồn kho (giá trị hằng cũ trong runner).</summary>
+    public const string DefaultUpdateStock = "30069";
+    /// <summary>Mặc định cân nặng, gram (giá trị hằng cũ trong runner).</summary>
+    public const string DefaultUpdateWeight = "500";
+    /// <summary>Mặc định kênh vận chuyển (giá trị hằng cũ trong runner).</summary>
+    public const string DefaultUpdateShippingChannel = "Nhanh";
+
+    /// <summary>Giá trị thực dùng cho 1 trong 3 field trên: trắng/rỗng → mặc định.</summary>
+    public static string OrDefault(string? value, string fallback) =>
+        string.IsNullOrWhiteSpace(value) ? fallback : value.Trim();
+
     // Cấu hình AI (dùng khi rewrite tên sản phẩm ở module Update Product).
     public string OpenAiModel { get; set; } = "gpt-4.1-mini";
     public string OpenAiApiKeyFile { get; set; } = "";

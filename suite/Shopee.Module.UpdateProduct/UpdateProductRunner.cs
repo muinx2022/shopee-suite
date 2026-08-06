@@ -17,7 +17,10 @@ public sealed record UpdateProductContext(
     int LinkColumn = 1, int PriceColumn = 3, int SkuColumn = 4,
     int ItemIdColumn = 5, int ProductNameColumn = 6, int RewrittenNameColumn = 7,
     string Password = "",
-    bool UseHubData = false);
+    bool UseHubData = false,
+    // Bộ 3 giá trị điền form Update product (cấu hình per-shop do HUB đặt). RỖNG = dùng mặc định
+    // (BigSellerShop.DefaultUpdate*) — mọi call-site cũ không truyền gì thì hành vi y như trước.
+    string UpdateStockValue = "", string UpdateWeightValue = "", string UpdateShippingChannel = "");
 
 /// <summary>
 /// Facade công khai bọc engine update-product. 3 workflow (TẤT CẢ C#, không còn Python):
@@ -94,6 +97,14 @@ public sealed class UpdateProductRunner
             ProductNameColumn = ctx.ProductNameColumn,
             RewrittenNameColumn = ctx.RewrittenNameColumn,
             UseHubData = ctx.UseHubData,   // hub-mode: runner đọc/ghi dòng qua HubClient thay vì mở WorkbookPath
+            // Bộ 3 giá trị điền form Update: hợp lệ hoá NGAY tại biên (rỗng → hằng mặc định) để runner khỏi
+            // phải nhớ fallback ở từng chỗ điền.
+            UpdateStockValue = Shopee.Core.BigSeller.BigSellerShop.OrDefault(
+                ctx.UpdateStockValue, Shopee.Core.BigSeller.BigSellerShop.DefaultUpdateStock),
+            UpdateWeightValue = Shopee.Core.BigSeller.BigSellerShop.OrDefault(
+                ctx.UpdateWeightValue, Shopee.Core.BigSeller.BigSellerShop.DefaultUpdateWeight),
+            UpdateShippingChannel = Shopee.Core.BigSeller.BigSellerShop.OrDefault(
+                ctx.UpdateShippingChannel, Shopee.Core.BigSeller.BigSellerShop.DefaultUpdateShippingChannel),
         };
     }
 

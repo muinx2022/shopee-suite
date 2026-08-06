@@ -197,7 +197,10 @@ public sealed class FileStoreConfigService
     };
 
     /// <summary>Shop MỚI từ client: chỉ chép field DÙNG CHUNG (đúng bộ trong SharedSignature); GIỮ Id client
-    /// (assignment resolve shop theo Id). Field run-config LEGACY (StartRow/EndRow/worker/reload) để DEFAULT.</summary>
+    /// (assignment resolve shop theo Id). Field run-config LEGACY (StartRow/EndRow/worker/reload) để DEFAULT.
+    /// Bộ 3 giá trị điền form Update (UpdateStockValue/UpdateWeightValue/UpdateShippingChannel) CỐ Ý để DEFAULT
+    /// (rỗng = dùng mặc định 30069/500/Nhanh): 3 field đó HUB-OWNED, admin đặt tại trang Fleet — xem
+    /// <see cref="UpdateSharedShopFields"/>.</summary>
     private static BigSellerShop FreshShopFromClient(BigSellerShop s) => new()
     {
         Id = s.Id, Name = s.Name, ShopeeDataSheet = s.ShopeeDataSheet,
@@ -257,6 +260,10 @@ public sealed class FileStoreConfigService
         if (existing.OpenAiModel != incoming.OpenAiModel) { existing.OpenAiModel = incoming.OpenAiModel; changed = true; }
         if (existing.OpenAiApiKeyFile != incoming.OpenAiApiKeyFile) { existing.OpenAiApiKeyFile = incoming.OpenAiApiKeyFile; changed = true; }
         if (existing.OpenAiBatchSize != incoming.OpenAiBatchSize) { existing.OpenAiBatchSize = incoming.OpenAiBatchSize; changed = true; }
+        // UpdateStockValue / UpdateWeightValue / UpdateShippingChannel CỐ TÌNH KHÔNG nhận từ client (cùng lý do
+        // như DataSource ở UpdateSharedAccountFields): 3 field này HUB-OWNED, client KHÔNG có UI để đặt nên bản
+        // client đẩy lên LUÔN mang giá trị RỖNG (client cũ chưa biết field; client mới chỉ mang bản vừa pull về
+        // — mà vẫn có cửa sổ ≤3' cầm bản CŨ). Nhận vào là mỗi lượt upsert xoá trắng cấu hình admin vừa đặt.
         return changed;
     }
 

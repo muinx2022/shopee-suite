@@ -34,6 +34,16 @@ internal sealed record BigSellerWorkflowSettings
     public string OpenAiApiKey { get; init; } = "";
     public int OpenAiBatchSize { get; init; } = 40;
 
+    // ── Bộ 3 giá trị ĐIỀN FORM của workflow Update product (cấu hình per-shop do HUB đặt; xem
+    //    BigSellerShop.UpdateStockValue/…). Ở đây LUÔN là giá trị ĐÃ hợp lệ hoá (rỗng đã được thay bằng hằng
+    //    Default* ở BigSellerContextFactory) → runner dùng thẳng, không phải nhớ fallback. ──
+    /// <summary>Tồn kho điền cho mọi biến thể.</summary>
+    public string UpdateStockValue { get; init; } = Shopee.Core.BigSeller.BigSellerShop.DefaultUpdateStock;
+    /// <summary>Cân nặng (gram) điền vào form.</summary>
+    public string UpdateWeightValue { get; init; } = Shopee.Core.BigSeller.BigSellerShop.DefaultUpdateWeight;
+    /// <summary>Tên kênh vận chuyển cần tick trên form.</summary>
+    public string UpdateShippingChannel { get; init; } = Shopee.Core.BigSeller.BigSellerShop.DefaultUpdateShippingChannel;
+
     // Ánh xạ field ↔ cột Excel (1-based) cho sheet của shop; mặc định layout cũ A/C/D/E/F/G.
     public int LinkColumn { get; init; } = 1;
     public int PriceColumn { get; init; } = 3;

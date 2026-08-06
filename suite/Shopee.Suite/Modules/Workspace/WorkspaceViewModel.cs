@@ -157,9 +157,94 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             Accounts.Add(new WorkspaceAccountViewModel(bs, scrape, update, Update, scrapeLog, updateLog));
         }
 
+        // Dải chip lọc log dựng TRƯỚC khi gán SelectedAccount: OnSelectedAccountChanged sẽ trỏ chip theo acc mới.
+        RebuildLogChips();
         SelectedAccount = Accounts.FirstOrDefault(a => a.Account.Id == prevId) ?? Accounts.FirstOrDefault();
+        SyncLogChipsToAccount();   // Accounts rỗng / acc không đổi → gán ở trên không bắn Changed, tự đồng bộ ở đây
         Status = $"{Accounts.Count} tài khoản BigSeller.";
         RecomputeResumePending();   // list acc đổi → map lại các mục "còn dở" theo acc/shop hiện có
+    }
+
+    // ── Dải chip LỌC LOG (H3.1) ────────────────────────────────────────────────
+    // Hạ tầng log per-acc (AccountLogRegistry) đã ghi sẵn từ lâu; đợt này bind ra UI: mỗi tab log có một dải
+    // chip "Tất cả" + mỗi tk một chip. HÀNH VI MẶC ĐỊNH GIỮ NGUYÊN: chip đang chọn BÁM theo tài khoản đang
+    // chọn ở cột trái (đúng thứ 2 tab log vẫn hiển thị trước đây); người dùng bấm "Tất cả" thì chế độ đó DÍNH
+    // qua các lần đổi tài khoản (chỉ bấm chip khác mới thoát).
+
+    /// <summary>Chip lọc log của tab "Theo dõi Scrape" ("Tất cả" + mỗi tk 1 chip).</summary>
+    public ObservableCollection<LogFilterChipViewModel> ScrapeLogChips { get; } = [];
+    /// <summary>Chip lọc log của tab "Theo dõi Update".</summary>
+    public ObservableCollection<LogFilterChipViewModel> UpdateLogChips { get; } = [];
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ScrapeLogHeader))]
+    private LogFilterChipViewModel? _selectedScrapeLogChip;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(UpdateLogHeader))]
+    private LogFilterChipViewModel? _selectedUpdateLogChip;
+
+    // Chỉ cú bấm THẬT của người dùng mới đổi chế độ. Guard _rebuildingLogChips là BẮT BUỘC: lúc dựng lại dải
+    // chip, ListBox thấy ItemsSource bị Clear nên tự ghi ngược SelectedItem = null → nếu không chặn thì chế độ
+    // "Tất cả" bị xoá sạch ở MỌI lần kho BigSeller bắn Changed (rất thường xuyên — Save mỗi phím cũng bắn).
+    // Điều kiện thứ hai (SelectedAccount is not null): CHƯA có tài khoản nào thì PickChip buộc phải trả chip
+    // "Tất cả" (không có chip acc để trỏ tới) — ghi lại thành _showAll sẽ khoá chế độ "Tất cả" vĩnh viễn, nên
+    // thêm tài khoản đầu tiên xong dải chip không bám tk như mặc định đã hứa.
+    partial void OnSelectedScrapeLogChipChanged(LogFilterChipViewModel? value)
+    { if (!_rebuildingLogChips && SelectedAccount is not null) _scrapeLogShowAll = value?.IsAll ?? false; }
+    partial void OnSelectedUpdateLogChipChanged(LogFilterChipViewModel? value)
+    { if (!_rebuildingLogChips && SelectedAccount is not null) _updateLogShowAll = value?.IsAll ?? false; }
+
+    // Người dùng đang ở chế độ "Tất cả" (gộp) — giữ qua các lần đổi tài khoản / dựng lại dải chip.
+    private bool _scrapeLogShowAll;
+    private bool _updateLogShowAll;
+    private bool _rebuildingLogChips;
+
+    public string ScrapeLogHeader => LogHeader("Nhật ký Scrape", SelectedScrapeLogChip);
+    public string UpdateLogHeader => LogHeader("Nhật ký Update", SelectedUpdateLogChip);
+
+    private static string LogHeader(string prefix, LogFilterChipViewModel? chip) => chip is null
+        ? $"{prefix} (chưa có tài khoản)"
+        : chip.IsAll
+            ? $"{prefix} — mọi tài khoản (500 dòng cuối · gộp)"
+            : $"{prefix} — {chip.Title} (500 dòng cuối · riêng acc này)";
+
+    private void RebuildLogChips()
+    {
+        _rebuildingLogChips = true;
+        try
+        {
+            foreach (var c in ScrapeLogChips) c.Dispose();
+            foreach (var c in UpdateLogChips) c.Dispose();
+            ScrapeLogChips.Clear();
+            UpdateLogChips.Clear();
+
+            ScrapeLogChips.Add(new LogFilterChipViewModel("", "Tất cả", Scrape.LogLines));
+            UpdateLogChips.Add(new LogFilterChipViewModel("", "Tất cả", Update.LogLines));
+            foreach (var a in Accounts)
+            {
+                ScrapeLogChips.Add(new LogFilterChipViewModel(a.Account.Id, a.DisplayName, a.ScrapeLog));
+                UpdateLogChips.Add(new LogFilterChipViewModel(a.Account.Id, a.DisplayName, a.UpdateLog));
+            }
+        }
+        finally { _rebuildingLogChips = false; }
+    }
+
+    /// <summary>Trỏ chip đang chọn về tài khoản đang chọn — TRỪ khi người dùng đang ở chế độ "Tất cả" (chip đó
+    /// dính). Gọi sau mỗi lần dựng lại dải chip hoặc đổi tài khoản.</summary>
+    private void SyncLogChipsToAccount()
+    {
+        var id = SelectedAccount?.Account.Id ?? "";
+        SelectedScrapeLogChip = PickChip(ScrapeLogChips, _scrapeLogShowAll, id);
+        SelectedUpdateLogChip = PickChip(UpdateLogChips, _updateLogShowAll, id);
+    }
+
+    private static LogFilterChipViewModel? PickChip(
+        ObservableCollection<LogFilterChipViewModel> chips, bool showAll, string accountId)
+    {
+        var all = chips.FirstOrDefault(c => c.IsAll);
+        if (showAll) return all;
+        return chips.FirstOrDefault(c => c.AccountId == accountId && accountId.Length > 0) ?? all;
     }
 
     partial void OnSelectedAccountChanged(WorkspaceAccountViewModel? value)
@@ -169,6 +254,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         // đang chọn. BigSeller.Selected chỉ set khi bấm "Đăng nhập / cấu hình" (GoToBigSellerConfig).
         Scrape.SelectedTarget = value?.ScrapeTarget;
         Update.SelectedTarget = value?.UpdateTarget;
+        SyncLogChipsToAccount();   // dải chip log bám theo tk đang chọn (trừ khi đang ở chế độ "Tất cả")
         value?.RefreshAll();
         AccountData.Rescope(value?.Account.Id);   // tab "Dữ liệu" theo tài khoản đang chọn
         Stats.Rescope(value?.Account);            // tab "Thống kê" theo tài khoản đang chọn
@@ -199,9 +285,11 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         RequestNavigate?.Invoke(BigSeller);
     }
 
-    // ── Mở FILE log RIÊNG của acc đang chọn (buffer UI chỉ giữ 500 dòng cuối; file có đủ) ──
-    [RelayCommand] private void OpenScrapeAccLog() { if (SelectedAccount is { } a) ShellOpener.RevealFile(a.ScrapeLog.FilePath); }
-    [RelayCommand] private void OpenUpdateAccLog() { if (SelectedAccount is { } a) ShellOpener.RevealFile(a.UpdateLog.FilePath); }
+    // ── Mở FILE log của CHIP đang chọn trên dải lọc (buffer UI chỉ giữ 500 dòng cuối; file có đủ). Bám chip
+    //    chứ không bám tk cột trái: nếu không, đang xem log tk B mà nút lại mở file của tk A đang chọn bên trái.
+    //    Chip "Tất cả" → chính là file log gộp (đúng file nút "Log gộp" mở).
+    [RelayCommand] private void OpenScrapeAccLog() { if (SelectedScrapeLogChip is { } c) ShellOpener.RevealFile(c.Buffer.FilePath); }
+    [RelayCommand] private void OpenUpdateAccLog() { if (SelectedUpdateLogChip is { } c) ShellOpener.RevealFile(c.Buffer.FilePath); }
 
     // ── Chọn shop (1 shop/account) ───────────────────────────────────────────
     [RelayCommand]

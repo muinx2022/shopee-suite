@@ -21,6 +21,24 @@ else
             <input type="checkbox" @bind="_shop.BigSellerImportFromClaimedTab" /> Import từ tab "Đã nhận"
         </label>
 
+        @* Bộ 3 giá trị workflow "Update product" ĐIỀN vào form BigSeller. Hub là chủ sở hữu (client không có ô
+           nhập nào cho chúng) — mọi máy chạy Update shop này đều dùng bản đặt ở đây. Để TRỐNG = dùng mặc định. *@
+        <div class="subhead">Update product — giá trị điền form (để trống = mặc định)</div>
+        <div class="row">
+            <label title="Tồn kho điền cho MỌI biến thể của sản phẩm. Để trống = @BigSellerShop.DefaultUpdateStock.">
+                Tồn kho
+                <input @bind="_shop.UpdateStockValue" placeholder="@BigSellerShop.DefaultUpdateStock" style="width:120px" />
+            </label>
+            <label title="Cân nặng (gram) điền vào form. Để trống = @BigSellerShop.DefaultUpdateWeight.">
+                Cân nặng (g)
+                <input @bind="_shop.UpdateWeightValue" placeholder="@BigSellerShop.DefaultUpdateWeight" style="width:120px" />
+            </label>
+            <label title="Tên kênh vận chuyển cần tick trên form (khớp CHỮ hiện trên BigSeller). Để trống = @BigSellerShop.DefaultUpdateShippingChannel.">
+                Kênh vận chuyển
+                <input @bind="_shop.UpdateShippingChannel" placeholder="@BigSellerShop.DefaultUpdateShippingChannel" style="width:150px" />
+            </label>
+        </div>
+
         <div class="bar">
             <button class="btn primary" @onclick="Save">💾 Lưu</button>
             @if (!_confirmDelete)

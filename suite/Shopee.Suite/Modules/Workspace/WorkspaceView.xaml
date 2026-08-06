@@ -135,6 +135,68 @@
             </Style.Triggers>
         </Style>
 
+        <!-- ══════════ DẢI CHIP LỌC LOG (2 tab "Theo dõi …") ══════════ -->
+        <!-- Danh sách chip ĐỘNG theo số tài khoản nên không dùng được TabControl khai cứng → ListBox ngang,
+             nhưng DIỆN MẠO bám đúng 2 nấc của segmented control dùng chung: khay `subtabTray` (bo 6, nền xám ấm)
+             + ô bo 4 nền trắng khi chọn, y `subtabItem` ở Themes/Theme.xaml. Chỉ khác: ô ở đây là ListBoxItem
+             nên phải chép template (TabItem ≠ ListBoxItem), KHÔNG BasedOn được. -->
+        <Style x:Key="logChipItem" TargetType="{x:Type ListBoxItem}">
+            <Setter Property="Padding" Value="12,0" />
+            <Setter Property="MinHeight" Value="26" />
+            <Setter Property="Height" Value="26" />
+            <Setter Property="Margin" Value="0,0,2,0" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type ListBoxItem}">
+                        <Border x:Name="PART_LayoutRoot" CornerRadius="4" Background="Transparent"
+                                BorderBrush="Transparent" BorderThickness="1" SnapsToDevicePixels="True"
+                                TextElement.FontSize="11.5" TextElement.FontWeight="Normal"
+                                TextElement.Foreground="{StaticResource TextSecondaryBrush}">
+                            <ContentPresenter Margin="{TemplateBinding Padding}"
+                                              HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="PART_LayoutRoot" Property="Background" Value="#66FFFFFF" />
+                                <Setter TargetName="PART_LayoutRoot" Property="TextElement.Foreground" Value="{StaticResource TextPrimaryBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="PART_LayoutRoot" Property="Background" Value="{StaticResource CardBackgroundBrush}" />
+                                <Setter TargetName="PART_LayoutRoot" Property="BorderBrush" Value="{StaticResource BorderBrush}" />
+                                <Setter TargetName="PART_LayoutRoot" Property="TextElement.Foreground" Value="{StaticResource TextPrimaryBrush}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <!-- Khay chip: nền/bo của `subtabTray`, cuộn NGANG khi nhiều tài khoản (không xuống dòng, không nuốt
+             chiều cao ô log). Bản thân ListBox trong suốt, không viền. -->
+        <Style x:Key="logChipList" TargetType="{x:Type ListBox}">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Auto" />
+            <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Disabled" />
+            <Setter Property="ItemContainerStyle" Value="{StaticResource logChipItem}" />
+            <Setter Property="ItemsPanel">
+                <Setter.Value>
+                    <ItemsPanelTemplate>
+                        <StackPanel Orientation="Horizontal" />
+                    </ItemsPanelTemplate>
+                </Setter.Value>
+            </Setter>
+            <Setter Property="ItemTemplate">
+                <Setter.Value>
+                    <DataTemplate>
+                        <TextBlock Text="{Binding Label}" ToolTip="{Binding Tooltip}" />
+                    </DataTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <!-- ══════════ BẢNG SHOP ══════════ -->
         <!-- Header CHỮ HOA nhỏ, màu phụ (chữ HOA do view tự viết hoa trong Header); Stretch để 4 cột op canh
              giữa được. Chữ trong header thừa kế FontSize/Weight/Foreground của DataGridColumnHeader. -->
@@ -698,9 +760,21 @@
                                                     <TextBlock Text="Số tk / khung" Style="{StaticResource fieldLabel}" />
                                                     <TextBox Text="{Binding ScrapeTarget.FrameSize}" />
                                                 </StackPanel>
-                                                <StackPanel Width="120" Margin="0,0,0,10">
+                                                <StackPanel Width="120" Margin="0,0,12,10">
                                                     <TextBlock Text="Reload (s)" Style="{StaticResource fieldLabel}" />
                                                     <TextBox Text="{Binding UpdateTarget.ListingReloadSeconds}" />
+                                                </StackPanel>
+                                                <!-- Khoảng nghỉ giữa 2 link của Scrape (giây). 0 = mặc định 120–240s;
+                                                     max < min thì VM tự kéo max lên bằng min (ô tự cập nhật lại). -->
+                                                <StackPanel Width="130" Margin="0,0,12,10">
+                                                    <TextBlock Text="Nghỉ min (s) · scrape" Style="{StaticResource fieldLabel}" />
+                                                    <TextBox Text="{Binding ScrapeTarget.RestMinSeconds}"
+                                                             ToolTip="Nghỉ TỐI THIỂU giữa 2 link khi scrape (giây). 0 = mặc định 120s." />
+                                                </StackPanel>
+                                                <StackPanel Width="130" Margin="0,0,0,10">
+                                                    <TextBlock Text="Nghỉ max (s) · scrape" Style="{StaticResource fieldLabel}" />
+                                                    <TextBox Text="{Binding ScrapeTarget.RestMaxSeconds}"
+                                                             ToolTip="Nghỉ TỐI ĐA giữa 2 link khi scrape (giây). 0 = mặc định 240s; nhỏ hơn min sẽ tự kéo lên bằng min." />
                                                 </StackPanel>
                                             </WrapPanel>
                                             <!-- 2 ô đường dẫn (máy này): chữ mono + nút "…" 34×30 chọn thư mục. -->
@@ -904,14 +978,15 @@
                                 <Grid DockPanel.Dock="Top" Margin="0,0,0,6">
                                     <!-- DataContext vùng này = Scrape → binding tới workspace phải qua ElementName=Root. -->
                                     <TextBlock Style="{StaticResource caption}" VerticalAlignment="Center"
-                                               TextTrimming="CharacterEllipsis"><Run Text="Nhật ký Scrape — " /><Run Text="{Binding DataContext.SelectedAccount.DisplayName, ElementName=Root, Mode=OneWay}" /><Run Text=" (500 dòng cuối · riêng acc này)" /></TextBlock>
+                                               TextTrimming="CharacterEllipsis"
+                                               Text="{Binding DataContext.ScrapeLogHeader, ElementName=Root, Mode=OneWay}" />
                                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                                         <Button Padding="8,2" FontSize="11.5" Margin="0,0,6,0"
                                                 Command="{Binding DataContext.OpenScrapeAccLogCommand, ElementName=Root}"
-                                                ToolTip="Mở file log RIÊNG của tài khoản đang chọn (chỉ dòng scrape của acc này).">
+                                                ToolTip="Mở file log của mục đang chọn trên dải chip (chip tài khoản → file riêng acc đó; chip 'Tất cả' → file gộp).">
                                             <StackPanel Orientation="Horizontal">
                                                 <c:PathIcon Data="{StaticResource IconFolder}" Width="12" Height="12" />
-                                                <TextBlock Style="{StaticResource btnLabel}" Margin="6,0,0,0" Text="Log acc này" />
+                                                <TextBlock Style="{StaticResource btnLabel}" Margin="6,0,0,0" Text="Log đang xem" />
                                             </StackPanel>
                                         </Button>
                                         <Button Padding="8,2" FontSize="11.5"
@@ -924,9 +999,16 @@
                                         </Button>
                                     </StackPanel>
                                 </Grid>
+                                <!-- Dải chip lọc log: "Tất cả" (buffer gộp) + mỗi tk 1 chip (buffer riêng, kèm số dòng). -->
+                                <Border DockPanel.Dock="Top" Style="{StaticResource subtabTray}"
+                                        HorizontalAlignment="Left" MaxWidth="640" Margin="0,0,0,6">
+                                    <ListBox Style="{StaticResource logChipList}"
+                                             ItemsSource="{Binding DataContext.ScrapeLogChips, ElementName=Root}"
+                                             SelectedItem="{Binding DataContext.SelectedScrapeLogChip, ElementName=Root}" />
+                                </Border>
                                 <Border CornerRadius="6" ClipToBounds="True" Background="{StaticResource LogBackgroundBrush}">
                                     <TextBox Style="{StaticResource log}"
-                                             b:LogText.Source="{Binding DataContext.SelectedAccount.ScrapeLog, ElementName=Root}" />
+                                             b:LogText.Source="{Binding DataContext.SelectedScrapeLogChip.Buffer, ElementName=Root}" />
                                 </Border>
                             </DockPanel>
                         </Grid>
@@ -938,14 +1020,15 @@
                             <Grid DockPanel.Dock="Top" Margin="0,0,0,6">
                                 <!-- DataContext vùng này = Update → binding tới workspace phải qua ElementName=Root. -->
                                 <TextBlock Style="{StaticResource caption}" VerticalAlignment="Center"
-                                           TextTrimming="CharacterEllipsis"><Run Text="Nhật ký Update — " /><Run Text="{Binding DataContext.SelectedAccount.DisplayName, ElementName=Root, Mode=OneWay}" /><Run Text=" (500 dòng cuối · riêng acc này)" /></TextBlock>
+                                           TextTrimming="CharacterEllipsis"
+                                           Text="{Binding DataContext.UpdateLogHeader, ElementName=Root, Mode=OneWay}" />
                                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                                     <Button Padding="8,2" FontSize="11.5" Margin="0,0,6,0"
                                             Command="{Binding DataContext.OpenUpdateAccLogCommand, ElementName=Root}"
-                                            ToolTip="Mở file log RIÊNG của tài khoản đang chọn (chỉ dòng import/update/tên SP của acc này).">
+                                            ToolTip="Mở file log của mục đang chọn trên dải chip (chip tài khoản → file riêng acc đó; chip 'Tất cả' → file gộp).">
                                         <StackPanel Orientation="Horizontal">
                                             <c:PathIcon Data="{StaticResource IconFolder}" Width="12" Height="12" />
-                                            <TextBlock Style="{StaticResource btnLabel}" Margin="6,0,0,0" Text="Log acc này" />
+                                            <TextBlock Style="{StaticResource btnLabel}" Margin="6,0,0,0" Text="Log đang xem" />
                                         </StackPanel>
                                     </Button>
                                     <Button Padding="8,2" FontSize="11.5"
@@ -958,9 +1041,16 @@
                                     </Button>
                                 </StackPanel>
                             </Grid>
+                            <!-- Dải chip lọc log: "Tất cả" (buffer gộp) + mỗi tk 1 chip (buffer riêng, kèm số dòng). -->
+                            <Border DockPanel.Dock="Top" Style="{StaticResource subtabTray}"
+                                    HorizontalAlignment="Left" MaxWidth="640" Margin="0,0,0,6">
+                                <ListBox Style="{StaticResource logChipList}"
+                                         ItemsSource="{Binding DataContext.UpdateLogChips, ElementName=Root}"
+                                         SelectedItem="{Binding DataContext.SelectedUpdateLogChip, ElementName=Root}" />
+                            </Border>
                             <Border CornerRadius="6" ClipToBounds="True" Background="{StaticResource LogBackgroundBrush}">
                                 <TextBox Style="{StaticResource log}"
-                                         b:LogText.Source="{Binding DataContext.SelectedAccount.UpdateLog, ElementName=Root}" />
+                                         b:LogText.Source="{Binding DataContext.SelectedUpdateLogChip.Buffer, ElementName=Root}" />
                             </Border>
                         </DockPanel>
                     </TabItem>

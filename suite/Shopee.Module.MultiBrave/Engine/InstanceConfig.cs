@@ -48,6 +48,13 @@ public sealed class InstanceConfig
     /// KHÔNG chạm luồng đăng nhập hiện có — cờ này chỉ đổi NGUỒN DỮ LIỆU link.</summary>
     public string HubAccountId { get; set; } = "";
 
+    /// <summary>Khoảng nghỉ giữa 2 link, tính bằng GIÂY — trước đây là 2 hằng cứng trong LauncherRunnerLoop.
+    /// Nguồn: cấu hình Scrape của máy hoặc tham số Hub giao cho lượt việc; quy đổi giây→ms CHỈ ở
+    /// <see cref="Shopee.Core.Scrape.ScrapeRestWindow"/>. RIÊNG-LƯỢT-CHẠY (không persist, không vào chữ ký sync).
+    /// Mặc định = đúng 120/240s (2 hằng cũ) để bản không đặt gì chạy y như trước.</summary>
+    public int RestMinSeconds { get; set; } = Shopee.Core.Scrape.ScrapeRestWindow.DefaultMinSeconds;
+    public int RestMaxSeconds { get; set; } = Shopee.Core.Scrape.ScrapeRestWindow.DefaultMaxSeconds;
+
     /// <summary>Từ dòng — nhập trên launcher (nguồn đúng).</summary>
     public int? StartRow { get; set; }
 

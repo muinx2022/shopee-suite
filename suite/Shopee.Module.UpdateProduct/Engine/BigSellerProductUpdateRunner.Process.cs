@@ -143,17 +143,17 @@ internal sealed partial class BigSellerProductUpdateRunner
         });
 
         await StepAsync("Vận chuyển + cân nặng");
-        // [10] shipping "Nhanh"
+        // [10] shipping — kênh theo cấu hình shop (mặc định "Nhanh")
         try
         {
-            var ship = page.Locator(ShippingFastWrapper).Filter(new() { HasTextString = "Nhanh" }).First;
+            var ship = page.Locator(ShippingFastWrapper).Filter(new() { HasTextString = ShippingChannel }).First;
             if (await ship.IsVisibleAsync())
             {
                 await ship.ScrollIntoViewIfNeededAsync();
                 if (await ship.Locator(ShippingCheckedMark).CountAsync() == 0) await ship.ClickAsync();
             }
         }
-        catch (Exception ex) { _log($"  ↳ Chọn vận chuyển 'Nhanh' lỗi: {ex.Message}"); }
+        catch (Exception ex) { _log($"  ↳ Chọn vận chuyển '{ShippingChannel}' lỗi: {ex.Message}"); }
 
         // [11] weight
         try

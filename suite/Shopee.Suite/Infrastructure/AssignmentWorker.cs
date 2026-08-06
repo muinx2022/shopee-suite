@@ -302,9 +302,11 @@ public sealed class AssignmentWorker : IDisposable
                 var shop = t?.Account.Shops.FirstOrDefault(s => s.Id == a.ShopId);
                 if (t is null || shop is null) return false;
                 t.SelectedShop = shop;
-                // Hub đặt khoảng dòng + số cửa sổ (= quỹ cấp) + cỡ khung cho lượt này (0/null = dùng cấu hình client).
+                // Hub đặt khoảng dòng + số cửa sổ (= quỹ cấp) + cỡ khung + khoảng nghỉ giữa link cho lượt này
+                // (0/null = dùng cấu hình client).
                 _ = _scrape.RunSingleAsync(t, resume: true, silent: true, a.StartRow, a.EndRow,
-                    grant > 0 ? grant : (int?)null, a.FrameSize > 0 ? a.FrameSize : (int?)null);
+                    grant > 0 ? grant : (int?)null, a.FrameSize > 0 ? a.FrameSize : (int?)null,
+                    a.RestMinSec > 0 ? a.RestMinSec : (int?)null, a.RestMaxSec > 0 ? a.RestMaxSec : (int?)null);
                 return true;
             }
             case AssignmentOps.Import:

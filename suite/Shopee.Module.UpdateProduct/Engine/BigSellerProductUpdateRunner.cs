@@ -17,8 +17,12 @@ namespace UpdateProduct;
 internal sealed partial class BigSellerProductUpdateRunner : BigSellerBraveRunner
 {
     // ── CONFIG (từ main.py CONFIG) ──
-    private const string StockValue = "30069";
-    private const string WeightValue = "500";
+    // Tồn kho / cân nặng / kênh vận chuyển KHÔNG còn là hằng ở đây: đọc từ cấu hình per-shop do HUB đặt
+    // (_settings.UpdateStockValue/UpdateWeightValue/UpdateShippingChannel — đã hợp lệ hoá, rỗng đã thay bằng
+    // hằng BigSellerShop.DefaultUpdate*). Xem BigSellerShop để biết giá trị mặc định 30069/500/"Nhanh".
+    private string StockValue => _settings.UpdateStockValue;
+    private string WeightValue => _settings.UpdateWeightValue;
+    private string ShippingChannel => _settings.UpdateShippingChannel;
     private const int MaxProductNameChars = 120;   // Shopee giới hạn tên SP 120 ký tự (BigSeller báo lỗi nếu vượt)
     private const int MaxDescriptionChars = 3000;
     private const int TrimmedDescriptionMaxChars = 2900;
@@ -155,6 +159,9 @@ internal sealed partial class BigSellerProductUpdateRunner : BigSellerBraveRunne
 
         _log(new string('=', 50));
         _log("BẮT ĐẦU UPDATE PRODUCT (C#)");
+        // Giá trị điền form của lượt này (cấu hình per-shop trên Hub; rỗng đã được thay bằng mặc định) — 1 dòng
+        // để chẩn đoán "sao SP ra tồn kho/cân nặng/kênh khác mong đợi" mà không phải đoán.
+        _log($"Giá trị điền form: tồn kho={StockValue} · cân nặng={WeightValue}g · vận chuyển='{ShippingChannel}'.");
         _log(new string('=', 50));
 
         await OuterLoopAsync(page, ct).ConfigureAwait(false);

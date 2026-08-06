@@ -85,6 +85,9 @@ public sealed partial class HubDatabase : IDisposable
         AddColumnIfMissing("assignments", "processes", "INTEGER DEFAULT 0");
         AddColumnIfMissing("assignments", "frame_size", "INTEGER DEFAULT 0");
         AddColumnIfMissing("assignments", "reload_seconds", "INTEGER DEFAULT 0");
+        // Khoảng nghỉ giữa 2 link của scrape (GIÂY; 0 = dùng cấu hình client — mặc định 120–240s).
+        AddColumnIfMissing("assignments", "rest_min_sec", "INTEGER DEFAULT 0");
+        AddColumnIfMissing("assignments", "rest_max_sec", "INTEGER DEFAULT 0");
         // Cờ "đã bỏ khỏi danh sách gián đoạn" do operator Reset máy / bỏ hẳn — status GIỮ NGUYÊN để sticky-cancel còn hiệu lực.
         AddColumnIfMissing("assignments", "dismissed", "INTEGER DEFAULT 0");
         // Trần cửa sổ Brave máy client tự báo lên (0 = chưa báo).
@@ -213,6 +216,7 @@ CREATE TABLE IF NOT EXISTS assignments(
   claimed_by TEXT, claimed_host TEXT, last_error TEXT, created_at TEXT, updated_at TEXT,
   start_row INTEGER DEFAULT 0, end_row INTEGER DEFAULT 0, payload TEXT DEFAULT '',
   processes INTEGER DEFAULT 0, frame_size INTEGER DEFAULT 0, reload_seconds INTEGER DEFAULT 0,
+  rest_min_sec INTEGER DEFAULT 0, rest_max_sec INTEGER DEFAULT 0,
   dismissed INTEGER DEFAULT 0);
 CREATE TABLE IF NOT EXISTS search_products(
   item_id INTEGER PRIMARY KEY, json TEXT, machine_id TEXT, source_file TEXT, updated_at TEXT);

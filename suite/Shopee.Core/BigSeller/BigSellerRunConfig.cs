@@ -19,4 +19,11 @@ public sealed class BigSellerRunConfig
     public int RowsPerAccount { get; set; } = 60;
     /// <summary>Reload trang listing mỗi N giây (update/import).</summary>
     public int ReloadSeconds { get; set; } = 20;
+    /// <summary>Khoảng nghỉ TỐI THIỂU giữa 2 link của scrape, tính bằng GIÂY (0 = dùng mặc định
+    /// <see cref="Shopee.Core.Scrape.ScrapeRestWindow.DefaultMinSeconds"/>). JSON cũ thiếu field → nhận đúng
+    /// giá trị mặc định ở đây nên hành vi KHÔNG đổi.</summary>
+    public int RestMinSeconds { get; set; } = Scrape.ScrapeRestWindow.DefaultMinSeconds;
+    /// <summary>Khoảng nghỉ TỐI ĐA giữa 2 link của scrape, tính bằng GIÂY (0 = dùng mặc định
+    /// <see cref="Shopee.Core.Scrape.ScrapeRestWindow.DefaultMaxSeconds"/>).</summary>
+    public int RestMaxSeconds { get; set; } = Scrape.ScrapeRestWindow.DefaultMaxSeconds;
 }

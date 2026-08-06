@@ -112,15 +112,19 @@ public sealed partial class ScrapeViewModel : ModuleViewModelBase
     /// Rảnh → mở phiên mới chỉ gồm tk này; đang chạy → thêm job tk này (resume) vào phiên hiện tại.
     /// TOTAL: tự nuốt + log mọi lỗi → an toàn để gọi fire-and-forget (caller không cần try/catch).</summary>
     public async Task RunSingleAsync(ScrapeTargetViewModel target, bool resume, bool silent = false,
-        int? startRow = null, int? endRow = null, int? processes = null, int? frameSize = null)
+        int? startRow = null, int? endRow = null, int? processes = null, int? frameSize = null,
+        int? restMinSeconds = null, int? restMaxSeconds = null)
     {
         try
         {
-            // Override khoảng dòng + số cửa sổ + cỡ khung (Hub giao việc) — KHÔNG ghi đè cấu hình người dùng; runner đọc rồi tự xoá.
+            // Override khoảng dòng + số cửa sổ + cỡ khung + khoảng nghỉ (Hub giao việc) — KHÔNG ghi đè cấu hình
+            // người dùng; runner đọc rồi tự xoá. Quy ước 0/null = dùng cấu hình client (khuôn hub-run-params).
             target.PendingStartRow = startRow is int sr && sr > 0 ? sr : null;
             target.PendingEndRow = endRow is int er && er > 0 ? er : null;
             target.PendingMaxProcess = processes is int pp && pp > 0 ? pp : null;
             target.PendingFrameSize = frameSize is int fs && fs > 0 ? fs : null;
+            target.PendingRestMinSeconds = restMinSeconds is int rmin && rmin > 0 ? rmin : null;
+            target.PendingRestMaxSeconds = restMaxSeconds is int rmax && rmax > 0 ? rmax : null;
             if (IsBusy) { StartOneAccount(target, silent); return; }
             await StartAsync(resume, new[] { target }, silent);
         }
@@ -232,8 +236,14 @@ public sealed partial class ScrapeViewModel : ModuleViewModelBase
         var startRow = Math.Max(1, target.PendingStartRow ?? target.StartRow);
         var endRowOverride = target.PendingEndRow;
         var frameSizeOverride = target.PendingFrameSize;
+        // Khoảng nghỉ giữa 2 link: ưu tiên override 1-lượt của Hub (>0), ngược lại cấu hình máy này. Resolve
+        // hợp lệ hoá cặp (0 → mặc định 120–240s, max<min → kéo max lên) trước khi xuống engine.
+        var restWindow = ScrapeRestWindow.Resolve(
+            target.PendingRestMinSeconds ?? target.RestMinSeconds,
+            target.PendingRestMaxSeconds ?? target.RestMaxSeconds);
         target.PendingStartRow = null; target.PendingEndRow = null;
         target.PendingMaxProcess = null; target.PendingFrameSize = null;
+        target.PendingRestMinSeconds = null; target.PendingRestMaxSeconds = null;
         var rowsPer = Math.Max(1, target.RowsPerAccount);
         var seq = h.Seq;
         var ct = h.Cts.Token;
@@ -359,7 +369,7 @@ public sealed partial class ScrapeViewModel : ModuleViewModelBase
             // Đưa thông báo dọn nền (quét Brave mồ côi…) ra log tab Scrape để người dùng thấy.
             Shopee.Core.Browser.BraveFleet.Notice = Log;
             var totalSeg = segments.Sum(x => x.to - x.from + 1);
-            LogA($"── {(resume ? "⏯ Tiếp tục" : "▶")} BigSeller \"{account.DisplayName}\" · shop \"{shop.DisplayName}\" · {totalSeg} dòng cần chạy (tổng sheet {totalRows}) · {procs} cửa sổ · KHUNG {frame.Count} tk Shopee (xoay vòng trong khung) · trần tổng app {Shopee.Core.Browser.BraveFleet.MaxConcurrentWindows} cửa sổ ──");
+            LogA($"── {(resume ? "⏯ Tiếp tục" : "▶")} BigSeller \"{account.DisplayName}\" · shop \"{shop.DisplayName}\" · {totalSeg} dòng cần chạy (tổng sheet {totalRows}) · {procs} cửa sổ · KHUNG {frame.Count} tk Shopee (xoay vòng trong khung) · nghỉ giữa link {restWindow} · trần tổng app {Shopee.Core.Browser.BraveFleet.MaxConcurrentWindows} cửa sổ ──");
 
             // Ghi nhận lượt chạy (chỉ tiến độ DÒNG — không đặt-chỗ tk nữa vì tk xoay vòng/tự trả về kho).
             if (resume) ScrapeProgressStore.Shared.BeginResume(account.Id, sheet, account.DisplayName, totalRows);
@@ -367,7 +377,8 @@ public sealed partial class ScrapeViewModel : ModuleViewModelBase
             OnUi(target.RefreshProgress);
 
             runner = new ScrapeRunner(account.WorkbookPath, VideoDir, braveExe: null, s.SourceUserData, bigSellerAccountName: account.DisplayName,
-                bigSellerAccountId: account.Id, useHubData: account.UsesHubData);   // hub-mode: engine nạp link từ kho Hub
+                bigSellerAccountId: account.Id, useHubData: account.UsesHubData,   // hub-mode: engine nạp link từ kho Hub
+                restWindow: restWindow);
             s.Jobs.TryUpdate(account.Id, j => j.Runner = runner);   // gán Runner DƯỚI lock (vs snapshot ở Stop)
             // Mỗi chunk xong → lưu tiến độ ngay (bền với dừng/treo).
             runner.RowsCompleted += (from, to) =>
