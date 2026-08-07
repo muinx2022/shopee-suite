@@ -252,6 +252,109 @@ public class OrdersBridgeFlowTests
         Assert.Equal(("shop-id-1", 1), Assert.Single(luot));
     }
 
+    // ===== 4. Tín hiệu "shop ĐẶT ĐƯỢC địa chỉ" (PickupOkShop) — vòng ngoài dùng để TỰ GỠ banner cũ =====
+
+    /// <summary>Extension trả về đúng lô đơn RỖNG (bỏ hẳn bước "Số tiền cuối cùng" — không đơn nào cần).</summary>
+    private static object LoDonRong() => new { action = "pageData", kind = "orders", data = Array.Empty<object>() };
+
+    /// <summary>Nhận lệnh kế tiếp và chốt đúng tên action (một lệnh = một chặng).</summary>
+    private static async Task NhanLenhAsync(BridgeTestRig rig, string action)
+    {
+        using var lenh = await rig.NhanLenhAsync();
+        Assert.Equal(action, lenh.RootElement.GetProperty("action").GetString());
+    }
+
+    [Fact]
+    public async Task DatDuocDiaChi_DanhDau_PickupOkShop_BangNhanShop()
+    {
+        await using var rig = await BridgeTestRig.StartAsync();
+        var dir = ThuMucTam();
+        try
+        {
+            var flow = Runner(rig, invoiceDir: dir);
+            var chay = flow.RunShopOrdersAsync("shop-id-1", "shop1", toShip: 3, CancellationToken.None);
+
+            await NhanLenhAsync(rig, "syncOrders");
+            await rig.GuiAsync(LoDonRong());
+
+            await NhanLenhAsync(rig, "setPickupAddress");
+            await rig.GuiAsync(new { action = "pickupDone", ok = true });
+
+            await NhanLenhAsync(rig, "prepareNextOrder");
+            await rig.GuiAsync(new { action = "noOrder" });
+
+            await NhanLenhAsync(rig, "setPickupAddressToOther");
+            await rig.GuiAsync(new { action = "pickupOtherDone", ok = true });
+
+            await chay;
+
+            // Đây là bằng chứng DUY NHẤT "shop này hết lỗi địa chỉ" — thiếu nó thì banner cũ không bao giờ tự gỡ.
+            Assert.Equal("shop1", flow.PickupOkShop);
+            Assert.Null(flow.PickupFailedShop);
+        }
+        finally
+        {
+            try { Directory.Delete(dir, true); } catch { /* thư mục tạm */ }
+        }
+    }
+
+    [Fact]
+    public async Task KhongDatDuocDiaChi_PickupOkShop_VanNull()
+    {
+        await using var rig = await BridgeTestRig.StartAsync();
+        var dir = ThuMucTam();
+        try
+        {
+            var flow = Runner(rig, invoiceDir: dir);
+            var chay = flow.RunShopOrdersAsync("shop-id-1", "shop1", toShip: 3, CancellationToken.None);
+
+            await NhanLenhAsync(rig, "syncOrders");
+            await rig.GuiAsync(LoDonRong());
+
+            await NhanLenhAsync(rig, "setPickupAddress");
+            await rig.GuiAsync(new { action = "pickupDone", ok = false });
+
+            var (_, slips) = await chay;
+
+            Assert.Equal(0, slips);                        // không in phiếu (hành vi cũ, không đổi)
+            Assert.Equal("shop1", flow.PickupFailedShop);
+            Assert.Null(flow.PickupOkShop);                // gỡ banner lúc này là xoá đúng cảnh báo đang đúng
+        }
+        finally
+        {
+            try { Directory.Delete(dir, true); } catch { /* thư mục tạm */ }
+        }
+    }
+
+    /// <summary>
+    /// Shop 0 đơn Chờ Lấy Hàng: bước đặt địa chỉ KHÔNG chạy ⇒ chưa chứng minh được gì ⇒ <c>PickupOkShop</c> phải
+    /// null. Trả nhãn ở đây là gỡ banner của shop chưa hề thử đặt địa chỉ.
+    /// </summary>
+    [Fact]
+    public async Task ShopKhongCoDonChoLayHang_KhongChayBuocDiaChi_PickupOkShop_Null()
+    {
+        await using var rig = await BridgeTestRig.StartAsync();
+        var dir = ThuMucTam();
+        try
+        {
+            var flow = Runner(rig, invoiceDir: dir);
+            var chay = flow.RunShopOrdersAsync("shop-id-1", "shop1", toShip: 0, CancellationToken.None);
+
+            await NhanLenhAsync(rig, "syncOrders");
+            await rig.GuiAsync(LoDonRong());
+            await chay;
+
+            Assert.Null(flow.PickupOkShop);
+            // Và KHÔNG có lệnh nào nữa được gửi (setPickupAddress phải không chạy).
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(
+                () => rig.NhanLenhAsync(TimeSpan.FromMilliseconds(300)));
+        }
+        finally
+        {
+            try { Directory.Delete(dir, true); } catch { /* thư mục tạm */ }
+        }
+    }
+
     /// <summary>Mã yêu cầu trả hàng của HÔM NAY (<c>yyMMdd</c> + đuôi) — cửa sổ lọc theo ngày yêu cầu nên mã cứng
     /// sẽ hết hạn theo thời gian, phải sinh động.</summary>
     private static string MaYeuCauHomNay() => DateTime.Now.ToString("yyMMdd") + "0TS2VYAW3";

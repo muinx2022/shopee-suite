@@ -526,6 +526,124 @@ internal sealed class OrderPersistPipeline
         }, CancellationToken.None);
     }
 
+    /// <summary>HÀM THUẦN: tách danh sách shop từ chuỗi nối <c>", "</c> — rỗng → danh sách RỖNG (khác
+    /// <see cref="TachTenShopLoiDiaChi"/>: ở đó rỗng nghĩa là "lỗi không rõ shop" nên phải đẻ ra một mục, ở đây
+    /// rỗng nghĩa là "không có shop nào để gỡ" nên tuyệt đối KHÔNG được đẻ mục nào — đẻ ra là đi dismiss một
+    /// shop tên "(không rõ shop)" chẳng ai có).</summary>
+    internal static IReadOnlyList<string> TachTenShopDatDuocDiaChi(string? pickupOkShops)
+    {
+        if (string.IsNullOrWhiteSpace(pickupOkShops))
+        {
+            return [];
+        }
+
+        return pickupOkShops.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(s => s.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    /// <summary>
+    /// TỰ GỠ banner lỗi địa chỉ của những shop vòng này ĐÃ ĐẶT ĐƯỢC địa chỉ lấy hàng — dùng LẠI y nguyên đường
+    /// "người dùng bấm Đóng" (<see cref="PickupAddressAlertsRepository.DismissTaiCho"/> + đẩy dismiss lên Hub)
+    /// chứ KHÔNG đẻ động từ mới: Hub chỉ có upsert/dismiss, thêm khái niệm "đóng vì hết lỗi" là phải sửa cả hợp
+    /// đồng API lẫn luật merge.
+    /// <para>Chỉ đụng shop ĐANG có banner active — shop chưa từng lỗi thì không ghi gì (khỏi đẻ tombstone rác
+    /// và khỏi bơm rev vô ích lên Hub mỗi vòng).</para>
+    /// <para>Ghi bằng chuỗi shop lấy TỪ DÒNG LOCAL, không phải chuỗi từ vòng chạy: khóa SQL so BINARY còn C# so
+    /// OrdinalIgnoreCase — lệch hoa/thường là UPDATE không trúng dòng nào (cạm bẫy đã ghi ở
+    /// <c>AccountsViewModel.MergeVaDayOutbox</c>).</para>
+    /// Nuốt lỗi Hub — local vẫn đúng khi offline, cờ <c>cho_day</c> ở lại để nhịp sync tab Shops đẩy lại.
+    /// </summary>
+    public void GoBannerLoiDiaChi(string? pickupOkShops, Action<string> log, CancellationToken ct)
+    {
+        var shops = TachTenShopDatDuocDiaChi(pickupOkShops);
+        if (shops.Count == 0)
+        {
+            return;
+        }
+
+        // Dòng ĐANG hiện banner, tra theo nhãn shop không phân biệt hoa/thường → giữ lại chuỗi THẬT của dòng.
+        var dangHien = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            foreach (var a in _services.PickupAlerts.ListActive(_accountId))
+            {
+                dangHien.TryAdd(a.ShopLogin, a.ShopLogin);
+            }
+        }
+        catch (Exception ex)
+        {
+            log("Gỡ banner địa chỉ (local): không đọc được danh sách banner — " + ex.ToString());
+            return;
+        }
+        if (dangHien.Count == 0)
+        {
+            return;
+        }
+
+        var daGo = new List<string>();
+        foreach (var shop in shops)
+        {
+            if (!dangHien.TryGetValue(shop, out var shopLocal))
+            {
+                continue; // shop chưa từng lỗi / banner đã đóng — KHÔNG ghi gì
+            }
+            try
+            {
+                _services.PickupAlerts.DismissTaiCho(_accountId, shopLocal);
+                daGo.Add(shopLocal);
+                log($"Banner địa chỉ: shop {shopLocal} đã đặt được địa chỉ ở vòng này — tự gỡ banner.");
+            }
+            catch (Exception ex)
+            {
+                log("Gỡ banner địa chỉ (local): lỗi ghi — " + ex.ToString());
+            }
+        }
+
+        if (daGo.Count == 0)
+        {
+            return;
+        }
+
+        _services.RaiseAddressAlertsChanged(_accountId);
+
+        var accountLogin = _services.Accounts.GetById(_accountId)?.Email?.Trim() ?? "";
+        var dismissHub = _services.DismissPickupAlertToHub;
+        if (dismissHub is null || accountLogin.Length == 0)
+        {
+            return; // local đã đúng; cờ cho_day ở lại cho nhịp sync tab Shops đẩy sau
+        }
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                foreach (var shop in daGo)
+                {
+                    var rev = await PickupAlertHubGate.RunAsync(accountLogin, shop, () =>
+                        dismissHub(accountLogin, shop, ct)).ConfigureAwait(false);
+                    if (rev is not null)
+                    {
+                        // daDayDismiss: true — lượt này đẩy trạng thái ĐÃ ĐÓNG. Vòng sau lại lỗi xen giữa thì
+                        // local đang là "đang lỗi", không khớp nên cờ KHÔNG bị hạ oan.
+                        _services.PickupAlerts.DanhDauDaDay(_accountId, shop, rev.Value, daDayDismiss: true);
+                        log($"Gỡ banner địa chỉ: đã đồng bộ Hub shop {shop} (rev {rev}).");
+                    }
+                    else
+                    {
+                        log($"Gỡ banner địa chỉ: Hub chưa nhận shop {shop} — giữ local, sẽ đẩy lại sau.");
+                    }
+                }
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception ex)
+            {
+                log("Gỡ banner địa chỉ (Hub): lỗi — " + ex.ToString());
+            }
+        }, CancellationToken.None);
+    }
+
     /// <summary>HÀM THUẦN (test được): client có tự gửi tin notify local không. KHÔNG gửi khi đã nối Hub
     /// (<paramref name="daNoiHub"/> — Hub bắn tin sau <c>orders/push</c>, gửi nữa là người trực nhận hai tin),
     /// khi URL trống, hoặc khi chẳng có mục nào để báo. Máy chạy ĐỘC LẬP (chưa nối Hub) vẫn phải tự gửi.</summary>

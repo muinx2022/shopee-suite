@@ -1,7 +1,7 @@
 # Plan: Tự đóng modal thông báo chắn trang Địa chỉ + tự gỡ banner khi shop hết lỗi
 
 - **Ngày:** 2026-08-08
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành
 - **Người lập:** Opus 5 (phiên chính) · **Người thực thi:** Opus (`opus-executor`)
 
 ## 1. Bối cảnh & mục tiêu
@@ -459,4 +459,81 @@ Ràng buộc kỹ thuật đã khảo sát cho plan đó (đừng khảo sát l�
 
 ---
 
-## Báo cáo thực thi (opus-executor điền sau khi xong)
+## Báo cáo thực thi
+
+**Xong 08/08/2026.** `opus-executor` triển khai → `nghiem-thu` phản biện → phiên chính đối chiếu diff, sửa
+các điểm phản biện nêu đúng, tự chạy lại kiểm chứng.
+
+### Kiểm chứng thật (phiên chính tự chạy, không lấy báo cáo của subagent)
+
+| Lệnh | Kết quả |
+|---|---|
+| `dotnet build ShopeeSuite.sln -t:Rebuild` | 0 Warning, 0 Error (rebuild thật, phủ cả 3 project `XuLyDonShopee.*`) |
+| `dotnet test orders/XuLyDonShopee.Tests` | **1658 passed / 0 failed** (trước bản vá 1647 → +11) |
+| `node --check` hai file JS | OK |
+| Bàn thử DOM giả cho `pageLocateBlockingModalButton` | **8/8 đạt** |
+
+Phần JS không có test runner trong repo, nên `pageLocateBlockingModalButton` được kiểm bằng một bàn thử DOM
+giả viết riêng (ngoài repo, ở scratchpad). Hai ca sống còn đều đạt: (1) chỉ có modal "Sửa Địa chỉ" trên màn →
+trả `null`, tuyệt đối không đụng modal của chính flow; (4) modal chắn chỉ có `<div class="closed-order-badge">`
+trang trí → trả `null`, không bấm bừa.
+
+### Đổi hướng so với plan (ghi lại, không sửa plan cho khớp kết quả)
+
+1. **Bước C — lượt 2 dùng `donModalTruoc: true`** (plan ghi `false`). Lý do: plan cũng chốt đưa cả khối điều
+   hướng vào `thuDatDiaChi`, nên lượt 2 **tải lại trang** — modal nào Shopee bật ở MỖI lần load sẽ hiện lại
+   ngay sau lượt dọn vừa xong, và lượt 2 chết đúng cái lỗi lượt 1 vừa chết. Giá phải trả: một `execInTab` trả
+   `null` khi trang sạch.
+2. **`ChoChang.Pickup` = 240s** (plan ghi 180s). Ngân sách trong plan tính thiếu vòng tick checkbox
+   (8 × ~1,1s ≈ 9s) và thiếu một lượt `dongModalChan`: một lượt xấu nhất ~72s chứ không phải ~40s, hai lượt +
+   dọn ≈ 150s ⇒ biên tới 180s chỉ còn 30s. Quá hạn ở chặng này làm **dừng cả vòng, không ghi banner, không gửi
+   cảnh báo** — tệ hơn hành vi cũ — nên nới rộng tay.
+3. **`ListActive` thay `ListAll`** để lấy chuỗi shop của dòng local: dòng active chính là dòng local, tiết kiệm
+   một truy vấn. Vẫn có test `GoBanner_NhanLechHoaThuong_VanGoTrungDongLocal` canh.
+4. **Thêm `PickupOkShops` vào cả 2 khối `catch` cuối `RunAllShopsAsync`** (plan liệt kê 5 lối ra). Hai catch đó
+   cũng là "thoát giữa vòng shop"; không thêm thì shop đã chạy xong đầu vòng mất tín hiệu gỡ banner khi vòng gãy.
+
+### Lỗi do `nghiem-thu` phát hiện và ĐÃ sửa
+
+| | Lỗi | Sửa |
+|---|---|---|
+| V1 | `dongModalChan` gọi `execInTab` (`exec.js:34` KHÔNG bọc `executeScript`) và `trustedClick` (`dbgSend` **reject** khi `chrome.runtime.lastError`, vd "Detached while handling command"). Exception thoát ra → `core.js:33` gửi `{action:"error"}` → C# fault chặng pickup → ném khỏi vòng shop → **cả vòng dừng, KHÔNG ghi banner, KHÔNG cảnh báo**. Tức một lượt dọn hỏng làm hỏng luôn các shop còn lại — tệ hơn hành vi cũ (bỏ đúng 1 shop). | Bọc kín thân `dongModalChan` bằng `try/catch`, trả số đã đóng được. Dọn modal là việc best-effort, không được nằm trên đường quyết định của vòng. |
+| V2 | `daDong++` ngay sau `trustedClick`, tức **đếm số cú BẤM chứ không phải số modal ĐÃ ĐÓNG**. Cú bấm trượt vẫn tính ⇒ chốt `if (daDong > 0)` luôn đúng ⇒ **mọi shop, mọi vòng tốn thêm nguyên một lượt thử (~72s) + 9 cú bấm vô nghĩa**, đúng cái mà comment tuyên bố muốn tránh. Nhật ký còn nói sai sự thật. | Sau mỗi cú bấm dò lại: cùng `title` còn đó → **không đếm, dừng luôn** (bấm thêm cũng vậy) + ghi nhật ký "KHÔNG đóng được"; biến mất mới `daDong++`. |
+| V4 | xmldoc của `ChoChang.Pickup` tính sai ngân sách (bỏ sót vòng tick checkbox, đếm thiếu một lượt dọn). | Tính lại đầy đủ trong xmldoc + nới 180s → 240s (mục "Đổi hướng" #2). |
+| G1 | `SEL_X` có `[class*='close']` quá rộng; `querySelector` trả phần tử ĐẦU theo **thứ tự DOM**, không theo thứ tự selector ⇒ `<div class="closed-…">` trang trí cũng trúng, và ta bấm mù vào tâm nó. Flow chạy tiếp trên chính trang đó nên một cú click lạc gây điều hướng sẽ đẻ ra đúng cái "lỗi địa chỉ oan" đang đi sửa. | Thu về `.eds-modal__close, .eds-icon-close, [aria-label='Close'], [class*='eds-modal__close']`. Ca 4 của bàn thử DOM canh việc này. |
+| G2 | `label: _na(el.textContent)` — nếu dò trúng phần tử bọc thì nhãn là text CẢ modal, đẩy nguyên khối qua WebSocket vào ô nhật ký. | `.slice(0, 40)`. Ca 8 của bàn thử DOM canh. |
+
+### Điểm `nghiem-thu` nêu mà phiên chính KHÔNG nhận (đã tự đối chiếu code)
+
+- **V3 — "xoá `_flow.PickupOkShop = null;` không làm đổ test nào ⇒ luật nguy hiểm nhất đang không có gì canh".**
+  Đúng là không test nào đổ, nhưng **đột biến đó trung tính về ngữ nghĩa**, không phải lỗ hổng test: giá trị rò
+  rỉ LUÔN là nhãn của shop TRƯỚC, mà nhãn đó đã nằm sẵn trong `pickupOkShops`; `TachTenShopDatDuocDiaChi` lại
+  `Distinct(OrdinalIgnoreCase)` ⇒ không có hành vi quan sát được nào đổi. Không có đường nào để một shop nhận
+  nhãn của CHÍNH NÓ mà không chạy bước địa chỉ. Dòng reset vẫn giữ (phòng thủ theo chiều sâu, đúng plan §5.5),
+  nhưng không dựng thêm harness cho `RunAllShopsAsync` chỉ để cố định một đột biến trung tính.
+- **G5 — hai dòng chỉ khác hoa/thường cùng tồn tại thì `TryAdd` bỏ dòng sau.** Đúng, nhưng đó là trạng thái
+  bệnh lý mà repo đã dung nạp ở chỗ khác (`MergeVaDayOutbox` cũng `TryAdd`). Giữ nhất quán, không thêm phức tạp.
+- **Đường đẩy Hub của `GoBannerLoiDiaChi` chưa có test.** Đúng — nhưng nó là `Task.Run` fire-and-forget, test sẽ
+  phải chờ nền → dễ chập chờn; và `GhiBannerLoiDiaChi` (đường đối xứng, có sẵn từ trước) cũng không có test.
+  Ghi nhận là nợ, không vá bằng một test chập chờn.
+
+### Test CHẬP CHỜN bắt được trong lúc nghiệm thu (đã vá) — ngoài phạm vi plan
+
+Một lượt `dotnet test` đổ **1/1658** rồi các lượt sau xanh lại. Không bỏ qua: truy ra
+`BridgeTestRig.CongTrong()` (`orders/XuLyDonShopee.Tests/BridgeTestRig.cs:118`) có khe hở kinh điển — mở
+`TcpListener` cổng 0 → **`Stop()` nhả cổng** → mới `channel.Start(port)` bind lại. xUnit chạy các collection
+SONG SONG nên giữa hai bước đó một rig khác chiếm đúng cổng ấy và giữ suốt bài test của nó.
+`OrdersBridgeChannel.Start` có retry 5 lượt nhưng retry **ĐÚNG CỔNG CŨ** → vô ích khi cổng bị chiếm thật → ném
+→ bài test đổ oan. Việc này thêm 3 test dùng rig nên xác suất đụng tăng lên.
+
+Đã vá ở tầng test: `StartAsync` nay xin **cổng KHÁC** tối đa 5 lượt khi `Start` ném. Không đụng mã sản xuất.
+
+Trung thực về mức bằng chứng: **không chụp được tên bài test đã đổ** (lượt sau xanh nên không còn thông báo),
+và chạy hai lượt `dotnet test` song song cố ép đụng cổng cũng không tái hiện được — cơ chế race thì chắc chắn
+có thật và đọc ra được từ mã. Sau khi vá đã chạy **14 lượt liên tiếp, xanh cả 14**.
+
+### Còn lại / nợ kỹ thuật
+
+- Phần extension JS chỉ được kiểm bằng đọc code + bàn thử DOM giả. **Kiểm thật phải chạy app trên Seller Centre**
+  — người dùng làm sau khi phát hành 1.8.4.
+- Chưa phát hành: `release-suite.cmd` CHƯA chạy, chưa upload, chưa deploy Hub (đúng phạm vi plan).

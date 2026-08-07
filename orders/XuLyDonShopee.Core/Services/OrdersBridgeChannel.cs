@@ -77,8 +77,20 @@ internal sealed class OrdersBridgeChannel : IDisposable
         /// <summary>Đọc đơn tab "Tất cả": extension phân trang tới <c>MAX_ORDER_PAGES</c> trang.</summary>
         internal static readonly TimeSpan Orders = TimeSpan.FromSeconds(120);
 
-        /// <summary>Đặt địa chỉ lấy hàng (mở modal "Sửa Địa chỉ" + chọn tỉnh + Lưu).</summary>
-        internal static readonly TimeSpan Pickup = TimeSpan.FromSeconds(90);
+        /// <summary>
+        /// Đặt địa chỉ lấy hàng (mở modal "Sửa Địa chỉ" + chọn tỉnh + Lưu).
+        /// <para>Nới 90s → 240s ngày 08/08/2026: extension nay dọn modal thông báo CHẮN trang rồi THỬ LẠI đúng
+        /// một lượt (xem <c>flow-address.js/doSetPickupAddress</c>), tức ngân sách phải ôm HAI lượt.</para>
+        /// <para>Ngân sách XẤU NHẤT của MỘT lượt ≈ <b>72s</b>: điều hướng ≤20s + sleep 1s + dọn modal ~5s +
+        /// tìm tab "Địa Chỉ" ≤10s + sleep 1,2s + tìm địa chỉ khớp tỉnh ≤15s + chờ modal ≤10s + sleep 0,8s +
+        /// vòng tick checkbox 8×~1,1s ≈ 9s + Lưu 1,2s + hộp xác nhận 1s. Hai lượt + lượt dọn xen giữa ≈
+        /// <b>150s</b>.</para>
+        /// <para>Vì sao 240s chứ không phải 180s (biên 30s là quá mỏng): quá hạn ở chặng này KHÔNG chỉ hỏng một
+        /// shop — <c>AwaitAsync</c> ném <see cref="TimeoutException"/> → <c>OrdersBridgeSession</c> catch ở
+        /// ngoài vòng shop ⇒ <b>cả vòng dừng, KHÔNG ghi banner, KHÔNG gửi cảnh báo</b>, tệ hơn hẳn hành vi cũ.
+        /// Cái giá của biên rộng chỉ là: shop hỏng THẬT giữ chỗ lâu hơn trong đúng vòng đó.</para>
+        /// </summary>
+        internal static readonly TimeSpan Pickup = TimeSpan.FromSeconds(240);
 
         /// <summary>Trả địa chỉ lấy hàng về "địa chỉ khác" sau khi xử xong (cùng modal, ít bước hơn
         /// <see cref="Pickup"/>).</summary>

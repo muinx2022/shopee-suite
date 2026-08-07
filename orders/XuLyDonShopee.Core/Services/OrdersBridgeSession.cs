@@ -42,9 +42,13 @@ public sealed record OrdersLoginParams(
 /// KHÁC <paramref name="Captcha"/>: nguyên nhân khác, xử khác.</param>
 /// <param name="PickupFailedShop">Nhãn shop (hoặc nhiều shop nối bằng ", ") không đặt được địa chỉ
 /// (null nếu không dính lỗi này).</param>
+/// <param name="PickupOkShops">Nhãn shop (hoặc nhiều shop nối bằng ", ") ĐẶT ĐƯỢC địa chỉ lấy hàng trong vòng
+/// này — caller dùng để TỰ GỠ banner lỗi địa chỉ cũ của đúng những shop đó. null = chưa shop nào chạy được bước
+/// đặt địa chỉ (shop 0 đơn chờ lấy hàng KHÔNG tính: không chạy bước đó thì chưa chứng minh được gì).
+/// ĐỘC LẬP với <paramref name="PickupFailedShop"/>: một vòng có thể vừa có shop lành vừa có shop hỏng.</param>
 public sealed record OrdersBridgeRunResult(
     int ShopCount, int ShopsDone, int TotalOrders, int TotalSlips, bool Captcha, string? Error,
-    bool PickupAddressFailed = false, string? PickupFailedShop = null);
+    bool PickupAddressFailed = false, string? PickupFailedShop = null, string? PickupOkShops = null);
 
 /// <summary>Kết quả MỘT lượt mở trình duyệt sạch + SSO về trang chọn shop
 /// (<see cref="OrdersBridgeSession.SsoVePickerAsync"/>).</summary>
@@ -467,6 +471,12 @@ public sealed class OrdersBridgeSession : IDisposable
     {
         int shopCount = 0, shopsDone = 0, totalOrders = 0, totalSlips = 0;
         var pickupFailedShops = new List<string>();
+        var pickupOkShops = new List<string>();
+
+        // Nhãn các shop ĐẶT ĐƯỢC địa chỉ trong vòng này (null khi chưa shop nào) — phải điền vào MỌI lối ra
+        // NẰM TRONG/SAU vòng shop, kẻo vòng thoát giữa chừng là mất tín hiệu gỡ banner của shop đã chạy xong.
+        string? NhanShopDatDuoc() => pickupOkShops.Count > 0 ? string.Join(", ", pickupOkShops) : null;
+
         try
         {
             var err = await LoginAndReachPickerAsync(login, ct).ConfigureAwait(false);
@@ -512,7 +522,8 @@ public sealed class OrdersBridgeSession : IDisposable
                     var d = await _channel.AwaitAsync(detailTcs, OrdersBridgeChannel.ChoChang.Detail, ct).ConfigureAwait(false);
                     if (_channel.CaptchaSeen || d == "captcha")
                     {
-                        return new OrdersBridgeRunResult(shopCount, shopsDone, totalOrders, totalSlips, true, "Rơi vào captcha khi mở Chi tiết.");
+                        return new OrdersBridgeRunResult(shopCount, shopsDone, totalOrders, totalSlips, true, "Rơi vào captcha khi mở Chi tiết.",
+                            PickupOkShops: NhanShopDatDuoc());
                     }
 
                     // Đọc "Chờ Lấy Hàng".
@@ -523,10 +534,16 @@ public sealed class OrdersBridgeSession : IDisposable
                     L($"[Shop {i + 1}] Chờ Lấy Hàng: {(toShip?.ToString() ?? "?")}.");
 
                     // Đọc đơn (Phần A) + callback lưu DB + xử đơn (Phần B) + revert địa chỉ.
+                    // Reset cờ "đặt được địa chỉ" NGAY TRƯỚC lời gọi: quên là shop sau thừa hưởng cờ của shop
+                    // trước ⇒ GỠ NHẦM banner của shop chưa hề chạy bước địa chỉ (vd shop 0 đơn chờ lấy hàng).
+                    _flow.PickupOkShop = null;
                     var (orders, slips) = await _flow.RunShopOrdersAsync(shop.ShopId, shopLogin, toShip ?? 0, ct).ConfigureAwait(false);
                     if (_channel.CaptchaSeen)
                     {
-                        return new OrdersBridgeRunResult(shopCount, shopsDone, totalOrders + orders, totalSlips + slips, true, "Rơi vào captcha khi đọc/xử đơn.");
+                        // Captcha giữa chừng vẫn phải mang theo tín hiệu của shop đã đặt được địa chỉ trước đó.
+                        if (_flow.PickupOkShop is not null) { pickupOkShops.Add(_flow.PickupOkShop); }
+                        return new OrdersBridgeRunResult(shopCount, shopsDone, totalOrders + orders, totalSlips + slips, true, "Rơi vào captcha khi đọc/xử đơn.",
+                            PickupOkShops: NhanShopDatDuoc());
                     }
                     if (_flow.PickupFailedShop is not null)
                     {
@@ -543,6 +560,8 @@ public sealed class OrdersBridgeSession : IDisposable
                         totalOrders += orders;
                         totalSlips += slips;
                         shopsDone++;
+                        // Shop này ĐẶT ĐƯỢC địa chỉ (bước đó thực sự chạy) → vòng ngoài tự gỡ banner cũ của nó.
+                        if (_flow.PickupOkShop is not null) { pickupOkShops.Add(_flow.PickupOkShop); }
                     }
 
                     // Đóng tab shop → về picker /portal/shop (listTabId picker giữ nguyên; extension đóng shopTabId).
@@ -563,7 +582,8 @@ public sealed class OrdersBridgeSession : IDisposable
                             // Giữ tín hiệu địa chỉ nếu đã có shop bị bỏ qua → AccountSession vẫn gửi Slack.
                             return new OrdersBridgeRunResult(shopCount, shopsDone, totalOrders, totalSlips, false, closeErr,
                                 PickupAddressFailed: pickupFailedShops.Count > 0,
-                                PickupFailedShop: pickupFailedShops.Count > 0 ? string.Join(", ", pickupFailedShops) : null);
+                                PickupFailedShop: pickupFailedShops.Count > 0 ? string.Join(", ", pickupFailedShops) : null,
+                                PickupOkShops: NhanShopDatDuoc());
                         }
                         L($"closeShopTab không về được picker sau shop CUỐI ({shopName}) — vòng đã xong, bỏ qua.");
                     }
@@ -591,20 +611,25 @@ public sealed class OrdersBridgeSession : IDisposable
                 var tenLoi = string.Join(", ", pickupFailedShops);
                 return new OrdersBridgeRunResult(shopCount, shopsDone, totalOrders, totalSlips, false,
                     $"Không đặt được địa chỉ lấy hàng ({_province}) ở shop {tenLoi} — đã bỏ qua shop đó, chưa in phiếu; các shop khác vẫn chạy.",
-                    PickupAddressFailed: true, PickupFailedShop: tenLoi);
+                    PickupAddressFailed: true, PickupFailedShop: tenLoi, PickupOkShops: NhanShopDatDuoc());
             }
-            return new OrdersBridgeRunResult(shopCount, shopsDone, totalOrders, totalSlips, false, null);
+            return new OrdersBridgeRunResult(shopCount, shopsDone, totalOrders, totalSlips, false, null,
+                PickupOkShops: NhanShopDatDuoc());
         }
         catch (OperationCanceledException) { throw; }
         catch (TimeoutException)
         {
+            // Vẫn mang theo tín hiệu của những shop ĐÃ đặt được địa chỉ trước lúc gãy — banner của chúng phải
+            // được gỡ dù vòng kết thúc bằng lỗi (hai đường đụng những shop KHÁC NHAU, không giẫm nhau).
             L("Cầu nối: hết thời gian chờ phản hồi từ extension.");
-            return new OrdersBridgeRunResult(shopCount, shopsDone, totalOrders, totalSlips, false, "Hết thời gian chờ phản hồi từ extension.");
+            return new OrdersBridgeRunResult(shopCount, shopsDone, totalOrders, totalSlips, false, "Hết thời gian chờ phản hồi từ extension.",
+                PickupOkShops: NhanShopDatDuoc());
         }
         catch (Exception ex)
         {
             L("Cầu nối lỗi: " + ex.ToString());
-            return new OrdersBridgeRunResult(shopCount, shopsDone, totalOrders, totalSlips, false, ex.Message);
+            return new OrdersBridgeRunResult(shopCount, shopsDone, totalOrders, totalSlips, false, ex.Message,
+                PickupOkShops: NhanShopDatDuoc());
         }
     }
 

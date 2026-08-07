@@ -48,12 +48,34 @@ internal sealed class BridgeTestRig : IAsyncDisposable
     /// <summary>True nếu có dòng log nào CHỨA <paramref name="phan"/>.</summary>
     public bool CoLog(string phan) => Logs.Any(m => m.Contains(phan, StringComparison.Ordinal));
 
+    /// <summary>Số lần đổi CỔNG KHÁC khi cổng vừa xin bị rig song song cướp mất (xem <see cref="CongTrong"/>).</summary>
+    private const int SoLanDoiCong = 5;
+
     public static async Task<BridgeTestRig> StartAsync()
     {
-        var port = CongTrong();
         var logs = new ConcurrentQueue<string>();
-        var channel = new OrdersBridgeChannel(logs.Enqueue);
-        channel.Start(port);
+
+        // CongTrong() có khe hở: nó ĐÓNG listener rồi mới trả cổng, nên giữa lúc đó một rig khác (xUnit chạy các
+        // collection SONG SONG) có thể chiếm đúng cổng ấy và GIỮ suốt bài test của nó. OrdersBridgeChannel.Start
+        // có retry nhưng retry ĐÚNG CỔNG CŨ — vô ích khi cổng bị chiếm thật, hết 5 lượt là ném và bài test đổ oan.
+        // Ở đây phải đổi sang cổng KHÁC. (Đã bắt được một lượt đổ kiểu này ngày 08/08/2026.)
+        OrdersBridgeChannel? channel = null;
+        var port = 0;
+        for (var lan = 0; lan < SoLanDoiCong; lan++)
+        {
+            port = CongTrong();
+            var thu = new OrdersBridgeChannel(logs.Enqueue);
+            try { thu.Start(port); channel = thu; break; }
+            catch (InvalidOperationException) when (lan < SoLanDoiCong - 1)
+            {
+                thu.Dispose();
+            }
+        }
+        if (channel is null)
+        {
+            throw new InvalidOperationException(
+                $"Không xin được cổng loopback trống sau {SoLanDoiCong} lượt — máy đang cạn cổng?");
+        }
 
         var client = new ClientWebSocket();
         await client.ConnectAsync(new Uri($"ws://localhost:{port}/"), CancellationToken.None);

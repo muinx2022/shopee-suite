@@ -123,6 +123,12 @@ internal sealed class ShopFlowRunner
     /// để BỎ QUA shop này (không in phiếu) rồi sang shop kế — KHÔNG đẻ kênh sự kiện thứ hai.</summary>
     public string? PickupFailedShop { get; set; }
 
+    /// <summary>Nhãn shop ĐẶT ĐƯỢC địa chỉ lấy hàng trong lượt này (null = chưa/không chạy bước đặt địa chỉ).
+    /// Đối xứng <see cref="PickupFailedShop"/> — vòng ngoài (phiên) đọc để TỰ GỠ banner lỗi địa chỉ cũ của shop
+    /// đó. CHỈ đặt khi bước đặt địa chỉ THỰC SỰ chạy và trả ok: shop 0 đơn chờ lấy hàng không chạy bước này nên
+    /// KHÔNG được coi là "đã hết lỗi" (chưa chứng minh được gì).</summary>
+    public string? PickupOkShop { get; set; }
+
     private void L(string m) => _log?.Invoke(m);
 
     /// <summary>
@@ -236,6 +242,11 @@ internal sealed class ShopFlowRunner
                 L($"⛔ Không đặt được địa chỉ lấy hàng ({_province}) — BỎ QUA shop này, sang shop kế (nếu còn), KHÔNG in phiếu (tránh phiếu sai địa chỉ).");
                 return (orders.Count, 0);
             }
+
+            // Lọt qua cả hai nhánh dừng ⇒ bước đặt địa chỉ ĐÃ CHẠY và trả ok. Đây là tín hiệu duy nhất chứng
+            // minh shop này KHÔNG còn lỗi địa chỉ — vòng ngoài đọc để tự gỡ banner cũ. Nhãn shop có thể RỖNG
+            // (picker không đọc được tên) → vẫn phải là chuỗi KHÁC null, y như PickupFailedShop.
+            PickupOkShop = string.IsNullOrWhiteSpace(shopLogin) ? "(không rõ shop)" : shopLogin;
 
             // Lặp Chuẩn bị hàng tới khi hết đơn / chạm chốt chặn / captcha. Mã vận đơn bắt NGAY tại modal
             // "Thông Tin Chi Tiết" (extension đọc trước khi in phiếu) → gom theo mã đơn để cập nhật DB same-cycle.

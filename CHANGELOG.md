@@ -5,6 +5,31 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Phiên bản & cập nhật. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.8.4 — 2026-08-08
+
+**Đơn hàng — hết báo "Lỗi địa chỉ" oan vì một hộp thông báo của Shopee**
+
+- Shopee thỉnh thoảng bật hộp thông báo (đổi chính sách, tính năng mới…) đè lên trang Cài đặt vận chuyển. Lớp
+  nền của hộp đó nuốt mọi cú bấm phía sau, nên app không mở được phần Địa chỉ và kết luận "không đặt được địa
+  chỉ lấy hàng": shop bị bỏ qua, không in phiếu, banner đỏ ở tab Shops, tin cảnh báo gửi đi — trong khi thực tế
+  chẳng có gì hỏng, chỉ cần bấm "Đồng ý" là xong.
+- Nay app **tự tìm và đóng hộp thông báo đó** ngay khi vào trang, và nếu lượt đầu vẫn hỏng thì dọn thêm một lần
+  rồi **thử lại đúng một lượt**. Đóng bằng nút chữ (Đồng ý / OK / Đã hiểu / Bỏ qua…), không có nút chữ mới dùng
+  dấu ✕. Hộp "Sửa Địa chỉ" của chính app thì tuyệt đối không đụng tới.
+- **Không đổi hành vi khi lỗi là thật**: vẫn bỏ qua shop, vẫn không in phiếu (tránh phiếu sai địa chỉ lấy hàng),
+  vẫn ghi banner và gửi cảnh báo như trước.
+- Đổi lại, một shop hỏng THẬT nay giữ chỗ lâu hơn trong vòng đó — hạn chờ bước đặt địa chỉ được nới từ 90 lên
+  240 giây cho đủ hai lượt thử (một lượt xấu nhất ~72 giây). Để hạn quá sát thì cả vòng bị dừng giữa chừng chứ
+  không phải chỉ hỏng một shop, nên thà rộng tay.
+
+**Đơn hàng — banner "Lỗi địa chỉ" tự tắt khi shop đã hết lỗi**
+
+- Trước đây banner đỏ chỉ mất khi người dùng tự bấm Đóng, nên các cảnh báo cũ nằm lại mãi kể cả khi vòng sau
+  shop đó đã đặt được địa chỉ bình thường.
+- Nay shop nào trong vòng **đặt được địa chỉ** thì banner cũ của chính shop đó tự gỡ, đồng bộ sang các máy khác
+  y như lần bấm Đóng bằng tay. Chỉ đụng shop đang thực sự có banner; shop 0 đơn chờ lấy hàng (không chạy bước
+  địa chỉ) **không** được coi là đã hết lỗi, và shop khác đang lỗi trong cùng vòng giữ nguyên banner.
+
 ## v1.8.3 — 2026-08-07
 
 **Đơn hàng — bỏ một lượt mở/đóng trình duyệt thừa mỗi vòng, mỗi tài khoản**

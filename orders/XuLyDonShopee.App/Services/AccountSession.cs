@@ -524,6 +524,11 @@ public partial class AccountSession : ObservableObject, IAccountSession
                         $"Vòng xong: {result.ShopsDone}/{result.ShopCount} shop, {result.TotalOrders} đơn, {result.TotalSlips} phiếu — nghỉ {intervalMin}'.");
                 }
 
+                // Shop nào vòng này ĐẶT ĐƯỢC địa chỉ mà còn banner cũ → tự gỡ (người dùng chốt 08/08/2026). Chạy
+                // ở MỌI nhánh, kể cả nhánh có shop khác lỗi địa chỉ: shop A hết lỗi thì gỡ banner A, không liên
+                // quan shop B đang lỗi. Đặt SAU GhiBannerLoiDiaChi để giữ đúng nghĩa "ghi cái mới rồi gỡ cái cũ".
+                _persist.GoBannerLoiDiaChi(result.PickupOkShops, log, ct);
+
                 // Nghỉ interval trước chu kỳ kế (hủy giữa chừng → thoát vòng). Ghi mốc dự kiến để nhật ký cho
                 // biết phiên vẫn sống trong lúc không có hoạt động trình duyệt.
                 var nextRunAt = DateTime.Now.AddMinutes(intervalMin);

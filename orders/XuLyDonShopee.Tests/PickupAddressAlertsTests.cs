@@ -190,6 +190,120 @@ public class PickupAddressAlertsTests
         Assert.Contains("b.store", list);
     }
 
+    // ── Chiều NGƯỢC LẠI: shop ĐẶT ĐƯỢC địa chỉ → tự gỡ banner ────────────────────────────────────────
+
+    /// <summary>
+    /// Rỗng phải ra danh sách RỖNG — KHÁC hẳn <see cref="OrderPersistPipeline.TachTenShopLoiDiaChi"/> (rỗng →
+    /// <c>["(không rõ shop)"]</c>). Dùng nhầm hàm kia ở đường gỡ là đi dismiss một shop tên "(không rõ shop)"
+    /// mỗi vòng: bơm rev vô ích lên Hub và đẻ tombstone rác.
+    /// </summary>
+    [Fact]
+    public void TachTenShopDatDuoc_NullHoacRong_ThiRONG_KhongDeMucNao()
+    {
+        Assert.Empty(OrderPersistPipeline.TachTenShopDatDuocDiaChi(null));
+        Assert.Empty(OrderPersistPipeline.TachTenShopDatDuocDiaChi(""));
+        Assert.Empty(OrderPersistPipeline.TachTenShopDatDuocDiaChi("   "));
+    }
+
+    [Fact]
+    public void TachTenShopDatDuoc_NoiBangPhay_TachDu()
+    {
+        var list = OrderPersistPipeline.TachTenShopDatDuocDiaChi("a.store, b.store");
+        Assert.Equal(2, list.Count);
+        Assert.Contains("a.store", list);
+        Assert.Contains("b.store", list);
+    }
+
+    [Fact]
+    public void TachTenShopDatDuoc_KhuTrungKhongPhanBietHoaThuong()
+        => Assert.Single(OrderPersistPipeline.TachTenShopDatDuocDiaChi("a.store, A.STORE"));
+
+    [Fact]
+    public void TachTenShopDatDuoc_BoMucRong()
+        => Assert.Equal(2, OrderPersistPipeline.TachTenShopDatDuocDiaChi("a.store,, b.store").Count);
+
+    /// <summary>
+    /// Shop đang có banner → vòng sau đặt được địa chỉ → banner tự tắt, và lần tắt đó ĐƯỢC XẾP HÀNG đẩy lên Hub
+    /// (<c>cho_day = 1</c>) y như lần người dùng bấm Đóng — Hub chỉ có upsert/dismiss, không có "lý do đóng".
+    /// </summary>
+    [Fact]
+    public void GoBanner_ShopDangCoBanner_TatBanner_VaXepHangDayHub()
+    {
+        using var temp = new TempDatabase();
+        var services = new AppServices(temp.Path);
+        services.Accounts.Insert(new Account { Email = "a@mail.com", Password = "p" });
+        var accountId = services.Accounts.GetAll().First().Id;
+
+        var pipeline = new OrderPersistPipeline(accountId, services);
+        pipeline.GhiBannerLoiDiaChi(ShopDau, "Thanh Hóa", _ => { }, CancellationToken.None);
+        Assert.Single(services.PickupAlerts.ListActive(accountId));
+
+        pipeline.GoBannerLoiDiaChi(ShopDau, _ => { }, CancellationToken.None);
+
+        Assert.Empty(services.PickupAlerts.ListActive(accountId));           // banner tắt
+        var cho = Assert.Single(services.PickupAlerts.ListChoDay(accountId)); // còn phải đẩy lên Hub
+        Assert.Equal(ShopDau, cho.ShopLogin);
+        Assert.NotNull(cho.DismissedAt);
+    }
+
+    /// <summary>
+    /// Shop CHƯA từng lỗi (không có dòng nào) → đường gỡ KHÔNG được ghi gì: đẻ tombstone rác + bơm rev Hub mỗi
+    /// vòng cho mọi shop lành là hỏng cả nhịp sync.
+    /// </summary>
+    [Fact]
+    public void GoBanner_ShopChuaTungLoi_KhongTaoDongMoi()
+    {
+        using var temp = new TempDatabase();
+        var services = new AppServices(temp.Path);
+        services.Accounts.Insert(new Account { Email = "a@mail.com", Password = "p" });
+        var accountId = services.Accounts.GetAll().First().Id;
+
+        new OrderPersistPipeline(accountId, services)
+            .GoBannerLoiDiaChi(ShopHai, _ => { }, CancellationToken.None);
+
+        Assert.Empty(services.PickupAlerts.ListAll(accountId));
+    }
+
+    /// <summary>Chỉ gỡ ĐÚNG shop đặt được địa chỉ — shop khác đang lỗi trong cùng vòng giữ nguyên banner.</summary>
+    [Fact]
+    public void GoBanner_ChiGoDungShopDatDuoc_ShopConLoiGiuNguyen()
+    {
+        using var temp = new TempDatabase();
+        var services = new AppServices(temp.Path);
+        services.Accounts.Insert(new Account { Email = "a@mail.com", Password = "p" });
+        var accountId = services.Accounts.GetAll().First().Id;
+
+        var pipeline = new OrderPersistPipeline(accountId, services);
+        pipeline.GhiBannerLoiDiaChi(ShopDau + ", " + ShopHai, "Thanh Hóa", _ => { }, CancellationToken.None);
+        Assert.Equal(2, services.PickupAlerts.ListActive(accountId).Count);
+
+        pipeline.GoBannerLoiDiaChi(ShopDau, _ => { }, CancellationToken.None);
+
+        var conLai = Assert.Single(services.PickupAlerts.ListActive(accountId));
+        Assert.Equal(ShopHai, conLai.ShopLogin);
+    }
+
+    /// <summary>
+    /// Nhãn shop từ vòng chạy lệch hoa/thường so với dòng local vẫn phải gỡ TRÚNG: khóa SQL so BINARY, ghi bằng
+    /// chuỗi của vòng chạy là UPDATE không trúng dòng nào ⇒ banner kẹt vĩnh viễn.
+    /// </summary>
+    [Fact]
+    public void GoBanner_NhanLechHoaThuong_VanGoTrungDongLocal()
+    {
+        using var temp = new TempDatabase();
+        var services = new AppServices(temp.Path);
+        services.Accounts.Insert(new Account { Email = "a@mail.com", Password = "p" });
+        var accountId = services.Accounts.GetAll().First().Id;
+
+        var pipeline = new OrderPersistPipeline(accountId, services);
+        pipeline.GhiBannerLoiDiaChi(ShopDau, "Thanh Hóa", _ => { }, CancellationToken.None);
+
+        pipeline.GoBannerLoiDiaChi(ShopDau.ToUpperInvariant(), _ => { }, CancellationToken.None);
+
+        Assert.Empty(services.PickupAlerts.ListActive(accountId));
+        Assert.Equal(ShopDau, Assert.Single(services.PickupAlerts.ListAll(accountId)).ShopLogin);
+    }
+
     /// <summary>
     /// Kịch bản test chính: shop ĐẦU TIÊN lỗi địa chỉ → dừng shop đó (không in phiếu) + ghi banner;
     /// shop hai vẫn có thể chạy (không bị dính cờ lỗi). UI: banner + dấu X đỏ trên dòng shop đầu.

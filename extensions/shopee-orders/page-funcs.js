@@ -471,6 +471,70 @@ export function pageAnyModalVisible() {
   return false;
 }
 
+// Tìm nút ĐÓNG của modal CHẮN — modal đang hiển thị mà KHÔNG phải modal ta đang chờ (exceptTitleReSrc).
+// Shopee hay bật thông báo (đổi chính sách/tính năng mới) đè lên trang Cài đặt vận chuyển; mask của nó nuốt mọi
+// trusted click nên bước đặt địa chỉ fail OAN. Trả {x,y,title,label} của nút bấm được, hoặc null.
+// Ưu tiên nút CHỮ ở footer (Đồng ý/OK/Xác nhận/Đã hiểu/Bỏ qua/Để sau/Đóng), sau đó mới tới nút ✕
+// (.eds-modal__close) — bấm nút chữ là ý người dùng thật, ✕ chỉ là đường lui.
+// ⚠ Modal "Sửa Địa chỉ" của chính flow CŨNG là .eds-modal__box: caller PHẢI truyền exceptTitleReSrc
+// "^sua dia chi$", nếu không hàm này sẽ bấm đóng đúng cái modal flow đang dùng.
+// TỰ CHỨA (world MAIN serialize ĐỘC LẬP): mọi hằng/regex khai báo TRONG hàm, chỉ gọi bare _na.
+export function pageLocateBlockingModalButton(exceptTitleReSrc) {
+  const NHAN_DONG = /^(dong y|ok|xac nhan|da hieu|toi da hieu|toi biet roi|da biet|bo qua|de sau|dong|tiep tuc|hoan tat)$/;
+  const SEL_NUT = [".eds-modal__footer button", ".eds-modal__footer [role='button']", "button", "[role='button']", "a"];
+  // HẸP có chủ đích: [class*='close'] trần từng ở đây là quá rộng — querySelector trả phần tử ĐẦU theo thứ tự
+  // DOM (KHÔNG theo thứ tự selector) nên một <div class="closed-…"> trang trí cũng trúng, và ta bấm mù vào tâm
+  // nó. Flow chạy TIẾP trên chính trang đó, nên một cú click lạc gây điều hướng sẽ đẻ ra đúng cái "lỗi địa chỉ
+  // oan" mà hàm này sinh ra để dập.
+  const SEL_X = ".eds-modal__close, .eds-icon-close, [aria-label='Close'], [class*='eds-modal__close']";
+
+  let except = null;
+  if (exceptTitleReSrc) { try { except = new RegExp(exceptTitleReSrc); } catch (e) { except = null; } }
+
+  const toaDo = (el, t) => {
+    try { el.scrollIntoView({ block: "center" }); } catch (e) {}
+    const r = el.getBoundingClientRect();
+    return {
+      x: Math.round(r.left + r.width / 2),
+      y: Math.round(r.top + r.height / 2),
+      title: t || "",
+      // Cắt 40: nhãn chỉ để ghi nhật ký. Dò trúng phần tử bọc thì textContent là CẢ modal — đẩy nguyên khối
+      // đó qua WebSocket vào ô nhật ký là rác.
+      label: (_na(el.textContent) || "x").slice(0, 40),
+    };
+  };
+
+  for (const box of document.querySelectorAll(".eds-modal__box")) {
+    const rb = box.getBoundingClientRect();
+    if (!(rb.width > 0 && rb.height > 0)) continue;
+    const titleEl = box.querySelector(".eds-modal__title") || box.querySelector(".title");
+    const t = titleEl ? _na(titleEl.textContent) : "";
+    if (except && except.test(t)) continue; // modal flow đang chờ — TUYỆT ĐỐI không đóng
+
+    // 1) Nút CHỮ (footer trước, rồi cả hộp).
+    for (const sel of SEL_NUT) {
+      let els;
+      try { els = box.querySelectorAll(sel); } catch (e) { continue; }
+      for (const el of els) {
+        if (el.disabled) continue;
+        if (!NHAN_DONG.test(_na(el.textContent))) continue;
+        const r0 = el.getBoundingClientRect();
+        if (!(r0.width > 0 && r0.height > 0)) continue;
+        return toaDo(el, t);
+      }
+    }
+
+    // 2) Nút ✕ — đường lui khi modal không có nút chữ nào.
+    let nutX = null;
+    try { nutX = box.querySelector(SEL_X); } catch (e) { nutX = null; }
+    if (nutX) {
+      const r0 = nutX.getBoundingClientRect();
+      if (r0.width > 0 && r0.height > 0) return toaDo(nutX, t);
+    }
+  }
+  return null;
+}
+
 // Đọc MÃ VẬN ĐƠN trong modal "Thông Tin Chi Tiết" (ô data-testid=shipping-detail-tracking-number, class .tracking-number).
 // Chuẩn hoá BỎ HẾT khoảng trắng ("SPX VN0 626 215 188 57" → "SPXVN062621518857"). Chưa tạo xong ("...đang được tạo")
 // hoặc không phải code (còn ký tự tiếng Việt / <6 ký tự) → "" (chưa sẵn sàng).
