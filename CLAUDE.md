@@ -1,6 +1,6 @@
 # Quy trình làm việc
 
-Mục này **thay thế** mô hình 2 tầng (Fable plan → Opus thực thi) ở `d:\Projects\CLAUDE.md` — user chốt lại
+Mục này **thay thế** mô hình 2 tầng (Fable plan → Opus thực thi) ở `C:\Projects\CLAUDE.md` — user chốt lại
 2026-08-02, nới phần subagent 2026-08-04.
 
 - **Mặc định: phiên chính vừa trao đổi vừa tự thực thi** — khảo sát, viết code, build, test đều do agent đang
