@@ -1,4 +1,4 @@
-using XuLyDonShopee.App.Services;
+﻿using XuLyDonShopee.App.Services;
 using XuLyDonShopee.Core.Models;
 
 namespace XuLyDonShopee.Tests;
@@ -11,12 +11,16 @@ namespace XuLyDonShopee.Tests;
 /// </summary>
 public class HubOutboxWorkerRoundTests
 {
+    /// <summary>Id tài khoản RIÊNG của lớp này — xem <see cref="TempDatabase.ThemTaiKhoanIdRieng{TLopTest}"/> (lấy id 1
+    /// mặc định thì lớp này và <c>NotifyDonTraKhoMaTests</c> giành <c>PushGate(1, Gsheet)</c> của nhau).
+    /// <b>Chép lớp test này đi nơi khác thì PHẢI đổi số này</b> — trùng id là dựng lại đúng cuộc đua đó.</summary>
+    private const long AccId = 4201;
+
     /// <summary>Dựng bộ dịch vụ trên DB tạm + 1 tài khoản, trả (services, accountId).</summary>
     private static (AppServices Services, long AccountId) Dung(TempDatabase temp)
     {
         var services = new AppServices(temp.Path);
-        var accountId = services.Accounts.Insert(new Account { Email = "shop-test@example.com" });
-        return (services, accountId);
+        return (services, TempDatabase.ThemTaiKhoanIdRieng<HubOutboxWorkerRoundTests>(services.Database, AccId));
     }
 
     private static SyncedOrder Order(string sn, string? status, string? sku = null)
