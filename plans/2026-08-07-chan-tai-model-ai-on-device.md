@@ -1,7 +1,8 @@
 # Plan: chặn hồ sơ trình duyệt tự tải model AI on-device (OptGuideOnDeviceModel ~4 GB/hồ sơ)
 
 - **Ngày:** 2026-08-07
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành (đã qua phản biện `nghiem-thu` 07/08/2026 + sửa 4 điểm; còn MỘT việc kiểm chứng
+  bằng tay chưa làm được ở máy dev — xem mục "Sau phản biện" cuối file)
 - **Người lập:** Opus 5 (phiên chính) · **Người thực thi:** phiên chính (theo `CLAUDE.md` của repo) · **Phản biện:** `nghiem-thu`
 
 ## 1. Bối cảnh & mục tiêu
@@ -25,6 +26,11 @@ về khi chuẩn bị hồ sơ.
 
 Mọi lệnh phóng trình duyệt của repo đều đi qua **một builder chung**: `shared/Shopee.Toolkit/Browser/BraveArgs.cs`
 (grep `--disable-features`, `--user-data-dir`, `BraveArgs.` — không sót nhánh nào). Năm call-site:
+
+> **Đính chính sau phản biện (07/08/2026):** thực tế là **6** call-site đi qua builder — bảng dưới gộp
+> `BrowserLauncher` và `BigSellerBraveRunner` làm một dòng (#5) nhưng chúng là hai nơi phóng khác nhau. Ngoài ra
+> còn **một đường thứ 7 KHÔNG đi qua builder**: hub web phóng Chromium bằng Playwright
+> (`BigSellerLoginService`) — xem bước 4 và mục "Sau phản biện".
 
 | # | Call-site | Chuỗi `--disable-features` hiện tại |
 |---|---|---|
@@ -212,6 +218,145 @@ Lần lượt hoàn tác tạm từng thay đổi và xác nhận **đúng** tes
 
 ---
 
-## Báo cáo thực thi (điền sau khi xong)
+## Báo cáo thực thi
 
-<chưa làm>
+Người thực thi: phiên chính (Opus 5). Làm đúng plan, không đổi hướng. File đã sửa:
+
+| File | Thay đổi |
+|---|---|
+| `shared/Shopee.Toolkit/Browser/BraveArgs.cs` | `OnDeviceAiModelFeatures`, `OnDeviceAiModelDirName`, `DisableFeatures(params)`, `NormalizeDisableFeatures` (gộp + bổ sung, chèn trước positional); `Build`/`BuildList` đi qua chuẩn hoá |
+| `orders/…/Services/BraveLaunchArgs.cs` | 2 chỗ `.Add("--disable-features=…")` → `.DisableFeatures(…)` |
+| `suite/Shopee.Module.Search/Engine/BraveManager.cs` | như trên |
+| `suite/Shopee.Module.MultiBrave/Engine/BraveProfileManager.cs` | như trên |
+| `suite/Shopee.Core/Browser/BraveCachePolicy.cs` | `RegenerableCacheRelPaths` += `OptGuideOnDeviceModel` |
+| `orders/…/Services/ProfileJanitor.cs` | thêm `XoaModelAiOnDevice` (+ `DoKichThuoc`) |
+| `orders/…/Services/BrowserProfileGuard.cs` | `FreeProfile` gọi thêm bước xoá model + log số MB |
+| `server/…/Services/BigSellerLoginService.cs` | thêm cờ vào `Args` Playwright |
+| 4 file test sửa + 2 file test mới | xem mục 3 bước 5 |
+
+### Kết quả kiểm chứng THẬT
+
+- `dotnet build ShopeeSuite.sln` → **0 lỗi, 0 warning**.
+- `dotnet build server/Shopee.Hub.Web` → **0 lỗi, 0 warning**.
+- `dotnet test suite/Shopee.Core.Tests` → **111/111 xanh**.
+- `dotnet test orders/XuLyDonShopee.Tests` → **1644/1644 xanh**.
+- Grep `--disable-features` trong `*.cs`: chỉ còn ở `BraveArgs.cs`, `BigSellerLoginService.cs` (hub) và test —
+  không còn `.Add("--disable-features=…")` chép tay ở call-site nào.
+
+**In args THẬT của từng call-site** (harness console riêng, gọi cả hàm `private` qua reflection —
+`scratchpad/argcheck`). Mỗi bộ đều có **đúng 1** cờ `--disable-features`:
+
+| Call-site | Chuỗi `--disable-features` | Phần tử cuối |
+|---|---|---|
+| orders `BuildBraveArgs` (không ext) | `Translate,CalculateNativeWinOcclusion,IntensiveWakeUpThrottling,OptimizationGuideOnDeviceModel,OptimizationGuideModelDownloading,TextSafetyClassifier` | `--disable-popup-blocking` |
+| orders `BuildBraveArgs` (có ext) | như trên + `DisableLoadExtensionCommandLineSwitch` (chèn trước nhóm AI) | `--load-extension=C:\ext` |
+| orders `BuildCleanPocArgs` | như trên | `https://banhang.shopee.vn/portal/shop` ✔ |
+| Search `BraveManager.BuildArgs` | `DisableLoadExtensionCommandLineSwitch` + 3 feature AI | `"https://shopee.vn/#_ss_ws=8123"` ✔ |
+| scrape `BraveProfileManager.BuildBraveArguments` | `CalculateNativeWinOcclusion,IntensiveWakeUpThrottling,DisableLoadExtensionCommandLineSwitch` + 3 feature AI | `--disable-component-update` |
+| `BrowserLauncher.BuildArgs` | **trước đây KHÔNG có cờ nào** → nay `OptimizationGuideOnDeviceModel,OptimizationGuideModelDownloading,TextSafetyClassifier` | `"https://shopee.vn/"` ✔ |
+
+**Call-site thứ 6 — `BigSellerBraveRunner.StartBrave` (Update/Import) — KHÔNG in được args thật**: chuỗi cờ nằm
+inline trong hàm phóng Brave, gọi là mở trình duyệt thật. Phần bảo đảm cho nó là test mức builder
+(`CallSiteKhongKhaiGi_VanCoDu3FeatureChanModelAi` + `StartUrlVanODongCuoi_KhiPhaiChenCoMoi`) vì chuỗi của nó
+cùng hình dạng `BraveArgs.Create()…StartUrl(StartUrl).Build()` (đọc `BigSellerBraveRunner.cs:77-100`) — tức
+verify bằng suy luận + test builder, KHÔNG phải chạy thật. Ghi rõ để không nhận vơ.
+
+### Thử phá test (5/5 mục, mỗi lần sửa hỏng → chạy test → khôi phục)
+
+| Sửa hỏng | Test đỏ |
+|---|---|
+| 1. Bỏ nhóm feature AI khỏi `NormalizeDisableFeatures` | Core: `CallSiteKhongKhaiGi…`, `GopMoi…`, `KhongTrungLap…`; orders: `CoDisableFeaturesOnDinh…` (chuỗi chính xác), `CoExtension_VanGiu…`, POC `ChanTaiModelAi…` |
+| 2. Thêm cờ `--disable-features` THỨ HAI thay vì gộp | Core: `GopMoi…`, `KhongTrungLap…`, `GoiBuildHaiLan…`; orders: `ChiCoDungMotCoDisableFeatures`, `CoExtension…`, POC `ChanTaiModelAi…` **và** POC `CoUserDataDir_VaStartUrlOCuoi` |
+| 3. Chèn cờ mới ở CUỐI thay vì trước positional | Core: `StartUrlVanODongCuoi_KhiPhaiChenCoMoi` |
+| 4. Bỏ `OnDeviceAiModelDirName` khỏi `RegenerableCacheRelPaths` | Core: `PruneProfileCache_XoaThuMucModelAi_GiuNguyenCookie` |
+| 5. Bỏ lời gọi `XoaModelAiDaTai` trong `FreeProfile` | orders: `FreeProfile_XoaLuonModelAiOnDevice_VaBaoNhatKy` |
+
+**Sai lệch so với plan (khai báo, không sửa plan cho khớp):**
+- Plan đoán mục 3 sẽ làm đỏ cả `BraveCleanPocArgsTests.CoUserDataDir_VaStartUrlOCuoi` — **sai**: đường POC vốn
+  đã khai cờ `--disable-features` nên đi nhánh "gộp tại chỗ", không có bước chèn. Luật chèn chỉ được canh bởi
+  test mức builder (đã đỏ đúng như mong đợi). Không hở, nhưng ghi lại cho đúng sự thật.
+- Plan viết mục 5 sẽ làm đỏ "test `ProfileJanitorTests` mới" — **sai**: test đó chỉ canh bản thân hàm dọn.
+  Phần NỐI DÂY được canh bằng test mới thêm `BrowserProfileGuardTests.FreeProfile_XoaLuonModelAiOnDevice_VaBaoNhatKy`
+  (test tích hợp Windows-only), và chính nó đỏ khi bỏ lời gọi.
+
+### Còn lại
+
+- 8 GB trên máy dev: hồ sơ `23-chrome`/`30-chrome` tự sạch ở lần mở phiên kế tiếp; hồ sơ không mở lại nữa thì
+  user xoá tay (lệnh gợi ý ở phần trả lời).
+- Chưa bump `version.txt`/CHANGELOG, chưa deploy hub, chưa phát hành client — theo đúng phạm vi.
+
+---
+
+## Sau phản biện (`nghiem-thu`, 07/08/2026)
+
+Kết luận của người phản biện: **đạt có điều kiện** — phần lõi chắc, nhưng thay đổi ở hub là lỗi thật. Phiên chính
+tự đối chiếu lại từng điểm (đọc thẳng driver Playwright, đọc code call-site) trước khi nhận. Bốn điểm đã sửa:
+
+### 1. (NGHIÊM TRỌNG — đã revert) Thay đổi ở hub tự tạo ra đúng cái bẫy hai cờ mà plan cấm
+
+`server/Shopee.Hub.Web/Services/BigSellerLoginService.cs` — bước 4 của plan **SAI**, đã bỏ hẳn.
+
+Bằng chứng đọc thẳng driver (`.playwright/package/lib/coreBundle.js`, Playwright 1.60):
+
+```js
+chromiumSwitches = (options) => [ …, "--disable-component-update", …,
+                                  "--disable-features=" + disabledFeatures.join(","), … ];
+_innerDefaultArgs(options) { const chromeArguments = [...chromiumSwitches()];
+                             … chromeArguments.push(...args);  // Args của mình nối SAU, KHÔNG gộp }
+```
+
+Playwright **đã tự truyền một cờ `--disable-features`** rồi mới nối `Args` của ta vào sau ⇒ browser nhận hai cờ
+cùng tên, Chromium chỉ giữ một. Danh sách mặc định của Playwright có `OptimizationHints` kèm đúng comment
+*"Prevents downloading optimization hints on startup."*, và nó cũng đã truyền sẵn `--disable-component-update`.
+Tức hub **vốn đã được che**, còn dòng thêm vào thì hoặc là no-op, hoặc (nếu cờ của ta thắng) **xoá sổ** danh sách
+của Playwright — bật lại `OptimizationHints` (phản tác dụng) và mất các feature giữ ổn định phiên headless
+(`AvoidUnnecessaryBeforeUnloadCheckSync`, `DestroyProfileOnBrowserClose`…).
+
+Đã trả `Args` về nguyên trạng 3 cờ cũ + comment cảnh báo dài để không ai thêm lại.
+
+### 2. (MỞ RỘNG PHẠM VI — có chủ đích) Thêm `--disable-component-update` cho hai đường phóng của orders
+
+`orders/XuLyDonShopee.Core/Services/BraveLaunchArgs.cs` — hằng `ChanComponentUpdater`, thêm vào cả
+`BuildBraveArgs` và `BuildCleanPocArgs`.
+
+Lý do: model AI on-device được **cài qua component updater** về gốc user-data-dir. Bằng chứng tại chỗ mạnh hơn
+mọi suy luận về tên feature: hai hồ sơ rò 3,98 GB đều là hồ sơ **của orders**, và orders là đường phóng **DUY
+NHẤT** thiếu cờ này — 4 đường phía suite (`BrowserLauncher`, `BigSellerBraveRunner`, `BraveManager`,
+`BraveProfileManager`) đều đã có sẵn qua `BraveArgs.DiskCacheLimit()` và **không hồ sơ nào của suite bị rò**.
+Nhóm feature AI vẫn giữ làm lớp thứ hai. Đây là mở rộng ngoài plan gốc — ghi rõ ở đây, không sửa plan cho khớp.
+
+**Chưa lấp:** orders vẫn KHÔNG có trần cache đĩa (3 cờ còn lại của `DiskCacheLimit`) — cố ý để ngoài phạm vi việc
+này; đó là một hạng mục riêng.
+
+### 3. (TRUNG BÌNH — đã sửa) Hàm xoá mới thiếu sanity check mà chính file đó đặt ra
+
+`ProfileJanitor.XoaModelAiOnDevice` nay chặn bằng `HasProfilesSegment` giống `TryResetDirectory` (cùng là thao
+tác phá huỷ). Đã kiểm: mọi hồ sơ thật đều là `<baseDir>/profiles/<id>-<kind>` (`BrowserProfilePaths.ForAccount`,
+là nguồn duy nhất của cả 3 nơi gọi `FreeProfile`) ⇒ luật này không cắt mất ca hợp lệ nào.
+`BrowserProfileGuardTests` đã sửa dùng đường dẫn có segment `profiles` như hồ sơ thật.
+
+### 4. (THẤP — đã sửa) Log làm tròn thành "~0 MB"
+
+`BrowserProfileGuard` in `{mb:0.##}` thay cho chia nguyên.
+
+### Kiểm chứng lại sau khi sửa (phiên chính tự chạy)
+
+- `dotnet build ShopeeSuite.sln` → **0 lỗi, 0 warning**; `dotnet build server/Shopee.Hub.Web` → **0 lỗi, 0 warning**.
+- `dotnet test suite/Shopee.Core.Tests` → **111/111**; `dotnet test orders/XuLyDonShopee.Tests` → **1647/1647** (+3 test mới).
+- **Thử phá 3 test mới** (sửa hỏng → build → chạy → khôi phục, hash file khớp bản gốc):
+
+  | Phá gì | Test đỏ |
+  |---|---|
+  | Bỏ `.Add(ChanComponentUpdater)` ở `BuildBraveArgs` | `BraveLaunchArgsTests.CoChanComponentUpdater` |
+  | Bỏ `.Add(ChanComponentUpdater)` ở `BuildCleanPocArgs` | `BraveCleanPocArgsTests.CoChanComponentUpdater` |
+  | Bỏ `!HasProfilesSegment(...)` trong `XoaModelAiOnDevice` | `ProfileJanitorTests.XoaModelAiOnDevice_DuongDanNgoaiProfiles_KhongXoaGi` |
+
+  **Bẫy gặp phải, ghi lại để lần sau khỏi dính:** khôi phục file bằng `Copy-Item` từ bản backup làm
+  `LastWriteTime` cũ hơn DLL đã build ⇒ MSBuild coi là up-to-date, **bỏ qua biên dịch**, và lượt test "xác nhận
+  khôi phục" chạy trên chính bản đã phá (1 test đỏ giả). Phải `touch` lại file rồi build mới ra kết quả thật.
+
+### Việc kiểm chứng CÒN LẠI (không làm được ở máy dev, phải làm khi chạy thật)
+
+**Chưa ai chứng minh thư mục 4 GB không mọc lại.** Toàn bộ việc này mới chỉ được chứng minh ở mức "chuỗi args
+đúng như thiết kế" + "bước dọn xoá đúng thư mục". Cách kiểm: xoá `OptGuideOnDeviceModel` ở một hồ sơ orders, chạy
+một vòng bình thường, rồi kiểm tra thư mục có mọc lại không.

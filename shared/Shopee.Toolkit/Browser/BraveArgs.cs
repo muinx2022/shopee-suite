@@ -7,7 +7,8 @@ namespace Shopee.Toolkit.Browser;
 /// cửa sổ nền, giới hạn cache, proxy, extension, remote-debugging-port) trong khi vẫn cho từng call-site thêm
 /// cờ RIÊNG của nó qua <see cref="Add(string)"/>/<see cref="AddRange"/>. Builder chỉ nối cờ theo ĐÚNG thứ tự
 /// gọi → mỗi call-site gọi các phương thức theo đúng thứ tự cờ gốc thì kết quả GIỐNG HỆT bản cũ (refactor
-/// không đổi hành vi).
+/// không đổi hành vi). NGOẠI LỆ DUY NHẤT: phần <c>--disable-features</c> được gộp + bổ sung lúc dựng kết quả —
+/// xem <see cref="NormalizeDisableFeatures"/>.
 /// <para>
 /// KHÁC BIỆT DUY NHẤT giữa hai phía là CÁCH GIAO args cho tiến trình, nên nó được tham số hoá bằng chế độ
 /// khởi tạo chứ không phải hai lớp:
@@ -92,6 +93,39 @@ public sealed class BraveArgs
         return this;
     }
 
+    /// <summary>
+    /// Feature Chromium phải TẮT ở MỌI hồ sơ do app tạo: chúng tải model AI on-device (Gemini Nano) về ngay gốc
+    /// user-data-dir. Đo 07/08/2026 trên máy dev: <c>OptGuideOnDeviceModel\2025.8.8.1141\weights.bin</c> =
+    /// <b>3,98 GB mỗi hồ sơ</b>, 2 hồ sơ đã ăn ~8 GB trong tổng 16 GB của 25 hồ sơ. App KHÔNG dùng tính năng AI
+    /// nào của trình duyệt và hồ sơ là loại dùng-rồi-bỏ ⇒ rác thuần, còn tăng theo số hồ sơ.
+    /// <para>Feature nào trình duyệt không có (vd Brave) thì Chromium bỏ qua, không lỗi.</para>
+    /// </summary>
+    public static readonly IReadOnlyList<string> OnDeviceAiModelFeatures = new[]
+    {
+        "OptimizationGuideOnDeviceModel",
+        "OptimizationGuideModelDownloading",
+        "TextSafetyClassifier",
+    };
+
+    /// <summary>Tên thư mục model AI đã tải — nằm ngay GỐC user-data-dir (KHÔNG phải trong <c>Default</c>).
+    /// Dùng chung cho các bước dọn hai phía (suite: BraveCachePolicy; orders: ProfileJanitor).</summary>
+    public const string OnDeviceAiModelDirName = "OptGuideOnDeviceModel";
+
+    private const string DisableFeaturesPrefix = "--disable-features=";
+
+    /// <summary>
+    /// Thêm cờ <c>--disable-features=…</c> với các feature RIÊNG của call-site. Nhận cả chuỗi đã ghép sẵn bằng
+    /// dấu phẩy (<c>"A,B"</c>) lẫn nhiều tham số rời. Dùng thay cho <see cref="Add(string)"/> chép tay để bước
+    /// gộp ở <see cref="Build"/>/<see cref="BuildList"/> nhìn thấy được.
+    /// </summary>
+    public BraveArgs DisableFeatures(params string[] features)
+    {
+        var list = SplitFeatures(features);
+        if (list.Count > 0)
+            _parts.Add(DisableFeaturesPrefix + string.Join(",", list));
+        return this;
+    }
+
     /// <summary>Thêm <c>--load-extension=…</c> (đường dẫn 1 extension hoặc chuỗi nhiều path ngăn bởi dấu phẩy).</summary>
     public BraveArgs LoadExtension(string path) { _parts.Add($"--load-extension={Q(path)}"); return this; }
 
@@ -104,10 +138,101 @@ public sealed class BraveArgs
     /// <summary>Thêm nhiều cờ RIÊNG của call-site.</summary>
     public BraveArgs AddRange(IEnumerable<string> flags) { _parts.AddRange(flags); return this; }
 
-    /// <summary>Kết quả dạng CHUỖI (nối bằng dấu cách) cho <c>Process.Start(exe, argsString)</c>.</summary>
-    public string Build() => string.Join(" ", _parts);
+    /// <summary>Kết quả dạng CHUỖI (nối bằng dấu cách) cho <c>Process.Start(exe, argsString)</c>.
+    /// Đã qua <see cref="NormalizeDisableFeatures"/>.</summary>
+    public string Build() => string.Join(" ", NormalizeDisableFeatures(_parts));
 
     /// <summary>Kết quả dạng DANH SÁCH cho <c>ProcessStartInfo.ArgumentList</c> / <c>args</c> của Playwright.
-    /// Trả bản CHỈ ĐỌC để caller không sửa ngược vào builder.</summary>
-    public IReadOnlyList<string> BuildList() => _parts.AsReadOnly();
+    /// Đã qua <see cref="NormalizeDisableFeatures"/>. Trả bản MỚI (không phải view của builder) để caller
+    /// không sửa ngược vào trong.</summary>
+    public IReadOnlyList<string> BuildList() => NormalizeDisableFeatures(_parts);
+
+    /// <summary>
+    /// Chuẩn hoá phần <c>--disable-features</c> của một danh sách tham số — hàm THUẦN (không đụng builder, gọi
+    /// bao nhiêu lần cũng ra cùng kết quả):
+    /// <list type="number">
+    /// <item>Gom MỌI cờ <c>--disable-features=</c> thành ĐÚNG MỘT cờ, đặt tại vị trí cờ đầu tiên; giữ nguyên thứ
+    /// tự feature, khử trùng lặp.</item>
+    /// <item>LUÔN nối thêm <see cref="OnDeviceAiModelFeatures"/> (chặn tải model AI ~4 GB/hồ sơ) — kể cả khi
+    /// call-site không khai cờ nào thì cũng tự chèn một cờ mới.</item>
+    /// <item>Cờ chèn mới đặt TRƯỚC tham số positional đầu tiên (URL của <see cref="StartUrl"/>, kể cả bản bọc
+    /// ngoặc kép) để URL vẫn là tham số cuối như Chromium đòi.</item>
+    /// </list>
+    /// <para><b>VÌ SAO phải gộp, đừng bao giờ thêm cờ thứ hai:</b> Chromium giữ switch trong một map theo TÊN —
+    /// có hai <c>--disable-features</c> thì chỉ một cái sống, cái kia mất trắng. Mất
+    /// <c>DisableLoadExtensionCommandLineSwitch</c> = extension (cầu nối Đơn hàng / Search / scrape) ngừng nạp mà
+    /// KHÔNG có thông báo lỗi nào.</para>
+    /// <para>Đặt luật ở đây (chứ không sửa tay từng call-site) vì hai nơi phóng trình duyệt — BrowserLauncher và
+    /// BigSellerBraveRunner — vốn KHÔNG có cờ <c>--disable-features</c> nào, và mọi call-site tương lai cũng
+    /// được phủ mà không phải nhớ.</para>
+    /// </summary>
+    public static IReadOnlyList<string> NormalizeDisableFeatures(IReadOnlyList<string> parts)
+    {
+        var result = new List<string>(parts.Count + 1);
+        var features = new List<string>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);   // tên feature Chromium PHÂN BIỆT hoa/thường
+        var slot = -1;
+
+        foreach (var part in parts)
+        {
+            if (part is not null && part.StartsWith(DisableFeaturesPrefix, StringComparison.Ordinal))
+            {
+                foreach (var f in SplitFeatures(new[] { part[DisableFeaturesPrefix.Length..] }))
+                {
+                    if (seen.Add(f))
+                        features.Add(f);
+                }
+                // Chỗ của cờ gộp = vị trí cờ ĐẦU TIÊN; các cờ sau bị bỏ (đã hút hết feature vào đây).
+                if (slot < 0)
+                {
+                    slot = result.Count;
+                    result.Add(string.Empty);   // giữ chỗ, điền lại ở cuối
+                }
+                continue;
+            }
+            result.Add(part!);
+        }
+
+        foreach (var f in OnDeviceAiModelFeatures)
+        {
+            if (seen.Add(f))
+                features.Add(f);
+        }
+
+        var co = DisableFeaturesPrefix + string.Join(",", features);
+        if (slot >= 0)
+        {
+            result[slot] = co;
+        }
+        else
+        {
+            // Chưa có cờ nào → chèn TRƯỚC positional đầu tiên (start URL), không thì thêm cuối.
+            var idx = result.FindIndex(p => !string.IsNullOrEmpty(p) && !p.StartsWith('-'));
+            result.Insert(idx >= 0 ? idx : result.Count, co);
+        }
+
+        return result.AsReadOnly();
+    }
+
+    /// <summary>Tách danh sách feature: nhận cả chuỗi ghép sẵn bằng dấu phẩy lẫn nhiều tham số rời;
+    /// trim + bỏ phần tử rỗng. Giữ nguyên thứ tự, KHÔNG khử trùng lặp (việc đó ở nơi gộp).</summary>
+    private static List<string> SplitFeatures(IEnumerable<string>? features)
+    {
+        var list = new List<string>();
+        if (features is null)
+            return list;
+
+        foreach (var raw in features)
+        {
+            if (string.IsNullOrWhiteSpace(raw))
+                continue;
+            foreach (var token in raw.Split(','))
+            {
+                var f = token.Trim();
+                if (f.Length > 0)
+                    list.Add(f);
+            }
+        }
+        return list;
+    }
 }

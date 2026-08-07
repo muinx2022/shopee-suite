@@ -67,6 +67,60 @@ public static class ProfileJanitor
         return false;
     }
 
+    /// <summary>
+    /// Xoá thư mục model AI on-device mà Chrome tự tải về GỐC hồ sơ (<c>OptGuideOnDeviceModel</c>) — đo
+    /// 07/08/2026: <b>3,98 GB mỗi hồ sơ</b>, hai hồ sơ đã ăn ~8 GB. Việc TẢI đã bị chặn bằng cờ dòng lệnh
+    /// (<see cref="Shopee.Toolkit.Browser.BraveArgs.OnDeviceAiModelFeatures"/>); hàm này dọn phần đã trót tải
+    /// ở các hồ sơ có từ trước.
+    /// <para>Chỉ đụng ĐÚNG thư mục con đó — KHÔNG xoá hồ sơ, KHÔNG đụng cookie/đăng nhập. Best-effort: mọi lỗi
+    /// bị nuốt (thư mục đang bị khoá thì lần dọn sau xoá tiếp), không ném.</para>
+    /// <para>SANITY CHECK phòng thủ giống <see cref="TryResetDirectory"/> (cùng là thao tác PHÁ HỦY): chỉ dọn khi
+    /// <paramref name="userDataDir"/> có một segment tên đúng <c>profiles</c> — mọi hồ sơ thật đều nằm ở
+    /// <c>&lt;baseDir&gt;/profiles/&lt;id&gt;-&lt;kind&gt;</c> (xem <see cref="BrowserProfilePaths.ForAccount"/>), nên luật này
+    /// không cắt mất trường hợp nào mà chỉ chặn đường dẫn rỗng/tương đối/trỏ nhầm.</para>
+    /// </summary>
+    /// <returns>Số byte ước tính đã giải phóng (0 nếu không có gì để xoá / xoá không được).</returns>
+    public static long XoaModelAiOnDevice(string userDataDir, Action<string>? log = null)
+    {
+        if (string.IsNullOrWhiteSpace(userDataDir) || !HasProfilesSegment(userDataDir))
+        {
+            return 0;
+        }
+
+        try
+        {
+            var dir = Path.Combine(userDataDir, Shopee.Toolkit.Browser.BraveArgs.OnDeviceAiModelDirName);
+            if (!Directory.Exists(dir))
+            {
+                return 0;
+            }
+
+            var size = DoKichThuoc(dir);
+            Directory.Delete(dir, recursive: true);
+            return size;
+        }
+        catch (Exception ex)
+        {
+            log?.Invoke("Không xoá được model AI on-device của hồ sơ (bỏ qua, dọn lại lần sau): " + ex.Message);
+            return 0;
+        }
+    }
+
+    /// <summary>Tổng kích thước file trong một thư mục (best-effort — file lỗi/khoá thì bỏ qua).</summary>
+    private static long DoKichThuoc(string dir)
+    {
+        long size = 0;
+        try
+        {
+            foreach (var f in Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories))
+            {
+                try { size += new FileInfo(f).Length; } catch { /* bỏ qua file lẻ */ }
+            }
+        }
+        catch { /* bỏ qua */ }
+        return size;
+    }
+
     /// <summary>True nếu <paramref name="dir"/> có một segment tên đúng "profiles" (không phân biệt hoa/thường).</summary>
     private static bool HasProfilesSegment(string dir)
     {

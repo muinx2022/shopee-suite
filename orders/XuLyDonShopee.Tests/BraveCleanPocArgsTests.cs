@@ -48,4 +48,25 @@ public class BraveCleanPocArgsTests
         Assert.Contains(Build(),
             a => a.StartsWith("--disable-features") && a.Contains("DisableLoadExtensionCommandLineSwitch"));
     }
+
+    /// <summary>Hồ sơ POC cũng là hồ sơ Chrome bền → phải chặn tải model AI on-device (~4 GB/hồ sơ, đo 07/08/2026),
+    /// và tất cả phải nằm trong ĐÚNG MỘT cờ (hai cờ thì Chromium chỉ nhận một, cờ cho phép load-extension mất).</summary>
+    [Fact]
+    public void DisableFeatures_ChanTaiModelAi_TrongDungMotCo()
+    {
+        var co = Assert.Single(Build(), a => a.StartsWith("--disable-features="));
+
+        Assert.Contains("OptimizationGuideOnDeviceModel", co);
+        Assert.Contains("OptimizationGuideModelDownloading", co);
+        Assert.Contains("TextSafetyClassifier", co);
+    }
+
+    /// <summary>Model AI on-device được CÀI QUA COMPONENT UPDATER về gốc hồ sơ → chặn updater là đường chặn trực
+    /// tiếp nhất (nhóm feature ở trên là lớp thứ hai). Bằng chứng: hồ sơ rò 3,98 GB đều là hồ sơ orders — đường
+    /// phóng duy nhất từng thiếu cờ này.</summary>
+    [Fact]
+    public void CoChanComponentUpdater()
+    {
+        Assert.Contains("--disable-component-update", Build());
+    }
 }

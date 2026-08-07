@@ -190,6 +190,39 @@ public class BrowserProfileGuardTests
         Assert.Empty(dong);
     }
 
+    /// <summary>Bước dọn hồ sơ PHẢI xoá luôn model AI on-device Chrome tự tải về gốc hồ sơ (3,98 GB/hồ sơ, đo
+    /// 07/08/2026) — chốt phần NỐI DÂY: chỉ có hàm dọn mà không ai gọi thì ổ vẫn đầy. Chạy Windows-only vì
+    /// FreeProfile gọi PowerShell (bước kill), phần xoá thư mục thì thuần BCL.</summary>
+    [Fact]
+    public void FreeProfile_XoaLuonModelAiOnDevice_VaBaoNhatKy()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var dong = new List<string>();
+        // Đường dẫn phải có segment "profiles" như hồ sơ THẬT (BrowserProfilePaths.ForAccount) — bước dọn có
+        // sanity check chặn mọi đường dẫn ngoài 'profiles'.
+        var goc = Path.Combine(Path.GetTempPath(), "hs-optguide-" + Guid.NewGuid().ToString("N"));
+        var hoSo = Path.Combine(goc, "profiles", "12-chrome");
+        var model = Path.Combine(hoSo, "OptGuideOnDeviceModel", "2025.8.8.1141");
+        try
+        {
+            Directory.CreateDirectory(model);
+            File.WriteAllBytes(Path.Combine(model, "weights.bin"), new byte[2 * 1024 * 1024]);
+
+            BrowserProfileGuard.FreeProfile(hoSo, alsoMatchBridgeExtension: false, dong.Add);
+
+            Assert.False(Directory.Exists(Path.Combine(hoSo, "OptGuideOnDeviceModel")));
+            Assert.Contains(dong, d => d.Contains("model AI on-device"));
+        }
+        finally
+        {
+            try { Directory.Delete(goc, true); } catch { /* bỏ qua */ }
+        }
+    }
+
     [Fact]
     public void MoTaThoatSom_NeuRoTenTrinhDuyet_MaThoat_VaHoSo()
     {

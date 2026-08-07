@@ -107,7 +107,7 @@ internal static class BraveProfileManager
             .Add("--disable-renderer-backgrounding")
             // DisableLoadExtensionCommandLineSwitch: Brave/Chrome 137+ MẶC ĐỊNH chặn --load-extension
             // → extension "Shopee Data Runner" KHÔNG load. Tắt feature này để --load-extension hoạt động lại.
-            .Add("--disable-features=CalculateNativeWinOcclusion,IntensiveWakeUpThrottling,DisableLoadExtensionCommandLineSwitch")
+            .DisableFeatures("CalculateNativeWinOcclusion", "IntensiveWakeUpThrottling", "DisableLoadExtensionCommandLineSwitch")
             // Chặn cache phình khi 24 cửa sổ chạy song song (profile bền → cache không tự dọn). Xem BraveCachePolicy.
             .DiskCacheLimit();
         if (!string.IsNullOrWhiteSpace(proxyServer))

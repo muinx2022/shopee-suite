@@ -208,7 +208,7 @@ public sealed class BraveManager(AppSettingsService appSettings)
             .Add("--disable-background-timer-throttling")
             // Brave/Chrome 137+ mặc định chặn --load-extension (DisableLoadExtensionCommandLineSwitch) →
             // tắt feature đó để extension Shopee Search load được (giống engine Scrape).
-            .Add("--disable-features=DisableLoadExtensionCommandLineSwitch")
+            .DisableFeatures("DisableLoadExtensionCommandLineSwitch")
             .RemoteDebuggingPort(cdpPort)
             .LoadExtension(extPath)
             // Profile Search cũng BỀN (giữ cookie login) → phải chặn cache phình như mọi Brave khác của app.

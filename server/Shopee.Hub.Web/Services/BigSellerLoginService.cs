@@ -117,6 +117,17 @@ public sealed class BigSellerLoginService : IAsyncDisposable
             _browser = await _pw.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
             {
                 Headless = true,
+                // TUYỆT ĐỐI KHÔNG thêm "--disable-features=..." vào đây. Playwright đã TỰ truyền một cờ
+                // --disable-features (danh sách mặc định của nó) rồi mới nối Args của mình vào SAU
+                // (chromiumSwitches() → chromeArguments.push(...args)); Chromium giữ switch trong map theo tên
+                // nên hai cờ cùng tên thì chỉ MỘT sống. Thêm cờ ở đây = một trong hai danh sách bị bỏ: theo hiểu
+                // biết hiện tại cái nối sau thắng, tức mất danh sách của Playwright — trong đó có
+                // "OptimizationHints" (chính cờ chặn tải optimization hints) và các feature giữ ổn định phiên
+                // headless (AvoidUnnecessaryBeforeUnloadCheckSync, DestroyProfileOnBrowserClose...); chiều ngược
+                // lại thì cờ của ta thành no-op. Cách nào cũng sai.
+                // Việc chặn model AI on-device ở hub ĐÃ được lo sẵn: Playwright mặc định truyền
+                // --disable-component-update và tắt OptimizationHints. Phía app dùng
+                // BraveArgs.OnDeviceAiModelFeatures (không áp dụng được ở đây).
                 Args = new[] { "--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu" },
             });
         }

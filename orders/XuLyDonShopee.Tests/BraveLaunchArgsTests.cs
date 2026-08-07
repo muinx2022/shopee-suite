@@ -38,11 +38,49 @@ public class BraveLaunchArgsTests
     public void CoDisableFeaturesOnDinh_KhongCoAutomationControlled()
     {
         // Chuỗi --disable-features đúng như shopee-suite: Translate + CalculateNativeWinOcclusion +
-        // IntensiveWakeUpThrottling — và tuyệt đối KHÔNG chứa AutomationControlled.
+        // IntensiveWakeUpThrottling — và tuyệt đối KHÔNG chứa AutomationControlled. Nối thêm nhóm chặn tải
+        // model AI on-device do BraveArgs bổ sung cho MỌI call-site (~4 GB/hồ sơ nếu để Chrome tự tải).
         var args = BraveLaunchArgs.BuildBraveArgs("/tmp/p", 0);
 
-        Assert.Contains("--disable-features=Translate,CalculateNativeWinOcclusion,IntensiveWakeUpThrottling", args);
+        Assert.Contains(
+            "--disable-features=Translate,CalculateNativeWinOcclusion,IntensiveWakeUpThrottling"
+            + ",OptimizationGuideOnDeviceModel,OptimizationGuideModelDownloading,TextSafetyClassifier",
+            args);
         Assert.DoesNotContain(args, a => a.StartsWith("--disable-features") && a.Contains("AutomationControlled"));
+    }
+
+    /// <summary>Chromium giữ switch trong map theo TÊN: có hai cờ <c>--disable-features</c> thì chỉ một cái sống,
+    /// cái kia mất trắng (mất <c>DisableLoadExtensionCommandLineSwitch</c> = extension ngừng nạp, không báo lỗi).
+    /// Chốt để không ai "sửa nhanh" bằng cách thêm cờ thứ hai.</summary>
+    [Fact]
+    public void ChiCoDungMotCoDisableFeatures()
+    {
+        Assert.Single(BraveLaunchArgs.BuildBraveArgs("/tmp/p", 0),
+            a => a.StartsWith("--disable-features="));
+        Assert.Single(BraveLaunchArgs.BuildBraveArgs("/tmp/p", 0, "/tmp/ext"),
+            a => a.StartsWith("--disable-features="));
+    }
+
+    /// <summary>Model AI on-device (3,98 GB/hồ sơ) được CÀI QUA COMPONENT UPDATER về gốc user-data-dir → cờ này
+    /// là đường chặn trực tiếp nhất, nhóm feature AI là lớp thứ hai. Orders TỪNG là đường phóng duy nhất thiếu
+    /// nó và cũng là nơi duy nhất đo được rò rỉ (07/08/2026) — đừng bỏ đi.</summary>
+    [Fact]
+    public void CoChanComponentUpdater()
+    {
+        Assert.Contains("--disable-component-update", BraveLaunchArgs.BuildBraveArgs("/tmp/p", 0));
+        Assert.Contains("--disable-component-update", BraveLaunchArgs.BuildBraveArgs("/tmp/p", 0, "/tmp/ext"));
+    }
+
+    [Fact]
+    public void CoExtension_VanGiuCoChoPhepLoadExtension_VaCoChanModelAi()
+    {
+        var args = BraveLaunchArgs.BuildBraveArgs("/tmp/p", 0, "/tmp/ext");
+
+        var co = Assert.Single(args, a => a.StartsWith("--disable-features="));
+        Assert.Contains("DisableLoadExtensionCommandLineSwitch", co);
+        Assert.Contains("OptimizationGuideOnDeviceModel", co);
+        Assert.Contains("OptimizationGuideModelDownloading", co);
+        Assert.Contains("TextSafetyClassifier", co);
     }
 
     [Fact]

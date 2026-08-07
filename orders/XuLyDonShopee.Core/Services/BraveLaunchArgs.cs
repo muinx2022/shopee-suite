@@ -49,10 +49,17 @@ public static class BraveLaunchArgs
     // Tắt các tính năng gây bóp/che tài nguyên: Translate (popup dịch), CalculateNativeWinOcclusion
     // (Brave coi cửa sổ bị che → giảm hoạt động), IntensiveWakeUpThrottling (bóp timer tab nền).
     // KHÔNG còn AutomationControlled ở đây — không ép webdriver=false nữa (khớp shopee-suite).
+    // Nhóm chặn tải model AI on-device KHÔNG liệt kê ở đây: BraveArgs tự nối cho MỌI call-site
+    // (xem BraveArgs.OnDeviceAiModelFeatures) nên chuỗi cuối cùng dài hơn hằng này.
     private const string DisableFeaturesCoBan = "Translate,CalculateNativeWinOcclusion,IntensiveWakeUpThrottling";
 
     // Chrome/Brave 137+ MẶC ĐỊNH chặn --load-extension → phải tắt feature này thì extension mới nạp được.
     private const string ChoPhepLoadExtension = "DisableLoadExtensionCommandLineSwitch";
+
+    // Model AI on-device (OptGuideOnDeviceModel, 3,98 GB/hồ sơ) được CÀI QUA COMPONENT UPDATER về gốc
+    // user-data-dir → chặn updater là đường chặn trực tiếp nhất, bổ sung cho nhóm feature của BraveArgs.
+    // Cùng cờ mà 4 đường phóng phía suite đã dùng sẵn (BraveArgs.DiskCacheLimitFlags).
+    private const string ChanComponentUpdater = "--disable-component-update";
 
     /// <summary>
     /// Trả về danh sách tham số dòng lệnh cho Brave/Chromium:
@@ -77,7 +84,12 @@ public static class BraveLaunchArgs
             .RemoteDebuggingPort(remoteDebuggingPort)
             .WindowBlock(userDataDir)
             .AddRange(KhongBopTaiNguyenNen)
-            .Add($"--disable-features={disableFeatures}")
+            // BraveArgs tự nối thêm nhóm feature chặn tải model AI on-device (~4 GB/hồ sơ) vào cùng MỘT cờ.
+            .DisableFeatures(disableFeatures)
+            // Chặn component updater — ĐÂY mới là đường model AI on-device được cài về gốc hồ sơ. Bằng chứng
+            // tại chỗ: hai hồ sơ rò 3,98 GB (07/08/2026) đều là hồ sơ của orders, và orders là đường phóng DUY
+            // NHẤT không có cờ này (4 đường phía suite đều có qua BraveArgs.DiskCacheLimit và không hồ sơ nào rò).
+            .Add(ChanComponentUpdater)
             // Locale tiếng Việt đặt bằng cờ trình duyệt (KHÔNG hook navigator.languages bằng JS —
             // hook JS tự tạo dấu hiệu lộ bot).
             .Add("--lang=vi-VN")
@@ -106,7 +118,9 @@ public static class BraveLaunchArgs
         // --remote-debugging-port (không mở endpoint CDP) và bỏ nhánh proxy; thêm startUrl positional ở cuối.
         return BraveArgs.WindowRaw(userDataDir)
             .AddRange(KhongBopTaiNguyenNen)
-            .Add($"--disable-features={DisableFeaturesCoBan},{ChoPhepLoadExtension}")
+            .DisableFeatures(DisableFeaturesCoBan, ChoPhepLoadExtension)
+            // Hồ sơ POC cũng bền → chặn component updater (đường cài model AI 4 GB), xem BuildBraveArgs.
+            .Add(ChanComponentUpdater)
             .Add("--lang=vi-VN")
             .Add("--disable-popup-blocking")
             .LoadExtension(extensionPath)

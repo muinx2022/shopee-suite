@@ -69,6 +69,10 @@ public static class BraveCachePolicy
         "component_crx_cache",
         "extensions_crx_cache",
         "Safe Browsing",
+        // Model AI on-device (Gemini Nano) Chrome tự tải về GỐC user-data-dir — 3,98 GB/hồ sơ (đo 07/08/2026).
+        // App không dùng AI của trình duyệt; đã chặn tải bằng cờ (BraveArgs.OnDeviceAiModelFeatures), dòng này
+        // dọn phần đã trót tải. Tái tạo được, KHÔNG chứa cookie/đăng nhập.
+        BraveArgs.OnDeviceAiModelDirName,
     };
 
     /// <summary>Xoá mọi thư mục cache tái tạo được trong 1 profile. Trả về SỐ BYTE ước tính đã giải phóng.

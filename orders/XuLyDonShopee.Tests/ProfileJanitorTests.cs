@@ -116,4 +116,58 @@ public class ProfileJanitorTests
     {
         Assert.False(ProfileJanitor.TryResetDirectory(dir));
     }
+
+    /// <summary>Chrome tự tải model AI on-device về GỐC hồ sơ — 3,98 GB/hồ sơ (đo 07/08/2026). Bước dọn phải xoá
+    /// ĐÚNG thư mục đó và KHÔNG đụng gì khác trong hồ sơ (nhất là cookie: mất là phải đăng nhập lại).</summary>
+    [Fact]
+    public void XoaModelAiOnDevice_XoaDungThuMucModel_GiuNguyenPhanConLai()
+    {
+        using var temp = new TempProfileDir();
+        var model = Path.Combine(temp.Dir, "OptGuideOnDeviceModel", "2025.8.8.1141");
+        Directory.CreateDirectory(model);
+        File.WriteAllBytes(Path.Combine(model, "weights.bin"), new byte[2048]);
+        var cookies = Path.Combine(temp.Dir, "Default", "Network");
+        Directory.CreateDirectory(cookies);
+        File.WriteAllText(Path.Combine(cookies, "Cookies"), "giu-nguyen");
+
+        var freed = ProfileJanitor.XoaModelAiOnDevice(temp.Dir);
+
+        Assert.False(Directory.Exists(Path.Combine(temp.Dir, "OptGuideOnDeviceModel")));
+        Assert.True(freed >= 2048, $"phải tính được dung lượng đã giải phóng, nhận {freed}");
+        Assert.Equal("giu-nguyen", File.ReadAllText(Path.Combine(cookies, "Cookies")));
+    }
+
+    [Fact]
+    public void XoaModelAiOnDevice_KhongCoThuMucModel_TraKhongVaKhongNem()
+    {
+        using var temp = new TempProfileDir();
+        Directory.CreateDirectory(temp.Dir);
+
+        Assert.Equal(0, ProfileJanitor.XoaModelAiOnDevice(temp.Dir));
+        Assert.Equal(0, ProfileJanitor.XoaModelAiOnDevice(string.Empty));
+        Assert.True(Directory.Exists(temp.Dir));
+    }
+
+    /// <summary>Sanity check phòng thủ giống <c>TryResetDirectory</c>: đường dẫn KHÔNG có segment "profiles" thì
+    /// tuyệt đối không đụng đĩa. Hồ sơ thật luôn là &lt;baseDir&gt;/profiles/&lt;id&gt;-&lt;kind&gt; nên luật này không cắt mất
+    /// ca hợp lệ nào — nó chặn đường dẫn rỗng/tương đối/trỏ nhầm xoá đệ quy nhầm chỗ.</summary>
+    [Fact]
+    public void XoaModelAiOnDevice_DuongDanNgoaiProfiles_KhongXoaGi()
+    {
+        var goc = Path.Combine(Path.GetTempPath(), $"xlds_noprof_{Guid.NewGuid():N}");
+        var model = Path.Combine(goc, "OptGuideOnDeviceModel", "2025.8.8.1141");
+        try
+        {
+            Directory.CreateDirectory(model);
+            File.WriteAllBytes(Path.Combine(model, "weights.bin"), new byte[2048]);
+
+            Assert.Equal(0, ProfileJanitor.XoaModelAiOnDevice(goc));
+
+            Assert.True(Directory.Exists(model), "đường dẫn ngoài 'profiles' phải được bỏ qua, không xoá");
+        }
+        finally
+        {
+            try { Directory.Delete(goc, recursive: true); } catch { /* bỏ qua */ }
+        }
+    }
 }

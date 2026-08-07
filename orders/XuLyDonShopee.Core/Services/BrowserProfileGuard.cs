@@ -39,6 +39,21 @@ internal static class BrowserProfileGuard
     {
         KillBrowsersOnProfile(userDataDir, alsoMatchBridgeExtension, log);
         ClearProfileSessionAndLocks(userDataDir);
+        XoaModelAiDaTai(userDataDir, log);
+    }
+
+    /// <summary>Xoá model AI on-device Chrome đã trót tải về hồ sơ (~4 GB/hồ sơ — xem
+    /// <see cref="ProfileJanitor.XoaModelAiOnDevice"/>). Gọi SAU khi mọi trình duyệt của hồ sơ đã chết, nếu không
+    /// thư mục còn bị khoá. Chỉ báo nhật ký khi thật sự giải phóng được (im lặng ở các vòng sau).</summary>
+    private static void XoaModelAiDaTai(string userDataDir, Action<string>? log)
+    {
+        var freed = ProfileJanitor.XoaModelAiOnDevice(userDataDir, log);
+        if (freed > 0)
+        {
+            // Format 2 chữ số thập phân: chia nguyên cho MB làm phần dưới 1 MB thành "~0 MB" (khó hiểu khi đọc log).
+            var mb = freed / (1024d * 1024d);
+            log?.Invoke($"Dọn hồ sơ trình duyệt: đã xoá model AI on-device Chrome tự tải (~{mb:0.##} MB).");
+        }
     }
 
     /// <summary>
