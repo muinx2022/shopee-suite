@@ -5,6 +5,28 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Phiên bản & cập nhật. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.8.3 — 2026-08-07
+
+**Đơn hàng — bỏ một lượt mở/đóng trình duyệt thừa mỗi vòng, mỗi tài khoản**
+
+- Trước đây mỗi vòng luôn mở trình duyệt điều khiển để đăng nhập rồi mới đóng đi và mở lại bản sạch — kể cả khi
+  hồ sơ còn cookie, tức phần lớn các vòng. Chỗ đó tốn ~30–60 giây mỗi tài khoản mỗi vòng và chính lần bàn giao
+  hồ sơ giữa hai trình duyệt là nguồn của lỗi "Trình duyệt thoát ngay khi khởi động" đã sửa ở v1.8.1.
+- Nay **mở bản sạch trước**: còn cookie thì chạy thẳng vào việc. Chỉ khi bản sạch gặp trang đăng nhập (hoặc bất
+  cứ trục trặc nào khác ngoài captcha) mới đóng lại và đi đường đăng nhập cũ, tối đa một lần mỗi vòng.
+- Gặp **captcha thì KHÔNG** đổi đường — đẩy trình duyệt điều khiển vào đúng lúc Shopee đang nghi ngờ là tự khai
+  bot. Vẫn nghỉ vòng như trước.
+
+**Ổ cứng — chặn trình duyệt tự tải model AI ~4 GB cho MỖI hồ sơ**
+
+- Chrome tự tải model AI on-device (Gemini Nano) về từng hồ sơ do app tạo — đo được **3,98 GB một hồ sơ**, hai
+  hồ sơ đã ăn 8 GB. App không dùng tính năng AI nào của trình duyệt, mà số hồ sơ thì tăng dần theo số tài khoản,
+  nên đây là rác thuần và sẽ còn phình.
+- Nay chặn ở **mọi** đường app mở trình duyệt (kể cả hai đường trước đây không có cờ nào), bằng cả hai lớp: tắt
+  nhóm tính năng AI và chặn bộ cập nhật component — chính là đường model được tải về.
+- Phần đã trót tải thì **tự dọn**: hồ sơ nào được mở lại sẽ được xoá thư mục model, có ghi nhật ký số dung lượng
+  giải phóng. Chỉ xoá đúng thư mục đó, không đụng cookie/đăng nhập.
+
 ## v1.8.2 — 2026-08-06
 
 Rà soát màn **Shopee → Thống kê** (đọc toàn tuyến + render màn thật + soi đối kháng nhiều góc) và dọn ba chỗ
