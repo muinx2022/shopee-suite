@@ -1,7 +1,7 @@
 # Plan: mở bản sạch TRƯỚC, chỉ đăng nhập Playwright khi cần
 
 - **Ngày:** 2026-08-07
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành (code + test + 2 lượt phản biện; CÒN CHỜ nghiệm thu vận hành — xem báo cáo)
 - **Người lập:** phiên chính (Opus 5) · **Người thực thi:** phiên chính; phản biện: `nghiem-thu`
 
 ## 1. Bối cảnh & mục tiêu
@@ -166,4 +166,66 @@ File mới `orders/XuLyDonShopee.Tests/OrdersBridgeSsoTests.cs`:
 
 ## Báo cáo thực thi
 
-<điền sau khi xong>
+Phiên chính tự thực thi (không giao `opus-executor`); `nghiem-thu` phản biện 2 lượt.
+
+### Đã làm đúng plan
+
+Bước 1–5 làm đủ. Sửa đúng 2 file: `orders/XuLyDonShopee.Core/Services/OrdersBridgeSession.cs` và file test mới
+`orders/XuLyDonShopee.Tests/OrdersBridgeSsoTests.cs`. Không đụng extension, `SubaccountLoginFlow`, `ShopFlowRunner`.
+
+### ĐỔI HƯỚNG giữa chừng: thêm `KetQuaSso.Treo` (KHÔNG có trong plan gốc)
+
+Plan bước 2 chỉ định nghĩa 3 giá trị `Ok / Captcha / Loi`, và quyết định đã chốt với người dùng là "fallback
+cho MỌI lỗi không-captcha". Lượt phản biện 1 chỉ ra một ca mà luật đó gây hại thật:
+
+> Tổng hạn phía extension của `gotoSellerCentre` (10s dò entry + 90s chờ tab banhang + 15s load + 30s ensure
+> picker ≈ **145s**) DÀI HƠN hạn chặng `AtSeller` (**120s**). Khi Shopee bày trang verify, C# hết giờ TRƯỚC khi
+> extension kịp gửi `captcha` → phân loại thành `Loi` → **đi mở Playwright đăng nhập ngay giữa lúc bị nghi ngờ**
+> — đúng thứ người dùng chốt là không được làm. Bản trước khi đảo thứ tự không có lỗi này (TimeoutException
+> xuyên lên caller → nghỉ vòng).
+
+Thuốc mà agent kê (kiểm `CaptchaSeen` trong hai `catch`) KHÔNG cứu được ca này — lúc hết giờ thì cờ chưa bật.
+Nên tách nhóm thứ tư:
+
+- `Loi` = extension **trả lời rõ ràng** là hỏng (form đăng nhập / SSO trượt / picker không render) → đăng nhập lại.
+- `Treo` = **không có phản hồi** trong hạn → nghỉ vòng, KHÔNG đăng nhập lại (giữ đúng hành vi bản gốc).
+
+Căn cứ: cookie hết hạn thì extension báo NGAY (`pageIsLoginForm` chạy trước mọi thứ trong `gotoSellerCentre`),
+nên treo gần như không bao giờ mang nghĩa "cần đăng nhập lại". Lượt phản biện 2 đã đi hết 8 lối ra của
+`gotoSellerCentre` và xác nhận: mọi ca "cookie hỏng" đều rơi vào `Loi`, kể cả hồ sơ mới tinh và trang trắng.
+
+**Bất biến kèm theo (đã ghi vào xmldoc `KetQuaSso.Treo`):** `ready` tới C# không phụ thuộc trang đang mở vì
+`background.js` gọi `bridge.connect()` ở top-level service worker. Nếu ai bỏ lời gọi đó thì "hết giờ Ready" sẽ
+mang nghĩa mới và phải xét lại `QuyetDinhSauThuBanSach`, kẻo tài khoản kẹt nghỉ-vòng vĩnh viễn.
+
+### Sửa theo phản biện
+
+| Điểm | Xử lý |
+|---|---|
+| Captcha lọt qua nhánh hết giờ | `KetQuaSso.Treo` (trên) + hàm cục bộ `CaptchaNeuCo()` gọi ở cả 3 lối ra |
+| `Process` trỏ tiến trình chết suốt pha đăng nhập | `Process = null` sau `DongTrinhDuyetSach()` (không `Dispose` — UI thread có thể đang đọc) |
+| `switch` lượt hai gom `BaoLoi` với `DangNhapLai` vào `_` | Liệt kê tường minh, nhánh lạ thì ném |
+| Chặng `Ready` không được test nào canh | Test `SsoQuaCauNoi_ChoReady_TruocKhiGuiLenh` (canh THỨ TỰ: chưa `ready` thì chưa gửi lệnh) |
+| Guard cổng + đường treo không có lưới | 3 test mới; `SsoQuaCauNoiAsync` nhận 2 tham số hạn optional (mặc định = `ChoChang`, production không đổi) |
+| Câu lỗi hết giờ chỉ sai thủ phạm | Tách 2 chuỗi: "extension không nối cầu trong Ns" vs "hết giờ khi vào trang chọn shop" |
+
+### Kiểm chứng THẬT (phiên chính tự chạy, không tin báo cáo subagent)
+
+- `dotnet build ShopeeSuite.sln` → **0 warning, 0 error**.
+- `dotnet test orders/XuLyDonShopee.Tests` → **1638/1638 xanh** (trước việc này: 1634).
+- **Thử phá luật:** bỏ nhánh `Treo` + bỏ `CaptchaNeuCo()` ở catch hết giờ + xoá dòng chờ `Ready` ⇒ đúng **4 test
+  đỏ đúng tên** (`QuyetDinhSauThuBanSach_MaTran`, `SsoQuaCauNoi_KhongAiTraLoi_TraTreo`,
+  `SsoQuaCauNoi_CoCaptchaNhungChangHetGio`, `SsoQuaCauNoi_ChoReady_TruocKhiGuiLenh`). Hoàn nguyên → xanh lại.
+- `nghiem-thu` lượt 2: **đạt**, không còn lỗi đúng-thật; tự chạy lại build/test khớp số trên.
+
+### Tiêu chí CHƯA đạt (thuộc về vận hành, người dùng làm)
+
+Tiêu chí #7 — **chạy thật một tài khoản ≥2 vòng liên tiếp**: nhật ký phải CÓ "Cookie hồ sơ còn hạn — đã về
+trang chọn shop, BỎ QUA bước đăng nhập Playwright." và KHÔNG có "Đăng nhập Nền tảng tài khoản phụ bằng trình
+duyệt điều khiển (Playwright)".
+
+Đây cũng là chốt chặn duy nhất cho hai thứ không test tự động được:
+1. Guard cổng 47821 (chỉ nổ ở ca cookie hết hạn — test hiện có chỉ canh *lý do* guard tồn tại, không canh guard).
+2. Rủi ro mục 5: nếu cookie phiên không sống qua cú kill cứng cuối mỗi vòng thì lượt 1 hỏng ở MỌI vòng và thay
+   đổi này thành **chậm hơn** bản cũ. Nhật ký fallback liên tục = dấu hiệu của đúng chuyện đó, và gốc nằm ở chỗ
+   đóng trình duyệt chứ không phải ở việc đảo thứ tự.

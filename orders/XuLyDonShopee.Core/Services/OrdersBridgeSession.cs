@@ -46,6 +46,58 @@ public sealed record OrdersBridgeRunResult(
     int ShopCount, int ShopsDone, int TotalOrders, int TotalSlips, bool Captcha, string? Error,
     bool PickupAddressFailed = false, string? PickupFailedShop = null);
 
+/// <summary>Kết quả MỘT lượt mở trình duyệt sạch + SSO về trang chọn shop
+/// (<see cref="OrdersBridgeSession.SsoVePickerAsync"/>).</summary>
+internal enum KetQuaSso
+{
+    /// <summary>Đã về trang chọn shop (/portal/shop) — chạy tiếp được.</summary>
+    Ok,
+
+    /// <summary>Rơi vào trang verify/captcha — KHÔNG được đăng nhập lại, phải nghỉ vòng.</summary>
+    Captcha,
+
+    /// <summary>Extension TRẢ LỜI rõ ràng là không vào được, vì lý do KHÁC captcha: /account ra form đăng nhập
+    /// (cookie hết hạn), SSO trượt, không thấy "Kênh Người bán", picker không render, hoặc gửi lệnh bị từ chối vì
+    /// socket đã rớt. Đây là nhóm ĐÁNG đăng nhập lại — ca chính là cookie hết hạn.</summary>
+    Loi,
+
+    /// <summary>KHÔNG có phản hồi trong hạn chặng (extension chưa nối cầu / trang treo). Khác <see cref="Loi"/> ở
+    /// chỗ ta KHÔNG biết đang ở đâu, nên KHÔNG đăng nhập lại: cookie hết hạn thì extension báo NGAY (nó kiểm
+    /// <c>pageIsLoginForm</c> trước khi làm gì), nên treo gần như không bao giờ có nghĩa "cần đăng nhập lại".
+    /// <para><b>Ca thật phải chặn:</b> tổng hạn phía extension của <c>gotoSellerCentre</c> (10s dò entry + 90s chờ
+    /// tab banhang + 15s load + 30s ensure picker ≈ 145s) DÀI HƠN hạn chặng <c>AtSeller</c> (120s) — nên khi Shopee
+    /// bày trang verify, C# có thể hết giờ TRƯỚC lúc extension kịp gửi <c>captcha</c>. Gộp ca này vào
+    /// <see cref="Loi"/> là đi mở trình duyệt đăng nhập ngay giữa lúc bị nghi ngờ; bản trước khi đảo thứ tự để
+    /// <c>TimeoutException</c> xuyên lên caller (nghỉ vòng) — giữ đúng hành vi đó.</para>
+    /// <para><b>BẤT BIẾN mà luật này đứng lên</b> (phá là kẹt tài khoản vĩnh viễn): <c>ready</c> tới C# KHÔNG phụ
+    /// thuộc trang đang mở — <c>background.js</c> gọi <c>bridge.connect()</c> ở TOP-LEVEL service worker, chạy ngay
+    /// khi bản chép extension được nạp lúc phóng trình duyệt, độc lập với content script. Nhờ vậy "hết giờ Ready"
+    /// luôn nghĩa là hạ tầng hỏng, KHÔNG BAO GIỜ nghĩa là "trang không phải Shopee ⇒ có thể đã logout". Nếu ai bỏ
+    /// lời gọi connect top-level đó (để <c>ready</c> chỉ đến từ content script), phải xét lại
+    /// <see cref="OrdersBridgeSession.QuyetDinhSauThuBanSach"/>: lúc ấy Treo có thể mang nghĩa cần đăng nhập lại
+    /// thật, và nghỉ-vòng-mãi sẽ không bao giờ tự thoát.</para></summary>
+    Treo,
+}
+
+/// <summary>Kết quả một lượt SSO kèm lý do (chỉ có khi <see cref="KetQuaSso.Loi"/>) để log + trả lên caller.</summary>
+internal sealed record KetQuaSsoChiTiet(KetQuaSso Ket, string? LyDo);
+
+/// <summary>Việc phải làm sau một lượt thử bản sạch — xem <see cref="OrdersBridgeSession.QuyetDinhSauThuBanSach"/>.</summary>
+internal enum HanhDongSauThuSach
+{
+    /// <summary>Đã ở trang chọn shop → chạy tiếp vòng shop.</summary>
+    ChayTiep,
+
+    /// <summary>Captcha → kết thúc êm, caller kiểm <c>CaptchaSeen</c> rồi nghỉ vòng.</summary>
+    DungVongCaptcha,
+
+    /// <summary>Đóng bản sạch, đăng nhập lại bằng Playwright rồi mở bản sạch lần nữa.</summary>
+    DangNhapLai,
+
+    /// <summary>Đã đăng nhập lại mà vẫn không vào được → trả lỗi, chờ vòng sau.</summary>
+    BaoLoi,
+}
+
 /// <summary>
 /// Vòng đời MỘT phiên cầu nối: mở cổng loopback (<see cref="OrdersBridgeChannel"/>) → mở trình duyệt SẠCH
 /// (không CDP, không remote-debugging-port) qua <see cref="OrdersBridgeLauncher"/> với <c>startUrl</c> có hash
@@ -139,7 +191,15 @@ public sealed class OrdersBridgeSession : IDisposable
     // ── Khởi động cầu + mở trình duyệt sạch tại startUrl (kèm hash cổng WS) ─────────────────────────────
     private void StartBridgeAndLaunch(string baseUrl)
     {
-        _channel.Start();
+        // Cổng mở ĐÚNG MỘT LẦN cho cả phiên: một vòng có thể phóng trình duyệt sạch HAI lần (thử trước bằng
+        // cookie hồ sơ, rồi mở lại sau khi đăng nhập Playwright). Gọi Start lần hai là dựng HttpListener MỚI
+        // trên cổng ta ĐANG giữ đăng ký → ném, và retry trong Channel.Start không cứu được vì kẻ chiếm cổng
+        // chính là mình. WebSocketServer tự thay socket khi extension của lượt sau nối vào ("kết nối mới nhất
+        // là sống"), nên giữ nguyên server là đủ.
+        if (!_channel.Started)
+        {
+            _channel.Start();
+        }
         L($"Cầu nối: WebSocket lắng nghe ws://localhost:{OrdersBridgeChannel.BridgePort} — mở trình duyệt sạch...");
 
         // Vẫn nhúng hash (extension đọc nếu còn) nhưng KHÔNG phụ thuộc: mất hash → extension dùng cổng cố định.
@@ -189,14 +249,172 @@ public sealed class OrdersBridgeSession : IDisposable
     }
 
     /// <summary>
-    /// Đăng nhập Playwright + SSO qua bản sạch để về TRANG CHỌN SHOP (picker /portal/shop). Trả <c>null</c> nếu
-    /// đã về picker (kiểm <see cref="OrdersBridgeChannel.CaptchaSeen"/> để phân biệt captcha — cũng trả null nhưng
-    /// cờ bật); trả CHUỖI LỖI nếu login/SSO thất bại. Dùng chung cho <see cref="RunLoginThenSliceAsync"/> (một shop)
-    /// và <see cref="RunAllShopsAsync"/> (mọi shop). Trình duyệt điều khiển login LUÔN được đóng (finally).
+    /// PURE — việc phải làm sau MỘT lượt thử bản sạch. Bảng quyết định của thứ tự "sạch trước, Playwright chỉ khi
+    /// cần" (user chốt 2026-08-07): cookie hồ sơ còn hạn thì KHỎI mở trình duyệt điều khiển; hỏng vì bất kỳ lý do
+    /// nào KHÁC captcha thì đăng nhập lại rồi thử NỐT một lượt nữa; đã đăng nhập lại mà vẫn hỏng thì báo lỗi, chờ
+    /// vòng sau.
+    /// <para><b>Vì sao fallback cho MỌI lỗi, không chỉ "gặp form đăng nhập":</b> extension báo lý do bằng một câu
+    /// tiếng Việt trong <c>action:"error"</c> — so khớp câu chữ đó là mong manh, sửa một dấu phẩy bên extension là
+    /// mất nhánh đăng nhập lại. Lỗi SSO nào cũng có thể là cookie hỏng, nên cứ đăng nhập lại một lần.</para>
+    /// <para><b>Riêng captcha KHÔNG đăng nhập lại:</b> đẩy Playwright vào lúc Shopee đang nghi ngờ là tự khai bot.</para>
+    /// <para><b>Treo (không phản hồi) cũng KHÔNG đăng nhập lại</b> — xem <see cref="KetQuaSso.Treo"/>: hết giờ
+    /// chặng có thể là captcha mà extension chưa kịp báo.</para>
+    /// </summary>
+    /// <param name="ket">Kết quả lượt thử vừa rồi.</param>
+    /// <param name="daFallback">Lượt này CÓ PHẢI đã đi qua bước đăng nhập lại chưa (true = lượt hai, hết đường lui).</param>
+    internal static HanhDongSauThuSach QuyetDinhSauThuBanSach(KetQuaSso ket, bool daFallback) => ket switch
+    {
+        KetQuaSso.Ok => HanhDongSauThuSach.ChayTiep,
+        KetQuaSso.Captcha => HanhDongSauThuSach.DungVongCaptcha,
+        KetQuaSso.Treo => HanhDongSauThuSach.BaoLoi,
+        _ => daFallback ? HanhDongSauThuSach.BaoLoi : HanhDongSauThuSach.DangNhapLai,
+    };
+
+    /// <summary>
+    /// MỘT lượt: mở trình duyệt SẠCH + extension tại <c>/account</c> → chờ extension nối cầu → SSO "Kênh Người bán"
+    /// → trang chọn shop. KHÔNG mở thẳng <c>/portal/shop</c> vì Shopee sticky-redirect vào shop mở lần trước
+    /// (server-side).
+    /// <para>Dùng cho CẢ hai lượt của một vòng: lượt đầu (ăn cookie hồ sơ sẵn có) và lượt sau khi đã đăng nhập lại
+    /// bằng Playwright. Mọi đường lỗi gói về <see cref="KetQuaSso.Loi"/> kèm lý do — trừ HỦY (người dùng bấm Dừng)
+    /// thì ném tiếp, kẻo nuốt thành "lỗi" rồi đi mở trình duyệt đăng nhập ngay sau khi vừa bấm Dừng.</para>
+    /// </summary>
+    private async Task<KetQuaSsoChiTiet> SsoVePickerAsync(CancellationToken ct)
+    {
+        try
+        {
+            ResetState();
+            StartBridgeAndLaunch(ShopeeLoginService.SubaccountAccountUrl);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            // Không mở được cổng cầu nối / không phóng được trình duyệt → cũng là một đường "Lỗi": lượt đầu sẽ
+            // dẫn tới đăng nhập lại, lượt hai trả lỗi cho caller (không treo vòng).
+            L("Mở trình duyệt sạch lỗi: " + ex.ToString());
+            return new KetQuaSsoChiTiet(KetQuaSso.Loi, "Không mở được trình duyệt sạch: " + ex.Message);
+        }
+
+        return await SsoQuaCauNoiAsync(_channel, _log, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Phần SSO CHỈ nói chuyện qua cầu nối (trình duyệt sạch đã mở sẵn ở ngoài): chờ extension báo <c>ready</c> →
+    /// gửi <c>gotoSellerCentre</c> → chờ chặng <c>AtSeller</c> → phân loại Ok / Captcha / Lỗi.
+    /// <para>Tách khỏi <see cref="SsoVePickerAsync"/> (phần phóng trình duyệt) để test được nguyên luật phân loại
+    /// bằng một client WebSocket giả làm extension, KHÔNG cần mở trình duyệt — xem <c>OrdersBridgeSsoTests</c>.</para>
+    /// <para><b>Không gọi <c>ResetStages</c> ở đây</b>: chặng <c>Ready</c> phải được thay mới TRƯỚC khi phóng trình
+    /// duyệt (việc của caller), kẻo xoá mất tín hiệu <c>ready</c> mà extension đã kịp gửi.</para>
+    /// </summary>
+    /// <param name="channel">Kênh cầu nối của phiên (cổng đã mở, trình duyệt đã phóng).</param>
+    /// <param name="log">Hàm ghi nhật ký của phiên.</param>
+    /// <param name="ct">Hủy của phiên (người dùng bấm Dừng).</param>
+    /// <param name="hanReady">Hạn chờ extension nối cầu — mặc định <see cref="OrdersBridgeChannel.ChoChang.Ready"/>.
+    /// Chỉ test rót hạn ngắn để canh được đường TREO mà không phải chờ thật 45s.</param>
+    /// <param name="hanAtSeller">Hạn chờ về trang chọn shop — mặc định
+    /// <see cref="OrdersBridgeChannel.ChoChang.AtSeller"/>. Chỉ test rót hạn ngắn.</param>
+    internal static async Task<KetQuaSsoChiTiet> SsoQuaCauNoiAsync(
+        OrdersBridgeChannel channel, Action<string>? log, CancellationToken ct,
+        TimeSpan? hanReady = null, TimeSpan? hanAtSeller = null)
+    {
+        void L(string m) => log?.Invoke(m);
+
+        // Captcha PHẢI được nhận diện ở MỌI lối ra, kể cả khi chặng vỡ vì lỗi/hết giờ: extension bật cờ qua
+        // message "captcha" độc lập với việc chặng nào đang chờ, nên có ca cờ đã bật mà chặng vẫn hỏng.
+        KetQuaSsoChiTiet? CaptchaNeuCo()
+        {
+            if (!channel.CaptchaSeen)
+            {
+                return null;
+            }
+            L("PHÁT HIỆN captcha/verify khi vào Seller Centre.");
+            return new KetQuaSsoChiTiet(KetQuaSso.Captcha, null);
+        }
+
+        // Hai hỏng hóc rất khác nhau cùng ném TimeoutException; cờ này để câu lỗi chỉ ĐÚNG thủ phạm. Không có nó
+        // thì ca "bản chép extension hỏng nên service worker chết câm" bị báo là lỗi ở bước SSO — chỉ sai chỗ cho
+        // người đọc nhật ký (đã mất một đợt truy vì kiểu này: xem plans/…-orders-bridge-extension-copy-recursive).
+        var daNoiCau = false;
+        var hanCho = hanReady ?? OrdersBridgeChannel.ChoChang.Ready;
+        try
+        {
+            L($"Chờ extension nối cầu (ready) — tối đa {hanCho.TotalSeconds:0}s...");
+            await channel.AwaitAsync(channel.Ready, hanCho, ct).ConfigureAwait(false);
+            daNoiCau = true;
+            L("Extension đã nối cầu — SSO 'Kênh Người bán' để về trang chọn shop...");
+
+            var atSellerTcs = channel.ArmAtSeller();
+            await channel.SendAsync(new { action = "gotoSellerCentre" }).ConfigureAwait(false);
+            var atSeller = await channel.AwaitAsync(atSellerTcs, hanAtSeller ?? OrdersBridgeChannel.ChoChang.AtSeller, ct).ConfigureAwait(false);
+
+            if (CaptchaNeuCo() is { } captcha)
+            {
+                return captcha;
+            }
+            if (!atSeller)
+            {
+                return new KetQuaSsoChiTiet(KetQuaSso.Loi,
+                    "Không về được trang chọn shop (/portal/shop) sau SSO — có thể sticky shop cũ / cookie hết hạn.");
+            }
+            return new KetQuaSsoChiTiet(KetQuaSso.Ok, null);
+        }
+        catch (OperationCanceledException) { throw; } // người dùng Dừng — KHÔNG biến thành lỗi rồi đi đăng nhập lại
+        catch (InvalidOperationException ex)
+        {
+            // Extension báo error (hay gặp nhất: "bản sạch gặp trang đăng nhập subaccount (cookie hết hạn)")
+            // hoặc extension chưa/không còn kết nối (SendAsync fail-fast).
+            return CaptchaNeuCo() ?? new KetQuaSsoChiTiet(KetQuaSso.Loi, ex.Message);
+        }
+        catch (TimeoutException)
+        {
+            // Hết giờ = KHÔNG biết đang ở đâu → Treo (nghỉ vòng), KHÔNG đăng nhập lại. Xem KetQuaSso.Treo.
+            return CaptchaNeuCo() ?? new KetQuaSsoChiTiet(KetQuaSso.Treo, daNoiCau
+                ? "Hết thời gian chờ phản hồi từ extension khi vào trang chọn shop."
+                : $"Extension không nối cầu trong {hanCho.TotalSeconds:0}s (bản chép extension hỏng? trình duyệt chặn?).");
+        }
+    }
+
+    /// <summary>
+    /// Về TRANG CHỌN SHOP (picker /portal/shop) — <b>bản sạch TRƯỚC, Playwright chỉ khi cần</b> (user chốt
+    /// 2026-08-07). Thứ tự: mở trình duyệt sạch + extension ăn cookie hồ sơ → về được picker thì XONG (bỏ hẳn lượt
+    /// Playwright); hỏng vì lý do khác captcha → đóng bản sạch, đăng nhập bằng trình duyệt điều khiển Playwright
+    /// (<see cref="ShopeeLoginService.OpenAsync"/> + <c>TryLoginSubaccountAsync</c>), rồi mở bản sạch LẦN NỮA.
+    /// <para><b>Vì sao đảo:</b> bản cũ luôn chạy Playwright trước, nên hồ sơ đã đăng nhập vẫn phải chịu một lượt
+    /// mở/đóng trình duyệt (~30–60s mỗi vòng, mỗi tài khoản) và một lần bàn giao hồ sơ — chính là nguồn của lỗi
+    /// "Trình duyệt thoát ngay khi khởi động".</para>
+    /// Trả <c>null</c> nếu đã về picker HOẶC gặp captcha (caller phân biệt bằng
+    /// <see cref="OrdersBridgeChannel.CaptchaSeen"/>); trả CHUỖI LỖI nếu hết đường. Dùng chung cho
+    /// <see cref="RunLoginThenSliceAsync"/> (một shop) và <see cref="RunAllShopsAsync"/> (mọi shop). Trình duyệt
+    /// điều khiển login LUÔN được đóng (finally).
     /// </summary>
     private async Task<string?> LoginAndReachPickerAsync(OrdersLoginParams login, CancellationToken ct)
     {
-        // 1) Đăng nhập bằng trình duyệt điều khiển (Playwright). try/finally: user Dừng giữa chừng vẫn đóng trình duyệt.
+        // 1) THỬ BẢN SẠCH TRƯỚC — hồ sơ còn cookie thì vào thẳng picker, khỏi đụng Playwright.
+        L("Mở trình duyệt sạch + extension (dùng cookie hồ sơ nếu còn hạn) — /account → SSO → trang chọn shop...");
+        var lanDau = await SsoVePickerAsync(ct).ConfigureAwait(false);
+        var hanhDong = QuyetDinhSauThuBanSach(lanDau.Ket, daFallback: false);
+        if (hanhDong == HanhDongSauThuSach.ChayTiep)
+        {
+            L("Cookie hồ sơ còn hạn — đã về trang chọn shop, BỎ QUA bước đăng nhập Playwright.");
+            return null;
+        }
+        if (hanhDong == HanhDongSauThuSach.DungVongCaptcha)
+        {
+            return null; // caller kiểm CaptchaSeen
+        }
+
+        // 2) Bản sạch không vào được → ĐÓNG hẳn nó rồi mới đăng nhập bằng trình duyệt điều khiển. Phải dùng
+        //    DongTrinhDuyetSach (kill handle RỒI quét theo hồ sơ): Brave fork tiến trình browser thật sang PID
+        //    khác nên kill-theo-handle một mình trượt, để lại cửa sổ mồ côi GIỮ HỒ SƠ → Playwright chết ngay ở
+        //    bước mở ("Trình duyệt thoát ngay khi khởi động").
+        L($"Bản sạch chưa vào được trang chọn shop ({lanDau.LyDo ?? "không rõ lý do"}) — đóng bản sạch, đăng nhập lại bằng Playwright.");
+        DongTrinhDuyetSach();
+        // Quên dòng này thì suốt pha đăng nhập (có thể vài phút — chờ người nhập mã) Process vẫn trỏ tiến trình
+        // ĐÃ CHẾT, tức "bản sạch đang sống" là tín hiệu SAI với mọi chỗ đọc nó (nút Dừng, WindowFocus).
+        // KHÔNG Dispose: UI thread có thể đang đọc cùng lúc, để GC lo còn hơn ném ObjectDisposedException chỗ khác.
+        Process = null;
+        await Task.Delay(800, ct).ConfigureAwait(false); // settle cho chắc nhả khoá file hồ sơ
+
+        // 3) Đăng nhập bằng trình duyệt điều khiển (Playwright). try/finally: user Dừng giữa chừng vẫn đóng trình duyệt.
         var entered = false;
         ILoginSession? session = null;
         try
@@ -220,31 +438,21 @@ public sealed class OrdersBridgeSession : IDisposable
             return "Đăng nhập subaccount chưa xong (nhập mã?). Bấm lại để thử tiếp.";
         }
 
-        // 2) Settle ngắn cho chắc nhả khoá file hồ sơ (Brave vừa kill) trước khi mở lại bằng trình duyệt sạch.
+        // 4) Settle ngắn cho chắc nhả khoá file hồ sơ (Brave vừa kill) trước khi mở lại bằng trình duyệt sạch.
         await Task.Delay(800, ct).ConfigureAwait(false);
 
-        // 3) Mở lại bằng trình duyệt SẠCH + extension tại /account → extension SSO "Kênh Người bán" → picker.
-        //    KHÔNG mở thẳng /portal/shop vì Shopee sticky-redirect vào shop mở lần trước (server-side).
         L("Đăng nhập xong — mở lại bằng trình duyệt sạch + extension (subaccount /account → SSO → trang chọn shop)...");
-        ResetState();
-        StartBridgeAndLaunch(ShopeeLoginService.SubaccountAccountUrl);
-        L("Chờ extension nối cầu (ready) — tối đa 45s...");
-        await _channel.AwaitAsync(_channel.Ready, OrdersBridgeChannel.ChoChang.Ready, ct).ConfigureAwait(false);
-        L("Extension đã nối cầu — SSO 'Kênh Người bán' để về trang chọn shop...");
-
-        var atSellerTcs = _channel.ArmAtSeller();
-        await _channel.SendAsync(new { action = "gotoSellerCentre" }).ConfigureAwait(false);
-        var atSeller = await _channel.AwaitAsync(atSellerTcs, OrdersBridgeChannel.ChoChang.AtSeller, ct).ConfigureAwait(false);
-        if (_channel.CaptchaSeen)
+        var lanHai = await SsoVePickerAsync(ct).ConfigureAwait(false);
+        // Liệt kê TƯỜNG MINH từng nhánh: gom BaoLoi với DangNhapLai vào `_` thì nếu ai sửa bảng quyết định cho
+        // phép đăng nhập lại lần nữa, lượt đó sẽ IM LẶNG biến thành lỗi thay vì gãy ra để người sửa thấy.
+        return QuyetDinhSauThuBanSach(lanHai.Ket, daFallback: true) switch
         {
-            L("PHÁT HIỆN captcha/verify khi vào Seller Centre.");
-            return null; // caller kiểm CaptchaSeen
-        }
-        if (!atSeller)
-        {
-            return "Không về được trang chọn shop (/portal/shop) sau SSO — có thể sticky shop cũ / cookie hết hạn.";
-        }
-        return null; // đã về picker, không captcha
+            HanhDongSauThuSach.ChayTiep => null,          // đã về picker
+            HanhDongSauThuSach.DungVongCaptcha => null,   // caller kiểm CaptchaSeen
+            HanhDongSauThuSach.BaoLoi => lanHai.LyDo ?? "Không về được trang chọn shop sau khi đăng nhập lại.",
+            var khac => throw new InvalidOperationException(
+                $"Bảng quyết định trả {khac} ở lượt ĐÃ đăng nhập lại — không có đường lui nào nữa, phải sửa QuyetDinhSauThuBanSach."),
+        };
     }
 
     // ── GĐ4: MỘT VÒNG qua MỌI shop: login → SSO → readShopList → từng shop (detail → toShip → syncOrders +
