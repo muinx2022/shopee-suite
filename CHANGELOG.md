@@ -5,6 +5,23 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Phiên bản & cập nhật. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.8.5 — 2026-08-08
+
+**Cập nhật app — gom về ĐÚNG MỘT nút trên thanh ribbon**
+
+- Trước đây có tới ba chỗ bấm cho cùng một việc: nút "Cập nhật & khởi động lại" trên ribbon (mờ tịt gần như
+  mọi lúc vì chỉ bật khi đã tải xong bản mới), cộng hai nút "Kiểm tra bản mới" và "Cập nhật & khởi động lại"
+  nằm trong Cài đặt → Phiên bản & cập nhật. Người dùng phải nhớ vào tận trong tab mới kiểm tra được.
+- Nay chỉ còn **một nút trên ribbon của tab Cài đặt**, tự đổi nhãn theo tình hình:
+  - **"Kiểm tra cập nhật"** (mặc định) — bấm là mở thẳng tab "Phiên bản & cập nhật" rồi kiểm tra ngay, xem
+    kết quả tại chỗ.
+  - **"Cập nhật"** — hiện khi đã tải xong bản mới; bấm là áp dụng + khởi động lại như trước.
+- Hai nút trong tab đã bỏ; tab vẫn giữ dòng phiên bản, dòng trạng thái và lời nhắc bản chạy trực tiếp từ thư
+  mục build thì không tự cập nhật được.
+- Máy chạy bản dev vẫn bấm được nút để mở tab đọc lời nhắc đó (nút không bị khoá).
+- **Không đổi luật cập nhật**: cách kiểm tra, tải nền, dừng êm job trước khi khởi động lại và đường update do
+  Hub giao đều giữ nguyên.
+
 ## v1.8.4 — 2026-08-08
 
 **Đơn hàng — hết báo "Lỗi địa chỉ" oan vì một hộp thông báo của Shopee**

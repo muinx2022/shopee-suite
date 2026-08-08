@@ -101,25 +101,35 @@ public sealed partial class RibbonScreenItem : ObservableObject
 /// Phải tra ở C# vì XAML không lồng được <c>{DynamicResource {Binding …}}</c>; dựng ở đây an toàn vì
 /// ShellViewModel chỉ được tạo SAU khi App.xaml đã nạp xong Application.Resources.
 /// </para>
+/// <para>
+/// <see cref="Title"/> và <see cref="ToolTip"/> QUAN SÁT ĐƯỢC (phát INPC) vì nút cập nhật là MỘT nút đổi
+/// nhãn theo trạng thái: "Kiểm tra cập nhật" ⇄ "Cập nhật" khi đã tải xong bản mới (người dùng chốt
+/// 08/08/2026 — gộp 2 nút trong tab "Phiên bản &amp; cập nhật" về đúng nút ribbon này). ShellViewModel gán
+/// lại 2 property đó khi <c>SettingsViewModel.UpdateReady</c> đổi; DataTemplate ở MainWindow.xaml đã bind
+/// thường nên nhãn tự cập nhật, không phải sửa XAML. Các nút hành động khác gán 1 lần lúc dựng — thêm INPC
+/// KHÔNG đổi hành vi của chúng.
+/// </para>
 /// </summary>
-public sealed class RibbonActionItem
+public sealed partial class RibbonActionItem : ObservableObject
 {
     public RibbonActionItem(string title, string iconKey, ICommand command, string? toolTip = null)
     {
-        Title = title;
+        _title = title;
         Icon = LookupIcon(iconKey);
         Command = command;
-        ToolTip = toolTip;
+        _toolTip = toolTip;
     }
 
-    public string Title { get; }
+    /// <summary>Nhãn dưới icon. Đổi được lúc chạy (nút cập nhật) — xem chú thích của lớp.</summary>
+    [ObservableProperty] private string _title;
 
     /// <summary>Hình icon vector đã tra sẵn; null = không tìm thấy khóa (nút vẫn chạy, chỉ thiếu icon).</summary>
     public Geometry? Icon { get; }
 
     public ICommand Command { get; }
 
-    public string? ToolTip { get; }
+    /// <summary>Tooltip. Đổi được lúc chạy cùng <see cref="Title"/> (một nút, hai vai trò).</summary>
+    [ObservableProperty] private string? _toolTip;
 
     /// <summary>Tra khóa tài nguyên → Geometry. Không tìm thấy thì trả null thay vì ném: thiếu icon không
     /// đáng làm sập cả dải ribbon lúc khởi động.</summary>

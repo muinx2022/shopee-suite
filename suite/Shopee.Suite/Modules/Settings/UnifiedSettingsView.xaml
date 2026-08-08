@@ -458,7 +458,11 @@
 
             <!-- ══════════ TAB 4: PHIÊN BẢN & CẬP NHẬT (LUÔN hiện — dùng chung mọi chế độ) ══════════ -->
             <!-- KHÔNG gate theo chế độ: chế độ Shopee ẩn nhóm Workspace nhưng vẫn phải cập nhật được. -->
-            <TabItem Header="Phiên bản &amp; cập nhật">
+            <!-- IsSelected bind HAI CHIỀU: nút "Kiểm tra cập nhật" trên ribbon bật cờ này để nhảy sang đây.
+                 KHÔNG dùng SelectedIndex trên TabControl — tab "Đơn hàng" và "Hiệu năng & Đồng bộ" bị ẩn theo
+                 chế độ ứng dụng nên chỉ số của tab này KHÔNG cố định. -->
+            <TabItem Header="Phiên bản &amp; cập nhật"
+                     IsSelected="{Binding Suite.ChonTabPhienBan, Mode=TwoWay}">
                 <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                     <StackPanel MaxWidth="1180" HorizontalAlignment="Left" Margin="0,12,0,0">
                         <Border Style="{StaticResource card}" Padding="18" HorizontalAlignment="Left" MaxWidth="560">
@@ -470,25 +474,10 @@
                                            Foreground="{StaticResource TextSecondaryBrush}"
                                            Visibility="{Binding Suite.UpdateStatus, Converter={StaticResource StringToVis}}" />
 
-                                <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
-                                    <Button MinWidth="160"
-                                            Visibility="{Binding Suite.UpdateSupported, Converter={StaticResource BoolToVis}}"
-                                            Command="{Binding Suite.CheckUpdateCommand}">
-                                        <StackPanel Orientation="Horizontal">
-                                            <c:PathIcon Data="{StaticResource IconUpgrade}" />
-                                            <TextBlock Text="Kiểm tra bản mới" Style="{StaticResource btnLabel}" />
-                                        </StackPanel>
-                                    </Button>
-                                    <Button Style="{StaticResource success}" MinWidth="200" Margin="10,0,0,0"
-                                            Visibility="{Binding Suite.UpdateReady, Converter={StaticResource BoolToVis}}"
-                                            Command="{Binding Suite.ApplyUpdateCommand}"
-                                            ToolTip="Đóng app + áp dụng bản đã tải + mở lại. Làm khi KHÔNG có job đang chạy.">
-                                        <StackPanel Orientation="Horizontal">
-                                            <c:PathIcon Data="{StaticResource IconUpgrade}" />
-                                            <TextBlock Text="Cập nhật &amp; khởi động lại" Style="{StaticResource btnLabel}" />
-                                        </StackPanel>
-                                    </Button>
-                                </StackPanel>
+                                <!-- Hai nút cũ trong tab (một nút kiểm tra, một nút áp dụng bản đã tải) đã BỎ:
+                                     mọi thao tác cập nhật gom về MỘT nút trên ribbon (chốt 08/08/2026). -->
+                                <TextBlock Style="{StaticResource caption}" Margin="0,10,0,0"
+                                           Text="Dùng nút &quot;Kiểm tra cập nhật&quot; trên thanh ribbon phía trên. Có bản mới thì nút đổi thành &quot;Cập nhật&quot;." />
 
                                 <TextBlock Style="{StaticResource caption}" Margin="0,10,0,0"
                                            Visibility="{Binding Suite.UpdateNotSupported, Converter={StaticResource BoolToVis}}"

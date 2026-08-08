@@ -276,14 +276,31 @@ public sealed partial class ShellViewModel : ObservableObject
         // ── Tab 4: Cài đặt (gộp 2 màn cài đặt) — LUÔN có ở mọi chế độ ──
         var setScreen = new RibbonScreenItem("Cài đặt", AppIcons.Settings, unifiedSettings,
             toolTip: "Chế độ ứng dụng · cấu hình Shopee Suite + Đơn hàng");
+        // Nút cập nhật DUY NHẤT: nhãn đổi theo trạng thái ("Kiểm tra cập nhật" ⇄ "Cập nhật") — người dùng chốt
+        // 08/08/2026, hai nút trong tab "Phiên bản & cập nhật" đã bỏ. RibbonActionItem nay phát INPC nên chỉ
+        // cần gán lại Title/ToolTip là ribbon tự vẽ lại.
+        var nutCapNhat = new RibbonActionItem(
+            SettingsViewModel.NhanNutCapNhat(settings.UpdateReady), "IconUpgrade",
+            settings.KiemTraHoacCapNhatCommand,
+            SettingsViewModel.TipNutCapNhat(settings.UpdateReady));
+
+        void DongBoNutCapNhat()
+        {
+            nutCapNhat.Title = SettingsViewModel.NhanNutCapNhat(settings.UpdateReady);
+            nutCapNhat.ToolTip = SettingsViewModel.TipNutCapNhat(settings.UpdateReady);
+        }
+        // KHÔNG rò event: cả SettingsViewModel lẫn ShellViewModel đều sống suốt vòng đời app (xem chú thích
+        // trong SettingsViewModel constructor). OnUpdateChanged bơm qua UiThread.Post nên PropertyChanged bắn
+        // trên UI thread ⇒ gán Title an toàn cho binding.
+        settings.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(SettingsViewModel.UpdateReady)) DongBoNutCapNhat();
+        };
+
         var settingsTab = new RibbonTab("Cài đặt", new List<RibbonGroup>
         {
             new RibbonGroup("Màn hình", new object[] { setScreen }),
-            new RibbonGroup("Hành động", new object[]
-            {
-                new RibbonActionItem("Cập nhật & khởi động lại", "IconUpgrade", settings.ApplyUpdateCommand,
-                    "Áp dụng bản đã tải + mở lại app (chỉ khả dụng khi đã tải xong bản mới)"),
-            }),
+            new RibbonGroup("Hành động", new object[] { nutCapNhat }),
         });
 
         // Thứ tự tab: Workspace → Cấu hình BigSeller → Shopee → Cài đặt (chỉ thêm cái đã dựng theo chế độ).

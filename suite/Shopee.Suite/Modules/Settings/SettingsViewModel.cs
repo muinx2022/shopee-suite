@@ -109,10 +109,15 @@ public sealed partial class SettingsViewModel : ObservableObject
     /// <summary>Nghịch đảo — hiện dòng nhắc "auto-update chỉ chạy khi cài qua bộ cài Velopack".</summary>
     public bool UpdateNotSupported => !UpdateSupported;
 
-    /// <summary>true khi đã TẢI xong bản mới, chờ người dùng bấm áp dụng.</summary>
-    [ObservableProperty]
-    [NotifyCanExecuteChangedFor(nameof(ApplyUpdateCommand))]
-    private bool _updateReady;
+    /// <summary>true khi đã TẢI xong bản mới, chờ người dùng bấm áp dụng. Nhãn nút cập nhật trên ribbon đổi
+    /// theo cờ này — ShellViewModel nghe PropertyChanged của chính nó rồi gán lại Title/ToolTip của
+    /// RibbonActionItem, KHÔNG đi qua property nào của VM này.</summary>
+    [ObservableProperty] private bool _updateReady;
+
+    /// <summary>Bật lên để View CHỌN tab "Phiên bản &amp; cập nhật". Bind HAI CHIỀU vào TabItem.IsSelected —
+    /// KHÔNG dùng SelectedIndex vì tab "Đơn hàng"/"Hiệu năng &amp; Đồng bộ" bị ẩn theo chế độ ⇒ chỉ số tab
+    /// không cố định (xem chú thích ở UnifiedSettingsView.xaml, khối tab "Đơn hàng").</summary>
+    [ObservableProperty] private bool _chonTabPhienBan;
 
     private void OnUpdateChanged() => UiThread.Post(() =>
     {
@@ -121,16 +126,42 @@ public sealed partial class SettingsViewModel : ObservableObject
         UpdateStatus = UpdateService.Shared.Status;
     });
 
-    /// <summary>Kiểm tra + tải nền bản mới (nút bấm tay). Kết quả cập nhật qua sự kiện Changed.</summary>
-    [RelayCommand]
-    private async Task CheckUpdate() => await UpdateService.Shared.CheckAsync();
+    /// <summary>HÀM THUẦN (test được): nhãn nút cập nhật trên ribbon theo trạng thái.</summary>
+    internal static string NhanNutCapNhat(bool updateReady) => updateReady ? "Cập nhật" : "Kiểm tra cập nhật";
 
-    /// <summary>Áp dụng bản đã tải + khởi động lại NGAY (đóng app). Chỉ hiện khi UpdateReady. Đi CHUNG đường với
-    /// lệnh update từ Hub qua <see cref="UpdateService.ApplyAfterPrepareAsync"/>: dừng ÊM việc đang chạy (Hub-giao →
-    /// hàng chờ; chạy tay → cancel chuẩn) để bản mới tự nhận lại + nhả lease ngay, tránh Velopack kill giữa chừng
-    /// làm khoá acc treo. Dòng trạng thái đi qua sự kiện Changed của UpdateService (OnUpdateChanged đã subscribe).</summary>
-    [RelayCommand(CanExecute = nameof(UpdateReady))]
-    private async Task ApplyUpdate() => await UpdateService.Shared.ApplyAfterPrepareAsync();
+    /// <summary>HÀM THUẦN (test được): tooltip nút cập nhật trên ribbon theo trạng thái.</summary>
+    internal static string TipNutCapNhat(bool updateReady) => updateReady
+        ? "Đã tải xong bản mới — áp dụng + khởi động lại app ngay"
+        : "Mở tab \"Phiên bản & cập nhật\" và kiểm tra bản mới ngay";
+
+    /// <summary>
+    /// Nút cập nhật DUY NHẤT trên ribbon (người dùng chốt 08/08/2026 — bỏ hai nút trong tab).
+    /// LUÔN mở tab "Phiên bản &amp; cập nhật" trước để người dùng thấy dòng trạng thái, rồi:
+    /// đã tải xong bản mới → áp dụng + khởi động lại; chưa → kiểm tra (và tải nền) ngay.
+    /// <para>Hai nhánh đi ĐÚNG hai hàm cũ của <see cref="UpdateService"/>, không đổi luật cập nhật:
+    /// <c>ApplyAfterPrepareAsync</c> đi CHUNG đường với lệnh update từ Hub — dừng ÊM việc đang chạy (Hub-giao →
+    /// hàng chờ; chạy tay → cancel chuẩn) để bản mới tự nhận lại + nhả lease ngay, tránh Velopack kill giữa
+    /// chừng làm khoá acc treo. Dòng trạng thái đi qua sự kiện Changed (OnUpdateChanged đã subscribe) nên
+    /// KHÔNG bọc try/catch rỗng ở đây.</para>
+    /// <para>KHÔNG đặt CanExecute: bản chạy dev (<see cref="UpdateSupported"/> = false) bấm vào vẫn phải mở
+    /// được tab để đọc dòng nhắc "chỉ tự cập nhật khi cài qua Velopack".</para>
+    /// </summary>
+    [RelayCommand]
+    private async Task KiemTraHoacCapNhat()
+    {
+        // Gán thẳng true, KHÔNG cần reset false trước: đã ĐO trên WPF thật (TabControl + TabItem khai trực tiếp,
+        // đúng khuôn UnifiedSettingsView) — người dùng bấm sang tab khác thì binding TwoWay GHI NGƯỢC false về
+        // đây, nên lần bấm thứ hai vẫn phát PropertyChanged và kéo được tab về. Thêm bước "false rồi true" lại
+        // hại: khi tab ĐANG chọn mà bấm nút, gán false làm TabControl rơi về SelectedIndex = -1 (không tab nào
+        // chọn) giữa chừng.
+        ChonTabPhienBan = true;
+        if (UpdateReady)
+        {
+            await UpdateService.Shared.ApplyAfterPrepareAsync();
+            return;
+        }
+        await UpdateService.Shared.CheckAsync();
+    }
 
     private void LoadFromStore()
     {

@@ -1,7 +1,7 @@
 # Plan: Gộp hai nút cập nhật vào MỘT nút trên ribbon (Kiểm tra cập nhật ⇄ Cập nhật)
 
 - **Ngày:** 2026-08-08
-- **Trạng thái:** đang làm
+- **Trạng thái:** hoàn thành
 - **Người lập:** Opus 5 (phiên chính) · **Người thực thi:** Opus (`opus-executor`)
 
 ## 1. Bối cảnh & mục tiêu
@@ -306,4 +306,65 @@ Nếu test được, thêm cho hai hàm thuần:
 
 ---
 
-## Báo cáo thực thi (opus-executor điền sau khi xong)
+## Báo cáo thực thi
+
+**Xong 08/08/2026.** `opus-executor` triển khai → phiên chính đối chiếu diff, sửa một regression, tự kiểm chứng.
+
+### Kiểm chứng thật (phiên chính tự chạy)
+
+| Lệnh | Kết quả |
+|---|---|
+| `dotnet build ShopeeSuite.sln -t:Rebuild` | 0 Warning, 0 Error |
+| `dotnet test ShopeeSuite.sln` | `Shopee.Core.Tests` 111/111 · `XuLyDonShopee.Tests` 1658/1658 |
+| grep `ApplyUpdateCommand\|CheckUpdateCommand` | **rỗng** — không còn lệnh chết |
+| grep `"Kiểm tra bản mới"` trong XAML | **rỗng** |
+| grep `SelectedIndex` trong XAML | chỉ 2 dòng COMMENT, không có thuộc tính nào |
+
+### Regression phiên chính phát hiện và ĐÃ sửa
+
+`ChonTabPhienBan` sống trên `SettingsViewModel` **singleton**, còn `UnifiedSettingsView` bị **dựng lại** mỗi lần
+quay về màn Cài đặt (shell bind `ContentControl` vào ViewModel + DataTemplate, `RibbonScreenItem.ScreenVm` giữ
+VM chứ không giữ view). Hệ quả: sau MỘT lần bấm "Kiểm tra cập nhật", **mọi lần mở Cài đặt sau đó đều nhảy
+thẳng vào tab "Phiên bản & cập nhật"** thay vì tab đầu — người dùng không hề yêu cầu.
+
+Sửa: hạ cờ ở `Unloaded` trong `UnifiedSettingsView.xaml.cs`. Cố ý KHÔNG hạ trong lệnh: lúc còn ở trên màn mà
+gán `false` thì binding TwoWay đẩy ngược `IsSelected = false` ⇒ TabControl rơi về `SelectedIndex = -1`.
+
+### Điểm executor làm khác plan (đều đúng, đã nhận)
+
+1. **Không thêm `ChonTabPhienBan = false` trước khi gán `true`** (mục Rủi ro #2 của plan gợi ý "không chắc thì
+   thêm"). Executor dựng một app WPF thật để ĐO: WPF **có** ghi ngược `false` về source khi người dùng bấm
+   sang tab khác ⇒ lần bấm thứ hai vẫn kéo được tab về; còn thêm bước reset thì gây `SelectedIndex = -1` nhấp
+   nháy khi tab đang được chọn. Điều kiện "không chắc" không còn đúng ⇒ bỏ gợi ý đó.
+2. **Plan đếm sai số chỗ gọi `RibbonActionItem`**: 7 chứ không phải 6 (sót `"Dừng tất cả"`,
+   `ShellViewModel.cs:242`). Không ảnh hưởng kết quả — không chỗ nào phải sửa, chữ ký ctor giữ nguyên.
+3. **Xmldoc `ChonTabPhienBan` trỏ "khối tab Đơn hàng"** thay vì số dòng, vì chính plan này đẩy số dòng trôi đi.
+
+### Bước E (test) — KHÔNG làm được, không phải bỏ sót
+
+Solution chỉ có 2 project test: `suite/Shopee.Core.Tests` (`net8.0`, chỉ ref `Shopee.Core`) và
+`orders/XuLyDonShopee.Tests` (`net8.0-windows`, ref `XuLyDonShopee.*`). **Không project nào ref `Shopee.Suite`**,
+và `Shopee.Suite` là `WinExe`/WPF nên `Shopee.Core.Tests` (`net8.0`) không ref được nếu không đổi TFM — nằm
+ngoài phạm vi. Executor dừng đúng, không tự tạo project mới.
+
+Bù lại: đo trên `ShopeeSuite.dll` đã build bằng probe phản chiếu (ngoài repo) — 12 mục đạt, và **thử phá**
+(đảo ternary trong `NhanNutCapNhat`) → probe đổ đúng 2 mục, hoàn tác → đạt lại.
+
+**Nợ:** hai hàm thuần `NhanNutCapNhat` / `TipNutCapNhat` chưa có test tự động. Muốn có thì phải mở plan riêng
+tạo `Shopee.Suite.Tests`.
+
+### Chuyện "test chập chờn" — chốt lại nguyên nhân
+
+Executor gặp 1/8 lượt `XuLyDonShopee.Tests` đỏ, giống lượt đỏ hôm trước. Phiên chính truy tiếp:
+
+- 10 lượt liên tiếp có `--logger trx`, chạy sạch → **0 lỗi**, không bắt được gì.
+- Ép chạy 6 lượt test SONG SONG với vòng `dotnet build -t:Rebuild` → đỏ ngay, nhưng đỏ **457 test** với
+  `System.IO.FileNotFoundException: Could not load file or assembly 'Microsoft.Data.Sqlite'`.
+
+⇒ **Nguyên nhân là chạy build song song với test trên CÙNG thư mục output**: `-t:Rebuild` xoá/thay file trong
+`bin/Debug/net8.0-windows` trong lúc test đang nạp assembly. Cả hai lượt đỏ trước đó đều xảy ra đúng lúc có
+build/agent khác đang chạy. **KHÔNG phải lỗi của bộ test, cũng không phải race cổng loopback** như phiên chính
+đoán ở plan trước — bản vá `BridgeTestRig` hôm đó vẫn đúng và đáng giữ (race có thật, đọc ra được từ mã), chỉ
+là nó không phải thủ phạm của lượt đỏ kia.
+
+**Bài học vận hành: đừng chạy `dotnet build` song song với `dotnet test` trên cùng project.**
