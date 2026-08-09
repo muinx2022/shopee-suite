@@ -1,19 +1,17 @@
 # Quy trình làm việc
 
-Mục này **thay thế** mô hình 2 tầng (Fable plan → Opus thực thi) ở `C:\Projects\CLAUDE.md` — user chốt lại
-2026-08-02, nới phần subagent 2026-08-04.
+**Quy trình chung nằm ở `D:\Projects\CLAUDE.md`** (áp cho mọi dự án trong `D:\Projects`) — mặc định phiên chính
+tự thực thi; `/lam` chạy đủ 5 chặng *nhận việc → `opus-dev` → `nghiem-thu` → `phan-bien` → chốt việc*. Định
+nghĩa agent/lệnh ở `~/.claude/agents/` và `~/.claude/commands/`. **Đừng chép lại quy trình đó vào đây** — mục
+này chỉ ghi phần riêng của repo shopee-suite.
 
-- **Mặc định: phiên chính vừa trao đổi vừa tự thực thi** — khảo sát, viết code, build, test đều do agent đang
-  chat làm. Không tự ý giao việc triển khai cho subagent.
-- **Subagent: dùng được khi có ích thật** (nghiệm thu/phản biện, audit một mảng riêng, khảo sát diện rộng)
-  nhưng phải **tiết chế hạn mức** — mỗi subagent là một request riêng, đốt quota rất nhanh. Không thả bầy
-  song song, không worktree-per-agent.
-- **Xong việc thì nên gọi `nghiem-thu` phản biện đối kháng.** Đợt 2026-08-04 chính nó chặn được hai bản vá
-  hỏng đã build xanh + test xanh: một bản làm banner kẹt vĩnh viễn, một bản làm Hub từ chối thao tác của user.
-  Test xanh KHÔNG thay được lượt phản biện này.
-- **Giao Opus triển khai: chỉ khi user gõ `/lam`** — khi đó phiên chính nhận việc + viết plan, giao `opus-dev`
-  (Opus, effort high) code, rồi `nghiem-thu` phản biện. Xem `.claude/commands/lam.md`.
-- Việc lớn vẫn viết plan trong `plans/` trước khi làm (để bám tiến độ và làm căn cứ chấm nghiệm thu).
+Riêng repo này (chốt 2026-08-02, nới phần subagent 2026-08-04):
+
+- Bản này **thay thế** mô hình 2 tầng cũ (Fable plan → Opus thực thi).
+- Việc lớn viết plan trong `plans/` (mẫu `plans/TEMPLATE.md`) — vừa để bám tiến độ, vừa làm căn cứ chấm nghiệm thu.
+- Ví dụ vì sao không được bỏ lượt phản biện: đợt 2026-08-04 hai bản vá build xanh + test xanh vẫn hỏng logic
+  (một bản làm banner kẹt vĩnh viễn, một bản làm Hub từ chối thao tác của user); đợt 2026-08-09 bước check đơn
+  trả hàng có 4 đường mất mã âm thầm mà toàn bộ 1600+ test không hề đỏ.
 
 # Build
 
