@@ -35,15 +35,24 @@ public sealed record DongTraHang(string? ShopeeOrderId, string HeadHtml, bool? L
 /// <see cref="TabTraHang"/> false thì caller BỎ HẲN LƯỢT (mốc giữ nguyên) — ghi số tab "Tất cả" vào mốc là đầu
 /// độc mốc, xem <see cref="ShopFlowRunner.QuyetDinhLuotTraHang"/>.
 /// <para><see cref="ChanDoan"/> = mô tả 4 dấu hiệu trang lúc extension BỎ lượt vì không đọc được ô tổng (url,
-/// title, ô tổng có/rỗng, số dòng, có tab-wrapper) — null khi đọc bình thường. Thuần để LOG.</para></summary>
+/// title, ô tổng có/rỗng, số dòng, có tab-wrapper) — null khi đọc bình thường. Thuần để LOG.</para>
+/// <para><see cref="CoTrangSau"/> = trang trả hàng còn nút "trang sau" DÙNG ĐƯỢC sau lượt vừa đọc. Caller dùng
+/// để khỏi gửi lượt ĐỌC THÊM vô ích khi shop chỉ có một trang. Thiếu field (extension đời cũ) → <c>false</c> ⇒
+/// không đọc thêm, đúng hành vi cũ.</para></summary>
 public sealed record KetQuaDocTraHang(
-    int? SoYeuCau, bool SortApplied, bool TabTraHang, IReadOnlyList<DongTraHang> Dong, string? ChanDoan = null);
+    int? SoYeuCau, bool SortApplied, bool TabTraHang, IReadOnlyList<DongTraHang> Dong, string? ChanDoan = null,
+    bool CoTrangSau = false);
 
 /// <summary>Kết quả ghép cặp: <see cref="Cap"/> = dòng đủ hai mã; <see cref="ThieuMaYeuCau"/> = mô tả CHẨN ĐOÁN
 /// (mã đơn + class/nhãn đọc được của từng khối + HTML thô rút gọn) của dòng CÓ mã đơn mà KHÔNG có mã yêu cầu;
-/// <see cref="BoQuaDonHuy"/> = số dòng bị bỏ vì <c>href</c> nói đó là ĐƠN HỦY (chỉ để LOG).</summary>
+/// <see cref="BoQuaDonHuy"/> = số dòng bị bỏ vì <c>href</c> nói đó là ĐƠN HỦY (chỉ để LOG).
+/// <para><see cref="TrungMaDon"/> = mô tả các dòng bị bỏ vì <b>trùng mã đơn</b> với một dòng đã lấy — tức một
+/// đơn có TỪ HAI yêu cầu trả hàng trở lên. Luật (user chốt 09/08): <b>giữ mã MỚI NHẤT</b>, mã còn lại chỉ ghi
+/// nhật ký. Cần con số này vì kho mã khoá theo <c>(tài khoản, mã đơn)</c> và cột trên Google Sheet cũng chỉ có
+/// MỘT ô mỗi đơn — không có chỗ chứa mã thứ hai, nên phải nói ra chứ không được bỏ im lặng.</para></summary>
 public sealed record KetQuaGhepTraHang(
-    IReadOnlyList<YeuCauTraHang> Cap, IReadOnlyList<string> ThieuMaYeuCau, int BoQuaDonHuy = 0);
+    IReadOnlyList<YeuCauTraHang> Cap, IReadOnlyList<string> ThieuMaYeuCau, int BoQuaDonHuy = 0,
+    IReadOnlyList<string>? TrungMaDon = null);
 
 /// <summary>Kết quả lọc theo cửa sổ ngày (<see cref="TraHangParser.LocTheoCuaSo"/>): <see cref="GiuLai"/> = cặp
 /// còn trong hạn; <see cref="BoQuaViCu"/> = số cặp bị bỏ vì NGÀY YÊU CẦU quá cũ; <see cref="GiuViKhongRoNgay"/> =
@@ -52,26 +61,40 @@ public sealed record KetQuaGhepTraHang(
 public sealed record KetQuaLocCuaSo(
     IReadOnlyList<YeuCauTraHang> GiuLai, int BoQuaViCu, int GiuViKhongRoNgay);
 
-/// <summary>4 nhánh luật đếm số yêu cầu (xem <see cref="TraHangParser.QuyetDinhCheck"/>).</summary>
+/// <summary>
+/// 4 nhánh luật đếm số yêu cầu (xem <see cref="TraHangParser.QuyetDinhCheck"/>).
+/// <para>
+/// <b>⚠ Từ 09/08/2026 các nhánh này KHÔNG còn quyết định "đọc hay không đọc dòng".</b> Mọi lượt đều parse HẾT
+/// số dòng extension gửi về — xem <see cref="TraHangParser.QuyetDinhCheck"/>. Nhánh chỉ còn để LOG và để tính
+/// ĐỘ SÂU phân trang (<see cref="TraHangParser.SoTrangCanDoc"/>).
+/// </para>
+/// </summary>
 public enum LuatSoYeuCau
 {
-    /// <summary>Chưa có mốc (shop này chưa từng check) → check <c>min(số yêu cầu, trần dòng/lượt)</c> dòng ĐẦU
-    /// rồi mới ghi mốc. Bản đầu CHỈ ghi mốc mà không đọc dòng nào: hệ quả là shop nào cũng chốt mốc ở lượt đầu
-    /// rồi im lặng mãi, toàn bộ yêu cầu đang có KHÔNG bao giờ được đọc.</summary>
+    /// <summary>Chưa có mốc (shop này chưa từng check) → quét SÂU một lượt (tối đa
+    /// <see cref="TraHangParser.TranTrangTraHang"/> trang) rồi mới ghi mốc.</summary>
     LanDau,
 
-    /// <summary>Số không đổi → bỏ qua hẳn.</summary>
+    /// <summary>Số không đổi. KHÔNG có nghĩa là "không có gì mới": yêu cầu xử xong rớt khỏi danh sách nên
+    /// +3 mới / −3 xử xong cũng ra số y hệt. Vẫn đọc trang đầu như thường.</summary>
     KhongDoi,
 
-    /// <summary>Số GIẢM (yêu cầu đã xử xong, rớt khỏi danh sách) → chỉ cập nhật lại mốc.</summary>
+    /// <summary>Số GIẢM (yêu cầu đã xử xong, rớt khỏi danh sách) — cũng KHÔNG có nghĩa là không có mã mới
+    /// (xem <see cref="KhongDoi"/>). Vẫn đọc trang đầu như thường.</summary>
     Giam,
 
-    /// <summary>Số TĂNG k → check k dòng ĐẦU (danh sách đã sắp "Ngày yêu cầu Mới - Cũ").</summary>
+    /// <summary>Số TĂNG k. k chỉ là CẬN DƯỚI của lượng phát sinh (phần xử xong đã trừ bớt vào đó), dùng để
+    /// tính độ sâu phân trang chứ không phải để cắt danh sách.</summary>
     Tang,
 }
 
-/// <summary>Quyết định sau khi đọc số yêu cầu: nhánh luật + số dòng đầu cần check (0 với 3 nhánh đầu).</summary>
-public readonly record struct QuyetDinhTraHang(LuatSoYeuCau Luat, int SoDongCanCheck);
+/// <summary>
+/// Quyết định sau khi đọc số yêu cầu: nhánh luật + số dòng MỚI ƯỚC TÍNH (0 với 3 nhánh không tăng).
+/// <para><b>⚠ <see cref="SoDongMoiUocTinh"/> KHÔNG phải "số dòng được phép đọc"</b> — nó chỉ là ước lượng để log
+/// và để tính độ sâu phân trang. Bản trước dùng nó cắt danh sách (<c>Take</c>) và đó chính là đường mất mã lớn
+/// nhất: nhánh <see cref="LuatSoYeuCau.KhongDoi"/>/<see cref="LuatSoYeuCau.Giam"/> cắt về 0 nên vứt sạch các
+/// dòng extension ĐÃ cào được, trong khi mốc vẫn nhảy ⇒ mất vĩnh viễn.</para></summary>
+public readonly record struct QuyetDinhTraHang(LuatSoYeuCau Luat, int SoDongMoiUocTinh);
 
 /// <summary>
 /// Hàm THUẦN cho bước "check đơn trả hàng" (bước CUỐI của flow mỗi shop): parse JSON extension gửi về, tách
@@ -92,17 +115,25 @@ public static class TraHangParser
     private const int TranHtmlChanDoan = 600;
 
     /// <summary>
-    /// Trần số dòng đọc trong MỘT lượt (nhánh <see cref="LuatSoYeuCau.LanDau"/> kẹp về đây). Đây là chỗ khai báo
-    /// DUY NHẤT phía C# — mọi caller lấy qua hằng này, đừng gõ lại số.
-    /// <para><b>Phải khớp <c>MAX_RETURN_ROWS</c> trong <c>extensions/shopee-orders/background.js</c></b>: extension
+    /// Trần số dòng đọc trong MỘT lượt, GỘP MỌI TRANG. Đây là chỗ khai báo DUY NHẤT phía C# — mọi caller lấy qua
+    /// hằng này, đừng gõ lại số.
+    /// <para><b>Phải khớp <c>MAX_RETURN_ROWS</c> trong <c>extensions/shopee-orders/constants.js</c></b>: extension
     /// đã cắt danh sách gửi về ở đúng trần đó, xin nhiều hơn cũng không có (cùng khuôn cặp hằng
     /// <c>MAX_ORDER_PAGES</c> ↔ <c>MaxSyncPages</c>). Hai runtime khác nhau nên không dùng chung được một literal;
     /// sửa một bên PHẢI sửa bên kia.</para>
-    /// <para>Không nới: cửa sổ <see cref="SoNgayCuaSoTraHang"/> ngày đằng nào cũng cắt phần lịch sử sâu hơn, mà
-    /// mỗi dòng thêm là thêm HTML gửi qua cầu nối. (Lý do CŨ — "đơn không còn trong DB thì lưu mã cũng vứt" — đã
-    /// HẾT hiệu lực từ khi mã trả hàng có bảng <c>return_codes</c> sống độc lập với vòng đời đơn.)</para>
+    /// <para>50 → 200 (09/08/2026) khi bước check biết lật trang: trần cũ đặt cho thời "chỉ trang đầu", mà trang
+    /// đầu chỉ ~20 dòng nên 50 chưa bao giờ với tới — shop tồn 141/340 yêu cầu vĩnh viễn không đọc hết. Lý do
+    /// giữ trần thấp ("đơn không còn trong DB thì lưu mã cũng vứt") đã HẾT hiệu lực từ khi mã trả hàng có bảng
+    /// <c>return_codes</c> sống độc lập với vòng đời đơn.</para>
     /// </summary>
-    public const int TranDongMoiLuot = 50;
+    public const int TranDongMoiLuot = 200;
+
+    /// <summary>
+    /// Trần số TRANG lật trong MỘT lượt check của một shop (khớp <c>MAX_RETURN_PAGES</c> bên extension). Chỉ là
+    /// dây bảo hiểm — vòng lật trang tự dừng sớm khi trang vừa đọc KHÔNG còn mã nào mới
+    /// (<c>ReturnCodesRepository.DemMaChuaBiet</c>), nên lượt thường không bao giờ chạm tới trần này.
+    /// </summary>
+    public const int TranTrangTraHang = 10;
 
     /// <summary>Mọi thẻ HTML (kể cả <c>&lt;!----&gt;</c> của Vue) — dùng để cắt biên khối và bóc text nhãn.</summary>
     private static readonly Regex TheHtml = new("<[^>]*>", RegexOptions.Compiled);
@@ -114,22 +145,23 @@ public static class TraHangParser
     // ── Luật đếm ────────────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Luật người dùng chốt: <paramref name="mocCu"/> null (lần đầu) → check <c>min(soMoi, tranDong)</c> dòng ĐẦU
-    /// rồi ghi mốc; số không đổi → bỏ qua; số GIẢM → chỉ cập nhật mốc; số TĂNG k → check k dòng ĐẦU.
-    /// <see cref="LuatSoYeuCau.KhongDoi"/>/<see cref="LuatSoYeuCau.Giam"/> đều trả
-    /// <see cref="QuyetDinhTraHang.SoDongCanCheck"/> = 0 nhưng GIỮ nhánh riêng để log/nghiệm thu phân biệt được.
-    /// <paramref name="soMoi"/> âm (rác) được kẹp về 0.
-    /// <para>LẦN ĐẦU phải đọc thật, không chỉ ghi mốc: nếu chỉ ghi mốc thì mọi yêu cầu ĐANG CÓ của shop không bao
-    /// giờ được đọc — chỉ yêu cầu phát sinh SAU mốc mới lọt vào nhánh <see cref="LuatSoYeuCau.Tang"/>.</para>
+    /// Phân nhánh theo số yêu cầu đọc được so với mốc lần trước: <paramref name="mocCu"/> null → lần đầu;
+    /// bằng → không đổi; nhỏ hơn → giảm; lớn hơn k → tăng k. <paramref name="soMoi"/> âm (rác) kẹp về 0.
+    /// <para>
+    /// <b>⚠ KẾT QUẢ CHỈ ĐỂ LOG + TÍNH ĐỘ SÂU PHÂN TRANG</b> (<see cref="SoTrangCanDoc"/>), KHÔNG dùng để cắt
+    /// danh sách dòng. Con số trên trang là MỨC TỒN tại thời điểm đọc, không phải bộ đếm cộng dồn — yêu cầu xử
+    /// xong rớt khỏi danh sách. Nên "+3 mới, −3 xử xong" ra số Y HỆT, và "+5 mới, −3 xử xong" chỉ ra +2. Bản
+    /// trước cắt danh sách theo hiệu số này rồi vẫn ghi mốc ⇒ phần chênh mất VĨNH VIỄN. Nay mọi nhánh đều parse
+    /// hết dòng extension gửi về; chống trùng do <c>ReturnCodesRepository.LuuMaTraHang</c> lo (mã cũ không đụng
+    /// dòng ⇒ không đẩy lại, không notify lại).
+    /// </para>
     /// </summary>
-    /// <param name="tranDong">Trần số dòng đọc lần đầu — mặc định <see cref="TranDongMoiLuot"/>; tham số hoá chỉ
-    /// để test kẹp trần được với số nhỏ, caller thật KHÔNG truyền.</param>
-    public static QuyetDinhTraHang QuyetDinhCheck(int? mocCu, int soMoi, int tranDong = TranDongMoiLuot)
+    public static QuyetDinhTraHang QuyetDinhCheck(int? mocCu, int soMoi)
     {
         var moi = Math.Max(0, soMoi);
         if (mocCu is null)
         {
-            return new QuyetDinhTraHang(LuatSoYeuCau.LanDau, Math.Min(moi, Math.Max(0, tranDong)));
+            return new QuyetDinhTraHang(LuatSoYeuCau.LanDau, moi);
         }
         if (moi == mocCu.Value)
         {
@@ -141,6 +173,12 @@ public static class TraHangParser
         }
         return new QuyetDinhTraHang(LuatSoYeuCau.Tang, moi - mocCu.Value);
     }
+
+    // ĐÃ BỎ `SoTrangCanDoc(mocCu, soMoi)` (bản 09/08 đầu tiên) — luật đó suy độ sâu phân trang từ MỐC nên sai
+    // từ gốc: nhánh "lần đầu thì quét sâu" chỉ chạy khi mốc null, mà mốc được ghi ở CUỐI mọi lượt check từ
+    // 29/07 và không có migration nào reset ⇒ mọi shop đang chạy đều có mốc ≠ null ⇒ đúng nhóm shop TỒN ĐỌNG
+    // (nhóm cần quét sâu nhất) lại không bao giờ được quét sâu. Nay độ sâu do DỮ LIỆU quyết định: còn ra mã mới
+    // thì còn lật — xem ShopFlowRunner.CheckDonTraHangAsync + ReturnCodesRepository.DemMaChuaBiet.
 
     /// <summary>
     /// Số yêu cầu từ text ô <c>.return-list-summary-title</c> (vd "7 Yêu cầu" → 7, "1.234 Yêu cầu" → 1234):
@@ -195,7 +233,7 @@ public static class TraHangParser
     /// </summary>
     public static KetQuaDocTraHang ParseKetQua(string? json)
     {
-        var rong = new KetQuaDocTraHang(null, false, false, Array.Empty<DongTraHang>(), null);
+        var rong = new KetQuaDocTraHang(null, false, false, Array.Empty<DongTraHang>(), null, false);
         if (string.IsNullOrWhiteSpace(json))
         {
             return rong;
@@ -251,7 +289,10 @@ public static class TraHangParser
                 }
             }
 
-            return new KetQuaDocTraHang(soYeuCau, sortApplied, tabTraHang, dong, DocChanDoan(root));
+            // Thiếu field (extension đời cũ) → false ⇒ caller không gửi lượt đọc thêm, đúng hành vi cũ.
+            var coTrangSau = root.TryGetProperty("coTrangSau", out var cts) && cts.ValueKind == JsonValueKind.True;
+
+            return new KetQuaDocTraHang(soYeuCau, sortApplied, tabTraHang, dong, DocChanDoan(root), coTrangSau);
         }
         catch (JsonException)
         {
@@ -299,7 +340,14 @@ public static class TraHangParser
     /// <see cref="KetQuaGhepTraHang.Cap"/>; dòng CÓ mã đơn mà THIẾU mã yêu cầu vào
     /// <see cref="KetQuaGhepTraHang.ThieuMaYeuCau"/> dưới dạng chuỗi chẩn đoán (mã đơn + nhãn đọc được + HTML thô
     /// rút gọn) để nhật ký lần chạy thật lộ ngay class/nhãn thật. Dòng không có mã đơn nào → bỏ im lặng (dòng lạ).
-    /// Mã đơn TRÙNG trong lô → chỉ giữ cặp ĐẦU (danh sách đã sắp mới→cũ nên cặp đầu là mới nhất).
+    /// <para>
+    /// <b>Một đơn có TỪ HAI yêu cầu trả hàng</b> (khách bấm lại sau khi yêu cầu trước bị hủy/từ chối, hoặc đơn
+    /// nhiều phần) → <b>GIỮ mã MỚI NHẤT</b> (danh sách đã sắp mới→cũ nên đó là dòng đầu), mã còn lại vào
+    /// <see cref="KetQuaGhepTraHang.TrungMaDon"/> để LOG. User chốt luật này 09/08 sau khi cân nhắc: ca hay gặp
+    /// là yêu cầu bị TẠO LẠI, lúc đó mã cũ đã chết nên giữ mã mới đúng là cái cần; còn ca hai yêu cầu cùng sống
+    /// thì cột trên Google Sheet chỉ có MỘT ô mỗi đơn, không có chỗ ghi mã thứ hai — nên nói ra bằng nhật ký
+    /// thay vì bỏ im lặng.
+    /// </para>
     /// <para>
     /// Dòng có <see cref="DongTraHang.LaTraHang"/> = <c>false</c> (href <c>/portal/sale/order/…</c> ⇒ ĐƠN HỦY) bị
     /// BỎ ngay, đếm vào <see cref="KetQuaGhepTraHang.BoQuaDonHuy"/> để log. Cờ <c>null</c> (extension đời cũ chưa
@@ -310,7 +358,10 @@ public static class TraHangParser
     {
         var cap = new List<YeuCauTraHang>();
         var thieu = new List<string>();
-        var daThay = new HashSet<string>(StringComparer.Ordinal);
+        // mã đơn → mã yêu cầu ĐÃ GIỮ cho đơn đó (rỗng = dòng giữ không đọc được mã yêu cầu). Dùng Dictionary chứ
+        // không HashSet để lúc gặp dòng trùng còn nói được "giữ mã nào, bỏ mã nào".
+        var daThay = new Dictionary<string, string>(StringComparer.Ordinal);
+        var trung = new List<string>();
         var boQuaDonHuy = 0;
 
         foreach (var d in dong ?? Array.Empty<DongTraHang>())
@@ -330,10 +381,19 @@ public static class TraHangParser
             {
                 continue; // không đọc được mã đơn → dòng lạ, không ghép được vào đơn nào
             }
-            if (!daThay.Add(ma.MaDon!))
+            if (daThay.TryGetValue(ma.MaDon!, out var maDaGiu))
             {
+                // Đơn này đã có một yêu cầu được lấy ở dòng TRÊN — danh sách sắp mới→cũ nên dòng trên là MỚI
+                // NHẤT. Luật user chốt 09/08: GIỮ mã mới nhất, mã ở đây chỉ ghi nhật ký (kho khoá theo
+                // (tài khoản, mã đơn) và cột trên sheet cũng chỉ có MỘT ô mỗi đơn — không có chỗ chứa mã thứ hai).
+                // Chỉ báo khi dòng bị bỏ THẬT SỰ có mã yêu cầu: dòng trùng mà không đọc được mã thì không mất gì.
+                if (!string.IsNullOrEmpty(ma.MaYeuCau))
+                {
+                    trung.Add($"{ma.MaDon}: giữ {(maDaGiu.Length == 0 ? "(không đọc được mã)" : maDaGiu)} (mới nhất), BỎ {ma.MaYeuCau}");
+                }
                 continue;
             }
+            daThay[ma.MaDon!] = ma.MaYeuCau ?? string.Empty;
 
             if (string.IsNullOrEmpty(ma.MaYeuCau))
             {
@@ -343,7 +403,7 @@ public static class TraHangParser
             cap.Add(new YeuCauTraHang(ma.MaDon!, ma.MaYeuCau!));
         }
 
-        return new KetQuaGhepTraHang(cap, thieu, boQuaDonHuy);
+        return new KetQuaGhepTraHang(cap, thieu, boQuaDonHuy, trung);
     }
 
     /// <summary>

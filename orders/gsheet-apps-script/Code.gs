@@ -31,6 +31,14 @@
 //  Đồng thời: dòng VỪA nhận mã trả hàng được đánh dấu bằng MÀU CHỮ (MAU_CHU_TRA_HANG), một trục riêng
 //  hoàn toàn với NỀN đỏ đơn hủy — dòng vừa hủy vừa có mã trả đọc được cả hai trạng thái.
 //
+//  ─── SỬA 09/08/2026: trạng thái ghi mã trả hàng báo THEO TỪNG DÒNG ────────────────────────────────
+//  Trước bản này, client chỉ suy được "ghi được hay không" từ `canhBao` cấp PHẢN HỒI. Mà `thieuCot` gom
+//  chung cho MỌI tab LẪN FILE PHỤ ⇒ file phụ thiếu tiêu đề "Mã đơn trả hàng" là cả lô mã ĐÃ ghi xong ở
+//  file chính vẫn bị client coi là chưa đẩy, rồi đẩy lại mỗi chu kỳ suốt 14 ngày (đốt quota Apps Script,
+//  badge "Chờ đẩy" báo sai). Nay mỗi dòng kết quả có thể mang `chuaGhiMaTra:true` + `lyDoChuaGhi`
+//  ('thieucot' | 'congthuc'); ô ĐÃ đúng mã sẵn thì KHÔNG báo (coi như xong, kẻo đẩy lại vô tận).
+//  FILE PHỤ cố ý KHÔNG bao giờ đặt cờ này: nó là bản sao, thiếu cột ở đó không có nghĩa file chính hỏng.
+//
 //  ─── SỬA 30/07/2026: mã trả hàng ĐỔI thì GHI ĐÈ ───────────────────────────────────────────────────
 //  App reset cờ đã-đẩy khi Shopee tạo LẠI yêu cầu với mã khác — nhưng ghiNeuTrong chỉ ghi ô TRỐNG nên ô
 //  còn mã CŨ không bao giờ nhận được mã mới, mà lượt đẩy vẫn trả ok:true ⇒ app đánh dấu "đã đẩy" và mã
@@ -182,8 +190,23 @@ function doPost(e) {
         // Cột "Mã đơn trả hàng" do MÁY ghi (người dùng không gõ tay) → payload chỉ-mã-trả được GHI ĐÈ khi mã
         // KHÁC: yêu cầu bị tạo lại mang mã mới, app đã reset cờ để đẩy lại, ô còn mã cũ mà chỉ-ghi-ô-trống thì
         // mã mới không bao giờ tới nơi (mà lượt đẩy vẫn ok ⇒ hỏng IM LẶNG). Payload đơn thường giữ nguyên luật cũ.
-        const vuaGhiMaTra = ghiTruong(
-          cho.sh, map, cho.row, 'donTraHang', don.donTraHang, thieuCot, don.chiDienNeuCo === true);
+        // Payload CHỈ-MÃ-TRẢ đi đường RIÊNG (ghiMaTraHang) để trả về trạng thái THEO TỪNG DÒNG. Trước 09/08 nó
+        // dùng chung ghiTruong, mà ghiTruong chỉ trả true/false không phân biệt được "thiếu cột" với "ô đã đúng
+        // mã rồi" — client buộc phải suy từ `canhBao` cấp PHẢN HỒI, tức cả lô. Mà `thieuCot` gom chung cho MỌI
+        // tab LẪN file phụ ⇒ file phụ thiếu tiêu đề là cả lô mã đã ghi xong ở file chính vẫn bị coi là chưa đẩy
+        // rồi đẩy lại mỗi chu kỳ suốt 14 ngày. Nay trạng thái nằm ở từng dòng, file phụ không làm ô nhiễm nữa.
+        let vuaGhiMaTra = false;
+        if (don.chiDienNeuCo === true) {
+          const ketMaTra = ghiMaTraHang(cho.sh, map, cho.row, don.donTraHang, thieuCot);
+          vuaGhiMaTra = ketMaTra === 'ghi';
+          // 'trung' = ô ĐÃ đúng mã ⇒ coi như xong, KHÔNG báo chưa ghi (báo thì client đẩy lại vô tận).
+          if (ketMaTra === 'thieucot' || ketMaTra === 'congthuc') {
+            r.chuaGhiMaTra = true;
+            r.lyDoChuaGhi = ketMaTra;
+          }
+        } else {
+          vuaGhiMaTra = ghiTruong(cho.sh, map, cho.row, 'donTraHang', don.donTraHang, thieuCot);
+        }
         ghiNeuTrong(cho.sh, cho.row, COT_TEN_SHOP, don.tenShop);      // F — Shop
         ghiTruong(cho.sh, map, cho.row, 'doanhThu',   don.doanhThu,   thieuCot);
         ghiTruong(cho.sh, map, cho.row, 'ngay',       don.ngay,       thieuCot);
@@ -445,6 +468,27 @@ function ghiNeuTrong(sheet, row, col, giaTri) {
 // "đã đẩy" và mã mới mất im lặng.
 // Ô có CÔNG THỨC thì KHÔNG đụng (người dùng có thể tự dựng =…) — cùng lằn ranh với ghiNeuTrong.
 // Trả true khi thực sự đổi giá trị ô.
+// Ghi cột "Mã đơn trả hàng" cho payload CHỈ-MÃ-TRẢ và nói RÕ kết cục của ĐÚNG dòng này:
+//   'ghi'      — vừa ghi giá trị mới vào ô (⇒ đổi màu chữ dòng đó)
+//   'trung'    — ô đã đúng mã sẵn ⇒ KHÔNG có gì để làm, coi như XONG (client đừng đẩy lại)
+//   'thieucot' — tab này không có tiêu đề "Mã đơn trả hàng" ⇒ giá trị BỊ BỎ, client phải giữ lại thử sau
+//   'congthuc' — ô đang chứa CÔNG THỨC nên script không đụng ⇒ cũng là chưa ghi được
+// Vì sao tách khỏi ghiTruong/ghiDeNeuKhac: hai hàm đó trả true/false, mà 'trung' và 'thieucot' cùng ra false —
+// gộp lại thì client không tài nào biết nên đánh dấu đã-đẩy hay giữ lại, và đó đúng là chỗ mã trả hàng bị nuốt.
+function ghiMaTraHang(sheet, map, row, giaTri, thieu) {
+  const ten = COT.donTraHang;
+  const col = map[ten];
+  if (!col) {
+    if (thieu.indexOf(ten) === -1) thieu.push(ten);
+    return 'thieucot';
+  }
+  const o = sheet.getRange(row, col);
+  if (o.getFormula() !== '') return 'congthuc';
+  if (String(o.getValue()).trim() === String(giaTri).trim()) return 'trung';
+  o.setValue(giaTri);
+  return 'ghi';
+}
+
 function ghiDeNeuKhac(sheet, row, col, giaTri) {
   if (giaTri === null || giaTri === undefined || giaTri === '') return false;
   const o = sheet.getRange(row, col);

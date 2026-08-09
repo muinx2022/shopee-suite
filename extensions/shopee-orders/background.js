@@ -11,7 +11,8 @@
 // Protocol:
 //   C#  -> ext:  {action:"readShopList"} | {action:"openShopDetail", shopId} | {action:"readToShip"}
 //                {action:"redownloadSlip", orderSn}                               (tải lại phiếu 1 đơn)
-//                {action:"readReturnRequests"}                                    (bước CUỐI: trang trả hàng)
+//                {action:"readReturnRequests"}                                    (bước CUỐI: trang trả hàng, TRANG ĐẦU)
+//                {action:"readReturnRequestsMore", maxPages}                       (lật thêm trang trên trang đang mở)
 //   ext -> C#:   {action:"ready"}
 //                {action:"shopOpened"}                                            (openShopDetail xong)
 //                {action:"pageData", kind:"shopList", data:<json-array-string>}
@@ -37,7 +38,7 @@ import { bridge, ctx, setCommandHandler } from "./core.js";
 import { gotoSellerCentre, doReadShopList, openShopDetail, doReadToShip, doCloseShopTab } from "./flow-shop.js";
 import { doSyncOrders, doSyncOrderFinals, doPrepareNextOrder, doRedownloadSlip } from "./flow-orders.js";
 import { doSetPickupAddress, doSetPickupAddressToOther } from "./flow-address.js";
-import { doReadReturnRequests } from "./flow-returns.js";
+import { doReadReturnRequests, doReadReturnRequestsMore } from "./flow-returns.js";
 
 // ---- Xử lý lệnh từ C# -----------------------------------------------------
 
@@ -56,6 +57,7 @@ async function handleCommand(cmd) {
     case "prepareNextOrder": await doPrepareNextOrder(); return;
     case "redownloadSlip":   await doRedownloadSlip(String(cmd.orderSn || "")); return;
     case "readReturnRequests": await doReadReturnRequests(); return;
+    case "readReturnRequestsMore": await doReadReturnRequestsMore(Number(cmd.maxPages) || 0); return;
     case "closeShopTab":     await doCloseShopTab(); return;
   }
 }

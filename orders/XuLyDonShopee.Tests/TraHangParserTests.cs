@@ -1,3 +1,6 @@
+using System.Globalization;
+using System.IO;
+using System.Text.RegularExpressions;
 using XuLyDonShopee.Core.Services;
 
 namespace XuLyDonShopee.Tests;
@@ -5,8 +8,8 @@ namespace XuLyDonShopee.Tests;
 /// <summary>
 /// Test các hàm THUẦN của bước "check đơn trả hàng" (bước CUỐI flow mỗi shop):
 /// <list type="bullet">
-/// <item><see cref="TraHangParser.QuyetDinhCheck"/> — 4 nhánh luật đếm (lần đầu = min(số, trần) / không đổi /
-/// giảm / tăng k).</item>
+/// <item><see cref="TraHangParser.QuyetDinhCheck"/> — 4 nhánh luật đếm (lần đầu / không đổi / giảm / tăng k)
+/// và <see cref="TraHangParser.SoTrangCanDoc"/> — độ sâu phân trang suy từ nhánh đó.</item>
 /// <item><see cref="TraHangParser.LocTheoCuaSo"/> — chặn theo cửa sổ NGÀY YÊU CẦU (suy từ MÃ YÊU CẦU, 20 ngày),
 /// LỌC chứ không dừng sớm.</item>
 /// <item><see cref="TraHangParser.ParseSoYeuCau"/> — "7 Yêu cầu" → 7, text lạ → null (KHÔNG ném).</item>
@@ -25,61 +28,60 @@ namespace XuLyDonShopee.Tests;
 public class TraHangParserTests
 {
     // ===================== Luật đếm: 4 nhánh =====================
+    // ⚠ Từ 09/08/2026 kết quả CHỈ để log + tính độ sâu phân trang. Số dòng được đọc KHÔNG còn phụ thuộc nhánh
+    // nào — mọi nhánh đều parse hết dòng extension gửi về (xem ShopFlowRunner.CheckDonTraHangAsync).
 
-    /// <summary>LẦN ĐẦU phải ĐỌC, không chỉ ghi mốc: bản trước trả 0 nên shop nào cũng chốt mốc rồi im lặng mãi,
-    /// toàn bộ yêu cầu ĐANG CÓ không bao giờ được đọc (số thật lấy về từ lúc phát hành là 0).</summary>
     [Fact]
-    public void QuyetDinhCheck_LanDau_CheckDungSoYeuCau_DuoiTran()
+    public void QuyetDinhCheck_LanDau_UocTinhDungSoYeuCau()
     {
         var q = TraHangParser.QuyetDinhCheck(mocCu: null, soMoi: 12);
         Assert.Equal(LuatSoYeuCau.LanDau, q.Luat);
-        Assert.Equal(12, q.SoDongCanCheck);
+        Assert.Equal(12, q.SoDongMoiUocTinh);
     }
 
-    /// <summary>Vượt trần → kẹp về <see cref="TraHangParser.TranDongMoiLuot"/> (extension cũng chỉ gửi tối đa
-    /// chừng đó dòng; đọc sâu hơn cũng vô ích vì DB chỉ giữ đơn vài ngày gần đây).</summary>
+    /// <summary>Lần đầu KHÔNG còn kẹp về trần dòng: trần nay là chuyện của extension (gửi tối đa
+    /// <see cref="TraHangParser.TranDongMoiLuot"/> dòng gộp mọi trang), không phải của luật đếm.</summary>
     [Fact]
-    public void QuyetDinhCheck_LanDau_VuotTran_KepVeTran()
+    public void QuyetDinhCheck_LanDau_SoLon_GiuNguyenSo()
     {
         var q = TraHangParser.QuyetDinhCheck(mocCu: null, soMoi: 340);
         Assert.Equal(LuatSoYeuCau.LanDau, q.Luat);
-        Assert.Equal(TraHangParser.TranDongMoiLuot, q.SoDongCanCheck);
-        Assert.Equal(50, q.SoDongCanCheck);
+        Assert.Equal(340, q.SoDongMoiUocTinh);
     }
 
     [Fact]
-    public void QuyetDinhCheck_LanDau_KhongCoYeuCauNao_Check0()
+    public void QuyetDinhCheck_LanDau_KhongCoYeuCauNao_UocTinh0()
     {
         var q = TraHangParser.QuyetDinhCheck(mocCu: null, soMoi: 0);
         Assert.Equal(LuatSoYeuCau.LanDau, q.Luat);
-        Assert.Equal(0, q.SoDongCanCheck);
+        Assert.Equal(0, q.SoDongMoiUocTinh);
     }
 
     [Fact]
-    public void QuyetDinhCheck_KhongDoi_BoQua()
+    public void QuyetDinhCheck_KhongDoi()
     {
         var q = TraHangParser.QuyetDinhCheck(mocCu: 7, soMoi: 7);
         Assert.Equal(LuatSoYeuCau.KhongDoi, q.Luat);
-        Assert.Equal(0, q.SoDongCanCheck);
+        Assert.Equal(0, q.SoDongMoiUocTinh);
     }
 
     [Fact]
-    public void QuyetDinhCheck_Giam_ChiCapNhatMoc()
+    public void QuyetDinhCheck_Giam()
     {
         var q = TraHangParser.QuyetDinhCheck(mocCu: 7, soMoi: 3);
         Assert.Equal(LuatSoYeuCau.Giam, q.Luat);
-        Assert.Equal(0, q.SoDongCanCheck);
+        Assert.Equal(0, q.SoDongMoiUocTinh);
     }
 
     [Theory]
     [InlineData(7, 8, 1)]
     [InlineData(7, 12, 5)]
     [InlineData(0, 3, 3)]
-    public void QuyetDinhCheck_Tang_CheckDungK(int mocCu, int soMoi, int k)
+    public void QuyetDinhCheck_Tang_RaDungK(int mocCu, int soMoi, int k)
     {
         var q = TraHangParser.QuyetDinhCheck(mocCu, soMoi);
         Assert.Equal(LuatSoYeuCau.Tang, q.Luat);
-        Assert.Equal(k, q.SoDongCanCheck);
+        Assert.Equal(k, q.SoDongMoiUocTinh);
     }
 
     [Fact]
@@ -87,7 +89,45 @@ public class TraHangParserTests
     {
         var q = TraHangParser.QuyetDinhCheck(mocCu: 5, soMoi: -3);
         Assert.Equal(LuatSoYeuCau.Giam, q.Luat);
-        Assert.Equal(0, q.SoDongCanCheck);
+        Assert.Equal(0, q.SoDongMoiUocTinh);
+    }
+
+    // ===================== Trần phải khớp hai runtime =====================
+    // (Luật `SoTrangCanDoc` đã BỎ 09/08/2026 — độ sâu phân trang nay do DỮ LIỆU quyết định, xem
+    //  ShopFlowRunner.CheckDonTraHangAsync. Test cũ của nó bỏ theo.)
+
+    /// <summary>
+    /// Hai hằng trần phải khớp ĐÚNG bản extension. ĐỌC THẲNG <c>constants.js</c> chứ không chép số sang đây:
+    /// hai runtime khác nhau không dùng chung được literal, mà chép tay thì bên JS trôi lúc nào không ai biết
+    /// (C# xin 200 dòng trong khi extension chỉ gửi 50 thì mất 150 dòng, ÂM THẦM).
+    /// </summary>
+    [Fact]
+    public void HangTran_KhopBanExtension()
+    {
+        var js = File.ReadAllText(Path.Combine(GocRepo(), "extensions", "shopee-orders", "constants.js"));
+
+        Assert.Equal(TraHangParser.TranDongMoiLuot, SoTrongJs(js, "MAX_RETURN_ROWS"));
+        Assert.Equal(TraHangParser.TranTrangTraHang, SoTrongJs(js, "MAX_RETURN_PAGES"));
+    }
+
+    /// <summary>Giá trị của <c>export const &lt;ten&gt; = &lt;số&gt;;</c> trong một file JS.</summary>
+    private static int SoTrongJs(string js, string ten)
+    {
+        var m = Regex.Match(js, @"export\s+const\s+" + Regex.Escape(ten) + @"\s*=\s*(\d+)\s*;");
+        Assert.True(m.Success, $"Không thấy hằng {ten} trong constants.js — đổi tên hằng thì sửa cả test này.");
+        return int.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>Gốc repo, dò ngược từ thư mục chạy test lên tới chỗ có <c>ShopeeSuite.sln</c>.</summary>
+    private static string GocRepo()
+    {
+        var d = new DirectoryInfo(AppContext.BaseDirectory);
+        while (d is not null && !File.Exists(Path.Combine(d.FullName, "ShopeeSuite.sln")))
+        {
+            d = d.Parent;
+        }
+        Assert.NotNull(d);
+        return d!.FullName;
     }
 
     // ===================== Parse số yêu cầu =====================

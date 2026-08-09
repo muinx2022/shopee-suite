@@ -23,7 +23,7 @@ public partial class OrdersRepository
        status, status_description, cancel_reason,
        gsheet_synced_at, gsheet_file_url, gsheet_da_huy, gsheet_da_co_van_don, gsheet_da_co_uoc_tinh,
        sold_counted_at, hub_synced_at, hub_slip_synced_at, gsheet_tab, items_json,
-       return_request_code, gsheet_da_co_don_tra_hang, shop_login
+       return_request_code, gsheet_da_co_don_tra_hang, shop_login, gsheet_push_gen
     FROM orders
     WHERE account_id = $a" + shopFilter + @"
     ORDER BY id;";
@@ -48,6 +48,9 @@ public partial class OrdersRepository
                 StatusDescription: reader.IsDBNull(6) ? null : reader.GetString(6),
                 CancelReason: reader.IsDBNull(7) ? null : reader.GetString(7),
                 DaGhiSheet: !reader.IsDBNull(8),
+                // "Đã TỪNG có dòng" — bền qua nút "Đẩy lại" (nút đó xoá gsheet_synced_at nhưng GIỮ gsheet_tab).
+                // OR với gsheet_synced_at là dây bảo hiểm cho đơn cũ hơn migration backfill cột tab.
+                DaTungGhiSheet: !reader.IsDBNull(16) || !reader.IsDBNull(8),
                 FileUrl: reader.IsDBNull(9) ? null : reader.GetString(9),
                 GsheetDaHuy: reader.IsDBNull(10) ? null : reader.GetInt64(10),
                 GsheetDaCoVanDon: reader.IsDBNull(11) ? null : reader.GetInt64(11),
@@ -56,6 +59,7 @@ public partial class OrdersRepository
                 DaDayHub: !reader.IsDBNull(14),
                 DaDayPhieuHub: !reader.IsDBNull(15),
                 GsheetTab: reader.IsDBNull(16) ? null : reader.GetString(16),
+                GsheetPushGen: reader.IsDBNull(21) ? 0L : reader.GetInt64(21),
                 ReturnRequestCode: reader.IsDBNull(18) ? null : reader.GetString(18),
                 GsheetDaCoDonTraHang: reader.IsDBNull(19) ? null : reader.GetInt64(19),
                 ShopLogin: reader.IsDBNull(20) ? null : reader.GetString(20)));
@@ -74,30 +78,74 @@ public partial class OrdersRepository
     /// trả hàng vừa xuất hiện). <c>gsheet_tab</c> dùng <c>COALESCE(cũ, $tab)</c> — GIỮ tab đã ghi LẦN ĐẦU, KHÔNG
     /// đổi khi đẩy lại (đơn cập nhật luôn về đúng tab cũ dù tháng/override hiện tại đã khác). Khóa theo
     /// <c>(account_id, order_sn)</c>.
-    /// </summary>
-    public void MarkGsheetSynced(long accountId, string orderSn, string? fileUrl, bool daHuy, bool coVanDon, bool coUocTinh, bool coDonTraHang, string tab, DateTime at)
+    /// <para>
+    /// <b>CHỐT THẾ HỆ — CHỈ áp cho NHÓM CỜ, KHÔNG áp cho NHÓM DỮ LIỆU.</b> Hàm chạy HAI câu UPDATE trong một
+    /// transaction, và việc tách đôi này là bắt buộc chứ không phải cho gọn:
+    /// <list type="number">
+    /// <item><b>Dữ liệu — LUÔN ghi:</b> <c>gsheet_tab</c> + <c>gsheet_file_url</c>. Hai cột này không phải "cờ đã
+    /// đẩy" mà là SỰ THẬT vừa xảy ra ngoài đời: dòng đã nằm ở tab đó, file đã có link đó. Cả hai đều COALESCE
+    /// (lần đầu thắng) nên ghi lại vô hại. Nhét chúng vào chung mệnh đề chốt thế hệ là tự tay dựng lại đúng hai
+    /// lỗi mà <see cref="DatLaiCoDayLai"/> cố ý tránh: quên tab ⇒ <b>dòng bị ghi LẦN HAI ở tab tháng mới</b>
+    /// (doanh thu đếm đôi, không sửa ngược được), quên link ⇒ upload lại phiếu đã có.</item>
+    /// <item><b>Cờ đã đẩy — chốt thế hệ:</b> <c>gsheet_synced_at</c> + 4 cờ <c>gsheet_da_*</c>, chỉ đóng khi
+    /// <c>gsheet_push_gen</c> CÒN BẰNG <paramref name="pushGen"/> (số đọc được lúc dựng lô, mang theo trong
+    /// <c>GsheetPendingOrder.GsheetPushGen</c>). Người dùng bấm "Đẩy lại" giữa lúc một lượt đang bay thì
+    /// <see cref="DatLaiCoDayLai"/> đã +1 thế hệ ⇒ lượt đang bay không đóng lại bộ cờ vừa mở. Cùng lớp lỗi
+    /// "cờ đã đẩy kẹt" đã sửa hai lần: v1.6.3 và v1.7.16.</item>
+    /// </list>
+    /// </para>
+    /// <returns>
+    /// Số dòng ĐÓNG ĐƯỢC CỜ (0 hoặc 1). <b>0 = thế hệ đã lệch</b> (hoặc đơn không còn) ⇒ lượt đẩy này KHÔNG được
+    /// coi đơn là xong. Caller BẮT BUỘC dùng giá trị này để quyết định <c>settled</c>: cộng vào <c>settled</c> khi
+    /// cờ chưa đóng là đưa đơn vào diện DỌN với <c>gsheet_synced_at</c> vẫn NULL — đơn biến mất khỏi app và cú bấm
+    /// "Đẩy lại" bốc hơi, đúng thứ chốt thế hệ sinh ra để chặn.
+    /// </returns>
+    public int MarkGsheetSynced(long accountId, string orderSn, string? fileUrl, bool daHuy, bool coVanDon, bool coUocTinh, bool coDonTraHang, string tab, DateTime at, long pushGen)
     {
         using var conn = _db.OpenConnection();
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = @"UPDATE orders SET
-    gsheet_synced_at = COALESCE(gsheet_synced_at, $at),
+        using var tx = conn.BeginTransaction();
+
+        // (1) NHÓM DỮ LIỆU — không chốt thế hệ (xem xmldoc).
+        using (var duLieu = conn.CreateCommand())
+        {
+            duLieu.Transaction = tx;
+            duLieu.CommandText = @"UPDATE orders SET
     gsheet_file_url = COALESCE($url, gsheet_file_url),
+    gsheet_tab = COALESCE(gsheet_tab, $tab)
+    WHERE account_id = $a AND order_sn = $sn;";
+            duLieu.Parameters.AddWithValue("$url", (object?)fileUrl ?? DBNull.Value);
+            duLieu.Parameters.AddWithValue("$tab", tab);
+            duLieu.Parameters.AddWithValue("$a", accountId);
+            duLieu.Parameters.AddWithValue("$sn", orderSn);
+            duLieu.ExecuteNonQuery();
+        }
+
+        // (2) NHÓM CỜ ĐÃ ĐẨY — chốt thế hệ.
+        int daDongCo;
+        using (var co = conn.CreateCommand())
+        {
+            co.Transaction = tx;
+            co.CommandText = @"UPDATE orders SET
+    gsheet_synced_at = COALESCE(gsheet_synced_at, $at),
     gsheet_da_huy = $daHuy,
     gsheet_da_co_van_don = $co,
     gsheet_da_co_uoc_tinh = $coUt,
-    gsheet_da_co_don_tra_hang = $coTh,
-    gsheet_tab = COALESCE(gsheet_tab, $tab)
-    WHERE account_id = $a AND order_sn = $sn;";
-        cmd.Parameters.AddWithValue("$at", DbSerialization.FormatDate(at));
-        cmd.Parameters.AddWithValue("$url", (object?)fileUrl ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$daHuy", daHuy ? 1 : 0);
-        cmd.Parameters.AddWithValue("$co", coVanDon ? 1 : 0);
-        cmd.Parameters.AddWithValue("$coUt", coUocTinh ? 1 : 0);
-        cmd.Parameters.AddWithValue("$coTh", coDonTraHang ? 1 : 0);
-        cmd.Parameters.AddWithValue("$tab", tab);
-        cmd.Parameters.AddWithValue("$a", accountId);
-        cmd.Parameters.AddWithValue("$sn", orderSn);
-        cmd.ExecuteNonQuery();
+    gsheet_da_co_don_tra_hang = $coTh
+    WHERE account_id = $a AND order_sn = $sn
+      AND gsheet_push_gen = $gen;";
+            co.Parameters.AddWithValue("$at", DbSerialization.FormatDate(at));
+            co.Parameters.AddWithValue("$daHuy", daHuy ? 1 : 0);
+            co.Parameters.AddWithValue("$co", coVanDon ? 1 : 0);
+            co.Parameters.AddWithValue("$coUt", coUocTinh ? 1 : 0);
+            co.Parameters.AddWithValue("$coTh", coDonTraHang ? 1 : 0);
+            co.Parameters.AddWithValue("$a", accountId);
+            co.Parameters.AddWithValue("$sn", orderSn);
+            co.Parameters.AddWithValue("$gen", pushGen);
+            daDongCo = co.ExecuteNonQuery();
+        }
+
+        tx.Commit();
+        return daDongCo;
     }
 
     /// <summary>

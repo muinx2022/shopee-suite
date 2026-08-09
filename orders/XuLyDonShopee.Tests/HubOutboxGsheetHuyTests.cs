@@ -46,7 +46,7 @@ public class HubOutboxGsheetHuyTests
         services.Orders.UpsertMany(accId, new[] { DonHuyKhongVanDon("DAGHI") }, DateTime.UtcNow);
         // Đơn ĐÃ có dòng trên sheet (ghi lúc còn "Chờ lấy hàng", lúc đó có vận đơn) — cờ hủy lần đẩy trước = 0.
         services.Orders.MarkGsheetSynced(accId, "DAGHI", null, daHuy: false, coVanDon: true, coUocTinh: false,
-            coDonTraHang: false, tab: "Tháng 07-2026", DateTime.UtcNow);
+            coDonTraHang: false, tab: "Tháng 07-2026", DateTime.UtcNow, pushGen: 0);
 
         Assert.Equal(KetQuaDay.ThanhCong, await DayAsync(accId, services));
 
@@ -69,6 +69,54 @@ public class HubOutboxGsheetHuyTests
 
         Assert.Empty(web.Bodies);                              // KHÔNG gửi gì (không spam dòng đỏ vô nghĩa)
         Assert.Empty(services.Orders.GetOrderSns(accId));      // settled by design → đã dọn khỏi app
+    }
+
+    [Fact]
+    public async Task DonHuy_DaCoDong_SauKhiBamDayLai_VAN_Gui_KemDaHuy()
+    {
+        // BẪY: nút "Đẩy lại" xoá gsheet_synced_at ⇒ cờ "đã ghi sheet" tụt về false. Nếu lối tắt bỏ-qua hỏi đúng
+        // cờ đó thì chính cú bấm của người dùng đẩy đơn vào nhánh "by design không ghi" → không gửi gì, lại còn
+        // được coi là settled rồi bị dọn khỏi app ⇒ dòng cũ trên sheet KHÔNG BAO GIỜ được tô đỏ nữa.
+        using var temp = new TempDatabase();
+        using var web = new FakeGsheetWebApp();
+        var (services, accId) = Dung(temp, web);
+
+        services.Orders.UpsertMany(accId, new[] { DonHuyKhongVanDon("DAYLAI") }, DateTime.UtcNow);
+        services.Orders.MarkGsheetSynced(accId, "DAYLAI", null, daHuy: false, coVanDon: true, coUocTinh: false,
+            coDonTraHang: false, tab: "Tháng 07-2026", DateTime.UtcNow, pushGen: 0);
+
+        Assert.Equal(1, services.Orders.DatLaiCoDayLai(accId, "DAYLAI")); // người dùng bấm "Đẩy lại"
+
+        Assert.Equal(KetQuaDay.ThanhCong, await DayAsync(accId, services));
+
+        var body = Assert.Single(web.Bodies);
+        Assert.Contains("\"maDon\":\"DAYLAI\"", body);
+        Assert.Contains("\"daHuy\":true", body);   // vẫn tô đỏ ĐÚNG dòng cũ, không nhân dòng mới
+    }
+
+    [Fact]
+    public async Task BamDayLai_XEN_GIUA_LuotDangBay_ThiGiuDon_KhongDon_KhongNuotCuBam()
+    {
+        // Đây là ca CHÍNH mà chốt thế hệ sinh ra để chữa, và là ca dễ hụt nhất: nghĩa vụ còn thiếu DUY NHẤT của
+        // đơn là "chưa ghi Google Sheet" (hub tắt) ⇒ đẩy xong là đơn đủ điều kiện DỌN ngay trong chính lượt này.
+        // Nếu `settled` vẫn được cộng khi cờ KHÔNG đóng được, đơn bị xoá khỏi app với gsheet_synced_at còn NULL
+        // ⇒ không còn đơn nào để đẩy lại ⇒ cú bấm của người dùng bốc hơi, đúng thứ định chặn.
+        using var temp = new TempDatabase();
+        using var web = new FakeGsheetWebApp();
+        var (services, accId) = Dung(temp, web);
+
+        services.Orders.UpsertMany(accId, new[] { DonHuyKhongVanDon("SN1") }, DateTime.UtcNow);
+        services.Orders.MarkGsheetSynced(accId, "SN1", null, daHuy: false, coVanDon: true, coUocTinh: false,
+            coDonTraHang: false, tab: "Tháng 07-2026", DateTime.UtcNow, pushGen: 0);
+
+        // Người dùng bấm "Đẩy lại" ĐÚNG LÚC server đã nhận lô mà client chưa kịp đóng cờ.
+        web.KhiNhanBody = _ => services.Orders.DatLaiCoDayLai(accId, "SN1");
+
+        Assert.Equal(KetQuaDay.ThanhCong, await DayAsync(accId, services));
+
+        Assert.Single(web.Bodies);                                    // lô VẪN được gửi (không nuốt lượt)
+        Assert.Contains("SN1", services.Orders.GetOrderSns(accId));   // đơn được GIỮ, KHÔNG bị dọn
+        Assert.Equal(1, services.Orders.CountForGsheetPush(accId));   // vẫn trong hàng chờ ⇒ lượt sau gửi lại thật
     }
 
     /// <summary>
@@ -98,6 +146,26 @@ public class HubOutboxGsheetHuyTests
 
         /// <summary>Nếu khác null → gắn <c>"filePhu":{"ghi":0,"them":0,"loi":…}</c> vào phản hồi (test cảnh báo lỗi file phụ).</summary>
         public string? FilePhuLoi { get; set; }
+
+        /// <summary>Bật → mọi dòng trả kèm <c>"boQua":true</c> (script KHÔNG tra thấy mã đơn ở tab nào nên
+        /// không ghi được gì, dù vẫn <c>ok:true</c>). Dùng cho test "không được đánh dấu đã đẩy".</summary>
+        public bool BoQuaTatCa { get; set; }
+
+        /// <summary>Nếu khác null → gắn <c>"canhBao":…</c> cấp phản hồi (script không tìm thấy tiêu đề cột).
+        /// CỐ Ý tách khỏi <see cref="ChuaGhiMaTraTatCa"/>: `canhBao` gom chung cả file phụ nên KHÔNG được suy ra
+        /// "dòng này chưa ghi được".</summary>
+        public string? CanhBao { get; set; }
+
+        /// <summary>Bật → mọi dòng trả kèm <c>"chuaGhiMaTra":true</c> (tra thấy dòng nhưng cột "Mã đơn trả hàng"
+        /// thiếu tiêu đề / ô có công thức ⇒ giá trị chưa vào sheet).</summary>
+        public bool ChuaGhiMaTraTatCa { get; set; }
+
+        /// <summary>
+        /// Chạy NGAY sau khi nhận body, TRƯỚC khi trả phản hồi — tức đúng lúc lô "đang bay": client đã gửi xong
+        /// và đang chờ, chưa đóng cờ nào. Đây là cửa sổ đua duy nhất mô phỏng được một cách TẤT ĐỊNH; dùng để
+        /// dựng ca người dùng bấm "Đẩy lại" xen giữa lượt đẩy.
+        /// </summary>
+        public Action<string>? KhiNhanBody { get; set; }
 
         /// <summary>Body JSON của MỖI lô POST đã nhận, theo thứ tự nhận.</summary>
         public IReadOnlyList<string> Bodies
@@ -129,6 +197,7 @@ public class HubOutboxGsheetHuyTests
                         {
                             _bodies.Add(body);
                         }
+                        KhiNhanBody?.Invoke(body);
 
                         var payload = Encoding.UTF8.GetBytes(TaoPhanHoi(body));
                         var header = Encoding.ASCII.GetBytes(
@@ -220,9 +289,16 @@ public class HubOutboxGsheetHuyTests
                 dau = false;
                 sb.Append("{\"maDon\":")
                   .Append(JsonSerializer.Serialize(o.GetProperty("maDon").GetString()))
-                  .Append(",\"ok\":true,\"added\":true}");
+                  .Append(",\"ok\":true,\"added\":true")
+                  .Append(BoQuaTatCa ? ",\"boQua\":true" : string.Empty)
+                  .Append(ChuaGhiMaTraTatCa ? ",\"chuaGhiMaTra\":true,\"lyDoChuaGhi\":\"thieucot\"" : string.Empty)
+                  .Append('}');
             }
             sb.Append(']');
+            if (CanhBao is not null)
+            {
+                sb.Append(",\"canhBao\":").Append(JsonSerializer.Serialize(CanhBao));
+            }
             if (FilePhuLoi is not null)
             {
                 sb.Append(",\"filePhu\":{\"ghi\":0,\"them\":0,\"loi\":")

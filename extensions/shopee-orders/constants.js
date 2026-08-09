@@ -10,7 +10,12 @@ export const SHIPPING_SETTINGS_URL = "https://banhang.shopee.vn/portal/all-setti
 export const RETURNS_URL = "https://banhang.shopee.vn/portal/sale/returnrefundcancel"; // trang "Trả hàng/Hoàn tiền/Hủy".
 export const MAX_ORDER_PAGES = 10; // chốt chặn số trang quét (khớp MaxSyncPages phía C#).
 export const MAX_ORDER_PRODUCTS = 20;     // trần số sản phẩm đọc/đơn ở trang chi tiết (vượt → cắt + cờ bicat cho C# log).
-export const MAX_RETURN_ROWS = 50;        // trần số dòng trả hàng đọc/lượt (chỉ trang ĐẦU, không phân trang).
+// Trần số dòng trả hàng đọc trong MỘT lượt, GỘP MỌI TRANG (khớp TraHangParser.TranDongMoiLuot phía C#).
+// Trước 09/08/2026 là 50 và chỉ đọc trang đầu; nay có phân trang nên trần này mới là thứ chặn thật.
+export const MAX_RETURN_ROWS = 200;
+// Trần số TRANG lật trong một lượt — dây bảo hiểm cho trường hợp nút "trang sau" không bao giờ tắt.
+// C# gửi xuống `maxPages` nhỏ hơn theo luật SoTrangCanDoc; hằng này chỉ là chốt chặn cuối.
+export const MAX_RETURN_PAGES = 10;
 export const MAX_RETURN_HEAD_HTML = 4000; // trần ký tự HTML mỗi dòng gửi về C# (giữ payload gọn).
 // Mục sắp xếp cần chọn, so trên text KHÔNG dấu (_na): "Ngày yêu cầu (Mới - Cũ)". Ràng buộc "moi - cu" để KHÔNG
 // dính nhầm mục ngược "Ngày yêu cầu (Cũ - Mới)".

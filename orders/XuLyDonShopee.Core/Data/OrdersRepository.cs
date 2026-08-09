@@ -10,7 +10,16 @@ namespace XuLyDonShopee.Core.Data;
 /// DTO một đơn ỨNG VIÊN đẩy lên Google Sheet (đọc từ bảng <c>orders</c> qua
 /// <see cref="OrdersRepository.GetForGsheetPush"/> — superset MỌI đơn của tài khoản; việc CHỌN đơn nào gửi
 /// do <c>AccountSession</c> quyết bằng C#). <see cref="DaGhiSheet"/> = đã có <c>gsheet_synced_at</c> (đơn
-/// từng được ghi dòng); <see cref="FileUrl"/> = <c>gsheet_file_url</c> đã lưu (null nếu chưa upload phiếu);
+/// đang được coi là ĐÃ ghi dòng — nút "Đẩy lại" XOÁ cờ này để bắt đẩy lại);
+/// <see cref="DaTungGhiSheet"/> = đơn ĐÃ TỪNG có dòng trên sheet, <b>bền qua nút "Đẩy lại"</b> (suy từ
+/// <c>gsheet_tab</c> — cột mà <c>DatLaiCoDayLai</c> tuyệt đối không đụng — hoặc <c>gsheet_synced_at</c>). Hai cờ
+/// này KHÁC NHAU ở đúng một chỗ nhưng là chỗ chết người: lối tắt "đơn hủy chưa từng có vận đơn thì by design
+/// không ghi sheet" phải hỏi <see cref="DaTungGhiSheet"/>, vì hỏi <see cref="DaGhiSheet"/> thì một đơn hủy ĐÃ CÓ
+/// DÒNG vừa bị bấm "Đẩy lại" sẽ rơi vào lối tắt → bị coi là settled → bị dọn khỏi app, còn dòng trên sheet nằm
+/// TRẮNG vĩnh viễn (không ai tô đỏ nữa).
+/// <see cref="GsheetPushGen"/> = thế hệ dữ liệu đường-ghi-sheet ĐỌC ĐƯỢC lúc dựng lô, mang theo tới
+/// <see cref="OrdersRepository.MarkGsheetSynced"/> để lượt đang bay không đóng cờ mà cú bấm "Đẩy lại" vừa mở.
+/// <see cref="FileUrl"/> = <c>gsheet_file_url</c> đã lưu (null nếu chưa upload phiếu);
 /// <see cref="GsheetDaHuy"/> = trạng thái hủy ĐÃ ĐẨY lần trước (0/1; null nếu chưa đẩy) — để phát hiện
 /// trạng thái hủy thay đổi; <see cref="GsheetDaCoVanDon"/> = lần đẩy gần nhất có gửi mã vận đơn chưa (0/1;
 /// null nếu chưa đẩy) — để tự điền cột B khi vận đơn xuất hiện sau; <see cref="FinalAmount"/> =
@@ -45,6 +54,7 @@ public sealed record GsheetPendingOrder(
     string? StatusDescription,
     string? CancelReason,
     bool DaGhiSheet,
+    bool DaTungGhiSheet,
     string? FileUrl,
     long? GsheetDaHuy,
     long? GsheetDaCoVanDon,
@@ -53,6 +63,7 @@ public sealed record GsheetPendingOrder(
     bool DaDayHub,
     bool DaDayPhieuHub,
     string? GsheetTab,
+    long GsheetPushGen,
     string? ReturnRequestCode,
     long? GsheetDaCoDonTraHang,
     string? ShopLogin = null);
@@ -161,10 +172,17 @@ public partial class OrdersRepository
     /// <item>4 cờ "trạng thái đã đẩy lần trước" <c>gsheet_da_huy</c> / <c>gsheet_da_co_van_don</c> /
     /// <c>gsheet_da_co_uoc_tinh</c> / <c>gsheet_da_co_don_tra_hang</c> = NULL — để nhánh quyết định gửi của
     /// <c>HubOutbox.ConNghiaVuGhiSheet</c> bật lên (mẫu sẵn có của "vận đơn vừa xuất hiện").</item>
+    /// <item><c>gsheet_push_gen + 1</c> — ĐỐI XỨNG với <c>hub_push_gen</c> ở trên, cho đường Google Sheet:
+    /// lượt đẩy sheet đang bay (chu kỳ 2 phút) sẽ thấy thế hệ lệch và KHÔNG đóng lại bộ cờ ta vừa mở. Thiếu dòng
+    /// này thì cú bấm "Đẩy lại" bị nuốt im lặng, mà màn hình đã báo "đã xếp vào hàng chờ" —
+    /// xem <see cref="MarkGsheetSynced"/>.</item>
     /// </list>
     /// <para><b>TUYỆT ĐỐI KHÔNG đụng</b> (mỗi cột là một lỗi đã từng trả giá):</para>
     /// <list type="bullet">
-    /// <item><c>gsheet_tab</c> — đơn đẩy lại phải về ĐÚNG tab cũ; xoá đi là dòng bị ghi lần hai ở tab tháng mới.</item>
+    /// <item><c>gsheet_tab</c> — đơn đẩy lại phải về ĐÚNG tab cũ; xoá đi là dòng bị ghi lần hai ở tab tháng mới.
+    /// Kiêm luôn vai trò <b>bằng chứng "đã từng có dòng trên sheet"</b> bền qua nút này
+    /// (<c>GsheetPendingOrder.DaTungGhiSheet</c>) — xoá đi là đơn hủy đã có dòng rơi vào lối tắt bỏ-qua rồi bị
+    /// dọn, để lại dòng trắng vĩnh viễn.</item>
     /// <item><c>sold_counted_at</c> — mở lại là +1 "Đã bán" LẦN HAI trên kho hub (sai số liệu, không sửa ngược được).</item>
     /// <item><c>gsheet_file_url</c> — mở lại là upload lại file phiếu đã có link.</item>
     /// <item><c>hub_slip_synced_at</c> — đơn còn nợ phiếu thì cột này VỐN đã NULL; mở lại cho đơn đã đẩy phiếu chỉ
@@ -188,7 +206,8 @@ public partial class OrdersRepository
     gsheet_da_huy = NULL,
     gsheet_da_co_van_don = NULL,
     gsheet_da_co_uoc_tinh = NULL,
-    gsheet_da_co_don_tra_hang = NULL
+    gsheet_da_co_don_tra_hang = NULL,
+    gsheet_push_gen = gsheet_push_gen + 1
     WHERE account_id = $a AND order_sn = $sn;";
         cmd.Parameters.AddWithValue("$a", accountId);
         cmd.Parameters.AddWithValue("$sn", orderSn.Trim());

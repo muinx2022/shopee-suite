@@ -81,6 +81,33 @@ export function pageReturnRowCount() {
   return document.querySelectorAll(".return-table-content a.return-row-item").length;
 }
 
+// Ký hiệu danh sách trả hàng hiện tại: "<số dòng>|<href dòng đầu>" — để biết trang ĐÃ ĐỔI sau khi bấm "trang
+// sau". CỐ Ý dùng href (mang returnId, duy nhất) chứ không dùng mỗi số dòng: hai trang liên tiếp gần như LUÔN
+// cùng số dòng, nhìn vào số dòng thì tưởng chưa đổi rồi dừng lật sớm.
+// (Đối xứng pageListSignature của trang đơn — hai trang khác selector nên không dùng chung được một hàm.)
+export function pageReturnListSignature() {
+  const rows = document.querySelectorAll(".return-table-content a.return-row-item");
+  return rows.length + "|" + (rows.length ? (rows[0].getAttribute("href") || "") : "");
+}
+
+// CHẨN ĐOÁN khi KHÔNG tìm được nút "trang sau" (pageFindNextPage trả null): gửi về HTML rút gọn của khối phân
+// trang để lượt chạy THẬT lộ markup thật — selector pager đang dùng chung với trang đơn (bộ EDS pager), chưa
+// xác nhận trên trang trả hàng. `null` = trang không có khối phân trang nào (một trang là hết, chuyện thường).
+export function pageChanDoanPagerTraHang(maxHtml) {
+  for (const el of document.querySelectorAll("[class*='pager'], [class*='pagination']")) {
+    const r = el.getBoundingClientRect();
+    if (!(r.width > 0 && r.height > 0)) continue;
+    let html = "";
+    try {
+      const clone = el.cloneNode(true);
+      for (const rac of clone.querySelectorAll("img, svg")) rac.remove();
+      html = clone.outerHTML;
+    } catch (e) { html = el.outerHTML; }
+    return html.length > maxHtml ? html.substring(0, maxHtml) : html;
+  }
+  return null;
+}
+
 // Quét các dòng yêu cầu (trang ĐẦU, không phân trang) → JSON [{shopeeOrderId, laTraHang, headHtml}].
 // CỐ Ý KHÔNG phân loại mã ở đây: luật nhận diện (class order-id/return-id → nhãn → vị trí) nằm ở C#
 // (TraHangParser) — test được, và dòng nào trượt luật thì C# log NGUYÊN VĂN html để lộ cấu trúc thật.

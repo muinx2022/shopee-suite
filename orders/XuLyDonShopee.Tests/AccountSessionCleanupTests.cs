@@ -30,6 +30,7 @@ public class AccountSessionCleanupTests
             StatusDescription: null,
             CancelReason: cancelReason,
             DaGhiSheet: false,
+            DaTungGhiSheet: false,
             FileUrl: null,
             GsheetDaHuy: null,
             GsheetDaCoVanDon: null,
@@ -38,6 +39,7 @@ public class AccountSessionCleanupTests
             DaDayHub: daDayHub,
             DaDayPhieuHub: daDayPhieuHub,
             GsheetTab: null,
+            GsheetPushGen: 0,
             ReturnRequestCode: null,
             GsheetDaCoDonTraHang: null);
 

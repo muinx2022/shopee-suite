@@ -824,11 +824,24 @@ public partial class AccountsViewModel
             return;
         }
 
+        GoBannerVaBaoHub(accountId, row);
+    }
+
+    /// <summary>
+    /// Gỡ MỘT banner: đóng local (đặt cờ chờ đẩy) → bỏ khỏi lưới → đẩy lên Hub để máy khác cũng gỡ.
+    /// <para>
+    /// Dùng chung cho <b>hai</b> đường: người dùng bấm ✕ Đóng, và lượt "Check" kết luận shop đã ĐẶT ĐƯỢC địa chỉ
+    /// (<see cref="CheckAddressAlertCommand"/>). Cố ý MỘT đường: luật rev/tombstone của banner đã cắn hai lần
+    /// (v1.6.3, v1.7.16), viết đường gỡ thứ hai là mời nó cắn lần ba.
+    /// </para>
+    /// </summary>
+    private void GoBannerVaBaoHub(long accountId, PickupAlertRow row)
+    {
         _services.PickupAlerts.DismissTaiCho(accountId, row.ShopLogin);
         AddressAlertRows.Remove(row);
         ApplyAddressErrorFlags();
 
-        var accountLogin = SelectedRow.Email?.Trim() ?? "";
+        var accountLogin = SelectedRow?.Email?.Trim() ?? "";
         var local = _services.PickupAlerts.ListAll(accountId)
             .FirstOrDefault(a => string.Equals(a.ShopLogin, row.ShopLogin, StringComparison.OrdinalIgnoreCase));
         if (local is not null)

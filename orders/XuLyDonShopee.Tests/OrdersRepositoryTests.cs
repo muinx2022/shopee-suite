@@ -351,7 +351,7 @@ public class OrdersRepositoryTests
             choLay,                      // KHÔNG tracking → vẫn phải trả (superset)
         }, DateTime.UtcNow);
 
-        repo.MarkGsheetSynced(1, "SYNCED_FULL", "https://drive/aaa", false, coVanDon: true, coUocTinh: true, coDonTraHang: false, tab: "Tháng 07-2026", DateTime.UtcNow);
+        repo.MarkGsheetSynced(1, "SYNCED_FULL", "https://drive/aaa", false, coVanDon: true, coUocTinh: true, coDonTraHang: false, tab: "Tháng 07-2026", DateTime.UtcNow, pushGen: 0);
 
         var pending = repo.GetForGsheetPush(1);
         var sns = pending.Select(p => p.OrderSn).ToList();
@@ -402,7 +402,7 @@ public class OrdersRepositoryTests
         // Lần 1: đã ghi, CHƯA có file, daHuy=false, coVanDon=false, coUocTinh=false → cả 3 cờ = 0;
         // tab lần đầu = "Tháng 06-2026".
         var t1 = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
-        repo.MarkGsheetSynced(1, "SN1", null, false, coVanDon: false, coUocTinh: false, coDonTraHang: false, tab: "Tháng 06-2026", t1);
+        repo.MarkGsheetSynced(1, "SN1", null, false, coVanDon: false, coUocTinh: false, coDonTraHang: false, tab: "Tháng 06-2026", t1, pushGen: 0);
         var synced1 = ReadString(db, "SN1", "gsheet_synced_at");
         Assert.NotNull(synced1);
         Assert.Null(ReadString(db, "SN1", "gsheet_file_url"));
@@ -414,7 +414,7 @@ public class OrdersRepositoryTests
         // Lần 2: bổ sung fileUrl + daHuy=true + coVanDon=true + coUocTinh=true, thời điểm KHÁC → synced_at GIỮ,
         // file_url điền, cả 3 cờ GHI ĐÈ = 1. Truyền tab KHÁC → gsheet_tab GIỮ tab lần đầu (COALESCE).
         var t2 = new DateTime(2026, 2, 2, 0, 0, 0, DateTimeKind.Utc);
-        repo.MarkGsheetSynced(1, "SN1", "https://drive/aaa", true, coVanDon: true, coUocTinh: true, coDonTraHang: false, tab: "Tháng 08-2026", t2);
+        repo.MarkGsheetSynced(1, "SN1", "https://drive/aaa", true, coVanDon: true, coUocTinh: true, coDonTraHang: false, tab: "Tháng 08-2026", t2, pushGen: 0);
         Assert.Equal(synced1, ReadString(db, "SN1", "gsheet_synced_at"));            // KHÔNG đổi
         Assert.Equal("https://drive/aaa", ReadString(db, "SN1", "gsheet_file_url"));
         Assert.Equal("1", ReadString(db, "SN1", "gsheet_da_huy"));
@@ -424,7 +424,7 @@ public class OrdersRepositoryTests
 
         // Lần 3: fileUrl null → KHÔNG xóa link; daHuy=false + coVanDon=false + coUocTinh=false → cả 3 cờ về 0
         // (ghi đè luôn).
-        repo.MarkGsheetSynced(1, "SN1", null, false, coVanDon: false, coUocTinh: false, coDonTraHang: false, tab: "Tháng 09-2026", t2);
+        repo.MarkGsheetSynced(1, "SN1", null, false, coVanDon: false, coUocTinh: false, coDonTraHang: false, tab: "Tháng 09-2026", t2, pushGen: 0);
         Assert.Equal("https://drive/aaa", ReadString(db, "SN1", "gsheet_file_url"));
         Assert.Equal("0", ReadString(db, "SN1", "gsheet_da_huy"));
         Assert.Equal("0", ReadString(db, "SN1", "gsheet_da_co_van_don"));
@@ -444,7 +444,7 @@ public class OrdersRepositoryTests
         chuaCoUocTinh.FinalAmount = null;
         chuaCoUocTinh.FinalAmountText = null;
         repo.UpsertMany(1, new[] { chuaCoUocTinh }, DateTime.UtcNow);
-        repo.MarkGsheetSynced(1, "SN1", null, false, coVanDon: true, coUocTinh: false, coDonTraHang: false, tab: "Tháng 07-2026", DateTime.UtcNow);
+        repo.MarkGsheetSynced(1, "SN1", null, false, coVanDon: true, coUocTinh: false, coDonTraHang: false, tab: "Tháng 07-2026", DateTime.UtcNow, pushGen: 0);
 
         // Lượt sync sau: trang chi tiết trả ước tính → final_amount có giá trị, cờ vẫn 0 → uocTinhMoi = true
         // (đủ điều kiện đẩy LẠI để ghi đè đúng số tiền).
@@ -455,7 +455,7 @@ public class OrdersRepositoryTests
         Assert.True(p.FinalAmount is not null && p.GsheetDaCoUocTinh != 1);
 
         // Đẩy lại KÈM ước tính → cờ = 1 → lượt sau KHÔNG đẩy lại nữa (chống spam Apps Script).
-        repo.MarkGsheetSynced(1, "SN1", null, false, coVanDon: true, coUocTinh: true, coDonTraHang: false, tab: "Tháng 07-2026", DateTime.UtcNow);
+        repo.MarkGsheetSynced(1, "SN1", null, false, coVanDon: true, coUocTinh: true, coDonTraHang: false, tab: "Tháng 07-2026", DateTime.UtcNow, pushGen: 0);
         var p2 = Assert.Single(repo.GetForGsheetPush(1));
         Assert.Equal(1, p2.GsheetDaCoUocTinh);
         Assert.False(p2.FinalAmount is not null && p2.GsheetDaCoUocTinh != 1);

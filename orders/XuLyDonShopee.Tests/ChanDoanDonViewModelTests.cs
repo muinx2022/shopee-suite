@@ -129,7 +129,7 @@ public class ChanDoanDonViewModelTests
 
         // Ghi sheet xong → hết nghĩa vụ → quét lại phải sạch.
         services.Orders.MarkGsheetSynced(acc, "SN1", null, daHuy: false, coVanDon: false, coUocTinh: false,
-            coDonTraHang: false, tab: "Tháng 08-2026", at: DateTime.UtcNow);
+            coDonTraHang: false, tab: "Tháng 08-2026", at: DateTime.UtcNow, pushGen: 0);
         await vm.ReloadCommand.ExecuteAsync(null);
         Assert.Empty(vm.Rows);
 

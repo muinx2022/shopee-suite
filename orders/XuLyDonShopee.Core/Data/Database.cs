@@ -114,6 +114,7 @@ CREATE TABLE IF NOT EXISTS orders (
     gsheet_da_co_uoc_tinh INTEGER,
     gsheet_da_co_don_tra_hang INTEGER,
     gsheet_tab         TEXT,
+    gsheet_push_gen    INTEGER NOT NULL DEFAULT 0,
     return_request_code TEXT,
     hub_synced_at      TEXT,
     hub_push_gen       INTEGER NOT NULL DEFAULT 0,
@@ -301,6 +302,16 @@ CREATE TABLE IF NOT EXISTS pickup_address_alerts (
         // không đóng cờ; GetForHubPush ngay trước đó đã chụp nên thực tế không có đơn nào kẹt.
         EnsureColumn(conn, "orders", "hub_push_gen", "INTEGER NOT NULL DEFAULT 0");
         EnsureColumn(conn, "orders", "hub_push_gen_sent", "INTEGER");
+
+        // CÙNG BỆNH, PHÍA GOOGLE SHEET: `gsheet_push_gen` = thế hệ dữ liệu của đơn cho đường ghi sheet. Chỗ duy
+        // nhất reset `gsheet_synced_at = NULL` là nút "Đẩy lại" (`DatLaiCoDayLai`) nên chỉ chỗ đó +1; còn
+        // `MarkGsheetSynced` chỉ đóng cờ khi thế hệ CÒN BẰNG số đã đọc ra lúc dựng lô. Không có lớp bảo vệ này
+        // thì lượt đẩy sheet đang bay (chu kỳ 2 phút, mỗi lượt vài giây) đóng lại đúng bộ cờ mà cú bấm "Đẩy lại"
+        // vừa mở ⇒ thao tác của người dùng bị NUỐT IM LẶNG trong khi màn hình đã báo "đã xếp vào hàng chờ".
+        // KHÁC phía hub một chi tiết: hub cần CẶP cột vì `MarkHubSynced` chỉ nhận danh sách order_sn, còn ở đây
+        // thế hệ đọc được đi theo từng đơn trong `GsheetPendingOrder.GsheetPushGen` tới tận lúc đóng cờ ⇒ một cột
+        // là đủ, không cần cột "_sent" (và không phải GHI trong lúc ĐỌC).
+        EnsureColumn(conn, "orders", "gsheet_push_gen", "INTEGER NOT NULL DEFAULT 0");
 
         // Banner lỗi địa chỉ đồng bộ đa máy KHÔNG so mốc thời gian (đồng hồ mỗi máy một khác), mà theo:
         //  · hub_rev = số hiệu bản ghi của Hub mà máy này ĐÃ NHẬN. Hub lớn hơn → nghe Hub.

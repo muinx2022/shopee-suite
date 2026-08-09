@@ -69,13 +69,22 @@ public sealed record GsheetReturnCodeRow(string MaDon, string DonTraHang)
 /// <see cref="Ok"/> = ghi thành công; <see cref="Added"/> = thêm dòng mới (khác với điền bổ sung dòng cũ);
 /// <see cref="FileUrl"/> = nội dung cột C sau khi ghi (link phiếu hiện có, null nếu chưa có);
 /// <see cref="Error"/> = mô tả lỗi phía script (null nếu không lỗi).
+/// <para>
+/// <b><see cref="BoQua"/> = script KHÔNG ghi được gì cho đơn này</b> dù <see cref="Ok"/> vẫn <c>true</c>: đơn
+/// mang cờ <c>chiDienNeuCo</c> mà không tra thấy mã đơn ở bất kỳ tab nào (script trả <c>boQua:true</c>), hoặc lô
+/// đó báo thiếu tiêu đề cột (<c>canhBao</c>) nên giá trị bị bỏ. <b>Caller KHÔNG được đánh dấu "đã đẩy" cho
+/// những đơn này</b> — đó chính là đường làm mất mã trả hàng ÂM THẦM trước 09/08/2026: script trả ok:true
+/// (đúng, "không có gì để làm"), client hiểu thành "đã ghi" rồi không bao giờ thử lại, kể cả sau khi dòng của
+/// đơn xuất hiện trên sheet hay người dùng sửa lại tiêu đề cột.
+/// </para>
 /// </summary>
 public sealed record GsheetOrderResult(
     string MaDon,
     bool Ok,
     bool Added,
     string? FileUrl,
-    string? Error);
+    string? Error,
+    bool BoQua = false);
 
 /// <summary>
 /// Đẩy đơn hàng (kèm file phiếu PDF base64) lên <b>Google Apps Script Web App</b> bằng HTTP thuần
@@ -208,6 +217,16 @@ public class GoogleSheetSyncService
                         $"trả về không đọc được (HTTP {status}): {Truncate(respBody, 200)}", ex);
                 }
 
+                // Thiếu TIÊU ĐỀ CỘT: script đã BỎ giá trị (không ghi bừa sang cột khác) nhưng vẫn trả ok:true.
+                // CHỈ LOG — KHÔNG suy ra "cả lô chưa đẩy" từ đây: `canhBao` là cấp PHẢN HỒI và gom chung cả FILE
+                // PHỤ, nên hạ cả lô là bắt đẩy lại 14 ngày những mã ĐÃ ghi xong ở file chính. Trạng thái thật
+                // nằm ở cờ `chuaGhiMaTra` của TỪNG DÒNG (xem DocKetQua) — script từ 09/08/2026 trả cờ đó.
+                var canhBao = DocCanhBao(respBody);
+                if (!string.IsNullOrEmpty(canhBao))
+                {
+                    log("GSheet: ⚠ " + canhBao);
+                }
+
                 all.AddRange(parsed);
 
                 // Lỗi ghi FILE PHỤ (nếu có) chỉ CẢNH BÁO — không làm hỏng đường file chính (results vẫn ok).
@@ -307,7 +326,11 @@ public class GoogleSheetSyncService
                     Ok: GetBool(r, "ok"),
                     Added: GetBool(r, "added"),
                     FileUrl: GetString(r, "fileUrl"),
-                    Error: GetString(r, "error")));
+                    Error: GetString(r, "error"),
+                    // Hai đường script báo "chưa ghi được gì cho đơn này", đều ở CẤP DÒNG:
+                    //   boQua        — không tra thấy mã đơn ở tab nào (payload chiDienNeuCo)
+                    //   chuaGhiMaTra — tra thấy dòng nhưng cột "Mã đơn trả hàng" thiếu tiêu đề / ô có công thức
+                    BoQua: GetBool(r, "boQua") || GetBool(r, "chuaGhiMaTra")));
             }
         }
 
@@ -332,6 +355,33 @@ public class GoogleSheetSyncService
                 return null;
             }
             var s = loi.GetString();
+            return string.IsNullOrWhiteSpace(s) ? null : s;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Đọc <c>canhBao</c> cấp phản hồi — script báo KHÔNG tìm thấy tiêu đề cột nên các giá trị tương ứng
+    /// <b>đã bị bỏ, không ghi bừa sang cột khác</b>. Thiếu / rỗng / JSON rác → <c>null</c> (KHÔNG ném).
+    /// <para>Với lô CHỈ-CÓ-MÃ-TRẢ thì cảnh báo này chỉ có thể là cột "Mã đơn trả hàng" (payload không ghi cột
+    /// nào khác) ⇒ caller coi cả lô là <see cref="GsheetOrderResult.BoQua"/> để còn thử lại sau khi người dùng
+    /// sửa tiêu đề — xem <paramref name="canhBaoLaBoQua"/> của <c>PushRowsAsync</c>.</para>
+    /// </summary>
+    internal static string? DocCanhBao(string json)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object
+                || !doc.RootElement.TryGetProperty("canhBao", out var cb)
+                || cb.ValueKind != JsonValueKind.String)
+            {
+                return null;
+            }
+            var s = cb.GetString();
             return string.IsNullOrWhiteSpace(s) ? null : s;
         }
         catch (JsonException)

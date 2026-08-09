@@ -36,7 +36,7 @@ public class DayLaiDonTests
         repo.MarkHubSlipSynced(Acc, new[] { "SN1" }, DateTime.UtcNow);
         repo.MarkSoldCounted(Acc, new[] { "SN1" }, DateTime.UtcNow);
         repo.MarkGsheetSynced(Acc, "SN1", "https://drive/file1", daHuy: false, coVanDon: true, coUocTinh: true,
-            coDonTraHang: true, tab: tab, at: DateTime.UtcNow);
+            coDonTraHang: true, tab: tab, at: DateTime.UtcNow, pushGen: 0);
         return repo;
     }
 
@@ -134,6 +134,83 @@ public class DayLaiDonTests
 
         // Thế hệ đã lệch → KHÔNG đóng cờ oan; đơn còn trong hàng chờ để lượt sau đẩy lại.
         Assert.Equal(new[] { "SN1" }, repo.GetForHubPush(Acc).Select(o => o.OrderSn));
+    }
+
+    [Fact]
+    public void DayLai_XenGiuaLoDangBay_MarkGsheetSynced_KhongDongCoOan()
+    {
+        // ĐỐI XỨNG với ca hub ngay trên, cho đường Google Sheet: lượt đẩy sheet chạy mỗi 2 phút và mỗi lượt mất
+        // vài giây; user bấm "Đẩy lại" rơi đúng cửa sổ đó thì lô đang bay KHÔNG được đóng lại cờ vừa mở — kẻo
+        // màn hình báo "đã xếp vào hàng chờ" mà đơn thì không bao giờ được đẩy lại.
+        using var temp = new TempDatabase();
+        var repo = new OrdersRepository(temp.Open());
+        repo.UpsertMany(Acc, new[] { Don("SN1") }, DateTime.UtcNow);
+
+        var loDangBay = Doc(repo);                 // lô bắt đầu bay: chụp thế hệ hiện tại
+        Assert.Equal(0, loDangBay.GsheetPushGen);
+
+        repo.DatLaiCoDayLai(Acc, "SN1");           // user bấm "Đẩy lại" GIỮA LÚC lô đang bay (+1 thế hệ)
+
+        // Lô cũ về đích, đòi đóng cờ bằng thế hệ CŨ → phải bị từ chối.
+        repo.MarkGsheetSynced(Acc, "SN1", null, daHuy: false, coVanDon: true, coUocTinh: false,
+            coDonTraHang: false, tab: "Tháng 08-2026", at: DateTime.UtcNow, pushGen: loDangBay.GsheetPushGen);
+
+        var sau = Doc(repo);
+        Assert.False(sau.DaGhiSheet);                   // cờ VẪN mở → lượt sau đẩy lại thật
+        Assert.Equal(1, repo.CountForGsheetPush(Acc));  // worker vẫn còn cớ chạy lượt sheet
+        Assert.True(XuLyDonShopee.App.Services.HubOutbox.ConNghiaVuGhiSheet(sau, coFileBoSung: false));
+
+        // ĐỐI CHỨNG: lô MỚI (đọc lại thế hệ hiện tại) thì đóng cờ bình thường — chốt này không khoá chết đường đẩy.
+        var loMoi = Doc(repo);
+        Assert.Equal(1, loMoi.GsheetPushGen);
+        repo.MarkGsheetSynced(Acc, "SN1", null, daHuy: false, coVanDon: true, coUocTinh: false,
+            coDonTraHang: false, tab: "Tháng 08-2026", at: DateTime.UtcNow, pushGen: loMoi.GsheetPushGen);
+        Assert.True(Doc(repo).DaGhiSheet);
+        Assert.Equal(0, repo.CountForGsheetPush(Acc));
+    }
+
+    [Fact]
+    public void ChotTheHe_ChanCoDaDay_NhungKHONG_Chan_TabVaLinkPhieu()
+    {
+        // Chốt thế hệ chỉ được chặn NHÓM CỜ. `gsheet_tab` và `gsheet_file_url` là SỰ THẬT vừa xảy ra ngoài đời
+        // (dòng đã nằm ở tab đó, file đã có link đó) — chặn luôn hai cột này là tự dựng lại đúng lỗi
+        // "dòng bị ghi LẦN HAI ở tab tháng mới" mà DatLaiCoDayLai cố ý tránh.
+        using var temp = new TempDatabase();
+        var repo = new OrdersRepository(temp.Open());
+        repo.UpsertMany(Acc, new[] { Don("SN1") }, DateTime.UtcNow);
+
+        var loDangBay = Doc(repo);
+        repo.DatLaiCoDayLai(Acc, "SN1");   // user bấm "Đẩy lại" giữa lượt ⇒ thế hệ lệch
+
+        var daDongCo = repo.MarkGsheetSynced(Acc, "SN1", "https://drive/vua-upload", daHuy: false, coVanDon: true,
+            coUocTinh: false, coDonTraHang: false, tab: "Tháng 08-2026", at: DateTime.UtcNow,
+            pushGen: loDangBay.GsheetPushGen);
+
+        Assert.Equal(0, daDongCo);        // cờ KHÔNG đóng — đúng ý chốt thế hệ
+        var p = Doc(repo);
+        Assert.False(p.DaGhiSheet);
+        Assert.Null(p.GsheetDaHuy);       // 4 cờ trạng thái cũng không bị đóng theo
+
+        // NHƯNG hai cột DỮ LIỆU phải được ghi:
+        Assert.Equal("Tháng 08-2026", p.GsheetTab);              // lượt sau về ĐÚNG tab cũ, không đẻ dòng thứ hai
+        Assert.Equal("https://drive/vua-upload", p.FileUrl);     // không upload lại phiếu đã có link
+        Assert.True(p.DaTungGhiSheet);                            // bằng chứng "đã từng có dòng" không bị mất
+    }
+
+    [Fact]
+    public void DayLai_KHONG_XoaBangChung_DaTungGhiSheet()
+    {
+        // "Đã TỪNG có dòng trên sheet" phải sống sót qua nút này: nó là thứ giữ đơn HỦY-mất-vận-đơn khỏi rơi vào
+        // lối tắt "by design không ghi sheet" rồi bị dọn, để lại dòng trắng vĩnh viễn (xem HubOutboxGsheetHuyTests).
+        using var temp = new TempDatabase();
+        var repo = RepoVoiDonDaXong(temp, tab: "Tháng 07-2026");
+
+        Assert.True(Doc(repo).DaTungGhiSheet);
+        repo.DatLaiCoDayLai(Acc, "SN1");
+
+        var p = Doc(repo);
+        Assert.False(p.DaGhiSheet);       // cờ "đang coi là đã ghi" thì MỞ (đúng mục đích nút)
+        Assert.True(p.DaTungGhiSheet);    // nhưng bằng chứng "đã từng có dòng" KHÔNG được quên
     }
 
     [Fact]

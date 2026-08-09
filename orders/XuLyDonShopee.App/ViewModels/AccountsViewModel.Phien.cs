@@ -237,19 +237,8 @@ public partial class AccountsViewModel
         {
             TryKillPoc(); // đóng cửa sổ/phiên cũ (nếu còn) trước khi mở mới — tránh khoá hồ sơ
 
-            // Công thức hồ sơ Y HỆT AccountSession: baseDir = thư mục Database.Path; kind theo browserChoice ở Cài đặt.
-            var baseDir = System.IO.Path.GetDirectoryName(_services.Database.Path) ?? ".";
-            var browserChoice = _services.Settings.GetBrowserChoice();
-            var browserKind = BrowserLocator.ResolveBrowserKind(browserChoice);
-            var userDataDir = BrowserProfilePaths.ForAccount(baseDir, accountId, browserKind);
-
-            // GĐ3: thư mục lưu phiếu (Cài đặt) + tỉnh địa chỉ lấy hàng (theo account, mặc định trong session).
-            var invoiceDir = _services.Settings.GetInvoiceFolder();
-            var province = acc?.PickupAddress;
-
             _bridgeCts = new System.Threading.CancellationTokenSource();
-            var session = new OrdersBridgeSession(userDataDir, browserChoice,
-                m => _services.Log.Append(email, m), invoiceDir, province);
+            var session = TaoPhienCauNoi(accountId, acc?.PickupAddress, email);
             _bridgeSession = session;
 
             _services.Log.Append(email,
@@ -308,6 +297,136 @@ public partial class AccountsViewModel
         {
             _bridgeRunning = false;
             OnPropertyChanged(nameof(CanStop)); // tắt lại nút ■ Dừng nếu không còn phiên nào
+            try { _bridgeSession?.Dispose(); } catch { /* bỏ qua */ }
+            _bridgeSession = null;
+            try { _bridgeCts?.Dispose(); } catch { /* bỏ qua */ }
+            _bridgeCts = null;
+        }
+    }
+
+    /// <summary>
+    /// Dựng một <see cref="OrdersBridgeSession"/> cho tài khoản đang xem. Công thức hồ sơ Y HỆT
+    /// <c>AccountSession</c>: baseDir = thư mục <c>Database.Path</c>, kind theo browserChoice ở Cài đặt.
+    /// <para>Dùng chung cho "Chạy thử (bridge)" và lượt "Check" địa chỉ — hai nơi tự dựng đường hồ sơ riêng là
+    /// hai công thức trôi lệch, mà lệch hồ sơ nghĩa là mở NHẦM profile: mất cookie, phải đăng nhập lại từ đầu.</para>
+    /// </summary>
+    private OrdersBridgeSession TaoPhienCauNoi(long accountId, string? province, string email)
+    {
+        var baseDir = System.IO.Path.GetDirectoryName(_services.Database.Path) ?? ".";
+        var browserChoice = _services.Settings.GetBrowserChoice();
+        var browserKind = BrowserLocator.ResolveBrowserKind(browserChoice);
+        var userDataDir = BrowserProfilePaths.ForAccount(baseDir, accountId, browserKind);
+        var invoiceDir = _services.Settings.GetInvoiceFolder(); // GĐ3: thư mục lưu phiếu (Cài đặt)
+        return new OrdersBridgeSession(userDataDir, browserChoice,
+            m => _services.Log.Append(email, m), invoiceDir, province);
+    }
+
+    /// <summary>
+    /// Nút <b>"Check"</b> trên banner lỗi địa chỉ — chạy MỘT lượt kiểm tra lại địa chỉ lấy hàng của ĐÚNG shop đó
+    /// (không đọc đơn, không chuẩn bị hàng, không in phiếu).
+    /// <list type="bullet">
+    /// <item><b>Đặt được</b> ⇒ gỡ banner qua ĐÚNG đường sẵn có <c>GoBannerVaBaoHub</c> (local + đẩy Hub ⇒ máy
+    /// khác cũng gỡ).</item>
+    /// <item><b>Vẫn lỗi</b> ⇒ giữ banner, hiện lý do ngay trên banner.</item>
+    /// <item><b>Captcha</b> ⇒ KHÔNG kết luận: giữ banner nhưng nói rõ là chưa kiểm được, đừng để người dùng
+    /// tưởng shop vẫn hỏng.</item>
+    /// </list>
+    /// <para>
+    /// <b>Chỉ chạy khi KHÔNG có phiên nào</b>: cầu nối dùng cổng CỐ ĐỊNH
+    /// (<c>OrdersBridgeChannel.BridgePort</c>) nên một lúc chỉ một phiên; chen vào phiên đang chạy là giành khoá
+    /// hồ sơ với chính nó. Đang chạy thì từ chối kèm chỉ dẫn, KHÔNG im lặng.
+    /// </para>
+    /// </summary>
+    [RelayCommand]
+    private async Task CheckAddressAlert(PickupAlertRow? row)
+    {
+        if (row is null || row.DangKiem || SelectedRow?.Id is not long accountId)
+        {
+            return;
+        }
+
+        var acc = _services.Accounts.GetById(accountId);
+        var email = acc?.Email ?? EditEmail;
+
+        if (_services.Sessions.IsRunning(accountId) || _bridgeRunning)
+        {
+            const string msg = "Đang có phiên chạy — đợi vòng xong (hoặc bấm ■ Dừng) rồi Check.";
+            row.KetQuaCheck = msg;
+            _services.Log.Append(email, "Check địa chỉ: " + msg);
+            BusyStatus = msg;
+            return;
+        }
+
+        row.DangKiem = true;
+        row.KetQuaCheck = null;
+        _bridgeRunning = true;
+        OnPropertyChanged(nameof(CanStop)); // bật ■ Dừng để hủy được lượt kiểm tra
+        try
+        {
+            TryKillPoc(); // nhả khoá hồ sơ trước khi mở
+
+            _bridgeCts = new System.Threading.CancellationTokenSource();
+            var session = TaoPhienCauNoi(accountId, acc?.PickupAddress, email);
+            _bridgeSession = session;
+            BusyStatus = $"Đang kiểm tra lại địa chỉ shop {row.ShopLogin}...";
+
+            var login = new OrdersLoginParams(
+                acc?.Email ?? EditEmail,
+                acc?.Password ?? string.Empty,
+                acc?.VerifyEmail,
+                acc?.VerifyEmailPassword);
+
+            OrdersKiemTraDiaChiResult kq;
+            try
+            {
+                kq = await session.KiemTraDiaChiMotShopAsync(login, row.ShopLogin, _bridgeCts.Token);
+            }
+            finally
+            {
+                _pocProcess = session.Process; // để ■ Dừng / TryKillPoc đóng được cửa sổ
+            }
+
+            if (kq.Ok)
+            {
+                BusyStatus = $"Shop {row.ShopLogin}: ĐẶT ĐƯỢC địa chỉ — đã gỡ cảnh báo.";
+                _services.Log.Append(email, "Check địa chỉ: " + BusyStatus);
+                GoBannerVaBaoHub(accountId, row); // gỡ local + đẩy Hub (máy khác tự gỡ theo rev)
+            }
+            else if (kq.Captcha)
+            {
+                row.KetQuaCheck = "Gặp captcha — CHƯA kiểm được, giữ cảnh báo.";
+                BusyStatus = $"Check địa chỉ shop {row.ShopLogin}: gặp captcha, chưa kết luận được.";
+                _services.Log.Append(email, "Check địa chỉ: " + BusyStatus);
+            }
+            else if (kq.Error is not null)
+            {
+                row.KetQuaCheck = "Chưa kiểm được: " + kq.Error;
+                BusyStatus = $"Check địa chỉ shop {row.ShopLogin}: {kq.Error}";
+                _services.Log.Append(email, "Check địa chỉ: " + BusyStatus);
+            }
+            else
+            {
+                row.KetQuaCheck = "VẪN không đặt được địa chỉ — giữ cảnh báo.";
+                BusyStatus = $"Shop {row.ShopLogin}: vẫn không đặt được địa chỉ.";
+                _services.Log.Append(email, "Check địa chỉ: " + BusyStatus);
+            }
+        }
+        catch (System.OperationCanceledException)
+        {
+            row.KetQuaCheck = "Đã hủy lượt kiểm tra.";
+            BusyStatus = "Đã hủy kiểm tra địa chỉ.";
+        }
+        catch (System.Exception ex)
+        {
+            row.KetQuaCheck = "Lỗi kiểm tra: " + ex.Message;
+            BusyStatus = "Lỗi kiểm tra địa chỉ: " + ex.Message;
+            _services.Log.Append(email, "Check địa chỉ lỗi: " + ex.ToString());
+        }
+        finally
+        {
+            row.DangKiem = false;
+            _bridgeRunning = false;
+            OnPropertyChanged(nameof(CanStop));
             try { _bridgeSession?.Dispose(); } catch { /* bỏ qua */ }
             _bridgeSession = null;
             try { _bridgeCts?.Dispose(); } catch { /* bỏ qua */ }

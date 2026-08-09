@@ -355,6 +355,84 @@ public class OrdersBridgeFlowTests
         }
     }
 
+    // ===== Nút "Check" trên banner lỗi địa chỉ: KiemTraLaiDiaChiAsync =====
+
+    /// <summary>
+    /// Lượt Check ĐẶT ĐƯỢC địa chỉ ⇒ trả true + đặt <c>PickupOkShop</c> (đó là căn cứ DUY NHẤT để vòng ngoài gỡ
+    /// banner + báo Hub), và tuyệt đối KHÔNG được gửi lệnh nào khác: người dùng bấm nút này lúc đang nhìn banner
+    /// đỏ, một lượt in phiếu ngoài ý muốn ở đây là hỏng việc thật.
+    /// </summary>
+    [Fact]
+    public async Task KiemTraLaiDiaChi_DatDuoc_TraTrue_DatPickupOkShop_VaKhongLamGiThem()
+    {
+        await using var rig = await BridgeTestRig.StartAsync();
+        var flow = Runner(rig);
+        var chay = flow.KiemTraLaiDiaChiAsync("shop1", CancellationToken.None);
+
+        await NhanLenhAsync(rig, "setPickupAddress");
+        await rig.GuiAsync(new { action = "pickupDone", ok = true });
+
+        Assert.True(await chay);
+        Assert.Equal("shop1", flow.PickupOkShop);
+        Assert.Null(flow.PickupFailedShop);
+
+        // KHÔNG đọc đơn, KHÔNG chuẩn bị hàng, KHÔNG trả địa chỉ về chỗ khác.
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => rig.NhanLenhAsync(TimeSpan.FromMilliseconds(300)));
+    }
+
+    /// <summary>Vẫn không đặt được ⇒ false + <c>PickupFailedShop</c>; banner phải Ở LẠI.</summary>
+    [Fact]
+    public async Task KiemTraLaiDiaChi_VanLoi_TraFalse_GiuBanner()
+    {
+        await using var rig = await BridgeTestRig.StartAsync();
+        var flow = Runner(rig);
+        var chay = flow.KiemTraLaiDiaChiAsync("shop1", CancellationToken.None);
+
+        await NhanLenhAsync(rig, "setPickupAddress");
+        await rig.GuiAsync(new { action = "pickupDone", ok = false });
+
+        Assert.False(await chay);
+        Assert.Equal("shop1", flow.PickupFailedShop);
+        Assert.Null(flow.PickupOkShop);   // gỡ banner lúc này là xoá đúng cảnh báo đang ĐÚNG
+    }
+
+    /// <summary>
+    /// Captcha ⇒ <b>KHÔNG kết luận</b>: cả hai cờ đều null. Coi là "vẫn lỗi" thì giữ banner oan; coi là "hết lỗi"
+    /// thì gỡ banner của shop chưa hề kiểm được. Không biết thì phải nói không biết.
+    /// </summary>
+    [Fact]
+    public async Task KiemTraLaiDiaChi_Captcha_KhongKetLuan_CaHaiCoDeuNull()
+    {
+        await using var rig = await BridgeTestRig.StartAsync();
+        var flow = Runner(rig);
+        var chay = flow.KiemTraLaiDiaChiAsync("shop1", CancellationToken.None);
+
+        await NhanLenhAsync(rig, "setPickupAddress");
+        rig.Channel.CaptchaSeen = true;
+        await rig.GuiAsync(new { action = "pickupDone", ok = false });
+
+        Assert.False(await chay);
+        Assert.Null(flow.PickupOkShop);
+        Assert.Null(flow.PickupFailedShop);
+    }
+
+    /// <summary>Nhãn shop RỖNG (picker không đọc được tên) vẫn phải ra chuỗi KHÁC null — y như vòng shop thường,
+    /// kẻo tín hiệu gỡ banner mất theo cái nhãn.</summary>
+    [Fact]
+    public async Task KiemTraLaiDiaChi_NhanShopRong_VanRaChuoiKhacNull()
+    {
+        await using var rig = await BridgeTestRig.StartAsync();
+        var flow = Runner(rig);
+        var chay = flow.KiemTraLaiDiaChiAsync("   ", CancellationToken.None);
+
+        await NhanLenhAsync(rig, "setPickupAddress");
+        await rig.GuiAsync(new { action = "pickupDone", ok = true });
+
+        Assert.True(await chay);
+        Assert.Equal("(không rõ shop)", flow.PickupOkShop);
+    }
+
     /// <summary>Mã yêu cầu trả hàng của HÔM NAY (<c>yyMMdd</c> + đuôi) — cửa sổ lọc theo ngày yêu cầu nên mã cứng
     /// sẽ hết hạn theo thời gian, phải sinh động.</summary>
     private static string MaYeuCauHomNay() => DateTime.Now.ToString("yyMMdd") + "0TS2VYAW3";

@@ -50,6 +50,18 @@ public sealed record OrdersBridgeRunResult(
     int ShopCount, int ShopsDone, int TotalOrders, int TotalSlips, bool Captcha, string? Error,
     bool PickupAddressFailed = false, string? PickupFailedShop = null, string? PickupOkShops = null);
 
+/// <summary>
+/// Kết quả MỘT lượt KIỂM TRA LẠI ĐỊA CHỈ của đúng một shop theo lệnh người dùng (nút "Check" trên banner lỗi
+/// địa chỉ) — <see cref="OrdersBridgeSession.KiemTraDiaChiMotShopAsync"/>.
+/// </summary>
+/// <param name="Ok">Shop ĐẶT ĐƯỢC địa chỉ ⇒ đủ căn cứ gỡ banner + báo Hub.</param>
+/// <param name="Captcha">Rơi captcha ⇒ <b>KHÔNG kết luận</b> được: không gỡ mà cũng không coi là còn lỗi.</param>
+/// <param name="Error">Lỗi hạ tầng (không đăng nhập được / không thấy shop / cầu nối chết). null = chạy trọn.</param>
+/// <param name="PickupOkShop">Nhãn shop đặt được địa chỉ — đưa thẳng vào đường gỡ banner sẵn có
+/// (<c>GoBannerLoiDiaChi</c>), KHÔNG viết đường gỡ thứ hai.</param>
+public sealed record OrdersKiemTraDiaChiResult(
+    bool Ok, bool Captcha, string? Error, string? PickupOkShop = null);
+
 /// <summary>Kết quả MỘT lượt mở trình duyệt sạch + SSO về trang chọn shop
 /// (<see cref="OrdersBridgeSession.SsoVePickerAsync"/>).</summary>
 internal enum KetQuaSso
@@ -168,7 +180,8 @@ public sealed class OrdersBridgeSession : IDisposable
         Func<string, int?>? returnCountLast = null,
         Action<string, int>? saveReturnCount = null,
         Func<IReadOnlyList<YeuCauTraHang>, string>? saveReturnCodes = null,
-        Func<string, CancellationToken, Task<IReadOnlyList<string>>>? layDonThieuPhieu = null)
+        Func<string, CancellationToken, Task<IReadOnlyList<string>>>? layDonThieuPhieu = null,
+        Func<IReadOnlyList<YeuCauTraHang>, int>? demMaTraChuaBiet = null)
     {
         _userDataDir = userDataDir;
         _browserChoice = browserChoice;
@@ -180,7 +193,8 @@ public sealed class OrdersBridgeSession : IDisposable
 
         _channel = new OrdersBridgeChannel(log);
         _flow = new ShopFlowRunner(_channel, log, invoiceDir, _province, syncCallback, finalDoneSns,
-            onOrderPrepared, returnCountLast, saveReturnCount, saveReturnCodes, layDonThieuPhieu);
+            onOrderPrepared, returnCountLast, saveReturnCount, saveReturnCodes, layDonThieuPhieu,
+            demMaTraChuaBiet);
     }
 
     private void L(string m) => _log?.Invoke(m);
@@ -467,6 +481,85 @@ public sealed class OrdersBridgeSession : IDisposable
     /// chỉ lấy hàng + Chuẩn bị hàng từng đơn + in phiếu + revert địa chỉ → đóng tab shop (về picker) → nghỉ 3-5' →
     /// shop kế. Captcha giữa chừng → dừng vòng (Captcha=true). Dùng cho nút "▶ Chạy" (production, chạy liên tục).
     /// </summary>
+    /// <summary>
+    /// KIỂM TRA LẠI ĐỊA CHỈ của ĐÚNG MỘT shop theo lệnh người dùng (nút "Check" trên banner lỗi địa chỉ):
+    /// đăng nhập → về picker → đọc danh sách shop → mở Chi tiết ĐÚNG shop đó → chạy MỖI bước đặt địa chỉ.
+    /// <para>
+    /// <b>KHÔNG đọc đơn, KHÔNG chuẩn bị hàng, KHÔNG in phiếu, KHÔNG check trả hàng</b> — đây là lượt kiểm tra,
+    /// không phải một vòng làm việc thu nhỏ. Người dùng bấm nút này lúc đang nhìn banner đỏ, thứ họ cần là câu
+    /// trả lời "shop này còn lỗi không", không phải một lượt in phiếu ngoài ý muốn.
+    /// </para>
+    /// <para>
+    /// Cầu nối chỉ có MỘT lane (<c>OrdersBridgeChannel.BridgePort</c> cố định) nên caller PHẢI tự chặn khi đang
+    /// có phiên chạy — ở đây không tự xếp hàng.
+    /// </para>
+    /// <para>
+    /// Tra shop theo <c>LoginName</c> rồi mới tới <c>ShopName</c>, so sánh KHÔNG phân biệt hoa/thường — đúng
+    /// khuôn nhãn mà vòng shop thường ghi vào banner (<c>shopLogin</c>), kẻo bấm Check xong báo "không thấy
+    /// shop" cho chính cái tên vừa hiện trên banner.
+    /// </para>
+    /// </summary>
+    public async Task<OrdersKiemTraDiaChiResult> KiemTraDiaChiMotShopAsync(
+        OrdersLoginParams login, string shopLogin, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(shopLogin))
+        {
+            return new OrdersKiemTraDiaChiResult(false, false, "Chưa biết shop nào cần kiểm tra.");
+        }
+
+        try
+        {
+            var err = await LoginAndReachPickerAsync(login, ct).ConfigureAwait(false);
+            if (_channel.CaptchaSeen)
+            {
+                return new OrdersKiemTraDiaChiResult(false, true, "Rơi vào trang verify/captcha khi vào Seller Centre.");
+            }
+            if (err is not null)
+            {
+                return new OrdersKiemTraDiaChiResult(false, false, err);
+            }
+
+            var shopListTcs = _channel.ArmShopList();
+            await _channel.SendAsync(new { action = "readShopList" }).ConfigureAwait(false);
+            var json = await _channel.AwaitAsync(shopListTcs, OrdersBridgeChannel.ChoChang.ShopList, ct).ConfigureAwait(false);
+            var shops = ShopeeLoginService.ParseShopListJson(json);
+            _onShopListRead?.Invoke(shops);
+
+            var shop = shops.FirstOrDefault(s =>
+                string.Equals(s.LoginName, shopLogin, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(s.ShopName, shopLogin, StringComparison.OrdinalIgnoreCase));
+            if (shop is null)
+            {
+                return new OrdersKiemTraDiaChiResult(false, false,
+                    $"Không thấy shop \"{shopLogin}\" trong danh sách {shops.Count} shop của tài khoản này.");
+            }
+
+            L($"Kiểm tra địa chỉ: mở Chi tiết shop {shopLogin}...");
+            var detailTcs = _channel.ArmDetail();
+            await _channel.SendAsync(new { action = "openShopDetail", shopId = shop.ShopId }).ConfigureAwait(false);
+            var d = await _channel.AwaitAsync(detailTcs, OrdersBridgeChannel.ChoChang.Detail, ct).ConfigureAwait(false);
+            if (_channel.CaptchaSeen || d == "captcha")
+            {
+                return new OrdersKiemTraDiaChiResult(false, true, "Rơi vào captcha khi mở Chi tiết shop.");
+            }
+
+            var ok = await _flow.KiemTraLaiDiaChiAsync(shopLogin, ct).ConfigureAwait(false);
+            if (_channel.CaptchaSeen)
+            {
+                return new OrdersKiemTraDiaChiResult(false, true, "Rơi vào captcha khi đặt địa chỉ.");
+            }
+            return new OrdersKiemTraDiaChiResult(ok, false, null, _flow.PickupOkShop);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            return new OrdersKiemTraDiaChiResult(false, false, ex.Message);
+        }
+    }
+
     public async Task<OrdersBridgeRunResult> RunAllShopsAsync(OrdersLoginParams login, CancellationToken ct = default)
     {
         int shopCount = 0, shopsDone = 0, totalOrders = 0, totalSlips = 0;

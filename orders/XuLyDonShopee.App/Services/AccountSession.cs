@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -475,7 +476,12 @@ public partial class AccountSession : ObservableObject, IAccountSession
                     saveReturnCodes: cap => _persist.LuuMaTraHang(cap, log, ct),
                     // Bước BÙ cuối flow shop: danh sách đơn của CHÍNH shop đó đang thiếu phiếu (mới nhất trước) để
                     // phiên tự tải lại ngay trên tab đang mở. Đọc DB đồng bộ (nhanh, đang ở thread nền của phiên).
-                    layDonThieuPhieu: (shopLogin, _) => Task.FromResult(LayDonThieuPhieu(shopLogin, invoiceDir)));
+                    layDonThieuPhieu: (shopLogin, _) => Task.FromResult(LayDonThieuPhieu(shopLogin, invoiceDir)),
+                    // Tín hiệu quyết định CÒN LẬT TRANG trả hàng nữa hay không: trang vừa đọc còn ra mã MỚI thì
+                    // còn lật. CỐ Ý không suy độ sâu từ mốc "số yêu cầu" — mốc chỉ null ở lần check đầu tiên của
+                    // mỗi shop nên shop đang tồn đọng (nhóm cần quét sâu nhất) sẽ không bao giờ được quét sâu.
+                    demMaTraChuaBiet: cap => _services.ReturnCodes.DemMaChuaBiet(
+                        _accountId, cap.Select(c => (c.MaDon, c.MaYeuCau)).ToList()));
                 _bridge = bridge;
                 OrdersBridgeRunResult result;
                 try

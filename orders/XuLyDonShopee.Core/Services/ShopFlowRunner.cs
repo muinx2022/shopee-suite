@@ -62,6 +62,9 @@ internal sealed class ShopFlowRunner
     private readonly Func<string, int?>? _returnCountLast;
     private readonly Action<string, int>? _saveReturnCount;
     private readonly Func<IReadOnlyList<YeuCauTraHang>, string>? _saveReturnCodes;
+    // Đếm mã CHƯA có trong kho `return_codes` — tín hiệu quyết định còn lật trang trả hàng nữa hay không
+    // (Core không biết accountId nên App rót vào). Null → KHÔNG lật trang, chỉ đọc trang đầu.
+    private readonly Func<IReadOnlyList<YeuCauTraHang>, int>? _demMaTraChuaBiet;
     // TỰ TẢI LẠI PHIẾU THIẾU: App trả danh sách order_sn của ĐÚNG shop đang mở đang có mã vận đơn NHƯNG thiếu file
     // PDF hợp lệ, đã xếp MỚI NHẤT TRƯỚC (Core không biết accountId/thư mục phiếu của App). Null → bỏ HẲN bước —
     // đó cũng là đường "Chạy thử" (RunSliceCoreAsync): nó chỉ đọc, không lưu, nên không được kéo theo bước này.
@@ -103,7 +106,8 @@ internal sealed class ShopFlowRunner
         Func<string, int?>? returnCountLast,
         Action<string, int>? saveReturnCount,
         Func<IReadOnlyList<YeuCauTraHang>, string>? saveReturnCodes,
-        Func<string, CancellationToken, Task<IReadOnlyList<string>>>? layDonThieuPhieu = null)
+        Func<string, CancellationToken, Task<IReadOnlyList<string>>>? layDonThieuPhieu = null,
+        Func<IReadOnlyList<YeuCauTraHang>, int>? demMaTraChuaBiet = null)
     {
         _ch = channel;
         _log = log;
@@ -116,6 +120,7 @@ internal sealed class ShopFlowRunner
         _saveReturnCount = saveReturnCount;
         _saveReturnCodes = saveReturnCodes;
         _layDonThieuPhieu = layDonThieuPhieu;
+        _demMaTraChuaBiet = demMaTraChuaBiet;
     }
 
     /// <summary>Nhãn shop KHÔNG đặt được địa chỉ lấy hàng (null = chưa dính). Cùng khuôn cờ với
@@ -148,8 +153,112 @@ internal sealed class ShopFlowRunner
             : pickupOk ? SauDatDiaChi.XuDon
             : SauDatDiaChi.DungViDiaChi;
 
+    /// <summary>
+    /// BƯỚC ĐẶT ĐỊA CHỈ LẤY HÀNG trên tab shop ĐANG MỞ — tách riêng để hai đường dùng CHUNG: vòng shop thường
+    /// (<see cref="ThanShopAsync"/>) và lượt kiểm tra lại theo lệnh người dùng
+    /// (<see cref="KiemTraLaiDiaChiAsync"/>). Hai nơi tự gửi lệnh riêng là hai luật trôi lệch — mà bên trong
+    /// extension bước này còn có dọn modal chắn + thử lại một lượt, càng không được chép đôi.
+    /// </summary>
+    private async Task<SauDatDiaChi> DatDiaChiAsync(CancellationToken ct)
+    {
+        var pickupTcs = _ch.ArmPickup();
+        await _ch.SendAsync(new { action = "setPickupAddress", province = _province }).ConfigureAwait(false);
+        var pickupOk = await _ch.AwaitAsync(pickupTcs, OrdersBridgeChannel.ChoChang.Pickup, ct).ConfigureAwait(false);
+        return QuyetDinhSauDatDiaChi(pickupOk, _ch.CaptchaSeen);
+    }
+
+    /// <summary>
+    /// LƯỢT KIỂM TRA LẠI ĐỊA CHỈ theo lệnh người dùng (nút "Check" trên banner lỗi địa chỉ): CHỈ chạy bước đặt
+    /// địa chỉ trên tab shop đang mở — KHÔNG đọc đơn, KHÔNG chuẩn bị hàng, KHÔNG in phiếu, KHÔNG check trả hàng.
+    /// <para>
+    /// Đặt <see cref="PickupOkShop"/> / <see cref="PickupFailedShop"/> y HỆT vòng shop thường, để vòng ngoài
+    /// dùng lại NGUYÊN đường gỡ banner + báo Hub sẵn có (<c>GoBannerLoiDiaChi</c>). Cố ý KHÔNG viết đường gỡ
+    /// banner thứ hai: hai đường gỡ là hai luật rev/tombstone trôi lệch nhau, mà lớp bug đó đã cắn hai lần.
+    /// </para>
+    /// <para>
+    /// <b>Captcha thì KHÔNG kết luận</b>: không đặt cả hai cờ. Coi captcha là "vẫn lỗi" thì banner bị giữ oan;
+    /// coi là "hết lỗi" thì gỡ banner của shop chưa hề kiểm được. Không biết thì nói không biết.
+    /// </para>
+    /// </summary>
+    /// <returns><c>true</c> = shop ĐẶT ĐƯỢC địa chỉ (đủ căn cứ gỡ banner).</returns>
+    public async Task<bool> KiemTraLaiDiaChiAsync(string shopLogin, CancellationToken ct)
+    {
+        // Nhãn có thể RỖNG (picker không đọc được tên) — vẫn phải là chuỗi KHÁC null, y như vòng shop thường,
+        // kẻo tín hiệu (null = không có gì) mất theo cái nhãn.
+        var nhan = string.IsNullOrWhiteSpace(shopLogin) ? "(không rõ shop)" : shopLogin;
+        PickupOkShop = null;
+        PickupFailedShop = null;
+
+        L($"Kiểm tra lại địa chỉ lấy hàng ({_province}) cho shop {nhan}...");
+        var quyetDinh = await DatDiaChiAsync(ct).ConfigureAwait(false);
+
+        if (quyetDinh == SauDatDiaChi.DungViCaptcha)
+        {
+            L($"PHÁT HIỆN captcha khi kiểm tra lại địa chỉ shop {nhan} — KHÔNG kết luận được, GIỮ NGUYÊN banner.");
+            return false;
+        }
+        if (quyetDinh == SauDatDiaChi.DungViDiaChi)
+        {
+            PickupFailedShop = nhan;
+            L($"⛔ Kiểm tra lại: VẪN không đặt được địa chỉ lấy hàng ({_province}) cho shop {nhan} — giữ banner.");
+            return false;
+        }
+
+        PickupOkShop = nhan;
+        L($"✓ Kiểm tra lại: shop {nhan} ĐẶT ĐƯỢC địa chỉ lấy hàng ({_province}) — gỡ banner + báo Hub.");
+        return true;
+    }
+
     // ── GĐ3: đọc đơn (Phần A) + xử đơn (Phần B) trên tab shop đang mở ───────────────────────────────────
+
+    /// <summary>
+    /// Flow MỘT shop = <see cref="ThanShopAsync"/> (đọc đơn → địa chỉ → chuẩn bị hàng → in phiếu → bù phiếu
+    /// thiếu) + mắt xích CUỐI là bước PHỤ <see cref="CheckDonTraHangAsync"/>.
+    /// <para>
+    /// <b>Vì sao bước phụ nằm ở ĐÂY chứ không ở cuối thân:</b> thân có 3 nhánh <c>return</c> sớm (captcha khi
+    /// đọc đơn, captcha khi đặt địa chỉ, KHÔNG đặt được địa chỉ lấy hàng). Đặt ở cuối thân thì shop nào dính lỗi
+    /// địa chỉ — lỗi thường trực, có hẳn banner riêng — <b>không bao giờ</b> được check trả hàng. Trang trả hàng
+    /// chẳng liên quan gì tới địa chỉ lấy hàng, không có lý do gì bỏ theo.
+    /// </para>
+    /// <para>
+    /// Ngoại lệ NÉM ra từ thân (cầu nối chết / hết giờ / hủy) thì KHÔNG chạy bước phụ: lúc đó gửi thêm lệnh chỉ
+    /// là ngồi chờ hết hạn. Captcha thì <see cref="CheckDonTraHangAsync"/> tự bỏ (trang đang là <c>/verify</c>).
+    /// </para>
+    /// </summary>
     public async Task<(int Orders, int Slips)> RunShopOrdersAsync(string shopId, string shopLogin, int toShip, CancellationToken ct)
+    {
+        var kq = await ThanShopAsync(shopId, shopLogin, toShip, ct).ConfigureAwait(false);
+
+        // Bọc kín: lỗi/timeout/captcha ở bước phụ KHÔNG được phá phần chuẩn bị hàng + in phiếu đã xong ở trên,
+        // cũng KHÔNG được dừng vòng shop. Chạy cả khi toShip = 0 (yêu cầu trả hàng không liên quan đơn chờ lấy hàng).
+        if (_returnCountLast is not null && _saveReturnCount is not null && _saveReturnCodes is not null
+            && !string.IsNullOrWhiteSpace(shopLogin))
+        {
+            var captchaTruocBuoc = _ch.CaptchaSeen;
+            try
+            {
+                await CheckDonTraHangAsync(shopLogin, ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                L("Check đơn trả hàng lỗi: " + ex.ToString() + " — bỏ qua bước này, phần đã xong không bị ảnh hưởng.");
+            }
+            finally
+            {
+                // Captcha ở bước PHỤ này KHÔNG được dừng cả vòng (phần chính của shop đã xong xuôi) → trả cờ về
+                // đúng như trước bước. Captcha THẬT vẫn lộ ngay ở shop kế: openShopDetail rơi /verify → dừng vòng
+                // đúng chỗ, không mất mát gì.
+                _ch.CaptchaSeen = captchaTruocBuoc;
+            }
+        }
+
+        return kq;
+    }
+
+    /// <summary>THÂN flow shop — mọi thứ TRỪ bước phụ check trả hàng (xem <see cref="RunShopOrdersAsync"/>).
+    /// Có 3 nhánh <c>return</c> sớm; đó chính là lý do bước phụ không được đặt ở cuối hàm này.</summary>
+    private async Task<(int Orders, int Slips)> ThanShopAsync(string shopId, string shopLogin, int toShip, CancellationToken ct)
     {
         // Phần A — đọc đơn tab "Tất cả" (test được ngay, kể cả shop 0 đơn chờ).
         var ordersTcs = _ch.ArmOrders();
@@ -220,10 +329,7 @@ internal sealed class ShopFlowRunner
         if (toShip > 0 && !string.IsNullOrWhiteSpace(_invoiceDir))
         {
             L($"Có {toShip} đơn Chờ Lấy Hàng — đặt địa chỉ lấy hàng ({_province}) rồi xử từng đơn...");
-            var pickupTcs = _ch.ArmPickup();
-            await _ch.SendAsync(new { action = "setPickupAddress", province = _province }).ConfigureAwait(false);
-            var pickupOk = await _ch.AwaitAsync(pickupTcs, OrdersBridgeChannel.ChoChang.Pickup, ct).ConfigureAwait(false);
-            var quyetDinh = QuyetDinhSauDatDiaChi(pickupOk, _ch.CaptchaSeen);
+            var quyetDinh = await DatDiaChiAsync(ct).ConfigureAwait(false);
             if (quyetDinh == SauDatDiaChi.DungViCaptcha)
             {
                 L("PHÁT HIỆN captcha khi đặt địa chỉ lấy hàng.");
@@ -330,31 +436,6 @@ internal sealed class ShopFlowRunner
         catch (Exception ex)
         {
             L("Tự tải lại phiếu thiếu lỗi: " + ex.ToString() + " — bỏ qua bước này, phần đã xong không bị ảnh hưởng.");
-        }
-
-        // ── Mắt xích CUỐI CÙNG của flow shop (bước PHỤ): check ĐƠN TRẢ HÀNG ──────────────────────────────
-        // Bọc kín: lỗi/timeout/captcha ở đây KHÔNG được phá phần chuẩn bị hàng + in phiếu đã xong ở trên, cũng
-        // KHÔNG được dừng vòng shop. Chạy cả khi toShip = 0 (yêu cầu trả hàng không liên quan đơn chờ lấy hàng).
-        if (_returnCountLast is not null && _saveReturnCount is not null && _saveReturnCodes is not null
-            && !string.IsNullOrWhiteSpace(shopLogin))
-        {
-            var captchaTruocBuoc = _ch.CaptchaSeen;
-            try
-            {
-                await CheckDonTraHangAsync(shopLogin, ct).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) { throw; }
-            catch (Exception ex)
-            {
-                L("Check đơn trả hàng lỗi: " + ex.ToString() + " — bỏ qua bước này, phần đã xong không bị ảnh hưởng.");
-            }
-            finally
-            {
-                // Captcha ở bước PHỤ này KHÔNG được dừng cả vòng (phần chính của shop đã xong xuôi) → trả cờ về
-                // đúng như trước bước. Captcha THẬT vẫn lộ ngay ở shop kế: openShopDetail rơi /verify → dừng vòng
-                // đúng chỗ, không mất mát gì.
-                _ch.CaptchaSeen = captchaTruocBuoc;
-            }
         }
 
         return (orders.Count, slips);
@@ -576,35 +657,107 @@ internal sealed class ShopFlowRunner
         switch (quyetDinh.Luat)
         {
             case LuatSoYeuCau.LanDau:
-                L($"Check đơn trả hàng [{shopLogin}]: {soMoi} yêu cầu — LẦN ĐẦU, check {quyetDinh.SoDongCanCheck} dòng đầu rồi ghi mốc.");
+                L($"Check đơn trả hàng [{shopLogin}]: {soMoi} yêu cầu — LẦN ĐẦU của shop này, quét sâu rồi ghi mốc.");
                 break;
             case LuatSoYeuCau.KhongDoi:
-                L($"Check đơn trả hàng [{shopLogin}]: {soMoi} yêu cầu — không đổi so với mốc {mocCuText}, bỏ qua.");
+                L($"Check đơn trả hàng [{shopLogin}]: {soMoi} yêu cầu — không đổi so với mốc {mocCuText} (số không đổi KHÔNG có nghĩa là không có mã mới).");
                 break;
             case LuatSoYeuCau.Giam:
-                L($"Check đơn trả hàng [{shopLogin}]: {soMoi} yêu cầu — GIẢM so với mốc {mocCuText} (đã xử xong), chỉ cập nhật mốc.");
+                L($"Check đơn trả hàng [{shopLogin}]: {soMoi} yêu cầu — GIẢM so với mốc {mocCuText} (có yêu cầu đã xử xong, rớt khỏi danh sách).");
                 break;
             default:
-                L($"Check đơn trả hàng [{shopLogin}]: {soMoi} yêu cầu — TĂNG {quyetDinh.SoDongCanCheck} so với mốc {mocCuText}, check {quyetDinh.SoDongCanCheck} dòng đầu.");
+                L($"Check đơn trả hàng [{shopLogin}]: {soMoi} yêu cầu — TĂNG {quyetDinh.SoDongMoiUocTinh} so với mốc {mocCuText}.");
                 break;
         }
 
-        if (quyetDinh.SoDongCanCheck > 0)
+        // ĐỌC THÊM TRANG SÂU — độ sâu do DỮ LIỆU quyết định, KHÔNG do mốc: lật tiếp chừng nào trang vừa đọc còn
+        // ra mã MỚI so với kho `return_codes`. Hết cái mới thì dừng.
+        //
+        // Vì sao KHÔNG suy độ sâu từ mốc (bản đầu 09/08 làm vậy và hỏng): mốc chỉ null ở lần check ĐẦU TIÊN của
+        // mỗi shop, mà mốc được ghi ở cuối MỌI lượt từ 29/07 và không có migration nào reset ⇒ mọi shop đang
+        // chạy đều có mốc ≠ null ⇒ nhóm shop TỒN ĐỌNG (nhóm duy nhất cần quét sâu) không bao giờ được quét sâu.
+        //
+        // Chi phí: lượt thường trang đầu không có mã mới ⇒ KHÔNG lật trang nào, đúng bằng chi phí trước đây.
+        // Shop tồn đọng ⇒ lật cho tới khi hết mã mới, tự rút cạn qua một hai lượt rồi vào nếp.
+        var dong = new List<DongTraHang>(doc.Dong);
+        var trangDaLat = 0;
+        var docDuSau = true;   // false = lượt này BIẾT là còn sót (chạm trần / lật trượt / captcha) ⇒ giữ nguyên mốc
+        var coTrangSau = doc.CoTrangSau;
+        if (!doc.SortApplied && coTrangSau)
         {
-            var canCheck = doc.Dong.Take(quyetDinh.SoDongCanCheck).ToList();
-            if (canCheck.Count < quyetDinh.SoDongCanCheck)
+            // Thứ tự không tin được ⇒ lật trang chỉ là nhặt ngẫu nhiên trong lịch sử. Đọc trang đầu rồi thôi,
+            // nhưng phải coi là ĐỌC THIẾU: mốc không được nhảy, kẻo lượt sau tưởng đã đọc hết.
+            L("Check đơn trả hàng: KHÔNG đổi được sắp xếp — chỉ đọc trang đầu, KHÔNG lật trang (mốc giữ nguyên).");
+            docDuSau = false;
+        }
+        else if (coTrangSau && _demMaTraChuaBiet is not null && MaMoiTrong(doc.Dong) > 0)
+        {
+            while (trangDaLat < TraHangParser.TranTrangTraHang)
             {
-                L($"Check đơn trả hàng: cần {quyetDinh.SoDongCanCheck} dòng nhưng trang chỉ có {canCheck.Count} — check phần đọc được.");
+                // Trần DÒNG áp cho CẢ LƯỢT (gộp mọi trang) — extension chỉ kẹp trần trong phạm vi MỘT lệnh nên
+                // nếu ở đây không kẹp thì lật 10 trang có thể vượt xa TranDongMoiLuot.
+                if (dong.Count >= TraHangParser.TranDongMoiLuot)
+                {
+                    L($"Check đơn trả hàng: chạm trần {TraHangParser.TranDongMoiLuot} dòng/lượt — dừng lật, còn sót, để lượt sau đọc tiếp.");
+                    docDuSau = false;
+                    break;
+                }
+                var them = await DocThemTrangTraHangAsync(1, ct).ConfigureAwait(false);
+                if (them.Dong.Count == 0)
+                {
+                    // Hết trang thật thì `CoTrangSau` đã false ở lượt trước; tới đây mà rỗng là lật TRƯỢT
+                    // (bấm nhầm nút / danh sách không vẽ lại) hoặc captcha ⇒ còn sót, đừng chốt mốc.
+                    L($"Check đơn trả hàng: lật sang trang {trangDaLat + 2} KHÔNG đọc được dòng nào — dừng lật, coi như còn sót.");
+                    docDuSau = false;
+                    break;
+                }
+                trangDaLat++;
+                dong.AddRange(them.Dong);
+                var maMoi = MaMoiTrong(them.Dong);
+                L($"Check đơn trả hàng: trang {trangDaLat + 1} → thêm {them.Dong.Count} dòng ({maMoi} mã mới), tổng {dong.Count}.");
+                if (maMoi == 0)
+                {
+                    break; // trang này không còn gì mới ⇒ các trang sau (cũ hơn) cũng vậy
+                }
+                coTrangSau = them.CoTrangSau;
+                if (!coTrangSau)
+                {
+                    break; // hết trang thật — đã đọc tới đáy
+                }
+                if (trangDaLat >= TraHangParser.TranTrangTraHang)
+                {
+                    L($"Check đơn trả hàng: chạm trần {TraHangParser.TranTrangTraHang} trang mà vẫn còn mã mới — còn sót, để lượt sau đọc tiếp.");
+                    docDuSau = false;
+                }
             }
+        }
 
-            var ghep = TraHangParser.GhepCap(canCheck);
+        // Parse HẾT dòng đọc được, MỌI nhánh luật — kể cả KhongDoi/Giam. Bản trước cắt theo hiệu số rồi vẫn ghi
+        // mốc: "+3 mới, −3 xử xong" ra số y hệt nên 3 mã mới bị vứt VĨNH VIỄN. Đọc thừa không hại: chống trùng
+        // nằm ở ReturnCodesRepository.LuuMaTraHang (mã cũ không đụng dòng ⇒ không đẩy lại, không notify lại).
+        if (dong.Count > 0)
+        {
+            var ghep = TraHangParser.GhepCap(dong);
             var phanDonHuy = ghep.BoQuaDonHuy > 0 ? $", bỏ {ghep.BoQuaDonHuy} dòng vì href là ĐƠN HỦY" : string.Empty;
-            L($"Check đơn trả hàng: đọc {canCheck.Count} dòng → {ghep.Cap.Count} cặp đủ hai mã, {ghep.ThieuMaYeuCau.Count} dòng THIẾU mã yêu cầu{phanDonHuy}.");
+            L($"Check đơn trả hàng: đọc {dong.Count} dòng → {ghep.Cap.Count} cặp đủ hai mã, {ghep.ThieuMaYeuCau.Count} dòng THIẾU mã yêu cầu{phanDonHuy}.");
             // In nguyên văn tối đa 3 dòng thiếu (kèm nhãn + HTML thô): nếu luật nhận diện theo nhãn trượt thì
             // nhật ký lần chạy thật lộ ngay class/nhãn thật — class khối mã yêu cầu tới giờ vẫn CHƯA xác nhận.
             foreach (var mo in ghep.ThieuMaYeuCau.Take(3))
             {
                 L("Check đơn trả hàng — dòng thiếu mã yêu cầu → " + mo);
+            }
+
+            // Một đơn có TỪ HAI yêu cầu: giữ mã mới nhất (user chốt 09/08), mã còn lại chỉ ghi nhật ký — kho mã
+            // khoá theo (tài khoản, mã đơn) và cột trên sheet cũng chỉ có MỘT ô mỗi đơn. In tối đa 3 dòng: số
+            // này lớn bất thường nghĩa là nhiều đơn đang có nhiều yêu cầu cùng lúc, lúc đó mới cần bàn cách chứa.
+            var trung = ghep.TrungMaDon ?? Array.Empty<string>();
+            if (trung.Count > 0)
+            {
+                L($"Check đơn trả hàng: {trung.Count} đơn có NHIỀU HƠN MỘT yêu cầu — giữ mã mới nhất, bỏ phần còn lại.");
+                foreach (var mo in trung.Take(3))
+                {
+                    L("Check đơn trả hàng — đơn nhiều yêu cầu → " + mo);
+                }
             }
 
             // Chặn theo THỜI GIAN trên NGÀY YÊU CẦU (suy từ mã yêu cầu), cửa sổ TraHangParser.SoNgayCuaSoTraHang
@@ -625,8 +778,69 @@ internal sealed class ShopFlowRunner
             }
         }
 
-        // Cập nhật mốc SAU khi xử xong (kể cả lượt không check dòng nào) để lần sau so đúng.
-        _saveReturnCount!(shopLogin, soMoi);
+        // Cập nhật mốc — CHỈ khi lượt này đọc đủ sâu. Lượt BIẾT là còn sót (không đổi được sắp xếp / lật trượt /
+        // chạm trần / captcha giữa chừng) mà vẫn chốt mốc thì lượt sau nhìn vào mốc tưởng "không đổi" rồi thôi —
+        // đúng cái bẫy mốc-nhảy-khi-chưa-đọc-hết mà cả đợt này đi vá. Giữ mốc cũ thì cùng lắm chậm một vòng.
+        if (docDuSau)
+        {
+            _saveReturnCount!(shopLogin, soMoi);
+        }
+        else
+        {
+            L($"Check đơn trả hàng [{shopLogin}]: lượt này đọc CHƯA đủ sâu — GIỮ NGUYÊN mốc {mocCuText} để lượt sau đọc tiếp.");
+        }
+    }
+
+    /// <summary>
+    /// Số mã trong <paramref name="dong"/> là MỚI với kho <c>return_codes</c> — tín hiệu quyết định còn lật trang
+    /// nữa hay không. Đi qua ĐÚNG đường xử lý thật (ghép cặp → lọc cửa sổ ngày) rồi mới đếm: một trang toàn mã
+    /// CŨ HƠN cửa sổ thì dù chưa có trong kho cũng không đáng lật tiếp — chúng sẽ bị lọc bỏ ở bước lưu.
+    /// <para>Chưa rót callback (đường "Chạy thử") → 0 ⇒ không lật trang nào.</para>
+    /// </summary>
+    private int MaMoiTrong(IReadOnlyList<DongTraHang> dong)
+    {
+        if (_demMaTraChuaBiet is null || dong.Count == 0)
+        {
+            return 0;
+        }
+        var cap = TraHangParser.GhepCap(dong).Cap;
+        var giu = TraHangParser.LocTheoCuaSo(cap, DateTime.Now, TraHangParser.SoNgayCuaSoTraHang).GiuLai;
+        return giu.Count == 0 ? 0 : _demMaTraChuaBiet(giu);
+    }
+
+    /// <summary>
+    /// Lượt ĐỌC THÊM của bước check trả hàng: bảo extension lật tiếp tối đa <paramref name="soTrangThem"/> trang
+    /// TRÊN CHÍNH trang đang mở (không điều hướng, không chọn lại tab, không đổi lại sắp xếp) rồi trả các dòng
+    /// đọc thêm. Chỉ dùng phần <see cref="KetQuaDocTraHang.Dong"/> của phản hồi — ô tổng/tab/sắp xếp đã chốt ở
+    /// lượt đầu.
+    /// <para>
+    /// <b>KHÔNG bao giờ ném:</b> hết giờ / extension đời cũ không biết lệnh này / captcha giữa chừng đều trả
+    /// danh sách RỖNG. Phần trang đầu đã đọc được là thứ phải giữ bằng mọi giá — thà thiếu phần sâu còn hơn
+    /// mất cả lượt vì một lệnh mở rộng.
+    /// </para>
+    /// </summary>
+    private async Task<(IReadOnlyList<DongTraHang> Dong, bool CoTrangSau)> DocThemTrangTraHangAsync(
+        int soTrangThem, CancellationToken ct)
+    {
+        try
+        {
+            var tcs = _ch.ArmReturns();
+            await _ch.SendAsync(new { action = "readReturnRequestsMore", maxPages = soTrangThem }).ConfigureAwait(false);
+            var json = await _ch.AwaitAsync(tcs, OrdersBridgeChannel.ChoChang.Returns, ct).ConfigureAwait(false);
+            if (_ch.CaptchaSeen)
+            {
+                L("Check đơn trả hàng: gặp captcha khi lật thêm trang — giữ phần trang đầu, bỏ phần sâu.");
+                return (Array.Empty<DongTraHang>(), false);
+            }
+            var kq = TraHangParser.ParseKetQua(json);
+            return (kq.Dong, kq.CoTrangSau);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            L("Check đơn trả hàng: lật thêm trang lỗi: " + ex.ToString() + " — giữ phần trang đầu.");
+            return (Array.Empty<DongTraHang>(), false);
+        }
     }
 
     /// <summary>Số lần gửi <c>closeShopTab</c> tối đa cho MỘT shop: lần đầu + đúng MỘT lần thử lại.</summary>

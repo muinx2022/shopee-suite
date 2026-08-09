@@ -105,7 +105,7 @@ public class MaTraHangDocLapTests
 
         Assert.Equal(1, kq.DaGhi);
         Assert.Equal(("260617ANE669U9", "2606210RB7XN9C4"), Assert.Single(kq.CapMoi));
-        Assert.Equal(("260617ANE669U9", "2606210RB7XN9C4"), Assert.Single(repo.LayMaTraHangChuaDay(1)));
+        Assert.Equal(("260617ANE669U9", "2606210RB7XN9C4"), Assert.Single(repo.LayMaTraHangChuaDay(1, Luc)));
     }
 
     [Fact]
@@ -115,13 +115,13 @@ public class MaTraHangDocLapTests
         var repo = new ReturnCodesRepository(temp.Open());
         repo.LuuMaTraHang(1, new[] { ("D1", "R1") }, "shop", Luc);
         repo.DanhDauDaDay(1, new[] { "D1" }, Luc);
-        Assert.Empty(repo.LayMaTraHangChuaDay(1));
+        Assert.Empty(repo.LayMaTraHangChuaDay(1, Luc));
 
         var kq = repo.LuuMaTraHang(1, new[] { ("D1", "R1") }, "shop", Luc.AddDays(1));
 
         Assert.Equal(0, kq.DaGhi);
         Assert.Empty(kq.CapMoi);
-        Assert.Empty(repo.LayMaTraHangChuaDay(1)); // KHÔNG đẩy trùng
+        Assert.Empty(repo.LayMaTraHangChuaDay(1, Luc)); // KHÔNG đẩy trùng
     }
 
     /// <summary>Bẫy #5: yêu cầu trả hàng được tạo LẠI với mã khác → phải đẩy lại.</summary>
@@ -137,7 +137,7 @@ public class MaTraHangDocLapTests
 
         Assert.Equal(1, kq.DaGhi);
         Assert.Equal(("D1", "R2"), Assert.Single(kq.CapMoi));
-        Assert.Equal(("D1", "R2"), Assert.Single(repo.LayMaTraHangChuaDay(1)));
+        Assert.Equal(("D1", "R2"), Assert.Single(repo.LayMaTraHangChuaDay(1, Luc)));
     }
 
     [Fact]
@@ -150,7 +150,7 @@ public class MaTraHangDocLapTests
 
         Assert.Equal(1, kq.DaGhi);
         Assert.Equal(("D2", "R2"), Assert.Single(kq.CapMoi));
-        Assert.Equal("D2", Assert.Single(repo.LayMaTraHangChuaDay(1)).OrderSn);
+        Assert.Equal("D2", Assert.Single(repo.LayMaTraHangChuaDay(1, Luc)).OrderSn);
     }
 
     [Fact]
@@ -161,8 +161,8 @@ public class MaTraHangDocLapTests
         repo.LuuMaTraHang(1, new[] { ("D1", "R1") }, "shop", Luc);
         repo.LuuMaTraHang(2, new[] { ("D2", "R2") }, "shop", Luc);
 
-        Assert.Equal("D1", Assert.Single(repo.LayMaTraHangChuaDay(1)).OrderSn);
-        Assert.Equal("D2", Assert.Single(repo.LayMaTraHangChuaDay(2)).OrderSn);
+        Assert.Equal("D1", Assert.Single(repo.LayMaTraHangChuaDay(1, Luc)).OrderSn);
+        Assert.Equal("D2", Assert.Single(repo.LayMaTraHangChuaDay(2, Luc)).OrderSn);
     }
 
     /// <summary>Bẫy #4: bảng dọn theo TUỔI, KHÔNG theo vòng đời đơn.</summary>
@@ -177,7 +177,9 @@ public class MaTraHangDocLapTests
         var xoa = repo.DonDep(Luc.AddDays(-ReturnCodesRepository.SoNgayGiuMac));
 
         Assert.Equal(1, xoa);
-        Assert.Equal("MOI", Assert.Single(repo.LayMaTraHangChuaDay(1)).OrderSn);
+        // Truyền mốc "bây giờ" = Luc: từ 09/08/2026 LayMaTraHangChuaDay còn chặn theo HẠN THỬ LẠI, mà fixture
+        // dùng ngày CỨNG (Luc) nên để nó lấy DateTime.UtcNow thì bản ghi "MOI" sẽ quá hạn theo thời gian thực.
+        Assert.Equal("MOI", Assert.Single(repo.LayMaTraHangChuaDay(1, Luc)).OrderSn);
     }
 
     /// <summary>90 ngày = hơn 4 lần cửa sổ quét 20 ngày → không bao giờ dọn nhầm mã còn đang chờ đẩy.</summary>
@@ -276,7 +278,7 @@ public class MaTraHangDocLapTests
             new SyncedOrder { OrderSn = "CON-SONG", ItemsJson = "[]", Status = "Chờ lấy hàng", TotalPrice = 1000 },
         }, DateTime.UtcNow);
         services.Orders.MarkGsheetSynced(accId, "CON-SONG", null, daHuy: false, coVanDon: false, coUocTinh: false,
-            coDonTraHang: false, tab: "Tháng 05-2026", at: DateTime.UtcNow);
+            coDonTraHang: false, tab: "Tháng 05-2026", at: DateTime.UtcNow, pushGen: 0);
         services.ReturnCodes.LuuMaTraHang(accId, new[] { ("CON-SONG", "R9") }, "shop", DateTime.UtcNow);
 
         await HubOutbox.PushReturnCodesToGsheetAsync(accId, services, _ => { }, CancellationToken.None);

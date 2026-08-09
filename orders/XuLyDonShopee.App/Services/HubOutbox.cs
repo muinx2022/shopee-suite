@@ -56,7 +56,10 @@ public static class HubOutbox
     {
         var daHuy = ShopeeShippingNav.LaDonHuy(p.Status, p.StatusDescription, p.CancelReason);
         var coVanDon = !string.IsNullOrWhiteSpace(p.TrackingNumber);
-        if (daHuy && !coVanDon && !p.DaGhiSheet)
+        // DaTungGhiSheet (KHÔNG phải DaGhiSheet): nút "Đẩy lại" xoá gsheet_synced_at, nên hỏi DaGhiSheet thì một
+        // đơn hủy ĐÃ CÓ DÒNG vừa được bấm "Đẩy lại" sẽ rơi vào lối tắt này → settled → bị dọn khỏi app, dòng cũ
+        // trên sheet nằm TRẮNG vĩnh viễn vì không còn ai đẩy lượt tô đỏ.
+        if (daHuy && !coVanDon && !p.DaTungGhiSheet)
         {
             return false; // đơn hủy trước khi vào pipeline giao → by design không ghi sheet
         }
@@ -346,6 +349,9 @@ public static class HubOutbox
                 var coVanDonByMaDon = new Dictionary<string, bool>(StringComparer.Ordinal);
                 var coUocTinhByMaDon = new Dictionary<string, bool>(StringComparer.Ordinal);
                 var coDonTraHangByMaDon = new Dictionary<string, bool>(StringComparer.Ordinal);
+                // Thế hệ dữ liệu ĐỌC ĐƯỢC lúc dựng lô — mang tới tận MarkGsheetSynced để lượt này không đóng cờ
+                // mà cú bấm "Đẩy lại" (xảy ra trong lúc lô đang bay) vừa mở. Xem OrdersRepository.MarkGsheetSynced.
+                var genByMaDon = new Dictionary<string, long>(StringComparer.Ordinal);
                 foreach (var p in pending)
                 {
                     var daHuy = ShopeeShippingNav.LaDonHuy(p.Status, p.StatusDescription, p.CancelReason);
@@ -359,7 +365,9 @@ public static class HubOutbox
                     // bật và Apps Script TÔ ĐỎ dòng cũ, kẻo dòng đó nằm trắng vĩnh viễn sau khi đơn bị dọn khỏi app.
                     // (Nhánh này là LỐI TẮT của ConNghiaVuGhiSheet — đặt TRƯỚC lượt đọc đĩa để khỏi mở file phiếu
                     //  vô ích. Hàm kia trả false cho đúng bộ điều kiện này; test canh hai bên không lệch nhau.)
-                    if (daHuy && !coVanDon && !p.DaGhiSheet)
+                    // Hỏi DaTungGhiSheet chứ KHÔNG hỏi DaGhiSheet — xem ghi chú ở ConNghiaVuGhiSheet: nút "Đẩy lại"
+                    // xoá gsheet_synced_at nên DaGhiSheet tụt về false, còn "đã từng có dòng" thì không được phép quên.
+                    if (daHuy && !coVanDon && !p.DaTungGhiSheet)
                     {
                         settled.Add(p.OrderSn);
                         continue;
@@ -400,6 +408,7 @@ public static class HubOutbox
                     coVanDonByMaDon[p.OrderSn] = coVanDon;
                     coUocTinhByMaDon[p.OrderSn] = coUocTinh;
                     coDonTraHangByMaDon[p.OrderSn] = coDonTraHang;
+                    genByMaDon[p.OrderSn] = p.GsheetPushGen;
 
                     // Tab đích: tab đã nhớ của đơn (đẩy lại về đúng chỗ cũ) hoặc tab mặc định cho đơn mới.
                     var tab = string.IsNullOrEmpty(p.GsheetTab) ? defaultTab : p.GsheetTab;
@@ -460,7 +469,7 @@ public static class HubOutbox
                     // (mạng đang hỏng); đơn các nhóm đã gửi trước đó vẫn settled, các nhóm sau giữ chưa settled.
                     try
                     {
-                        int added = 0, updated = 0, withFile = 0, errors = 0;
+                        int added = 0, updated = 0, withFile = 0, errors = 0, boChot = 0;
                         string? firstError = null;
                         foreach (var nhom in rowsByTab)
                         {
@@ -475,8 +484,23 @@ public static class HubOutbox
                                     var coVanDon = coVanDonByMaDon.TryGetValue(r.MaDon, out var cv) && cv;
                                     var coUocTinh = coUocTinhByMaDon.TryGetValue(r.MaDon, out var cu) && cu;
                                     var coDonTraHang = coDonTraHangByMaDon.TryGetValue(r.MaDon, out var ct2) && ct2;
-                                    services.Orders.MarkGsheetSynced(accountId, r.MaDon, r.FileUrl, daHuy, coVanDon, coUocTinh, coDonTraHang, tabName, DateTime.UtcNow);
-                                    settled.Add(r.MaDon); // gửi thành công → settled (đủ điều kiện dọn nếu kết thúc)
+                                    // Không tra được thế hệ (đơn lạ trong kết quả trả về) → -1: KHÔNG khớp cột nào
+                                    // ⇒ không đóng cờ. Thà đẩy lại thừa một lượt còn hơn nuốt mất một dòng.
+                                    var gen = genByMaDon.TryGetValue(r.MaDon, out var g) ? g : -1L;
+                                    var daDongCo = services.Orders.MarkGsheetSynced(accountId, r.MaDon, r.FileUrl, daHuy, coVanDon, coUocTinh, coDonTraHang, tabName, DateTime.UtcNow, gen);
+                                    if (daDongCo > 0)
+                                    {
+                                        settled.Add(r.MaDon); // gửi thành công + cờ ĐÃ đóng → đủ điều kiện dọn nếu kết thúc
+                                    }
+                                    else
+                                    {
+                                        // Cờ KHÔNG đóng được (user bấm "Đẩy lại" giữa lượt này ⇒ thế hệ lệch).
+                                        // TUYỆT ĐỐI không settled: `settled` chảy thẳng vào NenXoaDonKetThuc → DeleteOrders,
+                                        // nên settled-mà-cờ-chưa-đóng = xoá đơn khỏi app với gsheet_synced_at còn NULL, cú bấm
+                                        // của người dùng bốc hơi vĩnh viễn (không còn đơn để đẩy lại) — đúng thứ chốt thế hệ
+                                        // sinh ra để chặn. Giữ đơn lại, lượt sau đẩy lại thật.
+                                        boChot++;
+                                    }
                                     if (r.Added) { added++; } else { updated++; }
                                     if (!string.IsNullOrEmpty(r.FileUrl)) { withFile++; }
                                 }
@@ -492,6 +516,12 @@ public static class HubOutbox
                         if (errors > 0)
                         {
                             summary += $" Lỗi {errors} đơn (vd {firstError}).";
+                        }
+                        if (boChot > 0)
+                        {
+                            // KHÔNG im lặng: đây là ca người dùng vừa bấm "Đẩy lại" nên nhìn vào log là hiểu ngay
+                            // vì sao đơn còn nằm lại thay vì biến mất.
+                            summary += $" Giữ lại {boChot} đơn vừa được bấm \"Đẩy lại\" giữa lượt — lượt sau gửi lại.";
                         }
                         log(summary);
                         ketQua = errors > 0 && added + updated == 0 ? KetQuaDay.ThatBai : KetQuaDay.ThanhCong;
@@ -586,6 +616,16 @@ public static class HubOutbox
             // Dọn theo TUỔI — KHÔNG theo vòng đời đơn (bất biến của bảng). Rẻ, chạy kèm mỗi lượt.
             services.ReturnCodes.DonDep(DateTime.UtcNow.AddDays(-ReturnCodesRepository.SoNgayGiuMac));
 
+            // Mã quá hạn thử lại: app THÔI đẩy nhưng phải nói ra. Không có dòng log này thì nhóm đó biến khỏi cả
+            // badge lẫn nhật ký đúng lúc bị bỏ — người dùng thấy ô "Mã đơn trả hàng" trống mà không biết vì sao.
+            // Đếm TRƯỚC nhánh "hàng đợi rỗng": ca đáng lo nhất chính là hàng đợi rỗng vì mọi mã đều quá hạn.
+            var quaHan = services.ReturnCodes.DemQuaHanThuLai(accountId);
+            if (quaHan > 0)
+            {
+                log($"GSheet mã trả hàng: {quaHan} mã QUÁ HẠN {ReturnCodesRepository.SoNgayThuLaiSheet} ngày "
+                    + "— THÔI thử lại (đơn chưa từng có dòng trên sheet / tiêu đề cột sai). Kiểm tra sheet nếu số này tăng.");
+            }
+
             var pending = services.ReturnCodes.LayMaTraHangChuaDay(accountId);
             if (pending.Count == 0)
             {
@@ -618,6 +658,7 @@ public static class HubOutbox
 
             var day = 0;
             var loi = 0;
+            var boQua = 0;
             string? loiDau = null;
             foreach (var nhom in rowsByTab)
             {
@@ -626,7 +667,15 @@ public static class HubOutbox
                     .PushReturnCodesAsync(url, nhom.Key, nhom.Value, log, ct, sheet2).ConfigureAwait(false);
                 foreach (var r in results)
                 {
-                    if (r.Ok)
+                    if (r.Ok && r.BoQua)
+                    {
+                        // Script trả ok:true nhưng KHÔNG ghi được gì (không tra thấy mã đơn trên sheet, hoặc
+                        // thiếu tiêu đề cột). TUYỆT ĐỐI không đánh dấu đã-đẩy: dòng của đơn có thể lên sheet ở
+                        // lượt sau, tiêu đề cột có thể được sửa — đánh dấu ở đây là vứt mã ÂM THẦM (lỗi cũ).
+                        // Chặn thử-lại-vô-hạn nằm ở ReturnCodesRepository.SoNgayThuLaiSheet, không phải ở đây.
+                        boQua++;
+                    }
+                    else if (r.Ok)
                     {
                         xong.Add(r.MaDon);
                     }
@@ -641,12 +690,18 @@ public static class HubOutbox
             }
 
             var tomTat = $"GSheet mã trả hàng: đã đẩy {day}/{pending.Count} mã (đơn đã dọn vẫn điền được).";
+            if (boQua > 0)
+            {
+                tomTat += $" {boQua} mã script BỎ QUA (chưa thấy dòng đơn trên sheet / thiếu tiêu đề cột) — GIỮ lại, thử lại lượt sau.";
+            }
             if (loi > 0)
             {
                 tomTat += $" Lỗi {loi} mã (vd {loiDau}).";
             }
             log(tomTat);
-            return day > 0 ? KetQuaDay.ThanhCong : KetQuaDay.ThatBai;
+            // Cả lô bị script BỎ QUA (không đẩy được mã nào nhưng cũng KHÔNG có lỗi đích) → KhongCanDay: đích
+            // đang khoẻ, backoff của HubOutboxWorker không có việc gì ở đây. Chỉ lỗi thật mới là ThatBai.
+            return day > 0 ? KetQuaDay.ThanhCong : (loi > 0 ? KetQuaDay.ThatBai : KetQuaDay.KhongCanDay);
         }
         catch (OperationCanceledException)
         {

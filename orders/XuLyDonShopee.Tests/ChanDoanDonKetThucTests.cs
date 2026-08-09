@@ -29,7 +29,8 @@ public class ChanDoanDonKetThucTests
         long? gsheetDaCoDonTraHang = null,
         long? finalAmount = null,
         string? returnRequestCode = null,
-        string? fileUrl = null)
+        string? fileUrl = null,
+        bool? daTungGhiSheet = null)
         => new(
             OrderSn: "SN",
             TrackingNumber: trackingNumber,
@@ -41,6 +42,9 @@ public class ChanDoanDonKetThucTests
             StatusDescription: null,
             CancelReason: cancelReason,
             DaGhiSheet: daGhiSheet,
+            // Mặc định bằng daGhiSheet = giữ NGUYÊN ngữ nghĩa các ca cũ (trước khi tách hai cờ, lối tắt hỏi
+            // DaGhiSheet). Ca "đã từng ghi nhưng vừa bấm Đẩy lại" có test riêng ở HubOutboxGsheetHuyTests.
+            DaTungGhiSheet: daTungGhiSheet ?? daGhiSheet,
             FileUrl: fileUrl,
             GsheetDaHuy: gsheetDaHuy,
             GsheetDaCoVanDon: gsheetDaCoVanDon,
@@ -49,6 +53,7 @@ public class ChanDoanDonKetThucTests
             DaDayHub: daDayHub,
             DaDayPhieuHub: daDayPhieuHub,
             GsheetTab: null,
+            GsheetPushGen: 0,
             ReturnRequestCode: returnRequestCode,
             GsheetDaCoDonTraHang: gsheetDaCoDonTraHang);
 
@@ -173,6 +178,23 @@ public class ChanDoanDonKetThucTests
         var p = Make("Đã hủy", cancelReason: "Khách đổi ý", trackingNumber: null, daGhiSheet: false);
         Assert.False(HubOutbox.ConNghiaVuGhiSheet(p, coFileBoSung: false));
         Assert.False(HubOutbox.ConNghiaVuGhiSheet(p, coFileBoSung: true)); // kể cả khi có file: vẫn không ghi
+    }
+
+    [Fact]
+    public void DonHuy_ChuaVanDon_NhungDA_TUNG_GhiSheet_VAN_ConNghiaVuSheet()
+    {
+        // Ca duy nhất hai cờ LỆCH nhau, và là ca nút "Đẩy lại" tạo ra: gsheet_synced_at bị xoá (DaGhiSheet=false)
+        // nhưng dòng trên sheet thì vẫn nằm đó (DaTungGhiSheet=true). Lối tắt phải hỏi cờ THỨ HAI — hỏi cờ thứ
+        // nhất là coi đơn đã xong nghĩa vụ rồi cho dọn, để lại dòng KHÔNG BAO GIỜ được tô đỏ.
+        var p = Make("Đã hủy", cancelReason: "Khách đổi ý", trackingNumber: null,
+            daGhiSheet: false, daTungGhiSheet: true);
+
+        Assert.True(HubOutbox.ConNghiaVuGhiSheet(p, coFileBoSung: false));
+
+        // ĐỐI CHỨNG (chốt hai cờ không bị gộp làm một): cùng ca đó nhưng CHƯA TỪNG có dòng → vẫn by design không ghi.
+        var chuaTung = Make("Đã hủy", cancelReason: "Khách đổi ý", trackingNumber: null,
+            daGhiSheet: false, daTungGhiSheet: false);
+        Assert.False(HubOutbox.ConNghiaVuGhiSheet(chuaTung, coFileBoSung: false));
     }
 
     [Fact]

@@ -32,6 +32,24 @@ public class ReturnCodesRepository
     /// Rộng rãi so với cửa sổ quét 20 ngày: bảng này rất nhẹ (2 chuỗi ngắn/dòng), thà giữ thừa.</summary>
     public const int SoNgayGiuMac = 90;
 
+    /// <summary>
+    /// Số ngày còn THỬ LẠI đẩy một mã lên Google Sheet (tính từ <c>created_at</c>). Quá hạn thì mã nằm im chờ
+    /// <see cref="DonDep"/> dọn — không đẩy nữa, không đếm vào badge "chờ đẩy".
+    /// <para>
+    /// Có hằng này vì từ 09/08/2026 mã bị Apps Script BỎ QUA (không tra thấy mã đơn ở tab nào, hoặc thiếu tiêu
+    /// đề cột) KHÔNG còn bị đánh dấu "đã đẩy" — nếu không có trần thì mã của đơn chưa từng lên sheet sẽ được thử
+    /// lại mỗi lượt cho tới khi <see cref="SoNgayGiuMac"/> dọn, tức 90 ngày gõ cửa Apps Script vô ích.
+    /// </para>
+    /// <para>14 ngày = quá đủ cho hai ca thật cần thử lại: dòng đơn lên sheet ở lượt sau, và người dùng sửa lại
+    /// tiêu đề cột sau khi thấy cảnh báo trong nhật ký.</para>
+    /// </summary>
+    public const int SoNgayThuLaiSheet = 14;
+
+    /// <summary>Điều kiện SQL "còn trong hạn thử lại" — dùng CHUNG cho <see cref="LayMaTraHangChuaDay"/> và
+    /// <see cref="DemChuaDay"/> để danh sách đẩy và con số trên badge không bao giờ lệch nhau.</summary>
+    private const string DieuKienChuaDay =
+        "account_id = $a AND gsheet_synced_at IS NULL AND created_at >= $hanThuLai";
+
     private readonly Database _db;
 
     public ReturnCodesRepository(Database db) => _db = db;
@@ -44,7 +62,10 @@ public class ReturnCodesRepository
     /// <item>Chưa có → thêm mới, <c>gsheet_synced_at</c> NULL (chờ đẩy).</item>
     /// <item>Đã có, mã KHÔNG đổi → KHÔNG chạm dòng ⇒ giữ nguyên cờ đã đẩy (đừng đẩy trùng).</item>
     /// <item>Đã có, mã ĐỔI (yêu cầu được tạo lại) → ghi mã mới + <b>RESET <c>gsheet_synced_at</c> về NULL</b> để
-    /// lượt kế đẩy lại — cùng mẫu <c>SetReturnRequestCodes</c> đang dùng cho <c>hub_synced_at</c>.</item>
+    /// lượt kế đẩy lại — cùng mẫu <c>SetReturnRequestCodes</c> đang dùng cho <c>hub_synced_at</c> — <b>VÀ làm mới
+    /// <c>created_at</c></b>: mã mới là một nghĩa vụ đẩy MỚI, phải được tính hạn thử lại
+    /// (<see cref="SoNgayThuLaiSheet"/>) từ lúc này. Giữ <c>created_at</c> cũ thì bản ghi quá 14 ngày được mở cờ
+    /// rồi rơi thẳng khỏi <see cref="LayMaTraHangChuaDay"/> — cờ mở ra mà không ai đẩy, không log, không badge.</item>
     /// </list>
     /// </summary>
     public KetQuaLuuMaTraHang LuuMaTraHang(
@@ -73,7 +94,8 @@ public class ReturnCodesRepository
     ON CONFLICT(account_id, order_sn) DO UPDATE SET
         code = $code,
         shop_login = COALESCE($shop, return_codes.shop_login),
-        gsheet_synced_at = NULL
+        gsheet_synced_at = NULL,
+        created_at = $now
     WHERE return_codes.code <> $code;";
             cmd.Parameters.AddWithValue("$a", accountId);
             cmd.Parameters.AddWithValue("$sn", sn.Trim());
@@ -90,17 +112,21 @@ public class ReturnCodesRepository
     }
 
     /// <summary>
-    /// Các mã CHƯA đẩy lên Google Sheet của một tài khoản (<c>gsheet_synced_at IS NULL</c>), cũ trước.
+    /// Các mã CHƯA đẩy lên Google Sheet của một tài khoản (<c>gsheet_synced_at IS NULL</c>) và còn trong hạn
+    /// thử lại <see cref="SoNgayThuLaiSheet"/> ngày, cũ trước.
     /// <b>KHÔNG</b> join sang <c>orders</c>: đơn còn hay đã bị dọn đều phải đẩy — đó là toàn bộ mục đích của bảng.
     /// </summary>
-    public IReadOnlyList<(string OrderSn, string Code)> LayMaTraHangChuaDay(long accountId)
+    /// <param name="nowUtc">Mốc "bây giờ" để tính hạn thử lại — null = <see cref="DateTime.UtcNow"/>. Tham số
+    /// hoá chỉ để test được, caller thật KHÔNG truyền.</param>
+    public IReadOnlyList<(string OrderSn, string Code)> LayMaTraHangChuaDay(long accountId, DateTime? nowUtc = null)
     {
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = @"SELECT order_sn, code FROM return_codes
-    WHERE account_id = $a AND gsheet_synced_at IS NULL
+        cmd.CommandText = $@"SELECT order_sn, code FROM return_codes
+    WHERE {DieuKienChuaDay}
     ORDER BY created_at, order_sn;";
         cmd.Parameters.AddWithValue("$a", accountId);
+        cmd.Parameters.AddWithValue("$hanThuLai", HanThuLai(nowUtc));
 
         var list = new List<(string, string)>();
         using var reader = cmd.ExecuteReader();
@@ -115,15 +141,81 @@ public class ReturnCodesRepository
         return list;
     }
 
-    /// <summary>Số mã CHƯA đẩy (dùng cho badge/log — khỏi nạp cả danh sách).</summary>
-    public int DemChuaDay(long accountId)
+    /// <summary>
+    /// Trong <paramref name="cap"/>, có bao nhiêu cặp là MỚI với kho — chưa có <c>order_sn</c> đó, hoặc có rồi
+    /// nhưng mã KHÁC (yêu cầu bị tạo lại). Đây là tín hiệu duy nhất đáng tin để quyết định <b>còn lật trang trả
+    /// hàng nữa hay không</b>: trang vừa đọc còn ra mã mới ⇒ nhiều khả năng trang sau cũng còn.
+    /// <para>
+    /// <b>Vì sao KHÔNG dùng mốc "số yêu cầu" để quyết định độ sâu</b> (bản 09/08 đầu tiên làm vậy và hỏng): mốc
+    /// chỉ null ở lần check ĐẦU TIÊN của mỗi shop. Shop đã chạy từ trước thì mốc luôn khác null, nên luật
+    /// "lần đầu thì quét sâu" không bao giờ chạm tới đúng nhóm shop đang tồn đọng — tức nhóm cần quét sâu nhất.
+    /// Đếm mã mới thì không phụ thuộc mốc, tự dừng khi hết cái mới, và tự chạy lại được nếu lượt trước gãy giữa chừng.
+    /// </para>
+    /// <para>KHÔNG ghi gì — thuần đọc. Danh sách rỗng → 0, không mở kết nối.</para>
+    /// </summary>
+    public int DemMaChuaBiet(long accountId, IReadOnlyList<(string OrderSn, string Code)> cap)
+    {
+        if (cap is null || cap.Count == 0)
+        {
+            return 0;
+        }
+
+        using var conn = _db.OpenConnection();
+        var moi = 0;
+        foreach (var (sn, code) in cap)
+        {
+            if (string.IsNullOrWhiteSpace(sn) || string.IsNullOrWhiteSpace(code))
+            {
+                continue;
+            }
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT code FROM return_codes WHERE account_id = $a AND order_sn = $sn;";
+            cmd.Parameters.AddWithValue("$a", accountId);
+            cmd.Parameters.AddWithValue("$sn", sn.Trim());
+            var cu = cmd.ExecuteScalar() as string;
+            if (cu is null || !string.Equals(cu, code.Trim(), StringComparison.Ordinal))
+            {
+                moi++;
+            }
+        }
+        return moi;
+    }
+
+    /// <summary>Số mã CHƯA đẩy mà CÒN trong hạn thử lại (dùng cho badge/log — khỏi nạp cả danh sách). Cùng điều
+    /// kiện với <see cref="LayMaTraHangChuaDay"/>: badge đếm đúng cái sẽ được đẩy, không đếm mã đã hết hạn.</summary>
+    public int DemChuaDay(long accountId, DateTime? nowUtc = null)
     {
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT COUNT(*) FROM return_codes WHERE account_id = $a AND gsheet_synced_at IS NULL;";
+        cmd.CommandText = $"SELECT COUNT(*) FROM return_codes WHERE {DieuKienChuaDay};";
         cmd.Parameters.AddWithValue("$a", accountId);
+        cmd.Parameters.AddWithValue("$hanThuLai", HanThuLai(nowUtc));
         return Convert.ToInt32(cmd.ExecuteScalar() ?? 0);
     }
+
+    /// <summary>
+    /// Số mã CHƯA đẩy được mà đã QUÁ HẠN thử lại (<see cref="SoNgayThuLaiSheet"/> ngày) — app thôi không đẩy
+    /// nữa, bản ghi nằm im chờ <see cref="DonDep"/> dọn ở <see cref="SoNgayGiuMac"/> ngày.
+    /// <para>
+    /// Có hàm này CHỈ để LOG. Không có nó thì nhóm mã đó biến khỏi badge lẫn khỏi mọi dòng nhật ký đúng vào lúc
+    /// bị bỏ — người dùng nhìn ô "Mã đơn trả hàng" trống trên sheet mà không có cách nào biết app đã thôi thử.
+    /// Đó là kiểu hỏng IM LẶNG mà cả đợt 09/08 đi vá; đừng để nó quay lại bằng chính bản vá.
+    /// </para>
+    /// </summary>
+    public int DemQuaHanThuLai(long accountId, DateTime? nowUtc = null)
+    {
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT COUNT(*) FROM return_codes "
+            + "WHERE account_id = $a AND gsheet_synced_at IS NULL AND created_at < $hanThuLai;";
+        cmd.Parameters.AddWithValue("$a", accountId);
+        cmd.Parameters.AddWithValue("$hanThuLai", HanThuLai(nowUtc));
+        return Convert.ToInt32(cmd.ExecuteScalar() ?? 0);
+    }
+
+    /// <summary>Mốc <c>created_at</c> cũ nhất còn được thử đẩy lại, đã format đúng khuôn ngày trong DB.</summary>
+    private static string HanThuLai(DateTime? nowUtc)
+        => DbSerialization.FormatDate((nowUtc ?? DateTime.UtcNow).AddDays(-SoNgayThuLaiSheet));
 
     /// <summary>
     /// Đánh dấu các mã ĐÃ đẩy lên Google Sheet lúc <paramref name="luc"/> (một transaction). Danh sách rỗng → 0,

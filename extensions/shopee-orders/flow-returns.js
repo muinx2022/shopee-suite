@@ -2,14 +2,78 @@
 // Thân hàm GIỮ NGUYÊN từ background.js (tách 2026-08-06).
 import { send, orderTabId } from "./core.js";
 import { execInTab } from "./exec.js";
-import { RETURNS_URL, RETURN_TAB_RE, SORT_NEWEST_RE, MAX_RETURN_ROWS, MAX_RETURN_HEAD_HTML } from "./constants.js";
+import {
+  RETURNS_URL, RETURN_TAB_RE, SORT_NEWEST_RE, MAX_RETURN_ROWS, MAX_RETURN_PAGES, MAX_RETURN_HEAD_HTML,
+} from "./constants.js";
 import {
   pageLocateReturnTab, pageReturnSummaryText, pageChanDoanTraHang, pageLocateReturnCaseTab,
   pageReturnRowCount, pageLocateSortButton, pageLocateSortOption, pageScanReturnRows,
+  pageReturnListSignature, pageChanDoanPagerTraHang,
 } from "./page-funcs-returns.js";
+import { pageFindNextPage } from "./page-funcs.js";
 import { sleep } from "./shared/util.js";
 import { waitForTabComplete } from "./shared/tab-wait.js";
 import { ensureDbg, trustedClick } from "./shared/dbg-input.js";
+
+// Chờ danh sách trả hàng ĐỔI so với ký hiệu 'before' sau khi bấm "trang sau" (đối xứng waitOrdersChanged của
+// trang đơn). Bỏ trạng thái đang tải ("0|"): giữa hai trang Vue xoá sạch bảng một nhịp rồi mới vẽ trang mới.
+async function waitReturnsChanged(tabId, before, timeoutMs) {
+  const dl = Date.now() + timeoutMs;
+  while (Date.now() < dl) {
+    await sleep(300);
+    let now = "";
+    try { now = (await execInTab(tabId, pageReturnListSignature, [])) || ""; } catch (e) {}
+    if (now.indexOf("0|") === 0) continue;
+    if (now && now !== before) return true;
+  }
+  return false;
+}
+
+// Quét dòng của TRANG HIỆN TẠI, cắt theo phần còn lại của trần tổng.
+async function quetTrangHienTai(tabId, daCo) {
+  const con = MAX_RETURN_ROWS - daCo;
+  if (con <= 0) return [];
+  let rows = "[]";
+  try { rows = (await execInTab(tabId, pageScanReturnRows, [con, MAX_RETURN_HEAD_HTML])) || "[]"; } catch (e) { rows = "[]"; }
+  try { return JSON.parse(rows) || []; } catch (e) { return []; }
+}
+
+// Có nút "trang sau" DÙNG ĐƯỢC không (dùng chung pageFindNextPage với trang đơn — cùng bộ EDS pager).
+async function coTrangSau(tabId) {
+  try { return !!(await execInTab(tabId, pageFindNextPage, [])); } catch (e) { return false; }
+}
+
+// LẬT TRANG: từ trang đang mở, lật tối đa `soTrang` lượt, gom dòng vào `list` (đã có sẵn dòng trang hiện tại).
+// Trả { soTrangLat, coTrangSau, pagerChanDoan } — dừng khi: hết trang / danh sách không đổi (bấm trượt) /
+// chạm trần dòng. KHÔNG bao giờ ném: lật trang là phần MỞ RỘNG, hỏng thì lượt vẫn có dữ liệu trang đầu.
+async function latTrang(tabId, list, soTrang) {
+  let soTrangLat = 0;
+  let pagerChanDoan = null;
+  const tran = Math.min(Math.max(0, soTrang), MAX_RETURN_PAGES);
+  while (soTrangLat < tran && list.length < MAX_RETURN_ROWS) {
+    let sigTruoc = "";
+    try { sigTruoc = (await execInTab(tabId, pageReturnListSignature, [])) || ""; } catch (e) {}
+    let next = null;
+    try { next = await execInTab(tabId, pageFindNextPage, []); } catch (e) { next = null; }
+    if (!next) {
+      // CHỈ chẩn đoán khi chưa lật nổi trang NÀO trong lượt này: đó mới là ca "selector pager của trang trả hàng
+      // khác trang đơn" cần lộ ra. Lật được rồi mới hết nút là đường THÀNH CÔNG (đã tới trang cuối) — bắn chẩn
+      // đoán kèm 4000 ký tự HTML ở đó là báo động giả, mỗi shop mỗi vòng một lần.
+      if (soTrangLat === 0) {
+        try { pagerChanDoan = await execInTab(tabId, pageChanDoanPagerTraHang, [MAX_RETURN_HEAD_HTML]); } catch (e) {}
+      }
+      break;
+    }
+    await ensureDbg(tabId);
+    await trustedClick(tabId, next.x, next.y);
+    if (!(await waitReturnsChanged(tabId, sigTruoc, 10000))) break;
+    soTrangLat++;
+    const them = await quetTrangHienTai(tabId, list.length);
+    if (them.length === 0) break;
+    for (const d of them) list.push(d);
+  }
+  return { soTrangLat: soTrangLat, coTrangSau: await coTrangSau(tabId), pagerChanDoan: pagerChanDoan };
+}
 
 // Bước CUỐI flow shop (bước PHỤ): mở trang "Trả hàng/Hoàn tiền/Hủy" của shop đang mở → ĐỔI SẮP XẾP sang
 // "Ngày yêu cầu (Mới - Cũ)" (mặc định trang là "Ngày đến hạn" — không đổi thì luật "N dòng đầu" của C# bỏ sót
@@ -21,18 +85,17 @@ export async function doReadReturnRequests() {
   const tabId = orderTabId();
   if (tabId == null) { send({ action: "error", message: "chưa có tab shop để check đơn trả hàng" }); return; }
 
-  const traVe = (summary, sortApplied, tabTraHang, list, chanDoan) => send({
+  const traVe = (summary, sortApplied, tabTraHang, list, chanDoan, them) => send({
     action: "pageData",
     kind: "returns",
-    data: JSON.stringify({
+    data: JSON.stringify(Object.assign({
       soYeuCauText: summary || "",
       sortApplied: !!sortApplied,
       tabTraHang: !!tabTraHang,
       list: list || [],
       // Chỉ có mặt ở lượt BỎ (không đọc được ô tổng) — xem pageChanDoanTraHang.
       chanDoan: chanDoan || null,
-    }),
-  });
+    }, them || {})));
 
   // 1) Mở trang trả hàng: ưu tiên BẤM TAB (trusted click, data-testid ổn định); không thấy tab → điều hướng thẳng.
   await ensureDbg(tabId);
@@ -138,7 +201,7 @@ export async function doReadReturnRequests() {
     send({ action: "progress", message: "KHÔNG đổi được sắp xếp 'Ngày yêu cầu (Mới - Cũ)' — đọc theo thứ tự đang có." });
   }
 
-  // 5) Đọc lại ô tổng (sau khi danh sách vẽ lại) + quét dòng.
+  // 5) Đọc lại ô tổng (sau khi danh sách vẽ lại) + quét dòng TRANG ĐẦU.
   try { summary = (await execInTab(tabId, pageReturnSummaryText, [])) || summary; } catch (e) {}
   const rdl = Date.now() + 8000;
   while (Date.now() < rdl) {
@@ -147,10 +210,41 @@ export async function doReadReturnRequests() {
     if (n > 0) break;
     await sleep(500);
   }
-  let rows = "[]";
-  try { rows = (await execInTab(tabId, pageScanReturnRows, [MAX_RETURN_ROWS, MAX_RETURN_HEAD_HTML])) || "[]"; } catch (e) { rows = "[]"; }
-  let list = [];
-  try { list = JSON.parse(rows) || []; } catch (e) { list = []; }
+  const list = await quetTrangHienTai(tabId, 0);
 
-  traVe(summary, sortApplied, tabTraHang, list);
+  // Lượt này CHỈ trang đầu. C# đọc ô tổng rồi so với mốc mới biết cần lật mấy trang (luật SoTrangCanDoc) — nên
+  // phần sâu đi bằng lệnh THỨ HAI `readReturnRequestsMore` trên chính trang đang mở, KHÔNG mở lại trang lần nữa.
+  // Cố ý không đoán trước độ sâu ở đây: đoán thừa thì mọi shop mỗi vòng đều lật trang vô ích.
+  traVe(summary, sortApplied, tabTraHang, list, null, {
+    soTrangDaDoc: 1,
+    coTrangSau: await coTrangSau(tabId),
+  });
+}
+
+// Lượt ĐỌC THÊM (bước 2 của check trả hàng): C# đã biết số yêu cầu + mốc cũ nên tự tính được cần lật mấy trang,
+// gửi `readReturnRequestsMore {maxPages}`. Trang trả hàng ĐANG MỞ sẵn (đúng tab, đúng sắp xếp) từ lượt trước —
+// hàm này KHÔNG điều hướng, KHÔNG chọn lại tab, KHÔNG đổi lại sắp xếp: chỉ lật trang và quét.
+// Trả về CÙNG khuôn `pageData kind:"returns"` (C# chỉ dùng phần `list`).
+export async function doReadReturnRequestsMore(maxPages) {
+  const tabId = orderTabId();
+  const traVe = (list, them) => send({
+    action: "pageData",
+    kind: "returns",
+    data: JSON.stringify(Object.assign({
+      soYeuCauText: "", sortApplied: true, tabTraHang: true, list: list || [], chanDoan: null,
+    }, them || {})),
+  });
+  if (tabId == null) { traVe([], { soTrangDaDoc: 0, coTrangSau: false }); return; }
+
+  // Rơi /verify giữa chừng → báo captcha rồi thôi (C# coi như bỏ phần đọc thêm, phần trang đầu vẫn giữ).
+  let url = "";
+  try { url = (await chrome.tabs.get(tabId)).url || ""; } catch (e) {}
+  if (/\/verify/i.test(url)) { send({ action: "captcha", message: url }); return; }
+
+  const list = [];
+  const kq = await latTrang(tabId, list, maxPages);
+  if (kq.pagerChanDoan) {
+    send({ action: "progress", message: "Trả hàng: không thấy nút 'trang sau' — khối phân trang: " + kq.pagerChanDoan });
+  }
+  traVe(list, { soTrangDaDoc: kq.soTrangLat, coTrangSau: kq.coTrangSau });
 }

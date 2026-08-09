@@ -168,7 +168,7 @@ public class TraHangLuuTests
         repo.SetReturnRequestCodes(1, new[] { ("D1", "R001") });
         repo.MarkHubSynced(1, new[] { "D1" }, DateTime.UtcNow);
         repo.MarkGsheetSynced(1, "D1", null, daHuy: false, coVanDon: false, coUocTinh: false,
-            coDonTraHang: true, tab: "Tháng 07-2026", at: DateTime.UtcNow);
+            coDonTraHang: true, tab: "Tháng 07-2026", at: DateTime.UtcNow, pushGen: 0);
         // Vừa đẩy sheet KÈM mã → cờ = 1 (đọc đúng cột, không lệch chỉ số reader).
         Assert.Equal(1, Assert.Single(repo.GetForGsheetPush(1)).GsheetDaCoDonTraHang);
 
