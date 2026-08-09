@@ -1,5 +1,4 @@
-using XuLyDonShopee.App.Services;
-using XuLyDonShopee.Core.Models;
+﻿using XuLyDonShopee.App.Services;
 
 namespace XuLyDonShopee.Tests;
 
@@ -14,7 +13,24 @@ namespace XuLyDonShopee.Tests;
 /// </summary>
 public class NotifyDonTraKhoMaTests
 {
-    private static readonly DateTime Luc = new(2026, 7, 30, 10, 0, 0, DateTimeKind.Utc);
+    /// <summary>
+    /// Mốc ghi mã trả hàng — phải là mốc <b>TƯƠNG ĐỐI</b> ("vừa ghi hôm qua"), KHÔNG được đóng cứng ngày.
+    /// <para>
+    /// <c>HubOutbox.PushReturnCodesToGsheetAsync</c> gọi <c>ReturnCodes.DonDep(UtcNow - SoNgayGiuMac)</c> ngay dòng
+    /// ĐẦU (trước cả cửa kiểm URL) ⇒ ngày đóng cứng sẽ trôi ra ngoài cửa sổ 90 ngày và bản ghi bị xoá NGAY trước
+    /// khi đếm. Bản cũ ghi <c>2026-07-30</c>: đã đo, từ <b>2026-10-28</b> là
+    /// <c>BadgeChoDay_DemCaMaTraHangConTon</c> đỏ vĩnh viễn với <c>Assert.False() Failure — Actual: null</c>
+    /// (trùng y hệt thông điệp của lỗi đua PushGate vừa vá) và <c>ChuaCoUrlSheet_…</c> đỏ ở <c>Assert.Single</c>.
+    /// </para>
+    /// Dùng thẳng <c>UtcNow</c> (không trừ lùi ngày nào) để KHÔNG ghép ngầm với giả định "cửa sổ giữ ≥ 1 ngày";
+    /// <c>created_at</c> là thứ duy nhất mốc này đi vào — không truy vấn nào của kho mã lọc theo thời gian.
+    /// </summary>
+    private static readonly DateTime Luc = DateTime.UtcNow;
+
+    /// <summary>Id tài khoản RIÊNG của lớp này — xem <see cref="TempDatabase.ThemTaiKhoanIdRieng{TLopTest}"/> (lấy id 1
+    /// mặc định thì lớp này và <c>HubOutboxWorkerRoundTests</c> giành <c>PushGate(1, Gsheet)</c> của nhau).
+    /// <b>Chép lớp test này đi nơi khác thì PHẢI đổi số này</b> — trùng id là dựng lại đúng cuộc đua đó.</summary>
+    private const long AccId = 4101;
 
     // ===== Nguồn của tin: kho mã, KHÔNG phải bảng orders =====
 
@@ -25,7 +41,7 @@ public class NotifyDonTraKhoMaTests
     {
         using var temp = new TempDatabase();
         var services = new AppServices(temp.Path);
-        var accId = services.Accounts.Insert(new Account { Email = "shop-test@example.com" });
+        var accId = TempDatabase.ThemTaiKhoanIdRieng<NotifyDonTraKhoMaTests>(services.Database, AccId);
         var cap = new[] { ("260715QNAP2587", "2607210QK4M8T21") };
 
         var kqMa = services.ReturnCodes.LuuMaTraHang(accId, cap, "alina99.store", Luc);
@@ -109,7 +125,7 @@ public class NotifyDonTraKhoMaTests
     {
         using var temp = new TempDatabase();
         var services = new AppServices(temp.Path);
-        var accId = services.Accounts.Insert(new Account { Email = "shop-test@example.com" });
+        var accId = TempDatabase.ThemTaiKhoanIdRieng<NotifyDonTraKhoMaTests>(services.Database, AccId);
         services.Settings.SetGsheetWebAppUrl("http://127.0.0.1:9/"); // cổng chết → đẩy hỏng, mã còn nguyên
         services.ReturnCodes.LuuMaTraHang(accId, new[] { ("D1", "R1") }, "shop", Luc);
 
@@ -127,7 +143,7 @@ public class NotifyDonTraKhoMaTests
     {
         using var temp = new TempDatabase();
         var services = new AppServices(temp.Path);
-        var accId = services.Accounts.Insert(new Account { Email = "shop-test@example.com" });
+        var accId = TempDatabase.ThemTaiKhoanIdRieng<NotifyDonTraKhoMaTests>(services.Database, AccId);
         services.ReturnCodes.LuuMaTraHang(accId, new[] { ("D1", "R1") }, "shop", Luc);
 
         var worker = new HubOutboxWorker(services);
