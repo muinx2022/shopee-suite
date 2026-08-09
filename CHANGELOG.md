@@ -5,6 +5,50 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Phiên bản & cập nhật. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.8.6 — 2026-08-09
+
+> ⚠ **Bản này cần hai việc TAY, làm xong mới ăn đủ:**
+> 1. **Nạp lại extension** trên từng máy — có lệnh cầu nối mới cho việc lật trang danh sách trả hàng. Chưa nạp
+>    lại thì mọi thứ khác vẫn chạy, riêng phần lật trang tự tắt (an toàn, không treo).
+> 2. **Dán lại Apps Script** (`orders/gsheet-apps-script/Code.gs`) rồi Triển khai phiên bản mới.
+>
+> Bản 1.8.5 chưa từng phát hành nên máy đang ở 1.8.4 sẽ nhận cả phần của 1.8.5 lẫn 1.8.6 trong một lần cập nhật.
+
+**Đơn hàng — check đơn trả hàng thôi bỏ sót**
+
+- Trước đây số yêu cầu trả hàng hiển thị trên trang được dùng làm mốc: số **không đổi** hoặc **giảm** thì app
+  không đọc dòng nào. Nhưng đó là số **đang tồn tại**, không phải bộ đếm cộng dồn — yêu cầu xử xong thì rớt
+  khỏi danh sách. Nên "3 cái mới + 3 cái vừa xử xong" ra đúng con số cũ, và app bỏ qua sạch. Mốc thì vẫn nhảy
+  nên **không lượt nào quay lại nữa**. Nay mọi lượt đều đọc hết số dòng đọc được — mà extension vốn đã cào sẵn
+  chúng trong cùng một lượt, nên không tốn thêm giây nào của trình duyệt.
+- **Đọc được nhiều trang**: lần đầu mỗi shop quét sâu (tối đa 10 trang) để vét hết tồn đọng cũ; các lượt sau
+  chỉ đọc trang đầu như trước. Trước đây shop có 141 hay 340 yêu cầu thì phần ngoài trang 1 vĩnh viễn không
+  được đọc tới.
+- **Mã không còn bị nuốt khi ghi sheet**: Apps Script có thể báo "đã nhận" nhưng thực ra không ghi được gì
+  (chưa thấy dòng của đơn, hoặc thiếu tiêu đề cột). App trước đây vẫn đánh dấu "đã đẩy" rồi thôi. Nay giữ lại
+  để lượt sau gửi tiếp, tối đa 14 ngày.
+- **Shop lỗi địa chỉ vẫn được check trả hàng**. Trước đây shop nào không đặt được địa chỉ lấy hàng là bị bỏ qua
+  cả bước này — mà đó lại là lỗi thường trực. Trang trả hàng chẳng liên quan gì tới địa chỉ lấy hàng.
+
+**Đơn hàng — nút "Check" ngay trên cảnh báo lỗi địa chỉ**
+
+- Mỗi dòng "Cảnh báo: Lỗi địa chỉ" nay có nút **Check**: chạy lại đúng bước đặt địa chỉ cho riêng shop đó,
+  **không** đọc đơn, **không** chuẩn bị hàng, **không** in phiếu.
+- Đặt được ⇒ cảnh báo tự biến mất và báo lên Hub, các máy khác cũng tự gỡ. Vẫn lỗi ⇒ giữ cảnh báo kèm lý do
+  hiện ngay tại chỗ. Gặp captcha ⇒ nói rõ là **chưa kiểm được**, không kết luận bừa.
+- Nút chỉ bấm được khi **không có vòng nào đang chạy** (trình duyệt chỉ mở được một phiên cho mỗi hồ sơ); đang
+  chạy thì nút báo rõ phải đợi, không im lặng.
+- Cookie hồ sơ còn hạn thì bấm Check chỉ mở bản sạch — không phải đăng nhập lại, không phải nhập mã.
+
+**Đơn hàng — hai lỗ quanh nút "Đẩy lại" ở màn chẩn đoán đơn kẹt**
+
+- Bấm "Đẩy lại" cho một đơn **đã hủy nhưng đã có dòng trên sheet** trước đây khiến app tưởng đơn đó "không
+  thuộc sổ theo dõi" ⇒ xoá đơn khỏi máy mà không gửi gì ⇒ **dòng cũ trên sheet nằm trắng vĩnh viễn**, không ai
+  tô đỏ nữa. Nay app phân biệt "đang coi là đã ghi" với "đã từng có dòng", nên dòng cũ vẫn được tô đỏ đúng chỗ.
+- Bấm "Đẩy lại" **đúng lúc** một lượt ghi sheet đang bay (mỗi 2 phút một lượt) thì lượt đó đóng lại đúng bộ cờ
+  vừa mở ⇒ cú bấm bị nuốt im lặng trong khi màn hình đã báo "đã xếp vào hàng chờ". Nay lượt đang bay nhận ra
+  dữ liệu đã đổi và không đóng cờ; đơn được giữ lại để lượt sau gửi thật, có ghi rõ trong nhật ký.
+
 ## v1.8.5 — 2026-08-08
 
 **Cập nhật app — gom về ĐÚNG MỘT nút trên thanh ribbon**
