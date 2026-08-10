@@ -51,6 +51,25 @@ internal enum SauDocTraHang
 internal readonly record struct LuotDocTraHang(SauDocTraHang Nhanh, int SoMoi);
 
 /// <summary>
+/// Kết quả lượt đưa trang chọn shop (<c>/portal/shop</c>) về trạng thái SẴN SÀNG — xem
+/// <see cref="ShopFlowRunner.DongTabShopAsync"/>. Hai lối hỏng phải TÁCH ĐÔI vì người trực chữa hai kiểu, và vì
+/// vòng chạy quyết định khác nhau (mở lại trình duyệt cứu được ca cầu nối, không cứu được trang hỏng).
+/// </summary>
+internal enum KetQuaVePicker
+{
+    /// <summary>Trang chọn shop đã sẵn sàng cho shop kế.</summary>
+    VeDuoc,
+
+    /// <summary>KHÔNG lượt thử nào gửi đi được vì cầu nối không sống lại ⇒ <b>chưa có bằng chứng nào</b> nói trang
+    /// chọn shop hỏng. Bệnh nằm ở WebSocket/trình duyệt.</summary>
+    CauNoiChet,
+
+    /// <summary>Có ít nhất một lượt gửi đi được lúc cầu nối đang sống mà extension vẫn không đưa được trang chọn
+    /// shop về trạng thái sạch (trả <c>ok=false</c>, hoặc im lặng tới hết hạn chặng).</summary>
+    PickerHong,
+}
+
+/// <summary>
 /// <b>FLOW của MỘT shop trên tab đang mở</b>: đọc đơn tab "Tất cả" → lấy "Số tiền cuối cùng" → callback lưu
 /// DB/GSheet/hub → (nếu có đơn Chờ Lấy Hàng) đặt địa chỉ lấy hàng + Chuẩn bị hàng từng đơn + in phiếu + revert địa
 /// chỉ → bước BÙ: tự tải lại phiếu THIẾU của shop (<see cref="TaiLaiPhieuThieuAsync"/>) → bước PHỤ cuối: check đơn
@@ -155,6 +174,19 @@ internal sealed class ShopFlowRunner
     /// KHÔNG được coi là "đã hết lỗi" (chưa chứng minh được gì).</summary>
     public string? PickupOkShop { get; set; }
 
+    /// <summary>
+    /// <b>Shop đang chạy ĐÃ GỬI lệnh <c>prepareNextOrder</c> lần nào chưa.</b> Bật NGAY TRƯỚC mỗi lần gửi (không
+    /// phải sau khi nhận trả lời): lệnh bay sang extension rồi cầu nối mới đứt cũng vẫn là "đã gửi" — chính là ca
+    /// <see cref="CauNoiRotGiuaChangException"/>, nơi ta KHÔNG biết extension đã chuẩn bị hàng tới đâu.
+    /// <para><b>Vì sao có cờ này:</b> vòng ngoài (<see cref="OrdersBridgeSession.RunAllShopsAsync"/>) cho shop rơi
+    /// vì cầu nối một lượt CHẠY LẠI cuối vòng. Chạy lại một shop đã gửi <c>prepareNextOrder</c> là CHUẨN BỊ HÀNG +
+    /// IN PHIẾU thêm lần nữa trên đơn THẬT (đếm trùng, phiếu trùng) — cờ này là chốt chặn duy nhất của ràng buộc đó.</para>
+    /// <para><b>Reset ở ĐẦU mỗi shop</b> — cả ở <see cref="RunShopOrdersAsync"/> (mọi caller) lẫn ở đầu mỗi vòng
+    /// lặp shop phía phiên (shop có thể hỏng TRƯỚC khi tới đây, vd ngay ở <c>openShopDetail</c>). Quên reset là
+    /// shop sau thừa hưởng cờ của shop trước — đúng lớp lỗi đã cắn với <see cref="PickupOkShop"/>.</para>
+    /// </summary>
+    public bool DaGuiChuanBiHang { get; set; }
+
     private void L(string m) => _log?.Invoke(m);
 
     /// <summary>
@@ -211,10 +243,11 @@ internal sealed class ShopFlowRunner
     }
 
     /// <summary>
-    /// BƯỚC ĐẶT ĐỊA CHỈ LẤY HÀNG trên tab shop ĐANG MỞ — tách riêng để hai đường dùng CHUNG: vòng shop thường
-    /// (<see cref="ThanShopAsync"/>) và lượt kiểm tra lại theo lệnh người dùng
-    /// (<see cref="KiemTraLaiDiaChiAsync"/>). Hai nơi tự gửi lệnh riêng là hai luật trôi lệch — mà bên trong
-    /// extension bước này còn có dọn modal chắn + thử lại một lượt, càng không được chép đôi.
+    /// BƯỚC ĐẶT ĐỊA CHỈ LẤY HÀNG trên tab shop ĐANG MỞ — tách riêng để HAI nhánh của
+    /// <see cref="ThanShopAsync"/> dùng CHUNG: nhánh có đơn (đặt địa chỉ rồi xử đơn) và nhánh
+    /// <see cref="BuocDiaChi.ThuLaiChoCanhBao"/> (shop treo banner mà lượt này không xử đơn). Hai nơi tự gửi
+    /// lệnh riêng là hai luật trôi lệch — mà bên trong extension bước này còn có dọn modal chắn + thử lại một
+    /// lượt, càng không được chép đôi.
     /// </summary>
     private async Task<SauDatDiaChi> DatDiaChiAsync(CancellationToken ct)
     {
@@ -239,48 +272,6 @@ internal sealed class ShopFlowRunner
         catch (TimeoutException) { L("Set địa chỉ khác: quá hạn — bỏ qua."); }
     }
 
-    /// <summary>
-    /// LƯỢT KIỂM TRA LẠI ĐỊA CHỈ theo lệnh người dùng (nút "Check" trên banner lỗi địa chỉ): CHỈ chạy bước đặt
-    /// địa chỉ trên tab shop đang mở — KHÔNG đọc đơn, KHÔNG chuẩn bị hàng, KHÔNG in phiếu, KHÔNG check trả hàng.
-    /// <para>
-    /// Đặt <see cref="PickupOkShop"/> / <see cref="PickupFailedShop"/> y HỆT vòng shop thường, để vòng ngoài
-    /// dùng lại NGUYÊN đường gỡ banner + báo Hub sẵn có (<c>GoBannerLoiDiaChi</c>). Cố ý KHÔNG viết đường gỡ
-    /// banner thứ hai: hai đường gỡ là hai luật rev/tombstone trôi lệch nhau, mà lớp bug đó đã cắn hai lần.
-    /// </para>
-    /// <para>
-    /// <b>Captcha thì KHÔNG kết luận</b>: không đặt cả hai cờ. Coi captcha là "vẫn lỗi" thì banner bị giữ oan;
-    /// coi là "hết lỗi" thì gỡ banner của shop chưa hề kiểm được. Không biết thì nói không biết.
-    /// </para>
-    /// </summary>
-    /// <returns><c>true</c> = shop ĐẶT ĐƯỢC địa chỉ (đủ căn cứ gỡ banner).</returns>
-    public async Task<bool> KiemTraLaiDiaChiAsync(string shopLogin, CancellationToken ct)
-    {
-        // Nhãn có thể RỖNG (picker không đọc được tên) — vẫn phải là chuỗi KHÁC null, y như vòng shop thường,
-        // kẻo tín hiệu (null = không có gì) mất theo cái nhãn.
-        var nhan = string.IsNullOrWhiteSpace(shopLogin) ? "(không rõ shop)" : shopLogin;
-        PickupOkShop = null;
-        PickupFailedShop = null;
-
-        L($"Kiểm tra lại địa chỉ lấy hàng ({_province}) cho shop {nhan}...");
-        var quyetDinh = await DatDiaChiAsync(ct).ConfigureAwait(false);
-
-        if (quyetDinh == SauDatDiaChi.DungViCaptcha)
-        {
-            L($"PHÁT HIỆN captcha khi kiểm tra lại địa chỉ shop {nhan} — KHÔNG kết luận được, GIỮ NGUYÊN banner.");
-            return false;
-        }
-        if (quyetDinh == SauDatDiaChi.DungViDiaChi)
-        {
-            PickupFailedShop = nhan;
-            L($"⛔ Kiểm tra lại: VẪN không đặt được địa chỉ lấy hàng ({_province}) cho shop {nhan} — giữ banner.");
-            return false;
-        }
-
-        PickupOkShop = nhan;
-        L($"✓ Kiểm tra lại: shop {nhan} ĐẶT ĐƯỢC địa chỉ lấy hàng ({_province}) — gỡ banner + báo Hub.");
-        return true;
-    }
-
     // ── GĐ3: đọc đơn (Phần A) + xử đơn (Phần B) trên tab shop đang mở ───────────────────────────────────
 
     /// <summary>
@@ -299,6 +290,10 @@ internal sealed class ShopFlowRunner
     /// </summary>
     public async Task<(int Orders, int Slips)> RunShopOrdersAsync(string shopId, string shopLogin, int toShip, CancellationToken ct)
     {
+        // Shop MỚI bắt đầu ⇒ chưa gửi lệnh chuẩn bị hàng nào. Reset ở đây để MỌI caller (vòng chính, hàng đợi
+        // thử lại, đường "Chạy thử") đều sạch cờ, không ai phải nhớ tự dọn — xem xmldoc của DaGuiChuanBiHang.
+        DaGuiChuanBiHang = false;
+
         var kq = await ThanShopAsync(shopId, shopLogin, toShip, ct).ConfigureAwait(false);
 
         // Bọc kín: lỗi/timeout/captcha ở bước phụ KHÔNG được phá phần chuẩn bị hàng + in phiếu đã xong ở trên,
@@ -436,6 +431,10 @@ internal sealed class ShopFlowRunner
             {
                 ct.ThrowIfCancellationRequested();
                 var prepareTcs = _ch.ArmPrepare();
+                // BẬT TRƯỚC KHI GỬI, không phải sau khi nhận: lệnh này CHUẨN BỊ HÀNG + IN PHIẾU trên đơn THẬT, nên
+                // hễ nó đã rời khỏi C# là shop này VĨNH VIỄN mất quyền được chạy lại trong vòng (dù cầu nối có rớt
+                // ngay sau đó và ta không bao giờ biết extension làm tới đâu). Xem DaGuiChuanBiHang.
+                DaGuiChuanBiHang = true;
                 await _ch.SendAsync(new { action = "prepareNextOrder" }).ConfigureAwait(false);
                 // 300s: extension chờ Shopee tạo vận đơn (≤90s) TRƯỚC khi in, rồi chờ tab phiếu (≤120s) — nới hạn cho đủ.
                 var prep = await _ch.AwaitAsync(prepareTcs, OrdersBridgeChannel.ChoChang.Prepare, ct).ConfigureAwait(false);
@@ -757,8 +756,10 @@ internal sealed class ShopFlowRunner
         // luật này KHÔNG phụ thuộc markup nên còn đúng cả khi họ đổi giao diện lần nữa.
         if (TraHangParser.NghiSaiTabTheoDuLieu(doc.Dong))
         {
-            L($"⚠ Check đơn trả hàng [{shopLogin}]: extension báo đúng tab nhưng {doc.Dong.Count} dòng đọc được ĐỀU là "
-              + $"ĐƠN HỦY (0 dòng có mã yêu cầu) — {luot.SoMoi} nhiều khả năng là số của tab khác → BỎ LƯỢT, mốc giữ nguyên.");
+            var soHuy = TraHangParser.GhepCap(doc.Dong).BoQuaDonHuy;
+            L($"⚠ Check đơn trả hàng [{shopLogin}]: extension báo đúng tab nhưng {soHuy}/{doc.Dong.Count} dòng đọc "
+              + $"được là ĐƠN HỦY (tab trả hàng đúng thì phải là 0) — {luot.SoMoi} nhiều khả năng là số của tab "
+              + "khác → BỎ LƯỢT, mốc giữ nguyên.");
             return;
         }
 
@@ -954,47 +955,93 @@ internal sealed class ShopFlowRunner
         }
     }
 
-    /// <summary>Số lần gửi <c>closeShopTab</c> tối đa cho MỘT shop: lần đầu + đúng MỘT lần thử lại.</summary>
-    private const int SoLanThuDongTabShop = 2;
+    /// <summary>
+    /// Số lần gửi <c>closeShopTab</c> tối đa cho MỘT shop. Nới 2 → 3 ngày 10/08/2026: trình duyệt của vòng chạy bị
+    /// dựng lại network service đều đặn ~240s/lần, nên một lượt thử rất dễ rơi TRÚNG cú đứt và chết tức khắc —
+    /// 16:17:15 lượt 2/2 không hề chạy trọn, vòng tuyên bố "không về được picker" rồi bỏ nốt shop cuối.
+    /// </summary>
+    internal const int SoLanThuDongTabShop = 3;
 
     /// <summary>
-    /// Đóng tab shop rồi đưa picker <c>/portal/shop</c> về trạng thái SẴN SÀNG cho shop kế. Trả <c>false</c> khi
-    /// vẫn không sẵn sàng sau <see cref="SoLanThuDongTabShop"/> lần — caller DỪNG vòng kèm đúng lý do.
+    /// Hạn chờ CẦU NỐI sống lại TRƯỚC mỗi lượt <c>closeShopTab</c>. Ngắn hơn
+    /// <see cref="OrdersBridgeChannel.ChoNoiLai"/> (90s) vì ở đây có tới <see cref="SoLanThuDongTabShop"/> lượt:
+    /// 3×45s chờ nối + 3×30s hạn chặng ≈ 225s, vẫn nằm dưới nhịp dựng lại network service (~240s) đo được — tức
+    /// lượt thử cuối còn ở trong CÙNG cửa sổ sống với lượt đầu, không phải chờ sang chu kỳ đứt kế tiếp.
+    /// <para>45s cũng rộng gấp rưỡi mức đo thật: extension nối lại trong 0–30s sau mỗi cú đứt.</para>
+    /// </summary>
+    internal static readonly TimeSpan ChoCauNoiTruocLuotDongTab = TimeSpan.FromSeconds(45);
+
+    /// <summary>
+    /// Đóng tab shop rồi đưa picker <c>/portal/shop</c> về trạng thái SẴN SÀNG cho shop kế. Thử tối đa
+    /// <see cref="SoLanThuDongTabShop"/> lượt, mỗi lượt CHỜ cầu nối sống lại trước
+    /// (<see cref="ChoCauNoiTruocLuotDongTab"/>) rồi mới gửi — caller DỪNG vòng / mở lại trình duyệt kèm đúng lý do.
     /// <para>
-    /// <b>Vì sao gửi LẠI chính <c>closeShopTab</c> làm bước hồi phục</b> (chứ không thêm lệnh mới): ở lần hai,
+    /// <b>Vì sao gửi LẠI chính <c>closeShopTab</c> làm bước hồi phục</b> (chứ không thêm lệnh mới): ở lượt sau,
     /// <c>shopTabId</c> bên extension đã null nên <c>doCloseShopTab</c> rơi vào nhánh khác hẳn — điều hướng THẲNG
     /// <c>listTabId</c> về <c>/portal/shop</c>, chờ tab load xong rồi <c>ensureShopPicker</c>. Đó đúng là "đưa
     /// picker về trạng thái sạch", dùng ngay đường đã có thay vì đẻ thêm một lệnh cầu nối phải nuôi.
     /// </para>
-    /// <para>Hết giờ (30s/lần) KHÔNG ném ra ngoài — nó chỉ là một lần thử trượt, cùng nghĩa với <c>ok=false</c>.</para>
+    /// <para>
+    /// <b>Không lượt nào GỬI ĐI ĐƯỢC ⇒ <see cref="KetQuaVePicker.CauNoiChet"/>, KHÔNG phải picker hỏng.</b> Đổ oan
+    /// cho picker là lần sửa sau đi nhầm chỗ (nhật ký 16:17:15 ngày 10/08/2026 nói "Không quay lại được trang chọn
+    /// shop" trong khi thủ phạm là WebSocket vừa sập).
+    /// </para>
+    /// <para>Hết giờ (30s/lượt) KHÔNG ném ra ngoài — nó chỉ là một lượt trượt, cùng nghĩa với <c>ok=false</c>.</para>
     /// </summary>
-    public async Task<bool> DongTabShopAsync(CancellationToken ct)
+    /// <param name="ct">Hủy của phiên (người dùng bấm Dừng) — vẫn ném <see cref="OperationCanceledException"/>.</param>
+    /// <param name="choCauNoi">Hạn chờ cầu nối sống lại mỗi lượt; mặc định
+    /// <see cref="ChoCauNoiTruocLuotDongTab"/>. CHỈ test rót hạn ngắn để khỏi chờ thật 45s.</param>
+    public async Task<KetQuaVePicker> DongTabShopAsync(CancellationToken ct, TimeSpan? choCauNoi = null)
     {
+        var han = choCauNoi ?? ChoCauNoiTruocLuotDongTab;
+
+        // Chỉ còn true khi KHÔNG lượt nào gửi đi được — đó mới là ca "cầu nối chết".
+        var chuaLuotNaoGuiDuoc = true;
+
         for (var lan = 1; lan <= SoLanThuDongTabShop; lan++)
         {
-            var closeTcs = _ch.ArmCloseShop();
-            await _ch.SendAsync(new { action = "closeShopTab" }).ConfigureAwait(false);
+            if (!await _ch.ChoNoiLaiAsync(han, ct).ConfigureAwait(false))
+            {
+                L($"closeShopTab (lần {lan}/{SoLanThuDongTabShop}): cầu nối chưa sống lại sau "
+                  + $"{han.TotalSeconds:0}s — KHÔNG đốt lượt thử này.");
+                continue;
+            }
 
+            var closeTcs = _ch.ArmCloseShop();
             var ok = false;
             try
             {
+                // TimeSpan.Zero: vừa chờ nối xong ngay trên kia rồi, để SendAsync chờ NỐT một hạn 90s nữa là kéo
+                // dài lượt hỏng gấp ba. Socket chết trong kẽ hở giữa hai dòng thì ném ngay — bắt ở dưới.
+                await _ch.SendAsync(new { action = "closeShopTab" }, TimeSpan.Zero).ConfigureAwait(false);
+                chuaLuotNaoGuiDuoc = false;
                 ok = await _ch.AwaitAsync(closeTcs, OrdersBridgeChannel.ChoChang.CloseShop, ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (InvalidOperationException ex)
+            {
+                // Socket chết đúng kẽ hở giữa lượt kiểm DaNoi và lúc gửi — vẫn là bệnh cầu nối, không phải picker.
+                L($"closeShopTab (lần {lan}/{SoLanThuDongTabShop}) không gửi đi được: {ex.Message}");
+                continue;
             }
             catch (TimeoutException)
             {
+                // Gồm cả CauNoiRotGiuaChangException (kế thừa TimeoutException). Lệnh ĐÃ bay đi nên lượt này vẫn
+                // tính là "gửi được": im lặng tới hết hạn là chuyện của extension/trang, không phải của socket.
                 L($"closeShopTab quá hạn (lần {lan}/{SoLanThuDongTabShop}).");
             }
 
             if (ok)
             {
-                return true;
+                return KetQuaVePicker.VeDuoc;
             }
             if (lan < SoLanThuDongTabShop)
             {
                 L("closeShopTab báo CHƯA về được trang chọn shop — thử đưa picker về trạng thái sạch một lần nữa.");
             }
         }
-        return false;
+
+        return chuaLuotNaoGuiDuoc ? KetQuaVePicker.CauNoiChet : KetQuaVePicker.PickerHong;
     }
 
     /// <summary>

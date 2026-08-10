@@ -88,7 +88,12 @@ public static partial class OrdersModuleHost
             if (!string.IsNullOrWhiteSpace(baseDir))
             {
                 var profilesRoot = Path.Combine(baseDir, "profiles");
-                BraveFleet.AddManagedRoot(profilesRoot);
+                // CHỈ QUÉT LÚC KHỞI ĐỘNG. Module Đơn hàng không gọi BraveFleet.RegisterActiveProfile (chỉ
+                // MultiBrave/UpdateProduct gọi) ⇒ với nhịp dọn định kỳ, trình duyệt ĐANG chạy vòng shop của
+                // Đơn hàng trông y hệt mồ côi và sẽ bị giết cả cây. Rác của lần chạy trước vẫn được dọn ở
+                // StartupSweep ngay dưới; trong lúc chạy đã có lưới riêng của module (BrowserProfileGuard
+                // trước khi phóng, kill theo --user-data-dir khi đóng phiên, Job Object khi app chết).
+                BraveFleet.AddManagedRoot(profilesRoot, chiQuetLucKhoiDong: true);
             }
 
             var swept = BraveFleet.StartupSweep();

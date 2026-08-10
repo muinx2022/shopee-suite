@@ -37,21 +37,34 @@ public static class BraveFleet
 
     // Root phụ (vd %APPDATA%\XuLyDonShopee\profiles của module Đơn hàng) — đăng ký lúc boot qua
     // AddManagedRoot. Sweep chỉ đụng browser có --user-data-dir nằm dưới các root này.
+    // GIÁ TRỊ = phạm vi quét: 0 = quét CẢ định kỳ lẫn lúc khởi động; 1 = CHỈ quét lúc khởi động.
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> ExtraManagedRoots =
         new(StringComparer.OrdinalIgnoreCase);
+
+    private const byte QuetDinhKy = 0;
+    private const byte ChiQuetLucKhoiDong = 1;
 
     // Profile của các session ĐANG SỐNG (đăng ký lúc phóng Brave, gỡ lúc đóng). Sweep CHỪA các dir này.
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> ActiveProfiles =
         new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>Tiến trình vừa sinh dưới ngưỡng này thì CHỪA ở nhịp định kỳ — nó có thể đang trong khoảng
+    /// giữa "đã phóng" và "kịp đăng ký profile sống".</summary>
+    private static readonly TimeSpan TuoiToiThieuCoiLaMoCoi = TimeSpan.FromSeconds(60);
+
     /// <summary>Thêm thư mục gốc profile do module khác quản lý (vd Đơn hàng). Path được chuẩn hoá;
-    /// gọi trước <see cref="StartupSweep"/> để lần quét đầu phủ luôn root này. An toàn gọi nhiều lần.</summary>
-    public static void AddManagedRoot(string path)
+    /// gọi trước <see cref="StartupSweep"/> để lần quét đầu phủ luôn root này. An toàn gọi nhiều lần
+    /// (lần gọi sau ghi đè phạm vi quét của lần trước).
+    /// <para><paramref name="chiQuetLucKhoiDong"/> = true → root này CHỈ bị quét ở <see cref="StartupSweep"/>,
+    /// nhịp dọn định kỳ TUYỆT ĐỐI không đụng. Dành cho module KHÔNG đăng ký hồ sơ đang chạy qua
+    /// <see cref="RegisterActiveProfile"/> (module Đơn hàng): với nó mọi trình duyệt ĐANG LÀM VIỆC đều trông
+    /// y như mồ côi, để nhịp định kỳ quét là tự giết trình duyệt của chính mình.</para></summary>
+    public static void AddManagedRoot(string path, bool chiQuetLucKhoiDong = false)
     {
         if (string.IsNullOrWhiteSpace(path)) return;
         var nd = NormalizePath(path);
         if (nd.Length == 0) return;
-        ExtraManagedRoots[nd] = 0;
+        ExtraManagedRoots[nd] = chiQuetLucKhoiDong ? ChiQuetLucKhoiDong : QuetDinhKy;
     }
 
     /// <summary>Kênh thông báo (vd dòng log của tab Scrape) cho việc dọn nền. Best-effort, có thể null.</summary>
@@ -224,9 +237,8 @@ public static class BraveFleet
     /// sống → tất cả là rác sót sau lần chạy trước bị treo/crash). Trả số tiến trình đã giết.</summary>
     public static int StartupSweep() => SweepOrphans(Notice, killAll: true);
 
-    /// <summary>Giết brave.exe có user-data-dir trong <see cref="ManagedRoot"/> mà KHÔNG thuộc session sống.
-    /// <paramref name="killAll"/>=true → giết hết (dùng lúc khởi động). Chừa tiến trình vừa sinh &lt;60s
-    /// phòng khi chưa kịp đăng ký.</summary>
+    /// <summary>Giết browser của app mà lượt quét này coi là mồ côi — luật ở <see cref="LaMoCoiCanGiet"/>.
+    /// <paramref name="killAll"/>=true → lượt quét KHỞI ĐỘNG (giết hết mọi root).</summary>
     private static int SweepOrphans(Action<string>? log, bool killAll = false)
     {
         // AN TOÀN ĐA-INSTANCE: registry profile-sống là TRONG-tiến-trình → nếu có ShopeeSuite KHÁC đang
@@ -235,14 +247,16 @@ public static class BraveFleet
         if (!IsSoleAppInstance())
             return 0;
 
+        var rootDinhKy = RootQuetDinhKy();
+        var rootKhoiDong = RootChiQuetLucKhoiDong();
+        var dangHoatDong = ActiveProfiles.Keys;
+
         var killed = 0;
+        var bayGio = DateTime.Now;
         foreach (var (pid, dir, started) in EnumerateOurBrave(log))
         {
-            if (!killAll)
-            {
-                if (ActiveProfiles.ContainsKey(dir)) continue;
-                if (started is { } t && (DateTime.Now - t) < TimeSpan.FromSeconds(60)) continue;
-            }
+            var tuoi = started is { } t ? bayGio - t : (TimeSpan?)null;
+            if (!LaMoCoiCanGiet(dir, tuoi, killAll, rootDinhKy, rootKhoiDong, dangHoatDong)) continue;
             if (BraveProcessReaper.TryKillTree(pid)) killed++;
         }
         if (killed > 0)
@@ -289,6 +303,79 @@ public static class BraveFleet
         foreach (var root in ExtraManagedRoots.Keys)
         {
             if (IsUnderRoot(normalizedDir, root)) return true;
+        }
+        return false;
+    }
+
+    /// <summary>Các root bị quét ở CẢ nhịp định kỳ lẫn lúc khởi động (persistent-data của suite + root phụ
+    /// đăng ký ở chế độ mặc định).</summary>
+    private static List<string> RootQuetDinhKy()
+    {
+        var list = new List<string> { ManagedRoot };
+        foreach (var kv in ExtraManagedRoots)
+        {
+            if (kv.Value == QuetDinhKy) list.Add(kv.Key);
+        }
+        return list;
+    }
+
+    /// <summary>Các root CHỈ bị quét lúc khởi động (xem <see cref="AddManagedRoot"/>).</summary>
+    private static List<string> RootChiQuetLucKhoiDong()
+    {
+        var list = new List<string>();
+        foreach (var kv in ExtraManagedRoots)
+        {
+            if (kv.Value == ChiQuetLucKhoiDong) list.Add(kv.Key);
+        }
+        return list;
+    }
+
+    /// <summary>
+    /// LUẬT THUẦN: một trình duyệt có <c>--user-data-dir</c> = <paramref name="normalizedDir"/> có phải MỒ CÔI
+    /// CẦN GIẾT trong lượt quét này không. Tách khỏi <see cref="SweepOrphans"/> (vốn phải đụng WMI + trạng thái
+    /// tĩnh) để test thẳng được ma trận ca.
+    /// <para>Thứ tự xét, từ chắc chắn nhất xuống:</para>
+    /// <list type="number">
+    /// <item>Không nằm dưới root nào của app → KHÔNG đụng (Brave cá nhân / app khác).</item>
+    /// <item>Lượt quét KHỞI ĐỘNG → giết hết: lúc đó chưa session nào của app sống, tất cả là rác lần trước.</item>
+    /// <item>Chỉ nằm dưới root "chỉ quét lúc khởi động" → nhịp định kỳ KHÔNG đụng. Đây là lưới chặn đúng cái
+    ///       lỗ đã có: module Đơn hàng đăng ký root nhưng không đăng ký hồ sơ đang chạy, nên trình duyệt đang
+    ///       làm việc của nó trông y hệt mồ côi.</item>
+    /// <item>Hồ sơ ĐANG HOẠT ĐỘNG (đã <see cref="RegisterActiveProfile"/>) → chừa.</item>
+    /// <item>Tiến trình non hơn <see cref="TuoiToiThieuCoiLaMoCoi"/> → chừa (chưa kịp đăng ký).</item>
+    /// </list>
+    /// </summary>
+    internal static bool LaMoCoiCanGiet(
+        string normalizedDir,
+        TimeSpan? tuoi,
+        bool quetLucKhoiDong,
+        IEnumerable<string> rootQuetDinhKy,
+        IEnumerable<string> rootChiQuetLucKhoiDong,
+        IEnumerable<string> hoSoDangHoatDong)
+    {
+        if (string.IsNullOrWhiteSpace(normalizedDir)) return false;
+
+        var duoiRootDinhKy = NamDuoiMotRoot(normalizedDir, rootQuetDinhKy);
+        var duoiRootKhoiDong = NamDuoiMotRoot(normalizedDir, rootChiQuetLucKhoiDong);
+        if (!duoiRootDinhKy && !duoiRootKhoiDong) return false;
+
+        if (quetLucKhoiDong) return true;
+
+        if (!duoiRootDinhKy) return false;
+
+        foreach (var hoSo in hoSoDangHoatDong)
+        {
+            if (string.Equals(hoSo, normalizedDir, StringComparison.OrdinalIgnoreCase)) return false;
+        }
+
+        return tuoi is not { } t || t >= TuoiToiThieuCoiLaMoCoi;
+    }
+
+    private static bool NamDuoiMotRoot(string normalizedDir, IEnumerable<string> roots)
+    {
+        foreach (var root in roots)
+        {
+            if (!string.IsNullOrEmpty(root) && IsUnderRoot(normalizedDir, root)) return true;
         }
         return false;
     }

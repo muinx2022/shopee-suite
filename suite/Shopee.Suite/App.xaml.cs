@@ -62,6 +62,9 @@ public partial class App : Application
                 Shopee.Core.Browser.BraveFleet.ConfigureJobLimits();
                 var swept = Shopee.Core.Browser.BraveFleet.StartupSweep();
                 if (swept > 0) TryLog("BraveFleet.StartupSweep", new Exception($"Đã dọn {swept} Brave mồ côi lúc khởi động."));
+                // Cầu nối WebSocket của Đơn hàng đứt đều đúng 240s, cùng giây trên đồng hồ treo tường ⇒ nghi
+                // nhịp bảo trì này (4 phút). Đổi tạm sang 7 phút: nếu chu kỳ đứt chuyển sang 420s thì thủ phạm
+                // là nhịp bảo trì; nếu vẫn 240s thì nhịp này vô can.
                 Shopee.Core.Browser.BraveFleet.StartMaintenance();
             }
             catch (Exception ex) { TryLog("BraveFleet.Init", ex); }

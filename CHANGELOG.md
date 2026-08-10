@@ -5,6 +5,69 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Phiên bản & cập nhật. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.8.8 — 2026-08-11
+
+> Bản này chữa đúng cái làm **không vòng chạy nào đi hết 12 shop**. Hai vòng liên tiếp trước khi phát hành đều
+> `12/12 shop` và **không một cú đứt cầu nối nào** trong suốt 53 phút — trước đó là 14 cú/58 phút và vòng nào
+> cũng chết ở shop 5–6.
+
+**Nguyên nhân gốc: vòng nhận WebSocket nằm trên thread pool**
+
+- Cầu nối app↔extension đứt đều đặn mỗi ~4 phút, suốt cả ngày, ở mọi vòng chạy. Nhật ký Chromium báo tiến trình
+  GPU và network service "crash", nên suốt nhiều lượt sửa đều đổ oan cho trình duyệt: bộ đếm crash GPU, service
+  worker MV3 ngủ, nhóm cờ chặn vứt tab, rồi WebRTC của SDK chat — **cả bốn đều sai**.
+- Thủ phạm nằm trong code của chính app: vòng nhận WebSocket chạy trên thread pool, mà Windows **huỷ overlapped
+  I/O khi thread phát ra nó bị thu hồi** (`ERROR_OPERATION_ABORTED`). Nay mỗi kết nối chạy trên một thread nền
+  riêng sống suốt đời kết nối.
+- Thứ lật được vụ này là hai dòng nhật ký mới: mốc `Cầu nối: extension ĐỨT/NỐI` chính xác tới giây, và **lý do
+  đứt** kèm mã lỗi Windows. Giữ nguyên hai dòng đó — đừng gỡ.
+
+**Vòng chạy chịu lỗi tốt hơn hẳn**
+
+- Cầu nối rớt GIỮA một lệnh: trước là nằm chờ mù trọn hạn chặng (tới 300 giây) rồi **giết cả vòng**; nay rút hạn
+  còn 90 giây và chỉ hỏng đúng shop đó.
+- **Một shop hỏng không còn giết cả vòng** — bỏ shop đó, chạy tiếp shop kế; hỏng liên tiếp 3 shop mới dừng.
+- **Mất trang chọn shop thì tự đóng và mở lại trình duyệt** (~6 giây, dùng lại cookie nên không phải đăng nhập)
+  rồi chạy tiếp phần chưa chạy trong chính vòng đó. Shop đã chạy TUYỆT ĐỐI không chạy lại.
+- **Shop rơi vì cầu nối được thử lại một lượt** sau khi hết 12 shop — trừ khi shop đó đã gửi lệnh Chuẩn bị hàng
+  (chạy lại là in phiếu trùng trên đơn thật).
+- Extension **giữ lại câu trả lời chưa gửi được** và tự gửi lại khi nối lại. Chỉ gửi lại KẾT QUẢ, không bao giờ
+  chạy lại LỆNH.
+
+**Đơn hàng — sắp xếp trang trả hàng đã chạy**
+
+- Bước đổi sắp xếp sang "Ngày yêu cầu (Mới - Cũ)" hỏng ở phần lớn shop. Thủ phạm: **lớp phủ tour hướng dẫn của
+  Shopee (`div.on-boarding`) che đúng điểm bấm**. Nay app phát hiện bị che, tự bấm "Đã hiểu" tắt tour rồi bấm
+  lại. Vòng nghiệm thu: 9 lỗi → **0 lỗi**, 12/12 shop qua được.
+- Nhờ đó shop nhiều yêu cầu trả hàng mới đọc đủ sâu; trước đây chỉ đọc được trang đầu.
+
+**Đơn hàng — chống ghi mốc trả hàng sai chặt hơn**
+
+- Lưới cũ chỉ nổ khi **100%** dòng đọc được là ĐƠN HỦY. Ca thật lọt lưới: một shop đọc 40 dòng thì 35 là đơn hủy,
+  ô tổng báo 148 trong khi mốc thật là 33. Nay nghi sai tab khi đủ 10 dòng trở lên **và** từ 80% dòng là đơn hủy
+  → bỏ lượt, giữ nguyên mốc. Đã chặn được hai shop khỏi ghi số rác (148 và 44).
+
+**Cảnh báo lỗi địa chỉ — bỏ nút "Check"**
+
+- Banner nay chỉ còn chữ cảnh báo + nút Đóng. Không cần bấm gì: vòng chạy kế **tự thử lại** bước đặt địa chỉ cho
+  shop còn treo cảnh báo, đặt được thì tự gỡ banner, báo Hub và gỡ ở máy khác.
+
+**Chặn một lỗi có thể giết trình duyệt trên máy khác**
+
+- Nhịp bảo trì 4 phút của app quét hồ sơ trình duyệt "mồ côi" để dọn. Thư mục hồ sơ của Đơn hàng có đăng ký vào
+  danh sách quét nhưng **không bao giờ đăng ký hồ sơ đang chạy** ⇒ trên máy có đường dẫn hồ sơ KHÔNG chứa dấu
+  cách, nhịp này giết trình duyệt Đơn hàng ĐANG CHẠY mỗi 4 phút. Nay root đó chỉ quét lúc khởi động.
+
+**Đổi hành vi cần biết**
+
+- Vòng kết thúc bằng lỗi mà trước đó đã có shop hỏng địa chỉ thì **nay CÓ gửi cảnh báo Slack**, trước thì không.
+  Chống spam vẫn giữ 1 tin/tài khoản/60 phút.
+
+**Còn tồn**
+
+- Bước dọn hồ sơ trình duyệt mồ côi lúc khởi động **không chạy** trên máy có dấu cách trong đường dẫn hồ sơ (lỗi
+  tách chuỗi `--user-data-dir`). Không gây hại thêm, nhưng hồ sơ cũ không được dọn tự động.
+
 ## v1.8.7 — 2026-08-10
 
 > ⚠ **Máy nào đang ở 1.8.6 thì gần như chắc chắn KHÔNG chạy được flow Đơn hàng** — xem mục đầu. Cập nhật bản

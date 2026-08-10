@@ -11,7 +11,8 @@ import {
 } from "./page-funcs.js";
 import { sleep } from "./shared/util.js";
 import { waitForTabComplete } from "./shared/tab-wait.js";
-import { ensureDbg, trustedClick } from "./shared/dbg-input.js";
+import { trustedClick } from "./shared/dbg-input.js";
+import { ensureDbgChanChat } from "./chan-chat.js";
 
 // ===== GĐ3 — lệnh đọc + xử đơn (chạy trên tab shop = shopTabId) =====
 
@@ -170,7 +171,7 @@ export async function doPrepareNextOrder() {
   if (/\/verify/i.test(url)) { send({ action: "captcha", message: url }); return; }
 
   await waitOrdersStable(tabId, 15000);
-  await ensureDbg(tabId); // attach TRƯỚC khi đọc toạ độ → banner đứng yên, toạ độ + click cùng trạng thái (click không trượt).
+  await ensureDbgChanChat(tabId); // attach TRƯỚC khi đọc toạ độ → banner đứng yên, toạ độ + click cùng trạng thái (click không trượt).
   // Tab "Chờ lấy hàng".
   const toShipTab = await execInTab(tabId, pageLocateByText, [["[role='tab']", ".eds-tabs__nav-tab", "a", "div", "span"], "^cho lay hang"]);
   if (toShipTab) { await trustedClick(tabId, toShipTab.x, toShipTab.y); await sleep(1200); await waitOrdersStable(tabId, 10000); }
@@ -256,7 +257,7 @@ export async function doPrepareNextOrder() {
     const tabs = await chrome.tabs.query({});
     const cand = tabs.find((t) => beforeTabs.indexOf(t.id) === -1 && t.id !== tabId);
     if (cand) { slipTab = cand; break; }
-    await ensureDbg(tabId);
+    await ensureDbgChanChat(tabId);
     const pbtn = await execInTab(tabId, pagePrintButton, []);
     printTries++;
     if (pbtn) {
@@ -317,7 +318,7 @@ export async function doRedownloadSlip(orderSn) {
   if (/\/verify/i.test(url)) { send({ action: "captcha", message: url }); return; }
 
   await waitOrdersStable(tabId, 15000);
-  await ensureDbg(tabId); // attach TRƯỚC khi đọc toạ độ + click (banner đứng yên → click không trượt).
+  await ensureDbgChanChat(tabId); // attach TRƯỚC khi đọc toạ độ + click (banner đứng yên → click không trượt).
 
   // Sang tab "Tất cả" (đơn Chuẩn bị hàng chắc chắn nằm trong "Tất cả").
   const allTab = await execInTab(tabId, pageLocateByText, [["[role='tab']", ".eds-tabs__nav-tab", "a", "div", "span"], "^tat ca$"]);
@@ -329,7 +330,7 @@ export async function doRedownloadSlip(orderSn) {
   while (pageNo < MAX_ORDER_PAGES) {
     pageNo++;
     await waitOrdersStable(tabId, 15000);
-    await ensureDbg(tabId);
+    await ensureDbgChanChat(tabId);
     try { loc = (await execInTab(tabId, pageFindPrintInCardBySn, [orderSn])) || { found: false, hasPrint: false }; } catch (e) { loc = { found: false, hasPrint: false }; }
     if (loc && loc.found) break;
 
@@ -358,7 +359,7 @@ export async function doRedownloadSlip(orderSn) {
 
   // Bấm "In phiếu giao" → bắt tab phiếu (awbprint).
   const beforeTabs = (await chrome.tabs.query({})).map((t) => t.id);
-  await ensureDbg(tabId);
+  await ensureDbgChanChat(tabId);
   await trustedClick(tabId, loc.x, loc.y);
 
   let slipTab = null;

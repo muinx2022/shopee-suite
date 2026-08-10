@@ -20,6 +20,13 @@ export const MAX_RETURN_HEAD_HTML = 4000; // trần ký tự HTML mỗi dòng g�
 // Mục sắp xếp cần chọn, so trên text KHÔNG dấu (_na): "Ngày yêu cầu (Mới - Cũ)". Ràng buộc "moi - cu" để KHÔNG
 // dính nhầm mục ngược "Ngày yêu cầu (Cũ - Mới)".
 export const SORT_NEWEST_RE = "ngay yeu cau.*moi\\s*[-–]\\s*cu";
+// DẤU NHẬN menu sắp xếp giữa các `.eds-dropdown-menu` khác trên trang (so trên text KHÔNG dấu). Trang trả hàng
+// có nhiều popper EDS cùng lớp: chẩn đoán vòng 19:21 ngày 10/08/2026 ra "menu tong=2" mà cái ẩn báo
+// `co-muc-ngay-yeu-cau=khong` — tức một dropdown KHÁC. Đếm gộp thì chốt "menu đang mở sẵn thì đừng bấm" bỏ hẳn
+// cú bấm chỉ vì cái dropdown khác đó đang mở, và cờ menu-tung-mo báo CO dù menu sắp xếp chưa hề bung.
+// Cố ý LỎNG hơn SORT_NEWEST_RE (chỉ cần có mục "Ngày yêu cầu", không cần đúng chiều Mới-Cũ): đây là câu hỏi
+// "menu này có phải menu sắp xếp không", không phải "có mục cần bấm không".
+export const SORT_MENU_MARK_RE = "ngay yeu cau";
 // Tab cần chọn trên tab-strip trang trả hàng, so trên text KHÔNG dấu (_na): "Đơn Trả hàng Hoàn tiền". Tab-strip
 // KHÔNG có data-testid nên buộc phải nhận theo TEXT — ngoại lệ so với tab điều hướng trái (pageLocateReturnTab
 // vẫn dùng data-testid). Không chọn tab thì ô tổng là của tab mặc định "Tất cả", gộp cả Đơn Hủy / Đơn Giao hàng

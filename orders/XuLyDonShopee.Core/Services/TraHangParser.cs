@@ -355,13 +355,42 @@ public static class TraHangParser
     /// </para>
     /// </summary>
     /// <summary>
-    /// (THUẦN) Dữ liệu đọc được có TỰ TỐ CÁO là đang đứng NHẦM TAB không: có ít nhất một dòng, và <b>MỌI</b> dòng
-    /// đều bị <see cref="GhepCap"/> loại vì <c>href</c> nói đó là ĐƠN HỦY (không dòng nào mang mã yêu cầu trả hàng).
+    /// SÀN số dòng đọc được để luật TỶ LỆ (<see cref="NguongTyLeDonHuyNghiSaiTab"/>) được phép nổ. Mẫu quá nhỏ thì
+    /// tỷ lệ không nói lên điều gì: 2 dòng gồm 1 đơn hủy + 1 trả hàng đã là 50%, mà đó là ca LÀNH — tab trả hàng
+    /// thật vẫn lẫn dòng lạ. 10 dòng ≈ nửa trang danh sách, đủ để tỷ lệ có nghĩa mà vẫn bắt được shop ít đơn.
+    /// <para>Luật "100% đơn hủy" bên dưới KHÔNG chịu sàn này: 0 dòng nào mang mã yêu cầu là bằng chứng thẳng,
+    /// không phải suy đoán thống kê (ca 3/3 dòng đơn hủy vẫn phải nổ).</para>
+    /// </summary>
+    public const int SanSoDongNghiSaiTab = 10;
+
+    /// <summary>
+    /// NGƯỠNG TỶ LỆ dòng ĐƠN HỦY để nghi đang đứng nhầm tab. Tab "Đơn Trả hàng/Hoàn tiền" ĐÚNG thì kỳ vọng số đơn
+    /// hủy = <b>0</b> — mọi dòng đều mang mã yêu cầu; nên bất cứ tỷ lệ cao nào cũng đã là bất thường.
+    /// <para>0,8 (chứ không phải 1,0) vì ca thật 10/08/2026 ở <c>deilca.store</c>: đọc 40 dòng, <b>35 đơn hủy</b> +
+    /// 5 trả hàng thật, ô tổng báo 148 trong khi mốc thật của shop là 33 — luật "100%" cũ lọt lưới đúng ca này.</para>
+    /// <para>Giá của báo nhầm rất rẻ (BỎ LƯỢT, mốc giữ nguyên ⇒ chậm một vòng), giá của lọt lưới là nuốt VĨNH VIỄN
+    /// mọi yêu cầu trả hàng mới của shop — nên ngưỡng cố ý đặt về phía gắt.</para>
+    /// </summary>
+    public const double NguongTyLeDonHuyNghiSaiTab = 0.8;
+
+    /// <summary>
+    /// (THUẦN) Dữ liệu đọc được có TỰ TỐ CÁO là đang đứng NHẦM TAB không. Nghi khi có ít nhất một dòng VÀ:
+    /// <list type="bullet">
+    /// <item><b>MỌI</b> dòng đều bị <see cref="GhepCap"/> loại vì <c>href</c> nói đó là ĐƠN HỦY (0 dòng mang mã
+    /// yêu cầu) — bằng chứng thẳng, không cần mẫu lớn; HOẶC</item>
+    /// <item>đủ <see cref="SanSoDongNghiSaiTab"/> dòng VÀ tỷ lệ dòng đơn hủy đạt
+    /// <see cref="NguongTyLeDonHuyNghiSaiTab"/>.</item>
+    /// </list>
     /// <para>
     /// Vì sao cần (ca thật 10/08/2026): extension báo cờ "đang ở tab Đơn Trả hàng/Hoàn tiền" nhưng thật ra đứng ở
     /// tab "Tất cả" — 33/33 dòng đều là đơn hủy, và số 33 bị ghi thẳng vào mốc ⇒ nuốt vĩnh viễn mọi yêu cầu mới
     /// của shop đó. Nhận diện tab qua markup là cuộc rượt đuổi với Shopee; luật này soi CHÍNH DỮ LIỆU nên không
     /// gãy khi họ đổi giao diện.
+    /// </para>
+    /// <para>
+    /// Vì sao thêm vế TỶ LỆ (10/08/2026, <c>deilca.store</c>): 35/40 dòng là đơn hủy mà vế "100%" không nổ, ô tổng
+    /// báo 148 trong khi mốc thật là 33. Hôm đó mốc thoát nạn chỉ nhờ bước sắp xếp đang hỏng; bước đó nay chạy lại
+    /// được nên con số rác sẽ được ghi thẳng vào mốc.
     /// </para>
     /// <para>
     /// KHÔNG bắt ca "tab đúng nhưng rỗng": danh sách rỗng (<c>dong.Count == 0</c>) trả <c>false</c> — đó là shop
@@ -375,8 +404,13 @@ public static class TraHangParser
             return false;
         }
 
-        var ghep = GhepCap(dong);
-        return ghep.BoQuaDonHuy == dong.Count;
+        var soHuy = GhepCap(dong).BoQuaDonHuy;
+        if (soHuy == dong.Count)
+        {
+            return true;
+        }
+        return dong.Count >= SanSoDongNghiSaiTab
+            && (double)soHuy / dong.Count >= NguongTyLeDonHuyNghiSaiTab;
     }
 
     public static KetQuaGhepTraHang GhepCap(IEnumerable<DongTraHang> dong)

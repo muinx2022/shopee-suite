@@ -53,7 +53,9 @@ internal sealed class BridgeTestRig : IAsyncDisposable
 
     /// <param name="nhipGiuSong">Nhịp giữ-sống rót cho channel (test nào canh nhịp thì truyền số nhỏ).
     /// Bỏ trống = dùng nhịp production 20s, tức trong một bài test bình thường sẽ KHÔNG có gói ping nào xen vào.</param>
-    public static async Task<BridgeTestRig> StartAsync(TimeSpan? nhipGiuSong = null)
+    /// <param name="choNoiLai">Hạn chờ extension nối lại (cũng là hạn rút ngắn của chặng khi socket đứt giữa
+    /// chừng). Bỏ trống = 90s như production — test nào canh lượt rút hạn phải truyền số nhỏ.</param>
+    public static async Task<BridgeTestRig> StartAsync(TimeSpan? nhipGiuSong = null, TimeSpan? choNoiLai = null)
     {
         var logs = new ConcurrentQueue<string>();
 
@@ -67,7 +69,7 @@ internal sealed class BridgeTestRig : IAsyncDisposable
         {
             port = CongTrong();
             var thu = new OrdersBridgeChannel(logs.Enqueue);
-            try { thu.Start(port, nhipGiuSong); channel = thu; break; }
+            try { thu.Start(port, nhipGiuSong, choNoiLai); channel = thu; break; }
             catch (InvalidOperationException) when (lan < SoLanDoiCong - 1)
             {
                 thu.Dispose();

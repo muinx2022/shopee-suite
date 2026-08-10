@@ -50,18 +50,6 @@ public sealed record OrdersBridgeRunResult(
     int ShopCount, int ShopsDone, int TotalOrders, int TotalSlips, bool Captcha, string? Error,
     bool PickupAddressFailed = false, string? PickupFailedShop = null, string? PickupOkShops = null);
 
-/// <summary>
-/// Kết quả MỘT lượt KIỂM TRA LẠI ĐỊA CHỈ của đúng một shop theo lệnh người dùng (nút "Check" trên banner lỗi
-/// địa chỉ) — <see cref="OrdersBridgeSession.KiemTraDiaChiMotShopAsync"/>.
-/// </summary>
-/// <param name="Ok">Shop ĐẶT ĐƯỢC địa chỉ ⇒ đủ căn cứ gỡ banner + báo Hub.</param>
-/// <param name="Captcha">Rơi captcha ⇒ <b>KHÔNG kết luận</b> được: không gỡ mà cũng không coi là còn lỗi.</param>
-/// <param name="Error">Lỗi hạ tầng (không đăng nhập được / không thấy shop / cầu nối chết). null = chạy trọn.</param>
-/// <param name="PickupOkShop">Nhãn shop đặt được địa chỉ — đưa thẳng vào đường gỡ banner sẵn có
-/// (<c>GoBannerLoiDiaChi</c>), KHÔNG viết đường gỡ thứ hai.</param>
-public sealed record OrdersKiemTraDiaChiResult(
-    bool Ok, bool Captcha, string? Error, string? PickupOkShop = null);
-
 /// <summary>Kết quả MỘT lượt mở trình duyệt sạch + SSO về trang chọn shop
 /// (<see cref="OrdersBridgeSession.SsoVePickerAsync"/>).</summary>
 internal enum KetQuaSso
@@ -114,6 +102,40 @@ internal enum HanhDongSauThuSach
     BaoLoi,
 }
 
+/// <summary>Việc phải làm sau khi MỘT shop hỏng giữa chừng (ngoại lệ ném ra từ thân shop) — xem
+/// <see cref="OrdersBridgeSession.QuyetDinhSauShopHong"/>.</summary>
+internal enum SauShopHong
+{
+    /// <summary>Bỏ shop hỏng, chạy tiếp shop kế — mặc định, vì hỏng thường chỉ của MỘT shop.</summary>
+    ChayTiepShopKe,
+
+    /// <summary>Hỏng LIÊN TIẾP chạm trần ⇒ coi như cầu nối chết hẳn, chạy tiếp chỉ tốn thời gian → dừng vòng.</summary>
+    DungVongHongLienTiep,
+
+    /// <summary>Không đưa được về trang chọn shop mà CÒN shop phía sau ⇒ shop kế chắc chắn chết → dừng vòng.</summary>
+    DungVongKhongVePicker,
+}
+
+/// <summary>Việc phải làm khi MẤT trang chọn shop giữa vòng — xem
+/// <see cref="OrdersBridgeSession.QuyetDinhKhiMatPicker"/>.</summary>
+internal enum KhiMatPicker
+{
+    /// <summary>Không còn shop nào chưa chạy ⇒ vòng đằng nào cũng xong, picker hỏng không hại ai.</summary>
+    KetThucBinhThuong,
+
+    /// <summary>Đóng trình duyệt sạch → mở lại → SSO về picker → chạy tiếp phần CHƯA chạy của CHÍNH vòng này.</summary>
+    MoLaiTrinhDuyet,
+
+    /// <summary>Hết đường (chạm trần mở lại, hoặc đang dính captcha) → dừng vòng, chờ vòng sau.</summary>
+    DungVong,
+}
+
+/// <summary>Phần CHƯA chạy của vòng sau khi mở lại trình duyệt và đọc lại picker — xem
+/// <see cref="OrdersBridgeSession.GhepShopConLai"/>.</summary>
+/// <param name="ConLai">Shop chưa chạy, theo THỨ TỰ của danh sách vừa đọc lại.</param>
+/// <param name="BienMat">Nhãn những shop chưa chạy mà danh sách mới KHÔNG còn (chỉ để ghi nhật ký).</param>
+internal sealed record ShopConLaiSauMoLai(IReadOnlyList<ShopListItem> ConLai, IReadOnlyList<string> BienMat);
+
 /// <summary>
 /// Vòng đời MỘT phiên cầu nối: mở cổng loopback (<see cref="OrdersBridgeChannel"/>) → mở trình duyệt SẠCH
 /// (không CDP, không remote-debugging-port) qua <see cref="OrdersBridgeLauncher"/> với <c>startUrl</c> có hash
@@ -141,6 +163,14 @@ public sealed class OrdersBridgeSession : IDisposable
     private readonly Action<string>? _onShopCheckFinished;
     // GĐ4: khoảng nghỉ ngẫu nhiên giữa các shop (ms) — kiểu người, tránh dồn dập.
     private readonly Random _rng = new();
+
+    /// <summary>Khoảng nghỉ "kiểu người" giữa hai shop — cận DƯỚI. Rút ngắn nữa là vòng chạy dồn dập bất thường
+    /// so với người thật đang bấm tay trên Seller Centre.</summary>
+    private static readonly TimeSpan NghiGiuaShopToiThieu = TimeSpan.FromMinutes(3);
+
+    /// <summary>Khoảng nghỉ "kiểu người" giữa hai shop — cận TRÊN. Nới nữa là một vòng 12 shop không kịp gọn
+    /// trong nhịp chạy của app.</summary>
+    private static readonly TimeSpan NghiGiuaShopToiDa = TimeSpan.FromMinutes(5);
 
     // Kênh lệnh (WebSocket + các chặng chờ) và flow bên trong một shop — dựng một lần, dùng lại qua các vòng.
     private readonly OrdersBridgeChannel _channel;
@@ -318,6 +348,148 @@ public sealed class OrdersBridgeSession : IDisposable
         KetQuaSso.Treo => HanhDongSauThuSach.BaoLoi,
         _ => daFallback ? HanhDongSauThuSach.BaoLoi : HanhDongSauThuSach.DangNhapLai,
     };
+
+    /// <summary>
+    /// TRẦN số shop HỎNG LIÊN TIẾP trước khi bỏ cả vòng. Hỏng lẻ tẻ thường chỉ là chuyện của một shop (trang
+    /// không render, extension kẹt một nhịp) nên vòng phải đi tiếp; nhưng hỏng liên tiếp tới ngần này thì gần
+    /// như chắc chắn cầu nối/trình duyệt đã chết hẳn, mỗi shop còn lại chỉ đốt thêm vài phút chờ vô ích.
+    /// <para>3 = đủ rộng để tha cho một chuỗi xui ngắn, đủ hẹp để không nướng cả 12 shop.</para>
+    /// </summary>
+    internal const int TranShopHongLienTiep = 3;
+
+    /// <summary>
+    /// PURE — việc phải làm sau khi thân MỘT shop ném ngoại lệ. Luật: <b>một shop hỏng KHÔNG được giết cả vòng</b>
+    /// (13:37 ngày 10/08/2026: một <c>TimeoutException</c> ở shop 6/12 kéo theo 6 shop chưa chạy), nhưng có hai
+    /// đường vẫn phải dừng — chạm trần hỏng liên tiếp, và không quay lại được trang chọn shop.
+    /// <para>Trần xét TRƯỚC: cả hai cùng đúng thì lý do "cầu nối chết" mới là lý do thật, còn "không về được
+    /// picker" chỉ là hệ quả của nó.</para>
+    /// </summary>
+    /// <param name="hongLienTiep">Số shop hỏng LIÊN TIẾP tính CẢ shop vừa hỏng (chuỗi đứt khi có shop chạy trọn).</param>
+    /// <param name="conShopPhiaSau">Còn shop chưa chạy hay không — shop CUỐI thì picker hỏng không hại ai.</param>
+    /// <param name="veDuocPicker">Lượt đóng tab shop có đưa được về trang chọn shop không (không cần thử thì
+    /// truyền <c>true</c>).</param>
+    internal static SauShopHong QuyetDinhSauShopHong(int hongLienTiep, bool conShopPhiaSau, bool veDuocPicker)
+    {
+        if (hongLienTiep >= TranShopHongLienTiep) { return SauShopHong.DungVongHongLienTiep; }
+        if (conShopPhiaSau && !veDuocPicker) { return SauShopHong.DungVongKhongVePicker; }
+        return SauShopHong.ChayTiepShopKe;
+    }
+
+    /// <summary>
+    /// TRẦN tổng số shop được XẾP VÀO HÀNG ĐỢI THỬ LẠI trong MỘT vòng (mỗi shop nhiều nhất 1 lượt). Thử lại là
+    /// đường cứu cho shop <b>rơi oan</b> vì cầu nối đứt — trang không hỏng, chỉ là ta mất câu trả lời — nên nó
+    /// đáng một lượt nữa sau khi hết 12 shop, lúc nhịp đứt ~240s của network service trình duyệt đã dịch đi.
+    /// <para>3 = đủ cứu một vòng xui bình thường (vòng 19:01 ngày 10/08/2026 rơi đúng 3 shop kiểu này), đủ hẹp để
+    /// một vòng hỏng nặng KHÔNG biến thành lượt hai chạy lại gần hết danh sách shop.</para>
+    /// </summary>
+    internal const int TranThuLaiShopMoiVong = 3;
+
+    /// <summary>
+    /// PURE — lỗi làm hỏng một shop có phải kiểu "RƠI OAN VÌ CẦU NỐI" không: cầu nối rớt giữa chặng
+    /// (<see cref="CauNoiRotGiuaChangException"/>) hoặc hết hạn chờ phản hồi extension
+    /// (<see cref="TimeoutException"/>). Cả hai đều nói "ta mất câu trả lời", KHÔNG nói "trang Seller Centre hỏng".
+    /// <para>Một dòng <c>is TimeoutException</c> là đủ vì <see cref="CauNoiRotGiuaChangException"/> KẾ THỪA
+    /// <see cref="TimeoutException"/> — hàm này tồn tại để ghi rõ luật đó ra, kẻo ai đó tách cây thừa kế rồi
+    /// lặng lẽ mất nhánh thử lại.</para>
+    /// </summary>
+    internal static bool LaLoiCauNoi(Exception ex) => ex is TimeoutException;
+
+    /// <summary>
+    /// PURE — shop vừa hỏng có được XẾP VÀO HÀNG ĐỢI THỬ LẠI cuối vòng không.
+    /// <para><b>RÀNG BUỘC SỐNG CÒN, xét TRƯỚC mọi điều kiện khác:</b> shop đã gửi <c>prepareNextOrder</c>
+    /// (<see cref="ShopFlowRunner.DaGuiChuanBiHang"/>) thì TUYỆT ĐỐI KHÔNG chạy lại — lệnh đó chuẩn bị hàng + in
+    /// phiếu trên đơn THẬT, chạy lại là đếm trùng, in phiếu trùng, đụng đơn của người dùng. Điều này quan trọng
+    /// hơn cả mục tiêu đi trọn 12/12 shop.</para>
+    /// </summary>
+    /// <param name="daGuiChuanBiHang">Shop này đã gửi <c>prepareNextOrder</c> lần nào chưa.</param>
+    /// <param name="loiCauNoi">Lỗi làm hỏng shop có thuộc nhóm cầu nối không (xem <see cref="LaLoiCauNoi"/>).</param>
+    /// <param name="daXongViecShop">Thân shop ĐÃ chạy trọn, chỉ bước dọn dẹp sau đó (đóng tab về picker) mới ném.
+    /// Shop như vậy không có gì để làm lại — chạy lại là cộng đôi <c>shopsDone</c> và đọc lại đơn vô ích.</param>
+    /// <param name="daThuLaiShopNay">Shop này đã được xếp/đã chạy lượt thử lại rồi (mỗi shop nhiều nhất 1 lượt).</param>
+    /// <param name="soShopDaXepThuLai">Số shop ĐÃ nằm trong hàng đợi thử lại của vòng này.</param>
+    internal static bool NenThuLaiShopRoiOan(
+        bool daGuiChuanBiHang, bool loiCauNoi, bool daXongViecShop, bool daThuLaiShopNay, int soShopDaXepThuLai)
+    {
+        if (daGuiChuanBiHang) { return false; }
+        if (!loiCauNoi) { return false; }
+        if (daXongViecShop) { return false; }
+        if (daThuLaiShopNay) { return false; }
+        return soShopDaXepThuLai < TranThuLaiShopMoiVong;
+    }
+
+    /// <summary>
+    /// TRẦN số lần MỞ LẠI trình duyệt sạch trong MỘT vòng. Mất trang chọn shop giữa vòng KHÔNG còn là án tử của
+    /// các shop còn lại: đóng trình duyệt sạch rồi mở lại + SSO về picker chỉ tốn ~6 giây và TÁI DÙNG cookie hồ sơ
+    /// (nhật ký thật: "Cookie hồ sơ còn hạn — đã về trang chọn shop, BỎ QUA bước đăng nhập Playwright"), rẻ hơn
+    /// hẳn cái giá bỏ trắng vài shop rồi chờ trọn một vòng sau.
+    /// <para>2 = đủ để tha cho hai cú sập hạ tầng trong một vòng 12 shop, đủ hẹp để trình duyệt hỏng HẲN không kéo
+    /// vòng vào chuỗi mở-đóng vô tận (mỗi lượt còn kèm một pha đăng nhập có thể chờ người nhập mã).</para>
+    /// </summary>
+    internal const int TranMoLaiTrinhDuyet = 2;
+
+    /// <summary>
+    /// PURE — việc phải làm khi vòng MẤT trang chọn shop sau một shop.
+    /// <para>Thứ tự xét: <paramref name="captcha"/> TRƯỚC (đẩy thêm một lượt mở trình duyệt vào đúng lúc Shopee
+    /// đang nghi ngờ là tự khai bot — cùng lý lẽ với <see cref="QuyetDinhSauThuBanSach"/>), rồi mới tới "còn shop
+    /// chưa chạy không" và trần mở lại.</para>
+    /// </summary>
+    /// <param name="conShopChuaChay">Còn shop nào chưa được đụng tới trong vòng này không.</param>
+    /// <param name="soLanDaMoLai">Số lần ĐÃ mở lại trình duyệt trong vòng này.</param>
+    /// <param name="captcha">Phiên đang dính cờ captcha/verify.</param>
+    internal static KhiMatPicker QuyetDinhKhiMatPicker(bool conShopChuaChay, int soLanDaMoLai, bool captcha)
+    {
+        if (captcha) { return KhiMatPicker.DungVong; }
+        if (!conShopChuaChay) { return KhiMatPicker.KetThucBinhThuong; }
+        if (soLanDaMoLai >= TranMoLaiTrinhDuyet) { return KhiMatPicker.DungVong; }
+        return KhiMatPicker.MoLaiTrinhDuyet;
+    }
+
+    /// <summary>
+    /// PURE — câu LÝ DO dừng vòng khi không đưa được về trang chọn shop. Hai nguyên nhân phải nói KHÁC NHAU vì
+    /// người trực xử khác nhau: <paramref name="viCauNoi"/> = không lượt thử nào gửi đi được (WebSocket/trình duyệt
+    /// gãy) — đi soi trình duyệt; ngược lại là extension/trang picker thật sự không về được — đi soi Seller Centre.
+    /// <para>Bản trước chỉ có MỘT câu, nên ca cầu nối gãy lúc 16:17:15 ngày 10/08/2026 bị ghi thành "không quay lại
+    /// được trang chọn shop" và lượt truy sau đó đi nhầm chỗ.</para>
+    /// </summary>
+    /// <param name="shopName">Nhãn shop vòng vừa đứng lại.</param>
+    /// <param name="shopVuaHong">Shop đó kết thúc bằng LỖI hay không (đổi vế "sau shop X" ↔ "sau shop X bị lỗi").</param>
+    /// <param name="viCauNoi">Mọi lượt thử đều trượt vì cầu nối không sống lại.</param>
+    internal static string LyDoDungVongKhongVePicker(string shopName, bool shopVuaHong, bool viCauNoi)
+    {
+        var sauShop = shopVuaHong ? $"sau shop {shopName} bị lỗi" : $"sau shop {shopName}";
+        return viCauNoi
+            ? $"Cầu nối extension KHÔNG sống lại nên không gửi nổi lệnh đóng tab shop {sauShop} — đã dừng vòng "
+              + "(chưa rõ trang chọn shop có hỏng hay không). Sẽ thử lại ở vòng sau."
+            : $"Không quay lại được trang chọn shop {sauShop} — đã dừng vòng (shop kế sẽ không mở được). "
+              + "Sẽ thử lại ở vòng sau.";
+    }
+
+    /// <summary>Nhãn shop cho nhật ký/thông báo: <c>LoginName</c>, không có thì <c>ShopId</c>.</summary>
+    private static string NhanShop(ShopListItem s)
+        => string.IsNullOrWhiteSpace(s.LoginName) ? s.ShopId : s.LoginName;
+
+    /// <summary>
+    /// PURE — ghép danh sách shop VỪA ĐỌC LẠI (sau khi mở lại trình duyệt) với phần chưa chạy của vòng, khớp theo
+    /// <see cref="ShopListItem.ShopId"/>.
+    /// <para><b>Vì sao không tin chỉ số của danh sách cũ:</b> picker đọc lại có thể trả THỨ TỰ khác, nên lấy theo
+    /// vị trí là chạy lại shop đã xong — đếm trùng, in phiếu trùng, đụng đơn THẬT. Khóa an toàn duy nhất là ShopId.</para>
+    /// <para>Shop MỚI xuất hiện (chưa từng đụng tới trong vòng này) được nhận vào phần còn lại; shop chưa chạy mà
+    /// biến mất khỏi danh sách mới thì bỏ, và trả nhãn ra <see cref="ShopConLaiSauMoLai.BienMat"/> để caller ghi
+    /// nhật ký — cấm im lặng nuốt.</para>
+    /// </summary>
+    /// <param name="danhSachMoi">Danh sách shop đọc lại từ picker sau khi mở lại trình duyệt.</param>
+    /// <param name="chuaChayCu">Phần CHƯA chạy theo danh sách CŨ — chỉ dùng để chỉ ra shop nào biến mất.</param>
+    /// <param name="daChayShopId">ShopId đã ĐỤNG TỚI trong vòng này (xong / bỏ qua / hỏng) — tuyệt đối không chạy lại.</param>
+    internal static ShopConLaiSauMoLai GhepShopConLai(
+        IReadOnlyList<ShopListItem> danhSachMoi,
+        IReadOnlyList<ShopListItem> chuaChayCu,
+        IReadOnlySet<string> daChayShopId)
+    {
+        var conLai = danhSachMoi.Where(s => !daChayShopId.Contains(s.ShopId)).ToList();
+        var coTrongMoi = new HashSet<string>(danhSachMoi.Select(s => s.ShopId), StringComparer.Ordinal);
+        var bienMat = chuaChayCu.Where(s => !coTrongMoi.Contains(s.ShopId)).Select(NhanShop).ToList();
+        return new ShopConLaiSauMoLai(conLai, bienMat);
+    }
 
     /// <summary>
     /// MỘT lượt: mở trình duyệt SẠCH + extension tại <c>/account</c> → chờ extension nối cầu → SSO "Kênh Người bán"
@@ -504,6 +676,58 @@ public sealed class OrdersBridgeSession : IDisposable
         };
     }
 
+    /// <summary>Nghỉ ngắn cho hệ điều hành NHẢ KHOÁ file hồ sơ sau khi kill trình duyệt sạch, trước khi mở lại
+    /// (Brave/Chrome giữ khoá thêm một nhịp; mở đè là "Trình duyệt thoát ngay khi khởi động").</summary>
+    private static readonly TimeSpan SettleNhaKhoaHoSo = TimeSpan.FromMilliseconds(800);
+
+    /// <summary>
+    /// MỞ LẠI trình duyệt sạch GIỮA một vòng shop rồi đọc lại danh sách shop ở picker — đường cứu khi vòng mất
+    /// trang chọn shop nhưng CÒN shop chưa chạy. Đóng bản sạch đang hỏng (nhả khoá hồ sơ) → đi lại
+    /// <see cref="LoginAndReachPickerAsync"/> (thường chỉ ~6 giây vì cookie hồ sơ còn hạn, không đụng Playwright)
+    /// → <c>readShopList</c>.
+    /// <para>Trả danh sách shop đọc lại được; <c>null</c> = không về được picker — caller DỪNG vòng, phân biệt
+    /// captcha bằng <see cref="OrdersBridgeChannel.CaptchaSeen"/>.</para>
+    /// <para>Ngoại lệ (hết giờ / cầu nối rớt) để NÉM tiếp: nó nằm ngoài thân một shop nên phải rơi vào khối catch
+    /// cuối <see cref="RunAllShopsAsync"/>, chỗ đã mang sẵn mọi tín hiệu địa chỉ tích lũy của vòng.</para>
+    /// </summary>
+    private async Task<IReadOnlyList<ShopListItem>?> MoLaiTrinhDuyetVePickerAsync(
+        OrdersLoginParams login, CancellationToken ct)
+    {
+        DongTrinhDuyetSach();
+        // Quên dòng này thì "bản sạch đang sống" là tín hiệu SAI với mọi chỗ đọc Process (nút Dừng, WindowFocus).
+        Process = null;
+        await Task.Delay(SettleNhaKhoaHoSo, ct).ConfigureAwait(false);
+
+        var err = await LoginAndReachPickerAsync(login, ct).ConfigureAwait(false);
+        if (_channel.CaptchaSeen)
+        {
+            L("Mở lại trình duyệt nhưng rơi vào trang verify/captcha — KHÔNG thử tiếp, dừng vòng.");
+            return null;
+        }
+        if (err is not null)
+        {
+            L("Mở lại trình duyệt nhưng vẫn không về được trang chọn shop: " + err);
+            return null;
+        }
+
+        var tcs = _channel.ArmShopList();
+        await _channel.SendAsync(new { action = "readShopList" }).ConfigureAwait(false);
+        var json = await _channel.AwaitAsync(tcs, OrdersBridgeChannel.ChoChang.ShopList, ct).ConfigureAwait(false);
+        var shops = ShopeeLoginService.ParseShopListJson(json);
+        _onShopListRead?.Invoke(shops); // tab "Shops": danh sách shop có thể đã đổi giữa hai lượt đọc.
+        L($"Đã mở lại trình duyệt và về trang chọn shop — đọc lại được {shops.Count} shop.");
+        return shops;
+    }
+
+    /// <summary>Nghỉ "kiểu người" một khoảng ngẫu nhiên trong
+    /// [<see cref="NghiGiuaShopToiThieu"/>, <see cref="NghiGiuaShopToiDa"/>] trước shop kế.</summary>
+    private async Task NghiGiuaShopAsync(CancellationToken ct)
+    {
+        var restMs = _rng.Next((int)NghiGiuaShopToiThieu.TotalMilliseconds, (int)NghiGiuaShopToiDa.TotalMilliseconds + 1);
+        L($"Nghỉ ~{restMs / 60000}' trước shop kế...");
+        await Task.Delay(restMs, ct).ConfigureAwait(false);
+    }
+
     // ── GĐ4: MỘT VÒNG qua MỌI shop: login → SSO → readShopList → từng shop (detail → toShip → syncOrders +
     //    callback lưu DB → nếu ToShip>0 xử đơn + revert địa chỉ) → đóng tab shop → nghỉ → shop kế. ─────────────
     /// <summary>
@@ -512,94 +736,51 @@ public sealed class OrdersBridgeSession : IDisposable
     /// chỉ lấy hàng + Chuẩn bị hàng từng đơn + in phiếu + revert địa chỉ → đóng tab shop (về picker) → nghỉ 3-5' →
     /// shop kế. Captcha giữa chừng → dừng vòng (Captcha=true). Dùng cho nút "▶ Chạy" (production, chạy liên tục).
     /// </summary>
-    /// <summary>
-    /// KIỂM TRA LẠI ĐỊA CHỈ của ĐÚNG MỘT shop theo lệnh người dùng (nút "Check" trên banner lỗi địa chỉ):
-    /// đăng nhập → về picker → đọc danh sách shop → mở Chi tiết ĐÚNG shop đó → chạy MỖI bước đặt địa chỉ.
-    /// <para>
-    /// <b>KHÔNG đọc đơn, KHÔNG chuẩn bị hàng, KHÔNG in phiếu, KHÔNG check trả hàng</b> — đây là lượt kiểm tra,
-    /// không phải một vòng làm việc thu nhỏ. Người dùng bấm nút này lúc đang nhìn banner đỏ, thứ họ cần là câu
-    /// trả lời "shop này còn lỗi không", không phải một lượt in phiếu ngoài ý muốn.
-    /// </para>
-    /// <para>
-    /// Cầu nối chỉ có MỘT lane (<c>OrdersBridgeChannel.BridgePort</c> cố định) nên caller PHẢI tự chặn khi đang
-    /// có phiên chạy — ở đây không tự xếp hàng.
-    /// </para>
-    /// <para>
-    /// Tra shop theo <c>LoginName</c> rồi mới tới <c>ShopName</c>, so sánh KHÔNG phân biệt hoa/thường — đúng
-    /// khuôn nhãn mà vòng shop thường ghi vào banner (<c>shopLogin</c>), kẻo bấm Check xong báo "không thấy
-    /// shop" cho chính cái tên vừa hiện trên banner.
-    /// </para>
-    /// </summary>
-    public async Task<OrdersKiemTraDiaChiResult> KiemTraDiaChiMotShopAsync(
-        OrdersLoginParams login, string shopLogin, CancellationToken ct = default)
-    {
-        if (string.IsNullOrWhiteSpace(shopLogin))
-        {
-            return new OrdersKiemTraDiaChiResult(false, false, "Chưa biết shop nào cần kiểm tra.");
-        }
-
-        try
-        {
-            var err = await LoginAndReachPickerAsync(login, ct).ConfigureAwait(false);
-            if (_channel.CaptchaSeen)
-            {
-                return new OrdersKiemTraDiaChiResult(false, true, "Rơi vào trang verify/captcha khi vào Seller Centre.");
-            }
-            if (err is not null)
-            {
-                return new OrdersKiemTraDiaChiResult(false, false, err);
-            }
-
-            var shopListTcs = _channel.ArmShopList();
-            await _channel.SendAsync(new { action = "readShopList" }).ConfigureAwait(false);
-            var json = await _channel.AwaitAsync(shopListTcs, OrdersBridgeChannel.ChoChang.ShopList, ct).ConfigureAwait(false);
-            var shops = ShopeeLoginService.ParseShopListJson(json);
-            _onShopListRead?.Invoke(shops);
-
-            var shop = shops.FirstOrDefault(s =>
-                string.Equals(s.LoginName, shopLogin, StringComparison.OrdinalIgnoreCase)
-                || string.Equals(s.ShopName, shopLogin, StringComparison.OrdinalIgnoreCase));
-            if (shop is null)
-            {
-                return new OrdersKiemTraDiaChiResult(false, false,
-                    $"Không thấy shop \"{shopLogin}\" trong danh sách {shops.Count} shop của tài khoản này.");
-            }
-
-            L($"Kiểm tra địa chỉ: mở Chi tiết shop {shopLogin}...");
-            var detailTcs = _channel.ArmDetail();
-            await _channel.SendAsync(new { action = "openShopDetail", shopId = shop.ShopId }).ConfigureAwait(false);
-            var d = await _channel.AwaitAsync(detailTcs, OrdersBridgeChannel.ChoChang.Detail, ct).ConfigureAwait(false);
-            if (_channel.CaptchaSeen || d == "captcha")
-            {
-                return new OrdersKiemTraDiaChiResult(false, true, "Rơi vào captcha khi mở Chi tiết shop.");
-            }
-
-            var ok = await _flow.KiemTraLaiDiaChiAsync(shopLogin, ct).ConfigureAwait(false);
-            if (_channel.CaptchaSeen)
-            {
-                return new OrdersKiemTraDiaChiResult(false, true, "Rơi vào captcha khi đặt địa chỉ.");
-            }
-            return new OrdersKiemTraDiaChiResult(ok, false, null, _flow.PickupOkShop);
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            return new OrdersKiemTraDiaChiResult(false, false, ex.Message);
-        }
-    }
-
     public async Task<OrdersBridgeRunResult> RunAllShopsAsync(OrdersLoginParams login, CancellationToken ct = default)
     {
         int shopCount = 0, shopsDone = 0, totalOrders = 0, totalSlips = 0;
         var pickupFailedShops = new List<string>();
         var pickupOkShops = new List<string>();
 
+        // Số shop hỏng LIÊN TIẾP (ngoại lệ từ thân shop) — chạm TranShopHongLienTiep thì dừng vòng; shop nào
+        // chạy trọn là đứt chuỗi. Xem QuyetDinhSauShopHong.
+        var hongLienTiep = 0;
+
         // Nhãn các shop ĐẶT ĐƯỢC địa chỉ trong vòng này (null khi chưa shop nào) — phải điền vào MỌI lối ra
         // NẰM TRONG/SAU vòng shop, kẻo vòng thoát giữa chừng là mất tín hiệu gỡ banner của shop đã chạy xong.
         string? NhanShopDatDuoc() => pickupOkShops.Count > 0 ? string.Join(", ", pickupOkShops) : null;
+
+        // Gom tín hiệu địa chỉ của shop VỪA chạy vào danh sách của vòng rồi DỌN cờ ngay: gọi ở cả lối thường
+        // lẫn lối shop-hỏng nên không dọn là một shop vào danh sách hai lần (banner ghi "shop, shop").
+        void ThuTinHieuDiaChi()
+        {
+            if (_flow.PickupOkShop is not null) { pickupOkShops.Add(_flow.PickupOkShop); _flow.PickupOkShop = null; }
+            if (_flow.PickupFailedShop is not null) { pickupFailedShops.Add(_flow.PickupFailedShop); _flow.PickupFailedShop = null; }
+        }
+
+        // Đóng tab shop để về trang chọn shop SAU KHI shop hỏng: chính lượt đóng cũng có thể ném (cầu nối chết
+        // hẳn) — nuốt tại đây, kẻo đường dọn dẹp lại giết cả vòng đúng như cái bug đang sửa.
+        // Ngoại lệ lạ ⇒ PickerHong: ta KHÔNG chứng minh được là lỗi cầu nối (mọi đường cầu nối đã được
+        // DongTabShopAsync nuốt sẵn), mà đoán bừa "cầu nối" là đúng cái tội báo sai nguyên nhân đang đi sửa.
+        async Task<KetQuaVePicker> ThuDongTabShopAsync(CancellationToken ctDong)
+        {
+            try { return await _flow.DongTabShopAsync(ctDong).ConfigureAwait(false); }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                L("Đóng tab shop sau lỗi cũng hỏng: " + ex.Message);
+                return KetQuaVePicker.PickerHong;
+            }
+        }
+
+        // MỌI lối ra LỖI của vòng đi qua đây: tín hiệu địa chỉ tích lũy TỪ ĐẦU VÒNG phải theo ra bằng hết, kể cả
+        // phần trước một lần mở lại trình duyệt. Mất PickupOkShops là banner địa chỉ của shop đã chạy xong treo
+        // oan; mất PickupFailedShop là shop hỏng địa chỉ không ai được báo.
+        OrdersBridgeRunResult KetQuaDungVong(string? loi, bool captcha = false)
+            => new(shopCount, shopsDone, totalOrders, totalSlips, captcha, loi,
+                PickupAddressFailed: pickupFailedShops.Count > 0,
+                PickupFailedShop: pickupFailedShops.Count > 0 ? string.Join(", ", pickupFailedShops) : null,
+                PickupOkShops: NhanShopDatDuoc());
 
         try
         {
@@ -626,109 +807,275 @@ public sealed class OrdersBridgeSession : IDisposable
                 return new OrdersBridgeRunResult(0, 0, 0, 0, false, "Không đọc được shop nào (đã tới /portal/shop chưa?).");
             }
 
-            for (int i = 0; i < shops.Count; i++)
+            // Phần CHƯA chạy của vòng. Đọc lại picker sau mỗi lần mở lại trình duyệt sẽ THAY danh sách này (ghép
+            // theo ShopId qua GhepShopConLai), nên vòng for phải bám conLai chứ không bám `shops`.
+            IReadOnlyList<ShopListItem> conLai = shops;
+            // ShopId đã ĐỤNG TỚI trong vòng (xong / bỏ qua vì địa chỉ / hỏng giữa chừng). Chạy lại một shop trong
+            // tập này là đếm trùng + in phiếu trùng + đụng đơn THẬT — ràng buộc quan trọng nhất của đường mở lại.
+            var daChayShopId = new HashSet<string>(StringComparer.Ordinal);
+            var soLanMoLai = 0;
+
+            // HÀNG ĐỢI THỬ LẠI: shop rơi OAN vì cầu nối (chưa hề gửi prepareNextOrder) — chạy nốt SAU KHI hết
+            // danh sách chính, không chen ngang, mỗi shop đúng 1 lượt. Xem NenThuLaiShopRoiOan.
+            var hangDoiThuLai = new List<ShopListItem>();
+            var laLuotThuLai = false;
+
+            // "Còn việc phía sau trong vòng này": còn shop chưa chạy của lượt hiện tại, HOẶC hàng đợi thử lại sắp
+            // chạy sau lượt chính. Dùng cho CẢ hai câu hỏi "có cần dọn trang chọn shop không" và "picker hỏng có
+            // hại ai không" — bỏ vế hàng đợi là lượt thử lại khởi động trên một picker bẩn, chết ngay từ shop đầu.
+            bool ConViecPhiaSau(int i, IReadOnlyList<ShopListItem> ds)
+                => i < ds.Count - 1 || (!laLuotThuLai && hangDoiThuLai.Count > 0);
+
+            // Vòng NGOÀI chỉ có tối đa hai lượt: danh sách chính, rồi hàng đợi thử lại (nếu có). `laLuotThuLai`
+            // chốt cửa — lượt thử lại KHÔNG được đẻ ra hàng đợi thử lại nữa.
+            while (true)
             {
-                ct.ThrowIfCancellationRequested();
-                var shop = shops[i];
-                var shopName = string.IsNullOrWhiteSpace(shop.LoginName) ? shop.ShopId : shop.LoginName;
-                // Nhãn shop cho cột Tên Shop (GSheet) + khóa đếm prepare_daily: LoginName, fallback ShopName
-                // (KHÁC shopName ở trên fallback ShopId). Tính SỚM để cột tiến độ báo được ngay lúc bắt đầu.
-                var shopLogin = string.IsNullOrWhiteSpace(shop.LoginName) ? shop.ShopName : shop.LoginName;
-                L($"[Shop {i + 1}/{shops.Count}] {shopName} — mở Chi tiết...");
-
-                // Cột tiến độ tab "Shops": bắt đầu check shop này → chấm nhảy sang đây + bật vòng quay.
-                _onShopCheckStarted?.Invoke(shopLogin);
-                try
+                for (int i = 0; i < conLai.Count; i++)
                 {
-                    // Mở Chi tiết shop (trusted click).
-                    var detailTcs = _channel.ArmDetail();
-                    await _channel.SendAsync(new { action = "openShopDetail", shopId = shop.ShopId }).ConfigureAwait(false);
-                    var d = await _channel.AwaitAsync(detailTcs, OrdersBridgeChannel.ChoChang.Detail, ct).ConfigureAwait(false);
-                    if (_channel.CaptchaSeen || d == "captcha")
-                    {
-                        return new OrdersBridgeRunResult(shopCount, shopsDone, totalOrders, totalSlips, true, "Rơi vào captcha khi mở Chi tiết.",
-                            PickupOkShops: NhanShopDatDuoc());
-                    }
+                    ct.ThrowIfCancellationRequested();
+                    var shop = conLai[i];
+                    var shopName = NhanShop(shop);
+                    // Nhãn shop cho cột Tên Shop (GSheet) + khóa đếm prepare_daily: LoginName, fallback ShopName
+                    // (KHÁC shopName ở trên fallback ShopId). Tính SỚM để cột tiến độ báo được ngay lúc bắt đầu.
+                    var shopLogin = string.IsNullOrWhiteSpace(shop.LoginName) ? shop.ShopName : shop.LoginName;
+                    L($"[{(laLuotThuLai ? "Thử lại " : "")}Shop {i + 1}/{conLai.Count}] {shopName} — mở Chi tiết...");
 
-                    // Đọc "Chờ Lấy Hàng".
-                    var toShipTcs = _channel.ArmToShip();
-                    await _channel.SendAsync(new { action = "readToShip" }).ConfigureAwait(false);
-                    var raw = await _channel.AwaitAsync(toShipTcs, OrdersBridgeChannel.ChoChang.ToShip, ct).ConfigureAwait(false);
-                    var toShip = ShopeeDashboard.ParseToShipCount(raw);
-                    L($"[Shop {i + 1}] Chờ Lấy Hàng: {(toShip?.ToString() ?? "?")}.");
+                    // Đánh dấu NGAY, TRƯỚC khi làm gì: mọi lối ra của shop này (xong, bỏ qua, hỏng, captcha) đều phải
+                    // tính là "đã đụng". Đánh dấu ở cuối thì lối hỏng sẽ trượt và shop được chạy lại sau lần mở lại.
+                    daChayShopId.Add(shop.ShopId);
 
-                    // Đọc đơn (Phần A) + callback lưu DB + xử đơn (Phần B) + revert địa chỉ.
-                    // Reset cờ "đặt được địa chỉ" NGAY TRƯỚC lời gọi: quên là shop sau thừa hưởng cờ của shop
-                    // trước ⇒ GỠ NHẦM banner của shop chưa hề chạy bước địa chỉ (vd shop 0 đơn chờ lấy hàng).
-                    _flow.PickupOkShop = null;
-                    var (orders, slips) = await _flow.RunShopOrdersAsync(shop.ShopId, shopLogin, toShip ?? 0, ct).ConfigureAwait(false);
-                    if (_channel.CaptchaSeen)
-                    {
-                        // Captcha giữa chừng vẫn phải mang theo tín hiệu của shop đã đặt được địa chỉ trước đó.
-                        if (_flow.PickupOkShop is not null) { pickupOkShops.Add(_flow.PickupOkShop); }
-                        return new OrdersBridgeRunResult(shopCount, shopsDone, totalOrders + orders, totalSlips + slips, true, "Rơi vào captcha khi đọc/xử đơn.",
-                            PickupOkShops: NhanShopDatDuoc());
-                    }
-                    if (_flow.PickupFailedShop is not null)
-                    {
-                        // Không đặt được địa chỉ → BỎ QUA shop này (không in phiếu), vẫn chạy shop kế.
-                        // Lỗi địa chỉ thường chỉ của một shop; giả thuyết cũ "modal hỏng = mọi shop hỏng" đã bỏ (2026-08-04).
-                        var failed = _flow.PickupFailedShop;
-                        pickupFailedShops.Add(failed);
-                        L($"⛔ Không đặt được địa chỉ lấy hàng ở shop {failed} — BỎ QUA shop này, KHÔNG in phiếu; sang shop kế.");
-                        totalOrders += orders; // Phần A có thể đã sync đơn; slips = 0
-                        _flow.PickupFailedShop = null; // tránh shop sau dính cờ cũ
-                    }
-                    else
-                    {
-                        totalOrders += orders;
-                        totalSlips += slips;
-                        shopsDone++;
-                        // Shop này ĐẶT ĐƯỢC địa chỉ (bước đó thực sự chạy) → vòng ngoài tự gỡ banner cũ của nó.
-                        if (_flow.PickupOkShop is not null) { pickupOkShops.Add(_flow.PickupOkShop); }
-                    }
+                    // Cờ "đã gửi chuẩn bị hàng" phải sạch TỪ TRƯỚC lệnh đầu tiên của shop: shop có thể hỏng ngay ở
+                    // openShopDetail, và lúc đó khối catch đọc cờ để quyết định có thử lại không. Thừa hưởng cờ của
+                    // shop trước là hoặc bỏ oan một shop, hoặc (tệ hơn nhiều) chạy lại một shop ĐÃ in phiếu.
+                    // ShopFlowRunner cũng tự reset ở đầu RunShopOrdersAsync — hai lớp cho ràng buộc sống còn này.
+                    _flow.DaGuiChuanBiHang = false;
 
-                    // Đóng tab shop → về picker /portal/shop (listTabId picker giữ nguyên; extension đóng shopTabId).
-                    // ⚠ PHẢI đọc cờ ok: bản trước vứt giá trị trả về, nên hễ picker không sẵn sàng là shop KẾ chết
-                    // với thông báo lạc đề "chờ 30s chưa thấy tab shop mở" (3/3 lần trong nhật ký production, luôn
-                    // đi ngay sau một lượt trang trả hàng không render).
-                    // Cũng bắt buộc sau nhánh bỏ-qua-địa-chỉ — quên thì shop kế chết.
-                    if (!await _flow.DongTabShopAsync(ct).ConfigureAwait(false))
+                    // != null ⇒ shop này đã xử xong nhưng picker CHƯA sạch; xử lý NGOÀI khối try (mở lại trình duyệt
+                    // là việc của cả vòng, không được rơi vào catch dành cho thân một shop).
+                    KetQuaVePicker? matPicker = null;
+                    var shopVuaHong = false;
+                    // Thân shop đã chạy trọn, chỉ còn dọn dẹp (đóng tab về picker). Ngoại lệ SAU mốc này không
+                    // được biến shop thành ứng viên chạy lại — chạy lại là cộng đôi shopsDone + đọc lại đơn vô ích.
+                    var daXongViecShop = false;
+
+                    // Cột tiến độ tab "Shops": bắt đầu check shop này → chấm nhảy sang đây + bật vòng quay.
+                    _onShopCheckStarted?.Invoke(shopLogin);
+                    try
                     {
-                        // Shop CUỐI thì picker hỏng không hại ai — vòng đằng nào cũng kết thúc và vòng sau mở cửa
-                        // sổ mới. Chỉ dừng khi CÒN shop phía sau, kẻo báo động giả ở đúng lúc mọi việc đã xong.
-                        if (i < shops.Count - 1)
+                        // Mở Chi tiết shop (trusted click).
+                        var detailTcs = _channel.ArmDetail();
+                        await _channel.SendAsync(new { action = "openShopDetail", shopId = shop.ShopId }).ConfigureAwait(false);
+                        var d = await _channel.AwaitAsync(detailTcs, OrdersBridgeChannel.ChoChang.Detail, ct).ConfigureAwait(false);
+                        if (_channel.CaptchaSeen || d == "captcha")
                         {
-                            L($"⛔ Dừng cả vòng của tài khoản (bỏ {shops.Count - i - 1} shop còn lại) — không đưa "
-                              + $"được về trang chọn shop sau shop {shopName}.");
-                            var closeErr = $"Không quay lại được trang chọn shop sau shop {shopName} — đã dừng vòng (shop kế "
-                                + "sẽ không mở được). Sẽ thử lại ở vòng sau.";
-                            // Giữ tín hiệu địa chỉ nếu đã có shop bị bỏ qua → AccountSession vẫn gửi Slack.
-                            return new OrdersBridgeRunResult(shopCount, shopsDone, totalOrders, totalSlips, false, closeErr,
+                            return KetQuaDungVong("Rơi vào captcha khi mở Chi tiết.", captcha: true);
+                        }
+
+                        // Đọc "Chờ Lấy Hàng".
+                        var toShipTcs = _channel.ArmToShip();
+                        await _channel.SendAsync(new { action = "readToShip" }).ConfigureAwait(false);
+                        var raw = await _channel.AwaitAsync(toShipTcs, OrdersBridgeChannel.ChoChang.ToShip, ct).ConfigureAwait(false);
+                        var toShip = ShopeeDashboard.ParseToShipCount(raw);
+                        L($"[Shop {i + 1}] Chờ Lấy Hàng: {(toShip?.ToString() ?? "?")}.");
+
+                        // Đọc đơn (Phần A) + callback lưu DB + xử đơn (Phần B) + revert địa chỉ.
+                        // Reset cờ "đặt được địa chỉ" NGAY TRƯỚC lời gọi: quên là shop sau thừa hưởng cờ của shop
+                        // trước ⇒ GỠ NHẦM banner của shop chưa hề chạy bước địa chỉ (vd shop 0 đơn chờ lấy hàng).
+                        _flow.PickupOkShop = null;
+                        var (orders, slips) = await _flow.RunShopOrdersAsync(shop.ShopId, shopLogin, toShip ?? 0, ct).ConfigureAwait(false);
+                        if (_channel.CaptchaSeen)
+                        {
+                            // Captcha giữa chừng vẫn phải mang theo tín hiệu của shop đã đặt được địa chỉ trước đó.
+                            if (_flow.PickupOkShop is not null) { pickupOkShops.Add(_flow.PickupOkShop); }
+                            // Không dùng KetQuaDungVong ở đây: hai con số đơn/phiếu của CHÍNH shop này chưa kịp cộng
+                            // vào tổng. Phần tín hiệu địa chỉ thì giữ y hệt — tích lũy từ đầu vòng.
+                            return new OrdersBridgeRunResult(shopCount, shopsDone, totalOrders + orders, totalSlips + slips,
+                                true, "Rơi vào captcha khi đọc/xử đơn.",
                                 PickupAddressFailed: pickupFailedShops.Count > 0,
                                 PickupFailedShop: pickupFailedShops.Count > 0 ? string.Join(", ", pickupFailedShops) : null,
                                 PickupOkShops: NhanShopDatDuoc());
                         }
+                        if (_flow.PickupFailedShop is not null)
+                        {
+                            // Không đặt được địa chỉ → BỎ QUA shop này (không in phiếu), vẫn chạy shop kế.
+                            // Lỗi địa chỉ thường chỉ của một shop; giả thuyết cũ "modal hỏng = mọi shop hỏng" đã bỏ (2026-08-04).
+                            var failed = _flow.PickupFailedShop;
+                            pickupFailedShops.Add(failed);
+                            L($"⛔ Không đặt được địa chỉ lấy hàng ở shop {failed} — BỎ QUA shop này, KHÔNG in phiếu; sang shop kế.");
+                            totalOrders += orders; // Phần A có thể đã sync đơn; slips = 0
+                            _flow.PickupFailedShop = null; // tránh shop sau dính cờ cũ
+                        }
+                        else
+                        {
+                            totalOrders += orders;
+                            totalSlips += slips;
+                            shopsDone++;
+                            // Shop này ĐẶT ĐƯỢC địa chỉ (bước đó thực sự chạy) → vòng ngoài tự gỡ banner cũ của nó.
+                            ThuTinHieuDiaChi();
+                            if (laLuotThuLai)
+                            {
+                                L($"↻ Thử lại shop {shopName}: XONG (tính vào số shop đã chạy của vòng).");
+                            }
+                        }
+
+                        // Từ đây chỉ còn dọn dẹp — xem daXongViecShop.
+                        daXongViecShop = true;
+
+                        // Đóng tab shop → về picker /portal/shop (listTabId picker giữ nguyên; extension đóng shopTabId).
+                        // ⚠ PHẢI đọc cờ ok: bản trước vứt giá trị trả về, nên hễ picker không sẵn sàng là shop KẾ chết
+                        // với thông báo lạc đề "chờ 30s chưa thấy tab shop mở" (3/3 lần trong nhật ký production, luôn
+                        // đi ngay sau một lượt trang trả hàng không render).
+                        // Cũng bắt buộc sau nhánh bỏ-qua-địa-chỉ — quên thì shop kế chết.
+                        var vePicker = await _flow.DongTabShopAsync(ct).ConfigureAwait(false);
+                        if (vePicker != KetQuaVePicker.VeDuoc)
+                        {
+                            // Quyết định (mở lại trình duyệt / dừng / kệ vì đã hết shop) nằm NGOÀI khối try.
+                            matPicker = vePicker;
+                        }
+
+                        hongLienTiep = 0; // shop này chạy trọn → đứt chuỗi hỏng liên tiếp
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        // Người dùng bấm Dừng — KHÔNG phải shop hỏng. Ném ra như cũ để cả vòng kết thúc ngay.
+                        throw;
+                    }
+                    catch (Exception ex)
+                    {
+                        // MỘT SHOP HỎNG KHÔNG ĐƯỢC GIẾT CẢ VÒNG. Trước 10/08/2026 ngoại lệ từ thân shop xuyên thẳng
+                        // ra khối catch cuối hàm ⇒ mọi shop phía sau mất trắng (13:37: cầu nối rớt giữa chặng Chuẩn
+                        // bị hàng ở shop 6/12, 6 shop cuối không hề được mở).
+                        hongLienTiep++;
+                        shopVuaHong = true;
+                        L($"⛔ Shop {shopName} HỎNG giữa chừng ({ex.Message}) — bỏ shop này, "
+                          + $"hỏng liên tiếp {hongLienTiep}/{TranShopHongLienTiep}.");
+                        L("Chi tiết lỗi shop: " + ex.ToString());
+
+                        // Tín hiệu địa chỉ của shop vừa hỏng vẫn phải theo vòng ra ngoài: bước đặt địa chỉ có thể ĐÃ
+                        // chạy xong (chỉ bước sau mới gãy), mà mất tín hiệu là banner của nó treo lại oan.
+                        ThuTinHieuDiaChi();
+
+                        if (laLuotThuLai)
+                        {
+                            L($"↻ Thử lại shop {shopName}: VẪN hỏng — thôi, để vòng sau.");
+                        }
+                        else if (NenThuLaiShopRoiOan(
+                                     _flow.DaGuiChuanBiHang, LaLoiCauNoi(ex), daXongViecShop,
+                                     hangDoiThuLai.Any(s => string.Equals(s.ShopId, shop.ShopId, StringComparison.Ordinal)),
+                                     hangDoiThuLai.Count))
+                        {
+                            hangDoiThuLai.Add(shop);
+                            L($"↻ Shop {shopName} rơi vì CẦU NỐI và chưa hề gửi lệnh chuẩn bị hàng — xếp vào hàng đợi "
+                              + $"thử lại cuối vòng ({hangDoiThuLai.Count}/{TranThuLaiShopMoiVong}).");
+                        }
+
+                        // "Còn việc phía sau" = còn shop chưa chạy của lượt này, HOẶC hàng đợi thử lại (đã gồm cả
+                        // shop vừa xếp vào ngay trên) sắp chạy. Cả hai đường đều cần trang chọn shop SẠCH.
+                        var conShopPhiaSau = ConViecPhiaSau(i, conLai);
+                        // Chỉ đóng tab khi việc đó còn ý nghĩa: shop CUỐI thì vòng xong rồi, còn chạm trần thì vòng
+                        // dừng ngay — mà cầu nối đã chết thì mỗi lệnh gửi đi còn ngốn trọn hạn chờ nối lại.
+                        var canVePicker = conShopPhiaSau && hongLienTiep < TranShopHongLienTiep;
+                        var vePicker = canVePicker
+                            ? await ThuDongTabShopAsync(ct).ConfigureAwait(false)
+                            : KetQuaVePicker.VeDuoc;
+
+                        var quyetDinh = QuyetDinhSauShopHong(
+                            hongLienTiep, conShopPhiaSau, vePicker == KetQuaVePicker.VeDuoc);
+                        if (quyetDinh == SauShopHong.DungVongHongLienTiep)
+                        {
+                            // Trần hỏng liên tiếp xét TRƯỚC và KHÔNG mở lại trình duyệt: chuỗi này nói hạ tầng hỏng
+                            // sâu hơn một cú rớt cầu nối, mở lại chỉ đổi chỗ đốt thời gian.
+                            var lyDo = $"{hongLienTiep} shop LIÊN TIẾP hỏng (shop cuối: {shopName} — {ex.Message}) "
+                                + "— coi như cầu nối đã chết, dừng vòng.";
+                            L($"⛔ Dừng cả vòng của tài khoản (bỏ {conLai.Count - i - 1} shop còn lại) — {lyDo}");
+                            return KetQuaDungVong(lyDo);
+                        }
+                        if (quyetDinh == SauShopHong.DungVongKhongVePicker)
+                        {
+                            matPicker = vePicker; // xử lý NGOÀI khối try (có thể còn cứu được bằng mở lại trình duyệt)
+                        }
+                    }
+                    finally
+                    {
+                        // XONG shop này — kể cả lỗi/captcha/hủy giữa chừng (đừng để vòng quay quay mãi). Tắt vòng quay,
+                        // chấm VẪN ở lại shop này cho tới khi shop kế gọi _onShopCheckStarted. Đặt TRƯỚC nhịp nghỉ 3-5'.
+                        _onShopCheckFinished?.Invoke(shopLogin);
+                    }
+
+                    if (matPicker is { } lyDoMatPicker)
+                    {
+                        var conShopChuaChay = ConViecPhiaSau(i, conLai);
+                        var quyet = QuyetDinhKhiMatPicker(conShopChuaChay, soLanMoLai, _channel.CaptchaSeen);
+
+                        if (quyet == KhiMatPicker.DungVong)
+                        {
+                            var lyDo = _channel.CaptchaSeen
+                                ? $"Rơi vào trang verify/captcha khi đóng tab shop {shopName}."
+                                : LyDoDungVongKhongVePicker(
+                                    shopName, shopVuaHong, lyDoMatPicker == KetQuaVePicker.CauNoiChet);
+                            L($"⛔ Dừng cả vòng của tài khoản (bỏ {conLai.Count - i - 1} shop còn lại) — {lyDo}");
+                            return KetQuaDungVong(lyDo, _channel.CaptchaSeen);
+                        }
+
+                        if (quyet == KhiMatPicker.MoLaiTrinhDuyet)
+                        {
+                            soLanMoLai++;
+                            var chuaChayCu = conLai.Skip(i + 1).ToList();
+                            L($"Mất trang chọn shop ({(lyDoMatPicker == KetQuaVePicker.CauNoiChet ? "cầu nối không sống lại" : "picker không về được trạng thái sạch")}) "
+                              + $"— MỞ LẠI trình duyệt lần {soLanMoLai}/{TranMoLaiTrinhDuyet}, còn {chuaChayCu.Count} shop chưa chạy.");
+
+                            var shopsMoi = await MoLaiTrinhDuyetVePickerAsync(login, ct).ConfigureAwait(false);
+                            if (shopsMoi is null)
+                            {
+                                var lyDo = _channel.CaptchaSeen
+                                    ? "Rơi vào trang verify/captcha khi mở lại trình duyệt giữa vòng."
+                                    : $"Mở lại trình duyệt (lần {soLanMoLai}/{TranMoLaiTrinhDuyet}) vẫn không về được "
+                                      + $"trang chọn shop sau shop {shopName} — dừng vòng, thử lại ở vòng sau.";
+                                L($"⛔ Dừng cả vòng của tài khoản (bỏ {chuaChayCu.Count} shop còn lại) — {lyDo}");
+                                return KetQuaDungVong(lyDo, _channel.CaptchaSeen);
+                            }
+
+                            var ghep = GhepShopConLai(shopsMoi, chuaChayCu, daChayShopId);
+                            if (ghep.BienMat.Count > 0)
+                            {
+                                L($"Sau khi mở lại: {ghep.BienMat.Count} shop chưa chạy KHÔNG còn trong danh sách mới "
+                                  + $"({string.Join(", ", ghep.BienMat)}) — bỏ qua, để vòng sau.");
+                            }
+                            conLai = ghep.ConLai;
+                            // Mở lại trình duyệt thành công = hạ tầng đã lành → chuỗi hỏng liên tiếp coi như đứt. Giữ
+                            // số cũ là để một chuỗi xui TRƯỚC lúc mở lại giết oan vòng vừa được dựng lại sạch sẽ.
+                            hongLienTiep = 0;
+                            L($"Chạy tiếp {conLai.Count} shop chưa chạy trong CHÍNH vòng này.");
+                            i = -1;   // for++ đưa về 0 — duyệt danh sách còn lại từ đầu
+                            continue; // bỏ luôn nhịp nghỉ: vừa mất mấy chục giây mở lại rồi
+                        }
+
+                        // KetThucBinhThuong: hết shop chưa chạy — picker hỏng không hại ai, vòng sau mở cửa sổ mới.
                         L($"closeShopTab không về được picker sau shop CUỐI ({shopName}) — vòng đã xong, bỏ qua.");
                     }
-                }
-                finally
-                {
-                    // XONG shop này — kể cả lỗi/captcha/hủy giữa chừng (đừng để vòng quay quay mãi). Tắt vòng quay,
-                    // chấm VẪN ở lại shop này cho tới khi shop kế gọi _onShopCheckStarted. Đặt TRƯỚC nhịp nghỉ 3-5'.
-                    _onShopCheckFinished?.Invoke(shopLogin);
+
+                    // Nghỉ kiểu người 3-5' giữa các shop (trừ shop cuối của lượt).
+                    if (i < conLai.Count - 1)
+                    {
+                        await NghiGiuaShopAsync(ct).ConfigureAwait(false);
+                    }
                 }
 
-                // Nghỉ kiểu người 3-5' giữa các shop (trừ shop cuối).
-                if (i < shops.Count - 1)
+                // Hết danh sách chính → chạy nốt hàng đợi thử lại (ĐƯỜNG RIÊNG, sau khi đã đi hết 12 shop: lúc này
+                // nhịp đứt ~240s của network service trình duyệt đã dịch đi, cơ may khác hẳn lúc shop rơi).
+                if (laLuotThuLai || hangDoiThuLai.Count == 0)
                 {
-                    var restMs = _rng.Next(180_000, 300_001);
-                    L($"Nghỉ ~{restMs / 60000}' trước shop kế...");
-                    await Task.Delay(restMs, ct).ConfigureAwait(false);
+                    break;
                 }
+                laLuotThuLai = true;
+                conLai = hangDoiThuLai.ToList(); // BẢN SAO: `hangDoiThuLai` còn dùng để đếm ở dòng tổng kết cuối vòng
+                L($"↻ Thử lại {hangDoiThuLai.Count} shop rơi vì cầu nối: "
+                  + string.Join(", ", hangDoiThuLai.Select(NhanShop)) + ".");
+                await NghiGiuaShopAsync(ct).ConfigureAwait(false);
             }
 
             L($"Xong 1 vòng: {shopsDone}/{shopCount} shop, {totalOrders} đơn, {totalSlips} phiếu"
+              + (hangDoiThuLai.Count > 0 ? $" (đã thử lại {hangDoiThuLai.Count} shop rơi vì cầu nối)" : "")
               + (pickupFailedShops.Count > 0 ? $", bỏ qua {pickupFailedShops.Count} shop lỗi địa chỉ." : "."));
             if (pickupFailedShops.Count > 0)
             {
@@ -741,19 +1088,25 @@ public sealed class OrdersBridgeSession : IDisposable
                 PickupOkShops: NhanShopDatDuoc());
         }
         catch (OperationCanceledException) { throw; }
+        catch (CauNoiRotGiuaChangException ex)
+        {
+            // Chỉ tới đây khi chặng gãy nằm NGOÀI vòng shop (đăng nhập/SSO/đọc danh sách shop) — trong vòng shop
+            // đã có khối catch riêng từng shop. Phân biệt với timeout thường vì thuốc khác nhau: lệnh MẤT chứ
+            // extension không hề chậm, nên đọc log đừng đi tìm bên extension.
+            L("⛔ " + ex.Message);
+            return KetQuaDungVong(ex.Message);
+        }
         catch (TimeoutException)
         {
             // Vẫn mang theo tín hiệu của những shop ĐÃ đặt được địa chỉ trước lúc gãy — banner của chúng phải
             // được gỡ dù vòng kết thúc bằng lỗi (hai đường đụng những shop KHÁC NHAU, không giẫm nhau).
             L("Cầu nối: hết thời gian chờ phản hồi từ extension.");
-            return new OrdersBridgeRunResult(shopCount, shopsDone, totalOrders, totalSlips, false, "Hết thời gian chờ phản hồi từ extension.",
-                PickupOkShops: NhanShopDatDuoc());
+            return KetQuaDungVong("Hết thời gian chờ phản hồi từ extension.");
         }
         catch (Exception ex)
         {
             L("Cầu nối lỗi: " + ex.ToString());
-            return new OrdersBridgeRunResult(shopCount, shopsDone, totalOrders, totalSlips, false, ex.Message,
-                PickupOkShops: NhanShopDatDuoc());
+            return KetQuaDungVong(ex.Message);
         }
     }
 

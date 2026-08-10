@@ -180,15 +180,87 @@ export function pageLocateSortButton(idx) {
   return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2), tong: ds.length };
 }
 
-// Số .eds-dropdown-menu ĐANG HIỆN (rect > 0). Dùng để biết cú bấm có mở được dropdown hay không — và để lượt
-// bấm thứ hai KHÔNG bấm khi menu đang mở sẵn (bấm lúc đó là tự tay đóng lại đúng cái vừa mở ra).
-export function pageDemMenuHien() {
-  let hien = 0;
+// Đếm .eds-dropdown-menu ĐANG HIỆN (rect > 0), TÁCH LÀM HAI theo `reSrc` (dấu nhận menu sắp xếp, text KHÔNG
+// dấu — xem SORT_MENU_MARK_RE): `sapXep` = menu CÓ chứa mục "ngay yeu cau" (đúng cái ta cần), `khac` = mọi
+// popper EDS khác đang mở (bộ lọc, chọn shop…).
+// Vì sao phải tách: bản cũ đếm GỘP, mà chốt "menu đang mở sẵn thì đừng bấm" đọc chính con số đó ⇒ một dropdown
+// KHÁC đang mở là cú bấm sắp xếp bị bỏ hẳn, và cờ menu-tung-mo báo CO dù menu sắp xếp chưa hề bung. Chẩn đoán
+// vòng 19:21 ngày 10/08/2026 đã thấy đúng ca đó: "menu tong=2 hien=0" với `menu-an#1 co-muc-ngay-yeu-cau=khong`.
+export function pageDemMenuHien(reSrc) {
+  const re = new RegExp(reSrc || "ngay yeu cau");
+  let sapXep = 0;
+  let khac = 0;
   for (const m of document.querySelectorAll(".eds-dropdown-menu")) {
     const r = m.getBoundingClientRect();
-    if (r.width > 0 && r.height > 0) { hien++; }
+    if (!(r.width > 0 && r.height > 0)) continue;
+    if (re.test(_na(m.textContent))) { sapXep++; } else { khac++; }
   }
-  return hien;
+  return { sapXep: sapXep, khac: khac };
+}
+
+// CHẨN ĐOÁN ĐIỂM BẤM — gọi NGAY TRƯỚC cú bấm nút sắp xếp, trả một dòng mô tả cái gì thật sự nằm dưới toạ độ
+// sắp bấm. Vì sao cần: chẩn đoán hậu-kỳ (pageChanDoanSapXep) chỉ nói "menu không mở", KHÔNG phân biệt được ba
+// thủ phạm khác hẳn nhau — (a) lớp phủ tour/mask nuốt cú bấm, (b) toạ độ lệch hệ quy chiếu (dpr / zoom / visual
+// viewport) nên bấm ra ngoài nút, (c) nút bị khoá (disabled / pointer-events:none) nên bấm trúng cũng vô ích.
+//   · elementFromPoint + chuỗi cha  → cái gì đang nằm TRÊN điểm bấm (câu trả lời cho (a)).
+//   · phần tử :hover sâu nhất       → RENDERER tự khai con trỏ đang ở đâu sau cú mouseMoved của trusted click;
+//                                     lệch với elementFromPoint tức lệch hệ toạ độ (câu trả lời cho (b)).
+//   · disabled/aria-*/pointerEvents → câu trả lời cho (c); aria-expanded còn cho biết nút CÓ mở dropdown không.
+// ⚠⚠ TỰ CHỨA (world MAIN serialize ĐỘC LẬP): phần gom ứng viên .sort-button CHÉP LẠI y hệt pageLocateSortButton
+// thay vì gọi hàm cấp module — hàm bơm đi chỉ mang theo THÂN của chính nó (đã vấp "_nutSapXep is not defined"
+// 10/08/2026, lỗi chỉ hiện trong console của TRANG nên nhìn nhật ký app tưởng code chạy đúng mà DOM sai).
+export function pageChanDoanDiemBam(x, y, idx) {
+  const phan = [];
+  const goi = (el) => {
+    if (!el) return "(khong co)";
+    const cls = (typeof el.className === "string" ? el.className : "").split(/\s+/).filter(Boolean).slice(0, 3).join(".");
+    return (el.tagName || "?").toLowerCase() + (cls ? "." + cls : "");
+  };
+  const trongNut = (el) => {
+    try { return !!(el && el.closest && el.closest(".sort-button")); } catch (e) { return false; }
+  };
+
+  phan.push("diem(" + Math.round(x) + "," + Math.round(y) + ")");
+  let tren = null;
+  try { tren = document.elementFromPoint(x, y); } catch (e) { tren = null; }
+  phan.push("tren-diem=" + goi(tren) + " " + (trongNut(tren) ? "TRUNG NUT" : "KHONG trung"));
+  const to = [];
+  let leo = tren ? tren.parentElement : null;
+  for (let i = 0; i < 4 && leo; i++) { to.push(goi(leo)); leo = leo.parentElement; }
+  phan.push("cha: " + (to.length ? to.join(" < ") : "(khong co)"));
+
+  let hover = null;
+  try {
+    const hs = document.querySelectorAll(":hover");
+    hover = hs.length ? hs[hs.length - 1] : null;
+  } catch (e) { hover = null; }
+  phan.push("hover=" + goi(hover) + " " + (trongNut(hover) ? "TRONG NUT" : "ngoai nut"));
+
+  const trongO = [];
+  const conLai = [];
+  for (const el of document.querySelectorAll(".sort-button")) {
+    const r0 = el.getBoundingClientRect();
+    if (!(r0.width > 0 && r0.height > 0)) continue;
+    (el.closest(".return-list-summary") ? trongO : conLai).push(el);
+  }
+  const ds = trongO.concat(conLai);
+  const nut = ds[idx || 0];
+  if (!nut) {
+    phan.push("nut#" + ((idx || 0) + 1) + " KHONG con trong DOM (tong=" + ds.length + ")");
+  } else {
+    let cs = null;
+    try { cs = getComputedStyle(nut); } catch (e) { cs = null; }
+    phan.push("nut#" + ((idx || 0) + 1)
+      + " disabled=" + (nut.disabled === true)
+      + " aria-disabled=" + (nut.getAttribute("aria-disabled") || "-")
+      + " aria-expanded=" + (nut.getAttribute("aria-expanded") || "-")
+      + " pointer-events=" + (cs ? cs.pointerEvents : "?"));
+  }
+
+  phan.push("dpr=" + (window.devicePixelRatio || 1)
+    + " vv-scale=" + (window.visualViewport ? window.visualViewport.scale : "-")
+    + " visibility=" + document.visibilityState);
+  return phan.join(" · ");
 }
 
 // CHẨN ĐOÁN khi KHÔNG đổi được sắp xếp: nút có không, có mấy .eds-dropdown-menu (hiện/tổng), và text các mục

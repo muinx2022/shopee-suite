@@ -4,29 +4,123 @@ using Shopee.Toolkit.Ws;
 namespace XuLyDonShopee.Core.Services;
 
 /// <summary>
+/// Chặng chờ dở bị CẦU NỐI RỚT GIỮA CHỪNG: lệnh đã bay sang extension rồi WebSocket mới đứt ⇒ lệnh đó mất hẳn
+/// (extension nối lại nhưng C# <b>KHÔNG tự gửi lại</b> — <c>prepareNextOrder</c> là thao tác THẬT, gửi lại có
+/// thể chuẩn bị nhầm thêm một đơn). Khác hẳn timeout thường, nơi extension vẫn cầm lệnh mà làm chậm.
+/// <para>Kế thừa <see cref="TimeoutException"/> cố ý: mọi chỗ đang <c>catch (TimeoutException)</c> best-effort
+/// (set địa chỉ khác, tải lại phiếu thiếu, đóng tab shop) giữ NGUYÊN hành vi cũ; ai cần phân biệt thì bắt
+/// riêng kiểu này TRƯỚC nhánh <see cref="TimeoutException"/>.</para>
+/// </summary>
+internal sealed class CauNoiRotGiuaChangException : TimeoutException
+{
+    public CauNoiRotGiuaChangException(string message) : base(message) { }
+}
+
+/// <summary>
 /// Nhớ chặng TCS ĐANG được await để khi extension báo <c>error</c> ta CHỈ fault đúng chặng đó — không fault
 /// hàng loạt TCS không ai await (11 chặng → 10 exception mồ côi → <c>UnobservedTaskException</c>). Các chặng
 /// không được await được để NGUYÊN (pending → GC lặng, KHÔNG raise unobserved) rồi
 /// <see cref="OrdersBridgeChannel.ResetStages"/> thay mới.
+/// <para>Cũng là chỗ RÚT NGẮN hạn của chặng đang chờ khi socket đứt — xem <see cref="RutNganHanKhiDut"/>.</para>
 /// <para>Lớp riêng (internal) để test được cơ chế mà không cần mở trình duyệt.</para>
 /// </summary>
 internal sealed class StageWaiter
 {
     private volatile Action<Exception>? _faultCurrent;
+    private volatile ChangDangCho? _changHienTai;
 
     /// <summary>Await <paramref name="tcs"/> (kèm timeout + ct) đồng thời ĐĂNG KÝ nó là "chặng hiện tại":
-    /// <see cref="FaultCurrent"/> sẽ fault ĐÚNG tcs này. Khôi phục chặng trước ở finally (các flow tuần tự nên
-    /// thường là null giữa hai chặng).</summary>
+    /// <see cref="FaultCurrent"/> sẽ fault ĐÚNG tcs này, <see cref="RutNganHanKhiDut"/> rút đúng hạn của nó.
+    /// Khôi phục chặng trước ở finally (các flow tuần tự nên thường là null giữa hai chặng).</summary>
     public async Task<T> AwaitAsync<T>(TaskCompletionSource<T> tcs, TimeSpan timeout, CancellationToken ct)
     {
-        var prev = _faultCurrent;
+        var prevFault = _faultCurrent;
+        var prevChang = _changHienTai;
+        using var chang = new ChangDangCho(timeout);
         _faultCurrent = ex => tcs.TrySetException(ex);
-        try { return await tcs.Task.WaitAsync(timeout, ct).ConfigureAwait(false); }
-        finally { _faultCurrent = prev; }
+        _changHienTai = chang;
+        try { return await chang.ChoAsync(tcs.Task, ct).ConfigureAwait(false); }
+        finally { _faultCurrent = prevFault; _changHienTai = prevChang; }
     }
 
     /// <summary>Fault CHỈ chặng đang chờ (nếu có). Không có ai chờ → no-op (không tạo task mồ côi).</summary>
     public void FaultCurrent(Exception ex) => _faultCurrent?.Invoke(ex);
+
+    /// <summary>
+    /// Socket vừa ĐỨT trong lúc một chặng đang chờ ⇒ RÚT NGẮN hạn còn lại của chặng đó xuống tối đa
+    /// <paramref name="choNoiLai"/> tính từ BÂY GIỜ.
+    /// <para><b>Cố ý KHÔNG fault ngay</b>: ngày 10/08/2026 có 15 nhịp đứt trong một giờ mà 14 nhịp vô hại
+    /// (extension nối lại trong 1 giây và vẫn trả lời đúng). Fault ngay là giết oan 14 lượt để cứu 1.</para>
+    /// </summary>
+    /// <returns><c>true</c> nếu ĐANG có chặng chờ dở (để caller ghi nhật ký); không có ai chờ → no-op.</returns>
+    public bool RutNganHanKhiDut(TimeSpan choNoiLai)
+    {
+        var chang = _changHienTai;
+        if (chang is null) { return false; }
+        chang.RutNganHan(choNoiLai);
+        return true;
+    }
+
+    /// <summary>
+    /// HẠN của MỘT chặng đang được await — rút ngắn được giữa chừng. Hạn gốc dài (Prepare 300s) là ngân sách
+    /// cho extension LÀM VIỆC; khi socket đứt sau lúc lệnh đã bay thì lệnh mất hẳn, chờ nốt hạn gốc chỉ là chờ
+    /// mù (13:32 → 13:37 ngày 10/08/2026: trọn 300s im lặng rồi mới ném, cả vòng chết theo).
+    /// </summary>
+    private sealed class ChangDangCho : IDisposable
+    {
+        private readonly CancellationTokenSource _hanCts = new();
+
+        /// <summary>Hạn UTC hiện hành (ticks) — đọc/ghi qua <see cref="Interlocked"/> vì lượt rút hạn đến từ
+        /// thread nhận WebSocket, không phải thread đang await.</summary>
+        private long _hanTicks;
+
+        /// <summary>Đã có lượt socket đứt TRONG lúc chặng này chờ dở — quyết định ném kiểu ngoại lệ nào.</summary>
+        private volatile bool _rotGiuaChang;
+
+        public ChangDangCho(TimeSpan han)
+        {
+            _hanTicks = (DateTime.UtcNow + han).Ticks;
+            _hanCts.CancelAfter(han);
+        }
+
+        /// <summary>Kéo hạn về <c>bây giờ + <paramref name="conLai"/></c>. CHỈ RÚT NGẮN, không bao giờ NỚI:
+        /// chặng vốn ngắn hơn (đọc DOM 30s) phải giữ nguyên hạn gốc của nó.</summary>
+        public void RutNganHan(TimeSpan conLai)
+        {
+            _rotGiuaChang = true;
+            var ticksMoi = (DateTime.UtcNow + conLai).Ticks;
+            long cu;
+            do
+            {
+                cu = Interlocked.Read(ref _hanTicks);
+                if (ticksMoi >= cu) { return; }
+            }
+            while (Interlocked.CompareExchange(ref _hanTicks, ticksMoi, cu) != cu);
+
+            // Chặng có thể vừa xong + Dispose xen giữa — hạn không còn ý nghĩa nữa, bỏ qua.
+            try { _hanCts.CancelAfter(conLai); } catch (ObjectDisposedException) { }
+        }
+
+        /// <summary>Chờ <paramref name="task"/> tới khi xong / hết hạn / user Dừng.</summary>
+        public async Task<T> ChoAsync<T>(Task<T> task, CancellationToken ct)
+        {
+            using var gop = CancellationTokenSource.CreateLinkedTokenSource(_hanCts.Token, ct);
+            try
+            {
+                return await task.WaitAsync(gop.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                // Hết hạn chặng — KHÔNG phải user bấm Dừng (nhánh đó để OperationCanceledException đi tiếp như cũ).
+                throw _rotGiuaChang
+                    ? new CauNoiRotGiuaChangException(
+                        "Cầu nối rớt giữa chặng — lệnh đã gửi bị mất, không chờ thêm (KHÔNG tự gửi lại).")
+                    : new TimeoutException("Hết thời gian chờ phản hồi từ extension.");
+            }
+        }
+
+        public void Dispose() => _hanCts.Dispose();
+    }
 }
 
 /// <summary>
@@ -202,10 +296,12 @@ internal sealed class OrdersBridgeChannel : IDisposable
 
     /// <summary>Mở cổng WebSocket <paramref name="port"/> (mặc định <see cref="BridgePort"/>) rồi nối handler
     /// và bật nhịp giữ sống (<paramref name="nhipGiuSong"/>, mặc định <see cref="NhipGiuSong"/> — chỉ test mới
-    /// truyền giá trị khác).
+    /// truyền giá trị khác). <paramref name="choNoiLai"/> (mặc định <see cref="ChoNoiLai"/>, cũng chỉ test rót
+    /// giá trị khác) là hạn chờ extension nối lại — dùng cho cả <see cref="SendAsync"/> lẫn lượt rút hạn chặng.
     /// Phiên trước vừa đóng có thể chưa nhả hẳn cổng → retry vài nhịp; hết lượt vẫn không mở được thì NÉM.</summary>
-    public void Start(int port = BridgePort, TimeSpan? nhipGiuSong = null)
+    public void Start(int port = BridgePort, TimeSpan? nhipGiuSong = null, TimeSpan? choNoiLai = null)
     {
+        _choNoiLai = choNoiLai ?? ChoNoiLai;
         WebSocketServer? ws = null;
         for (var attempt = 0; attempt < 5 && ws is null; attempt++)
         {
@@ -221,7 +317,15 @@ internal sealed class OrdersBridgeChannel : IDisposable
         // socket chập chờn nối lại được vài lần rồi mới thua. Đúng hai giả thuyết cần tách ở ca 10/08/2026 (hai
         // vòng liền chết ở shop 6). Lượng dòng nhỏ: bình thường mỗi vòng đúng một lần nối.
         _ws.Connected += () => L($"Cầu nối: extension NỐI vào lúc {DateTime.Now:HH:mm:ss}.");
-        _ws.Disconnected += () => L($"Cầu nối: extension ĐỨT lúc {DateTime.Now:HH:mm:ss}.");
+
+        // Dùng DutVoiLyDo (KHÔNG phải Disconnected) để câu log nói luôn AI đóng socket. Không có phần lý do thì
+        // chỉ biết "đứt lúc mấy giờ", không phân biệt được client chủ động đóng với server/http.sys ngắt — mà cả
+        // ngày 10/08/2026 đổ oan cho Chromium chính vì thiếu con số này.
+        _ws.DutVoiLyDo += lyDo =>
+        {
+            L($"Cầu nối: extension ĐỨT lúc {DateTime.Now:HH:mm:ss} — {lyDo}.");
+            RutNganChangDangCho();
+        };
 
         var nhip = nhipGiuSong ?? NhipGiuSong;
         _giuSong = new System.Threading.Timer(_ => GuiGiuSong(), null, nhip, nhip);
@@ -259,11 +363,62 @@ internal sealed class OrdersBridgeChannel : IDisposable
     /// </summary>
     internal static readonly TimeSpan ChoNoiLai = TimeSpan.FromSeconds(90);
 
+    /// <summary>Hạn chờ nối lại ĐANG DÙNG của phiên này (<see cref="Start"/> rót vào; chỉ test đổi khác
+    /// <see cref="ChoNoiLai"/>).</summary>
+    private TimeSpan _choNoiLai = ChoNoiLai;
+
     /// <summary>Extension đang nối cầu hay không (cổng chưa mở cũng tính là chưa nối).</summary>
     public bool DaNoi => _ws?.IsConnected == true;
 
+    /// <summary>Nhịp hỏi lại <see cref="DaNoi"/> trong lúc chờ extension nối lại. 500ms: đủ dày để không phí giây
+    /// nào của hạn chờ, đủ thưa để vòng chờ không đốt CPU (bằng nhịp <see cref="SendAsync"/> vẫn dùng).</summary>
+    internal static readonly TimeSpan NhipHoiDaNoi = TimeSpan.FromMilliseconds(500);
+
+    /// <summary>
+    /// CHỜ extension nối (lại) cầu: trả <c>true</c> ngay khi <see cref="DaNoi"/>, trả <c>false</c> nếu hết
+    /// <paramref name="han"/> (mặc định hạn chờ nối lại của phiên — xem <see cref="ChoNoiLai"/>) mà vẫn chưa nối.
+    /// Người dùng bấm Dừng vẫn ném <see cref="OperationCanceledException"/> như mọi chỗ khác.
+    /// <para>
+    /// <b>Vì sao cần đường chờ RIÊNG thay vì để <see cref="SendAsync"/> tự chờ:</b> đường hồi phục trang chọn shop
+    /// (<c>ShopFlowRunner.DongTabShopAsync</c>) phải BIẾT cầu nối có sống lại hay không mới nói đúng nguyên nhân —
+    /// "cầu nối đang gãy" và "picker hỏng" là hai bệnh, chữa hai kiểu, mà <see cref="SendAsync"/> nuốt câu trả lời
+    /// đó vào trong. Ngoài ra gửi lệnh lúc socket đang đứt là đốt một lượt thử vô ích.
+    /// </para>
+    /// </summary>
+    public async Task<bool> ChoNoiLaiAsync(TimeSpan? han = null, CancellationToken ct = default)
+    {
+        if (DaNoi) { return true; }
+
+        var hetHan = DateTime.UtcNow + (han ?? _choNoiLai);
+        while (!DaNoi)
+        {
+            var conLai = hetHan - DateTime.UtcNow;
+            if (conLai <= TimeSpan.Zero) { break; }
+            await Task.Delay(conLai < NhipHoiDaNoi ? conLai : NhipHoiDaNoi, ct).ConfigureAwait(false);
+        }
+        return DaNoi;
+    }
+
+    /// <summary>
+    /// Socket vừa ĐỨT: nếu đang có chặng chờ dở thì hạ hạn còn lại của nó xuống tối đa <see cref="_choNoiLai"/>.
+    /// Lệnh của chặng đó đã bay đi rồi nên coi như MẤT — chờ nốt hạn gốc (Prepare tới 300s) là chờ mù, mà quá
+    /// hạn ở đó thì ném ra tận ngoài vòng shop và giết cả vòng (13:32→13:37 ngày 10/08/2026, mất 6 shop cuối).
+    /// <para>Đứt của socket CŨ vừa bị socket MỚI thay chỗ thì <b>không</b> rút: <c>WebSocketServer</c> raise
+    /// <c>Connected</c> của cái mới TRƯỚC <c>Disconnected</c> của cái cũ, mà lúc đó cầu nối vẫn đang nối nên
+    /// chặng đang chờ chưa chắc mất lệnh — rút hạn ở đây là giết oan một chặng còn sống.</para>
+    /// </summary>
+    private void RutNganChangDangCho()
+    {
+        if (DaNoi) { return; }
+        if (_waiter.RutNganHanKhiDut(_choNoiLai))
+        {
+            L($"Cầu nối rớt GIỮA một chặng đang chờ — lệnh đó coi như mất, chỉ chờ thêm tối đa {_choNoiLai.TotalSeconds:0}s.");
+        }
+    }
+
     /// <summary>Gửi lệnh cho extension. Cổng chưa mở → ném NGAY (lỗi lập trình, chờ vô ích). Extension chưa/không
-    /// còn kết nối → CHỜ nó nối lại tới <paramref name="choNoiLai"/> (mặc định <see cref="ChoNoiLai"/>) rồi mới
+    /// còn kết nối → CHỜ nó nối lại tới <paramref name="choNoiLai"/> (mặc định hạn của phiên, xem
+    /// <see cref="ChoNoiLai"/>) rồi mới
     /// gửi; hết hạn vẫn chưa có thì để <see cref="WebSocketServer.SendAsync"/> ném như cũ (caller phân biệt được
     /// "extension chưa kết nối" với "extension kẹt").</summary>
     public async Task SendAsync(object message, TimeSpan? choNoiLai = null)
@@ -273,7 +428,7 @@ internal sealed class OrdersBridgeChannel : IDisposable
 
         if (!ws.IsConnected)
         {
-            var han = choNoiLai ?? ChoNoiLai;
+            var han = choNoiLai ?? _choNoiLai;
             // KHÔNG đoán nguyên nhân trong câu này nữa. Bản cũ ghi "(service worker ngủ trong lúc nghỉ?)" và câu
             // đó đổ oan suốt buổi sáng 10/08/2026 — hoá ra có lượt CẢ TRÌNH DUYỆT đã thoát, chẳng liên quan MV3.
             // Nguyên nhân thật đọc ở hai dòng mốc "Cầu nối: extension ĐỨT/NỐI" và dòng "Trình duyệt sạch đã THOÁT".

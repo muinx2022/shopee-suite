@@ -3,31 +3,46 @@
 import { send, orderTabId } from "./core.js";
 import { execInTab } from "./exec.js";
 import {
-  RETURNS_URL, RETURN_TAB_RE, SORT_NEWEST_RE, MAX_RETURN_ROWS, MAX_RETURN_PAGES, MAX_RETURN_HEAD_HTML,
+  RETURNS_URL, RETURN_TAB_RE, SORT_NEWEST_RE, SORT_MENU_MARK_RE,
+  MAX_RETURN_ROWS, MAX_RETURN_PAGES, MAX_RETURN_HEAD_HTML,
 } from "./constants.js";
 import {
   pageLocateReturnTab, pageReturnSummaryText, pageChanDoanTraHang, pageLocateReturnCaseTab,
   pageReturnRowCount, pageLocateSortButton, pageLocateSortOption, pageScanReturnRows,
   pageReturnListSignature, pageChanDoanPagerTraHang, pageChanDoanTabTraHang, pageChanDoanSapXep, pageDemMenuHien,
+  pageChanDoanDiemBam,
 } from "./page-funcs-returns.js";
 import { pageFindNextPage } from "./page-funcs.js";
 import { dongModalChan, choHetLopPhu } from "./flow-modal.js";
 import { sleep } from "./shared/util.js";
 import { waitForTabComplete } from "./shared/tab-wait.js";
-import { ensureDbg, trustedClick } from "./shared/dbg-input.js";
+import { trustedClick } from "./shared/dbg-input.js";
+import { ensureDbgChanChat } from "./chan-chat.js";
 
 // Hạn chờ dải tab loại đơn ("Đơn Trả hàng/Hoàn tiền" · "Đơn Hủy" · "Đơn Giao không thành công") xuất hiện sau
 // khi trang trả hàng render. 6s: đủ cho một nhịp vẽ lại của Vue, và vẫn nằm gọn trong hạn chặng Returns 90s
 // kể cả khi lượt dọn modal trước đó tốn kha khá.
 const CHO_TAB_LOAI_DON_MS = 6000;
 
-// Mở dropdown "Sắp xếp theo": thử tối đa 3 ỨNG VIÊN .sort-button (mỗi lượt một nút khác), mỗi lượt chờ menu 4s.
-// Vì sao 2 lượt (bằng chứng vòng 09:44/10:07): bấm xong mà chẩn đoán ra "menu tong=2 hien=0" — menu có trong DOM
-// nhưng KHÔNG cái nào mở. Hai nguyên nhân đều tự khỏi ở lượt bấm thứ hai: (a) lượt đầu bấm trượt vì nút vừa bị
-// cuộn/vẽ lại, (b) lượt đầu mở rồi bị chính cú nhả chuột đóng lại. Trần 2 lượt để bước phụ này không ngốn hạn
-// chặng Returns 90s của cả trang.
+// Mở dropdown "Sắp xếp theo": bấm tối đa 3 LƯỢT THẬT, mỗi lượt chờ menu 4s.
+// Vì sao nhiều lượt (bằng chứng vòng 09:44/10:07): bấm xong mà chẩn đoán ra "menu tong=2 hien=0" — menu có trong
+// DOM nhưng KHÔNG cái nào mở. Ba nguyên nhân đều có cơ tự khỏi ở lượt sau: (a) lượt đầu bấm trượt vì nút vừa bị
+// cuộn/vẽ lại, (b) lượt đầu mở rồi bị chính cú nhả chuột đóng lại, (c) tour/modal chắn ở lượt đầu, dọn xong thì
+// hết. Trần 3 lượt để bước phụ này không ngốn hạn chặng Returns 90s của cả trang.
+// ⚠ "LƯỢT" ở đây là LƯỢT BẤM, KHÔNG phải "ứng viên .sort-button thứ n". Bản trước lấy `lan` làm thẳng chỉ số ứng
+// viên rồi `break` khi hết ứng viên — mà trang thật LUÔN chỉ có 1 nút ⇒ lượt 2 thoát ngay ⇒ vòng "3 lượt" chưa
+// bao giờ chạy quá 1 lượt. Bằng chứng đồng hồ: bản 2-lượt trước tốn 9–11s mỗi lần hỏng, bản đó chỉ 4–5s.
 const SO_LAN_MO_SAP_XEP = 3;
 const CHO_MENU_SAP_XEP_MS = 4000;
+// Nghỉ giữa hai lượt bấm sắp xếp. Đủ để popper EDS của lượt trước đóng hẳn và layout lắng lại — bấm dồn thì cú
+// sau rơi vào lúc menu đang thu, tức tự tay tái tạo đúng ca "mở rồi tự đóng" đang muốn thoát ra.
+const NGHI_GIUA_HAI_LUOT_SAP_XEP_MS = 700;
+// Trần thời gian cho CẢ bước đổi sắp xếp. Đổi sắp xếp là bước PHỤ (hỏng thì đọc theo thứ tự đang có), còn chặng
+// Returns phía C# chỉ có 90s cho cả trang — mở trang + chờ ô tổng (tới 20s) + chọn tab (tới 8s) đã ăn kha khá.
+// Nay mỗi lượt bấm còn kèm dọn tour + hai lượt chờ lớp phủ tan, nên ca xấu nhất (tour bật, cả 3 lượt trượt) đủ
+// sức đẩy chặng quá hạn ⇒ mất TRỌN lượt check (mốc giữ nguyên) — tệ hơn hẳn cái giá "đọc sai thứ tự". Hết trần
+// thì thôi thử, phần đọc số + quét dòng vẫn kịp chạy.
+const TRAN_THOI_GIAN_SAP_XEP_MS = 35000;
 
 // Chờ danh sách trả hàng ĐỔI so với ký hiệu 'before' sau khi bấm "trang sau" (đối xứng waitOrdersChanged của
 // trang đơn). Bỏ trạng thái đang tải ("0|"): giữa hai trang Vue xoá sạch bảng một nhịp rồi mới vẽ trang mới.
@@ -78,7 +93,7 @@ async function latTrang(tabId, list, soTrang) {
       }
       break;
     }
-    await ensureDbg(tabId);
+    await ensureDbgChanChat(tabId);
     await trustedClick(tabId, next.x, next.y);
     if (!(await waitReturnsChanged(tabId, sigTruoc, 10000))) break;
     soTrangLat++;
@@ -115,7 +130,7 @@ export async function doReadReturnRequests() {
   // 0) Dọn modal chắn TRƯỚC. Bước này toàn trusted click, mà mask của modal nuốt sạch. Ca thật 10/08/2026:
   // modal "Điều khoản - Điều kiện" nuốt cú bấm tab, trang đứng nguyên ở /portal/sale/order rồi hết 20s chờ ô
   // tổng → bỏ lượt check. Flow này KHÔNG tự mở modal nào nên giữ lại "" (không loại trừ tiêu đề nào).
-  await ensureDbg(tabId);
+  await ensureDbgChanChat(tabId);
   await dongModalChan(tabId, "");
 
   // 1) Mở trang trả hàng: ưu tiên BẤM TAB (trusted click, data-testid ổn định); không thấy tab → điều hướng thẳng.
@@ -182,7 +197,7 @@ export async function doReadReturnRequests() {
   let tabTraHang = false;
   let dangChon = "";
   try {
-    await ensureDbg(tabId);
+    await ensureDbgChanChat(tabId);
     // CHỜ dải tab loại đơn vẽ xong rồi mới kết luận. Trước đây dò ĐÚNG MỘT LẦN: ca 10/08/2026 modal đóng lúc
     // :42 thì :43 đã kết luận "không thấy tab" — Vue vẽ lại dải tab sau khi trang hết bị chắn, ta nhìn quá sớm.
     let ct = null;
@@ -250,24 +265,65 @@ export async function doReadReturnRequests() {
   // Có LÚC NÀO menu bung ra không (dù mục cần bấm không khớp / bung rồi tự đóng) — tách hẳn hai ca "cú bấm
   // không mở được dropdown" với "dropdown mở được nhưng không tìm ra mục", mà chẩn đoán hậu-kỳ không tách nổi.
   let menuTungMo = false;
+  // Lỗi NÉM RA giữa chừng, nếu có. PHẢI lộ vào câu báo: ca thật 10/08/2026 có 6/17 lượt "hỏng sắp xếp" mà thân
+  // try ném ngay từ dòng đầu (execInTab lỗi vì tab bị vứt khỏi bộ nhớ) — CHƯA HỀ bấm phát nào, mà nhật ký in ra
+  // y hệt lượt bấm thật ⇒ cả ngày đi soi DOM trong khi thủ phạm nằm ở cầu nối.
+  let loiSapXep = "";
+  const nhatKyBam = [];       // "k/N tai(x,y)" của TỪNG lượt bấm THẬT — để lần sau đếm được bằng nhật ký.
+  const chanDoanDiemBam = []; // ảnh chụp điểm bấm NGAY TRƯỚC mỗi cú bấm; chỉ gửi đi khi lượt sắp xếp HỎNG.
+  let hetTranSapXep = false;  // dừng vì chạm TRAN_THOI_GIAN_SAP_XEP_MS chứ không phải vì hết lượt — phải phân biệt.
   try {
-    await ensureDbg(tabId);
+    await ensureDbgChanChat(tabId);
     // Lượt 1 CHỈ để cuộn nút vào giữa màn; đo toạ độ thật ở lượt 2 sau khi layout đã lắng. Đo ngay sau khi cuộn
     // là cách chắc chắn nhất để bấm trượt (trang cuộn mượt / danh sách vẽ lại đẩy nút đi chỗ khác).
     await execInTab(tabId, pageLocateSortButton, [0]);
     await sleep(400);
-    // Thử lần lượt TỪNG ứng viên .sort-button (ưu tiên nút trong ô tổng ".return-list-summary"). Vòng 11:00 cho
-    // menu-tung-mo=KHONG ở 2/5 shop: bấm mà dropdown chưa từng bung — hợp với việc trang có nhiều .sort-button
-    // và bản cũ luôn bấm đúng cái đầu tiên tìm thấy. Trần SO_LAN_MO_SAP_XEP để bước phụ này không ngốn hạn chặng.
+    // Trang thật chỉ có 1 ứng viên .sort-button, nhưng vẫn giữ đường thử ứng viên khác khi có nhiều nút (ưu tiên
+    // nút trong ô tổng ".return-list-summary"): KẸP chỉ số vào [0, tong-1] để lượt thử lại luôn bấm được một nút
+    // THẬT thay vì thoát non như bản trước.
+    let tongUngVien = 1;
+    const hanSapXep = Date.now() + TRAN_THOI_GIAN_SAP_XEP_MS;
     for (let lan = 0; lan < SO_LAN_MO_SAP_XEP && !sortApplied; lan++) {
-      // Menu đang mở sẵn thì ĐỪNG bấm nữa — cú bấm lúc này là tự tay đóng đúng cái vừa mở (dropdown là nút
-      // bật/tắt). Bẫy do chính lượt thử lại đẻ ra, phải chặn ngay tại đây.
-      let dangHien = 0;
-      try { dangHien = (await execInTab(tabId, pageDemMenuHien, [])) || 0; } catch (e) { dangHien = 0; }
-      if (dangHien === 0) {
-        const btn = await execInTab(tabId, pageLocateSortButton, [lan]);
-        if (!btn) break; // hết ứng viên
+      if (Date.now() >= hanSapXep) { hetTranSapXep = true; break; }
+      if (lan > 0) { await sleep(NGHI_GIUA_HAI_LUOT_SAP_XEP_MS); }
+      // Menu SẮP XẾP đang mở sẵn thì ĐỪNG bấm nữa — cú bấm lúc này là tự tay đóng đúng cái vừa mở (dropdown là
+      // nút bật/tắt). Bẫy do chính lượt thử lại đẻ ra, phải chặn ngay tại đây. Chỉ đếm menu sắp xếp: popper KHÁC
+      // đang mở không liên quan gì tới cú bấm này (xem pageDemMenuHien).
+      let dem = null;
+      try { dem = await execInTab(tabId, pageDemMenuHien, [SORT_MENU_MARK_RE]); } catch (e) { dem = null; }
+      if (!dem || (dem.sapXep || 0) === 0) {
+        const viTri = Math.min(lan, Math.max(0, tongUngVien - 1));
+        let btn = await execInTab(tabId, pageLocateSortButton, [viTri]);
+        if (!btn) break; // trang KHÔNG còn nút .sort-button nào hiện hình → bấm lại cũng vô ích (pageChanDoanSapXep sẽ nói rõ)
+        tongUngVien = btn.tong || tongUngVien;
+
+        // ĐIỂM SẮP BẤM có bị lớp phủ đè không — DÙNG LẠI đúng cơ chế của cú bấm tab (choHetLopPhu), đừng đẻ
+        // đường mới. Ca 19:21 ngày 10/08/2026: tour `.on-boarding` bật giữa lượt (lượt dọn modal đầu vòng đã ném
+        // lỗi vì tab mất truy cập, nên tour ở lại suốt lượt) — dải tour đẩy nút sắp xếp xuống đúng 40px và lớp
+        // `.on-boarding-highlight` nuốt cú bấm. Che thì DỌN LẠI rồi bấm tiếp, KHÔNG bỏ cuộc.
+        let phu = await choHetLopPhu(tabId, btn.x, btn.y);
+        if (phu) {
+          send({ action: "progress", message: "điểm bấm nút sắp xếp đang bị che bởi: " + phu + " — dọn lại modal/tour rồi bấm tiếp." });
+          // dongModalChan xử luôn tour `.on-boarding`: nhãn "Đã hiểu" nằm sẵn trong bộ NHAN_DONG của
+          // pageLocateBlockingModalButton, và nó lặp tới 6 lượt cho tour nhiều bước. Hàm này KHÔNG ném.
+          await dongModalChan(tabId, "");
+          await ensureDbgChanChat(tabId); // trang vẽ lại sau khi tour tắt có thể làm debugger tự detach
+          // ĐO LẠI toạ độ: gỡ dải tour xong là nội dung dịch lên, toạ độ vừa đo đã cũ (đúng 40px lệch đã đo được).
+          const btn2 = await execInTab(tabId, pageLocateSortButton, [Math.min(lan, Math.max(0, tongUngVien - 1))]);
+          if (btn2) { btn = btn2; tongUngVien = btn2.tong || tongUngVien; }
+          phu = await choHetLopPhu(tabId, btn.x, btn.y);
+          if (phu) { send({ action: "progress", message: "vẫn còn lớp phủ ở điểm bấm nút sắp xếp sau lượt dọn: " + phu }); }
+        }
+
+        // Ảnh chụp điểm bấm NGAY TRƯỚC cú bấm — thứ duy nhất phân biệt được "bị che" / "lệch hệ toạ độ" / "nút
+        // bị khoá". Gom lại chứ KHÔNG gửi ngay: lượt thành công thì chẳng ai cần, mà gửi mỗi shop mỗi lượt là
+        // ngập nhật ký. Chỉ đổ ra ở câu báo hỏng bên dưới (cùng lối với mọi chẩn đoán khác trong file này).
+        let cdBam = "";
+        try { cdBam = (await execInTab(tabId, pageChanDoanDiemBam, [btn.x, btn.y, Math.min(lan, Math.max(0, tongUngVien - 1))])) || ""; } catch (e) { cdBam = ""; }
+        if (cdBam) { chanDoanDiemBam.push("lượt " + (lan + 1) + " → " + cdBam); }
+
         await trustedClick(tabId, btn.x, btn.y);
+        nhatKyBam.push((lan + 1) + "/" + SO_LAN_MO_SAP_XEP + " tai(" + btn.x + "," + btn.y + ")");
       }
       let opt = null;
       const odl = Date.now() + CHO_MENU_SAP_XEP_MS;
@@ -278,7 +334,8 @@ export async function doReadReturnRequests() {
         await sleep(cho);
         cho = Math.min(400, cho + 100);
         try {
-          if (((await execInTab(tabId, pageDemMenuHien, [])) || 0) > 0) { menuTungMo = true; }
+          const d2 = await execInTab(tabId, pageDemMenuHien, [SORT_MENU_MARK_RE]);
+          if (d2 && (d2.sapXep || 0) > 0) { menuTungMo = true; }
         } catch (e) {}
         opt = await execInTab(tabId, pageLocateSortOption, [SORT_NEWEST_RE]);
         if (opt) break;
@@ -289,7 +346,10 @@ export async function doReadReturnRequests() {
         await sleep(1500); // danh sách vẽ lại theo thứ tự mới
       }
     }
-  } catch (e) { /* đổi sắp xếp lỗi → đọc theo thứ tự đang có (sortApplied=false) */ }
+  } catch (e) {
+    // KHÔNG nuốt câm nữa — xem chú thích của `loiSapXep`. Vẫn đi tiếp (đọc theo thứ tự đang có, sortApplied=false).
+    loiSapXep = String((e && e.message) || e);
+  }
   if (!sortApplied) {
     // Regex SORT_NEWEST_RE đã kiểm khớp ĐÚNG nhãn thật "Ngày yêu cầu (Mới - Cũ)" (10/08/2026) ⇒ lỗi KHÔNG ở
     // luật khớp text. Còn lại hai khả năng: bấm nút mà dropdown không mở, hoặc menu nằm chỗ khác. Chẩn đoán
@@ -300,6 +360,12 @@ export async function doReadReturnRequests() {
       action: "progress",
       message: "KHÔNG đổi được sắp xếp 'Ngày yêu cầu (Mới - Cũ)' — đọc theo thứ tự đang có."
         + " menu-tung-mo=" + (menuTungMo ? "CO" : "KHONG")
+        // ĐẾM ĐƯỢC BẰNG NHẬT KÝ: có bấm hay không, bấm mấy lượt, bấm vào đâu. Không có dòng này thì lượt "ném
+        // ngay dòng đầu" và lượt "bấm 3 phát đều trượt" in ra y hệt nhau.
+        + " · lượt bấm: " + (nhatKyBam.length ? nhatKyBam.join(", ") : "KHONG bam duoc lan nao")
+        + (hetTranSapXep ? " · DỪNG vì chạm trần " + TRAN_THOI_GIAN_SAP_XEP_MS + "ms của bước sắp xếp" : "")
+        + (loiSapXep ? " · LỖI: " + loiSapXep : "")
+        + (chanDoanDiemBam.length ? " · Điểm bấm: " + chanDoanDiemBam.join(" | ") : "")
         + (cdSort ? " · Chẩn đoán: " + cdSort : ""),
     });
   }

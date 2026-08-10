@@ -711,29 +711,16 @@
                                                     <ColumnDefinition Width="Auto" />
                                                     <ColumnDefinition Width="Auto" />
                                                 </Grid.ColumnDefinitions>
-                                                <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                                <!-- CHỈ còn chữ cảnh báo + nút Đóng. Nút "Check" thủ công đã BỎ
+                                                     (10/08/2026, người dùng chốt): banner nay tự hết ở vòng chạy
+                                                     kế — shop nào còn treo cảnh báo là vòng lặp tự thử lại bước
+                                                     đặt địa chỉ, đặt được thì tự gỡ banner + báo Hub + gỡ ở máy
+                                                     khác, vẫn lỗi thì banner ở lại. Không cần ai bấm gì. -->
+                                                <StackPanel Grid.Column="0" Grid.ColumnSpan="2" VerticalAlignment="Center">
                                                     <TextBlock Text="{Binding Message}" FontSize="12.5"
                                                                Foreground="{StaticResource AmberTextBrush}"
                                                                TextWrapping="Wrap" />
-                                                    <!-- Kết quả lượt Check gần nhất, hiện NGAY tại banner: bấm nút
-                                                         xong mà banner không đổi gì thì không phân biệt được
-                                                         "vẫn lỗi" với "nút hỏng". -->
-                                                    <TextBlock Text="{Binding KetQuaCheck}" FontSize="11.5" Margin="0,3,0,0"
-                                                               Foreground="{StaticResource TextMuted}"
-                                                               TextWrapping="Wrap"
-                                                               Visibility="{Binding CoKetQuaCheck, Converter={StaticResource BoolToVis}}" />
                                                 </StackPanel>
-                                                <!-- Nút CHECK: chạy lại ĐÚNG bước đặt địa chỉ cho shop này. Đặt được
-                                                     thì banner tự biến mất + báo Hub (máy khác cũng gỡ). Chỉ chạy khi
-                                                     KHÔNG có phiên nào — cầu nối dùng cổng cố định, một lane. -->
-                                                <Button Grid.Column="1" Style="{StaticResource alertClose}"
-                                                        Margin="8,0,0,0"
-                                                        IsEnabled="{Binding DangKiem, Converter={StaticResource InvBool}}"
-                                                        ToolTip="Kiểm tra lại địa chỉ lấy hàng của shop này (chỉ chạy khi không có phiên nào)"
-                                                        Command="{Binding DataContext.CheckAddressAlertCommand, RelativeSource={RelativeSource AncestorType=TabControl}}"
-                                                        CommandParameter="{Binding}">
-                                                    <TextBlock Text="{Binding NhanNutCheck}" Style="{StaticResource btnLabel}" />
-                                                </Button>
                                                 <!-- Nút ĐÓNG banner: trước là ✕ ĐỎ 11px — vừa khó bấm, vừa TRÙNG
                                                      NGÔN NGỮ với ✕ đỏ ở cột tiến độ ngay dưới (dấu hiệu "shop
                                                      lỗi địa chỉ", không phải nút). Nay là nút CHỮ "Đóng" kèm ✕
