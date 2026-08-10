@@ -24,4 +24,8 @@ export const SORT_NEWEST_RE = "ngay yeu cau.*moi\\s*[-–]\\s*cu";
 // KHÔNG có data-testid nên buộc phải nhận theo TEXT — ngoại lệ so với tab điều hướng trái (pageLocateReturnTab
 // vẫn dùng data-testid). Không chọn tab thì ô tổng là của tab mặc định "Tất cả", gộp cả Đơn Hủy / Đơn Giao hàng
 // không thành công — hai loại KHÔNG có mã yêu cầu trả hàng, nên số phồng lên và lượt quét về tay không.
-export const RETURN_TAB_RE = "don tra hang hoan tien";
+// 10/08/2026: nới cho chịu được DẤU NGĂN. Shopee đang đổi giao diện khu này (chính trang bật tour hướng dẫn
+// "Đơn Trả hàng/Hoàn tiền, Đơn Hủy và Đơn Giao không thành công"), và nhãn mới có dấu "/" ⇒ _na cho ra
+// "don tra hang/hoan tien", KHÔNG khớp chuỗi cũ toàn dấu cách ⇒ locator trả null ⇒ bỏ lượt check mỗi shop.
+// Vẫn khớp nhãn CŨ "Đơn Trả hàng Hoàn tiền" (dấu ngăn là tuỳ chọn).
+export const RETURN_TAB_RE = "don tra hang\\s*[\\/|.,-]?\\s*hoan tien";

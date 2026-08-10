@@ -10,6 +10,11 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Acornima: parser JavaScript thuần .NET (nhánh kế của Esprima.NET, cũng là parser của Jint). Dùng cho
+         ExtensionJsCuPhapTests — soát cú pháp JS của extensions/ ngay trong `dotnet test`. CỐ Ý không gọi
+         Node ngoài (`node` + cờ check): máy nào không cài Node là lưới tự tắt, mà đây là lưới duy nhất chặn
+         lỗi JS ra bản phát hành (bản 1.8.6 đã lọt một dấu ngoặc thừa làm chết hẳn cầu nối extension). -->
+    <PackageReference Include="Acornima" Version="1.7.0" />
     <PackageReference Include="coverlet.collector" Version="6.0.0" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
     <PackageReference Include="xunit" Version="2.5.3" />

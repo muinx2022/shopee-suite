@@ -354,6 +354,31 @@ public static class TraHangParser
     /// gửi) → GIỮ như trước: chốt chặn mới không được làm câm bản client chưa cập nhật.
     /// </para>
     /// </summary>
+    /// <summary>
+    /// (THUẦN) Dữ liệu đọc được có TỰ TỐ CÁO là đang đứng NHẦM TAB không: có ít nhất một dòng, và <b>MỌI</b> dòng
+    /// đều bị <see cref="GhepCap"/> loại vì <c>href</c> nói đó là ĐƠN HỦY (không dòng nào mang mã yêu cầu trả hàng).
+    /// <para>
+    /// Vì sao cần (ca thật 10/08/2026): extension báo cờ "đang ở tab Đơn Trả hàng/Hoàn tiền" nhưng thật ra đứng ở
+    /// tab "Tất cả" — 33/33 dòng đều là đơn hủy, và số 33 bị ghi thẳng vào mốc ⇒ nuốt vĩnh viễn mọi yêu cầu mới
+    /// của shop đó. Nhận diện tab qua markup là cuộc rượt đuổi với Shopee; luật này soi CHÍNH DỮ LIỆU nên không
+    /// gãy khi họ đổi giao diện.
+    /// </para>
+    /// <para>
+    /// KHÔNG bắt ca "tab đúng nhưng rỗng": danh sách rỗng (<c>dong.Count == 0</c>) trả <c>false</c> — đó là shop
+    /// thật sự không có yêu cầu nào, phải cho ghi mốc 0 bình thường.
+    /// </para>
+    /// </summary>
+    public static bool NghiSaiTabTheoDuLieu(IReadOnlyList<DongTraHang> dong)
+    {
+        if (dong is null || dong.Count == 0)
+        {
+            return false;
+        }
+
+        var ghep = GhepCap(dong);
+        return ghep.BoQuaDonHuy == dong.Count;
+    }
+
     public static KetQuaGhepTraHang GhepCap(IEnumerable<DongTraHang> dong)
     {
         var cap = new List<YeuCauTraHang>();

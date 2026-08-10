@@ -1,3 +1,5 @@
+using System;
+using System.Linq;
 using XuLyDonShopee.Core.Services;
 
 namespace XuLyDonShopee.Tests;
@@ -68,5 +70,44 @@ public class BraveCleanPocArgsTests
     public void CoChanComponentUpdater()
     {
         Assert.Contains("--disable-component-update", Build());
+    }
+    /// <summary>
+    /// ⛔ Nhóm cờ chặn discard/freeze tab TUYỆT ĐỐI KHÔNG được có mặt. Test này là bản ĐẢO NGƯỢC của test cũ
+    /// <c>ChanVutTabKhoiBoNho_CoTrongDisableFeatures</c> (thêm sáng 10/08/2026, gỡ chiều cùng ngày) — giữ lại ở
+    /// dạng đảo để lần sau ai gặp lại lỗi "tab bị vứt khỏi bộ nhớ" thì không đi lại đúng vết xe đó.
+    /// <para>
+    /// Cái giá của nhóm cờ ấy: từ lúc thêm, KHÔNG vòng nào đi hết 12 shop nữa — trình duyệt sạch TỰ CHẾT giữa
+    /// vòng, luôn rơi vào kỳ nghỉ 3–4' (đúng lúc máy đóng băng/vứt tab chạy), luôn sau ~23 phút. Bằng chứng:
+    /// <c>⚠ Trình duyệt sạch (PID 22024) đã THOÁT lúc 11:54:38 — mã thoát -2147483645 (0x80000003)</c>.
+    /// 0x80000003 = STATUS_BREAKPOINT = Chromium tự kết liễu vì CHECK thất bại — không phải hết RAM (còn
+    /// 15,7 GB), không phải bị kill từ ngoài (0x40010004), không phải thoát êm (0).
+    /// </para>
+    /// <para>Lỗi tab discarded nguyên bản vẫn có lưới bên extension (nạp lại tab rồi thử lại một lượt), và ba
+    /// vòng gần nhất không tái phát lần nào.</para>
+    /// </summary>
+    /// <summary>
+    /// Cờ chặn "GPU chết đủ số lần thì giết cả trình duyệt" phải LUÔN có mặt. Không có nó thì trình duyệt sạch
+    /// tự thoát sau ~23,5 phút với <c>FATAL ... GPU process isn't usable. Goodbye.</c> — đã đo bốn vòng liên
+    /// tiếp ngày 10/08/2026, sai số 2 giây, và KHÔNG vòng nào đi hết 12 shop. Lỗi chỉ lộ sau hơn 20 phút chạy
+    /// thật nên tuyệt đối không thể bắt bằng thử tay.
+    /// </summary>
+    [Fact]
+    public void CoCoChanGietTrinhDuyetKhiGpuChet()
+    {
+        Assert.Contains("--disable-gpu-process-crash-limit", Build());
+    }
+
+    [Fact]
+    public void KhongChanVutTabKhoiBoNho_VonLamTrinhDuyetTuChet()
+    {
+        var df = Build().Single(a => a.StartsWith("--disable-features="));
+        foreach (var ten in new[]
+        {
+            "HighEfficiencyModeAvailable", "BatterySaverModeAvailable",
+            "PerformanceControlsPerformanceInterventions", "FreezingOnEnergySaver", "ModernDiscardStrategy",
+        })
+        {
+            Assert.DoesNotContain(ten, df, StringComparison.Ordinal);
+        }
     }
 }

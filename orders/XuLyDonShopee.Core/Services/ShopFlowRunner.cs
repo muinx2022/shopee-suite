@@ -15,6 +15,22 @@ internal enum SauDatDiaChi
     DungViDiaChi,
 }
 
+/// <summary>Có chạy bước "đặt địa chỉ lấy hàng" trong lượt này không, và chạy để LÀM GÌ
+/// (xem <see cref="ShopFlowRunner.QuyetDinhBuocDiaChi"/>).</summary>
+internal enum BuocDiaChi
+{
+    /// <summary>Không chạy bước địa chỉ (shop không có đơn chờ lấy hàng và cũng không có cảnh báo nào cần gỡ).</summary>
+    Bo,
+
+    /// <summary>Có đơn Chờ Lấy Hàng + có thư mục phiếu → đặt địa chỉ RỒI xử đơn (in phiếu) như xưa nay.</summary>
+    DatRoiXuDon,
+
+    /// <summary>Shop đang có BANNER lỗi địa chỉ mà lượt này không xử đơn được → vẫn chạy bước địa chỉ, nhưng CHỈ
+    /// để biết shop còn lỗi hay không (đặt được thì vòng ngoài tự gỡ banner + báo Hub). Không chuẩn bị hàng,
+    /// không in phiếu.</summary>
+    ThuLaiChoCanhBao,
+}
+
 /// <summary>Quyết định sau khi ĐỌC xong trang trả hàng, TRƯỚC khi chạy luật đếm
 /// (xem <see cref="ShopFlowRunner.QuyetDinhLuotTraHang"/>).</summary>
 internal enum SauDocTraHang
@@ -69,6 +85,9 @@ internal sealed class ShopFlowRunner
     // PDF hợp lệ, đã xếp MỚI NHẤT TRƯỚC (Core không biết accountId/thư mục phiếu của App). Null → bỏ HẲN bước —
     // đó cũng là đường "Chạy thử" (RunSliceCoreAsync): nó chỉ đọc, không lưu, nên không được kéo theo bước này.
     private readonly Func<string, CancellationToken, Task<IReadOnlyList<string>>>? _layDonThieuPhieu;
+    // Shop này có đang treo BANNER lỗi địa chỉ trên tab Shops không (App rót — Core không biết accountId/DB).
+    // Null → coi như không shop nào có banner ⇒ hành vi y hệt trước 10/08/2026 (đường "Chạy thử" không rót).
+    private readonly Func<string, bool>? _dangCoCanhBaoDiaChi;
 
     // Tập rỗng dùng khi _finalDoneSns null (tránh cấp phát mỗi shop).
     private static readonly IReadOnlySet<string> EmptyFinalSet = new HashSet<string>();
@@ -107,7 +126,8 @@ internal sealed class ShopFlowRunner
         Action<string, int>? saveReturnCount,
         Func<IReadOnlyList<YeuCauTraHang>, string>? saveReturnCodes,
         Func<string, CancellationToken, Task<IReadOnlyList<string>>>? layDonThieuPhieu = null,
-        Func<IReadOnlyList<YeuCauTraHang>, int>? demMaTraChuaBiet = null)
+        Func<IReadOnlyList<YeuCauTraHang>, int>? demMaTraChuaBiet = null,
+        Func<string, bool>? dangCoCanhBaoDiaChi = null)
     {
         _ch = channel;
         _log = log;
@@ -121,6 +141,7 @@ internal sealed class ShopFlowRunner
         _saveReturnCodes = saveReturnCodes;
         _layDonThieuPhieu = layDonThieuPhieu;
         _demMaTraChuaBiet = demMaTraChuaBiet;
+        _dangCoCanhBaoDiaChi = dangCoCanhBaoDiaChi;
     }
 
     /// <summary>Nhãn shop KHÔNG đặt được địa chỉ lấy hàng (null = chưa dính). Cùng khuôn cờ với
@@ -154,6 +175,42 @@ internal sealed class ShopFlowRunner
             : SauDatDiaChi.DungViDiaChi;
 
     /// <summary>
+    /// HÀM THUẦN (test được, không cần trình duyệt) — lượt này có chạy bước "đặt địa chỉ lấy hàng" không, và
+    /// chạy để LÀM GÌ:
+    /// <list type="bullet">
+    /// <item>Có đơn Chờ Lấy Hàng VÀ có thư mục lưu phiếu → <see cref="BuocDiaChi.DatRoiXuDon"/> (luật cũ, không đổi).</item>
+    /// <item>Không xử đơn được, NHƯNG shop đang treo banner lỗi địa chỉ → <see cref="BuocDiaChi.ThuLaiChoCanhBao"/>.
+    /// Đây là lỗ hổng vá ngày 10/08/2026: banner chỉ tự hết khi bước địa chỉ CHẠY và trả ok, mà bước đó xưa nay chỉ
+    /// chạy khi có đơn chờ lấy hàng ⇒ shop ít đơn (vd <c>piko.store1</c>, 0 đơn suốt nhiều vòng) treo banner vĩnh
+    /// viễn dù địa chỉ có thể đã đặt được từ lâu.</item>
+    /// <item>Còn lại → <see cref="BuocDiaChi.Bo"/>. Shop không lỗi thì tuyệt đối KHÔNG đụng vào địa chỉ của nó —
+    /// mỗi lượt đặt địa chỉ là một thao tác GHI thật trên Seller Centre.</item>
+    /// </list>
+    /// <para>Có đơn mà THIẾU thư mục phiếu (in phiếu không nổi) + đang có banner ⇒ vẫn
+    /// <see cref="BuocDiaChi.ThuLaiChoCanhBao"/>: không in được phiếu không phải lý do để bỏ luôn cơ hội gỡ banner.</para>
+    /// </summary>
+    internal static BuocDiaChi QuyetDinhBuocDiaChi(int toShip, bool coThuMucPhieu, bool dangCoCanhBao)
+        => toShip > 0 && coThuMucPhieu ? BuocDiaChi.DatRoiXuDon
+            : dangCoCanhBao ? BuocDiaChi.ThuLaiChoCanhBao
+            : BuocDiaChi.Bo;
+
+    /// <summary>Hỏi App "shop này có đang treo banner lỗi địa chỉ không". Callback đọc SQLite trên thread nền của
+    /// phiên nên phải bọc kín: hỏng thì coi như KHÔNG có banner — thà bỏ một lượt thử lại còn hơn làm chết cả shop.</summary>
+    private bool DangCoCanhBaoDiaChi(string shopLogin)
+    {
+        if (_dangCoCanhBaoDiaChi is null || string.IsNullOrWhiteSpace(shopLogin))
+        {
+            return false;
+        }
+        try { return _dangCoCanhBaoDiaChi(shopLogin); }
+        catch (Exception ex)
+        {
+            L("Không đọc được danh sách cảnh báo địa chỉ: " + ex.ToString() + " — coi như shop không có cảnh báo.");
+            return false;
+        }
+    }
+
+    /// <summary>
     /// BƯỚC ĐẶT ĐỊA CHỈ LẤY HÀNG trên tab shop ĐANG MỞ — tách riêng để hai đường dùng CHUNG: vòng shop thường
     /// (<see cref="ThanShopAsync"/>) và lượt kiểm tra lại theo lệnh người dùng
     /// (<see cref="KiemTraLaiDiaChiAsync"/>). Hai nơi tự gửi lệnh riêng là hai luật trôi lệch — mà bên trong
@@ -165,6 +222,21 @@ internal sealed class ShopFlowRunner
         await _ch.SendAsync(new { action = "setPickupAddress", province = _province }).ConfigureAwait(false);
         var pickupOk = await _ch.AwaitAsync(pickupTcs, OrdersBridgeChannel.ChoChang.Pickup, ct).ConfigureAwait(false);
         return QuyetDinhSauDatDiaChi(pickupOk, _ch.CaptchaSeen);
+    }
+
+    /// <summary>
+    /// TRẢ ĐỊA CHỈ LẤY HÀNG VỀ ĐỊA CHỈ KHÁC — giữ tag "trả hàng" ở địa chỉ mặc định. Chạy sau MỌI lượt đặt địa chỉ
+    /// THÀNH CÔNG, kể cả lượt chỉ chạy để gỡ banner (<see cref="BuocDiaChi.ThuLaiChoCanhBao"/>): đặt xong mà không
+    /// trả về là shop bị treo tag lấy hàng ở địa chỉ tỉnh, lệch với mọi shop chạy trọn vòng bình thường.
+    /// <para>Best-effort: hết giờ thì bỏ qua (đã đặt được địa chỉ rồi, đó mới là việc chính của bước này).</para>
+    /// </summary>
+    private async Task TraDiaChiVeKhacAsync(CancellationToken ct)
+    {
+        L("Set địa chỉ lấy hàng về địa chỉ khác (hoàn tất flow shop)...");
+        var pickupOtherTcs = _ch.ArmPickupOther();
+        await _ch.SendAsync(new { action = "setPickupAddressToOther" }).ConfigureAwait(false);
+        try { await _ch.AwaitAsync(pickupOtherTcs, OrdersBridgeChannel.ChoChang.PickupOther, ct).ConfigureAwait(false); }
+        catch (TimeoutException) { L("Set địa chỉ khác: quá hạn — bỏ qua."); }
     }
 
     /// <summary>
@@ -324,9 +396,11 @@ internal sealed class ShopFlowRunner
             catch (Exception ex) { L("Lưu đơn (DB/GSheet/hub) lỗi: " + ex.ToString()); }
         }
 
-        // Phần B — chỉ khi có đơn Chờ Lấy Hàng VÀ có thư mục lưu phiếu.
+        // Phần B — chỉ khi có đơn Chờ Lấy Hàng VÀ có thư mục lưu phiếu; shop KHÔNG xử đơn được mà đang treo banner
+        // lỗi địa chỉ thì vẫn chạy riêng bước địa chỉ để banner có đường tự hết (xem QuyetDinhBuocDiaChi).
         var slips = 0;
-        if (toShip > 0 && !string.IsNullOrWhiteSpace(_invoiceDir))
+        var buocDiaChi = QuyetDinhBuocDiaChi(toShip, !string.IsNullOrWhiteSpace(_invoiceDir), DangCoCanhBaoDiaChi(shopLogin));
+        if (buocDiaChi == BuocDiaChi.DatRoiXuDon)
         {
             L($"Có {toShip} đơn Chờ Lấy Hàng — đặt địa chỉ lấy hàng ({_province}) rồi xử từng đơn...");
             var quyetDinh = await DatDiaChiAsync(ct).ConfigureAwait(false);
@@ -416,11 +490,36 @@ internal sealed class ShopFlowRunner
             }
 
             // Hết đơn → set địa chỉ lấy hàng VỀ ĐỊA CHỈ KHÁC (giữ tag "trả hàng" ở địa chỉ mặc định) — hoàn tất 1 flow shop.
-            L("Set địa chỉ lấy hàng về địa chỉ khác (hoàn tất flow shop)...");
-            var pickupOtherTcs = _ch.ArmPickupOther();
-            await _ch.SendAsync(new { action = "setPickupAddressToOther" }).ConfigureAwait(false);
-            try { await _ch.AwaitAsync(pickupOtherTcs, OrdersBridgeChannel.ChoChang.PickupOther, ct).ConfigureAwait(false); }
-            catch (TimeoutException) { L("Set địa chỉ khác: quá hạn — bỏ qua."); }
+            await TraDiaChiVeKhacAsync(ct).ConfigureAwait(false);
+        }
+        else if (buocDiaChi == BuocDiaChi.ThuLaiChoCanhBao)
+        {
+            // Shop đang treo banner lỗi địa chỉ mà lượt này không xử đơn được (thường là 0 đơn Chờ Lấy Hàng).
+            // Vẫn chạy ĐÚNG bước địa chỉ của vòng thường — bên trong extension bước này tự dọn modal chắn trang
+            // (TOS/tour) rồi thử lại một lượt, nên "fix lỗi khi modal mở ra" đi kèm sẵn, không phải viết lại.
+            var nhan = string.IsNullOrWhiteSpace(shopLogin) ? "(không rõ shop)" : shopLogin;
+            L($"Shop {nhan} đang treo cảnh báo lỗi địa chỉ mà lượt này không xử đơn — vẫn thử lại bước đặt địa chỉ "
+              + $"({_province}) để cảnh báo có đường TỰ hết...");
+            var quyetDinh = await DatDiaChiAsync(ct).ConfigureAwait(false);
+            if (quyetDinh == SauDatDiaChi.DungViCaptcha)
+            {
+                L("PHÁT HIỆN captcha khi thử lại địa chỉ — KHÔNG kết luận được, giữ nguyên cảnh báo.");
+                return (orders.Count, 0);
+            }
+            if (quyetDinh == SauDatDiaChi.XuDon)
+            {
+                PickupOkShop = nhan;
+                L($"✓ Shop {nhan} ĐẶT ĐƯỢC địa chỉ lấy hàng ({_province}) — cuối vòng sẽ gỡ cảnh báo, báo Hub và gỡ ở máy khác.");
+                await TraDiaChiVeKhacAsync(ct).ConfigureAwait(false);
+            }
+            else
+            {
+                // CỐ Ý không đặt PickupFailedShop: banner đã treo sẵn rồi. Đặt cờ ở đây là đếm một shop khỏe
+                // thành shop hỏng, bắn lại tin Slack và đẩy Hub một lượt vô ích ở MỖI vòng. Không có đơn nào để
+                // in nên cũng chẳng có gì để "bỏ qua" — im lặng giữ nguyên hiện trạng là đúng.
+                L($"⛔ Thử lại: shop {nhan} VẪN không đặt được địa chỉ lấy hàng ({_province}) — giữ cảnh báo. "
+                  + "Lượt này không xử đơn nên không ảnh hưởng việc in phiếu.");
+            }
         }
 
         // ── Bước BÙ: TỰ TẢI LẠI PHIẾU THIẾU của shop này ────────────────────────────────────────────────
@@ -649,6 +748,18 @@ internal sealed class ShopFlowRunner
         if (!doc.SortApplied)
         {
             L("⚠ Check đơn trả hàng: KHÔNG đổi được sắp xếp sang 'Ngày yêu cầu (Mới - Cũ)' — 'N dòng đầu' có thể sót.");
+        }
+
+        // CHỐT THEO DỮ LIỆU, không tin lời extension. Extension báo "đang ở tab Đơn Trả hàng/Hoàn tiền" mà đọc ra
+        // toàn ĐƠN HỦY thì nó đang đứng nhầm tab — dù cờ tabTraHang=true. Ca thật 10/08/2026: alina99.store báo
+        // đúng tab nhưng 33/33 dòng đều là đơn hủy, và số 33 (của tab "Tất cả") bị ghi thẳng vào mốc ⇒ từ đó mọi
+        // yêu cầu trả hàng mới của shop bị nuốt vĩnh viễn. Nhận diện markup tab là cuộc rượt đuổi với Shopee;
+        // luật này KHÔNG phụ thuộc markup nên còn đúng cả khi họ đổi giao diện lần nữa.
+        if (TraHangParser.NghiSaiTabTheoDuLieu(doc.Dong))
+        {
+            L($"⚠ Check đơn trả hàng [{shopLogin}]: extension báo đúng tab nhưng {doc.Dong.Count} dòng đọc được ĐỀU là "
+              + $"ĐƠN HỦY (0 dòng có mã yêu cầu) — {luot.SoMoi} nhiều khả năng là số của tab khác → BỎ LƯỢT, mốc giữ nguyên.");
+            return;
         }
 
         var soMoi = luot.SoMoi;

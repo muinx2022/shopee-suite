@@ -68,18 +68,58 @@ setCommandHandler(handleCommand);
 // content.js gửi 'wake' (mọi trang khớp) → đánh thức SW + nối cầu. Không còn phụ thuộc hash sống sót:
 // mất hash thì content.js gửi DEFAULT_PORT. listTabId gán tab đầu tiên khớp; ensureListTab(BANHANG_HOSTS) tự
 // phân giải lại tab /portal/shop khi chạy lát cắt (login đã do C#/Playwright lo, extension chỉ ở Seller Centre).
+// ⚠ content.js gửi 'wake' theo NHỊP 20s (keepalive giữ SW sống qua kỳ nghỉ 3–5' giữa hai shop), nên handler này
+// chạy liên tục chứ không chỉ lúc load trang. Vì vậy CHỈ gói `dauTien` (lượt đầu của mỗi lần load trang) mới
+// được nhận vai listTabId — để nhịp lặp cũng giành thì tab shop có thể cướp vai tab picker giữa chừng, và mọi
+// lệnh cần picker sau đó bắn nhầm tab. Gói không có `dauTien` (bản content.js cũ) vẫn được nhận như trước.
 chrome.runtime.onMessage.addListener((msg, sender) => {
   if (msg && msg.type === "wake") {
-    if (ctx.listTabId == null && sender.tab && sender.tab.id != null) ctx.listTabId = sender.tab.id;
+    const nhanTab = msg.dauTien === undefined || msg.dauTien === true;
+    if (nhanTab && ctx.listTabId == null && sender.tab && sender.tab.id != null) ctx.listTabId = sender.tab.id;
     bridge.connect(msg.wsPort);
     try { chrome.storage.session.set({ wsPort: bridge.port, listTabId: ctx.listTabId }); } catch (e) {}
   }
 });
 
-// Service worker khởi động lại (MV3 có thể ngủ) → nạp cổng đã lưu (hoặc mặc định) rồi nối lại.
+// CỔNG BỀN từ content.js ("od-keepalive"): trình duyệt giữ service worker sống chừng nào còn cổng mở, và mỗi
+// gói trên cổng lại gia hạn đồng hồ idle. Đây là lưới CHÍNH chống "SW ngủ trong kỳ nghỉ 3–5' giữa hai shop";
+// nhịp sendMessage 20s và chrome.alarms là hai lưới sau. Mỗi gói cũng nối lại cầu WS luôn (connect bỏ qua khi
+// socket còn sống) — SW vừa được dựng dậy thì đây là đường nối lại nhanh nhất.
 try {
-  chrome.storage.session.get(["wsPort", "listTabId"], (v) => {
-    if (v && v.listTabId != null) ctx.listTabId = v.listTabId;
-    bridge.connect(v && v.wsPort ? v.wsPort : undefined);
+  chrome.runtime.onConnect.addListener((port) => {
+    if (!port || port.name !== "od-keepalive") { return; }
+    port.onMessage.addListener((m) => { bridge.connect(m && m.wsPort ? m.wsPort : undefined); });
+    port.onDisconnect.addListener(() => { /* tab đóng/điều hướng — content script bên kia tự mở lại */ });
+    bridge.connect();
   });
-} catch (e) { bridge.connect(); }
+} catch (e) { /* không dựng được cổng bền → vẫn còn nhịp sendMessage + alarms */ }
+
+// Service worker khởi động lại (MV3 có thể ngủ) → nạp cổng đã lưu (hoặc mặc định) rồi nối lại.
+function noiLaiTuStorage() {
+  try {
+    chrome.storage.session.get(["wsPort", "listTabId"], (v) => {
+      if (v && v.listTabId != null) ctx.listTabId = v.listTabId;
+      bridge.connect(v && v.wsPort ? v.wsPort : undefined);
+    });
+  } catch (e) { bridge.connect(); }
+}
+noiLaiTuStorage();
+
+// HỒI SINH service worker bằng chrome.alarms — KHÔNG phải "giữ" cho nó sống, mà DỰNG NÓ DẬY sau khi bị giết.
+// Vì sao cần (ca thật 10/08/2026): giữa hai shop vòng chạy NGHỈ 3–4 phút. Trình duyệt giết service worker MV3
+// sau ~30s không hoạt động; chết rồi thì `scheduleReconnect` của ws-bridge chết theo, và KHÔNG có sự kiện nào
+// đánh thức (content.js chỉ gửi 'wake' lúc trang load, mà lúc nghỉ không trang nào load). Kết quả: lệnh đầu
+// tiên của shop kế ném "Cầu nối extension chưa kết nối".
+// Gói ping 20s mà C# bắn xuống KHÔNG cứu được ca này — đã thử ở vòng 06:50 và vẫn chết, nên đừng tin vào nó.
+// chrome.alarms sống ĐỘC LẬP với service worker: tới hẹn thì trình duyệt dựng service worker dậy để chạy
+// handler, và chính lúc dựng dậy thì đoạn top-level trên đã nối lại cầu rồi. Handler chỉ cần gọi thêm một lần
+// nữa cho chắc — `bridge.connect` tự bỏ qua khi socket còn sống nên gọi thừa vô hại.
+// 0.5 phút: extension nạp bằng --load-extension (unpacked) nên được phép dưới 1 phút; bị trình duyệt kẹp lên
+// 1 phút cũng vẫn đủ, vì phía C# chờ nối lại tới CauNoiLai trước khi báo lỗi.
+const ALARM_HOI_SINH = "hoi-sinh-cau-noi";
+try {
+  chrome.alarms.create(ALARM_HOI_SINH, { periodInMinutes: 0.5 });
+  chrome.alarms.onAlarm.addListener((a) => {
+    if (a && a.name === ALARM_HOI_SINH) { noiLaiTuStorage(); }
+  });
+} catch (e) { /* không có quyền alarms → mất đường hồi sinh, cầu nối vẫn chạy như cũ */ }

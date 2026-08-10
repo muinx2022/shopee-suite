@@ -169,6 +169,10 @@ public sealed class OrdersBridgeSession : IDisposable
     /// <param name="layDonThieuPhieu">Tự tải lại phiếu thiếu (bước BÙ cuối flow shop): tham số = nhãn shop; App trả
     /// danh sách <c>order_sn</c> của ĐÚNG shop đó đang có mã vận đơn nhưng thiếu file PDF hợp lệ, xếp MỚI NHẤT
     /// TRƯỚC. null → BỎ HẲN bước (đường "Chạy thử" chỉ đọc, không lưu, nên không rót).</param>
+    /// <param name="dangCoCanhBaoDiaChi">Shop này (tham số = nhãn shop) có đang treo BANNER lỗi địa chỉ trên tab
+    /// Shops không. Shop đang treo banner mà lượt này không có đơn Chờ Lấy Hàng thì vẫn chạy riêng bước đặt địa chỉ,
+    /// để banner có đường TỰ hết (xem <c>ShopFlowRunner.QuyetDinhBuocDiaChi</c>). null → coi như không shop nào có
+    /// banner ⇒ hành vi y hệt trước 10/08/2026.</param>
     public OrdersBridgeSession(string userDataDir, BrowserChoice browserChoice, Action<string>? log = null,
         string? invoiceDir = null, string? province = null,
         Func<string, string, IReadOnlyList<SyncedOrder>, CancellationToken, Task>? syncCallback = null,
@@ -181,7 +185,8 @@ public sealed class OrdersBridgeSession : IDisposable
         Action<string, int>? saveReturnCount = null,
         Func<IReadOnlyList<YeuCauTraHang>, string>? saveReturnCodes = null,
         Func<string, CancellationToken, Task<IReadOnlyList<string>>>? layDonThieuPhieu = null,
-        Func<IReadOnlyList<YeuCauTraHang>, int>? demMaTraChuaBiet = null)
+        Func<IReadOnlyList<YeuCauTraHang>, int>? demMaTraChuaBiet = null,
+        Func<string, bool>? dangCoCanhBaoDiaChi = null)
     {
         _userDataDir = userDataDir;
         _browserChoice = browserChoice;
@@ -194,7 +199,7 @@ public sealed class OrdersBridgeSession : IDisposable
         _channel = new OrdersBridgeChannel(log);
         _flow = new ShopFlowRunner(_channel, log, invoiceDir, _province, syncCallback, finalDoneSns,
             onOrderPrepared, returnCountLast, saveReturnCount, saveReturnCodes, layDonThieuPhieu,
-            demMaTraChuaBiet);
+            demMaTraChuaBiet, dangCoCanhBaoDiaChi);
     }
 
     private void L(string m) => _log?.Invoke(m);
@@ -223,6 +228,32 @@ public sealed class OrdersBridgeSession : IDisposable
         // Vẫn nhúng hash (extension đọc nếu còn) nhưng KHÔNG phụ thuộc: mất hash → extension dùng cổng cố định.
         var startUrl = $"{baseUrl}#_od_ws={OrdersBridgeChannel.BridgePort}";
         Process = OrdersBridgeLauncher.Launch(_userDataDir, _browserChoice, startUrl, _log);
+        TheoDoiTrinhDuyetThoat(Process);
+    }
+
+    /// <summary>
+    /// Ghi nhật ký khi TIẾN TRÌNH trình duyệt sạch thoát, kèm MÃ THOÁT. Không có dòng này thì trình duyệt chết
+    /// giữa vòng chỉ hiện ra dưới dạng "cầu nối đứt", và câu chờ-nối-lại còn đổ oan cho service worker MV3
+    /// ("service worker ngủ trong lúc nghỉ?") — đúng ca 10/08/2026: vòng 11:00 thấy Brave biến mất sạch lúc
+    /// 11:23:46 mà nhật ký chỉ nói cầu nối đứt. Mã thoát phân biệt THOÁT ÊM (0) với CHẾT (mã lỗi Windows), tức
+    /// phân biệt "có ai đó đóng cửa sổ / tab cuối vừa đóng" với "trình duyệt sập".
+    /// <para>Best-effort tuyệt đối: hỏng ở đây tuyệt đối không được ảnh hưởng vòng chạy.</para>
+    /// </summary>
+    private void TheoDoiTrinhDuyetThoat(System.Diagnostics.Process? p)
+    {
+        if (p is null) { return; }
+        try
+        {
+            p.EnableRaisingEvents = true;
+            p.Exited += (_, _) =>
+            {
+                int? ma = null;
+                try { ma = p.ExitCode; } catch { /* không đọc được mã */ }
+                L($"⚠ Trình duyệt sạch (PID {p.Id}) đã THOÁT lúc {DateTime.Now:HH:mm:ss}"
+                  + (ma is null ? " (không đọc được mã thoát)." : $" — mã thoát {ma} (0x{ma:X})."));
+            };
+        }
+        catch (Exception ex) { L("Không gắn được theo dõi tiến trình trình duyệt: " + ex.ToString()); }
     }
 
     // ── GĐ2 (pivot): đăng nhập bằng Playwright (an toàn — subaccount + /portal/shop KHÔNG bị captcha) → đóng

@@ -3,7 +3,7 @@
   "name": "Shopee Orders Bridge",
   "version": "0.2",
   "description": "Cau noi C#<->Shopee qua WebSocket + trusted input (chrome.debugger) de ne anti-bot. GD1: readShopList/openShopDetail/readToShip. GD2: login/checkLogin/gotoSellerCentre tren subaccount.",
-  "permissions": ["debugger", "tabs", "scripting", "storage"],
+  "permissions": ["debugger", "tabs", "scripting", "storage", "alarms"],
   "host_permissions": [
     "https://banhang.shopee.vn/*",
     "https://subaccount.shopee.com/*",

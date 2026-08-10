@@ -481,7 +481,13 @@ public partial class AccountSession : ObservableObject, IAccountSession
                     // còn lật. CỐ Ý không suy độ sâu từ mốc "số yêu cầu" — mốc chỉ null ở lần check đầu tiên của
                     // mỗi shop nên shop đang tồn đọng (nhóm cần quét sâu nhất) sẽ không bao giờ được quét sâu.
                     demMaTraChuaBiet: cap => _services.ReturnCodes.DemMaChuaBiet(
-                        _accountId, cap.Select(c => (c.MaDon, c.MaYeuCau)).ToList()));
+                        _accountId, cap.Select(c => (c.MaDon, c.MaYeuCau)).ToList()),
+                    // Shop đang treo banner lỗi địa chỉ ⇒ vòng này vẫn thử lại bước đặt địa chỉ dù 0 đơn Chờ Lấy
+                    // Hàng — nếu không, banner của shop ít đơn không bao giờ tự hết (bước địa chỉ xưa nay chỉ chạy
+                    // khi có đơn để in phiếu). So nhãn KHÔNG phân biệt hoa/thường: khóa SQL so BINARY, C# so
+                    // OrdinalIgnoreCase — cùng cạm bẫy đã ghi ở OrderPersistPipeline.GoBannerLoiDiaChi.
+                    dangCoCanhBaoDiaChi: shopLabel => _services.PickupAlerts.ListActive(_accountId)
+                        .Any(a => string.Equals(a.ShopLogin, shopLabel, StringComparison.OrdinalIgnoreCase)));
                 _bridge = bridge;
                 OrdersBridgeRunResult result;
                 try

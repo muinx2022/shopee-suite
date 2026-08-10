@@ -478,6 +478,11 @@ export function pageAnyModalVisible() {
 // (.eds-modal__close) — bấm nút chữ là ý người dùng thật, ✕ chỉ là đường lui.
 // ⚠ Modal "Sửa Địa chỉ" của chính flow CŨNG là .eds-modal__box: caller PHẢI truyền exceptTitleReSrc
 // "^sua dia chi$", nếu không hàm này sẽ bấm đóng đúng cái modal flow đang dùng.
+// ⚠ KHỐI CHẮN KHÔNG CHỈ LÀ MODAL: tour hướng dẫn của Shopee (`.on-boarding` + `.eds-popover`, nút "Đã hiểu")
+// phủ nguyên trang bằng lớp highlight và nuốt click y hệt, nhưng KHÔNG có `.eds-modal__box` nào. Ca thật
+// 10/08/2026: trang trả hàng bật tour "Đơn Trả hàng/Hoàn tiền, Đơn Hủy và Đơn Giao không thành công" ngay sau
+// khi đóng modal điều khoản ⇒ cú bấm chọn tab và cú đổi sắp xếp trượt im lặng ⇒ bỏ lượt check. Nên phải quét
+// CẢ hai loại khối.
 // TỰ CHỨA (world MAIN serialize ĐỘC LẬP): mọi hằng/regex khai báo TRONG hàm, chỉ gọi bare _na.
 export function pageLocateBlockingModalButton(exceptTitleReSrc) {
   const NHAN_DONG = /^(dong y|ok|xac nhan|da hieu|toi da hieu|toi biet roi|da biet|bo qua|de sau|dong|tiep tuc|hoan tat)$/;
@@ -504,9 +509,14 @@ export function pageLocateBlockingModalButton(exceptTitleReSrc) {
     };
   };
 
-  for (const box of document.querySelectorAll(".eds-modal__box")) {
+  for (const box of document.querySelectorAll(".eds-modal__box, .on-boarding")) {
+    const clsBox = typeof box.className === "string" ? box.className : "";
+    const laTour = clsBox.indexOf("on-boarding") >= 0;
     const rb = box.getBoundingClientRect();
-    if (!(rb.width > 0 && rb.height > 0)) continue;
+    // Khung `.on-boarding` thường RỖNG về kích thước (mọi con định vị absolute) → rect 0×0. Lấy nó làm điều
+    // kiện hiển thị là loại nhầm cả tour. Với tour, thứ "thấy được" là cái nút bên trong — vòng dưới đã kiểm
+    // rect của TỪNG nút rồi nên không mất chốt chặn nào.
+    if (!laTour && !(rb.width > 0 && rb.height > 0)) continue;
     const titleEl = box.querySelector(".eds-modal__title") || box.querySelector(".title");
     const t = titleEl ? _na(titleEl.textContent) : "";
     if (except && except.test(t)) continue; // modal flow đang chờ — TUYỆT ĐỐI không đóng
@@ -533,6 +543,100 @@ export function pageLocateBlockingModalButton(exceptTitleReSrc) {
     }
   }
   return null;
+}
+
+// Tìm Ô TICK BẮT BUỘC của modal CHẮN — ô phải tick thì nút xác nhận mới hết khoá.
+// Ca thật (10/08/2026): modal "Điều khoản - Điều kiện" (TosModal của Shopee) có
+// `<button class="... disabled" disabled>Đồng ý</button>` và một `label.eds-checkbox`
+// "Tôi xác nhận đã đọc, hiểu và đồng ý...". pageLocateBlockingModalButton BỎ QUA nút disabled, modal lại KHÔNG
+// có nút ✕ → hàm đó trả null ⇒ dongModalChan tưởng "không có modal nào" ⇒ modal nằm lì chắn cả trang, mọi
+// trusted click sau đó rơi vào mask ⇒ đặt địa chỉ fail OAN (đúng triệu chứng "Lỗi địa chỉ" của người dùng).
+// CHỈ trả ô tick khi modal đó CÓ nút xác nhận ĐANG BỊ KHOÁ — cố ý hẹp: modal nào nút đã bấm được thì không
+// đụng tới ô tick nào của nó (không tự tick hộ những ô không cần thiết, vd "đăng ký nhận tin").
+// Toạ độ trả về là TÂM CỦA LABEL chứ không phải input: EDS giấu input thật, phần bấm được là label/indicator
+// (cùng cách pageFirstUncheckedBox đang làm ở modal Sửa Địa chỉ).
+// TỰ CHỨA (world MAIN serialize ĐỘC LẬP): mọi hằng/regex khai báo TRONG hàm, chỉ gọi bare _na.
+export function pageLocateBlockingModalCheckbox(exceptTitleReSrc) {
+  const NHAN_DONG = /^(dong y|ok|xac nhan|da hieu|toi da hieu|toi biet roi|da biet|bo qua|de sau|dong|tiep tuc|hoan tat)$/;
+  const SEL_NUT = [".eds-modal__footer button", ".eds-modal__footer [role='button']", "button", "[role='button']"];
+
+  let except = null;
+  if (exceptTitleReSrc) { try { except = new RegExp(exceptTitleReSrc); } catch (e) { except = null; } }
+
+  const biKhoa = (el) => {
+    if (el.disabled === true) return true;
+    const cls = typeof el.className === "string" ? el.className : "";
+    return cls.split(/\s+/).indexOf("disabled") >= 0 || el.getAttribute("aria-disabled") === "true";
+  };
+
+  for (const box of document.querySelectorAll(".eds-modal__box")) {
+    const rb = box.getBoundingClientRect();
+    if (!(rb.width > 0 && rb.height > 0)) continue;
+    const titleEl = box.querySelector(".eds-modal__title") || box.querySelector(".title");
+    const t = titleEl ? _na(titleEl.textContent) : "";
+    if (except && except.test(t)) continue; // modal flow đang chờ — TUYỆT ĐỐI không đụng
+
+    // Có nút xác nhận nào ĐANG BẤM ĐƯỢC không? Có → modal này không bị khoá, khỏi tick.
+    let coNutKhoa = false;
+    let coNutMo = false;
+    for (const sel of SEL_NUT) {
+      let els;
+      try { els = box.querySelectorAll(sel); } catch (e) { continue; }
+      for (const el of els) {
+        if (!NHAN_DONG.test(_na(el.textContent))) continue;
+        const r0 = el.getBoundingClientRect();
+        if (!(r0.width > 0 && r0.height > 0)) continue;
+        if (biKhoa(el)) { coNutKhoa = true; } else { coNutMo = true; }
+      }
+    }
+    if (coNutMo || !coNutKhoa) continue;
+
+    for (const lbl of box.querySelectorAll("label.eds-checkbox")) {
+      const cls = typeof lbl.className === "string" ? lbl.className : "";
+      if (cls.indexOf("disabled") >= 0) continue;
+      const inp = lbl.querySelector("input.eds-checkbox__input") || lbl.querySelector("input[type='checkbox']");
+      if (inp && (inp.checked === true || inp.disabled === true)) continue;
+      const b0 = lbl.getBoundingClientRect();
+      if (!(b0.width > 0 && b0.height > 0)) continue;
+      try { lbl.scrollIntoView({ block: "center" }); } catch (e) {}
+      const b = lbl.getBoundingClientRect();
+      return {
+        x: Math.round(b.left + b.width / 2),
+        y: Math.round(b.top + b.height / 2),
+        title: t || "",
+        label: (_na(lbl.textContent) || "x").slice(0, 40),
+      };
+    }
+  }
+  return null;
+}
+
+// Trang CÒN BỊ LỚP PHỦ CHẮN không → chuỗi mô tả lớp phủ (rỗng = trang thông thoáng, bấm được).
+// Vì sao cần: EDS gỡ .eds-modal__box TRƯỚC, còn lớp mask mờ dần rồi mới biến mất. Bấm trong khoảng đó là cú
+// trusted click rơi vào mask — DOM vẫn "thấy" nút, toạ độ vẫn đúng, mà không có gì xảy ra. Đó đúng là ca
+// 10/08/2026: modal điều khoản đóng lúc 06:24:57, hai cú bấm ngay sau (chọn tab trả hàng, đổi sắp xếp) đều
+// trượt im lặng.
+// Kiểm tại ĐIỂM SẮP BẤM (nếu truyền x,y) và tại tâm khung nhìn — leo cây cha để bắt cả mask bọc ngoài.
+// TỰ CHỨA (world MAIN serialize ĐỘC LẬP).
+export function pageConLopPhuChan(x, y) {
+  const diem = [];
+  if (typeof x === "number" && typeof y === "number") { diem.push([x, y]); }
+  diem.push([Math.round(window.innerWidth / 2), Math.round(window.innerHeight / 2)]);
+
+  for (const d of diem) {
+    let el = null;
+    try { el = document.elementFromPoint(d[0], d[1]); } catch (e) { el = null; }
+    let sau = 0;
+    while (el && sau < 12) {
+      const cls = typeof el.className === "string" ? el.className : "";
+      if (/eds-modal|on-boarding|onboarding|mask|overlay|backdrop/i.test(cls)) {
+        return (el.tagName || "?").toLowerCase() + "." + cls.split(/\s+/).slice(0, 3).join(".");
+      }
+      el = el.parentElement;
+      sau++;
+    }
+  }
+  return "";
 }
 
 // Đọc MÃ VẬN ĐƠN trong modal "Thông Tin Chi Tiết" (ô data-testid=shipping-detail-tracking-number, class .tracking-number).

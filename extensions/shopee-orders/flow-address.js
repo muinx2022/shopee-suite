@@ -5,8 +5,9 @@ import { execInTab } from "./exec.js";
 import { SHIPPING_SETTINGS_URL } from "./constants.js";
 import {
   pageLocateByText, pageFindAddressEdit, pageFindOtherAddressEdit, pageModalHasTitle,
-  pageFirstUncheckedBox, pageCheckboxCount, pageLocateInModal, pageLocateBlockingModalButton,
+  pageFirstUncheckedBox, pageCheckboxCount, pageLocateInModal,
 } from "./page-funcs.js";
+import { dongModalChan } from "./flow-modal.js";
 import { sleep } from "./shared/util.js";
 import { waitForTabComplete } from "./shared/tab-wait.js";
 import { trustedClick } from "./shared/dbg-input.js";
@@ -14,50 +15,6 @@ import { trustedClick } from "./shared/dbg-input.js";
 // Tiêu đề (chuẩn hoá KHÔNG dấu) của modal mà flow này TỰ mở và đang dùng. Mọi lượt dò "modal chắn" phải loại
 // trừ nó, kẻo tự bấm đóng chính modal mình đang thao tác.
 const MODAL_SUA_DIA_CHI = "^sua dia chi$";
-
-// Số lần bấm đóng modal chắn tối đa trong MỘT lượt dọn — để không quay vô tận khi Shopee bật modal mới liên tục.
-const TRAN_MODAL_CHAN = 3;
-
-// Dọn các modal thông báo đang CHẮN trang (không tính modal `giuTitle` mà flow đang chờ/đang dùng). Shopee bật
-// thông báo đổi chính sách/tính năng đè lên trang Cài đặt vận chuyển; mask của nó nuốt mọi trusted click nên
-// bước đặt địa chỉ fail OAN. Trả về SỐ modal đã đóng được.
-async function dongModalChan(tabId, giuTitle) {
-  const ten = (m) => (m && m.title) || "(không tiêu đề)";
-  let daDong = 0;
-  // ⚠ BỌC KÍN cả thân: execInTab (exec.js KHÔNG bọc executeScript) và trustedClick (dbgSend REJECT khi
-  // chrome.runtime.lastError, vd "Detached while handling command" lúc trang đang điều hướng) đều NÉM được.
-  // Để exception thoát ra là background.js gửi {action:"error"} → C# fault chặng pickup → ném khỏi vòng shop
-  // → CẢ VÒNG dừng, KHÔNG ghi banner, KHÔNG cảnh báo. Tức một lượt dọn hỏng làm hỏng luôn các shop còn lại,
-  // tệ hơn hẳn hành vi cũ (bỏ qua đúng 1 shop). Dọn modal là việc BEST-EFFORT: hỏng thì trả số đã đóng được.
-  try {
-    for (let i = 0; i < TRAN_MODAL_CHAN; i++) {
-      const m = await execInTab(tabId, pageLocateBlockingModalButton, [giuTitle || ""]);
-      if (!m) break;
-      await trustedClick(tabId, m.x, m.y);
-      await sleep(900);
-
-      // ĐẾM THEO MODAL ĐÃ BIẾN MẤT, không theo số cú bấm: cú bấm có thể trượt (rơi vào mask của modal khác,
-      // hoặc nút dò được không thật sự đóng gì). Đếm theo cú bấm thì daDong luôn > 0 ⇒ chốt "chỉ thử lại khi
-      // đóng được modal" ở doSetPickupAddress thành vô nghĩa, và MỌI shop tốn thêm nguyên một lượt thử.
-      const con = await execInTab(tabId, pageLocateBlockingModalButton, [giuTitle || ""]);
-      if (con && con.title === m.title) {
-        // Bấm rồi mà đúng modal đó vẫn còn → không đóng được, bấm thêm 2 lượt nữa cũng vậy. Dừng, KHÔNG đếm.
-        send({ action: "progress", message: 'modal chắn "' + ten(m) + '" KHÔNG đóng được bằng nút "' + m.label + '" — bỏ cuộc.' });
-        break;
-      }
-      daDong++;
-      send({ action: "progress", message: 'đã đóng modal chắn "' + ten(m) + '" bằng nút "' + m.label + '".' });
-      if (!con) break; // sạch trang rồi, khỏi dò thêm
-      // Còn modal KHÁC → vòng sau xử. Chạm trần thì báo ra, CẤM im lặng bỏ cuộc.
-      if (i === TRAN_MODAL_CHAN - 1) {
-        send({ action: "progress", message: "còn modal chắn sau " + TRAN_MODAL_CHAN + " lượt đóng — bỏ cuộc." });
-      }
-    }
-  } catch (e) {
-    send({ action: "progress", message: "dọn modal chắn lỗi (bỏ qua, không phá vòng): " + String((e && e.message) || e) });
-  }
-  return daDong;
-}
 
 // MỘT LƯỢT thử đặt địa chỉ: điều hướng về trang Cài đặt vận chuyển rồi đi hết các bước trên trang đó.
 // KHÔNG gửi pickupDone (hàm gọi quyết định gửi đúng MỘT lần) — chỉ gửi progress, và gửi captcha ở nhánh /verify.

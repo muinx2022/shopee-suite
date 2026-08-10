@@ -23,7 +23,7 @@ namespace XuLyDonShopee.Tests;
 /// </summary>
 internal sealed class BridgeTestRig : IAsyncDisposable
 {
-    private readonly ClientWebSocket _client;
+    private ClientWebSocket _client;
     private readonly CancellationTokenSource _cts = new();
 
     /// <summary>Nhật ký của channel + flow (test soi câu log nghiệp vụ). Ghi từ nhiều thread → ConcurrentQueue.</summary>
@@ -51,7 +51,9 @@ internal sealed class BridgeTestRig : IAsyncDisposable
     /// <summary>Số lần đổi CỔNG KHÁC khi cổng vừa xin bị rig song song cướp mất (xem <see cref="CongTrong"/>).</summary>
     private const int SoLanDoiCong = 5;
 
-    public static async Task<BridgeTestRig> StartAsync()
+    /// <param name="nhipGiuSong">Nhịp giữ-sống rót cho channel (test nào canh nhịp thì truyền số nhỏ).
+    /// Bỏ trống = dùng nhịp production 20s, tức trong một bài test bình thường sẽ KHÔNG có gói ping nào xen vào.</param>
+    public static async Task<BridgeTestRig> StartAsync(TimeSpan? nhipGiuSong = null)
     {
         var logs = new ConcurrentQueue<string>();
 
@@ -65,7 +67,7 @@ internal sealed class BridgeTestRig : IAsyncDisposable
         {
             port = CongTrong();
             var thu = new OrdersBridgeChannel(logs.Enqueue);
-            try { thu.Start(port); channel = thu; break; }
+            try { thu.Start(port, nhipGiuSong); channel = thu; break; }
             catch (InvalidOperationException) when (lan < SoLanDoiCong - 1)
             {
                 thu.Dispose();
@@ -106,8 +108,47 @@ internal sealed class BridgeTestRig : IAsyncDisposable
         await _client.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, _cts.Token);
     }
 
-    /// <summary>Extension NHẬN một lệnh C# vừa gửi (một message = một lệnh). Hết giờ → ném để test thấy ngay.</summary>
-    public async Task<JsonDocument> NhanLenhAsync(TimeSpan? timeout = null)
+    /// <summary>Đóng socket phía "extension" — mô phỏng service worker MV3 bị trình duyệt giết lúc vòng nghỉ.
+    /// Chờ tới khi server GHI NHẬN đứt (<c>IsConnected == false</c>) để test không đua với luồng nhận.</summary>
+    public async Task NgatKetNoiAsync()
+    {
+        try { _client.Abort(); } catch { }
+        var dl = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+        while (DateTime.UtcNow < dl && Channel.DaNoi)
+        {
+            await Task.Delay(20);
+        }
+    }
+
+    /// <summary>"Extension" sống lại và nối cầu lần nữa (đúng đường <c>chrome.alarms</c> dựng service worker dậy
+    /// rồi gọi <c>bridge.connect</c>). Gửi luôn <c>ready</c> như bản thật.</summary>
+    public async Task NoiLaiAsync()
+    {
+        _client = new ClientWebSocket();
+        await _client.ConnectAsync(new Uri($"ws://localhost:{Port}/"), CancellationToken.None);
+        await GuiAsync(new { action = "ready" });
+        var dl = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+        while (DateTime.UtcNow < dl && !Channel.DaNoi)
+        {
+            await Task.Delay(20);
+        }
+    }
+
+    /// <summary>Extension NHẬN một lệnh C# vừa gửi (một message = một lệnh). Hết giờ → ném để test thấy ngay.
+    /// <paramref name="boQuaPing"/>: bỏ qua các gói giữ-sống <c>ping</c> xen giữa (test nhịp ngắn hay dính).</summary>
+    public async Task<JsonDocument> NhanLenhAsync(TimeSpan? timeout = null, bool boQuaPing = false)
+    {
+        while (true)
+        {
+            var doc = await NhanMotLenhAsync(timeout);
+            if (!boQuaPing) { return doc; }
+            var act = doc.RootElement.TryGetProperty("action", out var a) ? a.GetString() : null;
+            if (act != "ping") { return doc; }
+            doc.Dispose();
+        }
+    }
+
+    private async Task<JsonDocument> NhanMotLenhAsync(TimeSpan? timeout)
     {
         using var to = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
         to.CancelAfter(timeout ?? TimeSpan.FromSeconds(10));

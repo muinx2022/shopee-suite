@@ -5,6 +5,62 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Phiên bản & cập nhật. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.8.7 — 2026-08-10
+
+> ⚠ **Máy nào đang ở 1.8.6 thì gần như chắc chắn KHÔNG chạy được flow Đơn hàng** — xem mục đầu. Cập nhật bản
+> này là hết.
+
+**Bản 1.8.6 hỏng cầu nối hoàn toàn — đã vá**
+
+- 1.8.6 lỡ mang theo một **lỗi cú pháp JavaScript** trong extension (`flow-returns.js`). Service worker chết
+  ngay lúc nạp nên extension **không bao giờ báo `ready`**, và mọi vòng chạy đều dừng ở
+  `Extension không nối cầu trong 45s` — mọi tài khoản, mọi vòng.
+- Thêm **lưới chặn**: 3 test mới soi TOÀN BỘ file `.js` của mọi extension bằng bộ phân tích cú pháp thật —
+  sai cú pháp, `import` sai đường, hay dùng hàm không được export đều làm đỏ ngay lúc build, không lọt lên máy
+  người dùng được nữa.
+
+**Trình duyệt tự chết giữa vòng sau ~23 phút — đã tìm ra và vá**
+
+- Triệu chứng: chạy được 5–6 shop thì cầu nối "rớt" và cả vòng dừng; vòng nào cũng vậy, không vòng nào đi hết
+  12 shop. Đo bốn vòng liên tiếp: trình duyệt tự thoát sau **23,5 phút, sai số 2 giây**.
+- Nguyên nhân THẬT nằm trong crash dump của chính trình duyệt: tiến trình GPU chết rồi dựng lại đều đặn
+  ~2 phút/lần; Chromium đếm đủ số lần thì `FATAL: GPU process isn't usable. Goodbye.` — tự kết liễu cả trình
+  duyệt. Không liên quan gì tới extension hay service worker như từng nghĩ.
+- Vá bằng cờ tắt đúng bộ đếm đó. Vòng chạy sau khi vá sống **60 phút** (gấp 2,5 lần) và lần đầu tiên đi qua
+  được mốc shop 6. Cố ý KHÔNG tắt GPU: tắt GPU đẩy WebGL sang SwiftShader, một dấu hiệu bot kinh điển.
+
+**Đơn hàng — shop treo cảnh báo lỗi địa chỉ nay tự hết**
+
+- Trước đây bước đặt địa chỉ chỉ chạy khi shop **có đơn Chờ Lấy Hàng**. Shop 0 đơn thì bước đó không chạy, mà
+  đó lại là bằng chứng DUY NHẤT để gỡ banner ⇒ banner của shop ít đơn treo **vĩnh viễn**, chỉ mất khi bấm tay.
+- Nay shop nào đang treo cảnh báo cũng được thử lại bước đặt địa chỉ dù không có đơn nào. Đặt được thì banner
+  tự gỡ, báo Hub, các máy khác gỡ theo; đặt xong còn trả địa chỉ về chỗ cũ y như một vòng chạy trọn vẹn.
+- Shop **không** treo cảnh báo thì tuyệt đối không bị đụng vào địa chỉ.
+- Chạy thật ngày 10/08: `hanily.store` và `rudi.store` (đều 0 đơn) tự đặt được địa chỉ, ba banner
+  `hanily`/`minoa`/`rudi` tự gỡ và đồng bộ Hub xong trong cùng một vòng.
+
+**Đơn hàng — chống ghi nhầm mốc trả hàng**
+
+- Có lúc extension báo đúng tab "Đơn Trả hàng/Hoàn tiền" nhưng số đọc được lại là của tab "Tất cả". Nay nếu mọi
+  dòng đọc được đều là ĐƠN HỦY (không dòng nào có mã yêu cầu) thì **bỏ lượt, giữ nguyên mốc** — thà chậm một
+  vòng còn hơn ghi một con số sai rồi không bao giờ quay lại.
+
+**Cầu nối bền hơn khi vòng chạy nghỉ**
+
+- Service worker của extension bị trình duyệt giết trong lúc vòng nghỉ 3–5 phút giữa hai shop. Nay content
+  script giữ một cổng bền + nhịp đánh thức 20 giây, nên service worker chết là dựng lại **trong khoảng 1 giây**;
+  phía app cũng chờ nối lại tới 90 giây thay vì hỏng ngay.
+- Nhật ký thêm hai mốc `Cầu nối: extension ĐỨT/NỐI lúc …` và dòng `Trình duyệt sạch đã THOÁT … mã thoát …`.
+  Chính hai dòng này đã lật được nguyên nhân ở mục trên; trước đó nhật ký chỉ đoán "service worker ngủ?" và câu
+  đoán đó dẫn sai suốt nửa ngày.
+
+**Còn tồn (chưa xong trong bản này)**
+
+- Bước đổi sắp xếp sang "Ngày yêu cầu (Mới - Cũ)" trên trang trả hàng **vẫn hỏng ở phần lớn shop** — cú bấm
+  không mở được dropdown. Không mất dữ liệu (app tự giữ nguyên mốc và cảnh báo trong nhật ký), nhưng shop nhiều
+  yêu cầu thì đọc chưa đủ sâu.
+- Sau ~60 phút trình duyệt vẫn thoát một lần nữa với mã khác — chưa rõ nguyên nhân, đang theo dõi.
+
 ## v1.8.6 — 2026-08-09
 
 > ⚠ **Bản này cần hai việc TAY, làm xong mới ăn đủ:**

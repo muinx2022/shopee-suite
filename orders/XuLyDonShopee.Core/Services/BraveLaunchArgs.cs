@@ -46,6 +46,19 @@ public static class BraveLaunchArgs
         "--disable-renderer-backgrounding",
     };
 
+    // ⛔ ĐÃ GỠ 10/08/2026 — ĐỪNG THÊM LẠI. Sáng 10/08 từng thêm nhóm cờ chặn discard/freeze tab
+    // ("HighEfficiencyModeAvailable, BatterySaverModeAvailable, PerformanceControlsPerformanceInterventions,
+    // FreezingOnEnergySaver, ModernDiscardStrategy") để chữa lỗi tab nền bị vứt khỏi bộ nhớ. Cái giá đắt hơn
+    // nhiều lần: từ đó KHÔNG vòng nào đi hết 12 shop nữa — trình duyệt sạch TỰ CHẾT giữa vòng, luôn trong kỳ
+    // nghỉ 3–4' (lúc máy đóng băng/vứt tab chạy), luôn sau ~23 phút. Bằng chứng dứt điểm:
+    //     11:54:38 ⚠ Trình duyệt sạch (PID 22024) đã THOÁT — mã thoát -2147483645 (0x80000003).
+    // 0x80000003 = STATUS_BREAKPOINT = Chromium tự kết liễu vì một CHECK thất bại; KHÔNG phải hết RAM (máy còn
+    // 15,7 GB), KHÔNG phải bị kill từ ngoài (0x40010004), KHÔNG phải thoát êm (0). Tắt nửa vời bộ máy tiết kiệm
+    // tài nguyên để lại đúng những đường mã Chromium không lường tới.
+    // Lỗi discard nguyên bản vẫn còn lưới: extension nạp lại tab discarded/unloaded rồi thử lại một lượt
+    // (execInTab) — mà thực tế 3 vòng gần nhất không hề tái phát ("discarded=" 0 lần).
+    // Guard chống thêm lại: BraveCleanPocArgsTests.KhongChanVutTabKhoiBoNho_VonLamTrinhDuyetTuChet.
+
     // Tắt các tính năng gây bóp/che tài nguyên: Translate (popup dịch), CalculateNativeWinOcclusion
     // (Brave coi cửa sổ bị che → giảm hoạt động), IntensiveWakeUpThrottling (bóp timer tab nền).
     // KHÔNG còn AutomationControlled ở đây — không ép webdriver=false nữa (khớp shopee-suite).
@@ -60,6 +73,35 @@ public static class BraveLaunchArgs
     // user-data-dir → chặn updater là đường chặn trực tiếp nhất, bổ sung cho nhóm feature của BraveArgs.
     // Cùng cờ mà 4 đường phóng phía suite đã dùng sẵn (BraveArgs.DiskCacheLimitFlags).
     private const string ChanComponentUpdater = "--disable-component-update";
+
+    /// <summary>
+    /// <b>ĐỪNG GỠ.</b> Cờ này chặn đúng cái đã giết trình duyệt sạch suốt ngày 10/08/2026.
+    /// <para>
+    /// Triệu chứng: trình duyệt tự thoát sau ~23,5 phút, mã <c>0x80000003</c> (STATUS_BREAKPOINT), lặp lại ở BỐN
+    /// vòng liên tiếp với sai số 2 giây (22m47s · 23m29s · 23m28s · 23m30s). Đã đoán sai một lượt (đổ cho nhóm cờ
+    /// chặn vứt tab — gỡ rồi vẫn chết y hệt). Crash dump trong <c>&lt;hồ sơ&gt;\Crashpad\reports</c> khai thẳng:
+    /// </para>
+    /// <code>
+    /// [24388:13324:0810/122730.160:FATAL:content\browser\gpu\gpu_data_manager_impl_private.cc:417]
+    /// GPU process isn't usable. Goodbye.
+    /// </code>
+    /// <para>
+    /// Tiến trình GPU chết rồi dựng lại đều đặn ~2 phút/lần (nhật ký Chromium: gpu-process mới lúc 12:31:43 rồi
+    /// 12:33:43). Chromium đếm số lần chết, tụt dần qua các chế độ dự phòng, hết đường thì <b>tự kết liễu CẢ
+    /// trình duyệt</b> — đó chính là mốc ~23,5 phút. Cờ này tắt bộ đếm đó: GPU có chết rồi dựng lại thì kệ, trình
+    /// duyệt sống tiếp.
+    /// </para>
+    /// <para>CỐ Ý KHÔNG dùng <c>--disable-gpu</c>: tắt GPU đẩy WebGL sang SwiftShader, mà chuỗi renderer
+    /// "Google SwiftShader" là một dấu hiệu bot kinh điển — cả kiến trúc này sinh ra để né anti-bot.</para>
+    /// </summary>
+    private const string KhongGietTrinhDuyetKhiGpuChet = "--disable-gpu-process-crash-limit";
+
+    // 🔎 CÁCH BẬT LẠI NHẬT KÝ CHROMIUM khi cần mổ xẻ trình duyệt (đã dùng 10/08/2026 để tìm ra lỗi GPU ở trên):
+    // thêm "--enable-logging" vào chuỗi cờ dưới → Chromium ghi `<hồ sơ>\chrome_debug.log`. ĐỪNG thêm "--v=1":
+    // verbose đổ cả nghìn dòng net/console mỗi phút, đọc không nổi mà vẫn không thấy dòng cần.
+    // KHÔNG bật mặc định: file ghi liên tục, không có trần, mà repo này từng ăn quả hồ sơ rò 4 GB.
+    // Lưu ý: KHÔNG CẦN cờ này để bắt lỗi trình duyệt tự chết — Crashpad vẫn tự ghi dump vào
+    // `<hồ sơ>\Crashpad\reports\*.dmp`, và chính dump đó đã khai ra "GPU process isn't usable. Goodbye."
 
     /// <summary>
     /// Trả về danh sách tham số dòng lệnh cho Brave/Chromium:
@@ -121,6 +163,7 @@ public static class BraveLaunchArgs
             .DisableFeatures(DisableFeaturesCoBan, ChoPhepLoadExtension)
             // Hồ sơ POC cũng bền → chặn component updater (đường cài model AI 4 GB), xem BuildBraveArgs.
             .Add(ChanComponentUpdater)
+            .Add(KhongGietTrinhDuyetKhiGpuChet)
             .Add("--lang=vi-VN")
             .Add("--disable-popup-blocking")
             .LoadExtension(extensionPath)

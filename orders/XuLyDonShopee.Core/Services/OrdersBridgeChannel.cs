@@ -126,6 +126,9 @@ internal sealed class OrdersBridgeChannel : IDisposable
     private readonly Action<string>? _log;
     private WebSocketServer? _ws;
 
+    /// <summary>Nhịp bắn gói giữ-sống cho service worker MV3 — xem <see cref="NhipGiuSong"/>.</summary>
+    private System.Threading.Timer? _giuSong;
+
     // Chặng đang chờ (để extension báo "error" CHỈ fault đúng chặng đó). Xem OnMessage case "error".
     private readonly StageWaiter _waiter = new();
 
@@ -182,9 +185,26 @@ internal sealed class OrdersBridgeChannel : IDisposable
 
     private void L(string m) => _log?.Invoke(m);
 
-    /// <summary>Mở cổng WebSocket <paramref name="port"/> (mặc định <see cref="BridgePort"/>) rồi nối handler.
+    /// <summary>
+    /// NHỊP GIỮ SỐNG service worker của extension. Service worker MV3 bị trình duyệt GIẾT sau ~30s không có
+    /// hoạt động nào, và Chromium tính hoạt động WebSocket là hoạt động của service worker — nên chỉ cần bắn
+    /// một gói đều đặn DƯỚI 30s là nó sống suốt phiên.
+    /// <para>
+    /// Vì sao cần: giữa hai shop, vòng chạy NGHỈ ~3 phút. Trong lúc nghỉ không có lệnh nào ⇒ service worker
+    /// chết ⇒ WebSocket đóng theo ⇒ lệnh đầu tiên của shop kế ném "Cầu nối extension chưa kết nối" và CẢ VÒNG
+    /// dừng (đã xảy ra thật 10/08/2026: shop 1/12 xong, nghỉ 3', shop 2/12 chết ngay lệnh mở Chi tiết).
+    /// Service worker chết rồi thì KHÔNG tự nối lại được — <c>scheduleReconnect</c> của ws-bridge chết theo nó;
+    /// nó chỉ sống lại khi có sự kiện (vd content.js gửi 'wake' lúc trang load), mà lúc nghỉ thì không có.
+    /// </para>
+    /// <para>20s: dưới mốc 30s một khoảng đủ rộng để lỡ một nhịp (máy nghẽn, GC) vẫn chưa chạm hạn.</para>
+    /// </summary>
+    internal static readonly TimeSpan NhipGiuSong = TimeSpan.FromSeconds(20);
+
+    /// <summary>Mở cổng WebSocket <paramref name="port"/> (mặc định <see cref="BridgePort"/>) rồi nối handler
+    /// và bật nhịp giữ sống (<paramref name="nhipGiuSong"/>, mặc định <see cref="NhipGiuSong"/> — chỉ test mới
+    /// truyền giá trị khác).
     /// Phiên trước vừa đóng có thể chưa nhả hẳn cổng → retry vài nhịp; hết lượt vẫn không mở được thì NÉM.</summary>
-    public void Start(int port = BridgePort)
+    public void Start(int port = BridgePort, TimeSpan? nhipGiuSong = null)
     {
         WebSocketServer? ws = null;
         for (var attempt = 0; attempt < 5 && ws is null; attempt++)
@@ -195,15 +215,78 @@ internal sealed class OrdersBridgeChannel : IDisposable
         _ws = ws ?? throw new InvalidOperationException(
             $"Không mở được cổng cầu nối {port} (đang bận? đóng phiên cũ rồi thử lại).");
         _ws.MessageReceived += OnMessage;
+
+        // Ghi ĐÚNG GIÂY socket nối/đứt. Không có hai dòng này thì chỉ biết "lúc gửi lệnh đã đứt" — không phân
+        // biệt được service worker chết ngay 30s đầu kỳ nghỉ (nhịp đánh thức của content script không chạy) với
+        // socket chập chờn nối lại được vài lần rồi mới thua. Đúng hai giả thuyết cần tách ở ca 10/08/2026 (hai
+        // vòng liền chết ở shop 6). Lượng dòng nhỏ: bình thường mỗi vòng đúng một lần nối.
+        _ws.Connected += () => L($"Cầu nối: extension NỐI vào lúc {DateTime.Now:HH:mm:ss}.");
+        _ws.Disconnected += () => L($"Cầu nối: extension ĐỨT lúc {DateTime.Now:HH:mm:ss}.");
+
+        var nhip = nhipGiuSong ?? NhipGiuSong;
+        _giuSong = new System.Threading.Timer(_ => GuiGiuSong(), null, nhip, nhip);
     }
 
-    /// <summary>Gửi lệnh cho extension. FAIL-FAST hai tầng: cổng chưa mở → ném ngay ở đây; extension chưa/không
-    /// còn kết nối → <see cref="WebSocketServer.SendAsync"/> ném (caller phân biệt được với "extension kẹt").</summary>
-    public Task SendAsync(object message)
+    /// <summary>Bắn một gói giữ-sống. BEST-EFFORT tuyệt đối: chưa nối thì BỎ QUA im lặng (mỗi 20s một dòng log
+    /// sẽ ngập nhật ký người dùng). Extension BỎ QUA action lạ (<c>switch</c> trong <c>background.js</c> không có
+    /// nhánh <c>ping</c> và cũng không có <c>default</c>) nên gói này không sinh phản hồi, không đụng chặng nào.
+    /// <para>
+    /// ⚠ Gói này KHÔNG phải lưới an toàn: vòng 06:50 ngày 10/08/2026 cho thấy service worker vẫn bị giết trong
+    /// lúc nghỉ dù ping đều 20s. Đường cứu THẬT là <c>chrome.alarms</c> bên extension dựng service worker dậy,
+    /// cộng với <see cref="ChoNoiLai"/> ở <see cref="SendAsync"/>. Giữ ping lại vì nó rẻ và vẫn có ích khi
+    /// trình duyệt CÓ tính hoạt động WebSocket vào hạn nhàn rỗi.
+    /// </para>
+    /// <para>Gửi THẲNG qua <c>_ws</c>, KHÔNG qua <see cref="SendAsync"/>: đường kia nay CHỜ nối lại tới 90s,
+    /// mà nhịp giữ sống thì phải trả ngay để không xếp hàng chồng nhau.</para></summary>
+    private void GuiGiuSong()
+    {
+        try
+        {
+            var ws = _ws;
+            if (ws is null || !ws.IsConnected) { return; }
+            _ = ws.SendAsync(new { action = "ping" })
+                .ContinueWith(t => { _ = t.Exception; }, TaskContinuationOptions.OnlyOnFaulted);
+        }
+        catch { /* vừa rớt giữa chừng — nhịp sau thử lại */ }
+    }
+
+    /// <summary>
+    /// Hạn CHỜ EXTENSION NỐI LẠI trước khi coi là đứt hẳn. Service worker MV3 bị trình duyệt giết trong lúc vòng
+    /// chạy nghỉ giữa hai shop; extension tự dựng dậy bằng <c>chrome.alarms</c> (nhịp ~30–60s) rồi nối lại. Nếu
+    /// C# ném NGAY khi thấy socket đóng thì cả vòng chết oan đúng lúc extension sắp quay lại — đã xảy ra thật
+    /// 10/08/2026 ở shop 2 rồi shop 3.
+    /// <para>90s = ôm trọn một nhịp alarm kể cả khi trình duyệt kẹp chu kỳ lên 1 phút, cộng biên cho máy chậm.</para>
+    /// </summary>
+    internal static readonly TimeSpan ChoNoiLai = TimeSpan.FromSeconds(90);
+
+    /// <summary>Extension đang nối cầu hay không (cổng chưa mở cũng tính là chưa nối).</summary>
+    public bool DaNoi => _ws?.IsConnected == true;
+
+    /// <summary>Gửi lệnh cho extension. Cổng chưa mở → ném NGAY (lỗi lập trình, chờ vô ích). Extension chưa/không
+    /// còn kết nối → CHỜ nó nối lại tới <paramref name="choNoiLai"/> (mặc định <see cref="ChoNoiLai"/>) rồi mới
+    /// gửi; hết hạn vẫn chưa có thì để <see cref="WebSocketServer.SendAsync"/> ném như cũ (caller phân biệt được
+    /// "extension chưa kết nối" với "extension kẹt").</summary>
+    public async Task SendAsync(object message, TimeSpan? choNoiLai = null)
     {
         var ws = _ws ?? throw new InvalidOperationException(
             "Cầu nối chưa khởi động (chưa mở cổng WebSocket) — không gửi được lệnh.");
-        return ws.SendAsync(message);
+
+        if (!ws.IsConnected)
+        {
+            var han = choNoiLai ?? ChoNoiLai;
+            // KHÔNG đoán nguyên nhân trong câu này nữa. Bản cũ ghi "(service worker ngủ trong lúc nghỉ?)" và câu
+            // đó đổ oan suốt buổi sáng 10/08/2026 — hoá ra có lượt CẢ TRÌNH DUYỆT đã thoát, chẳng liên quan MV3.
+            // Nguyên nhân thật đọc ở hai dòng mốc "Cầu nối: extension ĐỨT/NỐI" và dòng "Trình duyệt sạch đã THOÁT".
+            L($"Cầu nối rớt — chờ extension nối lại tối đa {han.TotalSeconds:0}s...");
+            var dl = DateTime.UtcNow + han;
+            while (DateTime.UtcNow < dl && !ws.IsConnected)
+            {
+                await Task.Delay(500).ConfigureAwait(false);
+            }
+            L(ws.IsConnected ? "Extension đã nối lại — chạy tiếp." : "Extension KHÔNG nối lại trong hạn chờ.");
+        }
+
+        await ws.SendAsync(message).ConfigureAwait(false);
     }
 
     /// <summary>Chờ một chặng (kèm timeout + ct) qua <see cref="StageWaiter"/> — extension báo lỗi lúc đang chờ
@@ -383,6 +466,9 @@ internal sealed class OrdersBridgeChannel : IDisposable
 
     public void Dispose()
     {
+        // Dừng nhịp giữ-sống TRƯỚC khi bỏ server: timer còn chạy sẽ gọi SendAsync trên _ws vừa dispose.
+        try { _giuSong?.Dispose(); } catch { }
+        _giuSong = null;
         try { _ws?.Dispose(); } catch { }
         _ws = null;
     }
