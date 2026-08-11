@@ -9,8 +9,7 @@ import {
 } from "./page-funcs.js";
 import { sleep } from "./shared/util.js";
 import { waitForTabComplete } from "./shared/tab-wait.js";
-import { trustedClick } from "./shared/dbg-input.js";
-import { ensureDbgChanChat } from "./chan-chat.js";
+import { ensureDbg, trustedClick } from "./shared/dbg-input.js";
 
 // GĐ4: đóng tab shop hiện tại rồi VỀ picker /portal/shop (giữa các shop). Shop thường mở ở TAB RIÊNG (shopTabId
 // khác listTabId) → chỉ đóng tab đó, picker (listTabId) còn nguyên. Nếu shop mở CÙNG tab picker → điều hướng
@@ -99,7 +98,7 @@ export async function gotoSellerCentre() {
   ctx.shopTabId = null;
   // Áp lệnh chặn SDK chat NGAY khi biết tab Seller Centre, TRƯỚC lúc chờ nó load xong: chặn kịp thì
   // chateasy/minichat không bao giờ được nạp trên tab này. Nuốt lỗi sẵn bên trong, không phá luồng.
-  await ensureDbgChanChat(ctx.listTabId);
+  await ensureDbg(ctx.listTabId);
   await waitForTabComplete(ctx.listTabId, 15000);
   let url = "";
   try { url = (await chrome.tabs.get(ctx.listTabId)).url || ""; } catch (e) {}
@@ -217,7 +216,7 @@ export async function openShopDetail(shopId) {
   if (!found) { send({ action: "error", message: "chờ 30s chưa thấy tab shop mở" }); return; }
   ctx.shopTabId = found.id;
   // Tab shop VỪA mở, trang chưa load xong — đây là lúc duy nhất chặn kịp SDK chat trước khi nó chạy.
-  await ensureDbgChanChat(ctx.shopTabId);
+  await ensureDbg(ctx.shopTabId);
 
   const loadDeadline = Date.now() + 15000;
   let url = found.url || "";

@@ -38,9 +38,15 @@ public readonly record struct OutboxPending(
 public sealed record OrdersLeaseResult(bool Ok, string? HolderMachine);
 
 /// <summary>Một sub-acc Đơn hàng trong DANH BẠ GỘP toàn Hub (kéo về máy mới): <paramref name="Login"/> = email
-/// đăng nhập, <paramref name="Shops"/> = shop con (login + tên). KHÔNG mang mật khẩu/cookie — Hub không giữ.
+/// đăng nhập, <paramref name="Shops"/> = shop con (login + tên), kèm 3 ô đăng nhập gộp từ mọi máy (từ
+/// 11/08/2026 — rỗng nghĩa là chưa máy nào nhập ô đó). KHÔNG mang cookie.
 /// Kiểu RIÊNG của module (module Đơn hàng KHÔNG tham chiếu <c>Shopee.Core</c> nên không lộ DTO hub vào đây).</summary>
-public sealed record OrdersDirectoryItem(string Login, IReadOnlyList<(string Login, string Name)> Shops);
+public sealed record OrdersDirectoryItem(
+    string Login,
+    IReadOnlyList<(string Login, string Name)> Shops,
+    string Password = "",
+    string VerifyEmail = "",
+    string VerifyEmailPassword = "");
 
 /// <summary>Dòng thống kê dùng chung từ Hub cho tab "Thống kê".</summary>
 public sealed record SharedStatBreakdown(string Label, int OrderCount, long Value, double Percentage);

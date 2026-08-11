@@ -138,6 +138,12 @@ public sealed partial class HubDatabase : IDisposable
         // nào cả — thà thiếu số của quá khứ còn hơn dồn cả kho mã cũ vào tin tổng kết đầu tiên.
         AddColumnIfMissing("orders", "return_code_at", "TEXT");
         ExecRaw("CREATE INDEX IF NOT EXISTS ix_orders_return_code_at ON orders(return_code_at);");
+        // BA Ô ĐĂNG NHẬP của gương danh bạ Đơn hàng (11/08/2026): mật khẩu tài khoản phụ + hòm thư xác minh +
+        // mật khẩu hòm thư đó, lưu DẠNG THƯỜNG (đúng mức client đang lưu, và đúng mức đường BigSeller đã làm).
+        // Dòng cũ nhận '' = "chưa máy nào góp" — UpsertOrdersAccounts sẽ vá dần khi client bản mới đẩy lên.
+        AddColumnIfMissing("orders_accounts", "password", "TEXT DEFAULT ''");
+        AddColumnIfMissing("orders_accounts", "verify_email", "TEXT DEFAULT ''");
+        AddColumnIfMissing("orders_accounts", "verify_email_password", "TEXT DEFAULT ''");
     }
 
     /// <summary>Thêm cột nếu thiếu; trả true nếu VỪA thêm (để chạy backfill 1 lần).</summary>

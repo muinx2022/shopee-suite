@@ -269,8 +269,15 @@ public sealed record MachineLeaveRequest(string MachineId);
 
 // ── GƯƠNG danh bạ tài khoản Đơn hàng (client đẩy lên; Hub KHÔNG sở hữu) ───────
 // Tài khoản Đơn hàng (Email/Password/Cookie/ProxyKey/PickupAddress…) nằm trong CSDL cục bộ của TỪNG máy. Hub chỉ
-// giữ một BẢN GƯƠNG để trang điều phối biết "máy này có những tài khoản nào" mà ra lệnh — TUYỆT ĐỐI không nhận
-// mật khẩu / cookie / mật khẩu hòm thư (đó là lý do chọn mô hình gương thay vì đưa acc lên hub làm nguồn sự thật).
+// giữ một BẢN GƯƠNG để trang điều phối biết "máy này có những tài khoản nào" mà ra lệnh — acc vẫn thuộc máy.
+//
+// ĐỔI 11/08/2026 — gương MANG THÊM 3 Ô ĐĂNG NHẬP: Password, VerifyEmail, VerifyEmailPassword.
+//   Vì sao: máy MỚI kéo danh bạ về chỉ tạo được bản ghi RỖNG mật khẩu ⇒ phải gõ tay 3 ô cho từng tài khoản trên
+//   từng máy. Đường BigSeller vốn đã đồng bộ Password + EmailPassword y hệt (FileStoreConfigService
+//   .UpdateSharedAccountFields) nên tư thế bảo mật của hệ thống không đổi về CHẤT.
+//   Lưu DẠNG THƯỜNG (đúng mức đang lưu ở client và ở đường BigSeller). Đường truyền là HTTPS + X-Api-Token.
+//   COOKIE VẪN TUYỆT ĐỐI KHÔNG ĐẨY: cookie là phiên đăng nhập sống, dùng lại được ngay không cần verify —
+//   rủi ro khác hẳn mật khẩu, và không giải quyết được vấn đề "máy mới phải gõ tay" nào cả.
 
 /// <summary>Một shop con của tài khoản Đơn hàng trong gương. <see cref="Login"/> = <c>shop_login</c> phía client —
 /// CŨNG là <c>shops.username</c> trên hub (client đẩy đơn theo khoá này) nên hub tra được số đơn của shop;
@@ -285,7 +292,22 @@ public sealed record OrdersAccountItem(
     string SessionState,
     List<OrdersShopItem> Shops,
     bool VerifyFailed,
-    DateTimeOffset? LastSyncAt);
+    DateTimeOffset? LastSyncAt)
+{
+    // BA Ô ĐĂNG NHẬP — để trong THÂN record (property init) chứ KHÔNG thêm tham số positional có giá trị mặc
+    // định: System.Text.Json bỏ qua field thiếu trong JSON và giữ nguyên giá trị khởi tạo ở đây, nên hub CŨ
+    // (chưa biết field) lẫn client CŨ (không gửi field) đều parse bình thường — deploy hai phía lệch nhau vô hại.
+    // Rỗng nghĩa là "máy này chưa có" — hub KHÔNG được lấy nó xoá giá trị đang giữ (xem UpsertOrdersAccounts).
+
+    /// <summary>Mật khẩu đăng nhập tài khoản phụ. Rỗng = máy này chưa nhập.</summary>
+    public string Password { get; init; } = "";
+
+    /// <summary>Hòm thư nhận mail xác minh của Shopee. Rỗng = máy này chưa nhập.</summary>
+    public string VerifyEmail { get; init; } = "";
+
+    /// <summary>Mật khẩu hòm thư xác minh. Rỗng = máy này chưa nhập.</summary>
+    public string VerifyEmailPassword { get; init; } = "";
+}
 
 /// <summary>Client đẩy TOÀN BỘ danh bạ tài khoản Đơn hàng của CHÍNH MÁY MÌNH lên hub. <see cref="MachineId"/> =
 /// id SUẤT ĐƠN HÀNG (<c>&lt;id-máy&gt;:orders</c>, xem <see cref="MachineSlots"/>). Hợp đồng: hub THAY TOÀN BỘ
@@ -293,9 +315,20 @@ public sealed record OrdersAccountItem(
 public sealed record OrdersAccountsPushRequest(string MachineId, string Hostname, List<OrdersAccountItem> Accounts);
 
 /// <summary>Một sub-acc Đơn hàng trong DANH BẠ GỘP toàn Hub (mọi máy, distinct theo login) — máy MỚI kéo về để
-/// tạo sẵn bản ghi tài khoản rỗng-mật-khẩu. Khoá là <see cref="Login"/> (email đăng nhập). TUYỆT ĐỐI KHÔNG mang
-/// mật khẩu/cookie — Hub không hề giữ (xem hợp đồng gương ở <see cref="OrdersAccountsPushRequest"/>).</summary>
-public sealed record OrdersDirectoryAccount(string Login, List<OrdersShopItem> Shops);
+/// tạo sẵn bản ghi tài khoản. Khoá là <see cref="Login"/> (email đăng nhập). Từ 11/08/2026 CÓ mang 3 ô đăng
+/// nhập (xem khối chú thích trên <see cref="OrdersAccountsPushRequest"/>); vẫn KHÔNG bao giờ mang cookie.
+/// Ô rỗng = chưa máy nào trong hệ thống nhập ô đó.</summary>
+public sealed record OrdersDirectoryAccount(string Login, List<OrdersShopItem> Shops)
+{
+    /// <summary>Mật khẩu đăng nhập tài khoản phụ (rỗng = chưa máy nào nhập).</summary>
+    public string Password { get; init; } = "";
+
+    /// <summary>Hòm thư nhận mail xác minh (rỗng = chưa máy nào nhập).</summary>
+    public string VerifyEmail { get; init; } = "";
+
+    /// <summary>Mật khẩu hòm thư xác minh (rỗng = chưa máy nào nhập).</summary>
+    public string VerifyEmailPassword { get; init; } = "";
+}
 
 /// <summary>Trạng thái phiên tài khoản Đơn hàng trong gương (chuỗi để DTO/JSON gọn, y khuôn
 /// <see cref="MachineRoles"/>). Rỗng = không có phiên / đã dừng / lỗi.</summary>

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text;
 using Shopee.Core.Platform;
 
 namespace Shopee.Core.Browser;
@@ -143,27 +144,72 @@ public static class BraveProcessReaper
         }
     }
 
-    /// <summary>Trích giá trị của cờ <c>--user-data-dir=</c> từ command-line (hỗ trợ có/không dấu nháy).
-    /// Dùng chung với <see cref="BraveFleet"/>.</summary>
+    /// <summary>
+    /// Trích giá trị của cờ <c>--user-data-dir=</c> từ command-line. Dùng chung với <see cref="BraveFleet"/>
+    /// và <see cref="BraveWindowMinimizer"/>.
+    /// <para><b>Phải tách theo luật ngoặc, không được bóc chuỗi.</b> Có BA dạng ngoặc thật ngoài đời và bản cũ
+    /// chỉ đúng hai:</para>
+    /// <list type="number">
+    /// <item><c>--user-data-dir=C:\ho-so\acc_1</c> — không dấu cách, không ngoặc.</item>
+    /// <item><c>--user-data-dir="C:\ho so\acc_1"</c> — ngoặc SAU dấu <c>=</c>, do phía suite tự bọc
+    /// (<c>BraveArgs.Create()</c> → <c>Process.Start(exe, argsString)</c>).</item>
+    /// <item><c>"--user-data-dir=C:\ho so\acc_1"</c> — ngoặc bọc CẢ tham số. Đây là dạng phía orders
+    /// (<c>BraveArgs.CreateRaw()</c> → <see cref="ProcessStartInfo.ArgumentList"/>): .NET tự bọc ngoặc quanh
+    /// tham số nào có dấu cách, nên dấu <c>"</c> rơi vào TRƯỚC <c>--user-data-dir</c>.</item>
+    /// </list>
+    /// <para>Bản cũ chỉ xét <c>rest[0] == '"'</c> nên dạng (3) rơi xuống nhánh cắt-tại-dấu-cách và trả về
+    /// <c>C:\Users\Ng</c> trên máy có dấu cách trong đường dẫn ⇒ <see cref="BraveFleet"/> không nhận ra trình
+    /// duyệt của app ⇒ bước dọn hồ sơ mồ côi lúc khởi động im lặng không làm gì. Sửa 11/08/2026.</para>
+    /// </summary>
     internal static string? ExtractUserDataDir(string commandLine)
     {
         const string flag = "--user-data-dir=";
-        var idx = commandLine.IndexOf(flag, StringComparison.OrdinalIgnoreCase);
-        if (idx < 0)
+        if (string.IsNullOrEmpty(commandLine))
             return null;
 
-        var rest = commandLine[(idx + flag.Length)..];
-        if (rest.Length == 0)
-            return null;
-
-        if (rest[0] == '"')
+        foreach (var token in TachThamSo(commandLine))
         {
-            var end = rest.IndexOf('"', 1);
-            return end < 0 ? rest[1..] : rest[1..end];
+            if (!token.StartsWith(flag, StringComparison.OrdinalIgnoreCase))
+                continue;
+            var value = token[flag.Length..];
+            return value.Length == 0 ? null : value;
+        }
+        return null;
+    }
+
+    /// <summary>Tách một dòng lệnh thành từng THAM SỐ theo luật ngoặc kép của Windows: khoảng trắng NGOÀI ngoặc
+    /// là dấu ngắt, ngoặc kép chỉ bật/tắt chế độ "trong ngoặc" và không vào giá trị. Đủ cho dòng lệnh Chromium
+    /// (không có escape <c>\"</c>). Hàm THUẦN — test thẳng được.</summary>
+    internal static IEnumerable<string> TachThamSo(string commandLine)
+    {
+        var sb = new StringBuilder();
+        var trongNgoac = false;
+        var coKyTu = false;   // đã mở một tham số (kể cả tham số rỗng dạng "") → khác với "chưa gặp gì"
+
+        foreach (var c in commandLine)
+        {
+            if (c == '"')
+            {
+                trongNgoac = !trongNgoac;
+                coKyTu = true;
+                continue;
+            }
+            if (!trongNgoac && char.IsWhiteSpace(c))
+            {
+                if (coKyTu)
+                {
+                    yield return sb.ToString();
+                    sb.Clear();
+                    coKyTu = false;
+                }
+                continue;
+            }
+            sb.Append(c);
+            coKyTu = true;
         }
 
-        var space = rest.IndexOf(' ');
-        return space < 0 ? rest : rest[..space];
+        if (coKyTu)
+            yield return sb.ToString();
     }
 
     /// <summary>Chuẩn hoá đường dẫn để so khớp: bỏ khoảng trắng + dấu nháy hai đầu + dấu <c>\</c>/<c>/</c> cuối.

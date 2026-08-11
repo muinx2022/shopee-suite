@@ -15,8 +15,9 @@ public static partial class OrdersModuleHost
 {
     // ── GƯƠNG danh bạ tài khoản Đơn hàng + lệnh hub giao ─────────────────────────
     // Hub KHÔNG sở hữu tài khoản Đơn hàng (chúng nằm trong CSDL cục bộ từng máy); máy tự đẩy một BẢN GƯƠNG
-    // (login + shop con + trạng thái phiên) để trang điều phối biết máy nào có tài khoản nào mà ra lệnh.
-    // TUYỆT ĐỐI KHÔNG đẩy Password / Cookie / VerifyEmailPassword — xem OrdersAccountsPushRequest.
+    // (login + shop con + trạng thái phiên + 3 ô đăng nhập) để trang điều phối biết máy nào có tài khoản nào mà
+    // ra lệnh, và để máy MỚI kéo về khỏi phải gõ tay mật khẩu. TUYỆT ĐỐI KHÔNG đẩy Cookie (phiên đăng nhập
+    // sống — xem khối chú thích trên OrdersAccountsPushRequest, sửa 11/08/2026).
 
     /// <summary>Nhịp kiểm của worker gương — cũng là khoảng cách TỐI THIỂU giữa 2 lượt đẩy: nhiều thay đổi phiên
     /// liên tiếp (Changed bắn dồn khi mở/đóng trình duyệt) chỉ tốn MỘT lượt đẩy.</summary>
@@ -132,7 +133,15 @@ public static partial class OrdersModuleHost
                 acc.VerifyFailedAt is not null,
                 lastSync.TryGetValue(acc.Id, out var at)
                     ? new DateTimeOffset(DateTime.SpecifyKind(at, DateTimeKind.Utc))
-                    : null));
+                    : null)
+            {
+                // Ô nào máy này chưa nhập thì gửi RỖNG — hub hiểu là "không có gì để góp" và giữ nguyên giá trị
+                // đang có, KHÔNG xoá (nếu không, một máy chưa nhập mật khẩu sẽ quét sạch dữ liệu của máy khác
+                // ngay nhịp đẩy kế — gương đẩy lại mỗi 3s khi bẩn / 60s khi rảnh).
+                Password = acc.Password ?? "",
+                VerifyEmail = acc.VerifyEmail ?? "",
+                VerifyEmailPassword = acc.VerifyEmailPassword ?? "",
+            });
         }
         return new OrdersAccountsPushRequest(LeaseMachineId, LeaseHostname, items);
     }

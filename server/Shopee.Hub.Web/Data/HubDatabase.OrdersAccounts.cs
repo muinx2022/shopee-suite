@@ -1,3 +1,4 @@
+using Microsoft.Data.Sqlite;
 using Shopee.Core.Coordination;
 
 namespace Shopee.Hub;
@@ -10,7 +11,18 @@ public sealed record OrdersMirrorShop(string Login, string Name);
 /// <see cref="UpdatedAt"/> = lúc máy đó đẩy gương gần nhất (biết dữ liệu còn tươi không).</summary>
 public sealed record OrdersMirrorAccount(
     string Login, string SessionState, bool VerifyFailed,
-    DateTimeOffset? LastSyncAt, DateTimeOffset UpdatedAt, List<OrdersMirrorShop> Shops);
+    DateTimeOffset? LastSyncAt, DateTimeOffset UpdatedAt, List<OrdersMirrorShop> Shops)
+{
+    /// <summary>Mật khẩu đăng nhập tài khoản phụ, dạng thường (rỗng = chưa máy nào góp). Trong THÂN record để
+    /// mọi chỗ đang dựng bằng 6 tham số vị trí không phải sửa.</summary>
+    public string Password { get; init; } = "";
+
+    /// <summary>Hòm thư nhận mail xác minh (rỗng = chưa máy nào góp).</summary>
+    public string VerifyEmail { get; init; } = "";
+
+    /// <summary>Mật khẩu hòm thư xác minh, dạng thường (rỗng = chưa máy nào góp).</summary>
+    public string VerifyEmailPassword { get; init; } = "";
+}
 
 /// <summary>Số tài khoản / số tài khoản ĐANG CHẠY trong gương của một máy — cho thẻ chọn máy.</summary>
 public sealed record OrdersMirrorCount(int Accounts, int Running);
@@ -33,8 +45,10 @@ public sealed record OrdersCommandRow(
 /// <para><b>Hợp đồng gương:</b> mỗi máy là nguồn sự thật cho danh sách của CHÍNH NÓ → <see cref="UpsertOrdersAccounts"/>
 /// THAY TOÀN BỘ danh bạ của đúng <c>machine_id</c> đó trong một transaction. Đây KHÔNG phải "hub tự dọn dữ liệu":
 /// dòng của máy khác TUYỆT ĐỐI không đụng tới.</para>
-/// <para>Bảng này KHÔNG bao giờ chứa mật khẩu / cookie — client cố ý không gửi (xem
-/// <see cref="OrdersAccountsPushRequest"/>).</para>
+/// <para><b>Từ 11/08/2026 bảng CÓ giữ 3 ô đăng nhập</b> (mật khẩu tài khoản phụ, hòm thư xác minh, mật khẩu hòm
+/// thư) dạng thường — xem lý do ở khối chú thích trên <see cref="OrdersAccountsPushRequest"/>. Cookie vẫn KHÔNG
+/// bao giờ có mặt. Ba ô này là NGOẠI LỆ của luật "thay toàn bộ": lượt đẩy mang ô RỖNG không được phép xoá giá
+/// trị đang giữ (xem <see cref="GiuLaiNeuRong"/>), vì rỗng chỉ có nghĩa "máy này chưa nhập".</para>
 /// </summary>
 public sealed partial class HubDatabase
 {
@@ -47,6 +61,7 @@ public sealed partial class HubDatabase
 CREATE TABLE IF NOT EXISTS orders_accounts(
   machine_id TEXT NOT NULL, login TEXT NOT NULL, session_state TEXT DEFAULT '',
   verify_failed INTEGER DEFAULT 0, last_sync_at TEXT DEFAULT '', updated_at TEXT,
+  password TEXT DEFAULT '', verify_email TEXT DEFAULT '', verify_email_password TEXT DEFAULT '',
   PRIMARY KEY(machine_id, login));
 CREATE TABLE IF NOT EXISTS orders_account_shops(
   machine_id TEXT NOT NULL, login TEXT NOT NULL, shop_login TEXT NOT NULL, shop_name TEXT DEFAULT '',
@@ -60,9 +75,22 @@ CREATE INDEX IF NOT EXISTS ix_orders_commands_machine ON orders_commands(machine
     // ── Gương danh bạ ───────────────────────────────────────────────────────────
 
     /// <summary>
+    /// (THUẦN) Luật gộp cho 3 ô đăng nhập ở chiều <b>client → Hub</b>: ô mới KHÁC RỖNG thì ghi đè, ô mới RỖNG
+    /// thì GIỮ giá trị cũ.
+    /// <para>Vì sao không cho rỗng ghi đè: <see cref="UpsertOrdersAccounts"/> xoá-rồi-ghi-lại toàn bộ danh bạ của
+    /// máy đó mỗi lượt đẩy (3s/lần khi có thay đổi), mà một máy chưa nhập mật khẩu vẫn đẩy gương bình thường —
+    /// để rỗng thắng thì mật khẩu bay ngay nhịp sau.</para>
+    /// <para>Vì sao vẫn cho giá trị mới khác rỗng ghi đè (thay vì đóng băng giá trị đầu tiên): user đổi mật khẩu
+    /// Shopee thì Hub phải theo kịp, không thì Hub phát tán mật khẩu cũ sang mọi máy mới.</para>
+    /// </summary>
+    internal static string GiuLaiNeuRong(string? moi, string? cu)
+        => string.IsNullOrWhiteSpace(moi) ? (cu ?? "") : moi;
+
+    /// <summary>
     /// Nhận một lượt đẩy gương: THAY TOÀN BỘ danh bạ của <c>r.MachineId</c> (xoá dòng cũ của MÁY ĐÓ rồi ghi lại)
     /// trong MỘT transaction — crash giữa chừng không để lại danh bạ nửa vời. Tài khoản thiếu login bị bỏ
-    /// (không có khoá). Trả số tài khoản đã ghi.
+    /// (không có khoá). NGOẠI LỆ: 3 ô đăng nhập được đọc ra TRƯỚC khi xoá rồi gộp theo
+    /// <see cref="GiuLaiNeuRong"/>. Trả số tài khoản đã ghi.
     /// </summary>
     public int UpsertOrdersAccounts(OrdersAccountsPushRequest r)
     {
@@ -72,6 +100,10 @@ CREATE INDEX IF NOT EXISTS ix_orders_commands_machine ON orders_commands(machine
             var now = Iso(DateTimeOffset.UtcNow);
             var written = 0;
             using var tx = _conn.BeginTransaction();
+
+            // Ba ô đăng nhập đang giữ của máy này — phải đọc TRƯỚC khối DELETE bên dưới, không thì lượt đẩy nào
+            // mang ô rỗng cũng xoá mất dữ liệu tốt.
+            var oCu = DocODangNhapLocked(tx, r.MachineId);
 
             // Xoá danh bạ CŨ của ĐÚNG máy này (không đụng máy khác — xem hợp đồng gương ở chú thích lớp).
             foreach (var tbl in new[] { "orders_accounts", "orders_account_shops" })
@@ -88,19 +120,24 @@ CREATE INDEX IF NOT EXISTS ix_orders_commands_machine ON orders_commands(machine
                 var login = a?.Login?.Trim() ?? "";
                 if (a is null || login.Length == 0) continue;
 
+                var cu = oCu.TryGetValue(login, out var x) ? x : ("", "", "");
                 using (var c = _conn.CreateCommand())
                 {
                     c.Transaction = tx;
                     c.CommandText = @"
-INSERT INTO orders_accounts(machine_id,login,session_state,verify_failed,last_sync_at,updated_at)
-VALUES($m,$l,$s,$vf,$ls,$ua)
-ON CONFLICT(machine_id,login) DO UPDATE SET session_state=$s, verify_failed=$vf, last_sync_at=$ls, updated_at=$ua;";
+INSERT INTO orders_accounts(machine_id,login,session_state,verify_failed,last_sync_at,updated_at,password,verify_email,verify_email_password)
+VALUES($m,$l,$s,$vf,$ls,$ua,$pw,$ve,$vp)
+ON CONFLICT(machine_id,login) DO UPDATE SET session_state=$s, verify_failed=$vf, last_sync_at=$ls, updated_at=$ua,
+  password=$pw, verify_email=$ve, verify_email_password=$vp;";
                     c.Parameters.AddWithValue("$m", r.MachineId);
                     c.Parameters.AddWithValue("$l", login);
                     c.Parameters.AddWithValue("$s", a.SessionState ?? "");
                     c.Parameters.AddWithValue("$vf", a.VerifyFailed ? 1 : 0);
                     c.Parameters.AddWithValue("$ls", a.LastSyncAt is { } ls ? Iso(ls) : "");
                     c.Parameters.AddWithValue("$ua", now);
+                    c.Parameters.AddWithValue("$pw", GiuLaiNeuRong(a.Password, cu.Item1));
+                    c.Parameters.AddWithValue("$ve", GiuLaiNeuRong(a.VerifyEmail, cu.Item2));
+                    c.Parameters.AddWithValue("$vp", GiuLaiNeuRong(a.VerifyEmailPassword, cu.Item3));
                     c.ExecuteNonQuery();
                 }
                 written++;
@@ -130,6 +167,26 @@ ON CONFLICT(machine_id,login,shop_login) DO UPDATE SET shop_name=$sn, sort_order
         }
     }
 
+    /// <summary>Ba ô đăng nhập ĐANG GIỮ của một máy, khoá theo login (không phân biệt hoa/thường — client có thể
+    /// đổi cách viết hoa email giữa hai lượt đẩy). Gọi TRONG lock + TRONG transaction của
+    /// <see cref="UpsertOrdersAccounts"/>, ngay TRƯỚC khối DELETE.</summary>
+    private Dictionary<string, (string, string, string)> DocODangNhapLocked(SqliteTransaction tx, string machineId)
+    {
+        var map = new Dictionary<string, (string, string, string)>(StringComparer.OrdinalIgnoreCase);
+        using var c = _conn.CreateCommand();
+        c.Transaction = tx;
+        c.CommandText = "SELECT login,password,verify_email,verify_email_password FROM orders_accounts WHERE machine_id=$m";
+        c.Parameters.AddWithValue("$m", machineId);
+        using var rd = c.ExecuteReader();
+        while (rd.Read())
+        {
+            var login = S(rd, 0).Trim();
+            if (login.Length == 0) continue;
+            map[login] = (S(rd, 1), S(rd, 2), S(rd, 3));
+        }
+        return map;
+    }
+
     /// <summary>Danh bạ tài khoản Đơn hàng của MỘT máy (kèm shop con, đúng thứ tự máy đó đẩy lên). Máy chưa đẩy
     /// gương (client bản cũ) → list RỖNG, KHÔNG lỗi.</summary>
     public List<OrdersMirrorAccount> OrdersAccountsOf(string machineId)
@@ -157,7 +214,7 @@ ON CONFLICT(machine_id,login,shop_login) DO UPDATE SET shop_name=$sn, sort_order
             var accounts = new List<OrdersMirrorAccount>();
             using (var c = _conn.CreateCommand())
             {
-                c.CommandText = "SELECT login,session_state,verify_failed,last_sync_at,updated_at FROM orders_accounts WHERE machine_id=$m ORDER BY login COLLATE NOCASE";
+                c.CommandText = "SELECT login,session_state,verify_failed,last_sync_at,updated_at,password,verify_email,verify_email_password FROM orders_accounts WHERE machine_id=$m ORDER BY login COLLATE NOCASE";
                 c.Parameters.AddWithValue("$m", machineId);
                 using var rd = c.ExecuteReader();
                 while (rd.Read())
@@ -167,7 +224,12 @@ ON CONFLICT(machine_id,login,shop_login) DO UPDATE SET shop_name=$sn, sort_order
                     accounts.Add(new OrdersMirrorAccount(
                         login, S(rd, 1), !rd.IsDBNull(2) && rd.GetInt32(2) != 0,
                         ls == DateTimeOffset.MinValue ? null : ls, D(rd, 4),
-                        shops.TryGetValue(login, out var list) ? list : []));
+                        shops.TryGetValue(login, out var list) ? list : [])
+                    {
+                        Password = S(rd, 5),
+                        VerifyEmail = S(rd, 6),
+                        VerifyEmailPassword = S(rd, 7),
+                    });
                 }
             }
             return accounts;
@@ -179,8 +241,10 @@ ON CONFLICT(machine_id,login,shop_login) DO UPDATE SET shop_name=$sn, sort_order
     /// <c>shop_login</c> (ignore-case, tên hiển thị lấy bản KHÔNG rỗng đầu tiên). Dùng cho máy MỚI kéo về để tạo
     /// sẵn bản ghi tài khoản rỗng-mật-khẩu — vì thế <see cref="OrdersMirrorAccount.SessionState"/>/
     /// <see cref="OrdersMirrorAccount.VerifyFailed"/>/<see cref="OrdersMirrorAccount.LastSyncAt"/>/
-    /// <see cref="OrdersMirrorAccount.UpdatedAt"/> KHÔNG mang ý nghĩa (để mặc định) — chỉ <c>login</c> + <c>shops</c>
-    /// có giá trị. TUYỆT ĐỐI không có mật khẩu/cookie (bảng gương vốn không giữ). Bảng rỗng → list rỗng.
+    /// <see cref="OrdersMirrorAccount.UpdatedAt"/> KHÔNG mang ý nghĩa (để mặc định) — chỉ <c>login</c>, <c>shops</c>
+    /// và 3 ô đăng nhập có giá trị. Ba ô gộp theo luật <b>ô nào CÓ CHỮ ĐẦU TIÊN thì thắng</b> (quét theo
+    /// <c>machine_id</c> để kết quả ổn định): máy nào đã nhập thì máy khác dùng được, máy chưa nhập không làm
+    /// hỏng gì. KHÔNG BAO GIỜ có cookie. Bảng rỗng → list rỗng.
     /// </summary>
     public List<OrdersMirrorAccount> AllOrdersAccountsDistinct()
     {
@@ -188,10 +252,12 @@ ON CONFLICT(machine_id,login,shop_login) DO UPDATE SET shop_name=$sn, sort_order
         {
             // login (thường hóa) → (login hiển thị, shop_login thường hóa → shop). Giữ thứ tự gặp đầu tiên.
             var accs = new Dictionary<string, (string Login, Dictionary<string, OrdersMirrorShop> Shops)>(StringComparer.OrdinalIgnoreCase);
+            // login (thường hóa) → 3 ô đăng nhập đã gộp từ MỌI máy.
+            var oDangNhap = new Dictionary<string, (string P, string E, string Ep)>(StringComparer.OrdinalIgnoreCase);
 
             using (var c = _conn.CreateCommand())
             {
-                c.CommandText = "SELECT DISTINCT login FROM orders_accounts";
+                c.CommandText = "SELECT login,password,verify_email,verify_email_password FROM orders_accounts ORDER BY machine_id, login";
                 using var rd = c.ExecuteReader();
                 while (rd.Read())
                 {
@@ -199,6 +265,12 @@ ON CONFLICT(machine_id,login,shop_login) DO UPDATE SET shop_name=$sn, sort_order
                     if (login.Length == 0) continue;
                     if (!accs.ContainsKey(login))
                         accs[login] = (login, new Dictionary<string, OrdersMirrorShop>(StringComparer.OrdinalIgnoreCase));
+
+                    oDangNhap.TryGetValue(login, out var cu);
+                    oDangNhap[login] = (
+                        OCoChuDauTien(cu.P, S(rd, 1)),
+                        OCoChuDauTien(cu.E, S(rd, 2)),
+                        OCoChuDauTien(cu.Ep, S(rd, 3)));
                 }
             }
 
@@ -228,12 +300,27 @@ ON CONFLICT(machine_id,login,shop_login) DO UPDATE SET shop_name=$sn, sort_order
             }
 
             return accs.Values
-                .Select(e => new OrdersMirrorAccount(
-                    e.Login, "", false, null, DateTimeOffset.MinValue, e.Shops.Values.ToList()))
+                .Select(e =>
+                {
+                    var o = oDangNhap.TryGetValue(e.Login, out var v) ? v : ("", "", "");
+                    return new OrdersMirrorAccount(
+                        e.Login, "", false, null, DateTimeOffset.MinValue, e.Shops.Values.ToList())
+                    {
+                        Password = o.Item1,
+                        VerifyEmail = o.Item2,
+                        VerifyEmailPassword = o.Item3,
+                    };
+                })
                 .OrderBy(a => a.Login, StringComparer.OrdinalIgnoreCase)
                 .ToList();
         }
     }
+
+    /// <summary>(THUẦN) Luật gộp 3 ô đăng nhập ở chiều <b>gộp nhiều máy</b>: ô đã CÓ CHỮ thì giữ, chưa có thì lấy
+    /// của máy kế tiếp. Khác <see cref="GiuLaiNeuRong"/> ở chỗ đây là gộp NGANG giữa các máy (không máy nào ưu
+    /// tiên hơn), còn kia là gộp DỌC theo thời gian của cùng một máy (lượt mới thắng lượt cũ).</summary>
+    internal static string OCoChuDauTien(string? dangCo, string? themVao)
+        => !string.IsNullOrWhiteSpace(dangCo) ? dangCo : (themVao ?? "");
 
     /// <summary>Số tài khoản / số tài khoản đang chiếm phiên theo TỪNG máy (một lượt quét) — cho thẻ chọn máy ở
     /// tab Đơn hàng, khỏi gọi <see cref="OrdersAccountsOf"/> cho từng máy mỗi nhịp.</summary>

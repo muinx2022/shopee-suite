@@ -156,7 +156,10 @@ public static partial class OrdersModuleHost
                 return dir.Select(a => new OrdersDirectoryItem(
                     a.Login,
                     (a.Shops ?? new List<OrdersShopItem>())
-                        .Select(s => (s.Login, s.Name)).ToList())).ToList();
+                        .Select(s => (s.Login, s.Name)).ToList(),
+                    a.Password ?? "",
+                    a.VerifyEmail ?? "",
+                    a.VerifyEmailPassword ?? "")).ToList();
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {

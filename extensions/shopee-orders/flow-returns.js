@@ -16,8 +16,7 @@ import { pageFindNextPage } from "./page-funcs.js";
 import { dongModalChan, choHetLopPhu } from "./flow-modal.js";
 import { sleep } from "./shared/util.js";
 import { waitForTabComplete } from "./shared/tab-wait.js";
-import { trustedClick } from "./shared/dbg-input.js";
-import { ensureDbgChanChat } from "./chan-chat.js";
+import { ensureDbg, trustedClick } from "./shared/dbg-input.js";
 
 // Hạn chờ dải tab loại đơn ("Đơn Trả hàng/Hoàn tiền" · "Đơn Hủy" · "Đơn Giao không thành công") xuất hiện sau
 // khi trang trả hàng render. 6s: đủ cho một nhịp vẽ lại của Vue, và vẫn nằm gọn trong hạn chặng Returns 90s
@@ -93,7 +92,7 @@ async function latTrang(tabId, list, soTrang) {
       }
       break;
     }
-    await ensureDbgChanChat(tabId);
+    await ensureDbg(tabId);
     await trustedClick(tabId, next.x, next.y);
     if (!(await waitReturnsChanged(tabId, sigTruoc, 10000))) break;
     soTrangLat++;
@@ -130,7 +129,7 @@ export async function doReadReturnRequests() {
   // 0) Dọn modal chắn TRƯỚC. Bước này toàn trusted click, mà mask của modal nuốt sạch. Ca thật 10/08/2026:
   // modal "Điều khoản - Điều kiện" nuốt cú bấm tab, trang đứng nguyên ở /portal/sale/order rồi hết 20s chờ ô
   // tổng → bỏ lượt check. Flow này KHÔNG tự mở modal nào nên giữ lại "" (không loại trừ tiêu đề nào).
-  await ensureDbgChanChat(tabId);
+  await ensureDbg(tabId);
   await dongModalChan(tabId, "");
 
   // 1) Mở trang trả hàng: ưu tiên BẤM TAB (trusted click, data-testid ổn định); không thấy tab → điều hướng thẳng.
@@ -197,7 +196,7 @@ export async function doReadReturnRequests() {
   let tabTraHang = false;
   let dangChon = "";
   try {
-    await ensureDbgChanChat(tabId);
+    await ensureDbg(tabId);
     // CHỜ dải tab loại đơn vẽ xong rồi mới kết luận. Trước đây dò ĐÚNG MỘT LẦN: ca 10/08/2026 modal đóng lúc
     // :42 thì :43 đã kết luận "không thấy tab" — Vue vẽ lại dải tab sau khi trang hết bị chắn, ta nhìn quá sớm.
     let ct = null;
@@ -273,7 +272,7 @@ export async function doReadReturnRequests() {
   const chanDoanDiemBam = []; // ảnh chụp điểm bấm NGAY TRƯỚC mỗi cú bấm; chỉ gửi đi khi lượt sắp xếp HỎNG.
   let hetTranSapXep = false;  // dừng vì chạm TRAN_THOI_GIAN_SAP_XEP_MS chứ không phải vì hết lượt — phải phân biệt.
   try {
-    await ensureDbgChanChat(tabId);
+    await ensureDbg(tabId);
     // Lượt 1 CHỈ để cuộn nút vào giữa màn; đo toạ độ thật ở lượt 2 sau khi layout đã lắng. Đo ngay sau khi cuộn
     // là cách chắc chắn nhất để bấm trượt (trang cuộn mượt / danh sách vẽ lại đẩy nút đi chỗ khác).
     await execInTab(tabId, pageLocateSortButton, [0]);
@@ -307,7 +306,7 @@ export async function doReadReturnRequests() {
           // dongModalChan xử luôn tour `.on-boarding`: nhãn "Đã hiểu" nằm sẵn trong bộ NHAN_DONG của
           // pageLocateBlockingModalButton, và nó lặp tới 6 lượt cho tour nhiều bước. Hàm này KHÔNG ném.
           await dongModalChan(tabId, "");
-          await ensureDbgChanChat(tabId); // trang vẽ lại sau khi tour tắt có thể làm debugger tự detach
+          await ensureDbg(tabId); // trang vẽ lại sau khi tour tắt có thể làm debugger tự detach
           // ĐO LẠI toạ độ: gỡ dải tour xong là nội dung dịch lên, toạ độ vừa đo đã cũ (đúng 40px lệch đã đo được).
           const btn2 = await execInTab(tabId, pageLocateSortButton, [Math.min(lan, Math.max(0, tongUngVien - 1))]);
           if (btn2) { btn = btn2; tongUngVien = btn2.tong || tongUngVien; }

@@ -20,10 +20,14 @@ internal sealed class HubDirectoryPuller
     public HubDirectoryPuller(AppServices services) => _services = services;
 
     /// <summary>
-    /// Máy MỚI hỏi Hub DANH BẠ sub-acc Đơn hàng (login + shop) rồi TẠO SẴN bản ghi cục bộ cho
-    /// các login CHƯA có (mật khẩu TRỐNG, trạng thái Chưa kiểm tra, ghi chú nhắc nhập mật khẩu). Login đã có ở
-    /// máy → GIỮ NGUYÊN (KHÔNG đè mật khẩu/cookie/ghi chú). Hub KHÔNG giữ mật khẩu nên người dùng phải tự mở
-    /// từng tài khoản nhập mật khẩu rồi bấm Chạy. Hook chưa rót / Hub offline / hub cũ → báo rõ, không tạo gì.
+    /// Máy MỚI hỏi Hub DANH BẠ sub-acc Đơn hàng (login + shop + 3 ô đăng nhập) rồi:
+    /// <list type="number">
+    /// <item>TẠO bản ghi cục bộ cho các login máy CHƯA có, điền luôn 3 ô đăng nhập Hub biết;</item>
+    /// <item><b>VÁ Ô TRỐNG</b> cho các login máy ĐÃ có: ô nào đang trống thì lấy của Hub, ô nào đã có chữ thì
+    /// TUYỆT ĐỐI không đụng (xem <see cref="VaOTrong"/>). Cookie/ghi chú/trạng thái không bao giờ bị đè.</item>
+    /// </list>
+    /// Ô Hub cũng rỗng (chưa máy nào nhập) → người dùng vẫn phải tự nhập rồi bấm Chạy.
+    /// Hook chưa rót / Hub offline / hub cũ → báo rõ, không tạo gì.
     /// </summary>
     /// <param name="nhatKy">Ghi một dòng vào panel nhật ký (nguồn cấp-BATCH).</param>
     /// <param name="trangThai">Đặt dòng trạng thái hiển thị trên màn.</param>
@@ -63,37 +67,65 @@ internal sealed class HubDirectoryPuller
         }
 
         var toAdd = TinhLoginCanThem(dir.Select(d => d.Login), _services.Accounts.GetAll().Select(a => a.Email));
-        if (toAdd.Count == 0)
-        {
-            nhatKy("Không có tài khoản mới (máy đã có đủ tài khoản Hub biết).");
-            trangThai("Không có tài khoản mới.");
-            napLai();
-            return;
-        }
 
-        // Map login (ignore-case) → shops để seed sau khi Insert (khỏi phải đợi đăng nhập mới thấy shop).
-        var shopsByLogin = new Dictionary<string, IReadOnlyList<(string Login, string Name)>>(StringComparer.OrdinalIgnoreCase);
+        // Map login (ignore-case) → mục danh bạ, dùng cho cả seed shop lẫn vá 3 ô đăng nhập.
+        var theoLogin = new Dictionary<string, OrdersDirectoryItem>(StringComparer.OrdinalIgnoreCase);
         foreach (var d in dir)
         {
             if (!string.IsNullOrWhiteSpace(d.Login))
             {
-                shopsByLogin[d.Login.Trim()] = d.Shops ?? new List<(string, string)>();
+                theoLogin[d.Login.Trim()] = d;
             }
+        }
+
+        // VÁ Ô TRỐNG cho tài khoản ĐÃ CÓ trên máy — chạy TRƯỚC nhánh "không có tài khoản mới" thoát sớm, vì
+        // đây mới là việc chính khi máy đã đủ login mà vài ô còn trống.
+        var soOVa = 0;
+        var soAccVa = 0;
+        foreach (var acc in _services.Accounts.GetAll())
+        {
+            var email = acc.Email?.Trim() ?? "";
+            if (email.Length == 0 || !theoLogin.TryGetValue(email, out var tuHub))
+            {
+                continue;
+            }
+            var va = VaOTrong(acc, tuHub.Password, tuHub.VerifyEmail, tuHub.VerifyEmailPassword);
+            if (va == 0)
+            {
+                continue;
+            }
+            _services.Accounts.Update(acc);
+            soOVa += va;
+            soAccVa++;
+        }
+
+        if (toAdd.Count == 0)
+        {
+            var them = soOVa > 0 ? $" Đã vá {soOVa} ô đăng nhập còn trống của {soAccVa} tài khoản." : "";
+            nhatKy("Không có tài khoản mới (máy đã có đủ tài khoản Hub biết)." + them);
+            trangThai("Không có tài khoản mới." + them);
+            napLai();
+            return;
         }
 
         foreach (var login in toAdd)
         {
+            var tuHub = theoLogin.TryGetValue(login, out var d0) ? d0 : null;
+            var matKhau = tuHub?.Password ?? "";
             var acc = new Account
             {
                 Email = login,
-                Password = string.Empty,
+                Password = matKhau,
+                VerifyEmail = tuHub?.VerifyEmail ?? "",
+                VerifyEmailPassword = tuHub?.VerifyEmailPassword ?? "",
                 Status = AccountStatus.ChuaKiemTra,
-                Note = "Kéo từ Hub — cần nhập mật khẩu",
+                Note = matKhau.Length > 0 ? "Kéo từ Hub" : "Kéo từ Hub — cần nhập mật khẩu",
             };
             _services.Accounts.Insert(acc);
 
             // Seed shop (tùy chọn, best-effort): hiện shop ngay ở tab "Shops"; lỗi KHÔNG chặn việc tạo tài khoản.
-            if (shopsByLogin.TryGetValue(login, out var shops) && shops.Count > 0)
+            var shops = tuHub?.Shops ?? new List<(string Login, string Name)>();
+            if (shops.Count > 0)
             {
                 try
                 {
@@ -109,8 +141,42 @@ internal sealed class HubDirectoryPuller
         }
 
         napLai();
-        nhatKy($"Đã kéo {toAdd.Count} tài khoản mới từ Hub — hãy mở từng tài khoản nhập mật khẩu rồi bấm Chạy.");
-        trangThai($"Đã kéo {toAdd.Count} tài khoản mới từ Hub — nhập mật khẩu rồi Chạy.");
+        // Chỉ nhắc "nhập mật khẩu" khi thật sự còn tài khoản thiếu mật khẩu — Hub giờ có thể đã gửi sẵn.
+        var conThieuMatKhau = toAdd.Count(l =>
+            string.IsNullOrWhiteSpace(theoLogin.TryGetValue(l, out var d1) ? d1.Password : null));
+        var nhac = conThieuMatKhau > 0
+            ? $" — còn {conThieuMatKhau} tài khoản chưa có mật khẩu, hãy mở ra nhập rồi bấm Chạy."
+            : " — đã có sẵn mật khẩu từ Hub, bấm Chạy được ngay.";
+        var vaThem = soOVa > 0 ? $" Vá thêm {soOVa} ô đăng nhập còn trống của {soAccVa} tài khoản cũ." : "";
+        nhatKy($"Đã kéo {toAdd.Count} tài khoản mới từ Hub{nhac}{vaThem}");
+        trangThai($"Đã kéo {toAdd.Count} tài khoản mới từ Hub{nhac}");
+    }
+
+    /// <summary>
+    /// (THUẦN, test được) <b>Vá ô trống</b> cho một bản ghi tài khoản cục bộ bằng giá trị Hub gửi về: ô nào đang
+    /// TRỐNG thì điền, ô nào ĐÃ CÓ CHỮ thì tuyệt đối không đụng — kể cả khi Hub có giá trị khác. Đây là chốt
+    /// "Hub không bao giờ đè thứ người dùng đã gõ trên máy này". Giá trị Hub rỗng cũng không xoá gì.
+    /// Trả về SỐ Ô vừa vá (0 = không đụng gì ⇒ khỏi ghi DB).
+    /// </summary>
+    internal static int VaOTrong(Account local, string? password, string? verifyEmail, string? verifyEmailPassword)
+    {
+        var va = 0;
+        if (string.IsNullOrWhiteSpace(local.Password) && !string.IsNullOrWhiteSpace(password))
+        {
+            local.Password = password;
+            va++;
+        }
+        if (string.IsNullOrWhiteSpace(local.VerifyEmail) && !string.IsNullOrWhiteSpace(verifyEmail))
+        {
+            local.VerifyEmail = verifyEmail;
+            va++;
+        }
+        if (string.IsNullOrWhiteSpace(local.VerifyEmailPassword) && !string.IsNullOrWhiteSpace(verifyEmailPassword))
+        {
+            local.VerifyEmailPassword = verifyEmailPassword;
+            va++;
+        }
+        return va;
     }
 
     /// <summary>

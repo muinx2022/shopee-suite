@@ -29,6 +29,7 @@ tools/scrape-test-agent/
 
 # Thu muc lam viec tam / build artifacts
 .cursor/
+.claude/
 artifacts/
 scratchpad/
 

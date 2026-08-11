@@ -80,8 +80,9 @@
                     <button class="opbtn @rb.Css" disabled="@rb.Disabled" title="@rb.Title"
                             @onclick="() => OnOrdersRunClick(a)">@rb.Label</button>
                     @* KHÔNG có nút "Đăng nhập lại" ở đây — ranh giới người dùng chốt: với Đơn hàng/Shopee,
-                       HUB CHỈ NHÌN VÀ CHẠY, còn đăng nhập thế nào là việc của client tự lo. (Khác BigSeller:
-                       bên đó hub login hộ được vì hub giữ sẵn mật khẩu + hòm thư đọc mã.)
+                       HUB CHỈ NHÌN VÀ CHẠY, còn đăng nhập thế nào là việc của client tự lo. Ranh giới này KHÔNG
+                       đổi sau 11/08/2026 dù gương giờ có giữ mật khẩu: hub giữ mật khẩu để MÁY KHÁC kéo về,
+                       không phải để hub tự đăng nhập hộ (khác BigSeller — bên đó hub login hộ thật).
                        "Đồng bộ 1 lượt" chưa làm được: client không có điểm vào cấp service (một phiên là vòng
                        liên tục login→mọi shop→sync), nhái lại logic phiên rủi ro hơn lợi ích. *@
                     <button class="opbtn blocked" disabled

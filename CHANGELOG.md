@@ -5,6 +5,51 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Phiên bản & cập nhật. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.8.9 — 2026-08-11
+
+> Bản dọn nợ sau v1.8.8: một lỗi tách đường dẫn âm thầm làm tê liệt bước dọn hồ sơ mồ côi, một tính năng đỡ
+> phải gõ tay mật khẩu trên từng máy, và một file dead code. **Không đụng gì vào đường chạy vòng shop** —
+> v1.8.8 đã chạy 5 vòng liên tiếp `12/12 shop` với 0 cú đứt cầu nối giữa chừng, không có lý do gì để mó vào.
+
+**Dọn hồ sơ trình duyệt mồ côi lúc khởi động — nay MỚI thật sự chạy**
+
+- Bước này đứng im trên máy có **dấu cách trong đường dẫn hồ sơ** (tức gần như mọi máy Windows:
+  `C:\Users\<tên có dấu cách>\AppData\…`). Lỗi ở khâu tách cờ `--user-data-dir` khỏi dòng lệnh: phía Đơn hàng
+  giao tham số qua `ProcessStartInfo.ArgumentList`, .NET bọc ngoặc kép quanh **cả tham số**
+  (`"--user-data-dir=C:\ho so\acc_1"`) chứ không phải sau dấu `=`, nên hàm cũ cắt tại dấu cách đầu tiên và trả
+  về `C:\Users\Ng`. Không khớp hồ sơ nào ⇒ không dọn gì, và không một dòng log nào báo.
+- Nay tách tham số theo đúng luật ngoặc kép, xử đủ ba dạng (không ngoặc · ngoặc sau `=` · ngoặc bọc cả tham số).
+  Hệ quả thực tế: Brave sót lại sau một lần app treo/tắt bẩn được dọn ngay lần mở app kế, thay vì tích tụ.
+
+**Tài khoản Đơn hàng: mật khẩu đồng bộ qua Hub, khỏi gõ tay từng máy**
+
+- Gương danh bạ nay mang thêm **3 ô đăng nhập**: mật khẩu tài khoản phụ, hòm thư xác minh, mật khẩu hòm thư.
+  Máy mới bấm "Kéo TK từ Hub" là có bản ghi dùng được ngay thay vì bản ghi rỗng phải gõ tay.
+- Hai đầu có luật gộp **khác nhau, cố ý**:
+  - *Client → Hub*: ô rỗng **không bao giờ xoá** giá trị Hub đang giữ (gương xoá-rồi-ghi-lại mỗi 3 giây — để
+    rỗng thắng là mật khẩu bay ngay nhịp sau). Ô mới khác rỗng thì ghi đè, để user đổi mật khẩu Shopee xong Hub
+    theo kịp.
+  - *Hub → client*: **vá ô trống, KHÔNG đè**. Thứ đã gõ trên máy này tuyệt đối không bị Hub ghi lên.
+- **Nói thẳng phần bảo mật:** đây là đảo một quyết định cũ. Mật khẩu đi qua mạng (HTTPS + `X-Api-Token`) và nằm
+  **dạng thường** trong `hub.db` trên VM. Đường BigSeller vốn đã đồng bộ mật khẩu y hệt nên tư thế bảo mật của
+  hệ thống không đổi về chất. **Cookie vẫn tuyệt đối không đẩy** — cookie là phiên sống, dùng lại được ngay
+  không cần verify, rủi ro khác hẳn.
+- Cần **deploy lại Hub** thì phần lưu trên Hub mới có tác dụng. Client bản mới nói chuyện với Hub bản cũ vẫn
+  chạy bình thường (Hub cũ bỏ qua field lạ), chỉ là không lưu được gì.
+
+**Dọn dẹp**
+
+- Xoá `extensions/shopee-orders/chan-chat.js` — thí nghiệm chặn SDK chat của Seller Centre, đã tắt từ khi
+  chứng minh được nó vô can với bệnh đứt cầu nối (bệnh gốc là vòng nhận WebSocket, sửa ở v1.8.8). Ba file flow
+  quay về gọi thẳng `ensureDbg`; hành vi không đổi một ly.
+
+**Còn tồn**
+
+- **Cầu nối chạy bằng Chrome/Edge 137+ sẽ treo im lặng**: Chromium 137 bỏ cờ cho phép `--load-extension`, nên
+  extension không nạp mà không báo lỗi. Chưa chữa vì cách chữa duy nhất là ép chọn Brave, mà `BrowserLocator`
+  cố ý ưu tiên Chrome/Edge do **Brave bật sẵn chống-fingerprint nên ăn captcha nhiều hơn** — đổi là đánh cược
+  trên đúng luồng vừa chạy sạch 12/12. Máy đang dùng chạy Brave nên không chạm tới.
+
 ## v1.8.8 — 2026-08-11
 
 > Bản này chữa đúng cái làm **không vòng chạy nào đi hết 12 shop**. Hai vòng liên tiếp trước khi phát hành đều

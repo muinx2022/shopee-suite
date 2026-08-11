@@ -206,21 +206,26 @@ public static class ClientApiEndpoints
 
         // ── Gương danh bạ tài khoản Đơn hàng + ack lệnh hub giao ──
         // POST /orders/accounts → máy đẩy TOÀN BỘ danh bạ tài khoản Đơn hàng của CHÍNH NÓ (login + shop con +
-        // trạng thái phiên). Hub thay trọn danh bạ của đúng machine_id đó, KHÔNG đụng máy khác. Payload CỐ Ý
-        // không có mật khẩu/cookie — hub chỉ làm gương, tài khoản vẫn thuộc máy.
+        // trạng thái phiên + 3 ô đăng nhập). Hub thay trọn danh bạ của đúng machine_id đó, KHÔNG đụng máy khác;
+        // riêng 3 ô đăng nhập thì ô rỗng KHÔNG xoá giá trị đang giữ. Payload KHÔNG có cookie.
         api.MapPost(HubRoutes.OrdersAccounts, (OrdersAccountsPushRequest? r) =>
         {
             if (r is null || string.IsNullOrWhiteSpace(r.MachineId)) return Results.BadRequest();
             return Results.Json(new { accounts = db.UpsertOrdersAccounts(r) });
         });
 
-        // GET /orders/accounts/directory → DANH BẠ sub-acc Đơn hàng GỘP TỪ MỌI MÁY (login + shop con), distinct
-        // theo login. KHÔNG mật khẩu/cookie (Hub không giữ). Máy MỚI kéo về để tạo sẵn bản ghi tài khoản
-        // rỗng-mật-khẩu; người dùng tự nhập mật khẩu rồi đăng nhập.
+        // GET /orders/accounts/directory → DANH BẠ sub-acc Đơn hàng GỘP TỪ MỌI MÁY (login + shop con + 3 ô đăng
+        // nhập), distinct theo login. KHÔNG cookie. Máy MỚI kéo về để tạo sẵn bản ghi tài khoản dùng được ngay;
+        // ô nào chưa máy nào nhập thì về rỗng và người dùng tự nhập.
         api.MapGet(HubRoutes.OrdersAccountsDirectory, () =>
             Results.Json(db.AllOrdersAccountsDistinct()
                 .Select(a => new OrdersDirectoryAccount(a.Login, a.Shops
-                    .Select(s => new OrdersShopItem(s.Login, s.Name)).ToList()))
+                    .Select(s => new OrdersShopItem(s.Login, s.Name)).ToList())
+                {
+                    Password = a.Password,
+                    VerifyEmail = a.VerifyEmail,
+                    VerifyEmailPassword = a.VerifyEmailPassword,
+                })
                 .ToList()));
 
         // POST /orders/commands/ack → client báo kết quả lệnh hub giao (lệnh ĐI kèm phản hồi heartbeat).

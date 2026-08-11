@@ -94,14 +94,16 @@ public static class HubRoutes
     public const string OrdersConfig = "/orders-config";
 
     // ── Gương danh bạ tài khoản Đơn hàng + lệnh hub → suất đơn hàng ──
-    /// <summary>Client đẩy GƯƠNG danh bạ tài khoản Đơn hàng của máy mình (login + shop con + trạng thái phiên;
-    /// KHÔNG mật khẩu, KHÔNG cookie). Hub thay TOÀN BỘ danh bạ của đúng máy đó. Như <see cref="BigSellerUpsert"/>,
-    /// CỐ Ý nằm ngoài tiền tố <c>config/</c> nên không dính chặn <c>AllowClientConfigPush</c>.</summary>
+    /// <summary>Client đẩy GƯƠNG danh bạ tài khoản Đơn hàng của máy mình (login + shop con + trạng thái phiên +
+    /// 3 ô đăng nhập từ 11/08/2026; KHÔNG cookie). Hub thay TOÀN BỘ danh bạ của đúng máy đó — trừ 3 ô đăng nhập,
+    /// nơi ô rỗng không xoá giá trị đang giữ. Như <see cref="BigSellerUpsert"/>, CỐ Ý nằm ngoài tiền tố
+    /// <c>config/</c> nên không dính chặn <c>AllowClientConfigPush</c>.</summary>
     public const string OrdersAccounts = "/orders/accounts";
 
-    /// <summary>GET: máy MỚI kéo DANH BẠ sub-acc Đơn hàng GỘP TỪ MỌI MÁY (login + shop con; KHÔNG mật khẩu,
-    /// KHÔNG cookie — Hub không hề giữ). Để tạo sẵn bản ghi tài khoản rỗng-mật-khẩu, người dùng tự nhập mật khẩu
-    /// rồi đăng nhập. CỐ Ý nằm ngoài tiền tố <c>config/</c> nên không dính chặn <c>AllowClientConfigPush</c>.</summary>
+    /// <summary>GET: máy MỚI kéo DANH BẠ sub-acc Đơn hàng GỘP TỪ MỌI MÁY (login + shop con + 3 ô đăng nhập;
+    /// KHÔNG cookie). Máy mới tạo sẵn bản ghi tài khoản dùng được ngay; ô nào chưa máy nào nhập thì về rỗng và
+    /// người dùng tự nhập. CỐ Ý nằm ngoài tiền tố <c>config/</c> nên không dính chặn
+    /// <c>AllowClientConfigPush</c>.</summary>
     public const string OrdersAccountsDirectory = "/orders/accounts/directory";
 
     /// <summary>Client báo kết quả thực thi một lệnh hub giao (lệnh ĐI trong phản hồi heartbeat, không có route
