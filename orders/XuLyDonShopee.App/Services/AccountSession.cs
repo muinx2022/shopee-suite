@@ -489,8 +489,8 @@ public partial class AccountSession : ObservableObject, IAccountSession
                     // Cờ "còn sót" bền theo shop: lượt chạm trần bỏ lại phần đuôi nằm SAU dải-đã-biết, mà phần đuôi
                     // đó không bao giờ hiện ở trang đầu ⇒ không có cờ này thì không lượt nào với tới nó nữa.
                     conSotTraHang: shopLabel => _services.Results.GetTraHangConSot(_accountId, shopLabel),
-                    luuConSotTraHang: (shopLabel, conSot) =>
-                        _services.Results.SetTraHangConSot(_accountId, shopLabel, conSot));
+                    luuConSotTraHang: (shopLabel, conSot, lyDo) =>
+                        _services.Results.SetTraHangConSot(_accountId, shopLabel, conSot, lyDo));
                 _bridge = bridge;
                 OrdersBridgeRunResult result;
                 try

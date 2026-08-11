@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using XuLyDonShopee.Core.Services;
@@ -71,6 +72,41 @@ public class ThuLaiShopRoiViCauNoiTests
     [Fact]
     public void LoiKhac_KhongPhaiLoiCauNoi()
         => Assert.False(OrdersBridgeSession.LaLoiCauNoi(new InvalidOperationException("trang trả hàng không render")));
+
+    /// <summary>Extension khai "MẤT NGỮ CẢNH TAB SHOP" (service worker MV3 vừa bị dựng lại, khôi phục hỏng) — đi
+    /// qua đường <c>error</c> nên thành <c>InvalidOperationException</c>, nhưng bản chất là hạ tầng cầu nối chết
+    /// đi sống lại: trang không hỏng, shop phải được xếp thử lại như mọi cú rớt cầu nối khác. Không nhận diện thì
+    /// cùng một cú SW chết mà biểu hiện bằng rớt socket được cứu, biểu hiện bằng <c>error</c> lại mất trọn vòng
+    /// (phản biện đợt trả nợ 11/08/2026).</summary>
+    [Fact]
+    public void MatNguCanhTabShop_CungLaLoiCauNoi()
+        => Assert.True(OrdersBridgeSession.LaLoiCauNoi(new InvalidOperationException(
+            "Extension báo lỗi: " + OrdersBridgeChannel.MocLoiMatTabShop
+            + " (service worker vừa khởi động lại) — bỏ lượt")));
+
+    /// <summary>Mốc chuỗi C# phải nằm TRONG đúng hằng <c>LOI_MAT_TAB_SHOP</c> của extension — đọc thẳng
+    /// <c>core.js</c> chứ không tin bản chép tay (cùng khuôn <c>HangTran_KhopBanExtension</c>): bên JS đổi câu là
+    /// phân loại thử-lại gãy ÂM THẦM, shop dính lỗi này mất trọn vòng thay vì được cứu.</summary>
+    [Fact]
+    public void MocLoiMatTabShop_KhopBanExtension()
+    {
+        var js = File.ReadAllText(Path.Combine(GocRepo(), "extensions", "shopee-orders", "core.js"));
+        var m = Regex.Match(js, "LOI_MAT_TAB_SHOP\\s*=\\s*\\r?\\n?\\s*\"([^\"]+)\"");
+        Assert.True(m.Success, "Không thấy hằng LOI_MAT_TAB_SHOP trong core.js — đổi tên hằng thì sửa cả test này.");
+        Assert.Contains(OrdersBridgeChannel.MocLoiMatTabShop, m.Groups[1].Value, StringComparison.Ordinal);
+    }
+
+    /// <summary>Gốc repo — dò ngược từ thư mục chạy test lên chỗ có <c>ShopeeSuite.sln</c>.</summary>
+    private static string GocRepo()
+    {
+        var d = new DirectoryInfo(AppContext.BaseDirectory);
+        while (d is not null && !File.Exists(Path.Combine(d.FullName, "ShopeeSuite.sln")))
+        {
+            d = d.Parent;
+        }
+        Assert.NotNull(d);
+        return d!.FullName;
+    }
 
     // ===== 3. Cờ DaGuiChuanBiHang chạy thật qua cầu nối =====
 

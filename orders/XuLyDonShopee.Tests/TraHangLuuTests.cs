@@ -357,9 +357,11 @@ CREATE TABLE account_shops (
     }
 
     /// <summary>
-    /// Cột cờ "còn sót" (<c>account_shops.tra_hang_con_sot</c>, thêm 11/08/2026) phải mọc ra trên DB CŨ mà không
-    /// mất dữ liệu, và shop cũ nhận mặc định 0 = KHÔNG còn sót ⇒ hành vi y hệt trước đây (không tự dưng lật trang
-    /// ở mọi shop). Ghi cờ dùng UPSERT nên KHÔNG được đụng tên shop / mốc số yêu cầu.
+    /// Cột cờ "còn sót" (<c>account_shops.tra_hang_con_sot</c>, thêm 11/08/2026) + cột LÝ DO
+    /// (<c>tra_hang_sot_ly_do</c>, đợt trả nợ cùng ngày) phải mọc ra trên DB CŨ mà không mất dữ liệu, và shop cũ
+    /// nhận mặc định 0/'' = KHÔNG còn sót ⇒ hành vi y hệt trước đây (không tự dưng lật trang ở mọi shop). Ghi cờ
+    /// dùng UPSERT nên KHÔNG được đụng tên shop / mốc số yêu cầu. TẮT cờ phải XÓA lý do — không để lý do cũ dính
+    /// lại sau khi shop đã đọc đủ sâu.
     /// </summary>
     [Fact]
     public void Migration_DbCu_ThemCotTraHangConSot_ShopCuMacDinhKhongConSot()
@@ -367,22 +369,29 @@ CREATE TABLE account_shops (
         using var temp = new TempDatabase();
         DungSchemaCu(temp.Path, accountId: 5, orderSn: "SNCU");
         Assert.False(CoCot(temp.Path, "account_shops", "tra_hang_con_sot"));
+        Assert.False(CoCot(temp.Path, "account_shops", "tra_hang_sot_ly_do"));
 
         var db = new Database(temp.Path); // Initialize() chạy migration ALTER TABLE
 
         Assert.True(CoCot(temp.Path, "account_shops", "tra_hang_con_sot"));
+        Assert.True(CoCot(temp.Path, "account_shops", "tra_hang_sot_ly_do"));
         var results = new ResultsRepository(db);
         Assert.False(results.GetTraHangConSot(5, "alina99.store"));   // shop cũ = chưa từng còn sót
         Assert.False(results.GetTraHangConSot(5, "shop.chua.co"));    // shop chưa có dòng cũng thế
+        Assert.Equal("", results.GetTraHangSotLyDo(5, "alina99.store"));
+        Assert.Equal("", results.GetTraHangSotLyDo(5, "shop.chua.co")); // chưa có dòng → rỗng, không ném
 
-        results.SetTraHangConSot(5, "alina99.store", true);
+        results.SetTraHangConSot(5, "alina99.store", true, ShopFlowRunner.LyDoSotTran);
         Assert.True(new ResultsRepository(db).GetTraHangConSot(5, "alina99.store"));
+        Assert.Equal(ShopFlowRunner.LyDoSotTran, results.GetTraHangSotLyDo(5, "alina99.store"));
         // UPSERT KHÔNG đụng cột khác: tên shop và mốc số yêu cầu còn nguyên.
         Assert.Equal("Alina", Assert.Single(results.GetShops(5)).ShopName);
         Assert.Null(results.GetReturnCount(5, "alina99.store"));
 
-        results.SetTraHangConSot(5, "alina99.store", false);
+        // Tắt cờ mà lỡ đưa kèm lý do ⇒ repo phải tự chuẩn về '' (lý do chỉ có nghĩa khi đang còn sót).
+        results.SetTraHangConSot(5, "alina99.store", false, ShopFlowRunner.LyDoSotTran);
         Assert.False(new ResultsRepository(db).GetTraHangConSot(5, "alina99.store"));
+        Assert.Equal("", results.GetTraHangSotLyDo(5, "alina99.store"));
     }
 
     [Fact]

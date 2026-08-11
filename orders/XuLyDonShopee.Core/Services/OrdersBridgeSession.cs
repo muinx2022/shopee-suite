@@ -206,7 +206,8 @@ public sealed class OrdersBridgeSession : IDisposable
     /// không (<c>account_shops.tra_hang_con_sot</c>). Bật ⇒ lượt này vẫn lật trang dù trang đầu không có mã mới
     /// (chế độ rút tồn đọng — xem <c>ShopFlowRunner.CheckDonTraHangAsync</c>). null → coi như không shop nào còn
     /// sót ⇒ hành vi y hệt trước 11/08/2026.</param>
-    /// <param name="luuConSotTraHang">Ghi lại cờ trên sau mỗi lượt check (nhãn shop, còn sót hay không). null →
+    /// <param name="luuConSotTraHang">Ghi lại cờ trên sau mỗi lượt check (nhãn shop, còn sót hay không, LÝ DO —
+    /// hằng <c>ShopFlowRunner.LyDoSot*</c>, chuỗi rỗng khi không sót → cột <c>tra_hang_sot_ly_do</c>). null →
     /// không ghi (đường "Chạy thử").</param>
     public OrdersBridgeSession(string userDataDir, Action<string>? log = null,
         string? invoiceDir = null, string? province = null,
@@ -223,7 +224,7 @@ public sealed class OrdersBridgeSession : IDisposable
         Func<IReadOnlyList<YeuCauTraHang>, int>? demMaTraChuaBiet = null,
         Func<string, bool>? dangCoCanhBaoDiaChi = null,
         Func<string, bool>? conSotTraHang = null,
-        Action<string, bool>? luuConSotTraHang = null)
+        Action<string, bool, string>? luuConSotTraHang = null)
     {
         _userDataDir = userDataDir;
         _log = log;
@@ -397,8 +398,17 @@ public sealed class OrdersBridgeSession : IDisposable
     /// <para>Một dòng <c>is TimeoutException</c> là đủ vì <see cref="CauNoiRotGiuaChangException"/> KẾ THỪA
     /// <see cref="TimeoutException"/> — hàm này tồn tại để ghi rõ luật đó ra, kẻo ai đó tách cây thừa kế rồi
     /// lặng lẽ mất nhánh thử lại.</para>
+    /// <para>Thành viên thứ ba (11/08/2026): extension tự khai "MẤT NGỮ CẢNH TAB SHOP" (service worker MV3 vừa bị
+    /// giết + khôi phục hỏng — <see cref="OrdersBridgeChannel.MocLoiMatTabShop"/>). Cùng bản chất hạ tầng cầu nối
+    /// chết đi sống lại; xếp khác nhóm với TimeoutException chỉ vì nó đi qua đường <c>error</c> →
+    /// <c>InvalidOperationException</c>. Không nhận diện thì shop dính nó mất TRỌN vòng (không được thử lại) và 3
+    /// shop liên tiếp là dừng cả vòng — trong khi cùng cú SW chết mà biểu hiện bằng rớt socket thì lại được cứu.
+    /// An toàn vì <see cref="NenThuLaiShopRoiOan"/> vẫn xét <c>DaGuiChuanBiHang</c> TRƯỚC mọi điều kiện khác.</para>
     /// </summary>
-    internal static bool LaLoiCauNoi(Exception ex) => ex is TimeoutException;
+    internal static bool LaLoiCauNoi(Exception ex) =>
+        ex is TimeoutException
+        || (ex is InvalidOperationException
+            && ex.Message.Contains(OrdersBridgeChannel.MocLoiMatTabShop, StringComparison.Ordinal));
 
     /// <summary>
     /// PURE — shop vừa hỏng có được XẾP VÀO HÀNG ĐỢI THỬ LẠI cuối vòng không.

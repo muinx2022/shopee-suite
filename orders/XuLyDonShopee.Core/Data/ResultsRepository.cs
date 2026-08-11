@@ -191,11 +191,14 @@ public class ResultsRepository
     }
 
     /// <summary>
-    /// Ghi cờ "còn sót" của bước check trả hàng cho shop này. UPSERT theo đúng mẫu <see cref="SetReturnCount"/>
-    /// (ghi được cả khi shop chưa có dòng) và <b>KHÔNG đụng cột nào khác</b> — mốc số yêu cầu, tên shop, thứ tự
-    /// đều do đường khác làm chủ. <paramref name="shopLogin"/> rỗng → bỏ qua.
+    /// Ghi cờ "còn sót" của bước check trả hàng cho shop này, kèm LÝ DO (<c>tra_hang_sot_ly_do</c>: xem chú thích
+    /// cột trong <see cref="Database"/> — <c>tran</c>/<c>sap_xep</c>/<c>lat_truot</c>/<c>doc_hong</c>; không sót
+    /// thì ghi chuỗi rỗng). UPSERT theo đúng mẫu <see cref="SetReturnCount"/> (ghi được cả khi shop chưa có dòng)
+    /// và <b>KHÔNG đụng cột nào khác</b> — mốc số yêu cầu, tên shop, thứ tự đều do đường khác làm chủ.
+    /// <paramref name="shopLogin"/> rỗng → bỏ qua. <paramref name="lyDo"/> luôn được chuẩn về rỗng khi
+    /// <paramref name="conSot"/> tắt — không để lý do cũ dính lại sau khi shop đã đọc đủ sâu.
     /// </summary>
-    public void SetTraHangConSot(long accountId, string shopLogin, bool conSot)
+    public void SetTraHangConSot(long accountId, string shopLogin, bool conSot, string lyDo)
     {
         if (string.IsNullOrWhiteSpace(shopLogin))
         {
@@ -205,14 +208,38 @@ public class ResultsRepository
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
         cmd.CommandText =
-            @"INSERT INTO account_shops (account_id, shop_login, tra_hang_con_sot, updated_at)
-    VALUES ($a, $login, $c, $now)
-    ON CONFLICT(account_id, shop_login) DO UPDATE SET tra_hang_con_sot = $c;";
+            @"INSERT INTO account_shops (account_id, shop_login, tra_hang_con_sot, tra_hang_sot_ly_do, updated_at)
+    VALUES ($a, $login, $c, $ly, $now)
+    ON CONFLICT(account_id, shop_login) DO UPDATE SET tra_hang_con_sot = $c, tra_hang_sot_ly_do = $ly;";
         cmd.Parameters.AddWithValue("$a", accountId);
         cmd.Parameters.AddWithValue("$login", shopLogin.Trim());
         cmd.Parameters.AddWithValue("$c", conSot ? 1 : 0);
+        cmd.Parameters.AddWithValue("$ly", conSot ? (lyDo ?? string.Empty) : string.Empty);
         cmd.Parameters.AddWithValue("$now", DbSerialization.FormatDate(DateTime.UtcNow));
         cmd.ExecuteNonQuery();
+    }
+
+    /// <summary>
+    /// LÝ DO còn sót của lượt check gần nhất (<c>tra_hang_sot_ly_do</c>) — chuỗi rỗng khi không sót / shop chưa
+    /// có dòng / DB đời cũ (cột NULL). Chỉ phục vụ chẩn đoán + test; quyết định chế độ rút tồn đọng vẫn đi qua
+    /// <see cref="GetTraHangConSot"/>.
+    /// </summary>
+    public string GetTraHangSotLyDo(long accountId, string shopLogin)
+    {
+        if (string.IsNullOrWhiteSpace(shopLogin))
+        {
+            return string.Empty;
+        }
+
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText =
+            "SELECT tra_hang_sot_ly_do FROM account_shops WHERE account_id = $a AND shop_login = $login;";
+        cmd.Parameters.AddWithValue("$a", accountId);
+        cmd.Parameters.AddWithValue("$login", shopLogin.Trim());
+
+        var res = cmd.ExecuteScalar();
+        return res is string s ? s : string.Empty;
     }
 
     /// <summary>

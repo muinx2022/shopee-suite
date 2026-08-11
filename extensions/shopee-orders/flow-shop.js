@@ -1,6 +1,6 @@
 // Lệnh cấp SHOP: SSO sang Seller Centre → trang chọn shop → mở "Chi tiết" một shop → đọc "Chờ Lấy Hàng"
 // → đóng tab shop về picker. Chạy TRƯỚC mọi việc cấp đơn (flow-orders/flow-address/flow-returns).
-import { ctx, send, ensureListTab } from "./core.js";
+import { ctx, send, ensureListTab, LOI_MAT_TAB_SHOP } from "./core.js";
 import { execInTab } from "./exec.js";
 import { BANHANG_HOSTS, SUBACCOUNT_HOSTS, SHOP_LIST_URL } from "./constants.js";
 import {
@@ -16,6 +16,9 @@ import { ensureDbg, trustedClick } from "./shared/dbg-input.js";
 // sau đó không còn tab shop (trước 11/08/2026 chúng lùi im lặng về tab picker và thao tác THẬT lên shop sai).
 // Đi qua ĐÚNG một hàm này để không có đường nào gán ctx.shopTabId mà quên lưu.
 function nhoTabShop(tabId) {
+  // Tăng THẾ HỆ trước khi ghi: `khoiPhucTabShop` (background.js) đang validate dở giữa chừng sẽ thấy thế hệ
+  // đổi và BỎ kết quả — ghi chủ động ở đây luôn thắng bản khôi phục từ storage (vốn có thể đã cũ vài ms).
+  ctx.theHeTabShop++;
   ctx.shopTabId = tabId;
   try { chrome.storage.session.set({ shopTabId: tabId }); } catch (e) {}
 }
@@ -170,10 +173,12 @@ export async function doReadShopList() {
   send({ action: "pageData", kind: "shopList", data: json });
 }
 
-// GĐ1: đọc số "Chờ Lấy Hàng".
+// GĐ1: đọc số "Chờ Lấy Hàng". KHÔNG lùi về tab picker khi mất shopTabId — cùng luật `orderTabIdStrict`
+// (core.js): trên tab picker thì hoặc treo 8s rồi trả null (che mất chẩn đoán), hoặc tệ hơn là đọc số của shop
+// sticky SAI. Thà bỏ lượt: C# nhận `error` → fault chặng ToShip → shop ghi lỗi, vòng sau chạy lại từ đầu shop.
 export async function doReadToShip() {
-  const tabId = ctx.shopTabId != null ? ctx.shopTabId : ctx.listTabId;
-  if (tabId == null) { send({ action: "error", message: "chưa có tab shop để đọc" }); return; }
+  const tabId = ctx.shopTabId;
+  if (tabId == null) { send({ action: "error", message: LOI_MAT_TAB_SHOP }); return; }
   const deadline = Date.now() + 8000;
   let raw = null;
   while (Date.now() < deadline) {

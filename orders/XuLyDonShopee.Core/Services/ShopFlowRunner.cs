@@ -102,9 +102,31 @@ internal sealed class ShopFlowRunner
     private readonly Func<IReadOnlyList<YeuCauTraHang>, int>? _demMaTraChuaBiet;
     // CỜ "CÒN SÓT" bền theo shop (account_shops.tra_hang_con_sot) — đọc đầu lượt, ghi cuối lượt. Bật ⇒ lượt này
     // chạy "chế độ rút tồn đọng" (lật trang cả khi trang đầu toàn mã cũ). Null → coi như không shop nào còn sót
-    // ⇒ hành vi y hệt trước 11/08/2026 (đường "Chạy thử" không rót).
+    // ⇒ hành vi y hệt trước 11/08/2026 (đường "Chạy thử" không rót). Đường GHI mang kèm LÝ DO (LyDoSot*, cột
+    // tra_hang_sot_ly_do) — đường ĐỌC vẫn chỉ bool vì chế độ rút tồn đọng không phụ thuộc lý do.
     private readonly Func<string, bool>? _conSotTraHang;
-    private readonly Action<string, bool>? _luuConSotTraHang;
+    private readonly Action<string, bool, string>? _luuConSotTraHang;
+
+    // LÝ DO còn sót — giá trị cột account_shops.tra_hang_sot_ly_do, hằng có tên để runner/repo/test dùng chung
+    // một bảng chữ. Phân đôi về bản chất: `tran` tự hết khi danh sách vơi; nhóm còn lại là trang/selector có
+    // vấn đề, cờ sẽ đứng im qua các lượt và người vận hành cần nhìn thấy điều đó trong nhật ký.
+    internal const string LyDoSotTran = "tran";          // chạm trần dòng/trang một lượt
+    internal const string LyDoSotSapXep = "sap_xep";     // không đổi được sắp xếp
+    internal const string LyDoSotLatTruot = "lat_truot"; // lật trang trượt (bấm không ăn / danh sách không vẽ lại)
+    internal const string LyDoSotDocHong = "doc_hong";   // ô tổng có số mà 0 dòng — selector dòng có thể đã đổi
+
+    /// <summary>Lời người-đọc-được cho mã lý do còn sót — dùng ở câu log "GIỮ NGUYÊN mốc" cuối lượt check.
+    /// Nhánh mặc định CỐ Ý tự tố: hàm này chỉ nhận giá trị do chính <c>CheckDonTraHangAsync</c> gán, nên rơi vào
+    /// đó nghĩa là có điểm hạ <c>docDuSau</c> mới quên gán lý do — phải LỘ ra trong nhật ký chứ không im lặng in
+    /// chuỗi rỗng (phản biện 11/08/2026).</summary>
+    internal static string MoTaLyDoSot(string lyDo) => lyDo switch
+    {
+        LyDoSotTran => "chạm trần một lượt — danh sách vơi bớt sẽ tự đọc được phần sâu hơn",
+        LyDoSotSapXep => "không đổi được sắp xếp — cần xem selector/giao diện nút sắp xếp",
+        LyDoSotLatTruot => "lật trang trượt — tạm thời, lượt sau thử lại",
+        LyDoSotDocHong => "ô tổng có số mà không đọc được dòng nào — selector dòng có thể đã đổi",
+        _ => $"không rõ lý do '{lyDo}' — điểm hạ cờ mới chưa gán lý do (lỗi code, báo dev)",
+    };
     // TỰ TẢI LẠI PHIẾU THIẾU: App trả danh sách order_sn của ĐÚNG shop đang mở đang có mã vận đơn NHƯNG thiếu file
     // PDF hợp lệ, đã xếp MỚI NHẤT TRƯỚC (Core không biết accountId/thư mục phiếu của App). Null → bỏ HẲN bước —
     // đó cũng là đường "Chạy thử" (RunSliceCoreAsync): nó chỉ đọc, không lưu, nên không được kéo theo bước này.
@@ -153,7 +175,7 @@ internal sealed class ShopFlowRunner
         Func<IReadOnlyList<YeuCauTraHang>, int>? demMaTraChuaBiet = null,
         Func<string, bool>? dangCoCanhBaoDiaChi = null,
         Func<string, bool>? conSotTraHang = null,
-        Action<string, bool>? luuConSotTraHang = null)
+        Action<string, bool, string>? luuConSotTraHang = null)
     {
         _ch = channel;
         _log = log;
@@ -811,6 +833,7 @@ internal sealed class ShopFlowRunner
         var dong = new List<DongTraHang>(doc.Dong);
         var trangDaLat = 0;
         var docDuSau = true;   // false = lượt này BIẾT là còn sót (chạm trần / lật trượt / captcha) ⇒ giữ nguyên mốc
+        var lyDoConSot = string.Empty; // đi đôi với docDuSau: điểm nào hạ docDuSau thì gán lý do (LyDoSot*)
         var coTrangSau = doc.CoTrangSau;
         // CỜ CÒN SÓT của lượt TRƯỚC (bền theo shop). Lượt trước chạm trần bỏ lại phần đuôi nằm SAU dải-đã-biết:
         // phần đuôi đó KHÔNG BAO GIỜ xuất hiện ở trang đầu, nên luật "trang đầu còn mã mới thì mới lật" không với
@@ -822,6 +845,7 @@ internal sealed class ShopFlowRunner
             // nhưng phải coi là ĐỌC THIẾU: mốc không được nhảy, kẻo lượt sau tưởng đã đọc hết.
             L("Check đơn trả hàng: KHÔNG đổi được sắp xếp — chỉ đọc trang đầu, KHÔNG lật trang (mốc giữ nguyên).");
             docDuSau = false;
+            lyDoConSot = LyDoSotSapXep;
         }
         else if (coTrangSau && _demMaTraChuaBiet is not null && (MaMoiTrong(doc.Dong) > 0 || conSot))
         {
@@ -843,6 +867,7 @@ internal sealed class ShopFlowRunner
                     L($"Check đơn trả hàng: chạm trần {TraHangParser.TranDongMoiLuot} dòng/lượt — dừng lật, còn sót. "
                       + $"Lượt sau quét LẠI {TraHangParser.TranDongMoiLuot} dòng đầu; phần sâu hơn chỉ đọc được khi danh sách vơi bớt (cần xử lý bớt yêu cầu đang mở).");
                     docDuSau = false;
+                    lyDoConSot = LyDoSotTran;
                     break;
                 }
                 var them = await DocThemTrangTraHangAsync(1, ct).ConfigureAwait(false);
@@ -852,6 +877,7 @@ internal sealed class ShopFlowRunner
                     // (bấm nhầm nút / danh sách không vẽ lại) hoặc captcha ⇒ còn sót, đừng chốt mốc.
                     L($"Check đơn trả hàng: lật sang trang {trangDaLat + 2} KHÔNG đọc được dòng nào — dừng lật, coi như còn sót.");
                     docDuSau = false;
+                    lyDoConSot = LyDoSotLatTruot;
                     break;
                 }
                 trangDaLat++;
@@ -875,6 +901,7 @@ internal sealed class ShopFlowRunner
                     L($"Check đơn trả hàng: chạm trần {TraHangParser.TranTrangTraHang} trang mà chưa tới đáy — còn sót. "
                       + $"Lượt sau quét LẠI {TraHangParser.TranTrangTraHang} trang đầu; phần sâu hơn chỉ đọc được khi danh sách vơi bớt (cần xử lý bớt yêu cầu đang mở).");
                     docDuSau = false;
+                    lyDoConSot = LyDoSotTran;
                 }
             }
         }
@@ -886,6 +913,8 @@ internal sealed class ShopFlowRunner
         if (soMoi > 0 && dong.Count == 0)
         {
             docDuSau = false;
+            // Đè được cả `sap_xep` (hỏng sắp xếp + 0 dòng thì "không đọc được dòng nào" là chẩn đoán sắc hơn).
+            lyDoConSot = LyDoSotDocHong;
             L($"⚠ Check đơn trả hàng [{shopLogin}]: ô tổng báo {soMoi} yêu cầu mà KHÔNG đọc được dòng nào — "
               + "selector dòng/khối đầu dòng có thể đã đổi. GIỮ NGUYÊN mốc, đánh dấu shop còn sót.");
             if (!string.IsNullOrEmpty(doc.ChanDoan))
@@ -949,12 +978,12 @@ internal sealed class ShopFlowRunner
         if (docDuSau)
         {
             _saveReturnCount!(shopLogin, soMoi);
-            _luuConSotTraHang?.Invoke(shopLogin, false);
+            _luuConSotTraHang?.Invoke(shopLogin, false, string.Empty);
         }
         else
         {
-            L($"Check đơn trả hàng [{shopLogin}]: lượt này đọc CHƯA đủ sâu — GIỮ NGUYÊN mốc {mocCuText} để lượt sau đọc tiếp.");
-            _luuConSotTraHang?.Invoke(shopLogin, true);
+            L($"Check đơn trả hàng [{shopLogin}]: lượt này đọc CHƯA đủ sâu ({MoTaLyDoSot(lyDoConSot)}) — GIỮ NGUYÊN mốc {mocCuText} để lượt sau đọc tiếp.");
+            _luuConSotTraHang?.Invoke(shopLogin, true, lyDoConSot);
         }
     }
 

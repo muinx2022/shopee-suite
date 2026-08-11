@@ -37,7 +37,7 @@ public class TraHangKhongBoSotTests
         Func<IReadOnlyList<YeuCauTraHang>, string>? saveReturnCodes = null,
         Func<IReadOnlyList<YeuCauTraHang>, int>? demMaTraChuaBiet = null,
         Func<string, bool>? conSotTraHang = null,
-        Action<string, bool>? luuConSotTraHang = null)
+        Action<string, bool, string>? luuConSotTraHang = null)
         => new(rig.Channel, rig.Log, invoiceDir: null, Tinh, syncCallback: null, finalDoneSns: null,
             onOrderPrepared: null, returnCountLast, saveReturnCount, saveReturnCodes,
             layDonThieuPhieu: null, demMaTraChuaBiet: demMaTraChuaBiet, dangCoCanhBaoDiaChi: null,
@@ -340,12 +340,12 @@ public class TraHangKhongBoSotTests
     {
         await using var rig = await BridgeTestRig.StartAsync();
         var moc = new List<(string Shop, int So)>();
-        var co = new List<(string Shop, bool ConSot)>();
+        var co = new List<(string Shop, bool ConSot, string LyDo)>();
         var flow = Runner(rig,
             returnCountLast: _ => 30,
             saveReturnCount: (shop, so) => moc.Add((shop, so)),
             saveReturnCodes: _ => "ok",
-            luuConSotTraHang: (shop, conSot) => co.Add((shop, conSot)));
+            luuConSotTraHang: (shop, conSot, lyDo) => co.Add((shop, conSot, lyDo)));
 
         var chay = flow.CheckDonTraHangAsync("shop1", CancellationToken.None);
         using (await rig.NhanLenhAsync()) { }
@@ -353,7 +353,7 @@ public class TraHangKhongBoSotTests
         await chay;
 
         Assert.Empty(moc);                                // MỐC GIỮ NGUYÊN
-        Assert.Equal(("shop1", true), Assert.Single(co)); // shop bị đánh dấu còn sót
+        Assert.Equal(("shop1", true, ShopFlowRunner.LyDoSotDocHong), Assert.Single(co)); // còn sót + đúng lý do
         Assert.True(rig.CoLog("KHÔNG đọc được dòng nào"));
     }
 
@@ -364,12 +364,12 @@ public class TraHangKhongBoSotTests
     {
         await using var rig = await BridgeTestRig.StartAsync();
         var moc = new List<(string Shop, int So)>();
-        var co = new List<(string Shop, bool ConSot)>();
+        var co = new List<(string Shop, bool ConSot, string LyDo)>();
         var flow = Runner(rig,
             returnCountLast: _ => 3,
             saveReturnCount: (shop, so) => moc.Add((shop, so)),
             saveReturnCodes: _ => "ok",
-            luuConSotTraHang: (shop, conSot) => co.Add((shop, conSot)));
+            luuConSotTraHang: (shop, conSot, lyDo) => co.Add((shop, conSot, lyDo)));
 
         var chay = flow.CheckDonTraHangAsync("shop1", CancellationToken.None);
         using (await rig.NhanLenhAsync()) { }
@@ -377,7 +377,7 @@ public class TraHangKhongBoSotTests
         await chay;
 
         Assert.Equal(("shop1", 0), Assert.Single(moc));
-        Assert.Equal(("shop1", false), Assert.Single(co));
+        Assert.Equal(("shop1", false, ""), Assert.Single(co));
         Assert.False(rig.CoLog("KHÔNG đọc được dòng nào"));
     }
 
@@ -394,7 +394,7 @@ public class TraHangKhongBoSotTests
     {
         await using var rig = await BridgeTestRig.StartAsync();
         var moc = new List<(string Shop, int So)>();
-        var co = new List<(string Shop, bool ConSot)>();
+        var co = new List<(string Shop, bool ConSot, string LyDo)>();
         var capDaLuu = new List<YeuCauTraHang>();
         var flow = Runner(rig,
             returnCountLast: _ => 141,
@@ -402,7 +402,7 @@ public class TraHangKhongBoSotTests
             saveReturnCodes: cap => { capDaLuu.AddRange(cap); return "ok"; },
             demMaTraChuaBiet: _ => 0,                     // kho đã biết HẾT mã của mọi trang đọc được
             conSotTraHang: _ => true,                     // lượt trước còn sót
-            luuConSotTraHang: (shop, conSot) => co.Add((shop, conSot)));
+            luuConSotTraHang: (shop, conSot, lyDo) => co.Add((shop, conSot, lyDo)));
 
         var chay = flow.CheckDonTraHangAsync("shop1", CancellationToken.None);
         using (await rig.NhanLenhAsync()) { }
@@ -428,7 +428,7 @@ public class TraHangKhongBoSotTests
 
         Assert.Equal(3, capDaLuu.Count);                    // gom cả ba trang
         Assert.Equal(("shop1", 141), Assert.Single(moc));   // đọc tới đáy ⇒ chốt mốc
-        Assert.Equal(("shop1", false), Assert.Single(co));  // và TẮT cờ — tồn đọng đã rút cạn
+        Assert.Equal(("shop1", false, ""), Assert.Single(co)); // TẮT cờ + xoá lý do — tồn đọng đã rút cạn
         Assert.True(rig.CoLog("RÚT TỒN"));
     }
 
@@ -438,14 +438,14 @@ public class TraHangKhongBoSotTests
     {
         await using var rig = await BridgeTestRig.StartAsync();
         var moc = new List<(string Shop, int So)>();
-        var co = new List<(string Shop, bool ConSot)>();
+        var co = new List<(string Shop, bool ConSot, string LyDo)>();
         var flow = Runner(rig,
             returnCountLast: _ => 340,
             saveReturnCount: (shop, so) => moc.Add((shop, so)),
             saveReturnCodes: _ => "ok",
             demMaTraChuaBiet: cap => cap.Count,           // trang đầu toàn mã mới ⇒ đòi lật tiếp
             conSotTraHang: _ => false,
-            luuConSotTraHang: (shop, conSot) => co.Add((shop, conSot)));
+            luuConSotTraHang: (shop, conSot, lyDo) => co.Add((shop, conSot, lyDo)));
 
         // Trang đầu đã đủ TRẦN DÒNG của cả lượt → vào vòng lật là chạm trần ngay, không xin thêm trang nào.
         var dongDay = Enumerable.Range(0, TraHangParser.TranDongMoiLuot)
@@ -462,7 +462,7 @@ public class TraHangKhongBoSotTests
         await chay;
 
         Assert.Empty(moc);                                  // mốc GIỮ NGUYÊN
-        Assert.Equal(("shop1", true), Assert.Single(co));   // bật cờ ⇒ lượt sau rút tồn đọng
+        Assert.Equal(("shop1", true, ShopFlowRunner.LyDoSotTran), Assert.Single(co)); // bật cờ, lý do = trần
         Assert.True(rig.CoLog($"chạm trần {TraHangParser.TranDongMoiLuot} dòng"));
     }
 
@@ -472,13 +472,13 @@ public class TraHangKhongBoSotTests
     public async Task LatTrangTruot_BatCoConSot()
     {
         await using var rig = await BridgeTestRig.StartAsync();
-        var co = new List<(string Shop, bool ConSot)>();
+        var co = new List<(string Shop, bool ConSot, string LyDo)>();
         var flow = Runner(rig,
             returnCountLast: _ => 141,
             saveReturnCount: (_, _) => { },
             saveReturnCodes: _ => "ok",
             demMaTraChuaBiet: _ => 1,
-            luuConSotTraHang: (shop, conSot) => co.Add((shop, conSot)));
+            luuConSotTraHang: (shop, conSot, lyDo) => co.Add((shop, conSot, lyDo)));
 
         var chay = flow.CheckDonTraHangAsync("shop1", CancellationToken.None);
         using (await rig.NhanLenhAsync()) { }
@@ -488,7 +488,7 @@ public class TraHangKhongBoSotTests
         await rig.GuiAsync(TrangTraHang("", coTrangSau: false)); // lật trượt → 0 dòng
         await chay;
 
-        Assert.Equal(("shop1", true), Assert.Single(co));
+        Assert.Equal(("shop1", true, ShopFlowRunner.LyDoSotLatTruot), Assert.Single(co));
     }
 
     /// <summary>ĐỐI CHỨNG giữ hành vi cũ: shop KHÔNG còn sót + trang đầu không có mã mới ⇒ vẫn KHÔNG lật trang
@@ -497,14 +497,14 @@ public class TraHangKhongBoSotTests
     public async Task KhongConSot_TrangDauKhongCoMaMoi_VanKhongLatTrang()
     {
         await using var rig = await BridgeTestRig.StartAsync();
-        var co = new List<(string Shop, bool ConSot)>();
+        var co = new List<(string Shop, bool ConSot, string LyDo)>();
         var flow = Runner(rig,
             returnCountLast: _ => 141,
             saveReturnCount: (_, _) => { },
             saveReturnCodes: _ => "ok",
             demMaTraChuaBiet: _ => 0,
             conSotTraHang: _ => false,
-            luuConSotTraHang: (shop, conSot) => co.Add((shop, conSot)));
+            luuConSotTraHang: (shop, conSot, lyDo) => co.Add((shop, conSot, lyDo)));
 
         var chay = flow.CheckDonTraHangAsync("shop1", CancellationToken.None);
         using (await rig.NhanLenhAsync()) { }
@@ -512,23 +512,26 @@ public class TraHangKhongBoSotTests
             new object[] { new { headHtml = DongHtml("260731AAAAAA", MaYeuCauHomNay()), laTraHang = true } }));
         await chay;
 
-        Assert.Equal(("shop1", false), Assert.Single(co));
+        Assert.Equal(("shop1", false, ""), Assert.Single(co));
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
             () => rig.NhanLenhAsync(TimeSpan.FromMilliseconds(300)));
     }
 
     /// <summary>Cờ "còn sót" KHÔNG được vượt ràng buộc cũ: không đổi được sắp xếp thì thứ tự trang không tin
-    /// được ⇒ vẫn CẤM lật trang (cùng lắm là bật cờ để lượt sau thử lại).</summary>
+    /// được ⇒ vẫn CẤM lật trang (cùng lắm là bật cờ để lượt sau thử lại). Cờ ghi ra phải mang lý do
+    /// <c>sap_xep</c> — chính là ca "cờ đứng im 1 qua các lượt" mà người vận hành cần nhìn thấy vì sao.</summary>
     [Fact]
     public async Task ConSot_NhungKhongDoiDuocSapXep_VanKhongLatTrang()
     {
         await using var rig = await BridgeTestRig.StartAsync();
+        var co = new List<(string Shop, bool ConSot, string LyDo)>();
         var flow = Runner(rig,
             returnCountLast: _ => 141,
             saveReturnCount: (_, _) => { },
             saveReturnCodes: _ => "ok",
             demMaTraChuaBiet: _ => 5,
-            conSotTraHang: _ => true);
+            conSotTraHang: _ => true,
+            luuConSotTraHang: (shop, conSot, lyDo) => co.Add((shop, conSot, lyDo)));
 
         var chay = flow.CheckDonTraHangAsync("shop1", CancellationToken.None);
         using (await rig.NhanLenhAsync()) { }
@@ -537,8 +540,85 @@ public class TraHangKhongBoSotTests
         await chay;
 
         Assert.True(rig.CoLog("chỉ đọc trang đầu"));
+        Assert.Equal(("shop1", true, ShopFlowRunner.LyDoSotSapXep), Assert.Single(co));
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
             () => rig.NhanLenhAsync(TimeSpan.FromMilliseconds(300)));
+    }
+
+    /// <summary>Chạm trần TRANG (lật đủ <c>TranTrangTraHang</c> trang mà chưa tới đáy): giữ mốc + bật cờ với lý
+    /// do <c>tran</c>. Nhánh này trước không có test nào đi qua — ghi nhầm hằng lý do ở đó thì toàn bộ suite vẫn
+    /// xanh (phản biện 11/08/2026).</summary>
+    [Fact]
+    public async Task ChamTranTrang_GiuMoc_BatCoConSot_LyDoTran()
+    {
+        await using var rig = await BridgeTestRig.StartAsync();
+        var moc = new List<(string Shop, int So)>();
+        var co = new List<(string Shop, bool ConSot, string LyDo)>();
+        var flow = Runner(rig,
+            returnCountLast: _ => 500,
+            saveReturnCount: (shop, so) => moc.Add((shop, so)),
+            saveReturnCodes: _ => "ok",
+            demMaTraChuaBiet: cap => cap.Count,           // trang nào cũng toàn mã mới ⇒ không dừng vì "hết mới"
+            luuConSotTraHang: (shop, conSot, lyDo) => co.Add((shop, conSot, lyDo)));
+
+        var chay = flow.CheckDonTraHangAsync("shop1", CancellationToken.None);
+        using (await rig.NhanLenhAsync()) { }
+        // Mỗi trang RẤT ÍT dòng để lật đủ 10 trang vẫn còn xa trần DÒNG (200) — ép đúng nhánh trần TRANG.
+        await rig.GuiAsync(TrangTraHang("500 Yêu cầu", coTrangSau: true, dong:
+            new object[] { new { headHtml = DongHtml("260731ZZZZZZ", MaYeuCauHomNay("0ZZZZZZZZ")), laTraHang = true } }));
+        for (var trang = 0; trang < TraHangParser.TranTrangTraHang; trang++)
+        {
+            using (var lenh = await rig.NhanLenhAsync())
+            {
+                Assert.Equal("readReturnRequestsMore", lenh.RootElement.GetProperty("action").GetString());
+            }
+            await rig.GuiAsync(TrangTraHang("", coTrangSau: true, dong:
+                new object[] { new { headHtml = DongHtml($"260731{trang:D6}", MaYeuCauHomNay($"1{trang:D8}")), laTraHang = true } }));
+        }
+        await chay;
+
+        Assert.Empty(moc);                                  // mốc GIỮ NGUYÊN
+        Assert.Equal(("shop1", true, ShopFlowRunner.LyDoSotTran), Assert.Single(co));
+        Assert.True(rig.CoLog($"chạm trần {TraHangParser.TranTrangTraHang} trang"));
+    }
+
+    /// <summary>Bảng mã lý do → lời người-đọc-được: mỗi mã phải ra đúng lời của nó, và mã LẠ (kể cả chuỗi rỗng —
+    /// điểm hạ cờ mới quên gán) phải TỰ TỐ trong nhật ký thay vì in câu trống vô nghĩa.</summary>
+    [Theory]
+    [InlineData(ShopFlowRunner.LyDoSotTran, "chạm trần")]
+    [InlineData(ShopFlowRunner.LyDoSotSapXep, "sắp xếp")]
+    [InlineData(ShopFlowRunner.LyDoSotLatTruot, "lật trang trượt")]
+    [InlineData(ShopFlowRunner.LyDoSotDocHong, "không đọc được dòng nào")]
+    public void MoTaLyDoSot_RaDungLoi(string ma, string mongChua)
+        => Assert.Contains(mongChua, ShopFlowRunner.MoTaLyDoSot(ma));
+
+    [Fact]
+    public void MoTaLyDoSot_MaLaHoacRong_TuToLaLoiCode()
+    {
+        Assert.Contains("không rõ lý do", ShopFlowRunner.MoTaLyDoSot(""));
+        Assert.Contains("không rõ lý do", ShopFlowRunner.MoTaLyDoSot("ma_la_hoac_go_sai"));
+    }
+
+    /// <summary>Hỏng sắp xếp VÀ 0 dòng trong CÙNG một lượt: lý do ghi ra phải là <c>doc_hong</c> (đè
+    /// <c>sap_xep</c>) — "không đọc được dòng nào" là chẩn đoán sắc hơn "không đổi được thứ tự".</summary>
+    [Fact]
+    public async Task SapXepHong_VaKhongDocDuocDongNao_LyDoLaDocHong()
+    {
+        await using var rig = await BridgeTestRig.StartAsync();
+        var co = new List<(string Shop, bool ConSot, string LyDo)>();
+        var flow = Runner(rig,
+            returnCountLast: _ => 30,
+            saveReturnCount: (_, _) => { },
+            saveReturnCodes: _ => "ok",
+            luuConSotTraHang: (shop, conSot, lyDo) => co.Add((shop, conSot, lyDo)));
+
+        var chay = flow.CheckDonTraHangAsync("shop1", CancellationToken.None);
+        using (await rig.NhanLenhAsync()) { }
+        await rig.GuiAsync(TrangTraHang("33 Yêu cầu", sortApplied: false, coTrangSau: true)); // 0 dòng
+        await chay;
+
+        Assert.Equal(("shop1", true, ShopFlowRunner.LyDoSotDocHong), Assert.Single(co));
+        Assert.True(rig.CoLog("KHÔNG đọc được dòng nào"));
     }
 
     // ===================== 3. Sheet không nuốt mã =====================

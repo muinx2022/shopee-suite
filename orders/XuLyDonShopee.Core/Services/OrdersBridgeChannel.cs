@@ -144,6 +144,13 @@ internal sealed class OrdersBridgeChannel : IDisposable
     /// trang đăng nhập (khớp <c>DEFAULT_PORT</c> trong extension). Một phiên/lần test nên cố định là đủ.</summary>
     public const int BridgePort = 47821;
 
+    /// <summary>Mốc chuỗi nhận diện lỗi "MẤT NGỮ CẢNH TAB SHOP" mà extension báo về khi service worker vừa bị
+    /// dựng lại (PHẢI là một phần của <c>LOI_MAT_TAB_SHOP</c> trong <c>extensions/shopee-orders/core.js</c> — có
+    /// test khoá khớp, đổi một bên là gãy). <see cref="OrdersBridgeSession.LaLoiCauNoi"/> dùng mốc này để xếp
+    /// lỗi đó vào nhóm "rơi oan vì cầu nối": trang Seller Centre không hỏng, chỉ là hạ tầng cầu nối vừa chết đi
+    /// sống lại — shop xứng đáng một lượt thử lại cuối vòng thay vì mất trọn vòng.</summary>
+    internal const string MocLoiMatTabShop = "mất ngữ cảnh tab shop";
+
     /// <summary>
     /// TRẦN CHỜ của từng chặng cầu nối. Gom về đây (lớp sở hữu các chặng) vì trước đây là số trần rải khắp
     /// <see cref="OrdersBridgeSession"/> + <see cref="ShopFlowRunner"/> — sửa hạn một chặng phải đi tìm, và

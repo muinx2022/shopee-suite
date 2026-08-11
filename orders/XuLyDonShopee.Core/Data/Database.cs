@@ -149,6 +149,11 @@ CREATE TABLE IF NOT EXISTS account_shops (
     tra_hang_con_sot INTEGER NOT NULL DEFAULT 0, -- 1 = lượt check trả hàng gần nhất BIẾT là còn sót (chạm trần
                                        -- dòng/trang, lật trượt, 0 dòng) ⇒ lượt sau VẪN lật trang dù trang đầu
                                        -- không có mã mới. Xem ShopFlowRunner.CheckDonTraHangAsync.
+    tra_hang_sot_ly_do TEXT NOT NULL DEFAULT '', -- VÌ SAO còn sót ('' = không sót): 'tran' (chạm trần, danh
+                                       -- sách vơi bớt là tự hết) | 'sap_xep' (không đổi được sắp xếp — cần
+                                       -- người xem selector/UI) | 'lat_truot' (tạm thời) | 'doc_hong' (ô tổng
+                                       -- có số mà 0 dòng — selector dòng có thể đã đổi). Chỉ để chẩn đoán;
+                                       -- quyết định chế độ rút tồn đọng vẫn theo tra_hang_con_sot.
     updated_at TEXT NOT NULL,
     UNIQUE(account_id, shop_login)
 );
@@ -291,6 +296,11 @@ CREATE TABLE IF NOT EXISTS pickup_address_alerts (
         // ngày và bị LocTheoCuaSo bỏ ⇒ mất vĩnh viễn. Cờ bật ⇒ lượt sau chạy "chế độ rút tồn đọng": vẫn lật trang
         // dù trang đầu toàn mã cũ, cho tới khi đọc tới đáy thì tự tắt. Shop cũ nhận 0 = hành vi y hệt trước đây.
         EnsureColumn(conn, "account_shops", "tra_hang_con_sot", "INTEGER NOT NULL DEFAULT 0");
+
+        // LÝ DO còn sót (thêm cùng ngày, đợt trả nợ): 0/1 ở trên trả lời "có sót không", cột này trả lời "vì
+        // sao" — 'tran' tự hết khi danh sách vơi, còn 'sap_xep'/'doc_hong' là selector/UI hỏng, cần NGƯỜI xem.
+        // Không tách thì shop hỏng sắp xếp giữ cờ 1 vĩnh viễn mà nhật ký không nói được tại sao.
+        EnsureColumn(conn, "account_shops", "tra_hang_sot_ly_do", "TEXT NOT NULL DEFAULT ''");
 
         // MÃ YÊU CẦU TRẢ HÀNG khớp với đơn (đọc ở trang "Trả hàng/Hoàn tiền/Hủy" cuối flow shop) — đẩy lên cột
         // "Đơn trả hàng" của Google Sheet + hub + màn Đơn hàng. NULL = đơn chưa có yêu cầu trả hàng nào.

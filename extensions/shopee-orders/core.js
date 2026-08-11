@@ -13,6 +13,11 @@ export const ctx = {
   listTabId: null, // tab đang thao tác (subaccount → sau SSO là tab banhang /portal/shop)
   shopTabId: null, // tab shop mở ra sau khi bấm "Chi tiết"
   lastTabUrls: [], // chẩn đoán: các URL tab lần query gần nhất (đưa vào thông báo lỗi khi không thấy tab).
+  // THẾ HỆ của shopTabId — chỉ ghi CHỦ ĐỘNG (nhoTabShop, flow-shop.js) mới tăng. Để `khoiPhucTabShop`
+  // (background.js, chạy async từ storage lúc SW dựng dậy + mỗi nhịp alarm) phát hiện có ghi chủ động chen
+  // vào giữa lúc nó đang validate mà bỏ kết quả — không còn cửa sổ vài ms hồi sinh id đã đóng / đè null lên
+  // id vừa mở (ghi nợ NHẸ-6 của đợt 11/08).
+  theHeTabShop: 0,
 };
 
 // ---- WebSocket ------------------------------------------------------------

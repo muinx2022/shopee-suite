@@ -98,20 +98,37 @@ try {
 // Centre. Không validate thì một id cũ (tab đã đóng, hoặc trình duyệt cấp lại id đó cho tab khác) sẽ dẫn các
 // lệnh cấp đơn — gồm cả thao tác THẬT như chuẩn bị hàng / đổi địa chỉ lấy hàng — vào một tab lạ. Không hợp lệ
 // thì để null: `orderTabIdStrict` sẽ bỏ lượt có báo lỗi, C# cho shop chạy lại từ `openShopDetail`.
+//
+// Hàm này chạy ASYNC từ storage (lúc SW dựng dậy + mỗi nhịp alarm 30s) nên có thể hoàn tất SAU một ghi chủ
+// động vừa chen vào quanh `await chrome.tabs.get`: `doCloseShopTab` vừa ghi null (hoàn tất muộn là HỒI SINH
+// id đã đóng) hoặc `openShopDetail` vừa ghi id mới (validate id CŨ chết xong lại ĐÈ null lên id mới). Chốt
+// bằng THẾ HỆ: `nhoTabShop` tăng `ctx.theHeTabShop` mỗi lần ghi chủ động — sau `await` mà thế hệ đã đổi thì
+// bỏ kết quả, bên ghi chủ động thắng.
 async function khoiPhucTabShop(id) {
+  if (ctx.shopTabId != null) return; // SW đang sống + đã có ngữ cảnh — ctx là nguồn chân lý, không đè từ storage
+  const theHe = ctx.theHeTabShop;
+  let hopLe = false;
   try {
     const t = await chrome.tabs.get(id);
-    if (t && (t.url || t.pendingUrl || "").indexOf("banhang.shopee.vn") >= 0) { ctx.shopTabId = id; return; }
+    hopLe = !!(t && (t.url || t.pendingUrl || "").indexOf("banhang.shopee.vn") >= 0);
   } catch (e) {}
+  if (theHe !== ctx.theHeTabShop) return;
+  if (hopLe) { ctx.shopTabId = id; return; }
   ctx.shopTabId = null;
   try { chrome.storage.session.set({ shopTabId: null }); } catch (e) {}
 }
 
 // Service worker khởi động lại (MV3 có thể ngủ) → nạp cổng đã lưu (hoặc mặc định) rồi nối lại.
+// ⚠ Hàm này còn chạy MỖI NHỊP alarm 30s (xem dưới) chứ không riêng lúc SW dựng dậy, nên với cả hai tab id đều
+// theo một kỷ luật: ctx đang có giá trị ⇒ ctx là nguồn chân lý, KHÔNG đè từ storage. Với listTabId: storage chỉ
+// được đồng bộ theo gói wake 20s, còn `ensureListTab`/`gotoSellerCentre` đổi ctx.listTabId mà không ghi storage
+// — thiếu chốt `== null` thì nhịp alarm kéo listTabId LÙI về tab cũ đã chết, và `doCloseShopTab` dùng thẳng id
+// đó: đốt 20s chờ tab ma rồi báo "picker không sẵn sàng" oan (đúng chốt của gói wake `dauTien`, background.js
+// phần trên; phản biện 11/08/2026).
 function noiLaiTuStorage() {
   try {
     chrome.storage.session.get(["wsPort", "listTabId", "shopTabId"], (v) => {
-      if (v && v.listTabId != null) ctx.listTabId = v.listTabId;
+      if (v && v.listTabId != null && ctx.listTabId == null) ctx.listTabId = v.listTabId;
       if (v && v.shopTabId != null) { khoiPhucTabShop(v.shopTabId).catch(() => {}); }
       bridge.connect(v && v.wsPort ? v.wsPort : undefined);
     });
