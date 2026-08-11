@@ -163,6 +163,19 @@ cứng, test HTTP thật chậm/bấp bênh) — nghiệm bằng journalctl ở 
 - [x] Client T1 T2 T3 T5 T10 T11 T12 + tests + thử phá
 - [x] Hub T4 T6 T7 T8 T9 + tests + thử phá
 - [x] Phản biện + sửa theo (2 NẶNG + 3 TB + 3 NHẸ — 13 lượt thử phá tổng cộng, đều đỏ đúng test)
-- [ ] Commit client · commit hub
-- [ ] Deploy hub + health
-- [ ] Bin máy này + soi log vòng thật
+- [x] Commit client (`8840568`) · commit hub (`a7a1c1e`) — đã push `origin/main`
+- [x] Deploy hub: publish linux-x64 → scp `Shopee.Hub.Web.dll` (hub LINK source nên 1 DLL chứa trọn đợt, gồm
+  cả OrderNotifyService) → backup `.bak-20260811-t1t12` → install → restart — health `{"ok":true,"pg":true}`,
+  journal khởi động sạch 23:30
+- [x] Bin máy này: dừng app đúng cửa nghỉ sau vòng 23:43 (12/12, 1128 đơn — vòng 2 của v1.9.1) → build bin
+  0W/0E → mở lại + tự bấm 23:45 → shop 1–3 chạy sạch trên bản T1–T12 (0 mẫu xấu, 0 câu cảnh báo mới nào nổ
+  oan); watcher trông tới hết vòng
+
+**Kiểm chứng sống còn khoanh lại:** đường T1 (cổng tick + xác minh tag) và T3 (prepareBlocked) chỉ chạy khi
+shop CÓ đơn Chờ Lấy Hàng — vòng đêm toàn 0 đơn nên mới xác nhận được mặt không-hồi-quy; hai đường dương tính
+tự lộ ở vòng ban ngày (đều đã có test + 13 lượt thử phá). Drain-khi-tắt của webhook queue nghiệm ở lượt restart
+hub KẾ TIẾP (lượt 23:30 chạy binary cũ lúc dừng).
+
+**TRẠNG THÁI: HOÀN THÀNH phần code** — 12/12 mục T sửa xong, phản biện đã xử, hub đã deploy, máy này chạy bản
+mới. **Chưa phát hành client** (bump version) — chờ lệnh user; các máy khác chỉ nhận được T-fixes phía client
+khi phát hành.
