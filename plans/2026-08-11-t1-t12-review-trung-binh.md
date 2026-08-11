@@ -176,6 +176,8 @@ shop CÓ đơn Chờ Lấy Hàng — vòng đêm toàn 0 đơn nên mới xác n
 tự lộ ở vòng ban ngày (đều đã có test + 13 lượt thử phá). Drain-khi-tắt của webhook queue nghiệm ở lượt restart
 hub KẾ TIẾP (lượt 23:30 chạy binary cũ lúc dừng).
 
-**TRẠNG THÁI: HOÀN THÀNH phần code** — 12/12 mục T sửa xong, phản biện đã xử, hub đã deploy, máy này chạy bản
-mới. **Chưa phát hành client** (bump version) — chờ lệnh user; các máy khác chỉ nhận được T-fixes phía client
-khi phát hành.
+**TRẠNG THÁI: HOÀN THÀNH** — 12/12 mục T sửa xong, phản biện đã xử, hub đã deploy, máy này chạy bản mới.
+**Đã phát hành client v1.9.2** sáng 12/08 (commit `2400c6b` bump + CHANGELOG; vpk pack + upload GitHub thành
+công, delta 1.9.1→1.9.2 chỉ 0.5 MB / 17 file vá). Trước khi phát hành, bản T1–T12 đã chạy thật **4 vòng liên
+tiếp sạch** trên máy này (23:45 → 05:25: 12/12 shop mỗi vòng, 1128→1130 đơn, 2 phiếu lưu, T1 verify-tag chạy
+thật 2 lượt, 0 mẫu xấu cả đêm). Các máy khác nhận qua "Cập nhật & khởi động lại".
