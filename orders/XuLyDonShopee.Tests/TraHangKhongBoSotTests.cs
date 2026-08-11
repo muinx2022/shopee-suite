@@ -621,6 +621,65 @@ public class TraHangKhongBoSotTests
         Assert.True(rig.CoLog("KHÔNG đọc được dòng nào"));
     }
 
+    // ===================== 2d. Lượt BỎ vì sai tab vẫn VỚT mã thật (T2, review 11/08) =====================
+
+    /// <summary>Extension KHÔNG chọn được tab (tabTraHang=false) ⇒ BỎ LƯỢT bảo vệ mốc — nhưng dòng trả hàng
+    /// THẬT đã cào được (laTraHang=true, ghép đủ hai mã) phải được VỚT vào kho, không vứt theo lượt: vứt là mất
+    /// tới khi mã trôi khỏi cửa sổ 20 ngày.</summary>
+    [Fact]
+    public async Task BoLuotSaiTab_VanVotMaThatDaCaoDuoc_MocGiuNguyen()
+    {
+        await using var rig = await BridgeTestRig.StartAsync();
+        var moc = new List<(string Shop, int So)>();
+        var capDaLuu = new List<YeuCauTraHang>();
+        var flow = Runner(rig,
+            returnCountLast: _ => 5,
+            saveReturnCount: (shop, so) => moc.Add((shop, so)),
+            saveReturnCodes: cap => { capDaLuu.AddRange(cap); return $"{cap.Count} mã"; });
+
+        var ma = MaYeuCauHomNay();
+        var chay = flow.CheckDonTraHangAsync("shop1", CancellationToken.None);
+        using (await rig.NhanLenhAsync()) { }
+        await rig.GuiAsync(TrangTraHang("9 Yêu cầu", tabTraHang: false, dong:
+            new object[] { new { headHtml = DongHtml("260811BBBBBB", ma), laTraHang = true } }));
+        await chay;
+
+        Assert.Empty(moc);                                                        // mốc KHÔNG được ghi
+        Assert.Equal(new YeuCauTraHang("260811BBBBBB", ma), Assert.Single(capDaLuu)); // mã VẪN được vớt
+        Assert.True(rig.CoLog("VỚT"));
+    }
+
+    /// <summary>Chốt NGHI SAI TAB THEO DỮ LIỆU (đa số dòng là đơn hủy) cũng phải vớt phần trả hàng thật.</summary>
+    [Fact]
+    public async Task NghiSaiTabTheoDuLieu_VanVotMaThat_MocGiuNguyen()
+    {
+        await using var rig = await BridgeTestRig.StartAsync();
+        var moc = new List<(string Shop, int So)>();
+        var capDaLuu = new List<YeuCauTraHang>();
+        var flow = Runner(rig,
+            returnCountLast: _ => 5,
+            saveReturnCount: (shop, so) => moc.Add((shop, so)),
+            saveReturnCodes: cap => { capDaLuu.AddRange(cap); return $"{cap.Count} mã"; });
+
+        var ma = MaYeuCauHomNay();
+        // 10 dòng: 9 đơn hủy + 1 trả hàng thật → NghiSaiTabTheoDuLieu nổ (đủ sàn 10, tỷ lệ 0,9 ≥ 0,8).
+        var dong = new List<object>();
+        for (var i = 0; i < 9; i++)
+        {
+            dong.Add(new { headHtml = DongHtml($"260811{i:D6}", ""), laTraHang = false });
+        }
+        dong.Add(new { headHtml = DongHtml("260811CCCCCC", ma), laTraHang = true });
+
+        var chay = flow.CheckDonTraHangAsync("shop1", CancellationToken.None);
+        using (await rig.NhanLenhAsync()) { }
+        await rig.GuiAsync(TrangTraHang("30 Yêu cầu", dong: dong.ToArray()));
+        await chay;
+
+        Assert.Empty(moc);
+        Assert.Equal(new YeuCauTraHang("260811CCCCCC", ma), Assert.Single(capDaLuu));
+        Assert.True(rig.CoLog("VỚT"));
+    }
+
     // ===================== 3. Sheet không nuốt mã =====================
 
     /// <summary>Script trả <c>ok:true</c> + <c>boQua:true</c> (không tra thấy mã đơn ở tab nào) ⇒ phải đọc được

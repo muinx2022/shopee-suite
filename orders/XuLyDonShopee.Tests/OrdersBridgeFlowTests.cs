@@ -126,7 +126,7 @@ public class OrdersBridgeFlowTests
     };
 
     [Fact]
-    public async Task CheckTraHang_KhongChonDuocTab_BoLuot_KhongGhiMoc_KhongLuuMa()
+    public async Task CheckTraHang_KhongChonDuocTab_BoLuot_KhongGhiMoc_NhungVotMaThat()
     {
         await using var rig = await BridgeTestRig.StartAsync();
         var moc = new List<(string Shop, int So)>();
@@ -147,8 +147,8 @@ public class OrdersBridgeFlowTests
             new { headHtml = DongHtml("260731AAAAAA", MaYeuCauHomNay()), laTraHang = true }));
         await chay;
 
-        Assert.Empty(moc);      // mốc GIỮ NGUYÊN
-        Assert.Empty(daLuu);    // không lưu mã nào
+        Assert.Empty(moc);                       // mốc GIỮ NGUYÊN
+        Assert.Equal(1, Assert.Single(daLuu));   // mã THẬT đã cào được thì VỚT (T2) — chỉ mốc mới phải bảo vệ
         Assert.True(rig.CoLog("BỎ LƯỢT"));
     }
 

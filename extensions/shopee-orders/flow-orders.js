@@ -195,12 +195,33 @@ export async function doPrepareNextOrder() {
   const toShipTab = await execInTab(tabId, pageLocateByText, [["[role='tab']", ".eds-tabs__nav-tab", "a", "div", "span"], "^cho lay hang"]);
   if (toShipTab) { await trustedClick(tabId, toShipTab.x, toShipTab.y); await sleep(1200); await waitOrdersStable(tabId, 10000); }
 
-  // Đơn đầu có "Chuẩn bị hàng".
+  // Đơn đầu có "Chuẩn bị hàng" VÀ đọc được mã. Kết quả { thieuMa } (có nút mà không card nào đọc được mã) chỉ
+  // được CHỐT sau khi hết cửa sổ poll — card đang render dở có thể thiếu .order-sn một nhịp, chờ thêm là có.
   let prep = null;
   const dl = Date.now() + 12000;
-  while (Date.now() < dl) { prep = await execInTab(tabId, pageFindPrepareOrder, []); if (prep) break; await sleep(500); }
+  while (Date.now() < dl) {
+    prep = await execInTab(tabId, pageFindPrepareOrder, []);
+    if (prep && !prep.thieuMa) break;
+    await sleep(500);
+  }
   if (!prep) { send({ action: "noOrder" }); return; }
+  // KHÔNG thao tác mù trên đơn thật (T3, review 11/08): card có nút "Chuẩn bị hàng" mà không đọc được mã đơn
+  // (.order-sn đổi markup?) thì arrange + in phiếu vẫn CHẠY THẬT trên Shopee trong khi app không biết đơn nào —
+  // phiếu ghi đè lẫn nhau vào "phieu.pdf", không MarkPrepared, mã vận đơn bắt được bị vứt. pageFindPrepareOrder
+  // đã tự BỎ QUA card hỏng mã để thử card kế; tới đây vẫn thieuMa nghĩa là KHÔNG card nào dùng được → báo
+  // `prepareBlocked` (KHÔNG phải noOrder — C# phải log được "selector hỏng" chứ không phải "hết đơn" y shop
+  // khỏe), để vòng sau (sau khi sửa selector) xử tiếp. Arrange mù thì không rút lại được.
+  if (prep.thieuMa) {
+    send({
+      action: "progress",
+      message: "⚠ card có nút 'Chuẩn bị hàng' nhưng KHÔNG đọc được mã đơn (.order-sn đổi markup?) — DỪNG bước "
+        + "chuẩn bị hàng của shop này, không thao tác trên đơn thật.",
+    });
+    send({ action: "prepareBlocked" });
+    return;
+  }
   const orderCode = prep.orderCode || "";
+  if (!orderCode) { send({ action: "prepareBlocked" }); return; } // lưới cuối — pageFindPrepareOrder đã chặn ở trên
 
   const beforeTabs = (await chrome.tabs.query({})).map((t) => t.id); // mọi tab (tab phiếu awbprint có thể khác domain).
 

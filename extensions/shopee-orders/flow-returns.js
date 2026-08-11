@@ -415,9 +415,26 @@ export async function doReadReturnRequests() {
   // Lượt này CHỈ trang đầu. C# đọc ô tổng rồi so với mốc mới biết cần lật mấy trang (luật SoTrangCanDoc) — nên
   // phần sâu đi bằng lệnh THỨ HAI `readReturnRequestsMore` trên chính trang đang mở, KHÔNG mở lại trang lần nữa.
   // Cố ý không đoán trước độ sâu ở đây: đoán thừa thì mọi shop mỗi vòng đều lật trang vô ích.
+  const coTrangSauKq = await coTrangSau(tabId);
+
+  // Chẩn đoán pager phải bắn Ở ĐÂY chứ không chỉ trong latTrang (T11, review 11/08): selector nút "trang sau"
+  // hỏng ⇒ coTrangSau=false ⇒ C# không bao giờ gửi nhịp 2 ⇒ khối chẩn đoán trong latTrang không bao giờ chạy —
+  // đúng ca nó sinh ra để phục vụ. Dấu hiệu: ô tổng nói NHIỀU hơn số dòng trang đầu mà lại "hết trang". Shop
+  // một-trang (ô tổng ≤ số dòng đọc được) không nổ, không tốn execInTab nào thêm ở lượt thường.
+  if (list.length > 0 && soOTong > list.length && !coTrangSauKq) {
+    let cdPager = "";
+    try { cdPager = (await execInTab(tabId, pageChanDoanPagerTraHang, [MAX_RETURN_HEAD_HTML])) || ""; } catch (e) { cdPager = ""; }
+    send({
+      action: "progress",
+      message: "⚠ Trả hàng: ô tổng nói " + soOTong + " yêu cầu mà trang đầu chỉ đọc được " + list.length
+        + " dòng và KHÔNG thấy nút 'trang sau' — selector phân trang có thể đã đổi, phần sâu sẽ bị bỏ sót."
+        + (cdPager ? " Khối phân trang: " + cdPager : ""),
+    });
+  }
+
   traVe(summary, sortApplied, tabTraHang, list, cdTrong, {
     soTrangDaDoc: 1,
-    coTrangSau: await coTrangSau(tabId),
+    coTrangSau: coTrangSauKq,
   });
 }
 

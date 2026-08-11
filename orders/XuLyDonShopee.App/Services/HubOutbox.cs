@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -618,6 +619,32 @@ public static class HubOutbox
     /// <b>Không bao giờ ném</b>: hủy chủ động → thôi; lỗi khác → log, KHÔNG đánh dấu ⇒ lượt sau thử lại.
     /// URL Web App trống → không đẩy (nhưng vẫn DỌN bản ghi quá hạn để bảng không phình).
     /// </summary>
+    /// <summary>Số mã QUÁ HẠN đã BÁO gần nhất theo tài khoản — chốt chỉ-log-khi-đổi của
+    /// <see cref="NenBaoQuaHan"/>. Static vì thân đẩy là static (xem đầu lớp); sống theo vòng đời app là đúng ý:
+    /// cùng một con số thì cả buổi chỉ cần một dòng.</summary>
+    private static readonly ConcurrentDictionary<long, int> _quaHanDaBao = new();
+
+    /// <summary>
+    /// QUYẾT ĐỊNH THUẦN (nhận dict để test được): lượt này có LOG dòng "mã QUÁ HẠN" không, và tự cập nhật chốt.
+    /// Luật: số &gt; 0 và KHÁC lần đã báo trước ⇒ log (lần đầu xuất hiện, hoặc tăng/giảm); y hệt lần trước ⇒ im;
+    /// về 0 ⇒ xoá chốt im lặng (sự việc đã hết — số 0 không đáng một dòng, nhưng lần tăng lại SAU ĐÓ phải được
+    /// báo như mới).
+    /// </summary>
+    internal static bool NenBaoQuaHan(ConcurrentDictionary<long, int> daBao, long accountId, int quaHan)
+    {
+        if (quaHan <= 0)
+        {
+            daBao.TryRemove(accountId, out _);
+            return false;
+        }
+        if (daBao.TryGetValue(accountId, out var truoc) && truoc == quaHan)
+        {
+            return false;
+        }
+        daBao[accountId] = quaHan;
+        return true;
+    }
+
     public static async Task<KetQuaDay> PushReturnCodesToGsheetAsync(
         long accountId, AppServices services, Action<string> log, CancellationToken ct)
     {
@@ -629,8 +656,11 @@ public static class HubOutbox
             // Mã quá hạn thử lại: app THÔI đẩy nhưng phải nói ra. Không có dòng log này thì nhóm đó biến khỏi cả
             // badge lẫn nhật ký đúng lúc bị bỏ — người dùng thấy ô "Mã đơn trả hàng" trống mà không biết vì sao.
             // Đếm TRƯỚC nhánh "hàng đợi rỗng": ca đáng lo nhất chính là hàng đợi rỗng vì mọi mã đều quá hạn.
+            // CHỈ log khi SỐ ĐỔI (T10, review 11/08 — chốt theo mẫu `_tonDaBao` của HubOutboxWorker): worker gọi
+            // lượt này mỗi 2', không chốt thì MỘT sự việc đứng yên rắc ~63.000 dòng y hệt vào nhật ký mỗi ngày,
+            // chôn sạch kênh chẩn đoán.
             var quaHan = services.ReturnCodes.DemQuaHanThuLai(accountId);
-            if (quaHan > 0)
+            if (NenBaoQuaHan(_quaHanDaBao, accountId, quaHan))
             {
                 log($"GSheet mã trả hàng: {quaHan} mã QUÁ HẠN {ReturnCodesRepository.SoNgayThuLaiSheet} ngày "
                     + "— THÔI thử lại (đơn chưa từng có dòng trên sheet / tiêu đề cột sai). Kiểm tra sheet nếu số này tăng.");

@@ -99,13 +99,20 @@ public partial class OrdersRepository
                 // điều kiện sau đúng (hub chỉ lấy đơn hub_synced_at IS NULL — KHÔNG có re-push "vận đơn mới" như
                 // GSheet; hub UpsertOrders idempotent nên đẩy lại chỉ cập nhật). Trong UPDATE của SQLite, cột ở vế
                 // phải SET là giá trị CŨ → so cũ-với-tham-số-mới là chuẩn:
-                //  - mã vận đơn HOẶC "Số tiền cuối cùng" VỪA xuất hiện (cột CŨ NULL → tham số MỚI có). final_amount
-                //    PHẢI có nhánh riêng: đơn thường lên hub NGAY lượt sync đầu (chưa mở trang chi tiết → chưa có số
-                //    tiền cuối cùng); lấy được ở lượt sau mà không reset cờ thì hub hiển thị "—" VĨNH VIỄN.
+                //  - mã vận đơn HOẶC "Số tiền cuối cùng" XUẤT HIỆN hoặc ĐỔI GIÁ TRỊ (T5, review 11/08: bản trước
+                //    chỉ bắt NULL→có; Shopee đổi mã vận đơn A→B / điều chỉnh số tiền thì local nhận giá trị mới mà
+                //    hub/sheet giữ giá trị CŨ vĩnh viễn sau khi đơn bị dọn). final_amount PHẢI có nhánh riêng: đơn
+                //    thường lên hub NGAY lượt sync đầu (chưa mở trang chi tiết → chưa có số tiền cuối cùng).
                 //  - TRẠNG THÁI đơn đổi (status hoặc cancel_reason): đơn đã đẩy một lần rồi chuyển "Đã hủy"/"Đã giao"
                 //    mà không reset cờ thì hub kẹt trạng thái CŨ VĨNH VIỄN (đơn kết thúc sau đó bị dọn khỏi client
                 //    nên không còn đường sửa). CHỈ so status + cancel_reason: status_description hay dao động (đếm
                 //    ngược, nhắc nhở…) nên so nó sẽ đẩy lại hub mỗi lượt sync, gây tải vô ích.
+                // gsheet_da_co_van_don: về NULL ("chưa gửi kèm" — đúng quy ước reset ở DatLaiCoDayLai) khi mã vận
+                // đơn xuất hiện/đổi, để đường re-push "vận đơn mới" của GSheet ăn theo giá trị MỚI. Kèm
+                // gsheet_push_gen + 1 — bất biến "MỞ CỜ NÀO THÌ +1 THẾ HỆ CỦA ĐÍCH ĐÓ" (xem DatLaiCoDayLai):
+                // lượt đẩy sheet fire-and-forget chạy SONG SONG với vòng shop, thiếu vế này thì lô đang bay gọi
+                // MarkGsheetSynced với thế hệ CŨ vẫn khớp và đóng lại đúng cái cờ vừa mở ⇒ vận đơn MỚI không bao
+                // giờ lên sheet (phản biện đợt T1–T12, 11/08).
                 upd.CommandText = @"UPDATE orders SET
     shop_id = COALESCE($shopId, shop_id),
     shop_login = COALESCE($shopLogin, shop_login),
@@ -116,17 +123,21 @@ public partial class OrdersRepository
     final_amount_text = COALESCE($finalText, final_amount_text),
     payment_method = $payment, status = $status, status_description = $statusDesc, cancel_reason = $cancelReason,
     channel = $channel, carrier = $carrier,
-    tracking_number = COALESCE($tracking, tracking_number),
-    hub_synced_at = CASE WHEN (tracking_number IS NULL AND $tracking IS NOT NULL)
-                           OR (final_amount IS NULL AND $finalAmount IS NOT NULL)
+    gsheet_da_co_van_don = CASE WHEN ($tracking IS NOT NULL AND (tracking_number IS NULL OR tracking_number <> $tracking))
+                                THEN NULL ELSE gsheet_da_co_van_don END,
+    gsheet_push_gen = CASE WHEN ($tracking IS NOT NULL AND (tracking_number IS NULL OR tracking_number <> $tracking))
+                           THEN gsheet_push_gen + 1 ELSE gsheet_push_gen END,
+    hub_synced_at = CASE WHEN ($tracking IS NOT NULL AND (tracking_number IS NULL OR tracking_number <> $tracking))
+                           OR ($finalAmount IS NOT NULL AND (final_amount IS NULL OR final_amount <> $finalAmount))
                            OR (COALESCE(status, '') <> COALESCE($status, ''))
                            OR (COALESCE(cancel_reason, '') <> COALESCE($cancelReason, ''))
                          THEN NULL ELSE hub_synced_at END,
-    hub_push_gen = CASE WHEN (tracking_number IS NULL AND $tracking IS NOT NULL)
-                          OR (final_amount IS NULL AND $finalAmount IS NOT NULL)
+    hub_push_gen = CASE WHEN ($tracking IS NOT NULL AND (tracking_number IS NULL OR tracking_number <> $tracking))
+                          OR ($finalAmount IS NOT NULL AND (final_amount IS NULL OR final_amount <> $finalAmount))
                           OR (COALESCE(status, '') <> COALESCE($status, ''))
                           OR (COALESCE(cancel_reason, '') <> COALESCE($cancelReason, ''))
                         THEN hub_push_gen + 1 ELSE hub_push_gen END,
+    tracking_number = COALESCE($tracking, tracking_number),
     synced_at = $synced, updated_at = $synced
     WHERE id = $id;";
                 upd.Parameters.AddWithValue("$shopId", (object?)shopId ?? DBNull.Value);

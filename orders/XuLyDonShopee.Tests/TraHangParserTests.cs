@@ -553,6 +553,38 @@ public class TraHangParserTests
         Assert.Empty(TraHangParser.GhepCap(null!).Cap);
     }
 
+    /// <summary>T12 (review 11/08): dòng LẶP Y HỆT (danh sách dịch trang giữa hai nhịp đọc → cùng một dòng bị
+    /// quét hai lần) phải dedupe IM LẶNG — không được báo "1 đơn NHIỀU yêu cầu — giữ X, BỎ X" với hai mã giống
+    /// nhau, kẻo nhiễu đúng con số user dùng để quyết có đổi layout sheet hay không.</summary>
+    [Fact]
+    public void GhepCap_DongLapYHet_DedupeImLang_KhongBaoTrung()
+    {
+        var dong = new[]
+        {
+            Dong("<div class=\"h\">" + KhoiMaDon("D1") + KhoiMaYeuCau("R1") + "</div>"),
+            Dong("<div class=\"h\">" + KhoiMaDon("D1") + KhoiMaYeuCau("R1") + "</div>"),
+        };
+
+        var kq = TraHangParser.GhepCap(dong);
+
+        Assert.Single(kq.Cap);
+        Assert.Empty(kq.TrungMaDon ?? Array.Empty<string>());
+    }
+
+    /// <summary>ĐỐI CHỨNG của T12: mã yêu cầu KHÁC nhau là đơn THẬT SỰ nhiều yêu cầu — vẫn phải báo.</summary>
+    [Fact]
+    public void GhepCap_MaDonTrung_MaYeuCauKhac_VanBaoTrung()
+    {
+        var dong = new[]
+        {
+            Dong("<div class=\"h\">" + KhoiMaDon("D1") + KhoiMaYeuCau("R-MOI") + "</div>"),
+            Dong("<div class=\"h\">" + KhoiMaDon("D1") + KhoiMaYeuCau("R-CU") + "</div>"),
+        };
+
+        var trung = Assert.Single(TraHangParser.GhepCap(dong).TrungMaDon ?? Array.Empty<string>());
+        Assert.Contains("R-CU", trung);
+    }
+
     // ===================== Parse cả gói JSON extension gửi =====================
 
     [Fact]

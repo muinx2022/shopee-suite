@@ -447,9 +447,11 @@ internal sealed class ShopFlowRunner
             {
                 // KHÔNG chạy prepareNextOrder: in phiếu lúc này = phiếu sai địa chỉ lấy hàng, shipper tới sai chỗ
                 // và không ai biết. Thà không giao đơn còn hơn giao sai địa chỉ (người dùng đã chốt 28/07).
-                // KHÔNG revert (setPickupAddressToOther): mọi lối ok=false của extension đều CHƯA bấm "Lưu" trong
-                // modal Sửa Địa chỉ ⇒ địa chỉ lấy hàng của shop còn NGUYÊN như trước vòng này, không có gì để trả về;
-                // chạy revert lúc này chỉ là một lượt GHI nữa vào đúng màn hình đang hỏng.
+                // KHÔNG revert (setPickupAddressToOther): các lối ok=false của extension hoặc CHƯA bấm "Lưu"
+                // (địa chỉ còn NGUYÊN, không có gì để trả về), hoặc — riêng nhánh xác-minh-tag của T1 (11/08) —
+                // ĐÃ bấm Lưu (cả hai lượt) mà tag không hiện: lúc đó địa chỉ CÓ THỂ đã là tỉnh gửi, nhưng vì
+                // không in phiếu nên không có hàng nào đi từ đó trong vòng này, và vòng sau bước địa chỉ chạy
+                // lại từ đầu (idempotent); chạy revert ngay chỉ là một lượt GHI nữa vào đúng màn hình đang hỏng.
                 // Nhãn shop có thể RỖNG (picker không đọc được tên) — vẫn phải là chuỗi KHÁC null, kẻo tín hiệu
                 // lỗi địa chỉ (null = không lỗi) mất theo cái nhãn.
                 PickupFailedShop = string.IsNullOrWhiteSpace(shopLogin) ? "(không rõ shop)" : shopLogin;
@@ -464,6 +466,7 @@ internal sealed class ShopFlowRunner
 
             // Lặp Chuẩn bị hàng tới khi hết đơn / chạm chốt chặn / captcha. Mã vận đơn bắt NGAY tại modal
             // "Thông Tin Chi Tiết" (extension đọc trước khi in phiếu) → gom theo mã đơn để cập nhật DB same-cycle.
+            _ch.PrepareBlockedSeen = false; // cờ theo TỪNG lượt shop — không để shop sau đọc nhầm cờ của shop trước
             var capturedTracking = new Dictionary<string, string>(StringComparer.Ordinal);
             var guard = 0;
             while (guard++ < TranDonMoiLuotShop)
@@ -484,7 +487,30 @@ internal sealed class ShopFlowRunner
                 }
                 if (prep is null)
                 {
-                    L("Hết đơn cần Chuẩn bị hàng.");
+                    if (_ch.PrepareBlockedSeen)
+                    {
+                        // KHÔNG được in "Hết đơn" ở ca này (phản biện 11/08): selector hỏng cả fleet mà nhật ký
+                        // in y hệt shop khỏe thì không ai biết bước chuẩn bị hàng đã ngừng chạy.
+                        L("⛔ DỪNG bước chuẩn bị hàng: extension KHÔNG đọc được mã đơn trên card có nút "
+                          + "'Chuẩn bị hàng' (.order-sn đổi markup?) — KHÔNG phải hết đơn; đơn của shop này chưa "
+                          + "được xử, vòng sau thử lại.");
+                    }
+                    else
+                    {
+                        L("Hết đơn cần Chuẩn bị hàng.");
+                    }
+                    break;
+                }
+
+                // PHÒNG LỚP HAI của T3 (extension nay đã tự chặn Ở NGUỒN — không bấm khi thiếu mã): kết quả
+                // không kèm mã đơn mà vẫn đi tiếp là +1 đếm chuẩn bị cho chuỗi rỗng, phiếu ghi đè lẫn nhau vào
+                // "phieu.pdf" (SanitizeFileName trả "phieu" cho chuỗi rỗng) và log "lưu phiếu OK" — toàn dấu vết
+                // SAI. Extension đời cũ có thể còn gửi kiểu này. DỪNG hẳn vòng: với extension cũ, mỗi lượt lặp
+                // nữa là thêm một đơn thật bị arrange mù.
+                if (string.IsNullOrWhiteSpace(prep.OrderCode))
+                {
+                    L("⚠ Extension trả kết quả chuẩn bị hàng KHÔNG kèm mã đơn (.order-sn đổi markup?) — DỪNG bước "
+                      + "chuẩn bị hàng của shop này; phiếu KHÔNG lưu (tránh ghi đè lẫn nhau), lượt không đếm.");
                     break;
                 }
 
@@ -781,6 +807,7 @@ internal sealed class ShopFlowRunner
         {
             L($"⚠ Check đơn trả hàng [{shopLogin}]: KHÔNG chọn được tab \"Đơn Trả hàng Hoàn tiền\" — {luot.SoMoi} là số của "
               + "tab \"Tất cả\" (gộp Đơn Hủy / Giao không thành công) → BỎ LƯỢT, mốc giữ nguyên.");
+            VotMaThatLuotBo(doc.Dong, "không chọn được tab");
             return;
         }
         if (!doc.SortApplied)
@@ -799,6 +826,7 @@ internal sealed class ShopFlowRunner
             L($"⚠ Check đơn trả hàng [{shopLogin}]: extension báo đúng tab nhưng {soHuy}/{doc.Dong.Count} dòng đọc "
               + $"được là ĐƠN HỦY (tab trả hàng đúng thì phải là 0) — {luot.SoMoi} nhiều khả năng là số của tab "
               + "khác → BỎ LƯỢT, mốc giữ nguyên.");
+            VotMaThatLuotBo(doc.Dong, "nghi sai tab theo dữ liệu");
             return;
         }
 
@@ -985,6 +1013,36 @@ internal sealed class ShopFlowRunner
             L($"Check đơn trả hàng [{shopLogin}]: lượt này đọc CHƯA đủ sâu ({MoTaLyDoSot(lyDoConSot)}) — GIỮ NGUYÊN mốc {mocCuText} để lượt sau đọc tiếp.");
             _luuConSotTraHang?.Invoke(shopLogin, true, lyDoConSot);
         }
+    }
+
+    /// <summary>
+    /// VỚT MÃ THẬT ở lượt BỎ vì sai tab / nghi sai tab theo dữ liệu (T2, review 11/08): hai chốt đó chỉ được
+    /// phép bảo vệ MỐC — dòng <c>laTraHang=true</c> đã ghép sạch (đủ mã đơn + mã yêu cầu) là dữ liệu THẬT
+    /// extension cào được, vứt theo lượt là mất tới khi nó trôi khỏi cửa sổ 20 ngày. Đi ĐÚNG đường lưu thường
+    /// (GhepCap → LocTheoCuaSo → <c>_saveReturnCodes</c>; chống trùng nằm sẵn ở
+    /// <c>ReturnCodesRepository.LuuMaTraHang</c>). KHÔNG đụng mốc, KHÔNG đụng cờ còn-sót — lượt vẫn tính là BỎ.
+    /// Dòng đơn hủy bị GhepCap loại theo cờ <c>laTraHang=false</c> (href); client ĐỜI CŨ không gửi cờ
+    /// (<c>null</c>) thì tầng chặn còn lại là <c>TachMa</c> — dòng đơn hủy không có khối mã yêu cầu nên rơi vào
+    /// ThieuMaYeuCau chứ không thành cặp, tức không vớt nhầm nhưng lưới mỏng hơn một lớp.
+    /// </summary>
+    private void VotMaThatLuotBo(IReadOnlyList<DongTraHang> dong, string lyDoBoLuot)
+    {
+        if (_saveReturnCodes is null || dong.Count == 0)
+        {
+            return;
+        }
+        var cap = TraHangParser.GhepCap(dong).Cap;
+        if (cap.Count == 0)
+        {
+            return;
+        }
+        var giu = TraHangParser.LocTheoCuaSo(cap, DateTime.Now, TraHangParser.SoNgayCuaSoTraHang).GiuLai;
+        if (giu.Count == 0)
+        {
+            return;
+        }
+        L($"Check đơn trả hàng: lượt BỎ ({lyDoBoLuot}) nhưng vẫn VỚT {giu.Count} mã trả hàng THẬT đã cào được — "
+          + _saveReturnCodes(giu));
     }
 
     /// <summary>

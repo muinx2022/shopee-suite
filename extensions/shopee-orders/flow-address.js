@@ -87,6 +87,13 @@ async function thuDatDiaChi(tabId, province, donModalTruoc) {
     return { ok: false, lyDo: "không thấy checkbox trong modal Sửa Địa chỉ" };
   }
   send({ action: "progress", message: "đã đảm bảo " + cnt.done + "/" + cnt.total + " checkbox địa chỉ có dấu tick." });
+  // CỔNG THẬT chứ không chỉ log (T1, review 11/08): overlay/tour nuốt cú tick thì done < total — bấm Lưu lúc
+  // này là lưu thiếu dấu, C# vẫn tưởng đã đặt địa chỉ và hàng đi từ địa chỉ CŨ không một banner nào. `done` đã
+  // đếm checkbox disabled là xong (pageCheckboxCount) nên done == total là điều kiện đúng, không tự bắn vào
+  // chân ở ca ô bị khoá. Trả ok:false để lượt thử-lại-1-lần của doSetPickupAddress dọn overlay rồi làm lại.
+  if (cnt.done < cnt.total) {
+    return { ok: false, lyDo: "chỉ tick được " + cnt.done + "/" + cnt.total + " checkbox (cú tick bị nuốt — lớp phủ?)" };
+  }
 
   // Lưu.
   const save = await execInTab(tabId, pageLocateInModal, [MODAL_SUA_DIA_CHI, [".eds-modal__footer button", "button", "[role='button']"], "^luu$"]);
@@ -101,7 +108,30 @@ async function thuDatDiaChi(tabId, province, donModalTruoc) {
   const confirm = await execInTab(tabId, pageLocateByText, [[".eds-modal__footer button", "button", "[role='button']"], "^dong y$"]);
   if (confirm) { await trustedClick(tabId, confirm.x, confirm.y); await sleep(1000); }
 
-  send({ action: "progress", message: "đã đặt địa chỉ lấy hàng = " + province + "." });
+  // XÁC MINH LẠI trên chính danh sách địa chỉ (T1): sau Lưu, dòng địa chỉ khớp tỉnh PHẢI mang tag
+  // "Địa chỉ lấy hàng". Bấm Lưu mà Shopee từ chối / modal đóng hụt thì tag không mọc — báo ok:true lúc đó là
+  // đúng cái lỗi "tin lời cú bấm" mà cả đợt này đi vá.
+  // ⚠ Nhánh này nằm trên ĐƯỜNG ĐI CHUẨN của mọi shop mỗi vòng (cuối vòng trước địa chỉ đã được trả về chỗ
+  // khác), nên ngân sách chờ phải RỘNG (20s — render nhanh thì thoát ngay ở lượt poll đầu, chỉ máy chậm mới trả
+  // đủ giá) và thất bại phải mang cờ `daBamLuu` để doSetPickupAddress THỬ LẠI một lượt kể cả khi không có modal
+  // chắn nào để dọn — thuDatDiaChi tải lại trang nên lượt hai tự thấy tag nếu cú Lưu thật ra ĐÃ ăn (mọi bước
+  // đều idempotent: checkbox đã tick thì vòng tick không đụng nữa).
+  let sau = null;
+  const vdl = Date.now() + 20000;
+  while (Date.now() < vdl) {
+    try { sau = await execInTab(tabId, pageFindAddressEdit, [province]); } catch (e) { sau = null; }
+    if (sau && sau.found && sau.hasTag) break;
+    await sleep(600);
+  }
+  if (!sau || !sau.found || !sau.hasTag) {
+    return {
+      ok: false,
+      daBamLuu: true,
+      lyDo: "đã bấm Lưu nhưng địa chỉ " + province + " CHƯA mang tag 'Địa chỉ lấy hàng' (lưu không ăn?)",
+    };
+  }
+
+  send({ action: "progress", message: "đã đặt địa chỉ lấy hàng = " + province + " (đã xác minh tag trên danh sách)." });
   return { ok: true, lyDo: "" };
 }
 
@@ -116,11 +146,13 @@ export async function doSetPickupAddress(province) {
   let kq = await thuDatDiaChi(tabId, province, /*donModalTruoc*/ true);
   if (kq.captcha) { return; }            // thuDatDiaChi đã send captcha
   if (!kq.ok) {
-    // Lượt 1 hỏng: modal có thể bật SAU khi trang load xong (Shopee bật trễ). Dọn rồi thử LẠI đúng 1 lượt, và
-    // CHỈ khi thực sự đóng được modal — không đóng được gì mà vẫn thử lại là tốn 1 lượt vô ích mỗi shop.
+    // Lượt 1 hỏng: modal có thể bật SAU khi trang load xong (Shopee bật trễ). Dọn rồi thử LẠI đúng 1 lượt khi
+    // (a) thực sự đóng được modal — không đóng được gì mà vẫn thử lại là tốn 1 lượt vô ích mỗi shop; HOẶC
+    // (b) lượt 1 ĐÃ bấm Lưu mà chưa thấy tag (kq.daBamLuu — nhánh xác minh của T1): ca đó không có modal nào
+    // để dọn nhưng rất đáng một lượt nữa — thuDatDiaChi tải lại trang, cú Lưu đã ăn thì lượt 2 thấy tag ngay.
     const daDong = await dongModalChan(tabId, MODAL_SUA_DIA_CHI);
-    if (daDong > 0) {
-      send({ action: "progress", message: "đã đóng " + daDong + " modal chắn — thử đặt địa chỉ lại." });
+    if (daDong > 0 || kq.daBamLuu) {
+      send({ action: "progress", message: (daDong > 0 ? ("đã đóng " + daDong + " modal chắn") : "lượt 1 đã Lưu mà chưa thấy tag") + " — thử đặt địa chỉ lại." });
       // donModalTruoc=true cả ở lượt 2: thuDatDiaChi TẢI LẠI trang, nên modal nào Shopee bật ở MỖI lần load sẽ
       // hiện lại ngay sau lượt dọn vừa rồi. Bỏ lượt dọn này là lượt 2 chết đúng cái lỗi lượt 1 vừa chết.
       // Giá: một execInTab trả null (~vài trăm ms) khi trang sạch — rẻ hơn nhiều so với mất cả shop.

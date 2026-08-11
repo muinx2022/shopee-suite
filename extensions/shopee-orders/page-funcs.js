@@ -407,9 +407,13 @@ export function pageDumpClickables() {
   return JSON.stringify(out);
 }
 
-// Đơn ĐẦU có nút "Chuẩn bị hàng" (IsPrepareOrderButtonText) → {x,y,orderCode}. null nếu không còn.
+// Đơn ĐẦU có nút "Chuẩn bị hàng" (IsPrepareOrderButtonText) VÀ đọc được mã đơn → {x,y,orderCode}.
+// Card có nút mà KHÔNG đọc được mã (.order-sn đổi markup / render dở) thì BỎ QUA thử card kế — bấm mù là
+// arrange thật trên đơn mà app không biết đơn nào (T3, review 11/08). Không card nào dùng được nhưng CÓ card
+// bị bỏ vì thiếu mã → { thieuMa: true } để flow báo prepareBlocked thay vì "hết đơn"; null = hết đơn THẬT.
 export function pageFindPrepareOrder() {
   const cards = document.querySelectorAll("a[data-testid='order-item']");
+  let thieuMa = false;
   for (const card of cards) {
     for (const b of card.querySelectorAll("button, [role='button'], a")) {
       if (_na(b.textContent) === "chuan bi hang") {
@@ -419,13 +423,14 @@ export function pageFindPrepareOrder() {
         const snRaw = snEl ? (snEl.textContent || "").replace(/\s+/g, " ").trim() : "";
         const toks = snRaw.split(" ");
         const orderCode = toks.length ? toks[toks.length - 1] : "";
+        if (!orderCode) { thieuMa = true; break; } // card hỏng mã → thử card KẾ (break vòng nút, sang card sau)
         try { b.scrollIntoView({ block: "center" }); } catch (e) {}
         const r = b.getBoundingClientRect();
         return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2), orderCode: orderCode };
       }
     }
   }
-  return null;
+  return thieuMa ? { thieuMa: true } : null;
 }
 
 // Định vị nút "In phiếu giao" NGAY trong card của đơn có mã = orderSn (đơn đã Chuẩn bị hàng thường có sẵn nút này).

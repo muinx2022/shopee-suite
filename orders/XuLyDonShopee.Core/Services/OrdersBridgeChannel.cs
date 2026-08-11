@@ -261,6 +261,13 @@ internal sealed class OrdersBridgeChannel : IDisposable
     /// (check đơn trả hàng) trả cờ về đúng như trước bước — xem <see cref="ShopFlowRunner"/>.</summary>
     public bool CaptchaSeen { get; set; }
 
+    /// <summary>Extension báo <c>prepareBlocked</c>: card CÓ nút "Chuẩn bị hàng" nhưng KHÔNG đọc được mã đơn
+    /// (<c>.order-sn</c> đổi markup?) nên nó DỪNG bước chuẩn bị hàng thay vì thao tác mù (T3, review 11/08).
+    /// Đi kèm <c>TrySetResult(null)</c> trên chặng Prepare — cờ này để <see cref="ShopFlowRunner"/> phân biệt
+    /// với "hết đơn" THẬT mà log cho đúng (selector hỏng cả fleet mà nhật ký in "Hết đơn" y shop khỏe là không
+    /// ai biết). Reset đầu mỗi lượt shop (cùng chỗ reset PickupOkShop).</summary>
+    public bool PrepareBlockedSeen { get; set; }
+
     // ── Các chặng dùng lại TCS của ResetStages (không tự Arm trước khi gửi) ─────────────────────────────
     public TaskCompletionSource<bool> Ready => _readyTcs;
     public TaskCompletionSource<string?> ShopList => _shopListTcs;
@@ -473,6 +480,7 @@ internal sealed class OrdersBridgeChannel : IDisposable
         _redownloadTcs = NewTcs<string?>();
         _returnsTcs = NewTcs<string?>();
         CaptchaSeen = false;
+        PrepareBlockedSeen = false;
     }
 
     // Xử lý ĐỒNG BỘ: rút mọi giá trị (chuỗi) ra khỏi doc NGAY, rồi mới hoàn tất TCS. Dispose doc ở cuối.
@@ -551,6 +559,11 @@ internal sealed class OrdersBridgeChannel : IDisposable
                 }
 
                 case "noOrder":
+                    _prepareTcs.TrySetResult(null);
+                    break;
+
+                case "prepareBlocked":
+                    PrepareBlockedSeen = true;
                     _prepareTcs.TrySetResult(null);
                     break;
 

@@ -445,8 +445,12 @@ public static class TraHangParser
                 // Đơn này đã có một yêu cầu được lấy ở dòng TRÊN — danh sách sắp mới→cũ nên dòng trên là MỚI
                 // NHẤT. Luật user chốt 09/08: GIỮ mã mới nhất, mã ở đây chỉ ghi nhật ký (kho khoá theo
                 // (tài khoản, mã đơn) và cột trên sheet cũng chỉ có MỘT ô mỗi đơn — không có chỗ chứa mã thứ hai).
-                // Chỉ báo khi dòng bị bỏ THẬT SỰ có mã yêu cầu: dòng trùng mà không đọc được mã thì không mất gì.
-                if (!string.IsNullOrEmpty(ma.MaYeuCau))
+                // Chỉ báo khi dòng bị bỏ THẬT SỰ có mã yêu cầu VÀ mã đó KHÁC mã đã giữ (T12, review 11/08):
+                // danh sách dịch trang giữa hai nhịp đọc tạo DÒNG LẶP y hệt — "giữ X, BỎ X" với hai mã giống
+                // nhau không phải "đơn nhiều yêu cầu", chỉ là cùng một dòng đọc hai lần ⇒ dedupe im lặng, đừng
+                // làm nhiễu đúng con số user dùng để quyết có đổi layout sheet hay không.
+                if (!string.IsNullOrEmpty(ma.MaYeuCau)
+                    && !string.Equals(ma.MaYeuCau, maDaGiu, StringComparison.Ordinal))
                 {
                     trung.Add($"{ma.MaDon}: giữ {(maDaGiu.Length == 0 ? "(không đọc được mã)" : maDaGiu)} (mới nhất), BỎ {ma.MaYeuCau}");
                 }
