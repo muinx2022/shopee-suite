@@ -5,6 +5,44 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Phiên bản & cập nhật. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.9.2 — 2026-08-12
+
+Đợt dọn **12 phát hiện TRUNG BÌNH còn lại** của lần review toàn luồng check đơn hàng (v1.9.1 đã xử 6 lỗ nặng).
+Phần phía Hub (5 mục) đã deploy thẳng lên máy chủ đêm 11/08 — bản client này mang 7 mục phía app + extension.
+Không đổi giao diện, không đổi cách dùng.
+
+**Bước đặt địa chỉ lấy hàng hết "tin lời cú bấm".** Trước đây extension tick checkbox + bấm Lưu xong là báo
+thành công vô điều kiện — overlay nuốt cú tick thì hàng vẫn đi từ địa chỉ CŨ mà không một cảnh báo nào. Nay:
+đủ dấu tick mới được bấm Lưu, bấm xong còn **xác minh lại trên danh sách** (dòng địa chỉ phải mang tag
+"Địa chỉ lấy hàng"), chưa thấy tag thì tự thử lại một lượt rồi mới chịu báo lỗi (có banner). Nhật ký nay in
+rõ: "đã đặt địa chỉ lấy hàng = … (đã xác minh tag trên danh sách)".
+
+**Không bao giờ "Chuẩn bị hàng" mù.** Card đơn mà không đọc được mã (Shopee đổi markup) thì trước đây vẫn
+arrange + in phiếu thật — phiếu ghi đè lẫn nhau, app không biết đơn nào vừa xử. Nay extension bỏ qua card hỏng
+để xử card khác; không card nào đọc được thì DỪNG bước này và nhật ký nói thẳng "KHÔNG đọc được mã đơn —
+KHÔNG phải hết đơn" (không giả vờ "Hết đơn" như shop khỏe).
+
+**Mã vận đơn ĐỔI / số tiền điều chỉnh nay lên đủ mọi nơi.** Shopee cấp lại mã vận đơn (A→B) hay điều chỉnh
+"Số tiền cuối cùng" thì trước đây chỉ máy local biết — Hub và Google Sheet giữ giá trị cũ vĩnh viễn. Nay mọi
+thay đổi giá trị đều mở lại cờ đẩy (đúng cả khi lô đẩy đang bay — có chốt thế hệ hai đích).
+
+**Mã trả hàng không bị vứt theo lượt bỏ.** Lượt check trả hàng bị BỎ vì nghi sai tab vẫn VỚT các mã thật đã
+cào được (chỉ mốc mới phải bảo vệ) — trước đây vứt cả, mã trôi quá cửa sổ 20 ngày là mất hẳn.
+
+**Nhật ký sạch hơn, nói thật hơn.** Cảnh báo "mã QUÁ HẠN 14 ngày" chỉ log khi số ĐỔI (hết ~63.000 dòng/ngày
+cho một sự việc đứng yên); chẩn đoán phân trang trả hàng nay bắn đúng ca selector hỏng; hết cảnh báo giả
+"1 đơn NHIỀU yêu cầu — giữ X, BỎ X" với hai mã giống hệt (dòng lặp giữa hai nhịp đọc).
+
+**Phía Hub (đã chạy từ đêm 11/08):** chuỗi rỗng không xoá được dữ liệu đang có; mọi bộ đếm "đơn chờ" dùng
+chung một định nghĩa; tin tổng kết ngày đếm đơn **đã chuẩn bị** hôm nay (hết nghịch lý ngày chạy càng trơn số
+càng nhỏ); restart không nuốt tin webhook/tổng kết; phiếu của đơn vừa bị xoá giữa lô không còn thành phiếu mồ côi.
+
+**Nghiệm thu:** build 0 warning; 1773 + 143 + 139 test xanh, 13 lượt "thử phá" đều đỏ đúng chỗ; hai lượt phản
+biện độc lập (bắt 2 lỗi nặng trước khi phát hành — đã vá); chạy thật **4 vòng liên tiếp 12/12 shop** trên bản
+này (đêm 11–12/08), 0 mẫu xấu, bước địa chỉ + chuẩn bị hàng đi trọn đường mới trên 2 đơn thật (2 phiếu OK).
+
+> Máy client bấm "Cập nhật & khởi động lại" như mọi bản — extension mới nằm trong gói.
+
 ## v1.9.1 — 2026-08-11
 
 Bản vá cho bước **check đơn hàng / đơn trả hàng**: sáu lỗ nặng tìm ra trong đợt review toàn luồng (app ↔
