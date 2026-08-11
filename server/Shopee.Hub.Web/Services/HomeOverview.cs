@@ -8,12 +8,14 @@ namespace Shopee.Hub.Web.Services;
 /// </summary>
 internal static class HomeOverview
 {
-    /// <summary>Trạng thái đơn coi là "đang chờ xử lý". CÙNG chuỗi mà tab Đơn hàng của trang Giao việc dùng cho
-    /// cột "Đơn chờ hôm nay" — hai chỗ phải nói cùng một số.</summary>
+    /// <summary>NHÃN trạng thái "đang chờ xử lý" cho tooltip/tiêu đề các trang. Việc ĐẾM từ 11/08 không còn so
+    /// exact chuỗi này nữa mà đi qua <c>ShopeeShippingNav.LaChuanBiHang</c> (contains, chịu biến thể) — cùng một
+    /// định nghĩa với mọi bộ đếm còn lại của hệ (T6).</summary>
     public const string TrangThaiCho = "Chờ lấy hàng";
 
     /// <summary>
-    /// Tổng đơn <see cref="TrangThaiCho"/> XUẤT HIỆN trong ngày Việt Nam chứa <paramref name="now"/>, gộp mọi shop.
+    /// Tổng đơn "đang chờ" (<c>LaChuanBiHang</c>) XUẤT HIỆN trong ngày Việt Nam chứa <paramref name="now"/>, gộp
+    /// mọi shop.
     /// <para>Dùng LẠI đúng truy vấn của "Đơn chờ hôm nay" (<see cref="HubDatabase.ShopOrderSummaries"/>): lọc theo
     /// <c>first_seen_at</c> — lần ĐẦU đơn lên hub — trong khoảng UTC của ngày VN. TUYỆT ĐỐI không đổi sang
     /// <c>synced_at</c>: cột đó bị ghi đè mỗi lần client đẩy lại nên đơn cũ sẽ nhảy vào hôm nay.</para>
@@ -21,6 +23,6 @@ internal static class HomeOverview
     public static int DonChoHomNay(HubDatabase db, DateTimeOffset now)
     {
         var (fromUtc, toUtcExclusive) = GioVietNam.KhoangNgayUtc(now);
-        return db.ShopOrderSummaries(TrangThaiCho, fromUtc, toUtcExclusive).Sum(s => s.Waiting);
+        return db.ShopOrderSummaries(fromUtc, toUtcExclusive).Sum(s => s.Waiting);
     }
 }

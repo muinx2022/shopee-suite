@@ -467,12 +467,14 @@ public class OrderNotifyService
         var sb = new StringBuilder();
         sb.Append($"📊 TỔNG KẾT NGÀY {luc.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture)}"
                   + $" (lúc {luc.ToString("HH:mm", CultureInfo.InvariantCulture)})");
-        sb.Append($"\nĐơn chuẩn bị hàng phát sinh hôm nay: {Math.Max(0, tongDonCho)}");
+        // "ĐÃ chuẩn bị" chứ không phải "phát sinh" (T7, review 11/08): số đếm theo prepared_day — đơn thực sự
+        // được bấm Chuẩn bị hàng trong ngày — nên câu chữ phải nói đúng chuyện đó.
+        sb.Append($"\nĐơn đã chuẩn bị hàng hôm nay: {Math.Max(0, tongDonCho)}");
 
         var shops = theoShop ?? Array.Empty<(string, int)>();
         if (shops.Count == 0)
         {
-            sb.Append("\n• (chưa shop nào có đơn hôm nay)");
+            sb.Append("\n• (chưa shop nào chuẩn bị đơn hôm nay)");
         }
         else
         {

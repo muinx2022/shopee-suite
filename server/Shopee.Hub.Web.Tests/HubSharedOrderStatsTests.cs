@@ -45,10 +45,34 @@ public sealed class HubSharedOrderStatsTests : IDisposable
 
         var (fromUtc, toUtc) = GioVietNam.KhoangNgayUtc(
             new DateTimeOffset(2026, 8, 3, 10, 0, 0, TimeSpan.FromHours(7)));
-        var summary = Assert.Single(db.ShopOrderSummaries("Chờ lấy hàng", fromUtc, toUtc));
+        var summary = Assert.Single(db.ShopOrderSummaries(fromUtc, toUtc));
 
         Assert.Equal(shopId, summary.ShopId);
         Assert.Equal(1, summary.Waiting);
+    }
+
+    /// <summary>T6 (review 11/08): "đang chờ" đo bằng ĐỦ bộ luật của NeedsAction — <c>LaChuanBiHang</c>
+    /// (contains, chịu biến thể) TRÊN đơn không bị hủy (<c>LaDonHuy</c>). Bản trước so <c>status=$w</c> CHÍNH
+    /// XÁC nên status mang biến thể là hai màn hình ra hai số; thiếu vế LaDonHuy thì đơn "Chờ lấy hàng" đã có
+    /// <c>cancel_reason</c> vẫn lệch giữa hai bộ đếm.</summary>
+    [Fact]
+    public void ShopOrderSummaries_DemCaBienTheTrangThai_CungDinhNghiaLaChuanBiHang()
+    {
+        using var db = new HubDatabase(_dataDir);
+        var shopId = db.GetOrCreateShopByUsername("shop-login", "Shop Test");
+        db.UpsertOrders(shopId,
+        [
+            new OrderPushItem { OrderSn = "V1", Status = "Chờ lấy hàng" },
+            new OrderPushItem { OrderSn = "V2", Status = "Chờ lấy hàng (2)" },   // nhãn kèm badge số
+            new OrderPushItem { OrderSn = "V3", Status = "Đang chuẩn bị hàng" }, // biến thể "chuẩn bị"
+            new OrderPushItem { OrderSn = "V4", Status = "Đã giao" },            // không chờ → không đếm
+            // Status còn "chờ" nhưng ĐÃ có lý do hủy → LaDonHuy loại, y hệt NeedsAction.
+            new OrderPushItem { OrderSn = "V5", Status = "Chờ lấy hàng", CancelReason = "Người mua hủy" },
+        ]);
+
+        var (fromUtc, toUtc) = GioVietNam.KhoangNgayUtc(DateTimeOffset.UtcNow);
+        var summary = Assert.Single(db.ShopOrderSummaries(fromUtc, toUtc));
+        Assert.Equal(3, summary.Waiting);
     }
 
     [Fact]

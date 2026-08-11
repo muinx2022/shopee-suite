@@ -9,8 +9,12 @@ namespace Shopee.Hub.Web.Services;
 /// <para>Quyết định nằm hết ở lõi thuần <see cref="DailyDigest"/> (test được); service này chỉ lo nhịp, đọc cấu
 /// hình, dựng tin, xếp hàng gửi và GHI MỐC "đã gửi ngày d" vào settings (bền qua restart — khác cảnh báo máy
 /// offline giữ trạng thái trong bộ nhớ).</para>
-/// <para>Mốc được ghi TRƯỚC khi xếp hàng gửi: webhook chết thì mất tin của hôm đó (log lại), còn ghi SAU sẽ
-/// khiến mỗi nhịp 60s lại bắn thêm một tin nữa suốt buổi tối.</para>
+/// <para><b>Mốc ghi SAU khi tin được XỬ XONG</b> (callback <c>OnDone</c> của <see cref="WebhookNotification"/> —
+/// T8, review 11/08). Bản trước ghi TRƯỚC khi xếp hàng nên restart hub đúng lúc (tin còn trong hàng đợi bị vứt)
+/// là mất hẳn tin của ngày, không gửi bù. Chống trùng trong lúc chờ gửi bằng chốt in-flight
+/// <see cref="_ngayDangGui"/> (bộ nhớ): nhịp 60s không xếp thêm tin cho ngày đang bay. Mốc vẫn ghi KỂ CẢ khi
+/// gửi fail đủ mọi lần thử — giữ đúng chính sách cũ "webhook chết thì mất tin của hôm đó, có log", vì đổi sang
+/// chỉ-ghi-khi-thành-công là mỗi nhịp 60s lại bắn thêm một tin suốt buổi tối.</para>
 /// </summary>
 public sealed class DailyDigestService : BackgroundService
 {
@@ -27,6 +31,12 @@ public sealed class DailyDigestService : BackgroundService
 
     /// <summary>Đã ghi log "bật tổng kết nhưng chưa có webhook" chưa — chống rác log mỗi nhịp.</summary>
     private bool _daLogThieuUrl;
+
+    /// <summary>Ngày (nhãn VN) đang có tin NẰM TRONG hàng đợi gửi — chốt in-flight trong bộ nhớ để nhịp 60s
+    /// không xếp trùng trong lúc chờ worker gửi. Restart giữa chừng thì chốt lẫn mốc bền đều chưa có ⇒ nhịp đầu
+    /// sau restart xếp lại tin — đúng đường gửi bù mà T8 đòi. <c>volatile</c>: ghi ở thread worker (OnDone),
+    /// đọc ở thread nhịp quét.</summary>
+    private volatile string? _ngayDangGui;
 
     public DailyDigestService(
         HubDatabase db, FleetStateService fleet, WebhookQueueService queue, ILogger<DailyDigestService> log)
@@ -54,8 +64,10 @@ public sealed class DailyDigestService : BackgroundService
         }
     }
 
-    /// <summary>Một lượt kiểm tra (tách ra để try/catch gọn + gọi được từ test).</summary>
-    internal void MotLuot(DateTimeOffset now)
+    /// <summary>Một lượt kiểm tra (tách ra để try/catch gọn + gọi được từ test). <paramref name="xepHang"/> chỉ
+    /// test rót (mặc định null → <see cref="WebhookQueueService.TryQueue"/>) — để test được đường mốc/in-flight
+    /// mà không phải gửi HTTP thật.</summary>
+    internal void MotLuot(DateTimeOffset now, Func<WebhookNotification, bool>? xepHang = null)
     {
         if ((_db.GetSetting(SettingKeys.NotifyTongKetBat) ?? "").Trim() != "1") return;
 
@@ -76,9 +88,7 @@ public sealed class DailyDigestService : BackgroundService
 
         var gio = DailyDigest.KepGio(_db.GetSetting(SettingKeys.NotifyTongKetGio));
         if (!DailyDigest.DenLuotGui(now, gio, _db.GetSetting(SettingKeys.NotifyTongKetDaGuiNgay), out var ngay)) return;
-
-        // Ghi mốc TRƯỚC khi gửi (xem xmldoc lớp): nhịp 60s + gửi thất bại = 1 tin/phút suốt buổi tối.
-        _db.SetSetting(SettingKeys.NotifyTongKetDaGuiNgay, ngay);
+        if (string.Equals(_ngayDangGui, ngay, StringComparison.Ordinal)) return; // đã xếp hàng, đang chờ worker gửi
 
         var nguong = TimeSpan.FromMinutes(
             MachineOfflineWatchService.KepNguong(_db.GetSetting(SettingKeys.NotifyMayOfflinePhut)));
@@ -86,8 +96,35 @@ public sealed class DailyDigestService : BackgroundService
         var text = OrderNotifyService.TaoTinNhanTongKetNgay(
             GioVietNam.Doi(now).DateTime, so.TongDonCho, so.TheoShop, so.MaTraMoi, so.ShopCanhBaoDiaChi, so.MayOffline);
 
-        _queue.TryQueue(new WebhookNotification(
-            "", new[] { url }, text, NhanKenh, $"tổng kết ngày {ngay}: {so.TongDonCho} đơn chuẩn bị hàng"));
+        var tin = new WebhookNotification(
+            "", new[] { url }, text, NhanKenh, $"tổng kết ngày {ngay}: {so.TongDonCho} đơn đã chuẩn bị")
+        {
+            // Mốc ghi Ở ĐÂY — sau khi worker xử xong tin (kể cả gửi fail, xem xmldoc lớp). OnDone chạy trên
+            // thread worker: SetSetting tự khoá; _ngayDangGui ghi đè đơn thuần (nhịp quét đọc giá trị cũ nhất
+            // cũng chỉ dẫn tới một lượt DenLuotGui đọc mốc bền — mốc đã ghi nên vẫn không xếp trùng).
+            OnDone = _ =>
+            {
+                try { _db.SetSetting(SettingKeys.NotifyTongKetDaGuiNgay, ngay); }
+                catch (Exception ex)
+                {
+                    // GHI MỐC HỎNG thì GIỮ NGUYÊN chốt in-flight (không nhả): nhả mà mốc trống là nhịp 60s bắn
+                    // lại 1 tin/phút suốt buổi tối — đúng thứ thiết kế cũ cố ý chặn. Giữ chốt thì mất tin của
+                    // NGÀY đó (có log), sang ngày mới chốt tự hết tác dụng vì so theo nhãn ngày.
+                    _log.LogWarning(ex, "Tổng kết ngày: lỗi ghi mốc đã-gửi — giữ chốt in-flight, tin của ngày này coi như đã xử.");
+                    return;
+                }
+                _ngayDangGui = null;
+            },
+        };
+
+        // Chốt in-flight đặt TRƯỚC khi xếp hàng: worker có thể gửi xong (OnDone xoá chốt) trước cả khi TryQueue
+        // trả về — đặt sau là tự khoá mình ở trạng thái "đang gửi" vĩnh viễn. Xếp không được (queue đầy) → nhả
+        // chốt, không đụng mốc: nhịp sau thử lại từ đầu.
+        _ngayDangGui = ngay;
+        if (!(xepHang ?? _queue.TryQueue)(tin))
+        {
+            _ngayDangGui = null;
+        }
     }
 
     private void TryLog(string level, string text)

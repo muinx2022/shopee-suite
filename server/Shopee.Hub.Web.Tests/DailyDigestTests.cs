@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging.Abstractions;
 using Shopee.Core.Coordination;
 using Shopee.Hub;
 using Shopee.Hub.Web.Services;
@@ -82,26 +83,31 @@ public sealed class DailyDigestTests : IDisposable
 
     // ══════════ Gom số liệu ══════════
 
+    /// <summary>T7 (review 11/08): tin tổng kết đếm đơn ĐÃ CHUẨN BỊ hôm nay (prepared_day — PrepareStatsByDay),
+    /// KHÔNG đếm ảnh chụp "còn đang chờ lúc giờ gửi": lời tin nói "hôm nay làm được gì", mà snapshot thì ngày
+    /// chạy càng trơn (xử hết đơn) số càng NHỎ — nghịch hướng với chính câu chữ.</summary>
     [Fact]
-    public void GomSoLieu_DemDonChoTheoShop_TheoNgayVN_VaSapGiamDan()
+    public void GomSoLieu_DemDonDaChuanBiHomNay_TheoPreparedDay_SapGiamDan()
     {
         using var db = new HubDatabase(_dataDir);
         var shopA = db.GetOrCreateShopByUsername("shop-a", "Shop A");
         var shopB = db.GetOrCreateShopByUsername("shop-b", "Shop B");
+        var homNay = DailyDigest.NgayVn(DateTimeOffset.UtcNow);
         db.UpsertOrders(shopA,
         [
-            new OrderPushItem { OrderSn = "A1", Status = HomeOverview.TrangThaiCho },
-            new OrderPushItem { OrderSn = "A2", Status = HomeOverview.TrangThaiCho },
-            new OrderPushItem { OrderSn = "A3", Status = "Đã giao" },   // không phải "chờ" → không đếm
+            // ĐÃ chuẩn bị hôm nay + đã rời trạng thái chờ (ngày chạy trơn) — VẪN phải được đếm.
+            new OrderPushItem { OrderSn = "A1", Status = "Đã giao", PreparedAt = "2026-08-11T03:00:00Z", PreparedDay = homNay },
+            new OrderPushItem { OrderSn = "A2", Status = HomeOverview.TrangThaiCho, PreparedAt = "2026-08-11T04:00:00Z", PreparedDay = homNay },
+            new OrderPushItem { OrderSn = "A3", Status = HomeOverview.TrangThaiCho },                 // CHƯA chuẩn bị → không đếm
+            new OrderPushItem { OrderSn = "A4", Status = "Đã giao", PreparedAt = "2026-08-01T03:00:00Z", PreparedDay = "2026-08-01" }, // ngày khác
         ]);
-        db.UpsertOrders(shopB, [new OrderPushItem { OrderSn = "B1", Status = HomeOverview.TrangThaiCho }]);
+        db.UpsertOrders(shopB,
+            [new OrderPushItem { OrderSn = "B1", Status = "Đã giao", PreparedAt = "2026-08-11T05:00:00Z", PreparedDay = homNay }]);
 
         var so = DailyDigest.GomSoLieu(db, new FleetSnapshot(), DateTimeOffset.UtcNow, TimeSpan.FromMinutes(10));
 
         Assert.Equal(3, so.TongDonCho);
         Assert.Equal(new[] { ("shop-a", 2), ("shop-b", 1) }, so.TheoShop.ToArray());
-        // Số này phải KHỚP thẻ "Đơn chờ hôm nay" của trang chủ (cùng truy vấn).
-        Assert.Equal(HomeOverview.DonChoHomNay(db, DateTimeOffset.UtcNow), so.TongDonCho);
     }
 
     [Fact]
@@ -170,7 +176,7 @@ public sealed class DailyDigestTests : IDisposable
             maTraMoi: 4, shopCanhBaoDiaChi: 2, mayOffline: 1);
 
         Assert.Contains("TỔNG KẾT NGÀY 06/08/2026", text);
-        Assert.Contains("Đơn chuẩn bị hàng phát sinh hôm nay: 78", text);
+        Assert.Contains("Đơn đã chuẩn bị hàng hôm nay: 78", text); // "ĐÃ chuẩn bị" — khớp nguồn prepared_day (T7)
         Assert.Contains("• shop-01 — 12 đơn", text);
         Assert.Contains("… và 2 shop nữa.", text);      // 12 shop, in 10
         Assert.DoesNotContain("shop-11", text);
@@ -185,8 +191,71 @@ public sealed class DailyDigestTests : IDisposable
         var text = OrderNotifyService.TaoTinNhanTongKetNgay(
             new DateTime(2026, 8, 6, 21, 0, 0), 0, theoShop: null, 0, 0, 0);
 
-        Assert.Contains("(chưa shop nào có đơn hôm nay)", text);
+        Assert.Contains("(chưa shop nào chuẩn bị đơn hôm nay)", text);
         Assert.DoesNotContain("null", text);
+    }
+
+    // ══════════ T8: mốc "đã gửi" ghi SAU khi tin được XỬ (OnDone) + chốt in-flight ══════════
+
+    private DailyDigestService DungService(HubDatabase db, FleetStateService fleet, WebhookQueueService queue)
+        => new(db, fleet, queue, NullLogger<DailyDigestService>.Instance);
+
+    private static void BatTongKet(HubDatabase db)
+    {
+        db.SetSetting(SettingKeys.NotifyTongKetBat, "1");
+        db.SetSetting(SettingKeys.NotifyWebhookTongKet, "https://example.invalid/hook");
+        db.SetSetting(SettingKeys.NotifyTongKetGio, "21");
+    }
+
+    /// <summary>Restart đúng lúc không được nuốt tin: mốc bền CHỈ ghi khi worker đã xử xong (OnDone) — trước đó
+    /// restart ⇒ mốc trống ⇒ nhịp đầu sau restart gửi lại. Trong lúc tin còn nằm hàng đợi, nhịp 60s KHÔNG được
+    /// xếp trùng (chốt in-flight bộ nhớ).</summary>
+    [Fact]
+    public void MotLuot_MocChiGhiSauOnDone_VaKhongXepTrungTrongLucCho()
+    {
+        using var db = new HubDatabase(_dataDir);
+        BatTongKet(db);
+        using var fleet = new FleetStateService(db, NullLogger<FleetStateService>.Instance);
+        using var queue = new WebhookQueueService(db, NullLogger<WebhookQueueService>.Instance);
+        var svc = DungService(db, fleet, queue);
+        var luc = LucVn("2026-08-11", 21);
+
+        var daXep = new List<WebhookNotification>();
+        svc.MotLuot(luc, tin => { daXep.Add(tin); return true; });
+        var tinDau = Assert.Single(daXep);
+
+        // Chưa xử xong → mốc bền CHƯA ghi (đây chính là chỗ bản cũ ghi TRƯỚC rồi mất tin khi restart).
+        Assert.NotEqual("2026-08-11", (db.GetSetting(SettingKeys.NotifyTongKetDaGuiNgay) ?? "").Trim());
+
+        // Nhịp 60s kế trong lúc tin còn trong hàng đợi: không xếp thêm tin thứ hai.
+        svc.MotLuot(luc.AddMinutes(1), tin => { daXep.Add(tin); return true; });
+        Assert.Single(daXep);
+
+        // Worker xử xong (KỂ CẢ gửi fail — chính sách "webhook chết thì mất tin, có log" giữ nguyên) → mốc ghi,
+        // các nhịp sau đọc mốc bền và im.
+        tinDau.OnDone!.Invoke(false);
+        Assert.Equal("2026-08-11", db.GetSetting(SettingKeys.NotifyTongKetDaGuiNgay));
+        svc.MotLuot(luc.AddMinutes(2), tin => { daXep.Add(tin); return true; });
+        Assert.Single(daXep);
+    }
+
+    /// <summary>Queue đầy (TryQueue false) → KHÔNG đụng mốc, KHÔNG kẹt chốt — nhịp sau thử lại từ đầu.</summary>
+    [Fact]
+    public void MotLuot_QueueDay_KhongGhiMoc_NhipSauThuLaiDuoc()
+    {
+        using var db = new HubDatabase(_dataDir);
+        BatTongKet(db);
+        using var fleet = new FleetStateService(db, NullLogger<FleetStateService>.Instance);
+        using var queue = new WebhookQueueService(db, NullLogger<WebhookQueueService>.Instance);
+        var svc = DungService(db, fleet, queue);
+        var luc = LucVn("2026-08-11", 21);
+
+        svc.MotLuot(luc, _ => false); // xếp không được (queue đầy)
+        Assert.NotEqual("2026-08-11", (db.GetSetting(SettingKeys.NotifyTongKetDaGuiNgay) ?? "").Trim());
+
+        var daXep = new List<WebhookNotification>();
+        svc.MotLuot(luc.AddMinutes(1), tin => { daXep.Add(tin); return true; }); // nhịp sau THỬ LẠI được
+        Assert.Single(daXep);
     }
 
     public void Dispose()

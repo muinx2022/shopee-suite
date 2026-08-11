@@ -145,7 +145,10 @@ CREATE INDEX IF NOT EXISTS ix_orders_status ON orders(status);");
                 c.Transaction = tx;
                 // final_amount / final_amount_text / tracking_number dùng COALESCE($moi, cot_cu): đơn ĐẨY LẠI (vd
                 // client đẩy lại vì trạng thái đổi sang "Đã hủy") có thể KHÔNG còn kèm số tiền cuối cùng / mã vận
-                // đơn — giữ giá trị hub ĐANG CÓ thay vì xoá về NULL. Các cột còn lại (nhất là status /
+                // đơn — giữ giá trị hub ĐANG CÓ thay vì xoá về NULL. Các cột TEXT trong nhóm đó còn bọc thêm
+                // NULLIF(TRIM(x),'') (T4, review 11/08): COALESCE trần không chặn CHUỖI RỖNG — một client lỗi đẩy
+                // "" là xoá tracking/mã trả/prepared_* trên hub không mốc không notify. Khoá hợp đồng ở tầng SQL
+                // thay vì tin mọi client đời sau đều gửi null tử tế. Các cột còn lại (nhất là status /
                 // status_description / cancel_reason) GHI ĐÈ thẳng: đó chính là dữ liệu cần cập nhật.
                 // prepared_at / prepared_day cũng COALESCE: đơn đẩy lại không kèm thì GIỮ, và MÁY KHÁC đẩy lại
                 // KHÔNG ghi đè ngày của máy đã thực sự chuẩn bị đơn (nguồn đếm /prepare-stats).
@@ -171,15 +174,15 @@ VALUES($s,$sn,$soi,$bu,$ij,$ic,$is,$sku,$tp,$tpt,$fa,$fat,$pm,$st,$sd,$cr,$ch,$c
 ON CONFLICT(shop_id,order_sn) DO UPDATE SET
   shopee_order_id=$soi, buyer_username=$bu, items_json=$ij, item_count=$ic, item_summary=$is, sku=$sku,
   total_price=$tp, total_price_text=$tpt,
-  final_amount=COALESCE($fa,final_amount), final_amount_text=COALESCE($fat,final_amount_text),
+  final_amount=COALESCE($fa,final_amount), final_amount_text=COALESCE(NULLIF(TRIM($fat),''),final_amount_text),
   payment_method=$pm,
   status=$st, status_description=$sd, cancel_reason=$cr, channel=$ch, carrier=$ca,
-  tracking_number=COALESCE($tn,tracking_number),
-  prepared_at=COALESCE($pa,prepared_at), prepared_day=COALESCE($pd,prepared_day),
+  tracking_number=COALESCE(NULLIF(TRIM($tn),''),tracking_number),
+  prepared_at=COALESCE(NULLIF(TRIM($pa),''),prepared_at), prepared_day=COALESCE(NULLIF(TRIM($pd),''),prepared_day),
   return_code_at=CASE WHEN TRIM(COALESCE($rrc,'')) <> ''
                        AND TRIM(COALESCE($rrc,'')) <> TRIM(COALESCE(return_request_code,''))
                       THEN $sa ELSE return_code_at END,
-  return_request_code=COALESCE($rrc,return_request_code),
+  return_request_code=COALESCE(NULLIF(TRIM($rrc),''),return_request_code),
   synced_at=$sa;";
                 c.Parameters.AddWithValue("$s", shopId);
                 c.Parameters.AddWithValue("$sn", o.OrderSn);
@@ -439,38 +442,49 @@ WHERE o.first_seen_at >= $from AND o.first_seen_at < $to"
     /// Gom số đơn theo TỪNG shop trong khoảng UTC <c>[fromUtc, toUtcExclusive)</c> bằng MỘT lượt quét bảng
     /// <c>orders</c> — trang Giao việc bám nhịp fleet nên
     /// KHÔNG đếm lại từng shop một (mỗi lần một query riêng).
-    /// <paramref name="waitingStatus"/> = trạng thái coi là "đang chờ" (vd "Chờ lấy hàng"). Shop chưa có đơn nào
-    /// → KHÔNG có dòng (bên gọi tự hiển thị 0). Lọc bằng <c>first_seen_at</c>, tuyệt đối không dùng
+    /// "Đang chờ" đo bằng <see cref="ShopeeShippingNav.LaChuanBiHang"/> TRÊN các đơn KHÔNG bị hủy
+    /// (<see cref="ShopeeShippingNav.LaDonHuy"/>) — đúng nguyên bộ luật của NeedsAction trong thống kê dùng
+    /// chung (T6, review 11/08: bản trước so <c>status=$w</c> CHÍNH XÁC nên status mang biến thể là hai màn
+    /// hình ra hai số; thiếu vế LaDonHuy thì đơn "Chờ lấy hàng" nhưng đã có <c>cancel_reason</c> vẫn lệch giữa
+    /// hai bộ đếm). Gộp bằng C# trên các dòng của khoảng ngày (vài trăm dòng/ngày, connection đọc WAL) thay vì
+    /// mô phỏng nửa vời luật contains bằng LIKE trong SQL. Shop chưa có đơn nào → KHÔNG có dòng
+    /// (bên gọi tự hiển thị 0). Lọc bằng <c>first_seen_at</c>, tuyệt đối không dùng
     /// <c>synced_at</c> vì đồng bộ lại sẽ làm đơn cũ nhảy sang ngày mới. Hàm ĐỌC thuần, không đụng hàm đếm sẵn có.
     /// </summary>
     public List<ShopOrderSummary> ShopOrderSummaries(
-        string waitingStatus,
         DateTimeOffset fromUtc,
         DateTimeOffset toUtcExclusive)
     {
         // Connection ĐỌC riêng (WAL) — trang Giao việc gọi hàm này mỗi ≤10s theo nhịp fleet.
         using var conn = OpenReadConnection();
-        var list = new List<ShopOrderSummary>();
         using var c = conn.CreateCommand();
-        // MAX(synced_at) so sánh chuỗi ISO ("o") — mọi bản ghi đều do Iso(UtcNow) ghi nên cùng định dạng,
-        // thứ tự từ điển = thứ tự thời gian.
-        // Đặt khoảng ngày ở WHERE để SQLite dùng ix_orders_first_seen và không GROUP BY toàn bộ lịch sử.
-        c.CommandText = "SELECT shop_id, "
-            + "SUM(CASE WHEN status=$w THEN 1 ELSE 0 END), "
-            + "SUM(CASE WHEN slip_at IS NOT NULL THEN 1 ELSE 0 END), "
-            + "MAX(synced_at) FROM orders "
-            + "WHERE first_seen_at >= $from AND first_seen_at < $to GROUP BY shop_id";
-        c.Parameters.AddWithValue("$w", waitingStatus ?? "");
+        // Đặt khoảng ngày ở WHERE để SQLite dùng ix_orders_first_seen và không quét toàn bộ lịch sử.
+        c.CommandText = "SELECT shop_id, status, slip_at, synced_at, status_description, cancel_reason FROM orders "
+            + "WHERE first_seen_at >= $from AND first_seen_at < $to";
         c.Parameters.AddWithValue("$from", Iso(fromUtc.ToUniversalTime()));
         c.Parameters.AddWithValue("$to", Iso(toUtcExclusive.ToUniversalTime()));
+
+        var gom = new Dictionary<long, (int Waiting, int WithSlip, DateTimeOffset LastSynced)>();
         using var rd = c.ExecuteReader();
         while (rd.Read())
-            list.Add(new ShopOrderSummary(
-                rd.GetInt64(0),
-                rd.IsDBNull(1) ? 0 : rd.GetInt32(1),
-                rd.IsDBNull(2) ? 0 : rd.GetInt32(2),
-                D(rd, 3)));
-        return list;
+        {
+            var shopId = rd.GetInt64(0);
+            var status = rd.IsDBNull(1) ? null : rd.GetString(1);
+            var statusDesc = rd.IsDBNull(4) ? null : rd.GetString(4);
+            var cancelReason = rd.IsDBNull(5) ? null : rd.GetString(5);
+            gom.TryGetValue(shopId, out var g);
+            if (!ShopeeShippingNav.LaDonHuy(status, statusDesc, cancelReason)
+                && ShopeeShippingNav.LaChuanBiHang(status))
+            {
+                g.Waiting++;
+            }
+            if (!rd.IsDBNull(2)) g.WithSlip++;
+            var sync = D(rd, 3);
+            if (sync > g.LastSynced) g.LastSynced = sync;
+            gom[shopId] = g;
+        }
+        return gom.Select(kv => new ShopOrderSummary(kv.Key, kv.Value.Waiting, kv.Value.WithSlip, kv.Value.LastSynced))
+            .ToList();
     }
 
     /// <summary>

@@ -189,7 +189,7 @@
         {
             _shops = Db.ListShops();
             var (fromUtc, toUtcExclusive) = GioVietNam.KhoangNgayUtc(DateTimeOffset.UtcNow);
-            _orderSums = Db.ShopOrderSummaries(WaitingStatus, fromUtc, toUtcExclusive).ToDictionary(s => s.ShopId);
+            _orderSums = Db.ShopOrderSummaries(fromUtc, toUtcExclusive).ToDictionary(s => s.ShopId);
             _shopIdByLogin = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
             foreach (var s in _shops)
             {

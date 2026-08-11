@@ -56,27 +56,27 @@ internal static class DailyDigest
     /// <summary>
     /// Gom số liệu tổng kết cho NGÀY VIỆT NAM chứa <paramref name="now"/>:
     /// <list type="bullet">
-    /// <item>đơn "chuẩn bị hàng" phát sinh hôm nay theo shop — DÙNG LẠI đúng truy vấn của thẻ "Đơn chờ hôm nay"
-    /// (<see cref="HubDatabase.ShopOrderSummaries"/>, lọc <c>first_seen_at</c> trong khoảng UTC của ngày VN) để
-    /// tin nhắn và trang chủ không bao giờ nói hai con số khác nhau;</item>
+    /// <item>đơn ĐÃ CHUẨN BỊ hôm nay theo shop — nguồn <see cref="HubDatabase.PrepareStatsByDay"/>
+    /// (<c>prepared_day</c>, mỗi đơn đúng một lần toàn fleet). T7, review 11/08: bản trước đếm ẢNH CHỤP "còn
+    /// đang chờ lúc giờ gửi tin" trong khi lời tin nói "hôm nay làm được gì" — ngày chạy càng trơn (xử hết đơn)
+    /// số càng NHỎ, nghịch hướng với chính câu chữ. Thẻ "Đơn chờ hôm nay" của trang chủ vẫn giữ định nghĩa
+    /// snapshot của nó — hai con số nay mô tả HAI chuyện khác nhau với hai nhãn khác nhau;</item>
     /// <item>mã trả hàng mới hôm nay (<see cref="HubDatabase.CountReturnCodesInRange"/>);</item>
     /// <item>số shop còn banner địa chỉ ĐANG MỞ;</item>
     /// <item>số máy mất nhịp quá <paramref name="nguongOffline"/> — cùng ngưỡng với cảnh báo máy offline để hai
     /// tính năng không có hai định nghĩa "offline".</item>
     /// </list>
-    /// Shop chưa có <c>username</c> (id lạ) → nhãn là id, không bỏ dòng (đơn vẫn phải được đếm).
+    /// Shop chưa có <c>username</c> bị <c>PrepareStatsByDay</c> bỏ (không định danh được với client — số đếm
+    /// chuẩn bị vốn do client báo theo username).
     /// </summary>
     public static SoLieuTongKet GomSoLieu(
         HubDatabase db, FleetSnapshot fleet, DateTimeOffset now, TimeSpan nguongOffline)
     {
         var (fromUtc, toUtcExclusive) = GioVietNam.KhoangNgayUtc(now);
 
-        var ten = db.ListShops().ToDictionary(s => s.Id, s => string.IsNullOrWhiteSpace(s.Username) ? s.Name : s.Username!);
-        var theoShop = db.ShopOrderSummaries(HomeOverview.TrangThaiCho, fromUtc, toUtcExclusive)
-            .Where(s => s.Waiting > 0)
-            .Select(s => (Shop: ten.TryGetValue(s.ShopId, out var n) && !string.IsNullOrWhiteSpace(n)
-                              ? n
-                              : s.ShopId.ToString(), SoDon: s.Waiting))
+        var theoShop = db.PrepareStatsByDay(NgayVn(now))
+            .Where(r => r.Count > 0)
+            .Select(r => (Shop: r.ShopUsername, SoDon: r.Count))
             .OrderByDescending(x => x.SoDon)
             .ThenBy(x => x.Shop, StringComparer.OrdinalIgnoreCase)
             .ToList();

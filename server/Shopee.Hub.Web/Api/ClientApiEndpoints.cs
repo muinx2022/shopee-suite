@@ -382,9 +382,18 @@ public static class ClientApiEndpoints
                 {
                     var dir = Path.Combine(opts.DataDir, "slips", shopId.ToString());
                     Directory.CreateDirectory(dir);
-                    File.WriteAllBytes(Path.Combine(dir, safe + ".pdf"), bytes);
-                    db.SetOrderSlipAt(shopId, sn, DateTimeOffset.UtcNow);
-                    saved++;
+                    var path = Path.Combine(dir, safe + ".pdf");
+                    File.WriteAllBytes(path, bytes);
+                    // Đơn có thể vừa bị xoá GIỮA lượt check OrderExists ở trên và đây (T9, review 11/08): UPDATE
+                    // 0 dòng mà vẫn báo `saved` là client đóng cờ hub_slip_synced_at VĨNH VIỄN còn hub ôm một
+                    // phiếu MỒ CÔI không dòng đơn nào trỏ tới. Trả "missing" để client thử lại lượt sau (đơn còn
+                    // sống sẽ được push lại trước phiếu), và xoá file vừa ghi (best-effort) cho khỏi rơi vãi.
+                    if (db.SetOrderSlipAt(shopId, sn, DateTimeOffset.UtcNow) > 0) { saved++; }
+                    else
+                    {
+                        missing.Add(sn);
+                        try { File.Delete(path); } catch { /* best-effort */ }
+                    }
                 }
                 catch (Exception ex) { errors.Add(new SlipPushError(sn, "ghi-file-loi: " + ex.Message)); }
             }
