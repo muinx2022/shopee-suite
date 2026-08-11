@@ -5,6 +5,43 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Phiên bản & cập nhật. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.9.1 — 2026-08-11
+
+Bản vá cho bước **check đơn hàng / đơn trả hàng**: sáu lỗ nặng tìm ra trong đợt review toàn luồng (app ↔
+extension ↔ lưu trữ) cộng phần trả nợ sau phản biện. Không đổi giao diện, không đổi cách dùng; DB tự nâng cấp
+(thêm 2 cột), không cần làm gì.
+
+**Hết mất mã trả hàng âm thầm** — bịt bốn đường mất mã mà mọi test cũ đều xanh:
+
+- Một đơn có **hai mã yêu cầu** trả hàng: trước đây đánh dấu "đã đẩy" theo mã đơn nên mã mới bị coi như đã xử;
+  nay đánh dấu theo đúng cặp (mã đơn, mã yêu cầu).
+- Mã **đổi ngay lúc lô đẩy Google Sheet đang bay**: lô cũ không còn đóng nhầm cờ của mã mới (thế hệ đẩy +1).
+- Đơn bị **dọn khỏi app trong lúc lô đẩy Hub đang bay**: lệnh xóa nay có mệnh đề thế hệ — đơn chưa đẩy xong
+  không bị xóa mất.
+- Ô tổng báo **có N yêu cầu mà không đọc được dòng nào** (Shopee đổi giao diện): nay cảnh báo to + GIỮ nguyên
+  mốc, không tự chốt như "shop sạch" nữa.
+
+**Shop tồn đọng sâu tự rút cạn.** Cờ "còn sót" bền theo shop: lượt nào đọc chưa hết (chạm trần 200 dòng/10
+trang) thì lượt sau tự chạy chế độ rút tồn đọng — lật trang xuyên qua vùng mã cũ cho tới đáy. Kèm cột **lý do
+còn sót** và câu nhật ký nói thẳng: kẹt vì trần (danh sách vơi là tự hết) khác với hỏng selector/sắp xếp (cần
+người xem) — trước đây hai ca này lẫn vào nhau.
+
+**Nút "trang sau" hết bấm trượt.** Cuộn instant + đo hai nhịp + trước khi bấm lại có chốt chữ ký trang (hết
+cảnh nhảy cách trang N→N+2 làm trang N+1 không ai quét). Vòng nghiệm thu thật: shop 400 đơn (~20 trang) đọc
+trọn vẹn, 0 lần trượt cả vòng.
+
+**Service worker trình duyệt chết không còn thao tác nhầm shop.** Extension nhớ tab shop bền qua các cú
+service worker bị dựng lại; mọi lệnh cấp đơn + đọc "Chờ Lấy Hàng" khi mất ngữ cảnh tab là **báo lỗi rõ** thay
+vì lùi im lặng về tab chọn shop (nguy cơ thao tác thật lên shop sai). Shop dính lỗi này được xếp **thử lại
+cuối vòng** y như rớt cầu nối — không mất trọn vòng như trước. Bịt thêm hai cửa sổ đua lúc service worker sống
+lại (tab shop lẫn tab chọn shop không còn bị kéo lùi về id đã chết).
+
+**Nghiệm thu:** build 0 warning; 1759 + 139 test xanh (8 lượt "thử phá" đều đỏ đúng chỗ rồi khôi phục); vòng
+chạy thật 12/12 shop, 1128 đơn — số đơn từng shop trùng khớp trước/sau vá.
+
+> Máy client chỉ cần bấm "Cập nhật & khởi động lại" như mọi bản — extension mới nằm trong gói, app nạp lại
+> tự động.
+
 ## v1.9.0 — 2026-08-11
 
 > **App chỉ còn chạy được bằng Brave.** Không có Brave thì app báo lỗi rồi thoát, không mở giao diện nữa.
