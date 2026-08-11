@@ -132,7 +132,20 @@ export async function ensureListTab(preferSubstrings) {
   return null;
 }
 
-// Tab dùng cho các lệnh cấp ĐƠN: ưu tiên tab shop (mở sau khi bấm "Chi tiết"), không có thì tab thao tác.
-export function orderTabId() {
-  return ctx.shopTabId != null ? ctx.shopTabId : ctx.listTabId;
+// Tab dùng cho các lệnh cấp ĐƠN — KHÔNG có đường lui.
+//
+// ⚠ Vì sao bỏ hẳn lối lùi về `listTabId` (bản trước lùi IM LẶNG): `ctx` nằm trong bộ nhớ service worker, mà SW
+// MV3 bị giết rồi dựng lại thường xuyên (đo được chu kỳ đứt 240s). SW mới có `shopTabId = null` ⇒ mọi lệnh cấp
+// đơn (`prepareNextOrder`, `setPickupAddress`, `readReturnRequests`) chạy trên TAB PICKER: kéo picker khỏi
+// /portal/shop, tab shop thành mồ côi, và nguy hiểm nhất là THAO TÁC THẬT (chuẩn bị hàng, đổi địa chỉ lấy hàng)
+// rơi vào shop sticky mà server chọn — tức shop SAI. Thà bỏ lượt: phía C# nhận `error` thì fault đúng chặng đang
+// chờ, shop ghi lỗi và vòng sau chạy lại từ `openShopDetail`.
+//
+// `shopTabId == listTabId` là HỢP LỆ (shop mở cùng tab picker) — hàm này chỉ đòi khác null.
+export function orderTabIdStrict() {
+  return ctx.shopTabId;
 }
+
+/// Câu báo dùng CHUNG cho mọi lệnh cấp đơn khi mất ngữ cảnh tab shop — một chuỗi để nhật ký C# gom được.
+export const LOI_MAT_TAB_SHOP =
+  "mất ngữ cảnh tab shop (service worker vừa khởi động lại) — bỏ lượt";

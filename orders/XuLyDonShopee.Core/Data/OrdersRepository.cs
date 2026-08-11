@@ -42,6 +42,10 @@ namespace XuLyDonShopee.Core.Data;
 /// <see cref="ShopLogin"/> = TÊN ĐĂNG NHẬP SHOP của ĐƠN (<c>shop_login</c>; null = đơn cũ chưa gắn shop) — nguồn
 /// cột "Shop" (F) trên sheet. Bắt buộc phải per-đơn: đường đẩy BÙ của worker gom MỌI shop của tài khoản trong
 /// một lượt nên không có "tên shop của cả lượt" để dùng chung.
+/// <see cref="HubPushGen"/> = thế hệ dữ liệu ĐỌC ĐƯỢC lúc dựng lô cho đường hub (<c>hub_push_gen</c>) — mang tới
+/// tận bước DỌN (<see cref="OrdersRepository.DeleteOrders"/>) để không xoá đơn mà một đường ghi vừa MỞ LẠI nghĩa
+/// vụ giữa chừng. Ảnh chụp <c>pending</c> được đọc MỘT lần rồi mới đọc PDF + POST Apps Script (nhiều phút), nên
+/// tới lúc dọn nó đã có thể cũ. Đặt ở CUỐI record (mặc định 0) để test dựng bằng tham số vị trí không vỡ.
 /// </summary>
 public sealed record GsheetPendingOrder(
     string OrderSn,
@@ -66,7 +70,8 @@ public sealed record GsheetPendingOrder(
     long GsheetPushGen,
     string? ReturnRequestCode,
     long? GsheetDaCoDonTraHang,
-    string? ShopLogin = null);
+    string? ShopLogin = null,
+    long HubPushGen = 0);
 
 /// <summary>
 /// Kết quả phát hiện đơn CHUYỂN sang "đã giao" giữa 2 lần sync (<see cref="OrdersRepository.DetectNewlyDelivered"/>),
@@ -101,10 +106,21 @@ public partial class OrdersRepository
     /// DỌN đơn KẾT THÚC (Đã giao / Đã hủy) khỏi app SAU khi mọi nghĩa vụ hoàn tất (GSheet đã ghi + "Đã bán" đã
     /// đếm + hub đã nhận). Trả về SỐ dòng thực xóa. Danh sách rỗng/null → trả 0 và KHÔNG mở connection. Đơn không
     /// có mã (rỗng) bị bỏ qua.
+    /// <para>
+    /// <b>⚠ MỆNH ĐỀ THẾ HỆ <c>hub_push_gen = $gen</c> là bắt buộc, không phải trang trí.</b> Quyết định "đơn này
+    /// dọn được" dựa trên ẢNH CHỤP <c>GetForGsheetPush</c> đọc từ đầu lượt, mà giữa lúc đó và lúc dọn có thể trôi
+    /// qua NHIỀU PHÚT (đọc PDF phiếu + POST Apps Script từng nhóm tab). Trong khoảng đó, mọi đường ghi MỞ LẠI
+    /// nghĩa vụ đều +1 thế hệ hub: nút "Đẩy lại" (<see cref="DatLaiCoDayLai"/>), mã trả hàng đổi
+    /// (<see cref="SetReturnRequestCodes"/>), <c>MarkPrepared</c>, <c>UpsertMany</c> khi trạng thái/vận đơn/ước
+    /// tính đổi. Xoá vô điều kiện bằng ảnh chụp cũ là cú bấm của người dùng bốc hơi và hub vĩnh viễn thiếu dữ
+    /// liệu — thế hệ lệch thì GIỮ đơn lại, lượt sau dọn cũng chẳng muộn.
+    /// </para>
+    /// <para><paramref name="don"/> = các cặp <c>(mã đơn, thế hệ ĐÃ CHỤP)</c>, lấy từ
+    /// <see cref="GsheetPendingOrder.HubPushGen"/> của chính ảnh chụp đã dùng để quyết định — KHÔNG đọc lại DB.</para>
     /// </summary>
-    public int DeleteOrders(long accountId, IReadOnlyCollection<string> orderSns)
+    public int DeleteOrders(long accountId, IReadOnlyCollection<(string OrderSn, long GenChup)> don)
     {
-        if (orderSns is null || orderSns.Count == 0)
+        if (don is null || don.Count == 0)
         {
             return 0;
         }
@@ -112,7 +128,7 @@ public partial class OrdersRepository
         using var conn = _db.OpenConnection();
         using var tx = conn.BeginTransaction();
         var deleted = 0;
-        foreach (var sn in orderSns)
+        foreach (var (sn, gen) in don)
         {
             if (string.IsNullOrWhiteSpace(sn))
             {
@@ -120,9 +136,11 @@ public partial class OrdersRepository
             }
             using var cmd = conn.CreateCommand();
             cmd.Transaction = tx;
-            cmd.CommandText = "DELETE FROM orders WHERE account_id = $a AND order_sn = $sn;";
+            cmd.CommandText =
+                "DELETE FROM orders WHERE account_id = $a AND order_sn = $sn AND hub_push_gen = $gen;";
             cmd.Parameters.AddWithValue("$a", accountId);
             cmd.Parameters.AddWithValue("$sn", sn);
+            cmd.Parameters.AddWithValue("$gen", gen);
             deleted += cmd.ExecuteNonQuery();
         }
         tx.Commit();
@@ -237,6 +255,14 @@ public partial class OrdersRepository
     /// Khi mã ĐỔI: <c>hub_synced_at</c> RESET về NULL và <c>gsheet_da_co_don_tra_hang</c> RESET về NULL để lượt đẩy
     /// KẾ mang mã mới lên hub + Google Sheet (đúng cơ chế cờ sẵn có của vận đơn/ước tính, không đẻ cơ chế mới).
     /// Cập nhật nhiều đơn trong một transaction (mẫu <see cref="MarkHubSynced"/>).
+    /// <para>
+    /// <b>Mở cờ nào thì +1 THẾ HỆ của đích đó — CẢ HAI đích.</b> <c>hub_push_gen + 1</c> cho đường hub và
+    /// <c>gsheet_push_gen + 1</c> cho đường Google Sheet. Thiếu vế gsheet (lỗi đã có thật): lượt đẩy sheet đang bay
+    /// gọi <see cref="MarkGsheetSynced"/> với thế hệ CŨ vẫn khớp ⇒ nó đóng lại đúng cờ
+    /// <c>gsheet_da_co_don_tra_hang</c> mà ta vừa mở ⇒ <c>donTraHangMoi</c> false VĨNH VIỄN, mã trả vừa đổi không
+    /// bao giờ đi được đường đơn thường nữa. Chốt thế hệ bảo vệ CẢ NHÓM cờ gsheet, không riêng
+    /// <c>gsheet_synced_at</c> của nút "Đẩy lại".
+    /// </para>
     /// </summary>
     public ReturnCodeSaveResult SetReturnRequestCodes(long accountId, IEnumerable<(string OrderSn, string Code)> pairs)
     {
@@ -275,7 +301,8 @@ public partial class OrdersRepository
     return_request_code = $code,
     gsheet_da_co_don_tra_hang = NULL,
     hub_synced_at = NULL,
-    hub_push_gen = hub_push_gen + 1
+    hub_push_gen = hub_push_gen + 1,
+    gsheet_push_gen = gsheet_push_gen + 1
     WHERE account_id = $a AND order_sn = $sn AND COALESCE(return_request_code, '') <> $code;";
             upd.Parameters.AddWithValue("$code", codeTrim);
             upd.Parameters.AddWithValue("$a", accountId);

@@ -1,6 +1,6 @@
 // Bước CUỐI vòng shop: trang "Trả hàng/Hoàn tiền/Hủy" — chọn tab, đổi sắp xếp, đọc ô tổng + các dòng.
 // Thân hàm GIỮ NGUYÊN từ background.js (tách 2026-08-06).
-import { send, orderTabId } from "./core.js";
+import { send, orderTabIdStrict, LOI_MAT_TAB_SHOP } from "./core.js";
 import { execInTab } from "./exec.js";
 import {
   RETURNS_URL, RETURN_TAB_RE, SORT_NEWEST_RE, SORT_MENU_MARK_RE,
@@ -13,6 +13,7 @@ import {
   pageChanDoanDiemBam,
 } from "./page-funcs-returns.js";
 import { pageFindNextPage } from "./page-funcs.js";
+import { timNutTrangSau, trangThaiTruocBamLai, SO_LAN_BAM_LAI_PAGER } from "./pager.js";
 import { dongModalChan, choHetLopPhu } from "./flow-modal.js";
 import { sleep } from "./shared/util.js";
 import { waitForTabComplete } from "./shared/tab-wait.js";
@@ -81,8 +82,7 @@ async function latTrang(tabId, list, soTrang) {
   while (soTrangLat < tran && list.length < MAX_RETURN_ROWS) {
     let sigTruoc = "";
     try { sigTruoc = (await execInTab(tabId, pageReturnListSignature, [])) || ""; } catch (e) {}
-    let next = null;
-    try { next = await execInTab(tabId, pageFindNextPage, []); } catch (e) { next = null; }
+    const next = await timNutTrangSau(tabId);
     if (!next) {
       // CHỈ chẩn đoán khi chưa lật nổi trang NÀO trong lượt này: đó mới là ca "selector pager của trang trả hàng
       // khác trang đơn" cần lộ ra. Lật được rồi mới hết nút là đường THÀNH CÔNG (đã tới trang cuối) — bắn chẩn
@@ -94,7 +94,29 @@ async function latTrang(tabId, list, soTrang) {
     }
     await ensureDbg(tabId);
     await trustedClick(tabId, next.x, next.y);
-    if (!(await waitReturnsChanged(tabId, sigTruoc, 10000))) break;
+    let doi = await waitReturnsChanged(tabId, sigTruoc, 10000);
+    // Trượt thì đo lại toạ độ + bấm LẠI đúng một lượt (layout vừa nhảy / danh sách vừa vẽ lại). Vẫn trượt ⇒ nói
+    // thẳng là đọc THIẾU: dừng câm ở đây là C# tưởng đã tới đáy rồi chốt mốc, tức nuốt phần đuôi vĩnh viễn.
+    // ⚠ TRƯỚC cú bấm lại PHẢI hỏi chữ ký (trangThaiTruocBamLai): fetch chậm >10s làm cú bấm ĐÃ ăn trông y hệt
+    // bấm trượt — bấm nữa là lật sang trang NỮA, trang vừa mở không ai quét (mất im lặng, còn tự chốt mốc).
+    for (let lai = 0; !doi && lai < SO_LAN_BAM_LAI_PAGER; lai++) {
+      const tt = await trangThaiTruocBamLai(tabId, pageReturnListSignature, sigTruoc);
+      if (tt === "doi") { doi = true; break; }                                   // cú bấm đầu đã ăn, chỉ là đổi muộn
+      if (tt === "dangTai") { doi = await waitReturnsChanged(tabId, sigTruoc, 10000); break; } // đang vẽ → chờ, KHÔNG bấm
+      const lanHai = await timNutTrangSau(tabId);
+      if (!lanHai) break;
+      await trustedClick(tabId, lanHai.x, lanHai.y);
+      doi = await waitReturnsChanged(tabId, sigTruoc, 10000);
+    }
+    if (!doi) {
+      // KHÔNG đánh số trang tuyệt đối ở đây: mỗi lệnh `readReturnRequestsMore` chỉ lật 1 trang nên số đếm trong
+      // hàm này là số CỤC BỘ — C# mới biết đang ở trang thứ mấy của cả lượt và tự log số đó.
+      send({
+        action: "progress",
+        message: "Trả hàng: bấm 'trang sau' 2 lượt mà danh sách KHÔNG đổi — dừng lật, lượt này đọc THIẾU.",
+      });
+      break;
+    }
     soTrangLat++;
     const them = await quetTrangHienTai(tabId, list.length);
     if (them.length === 0) break;
@@ -110,8 +132,8 @@ async function latTrang(tabId, list, soTrang) {
 // vòng WS (đọc DOM thừa vài chục dòng rẻ hơn nhiều so với một lượt chờ-trả-lời nữa).
 // LUÔN gửi pageData (kể cả khi không đọc được gì) để C# không phải ngồi chờ hết timeout; /verify → captcha.
 export async function doReadReturnRequests() {
-  const tabId = orderTabId();
-  if (tabId == null) { send({ action: "error", message: "chưa có tab shop để check đơn trả hàng" }); return; }
+  const tabId = orderTabIdStrict();
+  if (tabId == null) { send({ action: "error", message: "check đơn trả hàng: " + LOI_MAT_TAB_SHOP }); return; }
 
   const traVe = (summary, sortApplied, tabTraHang, list, chanDoan, them) => send({
     action: "pageData",
@@ -208,6 +230,8 @@ export async function doReadReturnRequests() {
     }
     if (ct && ct.daDung) {
       tabTraHang = true; // đã đúng tab → KHÔNG bấm (bấm lại = một vòng chờ vô ích, nhân với mọi shop mỗi lượt)
+      dangChon = ct.dangChon || ""; // dòng đối chứng bên dưới phải in được NHÃN THẬT ở ĐÚNG nhánh này — chính
+                                    // nhánh "đã đúng tab" đã cho dương tính giả 07:08 ngày 10/08/2026.
     } else if (ct) {
       const soTruoc = summary;
       let dongTruoc = 0;
@@ -380,10 +404,18 @@ export async function doReadReturnRequests() {
   }
   const list = await quetTrangHienTai(tabId, 0);
 
+  // Ô TỔNG nói CÓ mà quét ra 0 DÒNG = hỏng THẬT (selector dòng / khối đầu dòng đổi), không phải shop sạch. Thu
+  // chẩn đoán trang gửi kèm để C# in ra ngay — CHỈ ở đúng ca này, lượt bình thường không tốn thêm execInTab nào.
+  let cdTrong = null;
+  const soOTong = parseInt((String(summary).match(/[\d.,]+/) || ["0"])[0].replace(/[.,\s]/g, ""), 10) || 0;
+  if (list.length === 0 && soOTong > 0) {
+    try { cdTrong = await execInTab(tabId, pageChanDoanTraHang, []); } catch (e) { cdTrong = null; }
+  }
+
   // Lượt này CHỈ trang đầu. C# đọc ô tổng rồi so với mốc mới biết cần lật mấy trang (luật SoTrangCanDoc) — nên
   // phần sâu đi bằng lệnh THỨ HAI `readReturnRequestsMore` trên chính trang đang mở, KHÔNG mở lại trang lần nữa.
   // Cố ý không đoán trước độ sâu ở đây: đoán thừa thì mọi shop mỗi vòng đều lật trang vô ích.
-  traVe(summary, sortApplied, tabTraHang, list, null, {
+  traVe(summary, sortApplied, tabTraHang, list, cdTrong, {
     soTrangDaDoc: 1,
     coTrangSau: await coTrangSau(tabId),
   });
@@ -394,7 +426,7 @@ export async function doReadReturnRequests() {
 // hàm này KHÔNG điều hướng, KHÔNG chọn lại tab, KHÔNG đổi lại sắp xếp: chỉ lật trang và quét.
 // Trả về CÙNG khuôn `pageData kind:"returns"` (C# chỉ dùng phần `list`).
 export async function doReadReturnRequestsMore(maxPages) {
-  const tabId = orderTabId();
+  const tabId = orderTabIdStrict();
   const traVe = (list, them) => send({
     action: "pageData",
     kind: "returns",
@@ -402,7 +434,9 @@ export async function doReadReturnRequestsMore(maxPages) {
       soYeuCauText: "", sortApplied: true, tabTraHang: true, list: list || [], chanDoan: null,
     }, them || {})),
   });
-  if (tabId == null) { traVe([], { soTrangDaDoc: 0, coTrangSau: false }); return; }
+  // Mất tab shop giữa chừng ⇒ BÁO LỖI, đừng trả danh sách RỖNG: rỗng nhìn y hệt "lật trượt", mà lượt này chưa
+  // hề đọc gì trên tab shop nào cả.
+  if (tabId == null) { send({ action: "error", message: "đọc thêm trang trả hàng: " + LOI_MAT_TAB_SHOP }); return; }
 
   // Rơi /verify giữa chừng → báo captcha rồi thôi (C# coi như bỏ phần đọc thêm, phần trang đầu vẫn giữ).
   let url = "";

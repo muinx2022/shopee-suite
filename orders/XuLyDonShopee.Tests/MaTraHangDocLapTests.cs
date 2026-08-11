@@ -114,7 +114,7 @@ public class MaTraHangDocLapTests
         using var temp = new TempDatabase();
         var repo = new ReturnCodesRepository(temp.Open());
         repo.LuuMaTraHang(1, new[] { ("D1", "R1") }, "shop", Luc);
-        repo.DanhDauDaDay(1, new[] { "D1" }, Luc);
+        repo.DanhDauDaDay(1, new[] { ("D1", "R1") }, Luc);
         Assert.Empty(repo.LayMaTraHangChuaDay(1, Luc));
 
         var kq = repo.LuuMaTraHang(1, new[] { ("D1", "R1") }, "shop", Luc.AddDays(1));
@@ -131,13 +131,35 @@ public class MaTraHangDocLapTests
         using var temp = new TempDatabase();
         var repo = new ReturnCodesRepository(temp.Open());
         repo.LuuMaTraHang(1, new[] { ("D1", "R1") }, "shop", Luc);
-        repo.DanhDauDaDay(1, new[] { "D1" }, Luc);
+        repo.DanhDauDaDay(1, new[] { ("D1", "R1") }, Luc);
 
         var kq = repo.LuuMaTraHang(1, new[] { ("D1", "R2") }, "shop", Luc.AddDays(1));
 
         Assert.Equal(1, kq.DaGhi);
         Assert.Equal(("D1", "R2"), Assert.Single(kq.CapMoi));
         Assert.Equal(("D1", "R2"), Assert.Single(repo.LayMaTraHangChuaDay(1, Luc)));
+    }
+
+    /// <summary>
+    /// Lô sheet mang mã R1 bay đi; GIỮA CHỪNG bước check shop ghi mã MỚI R2 cho cùng đơn (cờ đẩy về NULL). Lô cũ
+    /// về đích KHÔNG được đóng cờ: đóng theo mã đơn TRẦN là đè lên nghĩa vụ vừa mở ⇒ R2 không bao giờ lên sheet,
+    /// không log, không badge. Lô sheet bay lâu (nhiều nhóm tab × tới 120s) nên cửa sổ đua này là chuyện thường.
+    /// </summary>
+    [Fact]
+    public void DanhDauDaDay_MaDaDoiGiuaLucLoDangBay_KhongDongCoOan()
+    {
+        using var temp = new TempDatabase();
+        var repo = new ReturnCodesRepository(temp.Open());
+        repo.LuuMaTraHang(1, new[] { ("D1", "R1") }, "shop", Luc);              // lô gửi đi mang R1
+        repo.LuuMaTraHang(1, new[] { ("D1", "R2") }, "shop", Luc.AddDays(1));   // yêu cầu tạo lại → R2, cờ mở lại
+
+        // Lô cũ về đích với đúng cặp nó đã gửi (D1, R1) — mã trong kho giờ là R2 ⇒ 0 dòng đổi.
+        Assert.Equal(0, repo.DanhDauDaDay(1, new[] { ("D1", "R1") }, Luc.AddDays(1)));
+        Assert.Equal(("D1", "R2"), Assert.Single(repo.LayMaTraHangChuaDay(1, Luc.AddDays(1))));
+
+        // ĐỐI CHỨNG: lô mang đúng mã đang có thì đóng cờ bình thường — mệnh đề này không khoá chết đường đẩy.
+        Assert.Equal(1, repo.DanhDauDaDay(1, new[] { ("D1", "R2") }, Luc.AddDays(1)));
+        Assert.Empty(repo.LayMaTraHangChuaDay(1, Luc.AddDays(1)));
     }
 
     [Fact]

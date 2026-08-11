@@ -23,7 +23,7 @@ public partial class OrdersRepository
        status, status_description, cancel_reason,
        gsheet_synced_at, gsheet_file_url, gsheet_da_huy, gsheet_da_co_van_don, gsheet_da_co_uoc_tinh,
        sold_counted_at, hub_synced_at, hub_slip_synced_at, gsheet_tab, items_json,
-       return_request_code, gsheet_da_co_don_tra_hang, shop_login, gsheet_push_gen
+       return_request_code, gsheet_da_co_don_tra_hang, shop_login, gsheet_push_gen, hub_push_gen
     FROM orders
     WHERE account_id = $a" + shopFilter + @"
     ORDER BY id;";
@@ -62,7 +62,9 @@ public partial class OrdersRepository
                 GsheetPushGen: reader.IsDBNull(21) ? 0L : reader.GetInt64(21),
                 ReturnRequestCode: reader.IsDBNull(18) ? null : reader.GetString(18),
                 GsheetDaCoDonTraHang: reader.IsDBNull(19) ? null : reader.GetInt64(19),
-                ShopLogin: reader.IsDBNull(20) ? null : reader.GetString(20)));
+                ShopLogin: reader.IsDBNull(20) ? null : reader.GetString(20),
+                // Thế hệ hub ĐỌC TRONG CÙNG lượt đọc này — bước DỌN so lại số này trước khi xoá (xem DeleteOrders).
+                HubPushGen: reader.IsDBNull(22) ? 0L : reader.GetInt64(22)));
         }
         return list;
     }

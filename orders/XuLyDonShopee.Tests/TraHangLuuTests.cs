@@ -167,8 +167,11 @@ public class TraHangLuuTests
         repo.UpsertMany(1, new[] { Don("D1") }, DateTime.UtcNow);
         repo.SetReturnRequestCodes(1, new[] { ("D1", "R001") });
         repo.MarkHubSynced(1, new[] { "D1" }, DateTime.UtcNow);
+        // Thế hệ ĐỌC LẠI, không cứng số 0: lượt ghi mã trên đã +1 gsheet_push_gen (mở cờ nào thì +1 thế hệ của
+        // đích đó — xem SetReturnRequestCodes), y như lượt đẩy thật chụp gen trong GetForGsheetPush.
+        var genHienTai = Assert.Single(repo.GetForGsheetPush(1)).GsheetPushGen;
         repo.MarkGsheetSynced(1, "D1", null, daHuy: false, coVanDon: false, coUocTinh: false,
-            coDonTraHang: true, tab: "Tháng 07-2026", at: DateTime.UtcNow, pushGen: 0);
+            coDonTraHang: true, tab: "Tháng 07-2026", at: DateTime.UtcNow, pushGen: genHienTai);
         // Vừa đẩy sheet KÈM mã → cờ = 1 (đọc đúng cột, không lệch chỉ số reader).
         Assert.Equal(1, Assert.Single(repo.GetForGsheetPush(1)).GsheetDaCoDonTraHang);
 
@@ -351,6 +354,35 @@ CREATE TABLE account_shops (
         var results = new ResultsRepository(new Database(temp.Path));
         Assert.Null(results.GetReturnCount(5, "alina99.store")); // shop cũ = chưa từng check
         Assert.Equal("Alina", Assert.Single(results.GetShops(5)).ShopName);
+    }
+
+    /// <summary>
+    /// Cột cờ "còn sót" (<c>account_shops.tra_hang_con_sot</c>, thêm 11/08/2026) phải mọc ra trên DB CŨ mà không
+    /// mất dữ liệu, và shop cũ nhận mặc định 0 = KHÔNG còn sót ⇒ hành vi y hệt trước đây (không tự dưng lật trang
+    /// ở mọi shop). Ghi cờ dùng UPSERT nên KHÔNG được đụng tên shop / mốc số yêu cầu.
+    /// </summary>
+    [Fact]
+    public void Migration_DbCu_ThemCotTraHangConSot_ShopCuMacDinhKhongConSot()
+    {
+        using var temp = new TempDatabase();
+        DungSchemaCu(temp.Path, accountId: 5, orderSn: "SNCU");
+        Assert.False(CoCot(temp.Path, "account_shops", "tra_hang_con_sot"));
+
+        var db = new Database(temp.Path); // Initialize() chạy migration ALTER TABLE
+
+        Assert.True(CoCot(temp.Path, "account_shops", "tra_hang_con_sot"));
+        var results = new ResultsRepository(db);
+        Assert.False(results.GetTraHangConSot(5, "alina99.store"));   // shop cũ = chưa từng còn sót
+        Assert.False(results.GetTraHangConSot(5, "shop.chua.co"));    // shop chưa có dòng cũng thế
+
+        results.SetTraHangConSot(5, "alina99.store", true);
+        Assert.True(new ResultsRepository(db).GetTraHangConSot(5, "alina99.store"));
+        // UPSERT KHÔNG đụng cột khác: tên shop và mốc số yêu cầu còn nguyên.
+        Assert.Equal("Alina", Assert.Single(results.GetShops(5)).ShopName);
+        Assert.Null(results.GetReturnCount(5, "alina99.store"));
+
+        results.SetTraHangConSot(5, "alina99.store", false);
+        Assert.False(new ResultsRepository(db).GetTraHangConSot(5, "alina99.store"));
     }
 
     [Fact]

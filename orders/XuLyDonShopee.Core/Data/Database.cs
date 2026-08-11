@@ -146,6 +146,9 @@ CREATE TABLE IF NOT EXISTS account_shops (
     return_count_last INTEGER,         -- MỐC CŨ, đếm trên tab Tất cả — chỉ giữ để chẩn đoán, KHÔNG còn đọc/ghi
     return_count_last_tra_hang INTEGER,-- mốc ĐANG DÙNG: số yêu cầu ở tab Đơn Trả hàng Hoàn tiền lần check gần
                                        -- nhất (NULL = chưa từng check → lượt sau quét trang đầu một lượt)
+    tra_hang_con_sot INTEGER NOT NULL DEFAULT 0, -- 1 = lượt check trả hàng gần nhất BIẾT là còn sót (chạm trần
+                                       -- dòng/trang, lật trượt, 0 dòng) ⇒ lượt sau VẪN lật trang dù trang đầu
+                                       -- không có mã mới. Xem ShopFlowRunner.CheckDonTraHangAsync.
     updated_at TEXT NOT NULL,
     UNIQUE(account_id, shop_login)
 );
@@ -282,6 +285,13 @@ CREATE TABLE IF NOT EXISTS pickup_address_alerts (
         EnsureColumn(conn, "account_shops", "return_count_last", "INTEGER");
         EnsureColumn(conn, "account_shops", "return_count_last_tra_hang", "INTEGER");
 
+        // CỜ "CÒN SÓT" của bước check trả hàng, bền THEO SHOP. Vì sao cần: một lượt chạm trần (200 dòng / 10
+        // trang) bỏ lại phần đuôi nằm SAU dải-đã-biết; lượt kế chỉ lật trang khi TRANG ĐẦU còn mã mới, mà phần
+        // đuôi thì không nằm ở trang đầu ⇒ không lượt nào với tới nữa, tới lúc nó trôi lên thì đã quá cửa sổ 20
+        // ngày và bị LocTheoCuaSo bỏ ⇒ mất vĩnh viễn. Cờ bật ⇒ lượt sau chạy "chế độ rút tồn đọng": vẫn lật trang
+        // dù trang đầu toàn mã cũ, cho tới khi đọc tới đáy thì tự tắt. Shop cũ nhận 0 = hành vi y hệt trước đây.
+        EnsureColumn(conn, "account_shops", "tra_hang_con_sot", "INTEGER NOT NULL DEFAULT 0");
+
         // MÃ YÊU CẦU TRẢ HÀNG khớp với đơn (đọc ở trang "Trả hàng/Hoàn tiền/Hủy" cuối flow shop) — đẩy lên cột
         // "Đơn trả hàng" của Google Sheet + hub + màn Đơn hàng. NULL = đơn chưa có yêu cầu trả hàng nào.
         // gsheet_da_co_don_tra_hang = lần đẩy sheet gần nhất ĐÃ gửi kèm mã này chưa (0/1; NULL = chưa) — mẫu y
@@ -303,8 +313,10 @@ CREATE TABLE IF NOT EXISTS pickup_address_alerts (
         EnsureColumn(conn, "orders", "hub_push_gen", "INTEGER NOT NULL DEFAULT 0");
         EnsureColumn(conn, "orders", "hub_push_gen_sent", "INTEGER");
 
-        // CÙNG BỆNH, PHÍA GOOGLE SHEET: `gsheet_push_gen` = thế hệ dữ liệu của đơn cho đường ghi sheet. Chỗ duy
-        // nhất reset `gsheet_synced_at = NULL` là nút "Đẩy lại" (`DatLaiCoDayLai`) nên chỉ chỗ đó +1; còn
+        // CÙNG BỆNH, PHÍA GOOGLE SHEET: `gsheet_push_gen` = thế hệ dữ liệu của đơn cho đường ghi sheet. Chốt thế
+        // hệ ở đây bảo vệ CẢ NHÓM cờ gsheet (`gsheet_synced_at` + 4 cờ `gsheet_da_*`), nên MỌI đường ghi mở BẤT KỲ
+        // cờ nào trong nhóm đều phải +1 cột này: nút "Đẩy lại" (`DatLaiCoDayLai`) và `SetReturnRequestCodes` (mã
+        // trả hàng đổi → mở `gsheet_da_co_don_tra_hang`). Còn
         // `MarkGsheetSynced` chỉ đóng cờ khi thế hệ CÒN BẰNG số đã đọc ra lúc dựng lô. Không có lớp bảo vệ này
         // thì lượt đẩy sheet đang bay (chu kỳ 2 phút, mỗi lượt vài giây) đóng lại đúng bộ cờ mà cú bấm "Đẩy lại"
         // vừa mở ⇒ thao tác của người dùng bị NUỐT IM LẶNG trong khi màn hình đã báo "đã xếp vào hàng chờ".

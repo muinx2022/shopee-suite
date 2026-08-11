@@ -11,18 +11,27 @@ import { sleep } from "./shared/util.js";
 import { waitForTabComplete } from "./shared/tab-wait.js";
 import { ensureDbg, trustedClick } from "./shared/dbg-input.js";
 
+// Ghi ctx.shopTabId + LƯU BỀN vào chrome.storage.session. Vì sao phải bền: `ctx` nằm trong bộ nhớ service
+// worker, mà SW MV3 bị giết/dựng lại liên tục giữa hai shop; SW mới có shopTabId = null nên MỌI lệnh cấp đơn
+// sau đó không còn tab shop (trước 11/08/2026 chúng lùi im lặng về tab picker và thao tác THẬT lên shop sai).
+// Đi qua ĐÚNG một hàm này để không có đường nào gán ctx.shopTabId mà quên lưu.
+function nhoTabShop(tabId) {
+  ctx.shopTabId = tabId;
+  try { chrome.storage.session.set({ shopTabId: tabId }); } catch (e) {}
+}
+
 // GĐ4: đóng tab shop hiện tại rồi VỀ picker /portal/shop (giữa các shop). Shop thường mở ở TAB RIÊNG (shopTabId
 // khác listTabId) → chỉ đóng tab đó, picker (listTabId) còn nguyên. Nếu shop mở CÙNG tab picker → điều hướng
 // listTabId về /portal/shop. Cuối cùng poll tr[data-row-key] để chắc chắn picker sẵn sàng cho shop kế.
 export async function doCloseShopTab() {
   if (ctx.shopTabId != null && ctx.shopTabId !== ctx.listTabId) {
     try { await chrome.tabs.remove(ctx.shopTabId); } catch (e) {}
-    ctx.shopTabId = null;
+    nhoTabShop(null);
   } else if (ctx.listTabId != null) {
     // Shop mở cùng tab picker (hoặc không rõ) → đưa picker về /portal/shop.
     try { await chrome.tabs.update(ctx.listTabId, { url: SHOP_LIST_URL }); } catch (e) {}
     await waitForTabComplete(ctx.listTabId, 20000);
-    ctx.shopTabId = null;
+    nhoTabShop(null);
   }
   if (ctx.listTabId == null) { send({ action: "shopTabClosed", ok: false }); return; }
   const st = await ensureShopPicker(ctx.listTabId); // "ok" | "verify" | "stuck"
@@ -95,7 +104,7 @@ export async function gotoSellerCentre() {
   if (!found) { send({ action: "error", message: "bấm 'Kênh Người bán' xong chờ 90s chưa thấy Seller Centre" }); return; }
 
   ctx.listTabId = found.id;
-  ctx.shopTabId = null;
+  nhoTabShop(null);
   // Áp lệnh chặn SDK chat NGAY khi biết tab Seller Centre, TRƯỚC lúc chờ nó load xong: chặn kịp thì
   // chateasy/minichat không bao giờ được nạp trên tab này. Nuốt lỗi sẵn bên trong, không phá luồng.
   await ensureDbg(ctx.listTabId);
@@ -214,7 +223,7 @@ export async function openShopDetail(shopId) {
     await sleep(500);
   }
   if (!found) { send({ action: "error", message: "chờ 30s chưa thấy tab shop mở" }); return; }
-  ctx.shopTabId = found.id;
+  nhoTabShop(found.id);
   // Tab shop VỪA mở, trang chưa load xong — đây là lúc duy nhất chặn kịp SDK chat trước khi nó chạy.
   await ensureDbg(ctx.shopTabId);
 

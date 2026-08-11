@@ -1,6 +1,6 @@
 // Địa chỉ lấy hàng của shop: đặt về tỉnh cần gửi (trước khi xử đơn) và trả VỀ địa chỉ khác (sau khi xử xong).
 // Thân hàm GIỮ NGUYÊN từ background.js (tách 2026-08-06).
-import { send, orderTabId } from "./core.js";
+import { send, orderTabIdStrict, LOI_MAT_TAB_SHOP } from "./core.js";
 import { execInTab } from "./exec.js";
 import { SHIPPING_SETTINGS_URL } from "./constants.js";
 import {
@@ -110,8 +110,8 @@ async function thuDatDiaChi(tabId, province, donModalTruoc) {
 // ⚠ BẤT BIẾN: mỗi lần gọi hàm này, C# Arm MỘT chặng pickup rồi chờ ĐÚNG MỘT pickupDone — mọi lối ra phải gửi
 // đúng một cái, trừ nhánh captcha (đã gửi action captcha, KHÔNG gửi pickupDone).
 export async function doSetPickupAddress(province) {
-  const tabId = orderTabId();
-  if (tabId == null) { send({ action: "error", message: "chưa có tab shop để đặt địa chỉ" }); return; }
+  const tabId = orderTabIdStrict();
+  if (tabId == null) { send({ action: "error", message: "đặt địa chỉ lấy hàng: " + LOI_MAT_TAB_SHOP }); return; }
 
   let kq = await thuDatDiaChi(tabId, province, /*donModalTruoc*/ true);
   if (kq.captcha) { return; }            // thuDatDiaChi đã send captcha
@@ -135,8 +135,8 @@ export async function doSetPickupAddress(province) {
 // Set địa chỉ lấy hàng VỀ ĐỊA CHỈ KHÁC (sau khi xử hết đơn) — port SetPickupAddressToOtherAsync. Tick CHỈ 2
 // (mặc định + lấy hàng, skipReturn=true → GIỮ tag "trả hàng" ở địa chỉ mặc định). → {action:"pickupOtherDone", ok}.
 export async function doSetPickupAddressToOther() {
-  const tabId = orderTabId();
-  if (tabId == null) { send({ action: "error", message: "chưa có tab shop để set địa chỉ khác" }); return; }
+  const tabId = orderTabIdStrict();
+  if (tabId == null) { send({ action: "error", message: "trả địa chỉ về mặc định: " + LOI_MAT_TAB_SHOP }); return; }
 
   try { await chrome.tabs.update(tabId, { url: SHIPPING_SETTINGS_URL }); } catch (e) {}
   await waitForTabComplete(tabId, 20000);

@@ -202,6 +202,12 @@ public sealed class OrdersBridgeSession : IDisposable
     /// Shops không. Shop đang treo banner mà lượt này không có đơn Chờ Lấy Hàng thì vẫn chạy riêng bước đặt địa chỉ,
     /// để banner có đường TỰ hết (xem <c>ShopFlowRunner.QuyetDinhBuocDiaChi</c>). null → coi như không shop nào có
     /// banner ⇒ hành vi y hệt trước 10/08/2026.</param>
+    /// <param name="conSotTraHang">Lượt check trả hàng TRƯỚC của shop này (tham số = nhãn shop) có biết là còn sót
+    /// không (<c>account_shops.tra_hang_con_sot</c>). Bật ⇒ lượt này vẫn lật trang dù trang đầu không có mã mới
+    /// (chế độ rút tồn đọng — xem <c>ShopFlowRunner.CheckDonTraHangAsync</c>). null → coi như không shop nào còn
+    /// sót ⇒ hành vi y hệt trước 11/08/2026.</param>
+    /// <param name="luuConSotTraHang">Ghi lại cờ trên sau mỗi lượt check (nhãn shop, còn sót hay không). null →
+    /// không ghi (đường "Chạy thử").</param>
     public OrdersBridgeSession(string userDataDir, Action<string>? log = null,
         string? invoiceDir = null, string? province = null,
         Func<string, string, IReadOnlyList<SyncedOrder>, CancellationToken, Task>? syncCallback = null,
@@ -215,7 +221,9 @@ public sealed class OrdersBridgeSession : IDisposable
         Func<IReadOnlyList<YeuCauTraHang>, string>? saveReturnCodes = null,
         Func<string, CancellationToken, Task<IReadOnlyList<string>>>? layDonThieuPhieu = null,
         Func<IReadOnlyList<YeuCauTraHang>, int>? demMaTraChuaBiet = null,
-        Func<string, bool>? dangCoCanhBaoDiaChi = null)
+        Func<string, bool>? dangCoCanhBaoDiaChi = null,
+        Func<string, bool>? conSotTraHang = null,
+        Action<string, bool>? luuConSotTraHang = null)
     {
         _userDataDir = userDataDir;
         _log = log;
@@ -227,7 +235,7 @@ public sealed class OrdersBridgeSession : IDisposable
         _channel = new OrdersBridgeChannel(log);
         _flow = new ShopFlowRunner(_channel, log, invoiceDir, _province, syncCallback, finalDoneSns,
             onOrderPrepared, returnCountLast, saveReturnCount, saveReturnCodes, layDonThieuPhieu,
-            demMaTraChuaBiet, dangCoCanhBaoDiaChi);
+            demMaTraChuaBiet, dangCoCanhBaoDiaChi, conSotTraHang, luuConSotTraHang);
     }
 
     private void L(string m) => _log?.Invoke(m);

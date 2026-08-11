@@ -24,7 +24,7 @@
 //                {action:"error",    message}
 //
 // Sau đợt tách 2026-08-06 file này CHỈ còn wiring: import module + đăng ký listener + dispatch handleCommand.
-//   core.js               state chung (ctx) + cầu WS + ensureListTab/orderTabId
+//   core.js               state chung (ctx) + cầu WS + ensureListTab/orderTabIdStrict
 //   constants.js          URL Seller Centre / trần quét / regex nhãn
 //   exec.js               execInTab + pageInstallHelpers (bơm hàm vào tab, world MAIN)
 //   page-funcs.js         hàm page* thuần DOM (picker shop, đơn, modal, phiếu, địa chỉ) + _na/_provCore
@@ -94,11 +94,25 @@ try {
   });
 } catch (e) { /* không dựng được cổng bền → vẫn còn nhịp sendMessage + alarms */ }
 
+// Khôi phục ctx.shopTabId sau khi service worker bị giết — nhưng CHỈ khi tab đó còn sống VÀ còn đứng ở Seller
+// Centre. Không validate thì một id cũ (tab đã đóng, hoặc trình duyệt cấp lại id đó cho tab khác) sẽ dẫn các
+// lệnh cấp đơn — gồm cả thao tác THẬT như chuẩn bị hàng / đổi địa chỉ lấy hàng — vào một tab lạ. Không hợp lệ
+// thì để null: `orderTabIdStrict` sẽ bỏ lượt có báo lỗi, C# cho shop chạy lại từ `openShopDetail`.
+async function khoiPhucTabShop(id) {
+  try {
+    const t = await chrome.tabs.get(id);
+    if (t && (t.url || t.pendingUrl || "").indexOf("banhang.shopee.vn") >= 0) { ctx.shopTabId = id; return; }
+  } catch (e) {}
+  ctx.shopTabId = null;
+  try { chrome.storage.session.set({ shopTabId: null }); } catch (e) {}
+}
+
 // Service worker khởi động lại (MV3 có thể ngủ) → nạp cổng đã lưu (hoặc mặc định) rồi nối lại.
 function noiLaiTuStorage() {
   try {
-    chrome.storage.session.get(["wsPort", "listTabId"], (v) => {
+    chrome.storage.session.get(["wsPort", "listTabId", "shopTabId"], (v) => {
       if (v && v.listTabId != null) ctx.listTabId = v.listTabId;
+      if (v && v.shopTabId != null) { khoiPhucTabShop(v.shopTabId).catch(() => {}); }
       bridge.connect(v && v.wsPort ? v.wsPort : undefined);
     });
   } catch (e) { bridge.connect(); }

@@ -542,7 +542,10 @@ public static class HubOutbox
             // ===== DỌN đơn KẾT THÚC (Đã giao / Đã hủy) đã hoàn tất mọi nghĩa vụ khỏi app =====
             // Thư mục phiếu để kiểm "còn phiếu local chưa đẩy hub" (giữ đơn tới khi phiếu lên hub). Đọc 1 lần.
             var slipDir = services.Settings.GetInvoiceFolder();
-            var deletable = new List<string>();
+            // Kèm THẾ HỆ đã chụp lúc đọc `pending` (đầu lượt): giữa đó và đây có thể trôi vài phút, và mọi đường
+            // ghi mở lại nghĩa vụ đều +1 thế hệ ⇒ đơn vừa được "Đẩy lại"/vừa có mã trả mới sẽ KHÔNG bị dọn theo
+            // ảnh chụp cũ. Xem OrdersRepository.DeleteOrders.
+            var deletable = new List<(string OrderSn, long GenChup)>();
             var terminalChuaXong = 0;
             foreach (var p in pending)
             {
@@ -557,7 +560,7 @@ public static class HubOutbox
                     && SlipFiles.SlipFileIsValidPdf(Path.Combine(slipDir, ShopeeShippingNav.SanitizeFileName(p.OrderSn) + ".pdf"));
                 if (OrderPersistPipeline.NenXoaDonKetThuc(p, settled.Contains(p.OrderSn), hubHookActive, coPhieuLocalChuaDayHub))
                 {
-                    deletable.Add(p.OrderSn);
+                    deletable.Add((p.OrderSn, p.HubPushGen));
                 }
                 else
                 {
@@ -570,6 +573,13 @@ public static class HubOutbox
                 var n = services.Orders.DeleteOrders(accountId, deletable);
                 services.RaiseOrdersChanged(); // lưới Đơn hàng đang mở tự vẽ lại
                 log($"Dọn: đã lưu sheet & xóa {n} đơn kết thúc (Đã giao/Đã hủy) khỏi app.");
+                if (n < deletable.Count)
+                {
+                    // KHÔNG im lặng: đúng ca ai đó bấm "Đẩy lại" / mã trả hàng vừa đổi trong lúc lượt này đang bay
+                    // — nhìn nhật ký là hiểu ngay vì sao đơn còn nằm lại thay vì biến mất. Câu chữ chừa đường cho
+                    // ca thứ hai (một lượt chạy song song đã dọn trước — phiên vs worker) kẻo log kết luận oan.
+                    log($"Dọn: {deletable.Count - n} đơn KHÔNG xóa lượt này (nghĩa vụ vừa mở lại giữa lượt, hoặc lượt chạy song song đã dọn trước) — lượt sau xử tiếp.");
+                }
             }
             if (terminalChuaXong > 0)
             {
@@ -659,10 +669,19 @@ public static class HubOutbox
             var day = 0;
             var loi = 0;
             var boQua = 0;
+            var lechHopDong = 0;
             string? loiDau = null;
             foreach (var nhom in rowsByTab)
             {
-                var xong = new List<string>();
+                var xong = new List<(string OrderSn, string Code)>();
+                // MÃ ĐÃ GỬI của từng đơn trong CHÍNH lô này — nguồn duy nhất đúng để đánh dấu. Trong lúc lô bay
+                // (mỗi nhóm tới 120s), bước check shop có thể ghi mã MỚI cho cùng đơn đó; đọc lại DB ở chỗ đánh
+                // dấu là đóng cờ đè lên nghĩa vụ vừa mở. Xem ReturnCodesRepository.DanhDauDaDay.
+                var maDaGui = new Dictionary<string, string>(StringComparer.Ordinal);
+                foreach (var row in nhom.Value)
+                {
+                    maDaGui[row.MaDon] = row.DonTraHang;
+                }
                 var results = await services.GsheetSync
                     .PushReturnCodesAsync(url, nhom.Key, nhom.Value, log, ct, sheet2).ConfigureAwait(false);
                 foreach (var r in results)
@@ -675,9 +694,18 @@ public static class HubOutbox
                         // Chặn thử-lại-vô-hạn nằm ở ReturnCodesRepository.SoNgayThuLaiSheet, không phải ở đây.
                         boQua++;
                     }
+                    else if (r.Ok && maDaGui.TryGetValue(r.MaDon, out var maDaDay))
+                    {
+                        xong.Add((r.MaDon, maDaDay));
+                    }
                     else if (r.Ok)
                     {
-                        xong.Add(r.MaDon);
+                        // Script trả về một mã đơn KHÔNG có trong lô vừa gửi (lệch hợp đồng) → không biết đóng cờ
+                        // của mã nào ⇒ GIỮ lại, lượt sau đẩy lại. Thà thừa một lượt còn hơn nuốt mất một mã.
+                        // ĐẾM RIÊNG, không gộp vào boQua: câu tóm tắt của boQua nói "chưa thấy dòng đơn / thiếu
+                        // tiêu đề cột" — gộp vào là người dùng đi sửa tiêu đề cột trong khi thủ phạm là script
+                        // trả sai mã đơn.
+                        lechHopDong++;
                     }
                     else
                     {
@@ -693,6 +721,10 @@ public static class HubOutbox
             if (boQua > 0)
             {
                 tomTat += $" {boQua} mã script BỎ QUA (chưa thấy dòng đơn trên sheet / thiếu tiêu đề cột) — GIỮ lại, thử lại lượt sau.";
+            }
+            if (lechHopDong > 0)
+            {
+                tomTat += $" {lechHopDong} phản hồi mang mã đơn KHÔNG có trong lô (script trả sai?) — GIỮ lại, thử lại lượt sau.";
             }
             if (loi > 0)
             {

@@ -337,6 +337,11 @@ export function pageListSignature() {
 }
 
 // Nút "trang sau" còn DÙNG ĐƯỢC (có box, không disabled) → toạ độ; port FindNextPageButtonAsync + IsUsableNextButtonAsync.
+// ⚠ behavior "instant": mặc định ("auto") theo CSS `scroll-behavior`, mà trang cuộn MƯỢT thì rect đo NGAY sau
+// scrollIntoView vẫn là toạ độ CŨ ⇒ cú bấm rơi xuống chỗ trống. Đúng thủ phạm đã kết luận cho nút sắp xếp
+// (pageLocateSortButton), mà pager còn dính nặng hơn: nó LUÔN nằm đáy trang nên lần nào cũng phải cuộn. Triệu
+// chứng nhìn y hệt "hết trang" ⇒ mất sạch đơn từ trang 2 trở đi, không một dòng log.
+// Chỗ gọi CÒN đo lại lần hai sau một nhịp nghỉ — xem `timNutTrangSau` trong pager.js.
 export function pageFindNextPage() {
   const sels = [
     ".eds-pager button.eds-pager__button-next",
@@ -354,7 +359,8 @@ export function pageFindNextPage() {
       if (el.getAttribute("aria-disabled") === "true") continue;
       const cls = (el.getAttribute("class") || "").toLowerCase();
       if (cls.split(/\s+/).some((c) => c.indexOf("disabled") >= 0)) continue;
-      try { el.scrollIntoView({ block: "center" }); } catch (e) {}
+      try { el.scrollIntoView({ block: "center", behavior: "instant" }); }
+      catch (e) { try { el.scrollIntoView({ block: "center" }); } catch (e2) {} }
       const r = el.getBoundingClientRect();
       return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
     }

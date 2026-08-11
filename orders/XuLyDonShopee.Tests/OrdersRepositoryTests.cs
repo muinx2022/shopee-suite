@@ -519,7 +519,8 @@ public class OrdersRepositoryTests
         repo.UpsertMany(1, new[] { Make("SN1"), Make("SN2"), Make("SN3") }, DateTime.UtcNow);
         repo.UpsertMany(2, new[] { Make("SN1") }, DateTime.UtcNow); // cùng mã SN1 nhưng tài khoản KHÁC
 
-        var deleted = repo.DeleteOrders(1, new[] { "SN1", "SN2" });
+        // Đơn mới upsert có hub_push_gen = 0 → thế hệ chụp cũng 0 (xem DeleteOrders về mệnh đề thế hệ).
+        var deleted = repo.DeleteOrders(1, new[] { ("SN1", 0L), ("SN2", 0L) });
 
         Assert.Equal(2, deleted);
         Assert.Equal(new[] { "SN3" }, repo.GetOrderSns(1).OrderBy(x => x)); // còn lại SN3
@@ -533,7 +534,7 @@ public class OrdersRepositoryTests
         var repo = new OrdersRepository(temp.Open());
         repo.UpsertMany(1, new[] { Make("SN1") }, DateTime.UtcNow);
 
-        Assert.Equal(0, repo.DeleteOrders(1, Array.Empty<string>()));
+        Assert.Equal(0, repo.DeleteOrders(1, Array.Empty<(string, long)>()));
         Assert.Equal(1, repo.CountByAccount(1)); // không xóa gì
     }
 
@@ -544,7 +545,7 @@ public class OrdersRepositoryTests
         var repo = new OrdersRepository(temp.Open());
         repo.UpsertMany(1, new[] { Make("SN1") }, DateTime.UtcNow);
 
-        Assert.Equal(0, repo.DeleteOrders(1, new[] { "KHONGCO" }));
+        Assert.Equal(0, repo.DeleteOrders(1, new[] { ("KHONGCO", 0L) }));
         Assert.Equal(1, repo.CountByAccount(1));
     }
 

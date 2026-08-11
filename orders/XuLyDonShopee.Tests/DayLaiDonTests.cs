@@ -169,6 +169,81 @@ public class DayLaiDonTests
         Assert.Equal(0, repo.CountForGsheetPush(Acc));
     }
 
+    /// <summary>
+    /// CÙNG lớp lỗi, đường KHÁC: <see cref="OrdersRepository.SetReturnRequestCodes"/> (bước check đơn trả hàng)
+    /// MỞ cờ <c>gsheet_da_co_don_tra_hang</c> — đó cũng là một cờ trong nhóm gsheet, nên phải +1 thế hệ y như nút
+    /// "Đẩy lại". Thiếu vế đó thì lô sheet đang bay đóng lại đúng cờ vừa mở ⇒ <c>donTraHangMoi</c> false VĨNH
+    /// VIỄN, mã trả vừa đổi không bao giờ đi được đường đơn thường nữa.
+    /// </summary>
+    [Fact]
+    public void MaTraHangDoi_XenGiuaLoSheetDangBay_KhongDongCoOan()
+    {
+        using var temp = new TempDatabase();
+        var repo = new OrdersRepository(temp.Open());
+        repo.UpsertMany(Acc, new[] { Don("SN1") }, DateTime.UtcNow);
+        // Đơn đã ghi sheet xong ở lượt trước, lúc đó CHƯA có mã trả hàng.
+        repo.MarkGsheetSynced(Acc, "SN1", null, daHuy: false, coVanDon: true, coUocTinh: false,
+            coDonTraHang: false, tab: "Tháng 08-2026", at: DateTime.UtcNow, pushGen: 0);
+
+        var loDangBay = Doc(repo);                                    // lô sheet kế bắt đầu bay: chụp thế hệ
+        repo.SetReturnRequestCodes(Acc, new[] { ("SN1", "R-MOI") });  // check trả hàng ghi mã MỚI giữa chừng
+
+        // Lô cũ về đích, đòi đóng cờ bằng thế hệ CŨ (và khai "đã gửi kèm mã trả") → phải bị từ chối.
+        repo.MarkGsheetSynced(Acc, "SN1", null, daHuy: false, coVanDon: true, coUocTinh: false,
+            coDonTraHang: true, tab: "Tháng 08-2026", at: DateTime.UtcNow, pushGen: loDangBay.GsheetPushGen);
+
+        var sau = Doc(repo);
+        Assert.Null(sau.GsheetDaCoDonTraHang);  // cờ VẪN mở ⇒ lượt sau thật sự mang mã mới lên sheet
+        Assert.Equal("R-MOI", sau.ReturnRequestCode);
+        Assert.True(XuLyDonShopee.App.Services.HubOutbox.ConNghiaVuGhiSheet(sau, coFileBoSung: false));
+
+        // ĐỐI CHỨNG: lô MỚI (đọc lại thế hệ) đóng cờ bình thường — chốt này không khoá chết đường đẩy.
+        var loMoi = Doc(repo);
+        Assert.Equal(1, loMoi.GsheetPushGen);
+        repo.MarkGsheetSynced(Acc, "SN1", null, daHuy: false, coVanDon: true, coUocTinh: false,
+            coDonTraHang: true, tab: "Tháng 08-2026", at: DateTime.UtcNow, pushGen: loMoi.GsheetPushGen);
+        Assert.Equal(1, Doc(repo).GsheetDaCoDonTraHang);
+        Assert.False(XuLyDonShopee.App.Services.HubOutbox.ConNghiaVuGhiSheet(Doc(repo), coFileBoSung: false));
+    }
+
+    /// <summary>
+    /// BƯỚC DỌN không được tin ẢNH CHỤP: <c>PushOrdersToGsheetAsync</c> đọc <c>pending</c> một lần ở đầu lượt rồi
+    /// vài phút sau (đọc PDF + POST Apps Script) mới dọn bằng chính ảnh đó. Cú bấm "Đẩy lại" rơi vào giữa ⇒ đơn
+    /// vừa được mở lại nghĩa vụ mà bị xoá theo ảnh cũ là bốc hơi vĩnh viễn (không còn đơn để đẩy lại).
+    /// </summary>
+    [Fact]
+    public void Don_DonDaXongNhungCoMoLaiGiuaLuot_KhongBiXoa()
+    {
+        using var temp = new TempDatabase();
+        var repo = RepoVoiDonDaXong(temp);
+
+        var anhChup = Doc(repo);                  // bước đẩy sheet đọc pending ở ĐẦU lượt
+        repo.DatLaiCoDayLai(Acc, "SN1");          // user bấm "Đẩy lại" trong lúc lô đang bay (+1 thế hệ hub)
+
+        Assert.Equal(0, repo.DeleteOrders(Acc, new[] { (anhChup.OrderSn, anhChup.HubPushGen) }));
+        Assert.Single(repo.Query(Acc));           // đơn CÒN trong app → lượt sau đẩy lại thật
+
+        // ĐỐI CHỨNG: không ai đụng gì giữa chừng → dọn bình thường.
+        var moi = Doc(repo);
+        Assert.Equal(1, repo.DeleteOrders(Acc, new[] { (moi.OrderSn, moi.HubPushGen) }));
+        Assert.Empty(repo.Query(Acc));
+    }
+
+    /// <summary>Cùng bước dọn, đường mở lại KHÁC: mã yêu cầu trả hàng vừa xuất hiện giữa lượt (cũng +1 thế hệ
+    /// hub). Xoá đơn lúc này là hub vĩnh viễn thiếu mã.</summary>
+    [Fact]
+    public void Don_MaTraHangVuaGhiGiuaLuot_KhongBiXoa()
+    {
+        using var temp = new TempDatabase();
+        var repo = RepoVoiDonDaXong(temp);
+
+        var anhChup = Doc(repo);
+        repo.SetReturnRequestCodes(Acc, new[] { ("SN1", "R-MOI") });
+
+        Assert.Equal(0, repo.DeleteOrders(Acc, new[] { (anhChup.OrderSn, anhChup.HubPushGen) }));
+        Assert.Single(repo.Query(Acc));
+    }
+
     [Fact]
     public void ChotTheHe_ChanCoDaDay_NhungKHONG_Chan_TabVaLinkPhieu()
     {

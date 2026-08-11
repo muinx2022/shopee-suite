@@ -35,10 +35,13 @@ public class TraHangKhongBoSotTests
         Func<string, int?>? returnCountLast = null,
         Action<string, int>? saveReturnCount = null,
         Func<IReadOnlyList<YeuCauTraHang>, string>? saveReturnCodes = null,
-        Func<IReadOnlyList<YeuCauTraHang>, int>? demMaTraChuaBiet = null)
+        Func<IReadOnlyList<YeuCauTraHang>, int>? demMaTraChuaBiet = null,
+        Func<string, bool>? conSotTraHang = null,
+        Action<string, bool>? luuConSotTraHang = null)
         => new(rig.Channel, rig.Log, invoiceDir: null, Tinh, syncCallback: null, finalDoneSns: null,
             onOrderPrepared: null, returnCountLast, saveReturnCount, saveReturnCodes,
-            layDonThieuPhieu: null, demMaTraChuaBiet: demMaTraChuaBiet);
+            layDonThieuPhieu: null, demMaTraChuaBiet: demMaTraChuaBiet, dangCoCanhBaoDiaChi: null,
+            conSotTraHang: conSotTraHang, luuConSotTraHang: luuConSotTraHang);
 
     /// <summary>HTML đầu dòng đúng khuôn trang thật (class <c>order-id</c> / <c>return-id</c>).</summary>
     private static string DongHtml(string maDon, string maYeuCau) =>
@@ -325,6 +328,219 @@ public class TraHangKhongBoSotTests
             () => rig.NhanLenhAsync(TimeSpan.FromMilliseconds(300)));
     }
 
+    // ===================== 2b. Ô tổng CÓ mà 0 dòng = hỏng THẬT (11/08/2026) =====================
+
+    /// <summary>
+    /// Selector dòng / khối đầu dòng đổi ⇒ ô tổng vẫn đọc được "33 yêu cầu" nhưng KHÔNG dòng nào ra. Bản trước
+    /// bỏ nguyên khối lưu (điều kiện <c>dong.Count > 0</c>) mà KHÔNG log, rồi vẫn chốt mốc ⇒ mọi shop "trông
+    /// khỏe" trong khi 0 mã nào được đọc, lặp lại mọi vòng. Phải: GIỮ mốc + cảnh báo + bật cờ còn sót.
+    /// </summary>
+    [Fact]
+    public async Task OTongCoSo_MaKhongDocDuocDongNao_GiuMoc_CanhBao_BatCoConSot()
+    {
+        await using var rig = await BridgeTestRig.StartAsync();
+        var moc = new List<(string Shop, int So)>();
+        var co = new List<(string Shop, bool ConSot)>();
+        var flow = Runner(rig,
+            returnCountLast: _ => 30,
+            saveReturnCount: (shop, so) => moc.Add((shop, so)),
+            saveReturnCodes: _ => "ok",
+            luuConSotTraHang: (shop, conSot) => co.Add((shop, conSot)));
+
+        var chay = flow.CheckDonTraHangAsync("shop1", CancellationToken.None);
+        using (await rig.NhanLenhAsync()) { }
+        await rig.GuiAsync(TrangTraHang("33 Yêu cầu"));   // ô tổng CÓ số, list RỖNG
+        await chay;
+
+        Assert.Empty(moc);                                // MỐC GIỮ NGUYÊN
+        Assert.Equal(("shop1", true), Assert.Single(co)); // shop bị đánh dấu còn sót
+        Assert.True(rig.CoLog("KHÔNG đọc được dòng nào"));
+    }
+
+    /// <summary>ĐỐI CHỨNG: shop SẠCH thật (ô tổng 0, không dòng nào) phải giữ NGUYÊN hành vi cũ — mốc 0 ghi bình
+    /// thường, không cảnh báo, không bật cờ.</summary>
+    [Fact]
+    public async Task OTongBang0_KhongCoDong_VanChotMoc0_KhongCanhBao()
+    {
+        await using var rig = await BridgeTestRig.StartAsync();
+        var moc = new List<(string Shop, int So)>();
+        var co = new List<(string Shop, bool ConSot)>();
+        var flow = Runner(rig,
+            returnCountLast: _ => 3,
+            saveReturnCount: (shop, so) => moc.Add((shop, so)),
+            saveReturnCodes: _ => "ok",
+            luuConSotTraHang: (shop, conSot) => co.Add((shop, conSot)));
+
+        var chay = flow.CheckDonTraHangAsync("shop1", CancellationToken.None);
+        using (await rig.NhanLenhAsync()) { }
+        await rig.GuiAsync(TrangTraHang("0 Yêu cầu"));
+        await chay;
+
+        Assert.Equal(("shop1", 0), Assert.Single(moc));
+        Assert.Equal(("shop1", false), Assert.Single(co));
+        Assert.False(rig.CoLog("KHÔNG đọc được dòng nào"));
+    }
+
+    // ===================== 2c. Cờ "còn sót" bền theo shop: rút cạn tồn đọng (11/08/2026) =====================
+
+    /// <summary>
+    /// LƯỢT SAU của một shop từng chạm trần: trang đầu KHÔNG còn mã mới (phần đuôi bỏ lại nằm SAU dải-đã-biết,
+    /// không bao giờ hiện ở trang đầu) — nếu chỉ nhìn "trang đầu còn mã mới" thì không lượt nào với tới nó nữa,
+    /// tới lúc nó trôi lên thì đã quá cửa sổ 20 ngày ⇒ mất vĩnh viễn. Cờ bật ⇒ VẪN lật trang.
+    /// Lượt này đọc tới ĐÁY (hết trang) ⇒ tắt cờ + chốt mốc.
+    /// </summary>
+    [Fact]
+    public async Task ConSot_TrangDauKhongCoMaMoi_VanLatTrang_DocToiDay_TatCo()
+    {
+        await using var rig = await BridgeTestRig.StartAsync();
+        var moc = new List<(string Shop, int So)>();
+        var co = new List<(string Shop, bool ConSot)>();
+        var capDaLuu = new List<YeuCauTraHang>();
+        var flow = Runner(rig,
+            returnCountLast: _ => 141,
+            saveReturnCount: (shop, so) => moc.Add((shop, so)),
+            saveReturnCodes: cap => { capDaLuu.AddRange(cap); return "ok"; },
+            demMaTraChuaBiet: _ => 0,                     // kho đã biết HẾT mã của mọi trang đọc được
+            conSotTraHang: _ => true,                     // lượt trước còn sót
+            luuConSotTraHang: (shop, conSot) => co.Add((shop, conSot)));
+
+        var chay = flow.CheckDonTraHangAsync("shop1", CancellationToken.None);
+        using (await rig.NhanLenhAsync()) { }
+        await rig.GuiAsync(TrangTraHang("141 Yêu cầu", coTrangSau: true, dong:
+            new object[] { new { headHtml = DongHtml("260731AAAAAA", MaYeuCauHomNay("0AAAAAAAA")), laTraHang = true } }));
+
+        // Đúng chỗ bản cũ dừng: trang đầu 0 mã mới. Cờ bật ⇒ phải xin trang tiếp.
+        using (var lenh2 = await rig.NhanLenhAsync())
+        {
+            Assert.Equal("readReturnRequestsMore", lenh2.RootElement.GetProperty("action").GetString());
+        }
+        // Trang 2 CŨNG toàn mã cũ — phải đi XUYÊN QUA vùng đã biết mới tới phần đuôi lượt trước bỏ lại, nên
+        // KHÔNG được dừng ở đây (bản cũ `break` ngay khi trang không còn mã mới).
+        await rig.GuiAsync(TrangTraHang("", coTrangSau: true, dong:
+            new object[] { new { headHtml = DongHtml("260730BBBBBB", MaYeuCauHomNay("0BBBBBBBB")), laTraHang = true } }));
+        using (var lenh3 = await rig.NhanLenhAsync())
+        {
+            Assert.Equal("readReturnRequestsMore", lenh3.RootElement.GetProperty("action").GetString());
+        }
+        await rig.GuiAsync(TrangTraHang("", coTrangSau: false, dong:
+            new object[] { new { headHtml = DongHtml("260729CCCCCC", MaYeuCauHomNay("0CCCCCCCC")), laTraHang = true } }));
+        await chay;
+
+        Assert.Equal(3, capDaLuu.Count);                    // gom cả ba trang
+        Assert.Equal(("shop1", 141), Assert.Single(moc));   // đọc tới đáy ⇒ chốt mốc
+        Assert.Equal(("shop1", false), Assert.Single(co));  // và TẮT cờ — tồn đọng đã rút cạn
+        Assert.True(rig.CoLog("RÚT TỒN"));
+    }
+
+    /// <summary>Lượt chạm TRẦN DÒNG: bỏ lại phần đuôi ⇒ giữ mốc + BẬT cờ để lượt sau rút tiếp.</summary>
+    [Fact]
+    public async Task ChamTranDong_GiuMoc_VaBatCoConSot()
+    {
+        await using var rig = await BridgeTestRig.StartAsync();
+        var moc = new List<(string Shop, int So)>();
+        var co = new List<(string Shop, bool ConSot)>();
+        var flow = Runner(rig,
+            returnCountLast: _ => 340,
+            saveReturnCount: (shop, so) => moc.Add((shop, so)),
+            saveReturnCodes: _ => "ok",
+            demMaTraChuaBiet: cap => cap.Count,           // trang đầu toàn mã mới ⇒ đòi lật tiếp
+            conSotTraHang: _ => false,
+            luuConSotTraHang: (shop, conSot) => co.Add((shop, conSot)));
+
+        // Trang đầu đã đủ TRẦN DÒNG của cả lượt → vào vòng lật là chạm trần ngay, không xin thêm trang nào.
+        var dongDay = Enumerable.Range(0, TraHangParser.TranDongMoiLuot)
+            .Select(i => (object)new
+            {
+                headHtml = DongHtml($"260731{i:D8}", MaYeuCauHomNay($"0{i:D8}")),
+                laTraHang = true,
+            })
+            .ToArray();
+
+        var chay = flow.CheckDonTraHangAsync("shop1", CancellationToken.None);
+        using (await rig.NhanLenhAsync()) { }
+        await rig.GuiAsync(TrangTraHang("340 Yêu cầu", coTrangSau: true, dong: dongDay));
+        await chay;
+
+        Assert.Empty(moc);                                  // mốc GIỮ NGUYÊN
+        Assert.Equal(("shop1", true), Assert.Single(co));   // bật cờ ⇒ lượt sau rút tồn đọng
+        Assert.True(rig.CoLog($"chạm trần {TraHangParser.TranDongMoiLuot} dòng"));
+    }
+
+    /// <summary>Lật TRƯỢT (bấm trượt / danh sách không vẽ lại): đã giữ mốc từ trước, nay còn phải BẬT cờ — không
+    /// thì lượt sau lại chỉ nhìn trang đầu và bỏ luôn phần chưa đọc.</summary>
+    [Fact]
+    public async Task LatTrangTruot_BatCoConSot()
+    {
+        await using var rig = await BridgeTestRig.StartAsync();
+        var co = new List<(string Shop, bool ConSot)>();
+        var flow = Runner(rig,
+            returnCountLast: _ => 141,
+            saveReturnCount: (_, _) => { },
+            saveReturnCodes: _ => "ok",
+            demMaTraChuaBiet: _ => 1,
+            luuConSotTraHang: (shop, conSot) => co.Add((shop, conSot)));
+
+        var chay = flow.CheckDonTraHangAsync("shop1", CancellationToken.None);
+        using (await rig.NhanLenhAsync()) { }
+        await rig.GuiAsync(TrangTraHang("141 Yêu cầu", coTrangSau: true, dong:
+            new object[] { new { headHtml = DongHtml("260731AAAAAA", MaYeuCauHomNay()), laTraHang = true } }));
+        using (await rig.NhanLenhAsync()) { }                    // readReturnRequestsMore
+        await rig.GuiAsync(TrangTraHang("", coTrangSau: false)); // lật trượt → 0 dòng
+        await chay;
+
+        Assert.Equal(("shop1", true), Assert.Single(co));
+    }
+
+    /// <summary>ĐỐI CHỨNG giữ hành vi cũ: shop KHÔNG còn sót + trang đầu không có mã mới ⇒ vẫn KHÔNG lật trang
+    /// (chi phí lượt thường không đổi), chốt mốc và ghi cờ tắt.</summary>
+    [Fact]
+    public async Task KhongConSot_TrangDauKhongCoMaMoi_VanKhongLatTrang()
+    {
+        await using var rig = await BridgeTestRig.StartAsync();
+        var co = new List<(string Shop, bool ConSot)>();
+        var flow = Runner(rig,
+            returnCountLast: _ => 141,
+            saveReturnCount: (_, _) => { },
+            saveReturnCodes: _ => "ok",
+            demMaTraChuaBiet: _ => 0,
+            conSotTraHang: _ => false,
+            luuConSotTraHang: (shop, conSot) => co.Add((shop, conSot)));
+
+        var chay = flow.CheckDonTraHangAsync("shop1", CancellationToken.None);
+        using (await rig.NhanLenhAsync()) { }
+        await rig.GuiAsync(TrangTraHang("141 Yêu cầu", coTrangSau: true, dong:
+            new object[] { new { headHtml = DongHtml("260731AAAAAA", MaYeuCauHomNay()), laTraHang = true } }));
+        await chay;
+
+        Assert.Equal(("shop1", false), Assert.Single(co));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => rig.NhanLenhAsync(TimeSpan.FromMilliseconds(300)));
+    }
+
+    /// <summary>Cờ "còn sót" KHÔNG được vượt ràng buộc cũ: không đổi được sắp xếp thì thứ tự trang không tin
+    /// được ⇒ vẫn CẤM lật trang (cùng lắm là bật cờ để lượt sau thử lại).</summary>
+    [Fact]
+    public async Task ConSot_NhungKhongDoiDuocSapXep_VanKhongLatTrang()
+    {
+        await using var rig = await BridgeTestRig.StartAsync();
+        var flow = Runner(rig,
+            returnCountLast: _ => 141,
+            saveReturnCount: (_, _) => { },
+            saveReturnCodes: _ => "ok",
+            demMaTraChuaBiet: _ => 5,
+            conSotTraHang: _ => true);
+
+        var chay = flow.CheckDonTraHangAsync("shop1", CancellationToken.None);
+        using (await rig.NhanLenhAsync()) { }
+        await rig.GuiAsync(TrangTraHang("141 Yêu cầu", sortApplied: false, coTrangSau: true, dong:
+            new object[] { new { headHtml = DongHtml("260731AAAAAA", MaYeuCauHomNay()), laTraHang = true } }));
+        await chay;
+
+        Assert.True(rig.CoLog("chỉ đọc trang đầu"));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => rig.NhanLenhAsync(TimeSpan.FromMilliseconds(300)));
+    }
+
     // ===================== 3. Sheet không nuốt mã =====================
 
     /// <summary>Script trả <c>ok:true</c> + <c>boQua:true</c> (không tra thấy mã đơn ở tab nào) ⇒ phải đọc được
@@ -386,7 +602,7 @@ public class TraHangKhongBoSotTests
             Luc.AddDays(-ReturnCodesRepository.SoNgayThuLaiSheet - 1));
         repo.LuuMaTraHang(1, new[] { ("DA_DAY", "R-DD") }, "shop",
             Luc.AddDays(-ReturnCodesRepository.SoNgayThuLaiSheet - 1));
-        repo.DanhDauDaDay(1, new[] { "DA_DAY" }, Luc);
+        repo.DanhDauDaDay(1, new[] { ("DA_DAY", "R-DD") }, Luc);
 
         // Chỉ đếm mã CHƯA đẩy được mà đã quá hạn — mã đã đẩy xong thì không phải nợ nần gì.
         Assert.Equal(1, repo.DemQuaHanThuLai(1, Luc));
@@ -511,6 +727,48 @@ public class TraHangKhongBoSotTests
         await chay;
         Assert.Equal(new YeuCauTraHang("260731AAAAAA", ma), Assert.Single(capDaLuu));
         Assert.Equal("shop1", flow.PickupFailedShop);   // vẫn báo đúng lỗi địa chỉ cho vòng ngoài
+    }
+
+    /// <summary>
+    /// Extension trả <c>error</c> cho chặng "set địa chỉ về địa chỉ khác" (ca thật sau V7: service worker chết
+    /// giữa shop → mất ngữ cảnh tab, <c>orderTabIdStrict</c> báo lỗi thay vì thao tác trên tab picker). Bước này
+    /// là BEST-EFFORT chạy SAU khi shop đã xử xong: lỗi ở đây phải được nuốt y như quá hạn — shop KHÔNG được tính
+    /// "hỏng giữa chừng" (mất tổng kết, 3 shop liên tiếp là dừng cả vòng) và bước check trả hàng VẪN phải chạy.
+    /// Bản đầu chỉ <c>catch (TimeoutException)</c> nên <c>error</c> (InvalidOperationException) xuyên thẳng ra ngoài.
+    /// </summary>
+    [Fact]
+    public async Task TraDiaChiVeKhac_ExtensionBaoLoi_VanChayCheckTraHang_KhongNemRaNgoai()
+    {
+        await using var rig = await BridgeTestRig.StartAsync();
+        var flow = new ShopFlowRunner(rig.Channel, rig.Log, invoiceDir: TempDirTam(), Tinh,
+            syncCallback: null, finalDoneSns: null, onOrderPrepared: null,
+            returnCountLast: _ => 0,
+            saveReturnCount: (_, _) => { },
+            saveReturnCodes: _ => "ok");
+
+        var chay = flow.RunShopOrdersAsync("sid", "shop1", toShip: 2, CancellationToken.None);
+
+        using (await rig.NhanLenhAsync()) { }                                    // syncOrders
+        await rig.GuiAsync(new { action = "pageData", kind = "orders", data = "[]" });
+        using (await rig.NhanLenhAsync()) { }                                    // setPickupAddress
+        await rig.GuiAsync(new { action = "pickupDone", ok = true });
+        using (await rig.NhanLenhAsync()) { }                                    // prepareNextOrder
+        await rig.GuiAsync(new { action = "noOrder" });
+        using (var lenh = await rig.NhanLenhAsync())                             // setPickupAddressToOther
+        {
+            Assert.Equal("setPickupAddressToOther", lenh.RootElement.GetProperty("action").GetString());
+        }
+        await rig.GuiAsync(new { action = "error", message = "set địa chỉ khác: mất ngữ cảnh tab shop — bỏ lượt" });
+
+        // Lỗi best-effort đã được nuốt ⇒ mắt xích cuối vẫn tới: lệnh kế là check trả hàng.
+        using (var lenh = await rig.NhanLenhAsync())
+        {
+            Assert.Equal("readReturnRequests", lenh.RootElement.GetProperty("action").GetString());
+        }
+        await rig.GuiAsync(TrangTraHang("0 Yêu cầu"));
+
+        await chay;                                    // KHÔNG ném — shop không bị tính "hỏng giữa chừng"
+        Assert.Equal("shop1", flow.PickupOkShop);      // tín hiệu "địa chỉ OK" giữ nguyên cho vòng ngoài
     }
 
     private static string TempDirTam()

@@ -485,7 +485,12 @@ public partial class AccountSession : ObservableObject, IAccountSession
                     // khi có đơn để in phiếu). So nhãn KHÔNG phân biệt hoa/thường: khóa SQL so BINARY, C# so
                     // OrdinalIgnoreCase — cùng cạm bẫy đã ghi ở OrderPersistPipeline.GoBannerLoiDiaChi.
                     dangCoCanhBaoDiaChi: shopLabel => _services.PickupAlerts.ListActive(_accountId)
-                        .Any(a => string.Equals(a.ShopLogin, shopLabel, StringComparison.OrdinalIgnoreCase)));
+                        .Any(a => string.Equals(a.ShopLogin, shopLabel, StringComparison.OrdinalIgnoreCase)),
+                    // Cờ "còn sót" bền theo shop: lượt chạm trần bỏ lại phần đuôi nằm SAU dải-đã-biết, mà phần đuôi
+                    // đó không bao giờ hiện ở trang đầu ⇒ không có cờ này thì không lượt nào với tới nó nữa.
+                    conSotTraHang: shopLabel => _services.Results.GetTraHangConSot(_accountId, shopLabel),
+                    luuConSotTraHang: (shopLabel, conSot) =>
+                        _services.Results.SetTraHangConSot(_accountId, shopLabel, conSot));
                 _bridge = bridge;
                 OrdersBridgeRunResult result;
                 try

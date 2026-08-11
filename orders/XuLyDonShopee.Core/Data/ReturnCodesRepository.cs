@@ -218,12 +218,24 @@ public class ReturnCodesRepository
         => DbSerialization.FormatDate((nowUtc ?? DateTime.UtcNow).AddDays(-SoNgayThuLaiSheet));
 
     /// <summary>
-    /// Đánh dấu các mã ĐÃ đẩy lên Google Sheet lúc <paramref name="luc"/> (một transaction). Danh sách rỗng → 0,
-    /// KHÔNG mở kết nối. Mã đơn rỗng bị bỏ qua. Trả về số dòng thực đổi.
+    /// Đánh dấu các CẶP <c>(mã đơn, mã yêu cầu)</c> ĐÃ đẩy lên Google Sheet lúc <paramref name="luc"/> (một
+    /// transaction). Danh sách rỗng → 0, KHÔNG mở kết nối. Cặp thiếu mã đơn / thiếu mã bị bỏ qua. Trả về số dòng
+    /// thực đổi.
+    /// <para>
+    /// <b>⚠ BẤT BIẾN: so CẢ <c>code</c>, không chỉ mã đơn.</b> Một lô sheet bay khá lâu (nhiều nhóm tab, mỗi lượt
+    /// POST tới 120s) mà bước check shop chạy SONG SONG có thể ghi mã MỚI cho đúng đơn đó —
+    /// <see cref="LuuMaTraHang"/> khi mã ĐỔI sẽ reset <c>gsheet_synced_at</c> về NULL, tức mở một nghĩa vụ đẩy MỚI.
+    /// Đóng cờ theo mã đơn TRẦN là đóng đè lên nghĩa vụ vừa mở ⇒ mã mới không bao giờ lên sheet, không log,
+    /// không badge — đúng lớp lỗi "mất dữ liệu âm thầm" mà bảng này sinh ra để chặn.
+    /// </para>
+    /// <para>
+    /// <b>Cặp phải lấy từ chính payload ĐÃ GỬI</b> (danh sách <c>GsheetReturnCodeRow</c> của lô), TUYỆT ĐỐI không
+    /// đọc lại DB tại chỗ đánh dấu: đọc lại là lấy đúng mã MỚI rồi tự tay đóng cờ của nó.
+    /// </para>
     /// </summary>
-    public int DanhDauDaDay(long accountId, IReadOnlyCollection<string> orderSns, DateTime luc)
+    public int DanhDauDaDay(long accountId, IReadOnlyCollection<(string OrderSn, string Code)> cap, DateTime luc)
     {
-        if (orderSns is null || orderSns.Count == 0)
+        if (cap is null || cap.Count == 0)
         {
             return 0;
         }
@@ -232,19 +244,20 @@ public class ReturnCodesRepository
         using var conn = _db.OpenConnection();
         using var tx = conn.BeginTransaction();
         var n = 0;
-        foreach (var sn in orderSns)
+        foreach (var (sn, code) in cap)
         {
-            if (string.IsNullOrWhiteSpace(sn))
+            if (string.IsNullOrWhiteSpace(sn) || string.IsNullOrWhiteSpace(code))
             {
                 continue;
             }
             using var cmd = conn.CreateCommand();
             cmd.Transaction = tx;
-            cmd.CommandText =
-                "UPDATE return_codes SET gsheet_synced_at = $at WHERE account_id = $a AND order_sn = $sn;";
+            cmd.CommandText = "UPDATE return_codes SET gsheet_synced_at = $at "
+                + "WHERE account_id = $a AND order_sn = $sn AND code = $code;";
             cmd.Parameters.AddWithValue("$at", atStr);
             cmd.Parameters.AddWithValue("$a", accountId);
             cmd.Parameters.AddWithValue("$sn", sn.Trim());
+            cmd.Parameters.AddWithValue("$code", code.Trim());
             n += cmd.ExecuteNonQuery();
         }
         tx.Commit();

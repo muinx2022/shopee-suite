@@ -100,6 +100,11 @@ internal sealed class ShopFlowRunner
     // Đếm mã CHƯA có trong kho `return_codes` — tín hiệu quyết định còn lật trang trả hàng nữa hay không
     // (Core không biết accountId nên App rót vào). Null → KHÔNG lật trang, chỉ đọc trang đầu.
     private readonly Func<IReadOnlyList<YeuCauTraHang>, int>? _demMaTraChuaBiet;
+    // CỜ "CÒN SÓT" bền theo shop (account_shops.tra_hang_con_sot) — đọc đầu lượt, ghi cuối lượt. Bật ⇒ lượt này
+    // chạy "chế độ rút tồn đọng" (lật trang cả khi trang đầu toàn mã cũ). Null → coi như không shop nào còn sót
+    // ⇒ hành vi y hệt trước 11/08/2026 (đường "Chạy thử" không rót).
+    private readonly Func<string, bool>? _conSotTraHang;
+    private readonly Action<string, bool>? _luuConSotTraHang;
     // TỰ TẢI LẠI PHIẾU THIẾU: App trả danh sách order_sn của ĐÚNG shop đang mở đang có mã vận đơn NHƯNG thiếu file
     // PDF hợp lệ, đã xếp MỚI NHẤT TRƯỚC (Core không biết accountId/thư mục phiếu của App). Null → bỏ HẲN bước —
     // đó cũng là đường "Chạy thử" (RunSliceCoreAsync): nó chỉ đọc, không lưu, nên không được kéo theo bước này.
@@ -146,7 +151,9 @@ internal sealed class ShopFlowRunner
         Func<IReadOnlyList<YeuCauTraHang>, string>? saveReturnCodes,
         Func<string, CancellationToken, Task<IReadOnlyList<string>>>? layDonThieuPhieu = null,
         Func<IReadOnlyList<YeuCauTraHang>, int>? demMaTraChuaBiet = null,
-        Func<string, bool>? dangCoCanhBaoDiaChi = null)
+        Func<string, bool>? dangCoCanhBaoDiaChi = null,
+        Func<string, bool>? conSotTraHang = null,
+        Action<string, bool>? luuConSotTraHang = null)
     {
         _ch = channel;
         _log = log;
@@ -161,6 +168,8 @@ internal sealed class ShopFlowRunner
         _layDonThieuPhieu = layDonThieuPhieu;
         _demMaTraChuaBiet = demMaTraChuaBiet;
         _dangCoCanhBaoDiaChi = dangCoCanhBaoDiaChi;
+        _conSotTraHang = conSotTraHang;
+        _luuConSotTraHang = luuConSotTraHang;
     }
 
     /// <summary>Nhãn shop KHÔNG đặt được địa chỉ lấy hàng (null = chưa dính). Cùng khuôn cờ với
@@ -270,6 +279,14 @@ internal sealed class ShopFlowRunner
         await _ch.SendAsync(new { action = "setPickupAddressToOther" }).ConfigureAwait(false);
         try { await _ch.AwaitAsync(pickupOtherTcs, OrdersBridgeChannel.ChoChang.PickupOther, ct).ConfigureAwait(false); }
         catch (TimeoutException) { L("Set địa chỉ khác: quá hạn — bỏ qua."); }
+        catch (InvalidOperationException ex)
+        {
+            // Extension trả `error` cho chặng này (vd mất ngữ cảnh tab shop sau khi service worker khởi động
+            // lại). Vẫn là best-effort y như quá hạn: việc chính (đặt địa chỉ + xử đơn) ĐÃ xong — để lỗi này
+            // xuyên ra là shop chạy trọn bị đếm "HỎNG giữa chừng", mất tổng kết + mất lượt check trả hàng,
+            // 3 shop liên tiếp như vậy còn dừng cả vòng tài khoản.
+            L("Set địa chỉ khác: " + ex.Message + " — bỏ qua.");
+        }
     }
 
     // ── GĐ3: đọc đơn (Phần A) + xử đơn (Phần B) trên tab shop đang mở ───────────────────────────────────
@@ -795,6 +812,10 @@ internal sealed class ShopFlowRunner
         var trangDaLat = 0;
         var docDuSau = true;   // false = lượt này BIẾT là còn sót (chạm trần / lật trượt / captcha) ⇒ giữ nguyên mốc
         var coTrangSau = doc.CoTrangSau;
+        // CỜ CÒN SÓT của lượt TRƯỚC (bền theo shop). Lượt trước chạm trần bỏ lại phần đuôi nằm SAU dải-đã-biết:
+        // phần đuôi đó KHÔNG BAO GIỜ xuất hiện ở trang đầu, nên luật "trang đầu còn mã mới thì mới lật" không với
+        // tới nó, và tới lúc nó trôi lên thì đã quá cửa sổ 20 ngày ⇒ mất vĩnh viễn. Cờ bật ⇒ RÚT TỒN ĐỌNG.
+        var conSot = _conSotTraHang is not null && _conSotTraHang(shopLogin);
         if (!doc.SortApplied && coTrangSau)
         {
             // Thứ tự không tin được ⇒ lật trang chỉ là nhặt ngẫu nhiên trong lịch sử. Đọc trang đầu rồi thôi,
@@ -802,15 +823,25 @@ internal sealed class ShopFlowRunner
             L("Check đơn trả hàng: KHÔNG đổi được sắp xếp — chỉ đọc trang đầu, KHÔNG lật trang (mốc giữ nguyên).");
             docDuSau = false;
         }
-        else if (coTrangSau && _demMaTraChuaBiet is not null && MaMoiTrong(doc.Dong) > 0)
+        else if (coTrangSau && _demMaTraChuaBiet is not null && (MaMoiTrong(doc.Dong) > 0 || conSot))
         {
+            if (conSot && MaMoiTrong(doc.Dong) == 0)
+            {
+                L("Check đơn trả hàng: trang đầu KHÔNG có mã mới nhưng lượt trước CÒN SÓT — chạy chế độ RÚT TỒN "
+                  + "ĐỌNG: vẫn lật trang cho tới khi đọc tới đáy hoặc chạm trần.");
+            }
             while (trangDaLat < TraHangParser.TranTrangTraHang)
             {
                 // Trần DÒNG áp cho CẢ LƯỢT (gộp mọi trang) — extension chỉ kẹp trần trong phạm vi MỘT lệnh nên
                 // nếu ở đây không kẹp thì lật 10 trang có thể vượt xa TranDongMoiLuot.
                 if (dong.Count >= TraHangParser.TranDongMoiLuot)
                 {
-                    L($"Check đơn trả hàng: chạm trần {TraHangParser.TranDongMoiLuot} dòng/lượt — dừng lật, còn sót, để lượt sau đọc tiếp.");
+                    // Nói THẬT về giới hạn: chế độ rút tồn đọng chỉ quét lại được cửa sổ TranDongMoiLuot dòng
+                    // đầu mỗi lượt — phần sâu hơn CHỈ tới lượt khi danh sách vơi bớt (yêu cầu phía trước được
+                    // xử lý xong và rớt khỏi trang). Hứa "lượt sau đọc tiếp" trống không là lặp lại đúng cái
+                    // bẫy lời-hứa-suông mà vòng phản biện 09/08 đã bắt.
+                    L($"Check đơn trả hàng: chạm trần {TraHangParser.TranDongMoiLuot} dòng/lượt — dừng lật, còn sót. "
+                      + $"Lượt sau quét LẠI {TraHangParser.TranDongMoiLuot} dòng đầu; phần sâu hơn chỉ đọc được khi danh sách vơi bớt (cần xử lý bớt yêu cầu đang mở).");
                     docDuSau = false;
                     break;
                 }
@@ -827,10 +858,13 @@ internal sealed class ShopFlowRunner
                 dong.AddRange(them.Dong);
                 var maMoi = MaMoiTrong(them.Dong);
                 L($"Check đơn trả hàng: trang {trangDaLat + 1} → thêm {them.Dong.Count} dòng ({maMoi} mã mới), tổng {dong.Count}.");
-                if (maMoi == 0)
+                if (maMoi == 0 && !conSot)
                 {
                     break; // trang này không còn gì mới ⇒ các trang sau (cũ hơn) cũng vậy
                 }
+                // Chế độ RÚT TỒN ĐỌNG: trang toàn mã cũ KHÔNG được dừng — phần đuôi lượt trước bỏ lại nằm SAU
+                // dải-đã-biết, tức phải đi XUYÊN QUA vùng mã cũ mới tới. Các đường dừng khác (trần dòng, trần
+                // trang, hết trang, lật trượt) vẫn nguyên nên chi phí mỗi lượt vẫn có trần.
                 coTrangSau = them.CoTrangSau;
                 if (!coTrangSau)
                 {
@@ -838,9 +872,25 @@ internal sealed class ShopFlowRunner
                 }
                 if (trangDaLat >= TraHangParser.TranTrangTraHang)
                 {
-                    L($"Check đơn trả hàng: chạm trần {TraHangParser.TranTrangTraHang} trang mà vẫn còn mã mới — còn sót, để lượt sau đọc tiếp.");
+                    L($"Check đơn trả hàng: chạm trần {TraHangParser.TranTrangTraHang} trang mà chưa tới đáy — còn sót. "
+                      + $"Lượt sau quét LẠI {TraHangParser.TranTrangTraHang} trang đầu; phần sâu hơn chỉ đọc được khi danh sách vơi bớt (cần xử lý bớt yêu cầu đang mở).");
                     docDuSau = false;
                 }
+            }
+        }
+
+        // Ô TỔNG nói CÓ mà đọc được 0 DÒNG = hỏng THẬT, không phải shop sạch. Bản trước để `dong.Count > 0` bỏ
+        // nguyên khối lưu mà không log, còn mốc thì vẫn chốt ⇒ selector dòng đổi (hoặc mọi dòng thiếu khối đầu
+        // dòng) là mọi shop "trông khỏe" trong khi KHÔNG mã nào được đọc, lặp lại mọi vòng. Ca soMoi == 0 GIỮ
+        // NGUYÊN hành vi (shop sạch thật, mốc 0 ghi bình thường).
+        if (soMoi > 0 && dong.Count == 0)
+        {
+            docDuSau = false;
+            L($"⚠ Check đơn trả hàng [{shopLogin}]: ô tổng báo {soMoi} yêu cầu mà KHÔNG đọc được dòng nào — "
+              + "selector dòng/khối đầu dòng có thể đã đổi. GIỮ NGUYÊN mốc, đánh dấu shop còn sót.");
+            if (!string.IsNullOrEmpty(doc.ChanDoan))
+            {
+                L("Check đơn trả hàng — chẩn đoán trang: " + doc.ChanDoan);
             }
         }
 
@@ -893,13 +943,18 @@ internal sealed class ShopFlowRunner
         // Cập nhật mốc — CHỈ khi lượt này đọc đủ sâu. Lượt BIẾT là còn sót (không đổi được sắp xếp / lật trượt /
         // chạm trần / captcha giữa chừng) mà vẫn chốt mốc thì lượt sau nhìn vào mốc tưởng "không đổi" rồi thôi —
         // đúng cái bẫy mốc-nhảy-khi-chưa-đọc-hết mà cả đợt này đi vá. Giữ mốc cũ thì cùng lắm chậm một vòng.
+        //
+        // CỜ CÒN SÓT đi CÙNG quyết định đó, không phải cơ chế thứ hai: đọc đủ sâu ⇒ tắt cờ (đã rút cạn tồn đọng);
+        // chưa đủ sâu ⇒ bật cờ để lượt sau chạy chế độ rút tồn đọng — giờ câu "để lượt sau đọc tiếp" mới là THẬT.
         if (docDuSau)
         {
             _saveReturnCount!(shopLogin, soMoi);
+            _luuConSotTraHang?.Invoke(shopLogin, false);
         }
         else
         {
             L($"Check đơn trả hàng [{shopLogin}]: lượt này đọc CHƯA đủ sâu — GIỮ NGUYÊN mốc {mocCuText} để lượt sau đọc tiếp.");
+            _luuConSotTraHang?.Invoke(shopLogin, true);
         }
     }
 

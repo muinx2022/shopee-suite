@@ -1,14 +1,15 @@
 // Lệnh cấp ĐƠN trên tab shop: quét đơn (phân trang) → "Số tiền cuối cùng" + sản phẩm → Chuẩn bị hàng +
 // in phiếu → tải lại phiếu một đơn. Thân hàm GIỮ NGUYÊN từ background.js (tách 2026-08-06).
-import { send, orderTabId } from "./core.js";
+import { send, orderTabIdStrict, LOI_MAT_TAB_SHOP } from "./core.js";
 import { execInTab } from "./exec.js";
 import { ORDERS_URL, ORDER_DETAIL_PREFIX, MAX_ORDER_PAGES, MAX_ORDER_PRODUCTS } from "./constants.js";
 import {
-  pageOrderCount, pageListSignature, pageLocateByText, pageScanOrders, pageFindNextPage,
+  pageOrderCount, pageListSignature, pageLocateByText, pageScanOrders,
   pageReadFinalAmount, pageChanDoanUocTinh, pageReadOrderProducts, pageFindPrepareOrder,
   pageModalHasTitle, pageAnyModalVisible, pageDumpClickables, pageLocateInModal,
   pageReadModalTracking, pagePrintButton, pageFetchSlipBase64, pageFindPrintInCardBySn,
 } from "./page-funcs.js";
+import { timNutTrangSau, trangThaiTruocBamLai, SO_LAN_BAM_LAI_PAGER } from "./pager.js";
 import { sleep } from "./shared/util.js";
 import { waitForTabComplete } from "./shared/tab-wait.js";
 import { ensureDbg, trustedClick } from "./shared/dbg-input.js";
@@ -43,8 +44,8 @@ async function waitOrdersChanged(tabId, before, timeoutMs) {
 
 // Phần A: đọc đơn tab "Tất cả" (phân trang). Trả {action:"pageData", kind:"orders", data:<json gộp>}.
 export async function doSyncOrders() {
-  const tabId = orderTabId();
-  if (tabId == null) { send({ action: "error", message: "chưa có tab shop để đọc đơn" }); return; }
+  const tabId = orderTabIdStrict();
+  if (tabId == null) { send({ action: "error", message: "đọc đơn: " + LOI_MAT_TAB_SHOP }); return; }
 
   try { await chrome.tabs.update(tabId, { url: ORDERS_URL }); } catch (e) {}
   await waitForTabComplete(tabId, 20000);
@@ -75,12 +76,31 @@ export async function doSyncOrders() {
 
     let sigBefore = "";
     try { sigBefore = (await execInTab(tabId, pageListSignature, [])) || ""; } catch (e) {}
-    const next = await execInTab(tabId, pageFindNextPage, []);
+    const next = await timNutTrangSau(tabId);
     if (!next) break;
     if (pageNo >= MAX_ORDER_PAGES) break;
     await trustedClick(tabId, next.x, next.y);
-    const changed = await waitOrdersChanged(tabId, sigBefore, 10000);
-    if (!changed) break;
+    let changed = await waitOrdersChanged(tabId, sigBefore, 10000);
+    // Trượt thì thử LẠI đúng một lượt (đo lại toạ độ từ đầu — layout có thể vừa nhảy). Vẫn trượt ⇒ BÁO RA rồi
+    // mới dừng: lật trang là đường đi THƯỜNG ở đây (~94 đơn/shop), dừng câm là mất đơn không ai hay.
+    // ⚠ TRƯỚC cú bấm lại PHẢI hỏi chữ ký (trangThaiTruocBamLai): fetch chậm >10s làm cú bấm ĐÃ ăn trông y hệt
+    // bấm trượt — bấm nữa là nhảy 2 trang, trang ở giữa không được quét (mất đơn im lặng).
+    for (let lai = 0; !changed && lai < SO_LAN_BAM_LAI_PAGER; lai++) {
+      const tt = await trangThaiTruocBamLai(tabId, pageListSignature, sigBefore);
+      if (tt === "doi") { changed = true; break; }                                // cú bấm đầu đã ăn, chỉ là đổi muộn
+      if (tt === "dangTai") { changed = await waitOrdersChanged(tabId, sigBefore, 10000); break; } // đang vẽ → chờ, KHÔNG bấm
+      const lanHai = await timNutTrangSau(tabId);
+      if (!lanHai) break;
+      await trustedClick(tabId, lanHai.x, lanHai.y);
+      changed = await waitOrdersChanged(tabId, sigBefore, 10000);
+    }
+    if (!changed) {
+      send({
+        action: "progress",
+        message: "lật sang trang " + (pageNo + 1) + " trượt — dừng ở " + pageNo + " trang, đọc THIẾU đơn.",
+      });
+      break;
+    }
     await sleep(1000);
   }
 
@@ -160,8 +180,8 @@ export async function doSyncOrderFinals(orders) {
 
 // Phần B: xử ĐƠN ĐẦU cần "Chuẩn bị hàng" (port ProcessFirstOrderAsync). → {action:"orderPrepared",...} hoặc {action:"noOrder"}.
 export async function doPrepareNextOrder() {
-  const tabId = orderTabId();
-  if (tabId == null) { send({ action: "error", message: "chưa có tab shop để xử đơn" }); return; }
+  const tabId = orderTabIdStrict();
+  if (tabId == null) { send({ action: "error", message: "chuẩn bị hàng: " + LOI_MAT_TAB_SHOP }); return; }
 
   try { await chrome.tabs.update(tabId, { url: ORDERS_URL }); } catch (e) {}
   await waitForTabComplete(tabId, 20000);
@@ -307,8 +327,11 @@ export async function doPrepareNextOrder() {
 // KHÔNG arrange lại (đơn đã Chuẩn bị hàng). LUÔN trả {action:"slipRedownloaded", orderSn, slipBase64}: base64 rỗng =
 // không thấy đơn / chưa có nút In phiếu / không lấy được (C# coi là thất bại). /verify → gửi captcha rồi thôi.
 export async function doRedownloadSlip(orderSn) {
-  const tabId = orderTabId();
-  if (tabId == null || !orderSn) { send({ action: "slipRedownloaded", orderSn: orderSn, slipBase64: "" }); return; }
+  const tabId = orderTabIdStrict();
+  // Mất tab shop ⇒ BÁO LỖI chứ không trả "không lấy được": trả rỗng là đổ oan cho đơn (C# ghi nhận đơn này không
+  // tải được phiếu) trong khi thủ phạm là service worker vừa chết. Thiếu MÃ ĐƠN thì vẫn theo lối cũ.
+  if (tabId == null) { send({ action: "error", message: "tải lại phiếu: " + LOI_MAT_TAB_SHOP }); return; }
+  if (!orderSn) { send({ action: "slipRedownloaded", orderSn: orderSn, slipBase64: "" }); return; }
 
   try { await chrome.tabs.update(tabId, { url: ORDERS_URL }); } catch (e) {}
   await waitForTabComplete(tabId, 20000);
@@ -333,15 +356,34 @@ export async function doRedownloadSlip(orderSn) {
     try { loc = (await execInTab(tabId, pageFindPrintInCardBySn, [orderSn])) || { found: false, hasPrint: false }; } catch (e) { loc = { found: false, hasPrint: false }; }
     if (loc && loc.found) break;
 
-    // Sang trang sau (reuse signature + FindNextPage + waitOrdersChanged như doSyncOrders).
+    // Sang trang sau (reuse signature + timNutTrangSau + waitOrdersChanged như doSyncOrders).
     let sigBefore = "";
     try { sigBefore = (await execInTab(tabId, pageListSignature, [])) || ""; } catch (e) {}
-    const next = await execInTab(tabId, pageFindNextPage, []);
+    const next = await timNutTrangSau(tabId);
     if (!next) break;
     if (pageNo >= MAX_ORDER_PAGES) break;
     await trustedClick(tabId, next.x, next.y);
-    const changed = await waitOrdersChanged(tabId, sigBefore, 10000);
-    if (!changed) break;
+    let changed = await waitOrdersChanged(tabId, sigBefore, 10000);
+    // Cùng chốt chặn chữ ký như doSyncOrders — bấm lại khi trang thật ra ĐÃ đổi là nhảy 2 trang, đơn cần tìm
+    // có thể nằm đúng trang bị nhảy qua.
+    for (let lai = 0; !changed && lai < SO_LAN_BAM_LAI_PAGER; lai++) {
+      const tt = await trangThaiTruocBamLai(tabId, pageListSignature, sigBefore);
+      if (tt === "doi") { changed = true; break; }
+      if (tt === "dangTai") { changed = await waitOrdersChanged(tabId, sigBefore, 10000); break; }
+      const lanHai = await timNutTrangSau(tabId);
+      if (!lanHai) break;
+      await trustedClick(tabId, lanHai.x, lanHai.y);
+      changed = await waitOrdersChanged(tabId, sigBefore, 10000);
+    }
+    if (!changed) {
+      // Dừng câm ở đây là báo SAI thủ phạm ("không thấy đơn trong danh sách") cho một đơn thật ra nằm ở trang sau.
+      send({
+        action: "progress",
+        message: "Tải lại phiếu: lật sang trang " + (pageNo + 1) + " trượt — chỉ duyệt được " + pageNo
+          + " trang, đơn " + orderSn + " có thể nằm sâu hơn.",
+      });
+      break;
+    }
     await sleep(1000);
   }
 

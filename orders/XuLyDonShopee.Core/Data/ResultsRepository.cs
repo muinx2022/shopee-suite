@@ -167,6 +167,55 @@ public class ResultsRepository
     }
 
     /// <summary>
+    /// Lượt check trả hàng gần nhất của shop này có BIẾT là còn sót không
+    /// (<c>account_shops.tra_hang_con_sot</c>). <c>true</c> ⇒ lượt tới chạy "chế độ rút tồn đọng": vẫn lật trang
+    /// dù trang đầu không còn mã mới (xem <c>ShopFlowRunner.CheckDonTraHangAsync</c>).
+    /// <para>Shop chưa có dòng / cột NULL (DB đời cũ) → <c>false</c> = hành vi y hệt trước 11/08/2026.</para>
+    /// </summary>
+    public bool GetTraHangConSot(long accountId, string shopLogin)
+    {
+        if (string.IsNullOrWhiteSpace(shopLogin))
+        {
+            return false;
+        }
+
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText =
+            "SELECT tra_hang_con_sot FROM account_shops WHERE account_id = $a AND shop_login = $login;";
+        cmd.Parameters.AddWithValue("$a", accountId);
+        cmd.Parameters.AddWithValue("$login", shopLogin.Trim());
+
+        var res = cmd.ExecuteScalar();
+        return res is not null && res != DBNull.Value && Convert.ToInt64(res) != 0;
+    }
+
+    /// <summary>
+    /// Ghi cờ "còn sót" của bước check trả hàng cho shop này. UPSERT theo đúng mẫu <see cref="SetReturnCount"/>
+    /// (ghi được cả khi shop chưa có dòng) và <b>KHÔNG đụng cột nào khác</b> — mốc số yêu cầu, tên shop, thứ tự
+    /// đều do đường khác làm chủ. <paramref name="shopLogin"/> rỗng → bỏ qua.
+    /// </summary>
+    public void SetTraHangConSot(long accountId, string shopLogin, bool conSot)
+    {
+        if (string.IsNullOrWhiteSpace(shopLogin))
+        {
+            return;
+        }
+
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText =
+            @"INSERT INTO account_shops (account_id, shop_login, tra_hang_con_sot, updated_at)
+    VALUES ($a, $login, $c, $now)
+    ON CONFLICT(account_id, shop_login) DO UPDATE SET tra_hang_con_sot = $c;";
+        cmd.Parameters.AddWithValue("$a", accountId);
+        cmd.Parameters.AddWithValue("$login", shopLogin.Trim());
+        cmd.Parameters.AddWithValue("$c", conSot ? 1 : 0);
+        cmd.Parameters.AddWithValue("$now", DbSerialization.FormatDate(DateTime.UtcNow));
+        cmd.ExecuteNonQuery();
+    }
+
+    /// <summary>
     /// +1 số đơn ĐÃ "chuẩn bị hàng" cho <c>(accountId, shopLogin, day)</c> — mỗi đơn arrange xong gọi một lần
     /// (đếm theo ĐƠN, không theo phiếu). Chưa có dòng ngày đó → tạo mới count=1; đã có → count+1. <paramref name="day"/>
     /// là chuỗi <c>yyyy-MM-dd</c> giờ địa phương. <paramref name="shopLogin"/>/<paramref name="day"/> rỗng → bỏ qua.
