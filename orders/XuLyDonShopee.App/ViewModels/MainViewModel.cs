@@ -127,7 +127,9 @@ public partial class MainViewModel : ViewModelBase
     {
         StatusAccountsText = $"{_services.Accounts.GetAll().Count} tài khoản";
         StatusOrdersText = $"{_services.Orders.Count()} đơn hàng";
-        StatusBrowserText = "Trình duyệt: " + BrowserChoices.VnLabel(_services.Settings.GetBrowserChoice());
+        // App chỉ chạy Brave (11/08/2026) — không còn lựa chọn nào để đọc. Giữ ô này trên thanh trạng thái để
+        // người dùng thấy ngay app đang mở bằng gì, khỏi tưởng nó dùng trình duyệt cá nhân của họ.
+        StatusBrowserText = "Trình duyệt: Brave";
     }
 
     partial void OnSelectedNavIndexChanged(int value)

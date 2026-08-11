@@ -1,93 +1,26 @@
 using System.Diagnostics;
 using Microsoft.Playwright;
-using XuLyDonShopee.Core.Models;
 
 namespace XuLyDonShopee.Core.Services;
 
 /// <summary>
-/// Khởi chạy trình duyệt cho phiên đăng nhập: phân giải file thực thi (Brave/Chrome/Edge, không có thì Chromium
-/// đóng gói của Playwright), phóng tiến trình với hồ sơ persistent + cổng gỡ lỗi, chờ CDP sẵn sàng rồi
-/// <see cref="IBrowserType.ConnectOverCDPAsync"/>. Không chứa nghiệp vụ Shopee — <see cref="ShopeeLoginService"/>
-/// gọi rồi tự điều hướng + dựng <c>LoginSession</c>.
+/// Khởi chạy trình duyệt cho phiên đăng nhập: lấy đường dẫn Brave, phóng tiến trình với hồ sơ persistent +
+/// cổng gỡ lỗi, chờ CDP sẵn sàng rồi <see cref="IBrowserType.ConnectOverCDPAsync"/>. Không chứa nghiệp vụ
+/// Shopee — <see cref="ShopeeLoginService"/> gọi rồi tự điều hướng + dựng <c>LoginSession</c>.
+/// <para><b>Chỉ Brave</b> (chốt 11/08/2026). Bản cũ có nhánh lùi: không tìm thấy trình duyệt thật thì TẢI
+/// Chromium đóng gói của Playwright (~150 MB) rồi chạy bằng nó. Đã bỏ hẳn — nhánh đó biến "máy thiếu Brave"
+/// thành một lần tải 150 MB im lặng rồi chạy bằng trình duyệt mà cầu nối không nạp nổi extension.</para>
+/// <para>Bỏ tải Chromium KHÔNG ảnh hưởng Playwright: driver đi kèm gói NuGet (thư mục <c>.playwright</c>), còn
+/// <see cref="IBrowserType.ConnectOverCDPAsync"/> nối vào Brave đang chạy chứ không cần binary Chromium.</para>
 /// </summary>
 internal static class LoginBrowserBootstrap
 {
-    /// <summary>
-    /// Đảm bảo có sẵn trình duyệt để mở cho <paramref name="browserChoice"/>. Nếu phân giải được một
-    /// trình duyệt thật đã cài trên máy (Chrome/Edge/Brave tùy lựa chọn) thì trả về ngay (0) mà
-    /// <b>không tải</b> Chromium đóng gói. Ngược lại (không có trình duyệt thật phù hợp, hoặc chọn
-    /// Chromium đóng gói) thì tải Chromium của Playwright (~150MB lần đầu; idempotent — đã cài thì
-    /// trả về nhanh). Trả về exit code (0 = thành công); bọc try/catch, trả code khác 0 khi lỗi để
-    /// tầng gọi thông báo.
-    /// </summary>
-    internal static int EnsureBrowserInstalled(BrowserChoice browserChoice)
+    /// <summary>Mô tả Brave sẽ được dùng (để hiển thị ở log): <c>"Brave (&lt;path&gt;)"</c>, hoặc câu báo thiếu
+    /// Brave nếu máy chưa cài.</summary>
+    internal static string DescribeBrowser()
     {
-        // Phân giải được trình duyệt thật → không cần tải Chromium đóng gói (đỡ ~150MB).
-        if (BrowserLocator.ResolveExecutable(browserChoice) != null)
-        {
-            return 0;
-        }
-
-        try
-        {
-            return Microsoft.Playwright.Program.Main(new[] { "install", "chromium" });
-        }
-        catch
-        {
-            return -1;
-        }
-    }
-
-    /// <summary>
-    /// Mô tả trình duyệt <b>THỰC SỰ</b> sẽ được dùng cho <paramref name="browserChoice"/> (để hiển
-    /// thị ở Cài đặt / log): phân giải file thực thi rồi phân loại bằng cách <b>so path bằng nhau</b>
-    /// với <see cref="BrowserLocator.FindChromeExecutable"/> / <see cref="BrowserLocator.FindEdgeExecutable"/>
-    /// / <see cref="BrowserLocator.FindBraveExecutable"/> (KHÔNG đoán theo tên file để tránh sai với
-    /// đường dẫn lạ): khớp Chrome → <c>"Chrome (&lt;path&gt;)"</c>; khớp Edge → <c>"Edge (&lt;path&gt;)"</c>;
-    /// khớp Brave → <c>"Brave (&lt;path&gt;)"</c>; <c>null</c> (không có trình duyệt thật / chọn Chromium
-    /// đóng gói) → <c>"Chromium đóng gói của Playwright"</c>.
-    /// <para>
-    /// Hành vi mặc định (<see cref="BrowserChoice.Auto"/>): ưu tiên Chrome → Edge → Brave; đây là đổi so
-    /// với bản cũ (trước ưu tiên Brave) — CÓ CHỦ ĐÍCH vì Chrome/Edge ít bị Shopee bắt captcha hơn Brave.
-    /// </para>
-    /// </summary>
-    internal static string DescribeBrowser(BrowserChoice browserChoice)
-    {
-        var exe = BrowserLocator.ResolveExecutable(browserChoice);
-        if (exe == null)
-        {
-            return "Chromium đóng gói của Playwright";
-        }
-
-        if (PathEquals(exe, BrowserLocator.FindChromeExecutable()))
-        {
-            return $"Chrome ({exe})";
-        }
-        if (PathEquals(exe, BrowserLocator.FindEdgeExecutable()))
-        {
-            return $"Edge ({exe})";
-        }
-        if (PathEquals(exe, BrowserLocator.FindBraveExecutable()))
-        {
-            return $"Brave ({exe})";
-        }
-
-        // Không khớp trình duyệt thật nào (không kỳ vọng xảy ra) → mô tả trung tính theo path.
-        return $"Trình duyệt ({exe})";
-    }
-
-    /// <summary>So sánh hai đường dẫn file (không phân biệt hoa/thường trên Windows). <c>b</c> null → false.</summary>
-    private static bool PathEquals(string a, string? b)
-    {
-        if (string.IsNullOrEmpty(b))
-        {
-            return false;
-        }
-
-        var comparison = OperatingSystem.IsWindows()
-            ? StringComparison.OrdinalIgnoreCase
-            : StringComparison.Ordinal;
-        return string.Equals(a, b, comparison);
+        var exe = BrowserLocator.FindBraveExecutable();
+        return exe is null ? BrowserLocator.ThieuBraveMessage : $"Brave ({exe})";
     }
 
     /// <summary>
@@ -100,21 +33,11 @@ internal static class LoginBrowserBootstrap
     /// <c>--lang=vi-VN</c> trong <see cref="BraveLaunchArgs"/>.</para>
     /// </summary>
     internal static async Task<(Process Process, IBrowser Browser, IBrowserContext Context)> LaunchAndConnectAsync(
-        IPlaywright playwright, string userDataDir, BrowserChoice browserChoice, CancellationToken ct,
+        IPlaywright playwright, string userDataDir, CancellationToken ct,
         Action<string>? log = null)
     {
-        // Phân giải trình duyệt thật theo lựa chọn của người dùng; không có → Chromium đóng gói (cùng cơ chế CDP).
-        var exePath = BrowserLocator.ResolveExecutable(browserChoice);
-        if (exePath == null)
-        {
-            EnsureChromiumInstalledForFallback();
-            exePath = playwright.Chromium.ExecutablePath;
-            if (string.IsNullOrEmpty(exePath) || !File.Exists(exePath))
-            {
-                throw new InvalidOperationException(
-                    "Không tìm thấy trình duyệt đã chọn và cũng chưa tải được Chromium đóng gói của Playwright.");
-            }
-        }
+        // Không có đường lùi: thiếu Brave là lỗi thật, ném ngay kèm câu chỉ chỗ tải.
+        var exePath = BrowserLocator.RequireBraveExecutable();
 
         return await PhongVoiDonHoSoAsync(
             // DỌN HỒ SƠ TRƯỚC MỖI LẦN PHÓNG. Bỏ bước này là để cả vòng chết ngay ở bước đăng nhập khi còn sót cửa
@@ -327,15 +250,5 @@ internal static class LoginBrowserBootstrap
         }
 
         throw new InvalidOperationException("Quá thời gian chờ endpoint CDP sẵn sàng.");
-    }
-
-    /// <summary>
-    /// Tải Chromium đóng gói của Playwright cho nhánh fallback (khi máy không có Brave). Nuốt lỗi —
-    /// nếu thực sự thiếu, bước lấy <c>ExecutablePath</c>/launch tiếp theo sẽ ném và được xử lý ở tầng trên.
-    /// </summary>
-    private static void EnsureChromiumInstalledForFallback()
-    {
-        try { Microsoft.Playwright.Program.Main(new[] { "install", "chromium" }); }
-        catch { /* bỏ qua — bước launch tiếp theo sẽ ném nếu thật sự thiếu */ }
     }
 }

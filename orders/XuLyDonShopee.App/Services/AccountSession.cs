@@ -414,9 +414,7 @@ public partial class AccountSession : ObservableObject, IAccountSession
             }
 
             var baseDir = Path.GetDirectoryName(_services.Database.Path) ?? ".";
-            var browserChoice = _services.Settings.GetBrowserChoice();
-            var browserKind = BrowserLocator.ResolveBrowserKind(browserChoice);
-            var userDataDir = BrowserProfilePaths.ForAccount(baseDir, _accountId, browserKind);
+            var userDataDir = BrowserProfilePaths.ForAccount(baseDir, _accountId, BrowserLocator.LoaiHoSo);
             Directory.CreateDirectory(userDataDir);
 
             var invoiceDir = _services.Settings.GetInvoiceFolder();
@@ -439,7 +437,7 @@ public partial class AccountSession : ObservableObject, IAccountSession
 
             while (!ct.IsCancellationRequested)
             {
-                var bridge = new OrdersBridgeSession(userDataDir, browserChoice, log, invoiceDir, province, syncCallback,
+                var bridge = new OrdersBridgeSession(userDataDir, log, invoiceDir, province, syncCallback,
                     finalDoneSns: () => _services.Orders.GetOrderSnsWithFinalAmount(_accountId),
                     // Tab "Shops": lưu danh sách shop + tăng đếm mỗi đơn arrange theo (tài khoản, shop, ngày yyyy-MM-dd giờ địa phương).
                     onShopListRead: shops =>

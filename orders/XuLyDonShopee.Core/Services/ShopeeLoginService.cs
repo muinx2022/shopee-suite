@@ -150,16 +150,11 @@ public class ShopeeLoginService
     /// extension (<c>OrdersBridgeSession</c>), không viết lại logic parse.</summary>
     internal static List<SyncedOrder> ParseOrdersJson(string? json) => LoginParsers.ParseOrdersJson(json);
 
-    /// <inheritdoc cref="LoginBrowserBootstrap.EnsureBrowserInstalled"/>
-    public int EnsureBrowserInstalled(BrowserChoice browserChoice = BrowserChoice.Auto)
-        => LoginBrowserBootstrap.EnsureBrowserInstalled(browserChoice);
-
     /// <inheritdoc cref="LoginBrowserBootstrap.DescribeBrowser"/>
-    public static string DescribeBrowser(BrowserChoice browserChoice)
-        => LoginBrowserBootstrap.DescribeBrowser(browserChoice);
+    public static string DescribeBrowser() => LoginBrowserBootstrap.DescribeBrowser();
 
     /// <summary>
-    /// Mở một cửa sổ trình duyệt (Brave nếu có, không thì Chromium đóng gói) tới trang bán hàng bằng
+    /// Mở một cửa sổ Brave tới trang bán hàng bằng
     /// <b>hồ sơ persistent</b> đặt tại <paramref name="userDataDir"/> (mỗi tài khoản một thư mục riêng)
     /// — nhờ đó lần sau mở lại vẫn còn đăng nhập — rồi trả về phiên đang mở. Đi thẳng IP máy (module đã bỏ
     /// hẳn proxy runtime). Cơ chế: tự khởi chạy tiến trình Brave với cờ stealth + <c>--user-data-dir</c> +
@@ -168,8 +163,7 @@ public class ShopeeLoginService
     /// (message tiếng Việt) nếu không mở được.
     /// </summary>
     public async Task<ILoginSession> OpenAsync(
-        string userDataDir, BrowserChoice browserChoice = BrowserChoice.Auto, CancellationToken ct = default,
-        Action<string>? log = null)
+        string userDataDir, CancellationToken ct = default, Action<string>? log = null)
     {
         IPlaywright? playwright = null;
         Process? process = null;
@@ -181,7 +175,7 @@ public class ShopeeLoginService
 
             IBrowserContext context;
             (process, browser, context) = await LoginBrowserBootstrap
-                .LaunchAndConnectAsync(playwright, userDataDir, browserChoice, ct, log).ConfigureAwait(false);
+                .LaunchAndConnectAsync(playwright, userDataDir, ct, log).ConfigureAwait(false);
 
             var page = context.Pages.Count > 0
                 ? context.Pages[0]

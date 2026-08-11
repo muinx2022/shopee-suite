@@ -43,48 +43,9 @@ public class SettingsRepositoryTests
         }
     }
 
-    [Fact]
-    public void GetBrowserChoice_ChuaDat_TraAuto()
-    {
-        using var temp = new TempDatabase();
-        var repo = new SettingsRepository(temp.Open());
-
-        Assert.Equal(BrowserChoice.Auto, repo.GetBrowserChoice());
-    }
-
-    [Theory]
-    [InlineData(BrowserChoice.Auto)]
-    [InlineData(BrowserChoice.Chrome)]
-    [InlineData(BrowserChoice.Edge)]
-    [InlineData(BrowserChoice.Brave)]
-    [InlineData(BrowserChoice.BundledChromium)]
-    public void SetVaGetBrowserChoice_Roundtrip(BrowserChoice choice)
-    {
-        using var temp = new TempDatabase();
-        var repo = new SettingsRepository(temp.Open());
-
-        repo.SetBrowserChoice(choice);
-
-        Assert.Equal(choice, repo.GetBrowserChoice());
-    }
-
-    [Fact]
-    public void BrowserChoice_ConNguyen_SauKhiMoLaiDatabase()
-    {
-        using var temp = new TempDatabase();
-
-        // Phiên 1: ghi.
-        {
-            var repo1 = new SettingsRepository(temp.Open());
-            repo1.SetBrowserChoice(BrowserChoice.Edge);
-        }
-
-        // Phiên 2: mở lại, dữ liệu còn nguyên.
-        {
-            var repo2 = new SettingsRepository(temp.Open());
-            Assert.Equal(BrowserChoice.Edge, repo2.GetBrowserChoice());
-        }
-    }
+    // Ba test về 'browser_choice' (đọc mặc định · roundtrip · còn nguyên sau khi mở lại DB) đã BỎ 11/08/2026
+    // cùng với chính tính năng chọn trình duyệt: app chỉ chạy Brave — xem BrowserLocator + BraveRequirement,
+    // và ChiChayBraveTests thay chỗ.
 
     [Fact]
     public void GetGsheetTabName_ChuaDat_TraChuoiRong()

@@ -193,44 +193,10 @@
                                 </StackPanel>
                             </Border>
 
-                            <Border Style="{StaticResource card}" Padding="18" Margin="0,14,0,0">
-                                <StackPanel>
-                                    <TextBlock Text="Trình duyệt" Style="{StaticResource h2}" />
-
-                                    <StackPanel Margin="0,14,0,0">
-                                        <TextBlock Text="Trình duyệt mở phiên" Style="{StaticResource caption}" />
-                                        <ComboBox Width="260" HorizontalAlignment="Left" Margin="0,4,0,0"
-                                                  ItemsSource="{Binding Orders.BrowserOptions}"
-                                                  SelectedItem="{Binding Orders.SelectedBrowser}">
-                                            <ComboBox.ItemTemplate>
-                                                <DataTemplate>
-                                                    <TextBlock Text="{Binding Label}" />
-                                                </DataTemplate>
-                                            </ComboBox.ItemTemplate>
-                                        </ComboBox>
-                                    </StackPanel>
-
-                                    <!-- Trình duyệt THỰC sẽ dùng -->
-                                    <TextBlock Style="{StaticResource caption}" Margin="0,14,0,0"
-                                               Text="{Binding Orders.DetectedBrowserText, StringFormat='Đang dùng: {0}'}" />
-
-                                    <TextBlock Style="{StaticResource caption}" Margin="0,14,0,0"
-                                               Text="Chrome thường ít bị Shopee bắt captcha hơn Brave (Brave bật sẵn chống-fingerprint dễ bị nhận diện). Mỗi tài khoản vẫn mở hồ sơ riêng, không đụng trình duyệt cá nhân của bạn. Áp cho các phiên mở SAU khi lưu." />
-
-                                    <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
-                                        <Button Style="{StaticResource primary}" Command="{Binding Orders.SaveBrowserCommand}">
-                                            <StackPanel Orientation="Horizontal">
-                                                <c:PathIcon Data="{StaticResource IconSave}" />
-                                                <TextBlock Text="Lưu" Style="{StaticResource btnLabel}" />
-                                            </StackPanel>
-                                        </Button>
-                                        <TextBlock Text="{Binding Orders.BrowserSavedMessage}" Margin="12,0,0,0"
-                                                   Foreground="{StaticResource SuccessBrush}"
-                                                   VerticalAlignment="Center" TextWrapping="Wrap"
-                                                   Visibility="{Binding Orders.BrowserSavedMessage, Converter={StaticResource StringToVis}}" />
-                                    </StackPanel>
-                                </StackPanel>
-                            </Border>
+                            <!-- Card "Trình duyệt" (ComboBox Auto/Chrome/Edge/Brave/Chromium đóng gói) đã BỎ
+                                 11/08/2026: app chỉ chạy được bằng Brave nên không còn gì để chọn. Thiếu Brave
+                                 thì app chặn ngay lúc khởi động kèm hướng dẫn cài, chứ không lặng lẽ mở trình
+                                 duyệt khác rồi treo cầu nối. -->
                         </StackPanel>
 
                         <!-- ── Cột phải: đồng bộ Google Sheet ── -->

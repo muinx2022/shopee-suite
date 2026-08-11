@@ -1,15 +1,16 @@
-using XuLyDonShopee.Core.Models;
 using XuLyDonShopee.Core.Services;
 using ToolkitLocator = Shopee.Toolkit.Browser.BrowserLocator;
 
 namespace XuLyDonShopee.Tests;
 
 /// <summary>
-/// Test cho hàm lõi thuần <see cref="ToolkitLocator.FindFirstExisting"/> (đã chuyển sang bộ dò dùng chung
-/// shared/Shopee.Toolkit) và <see cref="BrowserLocator.ResolveExecutableCore"/> (luật BrowserChoice còn ở
-/// module Đơn hàng) — không phụ thuộc máy thật vì tiêm predicate.
-/// Không test <see cref="BrowserLocator.FindBraveExecutable"/>/<c>FindChromeExecutable</c>/<c>FindEdgeExecutable</c>
-/// vì phụ thuộc hệ thống file cụ thể.
+/// Test cho hàm lõi thuần <see cref="ToolkitLocator.FindFirstExisting"/> (bộ dò dùng chung
+/// shared/Shopee.Toolkit) — không phụ thuộc máy thật vì tiêm predicate. Không test
+/// <see cref="BrowserLocator.FindBraveExecutable"/> vì nó phụ thuộc hệ thống file cụ thể.
+/// <para>Các test <c>ResolveExecutableCore</c> (ma trận Auto/Chrome/Edge/Brave/Chromium đóng gói) và
+/// <c>ClassifyExe</c> đã BỎ 11/08/2026 cùng với enum <c>BrowserChoice</c>: app chỉ chạy Brave nên không còn
+/// gì để phân giải. Hậu tố thư mục hồ sơ giờ là hằng <see cref="BrowserLocator.LoaiHoSo"/> — có test riêng
+/// khoá chuỗi đó ở <c>ChiChayBraveTests</c>.</para>
 /// </summary>
 public class BrowserLocatorTests
 {
@@ -60,170 +61,5 @@ public class BrowserLocatorTests
         var result = ToolkitLocator.FindFirstExisting(System.Array.Empty<string>(), _ => true);
 
         Assert.Null(result);
-    }
-
-    // ===== ResolveExecutableCore: phân giải BrowserChoice (thứ tự Auto = Chrome → Edge → Brave) =====
-
-    // Predicate stub tiện dụng: trả path nếu "có", null nếu "không có".
-    private static System.Func<string?> Have(string path) => () => path;
-    private static readonly System.Func<string?> None = () => null;
-
-    [Fact]
-    public void ResolveCore_Auto_CoDuCa3_TraChrome()
-    {
-        var result = BrowserLocator.ResolveExecutableCore(
-            BrowserChoice.Auto, Have("chrome"), Have("edge"), Have("brave"));
-
-        Assert.Equal("chrome", result);
-    }
-
-    [Fact]
-    public void ResolveCore_Auto_ChiEdgeVaBrave_TraEdge()
-    {
-        var result = BrowserLocator.ResolveExecutableCore(
-            BrowserChoice.Auto, None, Have("edge"), Have("brave"));
-
-        Assert.Equal("edge", result);
-    }
-
-    [Fact]
-    public void ResolveCore_Auto_ChiBrave_TraBrave()
-    {
-        var result = BrowserLocator.ResolveExecutableCore(
-            BrowserChoice.Auto, None, None, Have("brave"));
-
-        Assert.Equal("brave", result);
-    }
-
-    [Fact]
-    public void ResolveCore_Auto_KhongCoGi_TraNull()
-    {
-        var result = BrowserLocator.ResolveExecutableCore(
-            BrowserChoice.Auto, None, None, None);
-
-        Assert.Null(result);
-    }
-
-    [Fact]
-    public void ResolveCore_Chrome_Co_TraChrome()
-    {
-        var result = BrowserLocator.ResolveExecutableCore(
-            BrowserChoice.Chrome, Have("chrome"), Have("edge"), Have("brave"));
-
-        Assert.Equal("chrome", result);
-    }
-
-    [Fact]
-    public void ResolveCore_Chrome_Khong_TraNull()
-    {
-        var result = BrowserLocator.ResolveExecutableCore(
-            BrowserChoice.Chrome, None, Have("edge"), Have("brave"));
-
-        Assert.Null(result);
-    }
-
-    [Fact]
-    public void ResolveCore_Edge_Co_TraEdge()
-    {
-        var result = BrowserLocator.ResolveExecutableCore(
-            BrowserChoice.Edge, Have("chrome"), Have("edge"), Have("brave"));
-
-        Assert.Equal("edge", result);
-    }
-
-    [Fact]
-    public void ResolveCore_Edge_Khong_TraNull()
-    {
-        var result = BrowserLocator.ResolveExecutableCore(
-            BrowserChoice.Edge, Have("chrome"), None, Have("brave"));
-
-        Assert.Null(result);
-    }
-
-    [Fact]
-    public void ResolveCore_Brave_Co_TraBrave()
-    {
-        var result = BrowserLocator.ResolveExecutableCore(
-            BrowserChoice.Brave, Have("chrome"), Have("edge"), Have("brave"));
-
-        Assert.Equal("brave", result);
-    }
-
-    [Fact]
-    public void ResolveCore_Brave_Khong_TraNull()
-    {
-        var result = BrowserLocator.ResolveExecutableCore(
-            BrowserChoice.Brave, Have("chrome"), Have("edge"), None);
-
-        Assert.Null(result);
-    }
-
-    [Fact]
-    public void ResolveCore_BundledChromium_LuonNull()
-    {
-        var result = BrowserLocator.ResolveExecutableCore(
-            BrowserChoice.BundledChromium, Have("chrome"), Have("edge"), Have("brave"));
-
-        Assert.Null(result);
-    }
-
-    // ===== ClassifyExe: phân loại exe path thành slug loại trình duyệt (thuần, path giả) =====
-
-    [Fact]
-    public void ClassifyExe_KhopChrome_TraChrome()
-    {
-        var result = BrowserLocator.ClassifyExe("chrome.exe", "chrome.exe", "edge.exe", "brave.exe");
-
-        Assert.Equal("chrome", result);
-    }
-
-    [Fact]
-    public void ClassifyExe_KhopEdge_TraEdge()
-    {
-        var result = BrowserLocator.ClassifyExe("edge.exe", "chrome.exe", "edge.exe", "brave.exe");
-
-        Assert.Equal("edge", result);
-    }
-
-    [Fact]
-    public void ClassifyExe_KhopBrave_TraBrave()
-    {
-        var result = BrowserLocator.ClassifyExe("brave.exe", "chrome.exe", "edge.exe", "brave.exe");
-
-        Assert.Equal("brave", result);
-    }
-
-    [Fact]
-    public void ClassifyExe_ExeNull_TraChromium()
-    {
-        var result = BrowserLocator.ClassifyExe(null, "chrome.exe", "edge.exe", "brave.exe");
-
-        Assert.Equal("chromium", result);
-    }
-
-    [Fact]
-    public void ClassifyExe_KhongKhopCaiNao_TraChromium()
-    {
-        var result = BrowserLocator.ClassifyExe("chromium.exe", "chrome.exe", "edge.exe", "brave.exe");
-
-        Assert.Equal("chromium", result);
-    }
-
-    [Fact]
-    public void ClassifyExe_ChiCaiBrave_TraBrave()
-    {
-        // Chrome/Edge chưa cài (null) — chỉ Brave có; exe khớp Brave.
-        var result = BrowserLocator.ClassifyExe("brave.exe", null, null, "brave.exe");
-
-        Assert.Equal("brave", result);
-    }
-
-    [Fact]
-    public void ClassifyExe_KhongPhanBietHoaThuong()
-    {
-        // Đường dẫn Windows không phân biệt hoa/thường → so khớp OrdinalIgnoreCase.
-        var result = BrowserLocator.ClassifyExe("CHROME.EXE", "chrome.exe", "edge.exe", "brave.exe");
-
-        Assert.Equal("chrome", result);
     }
 }

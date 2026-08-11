@@ -152,7 +152,6 @@ internal sealed record ShopConLaiSauMoLai(IReadOnlyList<ShopListItem> ConLai, IR
 public sealed class OrdersBridgeSession : IDisposable
 {
     private readonly string _userDataDir;
-    private readonly BrowserChoice _browserChoice;
     private readonly Action<string>? _log;
     private readonly string _province;
     // Tab "Shops": callback do App rót (Core không ref App/DB) — CHỈ THÊM lời gọi, không đổi luồng. Null-safe.
@@ -203,7 +202,7 @@ public sealed class OrdersBridgeSession : IDisposable
     /// Shops không. Shop đang treo banner mà lượt này không có đơn Chờ Lấy Hàng thì vẫn chạy riêng bước đặt địa chỉ,
     /// để banner có đường TỰ hết (xem <c>ShopFlowRunner.QuyetDinhBuocDiaChi</c>). null → coi như không shop nào có
     /// banner ⇒ hành vi y hệt trước 10/08/2026.</param>
-    public OrdersBridgeSession(string userDataDir, BrowserChoice browserChoice, Action<string>? log = null,
+    public OrdersBridgeSession(string userDataDir, Action<string>? log = null,
         string? invoiceDir = null, string? province = null,
         Func<string, string, IReadOnlyList<SyncedOrder>, CancellationToken, Task>? syncCallback = null,
         Func<IReadOnlySet<string>>? finalDoneSns = null,
@@ -219,7 +218,6 @@ public sealed class OrdersBridgeSession : IDisposable
         Func<string, bool>? dangCoCanhBaoDiaChi = null)
     {
         _userDataDir = userDataDir;
-        _browserChoice = browserChoice;
         _log = log;
         _province = string.IsNullOrWhiteSpace(province) ? "Thanh Hóa" : province;
         _onShopListRead = onShopListRead;
@@ -257,7 +255,7 @@ public sealed class OrdersBridgeSession : IDisposable
 
         // Vẫn nhúng hash (extension đọc nếu còn) nhưng KHÔNG phụ thuộc: mất hash → extension dùng cổng cố định.
         var startUrl = $"{baseUrl}#_od_ws={OrdersBridgeChannel.BridgePort}";
-        Process = OrdersBridgeLauncher.Launch(_userDataDir, _browserChoice, startUrl, _log);
+        Process = OrdersBridgeLauncher.Launch(_userDataDir, startUrl, _log);
         TheoDoiTrinhDuyetThoat(Process);
     }
 
@@ -642,7 +640,7 @@ public sealed class OrdersBridgeSession : IDisposable
         {
             L("Đăng nhập Nền tảng tài khoản phụ bằng trình duyệt điều khiển (Playwright)...");
             var svc = new ShopeeLoginService();
-            session = await svc.OpenAsync(_userDataDir, _browserChoice, ct, _log).ConfigureAwait(false);
+            session = await svc.OpenAsync(_userDataDir, ct, _log).ConfigureAwait(false);
             entered = await session.TryLoginSubaccountAsync(
                 login.User, login.Pass, login.VerifyEmail, login.VerifyEmailPassword, _log, ct).ConfigureAwait(false);
         }

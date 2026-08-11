@@ -313,11 +313,9 @@ public partial class AccountsViewModel
     private OrdersBridgeSession TaoPhienCauNoi(long accountId, string? province, string email)
     {
         var baseDir = System.IO.Path.GetDirectoryName(_services.Database.Path) ?? ".";
-        var browserChoice = _services.Settings.GetBrowserChoice();
-        var browserKind = BrowserLocator.ResolveBrowserKind(browserChoice);
-        var userDataDir = BrowserProfilePaths.ForAccount(baseDir, accountId, browserKind);
+        var userDataDir = BrowserProfilePaths.ForAccount(baseDir, accountId, BrowserLocator.LoaiHoSo);
         var invoiceDir = _services.Settings.GetInvoiceFolder(); // GĐ3: thư mục lưu phiếu (Cài đặt)
-        return new OrdersBridgeSession(userDataDir, browserChoice,
+        return new OrdersBridgeSession(userDataDir,
             m => _services.Log.Append(email, m), invoiceDir, province);
     }
 

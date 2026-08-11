@@ -23,6 +23,19 @@ public partial class App : Application
     {
         base.OnStartup(e);
 
+        // ── CỔNG BRAVE (11/08/2026): không có Brave thì BÁO LỖI RỒI DỪNG, không mở giao diện ──
+        // App chỉ chạy được bằng Brave — xem Shopee.Toolkit.Browser.BraveRequirement cho lý do đầy đủ. Đặt ở
+        // đây, TRƯỚC mọi khởi tạo engine/cửa sổ: để lọt xuống dưới thì người dùng thấy một app mở lên bình
+        // thường rồi mọi thao tác đều hỏng theo những kiểu khó đoán (cầu nối treo 45 giây rồi chết, không nói
+        // vì sao). Chặn cả app chứ không riêng module Đơn hàng: các module Workspace cũng chạy trên Brave.
+        if (Shopee.Toolkit.Browser.BraveRequirement.LyDoChanKhoiDong(
+                Shopee.Toolkit.Browser.BrowserLocator.FindBraveExecutable()) is { } lyDoChan)
+        {
+            MessageBox.Show(lyDoChan, "Thiếu trình duyệt Brave", MessageBoxButton.OK, MessageBoxImage.Error);
+            Shutdown(1);
+            return;
+        }
+
         // Công tắc CHẨN ĐOÁN (mặc định TẮT, cùng họ với SHOPEESUITE_BINDING_LOG): ép WPF vẽ bằng đường PHẦN MỀM.
         // Cần khi máy đang ở trạng thái mà đường tăng tốc D3D không "present" được — cửa sổ WPF mới hiện ra
         // TRẮNG/ĐEN dù cây giao diện vẫn dựng đúng (đã gặp thật lúc nghiệm thu đợt 4: ảnh chụp trắng trơn trong

@@ -1,5 +1,3 @@
-using XuLyDonShopee.Core.Models;
-
 namespace XuLyDonShopee.Core.Services;
 
 /// <summary>
@@ -14,7 +12,7 @@ internal static class OrdersBridgeLauncher
     /// mục mới → kill mọi trình duyệt của hồ sơ (POLL tới khi chết hẳn) → xóa session-restore + khóa Singleton →
     /// mở. Đảo thứ tự là dính "single-instance handoff" vào tiến trình Playwright còn CDP ⇒ Chi tiết ăn captcha.
     /// </summary>
-    public static System.Diagnostics.Process? Launch(string userDataDir, BrowserChoice browserChoice, string startUrl,
+    public static System.Diagnostics.Process? Launch(string userDataDir, string startUrl,
         Action<string>? log = null)
     {
         var srcExt = BraveLaunchArgs.ResolveOrdersBridgeExtension()
@@ -33,7 +31,7 @@ internal static class OrdersBridgeLauncher
         // Playwright login còn CDP (→ Chi tiết captcha) + orphan cùng nối cổng cố định 47821 cướp lệnh.
         BrowserProfileGuard.FreeProfile(userDataDir, alsoMatchBridgeExtension: true, log);
 
-        return PocCleanLauncher.Open(userDataDir, browserChoice, startUrl, extPath);
+        return PocCleanLauncher.Open(userDataDir, startUrl, extPath);
     }
 
     /// <summary>Chép thư mục extension <paramref name="srcDir"/> ra một thư mục MỚI (GUID) dưới temp và trả về

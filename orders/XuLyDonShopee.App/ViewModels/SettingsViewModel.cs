@@ -9,9 +9,6 @@ using XuLyDonShopee.Core.Services;
 
 namespace XuLyDonShopee.App.ViewModels;
 
-/// <summary>Một mục trong ComboBox chọn trình duyệt: giá trị enum + nhãn tiếng Việt hiển thị.</summary>
-public sealed record BrowserChoiceOption(BrowserChoice Value, string Label);
-
 /// <summary>
 /// Màn "Cài đặt" (HOẠT ĐỘNG THẬT): các mục lưu xuống DB qua <see cref="SettingsRepository"/>:
 /// <list type="bullet">
@@ -22,9 +19,11 @@ public sealed record BrowserChoiceOption(BrowserChoice Value, string Label);
 /// <item><b>Đồng bộ Google Sheet</b> — link Web App Apps Script + tên tab đích; sau mỗi lần Sync app tự ghi
 /// đơn + link phiếu vào Google Sheet.</item>
 /// </list>
-/// Ba card (Tự động hóa / Đồng bộ Google Sheet / Trình duyệt) có ô thông báo RIÊNG
-/// (<see cref="SavedMessage"/> / <see cref="GsheetSavedMessage"/> / <see cref="BrowserSavedMessage"/>): lưu
-/// card nào thì chỉ hiện thông báo ở card đó, clear các card kia.
+/// Hai card (Tự động hóa / Đồng bộ Google Sheet) có ô thông báo RIÊNG
+/// (<see cref="SavedMessage"/> / <see cref="GsheetSavedMessage"/>): lưu card nào thì chỉ hiện thông báo ở card
+/// đó, clear card kia.
+/// <para>Card "Trình duyệt" (ComboBox Auto/Chrome/Edge/Brave/Chromium đóng gói) đã BỎ 11/08/2026: app chỉ chạy
+/// được bằng Brave nên không còn gì để chọn — xem <see cref="XuLyDonShopee.Core.Services.BrowserLocator"/>.</para>
 /// <para>
 /// Webhook thông báo KHÔNG còn cấu hình ở client: đó là cấu hình HUB-OWNED (đặt trên trang Cài đặt của Hub
 /// web, Hub gửi tin). Backend giữ nguyên — <c>SettingsRepository</c> vẫn đọc/ghi được và
@@ -72,23 +71,7 @@ public partial class SettingsViewModel : ViewModelBase
     [ObservableProperty]
     private string? _gsheetSavedMessage;
 
-    /// <summary>Các lựa chọn trình duyệt (Tự động · Chrome · Edge · Brave · Chromium đóng gói) cho ComboBox.</summary>
-    public ObservableCollection<BrowserChoiceOption> BrowserOptions { get; } =
-        new(BrowserChoices.All.Select(c => new BrowserChoiceOption(c, BrowserChoices.VnLabel(c))));
-
-    /// <summary>Lựa chọn trình duyệt đang chọn ở ComboBox (đổi → cập nhật <see cref="DetectedBrowserText"/>).</summary>
-    [ObservableProperty]
-    private BrowserChoiceOption? _selectedBrowser;
-
-    /// <summary>Mô tả trình duyệt THỰC sẽ dùng cho lựa chọn hiện tại (Chrome/Edge/Brave + path, hoặc Chromium đóng gói).</summary>
-    [ObservableProperty]
-    private string _detectedBrowserText = string.Empty;
-
-    /// <summary>Thông báo sau khi lưu của card TRÌNH DUYỆT (null = ẩn) — RIÊNG để không hiện lẫn ở card kia.</summary>
-    [ObservableProperty]
-    private string? _browserSavedMessage;
-
-    /// <summary>MainViewModel gọi khi chuyển sang màn này: nạp lại cấu hình từ DB (thư mục hóa đơn + chu kỳ + link/tab GSheet + trình duyệt).</summary>
+    /// <summary>MainViewModel gọi khi chuyển sang màn này: nạp lại cấu hình từ DB (thư mục hóa đơn + chu kỳ + link/tab GSheet).</summary>
     public void Reload()
     {
         InvoiceFolder = _services.Settings.GetInvoiceFolder();
@@ -97,19 +80,8 @@ public partial class SettingsViewModel : ViewModelBase
         GsheetTabName = _services.Settings.GetGsheetTabName();
         GsheetSheet2 = _services.Settings.GetGsheetSheet2() ?? string.Empty;
 
-        var choice = _services.Settings.GetBrowserChoice();
-        SelectedBrowser = BrowserOptions.FirstOrDefault(o => o.Value == choice) ?? BrowserOptions[0];
-        DetectedBrowserText = ShopeeLoginService.DescribeBrowser(choice); // set tường minh (đề phòng SelectedBrowser không đổi → handler không chạy)
-        BrowserSavedMessage = null;
-
         SavedMessage = null;
         GsheetSavedMessage = null;
-    }
-
-    /// <summary>Đổi lựa chọn ở ComboBox → cập nhật ngay dòng "Đang dùng" (trình duyệt THỰC sẽ dùng).</summary>
-    partial void OnSelectedBrowserChanged(BrowserChoiceOption? value)
-    {
-        DetectedBrowserText = ShopeeLoginService.DescribeBrowser(value?.Value ?? BrowserChoice.Auto);
     }
 
     /// <summary>
@@ -200,18 +172,4 @@ public partial class SettingsViewModel : ViewModelBase
             : "Đã lưu (Hub chưa kết nối — sẽ dùng bản của Hub khi có).";
     }
 
-    /// <summary>
-    /// Nút "Lưu" của card TRÌNH DUYỆT: lưu lựa chọn xuống DB (thiếu → Auto), thông báo RIÊNG ở card này (dọn
-    /// các card kia), cập nhật lại dòng "Đang dùng". Áp cho các phiên MỞ SAU khi lưu (phiên đang chạy giữ nguyên).
-    /// </summary>
-    [RelayCommand]
-    private void SaveBrowser()
-    {
-        var choice = SelectedBrowser?.Value ?? BrowserChoice.Auto;
-        _services.Settings.SetBrowserChoice(choice);
-        DetectedBrowserText = ShopeeLoginService.DescribeBrowser(choice);
-        BrowserSavedMessage = "Đã lưu trình duyệt (áp cho các phiên mở sau khi lưu).";
-        SavedMessage = null; // dọn thông báo các card kia
-        GsheetSavedMessage = null;
-    }
 }

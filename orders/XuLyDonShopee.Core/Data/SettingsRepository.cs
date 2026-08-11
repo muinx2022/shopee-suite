@@ -50,8 +50,8 @@ public class SettingsRepository
     /// <summary>Key: webhook khi check flow phát hiện đơn trả hàng mới — trống → tắt.</summary>
     private const string NotifyWebhookDonTraKey = "notify_webhook_url_don_tra";
 
-    /// <summary>Key: trình duyệt người dùng chọn để mở phiên (thiếu/lạ → <see cref="BrowserChoice.Auto"/>).</summary>
-    private const string BrowserChoiceKey = "browser_choice";
+    // Khoá 'browser_choice' đã BỎ 11/08/2026 (app chỉ chạy Brave — xem BrowserLocator). Dòng cũ trong bảng
+    // settings của máy đang dùng cứ để nguyên: không ai đọc nữa, xoá đi chỉ thêm một bước migrate vô ích.
 
     /// <summary>Key: cờ "Xóa profile và tạo lại" khi mở phiên mới (thiếu/lạ → false = TẮT). BẬT ⇒ mỗi phiên
     /// mở mới xóa thư mục hồ sơ trình duyệt của tài khoản rồi tạo lại sạch (phải đăng nhập lại).</summary>
@@ -198,12 +198,6 @@ public class SettingsRepository
         var v = url?.Trim();
         return string.IsNullOrEmpty(v) ? null : v;
     }
-
-    /// <summary>Trình duyệt người dùng chọn để mở phiên (thiếu/lạ → <see cref="BrowserChoice.Auto"/>).</summary>
-    public BrowserChoice GetBrowserChoice() => BrowserChoices.Parse(Get(BrowserChoiceKey));
-
-    /// <summary>Lưu lựa chọn trình duyệt (chuẩn hóa qua <see cref="BrowserChoices.ToStorage"/>).</summary>
-    public void SetBrowserChoice(BrowserChoice choice) => Set(BrowserChoiceKey, BrowserChoices.ToStorage(choice));
 
     /// <summary>Cờ "Xóa profile và tạo lại" khi mở phiên mới: nhận "true"/"1" (bất kể hoa/thường) ⇒ true;
     /// thiếu/rỗng/lạ ⇒ false (mặc định TẮT — hành vi cũ không đổi).</summary>

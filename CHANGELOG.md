@@ -5,6 +5,42 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Phiên bản & cập nhật. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.9.0 — 2026-08-11
+
+> **App chỉ còn chạy được bằng Brave.** Không có Brave thì app báo lỗi rồi thoát, không mở giao diện nữa.
+> Đây là lý do lên số phụ mới: một tính năng người dùng thấy được đã bị gỡ, và app có thêm một cửa từ chối khởi
+> động.
+
+**Bỏ lựa chọn trình duyệt — và hai đường đi ngầm sang trình duyệt khác**
+
+Ô chọn trình duyệt ở *Cài đặt → Đơn hàng* (Tự động · Chrome · Edge · Brave · Chromium đóng gói) chỉ là phần
+nổi. Gỡ nó kéo theo hai thứ nguy hiểm hơn nhiều:
+
+- **Mặc định của app trước bản này KHÔNG phải Brave.** Lựa chọn "Tự động" ưu tiên **Chrome → Edge → Brave**.
+  Trên máy có cài Chrome, cầu nối mở Chrome — mà Chromium 137+ đã bỏ cờ cho phép `--load-extension`, nên
+  extension **không nạp mà cũng không báo lỗi**: cầu nối treo hết hạn 45 giây rồi chết, không dấu vết. Đây
+  đúng mục "Còn tồn" ghi ở v1.8.9.
+- **Nhánh lùi tải Chromium đóng gói.** Máy không có trình duyệt thật thì app lặng lẽ tải ~150 MB Chromium của
+  Playwright rồi chạy bằng nó — tức bằng đúng loại trình duyệt mà cầu nối không nạp nổi extension.
+
+Cả hai đã bỏ hẳn. Thiếu Brave giờ là **lỗi thật, báo ngay**, kèm chỗ tải.
+
+**Cổng chặn lúc khởi động**
+
+Không tìm thấy Brave → hộp thoại *"Không tìm thấy trình duyệt Brave… Hãy cài Brave từ brave.com/download"* rồi
+thoát. Đặt ở đầu `App.OnStartup`, TRƯỚC mọi khởi tạo engine/cửa sổ: để lọt xuống dưới thì người dùng thấy một
+app mở lên bình thường rồi mọi thao tác hỏng theo những kiểu khó đoán. Chặn cả app chứ không riêng module Đơn
+hàng — các module Workspace cũng chạy trên Brave.
+
+**Không đổi gì với máy đang dùng**
+
+Thư mục hồ sơ vẫn là `profiles/<id>-brave` y như cũ, **cookie đăng nhập còn nguyên, không phải đăng nhập lại**.
+Hằng tên thư mục nay có test riêng khoá lại — đó là chỗ dễ mất sạch cookie nhất nếu về sau có ai "dọn dẹp đặt
+tên". Vòng nghiệm thu trên bản này: `12/12 shop, 1128 đơn`, 0 cú đứt cầu nối giữa chừng, 0 lỗi sắp xếp kể cả ở
+shop 64 yêu cầu trả hàng.
+
+Tổng cộng 17 file, **−725 dòng / +101 dòng** — gần như toàn bộ là gỡ.
+
 ## v1.8.9 — 2026-08-11
 
 > Bản dọn nợ sau v1.8.8: một lỗi tách đường dẫn âm thầm làm tê liệt bước dọn hồ sơ mồ côi, một tính năng đỡ
