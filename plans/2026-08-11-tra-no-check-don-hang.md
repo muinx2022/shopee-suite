@@ -123,7 +123,19 @@ Phản biện xác nhận không có đường mất dữ liệu trong 3 món n�
 - [x] Nợ C (DB + runner + plumbing) + tests + thử phá
 - [x] Build 0W + full test xanh
 - [x] Phản biện subagent + sửa theo (2 TB + 3 NHẸ — xem trên)
-- [ ] Commit trả nợ
-- [ ] Bump 1.9.1 + CHANGELOG + commit
-- [ ] Phát hành GitHub + push
-- [ ] Cập nhật bin máy này + chạy lại app + soi log
+- [x] Commit trả nợ (`a478f8a`)
+- [x] Bump 1.9.1 + CHANGELOG + commit (`ede5de6`)
+- [x] Phát hành GitHub (release v1.9.1, delta 1.9.0→1.9.1 chỉ 20 file) + push `origin/main`
+- [x] Cập nhật bin máy này + chạy lại app + soi log
+
+## NGHIỆM THU CHẠY THẬT trên bản v1.9.1 (vòng 20:28–21:22, 11/08)
+
+Dừng app đúng cửa nghỉ sau vòng 20:24 → build bin thật (0W/0E) → mở lại + tự bấm Chạy (UIA). Kết quả:
+**12/12 shop, 1128 đơn** — trùng từng con số với các vòng trước vá. Migration 2 cột mới
+(`tra_hang_sot_ly_do`) chạy êm trên DB thật; cờ còn-sót ghi qua UPSERT hai cột cả 12 shop không lỗi. Watcher
+soi phân đoạn mới: **0** dòng `trượt` / `đọc THIẾU` / `mất ngữ cảnh` / `KHÔNG đọc được dòng nào` / `HỎNG` /
+`không rõ lý do` / ⛔ (dòng "extension ĐỨT … WebSocketException" lúc 21:22:22 là noise đóng trình duyệt cuối
+vòng, vòng nào cũng có). App để chạy tiếp, vòng kế 22:52.
+
+**TRẠNG THÁI: HOÀN THÀNH** — trả nợ + phản biện + phát hành + nghiệm thu chạy thật đủ. Việc để đợt sau ghi ở
+mục "KHÔNG làm đợt này" và "Ghi nợ mới".
