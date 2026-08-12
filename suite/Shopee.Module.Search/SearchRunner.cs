@@ -26,7 +26,7 @@ public sealed record SearchFilter(long MinPrice, int MinSoldFrom, int MinSoldTo,
 /// </summary>
 public sealed class SearchRunner
 {
-    private readonly AppSettingsService _settings = new();
+    private readonly AppSettingsService _settings = TaoSettings();
     private readonly SearchTaskStore _store = new();
     private readonly ConcurrentBag<ProductResult> _collected = new();
     private FileRunCoordinator? _file;
@@ -170,6 +170,29 @@ public sealed class SearchRunner
     private static CategoryAiUpdater MakeUpdater(AiConfig ai) => new(ai);
 
     // ── Helpers ──────────────────────────────────────────────────────────────────
+    /// <summary>Tạo service cấu hình và ĐỌC NGAY <c>settings.json</c>. Bắt buộc phải <c>Load()</c>: cấu hình
+    /// của user (đường dẫn Brave, proxy…) không được đọc là một chuyện, nhưng <c>SaveSettings()</c>
+    /// (BraveManager / ShopeeLoginService gọi lúc chạy) ghi ĐÈ nguyên file bằng object mặc định —
+    /// chạy Search một lượt là mất sạch cấu hình đã lưu.</summary>
+    private static AppSettingsService TaoSettings()
+    {
+        var s = new AppSettingsService();
+        s.Load();
+        return s;
+    }
+
+    /// <summary>Khử link TRÙNG (so theo link, không phân biệt hoa/thường) — giữ mục ĐẦU (giữ nguyên thứ tự).
+    /// Hai lane cùng một link là hai lượt cào song song ghi đè file Excel của nhau, đè cả bản ghi
+    /// <c>_linkCts</c> (bấm dừng link chỉ hủy được lane sau) và tab UI thì gộp làm một.</summary>
+    public static List<(int Index, string Link, string SourceFile)> DedupLinks(
+        IEnumerable<(int Index, string Link, string SourceFile)> links)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // Link rỗng/trắng bị LOẠI HẲN (không phải "giữ mục đầu"): một mục việc không có link thì lane chỉ mở
+        // Brave rồi báo lỗi vô nghĩa.
+        return links.Where(l => !string.IsNullOrWhiteSpace(l.Link) && seen.Add(l.Link)).ToList();
+    }
+
     private static List<InstanceConfig> ToAccounts(IReadOnlyList<SearchAccountSpec> specs) =>
         specs.Select(ToAccount).ToList();
 
@@ -197,10 +220,13 @@ public sealed class SearchRunner
         && (f.MinSoldTo <= 0 || p.MonthlySold <= f.MinSoldTo)
         && (string.IsNullOrWhiteSpace(f.Category) || string.Equals(p.Category, f.Category, StringComparison.OrdinalIgnoreCase));
 
+    /// <summary>Ghi file Excel per-link. Lỗi ghi (thư mục cấm, file đang mở trong Excel, đĩa đầy) KHÔNG được
+    /// nuốt: <c>FileRunCoordinator.SaveLinkOnceAsync</c> bắt và đẩy "Lỗi lưu Excel: …" ra ô trạng thái của
+    /// link — nuốt ở đây là user tưởng đã có file trong khi thư mục xuất trống.</summary>
     private static Task ExportSafe(string outputDir, IReadOnlyList<ProductResult> products, string fileName)
     {
-        try { if (!string.IsNullOrWhiteSpace(outputDir) && products.Count > 0) ExcelExporter.Export(products, outputDir, fileName); }
-        catch { }
+        if (!string.IsNullOrWhiteSpace(outputDir) && products.Count > 0)
+            ExcelExporter.Export(products, outputDir, fileName);
         return Task.CompletedTask;
     }
 

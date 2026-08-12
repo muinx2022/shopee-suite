@@ -590,17 +590,12 @@ public sealed class ScrapeRunner
                     var p = _patches.Dequeue();
                     // ĐUÔI: mảng vá còn NHIỀU dòng (>= 2×process) → cắt 1 lát, TRẢ phần dư lại hàng để
                     // worker rảnh khác cùng chạy, thay vì 1 worker ôm cả mảng (chia việc đoạn cuối).
-                    var psize = p.to - p.from + 1;
-                    if (_workers > 1 && psize >= 2 * _workers)
-                    {
-                        var take = (int)Math.Ceiling((double)psize / _workers);
-                        var pieceTo = p.from + take - 1;
-                        _patches.Enqueue((pieceTo + 1, p.to, p.stall));
-                        _inFlight++;
-                        return (p.from, pieceTo, p.stall, true);
-                    }
+                    // Toán cắt (kể cả luật "phần dư stall=0") nằm ở ScrapeChunkMath.SplitPatch — thuần, có test.
+                    var (piece, rest) = Shopee.Core.Scrape.ScrapeChunkMath.SplitPatch(
+                        new Shopee.Core.Scrape.ScrapeChunkMath.PatchSlice(p.from, p.to, p.stall), _workers);
+                    if (rest is { } r) _patches.Enqueue((r.From, r.To, r.Stall));
                     _inFlight++;
-                    return (p.from, p.to, p.stall, true);
+                    return (piece.From, piece.To, piece.Stall, true);
                 }
                 while (_segIdx < _segments.Count)
                 {

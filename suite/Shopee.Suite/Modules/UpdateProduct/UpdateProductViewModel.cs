@@ -138,9 +138,11 @@ public sealed partial class UpdateProductViewModel : ModuleViewModelBase
     public Task RunNameRewriteSingleAsync(UpdateRunTargetViewModel t, bool silent = false, int? startRow = null, int? endRow = null, int? processes = null, int? reloadSeconds = null) =>
         RunOneWorkflowAsync("Update tên SP", UpdateKind.Rewrite, (r, ctx, ct) => r.RunNameRewriteAsync(ctx, ct), t, requiresBigSellerLogin: false, silent: silent, startRow: startRow, endRow: endRow, processes: processes, reloadSeconds: reloadSeconds);
 
-    /// <summary>Tiền-kiểm điều kiện chạy import/update/rewrite cho 1 đích — KHÔNG mở dialog. Cho AssignmentWorker.</summary>
-    public bool CanDispatchUpdate(UpdateRunTargetViewModel t, string op, out string problem) =>
-        ValidateUpdateTarget(t, requiresBigSellerLogin: op != AssignmentOps.Rewrite, out problem);
+    /// <summary>Tiền-kiểm điều kiện chạy import/update/rewrite cho 1 đích — KHÔNG mở dialog, KHÔNG đụng state.
+    /// Shop cần kiểm TRUYỀN VÀO (không đọc <c>t.SelectedShop</c>) để AssignmentWorker khỏi phải ghi đè lựa chọn
+    /// shop của người ngồi máy chỉ để tiền-kiểm một việc có thể bị từ chối. Cho AssignmentWorker.</summary>
+    public bool CanDispatchUpdate(UpdateRunTargetViewModel t, BigSellerShop? shop, string op, out string problem) =>
+        ValidateUpdateTarget(t, shop, requiresBigSellerLogin: op != AssignmentOps.Rewrite, out problem);
 
     private sealed class WsJob
     {
@@ -178,7 +180,7 @@ public sealed partial class UpdateProductViewModel : ModuleViewModelBase
         int? startRow = null, int? endRow = null, bool? importFromClaimedTab = null,
         int? processes = null, int? reloadSeconds = null)
     {
-        if (!ValidateUpdateTarget(t, requiresBigSellerLogin, out var problem)) { Warn(problem + ".", silent); return; }
+        if (!ValidateUpdateTarget(t, t.SelectedShop, requiresBigSellerLogin, out var problem)) { Warn(problem + ".", silent); return; }
         var a = t.Account; var s = t.SelectedShop!;
 
         // 1 tk BigSeller CHỈ 1 workflow tại 1 thời điểm → các shop CÙNG tk KHÔNG import/update song song.
@@ -302,9 +304,9 @@ public sealed partial class UpdateProductViewModel : ModuleViewModelBase
     // Validate 1 đích update (shop/sheet/workbook/cookie). true = hợp lệ; false → problem = thông điệp lỗi
     // KHÔNG có dấu chấm cuối (caller tự thêm). Dùng CHUNG cho mọi đường chạy single per-shop (RunOneWorkflowAsync
     // + CanDispatchUpdate) → một nguồn sự thật cho "đích nào chạy được".
-    private static bool ValidateUpdateTarget(UpdateRunTargetViewModel t, bool requiresBigSellerLogin, out string problem)
+    private static bool ValidateUpdateTarget(UpdateRunTargetViewModel t, BigSellerShop? shop, bool requiresBigSellerLogin, out string problem)
     {
-        var a = t.Account; var s = t.SelectedShop;
+        var a = t.Account; var s = shop;
         if (s is null) { problem = $"{a.DisplayName}: chưa chọn shop"; return false; }
         if (string.IsNullOrWhiteSpace(s.ShopeeDataSheet)) { problem = $"{a.DisplayName}/{s.DisplayName}: shop chưa gán sheet"; return false; }
         if (string.IsNullOrWhiteSpace(a.WorkbookPath) || !File.Exists(a.WorkbookPath)) { problem = $"{a.DisplayName}: workbook không tồn tại"; return false; }

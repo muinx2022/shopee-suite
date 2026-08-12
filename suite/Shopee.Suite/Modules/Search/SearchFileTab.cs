@@ -47,6 +47,30 @@ public sealed partial class SearchFileTab : ObservableObject
 
     public ObservableCollection<SearchProductRow> Products { get; } = [];
 
+    /// <summary>Link SP đã hiện TRONG TAB NÀY. Khử trùng phải theo TỪNG tab, không dùng chung một sổ toàn
+    /// phiên: một SP nằm ở 2 danh mục thì sổ chung chỉ cho nó hiện ở tab của link chạy trước, tab kia đứng
+    /// im như đang hỏng; chạy lại một link trong cùng phiên cũng không ra dòng nào.</summary>
+    private readonly HashSet<string> _seen = new(StringComparer.Ordinal);
+
+    /// <summary>Thêm 1 SP vào tab, bỏ qua nếu tab này đã có (theo link SP). SP không có link thì luôn thêm
+    /// (không có khoá để so). Trả về true nếu đã thêm thật.</summary>
+    public bool AddProduct(SearchProductRow p)
+    {
+        if (!string.IsNullOrEmpty(p.Link) && !_seen.Add(p.Link)) return false;
+        Products.Add(p);
+        ProductCount = Products.Count;
+        return true;
+    }
+
+    /// <summary>Xoá sạch SP của tab ("Xóa dữ liệu"): sổ khử trùng phải sạch THEO, kẻo lượt cào sau tưởng SP
+    /// cũ là trùng và tab ở lại trống.</summary>
+    public void ClearProducts()
+    {
+        Products.Clear();
+        _seen.Clear();
+        ProductCount = 0;
+    }
+
     [ObservableProperty] private string _account = "";
 
     [ObservableProperty]

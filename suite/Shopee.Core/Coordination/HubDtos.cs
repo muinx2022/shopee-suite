@@ -216,6 +216,15 @@ public sealed record ResumeMineResponse(int Requeued);
 public sealed record SetLedgerStatusRequest(
     string Key, string BigsellerId, string ShopId, string Sheet, string Op, string Status);
 
+/// <summary>Client bấm "Cào lại dòng đã bỏ" → Hub bỏ các dòng trong sổ bỏ-qua khỏi vùng phủ + xoá sổ + đưa
+/// status về stopped. Mang đủ (BigsellerId, ShopId, Sheet, Op) như <see cref="SetLedgerStatusRequest"/> dù hub
+/// chỉ tra theo <paramref name="Key"/>: giữ 2 request cùng hình dạng để đọc log Hub còn biết là việc nào.
+/// <para><paramref name="Rows"/> = sổ dòng bỏ-qua ĐANG CÓ Ở CLIENT: hub union với sổ của mình rồi mới khoét.
+/// Thiếu nó thì mọi dòng bỏ TRƯỚC khi hub có cột skipped (không backfill) làm nút thành no-op im lặng —
+/// hub trả OK mà không khoét gì, client xoá sổ local, lượt fold sau phủ lại → mất dấu vĩnh viễn.</para></summary>
+public sealed record ReopenSkippedRequest(
+    string Key, string BigsellerId, string ShopId, string Sheet, string Op, List<int>? Rows = null);
+
 // ── Request / Response ────────────────────────────────────────────────────────
 
 public sealed record LeaseAcquireRequest(

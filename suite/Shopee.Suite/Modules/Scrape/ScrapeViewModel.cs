@@ -84,7 +84,8 @@ public sealed partial class ScrapeViewModel : ModuleViewModelBase
             a =>
             {
                 var t = new ScrapeTargetViewModel(a);
-                t.IsShopRunning = shop => IsShopScraping(t, shop);   // "đang scrape" theo job LIVE, không kẹt sau crash
+                t.IsShopRunning = shop => IsShopScraping(t, shop);      // chip per-shop: so ShopId
+                t.IsSheetRunning = sheet => IsSheetScraping(t, sheet);  // "sheet đang cào?": so sheet (tiến độ khoá theo sheet)
                 return t;
             },
             t => t.Account.Id, a => a.Id, () => SelectedTarget, v => SelectedTarget = v);
@@ -102,6 +103,15 @@ public sealed partial class ScrapeViewModel : ModuleViewModelBase
     [RelayCommand]
     private void Reload()
     {
+        // ĐANG CHẠY thì KHÔNG dựng lại: Rebuild thay ScrapeTargetViewModel bằng object MỚI, trong khi job đang
+        // chạy vẫn giữ VM CŨ → chip tiến độ bind vào VM mới đứng im tới hết phiên (nút "Tải lại" bấm nhầm giữa
+        // lúc chạy là mất theo dõi cả lượt). Đường store-Changed đã guard sẵn (OnStoresChanged), đây là nút BẤM TAY.
+        if (IsBusy)
+        {
+            Status = "Đang chạy — không tải lại danh sách (bấm Dừng trước).";
+            Log("⚠ Bỏ qua 'Tải lại': đang có job scrape chạy — tải lại sẽ làm mất theo dõi tiến độ của job.");
+            return;
+        }
         // Dựng lại ScrapeTargets từ kho BigSeller + giữ lựa chọn panel-chi-tiết (thuần UI) theo Id — projection lo.
         _targets.Rebuild();
         _poolCount = AccountStore.Shared.Accounts.Count(a => !a.Disabled);
@@ -110,8 +120,31 @@ public sealed partial class ScrapeViewModel : ModuleViewModelBase
 
     /// <summary>v1.1 (màn gộp BigSeller): chạy/tiếp tục RIÊNG 1 tk BigSeller mà KHÔNG đụng tick của tk khác.
     /// Rảnh → mở phiên mới chỉ gồm tk này; đang chạy → thêm job tk này (resume) vào phiên hiện tại.
-    /// TOTAL: tự nuốt + log mọi lỗi → an toàn để gọi fire-and-forget (caller không cần try/catch).</summary>
+    /// TOTAL: tự nuốt + log mọi lỗi → an toàn để gọi fire-and-forget (caller không cần try/catch).
+    /// <para>= <see cref="TryStartSingleAsync"/> rồi CHỜ job của tk này xong (giữ nguyên chữ ký + ngữ nghĩa
+    /// "await tới khi chạy xong" cho mọi caller cũ). Ai cần biết job có KHỞI ĐỘNG ĐƯỢC không (AssignmentWorker)
+    /// thì gọi thẳng TryStartSingleAsync.</para></summary>
     public async Task RunSingleAsync(ScrapeTargetViewModel target, bool resume, bool silent = false,
+        int? startRow = null, int? endRow = null, int? processes = null, int? frameSize = null,
+        int? restMinSeconds = null, int? restMaxSeconds = null)
+    {
+        if (!await TryStartSingleAsync(target, resume, silent, startRow, endRow, processes, frameSize,
+                restMinSeconds, restMaxSeconds))
+            return;   // không đăng ký được job (validate hỏng / đã có job) — TryStart đã log/cảnh báo
+        // Chờ ĐÚNG job của tk này (phiên có thể còn job tk khác chạy tiếp). Job có thể đã xong + rời sổ ngay
+        // trước khi đọc → không có gì để chờ. Bọc try/catch: RunOneJobAsync đã TOTAL, đây chỉ là lưới cuối.
+        try
+        {
+            if (_session is { } s && s.Jobs.TryGet(target.Account.Id, out var h)) await h.Task;
+        }
+        catch (Exception ex) { LogAcc(target.Account.Id, target.Account.DisplayName, $"✖ Lỗi scrape: {ex.Message}"); }
+    }
+
+    /// <summary>Khởi động job scrape cho 1 tk BigSeller rồi TRẢ VỀ NGAY (không chờ chạy xong).
+    /// true = job THẬT SỰ vào sổ (đăng ký thành công); false = KHÔNG chạy được lượt này (thiếu điều kiện,
+    /// phiên đang kết thúc, hoặc tk đã có job) — caller phân biệt được start-fail với "đã nhận việc".
+    /// TOTAL như <see cref="RunSingleAsync"/>: tự nuốt + log mọi lỗi, KHÔNG rò IsBusy/_session khi trả false.</summary>
+    public async Task<bool> TryStartSingleAsync(ScrapeTargetViewModel target, bool resume, bool silent = false,
         int? startRow = null, int? endRow = null, int? processes = null, int? frameSize = null,
         int? restMinSeconds = null, int? restMaxSeconds = null)
     {
@@ -125,10 +158,20 @@ public sealed partial class ScrapeViewModel : ModuleViewModelBase
             target.PendingFrameSize = frameSize is int fs && fs > 0 ? fs : null;
             target.PendingRestMinSeconds = restMinSeconds is int rmin && rmin > 0 ? rmin : null;
             target.PendingRestMaxSeconds = restMaxSeconds is int rmax && rmax > 0 ? rmax : null;
-            if (IsBusy) { StartOneAccount(target, silent); return; }
-            await StartAsync(resume, new[] { target }, silent);
+            if (IsBusy) return StartOneAccount(target, silent);
+            // Phiên MỚI: StartAsync là TOTAL (tự bọc try/catch + finally gỡ IsBusy/_session) nên chạy NỀN được;
+            // nó báo kết quả phóng job qua `launched` NGAY sau vòng StartJob (mọi lối ra đều báo) → ta biết
+            // job có vào sổ hay không mà KHÔNG phải chờ hết phiên, cũng không phải soi lại registry (job ngắn
+            // có thể đã rời sổ trước khi soi).
+            var launched = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            TaskExt.FireAndForget(StartAsync(resume, new[] { target }, silent, launched), "phiên scrape");
+            return await launched.Task;
         }
-        catch (Exception ex) { LogAcc(target.Account.Id, target.Account.DisplayName, $"✖ Lỗi khởi động scrape: {ex.Message}"); }
+        catch (Exception ex)
+        {
+            LogAcc(target.Account.Id, target.Account.DisplayName, $"✖ Lỗi khởi động scrape: {ex.Message}");
+            return false;
+        }
     }
 
     /// <summary>v1.1 (màn gộp): DỪNG RIÊNG job của 1 tk BigSeller (các tk khác chạy tiếp). Không có job
@@ -139,7 +182,19 @@ public sealed partial class ScrapeViewModel : ModuleViewModelBase
         catch (Exception ex) { LogAcc(target.Account.Id, target.Account.DisplayName, $"✖ Lỗi dừng scrape: {ex.Message}"); }
     }
 
-    private async Task StartAsync(bool resume, IReadOnlyList<ScrapeTargetViewModel>? only = null, bool silent = false)
+    /// <summary>Mở phiên chạy + phóng job. <paramref name="launched"/> (nếu có) được CHỐT ngay khi biết job có
+    /// vào sổ hay không — TryStartSingleAsync await nó để trả lời "đã khởi động được chưa" mà không phải chờ hết
+    /// phiên. finally ở đây là BẢO ĐẢM: dù dựng phiên ném ở bất kỳ đâu, `launched` luôn được chốt (bỏ đi thì
+    /// người đang await nó treo vĩnh viễn).</summary>
+    private async Task StartAsync(bool resume, IReadOnlyList<ScrapeTargetViewModel>? only = null, bool silent = false,
+        TaskCompletionSource<bool>? launched = null)
+    {
+        try { await StartCoreAsync(resume, only, silent, launched); }
+        finally { launched?.TrySetResult(false); }
+    }
+
+    private async Task StartCoreAsync(bool resume, IReadOnlyList<ScrapeTargetViewModel>? only, bool silent,
+        TaskCompletionSource<bool>? launched)
     {
         // only != null (màn gộp v1.1): chạy RIÊNG danh sách được chỉ định, KHÔNG đụng tick của tk khác.
         var picked = (only ?? ScrapeTargets.Where(t => t.IsSelected)).ToList();
@@ -157,7 +212,7 @@ public sealed partial class ScrapeViewModel : ModuleViewModelBase
         var problems = new List<string>();
         foreach (var t in picked)
         {
-            if (ValidateTarget(t, pool.Count, out var problem)) jobs.Add(t);
+            if (ValidateTarget(t, t.SelectedShop, pool.Count, out var problem)) jobs.Add(t);
             else problems.Add(problem);
         }
         if (jobs.Count == 0) { Warn("Không có tài khoản hợp lệ để scrape.\n" + string.Join("\n", problems), silent); return; }
@@ -185,7 +240,9 @@ public sealed partial class ScrapeViewModel : ModuleViewModelBase
                 : $"▶ Scrape {jobs.Count} BigSeller (RESET — chạy lại từ đầu). Kho {pool.Count} tk Shopee.");
 
             // Phóng job cho từng tk đã chọn (mỗi job = 1 token RIÊNG → dừng được lẻ giữa chừng).
-            foreach (var t in jobs) StartJob(session, t, resume);
+            var launchedAny = false;
+            foreach (var t in jobs) launchedAny |= StartJob(session, t, resume);
+            launched?.TrySetResult(launchedAny);   // báo NGAY (khỏi chờ hết phiên) job có vào sổ hay không
 
             // Coordinator: chờ tới khi registry rỗng. Cho phép thêm/bớt job ĐỘNG giữa chừng (StartOne/StopOne).
             while (true)
@@ -228,8 +285,10 @@ public sealed partial class ScrapeViewModel : ModuleViewModelBase
         void LogA(string m) => LogAcc(account.Id, account.DisplayName, m);
         // Mỗi lượt chạy hiện log TƯƠI của acc → xoá phần XEM buffer riêng (file vẫn giữ đầy đủ).
         OnUi(() => AccountLogs.Get(account.Id, account.DisplayName).Clear());
-        var shop = target.SelectedShop!;
-        var sheet = shop.ShopeeDataSheet;
+        // Shop/sheet ĐÃ CHỐT lúc đăng ký job (KHÔNG đọc target.SelectedShop nữa — xem JobHandle): người dùng
+        // bấm sang shop khác giữa chừng cũng không làm job ghi tiến độ sang sheet khác.
+        var shop = h.Shop;
+        var sheet = h.Sheet;
         // Override TẠM (Hub giao việc) cho khoảng dòng + số cửa sổ + cỡ khung — dùng-một-lần → đọc xong XOÁ HẾT ở
         // ĐÂY (đúng chỗ config được chốt cho job) để không lọt sang lượt chạy sau. null = dùng cấu hình người dùng.
         var maxProc = Math.Max(1, target.PendingMaxProcess ?? target.MaxProcess);   // = SỐ CỬA SỔ Brave song song (KHÔNG còn = số tk dùng)
@@ -268,7 +327,9 @@ public sealed partial class ScrapeViewModel : ModuleViewModelBase
                         ?? throw new InvalidOperationException("⛔ Tk ở chế độ kho Hub nhưng chưa kết nối Hub — kiểm tra Cài đặt → Hub.");
                     var sheets = await client.GetProductSheetsAsync(account.Id, ct).ConfigureAwait(false)
                         ?? throw new InvalidOperationException("⛔ Hub chưa sẵn sàng (kho sản phẩm Postgres) — thử lại sau.");
-                    totalRows = sheets.FirstOrDefault(x => string.Equals(x.Sheet, sheet, StringComparison.Ordinal))?.Rows ?? 0;
+                    // OrdinalIgnoreCase như MỌI chỗ khác so tên sheet (Excel không phân biệt hoa/thường): so
+                    // Ordinal ở đây từng làm sheet "Data" ≠ "data" trên Hub → totalRows=0 → job bỏ qua im lặng.
+                    totalRows = sheets.FirstOrDefault(x => string.Equals(x.Sheet, sheet, StringComparison.OrdinalIgnoreCase))?.Rows ?? 0;
                 }
                 else
                 {
@@ -383,12 +444,14 @@ public sealed partial class ScrapeViewModel : ModuleViewModelBase
             };
             // Dòng KHÔNG cào được (lỗi giữa khối / kẹt 3 lần): trước đây chỉ có một dòng log rồi trôi, mà
             // khoảng runner báo "đã cào" vẫn trùm lên nó → mất SP âm thầm. Nay ghi vào SỔ BỎ QUA + đẩy
-            // [row..row] lên Hub (CÓ CHỦ ĐÍCH: không publish thì Hub giao lại dòng hỏng vòng vô tận).
+            // [row..row] lên Hub (CÓ CHỦ ĐÍCH: không publish thì Hub giao lại dòng hỏng vòng vô tận) — qua
+            // PublishSkipped chứ KHÔNG PublishProgress, để sổ bỏ-qua đi cùng vùng phủ lên Hub: máy khác fold về
+            // mới biết đang thiếu SP, thay vì thấy "✔ Hoàn thành toàn bộ".
             runner.RowSkipped += (row, reason) =>
             {
                 ScrapeProgressStore.Shared.MarkSkipped(account.Id, sheet, row);
-                Coordination.Hub.PublishProgress(coordKey, row, row);
-                LogA($"[{account.DisplayName}] ⚠ BỎ QUA dòng {row}: {reason} — SP dòng này KHÔNG được cào; muốn cào lại hãy Chạy (reset).");
+                Coordination.Hub.PublishSkipped(coordKey, row);
+                LogA($"[{account.DisplayName}] ⚠ BỎ QUA dòng {row}: {reason} — SP dòng này KHÔNG được cào; muốn cào lại hãy Chạy (reset) hoặc bấm \"Cào lại dòng đã bỏ\" trong Thống kê.");
                 OnUi(target.RefreshProgress);
             };
             WireRunner(runner, seq, account);
@@ -445,11 +508,19 @@ public sealed partial class ScrapeViewModel : ModuleViewModelBase
     /// Trả false nếu phiên đang kết thúc (sổ đã chốt) hoặc tk đó đã có job đang chạy.</summary>
     private bool StartJob(RunSession s, ScrapeTargetViewModel target, bool resume, bool force = false)
     {
+        // CHỐT shop/sheet của job NGAY tại đây, trước khi vào sổ: từ lúc này job KHÔNG đọc SelectedShop nữa
+        // (state mutable — xem chú thích ở JobHandle). Đích chưa chọn shop thì không có gì để chạy → false
+        // (đường gọi đã ValidateTarget trước nên đây chỉ là chốt an toàn).
+        var shop = target.SelectedShop;
+        if (shop is null) return false;
         var started = s.Jobs.TryAdd(target.Account.Id, () =>
         {
             var h = new JobHandle
             {
                 Target = target,
+                Shop = shop,
+                Sheet = shop.ShopeeDataSheet ?? "",
+                ShopId = shop.Id,
                 Seq = Interlocked.Increment(ref s.JobSeq),
                 Cts = CancellationTokenSource.CreateLinkedTokenSource(s.MasterCts.Token),
                 Force = force,
@@ -464,14 +535,27 @@ public sealed partial class ScrapeViewModel : ModuleViewModelBase
         return true;
     }
 
-    /// <summary>true nếu đang có job LIVE cào đúng shop (sheet) này của tk BigSeller → chip hiện "đang scrape".</summary>
+    /// <summary>true nếu đang có job LIVE cào đúng shop (sheet) này của tk BigSeller → chip hiện "đang scrape".
+    /// So theo sheet ĐÃ CHỐT của job (JobHandle.Sheet), KHÔNG theo Target.SelectedShop: cái sau bị PickShop /
+    /// AssignmentWorker ghi đè giữa chừng nên chip từng nhảy sang shop khác trong lúc job vẫn cào shop cũ.</summary>
     private bool IsShopScraping(ScrapeTargetViewModel target, BigSellerShop shop)
     {
         var s = _session;
         if (s is null) return false;
         if (!s.Jobs.TryGet(target.Account.Id, out var h)) return false;
-        return string.Equals(
-            h.Target.SelectedShop?.ShopeeDataSheet, shop.ShopeeDataSheet, StringComparison.OrdinalIgnoreCase);
+        // So theo SHOP chứ không theo sheet: 2 shop có thể cùng trỏ một sheet (UI không chặn) — so sheet thì
+        // cả hai chip cùng nhấp nháy "đang scrape" dù job chỉ chạy một shop.
+        return string.Equals(h.ShopId, shop.Id, StringComparison.Ordinal);
+    }
+
+    /// <summary>true nếu đang có job LIVE cào đúng SHEET này của tk BigSeller. Dùng cho tiến độ (khoá theo
+    /// acc+sheet): "còn dở?" hỏi theo sheet, không theo shop — 2 shop cùng sheet thì hỏi theo shop trả sai.</summary>
+    private bool IsSheetScraping(ScrapeTargetViewModel target, string sheet)
+    {
+        var s = _session;
+        if (s is null) return false;
+        if (!s.Jobs.TryGet(target.Account.Id, out var h)) return false;
+        return string.Equals(h.Sheet, sheet ?? "", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>Chạy RIÊNG 1 tk giữa lúc đang run (tick checkbox khi busy). Mid-run = RESUME.
@@ -481,7 +565,7 @@ public sealed partial class ScrapeViewModel : ModuleViewModelBase
         var s = _session;
         if (s is null || s.MasterCts.IsCancellationRequested) return false;
         var poolCount = AccountStore.Shared.Accounts.Count(a => !a.Disabled);
-        if (!ValidateTarget(target, poolCount, out var problem)) { Warn($"Không chạy được: {problem}", silent); return false; }
+        if (!ValidateTarget(target, target.SelectedShop, poolCount, out var problem)) { Warn($"Không chạy được: {problem}", silent); return false; }
         // Kho tk Shopee dùng chung → acc thêm giữa chừng chỉ việc mượn từ kho như mọi job khác (không cần
         // đòi lại tk đặt-chỗ vì không còn pin tk vào BigSeller nào).
         if (StartJob(s, target, resume: true))
@@ -499,7 +583,11 @@ public sealed partial class ScrapeViewModel : ModuleViewModelBase
         var s = _session;
         if (s is null) return;
         if (!s.Jobs.TryGet(target.Account.Id, out var h)) return;
-        h.Cts.Cancel();                                   // bẻ gãy chờ mượn tk / RunChunk
+        // Cancel ĐUA với finally của RunOneJobAsync (Jobs.Remove rồi Cts.Dispose): snapshot lấy được handle
+        // xong job kịp kết thúc → Cancel ném ObjectDisposedException. Job ĐÃ dừng rồi, không có gì hỏng — nuốt
+        // riêng ca này (trước đây nó nổi lên StopSingleAsync thành "✖ Lỗi dừng scrape" sai sự thật).
+        try { h.Cts.Cancel(); }                           // bẻ gãy chờ mượn tk / RunChunk
+        catch (ObjectDisposedException) { }
         var runner = h.Runner;
         if (runner is not null) { try { await runner.StopAllAsync(); } catch { } }
         // finally của job tự dọn: xoá khỏi Jobs, xoá dòng lưới, FinishRun(...,0)=giữ tiến độ cho Tiếp tục.
@@ -520,10 +608,12 @@ public sealed partial class ScrapeViewModel : ModuleViewModelBase
         h?.Runner?.BringInstanceToFront(slotKey);
     }
 
-    /// <summary>Kiểm tra 1 đích Scrape có hợp lệ để chạy không (shop/cookie/sheet/workbook/đủ tk).</summary>
-    private static bool ValidateTarget(ScrapeTargetViewModel t, int poolCount, out string problem)
+    /// <summary>Kiểm tra 1 đích Scrape có hợp lệ để chạy không (shop/cookie/sheet/workbook/đủ tk).
+    /// Shop truyền VÀO (không đọc <c>t.SelectedShop</c> bên trong) để chỗ tiền-kiểm của Hub kiểm đúng shop được
+    /// giao mà KHÔNG phải ghi đè lựa chọn shop của người đang ngồi máy.</summary>
+    private static bool ValidateTarget(ScrapeTargetViewModel t, BigSellerShop? shop, int poolCount, out string problem)
     {
-        var a = t.Account; var s = t.SelectedShop;
+        var a = t.Account; var s = shop;
         if (s is null) { problem = $"{a.DisplayName}: chưa chọn shop"; return false; }
         if (!a.HasCookie) { problem = $"{a.DisplayName}: chưa có cookie BigSeller (đăng nhập ở mục BigSeller)"; return false; }
         if (string.IsNullOrWhiteSpace(s.ShopeeDataSheet)) { problem = $"{a.DisplayName}/{s.DisplayName}: shop chưa gán sheet"; return false; }
@@ -566,13 +656,14 @@ public sealed partial class ScrapeViewModel : ModuleViewModelBase
     public string? TakeJobFatal(string bigSellerAccountId) =>
         _jobFatal.TryRemove(bigSellerAccountId, out var reason) ? reason : null;
 
-    /// <summary>Tiền-kiểm điều kiện scrape 1 đích (kho tk Shopee, Brave, cấu hình) — KHÔNG mở dialog.
-    /// Cho <c>AssignmentWorker</c> kiểm TRƯỚC khi chạy để khỏi modal + khỏi kẹt việc 'running'.</summary>
-    public bool CanDispatchScrape(ScrapeTargetViewModel target, out string problem)
+    /// <summary>Tiền-kiểm điều kiện scrape 1 đích (kho tk Shopee, Brave, cấu hình) — KHÔNG mở dialog, KHÔNG
+    /// đụng state (shop cần kiểm truyền vào, không ghi <c>SelectedShop</c>). Cho <c>AssignmentWorker</c> kiểm
+    /// TRƯỚC khi chạy để khỏi modal + khỏi kẹt việc 'running'.</summary>
+    public bool CanDispatchScrape(ScrapeTargetViewModel target, BigSellerShop? shop, out string problem)
     {
         var pool = AccountStore.Shared.Accounts.Count(a => !a.Disabled);
         if (pool == 0) { problem = "kho tài khoản Shopee trống"; return false; }
         if (BrowserLauncher.DetectUserData(BrowserKind.Brave) is null) { problem = "không tìm thấy User Data Brave"; return false; }
-        return ValidateTarget(target, pool, out problem);
+        return ValidateTarget(target, shop, pool, out problem);
     }
 }

@@ -189,6 +189,16 @@ public sealed class HttpCoordinationHub : ICoordinationHub, IUpdateAckSink, IDis
         Status = LedgerStatus.Running, LastMachineId = _machineId, LastHostname = Host, LastRunAt = DateTimeOffset.Now,
     });
 
+    /// <summary>Dòng BỎ QUA: vẫn đẩy [row..row] vào vùng phủ (GIỮ NGUYÊN ngữ nghĩa complement — không publish
+    /// thì Hub giao lại dòng hỏng vòng vô tận) NHƯNG kèm tên dòng vào sổ bỏ-qua để máy khác fold về còn biết
+    /// mình đang thiếu SP, thay vì thấy "✔ Hoàn thành toàn bộ".</summary>
+    public void PublishSkipped(CoordKey key, int row) => _ = TryPublish(new WorkLedgerRecord
+    {
+        Key = key.Id, BigsellerId = key.BigsellerId, ShopId = key.ShopId, Sheet = key.Sheet, Op = OpStr(key.Op),
+        Completed = [new RowRange { From = row, To = row }], Skipped = [row], LastRowReached = row,
+        Status = LedgerStatus.Running, LastMachineId = _machineId, LastHostname = Host, LastRunAt = DateTimeOffset.Now,
+    });
+
     public void PublishCompletion(CoordKey key, string status, int lastRow) => _ = TryPublish(new WorkLedgerRecord
     {
         Key = key.Id, BigsellerId = key.BigsellerId, ShopId = key.ShopId, Sheet = key.Sheet, Op = OpStr(key.Op),
@@ -357,16 +367,34 @@ public sealed class HttpCoordinationHub : ICoordinationHub, IUpdateAckSink, IDis
     {
         try
         {
+            // Gom theo (acc, sheet) để RECONCILE sổ bỏ qua sau khi fold hết: 1 sheet có thể trải NHIỀU
+            // shop-record trên ledger, phải nhìn TẤT CẢ mới biết dòng nào còn bị (máy nào đó) bỏ. Nếu không
+            // gỡ, SkippedRows chỉ-ghi-thêm: máy khác cào lại xong dòng đó rồi mà máy này vẫn hiện "bỏ n dòng"
+            // → bấm "Cào lại" khoét NHẦM dòng đã xong khỏi vùng phủ Hub (xem UnmarkResolvedSkipped).
+            var completedBySheet = new Dictionary<(string acc, string sheet), List<RowRange>>();
+            var skippedBySheet = new Dictionary<(string acc, string sheet), HashSet<int>>();
             foreach (var r in await _client.AllLedgerAsync())
             {
                 // CHỈ fold op=scrape: import/update/rewrite GIỜ cũng đẩy Completed (dòng đã làm) lên ledger để
                 // Thống kê xem "dòng nào đã import/update"; nhưng ĐÓ KHÔNG phải tiến độ scrape → nếu fold vào
                 // ScrapeProgressStore thì scrape sẽ tưởng các dòng ấy đã cào xong → BỎ SÓT khi Tiếp tục.
                 if (r.Op != AssignmentOps.Scrape) continue;
-                if (string.IsNullOrEmpty(r.BigsellerId) || r.Completed.Count == 0) continue;
+                if (string.IsNullOrEmpty(r.BigsellerId) || (r.Completed.Count == 0 && r.Skipped.Count == 0)) continue;
                 foreach (var rr in r.Completed)
-                    ScrapeProgressStore.Shared.MarkCompleted(r.BigsellerId, r.Sheet, rr.From, rr.To);
+                    ScrapeProgressStore.Shared.MarkCompleted(r.BigsellerId, r.Sheet ?? "", rr.From, rr.To);
+                // Sổ dòng bỏ qua đi kèm vùng phủ: không fold thì máy này thấy "✔ Hoàn thành toàn bộ" trong khi
+                // máy kia đã bỏ mất mấy dòng. MarkSkipped idempotent (dedup + tự kéo dòng vào vùng phủ).
+                foreach (var row in r.Skipped)
+                    ScrapeProgressStore.Shared.MarkSkipped(r.BigsellerId, r.Sheet ?? "", row);
+                var key = (r.BigsellerId, r.Sheet ?? "");
+                if (!completedBySheet.TryGetValue(key, out var cl)) completedBySheet[key] = cl = [];
+                cl.AddRange(r.Completed);
+                if (!skippedBySheet.TryGetValue(key, out var sl)) skippedBySheet[key] = sl = [];
+                sl.UnionWith(r.Skipped);
             }
+            foreach (var (key, completed) in completedBySheet)
+                ScrapeProgressStore.Shared.UnmarkResolvedSkipped(key.acc, key.sheet, completed,
+                    skippedBySheet.TryGetValue(key, out var sk) ? sk : []);
         }
         catch { }
     }
@@ -381,15 +409,44 @@ public sealed class HttpCoordinationHub : ICoordinationHub, IUpdateAckSink, IDis
         if (string.IsNullOrEmpty(bigsellerId)) return;
         try
         {
+            var completed = new List<RowRange>();
+            var skipped = new HashSet<int>();
             foreach (var r in await _client.AllLedgerAsync())
             {
-                if (r.Op != AssignmentOps.Scrape || r.BigsellerId != bigsellerId || r.Completed.Count == 0) continue;
+                if (r.Op != AssignmentOps.Scrape || r.BigsellerId != bigsellerId) continue;
+                if (r.Completed.Count == 0 && r.Skipped.Count == 0) continue;
                 if (!string.Equals(r.Sheet ?? "", sheet ?? "", StringComparison.OrdinalIgnoreCase)) continue;
                 foreach (var rr in r.Completed)
                     ScrapeProgressStore.Shared.MarkCompleted(r.BigsellerId, r.Sheet ?? "", rr.From, rr.To);
+                // Như SyncIntoProgressAsync: sổ dòng bỏ qua phải theo cùng vùng phủ, kẻo máy tiếp quản resume
+                // xong lại báo "✔ Hoàn thành toàn bộ" trong khi vẫn thiếu đúng ngần ấy SP.
+                foreach (var row in r.Skipped)
+                    ScrapeProgressStore.Shared.MarkSkipped(r.BigsellerId, r.Sheet ?? "", row);
+                completed.AddRange(r.Completed);
+                skipped.UnionWith(r.Skipped);
             }
+            // Gỡ sổ bỏ qua local các dòng Hub đã coi là xong (máy khác cào lại) — chống "nút ma" khoét nhầm.
+            ScrapeProgressStore.Shared.UnmarkResolvedSkipped(bigsellerId, sheet ?? "", completed, skipped);
         }
         catch { }
+    }
+
+    /// <summary>MỞ LẠI trên Hub các dòng đã bỏ qua của 1 việc (nút "Cào lại dòng đã bỏ"): Hub bỏ chúng khỏi vùng
+    /// phủ + xoá sổ + status về stopped. Trả <c>true</c> = Hub ĐÃ XÁC NHẬN; <c>false</c> = offline/hub lỗi.
+    /// <para>CỐ Ý không nuốt lỗi thành true như các hàm best-effort khác quanh đây: caller phải mở Hub TRƯỚC rồi
+    /// mới sửa local, vì làm ngược mà Hub fail thì lượt fold kế tiếp phủ lại đúng các dòng vừa mở → no-op im
+    /// lặng, user tưởng đã cào lại.</para></summary>
+    public async Task<bool> ReopenSkippedAsync(CoordKey key, IReadOnlyCollection<int> rows)
+    {
+        try
+        {
+            // Gửi KÈM sổ dòng của client: hub union với sổ của mình rồi khoét — nhờ đó dòng bỏ TRƯỚC khi hub
+            // có cột skipped (không backfill) vẫn khoét được, nút không thành no-op im lặng.
+            await _client.ReopenSkippedLedgerAsync(new ReopenSkippedRequest(
+                key.Id, key.BigsellerId, key.ShopId, key.Sheet, OpStr(key.Op), [.. rows]));
+            return true;
+        }
+        catch { return false; }
     }
 
     internal Task HeartbeatLeaseAsync(CoordKey key) => _client.HeartbeatLeaseAsync(key.Id, _machineId);

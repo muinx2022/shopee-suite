@@ -111,6 +111,9 @@ public sealed partial class HubDatabase : IDisposable
         if (AddColumnIfMissing("ledger", "machines_json", "TEXT DEFAULT ''"))
             ExecRaw("UPDATE ledger SET machines_json = '[\"' || last_machine_id || '\"]' " +
                     "WHERE (machines_json IS NULL OR machines_json = '') AND last_machine_id IS NOT NULL AND last_machine_id <> '';");
+        // Sổ dòng BỎ QUA xuyên máy (WorkLedgerRecord.Skipped). KHÔNG backfill: bản ghi cũ để '' = "không biết
+        // máy nào bỏ dòng nào" — thà rỗng còn hơn bịa. Client bản mới publish tới đâu, hub union tới đó.
+        AddColumnIfMissing("ledger", "skipped_json", "TEXT DEFAULT ''");
         // Thời điểm hub NHẬN file phiếu PDF của đơn (POST /api/orders/slip). NULL = chưa có phiếu trên hub.
         AddColumnIfMissing("orders", "slip_at", "TEXT");
         // "Chuẩn bị hàng": prepared_at = ISO UTC lúc máy client arrange xong đơn; prepared_day = yyyy-MM-dd theo
@@ -206,7 +209,7 @@ CREATE TABLE IF NOT EXISTS ledger(
   key TEXT PRIMARY KEY, bigseller_id TEXT, shop_id TEXT, sheet TEXT, op TEXT,
   completed_json TEXT, last_row INTEGER, status TEXT,
   last_machine_id TEXT, last_hostname TEXT, last_run_at TEXT, updated_at TEXT,
-  machines_json TEXT DEFAULT '');
+  machines_json TEXT DEFAULT '', skipped_json TEXT DEFAULT '');
 CREATE TABLE IF NOT EXISTS machines(
   machine_id TEXT PRIMARY KEY, hostname TEXT, last_seen TEXT, app_version TEXT, max_brave INTEGER DEFAULT 0,
   update_requested_at TEXT DEFAULT '', update_requested_from TEXT DEFAULT '', update_status TEXT DEFAULT '',

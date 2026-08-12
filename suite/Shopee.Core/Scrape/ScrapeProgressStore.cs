@@ -182,6 +182,54 @@ public sealed class ScrapeProgressStore
         Changed?.Invoke();
     }
 
+    /// <summary>
+    /// MỞ LẠI các dòng đã bỏ qua: khoét chúng khỏi vùng phủ <see cref="ScrapeProgress.Completed"/> rồi xoá sổ →
+    /// lượt Tiếp tục sau nhặt đúng ngần ấy dòng. Đây là đường cào lại CHỦ ĐỘNG duy nhất ngoài Chạy (reset) —
+    /// reset thì mất cả tiến độ của cả sheet, còn đây chỉ đụng mấy dòng hỏng.
+    /// <para>Đang <see cref="LedgerStatus.Completed"/> thì hạ về <see cref="LedgerStatus.Stopped"/>: vừa có dòng
+    /// chưa cào thì không được để UI báo "✔ Hoàn thành". <see cref="ScrapeProgress.LastRowReached"/> GIỮ NGUYÊN
+    /// (là mốc "đã tới đâu", không phải số dòng đã xong). Trả về SỐ dòng vừa mở lại; 0 = sổ vốn đã sạch.</para>
+    /// </summary>
+    public int ReopenSkipped(string accountId, string sheet)
+    {
+        int reopened;
+        lock (_lock)
+        {
+            var p = _items.FirstOrDefault(x => KeyEq(x, accountId, sheet));
+            if (p is null || p.SkippedRows.Count == 0) return 0;
+            reopened = p.SkippedRows.Count;
+            p.Completed = RowRangeMath.SubtractRows(p.Completed, p.SkippedRows);
+            p.SkippedRows.Clear();
+            if (p.Status == LedgerStatus.Completed) p.Status = LedgerStatus.Stopped;
+            SaveLocked();
+        }
+        Changed?.Invoke();
+        return reopened;
+    }
+
+    /// <summary>Sau khi fold ledger Hub: GỠ khỏi sổ bỏ qua local những dòng mà Hub coi là ĐÃ XONG — được một
+    /// máy nào đó cào lại (nằm trong vùng phủ <paramref name="hubCompleted"/>) VÀ không máy nào còn bỏ (KHÔNG
+    /// có trong <paramref name="hubSkipped"/>). KHÔNG đụng Completed (dòng đã cào xong, vẫn thuộc vùng phủ).
+    /// <para>Thiếu bước này thì SkippedRows là sổ CHỈ-GHI-THÊM: máy A cào lại xong dòng 50, máy B fold về vẫn
+    /// hiện "bỏ 1 dòng" → bấm "Cào lại dòng đã bỏ" gửi [50] lên Hub → khoét NHẦM dòng đã xong khỏi vùng phủ,
+    /// hạ shop về "chưa xong", lan mọi máy đã fold.</para>
+    /// Gọi từ luồng nền (2 đường fold) — chỉ Save/Changed khi thật sự gỡ được dòng nào.</summary>
+    public void UnmarkResolvedSkipped(string accountId, string sheet,
+        IReadOnlyList<RowRange> hubCompleted, IReadOnlyCollection<int> hubSkipped)
+    {
+        var changed = false;
+        lock (_lock)
+        {
+            var p = _items.FirstOrDefault(x => KeyEq(x, accountId, sheet));
+            if (p is null || p.SkippedRows.Count == 0) return;
+            var stillSkipped = hubSkipped as IReadOnlySet<int> ?? new HashSet<int>(hubSkipped);
+            var removed = p.SkippedRows.RemoveAll(row =>
+                !stillSkipped.Contains(row) && hubCompleted.Any(r => row >= r.From && row <= r.To));
+            if (removed > 0) { SaveLocked(); changed = true; }
+        }
+        if (changed) Changed?.Invoke();
+    }
+
     /// <summary>Kết thúc lượt chạy: nếu đã xong hết [start..total] → completed + nhả hết tk; ngược lại stopped (giữ tk).</summary>
     public void FinishRun(string accountId, string sheet, int start, int total)
     {
@@ -281,6 +329,35 @@ public static class RowRangeMath
                 result.Add(new RowRange { From = from, To = to });
         }
         return result;
+    }
+
+    /// <summary>KHOÉT các dòng rời <paramref name="rows"/> khỏi vùng phủ: khoảng nào chứa một dòng bị khoét thì
+    /// tách đôi (dòng ở giữa), cụt đầu/cụt đuôi, hoặc biến mất hẳn (khoảng 1 dòng). Dòng không thuộc khoảng nào
+    /// thì bỏ qua. Kết quả đã Normalize. Dùng cho "Cào lại dòng đã bỏ" — nghịch đảo của
+    /// <see cref="Merge"/> ở mức từng dòng.</summary>
+    public static List<RowRange> SubtractRows(IReadOnlyList<RowRange> ranges, IReadOnlyCollection<int> rows)
+    {
+        var input = ranges.Where(r => r.To >= r.From).Select(r => (from: r.From, to: r.To));
+        if (rows.Count == 0) return Normalize(input);
+
+        // Cắt QUANH các dòng cần khoét, KHÔNG đi từng dòng của khoảng: bản per-row với một khoảng rác
+        // To=int.MaxValue (server không validate RowRange client gửi) là vòng lặp chạy (gần như) vĩnh viễn —
+        // ở HubDatabase nó nằm TRONG lock nên treo cả Hub. `start` dùng long vì row+1 tràn int ở biên.
+        var cut = rows.Where(r => r > 0).Distinct().OrderBy(r => r).ToList();
+        var kept = new List<(int from, int to)>();
+        foreach (var (from, to) in input)
+        {
+            long start = from;
+            foreach (var row in cut)
+            {
+                if (row < start) continue;
+                if (row > to) break;
+                if (row > start) kept.Add(((int)start, row - 1));
+                start = (long)row + 1;
+            }
+            if (start <= to) kept.Add(((int)start, to));
+        }
+        return Normalize(kept);
     }
 
     /// <summary>Phần bù: các khoảng trong [start..total] KHÔNG nằm trong <paramref name="completed"/>.</summary>

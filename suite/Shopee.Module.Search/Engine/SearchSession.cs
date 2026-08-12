@@ -13,6 +13,10 @@ public enum SearchRunOutcome
     /// account và không bỏ từ khóa/link.
     /// </summary>
     Reconnect,
+    /// <summary>Đăng nhập Shopee THẤT BẠI (sai mật khẩu, OTP, tk khoá…) — lỗi của TÀI KHOẢN, không phải
+    /// của link. Coordinator xử như captcha: đánh dấu tk lỗi rồi đổi account thử LẠI cùng link, KHÔNG bỏ
+    /// link (trước đây trả <see cref="Error"/> nên link bị bỏ dù còn tk rảnh).</summary>
+    LoginFailed,
 }
 
 /// <summary>
@@ -108,65 +112,46 @@ public sealed class SearchSession : IAsyncDisposable
             return SearchRunOutcome.Error;
         }
 
-        // Bind the WS server on `port` and wire the orchestrator BEFORE launching Brave, so the
-        // extension reaches a live server the instant it connects: no window for another lane's
-        // PortAllocator.Reserve to grab this port, and no connect-before-listen race. The crawl stays gated —
-        // PrepareSearch() runs only AFTER login below, so the extension's early "ready" (the launch
-        // URL carries #_ss_ws={port}) is a no-op until we're logged in.
-        // Reuse an existing task when resuming a keyword (keeps its accumulated products + checkpoint
-        // across attempts and across app restarts); otherwise create a fresh task.
-        if (resumeTaskId > 0)
-        {
-            TaskId = resumeTaskId;
-            _taskStore.UpdateStatus(TaskId, "Running");
-        }
-        else
-        {
-            TaskId = _taskStore.CreateTask(config, account);
-        }
-
-        _ws = new WebSocketServer(port);
-        _ws.Connected += () => { Touch(); ConnectionChanged?.Invoke(true); };
-        _ws.Disconnected += () => { Touch(); ConnectionChanged?.Invoke(false); };
-
         var completion = new TaskCompletionSource<SearchRunOutcome>(TaskCreationOptions.RunContinuationsAsynchronously);
         _runCompletion = completion;
         using var registration = ct.Register(() => completion.TrySetResult(SearchRunOutcome.Cancelled));
 
-        _orchestrator = new SearchOrchestrator(_ws);
-        _orchestrator.ProgressChanged += msg => { Touch(); Log?.Invoke(msg); };
-        _orchestrator.ProductFound += product => { Touch(); ProductFound?.Invoke(product); };
-        _orchestrator.ProductPersisted += product => _taskStore.SaveProduct(TaskId, product);
-        _orchestrator.CheckpointChanged += (categoryIndex, categoryName, page) =>
+        SearchOrchestrator orchestrator;
+        // Giữ chỗ cổng phải được NHẢ trên MỌI đường ném giữa Reserve và Start: CSDL khoá (CreateTask/
+        // UpdateStatus ném SqliteException) hay HTTP.sys từ chối bind (_ws.Start()) trước đây ném thẳng ra
+        // ngoài RunAsync → cổng đó bị giữ tới khi tắt app, lane chết không trạng thái.
+        try
         {
-            Touch();
-            LastCategoryIndex = Math.Max(1, categoryIndex);
-            if (page > 0) LastPage = page;
-            _taskStore.UpdateCheckpoint(TaskId, categoryIndex, categoryName, page);
-        };
-        _orchestrator.CaptchaDetected += () =>
-        {
-            _taskStore.UpdateStatus(TaskId, "Failed", "Verify/captcha");
-            completion.TrySetResult(SearchRunOutcome.CaptchaOrVerify);
-        };
-        _orchestrator.NetworkErrorDetected += msg =>
-        {
-            _taskStore.UpdateStatus(TaskId, "Failed", msg);
-            completion.TrySetResult(SearchRunOutcome.NetworkError);
-        };
-        _orchestrator.SearchCompleted += () =>
-        {
-            _taskStore.UpdateStatus(TaskId, "Completed");
-            completion.TrySetResult(SearchRunOutcome.Completed);
-        };
-        _orchestrator.ErrorOccurred += msg =>
-        {
-            LastError = msg;
-            _taskStore.UpdateStatus(TaskId, "Failed", msg);
-            completion.TrySetResult(SearchRunOutcome.Error);
-        };
+            // Bind the WS server on `port` and wire the orchestrator BEFORE launching Brave, so the
+            // extension reaches a live server the instant it connects: no window for another lane's
+            // PortAllocator.Reserve to grab this port, and no connect-before-listen race. The crawl stays gated —
+            // PrepareSearch() runs only AFTER login below, so the extension's early "ready" (the launch
+            // URL carries #_ss_ws={port}) is a no-op until we're logged in.
+            // Reuse an existing task when resuming a keyword (keeps its accumulated products + checkpoint
+            // across attempts and across app restarts); otherwise create a fresh task.
+            if (resumeTaskId > 0)
+            {
+                TaskId = resumeTaskId;
+                _taskStore.UpdateStatus(TaskId, "Running");
+            }
+            else
+            {
+                TaskId = _taskStore.CreateTask(config, account);
+            }
 
-        _ws.Start();
+            _ws = new WebSocketServer(port);
+            _ws.Connected += () => { Touch(); ConnectionChanged?.Invoke(true); };
+            _ws.Disconnected += () => { Touch(); ConnectionChanged?.Invoke(false); };
+
+            orchestrator = WireOrchestrator(_ws, completion);
+
+            _ws.Start();
+        }
+        catch
+        {
+            Shopee.Core.Infrastructure.PortAllocator.Release(port);   // never bound — don't leak the reservation
+            throw;
+        }
         // The listener now owns the port (HTTP.sys binds synchronously), so the OS won't
         // hand it to another lane — release the reservation that guarded the pre-bind gap.
         Shopee.Core.Infrastructure.PortAllocator.Release(port);
@@ -182,8 +167,10 @@ public sealed class SearchSession : IAsyncDisposable
             var ok = await loginSvc.EnsureLoggedInAsync(account, _brave.CdpPort, m => Log?.Invoke(m), ct);
             if (!ok)
             {
+                // Lỗi của TÀI KHOẢN (sai mật khẩu/OTP/khoá) chứ không phải của link → coordinator đổi
+                // account thử lại chính link này thay vì bỏ link.
                 Log?.Invoke("Đăng nhập thất bại.");
-                return SearchRunOutcome.Error;
+                return SearchRunOutcome.LoginFailed;
             }
             AccountStateChanged?.Invoke();
             AccountLoggedIn?.Invoke(account.Id);
@@ -198,7 +185,7 @@ public sealed class SearchSession : IAsyncDisposable
         // Logged in (or no login needed) → arm the crawl. If the extension already connected (it
         // usually has, from the launch URL hash), PrepareSearch sends "start" right away; otherwise
         // the orchestrator sends it when the next "ready" arrives.
-        _orchestrator.PrepareSearch(config);
+        orchestrator.PrepareSearch(config);
 
         // Trusted-input controller; failure is non-fatal (extension falls back to synthetic events).
         _cdpInput = new CdpInputController(_ws, _brave.CdpPort);
@@ -216,6 +203,47 @@ public sealed class SearchSession : IAsyncDisposable
         Log?.Invoke("Chờ extension kết nối...");
         try { return await completion.Task; }
         finally { _runCompletion = null; }
+    }
+
+    // Gắn orchestrator của lượt chạy này vào WS + các sự kiện kết thúc lượt (tách khỏi RunAsync để phần
+    // "giữ chỗ cổng" ở trên gói gọn trong một try/catch). Trả về chính orchestrator vừa gắn để caller khỏi
+    // đọc lại field nullable.
+    private SearchOrchestrator WireOrchestrator(WebSocketServer ws, TaskCompletionSource<SearchRunOutcome> completion)
+    {
+        var orchestrator = new SearchOrchestrator(ws);
+        _orchestrator = orchestrator;
+        orchestrator.ProgressChanged += msg => { Touch(); Log?.Invoke(msg); };
+        orchestrator.ProductFound += product => { Touch(); ProductFound?.Invoke(product); };
+        orchestrator.ProductPersisted += product => _taskStore.SaveProduct(TaskId, product);
+        orchestrator.CheckpointChanged += (categoryIndex, categoryName, page) =>
+        {
+            Touch();
+            LastCategoryIndex = Math.Max(1, categoryIndex);
+            if (page > 0) LastPage = page;
+            _taskStore.UpdateCheckpoint(TaskId, categoryIndex, categoryName, page);
+        };
+        orchestrator.CaptchaDetected += () =>
+        {
+            _taskStore.UpdateStatus(TaskId, "Failed", "Verify/captcha");
+            completion.TrySetResult(SearchRunOutcome.CaptchaOrVerify);
+        };
+        orchestrator.NetworkErrorDetected += msg =>
+        {
+            _taskStore.UpdateStatus(TaskId, "Failed", msg);
+            completion.TrySetResult(SearchRunOutcome.NetworkError);
+        };
+        orchestrator.SearchCompleted += () =>
+        {
+            _taskStore.UpdateStatus(TaskId, "Completed");
+            completion.TrySetResult(SearchRunOutcome.Completed);
+        };
+        orchestrator.ErrorOccurred += msg =>
+        {
+            LastError = msg;
+            _taskStore.UpdateStatus(TaskId, "Failed", msg);
+            completion.TrySetResult(SearchRunOutcome.Error);
+        };
+        return orchestrator;
     }
 
     // Tự khôi phục lane treo: nếu không có sự kiện nào (kết nối/progress/sản phẩm/checkpoint) trong

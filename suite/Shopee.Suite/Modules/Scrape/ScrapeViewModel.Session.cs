@@ -1,4 +1,5 @@
 using Shopee.Core.Accounts;
+using Shopee.Core.BigSeller;
 using Shopee.Modules.MultiBrave;
 using Shopee.Suite.Infrastructure;
 
@@ -74,6 +75,13 @@ public sealed partial class ScrapeViewModel
     private sealed class JobHandle
     {
         public required ScrapeTargetViewModel Target;
+        // Shop/sheet của job được CHỐT LÚC ĐĂNG KÝ (không đọc Target.SelectedShop nữa). SelectedShop là state
+        // MUTABLE: WorkspaceViewModel.PickShop / AssignmentWorker ghi đè nó giữa chừng, nên đọc muộn có thể trả
+        // shop KHÁC hẳn shop job đang cào → chip "đang scrape" nhảy sang shop khác, IsRunningLocally kết luận
+        // sai (việc Hub-giao bị báo "không khởi động được" dù đang chạy ngon).
+        public required BigSellerShop Shop;
+        public required string Sheet;     // = Shop.ShopeeDataSheet lúc đăng ký (so sánh OrdinalIgnoreCase)
+        public required string ShopId;    // = Shop.Id lúc đăng ký
         public required int Seq;
         public required CancellationTokenSource Cts;   // linked tới MasterCts → dừng RIÊNG 1 tk
         public ScrapeRunner? Runner;

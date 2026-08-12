@@ -9,6 +9,7 @@ namespace ShopeeStatApp.Services;
 public sealed class ExcelCategoryFile : IDisposable
 {
     private readonly XLWorkbook _wb;
+    private readonly string _path;
     private readonly List<IXLCell> _catCells = [];
 
     /// <summary>Tên sản phẩm theo từng dòng (cùng thứ tự với ô danh mục sẽ ghi).</summary>
@@ -16,7 +17,8 @@ public sealed class ExcelCategoryFile : IDisposable
 
     public ExcelCategoryFile(string path)
     {
-        _wb = new XLWorkbook(path); // nạp toàn bộ vào bộ nhớ; Save() sẽ ghi lại đúng file này
+        _path = Path.GetFullPath(path);
+        _wb = new XLWorkbook(_path); // nạp toàn bộ vào bộ nhớ; ApplyAndSave ghi lại đúng file này
 
         foreach (var ws in _wb.Worksheets)
         {
@@ -58,8 +60,28 @@ public sealed class ExcelCategoryFile : IDisposable
             _catCells[i].Value = categories[i];
             written++;
         }
-        _wb.Save();
+        SaveAtomic();
         return written;
+    }
+
+    /// <summary>Ghi qua file TẠM rồi đổi tên đè lên file gốc (như <see cref="ExcelExporter"/>): <c>_wb.Save()</c>
+    /// ghi THẲNG vào file của user — ClosedXML ghi lại toàn bộ workbook nên hỏng giữa chừng (hết đĩa, mất
+    /// điện, AV chặn) là mất luôn file nguồn. Move hỏng (file đang mở trong Excel) thì dọn file tạm rồi ném
+    /// tiếp — caller báo lỗi, KHÔNG để lại rác.</summary>
+    private void SaveAtomic()
+    {
+        var dir = Path.GetDirectoryName(_path)!;
+        var tmp = Path.Combine(dir, $"{Path.GetFileNameWithoutExtension(_path)}_{Guid.NewGuid():N}.tmp.xlsx");
+        try
+        {
+            _wb.SaveAs(tmp);
+            File.Move(tmp, _path, overwrite: true);
+        }
+        catch
+        {
+            try { File.Delete(tmp); } catch { }
+            throw;
+        }
     }
 
     public void Dispose() => _wb.Dispose();

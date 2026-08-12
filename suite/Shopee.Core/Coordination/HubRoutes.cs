@@ -34,6 +34,9 @@ public static class HubRoutes
     // ── Sổ hoàn thành (ledger) ──
     public const string Ledger = "/ledger";
     public const string LedgerSet = "/ledger/set";
+    /// <summary>POST: mở lại các dòng ĐÃ BỎ QUA của 1 việc — bỏ chúng khỏi vùng phủ + xoá sổ + status về
+    /// stopped. Route MỚI (08/2026): client cũ không gọi nên hub mới deploy trước là vô hại.</summary>
+    public const string LedgerReopenSkipped = "/ledger/reopen-skipped";
 
     // ── Vai trò máy + giao việc ──
     public const string Assignments = "/assignments";

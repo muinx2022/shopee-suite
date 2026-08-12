@@ -2,12 +2,16 @@ using Shopee.Core.Infrastructure;
 
 namespace Shopee.Core.Scrape;
 
-public sealed record VideoCandidate(string Url, double Duration, string Label = "");
-public sealed record VideoDownloadResult(bool Success, string? SavedPath, string? Url, double Duration, long? Size, string? Error);
+/// <summary>Một ứng viên video của trang SP. <paramref name="Duration"/> = null nghĩa là KHÔNG ĐO ĐƯỢC thời
+/// lượng (ứng viên lấy từ nhánh fallback: performance entries / thẻ script) — KHÁC HẲN "0 giây". Coi null là 0
+/// (bản cũ) khiến MỌI ứng viên fallback bị bộ lọc &lt; 60s loại sạch → cả đường fallback thành code chết.</summary>
+public sealed record VideoCandidate(string Url, double? Duration, string Label = "");
+public sealed record VideoDownloadResult(bool Success, string? SavedPath, string? Url, double? Duration, long? Size, string? Error);
 
 /// <summary>
 /// Tải video native bằng HttpClient — THAY cho API Python (/video/download). Lọc các ứng viên có
-/// thời lượng &lt; 60s, đo dung lượng (HEAD hoặc Range), chọn cái lớn nhất rồi tải về thư mục đích.
+/// thời lượng &lt; 60s (hoặc KHÔNG đo được), đo dung lượng (HEAD hoặc Range), chọn cái lớn nhất rồi tải về
+/// thư mục đích.
 /// </summary>
 public static class VideoDownloader
 {
@@ -16,13 +20,21 @@ public static class VideoDownloader
     public static async Task<VideoDownloadResult> DownloadBestAsync(
         string sku, IEnumerable<VideoCandidate> candidates, string outputDir, CancellationToken ct = default)
     {
-        var valid = candidates
+        var all = candidates.ToList();
+        var valid = all
             .Where(c => !string.IsNullOrWhiteSpace(c.Url)
                         && (c.Url.StartsWith("http://") || c.Url.StartsWith("https://"))
-                        && c.Duration > 0 && c.Duration < 60)
+                        // KHÔNG đo được thời lượng (null) → VẪN NHẬN: ứng viên fallback không bao giờ có
+                        // duration, loại nó đi là loại luôn cả đường fallback.
+                        && (c.Duration is null || (c.Duration > 0 && c.Duration < 60)))
             .ToList();
         if (valid.Count == 0)
-            return new VideoDownloadResult(false, null, null, 0, null, "Không có video ứng viên < 60s.");
+            // Phân biệt 2 ca cho người đọc log: trang KHÔNG có ứng viên nào vs có ứng viên nhưng bị lọc hết
+            // (video dài ≥ 60s / URL không hợp lệ) — trước đây cả hai đều báo "không có video ứng viên < 60s".
+            return new VideoDownloadResult(false, null, null, null, null,
+                all.Count == 0
+                    ? "Trang không có video ứng viên nào."
+                    : $"Có {all.Count} video ứng viên nhưng không cái nào dùng được (dài ≥ 60s hoặc URL không hợp lệ).");
 
         // Đo dung lượng từng ứng viên, chọn cái lớn nhất.
         var sized = new List<(VideoCandidate c, long size)>();

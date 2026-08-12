@@ -264,6 +264,14 @@ public sealed partial class WorkspaceViewModel : ObservableObject
     // (Thêm/xoá/đăng nhập tài khoản BigSeller đều nằm ở tab "BigSeller" — không lặp lại ở đây.)
     [RelayCommand] private void Reload()
     {
+        // Đang chạy (scrape / update batch / update inline) thì KHÔNG tải lại: Rebuild dựng VM MỚI trong khi
+        // job giữ VM CŨ → mọi chip tiến độ đứng im tới hết phiên. Cùng luật với OnStoreChanged (AnyRunning) —
+        // ở đó là đường tự động, đây là nút BẤM TAY nên phải nói rõ lý do qua Status.
+        if (AnyRunning)
+        {
+            Status = "Đang chạy — không tải lại danh sách (bấm ■ Dừng trước).";
+            return;
+        }
         Scrape.ReloadCommand.Execute(null);
         Update.ReloadCommand.Execute(null);
         Rebuild();
@@ -494,7 +502,9 @@ public sealed partial class WorkspaceViewModel : ObservableObject
                 clearScrape.Add((p.AccountId, p.Sheet ?? ""));
                 continue;
             }
-            if (acct.ScrapeTarget.IsShopRunning?.Invoke(shop) ?? false) continue;     // đang scrape thật → bỏ
+            // Tiến độ khoá theo (acc + sheet) → hỏi "SHEET này đang cào?" (không phải shop): 2 shop cùng sheet
+            // mà hỏi theo shop thì shop KHÔNG-được-chọn ra false → mục "còn dở" hiện oan giữa lúc job đang chạy.
+            if (acct.ScrapeTarget.IsSheetRunning?.Invoke(p.Sheet ?? "") ?? false) continue;   // đang scrape thật → bỏ
             _resumePending.Add(new ResumeItem(AssignmentOps.Scrape, acct, shop));
             rows.Add(new ResumePendingRow(OpLabel(AssignmentOps.Scrape), acct.DisplayName, shop.DisplayName,
                 ScrapeProgressText(p), FormatLastRun(p.LastRunAt)));

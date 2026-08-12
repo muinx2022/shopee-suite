@@ -242,11 +242,25 @@ public sealed class AssignmentWorker : IDisposable
         }
 
         // Enqueue (luôn xếp hàng, không chạy inline) → LaunchCore không chạy trong nested modal pump nếu lỡ có dialog đang mở.
-        UiThread.Enqueue(() =>
+        UiThread.Enqueue(() => TaskExt.FireAndForget(LaunchCoreAndReportAsync(hub, a, grant), $"phóng việc {Describe(a)}"));
+    }
+
+    /// <summary>Phóng việc rồi kết luận NGAY theo kết quả THẬT của lời gọi chạy: chạy được → "▶ Nhận";
+    /// KHÔNG chạy được → trả về hàng đợi / 'failed' (trước đây scrape LUÔN trả true nên việc bị từ chối ngay
+    /// tại chỗ vẫn được đánh dấu "đã nhận", rồi chết lặng cho tới khi hết grace 60s).</summary>
+    private async Task LaunchCoreAndReportAsync(HttpCoordinationHub hub, Assignment a, int grant)
+    {
+        if (await LaunchCoreAsync(a, grant))
         {
-            if (LaunchCore(a, grant)) { _liveIds[a.Id] = 1; _launchAttempts.TryRemove(a.Id, out _); HubLog.Info($"▶ Nhận {Describe(a)}"); }   // đã chạy → xoá bộ đếm thử lại
-            else { _inflight.TryRemove(a.Id, out _); _ = RequeueOrFailAsync(hub, a, "không khởi động được trên máy này"); }
-        });
+            _liveIds[a.Id] = 1;
+            _launchAttempts.TryRemove(a.Id, out _);   // đã chạy → xoá bộ đếm thử lại
+            HubLog.Info($"▶ Nhận {Describe(a)}");
+        }
+        else
+        {
+            _inflight.TryRemove(a.Id, out _);
+            await RequeueOrFailAsync(hub, a, "không khởi động được trên máy này");
+        }
     }
 
     /// <summary>Việc vừa claim nhưng CHƯA chạy được (thường do client mới chưa kịp đồng bộ tk/workbook) = lỗi
@@ -266,7 +280,9 @@ public sealed class AssignmentWorker : IDisposable
         }
     }
 
-    /// <summary>Tiền-kiểm điều kiện chạy (KHÔNG side-effect mở dialog). false → báo failed ngay.</summary>
+    /// <summary>Tiền-kiểm điều kiện chạy — KHÔNG side-effect (không mở dialog, KHÔNG ghi <c>SelectedShop</c>:
+    /// shop cần kiểm được TRUYỀN VÀO). Trước đây hàm này ghi đè SelectedShop của đích ngay ở bước tiền-kiểm,
+    /// nên một việc bị từ chối vẫn kéo lựa chọn shop của người ngồi máy đi theo. false → xử như launch fail.</summary>
     private bool CanLaunch(Assignment a, out string problem)
     {
         problem = "";
@@ -282,17 +298,18 @@ public sealed class AssignmentWorker : IDisposable
             var t = _scrape.ScrapeTargets.FirstOrDefault(x => x.Account.Id == a.BigsellerId);
             var shop = t?.Account.Shops.FirstOrDefault(s => s.Id == a.ShopId);
             if (t is null || shop is null) { problem = "không thấy tài khoản/shop trên máy này"; return false; }
-            t.SelectedShop = shop;
-            return _scrape.CanDispatchScrape(t, out problem);
+            return _scrape.CanDispatchScrape(t, shop, out problem);
         }
         var ut = _update.RunTargets.FirstOrDefault(x => x.Account.Id == a.BigsellerId);
         var ushop = ut?.Account.Shops.FirstOrDefault(s => s.Id == a.ShopId);
         if (ut is null || ushop is null) { problem = "không thấy tài khoản/shop trên máy này"; return false; }
-        ut.SelectedShop = ushop;
-        return _update.CanDispatchUpdate(ut, a.Op, out problem);
+        return _update.CanDispatchUpdate(ut, ushop, a.Op, out problem);
     }
 
-    private bool LaunchCore(Assignment a, int grant)
+    /// <summary>Phóng việc thật. true = việc ĐÃ khởi động được trên máy này. Riêng scrape: chờ
+    /// <see cref="ScrapeViewModel.TryStartSingleAsync"/> chốt "job có vào sổ không" (trả về ngay sau khi đăng
+    /// ký job, KHÔNG chờ cào xong) → false = start FAIL thật, KHÔNG đánh dấu đã nhận việc.</summary>
+    private async Task<bool> LaunchCoreAsync(Assignment a, int grant)
     {
         switch (a.Op)
         {
@@ -301,13 +318,12 @@ public sealed class AssignmentWorker : IDisposable
                 var t = _scrape.ScrapeTargets.FirstOrDefault(x => x.Account.Id == a.BigsellerId);
                 var shop = t?.Account.Shops.FirstOrDefault(s => s.Id == a.ShopId);
                 if (t is null || shop is null) return false;
-                t.SelectedShop = shop;
+                t.SelectedShop = shop;   // chốt shop NGAY TRƯỚC khi phóng job (StartJob đóng băng shop/sheet từ đây)
                 // Hub đặt khoảng dòng + số cửa sổ (= quỹ cấp) + cỡ khung + khoảng nghỉ giữa link cho lượt này
                 // (0/null = dùng cấu hình client).
-                _ = _scrape.RunSingleAsync(t, resume: true, silent: true, a.StartRow, a.EndRow,
+                return await _scrape.TryStartSingleAsync(t, resume: true, silent: true, a.StartRow, a.EndRow,
                     grant > 0 ? grant : (int?)null, a.FrameSize > 0 ? a.FrameSize : (int?)null,
                     a.RestMinSec > 0 ? a.RestMinSec : (int?)null, a.RestMaxSec > 0 ? a.RestMaxSec : (int?)null);
-                return true;
             }
             case AssignmentOps.Import:
             case AssignmentOps.Update:
@@ -316,7 +332,7 @@ public sealed class AssignmentWorker : IDisposable
                 var t = _update.RunTargets.FirstOrDefault(x => x.Account.Id == a.BigsellerId);
                 var shop = t?.Account.Shops.FirstOrDefault(s => s.Id == a.ShopId);
                 if (t is null || shop is null) return false;
-                t.SelectedShop = shop;
+                t.SelectedShop = shop;   // chốt shop ngay trước khi phóng workflow update
                 // import/update: số lane = quỹ Brave cấp; reload theo Hub đặt (0/null = dùng cấu hình client).
                 // rewrite: KHÔNG mở trình duyệt → processes null (quỹ đã cấp grant=0 cho op này).
                 if (a.Op == AssignmentOps.Import) _ = _update.RunImportSingleAsync(t, silent: true, a.StartRow, a.EndRow, ImportFromClaimedTab(a),

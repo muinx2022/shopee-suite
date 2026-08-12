@@ -21,8 +21,11 @@ internal static class ExtensionProgressReader
     private static readonly Regex CurrentRowRx =
         new(@"currentRow[^\d]{0,12}(\d+)", RegexOptions.Compiled);
 
+    // Char class NHẬN thêm '-' '.' '(' ')' — tên sheet thật hay có chúng ("Data-Shop A", "Data (2)", "SP.01").
+    // Thiếu chúng thì "Data-Shop A" bị đọc CỤT thành "Data" ở nhánh regex-fallback → guard so tên sheet từ chối
+    // oan (hướng an toàn nhưng bắt cào lại thừa). Dấu '-' đặt CUỐI class để không thành khoảng.
     private static readonly Regex SheetNameRx =
-        new(@"(?:lastSheetName|sheetName)[^\w""]{0,12}""?([a-zA-Z0-9_\s\u00C0-\u024F]+)", RegexOptions.Compiled);
+        new(@"(?:lastSheetName|sheetName)[^\w""]{0,12}""?([a-zA-Z0-9_\s\u00C0-\u024F.()-]+)", RegexOptions.Compiled);
 
     private static readonly Regex LastSkuRx =
         new(@"lastSku[^\w""]{0,12}""?([A-Z0-9]+)", RegexOptions.Compiled);

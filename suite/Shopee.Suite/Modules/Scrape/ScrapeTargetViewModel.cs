@@ -29,9 +29,15 @@ public sealed partial class ScrapeTargetViewModel : ObservableObject
     public BigSellerAccount Account { get; }
     public ObservableCollection<BigSellerShop> Shops { get; }
 
-    /// <summary>Do ScrapeViewModel cấp: TRẢ true nếu đang có job LIVE cào đúng shop (sheet) này → hiện
+    /// <summary>Do ScrapeViewModel cấp: TRẢ true nếu đang có job LIVE cào đúng SHOP này (so ShopId) → hiện
     /// "đang scrape". Dựa vào job sống thay vì cờ "running" trong file tiến độ (cờ này có thể kẹt sau crash).</summary>
     public Func<BigSellerShop, bool>? IsShopRunning { get; set; }
+
+    /// <summary>Do ScrapeViewModel cấp: TRẢ true nếu đang có job LIVE cào đúng SHEET này (tham số = tên sheet).
+    /// KHÁC <see cref="IsShopRunning"/> (so shop): tiến độ khoá theo (acc + sheet) nên câu hỏi "sheet này đang
+    /// được cào?" phải so sheet — 2 shop cùng trỏ một sheet thì hỏi theo shop trả sai (shop kia đang chạy vẫn
+    /// ra false → mục "còn dở" hiện oan giữa lúc đang chạy).</summary>
+    public Func<string, bool>? IsSheetRunning { get; set; }
 
     // Khi true (đang nạp config đã lưu lúc khởi tạo) thì KHÔNG lưu lại — tránh ghi đè vòng vo.
     private bool _loading;

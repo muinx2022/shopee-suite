@@ -79,13 +79,40 @@ internal static class LauncherRunnerLoop
             workbookPath, sheet, startRow, endRow.Value, cancellationToken, useHubData, hubAccountId);
         var items = fetch.Items;
 
-        if (items.Count == 0)
-            throw new InvalidOperationException("Không có link hợp lệ trong khoảng dòng đã chọn.");
-
+        // 2 dòng đếm này phải chạy TRƯỚC nhánh "khối rỗng" bên dưới — trước đây nhánh đó ném ngay ở trên nên
+        // người dùng không bao giờ thấy LÝ DO khối bị bỏ.
         if (fetch.SkippedMissingProductName > 0)
             log($"Bỏ qua {fetch.SkippedMissingProductName} dòng vì cột F (tên SP) trống.");
         if (fetch.SkippedMissingLink > 0)
             log($"Bỏ qua {fetch.SkippedMissingLink} dòng vì cột A không có link hợp lệ.");
+
+        if (items.Count == 0)
+        {
+            // 0 item + 2 bộ đếm skip = 0 nghĩa là KHÔNG CÓ BẰNG CHỨNG các dòng này tồn tại-nhưng-thiếu-input:
+            // hub-mode lọc phía server nên 2 bộ đếm luôn 0 (kho trả rỗng vì lý do gì đó thì cũng y hệt), còn
+            // excel-mode thì startRow > tổng dòng thật (user vừa xoá dòng cuối giữa lượt) cũng ra 0/0. Đóng dấu
+            // "đã phủ" lúc này là ghi xong cả khối lên ledger mà không mở một link nào — mất dòng âm thầm đúng
+            // lớp S1. Giữ đường lỗi cũ: chunk Errored → allocator vá + stall-skip ghi SỔ BỎ QUA (có dấu vết).
+            if (fetch.SkippedMissingProductName + fetch.SkippedMissingLink == 0)
+                throw new InvalidOperationException("Không có link hợp lệ trong khoảng dòng đã chọn.");
+
+            // MỌI dòng trong khối đều THIẾU INPUT (cột A không link / cột F trống) — CÓ bằng chứng qua 2 bộ
+            // đếm → không có gì để cào. TRƯỚC ĐÂY ném lỗi → chunk Errored → allocator vá lại đúng khối ấy,
+            // mỗi dòng đốt 3 lượt mở Brave rồi mới bị bỏ (sheet 30 dòng trống ≈ 90 lượt mở Brave) mà log
+            // không nói vì sao. Nay coi khối là ĐÃ PHỦ rồi kết thúc chunk BÌNH THƯỜNG (phase "finished" →
+            // ScrapeRunner đọc LastCompletedRow = hết khối → "✓ Xong dòng from–to", chạy tiếp khối kế).
+            // KHÔNG ghi vào sổ BỎ QUA: sổ đó chỉ dành cho dòng CÓ input mà cào fail (xem docstring SkippedRows).
+            config.LastCompletedRow = endRow.Value;
+            config.NextRunRow = endRow.Value + 1;
+            config.RunnerRunning = false;
+            config.RunnerPhase = "finished";
+            config.LastRunnerMessage = $"Khối dòng {startRow}–{endRow.Value}: 0 link hợp lệ " +
+                $"(thiếu tên SP: {fetch.SkippedMissingProductName}, thiếu link: {fetch.SkippedMissingLink}) — coi như đã phủ, sang khối kế.";
+            log(config.LastRunnerMessage);
+            config.ProgressSyncedAt = DateTimeOffset.Now;
+            onProgress();
+            return;
+        }
 
         if (onBeforeExtensionReady is not null)
             await onBeforeExtensionReady().ConfigureAwait(false);
@@ -652,7 +679,9 @@ internal static class LauncherRunnerLoop
         CancellationToken cancellationToken)
     {
         // TẢI NATIVE (HttpClient) thay cho API Python.
-        var coreCandidates = candidates.Select(c => new Shopee.Core.Scrape.VideoCandidate(c.Url, c.Duration ?? 0, c.Label));
+        // Giữ NGUYÊN Duration null (không đo được) — `?? 0` ở đây từng làm bộ lọc "<60s" phía Core loại sạch
+        // mọi ứng viên fallback, tức trang chỉ lộ URL video qua performance/script thì KHÔNG BAO GIỜ tải được.
+        var coreCandidates = candidates.Select(c => new Shopee.Core.Scrape.VideoCandidate(c.Url, c.Duration, c.Label));
         var r = await Shopee.Core.Scrape.VideoDownloader.DownloadBestAsync(
             sku, coreCandidates, ScrapeNativeSettings.VideoOutputDir, cancellationToken);
         if (!r.Success)

@@ -76,6 +76,9 @@ public sealed class HubClient : IDisposable
     // ── Sổ hoàn thành ──
     public Task PublishLedgerAsync(WorkLedgerRecord rec, CancellationToken ct = default) => PostAsync(HubRoutes.Ledger, rec, ct);
     public Task SetLedgerStatusAsync(SetLedgerStatusRequest req, CancellationToken ct = default) => PostAsync(HubRoutes.LedgerSet, req, ct);
+    /// <summary>Mở lại dòng đã bỏ qua trên sổ Hub. PostAsync NÉM khi lỗi HTTP/mạng — CÓ CHỦ ĐÍCH: caller
+    /// (<c>HttpCoordinationHub.ReopenSkippedAsync</c>) phải phân biệt được "hub đã nhận" với "chưa gọi tới nơi".</summary>
+    public Task ReopenSkippedLedgerAsync(ReopenSkippedRequest req, CancellationToken ct = default) => PostAsync(HubRoutes.LedgerReopenSkipped, req, ct);
     public async Task<List<WorkLedgerRecord>> AllLedgerAsync(CancellationToken ct = default)
         => await _http.GetFromJsonAsync<List<WorkLedgerRecord>>(HubRoutes.Ledger, ct) ?? [];
 

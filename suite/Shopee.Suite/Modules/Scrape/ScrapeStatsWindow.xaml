@@ -33,6 +33,17 @@
                                            Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" />
                                 <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
                                     <!-- Command nằm trên VM của CỬA SỔ (không phải trên dòng) → leo tổ tiên Window. -->
+                                    <!-- Chỉ hiện khi sheet CÓ dòng bỏ qua: mở Hub trước rồi mới khoét vùng phủ local. -->
+                                    <Button MinWidth="170" Margin="0,0,10,0"
+                                            Visibility="{Binding CanReopenSkipped, Converter={StaticResource BoolToVis}}"
+                                            Command="{Binding DataContext.ReopenSkippedCommand,
+                                                      RelativeSource={RelativeSource AncestorType={x:Type Window}}}"
+                                            CommandParameter="{Binding}">
+                                        <StackPanel Orientation="Horizontal">
+                                            <c:PathIcon Data="{StaticResource IconRefresh}" />
+                                            <TextBlock Style="{StaticResource btnLabel}" Text="{Binding ReopenSkippedLabel}" />
+                                        </StackPanel>
+                                    </Button>
                                     <Button Style="{StaticResource destructive}" MinWidth="110"
                                             Command="{Binding DataContext.ClearProgressCommand,
                                                       RelativeSource={RelativeSource AncestorType={x:Type Window}}}"

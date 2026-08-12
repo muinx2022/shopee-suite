@@ -13,6 +13,7 @@ public sealed class NoOpCoordinationHub : ICoordinationHub
         => Task.FromResult(new LeaseAttempt(AcquireResult.Off(), null));
 
     public void PublishProgress(CoordKey key, int from, int to) { }
+    public void PublishSkipped(CoordKey key, int row) { }
     public void PublishCompletion(CoordKey key, string status, int lastRow) { }
     public IReadOnlyList<LeaseRecord> ActiveLeases() => [];
 }

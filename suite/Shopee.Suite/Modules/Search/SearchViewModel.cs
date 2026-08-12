@@ -41,6 +41,8 @@ public sealed partial class SearchViewModel : ModuleViewModelBase
     public ObservableCollection<SearchProductRow> CategoryProducts { get; } = [];
 
     private readonly List<SearchProductRow> _all = [];
+    /// <summary>Link SP đã tính vào "Tổng phiên" (<see cref="_all"/>) — CHỈ để đếm không trùng. Khử trùng
+    /// HIỂN THỊ nằm ở từng <see cref="SearchFileTab"/>, xem <see cref="SearchFileTab.AddProduct"/>.</summary>
     private readonly HashSet<string> _seenLinks = new(StringComparer.Ordinal);
 
     // Lọc theo KHU VỰC để tick "Nơi Bán" trong trình duyệt (vd "Hà Nội"). Trống = không lọc nơi bán.
@@ -141,20 +143,25 @@ public sealed partial class SearchViewModel : ModuleViewModelBase
         var selected = LoadedLinks.Where(l => l.IsSelected).ToList();
         if (selected.Count == 0) { Warn("Tick chọn ít nhất 1 link để search."); return; }
 
-        var lanes = Math.Max(1, Math.Min(Math.Min(LaneCount, _pool.Count), selected.Count));
+        // Khử link TRÙNG trước khi dựng gì hết: cùng một link nằm ở 2 file (hoặc 2 dòng) mà cùng được tick
+        // thì thành 2 lane cào song song một link — ghi đè file Excel của nhau, đè bản ghi hủy-theo-link, và
+        // chung một tab UI nên user không thấy gì bất thường. Số lane cũng đếm theo danh sách ĐÃ khử trùng.
+        var chon = selected.Select(l => (Index: l.Row, l.Link, l.SourceFile)).ToList();
+        var items = SearchRunner.DedupLinks(chon);
+        if (items.Count < chon.Count) Log($"⚠ bỏ {chon.Count - items.Count} link trùng giữa các file.");
+
+        var lanes = Math.Max(1, Math.Min(Math.Min(LaneCount, _pool.Count), items.Count));
 
         // Dựng tab cho từng link đã chọn (mỗi link 1 tab). Gộp với tab cũ theo link.
-        var items = new List<(int Index, string Link, string SourceFile)>();
-        foreach (var l in selected)
+        foreach (var it in items)
         {
-            var tab = LinkTabs.FirstOrDefault(t => t.Link == l.Link);
+            var tab = LinkTabs.FirstOrDefault(t => t.Link == it.Link);
             if (tab is null)
             {
-                tab = new SearchFileTab(l.Row, l.Link, l.SourceFile, FileRunCoordinator.CatLabel(l.Link));
+                tab = new SearchFileTab(it.Index, it.Link, it.SourceFile, FileRunCoordinator.CatLabel(it.Link));
                 LinkTabs.Add(tab);
             }
             tab.Status = "chờ";
-            items.Add((l.Row, l.Link, l.SourceFile));
         }
         SelectedLinkTab ??= LinkTabs.FirstOrDefault();
 
@@ -221,7 +228,9 @@ public sealed partial class SearchViewModel : ModuleViewModelBase
     private void CloseLinkTab(SearchFileTab? tab)
     {
         if (tab is null) return;
-        foreach (var p in tab.Products) _seenLinks.Remove(p.Link);
+        // KHÔNG gỡ link SP khỏi _seenLinks nữa: sổ khử trùng hiển thị nằm trong chính tab và chết theo tab
+        // (mở lại tab là nạp đủ), còn _seenLinks chỉ để đếm "Tổng phiên" — gỡ ra là cùng một SP được đếm hai
+        // lần khi cào lại.
         LinkTabs.Remove(tab);
         if (ReferenceEquals(SelectedLinkTab, tab)) SelectedLinkTab = LinkTabs.FirstOrDefault();
     }
@@ -244,10 +253,10 @@ public sealed partial class SearchViewModel : ModuleViewModelBase
         });
         _runner.LinkProduct += (link, p) => OnUi(() =>
         {
-            if (!IsNewProduct(p)) return;
-            _all.Add(p);
-            var t = Tab(link);
-            if (t is not null) { t.Products.Add(p); t.ProductCount++; }
+            // Hiển thị: khử trùng TRONG TỪNG TAB (tab tự giữ sổ) — SP nằm ở 2 link thì hiện ở CẢ 2 tab.
+            Tab(link)?.AddProduct(p);
+            // "Tổng phiên" (_all) vẫn khử trùng TOÀN CỤC: đây là số đếm, không phải danh sách hiển thị.
+            if (IsNewProduct(p)) _all.Add(p);
         });
         _runner.LinkFinished += link => OnUi(() => { var t = Tab(link); if (t is not null && t.Status.StartsWith("Đang")) t.Status = "đã đóng"; });
         _runner.AccountLoggedIn += id => OnUi(() => _usedAccounts.Add(id));
@@ -295,7 +304,7 @@ public sealed partial class SearchViewModel : ModuleViewModelBase
                 DialogIcon.Warning)) return;
         Db.ClearFileHistory(OutputDir, _filePaths);
         _all.Clear(); _seenLinks.Clear();
-        foreach (var t in LinkTabs) { t.Products.Clear(); t.ProductCount = 0; }
+        foreach (var t in LinkTabs) t.ClearProducts();   // xoá cả sổ khử trùng của tab, không chỉ dòng hiển thị
         RefreshCategoryGrid();
         // ComboBox lọc Danh mục cũng phải theo: ClearFileHistory xoá cả bảng categories, để nguyên thì combo
         // còn treo danh mục của dữ liệu vừa bị xoá (chọn vào là xuất ra file rỗng).
@@ -304,6 +313,7 @@ public sealed partial class SearchViewModel : ModuleViewModelBase
     }
 
     // ── Helpers ─────────────────────────────────────────────────────────────────
+    /// <summary>SP chưa được TÍNH vào tổng phiên (không phải "chưa hiển thị" — mỗi tab tự khử trùng).</summary>
     private bool IsNewProduct(SearchProductRow p) => string.IsNullOrEmpty(p.Link) || _seenLinks.Add(p.Link);
 
     private void RefreshCategories()

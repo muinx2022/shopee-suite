@@ -81,6 +81,10 @@ public static class ClientApiEndpoints
         api.MapPost(HubRoutes.Ledger, (WorkLedgerRecord? r) => { if (r is null) return Results.BadRequest(); db.PublishLedger(r); return Results.Ok(); });
         api.MapPost(HubRoutes.LedgerSet, (SetLedgerStatusRequest? r) => { if (r is null) return Results.BadRequest(); db.SetLedgerStatus(r.Key, r.BigsellerId, r.ShopId, r.Sheet, r.Op, r.Status); return Results.Ok(); });
         api.MapGet(HubRoutes.Ledger, () => Results.Json(db.AllLedger()));
+        // Mở lại dòng đã bỏ qua. Không có bản ghi / sổ đã sạch → reopened = 0 + 200 (client coi là thành công
+        // rồi sửa tiếp phần local); chỉ lỗi mạng/hub mới ném để client DỪNG, không sửa local nửa vời.
+        api.MapPost(HubRoutes.LedgerReopenSkipped, (ReopenSkippedRequest? r) =>
+            r is null ? Results.BadRequest() : Results.Ok(new { reopened = db.ReopenSkippedLedger(r.Key, r.Rows) }));
 
         // ── Nhịp máy + bảng trạng thái ──
         // Heartbeat giờ TRẢ JSON (lệnh update trong body). Client cũ bỏ qua body → đổi shape vô hại.

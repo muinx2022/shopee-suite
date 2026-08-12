@@ -24,19 +24,54 @@ public sealed class AppSettingsService
         _settingsPath = Path.Combine(dataDir, "settings.json");
     }
 
+    /// <summary>Đọc/ghi cấu hình ở đường dẫn chỉ định — chỉ dùng cho TEST (bản thường luôn nằm trong
+    /// %AppData%\ShopeeStatApp\settings.json, test mà đụng vào là xoá cấu hình thật của user).</summary>
+    internal AppSettingsService(string settingsPath)
+    {
+        var dir = Path.GetDirectoryName(Path.GetFullPath(settingsPath));
+        if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+        _settingsPath = settingsPath;
+    }
+
+    /// <summary>Nạp <c>settings.json</c> vào <see cref="Settings"/>. PHẢI gọi ngay sau khi tạo service:
+    /// <see cref="SaveSettings"/> ghi đè NGUYÊN file bằng <see cref="Settings"/> đang có, nên bỏ Load là
+    /// mất cấu hình của user ngay lần ghi đầu tiên.</summary>
+    /// <summary>File tồn tại nhưng ĐỌC/PARSE hỏng (đang bị ghi dở bởi instance khác, AV khoá, JSON nát) →
+    /// Settings đành về mặc định để chạy tiếp, nhưng <see cref="SaveSettings"/> bị CẤM: ghi lúc này là đè
+    /// object mặc định lên settings.json của user — đúng cái lỗi "mất sạch cấu hình" vừa vá. Phơi ra ngoài
+    /// (<see cref="LoadFailed"/>) để caller cảnh báo user rằng cấu hình phiên này KHÔNG được lưu.</summary>
+    public bool LoadFailed { get; private set; }
+
     public void Load()
     {
-        if (File.Exists(_settingsPath))
+        if (!File.Exists(_settingsPath)) return;   // chưa từng có file → mặc định là ĐÚNG, ghi được
+        try
         {
-            try { Settings = JsonSerializer.Deserialize<LauncherSettings>(File.ReadAllText(_settingsPath), Opts) ?? new(); }
-            catch { Settings = new(); }
+            Settings = JsonSerializer.Deserialize<LauncherSettings>(File.ReadAllText(_settingsPath), Opts) ?? new();
+            LoadFailed = false;
         }
+        catch { Settings = new(); LoadFailed = true; }
     }
 
     public void SaveSettings()
     {
         lock (_saveLock)
-            File.WriteAllText(_settingsPath, JsonSerializer.Serialize(Settings, Opts), Encoding.UTF8);
+        {
+            if (LoadFailed) return;   // xem LoadFailed — thà mất lần ghi này còn hơn mất file của user
+            // tmp + move như ExcelExporter: WriteAllText ghi thẳng = file rỗng vài ms giữa chừng, instance
+            // khác Load() trúng lúc đó là dính _loadFailed oan (hoặc tệ hơn, đọc được file cụt).
+            var tmp = $"{_settingsPath}.{Guid.NewGuid():N}.tmp";
+            try
+            {
+                File.WriteAllText(tmp, JsonSerializer.Serialize(Settings, Opts), Encoding.UTF8);
+                File.Move(tmp, _settingsPath, overwrite: true);
+            }
+            catch
+            {
+                try { if (File.Exists(tmp)) File.Delete(tmp); } catch { }
+                throw;
+            }
+        }
     }
 
     public string GetProfileDir(InstanceConfig config)

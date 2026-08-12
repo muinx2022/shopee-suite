@@ -47,10 +47,9 @@ public sealed class FileRunCoordinator
     private const int LinkRestMaxMs = 18_000;
     private static int RandomRest(int minMs, int maxMs) => Random.Shared.Next(minMs, maxMs + 1);
 
-    // Per-link cancellation (✕ trên tab link đang chạy) + danh sách link bị bỏ qua (✕ khi còn chờ).
+    // Per-link cancellation (hủy đúng link đang chạy trên 1 lane).
     private readonly object _linkCtsLock = new();
     private readonly Dictionary<string, CancellationTokenSource> _linkCts = new(StringComparer.Ordinal);
-    private readonly HashSet<string> _skippedLinks = new(StringComparer.Ordinal);
 
     // Events (key = link string).
     public event Action<string, string>? LinkStatus;                 // link, status/log message
@@ -110,21 +109,6 @@ public sealed class FileRunCoordinator
                 try { s.KillBrowser(); } catch { }
     }
 
-    /// <summary>"✕" trên tab 1 link đang CHẠY: hủy đúng link đó (kill browser của lane đang xử lý nó).</summary>
-    public void StopLink(string link)
-    {
-        lock (_linkCtsLock)
-        {
-            _skippedLinks.Add(link);
-            if (_linkCts.TryGetValue(link, out var cts)) { try { cts.Cancel(); } catch { } }
-        }
-    }
-
-    private bool IsSkipped(string link)
-    {
-        lock (_linkCtsLock) return _skippedLinks.Contains(link);
-    }
-
     private async Task WorkerLoopAsync(int laneId, CancellationToken ct)
     {
         var session = new SearchSession(laneId, _appSettings, _taskStore);
@@ -136,8 +120,6 @@ public sealed class FileRunCoordinator
         {
             while (!ct.IsCancellationRequested && _linkQueue.TryDequeue(out var item))
             {
-                if (IsSkipped(item.Link)) continue;
-
                 using var linkCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
                 lock (_linkCtsLock) _linkCts[item.Link] = linkCts;
                 // Gắn log/sản phẩm của session vào ĐÚNG link đang xử lý trên lane này.
@@ -307,7 +289,8 @@ public sealed class FileRunCoordinator
                         LinkStatus?.Invoke(item.Link, "Kết nối lại nhiều lần không được — đổi account.");
                     }
                 }
-                else if (outcome is SearchRunOutcome.CaptchaOrVerify or SearchRunOutcome.NetworkError)
+                else if (outcome is SearchRunOutcome.CaptchaOrVerify or SearchRunOutcome.NetworkError
+                         or SearchRunOutcome.LoginFailed)
                 {
                     reconnectStreak = 0;
                     triedForLink.Add(account.Id);
@@ -316,6 +299,17 @@ public sealed class FileRunCoordinator
                         MarkErrored(account, "Verify/captcha", item.Link);   // lưu LINK đang cào (KHÔNG lưu trang /verify)
                         ReleaseAccount(account, rest: false);
                         LinkStatus?.Invoke(item.Link, $"\"{account.DisplayName}\" bị verify/captcha — đổi account, thử lại.");
+                    }
+                    else if (outcome == SearchRunOutcome.LoginFailed)
+                    {
+                        // Login fail KHÔNG đồng nghĩa tk hỏng: ShopeeLoginService trả false cả khi CDP không
+                        // nối được / proxy chậm / hết 90s chờ — toàn lỗi CỤC BỘ. Mà MarkErrored ở đây là
+                        // Disabled=true GHI XUỐNG accounts.json + báo Hub (đường AccountErrorReporter): một
+                        // sự cố hạ tầng (key proxy hết hạn) sẽ lần lượt đốt SẠCH cả kho tk, module Scrape
+                        // chết theo. Nên chỉ đổi account thử lại cùng link (triedForLink đã ghi ở trên) và
+                        // cho tk NGHỈ — lỗi mạng thoáng qua thì lượt sau tk này vẫn dùng lại được.
+                        ReleaseAccount(account, rest: true);
+                        LinkStatus?.Invoke(item.Link, $"\"{account.DisplayName}\" đăng nhập không được — đổi account, thử lại.");
                     }
                     else
                     {
@@ -375,7 +369,7 @@ public sealed class FileRunCoordinator
     private async Task SaveLinkOnceAsync(string link, IReadOnlyList<ProductResult> results)
     {
         if (SaveLinkExcel is null) return;
-        try { await SaveLinkExcel(CatLabel(link), results); }
+        try { await SaveLinkExcel(FileLabel(link), results); }
         catch (Exception ex) { LinkStatus?.Invoke(link, "Lỗi lưu Excel: " + ex.Message); }
     }
 
@@ -499,6 +493,18 @@ public sealed class FileRunCoordinator
             return string.IsNullOrWhiteSpace(name) ? "category" : Uri.UnescapeDataString(name);
         }
         catch { return "category"; }
+    }
+
+    /// <summary>Nhãn ĐẶT TÊN FILE Excel của 1 link = nhãn danh mục + mã danh mục (khi đọc được). Slug KHÔNG
+    /// duy nhất: hai danh mục khác nhau vẫn có thể cùng slug (vd <c>…/dien-thoai-cat.11036030</c> và
+    /// <c>…/dien-thoai-cat.11036132</c>) → cùng tên file thì link chạy sau GHI ĐÈ kết quả của link trước.
+    /// Đây là nhãn DUY NHẤT dùng cho file per-link (<see cref="SaveLinkExcel"/>); nhãn hiển thị/CSDL vẫn là
+    /// <see cref="CatLabel"/>.</summary>
+    public static string FileLabel(string link)
+    {
+        var label = CatLabel(link);
+        var id = CatId(link);
+        return id > 0 ? $"{label}-{id}" : label;
     }
 
     private static readonly Regex IdRx = new(

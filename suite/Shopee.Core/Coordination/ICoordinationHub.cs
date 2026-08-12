@@ -65,6 +65,15 @@ public sealed class WorkLedgerRecord
     /// xử lý xong — để Thống kê trên Hub xem "shop này đã import/update được những dòng nào". Fold-về-tiến-độ
     /// scrape CHỈ dùng record op=scrape (xem HttpCoordinationHub.SyncIntoProgressAsync/FoldScrapeLedgerAsync).</summary>
     public List<RowRange> Completed { get; set; } = [];
+
+    /// <summary>Các dòng NẰM TRONG <see cref="Completed"/> mà THỰC TẾ không cào được (kẹt 3 lần / lỗi giữa
+    /// khối) — bản xuyên máy của <c>ScrapeProgress.SkippedRows</c>. Không có sổ này thì máy KHÁC fold ledger về
+    /// chỉ thấy "✔ Hoàn thành toàn bộ" mà không biết đang thiếu SP nào (báo thành công khi thiếu).
+    /// <para>TƯƠNG THÍCH NGƯỢC: client cũ (≤ v1.9.2) KHÔNG gửi field này → JSON thiếu → về danh sách RỖNG, và
+    /// server CHỈ UNION (không thay thế) nên sổ đã có trên Hub không bị client cũ xoá trắng. Hub gộp như
+    /// <see cref="Completed"/>; <c>/ledger/set</c> idle xoá bản ghi nên sổ chết theo — đúng ý reset.</para></summary>
+    public List<int> Skipped { get; set; } = [];
+
     public int LastRowReached { get; set; }
     public string Status { get; set; } = LedgerStatus.Idle;   // xem LedgerStatus
     public string LastMachineId { get; set; } = "";
@@ -88,6 +97,12 @@ public interface ICoordinationHub
     event Action? Changed;
     Task<LeaseAttempt> AcquireAsync(CoordKey key, bool force, CancellationToken ct);
     void PublishProgress(CoordKey key, int from, int to);
+
+    /// <summary>Báo 1 dòng BỎ QUA (không cào được) lên sổ Hub: vẫn TÍNH VÀO vùng phủ như
+    /// <see cref="PublishProgress"/> (không publish thì Hub giao lại dòng hỏng vòng vô tận) NHƯNG kèm tên dòng
+    /// vào <see cref="WorkLedgerRecord.Skipped"/> để máy khác biết chỗ này đang thiếu SP.</summary>
+    void PublishSkipped(CoordKey key, int row);
+
     void PublishCompletion(CoordKey key, string status, int lastRow);
     IReadOnlyList<LeaseRecord> ActiveLeases();
 }

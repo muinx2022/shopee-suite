@@ -43,7 +43,15 @@ public static class ExcelExporter
         var tmpPath = Path.Combine(outputDir,
             $"{Path.GetFileNameWithoutExtension(fileName)}_{Guid.NewGuid():N}.tmp.xlsx");
         wb.SaveAs(tmpPath);
-        File.Move(tmpPath, path, overwrite: true);
+        try { File.Move(tmpPath, path, overwrite: true); }
+        catch
+        {
+            // File đích đang mở trong Excel / bị khoá → Move ném. Dọn file tạm rồi ném tiếp: bỏ lại
+            // "*.tmp.xlsx" trong thư mục xuất là user không phân biệt nổi với file thật, và mỗi lượt
+            // chạy lỗi lại thêm một rác mới (tên có GUID nên không bao giờ bị ghi đè).
+            try { File.Delete(tmpPath); } catch { }
+            throw;
+        }
 
         return path;
     }

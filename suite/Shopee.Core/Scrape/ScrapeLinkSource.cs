@@ -36,7 +36,9 @@ public static class ScrapeLinkSource
                 ?? throw new InvalidOperationException("⛔ Tk ở chế độ kho Hub nhưng chưa kết nối Hub — kiểm tra Cài đặt → Hub rồi chạy lại.");
             var sheets = await client.GetProductSheetsAsync(accountId, ct).ConfigureAwait(false)
                 ?? throw new InvalidOperationException("⛔ Hub chưa sẵn sàng (kho sản phẩm Postgres) — thử lại sau.");
-            total = sheets.FirstOrDefault(s => string.Equals(s.Sheet, sheet, StringComparison.Ordinal))?.Rows ?? 0;
+            // OrdinalIgnoreCase như mọi chỗ khác so tên sheet (Excel không phân biệt hoa/thường) — so Ordinal
+            // ở đây làm tổng dòng = 0 khi hoa/thường lệch, tức "vượt quá số dòng sheet" oan.
+            total = sheets.FirstOrDefault(s => string.Equals(s.Sheet, sheet, StringComparison.OrdinalIgnoreCase))?.Rows ?? 0;
         }
         else
         {

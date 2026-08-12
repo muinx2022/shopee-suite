@@ -40,15 +40,15 @@ public sealed partial class SearchViewModel
         var region = string.IsNullOrWhiteSpace(p.Region) ? Region : p.Region!;
         var source = string.IsNullOrWhiteSpace(p.SourceFile) ? "(Hub giao)" : p.SourceFile!;
 
-        // Dựng tab cho từng link của khối (mỗi link 1 tab) — giống chạy tay để theo dõi tiến độ.
-        var items = new List<(int Index, string Link, string SourceFile)>();
-        for (var i = 0; i < links.Count; i++)
+        // Dựng tab cho từng link của khối (mỗi link 1 tab) — giống chạy tay để theo dõi tiến độ. Khối Hub
+        // giao cũng phải khử link TRÙNG như đường chạy tay: 2 lane cùng một link ghi đè file Excel của nhau.
+        var items = SearchRunner.DedupLinks(links.Select((link, i) => (Index: i + 1, Link: link, SourceFile: source)));
+        if (items.Count < links.Count) Log($"⚠ bỏ {links.Count - items.Count} link trùng trong khối Hub giao.");
+        foreach (var it in items)
         {
-            var link = links[i];
-            var tab = LinkTabs.FirstOrDefault(t => t.Link == link);
-            if (tab is null) { tab = new SearchFileTab(i + 1, link, source, FileRunCoordinator.CatLabel(link)); LinkTabs.Add(tab); }
+            var tab = LinkTabs.FirstOrDefault(t => t.Link == it.Link);
+            if (tab is null) { tab = new SearchFileTab(it.Index, it.Link, source, FileRunCoordinator.CatLabel(it.Link)); LinkTabs.Add(tab); }
             tab.Status = "chờ";
-            items.Add((i + 1, link, source));
         }
         SelectedLinkTab ??= LinkTabs.FirstOrDefault();
 

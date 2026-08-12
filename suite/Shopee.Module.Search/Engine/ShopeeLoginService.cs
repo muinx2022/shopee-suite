@@ -82,7 +82,11 @@ public sealed class ShopeeLoginService(AppSettingsService appSettings)
             {
                 log($"Đăng nhập thành công: {username}");
                 ClearLoginFlag(config);
-                appSettings.SaveSettings();
+                // Ghi token/cờ vừa xoá xuống settings.json — nhưng ĐÃ đăng nhập THÀNH CÔNG rồi, lỗi ghi file
+                // (đích đang bị mở đọc/AV khoá → File.Move replace ném) KHÔNG được biến thành lỗi login làm
+                // chết cả lane. Nuốt + log như BraveManager.SaveSettings.
+                try { appSettings.SaveSettings(); }
+                catch (Exception ex) { log($"⚠ Lưu settings.json không được (đăng nhập vẫn OK): {ex.Message}"); }
                 return true;
             }
         }

@@ -300,6 +300,17 @@ public sealed class SearchTaskStore
                 idx.CommandText = "CREATE INDEX IF NOT EXISTS ix_shop_products_item_id ON shop_products(item_id)";
                 idx.ExecuteNonQuery();
             }
+
+            // SaveProduct chạy COUNT(*) FROM task_products WHERE task_id=? sau MỖI sản phẩm, dưới khoá ghi.
+            // Index chuyên cho task_id: đếm chỉ chạm các dòng CỦA task đó thay vì quét cả bảng (chung cho mọi
+            // task, tích lũy qua nhiều ngày). Lưu ý: UNIQUE(task_id,item_id,shop_id) đã phủ được tiền tố
+            // task_id nên CSDL mới thường không quét bảng — index này là bảo hiểm cho DB cũ / kế hoạch truy
+            // vấn khác, và vẫn KHÔNG bỏ được tính chất O(n²) theo số SP của một task (đếm lại từ đầu mỗi lần).
+            using (var idx = con.CreateCommand())
+            {
+                idx.CommandText = "CREATE INDEX IF NOT EXISTS ix_task_products_task ON task_products(task_id)";
+                idx.ExecuteNonQuery();
+            }
         }
     }
 
