@@ -12,4 +12,11 @@
   <ItemGroup>
     <ProjectReference Include="..\Shopee.Core\Shopee.Core.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- Cho bộ test đọc thành viên `internal` (khuôn đã dùng ở Shopee.Core) — vd ctor SearchTaskStore nhận
+         đường dẫn DB tạm, khỏi phải nới `public` chỉ vì test. -->
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
+      <_Parameter1>Shopee.Module.Search.Tests</_Parameter1>
+    </AssemblyAttribute>
+  </ItemGroup>
 </Project>

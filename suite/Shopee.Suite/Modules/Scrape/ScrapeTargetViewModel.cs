@@ -192,7 +192,10 @@ public sealed partial class ScrapeTargetViewModel : ObservableObject
                 LedgerStatus.Stopped => "■ Dừng giữa chừng",
                 _ => "—",
             };
-            return $"{status} · đã xong tới dòng {p.LastRowReached}";
+            // "bỏ n dòng" = dòng nằm trong vùng phủ nhưng KHÔNG cào được (skip-ledger) — phải hiện, không thì
+            // "Hoàn thành" trông như đã đủ SP.
+            var skip = p.SkippedRows.Count > 0 ? $" · bỏ {p.SkippedRows.Count} dòng" : "";
+            return $"{status} · đã xong tới dòng {p.LastRowReached}{skip}";
         }
     }
 

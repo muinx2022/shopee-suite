@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <!-- AssemblyName phải khớp InternalsVisibleTo khai trong Shopee.Module.Search.csproj (ctor DB tạm). -->
+    <AssemblyName>Shopee.Module.Search.Tests</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" Version="6.0.0" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
+    <PackageReference Include="xunit" Version="2.5.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.5.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <!-- Ref thẳng module Search: cần chính SearchTaskStore/LinkFileStore thật (đụng SQLite + ClosedXML qua
+       Shopee.Core) chứ không phải bản chép. -->
+  <ItemGroup>
+    <ProjectReference Include="..\Shopee.Module.Search\Shopee.Module.Search.csproj" />
+  </ItemGroup>
+
+</Project>

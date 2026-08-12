@@ -11,11 +11,16 @@ export async function startCategoryFromLink(msg) {
   stopSearch();
   const link = msg.link || '';
   const region = (msg.region || '').trim();
+  // Điểm tiếp tục do app gửi (đổi account / nối lại WS / bấm Tiếp tục). Bỏ qua hai field này là mỗi lần
+  // nối lại đều cào lại từ danh mục #1 và checkpoint bị đẩy LÙI về 1 — link không bao giờ chạy hết.
+  const resumeIdx = Math.max(1, (msg.resumeCategoryIndex | 0) || 1);
+  const resumePage = Math.max(1, (msg.resumePage | 0) || 1);
   const state = {
-    keyword: link, link, region, resumeCategoryIndex: 1,
+    keyword: link, link, region, resumeCategoryIndex: resumeIdx,
     stopped: false, networkErrorDetected: false, captchaDetected: false,
     mode: 'categoryFromLink',
   };
+  if (resumeIdx > 1 || resumePage > 1) log(`⏯ Tiếp tục từ danh mục #${resumeIdx}, trang ${resumePage}.`);
   ctx.searchState = state;
   const dead = () => state !== ctx.searchState || state.stopped || state.networkErrorDetected;
 
@@ -83,14 +88,23 @@ export async function startCategoryFromLink(msg) {
     await waitForTabLoad(ctx.searchTabId);
     await sleep(2500 + Math.random() * 1500);
     if (dead()) return;
-    await crawlPagesForCurrentState(state, link, '', 1, 1, 50, true);
+    await crawlPagesForCurrentState(state, link, '', 1, 1, 50, true, resumePage);
     if (dead() || state.captchaDetected) return;
     send({ action: 'done' });
     return;
   }
 
   log(`Tìm thấy ${subs.length} danh mục con — lần lượt cào từng cái.`);
-  for (let i = 0; i < subs.length; i++) {
+  // Danh sách danh mục con có thể đã đổi so với lúc lưu checkpoint → mốc cũ trỏ ra ngoài danh sách:
+  // cào lại từ đầu (kèm cảnh báo) còn hơn bỏ trắng cả link.
+  let startIdx = resumeIdx - 1;
+  let startPage = resumePage;
+  if (startIdx >= subs.length) {
+    log(`⚠ Danh mục #${resumeIdx} vượt quá ${subs.length} danh mục con (danh sách đã đổi) — cào lại từ danh mục #1.`);
+    startIdx = 0;
+    startPage = 1;
+  }
+  for (let i = startIdx; i < subs.length; i++) {
     if (dead()) return;
     const sub = subs[i];
     log(`Danh mục con ${i + 1}/${subs.length}: ${sub.name}`);
@@ -120,7 +134,9 @@ export async function startCategoryFromLink(msg) {
     if (dead()) return;
     if (await isVerifyPage()) { state.captchaDetected = true; send({ action: 'captcha' }); return; }
 
-    await crawlPagesForCurrentState(state, sub.href, sub.name, i + 1, subs.length, 50, i === subs.length - 1);
+    // Chỉ danh mục ĐẦU TIÊN của lượt tiếp tục mới nhảy vào giữa chừng; các danh mục sau cào từ trang 1.
+    await crawlPagesForCurrentState(state, sub.href, sub.name, i + 1, subs.length, 50, i === subs.length - 1,
+      i === startIdx ? startPage : 1);
     if (dead() || state.captchaDetected) return;
   }
   send({ action: 'done' });

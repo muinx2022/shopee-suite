@@ -86,6 +86,31 @@ public sealed class InstanceConfig
     public List<RunnerLogEntry> RunLog { get; set; } = [];
     public DateTimeOffset? ProgressSyncedAt { get; set; }
 
+    // ── SỔ DÒNG BỎ QUA (skip-ledger) ────────────────────────────────────────────────────────────────
+    // Dòng mà runner loop KHÔNG cào được nhưng vẫn chạy tiếp sang dòng kế (nhóm lỗi thường). Không ghi
+    // lại thì dòng đó nằm gọn trong khoảng [from..lastDone] mà ScrapeRunner báo là "đã cào" → không bao
+    // giờ chạy lại, không dấu vết. Ghi từ luồng engine, đọc (diff) từ luồng runner → phải khoá.
+    // KHÔNG persist (chỉ sống trong 1 lượt chạy của chunk): field private nên System.Text.Json bỏ qua.
+    private readonly object _failedRowsLock = new();
+    private readonly List<(int Row, string Reason)> _failedRows = [];
+
+    /// <summary>Ghi nhận 1 dòng KHÔNG cào được (dedup theo dòng, giữ lý do lần đầu). Thread-safe.</summary>
+    public void AddFailedRow(int row, string reason)
+    {
+        if (row <= 0) return;
+        lock (_failedRowsLock)
+        {
+            if (_failedRows.Any(x => x.Row == row)) return;
+            _failedRows.Add((row, string.IsNullOrWhiteSpace(reason) ? "không cào được" : reason.Trim()));
+        }
+    }
+
+    /// <summary>Bản sao sổ dòng bỏ qua (để runner diff ra phần MỚI rồi báo ra ngoài). Thread-safe.</summary>
+    public IReadOnlyList<(int Row, string Reason)> SnapshotFailedRows()
+    {
+        lock (_failedRowsLock) return _failedRows.ToArray();
+    }
+
     [JsonIgnore]
     public string DisplayName =>
         string.IsNullOrWhiteSpace(Label) ? $"Instance {Id[..Math.Min(8, Id.Length)]}" : Label.Trim();
@@ -107,8 +132,9 @@ public sealed class InstanceConfig
         };
     }
 
-    /// <summary>Chỉ cập nhật tiến độ chạy — không ghi đè sheet / từ dòng / đến dòng trên form.</summary>
-    public void ApplyExtensionProgress(ExtensionRunnerState state)
+    /// <summary>Chỉ cập nhật tiến độ chạy — không ghi đè sheet / từ dòng / đến dòng trên form.
+    /// <paramref name="log"/> (tuỳ chọn) nhận 1 dòng khi tiến độ đọc được bị BỎ vì không thuộc khối này.</summary>
+    public void ApplyExtensionProgress(ExtensionRunnerState state, Action<string>? log = null)
     {
         if (string.IsNullOrWhiteSpace(DataSheet) && !string.IsNullOrWhiteSpace(state.SheetName))
             DataSheet = state.SheetName.Trim();
@@ -119,11 +145,21 @@ public sealed class InstanceConfig
         if (EndRow is null or < 1 && state.EndRow is > 0)
             EndRow = state.EndRow;
 
-        if (state.LastCompletedRow is > 0)
-            LastCompletedRow = state.LastCompletedRow;
+        // Tiến độ đọc từ extension chỉ được nhận khi CHẮC là của KHỐI NÀY. Profile Brave dùng lại theo tk
+        // Shopee nên runnerState còn nguyên tiến độ lượt trước (sheet khác / khối khác); nhận mù thì
+        // lastCompletedRow=5000 của hôm qua thành "đã xong" cho khối 2–12 → cả khối bị coi là đã cào.
+        if (!ProgressBelongsToThisBlock(state, out var why))
+        {
+            log?.Invoke($"⚠ Bỏ qua tiến độ extension KHÔNG thuộc khối đang chạy ({why}) — giữ tiến độ hiện có.");
+        }
+        else
+        {
+            if (state.LastCompletedRow is > 0)
+                LastCompletedRow = state.LastCompletedRow;
 
-        if (state.CurrentRow is > 0)
-            CurrentRow = state.CurrentRow;
+            if (state.CurrentRow is > 0)
+                CurrentRow = state.CurrentRow;
+        }
 
         if (!string.IsNullOrWhiteSpace(state.LastSku))
             LastSku = state.LastSku.Trim();
@@ -138,6 +174,38 @@ public sealed class InstanceConfig
             LastRunnerMessage = state.LastMessage.Trim();
 
         ProgressSyncedAt = DateTimeOffset.Now;
+    }
+
+    /// <summary>Tiến độ (LastCompletedRow/CurrentRow) đọc từ extension có ĐÚNG là của khối đang chạy không.
+    /// Hai điều kiện, chỉ kiểm khi có đủ dữ liệu để kiểm (thiếu mốc thì cho qua như trước):
+    ///  • sheet của state (nếu có) trùng <see cref="DataSheet"/> (nếu có), so KHÔNG phân biệt hoa thường;
+    ///  • mọi giá trị dòng nằm trong <c>[StartRow-1 .. EndRow]</c> (chỉ khi cả 2 mốc đã set).</summary>
+    private bool ProgressBelongsToThisBlock(ExtensionRunnerState state, out string why)
+    {
+        why = "";
+        var stateSheet = state.SheetName?.Trim() ?? "";
+        var mySheet = DataSheet?.Trim() ?? "";
+        if (stateSheet.Length > 0 && mySheet.Length > 0 &&
+            !string.Equals(stateSheet, mySheet, StringComparison.OrdinalIgnoreCase))
+        {
+            why = $"sheet \"{stateSheet}\" ≠ \"{mySheet}\"";
+            return false;
+        }
+
+        if (StartRow is not > 0 || EndRow is not > 0) return true;   // chưa đủ mốc để kiểm khoảng
+        var lo = StartRow.Value - 1;
+        var hi = EndRow.Value;
+        if (state.LastCompletedRow is { } lc && lc > 0 && (lc < lo || lc > hi))
+        {
+            why = $"dòng xong {lc} ngoài khối {StartRow}–{EndRow}";
+            return false;
+        }
+        if (state.CurrentRow is { } cur && cur > 0 && (cur < lo || cur > hi))
+        {
+            why = $"dòng hiện tại {cur} ngoài khối {StartRow}–{EndRow}";
+            return false;
+        }
+        return true;
     }
 
     [JsonIgnore]

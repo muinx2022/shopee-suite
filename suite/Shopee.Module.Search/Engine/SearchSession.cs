@@ -36,6 +36,10 @@ public sealed class SearchSession : IAsyncDisposable
     public long TaskId { get; private set; }
     public IReadOnlyList<ProductResult> Results => _orchestrator?.Results ?? [];
 
+    /// <summary>Số SP bị bộ lọc khu vực loại trong lần chạy hiện tại. Phải đọc NGAY sau <c>RunAsync</c>:
+    /// <c>CloseBrowserAsync</c> bỏ orchestrator nên sau đó về 0, y như <see cref="Results"/>.</summary>
+    public int SkippedByRegionTotal => _orchestrator?.SkippedByRegionTotal ?? 0;
+
     /// <summary>Thông điệp lỗi của lần chạy gần nhất (outcome == Error) — để hiển thị lý do ở ô link.</summary>
     public string? LastError { get; private set; }
 

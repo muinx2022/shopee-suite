@@ -825,13 +825,28 @@ globalThis.__launcherApplyFormConfig = async (config) => {
   await chrome.storage.local.set({ lastRunConfig });
 
   const state = await readState();
-  await writeState({
-    sheetName: sheetName || state.sheetName,
-    startRow: lastRunConfig.startRow || state.startRow,
-    endRow: lastRunConfig.endRow || state.endRow,
-  });
+  const nextSheet = sheetName || state.sheetName;
+  const nextStart = lastRunConfig.startRow || state.startRow;
+  const nextEnd = lastRunConfig.endRow || state.endRow;
+
+  // ĐỔI KHỐI (bộ sheet/từ dòng/đến dòng khác bộ đang lưu) → tiến độ trong runnerState là RÁC của khối
+  // TRƯỚC: profile Brave dùng lại theo tk Shopee nên Local Extension Settings không bị dọn, giữ nguyên
+  // lastCompletedRow của lượt cũ (vd 5000 hôm qua) → launcher đọc lên rồi coi khối 2–12 "đã cào xong".
+  // TRÙNG cả 3 → GIỮ NGUYÊN: watchdog relaunch giữa chừng chạy lại đúng khối này và resume nhờ chính
+  // lastCompletedRow đó (SuggestedResumeRow) — reset vô điều kiện là bắt cào lại từ đầu khối.
+  const same = (a, b) => String(a ?? "") === String(b ?? "");
+  const sameBlock =
+    same(state.sheetName, nextSheet) && same(state.startRow, nextStart) && same(state.endRow, nextEnd);
+
+  const patch = { sheetName: nextSheet, startRow: nextStart, endRow: nextEnd };
+  if (!sameBlock) {
+    // 2 mốc tiến độ THẬT của runnerState (extension này không lưu stoppedAtRow — C# tự suy ra từ 2 mốc này).
+    patch.lastCompletedRow = null;
+    patch.currentRow = null;
+  }
+  await writeState(patch);
   await broadcastState();
-  return { ok: true, lastRunConfig };
+  return { ok: true, lastRunConfig, blockChanged: !sameBlock };
 };
 
 /** Giữ tương thích cũ — chỉ hủy bước scrape đang chạy. */

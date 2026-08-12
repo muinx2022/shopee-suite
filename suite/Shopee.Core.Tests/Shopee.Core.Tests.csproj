@@ -25,6 +25,13 @@
     <Using Include="Xunit" />
   </ItemGroup>
 
+  <!-- CÁCH LY KHO DỮ LIỆU KHI CHẠY TEST: SuitePaths đọc data-dir.txt CẠNH .exe → Root của test trỏ vào
+       bin\...\test-data\ShopeeSuite thay vì %AppData%\ShopeeSuite. Nhờ vậy test đụng được các store dạng
+       `Shared` (ScrapeProgressStore…) mà KHÔNG ghi đè tiến độ thật của máy đang chạy. -->
+  <ItemGroup>
+    <None Update="data-dir.txt" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
   <!-- Ref thẳng cả Shopee.Core (khác XuLyDonShopee.Tests vốn LINK từng file để né dây Playwright/ClosedXML):
        ở đây test nằm CÙNG solution với Core nên ref project là rẻ nhất, và cần chính các kiểu thật của store
        (ShopeeAccount / BigSellerAccount / OpProgress) để đối chiếu byte JSON trên đĩa. -->

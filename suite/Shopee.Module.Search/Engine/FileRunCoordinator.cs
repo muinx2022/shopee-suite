@@ -236,33 +236,61 @@ public sealed class FileRunCoordinator
 
                 SearchRunOutcome outcome;
                 List<ProductResult> results;
+                int skippedByRegion;
                 try
                 {
                     outcome = await session.RunAsync(account, cfg, ct, taskId);
+                    // Chốt lại NGAY: CloseBrowserAsync dưới finally bỏ orchestrator nên sau đó Results rỗng
+                    // và số bị lọc khu vực về 0.
                     results = session.Results.ToList();
+                    skippedByRegion = session.SkippedByRegionTotal;
                     // Tái dùng cùng task + checkpoint cho lần thử kế (đổi account) → không cào lại từ đầu.
                     taskId = session.TaskId;
                     resumeCatIndex = Math.Max(1, session.LastCategoryIndex);
                     resumePage = Math.Max(1, session.LastPage);
                 }
-                catch (OperationCanceledException) { throw; }
+                catch (OperationCanceledException)
+                {
+                    // Hủy giữa chừng: SP đã cào vẫn phải xuống đĩa trước khi ném tiếp (upsert nên chạy đôi vô hại).
+                    await PersistResultsAsync(item, session.Results.ToList());
+                    throw;
+                }
                 finally
                 {
                     try { await session.CloseBrowserAsync(); } catch { }
                 }
 
-                if (outcome == SearchRunOutcome.Cancelled) return;
+                // LƯU NGAY sau MỌI lượt chạy, không chờ tới nhánh "Completed": lượt sau (đổi account, kết
+                // nối lại) gọi PrepareSearch — xóa sạch session.Results — rồi cào tiếp TỪ CHECKPOINT, nên SP
+                // của lượt này không bao giờ quay lại nữa. Đây là chỗ trước đây mất trắng khi dính captcha
+                // giữa chừng / bấm Dừng / link lỗi.
+                var fileTotal = await PersistResultsAsync(item, results);
+                // File per-link gộp MỌI lượt nên thường nhiều hơn số của lượt này — nói rõ kẻo user thấy
+                // "Xong (500)" mà mở file ra 2500 dòng lại tưởng lỗi.
+                var ghiChuGop = fileTotal > results.Count ? $" (file gộp {fileTotal} SP)" : "";
+
+                if (outcome == SearchRunOutcome.Cancelled)
+                {
+                    // Bấm Dừng: đã lưu ở trên, chỉ KHÔNG đánh dấu link đã xử lý vì còn dở.
+                    if (results.Count > 0)
+                        LinkStatus?.Invoke(item.Link, $"■ Đã dừng — đã lưu {results.Count} SP lượt này{ghiChuGop}.");
+                    return;
+                }
 
                 if (outcome == SearchRunOutcome.Completed)
                 {
-                    if (results.Count > 0)
+                    if (results.Count == 0 && skippedByRegion > 0)
                     {
-                        try { _taskStore.SaveShopProducts(CatId(item.Link), CatLabel(item.Link), item.Link, results); }
-                        catch (Exception ex) { LinkStatus?.Invoke(item.Link, "Lưu CSDL lỗi: " + ex.Message); }
-                        await SaveLinkOnceAsync(item.Link, results);
+                        // Link CÓ hàng nhưng bộ lọc khu vực gạt sạch (ô Khu vực sai, hoặc trang không trả
+                        // được nơi bán) → giữ link lại để lần sau còn cào, đừng đánh dấu đã xử lý.
+                        LinkStatus?.Invoke(item.Link,
+                            $"⚠ 0 SP sau lọc khu vực ({skippedByRegion} bị loại) — link giữ lại, kiểm tra ô Khu vực.");
                     }
-                    LinkStatus?.Invoke(item.Link, $"✔ Xong ({results.Count} sản phẩm).");
-                    SetDone(item);
+                    else
+                    {
+                        LinkStatus?.Invoke(item.Link, $"✔ Xong ({results.Count} sản phẩm){ghiChuGop}.");
+                        SetDone(item);
+                    }
                     resolved = true;
                 }
                 else if (outcome == SearchRunOutcome.Reconnect)
@@ -299,7 +327,9 @@ public sealed class FileRunCoordinator
                 else // Error (link chết / không crawl được) → KHÔNG đổi account, bỏ qua link.
                 {
                     var reason = string.IsNullOrWhiteSpace(session.LastError) ? outcome.ToString() : session.LastError!;
-                    LinkStatus?.Invoke(item.Link, $"Lỗi: {reason} — bỏ qua link.");
+                    // Lỗi nửa chừng vẫn có thể đã cào được kha khá — đã lưu ở trên, nói rõ cho user biết.
+                    var saved = results.Count > 0 ? $" (đã lưu {results.Count} SP)" : "";
+                    LinkStatus?.Invoke(item.Link, $"Lỗi: {reason} — bỏ qua link{saved}.");
                     resolved = true;
                 }
             }
@@ -310,9 +340,36 @@ public sealed class FileRunCoordinator
         }
     }
 
+    /// <summary>Đưa SP của 1 link xuống đĩa: CSDL (nguồn DUY NHẤT của "Xuất tất cả") + file Excel riêng của
+    /// link. Gọi ở MỌI đường kết thúc có sản phẩm (xong / dừng / lỗi), không chỉ đường "Completed" — lưu hai
+    /// lần là vô hại vì đều upsert. Lỗi từng bước ra thẳng ô trạng thái của link, không nuốt.
+    /// <para>File Excel per-link xuất từ CSDL GỘP theo link (mọi lượt, kể cả hôm trước) chứ KHÔNG xuất thẳng
+    /// <paramref name="results"/> của một lượt: tên file cố định theo slug + ghi đè, nên xuất phần nửa chừng
+    /// của lượt Dừng/lỗi sẽ THAY file 3000 dòng hôm qua bằng 120 dòng hôm nay.</para></summary>
+    private async Task<int> PersistResultsAsync(LinkItem item, IReadOnlyList<ProductResult> results)
+    {
+        if (results.Count == 0) return 0;
+        try { _taskStore.SaveShopProducts(CatId(item.Link), CatLabel(item.Link), item.Link, results); }
+        catch (Exception ex) { LinkStatus?.Invoke(item.Link, "Lưu CSDL lỗi: " + ex.Message); }
+        List<ProductResult> full;
+        try { full = _taskStore.GetShopProductsBySourceLink(item.Link); }
+        catch (Exception ex)
+        {
+            // CSDL đọc lỗi (hỏng file/khoá): xuất tạm phần của lượt này còn hơn không có gì — chấp nhận
+            // file có thể teo, vì lúc này "Xuất tất cả" cũng đã hỏng theo CSDL.
+            LinkStatus?.Invoke(item.Link, "Đọc CSDL để xuất Excel lỗi: " + ex.Message);
+            full = [.. results];
+        }
+        if (full.Count > 0) await SaveLinkOnceAsync(item.Link, full);
+        return full.Count;   // số dòng THẬT trong file gộp — cho thông báo khỏi vênh với file
+    }
+
     private void SetDone(LinkItem item)
     {
-        try { new LinkFileStore(item.SourceFile).MarkStatus(item.Index, LinkFileStore.Processed); } catch { }
+        // File link có thể đang mở trong Excel / bị khóa: báo ra ô trạng thái để user biết dấu "đã xử lý"
+        // KHÔNG ghi được (lần chạy sau sẽ cào lại link này), thay vì nuốt lặng.
+        try { new LinkFileStore(item.SourceFile).MarkStatus(item.Index, LinkFileStore.Processed); }
+        catch (Exception ex) { LinkStatus?.Invoke(item.Link, "⚠ không đánh dấu được file link: " + ex.Message); }
     }
 
     private async Task SaveLinkOnceAsync(string link, IReadOnlyList<ProductResult> results)

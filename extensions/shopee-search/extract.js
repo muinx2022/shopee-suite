@@ -61,7 +61,11 @@ export async function extractPageData(keyword, categoryName = '') {
               return {
                 name: b.name, itemid: b.itemid, shopid: b.shopid,
                 price: priceToVnd(b.price), sold: b.sold,
+                rating: b.rating_star,
+                // Thiếu location là app LOẠI SẠCH sản phẩm ở bộ lọc khu vực (rỗng = loại) mà vẫn báo "xong".
+                location: b.shop_location,
                 category: categoryName || '',
+                image: b.image,
                 link: `https://shopee.vn/product/${b.shopid}/${b.itemid}`,
               };
             });

@@ -284,15 +284,9 @@ public sealed partial class ScrapeViewModel : ModuleViewModelBase
             // RESET → xoá tiến độ cũ. Tính các khoảng cần chạy (reset = cả đoạn; resume = phần còn thiếu).
             if (!resume)
             {
-                ScrapeProgressStore.Shared.Clear(account.Id, sheet);
-                // XOÁ LOCAL CHƯA ĐỦ: ledger hub còn nguyên khoảng-dòng cũ → lượt Resume sau (hoặc mở lại app:
-                // SyncIntoProgressAsync fold TOÀN BỘ ledger về tiến độ local) kéo lại tiến độ CŨ → resume tưởng
-                // đã xong phần user vừa muốn cào lại từ đầu → BỎ SÓT dòng ("fold-poisoning"). Xoá luôn ledger hub
-                // op scrape của shop này (status "idle" = server xoá bản ghi ledger + tiến độ dòng). Fire-and-forget,
-                // có try/catch: offline/lỗi → thôi (local đã clear là đủ để chạy lại từ đầu).
-                if (accHub is not null)
-                    TaskExt.FireAndForget(accHub.SetLedgerStatusAsync(coordKey, LedgerStatus.Idle),
-                        $"xoá ledger hub (idle) khi Reset · {account.DisplayName}/{sheet}");
+                // Xoá tiến độ local + ledger Hub qua MỘT helper dùng chung với nút "Xoá tiến độ" ở cửa sổ
+                // Thống kê (trước đây cửa sổ đó chỉ Clear local → ledger Hub còn nguyên, xoá thành no-op).
+                ScrapeProgressReset.Reset(account.Id, sheet, shop, account.DisplayName, m => LogA($"[{account.DisplayName}] {m}"));
             }
             // HAND-OFF XUYÊN MÁY: trước khi tính phần CÒN THIẾU, kéo ledger TƯƠI của shop này từ Hub → fold vào
             // tiến độ local. Nhờ đó máy TIẾP QUẢN (khi máy trước rớt net giữa chừng) chỉ scrape đúng phần còn
@@ -387,6 +381,16 @@ public sealed partial class ScrapeViewModel : ModuleViewModelBase
                 Coordination.Hub.PublishProgress(coordKey, from, to);     // chia sẻ tiến độ lên Hub
                 OnUi(target.RefreshProgress);
             };
+            // Dòng KHÔNG cào được (lỗi giữa khối / kẹt 3 lần): trước đây chỉ có một dòng log rồi trôi, mà
+            // khoảng runner báo "đã cào" vẫn trùm lên nó → mất SP âm thầm. Nay ghi vào SỔ BỎ QUA + đẩy
+            // [row..row] lên Hub (CÓ CHỦ ĐÍCH: không publish thì Hub giao lại dòng hỏng vòng vô tận).
+            runner.RowSkipped += (row, reason) =>
+            {
+                ScrapeProgressStore.Shared.MarkSkipped(account.Id, sheet, row);
+                Coordination.Hub.PublishProgress(coordKey, row, row);
+                LogA($"[{account.DisplayName}] ⚠ BỎ QUA dòng {row}: {reason} — SP dòng này KHÔNG được cào; muốn cào lại hãy Chạy (reset).");
+                OnUi(target.RefreshProgress);
+            };
             WireRunner(runner, seq, account);
 
             // BÙ TK THAY THẾ: khi captcha loại tk khỏi khung, pool xin 1 tk RẢNH từ kho chung (đã khóa lease
@@ -398,9 +402,14 @@ public sealed partial class ScrapeViewModel : ModuleViewModelBase
             // Kết thúc: xong hết [startRow..total] → completed; còn dở → stopped (resume chạy nốt theo dòng).
             ScrapeProgressStore.Shared.FinishRun(account.Id, sheet, startRow, totalRows);
             var after = ScrapeProgressStore.Shared.Find(account.Id, sheet);
+            // Dòng bỏ qua nằm TRONG vùng phủ nên "hoàn thành" vẫn có thể thiếu SP → nói rõ ở dòng tổng kết.
+            var skipped = after?.SkippedRows ?? [];
+            var skipNote = skipped.Count == 0
+                ? ""
+                : $" ⚠ BỎ QUA {skipped.Count} dòng (không cào được): {string.Join(", ", skipped.Take(20))}{(skipped.Count > 20 ? "…" : "")} — muốn cào lại hãy Chạy (reset).";
             LogA(string.Equals(after?.Status, LedgerStatus.Completed, StringComparison.OrdinalIgnoreCase)
-                ? $"[{account.DisplayName}] ✔ Hoàn thành toàn bộ."
-                : $"[{account.DisplayName}] ■ Chưa xong (xong tới dòng {after?.LastRowReached ?? 0}) — Tiếp tục để chạy nốt.");
+                ? $"[{account.DisplayName}] ✔ Hoàn thành toàn bộ.{skipNote}"
+                : $"[{account.DisplayName}] ■ Chưa xong (xong tới dòng {after?.LastRowReached ?? 0}) — Tiếp tục để chạy nốt.{skipNote}");
         }
         catch (OperationCanceledException)
         {

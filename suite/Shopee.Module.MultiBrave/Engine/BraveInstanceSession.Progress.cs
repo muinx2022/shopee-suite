@@ -44,7 +44,7 @@ internal sealed partial class BraveInstanceSession
         if (!ExtensionProgressReader.TryRead(profileRoot, out var state) || !HasMeaningfulProgress(state))
             return false;
 
-        _config.ApplyExtensionProgress(state);
+        _config.ApplyExtensionProgress(state, Log);
         ExtensionProgressSynced?.Invoke();
         return true;
     }
@@ -82,7 +82,7 @@ internal sealed partial class BraveInstanceSession
                 return false;
             }
 
-            _config!.ApplyExtensionProgress(state);
+            _config!.ApplyExtensionProgress(state, Log);
 
             if (state.Running == true)
                 _lastInterruptLogSignature = null;

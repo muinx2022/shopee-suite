@@ -271,6 +271,11 @@ internal static class LauncherRunnerLoop
                 }
                 else
                 {
+                    // KHÔNG cào được nhưng vòng lặp vẫn chạy tiếp sang dòng kế → GHI VÀO SỔ BỎ QUA để
+                    // ScrapeRunner diff ra và báo RowSkipped. Trước đây chỉ có dòng log này: dòng hỏng nằm
+                    // gọn trong khoảng [from..lastDone] mà runner báo là "đã cào" → mất âm thầm, Resume
+                    // không bao giờ chạy lại nó.
+                    config.AddFailedRow(rowNumber, step.Message ?? "không scrape được");
                     log($"Dòng {rowNumber}: {step.Message ?? "không scrape được."}");
                 }
 

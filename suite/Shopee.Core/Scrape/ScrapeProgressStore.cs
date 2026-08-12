@@ -24,6 +24,14 @@ public sealed class ScrapeProgress
     /// <summary>Các khoảng dòng đã cào xong, đã gộp + sắp xếp.</summary>
     public List<RowRange> Completed { get; set; } = [];
 
+    /// <summary>Các dòng BỎ QUA CÓ GHI NHẬN: nằm trong vùng phủ <see cref="Completed"/> nhưng THỰC TẾ không
+    /// có dữ liệu (cào lỗi giữa khối / kẹt 3 lần). Bất biến của tiến độ: mọi dòng CÓ INPUT HỢP LỆ trong vùng
+    /// phủ = cào OK HOẶC có tên ở đây — dòng thiếu link/tên SP bị FetchLinks lọc từ ĐẦU vòng không tính
+    /// (không cào được theo định nghĩa, chỉ có dòng log đếm; đưa vào đây thì sheet nhiều dòng trống nào cũng
+    /// báo "bỏ n dòng"). Có sổ này thì Resume không lặp vô tận vào dòng hỏng mà user vẫn thấy mình mất gì.
+    /// Chạy (reset) xoá sạch; Tiếp tục (resume) giữ nguyên.</summary>
+    public List<int> SkippedRows { get; set; } = [];
+
     /// <summary>"Khung" tk Shopee được cấp cố định cho tk BigSeller này lúc bắt đầu chạy (reset). Engine
     /// CHỈ xoay vòng trong khung → BigSeller chỉ thấy ngần ấy thiết bị ổn định → không bị đá phiên. Resume
     /// giữ NGUYÊN khung này (không phơi tk mới). Reset (Run) cấp khung mới.</summary>
@@ -112,6 +120,7 @@ public sealed class ScrapeProgressStore
         {
             var p = GetOrCreateLocked(accountId, sheet, accountName);
             p.Completed.Clear();
+            p.SkippedRows.Clear();   // chạy lại từ đầu → sổ bỏ qua của lượt cũ hết nghĩa
             p.LastRowReached = 0;
             p.TotalRowsAtLastRun = totalRows;
             p.Status = LedgerStatus.Running;
@@ -143,6 +152,30 @@ public sealed class ScrapeProgressStore
         {
             var p = GetOrCreateLocked(accountId, sheet, "");
             p.Completed = RowRangeMath.Merge(p.Completed, from, to);
+            p.LastRowReached = Math.Max(p.LastRowReached, RowRangeMath.MaxRow(p.Completed));
+            SaveLocked();
+        }
+        Changed?.Invoke();
+    }
+
+    /// <summary>
+    /// Ghi nhận một dòng BỊ BỎ QUA (cào lỗi / kẹt): vào <see cref="ScrapeProgress.SkippedRows"/> (dedup) VÀ
+    /// vào vùng phủ <see cref="ScrapeProgress.Completed"/>. Đưa vào vùng phủ là CÓ CHỦ ĐÍCH: dòng này không
+    /// cào được nên Resume mà giao lại thì lặp vô tận; muốn cào lại phải Chạy (reset). Idempotent — diff của
+    /// runner có thể bắn trùng khi retry chunk.
+    /// </summary>
+    public void MarkSkipped(string accountId, string sheet, int row)
+    {
+        if (row <= 0) return;
+        lock (_lock)
+        {
+            var p = GetOrCreateLocked(accountId, sheet, "");
+            if (!p.SkippedRows.Contains(row))
+            {
+                p.SkippedRows.Add(row);
+                p.SkippedRows.Sort();
+            }
+            p.Completed = RowRangeMath.Merge(p.Completed, row, row);
             p.LastRowReached = Math.Max(p.LastRowReached, RowRangeMath.MaxRow(p.Completed));
             SaveLocked();
         }
@@ -213,6 +246,7 @@ public sealed class ScrapeProgressStore
         Sheet = p.Sheet,
         AccountName = p.AccountName,
         Completed = p.Completed.Select(r => new RowRange { From = r.From, To = r.To }).ToList(),
+        SkippedRows = [.. p.SkippedRows],
         FrameAccountIds = [.. p.FrameAccountIds],
         LastRowReached = p.LastRowReached,
         TotalRowsAtLastRun = p.TotalRowsAtLastRun,

@@ -20,6 +20,10 @@ public sealed class SearchOrchestrator
     private bool _extensionReady;
     public IReadOnlyList<ProductResult> Results => _results;
 
+    /// <summary>Tổng số SP bị bộ lọc khu vực LOẠI trong lượt chạy này (cộng dồn mọi trang). Dùng để phân biệt
+    /// "link rỗng thật" với "link có hàng nhưng ô Khu vực loại sạch" — hai ca này đều ra 0 SP.</summary>
+    public int SkippedByRegionTotal { get; private set; }
+
     public event Action<string>? ProgressChanged;
     public event Action<ProductResult>? ProductFound;
     public event Action<ProductResult>? ProductPersisted;
@@ -47,6 +51,7 @@ public sealed class SearchOrchestrator
         _searchActive = true;
         _results.Clear();
         _resultIndex.Clear();
+        SkippedByRegionTotal = 0;
 
         // Extension already connected (e.g. it connected from the launch URL hash before we
         // finished logging in)? Send "start" now — there won't be another "ready" to trigger it.
@@ -160,8 +165,14 @@ public sealed class SearchOrchestrator
         CheckpointChanged?.Invoke(idx, categoryName, page);
         // Keep the live config in sync so a reconnect (which re-sends _searchConfig
         // via SendPendingSearchOnReady) resumes at the latest category, not category 1.
+        // PHẢI cập nhật CẢ CẶP (idx, page) cùng nhịp: chỉ cập nhật idx thì reconnect gửi idx MỚI kèm
+        // resumePage CŨ của danh mục trước → extension nhảy thẳng vào giữa danh mục mới, bỏ trắng các
+        // trang đầu (trang ít hơn resumePage là mất trắng cả danh mục) mà link vẫn được đánh dấu xong.
         if (_searchConfig is not null)
+        {
             _searchConfig.ResumeCategoryIndex = idx;
+            _searchConfig.ResumePage = page > 0 ? page : 1;
+        }
 
         // Structured items (have name/price/sold)
         if (source.TryGetProperty("items", out var itemsEl) && itemsEl.GetArrayLength() > 0)
@@ -205,6 +216,7 @@ public sealed class SearchOrchestrator
                 else
                     updatedOrDuplicate++;
             }
+            SkippedByRegionTotal += skippedByRegion;
             ProgressChanged?.Invoke($"[pageData/{srcName}] received {totalReceived}, added {added}, updated/duplicate {updatedOrDuplicate}, skipped region {skippedByRegion}, total {_results.Count}.");
             if (IsFinalPageData(source))
                 SearchCompleted?.Invoke();

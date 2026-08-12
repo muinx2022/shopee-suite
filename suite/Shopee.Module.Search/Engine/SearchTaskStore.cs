@@ -18,6 +18,15 @@ public sealed class SearchTaskStore
         Initialize();
     }
 
+    /// <summary>Mở CSDL ở đường dẫn chỉ định — chỉ dùng cho TEST (bản thường luôn nằm trong %AppData%).</summary>
+    internal SearchTaskStore(string dbPath)
+    {
+        var dir = Path.GetDirectoryName(dbPath);
+        if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+        _dbPath = dbPath;
+        Initialize();
+    }
+
     public long CreateTask(SearchConfig config, InstanceConfig account)
     {
         lock (_sync)
@@ -252,6 +261,8 @@ public sealed class SearchTaskStore
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     shop_id INTEGER NOT NULL,
                     shop_name TEXT NOT NULL DEFAULT '',
+                    category_id INTEGER NOT NULL DEFAULT 0,
+                    category_label TEXT NOT NULL DEFAULT '',
                     source_link TEXT NOT NULL DEFAULT '',
                     item_id INTEGER NOT NULL,
                     name TEXT NOT NULL DEFAULT '',
@@ -275,7 +286,34 @@ public sealed class SearchTaskStore
                 );
                 """;
             cmd.ExecuteNonQuery();
+
+            // CSDL cũ (trước 2026-08-12) chưa có 2 cột danh mục — bản cũ nhét cat id vào shop_id nên Shop ID
+            // sai toàn bộ. Thêm cột tại chỗ, dòng cũ giữ nguyên (0/'') vì không phân biệt được với dòng đúng.
+            AddColumnIfMissing(con, "shop_products", "category_id", "INTEGER NOT NULL DEFAULT 0");
+            AddColumnIfMissing(con, "shop_products", "category_label", "TEXT NOT NULL DEFAULT ''");
+
+            // SaveShopProducts dọn bản cũ bằng DELETE theo item_id MỖI sản phẩm; UNIQUE(shop_id,item_id) có
+            // item_id ở vị trí SAU nên không phục vụ tra cứu này → thiếu index là quét toàn bảng cho từng SP
+            // (đo thật: lưu 2000 SP vào bảng 20k dòng chậm ~60×, giữ khoá ghi chặn các lane khác + nút Dừng).
+            using (var idx = con.CreateCommand())
+            {
+                idx.CommandText = "CREATE INDEX IF NOT EXISTS ix_shop_products_item_id ON shop_products(item_id)";
+                idx.ExecuteNonQuery();
+            }
         }
+    }
+
+    private static void AddColumnIfMissing(SqliteConnection con, string table, string column, string definition)
+    {
+        using (var probe = con.CreateCommand())
+        {
+            probe.CommandText = $"SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name = $col";
+            Add(probe, "$col", column);
+            if (Convert.ToInt32(probe.ExecuteScalar() ?? 0) > 0) return;
+        }
+        using var alter = con.CreateCommand();
+        alter.CommandText = $"ALTER TABLE {table} ADD COLUMN {column} {definition}";
+        alter.ExecuteNonQuery();
     }
 
     /// <summary>Một danh mục trong "từ điển" danh mục (số liệu tính trực tiếp từ shop_products).
@@ -396,7 +434,7 @@ public sealed class SearchTaskStore
                     ShopLocation = GetString(reader, "shop_location"),
                     ImageUrl = GetString(reader, "image_url"),
                     Category = GetString(reader, "category"),
-                    ShopName = GetString(reader, "shop_name"),
+                    ShopName = ShopNameOrLabel(reader),
                 });
             }
             return products;
@@ -435,8 +473,13 @@ public sealed class SearchTaskStore
         }
     }
 
-    /// <summary>Persists scraped products of a shop (file/shop-from-link mode) for later export.</summary>
-    public void SaveShopProducts(long shopId, string shopName, string sourceLink, IReadOnlyList<ProductResult> products)
+    /// <summary>
+    /// Lưu sản phẩm cào được từ MỘT link danh mục (chế độ tìm theo file) để xuất về sau.
+    /// <para><paramref name="categoryId"/>/<paramref name="categoryLabel"/> là DANH MỤC của link — KHÔNG
+    /// phải shop. Shop lấy từ chính sản phẩm (<c>p.ShopId</c>/<c>p.ShopName</c>): trước 2026-08-12 cat id bị
+    /// ghi đè vào cột <c>shop_id</c>, làm link <c>product/{shopId}/{itemId}</c> chết 404 ở mọi bản xuất.</para>
+    /// </summary>
+    public void SaveShopProducts(long categoryId, string categoryLabel, string sourceLink, IReadOnlyList<ProductResult> products)
     {
         if (products.Count == 0) return;
         lock (_sync)
@@ -446,16 +489,31 @@ public sealed class SearchTaskStore
             foreach (var p in products)
             {
                 if (p.ItemId <= 0) continue;
+                // THAY bản cũ cùng itemId nhưng KHÁC shop_id: dòng trước 2026-08-12 mang CAT ID trong
+                // shop_id nên không đụng UNIQUE(shop_id,item_id) với dòng đúng → cùng một SP thành 2 dòng,
+                // tab Danh mục đếm đôi. itemId là định danh toàn cục (mọi truy vấn đều khử trùng theo nó)
+                // nên xoá bản khác shop_id là an toàn.
+                using (var del = con.CreateCommand())
+                {
+                    del.Transaction = tx;
+                    del.CommandText = "DELETE FROM shop_products WHERE item_id = $itemId AND shop_id <> $shopId";
+                    Add(del, "$itemId", p.ItemId);
+                    Add(del, "$shopId", p.ShopId);
+                    del.ExecuteNonQuery();
+                }
                 using var cmd = con.CreateCommand();
                 cmd.Transaction = tx;
                 cmd.CommandText = """
                     INSERT INTO shop_products
-                    (shop_id, shop_name, source_link, item_id, name, price_vnd, original_price_vnd,
-                     monthly_sold, rating, liked_count, comment_count, shop_location, image_url, category, scanned_at)
-                    VALUES ($shopId, $shopName, $link, $itemId, $name, $price, $originalPrice,
-                     $sold, $rating, $liked, $comments, $location, $image, $category, $now)
+                    (shop_id, shop_name, category_id, category_label, source_link, item_id, name, price_vnd,
+                     original_price_vnd, monthly_sold, rating, liked_count, comment_count, shop_location,
+                     image_url, category, scanned_at)
+                    VALUES ($shopId, $shopName, $categoryId, $categoryLabel, $link, $itemId, $name, $price,
+                     $originalPrice, $sold, $rating, $liked, $comments, $location, $image, $category, $now)
                     ON CONFLICT(shop_id, item_id) DO UPDATE SET
                         shop_name=excluded.shop_name,
+                        category_id=excluded.category_id,
+                        category_label=excluded.category_label,
                         source_link=excluded.source_link,
                         name=excluded.name,
                         price_vnd=excluded.price_vnd,
@@ -469,8 +527,10 @@ public sealed class SearchTaskStore
                         category=excluded.category,
                         scanned_at=excluded.scanned_at
                     """;
-                Add(cmd, "$shopId", shopId > 0 ? shopId : p.ShopId);
-                Add(cmd, "$shopName", shopName);
+                Add(cmd, "$shopId", p.ShopId);
+                Add(cmd, "$shopName", p.ShopName);
+                Add(cmd, "$categoryId", categoryId);
+                Add(cmd, "$categoryLabel", categoryLabel);
                 Add(cmd, "$link", sourceLink);
                 Add(cmd, "$itemId", p.ItemId);
                 Add(cmd, "$name", p.Name);
@@ -525,11 +585,58 @@ public sealed class SearchTaskStore
                     ShopLocation = GetString(reader, "shop_location"),
                     ImageUrl = GetString(reader, "image_url"),
                     Category = GetString(reader, "category"),
-                    ShopName = GetString(reader, "shop_name"),
+                    ShopName = ShopNameOrLabel(reader),
                 };
             }
             return byItem.Values.ToList();
         }
+    }
+
+    /// <summary>Toàn bộ SP đã lưu của MỘT link (mọi lượt chạy, kể cả các lần trước), khử trùng theo itemId —
+    /// giữ bản quét mới nhất. Dùng cho file Excel per-link: xuất từ CSDL thay vì kết quả của MỘT lượt, để
+    /// lượt dừng giữa chừng / đổi account không GHI ĐÈ file đầy đủ của các lượt trước bằng phần nửa chừng.</summary>
+    public List<ProductResult> GetShopProductsBySourceLink(string sourceLink)
+    {
+        lock (_sync)
+        {
+            using var con = Open();
+            using var cmd = con.CreateCommand();
+            cmd.CommandText = "SELECT * FROM shop_products WHERE source_link = $link ORDER BY scanned_at DESC, id DESC";
+            Add(cmd, "$link", sourceLink);
+            using var reader = cmd.ExecuteReader();
+            var byItem = new Dictionary<long, ProductResult>();
+            while (reader.Read())
+            {
+                var itemId = reader.GetInt64(reader.GetOrdinal("item_id"));
+                if (byItem.ContainsKey(itemId)) continue; // đã có bản mới nhất → bỏ trùng itemId
+                byItem[itemId] = new ProductResult
+                {
+                    ItemId = itemId,
+                    ShopId = reader.GetInt64(reader.GetOrdinal("shop_id")),
+                    Name = GetString(reader, "name"),
+                    PriceVnd = GetDecimal(reader, "price_vnd"),
+                    PriceOriginalVnd = GetDecimal(reader, "original_price_vnd"),
+                    MonthlySold = GetInt(reader, "monthly_sold"),
+                    Rating = GetDouble(reader, "rating"),
+                    LikedCount = GetInt(reader, "liked_count"),
+                    CommentCount = GetInt(reader, "comment_count"),
+                    ShopLocation = GetString(reader, "shop_location"),
+                    ImageUrl = GetString(reader, "image_url"),
+                    Category = GetString(reader, "category"),
+                    ShopName = ShopNameOrLabel(reader),
+                };
+            }
+            return byItem.Values.ToList();
+        }
+    }
+
+    /// <summary>Cột "Tên shop" khi hiển thị/xuất: extension search KHÔNG trả tên shop nên <c>shop_name</c>
+    /// của dòng mới luôn rỗng — fallback sang nhãn danh mục (đúng thứ cột này vẫn chứa trước 2026-08-12,
+    /// dù hồi đó là do ghi NHẦM). Có tên shop thật thì tên thật thắng.</summary>
+    private static string ShopNameOrLabel(SqliteDataReader reader)
+    {
+        var name = GetString(reader, "shop_name");
+        return name.Length > 0 ? name : GetString(reader, "category_label");
     }
 
     /// <summary>Xóa task link + bảng shop_products của tab "Tìm theo file".</summary>

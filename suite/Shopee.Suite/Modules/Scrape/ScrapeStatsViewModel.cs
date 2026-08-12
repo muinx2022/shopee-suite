@@ -28,10 +28,16 @@ public sealed class SheetProgressRow
         };
         var sheetName = string.IsNullOrWhiteSpace(p.Sheet) ? "(mặc định)" : p.Sheet;
         var last = p.LastRunAt is { } t ? t.LocalDateTime.ToString("dd/MM HH:mm") : "—";
-        Header = $"Sheet \"{sheetName}\" · {status} · đã xong tới dòng {p.LastRowReached} / tổng {p.TotalRowsAtLastRun} · lượt cuối {last}";
-        RangesText = p.Completed.Count == 0
+        // "bỏ n dòng" = dòng trong vùng phủ nhưng KHÔNG cào được (skip-ledger). Liệt kê hẳn số dòng ở
+        // RangesText để user biết chính xác thiếu SP nào mà quyết định có Chạy (reset) lại không.
+        var skip = p.SkippedRows.Count > 0 ? $" · bỏ {p.SkippedRows.Count} dòng" : "";
+        Header = $"Sheet \"{sheetName}\" · {status} · đã xong tới dòng {p.LastRowReached}{skip} / tổng {p.TotalRowsAtLastRun} · lượt cuối {last}";
+        RangesText = (p.Completed.Count == 0
             ? "Đã cào: (chưa có)"
-            : "Đã cào: " + string.Join(", ", p.Completed.Select(r => r.From == r.To ? $"{r.From}" : $"{r.From}–{r.To}"));
+            : "Đã cào: " + string.Join(", ", p.Completed.Select(r => r.From == r.To ? $"{r.From}" : $"{r.From}–{r.To}")))
+            + (p.SkippedRows.Count == 0
+                ? ""
+                : $"   ⚠ Bỏ qua (không cào được): {string.Join(", ", p.SkippedRows)}");
         FrameText = frameLabels.Count == 0
             ? "Khung tk Shopee: (chưa cấp — lần Chạy đầu sẽ khoanh vùng)"
             : $"Khung tk Shopee ({frameLabels.Count}): " + string.Join(", ", frameLabels);
@@ -79,12 +85,16 @@ public sealed partial class ScrapeStatsViewModel : ObservableObject
 
     [RelayCommand] private void Refresh() => Load();
 
-    /// <summary>Xoá hẳn tiến độ của 1 sheet (lần Chạy/Tiếp tục sau sẽ coi như mới).</summary>
+    /// <summary>Xoá hẳn tiến độ của 1 sheet (lần Chạy/Tiếp tục sau sẽ coi như mới). Đi qua
+    /// <see cref="ScrapeProgressReset"/> — cùng đường với nút Chạy (reset) — để xoá CẢ ledger Hub: trước đây
+    /// chỗ này chỉ Clear local nên khi có Hub, "Xoá tiến độ" là no-op (lượt sau fold ledger kéo tiến độ cũ về).</summary>
     [RelayCommand]
     private void ClearProgress(SheetProgressRow row)
     {
         if (row is null) return;
-        ScrapeProgressStore.Shared.Clear(_accountId, row.Sheet);
+        string? note = null;
+        ScrapeProgressReset.Reset(_accountId, row.Sheet, m => note = m);
         Load();
+        if (note is not null) Summary = note;
     }
 }

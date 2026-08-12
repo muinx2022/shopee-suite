@@ -24,10 +24,25 @@ public sealed class LinkFileStore
 
     private readonly bool _isTxt;
 
+    // Khóa ghi THEO FILE (dùng chung cho mọi instance trong process): nhiều lane cùng đánh dấu một file link
+    // — mỗi lượt là đọc-sửa-ghi cả file — chồng nhau thì mất dấu hoặc hỏng workbook. Khóa theo đường dẫn đầy
+    // đủ, không phân biệt hoa/thường (Windows). KHÔNG chống được file bị process khác khóa: lỗi đó ném ra
+    // ngoài cho người gọi báo lên UI.
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, object> FileLocks =
+        new(StringComparer.OrdinalIgnoreCase);
+
     public LinkFileStore(string path)
     {
         Path = path;
         _isTxt = path.EndsWith(".txt", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private object WriteLock => FileLocks.GetOrAdd(LockKey(Path), _ => new object());
+
+    private static string LockKey(string path)
+    {
+        try { return System.IO.Path.GetFullPath(path); }
+        catch { return path; }   // đường dẫn dị dạng: khóa theo chuỗi thô còn hơn không khóa
     }
 
     private string StatusSidecarPath => Path + ".status.tsv";
@@ -38,19 +53,26 @@ public sealed class LinkFileStore
     /// <summary>Clears every status (reset resume state).</summary>
     public void ClearAllStatuses()
     {
-        if (_isTxt)
+        lock (WriteLock)
         {
-            try { if (File.Exists(StatusSidecarPath)) File.Delete(StatusSidecarPath); } catch { }
-            return;
+            if (_isTxt)
+            {
+                try { if (File.Exists(StatusSidecarPath)) File.Delete(StatusSidecarPath); } catch { }
+                return;
+            }
+            ClearAllStatusesXlsx();
         }
-        ClearAllStatusesXlsx();
     }
 
-    /// <summary>Writes a status value for a row and persists it.</summary>
+    /// <summary>Writes a status value for a row and persists it. Ném lỗi ra ngoài (file đang bị khóa/mở
+    /// trong Excel) — người gọi phải báo lên UI, nuốt lặng là mất dấu "đã xử lý" không ai biết.</summary>
     public void MarkStatus(int rowNumber, string status)
     {
-        if (_isTxt) { MarkStatusTxt(rowNumber, status); return; }
-        MarkStatusXlsx(rowNumber, status);
+        lock (WriteLock)
+        {
+            if (_isTxt) { MarkStatusTxt(rowNumber, status); return; }
+            MarkStatusXlsx(rowNumber, status);
+        }
     }
 
     // ── .txt (mỗi dòng 1 link) ──────────────────────────────────────────────────
@@ -91,16 +113,22 @@ public sealed class LinkFileStore
 
     private void MarkStatusTxt(int rowNumber, string status)
     {
+        var map = ReadTxtStatuses();
+        map[rowNumber] = status;
+        var lines = map.OrderBy(kv => kv.Key).Select(kv => $"{kv.Key}\t{kv.Value}");
+        // Tên tmp DUY NHẤT mỗi lượt ghi: khóa ở trên chỉ chặn trong process, còn hai process cùng ghi một
+        // đường tmp thì file rename ra là bản trộn.
+        var tmp = $"{StatusSidecarPath}.{Guid.NewGuid():N}.tmp";
         try
         {
-            var map = ReadTxtStatuses();
-            map[rowNumber] = status;
-            var lines = map.OrderBy(kv => kv.Key).Select(kv => $"{kv.Key}\t{kv.Value}");
-            var tmp = StatusSidecarPath + ".tmp";
             File.WriteAllLines(tmp, lines);
             File.Move(tmp, StatusSidecarPath, overwrite: true);
         }
-        catch { }
+        catch
+        {
+            try { if (File.Exists(tmp)) File.Delete(tmp); } catch { }
+            throw;
+        }
     }
 
     // ── .xlsx (giữ tương thích) ─────────────────────────────────────────────────
@@ -125,8 +153,7 @@ public sealed class LinkFileStore
         {
             var link = FindLinkInRow(ws, r, lastCol);
             if (string.IsNullOrWhiteSpace(link)) continue;
-            var status = ws.Cell(r, StatusColumn).GetString().Trim();
-            rows.Add(new LinkRow(r, link, status));
+            rows.Add(new LinkRow(r, link, ReadStatus(ws, r, StatusColumn, lastCol)));
         }
         return rows;
     }
@@ -139,9 +166,12 @@ public sealed class LinkFileStore
         var lastCol = ws.LastColumnUsed()?.ColumnNumber() ?? 0;
         if (lastRow == 0 || lastCol == 0) return;
 
+        // Xoá CẢ DÃY cột trạng thái: file do bản cũ đẻ thêm cột mỗi lượt đánh dấu, chỉ xoá một cột thì
+        // "đặt lại" xong đọc lên vẫn còn Processed ở các cột thừa.
         var statusCol = ResolveStatusColumn(ws, lastRow, lastCol);
         for (var r = 1; r <= lastRow; r++)
-            ws.Cell(r, statusCol).Value = "";
+            for (var c = statusCol; c <= lastCol; c++)
+                ws.Cell(r, c).Value = "";
         wb.Save();
     }
 
@@ -149,16 +179,36 @@ public sealed class LinkFileStore
     {
         using var wb = new XLWorkbook(Path);
         var ws = wb.Worksheets.First();
-        var col = StatusColumn > 0 ? StatusColumn : (ws.LastColumnUsed()?.ColumnNumber() ?? 1) + 1;
+        var lastRow = ws.LastRowUsed()?.RowNumber() ?? 0;
+        var lastCol = ws.LastColumnUsed()?.ColumnNumber() ?? 0;
+        // Chưa Load() thì tự dò lại cột trạng thái NHƯ Load — bản cũ lấy "cột cuối + 1" nên mỗi lượt đánh
+        // dấu đẻ ra một cột mới, nạp lại chỉ đọc cột cuối ⇒ mất sạch dấu của các lượt trước.
+        var col = StatusColumn > 0 ? StatusColumn : ResolveStatusColumn(ws, lastRow, Math.Max(lastCol, 1));
         ws.Cell(rowNumber, col).Value = status;
         wb.Save();
     }
 
+    /// <summary>Cột trạng thái = cột TRÁI NHẤT của dãy cột "toàn giá trị trạng thái" liền nhau ở cuối bảng.
+    /// Không có dãy nào (lượt đầu) → cột trống ngay sau dữ liệu. Nhờ vậy file đã bị bản cũ đẻ nhiều cột vẫn
+    /// quy về đúng một cột để ghi, các cột thừa để nguyên và vẫn được đọc gộp (xem <see cref="ReadStatus"/>).</summary>
     private static int ResolveStatusColumn(IXLWorksheet ws, int lastRow, int lastCol)
     {
-        // Reuse the last column if it already holds only status-like values (a re-run),
-        // otherwise put the status in a fresh column right after the data.
-        return IsStatusColumn(ws, lastCol, lastRow) ? lastCol : lastCol + 1;
+        var col = lastCol + 1;
+        for (var c = lastCol; c >= 1 && IsStatusColumn(ws, c, lastRow); c--)
+            col = c;
+        return col;
+    }
+
+    /// <summary>Trạng thái của một dòng = giá trị khác rỗng ĐẦU TIÊN trong dãy cột trạng thái — dấu cũ có
+    /// thể nằm ở bất kỳ cột thừa nào do bản cũ sinh ra.</summary>
+    private static string ReadStatus(IXLWorksheet ws, int row, int from, int to)
+    {
+        for (var c = from; c <= to; c++)
+        {
+            var v = ws.Cell(row, c).GetString().Trim();
+            if (v.Length > 0) return v;
+        }
+        return "";
     }
 
     private static bool IsStatusColumn(IXLWorksheet ws, int col, int lastRow)
@@ -169,10 +219,14 @@ public sealed class LinkFileStore
             var v = ws.Cell(r, col).GetString().Trim();
             if (v.Length == 0) continue;
             sawAny = true;
+            // CHỈ nhận giá trị do CHÍNH APP ghi + ô tiêu đề "Trạng thái" (ở BẤT KỲ hàng nào: file user hay
+            // có dòng tiêu đề bảng ở hàng 1, tên cột nằm hàng 2 — khoá cứng hàng 1 là các file đó mất sạch
+            // dấu). Nhận cả tiền tố "Lỗi" như trước thì cột GHI CHÚ của user ("Lỗi ảnh dòng 2"…) bị nhận
+            // nhầm thành cột trạng thái → MarkStatus GHI ĐÈ mất ghi chú, ClearAllStatuses xoá lan sang,
+            // ReadStatus lấy nhầm ghi chú che mất dấu Processed thật.
             var isStatus = v.Equals(Processing, StringComparison.OrdinalIgnoreCase)
                 || v.Equals(Processed, StringComparison.OrdinalIgnoreCase)
-                || v.StartsWith("Trạng thái", StringComparison.OrdinalIgnoreCase)
-                || v.StartsWith("Lỗi", StringComparison.OrdinalIgnoreCase);
+                || v.StartsWith("Trạng thái", StringComparison.OrdinalIgnoreCase);
             if (!isStatus) return false;
         }
         return sawAny;

@@ -59,6 +59,10 @@ public sealed class ScrapeRunner
     public event Action<string, string>? AccountCaptchaDropped;
     /// <summary>(from, to) — khoảng dòng vừa cào XONG (để lưu tiến độ resume). Báo theo từng chunk.</summary>
     public event Action<int, int>? RowsCompleted;
+    /// <summary>(row, lý do) — dòng BỊ BỎ QUA: nằm trong khoảng runner báo "đã cào" nhưng THỰC TẾ không có dữ
+    /// liệu (cào lỗi giữa khối, hoặc kẹt <see cref="MaxStallRetries"/> lần liên tiếp). Handler ngoài phải GHI
+    /// NHẬN (skip-ledger) — bất biến: mọi dòng trong vùng phủ = cào OK HOẶC có tên trong sổ bỏ qua.</summary>
+    public event Action<int, string>? RowSkipped;
     /// <summary>(lý do) — tk BigSeller mất phiên ("log in first"). Toàn bộ job tk này bị dừng; cần đăng nhập lại BigSeller.</summary>
     public event Action<string>? BigSellerNeedLogin;
     /// <summary>(lý do) — LỖI HẠ TẦNG TOÀN CỤC (key proxy chết): mọi tk Shopee đều hỏng như nhau nên job đã bị
@@ -290,9 +294,13 @@ public sealed class ScrapeRunner
                     var nextStall = progressed ? 0 : stall + 1;
                     if (nextStall >= MaxStallRetries)
                     {
+                        var stallReason = string.IsNullOrWhiteSpace(res.Reason) ? "không tiến" : res.Reason;
                         InstanceLog?.Invoke(key,
                             $"⛔ Dòng {nextFrom} kẹt {MaxStallRetries} lần liên tiếp " +
-                            $"({(string.IsNullOrWhiteSpace(res.Reason) ? "không tiến" : res.Reason)}) → BỎ QUA dòng {nextFrom}.");
+                            $"({stallReason}) → BỎ QUA dòng {nextFrom}.");
+                        // GHI NHẬN dòng bỏ qua: không báo ra thì shop kẹt vĩnh viễn ở "chưa xong" (dòng này
+                        // không bao giờ cào được), mỗi lượt Tiếp tục lại đốt 3 lượt mở Brave cho đúng nó.
+                        RowSkipped?.Invoke(nextFrom, $"kẹt {MaxStallRetries} lần liên tiếp ({stallReason})");
                         nextFrom += 1;
                         nextStall = 0;
                     }
@@ -351,14 +359,11 @@ public sealed class ScrapeRunner
 
     private readonly record struct ChunkResult(bool Errored, string Reason, int LastCompletedRow, bool IsCaptcha, bool NeedLogin = false);
 
-    /// <summary>Dòng cuối ĐÃ scrape xong của 1 chunk (đọc từ cfg do engine ghi per-row). Chưa xong
-    /// dòng nào → from-1. Kẹp trong [from-1, to].</summary>
-    private static int LastDoneOf(InstanceConfig cfg, int from, int to)
-    {
-        var last = cfg.LastCompletedRow ?? (from - 1);
-        if (last < from - 1) last = from - 1;
-        return Math.Min(last, to);
-    }
+    /// <summary>Dòng cuối ĐÃ scrape xong của 1 chunk (đọc từ cfg do engine ghi per-row). Toán nằm ở
+    /// <see cref="Shopee.Core.Scrape.ScrapeChunkMath.ClampLastDone"/> (thuần, có test) — nhớ: giá trị LỚN HƠN
+    /// <paramref name="to"/> là RÁC của lượt trước còn trong profile, KHÔNG phải "xong cả khối".</summary>
+    private static int LastDoneOf(InstanceConfig cfg, int from, int to) =>
+        Shopee.Core.Scrape.ScrapeChunkMath.ClampLastDone(cfg.LastCompletedRow, from, to);
 
     /// <summary>Chạy 1 khối dòng với 1 account (mở Brave → đăng nhập → extension → đóng). Đọc
     /// cfg.RunnerPhase/LastRunnerMessage sau khi xong để biết captcha/proxy lỗi.</summary>
@@ -374,6 +379,26 @@ public sealed class ScrapeRunner
         cfg.BigSellerAccountName = _bigSellerAccountName;   // để overlay hiện "Bigseller Account: …"
         var port = ScrapePorts.Shared.Allocate();
         var windowSlotHeld = false;
+        // Sổ dòng bỏ qua ĐÃ báo ra ngoài của chunk này (cfg mới toanh mỗi chunk nên không lẫn chunk khác).
+        // Diff chạy từ 2 luồng: ExtensionProgressSynced (luồng nền của session) + lượt vét cuối chunk (luồng
+        // worker) → khoá quanh tập đã báo; event bắn NGOÀI khoá để handler ngoài không chạy dưới lock.
+        // CHỈ báo dòng NẰM TRONG vùng đã phủ [from..lastDone]: dòng hỏng ở ĐUÔI chunk (lớn hơn lastDone)
+        // không bị nuốt — nó quay lại hàng VÁ và được tk khác thử lại, báo bỏ qua lúc này là báo oan. Dòng
+        // đuôi thử mãi không được thì đường "kẹt N lần" bắn RowSkipped riêng.
+        var skipLock = new object();
+        var reportedSkips = new HashSet<int>();
+        void DrainSkippedRows()
+        {
+            var covered = LastDoneOf(cfg, from, to);
+            List<(int Row, string Reason)> fresh = [];
+            foreach (var item in cfg.SnapshotFailedRows())
+            {
+                if (item.Row < from || item.Row > covered) continue;
+                lock (skipLock) { if (!reportedSkips.Add(item.Row)) continue; }
+                fresh.Add(item);
+            }
+            foreach (var item in fresh) RowSkipped?.Invoke(item.Row, item.Reason);
+        }
         try
         {
             // PHANH SỐ CỬA SỔ: giữ tổng cửa sổ Brave (mọi job cộng lại) ≤ trần toàn app + chờ nếu RAM
@@ -402,6 +427,7 @@ public sealed class ScrapeRunner
             session.ExtensionProgressSynced += () =>
             {
                 InstanceStatus?.Invoke(key, RowStatus(cfg));
+                DrainSkippedRows();   // báo SỚM dòng hỏng (khỏi đợi hết chunk) — idempotent, không bắn trùng
                 var lc = cfg.LastCompletedRow ?? 0;
                 if (lc > reportedRow && lc <= to)
                 {
@@ -446,6 +472,9 @@ public sealed class ScrapeRunner
         catch (Exception ex) { InstanceLog?.Invoke(key, "✘ " + ex.Message); return new ChunkResult(true, ex.Message, LastDoneOf(cfg, from, to), false); }
         finally
         {
+            // VÉT nốt sổ bỏ qua của chunk (mọi lối ra: xong / dừng / lỗi). Đặt trong finally để không lối
+            // nào bỏ sót; bọc try/catch vì handler ngoài KHÔNG được phép chặn các bước nhả cửa sổ/port dưới.
+            try { DrainSkippedRows(); } catch (Exception ex) { InstanceLog?.Invoke(key, "✘ ghi dòng bỏ qua lỗi: " + ex.Message); }
             try { if (session is not null) await session.StopAsync(CancellationToken.None).ConfigureAwait(false); } catch { }
             try { session?.Dispose(); } catch { }
             _sessions.TryRemove(key, out _);
