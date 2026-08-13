@@ -5,6 +5,92 @@ App desktop phát hành qua Velopack + GitHub Releases (kênh `win`). Client cà
 "Cập nhật & khởi động lại" trong Settings → Phiên bản & cập nhật. Quy trình ra bản mới: sửa
 `version.txt` → chạy `release-suite.cmd` (cần `GITHUB_TOKEN`).
 
+## v1.9.3 — 2026-08-13
+
+Đợt vá lớn cho hai mảng **Scrape** và **Tìm theo file**: 8 lỗi NẶNG — phần lớn là **mất dữ liệu âm thầm**, tức
+app vẫn báo "xong" trong khi thiếu hàng — cộng toàn bộ nhóm trung bình/nhẹ còn lại của lượt review. Thêm một
+nút mới trong cửa sổ Thống kê scrape; ngoài ra không đổi cách dùng. Kho sản phẩm của Search tự nâng cấp (thêm
+2 cột danh mục), không cần làm gì. Phần Hub đã deploy sẵn đêm 12/08 — xem đoạn cuối.
+
+**Scrape hết nuốt dòng hỏng.** Dòng nào cào lỗi giữa khối (hoặc kẹt 3 lần liên tiếp) thì trước đây bị khoảng
+"đã cào" trùm lên: sản phẩm dòng đó không bao giờ có, mà Tiếp tục cũng không bao giờ chạy lại, không để lại
+dấu vết nào ngoài một dòng log trôi mất. Nay mỗi dòng như vậy vào **sổ bỏ qua**: chip tiến độ và Thống kê hiện
+thêm "· bỏ N dòng", Thống kê liệt kê hẳn "⚠ Bỏ qua (không cào được): 12, 45, 78", và có **nút mới "Cào lại
+dòng đã bỏ (N)"** để cào lại đúng mấy dòng đó thay vì phải Chạy (reset) cả sheet vài nghìn dòng.
+
+**Tiến độ "ma" của lượt cũ hết đè lên khối đang chạy.** Profile trình duyệt dùng lại theo tài khoản Shopee nên
+còn nguyên mốc "đã xong dòng 5000" của hôm trước; gặp lúc đăng nhập hỏng ngay dòng đầu là cả khối bị đóng dấu
+đã cào mà chưa mở một link nào. Nay mốc nằm ngoài khoảng đang chạy bị coi là rác, chặn ở cả ba lớp (app,
+engine, extension).
+
+**"Xoá tiến độ" ở cửa sổ Thống kê giờ mới thật sự xoá.** Trước đây nó chỉ xoá trên máy này, sổ trên Hub còn
+nguyên nên lượt Tiếp tục sau — hoặc chỉ cần mở lại app — kéo tiến độ cũ về: bấm xong y như không bấm. Nay đi
+chung một đường với nút Chạy (reset), xoá cả sổ Hub, và xoá cho MỌI shop cùng trỏ một sheet.
+
+**Search: bấm Dừng không còn mất trắng.** Cào hai giờ được 4000 sản phẩm rồi bấm Dừng — trước đây toàn bộ số
+đó biến mất khỏi "Xuất tất cả", vì chỉ đường "chạy xong trọn vẹn" mới lưu. Nay lưu ở MỌI đường kết thúc: dừng
+tay, link lỗi, dính captcha, đổi tài khoản giữa chừng. Ô trạng thái nói rõ "■ Đã dừng — đã lưu 120 SP lượt này
+(file gộp 3000 SP)".
+
+**Link sản phẩm trong file xuất ra hết chết 404.** Cột "Shop ID" và "link sp" trước đây mang **mã danh mục**
+thay cho mã shop nên mọi link mở ra đều 404; cùng một sản phẩm còn bị ghi thành 2 dòng làm tab Danh mục đếm
+đôi. Nay ghi đúng shop thật, mã danh mục có cột riêng.
+
+**File link .xlsx hết mất dấu "Đã xử lý".** Mỗi lượt đánh dấu trước đây đẻ thêm một cột mới, mở lại app thì
+chỉ còn dấu của lượt cuối — 19/20 link bị tick lại rồi cào lại từ đầu. Nay dồn về đúng một cột (đọc được cả
+file đã bị bản cũ đẻ nhiều cột), có khoá ghi khi nhiều luồng cùng đánh dấu, và **cột ghi chú của người dùng
+không còn bị nhận nhầm là cột trạng thái rồi ghi đè mất**.
+
+**Search hết cào lại từ danh mục #1 mỗi lần nối lại.** Extension bỏ qua hoàn toàn điểm tiếp tục mà app gửi
+sang: rớt kết nối hay đổi tài khoản là quay về danh mục con đầu tiên, link nhiều danh mục thì không bao giờ
+chạy hết. Nay tiếp tục đúng danh mục + đúng trang; danh sách danh mục đổi thì cảnh báo rồi cào lại từ đầu.
+
+**Một sự cố mạng không còn tắt sạch kho tài khoản.** Đăng nhập hỏng vì proxy chậm hoặc trình duyệt không nối
+được từng bị tính là "tài khoản hỏng" → tắt dần từng tài khoản trong kho, kéo cả module Scrape chết theo vì
+hết tài khoản khả dụng. Nay chỉ cho tài khoản nghỉ rồi đổi tài khoản khác thử lại cùng link.
+
+**Hết mất cấu hình sau mỗi lượt Search.** Chạy Search một lượt là `settings.json` (đường dẫn Brave, proxy,
+danh sách file) bị ghi đè bằng bản mặc định. Nay đọc đúng file trước khi ghi, ghi qua file tạm, và khi file
+đang hỏng thì **cấm ghi** thay vì đè lên.
+
+**Việc Hub giao: hết "nhận rồi chết lặng".** Máy từ chối việc ngay tại chỗ vẫn báo "▶ Nhận" rồi im đến hết 60
+giây mới bị kết luận hỏng; bước tiền-kiểm còn kéo lựa chọn shop của người đang ngồi máy đi theo. Nay từ chối
+là trả việc lại ngay, và tiền-kiểm không đụng vào lựa chọn của người dùng.
+
+**Nhặt nốt:** chip "đang scrape" hết nhảy sang shop khác khi bấm chọn shop giữa lúc chạy · khối toàn dòng
+trống hết đốt ~90 lượt mở trình duyệt · video chỉ lộ URL qua đường dự phòng nay tải được · sheet lệch
+hoa/thường hoặc có dấu `-` `.` `( )` hết bị bỏ qua im lặng · bấm Dừng hết hiện "✖ Lỗi dừng scrape" oan · lỗi
+ghi Excel hết bị nuốt lặng và không để lại file `.tmp` rác · tick cùng một link ở 2 file hết thành 2 luồng
+cào đè nhau · sản phẩm nằm ở 2 danh mục nay hiện ở cả 2 tab.
+
+**Những chỗ nhìn sẽ thấy KHÁC:**
+
+- File Excel xuất theo từng link đổi tên: `dien-thoai.xlsx` → `dien-thoai-11036030.xlsx` (thêm mã danh mục để
+  hai danh mục trùng tên hết ghi đè nhau). **File tên cũ nằm lại và không được cập nhật nữa** — xoá tay.
+- Số sản phẩm trong file per-link nay là **gộp mọi lượt cào** (đọc từ kho) chứ không phải của riêng lượt vừa
+  chạy: báo "✔ Xong (500 sản phẩm) (file gộp 2500 SP)" là đúng, không phải lỗi.
+- Cột Shop ID: dòng cào bằng bản mới mang mã shop thật, còn dòng đã nằm sẵn trong kho từ trước vẫn mang mã
+  danh mục cũ cho tới khi được cào lại — muốn sạch hẳn thì "Xóa dữ liệu" rồi cào lại.
+- Trạng thái sheet có thể hiện "✔ Hoàn thành · bỏ 3 dòng" — hoàn thành nhưng vẫn thiếu đúng 3 dòng đó.
+- Nút "Tải lại" không làm gì khi đang chạy (trước đây bấm là mất theo dõi tiến độ của cả lượt).
+- Link ra 0 sản phẩm vì bộ lọc khu vực **không** còn bị đánh dấu đã xử lý — lần sau vẫn nằm trong danh sách.
+- Tick 5 link mà chỉ mọc 3 tab là đúng: link trùng giữa các file bị loại trước khi chạy.
+- "Đặt lại trạng thái" file link nay xoá từ cột trạng thái đến hết cột cuối — dữ liệu riêng đặt sau cột đó sẽ
+  mất theo.
+
+**Phía Hub (đã deploy đêm 12/08):** sổ hoàn thành mang thêm danh sách dòng bỏ qua, nên máy KHÁC nhìn shop đó
+cũng thấy "bỏ N dòng" thay vì "✔ Hoàn thành" trơn, kèm đường mở lại các dòng đã bỏ. Hub mới + client cũ vẫn
+chạy bình thường (Hub chỉ gộp thêm, không xoá gì). Nếu Hub chưa deploy thì nút "Cào lại dòng đã bỏ" báo
+"⚠ Hub chưa mở lại được cho: …" và không đổi gì trên máy.
+
+**Nghiệm thu:** build app + Hub đều **0 warning**; **2126 test xanh** (1773 + 151 + 168 + 34), **38 lượt "thử
+phá"** đều đỏ đúng chỗ rồi khôi phục; **bốn lượt phản biện độc lập soi lại chính bản vá**, bắt 6 lỗi nặng cộng
+các hồi quy do chính bản vá đẻ ra (tắt tài khoản khi đăng nhập hỏng, nút "Cào lại" chạy rỗng, cột ghi chú bị
+ghi đè, file Excel bị teo) — đã sửa hết trước khi phát hành. **Chưa chạy nghiệm thu sống** trên bản đóng gói:
+máy dev không có bản cài Velopack, hai mảng này cần một vòng cào thật để xác nhận.
+
+> Máy client bấm "Cập nhật & khởi động lại" như mọi bản — extension mới nằm trong gói.
+
 ## v1.9.2 — 2026-08-12
 
 Đợt dọn **12 phát hiện TRUNG BÌNH còn lại** của lần review toàn luồng check đơn hàng (v1.9.1 đã xử 6 lỗ nặng).
