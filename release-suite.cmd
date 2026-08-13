@@ -30,6 +30,22 @@ set NODELTA=
 
 echo === Phat hanh ShopeeSuite v%VER% (win-x64) ===
 
+REM 0a) CHAN BAY TAG DONG NHAM COMMIT: "vpk upload --tag" gan tag vao HEAD cua nhanh mac dinh TREN
+REM     GITHUB tai thoi diem upload, KHONG phai commit local. Chua push la tag tro vao commit CU
+REM     -^> mat dau vet ban phat hanh gan voi ma nguon. Da hong that 3 ban: v1.8.9, v1.9.0, v1.9.1.
+REM     Kiem SOM (truoc build) de khoi ton ~3 phut publish+pack roi moi bao "chua push".
+if not defined GITHUB_TOKEN goto :bo_qua_kiem_push
+set STAGE=kiem da push chua (chan tag dong nham commit)
+git rev-parse --verify HEAD >nul 2>&1 || goto :khonggit
+git fetch -q origin || goto :fail
+for /f %%i in ('git rev-parse HEAD') do set LOCALSHA=%%i
+for /f %%i in ('git rev-parse origin/main') do set REMOTESHA=%%i
+if not "%LOCALSHA%"=="%REMOTESHA%" goto :chuapush
+goto :bo_qua_kiem_push
+:khonggit
+echo [canh bao] Khong kiem duoc git ^(khong phai repo?^) -^> bo qua buoc chan tag-dong-nham-commit.
+:bo_qua_kiem_push
+
 REM 0) Ban copy shared\ cua 3 extension phai con khop extensions\shared\ (nguon chuan). Lech -> DUNG,
 REM    vi extension nap thang tu thu muc cua no nen ban dong goi se chay code cu.
 set STAGE=kiem ban copy shared\ cua 3 extension
@@ -64,22 +80,6 @@ vpk pack --packId ShopeeSuite --packTitle "Shopee Suite" --packAuthors "Shopee S
 
 REM 4) Day len GitHub Releases neu co GITHUB_TOKEN (quyen ghi repo). Khong co token -> chi dong goi cuc bo.
 if not defined GITHUB_TOKEN goto :khongday
-
-REM 4a) CHAN BAY TAG DONG NHAM COMMIT: "vpk upload --tag" gan tag vao HEAD cua nhanh mac dinh TREN
-REM     GITHUB tai thoi diem upload, KHONG phai commit local. Chua push la tag tro vao commit CU
-REM     -> mat dau vet ban phat hanh <-> ma nguon. Da hong that 3 ban: v1.8.9, v1.9.0, v1.9.1.
-set STAGE=kiem da push chua (chan tag dong nham commit)
-git rev-parse --verify HEAD >nul 2>&1 || goto :khonggit
-git fetch -q origin || goto :fail
-for /f %%i in ('git rev-parse HEAD') do set LOCALSHA=%%i
-for /f %%i in ('git rev-parse origin/main') do set REMOTESHA=%%i
-if not "%LOCALSHA%"=="%REMOTESHA%" goto :chuapush
-goto :daypush
-
-:khonggit
-echo [canh bao] Khong kiem duoc git (khong phai repo?) -^> bo qua buoc chan tag-dong-nham-commit.
-
-:daypush
 set STAGE=day len GitHub (vpk upload)
 echo === Dang day len GitHub Releases ... ===
 vpk upload github --repoUrl %REPO% --channel win --outputDir %OUT% --publish true --merge true --releaseName "Shopee Suite v%VER%" --tag v%VER% --token %GITHUB_TOKEN% || goto :fail
