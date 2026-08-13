@@ -1,2 +1,8 @@
 # Script shell chạy trên Ubuntu → BẮT BUỘC line-ending LF (CRLF làm "bad interpreter"/lỗi chạy).
 *.sh text eol=lf
+
+# Batch Windows → BẮT BUỘC CRLF. File .cmd chỉ có LF thì cmd.exe đọc LỆCH DÒNG: nó nhảy `goto` sai
+# chỗ và thực thi cả dòng `REM` như lệnh (đã dính thật 13/08 khi release-suite.cmd bị ghi lại thành
+# LF — script chạy loạn, in "'ho' is not recognized"). Script càng nhiều nhãn/goto càng dễ vỡ.
+*.cmd text eol=crlf
+*.bat text eol=crlf
